@@ -1,6 +1,35 @@
 import SwiftUI
 import SceneKit
 
+// MARK: - 美化紀錄（HolographicBuildingView）
+// [2026-06 v1] 本次美化方向：
+//   本元件採刻意設計的深色 HUD 全息主題（SceneKit 3D + 霓虹青色 #0ADDF2），
+//   與全 App 亮色 UI 語言截然不同——美化重心在「主題內部一致性」而非全 App 對齊。
+//   1. header 計數：從帶括弧的等寬文字 "(\(n)層)" 升級為霓虹青色 Capsule 膠囊徽章
+//      (fill opacity 0.10 + stroke 0.40)，維持 HUD 配色，同時提升可讀性與視覺層次。
+//   2. header 佈局：脈衝點移至最右側（Spacer 之後），標題區域更乾淨。
+//   3. sideLabels：FloorTagView 清單上方補入等寬小標題「FLOORS」+ 霓虹青色細分隔線，
+//      強化 HUD 面板資訊結構感，對齊科幻 HUD 常見的「區域標籤 + 分隔線」設計語言。
+//
+//   注意：SceneKit 3D 部分（BuildingSceneView、Coordinator）完全不動——屬商業邏輯。
+// [2026-07 v2] 操作流暢性 + 空狀態補齊：
+//   4. FloorTagView 補按下縮放回饋（HUDPressableStyle，0.96 / 0.12s ease-out），
+//      對齊 MultiPhotoGallery 縮圖按下手感，讓樓層清單的點擊也有明確觸控回饋
+//      （原本 .buttonStyle(.plain) 完全無回饋，是本元件唯一沒有互動反饋的可點擊項目）。
+//   5. sideLabels 清單補入場交錯動畫（opacity 0→1 + offset x: -10→0，每列間隔 0.05s），
+//      對齊全 App 清單類元件（如 FamilyView / ChildrenResumeView）的 stagger 進場規格。
+//   6. floors 為空時（尚未新增任何樓層物件）補 HUD 風格空狀態：虛線切角框 + 圖示 +
+//      「尚無樓層資料」提示文字，取代原本清單直接留白的視覺缺口。
+//   純視覺／互動回饋層調整，未動 SceneKit 3D 建築渲染、樓層排序與選取邏輯。
+// [2026-07 v3] FloorTagView 大字自適應補強：
+//   7. 樓層編號（floorNumber）與樓層功能（functions）文字原本沒有 minimumScaleFactor，
+//      使用者輸入較長樓層代號（如 "B2-地下停車場"）或多個功能標籤以「・」串接時，
+//      在系統輔助大字體設定下會被直接裁切成省略號，是本元件唯一缺文字自適應防護的地方。
+//      補上 lineLimit(1) + minimumScaleFactor(0.7)，讓長字串改為自動縮小顯示、
+//      不至於小到無法辨識，對齊全 App 文字自適應規格（VehicleDetailView / ResumeGiftSection 等）。
+//   純視覺層調整，未動樓層資料、排序或選取邏輯。
+//   （下次美化本元件時，可從這裡接著找其他可統一之處）
+
 // MARK: - 全息 HUD 配色
 
 private enum HoloPalette {
@@ -23,6 +52,8 @@ struct HolographicBuildingView: View {
     @Binding var selectedFloorId: UUID?
 
     @State private var pulse: Double = 0.4
+    // [v2] sideLabels 清單交錯進場動畫旗標
+    @State private var tagsAppeared = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -51,28 +82,42 @@ struct HolographicBuildingView: View {
         .overlay(cornerBrackets.allowsHitTesting(false))
         .clipShape(RoundedRectangle(cornerRadius: 14))
         .onAppear {
-            withAnimation(.easeInOut(duration: 1.2).repeatForever(autoreverses: true)) {
-                pulse = 1.0
+            // 比照 tagsAppeared 的守衛：view 若因父層重建等原因重新觸發 onAppear，
+            // 不應在仍在振盪中的 repeatForever 動畫上再疊加一個新的，否則會產生跳動的視覺瑕疵。
+            if pulse != 1.0 {
+                withAnimation(.easeInOut(duration: 1.2).repeatForever(autoreverses: true)) {
+                    pulse = 1.0
+                }
+            }
+            if !tagsAppeared {
+                withAnimation(.easeOut(duration: 0.3)) {
+                    tagsAppeared = true
+                }
             }
         }
     }
 
     // MARK: 標題
 
+    // 美化：計數升級為 Capsule 膠囊徽章；脈衝點移至右側，標題區域更清晰
     private var header: some View {
         HStack(spacing: 8) {
             Text("樓層資訊")
                 .font(.system(size: 14, weight: .semibold))
                 .foregroundStyle(.white)
-            Text("(\(floors.count)層)")
-                .font(.system(size: 11, design: .monospaced))
-                .foregroundStyle(HoloPalette.neonCyan.opacity(0.85))
+            Text("\(floors.count) 層")
+                .font(.system(size: 10, weight: .bold, design: .monospaced))
+                .foregroundStyle(HoloPalette.neonCyan)
+                .padding(.horizontal, 7).padding(.vertical, 3)
+                .background(HoloPalette.neonCyan.opacity(0.10))
+                .clipShape(Capsule())
+                .overlay(Capsule().stroke(HoloPalette.neonCyan.opacity(0.40), lineWidth: 0.75))
+            Spacer()
             Circle()
                 .fill(HoloPalette.neonCyan)
                 .frame(width: 6, height: 6)
                 .scaleEffect(pulse)
                 .shadow(color: HoloPalette.neonCyan.opacity(0.8), radius: 4)
-            Spacer()
         }
         .padding(.horizontal, 16)
         .padding(.top, 14)
@@ -81,20 +126,59 @@ struct HolographicBuildingView: View {
 
     // MARK: 側邊樓層標籤
 
+    // 美化：清單上方補「FLOORS」等寬小標題 + 霓虹青色細分隔線，強化 HUD 面板結構感
+    // [v2] 補空狀態 + ForEach 項目交錯進場動畫
     private var sideLabels: some View {
-        VStack(spacing: 6) {
-            ForEach(floors.sorted { floorOrder($0) > floorOrder($1) }) { f in
-                FloorTagView(
-                    floor: f,
-                    isSelected: selectedFloorId == f.id,
-                    onTap: {
-                        withAnimation(.spring(duration: 0.25)) {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Text("FLOORS")
+                    .font(.system(size: 8, weight: .bold, design: .monospaced))
+                    .foregroundStyle(HoloPalette.neonCyan.opacity(0.50))
+                Rectangle()
+                    .fill(HoloPalette.neonCyan.opacity(0.18))
+                    .frame(height: 0.5)
+            }
+            .padding(.bottom, 2)
+
+            if floors.isEmpty {
+                emptyFloorsPlaceholder
+            } else {
+                let sorted = floors.sorted { floorOrder($0) > floorOrder($1) }
+                ForEach(Array(sorted.enumerated()), id: \.element.id) { index, f in
+                    FloorTagView(
+                        floor: f,
+                        isSelected: selectedFloorId == f.id,
+                        onTap: {
+                            // 不在這裡用 withAnimation：交由父層 Group 的
+                            // .animation(value: selectedFloorId) 作為單一動畫來源，
+                            // 避免兩個動畫同時驅動同一個 transition 而造成閃退。
                             selectedFloorId = (selectedFloorId == f.id) ? nil : f.id
                         }
-                    }
-                )
+                    )
+                    .opacity(tagsAppeared ? 1 : 0)
+                    .offset(x: tagsAppeared ? 0 : -10)
+                    .animation(
+                        .easeOut(duration: 0.3).delay(Double(index) * 0.05),
+                        value: tagsAppeared
+                    )
+                }
             }
         }
+    }
+
+    // [v2] HUD 風格空狀態：尚未新增任何樓層物件時的提示
+    private var emptyFloorsPlaceholder: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Image(systemName: "square.stack.3d.up.slash")
+                .font(.system(size: 15))
+                .foregroundStyle(HoloPalette.neonCyan.opacity(0.45))
+            Text("尚無樓層資料")
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundStyle(.white.opacity(0.45))
+        }
+        .padding(.vertical, 6)
+        .opacity(tagsAppeared ? 1 : 0)
+        .animation(.easeOut(duration: 0.3), value: tagsAppeared)
     }
 
     private func floorOrder(_ f: FloorInfo) -> Int {
@@ -173,6 +257,8 @@ private struct FloorTagView: View {
                         .font(.system(size: 13, weight: .bold, design: .monospaced))
                         .foregroundStyle(isSelected ? .white : Color.white.opacity(0.95))
                         .shadow(color: isSelected ? HoloPalette.neonCyan : .clear, radius: 4)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
                     Spacer(minLength: 0)
                 }
                 if !floor.functions.isEmpty {
@@ -180,6 +266,7 @@ private struct FloorTagView: View {
                         .font(.system(size: 10, design: .monospaced))
                         .foregroundStyle(HoloPalette.neonCyan.opacity(isSelected ? 1.0 : 0.75))
                         .lineLimit(1)
+                        .minimumScaleFactor(0.7)
                 }
             }
             .padding(.horizontal, 10)
@@ -199,7 +286,17 @@ private struct FloorTagView: View {
                     .shadow(color: HoloPalette.neonCyan.opacity(isSelected ? 0.7 : 0), radius: 4)
             )
         }
-        .buttonStyle(.plain)
+        .buttonStyle(HUDPressableStyle())
+    }
+}
+
+// [v2] 輕量按下回饋：縮放至 0.96 + 0.12s ease-out，對齊 MultiPhotoGallery.PressableScaleStyle 手感，
+// 讓樓層清單點擊有明確觸控回饋。
+private struct HUDPressableStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.96 : 1.0)
+            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
     }
 }
 
@@ -529,14 +626,15 @@ struct BuildingSceneView: UIViewRepresentable {
             let p = gesture.location(in: view)
             let hits = view.hitTest(p, options: [SCNHitTestOption.searchMode: SCNHitTestSearchMode.closest.rawValue])
             guard let hit = hits.first else {
-                Task { @MainActor in self.parent.selectedFloorId = nil }
+                Task { @MainActor [weak self] in self?.parent.selectedFloorId = nil }
                 return
             }
             // 找到對應的使用者樓層
             for entry in floorNodes {
                 if hit.node == entry.node {
                     let id = entry.id
-                    Task { @MainActor in
+                    Task { @MainActor [weak self] in
+                        guard let self else { return }
                         self.parent.selectedFloorId = (self.parent.selectedFloorId == id) ? nil : id
                     }
                     return

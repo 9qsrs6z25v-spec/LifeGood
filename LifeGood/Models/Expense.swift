@@ -27,7 +27,7 @@ enum VariableCategory: String, Codable, Identifiable {
     var id: String { rawValue }
 
     static var allCases: [VariableCategory] {
-        [.food, .vehicle, .stock, .realEstate, .tax, .taxSaving, .entertainment, .shopping, .dailyNecessities, .medical, .education, .social, .other]
+        [.food, .transportation, .vehicle, .stock, .realEstate, .tax, .taxSaving, .entertainment, .shopping, .dailyNecessities, .medical, .education, .social, .other]
     }
 
     var icon: String {
@@ -237,6 +237,18 @@ enum LoanSubCategory: String, Codable, CaseIterable, Identifiable {
 }
 
 // MARK: - 支出資料模型
+/// 固定支出的金額歷史快照（例：乙式險每年續保金額都變）。
+/// 卡片的「更新金額」會補一筆快照，走勢圖據此畫實線＋虛線預測。
+struct AmountSnapshot: Identifiable, Codable, Equatable {
+    let id: UUID
+    var date: Date
+    var amount: Double
+
+    init(id: UUID = UUID(), date: Date = Date(), amount: Double) {
+        self.id = id; self.date = date; self.amount = amount
+    }
+}
+
 struct Expense: Identifiable, Codable {
     let id: UUID
     var title: String
@@ -267,6 +279,8 @@ struct Expense: Identifiable, Codable {
     var loanTotalAmount: Double?
     var loanYears: Double?
     var loanRate: Double?
+    /// 儲蓄險複利年利率（%）。同步存一份於支出本身，避免連結的理財儲蓄險遺失時利率帶不出來。
+    var insuranceRate: Double?
     var linkedBankMilestoneId: UUID?
     var linkedBankCurrency: String?
     var linkedCreditCardMilestoneId: UUID?
@@ -278,6 +292,19 @@ struct Expense: Identifiable, Codable {
     var placeLongitude: Double?
     /// 此筆支出附帶的照片檔名（多張）
     var photoFileNames: [String]
+    /// 金額歷史快照（固定支出「更新金額」累積；刻意不進 memberwise init——
+    /// 那個 init 已 30+ 參數，編輯重建時由呼叫端帶回，比照 bankDeposits 慣例）
+    var amountHistory: [AmountSnapshot] = []
+    // [v25.312] 電動車充電資訊（變動支出＋關聯汽車＋分類=電費才有意義；
+    // 同樣不進 memberwise init，儲存端條件化指派）
+    /// 充電度數（kWh）
+    var evKwh: Double? = nil
+    /// 充電起始電量（%）
+    var evFromPct: Double? = nil
+    /// 充電結束電量（%）
+    var evToPct: Double? = nil
+    /// [v25.313] 充電當下的里程錶讀數（km）；連續兩筆都有里程時可算電耗（km/kWh）
+    var evOdometer: Double? = nil
 
     init(
         id: UUID = UUID(),
@@ -306,6 +333,7 @@ struct Expense: Identifiable, Codable {
         loanTotalAmount: Double? = nil,
         loanYears: Double? = nil,
         loanRate: Double? = nil,
+        insuranceRate: Double? = nil,
         linkedBankMilestoneId: UUID? = nil,
         linkedBankCurrency: String? = nil,
         linkedCreditCardMilestoneId: UUID? = nil,
@@ -340,6 +368,7 @@ struct Expense: Identifiable, Codable {
         self.loanTotalAmount = loanTotalAmount
         self.loanYears = loanYears
         self.loanRate = loanRate
+        self.insuranceRate = insuranceRate
         self.linkedBankMilestoneId = linkedBankMilestoneId
         self.linkedBankCurrency = linkedBankCurrency
         self.linkedCreditCardMilestoneId = linkedCreditCardMilestoneId
@@ -378,6 +407,7 @@ struct Expense: Identifiable, Codable {
         loanTotalAmount = try? c.decode(Double.self, forKey: .loanTotalAmount)
         loanYears = try? c.decode(Double.self, forKey: .loanYears)
         loanRate = try? c.decode(Double.self, forKey: .loanRate)
+        insuranceRate = try? c.decodeIfPresent(Double.self, forKey: .insuranceRate)
         linkedBankMilestoneId = try? c.decode(UUID.self, forKey: .linkedBankMilestoneId)
         linkedBankCurrency = try? c.decode(String.self, forKey: .linkedBankCurrency)
         linkedCreditCardMilestoneId = try? c.decodeIfPresent(UUID.self, forKey: .linkedCreditCardMilestoneId)
@@ -385,6 +415,11 @@ struct Expense: Identifiable, Codable {
         placeLatitude = try? c.decodeIfPresent(Double.self, forKey: .placeLatitude)
         placeLongitude = try? c.decodeIfPresent(Double.self, forKey: .placeLongitude)
         photoFileNames = (try? c.decodeIfPresent([String].self, forKey: .photoFileNames)) ?? []
+        amountHistory = (try? c.decodeIfPresent([AmountSnapshot].self, forKey: .amountHistory)) ?? []
+        evKwh = try? c.decodeIfPresent(Double.self, forKey: .evKwh)
+        evFromPct = try? c.decodeIfPresent(Double.self, forKey: .evFromPct)
+        evToPct = try? c.decodeIfPresent(Double.self, forKey: .evToPct)
+        evOdometer = try? c.decodeIfPresent(Double.self, forKey: .evOdometer)
     }
     private enum CodingKeys: String, CodingKey {
         case id, title, amount, date, expenseType, variableCategory, fixedCategory, recurrence
@@ -392,9 +427,10 @@ struct Expense: Identifiable, Codable {
         case linkedInsuranceId, linkedStockId, linkedRealEstateId, linkedVehicleId
         case vehicleExpenseCategory, realEstateExpenseCategory, taxSavingSubCategory
         case socialSubCategory, socialRecipient, taxDeductibleOverride, note, currencyCode, diningMember
-        case loanTotalAmount, loanYears, loanRate
+        case loanTotalAmount, loanYears, loanRate, insuranceRate
         case linkedBankMilestoneId, linkedBankCurrency, linkedCreditCardMilestoneId
-        case placeAddress, placeLatitude, placeLongitude, photoFileNames
+        case placeAddress, placeLatitude, placeLongitude, photoFileNames, amountHistory
+        case evKwh, evFromPct, evToPct, evOdometer
     }
 
     var categoryName: String {
@@ -478,11 +514,22 @@ extension Expense {
         return dir
     }
 
-    /// 將 jpeg 資料寫入並回傳檔名（同時推送 CloudKit）
-    static func savePhoto(_ data: Data, expenseId: UUID, photoId: UUID = UUID()) -> String {
+    /// 將 jpeg 資料寫入並回傳檔名（同時推送 CloudKit）；寫入失敗回傳 nil，避免呼叫端存進一筆指向不存在檔案的紀錄
+    static func savePhoto(_ data: Data, expenseId: UUID, photoId: UUID = UUID()) -> String? {
+        let data = ImageCompressor.compressForStorage(data)   // 存檔前統一壓縮：1080P 長邊 + JPEG 80%
         let name = "\(expenseId.uuidString)_\(photoId.uuidString).jpg"
         let url = photosDirectory.appendingPathComponent(name)
-        try? data.write(to: url)
+        guard (try? data.write(to: url)) != nil else { return nil }
+        PhotoCloudSync.upload(directory: "ExpensePhotos", fileName: name)
+        return name
+    }
+
+    /// [v25.306] 將 PDF 帳單原檔寫入並回傳檔名（原檔保留不壓縮；同步推送 CloudKit）。
+    /// 與照片共用同一個資料夾與檔名規則，只差副檔名——刪除／雲端同步走同一條路。
+    static func savePDF(_ data: Data, expenseId: UUID, fileId: UUID = UUID()) -> String? {
+        let name = "\(expenseId.uuidString)_\(fileId.uuidString).pdf"
+        let url = photosDirectory.appendingPathComponent(name)
+        guard (try? data.write(to: url)) != nil else { return nil }
         PhotoCloudSync.upload(directory: "ExpensePhotos", fileName: name)
         return name
     }

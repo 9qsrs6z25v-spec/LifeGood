@@ -1,5 +1,48 @@
 import SwiftUI
 
+// MARK: - 美化紀錄（RealEstateView）
+// [2026-06-v1] 初次美化：英雄卡、emptyState、卡片入場動畫、toolbar 配色
+// [2026-06-v2] summaryHeader 重構、emptyState 雙層脈衝環、kpiCell 統一白色、已售出 header 升級
+// [2026-06-v3] 本次美化方向（estateCard）：
+//   1. 左側加入 4pt 紫色漸層強調條，對齊 VehicleView / SavingsInsuranceView / StockView 卡片規格
+//   2. 加入 44pt 漸層圖示圓（building.2.fill），對齊 VehicleView vehicleCard 圖示圓規格
+//   3. 標題列改為 圖示圓 + 名稱/地址 + 估值大字 + 增值率彩色膠囊 的一致佈局，
+//      估值字型升級為 .system(size:16,weight:.bold,design:.rounded)，對齊 StockView.stockCard
+//   4. 貸款 / 房屋價金 / 變動支出 小標籤從 RoundedRectangle(cornerRadius:3) 升級為 Capsule 膠囊，
+//      padding 從 (.horizontal,5)(.vertical,1) 統一為 (.horizontal,7)(.vertical,2.5)，
+//      與 VehicleView vehicleCard 固定/變動支出膠囊規格一致
+//   5. 底部月租 / 月貸 行加入彩色圖示（dollarsign.circle.fill/creditcard.fill），
+//      文字改 .caption2.weight(.medium) 並區分綠色（租金）/ 藍色（貸款）/ 紅色（已付）顯色
+//   6. 分隔線從 Divider() 改為 Rectangle().fill(.separator.opacity(0.20)).frame(height:0.5)，
+//      視覺更細緻，對齊 VehicleView vehicleCard 分隔線規格
+// [2026-06-v4] 本次美化方向（英雄卡玻璃光澤補齊 + 卡片細節精修）：
+//   7. summaryHeader 背景 ZStack 末層加入 LinearGradient [.white.opacity(0.18), .clear]
+//      top→center 玻璃反光覆蓋層，對齊 OverviewView / IncomeView / VariableExpenseView /
+//      FixedExpenseView / VehicleView / StockView v3/v4 英雄卡玻璃光澤統一規格，
+//      補齊全 App 英雄卡此頁最後缺漏的一層 glass shine。
+//   8. estateCard 44pt 圖示圓：補入 Circle().stroke(purpleAccent.opacity(0.18), lineWidth:0.75)
+//      overlay 細邊框，對齊 VehicleView v3 / StockView v3 圖示圓邊框規格，
+//      視覺與 allocationSection / summaryCard 統一。
+//   9. kpiCell 數值文字：加入 contentTransition(.numericText())，
+//      讓年份切換 / 資料更新時 KPI 數字有平滑滾動過渡，對齊 TaxOverviewView v3 taxStatCell 規格。
+//  10. summaryHeader 總估值大字：補入 minimumScaleFactor(0.72)，
+//      防止大數字（如「NT$ 12.5 億元」）在小螢幕截斷，對齊 VehicleView summaryHeader 規格。
+// [2026-08-v5] 本次美化方向（estateCard 明細標籤描邊補齊）：
+//  11. 「貸款/房屋價金/變動支出」三顆 Capsule 標籤原本只有 fill、無 stroke，
+//      是本卡片內唯一沒有描邊的膠囊元素，與同卡增值率膠囊（stroke 0.22）、
+//      Section header 已售出計數膠囊（stroke 0.22）視覺節奏不一致，深色模式下尤其顯扁平；
+//      三者補上對應色 overlay(Capsule().stroke(color.opacity(0.22), lineWidth: 0.6))，
+//      統一全卡膠囊「fill + stroke」規格。純視覺層調整，未動貸款/價金/支出金額計算邏輯。
+// [2026-08-v6] 承接 v5 遺留缺口，toolbar sort menu 圖示補齊 filled 樣式：
+//  12. toolbar HStack 內 sort menu「arrow.up.arrow.down.circle」與緊鄰的新增鈕
+//      「plus.circle.fill」同為 .title3 + .purple，卻一個是外框、一個是填色，並排時
+//      粗細不一致；全 App 其餘同類主要工具列按鈕（VehicleView／StockView 的
+//      plus.circle.fill 等）一律使用 filled 樣式。改為 arrow.up.arrow.down.circle.fill，
+//      與新增鈕視覺份量一致。（估 estateCard 底部月租/月貸/已付列圖示為 10pt caption2
+//      行內小圖示，非清單列大圖示規格，加背景圓反而過重，評估後不採用，維持現狀。）
+//      純視覺層調整，排序邏輯／新增流程等既有功能完全未變動。
+//   （下次美化本檔案時，可轉往其他仍留有待辦的畫面）
+
 enum RealEstateSortOption: String, CaseIterable, Identifiable {
     case purchasePrice = "購入價格"
     case currentValue = "目前估值"
@@ -30,6 +73,10 @@ struct RealEstateView: View {
     @State private var sortOption: RealEstateSortOption = .purchaseDate
     @State private var sortAscending = false
     @State private var showPremiumAlert = false
+    @State private var headerAppeared = false
+    @State private var cardsAppeared = false
+    @State private var emptyIconPulse = false
+    @State private var emptyPulseTask: Task<Void, Never>?
 
     private var activeEstates: [RealEstate] {
         sorted(store.realEstates.filter { !$0.isSold })
@@ -54,56 +101,111 @@ struct RealEstateView: View {
     }
 
     var body: some View {
-        NavigationStack {
-            VStack(spacing: 0) {
-                summaryHeader
+        // 一次算好 active／sold，避免 activeEstates／soldEstates（filter+sort 全量
+        // store.realEstates）在同一次 body 求值中被 summaryHeader、ForEach、計數文字
+        // 等多處各自重複呼叫（同型修復見 StockDetailView sortedTransactions／sortedDividends）。
+        let active = activeEstates
+        let sold = soldEstates
+        return NavigationStack {
+            List {
+                Section {
+                    summaryHeader(active: active, sold: sold)
+                        .offset(y: headerAppeared ? 0 : -20)
+                        .opacity(headerAppeared ? 1 : 0)
+                        .animation(.spring(response: 0.6, dampingFraction: 0.8), value: headerAppeared)
+                        .listRowInsets(EdgeInsets())
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                }
 
                 if store.realEstates.isEmpty {
-                    emptyState
+                    Section {
+                        emptyState
+                            .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
+                            .listRowInsets(EdgeInsets())
+                    }
                 } else {
-                    List {
-                        ForEach(activeEstates) { item in
-                            estateCard(item)
-                                .listRowBackground(Color.clear)
-                                .listRowSeparator(.hidden)
-                                .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
-                                .onTapGesture { viewingItem = item }
-                                .swipeActions(edge: .trailing) {
-                                    Button(role: .destructive) {
-                                        if subscription.isPremium { deleteEstate(item) }
-                                        else { showPremiumAlert = true }
-                                    } label: {
-                                        Label("刪除", systemImage: "trash")
-                                    }
+                    let activeCount = active.count
+                    ForEach(Array(active.enumerated()), id: \.element.id) { idx, item in
+                        estateCard(item)
+                            .offset(y: cardsAppeared ? 0 : 30)
+                            .opacity(cardsAppeared ? 1 : 0)
+                            .animation(
+                                .spring(response: 0.5, dampingFraction: 0.8).delay(Double(idx) * 0.05),
+                                value: cardsAppeared
+                            )
+                            .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
+                            .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
+                            .onTapGesture { viewingItem = item }
+                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                Button(role: .destructive) {
+                                    if subscription.isPremium { deleteEstate(item) }
+                                    else { showPremiumAlert = true }
+                                } label: {
+                                    Label("刪除", systemImage: "trash")
                                 }
-                        }
-
-                        if !soldEstates.isEmpty {
-                            Section {
-                                ForEach(soldEstates) { item in
-                                    estateCard(item)
-                                        .listRowBackground(Color.clear)
-                                        .listRowSeparator(.hidden)
-                                        .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
-                                        .onTapGesture { viewingItem = item }
-                                        .swipeActions(edge: .trailing) {
-                                            Button(role: .destructive) { deleteEstate(item) } label: {
-                                                Label("刪除", systemImage: "trash")
-                                            }
-                                        }
-                                }
-                            } header: {
-                                Text("已售出").font(.caption.weight(.semibold))
                             }
+                    }
+
+                    if !sold.isEmpty {
+                        Section {
+                            ForEach(Array(sold.enumerated()), id: \.element.id) { idx, item in
+                                estateCard(item)
+                                    .offset(y: cardsAppeared ? 0 : 30)
+                                    .opacity(cardsAppeared ? 1 : 0)
+                                    .animation(
+                                        .spring(response: 0.5, dampingFraction: 0.8)
+                                            .delay(Double(activeCount + idx) * 0.05),
+                                        value: cardsAppeared
+                                    )
+                                    .listRowBackground(Color.clear)
+                                    .listRowSeparator(.hidden)
+                                    .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
+                                    .onTapGesture { viewingItem = item }
+                                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                        Button(role: .destructive) {
+                                            if subscription.isPremium { deleteEstate(item) }
+                                            else { showPremiumAlert = true }
+                                        } label: {
+                                            Label("刪除", systemImage: "trash")
+                                        }
+                                    }
+                            }
+                        } header: {
+                            // 已售出 Section header：彩色強調條 + 計數膠囊（對齊 daySectionHeader 規格）
+                            HStack(spacing: 8) {
+                                RoundedRectangle(cornerRadius: 3)
+                                    .fill(
+                                        LinearGradient(
+                                            colors: [.purple, .purple.opacity(0.55)],
+                                            startPoint: .top, endPoint: .bottom
+                                        )
+                                    )
+                                    .frame(width: 3, height: 14)
+                                Text("已售出")
+                                    .font(.footnote.weight(.semibold))
+                                    .foregroundStyle(.primary.opacity(0.75))
+                                Spacer(minLength: 6)
+                                Text("\(sold.count) 筆")
+                                    .font(.caption2.weight(.semibold))
+                                    .foregroundStyle(.purple)
+                                    .padding(.horizontal, 8).padding(.vertical, 3)
+                                    .background(Color.purple.opacity(0.10))
+                                    .clipShape(Capsule())
+                                    .overlay(Capsule().stroke(Color.purple.opacity(0.22), lineWidth: 0.6))
+                            }
+                            .textCase(nil)
                         }
                     }
-                    .listStyle(.plain)
-                    .background(Color(.systemGroupedBackground))
-                    .scrollContentBackground(.hidden)
                 }
             }
+            .listStyle(.insetGrouped)
+            .scrollContentBackground(.hidden)
             .background(Color(.systemGroupedBackground))
             .navigationTitle("房地產")
+            .navigationBarTitleDisplayMode(.large)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     HStack(spacing: 12) {
@@ -129,15 +231,15 @@ struct RealEstateView: View {
                                 }
                             }
                         } label: {
-                            Image(systemName: "arrow.up.arrow.down.circle")
-                                .font(.title3).foregroundStyle(.green)
+                            Image(systemName: "arrow.up.arrow.down.circle.fill")
+                                .font(.title3).foregroundStyle(.purple)
                         }
 
                         Button {
                             if subscription.isPremium { showAdd = true }
                             else { showPremiumAlert = true }
                         } label: {
-                            Image(systemName: "plus.circle.fill").font(.title3).foregroundStyle(.green)
+                            Image(systemName: "plus.circle.fill").font(.title3).foregroundStyle(.purple)
                         }
                     }
                 }
@@ -146,199 +248,460 @@ struct RealEstateView: View {
             .sheet(item: $viewingItem) { item in RealEstateDetailView(estate: item) }
             .sheet(item: $editingItem) { item in AddRealEstateView(editing: item) }
             .premiumLockAlert(isPresented: $showPremiumAlert)
+            .onAppear {
+                withAnimation(.spring(response: 0.6, dampingFraction: 0.8)) {
+                    headerAppeared = true
+                }
+                withAnimation(.spring(response: 0.5, dampingFraction: 0.8).delay(0.2)) {
+                    cardsAppeared = true
+                }
+                // emptyIconPulse 由 emptyState ZStack .onAppear 觸發，不在此設定
+            }
+            .onDisappear {
+                headerAppeared = false
+                cardsAppeared = false
+                emptyIconPulse = false
+            }
         }
     }
 
     private func deleteEstate(_ item: RealEstate) {
-        for m in item.mortgageItems {
-            if let linkedId = m.linkedExpenseId { expenseStore.expenses.removeAll { $0.id == linkedId } }
-        }
-        for p in item.paidItems {
-            if let linkedId = p.linkedExpenseId { expenseStore.expenses.removeAll { $0.id == linkedId } }
-        }
-        for ve in item.variableExpenses {
-            if let linkedId = ve.linkedExpenseId { expenseStore.expenses.removeAll { $0.id == linkedId } }
-        }
-        for ins in item.insuranceItems {
-            if let linkedId = ins.linkedExpenseId { expenseStore.expenses.removeAll { $0.id == linkedId } }
-        }
-        for asset in item.propertyAssets {
-            if let linkedId = asset.linkedExpenseId { expenseStore.expenses.removeAll { $0.id == linkedId } }
-        }
+        // 先收集所有關聯支出 ID，最後一次 removeAll，避免每個 ID 各自觸發一次 @Published 更新與 save() 磁碟寫入
+        var expenseIds = Set<UUID>()
+        for m in item.mortgageItems { if let id = m.linkedExpenseId { expenseIds.insert(id) } }
+        for p in item.paidItems { if let id = p.linkedExpenseId { expenseIds.insert(id) } }
+        for ve in item.variableExpenses { if let id = ve.linkedExpenseId { expenseIds.insert(id) } }
+        for ins in item.insuranceItems { if let id = ins.linkedExpenseId { expenseIds.insert(id) } }
+        for asset in item.propertyAssets { if let id = asset.linkedExpenseId { expenseIds.insert(id) } }
+        // 水電繳費／裝潢照片／電梯保養照片／附件文件的磁碟＋CloudKit 清理，
+        // FinanceStore.deleteRealEstate(_:) 下方已統一做（cleanupRealEstateFiles），
+        // 這裡只需收集 linkedExpenseId；重複呼叫 deletePhoto/deleteDocument 只會讓
+        // 已刪除的檔案再觸發一次多餘的 CloudKit 刪除網路請求，磁碟端則因 try? 靜默忽略。
         for up in item.utilityPayments {
-            if let linkedId = up.linkedExpenseId { expenseStore.expenses.removeAll { $0.id == linkedId } }
-            if let name = up.photoFileName { UtilityPayment.deletePhoto(name) }
+            if let id = up.linkedExpenseId { expenseIds.insert(id) }
         }
-        for rp in item.renovationPhotos {
-            for name in rp.photoFileNames { RenovationPhoto.deletePhoto(name) }
+        if let id = item.linkedExpenseId { expenseIds.insert(id) }
+        if let id = item.saleLinkedExpenseId { expenseIds.insert(id) }
+
+        if !expenseIds.isEmpty {
+            for exp in expenseStore.expenses where expenseIds.contains(exp.id) {
+                for name in exp.photoFileNames { Expense.deletePhoto(name) }
+            }
+            expenseStore.expenses.removeAll { expenseIds.contains($0.id) }
         }
-        if let linkedId = item.linkedExpenseId { expenseStore.expenses.removeAll { $0.id == linkedId } }
-        if let saleExpId = item.saleLinkedExpenseId { expenseStore.expenses.removeAll { $0.id == saleExpId } }
-        if let saleIncId = item.saleLinkedIncomeId { expenseStore.incomes.removeAll { $0.id == saleIncId } }
+        if let saleIncId = item.saleLinkedIncomeId {
+            expenseStore.incomes.removeAll { $0.id == saleIncId }
+        }
         store.deleteRealEstate(item)
     }
 
-    // MARK: - 摘要
+    // MARK: - 摘要（英雄卡）
+    // 【美化 v2】VStack+.background+.clipShape+.shadow 結構，對齊 SavingsInsuranceView 規格；
+    //   散景圓加入 .blur；右側增月現金流 KPI 膠囊；kpiItem 改為統一白色 kpiCell。
 
-    private var summaryHeader: some View {
-        VStack(spacing: 8) {
-            HStack {
-                VStack(alignment: .leading, spacing: 4) {
+    private func summaryHeader(active activeList: [RealEstate], sold soldList: [RealEstate]) -> some View {
+        let active = activeList.count
+        let sold = soldList.count
+        let flow = store.monthlyCashFlow
+        let avgRate = activeList.isEmpty
+            ? 0.0
+            : activeList.map(\.appreciationRate).reduce(0, +) / Double(activeList.count)
+
+        return VStack(spacing: 0) {
+            // 頂部：總估值 + 右側計數膠囊 / 月現金流 KPI
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 5) {
                     Text("房產總估值")
-                        .font(.subheadline).foregroundStyle(.secondary)
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.80))
                     Text(fmt(store.totalRealEstateValue))
-                        .font(.title2.bold())
+                        .heroBigValueFont()
+                        .foregroundStyle(.white)
+                        .minimumScaleFactor(0.72)
+                        .lineLimit(1)
+                        .contentTransition(.numericText())
+                    if store.totalRealEstateValue > 0 {
+                        Text("\(active) 筆持有" + (sold > 0 ? " · \(sold) 筆已售" : ""))
+                            .font(.caption2.weight(.medium))
+                            .foregroundStyle(.white.opacity(0.65))
+                            .padding(.top, 1)
+                    }
                 }
                 Spacer()
-                VStack(alignment: .trailing, spacing: 4) {
-                    let active = store.realEstates.filter { !$0.isSold }.count
-                    let sold = store.realEstates.filter { $0.isSold }.count
-                    Text("\(active) 筆持有")
-                        .font(.subheadline).foregroundStyle(.secondary)
-                    if sold > 0 {
-                        Text("\(sold) 筆已售")
-                            .font(.caption).foregroundStyle(.orange)
+                VStack(alignment: .trailing, spacing: 6) {
+                    // 持有計數膠囊
+                    HStack(spacing: 4) {
+                        Image(systemName: "building.2.fill").font(.caption2)
+                        Text("\(active) 筆持有").font(.caption.weight(.semibold))
+                    }
+                    .padding(.horizontal, 11).padding(.vertical, 5)
+                    .background(.white.opacity(0.22))
+                    .clipShape(Capsule())
+                    .foregroundStyle(.white)
+                    // 月現金流 KPI 膠囊（正值綠、負值紅，對齊 totalAssetsCard 損益膠囊規格）
+                    if active > 0 {
+                        HStack(spacing: 3) {
+                            Image(systemName: flow >= 0 ? "arrow.up.right" : "arrow.down.right")
+                                .font(.system(size: 9, weight: .bold))
+                            Text((flow >= 0 ? "+" : "") + fmt(flow))
+                                .font(.system(size: 10, weight: .semibold))
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.7)
+                        }
+                        .foregroundStyle(flow >= 0
+                            ? Color(red: 0.60, green: 1.00, blue: 0.75)
+                            : Color(red: 1.0, green: 0.78, blue: 0.75))
+                        .padding(.horizontal, 9).padding(.vertical, 5)
+                        .background(.white.opacity(0.18))
+                        .clipShape(Capsule())
+                        .overlay(Capsule().stroke(.white.opacity(flow >= 0 ? 0.35 : 0.25), lineWidth: 0.75))
                     }
                 }
             }
-            HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("月租金收入").font(.caption).foregroundStyle(.secondary)
-                    Text(fmt(store.monthlyRentalIncome)).font(.caption.bold()).foregroundStyle(.green)
-                }
-                Spacer()
-                VStack(alignment: .trailing, spacing: 2) {
-                    Text("月淨現金流").font(.caption).foregroundStyle(.secondary)
-                    let flow = store.monthlyCashFlow
-                    Text(fmt(flow)).font(.caption.bold()).foregroundStyle(flow >= 0 ? .green : .red)
-                }
+
+            // KPI 橫列：月租金 / 月現金流 / 平均增值率（統一白色，對齊 kpiCell 規格）
+            HStack(spacing: 0) {
+                HeroKpiCell(label: "月租金", value: fmt(store.monthlyRentalIncome))
+                HeroKpiDivider()
+                HeroKpiCell(label: "月現金流", value: (flow >= 0 ? "+" : "") + fmt(flow))
+                HeroKpiDivider()
+                HeroKpiCell(label: "平均增值", value: String(format: "%@%.1f%%", avgRate >= 0 ? "+" : "", avgRate))
             }
+            .padding(.vertical, 10)
+            .background(.white.opacity(0.08))
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+            .padding(.top, 14)
         }
-        .padding()
-        .background(Color(.systemBackground))
+        .padding(.horizontal, 20)
+        .padding(.vertical, 18)
+        .heroCardShell(card: .realEstate)
+        .padding(.horizontal, 16)
+        .padding(.top, 10)
+        .padding(.bottom, 4)
     }
+
+    // kpiCell：統一白色 KPI 格（對齊 IncomeView / VehicleView / SavingsInsuranceView 規格）
+
+    // MARK: - 空狀態
+    // 【美化 v2】scaleEffect + easeOut.repeatForever(autoreverses:false) 雙層脈衝環，
+    //   對齊 SavingsInsuranceView / StockView emptyStateView 標準動畫模式。
+    //   主圓升級為 88pt 半透明漸層底 + 細邊框，圖示調大至 36pt light。
 
     private var emptyState: some View {
-        VStack(spacing: 16) {
-            Spacer()
-            Image(systemName: "building.2").font(.system(size: 48)).foregroundStyle(.secondary)
-            Text("尚無房地產紀錄").font(.headline).foregroundStyle(.secondary)
-            Text("點擊右上角 + 新增物件").font(.subheadline).foregroundStyle(.tertiary)
-            Spacer()
-        }.frame(maxWidth: .infinity)
+        let purpleAccent = Color(red: 0.48, green: 0.25, blue: 0.80)
+        let purpleDark   = Color(red: 0.25, green: 0.15, blue: 0.60)
+
+        return VStack(spacing: 24) {
+            Spacer(minLength: 40)
+
+            ZStack {
+                // 外層脈衝光環（easeOut + repeatForever 向外擴散淡出）
+                Circle()
+                    .stroke(purpleAccent.opacity(emptyIconPulse ? 0 : 0.28), lineWidth: 1.5)
+                    .frame(width: 110, height: 110)
+                    .scaleEffect(emptyIconPulse ? 1.35 : 1.0)
+                    .animation(
+                        .easeOut(duration: 2.0).repeatForever(autoreverses: false),
+                        value: emptyIconPulse
+                    )
+                // 內層脈衝光環（延遲 0.3s，製造波紋層次感）
+                Circle()
+                    .stroke(purpleAccent.opacity(emptyIconPulse ? 0 : 0.14), lineWidth: 1)
+                    .frame(width: 110, height: 110)
+                    .scaleEffect(emptyIconPulse ? 1.62 : 1.0)
+                    .animation(
+                        .easeOut(duration: 2.0).delay(0.3).repeatForever(autoreverses: false),
+                        value: emptyIconPulse
+                    )
+                // 主圓底（88pt 半透明漸層 + 細邊框，對齊 SavingsInsuranceView 規格）
+                Circle()
+                    .fill(
+                        LinearGradient(
+                            colors: [purpleAccent.opacity(0.18), purpleAccent.opacity(0.07)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 88, height: 88)
+                    .overlay(Circle().stroke(purpleAccent.opacity(0.25), lineWidth: 1.2))
+                Image(systemName: "building.2.fill")
+                    .font(.system(size: 36, weight: .light))
+                    .foregroundStyle(purpleAccent.opacity(0.72))
+            }
+            .onAppear {
+                emptyIconPulse = false
+                emptyPulseTask?.cancel()
+                emptyPulseTask = Task {
+                    try? await Task.sleep(nanoseconds: 300_000_000)
+                    guard !Task.isCancelled else { return }
+                    emptyIconPulse = true
+                }
+            }
+            .onDisappear {
+                emptyPulseTask?.cancel()
+            }
+
+            VStack(spacing: 10) {
+                Text("尚無房地產紀錄")
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(.primary.opacity(0.75))
+                Text("新增物件，掌握房產投資組合\n租金、房貸與增值一目了然")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .lineSpacing(3)
+            }
+
+            Button {
+                if subscription.isPremium { showAdd = true }
+                else { showPremiumAlert = true }
+            } label: {
+                Label("新增第一筆房產", systemImage: "plus.circle.fill")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 24).padding(.vertical, 12)
+                    .background(
+                        LinearGradient(
+                            colors: [purpleAccent, purpleDark],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    )
+                    .clipShape(Capsule())
+                    .shadow(color: purpleDark.opacity(0.38), radius: 10, y: 5)
+            }
+            .buttonStyle(.plain)
+
+            Spacer(minLength: 40)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal, 20)
     }
 
-    // MARK: - 卡片
+    // MARK: - 卡片（v3 美化：左側強調條 + 44pt 圖示圓 + Capsule 膠囊標籤 + 彩色底部行）
 
     private func estateCard(_ item: RealEstate) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(item.name).font(.subheadline.weight(.semibold))
-                    if !item.fullAddress.isEmpty {
-                        Text(item.fullAddress).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+        let purpleAccent = Color(red: 0.48, green: 0.25, blue: 0.80)
+        let appRate = item.appreciationRate
+        let isUp = appRate >= 0
+
+        return HStack(spacing: 0) {
+            // 左側 4pt 紫色漸層強調條（對齊 VehicleView / SavingsInsuranceView / StockView 規格）
+            RoundedRectangle(cornerRadius: 3)
+                .fill(
+                    LinearGradient(
+                        colors: [purpleAccent, purpleAccent.opacity(0.40)],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
+                .frame(width: 4)
+                .padding(.vertical, 10)
+                .padding(.trailing, 14)
+
+            VStack(alignment: .leading, spacing: 10) {
+                // ① 頂部：44pt 圖示圓 + 名稱/地址 + 估值大字 + 增值率膠囊
+                HStack(spacing: 12) {
+                    // 44pt 漸層圖示圓 + [v4] stroke 細邊框（對齊 VehicleView v3 / StockView v3 規格）
+                    ZStack {
+                        Circle()
+                            .fill(
+                                LinearGradient(
+                                    colors: [purpleAccent.opacity(0.22), purpleAccent.opacity(0.09)],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                            .frame(width: 44, height: 44)
+                            .shadow(color: purpleAccent.opacity(0.22), radius: 6, x: 0, y: 3)
+                        Circle()
+                            .stroke(purpleAccent.opacity(0.18), lineWidth: 0.75)
+                            .frame(width: 44, height: 44)
+                        Image(systemName: "building.2.fill")
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundStyle(purpleAccent)
+                    }
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(item.name)
+                            .font(.subheadline.weight(.semibold))
+                            .lineLimit(1)
+                        if !item.fullAddress.isEmpty {
+                            Text(item.fullAddress)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+                    }
+
+                    Spacer(minLength: 4)
+
+                    // 右側：估值大字 + 增值率彩色膠囊（對齊 StockView.stockCard 規格）
+                    VStack(alignment: .trailing, spacing: 4) {
+                        Text(fmt(item.currentValue))
+                            .font(.system(size: 16, weight: .bold, design: .rounded))
+                            .foregroundStyle(.primary)
+                            .contentTransition(.numericText())
+                        HStack(spacing: 3) {
+                            Image(systemName: isUp ? "arrow.up.right" : "arrow.down.right")
+                                .font(.system(size: 9, weight: .bold))
+                            Text(String(format: "%@%.1f%%", isUp ? "+" : "", appRate))
+                                .font(.system(size: 11, weight: .bold))
+                        }
+                        .foregroundStyle(isUp ? .green : .red)
+                        .padding(.horizontal, 7).padding(.vertical, 3)
+                        .background((isUp ? Color.green : Color.red).opacity(0.10))
+                        .clipShape(Capsule())
+                        .overlay(Capsule().stroke((isUp ? Color.green : Color.red).opacity(0.22), lineWidth: 0.6))
                     }
                 }
-                Spacer()
-                VStack(alignment: .trailing, spacing: 3) {
-                    Text(fmt(item.currentValue)).font(.subheadline.bold())
-                    Text(String(format: "%@%.1f%%", item.appreciationRate >= 0 ? "+" : "", item.appreciationRate))
-                        .font(.caption.bold())
-                        .foregroundStyle(item.appreciationRate >= 0 ? .green : .red)
-                }
-            }
 
-            Divider()
+                // ② 分隔線（細線，對齊 VehicleView vehicleCard 規格）
+                Rectangle()
+                    .fill(Color(.separator).opacity(0.20))
+                    .frame(height: 0.5)
 
-            if !item.mortgageItems.isEmpty {
-                // 只顯示「正在繳費中」的貸款：已開始（startDate <= 今天）且尚未繳完（elapsedPeriods < totalPeriods）。
-                // 未來才開始的接續貸款，elapsedPeriods 會被 clamp 成 0，光看 elapsedPeriods < totalPeriods 會誤判為繳費中。
-                let today = Date()
-                let activeMortgages = item.mortgageItems.filter {
-                    $0.startDate <= today && $0.elapsedPeriods < $0.totalPeriods
-                }
-                if !activeMortgages.isEmpty {
-                    VStack(alignment: .leading, spacing: 4) {
-                        ForEach(activeMortgages) { m in
+                // ③ 貸款明細（只顯示繳費中者）
+                // 已開始（startDate <= 今天）且尚未繳完（elapsedPeriods < totalPeriods）的貸款才顯示。
+                if !item.mortgageItems.isEmpty {
+                    let today = Date()
+                    let activeMortgages = item.mortgageItems.filter {
+                        $0.startDate <= today && $0.elapsedPeriods < $0.totalPeriods
+                    }
+                    if !activeMortgages.isEmpty {
+                        VStack(alignment: .leading, spacing: 5) {
+                            ForEach(activeMortgages) { m in
+                                HStack {
+                                    HStack(spacing: 5) {
+                                        // Capsule 膠囊標籤（對齊 vehicleCard 固定支出膠囊規格）
+                                        Text(m.title.isEmpty ? "房貸" : m.title)
+                                            .font(.system(size: 10, weight: .semibold))
+                                            .foregroundStyle(.blue)
+                                            .padding(.horizontal, 7).padding(.vertical, 2.5)
+                                            .background(Color.blue.opacity(0.10))
+                                            .clipShape(Capsule())
+                                            .overlay(Capsule().stroke(Color.blue.opacity(0.22), lineWidth: 0.6))
+                                        Text("\(m.elapsedPeriods)/\(m.totalPeriods)期")
+                                            .font(.caption2)
+                                            .foregroundStyle(.tertiary)
+                                    }
+                                    Spacer()
+                                    Text(fmt(m.amount) + "/月")
+                                        .font(.caption.weight(.medium))
+                                        .foregroundStyle(.primary)
+                                }
+                            }
                             HStack {
-                                Text(m.title.isEmpty ? "房貸" : m.title)
-                                    .font(.caption2.weight(.medium))
-                                    .padding(.horizontal, 5).padding(.vertical, 1)
-                                    .background(Color.blue.opacity(0.1))
-                                    .foregroundStyle(.blue)
-                                    .clipShape(RoundedRectangle(cornerRadius: 3))
-                                Text("\(m.elapsedPeriods)/\(m.totalPeriods)期")
-                                    .font(.caption2).foregroundStyle(.tertiary)
+                                Text("已繳貸款")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
                                 Spacer()
-                                Text(fmt(m.amount) + "/月").font(.caption)
+                                Text(fmt(item.totalMortgagePaid))
+                                    .font(.caption.bold())
+                                    .foregroundStyle(.blue)
                             }
                         }
-                        HStack {
-                            Text("已繳貸款").font(.caption2).foregroundStyle(.secondary)
-                            Spacer()
-                            Text(fmt(item.totalMortgagePaid)).font(.caption.bold()).foregroundStyle(.blue)
+                    }
+                }
+
+                // ④ 房屋價金
+                if !item.paidItems.isEmpty {
+                    HStack {
+                        HStack(spacing: 5) {
+                            Text("房屋價金")
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundStyle(.purple)
+                                .padding(.horizontal, 7).padding(.vertical, 2.5)
+                                .background(Color.purple.opacity(0.10))
+                                .clipShape(Capsule())
+                                .overlay(Capsule().stroke(Color.purple.opacity(0.22), lineWidth: 0.6))
+                            Text("\(item.paidItems.count) 筆")
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
+                        }
+                        Spacer()
+                        Text(fmt(item.totalPaid))
+                            .font(.caption.bold())
+                            .foregroundStyle(.purple)
+                    }
+                }
+
+                // ⑤ 變動支出
+                if !item.variableExpenses.isEmpty {
+                    HStack {
+                        HStack(spacing: 5) {
+                            Text("變動支出")
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundStyle(.orange)
+                                .padding(.horizontal, 7).padding(.vertical, 2.5)
+                                .background(Color.orange.opacity(0.10))
+                                .clipShape(Capsule())
+                                .overlay(Capsule().stroke(Color.orange.opacity(0.22), lineWidth: 0.6))
+                            Text("\(item.variableExpenses.count) 筆")
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
+                        }
+                        Spacer()
+                        Text(fmt(item.variableTotal))
+                            .font(.caption.bold())
+                            .foregroundStyle(.orange)
+                    }
+                }
+
+                // ⑥ 底部：月租（綠）/ 月貸（藍）/ 已付（紅）+ 報酬率
+                let hasBottomRow = item.monthlyRental > 0 || item.monthlyMortgage > 0 || item.totalAllPaid > 0
+                if hasBottomRow {
+                    HStack(spacing: 8) {
+                        if item.monthlyRental > 0 {
+                            HStack(spacing: 4) {
+                                Image(systemName: "dollarsign.circle.fill")
+                                    .font(.system(size: 10))
+                                Text("月租 " + fmt(item.monthlyRental))
+                            }
+                            .font(.caption2.weight(.medium))
+                            .foregroundStyle(.green)
+                        }
+                        if item.monthlyMortgage > 0 {
+                            HStack(spacing: 4) {
+                                Image(systemName: "creditcard.fill")
+                                    .font(.system(size: 10))
+                                Text("月貸 " + fmt(item.monthlyMortgage))
+                            }
+                            .font(.caption2.weight(.medium))
+                            .foregroundStyle(.blue)
+                        }
+                        Spacer()
+                        if item.totalAllPaid > 0 {
+                            HStack(spacing: 3) {
+                                Image(systemName: "arrow.up.right")
+                                    .font(.system(size: 9))
+                                Text("已付 " + fmt(item.totalAllPaid))
+                            }
+                            .font(.caption2.weight(.medium))
+                            .foregroundStyle(.red)
                         }
                     }
                 }
-            }
 
-            if !item.paidItems.isEmpty {
-                HStack {
-                    Text("房屋價金")
-                        .font(.caption2.weight(.medium))
-                        .padding(.horizontal, 5).padding(.vertical, 1)
-                        .background(Color.purple.opacity(0.1))
-                        .foregroundStyle(.purple)
-                        .clipShape(RoundedRectangle(cornerRadius: 3))
-                    Text("\(item.paidItems.count) 筆")
-                        .font(.caption2).foregroundStyle(.tertiary)
-                    Spacer()
-                    Text(fmt(item.totalPaid)).font(.caption.bold()).foregroundStyle(.purple)
-                }
-            }
-
-            if !item.variableExpenses.isEmpty {
-                HStack {
-                    Text("變動支出")
-                        .font(.caption2.weight(.medium))
-                        .padding(.horizontal, 5).padding(.vertical, 1)
-                        .background(Color.orange.opacity(0.1))
-                        .foregroundStyle(.orange)
-                        .clipShape(RoundedRectangle(cornerRadius: 3))
-                    Text("\(item.variableExpenses.count) 筆")
-                        .font(.caption2).foregroundStyle(.tertiary)
-                    Spacer()
-                    Text(fmt(item.variableTotal)).font(.caption.bold()).foregroundStyle(.orange)
-                }
-            }
-
-            HStack {
+                // ⑦ 租金報酬率（有租金才顯示）
                 if item.monthlyRental > 0 {
-                    Label("月租 " + fmt(item.monthlyRental), systemImage: "dollarsign.circle")
-                }
-                if item.monthlyMortgage > 0 {
-                    Label("月貸 " + fmt(item.monthlyMortgage), systemImage: "creditcard")
-                }
-                Spacer()
-                if item.totalAllPaid > 0 {
-                    Text("已付 " + fmt(item.totalAllPaid)).foregroundStyle(.red)
-                }
-            }
-            .font(.caption).foregroundStyle(.secondary)
-
-            if item.monthlyRental > 0 {
-                HStack {
-                    Spacer()
-                    Text(String(format: "報酬率 %.1f%%", item.rentalYield))
-                        .font(.caption).foregroundStyle(.blue)
+                    HStack(spacing: 4) {
+                        Spacer()
+                        Image(systemName: "percent")
+                            .font(.system(size: 9))
+                        Text(String(format: "報酬率 %.1f%%", item.rentalYield))
+                    }
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(purpleAccent.opacity(0.80))
                 }
             }
+            .padding(.vertical, 12)
         }
-        .padding(14)
+        .padding(.horizontal, 14)
         .background(Color(.systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .clipShape(RoundedRectangle(cornerRadius: 14))
         .overlay(
-            RoundedRectangle(cornerRadius: 12)
+            RoundedRectangle(cornerRadius: 14)
                 .stroke(
                     AngularGradient(
                         colors: CardRarity.realEstate(price: item.purchasePrice).borderGradient,
@@ -350,32 +713,38 @@ struct RealEstateView: View {
         .shadow(color: CardRarity.realEstate(price: item.purchasePrice).shadowColor, radius: 6, y: 2)
         .overlay(alignment: .topLeading) {
             if item.isSold {
+                // 貼齊卡片內緣：先前 -8 偏移讓印章凸出卡片外，凸出部分被 List 列邊界裁切遮擋
                 SoldStamp(size: 16)
-                    .offset(x: -8, y: -8)
+                    .offset(x: 4, y: 4)
             }
         }
     }
+
+    private static let fmtDecimal0: NumberFormatter = {
+        let nf = NumberFormatter(); nf.numberStyle = .decimal; nf.maximumFractionDigits = 0; return nf
+    }()
+    private static let fmtDecimal1: NumberFormatter = {
+        let nf = NumberFormatter(); nf.numberStyle = .decimal
+        nf.maximumFractionDigits = 1; nf.minimumFractionDigits = 0; return nf
+    }()
+    private static let fmtDecimal2: NumberFormatter = {
+        let nf = NumberFormatter(); nf.numberStyle = .decimal
+        nf.maximumFractionDigits = 2; nf.minimumFractionDigits = 0; return nf
+    }()
 
     /// 依數字大小自動帶單位：< 1 萬顯示「元」、1 萬 ~ 1 億顯示「萬元」、≥ 1 億顯示「億元」
     private func fmt(_ v: Double) -> String {
         let abs = Swift.abs(v)
         let sign = v < 0 ? "-" : ""
-        let nf = NumberFormatter()
-        nf.numberStyle = .decimal
         if abs >= 100_000_000 {
-            nf.maximumFractionDigits = 2
-            nf.minimumFractionDigits = 0
-            let s = nf.string(from: NSNumber(value: abs / 100_000_000)) ?? "0"
+            let s = Self.fmtDecimal2.string(from: NSNumber(value: abs / 100_000_000)) ?? "0"
             return "\(sign)NT$ \(s) 億元"
         }
         if abs >= 10_000 {
-            nf.maximumFractionDigits = 1
-            nf.minimumFractionDigits = 0
-            let s = nf.string(from: NSNumber(value: abs / 10_000)) ?? "0"
+            let s = Self.fmtDecimal1.string(from: NSNumber(value: abs / 10_000)) ?? "0"
             return "\(sign)NT$ \(s) 萬元"
         }
-        nf.maximumFractionDigits = 0
-        let s = nf.string(from: NSNumber(value: abs)) ?? "0"
+        let s = Self.fmtDecimal0.string(from: NSNumber(value: abs)) ?? "0"
         return "\(sign)NT$ \(s) 元"
     }
 }

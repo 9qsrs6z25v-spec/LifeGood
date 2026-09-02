@@ -1,0 +1,1265 @@
+import SwiftUI
+
+// MARK: - 美化紀錄（SubordinateRosterView）
+// v1 美化方向：
+//   filterBar  — 月份切換箭頭升級為 36pt 填充圓形按鈕（對齊 TaxOverviewView.yearPicker 規格）；
+//                部門 Menu 膠囊加動態 tint（選取時藍底/邊框，預設次要背景）
+//   legendChip — 色塊從 12pt 方形改 8pt Circle；加 color.opacity(0.10) 膠囊背景 + stroke 邊框
+//   emptyHint  — 升級雙層脈衝光環 + 靛藍漸層底圓 + icon 尺寸 36pt（對齊 SubordinateView.emptyState）；
+//                加細說明文字，兩種狀態（全空 vs 本部門空）分別顯示
+// v2 美化方向（RosterCellDetailSheet）：
+//   heroSection    — 頂部人員概覽列：44pt 靛藍漸層姓名縮寫圓（2字）+ 姓名 + 日期膠囊（假日紅/平日藍）
+//                    + 班別彩色膠囊（依 rosterShiftColor）或「未排班」灰膠囊；
+//                    進場 spring 動畫（heroAppeared，對齊 SubordinateDetailView.headerCard 規格）。
+//   shiftSection   — Section 標題升級為 Capsule 色條 + 圖示 + .subheadline.semibold（sectionHeader 輔助）；
+//                    「目前班別」列：班別名稱從純 bold 文字升級為彩色膠囊（含細邊框），
+//                    對齊 legendChip + OverviewView.categoryRow 百分比膠囊規格；
+//                    上班時間列：時間文字加 rosterShiftColor 著色，強化視覺關聯。
+//   summarySection — Section 標題升級 sectionHeader；
+//                    各事項（請假 / 會議 / 任務）從裸 Label 升級為
+//                    32pt 漸層圖示圓 + 文字（對齊 SubordinateOverviewView.recordRow 規格）；
+//                    全空時顯示 checkmark.circle.fill 微型圖示 + 說明文字，對齊 emptyHint 小型空狀態。
+//   actionSection  — Section 標題升級 sectionHeader；
+//                    動作列從裸 Label 升級為 32pt 漸層圖示圓 + 文字，
+//                    對齊 SubordinateDetailView.sectionHeader 規格。
+//   Form 背景      — 補 .scrollContentBackground(.hidden) + .background(systemGroupedBackground)，
+//                    深色模式不再出現白色 List 背景，對齊 FixedExpenseView / ResumeView 規格。
+// v3 美化方向（視覺一致性修正 + ShiftScheduleSettingsView 全面升級）：
+//   關閉按鈕位置   — RosterCellDetailSheet 與 ShiftScheduleSettingsView 的「完成」按鈕
+//                    從 .topBarTrailing 修正為 .topBarLeading，全 App 統一關閉鈕在左側規則。
+//   ShiftScheduleSettingsView：
+//     Form 背景    — 補 .scrollContentBackground(.hidden) + .background(systemGroupedBackground)；
+//     sectionHeader — 各班別 Section 標題升級為 Capsule 漸層色條 + 班別圖示圓 + 班別名稱，
+//                     使用 rosterShiftColor 著色，對齊 RosterCellDetailSheet.sectionHeader 規格；
+//     重置 Section  — 補紅色 Capsule 色條標題；
+//     timeRow       — 假日列標題以紅色呈現，與 dayHeader 週末紅字視覺一致；
+//     shiftIcon()   — 班別圖示對照函式（nightShift: moon.fill / eveningShift: moon.stars /
+//                     holidayDuty: sun.max.fill / dayDuty: sun.min.fill）。
+// v4 美化方向（RosterCellDetailSheet.dateSection 標頭一致性）：
+//   dateSection 原本是本 sheet 唯一還在用系統預設 Text("操作日期") 純文字標頭的 Section，
+//   同一個 sheet 內 shiftSection／summarySection／actionSection 三個 Section 早在 v2
+//   就已改用 sectionHeader(_:icon:color:) 輔助（Capsule 漸層色條 + 圖示 + 粗體標題），
+//   引入輔助函式當下漏改了最上面的日期 Section，是本 sheet 唯一的落差。改為呼叫
+//   sectionHeader("操作日期", icon: "calendar", color: .blue)，藍色呼應同 Section 內
+//   左右翻頁 chevron 按鈕既有的 .blue 著色。純視覺層調整，dayOffset 切換、日期綁定、
+//   下方班別設定套用邏輯完全未變動。
+//   （下次美化本檔案時，可轉往其他仍留有待辦的畫面）
+
+// MARK: - 班別時間設定（可自訂，存於本機 UserDefaults）
+
+final class ShiftScheduleStore: ObservableObject {
+    static let shared = ShiftScheduleStore()
+    private let key = "subordinate_shift_schedule"
+
+    @Published var schedule: ShiftSchedule { didSet { persist() } }
+
+    private init() {
+        if let data = UserDefaults.standard.data(forKey: key),
+           let s = try? JSONDecoder().decode(ShiftSchedule.self, from: data) {
+            schedule = s
+        } else {
+            schedule = .default
+        }
+    }
+
+    private func persist() {
+        if let data = try? JSONEncoder().encode(schedule) {
+            UserDefaults.standard.set(data, forKey: key)
+        }
+    }
+}
+
+// MARK: - 顏色語言
+
+func rosterShiftColor(_ t: ShiftType) -> Color {
+    switch t {
+    case .nightShift:   return .indigo
+    case .eveningShift: return .purple
+    case .holidayDuty:  return .orange
+    case .dayDuty:      return .mint
+    case .jetLagLeave:  return .teal
+    case .restDay:      return .gray
+    }
+}
+
+func rosterLeaveColor(_ t: LeaveType) -> Color {
+    switch t {
+    case .personal:   return .blue
+    case .sick:       return .red
+    case .annual:     return .green
+    case .marriage:   return .pink
+    case .funeral:    return Color(.darkGray)
+    case .maternity:  return .purple
+    case .paternity:  return .cyan
+    case .official:   return .teal
+    case .workInjury: return .brown
+    }
+}
+
+// MARK: - 點擊格子的識別
+
+private struct RosterCell: Identifiable {
+    let id = UUID()
+    let subId: UUID
+    let date: Date
+}
+
+/// 班表日格水平捲動位移（用來讓凍結的日期表頭與內容同步）
+private struct RosterHOffsetKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
+}
+
+/// 用獨立 ObservableObject 承載水平捲動位移：先前用 SubordinateRosterView 自身的
+/// @State 存放時，即使 1pt 節流門檻已生效，真實拖曳時位移量幾乎每影格都超過門檻，
+/// 導致整個 body（含棋盤格重建與 buildShiftLookup/buildLeaveLookup 查表建置）連帶重算，
+/// 造成捲動卡頓／閃爍。改由 RosterFrozenHeader 這個子視圖單獨觀察此物件，
+/// 讓位移變化只讓表頭子視圖重繪，不會波及父視圖的棋盤格。
+private final class RosterHOffsetBox: ObservableObject {
+    @Published var value: CGFloat = 0
+}
+
+/// 凍結表頭覆蓋層：僅依賴水平捲動位移，抽成獨立子視圖以隔離重繪範圍（見 RosterHOffsetBox 註解）。
+private struct RosterFrozenHeader: View {
+    @ObservedObject var box: RosterHOffsetBox
+    let days: [Date]
+    let nameColWidth: CGFloat
+    let headerH: CGFloat
+    let cellW: CGFloat
+    let viewportW: CGFloat
+    let bodyWidth: CGFloat
+
+    var body: some View {
+        HStack(spacing: 0) {
+            Color.clear.frame(width: nameColWidth, height: headerH)
+            HStack(spacing: 0) { ForEach(days, id: \.self) { d in dayHeader(d) } }
+                .frame(width: bodyWidth, alignment: .leading)
+                .offset(x: box.value)
+                .frame(width: viewportW, alignment: .leading)
+                .clipped()
+        }
+        .frame(height: headerH)
+        .background(Color(.systemBackground))
+        .allowsHitTesting(false)
+    }
+
+    private func isWeekend(_ d: Date) -> Bool {
+        let wd = Calendar.current.component(.weekday, from: d)
+        return wd == 1 || wd == 7
+    }
+
+    private func weekdayShort(_ d: Date) -> String {
+        let wd = Calendar.current.component(.weekday, from: d)  // 1 = 週日
+        return ["日", "一", "二", "三", "四", "五", "六"][max(0, min(6, wd - 1))]
+    }
+
+    private func dayHeader(_ day: Date) -> some View {
+        let weekend = isWeekend(day)
+        return VStack(spacing: 1) {
+            Text(weekdayShort(day)).font(.system(size: 9)).foregroundStyle(weekend ? .red : .secondary)
+            Text("\(Calendar.current.component(.day, from: day))")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(weekend ? .red : .primary)
+        }
+        .frame(width: cellW, height: headerH)
+        .background(weekend ? Color(.tertiarySystemFill).opacity(0.5) : Color.clear)
+        .overlay(Rectangle().stroke(Color(.separator).opacity(0.2), lineWidth: 0.5))
+    }
+}
+
+// MARK: - 部屬班表（棋盤式燈號）
+
+struct SubordinateRosterView: View {
+    @EnvironmentObject var lifeStore: LifeStore
+    @StateObject private var scheduleStore = ShiftScheduleStore.shared
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var month: Date = Calendar.current.date(
+        from: Calendar.current.dateComponents([.year, .month], from: Date())) ?? Date()
+    @State private var selectedDeptId: UUID? = nil
+    @State private var detail: RosterCell?
+    @State private var showSettings = false
+    // 注意：這裡刻意用 @State 而非 @StateObject。用 classic ObservableObject 時，任何持有
+    // @StateObject/@ObservedObject 的視圖都會在該物件 objectWillChange 觸發時整個 body 重算，
+    // 不論有沒有實際讀取變動的屬性；先前用 @StateObject 持有會讓每次捲動寫入 hOffsetBox.value
+    // 時，SubordinateRosterView 自己也被連帶重新整個 body（含棋盤格 O(人數 × 天數) 掃描），
+    // 等於重新引入了下面這段註解原本要隔離掉的閃爍/卡頓。@State 一樣能跨重繪保留同一個
+    // class 實例（RosterFrozenHeader 仍可正常經由 @ObservedObject 觀察它），但不會讓持有它
+    // 的這個視圖自己訂閱 objectWillChange，才能真正做到只讓子視圖重繪。
+    @State private var hOffsetBox = RosterHOffsetBox()   // 日格水平捲動位移（同步凍結表頭；獨立物件避免波及棋盤格重算）
+    @State private var emptyIconPulse = false
+    @State private var emptyPulseTask: Task<Void, Never>?
+    @State private var didAutoScroll = false  // 開啟時自動捲到今天（僅一次）
+
+    private let nameColWidth: CGFloat = 88
+    private let cellW: CGFloat = 40
+    private let cellH: CGFloat = 42
+    private let headerH: CGFloat = 38
+    private let groupHeaderH: CGFloat = 26
+
+    // MARK: 資料
+
+    private var people: [Subordinate] {
+        lifeStore.subordinates
+            .filter { selectedDeptId == nil || $0.departmentId == selectedDeptId }
+            .sorted { $0.name < $1.name }
+    }
+
+    /// 班表列：依廠區分組後的展開列（廠區標題 + 各部屬）
+    private enum RosterRow: Identifiable {
+        case header(String)
+        case person(Subordinate)
+        var id: String {
+            switch self {
+            case .header(let s):  return "h_\(s)"
+            case .person(let p):  return "p_\(p.id.uuidString)"
+            }
+        }
+    }
+
+    /// 把 people 依廠區分組：有分廠區者各自成段（前面加標題），未分廠區者收在最後。
+    /// 完全沒有人分廠區時，回傳純名單（不顯示任何標題）。
+    private var rosterRows: [RosterRow] {
+        let ppl = people
+        let grouped = Dictionary(grouping: ppl) { $0.plantArea }
+        let areas = grouped.keys.filter { !$0.isEmpty }.sorted()
+        if areas.isEmpty { return ppl.map { .person($0) } }
+        var rows: [RosterRow] = []
+        for area in areas {
+            rows.append(.header(area))
+            rows.append(contentsOf: (grouped[area] ?? []).map { .person($0) })
+        }
+        if let unassigned = grouped[""], !unassigned.isEmpty {
+            rows.append(.header("未分廠區"))
+            rows.append(contentsOf: unassigned.map { .person($0) })
+        }
+        return rows
+    }
+
+    private var days: [Date] {
+        let cal = Calendar.current
+        guard let range = cal.range(of: .day, in: .month, for: month),
+              let first = cal.date(from: cal.dateComponents([.year, .month], from: month)) else { return [] }
+        return range.compactMap { cal.date(byAdding: .day, value: $0 - 1, to: first) }
+    }
+
+    private static let monthTitleFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "zh_Hant_TW")
+        f.dateFormat = "yyyy 年 M 月"
+        return f
+    }()
+
+    private var monthTitle: String {
+        Self.monthTitleFormatter.string(from: month)
+    }
+
+    private var selectedDeptName: String {
+        guard let id = selectedDeptId,
+              let d = lifeStore.departments.first(where: { $0.id == id }) else { return "全部部門" }
+        return d.name.isEmpty ? (d.code.isEmpty ? "未命名部門" : d.code) : d.name
+    }
+
+    // MARK: Body
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 10) {
+                filterBar
+                legend
+                if people.isEmpty {
+                    emptyHint
+                } else {
+                    gridArea
+                }
+            }
+            .padding(.top, 6)
+            .background(Color(.systemGroupedBackground))
+            .navigationTitle("部屬班表")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) { Button("完成") { dismiss() } }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button { showSettings = true } label: { Image(systemName: "gearshape") }
+                }
+            }
+            .sheet(item: $detail) { cell in
+                RosterCellDetailSheet(scheduleStore: scheduleStore, cell: cell)
+            }
+            .sheet(isPresented: $showSettings) {
+                ShiftScheduleSettingsView(scheduleStore: scheduleStore)
+            }
+            .onChange(of: lifeStore.departments.map(\.id)) { _, ids in
+                // 所選部門被刪除時，篩選回復為「全部部門」，避免殘留孤兒 UUID 讓名單假性清空
+                // （對齊 SubordinateView／TalentMatrixView 既有修復規格）
+                if let id = selectedDeptId, !ids.contains(id) {
+                    selectedDeptId = nil
+                }
+            }
+        }
+    }
+
+    // MARK: 篩選列
+
+    private var filterBar: some View {
+        VStack(spacing: 10) {
+            HStack(spacing: 0) {
+                Button { shiftMonth(-1) } label: {
+                    ZStack {
+                        Circle()
+                            .fill(Color.blue.opacity(0.12))
+                            .frame(width: 36, height: 36)
+                        Image(systemName: "chevron.left")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(.blue)
+                    }
+                }
+                .buttonStyle(.plain)
+                Spacer()
+                Text(monthTitle)
+                    .font(.title3.weight(.semibold))
+                Spacer()
+                Button { shiftMonth(1) } label: {
+                    ZStack {
+                        Circle()
+                            .fill(Color.blue.opacity(0.12))
+                            .frame(width: 36, height: 36)
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(.blue)
+                    }
+                }
+                .buttonStyle(.plain)
+            }
+            Menu {
+                Button("全部部門") { selectedDeptId = nil }
+                ForEach(lifeStore.departments) { d in
+                    Button(d.name.isEmpty ? d.code : d.name) { selectedDeptId = d.id }
+                }
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "line.3.horizontal.decrease.circle")
+                        .foregroundStyle(selectedDeptId == nil ? Color.secondary : Color.blue)
+                    Text(selectedDeptName).lineLimit(1)
+                    Image(systemName: "chevron.down").font(.caption2)
+                }
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(selectedDeptId == nil ? Color.primary : Color.blue)
+                .padding(.horizontal, 14).padding(.vertical, 8)
+                .background(selectedDeptId == nil ? Color(.secondarySystemBackground) : Color.blue.opacity(0.10))
+                .clipShape(Capsule())
+                .overlay(Capsule().stroke(selectedDeptId == nil ? Color.clear : Color.blue.opacity(0.22), lineWidth: 0.75))
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.horizontal)
+    }
+
+    // MARK: 圖例
+
+    private var legend: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(ShiftType.allCases) { t in
+                    legendChip(t.shortLabel, rosterShiftColor(t))
+                }
+                legendChip("請假", .blue)
+            }
+            .padding(.horizontal)
+        }
+    }
+
+    private func legendChip(_ text: String, _ color: Color) -> some View {
+        HStack(spacing: 4) {
+            Circle().fill(color).frame(width: 8, height: 8)
+            Text(text).font(.caption2.weight(.medium))
+        }
+        .padding(.horizontal, 8).padding(.vertical, 4)
+        .background(color.opacity(0.10))
+        .clipShape(Capsule())
+        .overlay(Capsule().stroke(color.opacity(0.22), lineWidth: 0.6))
+    }
+
+    private var emptyHint: some View {
+        VStack(spacing: 24) {
+            Spacer()
+            ZStack {
+                Circle()
+                    .stroke(Color.indigo.opacity(emptyIconPulse ? 0 : 0.28), lineWidth: 1.5)
+                    .frame(width: 110, height: 110)
+                    .scaleEffect(emptyIconPulse ? 1.35 : 1.0)
+                    .animation(.easeOut(duration: 2.0).repeatForever(autoreverses: false), value: emptyIconPulse)
+                Circle()
+                    .stroke(Color.indigo.opacity(emptyIconPulse ? 0 : 0.14), lineWidth: 1)
+                    .frame(width: 110, height: 110)
+                    .scaleEffect(emptyIconPulse ? 1.62 : 1.0)
+                    .animation(.easeOut(duration: 2.0).delay(0.3).repeatForever(autoreverses: false), value: emptyIconPulse)
+                Circle()
+                    .fill(LinearGradient(
+                        colors: [Color.indigo.opacity(0.14), Color.indigo.opacity(0.06)],
+                        startPoint: .topLeading, endPoint: .bottomTrailing))
+                    .frame(width: 88, height: 88)
+                    .overlay(Circle().stroke(Color.indigo.opacity(0.22), lineWidth: 1.2))
+                Image(systemName: "person.2.slash")
+                    .font(.system(size: 36, weight: .light))
+                    .foregroundStyle(Color.indigo.opacity(0.70))
+            }
+            .onAppear {
+                emptyIconPulse = false
+                emptyPulseTask?.cancel()
+                emptyPulseTask = Task {
+                    try? await Task.sleep(nanoseconds: 300_000_000)
+                    guard !Task.isCancelled else { return }
+                    emptyIconPulse = true
+                }
+            }
+            .onDisappear {
+                emptyPulseTask?.cancel()
+                emptyIconPulse = false
+            }
+            VStack(spacing: 8) {
+                Text(selectedDeptId == nil ? "尚無部屬資料" : "此部門沒有部屬")
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(.primary.opacity(0.75))
+                Text(selectedDeptId == nil
+                     ? "在部屬頁新增成員，即可在此管理班表"
+                     : "切換為「全部部門」或新增部屬後即可查看班表")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .lineSpacing(3)
+            }
+            Spacer()
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal, 32)
+    }
+
+    // MARK: 棋盤格
+
+    private var gridArea: some View {
+        // 只算一次：rosterRows 內部對 lifeStore.subordinates 做 filter+sort+Dictionary(grouping:)，
+        // 原本被凍結姓名欄與日格區塊各自的 ForEach 各重新呼叫一次，改為算一次往下傳參數。
+        let rows = rosterRows
+        return GeometryReader { geo in
+            let bodyWidth = CGFloat(days.count) * cellW
+            let viewportW = max(0, geo.size.width - nameColWidth)   // 日格可視寬度（扣掉凍結姓名欄）
+            VStack(spacing: 0) {
+                // 預留凍結表頭的高度（實際表頭改由 overlay 即時繪製，確保水平捲動同步）
+                Color.clear.frame(height: headerH)
+
+                // 內容：凍結姓名欄（固定寬）+ 日格（限定 viewport 寬，水平捲動並回報位移）
+                ScrollView(.vertical, showsIndicators: true) {
+                    HStack(alignment: .top, spacing: 0) {
+                        VStack(spacing: 0) {
+                            ForEach(rows) { row in
+                                switch row {
+                                case .header(let area): nameHeaderCell(area)
+                                case .person(let p):    nameCell(p)
+                                }
+                            }
+                        }
+                        .frame(width: nameColWidth)
+
+                        rosterHScroll(bodyWidth: bodyWidth, rows: rows)
+                            .frame(width: viewportW)
+                    }
+                }
+            }
+            .coordinateSpace(name: "rosterArea")
+            .onPreferenceChange(RosterHOffsetKey.self) { value in
+                // iOS 17 後援：由偏好值推算水平位移（捲右為負）；iOS 18+ 已由 onScrollGeometryChange
+                // 直接同步 hOffsetBox，此處若繼續生效會與其在同一捲動影格互相覆寫，故僅 iOS 17 以下才採用。
+                guard #unavailable(iOS 18.0) else { return }
+                let newOffset = value - nameColWidth
+                if abs(newOffset - hOffsetBox.value) > 0.5 { hOffsetBox.value = newOffset }
+            }
+            .overlay(alignment: .topLeading) {
+                // 凍結表頭：以實際水平捲動量即時平移。抽成獨立子視圖只觀察 hOffsetBox，
+                // 讓每影格的位移更新只讓這一小塊表頭重繪，不會連帶讓整個棋盤格
+                // （含 buildShiftLookup/buildLeaveLookup 查表建置）跟著重算，避免捲動卡頓/閃爍。
+                RosterFrozenHeader(box: hOffsetBox, days: days, nameColWidth: nameColWidth,
+                                   headerH: headerH, cellW: cellW, viewportW: viewportW, bodyWidth: bodyWidth)
+            }
+            .background(Color(.systemBackground))
+            .clipShape(RoundedRectangle(cornerRadius: 14))
+            .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color(.separator).opacity(0.15), lineWidth: 0.75))
+        }
+        .padding(.horizontal)
+        .padding(.bottom, 8)
+    }
+
+    /// 今天若落在目前顯示的月份，回傳對應的日期（供自動捲動用）
+    private var todayInMonth: Date? {
+        let cal = Calendar.current
+        return days.first { cal.isDate($0, inSameDayAs: Date()) }
+    }
+
+    /// 日格欄位的捲動錨點 id（避免與 cell 的 ForEach 隱式 id 衝突）
+    private func dayColID(_ d: Date) -> String { "rcol-\(Int(d.timeIntervalSinceReferenceDate))" }
+
+    /// 日格水平捲動區：開啟時自動捲到今天；iOS 18 直接讀 contentOffset 同步表頭。
+    @ViewBuilder
+    private func rosterHScroll(bodyWidth: CGFloat, rows: [RosterRow]) -> some View {
+        ScrollViewReader { proxy in
+            hScrollContent(bodyWidth: bodyWidth, rows: rows)
+                .onAppear {
+                    guard !didAutoScroll, let today = todayInMonth else { return }
+                    didAutoScroll = true
+                    // 延遲一拍待版面完成，直接跳到今天（置中），不做動畫避免閃動
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                        proxy.scrollTo(dayColID(today), anchor: .center)
+                    }
+                }
+        }
+    }
+
+    @ViewBuilder
+    private func hScrollContent(bodyWidth: CGFloat, rows: [RosterRow]) -> some View {
+        // 一次建好本月「人員 × 日期 → 班別／請假」查表，取代原本 shiftFor/leaveFor 逐格對
+        // sub.shifts／sub.records 全量線性掃描（兩者只增不減，會隨使用年資持續變長）；
+        // 建表成本為 O(人數 × 該人歷史筆數)，之後每一格都是 O(1) 字典查詢，
+        // 避免整張棋盤格淪為 O(人數 × 天數 × 歷史筆數)。
+        let shiftLookup = buildShiftLookup()
+        let leaveLookup = buildLeaveLookup()
+        let content = ScrollView(.horizontal, showsIndicators: true) {
+            VStack(spacing: 0) {
+                // 隱形錨點列（height 0）：供 ScrollViewReader 自動捲到今天
+                HStack(spacing: 0) {
+                    ForEach(days, id: \.self) { d in
+                        Color.clear.frame(width: cellW, height: 0).id(dayColID(d))
+                    }
+                }
+                ForEach(rows) { row in
+                    switch row {
+                    case .header:        gridHeaderRow()
+                    case .person(let p):
+                        HStack(spacing: 0) {
+                            ForEach(days, id: \.self) { d in
+                                cell(p, d, shiftLookup: shiftLookup, leaveLookup: leaveLookup)
+                            }
+                        }
+                    }
+                }
+            }
+            .background(
+                GeometryReader { g in
+                    // iOS 17 後援：內容左緣相對外層固定容器的位置 = nameColWidth + 水平捲動量
+                    Color.clear.preference(key: RosterHOffsetKey.self,
+                                           value: g.frame(in: .named("rosterArea")).minX)
+                }
+            )
+        }
+        if #available(iOS 18.0, *) {
+            content.onScrollGeometryChange(for: CGFloat.self) { geo in
+                geo.contentOffset.x
+            } action: { _, x in
+                // 捲右 contentOffset 為正，表頭需往左 → 取負
+                // 寫入獨立的 hOffsetBox（見上方 RosterHOffsetBox 註解），只讓凍結表頭子視圖重繪，
+                // 不會連帶讓整個棋盤格在每個捲動影格都重算一次
+                let newOffset = -x
+                if abs(newOffset - hOffsetBox.value) > 0.5 { hOffsetBox.value = newOffset }
+            }
+        } else {
+            content
+        }
+    }
+
+    private func nameCell(_ sub: Subordinate) -> some View {
+        HStack {
+            Text(sub.name.isEmpty ? "未命名" : sub.name)
+                .font(.system(size: 12, weight: .medium))
+                .lineLimit(1).minimumScaleFactor(0.7)
+            Spacer(minLength: 0)
+        }
+        .padding(.leading, 8)
+        .frame(width: nameColWidth, height: cellH)
+        .overlay(Rectangle().stroke(Color(.separator).opacity(0.2), lineWidth: 0.5))
+    }
+
+    /// 廠區分段：姓名欄上的標題格
+    private func nameHeaderCell(_ area: String) -> some View {
+        HStack(spacing: 4) {
+            Image(systemName: "building.2.fill").font(.system(size: 9))
+            Text(area).font(.system(size: 11, weight: .bold)).lineLimit(1).minimumScaleFactor(0.6)
+            Spacer(minLength: 0)
+        }
+        .foregroundStyle(.blue)
+        .padding(.leading, 8)
+        .frame(width: nameColWidth, height: groupHeaderH, alignment: .leading)
+        .background(Color.blue.opacity(0.10))
+        .overlay(Rectangle().stroke(Color(.separator).opacity(0.2), lineWidth: 0.5))
+    }
+
+    /// 廠區分段：日格區對齊的整列底色橫條
+    private func gridHeaderRow() -> some View {
+        Rectangle()
+            .fill(Color.blue.opacity(0.10))
+            .frame(width: CGFloat(days.count) * cellW, height: groupHeaderH)
+            .overlay(Rectangle().stroke(Color(.separator).opacity(0.2), lineWidth: 0.5))
+    }
+
+    private func cell(_ sub: Subordinate, _ day: Date,
+                       shiftLookup: [UUID: [Date: ShiftType]],
+                       leaveLookup: [UUID: [Date: LeaveType]]) -> some View {
+        let key = Calendar.current.startOfDay(for: day)
+        let leave = leaveLookup[sub.id]?[key]
+        let shift = shiftLookup[sub.id]?[key]
+        let weekend = isWeekend(day)
+        return Button {
+            detail = RosterCell(subId: sub.id, date: day)
+        } label: {
+            ZStack {
+                Rectangle().fill(weekend ? Color(.tertiarySystemFill).opacity(0.4) : Color.clear)
+                if let leave = leave {
+                    cellChip(String(leave.rawValue.prefix(1)), rosterLeaveColor(leave))
+                } else if let shift = shift {
+                    cellChip(shift.shortLabel, rosterShiftColor(shift))
+                }
+            }
+            .frame(width: cellW, height: cellH)
+            .overlay(Rectangle().stroke(Color(.separator).opacity(0.2), lineWidth: 0.5))
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func cellChip(_ text: String, _ color: Color) -> some View {
+        Text(text)
+            .font(.system(size: 10, weight: .bold))
+            .foregroundStyle(.white)
+            .lineLimit(1).minimumScaleFactor(0.6)
+            .frame(width: cellW - 8, height: cellH - 10)
+            .background(color.gradient)
+            .clipShape(RoundedRectangle(cornerRadius: 6))
+    }
+
+    // MARK: 計算
+
+    /// 建立「部屬 id → 日期（startOfDay）→ 班別」查表：對每人的 shifts 只掃描一次。
+    private func buildShiftLookup() -> [UUID: [Date: ShiftType]] {
+        let cal = Calendar.current
+        var result: [UUID: [Date: ShiftType]] = [:]
+        for p in people {
+            var map: [Date: ShiftType] = [:]
+            for s in p.shifts { map[cal.startOfDay(for: s.date)] = s.type }
+            result[p.id] = map
+        }
+        return result
+    }
+
+    /// 建立「部屬 id → 日期（startOfDay）→ 請假別」查表：只展開目前顯示月份內的日期，
+    /// 避免長天期請假紀錄被無謂展開到看不見的月份。
+    private func buildLeaveLookup() -> [UUID: [Date: LeaveType]] {
+        let cal = Calendar.current
+        let visibleDays = Set(days.map { cal.startOfDay(for: $0) })
+        // 先夾在目前顯示月份的頭尾之間再展開，避免請假紀錄的 endDate 因舊資料異常
+        // （例如遠未來日期）而讓迴圈跑出可見月份之外的天文數字次數。
+        guard let monthStart = days.first.map({ cal.startOfDay(for: $0) }),
+              let monthEnd = days.last.map({ cal.startOfDay(for: $0) }) else { return [:] }
+        var result: [UUID: [Date: LeaveType]] = [:]
+        for p in people {
+            var map: [Date: LeaveType] = [:]
+            for r in p.records where r.type == .leave {
+                let s = max(cal.startOfDay(for: r.date), monthStart)
+                let e = min(cal.startOfDay(for: r.endDate ?? r.date), monthEnd)
+                guard s <= e else { continue }
+                var d = s
+                while d <= e {
+                    if visibleDays.contains(d) { map[d] = r.leaveType ?? .personal }
+                    guard let next = cal.date(byAdding: .day, value: 1, to: d) else { break }
+                    d = next
+                }
+            }
+            result[p.id] = map
+        }
+        return result
+    }
+
+    private func isWeekend(_ d: Date) -> Bool {
+        let wd = Calendar.current.component(.weekday, from: d)
+        return wd == 1 || wd == 7
+    }
+
+    private func weekdayShort(_ d: Date) -> String {
+        let wd = Calendar.current.component(.weekday, from: d)  // 1 = 週日
+        return ["日", "一", "二", "三", "四", "五", "六"][max(0, min(6, wd - 1))]
+    }
+
+    private func shiftMonth(_ delta: Int) {
+        if let m = Calendar.current.date(byAdding: .month, value: delta, to: month) { month = m }
+    }
+}
+
+// MARK: - 格子詳情（摘要 + 設定班別 + 快速請假 + 前往詳情）
+
+private struct RosterCellDetailSheet: View {
+    @EnvironmentObject var lifeStore: LifeStore
+    @ObservedObject var scheduleStore: ShiftScheduleStore
+    @Environment(\.dismiss) private var dismiss
+
+    let cell: RosterCell
+    @State private var showAddLeave = false
+    @State private var goDetail = false
+    @State private var heroAppeared = false
+    @State private var dayOffset = 0   // 相對點到那天的日期微調（避免點歪）
+
+    private var sub: Subordinate? { lifeStore.subordinates.first { $0.id == cell.subId } }
+
+    /// 實際操作的日期（可由使用者在上方微調）
+    private var selectedDate: Date {
+        Calendar.current.date(byAdding: .day, value: dayOffset, to: cell.date) ?? cell.date
+    }
+
+    /// 綁定到 DatePicker：選日期 → 換算成相對點擊日的 offset
+    private var selectedDateBinding: Binding<Date> {
+        Binding(
+            get: { selectedDate },
+            set: { newDate in
+                let cal = Calendar.current
+                let d0 = cal.startOfDay(for: cell.date)
+                let d1 = cal.startOfDay(for: newDate)
+                dayOffset = cal.dateComponents([.day], from: d0, to: d1).day ?? 0
+            }
+        )
+    }
+
+    private var initials: String {
+        let name = sub?.name ?? ""
+        if name.isEmpty { return "?" }
+        return String(name.prefix(2))
+    }
+
+    private var isHoliday: Bool {
+        let wd = Calendar.current.component(.weekday, from: selectedDate)
+        return wd == 1 || wd == 7
+    }
+
+    private var currentShift: ShiftType? {
+        let cal = Calendar.current
+        return sub?.shifts.first { cal.isDate($0.date, inSameDayAs: selectedDate) }?.type
+    }
+
+    private static let headerDateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "zh_Hant_TW")
+        f.dateFormat = "M/d（EEE）"
+        return f
+    }()
+
+    private var headerTitle: String {
+        "\(sub?.name ?? "")　\(Self.headerDateFormatter.string(from: selectedDate))"
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                heroSection
+                dateSection
+                shiftSection
+                summarySection
+                actionSection
+            }
+            .scrollContentBackground(.hidden)
+            .background(Color(.systemGroupedBackground))
+            .navigationTitle(headerTitle)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .topBarLeading) { Button("完成") { dismiss() } } }
+            .sheet(isPresented: $showAddLeave) {
+                RecordEditorSheet(subordinateId: cell.subId, type: .leave, editing: nil, initialDate: selectedDate)
+            }
+            .sheet(isPresented: $goDetail) {
+                if let sub = sub { SubordinateDetailView(subordinate: sub) }
+            }
+        }
+    }
+
+    // MARK: - 人員概覽列（美化 v2）
+
+    private var heroSection: some View {
+        Section {
+            HStack(spacing: 14) {
+                // 姓名縮寫圓：44pt 靛藍漸層，對齊 SubordinateDetailView.headerCard 規格
+                ZStack {
+                    Circle()
+                        .fill(
+                            LinearGradient(
+                                colors: [Color.indigo.opacity(0.22), Color.indigo.opacity(0.09)],
+                                startPoint: .topLeading, endPoint: .bottomTrailing
+                            )
+                        )
+                        .frame(width: 44, height: 44)
+                        .shadow(color: Color.indigo.opacity(0.18), radius: 6, x: 0, y: 2)
+                    Circle()
+                        .stroke(Color.indigo.opacity(0.22), lineWidth: 1)
+                        .frame(width: 44, height: 44)
+                    Text(initials)
+                        .font(.system(size: 15, weight: .bold, design: .rounded))
+                        .foregroundStyle(.indigo)
+                }
+
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(sub.flatMap { $0.name.isEmpty ? nil : $0.name } ?? "未知部屬")
+                        .font(.subheadline.weight(.semibold))
+                        .lineLimit(1)
+                    HStack(spacing: 5) {
+                        // 日期膠囊：假日用紅色，平日用藍色
+                        Text(Self.headerDateFormatter.string(from: selectedDate))
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(isHoliday ? .red : .blue)
+                            .padding(.horizontal, 7).padding(.vertical, 2.5)
+                            .background((isHoliday ? Color.red : Color.blue).opacity(0.10))
+                            .clipShape(Capsule())
+                            .overlay(Capsule().stroke(
+                                (isHoliday ? Color.red : Color.blue).opacity(0.22),
+                                lineWidth: 0.6
+                            ))
+                        // 班別膠囊：依 rosterShiftColor 著色，未排班用次要灰
+                        if let shift = currentShift {
+                            Text(shift.rawValue)
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundStyle(rosterShiftColor(shift))
+                                .padding(.horizontal, 7).padding(.vertical, 2.5)
+                                .background(rosterShiftColor(shift).opacity(0.10))
+                                .clipShape(Capsule())
+                                .overlay(Capsule().stroke(rosterShiftColor(shift).opacity(0.22), lineWidth: 0.6))
+                        } else {
+                            Text("未排班")
+                                .font(.system(size: 10, weight: .medium))
+                                .foregroundStyle(.secondary)
+                                .padding(.horizontal, 7).padding(.vertical, 2.5)
+                                .background(Color(.tertiarySystemFill))
+                                .clipShape(Capsule())
+                        }
+                    }
+                }
+            }
+            .padding(.vertical, 4)
+            .opacity(heroAppeared ? 1 : 0)
+            .offset(y: heroAppeared ? 0 : 12)
+            .onAppear {
+                withAnimation(.spring(response: 0.45, dampingFraction: 0.82)) {
+                    heroAppeared = true
+                }
+            }
+        }
+    }
+
+    // MARK: - Section 標題輔助（Capsule 色條 + 圖示 + 標題，對齊全 App sectionHeader 規格）
+
+    private func sectionHeader(_ title: String, icon: String, color: Color) -> some View {
+        HStack(spacing: 8) {
+            Capsule()
+                .fill(
+                    LinearGradient(
+                        colors: [color, color.opacity(0.55)],
+                        startPoint: .top, endPoint: .bottom
+                    )
+                )
+                .frame(width: 3, height: 16)
+            Image(systemName: icon)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(color)
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.primary)
+        }
+        .textCase(nil)
+    }
+
+    // MARK: - 摘要事項列輔助（32pt 漸層圓 + 文字，對齊 SubordinateOverviewView.recordRow 規格）
+
+    private func summaryRow(icon: String, title: String, color: Color) -> some View {
+        HStack(spacing: 12) {
+            ZStack {
+                Circle()
+                    .fill(
+                        LinearGradient(
+                            colors: [color.opacity(0.22), color.opacity(0.09)],
+                            startPoint: .topLeading, endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 32, height: 32)
+                Circle()
+                    .stroke(color.opacity(0.20), lineWidth: 0.75)
+                    .frame(width: 32, height: 32)
+                Image(systemName: icon)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(color)
+            }
+            Text(title)
+                .font(.subheadline)
+                .foregroundStyle(.primary)
+                .lineLimit(2)
+        }
+    }
+
+    // MARK: - 日期選擇（避免點歪，可在此微調 / 直接選日期）
+
+    private var dateSection: some View {
+        Section {
+            HStack(spacing: 12) {
+                Button { dayOffset -= 1 } label: {
+                    Image(systemName: "chevron.left.circle.fill")
+                        .font(.title2).foregroundStyle(.blue)
+                }
+                .buttonStyle(.plain)
+
+                DatePicker("", selection: selectedDateBinding, displayedComponents: .date)
+                    .labelsHidden()
+                    .frame(maxWidth: .infinity)
+
+                Button { dayOffset += 1 } label: {
+                    Image(systemName: "chevron.right.circle.fill")
+                        .font(.title2).foregroundStyle(.blue)
+                }
+                .buttonStyle(.plain)
+            }
+        } header: {
+            sectionHeader("操作日期", icon: "calendar", color: .blue)
+        } footer: {
+            Text("這裡可微調或直接選日期，下方的班別設定都會套用到這一天。")
+        }
+    }
+
+    // MARK: - 班別設定 Section（美化 v2）
+
+    private var shiftSection: some View {
+        Section {
+            // 目前班別：彩色膠囊（含細邊框），對齊 legendChip 設計規格
+            HStack {
+                Text("目前班別")
+                    .foregroundStyle(.secondary)
+                Spacer()
+                if let shift = currentShift {
+                    Text(shift.rawValue)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(rosterShiftColor(shift))
+                        .padding(.horizontal, 8).padding(.vertical, 3)
+                        .background(rosterShiftColor(shift).opacity(0.12))
+                        .clipShape(Capsule())
+                        .overlay(Capsule().stroke(rosterShiftColor(shift).opacity(0.28), lineWidth: 0.6))
+                } else {
+                    Text("未排班")
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 7).padding(.vertical, 2.5)
+                        .background(Color(.tertiarySystemFill))
+                        .clipShape(Capsule())
+                }
+            }
+            // 上班時間：時間文字以班別色著色，強化視覺關聯
+            if let s = currentShift, s.hasWorkTime,
+               let r = scheduleStore.schedule.range(for: s, isHoliday: isHoliday) {
+                HStack {
+                    Text(isHoliday ? "時間（假日）" : "時間（平日）")
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Text(r.display)
+                        .monospacedDigit()
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(rosterShiftColor(s))
+                }
+            }
+            Menu {
+                ForEach(ShiftType.allCases) { t in
+                    Button(t.rawValue) { lifeStore.setShift(subordinateId: cell.subId, date: selectedDate, type: t) }
+                }
+            } label: {
+                Label("設定 / 變更班別", systemImage: "calendar.badge.clock")
+            }
+            Button {
+                lifeStore.setShift(subordinateId: cell.subId, date: selectedDate, type: .holidayDuty)
+                dismiss()
+            } label: {
+                Label("設為假日值班（單日）", systemImage: "sun.horizon.fill")
+            }
+            // 大夜輪班（8 天）：點選日時差、隔天起大夜 6 晚、第 8 天休。
+            // 週五自動分岔（使用者規則 v25.282）：看同廠區週六晚上有沒有人輪大夜——
+            // 有人（對方輪班週日結尾、週日交接重疊）→ 五時差、六休、日起大夜；
+            // 週六沒人 → 五時差、六起大夜、下週五休（標準序列）。
+            if Calendar.current.component(.weekday, from: selectedDate) == 6 {
+                let saturday = Calendar.current.date(byAdding: .day, value: 1, to: selectedDate) ?? selectedDate
+                let plant = lifeStore.subordinates.first { $0.id == cell.subId }?.plantArea ?? ""
+                let saturdayCovered = lifeStore.plantHasNightShift(on: saturday, plantArea: plant,
+                                                                   excluding: cell.subId)
+                Button {
+                    lifeStore.applyNightShiftRotation(subordinateId: cell.subId, startDate: selectedDate,
+                                                      skipSaturday: saturdayCovered)
+                    dismiss()
+                } label: {
+                    Label(saturdayCovered
+                          ? "大夜輪班：五時差、六休（該廠週六已有人）、日起大夜"
+                          : "大夜輪班：五時差、六起大夜（該廠週六無人）、下週五休",
+                          systemImage: "arrow.triangle.2.circlepath")
+                }
+            } else {
+                Button {
+                    lifeStore.applyNightShiftRotation(subordinateId: cell.subId, startDate: selectedDate)
+                    dismiss()
+                } label: {
+                    Label("套用大夜班輪班（這天時差、隔天起大夜 6 晚、第 8 天休）",
+                          systemImage: "arrow.triangle.2.circlepath")
+                }
+            }
+            Button {
+                lifeStore.applyEveningShiftWeekdays(subordinateId: cell.subId, startDate: selectedDate)
+                dismiss()
+            } label: {
+                Label("套用小夜班（整週一至五 5 天）", systemImage: "moon.stars")
+            }
+            Button {
+                lifeStore.setShift(subordinateId: cell.subId, date: selectedDate, type: .dayDuty)
+                dismiss()
+            } label: {
+                Label("設為日值班（單日，平日 08:30–17:30）", systemImage: "sun.max")
+            }
+            Button(role: .destructive) {
+                lifeStore.setShift(subordinateId: cell.subId, date: selectedDate, type: nil)
+                dismiss()
+            } label: {
+                Label("清除這天班別", systemImage: "xmark.circle")
+            }
+        } header: {
+            sectionHeader("班別設定", icon: "calendar.badge.clock", color: .indigo)
+        }
+    }
+
+    // MARK: - 當天摘要 Section（美化 v2）
+
+    private var summarySection: some View {
+        Section {
+            let leave = leaveRecord
+            let meets = meetingsToday
+            let dueTasks = tasksToday
+            if leave == nil && meets.isEmpty && dueTasks.isEmpty {
+                // 全空小型空狀態：圖示 + 說明文字，對齊 SubordinateOverviewView.emptyHint 規格
+                HStack(spacing: 8) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 15))
+                        .foregroundStyle(Color.secondary.opacity(0.55))
+                    Text("當天無請假 / 會議 / 任務")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.vertical, 2)
+            }
+            if let leave = leave {
+                summaryRow(
+                    icon: "calendar.badge.minus",
+                    title: "請假：\(leave.leaveType?.rawValue ?? "")",
+                    color: .teal
+                )
+            }
+            ForEach(meets) { m in
+                summaryRow(
+                    icon: "person.2.fill",
+                    title: m.topic.isEmpty ? "會議" : m.topic,
+                    color: .indigo
+                )
+            }
+            ForEach(dueTasks) { t in
+                summaryRow(
+                    icon: "checklist",
+                    title: "\(t.topic.isEmpty ? "任務" : t.topic)（截止）",
+                    color: .cyan
+                )
+            }
+        } header: {
+            sectionHeader("當天摘要", icon: "calendar.day.timeline.left", color: .teal)
+        }
+    }
+
+    // MARK: - 快速操作 Section（美化 v2）
+
+    private var actionSection: some View {
+        Section {
+            Button { showAddLeave = true } label: {
+                summaryRow(icon: "plus.circle.fill", title: "快速新增請假", color: .teal)
+            }
+            .tint(.teal)
+            Button { goDetail = true } label: {
+                summaryRow(icon: "person.text.rectangle.fill", title: "前往部屬詳情頁", color: .blue)
+            }
+            .tint(.blue)
+        } header: {
+            sectionHeader("快速操作", icon: "bolt.fill", color: .orange)
+        }
+    }
+
+    // 當天事項
+    private var leaveRecord: SubordinateRecord? {
+        guard let sub = sub else { return nil }
+        let cal = Calendar.current
+        let d = cal.startOfDay(for: selectedDate)
+        return sub.records.first { r in
+            guard r.type == .leave else { return false }
+            let s = cal.startOfDay(for: r.date)
+            let e = cal.startOfDay(for: r.endDate ?? r.date)
+            return d >= s && d <= e
+        }
+    }
+
+    private var meetingsToday: [SubordinateMeeting] {
+        guard let sub = sub else { return [] }
+        let cal = Calendar.current
+        return sub.meetings.filter { cal.isDate($0.date, inSameDayAs: selectedDate) }
+    }
+
+    private var tasksToday: [SubordinateTask] {
+        guard let sub = sub else { return [] }
+        let cal = Calendar.current
+        return sub.tasks.filter { t in
+            if let due = t.dueDate, cal.isDate(due, inSameDayAs: selectedDate) { return true }
+            return cal.isDate(t.date, inSameDayAs: selectedDate)
+        }
+    }
+}
+
+// MARK: - 班別時間設定
+
+private struct ShiftScheduleSettingsView: View {
+    @ObservedObject var scheduleStore: ShiftScheduleStore
+    @Environment(\.dismiss) private var dismiss
+
+    private let editable: [ShiftType] = [.nightShift, .eveningShift, .holidayDuty, .dayDuty]
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                ForEach(editable) { t in
+                    Section {
+                        timeRow("平日 開始", t, isHoliday: false, isStart: true)
+                        timeRow("平日 結束", t, isHoliday: false, isStart: false)
+                        timeRow("假日 開始", t, isHoliday: true, isStart: true)
+                        timeRow("假日 結束", t, isHoliday: true, isStart: false)
+                        // 休息時間（用於請假時數自動扣除）；大夜班預設無休息
+                        if t != .nightShift {
+                            restRow("休息 開始", t, isStart: true)
+                            restRow("休息 結束", t, isStart: false)
+                        }
+                    } header: {
+                        shiftSectionHeader(t)
+                    }
+                }
+                Section {
+                    Button("恢復預設時間", role: .destructive) { scheduleStore.schedule = .default }
+                } header: {
+                    resetSectionHeader
+                } footer: {
+                    Text("時差假與休息（班別）沒有上下班時間。休息時間會在請假時數計算時自動扣除（例如日值班 12:00–13:00、小夜班 17:30–18:30）。班別時間僅存於本機。")
+                }
+            }
+            .scrollContentBackground(.hidden)
+            .background(Color(.systemGroupedBackground))
+            .navigationTitle("班別時間設定")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .topBarLeading) { Button("完成") { dismiss() } } }
+        }
+    }
+
+    // 班別 Section 標題：Capsule 色條 + 班別圖示 + 名稱（對齊 RosterCellDetailSheet.sectionHeader）
+    private func shiftSectionHeader(_ t: ShiftType) -> some View {
+        HStack(spacing: 8) {
+            Capsule()
+                .fill(LinearGradient(
+                    colors: [rosterShiftColor(t), rosterShiftColor(t).opacity(0.55)],
+                    startPoint: .top, endPoint: .bottom))
+                .frame(width: 3, height: 16)
+            Image(systemName: shiftIcon(t))
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(rosterShiftColor(t))
+            Text(t.rawValue)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.primary)
+        }
+        .textCase(nil)
+    }
+
+    // 重置 Section 標題：紅色 Capsule 色條
+    private var resetSectionHeader: some View {
+        HStack(spacing: 8) {
+            Capsule()
+                .fill(LinearGradient(
+                    colors: [Color.red, Color.red.opacity(0.55)],
+                    startPoint: .top, endPoint: .bottom))
+                .frame(width: 3, height: 16)
+            Image(systemName: "arrow.counterclockwise")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.red)
+            Text("重置")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.primary)
+        }
+        .textCase(nil)
+    }
+
+    // 班別圖示對照（對齊各班別語意）
+    private func shiftIcon(_ t: ShiftType) -> String {
+        switch t {
+        case .nightShift:   return "moon.fill"
+        case .eveningShift: return "moon.stars"
+        case .holidayDuty:  return "sun.max.fill"
+        case .dayDuty:      return "sun.min.fill"
+        default:            return "clock"
+        }
+    }
+
+    // 時間列：假日標題以紅色呈現，與班表日格週末紅字視覺一致
+    private func timeRow(_ title: String, _ t: ShiftType, isHoliday: Bool, isStart: Bool) -> some View {
+        HStack {
+            Text(title)
+                .foregroundStyle(isHoliday ? Color.red.opacity(0.85) : Color.primary)
+            Spacer()
+            DatePicker("", selection: timeBinding(t, isHoliday: isHoliday, isStart: isStart),
+                       displayedComponents: .hourAndMinute)
+                .labelsHidden()
+        }
+    }
+
+    private func timeBinding(_ t: ShiftType, isHoliday: Bool, isStart: Bool) -> Binding<Date> {
+        Binding(
+            get: {
+                let r = scheduleStore.schedule.range(for: t, isHoliday: isHoliday)
+                    ?? ShiftTimeRange(startMinutes: 0, endMinutes: 0)
+                let mins = isStart ? r.startMinutes : r.endMinutes
+                return Calendar.current.date(bySettingHour: mins / 60, minute: mins % 60, second: 0, of: Date()) ?? Date()
+            },
+            set: { newDate in
+                let cal = Calendar.current
+                let mins = cal.component(.hour, from: newDate) * 60 + cal.component(.minute, from: newDate)
+                var r = scheduleStore.schedule.range(for: t, isHoliday: isHoliday)
+                    ?? ShiftTimeRange(startMinutes: 0, endMinutes: 0)
+                if isStart { r.startMinutes = mins } else { r.endMinutes = mins }
+                scheduleStore.schedule.set(r, for: t, isHoliday: isHoliday)
+            }
+        )
+    }
+
+    // 休息時間列（橘色標題），用於請假時數自動扣除
+    private func restRow(_ title: String, _ t: ShiftType, isStart: Bool) -> some View {
+        HStack {
+            Text(title).foregroundStyle(.orange)
+            Spacer()
+            DatePicker("", selection: restBinding(t, isStart: isStart), displayedComponents: .hourAndMinute)
+                .labelsHidden()
+        }
+    }
+
+    private func restBinding(_ t: ShiftType, isStart: Bool) -> Binding<Date> {
+        let fallback = ShiftTimeRange(startMinutes: 12 * 60, endMinutes: 13 * 60)
+        return Binding(
+            get: {
+                let r = scheduleStore.schedule.restRange(for: t) ?? fallback
+                let mins = isStart ? r.startMinutes : r.endMinutes
+                return Calendar.current.date(bySettingHour: mins / 60, minute: mins % 60, second: 0, of: Date()) ?? Date()
+            },
+            set: { newDate in
+                let cal = Calendar.current
+                let mins = cal.component(.hour, from: newDate) * 60 + cal.component(.minute, from: newDate)
+                var r = scheduleStore.schedule.restRange(for: t) ?? fallback
+                if isStart { r.startMinutes = mins } else { r.endMinutes = mins }
+                scheduleStore.schedule.setRest(r, for: t)
+            }
+        )
+    }
+}

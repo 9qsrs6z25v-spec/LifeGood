@@ -52,7 +52,7 @@ enum FinanceFeature: String, CaseIterable, Identifiable {
 }
 
 enum LifeFeature: String, CaseIterable, Identifiable {
-    case overview, resume, finance, career, family, realEstate, tax, foodMap
+    case overview, resume, finance, career, family, realEstate, tax, foodMap, travelMap, medicalMap
     var id: String { rawValue }
     var title: String {
         switch self {
@@ -64,6 +64,8 @@ enum LifeFeature: String, CaseIterable, Identifiable {
         case .realEstate: return "房地產"
         case .tax: return "稅務"
         case .foodMap: return "美食地圖"
+        case .travelMap: return "旅遊地圖"
+        case .medicalMap: return "醫療地圖"
         }
     }
     var icon: String {
@@ -76,12 +78,17 @@ enum LifeFeature: String, CaseIterable, Identifiable {
         case .realEstate: return "building.2.fill"
         case .tax: return "doc.text.fill"
         case .foodMap: return "fork.knife.circle.fill"
+        case .travelMap: return "airplane.circle.fill"
+        case .medicalMap: return "cross.case.circle.fill"
         }
     }
 }
 
 enum ManagementFeature: String, CaseIterable, Identifiable {
     case calendar, overview, subordinates, businessCard, organization, gradeTitle
+    /// 兼任職務管理中樞。列出所有已啟用專屬管理頁的兼任職務。
+    /// 一個 case 承載 N 筆——動態數量不可能用靜態列舉逐一表達。
+    case sideRole
     var id: String { rawValue }
     var title: String {
         switch self {
@@ -91,6 +98,7 @@ enum ManagementFeature: String, CaseIterable, Identifiable {
         case .businessCard: return "名片"
         case .organization: return "公司組織"
         case .gradeTitle: return "部門職等"
+        case .sideRole: return "兼任職務"
         }
     }
     var icon: String {
@@ -101,6 +109,7 @@ enum ManagementFeature: String, CaseIterable, Identifiable {
         case .businessCard: return "person.crop.rectangle.stack"
         case .organization: return "building.2.crop.circle"
         case .gradeTitle: return "list.number"
+        case .sideRole: return "person.badge.plus"
         }
     }
 }
@@ -124,6 +133,83 @@ enum FamilyMgmtFeature: String, CaseIterable, Identifiable {
     }
 }
 
+// MARK: - 美化紀錄（MainTabView）
+// [初版] UI 美化方向（既有）：
+//   • bottomTabBar：@Namespace + matchedGeometryEffect 讓選中膠囊在頁籤間平滑滑動
+//   • topSubFeatureBar：兩側漸層遮罩（allowsHitTesting false）暗示橫向可捲動
+//   • FAB：彈出選單彩色陰影 + 主 FAB 雙層 shadow 綠色光暈
+//   • Tab 圖示：active 時 scaleEffect 1.05 + symbolEffect(.bounce)
+// [2026-06] 本次美化方向：
+//   1. subFeaturePill 非選中狀態：補 Capsule overlay stroke（.primary.opacity(0.08), 0.6pt），
+//      深色模式下未選中膠囊具備細框線，與全 App 系統元件細邊框設計語言一致，
+//      對齊 FilterChip / ExpenseRow categoryAccent Capsule 規格。
+//   2. exportProgressBar：
+//      ① 軌道從 Rectangle → Capsule，圓頭視覺更精緻；
+//      ② 進度填充從純色 Color.green → LinearGradient（.green→teal）+ Capsule + 軟光暈 shadow，
+//         對齊 IncomeView summaryHeader 雙軌進度條設計語言；
+//      ③ 高度 2.5pt → 3.5pt，避免細到難以辨識。
+//   3. tabItemLabel 選中指示器：
+//      Capsule 底色從純色 Color.green.opacity(0.15) 升級為
+//      LinearGradient（topLeading 0.22 → bottomTrailing 0.10）+ overlay stroke（0.75pt），
+//      對齊 FinanceOverviewView.totalAssetsCard / SavingsInsuranceView 漸層卡片設計語言。
+// [2026-07] 本次美化方向：AI 語音記帳結果提示卡（aiToastView）
+//   4. 圖示從裸 SF Symbol 升級為 32pt 漸層圓徽章（LinearGradient 填色 + stroke 邊框），
+//      對齊 AdminConsoleView / SettingsView 圖示圓規格。
+//   5. 卡片補上 accent 色（成功綠／失敗橘）overlay RoundedRectangle stroke（0.75pt）
+//      與第二層柔化陰影，取代單一黑色陰影，成功/失敗主題更醒目。
+//   6. aiCommitExpense 成功 toast 金額顯示改用全 App 共用 ntdWanString 萬/億智慧量級，
+//      取代原本高額時會顯示成長串裸整數（如 NT$ 1200000）的寫法；
+//      純顯示調整，未變動實際存入的 Expense.amount 或其他記帳邏輯。
+// [2026-07 v2] 承接上方提示，本次美化 topSubFeatureBar／floatingActionButton：
+//   7. subFeaturePill 標題文字補上 lineLimit(1) + minimumScaleFactor(0.8)：
+//      「我的行事曆」「部屬總覽」等 4~5 字標題在大字級輔助模式下，於橫向捲動膠囊列中
+//      原本沒有縮放保護，容易被壓縮換行撐高整條 topSubFeatureBar；對齊全 App 文字自適應規格。
+//   8. careerGroupedPills／familyGroupedPills 分組背景：固定 opacity(0.10) 在深色模式下
+//      因 systemBackground 接近純黑而被吃成幾乎看不見的灰框，改為依 colorScheme 切換
+//      （淺色維持 0.10、深色提高到 0.20；邊框 0.25→0.38），對齊 MacaronDatePicker v2
+//      依 colorScheme 切換底色的既有做法，新增 colorScheme Environment。
+//   9. FloatingActionButtonView.fabStack：彈出選單「新增收入」「新增支出」與收合時的
+//      「新增收支」文字補上 lineLimit(1) + minimumScaleFactor(0.85)，避免大字級輔助模式
+//      下膠囊按鈕文字換行擠壓變形。
+//   純視覺調整，分頁切換、FAB 拖曳吸邊、AI 記帳等既有邏輯完全未變動。
+// [2026-07 v3] 承接上方提示，本次美化 bottomTabBar／aiMicOverlay：
+//   10. tabItemLabel 選中膠囊：深色模式下漸層與外框不透明度同步提高
+//       （0.22/0.10→0.32/0.18，外框 0.18→0.32），修復與 topSubFeatureBar 分組膠囊相同的
+//       深色背景吃色問題；標籤文字補上 lineLimit(1) + minimumScaleFactor(0.8) 防截斷保護。
+//   11. aiMicButton：新增「啟動中」過渡態視覺回饋——按下麥克風到語音辨識真正開始錄音
+//       之間（多半在等權限對話框），主按鈕原本毫無變化容易讓人以為沒按到，現在會先
+//       輕縮小＋淡化（scale 0.92 / opacity 0.75），純讀取既有 aiStartingRecording 狀態，
+//       未新增任何判斷邏輯。
+//   純視覺調整，麥克風錄音／AI 記帳送出、分頁切換等既有邏輯完全未變動。
+// [2026-07 v4] 承接上方待辦，本次美化 exportProgressBar／FloatingActionButtonView 主體造型：
+//  12. exportProgressBar：
+//      ① 標籤補上 16pt 漸層圖示圓錨點（arrow.up.doc.fill），對齊全 App「圖示圓 + 文字」
+//         標籤設計語言，取代原本裸文字沒有視覺錨點的寫法；
+//      ② 進度百分比補 contentTransition(.numericText())，數字跳動時平滑過場，
+//         對齊 pieChartBody 金額數字規格；
+//      ③ 軌道 Capsule 補 stroke(Color.green.opacity(0.22))，深色模式下與純色底更好區分；
+//      ④ 頂部補 0.5pt 分隔線（Color(.separator).opacity(0.18)），對齊 bottomTabBar 上緣
+//         分隔線規格，讓匯出條與下方導覽列有清楚的視覺交界。
+//  13. FloatingActionButtonView.fabStack：
+//      ① 主 FAB 與「新增收入」「新增支出」兩顆選單按鈕，底色從純色 Color.green／.red／
+//         .secondary 升級為 LinearGradient（topLeading→bottomTrailing），對齊全 App
+//         漸層按鈕/卡片設計語言，取代本檔案內僅存的三處純色扁平按鈕；
+//      ② 三顆按鈕補上頂部 glass shine 白色高光 overlay（.white.opacity(0.18)→.clear，
+//         clip 至 Capsule），與 chartHeroCard／英雄卡片 glass shine 規格一致；
+//      ③ 三顆按鈕補 Capsule().stroke(.white.opacity(0.22)) 細邊框，強化按鈕邊緣立體感。
+//   純視覺調整，拖曳吸邊、彈出選單開關、新增收入／支出導頁等既有邏輯完全未變動。
+// [2026-07 v5] 承接上方待辦，本次美化 subFeaturePill 選中膠囊本體：
+//  14. subFeaturePill 選中底色原本是扁平純色 tint（.background(isSelected ? tint : …)），
+//      是 topSubFeatureBar 家族中唯一還沒升級的一環——careerGroupedPills／
+//      familyGroupedPills 分組外框（v2）與正上方 tabItemLabel 選中指示器（既有）
+//      都已是漸層 + 深色模式加強不透明度規格，子功能列本身的膠囊反而還停在扁平色。
+//      改為 LinearGradient（tint → tint.opacity(0.78)，topLeading→bottomTrailing）
+//      + 頂部玻璃光澤覆層（.white.opacity(0.20)→.clear, top→center），
+//      overlay 細邊框同步從固定 .primary.opacity(0.08) 改為選中時 .white.opacity(0.24)、
+//      未選中維持原樣，對齊 FAB 按鈕（v25.09）「漸層 + glass shine + 白色細邊框」三件式規格。
+//      純視覺調整，isSelected 判斷、分頁/子功能切換等既有邏輯完全未變動。
+//   （下次美化本檔案時，可轉往其他仍留有待辦的畫面）
+
 // MARK: - 主畫面
 
 struct MainTabView: View {
@@ -136,12 +222,20 @@ struct MainTabView: View {
     /// 家庭子功能；空字串代表選的是「家庭」本身
     @AppStorage("family_mgmt_feature") private var familyMgmtFeatureRaw: String = ""
     @State private var isSettingsActive: Bool = false
+    // UI美化：matchedGeometryEffect 讓底部 Tab Bar 選中指示器在頁籤間滑動而非消失/出現
+    @Namespace private var tabBarNamespace
+    // 佔位用（.hidden()）bottomTabBar 副本專用的獨立 namespace：避免與下方真正顯示的
+    // bottomTabBar 共用 tabBarNamespace，導致同一個 matchedGeometryEffect(id:) 在同一個
+    // namespace 裡同時有兩個 source view（Apple 文件：結果為 undefined），
+    // 可能造成分頁切換時膠囊指示器位置偶發跳動。
+    @Namespace private var hiddenTabBarNamespace
 
     @EnvironmentObject var lifeStore: LifeStore
     @EnvironmentObject var financeStore: FinanceStore
     @EnvironmentObject var expenseStore: ExpenseStore
     @EnvironmentObject var subscription: SubscriptionManager
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.colorScheme) private var colorScheme
     @State private var showPaywall: Bool = false
 
     private var currentMode: AppMode {
@@ -187,13 +281,17 @@ struct MainTabView: View {
     }
 
     private var isCurrentlyManagerial: Bool {
-        lifeStore.milestones
-            .filter { $0.category == .career }
-            .sorted { $0.date > $1.date }
-            .first(where: {
-                let sub = $0.careerSubCategory
-                return sub == .join || sub == .promote || sub == .transfer || sub == .demote
-            })?.isManagerial == true
+        let relevant = lifeStore.milestones.filter {
+            $0.category == .career &&
+            ($0.careerSubCategory == .join || $0.careerSubCategory == .promote ||
+             $0.careerSubCategory == .transfer || $0.careerSubCategory == .demote)
+        }
+        return relevant.max(by: { $0.date < $1.date })?.isManagerial == true
+    }
+
+    /// 有沒有任何已啟用專屬管理頁的兼任職務
+    private var hasAnySideRoleWorkspace: Bool {
+        lifeStore.milestones.contains { $0.hasSideRoleWorkspace }
     }
 
     private var familyMgmtFeature: FamilyMgmtFeature? {
@@ -216,14 +314,31 @@ struct MainTabView: View {
         }
     }
 
-    /// 職涯子功能列在「職涯」被選取且使用者目前為主管時展開
+    /// 職涯子功能列在「職涯」被選取，且使用者是主管**或**有啟用中的兼任職務管理頁時展開。
+    ///
+    /// ⚠️ 原本只看 isCurrentlyManagerial（最近一筆本職異動有沒有勾管理職）。
+    ///    但兼任職務跟管理職是兩回事——「尾牙負責人」多半不是主管，
+    ///    只看管理職會讓這些人永遠看不到自己剛開好的管理頁，功能等於不存在。
     private var shouldExpandManagement: Bool {
-        currentMode == .life && lifeFeature == .career && isCurrentlyManagerial && !isSettingsActive
+        currentMode == .life && lifeFeature == .career
+            && (isCurrentlyManagerial || hasAnySideRoleWorkspace) && !isSettingsActive
     }
 
     /// 家庭子功能列在「家庭」被選取且有家庭成員時展開
     private var shouldExpandFamily: Bool {
         currentMode == .life && lifeFeature == .family && !lifeStore.familyMembers.isEmpty && !isSettingsActive
+    }
+
+    /// 職涯功能列實際要顯示哪幾顆。六個既有管理功能維持「限主管」，
+    /// 兼任職務則只看有沒有啟用中的管理頁——兩者互不相干。
+    private var availableManagementFeatures: [ManagementFeature] {
+        var list: [ManagementFeature] = []
+        if isCurrentlyManagerial {
+            list.append(contentsOf: [.calendar, .overview, .subordinates,
+                                     .businessCard, .organization, .gradeTitle])
+        }
+        if hasAnySideRoleWorkspace { list.append(.sideRole) }
+        return list
     }
 
     private var availableFamilyFeatures: [FamilyMgmtFeature] {
@@ -234,23 +349,33 @@ struct MainTabView: View {
         return list
     }
 
-    @State private var showQuickAdd = false
     @State private var showAddIncome = false
     @State private var showAddExpense = false
-    @State private var fabOffset: CGSize = .zero
-    @State private var fabDragOffset: CGSize = .zero
 
     // MARK: - 語音 AI 記帳
     @StateObject private var aiSettings = AISettingsStore.shared
     @StateObject private var speechRecognizer = SpeechRecognizer()
     @State private var aiToast: AIToastInfo?
+    @State private var toastDismissTask: Task<Void, Never>?
     @State private var aiBusy = false
     /// 同步守門旗標：DragGesture.onChanged 在按住期間會反覆觸發，
     /// 但 aiStartRecording 是 async，從觸發到 speechRecognizer.isRecording=true 之間有空窗，
     /// 若沒這個旗標會多次平行 startRecording → 重設 transcript / 重裝 audio tap → 畫面閃爍
     @State private var aiStartingRecording = false
+    /// 快速點放守衛：requestAccess() 尚未回覆權限、startRecording() 還沒真正把
+    /// isRecording 設成 true 前，使用者就已放開手指——DragGesture.onEnded 此時讀到
+    /// isRecording == false 會直接略過、不會呼叫 stopRecording()，導致麥克風在放開手指後
+    /// 仍悄悄持續錄音（旗標卡在 aiStartingRecording，下次按住也會被 onChanged 的
+    /// !isRecording 守衛擋掉，只能靠背景/前景切換的 stopRecording 才能解除）。
+    /// 這個旗標在 onEnded 提前觸發時記錄「使用者已放開」，等 aiStartRecording 真正啟動
+    /// 錄音後立刻補一次 stopRecording／收尾，不需等待下一次手勢。
+    @State private var aiStopRequestedBeforeStart = false
     /// 麥克風進場動畫旗標：每次切到變動支出頁就從左下角彈一次
     @State private var micEntered = false
+    /// 麥克風進場動畫延遲任務：50ms 內快速切出又切回分頁會疊出多個 asyncAfter，
+    /// 較舊的一個可能在較新的已把 micEntered 設回 true 之後才觸發，導致動畫倒退閃爍；
+    /// 改用可取消的 Task，切換時先取消前一個再排新的。
+    @State private var micEnterTask: Task<Void, Never>?
 
     /// 是否在「收支 → 變動支出」分頁
     private var isOnVariableExpense: Bool {
@@ -291,11 +416,24 @@ struct MainTabView: View {
                 }
                 contentView
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-                // 佔位用：與底部 tab bar 同高，保證內容區不會被 tab bar 蓋住
-                bottomTabBar
+                    // 全域滑動手勢：邊緣滑動切大功能、快速甩動切子功能（詳見 handleSwipe）
+                    .simultaneousGesture(
+                        DragGesture(minimumDistance: 30, coordinateSpace: .global)
+                            .onEnded { handleSwipe($0) }
+                    )
+                // 佔位用：與底部 tab bar 同高，保證內容區不會被 tab bar 蓋住。
+                // 用獨立的 hiddenTabBarNamespace，避免跟下方真正顯示的副本共用同一個
+                // matchedGeometryEffect namespace（見上方 hiddenTabBarNamespace 宣告註解）。
+                bottomTabBar(namespace: hiddenTabBarNamespace)
                     .hidden()
             }
             .tint(.green)
+            // 每天開 App 自動背景收集三大法人買賣超（同一天只跑一輪，內部節流；
+            // 逐日累積供股票頁「法人連續買超」篩選與個股買賣超柱狀圖使用）。
+            // collectIfNeeded 為 nonisolated async，實際執行在背景執行緒不佔主線。
+            .task {
+                await InstitutionalHistory.collectIfNeeded()
+            }
             .onChange(of: appMode) { _, _ in
                 isSettingsActive = false
             }
@@ -303,6 +441,14 @@ struct MainTabView: View {
                 // 切到別的人生子功能時，清除非當前父功能的 sub 選擇
                 if newValue != LifeFeature.career.rawValue { managementFeatureRaw = "" }
                 if newValue != LifeFeature.family.rawValue { familyMgmtFeatureRaw = "" }
+            }
+            // 目前選中的管理功能若已不在可用清單裡就清空路由。
+            // 兩種情況都會踩到：① 使用者關掉最後一個兼任職務的管理頁開關；
+            // ② 使用者把最近一筆本職異動的「管理職」取消、或新增一筆離職。
+            // 不清的話膠囊列上沒有任何一顆反白，內容區卻照樣渲染那一頁，
+            // 變成一個沒有入口也退不出去的畫面。
+            .onChange(of: availableManagementFeatures) { _, list in
+                if let m = managementFeature, !list.contains(m) { managementFeatureRaw = "" }
             }
 
             floatingActionButton
@@ -314,7 +460,13 @@ struct MainTabView: View {
             // 真正顯示用的 tab bar：壓在麥克風上層，誤觸時也能看清楚分頁
             VStack(spacing: 0) {
                 Spacer()
-                bottomTabBar
+                // [效能] 改用獨立子 View 自行 @ObservedObject 觀察 ExportProgressModel.shared：
+                // 原本 MainTabView 直接持有 @StateObject exportProgress，匯出備份時 fraction
+                // 每個檔案都會更新一次（大量照片可達數百次），任何一次 @Published 變化都會
+                // 讓整個 MainTabView.body（分頁切換、全域手勢等）重新求值一次，不只是這條細
+                // 進度條；改由子 View 自己訂閱，變化只會讓這一小塊重繪。
+                ExportProgressBarView()
+                bottomTabBar(namespace: tabBarNamespace)
             }
 
             if let toast = aiToast {
@@ -337,9 +489,12 @@ struct MainTabView: View {
         }
         .onChange(of: isOnVariableExpense, initial: true) { _, isOn in
             // 每次切到變動支出頁，從左下角彈一次皮球進場
+            micEnterTask?.cancel()
             if isOn {
                 micEntered = false
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                micEnterTask = Task {
+                    try? await Task.sleep(nanoseconds: 50_000_000)
+                    guard !Task.isCancelled else { return }
                     withAnimation(.spring(response: 0.55, dampingFraction: 0.5)) {
                         micEntered = true
                     }
@@ -385,6 +540,9 @@ struct MainTabView: View {
 
     private var aiMicButton: some View {
         let listening = speechRecognizer.isRecording
+        // 美化：「按下→實際開始錄音」中間（多半在等權限對話框）原本毫無視覺回饋，
+        // 補上淡出＋縮小的過渡態，讓使用者知道按壓已被接收、正在啟動
+        let starting = aiStartingRecording && !listening
         return ZStack {
             // 外圍呼吸光暈
             Circle()
@@ -424,13 +582,15 @@ struct MainTabView: View {
                 // 紫色光暈：強調主題色、錄音時更亮
                 .shadow(color: Color.purple.opacity(listening ? 0.8 : 0.5),
                         radius: listening ? 18 : 14, x: 0, y: 4)
-                .scaleEffect(listening ? 1.08 : 1.0)
+                .scaleEffect(listening ? 1.08 : (starting ? 0.92 : 1.0))
+                .opacity(starting ? 0.75 : 1.0)
                 .animation(
                     listening
                     ? .easeInOut(duration: 0.7).repeatForever(autoreverses: true)
                     : .easeInOut(duration: 0.2),
                     value: listening
                 )
+                .animation(.easeInOut(duration: 0.2), value: starting)
             Group {
                 if aiBusy {
                     ProgressView().tint(.white)
@@ -458,13 +618,19 @@ struct MainTabView: View {
                           !aiStartingRecording
                     else { return }
                     aiStartingRecording = true
+                    aiStopRequestedBeforeStart = false
                     Task {
                         await aiStartRecording()
                         await MainActor.run { aiStartingRecording = false }
                     }
                 }
                 .onEnded { _ in
-                    guard speechRecognizer.isRecording else { return }
+                    guard speechRecognizer.isRecording else {
+                        // 錄音尚未真正啟動（仍在等權限／等 startRecording）就放開手指，
+                        // 記下來讓 aiStartRecording 啟動成功後立刻收尾，不留下悄悄持續的錄音。
+                        if aiStartingRecording { aiStopRequestedBeforeStart = true }
+                        return
+                    }
                     Task { await aiFinishRecording() }
                 }
         )
@@ -479,6 +645,11 @@ struct MainTabView: View {
         }
         do {
             try speechRecognizer.startRecording()
+            // 手指在權限詢問／啟動期間就已放開 → 立刻收尾，不留下悄悄持續的錄音。
+            if aiStopRequestedBeforeStart {
+                aiStopRequestedBeforeStart = false
+                await aiFinishRecording()
+            }
         } catch {
             aiShowToast("錄音失敗", detail: error.localizedDescription, isError: true)
         }
@@ -519,13 +690,17 @@ struct MainTabView: View {
                 availableBankAccounts: bankDisplayNames.map(\.display),
                 availableRealEstates: realEstateDisplayNames.map(\.display)
             )
-            aiBusy = false
+            // aiBusy 要保護到 aiCommitExpense（含其內部的 Apple Maps 地點查詢與
+            // expenseStore/lifeStore/financeStore 寫入）完全結束為止，否則使用者能在
+            // 上一筆記帳仍在背景寫入時就按住麥克風開始下一筆，兩個 commit 交錯執行，
+            // toast 顯示順序錯亂，畫面卻顯示「未在忙碌」造成誤導。
             try await aiCommitExpense(
                 parsed: parsed,
                 cardDisplayNames: cardDisplayNames,
                 bankDisplayNames: bankDisplayNames,
                 realEstateDisplayNames: realEstateDisplayNames
             )
+            aiBusy = false
         } catch {
             aiBusy = false
             aiShowToast("AI 解析失敗", detail: error.localizedDescription, isError: true)
@@ -655,15 +830,23 @@ struct MainTabView: View {
             note: parsed.note ?? "",
             diningMember: resolvedDiningMember,
             linkedBankMilestoneId: linkedBankId,
-            linkedBankCurrency: linkedBankId == nil ? nil : "NT$",
+            linkedBankCurrency: linkedBankId.map { aiBankCurrency(for: $0) },
             linkedCreditCardMilestoneId: linkedCardId,
             placeAddress: placeAddress,
             placeLatitude: placeLat,
             placeLongitude: placeLon
         )
         expenseStore.add(exp)
+        // AI 語音記帳原本只寫入 Expense 就結束，沒有比照 AddExpenseView.save() 呼叫
+        // syncBankWithdrawal／syncRealEstateVariableExpense，導致銀行帳戶餘額、房地產支出
+        // 章節帳實不符（AI 標了扣款帳戶／房地產，但對應清單與總額完全看不到這筆錢）；
+        // 這裡補上對等的同步邏輯，供 AI 記帳流程使用。
+        aiSyncBankWithdrawal(for: exp)
+        aiSyncRealEstateExpense(for: exp)
         // 成功 toast
-        var detailParts: [String] = ["\(finalCategory.rawValue)・NT$ \(Int(amount))"]
+        // [美化] 金額改用全 App 共用的萬/億智慧量級（ntdWanString），對齊其餘頁面金額顯示規格，
+        // 取代原本高額時會顯示成長串裸整數（如 NT$ 1200000）的寫法；純顯示調整，未變動實際存入的 exp.amount。
+        var detailParts: [String] = ["\(finalCategory.rawValue)・\(amount.ntdWanString)"]
         if let m = resolvedDiningMember, !m.isEmpty { detailParts.append(m) }
         if let acc = matchedAccountDisplay { detailParts.append(acc) }
         if let re = matchedRealEstateDisplay {
@@ -672,6 +855,63 @@ struct MainTabView: View {
         }
         if placeLat != nil { detailParts.append("已標 美食地圖") }
         aiShowToast("已記一筆：\(title)", detail: detailParts.joined(separator: "・"), isError: false)
+    }
+
+    /// AI 記帳扣款帳戶預設幣別：沿用該銀行帳戶既有存款紀錄的幣別（比照 AddExpenseView.bankCurrencies(for:)），
+    /// 而非寫死 "NT$"，避免外幣帳戶被記到錯誤幣別的桶子。
+    private func aiBankCurrency(for bankId: UUID) -> String {
+        guard let ms = lifeStore.milestones.first(where: { $0.id == bankId }) else { return "NT$" }
+        let code = (ms.bankDeposits ?? []).first(where: { !$0.isWithdrawal })?.currencyCode
+        return code ?? "NT$"
+    }
+
+    /// AI 記帳同步：寫入銀行扣款紀錄，比照 AddExpenseView.syncBankWithdrawal(for:previous:)（新記錄、無需移除舊連結）。
+    @MainActor
+    private func aiSyncBankWithdrawal(for expense: Expense) {
+        guard expense.linkedCreditCardMilestoneId == nil,
+              let bankId = expense.linkedBankMilestoneId,
+              var ms = lifeStore.milestones.first(where: { $0.id == bankId }) else { return }
+        var list = ms.bankDeposits ?? []
+        list.append(BankDeposit(
+            id: UUID(), date: expense.date, amount: expense.amount,
+            currencyCode: expense.linkedBankCurrency ?? "NT$",
+            isWithdrawal: true, linkedExpenseId: expense.id
+        ))
+        ms.bankDeposits = list
+        lifeStore.update(ms)
+    }
+
+    /// AI 記帳同步：寫入房地產已支出／水電瓦斯／變動支出章節，比照 AddExpenseView.syncRealEstateVariableExpense(realEstateId:expenseId:amount:)。
+    @MainActor
+    private func aiSyncRealEstateExpense(for expense: Expense) {
+        guard let reId = expense.linkedRealEstateId,
+              var re = financeStore.realEstates.first(where: { $0.id == reId }) else { return }
+        let category = expense.realEstateExpenseCategory ?? .other
+        switch category {
+        case .housePayment:
+            re.paidItems.append(RealEstatePaidItem(
+                id: UUID(), title: expense.title, amount: expense.amount,
+                date: expense.date, linkedExpenseId: expense.id
+            ))
+        case .utility:
+            let lower = expense.title.lowercased()
+            let inferredType: UtilityType = {
+                if lower.contains("水") || lower.contains("water") { return .water }
+                if lower.contains("電") || lower.contains("electric") { return .electricity }
+                if lower.contains("瓦斯") || lower.contains("gas") { return .gas }
+                return .electricity
+            }()
+            re.utilityPayments.append(UtilityPayment(
+                type: inferredType, date: expense.date, amount: expense.amount,
+                note: expense.note, linkedExpenseId: expense.id
+            ))
+        default:
+            re.variableExpenses.append(RealEstateVariableExpense(
+                id: UUID(), category: category, name: expense.note,
+                amount: expense.amount, date: expense.date, linkedExpenseId: expense.id
+            ))
+        }
+        financeStore.update(re)
     }
 
     /// 取得本人姓名（中文優先，否則英文；都空 → 回空字串）
@@ -684,17 +924,20 @@ struct MainTabView: View {
     /// 若 AI 抽出的 diningMember 沒包含本人，幫忙補進去（最前面）
     private func aiAppendSpeakerIfNeeded(_ raw: String?) -> String? {
         let speaker = aiSpeakerName()
+        // guard 失敗時以 trimmed 後的值判斷：原始 raw 可能是純空白字串，
+        // 直接回傳未 trim 的值會讓 diningMember 存到無效空白內容。
+        let trimmedRaw = raw?.trimmingCharacters(in: .whitespaces)
         guard !speaker.isEmpty,
-              let raw = raw?.trimmingCharacters(in: .whitespaces),
-              !raw.isEmpty
-        else { return raw?.isEmpty == true ? nil : raw }
+              let trimmedRaw = trimmedRaw,
+              !trimmedRaw.isEmpty
+        else { return trimmedRaw?.isEmpty == true ? nil : trimmedRaw }
         let separators = CharacterSet(charactersIn: "、,，;； ")
-        let existing = raw
+        let existing = trimmedRaw
             .components(separatedBy: separators)
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty }
-        if existing.contains(speaker) { return raw }
-        return "\(speaker)、\(raw)"
+        if existing.contains(speaker) { return trimmedRaw }
+        return "\(speaker)、\(trimmedRaw)"
     }
 
     /// 用 MKLocalSearch 查 AI 給出的店家名稱，帶當前位置偏向
@@ -707,7 +950,8 @@ struct MainTabView: View {
         request.resultTypes = .pointOfInterest
         let search = MKLocalSearch(request: request)
         return await withCheckedContinuation { cont in
-            search.start { resp, _ in
+            search.start { [search] resp, _ in
+                _ = search  // 防止 ARC 在回調完成前提前釋放 search，導致 continuation 永不 resume
                 cont.resume(returning: resp?.mapItems.first)
             }
         }
@@ -718,8 +962,11 @@ struct MainTabView: View {
         withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
             aiToast = AIToastInfo(title: title, detail: detail, isError: isError)
         }
-        Task {
+        // 取消前一個倒數計時，避免連續呼叫時多個 Task 同時競爭清除 toast
+        toastDismissTask?.cancel()
+        toastDismissTask = Task {
             try? await Task.sleep(nanoseconds: 3_500_000_000)
+            guard !Task.isCancelled else { return }
             await MainActor.run {
                 withAnimation(.easeInOut(duration: 0.3)) {
                     aiToast = nil
@@ -728,12 +975,27 @@ struct MainTabView: View {
         }
     }
 
+    // [美化] 圖示改為漸層圓徽章（對齊全 App icon 圓規格：LinearGradient 填色 + stroke 邊框），
+    // 取代原本裸 SF Symbol；卡片補 accent 色 overlay 邊框（0.75pt）與雙層陰影，
+    // 成功/失敗兩色主題更醒目，對齊 AdminConsoleView 錯誤橫幅、OverviewView 卡片邊框設計語言。
     private func aiToastView(_ toast: AIToastInfo) -> some View {
-        VStack {
+        let accent: Color = toast.isError ? .orange : .green
+        return VStack {
             HStack(alignment: .top, spacing: 10) {
-                Image(systemName: toast.isError ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
-                    .foregroundStyle(toast.isError ? Color.orange : Color.green)
-                    .font(.title3)
+                ZStack {
+                    Circle()
+                        .fill(LinearGradient(
+                            colors: [accent.opacity(0.24), accent.opacity(0.10)],
+                            startPoint: .topLeading, endPoint: .bottomTrailing
+                        ))
+                        .frame(width: 32, height: 32)
+                    Circle()
+                        .stroke(accent.opacity(0.30), lineWidth: 1)
+                        .frame(width: 32, height: 32)
+                    Image(systemName: toast.isError ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
+                        .foregroundStyle(accent)
+                        .font(.system(size: 15, weight: .semibold))
+                }
                 VStack(alignment: .leading, spacing: 2) {
                     Text(toast.title).font(.subheadline.weight(.semibold))
                     Text(toast.detail).font(.caption2).foregroundStyle(.secondary).lineLimit(3)
@@ -742,7 +1004,12 @@ struct MainTabView: View {
             }
             .padding(.horizontal, 14).padding(.vertical, 10)
             .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
-            .shadow(color: .black.opacity(0.15), radius: 10, y: 4)
+            .overlay(
+                RoundedRectangle(cornerRadius: 14)
+                    .stroke(accent.opacity(0.22), lineWidth: 0.75)
+            )
+            .shadow(color: accent.opacity(0.18), radius: 10, y: 4)
+            .shadow(color: .black.opacity(0.10), radius: 4, y: 2)
             .padding(.horizontal, 16)
             .padding(.top, 12)
             .transition(.move(edge: .top).combined(with: .opacity))
@@ -753,6 +1020,7 @@ struct MainTabView: View {
 
     // MARK: - 頂部子功能列
 
+    // UI美化：兩側漸層遮罩暗示橫向可捲動；allowsHitTesting false 確保捲動手勢不被阻擋
     private var topSubFeatureBar: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
@@ -800,6 +1068,23 @@ struct MainTabView: View {
             .padding(.vertical, 8)
         }
         .background(Color(.systemBackground))
+        // 左右兩側漸層遮罩，提示橫向可捲動
+        .overlay(
+            HStack(spacing: 0) {
+                LinearGradient(
+                    colors: [Color(.systemBackground), Color(.systemBackground).opacity(0)],
+                    startPoint: .leading, endPoint: .trailing
+                )
+                .frame(width: 14)
+                Spacer()
+                LinearGradient(
+                    colors: [Color(.systemBackground).opacity(0), Color(.systemBackground)],
+                    startPoint: .leading, endPoint: .trailing
+                )
+                .frame(width: 14)
+            }
+            .allowsHitTesting(false)
+        )
         .overlay(
             Rectangle()
                 .fill(Color(.separator).opacity(0.25))
@@ -825,7 +1110,7 @@ struct MainTabView: View {
                 lifeFeatureRaw = LifeFeature.career.rawValue
                 managementFeatureRaw = ""
             }
-            ForEach(ManagementFeature.allCases) { m in
+            ForEach(availableManagementFeatures) { m in
                 subFeaturePill(m.title, icon: m.icon,
                                isSelected: managementFeatureRaw == m.rawValue,
                                tint: .orange,
@@ -836,10 +1121,12 @@ struct MainTabView: View {
             }
         }
         .padding(.horizontal, 6).padding(.vertical, 4)
-        .background(Color.orange.opacity(0.10))
+        // 深色模式下 systemBackground 接近純黑，固定 0.10 底色會被吃成幾乎看不見的灰框，
+        // 比照 MacaronDatePicker v2 依 colorScheme 提高底色不透明度的做法
+        .background(Color.orange.opacity(colorScheme == .dark ? 0.20 : 0.10))
         .overlay(
             RoundedRectangle(cornerRadius: 22)
-                .stroke(Color.orange.opacity(0.25), lineWidth: 1)
+                .stroke(Color.orange.opacity(colorScheme == .dark ? 0.38 : 0.25), lineWidth: 1)
         )
         .clipShape(RoundedRectangle(cornerRadius: 22))
     }
@@ -864,10 +1151,11 @@ struct MainTabView: View {
             }
         }
         .padding(.horizontal, 6).padding(.vertical, 4)
-        .background(Color.pink.opacity(0.10))
+        // 深色模式下同步提高底色不透明度，理由同 careerGroupedPills
+        .background(Color.pink.opacity(colorScheme == .dark ? 0.20 : 0.10))
         .overlay(
             RoundedRectangle(cornerRadius: 22)
-                .stroke(Color.pink.opacity(0.25), lineWidth: 1)
+                .stroke(Color.pink.opacity(colorScheme == .dark ? 0.38 : 0.25), lineWidth: 1)
         )
         .clipShape(RoundedRectangle(cornerRadius: 22))
     }
@@ -879,15 +1167,34 @@ struct MainTabView: View {
         }) {
             HStack(spacing: 4) {
                 Image(systemName: icon).font(.caption2)
-                Text(title).font(.caption.weight(isSelected ? .semibold : .medium))
+                Text(title)
+                    .font(.caption.weight(isSelected ? .semibold : .medium))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
                 if locked {
                     Image(systemName: "lock.fill").font(.system(size: 9))
                 }
             }
             .padding(.horizontal, 12).padding(.vertical, 7)
-            .background(isSelected ? tint : Color(.tertiarySystemFill))
+            // [v5] 選中底色：純色 tint → 漸層 + 頂部玻璃光澤，對齊全 App 選中膠囊
+            // （tabItemLabel 選中指示器／FAB 按鈕）漸層規格，取代本檔案子功能列
+            // 膠囊本身仍是唯一還在用扁平純色的地方。
+            .background(
+                ZStack {
+                    if isSelected {
+                        LinearGradient(colors: [tint, tint.opacity(0.78)], startPoint: .topLeading, endPoint: .bottomTrailing)
+                        LinearGradient(colors: [.white.opacity(0.20), .clear], startPoint: .top, endPoint: .center)
+                    } else {
+                        Color(.tertiarySystemFill)
+                    }
+                }
+            )
             .foregroundStyle(isSelected ? .white : .primary)
             .clipShape(Capsule())
+            .overlay(
+                Capsule()
+                    .stroke(isSelected ? .white.opacity(0.24) : .primary.opacity(0.08), lineWidth: isSelected ? 0.75 : 0.6)
+            )
             .shadow(
                 color: isSelected ? tint.opacity(0.38) : .clear,
                 radius: 6, x: 0, y: 3
@@ -898,27 +1205,91 @@ struct MainTabView: View {
         .animation(.spring(response: 0.26, dampingFraction: 0.72), value: isSelected)
     }
 
+    // MARK: - 匯出進度條（細，壓在底部導覽上方，不影響介面）
+
+    /// 獨立持有 @ObservedObject，避免 fraction 高頻更新牽動整個 MainTabView.body 重繪
+    /// （見上方呼叫處註解）。isExporting 為 false 時不畫任何東西，語意與原本
+    /// `if exportProgress.isExporting { exportProgressBar }` 完全相同。
+    private struct ExportProgressBarView: View {
+        @ObservedObject private var exportProgress = ExportProgressModel.shared
+
+        var body: some View {
+            if exportProgress.isExporting {
+                VStack(spacing: 1) {
+                    HStack(spacing: 5) {
+                        Spacer()
+                        // [v4] 16pt 漸層圖示圓錨點，取代裸文字，對齊全 App「圖示圓 + 文字」標籤語言
+                        ZStack {
+                            Circle()
+                                .fill(LinearGradient(
+                                    colors: [Color(red: 0.16, green: 0.74, blue: 0.50), Color(red: 0.07, green: 0.50, blue: 0.38)],
+                                    startPoint: .topLeading, endPoint: .bottomTrailing
+                                ))
+                            Image(systemName: "arrow.up.doc.fill")
+                                .font(.system(size: 7.5, weight: .bold))
+                                .foregroundStyle(.white)
+                        }
+                        .frame(width: 14, height: 14)
+                        Text("匯出 \(Int(exportProgress.fraction * 100))%")
+                            .font(.system(size: 9, weight: .medium))
+                            .foregroundStyle(.secondary)
+                            .contentTransition(.numericText())
+                            .animation(.easeInOut(duration: 0.2), value: exportProgress.fraction)
+                            .padding(.trailing, 14)
+                    }
+                    GeometryReader { geo in
+                        ZStack(alignment: .leading) {
+                            Capsule()
+                                .fill(Color.green.opacity(0.14))
+                                .overlay(Capsule().stroke(Color.green.opacity(0.22), lineWidth: 0.6))
+                            Capsule()
+                                .fill(LinearGradient(
+                                    colors: [Color(red: 0.16, green: 0.74, blue: 0.50), Color(red: 0.07, green: 0.50, blue: 0.38)],
+                                    startPoint: .leading, endPoint: .trailing
+                                ))
+                                .frame(width: max(0, geo.size.width * exportProgress.fraction))
+                                .shadow(color: Color.green.opacity(0.40), radius: 3, x: 0, y: 0)
+                                .animation(.linear(duration: 0.2), value: exportProgress.fraction)
+                        }
+                    }
+                    .frame(height: 3.5)
+                }
+                .padding(.bottom, 1)
+                .background(.ultraThinMaterial)
+                // [v4] 頂部 0.5pt 分隔線，對齊 bottomTabBar 上緣分隔線規格，與下方導覽列劃出清楚交界
+                .overlay(
+                    Rectangle()
+                        .fill(Color(.separator).opacity(0.18))
+                        .frame(height: 0.5),
+                    alignment: .top
+                )
+                .transition(.opacity)
+            }
+        }
+    }
+
     // MARK: - 底部四按鈕
 
-    private var bottomTabBar: some View {
+    // UI美化：傳入 tabBarNamespace 給各頁籤，讓 matchedGeometryEffect 可跨按鈕滑動
+    private func bottomTabBar(namespace: Namespace.ID) -> some View {
         HStack(spacing: 0) {
-            tabButton(mode: .expense, icon: "dollarsign.circle.fill", label: "收支")
-            tabButton(mode: .finance, icon: "chart.pie.fill", label: "理財")
-            tabButton(mode: .life, icon: "person.fill", label: "人生")
+            tabButton(mode: .expense, icon: "dollarsign.circle.fill", label: "收支", namespace: namespace)
+            tabButton(mode: .finance, icon: "chart.pie.fill", label: "理財", namespace: namespace)
+            tabButton(mode: .life, icon: "person.fill", label: "人生", namespace: namespace)
             Button {
                 withAnimation(.spring(response: 0.28, dampingFraction: 0.70)) {
                     isSettingsActive = true
                 }
             } label: {
-                tabItemLabel(icon: "gearshape.fill", label: "設定", isActive: isSettingsActive)
+                tabItemLabel(icon: "gearshape.fill", label: "設定", isActive: isSettingsActive, namespace: namespace)
             }
             .buttonStyle(.plain)
         }
-        .padding(.top, 6)
+        .padding(.top, 8)
         .padding(.bottom, 6)
         .background(
             Color(.systemBackground)
-                .shadow(color: .black.opacity(0.08), radius: 20, y: -6)
+                .shadow(color: .black.opacity(0.10), radius: 24, y: -8)
                 .ignoresSafeArea(edges: .bottom)
         )
         .overlay(
@@ -929,155 +1300,151 @@ struct MainTabView: View {
         )
     }
 
-    private func tabButton(mode: AppMode, icon: String, label: String) -> some View {
+    private func tabButton(mode: AppMode, icon: String, label: String, namespace: Namespace.ID) -> some View {
         Button {
             withAnimation(.spring(response: 0.28, dampingFraction: 0.70)) {
                 appMode = mode.rawValue
                 isSettingsActive = false
             }
         } label: {
-            tabItemLabel(icon: icon, label: label, isActive: currentMode == mode && !isSettingsActive)
+            tabItemLabel(icon: icon, label: label, isActive: currentMode == mode && !isSettingsActive, namespace: namespace)
         }
         .buttonStyle(.plain)
     }
 
-    private func tabItemLabel(icon: String, label: String, isActive: Bool) -> some View {
-        VStack(spacing: 4) {
+    // UI美化：matchedGeometryEffect(id:"activeTabIndicator") 讓選中膠囊背景在頁籤間平滑位移；
+    //         active 圖示輕放大 1.05 增強視覺回饋；字級從 10 → 10.5 改善小字可讀性
+    private func tabItemLabel(icon: String, label: String, isActive: Bool, namespace: Namespace.ID) -> some View {
+        VStack(spacing: 3) {
             ZStack {
-                // 選中時的膠囊高亮背景，彈跳進場
-                Capsule()
-                    .fill(Color.green.opacity(isActive ? 0.14 : 0))
-                    .frame(width: 54, height: 30)
-                    .scaleEffect(isActive ? 1.0 : 0.6)
-                    .animation(.spring(response: 0.34, dampingFraction: 0.64), value: isActive)
+                if isActive {
+                    // 選中時的膠囊指示器：漸層填色 + 細框 + matchedGeometryEffect 跨頁籤滑動
+                    // 深色模式下提高不透明度，對齊 topSubFeatureBar 分組膠囊（v2）已修復的
+                    // 深色背景吃色問題，避免選中膠囊在深色模式下辨識度偏低
+                    Capsule()
+                        .fill(LinearGradient(
+                            colors: [
+                                Color.green.opacity(colorScheme == .dark ? 0.32 : 0.22),
+                                Color.green.opacity(colorScheme == .dark ? 0.18 : 0.10)
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ))
+                        .frame(width: 54, height: 30)
+                        .overlay(Capsule().stroke(Color.green.opacity(colorScheme == .dark ? 0.32 : 0.18), lineWidth: 0.75))
+                        .matchedGeometryEffect(id: "activeTabIndicator", in: namespace)
+                } else {
+                    // 佔位透明膠囊，確保圖示對齊不跳動
+                    Capsule()
+                        .fill(Color.clear)
+                        .frame(width: 54, height: 30)
+                }
                 Image(systemName: icon)
-                    .font(.system(size: 20, weight: isActive ? .semibold : .medium))
+                    .font(.system(size: 21, weight: isActive ? .semibold : .medium))
                     .symbolEffect(.bounce, value: isActive)
+                    .scaleEffect(isActive ? 1.05 : 1.0)
+                    .animation(.spring(response: 0.28, dampingFraction: 0.7), value: isActive)
             }
+            // 補上防截斷保護：大字級輔助模式下「設定」等標籤維持單行，對齊全 App 文字自適應規格
             Text(label)
-                .font(.system(size: 10, weight: isActive ? .semibold : .regular))
+                .font(.system(size: 10.5, weight: isActive ? .semibold : .regular))
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
         }
         .foregroundStyle(isActive ? Color.green : Color.secondary)
         .frame(maxWidth: .infinity)
         .padding(.vertical, 4)
         .contentShape(Rectangle())
-        .animation(.spring(response: 0.28, dampingFraction: 0.70), value: isActive)
+        .animation(.spring(response: 0.3, dampingFraction: 0.72), value: isActive)
+    }
+
+    // MARK: - 全域滑動手勢（邊緣滑動切大功能 / 快速甩動切子功能）
+
+    /// 邊緣判定寬度：起點距螢幕左右緣此距離內視為「邊緣滑動」
+    private static let edgeSwipeWidth: CGFloat = 28
+
+    /// 單一 DragGesture 同時支援兩種手勢，依「起點位置」與「甩動速度」分流：
+    /// 1. 起點在螢幕左/右緣 + 水平滑動 → 切換大功能（收支/理財/人生/設定，循環）
+    /// 2. 非邊緣起點 + 快速甩動（慣性預測位移遠大於實際位移）→ 切換目前大功能內的子功能
+    /// 用 simultaneousGesture 掛在內容區：不攔截頁面內既有的捲動/點擊；
+    /// 子功能切換門檻刻意訂高（快速甩動才觸發），避免與橫向捲動列/地圖平移誤觸。
+    private func handleSwipe(_ value: DragGesture.Value) {
+        let dx = value.translation.width
+        let dy = value.translation.height
+        guard abs(dx) > abs(dy) * 1.5 else { return }   // 必須以水平為主，斜向/垂直不觸發
+        let screenW = UIScreen.main.bounds.width
+        let startX = value.startLocation.x
+
+        if startX <= Self.edgeSwipeWidth, dx > 60 {
+            switchMainTab(-1)   // 左緣往右滑 → 上一個大功能
+            return
+        }
+        if startX >= screenW - Self.edgeSwipeWidth, dx < -60 {
+            switchMainTab(1)    // 右緣往左滑 → 下一個大功能
+            return
+        }
+        // 快速甩動判定：predictedEndTranslation 是系統依放手瞬間速度推算的慣性終點，
+        // 與實際位移的差值大＝放手時速度快。慢速拖曳（一般捲動）不會達標。
+        let flingExtra = abs(value.predictedEndTranslation.width - dx)
+        if abs(dx) > 110, flingExtra > 160 {
+            switchSubFeature(dx < 0 ? 1 : -1)   // 往左甩 → 下一個子功能
+        }
+    }
+
+    /// 大功能循環切換：收支 → 理財 → 人生 → 設定 → 收支…（順序同底部導覽列）
+    private func switchMainTab(_ delta: Int) {
+        let order: [AppMode] = [.expense, .finance, .life]
+        let current = isSettingsActive ? 3 : (order.firstIndex(of: currentMode) ?? 0)
+        let next = (current + delta + 4) % 4
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        withAnimation(.spring(response: 0.28, dampingFraction: 0.70)) {
+            if next == 3 {
+                isSettingsActive = true
+            } else {
+                appMode = order[next].rawValue
+                isSettingsActive = false
+            }
+        }
+    }
+
+    /// 子功能切換：在目前大功能的子功能列表內前後移動（到頭/到尾即停，不循環）。
+    /// 人生模式只切換頂層子功能（職涯/家庭的第二層膠囊維持點選操作，
+    /// 切走時既有 onChange 會自動清除第二層選擇）。
+    private func switchSubFeature(_ delta: Int) {
+        guard !isSettingsActive else { return }
+
+        func advance<F: CaseIterable & Equatable>(_ current: F, write: (F) -> Void) {
+            let all = Array(F.allCases)
+            guard let i = all.firstIndex(of: current) else { return }
+            let n = min(max(i + delta, 0), all.count - 1)
+            guard n != i else { return }
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            withAnimation(.spring(response: 0.28, dampingFraction: 0.70)) {
+                write(all[n])
+            }
+        }
+
+        switch currentMode {
+        case .expense:
+            advance(expenseFeature) { expenseFeatureRaw = $0.rawValue }
+        case .finance:
+            advance(financeFeature) { financeFeatureRaw = $0.rawValue }
+        case .life:
+            advance(lifeFeature) { lifeFeatureRaw = $0.rawValue }
+        }
     }
 
     // MARK: - 浮動新增按鈕
 
+    /// 進階設定可整顆隱藏（部分使用者反映不需要；預設顯示）。
+    /// key 與 SettingsView 進階設定的開關共用。
+    @AppStorage("show_floating_add_button") private var showFloatingAddButton = true
+
+    @ViewBuilder
     private var floatingActionButton: some View {
-        GeometryReader { geo in
-            // 基本佈局常數
-            let fabWidth: CGFloat = 130   // 顯示「新增收支」時的膠囊寬度（用於拖曳邊界）
-            let fabHeight: CGFloat = 52
-            let hPad: CGFloat = 20         // 距左/右邊距
-            let bottomPad: CGFloat = 80    // 距下緣（避開底部 Tab Bar）
-            let topMargin: CGFloat = 120   // 不可拖至此線以上（避開頂部子功能列）
-
-            // 拖曳上下界（offset 相對於 bottom-right 自然錨點）
-            let leftLimit  = -(geo.size.width  - fabWidth  - 2 * hPad)
-            let topLimit   = -(geo.size.height - fabHeight - bottomPad - topMargin)
-
-            let liveX = clamp(fabOffset.width  + fabDragOffset.width,  leftLimit, 0)
-            let liveY = clamp(fabOffset.height + fabDragOffset.height, topLimit,  0)
-
-            VStack {
-                Spacer()
-                HStack {
-                    Spacer()
-                    fabStack
-                        .offset(x: liveX, y: liveY)
-                        .gesture(
-                            DragGesture()
-                                .onChanged { v in
-                                    if showQuickAdd { showQuickAdd = false } // 拖曳時自動收起選單
-                                    fabDragOffset = v.translation
-                                }
-                                .onEnded { v in
-                                    let finalX = clamp(fabOffset.width  + v.translation.width,  leftLimit, 0)
-                                    let finalY = clamp(fabOffset.height + v.translation.height, topLimit,  0)
-                                    // 水平吸邊：靠近哪邊就吸過去
-                                    let snappedX: CGFloat = finalX < (leftLimit / 2) ? leftLimit : 0
-                                    withAnimation(.spring(response: 0.4, dampingFraction: 0.72)) {
-                                        fabOffset = CGSize(width: snappedX, height: finalY)
-                                        fabDragOffset = .zero
-                                    }
-                                }
-                        )
-                        .padding(.trailing, hPad)
-                        .padding(.bottom, bottomPad)
-                }
-            }
+        if showFloatingAddButton {
+            FloatingActionButtonView(showAddIncome: $showAddIncome, showAddExpense: $showAddExpense)
         }
-        .ignoresSafeArea(.keyboard)
-    }
-
-    /// FAB + 彈出選單，獨立出來方便閱讀
-    private var fabStack: some View {
-        ZStack(alignment: .bottom) {
-            if showQuickAdd {
-                VStack(spacing: 10) {
-                    Button {
-                        showQuickAdd = false
-                        showAddIncome = true
-                    } label: {
-                        HStack(spacing: 6) {
-                            Image(systemName: "plus.circle.fill")
-                            Text("新增收入")
-                        }
-                        .font(.subheadline.weight(.medium))
-                        .padding(.horizontal, 16).padding(.vertical, 10)
-                        .background(Color.green)
-                        .foregroundStyle(.white)
-                        .clipShape(Capsule())
-                        .shadow(color: .green.opacity(0.3), radius: 6, y: 3)
-                    }
-
-                    Button {
-                        showQuickAdd = false
-                        showAddExpense = true
-                    } label: {
-                        HStack(spacing: 6) {
-                            Image(systemName: "minus.circle.fill")
-                            Text("新增支出")
-                        }
-                        .font(.subheadline.weight(.medium))
-                        .padding(.horizontal, 16).padding(.vertical, 10)
-                        .background(Color.red)
-                        .foregroundStyle(.white)
-                        .clipShape(Capsule())
-                        .shadow(color: .red.opacity(0.3), radius: 6, y: 3)
-                    }
-                }
-                .transition(.scale.combined(with: .opacity))
-                .padding(.bottom, 64)
-            }
-
-            Button {
-                withAnimation(.spring(duration: 0.3)) { showQuickAdd.toggle() }
-            } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: showQuickAdd ? "xmark" : "plus")
-                        .font(.title3.weight(.bold))
-                        .rotationEffect(.degrees(showQuickAdd ? 45 : 0))
-                    if !showQuickAdd {
-                        Text("新增收支")
-                            .font(.subheadline.weight(.semibold))
-                    }
-                }
-                .foregroundStyle(.white)
-                .padding(.horizontal, showQuickAdd ? 0 : 14)
-                .frame(minWidth: 52, minHeight: 52)
-                .background(showQuickAdd ? Color.secondary : Color.green)
-                .clipShape(Capsule())
-                .shadow(color: .black.opacity(0.2), radius: 6, y: 3)
-            }
-        }
-    }
-
-    private func clamp(_ value: CGFloat, _ lower: CGFloat, _ upper: CGFloat) -> CGFloat {
-        min(upper, max(lower, value))
     }
 
     // MARK: - 內容區
@@ -1139,6 +1506,7 @@ struct MainTabView: View {
                 case .businessCard: BusinessCardView()
                 case .organization: OrganizationView()
                 case .gradeTitle:   GradeTitleView()
+                case .sideRole:     SideRoleHubView()
                 }
             } else if hasCareerMilestones {
                 CareerView()
@@ -1171,6 +1539,10 @@ struct MainTabView: View {
             TaxOverviewView()
         case .foodMap:
             FoodMapView()
+        case .travelMap:
+            TravelMapView()
+        case .medicalMap:
+            MedicalMapView()
         }
     }
 
@@ -1190,16 +1562,16 @@ struct MainTabView: View {
         if !financeStore.realEstates.isEmpty { list.append(.realEstate) }
         if hasTaxData { list.append(.tax) }
         if hasFoodMapData { list.append(.foodMap) }
+        if hasTravelMapData { list.append(.travelMap) }
+        if hasMedicalMapData { list.append(.medicalMap) }
         return list
     }
 
     /// 任一稅費 / 節稅紀錄、有房產或車輛（會產生年度稅）→ 顯示稅務頁
     private var hasTaxData: Bool {
         if expenseStore.expenses.contains(where: {
-            $0.variableCategory == .tax || $0.variableCategory == .taxSaving
-        }) { return true }
-        if expenseStore.expenses.contains(where: {
-            $0.expenseType == .fixed && $0.effectivelyTaxDeductible
+            $0.variableCategory == .tax || $0.variableCategory == .taxSaving ||
+            ($0.expenseType == .fixed && $0.effectivelyTaxDeductible)
         }) { return true }
         if !financeStore.realEstates.isEmpty || !financeStore.vehicles.isEmpty { return true }
         return false
@@ -1211,6 +1583,20 @@ struct MainTabView: View {
             $0.variableCategory == .food && $0.placeLatitude != nil && $0.placeLongitude != nil
         })
     }
+
+    /// 任一娛樂紀錄已附經緯度 → 顯示旅遊地圖頁
+    private var hasTravelMapData: Bool {
+        expenseStore.expenses.contains(where: {
+            $0.variableCategory == .entertainment && $0.placeLatitude != nil && $0.placeLongitude != nil
+        })
+    }
+
+    /// 有醫療支出、健康里程碑或已建立健康檔案 → 顯示醫療地圖頁
+    private var hasMedicalMapData: Bool {
+        if expenseStore.expenses.contains(where: { $0.variableCategory == .medical }) { return true }
+        if lifeStore.milestones.contains(where: { $0.category == .health }) { return true }
+        return !lifeStore.healthProfile.isEmpty
+    }
 }
 
 #Preview {
@@ -1220,4 +1606,170 @@ struct MainTabView: View {
         .environmentObject(LifeStore())
         .environmentObject(SubscriptionManager.shared)
         .environmentObject(EInvoiceSyncManager.shared)
+}
+
+// MARK: - 浮動新增按鈕（獨立 View）
+//
+// 拖曳手勢的 onChanged 幾乎每個像素都會觸發一次；若拖曳狀態仍留在 MainTabView 自己的
+// @State 上，即使把 UI 拆成 computed var（如原本的 floatingActionButton／fabStack），
+// SwiftUI 仍會把整個 MainTabView.body 視為同一棵樹重新求值——連帶重算 topSubFeatureBar、
+// bottomTabBar 等整個分頁殼層，在使用者拖曳「+」按鈕時造成明顯畫面閃爍／掉幀。
+// 拆成獨立的 View struct、把拖曳相關 @State 收在這個 struct 內部，才能讓 SwiftUI 的
+// diffing 把它當成獨立子樹：拖曳只會重繪這個按鈕本身，不影響上層畫面。
+private struct FloatingActionButtonView: View {
+    @Binding var showAddIncome: Bool
+    @Binding var showAddExpense: Bool
+
+    @State private var showQuickAdd = false
+    @State private var fabOffset: CGSize = .zero
+    @State private var fabDragOffset: CGSize = .zero
+
+    var body: some View {
+        GeometryReader { geo in
+            // 基本佈局常數
+            let fabWidth: CGFloat = 130   // 顯示「新增收支」時的膠囊寬度（用於拖曳邊界）
+            let fabHeight: CGFloat = 52
+            let hPad: CGFloat = 20         // 距左/右邊距
+            let bottomPad: CGFloat = 80    // 距下緣（避開底部 Tab Bar）
+            let topMargin: CGFloat = 120   // 不可拖至此線以上（避開頂部子功能列）
+
+            // 拖曳上下界（offset 相對於 bottom-right 自然錨點）
+            let leftLimit  = -(geo.size.width  - fabWidth  - 2 * hPad)
+            let topLimit   = -(geo.size.height - fabHeight - bottomPad - topMargin)
+
+            let liveX = clamp(fabOffset.width  + fabDragOffset.width,  leftLimit, 0)
+            let liveY = clamp(fabOffset.height + fabDragOffset.height, topLimit,  0)
+
+            VStack {
+                Spacer()
+                HStack {
+                    Spacer()
+                    fabStack
+                        .offset(x: liveX, y: liveY)
+                        .gesture(
+                            DragGesture()
+                                .onChanged { v in
+                                    if showQuickAdd { showQuickAdd = false } // 拖曳時自動收起選單
+                                    fabDragOffset = v.translation
+                                }
+                                .onEnded { v in
+                                    let finalX = clamp(fabOffset.width  + v.translation.width,  leftLimit, 0)
+                                    let finalY = clamp(fabOffset.height + v.translation.height, topLimit,  0)
+                                    // 水平吸邊：靠近哪邊就吸過去
+                                    let snappedX: CGFloat = finalX < (leftLimit / 2) ? leftLimit : 0
+                                    withAnimation(.spring(response: 0.4, dampingFraction: 0.72)) {
+                                        fabOffset = CGSize(width: snappedX, height: finalY)
+                                        fabDragOffset = .zero
+                                    }
+                                }
+                        )
+                        .padding(.trailing, hPad)
+                        .padding(.bottom, bottomPad)
+                }
+            }
+        }
+        .ignoresSafeArea(.keyboard)
+    }
+
+    // UI美化：彈出選單加粗字重 + 更大內距 + 強化彩色陰影；主 FAB 雙層 shadow 加綠色光暈；
+    //         transition 改用 asymmetric scale(anchor:.bottom) 讓選單從 FAB 方向彈出/縮回
+    /// FAB + 彈出選單，獨立出來方便閱讀
+    private var fabStack: some View {
+        ZStack(alignment: .bottom) {
+            if showQuickAdd {
+                VStack(spacing: 10) {
+                    Button {
+                        showQuickAdd = false
+                        showAddIncome = true
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: "plus.circle.fill")
+                            Text("新增收入")
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.85)
+                        }
+                        .font(.subheadline.weight(.semibold))
+                        .padding(.horizontal, 18).padding(.vertical, 12)
+                        // [v4] 純色 → 漸層底 + 頂部 glass shine 高光 + 細邊框，對齊全 App 漸層按鈕規格
+                        .background(fabGradientBackground(
+                            colors: [Color(red: 0.16, green: 0.74, blue: 0.50), Color(red: 0.07, green: 0.50, blue: 0.38)]
+                        ))
+                        .foregroundStyle(.white)
+                        .clipShape(Capsule())
+                        .overlay(Capsule().stroke(Color.white.opacity(0.22), lineWidth: 0.75))
+                        .shadow(color: .green.opacity(0.45), radius: 10, y: 5)
+                    }
+
+                    Button {
+                        showQuickAdd = false
+                        showAddExpense = true
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: "minus.circle.fill")
+                            Text("新增支出")
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.85)
+                        }
+                        .font(.subheadline.weight(.semibold))
+                        .padding(.horizontal, 18).padding(.vertical, 12)
+                        .background(fabGradientBackground(
+                            colors: [Color(red: 0.98, green: 0.38, blue: 0.38), Color(red: 0.76, green: 0.14, blue: 0.18)]
+                        ))
+                        .foregroundStyle(.white)
+                        .clipShape(Capsule())
+                        .overlay(Capsule().stroke(Color.white.opacity(0.22), lineWidth: 0.75))
+                        .shadow(color: .red.opacity(0.45), radius: 10, y: 5)
+                    }
+                }
+                .transition(.asymmetric(
+                    insertion: .scale(scale: 0.82, anchor: .bottom).combined(with: .opacity),
+                    removal: .scale(scale: 0.82, anchor: .bottom).combined(with: .opacity)
+                ))
+                .padding(.bottom, 64)
+            }
+
+            Button {
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) { showQuickAdd.toggle() }
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: showQuickAdd ? "xmark" : "plus")
+                        .font(.title3.weight(.bold))
+                        .rotationEffect(.degrees(showQuickAdd ? 45 : 0))
+                        .animation(.spring(response: 0.3, dampingFraction: 0.7), value: showQuickAdd)
+                    if !showQuickAdd {
+                        Text("新增收支")
+                            .font(.subheadline.weight(.semibold))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.85)
+                    }
+                }
+                .foregroundStyle(.white)
+                .padding(.horizontal, showQuickAdd ? 0 : 14)
+                .frame(minWidth: 52, minHeight: 52)
+                .background(fabGradientBackground(
+                    colors: showQuickAdd
+                        ? [Color(.systemGray), Color(.systemGray2)]
+                        : [Color(red: 0.16, green: 0.74, blue: 0.50), Color(red: 0.07, green: 0.50, blue: 0.38)]
+                ))
+                .clipShape(Capsule())
+                .overlay(Capsule().stroke(Color.white.opacity(0.22), lineWidth: 0.75))
+                // 深色基礎陰影 + 綠色光暈（展開時光暈消隱）
+                .shadow(color: .black.opacity(0.25), radius: 8, y: 4)
+                .shadow(color: showQuickAdd ? .clear : Color.green.opacity(0.38), radius: 14, y: 6)
+            }
+        }
+    }
+
+    // [v4] 主 FAB／彈出選單三顆按鈕共用：漸層底 + 頂部 glass shine 白色高光，
+    //      對齊 chartHeroCard／全 App 英雄卡片 glass shine 統一規格
+    private func fabGradientBackground(colors: [Color]) -> some View {
+        ZStack {
+            LinearGradient(colors: colors, startPoint: .topLeading, endPoint: .bottomTrailing)
+            LinearGradient(colors: [.white.opacity(0.18), .clear], startPoint: .top, endPoint: .center)
+        }
+    }
+
+    private func clamp(_ value: CGFloat, _ lower: CGFloat, _ upper: CGFloat) -> CGFloat {
+        min(upper, max(lower, value))
+    }
 }

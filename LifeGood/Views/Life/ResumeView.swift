@@ -1,5 +1,17 @@
 import SwiftUI
 
+// MARK: - 美化紀錄（ResumeView.swift · v1 · 2026-08-06）
+// [2026-08 v25.102] AddMilestoneView「新增/編輯里程碑」工具列儲存按鈕補齊載入狀態：
+//  1. save() 自帶 isSaving 忙碌守衛（disabled(!canSave || isSaving)）避免快速連點造成重複
+//     里程碑紀錄（含家庭成員/職涯/財富卡各分支寫入），但按鈕本身在存檔期間毫無視覺提示。
+//     比照 LifeFinanceView v25.101／MyCalendarView v25.100 等全 App 儲存按鈕載入狀態規格，
+//     於按鈕左側補上 HStack { if isSaving { ProgressView().scaleEffect(0.7).tint(.green) }；
+//     Button(...) }。純視覺層調整，save() 內部各分類（家庭/房地產/職涯/財富卡）寫入邏輯
+//     完全未變動。全 App 同型待辦清單（v25.96 起紀錄）已剩 ChildDetailView，下次可依序
+//     比照補齊。
+//   （下次美化本檔案時，可轉往 ResumeView／EditProfileView 等本檔案內其他畫面，或轉往
+//     其他仍留有待辦的畫面）
+
 // MARK: - 防偽浮水印
 
 struct HolographicWatermark: View {
@@ -57,6 +69,16 @@ struct HolographicWatermark: View {
 }
 
 // MARK: - 個人檔案閃卡
+// [2026-06] 本次美化方向（ProfileFlashCard）：
+//   1. fmtWan → 升級為 fmtAssets：加入億量級支援（≥1億顯示 "X.X 億"，≥1萬顯示 "X.X 萬"，
+//      其餘顯示 "NT$X"），對齊 OverviewView.smartCurrency 與 FinanceOverviewView.fmtShort 規格，
+//      避免資產達億時出現五位數尷尬顯示。
+//   2. 總資產大字：加入 minimumScaleFactor(0.52) + lineLimit(1)，防止超長數字溢出；
+//      字型從固定 48pt 調整為 46pt，搭配自適應仍可維持視覺衝擊力。
+//   3. 底部資訊欄：每欄加入半透明白色圓角背景框，強化深色模式下的邊界感與視覺層次，
+//      對齊 OverviewView.summaryCard 的內嵌資訊排版語言。
+//   4. 散景裝飾圓：在卡片右上 + 左下加入兩顆白色高亮 blur 圓，增加卡片立體層次，
+//      對齊 FinanceOverviewView.totalAssetsCard / OverviewView.monthlyBalanceCard 設計規格。
 
 struct ProfileFlashCard: View {
     let profile: UserProfile
@@ -98,34 +120,42 @@ struct ProfileFlashCard: View {
                     Text(profile.chineseName.isEmpty ? "未設定姓名" : profile.chineseName)
                         .font(.title.weight(.bold))
                         .foregroundStyle(.white)
+                        .minimumScaleFactor(0.7)
+                        .lineLimit(1)
                     if !profile.englishName.isEmpty {
                         Text(profile.englishName)
                             .font(.subheadline.weight(.medium))
                             .foregroundStyle(.white.opacity(0.7))
+                            .minimumScaleFactor(0.75)
+                            .lineLimit(1)
                     }
                 }
                 .padding(.top, 14)
 
-                // 財富總計
-                VStack(spacing: 4) {
-                    Text(fmtWan(totalAssets))
-                        .font(.system(size: 48, weight: .bold, design: .rounded))
+                // 財富總計：萬／億自適應顯示，避免億量級出現五位數
+                VStack(spacing: 5) {
+                    Text(fmtAssets(totalAssets))
+                        .font(.system(size: 46, weight: .bold, design: .rounded))
                         .foregroundStyle(rarity.textColor)
-                    Text("萬元 總資產")
-                        .font(.subheadline)
-                        .foregroundStyle(.white.opacity(0.6))
+                        .minimumScaleFactor(0.52)
+                        .lineLimit(1)
+                        .contentTransition(.numericText())
+                    Text("總資產")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.white.opacity(0.58))
+                        .padding(.horizontal, 10).padding(.vertical, 3)
+                        .background(.white.opacity(0.12))
+                        .clipShape(Capsule())
                 }
                 .padding(.vertical, 16)
 
-                // 底部資訊列
-                HStack {
+                // 底部資訊列：每欄加半透明圓角背景框，提升深色模式下的邊界感
+                HStack(spacing: 8) {
                     infoColumn("公司", profile.company.isEmpty ? "—" : profile.company)
-                    Spacer()
                     infoColumn("職稱", profile.jobTitle.isEmpty ? "—" : profile.jobTitle)
-                    Spacer()
                     infoColumn("配偶", spouseDisplay)
                 }
-                .padding(.horizontal, 20)
+                .padding(.horizontal, 14)
                 .padding(.bottom, 16)
             }
             .zIndex(1)
@@ -134,6 +164,23 @@ struct ProfileFlashCard: View {
             if !profile.englishName.isEmpty {
                 HolographicWatermark(text: profile.englishName)
             }
+
+            // 散景裝飾圓：增加卡片立體層次感（對齊 FinanceOverviewView.totalAssetsCard 規格）
+            GeometryReader { geo in
+                ZStack {
+                    Circle()
+                        .fill(.white.opacity(0.10))
+                        .frame(width: 120, height: 120)
+                        .offset(x: geo.size.width - 40, y: -40)
+                        .blur(radius: 14)
+                    Circle()
+                        .fill(.white.opacity(0.07))
+                        .frame(width: 80, height: 80)
+                        .offset(x: -20, y: geo.size.height - 20)
+                        .blur(radius: 10)
+                }
+            }
+            .allowsHitTesting(false)
         }
         .background(
             LinearGradient(colors: rarity.bgGradient,
@@ -153,23 +200,84 @@ struct ProfileFlashCard: View {
     }
 
     private func infoColumn(_ label: String, _ value: String) -> some View {
-        VStack(spacing: 2) {
+        VStack(spacing: 3) {
             Text(label)
-                .font(.caption2)
-                .foregroundStyle(.white.opacity(0.5))
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.50))
             Text(value)
-                .font(.caption.bold())
-                .foregroundStyle(.white.opacity(0.8))
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.white.opacity(0.85))
                 .lineLimit(1)
+                .minimumScaleFactor(0.75)
         }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 7)
+        .background(.white.opacity(0.10))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .stroke(.white.opacity(0.18), lineWidth: 0.6)
+        )
     }
 
-    private func fmtWan(_ v: Double) -> String {
-        String(format: "%.0f", v / 10000)
+    // 億量級格式：≥1億 → "X.X 億"，≥1萬 → "X.X 萬"，其餘 → "NT$X"
+    private func fmtAssets(_ v: Double) -> String {
+        let absV = abs(v)
+        if absV >= 100_000_000 {
+            return String(format: "%.1f 億", v / 100_000_000)
+        }
+        if absV >= 10_000 {
+            let wan = v / 10_000
+            // 避免 9999.95 萬四捨五入到「10000.0 萬」
+            if abs(wan) >= 9_999.95 { return String(format: "%.1f 億", v / 100_000_000) }
+            return String(format: abs(wan) >= 100 ? "%.1f 萬" : "%.2f 萬", wan)
+        }
+        return String(format: "NT$%.0f", v)
     }
 }
 
-// MARK: - 編輯個人檔案
+// MARK: - 美化紀錄（EditProfileView）2026-07
+// [2026-07] 首次美化方向：
+//   1. 原本為完全無標頭的裸 Form（三個 Section 只用系統預設純文字標題），與全 App 其他
+//      Form 型編輯頁（HealthProfileEditView.healthEditorSectionHeader／MyCalendarView.
+//      editorSectionHeader）「4pt 漸層色條 + 圖示 + 粗體文字」規格落差明顯；新增共用
+//      profileEditorSectionHeader(_:icon:color:) 補齊三個 Section 標頭：
+//      姓名(indigo, person.text.rectangle.fill)／工作(orange, briefcase.fill)／
+//      家庭(pink, heart.fill)，各自獨立主題色提升可掃視性。
+//   2. 關閉按鈕維持固定左側「取消」、儲存固定右側「儲存」，對齊全 App 一致慣例（未變動）。
+//   3. 純視覺層調整，chineseName／englishName／company／jobTitle／spouse 欄位資料來源、
+//      loadProfile()／save() 寫回 store 等既有商業邏輯完全未變動。
+//   下次美化本檔案時：可考慮把 fmtAssets() 之外的其餘 ResumeView 元件（如
+//   ResumeGiftSection 以外仍待均值化的清單列）一併比對，或轉往其他仍留有待辦的畫面。
+// [2026-07 v2] 承接上方待辦，補齊 ResumeView 主列表（milestoneRow／mySpendingSection）
+//   最後的空狀態與大字自適應缺口：
+//   4. filteredList 單一分類篩選後零筆時，原本是裸 Text("此分類尚無紀錄")，未包在 List
+//      Section 內、也沒有圖示錨點，與同檔案 emptyStateList 的 emptyState（雙層脈衝光環）
+//      及全 App 其餘「篩選後零筆」次要空狀態（FoodMapView.restaurantListEmptyState）不
+//      一致。新增 categoryEmptyState(_:)：56pt 分類色圖示圓（cat.icon + categoryColor）
+//      + 說明文字，包入 Section 對齊 List 版面規格；僅次要篩選態使用輕量卡片，不做
+//      全頁大型脈衝動畫（該規格保留給頁面首次無資料的 emptyState）。
+//   5. milestoneRow／spendingRow 標題文字原本只有 lineLimit(1)，缺 minimumScaleFactor，
+//      大字級輔助模式下長標題／消費項目名稱會被裁切（…）而非縮小顯示；補上
+//      minimumScaleFactor(0.85)，對齊全 App 大字自適應規格（可縮小但不到無法辨識）。
+//   6. 移除 spendingRow 改用 ntdWanString（v1）後已無任何呼叫端的私有
+//      formatCurrency(_:) / currencyFormatter 死碼。
+//   純視覺層調整，篩選邏輯、里程碑/消費資料來源、刪除等既有商業邏輯完全未變動。
+//   （下次美化本檔案時：可轉往其他仍留有待辦的畫面）
+
+private func profileEditorSectionHeader(_ title: String, icon: String, color: Color) -> some View {
+    HStack(spacing: 7) {
+        Capsule()
+            .fill(LinearGradient(colors: [color, color.opacity(0.70)], startPoint: .top, endPoint: .bottom))
+            .frame(width: 4, height: 18)
+        Image(systemName: icon)
+            .font(.system(size: 12, weight: .semibold))
+            .foregroundStyle(color)
+        Text(title)
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(.primary)
+    }
+}
 
 struct EditProfileView: View {
     @EnvironmentObject var store: LifeStore
@@ -184,17 +292,23 @@ struct EditProfileView: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("姓名") {
+                Section {
                     TextField("中文姓名", text: $chineseName)
                     TextField("英文姓名", text: $englishName)
                         .autocapitalization(.words)
+                } header: {
+                    profileEditorSectionHeader("姓名", icon: "person.text.rectangle.fill", color: .indigo)
                 }
-                Section("工作") {
+                Section {
                     TextField("公司名稱", text: $company)
                     TextField("職稱", text: $jobTitle)
+                } header: {
+                    profileEditorSectionHeader("工作", icon: "briefcase.fill", color: .orange)
                 }
-                Section("家庭") {
+                Section {
                     TextField("配偶", text: $spouse)
+                } header: {
+                    profileEditorSectionHeader("家庭", icon: "heart.fill", color: .pink)
                 }
             }
             .navigationTitle("編輯個人檔案")
@@ -231,6 +345,44 @@ struct EditProfileView: View {
     }
 }
 
+// MARK: - 美化紀錄（ResumeView）
+// [2026-06] 本次美化方向：
+//   1. categoryFilter：補底部細分隔線 overlay，對齊 VariableExpenseView / IncomeView 分類篩選列規格
+//   2. sectionHeader：加入 Capsule 側條 + 圖示圓角方形（圓角 7pt）+ 計數膠囊改用彩色文字與細邊框，
+//      完整對齊 daySectionHeader / allocationSection / careerView 的 section header 標準格式
+//   3. milestoneRow：圖示圓從 40pt 升至 44pt + 補 categoryAccent 陰影，對齊 ExpenseRow / CareerView 圖示圓規格
+//   4. groupedList / filteredList：補 .scrollContentBackground(.hidden) + .background(systemGroupedBackground)，
+//      深色模式下不再顯示白色 List 背景
+//   5. 列表行：加入交錯淡入 + 向上進場動畫（rowsAppeared 旗標），對齊 FamilyView / FixedExpenseView 規格
+// [2026-06 v2] mySpendingSection + spendingRow 升級：
+//   6. mySpendingSection header：從純 image+Text 升級為「4pt 紅色漸層 Capsule 側條 + 26pt 圖示圓角方形
+//      + .subheadline.bold 標題 + "N 筆" 計數膠囊（彩色文字 + 細邊框）」，
+//      對齊 sectionHeader() / OverviewView.categoryBreakdownSection 標準 section header 規格。
+//   7. 總計列：從純 Label+Text 升級為「34pt 紅色漸層圖示圓（sum）+ ntdWanString Capsule 金額徽章」，
+//      對齊 ResumeGiftSection 總計列 / SpouseResumeView 彙總行視覺規格。
+//   8. spendingRow 圖示圓：36pt → 40pt + shadow，對齊 OverviewView.recentRow 40pt 列表規格；
+//      左側加入 3pt 橘色漸層強調條，統一列表行視覺語言。
+//   9. spendingRow 日期：純 tertiary 文字 → tertiarySystemFill 底色 Capsule 徽章，
+//      對齊 OverviewView.recentRow / CareerView.careerRow 日期膠囊規格。
+//  10. spendingRow 同行人員：純橘文字 → pink Capsule 膠囊（person.2.fill 圖示），
+// [2026-06 v3] resumeHeroCard 英雄統計卡 + milestoneRow 細節對齊：
+//  13. resumeHeroCard：頂部新增橘色→琥珀漸層英雄統計卡（唯一主要列表頁缺少頂部英雄卡的均值補齊）：
+//      左上 trophy.fill 圖示圓 + 「我的履歷」小標；大字：總里程碑 N 項；
+//      右上：今年新增白色膠囊（sparkles 圖示）；三顆散景裝飾圓 + 頂部玻璃光澤；
+//      KPI 橫列三格（涵蓋分類 / 今年新增 / 最近一筆）；
+//      heroCardAppeared spring 進場動畫，對齊 ChildrenResumeView.heroStatsCard /
+//      CareerView.summaryCard / BusinessCardView.summaryHeader 英雄卡規格。
+//  14. milestoneRow 44pt 圖示圓：補入 Circle().stroke(accent.opacity(0.18), lineWidth:0.75) overlay
+//      細邊框，對齊 CareerView v2 / FamilyView v2 / OverviewView.recentRow v3 圖示圓邊框規格。
+//  15. milestoneRow 分類膠囊：補入 .overlay(Capsule().stroke(accent.opacity(0.22), lineWidth:0.6))
+//      細邊框，對齊 SubordinateView v2 / FamilyView v2 / LifeOverviewView.categoryBreakdownSection 膠囊規格。
+//  16. milestoneRow 日期膠囊：補入 .overlay(Capsule().stroke(accent.opacity(0.22), lineWidth:0.5))
+//      細邊框，對齊 CareerView v2 / SpouseResumeView v2 / ChildDetailView v2 日期膠囊邊框規格。
+//      對齊 VariableExpenseView.ExpenseRow diningMember 規格，強化資訊辨識度。
+//  11. spendingRow 金額：formatCurrency → ntdWanString，支援萬/億量級自動切換；
+//      改用紅色 Capsule 徽章顯示（含細邊框），對齊 ResumeGiftSection.giftRow 金額規格。
+//  12. "還有 N 筆…" → 水平置中 Capsule 膠囊徽章，對齊 IncomeView.visibleMonths 展開按鈕視覺語言。
+
 // MARK: - 履歷頁面
 
 struct ResumeView: View {
@@ -242,7 +394,13 @@ struct ResumeView: View {
     @State private var editingItem: LifeMilestone?
     @State private var selectedCategory: MilestoneCategory?
     @State private var showPremiumAlert = false
+    /// 待確認刪除的兼任職務（底下已累積管理頁內容時才會被設定）
+    @State private var pendingSideRoleDelete: LifeMilestone?
     @State private var emptyStatePulse = false
+    @State private var emptyStatePulseTask: Task<Void, Never>?
+    @State private var rowsAppeared = false
+    // [v3] 英雄卡進場動畫旗標
+    @State private var heroCardAppeared = false
 
     private var realMilestoneIDs: Set<UUID> { Set(store.milestones.map(\.id)) }
 
@@ -258,37 +416,41 @@ struct ResumeView: View {
             .sorted { $0.date > $1.date }
     }
 
-    /// 只在有選擇篩選時使用，顯示平面列表
-    private var filteredByCategory: [LifeMilestone] {
+    /// 只在有選擇篩選時使用，顯示平面列表（接收已排序陣列，避免重複計算）
+    private func filteredByCategory(_ sorted: [LifeMilestone]) -> [LifeMilestone] {
         guard let cat = selectedCategory else { return [] }
-        return allSorted.filter { $0.category == cat }
+        return sorted.filter { $0.category == cat }
     }
 
-    /// 依分類分組（保留 sectionOrder 順序，跳過空分類）
-    private var groupedSections: [(category: MilestoneCategory, items: [LifeMilestone])] {
-        let grouped = Dictionary(grouping: allSorted, by: \.category)
+    /// 依分類分組（保留 sectionOrder 順序，跳過空分類；接收已排序陣列，避免重複計算）
+    private func groupedSections(_ sorted: [LifeMilestone]) -> [(category: MilestoneCategory, items: [LifeMilestone])] {
+        let grouped = Dictionary(grouping: sorted, by: \.category)
         return sectionOrder.compactMap { cat in
             guard let items = grouped[cat], !items.isEmpty else { return nil }
             return (cat, items)
         }
     }
 
-    private var isEmptyAll: Bool { allSorted.isEmpty }
-
     var body: some View {
-        NavigationStack {
-            VStack(spacing: 0) {
-                categoryFilter
-
-                if isEmptyAll {
-                    emptyState
+        // body 頂端一次計算，filteredByCategory / groupedSections / isEmpty 共用同一份陣列
+        let sorted = allSorted
+        return NavigationStack {
+            // [對齊 SavingsInsuranceView 看板規格] 英雄卡與分類篩選列改為 List 內首個
+            // Section（headerSections），隨內容一起捲動，不再固定釘在列表上方。
+            Group {
+                if sorted.isEmpty {
+                    emptyStateList(sorted)
                 } else if let cat = selectedCategory {
-                    filteredList(category: cat)
+                    filteredList(category: cat, sorted: sorted)
                 } else {
-                    groupedList
+                    groupedList(sorted)
                 }
             }
             .background(Color(.systemGroupedBackground))
+            // 切換篩選分類時重置進場動畫旗標
+            .onChange(of: selectedCategory) { _, _ in
+                rowsAppeared = false
+            }
             .navigationTitle("我的履歷")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
@@ -303,28 +465,167 @@ struct ResumeView: View {
             .sheet(isPresented: $showAdd) { AddMilestoneView() }
             .sheet(item: $editingItem) { item in AddMilestoneView(editing: item) }
             .premiumLockAlert(isPresented: $showPremiumAlert)
+            .confirmationDialog("刪除這筆兼任職務？",
+                                isPresented: Binding(
+                                    get: { pendingSideRoleDelete != nil },
+                                    set: { if !$0 { pendingSideRoleDelete = nil } }),
+                                titleVisibility: .visible) {
+                Button("刪除", role: .destructive) {
+                    if let item = pendingSideRoleDelete { deleteMilestoneCleaningLinks(item) }
+                    pendingSideRoleDelete = nil
+                }
+                Button("取消", role: .cancel) { pendingSideRoleDelete = nil }
+            } message: {
+                Text(pendingDeleteMessage)
+            }
         }
+    }
+
+    /// 刪除里程碑並清除其他 Store 對此 id 的懸空引用。LifeStore.deleteMilestone 本身無法觸及
+    /// FinanceStore／ExpenseStore（不同 store，無互相持有），比照 deleteFamilyMember／deleteSubordinate
+    /// 解除交叉引用的既有寫法，改在同時持有三個 store 的這一層補上清除。
+    /// 刪除前的守門。兼任職務底下可能累積了半年的待辦、十幾位工作人員名單、
+    /// 會議紀錄與重要日期——這些不會出現在履歷列上，滑一下就全部消失、
+    /// 而且 milestones 沒有復原機制、didSet 立刻存檔並推 CloudKit。
+    /// 有內容就先問；其餘子分類維持原本的直接刪除，零行為變更。
+    private func requestDelete(_ item: LifeMilestone) {
+        if item.isSideRole && item.hasAnySideRoleContent {
+            pendingSideRoleDelete = item
+        } else {
+            deleteMilestoneCleaningLinks(item)
+        }
+    }
+
+    private var pendingDeleteMessage: String {
+        guard let item = pendingSideRoleDelete else { return "" }
+        let c = item.sideRoleContentCount
+        var parts: [String] = []
+        if c.tasks > 0 { parts.append("\(c.tasks) 則待辦") }
+        if c.members > 0 { parts.append("\(c.members) 位成員") }
+        if c.meetings > 0 { parts.append("\(c.meetings) 則會議紀錄") }
+        if c.resolutions > 0 { parts.append("\(c.resolutions) 則重大決議") }
+        if c.keyDates > 0 { parts.append("\(c.keyDates) 個重要日期") }
+        return "這個職務的 " + parts.joined(separator: "、") + " 也會一併刪除，且無法復原。"
+    }
+
+    private func deleteMilestoneCleaningLinks(_ item: LifeMilestone) {
+        store.deleteMilestone(item)
+
+        var stocks = financeStore.stocks
+        var stocksChanged = false
+        for i in stocks.indices {
+            if stocks[i].linkedBankMilestoneId == item.id {
+                stocks[i].linkedBankMilestoneId = nil
+                stocks[i].linkedBankCurrency = nil
+                stocksChanged = true
+            }
+            if stocks[i].linkedSecuritiesMilestoneId == item.id {
+                stocks[i].linkedSecuritiesMilestoneId = nil
+                stocksChanged = true
+            }
+        }
+        if stocksChanged { financeStore.stocks = stocks }
+
+        var expenses = expenseStore.expenses
+        var expensesChanged = false
+        for i in expenses.indices {
+            if expenses[i].linkedBankMilestoneId == item.id {
+                expenses[i].linkedBankMilestoneId = nil
+                expensesChanged = true
+            }
+            if expenses[i].linkedCreditCardMilestoneId == item.id {
+                expenses[i].linkedCreditCardMilestoneId = nil
+                expensesChanged = true
+            }
+        }
+        if expensesChanged { expenseStore.expenses = expenses }
+
+        var incomes = expenseStore.incomes
+        var incomesChanged = false
+        for i in incomes.indices where incomes[i].linkedBankMilestoneId == item.id {
+            incomes[i].linkedBankMilestoneId = nil
+            incomesChanged = true
+        }
+        if incomesChanged { expenseStore.incomes = incomes }
     }
 
     // MARK: - 列表
 
-    private var groupedList: some View {
+    /// 英雄卡 + 分類篩選列（List 內首個 Section；grouped／filtered／empty 三種列表共用），
+    /// 對齊 SavingsInsuranceView summaryHeader 的「看板隨內容捲動」規格。
+    @ViewBuilder
+    private func headerSections(_ sorted: [LifeMilestone]) -> some View {
+        Section {
+            resumeHeroCard(sorted)
+                .listRowInsets(EdgeInsets(top: 12, leading: 16, bottom: 4, trailing: 16))
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+                .opacity(heroCardAppeared ? 1 : 0)
+                .offset(y: heroCardAppeared ? 0 : 20)
+                .onAppear {
+                    withAnimation(.spring(response: 0.55, dampingFraction: 0.78)) {
+                        heroCardAppeared = true
+                    }
+                }
+                .onDisappear {
+                    // 重置旗標：切到其他分頁再切回時能重新播放英雄卡進場動畫
+                    heroCardAppeared = false
+                }
+            categoryFilter
+                .listRowInsets(EdgeInsets())
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+        }
+    }
+
+    /// 空狀態也包在同款 List 內，讓英雄卡／篩選列與其他兩種列表行為一致
+    private func emptyStateList(_ sorted: [LifeMilestone]) -> some View {
         List {
-            ForEach(groupedSections, id: \.category) { section in
+            headerSections(sorted)
+            Section {
+                emptyState
+                    .listRowInsets(EdgeInsets())
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+            }
+        }
+        .listStyle(.insetGrouped)
+        .scrollContentBackground(.hidden)
+        .background(Color(.systemGroupedBackground))
+    }
+
+    private func groupedList(_ sorted: [LifeMilestone]) -> some View {
+        List {
+            headerSections(sorted)
+            ForEach(Array(groupedSections(sorted).enumerated()), id: \.element.category) { sectionIdx, section in
                 Section {
-                    ForEach(section.items) { item in
+                    ForEach(Array(section.items.enumerated()), id: \.element.id) { rowIdx, item in
                         milestoneRow(item)
                             .contentShape(Rectangle())
                             .onTapGesture {
                                 guard subscription.isPremium else { showPremiumAlert = true; return }
                                 if realMilestoneIDs.contains(item.id) { editingItem = item }
                             }
-                    }
-                    .onDelete { offsets in
-                        guard subscription.isPremium else { showPremiumAlert = true; return }
-                        let items = offsets.map { section.items[$0] }
-                            .filter { realMilestoneIDs.contains($0.id) }
-                        items.forEach { store.deleteMilestone($0) }
+                            // 交錯進場動畫：群組序 × 4 + 列序，對齊 FixedExpenseView 規格
+                            .opacity(rowsAppeared ? 1 : 0)
+                            .offset(y: rowsAppeared ? 0 : 14)
+                            .animation(
+                                .spring(response: 0.45, dampingFraction: 0.82)
+                                    .delay(0.05 * Double(sectionIdx * 4 + rowIdx)),
+                                value: rowsAppeared
+                            )
+                            // 改用 allowsFullSwipe: false 的滑出按鈕取代 .onDelete：
+                            // 避免整列滑到底直接刪除（與邊緣切頁手勢衝突，同型修正見 v25.154）
+                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                if realMilestoneIDs.contains(item.id) {
+                                    Button(role: .destructive) {
+                                        guard subscription.isPremium else { showPremiumAlert = true; return }
+                                        requestDelete(item)
+                                    } label: {
+                                        Label("刪除", systemImage: "trash")
+                                    }
+                                }
+                            }
                     }
                 } header: {
                     sectionHeader(section.category, count: section.items.count)
@@ -333,29 +634,58 @@ struct ResumeView: View {
             mySpendingSection
         }
         .listStyle(.insetGrouped)
+        .scrollContentBackground(.hidden)
+        .background(Color(.systemGroupedBackground))
+        .onAppear {
+            withAnimation(.spring(response: 0.5, dampingFraction: 0.82).delay(0.05)) {
+                rowsAppeared = true
+            }
+        }
+        .onDisappear {
+            // 重置旗標：切到其他分頁再切回時能重新播放列表進場動畫，對齊 FixedExpenseView 既有寫法。
+            rowsAppeared = false
+        }
     }
 
-    private func filteredList(category: MilestoneCategory) -> some View {
-        let items = filteredByCategory
+    private func filteredList(category: MilestoneCategory, sorted: [LifeMilestone]) -> some View {
+        let items = filteredByCategory(sorted)
         return List {
+            headerSections(sorted)
             if items.isEmpty {
-                Text("此分類尚無紀錄")
-                    .foregroundStyle(.secondary).font(.subheadline)
+                Section {
+                    categoryEmptyState(category)
+                        .listRowInsets(EdgeInsets())
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                }
             } else {
                 Section {
-                    ForEach(items) { item in
+                    ForEach(Array(items.enumerated()), id: \.element.id) { rowIdx, item in
                         milestoneRow(item)
                             .contentShape(Rectangle())
                             .onTapGesture {
                                 guard subscription.isPremium else { showPremiumAlert = true; return }
                                 if realMilestoneIDs.contains(item.id) { editingItem = item }
                             }
-                    }
-                    .onDelete { offsets in
-                        guard subscription.isPremium else { showPremiumAlert = true; return }
-                        let toDelete = offsets.map { items[$0] }
-                            .filter { realMilestoneIDs.contains($0.id) }
-                        toDelete.forEach { store.deleteMilestone($0) }
+                            // 交錯進場動畫，對齊 groupedList 規格
+                            .opacity(rowsAppeared ? 1 : 0)
+                            .offset(y: rowsAppeared ? 0 : 14)
+                            .animation(
+                                .spring(response: 0.45, dampingFraction: 0.82)
+                                    .delay(0.05 * Double(rowIdx)),
+                                value: rowsAppeared
+                            )
+                            // 改用 allowsFullSwipe: false 的滑出按鈕取代 .onDelete（同 groupedList）
+                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                if realMilestoneIDs.contains(item.id) {
+                                    Button(role: .destructive) {
+                                        guard subscription.isPremium else { showPremiumAlert = true; return }
+                                        requestDelete(item)
+                                    } label: {
+                                        Label("刪除", systemImage: "trash")
+                                    }
+                                }
+                            }
                     }
                 } header: {
                     sectionHeader(category, count: items.count)
@@ -363,6 +693,17 @@ struct ResumeView: View {
             }
         }
         .listStyle(.insetGrouped)
+        .scrollContentBackground(.hidden)
+        .background(Color(.systemGroupedBackground))
+        .onAppear {
+            withAnimation(.spring(response: 0.5, dampingFraction: 0.82).delay(0.05)) {
+                rowsAppeared = true
+            }
+        }
+        .onDisappear {
+            // 重置旗標：切到其他分頁再切回時能重新播放列表進場動畫，對齊 FixedExpenseView 既有寫法。
+            rowsAppeared = false
+        }
     }
 
     // MARK: - 我的消費（變動支出 diningMember 含本人名字）
@@ -385,36 +726,96 @@ struct ResumeView: View {
         let items = mySpendingExpenses
         if !items.isEmpty {
             Section {
-                HStack {
-                    Label("總計", systemImage: "sum")
-                    Spacer()
-                    Text(formatCurrency(items.reduce(0) { $0 + $1.amount }))
+                // 總計列：34pt 紅色漸層圖示圓 + ntdWanString Capsule 金額徽章
+                HStack(spacing: 12) {
+                    ZStack {
+                        Circle()
+                            .fill(
+                                LinearGradient(
+                                    colors: [Color.red.opacity(0.22), Color.red.opacity(0.09)],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                            .frame(width: 34, height: 34)
+                            .overlay(Circle().stroke(Color.red.opacity(0.22), lineWidth: 1))
+                        Image(systemName: "sum")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(.red)
+                    }
+                    Text("總計")
                         .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.primary)
+                    Spacer()
+                    Text(items.reduce(0) { $0 + $1.amount }.ntdWanString)
+                        .font(.system(size: 15, weight: .bold, design: .rounded))
                         .foregroundStyle(.red)
+                        .contentTransition(.numericText())
+                        .padding(.horizontal, 10).padding(.vertical, 4)
+                        .background(Color.red.opacity(0.10))
+                        .clipShape(Capsule())
+                        .overlay(Capsule().stroke(Color.red.opacity(0.22), lineWidth: 0.6))
                 }
+
                 ForEach(items.prefix(20)) { e in
                     spendingRow(e)
                 }
+                // "還有 N 筆" → 水平置中 Capsule 膠囊徽章
                 if items.count > 20 {
-                    Text("還有 \(items.count - 20) 筆…")
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
+                    HStack {
+                        Spacer()
+                        Text("還有 \(items.count - 20) 筆")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 10).padding(.vertical, 3.5)
+                            .background(Color(.tertiarySystemFill))
+                            .clipShape(Capsule())
+                        Spacer()
+                    }
+                    .padding(.vertical, 2)
                 }
             } header: {
+                // 標準 4pt Capsule 側條 section header（對齊 sectionHeader() 全 App 規格）
                 HStack(spacing: 8) {
-                    Image(systemName: "creditcard.fill")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.red)
-                    Text("消費")
-                        .font(.subheadline.weight(.semibold))
+                    Capsule()
+                        .fill(
+                            LinearGradient(
+                                colors: [Color.red, Color.red.opacity(0.55)],
+                                startPoint: .top, endPoint: .bottom
+                            )
+                        )
+                        .frame(width: 3, height: 16)
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 7, style: .continuous)
+                            .fill(
+                                LinearGradient(
+                                    colors: [Color.red.opacity(0.20), Color.red.opacity(0.09)],
+                                    startPoint: .topLeading, endPoint: .bottomTrailing
+                                )
+                            )
+                            .frame(width: 26, height: 26)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                    .stroke(Color.red.opacity(0.22), lineWidth: 0.75)
+                            )
+                        Image(systemName: "creditcard.fill")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(.red)
+                    }
+                    Text("我的消費")
+                        .font(.subheadline.weight(.bold))
                         .foregroundStyle(.primary)
-                    Text("\(items.count)")
+                    Text("\(items.count) 筆")
                         .font(.caption2.weight(.semibold))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 6).padding(.vertical, 2)
-                        .background(Color.red, in: Capsule())
+                        .foregroundStyle(Color.red.opacity(0.85))
+                        .padding(.horizontal, 7).padding(.vertical, 2.5)
+                        .background(Color.red.opacity(0.10))
+                        .clipShape(Capsule())
+                        .overlay(Capsule().stroke(Color.red.opacity(0.22), lineWidth: 0.6))
+                    Spacer()
                 }
-                .textCase(.none)
+                .textCase(nil)
+                .padding(.vertical, 2)
             } footer: {
                 Text("變動支出中將「\(store.profile.chineseName)」加入人員的紀錄會自動出現在此。")
             }
@@ -422,91 +823,139 @@ struct ResumeView: View {
     }
 
     private func spendingRow(_ e: Expense) -> some View {
-        HStack(alignment: .center, spacing: 10) {
-            // 分類圖示圓（帶漸層）
+        let rowAccent = Color.orange
+        return HStack(alignment: .center, spacing: 0) {
+            // 左側 3pt 橘色漸層強調條（對齊 milestoneRow / CareerView.careerRow 規格）
+            RoundedRectangle(cornerRadius: 2)
+                .fill(
+                    LinearGradient(
+                        colors: [rowAccent, rowAccent.opacity(0.45)],
+                        startPoint: .top, endPoint: .bottom
+                    )
+                )
+                .frame(width: 3)
+                .padding(.vertical, 8)
+                .padding(.trailing, 10)
+
+            // 40pt 漸層圖示圓 + 陰影（36pt → 40pt，對齊 OverviewView.recentRow 40pt 列表規格）
             ZStack {
                 Circle()
                     .fill(
                         LinearGradient(
-                            colors: [Color.orange.opacity(0.20), Color.orange.opacity(0.07)],
+                            colors: [rowAccent.opacity(0.22), rowAccent.opacity(0.09)],
                             startPoint: .topLeading,
                             endPoint: .bottomTrailing
                         )
                     )
-                    .frame(width: 36, height: 36)
+                    .frame(width: 40, height: 40)
+                    .shadow(color: rowAccent.opacity(0.22), radius: 5, x: 0, y: 2)
                 Circle()
-                    .stroke(Color.orange.opacity(0.20), lineWidth: 1)
-                    .frame(width: 36, height: 36)
+                    .stroke(rowAccent.opacity(0.18), lineWidth: 1)
+                    .frame(width: 40, height: 40)
                 Image(systemName: e.variableCategory?.icon ?? "questionmark.circle")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(.orange)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(rowAccent)
             }
+            .padding(.trailing, 10)
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(e.title.isEmpty ? (e.variableCategory?.rawValue ?? "未分類") : e.title)
                     .font(.subheadline.weight(.medium))
                     .lineLimit(1)
+                    .minimumScaleFactor(0.85)
                 HStack(spacing: 5) {
+                    // 日期：tertiarySystemFill Capsule 徽章（對齊 OverviewView.recentRow 日期規格）
                     Text(formatExpenseDate(e.date))
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
+                        .font(.caption2.weight(.medium))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 6).padding(.vertical, 2)
+                        .background(Color(.tertiarySystemFill))
+                        .clipShape(Capsule())
                     if let cat = e.variableCategory {
                         Text(cat.rawValue)
                             .font(.system(size: 10, weight: .semibold))
-                            .foregroundStyle(.orange)
+                            .foregroundStyle(rowAccent)
                             .padding(.horizontal, 6).padding(.vertical, 2)
-                            .background(Color.orange.opacity(0.10))
+                            .background(rowAccent.opacity(0.10))
                             .clipShape(Capsule())
                     }
+                    // 同行人員：粉紅 Capsule（對齊 ExpenseRow.diningMember 規格）
                     if let raw = e.diningMember, !raw.isEmpty {
-                        Text(raw)
-                            .font(.caption2)
-                            .foregroundStyle(.orange)
+                        Label(raw, systemImage: "person.2.fill")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(Color.pink.opacity(0.85))
+                            .padding(.horizontal, 6).padding(.vertical, 2)
+                            .background(Color.pink.opacity(0.10))
+                            .clipShape(Capsule())
                             .lineLimit(1)
                     }
                 }
             }
 
-            Spacer()
+            Spacer(minLength: 8)
 
-            Text(formatCurrency(e.amount))
-                .font(.subheadline.bold())
+            // 金額：ntdWanString + 紅色 Capsule 徽章（對齊 ResumeGiftSection.giftRow 金額規格）
+            Text(e.amount.ntdWanString)
+                .font(.system(size: 14, weight: .bold, design: .rounded))
                 .foregroundStyle(.red)
+                .contentTransition(.numericText())
+                .padding(.horizontal, 8).padding(.vertical, 3)
+                .background(Color.red.opacity(0.10))
+                .clipShape(Capsule())
+                .overlay(Capsule().stroke(Color.red.opacity(0.22), lineWidth: 0.5))
         }
         .padding(.vertical, 4)
     }
 
-    private static let currencyFormatter: NumberFormatter = {
-        let f = NumberFormatter()
-        f.numberStyle = .currency; f.currencySymbol = "NT$"; f.maximumFractionDigits = 0
-        return f
-    }()
-
     private static let expenseDateFormatter: DateFormatter = {
         let f = DateFormatter(); f.dateFormat = "M/d"; return f
     }()
-
-    private func formatCurrency(_ v: Double) -> String {
-        Self.currencyFormatter.string(from: NSNumber(value: v)) ?? "NT$0"
-    }
 
     private func formatExpenseDate(_ d: Date) -> String {
         Self.expenseDateFormatter.string(from: d)
     }
 
     private func sectionHeader(_ cat: MilestoneCategory, count: Int) -> some View {
-        HStack(spacing: 8) {
-            Image(systemName: cat.icon)
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(categoryColor(cat))
+        let accent = categoryColor(cat)
+        return HStack(spacing: 8) {
+            // 標準側條：對齊 daySectionHeader / FinanceOverviewView.allocationSection 規格
+            Capsule()
+                .fill(
+                    LinearGradient(
+                        colors: [accent, accent.opacity(0.55)],
+                        startPoint: .top, endPoint: .bottom
+                    )
+                )
+                .frame(width: 3, height: 16)
+            // 圖示圓角方塊：對齊 FixedExpenseView.categoryHeader 規格
+            ZStack {
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [accent.opacity(0.20), accent.opacity(0.09)],
+                            startPoint: .topLeading, endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 26, height: 26)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 7, style: .continuous)
+                            .stroke(accent.opacity(0.22), lineWidth: 0.75)
+                    )
+                Image(systemName: cat.icon)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(accent)
+            }
             Text(cat.displayName)
-                .font(.subheadline.weight(.semibold))
+                .font(.subheadline.weight(.bold))
                 .foregroundStyle(.primary)
-            Text("\(count)")
+            // 計數膠囊：彩色文字 + 透明底 + 細邊框，對齊 FixedExpenseView.categoryHeader 項目計數徽章
+            Text("\(count) 項")
                 .font(.caption2.weight(.semibold))
-                .foregroundStyle(.white)
-                .padding(.horizontal, 6).padding(.vertical, 2)
-                .background(categoryColor(cat), in: Capsule())
+                .foregroundStyle(accent.opacity(0.85))
+                .padding(.horizontal, 7).padding(.vertical, 2.5)
+                .background(accent.opacity(0.10))
+                .clipShape(Capsule())
+                .overlay(Capsule().stroke(accent.opacity(0.22), lineWidth: 0.6))
             Spacer()
         }
         .textCase(nil)
@@ -543,6 +992,18 @@ struct ResumeView: View {
             .padding(.horizontal).padding(.vertical, 10)
         }
         .background(Color(.systemBackground))
+        // 底部細分隔線：對齊 VariableExpenseView / IncomeView 分類篩選列規格
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(
+                    LinearGradient(
+                        colors: [Color(.separator).opacity(0.22), .clear],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
+                .frame(height: 1)
+        }
     }
 
     private var emptyState: some View {
@@ -584,9 +1045,16 @@ struct ResumeView: View {
                     .foregroundStyle(Color.orange.opacity(0.75))
             }
             .onAppear {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                emptyStatePulseTask?.cancel()
+                emptyStatePulseTask = Task {
+                    try? await Task.sleep(nanoseconds: 300_000_000)
+                    guard !Task.isCancelled else { return }
                     emptyStatePulse = true
                 }
+            }
+            .onDisappear {
+                emptyStatePulseTask?.cancel()
+                emptyStatePulse = false
             }
 
             VStack(spacing: 8) {
@@ -604,6 +1072,29 @@ struct ResumeView: View {
         .padding(.vertical, 40)
     }
 
+    /// 單一分類篩選後零筆時的次要空狀態：輕量圖示＋文字卡片，對齊 FoodMapView
+    /// .restaurantListEmptyState 規格（篩選態不做全頁雙層脈衝光環，僅頁面首次無資料的
+    /// emptyState 才用大型脈衝設計），取代原本裸露 Text 造成的視覺缺口。
+    private func categoryEmptyState(_ cat: MilestoneCategory) -> some View {
+        let accent = categoryColor(cat)
+        return VStack(spacing: 10) {
+            ZStack {
+                Circle()
+                    .fill(accent.opacity(0.12))
+                    .frame(width: 56, height: 56)
+                    .overlay(Circle().stroke(accent.opacity(0.20), lineWidth: 1))
+                Image(systemName: cat.icon)
+                    .font(.system(size: 22, weight: .light))
+                    .foregroundStyle(accent.opacity(0.75))
+            }
+            Text("此分類尚無紀錄")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 36)
+    }
+
     private func milestoneRow(_ item: LifeMilestone) -> some View {
         let accent = categoryColor(item.category)
         return HStack(alignment: .center, spacing: 0) {
@@ -619,22 +1110,23 @@ struct ResumeView: View {
                 .padding(.vertical, 8)
                 .padding(.trailing, 12)
 
-            // 分類圖示圓（漸層 + 細邊框）
+            // 分類圖示圓：44pt 漸層底 + 陰影 + [v3] stroke 細邊框（對齊 CareerView v2 / FamilyView v2 規格）
             ZStack {
                 Circle()
                     .fill(
                         LinearGradient(
-                            colors: [accent.opacity(0.22), accent.opacity(0.08)],
+                            colors: [accent.opacity(0.22), accent.opacity(0.09)],
                             startPoint: .topLeading,
                             endPoint: .bottomTrailing
                         )
                     )
-                    .frame(width: 40, height: 40)
+                    .frame(width: 44, height: 44)
+                    .shadow(color: accent.opacity(0.22), radius: 6, x: 0, y: 3)
                 Circle()
-                    .stroke(accent.opacity(0.26), lineWidth: 1.5)
-                    .frame(width: 40, height: 40)
+                    .stroke(accent.opacity(0.18), lineWidth: 0.75)
+                    .frame(width: 44, height: 44)
                 Image(systemName: item.careerSubCategory?.icon ?? item.category.icon)
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(.system(size: 17, weight: .semibold))
                     .foregroundStyle(accent)
             }
             .padding(.trailing, 12)
@@ -644,15 +1136,17 @@ struct ResumeView: View {
                 Text(item.title)
                     .font(.subheadline.weight(.semibold))
                     .lineLimit(1)
+                    .minimumScaleFactor(0.85)
 
                 HStack(spacing: 5) {
-                    // 分類膠囊徽章
+                    // 分類膠囊徽章：[v3] 補 Capsule stroke 細邊框（對齊 FamilyView v2 / SubordinateView v2 規格）
                     Text(item.category.displayName)
                         .font(.system(size: 10, weight: .semibold))
                         .foregroundStyle(accent)
                         .padding(.horizontal, 7).padding(.vertical, 2.5)
                         .background(accent.opacity(0.12))
                         .clipShape(Capsule())
+                        .overlay(Capsule().stroke(accent.opacity(0.22), lineWidth: 0.6))
 
                     if let sub = item.careerSubCategory {
                         careerSubtitle(item, sub: sub)
@@ -667,16 +1161,112 @@ struct ResumeView: View {
 
             Spacer(minLength: 6)
 
-            // 日期徽章
+            // 日期膠囊：[v3] 補 Capsule stroke 細邊框（對齊 CareerView v2 / SpouseResumeView v2 規格）
             Text(formatDate(item.date))
                 .font(.system(size: 11, weight: .medium, design: .rounded))
                 .foregroundStyle(accent.opacity(0.85))
                 .padding(.horizontal, 8).padding(.vertical, 3)
                 .background(accent.opacity(0.10))
                 .clipShape(Capsule())
+                .overlay(Capsule().stroke(accent.opacity(0.22), lineWidth: 0.5))
         }
         .padding(.vertical, 5)
     }
+
+    // MARK: - [v3] 英雄統計卡（橘色→琥珀漸層）
+
+    /// 頂部英雄統計卡：顯示總里程碑數 + 三格 KPI + 散景裝飾圓 + 玻璃光澤。
+    /// 補齊 ResumeView 是全 App 主要列表頁唯一缺少英雄卡的均值落差。
+    private func resumeHeroCard(_ sorted: [LifeMilestone]) -> some View {
+        let totalCount = sorted.count
+        let cal = Calendar.current
+        let thisYear = cal.component(.year, from: Date())
+        let thisYearCount = sorted.filter { cal.component(.year, from: $0.date) == thisYear }.count
+        let categoryCount = Set(sorted.map(\.category)).count
+        let mostRecent = sorted.first
+
+        return VStack(alignment: .leading, spacing: 0) {
+            // 頂部列：trophy 圖示圓 + 小標 + 今年計數膠囊
+            HStack(spacing: 8) {
+                ZStack {
+                    Circle()
+                        .fill(.white.opacity(0.22))
+                        .frame(width: 36, height: 36)
+                        .overlay(Circle().stroke(.white.opacity(0.30), lineWidth: 0.75))
+                    Image(systemName: "trophy.fill")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(.white)
+                }
+                Text("我的履歷")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.white.opacity(0.88))
+                Spacer()
+                // 今年新增計數膠囊
+                if thisYearCount > 0 {
+                    HStack(spacing: 3) {
+                        Image(systemName: "sparkles")
+                            .font(.system(size: 9, weight: .semibold))
+                        Text("今年 \(thisYearCount) 項")
+                            .font(.caption2.weight(.semibold))
+                    }
+                    .foregroundStyle(.white.opacity(0.90))
+                    .padding(.horizontal, 9).padding(.vertical, 3.5)
+                    .background(.white.opacity(0.22))
+                    .clipShape(Capsule())
+                    .overlay(Capsule().stroke(.white.opacity(0.35), lineWidth: 0.75))
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 14)
+
+            // 總數大字
+            HStack(alignment: .lastTextBaseline, spacing: 6) {
+                Text("\(totalCount)")
+                    .heroBigValueFont()
+                    .foregroundStyle(.white)
+                    .minimumScaleFactor(0.65)
+                    .lineLimit(1)
+                    .contentTransition(.numericText())
+                Text("項里程碑")
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(.white.opacity(0.75))
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 6)
+            .padding(.bottom, 10)
+
+            // 分隔線
+            Rectangle()
+                .fill(.white.opacity(0.20))
+                .frame(height: 0.5)
+                .padding(.horizontal, 16)
+
+            // KPI 橫列（涵蓋分類 / 今年新增 / 最近一筆）
+            HStack(spacing: 0) {
+                HeroKpiCell(label: "涵蓋分類",
+                            value: categoryCount > 0 ? "\(categoryCount) 類" : "—",
+                            icon: "square.grid.2x2.fill")
+                HeroKpiDivider()
+                HeroKpiCell(label: "今年新增",
+                            value: thisYearCount > 0 ? "\(thisYearCount) 項" : "—",
+                            icon: "calendar.badge.plus")
+                HeroKpiDivider()
+                HeroKpiCell(label: "最近一筆",
+                            value: mostRecent.map { formatDate($0.date) } ?? "—",
+                            icon: "clock.fill")
+            }
+            .background(.white.opacity(0.10))
+            .padding(.top, 10)
+            .padding(.bottom, 14)
+            .padding(.horizontal, 8)
+        }
+        .heroCardShell(card: .resume)
+        .overlay(
+            RoundedRectangle(cornerRadius: 20)
+                .stroke(.white.opacity(0.18), lineWidth: 0.75)
+        )
+    }
+
 
     @ViewBuilder
     private func careerSubtitle(_ item: LifeMilestone, sub: CareerSubCategory) -> some View {
@@ -687,7 +1277,12 @@ struct ResumeView: View {
             if let g = item.jobGrade, !g.isEmpty { p.append(g) }
             return p
         }()
-        if sub == .resign {
+        if sub == .sideRole {
+            // 兼任職務的 department/jobTitle/jobGrade 都是空的，走一般分支只會掉到
+            // note；改顯示「主辦單位 · 期間」才是這一列真正的資訊。
+            Text(SideRoleFormat.subtitle(item))
+                .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+        } else if sub == .resign {
             if let m = item.mood, !m.isEmpty {
                 Text(m).font(.caption).foregroundStyle(.secondary).lineLimit(1)
             }
@@ -710,6 +1305,46 @@ struct ResumeView: View {
 
 // MARK: - 新增/編輯里程碑
 
+// MARK: - 美化紀錄（AddMilestoneView）
+// [2026-07] 本次美化方向：
+//   1. realEstateFields「購入價格」列：私有 formatWan(_:) 只到「萬」量級（無條件捨去小數，
+//      未處理億級，例如 1.2 億的房產會顯示成「12000 萬」），與全 App 共用的
+//      Double.ntdWanString（萬/億自動切換、保留一位小數）不一致，是本表單唯一未接上
+//      共用金額量級格式的地方（與 v23.79 AddExpenseView.formatBankBalance 同型問題）。
+//      改呼叫 ntdWanString，並補 lineLimit(1) + minimumScaleFactor(0.75) 防止大字截斷；
+//      移除已無其他呼叫端的 formatWan 死碼。純顯示層調整，未變動購入價格資料或篩選邏輯。
+// [2026-07 v2] Form 內薪水／調薪前後薪水／年費／保費五處 HStack "NT$" 前綴寫法原本各自
+//   手刻（部分甚至擠成單行），是上一輪美化留下的一致性缺口。新增共用 currencyField(_:text:)
+//   row helper（Text("NT$") + TextField + .numberPad 鍵盤），salaryField／careerExtraSection／
+//   financeDetailSection 五處呼叫點統一改用，往後新增金額欄位時比照呼叫即可維持一致樣式。
+//   純顯示層重構，未變動任何欄位的資料綁定、驗證或試算邏輯。
+// [2026-07 v3] 補齊「表單 Section header」缺口：本表單基本資訊／備註／調薪資訊／心境與規劃／
+//   銀行／信用卡／電子票證／會員／證券／保險共 16 個 Section 先前全部是預設純文字
+//   header（Section("...")），是全 App「表單 Section header 補齊」系列（BusinessCardEditor
+//   v25.24／FamilyMembersResumeView v25.31／OrgPersonEditor v25.22／EInvoiceSetupView
+//   v25.21／ChildDetailView v25.01）尚未覆蓋到、且欄位數量最多的一個表單，落後於均值。
+//   新增 milestoneSectionHeader(_:icon:color:)（4pt 漸層 Capsule 側條 + 圖示 + 粗體標題，
+//   規格與 familyEditorSectionHeader 一致），主題色與圖示直接沿用既有分類 enum（bank／
+//   creditCard／securities／insurance 用 FinanceSubCategory.icon + LifeFinanceView.colorFor
+//   同款藍/橘/綠/紫；調薪／心境與規劃比照 CareerView.subColor 的 salaryAdjust＝cyan／
+//   resign＝red），備註一律 secondary，避免另外發明一套不同調色。純標題視覺升級，
+//   Section 內容、欄位綁定、canSave／save() 等既有商業邏輯完全未變動。
+// ─────────────────────────────────────────────
+
+private func milestoneSectionHeader(_ title: String, icon: String, color: Color) -> some View {
+    HStack(spacing: 7) {
+        Capsule()
+            .fill(LinearGradient(colors: [color, color.opacity(0.70)], startPoint: .top, endPoint: .bottom))
+            .frame(width: 4, height: 18)
+        Image(systemName: icon)
+            .font(.system(size: 12, weight: .semibold))
+            .foregroundStyle(color)
+        Text(title)
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(.primary)
+    }
+}
+
 struct AddMilestoneView: View {
     @EnvironmentObject var store: LifeStore
     @EnvironmentObject var financeStore: FinanceStore
@@ -718,6 +1353,8 @@ struct AddMilestoneView: View {
     var editing: LifeMilestone?
     var editingFamily: FamilyMember?
     var initialCategory: MilestoneCategory = .other
+    /// 從「兼任職務」管理中樞按＋進來時帶入，讓表單直接停在兼任子分類
+    var initialCareerSub: CareerSubCategory?
 
     @State private var category: MilestoneCategory = .other
     @State private var title = ""
@@ -756,9 +1393,20 @@ struct AddMilestoneView: View {
     @State private var mood = ""
     @State private var futurePlan = ""
     @State private var isManagerial = false
+    /// 管理職的管理單位（單選文字；可 key 或點部門膠囊帶入）
+    @State private var managedUnit = ""
     @State private var salaryText = ""
     @State private var salaryBeforeText = ""
     @State private var salaryAfterText = ""
+
+    // 兼任職務專屬
+    @State private var sideRoleName = ""
+    @State private var sideRoleOrg = ""
+    @State private var sideRoleScope = ""
+    @State private var hasSideRoleEnd = false
+    @State private var sideRoleEndDate = Date()
+    @State private var sideRoleIsLead = false
+    @State private var sideRoleWorkspaceEnabled = false
 
     // 理財專屬
     @State private var financeSub: FinanceSubCategory = .bank
@@ -784,6 +1432,7 @@ struct AddMilestoneView: View {
     @State private var insType: InsuranceType = .life
     @State private var premiumText = ""
     @State private var beneficiary = ""
+    @State private var isSaving = false
 
     private var isFamily: Bool { category == .family }
     private var isRealEstate: Bool { category == .realEstate }
@@ -805,6 +1454,7 @@ struct AddMilestoneView: View {
                 return (Double(salaryBeforeText) ?? 0) > 0 && (Double(salaryAfterText) ?? 0) > 0
             case .transfer: return !department.trimmingCharacters(in: .whitespaces).isEmpty
             case .resign: return true
+            case .sideRole: return !sideRoleName.trimmingCharacters(in: .whitespaces).isEmpty
             }
         }
         if isFinance {
@@ -821,12 +1471,17 @@ struct AddMilestoneView: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("基本資訊") {
+                Section {
                     Picker("分類", selection: $category) {
                         ForEach(MilestoneCategory.allCases) { cat in
                             Label(cat.displayName, systemImage: cat.icon).tag(cat)
                         }
                     }
+                    // 編輯既有項目時鎖定分類：save() 是依「進入編輯時的分類」各自寫回
+                    // editing / editingFamily 其中一個既有記錄，若編輯中途切換分類，
+                    // 會變成用新 UUID 呼叫 store.add() 建立另一筆全新記錄，原記錄則完全
+                    // 未被更新或刪除，形成孤兒記錄 + 使用者的編輯內容不翼而飛。
+                    .disabled(editing != nil || editingFamily != nil)
 
                     if isFamily {
                         familyFields
@@ -840,6 +1495,8 @@ struct AddMilestoneView: View {
                         TextField("標題", text: $title)
                         DatePicker("日期", selection: $date, displayedComponents: .date)
                     }
+                } header: {
+                    milestoneSectionHeader("基本資訊", icon: "person.text.rectangle.fill", color: .indigo)
                 }
                 if isFinance {
                     financeDetailSection
@@ -848,8 +1505,10 @@ struct AddMilestoneView: View {
                     careerExtraSection
                 }
                 if !isFamily && !isRealEstate && !isCareer && !isFinance {
-                    Section("備註") {
+                    Section {
                         TextField("選填備註", text: $note, axis: .vertical).lineLimit(3)
+                    } header: {
+                        milestoneSectionHeader("備註", icon: "note.text", color: .secondary)
                     }
                 }
             }
@@ -861,9 +1520,16 @@ struct AddMilestoneView: View {
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button("取消") { dismiss() } }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button(editing != nil || editingFamily != nil ? "儲存" : "新增") { save() }
-                        .bold().foregroundStyle(.green)
-                        .disabled(!canSave)
+                    // v25.102 美化：isSaving 忙碌守衛補齊載入視覺，對齊 LifeFinanceView
+                    // v25.101／MyCalendarView v25.100 等全 App 儲存按鈕載入狀態規格。
+                    HStack(spacing: 6) {
+                        if isSaving {
+                            ProgressView().scaleEffect(0.7).tint(.green)
+                        }
+                        Button(editing != nil || editingFamily != nil ? "儲存" : "新增") { save() }
+                            .bold().foregroundStyle(.green)
+                            .disabled(!canSave || isSaving)
+                    }
                 }
             }
             .onAppear { loadEditing() }
@@ -921,12 +1587,12 @@ struct AddMilestoneView: View {
         if familyRole == .spouse {
             Toggle("填入結婚時間", isOn: $hasMarriageDate)
             if hasMarriageDate {
-                DatePicker("結婚日期", selection: $marriageDate, displayedComponents: .date)
+                DatePicker("結婚日期", selection: $marriageDate, in: ...Date(), displayedComponents: .date)
             }
             Toggle("已離婚", isOn: $isDivorced)
             if isDivorced {
                 DatePicker("離婚日期", selection: $divorceDate,
-                           in: (hasMarriageDate ? marriageDate : Date.distantPast)...,
+                           in: (hasMarriageDate ? marriageDate : Date.distantPast)...Date(),
                            displayedComponents: .date)
             }
         } else if familyRole == .otherRelative {
@@ -940,7 +1606,7 @@ struct AddMilestoneView: View {
             TextField("備註（如 關係說明）", text: $relativeNote, axis: .vertical)
                 .lineLimit(2...4)
         } else {
-            DatePicker("出生日期", selection: $familyBirthday, displayedComponents: .date)
+            DatePicker("出生日期", selection: $familyBirthday, in: ...Date(), displayedComponents: .date)
         }
     }
 
@@ -967,7 +1633,10 @@ struct AddMilestoneView: View {
                 if let id = selectedRealEstateId,
                    let re = financeStore.realEstates.first(where: { $0.id == id }) {
                     HStack { Text("購入價格"); Spacer()
-                        Text(formatWan(re.purchasePrice)).foregroundStyle(.secondary)
+                        Text(re.purchasePrice > 0 ? re.purchasePrice.ntdWanString : "—")
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.75)
                     }
                     HStack { Text("購入日期"); Spacer()
                         Text(formatDateOnly(re.purchaseDate)).foregroundStyle(.secondary)
@@ -997,7 +1666,7 @@ struct AddMilestoneView: View {
     private var careerFields: some View {
         Picker("子分類", selection: $careerSub) {
             ForEach(CareerSubCategory.allCases) { sub in
-                Label(sub.rawValue, systemImage: sub.icon).tag(sub)
+                Label(sub.title, systemImage: sub.icon).tag(sub)
             }
         }
 
@@ -1021,23 +1690,70 @@ struct AddMilestoneView: View {
             salaryField
         case .resign:
             EmptyView()
+        case .sideRole:
+            // 兼任職務的欄位全部放在下方 sideRoleSections 的獨立 Section，
+            // 不擠進「基本資訊」——那個 Section 已經是 Picker + 多層條件分支的
+            // 複合泛型，再塞一組欄位進去有型別推導爆掉的風險。
+            EmptyView()
         }
 
         if careerSub != .salaryAdjust {
-            DatePicker("日期", selection: $date, displayedComponents: .date)
+            DatePicker(careerSub == .sideRole ? "就任日期" : "日期",
+                       selection: $date, displayedComponents: .date)
         }
 
         if careerSub == .join || careerSub == .promote || careerSub == .transfer {
             Toggle("是否為管理職", isOn: $isManagerial)
+            // [v25.293] 管理職打開才長出管理單位（單選）：可自己 key，也可點下方
+            // 公司組織的部門膠囊快速帶入；名稱與組織部門相符時，該部門的
+            // 管理人員名單會自動顯示「我」。
+            if isManagerial {
+                TextField("管理單位（例：製造一課，選填）", text: $managedUnit)
+                if !store.departments.isEmpty {
+                    FlexibleChipWrap(items: managedUnitSuggestions) { name in
+                        managedUnitChip(name)
+                    }
+                    .padding(.vertical, 2)
+                }
+            }
+        }
+    }
+
+    /// 部門膠囊候選：公司組織的部門名稱（去空白、去重、保留原順序）
+    private var managedUnitSuggestions: [String] {
+        var seen = Set<String>()
+        return store.departments
+            .map { $0.name.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty && seen.insert($0).inserted }
+    }
+
+    /// 管理單位膠囊：點選帶入（再點取消）——單選，一個管理職一個單位
+    private func managedUnitChip(_ name: String) -> some View {
+        let on = managedUnit.trimmingCharacters(in: .whitespaces) == name
+        return Button {
+            managedUnit = on ? "" : name
+        } label: {
+            Text(name)
+                .font(.system(size: 12, weight: .semibold))
+                .padding(.horizontal, 9).padding(.vertical, 4)
+                .background(on ? Color.orange.opacity(0.18) : Color(.tertiarySystemFill), in: Capsule())
+                .foregroundStyle(on ? Color.orange : Color.secondary)
+                .overlay(Capsule().stroke(on ? Color.orange.opacity(0.4) : .clear, lineWidth: 1))
+        }
+        .buttonStyle(.borderless)
+    }
+
+    /// 「NT$」前綴金額輸入列，供薪水／調薪前後薪水／年費／保費共用，統一前綴文字樣式與鍵盤類型。
+    private func currencyField(_ placeholder: String, text: Binding<String>) -> some View {
+        HStack {
+            Text("NT$").foregroundStyle(.secondary)
+            TextField(placeholder, text: text)
+                .keyboardType(.numberPad)
         }
     }
 
     private var salaryField: some View {
-        HStack {
-            Text("NT$").foregroundStyle(.secondary)
-            TextField("薪水（選填）", text: $salaryText)
-                .keyboardType(.numberPad)
-        }
+        currencyField("薪水（選填）", text: $salaryText)
     }
 
     /// 職稱 / 職等編號連動「部門職等」設定。
@@ -1106,17 +1822,9 @@ struct AddMilestoneView: View {
     @ViewBuilder
     private var careerExtraSection: some View {
         if careerSub == .salaryAdjust {
-            Section("調薪資訊") {
-                HStack {
-                    Text("NT$").foregroundStyle(.secondary)
-                    TextField("調薪前薪水", text: $salaryBeforeText)
-                        .keyboardType(.numberPad)
-                }
-                HStack {
-                    Text("NT$").foregroundStyle(.secondary)
-                    TextField("調薪後薪水", text: $salaryAfterText)
-                        .keyboardType(.numberPad)
-                }
+            Section {
+                currencyField("調薪前薪水", text: $salaryBeforeText)
+                currencyField("調薪後薪水", text: $salaryAfterText)
                 HStack {
                     Text("幅度")
                     Spacer()
@@ -1130,20 +1838,135 @@ struct AddMilestoneView: View {
                     }
                 }
                 DatePicker("日期", selection: $date, displayedComponents: .date)
+            } header: {
+                milestoneSectionHeader("調薪資訊", icon: "dollarsign.arrow.circlepath", color: .cyan)
             }
-            Section("備註") {
+            Section {
                 TextField("選填備註", text: $note, axis: .vertical).lineLimit(3)
+            } header: {
+                milestoneSectionHeader("備註", icon: "note.text", color: .secondary)
             }
+        } else if careerSub == .sideRole {
+            sideRoleSections
         } else if careerSub == .resign {
-            Section("心境與規劃") {
+            Section {
                 TextField("心境", text: $mood, axis: .vertical).lineLimit(3)
                 TextField("未來規劃", text: $futurePlan, axis: .vertical).lineLimit(3)
+            } header: {
+                milestoneSectionHeader("心境與規劃", icon: "arrow.right.square", color: .red)
             }
         } else {
-            Section("備註") {
+            Section {
                 TextField("選填備註", text: $note, axis: .vertical).lineLimit(3)
+            } header: {
+                milestoneSectionHeader("備註", icon: "note.text", color: .secondary)
             }
         }
+    }
+
+    /// 兼任職務的表單區塊。刻意拆成三個扁平 Section、每個 Section 內只有單層欄位——
+    /// 不做巢狀條件包裝，避免加重 Form 的型別推導負擔。
+    @ViewBuilder
+    private var sideRoleSections: some View {
+        Section {
+            TextField("職務名稱（例：尾牙負責人）", text: $sideRoleName)
+            HStack {
+                TextField("主辦單位（例：員工福委會）", text: $sideRoleOrg)
+                orgSuggestionMenu
+            }
+            TextField("負責範圍", text: $sideRoleScope, axis: .vertical).lineLimit(3)
+        } header: {
+            milestoneSectionHeader("兼任職務", icon: "person.badge.plus", color: .indigo)
+        } footer: {
+            Text("與本職並行的額外職務。同時兼任多個就各記一筆，各自有自己的期間與管理頁。")
+        }
+
+        Section {
+            Toggle("已卸任", isOn: $hasSideRoleEnd)
+            if hasSideRoleEnd {
+                // in: date... 只夾住渲染當下的下限。使用者可以先設卸任日、
+                // 再回頭把就任日改晚，所以存檔時還會再夾一次（見 save()）。
+                DatePicker("卸任日期", selection: $sideRoleEndDate,
+                           in: date..., displayedComponents: .date)
+            }
+        } header: {
+            milestoneSectionHeader("任期", icon: "calendar", color: .indigo)
+        } footer: {
+            Text(hasSideRoleEnd ? "卸任後仍會保留在職涯紀錄裡。" : "未勾選代表目前仍在任。")
+        }
+
+        Section {
+            Toggle("我是這個職務的主責者", isOn: $sideRoleIsLead)
+            if sideRoleIsLead {
+                Toggle("啟用專屬管理頁面", isOn: $sideRoleWorkspaceEnabled)
+            }
+        } header: {
+            milestoneSectionHeader("主責與管理", icon: "checkmark.seal.fill", color: .indigo)
+        } footer: {
+            Text(sideRoleFooterText)
+        }
+    }
+
+    /// 主辦單位建議選單：公司內部單位（部門表）＋ 過去填過的外部單位。
+    /// 做成選單而不是 Picker，是因為主辦單位常常是不在部門表裡的外部組織
+    /// （協會、工會、社團），必須永遠能自由輸入——選單只是省去重打。
+    @ViewBuilder
+    private var orgSuggestionMenu: some View {
+        let s = store.sideRoleOrgSuggestions()
+        if s.internalUnits.isEmpty && s.usedBefore.isEmpty {
+            EmptyView()
+        } else {
+            Menu {
+                if !s.internalUnits.isEmpty {
+                    Section("公司單位") {
+                        ForEach(s.internalUnits, id: \.self) { name in
+                            Button(name) { sideRoleOrg = name }
+                        }
+                    }
+                }
+                if !s.usedBefore.isEmpty {
+                    Section("用過的單位") {
+                        ForEach(s.usedBefore, id: \.self) { name in
+                            Button(name) { sideRoleOrg = name }
+                        }
+                    }
+                }
+                if !sideRoleOrg.isEmpty {
+                    Section {
+                        Button(role: .destructive) { sideRoleOrg = "" } label: {
+                            Label("清除", systemImage: "xmark.circle")
+                        }
+                    }
+                }
+            } label: {
+                Image(systemName: "list.bullet.circle.fill")
+                    .font(.system(size: 20))
+                    .foregroundStyle(.indigo)
+            }
+        }
+    }
+
+    /// 開關說明。關閉時如果底下已經有內容，要把實際筆數講出來——
+    /// 只寫一句「資料會保留」沒有憑據，使用者看到內容消失還是會判定資料不見了。
+    private var sideRoleFooterText: String {
+        guard sideRoleIsLead else {
+            return "只有主責者才需要管理頁面；協辦或掛名的職務維持關閉即可。"
+        }
+        if sideRoleWorkspaceEnabled {
+            return "會在「職涯」的功能列出現「兼任職務」入口，裡面可以管待辦、成員名單、會議紀錄與重要日期。"
+        }
+        let c = editing?.sideRoleContentCount
+            ?? (tasks: 0, members: 0, meetings: 0, keyDates: 0, resolutions: 0)
+        var parts: [String] = []
+        if c.tasks > 0 { parts.append("\(c.tasks) 則待辦") }
+        if c.members > 0 { parts.append("\(c.members) 位成員") }
+        if c.meetings > 0 { parts.append("\(c.meetings) 則會議紀錄") }
+        if c.resolutions > 0 { parts.append("\(c.resolutions) 則重大決議") }
+        if c.keyDates > 0 { parts.append("\(c.keyDates) 個重要日期") }
+        if !parts.isEmpty {
+            return "目前保留 " + parts.joined(separator: "、") + "，重新開啟就會看到。關閉只是隱藏入口，不會刪除任何內容。"
+        }
+        return "開啟後會有一個專屬頁面，可以管待辦、成員名單、會議紀錄與重要日期。"
     }
 
     // MARK: - 導航標題
@@ -1163,7 +1986,7 @@ struct AddMilestoneView: View {
     private var financeDetailSection: some View {
         switch financeSub {
         case .bank:
-            Section("銀行資訊") {
+            Section {
                 TextField("銀行名稱", text: $bankName)
                 TextField("分行（選填）", text: $branchName)
                 TextField("帳號（選填）", text: $accountNumber).keyboardType(.numberPad)
@@ -1171,17 +1994,21 @@ struct AddMilestoneView: View {
                     ForEach(BankAccountType.allCases) { t in Text(t.rawValue).tag(t) }
                 }
                 DatePicker("開戶日期", selection: $date, displayedComponents: .date)
+            } header: {
+                milestoneSectionHeader("銀行資訊", icon: FinanceSubCategory.bank.icon, color: .blue)
             }
-            Section("備註") {
+            Section {
                 TextField("選填備註", text: $note, axis: .vertical).lineLimit(3)
+            } header: {
+                milestoneSectionHeader("備註", icon: "note.text", color: .secondary)
             }
         case .creditCard:
-            Section("信用卡資訊") {
+            Section {
                 bankNamePicker
                 TextField("卡別名稱（如：御璽卡）", text: $cardName)
                 TextField("卡號末四碼（選填）", text: $cardLastFour).keyboardType(.numberPad)
                 HStack { TextField("額度", text: $creditLimitText).keyboardType(.numberPad); Text("萬元").foregroundStyle(.secondary) }
-                HStack { Text("NT$").foregroundStyle(.secondary); TextField("年費", text: $annualFeeText).keyboardType(.numberPad) }
+                currencyField("年費", text: $annualFeeText)
                 HStack { TextField("帳單日", text: $billingDayText).keyboardType(.numberPad); Text("日").foregroundStyle(.secondary) }
                 HStack { TextField("繳款日", text: $paymentDayText).keyboardType(.numberPad); Text("日").foregroundStyle(.secondary) }
                 DatePicker("核卡日期", selection: $date, displayedComponents: .date)
@@ -1189,46 +2016,62 @@ struct AddMilestoneView: View {
                 if hasExpiryDate {
                     expiryMonthYearPicker
                 }
+            } header: {
+                milestoneSectionHeader("信用卡資訊", icon: FinanceSubCategory.creditCard.icon, color: .orange)
             }
-            Section("綁定電子票證") {
+            Section {
                 TextField("悠遊卡卡號（選填）", text: $easyCardNumber).keyboardType(.numbersAndPunctuation)
                 TextField("一卡通卡號（選填）", text: $iPassNumber).keyboardType(.numbersAndPunctuation)
+            } header: {
+                milestoneSectionHeader("綁定電子票證", icon: "wallet.pass.fill", color: .teal)
             }
-            Section("綁定會員") {
+            Section {
                 TextField("Happy Go 卡號（選填）", text: $happyGoNumber).keyboardType(.numbersAndPunctuation)
+            } header: {
+                milestoneSectionHeader("綁定會員", icon: "star.circle.fill", color: .pink)
             }
-            Section("備註") {
+            Section {
                 TextField("選填備註", text: $note, axis: .vertical).lineLimit(3)
+            } header: {
+                milestoneSectionHeader("備註", icon: "note.text", color: .secondary)
             }
         case .securities:
-            Section("證券資訊") {
+            Section {
                 TextField("券商名稱", text: $bankName)
                 TextField("帳號（選填）", text: $accountNumber).keyboardType(.numberPad)
                 Picker("帳戶類型", selection: $secAccType) {
                     ForEach(SecuritiesAccountType.allCases) { t in Text(t.rawValue).tag(t) }
                 }
                 DatePicker("開戶日期", selection: $date, displayedComponents: .date)
+            } header: {
+                milestoneSectionHeader("證券資訊", icon: FinanceSubCategory.securities.icon, color: .green)
             }
-            Section("備註") {
+            Section {
                 TextField("選填備註", text: $note, axis: .vertical).lineLimit(3)
+            } header: {
+                milestoneSectionHeader("備註", icon: "note.text", color: .secondary)
             }
         case .insurance:
-            Section("保險資訊") {
+            Section {
                 TextField("保險公司", text: $insuranceCompany)
                 TextField("保單號碼（選填）", text: $policyNumber)
                 Picker("險種", selection: $insType) {
                     ForEach(InsuranceType.allCases) { t in Text(t.rawValue).tag(t) }
                 }
-                HStack { Text("NT$").foregroundStyle(.secondary); TextField("保費", text: $premiumText).keyboardType(.numberPad) }
+                currencyField("保費", text: $premiumText)
                 DatePicker("生效日", selection: $date, displayedComponents: .date)
                 Toggle("填入到期日", isOn: $hasExpiryDate)
                 if hasExpiryDate {
                     DatePicker("到期日", selection: $expiryDate, displayedComponents: .date)
                 }
                 TextField("受益人（選填）", text: $beneficiary)
+            } header: {
+                milestoneSectionHeader("保險資訊", icon: FinanceSubCategory.insurance.icon, color: .purple)
             }
-            Section("備註") {
+            Section {
                 TextField("選填備註", text: $note, axis: .vertical).lineLimit(3)
+            } header: {
+                milestoneSectionHeader("備註", icon: "note.text", color: .secondary)
             }
         }
     }
@@ -1323,7 +2166,19 @@ struct AddMilestoneView: View {
 
     // MARK: - 儲存
 
+    /// 只有在 careerSub／financeSub 對應的表單分支才會顯示、可能被使用者填寫的欄位，
+    /// 若不比照 isManagerial／salary 等既有欄位一併依子分類條件化，切換子分類（不影響／不清空
+    /// 這些 @State）時，前一個子分類殘留的文字會被原封不動存進新子分類的紀錄裡
+    /// （例如先在「升遷」填了職稱，切到「調薪」送出，調薪紀錄會被存進不相關的舊職稱）。
+    private func trimmedOrNil(_ text: String, when condition: Bool) -> String? {
+        guard condition else { return nil }
+        let t = text.trimmingCharacters(in: .whitespaces)
+        return t.isEmpty ? nil : t
+    }
+
     private func save() {
+        guard !isSaving else { return }
+        isSaving = true
         if isFamily {
             let isSpouse = familyRole == .spouse
             let isOther = familyRole == .otherRelative
@@ -1343,15 +2198,43 @@ struct AddMilestoneView: View {
                 familySide: familyRole.supportsFamilySide ? familySide : nil,
                 spouseId: familyRole.spouseCandidateRole != nil ? familySpouseId : nil
             )
-            // 保留既有的 dailyRecords / childRecords / familyEvents / familyPhotos
+            // 保留所有「不在這張表單上、但掛在這位成員底下」的集合。
+            //
+            // ⚠️ member 是用 memberwise init 整個重建的，沒在這裡帶回的欄位一律變成
+            //    預設空值。原本漏了 vaccinations——編輯小孩的姓名或生日，
+            //    疫苗接種紀錄就會被整批清空（那份資料是在兒童疫苗頁另外填的，
+            //    這張表單上完全看不到，所以出事也不會當場察覺）。
+            //    新增 agreements 時一併補上。日後再往 FamilyMember 加集合欄位，
+            //    這裡一定要同步補一行。
             var preserved = member
             if let original = editingFamily {
                 preserved.childRecords = original.childRecords
                 preserved.dailyRecords = original.dailyRecords
                 preserved.familyEvents = original.familyEvents
                 preserved.familyPhotos = original.familyPhotos
+                preserved.vaccinations = original.vaccinations
+                preserved.agreements = original.agreements
             }
             if editingFamily != nil { store.update(preserved) } else { store.add(preserved) }
+            // 解除舊配對關係，避免殘留失效引用（比照 LifeStore.deleteFamilyMember 解除
+            // spouseId 的既有寫法）：
+            // ① 本人原本配對的對象若換了（或整個清空），原對象的 spouseId 要一併清掉，
+            //    否則會永遠單向指向本人（本人已改指別人或不再有配偶）。
+            if let oldSpouseId = editingFamily?.spouseId, oldSpouseId != familySpouseId,
+               var oldSpouse = store.familyMembers.first(where: { $0.id == oldSpouseId }),
+               oldSpouse.spouseId == memberId {
+                oldSpouse.spouseId = nil
+                store.update(oldSpouse)
+            }
+            // ② 新選的另一半若原本配對別人，那個人的 spouseId 也要清掉，
+            //    否則會同時被兩個人的 spouseId 指到。
+            if let spouseId = familySpouseId,
+               var otherOldSpouse = store.familyMembers.first(where: {
+                   $0.spouseId == spouseId && $0.id != memberId
+               }) {
+                otherOldSpouse.spouseId = nil
+                store.update(otherOldSpouse)
+            }
             // 雙向綁定：把選中的另一半也指向自己（同步補位）
             if let spouseId = familySpouseId,
                var other = store.familyMembers.first(where: { $0.id == spouseId }),
@@ -1376,22 +2259,49 @@ struct AddMilestoneView: View {
                 guard let v = Double(salaryText), v > 0 else { return nil }
                 return v
             }()
-            let item = LifeMilestone(
+            // 對齊 careerFields 表單實際顯示這些欄位的子分類，避免切換子分類時把
+            // 前一個子分類殘留的文字誤存進新子分類的紀錄。
+            let hasTitleGrade = [.join, .promote, .transfer, .demote].contains(careerSub)
+            let isSide = careerSub == .sideRole
+            var item = LifeMilestone(
                 id: editing?.id ?? UUID(),
                 title: autoTitle, date: date, category: .career,
                 note: careerSub == .resign ? "" : note.trimmingCharacters(in: .whitespaces),
                 careerSubCategory: careerSub,
-                companyName: companyName.trimmingCharacters(in: .whitespaces).isEmpty ? nil : companyName.trimmingCharacters(in: .whitespaces),
-                department: department.trimmingCharacters(in: .whitespaces).isEmpty ? nil : department.trimmingCharacters(in: .whitespaces),
-                jobTitle: jobTitle.trimmingCharacters(in: .whitespaces).isEmpty ? nil : jobTitle.trimmingCharacters(in: .whitespaces),
-                jobGrade: jobGrade.trimmingCharacters(in: .whitespaces).isEmpty ? nil : jobGrade.trimmingCharacters(in: .whitespaces),
-                mood: mood.trimmingCharacters(in: .whitespaces).isEmpty ? nil : mood.trimmingCharacters(in: .whitespaces),
-                futurePlan: futurePlan.trimmingCharacters(in: .whitespaces).isEmpty ? nil : futurePlan.trimmingCharacters(in: .whitespaces),
+                companyName: trimmedOrNil(companyName, when: careerSub == .join),
+                department: trimmedOrNil(department, when: careerSub == .join || careerSub == .transfer),
+                jobTitle: trimmedOrNil(jobTitle, when: hasTitleGrade),
+                jobGrade: trimmedOrNil(jobGrade, when: hasTitleGrade),
+                mood: trimmedOrNil(mood, when: careerSub == .resign),
+                futurePlan: trimmedOrNil(futurePlan, when: careerSub == .resign),
                 isManagerial: managerial,
                 salary: salaryVal,
                 salaryBefore: careerSub == .salaryAdjust ? Double(salaryBeforeText) : nil,
                 salaryAfter: careerSub == .salaryAdjust ? Double(salaryAfterText) : nil
             )
+            // 管理單位：只在「是管理職」時存（比照 trimmedOrNil 的子分類條件化原則）
+            item.managedUnit = trimmedOrNil(managedUnit, when: managerial == true)
+            // 兼任職務欄位（不在 memberwise init 裡，逐一指派）
+            item.sideRoleName = trimmedOrNil(sideRoleName, when: isSide)
+            item.sideRoleOrg = trimmedOrNil(sideRoleOrg, when: isSide)
+            item.sideRoleScope = trimmedOrNil(sideRoleScope, when: isSide)
+            // 卸任日再夾一次：DatePicker 的 in: date... 只夾住渲染當下，
+            // 使用者可以先設卸任日再把就任日改晚，那樣會存進「卸任早於就任」，
+            // 導致期間顯示顛倒、任期算成負數、在任判定錯誤，而且全程沒有任何提示。
+            item.sideRoleEndDate = (isSide && hasSideRoleEnd) ? max(date, sideRoleEndDate) : nil
+            item.sideRoleIsLead = isSide ? sideRoleIsLead : nil
+            item.sideRoleWorkspaceEnabled = (isSide && sideRoleIsLead) ? sideRoleWorkspaceEnabled : nil
+            // ⚠️ 管理頁的四份資料**無條件**從原紀錄帶回，不依 isSide 條件化。
+            //    這個 item 是整個重建的，沒帶回就等於每次編輯都把使用者累積的
+            //    待辦／名單／會議／重要日期全部清空。不條件化的用意是：連使用者
+            //    把子分類切走再切回來，資料都還在。
+            item.sideRoleTasks = editing?.sideRoleTasks
+            item.sideRoleMembers = editing?.sideRoleMembers
+            item.sideRoleMeetings = editing?.sideRoleMeetings
+            item.sideRoleKeyDates = editing?.sideRoleKeyDates
+            // [修正 v25.293] 重大決議先前漏在這份帶回清單——編輯兼任職務里程碑
+            // 存檔會把累積的重大決議整批清空
+            item.sideRoleResolutions = editing?.sideRoleResolutions
             if editing != nil { store.update(item) } else { store.add(item) }
         } else if isFinance {
             let autoTitle = generateFinanceTitle()
@@ -1401,26 +2311,29 @@ struct AddMilestoneView: View {
                 title: autoTitle, date: date, category: .achievement,
                 note: t,
                 financeSubCategory: financeSub,
-                bankName: bankName.trimmingCharacters(in: .whitespaces).isEmpty ? nil : bankName.trimmingCharacters(in: .whitespaces),
-                branchName: branchName.trimmingCharacters(in: .whitespaces).isEmpty ? nil : branchName.trimmingCharacters(in: .whitespaces),
-                accountNumber: accountNumber.trimmingCharacters(in: .whitespaces).isEmpty ? nil : accountNumber.trimmingCharacters(in: .whitespaces),
+                // 對齊 financeDetailSection 表單實際顯示這些欄位的子分類，避免切換子分類時把
+                // 前一個子分類殘留的文字誤存進新子分類的紀錄（例如先在「信用卡」填了卡號末四碼，
+                // 切到「保險」送出，保單紀錄會被存進不相關的舊卡號）。
+                bankName: trimmedOrNil(bankName, when: financeSub != .insurance),
+                branchName: trimmedOrNil(branchName, when: financeSub == .bank),
+                accountNumber: trimmedOrNil(accountNumber, when: financeSub == .bank || financeSub == .securities),
                 bankAccountType: financeSub == .bank ? bankAccType : nil,
-                cardName: cardName.trimmingCharacters(in: .whitespaces).isEmpty ? nil : cardName.trimmingCharacters(in: .whitespaces),
-                cardLastFour: cardLastFour.trimmingCharacters(in: .whitespaces).isEmpty ? nil : cardLastFour.trimmingCharacters(in: .whitespaces),
+                cardName: trimmedOrNil(cardName, when: financeSub == .creditCard),
+                cardLastFour: trimmedOrNil(cardLastFour, when: financeSub == .creditCard),
                 // 信用卡額度輸入值單位為「萬元」，存進 LifeMilestone 時換算回元
                 creditLimit: financeSub == .creditCard
                     ? (Double(creditLimitText).map { $0 * 10000 })
-                    : Double(creditLimitText),
-                annualFee: Double(annualFeeText),
-                billingDay: Int(billingDayText),
-                paymentDay: Int(paymentDayText),
-                expiryDate: hasExpiryDate ? expiryDate : nil,
+                    : nil,
+                annualFee: financeSub == .creditCard ? Double(annualFeeText) : nil,
+                billingDay: financeSub == .creditCard ? Int(billingDayText) : nil,
+                paymentDay: financeSub == .creditCard ? Int(paymentDayText) : nil,
+                expiryDate: (financeSub == .creditCard || financeSub == .insurance) && hasExpiryDate ? expiryDate : nil,
                 securitiesAccountType: financeSub == .securities ? secAccType : nil,
-                insuranceCompany: insuranceCompany.trimmingCharacters(in: .whitespaces).isEmpty ? nil : insuranceCompany.trimmingCharacters(in: .whitespaces),
-                policyNumber: policyNumber.trimmingCharacters(in: .whitespaces).isEmpty ? nil : policyNumber.trimmingCharacters(in: .whitespaces),
+                insuranceCompany: trimmedOrNil(insuranceCompany, when: financeSub == .insurance),
+                policyNumber: trimmedOrNil(policyNumber, when: financeSub == .insurance),
                 insuranceType: financeSub == .insurance ? insType : nil,
-                premiumAmount: Double(premiumText),
-                beneficiary: beneficiary.trimmingCharacters(in: .whitespaces).isEmpty ? nil : beneficiary.trimmingCharacters(in: .whitespaces),
+                premiumAmount: financeSub == .insurance ? Double(premiumText) : nil,
+                beneficiary: trimmedOrNil(beneficiary, when: financeSub == .insurance),
                 linkedBankMilestoneId: financeSub == .creditCard ? selectedLinkedBankId : nil
             )
             // 編輯既有財富卡時保留銀行存取紀錄（init 沒提供 bankDeposits 參數，需手動帶回）
@@ -1481,14 +2394,16 @@ struct AddMilestoneView: View {
         case .resign:
             let company = co.isEmpty ? (latestCompanyName ?? "") : co
             return company.isEmpty ? "離職" : "從 \(company) 離職"
+        case .sideRole:
+            // 標題一律帶年份。年度性職務（尾牙負責人）每年一筆，
+            // 不帶年份的話職涯列表會出現一整排一模一樣的字，只剩右側日期膠囊能分辨。
+            let rn = sideRoleName.trimmingCharacters(in: .whitespaces)
+            let year = Calendar.current.component(.year, from: date)
+            return rn.isEmpty ? "兼任職務（\(year)）" : "兼任 \(rn)（\(year)）"
         }
     }
 
     // MARK: - 工具
-
-    private func formatWan(_ v: Double) -> String {
-        v > 0 ? String(format: "%.0f 萬", v / 10000) : "—"
-    }
 
     private static let dateOnlyFormatter: DateFormatter = {
         let f = DateFormatter(); f.dateFormat = "yyyy/M/d"; return f
@@ -1511,9 +2426,18 @@ struct AddMilestoneView: View {
             mood = e.mood ?? ""
             futurePlan = e.futurePlan ?? ""
             isManagerial = e.isManagerial ?? false
+            managedUnit = e.managedUnit ?? ""
             if let s = e.salary, s > 0 { salaryText = String(format: "%.0f", s) }
             if let sb = e.salaryBefore, sb > 0 { salaryBeforeText = String(format: "%.0f", sb) }
             if let sa = e.salaryAfter, sa > 0 { salaryAfterText = String(format: "%.0f", sa) }
+            // 兼任職務欄位
+            sideRoleName = e.sideRoleName ?? ""
+            sideRoleOrg = e.sideRoleOrg ?? ""
+            sideRoleScope = e.sideRoleScope ?? ""
+            hasSideRoleEnd = e.sideRoleEndDate != nil
+            if let end = e.sideRoleEndDate { sideRoleEndDate = end }
+            sideRoleIsLead = e.sideRoleIsLead ?? false
+            sideRoleWorkspaceEnabled = e.sideRoleWorkspaceEnabled ?? false
             // 理財欄位
             if let fs = e.financeSubCategory { financeSub = fs }
             bankName = e.bankName ?? ""
@@ -1563,6 +2487,18 @@ struct AddMilestoneView: View {
             return
         }
         category = initialCategory
+        // 從「兼任職務」管理中樞按＋進來：直接停在兼任子分類，並預先勾好主責者與
+        // 管理頁開關。少了這兩個預設值，使用者在中樞裡新增完一筆、關掉表單後，
+        // 那筆不會出現在中樞裡（中樞只列已啟用管理頁的），畫面上也不會有任何說明——
+        // 從中樞進來的語意本來就是「我要為這個職務開一個管理頁」。
+        // 從職涯頁一般新增時 initialCareerSub 是 nil，預設仍然是關閉的。
+        if let s = initialCareerSub {
+            careerSub = s
+            if s == .sideRole {
+                sideRoleIsLead = true
+                sideRoleWorkspaceEnabled = true
+            }
+        }
         if isRealEstate && financeStore.realEstates.isEmpty {
             realEstateMode = .new
         }

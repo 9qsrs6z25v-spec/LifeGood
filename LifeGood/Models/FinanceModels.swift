@@ -1,6 +1,84 @@
 import Foundation
 import SwiftUI
 
+/// 巢狀陣列的逐筆容錯解碼：單一壞元素只跳過該筆，不會讓整批（貸款分期/繳費紀錄/交易紀錄等）消失。
+/// 沿用 LifeModels.swift 既有的 LossyArray<Element>。
+private func lossyArray<Element: Decodable, Key: CodingKey>(
+    _ container: KeyedDecodingContainer<Key>, forKey key: Key
+) -> [Element] {
+    (try? container.decode(LossyArray<Element>.self, forKey: key))?.elements ?? []
+}
+
+// MARK: - 金額顯示（萬 / 億 量級單位）
+// 【美化方向 — ntdWanString 共用金額格式元件】
+// ① 量級單位從「千萬」改為「億」，統一全 App 僅使用「萬」與「億」兩個量級，
+//    符合繁體中文金融慣例且與 FinanceOverviewView.fmtShort 保持一致。
+//    舊：≥1000萬 → "NT$X千萬"
+//    新：≥1億   → "NT$X億"；≥1萬 → "NT$X萬"；<1萬 → NT$X
+// ② trimmed() 邏輯不變：整數不帶小數、有小數則保留一位，大字不換行、節省空間。
+// ③ [2026-08] 新增 wanString(symbolPrefix:)：ntdWanString 寫死「NT$」字首，多幣別帳戶
+//    （USD／JPY 等）餘額需要萬/億量級但不能套用「NT$」時無處可用；沿用相同進位規則抽出
+//    可帶入自訂符號的版本，ntdWanString 本身完全未變動（呼叫端遍布全 App，故不直接改寫）。
+
+/// 共用靜態實例，避免每次 ntdWanString 呼叫都重新分配 NumberFormatter（昂貴操作）。
+/// SwiftUI body 均在主執行緒執行，此共用實例不存在競態條件。
+private let _ntdCurrencyFormatter: NumberFormatter = {
+    let f = NumberFormatter()
+    f.numberStyle = .currency
+    f.currencySymbol = "NT$"
+    f.maximumFractionDigits = 0
+    return f
+}()
+
+/// 供 wanString(symbolPrefix:) 未滿一萬時使用的純數字千分位格式（不含幣別符號，符號由呼叫端拼接）。
+private let _plainGroupedFormatter: NumberFormatter = {
+    let f = NumberFormatter(); f.numberStyle = .decimal; f.maximumFractionDigits = 0; return f
+}()
+
+extension Double {
+    /// 台幣金額顯示：≥1億以「億」、≥1萬以「萬」為單位（整數不帶小數，否則一位小數），
+    /// 未滿一萬維持 NT$ 整數。
+    /// 例：12,345 → NT$1.2萬；150,000,000 → NT$1.5億。
+    /// 理財/收支各頁共用，確保顯示規則一致。
+    var ntdWanString: String {
+        func trimmed(_ x: Double) -> String {
+            (x == x.rounded()) ? String(format: "%.0f", x) : String(format: "%.1f", x)
+        }
+        let a = Swift.abs(self)
+        let sign = self < 0 ? "-" : ""
+        if a >= 100_000_000 {           // ≥ 1億 → 億
+            return "\(sign)NT$\(trimmed(a / 100_000_000))億"
+        }
+        if a >= 10_000 {                // ≥ 1 萬 → 萬
+            let wan = a / 10_000
+            // %.1f 格式化後若捨入到 10000，改以億顯示，避免「10000.0萬」
+            if wan >= 9_999.95 { return "\(sign)NT$\(trimmed(a / 100_000_000))億" }
+            return "\(sign)NT$\(trimmed(wan))萬"
+        }
+        return _ntdCurrencyFormatter.string(from: NSNumber(value: self)) ?? "NT$0"
+    }
+
+    /// 與 ntdWanString 同一套萬/億進位規則，但幣別符號可自訂：多幣別帳戶（USD／JPY 等
+    /// 非台幣）餘額不可套用寫死的「NT$」字首時使用。
+    /// 例：("USD", 12345) → USD 1.2萬；("JPY", 150_000_000) → JPY 1.5億。
+    func wanString(symbolPrefix: String) -> String {
+        func trimmed(_ x: Double) -> String {
+            (x == x.rounded()) ? String(format: "%.0f", x) : String(format: "%.1f", x)
+        }
+        let a = Swift.abs(self)
+        let sign = self < 0 ? "-" : ""
+        if a >= 100_000_000 {
+            return "\(sign)\(symbolPrefix) \(trimmed(a / 100_000_000))億"
+        }
+        if a >= 10_000 {
+            let wan = a / 10_000
+            if wan >= 9_999.95 { return "\(sign)\(symbolPrefix) \(trimmed(a / 100_000_000))億" }
+            return "\(sign)\(symbolPrefix) \(trimmed(wan))萬"
+        }
+        return "\(symbolPrefix) \(_plainGroupedFormatter.string(from: NSNumber(value: self)) ?? "0")"
+    }
+}
+
 // MARK: - 幣別
 
 enum Currency: String, Codable, CaseIterable {
@@ -16,6 +94,91 @@ enum Currency: String, Codable, CaseIterable {
 }
 
 // MARK: - 自訂匯率
+
+/// 設定頁「自訂幣別匯率」的自動取值。
+/// 資料源與美股市值換算同一個（Yahoo v8 chart 的 {幣別}TWD=X），
+/// 實測 JPY 0.1982／EUR 36.96／CNY 4.74 等皆與台銀牌價同量級。
+///
+/// 使用者的幣別欄是自由文字（「美金」「日圓」……），所以先過一張別名表
+/// 對成 ISO 代碼再查；對不上的（例如自創代號）不動它，維持手動值。
+enum FXRateService {
+    /// 常見寫法 → ISO 代碼。鍵一律存大寫，查表前先 uppercased。
+    private static let aliases: [String: String] = [
+        "美金": "USD", "美元": "USD", "USD": "USD",
+        "日圓": "JPY", "日幣": "JPY", "日元": "JPY", "JPY": "JPY",
+        "歐元": "EUR", "EUR": "EUR",
+        "人民幣": "CNY", "RMB": "CNY", "CNY": "CNY",
+        "港幣": "HKD", "港元": "HKD", "HKD": "HKD",
+        "英鎊": "GBP", "GBP": "GBP",
+        "澳幣": "AUD", "澳元": "AUD", "AUD": "AUD",
+        "加幣": "CAD", "加元": "CAD", "CAD": "CAD",
+        "韓元": "KRW", "韓圜": "KRW", "KRW": "KRW",
+        "新加坡幣": "SGD", "新幣": "SGD", "星幣": "SGD", "SGD": "SGD",
+        "瑞士法郎": "CHF", "CHF": "CHF",
+        "泰銖": "THB", "THB": "THB",
+        "越南盾": "VND", "VND": "VND",
+        "馬來幣": "MYR", "令吉": "MYR", "MYR": "MYR",
+        "菲律賓披索": "PHP", "披索": "PHP", "PHP": "PHP",
+        "印尼盾": "IDR", "IDR": "IDR",
+        "紐幣": "NZD", "紐元": "NZD", "NZD": "NZD"
+    ]
+
+    /// 把使用者輸入的幣別文字對成 ISO 代碼；對不上回 nil（該列維持手動）
+    static func isoCode(for raw: String) -> String? {
+        let key = raw.trimmingCharacters(in: .whitespaces).uppercased()
+        guard !key.isEmpty else { return nil }
+        return aliases[key]
+    }
+
+    /// 抓一批幣別的對台幣匯率。回傳 ISO 代碼 → 匯率；抓不到的不出現在結果裡。
+    /// 併發上限 4，比照股票報價補網的既有節流。
+    static func fetchRates(isoCodes: [String]) async -> [String: Double] {
+        let wanted = Array(Set(isoCodes)).sorted()
+        guard !wanted.isEmpty else { return [:] }
+        var result: [String: Double] = [:]
+        var idx = 0
+        while idx < wanted.count {
+            let slice = Array(wanted[idx..<min(idx + 4, wanted.count)])
+            idx += 4
+            await withTaskGroup(of: (String, Double?).self) { group in
+                for code in slice {
+                    group.addTask { (code, await fetchRate(isoCode: code)) }
+                }
+                for await (code, r) in group {
+                    if let r { result[code] = r }
+                }
+            }
+        }
+        return result
+    }
+
+    /// 一次自動更新的結果（設定頁組訊息用；App 啟動時的靜默更新忽略它）
+    struct UpdateOutcome {
+        var updated = 0
+        /// 認得但查價失敗的 ISO 代碼
+        var failedIso: [String] = []
+        /// 別名表認不得的幣別原文
+        var unknown: [String] = []
+        var recognizedAny: Bool { updated > 0 || !failedIso.isEmpty }
+    }
+
+    /// 單一幣別對台幣。USD 的 Yahoo 代號是特例「TWD=X」，其餘為「{代碼}TWD=X」。
+    private static func fetchRate(isoCode: String) async -> Double? {
+        let pair = isoCode == "USD" ? "TWD=X" : "\(isoCode)TWD=X"
+        let urlString = "https://query1.finance.yahoo.com/v8/finance/chart/\(pair)?range=1d&interval=1d"
+        guard let url = URL(string: urlString) else { return nil }
+        do {
+            var req = URLRequest(url: url)
+            req.setValue("Mozilla/5.0", forHTTPHeaderField: "User-Agent")
+            let (data, _) = try await URLSession.shared.data(for: req)
+            guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let chart = json["chart"] as? [String: Any],
+                  let meta = (chart["result"] as? [[String: Any]])?.first?["meta"] as? [String: Any],
+                  let rate = meta["regularMarketPrice"] as? Double, rate > 0 else { return nil }
+            return rate
+        } catch { return nil }
+    }
+}
 
 struct CurrencyRate: Identifiable, Codable {
     let id: UUID
@@ -143,12 +306,20 @@ struct SavingsInsurance: Identifiable, Codable {
         return payment * ((pow(1 + r, n) - 1) / r) * (1 + r)
     }
 
-    /// 總繳費期數
+    /// 總繳費期數。
+    /// [修正 v25.314] 繳款發生在**每期期初**（起始日當天就扣第一期），所以期數＝
+    /// 「起始日到到期日之間有幾個期初」。到期日常見寫法是「差一天滿整數年」
+    ///（例：2018/08/11 生效、2028/08/10 到期＝119 個月又 30 天），原本
+    /// 取整除直接砍成 9 期，實際繳了 10 期（2018～2027 每年 8/11 各一筆）。
+    /// 未整除的餘月代表「最後一個期初已扣款、只是該期未走完」→ 進位補 1；
+    /// 恰好整除（8/11 到 8/11）時最後一天是領回日不再扣款，維持整除值。
     var totalPeriods: Int {
+        guard maturityDate > startDate else { return 0 }
         let calendar = Calendar.current
         let totalMonths = calendar.dateComponents([.month], from: startDate, to: maturityDate).month ?? 0
         let monthsPerPeriod: Int = paymentPeriod == .monthly ? 1 : (paymentPeriod == .quarterly ? 3 : 12)
-        return max(0, totalMonths / monthsPerPeriod)
+        let full = totalMonths / monthsPerPeriod
+        return totalMonths % monthsPerPeriod == 0 ? max(1, full) : full + 1
     }
 
     /// 已繳期數（起始日即繳第一期，故 +1）
@@ -158,7 +329,7 @@ struct SavingsInsurance: Identifiable, Codable {
         guard now >= startDate else { return 0 }
         let elapsedMonths = calendar.dateComponents([.month], from: startDate, to: min(now, maturityDate)).month ?? 0
         let monthsPerPeriod: Int = paymentPeriod == .monthly ? 1 : (paymentPeriod == .quarterly ? 3 : 12)
-        return min(elapsedMonths / monthsPerPeriod + 1, totalPeriods)
+        return max(0, min(elapsedMonths / monthsPerPeriod + 1, totalPeriods))
     }
 
     /// 計算到期預估領回
@@ -171,6 +342,24 @@ struct SavingsInsurance: Identifiable, Codable {
     var calculatedCurrentValue: Double {
         let r = annualRate / 100.0 / periodsPerYear
         return Self.futureValue(payment: premiumAmount, ratePerPeriod: r, periods: elapsedPeriods)
+    }
+
+    /// 指定日期當下的已繳期數（歷史回算用；同 elapsedPeriods 規則）
+    func elapsedPeriods(at date: Date) -> Int {
+        let calendar = Calendar.current
+        guard date >= startDate else { return 0 }
+        let elapsedMonths = calendar.dateComponents([.month], from: startDate,
+                                                    to: min(date, maturityDate)).month ?? 0
+        let monthsPerPeriod: Int = paymentPeriod == .monthly ? 1 : (paymentPeriod == .quarterly ? 3 : 12)
+        return max(0, min(elapsedMonths / monthsPerPeriod + 1, totalPeriods))
+    }
+
+    /// 指定日期當下的估值（歷史回算用；英雄卡背景趨勢曲線）——
+    /// 複利公式對過去任一時點都可確定性回算，不需要另存歷史快照
+    func value(at date: Date) -> Double {
+        let r = annualRate / 100.0 / periodsPerYear
+        return Self.futureValue(payment: premiumAmount, ratePerPeriod: r,
+                                periods: elapsedPeriods(at: date))
     }
 
     /// 已繳總額
@@ -288,7 +477,7 @@ struct StockDividend: Identifiable, Codable, Equatable {
         lots = (try? c.decode(Double.self, forKey: .lots)) ?? 0
         perShare = (try? c.decode(Double.self, forKey: .perShare)) ?? 0
         sharesAtEvent = (try? c.decode(Double.self, forKey: .sharesAtEvent)) ?? 0
-        linkedIncomeId = try? c.decodeIfPresent(UUID.self, forKey: .linkedIncomeId)
+        linkedIncomeId = try c.decodeIfPresent(UUID.self, forKey: .linkedIncomeId)
         note = (try? c.decode(String.self, forKey: .note)) ?? ""
     }
 
@@ -382,8 +571,8 @@ struct Stock: Identifiable, Codable {
         linkedBankMilestoneId = try c.decodeIfPresent(UUID.self, forKey: .linkedBankMilestoneId)
         linkedBankCurrency = try c.decodeIfPresent(String.self, forKey: .linkedBankCurrency)
         linkedSecuritiesMilestoneId = try c.decodeIfPresent(UUID.self, forKey: .linkedSecuritiesMilestoneId)
-        transactions = (try? c.decodeIfPresent([StockTransaction].self, forKey: .transactions)) ?? []
-        dividends = (try? c.decodeIfPresent([StockDividend].self, forKey: .dividends)) ?? []
+        transactions = lossyArray(c, forKey: .transactions)
+        dividends = lossyArray(c, forKey: .dividends)
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -394,10 +583,32 @@ struct Stock: Identifiable, Codable {
         case transactions, dividends
     }
 
-    /// 投入成本
-    var totalCost: Double { shares * purchasePrice }
-    /// 目前市值
-    var marketValue: Double { shares * (isSold ? soldPrice : currentPrice) }
+    // MARK: - 美股
+
+    /// 美股判定：台股代號一律以數字開頭（含 00878B 這類債券 ETF），
+    /// 美股代號一律以英文字母開頭（AAPL、TSLA、BRK.B）。以代號判定而非另存欄位，
+    /// 舊資料不需遷移，使用者也不用多按一個開關。
+    var isUSStock: Bool { symbol.first?.isLetter == true }
+
+    /// USD→TWD 匯率的全域快取。每次報價刷新時由 TWQuoteService 抓
+    /// Yahoo 的 TWD=X 更新；還沒抓過任何一次時退回 31（近年區間中值），
+    /// 首次刷新報價後就會被真實匯率覆蓋。
+    static let usdTwdRateKey = "stock_usd_twd_rate"
+    static var usdTwdRate: Double {
+        let r = UserDefaults.standard.double(forKey: usdTwdRateKey)
+        return r > 0 ? r : 31.0
+    }
+
+    /// 換算成 NT$ 用的係數。台股為 1；美股為 USD→TWD 匯率。
+    /// per-share 價格（purchasePrice／currentPrice／soldPrice／交易價）一律存原幣別，
+    /// 只在彙總（成本／市值／損益）時乘上係數——這樣總資產、圖表、英雄卡
+    /// 全部經由 totalCost／marketValue 的既有路徑自動變成 NT$，一處都不用改。
+    var currencyFactor: Double { isUSStock ? Self.usdTwdRate : 1 }
+
+    /// 投入成本（NT$；美股已按匯率換算）
+    var totalCost: Double { shares * purchasePrice * currencyFactor }
+    /// 目前市值（NT$；美股已按匯率換算）
+    var marketValue: Double { shares * (isSold ? soldPrice : currentPrice) * currencyFactor }
     /// 損益
     var profitLoss: Double { marketValue - totalCost }
     /// 報酬率
@@ -414,7 +625,16 @@ struct Stock: Identifiable, Codable {
     ///   → 配股稀釋均價（總成本不變，股數變多）
     /// 若 shares 歸零且曾有賣出，isSold = true、soldDate = 最後賣出日、soldPrice = 加權平均賣出價
     mutating func recomputeFromTransactions() {
-        guard !transactions.isEmpty || !dividends.isEmpty else { return }
+        guard !transactions.isEmpty || !dividends.isEmpty else {
+            // 交易與配息都被刪光時，先前直接 return 會保留刪除前的舊 shares/purchasePrice/isSold，
+            // 使閃卡（讀 shares/marketValue/profitLoss）與已清空的交易列表互相矛盾；改為歸零。
+            shares = 0
+            purchasePrice = 0
+            isSold = false
+            soldDate = nil
+            soldPrice = 0
+            return
+        }
         var buyShares: Double = 0
         var buyAmount: Double = 0
         var sellShares: Double = 0
@@ -457,9 +677,14 @@ struct Stock: Identifiable, Codable {
         }
     }
 
-    /// 若 transactions 為空，但已有 shares / purchasePrice → 種一筆原始買入（與賣出，若已售出）
-    mutating func seedTransactionsFromLegacyIfNeeded() {
-        guard transactions.isEmpty, shares > 0 || isSold else { return }
+    /// 若 transactions 為空，但已有 shares / purchasePrice → 種一筆原始買入（與賣出，若已售出）。
+    /// 回傳 false 表示「本該補種但股數已歸零、無法推算原始張數而放棄」（見下方 baseLots==0 分支）；
+    /// 此時 transactions 仍是空的，呼叫端不應該接著呼叫 recomputeFromTransactions()，
+    /// 否則會把這筆舊資料僅存的 isSold/soldDate/soldPrice/purchasePrice 當成「無交易」全部清空覆蓋，
+    /// 與本函式「保留舊欄位為元資料」的意圖矛盾，造成資料靜默遺失。
+    @discardableResult
+    mutating func seedTransactionsFromLegacyIfNeeded() -> Bool {
+        guard transactions.isEmpty, shares > 0 || isSold else { return true }
         var seeds: [StockTransaction] = []
         if shares > 0 || (isSold && soldPrice > 0) {
             // 原始買入（包含售出後的數量需要先還原）
@@ -470,8 +695,9 @@ struct Stock: Identifiable, Codable {
                 // 已賣完且 shares=0：以 soldPrice 推不出，給 0
                 return 0
             }()
-            if baseLots > 0 || isSold {
-                let lots = baseLots > 0 ? baseLots : 1  // fallback
+            if baseLots > 0 {
+                // 已售光（shares==0）時歷史張數無法推算，跳過偽造，保留舊欄位為元資料
+                let lots = baseLots
                 seeds.append(StockTransaction(
                     id: UUID(), date: purchaseDate,
                     kind: .buy,
@@ -487,6 +713,7 @@ struct Stock: Identifiable, Codable {
             ))
         }
         transactions = seeds
+        return !(isSold && shares <= 0.0001 && seeds.isEmpty)
     }
 }
 
@@ -551,6 +778,15 @@ struct RealEstateMortgageItem: Identifiable, Codable {
 
     /// 已繳貸款金額
     var paidAmount: Double { amount * Double(elapsedPeriods) }
+
+    /// 本月是否仍需繳款：已開始（今天 ≥ 起始日）且尚未繳滿期數。
+    /// 尚未開始的未來貸款區段、已繳滿的貸款都不算入當期月付。
+    var isPayingNow: Bool {
+        let now = Date()
+        guard now >= startDate else { return false }   // 未開始
+        let months = Calendar.current.dateComponents([.month], from: startDate, to: now).month ?? 0
+        return months < totalPeriods                   // 未繳滿
+    }
 }
 
 // MARK: - 房地產已支出金額項目
@@ -655,15 +891,41 @@ enum BuildingType: String, Codable, CaseIterable, Identifiable {
 struct ElevatorMaintenance: Identifiable, Codable {
     let id: UUID
     var date: Date
+    /// 舊版單張照片欄位（保留供舊版本讀取；恆同步為 photoFileNames.first）
     var photoFileName: String?
+    /// [v25.308] 保養照片（可多張；共用 MultiPhotoGallery——拍照連拍/相簿多選/燈箱）。
+    /// 遷移模式完全比照 UtilityPayment：舊單張解碼時自動併入陣列。
+    var photoFileNames: [String]
 
-    init(id: UUID = UUID(), date: Date = Date(), photoFileName: String? = nil) {
-        self.id = id; self.date = date; self.photoFileName = photoFileName
+    init(id: UUID = UUID(), date: Date = Date(),
+         photoFileName: String? = nil, photoFileNames: [String] = []) {
+        self.id = id; self.date = date
+        // 兩欄位互補：只給單張就放進多張陣列；只給多張就把第一張回填舊欄位
+        var names = photoFileNames
+        if names.isEmpty, let single = photoFileName { names = [single] }
+        self.photoFileNames = names
+        self.photoFileName = photoFileName ?? names.first
     }
 
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        date = (try? c.decode(Date.self, forKey: .date)) ?? Date()
+        photoFileName = try? c.decodeIfPresent(String.self, forKey: .photoFileName)
+        var names = (try? c.decodeIfPresent([String].self, forKey: .photoFileNames)) ?? []
+        // 舊資料只有單張欄位：升級為多張陣列
+        if names.isEmpty, let single = photoFileName { names = [single] }
+        photoFileNames = names
+    }
+    private enum CodingKeys: String, CodingKey { case id, date, photoFileName, photoFileNames }
+
     var photoURL: URL? {
-        guard let name = photoFileName else { return nil }
+        guard let name = photoFileNames.first ?? photoFileName else { return nil }
         return Self.photosDirectory.appendingPathComponent(name)
+    }
+
+    static func photoURL(for fileName: String) -> URL {
+        photosDirectory.appendingPathComponent(fileName)
     }
 
     static var photosDirectory: URL {
@@ -674,10 +936,11 @@ struct ElevatorMaintenance: Identifiable, Codable {
         return dir
     }
 
-    static func savePhoto(_ data: Data, id: UUID) -> String {
+    static func savePhoto(_ data: Data, id: UUID) -> String? {
+        let data = ImageCompressor.compressForStorage(data)   // 存檔前統一壓縮：1080P 長邊 + JPEG 80%
         let name = "\(id.uuidString).jpg"
         let url = photosDirectory.appendingPathComponent(name)
-        try? data.write(to: url)
+        guard (try? data.write(to: url)) != nil else { return nil }
         PhotoCloudSync.upload(directory: "ElevatorPhotos", fileName: name)
         return name
     }
@@ -712,21 +975,47 @@ struct UtilityPayment: Identifiable, Codable {
     var type: UtilityType
     var date: Date
     var amount: Double
+    /// 舊版單張照片欄位（保留供舊版本讀取；恆同步為 photoFileNames.first）
     var photoFileName: String?
+    /// 收據照片（可多張；可拍照連拍或相簿多選）
+    var photoFileNames: [String]
     var note: String
     /// 連結到記帳模式變動支出的 ID（雙向同步用）
     var linkedExpenseId: UUID?
 
     init(id: UUID = UUID(), type: UtilityType = .water, date: Date = Date(),
-         amount: Double = 0, photoFileName: String? = nil, note: String = "",
-         linkedExpenseId: UUID? = nil) {
+         amount: Double = 0, photoFileName: String? = nil, photoFileNames: [String] = [],
+         note: String = "", linkedExpenseId: UUID? = nil) {
         self.id = id; self.type = type; self.date = date; self.amount = amount
-        self.photoFileName = photoFileName; self.note = note
+        // 兩欄位互補：只給單張就放進多張陣列；只給多張就把第一張回填舊欄位
+        var names = photoFileNames
+        if names.isEmpty, let single = photoFileName { names = [single] }
+        self.photoFileNames = names
+        self.photoFileName = photoFileName ?? names.first
+        self.note = note
         self.linkedExpenseId = linkedExpenseId
     }
 
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        type = (try? c.decode(UtilityType.self, forKey: .type)) ?? .water
+        date = (try? c.decode(Date.self, forKey: .date)) ?? Date()
+        amount = (try? c.decode(Double.self, forKey: .amount)) ?? 0
+        photoFileName = try? c.decodeIfPresent(String.self, forKey: .photoFileName)
+        var names = (try? c.decodeIfPresent([String].self, forKey: .photoFileNames)) ?? []
+        // 舊資料只有單張欄位：升級為多張陣列
+        if names.isEmpty, let single = photoFileName { names = [single] }
+        photoFileNames = names
+        note = (try? c.decode(String.self, forKey: .note)) ?? ""
+        linkedExpenseId = try? c.decodeIfPresent(UUID.self, forKey: .linkedExpenseId)
+    }
+    private enum CodingKeys: String, CodingKey {
+        case id, type, date, amount, photoFileName, photoFileNames, note, linkedExpenseId
+    }
+
     var photoURL: URL? {
-        guard let name = photoFileName else { return nil }
+        guard let name = photoFileNames.first ?? photoFileName else { return nil }
         return Self.photosDirectory.appendingPathComponent(name)
     }
 
@@ -738,10 +1027,11 @@ struct UtilityPayment: Identifiable, Codable {
         return dir
     }
 
-    static func savePhoto(_ data: Data, id: UUID) -> String {
+    static func savePhoto(_ data: Data, id: UUID) -> String? {
+        let data = ImageCompressor.compressForStorage(data)   // 存檔前統一壓縮：1080P 長邊 + JPEG 80%
         let name = "\(id.uuidString).jpg"
         let url = photosDirectory.appendingPathComponent(name)
-        try? data.write(to: url)
+        guard (try? data.write(to: url)) != nil else { return nil }
         PhotoCloudSync.upload(directory: "UtilityPhotos", fileName: name)
         return name
     }
@@ -811,9 +1101,9 @@ struct FloorInfo: Identifiable, Codable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(UUID.self, forKey: .id)
         floorNumber = try c.decode(String.self, forKey: .floorNumber)
-        functions = (try? c.decode([FloorFunction].self, forKey: .functions)) ?? []
+        functions = lossyArray(c, forKey: .functions)
         area = (try? c.decode(Double.self, forKey: .area)) ?? 0
-        items = (try? c.decode([FloorItem].self, forKey: .items)) ?? []
+        items = lossyArray(c, forKey: .items)
     }
 }
 
@@ -902,10 +1192,11 @@ struct RenovationPhoto: Identifiable, Codable {
         return dir
     }
 
-    static func savePhoto(_ data: Data, id: UUID = UUID()) -> String {
+    static func savePhoto(_ data: Data, id: UUID = UUID()) -> String? {
+        let data = ImageCompressor.compressForStorage(data)   // 存檔前統一壓縮：1080P 長邊 + JPEG 80%
         let name = "\(id.uuidString).jpg"
         let url = photosDirectory.appendingPathComponent(name)
-        try? data.write(to: url)
+        guard (try? data.write(to: url)) != nil else { return nil }
         PhotoCloudSync.upload(directory: "RenovationPhotos", fileName: name)
         return name
     }
@@ -1273,16 +1564,16 @@ struct RealEstate: Identifiable, Codable {
         purchasePrice = (try? c.decode(Double.self, forKey: .purchasePrice)) ?? 0
         currentValue = (try? c.decode(Double.self, forKey: .currentValue)) ?? 0
         monthlyRental = (try? c.decode(Double.self, forKey: .monthlyRental)) ?? 0
-        mortgageItems = (try? c.decode([RealEstateMortgageItem].self, forKey: .mortgageItems)) ?? []
-        paidItems = (try? c.decode([RealEstatePaidItem].self, forKey: .paidItems)) ?? []
-        variableExpenses = (try? c.decode([RealEstateVariableExpense].self, forKey: .variableExpenses)) ?? []
+        mortgageItems = lossyArray(c, forKey: .mortgageItems)
+        paidItems = lossyArray(c, forKey: .paidItems)
+        variableExpenses = lossyArray(c, forKey: .variableExpenses)
         linkedExpenseId = try? c.decode(UUID.self, forKey: .linkedExpenseId)
         saleLinkedExpenseId = try? c.decode(UUID.self, forKey: .saleLinkedExpenseId)
         saleLinkedIncomeId = try? c.decode(UUID.self, forKey: .saleLinkedIncomeId)
         note = (try? c.decode(String.self, forKey: .note)) ?? ""
         buildingType = (try? c.decode(BuildingType.self, forKey: .buildingType)) ?? .townhouse
         hasElevator = (try? c.decode(Bool.self, forKey: .hasElevator)) ?? false
-        elevatorMaintenances = (try? c.decode([ElevatorMaintenance].self, forKey: .elevatorMaintenances)) ?? []
+        elevatorMaintenances = lossyArray(c, forKey: .elevatorMaintenances)
         pingCount = (try? c.decode(Double.self, forKey: .pingCount)) ?? 0
         landOwner = (try? c.decode(String.self, forKey: .landOwner)) ?? ""
         landSituation = (try? c.decode(String.self, forKey: .landSituation)) ?? ""
@@ -1295,8 +1586,8 @@ struct RealEstate: Identifiable, Codable {
         bldgUsage = (try? c.decode(String.self, forKey: .bldgUsage)) ?? ""
         bldgAnnex = (try? c.decode(String.self, forKey: .bldgAnnex)) ?? ""
         bldgArea = (try? c.decode(Double.self, forKey: .bldgArea)) ?? 0
-        landDeeds = (try? c.decode([LandDeed].self, forKey: .landDeeds)) ?? []
-        buildingDeeds = (try? c.decode([BuildingDeed].self, forKey: .buildingDeeds)) ?? []
+        landDeeds = lossyArray(c, forKey: .landDeeds)
+        buildingDeeds = lossyArray(c, forKey: .buildingDeeds)
         // 向下相容：舊版單筆資料遷移至陣列
         if landDeeds.isEmpty && (!landSituation.isEmpty || !landNumber.isEmpty || landArea > 0) {
             landDeeds = [LandDeed(situation: landSituation, number: landNumber, area: landArea)]
@@ -1308,7 +1599,7 @@ struct RealEstate: Identifiable, Codable {
         totalFloors = (try? c.decode(Int.self, forKey: .totalFloors)) ?? 0
         fromFloor = (try? c.decode(Int.self, forKey: .fromFloor)) ?? 0
         toFloor = (try? c.decode(Int.self, forKey: .toFloor)) ?? 0
-        floors = (try? c.decode([FloorInfo].self, forKey: .floors)) ?? []
+        floors = lossyArray(c, forKey: .floors)
         waterMeterNumber = (try? c.decode(String.self, forKey: .waterMeterNumber)) ?? ""
         waterMeterOwner = (try? c.decode(String.self, forKey: .waterMeterOwner)) ?? ""
         electricityMeterNumber = (try? c.decode(String.self, forKey: .electricityMeterNumber)) ?? ""
@@ -1316,12 +1607,12 @@ struct RealEstate: Identifiable, Codable {
         gasMeterNumber = (try? c.decode(String.self, forKey: .gasMeterNumber)) ?? ""
         gasMeterOwner = (try? c.decode(String.self, forKey: .gasMeterOwner)) ?? ""
         gasUserNumber = (try? c.decode(String.self, forKey: .gasUserNumber)) ?? ""
-        insuranceItems = (try? c.decode([RealEstateInsuranceItem].self, forKey: .insuranceItems)) ?? []
-        propertyAssets = (try? c.decode([RealEstatePropertyAsset].self, forKey: .propertyAssets)) ?? []
-        utilityPayments = (try? c.decode([UtilityPayment].self, forKey: .utilityPayments)) ?? []
-        extraMeters = (try? c.decode([UtilityMeter].self, forKey: .extraMeters)) ?? []
-        renovationPhotos = (try? c.decode([RenovationPhoto].self, forKey: .renovationPhotos)) ?? []
-        documents = (try? c.decode([RealEstateDocument].self, forKey: .documents)) ?? []
+        insuranceItems = lossyArray(c, forKey: .insuranceItems)
+        propertyAssets = lossyArray(c, forKey: .propertyAssets)
+        utilityPayments = lossyArray(c, forKey: .utilityPayments)
+        extraMeters = lossyArray(c, forKey: .extraMeters)
+        renovationPhotos = lossyArray(c, forKey: .renovationPhotos)
+        documents = lossyArray(c, forKey: .documents)
 
         // 向下相容：舊版有 monthlyMortgage 欄位，轉為 mortgageItems
         if mortgageItems.isEmpty,
@@ -1366,9 +1657,13 @@ struct RealEstate: Identifiable, Codable {
         try c.encode(elevatorMaintenances, forKey: .elevatorMaintenances)
         try c.encode(pingCount, forKey: .pingCount)
         try c.encode(landOwner, forKey: .landOwner)
-        try c.encode(landSituation, forKey: .landSituation)
-        try c.encode(landNumber, forKey: .landNumber)
-        try c.encode(landArea, forKey: .landArea)
+        // 舊版單筆土地權狀欄位改由 landDeeds 陣列推導寫回（而非直接存 stored 值），
+        // 避免 AddRealEstateView 載入舊資料時把過期的 landSituation/landNumber/landArea
+        // 原樣存回：使用者刪掉唯一一筆土地權狀後，landDeeds 已清空，但這三個純量欄位
+        // 若仍保留舊值，下次 decode 的向下相容遷移邏輯會把剛刪除的權狀「復活」回來。
+        try c.encode(landDeeds.first?.situation ?? "", forKey: .landSituation)
+        try c.encode(landDeeds.first?.number ?? "", forKey: .landNumber)
+        try c.encode(landDeeds.first?.area ?? 0, forKey: .landArea)
         try c.encode(bldgSituation, forKey: .bldgSituation)
         try c.encode(bldgNumber, forKey: .bldgNumber)
         try c.encode(bldgAddress, forKey: .bldgAddress)
@@ -1406,8 +1701,8 @@ struct RealEstate: Identifiable, Codable {
     /// 是否已售出
     var isSold: Bool { soldDate != nil }
 
-    /// 每月房貸合計
-    var monthlyMortgage: Double { mortgageItems.reduce(0) { $0 + $1.amount } }
+    /// 每月房貸合計（只計入當期實際要繳的貸款，排除尚未開始或已繳滿的區段）
+    var monthlyMortgage: Double { mortgageItems.filter { $0.isPayingNow }.reduce(0) { $0 + $1.amount } }
     /// 貸款總額
     var totalMortgageAmount: Double { mortgageItems.reduce(0) { $0 + $1.totalAmount } }
     /// 已繳貸款金額合計
@@ -1572,6 +1867,113 @@ struct VehicleVariableExpense: Identifiable, Codable {
 
 // MARK: - 汽車
 
+// MARK: - 車輛照片紀錄（保養/稅費收據/保險文件等，比照房地產裝潢照片規格）
+
+enum VehiclePhotoCategory: String, Codable, CaseIterable, Identifiable {
+    case maintenance = "保養維修"
+    case tax = "稅費單據"
+    case insurance = "保險文件"
+    case fuel = "加油充電"
+    case accident = "事故紀錄"
+    case appearance = "車輛照片"
+    case other = "其他"
+
+    var id: String { rawValue }
+
+    var icon: String {
+        switch self {
+        case .maintenance: return "wrench.and.screwdriver.fill"
+        case .tax: return "doc.text.fill"
+        case .insurance: return "shield.lefthalf.filled"
+        case .fuel: return "fuelpump.fill"
+        case .accident: return "exclamationmark.triangle.fill"
+        case .appearance: return "car.fill"
+        case .other: return "square.grid.2x2.fill"
+        }
+    }
+
+    var color: Color {
+        switch self {
+        case .maintenance: return .blue
+        case .tax: return .orange
+        case .insurance: return .green
+        case .fuel: return .purple
+        case .accident: return .red
+        case .appearance: return .teal
+        case .other: return .gray
+        }
+    }
+}
+
+/// 一筆車輛照片紀錄：可承載多張照片（堆疊呈現），依類別分色標示。
+/// 結構與存取模式完全比照 RenovationPhoto（房地產裝潢照片）。
+struct VehiclePhotoRecord: Identifiable, Codable {
+    let id: UUID
+    var date: Date
+    var category: VehiclePhotoCategory
+    var title: String
+    var photoFileNames: [String]
+    var note: String
+
+    init(id: UUID = UUID(), date: Date = Date(),
+         category: VehiclePhotoCategory = .maintenance,
+         title: String = "", photoFileNames: [String] = [], note: String = "") {
+        self.id = id
+        self.date = date
+        self.category = category
+        self.title = title
+        self.photoFileNames = photoFileNames
+        self.note = note
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        date = (try? c.decode(Date.self, forKey: .date)) ?? Date()
+        category = (try? c.decode(VehiclePhotoCategory.self, forKey: .category)) ?? .other
+        title = (try? c.decode(String.self, forKey: .title)) ?? ""
+        photoFileNames = (try? c.decode([String].self, forKey: .photoFileNames)) ?? []
+        note = (try? c.decode(String.self, forKey: .note)) ?? ""
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, date, category, title, photoFileNames, note
+    }
+
+    /// 第一張照片的 URL（縮圖封面用）
+    var photoURL: URL? {
+        guard let name = photoFileNames.first else { return nil }
+        return Self.photosDirectory.appendingPathComponent(name)
+    }
+
+    static var photosDirectory: URL {
+        let dir = (FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
+            ?? FileManager.default.temporaryDirectory)
+            .appendingPathComponent("VehiclePhotos", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
+    static func savePhoto(_ data: Data, id: UUID = UUID()) -> String? {
+        let data = ImageCompressor.compressForStorage(data)   // 存檔前統一壓縮：1080P 長邊 + JPEG 80%
+        let name = "\(id.uuidString).jpg"
+        let url = photosDirectory.appendingPathComponent(name)
+        guard (try? data.write(to: url)) != nil else { return nil }
+        PhotoCloudSync.upload(directory: "VehiclePhotos", fileName: name)
+        return name
+    }
+
+    static func deletePhoto(_ fileName: String) {
+        let url = photosDirectory.appendingPathComponent(fileName)
+        try? FileManager.default.removeItem(at: url)
+        PhotoCloudSync.delete(directory: "VehiclePhotos", fileName: fileName)
+    }
+
+    static func photoURL(for fileName: String) -> URL {
+        photosDirectory.appendingPathComponent(fileName)
+    }
+}
+
 struct Vehicle: Identifiable, Codable {
     let id: UUID
     var name: String
@@ -1584,6 +1986,7 @@ struct Vehicle: Identifiable, Codable {
     var currentValue: Double
     var fixedExpenses: [VehicleFixedExpense]       // 定期支出（車貸/稅費/訂閱）
     var variableExpenses: [VehicleVariableExpense]  // 變動支出（依動力類型：油錢或電費等）
+    var photoRecords: [VehiclePhotoRecord]          // 照片紀錄（保養/稅費收據/保險文件等）
     var note: String
 
     init(
@@ -1598,6 +2001,7 @@ struct Vehicle: Identifiable, Codable {
         currentValue: Double = 0,
         fixedExpenses: [VehicleFixedExpense] = [],
         variableExpenses: [VehicleVariableExpense] = [],
+        photoRecords: [VehiclePhotoRecord] = [],
         note: String = ""
     ) {
         self.id = id
@@ -1611,6 +2015,7 @@ struct Vehicle: Identifiable, Codable {
         self.currentValue = currentValue
         self.fixedExpenses = fixedExpenses
         self.variableExpenses = variableExpenses
+        self.photoRecords = photoRecords
         self.note = note
     }
 
@@ -1626,8 +2031,9 @@ struct Vehicle: Identifiable, Codable {
         soldDate = try? c.decode(Date.self, forKey: .soldDate)
         purchasePrice = (try? c.decode(Double.self, forKey: .purchasePrice)) ?? 0
         currentValue = (try? c.decode(Double.self, forKey: .currentValue)) ?? 0
-        fixedExpenses = (try? c.decode([VehicleFixedExpense].self, forKey: .fixedExpenses)) ?? []
-        variableExpenses = (try? c.decode([VehicleVariableExpense].self, forKey: .variableExpenses)) ?? []
+        fixedExpenses = lossyArray(c, forKey: .fixedExpenses)
+        variableExpenses = lossyArray(c, forKey: .variableExpenses)
+        photoRecords = lossyArray(c, forKey: .photoRecords)
         note = (try? c.decode(String.self, forKey: .note)) ?? ""
     }
 
@@ -1644,12 +2050,13 @@ struct Vehicle: Identifiable, Codable {
         try c.encode(currentValue, forKey: .currentValue)
         try c.encode(fixedExpenses, forKey: .fixedExpenses)
         try c.encode(variableExpenses, forKey: .variableExpenses)
+        try c.encode(photoRecords, forKey: .photoRecords)
         try c.encode(note, forKey: .note)
     }
 
     private enum CodingKeys: String, CodingKey {
         case id, name, brand, ownerName, powerType, purchaseDate, soldDate, purchasePrice, currentValue
-        case fixedExpenses, variableExpenses, note
+        case fixedExpenses, variableExpenses, photoRecords, note
     }
 
     /// 是否已售出

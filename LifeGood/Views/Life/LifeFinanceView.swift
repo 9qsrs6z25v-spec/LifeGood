@@ -1,5 +1,102 @@
 import SwiftUI
 
+// MARK: - 美化紀錄（LifeFinanceView · v9 · 2026-08-03）
+// [2026-06 v1] 本次美化方向：
+//   1. summaryHeader → 升級為藍色漸層英雄卡片（對齊 SavingsInsuranceView summaryHeader 規格）：
+//      銀行總餘額台幣等值大字 + 計數膠囊 + 餘額正負色 + 散景裝飾圓；
+//      底部四欄 KPI（銀行 / 信用卡 / 證券 / 保險），對齊 FinanceChartView 英雄卡 KPI 規格；
+//      headerAppeared spring 進場動畫（透明度 + Y 位移）。
+//   2. filterChips → 加入底部分隔線 overlay + padding 對齊 IncomeView.categoryFilter 規格；
+//      chip 樣式從純綠改為依選取分類主色動態著色，對齊 StockView / SavingsInsuranceView filter 規格。
+//   3. milestoneRow → 圖示從 36pt 純色升級為 44pt 雙層漸層圓（LinearGradient 底色 + stroke），
+//      對齊 IncomeView.incomeRow / StockView.stockCard 圖示視覺規格；
+//      加入列表交錯淡入 + 向上進場動畫（rowsAppeared），對齊 VariableExpenseView 規格。
+//   4. creditCardSubRow → 圖示從 24pt 升級為 32pt 漸層圓，對齊 milestoneRow 規格；
+//      停用卡以 .tertiary 淡化，視覺上更一目了然。
+// [2026-06 v2] FinanceCardView 美化方向（depositSection + depositRow + linkedCreditCardSection + creditCardChartSection）：
+//   5. depositSection 標題列：Capsule 側條（藍色漸層）+ .semibold 標題 + 筆數計數膠囊，
+//      對齊 OverviewView categoryBreakdownSection / CareerView milestoneListSection 標題規格。
+//   6. depositRow：加入 36pt 漸層圖示圓（依類型分色圖示：存入/提款/信用卡/股票/沖正），
+//      Badge 從 RoundedRectangle(cornerRadius:3) 升級為 Capsule + 細邊框（0.6pt）；
+//      備註文字加入顯示（.caption2 .secondary），日期移至副文字行；
+//      金額字型升為 .system(size:15, weight:.bold, design:.rounded) + contentTransition(.numericText())；
+//      對齊 IncomeView.incomeRow / StockView.stockCard 視覺規格。
+//   7. linkedCreditCardSection 標題列：同步升級 Capsule 側條（橙色）+ 張數膠囊；
+//      信用卡列從 20pt 圖示升至 36pt 漸層圓（含 stroke），對齊 creditCardSubRow 36pt 規格。
+//   8. creditCardChartSection 個別支出列：加入 32pt 漸層圓圖示（使用分類圖示），
+//      日期從純文字改為 Capsule 徽章（tertiarySystemFill 底）；
+//      金額字型升為 .system(size:14, weight:.bold, design:.rounded) + contentTransition；
+//      對齊 OverviewView.recentRow 視覺語言，形成帳戶詳頁統一 row 規格。
+// [2026-06 v3] summaryHeader + milestoneRow 細節升級：
+//   9. summaryHeader background ZStack → 補上玻璃光澤 overlay（LinearGradient .white.opacity(0.18)→.clear
+//      top→center），對齊全 App 英雄卡三散景＋玻璃光澤標準（AddVehicleView / SavingsInsuranceView 同款）。
+//  10. KPI 圖示圓 → 從 Circle().fill(.white.opacity(0.16)) 升級為
+//      LinearGradient([.white.opacity(0.26), .white.opacity(0.10)]) + strokeBorder(.white.opacity(0.30), 0.75pt)，
+//      對齊 FinanceChartView KPI 圖示圓規格（多一層光澤感，白色比例梯度更柔和）。
+//  11. KPI 數字加入 contentTransition(.numericText())，資料切換時平滑捲動。
+//  12. KPI 背景條 → 補上 .white.opacity(0.18) strokeBorder，增加容器定義感。
+//  13. milestoneRow 非銀行類日期 → 從純文字升級為 Capsule 徽章（tertiarySystemFill 底），
+//      對齊 MyCalendarView / creditCardChartSection 日期 Badge 規格。
+// [2026-07 v4] DepositEditorSheet 轉帳/沖正帳戶餘額格式一致性修復：
+//  14. fmtBal(_:) 先前自製 NumberFormatter 手刻「NT$ X萬」（無條件捨去小數、且未處理
+//      億級單位，例如 1.2 億的帳戶會顯示成「NT$12000萬」），與全 App 其餘畫面共用的
+//      Double.ntdWanString（「NT$1.2萬」保留一位小數、億以上自動換算為「億」）風格不一致，
+//      是本檔案唯一未接上共用金額量級格式的地方（對齊 v23.79 AddExpenseView.formatBankBalance
+//      同型修復）。改呼叫既有 ntdWanString，「轉入帳戶」選單與「沖正」目前總額顯示對齊全 App
+//      金額規則。純視覺調整，未變動帳戶餘額計算、轉帳或沖正等既有邏輯。
+// [2026-07 v5] 主畫面「銀行帳戶總餘額」英雄卡大字 + 導覽列小計精度修復：
+//  15. formatTwdShort(_:) 先前用 maximumFractionDigits=0 的 decimalFormatter 直接對
+//      「金額 / 億」「金額 / 萬」四捨五入到整數（無小數位），例如 1.25 億會被捨入顯示成
+//      「NT$ 1 億」，實際少報 25%；4.56 萬會顯示成「NT$ 5 萬」，同樣嚴重失真——是本頁級距
+//      最大的金額顯示 bug（比 v4 修的 fmtBal 精度問題更嚴重，因為這裡連小數位都沒有保留）。
+//      改呼叫全 App 共用的 Double.ntdWanString（億/萬保留一位小數），summaryHeader 30pt 大字
+//      與導覽列小計兩處同步套用；移除已無呼叫端的 formatTwdShort 死碼。純顯示層調整，未變動
+//      銀行餘額換算或加總邏輯。
+// [2026-07 v6] FinanceCardView 信用卡明細卡金額量級一致性修復：
+//  16. creditCardDetail 的「額度」原本手刻 cl/10000 只顯示到萬（無條件捨去小數、未處理億級
+//      單位），「年費」原本用「NT$\(fmtNum(af))」純整數無量級轉換，與同一張卡緊接在下方、
+//      v23.97 才剛加入的「本期已用」「可用額度」（已用共用 ntdWanString「NT$X萬」規格）風格
+//      不一致，是同一張信用卡明細卡上最顯眼的落差；「額度」「年費」兩處改呼叫共用 ntdWanString。
+//  17. 「最近一期」加總與信用卡個別支出列金額原本用「-NT$ \(fmtNum(...))」純整數顯示，同樣未
+//      處理萬/億量級；改為「-」+ ntdWanString（對齊 StockDetailView 損益金額 "(pl >= 0 ? "+" :
+//      "") + fmt(pl)" 的正負號拼接慣例）。以上四處純顯示層調整，額度／年費／消費金額等既有
+//      試算與資料綁定邏輯未變動。
+// [2026-07 v7] DepositEditorSheet 新增/編輯表單 Section header 補齊：
+//  18. 「轉帳資訊」「沖正」「幣別 存款‧提款」共 3 個 Section 原本是系統預設純文字標頭，
+//      是全 App「表單 Section header 補齊」系列（StockDetailView.stockEditorSectionHeader／
+//      RealEstateDetailView.realEstateEditorSectionHeader 等既有做法）尚未覆蓋到的一處。新增
+//      depositEditorSectionHeader(_:icon:color:)（4pt 漸層 Capsule 側條 + 圖示 + 粗體標題），
+//      主題色依語意分配（轉帳資訊＝blue／沖正＝orange，呼應差額正負著色／存款‧提款＝green，
+//      呼應本表單既有「新增」按鈕綠色）。純標題視覺升級，save()／saveTransfer()／saveAdjust()
+//      等既有商業邏輯完全未變動。
+// [2026-08 v8] insuranceDetail「保費」金額量級補齊：
+//  19. 承接 v6 對同一張 FinanceCardView 明細卡「額度」「年費」的修法，「保費」原本仍是
+//      「NT$\(fmtNum(pa))」純整數無量級轉換，是 v6 當時漏掉、同一批 infoRow 金額欄位中
+//      唯一沒跟進 ntdWanString 的一處。改呼叫共用 Double.ntdWanString；fmtNum(_:) 本身在
+//      同一 struct 內仍有 depositRow／餘額列等其他呼叫端（非本次金額欄位性質，維持原樣），
+//      故保留不動，僅改「保費」這一處呼叫點。純顯示層調整，保費／到期日等既有資料綁定
+//      完全未變動。
+// [2026-08 v9] milestoneRow「銀行帳戶」列表餘額量級補齊：
+//  20. bankBalanceDisplay(_:) 是本檔案 v4～v8 四輪 ntdWanString 一致性修復唯一漏掉的一處：
+//      主列表每一列銀行帳戶餘額原本用私有 formatNumber(_:)（純千分位整數，無萬/億量級），
+//      同一筆帳戶點進 FinanceCardView 詳情頁卻已是 ntdWanString 規格，導致「列表 NT$
+//      1,234,567」點進去變成「詳情頁 NT$123.4萬」，同一數字兩種顯示語言。多幣別（USD／
+//      JPY 等）分支不能直接沿用 ntdWanString（會寫死錯誤的「NT$」字首蓋掉原幣別），
+//      故於 FinanceModels.swift 新增 Double.wanString(symbolPrefix:)，沿用相同萬/億進位
+//      規則、僅符號可自訂；單一幣別分支改呼叫 entry.1.wanString(symbolPrefix: entry.0)，
+//      多幣別台幣等值分支改呼叫既有 ntdWanString。移除已無呼叫端的 formatNumber(_:)／
+//      decimalFormatter 死碼。純顯示層調整，餘額換算、幣別歸戶等既有邏輯完全未變動。
+// [2026-08 v25.101] 本次美化方向（DepositEditorSheet 工具列儲存按鈕補齊載入狀態）：
+//  21. DepositEditorSheet 的 save()／saveTransfer()／saveAdjust() 三個存檔入口共用同一顆
+//      isSaving 忙碌守衛（disabled(saveDisabled || isSaving)）避免快速連點造成重複存款／
+//      提款／轉帳／沖正紀錄，但按鈕本身在存檔期間毫無視覺提示。比照 MyCalendarView
+//      v25.100／SubordinateDetailView v25.99 等全 App 儲存按鈕載入狀態規格，於按鈕左側補上
+//      HStack { if isSaving { ProgressView().scaleEffect(0.7).tint(.green) }；Button(...) }。
+//      純視覺層調整，三個 save 函式內部守衛判斷與帳戶餘額寫入等既有商業邏輯完全未變動。
+//      全 App 同型待辦清單（v25.96 起紀錄）已於 v25.102 補齊 ResumeView，僅剩
+//      ChildDetailView，下次可依序比照補齊。
+//   （下次美化本檔案時，可轉往其他仍留有待辦的畫面）
+
 // MARK: - 固定支出週期展開（共用）
 
 /// 把連結到指定銀行 milestone 的「直接扣款 + 週期性」固定支出，
@@ -115,6 +212,9 @@ fileprivate func expandedIncomeDeposits(
         var current = inc.date
         var idx = 0
         while current <= now && idx < 1200 {
+            // 固定薪水設有結束日者，展開至結束月（含）為止；之後停止入帳，
+            // 與 Income.isActive(in:)／收入頁計算一致。current 單調遞增，失效後即可跳出。
+            if !inc.isActive(in: current, calendar: cal) { break }
             let stableId = stableDepositUUID(seed: "inc-\(inc.id.uuidString)-\(idx)")
             result.append(BankDeposit(
                 id: stableId,
@@ -164,6 +264,66 @@ fileprivate func stableDepositUUID(seed: String) -> UUID {
     ))
 }
 
+/// 依幣別計算銀行帳戶的目前餘額（含信用卡彙總扣款 NT$ + 固定支出／週期性收入展開）。
+/// 獨立成檔案層級的共用函式（而非 LifeFinanceView 的 private 方法），讓 DepositEditorSheet
+/// 的轉帳／沖正也能算出與列表頁一致的完整餘額，不必各自維護一份簡化、容易脫節的版本。
+fileprivate func bankBalances(
+    for ms: LifeMilestone, now: Date,
+    expensesById: [UUID: Expense], incomesById: [UUID: Income],
+    lifeStore: LifeStore, expenseStore: ExpenseStore
+) -> [String: Double] {
+    var totals: [String: Double] = [:]
+    for dep in ms.bankDeposits ?? [] where dep.date <= now {
+        // 跳過已連結到信用卡支出的存款（用信用卡彙總取代）
+        if let expId = dep.linkedExpenseId,
+           let exp = expensesById[expId],
+           exp.linkedCreditCardMilestoneId != nil { continue }
+        // 跳過已連結到固定支出（含週期）的存款 — 改用展開的虛擬條目取代，避免漏算或重算
+        if let expId = dep.linkedExpenseId,
+           let exp = expensesById[expId],
+           exp.expenseType == .fixed, exp.recurrence != nil { continue }
+        // 跳過已連結到週期性收入的存款 — 改用展開的虛擬條目取代
+        if let incId = dep.linkedExpenseId,
+           let inc = incomesById[incId],
+           inc.period != .once { continue }
+        totals[dep.currencyCode, default: 0] += dep.isWithdrawal ? -dep.amount : dep.amount
+    }
+    // 固定支出（直接扣銀行）依週期展開為每期扣款
+    for dep in expandedFixedExpenseWithdrawals(for: ms.id, expenses: expenseStore.expenses) {
+        totals[dep.currencyCode, default: 0] -= dep.amount
+    }
+    // 週期性收入依 period 展開為每期入帳
+    for dep in expandedIncomeDeposits(for: ms.id, incomes: expenseStore.incomes) {
+        totals[dep.currencyCode, default: 0] += dep.amount
+    }
+    // 信用卡彙總扣款一律以 NT$ 計（週期性固定支出依 recurrence 展開到今天）
+    let cards = lifeStore.milestones.filter {
+        $0.financeSubCategory == .creditCard && $0.linkedBankMilestoneId == ms.id
+    }
+    for card in cards {
+        let entries = expandedCreditCardEntries(forCard: card.id, expenses: expenseStore.expenses)
+        for entry in entries { totals["NT$", default: 0] -= entry.amount }
+    }
+    // 過濾掉淨額為 0 的幣別（避免單一幣別帳戶被誤判為混幣）
+    let nonZero = totals.filter { $0.value != 0 }
+    return nonZero.isEmpty ? totals : nonZero
+}
+
+/// 將某帳戶的所有幣別餘額換算成 TWD 加總
+fileprivate func balanceInTWD(_ balances: [String: Double], expenseStore: ExpenseStore) -> Double {
+    var total: Double = 0
+    for (code, amount) in balances {
+        if code == "NT$" {
+            total += amount
+        } else if let rate = expenseStore.currencyRates.first(where: { $0.code == code }), rate.rate > 0 {
+            total += amount * rate.rate
+        } else {
+            total += amount  // 找不到匯率時不換算，至少不丟失資料
+        }
+    }
+    return total
+}
+
 struct LifeFinanceView: View {
     @EnvironmentObject var lifeStore: LifeStore
     @EnvironmentObject var expenseStore: ExpenseStore
@@ -172,6 +332,9 @@ struct LifeFinanceView: View {
     @State private var viewingItem: LifeMilestone?
     @State private var showAdd = false
     @State private var showPremiumAlert = false
+    // 進場動畫旗標
+    @State private var headerAppeared = false
+    @State private var rowsAppeared = false
 
     private var financeMilestones: [LifeMilestone] {
         lifeStore.milestones
@@ -192,20 +355,21 @@ struct LifeFinanceView: View {
     }
 
     var body: some View {
+        // 一次取出，避免 toolbar + summaryHeader + milestoneList 各自重複計算 O(n×1200) 的銀行餘額展開
+        let balancesByBank = allBankBalances()
+        let bankBalanceTWD = balancesByBank.values.reduce(0) { $0 + balanceInTWD($1, expenseStore: expenseStore) }
         NavigationStack {
-            VStack(spacing: 0) {
-                summaryHeader
-                filterChips
-                milestoneList
-            }
+            // [對齊 SavingsInsuranceView 看板規格] 英雄看板與篩選列改為 List 內首個 Section，
+            // 隨內容一起捲動，不再固定釘在列表上方。
+            milestoneList(balance: bankBalanceTWD, balancesByBank: balancesByBank)
             .background(Color(.systemGroupedBackground))
             .navigationTitle("財富")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     HStack(spacing: 8) {
-                        Text(formatTwdShort(allBankBalanceInTWD))
+                        Text(bankBalanceTWD.ntdWanString)
                             .font(.caption.weight(.semibold))
-                            .foregroundStyle(allBankBalanceInTWD >= 0 ? Color.blue : Color.red)
+                            .foregroundStyle(bankBalanceTWD >= 0 ? Color.blue : Color.red)
                             .lineLimit(1)
                             .minimumScaleFactor(0.7)
                         Button {
@@ -227,77 +391,205 @@ struct LifeFinanceView: View {
         }
     }
 
-    // MARK: - 摘要
+    // MARK: - 摘要（英雄卡）
 
-    private var summaryHeader: some View {
-        VStack(spacing: 8) {
-            HStack {
-                Text("理財帳戶總覽").font(.subheadline).foregroundStyle(.secondary)
+    private let heroAccent     = Color(red: 0.22, green: 0.53, blue: 0.98)
+    private let heroAccentDark = Color(red: 0.10, green: 0.35, blue: 0.82)
+
+    private func summaryHeader(balance: Double) -> some View {
+        let isPositive = balance >= 0
+        // 一次取出，避免 ForEach 內 4 次重複 O(n) filter
+        let milestones = allFinanceMilestones
+        let totalCount = milestones.count
+        let countBySub: [FinanceSubCategory: Int] = milestones.reduce(into: [:]) { dict, m in
+            if let sub = m.financeSubCategory { dict[sub, default: 0] += 1 }
+        }
+
+        return VStack(spacing: 0) {
+            // 頂部：銀行總餘額 + 計數膠囊
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 6) {
+                        Text("銀行帳戶總餘額（台幣等值）")
+                            .font(.caption)
+                            .foregroundStyle(.white.opacity(0.78))
+                    }
+                    Text(balance.ntdWanString)
+                        .heroBigValueFont()
+                        .foregroundStyle(isPositive ? .white : Color(red: 1.0, green: 0.78, blue: 0.75))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.5)
+                        .contentTransition(.numericText())
+                        .shadow(
+                            color: isPositive ? .clear : Color.red.opacity(0.40),
+                            radius: 6, x: 0, y: 2
+                        )
+                }
                 Spacer()
-                Text("\(allFinanceMilestones.count) 筆").font(.subheadline).foregroundStyle(.secondary)
+                // 帳戶計數膠囊
+                VStack(alignment: .trailing, spacing: 4) {
+                    Text("帳戶總計")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.62))
+                    Text("\(totalCount) 筆")
+                        .font(.system(size: 13, weight: .bold, design: .rounded))
+                }
+                .padding(.horizontal, 11).padding(.vertical, 6)
+                .background(.white.opacity(0.20))
+                .clipShape(Capsule())
+                .foregroundStyle(.white)
             }
-            HStack(spacing: 16) {
-                ForEach(FinanceSubCategory.allCases) { sub in
-                    let count = allFinanceMilestones.filter { $0.financeSubCategory == sub }.count
-                    VStack(spacing: 2) {
-                        Image(systemName: sub.icon).font(.title3).foregroundStyle(colorFor(sub))
-                        Text("\(count)").font(.caption.bold())
-                        Text(sub.rawValue).font(.caption2).foregroundStyle(.secondary)
+
+            // 分隔線
+            Rectangle()
+                .fill(.white.opacity(0.20))
+                .frame(height: 0.5)
+                .padding(.vertical, 14)
+
+            // 四欄 KPI：銀行 / 信用卡 / 證券 / 保險
+            HStack(spacing: 0) {
+                ForEach(Array(FinanceSubCategory.allCases.enumerated()), id: \.element) { i, sub in
+                    let count = countBySub[sub, default: 0]
+                    VStack(spacing: 5) {
+                        ZStack {
+                            Circle()
+                                .fill(
+                                    LinearGradient(
+                                        colors: [.white.opacity(0.26), .white.opacity(0.10)],
+                                        startPoint: .topLeading,
+                                        endPoint: .bottomTrailing
+                                    )
+                                )
+                                .frame(width: 30, height: 30)
+                            Circle()
+                                .strokeBorder(.white.opacity(0.30), lineWidth: 0.75)
+                                .frame(width: 30, height: 30)
+                            Image(systemName: sub.icon)
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(.white)
+                        }
+                        Text("\(count)")
+                            .font(.system(size: 13, weight: .bold, design: .rounded))
+                            .foregroundStyle(.white)
+                            .contentTransition(.numericText())
+                        Text(sub.rawValue)
+                            .font(.system(size: 9, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.72))
                     }
                     .frame(maxWidth: .infinity)
+
+                    if i < FinanceSubCategory.allCases.count - 1 {
+                        Rectangle()
+                            .fill(.white.opacity(0.22))
+                            .frame(width: 0.5, height: 36)
+                    }
                 }
             }
+            .padding(.vertical, 6)
+            .background(.white.opacity(0.08))
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+            .overlay(
+                RoundedRectangle(cornerRadius: 10)
+                    .strokeBorder(.white.opacity(0.18), lineWidth: 0.75)
+            )
         }
-        .padding()
-        .background(Color(.systemBackground))
+        .padding(.horizontal, 20)
+        .padding(.vertical, 20)
+        .heroCardShell(card: .lifeFinance)
+        .padding(.horizontal, 16)
     }
 
     // MARK: - 篩選
 
     private var filterChips: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
+        // 一次 reduce 建立計數表，避免 ForEach 內對每個分類各做一次 O(n) filter
+        let countBySub: [FinanceSubCategory: Int] = financeMilestones.reduce(into: [:]) { dict, m in
+            if let sub = m.financeSubCategory { dict[sub, default: 0] += 1 }
+        }
+        return ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
-                chipButton(label: "全部", isSelected: selectedSub == nil) { selectedSub = nil }
+                chipButton(label: "全部", icon: "tray.full.fill",
+                           tint: heroAccent, isSelected: selectedSub == nil) { selectedSub = nil }
                 ForEach(FinanceSubCategory.allCases) { sub in
-                    let count = financeMilestones.filter { $0.financeSubCategory == sub }.count
+                    let count = countBySub[sub, default: 0]
                     if count > 0 {
-                        chipButton(label: "\(sub.rawValue) \(count)", isSelected: selectedSub == sub) { selectedSub = sub }
+                        chipButton(label: "\(sub.rawValue) \(count)", icon: sub.icon,
+                                   tint: colorFor(sub), isSelected: selectedSub == sub) { selectedSub = sub }
                     }
                 }
             }
-            .padding(.horizontal).padding(.vertical, 8)
+            .padding(.horizontal)
+            .padding(.vertical, 10)
+        }
+        .background(Color(.systemBackground))
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(
+                    LinearGradient(
+                        colors: [Color(.separator).opacity(0.22), .clear],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
+                .frame(height: 1)
         }
     }
 
-    private func chipButton(label: String, isSelected: Bool, action: @escaping () -> Void) -> some View {
+    private func chipButton(label: String, icon: String, tint: Color, isSelected: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Text(label).font(.caption.weight(.medium))
-                .padding(.horizontal, 12).padding(.vertical, 6)
-                .background(isSelected ? Color.green : Color(.tertiarySystemFill))
-                .foregroundStyle(isSelected ? .white : .primary)
-                .clipShape(Capsule())
+            HStack(spacing: 5) {
+                Image(systemName: icon).font(.caption2)
+                Text(label).font(.caption.weight(isSelected ? .semibold : .medium))
+            }
+            .padding(.horizontal, 12).padding(.vertical, 6)
+            .background(isSelected ? tint : Color(.tertiarySystemFill))
+            .foregroundStyle(isSelected ? .white : .primary)
+            .clipShape(Capsule())
+            .shadow(color: isSelected ? tint.opacity(0.35) : .clear, radius: 5, x: 0, y: 2)
         }
         .buttonStyle(.plain)
+        .animation(.spring(response: 0.26, dampingFraction: 0.72), value: isSelected)
     }
 
     // MARK: - 列表
 
-    private func linkedCards(for bankId: UUID) -> [LifeMilestone] {
-        lifeStore.milestones.filter {
-            $0.category == .achievement && $0.financeSubCategory == .creditCard && $0.linkedBankMilestoneId == bankId
-        }
-    }
-
-    private var milestoneList: some View {
-        List {
-            ForEach(filteredMilestones) { item in
+    private func milestoneList(balance: Double, balancesByBank: [UUID: [String: Double]]) -> some View {
+        // balancesByBank 由呼叫端 body 一次算好傳入，避免與 toolbar/summaryHeader 的
+        // allBankBalanceInTWD 各自重複呼叫 allBankBalances()（O(banks×1200) 全量展開跑兩次）
+        // 一次依 linkedBankMilestoneId 分組信用卡，避免每一列銀行帳戶各自對
+        // lifeStore.milestones 做一次 O(n) filter（N 家銀行 × M 筆信用卡 = O(n×m)）
+        let cardsByBank = Dictionary(grouping: lifeStore.milestones.filter {
+            $0.category == .achievement && $0.financeSubCategory == .creditCard && $0.linkedBankMilestoneId != nil
+        }, by: { $0.linkedBankMilestoneId! })
+        return List {
+            Section {
+                summaryHeader(balance: balance)
+                    .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 0, trailing: 0))
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+                    .opacity(headerAppeared ? 1 : 0)
+                    .offset(y: headerAppeared ? 0 : 22)
+                    .onAppear {
+                        withAnimation(.spring(response: 0.55, dampingFraction: 0.78)) {
+                            headerAppeared = true
+                        }
+                    }
+                    .onDisappear {
+                        headerAppeared = false
+                    }
+                filterChips
+                    .listRowInsets(EdgeInsets())
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+            }
+            ForEach(Array(filteredMilestones.enumerated()), id: \.element.id) { idx, item in
                 VStack(spacing: 0) {
-                    milestoneRow(item)
+                    milestoneRow(item, balances: balancesByBank[item.id])
                         .contentShape(Rectangle())
                         .onTapGesture { viewingItem = item }
 
                     if item.financeSubCategory == .bank {
-                        let cards = linkedCards(for: item.id)
+                        let cards = cardsByBank[item.id] ?? []
                         if !cards.isEmpty {
                             ForEach(cards) { card in
                                 creditCardSubRow(card)
@@ -307,33 +599,64 @@ struct LifeFinanceView: View {
                         }
                     }
                 }
+                // 交錯淡入 + 向上進場，對齊 VariableExpenseView / IncomeView 規格
+                .opacity(rowsAppeared ? 1 : 0)
+                .offset(y: rowsAppeared ? 0 : 12)
+                .animation(
+                    .spring(response: 0.44, dampingFraction: 0.82)
+                        .delay(0.04 * Double(min(idx, 12))),
+                    value: rowsAppeared
+                )
             }
         }
         .listStyle(.insetGrouped)
+        .scrollContentBackground(.hidden)
+        .onAppear {
+            withAnimation(.spring(response: 0.5, dampingFraction: 0.82).delay(0.08)) {
+                rowsAppeared = true
+            }
+        }
+        .onDisappear {
+            rowsAppeared = false
+        }
     }
 
     private func creditCardSubRow(_ card: LifeMilestone) -> some View {
         let disabled = card.isDisabled == true
-        return HStack(spacing: 8) {
-            Rectangle().fill(Color.clear).frame(width: 20)
-            Image(systemName: "creditcard.fill")
-                .font(.caption)
-                .foregroundStyle(disabled ? Color.secondary : .orange)
-                .frame(width: 24, height: 24)
-                .background((disabled ? Color.secondary : Color.orange).opacity(0.12))
-                .clipShape(Circle())
+        let accent: Color = disabled ? .secondary : .orange
+        return HStack(spacing: 10) {
+            // 縮排 + 32pt 漸層圓（對齊 milestoneRow 子層規格）
+            Rectangle().fill(Color.clear).frame(width: 16)
+            ZStack {
+                Circle()
+                    .fill(
+                        LinearGradient(
+                            colors: [accent.opacity(0.18), accent.opacity(0.07)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 32, height: 32)
+                Circle()
+                    .stroke(accent.opacity(disabled ? 0.08 : 0.18), lineWidth: 0.75)
+                    .frame(width: 32, height: 32)
+                Image(systemName: "creditcard.fill")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(accent)
+            }
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
                     Text(card.cardName ?? card.title)
                         .font(.caption.weight(.medium))
                         .foregroundStyle(disabled ? .secondary : .primary)
+                        .lineLimit(1)
                     if disabled {
                         Text("已停用")
-                            .font(.caption2.weight(.medium))
-                            .padding(.horizontal, 6).padding(.vertical, 1)
-                            .background(Color.secondary.opacity(0.18))
+                            .font(.system(size: 9, weight: .semibold))
+                            .padding(.horizontal, 6).padding(.vertical, 2)
+                            .background(Color.secondary.opacity(0.14))
                             .foregroundStyle(.secondary)
-                            .clipShape(RoundedRectangle(cornerRadius: 4))
+                            .clipShape(Capsule())
                     }
                 }
                 HStack(spacing: 4) {
@@ -348,22 +671,35 @@ struct LifeFinanceView: View {
             }
             Spacer()
             Image(systemName: "chevron.right")
-                .font(.caption2).foregroundStyle(.tertiary)
+                .font(.system(size: 10)).foregroundStyle(.tertiary)
         }
         .padding(.vertical, 4)
-        .opacity(disabled ? 0.7 : 1.0)
+        .opacity(disabled ? 0.65 : 1.0)
     }
 
-    private func milestoneRow(_ item: LifeMilestone) -> some View {
-        HStack(spacing: 12) {
-            Image(systemName: item.financeSubCategory?.icon ?? "banknote.fill")
-                .font(.title3)
-                .foregroundStyle(colorFor(item.financeSubCategory ?? .bank))
-                .frame(width: 36, height: 36)
-                .background(colorFor(item.financeSubCategory ?? .bank).opacity(0.12))
-                .clipShape(Circle())
+    private func milestoneRow(_ item: LifeMilestone, balances: [String: Double]?) -> some View {
+        let accent = colorFor(item.financeSubCategory ?? .bank)
+        return HStack(spacing: 12) {
+            // 44pt 漸層圖示圓（對齊 IncomeView.incomeRow 規格）
+            ZStack {
+                Circle()
+                    .fill(
+                        LinearGradient(
+                            colors: [accent.opacity(0.22), accent.opacity(0.09)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 44, height: 44)
+                Circle()
+                    .stroke(accent.opacity(0.20), lineWidth: 1)
+                    .frame(width: 44, height: 44)
+                Image(systemName: item.financeSubCategory?.icon ?? "banknote.fill")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(accent)
+            }
             VStack(alignment: .leading, spacing: 4) {
-                Text(item.title).font(.subheadline.weight(.medium))
+                Text(item.title).font(.subheadline.weight(.semibold)).lineLimit(1)
                 subtitle(for: item)
             }
             Spacer()
@@ -371,109 +707,55 @@ struct LifeFinanceView: View {
                 VStack(alignment: .trailing, spacing: 2) {
                     Text("開戶日期：\(formatDate(item.date))")
                         .font(.caption2).foregroundStyle(.tertiary)
-                    let balances = bankBalances(for: item)
-                    let display = bankBalanceDisplay(balances: balances)
+                    let display = bankBalanceDisplay(balances: balances ?? [:])
                     Text(display.text)
-                        .font(.caption.bold())
+                        .font(.system(size: 13, weight: .bold, design: .rounded))
                         .foregroundStyle(display.amount >= 0 ? Color.blue : Color.red)
+                        .contentTransition(.numericText())
                 }
             } else {
-                Text(formatDate(item.date)).font(.caption).foregroundStyle(.tertiary)
+                HStack(spacing: 4) {
+                    Image(systemName: "calendar")
+                        .font(.system(size: 9, weight: .medium))
+                    Text(formatDate(item.date))
+                        .font(.caption2.weight(.medium))
+                }
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 7).padding(.vertical, 3)
+                .background(Color(.tertiarySystemFill))
+                .clipShape(Capsule())
             }
         }
-        .padding(.vertical, 2)
+        .padding(.vertical, 4)
     }
 
-    /// 依幣別計算銀行帳戶的目前餘額（含信用卡彙總扣款 NT$ + 股票交易 + 固定支出週期展開）
-    private func bankBalances(for ms: LifeMilestone) -> [String: Double] {
+    /// 一次批次算好所有銀行帳戶的餘額：expensesById／incomesById 各建一次表，
+    /// 銀行帳戶逐筆存款改為 O(1) 查表，取代原本 bankBalances(for:) 每次呼叫都對
+    /// expenseStore.expenses / incomes 做 first(where:) 全量掃描（O(deposits × expenses)），
+    /// 而 milestoneRow 是列表每一列都會呼叫的路徑，未批次化會在任何無關的 @Published 變動時
+    /// 對每一列重跑一次全量掃描。對齊 AddExpenseView.allBankBalances() 的批次建表作法。
+    private func allBankBalances() -> [UUID: [String: Double]] {
         let now = Date()
-        var totals: [String: Double] = [:]
-        for dep in ms.bankDeposits ?? [] where dep.date <= now {
-            // 跳過已連結到信用卡支出的存款（用信用卡彙總取代）
-            if let expId = dep.linkedExpenseId,
-               let exp = expenseStore.expenses.first(where: { $0.id == expId }),
-               exp.linkedCreditCardMilestoneId != nil { continue }
-            // 跳過已連結到固定支出（含週期）的存款 — 改用展開的虛擬條目取代，避免漏算或重算
-            if let expId = dep.linkedExpenseId,
-               let exp = expenseStore.expenses.first(where: { $0.id == expId }),
-               exp.expenseType == .fixed, exp.recurrence != nil { continue }
-            // 跳過已連結到週期性收入的存款 — 改用展開的虛擬條目取代
-            if let incId = dep.linkedExpenseId,
-               let inc = expenseStore.incomes.first(where: { $0.id == incId }),
-               inc.period != .once { continue }
-            totals[dep.currencyCode, default: 0] += dep.isWithdrawal ? -dep.amount : dep.amount
+        let expensesById = Dictionary(expenseStore.expenses.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let incomesById = Dictionary(expenseStore.incomes.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let banks = lifeStore.milestones.filter {
+            $0.category == .achievement && $0.financeSubCategory == .bank
         }
-        // 固定支出（直接扣銀行）依週期展開為每期扣款
-        for dep in expandedFixedExpenseWithdrawals(for: ms.id, expenses: expenseStore.expenses) {
-            totals[dep.currencyCode, default: 0] -= dep.amount
+        var result: [UUID: [String: Double]] = [:]
+        for ms in banks {
+            result[ms.id] = bankBalances(for: ms, now: now, expensesById: expensesById, incomesById: incomesById, lifeStore: lifeStore, expenseStore: expenseStore)
         }
-        // 週期性收入依 period 展開為每期入帳
-        for dep in expandedIncomeDeposits(for: ms.id, incomes: expenseStore.incomes) {
-            totals[dep.currencyCode, default: 0] += dep.amount
-        }
-        // 信用卡彙總扣款一律以 NT$ 計（週期性固定支出依 recurrence 展開到今天）
-        let cards = lifeStore.milestones.filter {
-            $0.financeSubCategory == .creditCard && $0.linkedBankMilestoneId == ms.id
-        }
-        for card in cards {
-            let entries = expandedCreditCardEntries(forCard: card.id, expenses: expenseStore.expenses)
-            for entry in entries { totals["NT$", default: 0] -= entry.amount }
-        }
-        // 過濾掉淨額為 0 的幣別（避免單一幣別帳戶被誤判為混幣）
-        let nonZero = totals.filter { $0.value != 0 }
-        return nonZero.isEmpty ? totals : nonZero
-    }
-
-    /// 將某帳戶的所有幣別餘額換算成 TWD 加總
-    private func balanceInTWD(_ balances: [String: Double]) -> Double {
-        var total: Double = 0
-        for (code, amount) in balances {
-            if code == "NT$" {
-                total += amount
-            } else if let rate = expenseStore.currencyRates.first(where: { $0.code == code }), rate.rate > 0 {
-                total += amount * rate.rate
-            } else {
-                total += amount  // 找不到匯率時不換算，至少不丟失資料
-            }
-        }
-        return total
+        return result
     }
 
     /// 帳戶餘額顯示：單幣別→該幣別；多幣別→換算 TWD 等值
     private func bankBalanceDisplay(balances: [String: Double]) -> (text: String, amount: Double) {
         if balances.count <= 1 {
             let entry = balances.first ?? ("NT$", 0)
-            return ("\(entry.0) \(formatNumber(entry.1))", entry.1)
+            return (entry.1.wanString(symbolPrefix: entry.0), entry.1)
         }
-        let twd = balanceInTWD(balances)
-        return ("≈ NT$ \(formatNumber(twd))", twd)
-    }
-
-    /// 所有銀行帳戶的台幣等值總和
-    private var allBankBalanceInTWD: Double {
-        let banks = lifeStore.milestones.filter {
-            $0.category == .achievement && $0.financeSubCategory == .bank
-        }
-        return banks.reduce(0) { $0 + balanceInTWD(bankBalances(for: $1)) }
-    }
-
-    private func formatNumber(_ v: Double) -> String {
-        let f = NumberFormatter(); f.numberStyle = .decimal; f.maximumFractionDigits = 0
-        return f.string(from: NSNumber(value: v)) ?? "0"
-    }
-
-    private func formatTwdShort(_ v: Double) -> String {
-        let f = NumberFormatter(); f.numberStyle = .decimal; f.maximumFractionDigits = 0
-        if abs(v) >= 100_000_000 {
-            let s = f.string(from: NSNumber(value: v / 100_000_000)) ?? "0"
-            return "NT$ \(s) 億"
-        }
-        if abs(v) >= 10_000 {
-            let s = f.string(from: NSNumber(value: v / 10_000)) ?? "0"
-            return "NT$ \(s) 萬"
-        }
-        let s = f.string(from: NSNumber(value: v)) ?? "0"
-        return "NT$ \(s)"
+        let twd = balanceInTWD(balances, expenseStore: expenseStore)
+        return ("≈ \(twd.ntdWanString)", twd)
     }
 
     @ViewBuilder
@@ -502,8 +784,12 @@ struct LifeFinanceView: View {
         }
     }
 
+    private static let dateFormatter: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "yyyy/M/d"; return f
+    }()
+
     private func formatDate(_ date: Date) -> String {
-        let f = DateFormatter(); f.dateFormat = "yyyy/M/d"; return f.string(from: date)
+        Self.dateFormatter.string(from: date)
     }
 }
 
@@ -542,6 +828,49 @@ struct FinanceCardView: View {
         case .bank: return .blue; case .creditCard: return .orange
         case .securities: return .green; case .insurance: return .purple
         }
+    }
+
+    /// 刪除里程碑並清除其他 Store 對此 id 的懸空引用（比照 ResumeView.deleteMilestoneCleaningLinks
+    /// 同型修復，LifeStore.deleteMilestone 本身無法觸及 FinanceStore／ExpenseStore）。
+    private func deleteMilestoneCleaningLinks(_ item: LifeMilestone) {
+        lifeStore.deleteMilestone(item)
+
+        var stocks = financeStore.stocks
+        var stocksChanged = false
+        for i in stocks.indices {
+            if stocks[i].linkedBankMilestoneId == item.id {
+                stocks[i].linkedBankMilestoneId = nil
+                stocks[i].linkedBankCurrency = nil
+                stocksChanged = true
+            }
+            if stocks[i].linkedSecuritiesMilestoneId == item.id {
+                stocks[i].linkedSecuritiesMilestoneId = nil
+                stocksChanged = true
+            }
+        }
+        if stocksChanged { financeStore.stocks = stocks }
+
+        var expenses = expenseStore.expenses
+        var expensesChanged = false
+        for i in expenses.indices {
+            if expenses[i].linkedBankMilestoneId == item.id {
+                expenses[i].linkedBankMilestoneId = nil
+                expensesChanged = true
+            }
+            if expenses[i].linkedCreditCardMilestoneId == item.id {
+                expenses[i].linkedCreditCardMilestoneId = nil
+                expensesChanged = true
+            }
+        }
+        if expensesChanged { expenseStore.expenses = expenses }
+
+        var incomes = expenseStore.incomes
+        var incomesChanged = false
+        for i in incomes.indices where incomes[i].linkedBankMilestoneId == item.id {
+            incomes[i].linkedBankMilestoneId = nil
+            incomesChanged = true
+        }
+        if incomesChanged { expenseStore.incomes = incomes }
     }
 
     var body: some View {
@@ -596,7 +925,7 @@ struct FinanceCardView: View {
                 AddStockView(editing: stk)
             }
             .alert("確定要刪除嗎？", isPresented: $showDeleteConfirm) {
-                Button("刪除", role: .destructive) { lifeStore.deleteMilestone(item); dismiss() }
+                Button("刪除", role: .destructive) { deleteMilestoneCleaningLinks(item); dismiss() }
                 Button("取消", role: .cancel) {}
             }
         }
@@ -612,6 +941,9 @@ struct FinanceCardView: View {
     }
 
     /// 預設樣式（證券／保險）
+    /// 【美化 v25.61】headerCard 三分支（creditCardHeader／bankPassbookHeader／defaultHeader）補齊立體感一致性：
+    /// 另兩支 case 卡片外層都已有 stroke(黑 0.06~white 0.15) + shadow(黑 0.12~0.18)，唯獨本 case（股票／保險，最常見的一支）
+    /// 原本平貼無邊框無陰影。已補上與 bankPassbookHeader 相同的中性描邊 + 陰影（同樣立於 systemBackground、非彩色漸層卡）。
     private var defaultHeader: some View {
         VStack(spacing: 10) {
             Image(systemName: sub.icon)
@@ -637,13 +969,18 @@ struct FinanceCardView: View {
         .frame(maxWidth: .infinity)
         .background(Color(.systemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 16))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16)
+                .stroke(Color.black.opacity(0.06), lineWidth: 1)
+        )
+        .shadow(color: Color.black.opacity(0.12), radius: 6, y: 3)
         .padding(.horizontal)
     }
 
     /// 信用卡樣式（仿真實信用卡 banner）
     private var creditCardHeader: some View {
         let disabled = item.isDisabled == true
-        let cardName = item.cardName?.isEmpty == false ? item.cardName! : item.title
+        let cardName = item.cardName.flatMap { $0.isEmpty ? nil : $0 } ?? item.title
         let last4 = item.cardLastFour ?? "----"
         let bankName: String? = {
             guard let bid = item.linkedBankMilestoneId,
@@ -736,7 +1073,7 @@ struct FinanceCardView: View {
 
     /// 銀行存摺樣式
     private var bankPassbookHeader: some View {
-        let bn = item.bankName?.isEmpty == false ? item.bankName! : item.title
+        let bn = item.bankName.flatMap { $0.isEmpty ? nil : $0 } ?? item.title
         let branch = item.branchName ?? ""
         let acc = item.accountNumber ?? ""
         let accType = item.bankAccountType?.rawValue ?? ""
@@ -803,16 +1140,19 @@ struct FinanceCardView: View {
         }
     }
 
+    private static let fmtMonthYearFormatter: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "MM/yy"; return f
+    }()
+    private static let fmtYearMonthZhFormatter: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "yyyy 年 M 月"; return f
+    }()
+
     private func fmtMonthYear(_ d: Date) -> String {
-        let f = DateFormatter()
-        f.dateFormat = "MM/yy"
-        return f.string(from: d)
+        Self.fmtMonthYearFormatter.string(from: d)
     }
 
     private func fmtYearMonthZh(_ d: Date) -> String {
-        let f = DateFormatter()
-        f.dateFormat = "yyyy 年 M 月"
-        return f.string(from: d)
+        Self.fmtYearMonthZhFormatter.string(from: d)
     }
 
     private var detailCard: some View {
@@ -837,12 +1177,67 @@ struct FinanceCardView: View {
         infoRow("開戶日期", fmtDate(item.date))
     }
 
+    /// 信用卡本期已用 / 可用額度 / 使用率（依帳單日計算本期，過帳單日自動重置）
+    @ViewBuilder
+    private func creditUsageBlock(limit: Double) -> some View {
+        let spent = currentCycleSpent(item)
+        let available = max(0, limit - spent)
+        let ratio = limit > 0 ? min(1, spent / limit) : 0
+        let barColor: Color = ratio > 0.8 ? .red : (ratio > 0.5 ? .orange : .green)
+        infoRow("本期已用", spent.ntdWanString)
+        infoRow("可用額度", available.ntdWanString)
+        VStack(alignment: .leading, spacing: 5) {
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(Color(.tertiarySystemFill)).frame(height: 8)
+                    Capsule().fill(barColor).frame(width: max(4, geo.size.width * ratio), height: 8)
+                }
+            }
+            .frame(height: 8)
+            Text("使用率 \(Int((ratio * 100).rounded()))%　·　依帳單日計算本期，過帳單日重置")
+                .font(.caption2).foregroundStyle(.secondary)
+        }
+        .padding(.vertical, 6)
+    }
+
+    /// 本期（自最近一個帳單日之後）刷這張卡的消費總額；週期性固定支出會依 recurrence 展開
+    private func currentCycleSpent(_ card: LifeMilestone) -> Double {
+        let cal = Calendar.current
+        let now = Date()
+        let cycleStart = Self.creditCardCycleStart(billingDay: card.billingDay, now: now, calendar: cal)
+        return expandedCreditCardEntries(forCard: card.id, expenses: expenseStore.expenses)
+            .filter { $0.date > cycleStart && $0.date <= now }
+            .reduce(0) { $0 + $1.amount }
+    }
+
+    /// 本期起點＝今天(含)以前最近的一個帳單日；無帳單日則以當月 1 號為界
+    static func creditCardCycleStart(billingDay: Int?, now: Date, calendar cal: Calendar) -> Date {
+        let startOfToday = cal.startOfDay(for: now)
+        guard let bd = billingDay, bd >= 1 else {
+            return cal.date(from: cal.dateComponents([.year, .month], from: now)) ?? startOfToday
+        }
+        func billingDate(inMonthOf ref: Date) -> Date {
+            var comps = cal.dateComponents([.year, .month], from: ref)
+            let maxDay = cal.range(of: .day, in: .month, for: ref)?.count ?? 28
+            comps.day = min(bd, maxDay)   // 帳單日超過該月天數時取月底
+            return cal.date(from: comps) ?? cal.startOfDay(for: ref)
+        }
+        let thisMonth = billingDate(inMonthOf: now)
+        if thisMonth <= startOfToday { return thisMonth }
+        // 本月帳單日還沒到 → 上一期結帳在上個月的帳單日
+        let prev = cal.date(byAdding: .month, value: -1, to: now) ?? now
+        return billingDate(inMonthOf: prev)
+    }
+
     @ViewBuilder
     private var creditCardDetail: some View {
         if let c = item.cardName, !c.isEmpty { infoRow("卡別", c) }
         if let l = item.cardLastFour, !l.isEmpty { infoRow("卡號末四碼", l) }
-        if let cl = item.creditLimit, cl > 0 { infoRow("額度", "\(fmtNum(cl / 10000)) 萬元") }
-        if let af = item.annualFee, af > 0 { infoRow("年費", "NT$\(fmtNum(af))") }
+        if let cl = item.creditLimit, cl > 0 {
+            infoRow("額度", cl.ntdWanString)
+            creditUsageBlock(limit: cl)
+        }
+        if let af = item.annualFee, af > 0 { infoRow("年費", af.ntdWanString) }
         if let bd = item.billingDay { infoRow("帳單日", "每月 \(bd) 日") }
         if let pd = item.paymentDay { infoRow("繳款日", "每月 \(pd) 日") }
         infoRow("核卡日期", fmtDate(item.date))
@@ -901,7 +1296,7 @@ struct FinanceCardView: View {
         if let co = item.insuranceCompany, !co.isEmpty { infoRow("保險公司", co) }
         if let pn = item.policyNumber, !pn.isEmpty { infoRow("保單號碼", pn) }
         if let it = item.insuranceType { infoRow("險種", it.rawValue) }
-        if let pa = item.premiumAmount, pa > 0 { infoRow("保費", "NT$\(fmtNum(pa))") }
+        if let pa = item.premiumAmount, pa > 0 { infoRow("保費", pa.ntdWanString) }
         infoRow("生效日", fmtDate(item.date))
         if let ed = item.expiryDate { infoRow("到期日", fmtDate(ed)) }
         if let b = item.beneficiary, !b.isEmpty { infoRow("受益人", b) }
@@ -928,13 +1323,22 @@ struct FinanceCardView: View {
         .padding(.horizontal).padding(.vertical, 10)
     }
 
+    private static let fmtDateFormatter: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "yyyy/M/d"; return f
+    }()
+    private static let fmtNumFormatter: NumberFormatter = {
+        let f = NumberFormatter(); f.numberStyle = .decimal; f.maximumFractionDigits = 0; return f
+    }()
+    private static let shortDateFormatter: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "M/d"; return f
+    }()
+
     private func fmtDate(_ date: Date) -> String {
-        let f = DateFormatter(); f.dateFormat = "yyyy/M/d"; return f.string(from: date)
+        Self.fmtDateFormatter.string(from: date)
     }
 
     private func fmtNum(_ v: Double) -> String {
-        let f = NumberFormatter(); f.numberStyle = .decimal; f.maximumFractionDigits = 0
-        return f.string(from: NSNumber(value: v)) ?? "0"
+        Self.fmtNumFormatter.string(from: NSNumber(value: v)) ?? "0"
     }
 
     // MARK: - 銀行存款章節
@@ -942,11 +1346,16 @@ struct FinanceCardView: View {
     /// 銀行存款列表：真實 BankDeposit + 信用卡逐月彙總 + 固定支出週期展開 + 週期性收入展開
     private var deposits: [BankDeposit] {
         let now = Date()
+        // 先建一次 expensesById／incomesById 查表，取代逐筆 first(where:) 對
+        // expenseStore.expenses／incomes 的全量線性掃描（O(bankDeposits × (expenses+incomes))），
+        // 對齊 allBankBalances() 的批次建表作法。
+        let expensesById = Dictionary(expenseStore.expenses.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let incomesById = Dictionary(expenseStore.incomes.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         let real = (item.bankDeposits ?? []).filter { dep in
             guard dep.date <= now else { return false }
             guard let linkedId = dep.linkedExpenseId else { return true }
             // 連結到 Expense
-            if let exp = expenseStore.expenses.first(where: { $0.id == linkedId }) {
+            if let exp = expensesById[linkedId] {
                 // 信用卡支出：用每月彙總取代
                 if exp.linkedCreditCardMilestoneId != nil { return false }
                 // 固定支出（週期）：用展開虛擬條目取代
@@ -954,7 +1363,7 @@ struct FinanceCardView: View {
                 return true
             }
             // 連結到 Income（週期性 → 用展開取代）
-            if let inc = expenseStore.incomes.first(where: { $0.id == linkedId }) {
+            if let inc = incomesById[linkedId] {
                 if inc.period != .once { return false }
             }
             return true
@@ -1038,11 +1447,31 @@ struct FinanceCardView: View {
     }
 
     private var depositSection: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                Image(systemName: "dollarsign.circle.fill").foregroundStyle(.blue)
-                Text(sub == .securities ? "證券交易" : "銀行存款").font(.headline)
+        // 預先取出 deposits，避免 header count + content 兩次重算
+        let allDeposits = deposits
+        return VStack(alignment: .leading, spacing: 0) {
+            // 標題列：Capsule 側條 + 計數膠囊，對齊 OverviewView categoryBreakdownSection 規格
+            HStack(spacing: 10) {
+                Capsule()
+                    .fill(
+                        LinearGradient(
+                            colors: [.blue, .blue.opacity(0.55)],
+                            startPoint: .top, endPoint: .bottom
+                        )
+                    )
+                    .frame(width: 4, height: 18)
+                Text(sub == .securities ? "證券交易" : "銀行存款")
+                    .font(.subheadline.weight(.bold))
                 Spacer()
+                if !allDeposits.isEmpty {
+                    Text("\(allDeposits.count) 筆")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.blue)
+                        .padding(.horizontal, 8).padding(.vertical, 3)
+                        .background(Color.blue.opacity(0.10))
+                        .clipShape(Capsule())
+                        .overlay(Capsule().stroke(Color.blue.opacity(0.22), lineWidth: 0.75))
+                }
                 Menu {
                     Button { addDepositCurrency = "NT$"; showAddDeposit = true } label: {
                         Label("台幣", systemImage: "dollarsign")
@@ -1053,19 +1482,19 @@ struct FinanceCardView: View {
                         }
                     }
                 } label: {
-                    Image(systemName: "plus.circle.fill").foregroundStyle(.blue)
+                    Image(systemName: "plus.circle.fill").font(.title3).foregroundStyle(.blue)
                 }
             }
-            .padding(.horizontal).padding(.top, 12).padding(.bottom, 8)
+            .padding(.horizontal, 16).padding(.top, 14).padding(.bottom, 10)
 
-            if deposits.isEmpty {
+            if allDeposits.isEmpty {
                 Text("尚無存款記錄").font(.caption).foregroundStyle(.tertiary)
-                    .padding(.horizontal).padding(.bottom, 12)
+                    .padding(.horizontal, 16).padding(.bottom, 14)
             } else {
-                depositChart
+                depositChart(allDeposits)
                     .padding(.horizontal).padding(.bottom, 8)
 
-                let sortedDesc = deposits.sorted { $0.date > $1.date }
+                let sortedDesc = allDeposits.sorted { $0.date > $1.date }
                 let visible = depositsExpanded ? sortedDesc : Array(sortedDesc.prefix(6))
                 ForEach(visible, id: \.id) { dep in
                     depositRow(dep)
@@ -1104,8 +1533,9 @@ struct FinanceCardView: View {
         let amount: Double
     }
 
-    private var creditCardMonthlyTotals: [CreditCardMonthlyTotal] {
-        let entries = expandedCreditCardEntries(forCard: milestoneId, expenses: expenseStore.expenses)
+    /// 接收呼叫端（creditCardChartSection）已算好的 entries，避免每次都重新呼叫
+    /// expandedCreditCardEntries 展開週期性支出（O(每筆固定支出 × 期數)）。
+    private func creditCardMonthlyTotals(_ entries: [CreditCardEntry]) -> [CreditCardMonthlyTotal] {
         let groups = Dictionary(grouping: entries) { entry -> String in
             let withdrawalDate = LifeMilestone.creditCardWithdrawalDate(
                 for: entry.date,
@@ -1135,8 +1565,8 @@ struct FinanceCardView: View {
         let amount: Double
     }
 
-    private var creditCardDailyTotals: [CreditCardDailyTotal] {
-        let entries = expandedCreditCardEntries(forCard: milestoneId, expenses: expenseStore.expenses)
+    /// 接收呼叫端（creditCardChartSection）已算好的 entries，理由同 creditCardMonthlyTotals(_:)。
+    private func creditCardDailyTotals(_ entries: [CreditCardEntry]) -> [CreditCardDailyTotal] {
         let calendar = Calendar.current
         let groups = Dictionary(grouping: entries) { entry -> String in
             let comps = calendar.dateComponents([.year, .month, .day], from: entry.date)
@@ -1152,35 +1582,83 @@ struct FinanceCardView: View {
 
     @State private var ccExpanded = false
 
-    private var creditCardExpenseItems: [Expense] {
-        expenseStore.expenses
-            .filter { $0.linkedCreditCardMilestoneId == milestoneId }
-            .sorted { $0.date > $1.date }
+    /// 信用卡個別項目列表的一列。
+    /// 週期性固定支出會展開成每期一列，所以「一列」不等於「一筆 Expense」——
+    /// 五月設定的月繳訂閱在六、七、八月各有一列，但它們指向同一筆 Expense。
+    private struct CreditCardExpenseRow: Identifiable {
+        let id: String
+        let date: Date
+        let amount: Double
+        let expense: Expense
+        /// 由週期自動展開出來的期別（非使用者手動記的那一筆）
+        let isProjected: Bool
+    }
+
+    /// ⚠️ 這份清單以前直接列 expenseStore.expenses，週期性固定支出只會出現「原始設定」
+    ///    那一筆——五月設定的月繳訂閱，六、七、八月完全看不到，看起來像漏帳。
+    ///    實際上金額從來沒算錯：銀行餘額、銀行明細的扣款紀錄、本頁的消費趨勢圖與
+    ///    「最近一期」四條路徑都走 expandedCreditCardEntries、都有展開；
+    ///    只有這份清單沒有，是顯示口徑不一致。改成同樣展開。
+    private var creditCardExpenseRows: [CreditCardExpenseRow] {
+        let byId = Dictionary(expenseStore.expenses.map { ($0.id, $0) },
+                              uniquingKeysWith: { first, _ in first })
+        let entries = expandedCreditCardEntries(forCard: milestoneId, expenses: expenseStore.expenses)
+        return entries.compactMap { e -> CreditCardExpenseRow? in
+            guard let exp = byId[e.expenseId] else { return nil }
+            let projected = exp.expenseType == .fixed && exp.recurrence != nil
+                && !Calendar.current.isDate(e.date, inSameDayAs: exp.date)
+            return CreditCardExpenseRow(
+                id: "\(e.expenseId)-\(e.date.timeIntervalSince1970)",
+                date: e.date, amount: e.amount, expense: exp, isProjected: projected)
+        }
+        .sorted { $0.date > $1.date }
     }
 
     private var creditCardChartSection: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                Image(systemName: "chart.bar.fill").foregroundStyle(.orange)
-                Text("消費趨勢").font(.headline)
+        // 預先求值一次 entries／dailyTotals，往下傳給 creditCardChart／creditCardMonthlyTotals，
+        // 避免三處各自重新呼叫 expandedCreditCardEntries 展開週期性支出。
+        let entries = expandedCreditCardEntries(forCard: milestoneId, expenses: expenseStore.expenses)
+        let dailyTotals = creditCardDailyTotals(entries)
+        return VStack(alignment: .leading, spacing: 0) {
+            // 標題列：Capsule 側條（橙色）+ 筆數膠囊，對齊 depositSection 標題規格
+            HStack(spacing: 10) {
+                Capsule()
+                    .fill(
+                        LinearGradient(
+                            colors: [.orange, .orange.opacity(0.55)],
+                            startPoint: .top, endPoint: .bottom
+                        )
+                    )
+                    .frame(width: 4, height: 18)
+                Text("消費趨勢")
+                    .font(.subheadline.weight(.bold))
                 Spacer()
-                Text("\(creditCardDailyTotals.count) 筆").font(.caption).foregroundStyle(.tertiary)
+                let dailyCount = dailyTotals.count
+                if dailyCount > 0 {
+                    Text("\(dailyCount) 筆")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.orange)
+                        .padding(.horizontal, 8).padding(.vertical, 3)
+                        .background(Color.orange.opacity(0.10))
+                        .clipShape(Capsule())
+                        .overlay(Capsule().stroke(Color.orange.opacity(0.22), lineWidth: 0.75))
+                }
             }
-            .padding(.horizontal).padding(.top, 12).padding(.bottom, 8)
+            .padding(.horizontal, 16).padding(.top, 14).padding(.bottom, 10)
 
-            if creditCardDailyTotals.isEmpty {
+            if dailyTotals.isEmpty {
                 Text("尚無扣款記錄").font(.caption).foregroundStyle(.tertiary)
                     .padding(.horizontal).padding(.bottom, 12)
             } else {
-                creditCardChart
+                creditCardChart(dailyTotals)
                     .padding(.horizontal).padding(.bottom, 8)
 
                 // 最近一期加總
-                if let last = creditCardMonthlyTotals.last {
+                if let last = creditCardMonthlyTotals(entries).last {
                     HStack {
                         Text("最近一期").font(.caption).foregroundStyle(.secondary)
                         Spacer()
-                        Text("-NT$ \(fmtNum(last.amount))").font(.caption.bold())
+                        Text("-\(last.amount.ntdWanString)").font(.caption.bold())
                             .foregroundStyle(.red)
                     }
                     .padding(.horizontal).padding(.bottom, 6)
@@ -1189,22 +1667,73 @@ struct FinanceCardView: View {
                 Divider().padding(.horizontal)
 
                 // 個別項目列表
-                let items = creditCardExpenseItems
+                let items = creditCardExpenseRows
                 let visible = ccExpanded ? items : Array(items.prefix(6))
-                ForEach(visible) { exp in
-                    Button { editingExpense = exp } label: {
-                        HStack {
-                            Text(fmtDate(exp.date)).font(.caption).foregroundStyle(.tertiary)
-                            Text(exp.title).font(.caption).lineLimit(1)
-                                .foregroundStyle(.primary)
-                            Spacer()
-                            Text("-NT$ \(fmtNum(exp.amount))")
-                                .font(.subheadline.weight(.medium))
-                                .foregroundStyle(.red)
-                            Image(systemName: "chevron.right")
-                                .font(.caption2).foregroundStyle(.tertiary)
+                // 信用卡個別支出列：32pt 漸層圖示圓 + 日期 Capsule 徽章 + 金額 rounded bold
+                // 對齊 depositRow 視覺語言，形成帳戶詳頁統一 row 規格
+                ForEach(visible) { row in
+                    // 展開出來的期別點下去編輯的是同一筆原始 Expense
+                    Button { editingExpense = row.expense } label: {
+                        HStack(spacing: 10) {
+                            // 32pt 漸層圖示圓（橙色 = 信用卡消費）
+                            ZStack {
+                                Circle()
+                                    .fill(
+                                        LinearGradient(
+                                            colors: [Color.orange.opacity(0.18), Color.orange.opacity(0.07)],
+                                            startPoint: .topLeading,
+                                            endPoint: .bottomTrailing
+                                        )
+                                    )
+                                    .frame(width: 32, height: 32)
+                                Circle()
+                                    .stroke(Color.orange.opacity(0.18), lineWidth: 0.75)
+                                    .frame(width: 32, height: 32)
+                                Image(systemName: row.expense.categoryIcon)
+                                    .font(.system(size: 12, weight: .semibold))
+                                    .foregroundStyle(Color.orange)
+                            }
+
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(row.expense.title)
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(.primary)
+                                    .lineLimit(1)
+                                // 日期 Capsule 徽章
+                                HStack(spacing: 4) {
+                                    Text(fmtDate(row.date))
+                                        .font(.system(size: 10, weight: .medium))
+                                        .foregroundStyle(.secondary)
+                                        .padding(.horizontal, 6).padding(.vertical, 2)
+                                        .background(Color(.tertiarySystemFill))
+                                        .clipShape(Capsule())
+                                    // 標示這一列是週期自動展開的期別，不是另外記的一筆帳，
+                                    // 否則使用者會以為同一筆訂閱被重複輸入了四次。
+                                    if row.isProjected {
+                                        Text("週期")
+                                            .font(.system(size: 9, weight: .semibold))
+                                            .foregroundStyle(.orange)
+                                            .padding(.horizontal, 5).padding(.vertical, 2)
+                                            .background(Color.orange.opacity(0.12))
+                                            .clipShape(Capsule())
+                                    }
+                                }
+                            }
+
+                            Spacer(minLength: 4)
+
+                            VStack(alignment: .trailing, spacing: 3) {
+                                Text("-\(row.amount.ntdWanString)")
+                                    .font(.system(size: 14, weight: .bold, design: .rounded))
+                                    .foregroundStyle(Color.red)
+                                    .contentTransition(.numericText())
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.8)
+                                Image(systemName: "chevron.right")
+                                    .font(.caption2).foregroundStyle(.tertiary)
+                            }
                         }
-                        .padding(.horizontal).padding(.vertical, 5)
+                        .padding(.horizontal, 14).padding(.vertical, 10)
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
@@ -1232,59 +1761,26 @@ struct FinanceCardView: View {
         .padding(.horizontal)
     }
 
-    /// 把整串資料切成每頁 30 筆（由舊到新，最後一頁可能不足 30 筆）
-    private var creditCardChartPages: [[CreditCardDailyTotal]] {
-        let data = creditCardDailyTotals
-        guard !data.isEmpty else { return [] }
-        let pageSize = 30
-        var pages: [[CreditCardDailyTotal]] = []
-        var i = 0
-        while i < data.count {
-            let end = min(i + pageSize, data.count)
-            pages.append(Array(data[i..<end]))
-            i = end
-        }
-        return pages
-    }
-
-    @State private var chartCurrentPage: Int = 0
 
     @ViewBuilder
-    private var creditCardChart: some View {
-        let pages = creditCardChartPages
-        if pages.isEmpty {
-            EmptyView()
-        } else {
-            VStack(alignment: .leading, spacing: 6) {
-                GeometryReader { geo in
-                    let pageWidth = geo.size.width
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 0) {
-                            ForEach(Array(pages.enumerated()), id: \.offset) { idx, pageData in
-                                creditCardChartPage(data: pageData)
-                                    .frame(width: pageWidth)
-                                    .id(idx)
-                            }
-                        }
-                        .scrollTargetLayout()
-                    }
-                    .scrollTargetBehavior(.paging)
-                    .scrollPosition(id: Binding<Int?>(
-                        get: { chartCurrentPage },
-                        set: { if let v = $0 { chartCurrentPage = v } }
-                    ))
-                }
-                .frame(height: 150)
-
-                if pages.count > 1 {
-                    HStack(spacing: 6) {
-                        Spacer()
-                        ForEach(0..<pages.count, id: \.self) { i in
-                            Circle()
-                                .fill(i == chartCurrentPage ? Color.orange : Color.secondary.opacity(0.3))
-                                .frame(width: 6, height: 6)
-                        }
-                        Spacer()
+    private func creditCardChart(_ dailyTotals: [CreditCardDailyTotal]) -> some View {
+        // [v25.317] 分頁式改為共用趨勢模板壓縮法（頭尾真實、中間分桶平均，見 depositChart）
+        let sampled = HeroTrendSeries.compressKeepingEnds(
+            dailyTotals, maxCount: 30,
+            date: { $0.date }, value: { $0.amount },
+            make: { d, v, rep in CreditCardDailyTotal(id: "avg-\(rep.id)", date: d, amount: v) }
+        )
+        Group {
+            if sampled.isEmpty {
+                EmptyView()
+            } else {
+                VStack(alignment: .leading, spacing: 6) {
+                    creditCardChartPage(data: sampled)
+                        .frame(height: 150)
+                    if dailyTotals.count > sampled.count {
+                        Text("已壓縮顯示：首末為真實值，中間為區段平均（共 \(dailyTotals.count) 筆）")
+                            .font(.caption2).foregroundStyle(.tertiary)
+                            .padding(.horizontal, 4)
                     }
                 }
             }
@@ -1336,35 +1832,97 @@ struct FinanceCardView: View {
     }
 
     private var linkedCreditCardSection: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                Image(systemName: "creditcard.fill").foregroundStyle(.orange)
-                Text("信用卡").font(.headline)
+        // 過去 isEmpty／count／ForEach 各自獨立呼叫 linkedCreditCards（對 lifeStore.milestones
+        // 全量 filter），同一次 render 被呼叫 4 次；改為先算一次本地變數全段共用。
+        let cards = linkedCreditCards
+        return VStack(alignment: .leading, spacing: 0) {
+            // 標題列：Capsule 側條（橙色）+ 張數膠囊，對齊 depositSection 標題規格
+            HStack(spacing: 10) {
+                Capsule()
+                    .fill(
+                        LinearGradient(
+                            colors: [.orange, .orange.opacity(0.55)],
+                            startPoint: .top, endPoint: .bottom
+                        )
+                    )
+                    .frame(width: 4, height: 18)
+                Text("信用卡")
+                    .font(.subheadline.weight(.bold))
                 Spacer()
-                Text("\(linkedCreditCards.count) 張").font(.caption).foregroundStyle(.tertiary)
+                if !cards.isEmpty {
+                    Text("\(cards.count) 張")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.orange)
+                        .padding(.horizontal, 8).padding(.vertical, 3)
+                        .background(Color.orange.opacity(0.10))
+                        .clipShape(Capsule())
+                        .overlay(Capsule().stroke(Color.orange.opacity(0.22), lineWidth: 0.75))
+                }
             }
-            .padding(.horizontal).padding(.top, 12).padding(.bottom, 8)
+            .padding(.horizontal, 16).padding(.top, 14).padding(.bottom, 10)
 
-            if linkedCreditCards.isEmpty {
+            if cards.isEmpty {
                 Text("尚無信用卡").font(.caption).foregroundStyle(.tertiary)
-                    .padding(.horizontal).padding(.bottom, 12)
+                    .padding(.horizontal, 16).padding(.bottom, 14)
             } else {
-                ForEach(linkedCreditCards) { card in
+                ForEach(cards) { card in
+                    let disabled = card.isDisabled == true
+                    let accent: Color = disabled ? .secondary : .orange
                     Button { viewingLinkedCard = card } label: {
-                        HStack(spacing: 10) {
-                            Image(systemName: "creditcard.fill")
-                                .font(.caption).foregroundStyle(.orange).frame(width: 20)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(card.title).font(.subheadline.weight(.medium)).foregroundStyle(Color.primary)
+                        HStack(spacing: 12) {
+                            // 36pt 漸層圖示圓，對齊 creditCardSubRow 規格
+                            ZStack {
+                                Circle()
+                                    .fill(
+                                        LinearGradient(
+                                            colors: [accent.opacity(0.20), accent.opacity(0.08)],
+                                            startPoint: .topLeading,
+                                            endPoint: .bottomTrailing
+                                        )
+                                    )
+                                    .frame(width: 36, height: 36)
+                                Circle()
+                                    .stroke(accent.opacity(disabled ? 0.08 : 0.20), lineWidth: 0.75)
+                                    .frame(width: 36, height: 36)
+                                Image(systemName: "creditcard.fill")
+                                    .font(.system(size: 14, weight: .semibold))
+                                    .foregroundStyle(accent)
+                            }
+                            VStack(alignment: .leading, spacing: 4) {
+                                HStack(spacing: 5) {
+                                    Text(card.title)
+                                        .font(.subheadline.weight(.semibold))
+                                        .foregroundStyle(disabled ? .secondary : .primary)
+                                        .lineLimit(1)
+                                    if disabled {
+                                        Text("已停用")
+                                            .font(.system(size: 9, weight: .semibold))
+                                            .foregroundStyle(.secondary)
+                                            .padding(.horizontal, 6).padding(.vertical, 2)
+                                            .background(Color.secondary.opacity(0.10))
+                                            .clipShape(Capsule())
+                                    }
+                                }
                                 HStack(spacing: 4) {
-                                    if let cn = card.cardName, !cn.isEmpty { Text(cn).font(.caption).foregroundStyle(.secondary) }
-                                    if let lf = card.cardLastFour, !lf.isEmpty { Text("末\(lf)").font(.caption).foregroundStyle(.tertiary) }
+                                    if let cn = card.cardName, !cn.isEmpty {
+                                        Text(cn).font(.caption2).foregroundStyle(.secondary)
+                                    }
+                                    if let lf = card.cardLastFour, !lf.isEmpty {
+                                        Text("末\(lf)")
+                                            .font(.caption2)
+                                            .foregroundStyle(.tertiary)
+                                            .padding(.horizontal, 5).padding(.vertical, 1.5)
+                                            .background(Color(.tertiarySystemFill))
+                                            .clipShape(Capsule())
+                                    }
                                 }
                             }
                             Spacer()
                             Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.tertiary)
                         }
-                        .padding(.horizontal).padding(.vertical, 8).contentShape(Rectangle())
+                        .padding(.horizontal, 14).padding(.vertical, 10)
+                        .contentShape(Rectangle())
+                        .opacity(disabled ? 0.65 : 1.0)
                     }
                     .buttonStyle(.plain)
                 }
@@ -1376,7 +1934,11 @@ struct FinanceCardView: View {
     }
 
     private func isVirtualCreditCardEntry(_ dep: BankDeposit) -> Bool {
-        !(item.bankDeposits ?? []).contains(where: { $0.id == dep.id })
+        // deposits 除了信用卡彙總虛擬條目外，也包含週期性固定支出／收入展開後的虛擬條目
+        // （expandedFixedExpenseWithdrawals／expandedIncomeDeposits），兩者同樣不存在於
+        // item.bankDeposits 中。信用卡彙總條目一律 linkedExpenseId == nil（見 1364 行），
+        // 固定支出／收入展開條目則帶有真實的 linkedExpenseId，需一併排除才不會被誤判為信用卡。
+        dep.linkedExpenseId == nil && !(item.bankDeposits ?? []).contains(where: { $0.id == dep.id })
     }
 
     /// 根據聚合條目 id 比對產生它的信用卡（含週期性固定支出展開後的虛擬條目）
@@ -1438,6 +2000,11 @@ struct FinanceCardView: View {
         editingDeposit = dep
     }
 
+    // MARK: - depositRow（v2 美化）
+    // 【美化方向】36pt 漸層圖示圓（依存款類型分色：存入/提款/信用卡/股票/沖正）；
+    //   Badge 升級為 Capsule + 細邊框；備註文字顯示；
+    //   金額升至 .system(size:15, weight:.bold, design:.rounded) + contentTransition；
+    //   對齊 IncomeView.incomeRow / StockView.stockCard 視覺規格
     private func depositRow(_ dep: BankDeposit) -> some View {
         let isVirtual = isVirtualCreditCardEntry(dep)
         let isStock = dep.linkedStockId != nil
@@ -1458,27 +2025,85 @@ struct FinanceCardView: View {
             if dep.isWithdrawal { return .red }
             return .green
         }()
+        let amountColor: Color = {
+            if isStock { return dep.isWithdrawal ? Color.red : Color.green }
+            if dep.isWithdrawal { return isVirtual ? Color.orange : Color.red }
+            return dep.currencyCode == "NT$" ? Color.green : Color.blue
+        }()
+        let iconName: String = {
+            if dep.isAdjust { return "arrow.2.circlepath" }
+            if isStock { return dep.isWithdrawal ? "chart.line.downtrend.xyaxis" : "chart.line.uptrend.xyaxis" }
+            if isVirtual { return "creditcard.fill" }
+            if dep.linkedExpenseId != nil { return dep.isWithdrawal ? "minus.circle.fill" : "plus.circle.fill" }
+            return dep.isWithdrawal ? "arrow.up.circle.fill" : "banknote.fill"
+        }()
         return Button {
             handleDepositTap(dep, isVirtual: isVirtual, isStock: isStock)
         } label: {
-            HStack {
-                Text(fmtDate(dep.date)).font(.caption).foregroundStyle(.tertiary)
-                if let txt = badgeText {
-                    Text(txt).font(.caption2).foregroundStyle(badgeColor)
-                        .padding(.horizontal, 5).padding(.vertical, 1)
-                        .background(badgeColor.opacity(0.12))
-                        .clipShape(RoundedRectangle(cornerRadius: 3))
+            HStack(spacing: 12) {
+                // 36pt 漸層圖示圓：依存款類型分色圖示
+                ZStack {
+                    Circle()
+                        .fill(
+                            LinearGradient(
+                                colors: [badgeColor.opacity(0.20), badgeColor.opacity(0.08)],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .frame(width: 36, height: 36)
+                    Circle()
+                        .stroke(badgeColor.opacity(0.20), lineWidth: 0.75)
+                        .frame(width: 36, height: 36)
+                    Image(systemName: iconName)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(badgeColor)
                 }
-                Spacer()
-                Text("\(dep.isWithdrawal ? "-" : "")\(dep.currencyCode) \(fmtNum(dep.amount))")
-                    .font(.subheadline.weight(.medium))
-                    .foregroundStyle(
-                        isStock ? (dep.isWithdrawal ? Color.red : Color.green) :
-                        (dep.isWithdrawal ? (isVirtual ? Color.orange : Color.red) :
-                         (dep.currencyCode == "NT$" ? Color.primary : Color.blue))
-                    )
+
+                // 主文字區：Badge 膠囊 + 備註 + 日期
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 5) {
+                        if let txt = badgeText {
+                            Text(txt)
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundStyle(badgeColor)
+                                .padding(.horizontal, 7).padding(.vertical, 2.5)
+                                .background(badgeColor.opacity(0.10))
+                                .clipShape(Capsule())
+                                .overlay(Capsule().stroke(badgeColor.opacity(0.22), lineWidth: 0.6))
+                        }
+                        if let note = dep.note, !note.isEmpty {
+                            Text(note)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+                    }
+                    // 日期：小型 Capsule 徽章
+                    Text(fmtDate(dep.date))
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 6).padding(.vertical, 2)
+                        .background(Color(.tertiarySystemFill))
+                        .clipShape(Capsule())
+                }
+
+                Spacer(minLength: 4)
+
+                // 金額 + chevron
+                VStack(alignment: .trailing, spacing: 3) {
+                    Text("\(dep.isWithdrawal ? "-" : "+")\(dep.currencyCode) \(fmtNum(dep.amount))")
+                        .font(.system(size: 15, weight: .bold, design: .rounded))
+                        .foregroundStyle(amountColor)
+                        .contentTransition(.numericText())
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                    Image(systemName: "chevron.right")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
             }
-            .padding(.horizontal).padding(.vertical, 6)
+            .padding(.horizontal, 14).padding(.vertical, 11)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -1493,10 +2118,9 @@ struct FinanceCardView: View {
         return amount
     }
 
-    @State private var depositChartPage: Int = 0
-
-    private var depositChart: some View {
-        let data = deposits
+    /// 接收呼叫端（depositSection）已算好的 deposits，避免各自獨立重算一次 deposits
+    /// （expensesById／incomesById 建表 + 固定支出／週期性收入展開，屬於較重的計算）。
+    private func depositChart(_ data: [BankDeposit]) -> some View {
         // 混幣帳戶（例如台幣存款 + 美金提款）一律換算 TWD 後再累計，
         // 避免外幣提款被當成台幣金額直接相減；單一幣別則保留原幣別不換算。
         let currencies = Set(data.map(\.currencyCode))
@@ -1509,48 +2133,22 @@ struct FinanceCardView: View {
             if dep.isWithdrawal { running -= amt } else { running += amt }
             balances.append((dep.date, running, dep.id))
         }
-        // 每頁 30 筆，由舊到新切頁；超過 30 筆可左右滑動
-        let pageSize = 30
-        var pages: [[(date: Date, balance: Double, id: UUID)]] = []
-        var i = 0
-        while i < balances.count {
-            let end = min(i + pageSize, balances.count)
-            pages.append(Array(balances[i..<end]))
-            i = end
-        }
+        // [v25.317] 分頁式（每 30 筆一頁左右滑）改為共用趨勢模板的壓縮法：
+        // 頭尾保留真實值、中間分桶平均壓到固定 30 根，一張圖看完整段歷史
+        let sampled = HeroTrendSeries.compressKeepingEnds(
+            balances, maxCount: 30,
+            date: { $0.date }, value: { $0.balance },
+            make: { d, v, rep in (date: d, balance: v, id: rep.id) }
+        )
 
         return VStack(alignment: .leading, spacing: 6) {
-            if !pages.isEmpty {
-                GeometryReader { geo in
-                    let pageWidth = geo.size.width
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 0) {
-                            ForEach(Array(pages.enumerated()), id: \.offset) { idx, pageData in
-                                depositChartPageView(pageData)
-                                    .frame(width: pageWidth)
-                                    .id(idx)
-                            }
-                        }
-                        .scrollTargetLayout()
-                    }
-                    .scrollTargetBehavior(.paging)
-                    .scrollPosition(id: Binding<Int?>(
-                        get: { depositChartPage },
-                        set: { if let v = $0 { depositChartPage = v } }
-                    ))
-                }
-                .frame(height: 150)
-
-                if pages.count > 1 {
-                    HStack(spacing: 6) {
-                        Spacer()
-                        ForEach(0..<pages.count, id: \.self) { p in
-                            Circle()
-                                .fill(p == depositChartPage ? Color.blue : Color.secondary.opacity(0.3))
-                                .frame(width: 6, height: 6)
-                        }
-                        Spacer()
-                    }
+            if !sampled.isEmpty {
+                depositChartPageView(sampled)
+                    .frame(height: 150)
+                if balances.count > sampled.count {
+                    Text("已壓縮顯示：首末為真實餘額，中間為區段平均（共 \(balances.count) 筆）")
+                        .font(.caption2).foregroundStyle(.tertiary)
+                        .padding(.horizontal, 4)
                 }
             }
 
@@ -1608,7 +2206,7 @@ struct FinanceCardView: View {
     }
 
     private func shortDate(_ date: Date) -> String {
-        let f = DateFormatter(); f.dateFormat = "M/d"; return f.string(from: date)
+        Self.shortDateFormatter.string(from: date)
     }
 }
 
@@ -1635,6 +2233,7 @@ struct DepositEditorSheet: View {
     @State private var amountText = ""
     @State private var transferTargetId: UUID?
     @State private var adjustNote = ""
+    @State private var isSaving = false
 
     private var bankMilestones: [LifeMilestone] {
         lifeStore.milestones.filter {
@@ -1642,49 +2241,66 @@ struct DepositEditorSheet: View {
         }
     }
 
-    private func bankBalance(for ms: LifeMilestone) -> Double {
-        let now = Date()
-        var total: Double = 0
-        for dep in ms.bankDeposits ?? [] {
-            guard dep.date <= now else { continue }
-            if let expId = dep.linkedExpenseId,
-               let exp = expenseStore.expenses.first(where: { $0.id == expId }),
-               exp.linkedCreditCardMilestoneId != nil { continue }
-            // 換算成台幣再加總，外幣提款 / 存款才不會被當成台幣金額直接計算
-            let twd = depositAmountInTWD(dep.amount, currency: dep.currencyCode)
-            total += dep.isWithdrawal ? -twd : twd
-        }
-        return total
+    /// expensesById／incomesById 由呼叫端批次建表傳入一次，避免每一列都對 expenseStore.expenses
+    /// 做 first(where:) 全量掃描（對齊 AddStockView.accountBalance() 的批次建表修復規格）。
+    /// 改呼叫檔案層級共用的 bankBalances()（與列表頁 milestoneRow／allBankBalances() 同一份邏輯），
+    /// 取代原本只加總 bankDeposits 原始條目的簡化版本——簡化版漏算信用卡彙總扣款、
+    /// 且週期性固定支出／收入只算到第一筆種子條目，會讓「轉入帳戶」下拉與「沖正」的
+    /// 「目前總額」明顯低估負債、高估餘額，導致沖正調整值算錯。
+    private func bankBalance(for ms: LifeMilestone, expensesById: [UUID: Expense], incomesById: [UUID: Income]) -> Double {
+        balanceInTWD(
+            bankBalances(for: ms, now: Date(), expensesById: expensesById, incomesById: incomesById, lifeStore: lifeStore, expenseStore: expenseStore),
+            expenseStore: expenseStore
+        )
     }
 
-    /// 把單筆金額換算成台幣（NT$ 直接回傳；找不到匯率時不換算以免丟資料）
-    private func depositAmountInTWD(_ amount: Double, currency: String) -> Double {
-        if currency == "NT$" { return amount }
-        if let rate = expenseStore.currencyRates.first(where: { $0.code == currency }), rate.rate > 0 {
-            return amount * rate.rate
-        }
-        return amount
-    }
-
-    private var currentBalance: Double {
+    private func currentBalance(expensesById: [UUID: Expense], incomesById: [UUID: Income]) -> Double {
         guard let ms = lifeStore.milestones.first(where: { $0.id == milestoneId }) else { return 0 }
-        return bankBalance(for: ms)
+        return bankBalance(for: ms, expensesById: expensesById, incomesById: incomesById)
     }
+
+    private static let numFormatter: NumberFormatter = {
+        let f = NumberFormatter(); f.numberStyle = .decimal; f.maximumFractionDigits = 0; return f
+    }()
 
     private func fmtNum(_ v: Double) -> String {
-        let f = NumberFormatter(); f.numberStyle = .decimal; f.maximumFractionDigits = 0
-        return f.string(from: NSNumber(value: v)) ?? "0"
+        Self.numFormatter.string(from: NSNumber(value: v)) ?? "0"
     }
 
+    // 【美化方向】轉帳/沖正帳戶餘額格式：先前自製 NumberFormatter 手刻「NT$ X萬」
+    // （無條件捨去小數、未處理億級單位），與全 App 共用的 Double.ntdWanString
+    // （「NT$1.2萬」保留一位小數、億以上自動換算）風格不一致。改呼叫共用 ntdWanString，
+    // 與全 App 金額量級顯示規則對齊。純視覺調整，未變動帳戶餘額計算邏輯。
     private func fmtBal(_ v: Double) -> String {
-        let f = NumberFormatter(); f.numberStyle = .decimal; f.maximumFractionDigits = 0
-        if abs(v) >= 10000 {
-            return "NT$ \(f.string(from: NSNumber(value: v / 10000)) ?? "0")萬"
+        v.ntdWanString
+    }
+
+    // 【美化方向】存款/提款/轉帳/沖正編輯 sheet Section header：轉帳資訊／沖正／
+    // 「幣別 存款‧提款」三個 Section 原本是系統預設純文字標頭，是全 App「表單 Section header
+    // 補齊」系列（StockDetailView.stockEditorSectionHeader／RealEstateDetailView.
+    // realEstateEditorSectionHeader 等既有做法）尚未覆蓋到的一處。新增檔案層級共用
+    // depositEditorSectionHeader(_:icon:color:)（4pt 漸層 Capsule 側條 + 圖示 + 粗體標題），
+    // 主題色依語意分配（轉帳資訊＝blue，呼應轉入帳戶／沖正＝orange，呼應差額正負著色／
+    // 存款‧提款＝green，呼應本表單既有「新增」按鈕綠色）。純標題視覺升級，欄位資料綁定、
+    // save()／saveTransfer()／saveAdjust() 等既有商業邏輯完全未變動。
+    private func depositEditorSectionHeader(_ title: String, icon: String, color: Color) -> some View {
+        HStack(spacing: 8) {
+            Capsule()
+                .fill(LinearGradient(colors: [color, color.opacity(0.55)], startPoint: .top, endPoint: .bottom))
+                .frame(width: 4, height: 16)
+            Image(systemName: icon)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(color)
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.primary)
         }
-        return "NT$ \(f.string(from: NSNumber(value: v)) ?? "0")"
+        .textCase(nil)
     }
 
     var body: some View {
+        let expensesById = Dictionary(expenseStore.expenses.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let incomesById = Dictionary(expenseStore.incomes.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         NavigationStack {
             Form {
                 Section {
@@ -1694,15 +2310,22 @@ struct DepositEditorSheet: View {
                         }
                     }
                     .pickerStyle(.segmented)
+                    // 編輯既有存款/提款時鎖定類型：saveTransfer()/saveAdjust() 不認得 editing，
+                    // 若在編輯途中改選「轉帳」/「沖正」會另外新增一筆（或兩筆）記錄，
+                    // 原本正在編輯的那筆卻完全沒被處理，變成帳戶餘額被靜默灌入幽靈記錄。
+                    .disabled(editing != nil)
+                    if editing != nil {
+                        Text("編輯時無法變更類型").font(.caption).foregroundStyle(.secondary)
+                    }
                 }
 
                 if txType == .transfer {
-                    Section("轉帳資訊") {
+                    Section {
                         Picker("轉入帳戶", selection: $transferTargetId) {
                             Text("請選擇").tag(nil as UUID?)
                             ForEach(bankMilestones) { ms in
                                 let name = ms.bankName ?? ms.title
-                                Text("\(name)（\(fmtBal(bankBalance(for: ms)))）")
+                                Text("\(name)（\(fmtBal(bankBalance(for: ms, expensesById: expensesById, incomesById: incomesById)))）")
                                     .tag(ms.id as UUID?)
                             }
                         }
@@ -1711,13 +2334,18 @@ struct DepositEditorSheet: View {
                             Text(currency).foregroundStyle(.secondary)
                             TextField("金額", text: $amountText).keyboardType(.decimalPad)
                         }
+                    } header: {
+                        depositEditorSectionHeader("轉帳資訊", icon: "arrow.left.arrow.right", color: .blue)
                     }
                 } else if txType == .adjust {
-                    Section("沖正") {
+                    // currentBalance() 內部呼叫 bankBalances() 全量展開，「目前總額」與下方「差額」
+                    // 原本各自呼叫一次，同一次 body 求值中重跑兩次；改為只算一次共用。
+                    let currentBal = currentBalance(expensesById: expensesById, incomesById: incomesById)
+                    Section {
                         HStack {
                             Text("目前總額").foregroundStyle(.secondary)
                             Spacer()
-                            Text(fmtBal(currentBalance)).foregroundStyle(.blue)
+                            Text(fmtBal(currentBal)).foregroundStyle(.blue)
                         }
                         DatePicker("日期", selection: $date, displayedComponents: .date)
                         HStack {
@@ -1725,7 +2353,7 @@ struct DepositEditorSheet: View {
                             TextField("調整後金額", text: $amountText).keyboardType(.decimalPad)
                         }
                         if let target = Double(amountText) {
-                            let diff = target - currentBalance
+                            let diff = target - currentBal
                             HStack {
                                 Text("差額").foregroundStyle(.secondary)
                                 Spacer()
@@ -1735,14 +2363,27 @@ struct DepositEditorSheet: View {
                             }
                         }
                         TextField("備註（如：對帳調整）", text: $adjustNote, axis: .vertical).lineLimit(2...3)
+                    } header: {
+                        depositEditorSectionHeader("沖正", icon: "arrow.triangle.2.circlepath", color: .orange)
                     }
                 } else {
-                    Section("\(currency) \(txType.rawValue)") {
+                    Section {
                         DatePicker("日期", selection: $date, displayedComponents: .date)
                         HStack {
                             Text(currency).foregroundStyle(.secondary)
                             TextField("金額", text: $amountText).keyboardType(.decimalPad)
                         }
+                        // 編輯既有沖正紀錄時（此畫面以存/提款型式呈現沖正的差額），
+                        // 補上備註欄位——過去這裡沒有欄位，備註看不到也改不了
+                        if editing?.isAdjust == true {
+                            TextField("備註（如：對帳調整）", text: $adjustNote, axis: .vertical).lineLimit(2...3)
+                        }
+                    } header: {
+                        depositEditorSectionHeader(
+                            editing?.isAdjust == true ? "沖正" : "\(currency) \(txType.rawValue)",
+                            icon: editing?.isAdjust == true ? "arrow.triangle.2.circlepath" : "banknote.fill",
+                            color: editing?.isAdjust == true ? .orange : .green
+                        )
                     }
                 }
 
@@ -1757,15 +2398,22 @@ struct DepositEditorSheet: View {
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button("取消") { dismiss() } }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button(editing != nil ? "儲存" : "新增") {
-                        switch txType {
-                        case .transfer: saveTransfer()
-                        case .adjust: saveAdjust()
-                        default: save()
+                    // [美化 v25.101] 存檔中顯示同色 ProgressView，對齊 MyCalendarView v25.100／
+                    // SubordinateDetailView v25.99 等 isSaving 忙碌守衛按鈕載入狀態規格。
+                    HStack(spacing: 6) {
+                        if isSaving {
+                            ProgressView().scaleEffect(0.7).tint(.green)
                         }
+                        Button(editing != nil ? "儲存" : "新增") {
+                            switch txType {
+                            case .transfer: saveTransfer()
+                            case .adjust: saveAdjust()
+                            default: save()
+                            }
+                        }
+                        .bold().foregroundStyle(.green)
+                        .disabled(saveDisabled || isSaving)
                     }
-                    .bold().foregroundStyle(.green)
-                    .disabled(saveDisabled)
                 }
             }
             .onAppear {
@@ -1773,6 +2421,9 @@ struct DepositEditorSheet: View {
                     txType = e.isWithdrawal ? .withdrawal : .deposit
                     date = e.date
                     amountText = String(format: "%.0f", e.amount)
+                    // 編輯沖正紀錄：把既有備註回填到欄位（過去漏了這步，備註欄位永遠空白，
+                    // 使用者輸入的備註也因 save() 沿用舊值而「存不起來」）
+                    if e.isAdjust { adjustNote = e.note ?? "" }
                 }
             }
         }
@@ -1787,9 +2438,19 @@ struct DepositEditorSheet: View {
     }
 
     private func save() {
+        guard !isSaving else { return }
         guard var ms = lifeStore.milestones.first(where: { $0.id == milestoneId }) else { dismiss(); return }
+        isSaving = true
+        // 「沖正」紀錄的 txType 在 onAppear 只會回填成 .deposit/.withdrawal（此表單沒有「編輯沖正」的重算 UI），
+        // 若直接用預設值重建 BankDeposit 會把 isAdjust／note 清掉，等於使用者只是打開又存檔就把「沖正」
+        // 紀錄靜默改成普通存提款、遺失對帳備註。這裡保留原始 isAdjust／note，避免資料被改型別。
+        // 沖正紀錄的備註採用畫面欄位的即時內容（onAppear 已回填舊值、UI 有備註欄位可改）；
+        // 先前寫死沿用 editing?.note，使用者改了備註也存不起來
+        let trimmedAdjustNote = adjustNote.trimmingCharacters(in: .whitespaces)
         let dep = BankDeposit(id: editing?.id ?? UUID(), date: date, amount: Double(amountText) ?? 0,
-                              currencyCode: currency, isWithdrawal: txType == .withdrawal)
+                              currencyCode: currency, isWithdrawal: txType == .withdrawal,
+                              isAdjust: editing?.isAdjust ?? false,
+                              note: (editing?.isAdjust == true) ? (trimmedAdjustNote.isEmpty ? nil : trimmedAdjustNote) : nil)
         var list = ms.bankDeposits ?? []
         if let idx = list.firstIndex(where: { $0.id == dep.id }) { list[idx] = dep }
         else { list.append(dep) }
@@ -1798,8 +2459,10 @@ struct DepositEditorSheet: View {
     }
 
     private func saveTransfer() {
+        guard !isSaving else { return }
         let amount = Double(amountText) ?? 0
         guard amount > 0, let targetId = transferTargetId else { return }
+        isSaving = true
 
         // 從本帳戶扣款
         if var fromMs = lifeStore.milestones.first(where: { $0.id == milestoneId }) {
@@ -1827,10 +2490,14 @@ struct DepositEditorSheet: View {
     }
 
     private func saveAdjust() {
+        guard !isSaving else { return }
         guard let targetAmount = Double(amountText),
               var ms = lifeStore.milestones.first(where: { $0.id == milestoneId }) else { dismiss(); return }
-        let diff = targetAmount - currentBalance
+        let expensesById = Dictionary(expenseStore.expenses.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let incomesById = Dictionary(expenseStore.incomes.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let diff = targetAmount - currentBalance(expensesById: expensesById, incomesById: incomesById)
         guard diff != 0 else { dismiss(); return }
+        isSaving = true
         var list = ms.bankDeposits ?? []
         let trimmedNote = adjustNote.trimmingCharacters(in: .whitespaces)
         list.append(BankDeposit(

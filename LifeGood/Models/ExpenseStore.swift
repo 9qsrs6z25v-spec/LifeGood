@@ -18,6 +18,10 @@ class ExpenseStore: ObservableObject {
     private let incomeKey = "lifegood_incomes"
     private let currencyRatesKey = "lifegood_currency_rates"
     private var isLoading = false
+    private let saveQueue = DispatchQueue(label: "com.lifegood.expensestore.save", qos: .utility)
+    /// 記錄每個 key 上次成功套用到 @Published 屬性的原始 Data，供 load() 判斷是否真的有變更，
+    /// 避免雲端這輪只改了其中一個 key 時，其餘資料仍用「完全相同」的內容重新賦值造成無謂重繪。
+    private var lastLoadedRawData: [String: Data] = [:]
 
     init() {
         load()
@@ -29,16 +33,36 @@ class ExpenseStore: ObservableObject {
         )
     }
 
-    @objc private func reloadFromCloud() {
-        load()
-        modifyID = UUID()
-        objectWillChange.send()
+    deinit {
+        NotificationCenter.default.removeObserver(self)
+    }
+
+    @objc private func reloadFromCloud(_ note: Notification) {
+        // userInfo["keys"] 是這次雲端拉取實際變更的 key；若有帶入且與本 Store 無關（例如
+        // 只有 FinanceStore/LifeStore 的資料變更），就跳過整批重載，避免圖表等畫面無謂重繪。
+        // 未帶 keys（例如首次同步覆蓋／合併）維持原本全量重載行為。
+        if let keys = note.userInfo?["keys"] as? [String],
+           Set(keys).isDisjoint(with: [saveKey, incomeKey, currencyRatesKey]) {
+            return
+        }
+        // load() 內部已按 key 比對原始 Data，只有真的有變更才回傳 true；
+        // 藉此避免這 3 個 key 只有其中一個變更時，其餘未變的資料仍觸發 ChartView 重算。
+        if load() {
+            modifyID = UUID()
+        }
     }
 
     // MARK: - 支出 CRUD
 
     func add(_ expense: Expense) {
         expenses.append(expense)
+    }
+
+    /// 批次新增多筆支出：只觸發一次 didSet → save() → CloudKit push，
+    /// 避免逐筆 add() 造成 N 次序列化與 N 次 CloudKit 推送。
+    func addExpenses(_ items: [Expense]) {
+        guard !items.isEmpty else { return }
+        expenses.append(contentsOf: items)
     }
 
     func update(_ expense: Expense) {
@@ -53,7 +77,8 @@ class ExpenseStore: ObservableObject {
     }
 
     func delete(at offsets: IndexSet, from list: [Expense]) {
-        let idsToDelete = Set(offsets.map { list[$0].id })
+        let validOffsets = offsets.filter { $0 < list.count }
+        let idsToDelete = Set(validOffsets.map { list[$0].id })
         for exp in expenses where idsToDelete.contains(exp.id) {
             for name in exp.photoFileNames { Expense.deletePhoto(name) }
         }
@@ -73,7 +98,8 @@ class ExpenseStore: ObservableObject {
     }
 
     func deleteIncome(at offsets: IndexSet, from list: [Income]) {
-        let ids = Set(offsets.map { list[$0].id })
+        let validOffsets = offsets.filter { $0 < list.count }
+        let ids = Set(validOffsets.map { list[$0].id })
         incomes.removeAll { ids.contains($0.id) }
     }
 
@@ -97,9 +123,9 @@ class ExpenseStore: ObservableObject {
             .filter { $0.period == .once && calendar.isDate($0.date, equalTo: now, toGranularity: .month) }
             .reduce(0) { $0 + $1.amount }
 
-        // 週期性收入：建立日期 <= 本月的，換算為月金額
+        // 週期性收入：建立日期 <= 本月、且尚未結束（固定薪水設有結束日者，結束月後不再計入）的，換算為月金額
         let recurringTotal = incomes
-            .filter { $0.period != .once && calendar.startOfDay(for: $0.date) <= calendar.startOfDay(for: now) }
+            .filter { $0.period != .once && calendar.startOfDay(for: $0.date) <= calendar.startOfDay(for: now) && $0.isActive(in: now, calendar: calendar) }
             .reduce(0) { $0 + $1.monthlyAmount }
 
         return onceTotal + recurringTotal
@@ -134,18 +160,43 @@ class ExpenseStore: ObservableObject {
         return sorted[count / 2]
     }
 
+    /// 今年累計收入（每年 1/1 重新起算）：逐月加總今年 1 月至本月的收入合計，
+    /// 單次收入計實際發生月份、週期收入依月金額逐月累計（年薪攤 12 個月），
+    /// 固定薪水設有結束日者結束月後不再計入（與 incomeTotal(for:) 同一套規則）。
+    var yearToDateIncomeTotal: Double {
+        let calendar = Calendar.current
+        let now = Date()
+        let currentMonth = calendar.component(.month, from: now)
+        var comps = calendar.dateComponents([.year], from: now)
+        comps.day = 1
+        var total: Double = 0
+        for month in 1...currentMonth {
+            comps.month = month
+            if let monthDate = calendar.date(from: comps) {
+                total += incomeTotal(for: monthDate)
+            }
+        }
+        return total
+    }
+
     /// 計算指定月份的收入合計
     private func incomeTotal(for date: Date) -> Double {
         let calendar = Calendar.current
         guard let monthStart = calendar.date(from: calendar.dateComponents([.year, .month], from: date)),
               let monthEnd = calendar.date(byAdding: .month, value: 1, to: monthStart) else { return 0 }
 
+        // 週期收入計入上限：過去月份用該月月底（monthEnd）；若查詢月份含今天（本月），
+        // 上限改收斂到「明天 00:00」，避免把本月尚未到期（起始日晚於今天）的固定薪水提前算入，
+        // 與 currentMonthIncomeTotal 的 startOfDay(date) <= startOfDay(now) 規則保持一致。
+        let tomorrow = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: Date())) ?? monthEnd
+        let recurringCutoff = min(monthEnd, tomorrow)
+
         let onceTotal = incomes
             .filter { $0.period == .once && calendar.isDate($0.date, equalTo: date, toGranularity: .month) }
             .reduce(0) { $0 + $1.amount }
 
         let recurringTotal = incomes
-            .filter { $0.period != .once && $0.date < monthEnd }
+            .filter { $0.period != .once && $0.date < recurringCutoff && $0.isActive(in: date, calendar: calendar) }
             .reduce(0) { $0 + $1.monthlyAmount }
 
         return onceTotal + recurringTotal
@@ -237,41 +288,124 @@ class ExpenseStore: ObservableObject {
     ///   - expense: 固定支出
     ///   - period: 目標時間區間
     /// - Returns: 換算後的金額
+    /// 支出的 NT$ 等值金額。儲蓄險的 amount 以「原幣別」存值（未乘匯率，
+    /// 見 AddExpenseView.saveExpense），其餘支出（含外幣保費）存的已是換算後 NT$；
+    /// 所有 NT$ 加總統計一律經此換算，否則 USD 5,000 會被當成 NT$5,000 加總而嚴重低估。
+    /// 找不到對應匯率時退回原值（使用者未設定匯率的舊行為）。
+    func ntdValue(of expense: Expense) -> Double {
+        let code = expense.currencyCode
+        guard expense.fixedCategory == .insurance,
+              expense.insuranceSubCategory == .savings,
+              code != "NT$", code != "TWD", !code.isEmpty,
+              let rate = currencyRates.first(where: { $0.code == code }), rate.rate > 0
+        else { return expense.amount }
+        return expense.amount * rate.rate
+    }
+
     private func projectedAmount(for expense: Expense, in period: TimePeriod) -> Double {
         guard expense.expenseType == .fixed, let recurrence = expense.recurrence else {
             return expense.amount
         }
 
+        // 外幣儲蓄險先換算 NT$ 再投射（修正：原本 USD 原幣金額被直接當 NT$）
+        let amount = ntdValue(of: expense)
         switch (recurrence, period) {
         // 每月 → 各區間
-        case (.monthly, .daily):    return expense.amount / 30.0
-        case (.monthly, .weekly):   return expense.amount / 4.33
-        case (.monthly, .monthly):  return expense.amount
-        case (.monthly, .quarterly): return expense.amount * 3.0
-        case (.monthly, .yearly):   return expense.amount * 12.0
+        case (.monthly, .daily):    return amount / 30.0
+        case (.monthly, .weekly):   return amount / 4.33
+        case (.monthly, .monthly):  return amount
+        case (.monthly, .quarterly): return amount * 3.0
+        case (.monthly, .yearly):   return amount * 12.0
         // 每季 → 各區間
-        case (.quarterly, .daily):    return expense.amount / 91.0
-        case (.quarterly, .weekly):   return expense.amount / 13.0
-        case (.quarterly, .monthly):  return expense.amount / 3.0
-        case (.quarterly, .quarterly): return expense.amount
-        case (.quarterly, .yearly):   return expense.amount * 4.0
+        case (.quarterly, .daily):    return amount / 91.0
+        case (.quarterly, .weekly):   return amount / 13.0
+        case (.quarterly, .monthly):  return amount / 3.0
+        case (.quarterly, .quarterly): return amount
+        case (.quarterly, .yearly):   return amount * 4.0
         // 每年 → 各區間
-        case (.yearly, .daily):    return expense.amount / 365.0
-        case (.yearly, .weekly):   return expense.amount / 52.0
-        case (.yearly, .monthly):  return expense.amount / 12.0
-        case (.yearly, .quarterly): return expense.amount / 4.0
-        case (.yearly, .yearly):   return expense.amount
+        case (.yearly, .daily):    return amount / 365.0
+        case (.yearly, .weekly):   return amount / 52.0
+        case (.yearly, .monthly):  return amount / 12.0
+        case (.yearly, .quarterly): return amount / 4.0
+        case (.yearly, .yearly):   return amount
         }
     }
 
     /// 計算某個時間點的固定支出投射總額（只計入建立日期 <= periodDate 的固定支出）
     private func projectedFixedTotal(for periodDate: Date, period: TimePeriod, calendar: Calendar) -> Double {
-        let activeFixed = expenses.filter { expense in
-            expense.expenseType == .fixed &&
-            expense.recurrence != nil &&
-            calendar.startOfDay(for: expense.date) <= calendar.startOfDay(for: periodDate)
+        // 只計入「固定且有週期」的支出；過去這裡誤傳整個 expenses，導致每筆變動支出的
+        // 全額被當成固定支出累加（projectedAmount 對非固定項目會直接回傳 amount），
+        // 使「本月固定支出」看板灌入全部變動消費而暴增。
+        let allFixed = expenses.filter { $0.expenseType == .fixed && $0.recurrence != nil }
+        return projectedFixedTotal(from: allFixed, for: periodDate, period: period, calendar: calendar)
+    }
+
+    /// 同上，但接受已預先篩選（expenseType == .fixed && recurrence != nil）的子集合，
+    /// 避免在迴圈中重複掃描整份支出陣列。
+    private func projectedFixedTotal(from fixedExpenses: [Expense], for periodDate: Date,
+                                     period: TimePeriod, calendar: Calendar) -> Double {
+        let dayOfPeriod = calendar.startOfDay(for: periodDate)
+        let active = fixedExpenses.filter {
+            calendar.startOfDay(for: $0.date) <= dayOfPeriod
         }
-        return activeFixed.reduce(0) { $0 + projectedAmount(for: $1, in: period) }
+        return active.reduce(0) { $0 + projectedAmount(for: $1, in: period) }
+    }
+
+    // MARK: - 英雄卡背景趨勢序列（HeroTrendBackground 模板用，月粒度）
+    // 從第一筆紀錄的月份一路畫到本月（使用者指定「從頭開始」）；每月一點，
+    // 超過 10 點的壓縮交給 HeroTrendSeries.averaged 分桶移動平均處理。
+
+    /// 「單月收入」逐月序列（含週期收入投射，與收入頁月統計同規則）
+    func heroIncomeSeries() -> [HeroTrendPoint] {
+        monthlyHeroSeries(firstDate: incomes.map(\.date).min()) { monthStart, _ in
+            incomeTotal(for: monthStart)
+        }
+    }
+
+    /// 「單月變動支出」逐月序列
+    func heroVariableSeries() -> [HeroTrendPoint] {
+        let cal = Calendar.current
+        let variable = expenses.filter { $0.expenseType == .variable }
+        return monthlyHeroSeries(firstDate: variable.map(\.date).min()) { monthStart, _ in
+            variable
+                .filter { cal.isDate($0.date, equalTo: monthStart, toGranularity: .month) }
+                .reduce(0) { $0 + $1.amount }
+        }
+    }
+
+    /// 「月固定支出」逐月序列——各月月底當時已存在的固定項目投射月額
+    /// （隨新增項目逐月墊高的階梯曲線；外幣儲蓄險經 ntdValue 換算 NT$）
+    func heroFixedSeries() -> [HeroTrendPoint] {
+        let cal = Calendar.current
+        let fixed = expenses.filter { $0.expenseType == .fixed && $0.recurrence != nil }
+        return monthlyHeroSeries(firstDate: fixed.map(\.date).min()) { _, monthEnd in
+            projectedFixedTotal(from: fixed, for: monthEnd, period: .monthly, calendar: cal)
+        }
+    }
+
+    /// 共用：從最早紀錄的月份到本月，每月產生一點；
+    /// valueFor 收到（月初、該月結算時點——過去月份為月底、本月收斂到現在）。
+    /// 安全上限 480 個月（40 年）：防止誤存的離譜日期（如 1970）造成上千次逐月計算。
+    private func monthlyHeroSeries(firstDate: Date?,
+                                   valueFor: (Date, Date) -> Double) -> [HeroTrendPoint] {
+        guard let firstDate else { return [] }
+        let cal = Calendar.current
+        let now = Date()
+        guard let currentMonth = cal.date(from: cal.dateComponents([.year, .month], from: now)),
+              let firstMonth = cal.date(from: cal.dateComponents([.year, .month], from: firstDate)) else {
+            return []
+        }
+        let monthsBetween = cal.dateComponents([.month], from: firstMonth, to: currentMonth).month ?? 0
+        let count = min(monthsBetween + 1, 480)
+        guard count >= 1 else { return [] }
+        var out: [HeroTrendPoint] = []
+        for back in stride(from: count - 1, through: 0, by: -1) {
+            guard let monthStart = cal.date(byAdding: .month, value: -back, to: currentMonth) else { continue }
+            let nextMonth = cal.date(byAdding: .month, value: 1, to: monthStart) ?? monthStart
+            let monthEnd = min(nextMonth.addingTimeInterval(-1), now)
+            out.append(HeroTrendPoint(date: monthStart, value: valueFor(monthStart, monthEnd)))
+        }
+        return out
     }
 
     // MARK: - 圖表資料
@@ -346,20 +480,23 @@ class ExpenseStore: ObservableObject {
 
     private func dailyData(calendar: Calendar, now: Date) -> [ChartDataPoint] {
         let formatter = Self.chartDayFormatter
+        let allFixed = expenses.filter { $0.expenseType == .fixed && $0.recurrence != nil }
+
+        // 預先將 30 天內的變動支出依「當日 startOfDay」分組（O(n) 一次掃描），
+        // 避免原本 O(30×n) 的逐日 filter
+        let cutoff = calendar.startOfDay(for: calendar.date(byAdding: .day, value: -29, to: now) ?? now)
+        var variableByDay: [Date: Double] = [:]
+        for e in expenses where e.expenseType == .variable {
+            let day = calendar.startOfDay(for: e.date)
+            if day >= cutoff { variableByDay[day, default: 0] += e.amount }
+        }
 
         var results: [ChartDataPoint] = []
         for dayOffset in (0..<30).reversed() {
             guard let date = calendar.date(byAdding: .day, value: -dayOffset, to: now) else { continue }
             let startOfDay = calendar.startOfDay(for: date)
-
-            // 變動支出：按實際日期加總
-            let variableTotal = expenses
-                .filter { $0.expenseType == .variable && calendar.isDate($0.date, inSameDayAs: startOfDay) }
-                .reduce(0) { $0 + $1.amount }
-
-            // 固定支出：依週期投射每日金額
-            let fixedTotal = projectedFixedTotal(for: startOfDay, period: .daily, calendar: calendar)
-
+            let variableTotal = variableByDay[startOfDay] ?? 0
+            let fixedTotal = projectedFixedTotal(from: allFixed, for: startOfDay, period: .daily, calendar: calendar)
             results.append(ChartDataPoint(
                 label: formatter.string(from: date),
                 amount: variableTotal + fixedTotal,
@@ -371,23 +508,37 @@ class ExpenseStore: ObservableObject {
 
     private func weeklyData(calendar: Calendar, now: Date) -> [ChartDataPoint] {
         let formatter = Self.chartDayFormatter
+        let allFixed = expenses.filter { $0.expenseType == .fixed && $0.recurrence != nil }
+
+        // 預先計算每週的起訖時間（O(12)），再以「日期偏移量 ÷ 7」直接計算週索引（真正 O(n)），
+        // 修正原本 O(n×12) 內層迴圈與注釋不符的問題。
+        var weekRanges: [(start: Date, end: Date)] = []
+        for weekOffset in (0..<12).reversed() {
+            guard let ws = calendar.date(byAdding: .weekOfYear, value: -weekOffset, to: now) else { continue }
+            let startOfWs = calendar.startOfDay(for: ws)
+            guard let we = calendar.date(byAdding: .day, value: 7, to: startOfWs) else { continue }
+            weekRanges.append((startOfWs, we))
+        }
+        var variableByWeek: [Date: Double] = [:]
+        if let cutoff = weekRanges.first?.start {
+            for e in expenses where e.expenseType == .variable {
+                let eDay = calendar.startOfDay(for: e.date)
+                guard eDay >= cutoff,
+                      let dayOffset = calendar.dateComponents([.day], from: cutoff, to: eDay).day else { continue }
+                let weekIndex = dayOffset / 7
+                guard weekIndex < weekRanges.count else { continue }
+                variableByWeek[weekRanges[weekIndex].start, default: 0] += e.amount
+            }
+        }
 
         var results: [ChartDataPoint] = []
-        for weekOffset in (0..<12).reversed() {
-            guard let weekStart = calendar.date(byAdding: .weekOfYear, value: -weekOffset, to: now),
-                  let weekEnd = calendar.date(byAdding: .day, value: 7, to: weekStart) else { continue }
-            let startOfWeek = calendar.startOfDay(for: weekStart)
-
-            let variableTotal = expenses
-                .filter { $0.expenseType == .variable && $0.date >= startOfWeek && $0.date < weekEnd }
-                .reduce(0) { $0 + $1.amount }
-
-            let fixedTotal = projectedFixedTotal(for: startOfWeek, period: .weekly, calendar: calendar)
-
+        for range in weekRanges {
+            let variableTotal = variableByWeek[range.start] ?? 0
+            let fixedTotal = projectedFixedTotal(from: allFixed, for: range.start, period: .weekly, calendar: calendar)
             results.append(ChartDataPoint(
-                label: formatter.string(from: startOfWeek),
+                label: formatter.string(from: range.start),
                 amount: variableTotal + fixedTotal,
-                date: startOfWeek
+                date: range.start
             ))
         }
         return results
@@ -395,17 +546,26 @@ class ExpenseStore: ObservableObject {
 
     private func monthlyData(calendar: Calendar, now: Date) -> [ChartDataPoint] {
         let formatter = Self.chartMonthFormatter
+        let allFixed = expenses.filter { $0.expenseType == .fixed && $0.recurrence != nil }
+
+        // 預先建立月份對照（year*100+month → representative Date），O(n) 分組
+        var monthDates: [(key: Int, date: Date)] = []
+        for monthOffset in (0..<12).reversed() {
+            guard let d = calendar.date(byAdding: .month, value: -monthOffset, to: now) else { continue }
+            let key = calendar.component(.year, from: d) * 100 + calendar.component(.month, from: d)
+            monthDates.append((key, d))
+        }
+        let validKeys = Set(monthDates.map(\.key))
+        var variableByMonth: [Int: Double] = [:]
+        for e in expenses where e.expenseType == .variable {
+            let k = calendar.component(.year, from: e.date) * 100 + calendar.component(.month, from: e.date)
+            if validKeys.contains(k) { variableByMonth[k, default: 0] += e.amount }
+        }
 
         var results: [ChartDataPoint] = []
-        for monthOffset in (0..<12).reversed() {
-            guard let date = calendar.date(byAdding: .month, value: -monthOffset, to: now) else { continue }
-
-            let variableTotal = expenses
-                .filter { $0.expenseType == .variable && calendar.isDate($0.date, equalTo: date, toGranularity: .month) }
-                .reduce(0) { $0 + $1.amount }
-
-            let fixedTotal = projectedFixedTotal(for: date, period: .monthly, calendar: calendar)
-
+        for (key, date) in monthDates {
+            let variableTotal = variableByMonth[key] ?? 0
+            let fixedTotal = projectedFixedTotal(from: allFixed, for: date, period: .monthly, calendar: calendar)
             results.append(ChartDataPoint(
                 label: formatter.string(from: date),
                 amount: variableTotal + fixedTotal,
@@ -416,42 +576,59 @@ class ExpenseStore: ObservableObject {
     }
 
     private func quarterlyData(calendar: Calendar, now: Date) -> [ChartDataPoint] {
-        var results: [ChartDataPoint] = []
+        let allFixed = expenses.filter { $0.expenseType == .fixed && $0.recurrence != nil }
+
+        // 預先建立季度對照（year*10+quarter），O(n) 分組
+        var quarterInfo: [(key: Int, year: Int, quarter: Int, date: Date)] = []
         for quarterOffset in (0..<8).reversed() {
-            guard let date = calendar.date(byAdding: .month, value: -quarterOffset * 3, to: now) else { continue }
-            let quarter = (calendar.component(.month, from: date) - 1) / 3 + 1
-            let year = calendar.component(.year, from: date)
+            guard let d = calendar.date(byAdding: .month, value: -quarterOffset * 3, to: now) else { continue }
+            let y = calendar.component(.year, from: d)
+            let q = (calendar.component(.month, from: d) - 1) / 3 + 1
+            quarterInfo.append((y * 10 + q, y, q, d))
+        }
+        let validKeys = Set(quarterInfo.map(\.key))
+        var variableByQuarter: [Int: Double] = [:]
+        for e in expenses where e.expenseType == .variable {
+            let y = calendar.component(.year, from: e.date)
+            let q = (calendar.component(.month, from: e.date) - 1) / 3 + 1
+            let k = y * 10 + q
+            if validKeys.contains(k) { variableByQuarter[k, default: 0] += e.amount }
+        }
 
-            let variableTotal = expenses.filter { expense in
-                expense.expenseType == .variable &&
-                (calendar.component(.month, from: expense.date) - 1) / 3 + 1 == quarter &&
-                calendar.component(.year, from: expense.date) == year
-            }.reduce(0) { $0 + $1.amount }
-
-            let fixedTotal = projectedFixedTotal(for: date, period: .quarterly, calendar: calendar)
-
+        var results: [ChartDataPoint] = []
+        for info in quarterInfo {
+            let variableTotal = variableByQuarter[info.key] ?? 0
+            let fixedTotal = projectedFixedTotal(from: allFixed, for: info.date, period: .quarterly, calendar: calendar)
             results.append(ChartDataPoint(
-                label: "\(year)Q\(quarter)",
+                label: "\(info.year)Q\(info.quarter)",
                 amount: variableTotal + fixedTotal,
-                date: date
+                date: info.date
             ))
         }
         return results
     }
 
     private func yearlyData(calendar: Calendar, now: Date) -> [ChartDataPoint] {
-        var results: [ChartDataPoint] = []
+        let allFixed = expenses.filter { $0.expenseType == .fixed && $0.recurrence != nil }
+
+        // 預先建立年份清單，O(n) 分組後直接查字典
+        var yearDates: [(year: Int, date: Date)] = []
         for yearOffset in (0..<5).reversed() {
-            guard let date = calendar.date(byAdding: .year, value: -yearOffset, to: now) else { continue }
+            guard let d = calendar.date(byAdding: .year, value: -yearOffset, to: now) else { continue }
+            yearDates.append((calendar.component(.year, from: d), d))
+        }
+        let validYears = Set(yearDates.map(\.year))
+        var variableByYear: [Int: Double] = [:]
+        for e in expenses where e.expenseType == .variable {
+            let y = calendar.component(.year, from: e.date)
+            if validYears.contains(y) { variableByYear[y, default: 0] += e.amount }
+        }
 
-            let variableTotal = expenses
-                .filter { $0.expenseType == .variable && calendar.isDate($0.date, equalTo: date, toGranularity: .year) }
-                .reduce(0) { $0 + $1.amount }
-
+        var results: [ChartDataPoint] = []
+        for (year, date) in yearDates {
+            let variableTotal = variableByYear[year] ?? 0
             // 固定支出：依週期換算成年度金額（每月×12、每季×4、每年×1）
-            let fixedTotal = projectedFixedTotal(for: date, period: .yearly, calendar: calendar)
-
-            let year = calendar.component(.year, from: date)
+            let fixedTotal = projectedFixedTotal(from: allFixed, for: date, period: .yearly, calendar: calendar)
             results.append(ChartDataPoint(
                 label: "\(year)",
                 amount: variableTotal + fixedTotal,
@@ -464,38 +641,123 @@ class ExpenseStore: ObservableObject {
     // MARK: - 持久化
 
     private func save() {
-        if let data = try? JSONEncoder().encode(expenses) {
-            UserDefaults.standard.set(data, forKey: saveKey)
-        }
-        if let data = try? JSONEncoder().encode(incomes) {
-            UserDefaults.standard.set(data, forKey: incomeKey)
-        }
         modifyID = UUID()
-        CloudSyncManager.shared.pushAll()
+        let expSnap = expenses
+        let incSnap = incomes
+        let expKey = saveKey
+        let incKey = incomeKey
+        saveQueue.async {
+            if let data = try? JSONEncoder().encode(expSnap) {
+                UserDefaults.standard.set(data, forKey: expKey)
+            }
+            if let data = try? JSONEncoder().encode(incSnap) {
+                UserDefaults.standard.set(data, forKey: incKey)
+            }
+            CloudSyncManager.shared.pushAll()
+        }
+    }
+
+    /// 自動更新自訂幣別匯率：認得的幣別帶入即時匯率，認不得的維持手動值。
+    /// 設定頁的按鈕與 App 啟動時的靜默更新共用這一份——邏輯只有一處。
+    @MainActor
+    func autoUpdateCurrencyRates() async -> FXRateService.UpdateOutcome {
+        var outcome = FXRateService.UpdateOutcome()
+        // 幣別文字 → ISO；認不得的記下原文，設定頁的結果訊息要指名道姓
+        var isoOf: [UUID: String] = [:]
+        for r in currencyRates {
+            let label = r.code.trimmingCharacters(in: .whitespaces)
+            guard !label.isEmpty else { continue }
+            if let iso = FXRateService.isoCode(for: label) { isoOf[r.id] = iso }
+            else { outcome.unknown.append(label) }
+        }
+        guard !isoOf.isEmpty else { return outcome }
+
+        let wanted = Array(Set(isoOf.values))
+        let fetched = await FXRateService.fetchRates(isoCodes: wanted)
+        outcome.failedIso = Set(wanted).subtracting(fetched.keys).sorted()
+
+        var newRates = currencyRates
+        var changed = false
+        for idx in newRates.indices {
+            guard let iso = isoOf[newRates[idx].id], let rate = fetched[iso] else { continue }
+            // updated 計「成功帶入」而非「數值有變」——匯率剛好沒動時回報 0 筆
+            // 會讓使用者以為更新失敗
+            outcome.updated += 1
+            if newRates[idx].rate != rate { newRates[idx].rate = rate; changed = true }
+            // 美金順帶同步股票市值換算用的全域匯率，兩處口徑一致
+            if iso == "USD" { UserDefaults.standard.set(rate, forKey: Stock.usdTwdRateKey) }
+        }
+        // 數值沒變就不寫回：didSet 會觸發存檔與 CloudKit 推送，沒必要白跑一趟
+        if changed { currencyRates = newRates }
+        return outcome
     }
 
     private func saveCurrencyRates() {
-        if let data = try? JSONEncoder().encode(currencyRates) {
-            UserDefaults.standard.set(data, forKey: currencyRatesKey)
+        let snap = currencyRates
+        let key = currencyRatesKey
+        // 使用 pushAll() 而非 push(key:)，統一走 2 秒防抖，
+        // 避免匯率連續更新時繞過節流直接打 CloudKit
+        saveQueue.async {
+            if let data = try? JSONEncoder().encode(snap) {
+                UserDefaults.standard.set(data, forKey: key)
+            }
+            CloudSyncManager.shared.pushAll()
         }
-        CloudSyncManager.shared.push(key: currencyRatesKey)
     }
 
-    private func load() {
+    /// 供外部（匯入／還原等一次操作觸及 expenses/incomes/currencyRates 多筆屬性）使用：
+    /// 暫停期間每筆 didSet 都不觸發 save()，body 結束後才統一存檔一次，
+    /// 避免例如「還原備份」同時指派 expenses 與 incomes 時，save() 各自把兩個陣列一起重複編碼兩次。
+    /// 用法與 LifeStore.withBatch(_:) 一致。
+    func withBatch(_ body: () -> Void) {
         isLoading = true
-        if let data = UserDefaults.standard.data(forKey: saveKey),
-           let decoded = try? JSONDecoder().decode([Expense].self, from: data) {
-            expenses = decoded
+        defer { isLoading = false }
+        body()
+        save()
+        saveCurrencyRates()
+    }
+
+    @discardableResult
+    private func load() -> Bool {
+        isLoading = true
+        defer { isLoading = false }
+        let decoder = JSONDecoder()
+        var changed = false
+        // 逐筆容錯解碼：單一筆損壞（舊資料格式／CloudKit 合併壞掉）不會讓整批記帳/收入資料消失
+        if let v = lossyDecodeArray([Expense].self, key: saveKey, decoder: decoder) { expenses = v; changed = true }
+        if let v = lossyDecodeArray([Income].self, key: incomeKey, decoder: decoder) { incomes = v; changed = true }
+        if let v = lossyDecodeArray([CurrencyRate].self, key: currencyRatesKey, decoder: decoder) { currencyRates = v; changed = true }
+        return changed
+    }
+
+    /// 讀取 key 目前在 UserDefaults 的原始 Data；若與上次成功套用的內容完全相同則回傳 nil，
+    /// 讓呼叫端略過解碼／賦值，避免同一批資料重複觸發 @Published 造成無謂重繪。
+    private func rawDataIfChanged(_ key: String) -> Data? {
+        guard let data = UserDefaults.standard.data(forKey: key) else { return nil }
+        if lastLoadedRawData[key] == data { return nil }
+        lastLoadedRawData[key] = data
+        return data
+    }
+
+    /// 逐筆容錯解碼：先試整批，失敗再逐筆解、跳過損壞的元素，保留其餘資料。
+    /// key 不存在、或與上次套用的內容相同 → 回傳 nil（不覆蓋現有值）；存在且有變更但全空 → 回傳 []。
+    private func lossyDecodeArray<Element: Decodable>(
+        _ type: [Element].Type, key: String, decoder: JSONDecoder
+    ) -> [Element]? {
+        guard let data = rawDataIfChanged(key) else { return nil }
+        if let items = try? decoder.decode([Element].self, from: data) { return items }
+        if let raw = try? decoder.decode([FailableDecodable<Element>].self, from: data) {
+            return raw.compactMap { $0.value }
         }
-        if let data = UserDefaults.standard.data(forKey: incomeKey),
-           let decoded = try? JSONDecoder().decode([Income].self, from: data) {
-            incomes = decoded
+        return nil
+    }
+
+    /// 包裝單一元素，解碼失敗時不丟錯、回傳 nil
+    private struct FailableDecodable<T: Decodable>: Decodable {
+        let value: T?
+        init(from decoder: Decoder) throws {
+            value = try? T(from: decoder)
         }
-        if let data = UserDefaults.standard.data(forKey: currencyRatesKey),
-           let decoded = try? JSONDecoder().decode([CurrencyRate].self, from: data) {
-            currencyRates = decoded
-        }
-        isLoading = false
     }
 
     // MARK: - 匯出
@@ -566,8 +828,12 @@ class ExpenseStore: ObservableObject {
         for exp in expenses {
             for name in exp.photoFileNames { Expense.deletePhoto(name) }
         }
+        isLoading = true
         expenses.removeAll()
         incomes.removeAll()
         currencyRates.removeAll()
+        isLoading = false
+        save()
+        saveCurrencyRates()
     }
 }

@@ -8,18 +8,31 @@ import CoreLocation
 // MARK: - Keychain 儲存 API Key
 
 /// 用 iOS Keychain 儲存第三方 AI 服務的 API Key（比 UserDefaults 安全）。
+/// v25.203 起改存「可同步」項目（kSecAttrSynchronizable）：走 iCloud 鑰匙圈
+/// 端對端加密同步到同一 Apple ID 的其他裝置——使用者回報 API Key 沒同步到另一支手機。
+/// 不走 App 的 CloudKit KV（那會把金鑰放進資料庫、家人共享時還會流到對方裝置）。
+/// 讀取用 kSecAttrSynchronizableAny 同時涵蓋舊的「僅本機」項目（向下相容）；
+/// 重新儲存時先刪掉新舊兩種再寫入可同步版本（自動遷移）。
 enum AIKeychainStore {
     @discardableResult
     static func set(_ value: String?, for key: String) -> Bool {
-        let baseQuery: [String: Any] = [
+        // 刪除既有項目：kSecAttrSynchronizableAny 涵蓋舊「僅本機」與新「可同步」兩種
+        let deleteQuery: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
-            kSecAttrAccount as String: key
+            kSecAttrAccount as String: key,
+            kSecAttrSynchronizable as String: kSecAttrSynchronizableAny
         ]
-        SecItemDelete(baseQuery as CFDictionary)
+        SecItemDelete(deleteQuery as CFDictionary)
         guard let value, !value.isEmpty,
               let data = value.data(using: .utf8) else { return true }
-        var add = baseQuery
-        add[kSecValueData as String] = data
+        let add: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrAccount as String: key,
+            kSecValueData as String: data,
+            kSecAttrSynchronizable as String: true,
+            // 可同步項目不能用 ThisDeviceOnly 保護等級；AfterFirstUnlock 讓背景同步也讀得到
+            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlock
+        ]
         return SecItemAdd(add as CFDictionary, nil) == errSecSuccess
     }
 
@@ -27,6 +40,7 @@ enum AIKeychainStore {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrAccount as String: key,
+            kSecAttrSynchronizable as String: kSecAttrSynchronizableAny,
             kSecReturnData as String: true,
             kSecMatchLimit as String: kSecMatchLimitOne
         ]
@@ -264,10 +278,15 @@ final class AIExpenseParserService {
         availableBankAccounts: [String] = [],
         availableRealEstates: [String] = []
     ) async throws -> ParsedAIExpense {
-        let settings = await AISettingsStore.shared
-        guard let provider = await settings.activeProvider else { throw AIParseError.noProvider }
-        let key = await settings.key(for: provider)
-        guard !key.isEmpty else { throw AIParseError.noKey }
+        // 在同一個 MainActor 切換中讀取 provider + key，避免兩次分開的 await
+        // 之間使用者切換供應商導致 provider 與 key 來自不同供應商
+        let (provider, key) = try await MainActor.run {
+            let settings = AISettingsStore.shared
+            guard let p = settings.activeProvider else { throw AIParseError.noProvider }
+            let k = settings.key(for: p)
+            guard !k.isEmpty else { throw AIParseError.noKey }
+            return (p, k)
+        }
 
         // 取得使用者目前位置（reverse geocode 結果，5 分鐘 cache），讓 AI 判斷分店
         let locationContext = await LocationContextProvider.shared.currentContext()
@@ -306,10 +325,106 @@ final class AIExpenseParserService {
         return result
     }
 
+    // MARK: 通用文字生成（股票 AI 持股健診等非記帳解析用途）
+
+    /// 帶自訂 system prompt 的通用補全：回傳純文字（不強制 JSON 格式）、輸出上限較高。
+    /// 供應商與 API Key 沿用語音 AI 助手的設定。
+    func completeText(system: String, prompt: String, maxTokens: Int = 1600) async throws -> String {
+        let (provider, key) = try await MainActor.run { () -> (AIProvider, String) in
+            let settings = AISettingsStore.shared
+            guard let p = settings.activeProvider else { throw AIParseError.noProvider }
+            let k = settings.key(for: p)
+            guard !k.isEmpty else { throw AIParseError.noKey }
+            return (p, k)
+        }
+        switch provider {
+        case .anthropic:
+            guard let url = URL(string: "https://api.anthropic.com/v1/messages") else {
+                throw AIParseError.invalidResponse("internal: malformed Anthropic URL")
+            }
+            var req = URLRequest(url: url)
+            req.httpMethod = "POST"
+            req.setValue(key, forHTTPHeaderField: "x-api-key")
+            req.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
+            req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            let body: [String: Any] = [
+                "model": "claude-sonnet-4-6",
+                "max_tokens": maxTokens,
+                "system": system,
+                "messages": [["role": "user", "content": prompt]]
+            ]
+            req.httpBody = try JSONSerialization.data(withJSONObject: body)
+            let (data, resp) = try await sendRequest(req)
+            try ensureOK(data: data, resp: resp)
+            guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let content = json["content"] as? [[String: Any]],
+                  let block = content.first(where: { ($0["type"] as? String) == "text" }),
+                  let textOut = block["text"] as? String else {
+                throw AIParseError.invalidResponse(String(data: data, encoding: .utf8) ?? "")
+            }
+            return textOut
+        case .openai:
+            guard let url = URL(string: "https://api.openai.com/v1/chat/completions") else {
+                throw AIParseError.invalidResponse("internal: malformed OpenAI URL")
+            }
+            var req = URLRequest(url: url)
+            req.httpMethod = "POST"
+            req.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
+            req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            let body: [String: Any] = [
+                "model": "gpt-4o-mini",
+                "messages": [
+                    ["role": "system", "content": system],
+                    ["role": "user", "content": prompt]
+                ],
+                "max_tokens": maxTokens
+            ]
+            req.httpBody = try JSONSerialization.data(withJSONObject: body)
+            let (data, resp) = try await sendRequest(req)
+            try ensureOK(data: data, resp: resp)
+            guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let choices = json["choices"] as? [[String: Any]],
+                  let message = choices.first?["message"] as? [String: Any],
+                  let content = message["content"] as? String else {
+                throw AIParseError.invalidResponse(String(data: data, encoding: .utf8) ?? "")
+            }
+            return content
+        case .gemini:
+            guard var components = URLComponents(string: "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent") else {
+                throw AIParseError.network("malformed Gemini base URL")
+            }
+            components.queryItems = [URLQueryItem(name: "key", value: key)]
+            guard let url = components.url else {
+                throw AIParseError.network("Invalid Gemini API key")
+            }
+            var req = URLRequest(url: url)
+            req.httpMethod = "POST"
+            req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            let body: [String: Any] = [
+                "systemInstruction": ["parts": [["text": system]]],
+                "contents": [["role": "user", "parts": [["text": prompt]]]],
+                "generationConfig": ["maxOutputTokens": maxTokens]
+            ]
+            req.httpBody = try JSONSerialization.data(withJSONObject: body)
+            let (data, resp) = try await sendRequest(req)
+            try ensureOK(data: data, resp: resp)
+            guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let candidates = json["candidates"] as? [[String: Any]],
+                  let content = candidates.first?["content"] as? [String: Any],
+                  let parts = content["parts"] as? [[String: Any]],
+                  let textOut = parts.first?["text"] as? String else {
+                throw AIParseError.invalidResponse(String(data: data, encoding: .utf8) ?? "")
+            }
+            return textOut
+        }
+    }
+
     // MARK: Anthropic
 
     private func callAnthropic(prompt: String, apiKey: String) async throws -> String {
-        let url = URL(string: "https://api.anthropic.com/v1/messages")!
+        guard let url = URL(string: "https://api.anthropic.com/v1/messages") else {
+            throw AIParseError.invalidResponse("internal: malformed Anthropic URL")
+        }
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
         req.setValue(apiKey, forHTTPHeaderField: "x-api-key")
@@ -336,7 +451,9 @@ final class AIExpenseParserService {
     // MARK: OpenAI
 
     private func callOpenAI(prompt: String, apiKey: String) async throws -> String {
-        let url = URL(string: "https://api.openai.com/v1/chat/completions")!
+        guard let url = URL(string: "https://api.openai.com/v1/chat/completions") else {
+            throw AIParseError.invalidResponse("internal: malformed OpenAI URL")
+        }
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
         req.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
@@ -365,7 +482,9 @@ final class AIExpenseParserService {
     // MARK: Gemini
 
     private func callGemini(prompt: String, apiKey: String) async throws -> String {
-        var components = URLComponents(string: "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent")!
+        guard var components = URLComponents(string: "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent") else {
+            throw AIParseError.network("malformed Gemini base URL")
+        }
         components.queryItems = [URLQueryItem(name: "key", value: apiKey)]
         guard let url = components.url else {
             throw AIParseError.network("Invalid Gemini API key")
@@ -419,12 +538,15 @@ final class AIExpenseParserService {
         var cleaned = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         if cleaned.hasPrefix("```") {
             let lines = cleaned.split(separator: "\n", omittingEmptySubsequences: false)
-            cleaned = lines.dropFirst().dropLast().joined(separator: "\n")
+            let inner = lines.dropFirst()
+            cleaned = (inner.last?.hasPrefix("```") == true ? inner.dropLast() : inner)
+                .joined(separator: "\n")
         }
         cleaned = cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
-        // 嘗試找 { ... } 區塊
+        // 嘗試找 { ... } 區塊；firstBrace 必須 <= lastBrace，否則逆向 range 會 crash
         if let firstBrace = cleaned.firstIndex(of: "{"),
-           let lastBrace = cleaned.lastIndex(of: "}") {
+           let lastBrace = cleaned.lastIndex(of: "}"),
+           firstBrace <= lastBrace {
             cleaned = String(cleaned[firstBrace...lastBrace])
         }
         guard let data = cleaned.data(using: .utf8),
@@ -519,6 +641,12 @@ final class SpeechRecognizer: NSObject, ObservableObject {
     func startRecording() throws {
         // 已在錄音中 → 直接略過，避免重複呼叫把 transcript 清空、重裝 audio tap
         if isRecording { return }
+        // recognizer 為 nil 表示此裝置不支援 zh-TW 語音辨識；提前中止，
+        // 避免音訊 session 啟動後麥克風佔用（及狀態列圖示）卻沒有實際轉錄。
+        guard recognizer != nil else {
+            errorMessage = "此裝置不支援中文語音辨識"
+            return
+        }
         transcript = ""
         errorMessage = nil
 
@@ -536,19 +664,24 @@ final class SpeechRecognizer: NSObject, ObservableObject {
         let input = audioEngine.inputNode
         let format = input.outputFormat(forBus: 0)
         input.removeTap(onBus: 0)
-        input.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in
-            self?.request?.append(buffer)
+        input.installTap(onBus: 0, bufferSize: 1024, format: format) { [req] buffer, _ in
+            // 直接捕捉 req 物件，避免從音訊執行緒存取 @MainActor 隔離的 self.request 屬性
+            req.append(buffer)
         }
         audioEngine.prepare()
         try audioEngine.start()
 
         task = recognizer?.recognitionTask(with: req) { [weak self] result, error in
-            guard let self else { return }
-            if let result {
-                Task { @MainActor [weak self] in self?.transcript = result.bestTranscription.formattedString }
-            }
-            if let error {
-                Task { @MainActor [weak self] in self?.errorMessage = error.localizedDescription }
+            // 先在背景執行緒提取值型別，避免對 @MainActor 隔離的 self 建立強引用
+            let text = result?.bestTranscription.formattedString
+            let errMsg = error?.localizedDescription
+            // 發生錯誤時需自動停止，否則 isRecording 卡在 true、麥克風指示器永遠亮著
+            let shouldStop = error != nil
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                if let text { self.transcript = text }
+                if let errMsg { self.errorMessage = errMsg }
+                if shouldStop { self.stopRecording() }
             }
         }
         isRecording = true
@@ -685,8 +818,13 @@ enum AIVariableCategoryMapper {
         if let lc = table[lower] { return lc }
 
         // 4) 部分包含（AI 可能回傳「飲食/餐飲」這樣的複合字）
-        for (key, value) in table {
-            if normalized.contains(key) || lower.contains(key) { return value }
+        // Dictionary 的疊代順序是每次啟動隨機的（雜湊種子隨行程重啟變動），若直接對 table
+        // 做 for-in，遇到同時包含多個 key 的複合字（例如「交通/稅費」同時含「交通」與「稅」）
+        // 會依當次隨機順序回傳不同分類，同一段 AI 回應在不同次啟動可能分到不同類別。
+        // 改為依關鍵字長度由長到短排序後比對，確保結果穩定且優先命中較具體的關鍵字。
+        let orderedKeys = table.keys.sorted { $0.count > $1.count }
+        for key in orderedKeys {
+            if normalized.contains(key) || lower.contains(key) { return table[key] }
         }
         return nil
     }

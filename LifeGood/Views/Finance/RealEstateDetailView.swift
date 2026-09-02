@@ -2,6 +2,153 @@ import SwiftUI
 import PhotosUI
 import UniformTypeIdentifiers
 import QuickLook
+import ImageIO
+
+// MARK: - 美化紀錄（RealEstateDetailView）
+// [2026-06 v1] 本次美化方向：
+//   1. flashCard：加入 cardAppeared spring 進場動畫（透明度 + Y 位移），
+//      對齊 SavingsInsuranceView / StockDetailView 閃卡進場規格。
+//   2. tabPicker：從系統 .segmented 升級為自訂彩色 Capsule Pill 列（@Namespace + matchedGeometryEffect），
+//      理財 → 紫色、房屋 → teal、資產 → 藍色，對齊 MainTabView bottomTabBar 動畫規格；
+//      每個 tab 搭配對應 SF Symbol，提升識別性。
+//   3. collapsibleSection header：加入彩色 Capsule 側條（summaryColor 對應色）+
+//      標題升至 .subheadline.semibold；summary 改為彩色膠囊（帶細邊框），
+//      對齊 OverviewView / FinanceOverviewView section 標題設計語言；
+//      chevron 改為與 summaryColor 同色（透明度 0.6），視覺層次更一致。
+//   4. sectionHeader：補 Capsule 側條（.secondary 色），對齊 collapsibleSection 規格。
+//   5. emptySectionRow：加入 tray 圖示，對齊 FixedExpenseView 空狀態佔位規格，
+//      避免空白感。
+//
+// [2026-06 v2] 本次美化方向：
+//   6. mortgageItems 列（理財分頁）→ 36pt 藍色漸層圖示圓（building.columns.fill）+
+//      標題標籤 RoundedRectangle(cornerRadius:4) → Capsule + 0.6pt 細邊框 +
+//      繳期標籤改為 tertiarySystemFill 底色 Capsule 膠囊；
+//      金額字型升級 .subheadline.bold() → .system(size:15,weight:.bold,design:.rounded)
+//      + contentTransition(.numericText())，對齊 IncomeView.incomeRow 數值規格。
+//   7. paidItems 列 → 36pt 紫色漸層圖示圓（banknote.fill）+ 標題 Capsule 升級；
+//      日期從純文字升級為 tertiarySystemFill Capsule 膠囊徽章，對齊 CareerView.careerRow 規格；
+//      金額字型同步升級。
+//   8. variableExpenses 列 → 36pt 橘色漸層圖示圓（依 ve.category.icon 取圖示）+ 分類 Capsule 升級；
+//      名稱從 Spacer 分開改為標籤列同排（.caption2 secondary），日期 Capsule 膠囊化；
+//      金額字型升級，對齊 ExpenseRow / VehicleDetailView 視覺規格。
+//   9. insuranceContent → 36pt indigo 漸層圖示圓（shield.fill）替代原 24pt 平面圖示；
+//      保單號 .foregroundStyle 改為 .primary（有效）/ .tertiary（空），
+//      金額升級 .system(size:15,weight:.bold,design:.rounded)，
+//      對齊 SavingsInsuranceView.insuranceCard 保險圖示視覺規格。
+//  10. propertyAssetsContent 分類標籤 RoundedRectangle(cornerRadius:4) → Capsule + 細邊框，
+//      對齊全 App 統一 Capsule 標籤規格。
+//  11. calcRow 金額字型：.subheadline.bold() → .system(size:14,weight:.bold,design:.rounded)
+//      對齊 kpiCell / collapsibleSection summary 字型層級。
+//
+// [2026-06 v3] 本次美化方向：
+//  12. flashCard 背景升級：加入三個 bokeh 裝飾圓（opacity 0.06 / 0.04 / 0.035）+
+//      頂部→中央玻璃光澤覆層（LinearGradient [.white.opacity(0.18), .clear]），
+//      對齊 VehicleView / StockView / IncomeView summaryHeader 英雄卡規格；
+//      背景改為 ZStack 包裹，所有裝飾層均 allowsHitTesting(false)。
+//  13. flashCard 主金額文字（52pt currentValue）加入 minimumScaleFactor(0.5) +
+//      lineLimit(1) + contentTransition(.numericText())，防止長數字溢出並對齊
+//      全 App 數值動態縮放規格（OverviewView / FinanceOverviewView / RealEstateView）。
+//  14. houseInfoSection 空狀態升級：56pt teal 漸層圖示圓（doc.text.magnifyingglass）
+//      + Circle stroke 細邊框 + .weight(.medium) 標題，對齊 CareerView /
+//      VariableExpenseView 空狀態 ZStack 漸層圓規格。
+//  15. assetsSection 空狀態升級：56pt 藍色漸層圖示圓（shippingbox）+ Circle stroke 細邊框，
+//      .weight(.medium) 標題，視覺均值化。
+//
+// [2026-06 v4] 本次美化方向：
+//  16. elevatorContent 列 → 36pt 藍綠色漸層圖示圓（wrench.and.screwdriver.fill）替代
+//      原 .caption icon，日期升級為 tertiarySystemFill Capsule 膠囊，對齊其他列規格；
+//      照片圖示由 .foregroundStyle(.blue) 升級加入 Capsule 背景標籤。
+//  17. utilityRow → 36pt 對應色（水=藍/電=黃/瓦斯=橘）漸層圖示圓替代原 24pt icon；
+//      水號/電號欄位文字升級 font(.subheadline.weight(.medium))，對齊 infoRow 規格。
+//  18. paymentRow → 36pt 對應色漸層圖示圓替代原 caption icon；金額字型升級
+//      .system(size:15,weight:.bold,design:.rounded) + contentTransition(.numericText())，
+//      對齊 mortgageItems / paidItems 金額規格。
+//  19. latestPaymentRow → 金額字型升級 .system(size:14,weight:.bold,design:.rounded) +
+//      contentTransition(.numericText())，對齊 calcRow 規格。
+//
+// [2026-07 v5] 空狀態一致性修復：
+//  20. elevatorContent 空狀態：原本是唯一手刻裸 HStack + Text("尚無保養記錄")，
+//      同檔案 mortgageItems／paidItems／variableExpenses 三處空狀態都已改用共用
+//      emptySectionRow(_:)（tray 圖示 + .caption/.tertiary + 14/9pt padding），
+//      只有電梯保養這格漏改、垂直 padding 也不同（6pt vs 9pt），
+//      切分頁時視覺不連貫。改呼叫 emptySectionRow("尚無保養記錄") 對齊其餘三處。
+//      純視覺調整，未變動保養記錄新增/刪除或任何既有資料邏輯。
+//
+// [2026-07 v6] 空狀態一致性修復（v5 補漏）：
+//  21. floorItemsTree（樓層物件樹）與 renovationPhotosContent（房屋資料集錦）
+//      兩處空狀態仍是手刻裸 HStack + Text，垂直 padding 各自為 10pt / 6pt，
+//      是 v5 掃描後全檔案僅剩的兩處未接上共用 emptySectionRow(_:) 的空狀態，
+//      與 mortgageItems／paidItems／variableExpenses／elevatorContent 四處不一致。
+//      改呼叫既有 emptySectionRow(_:)，至此全檔案六處空狀態視覺統一。
+//      純視覺調整，未變動樓層物件或房屋資料集錦的任何既有資料邏輯。
+//
+// [2026-07 v7] ExpensePhotoStackViewer 補齊 v24.91 留下的待辦（與姊妹元件
+//   RenovationStackViewer 對齊規格，詳見 RenovationPhotoEditor.swift）：
+//  22. 空狀態從裸 Text("沒有照片") 升級為 52pt 圓形圖示（photo，白 0.10 底 +
+//      0.18 邊框）+ subheadline 說明文字；圖片載入完成加入
+//      .transition(.opacity) + .animation(.easeOut(duration:0.28), value: img != nil)
+//      淡入；頁碼從純文字改為半透明 Capsule 膠囊徽章；日期加 calendar 圖示前綴；
+//      標題字重 .semibold → .bold 對齊；底部資訊面板加入 infoPanelAppeared 進場動畫
+//      （opacity 0→1 + 上移 20pt，spring 0.55/0.78），onDisappear 歸零避免重播殘留。
+//      純視覺層調整，支出照片讀取、翻頁、刪除等既有商業邏輯完全未變動。
+//
+// [2026-07 v8] 補齊 StockDetailView v4／VehicleDetailView v4 留下的待辦：金額量級單位
+//   （萬／億）一致性：
+//  23. flashCard 估值大字、底部「購入」值原本各自呼叫私有 fmtWan(_:)（僅 `%g` 除以萬，
+//      無條件只顯示「萬」），估值一旦達 1 億以上會顯示成 5～6 位數的鉅額「萬」數字，與
+//      同檔案 mortgageItems／paidItems／calcRow 等皆已改用共用 Double.ntdWanString
+//      不一致。新增 splitWan(_:)／splitWanLabel(_:) 從 ntdWanString 拆出「數字／單位」
+//      二段供大字沿用既有字級與 contentTransition 動畫設計，移除已無呼叫端的私有
+//      fmtWan 死碼；作法對齊 VehicleDetailView.splitWan 既有規格。純顯示層調整，估值、
+//      購入價、增值率等既有試算邏輯完全未變動。
+//
+// [2026-07 v9] 電梯保養／水電繳費「新增／編輯」表單 Section header 補齊：
+//  24. ElevatorMaintenanceEditor（保養記錄）與 UtilityPaymentEditor（基本資訊／收據照片／
+//      備註）共 4 處，是本檔案唯二仍在用系統預設純文字 Section("...") 標頭的獨立編輯
+//      sheet，與同檔案 RealEstateDetailView.sectionHeader／collapsibleSection 早已升級的
+//      Capsule 側條規格脫節，也是全 App「表單 Section header 補齊」系列（ResumeView.
+//      AddMilestoneView／BusinessCardEditor／FamilyMembersResumeView／OrgPersonEditor 等）
+//      尚未覆蓋到的兩個編輯 sheet。新增檔案層級共用 realEstateEditorSectionHeader(_:icon:
+//      color:)，主題色沿用既有列規格（保養記錄＝teal，對齊 elevatorContent 列圖示色；
+//      基本資訊＝indigo／收據照片＝teal／備註＝secondary，對齊全 App 慣例配色），刪除
+//      Section／扣款目標 Section（原本就無標頭）維持不變。純視覺層調整，欄位資料綁定、
+//      save()／deleteRecord() 等既有商業邏輯完全未變動。
+//
+// [2026-08 v10] FloorItemEditor（樓層物件命名 sheet）Section header 補齊（v9 補漏）：
+//  25. v9 筆記聲稱 ElevatorMaintenanceEditor／UtilityPaymentEditor 是「本檔案唯二」仍用系統
+//      預設純文字 Section("...") 的編輯 sheet，實際上早於 v9 就存在的 FloorItemEditor（新增／
+//      重新命名樓層物件的極簡 sheet）也是裸 Section("物件名稱")，當時複查漏掉，是本檔案目前
+//      僅剩一處未接上 realEstateEditorSectionHeader 的獨立編輯 sheet。改呼叫既有
+//      realEstateEditorSectionHeader("物件名稱", icon: "shippingbox.fill", color: .brown)，
+//      主題色與圖示對齊 assetsSection 空狀態（v3 已用 shippingbox 代表「物件」語意）。純視覺層
+//      調整，name／isSaving／onSave 等既有新增、重新命名商業邏輯完全未變動。
+//      （下次美化本檔案時：可全檔案複查是否還有其他手刻金額格式殘留待統一）
+//
+// [2026-08 v11] flashCard 房地產名稱補齊防截斷：
+//  26. Text(estate.name)（.title.bold()，已置中對齊）原本沒有 lineLimit／minimumScaleFactor，
+//      是 Vehicle／RealEstate／Stock 三款同型閃卡車名/物件名/股票名大字中，唯二仍缺這道防護的
+//      其中一處（另一處 StockDetailView 同步補齊）。長物件名稱（例如含棟別/樓層完整命名）
+//      理論上會無限換行撐高卡片。補上 .lineLimit(2) + .minimumScaleFactor(0.7)，對齊
+//      VehicleDetailView v5 同批規格，讓超長名稱自動縮字換行但不致無法辨識。純視覺層調整，
+//      estate.name 等既有資料完全未變動。
+//
+// [2026-08 v12] CutePhotoViewer.photoArea 載入狀態補上主題色：
+//  27. 找不到照片時的圖示已用 draft.kind.accent.opacity(0.6) 上色（裝潢＝粉紫／支出＝蜜桃／
+//      水電＝對應色／電梯＝薄荷綠），緊接在同一個 else 分支裡的載入中 ProgressView() 卻是
+//      系統預設灰色，是本檔案「可愛風照片瀏覽器」四種色系裡唯一沒有跟上主題色的狀態、也是全檔
+//      案唯一沒有 .tint() 的 ProgressView（AddRealEstateView.PhotoViewerSheet 已於 v25.23
+//      補上 .tint(.white)）。補上 .tint(draft.kind.accent)，讓「載入中→找不到」轉場時顏色
+//      一致，不會從灰轉彩。純視覺層調整，didLoad／urls 等既有讀取邏輯完全未變動。
+//
+// [2026-08 v13] CutePhotoViewer.topBar 關閉按鈕改回左側，修正全 App 唯一的右側殘留：
+//  28. 全 App「關閉」按鈕統一放在畫面左上角（ToolbarItem(.topBarLeading) 或自訂 HStack 把
+//      Button 放在 Spacer() 之前），例如同檔案 ExpensePhotoStackViewer／MultiPhotoGallery
+//      的 PhotoLightbox 皆是如此。CutePhotoViewer.topBar 卻是「來源膠囊」在前、Spacer()、
+//      關閉按鈕在後，把 xmark 推到右上角，是全 App 唯一一處關閉鈕落在右側的照片檢視器
+//      （CutePhotoViewer 正是裝潢／支出／水電／電梯保養四類照片實際會開啟的檢視器，見上方
+//      v25.65 筆記）。調整 HStack 順序：關閉按鈕移到最前面（左側），來源膠囊移到 Spacer() 之後
+//      （右側），視覺樣式（.ultraThinMaterial 圓底、描邊、陰影等）完全不變，只調換左右位置。
+//      純視覺層調整，dismiss()／draft.kind 等既有邏輯完全未變動。
 
 struct RealEstateDetailView: View {
     @EnvironmentObject var store: FinanceStore
@@ -21,10 +168,6 @@ struct RealEstateDetailView: View {
     @State private var utilityExpanded = false
     @State private var addingRenovationPhoto = false
     @State private var editingRenovationPhoto: RenovationPhoto?
-    @State private var bulkRenovationPickerItems: [PhotosPickerItem] = []
-    @State private var showBulkRenovationPicker = false
-    /// 批次匯入後等待輸入日期/標題的暫存檔名（傳給 RenovationPhotoEditor）
-    @State private var pendingBulkPhotoNames: [String]? = nil
     /// 房屋資料集錦中點任何一張照片，都用這個 cute viewer 呈現
     @State private var cutePhotoDraft: CutePhotoDraft?
     /// 文件上傳 picker
@@ -35,7 +178,13 @@ struct RealEstateDetailView: View {
     /// 已展開備註的變動支出項目 IDs
     @State private var expandedVariableExpenseIds: Set<UUID> = []
     /// 用於在子 sheet 關閉後強制刷新水電瓦斯區塊（解決 SwiftUI 巢狀 sheet 偶爾不更新的問題）
-    @State private var dataRefreshID = UUID()
+    // 只給水電瓦斯區塊用（見 utilitiesContent.id(utilitiesRefreshID)）；
+    // 不要讓其他不相關的 sheet 也 bump 這個值，否則會強制整個水電瓦斯子樹重建身分、造成閃爍
+    @State private var utilitiesRefreshID = UUID()
+
+    // 美化：閃卡進場動畫旗標（對齊 SavingsInsuranceView headerAppeared 規格）
+    // 美化：自訂 tabPicker matchedGeometryEffect namespace
+    @Namespace private var tabNamespace
 
     // MARK: - 收合狀態（理財分頁）
     /// 試算章節預設展開
@@ -47,7 +196,6 @@ struct RealEstateDetailView: View {
 
     // MARK: - 收合狀態（房屋資料分頁）
     @State private var hiBasicExpanded = false
-    @State private var hiFloorsExpanded = false
     /// 集錦預設展開（房屋資料分頁的主視覺）
     @State private var hiGalleryExpanded = true
     @State private var hiElevatorExpanded = false
@@ -55,8 +203,6 @@ struct RealEstateDetailView: View {
     @State private var hiInsuranceExpanded = false
     @State private var hiAssetsExpanded = false
 
-    /// 樓層 3D 目前選中的樓層；同步給 3D 與下方物件樹
-    @State private var selectedFloorId: UUID?
     /// 物件編輯 sheet：依（樓層 id, 項目 id, 是否為新增）開啟
     @State private var editingFloorItemTarget: FloorItemEditTarget?
 
@@ -70,6 +216,7 @@ struct RealEstateDetailView: View {
     enum DetailTab: String, CaseIterable {
         case finance = "理財"
         case house = "房屋資料"
+        case assets = "資產"
     }
     @State private var detailTab: DetailTab = .finance
 
@@ -89,12 +236,13 @@ struct RealEstateDetailView: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 24) {
+                    // 進場動畫改由 FlashCardView 模板內建（進階設定可關閉）
                     flashCard
                     tabPicker
-                    if detailTab == .finance {
-                        infoSection
-                    } else {
-                        houseInfoSection
+                    switch detailTab {
+                    case .finance: infoSection
+                    case .house:   houseInfoSection
+                    case .assets:  assetsSection
                     }
                 }
                 .padding(.vertical)
@@ -130,40 +278,42 @@ struct RealEstateDetailView: View {
             .sheet(item: $viewingPhotoURL) { url in
                 PhotoViewerSheet(url: url)
             }
-            .sheet(isPresented: $addingElevatorMaintenance,
-                   onDismiss: { dataRefreshID = UUID() }) {
+            .sheet(isPresented: $addingElevatorMaintenance) {
                 ElevatorMaintenanceEditor(estateId: estateId, editing: nil)
             }
-            .sheet(item: $editingElevatorMaintenance,
-                   onDismiss: { dataRefreshID = UUID() }) { m in
+            .sheet(item: $editingElevatorMaintenance) { m in
                 ElevatorMaintenanceEditor(estateId: estateId, editing: m)
             }
             .sheet(isPresented: $addingUtilityPayment,
-                   onDismiss: { dataRefreshID = UUID() }) {
+                   onDismiss: { utilitiesRefreshID = UUID() }) {
                 UtilityPaymentEditor(estateId: estateId, editing: nil)
             }
             .sheet(item: $editingUtilityPayment,
-                   onDismiss: { dataRefreshID = UUID() }) { p in
+                   onDismiss: { utilitiesRefreshID = UUID() }) { p in
                 UtilityPaymentEditor(estateId: estateId, editing: p)
             }
-            .sheet(isPresented: $addingRenovationPhoto,
-                   onDismiss: { dataRefreshID = UUID() }) {
+            .sheet(isPresented: $addingRenovationPhoto) {
                 RenovationPhotoEditor(estateId: estateId, editing: nil)
             }
-            .sheet(item: $editingRenovationPhoto,
-                   onDismiss: { dataRefreshID = UUID() }) { p in
+            .sheet(item: $editingRenovationPhoto) { p in
                 RenovationPhotoEditor(estateId: estateId, editing: p)
-            }
-            .sheet(isPresented: Binding(
-                get: { pendingBulkPhotoNames != nil },
-                set: { if !$0 { pendingBulkPhotoNames = nil } }
-            ), onDismiss: { dataRefreshID = UUID() }) {
-                if let names = pendingBulkPhotoNames {
-                    RenovationPhotoEditor(estateId: estateId, editing: nil, preloadedFileNames: names)
-                }
             }
             .sheet(item: $cutePhotoDraft) { draft in
                 CutePhotoViewer(draft: draft)
+            }
+            // fileImporter 掛在穩定的 NavigationStack 上（不要掛在 galleryAddMenu 的
+            // Menu label，那是暫態 view，關閉檔案選單時回寫 binding 會閃退）。
+            .fileImporter(
+                isPresented: $showDocumentPicker,
+                allowedContentTypes: [
+                    .pdf, .presentation, .spreadsheet, .text, .commaSeparatedText,
+                    .plainText, .rtf, .image, .data
+                ],
+                allowsMultipleSelection: true
+            ) { result in
+                if case .success(let urls) = result {
+                    importDocuments(urls)
+                }
             }
             .sheet(item: $previewingDocumentURL) { wrapper in
                 DocumentQuickLookView(url: wrapper.url)
@@ -180,7 +330,7 @@ struct RealEstateDetailView: View {
                     }
                 }
             }
-            .sheet(isPresented: $addingMortgageItem, onDismiss: { dataRefreshID = UUID() }) {
+            .sheet(isPresented: $addingMortgageItem) {
                 AddExpenseView(
                     expenseType: .fixed,
                     preset: AddExpensePreset(
@@ -192,7 +342,7 @@ struct RealEstateDetailView: View {
                     )
                 )
             }
-            .sheet(isPresented: $addingPaidItem, onDismiss: { dataRefreshID = UUID() }) {
+            .sheet(isPresented: $addingPaidItem) {
                 AddExpenseView(
                     expenseType: .variable,
                     preset: AddExpensePreset(
@@ -204,7 +354,7 @@ struct RealEstateDetailView: View {
                     )
                 )
             }
-            .sheet(item: $addingVariableCategory, onDismiss: { dataRefreshID = UUID() }) { cat in
+            .sheet(item: $addingVariableCategory) { cat in
                 AddExpenseView(
                     expenseType: .variable,
                     preset: AddExpensePreset(
@@ -216,7 +366,7 @@ struct RealEstateDetailView: View {
                     )
                 )
             }
-            .sheet(item: $editingLinkedExpense, onDismiss: { dataRefreshID = UUID() }) { exp in
+            .sheet(item: $editingLinkedExpense) { exp in
                 AddExpenseView(expenseType: exp.expenseType, editingExpense: exp)
             }
             .alert("確定要刪除這筆房地產嗎？", isPresented: $showDeleteConfirm) {
@@ -234,90 +384,38 @@ struct RealEstateDetailView: View {
     // MARK: - 閃卡主體
 
     private var flashCard: some View {
-        VStack(spacing: 0) {
-            HStack {
-                Text(rarity.label)
-                    .font(.caption2.weight(.heavy))
-                    .tracking(2)
-                    .foregroundStyle(rarity.textColor)
-                Spacer()
-                Label("房地產", systemImage: "building.2.fill")
-                    .font(.caption2.weight(.bold))
-                    .foregroundStyle(rarity == .legendary ? .yellow : .secondary)
-            }
-            .padding(.horizontal, 16)
-            .padding(.top, 14)
-
-            VStack(spacing: 6) {
-                Text(estate.name)
-                    .font(.title.weight(.bold))
-                    .foregroundStyle(rarity == .legendary ? .white : .primary)
-                    .multilineTextAlignment(.center)
-
-                if !estate.fullAddress.isEmpty {
-                    Text(estate.fullAddress)
-                        .font(.subheadline)
-                        .foregroundStyle(rarity == .legendary ? .white.opacity(0.7) : .secondary)
-                        .multilineTextAlignment(.center)
-                        .lineLimit(3)
-                }
-            }
-            .padding(.top, 16)
-            .padding(.horizontal, 24)
-
-            VStack(spacing: 4) {
-                Text("\(fmtWan(estate.currentValue))")
-                    .font(.system(size: 52, weight: .bold, design: .rounded))
-                    .foregroundStyle(rarity.textColor)
-                Text("萬元")
+        // 改用 FlashCardView 標準模板：殼層與版面骨架由模板統一，本頁只填內容；
+        // 樣式參數由「設定 > 進階設定 > 閃卡樣式」控制。
+        let estimate = splitWan(estate.currentValue)
+        return FlashCardView(
+            rarity: rarity,
+            categoryLabel: "房地產",
+            categoryIcon: "building.2.fill",
+            title: estate.name,
+            bigNumber: estimate.number,
+            bigCaption: "\(estimate.unit)元",
+            columns: [
+                FlashCardInfoColumn("購入", splitWanLabel(estate.purchasePrice)),
+                FlashCardInfoColumn("增值率",
+                                    String(format: "%@%.1f%%",
+                                           estate.appreciationRate >= 0 ? "+" : "",
+                                           estate.appreciationRate),
+                                    valueColor: estate.appreciationRate >= 0 ? .green : .red),
+                FlashCardInfoColumn("月租", estate.monthlyRental > 0 ? fmt(estate.monthlyRental) : "—")
+            ],
+            isSold: estate.isSold
+        ) {
+            if !estate.fullAddress.isEmpty {
+                Text(estate.fullAddress)
                     .font(.subheadline)
-                    .foregroundStyle(rarity == .legendary ? .white.opacity(0.6) : .secondary)
+                    .foregroundStyle(rarity.secondaryTextColor)
+                    .multilineTextAlignment(.center)
+                    .lineLimit(3)
             }
-            .padding(.vertical, 20)
-
-            HStack {
-                VStack(spacing: 2) {
-                    Text("購入")
-                        .font(.caption2).foregroundStyle(rarity == .legendary ? Color.white.opacity(0.5) : Color(UIColor.tertiaryLabel))
-                    Text("\(fmtWan(estate.purchasePrice)) 萬")
-                        .font(.caption.bold()).foregroundStyle(rarity == .legendary ? Color.white.opacity(0.8) : Color.primary)
-                }
-                Spacer()
-                VStack(spacing: 2) {
-                    Text("增值率")
-                        .font(.caption2).foregroundStyle(rarity == .legendary ? Color.white.opacity(0.5) : Color(UIColor.tertiaryLabel))
-                    Text(String(format: "%@%.1f%%", estate.appreciationRate >= 0 ? "+" : "", estate.appreciationRate))
-                        .font(.caption.bold()).foregroundStyle(estate.appreciationRate >= 0 ? .green : .red)
-                }
-                Spacer()
-                VStack(spacing: 2) {
-                    Text("月租")
-                        .font(.caption2).foregroundStyle(rarity == .legendary ? Color.white.opacity(0.5) : Color(UIColor.tertiaryLabel))
-                    Text(estate.monthlyRental > 0 ? fmt(estate.monthlyRental) : "—")
-                        .font(.caption.bold()).foregroundStyle(rarity == .legendary ? Color.white.opacity(0.8) : Color.primary)
-                }
-            }
-            .padding(.horizontal, 24)
-            .padding(.bottom, 16)
-        }
-        .background(
-            LinearGradient(colors: rarity.bgGradient,
-                           startPoint: .topLeading, endPoint: .bottomTrailing)
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 16))
-        .overlay(
-            RoundedRectangle(cornerRadius: 16)
-                .stroke(
-                    AngularGradient(colors: rarity.borderGradient, center: .center),
-                    lineWidth: rarity.borderWidth
-                )
-        )
-        .shadow(color: rarity.shadowColor, radius: rarity == .legendary ? 15 : 8, y: 4)
-        .overlay(alignment: .topLeading) {
-            if estate.isSold {
-                SoldStamp(size: 32)
-                    .offset(x: -10, y: -14)
-            }
+        } middleExtra: {
+            EmptyView()
+        } extraBackground: {
+            EmptyView()
         }
         .padding(.horizontal, 24)
         .padding(.top, 16)
@@ -374,7 +472,10 @@ struct RealEstateDetailView: View {
         HStack {
             Text(label).font(.caption).foregroundStyle(.secondary)
             Spacer()
-            Text(value).font(.subheadline.bold()).foregroundStyle(color)
+            Text(value)
+                .font(.system(size: 14, weight: .bold, design: .rounded))
+                .foregroundStyle(color)
+                .contentTransition(.numericText())
         }
         .padding(.horizontal).padding(.vertical, 6)
     }
@@ -407,19 +508,45 @@ struct RealEstateDetailView: View {
                             onCopy: { duplicateMortgageItem(m) },
                             onDelete: { deleteMortgageItem(m) }
                         ) {
-                            HStack {
-                                Text(m.title.isEmpty ? "房貸" : m.title)
-                                    .font(.caption.weight(.medium))
-                                    .padding(.horizontal, 6).padding(.vertical, 2)
-                                    .background(Color.blue.opacity(0.1))
-                                    .foregroundStyle(.blue)
-                                    .clipShape(RoundedRectangle(cornerRadius: 4))
-                                Text("\(m.elapsedPeriods)/\(m.totalPeriods) 期")
-                                    .font(.caption).foregroundStyle(.secondary)
-                                Spacer()
-                                Text(fmt(m.amount) + "/月").font(.subheadline.bold())
+                            // [v2] 36pt 藍色漸層圖示圓 + Capsule 標籤 + 繳期膠囊 + 升級金額字型
+                            HStack(spacing: 10) {
+                                ZStack {
+                                    Circle()
+                                        .fill(LinearGradient(
+                                            colors: [Color.blue.opacity(0.18), Color.blue.opacity(0.07)],
+                                            startPoint: .topLeading, endPoint: .bottomTrailing
+                                        ))
+                                        .frame(width: 36, height: 36)
+                                        .shadow(color: Color.blue.opacity(0.16), radius: 4, x: 0, y: 2)
+                                        .overlay(Circle().stroke(Color.blue.opacity(0.18), lineWidth: 0.8))
+                                    Image(systemName: "building.columns.fill")
+                                        .font(.system(size: 14, weight: .semibold))
+                                        .foregroundStyle(Color.blue)
+                                }
+                                VStack(alignment: .leading, spacing: 4) {
+                                    HStack(spacing: 5) {
+                                        Text(m.title.isEmpty ? "房貸" : m.title)
+                                            .font(.system(size: 11, weight: .semibold))
+                                            .foregroundStyle(.blue)
+                                            .padding(.horizontal, 7).padding(.vertical, 2.5)
+                                            .background(Color.blue.opacity(0.10))
+                                            .clipShape(Capsule())
+                                            .overlay(Capsule().stroke(Color.blue.opacity(0.22), lineWidth: 0.6))
+                                        Text("\(m.elapsedPeriods)/\(m.totalPeriods) 期")
+                                            .font(.caption2)
+                                            .foregroundStyle(.secondary)
+                                            .padding(.horizontal, 6).padding(.vertical, 2)
+                                            .background(Color(.tertiarySystemFill))
+                                            .clipShape(Capsule())
+                                    }
+                                    Text(fmt(m.amount) + "/月")
+                                        .font(.system(size: 15, weight: .bold, design: .rounded))
+                                        .foregroundStyle(.primary)
+                                        .contentTransition(.numericText())
+                                }
+                                Spacer(minLength: 4)
                             }
-                            .padding(.horizontal).padding(.vertical, 8)
+                            .padding(.horizontal, 12).padding(.vertical, 10)
                             .contentShape(Rectangle())
                             .onTapGesture { openLinkedExpense(id: m.linkedExpenseId) }
                         }
@@ -428,7 +555,9 @@ struct RealEstateDetailView: View {
                         Text("已繳貸款").font(.caption).foregroundStyle(.secondary)
                         Spacer()
                         Text(fmt(estate.totalMortgagePaid))
-                            .font(.subheadline.bold()).foregroundStyle(.blue)
+                            .font(.system(size: 14, weight: .bold, design: .rounded))
+                            .foregroundStyle(.blue)
+                            .contentTransition(.numericText())
                     }
                     .padding(.horizontal).padding(.vertical, 6)
                 }
@@ -459,22 +588,45 @@ struct RealEstateDetailView: View {
                             onCopy: { duplicatePaidItem(p) },
                             onDelete: { deletePaidItem(p) }
                         ) {
-                            HStack(alignment: .top) {
-                                Text(p.title.isEmpty ? "已付款" : p.title)
-                                    .font(.caption.weight(.medium))
-                                    .padding(.horizontal, 6).padding(.vertical, 2)
-                                    .background(Color.purple.opacity(0.1))
-                                    .foregroundStyle(.purple)
-                                    .clipShape(RoundedRectangle(cornerRadius: 4))
-                                Spacer()
-                                VStack(alignment: .trailing, spacing: 2) {
-                                    Text(fmt(p.amount)).font(.subheadline.bold())
-                                    Text(fmtDate(p.date))
-                                        .font(.caption2)
-                                        .foregroundStyle(.secondary)
+                            // [v2] 36pt 紫色漸層圖示圓 + Capsule 標籤 + 日期 Capsule 膠囊 + 升級金額字型
+                            HStack(spacing: 10) {
+                                ZStack {
+                                    Circle()
+                                        .fill(LinearGradient(
+                                            colors: [Color.purple.opacity(0.18), Color.purple.opacity(0.07)],
+                                            startPoint: .topLeading, endPoint: .bottomTrailing
+                                        ))
+                                        .frame(width: 36, height: 36)
+                                        .shadow(color: Color.purple.opacity(0.16), radius: 4, x: 0, y: 2)
+                                        .overlay(Circle().stroke(Color.purple.opacity(0.18), lineWidth: 0.8))
+                                    Image(systemName: "banknote.fill")
+                                        .font(.system(size: 14, weight: .semibold))
+                                        .foregroundStyle(Color.purple)
                                 }
+                                VStack(alignment: .leading, spacing: 4) {
+                                    HStack(spacing: 5) {
+                                        Text(p.title.isEmpty ? "已付款" : p.title)
+                                            .font(.system(size: 11, weight: .semibold))
+                                            .foregroundStyle(.purple)
+                                            .padding(.horizontal, 7).padding(.vertical, 2.5)
+                                            .background(Color.purple.opacity(0.10))
+                                            .clipShape(Capsule())
+                                            .overlay(Capsule().stroke(Color.purple.opacity(0.22), lineWidth: 0.6))
+                                        Text(fmtDate(p.date))
+                                            .font(.caption2)
+                                            .foregroundStyle(.secondary)
+                                            .padding(.horizontal, 6).padding(.vertical, 2)
+                                            .background(Color(.tertiarySystemFill))
+                                            .clipShape(Capsule())
+                                    }
+                                    Text(fmt(p.amount))
+                                        .font(.system(size: 15, weight: .bold, design: .rounded))
+                                        .foregroundStyle(.primary)
+                                        .contentTransition(.numericText())
+                                }
+                                Spacer(minLength: 4)
                             }
-                            .padding(.horizontal).padding(.vertical, 8)
+                            .padding(.horizontal, 12).padding(.vertical, 10)
                             .contentShape(Rectangle())
                             .onTapGesture { openLinkedExpense(id: p.linkedExpenseId) }
                         }
@@ -496,15 +648,17 @@ struct RealEstateDetailView: View {
                         Text("月淨現金流").font(.caption).foregroundStyle(.secondary)
                         Spacer()
                         Text(fmt(flow))
-                            .font(.subheadline.bold())
+                            .font(.system(size: 14, weight: .bold, design: .rounded))
                             .foregroundStyle(flow >= 0 ? .green : .red)
+                            .contentTransition(.numericText())
                     }
                     .padding(.horizontal).padding(.vertical, 8)
                     HStack {
                         Text("年租金報酬率").font(.caption).foregroundStyle(.secondary)
                         Spacer()
                         Text(String(format: "%.2f%%", estate.rentalYield))
-                            .font(.subheadline.bold()).foregroundStyle(.blue)
+                            .font(.system(size: 14, weight: .bold, design: .rounded))
+                            .foregroundStyle(.blue)
                     }
                     .padding(.horizontal).padding(.vertical, 8)
                 }
@@ -548,30 +702,51 @@ struct RealEstateDetailView: View {
                         onCopy: { duplicateVariableExpenseItem(ve) },
                         onDelete: { deleteVariableExpenseItem(ve) }
                     ) {
-                        HStack(alignment: .top) {
-                            Text(ve.category.rawValue)
-                                .font(.caption.weight(.medium))
-                                .padding(.horizontal, 6).padding(.vertical, 2)
-                                .background(Color.orange.opacity(0.1))
-                                .foregroundStyle(.orange)
-                                .clipShape(RoundedRectangle(cornerRadius: 4))
-                            if !ve.name.isEmpty {
-                                Text(ve.name)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(2)
-                                    .multilineTextAlignment(.leading)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                            } else {
-                                Spacer()
+                        // [v2] 36pt 橘色漸層圖示圓（用 ve.category.icon）+ Capsule 標籤 + 日期膠囊 + 升級金額字型
+                        HStack(spacing: 10) {
+                            ZStack {
+                                Circle()
+                                    .fill(LinearGradient(
+                                        colors: [Color.orange.opacity(0.18), Color.orange.opacity(0.07)],
+                                        startPoint: .topLeading, endPoint: .bottomTrailing
+                                    ))
+                                    .frame(width: 36, height: 36)
+                                    .shadow(color: Color.orange.opacity(0.16), radius: 4, x: 0, y: 2)
+                                    .overlay(Circle().stroke(Color.orange.opacity(0.18), lineWidth: 0.8))
+                                Image(systemName: ve.category.icon)
+                                    .font(.system(size: 14, weight: .semibold))
+                                    .foregroundStyle(Color.orange)
                             }
-                            VStack(alignment: .trailing, spacing: 2) {
-                                Text(fmt(ve.amount)).font(.subheadline.bold())
-                                Text(fmtDate(ve.date))
-                                    .font(.caption2).foregroundStyle(.secondary)
+                            VStack(alignment: .leading, spacing: 4) {
+                                HStack(spacing: 5) {
+                                    Text(ve.category.rawValue)
+                                        .font(.system(size: 11, weight: .semibold))
+                                        .foregroundStyle(.orange)
+                                        .padding(.horizontal, 7).padding(.vertical, 2.5)
+                                        .background(Color.orange.opacity(0.10))
+                                        .clipShape(Capsule())
+                                        .overlay(Capsule().stroke(Color.orange.opacity(0.22), lineWidth: 0.6))
+                                    if !ve.name.isEmpty {
+                                        Text(ve.name)
+                                            .font(.caption2)
+                                            .foregroundStyle(.secondary)
+                                            .lineLimit(1)
+                                    }
+                                    Text(fmtDate(ve.date))
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                        .padding(.horizontal, 6).padding(.vertical, 2)
+                                        .background(Color(.tertiarySystemFill))
+                                        .clipShape(Capsule())
+                                }
+                                Text(fmt(ve.amount))
+                                    .font(.system(size: 15, weight: .bold, design: .rounded))
+                                    .foregroundStyle(.primary)
+                                    .contentTransition(.numericText())
                             }
+                            Spacer(minLength: 4)
                         }
-                        .padding(.horizontal).padding(.vertical, 8)
+                        .padding(.horizontal, 12).padding(.vertical, 10)
                         .contentShape(Rectangle())
                         .onTapGesture { openLinkedExpense(id: ve.linkedExpenseId) }
                     }
@@ -580,24 +755,77 @@ struct RealEstateDetailView: View {
         }
     }
 
+    // 【美化】emptySectionRow 加 tray 圖示，對齊 FixedExpenseView 空狀態佔位規格
     private func emptySectionRow(_ text: String) -> some View {
-        HStack {
-            Text(text).font(.caption).foregroundStyle(.tertiary)
+        HStack(spacing: 8) {
+            Image(systemName: "tray")
+                .font(.system(size: 12, weight: .light))
+                .foregroundStyle(.quaternary)
+            Text(text)
+                .font(.caption)
+                .foregroundStyle(.tertiary)
             Spacer()
         }
-        .padding(.horizontal).padding(.vertical, 6)
+        .padding(.horizontal, 14).padding(.vertical, 9)
     }
 
     // MARK: - 分頁選擇器
+    // 【美化】從 .segmented 升級為彩色 Capsule Pill 列，帶 matchedGeometryEffect 滑動指示器
 
     private var tabPicker: some View {
-        Picker("", selection: $detailTab) {
+        HStack(spacing: 8) {
             ForEach(DetailTab.allCases, id: \.self) { tab in
-                Text(tab.rawValue).tag(tab)
+                let isActive = detailTab == tab
+                Button {
+                    withAnimation(.spring(response: 0.28, dampingFraction: 0.72)) {
+                        detailTab = tab
+                    }
+                } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: tabIcon(tab))
+                            .font(.system(size: 12, weight: isActive ? .semibold : .medium))
+                        Text(tab.rawValue)
+                            .font(.system(size: 13, weight: isActive ? .semibold : .regular))
+                    }
+                    .foregroundStyle(isActive ? .white : .primary)
+                    .padding(.horizontal, 14).padding(.vertical, 8)
+                    .background {
+                        if isActive {
+                            Capsule()
+                                .fill(tabAccent(tab))
+                                .matchedGeometryEffect(id: "detailTabIndicator", in: tabNamespace)
+                                .shadow(color: tabAccent(tab).opacity(0.38), radius: 7, x: 0, y: 3)
+                        } else {
+                            Capsule()
+                                .fill(Color(.tertiarySystemFill))
+                        }
+                    }
+                }
+                .buttonStyle(.plain)
+                .scaleEffect(isActive ? 1.03 : 1.0)
+                .animation(.spring(response: 0.26, dampingFraction: 0.72), value: isActive)
             }
         }
-        .pickerStyle(.segmented)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal)
+    }
+
+    /// 每個分頁對應的 SF Symbol 圖示
+    private func tabIcon(_ tab: DetailTab) -> String {
+        switch tab {
+        case .finance: return "chart.bar.xaxis"
+        case .house:   return "house.fill"
+        case .assets:  return "shippingbox.fill"
+        }
+    }
+
+    /// 每個分頁的主題色（理財紫 / 房屋 teal / 資產藍）
+    private func tabAccent(_ tab: DetailTab) -> Color {
+        switch tab {
+        case .finance: return Color(red: 0.50, green: 0.25, blue: 0.85)
+        case .house:   return Color(red: 0.18, green: 0.62, blue: 0.62)
+        case .assets:  return Color(red: 0.22, green: 0.50, blue: 0.90)
+        }
     }
 
     // MARK: - 房屋資料（人生）
@@ -620,27 +848,19 @@ struct RealEstateDetailView: View {
                 }
             }
 
-            // 2. 樓層 3D
-            if !estate.floors.isEmpty {
-                collapsibleSection(
-                    title: "樓層 3D",
-                    summary: "\(estate.floors.count) 層",
-                    summaryColor: Self.cyanColor,
-                    isExpanded: $hiFloorsExpanded
-                ) {
-                    buildingVisualization
-                }
-            }
-
             // 3. 房屋資料集錦（預設展開；右側 + Menu）
+            // gallerySummary／renovationPhotosContent 過去各自獨立呼叫 linkedExpensePhotos
+            // （對 expenseStore.expenses 全量 filter），summary 又不受展開狀態影響、每次都會算，
+            // 同一次 render 因此重複掃描兩次；改由呼叫端算一次後往下傳參數。
+            let expPhotos = linkedExpensePhotos
             collapsibleSection(
                 title: "房屋資料集錦",
-                summary: gallerySummary,
+                summary: gallerySummary(expensePhotos: expPhotos),
                 summaryColor: .green,
                 isExpanded: $hiGalleryExpanded,
                 trailing: { galleryAddMenu }
             ) {
-                renovationPhotosContent
+                renovationPhotosContent(expensePhotos: expPhotos)
             }
 
             // 4. 電梯資料
@@ -674,7 +894,7 @@ struct RealEstateDetailView: View {
                     trailing: { addButton { addingUtilityPayment = true } }
                 ) {
                     utilitiesContent
-                        .id(dataRefreshID)
+                        .id(utilitiesRefreshID)
                 }
             }
 
@@ -707,14 +927,29 @@ struct RealEstateDetailView: View {
             // 空狀態
             if !hasBasic && estate.floors.isEmpty && !hasUtilities
                 && estate.insuranceItems.isEmpty && estate.propertyAssets.isEmpty {
-                VStack(spacing: 8) {
-                    Image(systemName: "doc.text.magnifyingglass")
-                        .font(.system(size: 36)).foregroundStyle(.tertiary)
-                    Text("尚未填寫房屋資料").font(.subheadline).foregroundStyle(.secondary)
-                    Text("點擊下方編輯按鈕填寫").font(.caption).foregroundStyle(.tertiary)
+                // [v3] 空狀態升級：56pt teal 漸層圖示圓，對齊 CareerView 空狀態規格
+                VStack(spacing: 12) {
+                    ZStack {
+                        Circle()
+                            .fill(LinearGradient(
+                                colors: [Color.teal.opacity(0.20), Color.teal.opacity(0.08)],
+                                startPoint: .topLeading, endPoint: .bottomTrailing
+                            ))
+                            .frame(width: 56, height: 56)
+                            .overlay(Circle().stroke(Color.teal.opacity(0.18), lineWidth: 0.8))
+                        Image(systemName: "doc.text.magnifyingglass")
+                            .font(.system(size: 24, weight: .semibold))
+                            .foregroundStyle(.teal)
+                    }
+                    Text("尚未填寫房屋資料")
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(.secondary)
+                    Text("點擊下方編輯按鈕填寫")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
                 }
                 .frame(maxWidth: .infinity)
-                .padding(.vertical, 32)
+                .padding(.vertical, 36)
             }
         }
         .padding(.bottom, 8)
@@ -771,12 +1006,12 @@ struct RealEstateDetailView: View {
 
     // MARK: - 集錦摘要
 
-    private var gallerySummary: String? {
+    private func gallerySummary(expensePhotos: [Expense]) -> String? {
         let photoCount = estate.renovationPhotos.reduce(0) { $0 + max(1, $1.photoFileNames.count) }
-        let expensePhotoCount = linkedExpensePhotos.reduce(0) { $0 + $1.photoFileNames.count }
+        let expensePhotoCount = expensePhotos.reduce(0) { $0 + $1.photoFileNames.count }
         let docCount = estate.documents.count
-        let utilityPhotoCount = estate.utilityPayments.filter { $0.photoFileName != nil }.count
-        let elevatorPhotoCount = estate.elevatorMaintenances.filter { $0.photoFileName != nil }.count
+        let utilityPhotoCount = estate.utilityPayments.reduce(0) { $0 + $1.photoFileNames.count }
+        let elevatorPhotoCount = estate.elevatorMaintenances.reduce(0) { $0 + $1.photoFileNames.count }
         let total = photoCount + expensePhotoCount + docCount + utilityPhotoCount + elevatorPhotoCount
         return total > 0 ? "\(total) 筆" : "尚無"
     }
@@ -786,35 +1021,57 @@ struct RealEstateDetailView: View {
     @ViewBuilder
     private var elevatorContent: some View {
         if estate.elevatorMaintenances.isEmpty {
-            HStack {
-                Text("尚無保養記錄").font(.caption).foregroundStyle(.tertiary)
-                Spacer()
-            }
-            .padding(.horizontal).padding(.vertical, 6)
+            emptySectionRow("尚無保養記錄")
         } else {
             ForEach(estate.elevatorMaintenances) { m in
                 Button { editingElevatorMaintenance = m } label: {
-                    HStack {
-                        Image(systemName: "wrench.and.screwdriver")
-                            .font(.caption).foregroundStyle(.blue)
-                        Text(fmtDate(m.date))
-                            .font(.subheadline).foregroundStyle(.primary)
-                        Spacer()
-                        if m.photoFileName != nil {
+                    // [v4] 36pt teal 漸層圖示圓 + 日期 Capsule 膠囊，對齊 paidItems 列規格
+                    HStack(spacing: 10) {
+                        ZStack {
+                            Circle()
+                                .fill(LinearGradient(
+                                    colors: [Color.teal.opacity(0.18), Color.teal.opacity(0.07)],
+                                    startPoint: .topLeading, endPoint: .bottomTrailing
+                                ))
+                                .frame(width: 36, height: 36)
+                                .shadow(color: Color.teal.opacity(0.16), radius: 4, x: 0, y: 2)
+                                .overlay(Circle().stroke(Color.teal.opacity(0.18), lineWidth: 0.8))
+                            Image(systemName: "wrench.and.screwdriver.fill")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundStyle(.teal)
+                        }
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(fmtDate(m.date))
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(.teal)
+                                .padding(.horizontal, 7).padding(.vertical, 2.5)
+                                .background(Color.teal.opacity(0.10))
+                                .clipShape(Capsule())
+                                .overlay(Capsule().stroke(Color.teal.opacity(0.22), lineWidth: 0.6))
+                        }
+                        Spacer(minLength: 4)
+                        if !m.photoFileNames.isEmpty {
                             Button {
-                                if let url = m.photoURL {
-                                    viewingPhotoURL = url
-                                }
+                                if let url = m.photoURL { viewingPhotoURL = url }
                             } label: {
-                                Image(systemName: "photo.fill")
-                                    .font(.caption).foregroundStyle(.blue)
+                                HStack(spacing: 3) {
+                                    Image(systemName: "photo.fill").font(.caption2)
+                                    if m.photoFileNames.count > 1 {
+                                        Text("\(m.photoFileNames.count)")
+                                            .font(.system(size: 9, weight: .bold))
+                                    }
+                                }
+                                .foregroundStyle(.teal)
+                                .padding(5)
+                                .background(Color.teal.opacity(0.10))
+                                .clipShape(Capsule())
                             }
                             .buttonStyle(.plain)
                         }
                         Image(systemName: "chevron.right")
                             .font(.caption2).foregroundStyle(.tertiary)
                     }
-                    .padding(.horizontal).padding(.vertical, 6)
+                    .padding(.horizontal, 12).padding(.vertical, 10)
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -841,18 +1098,36 @@ struct RealEstateDetailView: View {
 
     @ViewBuilder
     private var insuranceContent: some View {
+        // [v2] 36pt indigo 漸層圖示圓 + 升級金額字型，對齊 SavingsInsuranceView.insuranceCard 視覺規格
         ForEach(estate.insuranceItems) { ins in
-            HStack {
-                Image(systemName: "shield.fill").foregroundStyle(.indigo)
-                Text(ins.policyNumber.isEmpty ? "未填險號" : ins.policyNumber)
-                    .font(.subheadline)
-                    .foregroundStyle(ins.policyNumber.isEmpty ? .tertiary : .primary)
-                Spacer()
-                if ins.amount > 0 {
-                    Text(fmt(ins.amount)).font(.subheadline.bold()).foregroundStyle(.orange)
+            HStack(spacing: 10) {
+                ZStack {
+                    Circle()
+                        .fill(LinearGradient(
+                            colors: [Color.indigo.opacity(0.18), Color.indigo.opacity(0.07)],
+                            startPoint: .topLeading, endPoint: .bottomTrailing
+                        ))
+                        .frame(width: 36, height: 36)
+                        .shadow(color: Color.indigo.opacity(0.16), radius: 4, x: 0, y: 2)
+                        .overlay(Circle().stroke(Color.indigo.opacity(0.18), lineWidth: 0.8))
+                    Image(systemName: "shield.fill")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(Color.indigo)
                 }
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(ins.policyNumber.isEmpty ? "未填險號" : ins.policyNumber)
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(ins.policyNumber.isEmpty ? .tertiary : .primary)
+                    if ins.amount > 0 {
+                        Text(fmt(ins.amount))
+                            .font(.system(size: 15, weight: .bold, design: .rounded))
+                            .foregroundStyle(.orange)
+                            .contentTransition(.numericText())
+                    }
+                }
+                Spacer(minLength: 4)
             }
-            .padding(.horizontal).padding(.vertical, 8)
+            .padding(.horizontal, 12).padding(.vertical, 10)
         }
     }
 
@@ -860,20 +1135,27 @@ struct RealEstateDetailView: View {
 
     @ViewBuilder
     private var propertyAssetsContent: some View {
+        // [v2] 分類標籤 RoundedRectangle(cornerRadius:4) → Capsule + 細邊框，
+        //      金額字型升級，對齊全 App 統一 Capsule 標籤規格
         ForEach(estate.propertyAssets) { asset in
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 5) {
                 HStack {
                     Text(asset.category.rawValue)
-                        .font(.caption.weight(.medium))
-                        .padding(.horizontal, 6).padding(.vertical, 2)
-                        .background(Color.orange.opacity(0.1))
+                        .font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(.orange)
-                        .clipShape(RoundedRectangle(cornerRadius: 4))
+                        .padding(.horizontal, 7).padding(.vertical, 2.5)
+                        .background(Color.orange.opacity(0.10))
+                        .clipShape(Capsule())
+                        .overlay(Capsule().stroke(Color.orange.opacity(0.22), lineWidth: 0.6))
                     Text(asset.name.isEmpty ? "—" : asset.name)
                         .font(.subheadline.weight(.semibold))
-                    Spacer()
+                        .lineLimit(1)
+                    Spacer(minLength: 4)
                     if asset.amount > 0 {
-                        Text(fmt(asset.amount)).font(.subheadline.bold()).foregroundStyle(.orange)
+                        Text(fmt(asset.amount))
+                            .font(.system(size: 15, weight: .bold, design: .rounded))
+                            .foregroundStyle(.orange)
+                            .contentTransition(.numericText())
                     }
                 }
                 HStack(spacing: 10) {
@@ -887,7 +1169,7 @@ struct RealEstateDetailView: View {
                     }
                 }
             }
-            .padding(.horizontal).padding(.vertical, 8)
+            .padding(.horizontal, 12).padding(.vertical, 10)
         }
     }
 
@@ -908,24 +1190,45 @@ struct RealEstateDetailView: View {
         return Int(s) ?? 0
     }
 
-    private var buildingVisualization: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HolographicBuildingView(
-                floors: sortedFloors,
-                isApartment: estate.buildingType != .townhouse,
-                selectedFloorId: $selectedFloorId
-            )
-            .shadow(color: Self.cyanColor.opacity(0.25), radius: 10)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
+    // MARK: - 資產分頁（依樓層分組的物件樹）
 
-            if let fid = selectedFloorId,
-               let floor = estate.floors.first(where: { $0.id == fid }) {
-                floorItemsTree(for: floor)
-                    .transition(.opacity.combined(with: .move(edge: .top)))
+    /// 「資產」分頁：依樓層分組，列出每一層可新增/重新命名/刪除的物件樹。
+    /// 從原本「樓層 3D」章節獨立出來，畫面更乾淨，也避開與 3D 視圖耦合的閃退路徑。
+    private var assetsSection: some View {
+        VStack(spacing: 16) {
+            if estate.floors.isEmpty {
+                // [v3] 空狀態升級：56pt 藍色漸層圖示圓，視覺均值化
+                VStack(spacing: 12) {
+                    ZStack {
+                        Circle()
+                            .fill(LinearGradient(
+                                colors: [Color.blue.opacity(0.20), Color.blue.opacity(0.08)],
+                                startPoint: .topLeading, endPoint: .bottomTrailing
+                            ))
+                            .frame(width: 56, height: 56)
+                            .overlay(Circle().stroke(Color.blue.opacity(0.18), lineWidth: 0.8))
+                        Image(systemName: "shippingbox")
+                            .font(.system(size: 24, weight: .semibold))
+                            .foregroundStyle(.blue)
+                    }
+                    Text("尚未建立樓層")
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(.secondary)
+                    Text("請先用上方「編輯」新增樓層，再回來這裡建立各樓層的資產物件")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                        .multilineTextAlignment(.center)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 40)
+                .padding(.horizontal)
+            } else {
+                ForEach(sortedFloors) { floor in
+                    floorItemsTree(for: floor)
+                }
             }
         }
-        .animation(.easeInOut(duration: 0.2), value: selectedFloorId)
+        .padding(.vertical, 8)
     }
 
     // MARK: - 樓層物件樹
@@ -957,12 +1260,7 @@ struct RealEstateDetailView: View {
             .padding(.horizontal, 12).padding(.top, 10)
 
             if floor.items.isEmpty {
-                HStack {
-                    Text("尚無物件，點右上「新增物件」開始建立")
-                        .font(.caption).foregroundStyle(.tertiary)
-                    Spacer()
-                }
-                .padding(.horizontal, 12).padding(.bottom, 10)
+                emptySectionRow("尚無物件，點右上「新增物件」開始建立")
             } else {
                 VStack(alignment: .leading, spacing: 2) {
                     // 先把樹狀物件攤平成一維列表，再用單一 ForEach 渲染。
@@ -1094,8 +1392,7 @@ struct RealEstateDetailView: View {
         } else {
             estate.floors[fIdx].items.append(newItem)
         }
-        store.update(estate)
-        dataRefreshID = UUID()
+        commitFloorEstate(estate)
     }
 
     private func renameFloorItem(floorId: UUID, itemId: UUID, newName: String) {
@@ -1104,16 +1401,25 @@ struct RealEstateDetailView: View {
               var estate = store.realEstates.first(where: { $0.id == estateId }),
               let fIdx = estate.floors.firstIndex(where: { $0.id == floorId }) else { return }
         estate.floors[fIdx].items = renameInTree(estate.floors[fIdx].items, targetId: itemId, newName: trimmed)
-        store.update(estate)
-        dataRefreshID = UUID()
+        commitFloorEstate(estate)
     }
 
     private func deleteFloorItem(floorId: UUID, itemId: UUID) {
         guard var estate = store.realEstates.first(where: { $0.id == estateId }),
               let fIdx = estate.floors.firstIndex(where: { $0.id == floorId }) else { return }
         estate.floors[fIdx].items = removeFromTree(estate.floors[fIdx].items, targetId: itemId)
-        store.update(estate)
-        dataRefreshID = UUID()
+        commitFloorEstate(estate)
+    }
+
+    /// 將樓層物件變更寫回 store。刻意延後到下一個 runloop 才改動 @Published store：
+    /// 樓層物件的新增/重新命名是在 FloorItemEditor「儲存」按鈕裡同步觸發，緊接著 sheet
+    /// 會 dismiss；刪除則來自 Menu 按鈕。若在這個 view-update 交易裡同步改動 observed
+    /// state（此 NavigationStack 疊了多個 sheet），SwiftUI 會閃退。延後一個 runloop 即可
+    /// 讓存檔脫離 sheet 關閉 / 按鈕點擊的更新交易。
+    private func commitFloorEstate(_ estate: RealEstate) {
+        DispatchQueue.main.async {
+            store.update(estate)
+        }
     }
 
     private func insertChild(into items: [FloorItem], parentId: UUID, child: FloorItem) -> [FloorItem] {
@@ -1168,13 +1474,7 @@ struct RealEstateDetailView: View {
                 if subscription.isPremium { addingRenovationPhoto = true }
                 else { showPremiumAlert = true }
             } label: {
-                Label("新增單張照片（含描述）", systemImage: "photo")
-            }
-            Button {
-                if subscription.isPremium { showBulkRenovationPicker = true }
-                else { showPremiumAlert = true }
-            } label: {
-                Label("批次匯入多張照片", systemImage: "photo.on.rectangle.angled")
+                Label("新增照片及描述", systemImage: "photo")
             }
             Divider()
             Button {
@@ -1188,40 +1488,6 @@ struct RealEstateDetailView: View {
                 .font(.subheadline).foregroundStyle(.green)
         }
         .buttonStyle(.plain)
-        .photosPicker(isPresented: $showBulkRenovationPicker,
-                      selection: $bulkRenovationPickerItems,
-                      maxSelectionCount: 0,
-                      matching: .images)
-        .onChange(of: bulkRenovationPickerItems) { _, items in
-            guard !items.isEmpty else { return }
-            Task { await importBulkRenovationPhotos(items) }
-        }
-        .fileImporter(
-            isPresented: $showDocumentPicker,
-            allowedContentTypes: [
-                .pdf, .presentation, .spreadsheet, .text, .commaSeparatedText,
-                .plainText, .rtf, .image, .data
-            ],
-            allowsMultipleSelection: true
-        ) { result in
-            if case .success(let urls) = result {
-                importDocuments(urls)
-            }
-        }
-    }
-
-    /// 把多選相片寫入磁碟後，開 RenovationPhotoEditor 讓使用者輸入日期/標題/備註，
-    /// 一次匯入成「一筆」RenovationPhoto，這些照片會以堆疊方式顯示。
-    @MainActor
-    private func importBulkRenovationPhotos(_ items: [PhotosPickerItem]) async {
-        var fileNames: [String] = []
-        for item in items {
-            guard let data = try? await item.loadTransferable(type: Data.self) else { continue }
-            fileNames.append(RenovationPhoto.savePhoto(data, id: UUID()))
-        }
-        bulkRenovationPickerItems = []
-        guard !fileNames.isEmpty else { return }
-        pendingBulkPhotoNames = fileNames
     }
 
     /// 該房地產關聯的、有附照片的支出（變動 + 固定皆含）
@@ -1231,29 +1497,24 @@ struct RealEstateDetailView: View {
     }
 
     @ViewBuilder
-    private var renovationPhotosContent: some View {
+    private func renovationPhotosContent(expensePhotos: [Expense]) -> some View {
         let renovationItems = estate.renovationPhotos.map { HousePhotoItem.renovation($0) }
-        let expenseItems = linkedExpensePhotos.map { HousePhotoItem.expense($0) }
+        let expenseItems = expensePhotos.map { HousePhotoItem.expense($0) }
         let documentItems = estate.documents.map { HousePhotoItem.document($0) }
         let utilityItems = estate.utilityPayments
             .filter { $0.photoFileName != nil }
             .map { HousePhotoItem.utility($0) }
         let elevatorItems = estate.elevatorMaintenances
-            .filter { $0.photoFileName != nil }
+            .filter { !$0.photoFileNames.isEmpty }
             .map { HousePhotoItem.elevator($0) }
         let allItems = (renovationItems + expenseItems + documentItems + utilityItems + elevatorItems)
             .sorted { $0.date > $1.date }
 
         if allItems.isEmpty {
-            HStack {
-                Text("尚無房屋資料（裝潢照片 / 關聯支出 / 文件 / 水電瓦斯收據 / 電梯保養）")
-                    .font(.caption).foregroundStyle(.tertiary)
-                Spacer()
-            }
-            .padding(.horizontal).padding(.vertical, 6)
+            emptySectionRow("尚無房屋資料（裝潢照片 / 關聯支出 / 文件 / 水電瓦斯收據 / 電梯保養）")
         } else {
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 14) {
+                LazyHStack(spacing: 14) {
                     ForEach(allItems) { item in
                         Button {
                             handleHousePhotoTap(item)
@@ -1333,29 +1594,29 @@ struct RealEstateDetailView: View {
         case .document(let d):
             previewingDocumentURL = IdentifiableURL(url: d.fileURL)
         case .utility(let u):
-            guard let name = u.photoFileName else {
+            guard !u.photoFileNames.isEmpty else {
                 editingUtilityPayment = u
                 return
             }
-            let url = UtilityPayment.photosDirectory.appendingPathComponent(name)
+            let urls = u.photoFileNames.map { UtilityPayment.photosDirectory.appendingPathComponent($0) }
             let amountText: String = u.amount > 0 ? fmt(u.amount) : ""
             let noteParts = [amountText, u.note.trimmingCharacters(in: .whitespaces)]
                 .filter { !$0.isEmpty }
             cutePhotoDraft = CutePhotoDraft(
-                urls: [url],
+                urls: urls,
                 title: "\(u.type.rawValue) 繳費",
                 note: noteParts.joined(separator: "・"),
                 date: u.date,
                 kind: .utility(u.type)
             )
         case .elevator(let m):
-            guard let name = m.photoFileName else {
+            guard !m.photoFileNames.isEmpty else {
                 editingElevatorMaintenance = m
                 return
             }
-            let url = ElevatorMaintenance.photosDirectory.appendingPathComponent(name)
+            let urls = m.photoFileNames.map { ElevatorMaintenance.photoURL(for: $0) }
             cutePhotoDraft = CutePhotoDraft(
-                urls: [url],
+                urls: urls,
                 title: "電梯保養",
                 note: "",
                 date: m.date,
@@ -1429,7 +1690,6 @@ struct RealEstateDetailView: View {
             }
         }
         store.update(estate)
-        dataRefreshID = UUID()
     }
 
     private func deleteDocument(_ doc: RealEstateDocument) {
@@ -1437,7 +1697,6 @@ struct RealEstateDetailView: View {
         RealEstateDocument.deleteDocument(doc.fileName)
         estate.documents.removeAll { $0.id == doc.id }
         store.update(estate)
-        dataRefreshID = UUID()
     }
 
     /// 通用堆疊照片視圖：用一個 urlFor 閉包來支援 RenovationPhoto / Expense 兩種來源
@@ -1480,18 +1739,12 @@ struct RealEstateDetailView: View {
 
     @ViewBuilder
     private func stackedHousePhotoLayer(url: URL) -> some View {
-        Group {
-            if let img = UIImage(contentsOfFile: url.path) {
-                Image(uiImage: img).resizable().scaledToFill()
-            } else {
-                RoundedRectangle(cornerRadius: 10).fill(Color(.tertiarySystemFill))
-            }
-        }
-        .frame(width: 130, height: 100)
-        .clipped()
-        .clipShape(RoundedRectangle(cornerRadius: 10))
-        // 去掉突兀的白色外框，改用陰影分層（疊張之間靠旋轉位移 + 陰影區隔）
-        .shadow(color: .black.opacity(0.2), radius: 3, y: 2)
+        ThumbnailImageView(url: url)
+            .frame(width: 130, height: 100)
+            .clipped()
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+            // 去掉突兀的白色外框，改用陰影分層（疊張之間靠旋轉位移 + 陰影區隔）
+            .shadow(color: .black.opacity(0.2), radius: 3, y: 2)
     }
 
     private func renovationPhotoCard(_ p: RenovationPhoto) -> some View {
@@ -1523,27 +1776,12 @@ struct RealEstateDetailView: View {
     /// 不再自帶白框與 onTapGesture，由外層 Button 統一導向 CutePhotoViewer。
     @ViewBuilder
     private func renovationSinglePhoto(url: URL?) -> some View {
-        Group {
-            if let url = url, let img = UIImage(contentsOfFile: url.path) {
-                Image(uiImage: img)
-                    .resizable()
-                    .scaledToFill()
-                    .frame(width: 130, height: 100)
-                    .clipped()
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
-                    .shadow(color: .black.opacity(0.18), radius: 3, y: 2)
-            } else {
-                RoundedRectangle(cornerRadius: 10)
-                    .fill(Color(.tertiarySystemFill))
-                    .frame(width: 130, height: 100)
-                    .overlay(
-                        Image(systemName: "photo")
-                            .font(.title2)
-                            .foregroundStyle(.tertiary)
-                    )
-            }
-        }
-        .frame(width: 140, height: 110)
+        ThumbnailImageView(url: url, placeholderIcon: "photo")
+            .frame(width: 130, height: 100)
+            .clipped()
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+            .shadow(color: .black.opacity(0.18), radius: 3, y: 2)
+            .frame(width: 140, height: 110)
     }
 
     /// 多張照片堆疊卡片：3 張往後遞減旋轉位移，最上層放第一張，右上角徽章顯示總張數
@@ -1592,24 +1830,15 @@ struct RealEstateDetailView: View {
 
     @ViewBuilder
     private func stackedPhotoLayer(_ name: String) -> some View {
-        let url = RenovationPhoto.photoURL(for: name)
-        Group {
-            if let img = UIImage(contentsOfFile: url.path) {
-                Image(uiImage: img)
-                    .resizable()
-                    .scaledToFill()
-            } else {
-                RoundedRectangle(cornerRadius: 10).fill(Color(.tertiarySystemFill))
-            }
-        }
-        .frame(width: 130, height: 100)
-        .clipped()
-        .clipShape(RoundedRectangle(cornerRadius: 10))
-        .overlay(
-            RoundedRectangle(cornerRadius: 10)
-                .stroke(Color.white, lineWidth: 2)
-        )
-        .shadow(color: .black.opacity(0.18), radius: 3, y: 2)
+        ThumbnailImageView(url: RenovationPhoto.photoURL(for: name))
+            .frame(width: 130, height: 100)
+            .clipped()
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+            .overlay(
+                RoundedRectangle(cornerRadius: 10)
+                    .stroke(Color.white, lineWidth: 2)
+            )
+            .shadow(color: .black.opacity(0.18), radius: 3, y: 2)
     }
 
     @ViewBuilder
@@ -1664,9 +1893,11 @@ struct RealEstateDetailView: View {
         latestPaymentRow(type: .gas)
 
         // 展開：顯示所有歷史繳費紀錄
+        // 各類型最新一筆的 id 只算一次，避免對每一筆繳費都重新掃描+排序整個 utilityPayments（O(n²)）
+        let latestIDs = latestPaymentIDs()
         let allPayments = estate.utilityPayments.sorted { $0.date > $1.date }
         let olderPayments = allPayments.filter { p in
-            !isLatestPayment(p)
+            !latestIDs.contains(p.id)
         }
         if utilityExpanded {
             if !olderPayments.isEmpty {
@@ -1710,11 +1941,12 @@ struct RealEstateDetailView: View {
                 HStack(spacing: 6) {
                     if !m.label.isEmpty {
                         Text(m.label)
-                            .font(.caption.weight(.medium))
-                            .padding(.horizontal, 5).padding(.vertical, 1)
-                            .background(color.opacity(0.12))
+                            .font(.system(size: 10, weight: .semibold))
                             .foregroundStyle(color)
-                            .clipShape(RoundedRectangle(cornerRadius: 4))
+                            .padding(.horizontal, 6).padding(.vertical, 2)
+                            .background(color.opacity(0.12))
+                            .clipShape(Capsule())
+                            .overlay(Capsule().stroke(color.opacity(0.22), lineWidth: 0.6))
                     }
                     if !m.userNumber.isEmpty {
                         Text("用戶編號 \(m.userNumber)").font(.caption2).foregroundStyle(.secondary)
@@ -1739,21 +1971,37 @@ struct RealEstateDetailView: View {
         .padding(.horizontal).padding(.vertical, 6)
     }
 
+    // [v4] 36pt 對應色漸層圖示圓 + 升級欄位字型，對齊 infoRow / mortgageItems 視覺規格
     private func utilityRow(icon: String, color: Color, number: String, owner: String, numberLabel: String) -> some View {
-        HStack(spacing: 12) {
-            Image(systemName: icon).foregroundStyle(color).frame(width: 24)
+        HStack(spacing: 10) {
+            ZStack {
+                Circle()
+                    .fill(LinearGradient(
+                        colors: [color.opacity(0.18), color.opacity(0.07)],
+                        startPoint: .topLeading, endPoint: .bottomTrailing
+                    ))
+                    .frame(width: 36, height: 36)
+                    .shadow(color: color.opacity(0.16), radius: 4, x: 0, y: 2)
+                    .overlay(Circle().stroke(color.opacity(0.18), lineWidth: 0.8))
+                Image(systemName: icon)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(color)
+            }
             VStack(alignment: .leading, spacing: 2) {
-                HStack {
-                    Text(numberLabel).font(.caption2).foregroundStyle(.secondary)
-                    Text(number.isEmpty ? "—" : number).font(.subheadline.weight(.medium))
+                HStack(spacing: 5) {
+                    Text(numberLabel)
+                        .font(.caption2).foregroundStyle(.secondary)
+                    Text(number.isEmpty ? "—" : number)
+                        .font(.subheadline.weight(.medium))
                 }
                 if !owner.isEmpty {
-                    Text("所有權人：\(owner)").font(.caption2).foregroundStyle(.tertiary)
+                    Text("所有權人：\(owner)")
+                        .font(.caption2).foregroundStyle(.tertiary)
                 }
             }
             Spacer()
         }
-        .padding(.horizontal).padding(.vertical, 8)
+        .padding(.horizontal, 12).padding(.vertical, 8)
     }
 
     // MARK: - 輔助
@@ -1766,21 +2014,30 @@ struct RealEstateDetailView: View {
             .first
     }
 
-    private func isLatestPayment(_ p: UtilityPayment) -> Bool {
-        for t in UtilityType.allCases {
-            if let latest = latestPayment(for: t), latest.id == p.id { return true }
+    /// 各水電瓦斯類型最新一筆繳費的 id 集合（一次分組取得，取代逐筆呼叫 latestPayment(for:) 的 O(n²) 掃描）
+    private func latestPaymentIDs() -> Set<UUID> {
+        var latestByType: [UtilityType: UtilityPayment] = [:]
+        for p in estate.utilityPayments {
+            if let cur = latestByType[p.type], cur.date >= p.date { continue }
+            latestByType[p.type] = p
         }
-        return false
+        return Set(latestByType.values.map { $0.id })
     }
 
+    // [v4] 最新一筆繳費：金額字型升級 + contentTransition，對齊 calcRow 規格
     @ViewBuilder
     private func latestPaymentRow(type: UtilityType) -> some View {
         if let p = latestPayment(for: type) {
             Button { editingUtilityPayment = p } label: {
                 HStack(spacing: 8) {
                     Rectangle().fill(Color.clear).frame(width: 20)
-                    Text(fmtDate(p.date)).font(.caption2).foregroundStyle(.tertiary)
-                    if p.photoFileName != nil {
+                    Text(fmtDate(p.date))
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 6).padding(.vertical, 2)
+                        .background(Color(.tertiarySystemFill))
+                        .clipShape(Capsule())
+                    if !p.photoFileNames.isEmpty {
                         Button {
                             if let url = p.photoURL { viewingPhotoURL = url }
                         } label: {
@@ -1790,41 +2047,75 @@ struct RealEstateDetailView: View {
                     }
                     Spacer()
                     Text(fmt(p.amount))
-                        .font(.caption.bold()).foregroundStyle(.red)
+                        .font(.system(size: 14, weight: .bold, design: .rounded))
+                        .foregroundStyle(.red)
+                        .contentTransition(.numericText())
                     Image(systemName: "chevron.right")
                         .font(.caption2).foregroundStyle(.tertiary)
                 }
-                .padding(.horizontal).padding(.vertical, 4)
+                .padding(.horizontal, 12).padding(.vertical, 5)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
         }
     }
 
+    // [v4] 36pt 對應色漸層圖示圓 + 金額字型升級 + contentTransition，對齊 paidItems 規格
     private func paymentRow(_ p: UtilityPayment) -> some View {
-        Button { editingUtilityPayment = p } label: {
-            HStack {
-                Image(systemName: p.type.icon)
-                    .font(.caption).foregroundStyle(utilityColor(p.type)).frame(width: 16)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(p.type.rawValue).font(.caption.weight(.medium)).foregroundStyle(.primary)
-                    Text(fmtDate(p.date)).font(.caption2).foregroundStyle(.tertiary)
+        let color = utilityColor(p.type)
+        return Button { editingUtilityPayment = p } label: {
+            HStack(spacing: 10) {
+                ZStack {
+                    Circle()
+                        .fill(LinearGradient(
+                            colors: [color.opacity(0.18), color.opacity(0.07)],
+                            startPoint: .topLeading, endPoint: .bottomTrailing
+                        ))
+                        .frame(width: 36, height: 36)
+                        .shadow(color: color.opacity(0.16), radius: 4, x: 0, y: 2)
+                        .overlay(Circle().stroke(color.opacity(0.18), lineWidth: 0.8))
+                    Image(systemName: p.type.icon)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(color)
                 }
-                Spacer()
-                if p.photoFileName != nil {
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 5) {
+                        Text(p.type.rawValue)
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(color)
+                            .padding(.horizontal, 7).padding(.vertical, 2.5)
+                            .background(color.opacity(0.10))
+                            .clipShape(Capsule())
+                            .overlay(Capsule().stroke(color.opacity(0.22), lineWidth: 0.6))
+                        Text(fmtDate(p.date))
+                            .font(.caption2).foregroundStyle(.secondary)
+                            .padding(.horizontal, 6).padding(.vertical, 2)
+                            .background(Color(.tertiarySystemFill))
+                            .clipShape(Capsule())
+                    }
+                    Text(fmt(p.amount))
+                        .font(.system(size: 15, weight: .bold, design: .rounded))
+                        .foregroundStyle(.red)
+                        .contentTransition(.numericText())
+                }
+                Spacer(minLength: 4)
+                if !p.photoFileNames.isEmpty {
                     Button {
                         if let url = p.photoURL { viewingPhotoURL = url }
                     } label: {
-                        Image(systemName: "photo.fill").font(.caption).foregroundStyle(.blue)
+                        Image(systemName: "photo.fill")
+                            .font(.caption2)
+                            .foregroundStyle(.blue)
+                            .padding(5)
+                            .background(Color.blue.opacity(0.10))
+                            .clipShape(Circle())
                     }
                     .buttonStyle(.plain)
                 }
-                Text(fmt(p.amount))
-                    .font(.subheadline.bold()).foregroundStyle(.red)
                 Image(systemName: "chevron.right")
                     .font(.caption2).foregroundStyle(.tertiary)
             }
-            .padding(.horizontal).padding(.vertical, 6)
+            .padding(.horizontal, 12).padding(.vertical, 10)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -1838,12 +2129,23 @@ struct RealEstateDetailView: View {
         }
     }
 
+    // 【美化】sectionHeader 加 Capsule 側條，對齊 collapsibleSection 標題規格
     private func sectionHeader(_ title: String) -> some View {
-        HStack {
-            Text(title).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+        HStack(spacing: 10) {
+            Capsule()
+                .fill(
+                    LinearGradient(
+                        colors: [Color.secondary.opacity(0.7), Color.secondary.opacity(0.30)],
+                        startPoint: .top, endPoint: .bottom
+                    )
+                )
+                .frame(width: 3, height: 12)
+            Text(title)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
             Spacer()
         }
-        .padding(.horizontal).padding(.top, 12).padding(.bottom, 4)
+        .padding(.horizontal, 14).padding(.top, 12).padding(.bottom, 4)
     }
 
     /// 可收合區塊：未展開時顯示摘要金額；點 header 切換展開
@@ -1864,6 +2166,7 @@ struct RealEstateDetailView: View {
     }
 
     /// 可收合區塊（含右側自訂按鈕，例：「+」新增鈕、Menu 等）
+    // 【美化】header 加彩色 Capsule 側條 + subheadline.semibold 標題；summary 改為帶細邊框膠囊
     @ViewBuilder
     private func collapsibleSection<Content: View, Trailing: View>(
         title: String,
@@ -1875,28 +2178,44 @@ struct RealEstateDetailView: View {
     ) -> some View {
         HStack(spacing: 8) {
             Button {
-                withAnimation(.easeInOut(duration: 0.2)) {
+                withAnimation(.spring(response: 0.28, dampingFraction: 0.78)) {
                     isExpanded.wrappedValue.toggle()
                 }
             } label: {
-                HStack {
-                    Text(title).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                HStack(spacing: 10) {
+                    // 左側彩色 Capsule 側條（對齊 OverviewView / FinanceOverviewView 分節標題規格）
+                    Capsule()
+                        .fill(
+                            LinearGradient(
+                                colors: [summaryColor, summaryColor.opacity(0.45)],
+                                startPoint: .top, endPoint: .bottom
+                            )
+                        )
+                        .frame(width: 3, height: 16)
+                    Text(title)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.primary)
                     Spacer()
                     if let summary, !isExpanded.wrappedValue {
                         Text(summary)
-                            .font(.subheadline.weight(.semibold))
+                            .font(.caption.weight(.semibold))
                             .foregroundStyle(summaryColor)
+                            .padding(.horizontal, 8).padding(.vertical, 3)
+                            .background(summaryColor.opacity(0.10))
+                            .clipShape(Capsule())
+                            .overlay(Capsule().stroke(summaryColor.opacity(0.22), lineWidth: 0.6))
+                            .lineLimit(1)
                     }
                     Image(systemName: isExpanded.wrappedValue ? "chevron.up" : "chevron.down")
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(summaryColor.opacity(0.60))
                 }
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             trailing()
         }
-        .padding(.horizontal).padding(.top, 12).padding(.bottom, 4)
+        .padding(.horizontal, 14).padding(.top, 12).padding(.bottom, 4)
 
         if isExpanded.wrappedValue {
             content()
@@ -1920,46 +2239,49 @@ struct RealEstateDetailView: View {
     }
 
     private func deleteEstate() {
+        // 收集所有連結支出 ID，先清除照片檔案再一次 removeAll，
+        // 對齊 VehicleDetailView.deleteVehicle 既有修復規格：
+        // ① 避免逐筆 removeAll 各自觸發 @Published didSet → save() + pushAll()
+        // ② 避免這些可透過 AddExpenseView 附加照片的項目（貸款/已支出/變動支出）刪除時孤兒化
+        var linkedIds = Set<UUID>()
         for m in estate.mortgageItems {
-            if let linkedId = m.linkedExpenseId {
-                expenseStore.expenses.removeAll { $0.id == linkedId }
-            }
+            if let linkedId = m.linkedExpenseId { linkedIds.insert(linkedId) }
         }
         for p in estate.paidItems {
-            if let linkedId = p.linkedExpenseId {
-                expenseStore.expenses.removeAll { $0.id == linkedId }
-            }
+            if let linkedId = p.linkedExpenseId { linkedIds.insert(linkedId) }
         }
         for ve in estate.variableExpenses {
-            if let linkedId = ve.linkedExpenseId {
-                expenseStore.expenses.removeAll { $0.id == linkedId }
-            }
+            if let linkedId = ve.linkedExpenseId { linkedIds.insert(linkedId) }
         }
         for ins in estate.insuranceItems {
-            if let linkedId = ins.linkedExpenseId {
-                expenseStore.expenses.removeAll { $0.id == linkedId }
-            }
+            if let linkedId = ins.linkedExpenseId { linkedIds.insert(linkedId) }
         }
         for asset in estate.propertyAssets {
-            if let linkedId = asset.linkedExpenseId {
-                expenseStore.expenses.removeAll { $0.id == linkedId }
-            }
+            if let linkedId = asset.linkedExpenseId { linkedIds.insert(linkedId) }
         }
         for up in estate.utilityPayments {
-            if let linkedId = up.linkedExpenseId {
-                expenseStore.expenses.removeAll { $0.id == linkedId }
-            }
-            if let name = up.photoFileName { UtilityPayment.deletePhoto(name) }
+            if let linkedId = up.linkedExpenseId { linkedIds.insert(linkedId) }
+            for name in up.photoFileNames { UtilityPayment.deletePhoto(name) }
         }
         // 清除裝潢照片檔案（多張）
         for rp in estate.renovationPhotos {
             for name in rp.photoFileNames { RenovationPhoto.deletePhoto(name) }
         }
-        if let linkedId = estate.linkedExpenseId {
-            expenseStore.expenses.removeAll { $0.id == linkedId }
+        // 清除電梯保養照片、附件文件檔案（先前遺漏，會永久留在磁碟上並被反覆重傳 CloudKit）
+        for em in estate.elevatorMaintenances {
+            em.photoFileNames.forEach { ElevatorMaintenance.deletePhoto($0) }
         }
-        if let saleExpId = estate.saleLinkedExpenseId {
-            expenseStore.expenses.removeAll { $0.id == saleExpId }
+        for doc in estate.documents {
+            RealEstateDocument.deleteDocument(doc.fileName)
+        }
+        if let linkedId = estate.linkedExpenseId { linkedIds.insert(linkedId) }
+        if let saleExpId = estate.saleLinkedExpenseId { linkedIds.insert(saleExpId) }
+
+        if !linkedIds.isEmpty {
+            for exp in expenseStore.expenses where linkedIds.contains(exp.id) {
+                for name in exp.photoFileNames { Expense.deletePhoto(name) }
+            }
+            expenseStore.expenses.removeAll { linkedIds.contains($0.id) }
         }
         if let saleIncId = estate.saleLinkedIncomeId {
             expenseStore.incomes.removeAll { $0.id == saleIncId }
@@ -1968,18 +2290,29 @@ struct RealEstateDetailView: View {
     }
 
     private func fmt(_ v: Double) -> String {
-        let f = NumberFormatter()
-        f.numberStyle = .currency; f.currencySymbol = "NT$"; f.maximumFractionDigits = 0
-        return f.string(from: NSNumber(value: v)) ?? "NT$0"
+        v.ntdWanString
     }
 
-    private func fmtWan(_ v: Double) -> String {
-        String(format: "%g", v / 10000)
+    /// v8：從共用 ntdWanString 拆出「數字」與「萬／億」量級單位，供大字估值沿用既有字級／
+    /// 動畫設計；跟進 ntdWanString 既有的萬→億進位邊界，取代僅換算到萬的舊版 fmtWan。
+    private func splitWan(_ v: Double) -> (number: String, unit: String) {
+        var s = v.ntdWanString
+        if s.hasPrefix("NT$") { s.removeFirst(3) }
+        if s.hasSuffix("億") { return (String(s.dropLast()), "億") }
+        if s.hasSuffix("萬") { return (String(s.dropLast()), "萬") }
+        return (s, "")
     }
 
-    private func fmtDate(_ d: Date) -> String {
-        let f = DateFormatter(); f.dateFormat = "yyyy/M/d"; return f.string(from: d)
+    /// v8：「數字 單位」單行組字（無單位時省略空格），供底部資訊列等窄欄位使用。
+    private func splitWanLabel(_ v: Double) -> String {
+        let parts = splitWan(v)
+        return parts.unit.isEmpty ? parts.number : "\(parts.number) \(parts.unit)"
     }
+
+    private static let _dateFmt: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "yyyy/M/d"; return f
+    }()
+    private func fmtDate(_ d: Date) -> String { Self._dateFmt.string(from: d) }
 
     // MARK: - 章節項目：點擊編輯 / 複製 / 刪除
 
@@ -2002,7 +2335,9 @@ struct RealEstateDetailView: View {
             ms.bankDeposits?.removeAll { $0.linkedExpenseId == expense.id }
             lifeStore.update(ms)
         }
-        expenseStore.expenses.removeAll { $0.id == expense.id }
+        // 改用 expenseStore.delete(_:) 而非直接 removeAll，確保照片檔案一併清除，
+        // 避免孤兒照片（對齊 StockDetailView.deleteStock 既有修復規格）
+        expenseStore.delete(expense)
     }
 
     /// 複製一個 Expense（新 id、日期改為今天）並重新觸發房地產 / 銀行同步
@@ -2032,13 +2367,22 @@ struct RealEstateDetailView: View {
             note: source.note,
             currencyCode: source.currencyCode,
             diningMember: source.diningMember,
+            // 複製房地產連動的貸款支出時，若漏了這四個欄位，計算機資料會靜默消失，
+            // 使用者複製一筆有填貸款試算的房貸項目後，開啟複製品會發現貸款總額／年期／
+            // 利率／保費率全部變空白（同型修復見 AddExpenseView.loadInitial 的讀取端）。
+            loanTotalAmount: source.loanTotalAmount,
+            loanYears: source.loanYears,
+            loanRate: source.loanRate,
+            insuranceRate: source.insuranceRate,
             linkedBankMilestoneId: source.linkedBankMilestoneId,
             linkedBankCurrency: source.linkedBankCurrency,
             linkedCreditCardMilestoneId: source.linkedCreditCardMilestoneId,
             placeAddress: source.placeAddress,
             placeLatitude: source.placeLatitude,
-            placeLongitude: source.placeLongitude,
-            photoFileNames: source.photoFileNames
+            placeLongitude: source.placeLongitude
+            // photoFileNames 刻意不沿用：直接複製檔名會讓複製品與原始支出指向磁碟上
+            // 同一批照片檔，之後刪除任一邊都會把檔案實體刪掉、讓另一邊的照片憑空找不到
+            // （同型修復見 VariableExpenseView.duplicateExpense，該處本就不帶這個欄位）。
         )
         expenseStore.expenses.append(copy)
         // 房地產項目層級同步：依原本 source 出現在哪個陣列，clone 一份新項目
@@ -2097,6 +2441,14 @@ struct RealEstateDetailView: View {
         if let expId = m.linkedExpenseId,
            let exp = expenseStore.expenses.first(where: { $0.id == expId }) {
             duplicateLinkedExpense(exp)
+        } else if var re = store.realEstates.first(where: { $0.id == estateId }) {
+            // 舊版資料（monthlyMortgage 遷移）／iCloud 還原出的項目 linkedExpenseId 恆為 nil，
+            // 先前完全沒有 else 分支，滑動複製會靜默無反應；比照 deleteMortgageItem 補上本地複製。
+            re.mortgageItems.append(RealEstateMortgageItem(
+                id: UUID(), title: m.title, amount: m.amount,
+                totalPeriods: m.totalPeriods, startDate: Date()
+            ))
+            store.update(re)
         }
     }
 
@@ -2114,6 +2466,12 @@ struct RealEstateDetailView: View {
         if let expId = p.linkedExpenseId,
            let exp = expenseStore.expenses.first(where: { $0.id == expId }) {
             duplicateLinkedExpense(exp)
+        } else if var re = store.realEstates.first(where: { $0.id == estateId }) {
+            // 同 duplicateMortgageItem：linkedExpenseId 為 nil 的舊資料補上本地複製，避免靜默無反應。
+            re.paidItems.append(RealEstatePaidItem(
+                id: UUID(), title: p.title, amount: p.amount, date: Date()
+            ))
+            store.update(re)
         }
     }
 
@@ -2131,6 +2489,12 @@ struct RealEstateDetailView: View {
         if let expId = v.linkedExpenseId,
            let exp = expenseStore.expenses.first(where: { $0.id == expId }) {
             duplicateLinkedExpense(exp)
+        } else if var re = store.realEstates.first(where: { $0.id == estateId }) {
+            // 同 duplicateMortgageItem：linkedExpenseId 為 nil 的舊資料補上本地複製，避免靜默無反應。
+            re.variableExpenses.append(RealEstateVariableExpense(
+                id: UUID(), category: v.category, name: v.name, amount: v.amount, date: Date()
+            ))
+            store.update(re)
         }
     }
 }
@@ -2260,6 +2624,24 @@ fileprivate struct SwipeableRow<Content: View>: View {
     }
 }
 
+// MARK: - 編輯 sheet 共用 Section header
+// 【美化 v9】ElevatorMaintenanceEditor／UtilityPaymentEditor 共用，4pt 漸層 Capsule 側條
+// + 圖示 + 粗體標題，對齊全 App「表單 Section header 補齊」系列規格
+// （ResumeView.AddMilestoneView／BusinessCardEditor／FamilyMembersResumeView 等既有做法）。
+fileprivate func realEstateEditorSectionHeader(_ title: String, icon: String, color: Color) -> some View {
+    HStack(spacing: 8) {
+        Capsule()
+            .fill(LinearGradient(colors: [color, color.opacity(0.45)], startPoint: .top, endPoint: .bottom))
+            .frame(width: 4, height: 14)
+        Image(systemName: icon)
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(color)
+        Text(title)
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(.primary)
+    }
+}
+
 // MARK: - 電梯保養編輯
 
 struct ElevatorMaintenanceEditor: View {
@@ -2270,34 +2652,33 @@ struct ElevatorMaintenanceEditor: View {
     let editing: ElevatorMaintenance?
 
     @State private var date = Date()
-    @State private var photoFileName: String?
-    @State private var photoItem: PhotosPickerItem?
+    /// [v25.308] 多張照片：共用 MultiPhotoGallery 模組（拍照連拍/相簿多選/燈箱/刪除），
+    /// 取代手刻的單張 PhotosPicker＋CameraPicker
+    @State private var photoFileNames: [String] = []
     @State private var showDeleteConfirm = false
+    // 儲存/刪除已 dismiss + 延後一個 runloop 才寫回 store，快速連點會讓兩次呼叫
+    // 各自讀到同一份舊 estate 快照、後寫回者蓋掉先寫回者；比照 UtilityPaymentEditor
+    // 既有修法補上忙碌守衛。
+    @State private var isSaving = false
 
     var body: some View {
         NavigationStack {
             Form {
-                Section("保養記錄") {
+                Section {
                     DatePicker("保養日期", selection: $date, displayedComponents: .date)
 
-                    PhotosPicker(selection: $photoItem, matching: .images) {
-                        HStack {
-                            Image(systemName: "photo")
-                            Text(photoFileName == nil ? "選擇照片" : "更換照片")
-                            Spacer()
-                            if photoFileName != nil {
-                                Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
-                            }
-                        }
-                    }
-                    if photoFileName != nil {
-                        Button(role: .destructive) {
-                            if let name = photoFileName { ElevatorMaintenance.deletePhoto(name) }
-                            photoFileName = nil
-                        } label: {
-                            Label("移除照片", systemImage: "xmark.circle")
-                        }
-                    }
+                    MultiPhotoGallery(
+                        fileNames: $photoFileNames,
+                        urlFor: { ElevatorMaintenance.photoURL(for: $0) },
+                        onSaveImage: { ElevatorMaintenance.savePhoto($0, id: UUID()) },
+                        onDeleteFile: { ElevatorMaintenance.deletePhoto($0) },
+                        title: "保養照片"
+                    )
+                    .padding(.vertical, 4)
+                } header: {
+                    realEstateEditorSectionHeader("保養記錄", icon: "wrench.and.screwdriver.fill", color: .teal)
+                } footer: {
+                    Text("可拍照連拍或從相簿多選（保養單、銘板、現場照）。")
                 }
 
                 if editing != nil {
@@ -2313,21 +2694,13 @@ struct ElevatorMaintenanceEditor: View {
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button("取消") { dismiss() } }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("儲存") { save() }.bold().foregroundStyle(.green)
+                    Button("儲存") { save() }.bold().foregroundStyle(.green).disabled(isSaving)
                 }
             }
             .onAppear {
                 if let e = editing {
                     date = e.date
-                    photoFileName = e.photoFileName
-                }
-            }
-            .onChange(of: photoItem) { _, item in
-                Task {
-                    if let item, let data = try? await item.loadTransferable(type: Data.self) {
-                        let id = editing?.id ?? UUID()
-                        photoFileName = ElevatorMaintenance.savePhoto(data, id: id)
-                    }
+                    photoFileNames = e.photoFileNames
                 }
             }
             .alert("確定刪除？", isPresented: $showDeleteConfirm) {
@@ -2338,25 +2711,33 @@ struct ElevatorMaintenanceEditor: View {
     }
 
     private func save() {
+        guard !isSaving else { return }
         guard var estate = store.realEstates.first(where: { $0.id == estateId }) else { return }
+        isSaving = true
         let recordId = editing?.id ?? UUID()
-        let record = ElevatorMaintenance(id: recordId, date: date, photoFileName: photoFileName)
+        let record = ElevatorMaintenance(id: recordId, date: date, photoFileNames: photoFileNames)
         if let idx = estate.elevatorMaintenances.firstIndex(where: { $0.id == recordId }) {
             estate.elevatorMaintenances[idx] = record
         } else {
             estate.elevatorMaintenances.append(record)
         }
-        store.update(estate)
+        // 先關閉 sheet，下一個 runloop 才改 @Published store，避免在 sheet 關閉的
+        // view-update 交易裡同步改 observed state（父頁堆多個 sheet）造成真機閃退。
+        let financeStore = store
         dismiss()
+        DispatchQueue.main.async { financeStore.update(estate) }
     }
 
     private func deleteRecord() {
+        guard !isSaving else { return }
         guard var estate = store.realEstates.first(where: { $0.id == estateId }),
               let e = editing else { return }
-        if let name = e.photoFileName { ElevatorMaintenance.deletePhoto(name) }
+        isSaving = true
+        e.photoFileNames.forEach { ElevatorMaintenance.deletePhoto($0) }
         estate.elevatorMaintenances.removeAll { $0.id == e.id }
-        store.update(estate)
+        let financeStore = store
         dismiss()
+        DispatchQueue.main.async { financeStore.update(estate) }
     }
 }
 
@@ -2375,13 +2756,17 @@ struct UtilityPaymentEditor: View {
     @State private var date = Date()
     @State private var amountText = ""
     @State private var note = ""
-    @State private var photoFileName: String?
-    @State private var photoItem: PhotosPickerItem?
+    // 收據照片（多張）：改用 MultiPhotoGallery（可拍照連拍 / 相簿多選 / 燈箱檢視 / 刪除）
+    @State private var photoFileNames: [String] = []
     @State private var showDeleteConfirm = false
     @State private var showError = false
     @State private var selectedBankMilestoneId: UUID?
     @State private var selectedBankCurrency: String = "NT$"
     @State private var selectedCreditCardMilestoneId: UUID?
+    // 防止「儲存」連點：save() 把實際寫回 store 的動作延後到下個 runloop（見 save() 內註解），
+    // 快速連點兩下會在第一次寫入完成前就再次進入 save()，各自建立一筆 Expense、並各自捕捉
+    // 自己的 estate 快照非同步寫回，後寫入者會蓋掉前者剛 append 的 UtilityPayment，留下孤兒 Expense。
+    @State private var isSaving = false
 
     private var bankMilestones: [LifeMilestone] {
         lifeStore.milestones.filter {
@@ -2447,7 +2832,7 @@ struct UtilityPaymentEditor: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("基本資訊") {
+                Section {
                     Picker("類型", selection: $type) {
                         ForEach(UtilityType.allCases) { t in
                             Label(t.rawValue, systemImage: t.icon).tag(t)
@@ -2458,6 +2843,8 @@ struct UtilityPaymentEditor: View {
                         Text("NT$").foregroundStyle(.secondary)
                         TextField("金額", text: $amountText).keyboardType(.decimalPad)
                     }
+                } header: {
+                    realEstateEditorSectionHeader("基本資訊", icon: "list.bullet.rectangle.fill", color: .indigo)
                 }
 
                 if hasPaymentTargets {
@@ -2502,29 +2889,22 @@ struct UtilityPaymentEditor: View {
                     }
                 }
 
-                Section("收據照片") {
-                    PhotosPicker(selection: $photoItem, matching: .images) {
-                        HStack {
-                            Image(systemName: "photo")
-                            Text(photoFileName == nil ? "選擇照片" : "更換照片")
-                            Spacer()
-                            if photoFileName != nil {
-                                Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
-                            }
-                        }
-                    }
-                    if photoFileName != nil {
-                        Button(role: .destructive) {
-                            if let name = photoFileName { UtilityPayment.deletePhoto(name) }
-                            photoFileName = nil
-                        } label: {
-                            Label("移除照片", systemImage: "xmark.circle")
-                        }
-                    }
+                Section {
+                    MultiPhotoGallery(
+                        fileNames: $photoFileNames,
+                        urlFor: { UtilityPayment.photosDirectory.appendingPathComponent($0) },
+                        onSaveImage: { UtilityPayment.savePhoto($0, id: UUID()) },
+                        onDeleteFile: { UtilityPayment.deletePhoto($0) },
+                        title: "收據照片"
+                    )
+                } header: {
+                    realEstateEditorSectionHeader("收據照片", icon: "photo.on.rectangle.angled", color: .teal)
                 }
 
-                Section("備註") {
+                Section {
                     TextField("選填備註", text: $note, axis: .vertical).lineLimit(3)
+                } header: {
+                    realEstateEditorSectionHeader("備註", icon: "note.text", color: .secondary)
                 }
 
                 if editing != nil {
@@ -2544,9 +2924,19 @@ struct UtilityPaymentEditor: View {
             .navigationTitle(editing == nil ? "新增繳費紀錄" : "編輯繳費紀錄")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) { Button("取消") { dismiss() } }
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("取消") {
+                        // 本次 session 新拍/新選的照片已寫入磁碟但未儲存進紀錄，
+                        // 取消時清掉避免孤兒檔案（既有照片不動；同型寫法見 RenovationPhotoEditor.cancel）
+                        let original = Set(editing?.photoFileNames ?? [])
+                        for name in photoFileNames where !original.contains(name) {
+                            UtilityPayment.deletePhoto(name)
+                        }
+                        dismiss()
+                    }
+                }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("儲存") { save() }.bold().foregroundStyle(.green)
+                    Button("儲存") { save() }.bold().foregroundStyle(.green).disabled(isSaving)
                 }
             }
             .onAppear {
@@ -2555,21 +2945,13 @@ struct UtilityPaymentEditor: View {
                     date = e.date
                     amountText = e.amount > 0 ? String(format: "%.0f", e.amount) : ""
                     note = e.note
-                    photoFileName = e.photoFileName
+                    photoFileNames = e.photoFileNames
                     // 載入既有的扣款目標（從連結的 Expense 讀回）
                     if let expId = e.linkedExpenseId,
                        let exp = expenseStore.expenses.first(where: { $0.id == expId }) {
                         selectedBankMilestoneId = exp.linkedBankMilestoneId
                         selectedBankCurrency = exp.linkedBankCurrency ?? "NT$"
                         selectedCreditCardMilestoneId = exp.linkedCreditCardMilestoneId
-                    }
-                }
-            }
-            .onChange(of: photoItem) { _, item in
-                Task {
-                    if let item, let data = try? await item.loadTransferable(type: Data.self) {
-                        let id = editing?.id ?? UUID()
-                        photoFileName = UtilityPayment.savePhoto(data, id: id)
                     }
                 }
             }
@@ -2581,10 +2963,12 @@ struct UtilityPaymentEditor: View {
     }
 
     private func save() {
+        guard !isSaving else { return }
         guard let amount = Double(amountText), amount > 0 else {
             showError = true; return
         }
         guard var estate = store.realEstates.first(where: { $0.id == estateId }) else { return }
+        isSaving = true
         let recordId = editing?.id ?? UUID()
 
         // 取得舊的支出（用於同步銀行扣款時還原舊紀錄）
@@ -2608,7 +2992,15 @@ struct UtilityPaymentEditor: View {
             note: note.trimmingCharacters(in: .whitespaces),
             linkedBankMilestoneId: selectedBankMilestoneId,
             linkedBankCurrency: selectedBankMilestoneId != nil ? selectedBankCurrency : nil,
-            linkedCreditCardMilestoneId: selectedCreditCardMilestoneId
+            linkedCreditCardMilestoneId: selectedCreditCardMilestoneId,
+            // 此編輯器只管理 UtilityPayment 自己的收據照片（photoFileNames 狀態，存於
+            // UtilityPhotos 資料夾），與 Expense 自己在 AddExpenseView 可另外附加的一般
+            // 照片（存於 ExpensePhotos 資料夾）是兩組互不相干的檔案。先前這裡完全沒帶
+            // photoFileNames，Expense 建構子預設為 []，導致每次在本頁編輯繳費金額／日期
+            // 存檔時，expenseStore.update() 直接整筆覆蓋，把使用者曾在 AddExpenseView
+            // 為這筆連結支出另外上傳的照片默默清空（陣列變空、原始檔案永久變孤兒），
+            // 因此需帶回 previousExpense 既有的 photoFileNames 才不會遺失。
+            photoFileNames: previousExpense?.photoFileNames ?? []
         )
         if editing?.linkedExpenseId != nil {
             expenseStore.update(expense)
@@ -2619,7 +3011,8 @@ struct UtilityPaymentEditor: View {
 
         let record = UtilityPayment(
             id: recordId, type: type, date: date, amount: amount,
-            photoFileName: photoFileName,
+            photoFileName: photoFileNames.first,
+            photoFileNames: photoFileNames,
             note: note.trimmingCharacters(in: .whitespaces),
             linkedExpenseId: expenseId
         )
@@ -2628,27 +3021,33 @@ struct UtilityPaymentEditor: View {
         } else {
             estate.utilityPayments.append(record)
         }
-        store.update(estate)
+        // 先關閉 sheet，下一個 runloop 才改 @Published store（避免真機 present/dismiss 交易期間改 observed state 閃退）
+        let financeStore = store
         dismiss()
+        DispatchQueue.main.async { financeStore.update(estate) }
     }
 
     private func deleteRecord() {
+        guard !isSaving else { return }
         guard var estate = store.realEstates.first(where: { $0.id == estateId }),
               let e = editing else { return }
-        if let name = e.photoFileName { UtilityPayment.deletePhoto(name) }
+        isSaving = true
+        for name in e.photoFileNames { UtilityPayment.deletePhoto(name) }
         // 同步移除對應的變動支出與銀行扣款紀錄
-        if let linkedId = e.linkedExpenseId {
-            if let exp = expenseStore.expenses.first(where: { $0.id == linkedId }),
-               let bankId = exp.linkedBankMilestoneId,
+        if let linkedId = e.linkedExpenseId,
+           let exp = expenseStore.expenses.first(where: { $0.id == linkedId }) {
+            if let bankId = exp.linkedBankMilestoneId,
                var ms = lifeStore.milestones.first(where: { $0.id == bankId }) {
                 ms.bankDeposits?.removeAll { $0.linkedExpenseId == linkedId }
                 lifeStore.update(ms)
             }
-            expenseStore.expenses.removeAll { $0.id == linkedId }
+            // 改用 expenseStore.delete(_:) 而非直接 removeAll，確保附加照片一併清除，避免孤兒照片
+            expenseStore.delete(exp)
         }
         estate.utilityPayments.removeAll { $0.id == e.id }
-        store.update(estate)
+        let financeStore = store
         dismiss()
+        DispatchQueue.main.async { financeStore.update(estate) }
     }
 
     /// 同步銀行扣款紀錄（與 AddExpenseView 同邏輯）
@@ -2733,8 +3132,8 @@ fileprivate enum HousePhotoItem: Identifiable {
         case .renovation(let p): return p.photoFileNames
         case .expense(let e): return e.photoFileNames
         case .document: return []
-        case .utility(let u): return u.photoFileName.map { [$0] } ?? []
-        case .elevator(let m): return m.photoFileName.map { [$0] } ?? []
+        case .utility(let u): return u.photoFileNames
+        case .elevator(let m): return m.photoFileNames
         }
     }
 
@@ -2787,6 +3186,8 @@ struct ExpensePhotoStackViewer: View {
     let expense: Expense
     @Environment(\.dismiss) private var dismiss
     @State private var currentIndex: Int = 0
+    // [v7] 底部資訊面板進場動畫旗標，對齊 RenovationStackViewer.infoPanelAppeared 規格。
+    @State private var infoPanelAppeared = false
 
     var body: some View {
         NavigationStack {
@@ -2794,17 +3195,36 @@ struct ExpensePhotoStackViewer: View {
                 Color.black.ignoresSafeArea()
 
                 if expense.photoFileNames.isEmpty {
-                    Text("沒有照片").foregroundStyle(.white.opacity(0.7))
+                    VStack(spacing: 10) {
+                        ZStack {
+                            Circle()
+                                .fill(Color.white.opacity(0.10))
+                                .frame(width: 52, height: 52)
+                            Circle()
+                                .strokeBorder(Color.white.opacity(0.18), lineWidth: 1)
+                                .frame(width: 52, height: 52)
+                            Image(systemName: "photo")
+                                .font(.system(size: 20, weight: .semibold))
+                                .foregroundStyle(.white.opacity(0.55))
+                        }
+                        Text("沒有照片")
+                            .font(.subheadline)
+                            .foregroundStyle(.white.opacity(0.55))
+                    }
                 } else {
                     TabView(selection: $currentIndex) {
                         ForEach(Array(expense.photoFileNames.enumerated()), id: \.offset) { idx, name in
                             let url = Expense.photoURL(for: name)
-                            ZStack {
-                                if let img = UIImage(contentsOfFile: url.path) {
-                                    ZoomableImageView(image: img)
-                                } else {
-                                    ProgressView().tint(.white)
+                            AsyncLocalImage(url: url) { img, _ in
+                                ZStack {
+                                    if let img {
+                                        ZoomableImageView(image: img)
+                                            .transition(.opacity)
+                                    } else {
+                                        ProgressView().tint(.white)
+                                    }
                                 }
+                                .animation(.easeOut(duration: 0.28), value: img != nil)
                             }
                             .tag(idx)
                         }
@@ -2815,6 +3235,11 @@ struct ExpensePhotoStackViewer: View {
 
                 VStack {
                     Spacer()
+                    // 目前這張的照片資訊：檔名 / 解析度 / 檔案大小（與 PhotoLightbox 共用 PhotoInfoBar）
+                    if expense.photoFileNames.indices.contains(currentIndex) {
+                        PhotoInfoBar(url: Expense.photoURL(for: expense.photoFileNames[currentIndex]))
+                            .padding(.bottom, 8)
+                    }
                     panelContent
                 }
             }
@@ -2841,12 +3266,16 @@ struct ExpensePhotoStackViewer: View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
                 Text(displayTitle)
-                    .font(.subheadline.weight(.semibold))
+                    .font(.subheadline.weight(.bold))
                     .foregroundStyle(.white)
                 Spacer()
+                // 頁碼升級為半透明 Capsule 膠囊徽章，對齊 RenovationStackViewer 規格。
                 Text("\(currentIndex + 1) / \(expense.photoFileNames.count)")
-                    .font(.caption2)
-                    .foregroundStyle(.white.opacity(0.7))
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.90))
+                    .padding(.horizontal, 9).padding(.vertical, 3)
+                    .background(.white.opacity(0.20))
+                    .clipShape(Capsule())
             }
             if !expense.title.isEmpty && !trimmedNote.isEmpty {
                 Text(expense.title)
@@ -2854,19 +3283,35 @@ struct ExpensePhotoStackViewer: View {
                     .foregroundStyle(.white.opacity(0.85))
                     .lineLimit(1)
             }
-            Text(fmtDate(expense.date))
-                .font(.caption2)
-                .foregroundStyle(.white.opacity(0.65))
+            // 日期加 calendar 圖示前綴，對齊 RenovationStackViewer 日期 icon+text 語言。
+            HStack(spacing: 4) {
+                Image(systemName: "calendar")
+                    .font(.system(size: 10, weight: .medium))
+                Text(fmtDate(expense.date))
+                    .font(.caption2)
+            }
+            .foregroundStyle(.white.opacity(0.65))
         }
         .padding()
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(.ultraThinMaterial)
         .padding(.bottom, 32)
+        // [v7] 底部資訊面板進場動畫：opacity 0→1 + 上移 20pt，spring(0.55/0.78)，
+        // 對齊 RenovationStackViewer 規格，取代原本一開啟就直接定位的生硬手感。
+        .opacity(infoPanelAppeared ? 1 : 0)
+        .offset(y: infoPanelAppeared ? 0 : 20)
+        .onAppear {
+            withAnimation(.spring(response: 0.55, dampingFraction: 0.78)) {
+                infoPanelAppeared = true
+            }
+        }
+        .onDisappear { infoPanelAppeared = false }
     }
 
-    private func fmtDate(_ date: Date) -> String {
-        let f = DateFormatter(); f.dateFormat = "yyyy/M/d"; return f.string(from: date)
-    }
+    private static let _dateFmt: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "yyyy/M/d"; return f
+    }()
+    private func fmtDate(_ date: Date) -> String { Self._dateFmt.string(from: date) }
 }
 
 // MARK: - 房屋資料集錦：可愛風照片瀏覽器
@@ -2877,6 +3322,7 @@ struct CutePhotoDraft: Identifiable {
         case expense
         case utility(UtilityType)
         case elevator
+        case vehicle(VehiclePhotoCategory)   // 車輛照片紀錄（VehicleDetailView 共用本瀏覽器）
 
         var label: String {
             switch self {
@@ -2884,6 +3330,7 @@ struct CutePhotoDraft: Identifiable {
             case .expense: return "支出照片"
             case .utility(let t): return "\(t.rawValue) 收據"
             case .elevator: return "電梯保養"
+            case .vehicle(let c): return c.rawValue
             }
         }
         var icon: String {
@@ -2892,6 +3339,7 @@ struct CutePhotoDraft: Identifiable {
             case .expense: return "tag.fill"
             case .utility(let t): return t.icon
             case .elevator: return "arrow.up.arrow.down.square.fill"
+            case .vehicle(let c): return c.icon
             }
         }
         var accent: Color {
@@ -2905,6 +3353,7 @@ struct CutePhotoDraft: Identifiable {
                 case .gas:         return Color(red: 0.96, green: 0.55, blue: 0.35)   // 蜜橘
                 }
             case .elevator: return Color(red: 0.45, green: 0.78, blue: 0.70)   // 薄荷綠
+            case .vehicle(let c): return c.color
             }
         }
     }
@@ -2934,6 +3383,14 @@ struct CutePhotoViewer: View {
                 Spacer(minLength: 4)
                 photoArea
                 Spacer(minLength: 4)
+                // 目前這張的照片資訊：檔名 / 解析度 / 檔案大小（與 PhotoLightbox 共用 PhotoInfoBar）。
+                // 本視圖（CutePhotoViewer）才是裝潢／支出／水電／電梯保養四類照片實際會開啟的檢視器；
+                // RenovationStackViewer／ExpensePhotoStackViewer 是同語意但從未被任何呼叫端建立的死碼，
+                // v25.65 當時把 PhotoInfoBar 接到了那兩個死碼元件，本體 CutePhotoViewer 反而漏接。
+                if draft.urls.indices.contains(currentIndex) {
+                    PhotoInfoBar(url: draft.urls[currentIndex])
+                        .padding(.bottom, 4)
+                }
                 if draft.urls.count > 1 {
                     pageDots
                         .padding(.bottom, 4)
@@ -2983,6 +3440,22 @@ struct CutePhotoViewer: View {
 
     private var topBar: some View {
         HStack {
+            // 關閉按鈕：改放左側，對齊全 App「關閉／取消」統一放左側的慣例（見 PhotoLightbox）
+            Button {
+                dismiss()
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundStyle(draft.kind.accent)
+                    .frame(width: 34, height: 34)
+                    .background(Circle().fill(.ultraThinMaterial))
+                    .overlay(Circle().stroke(draft.kind.accent.opacity(0.25), lineWidth: 1))
+                    .shadow(color: .black.opacity(0.08), radius: 4, y: 2)
+            }
+            .buttonStyle(.plain)
+
+            Spacer()
+
             // 來源膠囊
             HStack(spacing: 6) {
                 Image(systemName: draft.kind.icon)
@@ -3001,22 +3474,6 @@ struct CutePhotoViewer: View {
                     ))
             )
             .shadow(color: draft.kind.accent.opacity(0.35), radius: 6, y: 3)
-
-            Spacer()
-
-            // 關閉按鈕
-            Button {
-                dismiss()
-            } label: {
-                Image(systemName: "xmark")
-                    .font(.system(size: 13, weight: .bold))
-                    .foregroundStyle(draft.kind.accent)
-                    .frame(width: 34, height: 34)
-                    .background(Circle().fill(.ultraThinMaterial))
-                    .overlay(Circle().stroke(draft.kind.accent.opacity(0.25), lineWidth: 1))
-                    .shadow(color: .black.opacity(0.08), radius: 4, y: 2)
-            }
-            .buttonStyle(.plain)
         }
         .padding(.horizontal, 18)
         .padding(.top, 14)
@@ -3037,33 +3494,58 @@ struct CutePhotoViewer: View {
     }
 
     private func photoCard(url: URL) -> some View {
-        Group {
-            if let img = UIImage(contentsOfFile: url.path) {
-                ZoomableImageView(image: img)
-                    .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 22, style: .continuous)
-                            .stroke(Color.white, lineWidth: 4)
-                    )
-                    .shadow(color: Color.black.opacity(0.15), radius: 14, y: 6)
-            } else {
-                RoundedRectangle(cornerRadius: 22, style: .continuous)
-                    .fill(.ultraThinMaterial)
-                    .overlay(
-                        VStack(spacing: 10) {
-                            Image(systemName: "photo.fill.on.rectangle.fill")
-                                .font(.system(size: 40))
-                                .foregroundStyle(draft.kind.accent.opacity(0.6))
-                            Text("找不到照片")
-                                .font(.subheadline.weight(.medium))
-                                .foregroundStyle(.secondary)
+        GeometryReader { geo in
+            AsyncLocalImage(url: url) { img, didLoad in
+                Group {
+                    if let img {
+                        ZStack {
+                            // 模糊填底：填滿卡片、補滿留白；裁切在白框內不外溢
+                            Image(uiImage: img)
+                                .resizable()
+                                .scaledToFill()
+                                .frame(width: geo.size.width, height: geo.size.height)
+                                .blur(radius: 18, opaque: true)
+                                .overlay(Color.black.opacity(0.06))
+
+                            // 原圖：完整顯示（橫圖也不會超出，可雙指縮放）
+                            ZoomableImageView(image: img)
+                                .frame(width: geo.size.width, height: geo.size.height)
                         }
-                    )
-                    .overlay(
+                        .frame(width: geo.size.width, height: geo.size.height)
+                        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                                .stroke(Color.white, lineWidth: 4)
+                        )
+                        .shadow(color: Color.black.opacity(0.15), radius: 14, y: 6)
+                    } else {
                         RoundedRectangle(cornerRadius: 22, style: .continuous)
-                            .stroke(Color.white, lineWidth: 4)
-                    )
-                    .shadow(color: Color.black.opacity(0.1), radius: 10, y: 4)
+                            .fill(.ultraThinMaterial)
+                            .overlay(
+                                VStack(spacing: 10) {
+                                    if didLoad {
+                                        Image(systemName: "photo.fill.on.rectangle.fill")
+                                            .font(.system(size: 40))
+                                            .foregroundStyle(draft.kind.accent.opacity(0.6))
+                                        Text("找不到照片")
+                                            .font(.subheadline.weight(.medium))
+                                            .foregroundStyle(.secondary)
+                                    } else {
+                                        // [v12] 補齊主題色，避免載入中→找不到照片切換時顏色從灰轉彩
+                                        ProgressView()
+                                            .tint(draft.kind.accent)
+                                    }
+                                }
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                                    .stroke(Color.white, lineWidth: 4)
+                            )
+                            .shadow(color: Color.black.opacity(0.1), radius: 10, y: 4)
+                            .frame(width: geo.size.width, height: geo.size.height)
+                    }
+                }
+                .frame(width: geo.size.width, height: geo.size.height)
             }
         }
     }
@@ -3152,12 +3634,13 @@ struct CutePhotoViewer: View {
         .padding(.bottom, 18)
     }
 
-    private func fmtDate(_ d: Date) -> String {
+    private static let _dateFmt: DateFormatter = {
         let f = DateFormatter()
         f.dateFormat = "yyyy 年 M 月 d 日"
         f.locale = Locale(identifier: "zh_TW")
-        return f.string(from: d)
-    }
+        return f
+    }()
+    private func fmtDate(_ d: Date) -> String { Self._dateFmt.string(from: d) }
 }
 
 // MARK: - 文件預覽（QuickLook 包裝）
@@ -3208,13 +3691,20 @@ fileprivate struct FloorItemEditor: View {
     @Environment(\.dismiss) private var dismiss
     @State private var name: String = ""
     @FocusState private var focused: Bool
+    /// onSave 最終寫回 store 是延後一個 runloop 的非同步操作（見 commitFloorEstate 註解），
+    /// sheet 收合動畫播完前快速連點「儲存」會讓兩次呼叫都讀到同一份舊 estate 快照各自
+    /// append，較晚落地的一次會覆蓋掉較早一次的結果，其中一筆新增物件會憑空消失；
+    /// 比照既有 isSaving 寫法鎖住按鈕，確保只送出一次。
+    @State private var isSaving = false
 
     var body: some View {
         NavigationStack {
             Form {
-                Section("物件名稱") {
+                Section {
                     TextField("例如：衣櫃 / 第一格", text: $name)
                         .focused($focused)
+                } header: {
+                    realEstateEditorSectionHeader("物件名稱", icon: "shippingbox.fill", color: .brown)
                 }
             }
             .navigationTitle(isEditing ? "重新命名物件" : "新增物件")
@@ -3225,10 +3715,12 @@ fileprivate struct FloorItemEditor: View {
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("儲存") {
+                        guard !isSaving else { return }
+                        isSaving = true
                         onSave(name)
                         dismiss()
                     }
-                    .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
+                    .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty || isSaving)
                 }
             }
             .onAppear {
@@ -3239,5 +3731,69 @@ fileprivate struct FloorItemEditor: View {
             }
         }
         .presentationDetents([.height(220)])
+    }
+}
+
+// MARK: - 縮圖快取（降採樣 + 非同步 + NSCache）
+
+/// 以 ImageIO 降採樣產生小縮圖，避免主執行緒解碼全解析度大圖造成卡頓；結果快取於記憶體。
+final class ThumbnailCache {
+    static let shared = ThumbnailCache()
+    private let cache = NSCache<NSString, UIImage>()
+    private init() { cache.countLimit = 500 }
+
+    func thumbnail(for url: URL, maxPixel: CGFloat) async -> UIImage? {
+        let key = "\(url.path)#\(Int(maxPixel))" as NSString
+        if let cached = cache.object(forKey: key) { return cached }
+        return await withCheckedContinuation { (cont: CheckedContinuation<UIImage?, Never>) in
+            DispatchQueue.global(qos: .userInitiated).async {
+                let img = Self.downsample(url: url, maxPixel: maxPixel)
+                if let img { self.cache.setObject(img, forKey: key) }  // NSCache 為 thread-safe
+                cont.resume(returning: img)
+            }
+        }
+    }
+
+    private static func downsample(url: URL, maxPixel: CGFloat) -> UIImage? {
+        let srcOpts = [kCGImageSourceShouldCache: false] as CFDictionary
+        guard let src = CGImageSourceCreateWithURL(url as CFURL, srcOpts) else { return nil }
+        let opts: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceShouldCacheImmediately: true,
+            kCGImageSourceThumbnailMaxPixelSize: Int(max(1, maxPixel))
+        ]
+        guard let cg = CGImageSourceCreateThumbnailAtIndex(src, 0, opts as CFDictionary) else { return nil }
+        return UIImage(cgImage: cg)
+    }
+}
+
+/// 縮圖檢視：先顯示佔位，背景降採樣載入後淡入；切換 url 會重載。
+struct ThumbnailImageView: View {
+    let url: URL?
+    var maxPixel: CGFloat = 420
+    var placeholderIcon: String? = nil
+    @State private var image: UIImage?
+
+    var body: some View {
+        ZStack {
+            if let image {
+                Image(uiImage: image).resizable().scaledToFill()
+            } else {
+                RoundedRectangle(cornerRadius: 10).fill(Color(.tertiarySystemFill))
+                if let placeholderIcon {
+                    Image(systemName: placeholderIcon)
+                        .font(.title2)
+                        .foregroundStyle(.tertiary)
+                }
+            }
+        }
+        .task(id: url?.path) {
+            // 先清空再讀，讓「url 改變」單純由 .task(id:) 本身的重觸發機制控管，
+            // 避免更換照片後畫面短暫停留在舊縮圖，對齊 AsyncLocalImage 同型修復。
+            image = nil
+            guard let url else { return }
+            image = await ThumbnailCache.shared.thumbnail(for: url, maxPixel: maxPixel)
+        }
     }
 }
