@@ -1,4 +1,5 @@
 import SwiftUI
+import Charts
 
 // MARK: - 收支項目詳情卡片標準模組
 //
@@ -25,6 +26,7 @@ struct FinanceItemCard: View {
 
     @EnvironmentObject var store: ExpenseStore
     @EnvironmentObject var lifeStore: LifeStore
+    @EnvironmentObject var financeStore: FinanceStore
     @Environment(\.dismiss) private var dismiss
 
     @State private var showEdit = false
@@ -176,6 +178,10 @@ struct FinanceItemCard: View {
     private func cardBody(forExport: Bool) -> some View {
         titleBlock
         infoCard
+        // [v25.328] 電動車充電支出：卡片顯示充電資訊與該車的每度電價走勢
+        if let e = expense, isEVCharge(e) {
+            evChargeBlock(e)
+        }
         if forExport {
             if !noteText.isEmpty { staticNoteBlock }
             Text("美好人生・\(Self.displayStampFmt.string(from: Date())) 匯出")
@@ -373,5 +379,110 @@ struct FinanceItemCard: View {
         }
         if !noteText.isEmpty { lines.append(""); lines.append("💬 備註"); lines.append(noteText) }
         shareItem = FinanceCardSharePayload(items: [lines.joined(separator: "\n")])
+    }
+}
+
+// MARK: - 電動車充電資訊區塊（v25.328）
+
+extension FinanceItemCard {
+    /// 這筆是「關聯汽車＋電費」且有填任何充電資料嗎
+    func isEVCharge(_ e: Expense) -> Bool {
+        e.vehicleExpenseCategory == .electricity && e.linkedVehicleId != nil
+            && (e.evKwh != nil || e.evFromPct != nil || e.evToPct != nil || e.evOdometer != nil)
+    }
+
+    /// 充電資訊卡：度數／電量區間／里程錶／每度電價／本次推估容量，
+    /// 下方附「這輛車」的每度電價走勢（本筆以大圓點標示）。畫面與匯出共用。
+    @ViewBuilder
+    func evChargeBlock(_ e: Expense) -> some View {
+        let vehicleName = e.linkedVehicleId.flatMap { vid in
+            financeStore.vehicles.first { $0.id == vid }?.name
+        } ?? ""
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 8) {
+                Capsule()
+                    .fill(LinearGradient(colors: [.green, .green.opacity(0.55)],
+                                         startPoint: .top, endPoint: .bottom))
+                    .frame(width: 4, height: 16)
+                Image(systemName: "bolt.car.fill")
+                    .font(.system(size: 12, weight: .semibold)).foregroundStyle(.green)
+                Text("充電資訊" + (vehicleName.isEmpty ? "" : "・\(vehicleName)"))
+                    .font(.subheadline.weight(.bold))
+                Spacer()
+            }
+            .padding(.horizontal, 14).padding(.top, 12).padding(.bottom, 6)
+
+            VStack(spacing: 0) {
+                if let kwh = e.evKwh {
+                    evField("充電度數", String(format: "%g kWh", kwh))
+                }
+                if let f = e.evFromPct, let t = e.evToPct {
+                    evField("電量", String(format: "%g%% → %g%%（+%g%%）", f, t, t - f))
+                } else if let t = e.evToPct {
+                    evField("充到電量", String(format: "%g%%", t))
+                }
+                if let odo = e.evOdometer {
+                    evField("里程錶", String(format: "%g km", odo))
+                }
+                if let kwh = e.evKwh, kwh > 0 {
+                    evField("每度電價", String(format: "NT$%.2f／kWh", e.amount / kwh))
+                }
+                if let kwh = e.evKwh, let f = e.evFromPct, let t = e.evToPct, t - f >= 15 {
+                    evField("本次推估電池容量", String(format: "%.1f kWh", kwh / (t - f) * 100))
+                }
+            }
+
+            // 這輛車的每度電價走勢（本筆大圓點）
+            let sessions = evSessions(vehicleId: e.linkedVehicleId)
+            if sessions.count >= 2 {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("每度電價走勢（這輛車）")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Chart(sessions) { se in
+                        LineMark(x: .value("日期", se.date),
+                                 y: .value("元/度", se.amount / (se.evKwh ?? 1)))
+                            .foregroundStyle(.teal)
+                            .interpolationMethod(.catmullRom)
+                        PointMark(x: .value("日期", se.date),
+                                  y: .value("元/度", se.amount / (se.evKwh ?? 1)))
+                            .foregroundStyle(se.id == e.id ? Color.red : Color.teal)
+                            .symbolSize(se.id == e.id ? 70 : 22)
+                    }
+                    .chartYScale(domain: .automatic(includesZero: false))
+                    .frame(height: 110)
+                    HStack(spacing: 4) {
+                        Circle().fill(Color.red).frame(width: 7, height: 7)
+                        Text("本筆").font(.caption2).foregroundStyle(.secondary)
+                    }
+                }
+                .padding(.horizontal, 14).padding(.top, 8).padding(.bottom, 12)
+            } else {
+                Spacer().frame(height: 10)
+            }
+        }
+        .background(Color(.secondarySystemGroupedBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+    }
+
+    private func evField(_ label: String, _ value: String) -> some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text(label).font(.subheadline).foregroundStyle(.secondary)
+                Spacer()
+                Text(value).font(.subheadline.weight(.semibold)).foregroundStyle(.green)
+            }
+            .padding(.horizontal, 14).padding(.vertical, 8)
+            Divider().padding(.leading, 14)
+        }
+    }
+
+    /// 這輛車有填度數的充電紀錄（時間升冪）
+    private func evSessions(vehicleId: UUID?) -> [Expense] {
+        guard let vehicleId else { return [] }
+        return store.expenses
+            .filter { $0.linkedVehicleId == vehicleId
+                && $0.vehicleExpenseCategory == .electricity
+                && ($0.evKwh ?? 0) > 0 }
+            .sorted { $0.date < $1.date }
     }
 }
