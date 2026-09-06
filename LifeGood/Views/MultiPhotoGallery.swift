@@ -550,6 +550,8 @@ struct PhotoLightbox: View {
     @State private var lastOffset: CGSize = .zero
     @State private var image: UIImage?
     @State private var imageAppeared = false
+    /// [v25.329] 貼合狀態下的下滑關閉：跟手位移，超過門檻放開即關閉
+    @State private var dismissDrag: CGFloat = 0
 
     var body: some View {
         ZStack {
@@ -576,7 +578,7 @@ struct PhotoLightbox: View {
                         .resizable()
                         .frame(width: fitted.width, height: fitted.height)
                         .scaleEffect(scale)
-                        .offset(offset)
+                        .offset(CGSize(width: offset.width, height: offset.height + dismissDrag))
                         .position(x: geo.size.width / 2, y: geo.size.height / 2)
                         .opacity(imageAppeared ? 1 : 0)
                 }
@@ -596,12 +598,25 @@ struct PhotoLightbox: View {
                         .simultaneously(with:
                             DragGesture()
                                 .onChanged { v in
-                                    guard scale > 1 else { return }   // fit 狀態不平移
-                                    offset = CGSize(width: lastOffset.width + v.translation.width,
-                                                    height: lastOffset.height + v.translation.height)
+                                    if scale > 1 {
+                                        // 放大狀態：平移
+                                        offset = CGSize(width: lastOffset.width + v.translation.width,
+                                                        height: lastOffset.height + v.translation.height)
+                                    } else {
+                                        // [v25.329] 貼合狀態：下滑跟手（照片檢視慣例的關閉手勢）
+                                        dismissDrag = max(0, v.translation.height)
+                                    }
                                 }
-                                .onEnded { _ in
-                                    lastOffset = offset
+                                .onEnded { v in
+                                    if scale > 1 {
+                                        lastOffset = offset
+                                    } else if dismissDrag > 110 {
+                                        dismiss()
+                                    } else {
+                                        withAnimation(.spring(response: 0.32, dampingFraction: 0.85)) {
+                                            dismissDrag = 0
+                                        }
+                                    }
                                 }
                         )
                 )
@@ -628,15 +643,18 @@ struct PhotoLightbox: View {
                     Button {
                         dismiss()
                     } label: {
+                        // [v25.329] 改高對比深色底：名片等大面積白底照片上，
+                        // 原本的半透明淺色材質圓鈕會整顆隱形（使用者回報找不到關閉）
                         Image(systemName: "xmark")
                             .font(.system(size: 14, weight: .bold))
                             .foregroundStyle(.white)
                             .frame(width: 36, height: 36)
                             .background(
                                 Circle()
-                                    .fill(.ultraThinMaterial)
-                                    .shadow(color: .black.opacity(0.30), radius: 6, x: 0, y: 3)
+                                    .fill(Color.black.opacity(0.55))
+                                    .shadow(color: .black.opacity(0.35), radius: 6, x: 0, y: 3)
                             )
+                            .overlay(Circle().stroke(Color.white.opacity(0.35), lineWidth: 1))
                     }
                     .padding()
                     Spacer()
