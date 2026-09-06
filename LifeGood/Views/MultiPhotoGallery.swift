@@ -558,10 +558,18 @@ struct PhotoLightbox: View {
             Color.black.ignoresSafeArea()
             if let img = image {
                 // 背景：同一張照片放大填滿 + 高斯模糊 + 輕微暗化，讓畫面不再死黑
-                Image(uiImage: img)
-                    .resizable()
-                    .scaledToFill()
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                // [v25.330] 真正的根因：scaledToFill 的 Image 會把「填滿後的尺寸」回報給父層
+                // （橫式名片在直式螢幕填滿高度後寬度約 1440pt），frame(maxWidth: .infinity)
+                // 擋不住，整個 ZStack 被撐到比螢幕寬、置中後左右溢出——GeometryReader 因此
+                // 拿到超寬容器，前景「貼合」等於貼合到 1440pt 寬（看起來像放超大只剩中間），
+                // 左上角關閉鈕也被推到螢幕外（使用者猜得沒錯）。改以 Color.clear 佔位、
+                // 圖片放 overlay 再 clipped：Color.clear 只吃父層提案尺寸，不會被圖片撐大。
+                Color.clear
+                    .overlay(
+                        Image(uiImage: img)
+                            .resizable()
+                            .scaledToFill()
+                    )
                     .clipped()
                     .blur(radius: 38, opaque: true)
                     .overlay(Color.black.opacity(0.30))
