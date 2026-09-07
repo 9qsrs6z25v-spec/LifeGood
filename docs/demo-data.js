@@ -139,9 +139,21 @@
 
   const M1 = id(), M2 = id();
   const milestones = [
-    { id: id(), title: '氣體化學執行秘書', date: ymd(2025, 1, 1), category: '職涯', note: '', careerSubCategory: 'sideRole', sideRoleName: '氣體化學執行秘書',
+    { id: id(), title: '氣體化學執行秘書', date: ymd(2025, 1, 1), category: '職涯', note: '', careerSubCategory: 'sideRole', sideRoleName: '氣體化學執行秘書', sideRoleOrg: '台灣氣體化學工業協會', sideRoleIsLead: true, sideRoleScope: '廠內特殊氣體與化學品安全、供應商評鑑、季度統計',
+      sideRoleResolutions: (() => { const R1 = id(), R2 = id(); return [
+        { id: R1, date: ymd(2026, 3, 12), title: '鋼瓶櫃改為雙迴路排氣', content: '因 F1 鋼瓶櫃排氣單迴路在停電時無備援，決議所有毒性氣體鋼瓶櫃改為雙迴路排氣，Q2 前完成。\n預算 120 萬，由廠務設備課執行。', site: 'F1', categories: ['GAS', '安全'], initiator: '吳美玲', serial: 1, references: [] },
+        { id: R2, date: ymd(2026, 6, 20), title: '雙迴路排氣驗收標準', content: '依 #001 決議，驗收標準：\n1. 單迴路失效時 30 秒內切換\n2. 櫃內負壓維持 -50 Pa 以上\n3. 每季測試一次並留紀錄', site: 'F1', categories: ['GAS'], initiator: '林雅婷', serial: 2, references: [R1] },
+        { id: id(), date: d(-12), title: '化學品倉庫溫濕度監控上線', content: '倉庫加裝溫濕度感測並接上中控，超限即通知值班人員；歷史資料保存一年。', site: 'F2', categories: ['CHM'], initiator: '王小明', serial: 3, references: [] },
+      ]; })(),
+      sideRoleMeetings: [{ id: id(), date: ymd(2026, 6, 18, 14, 0), topic: '第二季氣化委員會', attendees: ['吳美玲', '林雅婷', '陳志豪', '大同氣體 陳經理'], decisions: '雙迴路排氣驗收標準定案（見決議 #002）；下季啟動供應商評鑑。', note: '' }, { id: id(), date: d(-9, 10, 0), topic: '供應商評鑑前置會', attendees: ['陳志豪', '林雅婷'], decisions: '評鑑表由陳志豪 9/20 前擬定。', note: '' }],
+      sideRoleKeyDates: [{ id: id(), date: d(9, 9, 0), title: '供應商評鑑現場稽核', remindDaysBefore: 3, note: '大同氣體 竹北廠' }, { id: id(), date: d(25, 14, 0), title: '第三季氣化委員會', remindDaysBefore: 7, note: '' }, { id: id(), date: ymd(2026, 6, 18, 14, 0), title: '第二季氣化委員會', remindDaysBefore: null, note: '' }],
       sideRoleMembers: [{ id: M1, name: '林雅婷', dutyInRole: '分析', contact: '', linkedPersonId: E.id, note: '' }, { id: M2, name: '陳志豪', dutyInRole: '鋼瓶', contact: '', linkedPersonId: C.id, note: '' }],
-      sideRoleTasks: [{ id: id(), content: '季度氣體用量統計', dueDate: d(-5), isCompleted: true, completedAt: d(-6), note: '', assigneeIds: [M1], categories: ['統計'] }, { id: id(), content: '鋼瓶供應商評鑑', dueDate: d(12), isCompleted: false, completedAt: null, note: '', assigneeIds: [M2], categories: [] }, { id: id(), content: '安全教育訓練教材', dueDate: d(-1), isCompleted: true, completedAt: d(-2), note: '', assigneeIds: [M1, M2], categories: [] }] },
+      sideRoleTasks: [{ id: id(), content: '季度氣體用量統計', dueDate: d(-5), isCompleted: true, completedAt: d(-6), note: '', assigneeIds: [M1], categories: ['統計'] }, { id: id(), content: '鋼瓶供應商評鑑', dueDate: d(12), isCompleted: false, completedAt: null, note: '含大同氣體現場稽核', assigneeIds: [M2], extraAssignees: ['吳美玲'], categories: ['評鑑'] }, { id: id(), content: '雙迴路排氣季測試（Q3）', dueDate: d(-3), isCompleted: false, completedAt: null, note: '', assigneeIds: [M1], categories: ['GAS'] }, { id: id(), content: '安全教育訓練教材', dueDate: d(-1), isCompleted: true, completedAt: d(-2), note: '', assigneeIds: [M1, M2], categories: [] }] },
+    { id: id(), title: '尾牙負責人', date: ymd(2025, 10, 1), category: '職涯', note: '2025 年尾牙總召', careerSubCategory: 'sideRole', sideRoleName: '尾牙負責人', sideRoleOrg: '員工福委會', sideRoleIsLead: true, sideRoleEndDate: ymd(2026, 2, 1), sideRoleScope: '場地、節目、預算',
+      sideRoleMembers: [{ id: id(), name: '黃冠宇', dutyInRole: '場控', contact: '', linkedPersonId: G.id, note: '' }],
+      sideRoleTasks: [{ id: id(), content: '場地簽約', dueDate: ymd(2025, 11, 15), isCompleted: true, completedAt: ymd(2025, 11, 10), note: '', assigneeIds: [], categories: ['場地'] }],
+      sideRoleResolutions: [{ id: id(), date: ymd(2025, 11, 5), title: '場地定案：竹北喜來登', content: '兩家比價後選定，預算 85 萬含餐。', site: '', categories: ['場地'], initiator: '我', serial: 1, references: [] }],
+      sideRoleMeetings: [], sideRoleKeyDates: [{ id: id(), date: ymd(2026, 1, 23, 18, 0), title: '尾牙正式日', remindDaysBefore: 7, note: '' }] },
   ];
 
   const cards = [

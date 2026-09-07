@@ -500,7 +500,7 @@ function route() {
   const hash = location.hash || '#/overview';
   const parts = hash.replace(/^#\//, '').split('/');
   const page = parts[0] || 'overview';
-  document.querySelectorAll('.nav a').forEach((a) => a.classList.toggle('active', a.dataset.route === page || (page === 'sub' && a.dataset.route === 'subs') || ((page === 'dept' || page === 'equipment') && a.dataset.route === 'org')));
+  document.querySelectorAll('.nav a').forEach((a) => a.classList.toggle('active', a.dataset.route === page || (page === 'sub' && a.dataset.route === 'subs') || (page === 'siderole' && a.dataset.route === 'sideroles') || ((page === 'dept' || page === 'equipment') && a.dataset.route === 'org')));
   destroyCharts();
   const main = $('#main');
   main.scrollTop = 0; window.scrollTo(0, 0);
@@ -513,6 +513,8 @@ function route() {
     case 'org': renderOrg(main); break;
     case 'dept': renderDept(main, ctx, decodeURIComponent(parts[1] || '')); break;
     case 'equipment': renderEquipment(main, ctx, decodeURIComponent(parts[1] || '')); break;
+    case 'sideroles': renderSideRoles(main); break;
+    case 'siderole': renderSideRole(main, decodeURIComponent(parts[1] || ''), parts[2] || 'tasks'); break;
     default: renderOverview(main, ctx);
   }
 }
@@ -1065,6 +1067,151 @@ function renderEquipment(main, ctx, id) {
       plugins: { legend: { labels: { color: textColor } } },
     },
   }));
+}
+
+// ---- 兼任職務 -------------------------------------------------------------
+const sideRoles = () => Store.milestones.filter((m) => m.careerSubCategory === 'sideRole');
+function roleName(r) { return (r.sideRoleName || r.title || '未命名職務').trim(); }
+function roleActive(r) { return !r.sideRoleEndDate || r.sideRoleEndDate >= startOfDay(new Date()); }
+function roleTasks(r) { return r.sideRoleTasks || []; }
+function roleMembers(r) { return r.sideRoleMembers || []; }
+function roleMeetings(r) { return r.sideRoleMeetings || []; }
+function roleResolutions(r) { return r.sideRoleResolutions || []; }
+function roleKeyDates(r) { return r.sideRoleKeyDates || []; }
+function serialLabel(res) { return res.serial != null ? '#' + String(res.serial).padStart(3, '0') : ''; }
+function memberById(r, mid) { return roleMembers(r).find((m) => m.id === mid); }
+/** 成員 → 連結的部屬（linkedPersonId 可能是部屬、組織人員或名片） */
+function memberSub(m) {
+  if (!m.linkedPersonId) return null;
+  const s = subById(m.linkedPersonId); if (s) return s;
+  const p = Store.orgPeople.find((x) => x.id === m.linkedPersonId || x.linkedBusinessCardId === m.linkedPersonId);
+  return p && p.linkedSubordinateId ? subById(p.linkedSubordinateId) : null;
+}
+function nextKeyDate(r) {
+  const today = startOfDay(new Date());
+  return [...roleKeyDates(r)].filter((k) => k.date >= today).sort((a, b) => a.date - b.date)[0] || null;
+}
+function roleStats(r) {
+  const now = new Date();
+  const tasks = roleTasks(r);
+  const done = tasks.filter((t) => t.isCompleted).length;
+  const overdue = tasks.filter((t) => !t.isCompleted && t.dueDate && t.dueDate < now).length;
+  return { total: tasks.length, done, overdue, members: roleMembers(r).length, meetings: roleMeetings(r).length, resolutions: roleResolutions(r).length, keyDates: roleKeyDates(r).length };
+}
+function renderSideRoles(main) {
+  const roles = sideRoles().sort((a, b) => (roleActive(b) - roleActive(a)) || (b.date - a.date));
+  main.innerHTML = `
+    ${pageHead('兼任職務', `${roles.filter(roleActive).length} 個在任・${roles.length - roles.filter(roleActive).length} 個已卸任`)}
+    <div class="grid cols-2">${roles.map((r) => {
+      const st = roleStats(r); const nk = nextKeyDate(r); const active = roleActive(r);
+      const pct = st.total ? Math.round(st.done / st.total * 100) : 0;
+      return `<div class="card dept-card" onclick="location.hash='#/siderole/${r.id}'" style="${active ? '' : 'opacity:.6'}">
+        <div class="row" style="justify-content:space-between;align-items:flex-start">
+          <div><div class="code">${esc(r.sideRoleOrg || '兼任職務')}</div><div class="dname">${esc(roleName(r))}</div></div>
+          <div class="chips">${r.sideRoleIsLead ? '<span class="chip gold">主責</span>' : '<span class="chip">協辦</span>'}${active ? '<span class="chip green">在任</span>' : '<span class="chip">已卸任</span>'}</div>
+        </div>
+        <div class="dfn">${esc(r.sideRoleScope || r.note || '')}</div>
+        <div class="muted small" style="margin-top:6px">就任 ${fmtDate(r.date).split(' ')[0]}${r.sideRoleEndDate ? '・卸任 ' + fmtDate(r.sideRoleEndDate).split(' ')[0] : ''}${nk ? `・下個重要日期 ${fmtDate(nk.date).split(' ')[0]} ${esc(nk.title)}` : ''}</div>
+        <div class="chips" style="margin-top:10px">
+          <span class="chip ${st.overdue ? 'red' : 'purple'}">待辦 ${st.done}/${st.total}${st.overdue ? '・逾期 ' + st.overdue : ''}</span>
+          <span class="chip indigo">決議 ${st.resolutions}</span>
+          <span class="chip blue">會議 ${st.meetings}</span>
+          <span class="chip teal">成員 ${st.members}</span>
+          <span class="chip orange">重要日期 ${st.keyDates}</span>
+        </div>
+        <div style="margin-top:10px;height:6px;border-radius:3px;background:var(--card2);overflow:hidden"><div style="width:${pct}%;height:100%;background:var(--purple)"></div></div>
+      </div>`;
+    }).join('') || '<div class="empty">還沒有兼任職務。在 App 的職涯里程碑新增「兼任職務」後就會出現在這裡。</div>'}</div>`;
+}
+
+function sideTaskRow(r, t) {
+  const now = new Date();
+  const overdue = !t.isCompleted && t.dueDate && t.dueDate < now;
+  const names = (t.assigneeIds || []).map((mid) => memberById(r, mid)).filter(Boolean).map((m) => { const s = memberSub(m); return s ? `<a href="#/sub/${s.id}">${esc(m.name || s.name)}</a>` : esc(m.name); }).concat((t.extraAssignees || []).map(esc));
+  const links = (t.links || []).map((l) => { const s = subById(l.subordinateId); return s ? `<a class="chip cyan" href="#/sub/${s.id}/${l.kind === 'meetingItem' ? 'meetings' : 'tasks'}">${l.kind === 'meetingItem' ? '議程' : '任務'}・${esc(s.name)}</a>` : ''; }).join('');
+  return `<div class="task-row"><div class="tick">${t.isCompleted ? '✅' : '⬜️'}</div>
+    <div><div class="t-title ${t.isCompleted ? 'done' : ''}">${esc(t.content || '（空白待辦）')}</div>
+      <div class="t-meta">${names.length ? '負責：' + names.join('、') : '未指派'}${t.dueDate ? '・截止 ' + fmtDue(t.dueDate) : ''}${t.isCompleted && t.completedAt ? '・完成 ' + fmtDateTime(t.completedAt) : ''}</div>
+      ${t.note ? `<div class="t-meta">備註：${esc(t.note)}</div>` : ''}
+      ${(t.categories || []).length || links ? `<div class="chips" style="margin-top:4px">${(t.categories || []).map((c) => `<span class="chip purple">${esc(c)}</span>`).join('')}${links}</div>` : ''}
+    </div>
+    <div class="t-right">${overdue ? `<span class="chip red">逾期 ${daysBetween(t.dueDate, now)} 天</span>` : ''}</div></div>`;
+}
+function resolutionCard(r, res, byId, opts = {}) {
+  const refs = (res.references || []).map((id) => byId[id]).filter(Boolean);
+  return `<div class="card" id="res-${res.id}" style="margin-bottom:12px">
+    <div class="row" style="align-items:flex-start;gap:10px">
+      ${serialLabel(res) ? `<span class="chip indigo big">${serialLabel(res)}</span>` : ''}
+      <div style="flex:1;min-width:0"><div style="font-size:16px;font-weight:900">${esc(res.title || '未命名決議')}</div>
+        <div class="muted small">${fmtDate(res.date)}${res.initiator ? '・發起 ' + esc(res.initiator) : ''}${res.site ? '・' + esc(res.site) : ''}</div></div>
+      <div class="chips">${(res.categories || []).map((c) => `<span class="chip purple">${esc(c)}</span>`).join('')}</div>
+    </div>
+    ${refs.length ? `<div class="section-title" style="margin:12px 0 6px">參照前案</div>${refs.map((x) => `<details class="agenda" style="margin:0 0 6px"><summary>${serialLabel(x) ? serialLabel(x) + ' ' : ''}${esc(x.title || '未命名決議')}・${fmtDate(x.date).split(' ')[0]}</summary><div class="sub-items"><div class="t-meta" style="white-space:pre-wrap;padding:6px 0">${esc(x.content || '（無內容）')}</div></div></details>`).join('')}` : ''}
+    <div class="section-title" style="margin:12px 0 6px">決議內容</div>
+    <div style="white-space:pre-wrap;line-height:1.7">${esc(res.content || '（無內容）')}</div>
+    ${opts.backrefs && opts.backrefs.length ? `<div class="muted small" style="margin-top:10px">被後案參照：${opts.backrefs.map((x) => `<a href="#res-${x.id}" style="color:var(--indigo)">${serialLabel(x) || esc(x.title)}</a>`).join('、')}</div>` : ''}
+  </div>`;
+}
+const roleUI = { q: '', cat: 'all' };
+function renderSideRole(main, id, tab) {
+  const r = sideRoles().find((x) => x.id === id);
+  if (!r) { main.innerHTML = pageHead('找不到兼任職務', '<a href="#/sideroles">回兼任職務</a>'); return; }
+  const st = roleStats(r); const nk = nextKeyDate(r); const now = new Date();
+  const tabs = [['tasks', `待辦 ${st.total}`], ['resolutions', `重大決議 ${st.resolutions}`], ['meetings', `會議紀錄 ${st.meetings}`], ['members', `成員 ${st.members}`], ['keydates', `重要日期 ${st.keyDates}`]];
+  let body = '';
+  if (tab === 'tasks') {
+    const open = roleTasks(r).filter((t) => !t.isCompleted).sort((a, b) => (a.dueDate ? +a.dueDate : 8e15) - (b.dueDate ? +b.dueDate : 8e15));
+    const done = roleTasks(r).filter((t) => t.isCompleted).sort((a, b) => (b.completedAt || 0) - (a.completedAt || 0));
+    body = `<div class="grid cols-2"><div class="card"><h3>進行中 <span class="count">${open.length}</span></h3>${open.map((t) => sideTaskRow(r, t)).join('') || '<div class="empty">沒有進行中的待辦</div>'}</div>
+      <div class="card"><h3>已完成 <span class="count">${done.length}</span></h3>${done.map((t) => sideTaskRow(r, t)).join('') || '<div class="empty">尚無完成的待辦</div>'}</div></div>`;
+  } else if (tab === 'resolutions') {
+    const all = [...roleResolutions(r)].sort((a, b) => ((b.serial ?? -1) - (a.serial ?? -1)) || (b.date - a.date));
+    const byId = Object.fromEntries(all.map((x) => [x.id, x]));
+    const backrefs = {}; for (const x of all) for (const ref of x.references || []) (backrefs[ref] = backrefs[ref] || []).push(x);
+    const cats = [...new Set(all.flatMap((x) => x.categories || []))].sort();
+    const q = roleUI.q.trim().toLowerCase();
+    const list = all.filter((x) => (roleUI.cat === 'all' || (x.categories || []).includes(roleUI.cat)) && (!q || (x.title + x.content + x.initiator + x.site + serialLabel(x)).toLowerCase().includes(q)));
+    body = `<div class="filters"><input type="search" id="res-q" placeholder="搜尋流水號／標題／內容／發起人" value="${esc(roleUI.q)}">
+        <span class="fchip ${roleUI.cat === 'all' ? 'on' : ''}" data-cat="all">全部</span>${cats.map((c) => `<span class="fchip ${roleUI.cat === c ? 'on' : ''}" data-cat="${esc(c)}">${esc(c)}</span>`).join('')}
+        <span class="muted small">${list.length}/${all.length} 則</span></div>
+      ${list.map((x) => resolutionCard(r, x, byId, { backrefs: backrefs[x.id] })).join('') || '<div class="empty">沒有符合的決議</div>'}`;
+  } else if (tab === 'meetings') {
+    const ms = [...roleMeetings(r)].sort((a, b) => b.date - a.date);
+    body = `<div class="card"><h3>會議紀錄 <span class="count">${ms.length}</span></h3>${ms.map((m) => `<div class="task-row"><div class="tick">🗒️</div><div>
+      <div class="t-title">${esc(m.topic || '未命名會議')}</div><div class="t-meta">${fmtDateTime(m.date)}${(m.attendees || []).length ? '・出席：' + esc(m.attendees.join('、')) : ''}</div>
+      ${m.decisions ? `<div class="t-meta" style="margin-top:4px;white-space:pre-wrap"><b>決議事項</b>　${esc(m.decisions)}</div>` : ''}${m.note ? `<div class="t-meta" style="white-space:pre-wrap">備註：${esc(m.note)}</div>` : ''}</div><div></div></div>`).join('') || '<div class="empty">尚無會議紀錄</div>'}</div>`;
+  } else if (tab === 'members') {
+    body = `<div class="people-grid">${roleMembers(r).map((m) => { const s = memberSub(m); const mine = roleTasks(r).filter((t) => (t.assigneeIds || []).includes(m.id)); const done = mine.filter((t) => t.isCompleted).length;
+      return `<div class="person ${s ? 'clickable' : ''}" ${s ? `onclick="location.hash='#/sub/${s.id}'"` : ''}><div class="avatar sm" style="${s ? '' : 'background:linear-gradient(135deg,#8e8e93,#636366)'}">${esc(initial(m.name))}</div>
+        <div style="min-width:0"><div class="pn">${esc(m.name || '未命名')}${s ? ' <span class="chip green">部屬</span>' : ''}</div><div class="pt">${esc(m.dutyInRole || '—')}${m.contact ? '・' + esc(m.contact) : ''}・待辦 ${done}/${mine.length}</div>${m.note ? `<div class="pt">${esc(m.note)}</div>` : ''}</div></div>`; }).join('') || '<div class="empty">尚無成員</div>'}</div>`;
+  } else if (tab === 'keydates') {
+    const today = startOfDay(now);
+    const ks = [...roleKeyDates(r)].sort((a, b) => a.date - b.date);
+    const up = ks.filter((k) => k.date >= today), past = ks.filter((k) => k.date < today).reverse();
+    const row = (k) => `<div class="task-row"><div class="tick">📌</div><div><div class="t-title">${esc(k.title || '未命名')}</div><div class="t-meta">${fmtDateTime(k.date)}${k.remindDaysBefore != null ? `・提前 ${k.remindDaysBefore} 天提醒` : ''}${k.note ? '・' + esc(k.note) : ''}</div></div><div class="t-right">${k.date >= today ? `<span class="chip ${daysBetween(today, k.date) <= 7 ? 'orange' : ''}">${daysBetween(today, k.date) === 0 ? '今天' : daysBetween(today, k.date) + ' 天後'}</span>` : ''}</div></div>`;
+    body = `<div class="grid cols-2"><div class="card"><h3>即將到來 <span class="count">${up.length}</span></h3>${up.map(row).join('') || '<div class="empty">沒有未來的重要日期</div>'}</div><div class="card"><h3>已過 <span class="count">${past.length}</span></h3>${past.map(row).join('') || '<div class="empty">—</div>'}</div></div>`;
+  }
+  const pct = st.total ? Math.round(st.done / st.total * 100) : 0;
+  main.innerHTML = `
+    <div class="crumb"><a href="#/sideroles">兼任職務</a> › ${esc(roleName(r))}</div>
+    <div class="card hero" style="background:linear-gradient(135deg, rgba(175,82,222,0.16), rgba(88,86,214,0.10))">
+      <div class="avatar" style="background:linear-gradient(135deg,#af52de,#5856d6)">🧩</div>
+      <div style="flex:1;min-width:0"><div class="name">${esc(roleName(r))} ${r.sideRoleIsLead ? '<span class="chip gold big">主責</span>' : '<span class="chip big">協辦</span>'} ${roleActive(r) ? '<span class="chip green big">在任</span>' : '<span class="chip big">已卸任</span>'}</div>
+        <div class="facts">${r.sideRoleOrg ? `<span>🏛️ ${esc(r.sideRoleOrg)}</span>` : ''}<span>📆 就任 ${fmtDate(r.date).split(' ')[0]}${r.sideRoleEndDate ? '・卸任 ' + fmtDate(r.sideRoleEndDate).split(' ')[0] : ''}</span>${nk ? `<span>📌 ${fmtDate(nk.date).split(' ')[0]} ${esc(nk.title)}</span>` : ''}</div>
+        ${r.sideRoleScope ? `<div class="muted small" style="margin-top:6px">負責範圍：${esc(r.sideRoleScope)}</div>` : ''}${r.note ? `<div class="muted small">${esc(r.note)}</div>` : ''}</div>
+    </div>
+    <div class="grid cols-5 mt">
+      <div class="card kpi"><div class="label">待辦完成率</div><div class="value ${pct >= 80 ? 'green' : ''}">${pct}%</div><div class="foot">${st.done}/${st.total}</div></div>
+      <div class="card kpi"><div class="label">逾期待辦</div><div class="value ${st.overdue ? 'red' : 'green'}">${st.overdue}</div></div>
+      <div class="card kpi"><div class="label">重大決議</div><div class="value">${st.resolutions}</div><div class="foot">最新 ${roleResolutions(r).length ? serialLabel([...roleResolutions(r)].sort((a, b) => (b.serial ?? -1) - (a.serial ?? -1))[0]) || '—' : '—'}</div></div>
+      <div class="card kpi"><div class="label">會議紀錄</div><div class="value">${st.meetings}</div></div>
+      <div class="card kpi"><div class="label">成員</div><div class="value">${st.members}</div><div class="foot">部屬 ${roleMembers(r).filter(memberSub).length} 人</div></div>
+    </div>
+    <div class="tabs">${tabs.map(([k, l]) => `<button class="${k === tab ? 'on' : ''}" data-tab="${k}">${l}</button>`).join('')}</div>
+    ${body}`;
+  main.querySelectorAll('.tabs button').forEach((btn) => btn.onclick = () => { location.hash = `#/siderole/${r.id}/${btn.dataset.tab}`; });
+  const q = $('#res-q'); if (q) q.oninput = (e) => { roleUI.q = e.target.value; const pos = e.target.selectionStart; renderSideRole(main, id, tab); const inp = $('#res-q'); inp.focus(); inp.setSelectionRange(pos, pos); };
+  main.querySelectorAll('.fchip[data-cat]').forEach((c) => c.onclick = () => { roleUI.cat = c.dataset.cat; renderSideRole(main, id, tab); });
 }
 
 // ---------------------------------------------------------------------------
