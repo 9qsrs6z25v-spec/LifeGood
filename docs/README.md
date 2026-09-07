@@ -49,13 +49,14 @@ Token 只會存在你自己瀏覽器的 localStorage，不會寫進程式碼、�
 | 統計圖表 | 請假時數、任務完成數、報告完成數、加分、扣分、逾期、主動性、潛力、總分；可切年度，團隊平均依數值排進序列 |
 | 公司組織 | 部門卡片（主管、成員、設備數）、點進部門看上下游、成員、部屬評分與設備清單 |
 | 兼任職務 | 列表卡片（主責／協辦、在任狀態、待辦進度、下個重要日期）；工作區五分頁：待辦、重大決議（流水號、參照前案展開、搜尋與分類篩選）、會議紀錄、成員、重要日期 |
+| 財務總覽 | 淨資產概算與五個 KPI；總覽（近 12 個月收支、支出分類、銀行餘額、信用卡本月消費）、帳戶、股票（持有／已賣出、損益、美股匯率換算）、保險・房產・車輛 |
 | 設備詳細 | 從部門設備表或部屬執掌設備點入：負責人／上次 PM／保養中狀態、PM 與警報 KPI、近 12 個月警報與 PM 對照圖、警報內容統計、PM／警報時間軸（警報可展開處理措施與回復結果） |
 
 ## 資料與評分
 
 - 讀取的記錄：`kv_life_subordinates`、`kv_life_departments`、`kv_life_org_people`、
   `kv_life_grade_titles`、`kv_life_equipment_pool`、`kv_life_milestones`（兼任職務待辦）、
-  `kv_life_business_cards`（@ 標註比對用的名字）、`kv_life_personal_events`（個人事件）。全部在私有資料庫的 `LifeGoodZone`。
+  `kv_life_business_cards`（@ 標註比對用的名字）、`kv_life_personal_events`（個人事件）、`kv_lifegood_expenses`／`incomes`／`currency_rates`／`insurances`／`stocks`／`vehicles`／`realestates`（理財）。全部在私有資料庫的 `LifeGoodZone`。
 - 評分規則（潛力／主動性／逾期定案制／兼任待辦／被標註／會議掛名基本分與議程項目依指派計分）與 App 相同，
   但權重使用 App 出廠預設值：App 進階設定裡調整過的權重存在手機本機，不會同步到 iCloud，網頁讀不到。
 - 統計圖表的年度歸類：任務／報告依完成時間、請假與紀錄依日期、逾期依截止日。

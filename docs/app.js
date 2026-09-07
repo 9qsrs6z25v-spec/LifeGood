@@ -24,11 +24,20 @@ const KV_KEYS = {
   milestones: 'life_milestones',
   cards: 'life_business_cards',
   personalEvents: 'life_personal_events',
+  // 理財（ExpenseStore／FinanceStore，同樣是 JSON blob）
+  expenses: 'lifegood_expenses',
+  incomes: 'lifegood_incomes',
+  currencyRates: 'lifegood_currency_rates',
+  insurances: 'lifegood_insurances',
+  stocks: 'lifegood_stocks',
+  vehicles: 'lifegood_vehicles',
+  realEstates: 'lifegood_realestates',
 };
 // JSONEncoder 預設把 Date 編成「距 2001-01-01 的秒數」；這些欄位名一律還原成 Date
 const DATE_KEYS = new Set([
   'date', 'dueDate', 'completedAt', 'endDate', 'joinDate', 'birthday', 'scheduledDate',
   'movedTo', 'createdAt', 'dateAdded', 'leftDate', 'sideRoleEndDate', 'updatedAt', 'recurrenceEndDate',
+  'purchaseDate', 'soldDate', 'startDate', 'maturityDate', 'expiryDate', 'bldgCompletionDate',
 ]);
 
 // App 出廠權重（TalentMatrixView.ScoreWeights）
@@ -46,6 +55,7 @@ const REC_COLOR = { '優點': 'green', '缺點': 'red', '成就': 'orange', '改
 // ---------------------------------------------------------------------------
 const Store = {
   subs: [], depts: [], orgPeople: [], grades: [], equipment: [], milestones: [], cards: [], personalEvents: [],
+  expenses: [], incomes: [], currencyRates: [], insurances: [], stocks: [], vehicles: [], realEstates: [],
   source: '', loadedAt: null, ctx: null,
 };
 let ckContainer = null;
@@ -516,6 +526,7 @@ function route() {
     case 'equipment': renderEquipment(main, ctx, decodeURIComponent(parts[1] || '')); break;
     case 'sideroles': renderSideRoles(main); break;
     case 'calendar': renderCalendar(main, parts[1] || ''); break;
+    case 'finance': renderFinance(main, parts[1] || 'overview'); break;
     case 'siderole': renderSideRole(main, decodeURIComponent(parts[1] || ''), parts[2] || 'tasks'); break;
     default: renderOverview(main, ctx);
   }
@@ -1327,6 +1338,166 @@ function renderCalendar(main, param) {
     </div>`;
   main.querySelectorAll('.cal-cell').forEach((c) => c.onclick = (e) => { if (e.target.closest('a[href]')) return; location.hash = `#/calendar/${c.dataset.day}`; });
   main.querySelectorAll('.fchip[data-kind]').forEach((c) => c.onclick = () => { const k = c.dataset.kind; if (calUI.hidden.has(k)) calUI.hidden.delete(k); else calUI.hidden.add(k); renderCalendar(main, param); });
+}
+
+// ---- 財務總覽 -------------------------------------------------------------
+// 計算規則移植自 LifeFinanceView：銀行餘額＝手動存提款（排除已由固定支出／週期收入／信用卡
+// 展開取代的連結筆）＋固定支出週期展開扣款＋週期收入展開＋連結信用卡消費扣款；
+// 外幣依 currencyRates 換算台幣；美股依「美金」匯率（沒有就 31）。
+const financeMilestones = () => Store.milestones.filter((m) => m.financeSubCategory);
+function rateOf(code) { if (!code || code === 'NT$') return 1; const r = (Store.currencyRates || []).find((x) => x.code === code); return r && r.rate > 0 ? r.rate : 1; }
+function usdRate() { const r = (Store.currencyRates || []).find((x) => x.code === '美金' || x.code === 'USD'); return r && r.rate > 0 ? r.rate : 31; }
+function fmtMoney(v, symbol = 'NT$') {
+  const a = Math.abs(v), sign = v < 0 ? '-' : '';
+  const trim = (x) => (Number.isInteger(Math.round(x * 10) / 10) ? String(Math.round(x)) : (Math.round(x * 10) / 10).toFixed(1));
+  if (a >= 1e8) return `${sign}${symbol} ${trim(a / 1e8)} 億`;
+  if (a >= 1e4) return `${sign}${symbol} ${trim(a / 1e4)} 萬`;
+  return `${sign}${symbol} ${Math.round(a).toLocaleString('zh-Hant-TW')}`;
+}
+function fmtFull(v) { return (v < 0 ? '-' : '') + 'NT$ ' + Math.round(Math.abs(v)).toLocaleString('zh-Hant-TW'); }
+function addMonths(d, n) { const x = new Date(d); const day = x.getDate(); x.setDate(1); x.setMonth(x.getMonth() + n); const last = new Date(x.getFullYear(), x.getMonth() + 1, 0).getDate(); x.setDate(Math.min(day, last)); return x; }
+function nextRecurrence(d, rec) { return rec === '每季' ? addMonths(d, 3) : rec === '每年' ? addMonths(d, 12) : addMonths(d, 1); }
+/** 固定支出展開成逐期扣款（貸款從下一期起算，與 App 相同） */
+function expandFixed(exp, until) {
+  const out = []; if (!exp.recurrence) return out;
+  let cur = exp.fixedCategory === '貸款' ? nextRecurrence(exp.date, exp.recurrence) : new Date(exp.date);
+  let i = 0; while (cur <= until && i < 1200) { out.push({ date: cur, amount: exp.amount, currency: exp.linkedBankCurrency || exp.currencyCode || 'NT$', expense: exp }); cur = nextRecurrence(cur, exp.recurrence); i++; }
+  return out;
+}
+function incomeActive(inc, d) { if (!inc.endDate) return true; return new Date(d.getFullYear(), d.getMonth(), 1) <= new Date(inc.endDate.getFullYear(), inc.endDate.getMonth(), 1); }
+function expandIncome(inc, until) {
+  if (!inc.period || inc.period === '單次') return inc.date <= until ? [{ date: inc.date, amount: inc.amount, currency: inc.linkedBankCurrency || 'NT$', income: inc }] : [];
+  const out = []; let cur = new Date(inc.date); let i = 0;
+  while (cur <= until && i < 1200) { if (!incomeActive(inc, cur)) break; out.push({ date: cur, amount: inc.amount, currency: inc.linkedBankCurrency || 'NT$', income: inc }); cur = inc.period === '每年' ? addMonths(cur, 12) : addMonths(cur, 1); i++; }
+  return out;
+}
+function creditCardEntries(cardId, until) {
+  const out = [];
+  for (const e of Store.expenses) {
+    if (e.linkedCreditCardMilestoneId !== cardId) continue;
+    if (e.expenseType === '固定支出' && e.recurrence) { for (const x of expandFixed(e, until)) out.push({ date: x.date, amount: e.amount, expense: e }); }
+    else if (e.date <= until) out.push({ date: e.date, amount: e.amount, expense: e });
+  }
+  return out;
+}
+function bankBalances(ms) {
+  const now = new Date(); const totals = {};
+  const expById = Object.fromEntries(Store.expenses.map((e) => [e.id, e])); const incById = Object.fromEntries(Store.incomes.map((i) => [i.id, i]));
+  for (const dep of ms.bankDeposits || []) {
+    if (!(dep.date <= now)) continue;
+    const exp = dep.linkedExpenseId && expById[dep.linkedExpenseId]; const inc = dep.linkedExpenseId && incById[dep.linkedExpenseId];
+    if (exp && exp.linkedCreditCardMilestoneId) continue;
+    if (exp && exp.expenseType === '固定支出' && exp.recurrence) continue;
+    if (inc && inc.period && inc.period !== '單次') continue;
+    totals[dep.currencyCode || 'NT$'] = (totals[dep.currencyCode || 'NT$'] || 0) + (dep.isWithdrawal ? -dep.amount : dep.amount);
+  }
+  for (const e of Store.expenses) if (e.expenseType === '固定支出' && e.recurrence && e.linkedBankMilestoneId === ms.id && !e.linkedCreditCardMilestoneId) for (const x of expandFixed(e, now)) totals[x.currency] = (totals[x.currency] || 0) - x.amount;
+  for (const inc of Store.incomes) if (inc.period && inc.period !== '單次' && inc.linkedBankMilestoneId === ms.id) for (const x of expandIncome(inc, now)) totals[x.currency] = (totals[x.currency] || 0) + x.amount;
+  for (const card of financeMilestones().filter((c) => c.financeSubCategory === '信用卡' && c.linkedBankMilestoneId === ms.id)) for (const en of creditCardEntries(card.id, now)) totals['NT$'] = (totals['NT$'] || 0) - en.amount;
+  const nz = Object.fromEntries(Object.entries(totals).filter(([, v]) => v !== 0));
+  return Object.keys(nz).length ? nz : totals;
+}
+function balanceTWD(bal) { return Object.entries(bal).reduce((a, [code, v]) => a + v * rateOf(code), 0); }
+function monthKeyOf(d) { return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}`; }
+/** 近 N 個月的收入／支出（台幣等值）；支出＝變動支出＋固定支出展開，收入＝單次＋週期展開 */
+function cashflowByMonth(n) {
+  const now = new Date(); const months = []; for (let i = n - 1; i >= 0; i--) months.push(new Date(now.getFullYear(), now.getMonth() - i, 1));
+  const from = months[0]; const until = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
+  const exp = {}, inc = {}, byCat = {};
+  const addE = (d, amt, cur, cat) => { if (d < from || d > until) return; const k = monthKeyOf(d); const v = amt * rateOf(cur); exp[k] = (exp[k] || 0) + v; byCat[cat || '其他'] = (byCat[cat || '其他'] || 0) + v; };
+  for (const e of Store.expenses) {
+    if (e.expenseType === '固定支出' && e.recurrence) { for (const x of expandFixed(e, until)) addE(x.date, e.amount, e.currencyCode, '固定・' + (e.fixedCategory || '其他')); }
+    else addE(e.date, e.amount, e.currencyCode, e.variableCategory || e.fixedCategory || '其他');
+  }
+  for (const i of Store.incomes) for (const x of expandIncome(i, until)) { if (x.date < from) continue; const k = monthKeyOf(x.date); inc[k] = (inc[k] || 0) + x.amount * rateOf(x.currency); }
+  return { months, exp, inc, byCat };
+}
+function stockView(st) {
+  const f = st.isUSStock !== undefined ? (st.isUSStock ? usdRate() : 1) : (/^[A-Za-z]/.test(st.symbol || '') ? usdRate() : 1);
+  const cost = st.shares * st.purchasePrice * f; const mv = st.shares * (st.isSold ? st.soldPrice : st.currentPrice) * f;
+  return { cost, mv, pl: mv - cost, rate: cost > 0 ? (mv - cost) / cost * 100 : 0, isUS: f !== 1 };
+}
+function mortgageRemaining(re) {
+  const now = new Date(); let total = 0;
+  for (const m of re.mortgageItems || []) { const elapsed = Math.max(0, (now.getFullYear() - m.startDate.getFullYear()) * 12 + (now.getMonth() - m.startDate.getMonth())); total += Math.max(0, (m.totalPeriods - elapsed)) * m.amount; }
+  return total;
+}
+function renderFinance(main, tab) {
+  const now = new Date();
+  const fm = financeMilestones();
+  const banks = fm.filter((m) => m.financeSubCategory === '銀行' && !m.isDisabled);
+  const cardsMs = fm.filter((m) => m.financeSubCategory === '信用卡');
+  const bankRows = banks.map((m) => { const bal = bankBalances(m); return { m, bal, twd: balanceTWD(bal) }; }).sort((a, b) => b.twd - a.twd);
+  const bankTotal = bankRows.reduce((a, r) => a + r.twd, 0);
+  const activeStocks = Store.stocks.filter((s) => !s.isSold && s.shares > 0).map((s) => Object.assign({ s }, stockView(s)));
+  const stockMV = activeStocks.reduce((a, x) => a + x.mv, 0), stockCost = activeStocks.reduce((a, x) => a + x.cost, 0);
+  const insTotal = Store.insurances.reduce((a, i) => a + (i.currentValue || 0) * rateOf(i.currencyCode), 0);
+  const reHeld = Store.realEstates.filter((r) => !r.soldDate); const reValue = reHeld.reduce((a, r) => a + (r.currentValue || 0), 0); const reDebt = reHeld.reduce((a, r) => a + mortgageRemaining(r), 0);
+  const vhHeld = Store.vehicles.filter((v) => !v.soldDate); const vhValue = vhHeld.reduce((a, v) => a + (v.currentValue || 0), 0);
+  const netWorth = bankTotal + stockMV + insTotal + reValue + vhValue - reDebt;
+  const cf = cashflowByMonth(12);
+  const thisKey = monthKeyOf(now);
+  const cardMonth = (c) => creditCardEntries(c.id, now).filter((e) => monthKeyOf(e.date) === thisKey).reduce((a, e) => a + e.amount, 0);
+  const cardTotalMonth = cardsMs.filter((c) => !c.isDisabled).reduce((a, c) => a + cardMonth(c), 0);
+  const kpi = (label, value, cls = '', foot = '') => `<div class="card kpi"><div class="label">${label}</div><div class="value ${cls}" style="font-size:22px">${value}</div>${foot ? `<div class="foot">${foot}</div>` : ''}</div>`;
+  const tabs = [['overview', '總覽'], ['accounts', `帳戶 ${fm.length}`], ['stocks', `股票 ${activeStocks.length}`], ['assets', `保險・房產・車輛 ${Store.insurances.length + reHeld.length + vhHeld.length}`]];
+  let body = '';
+  if (tab === 'overview') {
+    const cats = Object.entries(cf.byCat).sort((a, b) => b[1] - a[1]).slice(0, 12);
+    body = `<div class="grid cols-2">
+      <div class="card chart-card"><h3>近 12 個月收支（台幣等值）</h3><div class="chart-box" style="height:280px"><canvas id="fin-cash"></canvas></div><div class="legend-note">支出＝變動支出＋固定支出逐期展開；收入＝單次＋薪資等週期展開。外幣依匯率表換算。</div></div>
+      <div class="card chart-card"><h3>近 12 個月支出分類</h3><div class="chart-box" style="height:280px"><canvas id="fin-cat"></canvas></div></div>
+    </div>
+    <div class="grid cols-2 mt">
+      <div class="card"><h3>銀行帳戶 <span class="count">${bankRows.length}</span></h3><div class="list">${bankRows.map(({ m, bal, twd }) => `<a class="item clickable" href="#/finance/accounts"><div class="avatar sm" style="background:linear-gradient(135deg,#007aff,#5ac8fa)">${esc(initial(m.bankName || m.title))}</div><div class="main-text"><div class="title">${esc(m.title)}</div><div class="meta">${esc([m.bankName, m.branchName, m.bankAccountType].filter(Boolean).join('・'))}${Object.keys(bal).length > 1 ? '・' + Object.entries(bal).map(([c, v]) => `${c} ${Math.round(v).toLocaleString()}`).join('／') : ''}</div></div><span class="score ${twd >= 0 ? 's80' : 's0'}">${fmtMoney(twd)}</span></a>`).join('') || '<div class="empty">尚無銀行帳戶</div>'}</div></div>
+      <div class="card"><h3>信用卡本月消費 <span class="count">${cardsMs.length}</span></h3><div class="list">${cardsMs.map((c) => { const used = cardMonth(c); const bank = c.linkedBankMilestoneId && Store.milestones.find((x) => x.id === c.linkedBankMilestoneId); return `<div class="item" style="${c.isDisabled ? 'opacity:.5' : ''}"><div class="avatar sm" style="background:linear-gradient(135deg,#ff9500,#ffcc00)">💳</div><div class="main-text"><div class="title">${esc(c.title)}${c.isDisabled ? ' <span class="chip">停用</span>' : ''}</div><div class="meta">${esc([c.cardName, c.cardLastFour ? '末' + c.cardLastFour : '', bank ? '扣款 ' + bank.title : '', c.billingDay ? '結帳 ' + c.billingDay + ' 日' : '', c.paymentDay ? '繳款 ' + c.paymentDay + ' 日' : ''].filter(Boolean).join('・'))}</div></div><div style="text-align:right"><div class="score s70">${fmtMoney(used)}</div>${c.creditLimit ? `<div class="muted small">額度 ${fmtMoney(c.creditLimit)}・${Math.round(used / c.creditLimit * 100)}%</div>` : ''}</div></div>`; }).join('') || '<div class="empty">尚無信用卡</div>'}</div></div>
+    </div>`;
+  } else if (tab === 'accounts') {
+    const subColor = { '銀行': 'blue', '信用卡': 'orange', '證券': 'green', '保險': 'purple' };
+    body = `<div class="card table-wrap"><table class="tbl"><thead><tr><th>帳戶</th><th>類型</th><th>資訊</th><th class="num">餘額／本月消費（台幣等值）</th><th>明細</th></tr></thead><tbody>${fm.sort((a, b) => (a.financeSubCategory || '').localeCompare(b.financeSubCategory || '')).map((m) => {
+      let val = '', detail = '';
+      if (m.financeSubCategory === '銀行') { const bal = bankBalances(m); val = fmtFull(balanceTWD(bal)); detail = Object.entries(bal).map(([c, v]) => `${c} ${Math.round(v).toLocaleString()}`).join('／') + `・存提 ${(m.bankDeposits || []).length} 筆`; }
+      else if (m.financeSubCategory === '信用卡') { val = fmtFull(cardMonth(m)); detail = [m.creditLimit ? '額度 ' + fmtMoney(m.creditLimit) : '', m.annualFee ? '年費 ' + fmtMoney(m.annualFee) : '', m.expiryDate ? '到期 ' + fmtDate(m.expiryDate).split(' ')[0] : ''].filter(Boolean).join('・'); }
+      else if (m.financeSubCategory === '保險') { val = m.premiumAmount ? fmtFull(m.premiumAmount) + '／期' : ''; detail = [m.insuranceCompany, m.insuranceType, m.policyNumber, m.beneficiary ? '受益人 ' + m.beneficiary : ''].filter(Boolean).join('・'); }
+      else { const linked = Store.stocks.filter((s) => s.linkedSecuritiesMilestoneId === m.id && !s.isSold); val = fmtFull(linked.reduce((a, s) => a + stockView(s).mv, 0)); detail = [m.securitiesAccountType, `持股 ${linked.length} 檔`].filter(Boolean).join('・'); }
+      return `<tr style="${m.isDisabled ? 'opacity:.5' : ''}"><td><b>${esc(m.title)}</b>${m.isDisabled ? ' <span class="chip">停用</span>' : ''}</td><td><span class="chip ${subColor[m.financeSubCategory] || ''}">${esc(m.financeSubCategory)}</span></td><td class="muted">${esc([m.bankName, m.branchName, m.bankAccountType, m.cardName, m.cardLastFour ? '末' + m.cardLastFour : ''].filter(Boolean).join('・'))}</td><td class="num"><b>${val}</b></td><td class="muted small">${esc(detail)}</td></tr>`;
+    }).join('') || '<tr><td colspan="5" class="empty">尚無財富卡片</td></tr>'}</tbody></table></div>`;
+  } else if (tab === 'stocks') {
+    const sold = Store.stocks.filter((s) => s.isSold).map((s) => Object.assign({ s }, stockView(s)));
+    const row = (x) => `<tr><td><b>${esc(x.s.symbol)}</b> ${x.isUS ? '<span class="chip blue">美股</span>' : ''}</td><td>${esc(x.s.name)}</td><td class="num">${x.s.shares.toLocaleString()}</td><td class="num">${x.s.purchasePrice}</td><td class="num">${x.s.isSold ? x.s.soldPrice : x.s.currentPrice}</td><td class="num">${fmtFull(x.cost)}</td><td class="num">${fmtFull(x.mv)}</td><td class="num"><span class="score ${x.pl >= 0 ? 's90' : 's0'}">${x.pl >= 0 ? '+' : ''}${fmtMoney(x.pl)}</span></td><td class="num"><span class="chip ${x.pl >= 0 ? 'green' : 'red'}">${x.rate >= 0 ? '+' : ''}${x.rate.toFixed(1)}%</span></td><td class="muted small">${(x.s.dividends || []).filter((d) => d.kind === '現金股利').length ? '配息 ' + (x.s.dividends || []).filter((d) => d.kind === '現金股利').length + ' 次' : ''}</td></tr>`;
+    const head = '<thead><tr><th>代號</th><th>名稱</th><th class="num">股數</th><th class="num">成本價</th><th class="num">現價</th><th class="num">成本</th><th class="num">市值</th><th class="num">損益</th><th class="num">報酬率</th><th>配息</th></tr></thead>';
+    body = `<div class="card table-wrap"><h3>持有中 <span class="count">${activeStocks.length}</span><span class="spacer"></span><span class="muted small">美金匯率 ${usdRate()}（匯率表「美金」，沒有則 31）</span></h3><table class="tbl">${head}<tbody>${activeStocks.sort((a, b) => b.mv - a.mv).map(row).join('') || '<tr><td colspan="10" class="empty">尚無持股</td></tr>'}</tbody></table></div>
+      ${sold.length ? `<div class="card table-wrap mt"><h3>已賣出 <span class="count">${sold.length}</span></h3><table class="tbl">${head}<tbody>${sold.map(row).join('')}</tbody></table></div>` : ''}`;
+  } else if (tab === 'assets') {
+    body = `<div class="card table-wrap"><h3>儲蓄險 <span class="count">${Store.insurances.length}</span></h3><table class="tbl"><thead><tr><th>名稱</th><th>公司</th><th class="num">每期保費</th><th>週期・利率</th><th>期間</th><th class="num">目前現值</th><th class="num">預期到期</th></tr></thead><tbody>${Store.insurances.map((i) => { const total = Math.max(1, (i.maturityDate - i.startDate)); const pct = Math.min(100, Math.max(0, Math.round((now - i.startDate) / total * 100))); return `<tr><td><b>${esc(i.name)}</b></td><td>${esc(i.company)}</td><td class="num">${esc(i.currencyCode)} ${Math.round(i.premiumAmount).toLocaleString()}</td><td>${esc(i.paymentPeriod)}・${i.annualRate}%</td><td>${fmtDate(i.startDate).split(' ')[0]} – ${fmtDate(i.maturityDate).split(' ')[0]}<div style="height:4px;border-radius:2px;background:var(--card2);margin-top:4px"><div style="width:${pct}%;height:100%;background:var(--purple);border-radius:2px"></div></div></td><td class="num"><b>${esc(i.currencyCode)} ${Math.round(i.currentValue).toLocaleString()}</b></td><td class="num">${esc(i.currencyCode)} ${Math.round(i.expectedReturn).toLocaleString()}</td></tr>`; }).join('') || '<tr><td colspan="7" class="empty">尚無儲蓄險</td></tr>'}</tbody></table></div>
+    <div class="grid cols-2 mt">
+      <div class="card"><h3>房地產 <span class="count">${reHeld.length}</span></h3><div class="list">${reHeld.map((r) => { const debt = mortgageRemaining(r); return `<div class="item"><div class="avatar sm" style="background:linear-gradient(135deg,#ff9500,#ff3b30)">🏠</div><div class="main-text"><div class="title">${esc(r.name)}</div><div class="meta">${esc([r.city, r.buildingType, r.pingCount ? r.pingCount + ' 坪' : '', '購入 ' + fmtDate(r.purchaseDate).split(' ')[0] + ' ' + fmtMoney(r.purchasePrice), r.monthlyRental ? '月租 ' + fmtMoney(r.monthlyRental) : ''].filter(Boolean).join('・'))}</div></div><div style="text-align:right"><div class="score s80">${fmtMoney(r.currentValue)}</div>${debt ? `<div class="muted small">房貸餘 ${fmtMoney(debt)}</div>` : ''}</div></div>`; }).join('') || '<div class="empty">尚無房地產</div>'}</div></div>
+      <div class="card"><h3>車輛 <span class="count">${vhHeld.length}</span></h3><div class="list">${vhHeld.map((v) => `<div class="item"><div class="avatar sm" style="background:linear-gradient(135deg,#30b0c7,#34c759)">🚗</div><div class="main-text"><div class="title">${esc(v.name)}</div><div class="meta">${esc([v.brand, v.powerType, v.ownerName, '購入 ' + fmtDate(v.purchaseDate).split(' ')[0] + ' ' + fmtMoney(v.purchasePrice)].filter(Boolean).join('・'))}</div></div><span class="score s80">${fmtMoney(v.currentValue)}</span></div>`).join('') || '<div class="empty">尚無車輛</div>'}</div></div>
+    </div>`;
+  }
+  main.innerHTML = `
+    ${pageHead('財務總覽', `台幣等值概算・${fmtDate(now)}`)}
+    <div class="grid cols-5">
+      ${kpi('淨資產概算', fmtMoney(netWorth), netWorth >= 0 ? 'green' : 'red', '銀行＋股票＋保險＋房產＋車輛 − 房貸餘額')}
+      ${kpi('銀行總餘額', fmtMoney(bankTotal), '', `${bankRows.length} 個帳戶`)}
+      ${kpi('股票市值', fmtMoney(stockMV), '', `損益 ${stockMV - stockCost >= 0 ? '+' : ''}${fmtMoney(stockMV - stockCost)}`)}
+      ${kpi('本月支出／收入', `${fmtMoney(cf.exp[thisKey] || 0)}`, (cf.exp[thisKey] || 0) > (cf.inc[thisKey] || 0) ? 'orange' : 'green', `收入 ${fmtMoney(cf.inc[thisKey] || 0)}・信用卡 ${fmtMoney(cardTotalMonth)}`)}
+      ${kpi('保險・房產・車輛', fmtMoney(insTotal + reValue + vhValue), '', reDebt ? `房貸餘額 ${fmtMoney(reDebt)}` : '')}
+    </div>
+    <div class="tabs">${tabs.map(([k, l]) => `<button class="${k === tab ? 'on' : ''}" data-tab="${k}">${l}</button>`).join('')}</div>
+    ${body}`;
+  main.querySelectorAll('.tabs button').forEach((btn) => btn.onclick = () => { location.hash = `#/finance/${btn.dataset.tab}`; });
+  if (tab !== 'overview' || !window.Chart) return;
+  const css = getComputedStyle(document.documentElement);
+  const textColor = css.getPropertyValue('--text').trim() || '#000';
+  const lineColor = css.getPropertyValue('--line').trim() || 'rgba(0,0,0,0.1)';
+  const labels = cf.months.map((m) => `${m.getFullYear() % 100}/${m.getMonth() + 1}`);
+  charts.push(new Chart($('#fin-cash'), { type: 'bar', data: { labels, datasets: [
+    { label: '收入', data: cf.months.map((m) => Math.round(cf.inc[monthKeyOf(m)] || 0)), backgroundColor: 'rgba(52,199,89,0.75)', borderRadius: 4 },
+    { label: '支出', data: cf.months.map((m) => Math.round(cf.exp[monthKeyOf(m)] || 0)), backgroundColor: 'rgba(255,59,48,0.7)', borderRadius: 4 },
+  ] }, options: { maintainAspectRatio: false, animation: { duration: 350 }, scales: { x: { grid: { display: false }, ticks: { color: textColor } }, y: { beginAtZero: true, grid: { color: lineColor }, ticks: { color: textColor, callback: (v) => fmtMoney(v, '') } } }, plugins: { legend: { labels: { color: textColor } }, tooltip: { callbacks: { label: (t) => `${t.dataset.label} ${fmtFull(t.raw)}` } } } } }));
+  const cats = Object.entries(cf.byCat).sort((a, b) => b[1] - a[1]).slice(0, 12);
+  charts.push(new Chart($('#fin-cat'), { type: 'bar', data: { labels: cats.map((c) => c[0]), datasets: [{ data: cats.map((c) => Math.round(c[1])), backgroundColor: cats.map((c) => c[0].startsWith('固定') ? 'rgba(88,86,214,0.75)' : 'rgba(255,149,0,0.75)'), borderRadius: 5, barThickness: 14 }] }, options: { indexAxis: 'y', maintainAspectRatio: false, animation: { duration: 350 }, scales: { x: { beginAtZero: true, grid: { color: lineColor }, ticks: { color: textColor, callback: (v) => fmtMoney(v, '') } }, y: { grid: { display: false }, ticks: { color: textColor, font: { weight: '700' } } } }, plugins: { legend: { display: false }, tooltip: { callbacks: { label: (t) => fmtFull(t.raw) } } } } }));
 }
 
 // ---------------------------------------------------------------------------

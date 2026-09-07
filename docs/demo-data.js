@@ -166,5 +166,53 @@
     { id: id(), title: '繳交月報', kind: '事務', date: d(4, 0, 0), durationMinutes: 0, note: '', recurrence: '每月', recurrenceEndDate: null, reminderMinutes: 1440, location: '', syncToAppleCalendar: false },
     { id: id(), title: '牙醫回診', kind: '事務', date: d(6, 18, 30), durationMinutes: 30, note: '', recurrence: '不重複', recurrenceEndDate: null, reminderMinutes: 60, location: '', syncToAppleCalendar: false },
   ];
-  window.LIFEGOOD_DEMO = { subs, depts, orgPeople, grades, equipment, milestones, cards, personalEvents };
+  // ---- 理財示範 ----
+  const BANK1 = id(), BANK2 = id(), CARD1 = id(), SEC1 = id();
+  const dep = (dayOff, amount, isWithdrawal, cur = 'NT$') => ({ id: id(), date: d(dayOff, 12), amount, currencyCode: cur, isWithdrawal, isAdjust: false });
+  milestones.push(
+    { id: BANK1, title: '玉山薪轉戶', date: ymd(2019, 3, 1), category: '成就', note: '', financeSubCategory: '銀行', bankName: '玉山銀行', branchName: '竹科分行', bankAccountType: '活存',
+      bankDeposits: [dep(-400, 350000, false), dep(-200, 60000, true), dep(-90, 120000, false), dep(-40, 45000, true), dep(-20, 30000, false)] },
+    { id: BANK2, title: '國泰外幣戶', date: ymd(2021, 6, 1), category: '成就', note: '', financeSubCategory: '銀行', bankName: '國泰世華', branchName: '', bankAccountType: '外幣',
+      bankDeposits: [dep(-300, 8000, false, '美金'), dep(-100, 2500, false, '美金'), dep(-60, 1200, true, '美金')] },
+    { id: CARD1, title: '玉山 U Bear 卡', date: ymd(2022, 1, 1), category: '成就', note: '', financeSubCategory: '信用卡', cardName: 'U Bear', cardLastFour: '3388', creditLimit: 200000, annualFee: 0, billingDay: 5, paymentDay: 20, linkedBankMilestoneId: BANK1 },
+    { id: SEC1, title: '永豐金證券', date: ymd(2020, 4, 1), category: '成就', note: '', financeSubCategory: '證券', securitiesAccountType: '台股' },
+    { id: id(), title: '南山儲蓄險', date: ymd(2018, 8, 11), category: '成就', note: '', financeSubCategory: '保險', insuranceCompany: '南山人壽', insuranceType: '儲蓄險', policyNumber: 'NS-2018-0811', premiumAmount: 67000, beneficiary: '配偶' },
+  );
+  const expense = (title, amount, dayOff, type, cat, extra) => Object.assign({ id: id(), title, amount, date: d(dayOff, 12), expenseType: type, note: '', currencyCode: 'NT$', photoFileNames: [], amountHistory: [] }, type === '固定支出' ? { fixedCategory: cat } : { variableCategory: cat }, extra || {});
+  const expenses = [
+    expense('房貸', 32000, -700, '固定支出', '貸款', { recurrence: '每月', linkedBankMilestoneId: BANK1 }),
+    expense('中華電信', 1399, -500, '固定支出', '電信費', { recurrence: '每月', linkedCreditCardMilestoneId: CARD1 }),
+    expense('Netflix', 390, -400, '固定支出', '訂閱服務', { recurrence: '每月', linkedCreditCardMilestoneId: CARD1 }),
+    expense('乙式車險', 28500, -320, '固定支出', '保險', { recurrence: '每年', linkedBankMilestoneId: BANK1 }),
+    expense('社區管理費', 2400, -600, '固定支出', '管理費', { recurrence: '每月', linkedBankMilestoneId: BANK1 }),
+    expense('好市多採買', 6800, -3, '變動支出', '日用品', { linkedCreditCardMilestoneId: CARD1 }),
+    expense('家庭聚餐', 3200, -6, '變動支出', '飲食', { linkedCreditCardMilestoneId: CARD1 }),
+    expense('加油', 1500, -9, '變動支出', '汽車'),
+    expense('小孩補習費', 8000, -12, '變動支出', '教育'),
+    expense('電動車充電', 620, -2, '變動支出', '汽車', { evKwh: 42, evFromPct: 20, evToPct: 90, evOdometer: 31250 }),
+    expense('牙醫', 1200, -18, '變動支出', '醫療'),
+    expense('週年旅行', 24000, -45, '變動支出', '娛樂', { linkedCreditCardMilestoneId: CARD1 }),
+    expense('婚禮禮金', 6000, -70, '變動支出', '社交'),
+    expense('新手機', 32900, -100, '變動支出', '購物', { linkedCreditCardMilestoneId: CARD1 }),
+    expense('家電維修', 4500, -130, '變動支出', '其他'),
+    expense('綜所稅', 68000, -110, '變動支出', '稅費'),
+  ];
+  const incomes = [
+    { id: id(), title: '薪資', amount: 98000, date: ymd(2024, 1, 5), category: '薪水', period: '每月', isFixedSalary: true, note: '', linkedBankMilestoneId: BANK1, linkedBankCurrency: 'NT$', endDate: null },
+    { id: id(), title: '年終獎金', amount: 180000, date: ymd(2026, 2, 5), category: '獎金', period: '單次', isFixedSalary: false, note: '', linkedBankMilestoneId: BANK1, linkedBankCurrency: 'NT$' },
+    { id: id(), title: '0056 配息', amount: 12600, date: d(-25), category: '投資', period: '單次', isFixedSalary: false, note: '' },
+  ];
+  const currencyRates = [{ id: id(), code: '美金', rate: 32.1 }, { id: id(), code: '日圓', rate: 0.21 }];
+  const tx = (dayOff, kind, lots, price) => ({ id: id(), date: d(dayOff, 9), kind, lots, price });
+  const stocks = [
+    { id: id(), name: '台積電', symbol: '2330', purchaseDate: ymd(2023, 5, 10), shares: 2000, purchasePrice: 560, currentPrice: 1085, note: '', isSold: false, soldPrice: 0, soldDate: null, linkedSecuritiesMilestoneId: SEC1, transactions: [tx(-480, '買入', 1, 540), tx(-300, '買入', 1, 580)], dividends: [{ id: id(), date: d(-60), kind: '現金股利', lots: 2, perShare: 4.5, sharesAtEvent: 2000, note: '' }] },
+    { id: id(), name: '元大高股息', symbol: '0056', purchaseDate: ymd(2022, 9, 1), shares: 15000, purchasePrice: 31.2, currentPrice: 38.4, note: '', isSold: false, soldPrice: 0, soldDate: null, linkedSecuritiesMilestoneId: SEC1, transactions: [tx(-700, '買入', 10, 30.5), tx(-350, '買入', 5, 32.6)], dividends: [{ id: id(), date: d(-25), kind: '現金股利', lots: 15, perShare: 0.84, sharesAtEvent: 15000, note: '' }] },
+    { id: id(), name: 'Vanguard S&P 500', symbol: 'VOO', purchaseDate: ymd(2025, 3, 3), shares: 12, purchasePrice: 512, currentPrice: 598, note: '', isSold: false, soldPrice: 0, soldDate: null, linkedBankMilestoneId: BANK2, linkedBankCurrency: '美金', transactions: [{ id: id(), date: ymd(2025, 3, 3), kind: '買入', lots: 0.012, price: 512 }], dividends: [] },
+    { id: id(), name: '長榮', symbol: '2603', purchaseDate: ymd(2024, 2, 1), shares: 1000, purchasePrice: 150, currentPrice: 0, note: '', isSold: true, soldPrice: 205, soldDate: ymd(2024, 8, 20), transactions: [], dividends: [] },
+  ];
+  const insurances = [{ id: id(), name: '美元儲蓄險', company: '南山人壽', currencyCode: '美金', premiumAmount: 2100, paymentPeriod: '每年', annualRate: 3.8, startDate: ymd(2018, 8, 11), maturityDate: ymd(2028, 8, 10), expectedReturn: 25400, currentValue: 19800, note: '' }];
+  const vehicles = [{ id: id(), name: 'Model Y', brand: 'Tesla', ownerName: '我', powerType: '電車', purchaseDate: ymd(2024, 6, 15), soldDate: null, purchasePrice: 1890000, currentValue: 1450000, fixedExpenses: [], variableExpenses: [], photoRecords: [], note: '' }];
+  const realEstates = [{ id: id(), name: '竹北自住宅', city: '新竹縣', address: '', purchaseDate: ymd(2021, 9, 1), soldDate: null, purchasePrice: 15800000, currentValue: 18500000, monthlyRental: 0, mortgageItems: [{ id: id(), title: '玉山房貸', amount: 32000, totalPeriods: 360, startDate: ymd(2021, 10, 1) }], paidItems: [], variableExpenses: [], note: '', buildingType: '大樓', hasElevator: true, elevatorMaintenances: [], pingCount: 42.5 }];
+
+  window.LIFEGOOD_DEMO = { subs, depts, orgPeople, grades, equipment, milestones, cards, personalEvents, expenses, incomes, currencyRates, insurances, stocks, vehicles, realEstates };
 })();
