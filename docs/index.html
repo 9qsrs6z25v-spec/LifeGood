@@ -53,14 +53,45 @@
       </div>
     </div>
     <nav class="nav">
-      <a href="#/overview" data-route="overview"><span class="ico">📋</span>部屬總覽</a>
-      <a href="#/calendar" data-route="calendar"><span class="ico">📅</span>我的行事曆</a>
-      <a href="#/subs" data-route="subs"><span class="ico">👥</span>部屬列表</a>
-      <a href="#/matrix" data-route="matrix"><span class="ico">🎯</span>人才矩陣</a>
-      <a href="#/stats" data-route="stats"><span class="ico">📊</span>統計圖表</a>
-      <a href="#/org" data-route="org"><span class="ico">🏢</span>公司組織</a>
-      <a href="#/sideroles" data-route="sideroles"><span class="ico">🧩</span>兼任職務</a>
-      <a href="#/finance" data-route="finance"><span class="ico">💰</span>財務總覽</a>
+      <div class="nav-group"><div class="nav-title">收支</div>
+        <a href="#/expense/overview" data-route="expense/overview"><span class="ico">🏠</span>總覽</a>
+        <a href="#/expense/income" data-route="expense/income"><span class="ico">💵</span>收入</a>
+        <a href="#/expense/variable" data-route="expense/variable"><span class="ico">🔁</span>變動支出</a>
+        <a href="#/expense/fixed" data-route="expense/fixed"><span class="ico">📌</span>固定支出</a>
+        <a href="#/expense/chart" data-route="expense/chart"><span class="ico">📈</span>圖表</a>
+      </div>
+      <div class="nav-group"><div class="nav-title">理財</div>
+        <a href="#/finance/overview" data-route="finance/overview"><span class="ico">🏠</span>總覽</a>
+        <a href="#/finance/insurance" data-route="finance/insurance"><span class="ico">🛡️</span>儲蓄險</a>
+        <a href="#/finance/stock" data-route="finance/stock"><span class="ico">📊</span>股票</a>
+        <a href="#/finance/vehicle" data-route="finance/vehicle"><span class="ico">🚗</span>載具</a>
+        <a href="#/finance/realestate" data-route="finance/realestate"><span class="ico">🏢</span>房地產</a>
+        <a href="#/finance/chart" data-route="finance/chart"><span class="ico">🥧</span>圖表</a>
+      </div>
+      <div class="nav-group"><div class="nav-title">人生</div>
+        <span class="nav-disabled" title="尚未提供網頁版"><span class="ico">🏠</span>總覽</span>
+        <span class="nav-disabled" title="尚未提供網頁版"><span class="ico">🏆</span>履歷</span>
+        <a href="#/life/wealth" data-route="life/wealth"><span class="ico">💰</span>財富</a>
+        <div class="nav-sub">職涯</div>
+        <a href="#/calendar" data-route="calendar"><span class="ico">📅</span>我的行事曆</a>
+        <a href="#/overview" data-route="overview"><span class="ico">📋</span>部屬總覽</a>
+        <a href="#/subs" data-route="subs"><span class="ico">👥</span>部屬</a>
+        <a href="#/matrix" data-route="matrix" class="nav-indent"><span class="ico">🎯</span>人才矩陣</a>
+        <a href="#/stats" data-route="stats" class="nav-indent"><span class="ico">📊</span>統計圖表</a>
+        <span class="nav-disabled" title="尚未提供網頁版"><span class="ico">🪪</span>名片</span>
+        <a href="#/org" data-route="org"><span class="ico">🏢</span>公司組織</a>
+        <span class="nav-disabled" title="尚未提供網頁版"><span class="ico">🔢</span>部門職等</span>
+        <a href="#/sideroles" data-route="sideroles"><span class="ico">🧩</span>兼任職務</a>
+        <span class="nav-disabled" title="尚未提供網頁版"><span class="ico">👨‍👩‍👧</span>家庭</span>
+        <span class="nav-disabled" title="尚未提供網頁版"><span class="ico">🏘️</span>房地產</span>
+        <span class="nav-disabled" title="尚未提供網頁版"><span class="ico">🧾</span>稅務</span>
+        <span class="nav-disabled" title="尚未提供網頁版"><span class="ico">🍜</span>美食地圖</span>
+        <span class="nav-disabled" title="尚未提供網頁版"><span class="ico">✈️</span>旅遊地圖</span>
+        <span class="nav-disabled" title="尚未提供網頁版"><span class="ico">🏥</span>醫療地圖</span>
+      </div>
+      <div class="nav-group"><div class="nav-title">設定</div>
+        <a href="#/settings" data-route="settings"><span class="ico">⚙️</span>設定</a>
+      </div>
     </nav>
     <div class="sidebar-foot">
       <div id="data-source" class="muted small"></div>

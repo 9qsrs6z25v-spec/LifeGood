@@ -201,7 +201,7 @@ function updateSourceLabel() {
 
 // 自動更新：登入 iCloud 後每 10 分鐘背景抓一次；分頁在背景時暫停，回到前景若已過期立刻補抓
 const AutoRefresh = {
-  intervalMs: 10 * 60 * 1000,
+  intervalMs: (() => { try { const m = Number(localStorage.getItem('lifegood_refresh_min')); return m >= 1 ? m * 60000 : 10 * 60000; } catch (e) { return 10 * 60000; } })(),
   timer: null, nextAt: null, busy: false,
   start() {
     this.stop();
@@ -511,7 +511,10 @@ function route() {
   const hash = location.hash || '#/overview';
   const parts = hash.replace(/^#\//, '').split('/');
   const page = parts[0] || 'overview';
-  document.querySelectorAll('.nav a').forEach((a) => a.classList.toggle('active', a.dataset.route === page || (page === 'sub' && a.dataset.route === 'subs') || (page === 'siderole' && a.dataset.route === 'sideroles') || ((page === 'dept' || page === 'equipment') && a.dataset.route === 'org')));
+  // 側欄高亮：分組頁面用「群組/分頁」當 key，舊有單層頁面用第一段
+  const groupKey = ['expense', 'finance', 'life'].includes(page) ? `${page}/${parts[1] || 'overview'}` : null;
+  const legacyKey = { sub: 'subs', siderole: 'sideroles', dept: 'org', equipment: 'org' }[page] || page;
+  document.querySelectorAll('.nav a').forEach((a) => a.classList.toggle('active', a.dataset.route === (groupKey || legacyKey)));
   destroyCharts();
   const main = $('#main');
   main.scrollTop = 0; window.scrollTo(0, 0);
@@ -526,7 +529,17 @@ function route() {
     case 'equipment': renderEquipment(main, ctx, decodeURIComponent(parts[1] || '')); break;
     case 'sideroles': renderSideRoles(main); break;
     case 'calendar': renderCalendar(main, parts[1] || ''); break;
-    case 'finance': renderFinance(main, parts[1] || 'overview'); break;
+    case 'expense': renderExpense(main, parts[1] || 'overview', parts[2] || ''); break;
+    case 'finance': {
+      const t = parts[1] || 'overview';
+      // 舊網址相容：#/finance/accounts→財富卡片、stocks→股票、assets→總覽
+      if (t === 'accounts') { location.hash = '#/life/wealth'; return; }
+      if (t === 'stocks') { location.hash = '#/finance/stock'; return; }
+      renderFinanceHome(main, t === 'assets' ? 'overview' : t, parts[2] ? decodeURIComponent(parts[2]) : '');
+      break;
+    }
+    case 'life': if ((parts[1] || '') === 'wealth') renderWealth(main); else renderOverview(main, ctx); break;
+    case 'settings': renderSettings(main); break;
     case 'siderole': renderSideRole(main, decodeURIComponent(parts[1] || ''), parts[2] || 'tasks'); break;
     default: renderOverview(main, ctx);
   }
@@ -1340,10 +1353,9 @@ function renderCalendar(main, param) {
   main.querySelectorAll('.fchip[data-kind]').forEach((c) => c.onclick = () => { const k = c.dataset.kind; if (calUI.hidden.has(k)) calUI.hidden.delete(k); else calUI.hidden.add(k); renderCalendar(main, param); });
 }
 
-// ---- 財務總覽 -------------------------------------------------------------
-// 計算規則移植自 LifeFinanceView：銀行餘額＝手動存提款（排除已由固定支出／週期收入／信用卡
-// 展開取代的連結筆）＋固定支出週期展開扣款＋週期收入展開＋連結信用卡消費扣款；
-// 外幣依 currencyRates 換算台幣；美股依「美金」匯率（沒有就 31）。
+// ---- 收支／理財／財富（計算規則移植自 LifeFinanceView 與各理財頁）------------------
+// 銀行餘額＝手動存提款（排除已由固定支出／週期收入／信用卡展開取代的連結筆）＋固定支出週期
+// 展開扣款＋週期收入展開＋連結信用卡消費扣款；外幣依 currencyRates 換算台幣；美股依「美金」匯率（沒有就 31）。
 const financeMilestones = () => Store.milestones.filter((m) => m.financeSubCategory);
 function rateOf(code) { if (!code || code === 'NT$') return 1; const r = (Store.currencyRates || []).find((x) => x.code === code); return r && r.rate > 0 ? r.rate : 1; }
 function usdRate() { const r = (Store.currencyRates || []).find((x) => x.code === '美金' || x.code === 'USD'); return r && r.rate > 0 ? r.rate : 31; }
@@ -1354,15 +1366,22 @@ function fmtMoney(v, symbol = 'NT$') {
   if (a >= 1e4) return `${sign}${symbol} ${trim(a / 1e4)} 萬`;
   return `${sign}${symbol} ${Math.round(a).toLocaleString('zh-Hant-TW')}`;
 }
-function fmtFull(v) { return (v < 0 ? '-' : '') + 'NT$ ' + Math.round(Math.abs(v)).toLocaleString('zh-Hant-TW'); }
+function fmtFull(v, symbol = 'NT$') { return (v < 0 ? '-' : '') + symbol + ' ' + Math.round(Math.abs(v)).toLocaleString('zh-Hant-TW'); }
+function fmtAmt(v, code) { return fmtFull(v, code || 'NT$'); }
 function addMonths(d, n) { const x = new Date(d); const day = x.getDate(); x.setDate(1); x.setMonth(x.getMonth() + n); const last = new Date(x.getFullYear(), x.getMonth() + 1, 0).getDate(); x.setDate(Math.min(day, last)); return x; }
 function nextRecurrence(d, rec) { return rec === '每季' ? addMonths(d, 3) : rec === '每年' ? addMonths(d, 12) : addMonths(d, 1); }
+function monthlyEquivalent(amount, rec) { return rec === '每季' ? amount / 3 : rec === '每年' ? amount / 12 : amount; }
 /** 固定支出展開成逐期扣款（貸款從下一期起算，與 App 相同） */
 function expandFixed(exp, until) {
   const out = []; if (!exp.recurrence) return out;
   let cur = exp.fixedCategory === '貸款' ? nextRecurrence(exp.date, exp.recurrence) : new Date(exp.date);
   let i = 0; while (cur <= until && i < 1200) { out.push({ date: cur, amount: exp.amount, currency: exp.linkedBankCurrency || exp.currencyCode || 'NT$', expense: exp }); cur = nextRecurrence(cur, exp.recurrence); i++; }
   return out;
+}
+function nextFixedDue(exp) {
+  const now = new Date(); let cur = exp.fixedCategory === '貸款' ? nextRecurrence(exp.date, exp.recurrence) : new Date(exp.date); let i = 0;
+  while (cur < startOfDay(now) && i < 1200) { cur = nextRecurrence(cur, exp.recurrence); i++; }
+  return cur;
 }
 function incomeActive(inc, d) { if (!inc.endDate) return true; return new Date(d.getFullYear(), d.getMonth(), 1) <= new Date(inc.endDate.getFullYear(), inc.endDate.getMonth(), 1); }
 function expandIncome(inc, until) {
@@ -1399,30 +1418,36 @@ function bankBalances(ms) {
 }
 function balanceTWD(bal) { return Object.entries(bal).reduce((a, [code, v]) => a + v * rateOf(code), 0); }
 function monthKeyOf(d) { return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}`; }
-/** 近 N 個月的收入／支出（台幣等值）；支出＝變動支出＋固定支出展開，收入＝單次＋週期展開 */
+/** 支出逐筆展開（固定支出逐期、變動支出原筆）到 until，附台幣等值 */
+function expenseEntries(until) {
+  const out = [];
+  for (const e of Store.expenses) {
+    if (e.expenseType === '固定支出' && e.recurrence) { for (const x of expandFixed(e, until)) out.push({ date: x.date, amount: e.amount, twd: e.amount * rateOf(e.currencyCode), cat: '固定・' + (e.fixedCategory || '其他'), expense: e }); }
+    else if (e.date <= until) out.push({ date: e.date, amount: e.amount, twd: e.amount * rateOf(e.currencyCode), cat: e.variableCategory || e.fixedCategory || '其他', expense: e });
+  }
+  return out;
+}
+function incomeEntries(until) { const out = []; for (const i of Store.incomes) for (const x of expandIncome(i, until)) out.push({ date: x.date, amount: x.amount, twd: x.amount * rateOf(x.currency), income: i }); return out; }
+/** 近 N 個月的收入／支出（台幣等值） */
 function cashflowByMonth(n) {
   const now = new Date(); const months = []; for (let i = n - 1; i >= 0; i--) months.push(new Date(now.getFullYear(), now.getMonth() - i, 1));
   const from = months[0]; const until = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
   const exp = {}, inc = {}, byCat = {};
-  const addE = (d, amt, cur, cat) => { if (d < from || d > until) return; const k = monthKeyOf(d); const v = amt * rateOf(cur); exp[k] = (exp[k] || 0) + v; byCat[cat || '其他'] = (byCat[cat || '其他'] || 0) + v; };
-  for (const e of Store.expenses) {
-    if (e.expenseType === '固定支出' && e.recurrence) { for (const x of expandFixed(e, until)) addE(x.date, e.amount, e.currencyCode, '固定・' + (e.fixedCategory || '其他')); }
-    else addE(e.date, e.amount, e.currencyCode, e.variableCategory || e.fixedCategory || '其他');
-  }
-  for (const i of Store.incomes) for (const x of expandIncome(i, until)) { if (x.date < from) continue; const k = monthKeyOf(x.date); inc[k] = (inc[k] || 0) + x.amount * rateOf(x.currency); }
+  for (const x of expenseEntries(until)) { if (x.date < from) continue; const k = monthKeyOf(x.date); exp[k] = (exp[k] || 0) + x.twd; byCat[x.cat] = (byCat[x.cat] || 0) + x.twd; }
+  for (const x of incomeEntries(until)) { if (x.date < from) continue; const k = monthKeyOf(x.date); inc[k] = (inc[k] || 0) + x.twd; }
   return { months, exp, inc, byCat };
 }
 function stockView(st) {
-  const f = st.isUSStock !== undefined ? (st.isUSStock ? usdRate() : 1) : (/^[A-Za-z]/.test(st.symbol || '') ? usdRate() : 1);
+  const isUS = /^[A-Za-z]/.test(st.symbol || ''); const f = isUS ? usdRate() : 1;
   const cost = st.shares * st.purchasePrice * f; const mv = st.shares * (st.isSold ? st.soldPrice : st.currentPrice) * f;
-  return { cost, mv, pl: mv - cost, rate: cost > 0 ? (mv - cost) / cost * 100 : 0, isUS: f !== 1 };
+  return { cost, mv, pl: mv - cost, rate: cost > 0 ? (mv - cost) / cost * 100 : 0, isUS, f };
 }
 function mortgageRemaining(re) {
   const now = new Date(); let total = 0;
   for (const m of re.mortgageItems || []) { const elapsed = Math.max(0, (now.getFullYear() - m.startDate.getFullYear()) * 12 + (now.getMonth() - m.startDate.getMonth())); total += Math.max(0, (m.totalPeriods - elapsed)) * m.amount; }
   return total;
 }
-function renderFinance(main, tab) {
+function financeSummary() {
   const now = new Date();
   const fm = financeMilestones();
   const banks = fm.filter((m) => m.financeSubCategory === '銀行' && !m.isDisabled);
@@ -1434,70 +1459,284 @@ function renderFinance(main, tab) {
   const insTotal = Store.insurances.reduce((a, i) => a + (i.currentValue || 0) * rateOf(i.currencyCode), 0);
   const reHeld = Store.realEstates.filter((r) => !r.soldDate); const reValue = reHeld.reduce((a, r) => a + (r.currentValue || 0), 0); const reDebt = reHeld.reduce((a, r) => a + mortgageRemaining(r), 0);
   const vhHeld = Store.vehicles.filter((v) => !v.soldDate); const vhValue = vhHeld.reduce((a, v) => a + (v.currentValue || 0), 0);
-  const netWorth = bankTotal + stockMV + insTotal + reValue + vhValue - reDebt;
-  const cf = cashflowByMonth(12);
   const thisKey = monthKeyOf(now);
   const cardMonth = (c) => creditCardEntries(c.id, now).filter((e) => monthKeyOf(e.date) === thisKey).reduce((a, e) => a + e.amount, 0);
-  const cardTotalMonth = cardsMs.filter((c) => !c.isDisabled).reduce((a, c) => a + cardMonth(c), 0);
-  const kpi = (label, value, cls = '', foot = '') => `<div class="card kpi"><div class="label">${label}</div><div class="value ${cls}" style="font-size:22px">${value}</div>${foot ? `<div class="foot">${foot}</div>` : ''}</div>`;
-  const tabs = [['overview', '總覽'], ['accounts', `帳戶 ${fm.length}`], ['stocks', `股票 ${activeStocks.length}`], ['assets', `保險・房產・車輛 ${Store.insurances.length + reHeld.length + vhHeld.length}`]];
+  return { now, fm, banks, cardsMs, bankRows, bankTotal, activeStocks, stockMV, stockCost, insTotal, reHeld, reValue, reDebt, vhHeld, vhValue, netWorth: bankTotal + stockMV + insTotal + reValue + vhValue - reDebt, thisKey, cardMonth };
+}
+const kpiCard = (label, value, cls = '', foot = '') => `<div class="card kpi"><div class="label">${label}</div><div class="value ${cls}" style="font-size:22px">${value}</div>${foot ? `<div class="foot">${foot}</div>` : ''}</div>`;
+function chartColors() { const css = getComputedStyle(document.documentElement); return { text: css.getPropertyValue('--text').trim() || '#000', line: css.getPropertyValue('--line').trim() || 'rgba(0,0,0,0.1)' }; }
+function tabsHTML(base, tabs, cur) { return `<div class="tabs">${tabs.map(([k, l]) => `<a class="${k === cur ? 'on' : ''}" href="#/${base}/${k}" style="display:inline-block;border:1px solid var(--line);background:${k === cur ? 'var(--text)' : 'var(--card)'};color:${k === cur ? 'var(--bg)' : 'var(--muted)'};padding:7px 14px;border-radius:999px;font-weight:700;${k === cur ? 'border-color:transparent' : ''}">${l}</a>`).join('')}</div>`; }
+function bankNameOf(id) { const m = id && Store.milestones.find((x) => x.id === id); return m ? m.title : ''; }
+const CAT_COLOR = { '飲食': '#ff9500', '交通': '#5ac8fa', '汽車': '#30b0c7', '股票': '#34c759', '房地產': '#ff3b30', '稅費': '#8e8e93', '節稅': '#a2845e', '娛樂': '#af52de', '購物': '#ff2d55', '日用品': '#ffcc00', '醫療': '#ff6b6b', '教育': '#007aff', '社交': '#ff9f0a', '其他': '#c7c7cc' };
+const catColor = (c) => (c.startsWith('固定') ? '#5856d6' : (CAT_COLOR[c] || '#8e8e93'));
+
+// ---- 收支 -------------------------------------------------------------------
+const EXPENSE_TABS = [['overview', '總覽'], ['income', '收入'], ['variable', '變動支出'], ['fixed', '固定支出'], ['chart', '圖表']];
+const expUI = { month: null, cat: 'all', year: 'all', q: '' };
+function renderExpense(main, tab, param) {
+  const now = new Date();
+  const S = financeSummary();
+  const cf = cashflowByMonth(12);
+  const yearStart = new Date(now.getFullYear(), 0, 1);
+  const untilNow = now;
+  const expAll = expenseEntries(untilNow), incAll = incomeEntries(untilNow);
+  const ytdExp = expAll.filter((x) => x.date >= yearStart).reduce((a, x) => a + x.twd, 0);
+  const ytdInc = incAll.filter((x) => x.date >= yearStart).reduce((a, x) => a + x.twd, 0);
+  const mExp = cf.exp[S.thisKey] || 0, mInc = cf.inc[S.thisKey] || 0;
   let body = '';
   if (tab === 'overview') {
-    const cats = Object.entries(cf.byCat).sort((a, b) => b[1] - a[1]).slice(0, 12);
+    const recent = [...Store.expenses].sort((a, b) => b.date - a.date).slice(0, 10);
+    const horizon = new Date(now); horizon.setDate(horizon.getDate() + 30);
+    const upcoming = Store.expenses.filter((e) => e.expenseType === '固定支出' && e.recurrence).map((e) => ({ e, due: nextFixedDue(e) })).filter((x) => x.due <= horizon).sort((a, b) => a.due - b.due);
     body = `<div class="grid cols-2">
-      <div class="card chart-card"><h3>近 12 個月收支（台幣等值）</h3><div class="chart-box" style="height:280px"><canvas id="fin-cash"></canvas></div><div class="legend-note">支出＝變動支出＋固定支出逐期展開；收入＝單次＋薪資等週期展開。外幣依匯率表換算。</div></div>
-      <div class="card chart-card"><h3>近 12 個月支出分類</h3><div class="chart-box" style="height:280px"><canvas id="fin-cat"></canvas></div></div>
+      <div class="card chart-card"><h3>近 12 個月收支（台幣等值）</h3><div class="chart-box" style="height:280px"><canvas id="ex-cash"></canvas></div><div class="legend-note">支出＝變動支出＋固定支出逐期展開；收入＝單次＋薪資等週期展開。外幣依匯率表換算。</div></div>
+      <div class="card chart-card"><h3>近 12 個月支出分類</h3><div class="chart-box" style="height:280px"><canvas id="ex-cat"></canvas></div></div>
     </div>
     <div class="grid cols-2 mt">
-      <div class="card"><h3>銀行帳戶 <span class="count">${bankRows.length}</span></h3><div class="list">${bankRows.map(({ m, bal, twd }) => `<a class="item clickable" href="#/finance/accounts"><div class="avatar sm" style="background:linear-gradient(135deg,#007aff,#5ac8fa)">${esc(initial(m.bankName || m.title))}</div><div class="main-text"><div class="title">${esc(m.title)}</div><div class="meta">${esc([m.bankName, m.branchName, m.bankAccountType].filter(Boolean).join('・'))}${Object.keys(bal).length > 1 ? '・' + Object.entries(bal).map(([c, v]) => `${c} ${Math.round(v).toLocaleString()}`).join('／') : ''}</div></div><span class="score ${twd >= 0 ? 's80' : 's0'}">${fmtMoney(twd)}</span></a>`).join('') || '<div class="empty">尚無銀行帳戶</div>'}</div></div>
-      <div class="card"><h3>信用卡本月消費 <span class="count">${cardsMs.length}</span></h3><div class="list">${cardsMs.map((c) => { const used = cardMonth(c); const bank = c.linkedBankMilestoneId && Store.milestones.find((x) => x.id === c.linkedBankMilestoneId); return `<div class="item" style="${c.isDisabled ? 'opacity:.5' : ''}"><div class="avatar sm" style="background:linear-gradient(135deg,#ff9500,#ffcc00)">💳</div><div class="main-text"><div class="title">${esc(c.title)}${c.isDisabled ? ' <span class="chip">停用</span>' : ''}</div><div class="meta">${esc([c.cardName, c.cardLastFour ? '末' + c.cardLastFour : '', bank ? '扣款 ' + bank.title : '', c.billingDay ? '結帳 ' + c.billingDay + ' 日' : '', c.paymentDay ? '繳款 ' + c.paymentDay + ' 日' : ''].filter(Boolean).join('・'))}</div></div><div style="text-align:right"><div class="score s70">${fmtMoney(used)}</div>${c.creditLimit ? `<div class="muted small">額度 ${fmtMoney(c.creditLimit)}・${Math.round(used / c.creditLimit * 100)}%</div>` : ''}</div></div>`; }).join('') || '<div class="empty">尚無信用卡</div>'}</div></div>
+      <div class="card"><h3>最近記帳 <span class="count">${recent.length}</span></h3><div class="list">${recent.map((e) => `<div class="item"><span class="chip" style="background:${catColor(e.variableCategory || '固定')}22;color:${catColor(e.variableCategory || '固定')}">${esc(e.variableCategory || e.fixedCategory || '其他')}</span><div class="main-text"><div class="title">${esc(e.title)}</div><div class="meta">${fmtDate(e.date).split(' ')[0]}${e.linkedCreditCardMilestoneId ? '・💳 ' + esc(bankNameOf(e.linkedCreditCardMilestoneId)) : e.linkedBankMilestoneId ? '・🏦 ' + esc(bankNameOf(e.linkedBankMilestoneId)) : ''}</div></div><b>${fmtAmt(e.amount, e.currencyCode)}</b></div>`).join('') || '<div class="empty">尚無記帳</div>'}</div></div>
+      <div class="card"><h3>30 天內到期的固定支出 <span class="count">${upcoming.length}</span></h3><div class="list">${upcoming.map(({ e, due }) => `<a class="item clickable" href="#/expense/fixed"><span class="chip indigo">${esc(e.fixedCategory || '固定')}</span><div class="main-text"><div class="title">${esc(e.title)}</div><div class="meta">${fmtDate(due).split(' ')[0]}・${esc(e.recurrence)}${e.linkedCreditCardMilestoneId ? '・💳 ' + esc(bankNameOf(e.linkedCreditCardMilestoneId)) : e.linkedBankMilestoneId ? '・🏦 ' + esc(bankNameOf(e.linkedBankMilestoneId)) : ''}</div></div><b>${fmtAmt(e.amount, e.currencyCode)}</b></a>`).join('') || '<div class="empty">30 天內沒有到期的固定支出</div>'}</div></div>
     </div>`;
-  } else if (tab === 'accounts') {
-    const subColor = { '銀行': 'blue', '信用卡': 'orange', '證券': 'green', '保險': 'purple' };
-    body = `<div class="card table-wrap"><table class="tbl"><thead><tr><th>帳戶</th><th>類型</th><th>資訊</th><th class="num">餘額／本月消費（台幣等值）</th><th>明細</th></tr></thead><tbody>${fm.sort((a, b) => (a.financeSubCategory || '').localeCompare(b.financeSubCategory || '')).map((m) => {
-      let val = '', detail = '';
-      if (m.financeSubCategory === '銀行') { const bal = bankBalances(m); val = fmtFull(balanceTWD(bal)); detail = Object.entries(bal).map(([c, v]) => `${c} ${Math.round(v).toLocaleString()}`).join('／') + `・存提 ${(m.bankDeposits || []).length} 筆`; }
-      else if (m.financeSubCategory === '信用卡') { val = fmtFull(cardMonth(m)); detail = [m.creditLimit ? '額度 ' + fmtMoney(m.creditLimit) : '', m.annualFee ? '年費 ' + fmtMoney(m.annualFee) : '', m.expiryDate ? '到期 ' + fmtDate(m.expiryDate).split(' ')[0] : ''].filter(Boolean).join('・'); }
-      else if (m.financeSubCategory === '保險') { val = m.premiumAmount ? fmtFull(m.premiumAmount) + '／期' : ''; detail = [m.insuranceCompany, m.insuranceType, m.policyNumber, m.beneficiary ? '受益人 ' + m.beneficiary : ''].filter(Boolean).join('・'); }
-      else { const linked = Store.stocks.filter((s) => s.linkedSecuritiesMilestoneId === m.id && !s.isSold); val = fmtFull(linked.reduce((a, s) => a + stockView(s).mv, 0)); detail = [m.securitiesAccountType, `持股 ${linked.length} 檔`].filter(Boolean).join('・'); }
-      return `<tr style="${m.isDisabled ? 'opacity:.5' : ''}"><td><b>${esc(m.title)}</b>${m.isDisabled ? ' <span class="chip">停用</span>' : ''}</td><td><span class="chip ${subColor[m.financeSubCategory] || ''}">${esc(m.financeSubCategory)}</span></td><td class="muted">${esc([m.bankName, m.branchName, m.bankAccountType, m.cardName, m.cardLastFour ? '末' + m.cardLastFour : ''].filter(Boolean).join('・'))}</td><td class="num"><b>${val}</b></td><td class="muted small">${esc(detail)}</td></tr>`;
-    }).join('') || '<tr><td colspan="5" class="empty">尚無財富卡片</td></tr>'}</tbody></table></div>`;
-  } else if (tab === 'stocks') {
-    const sold = Store.stocks.filter((s) => s.isSold).map((s) => Object.assign({ s }, stockView(s)));
-    const row = (x) => `<tr><td><b>${esc(x.s.symbol)}</b> ${x.isUS ? '<span class="chip blue">美股</span>' : ''}</td><td>${esc(x.s.name)}</td><td class="num">${x.s.shares.toLocaleString()}</td><td class="num">${x.s.purchasePrice}</td><td class="num">${x.s.isSold ? x.s.soldPrice : x.s.currentPrice}</td><td class="num">${fmtFull(x.cost)}</td><td class="num">${fmtFull(x.mv)}</td><td class="num"><span class="score ${x.pl >= 0 ? 's90' : 's0'}">${x.pl >= 0 ? '+' : ''}${fmtMoney(x.pl)}</span></td><td class="num"><span class="chip ${x.pl >= 0 ? 'green' : 'red'}">${x.rate >= 0 ? '+' : ''}${x.rate.toFixed(1)}%</span></td><td class="muted small">${(x.s.dividends || []).filter((d) => d.kind === '現金股利').length ? '配息 ' + (x.s.dividends || []).filter((d) => d.kind === '現金股利').length + ' 次' : ''}</td></tr>`;
-    const head = '<thead><tr><th>代號</th><th>名稱</th><th class="num">股數</th><th class="num">成本價</th><th class="num">現價</th><th class="num">成本</th><th class="num">市值</th><th class="num">損益</th><th class="num">報酬率</th><th>配息</th></tr></thead>';
-    body = `<div class="card table-wrap"><h3>持有中 <span class="count">${activeStocks.length}</span><span class="spacer"></span><span class="muted small">美金匯率 ${usdRate()}（匯率表「美金」，沒有則 31）</span></h3><table class="tbl">${head}<tbody>${activeStocks.sort((a, b) => b.mv - a.mv).map(row).join('') || '<tr><td colspan="10" class="empty">尚無持股</td></tr>'}</tbody></table></div>
-      ${sold.length ? `<div class="card table-wrap mt"><h3>已賣出 <span class="count">${sold.length}</span></h3><table class="tbl">${head}<tbody>${sold.map(row).join('')}</tbody></table></div>` : ''}`;
-  } else if (tab === 'assets') {
-    body = `<div class="card table-wrap"><h3>儲蓄險 <span class="count">${Store.insurances.length}</span></h3><table class="tbl"><thead><tr><th>名稱</th><th>公司</th><th class="num">每期保費</th><th>週期・利率</th><th>期間</th><th class="num">目前現值</th><th class="num">預期到期</th></tr></thead><tbody>${Store.insurances.map((i) => { const total = Math.max(1, (i.maturityDate - i.startDate)); const pct = Math.min(100, Math.max(0, Math.round((now - i.startDate) / total * 100))); return `<tr><td><b>${esc(i.name)}</b></td><td>${esc(i.company)}</td><td class="num">${esc(i.currencyCode)} ${Math.round(i.premiumAmount).toLocaleString()}</td><td>${esc(i.paymentPeriod)}・${i.annualRate}%</td><td>${fmtDate(i.startDate).split(' ')[0]} – ${fmtDate(i.maturityDate).split(' ')[0]}<div style="height:4px;border-radius:2px;background:var(--card2);margin-top:4px"><div style="width:${pct}%;height:100%;background:var(--purple);border-radius:2px"></div></div></td><td class="num"><b>${esc(i.currencyCode)} ${Math.round(i.currentValue).toLocaleString()}</b></td><td class="num">${esc(i.currencyCode)} ${Math.round(i.expectedReturn).toLocaleString()}</td></tr>`; }).join('') || '<tr><td colspan="7" class="empty">尚無儲蓄險</td></tr>'}</tbody></table></div>
-    <div class="grid cols-2 mt">
-      <div class="card"><h3>房地產 <span class="count">${reHeld.length}</span></h3><div class="list">${reHeld.map((r) => { const debt = mortgageRemaining(r); return `<div class="item"><div class="avatar sm" style="background:linear-gradient(135deg,#ff9500,#ff3b30)">🏠</div><div class="main-text"><div class="title">${esc(r.name)}</div><div class="meta">${esc([r.city, r.buildingType, r.pingCount ? r.pingCount + ' 坪' : '', '購入 ' + fmtDate(r.purchaseDate).split(' ')[0] + ' ' + fmtMoney(r.purchasePrice), r.monthlyRental ? '月租 ' + fmtMoney(r.monthlyRental) : ''].filter(Boolean).join('・'))}</div></div><div style="text-align:right"><div class="score s80">${fmtMoney(r.currentValue)}</div>${debt ? `<div class="muted small">房貸餘 ${fmtMoney(debt)}</div>` : ''}</div></div>`; }).join('') || '<div class="empty">尚無房地產</div>'}</div></div>
-      <div class="card"><h3>車輛 <span class="count">${vhHeld.length}</span></h3><div class="list">${vhHeld.map((v) => `<div class="item"><div class="avatar sm" style="background:linear-gradient(135deg,#30b0c7,#34c759)">🚗</div><div class="main-text"><div class="title">${esc(v.name)}</div><div class="meta">${esc([v.brand, v.powerType, v.ownerName, '購入 ' + fmtDate(v.purchaseDate).split(' ')[0] + ' ' + fmtMoney(v.purchasePrice)].filter(Boolean).join('・'))}</div></div><span class="score s80">${fmtMoney(v.currentValue)}</span></div>`).join('') || '<div class="empty">尚無車輛</div>'}</div></div>
-    </div>`;
+  } else if (tab === 'income') {
+    const years = [...new Set(incAll.map((x) => x.date.getFullYear()))].sort((a, b) => b - a);
+    const list = [...Store.incomes].sort((a, b) => b.date - a.date).filter((i) => expUI.year === 'all' || i.date.getFullYear() === Number(expUI.year));
+    const recurring = list.filter((i) => i.period && i.period !== '單次'), once = list.filter((i) => !i.period || i.period === '單次');
+    const IC = { '薪水': 'blue', '獎金': 'gold', '禮金': 'pink', '確幸': 'purple', '投資': 'green' };
+    const row = (i) => `<tr><td>${fmtDate(i.date).split(' ')[0]}</td><td><b>${esc(i.title)}</b>${i.note ? `<div class="muted small">${esc(i.note)}</div>` : ''}</td><td><span class="chip ${IC[i.category] || ''}">${esc(i.category)}</span></td><td>${esc(i.period || '單次')}${i.endDate ? `<div class="muted small">至 ${fmtDate(i.endDate).split(' ')[0]}${i.endReason ? '・' + esc(i.endReason) : ''}</div>` : ''}</td><td class="num"><b>${fmtAmt(i.amount, i.linkedBankCurrency)}</b></td><td class="muted small">${esc(bankNameOf(i.linkedBankMilestoneId))}</td></tr>`;
+    const head = '<thead><tr><th>日期</th><th>項目</th><th>分類</th><th>週期</th><th class="num">金額</th><th>入帳銀行</th></tr></thead>';
+    body = `<div class="filters"><span class="muted small">年度</span><span class="fchip ${expUI.year === 'all' ? 'on' : ''}" data-year="all">全部</span>${years.map((y) => `<span class="fchip ${String(expUI.year) === String(y) ? 'on' : ''}" data-year="${y}">${y}</span>`).join('')}</div>
+      <div class="card table-wrap"><h3>週期收入 <span class="count">${recurring.length}</span></h3><table class="tbl">${head}<tbody>${recurring.map(row).join('') || '<tr><td colspan="6" class="empty">—</td></tr>'}</tbody></table></div>
+      <div class="card table-wrap mt"><h3>單次收入 <span class="count">${once.length}</span></h3><table class="tbl">${head}<tbody>${once.map(row).join('') || '<tr><td colspan="6" class="empty">—</td></tr>'}</tbody></table></div>`;
+  } else if (tab === 'variable') {
+    const m = /^(\d{4})-(\d{2})$/.exec(param || '') ; const cur = m ? new Date(+m[1], +m[2] - 1, 1) : new Date(now.getFullYear(), now.getMonth(), 1);
+    const monthStart = cur, monthEnd = new Date(cur.getFullYear(), cur.getMonth() + 1, 1);
+    const list = Store.expenses.filter((e) => e.expenseType !== '固定支出' && e.date >= monthStart && e.date < monthEnd).sort((a, b) => b.date - a.date);
+    const cats = [...new Set(list.map((e) => e.variableCategory || '其他'))].sort();
+    const filtered = list.filter((e) => (expUI.cat === 'all' || (e.variableCategory || '其他') === expUI.cat) && (!expUI.q || (e.title + (e.note || '')).toLowerCase().includes(expUI.q.toLowerCase())));
+    const total = list.reduce((a, e) => a + e.amount * rateOf(e.currencyCode), 0);
+    const byCat = {}; for (const e of list) { const k = e.variableCategory || '其他'; byCat[k] = (byCat[k] || 0) + e.amount * rateOf(e.currencyCode); }
+    const prev = new Date(cur.getFullYear(), cur.getMonth() - 1, 1), next = new Date(cur.getFullYear(), cur.getMonth() + 1, 1);
+    body = `<div class="filters"><a class="btn small" href="#/expense/variable/${monthKeyOf(prev)}">‹ 上月</a><b>${cur.getFullYear()} 年 ${cur.getMonth() + 1} 月</b><a class="btn small" href="#/expense/variable/${monthKeyOf(next)}">下月 ›</a><span class="muted small">本月變動支出 ${fmtFull(total)}・${list.length} 筆</span><span class="spacer"></span><input type="search" id="ex-q" placeholder="搜尋項目／備註" value="${esc(expUI.q)}"></div>
+      <div class="filters"><span class="fchip ${expUI.cat === 'all' ? 'on' : ''}" data-cat="all">全部</span>${cats.map((c) => `<span class="fchip ${expUI.cat === c ? 'on' : ''}" data-cat="${esc(c)}">${esc(c)} ${fmtMoney(byCat[c] || 0, '')}</span>`).join('')}</div>
+      <div class="card table-wrap"><table class="tbl"><thead><tr><th>日期</th><th>項目</th><th>分類</th><th class="num">金額</th><th>付款</th><th>備註</th></tr></thead><tbody>${filtered.map((e) => `<tr><td>${fmtDate(e.date).split(' ')[0]}</td><td><b>${esc(e.title)}</b>${e.linkedVehicleId ? ' <span class="chip teal">🚗</span>' : ''}${e.evKwh ? ` <span class="chip green">⚡ ${e.evKwh} kWh</span>` : ''}</td><td><span class="chip" style="background:${catColor(e.variableCategory || '其他')}22;color:${catColor(e.variableCategory || '其他')}">${esc(e.variableCategory || '其他')}${e.vehicleExpenseCategory ? '・' + esc(e.vehicleExpenseCategory) : ''}${e.socialSubCategory ? '・' + esc(e.socialSubCategory) : ''}</span></td><td class="num"><b>${fmtAmt(e.amount, e.currencyCode)}</b></td><td class="muted small">${e.linkedCreditCardMilestoneId ? '💳 ' + esc(bankNameOf(e.linkedCreditCardMilestoneId)) : e.linkedBankMilestoneId ? '🏦 ' + esc(bankNameOf(e.linkedBankMilestoneId)) : ''}</td><td class="muted small">${esc(e.note || '')}${e.placeAddress ? ' 📍' + esc(e.placeAddress) : ''}</td></tr>`).join('') || '<tr><td colspan="6" class="empty">這個月沒有變動支出</td></tr>'}</tbody></table></div>`;
+  } else if (tab === 'fixed') {
+    const list = Store.expenses.filter((e) => e.expenseType === '固定支出').sort((a, b) => (a.fixedCategory || '').localeCompare(b.fixedCategory || '') || b.amount - a.amount);
+    const monthly = list.reduce((a, e) => a + monthlyEquivalent(e.amount, e.recurrence) * rateOf(e.currencyCode), 0);
+    const yearly = monthly * 12;
+    const byCat = {}; for (const e of list) { const k = e.fixedCategory || '其他'; byCat[k] = (byCat[k] || 0) + monthlyEquivalent(e.amount, e.recurrence) * rateOf(e.currencyCode); }
+    body = `<div class="grid cols-4">${kpiCard('每月固定支出（等值）', fmtMoney(monthly), 'orange', `每年約 ${fmtMoney(yearly)}`)}${kpiCard('項目數', list.length, '', `${Object.keys(byCat).length} 個分類`)}${kpiCard('走信用卡', list.filter((e) => e.linkedCreditCardMilestoneId).length, '', '其餘由銀行扣款')}${kpiCard('最大一項', list.length ? esc(list.reduce((a, b) => (monthlyEquivalent(a.amount, a.recurrence) >= monthlyEquivalent(b.amount, b.recurrence) ? a : b)).title) : '—', '')}</div>
+      <div class="chips mt">${Object.entries(byCat).sort((a, b) => b[1] - a[1]).map(([c, v]) => `<span class="chip indigo">${esc(c)} ${fmtMoney(v, '')}／月</span>`).join('')}</div>
+      <div class="card table-wrap mt"><table class="tbl"><thead><tr><th>項目</th><th>分類</th><th>週期</th><th class="num">金額</th><th class="num">每月等值</th><th>下次扣款</th><th>扣款方式</th><th>金額變動</th></tr></thead><tbody>${list.map((e) => { const hist = (e.amountHistory || []).slice().sort((a, b) => a.date - b.date); const due = e.recurrence ? nextFixedDue(e) : null; const first = hist[0]; const trend = hist.length > 1 ? `${fmtMoney(first.amount, '')} → ${fmtMoney(e.amount, '')}（${hist.length} 次）` : ''; return `<tr><td><b>${esc(e.title)}</b>${e.note ? `<div class="muted small">${esc(e.note)}</div>` : ''}</td><td><span class="chip indigo">${esc(e.fixedCategory || '其他')}${e.insuranceSubCategory ? '・' + esc(e.insuranceSubCategory) : ''}${e.loanSubCategory ? '・' + esc(e.loanSubCategory) : ''}</span></td><td>${esc(e.recurrence || '—')}</td><td class="num"><b>${fmtAmt(e.amount, e.currencyCode)}</b></td><td class="num">${fmtFull(monthlyEquivalent(e.amount, e.recurrence) * rateOf(e.currencyCode))}</td><td>${due ? fmtDate(due).split(' ')[0] + (daysBetween(now, due) <= 7 ? ' <span class="chip orange">' + (daysBetween(now, due) <= 0 ? '今天' : daysBetween(now, due) + ' 天') + '</span>' : '') : '—'}</td><td class="muted small">${e.linkedCreditCardMilestoneId ? '💳 ' + esc(bankNameOf(e.linkedCreditCardMilestoneId)) : e.linkedBankMilestoneId ? '🏦 ' + esc(bankNameOf(e.linkedBankMilestoneId)) : '—'}</td><td class="muted small">${trend}${e.loanTotalAmount ? `貸款 ${fmtMoney(e.loanTotalAmount)}・${e.loanYears || '?'} 年・${e.loanRate || '?'}%` : ''}</td></tr>`; }).join('') || '<tr><td colspan="8" class="empty">尚無固定支出</td></tr>'}</tbody></table></div>`;
+  } else if (tab === 'chart') {
+    const years = [...new Set(expAll.concat(incAll).map((x) => x.date.getFullYear()))].sort();
+    const yExp = {}, yInc = {}; for (const x of expAll) yExp[x.date.getFullYear()] = (yExp[x.date.getFullYear()] || 0) + x.twd; for (const x of incAll) yInc[x.date.getFullYear()] = (yInc[x.date.getFullYear()] || 0) + x.twd;
+    const y = expUI.year === 'all' ? now.getFullYear() : Number(expUI.year);
+    const byCatY = {}; for (const x of expAll) if (x.date.getFullYear() === y) byCatY[x.cat] = (byCatY[x.cat] || 0) + x.twd;
+    const monthsY = []; for (let i = 0; i < 12; i++) monthsY.push(new Date(y, i, 1));
+    const mExpY = {}, mIncY = {}; for (const x of expAll) if (x.date.getFullYear() === y) mExpY[x.date.getMonth()] = (mExpY[x.date.getMonth()] || 0) + x.twd; for (const x of incAll) if (x.date.getFullYear() === y) mIncY[x.date.getMonth()] = (mIncY[x.date.getMonth()] || 0) + x.twd;
+    body = `<div class="filters"><span class="muted small">分類與月份圖的年度</span>${years.slice().reverse().map((yy) => `<span class="fchip ${yy === y ? 'on' : ''}" data-year="${yy}">${yy}</span>`).join('')}</div>
+      <div class="grid cols-2">
+        <div class="card chart-card"><h3>年度收支</h3><div class="chart-box" style="height:260px"><canvas id="ex-year"></canvas></div></div>
+        <div class="card chart-card"><h3>${y} 年逐月收支</h3><div class="chart-box" style="height:260px"><canvas id="ex-monthly"></canvas></div></div>
+      </div>
+      <div class="card chart-card mt"><h3>${y} 年支出分類</h3><div class="chart-box" style="height:${Math.max(220, 26 * Object.keys(byCatY).length + 40)}px"><canvas id="ex-cat-y"></canvas></div></div>`;
+    main.__chartData = { years, yExp, yInc, y, byCatY, monthsY, mExpY, mIncY };
   }
   main.innerHTML = `
-    ${pageHead('財務總覽', `台幣等值概算・${fmtDate(now)}`)}
+    ${pageHead('收支', `${fmtDate(now)}・台幣等值`)}
     <div class="grid cols-5">
-      ${kpi('淨資產概算', fmtMoney(netWorth), netWorth >= 0 ? 'green' : 'red', '銀行＋股票＋保險＋房產＋車輛 − 房貸餘額')}
-      ${kpi('銀行總餘額', fmtMoney(bankTotal), '', `${bankRows.length} 個帳戶`)}
-      ${kpi('股票市值', fmtMoney(stockMV), '', `損益 ${stockMV - stockCost >= 0 ? '+' : ''}${fmtMoney(stockMV - stockCost)}`)}
-      ${kpi('本月支出／收入', `${fmtMoney(cf.exp[thisKey] || 0)}`, (cf.exp[thisKey] || 0) > (cf.inc[thisKey] || 0) ? 'orange' : 'green', `收入 ${fmtMoney(cf.inc[thisKey] || 0)}・信用卡 ${fmtMoney(cardTotalMonth)}`)}
-      ${kpi('保險・房產・車輛', fmtMoney(insTotal + reValue + vhValue), '', reDebt ? `房貸餘額 ${fmtMoney(reDebt)}` : '')}
+      ${kpiCard('本月支出', fmtMoney(mExp), mExp > mInc ? 'orange' : '', `信用卡 ${fmtMoney(S.cardsMs.filter((c) => !c.isDisabled).reduce((a, c) => a + S.cardMonth(c), 0))}`)}
+      ${kpiCard('本月收入', fmtMoney(mInc), 'green')}
+      ${kpiCard('本月結餘', fmtMoney(mInc - mExp), mInc - mExp >= 0 ? 'green' : 'red')}
+      ${kpiCard(`${now.getFullYear()} 年支出`, fmtMoney(ytdExp), '', `${Store.expenses.length} 筆記帳`)}
+      ${kpiCard(`${now.getFullYear()} 年收入`, fmtMoney(ytdInc), 'green', `結餘 ${fmtMoney(ytdInc - ytdExp)}`)}
     </div>
-    <div class="tabs">${tabs.map(([k, l]) => `<button class="${k === tab ? 'on' : ''}" data-tab="${k}">${l}</button>`).join('')}</div>
+    ${tabsHTML('expense', EXPENSE_TABS, tab)}
     ${body}`;
-  main.querySelectorAll('.tabs button').forEach((btn) => btn.onclick = () => { location.hash = `#/finance/${btn.dataset.tab}`; });
-  if (tab !== 'overview' || !window.Chart) return;
-  const css = getComputedStyle(document.documentElement);
-  const textColor = css.getPropertyValue('--text').trim() || '#000';
-  const lineColor = css.getPropertyValue('--line').trim() || 'rgba(0,0,0,0.1)';
-  const labels = cf.months.map((m) => `${m.getFullYear() % 100}/${m.getMonth() + 1}`);
-  charts.push(new Chart($('#fin-cash'), { type: 'bar', data: { labels, datasets: [
-    { label: '收入', data: cf.months.map((m) => Math.round(cf.inc[monthKeyOf(m)] || 0)), backgroundColor: 'rgba(52,199,89,0.75)', borderRadius: 4 },
-    { label: '支出', data: cf.months.map((m) => Math.round(cf.exp[monthKeyOf(m)] || 0)), backgroundColor: 'rgba(255,59,48,0.7)', borderRadius: 4 },
-  ] }, options: { maintainAspectRatio: false, animation: { duration: 350 }, scales: { x: { grid: { display: false }, ticks: { color: textColor } }, y: { beginAtZero: true, grid: { color: lineColor }, ticks: { color: textColor, callback: (v) => fmtMoney(v, '') } } }, plugins: { legend: { labels: { color: textColor } }, tooltip: { callbacks: { label: (t) => `${t.dataset.label} ${fmtFull(t.raw)}` } } } } }));
-  const cats = Object.entries(cf.byCat).sort((a, b) => b[1] - a[1]).slice(0, 12);
-  charts.push(new Chart($('#fin-cat'), { type: 'bar', data: { labels: cats.map((c) => c[0]), datasets: [{ data: cats.map((c) => Math.round(c[1])), backgroundColor: cats.map((c) => c[0].startsWith('固定') ? 'rgba(88,86,214,0.75)' : 'rgba(255,149,0,0.75)'), borderRadius: 5, barThickness: 14 }] }, options: { indexAxis: 'y', maintainAspectRatio: false, animation: { duration: 350 }, scales: { x: { beginAtZero: true, grid: { color: lineColor }, ticks: { color: textColor, callback: (v) => fmtMoney(v, '') } }, y: { grid: { display: false }, ticks: { color: textColor, font: { weight: '700' } } } }, plugins: { legend: { display: false }, tooltip: { callbacks: { label: (t) => fmtFull(t.raw) } } } } }));
+  main.querySelectorAll('.fchip[data-year]').forEach((c) => c.onclick = () => { expUI.year = c.dataset.year; renderExpense(main, tab, param); });
+  main.querySelectorAll('.fchip[data-cat]').forEach((c) => c.onclick = () => { expUI.cat = c.dataset.cat; renderExpense(main, tab, param); });
+  const q = $('#ex-q'); if (q) q.oninput = (e) => { expUI.q = e.target.value; const pos = e.target.selectionStart; renderExpense(main, tab, param); const inp = $('#ex-q'); inp.focus(); inp.setSelectionRange(pos, pos); };
+  if (!window.Chart) return;
+  const { text, line } = chartColors();
+  const moneyTick = (v) => fmtMoney(v, '');
+  if (tab === 'overview') {
+    const labels = cf.months.map((m) => `${m.getFullYear() % 100}/${m.getMonth() + 1}`);
+    charts.push(new Chart($('#ex-cash'), { type: 'bar', data: { labels, datasets: [{ label: '收入', data: cf.months.map((m) => Math.round(cf.inc[monthKeyOf(m)] || 0)), backgroundColor: 'rgba(52,199,89,0.75)', borderRadius: 4 }, { label: '支出', data: cf.months.map((m) => Math.round(cf.exp[monthKeyOf(m)] || 0)), backgroundColor: 'rgba(255,59,48,0.7)', borderRadius: 4 }] }, options: { maintainAspectRatio: false, animation: { duration: 350 }, scales: { x: { grid: { display: false }, ticks: { color: text } }, y: { beginAtZero: true, grid: { color: line }, ticks: { color: text, callback: moneyTick } } }, plugins: { legend: { labels: { color: text } }, tooltip: { callbacks: { label: (t) => `${t.dataset.label} ${fmtFull(t.raw)}` } } } } }));
+    const cats = Object.entries(cf.byCat).sort((a, b) => b[1] - a[1]).slice(0, 12);
+    charts.push(new Chart($('#ex-cat'), { type: 'bar', data: { labels: cats.map((c) => c[0]), datasets: [{ data: cats.map((c) => Math.round(c[1])), backgroundColor: cats.map((c) => catColor(c[0])), borderRadius: 5, barThickness: 14 }] }, options: { indexAxis: 'y', maintainAspectRatio: false, animation: { duration: 350 }, scales: { x: { beginAtZero: true, grid: { color: line }, ticks: { color: text, callback: moneyTick } }, y: { grid: { display: false }, ticks: { color: text, font: { weight: '700' } } } }, plugins: { legend: { display: false }, tooltip: { callbacks: { label: (t) => fmtFull(t.raw) } } } } }));
+  } else if (tab === 'chart') {
+    const D = main.__chartData;
+    charts.push(new Chart($('#ex-year'), { type: 'bar', data: { labels: D.years, datasets: [{ label: '收入', data: D.years.map((yy) => Math.round(D.yInc[yy] || 0)), backgroundColor: 'rgba(52,199,89,0.75)', borderRadius: 4 }, { label: '支出', data: D.years.map((yy) => Math.round(D.yExp[yy] || 0)), backgroundColor: 'rgba(255,59,48,0.7)', borderRadius: 4 }] }, options: { maintainAspectRatio: false, scales: { x: { grid: { display: false }, ticks: { color: text } }, y: { beginAtZero: true, grid: { color: line }, ticks: { color: text, callback: moneyTick } } }, plugins: { legend: { labels: { color: text } }, tooltip: { callbacks: { label: (t) => `${t.dataset.label} ${fmtFull(t.raw)}` } } } } }));
+    charts.push(new Chart($('#ex-monthly'), { type: 'line', data: { labels: D.monthsY.map((m) => `${m.getMonth() + 1} 月`), datasets: [{ label: '收入', data: D.monthsY.map((m) => Math.round(D.mIncY[m.getMonth()] || 0)), borderColor: '#34c759', backgroundColor: 'rgba(52,199,89,0.15)', fill: true, tension: 0.35 }, { label: '支出', data: D.monthsY.map((m) => Math.round(D.mExpY[m.getMonth()] || 0)), borderColor: '#ff3b30', backgroundColor: 'rgba(255,59,48,0.12)', fill: true, tension: 0.35 }] }, options: { maintainAspectRatio: false, scales: { x: { grid: { display: false }, ticks: { color: text } }, y: { beginAtZero: true, grid: { color: line }, ticks: { color: text, callback: moneyTick } } }, plugins: { legend: { labels: { color: text } }, tooltip: { callbacks: { label: (t) => `${t.dataset.label} ${fmtFull(t.raw)}` } } } } }));
+    const cats = Object.entries(D.byCatY).sort((a, b) => b[1] - a[1]);
+    charts.push(new Chart($('#ex-cat-y'), { type: 'bar', data: { labels: cats.map((c) => c[0]), datasets: [{ data: cats.map((c) => Math.round(c[1])), backgroundColor: cats.map((c) => catColor(c[0])), borderRadius: 5, barThickness: 14 }] }, options: { indexAxis: 'y', maintainAspectRatio: false, scales: { x: { beginAtZero: true, grid: { color: line }, ticks: { color: text, callback: moneyTick } }, y: { grid: { display: false }, ticks: { color: text, font: { weight: '700' } } } }, plugins: { legend: { display: false }, tooltip: { callbacks: { label: (t) => fmtFull(t.raw) } } } } }));
+  }
+}
+
+// ---- 理財 -------------------------------------------------------------------
+const FINANCE_TABS = [['overview', '總覽'], ['insurance', '儲蓄險'], ['stock', '股票'], ['vehicle', '載具'], ['realestate', '房地產'], ['chart', '圖表']];
+function stockRowHTML(x) {
+  return `<tr class="clickable" onclick="location.hash='#/finance/stock/${x.s.id}'"><td><b>${esc(x.s.symbol)}</b> ${x.isUS ? '<span class="chip blue">美股</span>' : ''}</td><td>${esc(x.s.name)}</td><td class="num">${x.s.shares.toLocaleString()}</td><td class="num">${x.s.purchasePrice}</td><td class="num">${x.s.isSold ? x.s.soldPrice : x.s.currentPrice}</td><td class="num">${fmtFull(x.cost)}</td><td class="num">${fmtFull(x.mv)}</td><td class="num"><span class="score ${x.pl >= 0 ? 's90' : 's0'}">${x.pl >= 0 ? '+' : ''}${fmtMoney(x.pl)}</span></td><td class="num"><span class="chip ${x.pl >= 0 ? 'green' : 'red'}">${x.rate >= 0 ? '+' : ''}${x.rate.toFixed(1)}%</span></td><td class="muted small">${(x.s.dividends || []).filter((d) => d.kind === '現金股利').length ? '配息 ' + (x.s.dividends || []).filter((d) => d.kind === '現金股利').length + ' 次' : ''}</td></tr>`;
+}
+const STOCK_HEAD = '<thead><tr><th>代號</th><th>名稱</th><th class="num">股數</th><th class="num">成本價</th><th class="num">現價</th><th class="num">成本</th><th class="num">市值</th><th class="num">損益</th><th class="num">報酬率</th><th>配息</th></tr></thead>';
+function renderFinanceHome(main, tab, id) {
+  if (tab === 'stock' && id) return renderStockDetail(main, id);
+  const S = financeSummary(); const now = S.now;
+  let body = '';
+  if (tab === 'overview') {
+    const alloc = [['銀行存款', S.bankTotal, '#007aff'], ['股票', S.stockMV, '#34c759'], ['儲蓄險', S.insTotal, '#af52de'], ['房地產', S.reValue, '#ff9500'], ['車輛', S.vhValue, '#30b0c7']].filter((a) => a[1] > 0);
+    const total = alloc.reduce((a, x) => a + x[1], 0) || 1;
+    body = `<div class="card"><h3>資產配置（台幣等值）</h3><div style="display:flex;height:22px;border-radius:8px;overflow:hidden;border:1px solid var(--line)">${alloc.map(([l, v, c]) => `<div title="${l} ${fmtMoney(v)}" style="width:${v / total * 100}%;background:${c}"></div>`).join('')}</div><div class="chips" style="margin-top:10px">${alloc.map(([l, v, c]) => `<span class="chip" style="background:${c}22;color:${c}">${l} ${fmtMoney(v)}・${Math.round(v / total * 100)}%</span>`).join('')}${S.reDebt ? `<span class="chip red">房貸餘額 −${fmtMoney(S.reDebt)}</span>` : ''}</div></div>
+    <div class="grid cols-2 mt">
+      <div class="card"><h3>持股市值前五 <span class="count">${S.activeStocks.length}</span></h3><div class="list">${S.activeStocks.sort((a, b) => b.mv - a.mv).slice(0, 5).map((x) => `<a class="item clickable" href="#/finance/stock/${x.s.id}"><div class="avatar sm" style="background:linear-gradient(135deg,#34c759,#30b0c7)">${esc(initial(x.s.symbol))}</div><div class="main-text"><div class="title">${esc(x.s.symbol)} ${esc(x.s.name)}</div><div class="meta">${x.s.shares.toLocaleString()} 股・成本 ${fmtMoney(x.cost)}</div></div><div style="text-align:right"><div class="score s80">${fmtMoney(x.mv)}</div><div class="small" style="color:${x.pl >= 0 ? 'var(--green)' : 'var(--red)'}">${x.pl >= 0 ? '+' : ''}${x.rate.toFixed(1)}%</div></div></a>`).join('') || '<div class="empty">尚無持股</div>'}</div></div>
+      <div class="card"><h3>銀行帳戶 <span class="count">${S.bankRows.length}</span></h3><div class="list">${S.bankRows.map(({ m, bal, twd }) => `<a class="item clickable" href="#/life/wealth"><div class="avatar sm" style="background:linear-gradient(135deg,#007aff,#5ac8fa)">${esc(initial(m.bankName || m.title))}</div><div class="main-text"><div class="title">${esc(m.title)}</div><div class="meta">${esc([m.bankName, m.branchName, m.bankAccountType].filter(Boolean).join('・'))}${Object.keys(bal).length > 1 ? '・' + Object.entries(bal).map(([c, v]) => `${c} ${Math.round(v).toLocaleString()}`).join('／') : ''}</div></div><span class="score ${twd >= 0 ? 's80' : 's0'}">${fmtMoney(twd)}</span></a>`).join('') || '<div class="empty">尚無銀行帳戶</div>'}</div></div>
+    </div>`;
+  } else if (tab === 'insurance') {
+    body = `<div class="card table-wrap"><h3>儲蓄險 <span class="count">${Store.insurances.length}</span><span class="spacer"></span><span class="muted small">現值合計 ${fmtMoney(S.insTotal)}</span></h3><table class="tbl"><thead><tr><th>名稱</th><th>公司</th><th class="num">每期保費</th><th>週期・利率</th><th>期間</th><th class="num">目前現值</th><th class="num">預期到期</th><th>連結固定支出</th></tr></thead><tbody>${Store.insurances.map((i) => { const total = Math.max(1, (i.maturityDate - i.startDate)); const pct = Math.min(100, Math.max(0, Math.round((now - i.startDate) / total * 100))); const linked = i.linkedExpenseId && Store.expenses.find((e) => e.id === i.linkedExpenseId); return `<tr><td><b>${esc(i.name)}</b>${i.note ? `<div class="muted small">${esc(i.note)}</div>` : ''}</td><td>${esc(i.company)}</td><td class="num">${fmtAmt(i.premiumAmount, i.currencyCode)}</td><td>${esc(i.paymentPeriod)}・${i.annualRate}%</td><td>${fmtDate(i.startDate).split(' ')[0]} – ${fmtDate(i.maturityDate).split(' ')[0]}<div style="height:4px;border-radius:2px;background:var(--card2);margin-top:4px"><div style="width:${pct}%;height:100%;background:var(--purple);border-radius:2px"></div></div><div class="muted small">${pct}%・剩 ${Math.max(0, Math.round((i.maturityDate - now) / 86400000 / 30))} 個月</div></td><td class="num"><b>${fmtAmt(i.currentValue, i.currencyCode)}</b>${i.currencyCode !== 'NT$' ? `<div class="muted small">≈ ${fmtMoney(i.currentValue * rateOf(i.currencyCode))}</div>` : ''}</td><td class="num">${fmtAmt(i.expectedReturn, i.currencyCode)}</td><td class="muted small">${linked ? esc(linked.title) : '—'}</td></tr>`; }).join('') || '<tr><td colspan="8" class="empty">尚無儲蓄險</td></tr>'}</tbody></table></div>`;
+  } else if (tab === 'stock') {
+    const sold = Store.stocks.filter((s) => s.isSold).map((s) => Object.assign({ s }, stockView(s)));
+    body = `<div class="card table-wrap"><h3>持有中 <span class="count">${S.activeStocks.length}</span><span class="spacer"></span><span class="muted small">市值 ${fmtMoney(S.stockMV)}・損益 ${S.stockMV - S.stockCost >= 0 ? '+' : ''}${fmtMoney(S.stockMV - S.stockCost)}・美金匯率 ${usdRate()}</span></h3><table class="tbl">${STOCK_HEAD}<tbody>${S.activeStocks.sort((a, b) => b.mv - a.mv).map(stockRowHTML).join('') || '<tr><td colspan="10" class="empty">尚無持股</td></tr>'}</tbody></table></div>
+      ${sold.length ? `<div class="card table-wrap mt"><h3>已賣出 <span class="count">${sold.length}</span></h3><table class="tbl">${STOCK_HEAD}<tbody>${sold.map(stockRowHTML).join('')}</tbody></table></div>` : ''}`;
+  } else if (tab === 'vehicle') {
+    body = `<div class="grid cols-2">${Store.vehicles.map((v) => {
+      const linked = Store.expenses.filter((e) => e.linkedVehicleId === v.id);
+      const byCat = {}; for (const e of linked) { const k = e.vehicleExpenseCategory || e.variableCategory || '其他'; byCat[k] = (byCat[k] || 0) + e.amount * rateOf(e.currencyCode); }
+      const fixedMonthly = (v.fixedExpenses || []).reduce((a, f) => a + (f.period === '年' ? f.amount / 12 : f.amount), 0);
+      const ev = linked.filter((e) => e.evKwh).sort((a, b) => a.date - b.date);
+      const kwh = ev.reduce((a, e) => a + e.evKwh, 0); const evCost = ev.reduce((a, e) => a + e.amount, 0);
+      const caps = ev.filter((e) => e.evFromPct != null && e.evToPct != null && e.evToPct - e.evFromPct >= 15).map((e) => e.evKwh / (e.evToPct - e.evFromPct) * 100);
+      const cap = caps.length ? caps.reduce((a, b) => a + b, 0) / caps.length : null;
+      const years = Math.max(0.1, (now - v.purchaseDate) / 86400000 / 365);
+      return `<div class="card" style="${v.soldDate ? 'opacity:.6' : ''}"><h3>🚗 ${esc(v.name)} <span class="chip teal">${esc(v.powerType)}</span>${v.soldDate ? '<span class="chip">已售出</span>' : ''}</h3>
+        <div class="muted small">${esc([v.brand, v.ownerName, '購入 ' + fmtDate(v.purchaseDate).split(' ')[0]].filter(Boolean).join('・'))}${v.note ? '・' + esc(v.note) : ''}</div>
+        <div class="grid cols-3 mt"><div class="kpi"><div class="label">目前價值</div><div class="value" style="font-size:20px">${fmtMoney(v.currentValue)}</div><div class="foot">購入 ${fmtMoney(v.purchasePrice)}・折舊 ${fmtMoney(v.purchasePrice - v.currentValue)}</div></div><div class="kpi"><div class="label">每月固定</div><div class="value" style="font-size:20px">${fmtMoney(fixedMonthly)}</div><div class="foot">${(v.fixedExpenses || []).map((f) => esc(f.category)).join('、') || '—'}</div></div><div class="kpi"><div class="label">累計變動支出</div><div class="value" style="font-size:20px">${fmtMoney(Object.values(byCat).reduce((a, b) => a + b, 0))}</div><div class="foot">持有 ${years.toFixed(1)} 年・每年約 ${fmtMoney(Object.values(byCat).reduce((a, b) => a + b, 0) / years)}</div></div></div>
+        <div class="chips mt">${Object.entries(byCat).sort((a, b) => b[1] - a[1]).map(([k, val]) => `<span class="chip teal">${esc(k)} ${fmtMoney(val, '')}</span>`).join('') || '<span class="muted small">尚無連結的記帳</span>'}</div>
+        ${ev.length ? `<div class="section-title" style="margin:12px 0 6px">⚡ 充電（${ev.length} 次）</div><div class="grid cols-3"><div class="kpi"><div class="label">累計度數</div><div class="value" style="font-size:18px">${Math.round(kwh)} kWh</div></div><div class="kpi"><div class="label">平均每度電價</div><div class="value" style="font-size:18px">NT$ ${kwh ? (evCost / kwh).toFixed(2) : '—'}</div></div><div class="kpi"><div class="label">推估電池容量</div><div class="value" style="font-size:18px">${cap ? cap.toFixed(1) + ' kWh' : '—'}</div><div class="foot">充電區間 ≥15% 的紀錄平均</div></div></div><div class="chart-box mt" style="height:180px"><canvas data-ev="${v.id}"></canvas></div>` : ''}
+      </div>`;
+    }).join('') || '<div class="empty">尚無載具</div>'}</div>`;
+    main.__ev = Store.vehicles.map((v) => ({ id: v.id, ev: Store.expenses.filter((e) => e.linkedVehicleId === v.id && e.evKwh).sort((a, b) => a.date - b.date) }));
+  } else if (tab === 'realestate') {
+    body = `<div class="grid cols-2">${Store.realEstates.map((r) => {
+      const debt = mortgageRemaining(r); const paid = (r.paidItems || []).reduce((a, p) => a + p.amount, 0);
+      const varByCat = {}; for (const x of r.variableExpenses || []) varByCat[x.category] = (varByCat[x.category] || 0) + x.amount;
+      const monthlyMortgage = (r.mortgageItems || []).reduce((a, m) => a + m.amount, 0);
+      return `<div class="card" style="${r.soldDate ? 'opacity:.6' : ''}"><h3>🏠 ${esc(r.name)} ${r.buildingType ? `<span class="chip orange">${esc(r.buildingType)}</span>` : ''}${r.soldDate ? '<span class="chip">已售出</span>' : ''}</h3>
+        <div class="muted small">${esc([r.city, r.address, r.pingCount ? r.pingCount + ' 坪' : '', '購入 ' + fmtDate(r.purchaseDate).split(' ')[0], r.hasElevator ? '有電梯' : ''].filter(Boolean).join('・'))}</div>
+        <div class="grid cols-3 mt"><div class="kpi"><div class="label">目前價值</div><div class="value" style="font-size:20px">${fmtMoney(r.currentValue)}</div><div class="foot">購入 ${fmtMoney(r.purchasePrice)}・${r.currentValue >= r.purchasePrice ? '+' : ''}${fmtMoney(r.currentValue - r.purchasePrice)}</div></div><div class="kpi"><div class="label">房貸餘額</div><div class="value ${debt ? 'orange' : 'green'}" style="font-size:20px">${fmtMoney(debt)}</div><div class="foot">每月 ${fmtMoney(monthlyMortgage)}${r.monthlyRental ? '・月租收入 ' + fmtMoney(r.monthlyRental) : ''}</div></div><div class="kpi"><div class="label">已付價金</div><div class="value" style="font-size:20px">${fmtMoney(paid)}</div><div class="foot">${(r.paidItems || []).map((p) => esc(p.title)).join('、') || '—'}</div></div></div>
+        ${(r.mortgageItems || []).length ? `<div class="section-title" style="margin:12px 0 6px">貸款</div>${r.mortgageItems.map((m) => { const elapsed = Math.max(0, (now.getFullYear() - m.startDate.getFullYear()) * 12 + (now.getMonth() - m.startDate.getMonth())); const pct = Math.min(100, Math.round(elapsed / m.totalPeriods * 100)); return `<div class="t-meta"><b>${esc(m.title)}</b>　每期 ${fmtMoney(m.amount)}・${Math.min(elapsed, m.totalPeriods)}/${m.totalPeriods} 期・起 ${fmtDate(m.startDate).split(' ')[0]}<div style="height:5px;border-radius:3px;background:var(--card2);margin:4px 0 8px"><div style="width:${pct}%;height:100%;background:var(--orange);border-radius:3px"></div></div></div>`; }).join('')}` : ''}
+        ${Object.keys(varByCat).length ? `<div class="chips mt">${Object.entries(varByCat).sort((a, b) => b[1] - a[1]).map(([k, val]) => `<span class="chip orange">${esc(k)} ${fmtMoney(val, '')}</span>`).join('')}</div>` : ''}
+        ${(r.elevatorMaintenances || []).length ? `<div class="muted small mt">電梯保養 ${r.elevatorMaintenances.length} 筆・最近 ${fmtDate([...r.elevatorMaintenances].sort((a, b) => b.date - a.date)[0].date).split(' ')[0]}</div>` : ''}
+      </div>`;
+    }).join('') || '<div class="empty">尚無房地產</div>'}</div>`;
+  } else if (tab === 'chart') {
+    body = `<div class="grid cols-2"><div class="card chart-card"><h3>資產配置</h3><div class="chart-box" style="height:300px"><canvas id="fin-alloc"></canvas></div></div><div class="card chart-card"><h3>持股市值與成本</h3><div class="chart-box" style="height:300px"><canvas id="fin-stocks"></canvas></div></div></div>`;
+  }
+  main.innerHTML = `
+    ${pageHead('理財', `台幣等值概算・${fmtDate(now)}`)}
+    <div class="grid cols-5">
+      ${kpiCard('淨資產概算', fmtMoney(S.netWorth), S.netWorth >= 0 ? 'green' : 'red', '銀行＋股票＋保險＋房產＋車輛 − 房貸餘額')}
+      ${kpiCard('銀行總餘額', fmtMoney(S.bankTotal), '', `${S.bankRows.length} 個帳戶`)}
+      ${kpiCard('股票市值', fmtMoney(S.stockMV), '', `損益 ${S.stockMV - S.stockCost >= 0 ? '+' : ''}${fmtMoney(S.stockMV - S.stockCost)}`)}
+      ${kpiCard('儲蓄險現值', fmtMoney(S.insTotal), '', `${Store.insurances.length} 張`)}
+      ${kpiCard('房產・車輛', fmtMoney(S.reValue + S.vhValue), '', S.reDebt ? `房貸餘額 ${fmtMoney(S.reDebt)}` : '')}
+    </div>
+    ${tabsHTML('finance', FINANCE_TABS, tab)}
+    ${body}`;
+  if (!window.Chart) return;
+  const { text, line } = chartColors();
+  if (tab === 'vehicle') {
+    for (const { id: vid, ev } of main.__ev) {
+      const cv = main.querySelector(`canvas[data-ev="${vid}"]`); if (!cv || ev.length < 2) continue;
+      charts.push(new Chart(cv, { type: 'line', data: { labels: ev.map((e) => `${e.date.getMonth() + 1}/${e.date.getDate()}`), datasets: [{ label: '每度電價', data: ev.map((e) => +(e.amount / e.evKwh).toFixed(2)), borderColor: '#34c759', backgroundColor: 'rgba(52,199,89,0.15)', fill: true, tension: 0.35, pointRadius: 4 }] }, options: { maintainAspectRatio: false, scales: { x: { grid: { display: false }, ticks: { color: text } }, y: { grid: { color: line }, ticks: { color: text } } }, plugins: { legend: { display: false }, tooltip: { callbacks: { label: (t) => `NT$ ${t.raw}／kWh` } } } } }));
+    }
+  } else if (tab === 'chart') {
+    const alloc = [['銀行存款', S.bankTotal, '#007aff'], ['股票', S.stockMV, '#34c759'], ['儲蓄險', S.insTotal, '#af52de'], ['房地產', S.reValue, '#ff9500'], ['車輛', S.vhValue, '#30b0c7']].filter((a) => a[1] > 0);
+    charts.push(new Chart($('#fin-alloc'), { type: 'doughnut', data: { labels: alloc.map((a) => a[0]), datasets: [{ data: alloc.map((a) => Math.round(a[1])), backgroundColor: alloc.map((a) => a[2]), borderWidth: 0 }] }, options: { maintainAspectRatio: false, plugins: { legend: { position: 'right', labels: { color: text } }, tooltip: { callbacks: { label: (t) => `${t.label} ${fmtFull(t.raw)}` } } } } }));
+    const st = S.activeStocks.sort((a, b) => b.mv - a.mv);
+    charts.push(new Chart($('#fin-stocks'), { type: 'bar', data: { labels: st.map((x) => x.s.symbol), datasets: [{ label: '成本', data: st.map((x) => Math.round(x.cost)), backgroundColor: 'rgba(142,142,147,0.6)', borderRadius: 4 }, { label: '市值', data: st.map((x) => Math.round(x.mv)), backgroundColor: st.map((x) => (x.pl >= 0 ? 'rgba(52,199,89,0.8)' : 'rgba(255,59,48,0.8)')), borderRadius: 4 }] }, options: { maintainAspectRatio: false, scales: { x: { grid: { display: false }, ticks: { color: text } }, y: { beginAtZero: true, grid: { color: line }, ticks: { color: text, callback: (v) => fmtMoney(v, '') } } }, plugins: { legend: { labels: { color: text } }, tooltip: { callbacks: { label: (t) => `${t.dataset.label} ${fmtFull(t.raw)}` } } } } }));
+  }
+}
+function renderStockDetail(main, id) {
+  const s = Store.stocks.find((x) => x.id === id);
+  if (!s) { main.innerHTML = pageHead('找不到股票', '<a href="#/finance/stock">回股票</a>'); return; }
+  const x = stockView(s); const now = new Date();
+  const txs = [...(s.transactions || [])].sort((a, b) => b.date - a.date); const divs = [...(s.dividends || [])].sort((a, b) => b.date - a.date);
+  const cashDiv = divs.filter((d) => d.kind === '現金股利').reduce((a, d) => a + d.perShare * d.sharesAtEvent, 0) * x.f;
+  const held = s.purchaseDate ? Math.max(0.1, (now - s.purchaseDate) / 86400000 / 365) : 0;
+  main.innerHTML = `
+    <div class="crumb"><a href="#/finance/stock">理財・股票</a> › ${esc(s.symbol)}</div>
+    <div class="card hero" style="background:linear-gradient(135deg, rgba(52,199,89,0.16), rgba(48,176,199,0.10))"><div class="avatar" style="background:linear-gradient(135deg,#34c759,#30b0c7)">${esc(initial(s.symbol))}</div>
+      <div style="flex:1;min-width:0"><div class="name">${esc(s.symbol)} ${esc(s.name)} ${x.isUS ? '<span class="chip blue big">美股</span>' : ''}${s.isSold ? '<span class="chip big">已賣出</span>' : ''}</div>
+        <div class="facts"><span>📆 首購 ${fmtDate(s.purchaseDate).split(' ')[0]}${held ? `（持有 ${held.toFixed(1)} 年）` : ''}</span>${s.soldDate ? `<span>售出 ${fmtDate(s.soldDate).split(' ')[0]}</span>` : ''}<span>🏦 ${esc(bankNameOf(s.linkedSecuritiesMilestoneId) || bankNameOf(s.linkedBankMilestoneId) || '—')}</span>${x.isUS ? `<span>匯率 ${x.f}</span>` : ''}</div>${s.note ? `<div class="muted small" style="margin-top:6px">${esc(s.note)}</div>` : ''}</div>
+      <div class="row" style="gap:18px"><div class="score-card"><div class="muted small">市值</div><div class="big score s80" style="font-size:26px">${fmtMoney(x.mv)}</div></div><div class="score-card"><div class="muted small">損益</div><div class="big score ${x.pl >= 0 ? 's90' : 's0'}" style="font-size:26px">${x.pl >= 0 ? '+' : ''}${fmtMoney(x.pl)}</div></div><div class="score-card"><div class="muted small">報酬率</div><div class="big score ${x.pl >= 0 ? 's90' : 's0'}" style="font-size:26px">${x.rate >= 0 ? '+' : ''}${x.rate.toFixed(1)}%</div></div></div>
+    </div>
+    <div class="grid cols-5 mt">
+      ${kpiCard('股數', s.shares.toLocaleString(), '', `${(s.shares / 1000).toFixed(3)} 張`)}
+      ${kpiCard('平均成本', s.purchasePrice, '', `總成本 ${fmtMoney(x.cost)}`)}
+      ${kpiCard(s.isSold ? '賣出價' : '現價', s.isSold ? s.soldPrice : s.currentPrice, '')}
+      ${kpiCard('現金股利累計', fmtMoney(cashDiv), 'green', `${divs.filter((d) => d.kind === '現金股利').length} 次・含息報酬 ${x.cost ? ((x.pl + cashDiv) / x.cost * 100).toFixed(1) : '—'}%`)}
+      ${kpiCard('交易次數', txs.length, '', `買 ${txs.filter((t) => t.kind === '買入').length}・賣 ${txs.filter((t) => t.kind === '賣出').length}`)}
+    </div>
+    <div class="grid cols-2 mt">
+      <div class="card table-wrap"><h3>交易紀錄 <span class="count">${txs.length}</span></h3><table class="tbl"><thead><tr><th>日期</th><th>類型</th><th class="num">張數</th><th class="num">股數</th><th class="num">價格</th><th class="num">金額</th></tr></thead><tbody>${txs.map((t) => `<tr><td>${fmtDate(t.date).split(' ')[0]}</td><td><span class="chip ${t.kind === '買入' ? 'green' : 'red'}">${esc(t.kind)}</span></td><td class="num">${t.lots}</td><td class="num">${Math.round(t.lots * 1000).toLocaleString()}</td><td class="num">${t.price}</td><td class="num"><b>${fmtFull(t.lots * 1000 * t.price, x.isUS ? 'US$' : 'NT$')}</b></td></tr>`).join('') || '<tr><td colspan="6" class="empty">尚無交易紀錄</td></tr>'}</tbody></table></div>
+      <div class="card table-wrap"><h3>配息／配股 <span class="count">${divs.length}</span></h3><table class="tbl"><thead><tr><th>日期</th><th>類型</th><th class="num">每股</th><th class="num">股數</th><th class="num">金額／股數</th><th>備註</th></tr></thead><tbody>${divs.map((d) => `<tr><td>${fmtDate(d.date).split(' ')[0]}</td><td><span class="chip ${d.kind === '現金股利' ? 'gold' : 'green'}">${esc(d.kind)}</span></td><td class="num">${d.perShare}</td><td class="num">${Math.round(d.sharesAtEvent).toLocaleString()}</td><td class="num"><b>${d.kind === '現金股利' ? fmtFull(d.perShare * d.sharesAtEvent, x.isUS ? 'US$' : 'NT$') : Math.round(d.perShare * d.sharesAtEvent / 10).toLocaleString() + ' 股'}</b></td><td class="muted small">${esc(d.note || '')}</td></tr>`).join('') || '<tr><td colspan="6" class="empty">尚無配息</td></tr>'}</tbody></table></div>
+    </div>`;
+}
+
+// ---- 人生・財富（財富卡片） -------------------------------------------------
+function renderWealth(main) {
+  const S = financeSummary(); const now = S.now;
+  const subColor = { '銀行': 'blue', '信用卡': 'orange', '證券': 'green', '保險': 'purple' };
+  const order = { '銀行': 0, '信用卡': 1, '證券': 2, '保險': 3 };
+  const fm = [...S.fm].sort((a, b) => (order[a.financeSubCategory] ?? 9) - (order[b.financeSubCategory] ?? 9));
+  const counts = {}; for (const m of fm) counts[m.financeSubCategory] = (counts[m.financeSubCategory] || 0) + 1;
+  main.innerHTML = `
+    ${pageHead('財富卡片', `${fm.length} 筆帳戶・銀行總餘額 ${fmtMoney(S.bankTotal)}（台幣等值）`)}
+    <div class="chips" style="margin-bottom:14px">${Object.entries(counts).map(([k, n]) => `<span class="chip ${subColor[k] || ''} big">${esc(k)} ${n}</span>`).join('')}</div>
+    <div class="grid cols-2">${fm.map((m) => {
+      let val = '', detail = '', extra = '';
+      if (m.financeSubCategory === '銀行') {
+        const bal = bankBalances(m); val = fmtMoney(balanceTWD(bal)); detail = Object.entries(bal).map(([c, v]) => `${c} ${Math.round(v).toLocaleString()}`).join('／');
+        const deps = [...(m.bankDeposits || [])].sort((a, b) => b.date - a.date).slice(0, 8);
+        extra = deps.length ? `<details class="agenda"><summary>最近存提 ${deps.length} 筆</summary><div class="sub-items">${deps.map((d) => `<div class="t-meta" style="padding:3px 0;display:flex;justify-content:space-between"><span>${fmtDate(d.date).split(' ')[0]}${d.isAdjust ? ' <span class="chip indigo">沖正</span>' : ''}${d.note ? '・' + esc(d.note) : ''}</span><b style="color:${d.isWithdrawal ? 'var(--red)' : 'var(--green)'}">${d.isWithdrawal ? '−' : '+'}${fmtAmt(d.amount, d.currencyCode)}</b></div>`).join('')}</div></details>` : '';
+      } else if (m.financeSubCategory === '信用卡') {
+        const used = S.cardMonth(m); val = fmtMoney(used) + '／本月'; detail = [m.creditLimit ? `額度 ${fmtMoney(m.creditLimit)}・${Math.round(used / m.creditLimit * 100)}%` : '', m.annualFee ? '年費 ' + fmtMoney(m.annualFee) : '', m.billingDay ? '結帳 ' + m.billingDay + ' 日' : '', m.paymentDay ? '繳款 ' + m.paymentDay + ' 日' : '', m.expiryDate ? '到期 ' + fmtDate(m.expiryDate).split(' ')[0] : '', m.linkedBankMilestoneId ? '扣款 ' + bankNameOf(m.linkedBankMilestoneId) : ''].filter(Boolean).join('・');
+        const ents = creditCardEntries(m.id, now).sort((a, b) => b.date - a.date).slice(0, 8);
+        extra = ents.length ? `<details class="agenda"><summary>最近消費 ${ents.length} 筆</summary><div class="sub-items">${ents.map((e) => `<div class="t-meta" style="padding:3px 0;display:flex;justify-content:space-between"><span>${fmtDate(e.date).split(' ')[0]}・${esc(e.expense.title)}</span><b>${fmtFull(e.amount)}</b></div>`).join('')}</div></details>` : '';
+      } else if (m.financeSubCategory === '保險') { val = m.premiumAmount ? fmtMoney(m.premiumAmount) + '／期' : ''; detail = [m.insuranceCompany, m.insuranceType, m.policyNumber, m.beneficiary ? '受益人 ' + m.beneficiary : ''].filter(Boolean).join('・'); }
+      else { const linked = Store.stocks.filter((s) => s.linkedSecuritiesMilestoneId === m.id && !s.isSold); val = fmtMoney(linked.reduce((a, s) => a + stockView(s).mv, 0)); detail = [m.securitiesAccountType, `持股 ${linked.length} 檔`].filter(Boolean).join('・'); extra = linked.length ? `<div class="chips" style="margin-top:6px">${linked.map((s) => `<a class="chip green" href="#/finance/stock/${s.id}">${esc(s.symbol)}</a>`).join('')}</div>` : ''; }
+      return `<div class="card" style="${m.isDisabled ? 'opacity:.55' : ''}"><div class="row" style="align-items:flex-start"><div class="avatar sm" style="background:${m.financeSubCategory === '銀行' ? 'linear-gradient(135deg,#007aff,#5ac8fa)' : m.financeSubCategory === '信用卡' ? 'linear-gradient(135deg,#ff9500,#ffcc00)' : m.financeSubCategory === '證券' ? 'linear-gradient(135deg,#34c759,#30b0c7)' : 'linear-gradient(135deg,#af52de,#5856d6)'}">${esc(initial(m.bankName || m.insuranceCompany || m.title))}</div><div style="flex:1;min-width:0"><div style="font-weight:900;font-size:15px">${esc(m.title)} <span class="chip ${subColor[m.financeSubCategory] || ''}">${esc(m.financeSubCategory)}</span>${m.isDisabled ? ' <span class="chip">停用</span>' : ''}</div><div class="muted small">${esc([m.bankName, m.branchName, m.bankAccountType, m.cardName, m.cardLastFour ? '末' + m.cardLastFour : ''].filter(Boolean).join('・'))}</div></div><div class="score s80" style="font-size:18px">${val}</div></div><div class="muted small" style="margin-top:8px">${esc(detail)}</div>${extra}${m.note ? `<div class="muted small" style="margin-top:6px">${esc(m.note)}</div>` : ''}</div>`;
+    }).join('') || '<div class="empty">尚無財富卡片</div>'}</div>`;
+}
+
+// ---- 設定 -----------------------------------------------------------------
+function renderSettings(main) {
+  const token = localStorage.getItem(TOKEN_KEY) || '';
+  const masked = token ? token.slice(0, 6) + '…' + token.slice(-4) : '（未設定）';
+  const counts = [['部屬', Store.subs.length], ['部門', Store.depts.length], ['組織人員', Store.orgPeople.length], ['機台', Store.equipment.length], ['里程碑', Store.milestones.length], ['名片', Store.cards.length], ['個人事件', Store.personalEvents.length], ['記帳', Store.expenses.length], ['收入', Store.incomes.length], ['匯率', Store.currencyRates.length], ['儲蓄險', Store.insurances.length], ['股票', Store.stocks.length], ['載具', Store.vehicles.length], ['房地產', Store.realEstates.length]];
+  const mins = Math.round(AutoRefresh.intervalMs / 60000);
+  main.innerHTML = `
+    ${pageHead('設定', '網頁版設定只存在這台瀏覽器')}
+    <div class="grid cols-2">
+      <div class="card"><h3>連線</h3>
+        <div class="t-meta">資料來源：<b>${esc(Store.source || '—')}</b>${Store.loadedAt ? `・${fmtDateTime(Store.loadedAt)} 讀取` : ''}</div>
+        <div class="t-meta" style="margin-top:6px">CloudKit API Token：<code>${esc(masked)}</code></div>
+        <div class="row mt"><button class="btn small" id="st-reload">重新讀取</button><button class="btn small ghost" id="st-token">更換 Token</button><button class="btn small ghost" id="st-signout">登出</button></div>
+        <div class="section-title">自動更新</div>
+        <div class="row"><span class="t-meta">每</span><select id="st-interval" class="btn small">${[5, 10, 15, 30, 60].map((m) => `<option value="${m}" ${m === mins ? 'selected' : ''}>${m} 分鐘</option>`).join('')}</select><span class="t-meta">在背景重新讀取一次（只有資料變動才重畫）</span></div>
+        <div class="muted small mt">${AutoRefresh.nextAt ? `下次自動更新 ${fmtTime(AutoRefresh.nextAt)}` : Store.source === 'iCloud' ? '自動更新暫停中' : '示範資料不自動更新'}</div>
+      </div>
+      <div class="card"><h3>已讀取的資料</h3><div class="chips">${counts.map(([k, n]) => `<span class="chip ${n ? 'green' : ''}">${k} ${n}</span>`).join('')}</div>
+        <div class="section-title">說明</div>
+        <div class="t-meta">評分權重使用 App 出廠預設值：App 進階設定裡調整過的權重存在手機本機，不會同步到 iCloud。</div>
+        <div class="t-meta" style="margin-top:4px">美股匯率取匯率表的「美金」；沒有就用 31。</div>
+        <div class="t-meta" style="margin-top:4px">網頁為唯讀，要修改資料請用 App。</div>
+        <div class="t-meta" style="margin-top:4px">頁面順序與分類對齊 App：收支／理財／人生／設定。灰色項目尚未提供網頁版。</div>
+      </div>
+    </div>`;
+  $('#st-reload').onclick = () => $('#reload-btn').click();
+  $('#st-token').onclick = () => { localStorage.removeItem(TOKEN_KEY); location.href = location.pathname; };
+  $('#st-signout').onclick = () => $('#signout-btn').click();
+  $('#st-interval').onchange = (e) => { AutoRefresh.intervalMs = Number(e.target.value) * 60000; try { localStorage.setItem('lifegood_refresh_min', String(e.target.value)); } catch (err) { /* ignore */ } if (Store.source === 'iCloud') AutoRefresh.schedule(); toast(`自動更新改為每 ${e.target.value} 分鐘`); renderSettings(main); };
 }
 
 // ---------------------------------------------------------------------------
