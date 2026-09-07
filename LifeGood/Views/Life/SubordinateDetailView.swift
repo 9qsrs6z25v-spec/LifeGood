@@ -3541,16 +3541,22 @@ struct TaskEditorSheet: View {
                         }
                     }
                     // [v25.325] 應做未作為（缺失）：開啟即轉為扣分事項，分數自動 -1
-                    Toggle(isOn: $isDereliction) {
+                    // [v25.331] 改在 Toggle 的 Binding setter 裡帶分數：原本用 onChange(of:)，
+                    // onAppear 載入既有缺失任務（false→true）也會觸發，把已存的自訂分數
+                    // （例如 -3）一律洗回 -1，等於每次編輯都偷改分數。只有使用者親手切換才動。
+                    Toggle(isOn: Binding(
+                        get: { isDereliction },
+                        set: { on in
+                            isDereliction = on
+                            // 開＝自動設 -1（仍可用下方加減微調）；關＝回到全域預設
+                            scoreValue = on ? -1 : ScoreWeights.actTask
+                        }
+                    )) {
                         Label("應做未作為（缺失）",
                               systemImage: isDereliction ? "exclamationmark.triangle.fill" : "exclamationmark.triangle")
                             .foregroundStyle(isDereliction ? .red : .primary)
                     }
                     .tint(.red)
-                    .onChange(of: isDereliction) { _, on in
-                        // 開＝自動設 -1（仍可用下方加減微調）；關＝回到全域預設
-                        scoreValue = on ? -1 : ScoreWeights.actTask
-                    }
                     // [v25.294] 任務自訂分數：右側加減調整，可正可負；等於全域預設值
                     // 時存 nil（跟隨進階設定的「完成任務」權重，日後調整會跟著變）
                     HStack(spacing: 10) {
@@ -4898,6 +4904,8 @@ struct SubordinateItemCard: View {
             }
             ownerBlock(subId: subId, accent: .cyan)
             taskStatusRow(t)
+            // [v25.331] 卡片補顯示任務分數：編輯頁改了分數，卡片原本完全沒地方看得到
+            field("任務分數", taskScoreText(t))
             if let info = cardEquipmentInfo(t.equipmentLink) {
                 field("來源機台", info.name + (info.system.isEmpty ? "" : "（\(info.system)）"))
             }
@@ -5089,6 +5097,18 @@ struct SubordinateItemCard: View {
     }
 
     /// 任務狀態列：已完成（綠）／逾期 N 天（紅）／進行中（青）
+    /// [v25.331] 任務分數文字：缺失＝存明確分數（預設 -1）；一般任務未自訂＝跟隨全域預設
+    private func taskScoreText(_ t: SubordinateTask) -> String {
+        if t.isDereliction {
+            let s = t.customScore ?? -1
+            return "\(s) 分（缺失扣分）"
+        }
+        if let c = t.customScore {
+            return (c > 0 ? "+\(c)" : "\(c)") + " 分（自訂）"
+        }
+        return "+\(ScoreWeights.actTask) 分（預設）"
+    }
+
     private func taskStatusRow(_ t: SubordinateTask) -> some View {
         let (text, color): (String, Color) = {
             if t.isCompleted { return ("已完成", .green) }
@@ -5177,14 +5197,27 @@ struct SubordinateItemCard: View {
         }
     }
 
+    /// [v25.331] 編輯頁一律帶 store 裡的最新資料，而非開卡片時的快照。
+    /// 原本傳快照：卡片上用鉛筆就地改過內容／備註、或已經進編輯頁存過一次，再按「編輯」
+    /// 時表單仍是舊值，一存檔就把先前的修改整個蓋回去——看起來就像「儲存了但卡片沒更新」。
     @ViewBuilder
     private var editor: some View {
         switch ref {
-        case .task(let subId, let task):     TaskEditorSheet(subordinateId: subId, editing: task)
-        case .meeting(let subId, let meeting): MeetingEditorSheet(subordinateId: subId, editing: meeting)
-        case .report(let subId, let report):  WeeklyReportEditorSheet(subordinateId: subId, editing: report)
-        case .leave(let subId, let rec):       RecordEditorSheet(subordinateId: subId, type: rec.type, editing: rec)
-        case .record(let subId, let rec):      RecordEditorSheet(subordinateId: subId, type: rec.type, editing: rec)
+        case .task(let subId, let snap):
+            let live = lifeStore.subordinates.first { $0.id == subId }?.tasks.first { $0.id == snap.id } ?? snap
+            TaskEditorSheet(subordinateId: subId, editing: live)
+        case .meeting(let subId, let snap):
+            let live = lifeStore.subordinates.first { $0.id == subId }?.meetings.first { $0.id == snap.id } ?? snap
+            MeetingEditorSheet(subordinateId: subId, editing: live)
+        case .report(let subId, let snap):
+            let live = lifeStore.subordinates.first { $0.id == subId }?.weeklyReports.first { $0.id == snap.id } ?? snap
+            WeeklyReportEditorSheet(subordinateId: subId, editing: live)
+        case .leave(let subId, let snap):
+            let live = lifeStore.subordinates.first { $0.id == subId }?.records.first { $0.id == snap.id } ?? snap
+            RecordEditorSheet(subordinateId: subId, type: live.type, editing: live)
+        case .record(let subId, let snap):
+            let live = lifeStore.subordinates.first { $0.id == subId }?.records.first { $0.id == snap.id } ?? snap
+            RecordEditorSheet(subordinateId: subId, type: live.type, editing: live)
         }
     }
 
