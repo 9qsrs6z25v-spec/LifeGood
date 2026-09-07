@@ -2588,6 +2588,7 @@ struct ScoreWeightSettingsView: View {
     @AppStorage("score_act_base") private var actBase = 60
     @AppStorage("score_act_task") private var actTask = 3
     @AppStorage("score_act_item") private var actItem = 1
+    @AppStorage("score_act_meeting_owner") private var actMeetingOwner = 1
     @AppStorage("score_act_report") private var actReport = 3
     @AppStorage("score_act_mention") private var actMention = 2
     @AppStorage("score_act_side_role") private var actSideRole = 3
@@ -2609,6 +2610,7 @@ struct ScoreWeightSettingsView: View {
             Section {
                 weightRow("基礎分", value: $actBase, range: 0...200, sign: "")
                 weightRow("完成任務", value: $actTask, range: 0...20, sign: "+")
+                weightRow("會議掛名（每場）", value: $actMeetingOwner, range: 0...20, sign: "+")
                 weightRow("完成議程項目", value: $actItem, range: 0...20, sign: "+")
                 weightRow("完成報告", value: $actReport, range: 0...20, sign: "+")
                 weightRow("被 @ 標註", value: $actMention, range: 0...20, sign: "+")
@@ -2617,7 +2619,7 @@ struct ScoreWeightSettingsView: View {
             } header: {
                 Text("主動性")
             } footer: {
-                Text("喪假／公假／病假不列入請假扣分。")
+                Text("喪假／公假／病假不列入請假扣分。議程項目的分數計給項目指派的負責人（多人各計一次）；沒指派才計給會議掛名的負責人。")
             }
             Section {
                 weightRow("每項逾期", value: $actOverdue, range: 0...20, sign: "−")
@@ -2670,7 +2672,7 @@ struct ScoreWeightSettingsView: View {
     }
 
     private func resetAll() {
-        let keys = ["score_act_base", "score_act_task", "score_act_item", "score_act_report",
+        let keys = ["score_act_base", "score_act_task", "score_act_item", "score_act_meeting_owner", "score_act_report",
                     "score_act_mention", "score_act_side_role", "score_act_leave_per8h",
                     "score_act_overdue",
                     "score_pot_base", "score_pot_ach", "score_pot_pro", "score_pot_imp",
@@ -2678,7 +2680,7 @@ struct ScoreWeightSettingsView: View {
                     "score_pot_miss_normal", "score_pot_miss_severe"]
         for k in keys { UserDefaults.standard.removeObject(forKey: k) }
         // @AppStorage 已快取的值也要拉回出廠值，畫面才會即時跳回
-        actBase = 60; actTask = 3; actItem = 1; actReport = 3
+        actBase = 60; actTask = 3; actItem = 1; actMeetingOwner = 1; actReport = 3
         actMention = 2; actSideRole = 3; actLeavePer8h = 2; actOverdue = 0
         potBase = 80; potAch = 3; potPro = 2; potImp = 1
         potCon = 2; potFault = 3; potMissMinor = 1; potMissNormal = 2; potMissSevere = 4

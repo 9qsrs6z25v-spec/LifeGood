@@ -50,7 +50,7 @@ Token 只會存在你自己瀏覽器的 localStorage，不會寫進程式碼、�
 - 讀取的記錄：`kv_life_subordinates`、`kv_life_departments`、`kv_life_org_people`、
   `kv_life_grade_titles`、`kv_life_equipment_pool`、`kv_life_milestones`（兼任職務待辦）、
   `kv_life_business_cards`（@ 標註比對用的名字）。全部在私有資料庫的 `LifeGoodZone`。
-- 評分規則（潛力／主動性／逾期定案制／兼任待辦／被標註）與 App 相同，
+- 評分規則（潛力／主動性／逾期定案制／兼任待辦／被標註／會議掛名基本分與議程項目依指派計分）與 App 相同，
   但權重使用 App 出廠預設值：App 進階設定裡調整過的權重存在手機本機，不會同步到 iCloud，網頁讀不到。
 - 統計圖表的年度歸類：任務／報告依完成時間、請假與紀錄依日期、逾期依截止日。
 

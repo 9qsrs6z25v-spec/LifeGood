@@ -34,7 +34,7 @@ const DATE_KEYS = new Set([
 const W = {
   potBase: 80, potPro: 2, potCon: 2, potAch: 3, potImp: 1, potFault: 3,
   potMissMinor: 1, potMissNormal: 2, potMissSevere: 4,
-  actBase: 60, actTask: 3, actItem: 1, actReport: 3, actMention: 2, actSideRole: 3,
+  actBase: 60, actTask: 3, actItem: 1, actMeetingOwner: 1, actReport: 3, actMention: 2, actSideRole: 3,
   actLeavePer8h: 2, actOverdue: 0,
 };
 const LEAVE_EXEMPT = new Set(['喪假', '公假', '病假']);
@@ -218,12 +218,14 @@ function proactivityBreakdown(s, ctx) {
   const doneTasks = (s.tasks || []).filter((t) => t.isCompleted && !t.sideRoleLink);
   const defaultTasks = doneTasks.filter((t) => t.customScore == null).length;
   const customTasks = doneTasks.filter((t) => t.customScore != null).map((t) => t.customScore);
-  const completedItems = (s.meetings || []).flatMap(allItems).filter((i) => i.isCompleted && !i.sideRoleLink).length;
+  const completedItems = ctx.itemCredits[s.id] || 0;
   const completedReports = (s.weeklyReports || []).filter((r) => r.isCompleted).length;
   const leaveHours = leaveHoursOf(s);
+  const owned = (s.meetings || []).length;
+  if (owned > 0) items.push([`會議掛名 ×${owned}`, owned * W.actMeetingOwner]);
   if (defaultTasks > 0) items.push([`完成任務 ×${defaultTasks}`, defaultTasks * W.actTask]);
   if (customTasks.length) items.push([`完成任務（自訂分）×${customTasks.length}`, customTasks.reduce((a, b) => a + b, 0)]);
-  if (completedItems > 0) items.push([`完成議程項目 ×${completedItems}`, completedItems * W.actItem]);
+  if (completedItems > 0) items.push([`完成議程項目（指派給我）×${completedItems}`, completedItems * W.actItem]);
   if (completedReports > 0) items.push([`完成報告 ×${completedReports}`, completedReports * W.actReport]);
   if (mentioned > 0) items.push([`被標註 ×${mentioned}`, mentioned * W.actMention]);
   if (sideDone > 0) items.push([`完成兼任待辦 ×${sideDone}`, sideDone * W.actSideRole]);
@@ -242,9 +244,9 @@ function proactivityScore(s, ctx) {
   const sideDone = (ctx.sideRoles[s.id] || { done: 0 }).done;
   const taskPoints = (s.tasks || []).filter((t) => t.isCompleted && !t.sideRoleLink)
     .reduce((a, t) => a + (t.customScore ?? W.actTask), 0);
-  const completedItems = (s.meetings || []).flatMap(allItems).filter((i) => i.isCompleted && !i.sideRoleLink).length;
+  const completedItems = ctx.itemCredits[s.id] || 0;
   const completedReports = (s.weeklyReports || []).filter((r) => r.isCompleted).length;
-  let score = W.actBase + taskPoints + completedItems * W.actItem + completedReports * W.actReport
+  let score = W.actBase + taskPoints + (s.meetings || []).length * W.actMeetingOwner + completedItems * W.actItem + completedReports * W.actReport
     + mentioned * W.actMention + sideDone * W.actSideRole;
   score -= leaveHoursOf(s) / 8 * W.actLeavePer8h;
   score -= overdueOpenCount(s) * W.actOverdue;
@@ -326,7 +328,26 @@ function sideRoleTaskCounts() {
   }
   return out;
 }
-function buildScoreContext() { return { mentions: mentionedCounts(), sideRoles: sideRoleTaskCounts() }; }
+/** 議程項目完成分歸屬：有指派部屬 → 每位各計一次；沒指派或都不是部屬 → 會議掛名負責人 */
+function meetingItemCredits() {
+  const subIds = new Set(Store.subs.map((s) => s.id));
+  const viaOrg = {}, viaCard = {};
+  for (const p of Store.orgPeople) {
+    if (!p.linkedSubordinateId || !subIds.has(p.linkedSubordinateId)) continue;
+    viaOrg[p.id] = p.linkedSubordinateId;
+    if (p.linkedBusinessCardId) viaCard[p.linkedBusinessCardId] = p.linkedSubordinateId;
+  }
+  const resolve = (pid) => (subIds.has(pid) ? pid : (viaOrg[pid] || viaCard[pid] || null));
+  const out = {};
+  for (const s of Store.subs) for (const m of s.meetings || []) for (const it of allItems(m)) {
+    if (!it.isCompleted || it.sideRoleLink) continue;
+    const owners = new Set((it.assigneeIds || []).map(resolve).filter(Boolean));
+    if (!owners.size) out[s.id] = (out[s.id] || 0) + 1;
+    else for (const id of owners) out[id] = (out[id] || 0) + 1;
+  }
+  return out;
+}
+function buildScoreContext() { return { mentions: mentionedCounts(), sideRoles: sideRoleTaskCounts(), itemCredits: meetingItemCredits() }; }
 
 // ---------------------------------------------------------------------------
 // 會議場次展開（規則是真相，展開結果是畫面）

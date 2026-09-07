@@ -513,6 +513,10 @@ struct SubordinateDetailView: View {
 
     // MARK: - 英雄頭部卡片
 
+    /// [v25.334] 這位部屬名下的已完成議程項目數（看項目指派給誰；沒指派才算會議負責人）。
+    /// 別人會議裡指派給他的項目也算，所以必須全量掃一次（比照 mentionedCounts）。
+    private var itemCredit: Int { lifeStore.meetingItemCredits()[subordinateId] ?? 0 }
+
     /// 這位部屬在兼任職務裡的待辦統計（完成／總數）。
     /// 只看一個人，直接查自己的即可，不必跑整批 sideRoleTaskCounts()。
     private var sideRoleStat: (done: Int, total: Int) {
@@ -632,13 +636,13 @@ struct SubordinateDetailView: View {
 
             // 分數看板：主動性 / 潛力性 / 綜合
             HStack(spacing: 0) {
-                HeroKpiCell(label: "主動性", value: "\(subordinate.proactivityScore(mentionedCount: mentionedCount, sideRoleDone: sideRoleStat.done))",
+                HeroKpiCell(label: "主動性", value: "\(subordinate.proactivityScore(mentionedCount: mentionedCount, sideRoleDone: sideRoleStat.done, itemDone: itemCredit))",
                             icon: "bolt.fill")
                 HeroKpiDivider()
                 HeroKpiCell(label: "潛力性", value: "\(subordinate.potentialScore)",
                             icon: "arrow.up.right.circle.fill")
                 HeroKpiDivider()
-                HeroKpiCell(label: "綜合", value: "\(subordinate.overallScore(mentionedCount: mentionedCount, sideRoleDone: sideRoleStat.done))",
+                HeroKpiCell(label: "綜合", value: "\(subordinate.overallScore(mentionedCount: mentionedCount, sideRoleDone: sideRoleStat.done, itemDone: itemCredit))",
                             icon: "star.fill")
             }
             .padding(.vertical, 10)
@@ -1746,7 +1750,7 @@ struct SubordinateDetailView: View {
     /// Tab 徽章數字：主動性/潛力性顯示分數，執掌顯示設備台數
     private func tabBadgeValue(_ tab: DetailTab, mentionedCount: Int) -> Int {
         switch tab {
-        case .daily: return subordinate.proactivityScore(mentionedCount: mentionedCount, sideRoleDone: sideRoleStat.done)
+        case .daily: return subordinate.proactivityScore(mentionedCount: mentionedCount, sideRoleDone: sideRoleStat.done, itemDone: itemCredit)
         case .rating: return subordinate.potentialScore
         case .duty: return lifeStore.equipmentPool.filter { $0.ownerId == subordinateId }.count
         }
@@ -1819,7 +1823,8 @@ struct SubordinateDetailView: View {
         if !sub.plantArea.isEmpty { lines.append("🏭 廠區：\(sub.plantArea)") }
         if let jd = sub.joinDate { lines.append("📅 入職：\(formatDate(jd))") }
         let srDone = sideRoleStat.done
-        lines.append("📊 主動性 \(sub.proactivityScore(mentionedCount: mentioned.count, sideRoleDone: srDone))｜潛力性 \(sub.potentialScore)｜綜合 \(sub.overallScore(mentionedCount: mentioned.count, sideRoleDone: srDone))")
+        let itemDone = itemCredit
+        lines.append("📊 主動性 \(sub.proactivityScore(mentionedCount: mentioned.count, sideRoleDone: srDone, itemDone: itemDone))｜潛力性 \(sub.potentialScore)｜綜合 \(sub.overallScore(mentionedCount: mentioned.count, sideRoleDone: srDone, itemDone: itemDone))")
 
         switch detailTab {
         case .daily:

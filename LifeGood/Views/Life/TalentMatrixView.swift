@@ -27,6 +27,8 @@ enum ScoreWeights {
     static var actBase: Int       { intValue("score_act_base", 60) }
     static var actTask: Int       { intValue("score_act_task", 3) }
     static var actItem: Int       { intValue("score_act_item", 1) }
+    /// [v25.334] 會議掛名基本分：每掛名一場會議（負責人）固定加這個分數
+    static var actMeetingOwner: Int { intValue("score_act_meeting_owner", 1) }
     static var actReport: Int     { intValue("score_act_report", 3) }
     static var actMention: Int    { intValue("score_act_mention", 2) }
     static var actSideRole: Int   { intValue("score_act_side_role", 3) }
@@ -106,21 +108,26 @@ extension Subordinate {
     /// ⚠️ sideRoleDone **刻意不給預設值**。給了預設值，任何忘記傳的呼叫點都會靜默算成 0，
     ///    同一個人在列表、人才矩陣、明細頁就會顯示三個不同的分數，而且完全不會編譯錯。
     ///    設成必填的話漏掉就編不過——這裡寧可編譯失敗。
-    func proactivityScore(mentionedCount: Int = 0, sideRoleDone: Int) -> Int {
+    /// itemDone = 此人名下的已完成議程項目數（由 LifeStore.meetingItemCredits() 傳入）——
+    ///   [v25.334] 議程項目的分數看「項目指派給誰」：有指派部屬就計給該部屬（多人各計一次），
+    ///   沒指派才計給會議掛名的負責人；掛名本身另有每場固定的基本分（actMeetingOwner）。
+    ///   與 sideRoleDone 一樣刻意不給預設值：漏傳會靜默算成 0。
+    func proactivityScore(mentionedCount: Int = 0, sideRoleDone: Int, itemDone: Int) -> Int {
         // 連到兼任待辦的紀錄跳過：那是「同一件事的另一面」，已由 sideRoleDone
         // 以 +3 計過一次。不跳的話同一件事會被計兩次分（本職 +3／+1 再加兼任 +3）。
         // [v25.294] 任務可帶自訂分數（可正可負）；沒自訂的跟隨全域權重
         let taskPoints = tasks.filter { $0.isCompleted && $0.sideRoleLink == nil }
             .reduce(0) { $0 + ($1.customScore ?? ScoreWeights.actTask) }
-        let completedItems = meetings.flatMap { $0.allItems }
-            .filter { $0.isCompleted && $0.sideRoleLink == nil }.count
+        let completedItems = itemDone
+        let ownedMeetings = meetings.count
         let completedReports = weeklyReports.filter { $0.isCompleted }.count
         // 喪假／公假／病假為非個人意願的假別，不列入扣分（LeaveType.isScoreExempt）
         let leaveHours = records.filter { $0.type == .leave && !($0.leaveType?.isScoreExempt ?? false) }.reduce(0.0) { $0 + ($1.leaveHours ?? 8) }
         // 權重走 ScoreWeights（進階設定可調；出廠值同原本：60／+3／+1／+3／+2／+3／每 8h -2）
         var score = Double(ScoreWeights.actBase)
         score += Double(taskPoints)                                  // 完成任務（含每題自訂分）
-        score += Double(completedItems * ScoreWeights.actItem)       // 每完成一個議程項目（顆粒最小，權重刻意壓低）
+        score += Double(ownedMeetings * ScoreWeights.actMeetingOwner) // 每掛名一場會議的基本分
+        score += Double(completedItems * ScoreWeights.actItem)       // 每完成一個議程項目（看指派給誰；顆粒最小，權重刻意壓低）
         score += Double(completedReports * ScoreWeights.actReport)   // 每完成一份報告
         score += Double(mentionedCount * ScoreWeights.actMention)    // 每被標註一項
         score += Double(sideRoleDone * ScoreWeights.actSideRole)     // 每完成一項兼任待辦（與本職任務同權重）
@@ -131,9 +138,9 @@ extension Subordinate {
     }
 
     /// 綜合分數＝潛力與主動性的平均（部屬列表左側顯示用）
-    func overallScore(mentionedCount: Int = 0, sideRoleDone: Int) -> Int {
+    func overallScore(mentionedCount: Int = 0, sideRoleDone: Int, itemDone: Int) -> Int {
         Int(((Double(potentialScore)
-              + Double(proactivityScore(mentionedCount: mentionedCount, sideRoleDone: sideRoleDone)))
+              + Double(proactivityScore(mentionedCount: mentionedCount, sideRoleDone: sideRoleDone, itemDone: itemDone)))
              / 2).rounded())
     }
 
@@ -170,7 +177,7 @@ extension Subordinate {
     }
 
     /// 主動性評分的計算明細（分組條目 + 加減分）
-    func proactivityBreakdown(mentionedCount: Int = 0, sideRoleDone: Int) -> [(label: String, points: Int)] {
+    func proactivityBreakdown(mentionedCount: Int = 0, sideRoleDone: Int, itemDone: Int) -> [(label: String, points: Int)] {
         var items: [(String, Int)] = [("基礎分", ScoreWeights.actBase)]
         // 連到兼任待辦的紀錄跳過：那是「同一件事的另一面」，已由 sideRoleDone
         // 以 +3 計過一次。不跳的話同一件事會被計兩次分（本職 +3／+1 再加兼任 +3）。
@@ -178,14 +185,14 @@ extension Subordinate {
         let doneTasks = tasks.filter { $0.isCompleted && $0.sideRoleLink == nil }
         let defaultTasks = doneTasks.filter { $0.customScore == nil }.count
         let customTasks = doneTasks.compactMap(\.customScore)
-        let completedItems = meetings.flatMap { $0.allItems }
-            .filter { $0.isCompleted && $0.sideRoleLink == nil }.count
+        let completedItems = itemDone
         let completedReports = weeklyReports.filter { $0.isCompleted }.count
         // 喪假／公假／病假為非個人意願的假別，不列入扣分（LeaveType.isScoreExempt）
         let leaveHours = records.filter { $0.type == .leave && !($0.leaveType?.isScoreExempt ?? false) }.reduce(0.0) { $0 + ($1.leaveHours ?? 8) }
+        if !meetings.isEmpty { items.append(("會議掛名 ×\(meetings.count)", meetings.count * ScoreWeights.actMeetingOwner)) }
         if defaultTasks > 0 { items.append(("完成任務 ×\(defaultTasks)", defaultTasks * ScoreWeights.actTask)) }
         if !customTasks.isEmpty { items.append(("完成任務（自訂分）×\(customTasks.count)", customTasks.reduce(0, +))) }
-        if completedItems > 0 { items.append(("完成議程項目 ×\(completedItems)", completedItems * ScoreWeights.actItem)) }
+        if completedItems > 0 { items.append(("完成議程項目（指派給我）×\(completedItems)", completedItems * ScoreWeights.actItem)) }
         if completedReports > 0 { items.append(("完成報告 ×\(completedReports)", completedReports * ScoreWeights.actReport)) }
         if mentionedCount > 0 { items.append(("被標註 ×\(mentionedCount)", mentionedCount * ScoreWeights.actMention)) }
         if sideRoleDone > 0 { items.append(("完成兼任待辦 ×\(sideRoleDone)", sideRoleDone * ScoreWeights.actSideRole)) }
@@ -304,6 +311,8 @@ struct TalentMatrixView: View {
         let mentionCounts: [UUID: Int]
         /// 部屬 id → 兼任待辦（完成／總數）。與 mentionCounts 同樣一次算好整批傳入。
         let sideRoleCounts: [UUID: (done: Int, total: Int)]
+        /// [v25.334] 部屬 id → 名下已完成議程項目數（看項目指派）
+        let itemCredits: [UUID: Int]
         let scores: [UUID: Int]
         let xRange: ClosedRange<Double>
         let xMid: Double
@@ -314,15 +323,17 @@ struct TalentMatrixView: View {
     private func makeAxisContext() -> AxisContext {
         let mentionCounts = lifeStore.mentionedCounts()
         let sideRoleCounts = lifeStore.sideRoleTaskCounts()
+        let itemCredits = lifeStore.meetingItemCredits()
         let scores = Dictionary(members.map {
             ($0.id, $0.proactivityScore(mentionedCount: mentionCounts[$0.id] ?? 0,
-                                        sideRoleDone: sideRoleCounts[$0.id]?.done ?? 0))
+                                        sideRoleDone: sideRoleCounts[$0.id]?.done ?? 0,
+                                        itemDone: itemCredits[$0.id] ?? 0))
         }, uniquingKeysWith: { first, _ in first })
         let range = domain(members.map { scores[$0.id] ?? 0 })
         let potentialScores = Dictionary(members.map { ($0.id, $0.potentialScore) }, uniquingKeysWith: { first, _ in first })
         let yRange = domain(members.map { potentialScores[$0.id] ?? 0 })
         return AxisContext(
-            mentionCounts: mentionCounts, sideRoleCounts: sideRoleCounts, scores: scores, xRange: range, xMid: (range.lowerBound + range.upperBound) / 2,
+            mentionCounts: mentionCounts, sideRoleCounts: sideRoleCounts, itemCredits: itemCredits, scores: scores, xRange: range, xMid: (range.lowerBound + range.upperBound) / 2,
             potentialScores: potentialScores, yRange: yRange, yMid: (yRange.lowerBound + yRange.upperBound) / 2
         )
     }
@@ -848,7 +859,8 @@ struct TalentMatrixView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     breakdownGroup("主動性（日常）", color: .blue, total: proactivity(m, ctx), items: m.proactivityBreakdown(mentionedCount: ctx.mentionCounts[m.id] ?? 0,
-                                                                  sideRoleDone: ctx.sideRoleCounts[m.id]?.done ?? 0))
+                                                                  sideRoleDone: ctx.sideRoleCounts[m.id]?.done ?? 0,
+                                                                  itemDone: ctx.itemCredits[m.id] ?? 0))
                     breakdownGroup("潛力（評分）", color: .indigo, total: m.potentialScore, items: m.potentialBreakdown)
                 }
                 .padding(.vertical, 4)

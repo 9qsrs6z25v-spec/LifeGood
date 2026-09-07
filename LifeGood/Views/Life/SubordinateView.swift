@@ -886,7 +886,8 @@ struct SubordinateView: View {
     /// 避免每一列各自重新全量掃描所有部屬的任務/會議/報告與兼任待辦。
     private func subordinateScore(_ sub: Subordinate, ctx: LifeStore.ScoreContext) -> Int {
         sub.overallScore(mentionedCount: ctx.mention(sub.id),
-                         sideRoleDone: ctx.sideRoleDone(sub.id))
+                         sideRoleDone: ctx.sideRoleDone(sub.id),
+                         itemDone: ctx.itemDone(sub.id))
     }
 
     private func scoreColor(_ score: Int) -> Color {

@@ -638,13 +638,48 @@ class LifeStore: ObservableObject {
     struct ScoreContext {
         var mentions: [UUID: Int] = [:]
         var sideRoles: [UUID: (done: Int, total: Int)] = [:]
+        /// [v25.334] 部屬 id → 名下已完成議程項目數（看項目指派給誰）
+        var itemCredits: [UUID: Int] = [:]
         func mention(_ id: UUID) -> Int { mentions[id] ?? 0 }
         func sideRoleDone(_ id: UUID) -> Int { sideRoles[id]?.done ?? 0 }
         func sideRoleTotal(_ id: UUID) -> Int { sideRoles[id]?.total ?? 0 }
+        func itemDone(_ id: UUID) -> Int { itemCredits[id] ?? 0 }
     }
 
     func makeScoreContext() -> ScoreContext {
-        ScoreContext(mentions: mentionedCounts(), sideRoles: sideRoleTaskCounts())
+        ScoreContext(mentions: mentionedCounts(), sideRoles: sideRoleTaskCounts(),
+                     itemCredits: meetingItemCredits())
+    }
+
+    /// [v25.334] 會議議程項目的完成分歸屬（使用者定義）：
+    /// 項目有指派負責人 → 計給每位負責人（多人各計一次）；沒指派、或負責人都不是部屬
+    ///（外部名片／組織人員）→ 計給會議掛名的負責人。連到兼任待辦的項目跳過（兼任那邊已計分）。
+    /// 指派 id 可能是部屬、組織人員（連結部屬）或名片（經組織人員連結部屬），三種都反查回部屬。
+    /// 整批一次算好往下傳，比照 mentionedCounts()／sideRoleTaskCounts()。
+    func meetingItemCredits() -> [UUID: Int] {
+        let subIds = Set(subordinates.map(\.id))
+        var viaOrg: [UUID: UUID] = [:]     // orgPerson id → subordinate id
+        var viaCard: [UUID: UUID] = [:]    // businessCard id → subordinate id
+        for p in orgPeople {
+            guard let sid = p.linkedSubordinateId, subIds.contains(sid) else { continue }
+            viaOrg[p.id] = sid
+            if let cid = p.linkedBusinessCardId { viaCard[cid] = sid }
+        }
+        func resolve(_ pid: UUID) -> UUID? {
+            if subIds.contains(pid) { return pid }
+            return viaOrg[pid] ?? viaCard[pid]
+        }
+        var out: [UUID: Int] = [:]
+        for s in subordinates {
+            for m in s.meetings {
+                for item in m.allItems where item.isCompleted && item.sideRoleLink == nil {
+                    let owners = Set(item.assigneeIds.compactMap(resolve))
+                    if owners.isEmpty { out[s.id, default: 0] += 1 }
+                    else { for id in owners { out[id, default: 0] += 1 } }
+                }
+            }
+        }
+        return out
     }
 
     /// 一次性修復：把兼任職務成員裡「指向名片」的連結改指回對應的部屬。
