@@ -159,16 +159,77 @@ async function loadFromCloud() {
   if (!out.subs.length && !out.depts.length && !out.orgPeople.length) {
     throw new Error('iCloud 裡沒有找到部屬／部門資料。請確認是用「擁有資料的那個 Apple ID」登入，且 App 已完成一次 iCloud 同步。');
   }
-  applyData(out, 'iCloud');
+  return applyData(out, 'iCloud');
 }
 
+/** 套用資料；回傳內容是否與上一次不同（自動更新時沒變就不重畫，免得打斷正在看的畫面） */
 function applyData(raw, source) {
+  const fingerprint = fingerprintOf(raw);
+  const changed = fingerprint !== Store.fingerprint;
+  Store.fingerprint = fingerprint;
   for (const k of Object.keys(KV_KEYS)) Store[k] = reviveDates(Array.isArray(raw[k]) ? raw[k] : []);
   Store.source = source;
   Store.loadedAt = new Date();
   Store.ctx = buildScoreContext();
-  $('#data-source').textContent = `${source}・${fmtTime(Store.loadedAt)} 讀取`;
+  updateSourceLabel();
+  return changed;
 }
+function fingerprintOf(raw) {
+  // 簡單 32-bit 雜湊：資料量不大（幾百 KB），逐字掃一次可接受
+  const str = JSON.stringify(raw);
+  let h = 2166136261;
+  for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 16777619); }
+  return `${str.length}:${h >>> 0}`;
+}
+function updateSourceLabel() {
+  const el = $('#data-source'); if (!el || !Store.loadedAt) return;
+  let text = `${Store.source}・${fmtTime(Store.loadedAt)} 讀取`;
+  if (AutoRefresh.nextAt) text += `・${fmtTime(AutoRefresh.nextAt)} 自動更新`;
+  el.textContent = text;
+}
+
+// 自動更新：登入 iCloud 後每 10 分鐘背景抓一次；分頁在背景時暫停，回到前景若已過期立刻補抓
+const AutoRefresh = {
+  intervalMs: 10 * 60 * 1000,
+  timer: null, nextAt: null, busy: false,
+  start() {
+    this.stop();
+    this.schedule();
+    document.addEventListener('visibilitychange', this.onVisibility);
+  },
+  stop() { if (this.timer) clearTimeout(this.timer); this.timer = null; this.nextAt = null; document.removeEventListener('visibilitychange', this.onVisibility); updateSourceLabel(); },
+  schedule(ms = this.intervalMs) {
+    if (this.timer) clearTimeout(this.timer);
+    this.nextAt = new Date(Date.now() + ms);
+    this.timer = setTimeout(() => this.tick(), ms);
+    updateSourceLabel();
+  },
+  async tick() {
+    if (document.hidden) { this.timer = null; this.nextAt = null; updateSourceLabel(); return; } // 背景分頁：等回前景再抓
+    await this.refresh(true);
+    this.schedule();
+  },
+  onVisibility: () => {
+    if (document.hidden || Store.source !== 'iCloud') return;
+    const stale = !Store.loadedAt || Date.now() - Store.loadedAt.getTime() >= AutoRefresh.intervalMs;
+    if (stale || !AutoRefresh.timer) { AutoRefresh.refresh(true).then(() => AutoRefresh.schedule()); }
+  },
+  /** silent=true：背景更新，只在資料有變時重畫並輕提示 */
+  async refresh(silent) {
+    if (this.busy || !ckContainer || Store.source !== 'iCloud') return false;
+    this.busy = true;
+    try {
+      const changed = await loadFromCloud();
+      if (changed) { route(); toast(silent ? '資料已自動更新' : '已更新'); }
+      else if (!silent) toast('資料沒有變動');
+      return changed;
+    } catch (e) {
+      if (!silent) toast('讀取失敗：' + (e.message || e));
+      updateSourceLabel();
+      return false;
+    } finally { this.busy = false; }
+  },
+};
 
 // ---------------------------------------------------------------------------
 // 評分（移植自 App）
@@ -801,11 +862,13 @@ function renderStats(main, ctx, year) {
   const textColor = css.getPropertyValue('--text').trim() || '#000';
   const lineColor = css.getPropertyValue('--line').trim() || 'rgba(0,0,0,0.1)';
   for (const c of defs) {
-    const rows = per(c.fn).sort((a, b) => b.v - a.v);
-    const avg = rows.length ? Math.round(rows.reduce((a, r) => a + r.v, 0) / rows.length * 10) / 10 : 0;
-    const labels = rows.map((r) => r.name).concat(['團隊平均']);
-    const data = rows.map((r) => r.v).concat([avg]);
-    const colors = rows.map(() => c.color).concat(['rgba(142,142,147,0.7)']);
+    const people = per(c.fn);
+    const avg = people.length ? Math.round(people.reduce((a, r) => a + r.v, 0) / people.length * 10) / 10 : 0;
+    // 團隊平均依數值排進序列（而不是固定放最下面），一眼看出誰在平均之上／之下
+    const rows = people.concat([{ name: '團隊平均', v: avg, isAvg: true }]).sort((a, b) => b.v - a.v);
+    const labels = rows.map((r) => r.name);
+    const data = rows.map((r) => r.v);
+    const colors = rows.map((r) => (r.isAvg ? 'rgba(142,142,147,0.7)' : c.color));
     const ch = new Chart($(`#stat-${c.key}`), {
       type: 'bar',
       data: { labels, datasets: [{ data, backgroundColor: colors, borderRadius: 6, barThickness: 16 }] },
@@ -902,7 +965,7 @@ async function startWithToken(token) {
       setStatus('請按上方按鈕以 Apple ID 登入。', '');
       container.whenUserSignsIn().then(afterSignIn).catch((e) => setStatus('登入失敗：' + (e.reason || e.message || e), 'err'));
     }
-    container.whenUserSignsOut().then(() => { showGate(); $('#gate-token').hidden = true; $('#gate-signin').hidden = false; setStatus('已登出。', ''); });
+    container.whenUserSignsOut().then(() => { AutoRefresh.stop(); showGate(); $('#gate-token').hidden = true; $('#gate-signin').hidden = false; setStatus('已登出。', ''); });
   } catch (e) {
     setStatus(String(e.message || e), 'err');
     $('#gate-token').hidden = false; $('#gate-signin').hidden = true;
@@ -910,10 +973,11 @@ async function startWithToken(token) {
 }
 async function afterSignIn() {
   setStatus('已登入，讀取 iCloud 資料中…', 'ok');
-  try { await loadFromCloud(); setStatus(''); showApp(); toast(`已讀取 ${Store.subs.length} 位部屬・${Store.depts.length} 個部門`); }
+  try { await loadFromCloud(); setStatus(''); showApp(); toast(`已讀取 ${Store.subs.length} 位部屬・${Store.depts.length} 個部門`); AutoRefresh.start(); }
   catch (e) { setStatus(String(e.message || e), 'err'); }
 }
 function startDemo() {
+  AutoRefresh.stop();
   applyData(window.LIFEGOOD_DEMO || {}, '示範資料');
   showApp();
   toast('目前顯示示範資料，非你的真實資料');
@@ -924,7 +988,7 @@ document.addEventListener('DOMContentLoaded', () => {
   $('#token-save').onclick = () => { const t = $('#token-input').value.trim(); if (!t) { setStatus('請先貼上 token', 'err'); return; } localStorage.setItem(TOKEN_KEY, t); startWithToken(t); };
   $('#token-reset').onclick = () => { localStorage.removeItem(TOKEN_KEY); location.reload(); };
   $('#demo-btn').onclick = startDemo; $('#demo-btn-2').onclick = startDemo;
-  $('#reload-btn').onclick = async () => { if (Store.source === '示範資料') { toast('示範資料不需重新讀取'); return; } toast('重新讀取中…'); try { await loadFromCloud(); route(); toast('已更新'); } catch (e) { toast('讀取失敗：' + (e.message || e)); } };
+  $('#reload-btn').onclick = async () => { if (Store.source === '示範資料') { toast('示範資料不需重新讀取'); return; } toast('重新讀取中…'); await AutoRefresh.refresh(false); AutoRefresh.schedule(); };
   $('#signout-btn').onclick = () => { if (ckContainer && Store.source !== '示範資料') { const btn = $('#apple-sign-out-button button, #apple-sign-out-button a'); if (btn) btn.click(); else { localStorage.removeItem(TOKEN_KEY); location.reload(); } } else { showGate(); } };
   const saved = localStorage.getItem(TOKEN_KEY);
   if (location.search.includes('demo=1')) startDemo();
