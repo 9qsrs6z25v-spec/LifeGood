@@ -324,3 +324,17 @@ details.agenda summary { cursor: pointer; color: var(--indigo); font-weight: 700
 .quad .q { padding: 10px 12px; border-radius: 12px; background: var(--card2); border: 1px solid var(--line); }
 .quad .q .qn { font-size: 22px; font-weight: 900; }
 .quad .q .ql { font-size: 12px; color: var(--muted); font-weight: 700; }
+
+/* 行事曆 */
+.cal-layout { display: grid; grid-template-columns: minmax(0, 2.2fr) minmax(300px, 1fr); gap: 16px; align-items: start; }
+@media (max-width: 1100px) { .cal-layout { grid-template-columns: 1fr; } }
+.cal-head { display: grid; grid-template-columns: repeat(7, 1fr); font-size: 12px; font-weight: 800; color: var(--muted); text-align: center; padding: 4px 0 8px; }
+.cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+.cal-cell { min-height: 108px; border: 1px solid var(--line); border-radius: 10px; padding: 6px; background: var(--card2); cursor: pointer; display: flex; flex-direction: column; gap: 4px; overflow: hidden; }
+.cal-cell:hover { border-color: var(--green); }
+.cal-cell.dim { opacity: .45; }
+.cal-cell.today { background: rgba(52,199,89,0.08); }
+.cal-cell.sel { border-color: var(--green); box-shadow: 0 0 0 2px rgba(52,199,89,0.25); }
+.cal-num { font-size: 13px; font-weight: 800; display: flex; align-items: center; }
+.cal-items { display: flex; flex-direction: column; gap: 3px; }
+.cal-items .chip { font-size: 10.5px; padding: 1px 6px; border-radius: 6px; }

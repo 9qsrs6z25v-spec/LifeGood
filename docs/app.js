@@ -23,11 +23,12 @@ const KV_KEYS = {
   equipment: 'life_equipment_pool',
   milestones: 'life_milestones',
   cards: 'life_business_cards',
+  personalEvents: 'life_personal_events',
 };
 // JSONEncoder 預設把 Date 編成「距 2001-01-01 的秒數」；這些欄位名一律還原成 Date
 const DATE_KEYS = new Set([
   'date', 'dueDate', 'completedAt', 'endDate', 'joinDate', 'birthday', 'scheduledDate',
-  'movedTo', 'createdAt', 'dateAdded', 'leftDate', 'sideRoleEndDate', 'updatedAt',
+  'movedTo', 'createdAt', 'dateAdded', 'leftDate', 'sideRoleEndDate', 'updatedAt', 'recurrenceEndDate',
 ]);
 
 // App 出廠權重（TalentMatrixView.ScoreWeights）
@@ -44,7 +45,7 @@ const REC_COLOR = { '優點': 'green', '缺點': 'red', '成就': 'orange', '改
 // 狀態
 // ---------------------------------------------------------------------------
 const Store = {
-  subs: [], depts: [], orgPeople: [], grades: [], equipment: [], milestones: [], cards: [],
+  subs: [], depts: [], orgPeople: [], grades: [], equipment: [], milestones: [], cards: [], personalEvents: [],
   source: '', loadedAt: null, ctx: null,
 };
 let ckContainer = null;
@@ -514,6 +515,7 @@ function route() {
     case 'dept': renderDept(main, ctx, decodeURIComponent(parts[1] || '')); break;
     case 'equipment': renderEquipment(main, ctx, decodeURIComponent(parts[1] || '')); break;
     case 'sideroles': renderSideRoles(main); break;
+    case 'calendar': renderCalendar(main, parts[1] || ''); break;
     case 'siderole': renderSideRole(main, decodeURIComponent(parts[1] || ''), parts[2] || 'tasks'); break;
     default: renderOverview(main, ctx);
   }
@@ -1212,6 +1214,119 @@ function renderSideRole(main, id, tab) {
   main.querySelectorAll('.tabs button').forEach((btn) => btn.onclick = () => { location.hash = `#/siderole/${r.id}/${btn.dataset.tab}`; });
   const q = $('#res-q'); if (q) q.oninput = (e) => { roleUI.q = e.target.value; const pos = e.target.selectionStart; renderSideRole(main, id, tab); const inp = $('#res-q'); inp.focus(); inp.setSelectionRange(pos, pos); };
   main.querySelectorAll('.fchip[data-cat]').forEach((c) => c.onclick = () => { roleUI.cat = c.dataset.cat; renderSideRole(main, id, tab); });
+}
+
+// ---- 我的行事曆 -----------------------------------------------------------
+const CAL_KINDS = [
+  ['task', '部屬任務', 'cyan'], ['meeting', '會議', 'indigo'], ['item', '議程截止', 'blue'], ['report', '報告', 'orange'],
+  ['leave', '請假', 'teal'], ['sideTask', '兼任待辦', 'purple'], ['keyDate', '重要日期', 'red'], ['personal', '個人事件', 'green'], ['birthday', '生日', 'pink'],
+];
+const calUI = { hidden: new Set(), day: null };
+function ymdKey(d) { return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`; }
+function personalOccurs(pe, day) {
+  const target = startOfDay(day), start = startOfDay(pe.date);
+  if (target < start) return false;
+  if (pe.recurrenceEndDate && target > startOfDay(pe.recurrenceEndDate)) return false;
+  switch (pe.recurrence) {
+    case '每天': return true;
+    case '每週': return daysBetween(start, target) % 7 === 0;
+    case '每月': { const months = (target.getFullYear() - start.getFullYear()) * 12 + (target.getMonth() - start.getMonth()); if (months < 0) return false; const exp = new Date(start); exp.setMonth(start.getMonth() + months); if (exp.getDate() !== start.getDate()) exp.setDate(0); return ymdKey(exp) === ymdKey(target); }
+    case '每年': return target.getMonth() === start.getMonth() && target.getDate() === start.getDate();
+    default: return ymdKey(target) === ymdKey(start);
+  }
+}
+/** 收集某一段日期範圍內的所有行事曆項目，以 yyyy-mm-dd 分組 */
+function calendarItems(from, to) {
+  const out = {};
+  const add = (d, it) => { const k = ymdKey(d); (out[k] = out[k] || []).push(Object.assign({ date: d }, it)); };
+  const inRange = (d) => d >= from && d < to;
+  const now = new Date();
+  for (const s of Store.subs) {
+    for (const t of s.tasks || []) {
+      const d = t.dueDate || t.date; if (!inRange(d)) continue;
+      add(d, { kind: 'task', title: t.topic || '未命名任務', who: s.name, done: t.isCompleted, derel: t.isDereliction, time: t.dueDate && !(t.dueDate.getHours() === 0 && t.dueDate.getMinutes() === 0) ? fmtTime(t.dueDate) : '', href: `#/sub/${s.id}/tasks`, overdue: !t.isCompleted && t.dueDate && t.dueDate < now });
+    }
+    for (const m of s.meetings || []) {
+      for (const o of expandOccurrences(m, from, to)) { if (!inRange(o.date) || o.isCancelled) continue; add(o.date, { kind: 'meeting', title: m.topic || '未命名會議', who: s.name, time: fmtTime(o.date), sub: `${o.items.length} 項議程${o.isMoved ? '・已改期' : ''}${o.isAdHoc ? '・臨時' : ''}`, href: `#/sub/${s.id}/meetings` }); }
+      for (const it of allItems(m)) { if (!it.dueDate || !inRange(it.dueDate)) continue; add(it.dueDate, { kind: 'item', title: it.content || '議程項目', who: `${s.name}・${m.topic}`, done: it.isCompleted, href: `#/sub/${s.id}/meetings` }); }
+    }
+    for (const r of s.weeklyReports || []) { if (!inRange(r.date)) continue; add(r.date, { kind: 'report', title: r.topic || '未命名報告', who: s.name, sub: r.reportType || '', done: r.isCompleted, overdue: !r.isCompleted && r.date < now, href: `#/sub/${s.id}/reports` }); }
+    for (const r of s.records || []) {
+      if (r.type !== '請假') continue;
+      const a = startOfDay(r.date), b = startOfDay(r.endDate || r.date);
+      for (let d = new Date(a); d <= b; d.setDate(d.getDate() + 1)) { if (!inRange(d)) continue; add(new Date(d), { kind: 'leave', title: `${s.name} ${r.leaveType || '請假'}`, sub: `${typeof r.leaveHours === 'number' ? r.leaveHours : 8} 小時${r.content ? '・' + r.content : ''}`, href: `#/sub/${s.id}/leave` }); }
+    }
+    const bi = birthdayInfo(s.birthday);
+    if (bi) { for (const y of [from.getFullYear(), to.getFullYear()]) { const d = new Date(y, s.birthday.getMonth(), s.birthday.getDate()); if (inRange(d)) add(d, { kind: 'birthday', title: `🎂 ${s.name} 生日`, sub: bi.sign, href: `#/sub/${s.id}` }); } }
+  }
+  for (const p of Store.orgPeople) {
+    if (!(p.birthday instanceof Date) || p.isInactive || (p.linkedSubordinateId && subById(p.linkedSubordinateId))) continue;
+    for (const y of [from.getFullYear(), to.getFullYear()]) { const d = new Date(y, p.birthday.getMonth(), p.birthday.getDate()); if (inRange(d)) add(d, { kind: 'birthday', title: `🎂 ${p.name} 生日`, sub: p.jobTitle || '', href: '#/org' }); }
+  }
+  for (const r of sideRoles()) {
+    for (const t of roleTasks(r)) { if (!t.dueDate || !inRange(t.dueDate)) continue; add(t.dueDate, { kind: 'sideTask', title: t.content || '兼任待辦', who: roleName(r), done: t.isCompleted, overdue: !t.isCompleted && t.dueDate < now, href: `#/siderole/${r.id}/tasks` }); }
+    for (const k of roleKeyDates(r)) { if (!inRange(k.date)) continue; add(k.date, { kind: 'keyDate', title: k.title || '重要日期', who: roleName(r), time: (k.date.getHours() || k.date.getMinutes()) ? fmtTime(k.date) : '', sub: k.note || '', href: `#/siderole/${r.id}/keydates` }); }
+    for (const m of roleMeetings(r)) { if (!inRange(m.date)) continue; add(m.date, { kind: 'meeting', title: m.topic || '兼任會議', who: roleName(r), time: fmtTime(m.date), href: `#/siderole/${r.id}/meetings` }); }
+  }
+  for (const pe of Store.personalEvents || []) {
+    for (let d = startOfDay(from); d < to; d.setDate(d.getDate() + 1)) {
+      if (!personalOccurs(pe, d)) continue;
+      const at = new Date(d); at.setHours(pe.date.getHours(), pe.date.getMinutes(), 0, 0);
+      add(at, { kind: 'personal', title: pe.title || '個人事件', time: pe.durationMinutes === 0 ? '全日' : fmtTime(at), sub: [pe.kind, pe.location, pe.recurrence && pe.recurrence !== '不重複' ? pe.recurrence : ''].filter(Boolean).join('・'), href: '' });
+    }
+  }
+  for (const k of Object.keys(out)) out[k].sort((a, b) => (a.time === '全日' ? -1 : 0) || (a.date - b.date));
+  return out;
+}
+function calChip(it) {
+  const k = CAL_KINDS.find((x) => x[0] === it.kind) || CAL_KINDS[0];
+  return `<a class="chip ${it.overdue ? 'red' : k[2]}" ${it.href ? `href="${it.href}"` : ''} style="max-width:100%;overflow:hidden;text-overflow:ellipsis;display:block;${it.done ? 'opacity:.55;text-decoration:line-through' : ''}">${it.time ? it.time + ' ' : ''}${esc(it.title)}</a>`;
+}
+function renderCalendar(main, param) {
+  const today = startOfDay(new Date());
+  let year = today.getFullYear(), month = today.getMonth();
+  let selected = calUI.day;
+  const m = /^(\d{4})-(\d{2})(?:-(\d{2}))?$/.exec(param || '');
+  if (m) { year = +m[1]; month = +m[2] - 1; if (m[3]) selected = new Date(year, month, +m[3]); }
+  if (!selected || selected.getFullYear() !== year || selected.getMonth() !== month) selected = (today.getFullYear() === year && today.getMonth() === month) ? today : new Date(year, month, 1);
+  calUI.day = selected;
+  const first = new Date(year, month, 1), last = new Date(year, month + 1, 0);
+  const gridStart = new Date(first); gridStart.setDate(first.getDate() - first.getDay());
+  const gridEnd = new Date(last); gridEnd.setDate(last.getDate() + (6 - last.getDay()) + 1);
+  const items = calendarItems(gridStart, gridEnd);
+  const visible = (list) => (list || []).filter((it) => !calUI.hidden.has(it.kind));
+  const prev = new Date(year, month - 1, 1), next = new Date(year, month + 1, 1);
+  const monthKey = (d) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}`;
+  let cells = '';
+  for (let d = new Date(gridStart); d < gridEnd; d.setDate(d.getDate() + 1)) {
+    const list = visible(items[ymdKey(d)]);
+    const inMonth = d.getMonth() === month; const isToday = ymdKey(d) === ymdKey(today); const isSel = ymdKey(d) === ymdKey(selected);
+    cells += `<div class="cal-cell ${inMonth ? '' : 'dim'} ${isToday ? 'today' : ''} ${isSel ? 'sel' : ''}" data-day="${ymdKey(d)}">
+      <div class="cal-num">${d.getDate()}${isToday ? '<span class="chip green" style="margin-left:4px">今天</span>' : ''}</div>
+      <div class="cal-items">${list.slice(0, 4).map(calChip).join('')}${list.length > 4 ? `<div class="muted small">+${list.length - 4}</div>` : ''}</div></div>`;
+  }
+  const dayList = visible(items[ymdKey(selected)]);
+  const groups = CAL_KINDS.map(([k, label, color]) => [k, label, color, dayList.filter((it) => it.kind === k)]).filter((g) => g[3].length);
+  // 本月摘要
+  const monthAll = Object.entries(items).filter(([k]) => k.startsWith(monthKey(first))).flatMap(([, v]) => visible(v));
+  const count = (k) => monthAll.filter((it) => it.kind === k).length;
+  main.innerHTML = `
+    ${pageHead('我的行事曆', `${year} 年 ${month + 1} 月・本月 ${monthAll.length} 項`, `<div class="row"><a class="btn small" href="#/calendar/${monthKey(prev)}">‹ 上月</a><a class="btn small" href="#/calendar/${monthKey(today)}-${pad2(today.getDate())}">今天</a><a class="btn small" href="#/calendar/${monthKey(next)}">下月 ›</a></div>`)}
+    <div class="filters">${CAL_KINDS.map(([k, label, color]) => `<span class="fchip ${calUI.hidden.has(k) ? '' : 'on'}" data-kind="${k}"><span class="chip ${color}" style="padding:0 6px">●</span> ${label} ${count(k)}</span>`).join('')}</div>
+    <div class="cal-layout">
+      <div class="card" style="padding:12px">
+        <div class="cal-head">${WD.map((w) => `<div>週${w}</div>`).join('')}</div>
+        <div class="cal-grid">${cells}</div>
+      </div>
+      <div class="card">
+        <h3>${fmtDate(selected)}${ymdKey(selected) === ymdKey(today) ? ' <span class="chip green">今天</span>' : ''} <span class="count">${dayList.length}</span></h3>
+        ${groups.map(([k, label, color, list]) => `<div class="section-title" style="margin:10px 0 4px">${label}（${list.length}）</div>${list.map((it) => `<a class="item clickable" ${it.href ? `href="${it.href}"` : ''} style="display:flex;align-items:center;gap:10px;padding:8px 4px;border-top:1px solid var(--line)">
+            <span class="chip ${it.overdue ? 'red' : color}">${it.time || '—'}</span>
+            <div class="main-text" style="flex:1;min-width:0"><div class="title" style="${it.done ? 'text-decoration:line-through;color:var(--muted)' : ''}${it.derel ? 'color:var(--red)' : ''}">${esc(it.title)}</div><div class="meta">${[it.who, it.sub].filter(Boolean).map(esc).join('・')}${it.overdue ? '・<span style="color:var(--red)">逾期</span>' : ''}${it.done ? '・已完成' : ''}</div></div></a>`).join('')}`).join('') || '<div class="empty">這天沒有任何項目</div>'}
+      </div>
+    </div>`;
+  main.querySelectorAll('.cal-cell').forEach((c) => c.onclick = (e) => { if (e.target.closest('a[href]')) return; location.hash = `#/calendar/${c.dataset.day}`; });
+  main.querySelectorAll('.fchip[data-kind]').forEach((c) => c.onclick = () => { const k = c.dataset.kind; if (calUI.hidden.has(k)) calUI.hidden.delete(k); else calUI.hidden.add(k); renderCalendar(main, param); });
 }
 
 // ---------------------------------------------------------------------------

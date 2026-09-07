@@ -161,5 +161,10 @@
     { id: id(), name: '大同氣體 陳經理', company: '大同氣體' },
   ];
 
-  window.LIFEGOOD_DEMO = { subs, depts, orgPeople, grades, equipment, milestones, cards };
+  const personalEvents = [
+    { id: id(), title: '主管週會', kind: '會議', date: d(-21, 9, 30), durationMinutes: 60, note: '', recurrence: '每週', recurrenceEndDate: null, reminderMinutes: 15, location: '3F 會議室', syncToAppleCalendar: false },
+    { id: id(), title: '繳交月報', kind: '事務', date: d(4, 0, 0), durationMinutes: 0, note: '', recurrence: '每月', recurrenceEndDate: null, reminderMinutes: 1440, location: '', syncToAppleCalendar: false },
+    { id: id(), title: '牙醫回診', kind: '事務', date: d(6, 18, 30), durationMinutes: 30, note: '', recurrence: '不重複', recurrenceEndDate: null, reminderMinutes: 60, location: '', syncToAppleCalendar: false },
+  ];
+  window.LIFEGOOD_DEMO = { subs, depts, orgPeople, grades, equipment, milestones, cards, personalEvents };
 })();
