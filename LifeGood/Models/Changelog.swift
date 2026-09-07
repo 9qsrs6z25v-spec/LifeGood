@@ -13,6 +13,10 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.333", build: 1086, date: "2026/08/19", notes: [
+            "【新增】桌面唯讀網頁版（第一版）：repo 的 docs/ 資料夾放了一個純靜態網頁，透過 CloudKit JS 用 Apple ID 登入後直接讀 iCloud 裡的部屬與部門資料——部屬總覽、部屬列表與明細（含評分明細、任務／會議／報告／紀錄／請假／執掌設備／升職）、人才矩陣、統計圖表、公司組織與部門頁。只讀不寫，App 本身沒有任何變動。",
+            "【說明】評分規則與 App 相同，但權重用出廠預設值（進階設定的自訂權重存在手機本機、不同步）。設定方式見 docs/README.md：GitHub Pages 選分支＋/docs 資料夾；CloudKit Dashboard 產生 API Token 後貼進網頁即可。沒有 token 也能按「示範資料」先看版面。"
+        ]),
         ChangelogEntry(version: "25.332", build: 1085, date: "2026/08/19", notes: [
             "【新增】會議可以移交給其他部屬了：會議編輯頁多了「指派人員・會議負責人」選單（比照任務編輯），換人後儲存，整場會議（含所有場次與議程項目）搬到新負責人名下；議程項目各自的負責人設定不變。原本會議掛錯人只能刪掉重建。",
             "【修正】任務／會議移交後，原本開著的事項卡片會自動跟到新負責人（卡片改成先查原持有人、找不到再掃全部部屬），不用關掉重開。",

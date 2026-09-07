@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>美好人生・部屬看板</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🌱</text></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- 登入／設定畫面 -->
+<section id="gate" class="gate">
+  <div class="gate-card">
+    <div class="gate-logo">🌱</div>
+    <h1>美好人生・部屬看板</h1>
+    <p class="muted">桌面唯讀版。用 Apple ID 登入後直接讀取你 iCloud 裡的部屬與部門資料，不會寫入任何東西。</p>
+
+    <div id="gate-token" class="gate-step">
+      <label for="token-input">CloudKit API Token</label>
+      <input id="token-input" type="text" spellcheck="false" autocomplete="off"
+             placeholder="貼上在 CloudKit Dashboard 產生的 token">
+      <p class="hint">Token 只存在這台瀏覽器的 localStorage，不會上傳、也不在程式碼裡。</p>
+      <div class="row">
+        <button id="token-save" class="btn primary">儲存並登入</button>
+        <button id="demo-btn" class="btn ghost">先用示範資料看看</button>
+      </div>
+    </div>
+
+    <div id="gate-signin" class="gate-step" hidden>
+      <p>Token 已設定。請用擁有這份資料的 Apple ID 登入：</p>
+      <div id="apple-sign-in-button"></div>
+      <div class="row">
+        <button id="token-reset" class="btn ghost small">更換 Token</button>
+        <button id="demo-btn-2" class="btn ghost small">先用示範資料看看</button>
+      </div>
+    </div>
+
+    <p id="gate-status" class="status" hidden></p>
+  </div>
+</section>
+
+<!-- 主畫面 -->
+<div id="app" class="app" hidden>
+  <aside class="sidebar">
+    <div class="brand">
+      <span class="brand-icon">🌱</span>
+      <div>
+        <div class="brand-name">美好人生</div>
+        <div class="brand-sub">部屬看板・唯讀</div>
+      </div>
+    </div>
+    <nav class="nav">
+      <a href="#/overview" data-route="overview"><span class="ico">📋</span>部屬總覽</a>
+      <a href="#/subs" data-route="subs"><span class="ico">👥</span>部屬列表</a>
+      <a href="#/matrix" data-route="matrix"><span class="ico">🎯</span>人才矩陣</a>
+      <a href="#/stats" data-route="stats"><span class="ico">📊</span>統計圖表</a>
+      <a href="#/org" data-route="org"><span class="ico">🏢</span>公司組織</a>
+    </nav>
+    <div class="sidebar-foot">
+      <div id="data-source" class="muted small"></div>
+      <div class="row">
+        <button id="reload-btn" class="btn ghost small">重新讀取</button>
+        <button id="signout-btn" class="btn ghost small">登出</button>
+      </div>
+      <div id="apple-sign-out-button" hidden></div>
+    </div>
+  </aside>
+  <main id="main" class="main"></main>
+</div>
+
+<div id="toast" class="toast" hidden></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script src="https://cdn.apple-cloudkit.com/ck/2/cloudkit.js" async onload="window.__ckReady=true" onerror="window.__ckFailed=true"></script>
+<script src="demo-data.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
