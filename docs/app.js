@@ -1257,11 +1257,11 @@ function calendarItems(from, to) {
       for (let d = new Date(a); d <= b; d.setDate(d.getDate() + 1)) { if (!inRange(d)) continue; add(new Date(d), { kind: 'leave', title: `${s.name} ${r.leaveType || '請假'}`, sub: `${typeof r.leaveHours === 'number' ? r.leaveHours : 8} 小時${r.content ? '・' + r.content : ''}`, href: `#/sub/${s.id}/leave` }); }
     }
     const bi = birthdayInfo(s.birthday);
-    if (bi) { for (const y of [from.getFullYear(), to.getFullYear()]) { const d = new Date(y, s.birthday.getMonth(), s.birthday.getDate()); if (inRange(d)) add(d, { kind: 'birthday', title: `🎂 ${s.name} 生日`, sub: bi.sign, href: `#/sub/${s.id}` }); } }
+    if (bi) { for (const y of new Set([from.getFullYear(), to.getFullYear()])) { const d = new Date(y, s.birthday.getMonth(), s.birthday.getDate()); if (inRange(d)) add(d, { kind: 'birthday', title: `🎂 ${s.name} 生日`, sub: bi.sign, href: `#/sub/${s.id}` }); } }
   }
   for (const p of Store.orgPeople) {
     if (!(p.birthday instanceof Date) || p.isInactive || (p.linkedSubordinateId && subById(p.linkedSubordinateId))) continue;
-    for (const y of [from.getFullYear(), to.getFullYear()]) { const d = new Date(y, p.birthday.getMonth(), p.birthday.getDate()); if (inRange(d)) add(d, { kind: 'birthday', title: `🎂 ${p.name} 生日`, sub: p.jobTitle || '', href: '#/org' }); }
+    for (const y of new Set([from.getFullYear(), to.getFullYear()])) { const d = new Date(y, p.birthday.getMonth(), p.birthday.getDate()); if (inRange(d)) add(d, { kind: 'birthday', title: `🎂 ${p.name} 生日`, sub: p.jobTitle || '', href: '#/org' }); }
   }
   for (const r of sideRoles()) {
     for (const t of roleTasks(r)) { if (!t.dueDate || !inRange(t.dueDate)) continue; add(t.dueDate, { kind: 'sideTask', title: t.content || '兼任待辦', who: roleName(r), done: t.isCompleted, overdue: !t.isCompleted && t.dueDate < now, href: `#/siderole/${r.id}/tasks` }); }
