@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.337", build: 1090, date: "2026/08/19", notes: [
+            "【網頁版】網址可以帶 token（?token=…）：要給其他人用時，直接傳「網址?token=你的token」，對方第一次打開會自動存進自己的瀏覽器並立刻把 token 從網址列拿掉（不留在瀏覽紀錄或書籤），之後打開不帶參數的網址也能登入。程式碼裡仍然沒有 token。App 本身無變動。"
+        ]),
         ChangelogEntry(version: "25.336", build: 1089, date: "2026/08/19", notes: [
             "【網頁版】新增設備詳細頁：從部門頁的設備表、或部屬明細的執掌設備點進去。看板顯示部門、負責人、上次 PM、最近警報與「保養中（停機）」狀態；KPI 有 PM 總數（停機／復機）、距上次 PM（超過 90 天轉橘）、警報總數與平均間隔、30／90 天警報、處理中警報。",
             "【網頁版】設備頁附近 12 個月警報與 PM 對照長條圖、警報內容統計（同一種警報出現幾次）、PM／警報合併時間軸（警報標示距上次 PM 天數）；警報若已自動掛任務，可展開看負責人的處理措施、回復結果與完成時間，與 App 的警報子項目相同。App 本身無變動。"

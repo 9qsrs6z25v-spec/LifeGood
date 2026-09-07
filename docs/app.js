@@ -1109,7 +1109,17 @@ document.addEventListener('DOMContentLoaded', () => {
   $('#demo-btn').onclick = startDemo; $('#demo-btn-2').onclick = startDemo;
   $('#reload-btn').onclick = async () => { if (Store.source === '示範資料') { toast('示範資料不需重新讀取'); return; } toast('重新讀取中…'); await AutoRefresh.refresh(false); AutoRefresh.schedule(); };
   $('#signout-btn').onclick = () => { if (ckContainer && Store.source !== '示範資料') { const btn = $('#apple-sign-out-button button, #apple-sign-out-button a'); if (btn) btn.click(); else { localStorage.removeItem(TOKEN_KEY); location.reload(); } } else { showGate(); } };
-  const saved = localStorage.getItem(TOKEN_KEY);
-  if (location.search.includes('demo=1')) startDemo();
+  // 網址帶 token（?token=...）：第一次打開自動存進這台瀏覽器，然後立刻把 token 從網址拿掉，
+  // 不留在網址列、瀏覽紀錄或書籤裡。之後打開不帶參數的網址也能直接登入。
+  const params = new URLSearchParams(location.search);
+  const urlToken = (params.get('token') || '').trim();
+  if (urlToken) {
+    try { localStorage.setItem(TOKEN_KEY, urlToken); } catch (e) { /* 私密瀏覽等情況存不進去就只用這一次 */ }
+    params.delete('token');
+    const clean = location.pathname + (params.toString() ? '?' + params.toString() : '') + location.hash;
+    try { history.replaceState(null, '', clean); } catch (e) { /* ignore */ }
+  }
+  const saved = urlToken || localStorage.getItem(TOKEN_KEY);
+  if (!urlToken && params.get('demo') === '1') startDemo();
   else if (saved) { $('#token-input').value = saved; startWithToken(saved); }
 });
