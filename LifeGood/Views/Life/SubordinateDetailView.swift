@@ -2552,6 +2552,8 @@ struct MeetingEditorSheet: View {
     @State private var occurrences: [MeetingOccurrence] = []
     @State private var note = ""
     @State private var isSaving = false
+    /// [v25.332] 會議負責人（可移交給其他部屬）
+    @State private var assignedSubId = UUID()
     /// 正在編輯的場次（以原定日期為鍵）。用 .sheet(item:) 開——本檔案的 Sheet 一律走這個模式。
     @State private var editingOccurrence: DateBox?
     /// 正在新增的臨時場次（規則之外加開的一場），值是預設的開會時間
@@ -2649,6 +2651,24 @@ struct MeetingEditorSheet: View {
                     }
                 }
 
+                // [v25.332] 會議也能移交給其他部屬（比照任務編輯的「指派人員」）：
+                // 原本會議只能掛在開會時選的那個人身上，掛錯人只能刪掉重建。
+                Section {
+                    Picker(selection: $assignedSubId) {
+                        ForEach(lifeStore.subordinates) { s in
+                            Text(s.name.isEmpty ? "未命名" : s.name).tag(s.id)
+                        }
+                    } label: {
+                        Label("會議負責人", systemImage: "person.crop.circle.badge.checkmark")
+                    }
+                } header: {
+                    editorSectionHeader("指派人員", icon: "person.crop.circle.badge.checkmark")
+                } footer: {
+                    if assignedSubId != subordinateId {
+                        Text("儲存後整場會議（含所有場次與議程項目）會移交給所選人員；議程項目的負責人設定不變。")
+                    }
+                }
+
                 if editing != nil {
                     Section {
                         Button(role: .destructive) { deleteMeeting() } label: { Label("刪除會議", systemImage: "trash") }
@@ -2721,6 +2741,7 @@ struct MeetingEditorSheet: View {
             .onAppear {
                 peopleIndex = Dictionary(lifeStore.sideRolePersonCandidates().map { ($0.id, $0) },
                                          uniquingKeysWith: { a, _ in a })
+                assignedSubId = subordinateId
                 if let e = editing {
                     topic = e.topic; date = e.date; createdAt = e.createdAt
                     durationText = "\(e.durationMinutes)"
@@ -2983,7 +3004,6 @@ struct MeetingEditorSheet: View {
 
     private func save() {
         guard !isSaving else { return }
-        guard var sub = lifeStore.subordinates.first(where: { $0.id == subordinateId }) else { dismiss(); return }
         isSaving = true
         // items ⇄ 場次的搬動已經在切換「設定週期」的當下就做掉了（見 onChange），
         // 這裡不再搬一次，否則會搬兩遍。
@@ -2996,9 +3016,17 @@ struct MeetingEditorSheet: View {
             createdAt: createdAt, occurrences: occurrences
         )
         meeting.pruneOccurrences()
-        if let idx = sub.meetings.firstIndex(where: { $0.id == meeting.id }) { sub.meetings[idx] = meeting }
-        else { sub.meetings.append(meeting) }
-        lifeStore.update(sub); dismiss()
+        // [v25.332] 移交：先從原負責人移除（比照 TaskEditorSheet.save 的換人流程）
+        let targetId = assignedSubId
+        if targetId != subordinateId,
+           var old = lifeStore.subordinates.first(where: { $0.id == subordinateId }) {
+            old.meetings.removeAll { $0.id == meeting.id }
+            lifeStore.update(old)
+        }
+        guard var target = lifeStore.subordinates.first(where: { $0.id == targetId }) else { dismiss(); return }
+        if let idx = target.meetings.firstIndex(where: { $0.id == meeting.id }) { target.meetings[idx] = meeting }
+        else { target.meetings.append(meeting) }
+        lifeStore.update(target); dismiss()
     }
 
     private func deleteMeeting() {
@@ -4746,8 +4774,8 @@ struct SubordinateItemCard: View {
         let divider = "━━━━━━━━━━━━━━"
         var lines: [String] = []
         switch ref {
-        case .task(let subId, let snap):
-            let t = lifeStore.subordinates.first { $0.id == subId }?.tasks.first { $0.id == snap.id } ?? snap
+        case .task(let refSubId, let snap):
+            let (subId, t) = liveTask(refSubId, snap)
             lines.append("📋 任務｜\(t.topic.isEmpty ? "未命名任務" : t.topic)")
             lines.append(divider)
             if let info = cardEquipmentInfo(t.equipmentLink) {
@@ -4764,8 +4792,8 @@ struct SubordinateItemCard: View {
                 lines.append(t.responseResult.isEmpty ? "（尚未回報）" : t.responseResult)
             }
             if !t.note.isEmpty { lines.append(""); lines.append("💬 備註"); lines.append(t.note) }
-        case .meeting(let subId, let snap):
-            let m = lifeStore.subordinates.first { $0.id == subId }?.meetings.first { $0.id == snap.id } ?? snap
+        case .meeting(let refSubId, let snap):
+            let (subId, m) = liveMeeting(refSubId, snap)
             lines.append("👥 會議｜\(m.topic.isEmpty ? "未命名會議" : m.topic)")
             lines.append(divider)
             lines.append("🕐 會議時間：\(fmt(m.date)) – \(MeetingTimeFormat.time24.string(from: m.endDate))")
@@ -4893,8 +4921,8 @@ struct SubordinateItemCard: View {
         // 每個 case 都從 lifeStore 取最新資料（編輯儲存後即時反映），找不到才退回快照。
         // forExport：匯出圖片模式——editBlock 空欄位整塊隱藏、有內容也不帶鉛筆鈕
         switch ref {
-        case .task(let subId, let snap):
-            let t = lifeStore.subordinates.first { $0.id == subId }?.tasks.first { $0.id == snap.id } ?? snap
+        case .task(let refSubId, let snap):
+            let (subId, t) = liveTask(refSubId, snap)
             // [v25.325] 應做未作為＝紅色缺失抬頭
             titleBlock(icon: t.isDereliction ? "exclamationmark.triangle.fill" : "checklist",
                        color: t.isDereliction ? .red : .cyan,
@@ -4928,8 +4956,8 @@ struct SubordinateItemCard: View {
             editBlock("備註", t.note, accent: .cyan, forExport: forExport) { new in
                 lifeStore.mutateSubordinateTaskFields(subordinateId: subId, taskId: t.id) { $0.note = new }
             }
-        case .meeting(let subId, let snap):
-            let m = lifeStore.subordinates.first { $0.id == subId }?.meetings.first { $0.id == snap.id } ?? snap
+        case .meeting(let refSubId, let snap):
+            let (subId, m) = liveMeeting(refSubId, snap)
             titleBlock(icon: "person.3.fill", color: .indigo, title: m.topic.isEmpty ? "未命名會議" : m.topic)
             ownerBlock(subId: subId, accent: .indigo)
             field("會議時間", "\(fmt(m.date)) – \(MeetingTimeFormat.time24.string(from: m.endDate))")
@@ -5015,6 +5043,27 @@ struct SubordinateItemCard: View {
     /// 職等/部門優先用 id 對照（gradeTitles/departments），沒有再退回文字欄位，
     /// 與 SubordinateDetailView.gradeTitleText/departmentText 同一套解析。
     @ViewBuilder
+    /// [v25.332] 任務／會議先查開卡片時的持有人，找不到（已移交給別人）再掃全部部屬，
+    /// 回傳「目前持有人 id ＋ 最新資料」；都找不到才退回快照。移交後卡片不必關掉重開。
+    private func liveTask(_ subId: UUID, _ snap: SubordinateTask) -> (UUID, SubordinateTask) {
+        if let t = lifeStore.subordinates.first(where: { $0.id == subId })?.tasks.first(where: { $0.id == snap.id }) {
+            return (subId, t)
+        }
+        for s in lifeStore.subordinates {
+            if let t = s.tasks.first(where: { $0.id == snap.id }) { return (s.id, t) }
+        }
+        return (subId, snap)
+    }
+    private func liveMeeting(_ subId: UUID, _ snap: SubordinateMeeting) -> (UUID, SubordinateMeeting) {
+        if let m = lifeStore.subordinates.first(where: { $0.id == subId })?.meetings.first(where: { $0.id == snap.id }) {
+            return (subId, m)
+        }
+        for s in lifeStore.subordinates {
+            if let m = s.meetings.first(where: { $0.id == snap.id }) { return (s.id, m) }
+        }
+        return (subId, snap)
+    }
+
     private func ownerBlock(subId: UUID, accent: Color) -> some View {
         if let sub = lifeStore.subordinates.first(where: { $0.id == subId }) {
             let gradeTitle: String = {
@@ -5203,11 +5252,11 @@ struct SubordinateItemCard: View {
     @ViewBuilder
     private var editor: some View {
         switch ref {
-        case .task(let subId, let snap):
-            let live = lifeStore.subordinates.first { $0.id == subId }?.tasks.first { $0.id == snap.id } ?? snap
+        case .task(let refSubId, let snap):
+            let (subId, live) = liveTask(refSubId, snap)
             TaskEditorSheet(subordinateId: subId, editing: live)
-        case .meeting(let subId, let snap):
-            let live = lifeStore.subordinates.first { $0.id == subId }?.meetings.first { $0.id == snap.id } ?? snap
+        case .meeting(let refSubId, let snap):
+            let (subId, live) = liveMeeting(refSubId, snap)
             MeetingEditorSheet(subordinateId: subId, editing: live)
         case .report(let subId, let snap):
             let live = lifeStore.subordinates.first { $0.id == subId }?.weeklyReports.first { $0.id == snap.id } ?? snap
