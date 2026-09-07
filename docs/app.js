@@ -500,7 +500,7 @@ function route() {
   const hash = location.hash || '#/overview';
   const parts = hash.replace(/^#\//, '').split('/');
   const page = parts[0] || 'overview';
-  document.querySelectorAll('.nav a').forEach((a) => a.classList.toggle('active', a.dataset.route === page || (page === 'sub' && a.dataset.route === 'subs') || (page === 'dept' && a.dataset.route === 'org')));
+  document.querySelectorAll('.nav a').forEach((a) => a.classList.toggle('active', a.dataset.route === page || (page === 'sub' && a.dataset.route === 'subs') || ((page === 'dept' || page === 'equipment') && a.dataset.route === 'org')));
   destroyCharts();
   const main = $('#main');
   main.scrollTop = 0; window.scrollTo(0, 0);
@@ -512,6 +512,7 @@ function route() {
     case 'stats': renderStats(main, ctx, parts[1] || 'all'); break;
     case 'org': renderOrg(main); break;
     case 'dept': renderDept(main, ctx, decodeURIComponent(parts[1] || '')); break;
+    case 'equipment': renderEquipment(main, ctx, decodeURIComponent(parts[1] || '')); break;
     default: renderOverview(main, ctx);
   }
 }
@@ -723,7 +724,7 @@ function renderSubDetail(main, ctx, id, tab) {
     body = `<div class="card"><h3>執掌設備 <span class="count">${eq.length}</span></h3>${eq.map((e) => {
       const pms = [...(e.pmRecords || [])].sort((a, b) => b.date - a.date); const als = [...(e.alarms || [])].sort((a, b) => b.date - a.date);
       const d = e.departmentId && deptById(e.departmentId);
-      return `<div class="task-row"><div class="tick">⚙️</div><div><div class="t-title">${esc(e.name || '未命名設備')}</div><div class="t-meta">${d ? esc(d.name) + '・' : ''}${e.system ? esc(e.system) + '・' : ''}最近 PM ${pms[0] ? fmtDate(pms[0].date) + (pms[0].phase ? '（' + esc(pms[0].phase) + '）' : '') : '—'}・最近警報 ${als[0] ? fmtDateTime(als[0].date) : '—'}</div>${e.note ? `<div class="t-meta">${esc(e.note)}</div>` : ''}
+      return `<div class="task-row"><div class="tick">⚙️</div><div><div class="t-title"><a href="#/equipment/${e.id}" style="color:var(--teal)">${esc(e.name || '未命名設備')} ›</a></div><div class="t-meta">${d ? esc(d.name) + '・' : ''}${e.system ? esc(e.system) + '・' : ''}最近 PM ${pms[0] ? fmtDate(pms[0].date) + (pms[0].phase ? '（' + esc(pms[0].phase) + '）' : '') : '—'}・最近警報 ${als[0] ? fmtDateTime(als[0].date) : '—'}</div>${e.note ? `<div class="t-meta">${esc(e.note)}</div>` : ''}
         ${als.length ? `<details class="agenda"><summary>警報 ${als.length} 筆</summary><div class="sub-items">${als.slice(0, 20).map((a) => `<div class="t-meta" style="padding:3px 0">🔔 ${fmtDateTime(a.date)}　${esc(a.content)}</div>`).join('')}</div></details>` : ''}
         ${pms.length ? `<details class="agenda"><summary>PM ${pms.length} 筆</summary><div class="sub-items">${pms.slice(0, 20).map((p) => `<div class="t-meta" style="padding:3px 0">${p.phase === '停機' ? '⏸️' : p.phase === '完成復機' ? '▶️' : '🛠️'} ${fmtDateTime(p.date)}　${esc(p.phase || 'PM')}${p.note ? '・' + esc(p.note) : ''}</div>`).join('')}</div></details>` : ''}
       </div><div class="t-right"><span class="chip teal">PM ${pms.length}</span><span class="chip ${als.length ? 'red' : ''}">警報 ${als.length}</span></div></div>`;
@@ -943,9 +944,127 @@ function renderDept(main, ctx, id) {
       ${[...eq].sort((a, b) => (a.system || '').localeCompare(b.system || '') || a.name.localeCompare(b.name)).map((e) => {
         const pms = [...(e.pmRecords || [])].sort((a, b) => b.date - a.date); const als = [...(e.alarms || [])].sort((a, b) => b.date - a.date);
         const recent = als.filter((a) => daysBetween(a.date, now) <= 30).length; const owner = e.ownerId && subById(e.ownerId);
-        return `<tr><td><b>${esc(e.name)}</b>${e.note ? `<div class="muted small">${esc(e.note)}</div>` : ''}</td><td>${e.system ? `<span class="chip teal">${esc(e.system)}</span>` : ''}</td><td>${owner ? `<a href="#/sub/${owner.id}">${esc(owner.name)}</a>` : '<span class="muted">未指派</span>'}</td><td>${pms[0] ? fmtDate(pms[0].date) + (pms[0].phase ? `（${esc(pms[0].phase)}）` : '') : '—'}</td><td class="num">${pms.length}</td><td>${als[0] ? fmtDateTime(als[0].date) : '—'}</td><td class="num">${als.length}</td><td class="num">${recent ? `<span class="chip red">${recent}</span>` : '0'}</td></tr>`;
+        return `<tr class="clickable" onclick="location.hash='#/equipment/${e.id}'"><td><b>${esc(e.name)}</b>${e.note ? `<div class="muted small">${esc(e.note)}</div>` : ''}</td><td>${e.system ? `<span class="chip teal">${esc(e.system)}</span>` : ''}</td><td>${owner ? `<a href="#/sub/${owner.id}">${esc(owner.name)}</a>` : '<span class="muted">未指派</span>'}</td><td>${pms[0] ? fmtDate(pms[0].date) + (pms[0].phase ? `（${esc(pms[0].phase)}）` : '') : '—'}</td><td class="num">${pms.length}</td><td>${als[0] ? fmtDateTime(als[0].date) : '—'}</td><td class="num">${als.length}</td><td class="num">${recent ? `<span class="chip red">${recent}</span>` : '0'}</td></tr>`;
       }).join('') || '<tr><td colspan="8" class="empty">此部門沒有設備</td></tr>'}
     </tbody></table></div>`;
+}
+
+// ---- 設備詳細頁 -----------------------------------------------------------
+/** 全部屬掃描找出連到這則警報的任務（警報自動掛任務時寫入 equipmentLink.alarmId） */
+function linkedAlarmTask(alarmId) {
+  for (const s of Store.subs) {
+    const t = (s.tasks || []).find((x) => x.equipmentLink && x.equipmentLink.alarmId === alarmId);
+    if (t) return { sub: s, task: t };
+  }
+  return null;
+}
+function renderEquipment(main, ctx, id) {
+  const e = Store.equipment.find((x) => x.id === id);
+  if (!e) { main.innerHTML = pageHead('找不到設備', '<a href="#/org">回公司組織</a>'); return; }
+  const now = new Date();
+  const d = e.departmentId && deptById(e.departmentId);
+  const owner = e.ownerId && subById(e.ownerId);
+  const pms = [...(e.pmRecords || [])].sort((a, b) => b.date - a.date);
+  const als = [...(e.alarms || [])].sort((a, b) => b.date - a.date);
+  const lastPM = pms[0] || null;
+  const daysSincePM = lastPM ? daysBetween(lastPM.date, now) : null;
+  const in30 = als.filter((a) => daysBetween(a.date, now) <= 30).length;
+  const in90 = als.filter((a) => daysBetween(a.date, now) <= 90).length;
+  // 平均警報間隔（最近 10 次警報的相鄰間隔平均）
+  const gaps = []; const recentAls = als.slice(0, 10);
+  for (let i = 0; i + 1 < recentAls.length; i++) gaps.push((recentAls[i].date - recentAls[i + 1].date) / 86400000);
+  const mtba = gaps.length ? Math.round(gaps.reduce((a, b) => a + b, 0) / gaps.length) : null;
+  // 目前是否在保養中：最新一筆 PM 是「停機」且之後沒有「完成復機」
+  const inMaintenance = !!(lastPM && lastPM.phase === '停機');
+  const openAlarms = als.filter((a) => { const l = linkedAlarmTask(a.id); return l && !l.task.isCompleted; }).length;
+
+  // 時間軸：PM 與警報合併、新到舊；警報標示距上一次 PM 的天數
+  const pmDatesAsc = pms.map((p) => p.date).sort((a, b) => a - b);
+  const entries = pms.map((p) => ({ id: p.id, isPM: true, date: p.date, text: p.note || '', phase: p.phase || null }))
+    .concat(als.map((a) => { const prior = [...pmDatesAsc].reverse().find((x) => x <= a.date); return { id: a.id, isPM: false, date: a.date, text: a.content || '', daysSincePM: prior ? daysBetween(prior, a.date) : null }; }))
+    .sort((a, b) => b.date - a.date);
+
+  // 近 12 個月警報數（含 PM 次數作對照）
+  const months = []; for (let i = 11; i >= 0; i--) { const m = new Date(now.getFullYear(), now.getMonth() - i, 1); months.push(m); }
+  const key = (dt) => `${dt.getFullYear()}-${dt.getMonth()}`;
+  const alarmByMonth = {}, pmByMonth = {};
+  for (const a of als) alarmByMonth[key(a.date)] = (alarmByMonth[key(a.date)] || 0) + 1;
+  for (const p of pms) if (p.phase !== '完成復機') pmByMonth[key(p.date)] = (pmByMonth[key(p.date)] || 0) + 1;
+
+  const kpi = (label, value, cls = '', foot = '') => `<div class="card kpi"><div class="label">${label}</div><div class="value ${cls}">${value}</div>${foot ? `<div class="foot">${foot}</div>` : ''}</div>`;
+  const timelineRow = (en) => {
+    if (en.isPM) {
+      const icon = en.phase === '停機' ? '⏸️' : en.phase === '完成復機' ? '▶️' : '🛠️';
+      const chip = en.phase === '停機' ? '<span class="chip orange">PM 停機</span>' : en.phase === '完成復機' ? '<span class="chip green">PM 完成復機</span>' : '<span class="chip green">PM</span>';
+      return `<div class="task-row"><div class="tick">${icon}</div><div><div class="t-title">${esc(en.text || (en.phase ? 'PM ' + en.phase : '預防保養'))}</div><div class="t-meta">${fmtDateTime(en.date)}</div></div><div class="t-right">${chip}</div></div>`;
+    }
+    const l = linkedAlarmTask(en.id);
+    let resp = '';
+    if (l) {
+      const done = l.task.isCompleted;
+      resp = `<details class="agenda"><summary style="color:${done ? 'var(--green)' : 'var(--orange)'}">${done ? '✅ 已完成回報' : '🧑‍🔧 處理中'}・<a href="#/sub/${l.sub.id}/tasks">${esc(l.sub.name)}</a></summary><div class="sub-items">
+        <div class="t-meta" style="padding:3px 0"><b>處理措施</b>　${esc(l.task.responseAction || '（尚未回報）')}</div>
+        <div class="t-meta" style="padding:3px 0"><b>回復結果</b>　${esc(l.task.responseResult || '（尚未回報）')}</div>
+        ${done && l.task.completedAt ? `<div class="t-meta" style="padding:3px 0"><b>完成時間</b>　${fmtDateTime(l.task.completedAt)}</div>` : ''}
+      </div></details>`;
+    }
+    return `<div class="task-row"><div class="tick">🔔</div><div><div class="t-title" style="color:var(--red)">${esc(en.text || '警報')}</div><div class="t-meta">${fmtDateTime(en.date)}${en.daysSincePM != null ? `・距上次 PM ${en.daysSincePM} 天` : '・之前沒有 PM 紀錄'}</div>${resp}</div><div class="t-right"><span class="chip red">警報</span></div></div>`;
+  };
+
+  main.innerHTML = `
+    <div class="crumb"><a href="#/org">公司組織</a> › ${d ? `<a href="#/dept/${d.id}">${esc(d.name)}</a> › ` : ''}${esc(e.name)}</div>
+    <div class="card hero" style="background:linear-gradient(135deg, rgba(48,176,199,0.18), rgba(88,86,214,0.10))">
+      <div class="avatar" style="background:linear-gradient(135deg,#30b0c7,#5856d6)">⚙️</div>
+      <div style="flex:1;min-width:0">
+        <div class="name">${esc(e.name || '未命名設備')} ${e.system ? `<span class="chip teal big">${esc(e.system)}</span>` : ''} ${inMaintenance ? '<span class="chip orange big">保養中（停機）</span>' : ''}</div>
+        <div class="facts">
+          ${d ? `<span>🏢 <a href="#/dept/${d.id}">${esc(d.name)}</a></span>` : '<span>🏢 未指定部門</span>'}
+          ${owner ? `<span>👤 負責人 <a href="#/sub/${owner.id}/equipment">${esc(owner.name)}</a>${owner.jobTitle ? '（' + esc(owner.jobTitle) + '）' : ''}</span>` : '<span>👤 未指派負責人</span>'}
+          ${lastPM ? `<span>🛠️ 上次 PM ${fmtDate(lastPM.date).split(' ')[0]}${lastPM.phase ? '（' + esc(lastPM.phase) + '）' : ''}</span>` : ''}
+          ${als[0] ? `<span>🔔 最近警報 ${fmtDateTime(als[0].date)}</span>` : ''}
+        </div>
+        ${e.note ? `<div class="muted small" style="margin-top:6px">${esc(e.note)}</div>` : ''}
+      </div>
+    </div>
+    <div class="grid cols-5 mt">
+      ${kpi('PM 總數', pms.length, 'green', `停機 ${pms.filter((p) => p.phase === '停機').length}・復機 ${pms.filter((p) => p.phase === '完成復機').length}`)}
+      ${kpi('距上次 PM', daysSincePM == null ? '—' : daysSincePM + ' 天', daysSincePM != null && daysSincePM >= 90 ? 'orange' : '', daysSincePM != null && daysSincePM >= 90 ? '已超過 90 天' : '')}
+      ${kpi('警報總數', als.length, als.length ? 'red' : '', mtba != null ? `平均間隔約 ${mtba} 天` : '')}
+      ${kpi('30 天警報', in30, in30 ? 'red' : 'green', `90 天內 ${in90} 次`)}
+      ${kpi('處理中警報', openAlarms, openAlarms ? 'orange' : 'green', '已自動掛任務、尚未回報完成')}
+    </div>
+    <div class="grid cols-2 mt">
+      <div class="card chart-card"><h3>近 12 個月警報與 PM</h3><div class="chart-box" style="height:240px"><canvas id="eq-chart"></canvas></div><div class="legend-note">紅＝警報次數，綠＝PM 次數（停機與一般 PM；復機不重複計）。</div></div>
+      <div class="card"><h3>警報內容統計 <span class="count">${als.length}</span></h3>${(() => {
+        const c = {}; for (const a of als) { const k = (a.content || '警報').trim(); c[k] = (c[k] || 0) + 1; }
+        const rows = Object.entries(c).sort((a, b) => b[1] - a[1]).slice(0, 10);
+        return rows.length ? `<div class="list">${rows.map(([k, n]) => `<div class="item"><div class="main-text"><div class="title">${esc(k)}</div></div><span class="chip red">${n} 次</span></div>`).join('')}</div>` : '<div class="empty">尚無警報</div>';
+      })()}</div>
+    </div>
+    <div class="card mt"><h3>PM／警報時間軸 <span class="count">${entries.length}</span>
+      <span class="spacer"></span><span class="chip orange">⏸️ 停機</span><span class="chip green">▶️ PM／復機</span><span class="chip red">🔔 警報</span></h3>
+      ${entries.map(timelineRow).join('') || '<div class="empty">尚無 PM／警報記錄</div>'}
+    </div>`;
+
+  if (!window.Chart) return;
+  const css = getComputedStyle(document.documentElement);
+  const textColor = css.getPropertyValue('--text').trim() || '#000';
+  const lineColor = css.getPropertyValue('--line').trim() || 'rgba(0,0,0,0.1)';
+  charts.push(new Chart($('#eq-chart'), {
+    type: 'bar',
+    data: {
+      labels: months.map((m) => `${m.getFullYear() % 100}/${m.getMonth() + 1}`),
+      datasets: [
+        { label: '警報', data: months.map((m) => alarmByMonth[key(m)] || 0), backgroundColor: 'rgba(255,59,48,0.75)', borderRadius: 4 },
+        { label: 'PM', data: months.map((m) => pmByMonth[key(m)] || 0), backgroundColor: 'rgba(52,199,89,0.75)', borderRadius: 4 },
+      ],
+    },
+    options: {
+      maintainAspectRatio: false, animation: { duration: 350 },
+      scales: { x: { grid: { display: false }, ticks: { color: textColor } }, y: { beginAtZero: true, ticks: { color: textColor, precision: 0 }, grid: { color: lineColor } } },
+      plugins: { legend: { labels: { color: textColor } } },
+    },
+  }));
 }
 
 // ---------------------------------------------------------------------------

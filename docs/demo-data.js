@@ -130,6 +130,13 @@
     { id: EQ5, name: 'GC-MS', note: '', pmRecords: [pm(-20, null, '原廠保養')], alarms: [], departmentId: D_LAB, ownerId: E.id, system: '分析' },
   ];
 
+  // 警報自動掛任務：EQ1「油壓低」→ 王小明處理中；冰水主機「冷卻水流量低」→ 李佳穎已回報完成
+  const alarmOil = equipment[0].alarms[1], alarmFlow = equipment[2].alarms[2];
+  A.tasks.push({ id: id(), topic: '警報處理：油壓低', content: 'CDA 壓縮機 #1 油壓低警報', date: alarmOil.date, dueDate: d(0, 18), note: '', isCompleted: false, completedAt: null,
+    equipmentLink: { equipmentId: EQ1, alarmId: alarmOil.id, equipmentName: 'CDA 壓縮機 #1', system: 'CDA' }, responseAction: '已補油並檢查油位開關，觀察中', responseResult: '', isDereliction: false });
+  B.tasks.push({ id: id(), topic: '警報處理：冷卻水流量低', content: '冰水主機 A 冷卻水流量低', date: alarmFlow.date, dueDate: d(0, 18), note: '', isCompleted: true, completedAt: d(-1, 14),
+    equipmentLink: { equipmentId: EQ3, alarmId: alarmFlow.id, equipmentName: '冰水主機 A', system: '冰水' }, responseAction: '清洗 Y 型過濾器', responseResult: '流量恢復 120 m³/h，警報解除', isDereliction: false });
+
   const M1 = id(), M2 = id();
   const milestones = [
     { id: id(), title: '氣體化學執行秘書', date: ymd(2025, 1, 1), category: '職涯', note: '', careerSubCategory: 'sideRole', sideRoleName: '氣體化學執行秘書',
