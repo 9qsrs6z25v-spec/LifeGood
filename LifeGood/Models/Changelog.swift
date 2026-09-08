@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.345", build: 1098, date: "2026/08/19", notes: [
+            "【調整】兼任職務「重大決議」列表改為兩行版型：第一行是膠囊列（流水號、日期、廠區、系統分類、發起人），可左右捲動，分類選再多也不會把標題擠掉；第二行才是標題，過長自動換行，不再截成「…」。膠囊點按篩選的功能不變。"
+        ]),
         ChangelogEntry(version: "25.344", build: 1097, date: "2026/08/19", notes: [
             "【修正】編譯錯誤：v25.332 在事項卡片加入「移交後跟隨新負責人」的兩個查詢函式時，把原本掛在負責人資訊卡（ownerBlock）上的 @ViewBuilder 擠到了新函式頭上，導致 v25.332～v25.343 無法編譯（SubordinateDetailView.swift:5072「opaque return type…no return statements」）。已把屬性移回正確位置，抱歉。"
         ]),

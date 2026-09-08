@@ -1404,47 +1404,53 @@ struct SideRoleWorkspaceView: View {
         }
     }
 
+    /// [v25.345] 兩行版型：第一行膠囊列（流水號／日期／廠區／系統分類／發起人）可橫向捲動，
+    /// 分類多也不會把標題擠掉；第二行才是標題，過長自動換行不再截成「…」。
     private func resolutionRow(_ r: SideRoleResolution) -> some View {
         HStack(spacing: 10) {
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: 6) {
-                    // [v25.299] 流水號徽章
-                    if !r.serialLabel.isEmpty {
-                        Text(r.serialLabel)
+            VStack(alignment: .leading, spacing: 5) {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 6) {
+                        // [v25.299] 流水號徽章
+                        if !r.serialLabel.isEmpty {
+                            Text(r.serialLabel)
+                                .font(.system(size: 10, weight: .bold))
+                                .foregroundStyle(.purple)
+                                .padding(.horizontal, 6).padding(.vertical, 2)
+                                .background(Color.purple.opacity(0.12))
+                                .clipShape(Capsule())
+                        }
+                        Text(SideRoleFormat.date(r.date))
                             .font(.system(size: 10, weight: .bold))
-                            .foregroundStyle(.purple)
+                            .foregroundStyle(.indigo)
                             .padding(.horizontal, 6).padding(.vertical, 2)
-                            .background(Color.purple.opacity(0.12))
+                            .background(Color.indigo.opacity(0.12))
                             .clipShape(Capsule())
+                        if !r.site.isEmpty {
+                            Text(r.site)
+                                .font(.system(size: 10, weight: .bold))
+                                .foregroundStyle(.teal)
+                                .padding(.horizontal, 6).padding(.vertical, 2)
+                                .background(Color.teal.opacity(0.14))
+                                .clipShape(Capsule())
+                                .overlay(Capsule().stroke(Color.teal.opacity(0.25), lineWidth: 0.6))
+                        }
+                        ForEach(r.categories, id: \.self) { cat in
+                            categoryFilterChip(cat)
+                        }
+                        if !r.initiator.isEmpty {
+                            HStack(spacing: 3) {
+                                Text("發起").font(.caption2).foregroundStyle(.secondary)
+                                personFilterChip(r.initiator)
+                            }
+                        }
                     }
-                    Text(SideRoleFormat.date(r.date))
-                        .font(.system(size: 10, weight: .bold))
-                        .foregroundStyle(.indigo)
-                        .padding(.horizontal, 6).padding(.vertical, 2)
-                        .background(Color.indigo.opacity(0.12))
-                        .clipShape(Capsule())
-                    if !r.site.isEmpty {
-                        Text(r.site)
-                            .font(.system(size: 10, weight: .bold))
-                            .foregroundStyle(.teal)
-                            .padding(.horizontal, 6).padding(.vertical, 2)
-                            .background(Color.teal.opacity(0.14))
-                            .clipShape(Capsule())
-                            .overlay(Capsule().stroke(Color.teal.opacity(0.25), lineWidth: 0.6))
-                    }
-                    ForEach(r.categories, id: \.self) { cat in
-                        categoryFilterChip(cat)
-                    }
-                    Text(r.title.isEmpty ? "（未填標題）" : r.title)
-                        .font(.subheadline.weight(.medium))
-                        .lineLimit(1)
+                    // 膠囊本身有點按（篩選）行為；留一點垂直空間避免被裁到陰影／描邊
+                    .padding(.vertical, 1)
                 }
-                if !r.initiator.isEmpty {
-                    HStack(spacing: 4) {
-                        Text("發起：").font(.caption2).foregroundStyle(.secondary)
-                        personFilterChip(r.initiator)
-                    }
-                }
+                Text(r.title.isEmpty ? "（未填標題）" : r.title)
+                    .font(.subheadline.weight(.medium))
+                    .fixedSize(horizontal: false, vertical: true)
                 if !r.content.isEmpty {
                     Text(r.content)
                         .font(.caption2).foregroundStyle(.secondary).lineLimit(3)
