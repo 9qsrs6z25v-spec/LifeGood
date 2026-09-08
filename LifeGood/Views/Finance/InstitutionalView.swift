@@ -911,6 +911,21 @@ struct InstNetBarCard: View {
         var hasBreakdown: Bool { foreign != nil || trust != nil || dealer != nil }
     }
     @State private var points: [DayNet] = []
+    /// [v25.343] 點選／拖曳的日期（Charts X 軸選取），比照技術線圖
+    @State private var selectedDate: Date?
+
+    /// 被點選的那一天（取最接近選取日期的資料點）
+    private var selectedPoint: DayNet? {
+        guard let selectedDate else { return nil }
+        return points.min {
+            abs($0.date.timeIntervalSince(selectedDate)) < abs($1.date.timeIntervalSince(selectedDate))
+        }
+    }
+
+    private static let detailFmt: DateFormatter = {
+        let f = DateFormatter(); f.locale = Locale(identifier: "zh_Hant_TW")
+        f.dateFormat = "yyyy/M/d (E)"; return f
+    }()
 
     private let upColor = Color(red: 0.92, green: 0.26, blue: 0.21)
     private let downColor = Color(red: 0.13, green: 0.65, blue: 0.37)
@@ -950,21 +965,30 @@ struct InstNetBarCard: View {
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                         Spacer()
-                        if let last = points.last {
-                            Text(last.net >= 0 ? "今日買超" : "今日賣超")
+                        // 點選某一天時膠囊改顯示該日；沒點選維持「今日」
+                        if let shown = selectedPoint ?? points.last {
+                            Text((selectedPoint == nil ? "今日" : "當日") + (shown.net >= 0 ? "買超" : "賣超"))
                                 .font(.system(size: 11, weight: .semibold))
                                 .padding(.horizontal, 8).padding(.vertical, 3)
-                                .background((last.net >= 0 ? upColor : downColor).opacity(0.10))
-                                .foregroundStyle(last.net >= 0 ? upColor : downColor)
+                                .background((shown.net >= 0 ? upColor : downColor).opacity(0.10))
+                                .foregroundStyle(shown.net >= 0 ? upColor : downColor)
                                 .clipShape(Capsule())
                         }
                     }
-                    if let last = points.last, last.hasBreakdown {
-                        breakdownRow(last)
+                    // [v25.343] 明細列：點選哪一天就顯示哪一天（含日期與關閉鈕）；
+                    // 沒點選時顯示最新一日。舊快照沒有分計的日子只顯示合計。
+                    if let shown = selectedPoint ?? points.last, shown.hasBreakdown || selectedPoint != nil {
+                        breakdownRow(shown, isSelected: selectedPoint != nil)
                     }
                     // 有分計的日子畫三色堆疊柱（正values往上疊、負往下疊，Charts 自動處理）；
                     // 舊快照沒有分計的日子退回單色合計柱，兩種同圖共存。
                     Chart {
+                        if let sel = selectedPoint {
+                            // 選取十字線（畫在柱子後面），與技術線圖同款
+                            RuleMark(x: .value("選取", sel.date))
+                                .foregroundStyle(Color.secondary.opacity(0.35))
+                                .lineStyle(StrokeStyle(lineWidth: 1, dash: [3, 3]))
+                        }
                         ForEach(points) { p in
                             if p.hasBreakdown {
                                 BarMark(x: .value("日", p.date),
@@ -989,6 +1013,8 @@ struct InstNetBarCard: View {
                     }
                     .chartXAxis { AxisMarks(values: .automatic(desiredCount: 4)) }
                     .chartYAxis { AxisMarks(position: .trailing, values: .automatic(desiredCount: 4)) }
+                    // 點按／拖曳選取某一天：明細列跟著顯示該日分計
+                    .chartXSelection(value: $selectedDate)
                     .frame(height: 120)
 
                     legendRow
@@ -1006,16 +1032,36 @@ struct InstNetBarCard: View {
         .task { await load() }
     }
 
-    /// 最新一日的分計明細列（張；外資含外資自營商）
-    private func breakdownRow(_ p: DayNet) -> some View {
-        HStack(spacing: 10) {
-            breakdownPair("外資", p.foreign, color: foreignColor)
-            breakdownPair("投信", p.trust, color: trustColor)
-            breakdownPair("自營", p.dealer, color: dealerColor)
-            Spacer()
-            Text(String(format: "合計 %+.0f 張", p.net / 1000))
-                .font(.caption2.weight(.semibold).monospacedDigit())
-                .foregroundStyle(p.net >= 0 ? upColor : downColor)
+    /// 分計明細列（張；外資含外資自營商）。isSelected＝使用者點選的日期（顯示日期＋關閉鈕）
+    private func breakdownRow(_ p: DayNet, isSelected: Bool = false) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            if isSelected {
+                HStack(spacing: 8) {
+                    Text(Self.detailFmt.string(from: p.date))
+                        .font(.caption.weight(.bold))
+                    Spacer()
+                    Button {
+                        selectedDate = nil
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 14)).foregroundStyle(.tertiary)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            HStack(spacing: 10) {
+                if p.hasBreakdown {
+                    breakdownPair("外資", p.foreign, color: foreignColor)
+                    breakdownPair("投信", p.trust, color: trustColor)
+                    breakdownPair("自營", p.dealer, color: dealerColor)
+                } else {
+                    Text("僅有合計（舊資料）").font(.caption2).foregroundStyle(.tertiary)
+                }
+                Spacer()
+                Text(String(format: "合計 %+.0f 張", p.net / 1000))
+                    .font(.caption2.weight(.semibold).monospacedDigit())
+                    .foregroundStyle(p.net >= 0 ? upColor : downColor)
+            }
         }
         .padding(.horizontal, 10).padding(.vertical, 6)
         .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 8))
@@ -1096,6 +1142,8 @@ struct MarginChipCard: View {
         var id: Date { date }
     }
     @State private var points: [DayMargin] = []
+    /// [v25.343] 點選／拖曳的日期（Charts X 軸選取），比照技術線圖
+    @State private var selectedDate: Date?
 
     private let upColor = Color(red: 0.92, green: 0.26, blue: 0.21)
     private let downColor = Color(red: 0.13, green: 0.65, blue: 0.37)
@@ -1103,6 +1151,19 @@ struct MarginChipCard: View {
     private let shortColor = Color.purple
 
     private var chartPoints: [DayMargin] { points.filter { $0.margin != nil } }
+
+    /// 被點選的那一天（取最接近選取日期的資料點）
+    private var selectedPoint: DayMargin? {
+        guard let selectedDate else { return nil }
+        return points.min {
+            abs($0.date.timeIntervalSince(selectedDate)) < abs($1.date.timeIntervalSince(selectedDate))
+        }
+    }
+
+    private static let detailFmt: DateFormatter = {
+        let f = DateFormatter(); f.locale = Locale(identifier: "zh_Hant_TW")
+        f.dateFormat = "yyyy/M/d (E)"; return f
+    }()
 
     var body: some View {
         Group {
@@ -1128,26 +1189,38 @@ struct MarginChipCard: View {
                         Spacer()
                     }
 
-                    metricsRow(last)
+                    // 點選哪一天就顯示哪一天的指標（增減對該日前一個有資料日算）；沒點選顯示最新一日
+                    metricsRow(selectedPoint ?? last, isSelected: selectedPoint != nil)
 
                     if chartPoints.count >= 2 {
-                        Chart(chartPoints) { p in
-                            LineMark(x: .value("日", p.date),
-                                     y: .value("融資（張）", p.margin ?? 0))
-                                .foregroundStyle(marginColor)
-                                .lineStyle(StrokeStyle(lineWidth: 1.8))
-                            AreaMark(x: .value("日", p.date),
-                                     y: .value("融資（張）", p.margin ?? 0))
-                                .foregroundStyle(
-                                    LinearGradient(colors: [marginColor.opacity(0.18), .clear],
-                                                   startPoint: .top, endPoint: .bottom)
-                                )
+                        Chart {
+                            if let sel = selectedPoint, let m = sel.margin {
+                                RuleMark(x: .value("選取", sel.date))
+                                    .foregroundStyle(Color.secondary.opacity(0.35))
+                                    .lineStyle(StrokeStyle(lineWidth: 1, dash: [3, 3]))
+                                PointMark(x: .value("選取", sel.date), y: .value("融資（張）", m))
+                                    .foregroundStyle(marginColor)
+                                    .symbolSize(60)
+                            }
+                            ForEach(chartPoints) { p in
+                                LineMark(x: .value("日", p.date),
+                                         y: .value("融資（張）", p.margin ?? 0))
+                                    .foregroundStyle(marginColor)
+                                    .lineStyle(StrokeStyle(lineWidth: 1.8))
+                                AreaMark(x: .value("日", p.date),
+                                         y: .value("融資（張）", p.margin ?? 0))
+                                    .foregroundStyle(
+                                        LinearGradient(colors: [marginColor.opacity(0.18), .clear],
+                                                       startPoint: .top, endPoint: .bottom)
+                                    )
+                            }
                         }
                         // 融資餘額是「量」不是「價」：軸從資料範圍起跳，
                         // 從 0 起跳的話多數個股會是一條貼底的平線看不出增減
                         .chartYScale(domain: yDomain)
                         .chartXAxis { AxisMarks(values: .automatic(desiredCount: 4)) }
                         .chartYAxis { AxisMarks(position: .trailing, values: .automatic(desiredCount: 3)) }
+                        .chartXSelection(value: $selectedDate)
                         .frame(height: 90)
                         Text("融資餘額走勢（張）")
                             .font(.caption2).foregroundStyle(.tertiary)
@@ -1174,19 +1247,38 @@ struct MarginChipCard: View {
         return max(0, lo - pad)...(hi + pad)
     }
 
-    /// 最新指標列：融資（±增減）、融券（±增減）、券資比、外資持股
-    private func metricsRow(_ last: DayMargin) -> some View {
-        // 增減對「前一個有資料的交易日」算
-        let prev = points.dropLast().last(where: { $0.margin != nil })
+    /// 指標列：融資（±增減）、融券（±增減）、券資比、外資持股。
+    /// isSelected＝使用者點選的日期（多顯示日期＋關閉鈕）；增減對「該日前一個有資料的交易日」算
+    private func metricsRow(_ last: DayMargin, isSelected: Bool = false) -> some View {
+        let prev = points.filter { $0.date < last.date }.last(where: { $0.margin != nil })
         let mDelta = zip2(last.margin, prev?.margin).map { $0 - $1 }
         let sDelta = zip2(last.short, prev?.short).map { $0 - $1 }
         let ratio = zip2(last.short, last.margin).flatMap { s, m in m > 0 ? s / m * 100 : nil }
-        return HStack(spacing: 12) {
-            if let m = last.margin { metric("融資", String(format: "%.0f 張", m), delta: mDelta) }
-            if let s = last.short { metric("融券", String(format: "%.0f 張", s), delta: sDelta) }
-            if let ratio { metric("券資比", String(format: "%.1f%%", ratio), delta: nil) }
-            if let f = last.foreignPct { metric("外資持股", String(format: "%.1f%%", f), delta: nil) }
-            Spacer()
+        return VStack(alignment: .leading, spacing: 4) {
+            if isSelected {
+                HStack(spacing: 8) {
+                    Text(Self.detailFmt.string(from: last.date))
+                        .font(.caption.weight(.bold))
+                    Spacer()
+                    Button {
+                        selectedDate = nil
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 14)).foregroundStyle(.tertiary)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            HStack(spacing: 12) {
+                if let m = last.margin { metric("融資", String(format: "%.0f 張", m), delta: mDelta) }
+                if let s = last.short { metric("融券", String(format: "%.0f 張", s), delta: sDelta) }
+                if let ratio { metric("券資比", String(format: "%.1f%%", ratio), delta: nil) }
+                if let f = last.foreignPct { metric("外資持股", String(format: "%.1f%%", f), delta: nil) }
+                if last.margin == nil && last.short == nil && last.foreignPct == nil {
+                    Text("該日無籌碼資料").font(.caption2).foregroundStyle(.tertiary)
+                }
+                Spacer()
+            }
         }
         .padding(.horizontal, 10).padding(.vertical, 6)
         .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 8))
