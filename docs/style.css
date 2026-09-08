@@ -356,7 +356,8 @@ details.agenda summary { cursor: pointer; color: var(--indigo); font-weight: 700
 .namecard .nc-name { font-size: 16px; font-weight: 900; }
 .namecard .nc-title { color: var(--muted); font-size: 12.5px; }
 .namecard .nc-co { font-weight: 700; font-size: 13px; }
-.namecard .nc-rows { display: flex; flex-direction: column; gap: 3px; font-size: 12.5px; }
-.namecard .nc-rows a { color: var(--blue); }
-.namecard .nc-rows a:hover { text-decoration: underline; }
-.namecard .nc-lbl { color: var(--muted); display: inline-block; min-width: 34px; margin-right: 8px; }
+/* 標籤＋內容小列表（名片、家庭成員、寵物、人際關係共用） */
+.nc-rows { display: flex; flex-direction: column; gap: 3px; font-size: 12.5px; }
+.nc-rows a { color: var(--blue); }
+.nc-rows a:hover { text-decoration: underline; }
+.nc-lbl { color: var(--muted); display: inline-block; min-width: 34px; margin-right: 8px; }

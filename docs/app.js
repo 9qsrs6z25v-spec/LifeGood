@@ -12,7 +12,7 @@
 // 常數
 // ---------------------------------------------------------------------------
 /** 網頁版自己的版本（與 App 版本無關；改網頁不再動 App 版號） */
-const WEB_VERSION = '1.2';
+const WEB_VERSION = '1.3';
 const CONTAINER_ID = 'iCloud.com.lifegood.app';
 const ZONE_NAME = 'LifeGoodZone';
 const TOKEN_KEY = 'lifegood_ck_token';
@@ -27,6 +27,10 @@ const KV_KEYS = {
   cards: 'life_business_cards',
   personalEvents: 'life_personal_events',
   profile: 'life_profile',
+  familyMembers: 'life_family',
+  relationships: 'life_relationships',
+  pets: 'life_pets',
+  familyTasks: 'life_family_tasks',
   // 理財（ExpenseStore／FinanceStore，同樣是 JSON blob）
   expenses: 'lifegood_expenses',
   incomes: 'lifegood_incomes',
@@ -40,6 +44,7 @@ const KV_KEYS = {
 const DATE_KEYS = new Set([
   'date', 'dueDate', 'completedAt', 'endDate', 'joinDate', 'birthday', 'scheduledDate',
   'movedTo', 'createdAt', 'dateAdded', 'leftDate', 'sideRoleEndDate', 'updatedAt', 'recurrenceEndDate',
+  'marriageDate', 'divorceDate', 'anniversary',
   'purchaseDate', 'soldDate', 'startDate', 'maturityDate', 'expiryDate', 'bldgCompletionDate',
 ]);
 
@@ -59,7 +64,7 @@ const REC_COLOR = { '優點': 'green', '缺點': 'red', '成就': 'orange', '改
 const Store = {
   subs: [], depts: [], orgPeople: [], grades: [], equipment: [], milestones: [], cards: [], personalEvents: [],
   expenses: [], incomes: [], currencyRates: [], insurances: [], stocks: [], vehicles: [], realEstates: [],
-  profile: {},
+  profile: {}, familyMembers: [], relationships: [], pets: [], familyTasks: [],
   source: '', loadedAt: null, ctx: null,
 };
 let ckContainer = null;
@@ -552,6 +557,7 @@ function route() {
       const t = parts[1] || '';
       if (t === 'wealth') renderWealth(main);
       else if (t === 'resume') renderResume(main, parts[2] || 'all');
+      else if (t === 'family') renderFamily(main, parts[2] || 'members');
       else renderOverview(main, ctx);
       break;
     }
@@ -1305,6 +1311,23 @@ function calendarItems(from, to) {
     if (!(p.birthday instanceof Date) || p.isInactive || (p.linkedSubordinateId && subById(p.linkedSubordinateId))) continue;
     for (const y of new Set([from.getFullYear(), to.getFullYear()])) { const d = new Date(y, p.birthday.getMonth(), p.birthday.getDate()); if (inRange(d)) add(d, { kind: 'birthday', title: `🎂 ${p.name} 生日`, sub: p.jobTitle || '', href: '#/org' }); }
   }
+  // 家庭：成員／寵物／人際關係的生日與結婚紀念日（比照 App 的行事曆）
+  const yearly = (date, item) => { for (const y of new Set([from.getFullYear(), to.getFullYear()])) { const d = new Date(y, date.getMonth(), date.getDate()); if (inRange(d)) add(d, item); } };
+  for (const m of Store.familyMembers || []) {
+    const nm = m.chineseName || m.englishName || '未命名';
+    if (m.birthday instanceof Date) yearly(m.birthday, { kind: 'birthday', title: `🎂 ${nm} 生日`, sub: m.role || '', href: '#/life/family' });
+    if (m.marriageDate instanceof Date && !m.isDivorced) yearly(m.marriageDate, { kind: 'birthday', title: `💍 結婚紀念日`, sub: nm, href: '#/life/family' });
+  }
+  for (const p of Store.pets || []) if (p.birthday instanceof Date) yearly(p.birthday, { kind: 'birthday', title: `🎂 ${p.name} 生日`, sub: p.type || '寵物', href: '#/life/family/pets' });
+  for (const r of Store.relationships || []) {
+    if (r.birthday instanceof Date) yearly(r.birthday, { kind: 'birthday', title: `🎂 ${r.name} 生日`, sub: r.group || '', href: '#/life/family/relations' });
+    if (r.anniversary instanceof Date) yearly(r.anniversary, { kind: 'birthday', title: `🎉 ${r.name} 紀念日`, sub: r.group || '', href: '#/life/family/relations' });
+  }
+  for (const t of Store.familyTasks || []) {
+    if (!t.dueDate || !inRange(t.dueDate)) continue;
+    const who = (t.assigneeIds || []).map((id) => { const m = (Store.familyMembers || []).find((x) => x.id === id); return m ? (m.chineseName || m.englishName) : ''; }).filter(Boolean);
+    add(t.dueDate, { kind: 'personal', title: `🏠 ${t.content || '家庭待辦'}`, sub: who.join('、'), done: t.isCompleted, overdue: !t.isCompleted && t.dueDate < now, href: '#/life/family/tasks' });
+  }
   for (const r of sideRoles()) {
     for (const t of roleTasks(r)) { if (!t.dueDate || !inRange(t.dueDate)) continue; add(t.dueDate, { kind: 'sideTask', title: t.content || '兼任待辦', who: roleName(r), done: t.isCompleted, overdue: !t.isCompleted && t.dueDate < now, href: `#/siderole/${r.id}/tasks` }); }
     for (const k of roleKeyDates(r)) { if (!inRange(k.date)) continue; add(k.date, { kind: 'keyDate', title: k.title || '重要日期', who: roleName(r), time: (k.date.getHours() || k.date.getMinutes()) ? fmtTime(k.date) : '', sub: k.note || '', href: `#/siderole/${r.id}/keydates` }); }
@@ -1724,6 +1747,177 @@ function renderWealth(main) {
       else { const linked = Store.stocks.filter((s) => s.linkedSecuritiesMilestoneId === m.id && !s.isSold); val = fmtMoney(linked.reduce((a, s) => a + stockView(s).mv, 0)); detail = [m.securitiesAccountType, `持股 ${linked.length} 檔`].filter(Boolean).join('・'); extra = linked.length ? `<div class="chips" style="margin-top:6px">${linked.map((s) => `<a class="chip green" href="#/finance/stock/${s.id}">${esc(s.symbol)}</a>`).join('')}</div>` : ''; }
       return `<div class="card" style="${m.isDisabled ? 'opacity:.55' : ''}"><div class="row" style="align-items:flex-start"><div class="avatar sm" style="background:${m.financeSubCategory === '銀行' ? 'linear-gradient(135deg,#007aff,#5ac8fa)' : m.financeSubCategory === '信用卡' ? 'linear-gradient(135deg,#ff9500,#ffcc00)' : m.financeSubCategory === '證券' ? 'linear-gradient(135deg,#34c759,#30b0c7)' : 'linear-gradient(135deg,#af52de,#5856d6)'}">${esc(initial(m.bankName || m.insuranceCompany || m.title))}</div><div style="flex:1;min-width:0"><div style="font-weight:900;font-size:15px">${esc(m.title)} <span class="chip ${subColor[m.financeSubCategory] || ''}">${esc(m.financeSubCategory)}</span>${m.isDisabled ? ' <span class="chip">停用</span>' : ''}</div><div class="muted small">${esc([m.bankName, m.branchName, m.bankAccountType, m.cardName, m.cardLastFour ? '末' + m.cardLastFour : ''].filter(Boolean).join('・'))}</div></div><div class="score s80" style="font-size:18px">${val}</div></div><div class="muted small" style="margin-top:8px">${esc(detail)}</div>${extra}${m.note ? `<div class="muted small" style="margin-top:6px">${esc(m.note)}</div>` : ''}</div>`;
     }).join('') || '<div class="empty">尚無財富卡片</div>'}</div>`;
+}
+
+// ---- 家庭 -----------------------------------------------------------------
+const FAMILY_TABS = [['members', '成員'], ['children', '兒女紀錄'], ['tasks', '家庭待辦'], ['pets', '寵物'], ['relations', '人際關係']];
+const CHILD_ROLES = new Set(['兒子', '女兒']);
+const PET_ICON = { '狗': '🐶', '貓': '🐱', '鳥': '🐦', '魚': '🐟', '倉鼠': '🐹', '兔子': '🐰', '爬蟲': '🦎' };
+const CHILD_REC_ICON = { '疫苗': '💉', '過敏': '🤧', '成長記錄': '📏', '就醫記錄': '🏥', '教育里程碑': '🎓', '興趣才藝': '🎨', '紀念時刻': '✨' };
+const CHILD_REC_COLOR = { '疫苗': 'blue', '過敏': 'orange', '成長記錄': 'green', '就醫記錄': 'red', '教育里程碑': 'indigo', '興趣才藝': 'purple', '紀念時刻': 'pink' };
+function ageOf(bday) {
+  if (!(bday instanceof Date)) return null;
+  const now = new Date();
+  let y = now.getFullYear() - bday.getFullYear();
+  const m = now.getMonth() - bday.getMonth();
+  if (m < 0 || (m === 0 && now.getDate() < bday.getDate())) y--;
+  const months = (y * 12) + (m < 0 ? m + 12 : m);
+  return { years: y, months, text: y >= 3 ? `${y} 歲` : `${y} 歲 ${((months % 12) + 12) % 12} 個月` };
+}
+const memberName = (m) => (m.chineseName || m.englishName || '未命名');
+function renderFamily(main, tab) {
+  const now = new Date();
+  const members = Store.familyMembers || [];
+  const children = members.filter((m) => CHILD_ROLES.has(m.role));
+  const pets = Store.pets || [];
+  const tasks = Store.familyTasks || [];
+  const rels = Store.relationships || [];
+  const openTasks = tasks.filter((t) => !t.isCompleted);
+  const overdueTasks = openTasks.filter((t) => t.dueDate && t.dueDate < now);
+  // 近期生日：家庭成員＋寵物＋人際關係
+  const bdays = [
+    ...members.map((m) => ({ name: memberName(m), sub: m.role, b: birthdayInfo(m.birthday) })),
+    ...pets.map((p) => ({ name: p.name, sub: (PET_ICON[p.type] || '🐾') + ' ' + (p.type || '寵物'), b: birthdayInfo(p.birthday) })),
+    ...rels.map((r) => ({ name: r.name, sub: r.group, b: birthdayInfo(r.birthday) })),
+  ].filter((x) => x.b && x.b.days <= 60).sort((a, b) => a.b.days - b.b.days);
+  const spouse = members.find((m) => m.role === '配偶' && !m.isDivorced);
+  const marriage = spouse && spouse.marriageDate ? spouse.marriageDate : null;
+  const marriageYears = marriage ? ((now - marriage) / 86400000 / 365) : null;
+
+  let body = '';
+  if (tab === 'members') {
+    const bySide = { '我的': [], '配偶的': [], '其他': [] };
+    for (const m of members) bySide[m.familySide === '我的' ? '我的' : m.familySide === '配偶的' ? '配偶的' : '其他'].push(m);
+    const card = (m) => {
+      const a = ageOf(m.birthday);
+      const recs = (m.childRecords || []).length, evts = (m.familyEvents || []).length, daily = (m.dailyRecords || []).length;
+      return `<div class="card"><div class="row" style="align-items:flex-start;gap:10px">
+        <div class="avatar sm" style="background:linear-gradient(135deg,#ff2d55,#ff9500)">${esc(initial(memberName(m)))}</div>
+        <div style="flex:1;min-width:0">
+          <div style="font-weight:900;font-size:15px">${esc(memberName(m))}${m.englishName && m.chineseName ? ` <span class="muted" style="font-weight:600">${esc(m.englishName)}</span>` : ''}</div>
+          <div class="muted small">${esc(m.role || '')}${m.familySide ? '・' + esc(m.familySide) + '家' : ''}${a ? '・' + a.text : ''}</div>
+        </div>
+        ${m.isDivorced ? '<span class="chip">已離婚</span>' : ''}
+      </div>
+      <div class="nc-rows" style="margin-top:8px">
+        ${m.birthday ? `<div><span class="nc-lbl">生日</span>${fmtDate(m.birthday).split(' ')[0]}・${zodiac(m.birthday)}</div>` : ''}
+        ${m.marriageDate ? `<div><span class="nc-lbl">結婚</span>${fmtDate(m.marriageDate).split(' ')[0]}${!m.isDivorced ? `（${((now - m.marriageDate) / 86400000 / 365).toFixed(1)} 年）` : ''}</div>` : ''}
+        ${m.divorceDate ? `<div><span class="nc-lbl">離婚</span>${fmtDate(m.divorceDate).split(' ')[0]}</div>` : ''}
+        ${m.relativeNote ? `<div><span class="nc-lbl">備註</span>${esc(m.relativeNote)}</div>` : ''}
+      </div>
+      ${recs || evts || daily || (m.vaccinations || []).length ? `<div class="chips" style="margin-top:8px">
+        ${recs ? `<a class="chip green" href="#/life/family/children">兒女紀錄 ${recs}</a>` : ''}
+        ${(m.vaccinations || []).length ? `<span class="chip blue">疫苗 ${(m.vaccinations || []).length}</span>` : ''}
+        ${evts ? `<span class="chip orange">家庭事件 ${evts}</span>` : ''}
+        ${daily ? `<span class="chip teal">日常紀錄 ${daily}</span>` : ''}
+        ${(m.agreements || []).length ? `<span class="chip purple">約定 ${(m.agreements || []).length}</span>` : ''}
+      </div>` : ''}
+      ${(m.familyEvents || []).length ? `<details class="agenda"><summary>家庭事件 ${(m.familyEvents || []).length}</summary><div class="sub-items">${[...m.familyEvents].sort((a, b) => b.date - a.date).slice(0, 10).map((e) => `<div class="t-meta" style="padding:3px 0"><b>${fmtDate(e.date).split(' ')[0]}</b>　${esc(e.title || '')}${e.content ? '・' + esc(e.content) : ''}</div>`).join('')}</div></details>` : ''}
+      </div>`;
+    };
+    body = ['我的', '配偶的', '其他'].filter((k) => bySide[k].length).map((k) => `<div class="section-title">${k === '其他' ? '未分家族' : k + '家'}（${bySide[k].length}）</div><div class="grid cols-3">${bySide[k].map(card).join('')}</div>`).join('')
+      || '<div class="empty">尚無家庭成員</div>';
+  } else if (tab === 'children') {
+    body = children.map((c) => {
+      const recs = [...(c.childRecords || [])].sort((a, b) => b.date - a.date);
+      const a = ageOf(c.birthday);
+      const growth = recs.filter((r) => r.type === '成長記錄' && (r.heightCm || r.weightKg)).sort((a2, b2) => a2.date - b2.date);
+      const latest = growth[growth.length - 1];
+      const byType = {}; for (const r of recs) byType[r.type] = (byType[r.type] || 0) + 1;
+      return `<div class="card mt"><h3>👶 ${esc(memberName(c))} <span class="count">${recs.length} 筆紀錄</span>
+          <span class="spacer"></span><span class="muted small">${c.birthday ? fmtDate(c.birthday).split(' ')[0] + '・' + (a ? a.text : '') : ''}</span></h3>
+        <div class="chips">${Object.entries(byType).sort((x, y) => y[1] - x[1]).map(([t, n]) => `<span class="chip ${CHILD_REC_COLOR[t] || ''}">${CHILD_REC_ICON[t] || ''} ${esc(t)} ${n}</span>`).join('') || '<span class="muted small">尚無紀錄</span>'}
+          ${latest ? `<span class="chip">最新身高體重 ${latest.heightCm ? latest.heightCm + ' cm' : ''}${latest.heightCm && latest.weightKg ? '・' : ''}${latest.weightKg ? latest.weightKg + ' kg' : ''}</span>` : ''}</div>
+        ${growth.length >= 2 ? `<div class="chart-box mt" style="height:200px"><canvas data-growth="${c.id}"></canvas></div>` : ''}
+        ${recs.slice(0, 20).map((r) => `<div class="task-row"><div class="tick">${CHILD_REC_ICON[r.type] || '•'}</div>
+          <div><div class="t-title">${esc(r.title || r.type)}</div>
+            <div class="t-meta">${fmtDate(r.date).split(' ')[0]}${r.detail ? '・' + esc(r.detail) : ''}${r.dose ? '・劑次 ' + esc(r.dose) : ''}${r.heightCm ? '・身高 ' + r.heightCm + ' cm' : ''}${r.weightKg ? '・體重 ' + r.weightKg + ' kg' : ''}${r.temperatureC ? '・體溫 ' + r.temperatureC + '°C' : ''}</div>
+            ${r.note ? `<div class="t-meta">${esc(r.note)}</div>` : ''}</div>
+          <div class="t-right"><span class="chip ${CHILD_REC_COLOR[r.type] || ''}">${esc(r.type)}</span>${r.severity ? `<span class="chip red">${esc(r.severity)}</span>` : ''}</div></div>`).join('')}
+        ${recs.length > 20 ? `<div class="muted small" style="margin-top:6px">僅顯示最新 20 筆，共 ${recs.length} 筆</div>` : ''}
+      </div>`;
+    }).join('') || '<div class="empty">尚無兒女成員（角色為「兒子」或「女兒」的家庭成員會出現在這裡）</div>';
+    main.__growth = children.map((c) => ({ id: c.id, pts: [...(c.childRecords || [])].filter((r) => r.type === '成長記錄' && (r.heightCm || r.weightKg)).sort((a, b) => a.date - b.date) }));
+  } else if (tab === 'tasks') {
+    const nameOfAssignee = (id) => { const m = members.find((x) => x.id === id); return m ? memberName(m) : (subById(id)?.name || ''); };
+    const row = (t) => {
+      const who = (t.assigneeIds || []).map(nameOfAssignee).filter(Boolean);
+      const od = !t.isCompleted && t.dueDate && t.dueDate < now;
+      return `<div class="task-row"><div class="tick">${t.isCompleted ? '✅' : '⬜️'}</div>
+        <div><div class="t-title ${t.isCompleted ? 'done' : ''}">${esc(t.content || '（空白待辦）')}</div>
+          <div class="t-meta">${who.length ? '負責：' + esc(who.join('、')) : '未指派'}${t.dueDate ? '・截止 ' + fmtDue(t.dueDate) : ''}${t.completedAt ? '・完成 ' + fmtDateTime(t.completedAt) : ''}</div>
+          ${t.note ? `<div class="t-meta">${esc(t.note)}</div>` : ''}</div>
+        <div class="t-right">${od ? `<span class="chip red">逾期 ${daysBetween(t.dueDate, now)} 天</span>` : ''}</div></div>`;
+    };
+    const done = tasks.filter((t) => t.isCompleted).sort((a, b) => (b.completedAt || b.createdAt || 0) - (a.completedAt || a.createdAt || 0));
+    body = `<div class="grid cols-2">
+      <div class="card"><h3>進行中 <span class="count">${openTasks.length}</span></h3>${openTasks.sort((a, b) => (a.dueDate ? +a.dueDate : 8e15) - (b.dueDate ? +b.dueDate : 8e15)).map(row).join('') || '<div class="empty">沒有進行中的家庭待辦</div>'}</div>
+      <div class="card"><h3>已完成 <span class="count">${done.length}</span></h3>${done.slice(0, 30).map(row).join('') || '<div class="empty">尚無完成紀錄</div>'}</div></div>`;
+  } else if (tab === 'pets') {
+    body = `<div class="grid cols-3">${pets.map((p) => {
+      const a = ageOf(p.birthday);
+      const hr = [...(p.healthRecords || [])].sort((x, y) => (y.date || 0) - (x.date || 0));
+      return `<div class="card"><div class="row" style="align-items:flex-start;gap:10px">
+        <div class="avatar sm" style="background:linear-gradient(135deg,#af52de,#ff2d55)">${PET_ICON[p.type] || '🐾'}</div>
+        <div style="flex:1;min-width:0"><div style="font-weight:900;font-size:15px">${esc(p.name || '未命名')}</div>
+          <div class="muted small">${esc([p.type, p.breed].filter(Boolean).join('・'))}${a ? '・' + a.text : ''}</div></div></div>
+        <div class="nc-rows" style="margin-top:8px">
+          ${p.birthday ? `<div><span class="nc-lbl">生日</span>${fmtDate(p.birthday).split(' ')[0]}</div>` : ''}
+          ${p.weight ? `<div><span class="nc-lbl">體重</span>${p.weight} kg</div>` : ''}
+          ${p.note ? `<div><span class="nc-lbl">備註</span>${esc(p.note)}</div>` : ''}
+        </div>
+        ${hr.length ? `<details class="agenda"><summary>健康紀錄 ${hr.length}</summary><div class="sub-items">${hr.slice(0, 10).map((r) => `<div class="t-meta" style="padding:3px 0"><b>${r.date ? fmtDate(r.date).split(' ')[0] : ''}</b>　${esc(r.title || r.type || '')}${r.note ? '・' + esc(r.note) : ''}</div>`).join('')}</div></details>` : ''}
+      </div>`;
+    }).join('') || '<div class="empty">尚無寵物</div>'}</div>`;
+  } else if (tab === 'relations') {
+    const groups = ['家人', '朋友', '同事', '客戶', '其他'];
+    const GC = { '家人': 'red', '朋友': 'green', '同事': 'blue', '客戶': 'orange', '其他': '' };
+    body = groups.filter((g) => rels.some((r) => r.group === g)).map((g) => {
+      const list = rels.filter((r) => r.group === g).sort((a, b) => (a.name || '').localeCompare(b.name || '', 'zh-Hant'));
+      return `<div class="section-title">${g}（${list.length}）</div><div class="grid cols-3">${list.map((r) => {
+        const b = birthdayInfo(r.birthday);
+        const ints = [...(r.interactions || [])].sort((x, y) => (y.date || 0) - (x.date || 0));
+        return `<div class="card"><div class="row" style="align-items:flex-start;gap:10px">
+          <div class="avatar sm" style="background:linear-gradient(135deg,#8e8e93,#636366)">${esc(initial(r.name))}</div>
+          <div style="flex:1;min-width:0"><div style="font-weight:900;font-size:15px">${esc(r.name || '未命名')}</div>
+            <div class="muted small">${esc(g)}${r.phone ? '・' + esc(r.phone) : ''}</div></div>
+          <span class="chip ${GC[g] || ''}">${ints.length} 次互動</span></div>
+          <div class="nc-rows" style="margin-top:8px">
+            ${r.birthday ? `<div><span class="nc-lbl">生日</span>${fmtDate(r.birthday).split(' ')[0]}${b && b.days <= 60 ? `（${b.days === 0 ? '今天' : b.days + ' 天後'}）` : ''}</div>` : ''}
+            ${r.anniversary ? `<div><span class="nc-lbl">紀念日</span>${fmtDate(r.anniversary).split(' ')[0]}</div>` : ''}
+            ${r.note ? `<div><span class="nc-lbl">備註</span>${esc(r.note)}</div>` : ''}
+          </div>
+          ${ints.length ? `<details class="agenda"><summary>互動紀錄 ${ints.length}</summary><div class="sub-items">${ints.slice(0, 8).map((i) => `<div class="t-meta" style="padding:3px 0"><b>${i.date ? fmtDate(i.date).split(' ')[0] : ''}</b>　${esc(i.note || '')}</div>`).join('')}</div></details>` : ''}
+        </div>`;
+      }).join('')}</div>`;
+    }).join('') || '<div class="empty">尚無人際關係紀錄</div>';
+  }
+
+  main.innerHTML = `
+    ${pageHead('家庭', `${members.length} 位成員・${pets.length} 隻寵物・${rels.length} 位人際關係`)}
+    <div class="grid cols-5">
+      ${kpiCard('家庭成員', members.length, '', children.length ? `兒女 ${children.length} 位` : '')}
+      ${kpiCard('家庭待辦', openTasks.length, overdueTasks.length ? 'red' : openTasks.length ? 'orange' : 'green', overdueTasks.length ? `逾期 ${overdueTasks.length}` : `已完成 ${tasks.length - openTasks.length}`)}
+      ${kpiCard('結婚', marriageYears != null ? marriageYears.toFixed(1) + ' 年' : '—', 'pink', marriage ? fmtDate(marriage).split(' ')[0] : '')}
+      ${kpiCard('60 天內生日', bdays.length, bdays.some((x) => x.b.days <= 1) ? 'pink' : '', bdays[0] ? `最近：${esc(bdays[0].name)}（${bdays[0].b.days === 0 ? '今天' : bdays[0].b.days + ' 天後'}）` : '無')}
+      ${kpiCard('寵物', pets.length, '', pets.map((p) => PET_ICON[p.type] || '🐾').join(' '))}
+    </div>
+    ${bdays.length ? `<div class="card mt"><h3>🎂 近期生日 <span class="count">${bdays.length}</span></h3><div class="chips">${bdays.map((x) => `<span class="chip ${x.b.days <= 1 ? 'pink' : ''}">${esc(x.name)}・${esc(x.sub || '')}・${fmtDate(x.b.next).split(' ')[0]}（${x.b.days === 0 ? '今天' : x.b.days + ' 天後'}）</span>`).join('')}</div></div>` : ''}
+    ${tabsHTML('life/family', FAMILY_TABS, tab)}
+    ${body}`;
+  if (tab !== 'children' || !window.Chart) return;
+  const { text, line } = chartColors();
+  for (const g of (main.__growth || [])) {
+    const cv = main.querySelector(`canvas[data-growth="${g.id}"]`); if (!cv || g.pts.length < 2) continue;
+    charts.push(new Chart(cv, { data: { labels: g.pts.map((r) => fmtDate(r.date).split(' ')[0]), datasets: [
+      { type: 'line', label: '身高 (cm)', data: g.pts.map((r) => r.heightCm ?? null), borderColor: '#34c759', backgroundColor: 'rgba(52,199,89,0.12)', fill: true, tension: 0.3, yAxisID: 'y', spanGaps: true, pointRadius: 4 },
+      { type: 'line', label: '體重 (kg)', data: g.pts.map((r) => r.weightKg ?? null), borderColor: '#ff9500', backgroundColor: 'rgba(255,149,0,0.10)', fill: false, tension: 0.3, yAxisID: 'y1', spanGaps: true, pointRadius: 4 },
+    ] }, options: { maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
+      scales: { x: { grid: { display: false }, ticks: { color: text } },
+        y: { position: 'left', grid: { color: line }, ticks: { color: text }, title: { display: true, text: 'cm', color: text } },
+        y1: { position: 'right', grid: { display: false }, ticks: { color: text }, title: { display: true, text: 'kg', color: text } } },
+      plugins: { legend: { labels: { color: text } } } } }));
+  }
 }
 
 // ---- 履歷 -----------------------------------------------------------------

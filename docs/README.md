@@ -53,8 +53,9 @@ Token 只會存在你自己瀏覽器的 localStorage，不會寫進程式碼、�
 | 理財 | 房地產 | 每筆：價值、房貸餘額與進度、已付價金、變動支出分類、電梯保養 |
 | 理財 | 圖表 | 資產配置圓餅、持股市值與成本 |
 | 人生 | 履歷 | 個人檔案、里程碑／職涯異動／目前薪資 KPI、薪資歷程圖、職涯時間軸（含調薪幅度、管理職）、里程碑依年份分組與分類篩選 |
+| 人生 | 家庭 | 成員（分我的家／配偶的家、年齡星座、家庭事件）、兒女紀錄（成長曲線、疫苗過敏就醫教育）、家庭待辦、寵物、人際關係 |
 | 人生 | 財富 | 財富卡片：銀行（餘額、最近存提）、信用卡（本月消費、額度、最近消費）、證券（持股）、保險 |
-| 人生・職涯 | 我的行事曆 | 月曆＋當日清單：部屬任務截止、會議場次（週期展開）、議程截止、報告、請假、兼任待辦與重要日期、個人事件（含重複）、生日；類別開關 |
+| 人生・職涯 | 我的行事曆 | 月曆＋當日清單：部屬任務截止、會議場次（週期展開）、議程截止、報告、請假、兼任待辦與重要日期、個人事件（含重複）、家庭待辦、生日與紀念日；類別開關 |
 | 人生・職涯 | 部屬總覽 | 人數／未完成任務／逾期／未交報告／生日 KPI、逾期任務、綜合分數排行、本週會議、近期生日 |
 | 人生・職涯 | 部屬 | 列表（搜尋、部門篩選、排序）與明細（評分明細；任務、會議、報告、紀錄、請假、執掌設備、升職） |
 | 人生・職涯 | 人才矩陣／統計圖表 | 主動性 × 潛力散布圖；九張年度統計長條圖含團隊平均 |
@@ -68,7 +69,7 @@ Token 只會存在你自己瀏覽器的 localStorage，不會寫進程式碼、�
 
 - 讀取的記錄：`kv_life_subordinates`、`kv_life_departments`、`kv_life_org_people`、
   `kv_life_grade_titles`、`kv_life_equipment_pool`、`kv_life_milestones`（兼任職務待辦）、
-  `kv_life_business_cards`（@ 標註比對用的名字）、`kv_life_personal_events`（個人事件）、`kv_life_profile`（個人檔案）、`kv_lifegood_expenses`／`incomes`／`currency_rates`／`insurances`／`stocks`／`vehicles`／`realestates`（理財）。全部在私有資料庫的 `LifeGoodZone`。
+  `kv_life_business_cards`（@ 標註比對用的名字）、`kv_life_personal_events`（個人事件）、`kv_life_profile`（個人檔案）、`kv_life_family`／`relationships`／`pets`／`family_tasks`（家庭）、`kv_lifegood_expenses`／`incomes`／`currency_rates`／`insurances`／`stocks`／`vehicles`／`realestates`（理財）。全部在私有資料庫的 `LifeGoodZone`。
 - 評分規則（潛力／主動性／逾期定案制／兼任待辦／被標註／會議掛名基本分與議程項目依指派計分）與 App 相同，
   但權重使用 App 出廠預設值：App 進階設定裡調整過的權重存在手機本機，不會同步到 iCloud，網頁讀不到。
 - 統計圖表的年度歸類：任務／報告依完成時間、請假與紀錄依日期、逾期依截止日。

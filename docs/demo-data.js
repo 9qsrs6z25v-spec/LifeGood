@@ -242,5 +242,48 @@
     ms('領養柴犬「麻糬」', '寵物', 2023, 6, 5, {}),
     ms('完成人生第一次半馬', '健康', 2025, 3, 16, { note: '2 小時 08 分。' }),
   );
-  window.LIFEGOOD_DEMO = { subs, depts, orgPeople, grades, equipment, milestones, cards, personalEvents, expenses, incomes, currencyRates, insurances, stocks, vehicles, realEstates, profile };
+  // ---- 家庭示範 ----
+  const SPOUSE = id(), SON = id(), DAU = id();
+  const crec = (type, y, mo, da, title, extra) => Object.assign({ id: id(), type, date: ymd(y, mo, da), title, detail: '', note: '' }, extra || {});
+  const familyMembers = [
+    { id: SPOUSE, role: '配偶', chineseName: '陳怡君', englishName: 'Ivy Chen', birthday: ymd(1991, 4, 22), marriageDate: ymd(2019, 11, 9), isDivorced: false, childRecords: [], dailyRecords: [], familySide: '我的', familyEvents: [{ id: id(), date: ymd(2024, 11, 9), title: '結婚五週年', content: '在台南吃了老宅法餐。' }], familyPhotos: [], vaccinations: [], agreements: [{ id: id(), title: '家事分工', content: '週間我洗碗、她收衣服' }] },
+    { id: SON, role: '兒子', chineseName: '林亦宸', englishName: 'Ethan', birthday: ymd(2021, 5, 18), isDivorced: false, dailyRecords: [], familySide: '我的', familyEvents: [], familyPhotos: [], vaccinations: [],
+      childRecords: [
+        crec('成長記錄', 2024, 5, 20, '三歲健檢', { heightCm: 96.5, weightKg: 14.2 }),
+        crec('成長記錄', 2025, 5, 22, '四歲健檢', { heightCm: 104.0, weightKg: 16.8 }),
+        crec('成長記錄', 2026, 5, 25, '五歲健檢', { heightCm: 111.5, weightKg: 19.4 }),
+        crec('疫苗', 2024, 9, 10, '流感疫苗', { dose: '第 1 劑' }),
+        crec('過敏', 2023, 8, 2, '蛋白過敏', { severity: '輕微', detail: '起疹子，觀察即可' }),
+        crec('就醫記錄', 2026, 2, 14, '腸胃炎', { temperatureC: 38.6, detail: '竹北仁心診所', note: '兩天後退燒。' }),
+        crec('教育里程碑', 2025, 9, 1, '上幼兒園中班'),
+        crec('紀念時刻', 2026, 6, 1, '第一次自己騎腳踏車'),
+      ] },
+    { id: DAU, role: '女兒', chineseName: '林亦恩', englishName: 'Erin', birthday: ymd(2024, 8, 30), isDivorced: false, dailyRecords: [], familySide: '我的', familyEvents: [], familyPhotos: [], vaccinations: [],
+      childRecords: [
+        crec('成長記錄', 2025, 8, 30, '一歲健檢', { heightCm: 75.0, weightKg: 9.1 }),
+        crec('成長記錄', 2026, 2, 28, '一歲半健檢', { heightCm: 82.3, weightKg: 10.6 }),
+        crec('疫苗', 2025, 8, 30, '水痘疫苗', { dose: '第 1 劑' }),
+        crec('興趣才藝', 2026, 7, 5, '幼幼律動課'),
+      ] },
+    { id: id(), role: '爸爸', chineseName: '林文雄', englishName: '', birthday: ymd(1962, 9, 14), isDivorced: false, childRecords: [], dailyRecords: [], familySide: '我的', familyEvents: [], familyPhotos: [], vaccinations: [], relativeNote: '住台中，每月回去一次。' },
+    { id: id(), role: '媽媽', chineseName: '王秀琴', englishName: '', birthday: ymd(1964, 1, 8), isDivorced: false, childRecords: [], dailyRecords: [], familySide: '我的', familyEvents: [], familyPhotos: [], vaccinations: [] },
+    { id: id(), role: '其他親屬', chineseName: '陳國強', englishName: '', birthday: ymd(1960, 6, 3), isDivorced: false, childRecords: [], dailyRecords: [], familySide: '配偶的', familyEvents: [], familyPhotos: [], vaccinations: [], relativeNote: '岳父' },
+  ];
+  const pets = [
+    { id: id(), name: '麻糬', type: '狗', breed: '柴犬', birthday: ymd(2023, 3, 20), weight: 9.8, note: '怕打雷。', healthRecords: [{ id: id(), date: ymd(2026, 3, 15), title: '年度預防針', note: '八合一＋狂犬' }, { id: id(), date: ymd(2025, 11, 2), title: '洗牙', note: '' }] },
+    { id: id(), name: '布丁', type: '貓', breed: '米克斯', birthday: ymd(2020, 12, 1), weight: 4.6, note: '', healthRecords: [] },
+  ];
+  const familyTasks = [
+    { id: id(), content: '繳幼兒園學費', assigneeIds: [SPOUSE], createdAt: d(-20), dueDate: d(-2, 18), isCompleted: false, completedAt: null, note: '' },
+    { id: id(), content: '訂長輩健檢', assigneeIds: [], createdAt: d(-10), dueDate: d(12, 18), isCompleted: false, completedAt: null, note: '爸媽各一次' },
+    { id: id(), content: '換季衣物整理', assigneeIds: [SPOUSE], createdAt: d(-30), dueDate: d(-25, 18), isCompleted: true, completedAt: d(-26, 20), note: '' },
+    { id: id(), content: '預約寵物美容', assigneeIds: [], createdAt: d(-5), dueDate: d(5, 18), isCompleted: false, completedAt: null, note: '麻糬' },
+  ];
+  const relationships = [
+    { id: id(), name: '李明哲', group: '朋友', birthday: ymd(1990, 10, 2), anniversary: null, phone: '0910-111-222', note: '大學同學，每年固定聚。', interactions: [{ id: id(), date: d(-40), note: '一起去露營' }, { id: id(), date: d(-140), note: '喝咖啡聊工作' }] },
+    { id: id(), name: '周淑惠', group: '家人', birthday: ymd(1988, 3, 11), anniversary: null, phone: '', note: '大姑', interactions: [] },
+    { id: id(), name: '蔡宗翰', group: '同事', birthday: ymd(1985, 12, 25), anniversary: null, phone: '分機 208', note: '前主管，離職後仍有往來。', interactions: [{ id: id(), date: d(-70), note: '中午一起吃飯' }] },
+    { id: id(), name: '大同氣體 陳經理', group: '客戶', birthday: null, anniversary: ymd(2025, 6, 1), phone: '0912-345-678', note: '供應商窗口', interactions: [{ id: id(), date: d(-9), note: '評鑑前置會' }] },
+  ];
+  window.LIFEGOOD_DEMO = { subs, depts, orgPeople, grades, equipment, milestones, cards, personalEvents, expenses, incomes, currencyRates, insurances, stocks, vehicles, realEstates, profile, familyMembers, pets, familyTasks, relationships };
 })();
