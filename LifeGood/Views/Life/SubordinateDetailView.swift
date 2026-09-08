@@ -5044,10 +5044,6 @@ struct SubordinateItemCard: View {
 
     // MARK: - 負責部屬資訊卡 / 任務狀態列
 
-    /// 負責部屬資訊卡：姓名＋職等職稱＋部門＋廠區，點擊可開啟該部屬卡片。
-    /// 職等/部門優先用 id 對照（gradeTitles/departments），沒有再退回文字欄位，
-    /// 與 SubordinateDetailView.gradeTitleText/departmentText 同一套解析。
-    @ViewBuilder
     /// [v25.332] 任務／會議先查開卡片時的持有人，找不到（已移交給別人）再掃全部部屬，
     /// 回傳「目前持有人 id ＋ 最新資料」；都找不到才退回快照。移交後卡片不必關掉重開。
     private func liveTask(_ subId: UUID, _ snap: SubordinateTask) -> (UUID, SubordinateTask) {
@@ -5069,6 +5065,10 @@ struct SubordinateItemCard: View {
         return (subId, snap)
     }
 
+    /// 負責部屬資訊卡：姓名＋職等職稱＋部門＋廠區，點擊可開啟該部屬卡片。
+    /// 職等/部門優先用 id 對照（gradeTitles/departments），沒有再退回文字欄位，
+    /// 與 SubordinateDetailView.gradeTitleText/departmentText 同一套解析。
+    @ViewBuilder
     private func ownerBlock(subId: UUID, accent: Color) -> some View {
         if let sub = lifeStore.subordinates.first(where: { $0.id == subId }) {
             let gradeTitle: String = {

@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.344", build: 1097, date: "2026/08/19", notes: [
+            "【修正】編譯錯誤：v25.332 在事項卡片加入「移交後跟隨新負責人」的兩個查詢函式時，把原本掛在負責人資訊卡（ownerBlock）上的 @ViewBuilder 擠到了新函式頭上，導致 v25.332～v25.343 無法編譯（SubordinateDetailView.swift:5072「opaque return type…no return statements」）。已把屬性移回正確位置，抱歉。"
+        ]),
         ChangelogEntry(version: "25.343", build: 1096, date: "2026/08/19", notes: [
             "【新增】股票卡片的「法人買賣超」與「籌碼指標」圖表支援點選／拖曳看單日資料，與技術線圖同款：圖上出現虛線十字線，上方明細列改顯示該日（含日期與關閉鈕）。法人買賣超顯示該日外資／投信／自營與合計（舊資料只有合計的日子會標示）；籌碼指標顯示該日融資、融券（增減對前一個有資料日算）、券資比、外資持股，融資走勢圖上以圓點標出該日。放開或按 ✕ 回到最新一日。"
         ]),
