@@ -11,6 +11,8 @@
 // ---------------------------------------------------------------------------
 // 常數
 // ---------------------------------------------------------------------------
+/** 網頁版自己的版本（與 App 版本無關；改網頁不再動 App 版號） */
+const WEB_VERSION = '1.1';
 const CONTAINER_ID = 'iCloud.com.lifegood.app';
 const ZONE_NAME = 'LifeGoodZone';
 const TOKEN_KEY = 'lifegood_ck_token';
@@ -540,6 +542,7 @@ function route() {
     }
     case 'life': if ((parts[1] || '') === 'wealth') renderWealth(main); else renderOverview(main, ctx); break;
     case 'settings': renderSettings(main); break;
+    case 'cards': renderCards(main, parts[1] ? decodeURIComponent(parts[1]) : ''); break;
     case 'siderole': renderSideRole(main, decodeURIComponent(parts[1] || ''), parts[2] || 'tasks'); break;
     default: renderOverview(main, ctx);
   }
@@ -1708,6 +1711,126 @@ function renderWealth(main) {
     }).join('') || '<div class="empty">尚無財富卡片</div>'}</div>`;
 }
 
+// ---- 名片 -----------------------------------------------------------------
+const cardUI = { q: '', company: 'all', sort: 'date' };
+/** 舊資料可能只有單數 phone／email 欄位，新資料是陣列，兩種都收 */
+function cardPhones(c) { const a = Array.isArray(c.phones) ? c.phones : []; return a.length ? a : (c.phone ? [c.phone] : []); }
+function cardEmails(c) { const a = Array.isArray(c.emails) ? c.emails : []; return a.length ? a : (c.email ? [c.email] : []); }
+function cardFaxes(c) { return Array.isArray(c.faxes) ? c.faxes : []; }
+/** 名片連到的組織人員；若該人員又連到部屬，一併回傳供跳轉 */
+function cardLinks(c) {
+  const p = c.linkedOrgPersonId
+    ? Store.orgPeople.find((x) => x.id === c.linkedOrgPersonId)
+    : Store.orgPeople.find((x) => x.linkedBusinessCardId === c.id);
+  const sub = p && p.linkedSubordinateId ? subById(p.linkedSubordinateId) : null;
+  const dept = p && p.departmentId ? deptById(p.departmentId) : null;
+  return { person: p || null, sub, dept };
+}
+const telHref = (v) => 'tel:' + String(v).replace(/[^\d+#*,]/g, '');
+function renderCards(main, param) {
+  if (param) return renderCardDetail(main, param);
+  const all = Store.cards;
+  const companies = [...new Set(all.map((c) => (c.company || '').trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'zh-Hant'));
+  const q = cardUI.q.trim().toLowerCase();
+  const list = all.filter((c) => {
+    if (cardUI.company !== 'all' && (c.company || '').trim() !== cardUI.company) return false;
+    if (!q) return true;
+    return [c.name, c.company, c.department, c.jobTitle, c.address, c.note, c.primaryBusiness, ...cardPhones(c), ...cardEmails(c)]
+      .filter(Boolean).join(' ').toLowerCase().includes(q);
+  }).sort((a, b) => (cardUI.sort === 'name'
+    ? (a.name || '').localeCompare(b.name || '', 'zh-Hant')
+    : cardUI.sort === 'company'
+      ? ((a.company || '').localeCompare(b.company || '', 'zh-Hant') || (a.name || '').localeCompare(b.name || '', 'zh-Hant'))
+      : (b.date || 0) - (a.date || 0)));
+  const linkedCount = all.filter((c) => cardLinks(c).person).length;
+  const newest = all.length ? [...all].sort((a, b) => (b.date || 0) - (a.date || 0))[0] : null;
+  main.innerHTML = `
+    ${pageHead('名片', `${all.length} 張・${companies.length} 家公司`)}
+    <div class="grid cols-4">
+      ${kpiCard('名片總數', all.length, '', `${companies.length} 家公司`)}
+      ${kpiCard('已連結組織人員', linkedCount, linkedCount ? 'green' : '', `未連結 ${all.length - linkedCount}`)}
+      ${kpiCard('有電話', all.filter((c) => cardPhones(c).length).length, '', `有 Email ${all.filter((c) => cardEmails(c).length).length}`)}
+      ${kpiCard('最近新增', newest ? esc(newest.name || '未命名') : '—', '', newest && newest.date ? fmtDate(newest.date).split(' ')[0] : '')}
+    </div>
+    <div class="filters mt">
+      <input type="search" id="nc-q" placeholder="搜尋姓名／公司／職稱／電話／Email" value="${esc(cardUI.q)}">
+      <span class="muted small">排序</span>
+      ${[['date', '新增日期'], ['name', '姓名'], ['company', '公司']].map(([k, l]) => `<span class="fchip ${cardUI.sort === k ? 'on' : ''}" data-sort="${k}">${l}</span>`).join('')}
+    </div>
+    <div class="filters">
+      <span class="fchip ${cardUI.company === 'all' ? 'on' : ''}" data-co="all">全部公司</span>
+      ${companies.map((co) => `<span class="fchip ${cardUI.company === co ? 'on' : ''}" data-co="${esc(co)}">${esc(co)}</span>`).join('')}
+      <span class="spacer"></span><span class="muted small">${list.length}/${all.length} 張</span>
+    </div>
+    <div class="card-grid">${list.map((c) => {
+      const L = cardLinks(c);
+      const phones = cardPhones(c), emails = cardEmails(c);
+      return `<div class="card namecard clickable" onclick="location.hash='#/cards/${c.id}'" style="cursor:pointer">
+        <div class="nc-head">
+          <div class="avatar sm" style="background:linear-gradient(135deg,#5856d6,#32ade6)">${esc(initial(c.name || c.company))}</div>
+          <div style="flex:1;min-width:0">
+            <div class="nc-name">${esc(c.name || '未命名')}</div>
+            <div class="nc-title">${esc([c.jobTitle, c.department].filter(Boolean).join('・') || '—')}</div>
+          </div>
+          ${L.sub ? '<span class="chip green">部屬</span>' : L.person ? '<span class="chip blue">組織</span>' : ''}
+        </div>
+        <div class="nc-co">🏢 ${esc(c.company || '（未填公司）')}</div>
+        ${c.primaryBusiness ? `<div class="muted small">主要業務：${esc(c.primaryBusiness)}</div>` : ''}
+        <div class="nc-rows">
+          ${phones.slice(0, 2).map((v) => `<div><span class="nc-lbl">電話</span>${esc(v)}</div>`).join('')}
+          ${emails.slice(0, 1).map((v) => `<div><span class="nc-lbl">Email</span>${esc(v)}</div>`).join('')}
+          ${c.address ? `<div><span class="nc-lbl">地址</span>${esc(c.address)}</div>` : ''}
+        </div>
+        <div class="muted small">${c.date ? '建檔 ' + fmtDate(c.date).split(' ')[0] : ''}</div>
+      </div>`;
+    }).join('') || '<div class="empty">沒有符合的名片</div>'}</div>`;
+  const qi = $('#nc-q');
+  qi.oninput = (e) => { cardUI.q = e.target.value; const pos = e.target.selectionStart; renderCards(main, ''); const n = $('#nc-q'); n.focus(); n.setSelectionRange(pos, pos); };
+  main.querySelectorAll('.fchip[data-sort]').forEach((el) => el.onclick = () => { cardUI.sort = el.dataset.sort; renderCards(main, ''); });
+  main.querySelectorAll('.fchip[data-co]').forEach((el) => el.onclick = () => { cardUI.company = el.dataset.co; renderCards(main, ''); });
+}
+function renderCardDetail(main, id) {
+  const c = Store.cards.find((x) => x.id === id);
+  if (!c) { main.innerHTML = pageHead('找不到名片', '<a href="#/cards">回名片</a>'); return; }
+  const L = cardLinks(c);
+  const phones = cardPhones(c), emails = cardEmails(c), faxes = cardFaxes(c);
+  const sameCo = Store.cards.filter((x) => x.id !== c.id && (x.company || '').trim() && (x.company || '').trim() === (c.company || '').trim());
+  const row = (label, html) => html ? `<div class="task-row" style="grid-template-columns:64px 1fr"><div class="muted small">${label}</div><div>${html}</div></div>` : '';
+  main.innerHTML = `
+    <div class="crumb"><a href="#/cards">名片</a> › ${esc(c.name || '未命名')}</div>
+    <div class="card hero" style="background:linear-gradient(135deg, rgba(88,86,214,0.16), rgba(50,173,230,0.10))">
+      <div class="avatar" style="background:linear-gradient(135deg,#5856d6,#32ade6)">${esc(initial(c.name || c.company))}</div>
+      <div style="flex:1;min-width:0">
+        <div class="name">${esc(c.name || '未命名')}</div>
+        <div class="facts">
+          ${c.jobTitle ? `<span>💼 ${esc(c.jobTitle)}</span>` : ''}
+          ${c.department ? `<span>🏛️ ${esc(c.department)}</span>` : ''}
+          ${c.company ? `<span>🏢 ${esc(c.company)}</span>` : ''}
+          ${c.date ? `<span>📆 建檔 ${fmtDate(c.date).split(' ')[0]}</span>` : ''}
+        </div>
+        ${L.person || L.sub ? `<div class="chips" style="margin-top:8px">
+          ${L.sub ? `<a class="chip green" href="#/sub/${L.sub.id}">部屬卡片・${esc(L.sub.name)}</a>` : ''}
+          ${L.dept ? `<a class="chip blue" href="#/dept/${L.dept.id}">${esc(L.dept.name)}</a>` : ''}
+          ${L.person && !L.sub ? `<a class="chip blue" href="#/org">組織人員・${esc(L.person.name)}</a>` : ''}
+        </div>` : ''}
+      </div>
+    </div>
+    <div class="grid cols-2 mt">
+      <div class="card"><h3>聯絡資訊</h3>
+        ${row('電話', phones.map((v) => `<a href="${telHref(v)}">${esc(v)}</a>`).join('<br>'))}
+        ${row('Email', emails.map((v) => `<a href="mailto:${esc(v)}">${esc(v)}</a>`).join('<br>'))}
+        ${row('傳真', faxes.map(esc).join('<br>'))}
+        ${row('地址', c.address ? `<a href="https://maps.apple.com/?q=${encodeURIComponent(c.address)}" target="_blank" rel="noreferrer">${esc(c.address)}</a>` : '')}
+        ${row('主要業務', esc(c.primaryBusiness || ''))}
+        ${!phones.length && !emails.length && !faxes.length && !c.address ? '<div class="empty">這張名片沒有聯絡資訊</div>' : ''}
+      </div>
+      <div class="card"><h3>備註</h3>
+        <div style="white-space:pre-wrap;line-height:1.7">${esc(c.note || '') || '<span class="muted">（未填）</span>'}</div>
+        ${sameCo.length ? `<div class="section-title">同公司名片（${sameCo.length}）</div><div class="chips">${sameCo.map((x) => `<a class="chip" href="#/cards/${x.id}">${esc(x.name || '未命名')}${x.jobTitle ? '・' + esc(x.jobTitle) : ''}</a>`).join('')}</div>` : ''}
+      </div>
+    </div>`;
+}
+
 // ---- 設定 -----------------------------------------------------------------
 function renderSettings(main) {
   const token = localStorage.getItem(TOKEN_KEY) || '';
@@ -1715,7 +1838,7 @@ function renderSettings(main) {
   const counts = [['部屬', Store.subs.length], ['部門', Store.depts.length], ['組織人員', Store.orgPeople.length], ['機台', Store.equipment.length], ['里程碑', Store.milestones.length], ['名片', Store.cards.length], ['個人事件', Store.personalEvents.length], ['記帳', Store.expenses.length], ['收入', Store.incomes.length], ['匯率', Store.currencyRates.length], ['儲蓄險', Store.insurances.length], ['股票', Store.stocks.length], ['載具', Store.vehicles.length], ['房地產', Store.realEstates.length]];
   const mins = Math.round(AutoRefresh.intervalMs / 60000);
   main.innerHTML = `
-    ${pageHead('設定', '網頁版設定只存在這台瀏覽器')}
+    ${pageHead('設定', `網頁版 v${WEB_VERSION}・設定只存在這台瀏覽器`)}
     <div class="grid cols-2">
       <div class="card"><h3>連線</h3>
         <div class="t-meta">資料來源：<b>${esc(Store.source || '—')}</b>${Store.loadedAt ? `・${fmtDateTime(Store.loadedAt)} 讀取` : ''}</div>
@@ -1731,6 +1854,7 @@ function renderSettings(main) {
         <div class="t-meta" style="margin-top:4px">美股匯率取匯率表的「美金」；沒有就用 31。</div>
         <div class="t-meta" style="margin-top:4px">網頁為唯讀，要修改資料請用 App。</div>
         <div class="t-meta" style="margin-top:4px">頁面順序與分類對齊 App：收支／理財／人生／設定。灰色項目尚未提供網頁版。</div>
+        <div class="t-meta" style="margin-top:4px">網頁版 <b>v${WEB_VERSION}</b>，版本獨立於 App（更新網頁不會動到 App 版號）；更新內容見 repo 的 <code>docs/CHANGELOG.md</code>。</div>
       </div>
     </div>`;
   $('#st-reload').onclick = () => $('#reload-btn').click();

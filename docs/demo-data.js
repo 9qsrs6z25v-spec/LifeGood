@@ -157,8 +157,12 @@
   ];
 
   const cards = [
-    { id: id(), name: '吳美玲', company: '本公司', linkedOrgPersonId: P_QA1 },
-    { id: id(), name: '大同氣體 陳經理', company: '大同氣體' },
+    { id: id(), name: '吳美玲', company: '本公司', department: '品保課', jobTitle: '品保課長', phones: ['03-5678900 #201'], emails: ['meiling.wu@example.com'], faxes: [], address: '新竹縣竹北市光明六路 100 號', note: '稽核窗口，回覆快。', date: ymd(2024, 3, 12), primaryBusiness: '進料／出貨檢驗、內部稽核', linkedOrgPersonId: P_QA1 },
+    { id: id(), name: '陳建豪', company: '大同氣體', department: '業務部', jobTitle: '業務經理', phones: ['0912-345-678', '03-5551234'], emails: ['jh.chen@example-gas.com'], faxes: ['03-5551235'], address: '新竹縣竹北市興隆路一段 50 號', note: '特殊氣體供應商，季度評鑑對口。報價可談 3~5%。', date: ymd(2025, 6, 3), primaryBusiness: '特殊氣體、鋼瓶配送' },
+    { id: id(), name: '林淑芬', company: '永豐冷凍空調', department: '', jobTitle: '技術服務主任', phones: ['0933-221-100'], emails: ['sf.lin@example-hvac.com'], faxes: [], address: '桃園市中壢區中華路二段 88 號', note: '冰水主機年度保養廠商，24H 緊急叫修。', date: ymd(2025, 11, 20), primaryBusiness: '冰水主機保養、冷卻水塔' },
+    { id: id(), name: '王志明', company: '永豐冷凍空調', department: '工程部', jobTitle: '工程師', phones: ['0955-778-899'], emails: [], faxes: [], address: '', note: '現場施工窗口。', date: ymd(2026, 1, 8), primaryBusiness: '' },
+    { id: id(), name: '張安倫', company: '安倫科技', department: '總經理室', jobTitle: '總經理', phones: ['+886-2-27001234'], emails: ['enzo.chang@example-tech.com'], faxes: ['+886-2-27001235'], address: '台北市信義區松高路 11 號', note: '尾牙場地合作、贊助洽談。', date: ymd(2026, 4, 15), primaryBusiness: '自動化設備整合' },
+    { id: id(), name: '黃冠宇', company: '本公司', department: '製造一課', jobTitle: '工程師', phones: ['分機 315'], emails: [], faxes: [], address: '', note: '', date: ymd(2025, 8, 1), primaryBusiness: '', linkedOrgPersonId: null },
   ];
 
   const personalEvents = [

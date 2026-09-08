@@ -109,7 +109,7 @@ a { color: inherit; text-decoration: none; }
 #apple-sign-in-button { margin: 12px 0; }
 
 /* ---------- 版面 ---------- */
-.app { display: grid; grid-template-columns: 224px 1fr; min-height: 100vh; }
+.app { display: grid; grid-template-columns: 224px minmax(0, 1fr); min-height: 100vh; }
 .sidebar {
   background: var(--sidebar);
   color: var(--sidebar-text);
@@ -141,7 +141,9 @@ a { color: inherit; text-decoration: none; }
 .sidebar-foot { margin-top: auto; padding-top: 10px; display: flex; flex-direction: column; gap: 8px; }
 .sidebar-foot .btn { color: var(--sidebar-text); border-color: rgba(255,255,255,0.18); }
 .sidebar-foot .btn:hover { background: rgba(255,255,255,0.08); }
-.main { padding: 26px 30px 60px; max-width: 1400px; width: 100%; }
+.main { padding: 26px 30px 60px; max-width: 1400px; width: 100%; min-width: 0; overflow-x: clip; }
+/* 寬內容（表格、圖表）一律在自己的容器內捲動，版面本身永遠不出現橫向捲軸 */
+.grid > *, .cal-layout > * { min-width: 0; }
 
 .page-head { display: flex; align-items: flex-end; gap: 14px; margin-bottom: 18px; flex-wrap: wrap; }
 .page-head h2 { margin: 0; font-size: 24px; font-weight: 900; }
@@ -151,6 +153,7 @@ a { color: inherit; text-decoration: none; }
 
 /* ---------- 卡片 ---------- */
 .card {
+  min-width: 0;
   background: var(--card);
   border: 1px solid var(--line);
   border-radius: 16px;
@@ -167,6 +170,8 @@ a { color: inherit; text-decoration: none; }
 @media (max-width: 1100px) {
   .grid.cols-4, .grid.cols-5 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .grid.cols-3 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .grid.cols-2 { grid-template-columns: 1fr; }
+  .main { padding: 22px 20px 60px; }
 }
 @media (max-width: 800px) {
   .app { grid-template-columns: 1fr; }
@@ -202,7 +207,7 @@ a { color: inherit; text-decoration: none; }
 .empty { color: var(--muted); font-size: 13px; padding: 14px 4px; font-style: italic; }
 
 /* 表格 */
-.table-wrap { overflow-x: auto; }
+.table-wrap { overflow-x: auto; min-width: 0; -webkit-overflow-scrolling: touch; }
 table.tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
 table.tbl th, table.tbl td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }
 table.tbl th { color: var(--muted); font-weight: 700; font-size: 12px; cursor: pointer; user-select: none; }
@@ -261,7 +266,7 @@ table.tbl td.num, table.tbl th.num { text-align: right; font-variant-numeric: ta
 
 /* 明細頭 */
 .hero {
-  display: flex; gap: 18px; align-items: center;
+  display: flex; gap: 18px; align-items: center; flex-wrap: wrap;
   background: linear-gradient(135deg, rgba(52,199,89,0.16), rgba(0,122,255,0.10));
 }
 .avatar {
@@ -343,3 +348,15 @@ details.agenda summary { cursor: pointer; color: var(--indigo); font-weight: 700
 .cal-num { font-size: 13px; font-weight: 800; display: flex; align-items: center; }
 .cal-items { display: flex; flex-direction: column; gap: 3px; }
 .cal-items .chip { font-size: 10.5px; padding: 1px 6px; border-radius: 6px; }
+
+/* 名片 */
+.card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px; }
+.namecard { display: flex; flex-direction: column; gap: 8px; }
+.namecard .nc-head { display: flex; gap: 10px; align-items: flex-start; }
+.namecard .nc-name { font-size: 16px; font-weight: 900; }
+.namecard .nc-title { color: var(--muted); font-size: 12.5px; }
+.namecard .nc-co { font-weight: 700; font-size: 13px; }
+.namecard .nc-rows { display: flex; flex-direction: column; gap: 3px; font-size: 12.5px; }
+.namecard .nc-rows a { color: var(--blue); }
+.namecard .nc-rows a:hover { text-decoration: underline; }
+.namecard .nc-lbl { color: var(--muted); display: inline-block; min-width: 34px; margin-right: 8px; }
