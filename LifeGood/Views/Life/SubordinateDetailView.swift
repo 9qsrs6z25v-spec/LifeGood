@@ -4602,6 +4602,8 @@ struct SubordinateItemCard: View {
     @State private var shareItem: CardSharePayload?
     /// [v25.324] 會議卡片就地「加開一場」（免進編輯頁）
     @State private var quickSessionTarget: QuickSessionTarget?
+    /// [v25.346] 會議場次右側「＋」就地新增議程項目（免進編輯頁）
+    @State private var quickItemTarget: QuickItemTarget?
     // [v1] 卡片內容進場動畫旗標，對齊本檔案其餘 sheet／卡片一致採用的淡入進場規格
     @State private var cardAppeared = false
 
@@ -4609,6 +4611,13 @@ struct SubordinateItemCard: View {
         let subId: UUID
         let meetingId: UUID
         var id: UUID { meetingId }
+    }
+    /// scheduledDate＝nil 代表不分場次的會議（項目放 meeting.items）
+    struct QuickItemTarget: Identifiable {
+        let subId: UUID
+        let meetingId: UUID
+        let scheduledDate: Date?
+        var id: String { "\(meetingId.uuidString)_\(scheduledDate?.timeIntervalSince1970 ?? -1)" }
     }
 
     private static let dateFmt: DateFormatter = {
@@ -4683,7 +4692,8 @@ struct SubordinateItemCard: View {
 
     @ViewBuilder
     private func occurrenceBlock(_ occ: ResolvedMeetingOccurrence,
-                                 meeting: SubordinateMeeting, subId: UUID) -> some View {
+                                 meeting: SubordinateMeeting, subId: UUID,
+                                 forExport: Bool = false) -> some View {
         let head = MeetingTimeFormat.dateTime24.string(from: occ.date)
             + (occ.isCancelled ? "（已取消）" : occ.isMoved ? "（已改期）" : "")
             + (occ.isAdHoc ? "（臨時）" : "")
@@ -4694,18 +4704,43 @@ struct SubordinateItemCard: View {
                 Text(head).font(.caption)
                 Text("尚無議程").font(.caption2).foregroundStyle(.tertiary)
                 Spacer(minLength: 0)
+                // [v25.346] 場次右側「＋」：就地新增這一場的議程項目（取消的場次不給加）
+                if !forExport && !occ.isCancelled {
+                    quickItemButton(subId: subId, meetingId: meeting.id, scheduledDate: occ.scheduledDate)
+                }
             }
             .foregroundStyle(occ.isCancelled ? Color.red.opacity(0.8) : Color.secondary)
             .padding(.horizontal, 4)
         } else {
-            agendaBlock(title: head, items: occ.items, meeting: meeting, subId: subId)
+            agendaBlock(title: head, items: occ.items, meeting: meeting, subId: subId,
+                        scheduledDate: occ.scheduledDate, forExport: forExport || occ.isCancelled)
         }
     }
 
+    /// [v25.346] 場次／議程區塊右側的「＋」鈕
+    private func quickItemButton(subId: UUID, meetingId: UUID, scheduledDate: Date?) -> some View {
+        Button {
+            quickItemTarget = QuickItemTarget(subId: subId, meetingId: meetingId, scheduledDate: scheduledDate)
+        } label: {
+            Image(systemName: "plus.circle.fill")
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(.indigo)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("新增議程項目")
+    }
+
     private func agendaBlock(title: String, items: [MeetingItem],
-                             meeting: SubordinateMeeting, subId: UUID) -> some View {
+                             meeting: SubordinateMeeting, subId: UUID,
+                             scheduledDate: Date? = nil, forExport: Bool = false) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(title).font(.caption).foregroundStyle(.secondary)
+            HStack(spacing: 6) {
+                Text(title).font(.caption).foregroundStyle(.secondary)
+                Spacer(minLength: 0)
+                if !forExport {
+                    quickItemButton(subId: subId, meetingId: meeting.id, scheduledDate: scheduledDate)
+                }
+            }
             ForEach(items) { item in
                 agendaRow(item, meetingId: meeting.id, subId: subId)
             }
@@ -4889,6 +4924,9 @@ struct SubordinateItemCard: View {
             .sheet(item: $quickSessionTarget) { t in
                 MeetingQuickAddSessionSheet(subId: t.subId, meetingId: t.meetingId)
             }
+            .sheet(item: $quickItemTarget) { t in
+                MeetingQuickAddItemSheet(subId: t.subId, meetingId: t.meetingId, scheduledDate: t.scheduledDate)
+            }
             .environment(\.openURL, OpenURLAction { url in handleMention(url) })
             .onAppear {
                 withAnimation(.spring(response: 0.46, dampingFraction: 0.82)) {
@@ -4972,10 +5010,15 @@ struct SubordinateItemCard: View {
                 // 有週期、或不開週期但有加開場次：議程項目屬於各場次，
                 // 攤平顯示會看不出哪一項是哪一場的
                 ForEach(displayOccurrences(of: m)) { occ in
-                    occurrenceBlock(occ, meeting: m, subId: subId)
+                    occurrenceBlock(occ, meeting: m, subId: subId, forExport: forExport)
                 }
             } else if !m.allItems.isEmpty {
-                agendaBlock(title: "議程項目", items: m.allItems, meeting: m, subId: subId)
+                agendaBlock(title: "議程項目", items: m.allItems, meeting: m, subId: subId,
+                            scheduledDate: nil, forExport: forExport)
+            } else if !forExport {
+                // 不分場次且還沒有任何議程：給一個可加項目的空區塊
+                agendaBlock(title: "議程項目（尚無）", items: [], meeting: m, subId: subId,
+                            scheduledDate: nil, forExport: false)
             }
             // [v25.324] 就地加開一場（免進編輯頁）：接在場次/議程正下方
             if !forExport {
@@ -5455,5 +5498,118 @@ struct MeetingQuickAddSessionSheet: View {
         }
         .presentationDetents([.medium])
         .presentationDragIndicator(.visible)
+    }
+}
+
+// MARK: - 就地新增議程項目（會議卡片場次右側「＋」）
+
+/// [v25.346] 免進編輯頁直接為某一場（或不分場次的會議）新增一則議程項目。
+/// scheduledDate 有值＝該場次：已有落地的場次就直接加進去，還沒落地（規則推導出來的場次）
+/// 就先建一筆 MeetingOccurrence 再加——與 MeetingOccurrenceEditor 存檔時的做法一致。
+struct MeetingQuickAddItemSheet: View {
+    @EnvironmentObject var lifeStore: LifeStore
+    @Environment(\.dismiss) private var dismiss
+
+    let subId: UUID
+    let meetingId: UUID
+    let scheduledDate: Date?
+
+    @State private var content = ""
+    @State private var note = ""
+    @State private var assigneeIds: [UUID] = []
+    @State private var hasDue = false
+    @State private var dueDate = FiveMinuteDateTimePicker.defaultSchedulingTime()
+    @State private var showPicker = false
+
+    private var meetingTopic: String {
+        let t = lifeStore.subordinates.first { $0.id == subId }?
+            .meetings.first { $0.id == meetingId }?.topic ?? ""
+        return t.isEmpty ? "未命名會議" : t
+    }
+    private var assigneeText: String {
+        let names = assigneeIds.compactMap { lifeStore.sideRolePerson($0)?.name }
+        return names.isEmpty ? "未指派" : names.joined(separator: "、")
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    HStack(spacing: 8) {
+                        Image(systemName: "person.3.fill")
+                            .font(.system(size: 13, weight: .semibold)).foregroundStyle(.indigo)
+                        Text(meetingTopic).font(.subheadline.weight(.medium)).lineLimit(1)
+                        Spacer()
+                        Text(scheduledDate.map { MeetingTimeFormat.dateTime24.string(from: $0) } ?? "不分場次")
+                            .font(.system(size: 10, weight: .bold))
+                            .padding(.horizontal, 7).padding(.vertical, 2)
+                            .background(Color.indigo.opacity(0.12)).foregroundStyle(.indigo)
+                            .clipShape(Capsule())
+                    }
+                    MentionTextField(text: $content, placeholder: "議程項目內容（可打 @ 標註人員）",
+                                     people: lifeStore.mentionPeople())
+                }
+                Section {
+                    Button {
+                        showPicker = true
+                    } label: {
+                        HStack {
+                            Label("負責人", systemImage: "person.2.fill")
+                            Spacer()
+                            Text(assigneeText).foregroundStyle(assigneeIds.isEmpty ? .secondary : .primary)
+                                .lineLimit(1)
+                            Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
+                        }
+                    }
+                    .foregroundStyle(.primary)
+                    Toggle(isOn: Binding(get: { hasDue }, set: { on in hasDue = on; if on { dueDate = FiveMinuteDateTimePicker.defaultSchedulingTime() } })) {
+                        Label("截止日期", systemImage: "clock")
+                    }
+                    if hasDue {
+                        HStack {
+                            Text("截止")
+                            Spacer()
+                            FiveMinuteDateTimePicker(selection: $dueDate).fixedSize()
+                        }
+                    }
+                    MentionTextField(text: $note, placeholder: "備註（選填）", people: lifeStore.mentionPeople())
+                } footer: {
+                    Text("議程項目完成的分數計給指派的負責人；沒指派才計給會議負責人。")
+                }
+            }
+            .navigationTitle("新增議程項目")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("新增") { save() }
+                        .bold().foregroundStyle(.indigo)
+                        .disabled(content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
+            .sheet(isPresented: $showPicker) {
+                NavigationStack {
+                    MeetingAssigneePicker(initial: assigneeIds, onDone: { assigneeIds = $0 })
+                }
+            }
+        }
+        .presentationDetents([.large])
+        .presentationDragIndicator(.visible)
+    }
+
+    private func save() {
+        let item = MeetingItem(content: content.trimmingCharacters(in: .whitespacesAndNewlines),
+                               assigneeIds: assigneeIds,
+                               dueDate: hasDue ? dueDate : nil,
+                               note: note.trimmingCharacters(in: .whitespacesAndNewlines))
+        lifeStore.mutateSubordinateMeetingFields(subordinateId: subId, meetingId: meetingId) { m in
+            guard let sd = scheduledDate else { m.items.append(item); return }
+            if let idx = m.occurrences.firstIndex(where: { $0.scheduledDate == sd }) {
+                m.occurrences[idx].items.append(item)
+            } else {
+                m.occurrences.append(MeetingOccurrence(scheduledDate: sd, items: [item]))
+            }
+        }
+        dismiss()
     }
 }
