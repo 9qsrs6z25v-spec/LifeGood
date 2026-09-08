@@ -12,7 +12,7 @@
 // 常數
 // ---------------------------------------------------------------------------
 /** 網頁版自己的版本（與 App 版本無關；改網頁不再動 App 版號） */
-const WEB_VERSION = '1.1';
+const WEB_VERSION = '1.2';
 const CONTAINER_ID = 'iCloud.com.lifegood.app';
 const ZONE_NAME = 'LifeGoodZone';
 const TOKEN_KEY = 'lifegood_ck_token';
@@ -26,6 +26,7 @@ const KV_KEYS = {
   milestones: 'life_milestones',
   cards: 'life_business_cards',
   personalEvents: 'life_personal_events',
+  profile: 'life_profile',
   // 理財（ExpenseStore／FinanceStore，同樣是 JSON blob）
   expenses: 'lifegood_expenses',
   incomes: 'lifegood_incomes',
@@ -58,6 +59,7 @@ const REC_COLOR = { '優點': 'green', '缺點': 'red', '成就': 'orange', '改
 const Store = {
   subs: [], depts: [], orgPeople: [], grades: [], equipment: [], milestones: [], cards: [], personalEvents: [],
   expenses: [], incomes: [], currencyRates: [], insurances: [], stocks: [], vehicles: [], realEstates: [],
+  profile: {},
   source: '', loadedAt: null, ctx: null,
 };
 let ckContainer = null;
@@ -180,7 +182,13 @@ function applyData(raw, source) {
   const fingerprint = fingerprintOf(raw);
   const changed = fingerprint !== Store.fingerprint;
   Store.fingerprint = fingerprint;
-  for (const k of Object.keys(KV_KEYS)) Store[k] = reviveDates(Array.isArray(raw[k]) ? raw[k] : []);
+  for (const k of Object.keys(KV_KEYS)) {
+    const v = raw[k];
+    // life_profile 是單一物件，其餘都是陣列
+    Store[k] = k === 'profile'
+      ? reviveDates(v && typeof v === 'object' && !Array.isArray(v) ? v : {})
+      : reviveDates(Array.isArray(v) ? v : []);
+  }
   Store.source = source;
   Store.loadedAt = new Date();
   Store.ctx = buildScoreContext();
@@ -540,7 +548,14 @@ function route() {
       renderFinanceHome(main, t === 'assets' ? 'overview' : t, parts[2] ? decodeURIComponent(parts[2]) : '');
       break;
     }
-    case 'life': if ((parts[1] || '') === 'wealth') renderWealth(main); else renderOverview(main, ctx); break;
+    case 'life': {
+      const t = parts[1] || '';
+      if (t === 'wealth') renderWealth(main);
+      else if (t === 'resume') renderResume(main, parts[2] || 'all');
+      else renderOverview(main, ctx);
+      break;
+    }
+    case 'grades': renderGrades(main); break;
     case 'settings': renderSettings(main); break;
     case 'cards': renderCards(main, parts[1] ? decodeURIComponent(parts[1]) : ''); break;
     case 'siderole': renderSideRole(main, decodeURIComponent(parts[1] || ''), parts[2] || 'tasks'); break;
@@ -1709,6 +1724,149 @@ function renderWealth(main) {
       else { const linked = Store.stocks.filter((s) => s.linkedSecuritiesMilestoneId === m.id && !s.isSold); val = fmtMoney(linked.reduce((a, s) => a + stockView(s).mv, 0)); detail = [m.securitiesAccountType, `持股 ${linked.length} 檔`].filter(Boolean).join('・'); extra = linked.length ? `<div class="chips" style="margin-top:6px">${linked.map((s) => `<a class="chip green" href="#/finance/stock/${s.id}">${esc(s.symbol)}</a>`).join('')}</div>` : ''; }
       return `<div class="card" style="${m.isDisabled ? 'opacity:.55' : ''}"><div class="row" style="align-items:flex-start"><div class="avatar sm" style="background:${m.financeSubCategory === '銀行' ? 'linear-gradient(135deg,#007aff,#5ac8fa)' : m.financeSubCategory === '信用卡' ? 'linear-gradient(135deg,#ff9500,#ffcc00)' : m.financeSubCategory === '證券' ? 'linear-gradient(135deg,#34c759,#30b0c7)' : 'linear-gradient(135deg,#af52de,#5856d6)'}">${esc(initial(m.bankName || m.insuranceCompany || m.title))}</div><div style="flex:1;min-width:0"><div style="font-weight:900;font-size:15px">${esc(m.title)} <span class="chip ${subColor[m.financeSubCategory] || ''}">${esc(m.financeSubCategory)}</span>${m.isDisabled ? ' <span class="chip">停用</span>' : ''}</div><div class="muted small">${esc([m.bankName, m.branchName, m.bankAccountType, m.cardName, m.cardLastFour ? '末' + m.cardLastFour : ''].filter(Boolean).join('・'))}</div></div><div class="score s80" style="font-size:18px">${val}</div></div><div class="muted small" style="margin-top:8px">${esc(detail)}</div>${extra}${m.note ? `<div class="muted small" style="margin-top:6px">${esc(m.note)}</div>` : ''}</div>`;
     }).join('') || '<div class="empty">尚無財富卡片</div>'}</div>`;
+}
+
+// ---- 履歷 -----------------------------------------------------------------
+const CAT_META = {
+  '職涯': ['briefcase', '💼', 'blue'], '學歷': ['edu', '🎓', 'indigo'], '成就': ['wealth', '💰', 'green'],
+  '結婚': ['marriage', '💍', 'pink'], '家庭': ['family', '❤️', 'red'], '房地產': ['re', '🏠', 'orange'],
+  '旅行': ['travel', '✈️', 'teal'], '寵物': ['pet', '🐾', 'purple'], '健康': ['health', '➕', 'cyan'], '其他': ['other', '⭐', ''],
+};
+/** 「成就」在 App 裡顯示為「財富」（財富卡片就是這個分類） */
+const catLabel = (c) => (c === '成就' ? '財富' : c === '結婚' ? '配偶' : c);
+const catIcon = (c) => (CAT_META[c] || CAT_META['其他'])[1];
+const catChipColor = (c) => (CAT_META[c] || CAT_META['其他'])[2];
+/** 職涯里程碑（不含兼任職務——那有自己的頁面） */
+function careerMilestones() {
+  return Store.milestones.filter((m) => m.category === '職涯' && m.careerSubCategory !== 'sideRole')
+    .sort((a, b) => b.date - a.date);
+}
+function salaryOf(m) { return m.salaryAfter ?? m.salary ?? null; }
+function careerYears() {
+  const list = careerMilestones();
+  const join = list.filter((m) => m.careerSubCategory === '入職').sort((a, b) => a.date - b.date)[0]
+    || [...list].sort((a, b) => a.date - b.date)[0];
+  if (!join) return null;
+  const quit = list.filter((m) => m.careerSubCategory === '離職').sort((a, b) => b.date - a.date)[0];
+  const end = quit && quit.date > join.date ? quit.date : new Date();
+  return { from: join.date, years: (end - join.date) / 86400000 / 365, ended: !!quit };
+}
+const CAREER_COLOR = { '入職': 'green', '升職': 'gold', '調薪': 'blue', '轉職': 'indigo', '降職': 'orange', '離職': 'red' };
+function renderResume(main, cat) {
+  const now = new Date();
+  const p = Store.profile || {};
+  const all = [...Store.milestones].sort((a, b) => b.date - a.date);
+  const cats = [...new Set(all.map((m) => m.category).filter(Boolean))];
+  const CAT_ORDER = ['職涯', '學歷', '成就', '結婚', '家庭', '房地產', '旅行', '寵物', '健康', '其他'];
+  cats.sort((a, b) => CAT_ORDER.indexOf(a) - CAT_ORDER.indexOf(b));
+  const counts = {}; for (const m of all) counts[m.category] = (counts[m.category] || 0) + 1;
+  const shown = cat === 'all' ? all : all.filter((m) => m.category === cat);
+  const thisYear = all.filter((m) => m.date && m.date.getFullYear() === now.getFullYear()).length;
+  const careers = careerMilestones();
+  const yrs = careerYears();
+  const latestJob = careers.find((m) => m.careerSubCategory !== '離職');
+  // 薪資點：有薪資數字的職涯里程碑，由舊到新
+  const salaryPts = careers.filter((m) => salaryOf(m)).sort((a, b) => a.date - b.date)
+    .map((m) => ({ date: m.date, value: salaryOf(m), label: m.careerSubCategory || '職涯' }));
+  // 依年份分組
+  const byYear = {}; for (const m of shown) { const y = m.date ? m.date.getFullYear() : '—'; (byYear[y] = byYear[y] || []).push(m); }
+  const years = Object.keys(byYear).sort((a, b) => b - a);
+  const milestoneRow = (m) => {
+    const href = m.financeSubCategory ? '#/life/wealth'
+      : (m.category === '職涯' && m.careerSubCategory === 'sideRole') ? `#/siderole/${m.id}` : '';
+    const bits = [];
+    if (m.companyName) bits.push(m.companyName);
+    if (m.department) bits.push(m.department);
+    if (m.jobTitle) bits.push(m.jobTitle);
+    if (m.jobGrade) bits.push(m.jobGrade);
+    if (m.financeSubCategory) bits.push(m.financeSubCategory);
+    const sal = (m.salaryBefore != null && m.salaryAfter != null)
+      ? `${fmtMoney(m.salaryBefore)} → ${fmtMoney(m.salaryAfter)}${m.salaryBefore > 0 ? `（${m.salaryAfter >= m.salaryBefore ? '+' : ''}${Math.round((m.salaryAfter / m.salaryBefore - 1) * 100)}%）` : ''}`
+      : (salaryOf(m) ? fmtMoney(salaryOf(m)) : '');
+    return `<div class="task-row"><div class="tick">${catIcon(m.category)}</div>
+      <div><div class="t-title">${href ? `<a href="${href}" style="color:var(--blue)">${esc(m.title || '未命名')} ›</a>` : esc(m.title || '未命名')}</div>
+        <div class="t-meta">${m.date ? fmtDate(m.date).split(' ')[0] : ''}${bits.length ? '・' + esc(bits.join('・')) : ''}${sal ? '・薪資 ' + sal : ''}</div>
+        ${m.note ? `<div class="t-meta" style="white-space:pre-wrap">${esc(m.note)}</div>` : ''}
+        ${m.mood ? `<div class="t-meta">心情：${esc(m.mood)}</div>` : ''}
+        ${m.futurePlan ? `<div class="t-meta">未來規劃：${esc(m.futurePlan)}</div>` : ''}</div>
+      <div class="t-right">
+        <span class="chip ${catChipColor(m.category)}">${esc(catLabel(m.category))}</span>
+        ${m.careerSubCategory && m.careerSubCategory !== 'sideRole' ? `<span class="chip ${CAREER_COLOR[m.careerSubCategory] || ''}">${esc(m.careerSubCategory)}</span>` : ''}
+        ${m.isManagerial ? `<span class="chip gold">管理職${m.managedUnit ? '・' + esc(m.managedUnit) : ''}</span>` : ''}
+      </div></div>`;
+  };
+  main.innerHTML = `
+    ${pageHead('履歷', `${all.length} 項里程碑・今年 ${thisYear} 項・${cats.length} 個分類`)}
+    <div class="card hero" style="background:linear-gradient(135deg, rgba(255,149,0,0.16), rgba(255,204,0,0.10))">
+      <div class="avatar" style="background:linear-gradient(135deg,#ff9500,#ffcc00)">${esc(initial(p.chineseName || p.englishName || '我'))}</div>
+      <div style="flex:1;min-width:0">
+        <div class="name">${esc(p.chineseName || '（未填姓名）')}${p.englishName ? ` <span class="muted" style="font-size:15px">${esc(p.englishName)}</span>` : ''}</div>
+        <div class="facts">
+          ${p.company || latestJob?.companyName ? `<span>🏢 ${esc(p.company || latestJob.companyName)}</span>` : ''}
+          ${p.jobTitle || latestJob?.jobTitle ? `<span>💼 ${esc(p.jobTitle || latestJob.jobTitle)}</span>` : ''}
+          ${p.spouse ? `<span>💍 ${esc(p.spouse)}</span>` : ''}
+          ${yrs ? `<span>📆 年資 ${yrs.years.toFixed(1)} 年（自 ${fmtDate(yrs.from).split(' ')[0]}${yrs.ended ? '，已離職' : ''}）</span>` : ''}
+        </div>
+      </div>
+    </div>
+    <div class="grid cols-4 mt">
+      ${kpiCard('里程碑', all.length, '', `今年 ${thisYear} 項`)}
+      ${kpiCard('職涯異動', careers.length, '', `升職 ${careers.filter((m) => m.careerSubCategory === '升職').length}・調薪 ${careers.filter((m) => m.careerSubCategory === '調薪').length}`)}
+      ${kpiCard('目前薪資', salaryPts.length ? fmtMoney(salaryPts[salaryPts.length - 1].value) : '—', 'green', salaryPts.length > 1 ? `自 ${fmtMoney(salaryPts[0].value)} 起（${salaryPts[0].value > 0 ? '+' + Math.round((salaryPts[salaryPts.length - 1].value / salaryPts[0].value - 1) * 100) + '%' : ''}）` : '')}
+      ${kpiCard('兼任職務', sideRoles().length, '', `在任 ${sideRoles().filter(roleActive).length}`)}
+    </div>
+    ${salaryPts.length >= 2 ? `<div class="card chart-card mt"><h3>薪資歷程</h3><div class="chart-box" style="height:220px"><canvas id="rs-salary"></canvas></div><div class="legend-note">取職涯里程碑上填寫的薪資（調薪後金額優先）。</div></div>` : ''}
+    ${careers.length ? `<div class="card mt"><h3>職涯時間軸 <span class="count">${careers.length}</span></h3>${careers.map(milestoneRow).join('')}</div>` : ''}
+    <div class="filters mt">
+      <span class="fchip ${cat === 'all' ? 'on' : ''}" data-cat="all">全部 ${all.length}</span>
+      ${cats.map((c) => `<span class="fchip ${cat === c ? 'on' : ''}" data-cat="${esc(c)}">${catIcon(c)} ${esc(catLabel(c))} ${counts[c]}</span>`).join('')}
+    </div>
+    ${years.map((y) => `<div class="card mt"><h3>${y} <span class="count">${byYear[y].length}</span></h3>${byYear[y].map(milestoneRow).join('')}</div>`).join('') || '<div class="empty">沒有符合的里程碑</div>'}`;
+  main.querySelectorAll('.fchip[data-cat]').forEach((el) => el.onclick = () => { location.hash = `#/life/resume/${encodeURIComponent(el.dataset.cat)}`; });
+  if (!window.Chart || salaryPts.length < 2) return;
+  const { text, line } = chartColors();
+  charts.push(new Chart($('#rs-salary'), {
+    type: 'line',
+    data: { labels: salaryPts.map((x) => fmtDate(x.date).split(' ')[0]), datasets: [{ label: '薪資', data: salaryPts.map((x) => Math.round(x.value)), borderColor: '#34c759', backgroundColor: 'rgba(52,199,89,0.15)', fill: true, tension: 0.25, pointRadius: 5, stepped: false }] },
+    options: { maintainAspectRatio: false, scales: { x: { grid: { display: false }, ticks: { color: text } }, y: { grid: { color: line }, ticks: { color: text, callback: (v) => fmtMoney(v, '') } } }, plugins: { legend: { display: false }, tooltip: { callbacks: { label: (t) => `${salaryPts[t.dataIndex].label} ${fmtFull(t.raw)}` } } } },
+  }));
+}
+
+// ---- 部門職等 ---------------------------------------------------------------
+function renderGrades(main) {
+  const grades = [...Store.grades];
+  const usage = (gid) => {
+    const subs = Store.subs.filter((s) => s.gradeTitleId === gid);
+    const people = Store.orgPeople.filter((p) => p.gradeTitleId === gid && !(p.linkedSubordinateId && subById(p.linkedSubordinateId)));
+    return { subs, people, total: subs.length + people.length };
+  };
+  const used = grades.map((g) => ({ g, u: usage(g.id) })).sort((a, b) => b.u.total - a.u.total || (a.g.grade || '').localeCompare(b.g.grade || '', 'zh-Hant'));
+  const noGradeSubs = Store.subs.filter((s) => !s.gradeTitleId || !gradeById(s.gradeTitleId));
+  const depts = [...Store.depts].sort((a, b) => (a.code || '').localeCompare(b.code || '') || (a.name || '').localeCompare(b.name || '', 'zh-Hant'));
+  const rel = (ids) => (ids || []).map(deptById).filter(Boolean).map((d) => `<a class="chip blue" href="#/dept/${d.id}">${esc(d.name)}</a>`).join(' ') || '<span class="muted">—</span>';
+  main.innerHTML = `
+    ${pageHead('部門職等', `${depts.length} 個部門・${grades.length} 個職等職稱`)}
+    <div class="grid cols-4">
+      ${kpiCard('部門', depts.length, '', `${Store.equipment.length} 台設備`)}
+      ${kpiCard('職等職稱', grades.length, '', `已指派 ${used.filter((x) => x.u.total).length} 個`)}
+      ${kpiCard('已套用職等的部屬', Store.subs.length - noGradeSubs.length, noGradeSubs.length ? 'orange' : 'green', noGradeSubs.length ? `未設定 ${noGradeSubs.length} 人` : '全部已設定')}
+      ${kpiCard('組織人員', Store.orgPeople.length, '', `其中部屬 ${Store.orgPeople.filter((p) => p.linkedSubordinateId && subById(p.linkedSubordinateId)).length} 人`)}
+    </div>
+    <div class="card table-wrap mt"><h3>職等職稱 <span class="count">${grades.length}</span></h3>
+      <table class="tbl"><thead><tr><th>職等</th><th>職稱</th><th class="num">使用人數</th><th>使用者</th></tr></thead><tbody>
+      ${used.map(({ g, u }) => `<tr><td><b>${esc(g.grade || '—')}</b></td><td>${esc(g.title || '—')}</td><td class="num">${u.total ? `<span class="chip green">${u.total}</span>` : '<span class="muted">0</span>'}</td>
+        <td>${[...u.subs.map((s) => `<a class="chip" href="#/sub/${s.id}">${esc(s.name)}</a>`), ...u.people.map((p) => `<span class="chip">${esc(p.name)}</span>`)].join(' ') || '<span class="muted">尚未指派</span>'}</td></tr>`).join('') || '<tr><td colspan="4" class="empty">尚無職等職稱</td></tr>'}
+      </tbody></table>
+      ${noGradeSubs.length ? `<div class="muted small" style="margin-top:10px">未設定職等的部屬：${noGradeSubs.map((s) => `<a class="chip orange" href="#/sub/${s.id}">${esc(s.name)}</a>`).join(' ')}</div>` : ''}
+    </div>
+    <div class="card table-wrap mt"><h3>部門 <span class="count">${depts.length}</span></h3>
+      <table class="tbl"><thead><tr><th>代號</th><th>部門</th><th>功能</th><th class="num">成員</th><th class="num">設備</th><th>主管</th><th>上游</th><th>下游</th><th>平行</th></tr></thead><tbody>
+      ${depts.map((d) => { const mem = deptMembers(d.id); const eq = Store.equipment.filter((e) => e.departmentId === d.id);
+        return `<tr class="clickable" onclick="location.hash='#/dept/${d.id}'"><td><b>${esc(d.code || '—')}</b></td><td>${esc(d.name || '未命名')}</td><td class="muted small" style="white-space:normal;max-width:260px">${esc(d.function || '')}</td>
+        <td class="num">${mem.filter((m) => !m.isInactive).length}</td><td class="num">${eq.length}</td>
+        <td>${(d.managerIds || []).map(personName).filter(Boolean).map((n) => `<span class="chip gold">${esc(n)}</span>`).join(' ') || '<span class="muted">—</span>'}</td>
+        <td>${rel(d.upstreamIds)}</td><td>${rel(d.downstreamIds)}</td><td>${rel(d.peerIds)}</td></tr>`; }).join('') || '<tr><td colspan="9" class="empty">尚無部門</td></tr>'}
+      </tbody></table></div>`;
 }
 
 // ---- 名片 -----------------------------------------------------------------

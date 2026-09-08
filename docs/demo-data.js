@@ -222,5 +222,25 @@
   const vehicles = [{ id: VEH1, name: 'Model Y', brand: 'Tesla', ownerName: '我', powerType: '電車', purchaseDate: ymd(2024, 6, 15), soldDate: null, purchasePrice: 1890000, currentValue: 1450000, fixedExpenses: [{ id: id(), category: '車貸', amount: 21000, period: '月' }, { id: id(), category: '稅費', amount: 11920, period: '年' }], variableExpenses: [], photoRecords: [], note: '' }];
   const realEstates = [{ id: id(), name: '竹北自住宅', city: '新竹縣', address: '', purchaseDate: ymd(2021, 9, 1), soldDate: null, purchasePrice: 15800000, currentValue: 18500000, monthlyRental: 0, mortgageItems: [{ id: id(), title: '玉山房貸', amount: 32000, totalPeriods: 360, startDate: ymd(2021, 10, 1) }], paidItems: [], variableExpenses: [], note: '', buildingType: '大樓', hasElevator: true, elevatorMaintenances: [], pingCount: 42.5 }];
 
-  window.LIFEGOOD_DEMO = { subs, depts, orgPeople, grades, equipment, milestones, cards, personalEvents, expenses, incomes, currencyRates, insurances, stocks, vehicles, realEstates };
+  // ---- 履歷示範 ----
+  const profile = { chineseName: '林承翰', englishName: 'Hank Lin', company: '晶宏科技', jobTitle: '副理', spouse: '陳怡君' };
+  const ms = (title, cat, y, mo, da, extra) => Object.assign({ id: id(), title, date: ymd(y, mo, da), category: cat, note: '' }, extra || {});
+  milestones.push(
+    ms('入職 晶宏科技 廠務工程師', '職涯', 2015, 8, 3, { careerSubCategory: '入職', companyName: '晶宏科技', department: '廠務部', jobTitle: '工程師', jobGrade: 'E3', salary: 52000, mood: '第一份正職，緊張但興奮。', note: '負責 CDA 與冰水系統巡檢。' }),
+    ms('調薪', '職涯', 2017, 1, 1, { careerSubCategory: '調薪', companyName: '晶宏科技', jobTitle: '工程師', jobGrade: 'E3', salaryBefore: 52000, salaryAfter: 58000 }),
+    ms('升職 資深工程師', '職涯', 2018, 7, 1, { careerSubCategory: '升職', companyName: '晶宏科技', department: '廠務部', jobTitle: '資深工程師', jobGrade: 'E5', salaryBefore: 58000, salaryAfter: 71000, mood: '帶第一個新人。' }),
+    ms('轉調 設備課', '職涯', 2020, 4, 1, { careerSubCategory: '轉職', companyName: '晶宏科技', department: '設備課', jobTitle: '資深工程師', jobGrade: 'E5', salary: 76000 }),
+    ms('升職 課長（管理職）', '職涯', 2022, 7, 1, { careerSubCategory: '升職', companyName: '晶宏科技', department: '設備課', jobTitle: '課長', jobGrade: 'M1', salaryBefore: 76000, salaryAfter: 92000, isManagerial: true, managedUnit: '設備課', futurePlan: '兩年內把 PM 制度數位化。' }),
+    ms('升職 副理', '職涯', 2025, 1, 1, { careerSubCategory: '升職', companyName: '晶宏科技', department: '廠務部', jobTitle: '副理', jobGrade: 'M2', salaryBefore: 92000, salaryAfter: 112000, isManagerial: true, managedUnit: '廠務部', mood: '管理範圍擴大到實驗室。' }),
+    ms('國立交通大學 機械工程學系', '學歷', 2011, 9, 1, { note: '學士' }),
+    ms('清華大學 工業工程碩士在職專班', '學歷', 2021, 9, 1, { note: '在職進修' }),
+    ms('結婚', '結婚', 2019, 11, 9, { note: '與陳怡君結婚。' }),
+    ms('長子出生', '家庭', 2021, 5, 18, {}),
+    ms('購入竹北自住宅', '房地產', 2021, 9, 1, { note: '42.5 坪，大樓。' }),
+    ms('公司年度創新提案首獎', '其他', 2023, 12, 20, { note: '冰水主機節能提案，年省電費約 180 萬。' }),
+    ms('日本北海道家庭旅行', '旅行', 2024, 2, 10, {}),
+    ms('領養柴犬「麻糬」', '寵物', 2023, 6, 5, {}),
+    ms('完成人生第一次半馬', '健康', 2025, 3, 16, { note: '2 小時 08 分。' }),
+  );
+  window.LIFEGOOD_DEMO = { subs, depts, orgPeople, grades, equipment, milestones, cards, personalEvents, expenses, incomes, currencyRates, insurances, stocks, vehicles, realEstates, profile };
 })();
