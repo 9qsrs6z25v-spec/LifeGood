@@ -2947,11 +2947,34 @@ struct PerformanceScore: Identifiable {
     var name: String
     var total: Double
     var sources: [PerformanceScoreSource]
+    /// [v25.349] 這一年被排在哪個職等（取自票上的快照，所以轉出／離職的人也還原得回來）
+    var gradeId: UUID?
+    var gradeLabel: String = ""
     /// 平均名次（跨所有把他排進去的票）
     var averageRank: Double {
         guard !sources.isEmpty else { return 0 }
         return sources.reduce(0.0) { $0 + Double($1.rank) } / Double(sources.count)
     }
+}
+
+/// [v25.349] 職等的分組鍵：id 可能是 nil（未設職等），label 是票上的快照
+struct PerformanceGradeKey: Hashable {
+    let id: UUID?
+    let label: String
+}
+
+/// [v25.349] 評分加總依職等切開後的一段
+struct PerformanceGradeSection: Identifiable {
+    var id: String { gradeId?.uuidString ?? "none-" + label }
+    let gradeId: UUID?
+    /// 顯示名稱（例：E5 資深工程師）
+    let label: String
+    /// 這個職等的績效權重；查不到職等時為 nil
+    let weight: Double?
+    /// 已在職等內排好序的得分
+    let scores: [PerformanceScore]
+
+    var topScore: Double { scores.first?.total ?? 0 }
 }
 
 

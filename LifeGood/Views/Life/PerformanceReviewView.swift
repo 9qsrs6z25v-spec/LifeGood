@@ -314,17 +314,25 @@ struct PerformanceSummaryView: View {
     @EnvironmentObject var lifeStore: LifeStore
 
     @State private var year: Int = Calendar.current.component(.year, from: Date())
-    @State private var deptFilter: UUID?     // nil = 全部課別
+    /// [v25.349] 課別選擇要記住，不必每次都從「全部課別」重選。空字串＝全部
+    @AppStorage("perf_summary_dept") private var deptFilterRaw: String = ""
     @State private var expanded: Set<UUID> = []
+
+    private var deptFilter: UUID? {
+        // 記住的課別若已被刪掉就自動回到「全部課別」，不會卡在空清單
+        get {
+            guard !deptFilterRaw.isEmpty, let id = UUID(uuidString: deptFilterRaw),
+                  lifeStore.departments.contains(where: { $0.id == id }) else { return nil }
+            return id
+        }
+        nonmutating set { deptFilterRaw = newValue?.uuidString ?? "" }
+    }
 
     private var scores: [PerformanceScore] { lifeStore.performanceScores(year: year) }
 
-    /// 依課別篩選後的名次（名次以篩選後的清單重新編號）
-    private var shown: [PerformanceScore] {
-        guard let deptFilter else { return scores }
-        return scores.filter { s in
-            lifeStore.subordinates.first(where: { $0.id == s.personId })?.departmentId == deptFilter
-        }
+    /// [v25.349] 依職等切開，權重高的職等排前面；名次在各職等內重新編號
+    private var sections: [PerformanceGradeSection] {
+        lifeStore.performanceGradeSections(year: year, deptId: deptFilter)
     }
 
     private var pending: [(id: UUID, name: String)] { lifeStore.performancePendingRaters(year: year) }
@@ -336,14 +344,26 @@ struct PerformanceSummaryView: View {
     /// 本頁是嵌在人才矩陣的 ScrollView 裡，所以自己不再包一層 ScrollView
     /// （巢狀垂直捲動會讓手勢互搶、滑動變得很奇怪）。
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        // 單次計算，避免 body 內多處重複跑加總
+        let secs = sections
+        return VStack(alignment: .leading, spacing: 14) {
             controls
             if scores.isEmpty {
                 emptyState
             } else {
-                summaryHeader
-                ForEach(Array(shown.enumerated()), id: \.element.id) { idx, score in
-                    scoreCard(score, rank: idx + 1)
+                summaryHeader(shownCount: secs.reduce(0) { $0 + $1.scores.count })
+                if secs.isEmpty {
+                    Text("這個課別在 \(String(year)) 年沒有排名資料（同課同職等要滿 2 人才會分組）")
+                        .font(.caption).foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                        .padding(.vertical, 26)
+                } else {
+                    ForEach(secs) { section in
+                        gradeHeader(section)
+                        ForEach(Array(section.scores.enumerated()), id: \.element.id) { idx, score in
+                            scoreCard(score, rank: idx + 1)
+                        }
+                    }
                 }
                 footnote
             }
@@ -389,13 +409,37 @@ struct PerformanceSummaryView: View {
         .buttonStyle(.plain)
     }
 
+    // MARK: 職等分段標題
+
+    private func gradeHeader(_ section: PerformanceGradeSection) -> some View {
+        HStack(spacing: 8) {
+            Capsule()
+                .fill(LinearGradient(colors: [.orange, .orange.opacity(0.35)],
+                                     startPoint: .top, endPoint: .bottom))
+                .frame(width: 4, height: 16)
+            Text(section.label).font(.subheadline.weight(.bold))
+            Text("\(section.scores.count) 人")
+                .font(.system(size: 10, weight: .bold))
+                .padding(.horizontal, 6).padding(.vertical, 2)
+                .background(Color.orange.opacity(0.13)).foregroundStyle(.orange)
+                .clipShape(Capsule())
+                .overlay(Capsule().stroke(Color.orange.opacity(0.22), lineWidth: 0.6))
+            Spacer()
+            if let w = section.weight {
+                Text("權重 ×\(pointsText(w))")
+                    .font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
+            }
+        }
+        .padding(.top, 6)
+    }
+
     // MARK: 看板
 
-    private var summaryHeader: some View {
+    private func summaryHeader(shownCount: Int) -> some View {
         HStack(spacing: 10) {
             statCell(value: "\(submittedCount)", label: "已送出票", color: .green)
             statCell(value: "\(pending.count)", label: "尚未送出", color: pending.isEmpty ? .secondary : .orange)
-            statCell(value: "\(shown.count)", label: "被評分人數", color: .blue)
+            statCell(value: "\(shownCount)", label: "被評分人數", color: .blue)
         }
     }
 
@@ -419,8 +463,6 @@ struct PerformanceSummaryView: View {
         let sub = lifeStore.subordinates.first(where: { $0.id == score.personId })
         let deptName = sub?.departmentId
             .flatMap { id in lifeStore.departments.first(where: { $0.id == id })?.name }
-        let gradeLabel = sub?.gradeTitleId
-            .flatMap { id in lifeStore.gradeTitles.first(where: { $0.id == id })?.displayLabel }
         let isOpen = expanded.contains(score.personId)
         return VStack(alignment: .leading, spacing: 0) {
             Button {
@@ -449,8 +491,10 @@ struct PerformanceSummaryView: View {
                                     .clipShape(Capsule())
                             }
                         }
-                        Text([deptName, gradeLabel].compactMap { $0 }.joined(separator: "・")
-                             + "・\(score.sources.count) 票・平均第 "
+                        // 職等已經是分段標題，這裡只補課別，避免同一列出現兩個職等
+                        Text([deptName].compactMap { $0 }.joined()
+                             + (deptName == nil ? "" : "・")
+                             + "\(score.sources.count) 票・平均第 "
                              + String(format: "%.1f", score.averageRank) + " 名")
                             .font(.caption2).foregroundStyle(.secondary)
                     }
@@ -508,7 +552,8 @@ struct PerformanceSummaryView: View {
             }
             Text("計分：排名在「同課 × 同職等」的組內進行，某組 N 人時第 1 名基礎分 N、"
                  + "往下每名少 1 分，再乘上評分者職等的績效權重後加總。"
-                 + "各課人數不同、基礎分上限就不同，跨課比較僅供參考。")
+                 + "總排名依職等分開呈現、名次各自從第 1 名起算（職等由票上的快照決定，"
+                 + "職等權重高的排前面）；各課人數不同、基礎分上限就不同，跨課比較僅供參考。")
                 .font(.caption2).foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)

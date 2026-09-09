@@ -750,11 +750,15 @@ class LifeStore: ObservableObject {
     /// 只計已送出的票（草稿不計）。人被移出課別或離職，票裡的快照仍在，分數照樣保留。
     func performanceScores(year: Int) -> [PerformanceScore] {
         var totals: [UUID: PerformanceScore] = [:]
+        // 每個人被排在哪個職等：票上的快照可能不只一種（例如年中升職），取出現最多次的那個
+        var gradeVotes: [UUID: [PerformanceGradeKey: Int]] = [:]
         for ballot in performanceBallots where ballot.year == year && ballot.isSubmitted {
             for g in ballot.groups {
                 let n = g.entries.count
                 guard n >= 2 else { continue }
+                let key = PerformanceGradeKey(id: g.gradeId, label: g.gradeLabel)
                 for (idx, entry) in g.entries.enumerated() {
+                    gradeVotes[entry.id, default: [:]][key, default: 0] += 1
                     let src = PerformanceScoreSource(
                         raterId: ballot.raterId, raterName: ballot.raterName,
                         raterGradeLabel: ballot.raterGradeLabel, weight: ballot.raterWeight,
@@ -773,9 +777,48 @@ class LifeStore: ObservableObject {
                 }
             }
         }
+        for (personId, votes) in gradeVotes {
+            guard var score = totals[personId],
+                  let best = votes.max(by: { ($0.value, $0.key.label) < ($1.value, $1.key.label) })?.key
+            else { continue }
+            score.gradeId = best.id
+            score.gradeLabel = best.label
+            totals[personId] = score
+        }
         return totals.values.sorted { a, b in
             if a.total != b.total { return a.total > b.total }
             return a.name < b.name
+        }
+    }
+
+    /// [v25.349] 依職等切開的加總結果：職等權重高的排前面（權重相同再比職等名稱），未設職等墊底。
+    /// 名次在各自的職等內重新編號——不同職等的人數與權重都不同，混在一起排沒有意義。
+    func performanceGradeSections(year: Int, deptId: UUID?) -> [PerformanceGradeSection] {
+        var scores = performanceScores(year: year)
+        if let deptId {
+            scores = scores.filter { s in
+                subordinates.first(where: { $0.id == s.personId })?.departmentId == deptId
+            }
+        }
+        var buckets: [PerformanceGradeKey: [PerformanceScore]] = [:]
+        for s in scores { buckets[PerformanceGradeKey(id: s.gradeId, label: s.gradeLabel), default: []].append(s) }
+        return buckets.map { key, items in
+            let weight = key.id.flatMap { id in gradeTitles.first(where: { $0.id == id })?.weightValue }
+            return PerformanceGradeSection(
+                gradeId: key.id,
+                label: key.label.isEmpty ? "未設職等" : key.label,
+                weight: weight,
+                scores: items.sorted { a, b in
+                    if a.total != b.total { return a.total > b.total }
+                    return a.name < b.name
+                })
+        }
+        .sorted { a, b in
+            // 未設職等永遠最後
+            if (a.gradeId == nil) != (b.gradeId == nil) { return b.gradeId == nil }
+            let wa = a.weight ?? 1, wb = b.weight ?? 1
+            if wa != wb { return wa > wb }
+            return a.label > b.label
         }
     }
 

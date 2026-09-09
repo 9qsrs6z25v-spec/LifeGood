@@ -12,7 +12,7 @@
 // 常數
 // ---------------------------------------------------------------------------
 /** 網頁版自己的版本（與 App 版本無關；改網頁不再動 App 版號） */
-const WEB_VERSION = '1.6';
+const WEB_VERSION = '1.7';
 const CONTAINER_ID = 'iCloud.com.lifegood.app';
 const ZONE_NAME = 'LifeGoodZone';
 const TOKEN_KEY = 'lifegood_ck_token';
@@ -1797,17 +1797,48 @@ function perfScores(year) {
       if (entries.length < 2) continue;
       entries.forEach((e, i) => {
         const base = entries.length - i;
-        const cur = totals[e.id] || { personId: e.id, name: e.name || '未命名', total: 0, sources: [] };
+        const cur = totals[e.id] || { personId: e.id, name: e.name || '未命名', total: 0, sources: [], gradeVotes: {} };
         const sub = subById(e.id);
         if (sub && sub.name) cur.name = sub.name;
         cur.total += base * w;
         cur.sources.push({ raterId: b.raterId, raterName: b.raterName || '未命名', raterGradeLabel: b.raterGradeLabel || '',
           weight: w, rank: i + 1, groupSize: entries.length, groupTitle: g.departmentName || '', base, points: base * w });
+        // 被排在哪個職等：用票上的快照，轉出／離職的人也還原得回來
+        const gk = `${g.gradeId || ''}|${g.gradeLabel || ''}`;
+        cur.gradeVotes[gk] = (cur.gradeVotes[gk] || 0) + 1;
         totals[e.id] = cur;
       });
     }
   }
+  for (const cur of Object.values(totals)) {
+    // 快照不只一種（例如年中升職）時取出現最多次的
+    const best = Object.entries(cur.gradeVotes).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0];
+    const [gid, glabel] = (best ? best[0] : '|').split('|');
+    cur.gradeId = gid || null;
+    cur.gradeLabel = glabel || '';
+    delete cur.gradeVotes;
+  }
   return Object.values(totals).sort((a, b) => b.total - a.total || a.name.localeCompare(b.name, 'zh-Hant'));
+}
+/** 依職等切開：權重高的職等在前，未設職等墊底；名次在各職等內重新編號 */
+function perfSections(scores) {
+  const buckets = {};
+  for (const s of scores) {
+    const k = `${s.gradeId || ''}|${s.gradeLabel || ''}`;
+    (buckets[k] = buckets[k] || []).push(s);
+  }
+  return Object.entries(buckets).map(([k, items]) => {
+    const [gid, glabel] = k.split('|');
+    const g = gid ? gradeById(gid) : null;
+    const weight = g ? (g.performanceWeight > 0 ? g.performanceWeight : 1) : null;
+    return { gradeId: gid || null, label: glabel || '未設職等', weight,
+      scores: items.sort((a, b) => b.total - a.total || a.name.localeCompare(b.name, 'zh-Hant')) };
+  }).sort((a, b) => {
+    if (!a.gradeId !== !b.gradeId) return a.gradeId ? -1 : 1;
+    const wa = a.weight == null ? 1 : a.weight, wb = b.weight == null ? 1 : b.weight;
+    if (wa !== wb) return wb - wa;
+    return b.label.localeCompare(a.label, 'zh-Hant');
+  });
 }
 const num = (v) => (v === Math.round(v) ? String(v) : v.toFixed(1));
 function renderPerf(main, param) {
@@ -1818,9 +1849,34 @@ function renderPerf(main, param) {
   const submitted = (Store.ballots || []).filter((b) => b.year === year && b.submittedAt);
   const raterIds = new Set(submitted.map((b) => b.raterId));
   const pending = Store.subs.filter((s) => !raterIds.has(s.id));
+  // 記住的課別若已不存在（換帳號、部門被刪）就自動回到「全部」
+  if (perfUI.dept !== 'all' && !deptById(perfUI.dept)) perfUI.setDept('all');
   const shown = perfUI.dept === 'all' ? scores
     : scores.filter((s) => { const sub = subById(s.personId); return sub && sub.departmentId === perfUI.dept; });
+  const sections = perfSections(shown);
   const rankColor = (r) => (r === 1 ? 'gold' : r === 2 ? '' : r === 3 ? 'orange' : '');
+  const scoreRow = (sc, rank) => {
+    const sub = subById(sc.personId);
+    const dept = sub && sub.departmentId ? (deptById(sub.departmentId) || {}).name : '';
+    const avgRank = sc.sources.length ? (sc.sources.reduce((a, x) => a + x.rank, 0) / sc.sources.length).toFixed(1) : '—';
+    return `<details class="agenda" style="border-top:1px solid var(--line);padding:8px 0;margin:0">
+      <summary style="list-style:none;display:flex;align-items:center;gap:12px;color:inherit;font-weight:400">
+        <span class="chip ${rankColor(rank)} big" style="min-width:34px;justify-content:center">${rank}</span>
+        <span style="flex:1;min-width:0"><b>${esc(sc.name)}</b>${sub ? '' : ' <span class="chip">已轉出</span>'}
+          <div class="muted small">${esc([dept, `${sc.sources.length} 票`, `平均第 ${avgRank} 名`].filter(Boolean).join('・'))}</div></span>
+        <span class="muted small">明細 ▾</span>
+        <b style="color:var(--orange);font-size:17px;min-width:48px;text-align:right">${num(sc.total)}</b>
+      </summary>
+      <div class="sub-items">${sc.sources.slice().sort((a, b) => b.points - a.points).map((src) => `
+        <div class="t-meta" style="display:flex;gap:8px;align-items:center;padding:3px 0">
+          <span style="width:76px">${esc(src.raterName)}</span>
+          <span class="chip blue">第 ${src.rank}/${src.groupSize} 名</span>
+          <span class="muted">${src.base} × ${num(src.weight)}</span>
+          <span class="spacer" style="flex:1"></span>
+          <b style="color:var(--orange)">${num(src.points)}</b>
+        </div>`).join('')}</div>
+    </details>`;
+  };
   main.innerHTML = `
     ${pageHead('評分加總', `${year} 年度績效互評・${submitted.length} 張已送出`)}
     <div class="filters">
@@ -1833,43 +1889,30 @@ function renderPerf(main, param) {
     </div>
     <div class="grid cols-4">
       ${kpiCard('已送出票', submitted.length, 'green', `尚未送出 ${pending.length}`)}
-      ${kpiCard('被評分人數', shown.length, '', perfUI.dept === 'all' ? '全部課別' : '此課別')}
-      ${kpiCard('最高分', shown.length ? num(shown[0].total) : '—', 'gold', shown.length ? esc(shown[0].name) : '')}
-      ${kpiCard('平均分', shown.length ? num(Math.round(shown.reduce((a, s) => a + s.total, 0) / shown.length * 10) / 10) : '—', '')}
+      ${kpiCard('被評分人數', shown.length, '', perfUI.dept === 'all' ? '全部課別' : esc((deptById(perfUI.dept) || {}).name || '此課別'))}
+      ${kpiCard('職等分組', sections.length, 'indigo', sections.length ? '名次各職等分開計算' : '')}
+      ${kpiCard('最高職等第一', sections.length ? esc(sections[0].scores[0].name) : '—', 'gold',
+        sections.length ? `${esc(sections[0].label)} ${num(sections[0].scores[0].total)} 分` : '')}
     </div>
     ${pending.length ? `<div class="card mt"><h3>⏳ 尚未送出 <span class="count">${pending.length}</span></h3><div class="chips">${pending.map((s) => `<a class="chip orange" href="#/sub/${s.id}">${esc(s.name)}</a>`).join('')}</div></div>` : ''}
-    <div class="card mt"><h3>總排名 <span class="count">${shown.length}</span></h3>
-      ${shown.map((sc, i) => {
-        const sub = subById(sc.personId);
-        const dept = sub && sub.departmentId ? (deptById(sub.departmentId) || {}).name : '';
-        const grade = sub && sub.gradeTitleId ? (gradeById(sub.gradeTitleId) || {}) : null;
-        const avgRank = sc.sources.length ? (sc.sources.reduce((a, x) => a + x.rank, 0) / sc.sources.length).toFixed(1) : '—';
-        return `<details class="agenda" style="border-top:1px solid var(--line);padding:8px 0;margin:0">
-          <summary style="list-style:none;display:flex;align-items:center;gap:12px;color:inherit;font-weight:400">
-            <span class="chip ${rankColor(i + 1)} big" style="min-width:34px;justify-content:center">${i + 1}</span>
-            <span style="flex:1;min-width:0"><b>${esc(sc.name)}</b>${sub ? '' : ' <span class="chip">已轉出</span>'}
-              <div class="muted small">${esc([dept, grade ? (grade.grade + ' ' + grade.title).trim() : ''].filter(Boolean).join('・'))}・${sc.sources.length} 票・平均第 ${avgRank} 名</div></span>
-            <span class="muted small">明細 ▾</span>
-            <b style="color:var(--orange);font-size:17px;min-width:48px;text-align:right">${num(sc.total)}</b>
-          </summary>
-          <div class="sub-items">${sc.sources.slice().sort((a, b) => b.points - a.points).map((src) => `
-            <div class="t-meta" style="display:flex;gap:8px;align-items:center;padding:3px 0">
-              <span style="width:76px">${esc(src.raterName)}</span>
-              <span class="chip blue">第 ${src.rank}/${src.groupSize} 名</span>
-              <span class="muted">${src.base} × ${num(src.weight)}</span>
-              <span class="spacer" style="flex:1"></span>
-              <b style="color:var(--orange)">${num(src.points)}</b>
-            </div>`).join('')}</div>
-        </details>`;
-      }).join('') || `<div class="empty">${scores.length ? '這個課別在這個年度沒有排名資料（同課同職等要滿 2 人才會分組）' : '這個年度還沒有已送出的評分票'}</div>`}
-    </div>
+    ${sections.map((sec) => `<div class="card mt"><h3>${esc(sec.label)} <span class="count">${sec.scores.length} 人</span>
+      <span class="spacer" style="flex:1"></span>${sec.weight == null ? '' : `<span class="muted small">權重 ×${num(sec.weight)}</span>`}</h3>
+      ${sec.scores.map((sc, i) => scoreRow(sc, i + 1)).join('')}
+    </div>`).join('') || `<div class="card mt"><div class="empty">${scores.length ? '這個課別在這個年度沒有排名資料（同課同職等要滿 2 人才會分組）' : '這個年度還沒有已送出的評分票'}</div></div>`}
     <div class="card mt"><h3>職等權重</h3><div class="chips">${Store.grades.map((g) => `<span class="chip indigo">${esc((g.grade + ' ' + g.title).trim())} ×${num(g.performanceWeight > 0 ? g.performanceWeight : 1)}</span>`).join('') || '<span class="muted small">尚未設定職等</span>'}</div>
-      <div class="legend-note">某組 N 人時第 1 名基礎分 N、往下每名少 1 分，再乘上評分者職等的權重後加總。各課人數不同、基礎分上限就不同，跨課比較僅供參考。</div></div>`;
+      <div class="legend-note">某組 N 人時第 1 名基礎分 N、往下每名少 1 分，再乘上評分者職等的權重後加總。
+        總排名依職等分開呈現、名次各自從第 1 名起算（職等取自票上的快照，職等權重高的排前面）；
+        各課人數不同、基礎分上限就不同，跨課比較僅供參考。</div></div>`;
   main.querySelectorAll('.fchip[data-d]').forEach((el) => el.onclick = () => {
-    perfUI.dept = el.dataset.d === 'all' ? 'all' : el.dataset.d; renderPerf(main, param);
+    perfUI.setDept(el.dataset.d === 'all' ? 'all' : el.dataset.d); renderPerf(main, param);
   });
 }
-const perfUI = { dept: 'all' };
+// 課別選擇記在瀏覽器，下次進來不用重選
+const PERF_DEPT_KEY = 'lifegood_perf_dept';
+const perfUI = {
+  dept: (() => { try { return localStorage.getItem(PERF_DEPT_KEY) || 'all'; } catch (e) { return 'all'; } })(),
+  setDept(v) { this.dept = v; try { localStorage.setItem(PERF_DEPT_KEY, v); } catch (e) { /* 私密瀏覽存不進去就只用這一次 */ } },
+};
 
 // ---- 稅務 -------------------------------------------------------------------
 // 節稅子分類的年度上限（與 App 的 TaxSavingSubCategory.annualLimit 一致）
