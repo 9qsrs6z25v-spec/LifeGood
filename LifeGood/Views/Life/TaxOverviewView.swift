@@ -136,21 +136,25 @@ struct TaxOverviewView: View {
         return result
     }
 
+    /// 某年度這筆固定支出實際發生的金額。
+    /// [v25.347] 加入結束日：停止後的月份不再計入，年中停掉的訂閱／繳完的房貸
+    /// 不會再整年灌進節稅金額（例如 3 月繳清的房貸只算 1–3 月）。
     private func yearEquivalentAmount(_ exp: Expense, year: Int) -> Double {
         let cal = Calendar.current
         let createYear = cal.component(.year, from: exp.date)
         guard createYear <= year else { return 0 }
-        let monthsActive: Int
-        if createYear < year {
-            monthsActive = 12
-        } else {
-            let createMonth = cal.component(.month, from: exp.date)
-            monthsActive = max(0, 12 - createMonth + 1)
-        }
+        // 結束日早於本年度 → 這年完全沒發生
+        if let end = exp.endDate, cal.component(.year, from: end) < year { return 0 }
+        let startMonth = createYear < year ? 1 : cal.component(.month, from: exp.date)
+        let endMonth: Int = {
+            guard let end = exp.endDate, cal.component(.year, from: end) == year else { return 12 }
+            return cal.component(.month, from: end)
+        }()
+        let monthsActive = max(0, endMonth - startMonth + 1)
         switch exp.recurrence {
         case .monthly:   return exp.amount * Double(monthsActive)
         case .quarterly: return exp.amount * (Double(monthsActive) / 3.0)
-        case .yearly:    return exp.amount
+        case .yearly:    return monthsActive > 0 ? exp.amount : 0
         case .none:      return 0
         }
     }

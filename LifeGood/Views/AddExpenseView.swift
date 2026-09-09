@@ -87,6 +87,10 @@ struct AddExpenseView: View {
     ]
     @State private var selectedFixedCategory: FixedCategory = .rent
     @State private var selectedRecurrence: Recurrence = .monthly
+    /// [v25.347] 固定支出的停止（結束日＝最後一次扣款日）
+    @State private var hasEndDate = false
+    @State private var endDate = Date()
+    @State private var endReason: FixedEndReason = .cancelled
     @State private var note = ""
     @State private var showValidationError = false
     @State private var validationErrorMessage = "請輸入有效的名稱與金額（大於 0）。"
@@ -347,6 +351,11 @@ struct AddExpenseView: View {
                 // 固定支出：節稅追蹤 toggle（保險 / 房貸 / 房租 才出現）
                 if showTaxDeductibleToggle {
                     taxDeductibleToggleSection
+                }
+
+                // [v25.347] 固定支出：停止（取消訂閱、繳清貸款、退租⋯）
+                if expenseType == .fixed && !isSavingsInsurance {
+                    fixedEndSection
                 }
 
                 if isSavingsInsurance {
@@ -1594,6 +1603,87 @@ struct AddExpenseView: View {
         }
     }
 
+    // MARK: - [v25.347] 固定支出停止
+
+    /// 這筆固定支出到目前為止已經扣了幾期、合計多少（含結束日當期）
+    private var parsedAmount: Double { Double(amountText.replacingOccurrences(of: ",", with: "")) ?? 0 }
+
+    private var endedSummary: (periods: Int, total: Double) {
+        let probe = Expense(
+            title: "", amount: parsedAmount, date: date, expenseType: .fixed,
+            fixedCategory: selectedFixedCategory, recurrence: selectedRecurrence,
+            endDate: hasEndDate ? endDate : nil
+        )
+        let n = probe.fixedPeriodCount()
+        return (n, Double(n) * parsedAmount)
+    }
+
+    private var fixedEndSection: some View {
+        Section {
+            Toggle(isOn: $hasEndDate.animation(.spring(response: 0.3, dampingFraction: 0.85))) {
+                Label("已停止（不再扣款）", systemImage: hasEndDate ? "stop.circle.fill" : "stop.circle")
+                    .foregroundStyle(hasEndDate ? .orange : .primary)
+            }
+            .tint(.orange)
+            .onChange(of: hasEndDate) { _, on in
+                guard on else { return }
+                // 貸款有年期 → 自動帶最後一期；其他類型預設今天
+                endDate = suggestedEnd ?? Date()
+                endReason = FixedEndReason.suggested(for: selectedFixedCategory).first ?? .cancelled
+            }
+            if hasEndDate {
+                HStack {
+                    Text("最後一次扣款日")
+                    Spacer()
+                    DatePicker("", selection: $endDate, displayedComponents: .date)
+                        .labelsHidden()
+                }
+                Picker("停止原因", selection: $endReason) {
+                    ForEach(FixedEndReason.suggested(for: selectedFixedCategory)) { r in
+                        Label(r.rawValue, systemImage: r.icon).tag(r)
+                    }
+                }
+                if let s = suggestedEnd, !Calendar.current.isDate(s, inSameDayAs: endDate) {
+                    Button {
+                        endDate = s
+                        endReason = .paidOff
+                    } label: {
+                        Label("套用推算的最後一期（\(Self.endFmt.string(from: s))）", systemImage: "wand.and.stars")
+                            .font(.footnote)
+                    }
+                }
+                let sum = endedSummary
+                HStack {
+                    Text("實際扣款期數").font(.footnote).foregroundStyle(.secondary)
+                    Spacer()
+                    Text("\(sum.periods) 期・合計 \(formatCurrency(sum.total))")
+                        .font(.footnote.weight(.semibold).monospacedDigit())
+                        .foregroundStyle(.orange)
+                }
+            }
+        } header: {
+            sectionHeader(title: "停止", accentColor: .orange)
+        } footer: {
+            Text(hasEndDate
+                 ? "排定扣款日在「最後一次扣款日」當天或之前的期數才算數。例：8/15 起每月扣，結束日填 9/14 只算 1 期，填 9/16 算 2 期。停止後不再計入月固定支出、銀行扣款、信用卡消費與節稅金額，過去已發生的期數完全保留。"
+                 : "取消訂閱、退租、貸款繳清時打開這個開關，填上最後一次扣款日即可——不用刪除項目，歷史紀錄與統計都會保留。")
+        }
+    }
+
+    /// 貸款年期推算出的最後一期扣款日（沒有年期資料時 nil）
+    private var suggestedEnd: Date? {
+        Expense(
+            title: "", amount: 0, date: date, expenseType: .fixed,
+            fixedCategory: selectedFixedCategory, recurrence: selectedRecurrence,
+            loanYears: Double(loanYearsText)
+        ).suggestedEndDate
+    }
+
+    private static let endFmt: DateFormatter = {
+        let f = DateFormatter(); f.locale = Locale(identifier: "zh_Hant_TW")
+        f.dateFormat = "yyyy/M/d"; return f
+    }()
+
     // [v3] 變動支出分類 FilterChip 橫向膠囊列
     // 14 個分類可橫向捲動；選中時主題色底+白字+投影；未選時 secondarySystemFill
     // 對齊 AddIncomeView.categoryChipPicker / VariableExpenseView.categoryFilter 設計規格
@@ -2589,7 +2679,10 @@ struct AddExpenseView: View {
             placeAddress: supportsPlacePicker ? placeAddress : nil,
             placeLatitude: supportsPlacePicker ? placeLatitude : nil,
             placeLongitude: supportsPlacePicker ? placeLongitude : nil,
-            photoFileNames: photoFileNames
+            photoFileNames: photoFileNames,
+            // [v25.347] 固定支出的停止；非固定或未開啟一律存 nil
+            endDate: (expenseType == .fixed && hasEndDate) ? endDate : nil,
+            endReason: (expenseType == .fixed && hasEndDate) ? endReason : nil
         )
         // 金額歷史（不在 memberwise init）：編輯重建時帶回，不然存個檔走勢就被清空
         expense.amountHistory = editingExpense?.amountHistory ?? []
@@ -3013,6 +3106,12 @@ struct AddExpenseView: View {
         }
         if let lt = expense.loanTotalAmount, lt > 0 { loanTotalAmountText = String(format: "%.0f", lt) }
         if let ly = expense.loanYears, ly > 0 { loanYearsText = String(format: "%g", ly) }
+        // [v25.347] 停止（結束日／原因）
+        if let end = expense.endDate {
+            hasEndDate = true
+            endDate = end
+            endReason = expense.endReason ?? .cancelled
+        }
         selectedBankMilestoneId = expense.linkedBankMilestoneId
         selectedBankCurrency = expense.linkedBankCurrency ?? "NT$"
         selectedCreditCardMilestoneId = expense.linkedCreditCardMilestoneId

@@ -12,7 +12,7 @@
 // 常數
 // ---------------------------------------------------------------------------
 /** 網頁版自己的版本（與 App 版本無關；改網頁不再動 App 版號） */
-const WEB_VERSION = '1.3';
+const WEB_VERSION = '1.4';
 const CONTAINER_ID = 'iCloud.com.lifegood.app';
 const ZONE_NAME = 'LifeGoodZone';
 const TOKEN_KEY = 'lifegood_ck_token';
@@ -1412,16 +1412,31 @@ function fmtAmt(v, code) { return fmtFull(v, code || 'NT$'); }
 function addMonths(d, n) { const x = new Date(d); const day = x.getDate(); x.setDate(1); x.setMonth(x.getMonth() + n); const last = new Date(x.getFullYear(), x.getMonth() + 1, 0).getDate(); x.setDate(Math.min(day, last)); return x; }
 function nextRecurrence(d, rec) { return rec === '每季' ? addMonths(d, 3) : rec === '每年' ? addMonths(d, 12) : addMonths(d, 1); }
 function monthlyEquivalent(amount, rec) { return rec === '每季' ? amount / 3 : rec === '每年' ? amount / 12 : amount; }
-/** 固定支出展開成逐期扣款（貸款從下一期起算，與 App 相同） */
+/** 這筆固定支出目前還在扣的每月等值（已停止＝0） */
+function activeMonthly(e) { return isFixedEnded(e) ? 0 : monthlyEquivalent(e.amount, e.recurrence) * rateOf(e.currencyCode); }
+/** 固定支出展開成逐期扣款（貸款從下一期起算，與 App 相同）
+ *  結束日＝最後一次扣款日：排定扣款日 <= 結束日的那幾期才算（與 App 同一條規則） */
+function fixedLimit(exp, until) { return exp.endDate && exp.endDate < until ? exp.endDate : until; }
+/** 已停止（結束日已過） */
+function isFixedEnded(exp) { return !!(exp.endDate && startOfDay(exp.endDate) < startOfDay(new Date())); }
+/** 某一天是否仍在有效期內（起始日 <= day <= 結束日） */
+function isFixedActive(exp, day) {
+  const d = startOfDay(day);
+  if (startOfDay(exp.date) > d) return false;
+  return !exp.endDate || d <= startOfDay(exp.endDate);
+}
 function expandFixed(exp, until) {
   const out = []; if (!exp.recurrence) return out;
+  const limit = fixedLimit(exp, until);
   let cur = exp.fixedCategory === '貸款' ? nextRecurrence(exp.date, exp.recurrence) : new Date(exp.date);
-  let i = 0; while (cur <= until && i < 1200) { out.push({ date: cur, amount: exp.amount, currency: exp.linkedBankCurrency || exp.currencyCode || 'NT$', expense: exp }); cur = nextRecurrence(cur, exp.recurrence); i++; }
+  let i = 0; while (cur <= limit && i < 1200) { out.push({ date: cur, amount: exp.amount, currency: exp.linkedBankCurrency || exp.currencyCode || 'NT$', expense: exp }); cur = nextRecurrence(cur, exp.recurrence); i++; }
   return out;
 }
 function nextFixedDue(exp) {
   const now = new Date(); let cur = exp.fixedCategory === '貸款' ? nextRecurrence(exp.date, exp.recurrence) : new Date(exp.date); let i = 0;
   while (cur < startOfDay(now) && i < 1200) { cur = nextRecurrence(cur, exp.recurrence); i++; }
+  // 已停止、或下一期已超過結束日 → 沒有下次扣款
+  if (exp.endDate && startOfDay(cur) > startOfDay(exp.endDate)) return null;
   return cur;
 }
 function incomeActive(inc, d) { if (!inc.endDate) return true; return new Date(d.getFullYear(), d.getMonth(), 1) <= new Date(inc.endDate.getFullYear(), inc.endDate.getMonth(), 1); }
@@ -1528,7 +1543,8 @@ function renderExpense(main, tab, param) {
   if (tab === 'overview') {
     const recent = [...Store.expenses].sort((a, b) => b.date - a.date).slice(0, 10);
     const horizon = new Date(now); horizon.setDate(horizon.getDate() + 30);
-    const upcoming = Store.expenses.filter((e) => e.expenseType === '固定支出' && e.recurrence).map((e) => ({ e, due: nextFixedDue(e) })).filter((x) => x.due <= horizon).sort((a, b) => a.due - b.due);
+    const upcoming = Store.expenses.filter((e) => e.expenseType === '固定支出' && e.recurrence && !isFixedEnded(e))
+      .map((e) => ({ e, due: nextFixedDue(e) })).filter((x) => x.due && x.due <= horizon).sort((a, b) => a.due - b.due);
     body = `<div class="grid cols-2">
       <div class="card chart-card"><h3>近 12 個月收支（台幣等值）</h3><div class="chart-box" style="height:280px"><canvas id="ex-cash"></canvas></div><div class="legend-note">支出＝變動支出＋固定支出逐期展開；收入＝單次＋薪資等週期展開。外幣依匯率表換算。</div></div>
       <div class="card chart-card"><h3>近 12 個月支出分類</h3><div class="chart-box" style="height:280px"><canvas id="ex-cat"></canvas></div></div>
@@ -1560,13 +1576,18 @@ function renderExpense(main, tab, param) {
       <div class="filters"><span class="fchip ${expUI.cat === 'all' ? 'on' : ''}" data-cat="all">全部</span>${cats.map((c) => `<span class="fchip ${expUI.cat === c ? 'on' : ''}" data-cat="${esc(c)}">${esc(c)} ${fmtMoney(byCat[c] || 0, '')}</span>`).join('')}</div>
       <div class="card table-wrap"><table class="tbl"><thead><tr><th>日期</th><th>項目</th><th>分類</th><th class="num">金額</th><th>付款</th><th>備註</th></tr></thead><tbody>${filtered.map((e) => `<tr><td>${fmtDate(e.date).split(' ')[0]}</td><td><b>${esc(e.title)}</b>${e.linkedVehicleId ? ' <span class="chip teal">🚗</span>' : ''}${e.evKwh ? ` <span class="chip green">⚡ ${e.evKwh} kWh</span>` : ''}</td><td><span class="chip" style="background:${catColor(e.variableCategory || '其他')}22;color:${catColor(e.variableCategory || '其他')}">${esc(e.variableCategory || '其他')}${e.vehicleExpenseCategory ? '・' + esc(e.vehicleExpenseCategory) : ''}${e.socialSubCategory ? '・' + esc(e.socialSubCategory) : ''}</span></td><td class="num"><b>${fmtAmt(e.amount, e.currencyCode)}</b></td><td class="muted small">${e.linkedCreditCardMilestoneId ? '💳 ' + esc(bankNameOf(e.linkedCreditCardMilestoneId)) : e.linkedBankMilestoneId ? '🏦 ' + esc(bankNameOf(e.linkedBankMilestoneId)) : ''}</td><td class="muted small">${esc(e.note || '')}${e.placeAddress ? ' 📍' + esc(e.placeAddress) : ''}</td></tr>`).join('') || '<tr><td colspan="6" class="empty">這個月沒有變動支出</td></tr>'}</tbody></table></div>`;
   } else if (tab === 'fixed') {
-    const list = Store.expenses.filter((e) => e.expenseType === '固定支出').sort((a, b) => (a.fixedCategory || '').localeCompare(b.fixedCategory || '') || b.amount - a.amount);
-    const monthly = list.reduce((a, e) => a + monthlyEquivalent(e.amount, e.recurrence) * rateOf(e.currencyCode), 0);
+    const all = Store.expenses.filter((e) => e.expenseType === '固定支出');
+    // 已停止的沉到最後（各自再依分類與金額排序）
+    const list = [...all].sort((a, b) => (isFixedEnded(a) - isFixedEnded(b))
+      || (a.fixedCategory || '').localeCompare(b.fixedCategory || '') || b.amount - a.amount);
+    const active = all.filter((e) => !isFixedEnded(e));
+    const ended = all.filter(isFixedEnded);
+    const monthly = all.reduce((a, e) => a + activeMonthly(e), 0);
     const yearly = monthly * 12;
-    const byCat = {}; for (const e of list) { const k = e.fixedCategory || '其他'; byCat[k] = (byCat[k] || 0) + monthlyEquivalent(e.amount, e.recurrence) * rateOf(e.currencyCode); }
-    body = `<div class="grid cols-4">${kpiCard('每月固定支出（等值）', fmtMoney(monthly), 'orange', `每年約 ${fmtMoney(yearly)}`)}${kpiCard('項目數', list.length, '', `${Object.keys(byCat).length} 個分類`)}${kpiCard('走信用卡', list.filter((e) => e.linkedCreditCardMilestoneId).length, '', '其餘由銀行扣款')}${kpiCard('最大一項', list.length ? esc(list.reduce((a, b) => (monthlyEquivalent(a.amount, a.recurrence) >= monthlyEquivalent(b.amount, b.recurrence) ? a : b)).title) : '—', '')}</div>
+    const byCat = {}; for (const e of active) { const k = e.fixedCategory || '其他'; byCat[k] = (byCat[k] || 0) + activeMonthly(e); }
+    body = `<div class="grid cols-4">${kpiCard('每月固定支出（等值）', fmtMoney(monthly), 'orange', `每年約 ${fmtMoney(yearly)}・不含已停止`)}${kpiCard('進行中項目', active.length, '', `${Object.keys(byCat).length} 個分類`)}${kpiCard('已停止', ended.length, ended.length ? 'orange' : 'green', ended.length ? `每月省下 ${fmtMoney(ended.reduce((a, e) => a + monthlyEquivalent(e.amount, e.recurrence) * rateOf(e.currencyCode), 0))}` : '全部進行中')}${kpiCard('最大一項', active.length ? esc(active.reduce((a, b) => (activeMonthly(a) >= activeMonthly(b) ? a : b)).title) : '—', '')}</div>
       <div class="chips mt">${Object.entries(byCat).sort((a, b) => b[1] - a[1]).map(([c, v]) => `<span class="chip indigo">${esc(c)} ${fmtMoney(v, '')}／月</span>`).join('')}</div>
-      <div class="card table-wrap mt"><table class="tbl"><thead><tr><th>項目</th><th>分類</th><th>週期</th><th class="num">金額</th><th class="num">每月等值</th><th>下次扣款</th><th>扣款方式</th><th>金額變動</th></tr></thead><tbody>${list.map((e) => { const hist = (e.amountHistory || []).slice().sort((a, b) => a.date - b.date); const due = e.recurrence ? nextFixedDue(e) : null; const first = hist[0]; const trend = hist.length > 1 ? `${fmtMoney(first.amount, '')} → ${fmtMoney(e.amount, '')}（${hist.length} 次）` : ''; return `<tr><td><b>${esc(e.title)}</b>${e.note ? `<div class="muted small">${esc(e.note)}</div>` : ''}</td><td><span class="chip indigo">${esc(e.fixedCategory || '其他')}${e.insuranceSubCategory ? '・' + esc(e.insuranceSubCategory) : ''}${e.loanSubCategory ? '・' + esc(e.loanSubCategory) : ''}</span></td><td>${esc(e.recurrence || '—')}</td><td class="num"><b>${fmtAmt(e.amount, e.currencyCode)}</b></td><td class="num">${fmtFull(monthlyEquivalent(e.amount, e.recurrence) * rateOf(e.currencyCode))}</td><td>${due ? fmtDate(due).split(' ')[0] + (daysBetween(now, due) <= 7 ? ' <span class="chip orange">' + (daysBetween(now, due) <= 0 ? '今天' : daysBetween(now, due) + ' 天') + '</span>' : '') : '—'}</td><td class="muted small">${e.linkedCreditCardMilestoneId ? '💳 ' + esc(bankNameOf(e.linkedCreditCardMilestoneId)) : e.linkedBankMilestoneId ? '🏦 ' + esc(bankNameOf(e.linkedBankMilestoneId)) : '—'}</td><td class="muted small">${trend}${e.loanTotalAmount ? `貸款 ${fmtMoney(e.loanTotalAmount)}・${e.loanYears || '?'} 年・${e.loanRate || '?'}%` : ''}</td></tr>`; }).join('') || '<tr><td colspan="8" class="empty">尚無固定支出</td></tr>'}</tbody></table></div>`;
+      <div class="card table-wrap mt"><table class="tbl"><thead><tr><th>項目</th><th>分類</th><th>週期</th><th class="num">金額</th><th class="num">每月等值</th><th>下次扣款</th><th>扣款方式</th><th>金額變動</th></tr></thead><tbody>${list.map((e) => { const hist = (e.amountHistory || []).slice().sort((a, b) => a.date - b.date); const due = e.recurrence ? nextFixedDue(e) : null; const first = hist[0]; const trend = hist.length > 1 ? `${fmtMoney(first.amount, '')} → ${fmtMoney(e.amount, '')}（${hist.length} 次）` : ''; const done = isFixedEnded(e); return `<tr style="${done ? 'opacity:.55' : ''}"><td><b>${esc(e.title)}</b>${done ? ` <span class="chip orange">${esc(e.endReason || '已停止')}</span>` : ''}${e.note ? `<div class="muted small">${esc(e.note)}</div>` : ''}</td><td><span class="chip indigo">${esc(e.fixedCategory || '其他')}${e.insuranceSubCategory ? '・' + esc(e.insuranceSubCategory) : ''}${e.loanSubCategory ? '・' + esc(e.loanSubCategory) : ''}</span></td><td>${esc(e.recurrence || '—')}</td><td class="num"><b>${fmtAmt(e.amount, e.currencyCode)}</b></td><td class="num">${done ? '<span class="muted">—</span>' : fmtFull(activeMonthly(e))}</td><td>${done ? `<span class="muted">${e.endDate ? '止於 ' + fmtDate(e.endDate).split(' ')[0] : '已停止'}</span>` : (due ? fmtDate(due).split(' ')[0] + (daysBetween(now, due) <= 7 ? ' <span class="chip orange">' + (daysBetween(now, due) <= 0 ? '今天' : daysBetween(now, due) + ' 天') + '</span>' : '') : '—')}</td><td class="muted small">${e.linkedCreditCardMilestoneId ? '💳 ' + esc(bankNameOf(e.linkedCreditCardMilestoneId)) : e.linkedBankMilestoneId ? '🏦 ' + esc(bankNameOf(e.linkedBankMilestoneId)) : '—'}</td><td class="muted small">${trend}${e.loanTotalAmount ? `貸款 ${fmtMoney(e.loanTotalAmount)}・${e.loanYears || '?'} 年・${e.loanRate || '?'}%` : ''}</td></tr>`; }).join('') || '<tr><td colspan="8" class="empty">尚無固定支出</td></tr>'}</tbody></table></div>`;
   } else if (tab === 'chart') {
     const years = [...new Set(expAll.concat(incAll).map((x) => x.date.getFullYear()))].sort();
     const yExp = {}, yInc = {}; for (const x of expAll) yExp[x.date.getFullYear()] = (yExp[x.date.getFullYear()] || 0) + x.twd; for (const x of incAll) yInc[x.date.getFullYear()] = (yInc[x.date.getFullYear()] || 0) + x.twd;

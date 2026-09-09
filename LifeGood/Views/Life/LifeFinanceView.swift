@@ -117,6 +117,9 @@ fileprivate func expandedFixedExpenseWithdrawals(
     var result: [BankDeposit] = []
     for exp in candidates {
         guard let recurrence = exp.recurrence else { continue }
+        // [v25.347] 停止後不再扣款：上界取 min(現在, 結束日)，
+        // 「排定扣款日 <= 結束日」的那幾期才算數
+        let limit = exp.fixedExpansionLimit(now: now)
         // 貸款類（房貸 / 車貸）的「日期」代表撥款日 / 起始日；
         // 第一次實際扣款是一個週期之後（撥款日 3/5 → 第一期 4/5）。
         // 其他類型（房租、訂閱、保費⋯）的日期就是第一次扣款日。
@@ -125,7 +128,7 @@ fileprivate func expandedFixedExpenseWithdrawals(
             current = nextRecurrenceDate(from: current, recurrence: recurrence, calendar: cal)
         }
         var idx = 0
-        while current <= now && idx < 1200 {
+        while current <= limit && idx < 1200 {
             let stableId = stableDepositUUID(seed: "\(exp.id.uuidString)-\(idx)")
             result.append(BankDeposit(
                 id: stableId,
@@ -177,12 +180,13 @@ fileprivate func expandedCreditCardEntries(
     var output: [CreditCardEntry] = []
     for exp in expenses where exp.linkedCreditCardMilestoneId == cardId {
         if exp.expenseType == .fixed, let recurrence = exp.recurrence {
+            let limit = exp.fixedExpansionLimit(now: now)   // [v25.347] 停止後不再刷卡
             var current = exp.date
             if exp.fixedCategory == .loan {
                 current = nextRecurrenceDate(from: current, recurrence: recurrence, calendar: cal)
             }
             var idx = 0
-            while current <= now && idx < 1200 {
+            while current <= limit && idx < 1200 {
                 output.append(CreditCardEntry(date: current, amount: exp.amount, expenseId: exp.id))
                 idx += 1
                 current = nextRecurrenceDate(from: current, recurrence: recurrence, calendar: cal)

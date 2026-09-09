@@ -187,6 +187,9 @@
     expense('房貸', 32000, -700, '固定支出', '貸款', { recurrence: '每月', linkedBankMilestoneId: BANK1 }),
     expense('中華電信', 1399, -500, '固定支出', '電信費', { recurrence: '每月', linkedCreditCardMilestoneId: CARD1 }),
     expense('Netflix', 390, -400, '固定支出', '訂閱服務', { recurrence: '每月', linkedCreditCardMilestoneId: CARD1 }),
+    // 已停止：去年底取消的訂閱、以及三年期已繳清的車貸
+    expense('Spotify 家庭方案', 268, -900, '固定支出', '訂閱服務', { recurrence: '每月', linkedCreditCardMilestoneId: CARD1, endDate: d(-95, 18), endReason: '取消訂閱' }),
+    expense('車貸', 12800, -1800, '固定支出', '貸款', { recurrence: '每月', linkedBankMilestoneId: BANK1, loanSubCategory: '車貸', loanTotalAmount: 450000, loanYears: 3, loanRate: 2.1, endDate: ymd(2024, 8, 20), endReason: '貸款繳清' }),
     expense('乙式車險', 28500, -320, '固定支出', '保險', { recurrence: '每年', linkedBankMilestoneId: BANK1 }),
     expense('社區管理費', 2400, -600, '固定支出', '管理費', { recurrence: '每月', linkedBankMilestoneId: BANK1 }),
     expense('好市多採買', 6800, -3, '變動支出', '日用品', { linkedCreditCardMilestoneId: CARD1 }),

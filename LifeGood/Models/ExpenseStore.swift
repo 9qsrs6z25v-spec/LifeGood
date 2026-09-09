@@ -25,6 +25,7 @@ class ExpenseStore: ObservableObject {
 
     init() {
         load()
+        backfillLoanEndDates()
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(reloadFromCloud),
@@ -35,6 +36,34 @@ class ExpenseStore: ObservableObject {
 
     deinit {
         NotificationCenter.default.removeObserver(self)
+    }
+
+    /// [v25.347] 一次性補算：貸款類固定支出依「貸款年限」推出最後一期扣款日。
+    ///
+    /// 在這之前，固定支出沒有結束日，展開迴圈一律跑到「今天」——所以繳清多年的房貸／車貸
+    /// 仍然每個月從銀行餘額扣款、每個月計入月固定支出，而且過去的歷史曲線也是錯的。
+    /// 這裡只補「有填年限、且還沒有結束日」的貸款；已經填過結束日的完全不動，
+    /// 使用者之後也可以在編輯頁自行修改（提前清償、轉貸都可能與推算不同）。
+    private func backfillLoanEndDates() {
+        var updated = expenses
+        var changed = false
+        for i in updated.indices {
+            let e = updated[i]
+            guard e.expenseType == .fixed, e.recurrence != nil,
+                  e.fixedCategory == .loan, e.endDate == nil,
+                  let suggested = e.suggestedEndDate else { continue }
+            updated[i].endDate = suggested
+            // 只有「推算的最後一期已經過去」才敢標成繳清；還在繳的留白，
+            // 避免把進行中的貸款寫成已繳清。
+            if suggested < Date() { updated[i].endReason = .paidOff }
+            changed = true
+        }
+        guard changed else { return }
+        // 一次寫回再存一次檔：直接在迴圈裡改 expenses[i] 會讓 didSet 每筆都觸發 save()
+        isLoading = true
+        expenses = updated
+        isLoading = false
+        save()
     }
 
     @objc private func reloadFromCloud(_ note: Notification) {
@@ -345,9 +374,9 @@ class ExpenseStore: ObservableObject {
     private func projectedFixedTotal(from fixedExpenses: [Expense], for periodDate: Date,
                                      period: TimePeriod, calendar: Calendar) -> Double {
         let dayOfPeriod = calendar.startOfDay(for: periodDate)
-        let active = fixedExpenses.filter {
-            calendar.startOfDay(for: $0.date) <= dayOfPeriod
-        }
+        // [v25.347] 除了「已經開始」，也要求「還沒結束」——否則取消的訂閱、繳完的貸款
+        // 會永遠留在月固定支出裡，連過去月份的歷史曲線也是錯的。
+        let active = fixedExpenses.filter { $0.isFixedActive(on: dayOfPeriod, calendar: calendar) }
         return active.reduce(0) { $0 + projectedAmount(for: $1, in: period) }
     }
 
@@ -464,7 +493,7 @@ class ExpenseStore: ObservableObject {
         let now = Date()
         var dict: [FixedCategory: Double] = [:]
         for e in expenses where e.expenseType == .fixed && e.recurrence != nil
-            && calendar.startOfDay(for: e.date) <= calendar.startOfDay(for: now) {
+            && e.isFixedActive(on: now, calendar: calendar) {
             guard let cat = e.fixedCategory else { continue }
             dict[cat, default: 0] += projectedAmount(for: e, in: period)
         }

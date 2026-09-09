@@ -77,9 +77,19 @@ struct FixedExpenseView: View {
         }
         let sums = grouped.mapValues { exps in
             // 排序用 NT$ 等值（外幣儲蓄險換算後比較才公平）
-            exps.filter { $0.date <= now }.reduce(0) { $0 + store.ntdValue(of: $1) }
+            // [v25.347] 已停止的項目不計入分類排序權重——否則繳清多年的房貸
+            // 仍然把「貸款」頂在最上面
+            exps.filter { $0.date <= now && !$0.isFixedEnded }
+                .reduce(0) { $0 + store.ntdValue(of: $1) }
         }
-        return grouped.sorted { sums[$0.key, default: 0] > sums[$1.key, default: 0] }
+        // [v25.347] 每個分類內：進行中在前、已停止沉到後面（各自再依金額排序）
+        let ordered = grouped.mapValues { exps in
+            exps.sorted { a, b in
+                if a.isFixedEnded != b.isFixedEnded { return !a.isFixedEnded }
+                return store.ntdValue(of: a) > store.ntdValue(of: b)
+            }
+        }
+        return ordered.sorted { sums[$0.key, default: 0] > sums[$1.key, default: 0] }
     }
 
     var body: some View {
@@ -750,6 +760,18 @@ struct FixedExpenseRow: View {
                         .font(.subheadline.weight(.semibold))
                         .lineLimit(1)
                     HStack(spacing: 4) {
+                        // [v25.347] 已停止（取消訂閱／繳清／退租⋯）
+                        if expense.isFixedEnded {
+                            HStack(spacing: 2) {
+                                Image(systemName: "stop.circle.fill").font(.system(size: 8))
+                                Text(expense.endReason?.rawValue ?? "已停止")
+                                    .font(.system(size: 9, weight: .bold))
+                            }
+                            .padding(.horizontal, 5).padding(.vertical, 2)
+                            .background(Color.orange.opacity(0.14))
+                            .foregroundStyle(Color.orange)
+                            .clipShape(Capsule())
+                        }
                         if let recurrence = expense.recurrence {
                             Text(recurrence.rawValue)
                                 .font(.system(size: 10, weight: .semibold))
@@ -796,6 +818,8 @@ struct FixedExpenseRow: View {
             }
             .padding(.vertical, 7)
         }
+        // 已停止的項目整列淡化，但仍留在清單裡（歷史與統計都保留）
+        .opacity(expense.isFixedEnded ? 0.55 : 1)
     }
 
     /// 繳費進度條（貸款＋儲蓄險共用；使用者指定兩者顯示方式對齊）。
@@ -1238,6 +1262,14 @@ private struct FixedExpenseCard: View {
             }
             Divider().padding(.leading, 14)
             field("起始日期", Self.dateFmt.string(from: current.date))
+            // [v25.347] 停止：最後一次扣款日、原因、實際扣了幾期
+            if let end = current.endDate {
+                Divider().padding(.leading, 14)
+                field("最後扣款", Self.dateFmt.string(from: end)
+                      + (current.endReason.map { "（\($0.rawValue)）" } ?? ""))
+                Divider().padding(.leading, 14)
+                field("實際期數", "\(current.fixedPeriodCount()) 期")
+            }
             if current.effectivelyTaxDeductible {
                 Divider().padding(.leading, 14)
                 field("節稅", "列入節稅追蹤")
