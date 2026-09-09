@@ -9,6 +9,8 @@ class LifeStore: ObservableObject {
     @Published var schedules: [Schedule] = [] { didSet { if !isLoading { save() } } }
     @Published var subordinates: [Subordinate] = [] { didSet { if !isLoading { save() } } }
     @Published var departments: [Department] = [] { didSet { if !isLoading { save() } } }
+    /// [v25.348] 績效互評票（年度同儕排名）
+    @Published var performanceBallots: [PerformanceBallot] = [] { didSet { if !isLoading { save() } } }
     @Published var gradeTitles: [GradeTitle] = [] { didSet { if !isLoading { save() } } }
     @Published var businessCards: [BusinessCard] = [] { didSet { if !isLoading { save() } } }
     @Published var personalEvents: [PersonalEvent] = [] { didSet { if !isLoading { save() } } }
@@ -33,7 +35,7 @@ class LifeStore: ObservableObject {
         "life_pets", "life_schedules", "life_subordinates", "life_departments",
         "life_grade_titles", "life_business_cards", "life_personal_events",
         "life_org_people", "life_health_profile", "life_family_tasks",
-        "life_equipment_pool"
+        "life_equipment_pool", "life_performance_ballots"
     ]
 
     init() {
@@ -628,6 +630,168 @@ class LifeStore: ObservableObject {
             guard let i = meeting.occurrences[oi].items.firstIndex(where: { $0.id == itemId }) else { continue }
             body(&meeting.occurrences[oi].items[i]); return
         }
+    }
+
+    // MARK: - 績效互評（年度同儕排名）
+
+    /// [v25.348] 評分者要排的名單：依「課別 × 職等」分組。
+    ///
+    /// 分組規則（使用者定義）：只排同課的人，再依職等分組，評分者自己也在組內（含自評）。
+    /// 「我」（selfRaterId）不屬於單一課，所以要排全部課的每一組。
+    /// 單人組不產生（自己排自己沒有意義，也拿不出相對名次）。
+    func performanceGroups(forRater raterId: UUID) -> [PerformanceRankGroup] {
+        let scopeDeptId: UUID??   // nil＝不限課（我）；.some(x)＝限定該課（含 x == nil 的未分部門）
+        if raterId == PerformanceBallot.selfRaterId {
+            scopeDeptId = nil
+        } else if let me = subordinates.first(where: { $0.id == raterId }) {
+            scopeDeptId = .some(me.departmentId)
+        } else {
+            return []
+        }
+        // 分組鍵：課別 id + 職等 id（都可能是 nil）
+        struct Key: Hashable { let dept: UUID?; let grade: UUID? }
+        var buckets: [Key: [Subordinate]] = [:]
+        for s in subordinates {
+            if let scope = scopeDeptId, s.departmentId != scope { continue }
+            buckets[Key(dept: s.departmentId, grade: s.gradeTitleId), default: []].append(s)
+        }
+        let deptName: (UUID?) -> String = { id in
+            guard let id, let d = self.departments.first(where: { $0.id == id }) else { return "未分部門" }
+            return d.name.isEmpty ? (d.code.isEmpty ? "未命名部門" : d.code) : d.name
+        }
+        let gradeName: (UUID?) -> String = { id in
+            guard let id, let g = self.gradeTitles.first(where: { $0.id == id }) else { return "未設職等" }
+            return g.displayLabel.isEmpty ? "未命名職等" : g.displayLabel
+        }
+        return buckets
+            .filter { $0.value.count >= 2 }   // 單人組不需要排名
+            .map { key, people in
+                PerformanceRankGroup(
+                    departmentId: key.dept, departmentName: deptName(key.dept),
+                    gradeId: key.grade, gradeLabel: gradeName(key.grade),
+                    // 預設順序：沿用部屬清單既有順序，評分者再自行拖曳
+                    entries: people.map { PerformanceRankEntry(id: $0.id, name: $0.name.isEmpty ? "未命名" : $0.name) }
+                )
+            }
+            .sorted { a, b in
+                if a.departmentName != b.departmentName { return a.departmentName < b.departmentName }
+                return a.gradeLabel < b.gradeLabel
+            }
+    }
+
+    /// 取某年某人的票；沒有就回 nil
+    func performanceBallot(year: Int, raterId: UUID) -> PerformanceBallot? {
+        performanceBallots.first { $0.year == year && $0.raterId == raterId }
+    }
+
+    /// 取出（或建立）某年某人的票，並把名單與目前的部屬狀態同步：
+    /// 新人加進組末、已離開的人移除、組別有增減也一併補上——
+    /// 但**已經排好的順序完全保留**，不會因為有人加入就被打散。
+    func performanceBallotSynced(year: Int, raterId: UUID,
+                                 raterGradeId: UUID?) -> PerformanceBallot {
+        let fresh = performanceGroups(forRater: raterId)
+        var ballot = performanceBallot(year: year, raterId: raterId)
+            ?? PerformanceBallot(year: year, raterId: raterId)
+        var merged: [PerformanceRankGroup] = []
+        for var g in fresh {
+            if let old = ballot.groups.first(where: { $0.departmentId == g.departmentId && $0.gradeId == g.gradeId }) {
+                let validIds = Set(g.entries.map(\.id))
+                // 舊順序中仍有效的人照舊排在前面，新加入的人接在後面
+                var ordered = old.entries.filter { validIds.contains($0.id) }
+                let seen = Set(ordered.map(\.id))
+                ordered.append(contentsOf: g.entries.filter { !seen.contains($0.id) })
+                // 姓名用最新的（改名要跟著更新，離開的人不在名單裡本來就不影響）
+                let nameOf = Dictionary(g.entries.map { ($0.id, $0.name) }, uniquingKeysWith: { a, _ in a })
+                g.entries = ordered.map { PerformanceRankEntry(id: $0.id, name: nameOf[$0.id] ?? $0.name) }
+            }
+            merged.append(g)
+        }
+        ballot.groups = merged
+        // 評分者資料（姓名／職等／權重）以「現在」為準；送出後才凍結成快照
+        if raterId == PerformanceBallot.selfRaterId {
+            ballot.raterName = profile.chineseName.isEmpty ? "我" : profile.chineseName
+        } else if let s = subordinates.first(where: { $0.id == raterId }) {
+            ballot.raterName = s.name.isEmpty ? "未命名" : s.name
+        }
+        let grade = raterGradeId.flatMap { gid in gradeTitles.first(where: { $0.id == gid }) }
+        ballot.raterGradeId = raterGradeId
+        ballot.raterGradeLabel = grade?.displayLabel ?? ""
+        ballot.raterWeight = grade?.weightValue ?? 1
+        return ballot
+    }
+
+    func upsertPerformanceBallot(_ ballot: PerformanceBallot) {
+        isLoading = true
+        defer { isLoading = false }
+        if let i = performanceBallots.firstIndex(where: { $0.id == ballot.id }) {
+            performanceBallots[i] = ballot
+        } else if let i = performanceBallots.firstIndex(where: {
+            $0.year == ballot.year && $0.raterId == ballot.raterId
+        }) {
+            performanceBallots[i] = ballot
+        } else {
+            performanceBallots.append(ballot)
+        }
+        save()
+    }
+
+    func deletePerformanceBallot(_ id: UUID) {
+        performanceBallots.removeAll { $0.id == id }
+    }
+
+    /// 有票的年度（新到舊）；沒有任何票時回傳今年
+    var performanceYears: [Int] {
+        let ys = Set(performanceBallots.map(\.year))
+        let thisYear = Calendar.current.component(.year, from: Date())
+        return ys.isEmpty ? [thisYear] : Array(ys.union([thisYear])).sorted(by: >)
+    }
+
+    /// 年度加總：每張票的每一組，第 1 名拿「組人數」分，往下遞減，再乘上該票的權重。
+    /// 只計已送出的票（草稿不計）。人被移出課別或離職，票裡的快照仍在，分數照樣保留。
+    func performanceScores(year: Int) -> [PerformanceScore] {
+        var totals: [UUID: PerformanceScore] = [:]
+        for ballot in performanceBallots where ballot.year == year && ballot.isSubmitted {
+            for g in ballot.groups {
+                let n = g.entries.count
+                guard n >= 2 else { continue }
+                for (idx, entry) in g.entries.enumerated() {
+                    let src = PerformanceScoreSource(
+                        raterId: ballot.raterId, raterName: ballot.raterName,
+                        raterGradeLabel: ballot.raterGradeLabel, weight: ballot.raterWeight,
+                        rank: idx + 1, groupSize: n, groupTitle: g.title
+                    )
+                    var cur = totals[entry.id] ?? PerformanceScore(
+                        personId: entry.id, name: entry.name, total: 0, sources: []
+                    )
+                    // 姓名以目前的部屬資料優先（改名跟著更新），查不到才用票上的快照
+                    if let s = subordinates.first(where: { $0.id == entry.id }), !s.name.isEmpty {
+                        cur.name = s.name
+                    }
+                    cur.total += src.points
+                    cur.sources.append(src)
+                    totals[entry.id] = cur
+                }
+            }
+        }
+        return totals.values.sorted { a, b in
+            if a.total != b.total { return a.total > b.total }
+            return a.name < b.name
+        }
+    }
+
+    /// 該年度應投票但還沒送出的人（含我）；用來提醒還要催誰
+    func performancePendingRaters(year: Int) -> [(id: UUID, name: String)] {
+        var out: [(UUID, String)] = []
+        let submitted = Set(performanceBallots.filter { $0.year == year && $0.isSubmitted }.map(\.raterId))
+        if !submitted.contains(PerformanceBallot.selfRaterId) {
+            out.append((PerformanceBallot.selfRaterId, profile.chineseName.isEmpty ? "我" : profile.chineseName))
+        }
+        for s in subordinates where !submitted.contains(s.id) {
+            // 沒有任何可排的組（例如整課只有他一人）就不用投票
+            guard !performanceGroups(forRater: s.id).isEmpty else { continue }
+            out.append((s.id, s.name.isEmpty ? "未命名" : s.name))
+        }
+        return out.map { (id: $0.0, name: $0.1) }
     }
 
     /// 部屬評分所需的整批預算結果。
@@ -1614,7 +1778,8 @@ class LifeStore: ObservableObject {
             relationships: relationships, pets: pets, schedules: schedules,
             subordinates: subordinates, departments: departments, gradeTitles: gradeTitles,
             businessCards: businessCards, personalEvents: personalEvents, orgPeople: orgPeople,
-            healthProfile: healthProfile, familyTasks: familyTasks, equipmentPool: equipmentPool
+            healthProfile: healthProfile, familyTasks: familyTasks, equipmentPool: equipmentPool,
+            performanceBallots: performanceBallots
         )
         saveQueue.async {
             let encoder = JSONEncoder()
@@ -1634,6 +1799,7 @@ class LifeStore: ObservableObject {
             if let d = try? encoder.encode(snap.healthProfile)  { ud.set(d, forKey: "life_health_profile") }
             if let d = try? encoder.encode(snap.familyTasks)    { ud.set(d, forKey: "life_family_tasks") }
             if let d = try? encoder.encode(snap.equipmentPool)  { ud.set(d, forKey: "life_equipment_pool") }
+            if let d = try? encoder.encode(snap.performanceBallots) { ud.set(d, forKey: "life_performance_ballots") }
             CloudSyncManager.shared.pushAll()
         }
     }
@@ -1661,6 +1827,7 @@ class LifeStore: ObservableObject {
         if let items = lossyDecodeArray([OrgPerson].self, key: "life_org_people", decoder: decoder) { orgPeople = items }
         if let items = lossyDecodeArray([FamilyTask].self, key: "life_family_tasks", decoder: decoder) { familyTasks = items }
         if let items = lossyDecodeArray([ManagedEquipment].self, key: "life_equipment_pool", decoder: decoder) { equipmentPool = items }
+        if let items = lossyDecodeArray([PerformanceBallot].self, key: "life_performance_ballots", decoder: decoder) { performanceBallots = items }
         if let data = rawDataIfChanged("life_health_profile"),
            let h = try? decoder.decode(HealthProfile.self, from: data) {
             healthProfile = h

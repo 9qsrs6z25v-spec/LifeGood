@@ -365,14 +365,19 @@ struct TalentMatrixView: View {
                 ScrollView {
                     VStack(spacing: 12) {
                         // [v25.320] 分頁：人才矩陣（既有）／統計圖表（年度統計）
+                        // [v25.348] 第三頁：績效互評的年度加總排名
                         Picker("頁面", selection: $tab) {
                             Text("人才矩陣").tag(0)
                             Text("統計圖表").tag(1)
+                            Text("評分加總").tag(2)
                         }
                         .pickerStyle(.segmented)
                         .padding(.horizontal)
-                        deptFilter
-                        if members.isEmpty {
+                        // 評分加總有自己的年度／課別篩選，不套用上方的部門篩選列
+                        if tab != 2 { deptFilter }
+                        if tab == 2 {
+                            PerformanceSummaryView()
+                        } else if members.isEmpty {
                             emptyHint
                         } else if tab == 0 {
                             // [v2] 英雄摘要卡 + section header

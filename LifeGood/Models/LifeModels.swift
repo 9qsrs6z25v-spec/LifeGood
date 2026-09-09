@@ -2795,9 +2795,162 @@ struct GradeTitle: Identifiable, Codable {
     let id: UUID
     var grade: String
     var title: String
+    /// [v25.348] 績效互評權重：這個職等的人投出的每一票，基礎分要乘上的倍數。
+    /// nil＝1.0（舊資料不受影響）。權重掛在「評分者」身上——職等越高，票越重。
+    var performanceWeight: Double?
 
-    init(id: UUID = UUID(), grade: String = "", title: String = "") {
+    /// 實際採用的權重（未設定視為 1）
+    var weightValue: Double {
+        guard let w = performanceWeight, w > 0 else { return 1 }
+        return w
+    }
+
+    /// 顯示用的完整名稱（例：E5 資深工程師）
+    var displayLabel: String {
+        [grade, title].filter { !$0.isEmpty }.joined(separator: " ")
+    }
+
+    init(id: UUID = UUID(), grade: String = "", title: String = "",
+         performanceWeight: Double? = nil) {
         self.id = id; self.grade = grade; self.title = title
+        self.performanceWeight = performanceWeight
+    }
+}
+
+// MARK: - 績效互評（年度同儕排名）
+
+/// [v25.348] 一位評分者、一個年度的一張票。
+///
+/// 計分規則（使用者定義）：
+/// 1. 排名在「同課 × 同職等」的組內進行，評分者自己也在組內（含自評）。
+/// 2. 某組 N 人 → 第 1 名基礎分 N、第 2 名 N-1 … 第 N 名 1 分。
+/// 3. 基礎分乘上**評分者職等的權重**（職等越高票越重），再全部加總。
+///
+/// 評分者職等、權重與被評者姓名都存**快照**：日後升職、轉課、離職都不會回頭
+/// 改寫已經投出的票，歷年分數永遠可回溯。
+struct PerformanceBallot: Identifiable, Codable {
+    let id: UUID
+    var year: Int
+    /// 評分者。本人（我）固定用 selfRaterId，不需要把自己建成部屬。
+    var raterId: UUID
+    var raterName: String
+    var raterGradeId: UUID?
+    var raterGradeLabel: String
+    /// 投票當下的權重快照
+    var raterWeight: Double
+    var groups: [PerformanceRankGroup]
+    var submittedAt: Date?
+    var note: String
+
+    /// 「我」這個評分者的固定 id
+    static let selfRaterId = UUID(uuidString: "00000000-0000-0000-0000-00000000FEED")!
+
+    var isSubmitted: Bool { submittedAt != nil }
+    /// 這張票總共排了幾個人
+    var rankedCount: Int { groups.reduce(0) { $0 + $1.entries.count } }
+
+    init(id: UUID = UUID(), year: Int, raterId: UUID, raterName: String = "",
+         raterGradeId: UUID? = nil, raterGradeLabel: String = "", raterWeight: Double = 1,
+         groups: [PerformanceRankGroup] = [], submittedAt: Date? = nil, note: String = "") {
+        self.id = id; self.year = year; self.raterId = raterId; self.raterName = raterName
+        self.raterGradeId = raterGradeId; self.raterGradeLabel = raterGradeLabel
+        self.raterWeight = raterWeight; self.groups = groups
+        self.submittedAt = submittedAt; self.note = note
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = (try? c.decode(UUID.self, forKey: .id)) ?? UUID()
+        year = (try? c.decode(Int.self, forKey: .year)) ?? Calendar.current.component(.year, from: Date())
+        raterId = (try? c.decode(UUID.self, forKey: .raterId)) ?? PerformanceBallot.selfRaterId
+        raterName = (try? c.decodeIfPresent(String.self, forKey: .raterName)) ?? ""
+        raterGradeId = try? c.decodeIfPresent(UUID.self, forKey: .raterGradeId)
+        raterGradeLabel = (try? c.decodeIfPresent(String.self, forKey: .raterGradeLabel)) ?? ""
+        raterWeight = (try? c.decodeIfPresent(Double.self, forKey: .raterWeight)) ?? 1
+        groups = (try? c.decodeIfPresent([PerformanceRankGroup].self, forKey: .groups)) ?? []
+        submittedAt = try? c.decodeIfPresent(Date.self, forKey: .submittedAt)
+        note = (try? c.decodeIfPresent(String.self, forKey: .note)) ?? ""
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, year, raterId, raterName, raterGradeId, raterGradeLabel, raterWeight
+        case groups, submittedAt, note
+    }
+}
+
+/// 一張票裡的一個排名組（同課 × 同職等）。entries 的順序就是名次。
+struct PerformanceRankGroup: Identifiable, Codable {
+    let id: UUID
+    var departmentId: UUID?
+    var departmentName: String
+    var gradeId: UUID?
+    var gradeLabel: String
+    var entries: [PerformanceRankEntry]
+
+    /// 組內第一名的基礎分＝人數
+    var topScore: Int { entries.count }
+    var title: String {
+        let d = departmentName.isEmpty ? "未分部門" : departmentName
+        let g = gradeLabel.isEmpty ? "未設職等" : gradeLabel
+        return "\(d)・\(g)"
+    }
+
+    init(id: UUID = UUID(), departmentId: UUID? = nil, departmentName: String = "",
+         gradeId: UUID? = nil, gradeLabel: String = "", entries: [PerformanceRankEntry] = []) {
+        self.id = id; self.departmentId = departmentId; self.departmentName = departmentName
+        self.gradeId = gradeId; self.gradeLabel = gradeLabel; self.entries = entries
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = (try? c.decode(UUID.self, forKey: .id)) ?? UUID()
+        departmentId = try? c.decodeIfPresent(UUID.self, forKey: .departmentId)
+        departmentName = (try? c.decodeIfPresent(String.self, forKey: .departmentName)) ?? ""
+        gradeId = try? c.decodeIfPresent(UUID.self, forKey: .gradeId)
+        gradeLabel = (try? c.decodeIfPresent(String.self, forKey: .gradeLabel)) ?? ""
+        entries = (try? c.decodeIfPresent([PerformanceRankEntry].self, forKey: .entries)) ?? []
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, departmentId, departmentName, gradeId, gradeLabel, entries
+    }
+}
+
+/// 排名組裡的一個人。id 就是部屬 id；name 是投票當下的姓名快照。
+struct PerformanceRankEntry: Identifiable, Codable, Equatable {
+    let id: UUID
+    var name: String
+
+    init(id: UUID, name: String) { self.id = id; self.name = name }
+}
+
+/// 某人在某年度的一筆得分來源（誰給的、第幾名、幾分）
+struct PerformanceScoreSource: Identifiable {
+    var id: UUID { raterId }
+    let raterId: UUID
+    let raterName: String
+    let raterGradeLabel: String
+    let weight: Double
+    /// 1 起算的名次
+    let rank: Int
+    let groupSize: Int
+    let groupTitle: String
+    /// 基礎分＝組人數 − 名次 + 1
+    var base: Int { max(0, groupSize - rank + 1) }
+    var points: Double { Double(base) * weight }
+}
+
+/// 某人在某年度的加總結果
+struct PerformanceScore: Identifiable {
+    var id: UUID { personId }
+    let personId: UUID
+    var name: String
+    var total: Double
+    var sources: [PerformanceScoreSource]
+    /// 平均名次（跨所有把他排進去的票）
+    var averageRank: Double {
+        guard !sources.isEmpty else { return 0 }
+        return sources.reduce(0.0) { $0 + Double($1.rank) } / Double(sources.count)
     }
 }
 

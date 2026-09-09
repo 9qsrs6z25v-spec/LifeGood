@@ -168,7 +168,9 @@ struct GradeTitleView: View {
                 } header: {
                     sectionHeader("職等設定", icon: "list.number", color: .purple, count: lifeStore.gradeTitles.count)
                 } footer: {
-                    Text("設定公司內部的職等編號與對應職稱，方便管理部屬與職涯記錄。")
+                    Text("設定公司內部的職等編號與對應職稱，方便管理部屬與職涯記錄。\n"
+                         + "右側橘色「×」是績效互評權重：這個職等的人投出的票，基礎分要乘上的倍數"
+                         + "（留空＝×1）。例如 32 職等設 ×2，他排第一名的人就拿雙倍分數。")
                 }
             }
             .listStyle(.insetGrouped)
@@ -504,12 +506,17 @@ private struct GradeTitleRow: View {
 
     @State private var gradeText: String
     @State private var titleText: String
+    /// [v25.348] 績效互評權重（這個職等的人投的票要乘幾倍）
+    @State private var weightText: String
     @State private var commitTask: Task<Void, Never>?
 
     init(item: GradeTitle) {
         itemId = item.id
         _gradeText = State(initialValue: item.grade)
         _titleText = State(initialValue: item.title)
+        _weightText = State(initialValue: item.performanceWeight.map {
+            $0 == $0.rounded() ? String(format: "%.0f", $0) : String(format: "%.1f", $0)
+        } ?? "")
     }
 
     var body: some View {
@@ -542,6 +549,26 @@ private struct GradeTitleRow: View {
                     .onChange(of: titleText) { _, _ in scheduleCommit() }
             }
 
+            // [v25.348] 績效權重：留空＝×1
+            ZStack {
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(Color.orange.opacity(0.10))
+                    .frame(width: 56, height: 36)
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(Color.orange.opacity(0.22), lineWidth: 0.75)
+                    .frame(width: 56, height: 36)
+                HStack(spacing: 1) {
+                    Text("×").font(.caption2.weight(.bold)).foregroundStyle(.orange.opacity(0.7))
+                    TextField("1", text: $weightText)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.orange)
+                        .multilineTextAlignment(.center)
+                        .keyboardType(.decimalPad)
+                        .frame(width: 34)
+                        .onChange(of: weightText) { _, _ in scheduleCommit() }
+                }
+            }
+
             Button(role: .destructive) {
                 commitTask?.cancel()
                 lifeStore.gradeTitles.removeAll { $0.id == itemId }
@@ -572,6 +599,12 @@ private struct GradeTitleRow: View {
         guard let idx = lifeStore.gradeTitles.firstIndex(where: { $0.id == itemId }) else { return }
         if lifeStore.gradeTitles[idx].grade != gradeText { lifeStore.gradeTitles[idx].grade = gradeText }
         if lifeStore.gradeTitles[idx].title != titleText { lifeStore.gradeTitles[idx].title = titleText }
+        // 空白或 <= 0 一律存 nil（視為 ×1），避免把權重誤設成 0 讓整個職等的票變沒分
+        let w = Double(weightText.trimmingCharacters(in: .whitespaces))
+        let newWeight: Double? = (w ?? 0) > 0 ? w : nil
+        if lifeStore.gradeTitles[idx].performanceWeight != newWeight {
+            lifeStore.gradeTitles[idx].performanceWeight = newWeight
+        }
     }
 }
 

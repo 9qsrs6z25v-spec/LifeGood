@@ -244,6 +244,7 @@ struct SubordinateDetailView: View {
     @State private var showEdit = false
     @State private var showPromotion = false   // 升職表單
     @State private var showBirthdayReminder = false   // 生日提醒設定（看板鈴鐺）
+    @State private var showPerformance = false   // [v25.348] 績效互評票
 
     /// 生日徽章的月/日顯示
     static let birthdayFmt: DateFormatter = {
@@ -449,6 +450,13 @@ struct SubordinateDetailView: View {
                         } label: {
                             Image(systemName: "square.and.arrow.up")
                         }
+                        // [v25.348] 績效互評：填這位同仁對大家的年度排名
+                        Button {
+                            if subscription.isPremium { showPerformance = true }
+                            else { showPremiumAlert = true }
+                        } label: {
+                            Image(systemName: "trophy.fill").foregroundStyle(.orange)
+                        }
                         // 升職（使用者指定）：付費鎖比照編輯
                         Button {
                             if subscription.isPremium { showPromotion = true }
@@ -479,6 +487,9 @@ struct SubordinateDetailView: View {
             .sheet(isPresented: $showEdit) { AddSubordinateView(editing: subordinate) }
             .sheet(isPresented: $showBirthdayReminder) {
                 BirthdayReminderSheet(subordinateId: subordinateId)
+            }
+            .sheet(isPresented: $showPerformance) {
+                PerformanceBallotView(raterId: subordinateId)
             }
             .premiumLockAlert(isPresented: $showPremiumAlert)
             .sheet(item: $addingType) { type in

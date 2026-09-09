@@ -61,6 +61,14 @@ struct SubordinateOverviewView: View {
     @State private var heroAppeared = false
     /// 看板蛋糕鈕開啟的生日名單視窗
     @State private var showBirthdaySheet = false
+    /// [v25.348] 我的績效互評票
+    @State private var showPerformanceSheet = false
+
+    /// 今年我的票是否已送出（決定獎盃鈕亮不亮）
+    private var hasSubmittedPerformance: Bool {
+        let y = Calendar.current.component(.year, from: Date())
+        return lifeStore.performanceBallot(year: y, raterId: PerformanceBallot.selfRaterId)?.isSubmitted == true
+    }
     @State private var sectionAppeared = false
     @State private var showCompleted = false
     @State private var editTarget: OverviewEditTarget?
@@ -297,6 +305,9 @@ struct SubordinateOverviewView: View {
             }
             .sheet(isPresented: $showBirthdaySheet) {
                 BirthdayOverviewSheet()
+            }
+            .sheet(isPresented: $showPerformanceSheet) {
+                PerformanceBallotView(raterId: PerformanceBallot.selfRaterId)
             }
         }
     }
@@ -1386,6 +1397,22 @@ struct SubordinateOverviewView: View {
                 Spacer()
                 // [v25.295] 生日蛋糕鈕：今天或明天有人生日就亮起來（粉紅），
                 // 否則黑白（半透明白）；點開生日名單視窗。匯出圖不畫按鈕。
+                // [v25.348] 績效評分鈕（蛋糕左邊）：填「我」的年度同儕排名。
+                // 已送出今年的票 → 亮橘色；還沒送出 → 半透明白，和蛋糕鈕同一套規格。
+                if !forExport {
+                    Button { showPerformanceSheet = true } label: {
+                        Image(systemName: "trophy.fill")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(hasSubmittedPerformance ? Color.orange : Color.white.opacity(0.45))
+                            .padding(7)
+                            .background(hasSubmittedPerformance ? Color.white.opacity(0.92)
+                                        : Color.white.opacity(0.16), in: Circle())
+                            .overlay(Circle().stroke(.white.opacity(0.30), lineWidth: 0.75))
+                            .shadow(color: hasSubmittedPerformance ? Color.orange.opacity(0.45) : .clear,
+                                    radius: 5, x: 0, y: 2)
+                    }
+                    .buttonStyle(.plain)
+                }
                 if !forExport {
                     Button { showBirthdaySheet = true } label: {
                         Image(systemName: "birthday.cake.fill")
