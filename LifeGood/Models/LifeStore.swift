@@ -778,9 +778,11 @@ class LifeStore: ObservableObject {
             }
         }
         for (personId, votes) in gradeVotes {
-            guard var score = totals[personId],
-                  let best = votes.max(by: { ($0.value, $0.key.label) < ($1.value, $1.key.label) })?.key
-            else { continue }
+            let top = votes.max { a, b in
+                if a.value != b.value { return a.value < b.value }
+                return a.key.label < b.key.label
+            }
+            guard var score = totals[personId], let best = top?.key else { continue }
             score.gradeId = best.id
             score.gradeLabel = best.label
             totals[personId] = score

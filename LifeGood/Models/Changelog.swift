@@ -13,6 +13,10 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.350", build: 1103, date: "2026/08/19", notes: [
+            "【修正】編譯錯誤：v25.349 把評分加總名次列的副標改成「課別＋票數＋平均名次」時，直接在 Text(...) 裡用 + 串接四段字串（含一個三元運算子），型別檢查器算不完（PerformanceReviewView.swift:497「unable to type-check this expression in reasonable time」）。改成先用一個小函式把字串組好再交給 Text。",
+            "【修正】同一頁的計分說明也是用 + 串接四段字串，一併改成單一字串常數；被評分人數的加總也移出 View 的宣告區，降低型別檢查負擔。功能與畫面完全沒變。"
+        ]),
         ChangelogEntry(version: "25.349", build: 1102, date: "2026/08/19", notes: [
             "【改善】評分加總改成「依職等分開排名」：原本把所有人混在一起排，但不同職等的組人數與權重都不一樣，混排沒有意義。現在每個職等各自一段、名次都從第 1 名重新起算，段落標題會顯示職等名稱、人數與該職等的權重。",
             "【改善】職等的排列順序依績效權重由高到低（權重相同時比職等名稱），所以職等高的一眼就看到；沒設職等的人集中排在最後一段。",

@@ -346,12 +346,14 @@ struct PerformanceSummaryView: View {
     var body: some View {
         // 單次計算，避免 body 內多處重複跑加總
         let secs = sections
+        var shownCount = 0
+        for sec in secs { shownCount += sec.scores.count }
         return VStack(alignment: .leading, spacing: 14) {
             controls
             if scores.isEmpty {
                 emptyState
             } else {
-                summaryHeader(shownCount: secs.reduce(0) { $0 + $1.scores.count })
+                summaryHeader(shownCount: shownCount)
                 if secs.isEmpty {
                     Text("這個課別在 \(String(year)) 年沒有排名資料（同課同職等要滿 2 人才會分組）")
                         .font(.caption).foregroundStyle(.secondary)
@@ -464,6 +466,8 @@ struct PerformanceSummaryView: View {
         let deptName = sub?.departmentId
             .flatMap { id in lifeStore.departments.first(where: { $0.id == id })?.name }
         let isOpen = expanded.contains(score.personId)
+        // 副標一次組好再交給 Text：串在 Text(...) 裡的字串相加會讓型別檢查爆掉
+        let metaText = metaLine(deptName: deptName, score: score)
         return VStack(alignment: .leading, spacing: 0) {
             Button {
                 withAnimation(.spring(response: 0.32, dampingFraction: 0.85)) {
@@ -491,11 +495,7 @@ struct PerformanceSummaryView: View {
                                     .clipShape(Capsule())
                             }
                         }
-                        // 職等已經是分段標題，這裡只補課別，避免同一列出現兩個職等
-                        Text([deptName].compactMap { $0 }.joined()
-                             + (deptName == nil ? "" : "・")
-                             + "\(score.sources.count) 票・平均第 "
-                             + String(format: "%.1f", score.averageRank) + " 名")
+                        Text(metaText)
                             .font(.caption2).foregroundStyle(.secondary)
                     }
                     Spacer()
@@ -521,6 +521,15 @@ struct PerformanceSummaryView: View {
         .clipShape(RoundedRectangle(cornerRadius: 16))
         .overlay(RoundedRectangle(cornerRadius: 16)
             .stroke(Color(.separator).opacity(0.12), lineWidth: 0.75))
+    }
+
+    /// 名次列的副標：職等已經是分段標題，這裡只補課別、票數與平均名次
+    private func metaLine(deptName: String?, score: PerformanceScore) -> String {
+        var parts: [String] = []
+        if let deptName, !deptName.isEmpty { parts.append(deptName) }
+        parts.append("\(score.sources.count) 票")
+        parts.append(String(format: "平均第 %.1f 名", score.averageRank))
+        return parts.joined(separator: "・")
     }
 
     private func sourceRow(_ src: PerformanceScoreSource) -> some View {
@@ -550,10 +559,7 @@ struct PerformanceSummaryView: View {
                 Text("尚未送出：" + pending.map(\.name).joined(separator: "、"))
                     .font(.caption).foregroundStyle(.orange)
             }
-            Text("計分：排名在「同課 × 同職等」的組內進行，某組 N 人時第 1 名基礎分 N、"
-                 + "往下每名少 1 分，再乘上評分者職等的績效權重後加總。"
-                 + "總排名依職等分開呈現、名次各自從第 1 名起算（職等由票上的快照決定，"
-                 + "職等權重高的排前面）；各課人數不同、基礎分上限就不同，跨課比較僅供參考。")
+            Text(Self.scoringNote)
                 .font(.caption2).foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -575,6 +581,9 @@ struct PerformanceSummaryView: View {
         .frame(maxWidth: .infinity)
         .padding(.vertical, 46)
     }
+
+    /// 計分說明：整段寫成單一字串常數，不要在 Text(...) 裡用 + 串接
+    private static let scoringNote = "計分：排名在「同課 × 同職等」的組內進行，某組 N 人時第 1 名基礎分 N、往下每名少 1 分，再乘上評分者職等的績效權重後加總。總排名依職等分開呈現、名次各自從第 1 名起算（職等由票上的快照決定，職等權重高的排前面）；各課人數不同、基礎分上限就不同，跨課比較僅供參考。"
 
     private func rankColor(_ rank: Int) -> Color {
         switch rank {
