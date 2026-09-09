@@ -12,7 +12,7 @@
 // 常數
 // ---------------------------------------------------------------------------
 /** 網頁版自己的版本（與 App 版本無關；改網頁不再動 App 版號） */
-const WEB_VERSION = '1.5';
+const WEB_VERSION = '1.6';
 const CONTAINER_ID = 'iCloud.com.lifegood.app';
 const ZONE_NAME = 'LifeGoodZone';
 const TOKEN_KEY = 'lifegood_ck_token';
@@ -32,6 +32,7 @@ const KV_KEYS = {
   pets: 'life_pets',
   familyTasks: 'life_family_tasks',
   ballots: 'life_performance_ballots',
+  health: 'life_health_profile',
   // 理財（ExpenseStore／FinanceStore，同樣是 JSON blob）
   expenses: 'lifegood_expenses',
   incomes: 'lifegood_incomes',
@@ -45,7 +46,7 @@ const KV_KEYS = {
 const DATE_KEYS = new Set([
   'date', 'dueDate', 'completedAt', 'endDate', 'joinDate', 'birthday', 'scheduledDate',
   'movedTo', 'createdAt', 'dateAdded', 'leftDate', 'sideRoleEndDate', 'updatedAt', 'recurrenceEndDate',
-  'marriageDate', 'divorceDate', 'anniversary', 'submittedAt',
+  'marriageDate', 'divorceDate', 'anniversary', 'submittedAt', 'nextDueDate',
   'purchaseDate', 'soldDate', 'startDate', 'maturityDate', 'expiryDate', 'bldgCompletionDate',
 ]);
 
@@ -65,7 +66,7 @@ const REC_COLOR = { '優點': 'green', '缺點': 'red', '成就': 'orange', '改
 const Store = {
   subs: [], depts: [], orgPeople: [], grades: [], equipment: [], milestones: [], cards: [], personalEvents: [],
   expenses: [], incomes: [], currencyRates: [], insurances: [], stocks: [], vehicles: [], realEstates: [],
-  profile: {}, familyMembers: [], relationships: [], pets: [], familyTasks: [], ballots: [],
+  profile: {}, health: {}, familyMembers: [], relationships: [], pets: [], familyTasks: [], ballots: [],
   source: '', loadedAt: null, ctx: null,
 };
 let ckContainer = null;
@@ -190,8 +191,8 @@ function applyData(raw, source) {
   Store.fingerprint = fingerprint;
   for (const k of Object.keys(KV_KEYS)) {
     const v = raw[k];
-    // life_profile 是單一物件，其餘都是陣列
-    Store[k] = k === 'profile'
+    // life_profile / life_health_profile 是單一物件，其餘都是陣列
+    Store[k] = (k === 'profile' || k === 'health')
       ? reviveDates(v && typeof v === 'object' && !Array.isArray(v) ? v : {})
       : reviveDates(Array.isArray(v) ? v : []);
   }
@@ -560,12 +561,16 @@ function route() {
       else if (t === 'resume') renderResume(main, parts[2] || 'all');
       else if (t === 'family') renderFamily(main, parts[2] || 'members');
       else if (t === 'overview') renderLifeOverview(main, ctx);
+      else if (t === 'realestate') renderLifeRealEstate(main);
       else renderOverview(main, ctx);
       break;
     }
     case 'grades': renderGrades(main); break;
     case 'perf': renderPerf(main, parts[1] || ''); break;
-    case 'tax': renderTax(main, parts[1] || ''); break;
+      case 'tax': renderTax(main, parts[1] || ''); break;
+    case 'food': renderFoodMap(main); break;
+    case 'travel': renderTravelMap(main); break;
+    case 'medical': renderMedicalMap(main); break;
     case 'settings': renderSettings(main); break;
     case 'cards': renderCards(main, parts[1] ? decodeURIComponent(parts[1]) : ''); break;
     case 'siderole': renderSideRole(main, decodeURIComponent(parts[1] || ''), parts[2] || 'tasks'); break;
@@ -2059,6 +2064,462 @@ function renderLifeOverview(main, ctx) {
       ${tile('👨‍👩‍👧', '家庭', '#/life/family', [['成員', (Store.familyMembers || []).length + ' 位'], ['寵物', (Store.pets || []).length + ' 隻'], ['人際關係', (Store.relationships || []).length + ' 位']])}
       ${tile('💰', '理財', '#/finance/overview', [['股票市值', fmtMoney(S.stockMV)], ['儲蓄險現值', fmtMoney(S.insTotal)], ['房產・車輛', fmtMoney(S.reValue + S.vhValue)]])}
     </div>`;
+}
+
+// ---- 地圖類共用 -------------------------------------------------------------
+// 網頁版不載入任何地圖圖磚（維持純靜態、不外連），改用等比例的經緯度散點呈現相對位置。
+const TW_CITIES = ['基隆市', '臺北市', '新北市', '桃園市', '新竹市', '新竹縣', '苗栗縣',
+  '臺中市', '彰化縣', '南投縣', '雲林縣', '嘉義市', '嘉義縣', '臺南市',
+  '高雄市', '屏東縣', '宜蘭縣', '花蓮縣', '臺東縣', '澎湖縣', '金門縣', '連江縣'];
+/** 從地址推斷台灣縣市（與 App 的 TravelCityParser 相同：把「台」正規化成「臺」） */
+function parseCity(address) {
+  if (!address) return '';
+  const n = String(address).replace(/台/g, '臺');
+  return TW_CITIES.find((c) => n.includes(c)) || '';
+}
+/** 縣市政府中心點（與 App 的 LifeRealEstateView.cityCoords 相同） */
+const CITY_COORD = {
+  '臺北市': [25.0330, 121.5654], '新北市': [25.0120, 121.4657], '桃園市': [24.9936, 121.3010],
+  '臺中市': [24.1477, 120.6736], '臺南市': [22.9997, 120.2270], '高雄市': [22.6273, 120.3014],
+  '基隆市': [25.1276, 121.7392], '新竹市': [24.8138, 120.9675], '嘉義市': [23.4801, 120.4491],
+  '新竹縣': [24.8387, 121.0177], '苗栗縣': [24.5602, 120.8214], '彰化縣': [24.0518, 120.5161],
+  '南投縣': [23.9157, 120.6869], '雲林縣': [23.7092, 120.4313], '嘉義縣': [23.4518, 120.2555],
+  '屏東縣': [22.5519, 120.5487], '宜蘭縣': [24.7021, 121.7378], '花蓮縣': [23.9872, 121.6015],
+  '臺東縣': [22.7583, 121.1444], '澎湖縣': [23.5712, 119.5793], '金門縣': [24.4370, 118.3172],
+  '連江縣': [26.1605, 119.9515],
+};
+/**
+ * 經緯度散點圖（純 SVG，無外部圖磚）。pts: { lat, lng, label, count, color }
+ * 依緯度做等距投影（乘 cos(平均緯度)），所以東西向與南北向的比例接近真實距離。
+ */
+function geoScatter(pts, height = 320) {
+  const ok = pts.filter((p) => typeof p.lat === 'number' && typeof p.lng === 'number');
+  if (!ok.length) return '<div class="empty">這些紀錄還沒有標定位置</div>';
+  const W = 1000, H = 560, PAD = { t: 34, b: 76, l: 68, r: 44 };   // 下方與左方留給刻度和標籤
+  const lats = ok.map((p) => p.lat), lngs = ok.map((p) => p.lng);
+  const midLat = (Math.min(...lats) + Math.max(...lats)) / 2;
+  const kx = Math.cos(midLat * Math.PI / 180) || 1;   // 等距投影：經度乘上緯度的餘弦
+  let x0 = Math.min(...lngs) * kx, x1 = Math.max(...lngs) * kx;
+  let y0 = Math.min(...lats), y1 = Math.max(...lats);
+  // 單點或同一直線時給一個最小視野（約 4 公里）
+  const MIN = 0.04;
+  const grow = (a, b, span) => [(a + b) / 2 - span / 2, (a + b) / 2 + span / 2];
+  if (x1 - x0 < MIN) [x0, x1] = grow(x0, x1, MIN);
+  if (y1 - y0 < MIN) [y0, y1] = grow(y0, y1, MIN);
+  // 兩軸同比例：把比較短的一軸撐開到符合畫布長寬比，圓圈之間的距離才等於真實距離比例
+  const inner = { w: W - PAD.l - PAD.r, h: H - PAD.t - PAD.b };
+  if ((x1 - x0) / inner.w > (y1 - y0) / inner.h) [y0, y1] = grow(y0, y1, (x1 - x0) * inner.h / inner.w);
+  else [x0, x1] = grow(x0, x1, (y1 - y0) * inner.w / inner.h);
+  // 兩軸同時再放大一點，最外圍的點才不會剛好貼在框線上（等比例放大不影響距離比例）
+  [x0, x1] = grow(x0, x1, (x1 - x0) * 1.2);
+  [y0, y1] = grow(y0, y1, (y1 - y0) * 1.2);
+  const sx = (lng) => PAD.l + ((lng * kx - x0) / (x1 - x0)) * inner.w;
+  const sy = (lat) => H - PAD.b - ((lat - y0) / (y1 - y0)) * inner.h;
+  const maxCount = Math.max(1, ...ok.map((p) => p.count || 1));
+  const rOf = (c) => 11 + Math.sqrt((c || 1) / maxCount) * 17;
+  // 經緯格線：取一個好看的間距
+  const step = (span) => [0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1, 2].find((v) => v >= span / 5) || 2;
+  const gx = step((x1 - x0) / kx), gy = step(y1 - y0);
+  const grid = [];
+  const blocked = [];   // 標籤要避開的方框：格線刻度 + 所有圓圈
+  const box = (x, y, halfW, halfH) => ({ x, y, hw: halfW, hh: halfH });
+  for (let v = Math.ceil((x0 / kx) / gx) * gx; v <= x1 / kx + 1e-9; v += gx) {
+    const X = sx(v);
+    grid.push(`<line x1="${X.toFixed(1)}" y1="8" x2="${X.toFixed(1)}" y2="${H - 26}" class="geo-grid"/>
+      <text x="${X.toFixed(1)}" y="${H - 10}" class="geo-tick" text-anchor="middle">${v.toFixed(2)}°E</text>`);
+    blocked.push(box(X, H - 15, 42, 11));
+  }
+  for (let v = Math.ceil(y0 / gy) * gy; v <= y1 + 1e-9; v += gy) {
+    const Y = sy(v);
+    grid.push(`<line x1="8" y1="${Y.toFixed(1)}" x2="${W - 8}" y2="${Y.toFixed(1)}" class="geo-grid"/>
+      <text x="10" y="${(Y - 6).toFixed(1)}" class="geo-tick">${v.toFixed(2)}°N</text>`);
+    blocked.push(box(52, Y - 11, 46, 11));
+  }
+  const circles = [...ok].sort((a, b) => (b.count || 1) - (a.count || 1))
+    .map((p) => ({ p, cx: sx(p.lng), cy: sy(p.lat), r: rOf(p.count) }));
+  for (const c of circles) blocked.push(box(c.cx, c.cy, c.r + 2, c.r + 2));
+  // 標籤避讓：圓越大越先擺，撞到圓圈、刻度或別的標籤就往下挪一行
+  const hits = (a, b) => Math.abs(a.x - b.x) < a.hw + b.hw && Math.abs(a.y - b.y) < a.hh + b.hh;
+  const nodes = circles.map(({ p, cx, cy, r }) => {
+    const label = String(p.label || '');
+    // 中日文字寬約等於字級，英數約一半；估出來的寬度用在避讓與貼邊裁切
+    const textW = [...label].reduce((a, ch) => a + (/[\u2E80-\u9FFF\uF900-\uFAFF\uFF00-\uFF60]/.test(ch) ? 19 : 9.5), 0);
+    const hw = Math.max(28, textW) / 2 + 5;
+    let ly = cy + r + 16;
+    for (let guard = 0; guard < 14; guard++) {
+      if (ly > H - 30) { ly = cy - r - 9; break; }   // 貼到底就改放圓的上方
+      if (!blocked.some((q) => hits(box(cx, ly - 6, hw, 10), q))) break;
+      ly += 19;
+    }
+    if (ly < 16) ly = cy + r + 16;
+    const lx = Math.min(W - hw - 4, Math.max(hw + 4, cx));   // 標籤不要被畫布左右切掉
+    blocked.push(box(lx, ly - 6, hw, 10));
+    // 被擠開超過一行就拉一條細引線，才看得出標籤屬於哪個圓
+    const moved = Math.abs(ly - (cy + r + 16)) > 4;
+    return { p, cx, cy, r, lx, ly, label, moved };
+  });
+  return `<div class="geo-wrap" style="height:${height}px">
+    <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="地點分佈">
+      ${grid.join('')}
+      ${nodes.map(({ p, cx, cy, r, lx, ly, label, moved }) => `<g>
+        ${moved ? `<line x1="${cx.toFixed(1)}" y1="${(ly > cy ? cy + r : cy - r).toFixed(1)}" x2="${lx.toFixed(1)}" y2="${(ly > cy ? ly - 14 : ly + 5).toFixed(1)}" class="geo-leader"/>` : ''}
+        <circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="${r.toFixed(1)}" fill="${p.color || '#ff9500'}" fill-opacity="0.28" stroke="${p.color || '#ff9500'}" stroke-width="2"/>
+        <text x="${cx.toFixed(1)}" y="${(cy + 5).toFixed(1)}" class="geo-count">${p.count || 1}</text>
+        <text x="${lx.toFixed(1)}" y="${ly.toFixed(1)}" class="geo-label">${esc(label)}</text>
+        <title>${esc(p.title || label)}</title></g>`).join('')}
+    </svg></div>`;
+}
+/** 依「名稱|地址」聚合有座標的支出 */
+function placeAggregates(list) {
+  const groups = {};
+  for (const e of list) {
+    if (typeof e.placeLatitude !== 'number' || typeof e.placeLongitude !== 'number') continue;
+    const key = `${e.title}|${e.placeAddress || ''}`;
+    (groups[key] = groups[key] || []).push(e);
+  }
+  return Object.entries(groups).map(([key, visits]) => {
+    const f = visits[0];
+    const total = visits.reduce((a, x) => a + x.amount * rateOf(x.currencyCode), 0);
+    return {
+      id: key, name: f.title, address: f.placeAddress || '', lat: f.placeLatitude, lng: f.placeLongitude,
+      city: parseCity(f.placeAddress), visits: [...visits].sort((a, b) => b.date - a.date),
+      count: visits.length, total, avg: total / visits.length,
+      last: visits.reduce((a, x) => (a && a > x.date ? a : x.date), null),
+      photos: visits.reduce((a, x) => a + (x.photoFileNames || []).length, 0),
+    };
+  });
+}
+/** 期間選項（與 App 的 FoodMapRange 相同） */
+const MAP_RANGES = [['all', '全部'], ['month', '本月'], ['quarter', '近 3 月'], ['half', '近半年'], ['year', '近一年']];
+function inRangeKey(date, key) {
+  const now = new Date();
+  if (key === 'all') return true;
+  if (key === 'month') return date.getFullYear() === now.getFullYear() && date.getMonth() === now.getMonth();
+  const from = new Date(now);
+  if (key === 'quarter') from.setMonth(from.getMonth() - 3);
+  else if (key === 'half') from.setMonth(from.getMonth() - 6);
+  else from.setFullYear(from.getFullYear() - 1);
+  return date >= from;
+}
+const MAP_SORTS = [['visits', '造訪次數'], ['spent', '總花費'], ['recent', '最近造訪']];
+function sortAggs(list, key) {
+  const c = [...list];
+  if (key === 'spent') return c.sort((a, b) => b.total - a.total);
+  if (key === 'recent') return c.sort((a, b) => (b.last || 0) - (a.last || 0));
+  return c.sort((a, b) => b.count - a.count || b.total - a.total);
+}
+/** 篩選膠囊列，data-* 由呼叫端接上事件 */
+function filterChips(attr, options, cur) {
+  return options.map(([k, l]) => `<span class="fchip ${k === cur ? 'on' : ''}" data-${attr}="${k}">${esc(l)}</span>`).join('');
+}
+function bindChips(main, attr, apply) {
+  main.querySelectorAll(`.fchip[data-${attr}]`).forEach((el) => { el.onclick = () => apply(el.dataset[attr]); });
+}
+/** 造訪明細（美食／旅遊／醫療共用） */
+function visitRows(agg, extra) {
+  return agg.visits.slice(0, 40).map((v) => `<div class="t-meta" style="display:flex;gap:8px;align-items:center;padding:3px 0">
+    <span class="chip" style="min-width:74px;justify-content:center">${fmtDate(v.date).split(' ')[0]}</span>
+    <span style="flex:1;min-width:0">${esc(v.note || '')}${extra ? extra(v) : ''}</span>
+    <b>${fmtAmt(v.amount, v.currencyCode)}</b></div>`).join('');
+}
+
+// ---- 美食地圖 ---------------------------------------------------------------
+const foodUI = { range: 'all', sort: 'visits', who: 'all' };
+function diningNames(e) {
+  return String(e.diningMember || '').split(/[,、，]/).map((s) => s.trim()).filter(Boolean);
+}
+function renderFoodMap(main) {
+  const all = Store.expenses.filter((e) => e.expenseType === '變動支出' && e.variableCategory === '飲食');
+  const located = all.filter((e) => typeof e.placeLatitude === 'number' && typeof e.placeLongitude === 'number');
+  const inRange = located.filter((e) => inRangeKey(e.date, foodUI.range));
+  const whoOptions = [...new Set(located.flatMap(diningNames))].sort();
+  const filtered = foodUI.who === 'all' ? inRange : inRange.filter((e) => diningNames(e).includes(foodUI.who));
+  const aggs = sortAggs(placeAggregates(filtered), foodUI.sort);
+  const visitCount = aggs.reduce((a, x) => a + x.count, 0);
+  const total = aggs.reduce((a, x) => a + x.total, 0);
+  // 最常光顧與最常同行
+  const topPlace = [...aggs].sort((a, b) => b.count - a.count)[0];
+  const whoCount = {};
+  for (const e of filtered) for (const n of diningNames(e)) whoCount[n] = (whoCount[n] || 0) + 1;
+  const topWho = Object.entries(whoCount).sort((a, b) => b[1] - a[1])[0];
+  const noLoc = all.length - located.length;
+  main.innerHTML = `
+    ${pageHead('美食地圖', `${aggs.length} 間餐廳・依飲食記帳的定位聚合`)}
+    <div class="filters">
+      <span class="muted small">期間</span>${filterChips('r', MAP_RANGES, foodUI.range)}
+      <span class="spacer"></span>
+      <span class="muted small">排序</span>${filterChips('s', MAP_SORTS, foodUI.sort)}
+    </div>
+    ${whoOptions.length ? `<div class="filters"><span class="muted small">同行</span>
+      ${filterChips('w', [['all', '全部'], ...whoOptions.map((n) => [n, n])], foodUI.who)}</div>` : ''}
+    <div class="grid cols-4">
+      ${kpiCard('餐廳數', aggs.length, '', noLoc ? `另有 ${noLoc} 筆未定位` : '全部已定位')}
+      ${kpiCard('造訪次數', visitCount, 'orange', topPlace ? `最常 ${esc(topPlace.name)}（${topPlace.count} 次）` : '')}
+      ${kpiCard('總花費', fmtMoney(total), 'red', visitCount ? `平均每次 ${fmtMoney(total / visitCount)}` : '')}
+      ${kpiCard('最常同行', topWho ? esc(topWho[0]) : '—', 'pink', topWho ? `${topWho[1]} 次` : '沒有記錄同行者')}
+    </div>
+    <div class="card mt"><h3>🍜 地點分佈 <span class="count">${aggs.length}</span></h3>
+      ${geoScatter(aggs.map((a) => ({ lat: a.lat, lng: a.lng, label: a.name, count: a.count, color: '#ff9500', title: `${a.name}｜${a.address}｜${a.count} 次` })), 360)}
+      <div class="legend-note">圓圈大小＝造訪次數；座標為記帳當下標定的位置，網頁版不載入地圖圖磚。</div></div>
+    <div class="card mt"><h3>餐廳清單 <span class="count">${aggs.length}</span></h3>
+      ${aggs.map((a) => `<details class="agenda" style="border-top:1px solid var(--line);padding:8px 0;margin:0">
+        <summary style="list-style:none;display:flex;align-items:center;gap:12px;color:inherit;font-weight:400">
+          <span class="chip orange big" style="min-width:52px;justify-content:center">${a.count} 次</span>
+          <span style="flex:1;min-width:0"><b>${esc(a.name)}</b>${a.photos ? ` <span class="chip">📷 ${a.photos}</span>` : ''}
+            <div class="muted small">${esc(a.address || '未填地址')}${a.last ? '・最近 ' + fmtDate(a.last).split(' ')[0] : ''}</div></span>
+          <span class="muted small">均 ${fmtMoney(a.avg, '')}</span>
+          <b style="color:var(--orange);min-width:76px;text-align:right">${fmtMoney(a.total)}</b>
+        </summary>
+        <div class="sub-items">${visitRows(a, (v) => (v.diningMember ? ` <span class="chip pink">${esc(v.diningMember)}</span>` : ''))}</div>
+      </details>`).join('') || `<div class="empty">${all.length ? '這個條件下沒有已定位的飲食紀錄' : '還沒有飲食紀錄'}</div>`}
+    </div>`;
+  bindChips(main, 'r', (v) => { foodUI.range = v; renderFoodMap(main); });
+  bindChips(main, 's', (v) => { foodUI.sort = v; renderFoodMap(main); });
+  bindChips(main, 'w', (v) => { foodUI.who = v; renderFoodMap(main); });
+}
+
+// ---- 旅遊地圖 ---------------------------------------------------------------
+const travelUI = { range: 'all', sort: 'visits', city: 'all' };
+function renderTravelMap(main) {
+  const all = Store.expenses.filter((e) => e.expenseType === '變動支出' && e.variableCategory === '娛樂');
+  const located = all.filter((e) => typeof e.placeLatitude === 'number' && typeof e.placeLongitude === 'number');
+  const inRange = located.filter((e) => inRangeKey(e.date, travelUI.range));
+  const cityOptions = [...new Set(located.map((e) => parseCity(e.placeAddress)).filter(Boolean))].sort();
+  const base = placeAggregates(inRange);
+  const aggs = sortAggs(travelUI.city === 'all' ? base : base.filter((a) => a.city === travelUI.city), travelUI.sort);
+  const visitCount = aggs.reduce((a, x) => a + x.count, 0);
+  const total = aggs.reduce((a, x) => a + x.total, 0);
+  const cities = {};
+  for (const a of aggs) (cities[a.city || '其他'] = cities[a.city || '其他'] || []).push(a);
+  const cityRows = Object.entries(cities).sort((x, y) => y[1].length - x[1].length || x[0].localeCompare(y[0], 'zh-Hant'));
+  const noLoc = all.length - located.length;
+  main.innerHTML = `
+    ${pageHead('旅遊地圖', `${aggs.length} 個地點・足跡 ${cityRows.filter(([c]) => c !== '其他').length} 個縣市`)}
+    <div class="filters">
+      <span class="muted small">期間</span>${filterChips('r', MAP_RANGES, travelUI.range)}
+      <span class="spacer"></span>
+      <span class="muted small">排序</span>${filterChips('s', MAP_SORTS, travelUI.sort)}
+    </div>
+    ${cityOptions.length ? `<div class="filters"><span class="muted small">縣市</span>
+      ${filterChips('c', [['all', '全部縣市'], ...cityOptions.map((c) => [c, c])], travelUI.city)}</div>` : ''}
+    <div class="grid cols-4">
+      ${kpiCard('地點數', aggs.length, '', noLoc ? `另有 ${noLoc} 筆未定位` : '全部已定位')}
+      ${kpiCard('造訪次數', visitCount, 'purple', aggs[0] ? `最常 ${esc(aggs[0].name)}` : '')}
+      ${kpiCard('總花費', fmtMoney(total), 'red', visitCount ? `平均每次 ${fmtMoney(total / visitCount)}` : '')}
+      ${kpiCard('足跡縣市', cityRows.filter(([c]) => c !== '其他').length, 'teal', cityRows[0] ? `最多 ${esc(cityRows[0][0])}（${cityRows[0][1].length} 處）` : '')}
+    </div>
+    <div class="card mt"><h3>✈️ 足跡分佈 <span class="count">${aggs.length}</span></h3>
+      ${geoScatter(aggs.map((a) => ({ lat: a.lat, lng: a.lng, label: a.name, count: a.count, color: '#af52de', title: `${a.name}｜${a.city || '未知縣市'}｜${a.count} 次` })), 380)}
+      <div class="legend-note">圓圈大小＝造訪次數；縣市由地址字串推斷（與 App 相同規則）。</div></div>
+    ${cityRows.map(([city, items]) => `<div class="card mt"><h3>📍 ${esc(city)} <span class="count">${items.length}</span>
+      <span class="spacer" style="flex:1"></span><span class="muted small">${fmtMoney(items.reduce((a, x) => a + x.total, 0))}</span></h3>
+      ${items.map((a) => `<details class="agenda" style="border-top:1px solid var(--line);padding:8px 0;margin:0">
+        <summary style="list-style:none;display:flex;align-items:center;gap:12px;color:inherit;font-weight:400">
+          <span class="chip purple big" style="min-width:52px;justify-content:center">${a.count} 次</span>
+          <span style="flex:1;min-width:0"><b>${esc(a.name)}</b>${a.photos ? ` <span class="chip">📷 ${a.photos}</span>` : ''}
+            <div class="muted small">${esc(a.address || '未填地址')}${a.last ? '・最近 ' + fmtDate(a.last).split(' ')[0] : ''}</div></span>
+          <b style="color:var(--orange);min-width:76px;text-align:right">${fmtMoney(a.total)}</b>
+        </summary>
+        <div class="sub-items">${visitRows(a)}</div>
+      </details>`).join('')}
+    </div>`).join('') || `<div class="card mt"><div class="empty">${all.length ? '這個條件下沒有已定位的娛樂紀錄' : '還沒有娛樂紀錄'}</div></div>`}`;
+  bindChips(main, 'r', (v) => { travelUI.range = v; renderTravelMap(main); });
+  bindChips(main, 's', (v) => { travelUI.sort = v; renderTravelMap(main); });
+  bindChips(main, 'c', (v) => { travelUI.city = v; renderTravelMap(main); });
+}
+
+// ---- 醫療地圖 ---------------------------------------------------------------
+const SEVERITY_COLOR = { '輕度': 'blue', '中度': 'orange', '重度': 'red' };
+function bmiOf(kg, cm) { return cm > 0 && kg > 0 ? kg / ((cm / 100) ** 2) : null; }
+function bmiLevel(b) {
+  if (b == null) return ['', '—'];
+  if (b < 18.5) return ['blue', '過輕'];
+  if (b < 24) return ['green', '正常'];
+  if (b < 27) return ['orange', '過重'];
+  return ['red', '肥胖'];
+}
+function renderMedicalMap(main) {
+  const now = new Date();
+  const h = Store.health || {};
+  const meas = [...(h.measurements || [])].filter((m) => m.date).sort((a, b) => b.date - a.date);
+  const lastWeight = meas.find((m) => typeof m.weightKg === 'number' && m.weightKg > 0);
+  const lastBp = meas.find((m) => typeof m.systolic === 'number' && typeof m.diastolic === 'number');
+  const checkups = [...(h.checkups || [])].filter((c) => c.date).sort((a, b) => b.date - a.date);
+  const nextDue = checkups.filter((c) => c.nextDueDate && c.nextDueDate >= startOfDay(now))
+    .sort((a, b) => a.nextDueDate - b.nextDueDate)[0];
+  const meds = (h.medications || []).filter((m) => m.isActive !== false);
+  const medExp = Store.expenses.filter((e) => e.expenseType === '變動支出' && e.variableCategory === '醫療');
+  const aggs = sortAggs(placeAggregates(medExp), 'visits');
+  const medTotal = medExp.reduce((a, e) => a + e.amount * rateOf(e.currencyCode), 0);
+  const thisYearTotal = medExp.filter((e) => e.date.getFullYear() === now.getFullYear())
+    .reduce((a, e) => a + e.amount * rateOf(e.currencyCode), 0);
+  const healthMs = Store.milestones.filter((m) => m.category === '健康' && m.date).sort((a, b) => b.date - a.date);
+  const insMs = Store.milestones.filter((m) => m.insuranceType === '醫療' || m.insuranceType === '意外');
+  const bmi = lastWeight ? bmiOf(lastWeight.weightKg, h.heightCm || 0) : null;
+  const [bmiCls, bmiText] = bmiLevel(bmi);
+
+  const wSeries = meas.filter((m) => typeof m.weightKg === 'number' && m.weightKg > 0).slice(0, 60).reverse();
+  const bSeries = meas.filter((m) => typeof m.systolic === 'number').slice(0, 60).reverse();
+  const empty = !meas.length && !checkups.length && !medExp.length && !healthMs.length
+    && !(h.allergies || []).length && !(h.conditions || []).length && !meds.length;
+  main.innerHTML = `
+    ${pageHead('醫療地圖', `健康檔案與就醫紀錄・${fmtDate(now)}`)}
+    ${empty ? '<div class="card"><div class="empty">還沒有健康檔案、醫療支出或健康里程碑</div></div>' : ''}
+    <div class="grid cols-5">
+      ${kpiCard('血型', esc(h.bloodType || '—'), '', h.heightCm > 0 ? `身高 ${h.heightCm} cm` : '未填身高')}
+      ${kpiCard('最近體重', lastWeight ? lastWeight.weightKg.toFixed(1) + ' kg' : '—', '',
+        lastWeight ? `${fmtDate(lastWeight.date).split(' ')[0]}${bmi ? `・BMI ${bmi.toFixed(1)} ${bmiText}` : ''}` : '沒有量測紀錄')}
+      ${kpiCard('最近血壓', lastBp ? `${lastBp.systolic}/${lastBp.diastolic}` : '—', '',
+        lastBp ? `${fmtDate(lastBp.date).split(' ')[0]}${lastBp.heartRate ? '・心率 ' + lastBp.heartRate : ''}` : '沒有量測紀錄')}
+      ${kpiCard('今年醫療支出', fmtMoney(thisYearTotal), thisYearTotal ? 'red' : '', `累計 ${fmtMoney(medTotal)}・${medExp.length} 筆`)}
+      ${kpiCard('下次追蹤', nextDue ? fmtDate(nextDue.nextDueDate).split(' ')[0] : '—',
+        nextDue && daysBetween(now, nextDue.nextDueDate) <= 14 ? 'orange' : '',
+        nextDue ? `${esc(nextDue.title || '回診')}・${daysBetween(now, nextDue.nextDueDate)} 天後` : '沒有排定回診')}
+    </div>
+
+    <div class="grid cols-2 mt">
+      <div class="card"><h3>🩺 健康狀況 </h3>
+        <div class="nc-rows">
+          <div><span class="nc-lbl" style="min-width:64px">慢性病史</span><b>${(h.conditions || []).length ? (h.conditions || []).map(esc).join('、') : '—'}</b></div>
+          ${h.note ? `<div><span class="nc-lbl" style="min-width:64px">備註</span><b>${esc(h.note)}</b></div>` : ''}
+        </div>
+        <div class="section-title">過敏 <span class="count">${(h.allergies || []).length}</span></div>
+        <div class="list">${(h.allergies || []).map((a) => `<div class="item">
+          <span class="chip ${SEVERITY_COLOR[a.severity] || ''}">${esc(a.severity || '過敏')}</span>
+          <div class="main-text"><div class="title">${esc(a.name || '未命名')}</div><div class="meta">${esc(a.reaction || '')}</div></div>
+        </div>`).join('') || '<div class="empty">沒有過敏紀錄</div>'}</div>
+        <div class="section-title">用藥中 <span class="count">${meds.length}</span></div>
+        <div class="list">${meds.map((m) => `<div class="item">
+          <span class="chip teal">💊</span>
+          <div class="main-text"><div class="title">${esc(m.name || '未命名')}</div><div class="meta">${esc([m.dosage, m.note].filter(Boolean).join('・'))}</div></div>
+        </div>`).join('') || '<div class="empty">沒有服用中的藥物</div>'}</div>
+      </div>
+      <div class="card chart-card"><h3>📈 量測趨勢 <span class="count">${meas.length}</span></h3>
+        ${wSeries.length ? '<div class="chart-box" style="height:150px"><canvas id="med-w"></canvas></div>' : '<div class="empty">沒有體重紀錄</div>'}
+        ${bSeries.length ? '<div class="chart-box" style="height:170px"><canvas id="med-bp"></canvas></div>' : '<div class="empty">沒有血壓紀錄</div>'}
+      </div>
+    </div>
+
+    <div class="grid cols-2 mt">
+      <div class="card"><h3>🏥 就醫院所 <span class="count">${aggs.length}</span></h3>
+        ${aggs.length ? geoScatter(aggs.map((a) => ({ lat: a.lat, lng: a.lng, label: a.name, count: a.count, color: '#ff3b30', title: `${a.name}｜${a.address}｜${a.count} 次` })), 300) : ''}
+        ${aggs.map((a) => `<details class="agenda" style="border-top:1px solid var(--line);padding:8px 0;margin:0">
+          <summary style="list-style:none;display:flex;align-items:center;gap:12px;color:inherit;font-weight:400">
+            <span class="chip red big" style="min-width:52px;justify-content:center">${a.count} 次</span>
+            <span style="flex:1;min-width:0"><b>${esc(a.name)}</b>
+              <div class="muted small">${esc(a.address || '未填地址')}${a.last ? '・最近 ' + fmtDate(a.last).split(' ')[0] : ''}</div></span>
+            <b style="min-width:76px;text-align:right">${fmtMoney(a.total)}</b>
+          </summary><div class="sub-items">${visitRows(a)}</div></details>`).join('')
+          || `<div class="empty">${medExp.length ? `有 ${medExp.length} 筆醫療支出，但都沒有標定位置` : '沒有醫療支出紀錄'}</div>`}
+      </div>
+      <div class="card"><h3>🧾 健檢與追蹤 <span class="count">${checkups.length}</span></h3>
+        <div class="list">${checkups.slice(0, 12).map((c) => `<div class="item">
+          <span class="chip ${c.nextDueDate && c.nextDueDate >= startOfDay(now) ? 'orange' : 'blue'}" style="min-width:74px;justify-content:center">${fmtDate(c.date).split(' ')[0]}</span>
+          <div class="main-text"><div class="title">${esc(c.title || '健檢')}</div>
+            <div class="meta">${esc([c.place, c.result, c.nextDueDate ? '下次 ' + fmtDate(c.nextDueDate).split(' ')[0] : ''].filter(Boolean).join('・'))}</div></div>
+        </div>`).join('') || '<div class="empty">沒有健檢紀錄</div>'}</div>
+        <div class="section-title">健康里程碑 <span class="count">${healthMs.length}</span></div>
+        <div class="list">${healthMs.slice(0, 8).map((m) => `<div class="item">
+          <span class="chip green">${catIcon(m.category)}</span>
+          <div class="main-text"><div class="title">${esc(m.title || '未命名')}</div><div class="meta">${fmtDate(m.date).split(' ')[0]}${m.note ? '・' + esc(m.note) : ''}</div></div>
+        </div>`).join('') || '<div class="empty">沒有健康里程碑</div>'}</div>
+        ${insMs.length ? `<div class="section-title">醫療／意外險 <span class="count">${insMs.length}</span></div>
+        <div class="chips">${insMs.map((m) => `<span class="chip indigo">${esc(m.title || (m.insuranceType || '') + '險')}${m.insuranceCompany ? '・' + esc(m.insuranceCompany) : ''}</span>`).join('')}</div>` : ''}
+      </div>
+    </div>
+
+    <div class="card table-wrap mt"><h3>量測紀錄 <span class="count">${meas.length}</span></h3>
+      <table class="tbl"><thead><tr><th>日期</th><th class="num">體重</th><th class="num">血壓</th><th class="num">心率</th><th>備註</th></tr></thead><tbody>
+      ${meas.slice(0, 40).map((m) => `<tr><td>${fmtDate(m.date).split(' ')[0]}</td>
+          <td class="num">${typeof m.weightKg === 'number' && m.weightKg > 0 ? m.weightKg.toFixed(1) + ' kg' : '—'}</td>
+          <td class="num">${typeof m.systolic === 'number' && typeof m.diastolic === 'number' ? `${m.systolic}/${m.diastolic}` : '—'}</td>
+          <td class="num">${typeof m.heartRate === 'number' && m.heartRate > 0 ? m.heartRate : '—'}</td>
+          <td class="muted small">${esc(m.note || '')}</td></tr>`).join('') || '<tr><td colspan="5" class="empty">沒有量測紀錄</td></tr>'}
+      </tbody></table></div>`;
+  if (!window.Chart) return;
+  const { text, line } = chartColors();
+  const lbl = (arr) => arr.map((m) => `${m.date.getMonth() + 1}/${m.date.getDate()}`);
+  if (wSeries.length) charts.push(new Chart($('#med-w'), { type: 'line',
+    data: { labels: lbl(wSeries), datasets: [{ label: '體重 kg', data: wSeries.map((m) => m.weightKg), borderColor: '#34c759', backgroundColor: 'rgba(52,199,89,0.15)', fill: true, tension: 0.35, pointRadius: 3 }] },
+    options: { maintainAspectRatio: false, scales: { x: { grid: { display: false }, ticks: { color: text } }, y: { grid: { color: line }, ticks: { color: text } } }, plugins: { legend: { labels: { color: text } } } } }));
+  if (bSeries.length) charts.push(new Chart($('#med-bp'), { type: 'line',
+    data: { labels: lbl(bSeries), datasets: [
+      { label: '收縮壓', data: bSeries.map((m) => m.systolic), borderColor: '#ff3b30', backgroundColor: 'rgba(255,59,48,0.12)', fill: false, tension: 0.35, pointRadius: 3 },
+      { label: '舒張壓', data: bSeries.map((m) => m.diastolic), borderColor: '#007aff', backgroundColor: 'rgba(0,122,255,0.12)', fill: false, tension: 0.35, pointRadius: 3 },
+      { label: '心率', data: bSeries.map((m) => m.heartRate ?? null), borderColor: '#ff9500', borderDash: [4, 3], fill: false, tension: 0.35, pointRadius: 2 }] },
+    options: { maintainAspectRatio: false, scales: { x: { grid: { display: false }, ticks: { color: text } }, y: { grid: { color: line }, ticks: { color: text } } }, plugins: { legend: { labels: { color: text } } } } }));
+}
+
+// ---- 人生・房地產（縣市足跡與權狀）------------------------------------------
+function renderLifeRealEstate(main) {
+  const list = Store.realEstates || [];
+  const owned = list.filter((r) => !r.soldDate);
+  const sold = list.filter((r) => r.soldDate);
+  const value = owned.reduce((a, r) => a + (r.currentValue || 0), 0);
+  const cost = owned.reduce((a, r) => a + (r.purchasePrice || 0), 0);
+  const cityOf = (r) => (r.city || parseCity(r.address) || '');
+  const byCity = {};
+  for (const r of list) (byCity[cityOf(r) || '未設定縣市'] = byCity[cityOf(r) || '未設定縣市'] || []).push(r);
+  const cityRows = Object.entries(byCity).sort((a, b) => b[1].length - a[1].length || a[0].localeCompare(b[0], 'zh-Hant'));
+  const BAR = ['#5856d6', '#ff9500', '#34c759', '#007aff', '#ff2d55', '#8e8e93'];
+  const points = cityRows.filter(([c]) => CITY_COORD[c]).map(([c, items], i) => ({
+    lat: CITY_COORD[c][0], lng: CITY_COORD[c][1], label: c, count: items.length,
+    color: BAR[i % BAR.length], title: `${c}｜${items.length} 筆｜${items.map((r) => r.name).join('、')}`,
+  }));
+  const deedRow = (label, v) => (v ? `<div><span class="nc-lbl" style="min-width:64px">${label}</span><b>${esc(v)}</b></div>` : '');
+  main.innerHTML = `
+    ${pageHead('房地產', `${list.length} 筆物件・分佈於 ${cityRows.filter(([c]) => c !== '未設定縣市').length} 個縣市`)}
+    <div class="grid cols-4">
+      ${kpiCard('總物件數', list.length, '', `持有中 ${owned.length}・已售出 ${sold.length}`)}
+      ${kpiCard('持有估值', fmtMoney(value), 'green', `購入 ${fmtMoney(cost)}・${value >= cost ? '+' : ''}${fmtMoney(value - cost)}`)}
+      ${kpiCard('房貸餘額', fmtMoney(owned.reduce((a, r) => a + mortgageRemaining(r), 0)), 'orange',
+        `每月 ${fmtMoney(owned.reduce((a, r) => a + (r.mortgageItems || []).reduce((x, m) => x + m.amount, 0), 0))}`)}
+      ${kpiCard('總坪數', owned.reduce((a, r) => a + (r.pingCount || 0), 0).toFixed(1) + ' 坪',
+        '', owned.some((r) => r.monthlyRental > 0) ? `月租收入 ${fmtMoney(owned.reduce((a, r) => a + (r.monthlyRental || 0), 0))}` : '沒有租金收入')}
+    </div>
+    ${cityRows.length > 1 ? `<div class="card mt"><h3>縣市分佈</h3>
+      <div style="display:flex;height:14px;border-radius:7px;overflow:hidden;margin:6px 0 8px">
+        ${cityRows.map(([c, items], i) => `<span title="${esc(c)} ${items.length} 筆" style="width:${(items.length / list.length * 100).toFixed(1)}%;background:${BAR[i % BAR.length]}"></span>`).join('')}
+      </div>
+      <div class="chips">${cityRows.map(([c, items], i) => `<span class="chip"><span style="display:inline-block;width:8px;height:8px;border-radius:4px;background:${BAR[i % BAR.length]};margin-right:6px"></span>${esc(c)} ${items.length}</span>`).join('')}</div>
+    </div>` : ''}
+    ${points.length ? `<div class="card mt"><h3>🏘️ 座落分佈 <span class="count">${points.length}</span></h3>
+      ${geoScatter(points, 360)}
+      <div class="legend-note">以縣市政府所在地標點（與 App 相同），圓圈大小＝該縣市的物件數。</div></div>` : ''}
+    ${cityRows.map(([city, items]) => `<div class="card mt"><h3>📍 ${esc(city)} <span class="count">${items.length}</span>
+      <span class="spacer" style="flex:1"></span><span class="muted small">${fmtMoney(items.reduce((a, r) => a + (r.currentValue || 0), 0))}</span></h3>
+      ${items.map((r) => {
+        const gain = (r.currentValue || 0) - (r.purchasePrice || 0);
+        const pct = r.purchasePrice > 0 ? (gain / r.purchasePrice * 100) : 0;
+        const floors = (r.floors || []).length || r.totalFloors || 0;
+        return `<details class="agenda" style="border-top:1px solid var(--line);padding:8px 0;margin:0${r.soldDate ? ';opacity:.65' : ''}">
+          <summary style="list-style:none;display:flex;align-items:center;gap:12px;color:inherit;font-weight:400">
+            <span class="chip ${r.soldDate ? '' : 'indigo'} big" style="min-width:52px;justify-content:center">${esc(r.buildingType || '房產')}</span>
+            <span style="flex:1;min-width:0"><b>${esc(r.name)}</b>${r.soldDate ? ' <span class="chip red">已售出</span>' : ''}${r.hasElevator ? ' <span class="chip teal">電梯</span>' : ''}
+              <div class="muted small">${esc([r.address, r.pingCount ? r.pingCount + ' 坪' : '', floors ? floors + ' 層' : '',
+                '購入 ' + fmtDate(r.purchaseDate).split(' ')[0], r.soldDate ? '售出 ' + fmtDate(r.soldDate).split(' ')[0] : ''].filter(Boolean).join('・'))}</div></span>
+            ${r.purchasePrice > 0 ? `<span class="chip ${gain >= 0 ? 'green' : 'red'}">${gain >= 0 ? '+' : ''}${pct.toFixed(1)}%</span>` : ''}
+            <b style="min-width:82px;text-align:right">${fmtMoney(r.currentValue || 0)}</b>
+          </summary>
+          <div class="sub-items">
+            <div class="nc-rows">
+              ${deedRow('土地權狀', [r.landSituation, r.landNumber, r.landArea ? r.landArea + ' ㎡' : ''].filter(Boolean).join('・'))}
+              ${deedRow('建物權狀', [r.bldgSituation || r.bldgAddress, r.bldgNumber, r.bldgArea ? r.bldgArea + ' ㎡' : '', r.bldgUsage].filter(Boolean).join('・'))}
+              ${deedRow('完工日', r.bldgCompletionDate ? fmtDate(r.bldgCompletionDate).split(' ')[0] : '')}
+              ${deedRow('所有權人', r.landOwner)}
+              ${deedRow('水號', [r.waterMeterNumber, r.waterMeterOwner].filter(Boolean).join('・'))}
+              ${deedRow('電號', [r.electricityMeterNumber, r.electricityMeterOwner].filter(Boolean).join('・'))}
+              ${deedRow('瓦斯', [r.gasMeterNumber, r.gasUserNumber, r.gasMeterOwner].filter(Boolean).join('・'))}
+              ${deedRow('備註', r.note)}
+            </div>
+            ${(r.floors || []).length ? `<div class="chips" style="margin-top:6px">${r.floors.map((f) => `<span class="chip">${esc(f.floorNumber || '樓層')}${(f.functions || []).length ? '・' + (f.functions || []).map(esc).join('／') : ''}${f.area ? '・' + f.area + ' ㎡' : ''}</span>`).join('')}</div>` : ''}
+            ${(r.landDeeds || []).length || (r.buildingDeeds || []).length ? `<div class="muted small" style="margin-top:6px">土地權狀 ${(r.landDeeds || []).length} 張・建物權狀 ${(r.buildingDeeds || []).length} 張</div>` : ''}
+            <div class="muted small" style="margin-top:6px">明細（貸款、已付價金、變動支出）在
+              <a href="#/finance/realestate">理財 › 房地產</a>。</div>
+          </div>
+        </details>`;
+      }).join('')}
+    </div>`).join('') || '<div class="card mt"><div class="empty">還沒有房地產資料</div></div>'}`;
 }
 
 // ---- 家庭 -----------------------------------------------------------------

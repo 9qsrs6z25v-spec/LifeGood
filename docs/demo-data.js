@@ -231,6 +231,33 @@
     expense('自付醫療費用', 18600, -85, '變動支出', '節稅', { taxSavingSubCategory: '醫療' }),
     expense('在職進修學分費', 22000, -170, '變動支出', '節稅', { taxSavingSubCategory: '教育學費' }),
     expense('幼兒園學費', 46000, -190, '變動支出', '節稅', { taxSavingSubCategory: '幼兒學前' }),
+    // ---- 已標定位置的飲食（美食地圖）----
+    ...[[-4, 1280, '家人'], [-25, 1450, '陳怡君'], [-58, 980, '陳怡君,林亦宸'], [-96, 1620, '家人'], [-150, 1180, '陳怡君']]
+      .map(([off, amt, who]) => expense('鼎泰豐 竹北店', amt, off, '變動支出', '飲食',
+        { placeAddress: '新竹縣竹北市莊敬北路 259 號', placeLatitude: 24.8266, placeLongitude: 121.0389, diningMember: who, linkedCreditCardMilestoneId: CARD1, note: '假日聚餐' })),
+    ...[[-8, 620, '同事'], [-19, 700, '同事'], [-40, 560, '']]
+      .map(([off, amt, who]) => expense('大心新泰式麵食', amt, off, '變動支出', '飲食',
+        { placeAddress: '新竹市東區光復路二段 295 號', placeLatitude: 24.7935, placeLongitude: 120.9925, diningMember: who })),
+    ...[[-12, 2350, '陳怡君'], [-73, 2680, '陳怡君']]
+      .map(([off, amt, who]) => expense('THE 176 法式餐酒館', amt, off, '變動支出', '飲食',
+        { placeAddress: '臺北市大安區安和路一段 176 號', placeLatitude: 25.0356, placeLongitude: 121.5486, diningMember: who, linkedCreditCardMilestoneId: CARD1, note: '結婚紀念日' })),
+    expense('阿蘭手工肉包', 180, -2, '變動支出', '飲食', { placeAddress: '新竹縣竹北市光明六路 90 號', placeLatitude: 24.8281, placeLongitude: 121.0121, diningMember: '林亦宸' }),
+    expense('公司附近便當', 110, -1, '變動支出', '飲食'),
+    // ---- 已標定位置的娛樂（旅遊地圖）----
+    ...[[-45, 6800], [-200, 5400]].map(([off, amt]) => expense('北投麗禧溫泉酒店', amt, off, '變動支出', '娛樂',
+      { placeAddress: '臺北市北投區幽雅路 30 號', placeLatitude: 25.1364, placeLongitude: 121.5075, note: '家庭泡湯', linkedCreditCardMilestoneId: CARD1 })),
+    expense('九族文化村', 3200, -120, '變動支出', '娛樂', { placeAddress: '南投縣魚池鄉大林村金天巷 45 號', placeLatitude: 23.8745, placeLongitude: 120.9385, note: '小孩最愛' }),
+    expense('日月潭遊湖', 1600, -119, '變動支出', '娛樂', { placeAddress: '南投縣魚池鄉中山路 599 號', placeLatitude: 23.8646, placeLongitude: 120.9155 }),
+    ...[[-63, 2400], [-230, 2100]].map(([off, amt]) => expense('宜蘭傳藝中心', amt, off, '變動支出', '娛樂',
+      { placeAddress: '宜蘭縣五結鄉五濱路二段 201 號', placeLatitude: 24.6844, placeLongitude: 121.8225 })),
+    expense('台中歌劇院音樂會', 3600, -88, '變動支出', '娛樂', { placeAddress: '臺中市西屯區惠來路二段 101 號', placeLatitude: 24.1621, placeLongitude: 120.6404, linkedCreditCardMilestoneId: CARD1 }),
+    expense('墾丁四天三夜', 28000, -320, '變動支出', '娛樂', { placeAddress: '屏東縣恆春鎮墾丁路 6 號', placeLatitude: 21.9478, placeLongitude: 120.7973, note: '年假家庭旅行' }),
+    // ---- 已標定位置的醫療（醫療地圖）----
+    ...[[-18, 1200], [-95, 3600], [-240, 900]].map(([off, amt]) => expense('康德牙醫診所', amt, off, '變動支出', '醫療',
+      { placeAddress: '新竹縣竹北市自強南路 66 號', placeLatitude: 24.8199, placeLongitude: 121.0155, note: '洗牙／補牙' })),
+    ...[[-52, 480], [-140, 520]].map(([off, amt]) => expense('東元綜合醫院', amt, off, '變動支出', '醫療',
+      { placeAddress: '新竹縣竹北市縣政二路 69 號', placeLatitude: 24.8271, placeLongitude: 121.0143, note: '門診' })),
+    expense('馬偕紀念醫院 健檢', 18000, -85, '變動支出', '醫療', { placeAddress: '臺北市中山區中山北路二段 92 號', placeLatitude: 25.0592, placeLongitude: 121.5209, note: '年度健檢' }),
   ];
   const incomes = [
     { id: id(), title: '薪資', amount: 98000, date: ymd(2024, 1, 5), category: '薪水', period: '每月', isFixedSalary: true, note: '', linkedBankMilestoneId: BANK1, linkedBankCurrency: 'NT$', endDate: null },
@@ -247,7 +274,24 @@
   ];
   const insurances = [{ id: id(), name: '美元儲蓄險', company: '南山人壽', currencyCode: '美金', premiumAmount: 2100, paymentPeriod: '每年', annualRate: 3.8, startDate: ymd(2018, 8, 11), maturityDate: ymd(2028, 8, 10), expectedReturn: 25400, currentValue: 19800, note: '' }];
   const vehicles = [{ id: VEH1, name: 'Model Y', brand: 'Tesla', ownerName: '我', powerType: '電車', purchaseDate: ymd(2024, 6, 15), soldDate: null, purchasePrice: 1890000, currentValue: 1450000, fixedExpenses: [{ id: id(), category: '車貸', amount: 21000, period: '月' }, { id: id(), category: '稅費', amount: 11920, period: '年' }], variableExpenses: [], photoRecords: [], note: '' }];
-  const realEstates = [{ id: id(), name: '竹北自住宅', city: '新竹縣', address: '', purchaseDate: ymd(2021, 9, 1), soldDate: null, purchasePrice: 15800000, currentValue: 18500000, monthlyRental: 0, mortgageItems: [{ id: id(), title: '玉山房貸', amount: 32000, totalPeriods: 360, startDate: ymd(2021, 10, 1) }], paidItems: [], variableExpenses: [], note: '', buildingType: '大樓', hasElevator: true, elevatorMaintenances: [], pingCount: 42.5 }];
+  const realEstates = [
+    { id: id(), name: '竹北自住宅', city: '新竹縣', address: '新竹縣竹北市光明六路 128 號 12 樓', purchaseDate: ymd(2021, 9, 1), soldDate: null, purchasePrice: 15800000, currentValue: 18500000, monthlyRental: 0,
+      mortgageItems: [{ id: id(), title: '玉山房貸', amount: 32000, totalPeriods: 360, startDate: ymd(2021, 10, 1) }], paidItems: [{ id: id(), title: '頭期款', amount: 3200000, date: ymd(2021, 9, 1) }], variableExpenses: [], note: '面公園，採光好。',
+      buildingType: '大樓', hasElevator: true, elevatorMaintenances: [], pingCount: 42.5, landOwner: '林承翰',
+      landSituation: '竹北市光明段', landNumber: '0521-0000', landArea: 128.4,
+      bldgSituation: '竹北市光明段', bldgNumber: '01885-000', bldgAddress: '光明六路 128 號 12 樓', bldgCompletionDate: ymd(2019, 6, 28), bldgUsage: '住家用', bldgArea: 140.5,
+      floors: [{ id: id(), floorNumber: '12F', functions: ['客廳', '廚房', '主臥', '客臥'], area: 140.5, items: [] }],
+      waterMeterNumber: 'W-1120458', waterMeterOwner: '林承翰', electricityMeterNumber: 'E-09-3320', electricityMeterOwner: '林承翰', gasMeterNumber: 'G-88214', gasUserNumber: '2210-4471', gasMeterOwner: '林承翰',
+      landDeeds: [{ id: id() }], buildingDeeds: [{ id: id() }], insuranceItems: [], propertyAssets: [], utilityPayments: [], extraMeters: [], renovationPhotos: [], documents: [] },
+    { id: id(), name: '員林老家透天', city: '彰化縣', address: '彰化縣員林市中山路二段 88 號', purchaseDate: ymd(2016, 3, 15), soldDate: ymd(2023, 11, 20), purchasePrice: 6200000, currentValue: 7800000, monthlyRental: 0,
+      mortgageItems: [], paidItems: [], variableExpenses: [], note: '父母舊居，售出後換竹北。',
+      buildingType: '透天', hasElevator: false, elevatorMaintenances: [], pingCount: 58.0, landOwner: '林文雄',
+      landSituation: '員林市中山段', landNumber: '0203-0001', landArea: 96.2,
+      bldgSituation: '員林市中山段', bldgNumber: '00742-000', bldgAddress: '中山路二段 88 號', bldgUsage: '住家用', bldgArea: 191.7,
+      floors: [{ id: id(), floorNumber: '1F', functions: ['停車', '客廳'], area: 64 }, { id: id(), floorNumber: '2F', functions: ['主臥', '客臥'], area: 64 }, { id: id(), floorNumber: '3F', functions: ['倉庫'], area: 63.7 }],
+      waterMeterNumber: '', waterMeterOwner: '', electricityMeterNumber: '', electricityMeterOwner: '', gasMeterNumber: '', gasUserNumber: '', gasMeterOwner: '',
+      landDeeds: [], buildingDeeds: [], insuranceItems: [], propertyAssets: [], utilityPayments: [], extraMeters: [], renovationPhotos: [], documents: [] },
+  ];
 
   // ---- 履歷示範 ----
   const profile = { chineseName: '林承翰', englishName: 'Hank Lin', company: '晶宏科技', jobTitle: '副理', spouse: '陳怡君' };
@@ -337,5 +381,42 @@
     ballot(thisYear - 1, E.id, E.name, G2, 'E5 資深工程師', 1.5, [gLAB([I, E])], -305),
   ];
 
-  window.LIFEGOOD_DEMO = { subs, depts, orgPeople, grades, equipment, milestones, cards, personalEvents, expenses, incomes, currencyRates, insurances, stocks, vehicles, realEstates, profile, familyMembers, pets, familyTasks, relationships, ballots };
+  // ---- 健康檔案（醫療地圖）----
+  const meas = (off, kg, sys, dia, hr, note) => ({ id: id(), date: d(off, 7), weightKg: kg, systolic: sys, diastolic: dia, heartRate: hr, note: note || '' });
+  const health = {
+    bloodType: 'O+', heightCm: 174,
+    conditions: ['輕度高血壓（家族史）', '慢性鼻過敏'],
+    allergies: [
+      { id: id(), name: '盤尼西林', reaction: '全身紅疹、呼吸不順', severity: '重度' },
+      { id: id(), name: '芒果', reaction: '嘴唇腫、皮膚癢', severity: '輕度' },
+      { id: id(), name: '塵蟎', reaction: '鼻塞、打噴嚏', severity: '中度' },
+    ],
+    medications: [
+      { id: id(), name: 'Amlodipine', dosage: '5mg 每日一次（早）', note: '血壓藥', isActive: true },
+      { id: id(), name: '鼻噴劑 Avamys', dosage: '每側一噴，早晚各一次', note: '季節性使用', isActive: true },
+      { id: id(), name: 'Amoxicillin', dosage: '500mg 每日三次', note: '2024 拔智齒療程，已停用', isActive: false },
+    ],
+    measurements: [
+      meas(-2, 74.8, 128, 82, 72), meas(-9, 75.2, 132, 85, 75, '前一晚吃比較鹹'),
+      meas(-16, 75.6, 126, 80, 70), meas(-23, 76.1, 135, 88, 78),
+      meas(-31, 76.4, 130, 84, 74), meas(-45, 77.0, 138, 90, 80, '加班週'),
+      meas(-60, 77.6, 134, 86, 76), meas(-75, 78.2, 141, 92, 82, '健檢前'),
+      meas(-95, 78.8, 136, 88, 79), meas(-120, 79.4, 133, 85, 77),
+      meas(-160, 80.1, 129, 83, 74), meas(-200, 80.6, 131, 84, 76),
+    ],
+    checkups: [
+      { id: id(), date: d(-85, 8), title: '年度健康檢查', place: '馬偕紀念醫院', result: '血壓偏高、肝功能正常、LDL 偏高（142）', note: '建議三個月後追蹤血壓與血脂', nextDueDate: d(5, 9) },
+      { id: id(), date: d(-18, 10), title: '牙科洗牙', place: '康德牙醫診所', result: '牙結石清除，右下 6 補牙', note: '', nextDueDate: d(160, 10) },
+      { id: id(), date: d(-450, 8), title: '年度健康檢查', place: '馬偕紀念醫院', result: '整體正常，體重偏重', note: '', nextDueDate: null },
+    ],
+    note: '固定週六早晨量血壓；家族有高血壓病史（父親）。',
+  };
+  milestones.push(
+    ms('確診輕度高血壓・開始服藥', '健康', 2024, 8, 12, { note: '每日 Amlodipine 5mg。' }),
+    ms('戒含糖飲料 100 天', '健康', 2025, 7, 20, { note: '體重從 80.6 降到 77。' }),
+    { id: id(), title: '國泰醫療險', date: ymd(2020, 5, 1), category: '成就', note: '住院日額 3000', financeSubCategory: '保險', insuranceCompany: '國泰人壽', insuranceType: '醫療', policyNumber: 'CT-2020-0501', premiumAmount: 18600, beneficiary: '本人' },
+    { id: id(), title: '富邦意外險', date: ymd(2022, 3, 1), category: '成就', note: '保額 500 萬', financeSubCategory: '保險', insuranceCompany: '富邦人壽', insuranceType: '意外', policyNumber: 'FB-2022-0301', premiumAmount: 6200, beneficiary: '陳怡君' },
+  );
+
+  window.LIFEGOOD_DEMO = { subs, depts, orgPeople, grades, equipment, milestones, cards, personalEvents, expenses, incomes, currencyRates, insurances, stocks, vehicles, realEstates, profile, familyMembers, pets, familyTasks, relationships, ballots, health };
 })();
