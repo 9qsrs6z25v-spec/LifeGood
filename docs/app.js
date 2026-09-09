@@ -12,7 +12,7 @@
 // 常數
 // ---------------------------------------------------------------------------
 /** 網頁版自己的版本（與 App 版本無關；改網頁不再動 App 版號） */
-const WEB_VERSION = '1.4';
+const WEB_VERSION = '1.5';
 const CONTAINER_ID = 'iCloud.com.lifegood.app';
 const ZONE_NAME = 'LifeGoodZone';
 const TOKEN_KEY = 'lifegood_ck_token';
@@ -31,6 +31,7 @@ const KV_KEYS = {
   relationships: 'life_relationships',
   pets: 'life_pets',
   familyTasks: 'life_family_tasks',
+  ballots: 'life_performance_ballots',
   // 理財（ExpenseStore／FinanceStore，同樣是 JSON blob）
   expenses: 'lifegood_expenses',
   incomes: 'lifegood_incomes',
@@ -44,7 +45,7 @@ const KV_KEYS = {
 const DATE_KEYS = new Set([
   'date', 'dueDate', 'completedAt', 'endDate', 'joinDate', 'birthday', 'scheduledDate',
   'movedTo', 'createdAt', 'dateAdded', 'leftDate', 'sideRoleEndDate', 'updatedAt', 'recurrenceEndDate',
-  'marriageDate', 'divorceDate', 'anniversary',
+  'marriageDate', 'divorceDate', 'anniversary', 'submittedAt',
   'purchaseDate', 'soldDate', 'startDate', 'maturityDate', 'expiryDate', 'bldgCompletionDate',
 ]);
 
@@ -64,7 +65,7 @@ const REC_COLOR = { '優點': 'green', '缺點': 'red', '成就': 'orange', '改
 const Store = {
   subs: [], depts: [], orgPeople: [], grades: [], equipment: [], milestones: [], cards: [], personalEvents: [],
   expenses: [], incomes: [], currencyRates: [], insurances: [], stocks: [], vehicles: [], realEstates: [],
-  profile: {}, familyMembers: [], relationships: [], pets: [], familyTasks: [],
+  profile: {}, familyMembers: [], relationships: [], pets: [], familyTasks: [], ballots: [],
   source: '', loadedAt: null, ctx: null,
 };
 let ckContainer = null;
@@ -558,10 +559,13 @@ function route() {
       if (t === 'wealth') renderWealth(main);
       else if (t === 'resume') renderResume(main, parts[2] || 'all');
       else if (t === 'family') renderFamily(main, parts[2] || 'members');
+      else if (t === 'overview') renderLifeOverview(main, ctx);
       else renderOverview(main, ctx);
       break;
     }
     case 'grades': renderGrades(main); break;
+    case 'perf': renderPerf(main, parts[1] || ''); break;
+    case 'tax': renderTax(main, parts[1] || ''); break;
     case 'settings': renderSettings(main); break;
     case 'cards': renderCards(main, parts[1] ? decodeURIComponent(parts[1]) : ''); break;
     case 'siderole': renderSideRole(main, decodeURIComponent(parts[1] || ''), parts[2] || 'tasks'); break;
@@ -1768,6 +1772,293 @@ function renderWealth(main) {
       else { const linked = Store.stocks.filter((s) => s.linkedSecuritiesMilestoneId === m.id && !s.isSold); val = fmtMoney(linked.reduce((a, s) => a + stockView(s).mv, 0)); detail = [m.securitiesAccountType, `持股 ${linked.length} 檔`].filter(Boolean).join('・'); extra = linked.length ? `<div class="chips" style="margin-top:6px">${linked.map((s) => `<a class="chip green" href="#/finance/stock/${s.id}">${esc(s.symbol)}</a>`).join('')}</div>` : ''; }
       return `<div class="card" style="${m.isDisabled ? 'opacity:.55' : ''}"><div class="row" style="align-items:flex-start"><div class="avatar sm" style="background:${m.financeSubCategory === '銀行' ? 'linear-gradient(135deg,#007aff,#5ac8fa)' : m.financeSubCategory === '信用卡' ? 'linear-gradient(135deg,#ff9500,#ffcc00)' : m.financeSubCategory === '證券' ? 'linear-gradient(135deg,#34c759,#30b0c7)' : 'linear-gradient(135deg,#af52de,#5856d6)'}">${esc(initial(m.bankName || m.insuranceCompany || m.title))}</div><div style="flex:1;min-width:0"><div style="font-weight:900;font-size:15px">${esc(m.title)} <span class="chip ${subColor[m.financeSubCategory] || ''}">${esc(m.financeSubCategory)}</span>${m.isDisabled ? ' <span class="chip">停用</span>' : ''}</div><div class="muted small">${esc([m.bankName, m.branchName, m.bankAccountType, m.cardName, m.cardLastFour ? '末' + m.cardLastFour : ''].filter(Boolean).join('・'))}</div></div><div class="score s80" style="font-size:18px">${val}</div></div><div class="muted small" style="margin-top:8px">${esc(detail)}</div>${extra}${m.note ? `<div class="muted small" style="margin-top:6px">${esc(m.note)}</div>` : ''}</div>`;
     }).join('') || '<div class="empty">尚無財富卡片</div>'}</div>`;
+}
+
+// ---- 績效評分加總 -----------------------------------------------------------
+// 計分規則與 App 相同：排名在「同課 × 同職等」的組內進行，某組 N 人時第 1 名基礎分 N、
+// 往下每名少 1 分，再乘上「評分者職等」的權重後加總。只計已送出的票。
+function perfYears() {
+  const ys = new Set((Store.ballots || []).map((b) => b.year).filter(Boolean));
+  ys.add(new Date().getFullYear());
+  return [...ys].sort((a, b) => b - a);
+}
+function perfScores(year) {
+  const totals = {};
+  for (const b of Store.ballots || []) {
+    if (b.year !== year || !b.submittedAt) continue;
+    const w = typeof b.raterWeight === 'number' && b.raterWeight > 0 ? b.raterWeight : 1;
+    for (const g of b.groups || []) {
+      const entries = g.entries || [];
+      if (entries.length < 2) continue;
+      entries.forEach((e, i) => {
+        const base = entries.length - i;
+        const cur = totals[e.id] || { personId: e.id, name: e.name || '未命名', total: 0, sources: [] };
+        const sub = subById(e.id);
+        if (sub && sub.name) cur.name = sub.name;
+        cur.total += base * w;
+        cur.sources.push({ raterId: b.raterId, raterName: b.raterName || '未命名', raterGradeLabel: b.raterGradeLabel || '',
+          weight: w, rank: i + 1, groupSize: entries.length, groupTitle: g.departmentName || '', base, points: base * w });
+        totals[e.id] = cur;
+      });
+    }
+  }
+  return Object.values(totals).sort((a, b) => b.total - a.total || a.name.localeCompare(b.name, 'zh-Hant'));
+}
+const num = (v) => (v === Math.round(v) ? String(v) : v.toFixed(1));
+function renderPerf(main, param) {
+  const years = perfYears();
+  const m = /^(\d{4})$/.exec(param || '');
+  const year = m ? +m[1] : years[0];
+  const scores = perfScores(year);
+  const submitted = (Store.ballots || []).filter((b) => b.year === year && b.submittedAt);
+  const raterIds = new Set(submitted.map((b) => b.raterId));
+  const pending = Store.subs.filter((s) => !raterIds.has(s.id));
+  const shown = perfUI.dept === 'all' ? scores
+    : scores.filter((s) => { const sub = subById(s.personId); return sub && sub.departmentId === perfUI.dept; });
+  const rankColor = (r) => (r === 1 ? 'gold' : r === 2 ? '' : r === 3 ? 'orange' : '');
+  main.innerHTML = `
+    ${pageHead('評分加總', `${year} 年度績效互評・${submitted.length} 張已送出`)}
+    <div class="filters">
+      <span class="muted small">年度</span>
+      ${years.map((y) => `<a class="fchip ${y === year ? 'on' : ''}" href="#/perf/${y}">${y}</a>`).join('')}
+      <span class="spacer"></span>
+      <span class="muted small">課別</span>
+      <span class="fchip ${perfUI.dept === 'all' ? 'on' : ''}" data-d="all">全部</span>
+      ${Store.depts.map((d) => `<span class="fchip ${perfUI.dept === d.id ? 'on' : ''}" data-d="${d.id}">${esc(d.name || d.code)}</span>`).join('')}
+    </div>
+    <div class="grid cols-4">
+      ${kpiCard('已送出票', submitted.length, 'green', `尚未送出 ${pending.length}`)}
+      ${kpiCard('被評分人數', shown.length, '', perfUI.dept === 'all' ? '全部課別' : '此課別')}
+      ${kpiCard('最高分', shown.length ? num(shown[0].total) : '—', 'gold', shown.length ? esc(shown[0].name) : '')}
+      ${kpiCard('平均分', shown.length ? num(Math.round(shown.reduce((a, s) => a + s.total, 0) / shown.length * 10) / 10) : '—', '')}
+    </div>
+    ${pending.length ? `<div class="card mt"><h3>⏳ 尚未送出 <span class="count">${pending.length}</span></h3><div class="chips">${pending.map((s) => `<a class="chip orange" href="#/sub/${s.id}">${esc(s.name)}</a>`).join('')}</div></div>` : ''}
+    <div class="card mt"><h3>總排名 <span class="count">${shown.length}</span></h3>
+      ${shown.map((sc, i) => {
+        const sub = subById(sc.personId);
+        const dept = sub && sub.departmentId ? (deptById(sub.departmentId) || {}).name : '';
+        const grade = sub && sub.gradeTitleId ? (gradeById(sub.gradeTitleId) || {}) : null;
+        const avgRank = sc.sources.length ? (sc.sources.reduce((a, x) => a + x.rank, 0) / sc.sources.length).toFixed(1) : '—';
+        return `<details class="agenda" style="border-top:1px solid var(--line);padding:8px 0;margin:0">
+          <summary style="list-style:none;display:flex;align-items:center;gap:12px;color:inherit;font-weight:400">
+            <span class="chip ${rankColor(i + 1)} big" style="min-width:34px;justify-content:center">${i + 1}</span>
+            <span style="flex:1;min-width:0"><b>${esc(sc.name)}</b>${sub ? '' : ' <span class="chip">已轉出</span>'}
+              <div class="muted small">${esc([dept, grade ? (grade.grade + ' ' + grade.title).trim() : ''].filter(Boolean).join('・'))}・${sc.sources.length} 票・平均第 ${avgRank} 名</div></span>
+            <span class="muted small">明細 ▾</span>
+            <b style="color:var(--orange);font-size:17px;min-width:48px;text-align:right">${num(sc.total)}</b>
+          </summary>
+          <div class="sub-items">${sc.sources.slice().sort((a, b) => b.points - a.points).map((src) => `
+            <div class="t-meta" style="display:flex;gap:8px;align-items:center;padding:3px 0">
+              <span style="width:76px">${esc(src.raterName)}</span>
+              <span class="chip blue">第 ${src.rank}/${src.groupSize} 名</span>
+              <span class="muted">${src.base} × ${num(src.weight)}</span>
+              <span class="spacer" style="flex:1"></span>
+              <b style="color:var(--orange)">${num(src.points)}</b>
+            </div>`).join('')}</div>
+        </details>`;
+      }).join('') || `<div class="empty">${scores.length ? '這個課別在這個年度沒有排名資料（同課同職等要滿 2 人才會分組）' : '這個年度還沒有已送出的評分票'}</div>`}
+    </div>
+    <div class="card mt"><h3>職等權重</h3><div class="chips">${Store.grades.map((g) => `<span class="chip indigo">${esc((g.grade + ' ' + g.title).trim())} ×${num(g.performanceWeight > 0 ? g.performanceWeight : 1)}</span>`).join('') || '<span class="muted small">尚未設定職等</span>'}</div>
+      <div class="legend-note">某組 N 人時第 1 名基礎分 N、往下每名少 1 分，再乘上評分者職等的權重後加總。各課人數不同、基礎分上限就不同，跨課比較僅供參考。</div></div>`;
+  main.querySelectorAll('.fchip[data-d]').forEach((el) => el.onclick = () => {
+    perfUI.dept = el.dataset.d === 'all' ? 'all' : el.dataset.d; renderPerf(main, param);
+  });
+}
+const perfUI = { dept: 'all' };
+
+// ---- 稅務 -------------------------------------------------------------------
+// 節稅子分類的年度上限（與 App 的 TaxSavingSubCategory.annualLimit 一致）
+const TAX_LIMITS = { '捐贈': null, '保險費': 24000, '醫療': null, '房貸利息': 300000, '房租': 180000,
+  '教育學費': 25000, '幼兒學前': 120000, '長期照顧': 120000, '身心障礙': 207000, '其他': null };
+const TAX_ICON = { '捐贈': '🎁', '保險費': '🛡️', '醫療': '🏥', '房貸利息': '🏠', '房租': '🏢',
+  '教育學費': '🎓', '幼兒學前': '🧒', '長期照顧': '💗', '身心障礙': '♿', '其他': '•' };
+/** 固定支出自動推斷的節稅子分類（壽險/意外/綜合/強制險→保險費、房貸→房貸利息、房租→房租） */
+function inferredTaxSub(e) {
+  if (e.expenseType !== '固定支出') return null;
+  if (e.fixedCategory === '保險') return '保險費';
+  if (e.fixedCategory === '貸款') return e.loanSubCategory === '房貸' ? '房貸利息' : null;
+  if (e.fixedCategory === '房租') return '房租';
+  return null;
+}
+function effectivelyTaxDeductible(e) {
+  if (typeof e.taxDeductibleOverride === 'boolean') return e.taxDeductibleOverride;
+  if (e.expenseType !== '固定支出') return false;
+  if (e.fixedCategory === '保險') return e.insuranceSubCategory !== '儲蓄險';
+  if (e.fixedCategory === '貸款') return e.loanSubCategory === '房貸';
+  if (e.fixedCategory === '房租') return true;
+  return false;
+}
+/** 某年度這筆固定支出實際發生的金額（含 v25.347 的結束日截斷） */
+function taxYearAmount(e, year) {
+  const startY = e.date.getFullYear();
+  if (startY > year) return 0;
+  if (e.endDate && e.endDate.getFullYear() < year) return 0;
+  const startM = startY < year ? 1 : e.date.getMonth() + 1;
+  const endM = e.endDate && e.endDate.getFullYear() === year ? e.endDate.getMonth() + 1 : 12;
+  const months = Math.max(0, endM - startM + 1);
+  if (e.recurrence === '每月') return e.amount * months;
+  if (e.recurrence === '每季') return e.amount * (months / 3);
+  if (e.recurrence === '每年') return months > 0 ? e.amount : 0;
+  return 0;
+}
+function renderTax(main, param) {
+  const now = new Date();
+  const years = [...new Set(Store.expenses.map((e) => e.date.getFullYear()))].sort((a, b) => b - a);
+  if (!years.includes(now.getFullYear())) years.unshift(now.getFullYear());
+  const m = /^(\d{4})$/.exec(param || '');
+  const year = m ? +m[1] : now.getFullYear();
+  const taxExp = Store.expenses.filter((e) => e.variableCategory === '稅費' && e.date.getFullYear() === year).sort((a, b) => b.date - a.date);
+  const saveExp = Store.expenses.filter((e) => e.variableCategory === '節稅' && e.date.getFullYear() === year);
+  const taxTotal = taxExp.reduce((a, e) => a + e.amount * rateOf(e.currencyCode), 0);
+  // 節稅分桶：直接記帳的節稅 + 固定支出推斷
+  const bySub = {};
+  for (const e of saveExp) { const k = e.taxSavingSubCategory || '其他'; bySub[k] = bySub[k] || { direct: 0, fixed: 0 }; bySub[k].direct += e.amount * rateOf(e.currencyCode); }
+  for (const e of Store.expenses) {
+    if (!effectivelyTaxDeductible(e)) continue;
+    const k = inferredTaxSub(e); if (!k) continue;
+    bySub[k] = bySub[k] || { direct: 0, fixed: 0 };
+    bySub[k].fixed += taxYearAmount(e, year) * rateOf(e.currencyCode);
+  }
+  const saveTotal = Object.values(bySub).reduce((a, v) => a + v.direct + v.fixed, 0);
+  // 預估年收入（週期收入以起始年 <= 該年為準；單次只算當年）
+  const income = Store.incomes.reduce((a, i) => {
+    const y = i.date.getFullYear();
+    if (i.period === '每月') return y <= year ? a + i.amount * 12 : a;
+    if (i.period === '每年') return y <= year ? a + i.amount : a;
+    return y === year ? a + i.amount : a;
+  }, 0);
+  const reCount = Store.realEstates.filter((r) => !r.soldDate).length;
+  const vhCount = Store.vehicles.filter((v) => !v.soldDate).length;
+  // 檢核項目：[月份, 名稱, 是否適用, 色, 對應稅費紀錄的關鍵字]
+  const paidOf = (re) => taxExp.filter((e) => re.test(e.title)).reduce((a, e) => a + e.amount * rateOf(e.currencyCode), 0);
+  const checklist = [
+    [5, '綜合所得稅申報', true, 'indigo', /綜所|所得稅/],
+    [5, '房屋稅繳納', reCount > 0, 'blue', /房屋稅/],
+    [7, '汽機車使用牌照稅', vhCount > 0, 'orange', /牌照/],
+    [11, '地價稅繳納', reCount > 0, 'purple', /地價/],
+    [4, '汽機車燃料費', vhCount > 0, 'teal', /燃料/],
+  ].filter((x) => x[2]).map(([mo, title, , color, re]) => {
+    const paid = paidOf(re);
+    const passed = year < now.getFullYear() || (year === now.getFullYear() && now.getMonth() + 1 > mo);
+    return { mo, title, color, paid, state: paid > 0 ? '已繳' : passed ? '未見紀錄' : '尚未到期' };
+  }).sort((a, b) => a.mo - b.mo);
+  // 稅費月份分佈
+  const byMonth = {}; for (const e of taxExp) byMonth[e.date.getMonth() + 1] = (byMonth[e.date.getMonth() + 1] || 0) + e.amount * rateOf(e.currencyCode);
+  const maxMonth = Math.max(1, ...Object.values(byMonth));
+  const subs = Object.entries(bySub).filter(([, v]) => v.direct + v.fixed > 0)
+    .sort((a, b) => (b[1].direct + b[1].fixed) - (a[1].direct + a[1].fixed));
+  main.innerHTML = `
+    ${pageHead('稅務', `${year} 年度・台幣等值`)}
+    <div class="filters"><span class="muted small">年度</span>${years.slice(0, 8).map((y) => `<a class="fchip ${y === year ? 'on' : ''}" href="#/tax/${y}">${y}</a>`).join('')}</div>
+    <div class="grid cols-4">
+      ${kpiCard('年度稅費支出', fmtMoney(taxTotal), taxTotal ? 'red' : '', `${taxExp.length} 筆`)}
+      ${kpiCard('節稅累計', fmtMoney(saveTotal), 'green', `${subs.length} 個項目`)}
+      ${kpiCard('預估年收入', fmtMoney(income), '', income ? `稅費占 ${(taxTotal / income * 100).toFixed(1)}%` : '')}
+      ${kpiCard('資產稅負', `${reCount} 房 / ${vhCount} 車`, '', '房屋稅・地價稅・牌照稅')}
+    </div>
+    <div class="grid cols-2 mt">
+      <div class="card"><h3>節稅累積 <span class="count">${subs.length}</span></h3>
+        ${subs.map(([k, v]) => {
+          const total = v.direct + v.fixed; const limit = TAX_LIMITS[k];
+          const pct = limit ? Math.min(100, Math.round(total / limit * 100)) : null;
+          return `<div style="padding:9px 0;border-top:1px solid var(--line)">
+            <div class="row" style="justify-content:space-between">
+              <span><b>${TAX_ICON[k] || '•'} ${esc(k)}</b>${v.fixed > 0 ? ` <span class="chip indigo">含固定支出 ${fmtMoney(v.fixed, '')}</span>` : ''}</span>
+              <b>${fmtFull(total)}</b>
+            </div>
+            ${limit ? `<div style="height:6px;border-radius:3px;background:var(--card2);margin-top:6px;overflow:hidden"><div style="width:${pct}%;height:100%;background:${pct >= 100 ? 'var(--red)' : 'var(--green)'}"></div></div>
+              <div class="muted small" style="margin-top:3px">上限 ${fmtMoney(limit)}・已用 ${pct}%${pct >= 100 ? '（已達上限）' : `・還可列 ${fmtMoney(limit - total)}`}</div>`
+              : '<div class="muted small" style="margin-top:3px">核實認列，無固定上限</div>'}
+          </div>`;
+        }).join('') || '<div class="empty">這個年度還沒有節稅項目</div>'}
+      </div>
+      <div class="card"><h3>年度稅務檢核 <span class="count">${checklist.length}</span></h3>
+        ${checklist.map((c) => `<div class="row" style="gap:10px;align-items:center;padding:7px 0;border-top:1px solid var(--line)">
+          <span class="chip ${c.color}" style="min-width:46px;justify-content:center">${c.mo} 月</span>
+          <span style="flex:1;min-width:0"><b>${esc(c.title)}</b>${c.paid > 0 ? `<div class="muted small">已繳 ${fmtMoney(c.paid, '')}</div>` : ''}</span>
+          <span class="chip ${c.state === '已繳' ? 'green' : c.state === '未見紀錄' ? 'orange' : ''}">${c.state}</span></div>`).join('') || '<div class="empty">沒有需要檢核的項目</div>'}
+        <div class="section-title">稅費月份分佈</div>
+        ${Object.keys(byMonth).length ? Object.entries(byMonth).sort((a, b) => a[0] - b[0]).map(([mo, v]) => `
+          <div class="row" style="gap:8px;padding:3px 0"><span class="muted small" style="width:36px">${mo} 月</span>
+            <span style="flex:1;height:8px;border-radius:4px;background:var(--card2);overflow:hidden"><span style="display:block;width:${Math.round(v / maxMonth * 100)}%;height:100%;background:var(--red);opacity:.7"></span></span>
+            <b class="small">${fmtMoney(v, '')}</b></div>`).join('') : '<div class="empty">這個年度沒有稅費紀錄</div>'}
+      </div>
+    </div>
+    <div class="card table-wrap mt"><h3>稅費紀錄 <span class="count">${taxExp.length}</span></h3>
+      <table class="tbl"><thead><tr><th>日期</th><th>項目</th><th class="num">金額</th><th>付款</th><th>備註</th></tr></thead><tbody>
+      ${taxExp.map((e) => `<tr><td>${fmtDate(e.date).split(' ')[0]}</td><td><b>${esc(e.title)}</b></td><td class="num"><b>${fmtAmt(e.amount, e.currencyCode)}</b></td><td class="muted small">${e.linkedCreditCardMilestoneId ? '💳 ' + esc(bankNameOf(e.linkedCreditCardMilestoneId)) : e.linkedBankMilestoneId ? '🏦 ' + esc(bankNameOf(e.linkedBankMilestoneId)) : ''}</td><td class="muted small">${esc(e.note || '')}</td></tr>`).join('') || '<tr><td colspan="5" class="empty">這個年度沒有稅費紀錄</td></tr>'}
+      </tbody></table></div>`;
+}
+
+// ---- 人生總覽 ---------------------------------------------------------------
+function renderLifeOverview(main, ctx) {
+  const now = new Date();
+  const S = financeSummary();
+  const p = Store.profile || {};
+  const yrs = careerYears();
+  const openTasks = Store.subs.reduce((a, s) => a + (s.tasks || []).filter((t) => !t.isCompleted).length, 0);
+  const overdue = Store.subs.reduce((a, s) => a + (s.tasks || []).filter((t) => !t.isCompleted && t.dueDate && t.dueDate < now).length, 0);
+  const famOpen = (Store.familyTasks || []).filter((t) => !t.isCompleted).length;
+  // 今天與未來 7 天的行事曆項目
+  const from = startOfDay(now); const to = new Date(from); to.setDate(to.getDate() + 8);
+  const items = calendarItems(from, to);
+  const upcoming = Object.keys(items).sort().flatMap((k) => items[k]).slice(0, 12);
+  const bdays = [
+    ...Store.subs.map((s) => ({ name: s.name, sub: '部屬', b: birthdayInfo(s.birthday) })),
+    ...(Store.familyMembers || []).map((m) => ({ name: m.chineseName || m.englishName, sub: m.role, b: birthdayInfo(m.birthday) })),
+  ].filter((x) => x.b && x.b.days <= 30).sort((a, b) => a.b.days - b.b.days);
+  // 待辦：家庭待辦＋兼任職務待辦，逾期在前、再依到期日
+  const todos = [
+    ...(Store.familyTasks || []).filter((t) => !t.isCompleted).map((t) => ({
+      title: t.content || '未命名待辦', who: '家庭', dueDate: t.dueDate, tag: '家', color: 'pink', href: '#/life/family/tasks',
+    })),
+    ...sideRoles().filter(roleActive).flatMap((r) => roleTasks(r).filter((t) => !t.isCompleted).map((t) => ({
+      title: t.content || '未命名待辦', who: roleName(r), dueDate: t.dueDate, tag: '兼', color: 'indigo', href: `#/siderole/${r.id}/tasks`,
+    }))),
+  ].map((t) => Object.assign(t, { overdue: !!t.dueDate && t.dueDate < now }))
+    .sort((a, b) => (b.overdue - a.overdue) || ((a.dueDate ? +a.dueDate : 8e15) - (b.dueDate ? +b.dueDate : 8e15)));
+  const tile = (icon, title, href, rows) => `<a class="card" href="${href}" style="display:block">
+    <h3>${icon} ${title} <span class="spacer" style="flex:1"></span><span class="muted small">開啟 ›</span></h3>
+    <div class="nc-rows">${rows.map(([k, v]) => `<div><span class="nc-lbl" style="min-width:76px">${k}</span><b>${v}</b></div>`).join('')}</div></a>`;
+  main.innerHTML = `
+    ${pageHead('人生總覽', `${fmtDate(now)}・一頁看完所有面向`)}
+    <div class="card hero" style="background:linear-gradient(135deg, rgba(52,199,89,0.16), rgba(0,122,255,0.10))">
+      <div class="avatar">${esc(initial(p.chineseName || '我'))}</div>
+      <div style="flex:1;min-width:0">
+        <div class="name">${esc(p.chineseName || '（未填姓名）')}</div>
+        <div class="facts">
+          ${p.company ? `<span>🏢 ${esc(p.company)}</span>` : ''}${p.jobTitle ? `<span>💼 ${esc(p.jobTitle)}</span>` : ''}
+          ${yrs ? `<span>📆 年資 ${yrs.years.toFixed(1)} 年</span>` : ''}
+          <span>👥 部屬 ${Store.subs.length} 人</span><span>🧩 兼任 ${sideRoles().filter(roleActive).length} 個</span>
+        </div>
+      </div>
+    </div>
+    <div class="grid cols-4 mt">
+      ${kpiCard('淨資產概算', fmtMoney(S.netWorth), S.netWorth >= 0 ? 'green' : 'red', `銀行 ${fmtMoney(S.bankTotal)}`)}
+      ${kpiCard('本月支出', fmtMoney(cashflowByMonth(1).exp[monthKeyOf(now)] || 0), 'orange', `收入 ${fmtMoney(cashflowByMonth(1).inc[monthKeyOf(now)] || 0)}`)}
+      ${kpiCard('部屬未完成任務', openTasks, overdue ? 'red' : '', overdue ? `逾期 ${overdue}` : '沒有逾期')}
+      ${kpiCard('家庭待辦', famOpen, famOpen ? 'orange' : 'green', `${(Store.familyMembers || []).length} 位成員`)}
+    </div>
+    <div class="grid cols-2 mt">
+      <div class="card"><h3>📅 未來 7 天 <span class="count">${upcoming.length}</span></h3>
+        <div class="list">${upcoming.map((it) => `<a class="item clickable" ${it.href ? `href="${it.href}"` : ''}>
+          <span class="chip ${it.overdue ? 'red' : (CAL_KINDS.find((k) => k[0] === it.kind) || CAL_KINDS[0])[2]}">${fmtDate(it.date).split(' ')[0].slice(5)}</span>
+          <div class="main-text"><div class="title" style="${it.done ? 'text-decoration:line-through;color:var(--muted)' : ''}">${esc(it.title)}</div><div class="meta">${[it.who, it.sub].filter(Boolean).map(esc).join('・')}</div></div></a>`).join('') || '<div class="empty">未來 7 天沒有排定項目</div>'}</div></div>
+      <div class="card"><h3>🎂 30 天內生日 <span class="count">${bdays.length}</span></h3>
+        <div class="chips">${bdays.map((x) => `<span class="chip ${x.b.days <= 1 ? 'pink' : ''}">${esc(x.name)}・${esc(x.sub)}・${x.b.days === 0 ? '今天' : x.b.days + ' 天後'}</span>`).join('') || '<span class="muted small">30 天內沒有人生日</span>'}</div>
+        <div class="section-title">最近里程碑</div>
+        <div class="list">${[...Store.milestones].filter((x) => x.date).sort((a, b) => b.date - a.date).slice(0, 5).map((x) => `<div class="item"><span class="chip ${catChipColor(x.category)}">${catIcon(x.category)}</span><div class="main-text"><div class="title">${esc(x.title || '未命名')}</div><div class="meta">${fmtDate(x.date).split(' ')[0]}・${esc(catLabel(x.category))}</div></div></div>`).join('')}</div>
+        <div class="section-title">待辦事項 <span class="count">${todos.length}</span></div>
+        <div class="list">${todos.slice(0, 8).map((t) => `<a class="item ${t.href ? 'clickable' : ''}" ${t.href ? `href="${t.href}"` : ''}>
+          <span class="chip ${t.overdue ? 'red' : t.color}">${t.tag}</span>
+          <div class="main-text"><div class="title">${esc(t.title)}</div><div class="meta">${[t.who, t.dueDate ? '截止 ' + fmtDue(t.dueDate) : '未設截止'].filter(Boolean).map(esc).join('・')}</div></div>
+        </a>`).join('') || '<div class="empty">沒有未完成的待辦 🎉</div>'}</div></div>
+    </div>
+    <div class="grid cols-3 mt">
+      ${tile('💼', '職涯', '#/overview', [['部屬', Store.subs.length + ' 人'], ['未交報告', Store.subs.reduce((a, s) => a + (s.weeklyReports || []).filter((r) => !r.isCompleted).length, 0) + ' 份'], ['執掌設備', Store.equipment.length + ' 台']])}
+      ${tile('👨‍👩‍👧', '家庭', '#/life/family', [['成員', (Store.familyMembers || []).length + ' 位'], ['寵物', (Store.pets || []).length + ' 隻'], ['人際關係', (Store.relationships || []).length + ' 位']])}
+      ${tile('💰', '理財', '#/finance/overview', [['股票市值', fmtMoney(S.stockMV)], ['儲蓄險現值', fmtMoney(S.insTotal)], ['房產・車輛', fmtMoney(S.reValue + S.vhValue)]])}
+    </div>`;
 }
 
 // ---- 家庭 -----------------------------------------------------------------

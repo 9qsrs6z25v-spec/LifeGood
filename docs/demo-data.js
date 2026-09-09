@@ -13,9 +13,9 @@
   const P_ME = id(), P_QA1 = id(), P_QA2 = id(), P_PROD1 = id();
 
   const grades = [
-    { id: G1, grade: 'E3', title: '工程師' },
-    { id: G2, grade: 'E5', title: '資深工程師' },
-    { id: G3, grade: 'M1', title: '課長' },
+    { id: G1, grade: 'E3', title: '工程師', performanceWeight: 1 },
+    { id: G2, grade: 'E5', title: '資深工程師', performanceWeight: 1.5 },
+    { id: G3, grade: 'M1', title: '課長', performanceWeight: 2 },
   ];
 
   const mkSub = (name, jobTitle, deptId, gradeId, opts) => Object.assign({
@@ -98,7 +98,20 @@
   G.weeklyReports = [report('新人報告：包裝線', '新人報', -2, true, 1)];
   G.records = [rec('缺點', '報告常遲交', -6), rec('Miss Operation', '未依 SOP 停機', -16, { severity: '一般' }), rec('請假', '', -2, { leaveType: '事假', leaveHours: 4 })];
 
-  const subs = [A, B, C, E, F, G];
+  // 為了讓「評分加總」有同課同職等的排名組（每組至少 2 人），再補三位資料較少的成員
+  const H = mkSub('吳孟儒', '工程師', D_EQ, G1, { joinDate: ymd(2024, 9, 2), birthday: ymd(1998, 7, 9) });
+  const I = mkSub('周雅琪', '資深工程師', D_LAB, G2, { joinDate: ymd(2020, 11, 16), plantArea: 'P2' });
+  const J = mkSub('蘇柏翰', '工程師', D_EQ, G1, { joinDate: ymd(2025, 3, 10) });
+  H.tasks = [task('CDA 巡檢表數位化驗收', '', -14, -6, -6), task('冰水泵浦異音追查', '', -6, 8, false)];
+  H.weeklyReports = [report('第 36 週週報', '周報', -1, true)];
+  H.records = [rec('優點', '交辦事項回覆快', -11)];
+  I.tasks = [task('純水系統水質年報', '', -25, -10, -10), task('化學品盤點', '', -8, 4, false)];
+  I.weeklyReports = [report('8 月月報', '月報', -5, true)];
+  I.records = [rec('成就', '通過 ISO 稽核零缺失', -35), rec('優點', '文件整理仔細', -20)];
+  J.tasks = [task('新人訓練：CDA 系統', '', -20, -12, -12), task('廢水池巡檢紀錄補登', '', -5, -1, false)];
+  J.records = [rec('請假', '', -13, { leaveType: '特休', leaveHours: 8 })];
+
+  const subs = [A, B, C, E, F, G, H, I, J];
 
   const depts = [
     { id: D_EQ, code: 'FAC-EQ', name: '設備課', function: '廠務設備（CDA、冰水、廢水）維運與 PM', upstreamIds: [D_PROD], downstreamIds: [], peerIds: [D_LAB], managerIds: [P_ME] },
@@ -115,6 +128,9 @@
     { id: id(), name: '林雅婷', jobTitle: '資深工程師', departmentId: D_LAB, relationship: '', note: '', children: [], relations: [], dateAdded: ymd(2024, 1, 1), isInactive: false, linkedSubordinateId: E.id, gradeTitleId: G2, works: [] },
     { id: P_PROD1, name: '張建國', jobTitle: '課長', departmentId: D_PROD, relationship: '', note: '', children: [], relations: [], dateAdded: ymd(2024, 1, 1), isInactive: false, linkedSubordinateId: F.id, gradeTitleId: G3, works: [] },
     { id: id(), name: '黃冠宇', jobTitle: '工程師', departmentId: D_PROD, relationship: '', note: '', children: [], relations: [], dateAdded: ymd(2024, 1, 1), isInactive: false, linkedSubordinateId: G.id, gradeTitleId: G1, works: [] },
+    { id: id(), name: '吳孟儒', jobTitle: '工程師', departmentId: D_EQ, relationship: '', note: '', children: [], relations: [], dateAdded: ymd(2024, 9, 2), isInactive: false, linkedSubordinateId: H.id, gradeTitleId: G1, works: [] },
+    { id: id(), name: '蘇柏翰', jobTitle: '工程師', departmentId: D_EQ, relationship: '', note: '', children: [], relations: [], dateAdded: ymd(2025, 3, 10), isInactive: false, linkedSubordinateId: J.id, gradeTitleId: G1, works: [] },
+    { id: id(), name: '周雅琪', jobTitle: '資深工程師', departmentId: D_LAB, relationship: '', note: '', children: [], relations: [], dateAdded: ymd(2020, 11, 16), isInactive: false, linkedSubordinateId: I.id, gradeTitleId: G2, works: [] },
     { id: P_QA1, name: '吳美玲', jobTitle: '品保課長', departmentId: D_QA, relationship: '稽核窗口', note: '', children: [], relations: [], dateAdded: ymd(2024, 1, 1), isInactive: false, gradeTitleId: null, works: [{ id: id(), title: '年度稽核總結報告', date: d(-20) }] },
     { id: P_QA2, name: '許志偉', jobTitle: '品保工程師', departmentId: D_QA, relationship: '', note: '', children: [], relations: [], dateAdded: ymd(2024, 1, 1), isInactive: true, leftDate: d(-90), gradeTitleId: null, works: [] },
     { id: id(), name: '劉大偉', jobTitle: '顧問', departmentId: null, relationship: '外部顧問', note: '', children: [], relations: [], dateAdded: ymd(2024, 1, 1), isInactive: false, gradeTitleId: null, works: [] },
@@ -184,7 +200,8 @@
   );
   const expense = (title, amount, dayOff, type, cat, extra) => Object.assign({ id: id(), title, amount, date: d(dayOff, 12), expenseType: type, note: '', currencyCode: 'NT$', photoFileNames: [], amountHistory: [] }, type === '固定支出' ? { fixedCategory: cat } : { variableCategory: cat }, extra || {});
   const expenses = [
-    expense('房貸', 32000, -700, '固定支出', '貸款', { recurrence: '每月', linkedBankMilestoneId: BANK1 }),
+    expense('房貸', 32000, -700, '固定支出', '貸款', { recurrence: '每月', linkedBankMilestoneId: BANK1, loanSubCategory: '房貸', loanTotalAmount: 6800000, loanYears: 30, loanRate: 2.06 }),
+    expense('南山壽險', 3250, -800, '固定支出', '保險', { recurrence: '每月', insuranceSubCategory: '壽險', linkedBankMilestoneId: BANK1 }),
     expense('中華電信', 1399, -500, '固定支出', '電信費', { recurrence: '每月', linkedCreditCardMilestoneId: CARD1 }),
     expense('Netflix', 390, -400, '固定支出', '訂閱服務', { recurrence: '每月', linkedCreditCardMilestoneId: CARD1 }),
     // 已停止：去年底取消的訂閱、以及三年期已繳清的車貸
@@ -207,6 +224,13 @@
     expense('新手機', 32900, -100, '變動支出', '購物', { linkedCreditCardMilestoneId: CARD1 }),
     expense('家電維修', 4500, -130, '變動支出', '其他'),
     expense('綜所稅', 68000, -110, '變動支出', '稅費'),
+    expense('房屋稅', 9800, -112, '變動支出', '稅費'),
+    expense('汽車牌照稅', 11920, -65, '變動支出', '稅費', { linkedVehicleId: VEH1, vehicleExpenseCategory: '稅費' }),
+    expense('汽車燃料費', 4800, -145, '變動支出', '稅費', { linkedVehicleId: VEH1, vehicleExpenseCategory: '稅費' }),
+    expense('育幼院捐款', 12000, -60, '變動支出', '節稅', { taxSavingSubCategory: '捐贈' }),
+    expense('自付醫療費用', 18600, -85, '變動支出', '節稅', { taxSavingSubCategory: '醫療' }),
+    expense('在職進修學分費', 22000, -170, '變動支出', '節稅', { taxSavingSubCategory: '教育學費' }),
+    expense('幼兒園學費', 46000, -190, '變動支出', '節稅', { taxSavingSubCategory: '幼兒學前' }),
   ];
   const incomes = [
     { id: id(), title: '薪資', amount: 98000, date: ymd(2024, 1, 5), category: '薪水', period: '每月', isFixedSalary: true, note: '', linkedBankMilestoneId: BANK1, linkedBankCurrency: 'NT$', endDate: null },
@@ -288,5 +312,30 @@
     { id: id(), name: '蔡宗翰', group: '同事', birthday: ymd(1985, 12, 25), anniversary: null, phone: '分機 208', note: '前主管，離職後仍有往來。', interactions: [{ id: id(), date: d(-70), note: '中午一起吃飯' }] },
     { id: id(), name: '大同氣體 陳經理', group: '客戶', birthday: null, anniversary: ymd(2025, 6, 1), phone: '0912-345-678', note: '供應商窗口', interactions: [{ id: id(), date: d(-9), note: '評鑑前置會' }] },
   ];
-  window.LIFEGOOD_DEMO = { subs, depts, orgPeople, grades, equipment, milestones, cards, personalEvents, expenses, incomes, currencyRates, insurances, stocks, vehicles, realEstates, profile, familyMembers, pets, familyTasks, relationships };
+  // ---- 績效互評票（陣列順序＝該評分者排出的名次；只有 submittedAt 有值的才計分）----
+  const SELF_RATER = '00000000-0000-0000-0000-00000000FEED';
+  const ent = (s) => ({ id: s.id, name: s.name });
+  const gEQ = (order) => ({ id: id(), departmentId: D_EQ, departmentName: '設備課', gradeId: G1, gradeLabel: 'E3 工程師', entries: order.map(ent) });
+  const gLAB = (order) => ({ id: id(), departmentId: D_LAB, departmentName: '實驗室', gradeId: G2, gradeLabel: 'E5 資深工程師', entries: order.map(ent) });
+  const ballot = (year, rater, name, gradeId, gradeLabel, weight, groups, dayOff) => ({
+    id: id(), year, raterId: rater, raterName: name, raterGradeId: gradeId, raterGradeLabel: gradeLabel,
+    raterWeight: weight, groups, submittedAt: dayOff == null ? null : d(dayOff, 20), note: '',
+  });
+  const thisYear = now.getFullYear();
+  const ballots = [
+    ballot(thisYear, SELF_RATER, '我', G3, 'M1 課長', 2, [gEQ([B, H, J]), gLAB([E, I])], -8),
+    ballot(thisYear, A.id, A.name, G2, 'E5 資深工程師', 1.5, [gEQ([B, J, H])], -10),
+    ballot(thisYear, B.id, B.name, G1, 'E3 工程師', 1, [gEQ([H, B, J])], -11),
+    ballot(thisYear, H.id, H.name, G1, 'E3 工程師', 1, [gEQ([B, H, J])], -9),
+    ballot(thisYear, E.id, E.name, G2, 'E5 資深工程師', 1.5, [gLAB([E, I])], -12),
+    ballot(thisYear, C.id, C.name, G1, 'E3 工程師', 1, [gLAB([I, E])], -7),
+    // 尚未送出的草稿：J、F、G、I 會出現在「尚未送出」名單
+    ballot(thisYear, J.id, J.name, G1, 'E3 工程師', 1, [gEQ([B, J, H])], null),
+    // 去年的票（讓年度切換有東西可看）
+    ballot(thisYear - 1, SELF_RATER, '我', G3, 'M1 課長', 2, [gEQ([B, J, H]), gLAB([I, E])], -300),
+    ballot(thisYear - 1, A.id, A.name, G2, 'E5 資深工程師', 1.5, [gEQ([J, B, H])], -302),
+    ballot(thisYear - 1, E.id, E.name, G2, 'E5 資深工程師', 1.5, [gLAB([I, E])], -305),
+  ];
+
+  window.LIFEGOOD_DEMO = { subs, depts, orgPeople, grades, equipment, milestones, cards, personalEvents, expenses, incomes, currencyRates, insurances, stocks, vehicles, realEstates, profile, familyMembers, pets, familyTasks, relationships, ballots };
 })();
