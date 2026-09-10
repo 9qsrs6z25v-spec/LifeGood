@@ -353,8 +353,8 @@
   const SPOUSE = id(), SON = id(), DAU = id();
   const crec = (type, y, mo, da, title, extra) => Object.assign({ id: id(), type, date: ymd(y, mo, da), title, detail: '', note: '' }, extra || {});
   const familyMembers = [
-    { id: SPOUSE, role: '配偶', chineseName: '陳怡君', englishName: 'Ivy Chen', birthday: ymd(1991, 4, 22), marriageDate: ymd(2019, 11, 9), isDivorced: false, childRecords: [], dailyRecords: [], familySide: '我的', familyEvents: [{ id: id(), date: ymd(2024, 11, 9), title: '結婚五週年', content: '在台南吃了老宅法餐。' }], familyPhotos: [], vaccinations: [], agreements: [{ id: id(), title: '家事分工', content: '週間我洗碗、她收衣服' }] },
-    { id: SON, role: '兒子', chineseName: '林亦宸', englishName: 'Ethan', birthday: ymd(2021, 5, 18), isDivorced: false, dailyRecords: [], familySide: '我的', familyEvents: [], familyPhotos: [], vaccinations: [],
+    { id: SPOUSE, role: '配偶', chineseName: '陳怡君', englishName: 'Ivy Chen', birthday: ymd(1991, 4, 22), marriageDate: ymd(2019, 11, 9), isDivorced: false, childRecords: [], dailyRecords: [], familySide: null, familyEvents: [{ id: id(), date: ymd(2024, 11, 9), title: '結婚五週年', content: '在台南吃了老宅法餐。' }], familyPhotos: [], vaccinations: [], agreements: [{ id: id(), title: '家事分工', content: '週間我洗碗、她收衣服' }] },
+    { id: SON, role: '兒子', chineseName: '林亦宸', englishName: 'Ethan', birthday: ymd(2021, 5, 18), isDivorced: false, dailyRecords: [], familySide: null, familyEvents: [], familyPhotos: [], vaccinations: [],
       childRecords: [
         crec('成長記錄', 2024, 5, 20, '三歲健檢', { heightCm: 96.5, weightKg: 14.2 }),
         crec('成長記錄', 2025, 5, 22, '四歲健檢', { heightCm: 104.0, weightKg: 16.8 }),
@@ -365,7 +365,7 @@
         crec('教育里程碑', 2025, 9, 1, '上幼兒園中班'),
         crec('紀念時刻', 2026, 6, 1, '第一次自己騎腳踏車'),
       ] },
-    { id: DAU, role: '女兒', chineseName: '林亦恩', englishName: 'Erin', birthday: ymd(2024, 8, 30), isDivorced: false, dailyRecords: [], familySide: '我的', familyEvents: [], familyPhotos: [], vaccinations: [],
+    { id: DAU, role: '女兒', chineseName: '林亦恩', englishName: 'Erin', birthday: ymd(2024, 8, 30), isDivorced: false, dailyRecords: [], familySide: null, familyEvents: [], familyPhotos: [], vaccinations: [],
       childRecords: [
         crec('成長記錄', 2025, 8, 30, '一歲健檢', { heightCm: 75.0, weightKg: 9.1 }),
         crec('成長記錄', 2026, 2, 28, '一歲半健檢', { heightCm: 82.3, weightKg: 10.6 }),

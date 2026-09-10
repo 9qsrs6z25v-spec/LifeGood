@@ -12,7 +12,7 @@
 // 常數
 // ---------------------------------------------------------------------------
 /** 網頁版自己的版本（與 App 版本無關；改網頁不再動 App 版號） */
-const WEB_VERSION = '1.8';
+const WEB_VERSION = '1.9';
 const CONTAINER_ID = 'iCloud.com.lifegood.app';
 const ZONE_NAME = 'LifeGoodZone';
 const TOKEN_KEY = 'lifegood_ck_token';
@@ -2722,6 +2722,15 @@ function ageOf(bday) {
   return { years: y, months, text: y >= 3 ? `${y} 歲` : `${y} 歲 ${((months % 12) + 12) % 12} 個月` };
 }
 const memberName = (m) => (m.chineseName || m.englishName || '未命名');
+/** 會分「我的／配偶的」家族側的角色（對齊 App 的 FamilyMemberRole.supportsFamilySide） */
+const SIDE_ROLES = new Set(['爸爸', '媽媽', '哥哥', '姐姐', '弟弟', '妹妹', '其他親屬']);
+/** 顯示用稱謂：配偶那一側的親屬加上「配偶的」前綴（對齊 App 的 displayRoleLabel） */
+const SPOUSE_ROLE_LABEL = { '爸爸': '配偶的父親', '媽媽': '配偶的母親', '哥哥': '配偶的哥哥',
+  '姐姐': '配偶的姐姐', '弟弟': '配偶的弟弟', '妹妹': '配偶的妹妹', '其他親屬': '配偶的親屬' };
+function displayRole(m) {
+  if (m.familySide === '配偶的' && SIDE_ROLES.has(m.role)) return SPOUSE_ROLE_LABEL[m.role] || m.role || '';
+  return m.role || '';
+}
 function renderFamily(main, tab) {
   const now = new Date();
   const members = Store.familyMembers || [];
@@ -2743,8 +2752,15 @@ function renderFamily(main, tab) {
 
   let body = '';
   if (tab === 'members') {
-    const bySide = { '我的': [], '配偶的': [], '其他': [] };
-    for (const m of members) bySide[m.familySide === '我的' ? '我的' : m.familySide === '配偶的' ? '配偶的' : '其他'].push(m);
+    // App 的 familySide 只用在父母／兄姊弟妹／其他親屬（FamilyMemberRole.supportsFamilySide）；
+    // 配偶與兒女不分家族側，familySide 一定是空的，所以要單獨成一段，不能丟進「未分家族」。
+    const bySide = { '核心': [], '我的': [], '配偶的': [], '其他': [] };
+    for (const m of members) {
+      if (!SIDE_ROLES.has(m.role)) bySide['核心'].push(m);
+      else if (m.familySide === '我的') bySide['我的'].push(m);
+      else if (m.familySide === '配偶的') bySide['配偶的'].push(m);
+      else bySide['其他'].push(m);
+    }
     const card = (m) => {
       const a = ageOf(m.birthday);
       const recs = (m.childRecords || []).length, evts = (m.familyEvents || []).length, daily = (m.dailyRecords || []).length;
@@ -2752,7 +2768,7 @@ function renderFamily(main, tab) {
         <div class="avatar sm" style="background:linear-gradient(135deg,#ff2d55,#ff9500)">${esc(initial(memberName(m)))}</div>
         <div style="flex:1;min-width:0">
           <div style="font-weight:900;font-size:15px">${esc(memberName(m))}${m.englishName && m.chineseName ? ` <span class="muted" style="font-weight:600">${esc(m.englishName)}</span>` : ''}</div>
-          <div class="muted small">${esc(m.role || '')}${m.familySide ? '・' + esc(m.familySide) + '家' : ''}${a ? '・' + a.text : ''}</div>
+          <div class="muted small">${esc(displayRole(m))}${a ? '・' + a.text : ''}</div>
         </div>
         ${m.isDivorced ? '<span class="chip">已離婚</span>' : ''}
       </div>
@@ -2772,7 +2788,9 @@ function renderFamily(main, tab) {
       ${(m.familyEvents || []).length ? `<details class="agenda"><summary>家庭事件 ${(m.familyEvents || []).length}</summary><div class="sub-items">${[...m.familyEvents].sort((a, b) => b.date - a.date).slice(0, 10).map((e) => `<div class="t-meta" style="padding:3px 0"><b>${fmtDate(e.date).split(' ')[0]}</b>　${esc(e.title || '')}${e.content ? '・' + esc(e.content) : ''}</div>`).join('')}</div></details>` : ''}
       </div>`;
     };
-    body = ['我的', '配偶的', '其他'].filter((k) => bySide[k].length).map((k) => `<div class="section-title">${k === '其他' ? '未分家族' : k + '家'}（${bySide[k].length}）</div><div class="grid cols-3">${bySide[k].map(card).join('')}</div>`).join('')
+    const SIDE_TITLE = { '核心': '配偶與兒女', '我的': '我的家', '配偶的': '配偶的家', '其他': '未分家族' };
+    body = ['核心', '我的', '配偶的', '其他'].filter((k) => bySide[k].length)
+      .map((k) => `<div class="section-title">${SIDE_TITLE[k]}（${bySide[k].length}）</div><div class="grid cols-3">${bySide[k].map(card).join('')}</div>`).join('')
       || '<div class="empty">尚無家庭成員</div>';
   } else if (tab === 'children') {
     body = children.map((c) => {
