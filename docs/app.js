@@ -12,7 +12,7 @@
 // 常數
 // ---------------------------------------------------------------------------
 /** 網頁版自己的版本（與 App 版本無關；改網頁不再動 App 版號） */
-const WEB_VERSION = '1.7';
+const WEB_VERSION = '1.8';
 const CONTAINER_ID = 'iCloud.com.lifegood.app';
 const ZONE_NAME = 'LifeGoodZone';
 const TOKEN_KEY = 'lifegood_ck_token';
@@ -567,6 +567,7 @@ function route() {
     }
     case 'grades': renderGrades(main); break;
     case 'perf': renderPerf(main, parts[1] || ''); break;
+    case 'roster': renderRoster(main, parts[1] || ''); break;
       case 'tax': renderTax(main, parts[1] || ''); break;
     case 'food': renderFoodMap(main); break;
     case 'travel': renderTravelMap(main); break;
@@ -1914,6 +1915,138 @@ const perfUI = {
   setDept(v) { this.dept = v; try { localStorage.setItem(PERF_DEPT_KEY, v); } catch (e) { /* 私密瀏覽存不進去就只用這一次 */ } },
 };
 
+// ---- 班表 -------------------------------------------------------------------
+// 對齊 App 的 SubordinateRosterView：列＝部屬（依廠區分組），欄＝當月每一天，
+// 格子優先顯示請假、其次顯示班別；假日底色加深。
+const SHIFT_SHORT = { '大夜班': '大夜', '小夜班': '小夜', '假日值班': '假值', '日值班': '日值', '時差假': '時差', '休息': '休' };
+const SHIFT_COLOR = { '大夜班': '#5856d6', '小夜班': '#af52de', '假日值班': '#ff9500', '日值班': '#00c7be', '時差假': '#30b0c7', '休息': '#8e8e93' };
+const LEAVE_COLOR = { '事假': '#007aff', '病假': '#ff3b30', '特休': '#34c759', '婚假': '#ff2d55', '喪假': '#636366',
+  '產假': '#af52de', '陪產假': '#32ade6', '公假': '#30b0c7', '公傷假': '#a2845e' };
+const ROSTER_DEPT_KEY = 'lifegood_roster_dept';
+const rosterUI = {
+  dept: (() => { try { return localStorage.getItem(ROSTER_DEPT_KEY) || 'all'; } catch (e) { return 'all'; } })(),
+  setDept(v) { this.dept = v; try { localStorage.setItem(ROSTER_DEPT_KEY, v); } catch (e) { /* 私密瀏覽存不進去就只用這一次 */ } },
+};
+function monthKeyStr(d) { return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}`; }
+function renderRoster(main, param) {
+  const now = new Date();
+  const m = /^(\d{4})-(\d{2})$/.exec(param || '');
+  const month = m ? new Date(+m[1], +m[2] - 1, 1) : new Date(now.getFullYear(), now.getMonth(), 1);
+  const prev = new Date(month.getFullYear(), month.getMonth() - 1, 1);
+  const next = new Date(month.getFullYear(), month.getMonth() + 1, 1);
+  const dayCount = new Date(month.getFullYear(), month.getMonth() + 1, 0).getDate();
+  const days = Array.from({ length: dayCount }, (_, i) => new Date(month.getFullYear(), month.getMonth(), i + 1));
+  const inMonth = (d) => d instanceof Date && d.getFullYear() === month.getFullYear() && d.getMonth() === month.getMonth();
+
+  if (rosterUI.dept !== 'all' && !deptById(rosterUI.dept)) rosterUI.setDept('all');
+  const people = Store.subs
+    .filter((s) => rosterUI.dept === 'all' || s.departmentId === rosterUI.dept)
+    .sort((a, b) => (a.name || '').localeCompare(b.name || '', 'zh-Hant'));
+
+  // 查表：部屬 → 日 → 班別／假別
+  const shiftOf = {}, leaveOf = {};
+  for (const s of people) {
+    const sh = {}, lv = {};
+    for (const x of s.shifts || []) if (inMonth(x.date)) sh[x.date.getDate()] = x.type;
+    for (const r of s.records || []) {
+      if (r.type !== '請假' || !r.leaveType) continue;
+      // 請假可能跨日（endDate），逐日標記
+      const from = r.date, to = r.endDate instanceof Date && r.endDate > r.date ? r.endDate : r.date;
+      for (let d = startOfDay(from); d <= to; d.setDate(d.getDate() + 1)) if (inMonth(d)) lv[d.getDate()] = r.leaveType;
+    }
+    shiftOf[s.id] = sh; leaveOf[s.id] = lv;
+  }
+
+  // 依廠區分組（與 App 相同：有廠區的先照名稱排，未分廠區墊底）
+  const byArea = {};
+  for (const s of people) (byArea[s.plantArea || ''] = byArea[s.plantArea || ''] || []).push(s);
+  const areas = Object.keys(byArea).filter((a) => a).sort();
+  const groups = areas.map((a) => [a, byArea[a]]);
+  if (byArea['']) groups.push([areas.length ? '未分廠區' : '', byArea['']]);
+
+  // 統計
+  let shiftTotal = 0, leaveTotal = 0;
+  const byType = {};
+  for (const s of people) {
+    for (const t of Object.values(shiftOf[s.id])) { shiftTotal++; byType[t] = (byType[t] || 0) + 1; }
+    leaveTotal += Object.keys(leaveOf[s.id]).length;
+  }
+  const staffed = people.filter((s) => Object.keys(shiftOf[s.id]).length || Object.keys(leaveOf[s.id]).length).length;
+  const topType = Object.entries(byType).sort((a, b) => b[1] - a[1])[0];
+
+  const cell = (s, day) => {
+    const lv = leaveOf[s.id][day.getDate()], sh = shiftOf[s.id][day.getDate()];
+    const weekend = day.getDay() === 0 || day.getDay() === 6;
+    const today = day.toDateString() === now.toDateString();
+    const bg = weekend ? 'background:var(--card2);' : '';
+    const inner = lv ? `<span class="rs-chip" style="background:${LEAVE_COLOR[lv] || '#8e8e93'}">${esc(lv)}</span>`
+      : sh ? `<span class="rs-chip" style="background:${SHIFT_COLOR[sh] || '#8e8e93'}">${esc(SHIFT_SHORT[sh] || sh)}</span>` : '';
+    return `<td class="rs-cell${today ? ' rs-today' : ''}" style="${bg}" title="${esc(s.name)}・${month.getMonth() + 1}/${day.getDate()}${lv ? '・' + esc(lv) : sh ? '・' + esc(sh) : ''}">${inner}</td>`;
+  };
+  const countsOf = (s) => {
+    const counts = {};
+    for (const t of Object.values(shiftOf[s.id])) counts[t] = (counts[t] || 0) + 1;
+    return counts;
+  };
+  const typeChips = (s) => {
+    const lvN = Object.keys(leaveOf[s.id]).length;
+    const parts = Object.entries(countsOf(s)).sort((a, b) => b[1] - a[1])
+      .map(([t, n]) => `<span class="chip" style="color:${SHIFT_COLOR[t]};border-color:${SHIFT_COLOR[t]}55">${esc(SHIFT_SHORT[t] || t)} ${n}</span>`);
+    if (lvN) parts.push(`<span class="chip orange">假 ${lvN}</span>`);
+    return parts.join('') || '<span class="muted small">本月未排班</span>';
+  };
+
+  main.innerHTML = `
+    ${pageHead('班表', `${month.getFullYear()} 年 ${month.getMonth() + 1} 月・${people.length} 位部屬`)}
+    <div class="filters">
+      <a class="fchip" href="#/roster/${monthKeyStr(prev)}">← ${prev.getMonth() + 1} 月</a>
+      <a class="fchip ${m ? '' : 'on'}" href="#/roster">本月</a>
+      <a class="fchip" href="#/roster/${monthKeyStr(next)}">${next.getMonth() + 1} 月 →</a>
+      <span class="spacer"></span>
+      <span class="muted small">課別</span>
+      <span class="fchip ${rosterUI.dept === 'all' ? 'on' : ''}" data-rd="all">全部</span>
+      ${Store.depts.map((d) => `<span class="fchip ${rosterUI.dept === d.id ? 'on' : ''}" data-rd="${d.id}">${esc(d.name || d.code)}</span>`).join('')}
+    </div>
+    <div class="grid cols-4">
+      ${kpiCard('有排班的人', staffed, '', `共 ${people.length} 位`)}
+      ${kpiCard('總班數', shiftTotal, 'indigo', topType ? `最多 ${esc(topType[0])} ${topType[1]} 班` : '這個月沒有排班')}
+      ${kpiCard('請假天數', leaveTotal, leaveTotal ? 'orange' : 'green', leaveTotal ? '格子以假別顏色標示' : '本月無人請假')}
+      ${kpiCard('班別種類', Object.keys(byType).length, '', Object.keys(byType).length ? Object.keys(byType).map((t) => SHIFT_SHORT[t] || t).join('、') : '')}
+    </div>
+    <div class="card mt table-wrap">
+      <h3>${month.getMonth() + 1} 月班表 <span class="count">${dayCount} 天</span>
+        <span class="spacer" style="flex:1"></span><span class="muted small">左右捲動看完整月份</span></h3>
+      <table class="tbl rs-table"><thead><tr>
+        <th class="rs-name">姓名</th>
+        ${days.map((d) => `<th class="rs-cell${d.getDay() === 0 || d.getDay() === 6 ? ' rs-weekend' : ''}">${d.getDate()}<div class="rs-wd">${WD[d.getDay()]}</div></th>`).join('')}
+        <th class="rs-sum">班數</th>
+      </tr></thead><tbody>
+      ${groups.map(([area, items]) => `
+        ${area ? `<tr class="rs-group"><td class="rs-name">${esc(area)}</td><td colspan="${dayCount + 1}" class="muted small">${items.length} 人</td></tr>` : ''}
+        ${items.map((s) => `<tr>
+          <td class="rs-name"><a href="#/sub/${s.id}">${esc(s.name)}</a></td>
+          ${days.map((d) => cell(s, d)).join('')}
+          <td class="rs-sum">${Object.keys(shiftOf[s.id]).length || '—'}</td>
+        </tr>`).join('')}`).join('') || `<tr><td colspan="${dayCount + 2}" class="empty">這個課別沒有部屬</td></tr>`}
+      </tbody></table>
+    </div>
+    <div class="card mt"><h3>各人班別統計 <span class="count">${people.length}</span></h3>
+      ${groups.flatMap(([, items]) => items).map((s) => `<div class="row" style="gap:10px;padding:6px 0;border-top:1px solid var(--line)">
+        <a href="#/sub/${s.id}" style="min-width:88px;font-weight:700">${esc(s.name)}</a>
+        <span class="muted small" style="min-width:64px">${esc(s.plantArea || '未分廠區')}</span>
+        <span style="flex:1;min-width:0">${typeChips(s)}</span>
+      </div>`).join('') || '<div class="empty">這個課別沒有部屬</div>'}
+    </div>
+    <div class="card mt"><h3>圖例</h3>
+      <div class="chips">${Object.keys(SHIFT_SHORT).map((t) => `<span class="chip"><span class="rs-dot" style="background:${SHIFT_COLOR[t]}"></span>${esc(t)}（${esc(SHIFT_SHORT[t])}）</span>`).join('')}</div>
+      <div class="chips" style="margin-top:8px">${Object.keys(LEAVE_COLOR).map((t) => `<span class="chip"><span class="rs-dot" style="background:${LEAVE_COLOR[t]}"></span>${esc(t)}</span>`).join('')}</div>
+      <div class="legend-note">格子同時有假別與班別時顯示假別（與 App 相同）。班別的上下班時間存在手機本機、不會同步到 iCloud，所以網頁只顯示班別名稱。</div>
+    </div>`;
+  main.querySelectorAll('.fchip[data-rd]').forEach((el) => el.onclick = () => {
+    rosterUI.setDept(el.dataset.rd); renderRoster(main, param);
+  });
+}
+
 // ---- 稅務 -------------------------------------------------------------------
 // 節稅子分類的年度上限（與 App 的 TaxSavingSubCategory.annualLimit 一致）
 const TAX_LIMITS = { '捐贈': null, '保險費': 24000, '醫療': null, '房貸利息': 300000, '房租': 180000,
@@ -2566,7 +2699,15 @@ function renderLifeRealEstate(main) {
 }
 
 // ---- 家庭 -----------------------------------------------------------------
-const FAMILY_TABS = [['members', '成員'], ['children', '兒女紀錄'], ['tasks', '家庭待辦'], ['pets', '寵物'], ['relations', '人際關係']];
+const FAMILY_TABS = [['members', '成員'], ['children', '兒女紀錄'], ['tasks', '家庭待辦'], ['gifts', '禮金往來'], ['pets', '寵物'], ['relations', '人際關係']];
+// 社交子分類的圖示（對齊 App 的 SocialSubCategory）
+const SOCIAL_ICON = { '生日禮金': '🎂', '過年紅包': '🧧', '結婚禮金': '💒', '白包': '🕯️', '彌月禮': '🍼',
+  '探病禮': '💐', '升遷／喬遷': '🎉', '其他': '•' };
+const SOCIAL_ORDER = ['生日禮金', '過年紅包', '結婚禮金', '白包', '彌月禮', '探病禮', '升遷／喬遷', '其他'];
+/** 社交支出的收受人（逗號分隔，可能多人） */
+function giftRecipients(e) {
+  return String(e.socialRecipient || '').split(/[,、，]/).map((x) => x.trim()).filter(Boolean);
+}
 const CHILD_ROLES = new Set(['兒子', '女兒']);
 const PET_ICON = { '狗': '🐶', '貓': '🐱', '鳥': '🐦', '魚': '🐟', '倉鼠': '🐹', '兔子': '🐰', '爬蟲': '🦎' };
 const CHILD_REC_ICON = { '疫苗': '💉', '過敏': '🤧', '成長記錄': '📏', '就醫記錄': '🏥', '教育里程碑': '🎓', '興趣才藝': '🎨', '紀念時刻': '✨' };
@@ -2685,6 +2826,80 @@ function renderFamily(main, tab) {
         ${hr.length ? `<details class="agenda"><summary>健康紀錄 ${hr.length}</summary><div class="sub-items">${hr.slice(0, 10).map((r) => `<div class="t-meta" style="padding:3px 0"><b>${r.date ? fmtDate(r.date).split(' ')[0] : ''}</b>　${esc(r.title || r.type || '')}${r.note ? '・' + esc(r.note) : ''}</div>`).join('')}</div></details>` : ''}
       </div>`;
     }).join('') || '<div class="empty">尚無寵物</div>'}</div>`;
+  } else if (tab === 'gifts') {
+    // 社交禮金：與 App 的 ResumeGiftSection 相同資料來源（變動支出的「社交」分類）
+    const gifts = Store.expenses.filter((e) => e.expenseType === '變動支出' && e.variableCategory === '社交')
+      .sort((a, b) => b.date - a.date);
+    const total = gifts.reduce((a, e) => a + e.amount * rateOf(e.currencyCode), 0);
+    const bySub = {};
+    for (const e of gifts) {
+      const k = e.socialSubCategory || '其他';
+      (bySub[k] = bySub[k] || []).push(e);
+    }
+    const subRows = SOCIAL_ORDER.filter((k) => bySub[k]).map((k) => [k, bySub[k]]);
+    // 依收受人彙總；一筆可能寫多個名字，各自都算
+    const byWho = {};
+    let noName = 0;
+    for (const e of gifts) {
+      const names = giftRecipients(e);
+      if (!names.length) { noName++; continue; }
+      for (const n of names) (byWho[n] = byWho[n] || []).push(e);
+    }
+    const famNames = new Set(members.map(memberName));
+    const whoRows = Object.entries(byWho).map(([n, items]) => ({
+      name: n, items, isFamily: famNames.has(n),
+      sum: items.reduce((a, e) => a + e.amount * rateOf(e.currencyCode), 0),
+    })).sort((a, b) => (b.isFamily - a.isFamily) || b.sum - a.sum);
+    const biggest = gifts.length ? gifts.reduce((a, e) => (a && a.amount * rateOf(a.currencyCode) >= e.amount * rateOf(e.currencyCode) ? a : e)) : null;
+    body = `
+      <div class="grid cols-4">
+        ${kpiCard('禮金筆數', gifts.length, '', noName ? `其中 ${noName} 筆未填對象` : '全部都有對象')}
+        ${kpiCard('累計金額', fmtMoney(total), 'pink', gifts.length ? `平均 ${fmtMoney(total / gifts.length)}` : '')}
+        ${kpiCard('往來對象', whoRows.length, '', whoRows.filter((w) => w.isFamily).length ? `家人 ${whoRows.filter((w) => w.isFamily).length} 位` : '')}
+        ${kpiCard('最大一筆', biggest ? fmtMoney(biggest.amount * rateOf(biggest.currencyCode)) : '—', 'orange',
+          biggest ? esc([biggest.socialSubCategory, giftRecipients(biggest).join('、')].filter(Boolean).join('・')) : '')}
+      </div>
+      <div class="grid cols-2 mt">
+        <div class="card"><h3>依類別 <span class="count">${subRows.length}</span></h3>
+          ${subRows.map(([k, items]) => {
+            const sum = items.reduce((a, e) => a + e.amount * rateOf(e.currencyCode), 0);
+            return `<div style="padding:8px 0;border-top:1px solid var(--line)">
+              <div class="row" style="justify-content:space-between">
+                <span><b>${SOCIAL_ICON[k] || '•'} ${esc(k)}</b> <span class="chip pink">${items.length} 筆</span></span>
+                <b>${fmtFull(sum)}</b></div>
+              <div style="height:6px;border-radius:3px;background:var(--card2);margin-top:6px;overflow:hidden">
+                <div style="width:${total > 0 ? Math.round(sum / total * 100) : 0}%;height:100%;background:var(--pink)"></div></div>
+            </div>`;
+          }).join('') || '<div class="empty">還沒有社交禮金紀錄</div>'}
+        </div>
+        <div class="card"><h3>依對象 <span class="count">${whoRows.length}</span></h3>
+          ${whoRows.map((w) => `<details class="agenda" style="border-top:1px solid var(--line);padding:8px 0;margin:0">
+            <summary style="list-style:none;display:flex;align-items:center;gap:10px;color:inherit;font-weight:400">
+              <div class="avatar sm">${esc(initial(w.name))}</div>
+              <span style="flex:1;min-width:0"><b>${esc(w.name)}</b>${w.isFamily ? ' <span class="chip pink">家人</span>' : ''}
+                <div class="muted small">${w.items.length} 筆・最近 ${fmtDate(w.items[0].date).split(' ')[0]}</div></span>
+              <b style="color:var(--pink)">${fmtMoney(w.sum)}</b>
+            </summary>
+            <div class="sub-items">${w.items.map((e) => `
+              <div class="t-meta" style="display:flex;gap:8px;align-items:center;padding:3px 0">
+                <span class="chip" style="min-width:74px;justify-content:center">${fmtDate(e.date).split(' ')[0]}</span>
+                <span style="flex:1;min-width:0">${esc(e.socialSubCategory || '其他')}${e.note ? '・' + esc(e.note) : ''}</span>
+                <b>${fmtAmt(e.amount, e.currencyCode)}</b></div>`).join('')}</div>
+          </details>`).join('') || '<div class="empty">沒有填寫對象的禮金紀錄</div>'}
+          <div class="legend-note">一筆禮金填了多個對象時，每個人都會列出整筆金額（與 App 相同），所以各對象加總會大於上面的累計金額。</div>
+        </div>
+      </div>
+      <div class="card table-wrap mt"><h3>全部紀錄 <span class="count">${gifts.length}</span></h3>
+        <table class="tbl"><thead><tr><th>日期</th><th>項目</th><th>類別</th><th>對象</th><th class="num">金額</th><th>付款</th><th>備註</th></tr></thead><tbody>
+        ${gifts.map((e) => `<tr>
+          <td>${fmtDate(e.date).split(' ')[0]}</td>
+          <td><b>${esc(e.title)}</b></td>
+          <td><span class="chip pink">${SOCIAL_ICON[e.socialSubCategory || '其他'] || '•'} ${esc(e.socialSubCategory || '其他')}</span></td>
+          <td>${giftRecipients(e).map((n) => `<span class="chip">${esc(n)}</span>`).join(' ') || '<span class="muted small">未填</span>'}</td>
+          <td class="num"><b>${fmtAmt(e.amount, e.currencyCode)}</b></td>
+          <td class="muted small">${e.linkedCreditCardMilestoneId ? '💳 ' + esc(bankNameOf(e.linkedCreditCardMilestoneId)) : e.linkedBankMilestoneId ? '🏦 ' + esc(bankNameOf(e.linkedBankMilestoneId)) : ''}</td>
+          <td class="muted small">${esc(e.note || '')}</td></tr>`).join('') || '<tr><td colspan="7" class="empty">還沒有社交禮金紀錄</td></tr>'}
+        </tbody></table></div>`;
   } else if (tab === 'relations') {
     const groups = ['家人', '朋友', '同事', '客戶', '其他'];
     const GC = { '家人': 'red', '朋友': 'green', '同事': 'blue', '客戶': 'orange', '其他': '' };

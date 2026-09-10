@@ -98,6 +98,31 @@
   G.weeklyReports = [report('新人報告：包裝線', '新人報', -2, true, 1)];
   G.records = [rec('缺點', '報告常遲交', -6), rec('Miss Operation', '未依 SOP 停機', -16, { severity: '一般' }), rec('請假', '', -2, { leaveType: '事假', leaveHours: 4 })];
 
+  // ---- 班表（本月與上月；輪班以 4 天為一個循環）----
+  const SHIFTS = ['大夜班', '小夜班', '日值班', '休息'];
+  const monthStart = (off) => new Date(now.getFullYear(), now.getMonth() + off, 1);
+  const shiftsFor = (offsetSeed) => {
+    const out = [];
+    for (const mOff of [-1, 0]) {
+      const first = monthStart(mOff);
+      const dayCount = new Date(first.getFullYear(), first.getMonth() + 1, 0).getDate();
+      for (let dd = 1; dd <= dayCount; dd++) {
+        const day = new Date(first.getFullYear(), first.getMonth(), dd);
+        const type = SHIFTS[(dd + offsetSeed) % SHIFTS.length];
+        // 假日只排假日值班或休息，比較像真的班表
+        const isWeekend = day.getDay() === 0 || day.getDay() === 6;
+        const final = isWeekend ? ((dd + offsetSeed) % 3 === 0 ? '假日值班' : '休息') : type;
+        out.push({ id: id(), date: day.getTime() / 1000 - REF, type: final });
+      }
+    }
+    return out;
+  };
+  A.shifts = shiftsFor(0);
+  B.shifts = shiftsFor(1);
+  C.shifts = shiftsFor(2);
+  E.shifts = shiftsFor(3);
+  G.shifts = shiftsFor(5);
+
   // 為了讓「評分加總」有同課同職等的排名組（每組至少 2 人），再補三位資料較少的成員
   const H = mkSub('吳孟儒', '工程師', D_EQ, G1, { joinDate: ymd(2024, 9, 2), birthday: ymd(1998, 7, 9) });
   const I = mkSub('周雅琪', '資深工程師', D_LAB, G2, { joinDate: ymd(2020, 11, 16), plantArea: 'P2' });
@@ -110,6 +135,9 @@
   I.records = [rec('成就', '通過 ISO 稽核零缺失', -35), rec('優點', '文件整理仔細', -20)];
   J.tasks = [task('新人訓練：CDA 系統', '', -20, -12, -12), task('廢水池巡檢紀錄補登', '', -5, -1, false)];
   J.records = [rec('請假', '', -13, { leaveType: '特休', leaveHours: 8 })];
+
+  H.shifts = shiftsFor(6);
+  J.shifts = shiftsFor(7);
 
   const subs = [A, B, C, E, F, G, H, I, J];
 
@@ -220,7 +248,15 @@
     expense('輪胎更換', 18000, -150, '變動支出', '汽車', { linkedVehicleId: VEH1, vehicleExpenseCategory: '保養' }),
     expense('牙醫', 1200, -18, '變動支出', '醫療'),
     expense('週年旅行', 24000, -45, '變動支出', '娛樂', { linkedCreditCardMilestoneId: CARD1 }),
-    expense('婚禮禮金', 6000, -70, '變動支出', '社交'),
+    expense('婚禮禮金 阿哲', 6000, -70, '變動支出', '社交', { socialSubCategory: '結婚禮金', socialRecipient: '李明哲' }),
+    expense('小孩生日紅包', 2000, -115, '變動支出', '社交', { socialSubCategory: '生日禮金', socialRecipient: '林亦宸' }),
+    expense('女兒生日紅包', 2000, -35, '變動支出', '社交', { socialSubCategory: '生日禮金', socialRecipient: '林亦恩' }),
+    expense('太太生日禮', 8800, -140, '變動支出', '社交', { socialSubCategory: '生日禮金', socialRecipient: '陳怡君', linkedCreditCardMilestoneId: CARD1, note: '項鍊' }),
+    expense('過年紅包', 36000, -220, '變動支出', '社交', { socialSubCategory: '過年紅包', socialRecipient: '林文雄、王秀琴、林亦宸、林亦恩', note: '長輩各一萬，小孩各八千' }),
+    expense('同事彌月禮', 1200, -55, '變動支出', '社交', { socialSubCategory: '彌月禮', socialRecipient: '蔡宗翰' }),
+    expense('探病水果籃', 1500, -28, '變動支出', '社交', { socialSubCategory: '探病禮', socialRecipient: '周淑惠' }),
+    expense('前主管榮退', 3600, -160, '變動支出', '社交', { socialSubCategory: '升遷／喬遷', socialRecipient: '蔡宗翰' }),
+    expense('奠儀', 3000, -46, '變動支出', '社交', { socialSubCategory: '白包', socialRecipient: '大同氣體 陳經理' }),
     expense('新手機', 32900, -100, '變動支出', '購物', { linkedCreditCardMilestoneId: CARD1 }),
     expense('家電維修', 4500, -130, '變動支出', '其他'),
     expense('綜所稅', 68000, -110, '變動支出', '稅費'),

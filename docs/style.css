@@ -189,6 +189,11 @@ a { color: inherit; text-decoration: none; }
 .kpi .value.green { color: var(--green); }
 .kpi .value.orange { color: var(--orange); }
 .kpi .value.pink { color: var(--pink); }
+.kpi .value.indigo { color: var(--indigo); }
+.kpi .value.purple { color: var(--purple); }
+.kpi .value.teal { color: var(--teal); }
+.kpi .value.blue { color: var(--blue); }
+.kpi .value.gold { color: #c8961e; }
 .kpi .foot { font-size: 12px; color: var(--muted); }
 
 /* 列表 */
@@ -370,3 +375,32 @@ details.agenda summary { cursor: pointer; color: var(--indigo); font-weight: 700
 .nc-rows a { color: var(--blue); }
 .nc-rows a:hover { text-decoration: underline; }
 .nc-lbl { color: var(--muted); display: inline-block; min-width: 34px; margin-right: 8px; }
+
+/* 班表（列＝部屬，欄＝當月每一天） */
+.rs-table th, .rs-table td { padding: 5px 4px; text-align: center; }
+.rs-table th.rs-name, .rs-table td.rs-name {
+  text-align: left; padding-left: 10px; padding-right: 12px;
+  position: sticky; left: 0; z-index: 2; background: var(--card);
+  font-weight: 700; min-width: 84px;
+  /* 往左延伸一塊同色底，蓋住卡片內距，捲動時內容不會從邊緣露出來 */
+  box-shadow: -20px 0 0 var(--card);
+}
+.rs-table thead th.rs-name { z-index: 3; }
+.rs-table th.rs-cell { min-width: 34px; font-size: 11px; line-height: 1.2; }
+.rs-table th.rs-weekend { color: var(--red); }
+.rs-wd { font-size: 9px; font-weight: 600; opacity: .65; }
+.rs-cell { width: 34px; }
+.rs-today { box-shadow: inset 0 0 0 2px rgba(52,199,89,0.55); }
+.rs-chip {
+  display: block; color: #fff; font-size: 10px; font-weight: 800;
+  border-radius: 5px; padding: 3px 2px; line-height: 1.3;
+}
+.rs-sum {
+  text-align: center !important; white-space: nowrap; font-weight: 800; min-width: 46px;
+  position: sticky; right: 0; z-index: 2; background: var(--card);
+  border-left: 1px solid var(--line);
+  box-shadow: 20px 0 0 var(--card);
+}
+.rs-group td { background: var(--card2); font-weight: 800; }
+.rs-group td.rs-name, .rs-group td.rs-sum { background: var(--card2); box-shadow: -20px 0 0 var(--card2); }
+.rs-dot { display: inline-block; width: 9px; height: 9px; border-radius: 5px; margin-right: 5px; }
