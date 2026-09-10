@@ -2817,6 +2817,188 @@ struct GradeTitle: Identifiable, Codable {
     }
 }
 
+// MARK: - 健身紀錄（v25.351）
+//
+// 一筆 WorkoutSession＝一次訓練（一天可以有多次），底下掛多個 WorkoutExercise。
+// 動作分兩種型態：
+//   • 重量訓練：次數 × 組數 × 負荷（自身體重／負重／徒手）
+//   • 有氧：距離（公里）與時間（分鐘），配速自動算
+// 「自身體重」的負荷會帶入健康檔案最近一次的體重，體重變了曲線也跟著反映；
+// 沒有體重紀錄時該動作只計總次數、不灌進總訓練量（不亂猜一個數字）。
+
+/// 動作型態
+enum WorkoutKind: String, Codable, CaseIterable, Identifiable {
+    case strength = "重量訓練"
+    case cardio = "有氧"
+
+    var id: String { rawValue }
+    var icon: String { self == .strength ? "dumbbell.fill" : "figure.run" }
+}
+
+/// 重量訓練的負荷來源
+enum WorkoutLoadType: String, Codable, CaseIterable, Identifiable {
+    case bodyweight = "自身體重"
+    case weight = "負重"
+    case none = "徒手"
+
+    var id: String { rawValue }
+}
+
+/// 一次訓練裡的一個動作
+struct WorkoutExercise: Identifiable, Codable {
+    let id: UUID
+    var name: String
+    var kind: WorkoutKind
+    // 重量訓練
+    var reps: Int              // 每組次數
+    var sets: Int              // 組數
+    var loadType: WorkoutLoadType
+    var loadKg: Double         // loadType == .weight 時的公斤數
+    // 有氧
+    var distanceKm: Double
+    var durationMinutes: Double
+    var note: String
+
+    init(id: UUID = UUID(), name: String = "", kind: WorkoutKind = .strength,
+         reps: Int = 10, sets: Int = 3, loadType: WorkoutLoadType = .bodyweight,
+         loadKg: Double = 0, distanceKm: Double = 0, durationMinutes: Double = 0,
+         note: String = "") {
+        self.id = id; self.name = name; self.kind = kind
+        self.reps = reps; self.sets = sets
+        self.loadType = loadType; self.loadKg = loadKg
+        self.distanceKm = distanceKm; self.durationMinutes = durationMinutes
+        self.note = note
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = (try? c.decode(UUID.self, forKey: .id)) ?? UUID()
+        name = (try? c.decode(String.self, forKey: .name)) ?? ""
+        kind = (try? c.decode(WorkoutKind.self, forKey: .kind)) ?? .strength
+        reps = (try? c.decode(Int.self, forKey: .reps)) ?? 0
+        sets = (try? c.decode(Int.self, forKey: .sets)) ?? 0
+        loadType = (try? c.decode(WorkoutLoadType.self, forKey: .loadType)) ?? .bodyweight
+        loadKg = (try? c.decode(Double.self, forKey: .loadKg)) ?? 0
+        distanceKm = (try? c.decode(Double.self, forKey: .distanceKm)) ?? 0
+        durationMinutes = (try? c.decode(Double.self, forKey: .durationMinutes)) ?? 0
+        note = (try? c.decode(String.self, forKey: .note)) ?? ""
+    }
+    private enum CodingKeys: String, CodingKey {
+        case id, name, kind, reps, sets, loadType, loadKg, distanceKm, durationMinutes, note
+    }
+
+    /// 總次數＝每組次數 × 組數
+    var totalReps: Int { max(0, reps) * max(0, sets) }
+
+    /// 這個動作每一下的等效負荷；自身體重要靠外部傳入體重
+    func loadPerRep(bodyWeightKg: Double?) -> Double? {
+        switch loadType {
+        case .weight: return loadKg > 0 ? loadKg : nil
+        case .bodyweight: return (bodyWeightKg ?? 0) > 0 ? bodyWeightKg : nil
+        case .none: return nil
+        }
+    }
+
+    /// 訓練量＝總次數 × 等效負荷（公斤）；算不出負荷時回 nil，不要當成 0 混進總量
+    func volume(bodyWeightKg: Double?) -> Double? {
+        guard kind == .strength, totalReps > 0,
+              let load = loadPerRep(bodyWeightKg: bodyWeightKg) else { return nil }
+        return Double(totalReps) * load
+    }
+
+    /// 配速（分鐘／公里）
+    var paceMinPerKm: Double? {
+        guard kind == .cardio, distanceKm > 0, durationMinutes > 0 else { return nil }
+        return durationMinutes / distanceKm
+    }
+
+    /// 一行摘要，例：伏地挺身 20 下 × 3 組・自身體重
+    func summary(bodyWeightKg: Double?) -> String {
+        switch kind {
+        case .strength:
+            var parts = ["\(reps) 下 × \(sets) 組"]
+            switch loadType {
+            case .weight: parts.append(WorkoutExercise.kgText(loadKg))
+            case .bodyweight:
+                if let w = bodyWeightKg, w > 0 { parts.append("自身體重 \(WorkoutExercise.kgText(w))") }
+                else { parts.append("自身體重") }
+            case .none: parts.append("徒手")
+            }
+            return parts.joined(separator: "・")
+        case .cardio:
+            var parts: [String] = []
+            if distanceKm > 0 { parts.append(String(format: "%.2f 公里", distanceKm)) }
+            if durationMinutes > 0 { parts.append(WorkoutExercise.minuteText(durationMinutes)) }
+            if let p = paceMinPerKm { parts.append(String(format: "配速 %.1f 分/公里", p)) }
+            return parts.isEmpty ? "有氧" : parts.joined(separator: "・")
+        }
+    }
+
+    static func kgText(_ v: Double) -> String {
+        v == v.rounded() ? String(format: "%.0f kg", v) : String(format: "%.1f kg", v)
+    }
+    static func minuteText(_ v: Double) -> String {
+        let m = Int(v.rounded())
+        return m >= 60 ? "\(m / 60) 小時 \(m % 60) 分" : "\(m) 分鐘"
+    }
+}
+
+/// 一次訓練
+struct WorkoutSession: Identifiable, Codable {
+    let id: UUID
+    var date: Date
+    /// 這次訓練的名稱，例：胸推日、腿日、晨跑
+    var title: String
+    var exercises: [WorkoutExercise]
+    /// 整場時間（分鐘，選填）
+    var durationMinutes: Double
+    var place: String
+    var note: String
+
+    init(id: UUID = UUID(), date: Date = Date(), title: String = "",
+         exercises: [WorkoutExercise] = [], durationMinutes: Double = 0,
+         place: String = "", note: String = "") {
+        self.id = id; self.date = date; self.title = title
+        self.exercises = exercises; self.durationMinutes = durationMinutes
+        self.place = place; self.note = note
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = (try? c.decode(UUID.self, forKey: .id)) ?? UUID()
+        date = (try? c.decode(Date.self, forKey: .date)) ?? Date()
+        title = (try? c.decode(String.self, forKey: .title)) ?? ""
+        exercises = (try? c.decodeIfPresent([WorkoutExercise].self, forKey: .exercises)) ?? []
+        durationMinutes = (try? c.decode(Double.self, forKey: .durationMinutes)) ?? 0
+        place = (try? c.decode(String.self, forKey: .place)) ?? ""
+        note = (try? c.decode(String.self, forKey: .note)) ?? ""
+    }
+    private enum CodingKeys: String, CodingKey {
+        case id, date, title, exercises, durationMinutes, place, note
+    }
+
+    var displayTitle: String {
+        if !title.isEmpty { return title }
+        if let first = exercises.first, !first.name.isEmpty {
+            return exercises.count > 1 ? "\(first.name) 等 \(exercises.count) 項" : first.name
+        }
+        return "訓練"
+    }
+
+    var strengthExercises: [WorkoutExercise] { exercises.filter { $0.kind == .strength } }
+    var cardioExercises: [WorkoutExercise] { exercises.filter { $0.kind == .cardio } }
+
+    /// 這次訓練的總訓練量（公斤數）；沒有任何可計算的動作時回 nil
+    func totalVolume(bodyWeightKg: Double?) -> Double? {
+        let vs = exercises.compactMap { $0.volume(bodyWeightKg: bodyWeightKg) }
+        return vs.isEmpty ? nil : vs.reduce(0, +)
+    }
+    var totalReps: Int { strengthExercises.reduce(0) { $0 + $1.totalReps } }
+    var totalSets: Int { strengthExercises.reduce(0) { $0 + max(0, $1.sets) } }
+    var totalDistanceKm: Double { cardioExercises.reduce(0) { $0 + $1.distanceKm } }
+    var totalCardioMinutes: Double { cardioExercises.reduce(0) { $0 + $1.durationMinutes } }
+}
+
 // MARK: - 績效互評（年度同儕排名）
 
 /// [v25.348] 一位評分者、一個年度的一張票。

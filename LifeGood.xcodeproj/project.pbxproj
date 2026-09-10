@@ -76,6 +76,8 @@
 		A01B000001000220 /* FinanceItemCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000220 /* FinanceItemCard.swift */; };
 		A01B000001000216 /* SideRoleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000216 /* SideRoleView.swift */; };
 		A01B000001000900 /* PerformanceReviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000900 /* PerformanceReviewView.swift */; };
+		A01B000001001100 /* WorkoutEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001100 /* WorkoutEditorView.swift */; };
+		A01B000001001000 /* HealthView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001000 /* HealthView.swift */; };
 		A01B000001000214 /* HeroStyleKit.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000214 /* HeroStyleKit.swift */; };
 		A01B000001000103 /* MultiPhotoGallery.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000103 /* MultiPhotoGallery.swift */; };
 		A01B000001000104 /* ResumeGiftSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000104 /* ResumeGiftSection.swift */; };
@@ -181,6 +183,8 @@
 		A01A000001000220 /* FinanceItemCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FinanceItemCard.swift; sourceTree = "<group>"; };
 		A01A000001000216 /* SideRoleView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SideRoleView.swift; sourceTree = "<group>"; };
 		A01A000001000900 /* PerformanceReviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PerformanceReviewView.swift; sourceTree = "<group>"; };
+		A01A000001001100 /* WorkoutEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkoutEditorView.swift; sourceTree = "<group>"; };
+		A01A000001001000 /* HealthView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthView.swift; sourceTree = "<group>"; };
 		A01A000001000214 /* HeroStyleKit.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HeroStyleKit.swift; sourceTree = "<group>"; };
 		A01A000001000103 /* MultiPhotoGallery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MultiPhotoGallery.swift; sourceTree = "<group>"; };
 		A01A000001000104 /* ResumeGiftSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResumeGiftSection.swift; sourceTree = "<group>"; };
@@ -367,6 +371,8 @@
 				A01A00000100004B /* FamilyMembersResumeView.swift */,
 				A01A000001000216 /* SideRoleView.swift */,
 				A01A000001000900 /* PerformanceReviewView.swift */,
+				A01A000001001100 /* WorkoutEditorView.swift */,
+				A01A000001001000 /* HealthView.swift */,
 				A01A000001000102 /* FoodMapView.swift */,
 				A01A000001000200 /* TravelMapView.swift */,
 				A01A000001000202 /* HealthProfileEditView.swift */,
@@ -566,6 +572,8 @@
 				A01B00000100004B /* FamilyMembersResumeView.swift in Sources */,
 				A01B000001000216 /* SideRoleView.swift in Sources */,
 				A01B000001000900 /* PerformanceReviewView.swift in Sources */,
+				A01B000001001100 /* WorkoutEditorView.swift in Sources */,
+				A01B000001001000 /* HealthView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -579,7 +587,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = LifeGood/LifeGood.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1103;
+				CURRENT_PROJECT_VERSION = 1104;
 				DEVELOPMENT_ASSET_PATHS = "\"LifeGood/Preview Content\"";
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -606,7 +614,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 25.350;
+				MARKETING_VERSION = 25.351;
 				PRODUCT_BUNDLE_IDENTIFIER = com.lifegood.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -622,7 +630,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = LifeGood/LifeGood.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1103;
+				CURRENT_PROJECT_VERSION = 1104;
 				DEVELOPMENT_ASSET_PATHS = "\"LifeGood/Preview Content\"";
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -649,7 +657,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 25.350;
+				MARKETING_VERSION = 25.351;
 				PRODUCT_BUNDLE_IDENTIFIER = com.lifegood.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;

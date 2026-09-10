@@ -52,13 +52,14 @@ enum FinanceFeature: String, CaseIterable, Identifiable {
 }
 
 enum LifeFeature: String, CaseIterable, Identifiable {
-    case overview, resume, finance, career, family, realEstate, tax, foodMap, travelMap, medicalMap
+    case overview, resume, finance, health, career, family, realEstate, tax, foodMap, travelMap, medicalMap
     var id: String { rawValue }
     var title: String {
         switch self {
         case .overview: return "總覽"
         case .resume: return "履歷"
         case .finance: return "財富"
+        case .health: return "健康"
         case .career: return "職涯"
         case .family: return "家庭"
         case .realEstate: return "房地產"
@@ -73,6 +74,7 @@ enum LifeFeature: String, CaseIterable, Identifiable {
         case .overview: return "house.fill"
         case .resume: return "trophy.fill"
         case .finance: return "banknote.fill"
+        case .health: return "figure.strengthtraining.traditional"
         case .career: return "briefcase.fill"
         case .family: return "person.3.fill"
         case .realEstate: return "building.2.fill"
@@ -1535,6 +1537,8 @@ struct MainTabView: View {
             } else {
                 LifeOverviewView()
             }
+        case .health:
+            HealthView()
         case .tax:
             TaxOverviewView()
         case .foodMap:
@@ -1554,9 +1558,16 @@ struct MainTabView: View {
         lifeStore.milestones.contains { $0.category == .achievement }
     }
 
+    /// 有健康里程碑或健身紀錄 → 顯示健康頁
+    private var hasHealthData: Bool {
+        if lifeStore.milestones.contains(where: { $0.category == .health }) { return true }
+        return !lifeStore.workouts.isEmpty
+    }
+
     private var lifeAvailableFeatures: [LifeFeature] {
         var list: [LifeFeature] = [.overview, .resume]
         if hasFinanceMilestones { list.append(.finance) }
+        if hasHealthData { list.append(.health) }
         if hasCareerMilestones { list.append(.career) }
         if !lifeStore.familyMembers.isEmpty { list.append(.family) }
         if !financeStore.realEstates.isEmpty { list.append(.realEstate) }

@@ -11,6 +11,8 @@ class LifeStore: ObservableObject {
     @Published var departments: [Department] = [] { didSet { if !isLoading { save() } } }
     /// [v25.348] 績效互評票（年度同儕排名）
     @Published var performanceBallots: [PerformanceBallot] = [] { didSet { if !isLoading { save() } } }
+    /// [v25.351] 健身紀錄：一筆＝一次訓練，底下掛多個動作
+    @Published var workouts: [WorkoutSession] = [] { didSet { if !isLoading { save() } } }
     @Published var gradeTitles: [GradeTitle] = [] { didSet { if !isLoading { save() } } }
     @Published var businessCards: [BusinessCard] = [] { didSet { if !isLoading { save() } } }
     @Published var personalEvents: [PersonalEvent] = [] { didSet { if !isLoading { save() } } }
@@ -35,7 +37,7 @@ class LifeStore: ObservableObject {
         "life_pets", "life_schedules", "life_subordinates", "life_departments",
         "life_grade_titles", "life_business_cards", "life_personal_events",
         "life_org_people", "life_health_profile", "life_family_tasks",
-        "life_equipment_pool", "life_performance_ballots"
+        "life_equipment_pool", "life_performance_ballots", "life_workouts"
     ]
 
     init() {
@@ -822,6 +824,55 @@ class LifeStore: ObservableObject {
             if wa != wb { return wa > wb }
             return a.label > b.label
         }
+    }
+
+    // MARK: - 健身紀錄（v25.351）
+
+    /// 自身體重動作的等效負荷：健康檔案最近一次的體重；沒填過就回 nil
+    var latestBodyWeightKg: Double? {
+        // latestWeight 是具名 tuple，不能用 key path，要自己拆
+        guard let w = healthProfile.latestWeight else { return nil }
+        return w.kg
+    }
+
+    /// 依日期新到舊
+    var workoutsByDateDesc: [WorkoutSession] {
+        workouts.sorted { $0.date > $1.date }
+    }
+
+    func upsertWorkout(_ session: WorkoutSession) {
+        if let i = workouts.firstIndex(where: { $0.id == session.id }) {
+            workouts[i] = session
+        } else {
+            workouts.append(session)
+        }
+    }
+
+    func deleteWorkout(id: UUID) {
+        workouts.removeAll { $0.id == id }
+    }
+
+    /// 出現過的動作名稱（依使用次數多寡），給新增時快速挑選
+    func workoutExerciseNames(kind: WorkoutKind? = nil) -> [String] {
+        var counts: [String: Int] = [:]
+        for s in workouts {
+            for e in s.exercises where kind == nil || e.kind == kind {
+                let n = e.name.trimmingCharacters(in: .whitespaces)
+                guard !n.isEmpty else { continue }
+                counts[n, default: 0] += 1
+            }
+        }
+        return counts.sorted { a, b in
+            if a.value != b.value { return a.value > b.value }
+            return a.key < b.key
+        }.map(\.key)
+    }
+
+    /// 某個動作的所有紀錄（新到舊），用來畫單一動作的進步曲線
+    func workoutHistory(exerciseName: String) -> [(date: Date, exercise: WorkoutExercise)] {
+        workouts.flatMap { s in
+            s.exercises.filter { $0.name == exerciseName }.map { (date: s.date, exercise: $0) }
+        }.sorted { $0.date > $1.date }
     }
 
     /// 該年度應投票但還沒送出的人（含我）；用來提醒還要催誰
@@ -1824,7 +1875,7 @@ class LifeStore: ObservableObject {
             subordinates: subordinates, departments: departments, gradeTitles: gradeTitles,
             businessCards: businessCards, personalEvents: personalEvents, orgPeople: orgPeople,
             healthProfile: healthProfile, familyTasks: familyTasks, equipmentPool: equipmentPool,
-            performanceBallots: performanceBallots
+            performanceBallots: performanceBallots, workouts: workouts
         )
         saveQueue.async {
             let encoder = JSONEncoder()
@@ -1845,6 +1896,7 @@ class LifeStore: ObservableObject {
             if let d = try? encoder.encode(snap.familyTasks)    { ud.set(d, forKey: "life_family_tasks") }
             if let d = try? encoder.encode(snap.equipmentPool)  { ud.set(d, forKey: "life_equipment_pool") }
             if let d = try? encoder.encode(snap.performanceBallots) { ud.set(d, forKey: "life_performance_ballots") }
+            if let d = try? encoder.encode(snap.workouts)       { ud.set(d, forKey: "life_workouts") }
             CloudSyncManager.shared.pushAll()
         }
     }
@@ -1873,6 +1925,7 @@ class LifeStore: ObservableObject {
         if let items = lossyDecodeArray([FamilyTask].self, key: "life_family_tasks", decoder: decoder) { familyTasks = items }
         if let items = lossyDecodeArray([ManagedEquipment].self, key: "life_equipment_pool", decoder: decoder) { equipmentPool = items }
         if let items = lossyDecodeArray([PerformanceBallot].self, key: "life_performance_ballots", decoder: decoder) { performanceBallots = items }
+        if let items = lossyDecodeArray([WorkoutSession].self, key: "life_workouts", decoder: decoder) { workouts = items }
         if let data = rawDataIfChanged("life_health_profile"),
            let h = try? decoder.decode(HealthProfile.self, from: data) {
             healthProfile = h
@@ -1947,6 +2000,7 @@ class LifeStore: ObservableObject {
         personalEvents.removeAll()
         orgPeople.removeAll()
         healthProfile = HealthProfile()
+        workouts.removeAll()
         save()
     }
 }
