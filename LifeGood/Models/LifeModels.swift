@@ -2844,6 +2844,30 @@ enum WorkoutLoadType: String, Codable, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
+/// 路徑上的一個點。座標＋距開始的秒數；為了控制同步體積，記錄時就已經抽稀過
+/// （見 RunTracker：至少移動 8 公尺或間隔 5 秒才收一點，單次上限 3000 點）。
+struct RoutePoint: Codable, Equatable {
+    var lat: Double
+    var lon: Double
+    /// 距這段路徑開始的秒數
+    var t: Double
+    /// 海拔（公尺），沒有就 0
+    var alt: Double
+
+    init(lat: Double, lon: Double, t: Double, alt: Double = 0) {
+        self.lat = lat; self.lon = lon; self.t = t; self.alt = alt
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        lat = (try? c.decode(Double.self, forKey: .lat)) ?? 0
+        lon = (try? c.decode(Double.self, forKey: .lon)) ?? 0
+        t = (try? c.decode(Double.self, forKey: .t)) ?? 0
+        alt = (try? c.decode(Double.self, forKey: .alt)) ?? 0
+    }
+    private enum CodingKeys: String, CodingKey { case lat, lon, t, alt }
+}
+
 /// 一次訓練裡的一個動作
 struct WorkoutExercise: Identifiable, Codable {
     let id: UUID
@@ -2857,16 +2881,22 @@ struct WorkoutExercise: Identifiable, Codable {
     // 有氧
     var distanceKm: Double
     var durationMinutes: Double
+    /// [v25.352] GPS 路徑（只有 App 內即時紀錄的跑步／騎車才有）
+    var route: [RoutePoint]
+    /// 累計爬升（公尺）
+    var elevationGainM: Double
     var note: String
 
     init(id: UUID = UUID(), name: String = "", kind: WorkoutKind = .strength,
          reps: Int = 10, sets: Int = 3, loadType: WorkoutLoadType = .bodyweight,
          loadKg: Double = 0, distanceKm: Double = 0, durationMinutes: Double = 0,
+         route: [RoutePoint] = [], elevationGainM: Double = 0,
          note: String = "") {
         self.id = id; self.name = name; self.kind = kind
         self.reps = reps; self.sets = sets
         self.loadType = loadType; self.loadKg = loadKg
         self.distanceKm = distanceKm; self.durationMinutes = durationMinutes
+        self.route = route; self.elevationGainM = elevationGainM
         self.note = note
     }
 
@@ -2881,11 +2911,17 @@ struct WorkoutExercise: Identifiable, Codable {
         loadKg = (try? c.decode(Double.self, forKey: .loadKg)) ?? 0
         distanceKm = (try? c.decode(Double.self, forKey: .distanceKm)) ?? 0
         durationMinutes = (try? c.decode(Double.self, forKey: .durationMinutes)) ?? 0
+        route = (try? c.decodeIfPresent([RoutePoint].self, forKey: .route)) ?? []
+        elevationGainM = (try? c.decode(Double.self, forKey: .elevationGainM)) ?? 0
         note = (try? c.decode(String.self, forKey: .note)) ?? ""
     }
     private enum CodingKeys: String, CodingKey {
-        case id, name, kind, reps, sets, loadType, loadKg, distanceKm, durationMinutes, note
+        case id, name, kind, reps, sets, loadType, loadKg, distanceKm, durationMinutes
+        case route, elevationGainM, note
     }
+
+    /// 有沒有可以畫在地圖上的路徑
+    var hasRoute: Bool { route.count >= 2 }
 
     /// 總次數＝每組次數 × 組數
     var totalReps: Int { max(0, reps) * max(0, sets) }
@@ -2954,13 +2990,20 @@ struct WorkoutSession: Identifiable, Codable {
     var durationMinutes: Double
     var place: String
     var note: String
+    /// [v25.352] 對應的 HealthKit HKWorkout UUID：
+    /// 有值代表這筆是從 Apple 健康匯入或已寫回去，用來避免重複匯入／重複寫入
+    var healthKitUUID: String?
+    /// 消耗熱量（大卡）；App 內即時紀錄或從 Apple 健康帶回來
+    var activeEnergyKcal: Double
 
     init(id: UUID = UUID(), date: Date = Date(), title: String = "",
          exercises: [WorkoutExercise] = [], durationMinutes: Double = 0,
-         place: String = "", note: String = "") {
+         place: String = "", note: String = "",
+         healthKitUUID: String? = nil, activeEnergyKcal: Double = 0) {
         self.id = id; self.date = date; self.title = title
         self.exercises = exercises; self.durationMinutes = durationMinutes
         self.place = place; self.note = note
+        self.healthKitUUID = healthKitUUID; self.activeEnergyKcal = activeEnergyKcal
     }
 
     init(from decoder: Decoder) throws {
@@ -2972,9 +3015,12 @@ struct WorkoutSession: Identifiable, Codable {
         durationMinutes = (try? c.decode(Double.self, forKey: .durationMinutes)) ?? 0
         place = (try? c.decode(String.self, forKey: .place)) ?? ""
         note = (try? c.decode(String.self, forKey: .note)) ?? ""
+        healthKitUUID = try? c.decodeIfPresent(String.self, forKey: .healthKitUUID)
+        activeEnergyKcal = (try? c.decode(Double.self, forKey: .activeEnergyKcal)) ?? 0
     }
     private enum CodingKeys: String, CodingKey {
         case id, date, title, exercises, durationMinutes, place, note
+        case healthKitUUID, activeEnergyKcal
     }
 
     var displayTitle: String {
@@ -2997,6 +3043,8 @@ struct WorkoutSession: Identifiable, Codable {
     var totalSets: Int { strengthExercises.reduce(0) { $0 + max(0, $1.sets) } }
     var totalDistanceKm: Double { cardioExercises.reduce(0) { $0 + $1.distanceKm } }
     var totalCardioMinutes: Double { cardioExercises.reduce(0) { $0 + $1.durationMinutes } }
+    /// 這次訓練裡第一段有路徑的動作
+    var firstRouteExercise: WorkoutExercise? { exercises.first { $0.hasRoute } }
 }
 
 // MARK: - 績效互評（年度同儕排名）

@@ -76,6 +76,9 @@
 		A01B000001000220 /* FinanceItemCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000220 /* FinanceItemCard.swift */; };
 		A01B000001000216 /* SideRoleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000216 /* SideRoleView.swift */; };
 		A01B000001000900 /* PerformanceReviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000900 /* PerformanceReviewView.swift */; };
+		A01B000001001400 /* RunTrackingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001400 /* RunTrackingView.swift */; };
+		A01B000001001300 /* RunTracker.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001300 /* RunTracker.swift */; };
+		A01B000001001200 /* HealthKitManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001200 /* HealthKitManager.swift */; };
 		A01B000001001100 /* WorkoutEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001100 /* WorkoutEditorView.swift */; };
 		A01B000001001000 /* HealthView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001000 /* HealthView.swift */; };
 		A01B000001000214 /* HeroStyleKit.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000214 /* HeroStyleKit.swift */; };
@@ -183,6 +186,9 @@
 		A01A000001000220 /* FinanceItemCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FinanceItemCard.swift; sourceTree = "<group>"; };
 		A01A000001000216 /* SideRoleView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SideRoleView.swift; sourceTree = "<group>"; };
 		A01A000001000900 /* PerformanceReviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PerformanceReviewView.swift; sourceTree = "<group>"; };
+		A01A000001001400 /* RunTrackingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunTrackingView.swift; sourceTree = "<group>"; };
+		A01A000001001300 /* RunTracker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunTracker.swift; sourceTree = "<group>"; };
+		A01A000001001200 /* HealthKitManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthKitManager.swift; sourceTree = "<group>"; };
 		A01A000001001100 /* WorkoutEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkoutEditorView.swift; sourceTree = "<group>"; };
 		A01A000001001000 /* HealthView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthView.swift; sourceTree = "<group>"; };
 		A01A000001000214 /* HeroStyleKit.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HeroStyleKit.swift; sourceTree = "<group>"; };
@@ -275,6 +281,8 @@
 				A01A00007A000038 /* Changelog.swift */,
 				A01A00007B000038 /* FullBackup.swift */,
 				A01A000001000101 /* RestaurantSearch.swift */,
+				A01A000001001200 /* HealthKitManager.swift */,
+				A01A000001001300 /* RunTracker.swift */,
 				A01A00000100003B /* SubscriptionManager.swift */,
 				A01A00000100003C /* FeatureGate.swift */,
 				A01A00000100003E /* EInvoice.swift */,
@@ -371,6 +379,7 @@
 				A01A00000100004B /* FamilyMembersResumeView.swift */,
 				A01A000001000216 /* SideRoleView.swift */,
 				A01A000001000900 /* PerformanceReviewView.swift */,
+				A01A000001001400 /* RunTrackingView.swift */,
 				A01A000001001100 /* WorkoutEditorView.swift */,
 				A01A000001001000 /* HealthView.swift */,
 				A01A000001000102 /* FoodMapView.swift */,
@@ -572,6 +581,9 @@
 				A01B00000100004B /* FamilyMembersResumeView.swift in Sources */,
 				A01B000001000216 /* SideRoleView.swift in Sources */,
 				A01B000001000900 /* PerformanceReviewView.swift in Sources */,
+				A01B000001001400 /* RunTrackingView.swift in Sources */,
+				A01B000001001300 /* RunTracker.swift in Sources */,
+				A01B000001001200 /* HealthKitManager.swift in Sources */,
 				A01B000001001100 /* WorkoutEditorView.swift in Sources */,
 				A01B000001001000 /* HealthView.swift in Sources */,
 			);
@@ -587,7 +599,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = LifeGood/LifeGood.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1104;
+				CURRENT_PROJECT_VERSION = 1105;
 				DEVELOPMENT_ASSET_PATHS = "\"LifeGood/Preview Content\"";
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -600,13 +612,16 @@
 				INFOPLIST_KEY_NSRemindersFullAccessUsageDescription = "LifeGood 需要存取提醒事項，把家庭待辦與部屬任務同步到 Apple 提醒事項。";
 				INFOPLIST_KEY_NSRemindersUsageDescription = "LifeGood 需要存取提醒事項，把家庭待辦與部屬任務同步到 Apple 提醒事項。";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "LifeGood 需要使用您的位置來推薦附近的餐廳，並在美食地圖上標示您去過的店家。";
+				INFOPLIST_KEY_NSLocationAlwaysAndWhenInUseUsageDescription = "LifeGood 在您開始跑步或騎車後持續記錄路徑，鎖屏或切到其他 App 時也需要位置權限才能繼續記錄。";
+				INFOPLIST_KEY_NSHealthShareUsageDescription = "LifeGood 讀取「健康」裡的體重、身高、血壓、心率與訓練紀錄，帶進健康頁的健康檔案與訓練清單，讓您不用兩邊各記一次。";
+				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "LifeGood 把您在 App 內記錄的體重與訓練寫回「健康」，讓運動計入體能訓練圓環、與其他健康 App 互通。";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "LifeGood 需要麥克風來錄製語音記帳輸入。";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "LifeGood 用語音辨識把你說的內容轉成文字，再交給 AI 解析成支出項目。";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "LifeGood 需要存取相簿讀取裝潢照片或收據。";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
-				INFOPLIST_KEY_UIBackgroundModes = "remote-notification";
+				INFOPLIST_KEY_UIBackgroundModes = "remote-notification location";
 				INFOPLIST_KEY_UIRequiresFullScreen = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = UIInterfaceOrientationPortrait;
@@ -614,7 +629,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 25.351;
+				MARKETING_VERSION = 25.352;
 				PRODUCT_BUNDLE_IDENTIFIER = com.lifegood.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -630,7 +645,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = LifeGood/LifeGood.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1104;
+				CURRENT_PROJECT_VERSION = 1105;
 				DEVELOPMENT_ASSET_PATHS = "\"LifeGood/Preview Content\"";
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -643,13 +658,16 @@
 				INFOPLIST_KEY_NSRemindersFullAccessUsageDescription = "LifeGood 需要存取提醒事項，把家庭待辦與部屬任務同步到 Apple 提醒事項。";
 				INFOPLIST_KEY_NSRemindersUsageDescription = "LifeGood 需要存取提醒事項，把家庭待辦與部屬任務同步到 Apple 提醒事項。";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "LifeGood 需要使用您的位置來推薦附近的餐廳，並在美食地圖上標示您去過的店家。";
+				INFOPLIST_KEY_NSLocationAlwaysAndWhenInUseUsageDescription = "LifeGood 在您開始跑步或騎車後持續記錄路徑，鎖屏或切到其他 App 時也需要位置權限才能繼續記錄。";
+				INFOPLIST_KEY_NSHealthShareUsageDescription = "LifeGood 讀取「健康」裡的體重、身高、血壓、心率與訓練紀錄，帶進健康頁的健康檔案與訓練清單，讓您不用兩邊各記一次。";
+				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "LifeGood 把您在 App 內記錄的體重與訓練寫回「健康」，讓運動計入體能訓練圓環、與其他健康 App 互通。";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "LifeGood 需要麥克風來錄製語音記帳輸入。";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "LifeGood 用語音辨識把你說的內容轉成文字，再交給 AI 解析成支出項目。";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "LifeGood 需要存取相簿讀取裝潢照片或收據。";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
-				INFOPLIST_KEY_UIBackgroundModes = "remote-notification";
+				INFOPLIST_KEY_UIBackgroundModes = "remote-notification location";
 				INFOPLIST_KEY_UIRequiresFullScreen = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = UIInterfaceOrientationPortrait;
@@ -657,7 +675,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 25.351;
+				MARKETING_VERSION = 25.352;
 				PRODUCT_BUNDLE_IDENTIFIER = com.lifegood.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;

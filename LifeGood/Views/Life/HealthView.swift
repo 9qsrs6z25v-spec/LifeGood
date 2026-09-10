@@ -1,22 +1,36 @@
 import SwiftUI
 import Charts
 
-// MARK: - 健康（v25.351）
+// MARK: - 健康（v25.351 建立，v25.352 加入 Apple 健康聯動與跑步路徑）
 //
 // 入口在人生分頁「財富」的右邊，有健康里程碑或健身紀錄才出現。
-// 內容分三塊：
-//   1. 看板：本月訓練次數、本月訓練量、最近一次、連續週數
-//   2. 綜效曲線：兩筆以上才畫。可切「整體訓練量／單一動作」與期間
-//   3. 訓練紀錄與健康里程碑
+// 內容：
+//   1. 即時紀錄橫幅（跑步進行中時）
+//   2. 看板：本月訓練次數、本月訓練量、連續週數、累計次數
+//   3. Apple 健康聯動開關與同步
+//   4. 綜效曲線：兩筆以上才畫，可切總訓練量／總次數／單一動作與期間
+//   5. 動作統計、訓練紀錄（含路徑地圖）、健康里程碑
 //
 // 訓練量＝總次數（每組次數 × 組數）× 等效負荷。負荷是「自身體重」時帶入健康檔案
 // 最近一次的體重；沒有體重紀錄就不灌進總量（見 WorkoutExercise.volume）。
+//
+// HealthKit 沒有組數／次數／負荷的欄位，所以重訓明細只留在本 App，寫回去的只有
+// 時間、距離與熱量——畫面上有明講，不要讓使用者以為明細會同步。
 
 struct HealthView: View {
     @EnvironmentObject var lifeStore: LifeStore
 
+    @StateObject private var health = HealthKitManager.shared
+    @StateObject private var tracker = RunTracker.shared
+
     @State private var showEditor = false
+    @State private var showRun = false
     @State private var editing: WorkoutSession?
+    @State private var syncing = false
+    @State private var syncMessage: String?
+    /// 上次同步時間，決定要往回抓多久（第一次抓 90 天）
+    @AppStorage("health_hk_last_sync") private var lastSyncEpoch: Double = 0
+    @AppStorage("health_hk_enabled") private var hkEnabled = false
     @State private var curveMode: CurveMode = .volume
     @State private var selectedExercise: String = ""
     @State private var range: HealthRange = .halfYear
@@ -160,7 +174,9 @@ struct HealthView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
+                    if tracker.isActive { liveBanner }
                     summaryCard
+                    healthKitCard
                     if sessions.count >= 2 {
                         curveSection
                     } else if !sessions.isEmpty {
@@ -178,12 +194,26 @@ struct HealthView: View {
             .navigationTitle("健康")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
+                    Button { showRun = true } label: {
+                        Image(systemName: tracker.isActive ? "location.fill" : "figure.run")
+                            .foregroundStyle(tracker.isActive ? accent : Color.accentColor)
+                    }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
                     Button { editing = nil; showEditor = true } label: { Image(systemName: "plus") }
                 }
             }
             .sheet(isPresented: $showEditor) {
                 WorkoutEditorView(session: editing) { saved in
                     lifeStore.upsertWorkout(saved)
+                    Task { await pushToHealthKit(saved) }
+                }
+                .environmentObject(lifeStore)
+            }
+            .sheet(isPresented: $showRun) {
+                RunTrackingView { session in
+                    lifeStore.upsertWorkout(session)
+                    Task { await pushToHealthKit(session) }
                 }
                 .environmentObject(lifeStore)
             }
@@ -251,6 +281,187 @@ struct HealthView: View {
         .frame(maxWidth: .infinity)
         .padding(.vertical, 9)
         .background(Color.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
+    }
+
+    // MARK: 即時紀錄橫幅
+
+    private var liveBanner: some View {
+        Button { showRun = true } label: {
+            HStack(spacing: 10) {
+                Image(systemName: "location.fill")
+                    .font(.system(size: 14, weight: .bold)).foregroundStyle(.white)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(tracker.phase == .paused ? "已暫停" : "記錄中")
+                        .font(.caption.weight(.bold)).foregroundStyle(.white)
+                    Text(liveText)
+                        .font(.system(size: 12, weight: .semibold).monospacedDigit())
+                        .foregroundStyle(.white.opacity(0.9))
+                }
+                Spacer()
+                Text("回到畫面").font(.caption2.weight(.bold)).foregroundStyle(.white.opacity(0.85))
+                Image(systemName: "chevron.right").font(.caption2.bold()).foregroundStyle(.white.opacity(0.85))
+            }
+            .padding(.horizontal, 14).padding(.vertical, 11)
+            .background(LinearGradient(colors: [.orange, .orange.opacity(0.75)],
+                                       startPoint: .leading, endPoint: .trailing))
+            .clipShape(RoundedRectangle(cornerRadius: 14))
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// 橫幅上的即時數字：字串先組好再進 Text
+    private var liveText: String {
+        var parts: [String] = []
+        parts.append(RunTrackingView.distanceText(tracker.distanceMeters) + " 公里")
+        parts.append(RunTrackingView.clockText(tracker.elapsed))
+        return parts.joined(separator: "・")
+    }
+
+    // MARK: Apple 健康
+
+    private var healthKitCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Image(systemName: "heart.text.square.fill")
+                    .font(.system(size: 15)).foregroundStyle(.pink)
+                Text("Apple 健康").font(.subheadline.weight(.bold))
+                Spacer()
+                if health.isAvailable {
+                    Toggle("", isOn: Binding(
+                        get: { hkEnabled },
+                        set: { on in
+                            hkEnabled = on
+                            if on { Task { await health.requestAuthorization(); await syncFromHealthKit() } }
+                        }))
+                        .labelsHidden()
+                        .tint(accent)
+                }
+            }
+            if !health.isAvailable {
+                Text("這台裝置不支援「健康」App。").font(.caption).foregroundStyle(.secondary)
+            } else if hkEnabled {
+                Text("體重、血壓、心率與訓練會與 Apple 健康互通。HealthKit 沒有「組數／次數／負荷」的欄位，所以重訓明細只留在這個 App，寫回去的只有時間、距離與熱量。")
+                    .font(.caption2).foregroundStyle(.secondary)
+                HStack(spacing: 10) {
+                    Button {
+                        Task { await syncFromHealthKit() }
+                    } label: {
+                        Label(syncing ? "同步中…" : "立即同步", systemImage: "arrow.triangle.2.circlepath")
+                            .font(.caption.weight(.bold))
+                    }
+                    .disabled(syncing)
+                    if lastSyncEpoch > 0 {
+                        Text("上次 " + Self.shortDate.string(from: Date(timeIntervalSince1970: lastSyncEpoch)))
+                            .font(.caption2).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                }
+                if let msg = syncMessage {
+                    Text(msg).font(.caption2).foregroundStyle(accent)
+                }
+                if let err = health.lastError {
+                    Text(err).font(.caption2).foregroundStyle(.red)
+                }
+            } else {
+                Text("打開後可以把 Apple 健康的體重、血壓與 Apple Watch 的訓練帶進來，這裡記的訓練也會寫回去計入體能訓練圓環。")
+                    .font(.caption2).foregroundStyle(.secondary)
+            }
+        }
+        .padding(14)
+        .background(Color(.secondarySystemGroupedBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color(.separator).opacity(0.12), lineWidth: 0.75))
+    }
+
+    /// 從 Apple 健康抓體重、血壓與訓練回來
+    private func syncFromHealthKit() async {
+        guard hkEnabled, health.isAvailable, !syncing else { return }
+        syncing = true
+        syncMessage = nil
+        defer { syncing = false }
+
+        let since = lastSyncEpoch > 0
+            ? Date(timeIntervalSince1970: lastSyncEpoch)
+            : Calendar.current.date(byAdding: .day, value: -90, to: Date()) ?? Date.distantPast
+
+        var addedWeights = 0
+        var addedVitals = 0
+        var addedWorkouts = 0
+
+        var profile = lifeStore.healthProfile
+        let cal = Calendar.current
+
+        // 體重：同一天已經有體重紀錄就不重複加
+        let weights = await health.fetchBodyMass(since: since)
+        for w in weights {
+            let hasSameDay = profile.measurements.contains {
+                $0.weightKg != nil && cal.isDate($0.date, inSameDayAs: w.date)
+            }
+            guard !hasSameDay else { continue }
+            profile.measurements.append(HealthMeasurement(date: w.date, weightKg: w.kg,
+                                                          note: "來自 Apple 健康"))
+            addedWeights += 1
+        }
+        // 血壓／心率：同一分鐘已經有就跳過
+        let vitals = await health.fetchVitals(since: since)
+        for v in vitals {
+            let exists = profile.measurements.contains {
+                abs($0.date.timeIntervalSince(v.date)) < 60 && $0.hasBloodPressure
+            }
+            guard !exists else { continue }
+            profile.measurements.append(HealthMeasurement(date: v.date, weightKg: nil,
+                                                          systolic: v.systolic, diastolic: v.diastolic,
+                                                          heartRate: v.heartRate, note: "來自 Apple 健康"))
+            addedVitals += 1
+        }
+        if profile.heightCm == 0, let h = await health.fetchLatestHeightCm(), h > 0 {
+            profile.heightCm = h
+        }
+        if addedWeights > 0 || addedVitals > 0 || profile.heightCm != lifeStore.healthProfile.heightCm {
+            profile.measurements.sort { $0.date > $1.date }
+            lifeStore.updateHealthProfile(profile)
+        }
+
+        // 訓練：已經匯入過的 UUID 不再重複
+        let known = Set(lifeStore.workouts.compactMap(\.healthKitUUID))
+        let imported = await health.fetchWorkouts(since: since, excluding: known)
+        for w in imported {
+            let minutes = w.end.timeIntervalSince(w.start) / 60
+            guard minutes >= 1 else { continue }
+            let ex = WorkoutExercise(
+                name: w.activityName,
+                kind: w.isCardio ? .cardio : .strength,
+                reps: 0, sets: 0, loadType: .none, loadKg: 0,
+                distanceKm: w.distanceKm, durationMinutes: minutes,
+                route: w.route, elevationGainM: 0,
+                note: w.isCardio ? "" : "來自 Apple 健康，組數次數請自行補上")
+            let session = WorkoutSession(
+                date: w.start, title: w.activityName, exercises: [ex],
+                durationMinutes: minutes, place: "", note: "",
+                healthKitUUID: w.uuid, activeEnergyKcal: w.energyKcal)
+            lifeStore.upsertWorkout(session)
+            addedWorkouts += 1
+        }
+
+        lastSyncEpoch = Date().timeIntervalSince1970
+        syncMessage = syncSummary(weights: addedWeights, vitals: addedVitals, workouts: addedWorkouts)
+    }
+
+    private func syncSummary(weights: Int, vitals: Int, workouts: Int) -> String {
+        var parts: [String] = []
+        if weights > 0 { parts.append("體重 \(weights) 筆") }
+        if vitals > 0 { parts.append("血壓 \(vitals) 筆") }
+        if workouts > 0 { parts.append("訓練 \(workouts) 筆") }
+        return parts.isEmpty ? "已是最新，沒有新資料" : "已帶入 " + parts.joined(separator: "、")
+    }
+
+    /// 把新記的訓練寫回 Apple 健康（只有打開聯動、而且還沒寫過的才寫）
+    private func pushToHealthKit(_ session: WorkoutSession) async {
+        guard hkEnabled, health.isAvailable, session.healthKitUUID == nil else { return }
+        guard let uuid = await health.saveWorkout(session, bodyWeightKg: bodyWeight) else { return }
+        var s = session
+        s.healthKitUUID = uuid
+        lifeStore.upsertWorkout(s)
     }
 
     // MARK: 綜效曲線
@@ -516,6 +727,32 @@ struct HealthView: View {
             if !s.note.isEmpty {
                 Text(s.note).font(.caption2).foregroundStyle(.secondary).padding(.leading, 46)
             }
+            if let ex = s.firstRouteExercise {
+                RouteMapView(route: ex.route, accent: accent)
+                    .padding(.leading, 46)
+                HStack(spacing: 8) {
+                    routeChip(String(format: "%.2f 公里", ex.distanceKm), "figure.run")
+                    if let p = ex.paceMinPerKm {
+                        routeChip("配速 " + RunTrackingView.paceText(p), "speedometer")
+                    }
+                    if ex.elevationGainM >= 5 {
+                        routeChip(String(format: "爬升 %.0f m", ex.elevationGainM), "mountain.2.fill")
+                    }
+                    if s.activeEnergyKcal > 0 {
+                        routeChip(String(format: "%.0f 大卡", s.activeEnergyKcal), "flame.fill")
+                    }
+                    Spacer()
+                }
+                .padding(.leading, 46)
+            }
+            if s.healthKitUUID != nil {
+                HStack(spacing: 4) {
+                    Image(systemName: "heart.text.square.fill").font(.system(size: 9))
+                    Text("已與 Apple 健康同步").font(.system(size: 10, weight: .semibold))
+                }
+                .foregroundStyle(.pink.opacity(0.85))
+                .padding(.leading, 46)
+            }
             Divider()
         }
     }
@@ -548,6 +785,17 @@ struct HealthView: View {
     }
 
     // MARK: 小元件
+
+    private func routeChip(_ text: String, _ icon: String) -> some View {
+        HStack(spacing: 3) {
+            Image(systemName: icon).font(.system(size: 9, weight: .bold))
+            Text(text).font(.system(size: 10, weight: .bold))
+        }
+        .padding(.horizontal, 7).padding(.vertical, 3)
+        .background(accent.opacity(0.12), in: Capsule())
+        .overlay(Capsule().stroke(accent.opacity(0.2), lineWidth: 0.6))
+        .foregroundStyle(accent)
+    }
 
     private func sectionHeader(_ title: String, count: Int) -> some View {
         HStack(spacing: 8) {
