@@ -13,6 +13,10 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.362", build: 1115, date: "2026/08/19", notes: [
+            "【修正】健身紀錄（v25.351）與廠區據點（v25.357）沒有同步到 iCloud。新增資料時只把它們登記在本機儲存的清單裡，漏了登記到 iCloud 同步的清單，所以換裝置或重裝之後這兩項會不見，桌面網頁版也讀不到。已補上，之後每次同步都會帶著走。",
+            "【說明】既有的資料不會遺失——它們一直都存在這台裝置上，只是沒有上傳。更新後開啟 App 並完成一次同步（設定裡可手動觸發），這台裝置上的健身紀錄與廠區據點就會推上 iCloud。如果你在多台裝置上各自記過，以資料比較完整的那台先同步為準。"
+        ]),
         ChangelogEntry(version: "25.361", build: 1114, date: "2026/08/19", notes: [
             "【修正】編譯錯誤：v25.360 決議搜尋列的命中計數，顏色寫成「沒有命中用灰色、有命中用棕色」時只寫了縮寫，Swift 把型別推成灰階樣式，棕色就對不上（OrganizationView.swift:2558）。兩邊都補上明確型別即可，畫面沒有變化。"
         ]),
