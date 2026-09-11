@@ -205,8 +205,24 @@ struct OrganizationView: View {
                                       ? "rectangle.3.group" : "list.bullet.indent")
                                     .foregroundStyle(.indigo)
                             }
-                            Button {
-                                pdfURL = generatePDFURL().map { IdentifiableURL(url: $0) }
+                            Menu {
+                                Button {
+                                    pdfURL = generatePDFURL().map { IdentifiableURL(url: $0) }
+                                } label: {
+                                    Label("組織圖 PDF", systemImage: "doc.richtext")
+                                }
+                                if !lifeStore.companySites.isEmpty {
+                                    Button {
+                                        shareChronicle(.vertical)
+                                    } label: {
+                                        Label("廠區編年史（直式）", systemImage: "arrow.down.doc")
+                                    }
+                                    Button {
+                                        shareChronicle(.horizontal)
+                                    } label: {
+                                        Label("廠區編年史（橫式）", systemImage: "arrow.right.doc.on.clipboard")
+                                    }
+                                }
                             } label: {
                                 Image(systemName: "square.and.arrow.up")
                                     .foregroundStyle(.green)
@@ -393,6 +409,47 @@ struct OrganizationView: View {
         }
         pdfContext.closePDF()
         return url
+    }
+
+    // MARK: - [v25.363] 廠區編年史出圖
+
+    /// 依時間由早到晚組出編年史資料；沒填啟用年月的據點不放進年表（排不進時間軸）
+    private var chronicleEntries: [ChronicleEntry] {
+        let grouping = lifeStore.groupResolutionsByEra()
+        return lifeStore.companySites
+            .filter { $0.startDate != nil }
+            .sorted { a, b in
+                if a.startYear != b.startYear { return a.startYear < b.startYear }
+                return a.startMonth < b.startMonth
+            }
+            .map { site in
+                let pairs = grouping.bySite[site.id] ?? []
+                return ChronicleEntry(
+                    site: site,
+                    eraEnd: grouping.eraEnd[site.id],
+                    // 年表由早到晚，決議也順著時間排
+                    resolutions: pairs.map(\.resolution).sorted { $0.date < $1.date })
+            }
+    }
+
+    private func shareChronicle(_ orientation: CompanyChronicleView.Orientation) {
+        let entries = chronicleEntries
+        guard !entries.isEmpty else { return }
+        let companies = Set(entries.map { $0.site.company.trimmingCharacters(in: .whitespaces) })
+            .filter { !$0.isEmpty }
+        let title = companies.count == 1 ? (companies.first ?? "廠區") : "廠區"
+        let total = entries.reduce(0) { $0 + $1.resolutions.count }
+        let span = [entries.first?.site.startText, entries.last?.site.startText]
+            .compactMap { $0 }.joined(separator: " ─ ")
+        let view = CompanyChronicleView(
+            title: title + "・廠區編年史",
+            subtitle: "\(entries.count) 個廠・\(total) 則重大決議" + (span.isEmpty ? "" : "・" + span),
+            entries: entries,
+            orientation: orientation)
+        let name = title + "編年史_" + CompanyChronicleView.stamp.string(from: Date())
+        if let url = ChronicleExporter.png(view, name: name) {
+            pdfURL = IdentifiableURL(url: url)
+        }
     }
 
     private func formattedExportDate() -> String {
