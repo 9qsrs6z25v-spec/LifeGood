@@ -13,6 +13,57 @@ struct CompanySiteSection: View {
 
     @State private var editing: CompanySite?
     @State private var showEditor = false
+    /// [v25.358] 排序循環：時間新→舊 → 時間舊→新 → 廠名 A→Z → 回到時間新→舊
+    @AppStorage("company_site_sort") private var sortRaw = SiteSort.timeDesc.rawValue
+
+    enum SiteSort: String, CaseIterable {
+        case timeDesc, timeAsc, nameAsc
+
+        var label: String {
+            switch self {
+            case .timeDesc: return "時間 新→舊"
+            case .timeAsc: return "時間 舊→新"
+            case .nameAsc: return "廠名 A→Z"
+            }
+        }
+        var icon: String {
+            switch self {
+            case .timeDesc: return "arrow.down"
+            case .timeAsc: return "arrow.up"
+            case .nameAsc: return "textformat.abc"
+            }
+        }
+        var next: SiteSort {
+            switch self {
+            case .timeDesc: return .timeAsc
+            case .timeAsc: return .nameAsc
+            case .nameAsc: return .timeDesc
+            }
+        }
+    }
+
+    private var sort: SiteSort { SiteSort(rawValue: sortRaw) ?? .timeDesc }
+
+    /// 依目前排序模式排好的據點
+    private var sortedSites: [CompanySite] {
+        let list = lifeStore.companySites
+        switch sort {
+        case .timeDesc:
+            return list.sorted { a, b in
+                if a.startYear != b.startYear { return a.startYear > b.startYear }
+                return a.startMonth > b.startMonth
+            }
+        case .timeAsc:
+            return list.sorted { a, b in
+                if a.startYear != b.startYear { return a.startYear < b.startYear }
+                return a.startMonth < b.startMonth
+            }
+        case .nameAsc:
+            return list.sorted {
+                $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending
+            }
+        }
+    }
     /// 點子項目要開的決議（交給呼叫端決定怎麼開）
     var onOpenResolution: ((LifeMilestone, SideRoleResolution) -> Void)?
 
@@ -25,12 +76,16 @@ struct CompanySiteSection: View {
     private let accent = Color.brown
 
     var body: some View {
-        Section {
+        let grouping = lifeStore.groupResolutionsByEra()
+        return Section {
             if lifeStore.companySites.isEmpty {
                 emptyRow
             } else {
-                ForEach(lifeStore.companySitesSorted) { site in
-                    siteRow(site)
+                ForEach(sortedSites) { site in
+                    siteRow(site, grouping: grouping)
+                }
+                if !grouping.beforeAny.isEmpty {
+                    beforeAnyRow(grouping.beforeAny)
                 }
             }
             Button {
@@ -54,9 +109,11 @@ struct CompanySiteSection: View {
                     .padding(.horizontal, 6).padding(.vertical, 1.5)
                     .background(accent.opacity(0.14), in: Capsule())
                     .foregroundStyle(accent)
+                Spacer()
+                sortButton
             }
         } footer: {
-            Text("記下每個廠的公司、地點與啟用年月。重大決議上填的「廠區」只要對得上廠名，就會自動掛在那個廠底下，點開就是那個廠的歷史年線。")
+            Text("決議掛在哪個廠是看時間，不是看廠名：一筆決議屬於「啟用年月早於或等於它」之中最晚的那個廠。每個廠的期間到下一個廠啟用為止，串起來就是一條歷史年線。")
         }
         .sheet(isPresented: $showEditor) {
             CompanySiteEditor(site: editing) { saved in
@@ -69,10 +126,10 @@ struct CompanySiteSection: View {
 
     // MARK: 列
 
-    private func siteRow(_ site: CompanySite) -> some View {
-        let pairs = lifeStore.resolutions(atSite: site)
+    private func siteRow(_ site: CompanySite, grouping: LifeStore.SiteEraGrouping) -> some View {
+        let pairs = grouping.bySite[site.id] ?? []
         return ItemRow(
-            chips: chips(site, resolutionCount: pairs.count),
+            chips: chips(site, resolutionCount: pairs.count, eraEnd: grouping.eraEnd[site.id]),
             title: site.displayName,
             titleIsMuted: !site.isActive,
             preview: site.note,
@@ -91,14 +148,16 @@ struct CompanySiteSection: View {
         .opacity(site.isActive ? 1 : 0.65)
     }
 
-    private func chips(_ site: CompanySite, resolutionCount: Int) -> [ItemChip] {
+    private func chips(_ site: CompanySite, resolutionCount: Int, eraEnd: Date?) -> [ItemChip] {
         var chips: [ItemChip] = []
         if !site.company.trimmingCharacters(in: .whitespaces).isEmpty {
             chips.append(ItemChip(id: "company", text: site.company, color: .indigo))
         }
-        chips.append(ItemChip(id: "start", text: site.startText, color: accent, icon: "calendar"))
+        // 這個廠在年線上負責的期間：自己啟用 → 下一個廠啟用（最後一個到今天）
+        chips.append(ItemChip(id: "era", text: eraText(site, eraEnd: eraEnd),
+                              color: accent, icon: "calendar"))
         if let end = site.endText {
-            chips.append(ItemChip(id: "end", text: "止 " + end, color: .secondary))
+            chips.append(ItemChip(id: "end", text: "已結束 " + end, color: .secondary))
         }
         if let y = site.years, y >= 0.1 {
             chips.append(ItemChip(id: "years", text: String(format: "%.1f 年", y), color: .orange))
@@ -126,10 +185,55 @@ struct CompanySiteSection: View {
         }
     }
 
+    /// [v25.358] 一顆按鈕循環三種排序
+    private var sortButton: some View {
+        Button {
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
+                sortRaw = sort.next.rawValue
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: sort.icon).font(.system(size: 9, weight: .bold))
+                Text(sort.label).font(.system(size: 10, weight: .bold))
+            }
+            .padding(.horizontal, 8).padding(.vertical, 3)
+            .background(accent.opacity(0.13), in: Capsule())
+            .overlay(Capsule().stroke(accent.opacity(0.25), lineWidth: 0.6))
+            .foregroundStyle(accent)
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .textCase(nil)
+    }
+
+    private func eraText(_ site: CompanySite, eraEnd: Date?) -> String {
+        guard site.startYear > 0 else { return "未填年月" }
+        guard let end = eraEnd else { return site.startText + " 至今" }
+        let cal = Calendar.current
+        let c = cal.dateComponents([.year, .month], from: end)
+        return site.startText + " ~ " + String(format: "%d/%02d", c.year ?? 0, c.month ?? 1)
+    }
+
+    /// 早於最早一個據點的決議，單獨一列，不要讓它們憑空消失
+    private func beforeAnyRow(_ pairs: [(role: LifeMilestone, resolution: SideRoleResolution)]) -> some View {
+        ItemRow(
+            chips: [ItemChip(id: "count", text: "\(pairs.count) 則決議", color: .purple)],
+            title: "最早的據點之前",
+            titleIsMuted: true,
+            preview: "這些決議的日期早於你建檔的第一個廠，還沒有對應的據點。補一個更早的據點就會歸進去。",
+            previewLineLimit: 3,
+            disclosures: disclosures(pairs),
+            disclosureLabel: "重大決議",
+            disclosureColor: .secondary,
+            leading: { ItemIconDisc(icon: "clock.badge.questionmark", color: .secondary, iconSize: 14) }
+        )
+        .listRowInsets(EdgeInsets())
+    }
+
     private var emptyRow: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text("還沒有廠區據點").font(.subheadline.weight(.semibold))
-            Text("例如「台積電 F12A・新竹科學園區・2000/01」。建好之後，重大決議上填同樣的廠區名就會自動掛進來。")
+            Text("例如「台積電 F12A・新竹科學園區・2000/01」。建好之後，決議會依日期自動落在當時所在的那個廠底下。")
                 .font(.caption).foregroundStyle(.secondary)
         }
         .padding(.vertical, 6)
@@ -138,7 +242,7 @@ struct CompanySiteSection: View {
     /// 決議上出現過、但還沒建成據點的廠區字串
     private var unregisteredHint: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("決議裡有這些廠區還沒建成據點")
+            Text("決議裡出現過這些廠區名稱，還沒建成據點")
                 .font(.caption.weight(.semibold)).foregroundStyle(.orange)
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 6) {

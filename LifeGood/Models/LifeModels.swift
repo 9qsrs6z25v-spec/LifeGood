@@ -2850,9 +2850,11 @@ struct GradeTitle: Identifiable, Codable {
 // MARK: - 公司廠區據點（v25.357）
 //
 // 台積電那種一家公司多個廠的情境：每個廠是一筆，記下公司、廠名、地點與啟用年月。
-// 與重大決議的連結走決議既有的「廠區」欄位（SideRoleResolution.site）——
-// 決議上填的廠區字串對得上這裡的廠名或公司＋廠名，就會掛在那個廠底下，
-// 於是每個廠自然長成一條由決議組成的歷史年線。
+// [v25.358] 與重大決議的連結改為**依時間**，不看廠名：
+// 一筆決議屬於「啟用年月早於或等於決議日期」之中最晚的那個據點。
+// A 廠蓋好之後才發生的事，如果那時 B 廠已經啟用，該算在 B 廠那個時間點上。
+// 每個據點的期間＝自己的啟用年月 到 下一個據點啟用為止（最後一個到今天），
+// 所有據點串起來就是一條連續的歷史年線。
 
 struct CompanySite: Identifiable, Codable {
     let id: UUID
@@ -2929,7 +2931,16 @@ struct CompanySite: Identifiable, Codable {
         return max(0, Double(months) / 12)
     }
 
-    /// 這筆據點可以對得上的廠區字串（決議的 site 欄位填其中任一個都算）
+    /// 啟用年月換成 Date（每月 1 日 00:00），用來判斷決議落在哪個廠的期間
+    var startDate: Date? {
+        guard startYear > 0 else { return nil }
+        return Calendar.current.date(from: DateComponents(year: startYear,
+                                                          month: min(12, max(1, startMonth)),
+                                                          day: 1))
+    }
+
+    /// 這筆據點用過的廠區字串。**不再用來決定決議歸屬**（v25.358 改為依時間），
+    /// 只拿來比對「決議填過但還沒建檔」的廠區名，提醒使用者補建。
     var matchKeys: [String] {
         [name, displayName, company]
             .map { $0.trimmingCharacters(in: .whitespaces) }

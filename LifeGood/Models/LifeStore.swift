@@ -831,14 +831,6 @@ class LifeStore: ObservableObject {
 
     // MARK: - 公司廠區據點（v25.357）
 
-    /// 依啟用年月新到舊；沒填年月的排最後
-    var companySitesSorted: [CompanySite] {
-        companySites.sorted { a, b in
-            if a.startYear != b.startYear { return a.startYear > b.startYear }
-            return a.startMonth > b.startMonth
-        }
-    }
-
     func upsertCompanySite(_ site: CompanySite) {
         if let i = companySites.firstIndex(where: { $0.id == site.id }) {
             companySites[i] = site
@@ -858,18 +850,48 @@ class LifeStore: ObservableObject {
         }.sorted { $0.resolution.date > $1.resolution.date }
     }
 
-    /// 掛在某個據點底下的重大決議：決議的「廠區」欄位對得上據點的廠名／公司＋廠名／公司。
-    /// 比對時去除前後空白、忽略英文大小寫——廠區是自由文字，使用者不會每次都打得一模一樣。
-    func resolutions(atSite site: CompanySite) -> [(role: LifeMilestone, resolution: SideRoleResolution)] {
-        let keys = Set(site.matchKeys.map { $0.lowercased() })
-        guard !keys.isEmpty else { return [] }
-        return allSideRoleResolutions.filter { pair in
-            let s = pair.resolution.site.trimmingCharacters(in: .whitespaces).lowercased()
-            return !s.isEmpty && keys.contains(s)
-        }
+    /// [v25.358] 依時間把決議掛到據點：一筆決議屬於「啟用年月 <= 決議日期」之中最晚的那個據點。
+    /// 不看決議上的廠區文字——A 廠蓋好之後才發生的事，如果那時 B 廠已經啟用，
+    /// 該算在 B 廠那個時間點上。沒填啟用年月的據點不參與分期（拿不到時間就無從判斷）。
+    struct SiteEraGrouping {
+        /// 據點 id → 落在它期間內的決議（新到舊）
+        var bySite: [UUID: [(role: LifeMilestone, resolution: SideRoleResolution)]] = [:]
+        /// 早於最早一個據點的決議
+        var beforeAny: [(role: LifeMilestone, resolution: SideRoleResolution)] = []
+        /// 據點 id → 期間結束時間（＝下一個據點的啟用；最後一個為 nil＝至今）
+        var eraEnd: [UUID: Date] = [:]
     }
 
-    /// 決議上填過、但還沒建成據點的廠區字串（提醒使用者補建）
+    func groupResolutionsByEra() -> SiteEraGrouping {
+        var out = SiteEraGrouping()
+        // 依啟用時間由早到晚；沒填年月的不參與分期
+        let timeline = companySites
+            .compactMap { site -> (site: CompanySite, start: Date)? in
+                guard let d = site.startDate else { return nil }
+                return (site, d)
+            }
+            .sorted { $0.start < $1.start }
+        guard !timeline.isEmpty else {
+            out.beforeAny = allSideRoleResolutions
+            return out
+        }
+        for (i, entry) in timeline.enumerated() where i + 1 < timeline.count {
+            out.eraEnd[entry.site.id] = timeline[i + 1].start
+        }
+        for pair in allSideRoleResolutions {
+            let date = pair.resolution.date
+            // 找出啟用時間不晚於這筆決議的最後一個據點
+            guard let owner = timeline.last(where: { $0.start <= date }) else {
+                out.beforeAny.append(pair)
+                continue
+            }
+            out.bySite[owner.site.id, default: []].append(pair)
+        }
+        return out
+    }
+
+    /// 決議上填過、但還沒建成據點的廠區字串。
+    /// v25.358 起歸屬看時間不看名字，這份清單只是「照著既有決議把廠區補建起來」的方便入口。
     var unregisteredResolutionSites: [String] {
         let known = Set(companySites.flatMap { $0.matchKeys.map { $0.lowercased() } })
         var seen: Set<String> = []
