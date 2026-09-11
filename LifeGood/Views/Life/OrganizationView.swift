@@ -87,6 +87,14 @@ struct OrganizationView: View {
     // 美化：空狀態脈衝光環動畫旗標
     @State private var orgEmptyPulse = false
     @State private var orgEmptyPulseTask: Task<Void, Never>?
+    /// [v25.357] 從廠區據點的子項目點開某筆重大決議
+    @State private var openingResolution: ResolutionJump?
+
+    struct ResolutionJump: Identifiable {
+        let roleId: UUID
+        let resolutionId: UUID
+        var id: String { "\(roleId)-\(resolutionId)" }
+    }
 
     private var rootDepartments: [Department] {
         // root = 沒有 upstream 的部門；若全部都有 upstream（可能成環），退而求其次抓部門裡的全部，
@@ -167,6 +175,10 @@ struct OrganizationView: View {
                 set: { viewingDeptId = $0?.id }
             )) { wrapper in
                 DepartmentDetailView(deptId: wrapper.id)
+            }
+            // [v25.357] 從廠區據點展開的決議直接開決議卡片
+            .sheet(item: $openingResolution) { jump in
+                SideRoleResolutionCard(roleId: jump.roleId, resolutionId: jump.resolutionId)
             }
             .premiumLockAlert(isPresented: $showPremiumAlert)
             .onAppear {
@@ -377,6 +389,10 @@ struct OrganizationView: View {
                 }
             } footer: {
                 Text("點部門名稱進入詳細頁設定人員與管理人員；點箭頭展開下游部門。右上角可切回樹狀圖。")
+            }
+            // [v25.357] 廠區據點：項目＝廠，子項目＝掛在那個廠的重大決議
+            CompanySiteSection { role, resolution in
+                openingResolution = ResolutionJump(roleId: role.id, resolutionId: resolution.id)
             }
         }
         .listStyle(.insetGrouped)

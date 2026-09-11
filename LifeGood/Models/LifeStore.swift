@@ -13,6 +13,8 @@ class LifeStore: ObservableObject {
     @Published var performanceBallots: [PerformanceBallot] = [] { didSet { if !isLoading { save() } } }
     /// [v25.351] 健身紀錄：一筆＝一次訓練，底下掛多個動作
     @Published var workouts: [WorkoutSession] = [] { didSet { if !isLoading { save() } } }
+    /// [v25.357] 公司廠區據點：與重大決議的「廠區」欄位對應，長成每個廠的歷史年線
+    @Published var companySites: [CompanySite] = [] { didSet { if !isLoading { save() } } }
     @Published var gradeTitles: [GradeTitle] = [] { didSet { if !isLoading { save() } } }
     @Published var businessCards: [BusinessCard] = [] { didSet { if !isLoading { save() } } }
     @Published var personalEvents: [PersonalEvent] = [] { didSet { if !isLoading { save() } } }
@@ -37,7 +39,8 @@ class LifeStore: ObservableObject {
         "life_pets", "life_schedules", "life_subordinates", "life_departments",
         "life_grade_titles", "life_business_cards", "life_personal_events",
         "life_org_people", "life_health_profile", "life_family_tasks",
-        "life_equipment_pool", "life_performance_ballots", "life_workouts"
+        "life_equipment_pool", "life_performance_ballots", "life_workouts",
+        "life_company_sites"
     ]
 
     init() {
@@ -824,6 +827,62 @@ class LifeStore: ObservableObject {
             if wa != wb { return wa > wb }
             return a.label > b.label
         }
+    }
+
+    // MARK: - 公司廠區據點（v25.357）
+
+    /// 依啟用年月新到舊；沒填年月的排最後
+    var companySitesSorted: [CompanySite] {
+        companySites.sorted { a, b in
+            if a.startYear != b.startYear { return a.startYear > b.startYear }
+            return a.startMonth > b.startMonth
+        }
+    }
+
+    func upsertCompanySite(_ site: CompanySite) {
+        if let i = companySites.firstIndex(where: { $0.id == site.id }) {
+            companySites[i] = site
+        } else {
+            companySites.append(site)
+        }
+    }
+
+    func deleteCompanySite(id: UUID) {
+        companySites.removeAll { $0.id == id }
+    }
+
+    /// 全部兼任職務的重大決議（附所屬職務），新到舊
+    var allSideRoleResolutions: [(role: LifeMilestone, resolution: SideRoleResolution)] {
+        milestones.filter { $0.isSideRole }.flatMap { role in
+            (role.sideRoleResolutions ?? []).map { (role: role, resolution: $0) }
+        }.sorted { $0.resolution.date > $1.resolution.date }
+    }
+
+    /// 掛在某個據點底下的重大決議：決議的「廠區」欄位對得上據點的廠名／公司＋廠名／公司。
+    /// 比對時去除前後空白、忽略英文大小寫——廠區是自由文字，使用者不會每次都打得一模一樣。
+    func resolutions(atSite site: CompanySite) -> [(role: LifeMilestone, resolution: SideRoleResolution)] {
+        let keys = Set(site.matchKeys.map { $0.lowercased() })
+        guard !keys.isEmpty else { return [] }
+        return allSideRoleResolutions.filter { pair in
+            let s = pair.resolution.site.trimmingCharacters(in: .whitespaces).lowercased()
+            return !s.isEmpty && keys.contains(s)
+        }
+    }
+
+    /// 決議上填過、但還沒建成據點的廠區字串（提醒使用者補建）
+    var unregisteredResolutionSites: [String] {
+        let known = Set(companySites.flatMap { $0.matchKeys.map { $0.lowercased() } })
+        var seen: Set<String> = []
+        var out: [String] = []
+        for pair in allSideRoleResolutions {
+            let raw = pair.resolution.site.trimmingCharacters(in: .whitespaces)
+            guard !raw.isEmpty else { continue }
+            let key = raw.lowercased()
+            guard !known.contains(key), !seen.contains(key) else { continue }
+            seen.insert(key)
+            out.append(raw)
+        }
+        return out.sorted()
     }
 
     // MARK: - 健身紀錄（v25.351）
@@ -1875,7 +1934,8 @@ class LifeStore: ObservableObject {
             subordinates: subordinates, departments: departments, gradeTitles: gradeTitles,
             businessCards: businessCards, personalEvents: personalEvents, orgPeople: orgPeople,
             healthProfile: healthProfile, familyTasks: familyTasks, equipmentPool: equipmentPool,
-            performanceBallots: performanceBallots, workouts: workouts
+            performanceBallots: performanceBallots, workouts: workouts,
+            companySites: companySites
         )
         saveQueue.async {
             let encoder = JSONEncoder()
@@ -1897,6 +1957,7 @@ class LifeStore: ObservableObject {
             if let d = try? encoder.encode(snap.equipmentPool)  { ud.set(d, forKey: "life_equipment_pool") }
             if let d = try? encoder.encode(snap.performanceBallots) { ud.set(d, forKey: "life_performance_ballots") }
             if let d = try? encoder.encode(snap.workouts)       { ud.set(d, forKey: "life_workouts") }
+            if let d = try? encoder.encode(snap.companySites)   { ud.set(d, forKey: "life_company_sites") }
             CloudSyncManager.shared.pushAll()
         }
     }
@@ -1926,6 +1987,7 @@ class LifeStore: ObservableObject {
         if let items = lossyDecodeArray([ManagedEquipment].self, key: "life_equipment_pool", decoder: decoder) { equipmentPool = items }
         if let items = lossyDecodeArray([PerformanceBallot].self, key: "life_performance_ballots", decoder: decoder) { performanceBallots = items }
         if let items = lossyDecodeArray([WorkoutSession].self, key: "life_workouts", decoder: decoder) { workouts = items }
+        if let items = lossyDecodeArray([CompanySite].self, key: "life_company_sites", decoder: decoder) { companySites = items }
         if let data = rawDataIfChanged("life_health_profile"),
            let h = try? decoder.decode(HealthProfile.self, from: data) {
             healthProfile = h
@@ -2001,6 +2063,7 @@ class LifeStore: ObservableObject {
         orgPeople.removeAll()
         healthProfile = HealthProfile()
         workouts.removeAll()
+        companySites.removeAll()
         save()
     }
 }

@@ -2847,6 +2847,96 @@ struct GradeTitle: Identifiable, Codable {
     }
 }
 
+// MARK: - 公司廠區據點（v25.357）
+//
+// 台積電那種一家公司多個廠的情境：每個廠是一筆，記下公司、廠名、地點與啟用年月。
+// 與重大決議的連結走決議既有的「廠區」欄位（SideRoleResolution.site）——
+// 決議上填的廠區字串對得上這裡的廠名或公司＋廠名，就會掛在那個廠底下，
+// 於是每個廠自然長成一條由決議組成的歷史年線。
+
+struct CompanySite: Identifiable, Codable {
+    let id: UUID
+    /// 公司（例：台積電）
+    var company: String
+    /// 廠區／據點名稱（例：F12A 十二廠）。與重大決議的「廠區」欄位對應
+    var name: String
+    /// 地點（例：新竹科學園區）
+    var location: String
+    /// 啟用年月（只到月，不記日）
+    var startYear: Int
+    var startMonth: Int
+    /// 結束年月（關廠／轉移／離開；沒有就是仍在運作）
+    var endYear: Int?
+    var endMonth: Int?
+    var note: String
+
+    init(id: UUID = UUID(), company: String = "", name: String = "", location: String = "",
+         startYear: Int = Calendar.current.component(.year, from: Date()),
+         startMonth: Int = Calendar.current.component(.month, from: Date()),
+         endYear: Int? = nil, endMonth: Int? = nil, note: String = "") {
+        self.id = id; self.company = company; self.name = name; self.location = location
+        self.startYear = startYear; self.startMonth = startMonth
+        self.endYear = endYear; self.endMonth = endMonth; self.note = note
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = (try? c.decode(UUID.self, forKey: .id)) ?? UUID()
+        company = (try? c.decode(String.self, forKey: .company)) ?? ""
+        name = (try? c.decode(String.self, forKey: .name)) ?? ""
+        location = (try? c.decode(String.self, forKey: .location)) ?? ""
+        startYear = (try? c.decode(Int.self, forKey: .startYear)) ?? 0
+        startMonth = (try? c.decode(Int.self, forKey: .startMonth)) ?? 1
+        endYear = try? c.decodeIfPresent(Int.self, forKey: .endYear)
+        endMonth = try? c.decodeIfPresent(Int.self, forKey: .endMonth)
+        note = (try? c.decode(String.self, forKey: .note)) ?? ""
+    }
+    private enum CodingKeys: String, CodingKey {
+        case id, company, name, location, startYear, startMonth, endYear, endMonth, note
+    }
+
+    /// 顯示名：公司 廠名（兩者都有才串起來）
+    var displayName: String {
+        let parts = [company, name].map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        return parts.isEmpty ? "未命名據點" : parts.joined(separator: " ")
+    }
+
+    /// 啟用年月文字（2000/01）
+    var startText: String {
+        startYear > 0 ? String(format: "%d/%02d", startYear, startMonth) : "未填年月"
+    }
+
+    var endText: String? {
+        guard let y = endYear, y > 0 else { return nil }
+        return String(format: "%d/%02d", y, endMonth ?? 1)
+    }
+
+    var isActive: Bool { endYear == nil }
+
+    /// 啟用至今（或至結束）幾年，給年線用；算不出來回 nil
+    var years: Double? {
+        guard startYear > 0 else { return nil }
+        let cal = Calendar.current
+        guard let start = cal.date(from: DateComponents(year: startYear, month: max(1, startMonth))) else { return nil }
+        let end: Date
+        if let y = endYear, y > 0,
+           let e = cal.date(from: DateComponents(year: y, month: max(1, endMonth ?? 1))) {
+            end = e
+        } else {
+            end = Date()
+        }
+        let months = cal.dateComponents([.month], from: start, to: end).month ?? 0
+        return max(0, Double(months) / 12)
+    }
+
+    /// 這筆據點可以對得上的廠區字串（決議的 site 欄位填其中任一個都算）
+    var matchKeys: [String] {
+        [name, displayName, company]
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+    }
+}
+
 // MARK: - 健身紀錄（v25.351）
 //
 // 一筆 WorkoutSession＝一次訓練（一天可以有多次），底下掛多個 WorkoutExercise。
