@@ -2555,7 +2555,9 @@ extension OrganizationView {
                 if hasQuery {
                     Text(hits.isEmpty ? "0" : "\(min(hitIndex, hits.count - 1) + 1) / \(hits.count)")
                         .font(.system(size: 11, weight: .bold).monospacedDigit())
-                        .foregroundStyle(hits.isEmpty ? .secondary : .brown)
+                        // 兩邊都寫成 Color：只寫 .secondary 會讓型別推成 HierarchicalShapeStyle，
+                        // 另一邊的 .brown 就對不上
+                        .foregroundStyle(hits.isEmpty ? Color.secondary : Color.brown)
                     Button { step(-1, total: hits.count) } label: {
                         Image(systemName: "chevron.up").font(.system(size: 12, weight: .bold))
                     }
