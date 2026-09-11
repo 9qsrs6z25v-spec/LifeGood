@@ -110,6 +110,11 @@ struct ItemRow<Leading: View, Accessory: View>: View {
     var disclosureLabel: String = "子項目"
     var disclosureColor: Color = .indigo
     var extra: AnyView?
+    /// [v25.360] 由外部強制展開子項目清單（搜尋跳轉時用）。
+    /// 列自己的展開狀態仍然有效，兩者取聯集。
+    var forceOpen: Bool = false
+    /// [v25.360] 要標亮並自動展開內文的子項目 id（搜尋命中的那一筆）
+    var highlightId: String?
     var onTap: (() -> Void)?
 
     @ViewBuilder var leading: () -> Leading
@@ -127,7 +132,8 @@ struct ItemRow<Leading: View, Accessory: View>: View {
          preview: String? = nil, previewLineLimit: Int = 3,
          progress: ItemProgress? = nil, disclosures: [ItemDisclosure] = [],
          disclosureLabel: String = "子項目", disclosureColor: Color = .indigo,
-         extra: AnyView? = nil, onTap: (() -> Void)? = nil,
+         extra: AnyView? = nil, forceOpen: Bool = false, highlightId: String? = nil,
+         onTap: (() -> Void)? = nil,
          @ViewBuilder leading: @escaping () -> Leading,
          @ViewBuilder accessory: @escaping () -> Accessory) {
         self.chips = chips
@@ -143,6 +149,8 @@ struct ItemRow<Leading: View, Accessory: View>: View {
         self.disclosureLabel = disclosureLabel
         self.disclosureColor = disclosureColor
         self.extra = extra
+        self.forceOpen = forceOpen
+        self.highlightId = highlightId
         self.onTap = onTap
         self.leading = leading
         self.accessory = accessory
@@ -222,7 +230,9 @@ struct ItemRow<Leading: View, Accessory: View>: View {
     // MARK: 摺疊子項目
 
     private var disclosureSection: some View {
-        VStack(alignment: .leading, spacing: 5) {
+        // 自己展開的，或外部（搜尋跳轉）要求展開的
+        let isOpen = listOpen || forceOpen
+        return VStack(alignment: .leading, spacing: 5) {
             Button {
                 withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) { listOpen.toggle() }
             } label: {
@@ -233,7 +243,7 @@ struct ItemRow<Leading: View, Accessory: View>: View {
                         .font(.system(size: 10, weight: .bold))
                     Image(systemName: "chevron.right")
                         .font(.system(size: 8, weight: .bold))
-                        .rotationEffect(.degrees(listOpen ? 90 : 0))
+                        .rotationEffect(.degrees(isOpen ? 90 : 0))
                 }
                 .padding(.horizontal, 7).padding(.vertical, 3)
                 .background(disclosureColor.opacity(0.12), in: Capsule())
@@ -243,7 +253,7 @@ struct ItemRow<Leading: View, Accessory: View>: View {
             }
             .buttonStyle(.plain)
 
-            if listOpen {
+            if isOpen {
                 VStack(alignment: .leading, spacing: 4) {
                     ForEach(disclosures) { d in disclosureLine(d) }
                 }
@@ -255,7 +265,8 @@ struct ItemRow<Leading: View, Accessory: View>: View {
 
     @ViewBuilder
     private func disclosureLine(_ d: ItemDisclosure) -> some View {
-        let open = openBodies.contains(d.id)
+        let isHit = d.id == highlightId
+        let open = openBodies.contains(d.id) || isHit
         VStack(alignment: .leading, spacing: 4) {
             Button {
                 withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
@@ -283,6 +294,10 @@ struct ItemRow<Leading: View, Accessory: View>: View {
                     }
                     Spacer(minLength: 4)
                 }
+                .padding(.horizontal, isHit ? 5 : 0)
+                .padding(.vertical, isHit ? 3 : 0)
+                .background(isHit ? disclosureColor.opacity(0.14) : .clear,
+                            in: RoundedRectangle(cornerRadius: 6))
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -322,13 +337,15 @@ extension ItemRow where Leading == EmptyView, Accessory == EmptyView {
          preview: String? = nil, previewLineLimit: Int = 3,
          progress: ItemProgress? = nil, disclosures: [ItemDisclosure] = [],
          disclosureLabel: String = "子項目", disclosureColor: Color = .indigo,
-         extra: AnyView? = nil, onTap: (() -> Void)? = nil) {
+         extra: AnyView? = nil, forceOpen: Bool = false, highlightId: String? = nil,
+         onTap: (() -> Void)? = nil) {
         self.init(chips: chips, title: title, titleIsMuted: titleIsMuted,
                   titleStrikethrough: titleStrikethrough, titleTap: titleTap,
                   titleIsFiltering: titleIsFiltering, preview: preview,
                   previewLineLimit: previewLineLimit, progress: progress,
                   disclosures: disclosures, disclosureLabel: disclosureLabel,
-                  disclosureColor: disclosureColor, extra: extra, onTap: onTap,
+                  disclosureColor: disclosureColor, extra: extra,
+                  forceOpen: forceOpen, highlightId: highlightId, onTap: onTap,
                   leading: { EmptyView() }, accessory: { EmptyView() })
     }
 }
@@ -340,14 +357,16 @@ extension ItemRow where Leading == EmptyView {
          preview: String? = nil, previewLineLimit: Int = 3,
          progress: ItemProgress? = nil, disclosures: [ItemDisclosure] = [],
          disclosureLabel: String = "子項目", disclosureColor: Color = .indigo,
-         extra: AnyView? = nil, onTap: (() -> Void)? = nil,
+         extra: AnyView? = nil, forceOpen: Bool = false, highlightId: String? = nil,
+         onTap: (() -> Void)? = nil,
          @ViewBuilder accessory: @escaping () -> Accessory) {
         self.init(chips: chips, title: title, titleIsMuted: titleIsMuted,
                   titleStrikethrough: titleStrikethrough, titleTap: titleTap,
                   titleIsFiltering: titleIsFiltering, preview: preview,
                   previewLineLimit: previewLineLimit, progress: progress,
                   disclosures: disclosures, disclosureLabel: disclosureLabel,
-                  disclosureColor: disclosureColor, extra: extra, onTap: onTap,
+                  disclosureColor: disclosureColor, extra: extra,
+                  forceOpen: forceOpen, highlightId: highlightId, onTap: onTap,
                   leading: { EmptyView() }, accessory: accessory)
     }
 }
@@ -359,14 +378,16 @@ extension ItemRow where Accessory == EmptyView {
          preview: String? = nil, previewLineLimit: Int = 3,
          progress: ItemProgress? = nil, disclosures: [ItemDisclosure] = [],
          disclosureLabel: String = "子項目", disclosureColor: Color = .indigo,
-         extra: AnyView? = nil, onTap: (() -> Void)? = nil,
+         extra: AnyView? = nil, forceOpen: Bool = false, highlightId: String? = nil,
+         onTap: (() -> Void)? = nil,
          @ViewBuilder leading: @escaping () -> Leading) {
         self.init(chips: chips, title: title, titleIsMuted: titleIsMuted,
                   titleStrikethrough: titleStrikethrough, titleTap: titleTap,
                   titleIsFiltering: titleIsFiltering, preview: preview,
                   previewLineLimit: previewLineLimit, progress: progress,
                   disclosures: disclosures, disclosureLabel: disclosureLabel,
-                  disclosureColor: disclosureColor, extra: extra, onTap: onTap,
+                  disclosureColor: disclosureColor, extra: extra,
+                  forceOpen: forceOpen, highlightId: highlightId, onTap: onTap,
                   leading: leading, accessory: { EmptyView() })
     }
 }

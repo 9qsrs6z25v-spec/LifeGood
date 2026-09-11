@@ -8,7 +8,23 @@ import SwiftUI
 //
 // 版型用 v25.354 的共用 ItemRow 模板：項目＝廠，子項目＝重大決議。
 
+/// [v25.360] 搜尋命中的一筆：哪個據點底下的哪一筆決議
+struct SiteResolutionHit: Identifiable, Equatable {
+    /// 據點 id；早於所有據點的那一列用 CompanySiteSection.beforeAnyAnchor
+    let siteId: UUID
+    let resolutionId: UUID
+    let roleId: UUID
+    let title: String
+    var id: String { "\(siteId)-\(resolutionId)" }
+
+    static func == (a: SiteResolutionHit, b: SiteResolutionHit) -> Bool { a.id == b.id }
+}
+
 struct CompanySiteSection: View {
+    /// 「最早的據點之前」那一列的捲動錨點
+    static let beforeAnyAnchor = UUID(uuidString: "00000000-0000-0000-0000-0000000051FE")
+        ?? UUID()
+
     @EnvironmentObject var lifeStore: LifeStore
 
     /// [v25.358] 排序循環：時間新→舊 → 時間舊→新 → 廠名 A→Z → 回到時間新→舊
@@ -68,13 +84,17 @@ struct CompanySiteSection: View {
     /// 掛在 Section 上時 List 重建 section 內容會把剛打開的 sheet 一起收掉
     /// （使用者回報：點新增後畫面打開又立刻關起來）。
     var onEdit: (CompanySite?) -> Void
+    /// [v25.360] 目前搜尋跳到的那一筆決議（據點 id + 決議 id）；有值時該據點會自動展開並標亮
+    var focus: SiteResolutionHit?
 
     /// 明確寫出 init：上面有 private 的 @State，合成的 memberwise init 會跟著變 private，
     /// 跨檔案（OrganizationView）叫不到。
     init(onOpenResolution: ((LifeMilestone, SideRoleResolution) -> Void)? = nil,
-         onEdit: @escaping (CompanySite?) -> Void) {
+         onEdit: @escaping (CompanySite?) -> Void,
+         focus: SiteResolutionHit? = nil) {
         self.onOpenResolution = onOpenResolution
         self.onEdit = onEdit
+        self.focus = focus
     }
 
     private let accent = Color.brown
@@ -134,6 +154,8 @@ struct CompanySiteSection: View {
             disclosures: disclosures(pairs),
             disclosureLabel: "重大決議",
             disclosureColor: accent,
+            forceOpen: focus?.siteId == site.id,
+            highlightId: focus?.siteId == site.id ? focus?.resolutionId.uuidString : nil,
             onTap: { onEdit(site) },
             leading: {
                 ItemIconDisc(icon: "building.2.fill",
@@ -143,6 +165,8 @@ struct CompanySiteSection: View {
         )
         .listRowInsets(EdgeInsets())
         .opacity(site.isActive ? 1 : 0.65)
+        // 供搜尋跳轉用的錨點
+        .id(site.id)
     }
 
     private func chips(_ site: CompanySite, resolutionCount: Int, eraEnd: Date?) -> [ItemChip] {
@@ -222,9 +246,13 @@ struct CompanySiteSection: View {
             disclosures: disclosures(pairs),
             disclosureLabel: "重大決議",
             disclosureColor: .secondary,
+            forceOpen: focus?.siteId == CompanySiteSection.beforeAnyAnchor,
+            highlightId: focus?.siteId == CompanySiteSection.beforeAnyAnchor
+                ? focus?.resolutionId.uuidString : nil,
             leading: { ItemIconDisc(icon: "clock.badge.questionmark", color: .secondary, iconSize: 14) }
         )
         .listRowInsets(EdgeInsets())
+        .id(CompanySiteSection.beforeAnyAnchor)
     }
 
     private var emptyRow: some View {

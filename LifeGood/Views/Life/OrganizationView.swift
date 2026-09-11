@@ -92,6 +92,9 @@ struct OrganizationView: View {
     /// [v25.359] 新增／編輯廠區據點。sheet 要掛在這裡而不是 Section 上——
     /// 掛在 Section 上時 List 重建內容會把剛打開的 sheet 一起收掉。
     @State private var editingSite: SiteEditTarget?
+    /// [v25.360] 決議內容搜尋：固定在頂端，命中後把清單捲到該筆決議所屬的廠區
+    @State private var resolutionQuery = ""
+    @State private var hitIndex = 0
 
     struct ResolutionJump: Identifiable {
         let roleId: UUID
@@ -103,6 +106,36 @@ struct OrganizationView: View {
         var site: CompanySite
         var isNew: Bool
         var id: UUID { site.id }
+    }
+
+    /// [v25.360] 符合關鍵字的重大決議，依時間新到舊；每一筆帶著它所屬的廠區
+    private var resolutionHits: [SiteResolutionHit] {
+        let q = resolutionQuery.trimmingCharacters(in: .whitespaces)
+        guard !q.isEmpty else { return [] }
+        let grouping = lifeStore.groupResolutionsByEra()
+        var siteOf: [UUID: UUID] = [:]          // 決議 id → 據點 id
+        for (siteId, pairs) in grouping.bySite {
+            for pair in pairs { siteOf[pair.resolution.id] = siteId }
+        }
+        for pair in grouping.beforeAny {
+            siteOf[pair.resolution.id] = CompanySiteSection.beforeAnyAnchor
+        }
+        return lifeStore.allSideRoleResolutions.compactMap { pair -> SiteResolutionHit? in
+            let r = pair.resolution
+            let haystack = [r.title, r.content, r.site, r.initiator, r.serialLabel]
+                + r.categories
+            guard haystack.contains(where: { $0.localizedCaseInsensitiveContains(q) }),
+                  let siteId = siteOf[r.id] else { return nil }
+            return SiteResolutionHit(siteId: siteId, resolutionId: r.id,
+                                     roleId: pair.role.id,
+                                     title: r.title.isEmpty ? "（未填標題）" : r.title)
+        }
+    }
+
+    private var currentHit: SiteResolutionHit? {
+        let hits = resolutionHits
+        guard !hits.isEmpty else { return nil }
+        return hits[min(max(0, hitIndex), hits.count - 1)]
     }
 
     private var rootDepartments: [Department] {
@@ -125,6 +158,12 @@ struct OrganizationView: View {
                 } else {
                     VStack(spacing: 0) {
                         orgSearchBar
+                        // 決議搜尋只在目錄模式有意義（要捲動到廠區那一列）
+                        if directoryMode,
+                           orgSearchText.trimmingCharacters(in: .whitespaces).isEmpty,
+                           !lifeStore.companySites.isEmpty {
+                            resolutionSearchBar
+                        }
                         if !orgSearchText.trimmingCharacters(in: .whitespaces).isEmpty {
                             orgSearchResults
                         } else if directoryMode {
@@ -394,7 +433,20 @@ struct OrganizationView: View {
             $0.name.localizedStandardCompare($1.name) == .orderedAscending
         }
         let nodes = makeNodes(roots, visited: [], ctx: ctx)
-        return List {
+        return ScrollViewReader { proxy in
+            directoryBody(nodes: nodes, ctx: ctx)
+                // [v25.360] 搜尋切到下一筆時把清單捲到那筆決議所屬的廠區
+                .onChange(of: currentHit) { _, hit in
+                    guard let hit else { return }
+                    withAnimation(.easeInOut(duration: 0.35)) {
+                        proxy.scrollTo(hit.siteId, anchor: .center)
+                    }
+                }
+        }
+    }
+
+    private func directoryBody(nodes: [DeptNode], ctx: OrgContext) -> some View {
+        List {
             Section {
                 statsHeader
                     .listRowInsets(EdgeInsets())
@@ -412,7 +464,7 @@ struct OrganizationView: View {
                 openingResolution = ResolutionJump(roleId: role.id, resolutionId: resolution.id)
             }, onEdit: { site in
                 editingSite = SiteEditTarget(site: site ?? CompanySite(), isNew: site == nil)
-            })
+            }, focus: currentHit)
         }
         .listStyle(.insetGrouped)
         .scrollContentBackground(.hidden)
@@ -2484,6 +2536,70 @@ extension OrganizationView {
         .background(Color(.secondarySystemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 10))
         .padding(.horizontal).padding(.top, 8).padding(.bottom, 6)
+    }
+
+    /// [v25.360] 決議內容搜尋列。固定在頂端不隨清單捲動；
+    /// 命中多筆時像 Word 一樣可以按上下箭頭逐一跳。
+    private var resolutionSearchBar: some View {
+        let hits = resolutionHits
+        let hasQuery = !resolutionQuery.trimmingCharacters(in: .whitespaces).isEmpty
+        return VStack(spacing: 4) {
+            HStack(spacing: 8) {
+                Image(systemName: "doc.text.magnifyingglass")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.brown)
+                TextField("搜尋重大決議，跳到所屬廠區", text: $resolutionQuery)
+                    .autocorrectionDisabled()
+                    .submitLabel(.search)
+                    .onChange(of: resolutionQuery) { _, _ in hitIndex = 0 }
+                if hasQuery {
+                    Text(hits.isEmpty ? "0" : "\(min(hitIndex, hits.count - 1) + 1) / \(hits.count)")
+                        .font(.system(size: 11, weight: .bold).monospacedDigit())
+                        .foregroundStyle(hits.isEmpty ? .secondary : .brown)
+                    Button { step(-1, total: hits.count) } label: {
+                        Image(systemName: "chevron.up").font(.system(size: 12, weight: .bold))
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(hits.count < 2)
+                    Button { step(1, total: hits.count) } label: {
+                        Image(systemName: "chevron.down").font(.system(size: 12, weight: .bold))
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(hits.count < 2)
+                    Button { resolutionQuery = ""; hitIndex = 0 } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 15)).foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, 12).padding(.vertical, 9)
+            .background(Color(.secondarySystemBackground))
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+
+            if hasQuery {
+                HStack(spacing: 4) {
+                    if let hit = currentHit {
+                        Image(systemName: "arrow.turn.down.right")
+                            .font(.system(size: 9, weight: .bold)).foregroundStyle(.brown)
+                        Text(hit.title)
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(.brown)
+                            .lineLimit(1)
+                    } else {
+                        Text("沒有符合的決議").font(.system(size: 11)).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                }
+                .padding(.horizontal, 4)
+            }
+        }
+        .padding(.horizontal).padding(.bottom, 6)
+    }
+
+    private func step(_ delta: Int, total: Int) {
+        guard total > 0 else { return }
+        hitIndex = ((hitIndex + delta) % total + total) % total
     }
 
     private func orgMatches(_ text: String) -> Bool {
