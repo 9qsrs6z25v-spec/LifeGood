@@ -1392,10 +1392,10 @@ struct SideRoleWorkspaceView: View {
                 emptyRow("還沒有重大決議。定案的事放這裡，之後在「我的行事曆」搜尋得到。")
             } else {
                 let shown = hasActiveFilter ? resolutions : Array(resolutions.prefix(resolutionLimit))
+                // [v25.356] 重大決議刻意不給左滑刪除：決議是定案紀錄，誤刪的代價太高。
+                // 要刪請點進決議 → 編輯 → 最下方的「刪除此決議」。
                 ForEach(shown) { r in
-                    SwipeDeleteRow(onDelete: { lifeStore.deleteSideRoleResolution(r.id, in: roleId) }) {
-                        resolutionRow(r)
-                    }
+                    resolutionRow(r)
                 }
                 if !hasActiveFilter {
                     showMoreRow(total: resolutions.count, limit: $resolutionLimit, color: .indigo)
