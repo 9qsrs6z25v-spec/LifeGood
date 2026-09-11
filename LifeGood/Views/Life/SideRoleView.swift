@@ -550,10 +550,6 @@ struct SideRoleWorkspaceView: View {
     @State private var editingResolution: SideRoleResolution?
     /// 點決議列先開檢視卡片（分享用）；編輯是卡片右上的動作
     @State private var viewingResolution: SideRoleResolution?
-    /// [v25.353] 決議列裡「參照前案」展開的決議 id
-    @State private var expandedRefLists: Set<UUID> = []
-    /// [v25.353] 展開看內文的前案 id（key＝決議 id + 前案 id，同一個前案被多筆參照也互不影響）
-    @State private var expandedRefBodies: Set<String> = []
     @State private var showCopyResult: String?
     @State private var showEditRole = false
     /// 工作區內搜尋：過濾五個區塊的項目（空字串＝不過濾）
@@ -1410,176 +1406,63 @@ struct SideRoleWorkspaceView: View {
 
     /// [v25.345] 兩行版型：第一行膠囊列（流水號／日期／廠區／系統分類／發起人）可橫向捲動，
     /// 分類多也不會把標題擠掉；第二行才是標題，過長自動換行不再截成「…」。
+    /// [v25.354] 改用共用的 ItemRow 模板（膠囊捲軸＋摺疊子項目都在模板裡），
+    /// 這一頁只負責把決議轉成模板要的資料。
     private func resolutionRow(_ r: SideRoleResolution) -> some View {
-        HStack(spacing: 10) {
-            VStack(alignment: .leading, spacing: 5) {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 6) {
-                        // [v25.299] 流水號徽章
-                        if !r.serialLabel.isEmpty {
-                            Text(r.serialLabel)
-                                .font(.system(size: 10, weight: .bold))
-                                .foregroundStyle(.purple)
-                                .padding(.horizontal, 6).padding(.vertical, 2)
-                                .background(Color.purple.opacity(0.12))
-                                .clipShape(Capsule())
-                        }
-                        Text(SideRoleFormat.date(r.date))
-                            .font(.system(size: 10, weight: .bold))
-                            .foregroundStyle(.indigo)
-                            .padding(.horizontal, 6).padding(.vertical, 2)
-                            .background(Color.indigo.opacity(0.12))
-                            .clipShape(Capsule())
-                        if !r.site.isEmpty {
-                            Text(r.site)
-                                .font(.system(size: 10, weight: .bold))
-                                .foregroundStyle(.teal)
-                                .padding(.horizontal, 6).padding(.vertical, 2)
-                                .background(Color.teal.opacity(0.14))
-                                .clipShape(Capsule())
-                                .overlay(Capsule().stroke(Color.teal.opacity(0.25), lineWidth: 0.6))
-                        }
-                        ForEach(r.categories, id: \.self) { cat in
-                            categoryFilterChip(cat)
-                        }
-                        if !r.initiator.isEmpty {
-                            HStack(spacing: 3) {
-                                Text("發起").font(.caption2).foregroundStyle(.secondary)
-                                personFilterChip(r.initiator)
-                            }
-                        }
-                    }
-                    // 膠囊本身有點按（篩選）行為；留一點垂直空間避免被裁到陰影／描邊
-                    .padding(.vertical, 1)
-                }
-                Text(r.title.isEmpty ? "（未填標題）" : r.title)
-                    .font(.subheadline.weight(.medium))
-                    .fixedSize(horizontal: false, vertical: true)
-                // [v25.353] 預覽去掉 v25.299～v25.318 寫進內容欄位的「── 參照前案 …」引用區塊，
-                // 那些前案現在有自己的摺疊區塊，不需要在摘要裡再灰灰地佔三行
-                if !r.previewContent.isEmpty {
-                    Text(r.previewContent)
-                        .font(.caption2).foregroundStyle(.secondary).lineLimit(3)
-                }
-                if !r.references.isEmpty {
-                    referenceDisclosure(r)
-                }
-            }
-            Spacer()
-        }
-        .padding(.horizontal, 14).padding(.vertical, 10)
-        .background(Color(.systemBackground))
-        .contentShape(Rectangle())
-        .onTapGesture { viewingResolution = r }
+        ItemRow(
+            chips: resolutionChips(r),
+            title: r.title,
+            // 預覽去掉 v25.299～v25.318 寫進內容欄位的「── 參照前案 …」引用區塊
+            preview: r.previewContent,
+            disclosures: resolutionReferences(r),
+            disclosureLabel: "參照前案",
+            disclosureColor: .indigo,
+            onTap: { viewingResolution = r }
+        )
     }
 
-    // MARK: [v25.353] 決議列裡的參照前案（摺疊）
-
-    /// 預設收合、只顯示「參照前案 N 項」；展開後列出各前案標題，再點一次展開看內文。
-    /// 不用跳到別的畫面就能在清單裡把來龍去脈看完。
-    @ViewBuilder
-    private func referenceDisclosure(_ r: SideRoleResolution) -> some View {
-        let isOpen = expandedRefLists.contains(r.id)
-        VStack(alignment: .leading, spacing: 5) {
-            Button {
-                withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
-                    if isOpen { expandedRefLists.remove(r.id) } else { expandedRefLists.insert(r.id) }
-                }
-            } label: {
-                HStack(spacing: 5) {
-                    Image(systemName: "link")
-                        .font(.system(size: 9, weight: .bold))
-                    Text("參照前案 \(r.references.count) 項")
-                        .font(.system(size: 10, weight: .bold))
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 8, weight: .bold))
-                        .rotationEffect(.degrees(isOpen ? 90 : 0))
-                }
-                .padding(.horizontal, 7).padding(.vertical, 3)
-                .background(Color.indigo.opacity(0.12), in: Capsule())
-                .overlay(Capsule().stroke(Color.indigo.opacity(0.22), lineWidth: 0.6))
-                .foregroundStyle(.indigo)
-                .contentShape(Capsule())
-            }
-            .buttonStyle(.plain)
-
-            if isOpen {
-                VStack(alignment: .leading, spacing: 4) {
-                    ForEach(r.references, id: \.self) { rid in
-                        referenceLine(parent: r, refId: rid)
-                    }
-                }
-                .padding(.leading, 4)
-                .transition(.opacity.combined(with: .move(edge: .top)))
-            }
+    /// 決議列的膠囊：流水號／日期／廠區／系統分類／發起人。
+    /// 分類與發起人可點＝套用篩選，點第二次取消（模板的 isActive 會畫出 ✕）。
+    private func resolutionChips(_ r: SideRoleResolution) -> [ItemChip] {
+        var chips: [ItemChip] = []
+        if !r.serialLabel.isEmpty {
+            chips.append(ItemChip(id: "serial", text: r.serialLabel, color: .purple))
         }
+        chips.append(ItemChip(id: "date", text: SideRoleFormat.date(r.date), color: .indigo))
+        if !r.site.isEmpty {
+            chips.append(ItemChip(id: "site", text: r.site, color: .teal))
+        }
+        for cat in r.categories {
+            chips.append(ItemChip(id: "cat-\(cat)", text: cat,
+                                  color: sideRoleCategoryColor(cat),
+                                  isActive: filterCategory == cat,
+                                  onTap: { toggleCategoryFilter(cat) }))
+        }
+        let person = r.initiator.trimmingCharacters(in: .whitespaces)
+        if !person.isEmpty {
+            chips.append(ItemChip(id: "person", text: person, color: .indigo,
+                                  leadingLabel: "發起",
+                                  isActive: filterPerson == person,
+                                  onTap: { togglePersonFilter(person) }))
+        }
+        return chips
     }
 
-    @ViewBuilder
-    private func referenceLine(parent: SideRoleResolution, refId: UUID) -> some View {
-        let key = "\(parent.id)-\(refId)"
-        let bodyOpen = expandedRefBodies.contains(key)
-        if let ref = role?.sideRoleResolutions?.first(where: { $0.id == refId }) {
-            VStack(alignment: .leading, spacing: 4) {
-                Button {
-                    withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
-                        if bodyOpen { expandedRefBodies.remove(key) } else { expandedRefBodies.insert(key) }
-                    }
-                } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: bodyOpen ? "chevron.down" : "chevron.right")
-                            .font(.system(size: 8, weight: .bold))
-                            .foregroundStyle(.indigo.opacity(0.7))
-                            .frame(width: 10)
-                        if !ref.serialLabel.isEmpty {
-                            Text(ref.serialLabel)
-                                .font(.system(size: 9, weight: .bold))
-                                .padding(.horizontal, 5).padding(.vertical, 1)
-                                .background(Color.indigo.opacity(0.12), in: Capsule())
-                                .foregroundStyle(.indigo)
-                        }
-                        Text(ref.title.isEmpty ? "（未填標題）" : ref.title)
-                            .font(.system(size: 11, weight: .semibold))
-                            .lineLimit(bodyOpen ? 3 : 1)
-                            .multilineTextAlignment(.leading)
-                        Text(SideRoleFormat.date(ref.date))
-                            .font(.system(size: 9)).foregroundStyle(.secondary)
-                        Spacer(minLength: 4)
-                    }
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-
-                if bodyOpen {
-                    Text(ref.previewContent.isEmpty ? "（未填內容）" : ref.previewContent)
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .padding(8)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(Color(.tertiarySystemFill))
-                        .clipShape(RoundedRectangle(cornerRadius: 7))
-                    Button {
-                        viewingResolution = ref
-                    } label: {
-                        HStack(spacing: 4) {
-                            Text("開啟這筆決議").font(.system(size: 10, weight: .bold))
-                            Image(systemName: "arrow.up.forward.app").font(.system(size: 10, weight: .bold))
-                        }
-                        .foregroundStyle(.indigo)
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                }
+    /// 參照前案轉成模板的摺疊子項目；前案被刪掉的也要留一行提示
+    private func resolutionReferences(_ r: SideRoleResolution) -> [ItemDisclosure] {
+        r.references.map { rid -> ItemDisclosure in
+            guard let ref = role?.sideRoleResolutions?.first(where: { $0.id == rid }) else {
+                return ItemDisclosure(id: rid.uuidString, title: "（前案已被刪除）",
+                                      body: "這筆前案已經不在職務裡了。")
             }
-            .padding(.leading, 2)
-        } else {
-            HStack(spacing: 6) {
-                Image(systemName: "link.badge.plus")
-                    .font(.system(size: 9)).foregroundStyle(.secondary)
-                Text("（前案已被刪除）").font(.system(size: 10)).foregroundStyle(.secondary)
-                Spacer(minLength: 0)
-            }
+            return ItemDisclosure(
+                id: rid.uuidString,
+                badge: ref.serialLabel.isEmpty ? nil : ref.serialLabel,
+                title: ref.title,
+                meta: SideRoleFormat.date(ref.date),
+                body: ref.previewContent,
+                actionLabel: "開啟這筆決議",
+                action: { viewingResolution = ref })
         }
     }
 
