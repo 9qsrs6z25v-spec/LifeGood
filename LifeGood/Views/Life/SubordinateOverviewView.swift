@@ -764,80 +764,45 @@ struct SubordinateOverviewView: View {
         }
     }
 
+    /// [v25.355] 改用共用的 ItemRow 模板：左側漸層圓＝可點的完成勾選，
+    /// 報告類型／狀態／人員／日期改走膠囊橫向捲軸。
     private func reportRow(_ sub: Subordinate, _ report: WeeklyReport, status: ReportStatus) -> some View {
-        let badge = reportStatusBadge(status)
-        let reportAccent: Color = report.isCompleted ? .green : .purple
-        return HStack(spacing: 12) {
-            // v3：裸 circle 圖示升級為 36pt 漸層圓，對齊 taskRow 視覺規格
-            Button {
-                lifeStore.toggleWeeklyReportCompletion(subordinateId: sub.id, reportId: report.id)
-            } label: {
-                ZStack {
-                    Circle()
-                        .fill(LinearGradient(
-                            colors: [reportAccent.opacity(0.22), reportAccent.opacity(0.08)],
-                            startPoint: .topLeading, endPoint: .bottomTrailing
-                        ))
-                        .frame(width: 36, height: 36)
-                        .shadow(color: reportAccent.opacity(0.18), radius: 5, x: 0, y: 2)
-                    Circle()
-                        .stroke(reportAccent.opacity(0.22), lineWidth: 1)
-                        .frame(width: 36, height: 36)
-                    Image(systemName: report.isCompleted ? "checkmark.circle.fill" : "circle")
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(reportAccent)
+        let accent: Color = report.isCompleted ? .green : .purple
+        return ItemRow(
+            chips: reportChips(sub, report, status: status),
+            title: report.topic.isEmpty ? "未命名報告" : report.topic,
+            titleIsMuted: report.isCompleted,
+            titleStrikethrough: report.isCompleted,
+            preview: report.note,
+            previewLineLimit: 1,
+            extra: report.isCompleted
+                ? AnyView(CompletionStamp(completedAt: report.completedAt, due: report.date))
+                : nil,
+            onTap: { editTarget = .report(subId: sub.id, report: report) },
+            leading: {
+                ItemIconDisc(icon: report.isCompleted ? "checkmark.circle.fill" : "circle",
+                             color: accent) {
+                    lifeStore.toggleWeeklyReportCompletion(subordinateId: sub.id, reportId: report.id)
                 }
             }
-            .buttonStyle(.plain)
-
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 6) {
-                    // 分類膠囊放在標題前面——放後面不醒目（使用者回饋）
-                    if !report.reportType.isEmpty {
-                        Text(report.reportType)
-                            .font(.caption2.weight(.bold))
-                            .padding(.horizontal, 6).padding(.vertical, 2)
-                            .background(Color.purple.opacity(0.14))
-                            .foregroundStyle(.purple)
-                            .clipShape(Capsule())
-                    }
-                    Text(report.topic.isEmpty ? "未命名報告" : report.topic)
-                        .font(.subheadline.weight(.semibold))
-                        .strikethrough(report.isCompleted, color: .secondary)
-                        .foregroundStyle(report.isCompleted ? .secondary : .primary)
-                        .lineLimit(1)
-                    if let badge {
-                        Text(badge.text)
-                            .font(.caption2.weight(.bold))
-                            .padding(.horizontal, 6).padding(.vertical, 2)
-                            .background(badge.color.opacity(0.15))
-                            .foregroundStyle(badge.color)
-                            .clipShape(Capsule())
-                    }
-                }
-                HStack(spacing: 6) {
-                    personChip(sub, tint: .purple)
-                    HStack(spacing: 3) {
-                        Image(systemName: "calendar").font(.system(size: 8))
-                        Text(reportDateText(report.date))
-                    }
-                    .font(.caption2.weight(.medium)).foregroundStyle(.secondary)
-                    .padding(.horizontal, 6).padding(.vertical, 2)
-                    .background(Color(.tertiarySystemFill)).clipShape(Capsule())
-                    if !report.note.isEmpty {
-                        Text(report.note).font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                    }
-                }
-                if report.isCompleted {
-                    CompletionStamp(completedAt: report.completedAt, due: report.date)
-                }
-            }
-            Spacer(minLength: 0)
-        }
-        .padding(.horizontal, 16).padding(.vertical, 12)
+        )
         .opacity(report.isCompleted ? 0.7 : 1)
-        .contentShape(Rectangle())
-        .onTapGesture { editTarget = .report(subId: sub.id, report: report) }
+    }
+
+    private func reportChips(_ sub: Subordinate, _ report: WeeklyReport,
+                             status: ReportStatus) -> [ItemChip] {
+        var chips: [ItemChip] = []
+        // 分類膠囊排在最前面——放後面不醒目（使用者回饋）
+        if !report.reportType.isEmpty {
+            chips.append(ItemChip(id: "type", text: report.reportType, color: .purple))
+        }
+        if let badge = reportStatusBadge(status) {
+            chips.append(ItemChip(id: "status", text: badge.text, color: badge.color))
+        }
+        chips.append(personItemChip(sub, tint: .purple))
+        chips.append(ItemChip(id: "date", text: reportDateText(report.date),
+                              color: .secondary, icon: "calendar"))
+        return chips
     }
 
     private static let reportDateFormatter: DateFormatter = {
@@ -1110,84 +1075,42 @@ struct SubordinateOverviewView: View {
 
     // MARK: - 列元件
 
+    /// [v25.355] 改用共用的 ItemRow 模板。標題仍是人名（可點＝以這個人篩選），
+    /// 假別／時數／時間改走膠囊橫向捲軸。
     private func leaveRow(_ sub: Subordinate, _ rec: SubordinateRecord) -> some View {
-        HStack(alignment: .center, spacing: 12) {
-            // v3：補 shadow，對齊 SubordinateDetailView.recordRow / meetingSection 規格
-            ZStack {
-                Circle()
-                    .fill(
-                        LinearGradient(
-                            colors: [Color.teal.opacity(0.22), Color.teal.opacity(0.08)],
-                            startPoint: .topLeading, endPoint: .bottomTrailing
-                        )
-                    )
-                    .frame(width: 36, height: 36)
-                    .shadow(color: Color.teal.opacity(0.18), radius: 5, x: 0, y: 2)
-                Circle()
-                    .stroke(Color.teal.opacity(0.22), lineWidth: 1)
-                    .frame(width: 36, height: 36)
-                Image(systemName: "calendar.badge.minus")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(.teal)
-            }
+        ItemRow(
+            chips: leaveChips(rec),
+            title: sub.name,
+            titleTap: {
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                    filterPersonId = filterPersonId == sub.id ? nil : sub.id
+                }
+            },
+            titleIsFiltering: filterPersonId == sub.id,
+            preview: rec.content,
+            previewLineLimit: 1,
+            onTap: { editTarget = .leave(subId: sub.id, rec: rec) },
+            leading: { ItemIconDisc(icon: "calendar.badge.minus", color: .teal, iconSize: 14) }
+        )
+    }
 
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 6) {
-                    Text(sub.name)
-                        .font(.subheadline.weight(.semibold))
-                        .lineLimit(1)
-                        .onTapGesture {
-                            withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
-                                filterPersonId = filterPersonId == sub.id ? nil : sub.id
-                            }
-                        }
-                    if filterPersonId == sub.id { clearFilterX }
-                    if let lt = rec.leaveType {
-                        Text(lt.rawValue)
-                            .font(.system(size: 10, weight: .semibold))
-                            .foregroundStyle(.teal)
-                            .padding(.horizontal, 7).padding(.vertical, 2.5)
-                            .background(Color.teal.opacity(0.12))
-                            .clipShape(Capsule())
-                            .overlay(Capsule().stroke(Color.teal.opacity(0.22), lineWidth: 0.6))
-                    }
-                    if let h = rec.leaveHours, h > 0 {
-                        Text(h.truncatingRemainder(dividingBy: 1) == 0
-                             ? "\(Int(h))h" : String(format: "%.1fh", h))
-                            .font(.system(size: 10, weight: .medium))
-                            .foregroundStyle(.secondary)
-                            .padding(.horizontal, 6).padding(.vertical, 2)
-                            .background(Color(.tertiarySystemFill))
-                            .clipShape(Capsule())
-                    }
-                }
-                HStack(spacing: 3) {
-                    Image(systemName: "clock")
-                        .font(.system(size: 9))
-                    Text(fmtTime(rec.date))
-                    if let end = rec.endDate {
-                        Text("~")
-                        Text(fmtTime(end))
-                    }
-                }
-                .font(.caption2.weight(.medium))
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 7).padding(.vertical, 2.5)
-                .background(Color(.tertiarySystemFill))
-                .clipShape(Capsule())
-                if !rec.content.isEmpty {
-                    Text(rec.content)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
-            }
-            Spacer(minLength: 4)
+    private func leaveChips(_ rec: SubordinateRecord) -> [ItemChip] {
+        var chips: [ItemChip] = []
+        if let lt = rec.leaveType {
+            chips.append(ItemChip(id: "type", text: lt.rawValue, color: .teal))
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 11)
-        .contentShape(Rectangle())
-        .onTapGesture { editTarget = .leave(subId: sub.id, rec: rec) }
+        if let h = rec.leaveHours, h > 0 {
+            let text = h.truncatingRemainder(dividingBy: 1) == 0
+                ? "\(Int(h))h" : String(format: "%.1fh", h)
+            chips.append(ItemChip(id: "hours", text: text, color: .secondary))
+        }
+        chips.append(ItemChip(id: "time", text: leaveTimeText(rec), color: .secondary, icon: "clock"))
+        return chips
+    }
+
+    private func leaveTimeText(_ rec: SubordinateRecord) -> String {
+        guard let end = rec.endDate else { return fmtTime(rec.date) }
+        return fmtTime(rec.date) + " ~ " + fmtTime(end)
     }
 
     private func meetingRow(_ sub: Subordinate, _ meeting: SubordinateMeeting) -> some View {
@@ -1269,111 +1192,67 @@ struct SubordinateOverviewView: View {
         .onTapGesture { editTarget = .meeting(subId: sub.id, meeting: meeting) }
     }
 
+    /// [v25.355] 改用共用的 ItemRow 模板：左側漸層圓＝可點的完成勾選，
+    /// 人員／時間／截止／設備／系統改走膠囊橫向捲軸（分類多也不會把標題擠掉）。
     private func taskRow(_ sub: Subordinate, _ task: SubordinateTask) -> some View {
         let isOverdue = !task.isCompleted && (task.dueDate.map { $0 < Date() } ?? false)
-        let taskAccent: Color = task.isCompleted ? .green : (isOverdue ? .red : .cyan)
-
-        return HStack(alignment: .center, spacing: 12) {
-            // 可點打勾圓圈：直接切換完成狀態
-            Button {
-                lifeStore.toggleTaskCompletion(subordinateId: sub.id, taskId: task.id)
-            } label: {
-                ZStack {
-                    Circle()
-                        .fill(
-                            LinearGradient(
-                                colors: [taskAccent.opacity(0.22), taskAccent.opacity(0.08)],
-                                startPoint: .topLeading, endPoint: .bottomTrailing
-                            )
-                        )
-                        .frame(width: 36, height: 36)
-                        .shadow(color: taskAccent.opacity(0.18), radius: 5, x: 0, y: 2)
-                    Circle()
-                        .stroke(taskAccent.opacity(0.22), lineWidth: 1)
-                        .frame(width: 36, height: 36)
-                    Image(systemName: task.isCompleted ? "checkmark.circle.fill" : (isOverdue ? "exclamationmark.circle.fill" : "circle"))
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(taskAccent)
+        let accent: Color = task.isCompleted ? .green : (isOverdue ? .red : .cyan)
+        let icon = task.isCompleted
+            ? "checkmark.circle.fill"
+            : (isOverdue ? "exclamationmark.circle.fill" : "circle")
+        return ItemRow(
+            chips: taskChips(sub, task, isOverdue: isOverdue),
+            title: task.topic.isEmpty ? "未命名任務" : task.topic,
+            titleIsMuted: task.isCompleted,
+            titleStrikethrough: task.isCompleted,
+            preview: task.content,
+            previewLineLimit: 2,
+            extra: task.isCompleted
+                ? AnyView(CompletionStamp(completedAt: task.completedAt, due: task.dueDate))
+                : nil,
+            onTap: { editTarget = .task(subId: sub.id, task: task) },
+            leading: {
+                ItemIconDisc(icon: icon, color: accent, iconSize: 16) {
+                    lifeStore.toggleTaskCompletion(subordinateId: sub.id, taskId: task.id)
                 }
             }
-            .buttonStyle(.plain)
-
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 6) {
-                    Text(task.topic.isEmpty ? "未命名任務" : task.topic)
-                        .font(.subheadline.weight(.semibold))
-                        .lineLimit(1)
-                        .strikethrough(task.isCompleted, color: .secondary)
-                        .foregroundStyle(task.isCompleted ? .secondary : .primary)
-                    personChip(sub)
-                }
-                HStack(spacing: 6) {
-                    HStack(spacing: 3) {
-                        Image(systemName: "clock")
-                            .font(.system(size: 9))
-                        Text(fmtTime(task.date))
-                    }
-                    .font(.caption2.weight(.medium))
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 7).padding(.vertical, 2.5)
-                    .background(Color(.tertiarySystemFill))
-                    .clipShape(Capsule())
-
-                    if let due = task.dueDate {
-                        HStack(spacing: 3) {
-                            Image(systemName: isOverdue ? "exclamationmark.triangle.fill" : "clock.badge")
-                                .font(.system(size: 9, weight: .semibold))
-                            Text("截止 \(fmtDateTime(due))")
-                                .font(.system(size: 10, weight: .semibold))
-                        }
-                        .foregroundStyle(isOverdue ? .red : .cyan)
-                        .padding(.horizontal, 7).padding(.vertical, 2.5)
-                        .background(taskAccent.opacity(0.12))
-                        .clipShape(Capsule())
-                        .overlay(Capsule().stroke(taskAccent.opacity(0.22), lineWidth: 0.6))
-                    }
-
-                    // 機台警報任務：來源機台＋系統別（顯示用；篩選在部屬明細頁）
-                    if let link = task.equipmentLink {
-                        let eq = lifeStore.equipmentPool.first { $0.id == link.equipmentId }
-                        let eqName = eq.map { $0.name.isEmpty ? "未命名設備" : $0.name } ?? link.equipmentName
-                        let sys = eq?.system ?? link.system
-                        HStack(spacing: 3) {
-                            Image(systemName: "gearshape.2.fill").font(.system(size: 7))
-                            Text(eqName)
-                        }
-                        .font(.caption2.weight(.semibold))
-                        .padding(.horizontal, 6).padding(.vertical, 2)
-                        .background(Color.teal.opacity(0.12)).foregroundStyle(.teal)
-                        .clipShape(Capsule())
-                        .lineLimit(1)
-                        if !sys.isEmpty {
-                            Text(sys)
-                                .font(.caption2.weight(.semibold))
-                                .padding(.horizontal, 6).padding(.vertical, 2)
-                                .background(Color.cyan.opacity(0.12)).foregroundStyle(.cyan)
-                                .clipShape(Capsule())
-                                .lineLimit(1)
-                        }
-                    }
-                }
-                if !task.content.isEmpty {
-                    Text(task.content)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(2)
-                }
-                if task.isCompleted {
-                    CompletionStamp(completedAt: task.completedAt, due: task.dueDate)
-                }
-            }
-            Spacer(minLength: 4)
-        }
+        )
         .opacity(task.isCompleted ? 0.6 : 1)
-        .padding(.horizontal, 14)
-        .padding(.vertical, 11)
-        .contentShape(Rectangle())
-        .onTapGesture { editTarget = .task(subId: sub.id, task: task) }
+    }
+
+    private func taskChips(_ sub: Subordinate, _ task: SubordinateTask,
+                           isOverdue: Bool) -> [ItemChip] {
+        var chips: [ItemChip] = [personItemChip(sub)]
+        chips.append(ItemChip(id: "time", text: fmtTime(task.date), color: .secondary, icon: "clock"))
+        if let due = task.dueDate {
+            chips.append(ItemChip(id: "due", text: "截止 \(fmtDateTime(due))",
+                                  color: isOverdue ? .red : .cyan,
+                                  icon: isOverdue ? "exclamationmark.triangle.fill" : "clock.badge"))
+        }
+        // 機台警報任務：來源機台＋系統別（顯示用；篩選在部屬明細頁）
+        if let link = task.equipmentLink {
+            let eq = lifeStore.equipmentPool.first { $0.id == link.equipmentId }
+            let eqName = eq.map { $0.name.isEmpty ? "未命名設備" : $0.name } ?? link.equipmentName
+            chips.append(ItemChip(id: "eq", text: eqName, color: .teal, icon: "gearshape.2.fill"))
+            let sys = eq?.system ?? link.system
+            if !sys.isEmpty {
+                chips.append(ItemChip(id: "sys", text: sys, color: .cyan))
+            }
+        }
+        return chips
+    }
+
+    /// 人員膠囊（可點＝以這個人篩選，點第二次取消）
+    private func personItemChip(_ sub: Subordinate, tint: Color = .secondary) -> ItemChip {
+        let active = filterPersonId == sub.id
+        return ItemChip(id: "person", text: sub.name.isEmpty ? "未命名" : sub.name,
+                        color: active ? .indigo : tint,
+                        isActive: active,
+                        onTap: {
+                            withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                                filterPersonId = active ? nil : sub.id
+                            }
+                        })
     }
 
     // MARK: - 英雄摘要卡

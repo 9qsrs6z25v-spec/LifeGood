@@ -98,6 +98,10 @@ struct ItemRow<Leading: View, Accessory: View>: View {
     var title: String
     var titleIsMuted: Bool = false
     var titleStrikethrough: Bool = false
+    /// 點標題的動作（例：以這個人篩選）。有值時標題右邊會留一個可點的熱區
+    var titleTap: (() -> Void)?
+    /// 標題目前正被拿來篩選：加底色並附 ✕
+    var titleIsFiltering: Bool = false
     var preview: String?
     var previewLineLimit: Int = 3
     var progress: ItemProgress?
@@ -118,7 +122,9 @@ struct ItemRow<Leading: View, Accessory: View>: View {
     /// 明確寫出初始化，不靠合成的 memberwise init——
     /// 上面有 private 的 @State，合成版會跟著變成 private，跨檔案叫不到。
     init(chips: [ItemChip] = [], title: String, titleIsMuted: Bool = false,
-         titleStrikethrough: Bool = false, preview: String? = nil, previewLineLimit: Int = 3,
+         titleStrikethrough: Bool = false, titleTap: (() -> Void)? = nil,
+         titleIsFiltering: Bool = false,
+         preview: String? = nil, previewLineLimit: Int = 3,
          progress: ItemProgress? = nil, disclosures: [ItemDisclosure] = [],
          disclosureLabel: String = "子項目", disclosureColor: Color = .indigo,
          extra: AnyView? = nil, onTap: (() -> Void)? = nil,
@@ -128,6 +134,8 @@ struct ItemRow<Leading: View, Accessory: View>: View {
         self.title = title
         self.titleIsMuted = titleIsMuted
         self.titleStrikethrough = titleStrikethrough
+        self.titleTap = titleTap
+        self.titleIsFiltering = titleIsFiltering
         self.preview = preview
         self.previewLineLimit = previewLineLimit
         self.progress = progress
@@ -145,11 +153,7 @@ struct ItemRow<Leading: View, Accessory: View>: View {
             leading()
             VStack(alignment: .leading, spacing: 5) {
                 if !chips.isEmpty { ItemChipBar(chips: chips) }
-                Text(title.isEmpty ? "（未填標題）" : title)
-                    .font(.subheadline.weight(.medium))
-                    .foregroundStyle(titleIsMuted ? Color.secondary : Color.primary)
-                    .strikethrough(titleStrikethrough, color: .secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                titleView
                 if let p = progress { progressBar(p) }
                 if let preview, !preview.isEmpty {
                     Text(preview)
@@ -166,6 +170,31 @@ struct ItemRow<Leading: View, Accessory: View>: View {
         .background(Color(.systemBackground))
         .contentShape(Rectangle())
         .onTapGesture { onTap?() }
+    }
+
+    // MARK: 標題
+
+    @ViewBuilder
+    private var titleView: some View {
+        let text = Text(title.isEmpty ? "（未填標題）" : title)
+            .font(.subheadline.weight(.medium))
+            .foregroundStyle(titleIsMuted ? Color.secondary : Color.primary)
+            .strikethrough(titleStrikethrough, color: .secondary)
+        if let titleTap {
+            Button(action: titleTap) {
+                HStack(spacing: 4) {
+                    text.fixedSize(horizontal: false, vertical: true)
+                    if titleIsFiltering {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 12)).foregroundStyle(.indigo)
+                    }
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+        } else {
+            text.fixedSize(horizontal: false, vertical: true)
+        }
     }
 
     // MARK: 進度條
@@ -288,12 +317,15 @@ struct ItemRow<Leading: View, Accessory: View>: View {
 
 extension ItemRow where Leading == EmptyView, Accessory == EmptyView {
     init(chips: [ItemChip] = [], title: String, titleIsMuted: Bool = false,
-         titleStrikethrough: Bool = false, preview: String? = nil, previewLineLimit: Int = 3,
+         titleStrikethrough: Bool = false, titleTap: (() -> Void)? = nil,
+         titleIsFiltering: Bool = false,
+         preview: String? = nil, previewLineLimit: Int = 3,
          progress: ItemProgress? = nil, disclosures: [ItemDisclosure] = [],
          disclosureLabel: String = "子項目", disclosureColor: Color = .indigo,
          extra: AnyView? = nil, onTap: (() -> Void)? = nil) {
         self.init(chips: chips, title: title, titleIsMuted: titleIsMuted,
-                  titleStrikethrough: titleStrikethrough, preview: preview,
+                  titleStrikethrough: titleStrikethrough, titleTap: titleTap,
+                  titleIsFiltering: titleIsFiltering, preview: preview,
                   previewLineLimit: previewLineLimit, progress: progress,
                   disclosures: disclosures, disclosureLabel: disclosureLabel,
                   disclosureColor: disclosureColor, extra: extra, onTap: onTap,
@@ -303,13 +335,16 @@ extension ItemRow where Leading == EmptyView, Accessory == EmptyView {
 
 extension ItemRow where Leading == EmptyView {
     init(chips: [ItemChip] = [], title: String, titleIsMuted: Bool = false,
-         titleStrikethrough: Bool = false, preview: String? = nil, previewLineLimit: Int = 3,
+         titleStrikethrough: Bool = false, titleTap: (() -> Void)? = nil,
+         titleIsFiltering: Bool = false,
+         preview: String? = nil, previewLineLimit: Int = 3,
          progress: ItemProgress? = nil, disclosures: [ItemDisclosure] = [],
          disclosureLabel: String = "子項目", disclosureColor: Color = .indigo,
          extra: AnyView? = nil, onTap: (() -> Void)? = nil,
          @ViewBuilder accessory: @escaping () -> Accessory) {
         self.init(chips: chips, title: title, titleIsMuted: titleIsMuted,
-                  titleStrikethrough: titleStrikethrough, preview: preview,
+                  titleStrikethrough: titleStrikethrough, titleTap: titleTap,
+                  titleIsFiltering: titleIsFiltering, preview: preview,
                   previewLineLimit: previewLineLimit, progress: progress,
                   disclosures: disclosures, disclosureLabel: disclosureLabel,
                   disclosureColor: disclosureColor, extra: extra, onTap: onTap,
@@ -319,13 +354,16 @@ extension ItemRow where Leading == EmptyView {
 
 extension ItemRow where Accessory == EmptyView {
     init(chips: [ItemChip] = [], title: String, titleIsMuted: Bool = false,
-         titleStrikethrough: Bool = false, preview: String? = nil, previewLineLimit: Int = 3,
+         titleStrikethrough: Bool = false, titleTap: (() -> Void)? = nil,
+         titleIsFiltering: Bool = false,
+         preview: String? = nil, previewLineLimit: Int = 3,
          progress: ItemProgress? = nil, disclosures: [ItemDisclosure] = [],
          disclosureLabel: String = "子項目", disclosureColor: Color = .indigo,
          extra: AnyView? = nil, onTap: (() -> Void)? = nil,
          @ViewBuilder leading: @escaping () -> Leading) {
         self.init(chips: chips, title: title, titleIsMuted: titleIsMuted,
-                  titleStrikethrough: titleStrikethrough, preview: preview,
+                  titleStrikethrough: titleStrikethrough, titleTap: titleTap,
+                  titleIsFiltering: titleIsFiltering, preview: preview,
                   previewLineLimit: previewLineLimit, progress: progress,
                   disclosures: disclosures, disclosureLabel: disclosureLabel,
                   disclosureColor: disclosureColor, extra: extra, onTap: onTap,
@@ -405,6 +443,42 @@ struct ItemCheckbox: View {
         }
         .buttonStyle(.plain)
         .padding(.top, 1)
+    }
+}
+
+/// 36pt 漸層圖示圓。部屬總覽那套列左側的標準樣式：
+/// 給 action 就是可點的（勾選／切換狀態），不給就是純圖示。
+struct ItemIconDisc: View {
+    let icon: String
+    var color: Color = .secondary
+    var size: CGFloat = 36
+    var iconSize: CGFloat = 15
+    var action: (() -> Void)?
+
+    var body: some View {
+        if let action {
+            Button(action: action) { disc }
+                .buttonStyle(.plain)
+        } else {
+            disc
+        }
+    }
+
+    private var disc: some View {
+        ZStack {
+            Circle()
+                .fill(LinearGradient(colors: [color.opacity(0.22), color.opacity(0.08)],
+                                     startPoint: .topLeading, endPoint: .bottomTrailing))
+                .frame(width: size, height: size)
+                .shadow(color: color.opacity(0.18), radius: 5, x: 0, y: 2)
+            Circle()
+                .stroke(color.opacity(0.22), lineWidth: 1)
+                .frame(width: size, height: size)
+            Image(systemName: icon)
+                .font(.system(size: iconSize, weight: .semibold))
+                .foregroundStyle(color)
+        }
+        .contentShape(Circle())
     }
 }
 
