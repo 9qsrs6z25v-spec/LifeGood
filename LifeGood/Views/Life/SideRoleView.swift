@@ -550,6 +550,10 @@ struct SideRoleWorkspaceView: View {
     @State private var editingResolution: SideRoleResolution?
     /// 點決議列先開檢視卡片（分享用）；編輯是卡片右上的動作
     @State private var viewingResolution: SideRoleResolution?
+    /// [v25.353] 決議列裡「參照前案」展開的決議 id
+    @State private var expandedRefLists: Set<UUID> = []
+    /// [v25.353] 展開看內文的前案 id（key＝決議 id + 前案 id，同一個前案被多筆參照也互不影響）
+    @State private var expandedRefBodies: Set<String> = []
     @State private var showCopyResult: String?
     @State private var showEditRole = false
     /// 工作區內搜尋：過濾五個區塊的項目（空字串＝不過濾）
@@ -1451,9 +1455,14 @@ struct SideRoleWorkspaceView: View {
                 Text(r.title.isEmpty ? "（未填標題）" : r.title)
                     .font(.subheadline.weight(.medium))
                     .fixedSize(horizontal: false, vertical: true)
-                if !r.content.isEmpty {
-                    Text(r.content)
+                // [v25.353] 預覽去掉 v25.299～v25.318 寫進內容欄位的「── 參照前案 …」引用區塊，
+                // 那些前案現在有自己的摺疊區塊，不需要在摘要裡再灰灰地佔三行
+                if !r.previewContent.isEmpty {
+                    Text(r.previewContent)
                         .font(.caption2).foregroundStyle(.secondary).lineLimit(3)
+                }
+                if !r.references.isEmpty {
+                    referenceDisclosure(r)
                 }
             }
             Spacer()
@@ -1462,6 +1471,116 @@ struct SideRoleWorkspaceView: View {
         .background(Color(.systemBackground))
         .contentShape(Rectangle())
         .onTapGesture { viewingResolution = r }
+    }
+
+    // MARK: [v25.353] 決議列裡的參照前案（摺疊）
+
+    /// 預設收合、只顯示「參照前案 N 項」；展開後列出各前案標題，再點一次展開看內文。
+    /// 不用跳到別的畫面就能在清單裡把來龍去脈看完。
+    @ViewBuilder
+    private func referenceDisclosure(_ r: SideRoleResolution) -> some View {
+        let isOpen = expandedRefLists.contains(r.id)
+        VStack(alignment: .leading, spacing: 5) {
+            Button {
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
+                    if isOpen { expandedRefLists.remove(r.id) } else { expandedRefLists.insert(r.id) }
+                }
+            } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: "link")
+                        .font(.system(size: 9, weight: .bold))
+                    Text("參照前案 \(r.references.count) 項")
+                        .font(.system(size: 10, weight: .bold))
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 8, weight: .bold))
+                        .rotationEffect(.degrees(isOpen ? 90 : 0))
+                }
+                .padding(.horizontal, 7).padding(.vertical, 3)
+                .background(Color.indigo.opacity(0.12), in: Capsule())
+                .overlay(Capsule().stroke(Color.indigo.opacity(0.22), lineWidth: 0.6))
+                .foregroundStyle(.indigo)
+                .contentShape(Capsule())
+            }
+            .buttonStyle(.plain)
+
+            if isOpen {
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(r.references, id: \.self) { rid in
+                        referenceLine(parent: r, refId: rid)
+                    }
+                }
+                .padding(.leading, 4)
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func referenceLine(parent: SideRoleResolution, refId: UUID) -> some View {
+        let key = "\(parent.id)-\(refId)"
+        let bodyOpen = expandedRefBodies.contains(key)
+        if let ref = role?.sideRoleResolutions?.first(where: { $0.id == refId }) {
+            VStack(alignment: .leading, spacing: 4) {
+                Button {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
+                        if bodyOpen { expandedRefBodies.remove(key) } else { expandedRefBodies.insert(key) }
+                    }
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: bodyOpen ? "chevron.down" : "chevron.right")
+                            .font(.system(size: 8, weight: .bold))
+                            .foregroundStyle(.indigo.opacity(0.7))
+                            .frame(width: 10)
+                        if !ref.serialLabel.isEmpty {
+                            Text(ref.serialLabel)
+                                .font(.system(size: 9, weight: .bold))
+                                .padding(.horizontal, 5).padding(.vertical, 1)
+                                .background(Color.indigo.opacity(0.12), in: Capsule())
+                                .foregroundStyle(.indigo)
+                        }
+                        Text(ref.title.isEmpty ? "（未填標題）" : ref.title)
+                            .font(.system(size: 11, weight: .semibold))
+                            .lineLimit(bodyOpen ? 3 : 1)
+                            .multilineTextAlignment(.leading)
+                        Text(SideRoleFormat.date(ref.date))
+                            .font(.system(size: 9)).foregroundStyle(.secondary)
+                        Spacer(minLength: 4)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+
+                if bodyOpen {
+                    Text(ref.previewContent.isEmpty ? "（未填內容）" : ref.previewContent)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(8)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Color(.tertiarySystemFill))
+                        .clipShape(RoundedRectangle(cornerRadius: 7))
+                    Button {
+                        viewingResolution = ref
+                    } label: {
+                        HStack(spacing: 4) {
+                            Text("開啟這筆決議").font(.system(size: 10, weight: .bold))
+                            Image(systemName: "arrow.up.forward.app").font(.system(size: 10, weight: .bold))
+                        }
+                        .foregroundStyle(.indigo)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.leading, 2)
+        } else {
+            HStack(spacing: 6) {
+                Image(systemName: "link.badge.plus")
+                    .font(.system(size: 9)).foregroundStyle(.secondary)
+                Text("（前案已被刪除）").font(.system(size: 10)).foregroundStyle(.secondary)
+                Spacer(minLength: 0)
+            }
+        }
     }
 
     // MARK: 共用外框
@@ -2929,10 +3048,28 @@ struct SideRoleResolutionEditor: View {
             } footer: {
                 Text("參照的前案以獨立章節顯示（標題、日期、內文），在卡片上會插在決議內容上方並附可點的超連結；下方內容欄位只需要寫本次的內容。")
             }
-            Section("內容") {
+            Section {
                 TextField("決議內容、脈絡、金額等（會被行事曆搜尋索引）",
                           text: $resolution.content, axis: .vertical)
                     .lineLimit(4...10)
+                // [v25.353] v25.318 以前的版本會把前案內文貼進這個欄位；前案現在有自己的
+                // 摺疊區塊，這段舊文字只是重複。清單預覽已經自動濾掉，這裡讓你決定要不要
+                // 真的從內容裡刪掉——不自動改你的資料。
+                if resolution.hasLegacyReferenceBlock {
+                    Button {
+                        withAnimation { resolution.content = resolution.previewContent }
+                    } label: {
+                        Label("整理舊格式：移除內容裡重複的前案引用", systemImage: "wand.and.sparkles")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.indigo)
+                    }
+                }
+            } header: {
+                Text("內容")
+            } footer: {
+                if resolution.hasLegacyReferenceBlock {
+                    Text("這筆決議的內容欄位裡還留著舊版貼進來的「── 參照前案 …」段落。前案已經在上面獨立列出，清單預覽也會自動略過那一段；要不要從內容裡真的刪掉由你決定。")
+                }
             }
             if isEditing {
                 Section {

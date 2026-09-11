@@ -999,6 +999,36 @@ struct SideRoleResolution: Identifiable, Codable {
 
     /// 流水號顯示文字（#003）；舊資料尚未補號時為空字串
     var serialLabel: String { serial.map { String(format: "#%03d", $0) } ?? "" }
+
+    /// [v25.353] v25.299～v25.318 的「參照前案」會把前案內容以
+    /// 「── 參照前案 #001｜2026/01/02｜標題 ──」開頭的引用區塊直接貼進 content。
+    /// v25.319 起前案改成獨立章節、不再寫進內容，但舊資料裡那段文字還在，
+    /// 清單預覽會被它佔滿。這個屬性把那些區塊濾掉，只留本次真正寫的內容。
+    /// 只影響顯示，儲存的 content 不動（要真的清掉請用編輯頁的「整理舊格式」）。
+    var previewContent: String {
+        guard content.contains("── 參照前案 ") else { return content }
+        var kept: [String] = []
+        var skipping = false
+        for line in content.components(separatedBy: .newlines) {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.hasPrefix("── 參照前案 ") && trimmed.hasSuffix("──") {
+                skipping = true
+                continue
+            }
+            // 引用區塊到下一個空行為止；空行之後就是本次內容
+            if skipping {
+                if trimmed.isEmpty { skipping = false }
+                continue
+            }
+            kept.append(line)
+        }
+        return kept.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// 內容裡還留著舊格式的參照區塊嗎（決定要不要顯示「整理舊格式」按鈕）
+    var hasLegacyReferenceBlock: Bool {
+        content.contains("── 參照前案 ") && previewContent != content
+    }
     /// 舊版單選分類。獨立 CodingKey 讓 encode 仍可用合成版
     ///（CodingKeys 出現沒有對應屬性的 case 會讓合成的 encode 編不過）。
     private enum LegacyKeys: String, CodingKey { case category }
