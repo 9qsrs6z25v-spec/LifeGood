@@ -89,11 +89,20 @@ struct OrganizationView: View {
     @State private var orgEmptyPulseTask: Task<Void, Never>?
     /// [v25.357] 從廠區據點的子項目點開某筆重大決議
     @State private var openingResolution: ResolutionJump?
+    /// [v25.359] 新增／編輯廠區據點。sheet 要掛在這裡而不是 Section 上——
+    /// 掛在 Section 上時 List 重建內容會把剛打開的 sheet 一起收掉。
+    @State private var editingSite: SiteEditTarget?
 
     struct ResolutionJump: Identifiable {
         let roleId: UUID
         let resolutionId: UUID
         var id: String { "\(roleId)-\(resolutionId)" }
+    }
+
+    struct SiteEditTarget: Identifiable {
+        var site: CompanySite
+        var isNew: Bool
+        var id: UUID { site.id }
     }
 
     private var rootDepartments: [Department] {
@@ -179,6 +188,14 @@ struct OrganizationView: View {
             // [v25.357] 從廠區據點展開的決議直接開決議卡片
             .sheet(item: $openingResolution) { jump in
                 SideRoleResolutionCard(roleId: jump.roleId, resolutionId: jump.resolutionId)
+            }
+            .sheet(item: $editingSite) { target in
+                CompanySiteEditor(site: target.isNew ? nil : target.site,
+                                  draft: target.site) { saved in
+                    lifeStore.upsertCompanySite(saved)
+                } onDelete: { id in
+                    lifeStore.deleteCompanySite(id: id)
+                }
             }
             .premiumLockAlert(isPresented: $showPremiumAlert)
             .onAppear {
@@ -391,9 +408,11 @@ struct OrganizationView: View {
                 Text("點部門名稱進入詳細頁設定人員與管理人員；點箭頭展開下游部門。右上角可切回樹狀圖。")
             }
             // [v25.357] 廠區據點：項目＝廠，子項目＝掛在那個廠的重大決議
-            CompanySiteSection { role, resolution in
+            CompanySiteSection(onOpenResolution: { role, resolution in
                 openingResolution = ResolutionJump(roleId: role.id, resolutionId: resolution.id)
-            }
+            }, onEdit: { site in
+                editingSite = SiteEditTarget(site: site ?? CompanySite(), isNew: site == nil)
+            })
         }
         .listStyle(.insetGrouped)
         .scrollContentBackground(.hidden)

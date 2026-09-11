@@ -11,8 +11,6 @@ import SwiftUI
 struct CompanySiteSection: View {
     @EnvironmentObject var lifeStore: LifeStore
 
-    @State private var editing: CompanySite?
-    @State private var showEditor = false
     /// [v25.358] 排序循環：時間新→舊 → 時間舊→新 → 廠名 A→Z → 回到時間新→舊
     @AppStorage("company_site_sort") private var sortRaw = SiteSort.timeDesc.rawValue
 
@@ -66,11 +64,17 @@ struct CompanySiteSection: View {
     }
     /// 點子項目要開的決議（交給呼叫端決定怎麼開）
     var onOpenResolution: ((LifeMilestone, SideRoleResolution) -> Void)?
+    /// [v25.359] 新增／編輯據點。sheet 一定要掛在呼叫端的視圖上——
+    /// 掛在 Section 上時 List 重建 section 內容會把剛打開的 sheet 一起收掉
+    /// （使用者回報：點新增後畫面打開又立刻關起來）。
+    var onEdit: (CompanySite?) -> Void
 
     /// 明確寫出 init：上面有 private 的 @State，合成的 memberwise init 會跟著變 private，
     /// 跨檔案（OrganizationView）叫不到。
-    init(onOpenResolution: ((LifeMilestone, SideRoleResolution) -> Void)? = nil) {
+    init(onOpenResolution: ((LifeMilestone, SideRoleResolution) -> Void)? = nil,
+         onEdit: @escaping (CompanySite?) -> Void) {
         self.onOpenResolution = onOpenResolution
+        self.onEdit = onEdit
     }
 
     private let accent = Color.brown
@@ -89,8 +93,7 @@ struct CompanySiteSection: View {
                 }
             }
             Button {
-                editing = nil
-                showEditor = true
+                onEdit(nil)
             } label: {
                 Label("新增廠區據點", systemImage: "plus.circle.fill")
                     .font(.subheadline.weight(.semibold))
@@ -115,13 +118,7 @@ struct CompanySiteSection: View {
         } footer: {
             Text("決議掛在哪個廠是看時間，不是看廠名：一筆決議屬於「啟用年月早於或等於它」之中最晚的那個廠。每個廠的期間到下一個廠啟用為止，串起來就是一條歷史年線。")
         }
-        .sheet(isPresented: $showEditor) {
-            CompanySiteEditor(site: editing) { saved in
-                lifeStore.upsertCompanySite(saved)
-            } onDelete: { id in
-                lifeStore.deleteCompanySite(id: id)
-            }
-        }
+
     }
 
     // MARK: 列
@@ -137,7 +134,7 @@ struct CompanySiteSection: View {
             disclosures: disclosures(pairs),
             disclosureLabel: "重大決議",
             disclosureColor: accent,
-            onTap: { editing = site; showEditor = true },
+            onTap: { onEdit(site) },
             leading: {
                 ItemIconDisc(icon: "building.2.fill",
                              color: site.isActive ? accent : .secondary,
@@ -248,8 +245,7 @@ struct CompanySiteSection: View {
                 HStack(spacing: 6) {
                     ForEach(lifeStore.unregisteredResolutionSites, id: \.self) { name in
                         Button {
-                            editing = CompanySite(name: name)
-                            showEditor = true
+                            onEdit(CompanySite(name: name))
                         } label: {
                             HStack(spacing: 3) {
                                 Image(systemName: "plus").font(.system(size: 8, weight: .bold))
@@ -273,9 +269,13 @@ struct CompanySiteSection: View {
 // MARK: - 新增／編輯據點
 
 struct CompanySiteEditor: View {
+    @EnvironmentObject var lifeStore: LifeStore
     @Environment(\.dismiss) private var dismiss
 
+    /// 既有據點（nil＝新增，不顯示刪除鈕）
     let site: CompanySite?
+    /// 預填內容。新增時也可能帶值（例如從「還沒建檔的廠區」點進來會先帶廠名）
+    var draft: CompanySite = CompanySite()
     let onSave: (CompanySite) -> Void
     let onDelete: (UUID) -> Void
 
@@ -290,6 +290,61 @@ struct CompanySiteEditor: View {
     @State private var note = ""
     @State private var loaded = false
 
+    /// 明確寫出 init：上面有 private 的 @State，合成的 memberwise init 會跟著變 private，
+    /// 跨檔案（OrganizationView）叫不到。
+    init(site: CompanySite?, draft: CompanySite = CompanySite(),
+         onSave: @escaping (CompanySite) -> Void,
+         onDelete: @escaping (UUID) -> Void) {
+        self.site = site
+        self.draft = draft
+        self.onSave = onSave
+        self.onDelete = onDelete
+    }
+
+    /// 已經填過的公司名稱（含個人檔案裡的公司），去重、目前這筆排最前面
+    private var companySuggestions: [String] {
+        var out: [String] = []
+        var seen = Set<String>()
+        let current = company.trimmingCharacters(in: .whitespaces)
+        if !current.isEmpty { out.append(current); seen.insert(current) }
+        var pool = lifeStore.companySites.map(\.company)
+        pool.append(lifeStore.profile.company)
+        for raw in pool {
+            let v = raw.trimmingCharacters(in: .whitespaces)
+            guard !v.isEmpty, !seen.contains(v) else { continue }
+            seen.insert(v)
+            out.append(v)
+        }
+        return Array(out.prefix(12))
+    }
+
+    /// 已經填過的地點，去重、目前這筆排最前面
+    private var locationSuggestions: [String] {
+        var out: [String] = []
+        var seen = Set<String>()
+        let current = location.trimmingCharacters(in: .whitespaces)
+        if !current.isEmpty { out.append(current); seen.insert(current) }
+        for raw in lifeStore.companySites.map(\.location) {
+            let v = raw.trimmingCharacters(in: .whitespaces)
+            guard !v.isEmpty, !seen.contains(v) else { continue }
+            seen.insert(v)
+            out.append(v)
+        }
+        return Array(out.prefix(12))
+    }
+
+    private func suggestionChip(_ text: String, isOn: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(text)
+                .font(.system(size: 12, weight: .semibold))
+                .padding(.horizontal, 9).padding(.vertical, 4)
+                .background(isOn ? Color.brown.opacity(0.20) : Color(.tertiarySystemFill), in: Capsule())
+                .foregroundStyle(isOn ? Color.brown : Color.secondary)
+                .overlay(Capsule().stroke(isOn ? Color.brown.opacity(0.45) : .clear, lineWidth: 1))
+        }
+        .buttonStyle(.borderless)
+    }
+
     private var years: [Int] {
         let thisYear = Calendar.current.component(.year, from: Date())
         return Array((1950...(thisYear + 5)).reversed())
@@ -301,10 +356,31 @@ struct CompanySiteEditor: View {
             Form {
                 Section {
                     TextField("公司（例：台積電）", text: $company)
+                    if !companySuggestions.isEmpty {
+                        FlexibleChipWrap(items: companySuggestions) { name in
+                            suggestionChip(name, isOn: company == name) {
+                                company = company == name ? "" : name
+                            }
+                        }
+                    }
                     TextField("廠區／據點（例：F12A 十二廠）", text: $name)
-                    TextField("地點（例：新竹科學園區）", text: $location)
                 } footer: {
-                    Text("「廠區／據點」要跟你在重大決議上填的廠區名一致，決議才掛得進來。")
+                    Text("公司名稱 key 過一次之後就會變成膠囊，下次點一下就好。")
+                }
+
+                Section {
+                    TextField("地點（例：新竹科學園區）", text: $location)
+                    if !locationSuggestions.isEmpty {
+                        FlexibleChipWrap(items: locationSuggestions) { name in
+                            suggestionChip(name, isOn: location == name) {
+                                location = location == name ? "" : name
+                            }
+                        }
+                    }
+                } header: {
+                    Text("地點")
+                } footer: {
+                    Text("同一個園區常有好幾個廠，填過的地點一樣會變成膠囊。")
                 }
 
                 Section("啟用年月") {
@@ -364,7 +440,7 @@ struct CompanySiteEditor: View {
             .onAppear {
                 guard !loaded else { return }
                 loaded = true
-                guard let s = site else { return }
+                let s = site ?? draft
                 company = s.company; name = s.name; location = s.location; note = s.note
                 if s.startYear > 0 { startYear = s.startYear; startMonth = max(1, s.startMonth) }
                 if let ey = s.endYear, ey > 0 {
@@ -375,7 +451,7 @@ struct CompanySiteEditor: View {
     }
 
     private func save() {
-        var s = site ?? CompanySite()
+        var s = site ?? draft
         s.company = company.trimmingCharacters(in: .whitespaces)
         s.name = name.trimmingCharacters(in: .whitespaces)
         s.location = location.trimmingCharacters(in: .whitespaces)
