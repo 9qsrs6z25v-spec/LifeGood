@@ -31,6 +31,23 @@ struct CompanyChronicleView: View {
     private let accent = Color(red: 0.45, green: 0.31, blue: 0.20)   // 棕
     private let paper = Color(red: 0.99, green: 0.98, blue: 0.96)
 
+    private let columnWidth: CGFloat = 278
+    private let columnGap: CGFloat = 22
+    private let pagePadding: CGFloat = 44
+
+    /// 整張圖的寬度一定要算得出來。ImageRenderer 的 proposedSize 是 .unspecified，
+    /// 版面裡只要有 Spacer 或 maxWidth/maxHeight: .infinity 落在沒有邊界的容器裡，
+    /// 量到的理想尺寸就會變成無限大，uiImage 直接回 nil——出圖會安靜地失敗。
+    private var canvasWidth: CGFloat {
+        switch orientation {
+        case .vertical:
+            return 900
+        case .horizontal:
+            let cols = max(1, CGFloat(entries.count))
+            return max(900, cols * (columnWidth + columnGap) + pagePadding * 2)
+        }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
@@ -48,9 +65,8 @@ struct CompanyChronicleView: View {
             }
             footer
         }
-        .padding(orientation == .vertical ? 44 : 40)
-        .frame(width: orientation == .vertical ? 900 : nil,
-               alignment: .topLeading)
+        .padding(pagePadding)
+        .frame(width: canvasWidth, alignment: .topLeading)
         .background(paper)
     }
 
@@ -96,34 +112,38 @@ struct CompanyChronicleView: View {
     private var verticalBody: some View {
         VStack(alignment: .leading, spacing: 0) {
             ForEach(Array(entries.enumerated()), id: \.element.id) { idx, entry in
+                let isLast = idx == entries.count - 1
                 HStack(alignment: .top, spacing: 18) {
-                    spine(isLast: idx == entries.count - 1)
+                    dot
                     VStack(alignment: .leading, spacing: 10) {
                         siteHeading(entry)
                         resolutionList(entry)
                     }
-                    .padding(.bottom, idx == entries.count - 1 ? 0 : 30)
+                    .padding(.bottom, isLast ? 0 : 30)
+                }
+                // 連接線畫在背景：background 拿得到父層的實際高度，
+                // 不需要 maxHeight: .infinity 去撐（那會讓量測變成無限大）
+                .background(alignment: .topLeading) {
+                    if !isLast {
+                        Rectangle()
+                            .fill(accent.opacity(0.28))
+                            .frame(width: 2)
+                            .padding(.leading, 8)
+                            .padding(.top, 18)
+                    }
                 }
             }
         }
     }
 
-    /// 時間軸：圓點 ＋ 往下的連續線
-    private func spine(isLast: Bool) -> some View {
-        VStack(spacing: 0) {
-            ZStack {
-                Circle()
-                    .fill(LinearGradient(colors: [accent, accent.opacity(0.65)],
-                                         startPoint: .top, endPoint: .bottom))
-                    .frame(width: 18, height: 18)
-                Circle().fill(paper).frame(width: 7, height: 7)
-            }
-            if !isLast {
-                Rectangle()
-                    .fill(accent.opacity(0.28))
-                    .frame(width: 2)
-                    .frame(maxHeight: .infinity)
-            }
+    /// 時間軸上的圓點（連接線由外層的 background 負責）
+    private var dot: some View {
+        ZStack {
+            Circle()
+                .fill(LinearGradient(colors: [accent, accent.opacity(0.65)],
+                                     startPoint: .top, endPoint: .bottom))
+                .frame(width: 18, height: 18)
+            Circle().fill(paper).frame(width: 7, height: 7)
         }
         .frame(width: 18)
     }
@@ -238,7 +258,7 @@ struct CompanyChronicleView: View {
                             Rectangle().fill(accent.opacity(0.28)).frame(height: 2)
                         }
                     }
-                    .frame(width: 300, alignment: .leading)
+                    .frame(width: columnWidth + columnGap, alignment: .leading)
                 }
             }
             .padding(.bottom, 14)
@@ -248,10 +268,9 @@ struct CompanyChronicleView: View {
                     VStack(alignment: .leading, spacing: 10) {
                         siteHeading(entry)
                         resolutionList(entry)
-                        Spacer(minLength: 0)
                     }
-                    .frame(width: 278, alignment: .topLeading)
-                    .padding(.trailing, 22)
+                    .frame(width: columnWidth, alignment: .topLeading)
+                    .padding(.trailing, columnGap)
                 }
             }
         }
@@ -282,21 +301,43 @@ struct CompanyChronicleView: View {
 // MARK: - 出圖
 
 enum ChronicleExporter {
-    /// 畫成 PNG 存到暫存檔，回傳可分享的 URL
+    enum ExportError: LocalizedError {
+        case renderFailed
+        case encodeFailed
+        case writeFailed(String)
+
+        var errorDescription: String? {
+            switch self {
+            case .renderFailed:
+                return "畫面轉成圖片時失敗了。決議如果非常多，試試另一個方向（直式／橫式），或先減少據點數量。"
+            case .encodeFailed:
+                return "圖片編碼失敗。"
+            case .writeFailed(let msg):
+                return "圖片存檔失敗：\(msg)"
+            }
+        }
+    }
+
+    /// 畫成 PNG 存到暫存檔，回傳可分享的 URL。
+    /// 失敗要往上丟——之前回 nil 讓呼叫端安靜地什麼都不做，使用者只會看到「按了沒反應」。
     @MainActor
-    static func png(_ view: CompanyChronicleView, name: String) -> URL? {
+    static func png(_ view: CompanyChronicleView, name: String) throws -> URL {
         let renderer = ImageRenderer(content: view)
         renderer.proposedSize = .unspecified
-        renderer.scale = 3
-        guard let image = renderer.uiImage, let data = image.pngData() else { return nil }
-        let safe = name.replacingOccurrences(of: "/", with: "-")
+        // 3 倍在據點多的時候容易做出超大點陣圖而失敗，2 倍列印仍然夠清楚
+        renderer.scale = 2
+        guard let image = renderer.uiImage else { throw ExportError.renderFailed }
+        guard let data = image.pngData() else { throw ExportError.encodeFailed }
+        let safe = name
+            .replacingOccurrences(of: "/", with: "-")
+            .replacingOccurrences(of: ":", with: "-")
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("\(safe).png")
         do {
             try data.write(to: url, options: .atomic)
             return url
         } catch {
-            return nil
+            throw ExportError.writeFailed(error.localizedDescription)
         }
     }
 }

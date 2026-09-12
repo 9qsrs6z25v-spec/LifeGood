@@ -95,6 +95,8 @@ struct OrganizationView: View {
     /// [v25.360] 決議內容搜尋：固定在頂端，命中後把清單捲到該筆決議所屬的廠區
     @State private var resolutionQuery = ""
     @State private var hitIndex = 0
+    /// [v25.364] 匯出失敗的原因。出圖失敗時一定要講出來，不能按了沒反應
+    @State private var exportError: String?
 
     struct ResolutionJump: Identifiable {
         let roleId: UUID
@@ -251,6 +253,14 @@ struct OrganizationView: View {
                 } onDelete: { id in
                     lifeStore.deleteCompanySite(id: id)
                 }
+            }
+            .alert("匯出失敗", isPresented: Binding(
+                get: { exportError != nil },
+                set: { if !$0 { exportError = nil } }
+            )) {
+                Button("好") { exportError = nil }
+            } message: {
+                Text(exportError ?? "")
             }
             .premiumLockAlert(isPresented: $showPremiumAlert)
             .onAppear {
@@ -434,7 +444,11 @@ struct OrganizationView: View {
 
     private func shareChronicle(_ orientation: CompanyChronicleView.Orientation) {
         let entries = chronicleEntries
-        guard !entries.isEmpty else { return }
+        guard !entries.isEmpty else {
+            exportError = "沒有可以排進年表的據點。編年史依啟用年月排序，"
+                + "請先到廠區據點把「啟用年月」填好（\(lifeStore.companySites.count) 筆據點目前都沒有年月）。"
+            return
+        }
         let companies = Set(entries.map { $0.site.company.trimmingCharacters(in: .whitespaces) })
             .filter { !$0.isEmpty }
         let title = companies.count == 1 ? (companies.first ?? "廠區") : "廠區"
@@ -447,8 +461,10 @@ struct OrganizationView: View {
             entries: entries,
             orientation: orientation)
         let name = title + "編年史_" + CompanyChronicleView.stamp.string(from: Date())
-        if let url = ChronicleExporter.png(view, name: name) {
-            pdfURL = IdentifiableURL(url: url)
+        do {
+            pdfURL = IdentifiableURL(url: try ChronicleExporter.png(view, name: name))
+        } catch {
+            exportError = error.localizedDescription
         }
     }
 
