@@ -107,7 +107,8 @@ final class RestaurantSearchCompleter: NSObject, ObservableObject, MKLocalSearch
         let request = MKLocalSearch.Request(completion: completion)
         request.resultTypes = .pointOfInterest
         let search = MKLocalSearch(request: request)
-        search.start { response, _ in
+        search.start { [search] response, _ in
+            _ = search  // 防止 ARC 在回調完成前提前釋放 search，導致靜默搜尋失敗
             DispatchQueue.main.async {
                 done(response?.mapItems.first)
             }

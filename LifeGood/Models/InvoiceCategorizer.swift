@@ -6,6 +6,8 @@ final class InvoiceCategorizer: ObservableObject {
 
     @Published private(set) var rules: [CategoryRule] = []
 
+    private let persistQueue = DispatchQueue(label: "com.lifegood.invoicecategorizer.persist", qos: .utility)
+
     private let storageURL: URL = {
         let dir = FileManager.default.urls(for: .applicationSupportDirectory,
                                            in: .userDomainMask).first
@@ -29,15 +31,19 @@ final class InvoiceCategorizer: ObservableObject {
 
     /// 依 header / items 推斷分類；找不到回 .other
     func categorize(seller: String, items: [EInvoiceItem]) -> VariableCategory {
+        // 使用者自訂規則永遠優先於預設規則比對，否則使用者新增的規則會被 addRule 附加在
+        // 陣列尾端、排在同關鍵字的預設規則之後，categorize() 取第一個命中就永遠回傳預設分類，
+        // 使用者規則形同無效卻毫無提示。
+        let orderedRules = rules.filter(\.isUserDefined) + rules.filter { !$0.isUserDefined }
         // 1. 優先比對商家
-        for rule in rules where rule.matchSeller && !rule.keyword.isEmpty {
+        for rule in orderedRules where rule.matchSeller && !rule.keyword.isEmpty {
             if seller.localizedCaseInsensitiveContains(rule.keyword) {
                 return rule.category
             }
         }
         // 2. 再比對品項
         for item in items {
-            for rule in rules where rule.matchItem && !rule.keyword.isEmpty {
+            for rule in orderedRules where rule.matchItem && !rule.keyword.isEmpty {
                 if item.description.localizedCaseInsensitiveContains(rule.keyword) {
                     return rule.category
                 }
@@ -71,14 +77,39 @@ final class InvoiceCategorizer: ObservableObject {
     // MARK: - 持久化
 
     private func load() {
-        guard let data = try? Data(contentsOf: storageURL),
-              let decoded = try? JSONDecoder().decode([CategoryRule].self, from: data) else { return }
-        rules = decoded
+        guard let data = try? Data(contentsOf: storageURL) else { return }
+        // 逐筆容錯解碼：單一筆損壞的分類規則不應讓整份自動分類規則消失
+        // （對齊 LifeStore/ExpenseStore/FinanceStore/EInvoiceSyncManager 既有的逐筆容錯規格）。
+        if let decoded = Self.lossyDecodeArray([CategoryRule].self, from: data) {
+            rules = decoded
+        }
+    }
+
+    /// 逐筆容錯解碼：先試整批，失敗再逐筆解、跳過損壞的元素，保留其餘資料。
+    private static func lossyDecodeArray<Element: Decodable>(_ type: [Element].Type, from data: Data) -> [Element]? {
+        let decoder = JSONDecoder()
+        if let items = try? decoder.decode([Element].self, from: data) { return items }
+        if let raw = try? decoder.decode([FailableDecodable<Element>].self, from: data) {
+            return raw.compactMap { $0.value }
+        }
+        return nil
+    }
+
+    /// 包裝單一元素，解碼失敗時不丟錯、回傳 nil
+    private struct FailableDecodable<T: Decodable>: Decodable {
+        let value: T?
+        init(from decoder: Decoder) throws {
+            value = try? T(from: decoder)
+        }
     }
 
     private func persist() {
-        guard let data = try? JSONEncoder().encode(rules) else { return }
-        try? data.write(to: storageURL, options: .atomic)
+        let snapshot = rules
+        let url = storageURL
+        persistQueue.async {
+            guard let data = try? JSONEncoder().encode(snapshot) else { return }
+            try? data.write(to: url, options: .atomic)
+        }
     }
 
     // MARK: - 預設規則

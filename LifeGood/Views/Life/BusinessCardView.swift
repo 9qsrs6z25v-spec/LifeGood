@@ -110,7 +110,14 @@ enum BusinessCardOCR {
             request.recognitionLanguages = ["zh-Hant", "zh-Hans", "en-US"]
             let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
             DispatchQueue.global(qos: .userInitiated).async {
-                try? handler.perform([request])
+                do {
+                    try handler.perform([request])
+                } catch {
+                    // perform 拋錯時（例如相機拍到的圖檔損毀）request 的 completion handler
+                    // 不會被呼叫，繼續用 try? 吞掉錯誤會讓 continuation 永遠不 resume，
+                    // 呼叫端的 await 卡死、isProcessingScan/isRescanning 卡在 true 出不去。
+                    continuation.resume(returning: [])
+                }
             }
         }
     }
@@ -386,12 +393,50 @@ extension BusinessCard {
     }
 }
 
+// MARK: - 美化紀錄（BusinessCardView）
+// [2026-06 v1] 本次美化方向：
+//   1. summaryHeader：新增橘粉漸層英雄卡（總名片數 + 公司數 + 聯絡人數），
+//      對齊 VehicleView.summaryHeader / StockView.summaryHeader 設計語言；
+//      加入 heroCardAppeared spring 進場動畫
+//   2. emptyState：純圖示升級為雙層脈衝光環 + 漸層底圓 + 橘色 CTA 按鈕，
+//      搜尋無結果時改用搜尋圖示，對齊 IncomeView.emptyState 規格
+//   3. companyHeader：公司分組標題從 plain Text 升級為橘色 Capsule 強調條 +
+//      計數膠囊，對齊 IncomeView.daySectionHeader 規格
+//   4. cardRow：頭像從 48pt 升至 52pt + 職稱標籤改用 Capsule + 加入分隔色線，
+//      對齊 IncomeView.incomeRow 視覺規格
+//   5. 卡片列表加入 cardsAppeared 交錯淡入 + 向上進場動畫，
+//      對齊 IncomeView.incomeListSections 進場動畫規格
+// [2026-06 v2] 本次美化方向：
+//   1. summaryHeader：補第三顆散景裝飾圓（中右側 55pt, white.opacity(0.06), blur 8）
+//      + 玻璃光澤高光覆層（LinearGradient [.white.opacity(0.18), .clear] 頂→中），
+//      對齊 IncomeView / VariableExpenseView v4 三圓散景 + 玻璃光澤規格
+//   2. companyHeader：Capsule 強調條寬度 3pt → 4pt，標題字型
+//      .footnote.weight(.semibold) → .subheadline.weight(.bold)，對齊全 App 分組標題基準
+//   3. cardRow 職稱膠囊：補 Capsule stroke overlay (blue.opacity(0.22), 0.6pt)
+//      讓膠囊輪廓更立體，對齊 LifeOverview / Career 標籤規格
+//   4. cardRow 日期標籤：從 plain caption2 升級為 Capsule 日期膠囊
+//      (quaternarySystemFill 底 + 7/3pt padding)，對齊 FamilyView / SubordinateView 規格
+//   5. avatarView 首字母方塊：補 .white.opacity(0.30) stroke overlay，
+//      讓無照片頭像邊框更明確，對齊設計語言圖示圓邊框規格
+// [2026-08 v3] summaryHeader 頂部總名片數大字補齊自適應防截斷：
+//   1. 「\(totalCards) 張名片」30pt 大字原本沒有 lineLimit／minimumScaleFactor
+//      防截斷保護，是同系列英雄卡 OverviewView／IncomeView／FinanceOverviewView／
+//      FinanceChartView／ChartView／SavingsInsuranceView／FixedExpenseView 皆已
+//      修過、本檔案仍缺的同型缺口——名片數量搭配「張名片」文字在窄螢幕或名片數
+//      達三位數以上時可能被系統裁切。補上 .lineLimit(1) + .minimumScaleFactor(0.6)，
+//      對齊全 App 英雄卡同尺寸大字規格。純視覺層調整，totalCards／companyCount／
+//      contactCount 統計邏輯完全未變動。
+//      （下次美化本檔案時：可留意 quoteHeroCard 同型大字檔案，或轉往其他仍留有
+//      待辦的畫面，如 AddStockView.quoteHeroCard 即時股價大字）
+
 struct BusinessCardView: View {
     @EnvironmentObject var lifeStore: LifeStore
     @EnvironmentObject var subscription: SubscriptionManager
     @State private var showAdd = false
     @State private var viewingCardId: UUID?
     @State private var searchText = ""
+    @State private var debouncedSearchText = ""
+    @State private var searchDebounceTask: Task<Void, Never>?
     @State private var showPremiumAlert = false
     @State private var showContactPicker = false
     // 拍名片掃描
@@ -404,6 +449,11 @@ struct BusinessCardView: View {
     @State private var selectedIds: Set<UUID> = []
     @State private var showExportConfirm = false
     @State private var exportAlertMessage: String?
+    // 美化進場動畫旗標
+    @State private var heroCardAppeared = false
+    @State private var cardsAppeared = false
+    @State private var emptyIconPulse = false
+    @State private var emptyPulseTask: Task<Void, Never>?
 
     fileprivate struct ScannedCardDraft: Identifiable {
         let id = UUID()
@@ -413,8 +463,8 @@ struct BusinessCardView: View {
 
     private var filteredCards: [BusinessCard] {
         let sorted = lifeStore.businessCards.sorted { $0.date > $1.date }
-        if searchText.isEmpty { return sorted }
-        let q = searchText.lowercased()
+        if debouncedSearchText.isEmpty { return sorted }
+        let q = debouncedSearchText.lowercased()
         return sorted.filter { card in
             card.name.lowercased().contains(q)
             || card.company.lowercased().contains(q)
@@ -426,41 +476,293 @@ struct BusinessCardView: View {
         }
     }
 
-    private var groupedByCompany: [(key: String, value: [BusinessCard])] {
-        let grouped = Dictionary(grouping: filteredCards) { $0.company.isEmpty ? "未分類" : $0.company }
+    private func groupedByCompany(_ cards: [BusinessCard]) -> [(key: String, value: [BusinessCard])] {
+        let grouped = Dictionary(grouping: cards) { $0.company.isEmpty ? "未分類" : $0.company }
         return grouped.sorted { $0.key < $1.key }
     }
 
+    // MARK: - 英雄摘要卡片（橘粉漸層）
+
+    private var summaryHeader: some View {
+        let totalCards = lifeStore.businessCards.count
+        let companyCount = Set(lifeStore.businessCards.map { $0.company }.filter { !$0.isEmpty }).count
+        let contactCount = lifeStore.businessCards.filter { !$0.phones.isEmpty || !$0.emails.isEmpty }.count
+
+        return VStack(spacing: 0) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("名片總覽")
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.80))
+                    Text("\(totalCards) 張名片")
+                        .heroBigValueFont()
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.6)
+                        .contentTransition(.numericText())
+                    if companyCount > 0 {
+                        Text("涵蓋 \(companyCount) 家公司")
+                            .font(.caption2.weight(.medium))
+                            .foregroundStyle(.white.opacity(0.72))
+                            .padding(.top, 1)
+                    }
+                }
+                Spacer()
+                VStack(alignment: .trailing, spacing: 6) {
+                    Text("\(totalCards) 張")
+                        .font(.caption.weight(.semibold))
+                        .padding(.horizontal, 11).padding(.vertical, 5)
+                        .background(.white.opacity(0.22))
+                        .clipShape(Capsule())
+                        .foregroundStyle(.white)
+                    if contactCount > 0 {
+                        HStack(spacing: 3) {
+                            Image(systemName: "phone.fill")
+                                .font(.system(size: 9, weight: .bold))
+                            Text("\(contactCount) 有聯絡方式")
+                                .font(.system(size: 10, weight: .semibold))
+                                .lineLimit(1)
+                        }
+                        .foregroundStyle(.white.opacity(0.88))
+                        .padding(.horizontal, 9).padding(.vertical, 4)
+                        .background(.white.opacity(0.16))
+                        .clipShape(Capsule())
+                        .overlay(Capsule().stroke(.white.opacity(0.28), lineWidth: 0.75))
+                    }
+                }
+            }
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 18)
+        .heroCardShell(card: .businessCardList)
+        .padding(.horizontal, 16)
+        .padding(.top, 10)
+        .padding(.bottom, 4)
+        .opacity(heroCardAppeared ? 1 : 0)
+        .offset(y: heroCardAppeared ? 0 : 22)
+        .onAppear {
+            withAnimation(.spring(response: 0.55, dampingFraction: 0.78)) {
+                heroCardAppeared = true
+            }
+        }
+        .onDisappear {
+            heroCardAppeared = false
+        }
+    }
+
+    // MARK: - 公司分組標題列（橘色強調條 + 計數膠囊）
+
+    private func companyHeader(_ company: String, _ cards: [BusinessCard]) -> some View {
+        let accent = Color(red: 1.00, green: 0.55, blue: 0.25)
+        return HStack(spacing: 8) {
+            Capsule()
+                .fill(
+                    LinearGradient(
+                        colors: [accent, accent.opacity(0.55)],
+                        startPoint: .top, endPoint: .bottom
+                    )
+                )
+                .frame(width: 4, height: 14) // v2：3pt → 4pt 對齊全 App 分組標題規格
+            Text(company)
+                .font(.subheadline.weight(.bold)) // v2：footnote.semibold → subheadline.bold
+                .foregroundStyle(.primary.opacity(0.75))
+            Spacer(minLength: 6)
+            HStack(spacing: 4) {
+                Text("\(cards.count) 張")
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(accent)
+                Text("·")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                Text("名片")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(accent.opacity(0.10))
+            .clipShape(Capsule())
+            .overlay(Capsule().stroke(accent.opacity(0.22), lineWidth: 0.6))
+        }
+        .textCase(nil)
+    }
+
+    // MARK: - 空狀態（雙層脈衝光環 + 橘色 CTA）
+
+    private var emptyStateView: some View {
+        let isSearching = !searchText.trimmingCharacters(in: .whitespaces).isEmpty
+        let accent = Color(red: 1.00, green: 0.55, blue: 0.25)
+        return VStack(spacing: 24) {
+            Spacer()
+
+            ZStack {
+                if !isSearching {
+                    Circle()
+                        .stroke(accent.opacity(emptyIconPulse ? 0 : 0.28), lineWidth: 1.5)
+                        .frame(width: 108, height: 108)
+                        .scaleEffect(emptyIconPulse ? 1.35 : 1.0)
+                        .animation(
+                            .easeOut(duration: 2.0).repeatForever(autoreverses: false),
+                            value: emptyIconPulse
+                        )
+                    Circle()
+                        .stroke(accent.opacity(emptyIconPulse ? 0 : 0.14), lineWidth: 1)
+                        .frame(width: 108, height: 108)
+                        .scaleEffect(emptyIconPulse ? 1.60 : 1.0)
+                        .animation(
+                            .easeOut(duration: 2.0).delay(0.3).repeatForever(autoreverses: false),
+                            value: emptyIconPulse
+                        )
+                }
+                Circle()
+                    .fill(
+                        LinearGradient(
+                            colors: isSearching
+                                ? [Color(.systemFill), Color(.secondarySystemFill)]
+                                : [accent.opacity(0.14), accent.opacity(0.06)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 88, height: 88)
+                    .overlay(
+                        Circle()
+                            .stroke(
+                                isSearching ? Color.clear : accent.opacity(0.22),
+                                lineWidth: 1.2
+                            )
+                    )
+                Image(systemName: isSearching ? "magnifyingglass" : "person.crop.rectangle.stack")
+                    .font(.system(size: 34, weight: .light))
+                    .foregroundStyle(isSearching ? .secondary : accent.opacity(0.72))
+            }
+            .onAppear {
+                emptyIconPulse = false
+                emptyPulseTask?.cancel()
+                if !isSearching {
+                    emptyPulseTask = Task {
+                        try? await Task.sleep(nanoseconds: 300_000_000)
+                        guard !Task.isCancelled else { return }
+                        emptyIconPulse = true
+                    }
+                }
+            }
+            .onDisappear {
+                emptyPulseTask?.cancel()
+            }
+
+            VStack(spacing: 10) {
+                Text(isSearching ? "找不到符合的名片" : "尚無名片紀錄")
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(.primary.opacity(0.75))
+                Text(isSearching ? "換個關鍵字試試" : "收集名片、拍照辨識\n或從聯絡人一鍵匯入")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .lineSpacing(3)
+            }
+
+            if !isSearching {
+                Button {
+                    if subscription.isPremium { showAdd = true }
+                    else { showPremiumAlert = true }
+                } label: {
+                    Label("新增第一張名片", systemImage: "plus.circle.fill")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 22)
+                        .padding(.vertical, 12)
+                        .background(
+                            LinearGradient(
+                                colors: [
+                                    Color(red: 1.00, green: 0.58, blue: 0.28),
+                                    Color(red: 0.90, green: 0.28, blue: 0.55)
+                                ],
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
+                        )
+                        .clipShape(Capsule())
+                        .shadow(color: Color(red: 0.90, green: 0.28, blue: 0.55).opacity(0.38), radius: 10, y: 5)
+                }
+                .buttonStyle(.plain)
+            }
+
+            Spacer()
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal, 32)
+    }
+
     var body: some View {
-        NavigationStack {
+        // filteredCards（全量 sort + 多欄位 contains 篩選）改在此算一次，往下傳給
+        // List／groupedByCompany／toolbar 多選按鈕，避免原本 4 處各自獨立重新計算。
+        let cards = filteredCards
+        return NavigationStack {
             VStack(spacing: 0) {
+                // 有名片時顯示搜尋列（帶圖示 + 圓角背景，對齊其他 searchable 頁面規格）
                 if !lifeStore.businessCards.isEmpty {
-                    HStack {
-                        Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                    HStack(spacing: 8) {
+                        Image(systemName: "magnifyingglass")
+                            .foregroundStyle(.secondary)
+                            .font(.subheadline)
                         TextField("搜尋姓名、公司、職稱、主要業務", text: $searchText)
                             .textFieldStyle(.plain)
+                            .font(.subheadline)
+                            .onChange(of: searchText) { _, newValue in
+                                searchDebounceTask?.cancel()
+                                searchDebounceTask = Task {
+                                    try? await Task.sleep(nanoseconds: 300_000_000)
+                                    guard !Task.isCancelled else { return }
+                                    debouncedSearchText = newValue
+                                }
+                            }
+                            .onDisappear { searchDebounceTask?.cancel() }
+                        if !searchText.isEmpty {
+                            Button {
+                                searchText = ""
+                            } label: {
+                                Image(systemName: "xmark.circle.fill")
+                                    .foregroundStyle(.secondary)
+                                    .font(.subheadline)
+                            }
+                            .buttonStyle(.plain)
+                            .transition(.scale.combined(with: .opacity))
+                        }
                     }
-                    .padding(10)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 9)
                     .background(Color(.tertiarySystemFill))
                     .clipShape(RoundedRectangle(cornerRadius: 10))
-                    .padding(.horizontal)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10)
+                            .stroke(Color(.separator).opacity(0.12), lineWidth: 0.75)
+                    )
+                    .padding(.horizontal, 16)
                     .padding(.vertical, 8)
+                    .animation(.spring(response: 0.3, dampingFraction: 0.8), value: searchText.isEmpty)
                 }
 
-                if filteredCards.isEmpty {
-                    Spacer()
-                    VStack(spacing: 16) {
-                        Image(systemName: "person.crop.rectangle.stack")
-                            .font(.system(size: 48)).foregroundStyle(.secondary)
-                        Text("尚無名片").font(.headline).foregroundStyle(.secondary)
-                        Text("點擊右上角 + 新增名片").font(.subheadline).foregroundStyle(.tertiary)
-                    }
-                    Spacer()
+                if cards.isEmpty {
+                    // 改版空狀態（雙層脈衝光環 + CTA 按鈕）
+                    emptyStateView
                 } else {
                     List {
-                        ForEach(groupedByCompany, id: \.key) { company, cards in
-                            Section(header: Text(company)) {
-                                ForEach(cards) { card in
+                        // 英雄摘要卡（僅在非搜尋狀態 + 有名片時顯示）
+                        if searchText.isEmpty {
+                            Section {
+                                summaryHeader
+                                    .listRowInsets(EdgeInsets())
+                                    .listRowBackground(Color.clear)
+                                    .listRowSeparator(.hidden)
+                            }
+                        }
+
+                        // 各公司分組（加入交錯進場動畫）
+                        ForEach(Array(groupedByCompany(cards).enumerated()), id: \.element.key) { sectionIdx, pair in
+                            let (company, cards) = pair
+                            Section(header: companyHeader(company, cards)) {
+                                ForEach(Array(cards.enumerated()), id: \.element.id) { rowIdx, card in
                                     HStack(spacing: 12) {
                                         if isMultiSelect {
                                             Image(systemName: selectedIds.contains(card.id)
@@ -487,7 +789,7 @@ struct BusinessCardView: View {
                                         withAnimation { isMultiSelect = true }
                                         selectedIds = [card.id]
                                     }
-                                    .swipeActions(edge: .trailing) {
+                                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                                         if !isMultiSelect {
                                             Button(role: .destructive) {
                                                 if subscription.isPremium { lifeStore.deleteBusinessCard(card) }
@@ -501,11 +803,28 @@ struct BusinessCardView: View {
                                             .tint(.blue)
                                         }
                                     }
+                                    // 交錯淡入 + 向上進場動畫
+                                    .opacity(cardsAppeared ? 1 : 0)
+                                    .offset(y: cardsAppeared ? 0 : 12)
+                                    .animation(
+                                        .spring(response: 0.44, dampingFraction: 0.82)
+                                            .delay(0.04 * Double(min(sectionIdx * 3 + rowIdx, 14))),
+                                        value: cardsAppeared
+                                    )
                                 }
                             }
                         }
                     }
                     .listStyle(.insetGrouped)
+                    .scrollContentBackground(.hidden)
+                    .onAppear {
+                        withAnimation(.spring(response: 0.5, dampingFraction: 0.82).delay(0.05)) {
+                            cardsAppeared = true
+                        }
+                    }
+                    .onDisappear {
+                        cardsAppeared = false
+                    }
                 }
             }
             .background(Color(.systemGroupedBackground))
@@ -527,10 +846,10 @@ struct BusinessCardView: View {
                     ToolbarItem(placement: .topBarTrailing) {
                         HStack(spacing: 12) {
                             Button {
-                                let all = Set(filteredCards.map { $0.id })
+                                let all = Set(cards.map { $0.id })
                                 selectedIds = (selectedIds == all) ? [] : all
                             } label: {
-                                Image(systemName: selectedIds.count == filteredCards.count && !filteredCards.isEmpty
+                                Image(systemName: selectedIds.count == cards.count && !cards.isEmpty
                                       ? "checkmark.circle.fill" : "checklist")
                                     .foregroundStyle(.blue)
                             }
@@ -668,112 +987,175 @@ struct BusinessCardView: View {
         }
     }
 
-    /// 列表 row：頭像 + 姓名/職稱 + 公司/部門 + 聯絡方式列 + 日期
+    // 【美化方向 v25.80】cardRow 姓名補齊 .minimumScaleFactor 防截斷：
+    // card.name 是使用者掃描/自填、長度不可控的欄位，同檔案 BusinessCardDetailView.heroCard（下方
+    // 約 1500 行）顯示同一欄位早已用 .lineLimit(2) + .minimumScaleFactor(0.7) 防護，本列表 row 卻只有
+    // .lineLimit(1) 沒有縮放保護，輔助模式大字級下姓名偏長時會直接被省略號截斷、而非跟 heroCard 一樣先縮小顯示。
+    /// 列表 row：52pt 頭像圓角方形 + 姓名 / Capsule 職稱 / 公司部門 / 聯絡方式 + 日期
     private func cardRow(_ card: BusinessCard) -> some View {
-        HStack(alignment: .top, spacing: 12) {
+        let accent = Color(red: 1.00, green: 0.55, blue: 0.25)
+        let hasContact = !card.phones.isEmpty || !card.emails.isEmpty
+        let primaryPhone = card.phones.first ?? card.phone
+        let primaryEmail = card.emails.first ?? card.email
+
+        return HStack(alignment: .top, spacing: 12) {
             avatarView(card)
 
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 5) {
+                // 姓名 + 職稱 Capsule 膠囊
                 HStack(spacing: 6) {
                     Text(card.name.isEmpty ? "未命名" : card.name)
                         .font(.subheadline.weight(.semibold))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
                     if !card.jobTitle.isEmpty {
                         Text(card.jobTitle)
-                            .font(.caption2)
-                            .padding(.horizontal, 5).padding(.vertical, 1)
-                            .background(Color.blue.opacity(0.12))
+                            .font(.system(size: 10, weight: .semibold))
                             .foregroundStyle(.blue)
-                            .clipShape(RoundedRectangle(cornerRadius: 3))
+                            .padding(.horizontal, 6).padding(.vertical, 2.5)
+                            .background(Color.blue.opacity(0.10))
+                            .clipShape(Capsule())
+                            // v2：補 stroke 讓膠囊輪廓更立體
+                            .overlay(Capsule().stroke(Color.blue.opacity(0.22), lineWidth: 0.6))
+                            .lineLimit(1)
                     }
                 }
+
+                // 公司 · 部門
                 if !card.company.isEmpty || !card.department.isEmpty {
                     HStack(spacing: 4) {
                         if !card.company.isEmpty {
-                            Text(card.company).font(.caption)
+                            Text(card.company)
+                                .font(.caption)
                                 .foregroundStyle(.secondary)
                                 .lineLimit(1)
                         }
                         if !card.company.isEmpty && !card.department.isEmpty {
-                            Text("·").foregroundStyle(.tertiary)
+                            Text("·").font(.caption).foregroundStyle(.tertiary)
                         }
                         if !card.department.isEmpty {
-                            Text(card.department).font(.caption)
+                            Text(card.department)
+                                .font(.caption)
                                 .foregroundStyle(.secondary)
                                 .lineLimit(1)
                         }
                     }
                 }
-                if !card.phone.isEmpty || !card.email.isEmpty {
-                    HStack(spacing: 10) {
-                        if !card.phone.isEmpty {
-                            HStack(spacing: 3) {
+
+                // 聯絡方式（phone + email 各一行）
+                if hasContact || !card.address.isEmpty {
+                    VStack(alignment: .leading, spacing: 2) {
+                        if !primaryPhone.isEmpty {
+                            HStack(spacing: 4) {
                                 Image(systemName: "phone.fill")
                                     .font(.system(size: 9))
-                                Text(card.phone).font(.caption2)
+                                Text(primaryPhone)
+                                    .font(.caption2)
+                                    .lineLimit(1)
                             }
                             .foregroundStyle(.green)
                         }
-                        if !card.email.isEmpty {
-                            HStack(spacing: 3) {
+                        if !primaryEmail.isEmpty {
+                            HStack(spacing: 4) {
                                 Image(systemName: "envelope.fill")
                                     .font(.system(size: 9))
-                                Text(card.email).font(.caption2).lineLimit(1)
+                                Text(primaryEmail)
+                                    .font(.caption2)
+                                    .lineLimit(1)
                             }
                             .foregroundStyle(.indigo)
                         }
-                    }
-                }
-                if !card.address.isEmpty {
-                    HStack(spacing: 3) {
-                        Image(systemName: "mappin.and.ellipse")
-                            .font(.system(size: 9))
-                        Text(card.address).font(.caption2)
-                            .foregroundStyle(.tertiary)
-                            .lineLimit(1)
+                        if !card.address.isEmpty && primaryPhone.isEmpty && primaryEmail.isEmpty {
+                            HStack(spacing: 4) {
+                                Image(systemName: "mappin.and.ellipse")
+                                    .font(.system(size: 9))
+                                Text(card.address)
+                                    .font(.caption2)
+                                    .foregroundStyle(.tertiary)
+                                    .lineLimit(1)
+                            }
+                        }
                     }
                 }
             }
-            Spacer()
+
+            Spacer(minLength: 4)
+
+            // 右側：日期膠囊 + 箭頭
             VStack(alignment: .trailing, spacing: 4) {
+                // v2：plain caption2 → Capsule 日期膠囊
                 Text(fmtDate(card.date))
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(.secondary.opacity(0.7))
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 3)
+                    .background(Color(.quaternarySystemFill))
+                    .clipShape(Capsule())
                 Image(systemName: "chevron.right")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(Color(.tertiaryLabel))
             }
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, 6)
     }
 
+    // 52pt 圓角頭像：有照片則顯示照片 + 細邊框；無照片則顯示首字母漸層圓角方塊
     @ViewBuilder
     private func avatarView(_ card: BusinessCard) -> some View {
-        if let url = card.photoURL,
-           let img = UIImage(contentsOfFile: url.path) {
-            Image(uiImage: img)
-                .resizable()
-                .scaledToFill()
-                .frame(width: 48, height: 48)
-                .clipShape(RoundedRectangle(cornerRadius: 10))
-        } else {
-            let initial = String((card.name.isEmpty ? card.company : card.name).prefix(1))
-            ZStack {
-                RoundedRectangle(cornerRadius: 10)
-                    .fill(LinearGradient(
-                        colors: [.orange, .pink.opacity(0.8)],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    ))
-                    .frame(width: 48, height: 48)
-                Text(initial)
-                    .font(.title3.bold())
-                    .foregroundStyle(.white)
+        if let url = card.photoURL {
+            AsyncLocalImage(url: url) { img, _ in
+                if let img {
+                    Image(uiImage: img)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: 52, height: 52)
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12)
+                                .stroke(Color(.separator).opacity(0.25), lineWidth: 0.75)
+                        )
+                        .shadow(color: .black.opacity(0.12), radius: 4, x: 0, y: 2)
+                } else {
+                    avatarPlaceholder(card)
+                }
             }
+        } else {
+            avatarPlaceholder(card)
         }
     }
 
+    private func avatarPlaceholder(_ card: BusinessCard) -> some View {
+        let initial = String((card.name.isEmpty ? card.company : card.name).prefix(1))
+        return ZStack {
+            RoundedRectangle(cornerRadius: 12)
+                .fill(
+                    LinearGradient(
+                        colors: [
+                            Color(red: 1.00, green: 0.62, blue: 0.32),
+                            Color(red: 0.90, green: 0.30, blue: 0.60)
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+                .frame(width: 52, height: 52)
+                .shadow(color: Color(red: 0.90, green: 0.30, blue: 0.60).opacity(0.28), radius: 6, x: 0, y: 3)
+            Text(initial)
+                .font(.system(size: 20, weight: .bold, design: .rounded))
+                .foregroundStyle(.white)
+            // v2：補白色邊框讓無照片頭像更立體
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(.white.opacity(0.30), lineWidth: 0.75)
+                .frame(width: 52, height: 52)
+        }
+    }
+
+    private static let cardDateFormatter: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "yyyy/M/d"; return f
+    }()
+
     private func fmtDate(_ date: Date) -> String {
-        let f = DateFormatter(); f.dateFormat = "yyyy/M/d"; return f.string(from: date)
+        Self.cardDateFormatter.string(from: date)
     }
 
     // MARK: - 複製名片
@@ -906,6 +1288,28 @@ struct BusinessCardView: View {
     }
 }
 
+// MARK: - 美化紀錄（BusinessCardDetailView）
+// [2026-06 v2] 本次美化方向（BusinessCardDetailView — 名片詳細頁）：
+//   1. heroCard：background 升級為 ZStack（原漸層 + 兩顆散景裝飾圓），製造立體層次感，
+//      對齊 FinanceOverviewView.totalAssetsCard / OverviewView.monthlyBalanceCard 規格；
+//      shadow 從 .black.opacity(0.2) 升級為雙層 shadow（橘色主光暈 + 黑色基礎陰影），
+//      加入 cardAppeared spring 進場動畫（opacity + Y 位移），
+//      對齊 VehicleDetailView.flashCard / StockDetailView 進場規格。
+//   2. contactCard：加入 section header（Capsule 漸層側條 + "聯絡方式" + 計數膠囊），
+//      對齊 LifeOverviewView / CareerView.milestoneListSection 標題規格；
+//      Divider().padding(.leading,48) → Rectangle(.separator.opacity(0.20)) 0.5pt 細分隔線；
+//      容器加 overlay 細邊框 + 雙層陰影，對齊 VariableExpenseView / StockDetailView 卡片規格。
+//   3. contactRow：圖示圓 32pt → 36pt + LinearGradient(opacity:0.22→0.09) + stroke(opacity:0.22),
+//      對齊 FamilyMembersResumeView / IncomeView.incomeRow 圖示圓規格。
+//   4. metaCard：容器加 overlay 細邊框 + 雙層陰影；cornerRadius 16 → 14。
+//   5. metaRow：圖示圓 32pt → 36pt + LinearGradient + stroke，對齊 contactRow 規格。
+//   6. noteCard：加入 section header（Capsule 漸層側條 + "備註"），
+//      對齊全 App section 標題設計語言；容器加 overlay + shadow，對齊 noteCard 統一規格。
+// [2026-07 v3] 一致性小步美化：
+//   7. qrFullscreenView「關閉」按鈕：topBarTrailing → topBarLeading，
+//      對齊本檔案 BusinessCardDetailView 主頁與全 App「關閉／取消」一律置左的慣例
+//      （下次美化本檔案時，可從這裡接著找其他可統一之處）
+
 // MARK: - 名片詳細頁（點 row 開啟）
 
 struct BusinessCardDetailView: View {
@@ -925,8 +1329,14 @@ struct BusinessCardDetailView: View {
     @State private var showPhotosPicker = false
     @State private var showAvatarLightbox = false
     @State private var pickerItem: PhotosPickerItem?
+    // 選取頭像是非同步的（iCloud 圖片可能要等幾秒），若使用者在等待期間又重新選了一次
+    // （或改用拍照），較慢完成的前一次選取不該覆蓋較新的結果；用世代編號判斷完成時是否
+    // 仍是最新一次選取（同型修復見 OrgPersonEditor.photoLoadGeneration）。
+    @State private var avatarLoadGeneration = 0
     @State private var showQRFullscreen = false
     @State private var viewingLinkedOrgPersonId: UUID?
+    // 美化：英雄卡片進場動畫旗標（對齊 VehicleDetailView.flashCard / RealEstateDetailView 規格）
+    @State private var cardAppeared = false
 
     private var card: BusinessCard {
         lifeStore.businessCards.first(where: { $0.id == cardId })
@@ -1111,18 +1521,21 @@ struct BusinessCardDetailView: View {
         .padding(20)
         .frame(maxWidth: .infinity, alignment: .leading)
         .frame(minHeight: 200)
-        .background(
-            LinearGradient(
-                colors: [Color.orange, Color.pink.opacity(0.85), Color.purple.opacity(0.7)],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 18))
-        .shadow(color: .black.opacity(0.2), radius: 8, y: 4)
+        .heroCardShell(card: .businessCardDetail)
         .padding(.horizontal)
+        // 英雄卡片進場動畫（對齊 VehicleDetailView.flashCard / StockDetailView 進場規格）
+        .opacity(cardAppeared ? 1 : 0)
+        .offset(y: cardAppeared ? 0 : 22)
+        .onAppear {
+            withAnimation(.spring(response: 0.52, dampingFraction: 0.78)) {
+                cardAppeared = true
+            }
+        }
         .sheet(isPresented: $showCamera) {
             CameraPicker { image in
+                // 讓任何仍在進行中的相簿選取 Task 過期，避免它稍後才完成、
+                // 把剛拍好的頭像又蓋回相簿選的舊結果。
+                avatarLoadGeneration += 1
                 if let data = image.jpegData(compressionQuality: 0.85) {
                     saveAvatarData(data)
                 }
@@ -1131,9 +1544,14 @@ struct BusinessCardDetailView: View {
         }
         .photosPicker(isPresented: $showPhotosPicker, selection: $pickerItem, matching: .images)
         .onChange(of: pickerItem) { _, item in
+            avatarLoadGeneration += 1
+            let generation = avatarLoadGeneration
             Task {
                 guard let item, let data = try? await item.loadTransferable(type: Data.self) else { return }
                 await MainActor.run {
+                    // 若載入期間使用者又重選了一次（或改用拍照），這次結果已過期，不套用，
+                    // 避免較慢完成的舊選取覆蓋掉使用者實際想要的較新選取。
+                    guard generation == avatarLoadGeneration else { return }
                     saveAvatarData(data)
                     pickerItem = nil
                 }
@@ -1185,22 +1603,20 @@ struct BusinessCardDetailView: View {
     @ViewBuilder
     private var avatarContent: some View {
         ZStack {
-            if let url = card.photoURL,
-               let img = UIImage(contentsOfFile: url.path) {
-                Image(uiImage: img)
-                    .resizable()
-                    .scaledToFill()
-                    .frame(width: 76, height: 76)
-                    .clipShape(RoundedRectangle(cornerRadius: 14))
+            if let url = card.photoURL {
+                AsyncLocalImage(url: url) { img, _ in
+                    if let img {
+                        Image(uiImage: img)
+                            .resizable()
+                            .scaledToFill()
+                            .frame(width: 76, height: 76)
+                            .clipShape(RoundedRectangle(cornerRadius: 14))
+                    } else {
+                        avatarPlaceholder
+                    }
+                }
             } else {
-                RoundedRectangle(cornerRadius: 14)
-                    .fill(Color.white.opacity(0.2))
-                    .frame(width: 76, height: 76)
-                    .overlay(
-                        Image(systemName: "person.crop.rectangle.fill")
-                            .font(.system(size: 36))
-                            .foregroundStyle(.white.opacity(0.85))
-                    )
+                avatarPlaceholder
             }
             // 右下角小相機圖示提示可點選
             VStack {
@@ -1219,6 +1635,17 @@ struct BusinessCardDetailView: View {
             RoundedRectangle(cornerRadius: 14)
                 .stroke(Color.white.opacity(0.5), lineWidth: 1)
         )
+    }
+
+    private var avatarPlaceholder: some View {
+        RoundedRectangle(cornerRadius: 14)
+            .fill(Color.white.opacity(0.2))
+            .frame(width: 76, height: 76)
+            .overlay(
+                Image(systemName: "person.crop.rectangle.fill")
+                    .font(.system(size: 36))
+                    .foregroundStyle(.white.opacity(0.85))
+            )
     }
 
     // MARK: - QR Code
@@ -1274,7 +1701,7 @@ struct BusinessCardDetailView: View {
             .navigationTitle("名片 QR Code")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItem(placement: .topBarLeading) {
                     Button("關閉") { showQRFullscreen = false }
                 }
             }
@@ -1286,7 +1713,10 @@ struct BusinessCardDetailView: View {
     private func saveAvatarData(_ data: Data) {
         guard var c = lifeStore.businessCards.first(where: { $0.id == cardId }) else { return }
         if let oldName = c.photoFileName { BusinessCard.deletePhoto(oldName) }
-        c.photoFileName = BusinessCard.savePhoto(data, id: c.id)
+        // 檔名用全新 UUID（而非沿用不變的 card id），確保換頭像後 photoURL 一定改變，
+        // 讓清單列（AsyncLocalImage 依 url 快取讀取結果）能重新讀取新照片，
+        // 不會因新照片覆寫同一路徑而讓已載入過的舊圖快取停留在畫面上。
+        c.photoFileName = BusinessCard.savePhoto(data, id: UUID())
         lifeStore.update(c)
     }
 
@@ -1355,52 +1785,95 @@ struct BusinessCardDetailView: View {
     }
 
     private var contactCard: some View {
-        VStack(spacing: 0) {
-            ForEach(Array(card.phones.enumerated()), id: \.offset) { idx, ph in
-                contactRow(
-                    icon: "phone.fill",
-                    label: card.phones.count > 1 ? "電話 \(idx + 1)" : "電話",
-                    value: ph,
-                    color: .green
-                ) { callPhone(ph) }
-                if idx < card.phones.count - 1 || !card.faxes.isEmpty || !card.emails.isEmpty || !card.address.isEmpty {
-                    Divider().padding(.leading, 48)
+        let count = card.phones.count + card.faxes.count + card.emails.count + (card.address.isEmpty ? 0 : 1)
+        return VStack(alignment: .leading, spacing: 10) {
+            // 聯絡方式 section header（Capsule 側條 + 標題 + 計數膠囊，對齊 CareerView.milestoneListSection 規格）
+            HStack(spacing: 8) {
+                Capsule()
+                    .fill(
+                        LinearGradient(
+                            colors: [.green, .green.opacity(0.55)],
+                            startPoint: .top, endPoint: .bottom
+                        )
+                    )
+                    .frame(width: 4, height: 18)
+                Text("聯絡方式")
+                    .font(.subheadline.weight(.bold))
+                Spacer()
+                if count > 0 {
+                    Text("\(count) 項")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.green)
+                        .padding(.horizontal, 8).padding(.vertical, 3)
+                        .background(Color.green.opacity(0.10))
+                        .clipShape(Capsule())
+                        .overlay(Capsule().stroke(Color.green.opacity(0.22), lineWidth: 0.75))
                 }
             }
-            ForEach(Array(card.faxes.enumerated()), id: \.offset) { idx, fx in
-                contactRow(
-                    icon: "printer.fill",
-                    label: card.faxes.count > 1 ? "傳真 \(idx + 1)" : "傳真",
-                    value: fx,
-                    color: .gray
-                ) {
-                    // 傳真不支援撥號，改為複製到剪貼簿
-                    UIPasteboard.general.string = fx
+            .padding(.horizontal)
+
+            VStack(spacing: 0) {
+                ForEach(Array(card.phones.enumerated()), id: \.offset) { idx, ph in
+                    contactRow(
+                        icon: "phone.fill",
+                        label: card.phones.count > 1 ? "電話 \(idx + 1)" : "電話",
+                        value: ph,
+                        color: .green
+                    ) { callPhone(ph) }
+                    if idx < card.phones.count - 1 || !card.faxes.isEmpty || !card.emails.isEmpty || !card.address.isEmpty {
+                        // 細分隔線（對齊 VehicleDetailView / FinanceOverviewView 卡片分隔規格）
+                        Rectangle()
+                            .fill(Color(.separator).opacity(0.20))
+                            .frame(height: 0.5)
+                            .padding(.leading, 62)
+                    }
                 }
-                if idx < card.faxes.count - 1 || !card.emails.isEmpty || !card.address.isEmpty {
-                    Divider().padding(.leading, 48)
+                ForEach(Array(card.faxes.enumerated()), id: \.offset) { idx, fx in
+                    contactRow(
+                        icon: "printer.fill",
+                        label: card.faxes.count > 1 ? "傳真 \(idx + 1)" : "傳真",
+                        value: fx,
+                        color: .gray
+                    ) {
+                        // 傳真不支援撥號，改為複製到剪貼簿
+                        UIPasteboard.general.string = fx
+                    }
+                    if idx < card.faxes.count - 1 || !card.emails.isEmpty || !card.address.isEmpty {
+                        Rectangle()
+                            .fill(Color(.separator).opacity(0.20))
+                            .frame(height: 0.5)
+                            .padding(.leading, 62)
+                    }
+                }
+                ForEach(Array(card.emails.enumerated()), id: \.offset) { idx, em in
+                    contactRow(
+                        icon: "envelope.fill",
+                        label: card.emails.count > 1 ? "Email \(idx + 1)" : "Email",
+                        value: em,
+                        color: .indigo
+                    ) { sendEmail(em) }
+                    if idx < card.emails.count - 1 || !card.address.isEmpty {
+                        Rectangle()
+                            .fill(Color(.separator).opacity(0.20))
+                            .frame(height: 0.5)
+                            .padding(.leading, 62)
+                    }
+                }
+                if !card.address.isEmpty {
+                    contactRow(icon: "mappin.and.ellipse", label: "地址", value: card.address, color: .red) {
+                        openInMaps(card.address)
+                    }
                 }
             }
-            ForEach(Array(card.emails.enumerated()), id: \.offset) { idx, em in
-                contactRow(
-                    icon: "envelope.fill",
-                    label: card.emails.count > 1 ? "Email \(idx + 1)" : "Email",
-                    value: em,
-                    color: .indigo
-                ) { sendEmail(em) }
-                if idx < card.emails.count - 1 || !card.address.isEmpty {
-                    Divider().padding(.leading, 48)
-                }
-            }
-            if !card.address.isEmpty {
-                contactRow(icon: "mappin.and.ellipse", label: "地址", value: card.address, color: .red) {
-                    openInMaps(card.address)
-                }
-            }
+            .background(Color(.systemBackground))
+            .clipShape(RoundedRectangle(cornerRadius: 14))
+            .overlay(
+                RoundedRectangle(cornerRadius: 14)
+                    .stroke(Color(.separator).opacity(0.12), lineWidth: 0.75)
+            )
+            .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 3)
+            .padding(.horizontal)
         }
-        .background(Color(.systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 16))
-        .padding(.horizontal)
     }
 
     private func contactRow(icon: String, label: String, value: String,
@@ -1408,7 +1881,16 @@ struct BusinessCardDetailView: View {
         Button(action: action) {
             HStack(spacing: 14) {
                 ZStack {
-                    Circle().fill(color.opacity(0.14)).frame(width: 32, height: 32)
+                    // 美化：36pt LinearGradient 圖示圓 + stroke（對齊 FamilyMembersResumeView / IncomeView.incomeRow 規格）
+                    Circle()
+                        .fill(
+                            LinearGradient(
+                                colors: [color.opacity(0.22), color.opacity(0.09)],
+                                startPoint: .topLeading, endPoint: .bottomTrailing
+                            )
+                        )
+                        .frame(width: 36, height: 36)
+                        .overlay(Circle().stroke(color.opacity(0.22), lineWidth: 0.75))
                     Image(systemName: icon).font(.subheadline).foregroundStyle(color)
                 }
                 VStack(alignment: .leading, spacing: 2) {
@@ -1433,14 +1915,28 @@ struct BusinessCardDetailView: View {
             metaRow(icon: "calendar", label: "收集日期", value: fmtDate(card.date), color: .gray)
         }
         .background(Color(.systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14)
+                .stroke(Color(.separator).opacity(0.12), lineWidth: 0.75)
+        )
+        .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 3)
         .padding(.horizontal)
     }
 
     private func metaRow(icon: String, label: String, value: String, color: Color) -> some View {
         HStack(spacing: 14) {
             ZStack {
-                Circle().fill(color.opacity(0.14)).frame(width: 32, height: 32)
+                // 美化：36pt LinearGradient 圖示圓 + stroke（對齊 contactRow 規格）
+                Circle()
+                    .fill(
+                        LinearGradient(
+                            colors: [color.opacity(0.22), color.opacity(0.09)],
+                            startPoint: .topLeading, endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 36, height: 36)
+                    .overlay(Circle().stroke(color.opacity(0.22), lineWidth: 0.75))
                 Image(systemName: icon).font(.subheadline).foregroundStyle(color)
             }
             Text(label).font(.subheadline).foregroundStyle(.secondary)
@@ -1453,17 +1949,37 @@ struct BusinessCardDetailView: View {
     // MARK: - 備註
 
     private var noteCard: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("備註")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 10) {
+            // 備註 section header（Capsule 漸層側條 + 標題，對齊全 App section 標題設計語言）
+            HStack(spacing: 8) {
+                Capsule()
+                    .fill(
+                        LinearGradient(
+                            colors: [.orange, .orange.opacity(0.55)],
+                            startPoint: .top, endPoint: .bottom
+                        )
+                    )
+                    .frame(width: 4, height: 18)
+                Text("備註")
+                    .font(.subheadline.weight(.bold))
+                Spacer()
+            }
+            .padding(.horizontal)
+
             Text(card.note)
                 .font(.subheadline)
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal)
+                .padding(.bottom, 16)
         }
-        .padding()
+        .padding(.top, 14)
         .background(Color(.systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14)
+                .stroke(Color(.separator).opacity(0.12), lineWidth: 0.75)
+        )
+        .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 3)
         .padding(.horizontal)
     }
 
@@ -1496,8 +2012,12 @@ struct BusinessCardDetailView: View {
         openURL(url)
     }
 
+    private static let detailDateFormatter: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "yyyy/M/d"; return f
+    }()
+
     private func fmtDate(_ date: Date) -> String {
-        let f = DateFormatter(); f.dateFormat = "yyyy/M/d"; return f.string(from: date)
+        Self.detailDateFormatter.string(from: date)
     }
 }
 
@@ -1507,7 +2027,24 @@ struct IdentifiableUUID: Identifiable {
     let id: UUID
 }
 
-// MARK: - 名片編輯
+// MARK: - 美化紀錄（BusinessCardEditor）
+// [2026-07 v1] 本次美化方向（BusinessCardEditor — 新增／編輯名片表單）：
+//   1. Section header：6 個 Section（基本資訊／電話／Email／傳真／地址／其他）原本全用系統
+//      預設純文字 Section("...")，與同檔案 BusinessCardDetailView.contactCard／noteCard、
+//      OrganizationView.orgPersonEditorSectionHeader／ChildDetailView.childEditorSectionHeader／
+//      ResumeView.profileEditorSectionHeader 等全 App 編輯表單「4pt 漸層 Capsule 側條 + 圖示 +
+//      粗體標題」規格脫節。新增 businessCardEditorSectionHeader(_:icon:color:)，依內容給主題色
+//      （基本資訊＝indigo／電話＝blue／Email＝purple／傳真＝orange／地址＝teal／其他＝secondary）；
+//      刪除名片 Section 維持無標頭，對齊全 App 編輯表單「刪除區塊不加標頭」慣例。
+//   純視覺層調整，欄位資料綁定、OCR 預填／編輯載入、新增刪除電話與 Email／save() 等既有商業
+//   邏輯完全未變動。
+// [2026-08 v2] save() 自帶 isSaving 忙碌守衛（disabled(...||isSaving)）避免快速連點造成重複
+//   名片紀錄，但按鈕本身在存檔期間毫無視覺提示——v25.103 曾記錄「v25.96 起儲存按鈕載入狀態
+//   補齊清單全數完成」，複查後發現本檔案的 BusinessCardEditor 其實不在當時清單內，是唯一仍
+//   缺這道規格的新增／編輯表單儲存按鈕。補上 HStack { if isSaving { ProgressView()
+//   .scaleEffect(0.7).tint(.green) }；Button(...) }，對齊 ResumeView／ChildDetailView／
+//   MyCalendarView／LifeFinanceView 等既有儲存按鈕載入狀態規格。純視覺層調整，save() 內部
+//   守衛判斷與電話/Email 陣列寫入、聯絡人建立等既有商業邏輯完全未變動。
 
 struct BusinessCardEditor: View {
     @EnvironmentObject var lifeStore: LifeStore
@@ -1530,22 +2067,45 @@ struct BusinessCardEditor: View {
     @State private var address = ""
     @State private var note = ""
     @State private var date = Date()
+    /// 存檔中鎖住儲存按鈕，避免 sheet 收合動畫播完前快速連點建立兩筆重複紀錄
+    @State private var isSaving = false
+
+    // [2026-07 v1] 對齊 OrganizationView.orgPersonEditorSectionHeader / ChildDetailView.
+    // childEditorSectionHeader 既有共用寫法（4pt 漸層 Capsule 色條 + 圖示 + .subheadline.semibold 標題）。
+    private func businessCardEditorSectionHeader(_ title: String, icon: String, color: Color) -> some View {
+        HStack(spacing: 7) {
+            Capsule()
+                .fill(LinearGradient(colors: [color, color.opacity(0.70)], startPoint: .top, endPoint: .bottom))
+                .frame(width: 4, height: 18)
+            Image(systemName: icon)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(color)
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.primary)
+        }
+    }
 
     var body: some View {
         NavigationStack {
             Form {
-                Section("基本資訊") {
+                Section {
                     TextField("姓名", text: $name)
                     TextField("公司名稱", text: $company)
                     TextField("部門", text: $department)
                     TextField("職稱", text: $jobTitle)
                     TextField("主要業務（可搜尋）", text: $primaryBusiness)
+                } header: {
+                    businessCardEditorSectionHeader("基本資訊", icon: "person.text.rectangle.fill", color: .indigo)
                 }
-                Section("電話") {
+                Section {
                     ForEach(phones.indices, id: \.self) { idx in
                         HStack {
                             TextField("電話 \(phones.count > 1 ? "\(idx + 1)" : "")",
-                                      text: $phones[idx])
+                                      text: Binding(
+                                          get: { idx < phones.count ? phones[idx] : "" },
+                                          set: { if idx < phones.count { phones[idx] = $0 } }
+                                      ))
                                 .keyboardType(.phonePad)
                             if phones.count > 1 {
                                 Button(role: .destructive) {
@@ -1563,13 +2123,18 @@ struct BusinessCardEditor: View {
                     } label: {
                         Label("新增電話", systemImage: "plus.circle").foregroundStyle(.green)
                     }
+                } header: {
+                    businessCardEditorSectionHeader("電話", icon: "phone.fill", color: .blue)
                 }
 
-                Section("Email") {
+                Section {
                     ForEach(emails.indices, id: \.self) { idx in
                         HStack {
                             TextField("Email \(emails.count > 1 ? "\(idx + 1)" : "")",
-                                      text: $emails[idx])
+                                      text: Binding(
+                                          get: { idx < emails.count ? emails[idx] : "" },
+                                          set: { if idx < emails.count { emails[idx] = $0 } }
+                                      ))
                                 .keyboardType(.emailAddress)
                                 .autocapitalization(.none)
                                 .disableAutocorrection(true)
@@ -1589,13 +2154,18 @@ struct BusinessCardEditor: View {
                     } label: {
                         Label("新增 Email", systemImage: "plus.circle").foregroundStyle(.green)
                     }
+                } header: {
+                    businessCardEditorSectionHeader("Email", icon: "envelope.fill", color: .purple)
                 }
 
-                Section("傳真") {
+                Section {
                     ForEach(faxes.indices, id: \.self) { idx in
                         HStack {
                             TextField("傳真 \(faxes.count > 1 ? "\(idx + 1)" : "")",
-                                      text: $faxes[idx])
+                                      text: Binding(
+                                          get: { idx < faxes.count ? faxes[idx] : "" },
+                                          set: { if idx < faxes.count { faxes[idx] = $0 } }
+                                      ))
                                 .keyboardType(.phonePad)
                             Button(role: .destructive) {
                                 faxes.remove(at: idx)
@@ -1611,14 +2181,20 @@ struct BusinessCardEditor: View {
                     } label: {
                         Label("新增傳真", systemImage: "plus.circle").foregroundStyle(.green)
                     }
+                } header: {
+                    businessCardEditorSectionHeader("傳真", icon: "printer.fill", color: .orange)
                 }
 
-                Section("地址") {
+                Section {
                     TextField("地址", text: $address)
+                } header: {
+                    businessCardEditorSectionHeader("地址", icon: "mappin.circle.fill", color: .teal)
                 }
-                Section("其他") {
+                Section {
                     DatePicker("收集日期", selection: $date, displayedComponents: .date)
                     TextField("備註", text: $note, axis: .vertical).lineLimit(2...5)
+                } header: {
+                    businessCardEditorSectionHeader("其他", icon: "text.bubble.fill", color: .secondary)
                 }
                 if editing != nil {
                     Section {
@@ -1634,9 +2210,15 @@ struct BusinessCardEditor: View {
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button("取消") { dismiss() } }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button(editing != nil ? "儲存" : "新增") { save() }
-                        .bold().foregroundStyle(.green)
-                        .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
+                    // v25.145 美化：isSaving 忙碌守衛補齊載入視覺，對齊全 App 儲存按鈕載入狀態規格。
+                    HStack(spacing: 6) {
+                        if isSaving {
+                            ProgressView().scaleEffect(0.7).tint(.green)
+                        }
+                        Button(editing != nil ? "儲存" : "新增") { save() }
+                            .bold().foregroundStyle(.green)
+                            .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty || isSaving)
+                    }
                 }
             }
             .onAppear {
@@ -1651,6 +2233,9 @@ struct BusinessCardEditor: View {
                     note = p.note
                     date = editing?.date ?? Date()
                     department = editing?.department ?? ""
+                    // OCR 重新掃描抓不到「主要往來」，沿用 date／department 的既有寫法一併保留，
+                    // 否則重新拍照辨識存檔會把原本已填的主要往來靜默清空。
+                    primaryBusiness = editing?.primaryBusiness ?? ""
                 } else if let e = editing {
                     name = e.name; company = e.company; department = e.department
                     jobTitle = e.jobTitle
@@ -1665,6 +2250,8 @@ struct BusinessCardEditor: View {
     }
 
     private func save() {
+        guard !isSaving else { return }
+        isSaving = true
         let id = editing?.id ?? UUID()
         // 新增 / 重新拍照辨識：有新的掃描照片時就用它，並把舊照片刪掉
         var photoFileName = editing?.photoFileName
@@ -1672,7 +2259,10 @@ struct BusinessCardEditor: View {
             if let oldName = photoFileName {
                 BusinessCard.deletePhoto(oldName)
             }
-            photoFileName = BusinessCard.savePhoto(data, id: id)
+            // 檔名用全新 UUID（而非沿用編輯中卡片不變的 id），理由同
+            // BusinessCardDetailView.saveAvatarData：避免同路徑覆寫造成
+            // AsyncLocalImage 快取的舊圖不更新。
+            photoFileName = BusinessCard.savePhoto(data, id: UUID())
         }
         let cleanedPhones = phones
             .map { $0.trimmingCharacters(in: .whitespaces) }
