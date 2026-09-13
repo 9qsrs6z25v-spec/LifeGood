@@ -1417,6 +1417,20 @@ struct AddMilestoneView: View {
     @State private var bankAccType: BankAccountType = .savings
     @State private var cardName = ""
     @State private var cardLastFour = ""
+    // [v25.368] 完整卡號／檢核碼：畫面上編輯明碼，存檔時才交給 CardVault 加密
+    /// 顯示用的卡號字串（含自動插入的「-」）
+    @State private var cardNumberInput = ""
+    /// 既有紀錄的卡號密文；沒解鎖前不會被改寫
+    @State private var cardNumberCipher: Data?
+    /// 是否已經通過 Face ID／密碼，可以看見並編輯明碼。
+    /// 預設 true＝新增卡片時直接可以填；讀取既有卡片時才會依內容改成 false。
+    @State private var cardUnlocked = true
+    /// 使用者自由決定要不要記檢核碼
+    @State private var wantsSecurityCode = false
+    @State private var cardSecurityInput = ""
+    @State private var cardSecurityCipher: Data?
+    @State private var cardVaultMessage: String?
+    @State private var cardUnlocking = false
     @State private var creditLimitText = ""
     @State private var annualFeeText = ""
     @State private var billingDayText = ""
@@ -1537,6 +1551,15 @@ struct AddMilestoneView: View {
                 if newValue == .realEstate && financeStore.realEstates.isEmpty {
                     realEstateMode = .new
                 }
+            }
+            // [v25.368] 卡號保管室的說明／錯誤
+            .alert("卡號與安全資訊", isPresented: Binding(
+                get: { cardVaultMessage != nil },
+                set: { if !$0 { cardVaultMessage = nil } }
+            )) {
+                Button("好") { cardVaultMessage = nil }
+            } message: {
+                Text(cardVaultMessage ?? "")
             }
         }
     }
@@ -2006,18 +2029,23 @@ struct AddMilestoneView: View {
             Section {
                 bankNamePicker
                 TextField("卡別名稱（如：御璽卡）", text: $cardName)
-                TextField("卡號末四碼（選填）", text: $cardLastFour).keyboardType(.numberPad)
                 HStack { TextField("額度", text: $creditLimitText).keyboardType(.numberPad); Text("萬元").foregroundStyle(.secondary) }
                 currencyField("年費", text: $annualFeeText)
                 HStack { TextField("帳單日", text: $billingDayText).keyboardType(.numberPad); Text("日").foregroundStyle(.secondary) }
                 HStack { TextField("繳款日", text: $paymentDayText).keyboardType(.numberPad); Text("日").foregroundStyle(.secondary) }
                 DatePicker("核卡日期", selection: $date, displayedComponents: .date)
-                Toggle("填入到期日", isOn: $hasExpiryDate)
-                if hasExpiryDate {
-                    expiryMonthYearPicker
-                }
             } header: {
                 milestoneSectionHeader("信用卡資訊", icon: FinanceSubCategory.creditCard.icon, color: .orange)
+            }
+            // [v25.368] 卡號／到期日／檢核碼獨立成一段，鎖在 Face ID 後面
+            Section {
+                cardNumberRows
+                cardExpiryRows
+                cardSecurityRows
+            } header: {
+                milestoneSectionHeader("卡號與安全資訊", icon: "lock.shield.fill", color: .red)
+            } footer: {
+                Text(Self.cardVaultFootnote)
             }
             Section {
                 TextField("悠遊卡卡號（選填）", text: $easyCardNumber).keyboardType(.numbersAndPunctuation)
@@ -2078,6 +2106,149 @@ struct AddMilestoneView: View {
 
     private var bankMilestonesList: [LifeMilestone] {
         store.milestones.filter { $0.category == .achievement && $0.financeSubCategory == .bank }
+    }
+
+    // MARK: - [v25.368] 卡號與安全資訊
+
+    /// 說明文字在 ViewBuilder 外組好（本檔案有型別檢查逾時的前科）
+    static let cardVaultFootnote =
+        "完整卡號與檢核碼會加密後才存起來，金鑰放在系統鑰匙圈、不會跟著資料同步進 iCloud 的紀錄裡，"
+        + "備份檔與桌面網頁版也讀不到明碼。要看或修改一定要先通過 Face ID 或裝置密碼。"
+        + "檢核碼是網路刷卡唯一還缺的那一塊，能不記就不記——所以預設不記，由你自己決定。"
+
+    /// 已輸入卡號的末四碼（存檔時會覆蓋 cardLastFour）
+    private var cardNumberLastFour: String { CardVault.lastFour(cardNumberInput) }
+
+    private var expiryMaskText: String { hasExpiryDate ? "••/••" : "未填" }
+
+    /// 卡號列：解鎖（或全新的卡）才看得到明碼，否則只顯示末四碼
+    @ViewBuilder
+    private var cardNumberRows: some View {
+        if cardUnlocked {
+            HStack {
+                Text("卡號")
+                Spacer()
+                TextField("1234-5678-9012-3456", text: $cardNumberInput)
+                    .keyboardType(.numberPad)
+                    .multilineTextAlignment(.trailing)
+                    .font(.body.monospaced())
+                    .onChange(of: cardNumberInput) { _, newValue in
+                        // 邊打邊補「-」。游標會留在最後面，正好符合從左往右輸入卡號的情境。
+                        let formatted = CardVault.grouped(newValue)
+                        if formatted != newValue { cardNumberInput = formatted }
+                    }
+            }
+            if !cardNumberLastFour.isEmpty {
+                HStack {
+                    Text("辨識用末四碼")
+                    Spacer()
+                    Text(cardNumberLastFour).font(.footnote.monospaced())
+                }
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+            }
+        } else {
+            Button {
+                unlockCardFields()
+            } label: {
+                HStack {
+                    Text("卡號").foregroundStyle(.primary)
+                    Spacer()
+                    Text(CardVault.masked(lastFour: cardLastFour))
+                        .font(.body.monospaced())
+                        .foregroundStyle(.secondary)
+                    Image(systemName: cardUnlocking ? "hourglass" : "lock.fill")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                }
+                .contentShape(Rectangle())
+            }
+            .disabled(cardUnlocking)
+        }
+    }
+
+    /// 到期日：與卡號用同一把鎖
+    @ViewBuilder
+    private var cardExpiryRows: some View {
+        if cardUnlocked {
+            Toggle("填入到期日", isOn: $hasExpiryDate)
+            if hasExpiryDate {
+                expiryMonthYearPicker
+            }
+        } else {
+            HStack {
+                Text("到期日")
+                Spacer()
+                Text(expiryMaskText)
+                    .font(.body.monospaced())
+                    .foregroundStyle(.secondary)
+                Image(systemName: "lock.fill")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            }
+        }
+    }
+
+    /// 檢核碼：完全由使用者決定要不要記
+    @ViewBuilder
+    private var cardSecurityRows: some View {
+        if cardUnlocked {
+            Toggle("記錄檢核碼（CVV／CVC）", isOn: $wantsSecurityCode.animation())
+            if wantsSecurityCode {
+                HStack {
+                    Text("檢核碼")
+                    Spacer()
+                    SecureField("3 碼", text: $cardSecurityInput)
+                        .keyboardType(.numberPad)
+                        .multilineTextAlignment(.trailing)
+                        .frame(width: 90)
+                        .onChange(of: cardSecurityInput) { _, newValue in
+                            // 運通是 4 碼，所以留到 4
+                            let cleaned = String(newValue.filter(\.isNumber).prefix(4))
+                            if cleaned != newValue { cardSecurityInput = cleaned }
+                        }
+                }
+            }
+        } else if cardSecurityCipher != nil {
+            HStack {
+                Text("檢核碼")
+                Spacer()
+                Text(CardVault.maskedCode())
+                    .font(.body.monospaced())
+                    .foregroundStyle(.secondary)
+                Image(systemName: "lock.fill")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            }
+        }
+    }
+
+    private func unlockCardFields() {
+        guard !cardUnlocking else { return }
+        cardUnlocking = true
+        Task { @MainActor in
+            defer { cardUnlocking = false }
+            switch await CardVault.unlock(reason: "檢視或修改完整卡號") {
+            case .ok:
+                let number = CardVault.open(cardNumberCipher) ?? ""
+                let code = CardVault.open(cardSecurityCipher) ?? ""
+                cardNumberInput = CardVault.grouped(number)
+                cardSecurityInput = code
+                wantsSecurityCode = !code.isEmpty
+                // 密文在、卻解不出來＝金鑰不在這台裝置（沒開 iCloud 鑰匙圈、或換機沒帶過來）
+                if cardNumberCipher != nil, number.isEmpty {
+                    cardVaultMessage =
+                        "這台裝置沒有解密金鑰，看不到原本存的卡號。"
+                        + "金鑰是透過 iCloud 鑰匙圈同步的，請確認「設定 → Apple ID → iCloud → 密碼與鑰匙圈」已開啟；"
+                        + "若金鑰已經遺失，只能重新輸入一次完整卡號。"
+                }
+                cardUnlocked = true
+            case .denied:
+                break
+            case .unavailable(let message):
+                cardVaultMessage = message
+            }
+        }
     }
 
     @ViewBuilder
@@ -2306,6 +2477,22 @@ struct AddMilestoneView: View {
         } else if isFinance {
             let autoTitle = generateFinanceTitle()
             let t = note.trimmingCharacters(in: .whitespaces)
+            // [v25.368] 加密失敗（鑰匙圈寫不進金鑰）就中止存檔，
+            // 不要一聲不響地把使用者剛打的卡號丟掉
+            if financeSub == .creditCard, cardUnlocked {
+                let typed = CardVault.digits(cardNumberInput)
+                if !typed.isEmpty, CardVault.seal(typed) == nil {
+                    cardVaultMessage = "卡號加密失敗：系統鑰匙圈寫不進金鑰，這次沒有儲存。"
+                        + "請把 App 完全關掉再打開試一次；若持續失敗，請確認裝置已設定密碼。"
+                    return
+                }
+            }
+            // [v25.368] 卡號末四碼：解鎖過就以剛輸入的完整卡號為準，沒解鎖就沿用原本的
+            let savedCardLastFour: String = {
+                guard cardUnlocked else { return cardLastFour }
+                let derived = CardVault.lastFour(cardNumberInput)
+                return derived.isEmpty ? cardLastFour : derived
+            }()
             var item = LifeMilestone(
                 id: editing?.id ?? UUID(),
                 title: autoTitle, date: date, category: .achievement,
@@ -2319,7 +2506,7 @@ struct AddMilestoneView: View {
                 accountNumber: trimmedOrNil(accountNumber, when: financeSub == .bank || financeSub == .securities),
                 bankAccountType: financeSub == .bank ? bankAccType : nil,
                 cardName: trimmedOrNil(cardName, when: financeSub == .creditCard),
-                cardLastFour: trimmedOrNil(cardLastFour, when: financeSub == .creditCard),
+                cardLastFour: trimmedOrNil(savedCardLastFour, when: financeSub == .creditCard),
                 // 信用卡額度輸入值單位為「萬元」，存進 LifeMilestone 時換算回元
                 creditLimit: financeSub == .creditCard
                     ? (Double(creditLimitText).map { $0 * 10000 })
@@ -2338,6 +2525,20 @@ struct AddMilestoneView: View {
             )
             // 編輯既有財富卡時保留銀行存取紀錄（init 沒提供 bankDeposits 參數，需手動帶回）
             item.bankDeposits = editing?.bankDeposits
+            // [v25.368] 卡號／檢核碼密文（init 沒提供參數）。
+            // 沒解鎖過就原封帶回既有密文——看不到內容的情況下絕不能把它洗掉。
+            if financeSub == .creditCard {
+                if cardUnlocked {
+                    let digits = CardVault.digits(cardNumberInput)
+                    item.cardNumberCipher = digits.isEmpty ? nil : CardVault.seal(digits)
+                    let code = cardSecurityInput.trimmingCharacters(in: .whitespaces)
+                    item.cardSecurityCipher = (wantsSecurityCode && !code.isEmpty)
+                        ? CardVault.seal(code) : nil
+                } else {
+                    item.cardNumberCipher = cardNumberCipher
+                    item.cardSecurityCipher = cardSecurityCipher
+                }
+            }
             // 信用卡綁定的電子票證與會員卡號（init 沒提供參數）
             if financeSub == .creditCard {
                 let ec = easyCardNumber.trimmingCharacters(in: .whitespaces)
@@ -2446,6 +2647,9 @@ struct AddMilestoneView: View {
             if let bat = e.bankAccountType { bankAccType = bat }
             cardName = e.cardName ?? ""
             cardLastFour = e.cardLastFour ?? ""
+            // [v25.368] 密文原封帶進畫面，沒通過 Face ID 之前不解、也不會被存檔改寫
+            cardNumberCipher = e.cardNumberCipher
+            cardSecurityCipher = e.cardSecurityCipher
             easyCardNumber = e.easyCardNumber ?? ""
             iPassNumber = e.iPassNumber ?? ""
             happyGoNumber = e.happyGoNumber ?? ""
@@ -2468,6 +2672,9 @@ struct AddMilestoneView: View {
             if let pa = e.premiumAmount, pa > 0 { premiumText = String(format: "%.0f", pa) }
             beneficiary = e.beneficiary ?? ""
             selectedLinkedBankId = e.linkedBankMilestoneId
+            // [v25.368] 這張卡有任何要保護的東西（卡號／檢核碼／到期日）就先鎖起來；
+            // 什麼都沒有的舊卡直接放行，不然使用者連填第一次都要先驗證。
+            cardUnlocked = (e.cardNumberCipher == nil && e.cardSecurityCipher == nil && e.expiryDate == nil)
             return
         }
         if let f = editingFamily {

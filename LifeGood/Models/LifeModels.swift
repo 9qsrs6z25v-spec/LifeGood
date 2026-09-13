@@ -1130,6 +1130,12 @@ struct LifeMilestone: Identifiable, Codable {
     var bankAccountType: BankAccountType?
     var cardName: String?
     var cardLastFour: String?
+    /// [v25.368] 完整卡號的密文（AES-GCM，金鑰在 Keychain，見 CardVault）。
+    /// 刻意不進 memberwise init——那個 init 已經 30+ 參數，比照 bankDeposits 慣例由呼叫端指派。
+    /// 明碼絕不寫進這個結構：它會整包進 iCloud blob、備份 JSON 與網頁版。
+    var cardNumberCipher: Data?
+    /// [v25.368] 檢核碼（CVV／CVC）的密文，選填；同上不進 memberwise init
+    var cardSecurityCipher: Data?
     var creditLimit: Double?
     var annualFee: Double?
     var billingDay: Int?
@@ -1218,6 +1224,8 @@ struct LifeMilestone: Identifiable, Codable {
         bankAccountType = try? c.decode(BankAccountType.self, forKey: .bankAccountType)
         cardName = try? c.decode(String.self, forKey: .cardName)
         cardLastFour = try? c.decode(String.self, forKey: .cardLastFour)
+        cardNumberCipher = try? c.decodeIfPresent(Data.self, forKey: .cardNumberCipher)
+        cardSecurityCipher = try? c.decodeIfPresent(Data.self, forKey: .cardSecurityCipher)
         creditLimit = try? c.decode(Double.self, forKey: .creditLimit)
         annualFee = try? c.decode(Double.self, forKey: .annualFee)
         billingDay = try? c.decode(Int.self, forKey: .billingDay)
@@ -1255,6 +1263,7 @@ struct LifeMilestone: Identifiable, Codable {
         case mood, futurePlan, isManagerial, managedUnit, salary, salaryBefore, salaryAfter
         case financeSubCategory, bankName, branchName, accountNumber, bankAccountType
         case cardName, cardLastFour, creditLimit, annualFee, billingDay, paymentDay, expiryDate
+        case cardNumberCipher, cardSecurityCipher
         case securitiesAccountType, insuranceCompany, policyNumber, insuranceType, premiumAmount, beneficiary, bankDeposits, linkedBankMilestoneId
         case isDisabled
         case easyCardNumber, iPassNumber, happyGoNumber

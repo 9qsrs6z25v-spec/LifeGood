@@ -819,6 +819,14 @@ struct FinanceCardView: View {
     @State private var editingStock: Stock?
     @State private var showPremiumAlert = false
     @State private var showDisableConfirm = false
+    // [v25.368] 卡號／到期日／檢核碼的解鎖狀態。只活在這個畫面上，離開就沒了。
+    @State private var cardRevealed = false
+    @State private var cardRevealNumber = ""
+    @State private var cardRevealCode = ""
+    @State private var cardRevealBusy = false
+    @State private var cardRevealMessage: String?
+    /// 解鎖後自動上鎖的倒數；換頁或再次解鎖都會取消重來
+    @State private var cardRelockTask: Task<Void, Never>?
 
     private var item: LifeMilestone {
         lifeStore.milestones.first(where: { $0.id == milestoneId })
@@ -932,6 +940,17 @@ struct FinanceCardView: View {
                 Button("刪除", role: .destructive) { deleteMilestoneCleaningLinks(item); dismiss() }
                 Button("取消", role: .cancel) {}
             }
+            // [v25.368] 卡號解鎖的說明／錯誤
+            .alert("卡號與安全資訊", isPresented: Binding(
+                get: { cardRevealMessage != nil },
+                set: { if !$0 { cardRevealMessage = nil } }
+            )) {
+                Button("好") { cardRevealMessage = nil }
+            } message: {
+                Text(cardRevealMessage ?? "")
+            }
+            // 離開這一頁就上鎖：解鎖狀態不該留到下次進來
+            .onDisappear { lockCard() }
         }
     }
 
@@ -981,6 +1000,90 @@ struct FinanceCardView: View {
         .padding(.horizontal)
     }
 
+    // MARK: - [v25.368] 卡號解鎖
+
+    private var cardRevealIcon: String {
+        if cardRevealBusy { return "hourglass" }
+        return cardRevealed ? "eye.slash.fill" : "eye.fill"
+    }
+
+    /// 橫幅上的卡號。字串在 ViewBuilder 外組好再進 Text（本專案有型別檢查逾時的前科）。
+    private func cardBannerNumber(last4: String) -> String {
+        guard cardRevealed, !cardRevealNumber.isEmpty else {
+            return "•••• •••• •••• " + last4
+        }
+        return CardVault.grouped(cardRevealNumber).replacingOccurrences(of: "-", with: " ")
+    }
+
+    private var cardBannerExpiry: String {
+        guard let ed = item.expiryDate else { return "" }
+        return cardRevealed ? fmtMonthYear(ed) : "••/••"
+    }
+
+    private var cardDetailNumber: String {
+        guard cardRevealed, !cardRevealNumber.isEmpty else {
+            return CardVault.masked(lastFour: item.cardLastFour ?? "")
+        }
+        return CardVault.grouped(cardRevealNumber)
+    }
+
+    private var cardDetailExpiry: String {
+        guard let ed = item.expiryDate else { return "未填" }
+        return cardRevealed ? fmtYearMonthZh(ed) : "••••／••"
+    }
+
+    /// 這張卡有沒有需要鎖起來的東西。只有到期日的舊卡也算——
+    /// 不然它的到期日會被遮起來卻沒有任何地方可以解鎖。
+    private var cardHasProtectedFields: Bool {
+        item.cardNumberCipher != nil || item.cardSecurityCipher != nil || item.expiryDate != nil
+    }
+
+    private func toggleCardReveal() {
+        if cardRevealed { lockCard(); return }
+        guard !cardRevealBusy else { return }
+        cardRevealBusy = true
+        Task { @MainActor in
+            defer { cardRevealBusy = false }
+            switch await CardVault.unlock(reason: "檢視完整卡號與到期日") {
+            case .ok:
+                let number = CardVault.open(item.cardNumberCipher) ?? ""
+                // 有密文卻解不出來＝金鑰不在這台裝置；沒有密文（只鎖到期日）則本來就沒東西可解
+                if item.cardNumberCipher != nil, number.isEmpty {
+                    cardRevealMessage =
+                        "這台裝置沒有解密金鑰，看不到原本存的卡號。"
+                        + "金鑰是透過 iCloud 鑰匙圈同步的，請確認「設定 → Apple ID → iCloud → 密碼與鑰匙圈」已開啟；"
+                        + "若金鑰已經遺失，請到編輯畫面重新輸入一次完整卡號。"
+                }
+                cardRevealNumber = number
+                cardRevealCode = CardVault.open(item.cardSecurityCipher) ?? ""
+                cardRevealed = true
+                scheduleRelock()
+            case .denied:
+                break
+            case .unavailable(let message):
+                cardRevealMessage = message
+            }
+        }
+    }
+
+    /// 看完 30 秒自動收回去，免得解鎖後把手機放著就等於沒鎖
+    private func scheduleRelock() {
+        cardRelockTask?.cancel()
+        cardRelockTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 30_000_000_000)
+            guard !Task.isCancelled else { return }
+            lockCard()
+        }
+    }
+
+    private func lockCard() {
+        cardRelockTask?.cancel()
+        cardRelockTask = nil
+        cardRevealed = false
+        cardRevealNumber = ""
+        cardRevealCode = ""
+    }
+
     /// 信用卡樣式（仿真實信用卡 banner）
     private var creditCardHeader: some View {
         let disabled = item.isDisabled == true
@@ -1025,11 +1128,27 @@ struct FinanceCardView: View {
                         .stroke(Color.black.opacity(0.15), lineWidth: 0.5)
                 )
 
-            // 卡號
-            Text("•••• •••• •••• \(last4)")
-                .font(.title3.weight(.semibold).monospaced())
-                .tracking(2)
-                .foregroundStyle(.white)
+            // 卡號：預設只露末四碼，要看完整的必須先過 Face ID／密碼
+            HStack(spacing: 10) {
+                Text(cardBannerNumber(last4: last4))
+                    .font(.title3.weight(.semibold).monospaced())
+                    .tracking(2)
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                if cardHasProtectedFields {
+                    Button {
+                        toggleCardReveal()
+                    } label: {
+                        Image(systemName: cardRevealIcon)
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(.white.opacity(0.9))
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(cardRevealBusy)
+                }
+                Spacer(minLength: 0)
+            }
 
             HStack(alignment: .bottom) {
                 VStack(alignment: .leading, spacing: 2) {
@@ -1041,11 +1160,20 @@ struct FinanceCardView: View {
                         .lineLimit(1)
                 }
                 Spacer()
-                if let ed = item.expiryDate {
+                if !cardRevealCode.isEmpty {
+                    VStack(alignment: .trailing, spacing: 2) {
+                        Text("CVV").font(.system(size: 9)).tracking(1.5)
+                            .foregroundStyle(.white.opacity(0.7))
+                        Text(cardRevealCode)
+                            .font(.subheadline.weight(.semibold).monospaced())
+                            .foregroundStyle(.white)
+                    }
+                }
+                if item.expiryDate != nil {
                     VStack(alignment: .trailing, spacing: 2) {
                         Text("VALID THRU").font(.system(size: 9)).tracking(1.5)
                             .foregroundStyle(.white.opacity(0.7))
-                        Text(fmtMonthYear(ed))
+                        Text(cardBannerExpiry)
                             .font(.subheadline.weight(.semibold).monospaced())
                             .foregroundStyle(.white)
                     }
@@ -1236,7 +1364,30 @@ struct FinanceCardView: View {
     @ViewBuilder
     private var creditCardDetail: some View {
         if let c = item.cardName, !c.isEmpty { infoRow("卡別", c) }
-        if let l = item.cardLastFour, !l.isEmpty { infoRow("卡號末四碼", l) }
+        // [v25.368] 卡號：有存完整卡號就整串顯示（預設遮罩），沒存就沿用末四碼
+        if item.cardNumberCipher != nil {
+            Button {
+                toggleCardReveal()
+            } label: {
+                HStack {
+                    Text("卡號").foregroundStyle(.secondary)
+                    Spacer()
+                    Text(cardDetailNumber)
+                        .font(.subheadline.monospaced())
+                        .foregroundStyle(.primary)
+                    Image(systemName: cardRevealIcon)
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                }
+                .font(.subheadline)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(cardRevealBusy)
+            if !cardRevealCode.isEmpty { infoRow("檢核碼", cardRevealCode) }
+        } else if let l = item.cardLastFour, !l.isEmpty {
+            infoRow("卡號末四碼", l)
+        }
         if let cl = item.creditLimit, cl > 0 {
             infoRow("額度", cl.ntdWanString)
             creditUsageBlock(limit: cl)
@@ -1245,7 +1396,8 @@ struct FinanceCardView: View {
         if let bd = item.billingDay { infoRow("帳單日", "每月 \(bd) 日") }
         if let pd = item.paymentDay { infoRow("繳款日", "每月 \(pd) 日") }
         infoRow("核卡日期", fmtDate(item.date))
-        if let ed = item.expiryDate { infoRow("到期日", fmtYearMonthZh(ed)) }
+        // [v25.368] 到期日與卡號同一把鎖，沒解鎖只顯示遮罩
+        if item.expiryDate != nil { infoRow("到期日", cardDetailExpiry) }
         if let ec = item.easyCardNumber, !ec.isEmpty { infoRow("悠遊卡", ec) }
         if let ip = item.iPassNumber, !ip.isEmpty { infoRow("一卡通", ip) }
         if let hg = item.happyGoNumber, !hg.isEmpty { infoRow("Happy Go", hg) }
