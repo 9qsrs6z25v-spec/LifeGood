@@ -242,9 +242,14 @@ struct FinanceItemCard: View {
                     Divider().padding(.leading, 14)
                     field("社交對象", recipient)
                 }
+                // [v25.365] 汽車的地點名稱存在 placeName（title 被自動命名佔用），單獨列一行
+                if let place = e.placeName, !place.isEmpty {
+                    Divider().padding(.leading, 14)
+                    field("地點", place)
+                }
                 if let addr = e.placeAddress, !addr.isEmpty {
                     Divider().padding(.leading, 14)
-                    field("店家地址", addr)
+                    field(e.placeName == nil ? "店家地址" : "地址", addr)
                 }
             }
             if let account = accountLabel {
@@ -372,7 +377,10 @@ struct FinanceItemCard: View {
             lines.append("🗓 日期：\(Self.dateFmt.string(from: e.date))")
             if let member = e.diningMember, !member.isEmpty { lines.append("👥 同行成員：\(member)") }
             if let recipient = e.socialRecipient, !recipient.isEmpty { lines.append("🎁 社交對象：\(recipient)") }
-            if let addr = e.placeAddress, !addr.isEmpty { lines.append("📍 店家地址：\(addr)") }
+            if let place = e.placeName, !place.isEmpty { lines.append("📍 地點：\(place)") }
+            if let addr = e.placeAddress, !addr.isEmpty {
+                lines.append(e.placeName == nil ? "📍 店家地址：\(addr)" : "🗺 地址：\(addr)")
+            }
         }
         if let account = accountLabel {
             lines.append("\(isIncome ? "🏦 入帳銀行" : "🏦 扣款目標")：\(account)")

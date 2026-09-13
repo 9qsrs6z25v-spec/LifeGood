@@ -341,6 +341,10 @@ struct Expense: Identifiable, Codable {
     var linkedBankMilestoneId: UUID?
     var linkedBankCurrency: String?
     var linkedCreditCardMilestoneId: UUID?
+    /// [v25.365] 地點名稱。飲食／娛樂／購物／日用品／醫療是把店名直接存在 title，
+    /// 但汽車變動支出的 title 被「項目 N：型號-類別」自動命名佔用，店名無處可放，
+    /// 因此另開這個欄位。其餘分類一律為 nil，讀取時用 placeDisplayName 取代直接讀。
+    var placeName: String?
     /// 飲食記錄附帶的店家地址（MKLocalSearch 解析）
     var placeAddress: String?
     /// 飲食記錄附帶的店家緯度
@@ -404,6 +408,7 @@ struct Expense: Identifiable, Codable {
         linkedBankMilestoneId: UUID? = nil,
         linkedBankCurrency: String? = nil,
         linkedCreditCardMilestoneId: UUID? = nil,
+        placeName: String? = nil,
         placeAddress: String? = nil,
         placeLatitude: Double? = nil,
         placeLongitude: Double? = nil,
@@ -441,6 +446,7 @@ struct Expense: Identifiable, Codable {
         self.linkedBankMilestoneId = linkedBankMilestoneId
         self.linkedBankCurrency = linkedBankCurrency
         self.linkedCreditCardMilestoneId = linkedCreditCardMilestoneId
+        self.placeName = placeName
         self.placeAddress = placeAddress
         self.placeLatitude = placeLatitude
         self.placeLongitude = placeLongitude
@@ -482,6 +488,7 @@ struct Expense: Identifiable, Codable {
         linkedBankMilestoneId = try? c.decode(UUID.self, forKey: .linkedBankMilestoneId)
         linkedBankCurrency = try? c.decode(String.self, forKey: .linkedBankCurrency)
         linkedCreditCardMilestoneId = try? c.decodeIfPresent(UUID.self, forKey: .linkedCreditCardMilestoneId)
+        placeName = try? c.decodeIfPresent(String.self, forKey: .placeName)
         placeAddress = try? c.decodeIfPresent(String.self, forKey: .placeAddress)
         placeLatitude = try? c.decodeIfPresent(Double.self, forKey: .placeLatitude)
         placeLongitude = try? c.decodeIfPresent(Double.self, forKey: .placeLongitude)
@@ -502,10 +509,24 @@ struct Expense: Identifiable, Codable {
         case socialSubCategory, socialRecipient, taxDeductibleOverride, note, currencyCode, diningMember
         case loanTotalAmount, loanYears, loanRate, insuranceRate
         case linkedBankMilestoneId, linkedBankCurrency, linkedCreditCardMilestoneId
-        case placeAddress, placeLatitude, placeLongitude, photoFileNames, amountHistory
+        case placeName, placeAddress, placeLatitude, placeLongitude, photoFileNames, amountHistory
         case evKwh, evFromPct, evToPct, evOdometer
         case endDate, endReason
     }
+
+    // MARK: - 地點
+
+    /// [v25.365] 這筆支出的地點名稱：優先用獨立的 placeName（汽車），
+    /// 沒有才退回 title（飲食／娛樂／購物／日用品／醫療把店名存在 title）。
+    /// 兩者都空時回傳 nil，呼叫端可直接 if let。
+    var placeDisplayName: String? {
+        if let n = placeName?.trimmingCharacters(in: .whitespaces), !n.isEmpty { return n }
+        let t = title.trimmingCharacters(in: .whitespaces)
+        return t.isEmpty ? nil : t
+    }
+
+    /// 是否已綁定實際座標（可畫在地圖／路線圖上）
+    var hasPlaceCoordinate: Bool { placeLatitude != nil && placeLongitude != nil }
 
     var categoryName: String {
         switch expenseType {

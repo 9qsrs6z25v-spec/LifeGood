@@ -2377,6 +2377,7 @@ struct RealEstateDetailView: View {
             linkedBankMilestoneId: source.linkedBankMilestoneId,
             linkedBankCurrency: source.linkedBankCurrency,
             linkedCreditCardMilestoneId: source.linkedCreditCardMilestoneId,
+            placeName: source.placeName,
             placeAddress: source.placeAddress,
             placeLatitude: source.placeLatitude,
             placeLongitude: source.placeLongitude

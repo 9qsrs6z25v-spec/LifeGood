@@ -211,6 +211,12 @@ struct AddExpenseView: View {
     @State private var placeAddress: String?
     @State private var placeLatitude: Double?
     @State private var placeLongitude: Double?
+    /// [v25.365] 汽車變動支出專用的地點名稱（名稱欄被自動命名佔用，見 usesSeparatePlaceField）
+    @State private var placeName: String = ""
+    /// [v25.365] 目前這組座標是「在哪個分類底下選的」（placeScopeKey 的快照）。
+    /// 使用者選完飲食的餐廳又把分類改成汽車時，座標已經不適用於新分類，
+    /// 存檔與顯示都要靠這個比對把它擋掉，不然停車紀錄會掛到餐廳的經緯度上。
+    @State private var placeScopeStamp: String = ""
     /// 每次選擇候選地點就遞增；resolve 完成回填時比對是否仍是最新一次選擇，避免快速連點造成舊請求覆寫新選擇的座標
     @State private var placeSelectionToken: Int = 0
     @FocusState private var titleFieldFocused: Bool
@@ -237,12 +243,50 @@ struct AddExpenseView: View {
         expenseType == .variable && selectedVariableCategory == .food
     }
 
-    /// 是否為「需要選地點」的變動支出分類：飲食 / 娛樂 / 購物 / 日用品 / 醫療
+    /// 是否為「需要選地點」的變動支出分類：飲食 / 娛樂 / 購物 / 日用品 / 醫療 / 汽車
+    /// [v25.365] 加入汽車：停車場、充電站、加油站、保養廠都是實體地點，
+    /// 記下座標之後才做得出汽車里程路線圖。
     private var supportsPlacePicker: Bool {
         guard expenseType == .variable else { return false }
-        return [.food, .entertainment, .shopping, .dailyNecessities, .medical]
+        return [.food, .entertainment, .shopping, .dailyNecessities, .medical, .vehicle]
             .contains(selectedVariableCategory)
     }
+
+    /// [v25.365] 汽車變動支出的「名稱」欄會被 linkedAssetTitle（項目 N：型號-類別）
+    /// 佔用並轉為唯讀，店名沒地方放，因此改成獨立的一列「地點」，
+    /// 文字存進 Expense.placeName 而不是 title。
+    private var usesSeparatePlaceField: Bool {
+        expenseType == .variable && selectedVariableCategory == .vehicle
+    }
+
+    /// 地點選擇器直接當成名稱欄使用（飲食等分類：店名就是 title）
+    private var showsInlinePlacePicker: Bool {
+        supportsPlacePicker && !usesSeparatePlaceField
+    }
+
+    /// 地點選擇器實際綁定的文字欄位：汽車用 placeName，其餘分類沿用 title
+    private var placeQuery: Binding<String> {
+        usesSeparatePlaceField ? $placeName : $title
+    }
+
+    /// placeQuery 的唯讀值（給 onChange 觀測與候選比對用）
+    private var placeQueryText: String {
+        usesSeparatePlaceField ? placeName : title
+    }
+
+    /// 「之前去過」候選的比對範圍。汽車再依支出類別細分，
+    /// 免得停車場、加油站、保養廠全部混在同一份清單裡。
+    private var placeScopeKey: String {
+        guard usesSeparatePlaceField else { return selectedVariableCategory.rawValue }
+        guard selectedAssetLink == .vehicle else { return "vehicle|all" }
+        return "vehicle|\(selectedVehicleExpenseCategory.rawValue)"
+    }
+
+    /// 目前綁定的座標是否仍屬於現在這個分類（見 placeScopeStamp）
+    private var placeScopeMatches: Bool { placeScopeStamp == placeScopeKey }
+
+    /// 已經有可用的座標（且屬於目前分類）
+    private var hasResolvedPlace: Bool { placeLatitude != nil && placeScopeMatches }
 
     /// 同分類最近用過的品名（快速選取膠囊模板選項）：常去的餐廳/診所/娛樂點一下帶入
     private var recentCategoryTitles: [String] {
@@ -611,7 +655,7 @@ struct AddExpenseView: View {
                             .multilineTextAlignment(.trailing)
                             .lineLimit(2)
                     }
-                } else if supportsPlacePicker {
+                } else if showsInlinePlacePicker {
                     placeNameAutocomplete
                 } else {
                     TextField(expenseType == .variable ? "名稱（留空自動以分類為名）" : "名稱", text: $title)
@@ -621,6 +665,12 @@ struct AddExpenseView: View {
                 if expenseType == .variable {
                     QuickPickCapsuleRow(options: recentCategoryTitles, selection: $title, accent: .green)
                 }
+            }
+
+            // [v25.365] 汽車：地點自成一列（名稱欄已被「項目 N：型號-類別」佔用），
+            // 停車場／充電站／加油站選完會一併存下座標，之後才畫得出里程路線圖。
+            if usesSeparatePlaceField {
+                placeNameAutocomplete
             }
 
             // 扣款目標（進階模式或固定支出才顯示）
@@ -673,9 +723,10 @@ struct AddExpenseView: View {
         }
     }
 
-    /// 是否顯示名稱欄位：進階模式 / 固定支出 / 已連結資產 / 飲食類別（要選店家）都顯示
+    /// 是否顯示名稱欄位：進階模式 / 固定支出 / 已連結資產 / 飲食類別（要選店家）都顯示。
+    /// 汽車的地點是獨立一列（usesSeparatePlaceField），不因此多開一個名稱欄。
     private var showNameField: Bool {
-        expenseType == .fixed || advancedMode || linkedAssetTitle != nil || supportsPlacePicker
+        expenseType == .fixed || advancedMode || linkedAssetTitle != nil || showsInlinePlacePicker
     }
 
     /// 是否顯示扣款目標選單
@@ -790,9 +841,10 @@ struct AddExpenseView: View {
         dismiss()
     }
 
-    // MARK: - 地點欄位（飲食 / 娛樂 / 購物 / 日用品 / 醫療）
+    // MARK: - 地點欄位（飲食 / 娛樂 / 購物 / 日用品 / 醫療 / 汽車）
 
-    /// 名稱欄位列：輸入店名同時跑出歷史地點 + Apple Maps 候選清單
+    /// 名稱欄位列：輸入店名同時跑出歷史地點 + Apple Maps 候選清單。
+    /// 汽車分類時這一列是獨立的「地點」（綁 placeName），其餘分類就是名稱欄本身（綁 title）。
     @ViewBuilder
     private var placeNameAutocomplete: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -800,18 +852,18 @@ struct AddExpenseView: View {
                 Image(systemName: placeIcon)
                     .foregroundStyle(placeIconColor)
                     .frame(width: 22)
-                TextField(placeNamePrompt, text: $title)
+                TextField(placeNamePrompt, text: placeQuery)
                     .focused($titleFieldFocused)
                     .textInputAutocapitalization(.never)
                     .disableAutocorrection(true)
-                if placeLatitude != nil {
+                if hasResolvedPlace {
                     Image(systemName: "mappin.circle.fill")
                         .foregroundStyle(.green)
                         .font(.caption)
                 }
-                if !title.isEmpty {
+                if !placeQueryText.isEmpty {
                     Button {
-                        title = ""
+                        placeQuery.wrappedValue = ""
                         clearPlace()
                         expandedSuggestions = false
                     } label: {
@@ -821,7 +873,7 @@ struct AddExpenseView: View {
                     .buttonStyle(.plain)
                 }
             }
-            if let addr = placeAddress, !addr.isEmpty, placeLatitude != nil {
+            if let addr = placeAddress, !addr.isEmpty, hasResolvedPlace {
                 Text(addr)
                     .font(.caption2)
                     .foregroundStyle(.secondary)
@@ -836,10 +888,10 @@ struct AddExpenseView: View {
         .onAppear {
             LocationProvider.shared.requestIfNeeded()
             restaurantCompleter.setRegion(LocationProvider.shared.searchRegion)
-            if !title.isEmpty { restaurantCompleter.queryFragment = title }
+            if !placeQueryText.isEmpty { restaurantCompleter.queryFragment = placeQueryText }
             cachedPastSuggestions = computePastSuggestions()
         }
-        .onChange(of: title) { _, newValue in
+        .onChange(of: placeQueryText) { _, newValue in
             if suppressNextCompleterUpdate {
                 suppressNextCompleterUpdate = false
                 return
@@ -859,16 +911,18 @@ struct AddExpenseView: View {
                 cachedPastSuggestions = computePastSuggestions()
             }
         }
-        .onChange(of: selectedVariableCategory) { _, _ in
+        // 分類（汽車再細到支出類別）一變，「之前去過」的比對範圍就換了，重算一次
+        .onChange(of: placeScopeKey) { _, _ in
             cachedPastSuggestions = computePastSuggestions()
         }
         .onChange(of: locationProvider.lastLocation) { _, _ in
             restaurantCompleter.setRegion(LocationProvider.shared.searchRegion)
-            if !title.isEmpty { restaurantCompleter.queryFragment = title }
+            if !placeQueryText.isEmpty { restaurantCompleter.queryFragment = placeQueryText }
         }
     }
 
     private var placeNamePrompt: String {
+        if usesSeparatePlaceField { return vehiclePlacePrompt }
         switch selectedVariableCategory {
         case .food: return "店名 / 餐廳"
         case .entertainment: return "電影院 / KTV / 場館"
@@ -876,6 +930,28 @@ struct AddExpenseView: View {
         case .dailyNecessities: return "賣場 / 超市"
         case .medical: return "醫院 / 診所 / 藥局"
         default: return "名稱"
+        }
+    }
+
+    /// 沒有任何候選時的說明。字串在 ViewBuilder 外組好再丟進 Text，避免型別檢查逾時。
+    private var noPlaceMatchHint: String {
+        let q = placeQueryText.trimmingCharacters(in: .whitespaces)
+        return usesSeparatePlaceField
+            ? "找不到符合的地點，將以「\(q)」儲存（沒有座標）。"
+            : "找不到符合的地點，將以「\(q)」儲存。"
+    }
+
+    /// 汽車地點欄的提示字。未連結車輛時（基本模式）還沒有支出類別，給一個泛用提示。
+    private var vehiclePlacePrompt: String {
+        guard selectedAssetLink == .vehicle else { return "地點（停車場 / 充電站 / 加油站）" }
+        switch selectedVehicleExpenseCategory {
+        case .fuel: return "加油站"
+        case .electricity: return "充電站"
+        case .parking: return "停車場"
+        case .maintenance: return "保養廠"
+        case .wash: return "洗車場"
+        case .repair: return "維修廠"
+        case .other: return "地點"
         }
     }
 
@@ -946,11 +1022,11 @@ struct AddExpenseView: View {
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
                     .stroke(Color.secondary.opacity(0.15), lineWidth: 0.5)
             )
-        } else if !title.trimmingCharacters(in: .whitespaces).isEmpty {
+        } else if !placeQueryText.trimmingCharacters(in: .whitespaces).isEmpty {
             HStack(spacing: 8) {
                 Image(systemName: "magnifyingglass")
                     .foregroundStyle(.tertiary)
-                Text("找不到符合的地點，將以「\(title)」儲存。")
+                Text(noPlaceMatchHint)
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                 Spacer()
@@ -995,23 +1071,30 @@ struct AddExpenseView: View {
     /// 對 store.expenses 做全量線性掃描，只在 cachedPastSuggestions 的 300ms 防抖視窗
     /// 或分類切換時呼叫，避免每次按鍵都同步全量掃描整個記帳歷史。
     private func computePastSuggestions() -> [PlaceSuggestion] {
-        let q = title.trimmingCharacters(in: .whitespaces).lowercased()
+        let q = placeQueryText.trimmingCharacters(in: .whitespaces).lowercased()
+        // 汽車要再依支出類別過濾，免得選「停車」時跳出加油站與保養廠
+        let vehicleScope: VehicleVariableCategory? =
+            (usesSeparatePlaceField && selectedAssetLink == .vehicle) ? selectedVehicleExpenseCategory : nil
         var seenKeys: Set<String> = []
         var output: [PlaceSuggestion] = []
         for exp in store.expenses
             where exp.expenseType == .variable
                 && exp.variableCategory == selectedVariableCategory
                 && exp.placeLatitude != nil
-                && exp.placeLongitude != nil
-                && !exp.title.trimmingCharacters(in: .whitespaces).isEmpty {
-            if !q.isEmpty && !exp.title.lowercased().contains(q) { continue }
-            let key = "past|\(exp.title.lowercased())|\(exp.placeAddress?.lowercased() ?? "")"
+                && exp.placeLongitude != nil {
+            if let scope = vehicleScope, exp.vehicleExpenseCategory != scope { continue }
+            // 汽車的地點名稱存在 placeName（title 被自動命名佔用），其餘分類就是 title
+            let rawName = usesSeparatePlaceField ? (exp.placeName ?? "") : exp.title
+            let name = rawName.trimmingCharacters(in: .whitespaces)
+            if name.isEmpty { continue }
+            if !q.isEmpty && !name.lowercased().contains(q) { continue }
+            let key = "past|\(name.lowercased())|\(exp.placeAddress?.lowercased() ?? "")"
             if seenKeys.contains(key) { continue }
             seenKeys.insert(key)
             output.append(PlaceSuggestion(
                 id: key,
                 source: .past,
-                title: exp.title,
+                title: name,
                 subtitle: exp.placeAddress ?? "",
                 completion: nil,
                 latitude: exp.placeLatitude,
@@ -1060,10 +1143,12 @@ struct AddExpenseView: View {
     /// 套用使用者選擇的候選
     private func applySuggestion(_ item: PlaceSuggestion) {
         suppressNextCompleterUpdate = true
-        title = item.title
+        placeQuery.wrappedValue = item.title
         expandedSuggestions = false
         // 遞增 token，讓任何仍在飛行中的舊 .apple resolve 回呼失效，避免它稍後才完成、覆寫這次選擇的地址／座標
         placeSelectionToken += 1
+        // 記住這組座標是在哪個分類（汽車再細到支出類別）選的，之後改分類就不會誤用
+        placeScopeStamp = placeScopeKey
         switch item.source {
         case .past:
             placeAddress = item.address
@@ -1101,11 +1186,13 @@ struct AddExpenseView: View {
         placeAddress = nil
         placeLatitude = nil
         placeLongitude = nil
+        placeScopeStamp = ""
         // 同步作廢任何仍在飛行中的 resolve 回呼，避免清除後被舊結果覆寫回來
         placeSelectionToken += 1
     }
 
     private var placeIcon: String {
+        if usesSeparatePlaceField { return vehiclePlaceIcon }
         switch selectedVariableCategory {
         case .food: return "fork.knife.circle.fill"
         case .entertainment: return "gamecontroller.fill"
@@ -1116,7 +1203,22 @@ struct AddExpenseView: View {
         }
     }
 
+    /// 汽車地點欄的圖示：依支出類別換，未連結車輛時用通用地標
+    private var vehiclePlaceIcon: String {
+        guard selectedAssetLink == .vehicle else { return "mappin.and.ellipse" }
+        switch selectedVehicleExpenseCategory {
+        case .fuel: return "fuelpump.fill"
+        case .electricity: return "bolt.car.fill"
+        case .parking: return "parkingsign.circle.fill"
+        case .maintenance: return "wrench.and.screwdriver.fill"
+        case .wash: return "drop.circle.fill"
+        case .repair: return "hammer.fill"
+        case .other: return "mappin.and.ellipse"
+        }
+    }
+
     private var placeIconColor: Color {
+        if usesSeparatePlaceField { return .teal }
         switch selectedVariableCategory {
         case .food: return .orange
         case .entertainment: return .pink
@@ -2645,6 +2747,13 @@ struct AddExpenseView: View {
         }
 
         let savedCurrencyCode = isSavingsInsurance ? insCurrencyCode : selectedCurrencyCode
+        // [v25.365] 汽車的地點名稱存獨立欄位；其餘分類店名本來就在 title，不重複存一份
+        let trimmedPlaceName = placeName.trimmingCharacters(in: .whitespaces)
+        let savedPlaceName: String? =
+            (supportsPlacePicker && usesSeparatePlaceField && !trimmedPlaceName.isEmpty)
+            ? trimmedPlaceName : nil
+        // 座標只在「仍屬於現在這個分類」時才存（選完餐廳又把分類改成汽車不該沿用餐廳座標）
+        let keepPlaceCoordinate = supportsPlacePicker && placeScopeMatches
         var expense = Expense(
             id: expenseId,
             title: trimmedTitle,
@@ -2676,9 +2785,10 @@ struct AddExpenseView: View {
             linkedBankMilestoneId: selectedBankMilestoneId,
             linkedBankCurrency: selectedBankMilestoneId != nil ? selectedBankCurrency : nil,
             linkedCreditCardMilestoneId: selectedCreditCardMilestoneId,
-            placeAddress: supportsPlacePicker ? placeAddress : nil,
-            placeLatitude: supportsPlacePicker ? placeLatitude : nil,
-            placeLongitude: supportsPlacePicker ? placeLongitude : nil,
+            placeName: savedPlaceName,
+            placeAddress: keepPlaceCoordinate ? placeAddress : nil,
+            placeLatitude: keepPlaceCoordinate ? placeLatitude : nil,
+            placeLongitude: keepPlaceCoordinate ? placeLongitude : nil,
             photoFileNames: photoFileNames,
             // [v25.347] 固定支出的停止；非固定或未開啟一律存 nil
             endDate: (expenseType == .fixed && hasEndDate) ? endDate : nil,
@@ -3064,6 +3174,7 @@ struct AddExpenseView: View {
 
         title = expense.title
         // 編輯飲食支出時，還原店家位置資訊但不要觸發完成器
+        if let pName = expense.placeName { placeName = pName }
         if let addr = expense.placeAddress { placeAddress = addr }
         if let lat = expense.placeLatitude { placeLatitude = lat }
         if let lon = expense.placeLongitude { placeLongitude = lon }
@@ -3229,6 +3340,13 @@ struct AddExpenseView: View {
 
         // 編輯時若已連動理財項目，依目前清單重新計算「項目 N：型號-類別」
         applyAutoTitleIfLinked()
+
+        // [v25.365] 分類與資產連結都還原完了，才把座標的歸屬分類蓋章起來
+        // （放在最後是必要的：placeScopeKey 讀的就是上面這些狀態）。
+        // 沒有座標的舊資料不蓋章，免得誤以為一個空座標屬於這個分類。
+        if expense.placeLatitude != nil || expense.placeLongitude != nil {
+            placeScopeStamp = placeScopeKey
+        }
     }
 
     /// 同步汽車變動支出到理財模式的汽車

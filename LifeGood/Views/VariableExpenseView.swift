@@ -97,6 +97,7 @@ struct VariableExpenseView: View {
                     || exp.note.lowercased().contains(q)
                     || exp.categoryName.lowercased().contains(q)
                     || (exp.placeAddress?.lowercased().contains(q) ?? false)
+                    || (exp.placeName?.lowercased().contains(q) ?? false)
                     || (exp.diningMember?.lowercased().contains(q) ?? false)
                     || (exp.socialRecipient?.lowercased().contains(q) ?? false)
                     || (exp.taxSavingSubCategory?.rawValue.lowercased().contains(q) ?? false)
@@ -745,6 +746,7 @@ struct VariableExpenseView: View {
             linkedBankMilestoneId: expense.linkedBankMilestoneId,
             linkedBankCurrency: expense.linkedBankCurrency,
             linkedCreditCardMilestoneId: expense.linkedCreditCardMilestoneId,
+            placeName: expense.placeName,
             placeAddress: expense.placeAddress,
             placeLatitude: expense.placeLatitude,
             placeLongitude: expense.placeLongitude
@@ -873,6 +875,14 @@ struct ExpenseRow: View {
                         Image(systemName: "mappin.circle.fill")
                             .font(.system(size: 11, weight: .medium))
                             .foregroundStyle(.green.opacity(0.72))
+                    }
+                    // [v25.365] 汽車的地點名稱不在 title 裡（title 是「項目 N：型號-類別」），
+                    // 列表上看不到停在哪、在哪充電，所以額外補一段
+                    if let place = expense.placeName, !place.isEmpty {
+                        Text(place)
+                            .font(.caption2)
+                            .foregroundStyle(.teal)
+                            .lineLimit(1)
                     }
                     if !expense.note.isEmpty {
                         Text(expense.note)
