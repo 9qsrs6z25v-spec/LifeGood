@@ -2049,7 +2049,14 @@ struct AddMilestoneView: View {
             }
             Section {
                 TextField("悠遊卡卡號（選填）", text: $easyCardNumber).keyboardType(.numbersAndPunctuation)
-                TextField("一卡通卡號（選填）", text: $iPassNumber).keyboardType(.numbersAndPunctuation)
+                // [v25.369] 一卡通固定 16 碼，比照信用卡邊打邊每四碼補「-」
+                TextField("一卡通卡號（選填，16 碼）", text: $iPassNumber)
+                    .keyboardType(.numberPad)
+                    .font(.body.monospaced())
+                    .onChange(of: iPassNumber) { _, newValue in
+                        let formatted = CardVault.grouped(newValue, limit: CardVault.iPassDigits)
+                        if formatted != newValue { iPassNumber = formatted }
+                    }
             } header: {
                 milestoneSectionHeader("綁定電子票證", icon: "wallet.pass.fill", color: .teal)
             }
@@ -2651,7 +2658,12 @@ struct AddMilestoneView: View {
             cardNumberCipher = e.cardNumberCipher
             cardSecurityCipher = e.cardSecurityCipher
             easyCardNumber = e.easyCardNumber ?? ""
-            iPassNumber = e.iPassNumber ?? ""
+            // [v25.369] 既有的一卡通卡號在讀進來時就順手分好組；
+            // 只有「純數字／分隔線／空白」才動它，含其他字元的原樣保留
+            let rawIPass = e.iPassNumber ?? ""
+            iPassNumber = CardVault.isSafeToRegroup(rawIPass)
+                ? CardVault.grouped(rawIPass, limit: CardVault.iPassDigits)
+                : rawIPass
             happyGoNumber = e.happyGoNumber ?? ""
             if let cl = e.creditLimit, cl > 0 {
                 // 信用卡額度以「萬元」顯示；其他子分類保留原始值

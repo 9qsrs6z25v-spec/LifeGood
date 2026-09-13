@@ -1032,6 +1032,12 @@ struct FinanceCardView: View {
         return cardRevealed ? fmtYearMonthZh(ed) : "••••／••"
     }
 
+    /// 一卡通卡號顯示用分組。含數字以外字元的舊資料原樣顯示，不自作主張改寫。
+    private func displayIPass(_ raw: String) -> String {
+        guard CardVault.isSafeToRegroup(raw) else { return raw }
+        return CardVault.grouped(raw, limit: CardVault.iPassDigits)
+    }
+
     /// 這張卡有沒有需要鎖起來的東西。只有到期日的舊卡也算——
     /// 不然它的到期日會被遮起來卻沒有任何地方可以解鎖。
     private var cardHasProtectedFields: Bool {
@@ -1399,7 +1405,8 @@ struct FinanceCardView: View {
         // [v25.368] 到期日與卡號同一把鎖，沒解鎖只顯示遮罩
         if item.expiryDate != nil { infoRow("到期日", cardDetailExpiry) }
         if let ec = item.easyCardNumber, !ec.isEmpty { infoRow("悠遊卡", ec) }
-        if let ip = item.iPassNumber, !ip.isEmpty { infoRow("一卡通", ip) }
+        // [v25.369] 舊資料沒有分隔線；顯示時就分好組，不用等使用者重存一次
+        if let ip = item.iPassNumber, !ip.isEmpty { infoRow("一卡通", displayIPass(ip)) }
         if let hg = item.happyGoNumber, !hg.isEmpty { infoRow("Happy Go", hg) }
         infoRow("使用狀態", item.isDisabled == true ? "已停用" : "使用中")
         creditCardDisableButton

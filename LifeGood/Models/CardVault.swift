@@ -106,9 +106,12 @@ enum CardVault {
         String(raw.filter(\.isNumber).prefix(limit))
     }
 
+    /// 一卡通卡號固定 16 碼（悠遊卡是 9～10 碼，不適用四碼分組，所以沒有比照辦理）
+    static let iPassDigits = 16
+
     /// 每四碼插一個「-」：1234567812345678 → 1234-5678-1234-5678
-    static func grouped(_ raw: String) -> String {
-        let d = digits(raw)
+    static func grouped(_ raw: String, limit: Int = maxDigits) -> String {
+        let d = digits(raw, limit: limit)
         guard !d.isEmpty else { return "" }
         var out = ""
         for (i, ch) in d.enumerated() {
@@ -120,6 +123,12 @@ enum CardVault {
 
     static func lastFour(_ raw: String) -> String {
         String(digits(raw).suffix(4))
+    }
+
+    /// 既有資料是不是「只有數字、分隔線與空白」——是的話重新分組不會弄丟任何字元，
+    /// 可以安全地正規化；含其他字元（使用者自己加的註記）就原樣保留，不要自作主張。
+    static func isSafeToRegroup(_ raw: String) -> Bool {
+        raw.allSatisfy { $0.isNumber || $0 == "-" || $0 == " " }
     }
 
     /// 卡號長度看起來合理才算填完（13～19 碼涵蓋所有常見發卡組織）
