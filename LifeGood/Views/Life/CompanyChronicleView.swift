@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import ImageIO
 
 // MARK: - 廠區編年史（v25.363）
 //
@@ -299,83 +300,259 @@ struct CompanyChronicleView: View {
     }()
 }
 
+// MARK: - 出圖進度
+
+/// 編年史出圖的階段。畫面上的進度條讀這個，不用知道任何出圖細節。
+enum ChronicleExportStage: Equatable {
+    case measuring
+    /// 內容太長，自動把每個廠逐條列出的決議數降到 n 則（多的併成「還有 N 則決議」）
+    case trimming(perSite: Int)
+    case drawingPDF
+    case drawingImage
+    case encoding
+    case writing
+    case done
+
+    /// 進度條的位置。階段數固定，所以直接給定值，不用另外算權重。
+    var fraction: Double {
+        switch self {
+        case .measuring:     return 0.12
+        case .trimming:      return 0.30
+        case .drawingPDF:    return 0.55
+        case .drawingImage:  return 0.55
+        case .encoding:      return 0.80
+        case .writing:       return 0.93
+        case .done:          return 1.0
+        }
+    }
+
+    var text: String {
+        switch self {
+        case .measuring:              return "量測版面尺寸…"
+        case .trimming(let perSite):  return "內容太長，每個廠改列 \(perSite) 則決議…"
+        case .drawingPDF:             return "繪製 PDF（向量，可無限放大）…"
+        case .drawingImage:           return "繪製圖片…"
+        case .encoding:               return "壓縮檔案（背景進行）…"
+        case .writing:                return "存檔…"
+        case .done:                   return "完成"
+        }
+    }
+
+    /// 圖示圓的符號（沿用設定頁行動列 36pt 漸層圖示圓的視覺語言）
+    var icon: String {
+        switch self {
+        case .measuring:                   return "ruler"
+        case .trimming:                    return "scissors"
+        case .drawingPDF:                  return "doc.richtext"
+        case .drawingImage:                return "photo"
+        case .encoding, .writing:          return "square.and.arrow.down"
+        case .done:                        return "checkmark"
+        }
+    }
+}
+
+// MARK: - 出圖進度 HUD
+
+/// 出圖進行中的浮層。視覺沿用 SettingsView.settingsActionRow 的
+/// 「36pt 漸層圖示圓 ＋ 雙行文字」規格，底下多一條實際進度條。
+struct ChronicleExportHUD: View {
+    let stage: ChronicleExportStage
+    let subtitle: String
+    var accent: Color = .brown
+
+    init(stage: ChronicleExportStage, subtitle: String, accent: Color = .brown) {
+        self.stage = stage
+        self.subtitle = subtitle
+        self.accent = accent
+    }
+
+    var body: some View {
+        VStack(spacing: 14) {
+            HStack(spacing: 14) {
+                ZStack {
+                    Circle()
+                        .fill(
+                            LinearGradient(
+                                colors: [accent.opacity(0.22), accent.opacity(0.09)],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .frame(width: 36, height: 36)
+                    Circle()
+                        .stroke(accent.opacity(0.20), lineWidth: 1)
+                        .frame(width: 36, height: 36)
+                    Image(systemName: stage.icon)
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(accent)
+                }
+                .shadow(color: accent.opacity(0.15), radius: 4, x: 0, y: 2)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(stage.text)
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(.primary)
+                    Text(subtitle)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 0)
+            }
+            ProgressView(value: stage.fraction)
+                .tint(accent)
+        }
+        .padding(18)
+        .frame(maxWidth: 320)
+        .background(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(.regularMaterial)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(Color.secondary.opacity(0.15), lineWidth: 0.5)
+        )
+        .shadow(color: .black.opacity(0.18), radius: 18, x: 0, y: 8)
+        .padding(24)
+    }
+}
+
 // MARK: - 出圖
 
 enum ChronicleExporter {
-    /// 單邊像素上限與總像素上限。
+    /// 點陣圖的單邊／總像素預算。
     /// v25.364 固定用 2 倍出圖，據點一多就會做出上萬像素高的點陣圖：
-    /// CGImage 畫得出來（uiImage 不是 nil），但 pngData() 要再配置一份完整的
-    /// 未壓縮點陣＋輸出緩衝，記憶體不夠時它**只是安靜地回 nil、不丟錯**，
+    /// CGImage 畫得出來（uiImage 不是 nil），但編碼要再配置一份完整的未壓縮點陣＋
+    /// 輸出緩衝，記憶體不夠時 pngData() **只是安靜地回 nil、不丟錯**，
     /// 使用者就看到「圖片編碼失敗」。所以尺寸必須在出圖前先壓進預算裡。
     private static let maxSide: CGFloat = 10_000
     private static let maxPixels: CGFloat = 24_000_000
-    /// 最高倍率（列印用 2 倍就夠）
+    /// 點陣圖最高倍率（列印用 2 倍就夠）
     private static let maxScale: CGFloat = 2
+
+    /// 超過「螢幕長邊 × 這個倍數」就改出 PDF。
+    /// 這種尺寸的點陣圖本來就不適合用看圖程式開，PDF 是向量、沒有像素上限，
+    /// 放大、列印、分頁都交給看檔案的人決定。
+    private static let pdfScreenMultiple: CGFloat = 1.5
+
+    /// Core Graphics 的 PDF mediaBox 上限是 200×200 英吋（14400pt），
+    /// 超過會做出看圖程式打不開或內容被裁掉的檔案，所以自己先守住。
+    private static let maxPDFSide: CGFloat = 14_000
 
     enum ExportError: LocalizedError {
         case renderFailed
+        case tooLarge(width: Int, height: Int)
         case encodeFailed(width: Int, height: Int)
         case writeFailed(String)
 
         var errorDescription: String? {
             switch self {
             case .renderFailed:
-                return "畫面轉成圖片時失敗了。決議如果非常多，試試另一個方向（直式／橫式），或先減少據點數量。"
+                return "畫面量不出尺寸，轉檔失敗了。試試另一個方向（直式／橫式），或先減少據點數量。"
+            case .tooLarge(let w, let h):
+                return "內容太長了：\(w)×\(h) 點，超過 PDF 單頁的上限（14400 點）。"
+                    + "已經把每個廠的決議縮到最少仍然放不下，請改用橫式，或先減少據點數量。"
             case .encodeFailed(let w, let h):
                 return "圖片編碼失敗：這張圖是 \(w)×\(h) 像素，超過這台裝置能編碼的大小。"
-                    + "已經自動降過解析度與每個廠顯示的決議數仍然編不出來，請改用另一個方向（直式／橫式）試試。"
+                    + "請改用另一個方向（直式／橫式）試試。"
             case .writeFailed(let msg):
-                return "圖片存檔失敗：\(msg)"
+                return "檔案存檔失敗：\(msg)"
             }
         }
     }
 
-    /// 畫成圖片存到暫存檔，回傳可分享的 URL。
-    /// 失敗要往上丟——之前回 nil 讓呼叫端安靜地什麼都不做，使用者只會看到「按了沒反應」。
+    /// 出圖主流程。量完尺寸才決定要出 PDF 還是 PNG：
+    /// 超過螢幕長邊 1.5 倍 → PDF（向量，沒有點陣上限）；否則 → PNG。
+    ///
+    /// 繪製本身綁在主執行緒（ImageRenderer 是 @MainActor），但每個階段之間會
+    /// `Task.yield()` 讓進度條畫得出來；真正耗時又吃記憶體的「壓成檔案」則丟到
+    /// 背景執行緒，而且直接串流寫進檔案，不在記憶體裡先組一份完整的 Data。
     @MainActor
-    static func png(_ view: CompanyChronicleView, name: String) throws -> URL {
-        // 1) 先用 1 倍量出這張圖有多大（UIImage.size 是點，與倍率無關）
-        guard var base = render(view, scale: 1) else { throw ExportError.renderFailed }
+    static func export(
+        _ view: CompanyChronicleView,
+        name: String,
+        onProgress: @MainActor (ChronicleExportStage) -> Void
+    ) async throws -> URL {
+        onProgress(.measuring)
+        await Task.yield()
+
         var source = view
-        var pointSize = base.size
+        var size = measure(source)
+        guard size.width > 0, size.height > 0 else { throw ExportError.renderFailed }
 
-        // 2) 光是 1 倍就超過單邊上限時，減少每個廠要畫的決議數再量一次。
-        //    版面本來就會把多出來的寫成「還有 N 則決議」，所以縮減是安全的降級，
-        //    不會漏掉資訊、只是不逐條列出。
-        var perSite = source.maxResolutionsPerSite
-        while max(pointSize.width, pointSize.height) > maxSide, perSite > 2 {
-            perSite = max(2, perSite / 2)
-            source.maxResolutionsPerSite = perSite
-            guard let shrunk = render(source, scale: 1) else { break }
-            base = shrunk
-            pointSize = shrunk.size
-        }
+        let screen = screenSize
+        let pdfThreshold = max(screen.width, screen.height) * pdfScreenMultiple
+        let wantsPDF = max(size.width, size.height) > pdfThreshold
 
-        // 3) 在像素預算內挑得起的最高倍率
-        let scale = fittingScale(for: pointSize)
-
-        // 4) 依序嘗試：目標倍率 PNG → 目標倍率 JPEG → 1 倍 PNG → 1 倍 JPEG。
-        //    JPEG 編碼需要的記憶體比 PNG 低，是大圖真的編不出 PNG 時的退路。
-        var attempts: [(image: UIImage, scale: CGFloat)] = []
-        if scale > 1.01, let scaled = render(source, scale: scale) {
-            attempts.append((scaled, scale))
-        }
-        attempts.append((base, 1))
-
-        var lastPixels = CGSize(width: pointSize.width, height: pointSize.height)
-        for attempt in attempts {
-            let image = attempt.image
-            lastPixels = CGSize(width: image.size.width * attempt.scale,
-                                height: image.size.height * attempt.scale)
-            if let data = image.pngData() {
-                return try write(data, name: name, ext: "png")
+        if wantsPDF {
+            // PDF 單頁有 14400pt 的硬上限。超過就逐步減少每個廠逐條列出的決議數，
+            // 版面本來就會把多的寫成「還有 N 則決議」，是不漏資訊的降級。
+            var perSite = source.maxResolutionsPerSite
+            while max(size.width, size.height) > maxPDFSide, perSite > 1 {
+                perSite = max(1, perSite / 2)
+                source.maxResolutionsPerSite = perSite
+                onProgress(.trimming(perSite: perSite))
+                await Task.yield()
+                size = measure(source)
             }
-            if let data = image.jpegData(compressionQuality: 0.92) {
-                return try write(data, name: name, ext: "jpg")
+            guard max(size.width, size.height) <= maxPDFSide else {
+                throw ExportError.tooLarge(width: Int(size.width.rounded()),
+                                           height: Int(size.height.rounded()))
             }
+            onProgress(.drawingPDF)
+            await Task.yield()
+            let url = tempURL(name: name, ext: "pdf")
+            try renderPDF(source, to: url)
+            onProgress(.done)
+            return url
         }
-        throw ExportError.encodeFailed(width: Int(lastPixels.width.rounded()),
-                                       height: Int(lastPixels.height.rounded()))
+
+        // 點陣圖路徑：尺寸已經在一個半螢幕以內，挑得起的最高倍率一定編得出來
+        let scale = fittingScale(for: size)
+        onProgress(.drawingImage)
+        await Task.yield()
+        guard let image = render(source, scale: scale), let cgImage = image.cgImage else {
+            throw ExportError.renderFailed
+        }
+        let pixelWidth = Int((size.width * scale).rounded())
+        let pixelHeight = Int((size.height * scale).rounded())
+
+        onProgress(.encoding)
+        await Task.yield()
+        // 編碼丟到背景：CGImageDestination 直接寫檔，不像 pngData() 要先在
+        // 記憶體裡組出一整份完整的壓縮結果
+        let box = CGImageBox(cgImage)
+        let pngURL = tempURL(name: name, ext: "png")
+        let jpgURL = tempURL(name: name, ext: "jpg")
+        let written = await Task.detached(priority: .userInitiated) { () -> URL? in
+            if writeImage(box.image, to: pngURL, type: "public.png", quality: nil) {
+                return pngURL
+            }
+            // PNG 編不出來時，JPEG 需要的記憶體低很多，當作退路
+            if writeImage(box.image, to: jpgURL, type: "public.jpeg", quality: 0.92) {
+                return jpgURL
+            }
+            return nil
+        }.value
+
+        guard let written else {
+            throw ExportError.encodeFailed(width: pixelWidth, height: pixelHeight)
+        }
+        onProgress(.writing)
+        await Task.yield()
+        onProgress(.done)
+        return written
+    }
+
+    // MARK: 尺寸
+
+    /// 只量尺寸、不畫任何點陣：render 的第二個參數才是「真的去畫」，不呼叫它就只拿到 size。
+    /// 先前是先用 1 倍 render 出一張完整 UIImage 來量，長圖光是量測就要配置上百 MB。
+    @MainActor
+    private static func measure(_ view: CompanyChronicleView) -> CGSize {
+        var out: CGSize = .zero
+        let renderer = ImageRenderer(content: view)
+        renderer.proposedSize = .unspecified
+        renderer.render { size, _ in out = size }
+        return out
     }
 
     /// 讓 點尺寸 × 倍率 同時滿足「單邊 <= maxSide」與「總像素 <= maxPixels」的最高倍率
@@ -389,6 +566,18 @@ enum ChronicleExporter {
     }
 
     @MainActor
+    private static var screenSize: CGSize {
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        let scene = scenes.first { $0.activationState == .foregroundActive } ?? scenes.first
+        guard let size = scene?.screen.bounds.size, size.width > 0, size.height > 0 else {
+            return CGSize(width: 390, height: 844)
+        }
+        return size
+    }
+
+    // MARK: 繪製
+
+    @MainActor
     private static func render(_ view: CompanyChronicleView, scale: CGFloat) -> UIImage? {
         let renderer = ImageRenderer(content: view)
         renderer.proposedSize = .unspecified
@@ -396,17 +585,60 @@ enum ChronicleExporter {
         return renderer.uiImage
     }
 
-    private static func write(_ data: Data, name: String, ext: String) throws -> URL {
+    /// 向量 PDF：直接寫進檔案，不經過任何點陣緩衝，所以多長都不會爆記憶體。
+    /// 寫法比照本專案既有的組織圖 PDF 匯出（OrganizationView.generatePDFURL）。
+    @MainActor
+    private static func renderPDF(_ view: CompanyChronicleView, to url: URL) throws {
+        let renderer = ImageRenderer(content: view)
+        renderer.proposedSize = .unspecified
+        guard let consumer = CGDataConsumer(url: url as CFURL) else {
+            throw ExportError.writeFailed("無法建立 PDF 檔案")
+        }
+        var box = CGRect(x: 0, y: 0, width: 1200, height: 1600)
+        guard let pdfContext = CGContext(consumer: consumer, mediaBox: &box, nil) else {
+            throw ExportError.writeFailed("無法建立 PDF 繪圖環境")
+        }
+        var drew = false
+        renderer.render { size, draw in
+            let pageBox = CGRect(origin: .zero, size: size)
+            let pageInfo = [kCGPDFContextMediaBox as String: NSValue(cgRect: pageBox)]
+            pdfContext.beginPDFPage(pageInfo as CFDictionary)
+            draw(pdfContext)
+            pdfContext.endPDFPage()
+            drew = true
+        }
+        pdfContext.closePDF()
+        guard drew else { throw ExportError.renderFailed }
+    }
+
+    // MARK: 檔案
+
+    private static func tempURL(name: String, ext: String) -> URL {
         let safe = name
             .replacingOccurrences(of: "/", with: "-")
             .replacingOccurrences(of: ":", with: "-")
-        let url = FileManager.default.temporaryDirectory
+        return FileManager.default.temporaryDirectory
             .appendingPathComponent("\(safe).\(ext)")
-        do {
-            try data.write(to: url, options: .atomic)
-            return url
-        } catch {
-            throw ExportError.writeFailed(error.localizedDescription)
-        }
+    }
+
+    /// CGImage 本身不是 Sendable，用一個明確的盒子把它交給背景工作，
+    /// 而不是讓編譯器在每個呼叫點各自抱怨一次。
+    private final class CGImageBox: @unchecked Sendable {
+        let image: CGImage
+        init(_ image: CGImage) { self.image = image }
+    }
+
+    /// 直接把 CGImage 串流寫進檔案。成功回 true。
+    private nonisolated static func writeImage(
+        _ image: CGImage, to url: URL, type: String, quality: Double?
+    ) -> Bool {
+        try? FileManager.default.removeItem(at: url)
+        guard let dest = CGImageDestinationCreateWithURL(
+            url as CFURL, type as CFString, 1, nil
+        ) else { return false }
+        var options: [CFString: Any] = [:]
+        if let quality { options[kCGImageDestinationLossyCompressionQuality] = quality }
+        CGImageDestinationAddImage(dest, image, options as CFDictionary)
+        return CGImageDestinationFinalize(dest)
     }
 }

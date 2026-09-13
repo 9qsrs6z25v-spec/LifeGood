@@ -97,6 +97,9 @@ struct OrganizationView: View {
     @State private var hitIndex = 0
     /// [v25.364] 匯出失敗的原因。出圖失敗時一定要講出來，不能按了沒反應
     @State private var exportError: String?
+    /// [v25.367] 編年史出圖進度；非 nil＝正在出圖，畫面蓋一層 HUD 並擋住重複點擊
+    @State private var chronicleStage: ChronicleExportStage?
+    @State private var chronicleSubtitle = ""
 
     struct ResolutionJump: Identifiable {
         let roleId: UUID
@@ -254,6 +257,18 @@ struct OrganizationView: View {
                     lifeStore.deleteCompanySite(id: id)
                 }
             }
+            // [v25.367] 出圖進度：繪製本身綁在主執行緒（ImageRenderer 是 @MainActor），
+            // 但每個階段之間會 yield，這層才畫得出來；壓檔那段跑在背景執行緒。
+            .overlay {
+                if let stage = chronicleStage {
+                    ZStack {
+                        Color.black.opacity(0.12).ignoresSafeArea()
+                        ChronicleExportHUD(stage: stage, subtitle: chronicleSubtitle)
+                    }
+                    .transition(.opacity)
+                }
+            }
+            .animation(.easeInOut(duration: 0.18), value: chronicleStage)
             .alert("匯出失敗", isPresented: Binding(
                 get: { exportError != nil },
                 set: { if !$0 { exportError = nil } }
@@ -443,6 +458,8 @@ struct OrganizationView: View {
     }
 
     private func shareChronicle(_ orientation: CompanyChronicleView.Orientation) {
+        // 出圖中再按一次就忽略：HUD 已經蓋在畫面上，重入只會白做一次工
+        guard chronicleStage == nil else { return }
         let entries = chronicleEntries
         guard !entries.isEmpty else {
             exportError = "沒有可以排進年表的據點。編年史依啟用年月排序，"
@@ -461,10 +478,19 @@ struct OrganizationView: View {
             entries: entries,
             orientation: orientation)
         let name = title + "編年史_" + CompanyChronicleView.stamp.string(from: Date())
-        do {
-            pdfURL = IdentifiableURL(url: try ChronicleExporter.png(view, name: name))
-        } catch {
-            exportError = error.localizedDescription
+        chronicleSubtitle = (orientation == .vertical ? "直式・" : "橫式・")
+            + "\(entries.count) 個廠・\(total) 則決議"
+        chronicleStage = .measuring
+        Task { @MainActor in
+            defer { chronicleStage = nil }
+            do {
+                let url = try await ChronicleExporter.export(view, name: name) { stage in
+                    chronicleStage = stage
+                }
+                pdfURL = IdentifiableURL(url: url)
+            } catch {
+                exportError = error.localizedDescription
+            }
         }
     }
 
