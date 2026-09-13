@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 // MARK: - 廠區編年史（v25.363）
 //
@@ -301,38 +302,106 @@ struct CompanyChronicleView: View {
 // MARK: - 出圖
 
 enum ChronicleExporter {
+    /// 單邊像素上限與總像素上限。
+    /// v25.364 固定用 2 倍出圖，據點一多就會做出上萬像素高的點陣圖：
+    /// CGImage 畫得出來（uiImage 不是 nil），但 pngData() 要再配置一份完整的
+    /// 未壓縮點陣＋輸出緩衝，記憶體不夠時它**只是安靜地回 nil、不丟錯**，
+    /// 使用者就看到「圖片編碼失敗」。所以尺寸必須在出圖前先壓進預算裡。
+    private static let maxSide: CGFloat = 10_000
+    private static let maxPixels: CGFloat = 24_000_000
+    /// 最高倍率（列印用 2 倍就夠）
+    private static let maxScale: CGFloat = 2
+
     enum ExportError: LocalizedError {
         case renderFailed
-        case encodeFailed
+        case encodeFailed(width: Int, height: Int)
         case writeFailed(String)
 
         var errorDescription: String? {
             switch self {
             case .renderFailed:
                 return "畫面轉成圖片時失敗了。決議如果非常多，試試另一個方向（直式／橫式），或先減少據點數量。"
-            case .encodeFailed:
-                return "圖片編碼失敗。"
+            case .encodeFailed(let w, let h):
+                return "圖片編碼失敗：這張圖是 \(w)×\(h) 像素，超過這台裝置能編碼的大小。"
+                    + "已經自動降過解析度與每個廠顯示的決議數仍然編不出來，請改用另一個方向（直式／橫式）試試。"
             case .writeFailed(let msg):
                 return "圖片存檔失敗：\(msg)"
             }
         }
     }
 
-    /// 畫成 PNG 存到暫存檔，回傳可分享的 URL。
+    /// 畫成圖片存到暫存檔，回傳可分享的 URL。
     /// 失敗要往上丟——之前回 nil 讓呼叫端安靜地什麼都不做，使用者只會看到「按了沒反應」。
     @MainActor
     static func png(_ view: CompanyChronicleView, name: String) throws -> URL {
+        // 1) 先用 1 倍量出這張圖有多大（UIImage.size 是點，與倍率無關）
+        guard var base = render(view, scale: 1) else { throw ExportError.renderFailed }
+        var source = view
+        var pointSize = base.size
+
+        // 2) 光是 1 倍就超過單邊上限時，減少每個廠要畫的決議數再量一次。
+        //    版面本來就會把多出來的寫成「還有 N 則決議」，所以縮減是安全的降級，
+        //    不會漏掉資訊、只是不逐條列出。
+        var perSite = source.maxResolutionsPerSite
+        while max(pointSize.width, pointSize.height) > maxSide, perSite > 2 {
+            perSite = max(2, perSite / 2)
+            source.maxResolutionsPerSite = perSite
+            guard let shrunk = render(source, scale: 1) else { break }
+            base = shrunk
+            pointSize = shrunk.size
+        }
+
+        // 3) 在像素預算內挑得起的最高倍率
+        let scale = fittingScale(for: pointSize)
+
+        // 4) 依序嘗試：目標倍率 PNG → 目標倍率 JPEG → 1 倍 PNG → 1 倍 JPEG。
+        //    JPEG 編碼需要的記憶體比 PNG 低，是大圖真的編不出 PNG 時的退路。
+        var attempts: [(image: UIImage, scale: CGFloat)] = []
+        if scale > 1.01, let scaled = render(source, scale: scale) {
+            attempts.append((scaled, scale))
+        }
+        attempts.append((base, 1))
+
+        var lastPixels = CGSize(width: pointSize.width, height: pointSize.height)
+        for attempt in attempts {
+            let image = attempt.image
+            lastPixels = CGSize(width: image.size.width * attempt.scale,
+                                height: image.size.height * attempt.scale)
+            if let data = image.pngData() {
+                return try write(data, name: name, ext: "png")
+            }
+            if let data = image.jpegData(compressionQuality: 0.92) {
+                return try write(data, name: name, ext: "jpg")
+            }
+        }
+        throw ExportError.encodeFailed(width: Int(lastPixels.width.rounded()),
+                                       height: Int(lastPixels.height.rounded()))
+    }
+
+    /// 讓 點尺寸 × 倍率 同時滿足「單邊 <= maxSide」與「總像素 <= maxPixels」的最高倍率
+    private static func fittingScale(for pointSize: CGSize) -> CGFloat {
+        let longest = max(pointSize.width, pointSize.height)
+        let area = pointSize.width * pointSize.height
+        guard longest > 0, area > 0 else { return 1 }
+        let bySide = maxSide / longest
+        let byArea = (maxPixels / area).squareRoot()
+        return max(1, min(maxScale, min(bySide, byArea)))
+    }
+
+    @MainActor
+    private static func render(_ view: CompanyChronicleView, scale: CGFloat) -> UIImage? {
         let renderer = ImageRenderer(content: view)
         renderer.proposedSize = .unspecified
-        // 3 倍在據點多的時候容易做出超大點陣圖而失敗，2 倍列印仍然夠清楚
-        renderer.scale = 2
-        guard let image = renderer.uiImage else { throw ExportError.renderFailed }
-        guard let data = image.pngData() else { throw ExportError.encodeFailed }
+        renderer.scale = scale
+        return renderer.uiImage
+    }
+
+    private static func write(_ data: Data, name: String, ext: String) throws -> URL {
         let safe = name
             .replacingOccurrences(of: "/", with: "-")
             .replacingOccurrences(of: ":", with: "-")
         let url = FileManager.default.temporaryDirectory
-            .appendingPathComponent("\(safe).png")
+            .appendingPathComponent("\(safe).\(ext)")
         do {
             try data.write(to: url, options: .atomic)
             return url
