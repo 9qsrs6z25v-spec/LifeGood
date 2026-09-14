@@ -1206,110 +1206,10 @@ struct SubordinateDetailView: View {
                 }
             } else {
                 ForEach(Array(items.enumerated()), id: \.element.id) { idx, t in
-                    HStack(alignment: .center, spacing: 10) {
-                        // 左側可點打勾圓圈：直接切換完成，不進編輯頁
-                        Button {
-                            lifeStore.toggleTaskCompletion(subordinateId: subordinateId, taskId: t.id)
-                        } label: {
-                            Image(systemName: t.isCompleted ? "checkmark.circle.fill" : "circle")
-                                .font(.title3)
-                                .foregroundStyle(t.isCompleted ? Color.green : Color.cyan)
-                        }
-                        .buttonStyle(.plain)
-
-                        // 主體點按開任務詳情（onTapGesture 而非 Button，讓內層機台／系統
-                        // 膠囊 Button 可以各自吃掉自己的點擊——比照部門所屬設備清單寫法）
-                        VStack(alignment: .leading, spacing: 4) {
-                                Text(t.topic.isEmpty ? "未命名任務" : t.topic)
-                                    .font(.subheadline.weight(.medium))
-                                    .foregroundStyle(t.isCompleted ? .secondary : .primary)
-                                    .strikethrough(t.isCompleted, color: .secondary)
-                                    .lineLimit(1)
-                                HStack(spacing: 5) {
-                                    HStack(spacing: 3) {
-                                        Image(systemName: "calendar")
-                                            .font(.system(size: 8))
-                                        Text(formatDateTime(t.date))
-                                    }
-                                    .font(.caption2.weight(.medium))
-                                    .foregroundStyle(.secondary)
-                                    .padding(.horizontal, 6).padding(.vertical, 2)
-                                    .background(Color(.tertiarySystemFill))
-                                    .clipShape(Capsule())
-
-                                    if let due = t.dueDate {
-                                        let isOverdue = due < Date() && !t.isCompleted
-                                        let dueColor: Color = isOverdue ? .red : .cyan
-                                        HStack(spacing: 3) {
-                                            Image(systemName: "flag.fill")
-                                                .font(.system(size: 7))
-                                            Text("截止 \(formatDate(due))")
-                                        }
-                                        .font(.caption2.weight(.semibold))
-                                        .padding(.horizontal, 6).padding(.vertical, 2)
-                                        .background(dueColor.opacity(0.12))
-                                        .foregroundStyle(dueColor)
-                                        .clipShape(Capsule())
-                                        .overlay(Capsule().stroke(dueColor.opacity(0.22), lineWidth: 0.6))
-                                    }
-                                    // [v25.325] 應做未作為：紅色缺失膠囊
-                                    if t.isDereliction {
-                                        HStack(spacing: 3) {
-                                            Image(systemName: "exclamationmark.triangle.fill")
-                                                .font(.system(size: 7))
-                                            Text("缺失")
-                                        }
-                                        .font(.caption2.weight(.bold))
-                                        .padding(.horizontal, 6).padding(.vertical, 2)
-                                        .background(Color.red.opacity(0.12))
-                                        .foregroundStyle(.red)
-                                        .clipShape(Capsule())
-                                        .overlay(Capsule().stroke(Color.red.opacity(0.22), lineWidth: 0.6))
-                                    }
-                                    // [v25.294] 自訂分數任務：顯示分數膠囊（正綠負紅）
-                                    if let cs = t.customScore {
-                                        let csColor: Color = cs >= 0 ? .green : .red
-                                        Text(cs > 0 ? "+\(cs)分" : "\(cs)分")
-                                            .font(.caption2.weight(.bold))
-                                            .padding(.horizontal, 6).padding(.vertical, 2)
-                                            .background(csColor.opacity(0.12))
-                                            .foregroundStyle(csColor)
-                                            .clipShape(Capsule())
-                                            .overlay(Capsule().stroke(csColor.opacity(0.22), lineWidth: 0.6))
-                                    }
-                                    // 與兼任待辦連動：打勾會同步兩邊，評分也只算一次
-                                    if let back = t.sideRoleLink {
-                                        SideRoleLinkBadge(back: back)
-                                    }
-                                    // 機台警報任務：機台與系統別膠囊，點一下暫時篩選
-                                    if let info = taskLinkInfo(t) {
-                                        taskEquipmentChip(equipmentId: info.equipmentId, name: info.name)
-                                        if !info.system.isEmpty {
-                                            taskSystemChip(info.system)
-                                        }
-                                    }
-                                }
-                                if t.isCompleted {
-                                    CompletionStamp(completedAt: t.completedAt, due: t.dueDate)
-                                }
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .contentShape(Rectangle())
-                        .onTapGesture {
-                            if subscription.isPremium { previewItem = .task(subId: subordinateId, task: t) }
-                            else { showPremiumAlert = true }
-                        }
-
-                        Image(systemName: "chevron.right")
-                            .font(.caption2.weight(.semibold))
-                            .foregroundStyle(.tertiary)
-                    }
-                    .opacity(t.isCompleted ? 0.6 : 1)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 10)
-
+                    taskItemRow(t)
                     if idx < items.count - 1 {
-                        Divider().padding(.leading, 56)
+                        // ItemRow 的左內距 14 ＋ 勾選圈約 21 ＋ 間距 10
+                        Divider().padding(.leading, 45)
                     }
                 }
             }
@@ -1324,6 +1224,124 @@ struct SubordinateDetailView: View {
         .padding(.horizontal)
     }
 
+    // MARK: - [v25.371] 任務列（套用 ItemRow 模板）
+
+    /// 任務列。膠囊橫向捲軸、標題、內容預覽、可摺疊的細節全部交給模板，
+    /// 這裡只負責把 SubordinateTask 翻譯成模板要的資料。
+    private func taskItemRow(_ t: SubordinateTask) -> some View {
+        ItemRow(
+            chips: taskChips(t),
+            title: t.topic.isEmpty ? "未命名任務" : t.topic,
+            titleIsMuted: t.isCompleted,
+            titleStrikethrough: t.isCompleted,
+            preview: taskPreview(t),
+            disclosures: taskDisclosures(t),
+            disclosureLabel: "細節",
+            disclosureColor: .cyan,
+            onTap: {
+                if subscription.isPremium { previewItem = .task(subId: subordinateId, task: t) }
+                else { showPremiumAlert = true }
+            },
+            leading: {
+                // 左側可點打勾圓圈：直接切換完成，不進編輯頁
+                ItemCheckbox(isOn: t.isCompleted, color: .green, offColor: .cyan) {
+                    lifeStore.toggleTaskCompletion(subordinateId: subordinateId, taskId: t.id)
+                }
+            },
+            accessory: {
+                Image(systemName: "chevron.right")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+            }
+        )
+        .opacity(t.isCompleted ? 0.6 : 1)
+    }
+
+    /// 任務內容當預覽。以前列表上完全看不到內容，要點進去才知道這件事是什麼。
+    private func taskPreview(_ t: SubordinateTask) -> String? {
+        let c = t.content.trimmingCharacters(in: .whitespacesAndNewlines)
+        return c.isEmpty ? nil : c
+    }
+
+    /// 膠囊。截止與缺失排在最前面——膠囊列是橫向捲軸，排前面的才一眼看得到。
+    private func taskChips(_ t: SubordinateTask) -> [ItemChip] {
+        var chips: [ItemChip] = []
+        if let due = t.dueDate {
+            let overdue = due < Date() && !t.isCompleted
+            chips.append(ItemChip(id: "due", text: "截止 " + formatDate(due),
+                                  color: overdue ? .red : .cyan, icon: "flag.fill"))
+        }
+        // [v25.325] 應做未作為
+        if t.isDereliction {
+            chips.append(ItemChip(id: "dereliction", text: "缺失", color: .red,
+                                  icon: "exclamationmark.triangle.fill"))
+        }
+        // [v25.294] 自訂分數任務
+        if let cs = t.customScore {
+            chips.append(ItemChip(id: "score", text: taskScoreText(cs),
+                                  color: cs >= 0 ? .green : .red))
+        }
+        // 與兼任待辦連動：打勾會同步兩邊，評分也只算一次
+        if let back = t.sideRoleLink {
+            chips.append(ItemChip(id: "sideRole", text: taskSideRoleName(back),
+                                  color: .indigo, icon: "link"))
+        }
+        // 機台警報任務：機台與系統別膠囊，點一下暫時篩選（再點取消）
+        if let info = taskLinkInfo(t) {
+            let eqActive = taskFilterEquipmentId == info.equipmentId
+            chips.append(ItemChip(id: "equipment", text: info.name, color: .teal,
+                                  icon: "gearshape.2.fill", isActive: eqActive,
+                                  onTap: {
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                    taskFilterEquipmentId = eqActive ? nil : info.equipmentId
+                }
+            }))
+            if !info.system.isEmpty {
+                let sysActive = taskFilterSystem == info.system
+                chips.append(ItemChip(id: "system", text: info.system, color: .cyan,
+                                      isActive: sysActive,
+                                      onTap: {
+                    withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                        taskFilterSystem = sysActive ? nil : info.system
+                    }
+                }))
+            }
+        }
+        chips.append(ItemChip(id: "created", text: formatDateTime(t.date),
+                              color: .secondary, icon: "calendar"))
+        return chips
+    }
+
+    /// 字串在 ViewBuilder 外組好（本專案有型別檢查逾時的前科）
+    private func taskScoreText(_ score: Int) -> String {
+        score > 0 ? "+\(score)分" : "\(score)分"
+    }
+
+    private func taskSideRoleName(_ back: SideRoleBackLink) -> String {
+        let name = lifeStore.milestones.first { $0.id == back.roleId }?
+            .sideRoleName?.trimmingCharacters(in: .whitespaces) ?? ""
+        return name.isEmpty ? "兼任職務" : name
+    }
+
+    /// 摺疊細節：備註與警報任務的處理措施／回復結果。
+    /// 這三欄以前只存在編輯頁裡，列表上一個字都看不到。
+    private func taskDisclosures(_ t: SubordinateTask) -> [ItemDisclosure] {
+        var out: [ItemDisclosure] = []
+        let note = t.note.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !note.isEmpty {
+            out.append(ItemDisclosure(id: "note", title: "備註", body: note))
+        }
+        let action = t.responseAction.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !action.isEmpty {
+            out.append(ItemDisclosure(id: "action", title: "處理措施", body: action))
+        }
+        let result = t.responseResult.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !result.isEmpty {
+            out.append(ItemDisclosure(id: "result", title: "回復結果", body: result))
+        }
+        return out
+    }
+
     /// 機台警報任務的來源機台資訊（優先現查機台池——改名/改系統跟著更新；
     /// 機台被刪則退回連結建立當下的快照）
     private func taskLinkInfo(_ t: SubordinateTask) -> (equipmentId: UUID, name: String, system: String)? {
@@ -1332,53 +1350,6 @@ struct SubordinateDetailView: View {
             return (link.equipmentId, eq.name.isEmpty ? "未命名設備" : eq.name, eq.system)
         }
         return (link.equipmentId, link.equipmentName, link.system)
-    }
-
-    /// 機台膠囊：點一下只看該機台的警報任務、已篩選中顯示 ✕、再點取消
-    private func taskEquipmentChip(equipmentId: UUID, name: String) -> some View {
-        let active = taskFilterEquipmentId == equipmentId
-        return Button {
-            withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
-                taskFilterEquipmentId = active ? nil : equipmentId
-            }
-        } label: {
-            HStack(spacing: 3) {
-                Image(systemName: "gearshape.2.fill").font(.system(size: 7))
-                Text(name)
-                if active { Image(systemName: "xmark").font(.system(size: 7, weight: .bold)) }
-            }
-            .font(.caption2.weight(.semibold))
-            .padding(.horizontal, 6).padding(.vertical, 2)
-            .background(Color.teal.opacity(active ? 0.20 : 0.12))
-            .foregroundStyle(.teal)
-            .clipShape(Capsule())
-            .overlay(Capsule().stroke(Color.teal.opacity(active ? 0.4 : 0), lineWidth: 0.8))
-            .lineLimit(1)
-        }
-        .buttonStyle(.plain)
-    }
-
-    /// 系統別膠囊：點一下只看該系統的警報任務、已篩選中顯示 ✕、再點取消
-    private func taskSystemChip(_ system: String) -> some View {
-        let active = taskFilterSystem == system
-        return Button {
-            withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
-                taskFilterSystem = active ? nil : system
-            }
-        } label: {
-            HStack(spacing: 3) {
-                Text(system)
-                if active { Image(systemName: "xmark").font(.system(size: 7, weight: .bold)) }
-            }
-            .font(.caption2.weight(.semibold))
-            .padding(.horizontal, 6).padding(.vertical, 2)
-            .background(Color.cyan.opacity(active ? 0.20 : 0.12))
-            .foregroundStyle(.cyan)
-            .clipShape(Capsule())
-            .overlay(Capsule().stroke(Color.cyan.opacity(active ? 0.4 : 0), lineWidth: 0.8))
-            .lineLimit(1)
-        }
-        .buttonStyle(.plain)
     }
 
     /// 任務機台／系統篩選中橫幅：說明目前條件、點 ✕ 全部清除
@@ -1787,6 +1758,9 @@ struct SubordinateDetailView: View {
             .frame(width: 430)
             .padding(.vertical, 20)
             .background(Color(.systemGroupedBackground))
+            // [v25.371] 出的是靜態圖，橫向捲軸捲不動＝捲出 430pt 的膠囊會被整個裁掉。
+            // 讓所有 ItemRow 的膠囊改成換行排版，該有的標籤才全部入鏡。
+            .environment(\.itemRowChipsWrap, true)
             .environmentObject(lifeStore)
             .environmentObject(subscription)
         let renderer = ImageRenderer(content: content)

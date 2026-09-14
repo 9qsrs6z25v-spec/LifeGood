@@ -392,28 +392,57 @@ extension ItemRow where Accessory == EmptyView {
     }
 }
 
+// MARK: - 出圖模式
+
+private struct ItemRowChipsWrapKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
+extension EnvironmentValues {
+    /// [v25.371] 把膠囊列從「橫向捲動」改成「自動換行」。
+    /// ImageRenderer 出的是靜態圖，捲不動＝捲出畫面的膠囊等於整個消失
+    /// （出圖的版面有固定寬度，ScrollView 只會把超出的部分裁掉）。
+    /// 匯出前在最外層掛 `.environment(\.itemRowChipsWrap, true)`，
+    /// 底下所有 ItemRow 自動改用換行排版，呼叫端一行都不用改。
+    var itemRowChipsWrap: Bool {
+        get { self[ItemRowChipsWrapKey.self] }
+        set { self[ItemRowChipsWrapKey.self] = newValue }
+    }
+}
+
 // MARK: - 膠囊橫向捲軸
 
-/// 標籤列。多到放不下時自己左右捲，不會把標題擠掉
+/// 標籤列。多到放不下時自己左右捲，不會把標題擠掉。
+/// 出圖模式（itemRowChipsWrap）下改成換行，避免捲出畫面的膠囊在圖片裡不見。
 struct ItemChipBar: View {
     let chips: [ItemChip]
+    @Environment(\.itemRowChipsWrap) private var wrapChips
 
     var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 6) {
-                ForEach(chips) { chip in
-                    if let label = chip.leadingLabel, !label.isEmpty {
-                        HStack(spacing: 3) {
-                            Text(label).font(.caption2).foregroundStyle(.secondary)
-                            chipBody(chip)
-                        }
-                    } else {
-                        chipBody(chip)
-                    }
-                }
+        if wrapChips {
+            ChipFlowLayout(spacing: 6) {
+                ForEach(chips) { chip in chipEntry(chip) }
             }
-            // 膠囊本身可能有點按行為；留一點垂直空間避免描邊被裁掉
-            .padding(.vertical, 1)
+        } else {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(chips) { chip in chipEntry(chip) }
+                }
+                // 膠囊本身可能有點按行為；留一點垂直空間避免描邊被裁掉
+                .padding(.vertical, 1)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func chipEntry(_ chip: ItemChip) -> some View {
+        if let label = chip.leadingLabel, !label.isEmpty {
+            HStack(spacing: 3) {
+                Text(label).font(.caption2).foregroundStyle(.secondary)
+                chipBody(chip)
+            }
+        } else {
+            chipBody(chip)
         }
     }
 
@@ -453,13 +482,16 @@ struct ItemChipBar: View {
 struct ItemCheckbox: View {
     let isOn: Bool
     var color: Color = .green
+    /// [v25.371] 未勾選時的圈圈顏色。預設淡灰；有些區域（部屬任務）習慣用章節色，
+    /// 沒有這個參數就只能在呼叫端自己重刻一顆按鈕。
+    var offColor: Color = Color.secondary.opacity(0.45)
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
             Image(systemName: isOn ? "checkmark.circle.fill" : "circle")
                 .font(.system(size: 19))
-                .foregroundStyle(isOn ? color : Color.secondary.opacity(0.45))
+                .foregroundStyle(isOn ? color : offColor)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

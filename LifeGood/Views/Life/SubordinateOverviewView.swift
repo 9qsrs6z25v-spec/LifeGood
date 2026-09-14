@@ -481,6 +481,8 @@ struct SubordinateOverviewView: View {
             .frame(width: 430)
             .padding(.vertical, 20)
             .background(Color(.systemGroupedBackground))
+            // [v25.371] 靜態圖捲不動：膠囊列改換行，不然捲出 430pt 的標籤會被裁掉
+            .environment(\.itemRowChipsWrap, true)
             .environmentObject(lifeStore)
         let renderer = ImageRenderer(content: content)
         renderer.scale = max(UIScreen.main.scale, 3)
