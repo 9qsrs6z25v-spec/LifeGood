@@ -442,34 +442,40 @@ struct SubordinateDetailView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button("關閉") { dismiss() } }
+                // [v25.370] 原本是「分享／排名／升職／編輯」四顆並排，
+                // 連同左邊的「關閉」把標題擠成「部屬...」。全部收進一顆溢出選單，
+                // 標題才有位置完整顯示。
                 ToolbarItem(placement: .topBarTrailing) {
-                    HStack(spacing: 16) {
-                        Menu {
-                            Button { exportJPG(mentioned: mentionedItemsCache) } label: { Label("匯出圖片", systemImage: "photo") }
-                            Button { exportText(mentioned: mentionedItemsCache) } label: { Label("匯出文字", systemImage: "text.alignleft") }
-                        } label: {
-                            Image(systemName: "square.and.arrow.up")
-                        }
-                        // [v25.348] 績效互評：填這位同仁對大家的年度排名
+                    Menu {
                         Button {
-                            if subscription.isPremium { showPerformance = true }
+                            if subscription.isPremium { showEdit = true }
                             else { showPremiumAlert = true }
                         } label: {
-                            Image(systemName: "trophy.fill").foregroundStyle(.orange)
+                            Label("編輯", systemImage: "square.and.pencil")
                         }
                         // 升職（使用者指定）：付費鎖比照編輯
                         Button {
                             if subscription.isPremium { showPromotion = true }
                             else { showPremiumAlert = true }
                         } label: {
-                            Image(systemName: "arrow.up.circle.fill")
-                                .font(.title3)
-                                .foregroundStyle(.orange)
+                            Label("升職", systemImage: "arrow.up.circle.fill")
                         }
-                        Button("編輯") {
-                            if subscription.isPremium { showEdit = true }
+                        // [v25.348] 績效互評：填這位同仁對大家的年度排名
+                        Button {
+                            if subscription.isPremium { showPerformance = true }
                             else { showPremiumAlert = true }
-                        }.foregroundStyle(.green)
+                        } label: {
+                            Label("績效互評排名", systemImage: "trophy.fill")
+                        }
+                        Divider()
+                        Button { exportJPG(mentioned: mentionedItemsCache) } label: {
+                            Label("匯出圖片", systemImage: "photo")
+                        }
+                        Button { exportText(mentioned: mentionedItemsCache) } label: {
+                            Label("匯出文字", systemImage: "text.alignleft")
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
                     }
                 }
             }
