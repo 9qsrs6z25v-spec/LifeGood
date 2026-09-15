@@ -3336,9 +3336,25 @@ struct PerformanceScore: Identifiable {
     var overallScore: Double = 0
     /// [v25.372] 有沒有可用的綜合分數（沒有＝這個人已經不在部屬清單裡）
     var hasOverall: Bool = false
-    /// [v25.372] 最終分數＝排名分數 × 占比 ＋ 綜合分數 × (1 − 占比)。
+
+    // [v25.373] 正規化：兩段分數的量級差很多（排名分數是各票加權後的累計、
+    // 綜合分數是 0～100 多的評分），直接加權會讓占比形同虛設。
+    // 先把兩者各自在**同一個職等內**換算成 100 分制，占比才真的等於影響力。
+
+    /// 這個職等裡「排名分數」的最高值（＝正規化後的 100 分）
+    var rankBasis: Double = 0
+    /// 這個職等裡「綜合分數」的最高值（＝正規化後的 100 分）
+    var overallBasis: Double = 0
+    /// 排名分數正規化後（0～100）
+    var normalizedRank: Double = 0
+    /// 綜合分數正規化後（0～100）
+    var normalizedOverall: Double = 0
+    /// [v25.372] 最終分數＝正規化排名 × 占比 ＋ 正規化綜合 × (1 − 占比)。
     /// 占比是年度層級的加權平均，由 LifeStore.performanceShare(year:) 算出。
     var finalScore: Double = 0
+    /// [v25.373] 未正規化的同一式加權結果。正規化是**每個職等各自**做的，
+    /// 所以正規化分數不能跨職等比較——這個原始值才看得出低職等的人實際做了多少事。
+    var rawFinalScore: Double = 0
     /// 平均名次（跨所有把他排進去的票）
     var averageRank: Double {
         guard !sources.isEmpty else { return 0 }

@@ -496,25 +496,40 @@ struct PerformanceSummaryView: View {
     // MARK: 職等分段標題
 
     private func gradeHeader(_ section: PerformanceGradeSection) -> some View {
-        HStack(spacing: 8) {
-            Capsule()
-                .fill(LinearGradient(colors: [.orange, .orange.opacity(0.35)],
-                                     startPoint: .top, endPoint: .bottom))
-                .frame(width: 4, height: 16)
-            Text(section.label).font(.subheadline.weight(.bold))
-            Text("\(section.scores.count) 人")
-                .font(.system(size: 10, weight: .bold))
-                .padding(.horizontal, 6).padding(.vertical, 2)
-                .background(Color.orange.opacity(0.13)).foregroundStyle(.orange)
-                .clipShape(Capsule())
-                .overlay(Capsule().stroke(Color.orange.opacity(0.22), lineWidth: 0.6))
-            Spacer()
-            if let w = section.weight {
-                Text("權重 ×\(pointsText(w))")
-                    .font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 8) {
+                Capsule()
+                    .fill(LinearGradient(colors: [.orange, .orange.opacity(0.35)],
+                                         startPoint: .top, endPoint: .bottom))
+                    .frame(width: 4, height: 16)
+                Text(section.label).font(.subheadline.weight(.bold))
+                Text("\(section.scores.count) 人")
+                    .font(.system(size: 10, weight: .bold))
+                    .padding(.horizontal, 6).padding(.vertical, 2)
+                    .background(Color.orange.opacity(0.13)).foregroundStyle(.orange)
+                    .clipShape(Capsule())
+                    .overlay(Capsule().stroke(Color.orange.opacity(0.22), lineWidth: 0.6))
+                Spacer()
+                if let w = section.weight {
+                    Text("權重 ×\(pointsText(w))")
+                        .font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
+                }
+            }
+            // [v25.373] 講清楚這個職等的 100 分是拿什麼當基準換算的
+            if let basisLine = gradeBasisLine(section) {
+                Text(basisLine)
+                    .font(.system(size: 9)).foregroundStyle(.tertiary)
+                    .padding(.leading, 12)
             }
         }
         .padding(.top, 6)
+    }
+
+    /// 正規化基準說明。基準取整個職等（不分課別），所以切換課別篩選不會讓分數跳動。
+    private func gradeBasisLine(_ section: PerformanceGradeSection) -> String? {
+        guard let s = section.scores.first, s.rankBasis > 0 || s.overallBasis > 0 else { return nil }
+        return "100 分基準：排名 " + pointsText(s.rankBasis)
+            + "、綜合 " + pointsText(s.overallBasis) + "（本職等最高，不分課別）"
     }
 
     // MARK: 看板
@@ -677,9 +692,25 @@ struct PerformanceSummaryView: View {
                             .font(.caption2).foregroundStyle(.secondary)
                     }
                     Spacer()
-                    Text(pointsText(score.finalScore))
-                        .font(.system(size: 19, weight: .bold, design: .rounded).monospacedDigit())
-                        .foregroundStyle(.orange)
+                    // [v25.373] 正規化分數 / 未正規化分數。
+                    // 正規化是每個職等各自做的，第一名一律 100 分，跨職等比不出高低；
+                    // 右邊那個原始值才看得出低職等的人實際做了多少事。
+                    VStack(alignment: .trailing, spacing: 0) {
+                        HStack(alignment: .firstTextBaseline, spacing: 3) {
+                            Text(pointsText(score.finalScore))
+                                .font(.system(size: 19, weight: .bold, design: .rounded).monospacedDigit())
+                                .foregroundStyle(.orange)
+                            Text("/")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(.tertiary)
+                            Text(pointsText(score.rawFinalScore))
+                                .font(.system(size: 13, weight: .semibold, design: .rounded).monospacedDigit())
+                                .foregroundStyle(.secondary)
+                        }
+                        Text("正規化 / 原始")
+                            .font(.system(size: 8, weight: .semibold))
+                            .foregroundStyle(.tertiary)
+                    }
                     Image(systemName: isOpen ? "chevron.up" : "chevron.down")
                         .font(.system(size: 11, weight: .bold)).foregroundStyle(.tertiary)
                 }
@@ -707,15 +738,15 @@ struct PerformanceSummaryView: View {
             .stroke(Color(.separator).opacity(0.12), lineWidth: 0.75))
     }
 
-    /// [v25.372] 最終分數的組成：排名分數 × 占比 ＋ 綜合分數 × (1 − 占比)
+    /// [v25.372] 最終分數的組成。[v25.373] 兩段分數先在同職等內正規化到 100 分再加權。
     private func finalBreakdown(_ score: PerformanceScore) -> some View {
         VStack(spacing: 5) {
-            breakdownRow(label: "排名分數", value: score.total,
-                         sharePercent: share.rankPercent,
-                         product: score.total * share.rank, color: .orange)
-            breakdownRow(label: "綜合分數", value: score.overallScore,
-                         sharePercent: share.overallPercent,
-                         product: score.overallScore * share.overall, color: .purple)
+            breakdownRow(label: "排名分數", raw: score.total, basis: score.rankBasis,
+                         normalized: score.normalizedRank, sharePercent: share.rankPercent,
+                         product: score.normalizedRank * share.rank, color: .orange)
+            breakdownRow(label: "綜合分數", raw: score.overallScore, basis: score.overallBasis,
+                         normalized: score.normalizedOverall, sharePercent: share.overallPercent,
+                         product: score.normalizedOverall * share.overall, color: .purple)
             if !score.hasOverall {
                 HStack(spacing: 5) {
                     Image(systemName: "exclamationmark.triangle.fill")
@@ -727,32 +758,59 @@ struct PerformanceSummaryView: View {
             }
             Divider().padding(.vertical, 2)
             HStack {
-                Text("最終分數").font(.caption.weight(.bold))
+                Text("最終分數（正規化）").font(.caption.weight(.bold))
                 Spacer()
                 Text(pointsText(score.finalScore))
                     .font(.caption.weight(.bold).monospacedDigit())
                     .foregroundStyle(.orange)
             }
+            HStack {
+                Text("未正規化").font(.caption2).foregroundStyle(.secondary)
+                Spacer()
+                Text(rawFormulaLine(score))
+                    .font(.system(size: 10).monospacedDigit()).foregroundStyle(.secondary)
+            }
         }
     }
 
-    private func breakdownRow(label: String, value: Double, sharePercent: Double,
+    /// 一段分數：原始值 →（同職等最高分當 100）正規化值 × 占比
+    private func breakdownRow(label: String, raw: Double, basis: Double,
+                              normalized: Double, sharePercent: Double,
                               product: Double, color: Color) -> some View {
-        HStack(spacing: 8) {
-            Text(label)
-                .font(.caption.weight(.semibold))
-                .frame(width: 68, alignment: .leading)
-            Text(breakdownFormula(value: value, sharePercent: sharePercent))
-                .font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
-            Spacer()
-            Text(pointsText(product))
-                .font(.caption.weight(.bold).monospacedDigit())
-                .foregroundStyle(color)
+        VStack(alignment: .leading, spacing: 1) {
+            HStack(spacing: 8) {
+                Text(label)
+                    .font(.caption.weight(.semibold))
+                    .frame(width: 68, alignment: .leading)
+                Text(breakdownFormula(value: normalized, sharePercent: sharePercent))
+                    .font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
+                Spacer()
+                Text(pointsText(product))
+                    .font(.caption.weight(.bold).monospacedDigit())
+                    .foregroundStyle(color)
+            }
+            Text(normalizeLine(raw: raw, basis: basis, normalized: normalized))
+                .font(.system(size: 9).monospacedDigit())
+                .foregroundStyle(.tertiary)
+                .padding(.leading, 76)
         }
     }
 
+    /// 字串在 ViewBuilder 外組好（本專案有型別檢查逾時的前科）
     private func breakdownFormula(value: Double, sharePercent: Double) -> String {
         pointsText(value) + " × " + percentText(sharePercent) + "%"
+    }
+
+    private func normalizeLine(raw: Double, basis: Double, normalized: Double) -> String {
+        guard basis > 0 else { return "本職等沒有可用的基準，正規化後為 0" }
+        return "原始 " + pointsText(raw) + " ÷ 本職等最高 " + pointsText(basis)
+            + " × 100 = " + pointsText(normalized)
+    }
+
+    private func rawFormulaLine(_ score: PerformanceScore) -> String {
+        pointsText(score.total) + " × " + percentText(share.rankPercent) + "% + "
+            + pointsText(score.overallScore) + " × " + percentText(share.overallPercent)
+            + "% = " + pointsText(score.rawFinalScore)
     }
 
     /// 名次列的副標：職等已經是分段標題，這裡只補課別、票數與平均名次
@@ -818,7 +876,7 @@ struct PerformanceSummaryView: View {
     }
 
     /// 計分說明：整段寫成單一字串常數，不要在 Text(...) 裡用 + 串接
-    private static let scoringNote = "計分兩段。第一段「排名分數」：排名在「同課 × 同職等」的組內進行，某組 N 人時第 1 名基礎分 N、往下每名少 1 分，再乘上評分者職等的績效權重後加總；該職等只有 1 個人時直接算第 1 名、基礎分 1 分。第二段「最終分數」＝排名分數 × 排名平均占比 ＋ 綜合分數（主動性與潛力的平均）×（1 − 占比）；占比是每張票各自填的百分比，再依評分者職等權重取加權平均。總排名依最終分數、依職等分開呈現、名次各自從第 1 名起算（職等由票上的快照決定，職等權重高的排前面）。注意兩段分數的量級不同——排名分數是各票加權後的累計值，綜合分數是 0～100 多的評分，數字大小不能直接對比。"
+    private static let scoringNote = "計分三段。①「排名分數」：排名在「同課 × 同職等」的組內進行，某組 N 人時第 1 名基礎分 N、往下每名少 1 分，再乘上評分者職等的績效權重後加總；該職等只有 1 個人時直接算第 1 名、基礎分 1 分。②「正規化」：排名分數與綜合分數（主動性與潛力的平均）的量級差很多，直接加權會讓占比形同虛設，所以兩者各自在同一個職等內除以該職等的最高分再乘 100——每個職等的第一名都是 100 分。基準取整個職等、不分課別，切換課別篩選不會讓分數跳動。③「最終分數」＝正規化排名 × 排名平均占比 ＋ 正規化綜合 ×（1 − 占比）；占比是每張票各自填的百分比再依評分者職等權重取加權平均。每一列右邊顯示「正規化 / 原始」兩個數字：正規化後每個職等的第一名都是 100，跨職等比不出高低，要看低職等實際做了多少事就看原始值。同職等內組人數不同時，人多的組基礎分上限較高，正規化後仍會略占優勢。"
 
     private func rankColor(_ rank: Int) -> Color {
         switch rank {

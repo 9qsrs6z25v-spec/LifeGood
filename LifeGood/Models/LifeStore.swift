@@ -813,7 +813,29 @@ class LifeStore: ObservableObject {
                 score.overallScore = 0
                 score.hasOverall = false
             }
-            score.finalScore = score.total * share.rank + score.overallScore * share.overall
+            totals[personId] = score
+        }
+        // [v25.373] 正規化：每個職等各自找出兩段分數的最高值當 100 分。
+        // 基準取**整個職等**（不分課別），所以畫面上套課別篩選不會讓分數跟著變動。
+        var rankBasis: [PerformanceGradeKey: Double] = [:]
+        var overallBasis: [PerformanceGradeKey: Double] = [:]
+        for s in totals.values {
+            let key = PerformanceGradeKey(id: s.gradeId, label: s.gradeLabel)
+            rankBasis[key] = max(rankBasis[key] ?? 0, s.total)
+            overallBasis[key] = max(overallBasis[key] ?? 0, s.overallScore)
+        }
+        for (personId, var score) in totals {
+            let key = PerformanceGradeKey(id: score.gradeId, label: score.gradeLabel)
+            let rBase = rankBasis[key] ?? 0
+            let oBase = overallBasis[key] ?? 0
+            score.rankBasis = rBase
+            score.overallBasis = oBase
+            score.normalizedRank = rBase > 0 ? score.total / rBase * 100 : 0
+            score.normalizedOverall = oBase > 0 ? score.overallScore / oBase * 100 : 0
+            score.finalScore = score.normalizedRank * share.rank
+                + score.normalizedOverall * share.overall
+            // 未正規化的同一式：跨職等對照用（正規化後每個職等的第一名都是 100，比不出來）
+            score.rawFinalScore = score.total * share.rank + score.overallScore * share.overall
             totals[personId] = score
         }
         return totals.values.sorted { a, b in
