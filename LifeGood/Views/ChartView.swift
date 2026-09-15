@@ -1,12 +1,130 @@
 import SwiftUI
 import Charts
 
+// MARK: - 美化紀錄（ChartView）
+// [2026-06] 本次美化方向：
+//   1. expenseTypeBreakdown：比例條升級為雙段圓角分色條 + 段間 4pt 空隙 + 比例百分比標注列
+//      + 進場 spring 動畫（typeBreakdownAppeared），對齊 FinanceOverviewView.allocationSection 規格
+//   2. breakdownLegendItem：圖示圓從 32pt 升至 36pt、金額改為 .system(size:15) rounded bold、
+//      百分比改為彩色膠囊（含細邊框），對齊 OverviewView.categoryRow 設計
+//   3. 三種圖表空狀態（趨勢 / 變動圓餅 / 固定圓餅）：升級為雙層脈衝光環（pieEmptyPulse）
+//      + 漸層底圓 + 細邊框 + 圖示顏色同分類 accent，
+//      對齊 IncomeView.emptyState 雙環脈衝設計規格
+//   4. expenseTypeBreakdown 空狀態同步升級雙層脈衝光環，
+//      對齊 VariableExpenseView.emptyStateView 規格
+//   5. pieChartBody 圖例項目：圖示圓從 32pt 升至 36pt（icon size 13→15），
+//      金額改為 .system(size:15, weight:.bold, design:.rounded) + minimumScaleFactor(0.72)
+//      + contentTransition(.numericText())，百分比改為彩色膠囊（含細邊框 0.5pt），
+//      對齊 breakdownLegendItem 統一規格，確保變動/固定圓餅兩頁圖例一致
+// [2026-06 v2] 本次美化方向：
+//   6. chartHeroCard 進場動畫：補 heroCardAppeared spring 進場動畫（透明度 + Y 位移），
+//      對齊 FinanceChartView.financeChartHeroCard / SavingsInsuranceView summaryHeader 規格
+//   7. 輪播指示器主題色：各模式圓點 / 膠囊底色 / 文字色改為對應主題色
+//      （趨勢=green / 變動圓餅=orange / 固定圓餅=blue），新增 ChartMode.themeColor 擴充；
+//      視覺上一眼即知目前所在圖表類型，對齊 CareerView.subCategoryBreakdown 分類色彩語言
+//   8. variablePieChart / fixedPieChart 空狀態圓環：從錯誤的 .green 修正為各自主題色
+//      （變動=orange / 固定=blue），消除空狀態與該分頁主題色不一致的視覺矛盾
+// [2026-06 v3] 本次美化方向：
+//   9. trendChart 標題列：補入「N 點」計數膠囊徽章（.green），對齊
+//      variablePieChart / fixedPieChart 標題規格，讓三頁圖表標題視覺均值一致。
+//  10. variablePieChart / fixedPieChart 標題列：補入「N 類」計數膠囊
+//      （橘色 / 藍色，對齊 OverviewView.categoryBreakdownSection 標題設計語言）。
+//  11. expenseTypeBreakdown 標題「本月」標籤：從純灰 tertiarySystemFill → 綠色膠囊
+//      + 細邊框（Color.green.opacity(0.22)），對齊全 App section 計數膠囊配色語言。
+//  12. expenseTypeBreakdown 雙段比例條：各段加入 glow overlay（頂部白色高亮 +
+//      底部柔化），提升彩條立體感，對齊 FinanceOverviewView.allocationSection 規格。
+//  13. breakdownLegendItem 圖示圓：底色從純色 color.opacity(0.14) 升級為
+//      LinearGradient（topLeading 0.20 → bottomTrailing 0.08），對齊
+//      OverviewView.categoryRow / FinanceOverviewView.allocationSection 圖示圓規格。
+//  14. pieChartBody 圖例行：加入交錯淡入進場動畫（pieRowsAppeared 旗標 +
+//      0.06s stagger），對齊 FinanceChartView.allocationRowsAppeared 規格。
+// [2026-06 v4] 本次美化方向：
+//  15. chartHeroCard 背景：補入第三顆散景圓（中右 55pt，white.opacity(0.07)，blur 8），
+//      對齊 IncomeView / VariableExpenseView summaryHeader 三顆散景設計規格。
+//  16. chartHeroCard 背景：補入 glass shine 頂部白色漸層（LinearGradient
+//      [.white.opacity(0.18),.clear] top→center），與 OverviewView / IncomeView /
+//      VariableExpenseView / FixedExpenseView / FinanceOverviewView 英雄卡片
+//      glass shine 規格完全統一，消除此卡片是全 App 唯一缺漏的視覺不均衡現象。
+// [2026-07 v5] 金額量級單位一致性修復：
+//  17. trendChart Y 軸刻度 abbreviateCurrency(_:)：原本只到「萬」量級（≥1萬顯示
+//      "%.0f萬"），未滿 1 萬則混用英式縮寫 "%.1fk"（如 "3.5k"），與全 App 其餘畫面
+//      一律使用「萬／億」中文量級單位的慣例不一致，且金額趨勢達 1 億以上時會被顯示成
+//      「12000萬」這種鉅額萬數字。改為比照 FinanceOverviewView.fmtShort／
+//      Double.ntdWanString 既有規格：≥1億 → "%.1f億"、≥1萬 → "%.0f萬"、
+//      其餘維持原始整數，移除不一致的 "k" 縮寫分支。純顯示層調整，圖表資料、
+//      期間切換、拖曳選點等既有邏輯完全未變動。
+//      （下次美化本檔案時：可留意 trendChart／variablePieChart／fixedPieChart 三個
+//      分頁的空狀態圖示圓與骨架載入動畫規格是否有可再收斂之處，或轉往其他仍留有
+//      待辦的畫面）
+// [2026-07 v6] 承接上方待辦，本次美化「載入圖表資料…」載入狀態：
+//  18. 主體 isLoading 卡片：原本是裸 ProgressView + 純文字，是全 App 載入態中
+//      唯一還在用系統原生 spinner、且與空狀態雙層脈衝光環／漸層圖示圓設計語言
+//      脫節的地方。改為對齊 trendChart／variablePieChart／fixedPieChart 空狀態的
+//      雙層脈衝光環 + 漸層圖示圓（chart.bar.fill 圖示以線性旋轉取代圈圈 spinner），
+//      並補上 7 條長條圖骨架佔位條（隨脈衝呼吸淡入淡出），讓「即將出現長條圖」的
+//      預期更明確；卡片補上 Color.green.opacity(0.10) 細邊框，對齊全 App 卡片統一
+//      規格。新增 chartLoadingPulse／chartLoadingSpin 旗標與可取消
+//      chartLoadingPulseTask（寫法比照既有四個 EmptyPulse 旗標：loadChartData()
+//      重載時歸零＋onDisappear 取消，避免快速切換週期時動畫從中途開始）。
+//      純視覺層調整，資料載入流程、期間切換、拖曳選點等既有邏輯完全未變動。
+// [2026-07 v7] 承接上方待辦，本次美化 chartHeroCard 頂部行內小型載入指示器：
+//  19. 頂部標籤旁的白色系統原生 ProgressView（0.65 倍縮小 spinner）是本檔案最後一處
+//      殘留系統 spinner 的地方，與大卡（isLoading 卡片）改用的漸層圖示圓＋旋轉
+//      chart.bar.fill 語言不一致。改為 14pt 迷你版同款造型（白色系漸層圓 + 旋轉
+//      圖示），共用大卡既有的 chartLoadingSpin 旗標（不新增 state），兩處圖示同步
+//      旋轉。純視覺層調整，isLoading 判斷邏輯、金額格式化等既有邏輯完全未變動。
+//      （本檔案 isLoading 相關視覺已全數收斂一致；下次美化本檔案時可留意其餘互動
+//      細節，或轉往其他仍留有待辦的畫面）
+// [2026-08 v8] chartHeroCard 頂部區間總計大字補齊自適應防截斷：
+//  20. 頂部「區間總計」32pt 大字（Text(formatCurrency(totalForPeriod))）原本沒有
+//      lineLimit／minimumScaleFactor 防截斷保護，是同系列英雄卡 OverviewView／
+//      IncomeView／FinanceOverviewView／FinanceChartView（v25.104）皆已修過、
+//      本檔案仍缺的同型缺口——formatCurrency 走 ntdWanString 萬／億量級縮寫，
+//      切換到長期間（如全年/全部）總額達億量級或窄螢幕時，字級沒有下修空間，
+//      可能被系統裁切。補上 .lineLimit(1) + .minimumScaleFactor(0.6)，對齊其餘
+//      英雄卡同尺寸大字規格。純視覺層調整，totalForPeriod／formatCurrency 換算
+//      邏輯與拖曳選點、期間切換等既有行為完全未變動。
+//      （下次美化本檔案時：可留意「最高」膠囊徽章與 periodHeroLabel 標籤在極端
+//      窄螢幕下的排列，或轉往其他仍留有待辦的畫面）
+// [2026-08 v9] 補齊 v8 留下的待辦：chartHeroCard 頂部列窄螢幕排列防護：
+//  21. periodHeroLabel（「近 N 天/週/月/季/年支出總計」caption 標籤）與「最高」膠囊徽章內的
+//      formatCurrency(maxAmount) 兩處原本都沒有 lineLimit／minimumScaleFactor，是本檔案 v8
+//      已補齊中央 32pt 區間總計大字防截斷後，同一列仍缺同型防護的最後兩處文字——期間標籤
+//      本身固定但在窄螢幕（如 iPhone SE）+ isLoading 迷你旋轉圖示同時出現時可能被右側徽章
+//      擠壓換行，最高值金額在億量級時也可能被固定 Capsule padding 裁切。補上 periodHeroLabel
+//      .lineLimit(1) + .minimumScaleFactor(0.8)（caption 級標籤規格，對齊 OverviewView 同類
+//      標籤慣例）、最高值金額 .lineLimit(1) + .minimumScaleFactor(0.6)（對齊全 App 英雄卡大字
+//      金額規格）；並為徽章補上 .layoutPriority(1)，窄螢幕擠壓時優先保留最高值徽章完整可讀，
+//      改由左側期間標籤與總計大字（本已有 minimumScaleFactor）吸收縮放空間。純視覺層調整，
+//      periodHeroLabel／maxAmount／formatCurrency 等既有資料與期間切換邏輯完全未變動。
+//      （下次美化本檔案時：chartHeroCard 頂部列已全數補齊防截斷與窄螢幕排列防護，
+//      可轉往其他仍留有待辦的畫面）
+
 enum ChartMode: String, CaseIterable, Identifiable {
     case trend = "支出趨勢"
     case variablePie = "變動支出比例"
     case fixedPie = "固定支出比例"
 
     var id: String { rawValue }
+}
+
+/// 收集各圖表分頁的自然高度（key = 分頁、value = 高度），給輪播容器自適應高度用。
+private struct ChartPageHeightKey: PreferenceKey {
+    static var defaultValue: [ChartMode: CGFloat] = [:]
+    static func reduce(value: inout [ChartMode: CGFloat], nextValue: () -> [ChartMode: CGFloat]) {
+        value.merge(nextValue()) { max($0, $1) }
+    }
+}
+
+private extension View {
+    /// 量測此分頁的高度並回報到 ChartPageHeightKey。
+    func reportChartPageHeight(_ mode: ChartMode) -> some View {
+        background(
+            GeometryReader { geo in
+                Color.clear.preference(key: ChartPageHeightKey.self, value: [mode: geo.size.height])
+            }
+        )
+    }
 }
 
 struct ChartView: View {
@@ -17,6 +135,37 @@ struct ChartView: View {
     @State private var isLoading = true
     @State private var chartMode: ChartMode = .trend
     @State private var loadTask: Task<Void, Never>?
+    /// 各圖表分頁量測到的自然高度，用來讓輪播容器自適應高度（避免固定高度裁切內容）
+    @State private var chartPageHeights: [ChartMode: CGFloat] = [:]
+    /// 快取圓餅圖資料，避免 chartCarousel 與隱藏量測層各算一次（每次都是 O(n) 掃描）
+    @State private var variableBreakdownCache: [(category: VariableCategory, amount: Double)] = []
+    @State private var fixedBreakdownCache: [(category: FixedCategory, amount: Double)] = []
+    @State private var typeBreakdownAppeared = false
+    // 各圖表空白態脈衝動畫獨立管理，避免量測層同時渲染三個圖表時共用旗標造成動畫互搶與閃爍
+    @State private var trendEmptyPulse = false
+    @State private var variablePieEmptyPulse = false
+    @State private var fixedPieEmptyPulse = false
+    @State private var typeBreakdownEmptyPulse = false
+    // 上面四個脈衝旗標原本各自用未取消的 DispatchQueue.main.asyncAfter 排程 0.3 秒後觸發，
+    // loadChartData() 重載資料時只會把旗標歸零、不會取消已排程但尚未觸發的 closure：
+    // 快速連續切換期間（例如來回點兩個週期分頁）舊的 closure 仍會在之後補一次遲到的觸發，
+    // 造成脈衝動畫從中途突然開始。改用可取消的 Task（比照 FinanceChartView 既有寫法）。
+    @State private var trendPulseTask: Task<Void, Never>?
+    @State private var variablePiePulseTask: Task<Void, Never>?
+    @State private var fixedPiePulseTask: Task<Void, Never>?
+    @State private var typeBreakdownPulseTask: Task<Void, Never>?
+    // 英雄卡片進場動畫旗標（v2 美化）
+    @State private var heroCardAppeared = false
+    // 圓餅圖例行交錯進場動畫旗標（v3 美化，各圓餅頁各用一個旗標避免頁面切換時互相重置）
+    @State private var variablePieRowsAppeared = false
+    @State private var fixedPieRowsAppeared = false
+    // [v6 美化] 圖表載入卡雙層脈衝光環／圖示旋轉／骨架長條旗標，寫法與上面四個
+    // EmptyPulse 旗標同源（可取消 Task 延遲觸發，避免快速連續切換週期時動畫從中途開始）
+    @State private var chartLoadingPulse = false
+    @State private var chartLoadingSpin = false
+    @State private var chartLoadingPulseTask: Task<Void, Never>?
+    /// 載入骨架長條高度，暗示即將出現的長條圖形狀
+    private static let chartSkeletonHeights: [CGFloat] = [22, 38, 30, 46, 34, 26, 40]
 
     private static let currencyFormatter: NumberFormatter = {
         let f = NumberFormatter()
@@ -40,95 +189,287 @@ struct ChartView: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 20) {
-                    periodPicker
+                    // 【美化方向】統一英雄卡片設計語言：漸層背景 + 週期篩選 pill 嵌入卡片，
+                    // 取代原本平面的 periodPicker + statisticsSummary 雙區塊，
+                    // 與 OverviewView / VariableExpenseView / IncomeView 設計語言保持均值。
+                    // v2: 補 heroCardAppeared spring 進場動畫，對齊 FinanceChartView 英雄卡規格。
+                    chartHeroCard
+                        .padding(.horizontal)
+                        .opacity(heroCardAppeared ? 1 : 0)
+                        .offset(y: heroCardAppeared ? 0 : 20)
+                        .onAppear {
+                            withAnimation(.spring(response: 0.52, dampingFraction: 0.78).delay(0.05)) {
+                                heroCardAppeared = true
+                            }
+                        }
 
                     if isLoading {
-                        ProgressView().padding(.vertical, 40)
+                        // [v6 美化] 原本是裸 ProgressView + 純文字，與全 App 其餘空狀態
+                        // （雙層脈衝光環 + 漸層圖示圓）視覺語言脫節，是本檔案唯一還在用
+                        // 系統原生 spinner 的地方。改為對齊 trendChart 等空狀態的雙層脈衝
+                        // 光環 + 漸層圖示圓（旋轉的長條圖示取代圈圈 spinner），下方補上
+                        // 長條圖骨架佔位條，讓「即將出現長條圖」的預期更明確。
+                        VStack(spacing: 16) {
+                            ZStack {
+                                Circle()
+                                    .stroke(Color.green.opacity(chartLoadingPulse ? 0 : 0.24), lineWidth: 1.5)
+                                    .frame(width: 78, height: 78)
+                                    .scaleEffect(chartLoadingPulse ? 1.42 : 1.0)
+                                    .animation(.easeOut(duration: 1.3).repeatForever(autoreverses: false), value: chartLoadingPulse)
+                                Circle()
+                                    .stroke(Color.green.opacity(chartLoadingPulse ? 0 : 0.12), lineWidth: 1)
+                                    .frame(width: 78, height: 78)
+                                    .scaleEffect(chartLoadingPulse ? 1.65 : 1.0)
+                                    .animation(.easeOut(duration: 1.3).delay(0.25).repeatForever(autoreverses: false), value: chartLoadingPulse)
+                                Circle()
+                                    .fill(
+                                        LinearGradient(
+                                            colors: [Color.green.opacity(0.22), Color.green.opacity(0.09)],
+                                            startPoint: .topLeading, endPoint: .bottomTrailing
+                                        )
+                                    )
+                                    .frame(width: 60, height: 60)
+                                    .overlay(Circle().stroke(Color.green.opacity(0.20), lineWidth: 1))
+                                Image(systemName: "chart.bar.fill")
+                                    .font(.system(size: 22, weight: .medium))
+                                    .foregroundStyle(Color.green)
+                                    .rotationEffect(.degrees(chartLoadingSpin ? 360 : 0))
+                                    .animation(.linear(duration: 1.1).repeatForever(autoreverses: false), value: chartLoadingSpin)
+                            }
+                            .onAppear {
+                                guard !chartLoadingPulse else { return }
+                                chartLoadingPulseTask?.cancel()
+                                chartLoadingPulseTask = Task { @MainActor in
+                                    try? await Task.sleep(nanoseconds: 200_000_000)
+                                    guard !Task.isCancelled else { return }
+                                    chartLoadingPulse = true
+                                    chartLoadingSpin = true
+                                }
+                            }
+
+                            HStack(alignment: .bottom, spacing: 7) {
+                                ForEach(Array(Self.chartSkeletonHeights.enumerated()), id: \.offset) { _, height in
+                                    RoundedRectangle(cornerRadius: 4)
+                                        .fill(Color.green.opacity(chartLoadingPulse ? 0.20 : 0.09))
+                                        .frame(width: 14, height: height)
+                                }
+                            }
+                            .frame(height: 46, alignment: .bottom)
+                            .animation(.easeInOut(duration: 1.3).repeatForever(autoreverses: true), value: chartLoadingPulse)
+
+                            Text("載入圖表資料…")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 36)
+                        .background(Color(.systemBackground))
+                        .clipShape(RoundedRectangle(cornerRadius: 16))
+                        .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.green.opacity(0.10), lineWidth: 0.75))
+                        .shadow(color: .black.opacity(0.05), radius: 6, x: 0, y: 2)
+                        .padding(.horizontal)
                     } else {
-                        statisticsSummary
                         chartCarousel
+                            .transition(.opacity.combined(with: .move(edge: .bottom)))
                         expenseTypeBreakdown
+                            .transition(.opacity.combined(with: .move(edge: .bottom)))
                     }
                 }
                 .padding(.vertical)
+                .animation(.spring(response: 0.45, dampingFraction: 0.80), value: isLoading)
             }
             .background(Color(.systemGroupedBackground))
             .navigationTitle("圖表")
-            .task(id: selectedPeriod) {
-                await loadChartData()
+            .onChange(of: selectedPeriod, initial: true) { _, _ in
+                loadTask?.cancel()
+                loadTask = Task { await loadChartData() }
             }
             .onChange(of: store.modifyID) { _, _ in
                 loadTask?.cancel()
                 loadTask = Task { await loadChartData() }
+            }
+            .onDisappear {
+                loadTask?.cancel()
+                trendPulseTask?.cancel()
+                variablePiePulseTask?.cancel()
+                fixedPiePulseTask?.cancel()
+                typeBreakdownPulseTask?.cancel()
+                chartLoadingPulseTask?.cancel()
+                // 重置英雄卡進場旗標：切到其他子功能再切回 Chart 分頁時能重新播放進場動畫
+                // （其餘圖表旗標已在 loadChartData() 內因資料重載而歸零，僅此旗標未被涵蓋）
+                heroCardAppeared = false
             }
         }
     }
 
     @MainActor
     private func loadChartData() async {
+        // 短暫等待讓 Task 取消有機會生效，避免快速連續更新時全部執行
+        try? await Task.sleep(nanoseconds: 100_000_000)
+        guard !Task.isCancelled else { return }
         isLoading = true
-        let data = store.chartData(for: selectedPeriod)
-        chartData = data
+        // 重置各圖表脈衝旗標：isLoading=true 會移除 empty state，旗標卡在 true 時
+        // 資料重載後 empty state 重出現、onAppear guard 通過不了，動畫不再播放。
+        // 在此歸零確保每次載入結束後 empty state 能重新觸發脈衝動畫。
+        trendPulseTask?.cancel()
+        variablePiePulseTask?.cancel()
+        fixedPiePulseTask?.cancel()
+        typeBreakdownPulseTask?.cancel()
+        chartLoadingPulseTask?.cancel()
+        trendEmptyPulse = false
+        variablePieEmptyPulse = false
+        fixedPieEmptyPulse = false
+        typeBreakdownEmptyPulse = false
+        chartLoadingPulse = false
+        chartLoadingSpin = false
+        // 重置圓餅圖例行與類型比例的進場動畫旗標：與 empty pulse 旗標相同，
+        // isLoading=true 會移除這些 view，若旗標卡在 true，
+        // 重載後 onAppear 不再觸發 state 變化，進場動畫不會重播。
+        variablePieRowsAppeared = false
+        fixedPieRowsAppeared = false
+        typeBreakdownAppeared = false
+        let period = selectedPeriod
+        chartData = store.chartData(for: period)
+        variableBreakdownCache = store.variableBreakdown(for: period)
+        fixedBreakdownCache = store.fixedBreakdown(for: period)
         isLoading = false
     }
 
-    // MARK: - 時間選擇
+    // MARK: - 圖表英雄摘要卡（含週期選擇器）
+    // 【美化方向】統一英雄卡片設計語言：漸層綠色背景 + 裝飾散景圓，
+    // 週期篩選 pill 嵌入卡片底部（白色系），總計/最高一目了然。
+    // 取代舊版分離的 periodPicker（白底卡片）+ statisticsSummary（三個獨立 StatCard），
+    // 視覺密度降低、層次感提升，與其他主要頁面的 hero card 設計保持均值。
 
-    private var periodPicker: some View {
-        Picker("時間區間", selection: $selectedPeriod) {
-            ForEach(TimePeriod.allCases, id: \.self) { period in
-                Text(period.rawValue).tag(period)
-            }
+    private var periodHeroLabel: String {
+        switch selectedPeriod {
+        case .daily:     return "近30天支出總計"
+        case .weekly:    return "近12週支出總計"
+        case .monthly:   return "近12個月支出總計"
+        case .quarterly: return "近8季支出總計"
+        case .yearly:    return "近5年支出總計"
         }
-        .pickerStyle(.segmented)
-        .padding(14)
-        .background(Color(.systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 16))
-        .shadow(color: .black.opacity(0.05), radius: 6, x: 0, y: 2)
-        .padding(.horizontal)
     }
 
-    // MARK: - 統計摘要
+    private var chartHeroCard: some View {
+        let maxAmount = chartData.map(\.amount).max() ?? 0
 
-    private var statisticsSummary: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 10) {
-                Capsule()
-                    .fill(
-                        LinearGradient(
-                            colors: [.green, .green.opacity(0.55)],
-                            startPoint: .top, endPoint: .bottom
-                        )
-                    )
-                    .frame(width: 4, height: 20)
-                Text("區間統計")
-                    .font(.subheadline.weight(.bold))
+        return VStack(spacing: 0) {
+            // 頂部：區間總計 + 最高值徽章
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 6) {
+                        Text(periodHeroLabel)
+                            .font(.caption)
+                            .foregroundStyle(.white.opacity(0.78))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
+                        if isLoading {
+                            // [v7 美化] 原本是白色系統原生 ProgressView（0.65 倍縮小 spinner），
+                            // 與下方大卡「載入圖表資料…」改用的漸層圖示圓＋旋轉圖示語言不一致，
+                            // 是本檔案最後一處殘留系統 spinner 的地方。改為迷你版同款造型
+                            // （白色系漸層圓 + chart.bar.fill 旋轉圖示），共用大卡的 chartLoadingSpin
+                            // 旗標，兩處圖示同步旋轉、視覺語言完全統一。純視覺層調整，載入狀態
+                            // 判斷邏輯（isLoading）本身未變動。
+                            ZStack {
+                                Circle()
+                                    .fill(.white.opacity(0.18))
+                                    .overlay(Circle().stroke(.white.opacity(0.32), lineWidth: 0.75))
+                                Image(systemName: "chart.bar.fill")
+                                    .font(.system(size: 7, weight: .semibold))
+                                    .foregroundStyle(.white.opacity(0.88))
+                                    .rotationEffect(.degrees(chartLoadingSpin ? 360 : 0))
+                                    .animation(.linear(duration: 1.1).repeatForever(autoreverses: false), value: chartLoadingSpin)
+                            }
+                            .frame(width: 14, height: 14)
+                        }
+                    }
+                    Text(isLoading ? "---" : formatCurrency(totalForPeriod))
+                        .heroBigValueFont()
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.6)
+                        .contentTransition(.numericText())
+                    if !isLoading && averageForPeriod > 0 {
+                        Text("期均 " + formatCurrency(averageForPeriod))
+                            .font(.caption2.weight(.medium))
+                            .foregroundStyle(.white.opacity(0.72))
+                            .padding(.top, 1)
+                    }
+                }
                 Spacer()
+                if !isLoading && maxAmount > 0 {
+                    VStack(alignment: .trailing, spacing: 3) {
+                        Text("最高")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(.white.opacity(0.62))
+                            .lineLimit(1)
+                        Text(formatCurrency(maxAmount))
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(.white)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.6)
+                            .contentTransition(.numericText())
+                    }
+                    .padding(.horizontal, 11)
+                    .padding(.vertical, 6)
+                    .background(.white.opacity(0.20))
+                    .clipShape(Capsule())
+                    .layoutPriority(1)
+                }
             }
-            .padding(.horizontal)
 
-            HStack(spacing: 12) {
-                StatCard(
-                    title: "總計",
-                    value: formatCurrency(totalForPeriod),
-                    icon: "sum",
-                    color: .green
-                )
-                StatCard(
-                    title: "平均",
-                    value: formatCurrency(averageForPeriod),
-                    icon: "divide",
-                    color: .blue
-                )
-                StatCard(
-                    title: "最高",
-                    value: formatCurrency(chartData.map(\.amount).max() ?? 0),
-                    icon: "arrow.up",
-                    color: .red
-                )
+            // 分隔線
+            Rectangle()
+                .fill(.white.opacity(0.20))
+                .frame(height: 0.5)
+                .padding(.vertical, 14)
+
+            // 週期篩選 pill（在卡片底部，白色系）
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(TimePeriod.allCases, id: \.self) { period in
+                        heroPeriodChip(period)
+                    }
+                }
+                .padding(.horizontal, 2)
             }
-            .padding(.horizontal)
         }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 18)
+        .heroCardShell(card: .chart)
+    }
+
+    private func heroPeriodChip(_ period: TimePeriod) -> some View {
+        let isSelected = selectedPeriod == period
+        return Button {
+            withAnimation(.spring(response: 0.28, dampingFraction: 0.70)) {
+                selectedPeriod = period
+            }
+        } label: {
+            HStack(spacing: 5) {
+                Image(systemName: period.chipIcon)
+                    .font(.caption2)
+                Text(period.chipLabel)
+                    .font(.caption.weight(isSelected ? .semibold : .medium))
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 7)
+            .background(isSelected ? .white.opacity(0.28) : .white.opacity(0.10))
+            .foregroundStyle(.white)
+            .clipShape(Capsule())
+            .overlay(
+                Capsule()
+                    .stroke(.white.opacity(isSelected ? 0.55 : 0.22), lineWidth: 1)
+            )
+            .shadow(
+                color: isSelected ? .white.opacity(0.22) : .clear,
+                radius: 4, x: 0, y: 2
+            )
+            .scaleEffect(isSelected ? 1.04 : 1.0)
+        }
+        .buttonStyle(.plain)
+        .animation(.spring(response: 0.26, dampingFraction: 0.72), value: isSelected)
     }
 
     // MARK: - 圖表輪播（左右滑動切換）
@@ -136,41 +477,85 @@ struct ChartView: View {
     private var chartCarousel: some View {
         VStack(spacing: 8) {
             TabView(selection: $chartMode) {
-                trendChart.tag(ChartMode.trend)
-                variablePieChart.tag(ChartMode.variablePie)
-                fixedPieChart.tag(ChartMode.fixedPie)
+                trendChart().tag(ChartMode.trend)
+                variablePieChart().tag(ChartMode.variablePie)
+                fixedPieChart().tag(ChartMode.fixedPie)
             }
             .tabViewStyle(.page(indexDisplayMode: .never))
-            .frame(height: 380)
+            // .page 樣式的 TabView 不會自動依內容高度伸縮，必須給定高度。
+            // 用隱形量測層算出每一頁的自然高度，再把容器高度綁到「目前這一頁」，
+            // 達成自適應高度、避免被固定框架裁切。
+            .frame(height: currentChartPageHeight)
+            .background(alignment: .top) { chartHeightMeasuringLayer }
+            .onPreferenceChange(ChartPageHeightKey.self) { chartPageHeights = $0 }
+            .animation(.easeInOut(duration: 0.25), value: currentChartPageHeight)
 
-            // 自訂指示器：模式名稱 + 圓點
-            HStack(spacing: 8) {
+            // 自訂指示器：模式名稱 + 圓點 + 膠囊高亮（v2: 各模式使用主題色，不再統一 .green）
+            HStack(spacing: 6) {
                 ForEach(ChartMode.allCases) { mode in
+                    let isActive = chartMode == mode
+                    let accent = mode.themeColor
                     Button {
-                        withAnimation(.easeInOut(duration: 0.25)) { chartMode = mode }
+                        withAnimation(.spring(response: 0.30, dampingFraction: 0.72)) {
+                            chartMode = mode
+                        }
                     } label: {
-                        HStack(spacing: 4) {
+                        HStack(spacing: 5) {
                             Circle()
-                                .fill(chartMode == mode ? Color.green : Color(.tertiaryLabel))
+                                .fill(isActive ? accent : Color(.tertiaryLabel))
                                 .frame(width: 6, height: 6)
-                            if chartMode == mode {
+                            if isActive {
                                 Text(mode.rawValue)
-                                    .font(.caption2.weight(.medium))
-                                    .foregroundStyle(.green)
-                                    .transition(.opacity.combined(with: .scale))
+                                    .font(.caption2.weight(.semibold))
+                                    .foregroundStyle(accent)
+                                    .transition(.opacity.combined(with: .scale(scale: 0.85)))
                             }
                         }
+                        .padding(.horizontal, isActive ? 10 : 6)
+                        .padding(.vertical, 4)
+                        .background(isActive ? accent.opacity(0.10) : Color.clear)
+                        .clipShape(Capsule())
+                        .overlay(
+                            Capsule()
+                                .stroke(isActive ? accent.opacity(0.25) : Color.clear, lineWidth: 0.75)
+                        )
                     }
                     .buttonStyle(.plain)
+                    .animation(.spring(response: 0.28, dampingFraction: 0.72), value: isActive)
                 }
             }
         }
     }
 
+    /// 目前選取分頁的高度；尚未量測到時先給一個合理預設值。
+    private var currentChartPageHeight: CGFloat {
+        chartPageHeights[chartMode] ?? 380
+    }
+
+    /// 隱形量測層：把三個分頁以「自然高度」排出來量測各自高度，回報給 ChartPageHeightKey。
+    /// 用 fixedSize(vertical:) 讓它忽略容器給的（被裁切的）高度、改用內容本身的高度。
+    private var chartHeightMeasuringLayer: some View {
+        VStack(spacing: 0) {
+            trendChart(interactive: false).reportChartPageHeight(.trend)
+            variablePieChart(rowsAppeared: .constant(true)).reportChartPageHeight(.variablePie)
+            fixedPieChart(rowsAppeared: .constant(true)).reportChartPageHeight(.fixedPie)
+        }
+        .fixedSize(horizontal: false, vertical: true)
+        .hidden()
+        .allowsHitTesting(false)
+    }
+
     // MARK: - 趨勢圖
 
-    private var trendChart: some View {
-        VStack(alignment: .leading, spacing: 12) {
+    /// - Parameter interactive: false 時停用拖曳手勢與選取狀態綁定，供 chartHeightMeasuringLayer
+    ///   的隱形量測副本使用。trendChart 的高度（220 / minHeight 220）與 selectedDataPoint 無關，
+    ///   但量測副本原本仍讀取同一個 @State，導致拖曳圖表選點時，隱形副本跟著視覺副本一起重新
+    ///   建置整個 Chart（含 RuleMark／annotation），對量到的高度沒有任何幫助，純粹是拖曳手勢
+    ///   期間白白多做一份 Charts 框架佈局運算。比照 variablePieChart／fixedPieChart 既有的
+    ///   rowsAppeared 參數化寫法，把「是否互動」拆成參數，量測副本傳 false 即可跳過選取邏輯。
+    private func trendChart(interactive: Bool = true) -> some View {
+        let nonZeroCount = chartData.filter { $0.amount > 0 }.count
+        return VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 10) {
                 Capsule()
                     .fill(
@@ -183,29 +568,67 @@ struct ChartView: View {
                 Text(periodTitle)
                     .font(.subheadline.weight(.bold))
                 Spacer()
+                // [v3] 計數膠囊徽章：非零資料點數，對齊 variablePieChart / fixedPieChart 標題規格
+                if nonZeroCount > 0 {
+                    Text("\(nonZeroCount) 點")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.green)
+                        .padding(.horizontal, 8).padding(.vertical, 3)
+                        .background(Color.green.opacity(0.10))
+                        .clipShape(Capsule())
+                        .overlay(Capsule().stroke(Color.green.opacity(0.22), lineWidth: 0.75))
+                }
             }
             .padding(.horizontal)
 
             if chartData.isEmpty || chartData.allSatisfy({ $0.amount == 0 }) {
-                VStack(spacing: 14) {
+                VStack(spacing: 18) {
                     ZStack {
+                        // 外層脈衝光環
                         Circle()
-                            .fill(Color(.systemFill))
-                            .frame(width: 64, height: 64)
+                            .stroke(Color.green.opacity(trendEmptyPulse ? 0 : 0.24), lineWidth: 1.5)
+                            .frame(width: 90, height: 90)
+                            .scaleEffect(trendEmptyPulse ? 1.42 : 1.0)
+                            .animation(.easeOut(duration: 2.0).repeatForever(autoreverses: false), value: trendEmptyPulse)
+                        // 內層脈衝光環（延遲 0.3s 製造波紋）
+                        Circle()
+                            .stroke(Color.green.opacity(trendEmptyPulse ? 0 : 0.12), lineWidth: 1)
+                            .frame(width: 90, height: 90)
+                            .scaleEffect(trendEmptyPulse ? 1.70 : 1.0)
+                            .animation(.easeOut(duration: 2.0).delay(0.3).repeatForever(autoreverses: false), value: trendEmptyPulse)
+                        // 漸層底圓 + 細邊框
+                        Circle()
+                            .fill(
+                                LinearGradient(
+                                    colors: [Color(.secondarySystemFill), Color(.systemFill)],
+                                    startPoint: .topLeading, endPoint: .bottomTrailing
+                                )
+                            )
+                            .frame(width: 72, height: 72)
+                            .overlay(Circle().stroke(Color.green.opacity(0.18), lineWidth: 1))
                         Image(systemName: "chart.bar.xaxis")
-                            .font(.system(size: 26, weight: .light))
-                            .foregroundStyle(.secondary)
+                            .font(.system(size: 28, weight: .light))
+                            .foregroundStyle(Color.green.opacity(0.55))
+                    }
+                    .onAppear {
+                        guard !trendEmptyPulse else { return }
+                        trendPulseTask?.cancel()
+                        trendPulseTask = Task { @MainActor in
+                            try? await Task.sleep(nanoseconds: 300_000_000)
+                            guard !Task.isCancelled else { return }
+                            trendEmptyPulse = true
+                        }
                     }
                     VStack(spacing: 6) {
                         Text("尚無資料")
-                            .font(.subheadline.weight(.medium))
+                            .font(.subheadline.weight(.semibold))
                             .foregroundStyle(.secondary)
                         Text("新增支出後將顯示圖表")
                             .font(.caption)
                             .foregroundStyle(.tertiary)
                     }
                 }
-                .frame(maxWidth: .infinity, minHeight: 200)
+                .frame(maxWidth: .infinity, minHeight: 220)
             } else {
                 Chart(chartData) { dataPoint in
                     BarMark(
@@ -221,7 +644,7 @@ struct ChartView: View {
                     )
                     .cornerRadius(4)
 
-                    if let selected = selectedDataPoint, selected.label == dataPoint.label {
+                    if interactive, let selected = selectedDataPoint, selected.label == dataPoint.label {
                         RuleMark(x: .value("選取", dataPoint.label))
                             .foregroundStyle(.green.opacity(0.3))
                             .lineStyle(StrokeStyle(lineWidth: 2, dash: [5, 3]))
@@ -275,21 +698,32 @@ struct ChartView: View {
                     }
                 }
                 .chartOverlay { proxy in
-                    GeometryReader { geometry in
-                        Rectangle().fill(.clear).contentShape(Rectangle())
-                            .gesture(
-                                DragGesture(minimumDistance: 0)
-                                    .onChanged { value in
-                                        let plotOrigin = proxy.plotFrame.map { geometry[$0].origin.x } ?? 0
-                                        let x = value.location.x - plotOrigin
-                                        if let label: String = proxy.value(atX: x) {
-                                            selectedDataPoint = chartData.first { $0.label == label }
-                                        }
-                                    }
-                                    .onEnded { _ in
-                                        selectedDataPoint = nil
-                                    }
-                            )
+                    // interactive == false（chartHeightMeasuringLayer 的隱形量測副本）不掛手勢：
+                    // 該副本本來就 .allowsHitTesting(false)，掛了也摸不到，但仍會產生一個獨立的
+                    // GestureRecognizer 與 GeometryReader，白白多一份配置成本。
+                    Group {
+                        if interactive {
+                            GeometryReader { geometry in
+                                Rectangle().fill(.clear).contentShape(Rectangle())
+                                    .gesture(
+                                        DragGesture(minimumDistance: 0)
+                                            .onChanged { value in
+                                                let plotOrigin = proxy.plotFrame.map { geometry[$0].origin.x } ?? 0
+                                                let x = value.location.x - plotOrigin
+                                                if let label: String = proxy.value(atX: x) {
+                                                    let newPoint = chartData.first { $0.label == label }
+                                                    // 只在資料點實際改變時才賦值，避免拖曳時持續觸發無效 @State 更新
+                                                    if newPoint?.label != selectedDataPoint?.label {
+                                                        selectedDataPoint = newPoint
+                                                    }
+                                                }
+                                            }
+                                            .onEnded { _ in
+                                                selectedDataPoint = nil
+                                            }
+                                    )
+                            }
+                        }
                     }
                 }
                 .frame(height: 220)
@@ -305,8 +739,13 @@ struct ChartView: View {
 
     // MARK: - 變動支出圓餅圖
 
-    private var variablePieChart: some View {
-        let entries = store.variableBreakdown(for: selectedPeriod)
+    // rowsAppeared 可由呼叫端覆寫：chartHeightMeasuringLayer 用來量高度的隱藏副本
+    // 若沿用真正可見那頁的 $variablePieRowsAppeared，會在使用者第一次滑到這頁之前
+    // 就把旗標設成 true，讓圖例的進場動畫失去「從無到有」的起點、變成直接以全不透明顯示、
+    // 完全不播放。隱藏副本改傳入獨立的 .constant(true)，不干擾可見頁的真正旗標。
+    private func variablePieChart(rowsAppeared: Binding<Bool>? = nil) -> some View {
+        let entries = variableBreakdownCache
+        let rowsAppearedBinding = rowsAppeared ?? $variablePieRowsAppeared
         return VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 10) {
                 Capsule()
@@ -320,32 +759,71 @@ struct ChartView: View {
                 Text(periodPieTitle(prefix: "變動支出"))
                     .font(.subheadline.weight(.bold))
                 Spacer()
+                // [v3] 「N 類」計數膠囊（橘色，對齊 OverviewView.categoryBreakdownSection 規格）
+                if !entries.isEmpty {
+                    Text("\(entries.count) 類")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.orange)
+                        .padding(.horizontal, 8).padding(.vertical, 3)
+                        .background(Color.orange.opacity(0.10))
+                        .clipShape(Capsule())
+                        .overlay(Capsule().stroke(Color.orange.opacity(0.22), lineWidth: 0.75))
+                }
             }
             .padding(.horizontal)
 
             if entries.isEmpty {
-                VStack(spacing: 14) {
+                VStack(spacing: 18) {
                     ZStack {
+                        // 外層脈衝光環（v2: 改用橘色主題色，對齊變動支出分頁主題）
                         Circle()
-                            .fill(Color(.systemFill))
-                            .frame(width: 64, height: 64)
+                            .stroke(Color.orange.opacity(variablePieEmptyPulse ? 0 : 0.24), lineWidth: 1.5)
+                            .frame(width: 90, height: 90)
+                            .scaleEffect(variablePieEmptyPulse ? 1.42 : 1.0)
+                            .animation(.easeOut(duration: 2.0).repeatForever(autoreverses: false), value: variablePieEmptyPulse)
+                        // 內層脈衝光環（延遲 0.3s 製造波紋）
+                        Circle()
+                            .stroke(Color.orange.opacity(variablePieEmptyPulse ? 0 : 0.12), lineWidth: 1)
+                            .frame(width: 90, height: 90)
+                            .scaleEffect(variablePieEmptyPulse ? 1.70 : 1.0)
+                            .animation(.easeOut(duration: 2.0).delay(0.3).repeatForever(autoreverses: false), value: variablePieEmptyPulse)
+                        // 漸層底圓 + 細邊框
+                        Circle()
+                            .fill(
+                                LinearGradient(
+                                    colors: [Color(.secondarySystemFill), Color(.systemFill)],
+                                    startPoint: .topLeading, endPoint: .bottomTrailing
+                                )
+                            )
+                            .frame(width: 72, height: 72)
+                            .overlay(Circle().stroke(Color.orange.opacity(0.18), lineWidth: 1))
                         Image(systemName: "chart.bar.xaxis")
-                            .font(.system(size: 26, weight: .light))
-                            .foregroundStyle(.secondary)
+                            .font(.system(size: 28, weight: .light))
+                            .foregroundStyle(Color.orange.opacity(0.55))
+                    }
+                    .onAppear {
+                        guard !variablePieEmptyPulse else { return }
+                        variablePiePulseTask?.cancel()
+                        variablePiePulseTask = Task { @MainActor in
+                            try? await Task.sleep(nanoseconds: 300_000_000)
+                            guard !Task.isCancelled else { return }
+                            variablePieEmptyPulse = true
+                        }
                     }
                     VStack(spacing: 6) {
                         Text("尚無資料")
-                            .font(.subheadline.weight(.medium))
+                            .font(.subheadline.weight(.semibold))
                             .foregroundStyle(.secondary)
                         Text("新增支出後將顯示圖表")
                             .font(.caption)
                             .foregroundStyle(.tertiary)
                     }
                 }
-                .frame(maxWidth: .infinity, minHeight: 200)
+                .frame(maxWidth: .infinity, minHeight: 220)
             } else {
                 let total = entries.reduce(0) { $0 + $1.amount }
-                pieChartBody(entries: entries.map { ($0.category.rawValue, $0.category.icon, colorFor(variable: $0.category), $0.amount) }, total: total)
+                // [v3] 傳入 rowsAppearedBinding 控制圖例行交錯進場
+                pieChartBody(entries: entries.map { ($0.category.rawValue, $0.category.icon, colorFor(variable: $0.category), $0.amount) }, total: total, rowsAppeared: rowsAppearedBinding)
             }
         }
         .padding(.vertical)
@@ -358,8 +836,10 @@ struct ChartView: View {
 
     // MARK: - 固定支出圓餅圖
 
-    private var fixedPieChart: some View {
-        let entries = store.fixedBreakdown(for: selectedPeriod)
+    // rowsAppeared 可由呼叫端覆寫，理由同 variablePieChart(rowsAppeared:) 上方註解。
+    private func fixedPieChart(rowsAppeared: Binding<Bool>? = nil) -> some View {
+        let entries = fixedBreakdownCache
+        let rowsAppearedBinding = rowsAppeared ?? $fixedPieRowsAppeared
         return VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 10) {
                 Capsule()
@@ -373,32 +853,71 @@ struct ChartView: View {
                 Text(periodPieTitle(prefix: "固定支出"))
                     .font(.subheadline.weight(.bold))
                 Spacer()
+                // [v3] 「N 類」計數膠囊（藍色，對齊 FinanceOverviewView.allocationSection 規格）
+                if !entries.isEmpty {
+                    Text("\(entries.count) 類")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.blue)
+                        .padding(.horizontal, 8).padding(.vertical, 3)
+                        .background(Color.blue.opacity(0.10))
+                        .clipShape(Capsule())
+                        .overlay(Capsule().stroke(Color.blue.opacity(0.22), lineWidth: 0.75))
+                }
             }
             .padding(.horizontal)
 
             if entries.isEmpty {
-                VStack(spacing: 14) {
+                VStack(spacing: 18) {
                     ZStack {
+                        // 外層脈衝光環（v2: 改用藍色主題色，對齊固定支出分頁主題）
                         Circle()
-                            .fill(Color(.systemFill))
-                            .frame(width: 64, height: 64)
+                            .stroke(Color.blue.opacity(fixedPieEmptyPulse ? 0 : 0.24), lineWidth: 1.5)
+                            .frame(width: 90, height: 90)
+                            .scaleEffect(fixedPieEmptyPulse ? 1.42 : 1.0)
+                            .animation(.easeOut(duration: 2.0).repeatForever(autoreverses: false), value: fixedPieEmptyPulse)
+                        // 內層脈衝光環（延遲 0.3s 製造波紋）
+                        Circle()
+                            .stroke(Color.blue.opacity(fixedPieEmptyPulse ? 0 : 0.12), lineWidth: 1)
+                            .frame(width: 90, height: 90)
+                            .scaleEffect(fixedPieEmptyPulse ? 1.70 : 1.0)
+                            .animation(.easeOut(duration: 2.0).delay(0.3).repeatForever(autoreverses: false), value: fixedPieEmptyPulse)
+                        // 漸層底圓 + 細邊框
+                        Circle()
+                            .fill(
+                                LinearGradient(
+                                    colors: [Color(.secondarySystemFill), Color(.systemFill)],
+                                    startPoint: .topLeading, endPoint: .bottomTrailing
+                                )
+                            )
+                            .frame(width: 72, height: 72)
+                            .overlay(Circle().stroke(Color.blue.opacity(0.18), lineWidth: 1))
                         Image(systemName: "chart.bar.xaxis")
-                            .font(.system(size: 26, weight: .light))
-                            .foregroundStyle(.secondary)
+                            .font(.system(size: 28, weight: .light))
+                            .foregroundStyle(Color.blue.opacity(0.55))
+                    }
+                    .onAppear {
+                        guard !fixedPieEmptyPulse else { return }
+                        fixedPiePulseTask?.cancel()
+                        fixedPiePulseTask = Task { @MainActor in
+                            try? await Task.sleep(nanoseconds: 300_000_000)
+                            guard !Task.isCancelled else { return }
+                            fixedPieEmptyPulse = true
+                        }
                     }
                     VStack(spacing: 6) {
                         Text("尚無資料")
-                            .font(.subheadline.weight(.medium))
+                            .font(.subheadline.weight(.semibold))
                             .foregroundStyle(.secondary)
                         Text("新增支出後將顯示圖表")
                             .font(.caption)
                             .foregroundStyle(.tertiary)
                     }
                 }
-                .frame(maxWidth: .infinity, minHeight: 200)
+                .frame(maxWidth: .infinity, minHeight: 220)
             } else {
                 let total = entries.reduce(0) { $0 + $1.amount }
-                pieChartBody(entries: entries.map { ($0.category.rawValue, $0.category.icon, colorFor(fixed: $0.category), $0.amount) }, total: total)
+                // [v3] 傳入 rowsAppearedBinding 控制圖例行交錯進場
+                pieChartBody(entries: entries.map { ($0.category.rawValue, $0.category.icon, colorFor(fixed: $0.category), $0.amount) }, total: total, rowsAppeared: rowsAppearedBinding)
             }
         }
         .padding(.vertical)
@@ -409,59 +928,173 @@ struct ChartView: View {
         .padding(.horizontal)
     }
 
-    /// 共用的圓餅圖 body
+    /// 共用的圓餅圖 body（v3：加入 rowsAppeared Binding 控制交錯進場動畫）
     private func pieChartBody(entries: [(name: String, icon: String, color: Color, amount: Double)],
-                              total: Double) -> some View {
-        VStack(spacing: 14) {
-            Chart(entries.indices, id: \.self) { i in
-                let e = entries[i]
-                SectorMark(
-                    angle: .value("金額", e.amount),
-                    innerRadius: .ratio(0.55),
-                    angularInset: 1.5
-                )
-                .foregroundStyle(e.color)
-                .cornerRadius(4)
-            }
-            .frame(height: 180)
-            .padding(.horizontal)
+                              total: Double,
+                              rowsAppeared: Binding<Bool>) -> some View {
+        // 將 named tuple 包成 Identifiable 結構，讓 Chart 以分類名稱（固定語義）
+        // 而非陣列位置作為 identity，避免類別消失/重排時 SectorMark 動畫錯位。
+        struct PieSlice: Identifiable {
+            let id: String   // category rawValue，同一分類永遠相同
+            let color: Color
+            let amount: Double
+        }
+        let slices = entries.map { PieSlice(id: $0.name, color: $0.color, amount: $0.amount) }
+        let displayCount = min(entries.count, 6)
+        return VStack(spacing: 16) {
+            // 環形圖（加大內徑與間距，讓圓餅更精緻）
+            ZStack {
+                Chart(slices) { s in
+                    SectorMark(
+                        angle: .value("金額", s.amount),
+                        innerRadius: .ratio(0.58),
+                        angularInset: 2.0
+                    )
+                    .foregroundStyle(s.color)
+                    .cornerRadius(5)
+                }
+                .frame(height: 192)
+                .padding(.horizontal)
 
-            // 圖例
-            VStack(spacing: 8) {
-                ForEach(entries.prefix(6).indices, id: \.self) { i in
-                    let e = entries[i]
-                    let pct = total > 0 ? e.amount / total * 100 : 0
-                    HStack(spacing: 10) {
-                        ZStack {
-                            Circle()
-                                .fill(e.color.opacity(0.14))
-                                .frame(width: 28, height: 28)
-                            Image(systemName: e.icon)
-                                .font(.system(size: 12, weight: .medium))
-                                .foregroundStyle(e.color)
-                        }
-                        Text(e.name)
-                            .font(.caption.weight(.medium))
-                        Spacer()
-                        Text(formatCurrency(e.amount))
-                            .font(.caption.bold())
-                        Text(String(format: "%.1f%%", pct))
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                            .frame(width: 44, alignment: .trailing)
+                // 甜甜圈中心：分類總金額 + 項目數
+                VStack(spacing: 3) {
+                    Text("總計")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                    Text(formatCurrency(total))
+                        .font(.system(size: 15, weight: .bold, design: .rounded))
+                        .foregroundStyle(.primary)
+                        .minimumScaleFactor(0.58)
+                        .lineLimit(1)
+                        .frame(maxWidth: 94)
+                    HStack(spacing: 3) {
+                        Circle()
+                            .fill(Color(.tertiaryLabel))
+                            .frame(width: 3, height: 3)
+                        Text("\(entries.count) 類")
+                            .font(.system(size: 9, weight: .medium))
+                            .foregroundStyle(.tertiary)
                     }
                 }
+            }
+
+            // 圖例與圖表的分隔線
+            Rectangle()
+                .fill(Color(.separator).opacity(0.22))
+                .frame(height: 0.5)
+                .padding(.horizontal, 8)
+
+            // [v3] 圖例（加入交錯淡入進場動畫，對齊 FinanceChartView.allocationRowsAppeared 規格）
+            VStack(spacing: 0) {
+                ForEach(Array(entries.prefix(6).enumerated()), id: \.element.name) { i, e in
+                    let pct = total > 0 ? e.amount / total : 0
+
+                    VStack(spacing: 6) {
+                        HStack(spacing: 10) {
+                            // [v3] 圖示圓底色：純色 → LinearGradient，對齊 breakdownLegendItem / FinanceOverviewView 規格
+                            ZStack {
+                                Circle()
+                                    .fill(
+                                        LinearGradient(
+                                            colors: [e.color.opacity(0.20), e.color.opacity(0.08)],
+                                            startPoint: .topLeading,
+                                            endPoint: .bottomTrailing
+                                        )
+                                    )
+                                    .frame(width: 36, height: 36)
+                                Circle()
+                                    .stroke(e.color.opacity(0.22), lineWidth: 1)
+                                    .frame(width: 36, height: 36)
+                                Image(systemName: e.icon)
+                                    .font(.system(size: 15, weight: .semibold))
+                                    .foregroundStyle(e.color)
+                            }
+                            Text(e.name)
+                                .font(.subheadline)
+                                .foregroundStyle(.primary)
+                            Spacer()
+                            VStack(alignment: .trailing, spacing: 3) {
+                                // 金額：rounded bold 15pt + 自適應縮放 + 數字過渡動畫
+                                Text(formatCurrency(e.amount))
+                                    .font(.system(size: 15, weight: .bold, design: .rounded))
+                                    .foregroundStyle(.primary)
+                                    .minimumScaleFactor(0.72)
+                                    .lineLimit(1)
+                                    .contentTransition(.numericText())
+                                // 百分比彩色膠囊（含細邊框），對齊 breakdownLegendItem 規格
+                                Text(String(format: "%.1f%%", pct * 100))
+                                    .font(.system(size: 10, weight: .semibold, design: .rounded))
+                                    .foregroundStyle(e.color)
+                                    .padding(.horizontal, 6)
+                                    .padding(.vertical, 2)
+                                    .background(e.color.opacity(0.12))
+                                    .overlay(
+                                        Capsule()
+                                            .stroke(e.color.opacity(0.30), lineWidth: 0.5)
+                                    )
+                                    .clipShape(Capsule())
+                            }
+                        }
+                        // 比例進度條：寬度對應佔總額的比例
+                        GeometryReader { geo in
+                            ZStack(alignment: .leading) {
+                                Capsule()
+                                    .fill(Color(.systemFill))
+                                    .frame(height: 4)
+                                Capsule()
+                                    .fill(
+                                        LinearGradient(
+                                            colors: [e.color, e.color.opacity(0.60)],
+                                            startPoint: .leading, endPoint: .trailing
+                                        )
+                                    )
+                                    .frame(width: geo.size.width * pct, height: 4)
+                                    .animation(
+                                        .spring(response: 0.65, dampingFraction: 0.78)
+                                            .delay(Double(i) * 0.07),
+                                        value: pct
+                                    )
+                            }
+                        }
+                        .frame(height: 4)
+                    }
+                    .padding(.vertical, 10)
+                    .padding(.horizontal, 16)
+                    // [v3] 交錯淡入 + 向上進場動畫，對齊 FinanceChartView.allocationRowsAppeared 規格
+                    .opacity(rowsAppeared.wrappedValue ? 1 : 0)
+                    .offset(y: rowsAppeared.wrappedValue ? 0 : 12)
+                    .animation(
+                        .spring(response: 0.45, dampingFraction: 0.82)
+                            .delay(0.06 * Double(i)),
+                        value: rowsAppeared.wrappedValue
+                    )
+
+                    if i < displayCount - 1 {
+                        Divider().padding(.leading, 58)
+                    }
+                }
+                .onAppear {
+                    withAnimation(.spring(response: 0.50, dampingFraction: 0.82).delay(0.05)) {
+                        rowsAppeared.wrappedValue = true
+                    }
+                }
+
                 if entries.count > 6 {
-                    HStack {
-                        Spacer()
-                        Text("還有 \(entries.count - 6) 個分類…")
+                    HStack(spacing: 5) {
+                        ForEach(0..<3, id: \.self) { _ in
+                            Circle()
+                                .fill(Color(.tertiaryLabel))
+                                .frame(width: 4, height: 4)
+                        }
+                        Text("還有 \(entries.count - 6) 個分類")
                             .font(.caption2)
                             .foregroundStyle(.tertiary)
                         Spacer()
                     }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
                 }
             }
-            .padding(.horizontal)
         }
     }
 
@@ -527,35 +1160,57 @@ struct ChartView: View {
                 Text("支出類型比例")
                     .font(.subheadline.weight(.bold))
                 Spacer()
+                // [v3] 「本月」標籤從純灰升級為綠色膠囊（含細邊框），對齊全 App section 計數膠囊語言
                 if total > 0 {
                     Text("本月")
                         .font(.caption2.weight(.semibold))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.green)
                         .padding(.horizontal, 8).padding(.vertical, 3)
-                        .background(Color(.tertiarySystemFill))
+                        .background(Color.green.opacity(0.10))
                         .clipShape(Capsule())
+                        .overlay(Capsule().stroke(Color.green.opacity(0.22), lineWidth: 0.75))
                 }
             }
             .padding(.horizontal)
 
             if total == 0 {
-                VStack(spacing: 14) {
+                VStack(spacing: 18) {
                     ZStack {
+                        Circle()
+                            .stroke(Color.green.opacity(typeBreakdownEmptyPulse ? 0 : 0.22), lineWidth: 1.5)
+                            .frame(width: 88, height: 88)
+                            .scaleEffect(typeBreakdownEmptyPulse ? 1.42 : 1.0)
+                            .animation(.easeOut(duration: 2.0).repeatForever(autoreverses: false), value: typeBreakdownEmptyPulse)
+                        Circle()
+                            .stroke(Color.green.opacity(typeBreakdownEmptyPulse ? 0 : 0.11), lineWidth: 1)
+                            .frame(width: 88, height: 88)
+                            .scaleEffect(typeBreakdownEmptyPulse ? 1.70 : 1.0)
+                            .animation(.easeOut(duration: 2.0).delay(0.3).repeatForever(autoreverses: false), value: typeBreakdownEmptyPulse)
                         Circle()
                             .fill(
                                 LinearGradient(
-                                    colors: [Color(.systemFill), Color(.secondarySystemFill)],
+                                    colors: [Color(.secondarySystemFill), Color(.systemFill)],
                                     startPoint: .topLeading, endPoint: .bottomTrailing
                                 )
                             )
-                            .frame(width: 68, height: 68)
+                            .frame(width: 70, height: 70)
+                            .overlay(Circle().stroke(Color.green.opacity(0.16), lineWidth: 1))
                         Image(systemName: "chart.pie")
                             .font(.system(size: 28, weight: .light))
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(Color.green.opacity(0.55))
+                    }
+                    .onAppear {
+                        guard !typeBreakdownEmptyPulse else { return }
+                        typeBreakdownPulseTask?.cancel()
+                        typeBreakdownPulseTask = Task { @MainActor in
+                            try? await Task.sleep(nanoseconds: 300_000_000)
+                            guard !Task.isCancelled else { return }
+                            typeBreakdownEmptyPulse = true
+                        }
                     }
                     VStack(spacing: 6) {
                         Text("尚無支出資料")
-                            .font(.subheadline.weight(.medium))
+                            .font(.subheadline.weight(.semibold))
                             .foregroundStyle(.secondary)
                         Text("新增收支後顯示本月比例")
                             .font(.caption)
@@ -570,30 +1225,71 @@ struct ChartView: View {
                 .padding(.horizontal)
             } else {
                 VStack(spacing: 14) {
-                    // 比例條：用 GeometryReader 取動態寬度，避免 UIScreen 相依
-                    GeometryReader { geo in
-                        HStack(spacing: 0) {
-                            if variableTotal > 0 {
-                                LinearGradient(
-                                    colors: [.orange, .orange.opacity(0.75)],
-                                    startPoint: .leading, endPoint: .trailing
-                                )
-                                .frame(width: max(6, geo.size.width * CGFloat(variableTotal / total)))
-                            }
-                            if fixedTotal > 0 {
-                                LinearGradient(
-                                    colors: [Color.blue.opacity(0.80), .blue],
-                                    startPoint: .leading, endPoint: .trailing
-                                )
+                    // 雙段圓角比例條（帶進場動畫 + 段間空隙）
+                    VStack(spacing: 5) {
+                        GeometryReader { geo in
+                            let gapW: CGFloat = 4
+                            let totalW = geo.size.width - gapW
+                            let varW = max(10, totalW * CGFloat(variableTotal / total))
+                            let fixW = max(10, totalW - varW)
+                            HStack(spacing: gapW) {
+                                // [v3] 變動支出段：加入 glow overlay（頂白底柔化），對齊 allocationSection 彩條立體感規格
+                                RoundedRectangle(cornerRadius: 7)
+                                    .fill(
+                                        LinearGradient(
+                                            colors: [.orange, .orange.opacity(0.78)],
+                                            startPoint: .leading, endPoint: .trailing
+                                        )
+                                    )
+                                    .frame(width: typeBreakdownAppeared ? varW : 0, height: 14)
+                                    .overlay(
+                                        LinearGradient(
+                                            colors: [.white.opacity(0.28), .clear, .black.opacity(0.08)],
+                                            startPoint: .top, endPoint: .bottom
+                                        )
+                                        .clipShape(RoundedRectangle(cornerRadius: 7))
+                                    )
+                                    .animation(.spring(response: 0.68, dampingFraction: 0.82), value: typeBreakdownAppeared)
+                                // [v3] 固定支出段：加入 glow overlay（頂白底柔化），同上規格
+                                RoundedRectangle(cornerRadius: 7)
+                                    .fill(
+                                        LinearGradient(
+                                            colors: [Color(red: 0.20, green: 0.50, blue: 0.95), .blue],
+                                            startPoint: .leading, endPoint: .trailing
+                                        )
+                                    )
+                                    .frame(width: typeBreakdownAppeared ? fixW : 0, height: 14)
+                                    .overlay(
+                                        LinearGradient(
+                                            colors: [.white.opacity(0.28), .clear, .black.opacity(0.08)],
+                                            startPoint: .top, endPoint: .bottom
+                                        )
+                                        .clipShape(RoundedRectangle(cornerRadius: 7))
+                                    )
+                                    .animation(.spring(response: 0.68, dampingFraction: 0.82).delay(0.07), value: typeBreakdownAppeared)
                             }
                         }
-                        .frame(height: 12)
-                        .clipShape(Capsule())
-                    }
-                    .frame(height: 12)
+                        .frame(height: 14)
 
-                    // 圖例
-                    HStack(spacing: 20) {
+                        // 比例百分比標注列
+                        HStack {
+                            Text(String(format: "%.1f%%", variableTotal / total * 100))
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundStyle(.orange)
+                            Spacer()
+                            Text(String(format: "%.1f%%", fixedTotal / total * 100))
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundStyle(.blue)
+                        }
+                    }
+
+                    // 分隔線
+                    Rectangle()
+                        .fill(Color(.separator).opacity(0.20))
+                        .frame(height: 0.5)
+
+                    // 圖例（升級：大字金額 + 彩色百分比膠囊）
+                    HStack(spacing: 14) {
                         breakdownLegendItem(
                             color: .orange,
                             icon: "arrow.up.arrow.down.circle.fill",
@@ -608,7 +1304,6 @@ struct ChartView: View {
                             amount: fixedTotal,
                             total: total
                         )
-                        Spacer()
                     }
                 }
                 .padding(16)
@@ -618,29 +1313,55 @@ struct ChartView: View {
                 .padding(.horizontal)
             }
         }
+        .opacity(typeBreakdownAppeared || total == 0 ? 1 : 0)
+        .offset(y: typeBreakdownAppeared || total == 0 ? 0 : 14)
+        .onAppear {
+            withAnimation(.spring(response: 0.50, dampingFraction: 0.82).delay(0.10)) {
+                typeBreakdownAppeared = true
+            }
+        }
     }
 
     private func breakdownLegendItem(color: Color, icon: String, label: String, amount: Double, total: Double) -> some View {
-        HStack(spacing: 8) {
+        let pct = total > 0 ? amount / total * 100 : 0
+        return HStack(spacing: 10) {
+            // [v3] 圖示圓底色：純色 → LinearGradient（topLeading 0.20 → bottomTrailing 0.08），
+            //      對齊 OverviewView.categoryRow / FinanceOverviewView.allocationSection 圖示圓規格
             ZStack {
                 Circle()
-                    .fill(color.opacity(0.14))
-                    .frame(width: 30, height: 30)
+                    .fill(
+                        LinearGradient(
+                            colors: [color.opacity(0.20), color.opacity(0.08)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 36, height: 36)
+                Circle()
+                    .stroke(color.opacity(0.22), lineWidth: 1)
+                    .frame(width: 36, height: 36)
                 Image(systemName: icon)
-                    .font(.system(size: 12, weight: .medium))
+                    .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(color)
             }
-            VStack(alignment: .leading, spacing: 1) {
+            VStack(alignment: .leading, spacing: 2) {
                 Text(label)
-                    .font(.caption)
+                    .font(.caption2.weight(.medium))
                     .foregroundStyle(.secondary)
                 Text(formatCurrency(amount))
-                    .font(.subheadline.bold())
+                    .font(.system(size: 15, weight: .bold, design: .rounded))
+                    .foregroundStyle(.primary)
                     .contentTransition(.numericText())
-                Text(String(format: "%.1f%%", total > 0 ? amount / total * 100 : 0))
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
             }
+            Spacer(minLength: 2)
+            Text(String(format: "%.1f%%", pct))
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(color)
+                .padding(.horizontal, 7)
+                .padding(.vertical, 3)
+                .background(color.opacity(0.10))
+                .clipShape(Capsule())
+                .overlay(Capsule().stroke(color.opacity(0.20), lineWidth: 0.6))
         }
     }
 
@@ -692,15 +1413,12 @@ struct ChartView: View {
     }
 
     private func formatCurrency(_ value: Double) -> String {
-        Self.currencyFormatter.string(from: NSNumber(value: value)) ?? "NT$0"
+        value.ntdWanString
     }
 
     private func abbreviateCurrency(_ value: Double) -> String {
-        if value >= 10000 {
-            return String(format: "%.0f萬", value / 10000)
-        } else if value >= 1000 {
-            return String(format: "%.1fk", value / 1000)
-        }
+        if value >= 100_000_000 { return String(format: "%.1f億", value / 100_000_000) }
+        if value >= 10_000 { return String(format: "%.0f萬", value / 10_000) }
         return String(format: "%.0f", value)
     }
 
@@ -712,69 +1430,39 @@ struct ChartView: View {
     }
 }
 
-// MARK: - 統計卡片
+// MARK: - ChartMode 主題色（v2 美化：輪播指示器依模式分色）
 
-struct StatCard: View {
-    let title: String
-    let value: String
-    let icon: String
-    let color: Color
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            // 彩色頂端條（與 OverviewView summaryCard 一致）
-            RoundedRectangle(cornerRadius: 2)
-                .fill(
-                    LinearGradient(
-                        colors: [color, color.opacity(0.55)],
-                        startPoint: .leading, endPoint: .trailing
-                    )
-                )
-                .frame(height: 4)
-                .padding(.bottom, 10)
-
-            ZStack {
-                Circle()
-                    .fill(color.opacity(0.16))
-                    .frame(width: 30, height: 30)
-                Image(systemName: icon)
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(color)
-            }
-
-            Spacer(minLength: 8)
-
-            Text(title)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-
-            Spacer(minLength: 4)
-
-            Text(value)
-                .font(.system(size: 13, weight: .bold, design: .rounded))
-                .foregroundStyle(.primary)
-                .minimumScaleFactor(0.7)
-                .lineLimit(1)
-                .contentTransition(.numericText())
+private extension ChartMode {
+    var themeColor: Color {
+        switch self {
+        case .trend:       return .green
+        case .variablePie: return .orange
+        case .fixedPie:    return .blue
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 12)
-        .padding(.top, 12)
-        .padding(.bottom, 14)
-        .background(
-            ZStack {
-                Color(.systemBackground)
-                color.opacity(0.04)
-            }
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 16))
-        .overlay(
-            RoundedRectangle(cornerRadius: 16)
-                .stroke(color.opacity(0.12), lineWidth: 0.75)
-        )
-        .shadow(color: color.opacity(0.13), radius: 10, x: 0, y: 4)
-        .shadow(color: .black.opacity(0.04), radius: 4, x: 0, y: 1)
+    }
+}
+
+// MARK: - TimePeriod chip UI helpers
+
+private extension TimePeriod {
+    var chipIcon: String {
+        switch self {
+        case .daily:     return "sun.max.fill"
+        case .weekly:    return "7.square"
+        case .monthly:   return "calendar"
+        case .quarterly: return "chart.bar.fill"
+        case .yearly:    return "sparkles"
+        }
+    }
+
+    var chipLabel: String {
+        switch self {
+        case .daily:     return "近30天"
+        case .weekly:    return "近12週"
+        case .monthly:   return "近12月"
+        case .quarterly: return "近8季"
+        case .yearly:    return "近5年"
+        }
     }
 }
 

@@ -1,5 +1,54 @@
 import SwiftUI
 
+// MARK: - 美化紀錄（CareerView）
+// [2026-06 v1] 本次美化方向：
+//   1. summaryCard：加入彩色頂端 Capsule 條 + 漸層圖示圓（對齊 OverviewView.summaryCard 規格）
+//   2. statCard：加入漸層圖示圓（LinearGradient + stroke）+ 細邊框 + 雙層陰影（對齊 LifeOverviewView.statBadge 規格）
+//   3. dashboardSection：加入錯落進場動畫（對齊 OverviewView summaryCard onAppear 規格）
+//   4. subCategoryBreakdown 區塊標題：Capsule 側條 + 分類數膠囊（對齊 milestoneTimelineSection 標題規格）
+//   5. subCategoryBreakdown 列：漸層圖示圓 + 計數膠囊 + mini 比例進度條 + 交錯進場動畫
+//   6. milestoneListSection 區塊標題：Capsule 側條 + 里程碑計數膠囊（對齊統一 section header 規格）
+//   7. careerRow：左側 4pt 分類色彩強調條 + 44pt 漸層圖示圓 + 陰影（對齊 ExpenseRow 規格）
+//   8. 空狀態：雙層脈衝光環 + 漸層底圓 + icon + 說明文字（對齊 VariableExpenseView emptyStateView 規格）
+//   9. milestoneListSection：加入交錯淡入 + 向上進場動畫（對齊 FamilyView 規格）
+// [2026-06 v2] 本次美化方向：
+//  10. careerRow 日期：從純 .caption2 文字升級為彩色 Capsule 徽章（accent.opacity(0.10) 底色 +
+//      accent.opacity(0.22) 細邊框），對齊 SpouseResumeView.marriageRow / OverviewView.recentRow 日期標籤規格。
+//  11. subtitleText salaryAdjust：薪資漲跌百分比從純色文字改為彩色 Capsule 膠囊（綠/紅）+
+//      薪前後金額以 .caption2.secondary 輔助顯示，提升資訊層次，對齊 IncomeView.incomeRow 數值排版規格。
+//  12. summaryCard 數值字型：.subheadline.bold() → .system(size:15, weight:.bold, design:.rounded)
+//      + minimumScaleFactor(0.72)，對齊 OverviewView.summaryCard 金額字型規格。
+// [2026-06 v3] 本次美化方向：
+//  13. summaryCard 圖示圓：30pt 純色 opacity(0.16) → 32pt LinearGradient (0.20→0.08) +
+//      Circle().stroke(color.opacity(0.18), lineWidth: 0.75)，
+//      對齊 OverviewView.summaryCard v3 / FinanceOverviewView.assetCard v3 圖示圓規格。
+//  14. subCategoryBreakdown 計數膠囊：補入 overlay Capsule().stroke(accent.opacity(0.22), 0.6pt)，
+//      對齊 LifeOverviewView.categoryBreakdownSection / OverviewView.categoryRow 膠囊邊框規格。
+//  15. subCategoryBreakdown 進度條：加入 glow overlay Capsule（LinearGradient
+//      [white.opacity(0.28), clear, black.opacity(0.08)] top→bottom），
+//      對齊 OverviewView.categoryRow v3 / ChartView v3 / FinanceChartView v4 彩條 glow 規格。
+//  16. careerRow 44pt 圖示圓：補入 Circle().stroke(accent.opacity(0.18), lineWidth: 0.75)，
+//      對齊 FamilyView v2 / VehicleView v3 / StockView v3 圖示圓 stroke 邊框規格。
+//  17. careerRow 子分類膠囊 + 管理職徽章：各補入 overlay Capsule stroke（0.6pt），
+//      對齊全 App 膠囊細邊框設計語言（VariableExpenseView.ExpenseRow / IncomeView.incomeRow）。
+//  18. emptyMilestoneState CTA 按鈕：非篩選狀態下補入「新增第一個里程碑」橘色漸層膠囊按鈕，
+//      對齊 IncomeView.emptyState / VariableExpenseView.emptyStateView CTA 按鈕設計規格。
+// [2026-07 v4] 金額單位一致性小步美化：
+//  19. subtitleText salaryAdjust 薪前後金額：String(format:"NT$%.0f") 原樣輸出整數台幣，
+//      高薪資時字串過長（例：NT$1200000 → NT$1500000）；改用 .ntdWanString 萬/億智慧量級，
+//      對齊全 App 金額顯示規格（IncomeView / FinanceOverviewView 等），且不換行更省寬度。
+// [2026-07 v5] 補齊卡片邊框一致性缺口：
+//  20. subCategoryBreakdown／milestoneListSection 清單卡片、emptyMilestoneState 空狀態卡片，
+//      三處 .background → .clipShape(RoundedRectangle(cornerRadius:16)) → .shadow 之間都缺
+//      overlay stroke 細邊框，而本檔頂部 summaryCard／statCard（240-244、291-295 行）
+//      早已套用 RoundedRectangle(cornerRadius:16).stroke(color.opacity(0.12), 0.75pt)，
+//      造成同一畫面「上方儀表板卡片有邊框、下方清單卡片沒邊框」的視覺落差。
+//      補上 .overlay(RoundedRectangle(cornerRadius:16).stroke(Color(.separator).opacity(0.12),
+//      lineWidth:0.75))，中性 separator 色可通用於任兩張清單卡片（不像 statCard 有單一
+//      主題色可用），深色模式下同樣可見一圈淡邊框。純視覺層調整，清單資料、篩選、
+//      進場動畫等既有商業邏輯完全未變動。
+//      （下次美化本檔案時，可轉往其他仍留有待辦的畫面）
+
 struct CareerView: View {
     @EnvironmentObject var store: LifeStore
     @EnvironmentObject var subscription: SubscriptionManager
@@ -8,70 +57,112 @@ struct CareerView: View {
     @State private var selectedSub: CareerSubCategory?
     @State private var showPremiumAlert = false
 
-    private var careerMilestones: [LifeMilestone] {
-        store.milestones
+    // 進場動畫旗標
+    @State private var dashboardAppeared = false
+    @State private var subCatRowsAppeared = false
+    @State private var milestoneRowsAppeared = false
+    @State private var emptyIconPulse = false
+    @State private var emptyPulseTask: Task<Void, Never>?
+
+    /// careerMilestones 及其衍生統計值整包快取，避免 dashboardSection / subCategoryBreakdown /
+    /// milestoneListSection 各自重新對 store.milestones 做 filter+sort（原本每次 render 約重跑 10 次）
+    private struct CareerStats {
+        let milestones: [LifeMilestone]
+        let currentCompany: String?
+        let currentPosition: String?
+        let totalCompanies: Int
+        let yearsAtCurrentCompany: Double?
+        let subCounts: [CareerSubCategory: Int]
+        // ── 以下為後加欄位，一律追加在最後 ──
+        // memberwise init 的引數順序必須與宣告順序一致，插在中間會讓既有呼叫端
+        // 整段要重排。
+        /// 事件型里程碑（入職／升職／調薪／轉職／降職／離職），不含期間型的兼任職務
+        let eventMilestones: [LifeMilestone]
+        /// 目前仍在任的兼任職務
+        let activeSideRoles: [LifeMilestone]
+        /// 事件型子分類裡的最大筆數，供分佈長條圖當分母
+        let eventMaxSubCount: Int
+    }
+
+    private func makeCareerStats() -> CareerStats {
+        let milestones = store.milestones
             .filter { $0.category == .career }
             .sorted { $0.date > $1.date }
-    }
 
-    private var filtered: [LifeMilestone] {
-        guard let sub = selectedSub else { return careerMilestones }
-        return careerMilestones.filter { $0.careerSubCategory == sub }
-    }
-
-    private var currentCompany: String? {
         // 以最近一筆入職為基準，若之後有對應離職則視為已離職
-        let sorted = careerMilestones
-        guard let latestJoin = sorted.first(where: { $0.careerSubCategory == .join && !($0.companyName ?? "").isEmpty }) else {
-            return nil
-        }
-        if sorted.first(where: { $0.careerSubCategory == .resign && $0.date > latestJoin.date }) != nil {
-            return nil
-        }
-        return latestJoin.companyName
-    }
+        let currentCompany: String? = {
+            guard let latestJoin = milestones.first(where: { $0.careerSubCategory == .join && !($0.companyName ?? "").isEmpty }) else {
+                return nil
+            }
+            if milestones.first(where: { $0.careerSubCategory == .resign && $0.date > latestJoin.date }) != nil {
+                return nil
+            }
+            return latestJoin.companyName
+        }()
 
-    private var currentPosition: String? {
         // 最新一筆有 jobTitle 的里程碑（入職/升職/轉職/降職）
-        careerMilestones.first(where: {
+        let currentPosition = milestones.first(where: {
             let sub = $0.careerSubCategory
             return (sub == .join || sub == .promote || sub == .transfer || sub == .demote)
                 && !($0.jobTitle ?? "").isEmpty
         })?.jobTitle
-    }
 
-    private var totalCompanies: Int {
-        let names = careerMilestones
-            .filter { $0.careerSubCategory == .join }
-            .compactMap { $0.companyName?.trimmingCharacters(in: .whitespaces) }
-            .filter { !$0.isEmpty }
-        return Set(names).count
-    }
+        let totalCompanies: Int = {
+            let names = milestones
+                .filter { $0.careerSubCategory == .join }
+                .compactMap { $0.companyName?.trimmingCharacters(in: .whitespaces) }
+                .filter { !$0.isEmpty }
+            return Set(names).count
+        }()
 
-    private var yearsAtCurrentCompany: Double? {
-        guard currentCompany != nil else { return nil }
-        guard let latestJoin = careerMilestones.first(where: { $0.careerSubCategory == .join && !($0.companyName ?? "").isEmpty }) else {
-            return nil
+        let yearsAtCurrentCompany: Double? = {
+            guard currentCompany != nil,
+                  let latestJoin = milestones.first(where: { $0.careerSubCategory == .join && !($0.companyName ?? "").isEmpty }) else {
+                return nil
+            }
+            let days = Calendar.current.dateComponents([.day], from: latestJoin.date, to: Date()).day ?? 0
+            return max(0, Double(days) / 365.0)
+        }()
+
+        var subCounts: [CareerSubCategory: Int] = [:]
+        for m in milestones {
+            if let s = m.careerSubCategory { subCounts[s, default: 0] += 1 }
         }
-        let days = Calendar.current.dateComponents([.day], from: latestJoin.date, to: Date()).day ?? 0
-        return max(0, Double(days) / 365.0)
-    }
 
-    private var subCounts: [CareerSubCategory: Int] {
-        var dict: [CareerSubCategory: Int] = [:]
-        for m in careerMilestones {
-            if let s = m.careerSubCategory { dict[s, default: 0] += 1 }
-        }
-        return dict
+        // 期間型（兼任職務）與事件型分開。上面的 currentCompany / currentPosition /
+        // totalCompanies / yearsAtCurrentCompany 都已經是按特定子分類 filter，
+        // 天生不受兼任影響；唯一會被污染的是「把每一筆都當一次職涯異動」的總數。
+        let eventMilestones = milestones.filter { !($0.careerSubCategory?.isPeriodType ?? false) }
+        let activeSideRoles = milestones.filter { $0.isActiveSideRole }
+        let eventMaxSubCount = subCounts
+            .filter { !$0.key.isPeriodType }
+            .map(\.value).max() ?? 1
+
+        return CareerStats(milestones: milestones,
+                            currentCompany: currentCompany,
+                            currentPosition: currentPosition,
+                            totalCompanies: totalCompanies,
+                            yearsAtCurrentCompany: yearsAtCurrentCompany,
+                            subCounts: subCounts,
+                            eventMilestones: eventMilestones,
+                            activeSideRoles: activeSideRoles,
+                            eventMaxSubCount: eventMaxSubCount)
     }
 
     var body: some View {
-        NavigationStack {
+        // stats 整頁只算一次，供三個 section 共用，避免各自重新 filter+sort 全部 store.milestones
+        let stats = makeCareerStats()
+        let filteredMilestones: [LifeMilestone] = {
+            guard let sub = selectedSub else { return stats.milestones }
+            return stats.milestones.filter { $0.careerSubCategory == sub }
+        }()
+
+        return NavigationStack {
             ScrollView {
-                VStack(spacing: 16) {
-                    dashboardSection
-                    subCategoryBreakdown
-                    milestoneListSection
+                VStack(spacing: 20) {
+                    dashboardSection(stats)
+                    subCategoryBreakdown(stats)
+                    milestoneListSection(stats, filtered: filteredMilestones)
                 }
                 .padding(.vertical)
             }
@@ -95,124 +186,372 @@ struct CareerView: View {
 
     // MARK: - 看板
 
-    private var dashboardSection: some View {
+    private func dashboardSection(_ stats: CareerStats) -> some View {
         VStack(spacing: 12) {
             HStack(spacing: 12) {
-                summaryCard(title: "目前公司", value: currentCompany ?? "—",
-                            icon: "building.2.fill", color: .blue)
-                summaryCard(title: "目前職位", value: currentPosition ?? "—",
-                            icon: "person.badge.key.fill", color: .indigo)
+                summaryCard(title: "目前公司", value: stats.currentCompany ?? "—",
+                            icon: "building.2.fill", color: .blue, delay: 0.06)
+                summaryCard(title: "目前職位", value: stats.currentPosition ?? "—",
+                            icon: "person.badge.key.fill", color: .indigo, delay: 0.12)
             }
             HStack(spacing: 12) {
                 statCard(title: "任職年資",
-                         value: yearsAtCurrentCompany.map { String(format: "%.1f 年", $0) } ?? "—",
-                         icon: "clock.fill", color: .orange)
-                statCard(title: "任職公司數", value: "\(totalCompanies)",
-                         icon: "building.columns.fill", color: .teal)
-                statCard(title: "職涯里程碑", value: "\(careerMilestones.count)",
-                         icon: "trophy.fill", color: .yellow)
+                         value: stats.yearsAtCurrentCompany.map { String(format: "%.1f 年", $0) } ?? "—",
+                         icon: "clock.fill", color: .orange, delay: 0.18)
+                statCard(title: "任職公司數", value: "\(stats.totalCompanies)",
+                         icon: "building.columns.fill", color: .teal, delay: 0.24)
+                // 標題從「職涯里程碑」改成「職涯異動」且只數事件型：
+                // 兼任職務是期間不是異動，混進來會讓這個數字失去意義。
+                statCard(title: "職涯異動", value: "\(stats.eventMilestones.count)",
+                         icon: "trophy.fill", color: Color(red: 1.00, green: 0.72, blue: 0.18), delay: 0.30)
+            }
+            if !stats.activeSideRoles.isEmpty {
+                HStack(spacing: 12) {
+                    statCard(title: "現任兼任職務", value: "\(stats.activeSideRoles.count)",
+                             icon: "person.badge.plus", color: .indigo, delay: 0.36)
+                    statCard(title: "兼任總紀錄",
+                             value: "\(stats.milestones.count - stats.eventMilestones.count)",
+                             icon: "clock.arrow.circlepath", color: .indigo, delay: 0.42)
+                }
             }
         }
         .padding(.horizontal)
+        .onAppear {
+            withAnimation { dashboardAppeared = true }
+        }
+        .onDisappear { dashboardAppeared = false }
     }
 
-    private func summaryCard(title: String, value: String, icon: String, color: Color) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 6) {
-                Image(systemName: icon).font(.caption).foregroundStyle(color)
-                Text(title).font(.caption).foregroundStyle(.secondary)
+    /// summaryCard：彩色頂端 Capsule 條 + 漸層圖示圓，對齊 OverviewView.summaryCard
+    private func summaryCard(title: String, value: String, icon: String, color: Color, delay: Double) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            // 彩色頂端條
+            RoundedRectangle(cornerRadius: 2)
+                .fill(
+                    LinearGradient(
+                        colors: [color, color.opacity(0.55)],
+                        startPoint: .leading, endPoint: .trailing
+                    )
+                )
+                .frame(height: 4)
+                .padding(.bottom, 10)
+
+            HStack(spacing: 8) {
+                // [v3] 32pt LinearGradient + stroke，對齊 OverviewView.summaryCard v3 圖示圓規格
+                ZStack {
+                    Circle()
+                        .fill(
+                            LinearGradient(
+                                colors: [color.opacity(0.20), color.opacity(0.08)],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .frame(width: 32, height: 32)
+                    Circle()
+                        .stroke(color.opacity(0.18), lineWidth: 0.75)
+                        .frame(width: 32, height: 32)
+                    Image(systemName: icon)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(color)
+                }
+                Text(title)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
             }
+
+            Spacer(minLength: 8)
+
             Text(value)
-                .font(.subheadline.bold())
+                .font(.system(size: 15, weight: .bold, design: .rounded))
                 .lineLimit(2)
-                .minimumScaleFactor(0.8)
+                .minimumScaleFactor(0.72)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(12)
-        .frame(maxWidth: .infinity, minHeight: 72, alignment: .topLeading)
-        .background(Color(.systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 12))
-        .shadow(color: .black.opacity(0.05), radius: 4, y: 2)
+        .frame(maxWidth: .infinity, minHeight: 80, alignment: .topLeading)
+        .padding(.horizontal, 12)
+        .padding(.top, 12)
+        .padding(.bottom, 14)
+        .background(
+            ZStack {
+                Color(.systemBackground)
+                color.opacity(0.04)
+            }
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16)
+                .stroke(color.opacity(0.12), lineWidth: 0.75)
+        )
+        .shadow(color: color.opacity(0.13), radius: 10, x: 0, y: 4)
+        .shadow(color: .black.opacity(0.04), radius: 4, x: 0, y: 1)
+        .opacity(dashboardAppeared ? 1 : 0)
+        .offset(y: dashboardAppeared ? 0 : 18)
+        .animation(.spring(response: 0.50, dampingFraction: 0.78).delay(delay), value: dashboardAppeared)
     }
 
-    private func statCard(title: String, value: String, icon: String, color: Color) -> some View {
-        VStack(spacing: 6) {
-            Image(systemName: icon).font(.title3).foregroundStyle(color)
-            Text(value).font(.subheadline.bold()).lineLimit(1).minimumScaleFactor(0.7)
-            Text(title).font(.caption2).foregroundStyle(.secondary)
+    /// statCard：漸層圖示圓 + 細邊框，對齊 LifeOverviewView.statBadge 規格
+    private func statCard(title: String, value: String, icon: String, color: Color, delay: Double) -> some View {
+        VStack(spacing: 10) {
+            ZStack {
+                Circle()
+                    .fill(
+                        LinearGradient(
+                            colors: [color.opacity(0.20), color.opacity(0.07)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 44, height: 44)
+                Circle()
+                    .stroke(color.opacity(0.22), lineWidth: 1.5)
+                    .frame(width: 44, height: 44)
+                Image(systemName: icon)
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(color)
+            }
+            Text(value)
+                .font(.system(size: 16, weight: .bold, design: .rounded))
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+                .contentTransition(.numericText())
+            Text(title)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
         }
         .frame(maxWidth: .infinity)
-        .padding(.vertical, 12)
-        .background(Color(.systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 12))
-        .shadow(color: .black.opacity(0.05), radius: 4, y: 2)
+        .padding(.vertical, 16)
+        .background(
+            ZStack {
+                Color(.systemBackground)
+                color.opacity(0.03)
+            }
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16)
+                .stroke(color.opacity(0.12), lineWidth: 0.75)
+        )
+        .shadow(color: color.opacity(0.14), radius: 10, x: 0, y: 4)
+        .shadow(color: .black.opacity(0.04), radius: 3, x: 0, y: 1)
+        .opacity(dashboardAppeared ? 1 : 0)
+        .offset(y: dashboardAppeared ? 0 : 18)
+        .animation(.spring(response: 0.50, dampingFraction: 0.78).delay(delay), value: dashboardAppeared)
     }
 
     // MARK: - 子分類統計
 
     @ViewBuilder
-    private var subCategoryBreakdown: some View {
-        if !subCounts.isEmpty {
+    private func subCategoryBreakdown(_ stats: CareerStats) -> some View {
+        let validSubs = CareerSubCategory.allCases.filter { stats.subCounts[$0, default: 0] > 0 }
+        // 分母只取事件型的最大值。兼任是期間型，年度性職務（尾牙負責人）累積幾年後
+        // 筆數會超過任何一種異動，拿它當分母會把既有使用者原本的長條全部壓扁——
+        // 那是「新增一個分類卻讓舊畫面變樣」的典型退化。兼任自己的長條夾到 1.0。
+        let maxCount = max(1, stats.eventMaxSubCount)
+
+        if !stats.subCounts.isEmpty {
             VStack(alignment: .leading, spacing: 10) {
-                Text("子分類統計").font(.headline).padding(.horizontal)
+                // 標準化區塊標題：Capsule 側條 + 計數膠囊
+                HStack(spacing: 10) {
+                    Capsule()
+                        .fill(
+                            LinearGradient(
+                                colors: [.blue, .blue.opacity(0.55)],
+                                startPoint: .top, endPoint: .bottom
+                            )
+                        )
+                        .frame(width: 4, height: 18)
+                    Text("子分類統計")
+                        .font(.subheadline.weight(.bold))
+                    Spacer()
+                    Text("\(validSubs.count) 類")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.blue)
+                        .padding(.horizontal, 8).padding(.vertical, 3)
+                        .background(Color.blue.opacity(0.10))
+                        .clipShape(Capsule())
+                        .overlay(Capsule().stroke(Color.blue.opacity(0.22), lineWidth: 0.75))
+                }
+                .padding(.horizontal)
+
                 VStack(spacing: 0) {
-                    ForEach(CareerSubCategory.allCases) { sub in
-                        if let count = subCounts[sub], count > 0 {
-                            HStack {
-                                Image(systemName: sub.icon).frame(width: 30)
-                                    .foregroundStyle(subColor(sub))
-                                Text(sub.rawValue).font(.subheadline)
+                    ForEach(Array(validSubs.enumerated()), id: \.element) { idx, sub in
+                        let count = stats.subCounts[sub, default: 0]
+                        let accent = subColor(sub)
+                        let ratio = min(1.0, Double(count) / Double(maxCount))
+
+                        VStack(spacing: 8) {
+                            HStack(spacing: 12) {
+                                // 漸層圖示圓（對齊 categoryBreakdownSection 規格）
+                                ZStack {
+                                    Circle()
+                                        .fill(
+                                            LinearGradient(
+                                                colors: [accent.opacity(0.20), accent.opacity(0.08)],
+                                                startPoint: .topLeading,
+                                                endPoint: .bottomTrailing
+                                            )
+                                        )
+                                        .frame(width: 34, height: 34)
+                                    Circle()
+                                        .stroke(accent.opacity(0.22), lineWidth: 1)
+                                        .frame(width: 34, height: 34)
+                                    Image(systemName: sub.icon)
+                                        .font(.system(size: 14, weight: .semibold))
+                                        .foregroundStyle(accent)
+                                }
+                                Text(sub.title)
+                                    .font(.subheadline)
                                 Spacer()
-                                Text("\(count) 筆").font(.caption).foregroundStyle(.secondary)
+                                // [v3] 計數膠囊：補入 stroke 細邊框，對齊 LifeOverviewView.categoryBreakdownSection 規格
+                                Text("\(count) 筆")
+                                    .font(.system(size: 12, weight: .bold))
+                                    .padding(.horizontal, 9).padding(.vertical, 4)
+                                    .background(accent.opacity(0.12))
+                                    .foregroundStyle(accent)
+                                    .clipShape(Capsule())
+                                    .overlay(Capsule().stroke(accent.opacity(0.22), lineWidth: 0.6))
                             }
-                            .padding(.horizontal).padding(.vertical, 10)
-                            if CareerSubCategory.allCases.last(where: { subCounts[$0, default: 0] > 0 }) != sub {
-                                Divider().padding(.leading, 50)
+
+                            // [v3] 比例進度條 + glow overlay，對齊 OverviewView.categoryRow v3 彩條規格
+                            GeometryReader { geo in
+                                ZStack(alignment: .leading) {
+                                    Capsule()
+                                        .fill(Color(.systemFill))
+                                        .frame(height: 4)
+                                    Capsule()
+                                        .fill(
+                                            LinearGradient(
+                                                colors: [accent, accent.opacity(0.60)],
+                                                startPoint: .leading, endPoint: .trailing
+                                            )
+                                        )
+                                        .frame(width: geo.size.width * ratio, height: 4)
+                                        .animation(.spring(response: 0.6, dampingFraction: 0.78), value: ratio)
+                                    // glow overlay：頂部白色高亮 + 底部柔化
+                                    Capsule()
+                                        .fill(
+                                            LinearGradient(
+                                                colors: [.white.opacity(0.28), .clear, .black.opacity(0.08)],
+                                                startPoint: .top,
+                                                endPoint: .bottom
+                                            )
+                                        )
+                                        .frame(width: geo.size.width * ratio, height: 4)
+                                }
                             }
+                            .frame(height: 4)
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 12)
+                        // 交錯進場動畫
+                        .opacity(subCatRowsAppeared ? 1 : 0)
+                        .offset(y: subCatRowsAppeared ? 0 : 12)
+                        .animation(
+                            .spring(response: 0.48, dampingFraction: 0.80)
+                                .delay(0.06 * Double(idx)),
+                            value: subCatRowsAppeared
+                        )
+
+                        if idx < validSubs.count - 1 {
+                            Divider().padding(.leading, 62)
                         }
                     }
                 }
                 .background(Color(.systemBackground))
-                .clipShape(RoundedRectangle(cornerRadius: 12))
-                .shadow(color: .black.opacity(0.05), radius: 4, y: 2)
+                .clipShape(RoundedRectangle(cornerRadius: 16))
+                // [v5] 補 overlay stroke 細邊框，對齊本檔 summaryCard／statCard 卡片邊框規格
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16)
+                        .stroke(Color(.separator).opacity(0.12), lineWidth: 0.75)
+                )
+                .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 3)
                 .padding(.horizontal)
+                .onAppear {
+                    withAnimation(.spring(response: 0.50, dampingFraction: 0.82).delay(0.05)) {
+                        subCatRowsAppeared = true
+                    }
+                }
+                .onDisappear { subCatRowsAppeared = false }
             }
         }
     }
 
     // MARK: - 里程碑列表
 
-    private var milestoneListSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Text("職涯里程碑").font(.headline)
+    private func milestoneListSection(_ stats: CareerStats, filtered: [LifeMilestone]) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            // 標準化區塊標題：Capsule 側條 + 計數膠囊
+            HStack(spacing: 10) {
+                Capsule()
+                    .fill(
+                        LinearGradient(
+                            colors: [.orange, .orange.opacity(0.55)],
+                            startPoint: .top, endPoint: .bottom
+                        )
+                    )
+                    .frame(width: 4, height: 18)
+                Text("職涯里程碑")
+                    .font(.subheadline.weight(.bold))
                 Spacer()
+                if !filtered.isEmpty {
+                    let totalCount = stats.milestones.count
+                    let shownCount = filtered.count
+                    Text(selectedSub == nil ? "\(totalCount) 筆" : "\(shownCount) / \(totalCount) 筆")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.orange)
+                        .padding(.horizontal, 8).padding(.vertical, 3)
+                        .background(Color.orange.opacity(0.10))
+                        .clipShape(Capsule())
+                        .overlay(Capsule().stroke(Color.orange.opacity(0.22), lineWidth: 0.75))
+                }
             }
             .padding(.horizontal)
 
             filterRow
 
             if filtered.isEmpty {
-                Text("此分類尚無紀錄").font(.subheadline).foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity).padding(.vertical, 24)
+                // 升級空狀態：脈衝光環 + 漸層圓底 + icon（對齊 emptyStateView 規格）
+                emptyMilestoneState
             } else {
                 VStack(spacing: 0) {
-                    ForEach(filtered) { item in
+                    ForEach(Array(filtered.enumerated()), id: \.element.id) { idx, item in
                         careerRow(item)
                             .contentShape(Rectangle())
                             .onTapGesture {
                                 if subscription.isPremium { editingItem = item }
                                 else { showPremiumAlert = true }
                             }
+                            .opacity(milestoneRowsAppeared ? 1 : 0)
+                            .offset(y: milestoneRowsAppeared ? 0 : 14)
+                            .animation(
+                                .spring(response: 0.45, dampingFraction: 0.82)
+                                    .delay(0.06 * Double(idx)),
+                                value: milestoneRowsAppeared
+                            )
                         if item.id != filtered.last?.id {
-                            Divider().padding(.leading, 60)
+                            Divider().padding(.leading, 72)
                         }
                     }
                 }
                 .background(Color(.systemBackground))
-                .clipShape(RoundedRectangle(cornerRadius: 12))
-                .shadow(color: .black.opacity(0.05), radius: 4, y: 2)
+                .clipShape(RoundedRectangle(cornerRadius: 16))
+                // [v5] 補 overlay stroke 細邊框，對齊本檔 summaryCard／statCard 卡片邊框規格
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16)
+                        .stroke(Color(.separator).opacity(0.12), lineWidth: 0.75)
+                )
+                .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 3)
                 .padding(.horizontal)
+                .onAppear {
+                    withAnimation(.spring(response: 0.50, dampingFraction: 0.82).delay(0.05)) {
+                        milestoneRowsAppeared = true
+                    }
+                }
+                .onDisappear { milestoneRowsAppeared = false }
             }
         }
     }
@@ -224,7 +563,9 @@ struct CareerView: View {
                     selectedSub = nil
                 }
                 ForEach(CareerSubCategory.allCases) { sub in
-                    FilterChip(title: sub.rawValue, icon: sub.icon, isSelected: selectedSub == sub) {
+                    FilterChip(title: sub.title, icon: sub.icon,
+                               isSelected: selectedSub == sub,
+                               tint: subColor(sub)) {
                         selectedSub = sub
                     }
                 }
@@ -233,40 +574,202 @@ struct CareerView: View {
         }
     }
 
-    private func careerRow(_ item: LifeMilestone) -> some View {
-        HStack(alignment: .top, spacing: 12) {
-            Image(systemName: item.careerSubCategory?.icon ?? "briefcase.fill")
-                .font(.title3)
-                .foregroundStyle(subColor(item.careerSubCategory ?? .join))
-                .frame(width: 36, height: 36)
-                .background(subColor(item.careerSubCategory ?? .join).opacity(0.12))
-                .clipShape(Circle())
-
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 6) {
-                    Text(item.title).font(.subheadline.weight(.medium))
-                    if item.isManagerial == true {
-                        Text("管理職")
-                            .font(.caption2.bold())
-                            .padding(.horizontal, 6).padding(.vertical, 2)
-                            .background(Color.orange.opacity(0.18))
-                            .foregroundStyle(.orange)
-                            .clipShape(Capsule())
-                    }
+    /// 空狀態：雙層脈衝光環 + 漸層底圓，對齊 VariableExpenseView.emptyStateView
+    private var emptyMilestoneState: some View {
+        let accent = Color.orange
+        return VStack(spacing: 20) {
+            ZStack {
+                // 外層脈衝光環
+                Circle()
+                    .stroke(accent.opacity(emptyIconPulse ? 0 : 0.28), lineWidth: 1.5)
+                    .frame(width: 108, height: 108)
+                    .scaleEffect(emptyIconPulse ? 1.38 : 1.0)
+                    .animation(
+                        .easeOut(duration: 2.0).repeatForever(autoreverses: false),
+                        value: emptyIconPulse
+                    )
+                // 內層脈衝光環（波紋層次）
+                Circle()
+                    .stroke(accent.opacity(emptyIconPulse ? 0 : 0.14), lineWidth: 1)
+                    .frame(width: 108, height: 108)
+                    .scaleEffect(emptyIconPulse ? 1.65 : 1.0)
+                    .animation(
+                        .easeOut(duration: 2.0).delay(0.3).repeatForever(autoreverses: false),
+                        value: emptyIconPulse
+                    )
+                // 主圓底（漸層填色）
+                Circle()
+                    .fill(
+                        LinearGradient(
+                            colors: [accent.opacity(0.15), accent.opacity(0.06)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 86, height: 86)
+                    .overlay(
+                        Circle()
+                            .stroke(accent.opacity(0.22), lineWidth: 1.2)
+                    )
+                Image(systemName: selectedSub == nil ? "briefcase" : "magnifyingglass")
+                    .font(.system(size: 34, weight: .light))
+                    .foregroundStyle(accent.opacity(0.72))
+            }
+            .onAppear {
+                emptyIconPulse = false
+                emptyPulseTask?.cancel()
+                emptyPulseTask = Task {
+                    try? await Task.sleep(nanoseconds: 300_000_000)
+                    guard !Task.isCancelled else { return }
+                    emptyIconPulse = true
                 }
-                subtitle(for: item)
+            }
+            .onDisappear {
+                emptyPulseTask?.cancel()
+                emptyIconPulse = false
             }
 
-            Spacer()
+            VStack(spacing: 8) {
+                Text(selectedSub == nil ? "尚無職涯里程碑" : "此分類尚無紀錄")
+                    .font(.headline.weight(.semibold))
+                    .foregroundStyle(.primary.opacity(0.70))
+                Text(selectedSub == nil ? "記錄職涯中的入職、升職、薪資調整等\n每個重要時刻" : "換一個分類篩選試試")
+                    .font(.subheadline)
+                    .foregroundStyle(.tertiary)
+                    .multilineTextAlignment(.center)
+                    .lineSpacing(3)
+            }
 
-            Text(formatDate(item.date)).font(.caption).foregroundStyle(.secondary)
+            // [v3] 非篩選狀態下顯示 CTA 按鈕，對齊 IncomeView / VariableExpenseView emptyState 規格
+            if selectedSub == nil {
+                Button {
+                    if subscription.isPremium { showAdd = true }
+                    else { showPremiumAlert = true }
+                } label: {
+                    Label("新增第一個里程碑", systemImage: "plus.circle.fill")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 22)
+                        .padding(.vertical, 12)
+                        .background(
+                            LinearGradient(
+                                colors: [accent, Color(red: 0.85, green: 0.40, blue: 0.00)],
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
+                        )
+                        .clipShape(Capsule())
+                        .shadow(color: Color(red: 0.85, green: 0.40, blue: 0.00).opacity(0.35), radius: 10, y: 5)
+                }
+                .buttonStyle(.plain)
+            }
         }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 44)
+        .background(Color(.systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        // [v5] 補 overlay stroke 細邊框，對齊本檔 summaryCard／statCard 卡片邊框規格
+        .overlay(
+            RoundedRectangle(cornerRadius: 16)
+                .stroke(Color(.separator).opacity(0.12), lineWidth: 0.75)
+        )
+        .shadow(color: .black.opacity(0.05), radius: 8, x: 0, y: 3)
         .padding(.horizontal)
-        .padding(.vertical, 10)
     }
 
+    /// careerRow：左側 4pt 分類色彩強調條 + 44pt 漸層圖示圓，對齊 ExpenseRow 規格
+    private func careerRow(_ item: LifeMilestone) -> some View {
+        let accent = subColor(item.careerSubCategory ?? .join)
+        return HStack(alignment: .center, spacing: 0) {
+            // 左側彩色強調條
+            RoundedRectangle(cornerRadius: 2)
+                .fill(
+                    LinearGradient(
+                        colors: [accent, accent.opacity(0.40)],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
+                .frame(width: 4)
+                .padding(.vertical, 10)
+                .padding(.trailing, 14)
+
+            HStack(alignment: .top, spacing: 12) {
+                // [v3] 44pt 漸層圖示圓 + 陰影 + stroke，對齊 FamilyView v2 / VehicleView v3 / StockView v3 規格
+                ZStack {
+                    Circle()
+                        .fill(
+                            LinearGradient(
+                                colors: [accent.opacity(0.22), accent.opacity(0.09)],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .frame(width: 44, height: 44)
+                        .shadow(color: accent.opacity(0.22), radius: 6, x: 0, y: 3)
+                    Circle()
+                        .stroke(accent.opacity(0.18), lineWidth: 0.75)
+                        .frame(width: 44, height: 44)
+                    Image(systemName: item.careerSubCategory?.icon ?? "briefcase.fill")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(accent)
+                }
+
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 6) {
+                        Text(item.title)
+                            .font(.subheadline.weight(.semibold))
+                            .lineLimit(1)
+                        if item.isManagerial == true {
+                            // [v3] 管理職徽章補 stroke 細邊框，對齊全 App 膠囊設計語言
+                            // [v25.293] 有填管理單位時一併顯示（管理職・製造一課）
+                            Text((item.managedUnit?.isEmpty == false)
+                                 ? "管理職・\(item.managedUnit!)" : "管理職")
+                                .font(.caption2.bold())
+                                .padding(.horizontal, 6).padding(.vertical, 2)
+                                .background(Color.orange.opacity(0.18))
+                                .foregroundStyle(.orange)
+                                .clipShape(Capsule())
+                                .overlay(Capsule().stroke(Color.orange.opacity(0.28), lineWidth: 0.6))
+                        }
+                    }
+
+                    // 子分類膠囊 + 副標題
+                    HStack(spacing: 6) {
+                        if let sub = item.careerSubCategory {
+                            // [v3] 子分類膠囊補 stroke 細邊框，對齊 ExpenseRow / IncomeView 膠囊規格
+                            Text(sub.title)
+                                .font(.system(size: 10, weight: .semibold))
+                                .padding(.horizontal, 7).padding(.vertical, 2.5)
+                                .background(accent.opacity(0.12))
+                                .foregroundStyle(accent)
+                                .clipShape(Capsule())
+                                .overlay(Capsule().stroke(accent.opacity(0.22), lineWidth: 0.6))
+                        }
+                        subtitleText(for: item)
+                    }
+                }
+
+                Spacer(minLength: 4)
+
+                // 日期 Capsule 徽章（對齊 SpouseResumeView.marriageRow / OverviewView.recentRow 規格）
+                Text(formatDate(item.date))
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(accent.opacity(0.85))
+                    .padding(.horizontal, 7).padding(.vertical, 2.5)
+                    .background(accent.opacity(0.10))
+                    .clipShape(Capsule())
+                    .overlay(Capsule().stroke(accent.opacity(0.22), lineWidth: 0.6))
+                    .padding(.top, 2)
+            }
+            .padding(.vertical, 10)
+        }
+        .padding(.horizontal, 16)
+    }
+
+    // 副標題文字（純文字，不含膠囊）
     @ViewBuilder
-    private func subtitle(for item: LifeMilestone) -> some View {
+    private func subtitleText(for item: LifeMilestone) -> some View {
         let parts: [String] = {
             var p: [String] = []
             if let d = item.department, !d.isEmpty { p.append(d) }
@@ -278,35 +781,59 @@ struct CareerView: View {
            let before = item.salaryBefore, before > 0,
            let after = item.salaryAfter, after > 0 {
             let pct = (after - before) / before * 100
-            Text(String(format: "NT$%.0f → NT$%.0f（%@%.1f%%）", before, after, pct >= 0 ? "+" : "", pct))
-                .font(.caption).foregroundStyle(pct >= 0 ? .green : .red).lineLimit(1)
+            let pctColor: Color = pct >= 0 ? .green : .red
+            // 薪前後金額（輔助文字） + 漲跌百分比 Capsule 膠囊（對齊 IncomeView.incomeRow 數值排版）
+            HStack(spacing: 5) {
+                Text("\(before.ntdWanString) → \(after.ntdWanString)")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                Text(String(format: "%@%.1f%%", pct >= 0 ? "▲ +" : "▼ ", abs(pct)))
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(pctColor)
+                    .padding(.horizontal, 6).padding(.vertical, 2)
+                    .background(pctColor.opacity(0.12))
+                    .clipShape(Capsule())
+                    .overlay(Capsule().stroke(pctColor.opacity(0.25), lineWidth: 0.6))
+            }
+        } else if item.careerSubCategory == .sideRole {
+            SideRoleRowSubtitle(item: item)
         } else if item.careerSubCategory == .resign {
             if let m = item.mood, !m.isEmpty {
                 Text("心境：\(m)").font(.caption).foregroundStyle(.secondary).lineLimit(1)
-            }
-            if let f = item.futurePlan, !f.isEmpty {
+            } else if let f = item.futurePlan, !f.isEmpty {
                 Text("規劃：\(f)").font(.caption).foregroundStyle(.secondary).lineLimit(1)
             }
         } else if !parts.isEmpty {
             Text(parts.joined(separator: " · "))
-                .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
         } else if !item.note.isEmpty {
-            Text(item.note).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            Text(item.note)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
         }
     }
 
     private func subColor(_ sub: CareerSubCategory) -> Color {
         switch sub {
-        case .join: return .green
-        case .promote: return .blue
+        case .join:         return .green
+        case .promote:      return .blue
         case .salaryAdjust: return .cyan
-        case .transfer: return .orange
-        case .demote: return .purple
-        case .resign: return .red
+        case .transfer:     return .orange
+        case .demote:       return .purple
+        case .resign:       return .red
+        case .sideRole:     return .indigo
         }
     }
 
+    private static let dateFormatter: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "yyyy/M/d"; return f
+    }()
+
     private func formatDate(_ date: Date) -> String {
-        let f = DateFormatter(); f.dateFormat = "yyyy/M/d"; return f.string(from: date)
+        Self.dateFormatter.string(from: date)
     }
 }
