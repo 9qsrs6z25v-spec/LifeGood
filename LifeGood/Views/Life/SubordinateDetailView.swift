@@ -265,6 +265,8 @@ struct SubordinateDetailView: View {
     @State private var editingReport: WeeklyReport?
     @State private var showPremiumAlert = false
     @State private var shareItem: CardSharePayload?
+    /// [v25.374] 匯出排名票失敗的說明（沒有票／出圖失敗）
+    @State private var ballotExportError: String?
 
     // 進場動畫旗標
     @State private var headerAppeared = false
@@ -468,7 +470,15 @@ struct SubordinateDetailView: View {
                             Label("績效互評排名", systemImage: "trophy.fill")
                         }
                         Divider()
-                        Button { exportJPG(mentioned: mentionedItemsCache) } label: {
+                        // [v25.374] 匯出圖片分成兩種內容：卡片本身／這位同仁填的排名票
+                        Menu {
+                            Button { exportJPG(mentioned: mentionedItemsCache) } label: {
+                                Label("部屬卡片內容", systemImage: "person.text.rectangle")
+                            }
+                            Button { exportBallotJPG() } label: {
+                                Label("績效互評排名內容", systemImage: "trophy")
+                            }
+                        } label: {
                             Label("匯出圖片", systemImage: "photo")
                         }
                         Button { exportText(mentioned: mentionedItemsCache) } label: {
@@ -480,6 +490,15 @@ struct SubordinateDetailView: View {
                 }
             }
             .sheet(item: $shareItem) { item in ShareSheet(items: item.items) }
+            // [v25.374] 匯出排名票的失敗說明
+            .alert("匯出圖片", isPresented: Binding(
+                get: { ballotExportError != nil },
+                set: { if !$0 { ballotExportError = nil } }
+            )) {
+                Button("好") { ballotExportError = nil }
+            } message: {
+                Text(ballotExportError ?? "")
+            }
             .sheet(isPresented: $showPromotion) { PromotionSheet(subordinateId: subordinateId) }
             .sheet(item: $viewingSideRole) { role in
                 // 不給跳回部屬明細：我們就是從那裡進來的，會無限疊 sheet
@@ -1773,6 +1792,35 @@ struct SubordinateDetailView: View {
             try data.write(to: url)
             shareItem = CardSharePayload(items: [url])
         } catch { }
+    }
+
+    /// [v25.374] 匯出這位同仁填的績效互評排名票。
+    /// 年度取「他有票的最新一年」，沒有任何票就用今年（會出一張空票，但至少講得出原因）。
+    @MainActor
+    private func exportBallotJPG() {
+        guard subscription.isPremium else { showPremiumAlert = true; return }
+        let years = lifeStore.performanceBallots
+            .filter { $0.raterId == subordinateId }
+            .map(\.year)
+        let year = years.max() ?? Calendar.current.component(.year, from: Date())
+        guard let ballot = lifeStore.performanceBallot(year: year, raterId: subordinateId),
+              !ballot.groups.isEmpty else {
+            ballotExportError = "\(subordinate.name.isEmpty ? "這位同仁" : subordinate.name)"
+                + "還沒有填過績效互評排名，沒有內容可以匯出。"
+                + "可以先從上面的「績效互評排名」代填一張。"
+            return
+        }
+        let subName = subordinate.name.isEmpty ? "部屬" : subordinate.name
+        let name = "績效互評_\(subName)_\(String(year))_"
+            + PerformanceExporter.fileStampFmt.string(from: Date())
+        let urls = PerformanceExporter.jpg(
+            PerformanceBallotExportView(ballot: ballot).environmentObject(lifeStore),
+            name: name)
+        guard !urls.isEmpty else {
+            ballotExportError = "出圖失敗，可能是內容太長。請減少排名組別後再試。"
+            return
+        }
+        shareItem = CardSharePayload(items: urls)
     }
 
     /// 供 ImageRenderer 使用的靜態版面：英雄卡 + 目前分頁的全部章節（不含進場動畫修飾）。

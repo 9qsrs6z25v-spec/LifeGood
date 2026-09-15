@@ -399,6 +399,12 @@ struct PerformanceSummaryView: View {
     @State private var expanded: Set<UUID> = []
     /// [v25.372] 占比來源明細是否展開
     @State private var shareOpen = false
+    // [v25.374] 匯出圖片
+    @State private var showExportPicker = false
+    /// 要匯出誰；空集合＝全部
+    @State private var exportSelection: Set<UUID> = []
+    @State private var sharePayload: PerfSharePayload?
+    @State private var exportError: String?
 
     private var deptFilter: UUID? {
         // 記住的課別若已被刪掉就自動回到「全部課別」，不會卡在空清單
@@ -453,16 +459,82 @@ struct PerformanceSummaryView: View {
             }
         }
         .padding(.horizontal)
+        // [v25.374] 匯出圖片：先選人，再出圖
+        .sheet(isPresented: $showExportPicker) {
+            PerformanceExportPicker(sections: secs, selection: $exportSelection) {
+                showExportPicker = false
+                exportImage(sections: secs)
+            }
+        }
+        .sheet(item: $sharePayload) { payload in ShareSheet(items: payload.items) }
+        .alert("匯出圖片", isPresented: Binding(
+            get: { exportError != nil },
+            set: { if !$0 { exportError = nil } }
+        )) {
+            Button("好") { exportError = nil }
+        } message: {
+            Text(exportError ?? "")
+        }
+    }
+
+    // MARK: - [v25.374] 匯出圖片
+
+    @MainActor
+    private func exportImage(sections: [PerformanceGradeSection]) {
+        guard !sections.isEmpty else {
+            exportError = "目前的篩選條件下沒有可以匯出的內容。"
+            return
+        }
+        let view = PerformanceSummaryExportView(
+            year: year,
+            sections: sections,
+            share: share,
+            submittedCount: submittedCount,
+            pendingNames: pending.map(\.name),
+            scopeLabel: exportScopeLabel,
+            personIds: exportSelection
+        )
+        .environmentObject(lifeStore)
+        let urls = PerformanceExporter.jpg(view, name: exportFileName)
+        guard !urls.isEmpty else {
+            exportError = "出圖失敗，可能是內容太長。試著只選幾個人再匯出。"
+            return
+        }
+        sharePayload = PerfSharePayload(items: urls)
+    }
+
+    /// 匯出圖上方的範圍說明
+    private var exportScopeLabel: String {
+        guard let id = deptFilter,
+              let d = lifeStore.departments.first(where: { $0.id == id }) else { return "全部課別" }
+        return d.name.isEmpty ? d.code : d.name
+    }
+
+    private var exportFileName: String {
+        "評分加總_\(String(year))_" + PerformanceExporter.fileStampFmt.string(from: Date())
     }
 
     // MARK: 控制列
 
     private var controls: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Picker("年度", selection: $year) {
-                ForEach(lifeStore.performanceYears, id: \.self) { y in Text("\(String(y)) 年").tag(y) }
+            HStack(spacing: 10) {
+                Picker("年度", selection: $year) {
+                    ForEach(lifeStore.performanceYears, id: \.self) { y in Text("\(String(y)) 年").tag(y) }
+                }
+                .pickerStyle(.segmented)
+                // [v25.374] 匯出圖片：可以只出指定的人
+                Button {
+                    exportSelection = []
+                    showExportPicker = true
+                } label: {
+                    Image(systemName: "square.and.arrow.up")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(.green)
+                }
+                .buttonStyle(.plain)
+                .disabled(scores.isEmpty)
             }
-            .pickerStyle(.segmented)
 
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 6) {
@@ -890,4 +962,129 @@ struct PerformanceSummaryView: View {
     private func pointsText(_ v: Double) -> String {
         v == v.rounded() ? String(format: "%.0f", v) : String(format: "%.1f", v)
     }
+}
+
+// MARK: - [v25.374] 匯出圖片：選人
+
+private struct PerfSharePayload: Identifiable {
+    let id = UUID()
+    let items: [Any]
+}
+
+/// 匯出前先選要出哪些人。什麼都不選＝全部——
+/// 「全部／某一個／某幾個」三種需求用同一個複選清單就涵蓋了，不必分成三個入口。
+struct PerformanceExportPicker: View {
+    let sections: [PerformanceGradeSection]
+    @Binding var selection: Set<UUID>
+    let onExport: () -> Void
+
+    @Environment(\.dismiss) private var dismiss
+
+    init(sections: [PerformanceGradeSection], selection: Binding<Set<UUID>>,
+         onExport: @escaping () -> Void) {
+        self.sections = sections
+        self._selection = selection
+        self.onExport = onExport
+    }
+
+    private var totalCount: Int {
+        sections.reduce(0) { $0 + $1.scores.count }
+    }
+
+    private var allIds: Set<UUID> {
+        Set(sections.flatMap { $0.scores.map(\.personId) })
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    Button {
+                        selection = []
+                    } label: {
+                        HStack {
+                            Image(systemName: selection.isEmpty
+                                  ? "checkmark.circle.fill" : "circle")
+                                .foregroundStyle(selection.isEmpty ? .green : .secondary)
+                            Text("全部（\(totalCount) 人）")
+                                .foregroundStyle(.primary)
+                            Spacer()
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                } footer: {
+                    Text(Self.hint)
+                }
+
+                ForEach(sections) { section in
+                    Section {
+                        ForEach(Array(section.scores.enumerated()), id: \.element.id) { idx, score in
+                            row(score, rank: idx + 1)
+                        }
+                    } header: {
+                        HStack {
+                            Text(section.label)
+                            Spacer()
+                            Button(allSelected(section) ? "取消本職等" : "選取本職等") {
+                                toggleSection(section)
+                            }
+                            .font(.caption)
+                        }
+                    }
+                }
+            }
+            .navigationTitle("要匯出誰")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) { Button("取消") { dismiss() } }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("匯出") { onExport() }
+                        .bold().foregroundStyle(.green)
+                }
+            }
+        }
+    }
+
+    private func row(_ score: PerformanceScore, rank: Int) -> some View {
+        let on = selection.contains(score.personId)
+        return Button {
+            if on { selection.remove(score.personId) } else { selection.insert(score.personId) }
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: on ? "checkmark.circle.fill" : "circle")
+                    .foregroundStyle(on ? .green : .secondary)
+                Text("\(rank)")
+                    .font(.system(size: 11, weight: .black, design: .rounded))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 18)
+                Text(score.name.isEmpty ? "未命名" : score.name)
+                    .foregroundStyle(.primary)
+                Spacer()
+                Text(PerformanceExporter.num(score.finalScore))
+                    .font(.system(size: 13, weight: .semibold, design: .rounded).monospacedDigit())
+                    .foregroundStyle(.orange)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func allSelected(_ section: PerformanceGradeSection) -> Bool {
+        let ids = Set(section.scores.map(\.personId))
+        return !ids.isEmpty && ids.isSubset(of: selection)
+    }
+
+    private func toggleSection(_ section: PerformanceGradeSection) {
+        let ids = Set(section.scores.map(\.personId))
+        if allSelected(section) {
+            selection.subtract(ids)
+        } else {
+            selection.formUnion(ids)
+        }
+    }
+
+    private static let hint =
+        "不勾任何人就是匯出全部。勾一個人＝只出那一位，勾幾個人＝只出那幾位；"
+        + "名次一律沿用完整職等裡的名次，不會因為只選幾個人就重新編號。"
 }
