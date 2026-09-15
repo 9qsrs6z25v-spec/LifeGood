@@ -610,6 +610,19 @@ enum AppPreferenceSync {
         "hero_card_shadow", "hero_card_kpi_value_size",
         // 法人連續買超天數
         "inst_streak_days",
+        // [v25.376] 部屬評分權重（進階設定 → 評分權重）。
+        // 這些鍵一直漏在同步之外：同一個部屬在 iPhone 與 iPad 上會算出不同的
+        // 主動性／潛力分數。v25.372 之後績效互評的最終分數也吃綜合分數，
+        // 兩台裝置連「評分加總」的名次都可能不一樣，所以一定要跟著走。
+        "score_act_base", "score_act_task", "score_act_item", "score_act_meeting_owner",
+        "score_act_report", "score_act_mention", "score_act_side_role",
+        "score_act_leave_per8h", "score_act_overdue",
+        "score_pot_base", "score_pot_ach", "score_pot_pro", "score_pot_imp",
+        "score_pot_con", "score_pot_fault", "score_pot_miss_minor",
+        "score_pot_miss_normal", "score_pot_miss_severe",
+        // [v25.376] 績效互評：我自己評分時採用的職等（決定我那張票的權重）。
+        // 草稿階段就要一致，不然同一張票在另一台裝置上的權重會不同。
+        "perf_self_grade_id",
         // 語音 AI 助手：供應商選擇（API Key 走 iCloud 鑰匙圈，不在此）
         "LifeGood.ai.activeProvider"
     ]
