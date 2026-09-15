@@ -267,6 +267,8 @@ struct SubordinateDetailView: View {
     @State private var shareItem: CardSharePayload?
     /// [v25.374] 匯出排名票失敗的說明（沒有票／出圖失敗）
     @State private var ballotExportError: String?
+    /// [v25.375] 匯出排名票前的確認：這張圖等於公開他把誰排在後面
+    @State private var confirmBallotExport = false
 
     // 進場動畫旗標
     @State private var headerAppeared = false
@@ -475,7 +477,7 @@ struct SubordinateDetailView: View {
                             Button { exportJPG(mentioned: mentionedItemsCache) } label: {
                                 Label("部屬卡片內容", systemImage: "person.text.rectangle")
                             }
-                            Button { exportBallotJPG() } label: {
+                            Button { confirmBallotExport = true } label: {
                                 Label("績效互評排名內容", systemImage: "trophy")
                             }
                         } label: {
@@ -490,6 +492,13 @@ struct SubordinateDetailView: View {
                 }
             }
             .sheet(item: $shareItem) { item in ShareSheet(items: item.items) }
+            // [v25.375] 這張圖會寫出這位同仁把每個人排第幾名，傳出去就收不回來了
+            .alert("要匯出排名票嗎？", isPresented: $confirmBallotExport) {
+                Button("取消", role: .cancel) {}
+                Button("匯出") { exportBallotJPG() }
+            } message: {
+                Text(Self.ballotExportWarning)
+            }
             // [v25.374] 匯出排名票的失敗說明
             .alert("匯出圖片", isPresented: Binding(
                 get: { ballotExportError != nil },
@@ -1793,6 +1802,12 @@ struct SubordinateDetailView: View {
             shareItem = CardSharePayload(items: [url])
         } catch { }
     }
+
+    /// 匯出排名票前的警語。字串在 ViewBuilder 外組好。
+    private static let ballotExportWarning =
+        "這張圖會完整寫出這位同仁把每一位同事排在第幾名，而且帶著他本人的姓名。"
+        + "傳出去之後就收不回來了，請確認收圖的人適合看到這些內容。"
+        + "（如果只是要看年度結果，評分加總頁的匯出可以把評分者匿名。）"
 
     /// [v25.374] 匯出這位同仁填的績效互評排名票。
     /// 年度取「他有票的最新一年」，沒有任何票就用今年（會出一張空票，但至少講得出原因）。

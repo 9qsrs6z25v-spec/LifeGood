@@ -405,6 +405,8 @@ struct PerformanceSummaryView: View {
     @State private var exportSelection: Set<UUID> = []
     @State private var sharePayload: PerfSharePayload?
     @State private var exportError: String?
+    /// [v25.375] 與 PerformanceExportPicker 共用同一個鍵，開關改了這裡就跟著變
+    @AppStorage("perf_export_show_raters") private var exportShowRaterNames = false
 
     private var deptFilter: UUID? {
         // 記住的課別若已被刪掉就自動回到「全部課別」，不會卡在空清單
@@ -492,7 +494,8 @@ struct PerformanceSummaryView: View {
             submittedCount: submittedCount,
             pendingNames: pending.map(\.name),
             scopeLabel: exportScopeLabel,
-            personIds: exportSelection
+            personIds: exportSelection,
+            showRaterNames: exportShowRaterNames
         )
         .environmentObject(lifeStore)
         let urls = PerformanceExporter.jpg(view, name: exportFileName)
@@ -979,6 +982,9 @@ struct PerformanceExportPicker: View {
     let onExport: () -> Void
 
     @Environment(\.dismiss) private var dismiss
+    /// [v25.375] 記住上次的選擇，但每次匯出前還是會看到這個開關。
+    /// 預設關閉：不小心把姓名帶出去造成的傷害，遠大於少帶出去要重匯一次的麻煩。
+    @AppStorage("perf_export_show_raters") private var showRaterNames = false
 
     init(sections: [PerformanceGradeSection], selection: Binding<Set<UUID>>,
          onExport: @escaping () -> Void) {
@@ -1015,6 +1021,20 @@ struct PerformanceExportPicker: View {
                     .buttonStyle(.plain)
                 } footer: {
                     Text(Self.hint)
+                }
+
+                // [v25.375] 誰把誰排在後面很容易變成嫌隙，所以每次匯出都問一次
+                Section {
+                    Toggle(isOn: $showRaterNames) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("顯示評分者姓名")
+                            Text(showRaterNames ? "圖上會寫出誰給了第幾名" : "一律顯示成「評分者 A／B／C」")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                    .tint(.orange)
+                } footer: {
+                    Text(Self.raterHint)
                 }
 
                 ForEach(sections) { section in
@@ -1087,4 +1107,9 @@ struct PerformanceExportPicker: View {
     private static let hint =
         "不勾任何人就是匯出全部。勾一個人＝只出那一位，勾幾個人＝只出那幾位；"
         + "名次一律沿用完整職等裡的名次，不會因為只選幾個人就重新編號。"
+
+    private static let raterHint =
+        "關掉的話，「各票名次」與「占比來源」的評分者都會顯示成代號，"
+        + "尚未送出的名單也只寫人數不點名。代號是依內部識別碼排的，"
+        + "與姓名、職等、名次都無關，看圖的人推不回是誰。"
 }

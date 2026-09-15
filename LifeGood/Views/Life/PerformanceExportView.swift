@@ -232,10 +232,14 @@ struct PerformanceSummaryExportView: View {
     let scopeLabel: String
     /// 只列出這些人；空集合＝全部
     let personIds: Set<UUID>
+    /// [v25.375] 要不要把「誰給的分數」顯示成真實姓名。
+    /// 關掉時所有評分者一律顯示成「評分者 A／B／C……」，尚未送出的名單也只出人數——
+    /// 這張圖多半是要給別人看的，誰把誰排在後面很容易變成嫌隙。
+    let showRaterNames: Bool
 
     init(year: Int, sections: [PerformanceGradeSection], share: PerformanceShare,
          submittedCount: Int, pendingNames: [String], scopeLabel: String,
-         personIds: Set<UUID>) {
+         personIds: Set<UUID>, showRaterNames: Bool) {
         self.year = year
         self.sections = sections
         self.share = share
@@ -243,6 +247,36 @@ struct PerformanceSummaryExportView: View {
         self.pendingNames = pendingNames
         self.scopeLabel = scopeLabel
         self.personIds = personIds
+        self.showRaterNames = showRaterNames
+    }
+
+    /// 匿名代號表。以 UUID 排序建立，跟姓名、職等、名次都無關，
+    /// 所以看圖的人推不回是誰；同一張圖裡同一個評分者的代號一致。
+    private var anonymousNames: [UUID: String] {
+        var ids = Set(share.votes.map(\.raterId))
+        for sec in sections {
+            for score in sec.scores {
+                for src in score.sources { ids.insert(src.raterId) }
+            }
+        }
+        var out: [UUID: String] = [:]
+        for (i, id) in ids.sorted(by: { $0.uuidString < $1.uuidString }).enumerated() {
+            out[id] = "評分者 " + Self.letter(i)
+        }
+        return out
+    }
+
+    /// 0→A、25→Z、26→A2、27→B2……（超過 26 人才會用到後綴）
+    private static func letter(_ index: Int) -> String {
+        let letters = Array("ABCDEFGHIJKLMNOPQRSTUVWXYZ")
+        let base = String(letters[index % 26])
+        let round = index / 26
+        return round == 0 ? base : base + String(round + 1)
+    }
+
+    private func raterLabel(_ id: UUID, fallback: String) -> String {
+        if showRaterNames { return fallback.isEmpty ? "未命名" : fallback }
+        return anonymousNames[id] ?? "評分者"
     }
 
     /// 套用「只出這些人」之後還有內容的分段
@@ -274,12 +308,12 @@ struct PerformanceSummaryExportView: View {
             }
             if !pendingNames.isEmpty {
                 ExportCard {
-                    Text("尚未送出：" + pendingNames.joined(separator: "、"))
+                    Text(pendingLine)
                         .font(.system(size: 10)).foregroundStyle(.orange)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
-            ExportFooter(note: Self.note)
+            ExportFooter(note: footerNote)
         }
         .padding(.vertical, 20)
         .frame(width: exportWidth)
@@ -313,9 +347,12 @@ struct PerformanceSummaryExportView: View {
                 .padding(.bottom, 6)
             ForEach(share.votes) { v in
                 HStack(spacing: 8) {
-                    Text(v.raterName).font(.system(size: 11, weight: .semibold))
+                    Text(raterLabel(v.raterId, fallback: v.raterName))
+                        .font(.system(size: 11, weight: .semibold))
                         .frame(width: 66, alignment: .leading).lineLimit(1)
-                    Text(v.raterGradeLabel).font(.system(size: 9)).foregroundStyle(.secondary)
+                    if showRaterNames {
+                        Text(v.raterGradeLabel).font(.system(size: 9)).foregroundStyle(.secondary)
+                    }
                     Spacer(minLength: 0)
                     Text(PerformanceExporter.num(v.percent) + "% × "
                          + PerformanceExporter.num(v.weight))
@@ -393,7 +430,8 @@ struct PerformanceSummaryExportView: View {
                     .padding(.top, 6).padding(.bottom, 2)
                 ForEach(score.sources.sorted { $0.points > $1.points }) { src in
                     HStack(spacing: 6) {
-                        Text(src.raterName).font(.system(size: 10, weight: .semibold))
+                        Text(raterLabel(src.raterId, fallback: src.raterName))
+                            .font(.system(size: 10, weight: .semibold))
                             .frame(width: 62, alignment: .leading).lineLimit(1)
                         Text("第 \(src.rank)/\(src.groupSize) 名")
                             .font(.system(size: 9, weight: .bold))
@@ -426,7 +464,14 @@ struct PerformanceSummaryExportView: View {
             parts.append("指定 \(shown) 人")
         }
         if !share.isConfigured { parts.append("占比未設定") }
+        if !showRaterNames { parts.append("評分者匿名") }
         return parts.joined(separator: "・")
+    }
+
+    /// 尚未送出的人：匿名時只講人數，不點名
+    private var pendingLine: String {
+        guard showRaterNames else { return "尚未送出：\(pendingNames.count) 人" }
+        return "尚未送出：" + pendingNames.joined(separator: "、")
     }
 
     private var shareFormula: String {
@@ -459,10 +504,18 @@ struct PerformanceSummaryExportView: View {
             + "　／　未正規化：" + PerformanceExporter.num(score.rawFinalScore)
     }
 
+    private var footerNote: String {
+        guard showRaterNames else { return Self.note + Self.anonymousNote }
+        return Self.note
+    }
+
     private static let note =
         "最終分數＝正規化排名 × 排名平均占比 ＋ 正規化綜合 ×（1 − 占比）。"
         + "正規化是每個職等各自把兩段分數除以該職等最高分再乘 100，所以每個職等的第一名都是 100 分、"
         + "跨職等不能直接比較；右邊的原始值才看得出實際的量。"
+
+    private static let anonymousNote =
+        "　評分者已匿名，代號與姓名、職等、名次無關。"
 }
 
 // MARK: - 出圖
