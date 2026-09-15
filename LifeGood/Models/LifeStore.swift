@@ -669,7 +669,9 @@ class LifeStore: ObservableObject {
             return g.displayLabel.isEmpty ? "未命名職等" : g.displayLabel
         }
         return buckets
-            .filter { $0.value.count >= 2 }   // 單人組不需要排名
+            // [v25.372] 單人組以前被濾掉，結果那個職等只有一個人的同仁從頭到尾
+            // 不會出現在任何一張票上，評分加總也永遠看不到他。現在一併列入：
+            // 一個人的組就是第 1 名、基礎分 1 分。
             .map { key, people in
                 PerformanceRankGroup(
                     departmentId: key.dept, departmentName: deptName(key.dept),
@@ -760,7 +762,8 @@ class LifeStore: ObservableObject {
         for ballot in performanceBallots where ballot.year == year && ballot.isSubmitted {
             for g in ballot.groups {
                 let n = g.entries.count
-                guard n >= 2 else { continue }
+                // [v25.372] 單人組也算（第 1 名基礎分 1）；空組才跳過
+                guard n >= 1 else { continue }
                 let key = PerformanceGradeKey(id: g.gradeId, label: g.gradeLabel)
                 for (idx, entry) in g.entries.enumerated() {
                     gradeVotes[entry.id, default: [:]][key, default: 0] += 1
@@ -792,16 +795,71 @@ class LifeStore: ObservableObject {
             score.gradeLabel = best.label
             totals[personId] = score
         }
+        // [v25.372] 併入綜合分數：最終分數＝排名分數 × 占比 ＋ 綜合分數 × (1 − 占比)。
+        // 三份輸入（被標註／兼任完成／議程項目）各自要掃全庫，所以在迴圈外先算好一次。
+        let share = performanceShare(year: year)
+        let mentions = mentionedCounts()
+        let sideRole = sideRoleTaskCounts()
+        let itemCredits = meetingItemCredits()
+        for (personId, var score) in totals {
+            if let sub = subordinates.first(where: { $0.id == personId }) {
+                let act = sub.proactivityScore(mentionedCount: mentions[personId] ?? 0,
+                                               sideRoleDone: sideRole[personId]?.done ?? 0,
+                                               itemDone: itemCredits[personId] ?? 0)
+                score.overallScore = (Double(sub.potentialScore) + Double(act)) / 2
+                score.hasOverall = true
+            } else {
+                // 已轉出／離職：部屬清單裡沒有這個人，算不出現在的綜合分數
+                score.overallScore = 0
+                score.hasOverall = false
+            }
+            score.finalScore = score.total * share.rank + score.overallScore * share.overall
+            totals[personId] = score
+        }
         return totals.values.sorted { a, b in
+            if a.finalScore != b.finalScore { return a.finalScore > b.finalScore }
             if a.total != b.total { return a.total > b.total }
             return a.name < b.name
         }
     }
 
+    /// [v25.372] 年度採用的「排名分數占比」：所有已送出票填的百分比，
+    /// 依各自的評分者職等權重做加權平均。
+    /// 例：31 職等(×1) 填 20%、32 職等(×2) 填 10% → (20×1 + 10×2)/(1+2) = 13.3%。
+    /// 沒有任何票（或權重總和為 0）時回 0%＝完全沿用綜合分數，與舊版行為一致。
+    func performanceShare(year: Int) -> PerformanceShare {
+        var votes: [PerformanceShareVote] = []
+        for b in performanceBallots where b.year == year && b.isSubmitted {
+            votes.append(PerformanceShareVote(
+                raterId: b.raterId, raterName: b.raterName.isEmpty ? "未命名" : b.raterName,
+                raterGradeLabel: b.raterGradeLabel.isEmpty ? "未設職等" : b.raterGradeLabel,
+                weight: b.raterWeight, percent: b.rankSharePercent))
+        }
+        // 沒有人填過＝還沒設定：rank 固定 1（100% 用排名分數），維持加入占比之前的行為。
+        // 這裡不能當成「排名占 0%」，那會把整頁默默換成綜合分數排名。
+        let configured = votes.contains { $0.percent > 0 }
+        let weightSum = votes.reduce(0.0) { $0 + $1.weight }
+        guard configured, weightSum > 0 else {
+            return PerformanceShare(rank: 1, votes: votes, isConfigured: false)
+        }
+        let weighted = votes.reduce(0.0) { $0 + $1.weighted } / weightSum
+        // 0～100 夾住：填 120% 或負數都不該讓最終分數失控
+        let clamped = min(max(weighted, 0), 100)
+        return PerformanceShare(rank: clamped / 100, votes: votes, isConfigured: true)
+    }
+
     /// [v25.349] 依職等切開的加總結果：職等權重高的排前面（權重相同再比職等名稱），未設職等墊底。
     /// 名次在各自的職等內重新編號——不同職等的人數與權重都不同，混在一起排沒有意義。
     func performanceGradeSections(year: Int, deptId: UUID?) -> [PerformanceGradeSection] {
-        var scores = performanceScores(year: year)
+        performanceGradeSections(scores: performanceScores(year: year), deptId: deptId)
+    }
+
+    /// [v25.372] 接收已經算好的分數。performanceScores 現在要掃被標註／兼任／議程三份全庫，
+    /// 呼叫端（評分加總頁）同時要用「全部分數」與「切好職等的分組」，
+    /// 走這個版本就只算一次，不會在同一次畫面更新裡重跑兩遍。
+    func performanceGradeSections(scores input: [PerformanceScore],
+                                  deptId: UUID?) -> [PerformanceGradeSection] {
+        var scores = input
         if let deptId {
             scores = scores.filter { s in
                 subordinates.first(where: { $0.id == s.personId })?.departmentId == deptId
@@ -815,7 +873,9 @@ class LifeStore: ObservableObject {
                 gradeId: key.id,
                 label: key.label.isEmpty ? "未設職等" : key.label,
                 weight: weight,
+                // [v25.372] 名次依最終分數（已含占比加權）排，不再只看排名分數
                 scores: items.sorted { a, b in
+                    if a.finalScore != b.finalScore { return a.finalScore > b.finalScore }
                     if a.total != b.total { return a.total > b.total }
                     return a.name < b.name
                 })

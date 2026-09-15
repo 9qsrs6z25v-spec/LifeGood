@@ -26,6 +26,9 @@ struct PerformanceBallotView: View {
     @AppStorage("perf_self_grade_id") private var selfGradeIdRaw = ""
     @State private var showGradePicker = false
     @State private var loaded = false
+    /// [v25.372] 排名分數占比的輸入字串（存進 ballot.rankSharePercent）
+    @State private var shareText = ""
+    @State private var shareSaveTask: Task<Void, Never>?
 
     private var isSelf: Bool { raterId == PerformanceBallot.selfRaterId }
 
@@ -78,8 +81,9 @@ struct PerformanceBallotView: View {
                 year = initialYear
                 reload()
             }
-            .onChange(of: year) { _, _ in reload() }
+            .onChange(of: year) { _, _ in flushDraft(); reload() }
             .onChange(of: selfGradeIdRaw) { _, _ in reload() }
+            .onDisappear { flushDraft() }
         }
     }
 
@@ -97,8 +101,7 @@ struct PerformanceBallotView: View {
                 } header: {
                     groupHeader(group)
                 } footer: {
-                    Text("長按拖曳調整名次。第 1 名 \(group.entries.count) 分，往下每名少 1 分，"
-                         + "再乘上你的權重 ×\(weightText)。")
+                    Text(groupFootnote(group))
                 }
             }
             noteSection(b)
@@ -110,6 +113,16 @@ struct PerformanceBallotView: View {
     private var weightText: String {
         let w = raterGrade?.weightValue ?? 1
         return w == w.rounded() ? String(format: "%.0f", w) : String(format: "%.1f", w)
+    }
+
+    /// 每組底下的說明。[v25.372] 單人組沒得拖，講法要不一樣。
+    private func groupFootnote(_ group: PerformanceRankGroup) -> String {
+        let n = group.entries.count
+        if n <= 1 {
+            return "這個職等在這一課只有 1 個人，沒有比較對象，直接算第 1 名、基礎分 1 分，"
+                + "再乘上你的權重 ×\(weightText)。"
+        }
+        return "長按拖曳調整名次。第 1 名 \(n) 分，往下每名少 1 分，再乘上你的權重 ×\(weightText)。"
     }
 
     private func headerSection(_ b: PerformanceBallot) -> some View {
@@ -150,6 +163,22 @@ struct PerformanceBallotView: View {
             Picker("年度", selection: $year) {
                 ForEach(yearOptions, id: \.self) { y in Text("\(String(y)) 年").tag(y) }
             }
+            // [v25.372] 排名分數在最終評分裡該占幾成
+            HStack {
+                Text("排名分數占比")
+                Spacer()
+                TextField("0", text: $shareText)
+                    .keyboardType(.decimalPad)
+                    .multilineTextAlignment(.trailing)
+                    .frame(width: 70)
+                    .onChange(of: shareText) { _, newValue in
+                        let cleaned = Self.cleanedPercent(newValue)
+                        if cleaned != newValue { shareText = cleaned }
+                        ballot?.rankSharePercent = Double(cleaned) ?? 0
+                        saveDraftDebounced()
+                    }
+                Text("%").foregroundStyle(.secondary)
+            }
             if isSelf {
                 Picker("我的職等（決定權重）", selection: $selfGradeIdRaw) {
                     Text("未設定（權重 ×1）").tag("")
@@ -160,12 +189,37 @@ struct PerformanceBallotView: View {
                 }
             }
         } footer: {
-            if isSelf {
-                Text("你的職等決定這張票的權重；在「部門職等」頁可以調整各職等的績效權重。")
-            } else if raterGrade == nil {
-                Text("這位同仁還沒設定職等，權重以 ×1 計算。可在部屬編輯頁補上職等。")
-            }
+            Text(shareFootnote)
         }
+    }
+
+    /// 占比欄的說明。字串在 ViewBuilder 外組好再進 Text。
+    private var shareFootnote: String {
+        var parts: [String] = [Self.shareExplain]
+        if isSelf {
+            parts.append("你的職等決定這張票的權重；在「部門職等」頁可以調整各職等的績效權重。")
+        } else if raterGrade == nil {
+            parts.append("這位同仁還沒設定職等，權重以 ×1 計算。可在部屬編輯頁補上職等。")
+        }
+        return parts.joined(separator: "\n")
+    }
+
+    private static let shareExplain =
+        "「排名分數占比」是你認為互評排名該占最終評分幾成。年度實際採用的是所有已送出票的加權平均"
+        + "（依各自的職等權重）：例如 31 職等(×1) 填 20%、32 職等(×2) 填 10%，"
+        + "平均就是 (20×1＋10×2)/3 ＝ 13.3%，剩下的 86.7% 由主動性與潛力的平均分數補上。"
+
+    /// 只留數字與一個小數點，並夾在 0～100
+    private static func cleanedPercent(_ raw: String) -> String {
+        var out = ""
+        var seenDot = false
+        for ch in raw {
+            if ch.isNumber { out.append(ch) }
+            else if (ch == "." || ch == "。") && !seenDot && !out.isEmpty { out.append("."); seenDot = true }
+        }
+        guard let v = Double(out) else { return out }
+        if v > 100 { return "100" }
+        return out
     }
 
     private func groupHeader(_ group: PerformanceRankGroup) -> some View {
@@ -260,8 +314,8 @@ struct PerformanceBallotView: View {
             Text("沒有可以排名的組別")
                 .font(.subheadline.weight(.semibold))
             Text(isSelf
-                 ? "排名在「同課 × 同職等」的組內進行，每組至少要 2 個人。請先在部屬編輯頁補上部門與職等。"
-                 : "\(raterName)所在的課裡，同職等的人不足 2 位，因此沒有需要排名的組別。")
+                 ? "排名在「同課 × 同職等」的組內進行。目前還沒有任何部屬可以排，請先在部屬編輯頁補上部門與職等。"
+                 : "\(raterName)所在的課裡找不到可以排名的人。")
                 .font(.caption).foregroundStyle(.secondary)
                 .multilineTextAlignment(.center).padding(.horizontal, 32)
             Picker("年度", selection: $year) {
@@ -281,8 +335,34 @@ struct PerformanceBallotView: View {
     // MARK: - 動作
 
     private func reload() {
-        ballot = lifeStore.performanceBallotSynced(year: year, raterId: raterId,
-                                                   raterGradeId: raterGradeId)
+        let b = lifeStore.performanceBallotSynced(year: year, raterId: raterId,
+                                                  raterGradeId: raterGradeId)
+        ballot = b
+        // 0 顯示成空字串：欄位空著比擺一個 0 更像「還沒填」
+        shareText = b.rankSharePercent > 0 ? Self.percentText(b.rankSharePercent) : ""
+    }
+
+    /// 占比欄改動時存草稿（比照拖曳排序：中途離開不會白填）。
+    /// 每敲一個字就寫一次會連帶跑一次完整存檔，所以節流到停止輸入 500ms 後才寫。
+    private func saveDraftDebounced() {
+        shareSaveTask?.cancel()
+        shareSaveTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 500_000_000)
+            guard !Task.isCancelled, let b = ballot else { return }
+            lifeStore.upsertPerformanceBallot(b)
+        }
+    }
+
+    /// 離開畫面時把還在防抖視窗裡的草稿補存一次，不然剛打的占比會消失
+    private func flushDraft() {
+        shareSaveTask?.cancel()
+        shareSaveTask = nil
+        guard let b = ballot else { return }
+        lifeStore.upsertPerformanceBallot(b)
+    }
+
+    private static func percentText(_ v: Double) -> String {
+        v == v.rounded() ? String(format: "%.0f", v) : String(format: "%.1f", v)
     }
 
     private func move(groupIndex: Int, from: IndexSet, to: Int) {
@@ -317,6 +397,8 @@ struct PerformanceSummaryView: View {
     /// [v25.349] 課別選擇要記住，不必每次都從「全部課別」重選。空字串＝全部
     @AppStorage("perf_summary_dept") private var deptFilterRaw: String = ""
     @State private var expanded: Set<UUID> = []
+    /// [v25.372] 占比來源明細是否展開
+    @State private var shareOpen = false
 
     private var deptFilter: UUID? {
         // 記住的課別若已被刪掉就自動回到「全部課別」，不會卡在空清單
@@ -330,12 +412,10 @@ struct PerformanceSummaryView: View {
 
     private var scores: [PerformanceScore] { lifeStore.performanceScores(year: year) }
 
-    /// [v25.349] 依職等切開，權重高的職等排前面；名次在各職等內重新編號
-    private var sections: [PerformanceGradeSection] {
-        lifeStore.performanceGradeSections(year: year, deptId: deptFilter)
-    }
-
     private var pending: [(id: UUID, name: String)] { lifeStore.performancePendingRaters(year: year) }
+
+    /// [v25.372] 這一年實際採用的占比（排名 vs 綜合分數）
+    private var share: PerformanceShare { lifeStore.performanceShare(year: year) }
 
     private var submittedCount: Int {
         lifeStore.performanceBallots.filter { $0.year == year && $0.isSubmitted }.count
@@ -345,17 +425,19 @@ struct PerformanceSummaryView: View {
     /// （巢狀垂直捲動會讓手勢互搶、滑動變得很奇怪）。
     var body: some View {
         // 單次計算，避免 body 內多處重複跑加總
-        let secs = sections
+        // （[v25.372] 加總現在還要掃被標註／兼任／議程三份全庫，更不能算兩遍）
+        let all = scores
+        let secs = lifeStore.performanceGradeSections(scores: all, deptId: deptFilter)
         var shownCount = 0
         for sec in secs { shownCount += sec.scores.count }
         return VStack(alignment: .leading, spacing: 14) {
             controls
-            if scores.isEmpty {
+            if all.isEmpty {
                 emptyState
             } else {
                 summaryHeader(shownCount: shownCount)
                 if secs.isEmpty {
-                    Text("這個課別在 \(String(year)) 年沒有排名資料（同課同職等要滿 2 人才會分組）")
+                    Text("這個課別在 \(String(year)) 年沒有排名資料")
                         .font(.caption).foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, alignment: .center)
                         .padding(.vertical, 26)
@@ -438,11 +520,107 @@ struct PerformanceSummaryView: View {
     // MARK: 看板
 
     private func summaryHeader(shownCount: Int) -> some View {
-        HStack(spacing: 10) {
-            statCell(value: "\(submittedCount)", label: "已送出票", color: .green)
-            statCell(value: "\(pending.count)", label: "尚未送出", color: pending.isEmpty ? .secondary : .orange)
-            statCell(value: "\(shownCount)", label: "被評分人數", color: .blue)
+        VStack(spacing: 8) {
+            HStack(spacing: 10) {
+                statCell(value: "\(submittedCount)", label: "已送出票", color: .green)
+                statCell(value: "\(pending.count)", label: "尚未送出", color: pending.isEmpty ? .secondary : .orange)
+                statCell(value: "\(shownCount)", label: "被評分人數", color: .blue)
+            }
+            // [v25.372] 第二列：這一年實際採用的兩個占比
+            HStack(spacing: 10) {
+                statCell(value: percentText(share.rankPercent) + "%",
+                         label: "排名平均占比", color: .orange)
+                statCell(value: percentText(share.overallPercent) + "%",
+                         label: "總分占比", color: .purple)
+            }
+            shareBreakdown
         }
+    }
+
+    /// 占比從哪來：每張票填了多少 × 權重
+    @ViewBuilder
+    private var shareBreakdown: some View {
+        let votes = share.votes
+        if !votes.isEmpty {
+            VStack(alignment: .leading, spacing: 0) {
+                Button {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
+                        shareOpen.toggle()
+                    }
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "percent")
+                            .font(.system(size: 10, weight: .bold))
+                        Text(shareSummaryLine)
+                            .font(.system(size: 11, weight: .semibold))
+                        Spacer()
+                        Image(systemName: shareOpen ? "chevron.up" : "chevron.down")
+                            .font(.system(size: 10, weight: .bold))
+                    }
+                    .foregroundStyle(share.isConfigured ? Color.orange : Color.secondary)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+
+                if shareOpen {
+                    Divider().padding(.vertical, 7)
+                    ForEach(votes) { v in shareVoteRow(v) }
+                    Divider().padding(.vertical, 7)
+                    HStack {
+                        Text("加權平均").font(.caption.weight(.bold))
+                        Spacer()
+                        Text(shareFormulaLine)
+                            .font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .padding(12)
+            .background(Color(.systemBackground))
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .overlay(RoundedRectangle(cornerRadius: 12)
+                .stroke(Color.orange.opacity(0.14), lineWidth: 0.75))
+        }
+    }
+
+    private func shareVoteRow(_ v: PerformanceShareVote) -> some View {
+        HStack(spacing: 8) {
+            Text(v.raterName)
+                .font(.caption.weight(.semibold))
+                .frame(width: 68, alignment: .leading)
+                .lineLimit(1)
+            Text(v.raterGradeLabel)
+                .font(.system(size: 10, weight: .bold))
+                .padding(.horizontal, 6).padding(.vertical, 2)
+                .background(Color.indigo.opacity(0.10)).foregroundStyle(.indigo)
+                .clipShape(Capsule())
+            Spacer()
+            Text(shareVoteLine(v))
+                .font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
+        }
+        .padding(.vertical, 3)
+    }
+
+    /// 字串在 ViewBuilder 外組好（本專案有型別檢查逾時的前科）
+    private var shareSummaryLine: String {
+        guard share.isConfigured else {
+            return "還沒有人填排名分數占比 → 目前 100% 採用排名分數（與舊版相同）"
+        }
+        return "占比來源：\(share.votes.count) 張票加權平均 → 排名 "
+            + percentText(share.rankPercent) + "%"
+    }
+
+    private func shareVoteLine(_ v: PerformanceShareVote) -> String {
+        percentText(v.percent) + "% × " + pointsText(v.weight)
+    }
+
+    private var shareFormulaLine: String {
+        let numerator = share.votes.reduce(0.0) { $0 + $1.weighted }
+        return percentText(numerator) + " ÷ " + pointsText(share.weightSum)
+            + " = " + percentText(share.rankPercent) + "%"
+    }
+
+    private func percentText(_ v: Double) -> String {
+        v == v.rounded() ? String(format: "%.0f", v) : String(format: "%.1f", v)
     }
 
     private func statCell(value: String, label: String, color: Color) -> some View {
@@ -499,7 +677,7 @@ struct PerformanceSummaryView: View {
                             .font(.caption2).foregroundStyle(.secondary)
                     }
                     Spacer()
-                    Text(pointsText(score.total))
+                    Text(pointsText(score.finalScore))
                         .font(.system(size: 19, weight: .bold, design: .rounded).monospacedDigit())
                         .foregroundStyle(.orange)
                     Image(systemName: isOpen ? "chevron.up" : "chevron.down")
@@ -511,6 +689,12 @@ struct PerformanceSummaryView: View {
 
             if isOpen {
                 Divider().padding(.vertical, 8)
+                // [v25.372] 最終分數怎麼組出來的
+                finalBreakdown(score)
+                Divider().padding(.vertical, 8)
+                Text("排名分數的來源")
+                    .font(.system(size: 10, weight: .bold)).foregroundStyle(.secondary)
+                    .padding(.bottom, 2)
                 ForEach(score.sources.sorted { $0.points > $1.points }) { src in
                     sourceRow(src)
                 }
@@ -523,12 +707,63 @@ struct PerformanceSummaryView: View {
             .stroke(Color(.separator).opacity(0.12), lineWidth: 0.75))
     }
 
+    /// [v25.372] 最終分數的組成：排名分數 × 占比 ＋ 綜合分數 × (1 − 占比)
+    private func finalBreakdown(_ score: PerformanceScore) -> some View {
+        VStack(spacing: 5) {
+            breakdownRow(label: "排名分數", value: score.total,
+                         sharePercent: share.rankPercent,
+                         product: score.total * share.rank, color: .orange)
+            breakdownRow(label: "綜合分數", value: score.overallScore,
+                         sharePercent: share.overallPercent,
+                         product: score.overallScore * share.overall, color: .purple)
+            if !score.hasOverall {
+                HStack(spacing: 5) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 9)).foregroundStyle(.orange)
+                    Text("已不在部屬清單裡，算不出目前的綜合分數，這一項以 0 計。")
+                        .font(.system(size: 10)).foregroundStyle(.secondary)
+                    Spacer()
+                }
+            }
+            Divider().padding(.vertical, 2)
+            HStack {
+                Text("最終分數").font(.caption.weight(.bold))
+                Spacer()
+                Text(pointsText(score.finalScore))
+                    .font(.caption.weight(.bold).monospacedDigit())
+                    .foregroundStyle(.orange)
+            }
+        }
+    }
+
+    private func breakdownRow(label: String, value: Double, sharePercent: Double,
+                              product: Double, color: Color) -> some View {
+        HStack(spacing: 8) {
+            Text(label)
+                .font(.caption.weight(.semibold))
+                .frame(width: 68, alignment: .leading)
+            Text(breakdownFormula(value: value, sharePercent: sharePercent))
+                .font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
+            Spacer()
+            Text(pointsText(product))
+                .font(.caption.weight(.bold).monospacedDigit())
+                .foregroundStyle(color)
+        }
+    }
+
+    private func breakdownFormula(value: Double, sharePercent: Double) -> String {
+        pointsText(value) + " × " + percentText(sharePercent) + "%"
+    }
+
     /// 名次列的副標：職等已經是分段標題，這裡只補課別、票數與平均名次
     private func metaLine(deptName: String?, score: PerformanceScore) -> String {
         var parts: [String] = []
         if let deptName, !deptName.isEmpty { parts.append(deptName) }
         parts.append("\(score.sources.count) 票")
         parts.append(String(format: "平均第 %.1f 名", score.averageRank))
+        // [v25.372] 右側大字已經換成最終分數，把兩個來源分數補在這裡才看得出怎麼來的
+        parts.append("排名 " + pointsText(score.total))
+        parts.append("綜合 " + pointsText(score.overallScore))
         return parts.joined(separator: "・")
     }
 
@@ -583,7 +818,7 @@ struct PerformanceSummaryView: View {
     }
 
     /// 計分說明：整段寫成單一字串常數，不要在 Text(...) 裡用 + 串接
-    private static let scoringNote = "計分：排名在「同課 × 同職等」的組內進行，某組 N 人時第 1 名基礎分 N、往下每名少 1 分，再乘上評分者職等的績效權重後加總。總排名依職等分開呈現、名次各自從第 1 名起算（職等由票上的快照決定，職等權重高的排前面）；各課人數不同、基礎分上限就不同，跨課比較僅供參考。"
+    private static let scoringNote = "計分兩段。第一段「排名分數」：排名在「同課 × 同職等」的組內進行，某組 N 人時第 1 名基礎分 N、往下每名少 1 分，再乘上評分者職等的績效權重後加總；該職等只有 1 個人時直接算第 1 名、基礎分 1 分。第二段「最終分數」＝排名分數 × 排名平均占比 ＋ 綜合分數（主動性與潛力的平均）×（1 − 占比）；占比是每張票各自填的百分比，再依評分者職等權重取加權平均。總排名依最終分數、依職等分開呈現、名次各自從第 1 名起算（職等由票上的快照決定，職等權重高的排前面）。注意兩段分數的量級不同——排名分數是各票加權後的累計值，綜合分數是 0～100 多的評分，數字大小不能直接對比。"
 
     private func rankColor(_ rank: Int) -> Color {
         switch rank {

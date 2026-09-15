@@ -3208,6 +3208,11 @@ struct PerformanceBallot: Identifiable, Codable {
     var raterGradeLabel: String
     /// 投票當下的權重快照
     var raterWeight: Double
+    /// [v25.372] 這位評分者認為「排名分數」在最終評分裡該占幾成（0～100 的百分比）。
+    /// 年度實際採用的是所有已送出票的**加權平均**（權重＝評分者職等權重），
+    /// 例：31 職等(×1) 填 20%、32 職等(×2) 填 10% → (20×1 + 10×2)/(1+2) = 13.3%。
+    /// 舊票沒有這個欄位，解碼成 0＝不影響既有分數。
+    var rankSharePercent: Double
     var groups: [PerformanceRankGroup]
     var submittedAt: Date?
     var note: String
@@ -3221,10 +3226,12 @@ struct PerformanceBallot: Identifiable, Codable {
 
     init(id: UUID = UUID(), year: Int, raterId: UUID, raterName: String = "",
          raterGradeId: UUID? = nil, raterGradeLabel: String = "", raterWeight: Double = 1,
+         rankSharePercent: Double = 0,
          groups: [PerformanceRankGroup] = [], submittedAt: Date? = nil, note: String = "") {
         self.id = id; self.year = year; self.raterId = raterId; self.raterName = raterName
         self.raterGradeId = raterGradeId; self.raterGradeLabel = raterGradeLabel
-        self.raterWeight = raterWeight; self.groups = groups
+        self.raterWeight = raterWeight; self.rankSharePercent = rankSharePercent
+        self.groups = groups
         self.submittedAt = submittedAt; self.note = note
     }
 
@@ -3237,6 +3244,8 @@ struct PerformanceBallot: Identifiable, Codable {
         raterGradeId = try? c.decodeIfPresent(UUID.self, forKey: .raterGradeId)
         raterGradeLabel = (try? c.decodeIfPresent(String.self, forKey: .raterGradeLabel)) ?? ""
         raterWeight = (try? c.decodeIfPresent(Double.self, forKey: .raterWeight)) ?? 1
+        // 舊票沒有這個 key → 0%，既有年度的分數完全不變
+        rankSharePercent = (try? c.decodeIfPresent(Double.self, forKey: .rankSharePercent)) ?? 0
         groups = (try? c.decodeIfPresent([PerformanceRankGroup].self, forKey: .groups)) ?? []
         submittedAt = try? c.decodeIfPresent(Date.self, forKey: .submittedAt)
         note = (try? c.decodeIfPresent(String.self, forKey: .note)) ?? ""
@@ -3244,6 +3253,7 @@ struct PerformanceBallot: Identifiable, Codable {
 
     private enum CodingKeys: String, CodingKey {
         case id, year, raterId, raterName, raterGradeId, raterGradeLabel, raterWeight
+        case rankSharePercent
         case groups, submittedAt, note
     }
 }
@@ -3315,16 +3325,58 @@ struct PerformanceScore: Identifiable {
     var id: UUID { personId }
     let personId: UUID
     var name: String
+    /// 互評排名的加權總分（第 1 名基礎分＝組人數，乘上評分者權重後加總）
     var total: Double
     var sources: [PerformanceScoreSource]
     /// [v25.349] 這一年被排在哪個職等（取自票上的快照，所以轉出／離職的人也還原得回來）
     var gradeId: UUID?
     var gradeLabel: String = ""
+    /// [v25.372] 這個人目前的綜合分數（主動性與潛力的平均）。
+    /// 已轉出／離職的人在部屬清單裡查不到，沒有可用的綜合分數 → 0，並由畫面標示。
+    var overallScore: Double = 0
+    /// [v25.372] 有沒有可用的綜合分數（沒有＝這個人已經不在部屬清單裡）
+    var hasOverall: Bool = false
+    /// [v25.372] 最終分數＝排名分數 × 占比 ＋ 綜合分數 × (1 − 占比)。
+    /// 占比是年度層級的加權平均，由 LifeStore.performanceShare(year:) 算出。
+    var finalScore: Double = 0
     /// 平均名次（跨所有把他排進去的票）
     var averageRank: Double {
         guard !sources.isEmpty else { return 0 }
         return sources.reduce(0.0) { $0 + Double($1.rank) } / Double(sources.count)
     }
+}
+
+/// [v25.372] 年度「排名分數占比」的來源明細：誰填了幾 %、他的票權重多少
+struct PerformanceShareVote: Identifiable {
+    var id: UUID { raterId }
+    let raterId: UUID
+    let raterName: String
+    let raterGradeLabel: String
+    let weight: Double
+    /// 這個人填的百分比（0～100）
+    let percent: Double
+    /// 對加權平均的貢獻分子＝percent × weight
+    var weighted: Double { percent * weight }
+}
+
+/// [v25.372] 年度採用的占比：排名分數占多少、綜合分數占多少
+struct PerformanceShare {
+    /// 排名分數占比（0...1）
+    let rank: Double
+    /// 來源票
+    let votes: [PerformanceShareVote]
+    /// 有沒有人真的填過占比。
+    /// 全部都是 0 時**不是**「排名占 0%」，而是「還沒設定」——
+    /// 那樣會讓最終分數變成 100% 綜合分數，等於默默把這一頁從互評排名換成綜合分數排名。
+    /// 未設定時 rank 固定為 1（＝100% 採用排名分數），與加入占比之前的行為完全一致。
+    let isConfigured: Bool
+
+    /// 綜合分數占比（0...1）
+    var overall: Double { 1 - rank }
+    var rankPercent: Double { rank * 100 }
+    var overallPercent: Double { overall * 100 }
+    /// 加權平均的分母（所有參與票的權重和）
+    var weightSum: Double { votes.reduce(0) { $0 + $1.weight } }
 }
 
 /// [v25.349] 職等的分組鍵：id 可能是 nil（未設職等），label 是票上的快照
@@ -3344,7 +3396,7 @@ struct PerformanceGradeSection: Identifiable {
     /// 已在職等內排好序的得分
     let scores: [PerformanceScore]
 
-    var topScore: Double { scores.first?.total ?? 0 }
+    var topScore: Double { scores.first?.finalScore ?? 0 }
 }
 
 
