@@ -135,6 +135,15 @@ enum DayTimelineFormat {
         time(stop.start) + "–" + time(stop.end)
     }
 
+    /// [v25.382] 時長：「45 分」「1 小時」「1.5 小時」
+    static func duration(_ stop: TimelineStop) -> String {
+        let m = stop.durationMinutes
+        if m < 60 { return "\(m) 分" }
+        let hours = Double(m) / 60
+        if hours == hours.rounded() { return String(format: "%.0f 小時", hours) }
+        return String(format: "%.1f 小時", hours)
+    }
+
     /// 收合狀態的右側文字：進行中顯示結束時間，否則顯示下一場開始時間。
     /// [v25.381] 兩者都沒有＝今天的行程都跑完了。原本回「N 場」看不出這件事，
     /// 而且現在軸上不只會議，「場」這個量詞也不對了。

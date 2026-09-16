@@ -24,21 +24,28 @@ struct DayTimelineLiveActivityWidget: Widget {
                 .activitySystemActionForegroundColor(.orange)
         } dynamicIsland: { context in
             DynamicIsland {
+                // [v25.382] 四個角是圓的，貼著邊放的內容會被切掉
+                //（使用者回報「M608 ESH」的 M 不見了）。
+                // 每一區都往內縮，DynamicIslandExpandedSpec.sidePadding 集中管理。
                 DynamicIslandExpandedRegion(.leading) {
                     Label(context.attributes.dayLabel, systemImage: "calendar")
                         .font(.caption2.weight(.semibold))
                         .foregroundStyle(.orange)
+                        .padding(.leading, DayTimelineLayout.sidePadding)
                 }
                 DynamicIslandExpandedRegion(.trailing) {
                     Text(countLabel(context.state))
                         .font(.caption2.weight(.semibold))
                         .foregroundStyle(.secondary)
+                        .padding(.trailing, DayTimelineLayout.sidePadding)
                 }
                 DynamicIslandExpandedRegion(.bottom) {
-                    VStack(alignment: .leading, spacing: 8) {
+                    VStack(alignment: .leading, spacing: 7) {
                         TimelineStrip(state: context.state)
-                        StopDetail(stop: context.state.selected)
+                        StopDetail(stop: context.state.selected, roomy: true)
                     }
+                    .padding(.horizontal, DayTimelineLayout.sidePadding)
+                    .padding(.bottom, 2)
                 }
             } compactLeading: {
                 Image(systemName: "calendar.day.timeline.left")
@@ -78,7 +85,7 @@ struct TimelineStrip: View {
     private var inset: CGFloat { selectedDotSize / 2 }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
+        VStack(alignment: .leading, spacing: 2) {
             GeometryReader { geo in
                 let usable = max(0, geo.size.width - inset * 2)
                 ZStack(alignment: .leading) {
@@ -137,6 +144,31 @@ struct TimelineStrip: View {
     }
 }
 
+// MARK: - 版面常數
+
+/// [v25.382] 展開區的尺寸拿捏。
+///
+/// 兩個互相拉扯的限制：
+///   • 四個角是圓的，貼邊的內容會被切掉 → 要往內縮
+///   • 展開區總高度上限約 160pt，超過系統直接截掉下半 → 行數不能無限加
+/// 下面的數字是照這兩件事抓的，改之前先把預估高度重算一次。
+enum DayTimelineLayout {
+    /// 左右內縮。圓角大約吃掉 10pt，留 8pt 再加上元件自身的 inset 就夠。
+    static let sidePadding: CGFloat = 8
+
+    /// 標題行數。原本 1 行，長會議名稱會被截掉一半。
+    static let titleLines = 2
+    /// 內容摘要行數。原本 2 行。
+    static let detailLines = 3
+
+    // 目前的高度預估（展開區）：
+    //   時間軸  17（點）＋2＋11（時刻標籤） = 30
+    //   間距                                =  7
+    //   詳情    14（時間列）＋34（標題 2 行）＋39（摘要 3 行）＋4 = 91
+    //   下方留白                            =  2
+    //   合計 ≈ 130，加上頂端那一列約 22 → ≈ 152，壓在 160 的上限內。
+}
+
 // MARK: - 來源配色
 
 /// [v25.380] 時間軸現在混了兩種來源，一眼要分得出來
@@ -160,6 +192,17 @@ enum DayTimelineStyle {
 
 struct StopDetail: View {
     let stop: TimelineStop?
+    /// [v25.382] 展開的靈動島空間比較多，標題與摘要可以多給幾行；
+    /// 鎖定畫面沿用原本的緊湊版。
+    var roomy: Bool = false
+
+    init(stop: TimelineStop?, roomy: Bool = false) {
+        self.stop = stop
+        self.roomy = roomy
+    }
+
+    private var titleLines: Int { roomy ? DayTimelineLayout.titleLines : 1 }
+    private var detailLines: Int { roomy ? DayTimelineLayout.detailLines : 2 }
 
     var body: some View {
         if let stop {
@@ -172,9 +215,14 @@ struct StopDetail: View {
                     Text(DayTimelineFormat.range(stop))
                         .font(.system(size: 11, weight: .bold).monospacedDigit())
                         .foregroundStyle(DayTimelineStyle.color(stop.kind))
+                    // [v25.382] 多給一個時長，不用自己算
+                    Text(DayTimelineFormat.duration(stop))
+                        .font(.system(size: 9, weight: .medium).monospacedDigit())
+                        .foregroundStyle(.white.opacity(0.45))
                     if !stop.owner.isEmpty {
                         Text(stop.owner)
                             .font(.system(size: 9, weight: .semibold))
+                            .lineLimit(1)
                             .padding(.horizontal, 5).padding(.vertical, 1)
                             .background(Color.white.opacity(0.14), in: Capsule())
                             .foregroundStyle(.white.opacity(0.85))
@@ -184,12 +232,14 @@ struct StopDetail: View {
                 Text(stop.title.isEmpty ? "未命名行程" : stop.title)
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(.white)
-                    .lineLimit(1)
+                    .lineLimit(titleLines)
+                    .multilineTextAlignment(.leading)
                 if !stop.detail.isEmpty {
                     Text(stop.detail)
                         .font(.system(size: 10))
                         .foregroundStyle(.white.opacity(0.65))
-                        .lineLimit(2)
+                        .lineLimit(detailLines)
+                        .multilineTextAlignment(.leading)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)

@@ -27,11 +27,13 @@ final class DayTimelineController: ObservableObject {
     /// 目前有沒有在跑
     @Published private(set) var isRunning = false
 
-    /// ContentState 的硬上限是 4KB。一站大約 250~350 bytes，
-    /// 取 8 站既有安全邊際，展開區的寬度也只放得下這麼多顆點。
+    /// 展開區的寬度放得下幾顆點。這是版面上限，不是容量上限。
     private let maxStops = 8
-    /// 內容摘要裁到這個長度，避免一場議程很長的會議就把整份快照撐爆
-    private let maxDetailLength = 70
+    /// 內容摘要的字數上限。[v25.382] 展開區現在給摘要 3 行，跟著放寬。
+    private let maxDetailLength = 90
+    /// ContentState 的硬上限是 4KB（超過 Activity.request 直接丟錯）。
+    /// 留 500 bytes 給 ActivityKit 自己的封裝開銷。
+    private let maxPayloadBytes = 3_500
 
     private var renewalTask: Task<Void, Never>?
 
@@ -47,7 +49,8 @@ final class DayTimelineController: ObservableObject {
             await stop()
             return
         }
-        let stops = todayStops(store: store)
+        // 先挑出今天的行程，再按實際編碼大小裁到 4KB 以內
+        let stops = fitted(todayStops(store: store))
         guard !stops.isEmpty else {
             // 今天沒有行程就不要占著靈動島
             await stop()
@@ -142,7 +145,7 @@ final class DayTimelineController: ObservableObject {
                     guard !occ.isCancelled else { continue }
                     guard occ.date >= dayStart, occ.date < dayEnd else { continue }
                     out.append(TimelineStop(
-                        id: "m-\(meeting.id.uuidString)-\(occ.scheduledDate.timeIntervalSinceReferenceDate)",
+                        id: Self.stopId("m", meeting.id, occ.date),
                         title: meeting.topic,
                         start: occ.date,
                         durationMinutes: max(5, meeting.durationMinutes),
@@ -162,7 +165,7 @@ final class DayTimelineController: ObservableObject {
                                        minute: hm.minute ?? 0,
                                        second: 0, of: dayStart) else { continue }
             out.append(TimelineStop(
-                id: "p-\(event.id.uuidString)-\(start.timeIntervalSinceReferenceDate)",
+                id: Self.stopId("p", event.id, start),
                 title: event.title,
                 start: start,
                 durationMinutes: max(5, event.durationMinutes),
@@ -183,6 +186,31 @@ final class DayTimelineController: ObservableObject {
             }
         }
         return out
+    }
+
+    /// [v25.382] 場次 id。只需要在同一份快照裡唯一（ForEach 用），
+    /// 以前塞整個 UUID 加上完整時間戳要 57 個字元，白白吃掉 4KB 預算的一大塊。
+    private static func stopId(_ prefix: String, _ id: UUID, _ start: Date) -> String {
+        // prefix(8) 回的是 Substring，String + Substring 不能直接相加
+        prefix + String(id.uuidString.prefix(8)) + String(Int(start.timeIntervalSince1970))
+    }
+
+    /// [v25.382] 依實際編碼大小裁到 4KB 以內。
+    ///
+    /// 以前是用「8 站 × 估計每站 300 bytes」這種心算來抓，很容易錯得離譜——
+    /// 中文一個字 3 bytes、JSON 還要算欄位名，一場議程滿檔的會議就可能逼近上限。
+    /// 直接編碼來量最準；超過就從最晚的那一站開始砍。
+    private func fitted(_ stops: [TimelineStop]) -> [TimelineStop] {
+        var out = stops
+        while out.count > 1, encodedSize(out) > maxPayloadBytes {
+            out.removeLast()
+        }
+        return out
+    }
+
+    private func encodedSize(_ stops: [TimelineStop]) -> Int {
+        let probe = DayTimelineAttributes.ContentState(stops: stops, selectedIndex: 0)
+        return (try? JSONEncoder().encode(probe))?.count ?? 0
     }
 
     /// 內容摘要：優先用議程項目，沒有才用備註；一律裁到上限
