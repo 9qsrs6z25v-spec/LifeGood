@@ -18,6 +18,22 @@ struct HolographicWatermark: View {
     let text: String
     @State private var phase: CGFloat = 0
 
+    /// 掃過浮水印的那道光。拉出來當具名屬性，除了避開上面那個多載歧義，
+    /// 也讓 body 的運算式淺一層——本檔案有型別檢查逾時的前科。
+    private var sweepGradient: LinearGradient {
+        LinearGradient(
+            stops: [
+                .init(color: .clear, location: 0),
+                .init(color: .white.opacity(0.28), location: 0.45),
+                .init(color: .white.opacity(0.45), location: 0.5),
+                .init(color: .white.opacity(0.28), location: 0.55),
+                .init(color: .clear, location: 1)
+            ],
+            startPoint: UnitPoint(x: phase - 0.5, y: phase - 0.5),
+            endPoint: UnitPoint(x: phase + 0.5, y: phase + 0.5)
+        )
+    }
+
     var body: some View {
         GeometryReader { geo in
             let rowHeight: CGFloat = 110
@@ -44,20 +60,18 @@ struct HolographicWatermark: View {
                     }
                 }
             }
-            .overlay(
-                LinearGradient(
-                    stops: [
-                        .init(color: .clear, location: 0),
-                        .init(color: .white.opacity(0.28), location: 0.45),
-                        .init(color: .white.opacity(0.45), location: 0.5),
-                        .init(color: .white.opacity(0.28), location: 0.55),
-                        .init(color: .clear, location: 1)
-                    ],
-                    startPoint: UnitPoint(x: phase - 0.5, y: phase - 0.5),
-                    endPoint: UnitPoint(x: phase + 0.5, y: phase + 0.5)
-                )
-                .blendMode(.plusLighter)
-            )
+            // [v25.378] 這裡原本是直接對 LinearGradient 呼叫 .blendMode(.plusLighter)，
+            // 編譯器回報 Ambiguous use of 'blendMode'：
+            // LinearGradient 同時符合 View 與 ShapeStyle，而兩個協定各自都有
+            // blendMode(_:)；外層的 .overlay(_:) 也同時有吃 View 與吃 ShapeStyle 的
+            // 多載，兩條路都說得通，於是無從選起。
+            // 先用 Rectangle().fill(...) 把它收斂成「只是 View」，
+            // 再改用 .overlay { } 的 ViewBuilder 形式，兩邊都只剩一種解讀。
+            .overlay {
+                Rectangle()
+                    .fill(sweepGradient)
+                    .blendMode(.plusLighter)
+            }
         }
         .allowsHitTesting(false)
         .onAppear {
