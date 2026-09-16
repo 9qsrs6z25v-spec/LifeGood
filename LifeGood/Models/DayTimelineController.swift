@@ -49,7 +49,7 @@ final class DayTimelineController: ObservableObject {
         }
         let stops = todayStops(store: store)
         guard !stops.isEmpty else {
-            // 今天沒有會議就不要占著靈動島
+            // 今天沒有行程就不要占著靈動島
             await stop()
             lastError = nil
             return
@@ -119,7 +119,11 @@ final class DayTimelineController: ObservableObject {
 
     // MARK: - 快照
 
-    /// 今天的會議場次（含週期展開），依開始時間排序後裁切
+    /// 今天的行程：部屬會議（含週期展開）＋我的行事曆的個人事件（含重複），
+    /// 依開始時間排序後裁切。
+    ///
+    /// 只收「有時間的」項目：時間軸是一條從早到晚的時間線，
+    /// 全日事件（durationMinutes == 0）沒有落點，硬放上去只會讓軸失真。
     private func todayStops(store: LifeStore) -> [TimelineStop] {
         let cal = Calendar.current
         let today = Date()
@@ -130,21 +134,43 @@ final class DayTimelineController: ObservableObject {
         let from = cal.date(byAdding: .day, value: -1, to: dayStart) ?? dayStart
 
         var out: [TimelineStop] = []
+
+        // 1) 部屬會議
         for sub in store.subordinates {
             for meeting in sub.meetings {
                 for occ in meeting.expandedOccurrences(from: from, horizon: dayEnd) {
                     guard !occ.isCancelled else { continue }
                     guard occ.date >= dayStart, occ.date < dayEnd else { continue }
                     out.append(TimelineStop(
-                        id: "\(meeting.id.uuidString)-\(occ.scheduledDate.timeIntervalSinceReferenceDate)",
+                        id: "m-\(meeting.id.uuidString)-\(occ.scheduledDate.timeIntervalSinceReferenceDate)",
                         title: meeting.topic,
                         start: occ.date,
                         durationMinutes: max(5, meeting.durationMinutes),
                         owner: sub.name,
-                        detail: detailText(meeting: meeting, occurrence: occ)))
+                        detail: detailText(meeting: meeting, occurrence: occ),
+                        kind: .meeting))
                 }
             }
         }
+
+        // 2) 我的行事曆：個人事件。occurs(on:) 已經處理好重複規則，
+        //    但它回答的是「今天有沒有」，實際時間要用原始事件的時分套到今天。
+        for event in store.personalEvents where event.occurs(on: today, calendar: cal) {
+            guard event.durationMinutes > 0 else { continue }   // 全日事件沒有軸上落點
+            let hm = cal.dateComponents([.hour, .minute], from: event.date)
+            guard let start = cal.date(bySettingHour: hm.hour ?? 0,
+                                       minute: hm.minute ?? 0,
+                                       second: 0, of: dayStart) else { continue }
+            out.append(TimelineStop(
+                id: "p-\(event.id.uuidString)-\(start.timeIntervalSinceReferenceDate)",
+                title: event.title,
+                start: start,
+                durationMinutes: max(5, event.durationMinutes),
+                owner: eventOwnerText(event),
+                detail: truncated(event.note),
+                kind: .personal))
+        }
+
         out.sort { $0.start < $1.start }
         // 超過上限時保留「從現在起最近的幾場」——早上八點看整天、下午三點看下半天
         if out.count > maxStops {
@@ -165,9 +191,22 @@ final class DayTimelineController: ObservableObject {
         let items = occurrence.items.isEmpty ? meeting.items : occurrence.items
         let titles = items.map(\.content).filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
         let raw = titles.isEmpty
-            ? meeting.note.trimmingCharacters(in: .whitespacesAndNewlines)
+            ? meeting.note
             : titles.joined(separator: "、")
-        let flat = raw.replacingOccurrences(of: "\n", with: " ")
+        return truncated(raw)
+    }
+
+    /// 個人事件的第二行標籤：有地點就顯示地點，沒有就顯示事件分類
+    private func eventOwnerText(_ event: PersonalEvent) -> String {
+        let place = event.location.trimmingCharacters(in: .whitespacesAndNewlines)
+        return place.isEmpty ? event.kind.rawValue : place
+    }
+
+    /// 壓成單行並裁到上限。ContentState 有 4KB 硬上限，長備註必須先砍。
+    private func truncated(_ raw: String) -> String {
+        let flat = raw
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "\n", with: " ")
         guard flat.count > maxDetailLength else { return flat }
         return String(flat.prefix(maxDetailLength)) + "…"
     }

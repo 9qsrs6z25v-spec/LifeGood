@@ -11,6 +11,9 @@ import ActivityKit
 //
 // 所以時間軸上的每個點都是一顆 Button，按下去換 selectedIndex，
 // 下方固定區塊顯示那一場的時間、標題與內容。
+//
+// [v25.380] 軸上混了兩種來源：部屬會議（橘）與我的行事曆的個人事件（青），
+// 點的顏色與詳情的圖示都跟著來源走。
 
 struct DayTimelineLiveActivityWidget: Widget {
     var body: some WidgetConfiguration {
@@ -116,7 +119,8 @@ struct TimelineStrip: View {
                 // 觸控區比圓點大一圈：展開區不能捲動，點太小會按不到
                 Color.clear.frame(width: 26, height: selectedDotSize + 6)
                 Circle()
-                    .fill(isOn ? Color.orange : Color.white.opacity(0.55))
+                    .fill(isOn ? DayTimelineStyle.color(stop.kind)
+                               : DayTimelineStyle.color(stop.kind).opacity(0.5))
                     .frame(width: size, height: size)
                     .overlay(
                         Circle().stroke(Color.black.opacity(isOn ? 0.35 : 0), lineWidth: 1.5)
@@ -129,6 +133,25 @@ struct TimelineStrip: View {
     }
 }
 
+// MARK: - 來源配色
+
+/// [v25.380] 時間軸現在混了兩種來源，一眼要分得出來
+enum DayTimelineStyle {
+    static func color(_ kind: TimelineStopKind) -> Color {
+        switch kind {
+        case .meeting:  return .orange
+        case .personal: return .cyan
+        }
+    }
+
+    static func icon(_ kind: TimelineStopKind) -> String {
+        switch kind {
+        case .meeting:  return "person.2.fill"
+        case .personal: return "calendar"
+        }
+    }
+}
+
 // MARK: - 單場詳情
 
 struct StopDetail: View {
@@ -138,9 +161,13 @@ struct StopDetail: View {
         if let stop {
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
+                    // [v25.380] 來源圖示：部屬會議 vs 我的行事曆
+                    Image(systemName: DayTimelineStyle.icon(stop.kind))
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(DayTimelineStyle.color(stop.kind))
                     Text(DayTimelineFormat.range(stop))
                         .font(.system(size: 11, weight: .bold).monospacedDigit())
-                        .foregroundStyle(.orange)
+                        .foregroundStyle(DayTimelineStyle.color(stop.kind))
                     if !stop.owner.isEmpty {
                         Text(stop.owner)
                             .font(.system(size: 9, weight: .semibold))
@@ -150,7 +177,7 @@ struct StopDetail: View {
                     }
                     Spacer(minLength: 0)
                 }
-                Text(stop.title.isEmpty ? "未命名會議" : stop.title)
+                Text(stop.title.isEmpty ? "未命名行程" : stop.title)
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(.white)
                     .lineLimit(1)
@@ -163,7 +190,7 @@ struct StopDetail: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         } else {
-            Text("今天沒有安排會議")
+            Text("今天沒有有時間的行程")
                 .font(.system(size: 11))
                 .foregroundStyle(.white.opacity(0.6))
                 .frame(maxWidth: .infinity, alignment: .leading)

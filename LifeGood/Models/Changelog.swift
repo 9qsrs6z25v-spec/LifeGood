@@ -13,6 +13,12 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.380", build: 1133, date: "2026/08/19", notes: [
+            "【新增】靈動島時間軸現在同時收錄「我的行事曆」裡的個人事件，不再只有部屬的會議。兩種來源的重複／週期規則都會展開。",
+            "【新增】兩種來源用顏色分開：部屬會議是橘點、個人事件是青點，展開後的詳情也會帶對應的圖示（兩個人／日曆）。個人事件的第二行顯示地點，沒填地點才顯示事件分類。",
+            "【說明】全日事件不會出現在軸上。時間軸是一條有時刻的線，沒有開始時間的項目放上去只會讓整條軸的比例失真——需要的話跟我說，可以另外想辦法呈現。",
+            "【說明】其餘規則不變：超過 8 筆只顯示從現在起最近的 8 筆，今天沒有行程就不占用靈動島。"
+        ]),
         ChangelogEntry(version: "25.379", build: 1132, date: "2026/08/19", notes: [
             "【修正】上架封裝時簽章失敗（Exporting for App Store Distribution failed）。原因是 v25.377 為了「將來要做鎖定畫面小工具」而加了 App Group，但那個小工具根本還不存在——App Group 必須先在 Apple Developer 後台註冊、再掛到兩個 App ID 上，沒做這件事就永遠簽不過。",
             "【修正】已經把 App Group 整個移除。靈動島的資料本來就是透過即時動態本身傳遞的，不需要 App Group；那是我提前借的債，現在還掉。之後真的要做小工具時再加。",

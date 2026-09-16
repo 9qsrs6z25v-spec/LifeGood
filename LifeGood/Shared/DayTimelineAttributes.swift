@@ -9,28 +9,45 @@ import ActivityKit
 // ⚠️ ContentState 有 4KB 上限（ActivityKit 硬限制），超過會直接啟動失敗。
 //    所以場次數量與文字長度都要先裁切，見 DayTimelineSnapshotBuilder。
 
-/// 時間軸上的一站（一場會議）
+/// [v25.380] 這一站是哪裡來的。決定點的顏色與詳情裡的來源標籤。
+enum TimelineStopKind: String, Codable, Hashable {
+    /// 部屬的會議
+    case meeting
+    /// 我的行事曆裡的個人事件
+    case personal
+
+    var label: String {
+        switch self {
+        case .meeting:  return "部屬會議"
+        case .personal: return "我的行事曆"
+        }
+    }
+}
+
+/// 時間軸上的一站
 struct TimelineStop: Codable, Hashable, Identifiable {
-    /// 會議場次的識別字串（會議 id + 場次時間）
+    /// 場次的識別字串（來源 id + 場次時間）
     var id: String
     var title: String
     var start: Date
     var durationMinutes: Int
-    /// 誰的會議（部屬姓名）
+    /// 部屬會議＝部屬姓名；個人事件＝地點，沒填就用事件分類
     var owner: String
     /// 內容摘要：議程項目或備註，已裁切
     var detail: String
+    var kind: TimelineStopKind
 
     var end: Date { start.addingTimeInterval(TimeInterval(durationMinutes * 60)) }
 
     init(id: String, title: String, start: Date, durationMinutes: Int,
-         owner: String, detail: String) {
+         owner: String, detail: String, kind: TimelineStopKind) {
         self.id = id
         self.title = title
         self.start = start
         self.durationMinutes = durationMinutes
         self.owner = owner
         self.detail = detail
+        self.kind = kind
     }
 }
 
