@@ -92,6 +92,10 @@ struct LifeGoodApp: App {
                     // [v25.377] 靈動島的今日行程：沒開啟就直接返回，不會做任何事
                     await DayTimelineController.shared.refresh(store: lifeStore)
                 }
+                // [v25.381] 從靈動島／鎖定畫面點進來：切到「我的行事曆」
+                .onOpenURL { url in
+                    _ = DayTimelineLink.apply(url)
+                }
                 .onAppear {
                     BackupManager.shared.createSnapshotIfNeeded(
                         expense: expenseStore, finance: financeStore, life: lifeStore

@@ -19,6 +19,7 @@ struct DayTimelineLiveActivityWidget: Widget {
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: DayTimelineAttributes.self) { context in
             LockScreenView(attributes: context.attributes, state: context.state)
+                .widgetURL(DayTimelineLink.today)
                 .activityBackgroundTint(Color.black.opacity(0.55))
                 .activitySystemActionForegroundColor(.orange)
         } dynamicIsland: { context in
@@ -50,6 +51,9 @@ struct DayTimelineLiveActivityWidget: Widget {
                 Image(systemName: "calendar.day.timeline.left")
                     .foregroundStyle(.orange)
             }
+            // [v25.381] 點一下開 App 是系統行為，改不了；但開到哪裡可以決定。
+            // 導到「我的行事曆」——那就是這條時間軸的完整版。
+            .widgetURL(DayTimelineLink.today)
             .keylineTint(.orange)
         }
     }

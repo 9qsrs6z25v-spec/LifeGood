@@ -135,12 +135,34 @@ enum DayTimelineFormat {
         time(stop.start) + "–" + time(stop.end)
     }
 
-    /// 收合狀態的右側文字：進行中顯示結束時間，否則顯示下一場開始時間
+    /// 收合狀態的右側文字：進行中顯示結束時間，否則顯示下一場開始時間。
+    /// [v25.381] 兩者都沒有＝今天的行程都跑完了。原本回「N 場」看不出這件事，
+    /// 而且現在軸上不只會議，「場」這個量詞也不對了。
     static func compactTrailing(_ state: DayTimelineAttributes.ContentState,
                                 now: Date = Date()) -> String {
         if let cur = state.currentStop(now) { return time(cur.end) }
         if let next = state.nextStop(now) { return time(next.start) }
-        return "\(state.stops.count) 場"
+        return "已結束"
+    }
+}
+
+// MARK: - 深層連結
+
+enum DayTimelineLink {
+    /// [v25.381] 點靈動島一定是開 App（長按才展開，這是系統行為改不了），
+    /// 那至少要開到有用的地方——「我的行事曆」就是這條時間軸的完整版。
+    static let today = URL(string: "lifegood://today")
+
+    /// App 端收到這個網址時要切到哪三個位置。
+    /// MainTabView 的導覽狀態全部是 @AppStorage，直接寫 UserDefaults 就會生效，
+    /// 不需要碰任何 navigation stack。
+    static func apply(_ url: URL) -> Bool {
+        guard url.scheme == "lifegood", url.host == "today" else { return false }
+        let d = UserDefaults.standard
+        d.set("life", forKey: "appMode")
+        d.set("career", forKey: "life_feature")
+        d.set("calendar", forKey: "management_feature")
+        return true
     }
 }
 
