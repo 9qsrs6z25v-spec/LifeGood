@@ -269,6 +269,9 @@ struct SettingsView: View {
     @State private var rateRowsRefreshToken = 0
     @State private var iCloudExpanded = false
     @State private var aiExpanded = false
+    /// [v25.377] 靈動島今日行程
+    @State private var dayTimelineExpanded = false
+    @StateObject private var dayTimeline = DayTimelineController.shared
     @State private var dataManagementExpanded = false
     @State private var dataStatsExpanded = false
     @State private var restoreExpanded = false
@@ -316,6 +319,11 @@ struct SettingsView: View {
                 }
                 disclosureBlock("語音 AI 助手", icon: "waveform", color: .purple, isExpanded: $aiExpanded) {
                     aiAssistantSection
+                }
+                // [v25.377] 今日行程時間軸（靈動島 / 鎖定畫面）
+                disclosureBlock("靈動島今日行程", icon: "calendar.day.timeline.left",
+                                color: .orange, isExpanded: $dayTimelineExpanded) {
+                    dayTimelineSection
                 }
                 disclosureBlock("資料匯出 / 匯入", icon: "tray.and.arrow.up.fill", color: .green, isExpanded: $dataManagementExpanded) {
                     dataManagementSection
@@ -1073,6 +1081,46 @@ struct SettingsView: View {
     private func formatSyncDate(_ date: Date) -> String {
         Self.syncDateFormatter.string(from: date)
     }
+
+    // MARK: - [v25.377] 靈動島今日行程
+
+    @ViewBuilder
+    private var dayTimelineSection: some View {
+        Section {
+            Toggle(isOn: $dayTimeline.isEnabled) {
+                settingsActionRow(icon: "calendar.day.timeline.left", color: .orange,
+                                  title: "在靈動島顯示今日行程",
+                                  subtitle: dayTimeline.isRunning ? "顯示中" : "未顯示")
+            }
+            .tint(.orange)
+            if dayTimeline.isEnabled {
+                Button {
+                    Task { await dayTimeline.refresh(store: lifeStore) }
+                } label: {
+                    settingsActionRow(icon: "arrow.clockwise", color: .blue,
+                                      title: "重新整理", subtitle: "立刻依目前的會議重算時間軸")
+                }
+                if let err = dayTimeline.lastError {
+                    HStack(alignment: .top, spacing: 6) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.caption).foregroundStyle(.orange)
+                        Text(err).font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+            }
+        } header: {
+            Text("靈動島今日行程")
+        } footer: {
+            Text(Self.dayTimelineFootnote)
+        }
+    }
+
+    /// 說明一次寫成單一字串常數，不要在 Text(...) 裡用 + 串接
+    private static let dayTimelineFootnote =
+        "把今天的會議畫成一條時間軸放進靈動島：長按靈動島展開，軸上每個點就是一場會議，"
+        + "點下去看那一場的時間、標題與議程摘要（點靈動島本身是開啟 App，長按才會展開——這是系統行為）。"
+        + "系統限制一次最多顯示 8 小時，超過會自動收起來，回到 App 就會重新掛上；"
+        + "場次多於 8 場時只顯示從現在起最近的 8 場。今天沒有會議就不會占用靈動島。"
 
     // MARK: - 語音 AI 助手
 

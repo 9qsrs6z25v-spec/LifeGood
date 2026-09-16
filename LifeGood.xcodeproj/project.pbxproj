@@ -7,6 +7,14 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		A01B000002000001 /* LifeGoodWidgetsBundle.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000001 /* LifeGoodWidgetsBundle.swift */; };
+		A01B000002000002 /* DayTimelineLiveActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000002 /* DayTimelineLiveActivity.swift */; };
+		A01B000002000003 /* DayTimelineAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000003 /* DayTimelineAttributes.swift */; };
+		A01B000002000004 /* DayTimelineIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000004 /* DayTimelineIntent.swift */; };
+		A01B000002000011 /* DayTimelineAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000003 /* DayTimelineAttributes.swift */; };
+		A01B000002000012 /* DayTimelineIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000004 /* DayTimelineIntent.swift */; };
+		A01B000002000013 /* DayTimelineController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000005 /* DayTimelineController.swift */; };
+		A01B000002000020 /* LifeGoodWidgets.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = A01A000002000100 /* LifeGoodWidgets.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		A01B000001000001 /* LifeGoodApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000001 /* LifeGoodApp.swift */; };
 		A01B000001000002 /* Expense.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000002 /* Expense.swift */; };
 		A01B000001000003 /* ExpenseStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000003 /* ExpenseStore.swift */; };
@@ -121,7 +129,47 @@
 		A01B00000100000B /* Preview Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A01A00000100000B /* Preview Assets.xcassets */; };
 /* End PBXBuildFile section */
 
+/* Begin PBXCopyFilesBuildPhase section */
+		A01C000002000004 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				A01B000002000020 /* LifeGoodWidgets.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
+/* Begin PBXContainerItemProxy section */
+		A018000002000001 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = A01E000001000002 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = A01E000002000001;
+			remoteInfo = LifeGoodWidgets;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXTargetDependency section */
+		A019000002000001 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = A01E000002000001 /* LifeGoodWidgets */;
+			targetProxy = A018000002000001 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
 /* Begin PBXFileReference section */
+		A01A000002000001 /* LifeGoodWidgetsBundle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LifeGoodWidgetsBundle.swift; sourceTree = "<group>"; };
+		A01A000002000002 /* DayTimelineLiveActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DayTimelineLiveActivity.swift; sourceTree = "<group>"; };
+		A01A000002000003 /* DayTimelineAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DayTimelineAttributes.swift; sourceTree = "<group>"; };
+		A01A000002000004 /* DayTimelineIntent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DayTimelineIntent.swift; sourceTree = "<group>"; };
+		A01A000002000005 /* DayTimelineController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DayTimelineController.swift; sourceTree = "<group>"; };
+		A01A000002000006 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		A01A000002000007 /* LifeGoodWidgets.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = LifeGoodWidgets.entitlements; sourceTree = "<group>"; };
+		A01A000002000100 /* LifeGoodWidgets.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = LifeGoodWidgets.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		A01A000001000001 /* LifeGoodApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LifeGoodApp.swift; sourceTree = "<group>"; };
 		A01A000001000002 /* Expense.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Expense.swift; sourceTree = "<group>"; };
 		A01A000001000003 /* ExpenseStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExpenseStore.swift; sourceTree = "<group>"; };
@@ -239,6 +287,13 @@
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
+		A01C000002000002 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		A01C000001000001 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -249,10 +304,31 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		A01D000002000001 /* LifeGoodWidgets */ = {
+			isa = PBXGroup;
+			children = (
+				A01A000002000001 /* LifeGoodWidgetsBundle.swift */,
+				A01A000002000002 /* DayTimelineLiveActivity.swift */,
+				A01A000002000006 /* Info.plist */,
+				A01A000002000007 /* LifeGoodWidgets.entitlements */,
+			);
+			path = LifeGoodWidgets;
+			sourceTree = "<group>";
+		};
+		A01D000002000002 /* Shared */ = {
+			isa = PBXGroup;
+			children = (
+				A01A000002000003 /* DayTimelineAttributes.swift */,
+				A01A000002000004 /* DayTimelineIntent.swift */,
+			);
+			path = Shared;
+			sourceTree = "<group>";
+		};
 		A01D000001000001 /* Root */ = {
 			isa = PBXGroup;
 			children = (
 				A01D000001000002 /* LifeGood */,
+				A01D000002000001 /* LifeGoodWidgets */,
 				A01D000001000005 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -262,6 +338,7 @@
 			children = (
 				A01A000001000001 /* LifeGoodApp.swift */,
 				A01A000001000034 /* LifeGood.entitlements */,
+				A01D000002000002 /* Shared */,
 				A01D000001000003 /* Models */,
 				A01D000001000004 /* Views */,
 				A01A00000100000A /* Assets.xcassets */,
@@ -298,6 +375,7 @@
 				A01A00000100003E /* EInvoice.swift */,
 				A01A00000100003F /* KeychainHelper.swift */,
 				A01A000001001800 /* CardVault.swift */,
+				A01A000002000005 /* DayTimelineController.swift */,
 				A01A000001000040 /* EInvoiceClient.swift */,
 				A01A000001000041 /* InvoiceCategorizer.swift */,
 				A01A000001000042 /* EInvoiceSyncManager.swift */,
@@ -413,6 +491,7 @@
 			isa = PBXGroup;
 			children = (
 				A01A00000100000C /* LifeGood.app */,
+				A01A000002000100 /* LifeGoodWidgets.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -428,6 +507,23 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		A01E000002000001 /* LifeGoodWidgets */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A01F000002000003 /* Build configuration list for PBXNativeTarget "LifeGoodWidgets" */;
+			buildPhases = (
+				A01C000002000001 /* Sources */,
+				A01C000002000002 /* Frameworks */,
+				A01C000002000003 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = LifeGoodWidgets;
+			productName = LifeGoodWidgets;
+			productReference = A01A000002000100 /* LifeGoodWidgets.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 		A01E000001000001 /* LifeGood */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = A01F000001000003 /* Build configuration list for PBXNativeTarget "LifeGood" */;
@@ -435,10 +531,12 @@
 				A01C000001000002 /* Sources */,
 				A01C000001000001 /* Frameworks */,
 				A01C000001000003 /* Resources */,
+				A01C000002000004 /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				A019000002000001 /* PBXTargetDependency */,
 			);
 			name = LifeGood;
 			productName = LifeGood;
@@ -458,6 +556,9 @@
 					A01E000001000001 = {
 						CreatedOnToolsVersion = 15.4;
 					};
+					A01E000002000001 = {
+						CreatedOnToolsVersion = 15.4;
+					};
 				};
 			};
 			buildConfigurationList = A01F000001000006 /* Build configuration list for PBXProject "LifeGood" */;
@@ -475,11 +576,19 @@
 			projectRoot = "";
 			targets = (
 				A01E000001000001 /* LifeGood */,
+				A01E000002000001 /* LifeGoodWidgets */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
+		A01C000002000003 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		A01C000001000003 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -492,6 +601,17 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		A01C000002000001 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A01B000002000001 /* LifeGoodWidgetsBundle.swift in Sources */,
+				A01B000002000002 /* DayTimelineLiveActivity.swift in Sources */,
+				A01B000002000003 /* DayTimelineAttributes.swift in Sources */,
+				A01B000002000004 /* DayTimelineIntent.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		A01C000001000002 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -582,6 +702,9 @@
 				A01B00000100003E /* EInvoice.swift in Sources */,
 				A01B00000100003F /* KeychainHelper.swift in Sources */,
 				A01B000001001800 /* CardVault.swift in Sources */,
+				A01B000002000011 /* DayTimelineAttributes.swift in Sources */,
+				A01B000002000012 /* DayTimelineIntent.swift in Sources */,
+				A01B000002000013 /* DayTimelineController.swift in Sources */,
 				A01B000001000040 /* EInvoiceClient.swift in Sources */,
 				A01B000001000041 /* InvoiceCategorizer.swift in Sources */,
 				A01B000001000042 /* EInvoiceSyncManager.swift in Sources */,
@@ -612,6 +735,62 @@
 /* End PBXSourcesBuildPhase section */
 
 /* Begin XCBuildConfiguration section */
+		A01F000002000001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CLANG_ENABLE_MODULES = YES;
+				CODE_SIGN_ENTITLEMENTS = LifeGoodWidgets/LifeGoodWidgets.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1130;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = LifeGoodWidgets/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "美好人生";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 25.377;
+				PRODUCT_BUNDLE_IDENTIFIER = com.lifegood.app.widgets;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		A01F000002000002 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CLANG_ENABLE_MODULES = YES;
+				CODE_SIGN_ENTITLEMENTS = LifeGoodWidgets/LifeGoodWidgets.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1130;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = LifeGoodWidgets/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "美好人生";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 25.377;
+				PRODUCT_BUNDLE_IDENTIFIER = com.lifegood.app.widgets;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
 		A01F000001000001 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -619,7 +798,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = LifeGood/LifeGood.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1129;
+				CURRENT_PROJECT_VERSION = 1130;
 				DEVELOPMENT_ASSET_PATHS = "\"LifeGood/Preview Content\"";
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -650,7 +829,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 25.376;
+				MARKETING_VERSION = 25.377;
 				PRODUCT_BUNDLE_IDENTIFIER = com.lifegood.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -666,7 +845,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = LifeGood/LifeGood.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1129;
+				CURRENT_PROJECT_VERSION = 1130;
 				DEVELOPMENT_ASSET_PATHS = "\"LifeGood/Preview Content\"";
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -697,7 +876,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 25.376;
+				MARKETING_VERSION = 25.377;
 				PRODUCT_BUNDLE_IDENTIFIER = com.lifegood.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -828,6 +1007,15 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		A01F000002000003 /* Build configuration list for PBXNativeTarget "LifeGoodWidgets" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A01F000002000001 /* Debug */,
+				A01F000002000002 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 		A01F000001000003 /* Build configuration list for PBXNativeTarget "LifeGood" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (

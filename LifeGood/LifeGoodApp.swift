@@ -89,6 +89,8 @@ struct LifeGoodApp: App {
                     // 認不得的幣別維持手動值）。放最後、結果不看：開場動畫期間
                     // 網路慢也不擋任何啟動流程，失敗就沿用上次的值。
                     _ = await expenseStore.autoUpdateCurrencyRates()
+                    // [v25.377] 靈動島的今日行程：沒開啟就直接返回，不會做任何事
+                    await DayTimelineController.shared.refresh(store: lifeStore)
                 }
                 .onAppear {
                     BackupManager.shared.createSnapshotIfNeeded(
@@ -110,6 +112,9 @@ struct LifeGoodApp: App {
                         Task {
                             await subscription.refreshStatus()
                             await einvoiceSync.syncIfDue(expenseStore: expenseStore)
+                            // [v25.377] 回到前景就重算時間軸：8 小時到期被系統收掉的
+                            // Live Activity 也會在這裡重新掛上
+                            await DayTimelineController.shared.refresh(store: lifeStore)
                         }
                     }
                 }
