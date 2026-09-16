@@ -168,7 +168,6 @@
 		A01A000002000004 /* DayTimelineIntent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DayTimelineIntent.swift; sourceTree = "<group>"; };
 		A01A000002000005 /* DayTimelineController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DayTimelineController.swift; sourceTree = "<group>"; };
 		A01A000002000006 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
-		A01A000002000007 /* LifeGoodWidgets.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = LifeGoodWidgets.entitlements; sourceTree = "<group>"; };
 		A01A000002000100 /* LifeGoodWidgets.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = LifeGoodWidgets.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		A01A000001000001 /* LifeGoodApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LifeGoodApp.swift; sourceTree = "<group>"; };
 		A01A000001000002 /* Expense.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Expense.swift; sourceTree = "<group>"; };
@@ -310,7 +309,6 @@
 				A01A000002000001 /* LifeGoodWidgetsBundle.swift */,
 				A01A000002000002 /* DayTimelineLiveActivity.swift */,
 				A01A000002000006 /* Info.plist */,
-				A01A000002000007 /* LifeGoodWidgets.entitlements */,
 			);
 			path = LifeGoodWidgets;
 			sourceTree = "<group>";
@@ -738,11 +736,9 @@
 		A01F000002000001 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CLANG_ENABLE_MODULES = YES;
-				CODE_SIGN_ENTITLEMENTS = LifeGoodWidgets/LifeGoodWidgets.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1131;
+				CURRENT_PROJECT_VERSION = 1132;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = LifeGoodWidgets/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "美好人生";
@@ -753,7 +749,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 25.378;
+				MARKETING_VERSION = 25.379;
 				PRODUCT_BUNDLE_IDENTIFIER = com.lifegood.app.widgets;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
@@ -766,11 +762,9 @@
 		A01F000002000002 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CLANG_ENABLE_MODULES = YES;
-				CODE_SIGN_ENTITLEMENTS = LifeGoodWidgets/LifeGoodWidgets.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1131;
+				CURRENT_PROJECT_VERSION = 1132;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = LifeGoodWidgets/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "美好人生";
@@ -781,7 +775,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 25.378;
+				MARKETING_VERSION = 25.379;
 				PRODUCT_BUNDLE_IDENTIFIER = com.lifegood.app.widgets;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
@@ -798,7 +792,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = LifeGood/LifeGood.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1131;
+				CURRENT_PROJECT_VERSION = 1132;
 				DEVELOPMENT_ASSET_PATHS = "\"LifeGood/Preview Content\"";
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -829,7 +823,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 25.378;
+				MARKETING_VERSION = 25.379;
 				PRODUCT_BUNDLE_IDENTIFIER = com.lifegood.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -845,7 +839,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = LifeGood/LifeGood.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1131;
+				CURRENT_PROJECT_VERSION = 1132;
 				DEVELOPMENT_ASSET_PATHS = "\"LifeGood/Preview Content\"";
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -876,7 +870,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 25.378;
+				MARKETING_VERSION = 25.379;
 				PRODUCT_BUNDLE_IDENTIFIER = com.lifegood.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;

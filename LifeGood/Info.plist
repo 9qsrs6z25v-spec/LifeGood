@@ -4,8 +4,6 @@
 <dict>
 	<key>NSSupportsLiveActivities</key>
 	<true/>
-	<key>NSSupportsLiveActivitiesFrequentUpdates</key>
-	<true/>
 	<key>CKSharingSupported</key>
 	<true/>
 </dict>

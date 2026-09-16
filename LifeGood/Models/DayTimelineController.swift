@@ -58,7 +58,6 @@ final class DayTimelineController: ObservableObject {
             stops: stops,
             selectedIndex: defaultIndex(for: stops),
             generatedAt: Date())
-        cacheSnapshot(state)
 
         if let activity = DayTimelineLiveActivity.running {
             await activity.update(ActivityContent(state: state, staleDate: staleDate(stops)))
@@ -179,13 +178,6 @@ final class DayTimelineController: ObservableObject {
         if let i = stops.firstIndex(where: { $0.start <= now && now < $0.end }) { return i }
         if let i = stops.firstIndex(where: { $0.start > now }) { return i }
         return 0
-    }
-
-    /// 也寫一份到 App Group，供未來的鎖定畫面小工具使用
-    private func cacheSnapshot(_ state: DayTimelineAttributes.ContentState) {
-        guard let defaults = DayTimelineAppGroup.defaults,
-              let data = try? JSONEncoder().encode(state) else { return }
-        defaults.set(data, forKey: DayTimelineAppGroup.snapshotKey)
     }
 
     // MARK: - 文字

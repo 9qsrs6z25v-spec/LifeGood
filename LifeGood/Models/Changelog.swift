@@ -13,6 +13,12 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.379", build: 1132, date: "2026/08/19", notes: [
+            "【修正】上架封裝時簽章失敗（Exporting for App Store Distribution failed）。原因是 v25.377 為了「將來要做鎖定畫面小工具」而加了 App Group，但那個小工具根本還不存在——App Group 必須先在 Apple Developer 後台註冊、再掛到兩個 App ID 上，沒做這件事就永遠簽不過。",
+            "【修正】已經把 App Group 整個移除。靈動島的資料本來就是透過即時動態本身傳遞的，不需要 App Group；那是我提前借的債，現在還掉。之後真的要做小工具時再加。",
+            "【修正】順手拿掉擴充功能設定裡指向不存在的主題色、以及用不到的「即時動態頻繁更新」宣告——前者這個 target 沒有素材檔、後者我們是本機更新不走推播，留著只會在審查時被追問。",
+            "【說明】靈動島今日行程的功能完全沒有變動，時間軸、可按的點、詳情都照舊。"
+        ]),
         ChangelogEntry(version: "25.378", build: 1131, date: "2026/08/19", notes: [
             "【修正】編譯錯誤：履歷頁防偽浮水印那道掃光寫成直接對漸層呼叫混合模式，編譯器分不出要用哪一個（ResumeView.swift:59）。漸層同時算「畫面元件」也算「填色樣式」，兩邊剛好都有同名的混合模式方法，外層的 overlay 也同時吃這兩種，四種組合都說得通就無從選起。改成先用矩形把漸層填起來、再套混合模式，只剩一種解讀。畫面完全沒有變化。"
         ]),

@@ -127,16 +127,12 @@ enum DayTimelineFormat {
     }
 }
 
-// MARK: - App Group
-
-enum DayTimelineAppGroup {
-    /// ⚠️ 這個值必須與兩個 target 的 entitlements、以及 Apple Developer 後台註冊的
-    ///    App Group 識別碼完全一致，改了要三個地方一起改。
-    static let identifier = "group.com.lifegood.app"
-
-    static var defaults: UserDefaults? { UserDefaults(suiteName: identifier) }
-
-    /// Live Activity 之外的備援快照：extension 需要在沒有 Activity 的情況下
-    /// （例如未來要做鎖定畫面小工具）也讀得到今天的行程。
-    static let snapshotKey = "day_timeline_snapshot"
-}
+// MARK: - 為什麼這裡沒有 App Group
+//
+// v25.377 曾經加了一個 App Group，只為了把快照多存一份「給未來的鎖定畫面小工具用」。
+// 那個小工具還不存在，卻讓兩個 target 都背上 application-groups entitlement——
+// App Group 必須先在 Apple Developer 後台註冊、並掛到兩個 App ID 上，
+// 否則 App Store 的封裝簽章會直接失敗（v25.379 遇到的就是這件事）。
+//
+// Live Activity 的資料是透過 ActivityAttributes / ContentState 走 ActivityKit 傳遞的，
+// 本來就不需要 App Group。等真的要做小工具時再加，不要提前借債。
