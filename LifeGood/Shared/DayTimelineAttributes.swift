@@ -15,11 +15,14 @@ enum TimelineStopKind: String, Codable, Hashable {
     case meeting
     /// 我的行事曆裡的個人事件
     case personal
+    /// [v25.383] iOS 系統行事曆（EventKit）讀進來的事件
+    case appleCalendar
 
     var label: String {
         switch self {
-        case .meeting:  return "部屬會議"
-        case .personal: return "我的行事曆"
+        case .meeting:       return "部屬會議"
+        case .personal:      return "我的行事曆"
+        case .appleCalendar: return "系統行事曆"
         }
     }
 }

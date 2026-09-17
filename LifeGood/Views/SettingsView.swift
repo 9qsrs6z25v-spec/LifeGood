@@ -272,6 +272,8 @@ struct SettingsView: View {
     /// [v25.377] 靈動島今日行程
     @State private var dayTimelineExpanded = false
     @StateObject private var dayTimeline = DayTimelineController.shared
+    /// [v25.383] 系統行事曆的授權狀態（時間軸的第三個來源）
+    @StateObject private var appleCal = AppleCalendarBridge.shared
     @State private var dataManagementExpanded = false
     @State private var dataStatsExpanded = false
     @State private var restoreExpanded = false
@@ -1094,11 +1096,32 @@ struct SettingsView: View {
             }
             .tint(.orange)
             if dayTimeline.isEnabled {
+                // [v25.383] 系統行事曆要授權才讀得到。沒授權的話時間軸會靜靜地
+                // 少掉一整個來源，使用者不會知道為什麼，所以在這裡講明。
+                if appleCal.authorizationStatus == .notDetermined {
+                    Button {
+                        Task {
+                            await appleCal.requestAccess()
+                            await dayTimeline.refresh(store: lifeStore)
+                        }
+                    } label: {
+                        settingsActionRow(icon: "calendar.badge.plus", color: .green,
+                                          title: "允許讀取系統行事曆",
+                                          subtitle: "才能把 iOS 行事曆的當日事件一起畫上時間軸")
+                    }
+                } else if appleCal.isDenied {
+                    HStack(alignment: .top, spacing: 6) {
+                        Image(systemName: "calendar.badge.exclamationmark")
+                            .font(.caption).foregroundStyle(.orange)
+                        Text(Self.calendarDeniedHint)
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
                 Button {
                     Task { await dayTimeline.refresh(store: lifeStore) }
                 } label: {
                     settingsActionRow(icon: "arrow.clockwise", color: .blue,
-                                      title: "重新整理", subtitle: "立刻依目前的會議重算時間軸")
+                                      title: "重新整理", subtitle: "立刻依目前的行程重算時間軸")
                 }
                 if let err = dayTimeline.lastError {
                     HStack(alignment: .top, spacing: 6) {
@@ -1115,10 +1138,15 @@ struct SettingsView: View {
         }
     }
 
+    private static let calendarDeniedHint =
+        "系統行事曆的讀取權限目前是關閉的，時間軸上不會有 iOS 行事曆的事件。"
+        + "要開啟請到「設定 → 隱私權與安全性 → 行事曆 → LifeGood」。"
+
     /// 說明一次寫成單一字串常數，不要在 Text(...) 裡用 + 串接
     private static let dayTimelineFootnote =
-        "把今天的行程畫成一條時間軸放進靈動島。收錄兩種來源：部屬的會議（橘點）"
-        + "與我的行事曆裡的個人事件（青點），兩者都會展開週期／重複規則。"
+        "把今天的行程畫成一條時間軸放進靈動島。收錄三種來源：部屬的會議（橘點）、"
+        + "我的行事曆裡的個人事件（青點）、iOS 系統行事曆的事件（綠點），"
+        + "週期與重複規則都會展開。"
         + "【長按】靈動島才會展開，軸上每個點點下去就看那一筆的時間、標題與內容；"
         + "【點一下】是開啟 App，會直接跳到「我的行事曆」。"
         + "點與長按的分工是 iOS 定的，所有 App 的即時動態都一樣，沒辦法改。"

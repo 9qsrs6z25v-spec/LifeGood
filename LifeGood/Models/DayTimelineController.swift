@@ -1,6 +1,7 @@
 import Foundation
 import ActivityKit
 import SwiftUI
+import EventKit
 
 // MARK: - 今日行程時間軸 · 主 App 側控制器（v25.377）
 //
@@ -157,13 +158,10 @@ final class DayTimelineController: ObservableObject {
         }
 
         // 2) 我的行事曆：個人事件。occurs(on:) 已經處理好重複規則，
-        //    但它回答的是「今天有沒有」，實際時間要用原始事件的時分套到今天。
+        //    occurrenceDate(on:) 再把原始時分套到今天（與 MyCalendarView 同一組工具）。
         for event in store.personalEvents where event.occurs(on: today, calendar: cal) {
             guard event.durationMinutes > 0 else { continue }   // 全日事件沒有軸上落點
-            let hm = cal.dateComponents([.hour, .minute], from: event.date)
-            guard let start = cal.date(bySettingHour: hm.hour ?? 0,
-                                       minute: hm.minute ?? 0,
-                                       second: 0, of: dayStart) else { continue }
+            let start = event.occurrenceDate(on: today, calendar: cal)
             out.append(TimelineStop(
                 id: Self.stopId("p", event.id, start),
                 title: event.title,
@@ -172,6 +170,30 @@ final class DayTimelineController: ObservableObject {
                 owner: eventOwnerText(event),
                 detail: truncated(event.note),
                 kind: .personal))
+        }
+
+        // 3) [v25.383] iOS 系統行事曆。比照 MyCalendarView：
+        //    已經從 LifeGood 同步出去的事件要排掉，不然同一件事會出現兩次
+        //    （一次是上面的個人事件、一次是它在系統行事曆裡的分身）。
+        let appleCal = AppleCalendarBridge.shared
+        if appleCal.hasAccess {
+            let syncedIds = Set(store.personalEvents.compactMap { $0.ekEventIdentifier })
+            for ev in appleCal.events(forDay: today, calendar: cal)
+            where !syncedIds.contains(ev.eventIdentifier) {
+                guard !ev.isAllDay else { continue }            // 全日事件沒有軸上落點
+                let start = ev.startDate ?? today
+                guard start >= dayStart, start < dayEnd else { continue }
+                let minutes = Int(((ev.endDate ?? start).timeIntervalSince(start)) / 60)
+                out.append(TimelineStop(
+                    id: "e" + String(ev.calendarItemIdentifier.prefix(8))
+                        + String(Int(start.timeIntervalSince1970)),
+                    title: ev.title ?? "",
+                    start: start,
+                    durationMinutes: max(5, minutes),
+                    owner: appleOwnerText(ev),
+                    detail: truncated(ev.notes ?? ""),
+                    kind: .appleCalendar))
+            }
         }
 
         out.sort { $0.start < $1.start }
@@ -228,6 +250,14 @@ final class DayTimelineController: ObservableObject {
     private func eventOwnerText(_ event: PersonalEvent) -> String {
         let place = event.location.trimmingCharacters(in: .whitespacesAndNewlines)
         return place.isEmpty ? event.kind.rawValue : place
+    }
+
+    /// [v25.383] 系統行事曆事件的第二行標籤：有地點顯示地點，
+    /// 沒有就顯示它屬於哪一本行事曆（工作／家庭／訂閱的節日…）
+    private func appleOwnerText(_ event: EKEvent) -> String {
+        let place = (event.location ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if !place.isEmpty { return place }
+        return event.calendar?.title ?? "行事曆"
     }
 
     /// 壓成單行並裁到上限。ContentState 有 4KB 硬上限，長備註必須先砍。
