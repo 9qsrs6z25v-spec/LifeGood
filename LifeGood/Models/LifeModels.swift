@@ -2361,14 +2361,24 @@ struct ManagedEquipment: Identifiable, Codable {
     /// 系統別（自由文字，例：CDA、冰水、廢水；空＝未填）。
     /// 填過的系統別會變成膠囊供快速選擇，並可在部門設備清單點選篩選。
     var system: String
+    /// [v25.384] 製程上游機台：東西從這些機台流過來。比照 Department 的上下游欄位。
+    var upstreamIds: [UUID]
+    /// [v25.384] 製程下游機台：這台的產出流到那些機台去。
+    ///
+    /// ⚠️ 兩邊是互為鏡像的：A 的下游有 B，就代表 B 的上游有 A。
+    ///    這個一致性由 LifeStore.linkEquipment／unlinkEquipment 單點維護，
+    ///    不要在別處直接改這兩個陣列，不然會出現「A 說 B 是下游、B 卻不認 A」的鬼影。
+    var downstreamIds: [UUID]
 
     init(id: UUID = UUID(), name: String = "", note: String = "",
          pmRecords: [EquipmentPMRecord] = [], alarms: [EquipmentAlarm] = [],
-         departmentId: UUID? = nil, ownerId: UUID? = nil, system: String = "") {
+         departmentId: UUID? = nil, ownerId: UUID? = nil, system: String = "",
+         upstreamIds: [UUID] = [], downstreamIds: [UUID] = []) {
         self.id = id; self.name = name; self.note = note
         self.pmRecords = pmRecords; self.alarms = alarms
         self.departmentId = departmentId; self.ownerId = ownerId
         self.system = system
+        self.upstreamIds = upstreamIds; self.downstreamIds = downstreamIds
     }
 
     init(from decoder: Decoder) throws {
@@ -2381,8 +2391,13 @@ struct ManagedEquipment: Identifiable, Codable {
         departmentId = try? c.decodeIfPresent(UUID.self, forKey: .departmentId)
         ownerId = try? c.decodeIfPresent(UUID.self, forKey: .ownerId)
         system = (try? c.decodeIfPresent(String.self, forKey: .system)) ?? ""
+        upstreamIds = (try? c.decodeIfPresent([UUID].self, forKey: .upstreamIds)) ?? []
+        downstreamIds = (try? c.decodeIfPresent([UUID].self, forKey: .downstreamIds)) ?? []
     }
-    private enum CodingKeys: String, CodingKey { case id, name, note, pmRecords, alarms, departmentId, ownerId, system }
+    private enum CodingKeys: String, CodingKey {
+        case id, name, note, pmRecords, alarms, departmentId, ownerId, system
+        case upstreamIds, downstreamIds
+    }
 }
 
 /// 單筆預防保養（PM）記錄。

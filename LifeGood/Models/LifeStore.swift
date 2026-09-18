@@ -1716,6 +1716,75 @@ class LifeStore: ObservableObject {
 
     func deleteEquipment(id: UUID) {
         equipmentPool.removeAll { $0.id == id }
+        // [v25.384] 別台機台還指著這台的上下游關係要一起清掉，
+        // 不然清單上會出現點不開的鬼影
+        for i in equipmentPool.indices {
+            equipmentPool[i].upstreamIds.removeAll { $0 == id }
+            equipmentPool[i].downstreamIds.removeAll { $0 == id }
+        }
+    }
+
+    // MARK: - [v25.384] 機台上下游
+
+    func equipment(id: UUID) -> ManagedEquipment? {
+        equipmentPool.first { $0.id == id }
+    }
+
+    /// 建立上下游關係。**兩邊一起寫**：把 other 設成 id 的下游，
+    /// 就等於把 id 設成 other 的上游——只寫一邊的話，從另一台點進去會看不到關係。
+    /// 這是唯一該改 upstreamIds／downstreamIds 的地方。
+    func linkEquipment(_ id: UUID, with otherId: UUID, asDownstream: Bool) {
+        guard id != otherId else { return }            // 自己不能是自己的上下游
+        guard let a = equipmentPool.firstIndex(where: { $0.id == id }),
+              let b = equipmentPool.firstIndex(where: { $0.id == otherId }) else { return }
+        isLoading = true
+        defer { isLoading = false }
+        // 先把兩個方向的舊關係清掉，避免同一對機台同時是上游又是下游
+        removeLink(a, b)
+        if asDownstream {
+            equipmentPool[a].downstreamIds.append(otherId)
+            equipmentPool[b].upstreamIds.append(id)
+        } else {
+            equipmentPool[a].upstreamIds.append(otherId)
+            equipmentPool[b].downstreamIds.append(id)
+        }
+        save()
+    }
+
+    /// 解除兩台之間的關係（不分方向）
+    func unlinkEquipment(_ id: UUID, from otherId: UUID) {
+        guard let a = equipmentPool.firstIndex(where: { $0.id == id }),
+              let b = equipmentPool.firstIndex(where: { $0.id == otherId }) else { return }
+        isLoading = true
+        defer { isLoading = false }
+        removeLink(a, b)
+        save()
+    }
+
+    /// 清掉 a、b 兩台之間所有方向的連結。呼叫端負責 isLoading 與 save。
+    private func removeLink(_ a: Int, _ b: Int) {
+        let aId = equipmentPool[a].id
+        let bId = equipmentPool[b].id
+        equipmentPool[a].upstreamIds.removeAll { $0 == bId }
+        equipmentPool[a].downstreamIds.removeAll { $0 == bId }
+        equipmentPool[b].upstreamIds.removeAll { $0 == aId }
+        equipmentPool[b].downstreamIds.removeAll { $0 == aId }
+    }
+
+    /// 某台機台的上游／下游清單（已解析成實體，查不到的 id 自動略過）
+    func relatedEquipment(of id: UUID, downstream: Bool) -> [ManagedEquipment] {
+        guard let eq = equipment(id: id) else { return [] }
+        let ids = downstream ? eq.downstreamIds : eq.upstreamIds
+        return ids.compactMap { rid in equipmentPool.first { $0.id == rid } }
+    }
+
+    /// 還可以被選來當上下游的機台：排除自己與已經連上的
+    func equipmentLinkCandidates(for id: UUID) -> [ManagedEquipment] {
+        guard let eq = equipment(id: id) else { return [] }
+        let taken = Set(eq.upstreamIds + eq.downstreamIds + [id])
+        return equipmentPool
+            .filter { !taken.contains($0.id) }
+            .sorted { ($0.name.isEmpty ? "未命名設備" : $0.name) < ($1.name.isEmpty ? "未命名設備" : $1.name) }
     }
 
     /// 指派／解除機台負責人（ownerId 為 nil 即解除）。只動負責人欄位，PM／警報記錄不動。

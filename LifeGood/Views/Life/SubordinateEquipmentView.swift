@@ -925,6 +925,13 @@ struct EquipmentDetailCard: View {
     @State private var showEditor = false
     /// [v25.303] 時間軸右上＋的快速新增（免進編輯畫面）
     @State private var quickAddKind: TimelineQuickAddKind?
+    /// [v25.384] 點上下游機台時要跳去看哪一台
+    @State private var jumpTarget: EquipmentJump?
+
+    /// 明確寫出初始化：本型別有 private @State，且被 OrganizationView 跨檔案建立
+    init(equipmentId: UUID) {
+        self.equipmentId = equipmentId
+    }
 
     private var equipment: ManagedEquipment? {
         lifeStore.equipmentPool.first { $0.id == equipmentId }
@@ -947,6 +954,10 @@ struct EquipmentDetailCard: View {
                             kpiRow(eq)
                             noteCard(eq)
                             timelineCard(eq)
+                            // [v25.384] 關聯機台（上下游）
+                            EquipmentRelationCard(equipmentId: eq.id) { targetId in
+                                jumpTarget = EquipmentJump(id: targetId)
+                            }
                         }
                         .padding(.vertical)
                     }
@@ -971,6 +982,12 @@ struct EquipmentDetailCard: View {
             }
             .sheet(item: $quickAddKind) { kind in
                 EquipmentTimelineQuickAddSheet(equipmentId: equipmentId, kind: kind)
+            }
+            // [v25.384] 點上下游機台就開那一台的詳情。
+            // 用 sheet 而不是 NavigationLink：這張卡本身常常已經是別人推出來的 sheet，
+            // 再往同一個 stack 推會讓「關閉」的語意變得很奇怪。
+            .sheet(item: $jumpTarget) { jump in
+                EquipmentDetailCard(equipmentId: jump.id)
             }
         }
     }
@@ -1447,5 +1464,312 @@ struct AlarmResponseDisclosure: View {
                 .foregroundStyle(value.isEmpty ? Color(.tertiaryLabel) : .primary)
                 .fixedSize(horizontal: false, vertical: true)
         }
+    }
+}
+
+// MARK: - [v25.384] 關聯機台（製程上下游）
+
+/// 跳去看別台機台的目標
+struct EquipmentJump: Identifiable {
+    let id: UUID
+}
+
+/// 機台詳情頁的「關聯機台」章節。
+/// 上游＝東西從那些機台流過來；下游＝這台的產出流到那些機台去。
+/// 兩邊的關係是互為鏡像的（見 LifeStore.linkEquipment），所以從任一台點進去都看得到對方。
+struct EquipmentRelationCard: View {
+    @EnvironmentObject var lifeStore: LifeStore
+
+    let equipmentId: UUID
+    /// 點某一台關聯機台時呼叫，由外層決定怎麼開
+    let onOpen: (UUID) -> Void
+
+    @State private var picking: EquipmentLinkDirection?
+    @State private var removing: EquipmentJump?
+
+    init(equipmentId: UUID, onOpen: @escaping (UUID) -> Void) {
+        self.equipmentId = equipmentId
+        self.onOpen = onOpen
+    }
+
+    private var upstream: [ManagedEquipment] {
+        lifeStore.relatedEquipment(of: equipmentId, downstream: false)
+    }
+    private var downstream: [ManagedEquipment] {
+        lifeStore.relatedEquipment(of: equipmentId, downstream: true)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            header
+            group(.upstream, items: upstream)
+            Divider().padding(.leading, 16)
+            group(.downstream, items: downstream)
+            if upstream.isEmpty && downstream.isEmpty {
+                emptyHint
+            }
+        }
+        .background(Color(.systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 18))
+        .overlay(RoundedRectangle(cornerRadius: 18)
+            .stroke(Color(.separator).opacity(0.12), lineWidth: 0.75))
+        .shadow(color: .black.opacity(0.05), radius: 8, x: 0, y: 3)
+        .padding(.horizontal)
+        .sheet(item: $picking) { direction in
+            EquipmentLinkPicker(equipmentId: equipmentId, direction: direction)
+        }
+        .confirmationDialog("解除關聯", isPresented: Binding(
+            get: { removing != nil },
+            set: { if !$0 { removing = nil } }
+        ), presenting: removing) { target in
+            Button("解除關聯", role: .destructive) {
+                lifeStore.unlinkEquipment(equipmentId, from: target.id)
+                removing = nil
+            }
+            Button("取消", role: .cancel) { removing = nil }
+        } message: { target in
+            Text(unlinkMessage(target.id))
+        }
+    }
+
+    // MARK: 版塊
+
+    private var header: some View {
+        HStack(spacing: 8) {
+            Capsule()
+                .fill(LinearGradient(colors: [.teal, .teal.opacity(0.5)],
+                                     startPoint: .top, endPoint: .bottom))
+                .frame(width: 4, height: 16)
+            Text("關聯機台").font(.subheadline.weight(.semibold))
+            Text("\(upstream.count + downstream.count)")
+                .font(.system(size: 10, weight: .bold))
+                .padding(.horizontal, 6).padding(.vertical, 2)
+                .background(Color.teal.opacity(0.13)).foregroundStyle(.teal)
+                .clipShape(Capsule())
+            Spacer()
+        }
+        .padding(.horizontal, 16).padding(.top, 14).padding(.bottom, 10)
+    }
+
+    @ViewBuilder
+    private func group(_ direction: EquipmentLinkDirection, items: [ManagedEquipment]) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 6) {
+                Image(systemName: direction.icon)
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(direction.color)
+                Text(direction.title)
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(direction.color)
+                Text(direction.hint)
+                    .font(.system(size: 10))
+                    .foregroundStyle(.tertiary)
+                Spacer()
+                Button {
+                    picking = direction
+                } label: {
+                    Image(systemName: "plus.circle.fill")
+                        .font(.system(size: 17))
+                        .foregroundStyle(direction.color)
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.horizontal, 16).padding(.vertical, 8)
+
+            ForEach(items) { eq in
+                relatedRow(eq, direction: direction)
+            }
+        }
+    }
+
+    private func relatedRow(_ eq: ManagedEquipment, direction: EquipmentLinkDirection) -> some View {
+        Button {
+            onOpen(eq.id)
+        } label: {
+            HStack(spacing: 10) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(direction.color.opacity(0.14))
+                        .frame(width: 30, height: 30)
+                    Image(systemName: "gearshape.2.fill")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(direction.color)
+                }
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(eq.name.isEmpty ? "未命名設備" : eq.name)
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                    Text(metaLine(eq))
+                        .font(.caption2).foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(.horizontal, 16).padding(.vertical, 9)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        // 這裡不是 List，.swipeActions 掛上去不會有任何作用（也不會報錯），
+        // 所以解除關聯走長按選單——這是非 List 列在 iOS 上的標準做法。
+        .contextMenu {
+            Button("開啟這台") { onOpen(eq.id) }
+            Button("解除關聯", role: .destructive) { removing = EquipmentJump(id: eq.id) }
+        }
+    }
+
+    private var emptyHint: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "point.3.connected.trianglepath.dotted")
+                .font(.system(size: 13, weight: .medium)).foregroundStyle(.tertiary)
+            Text("還沒有設定上下游。按右邊的＋加上去，設好之後警報時可以直接點過去看相鄰機台的狀況；長按已關聯的機台可以解除。")
+                .font(.caption).foregroundStyle(.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 16).padding(.bottom, 14)
+    }
+
+    // MARK: 字串（在 ViewBuilder 外組好）
+
+    private func metaLine(_ eq: ManagedEquipment) -> String {
+        var parts: [String] = []
+        if !eq.system.isEmpty { parts.append(eq.system) }
+        if let did = eq.departmentId,
+           let d = lifeStore.departments.first(where: { $0.id == did }) {
+            let n = d.name.isEmpty ? d.code : d.name
+            if !n.isEmpty { parts.append(n) }
+        }
+        parts.append("PM \(eq.pmRecords.count)")
+        parts.append("警報 \(eq.alarms.count)")
+        return parts.joined(separator: "・")
+    }
+
+    private func unlinkMessage(_ id: UUID) -> String {
+        let name = lifeStore.equipment(id: id)?.name ?? ""
+        let shown = name.isEmpty ? "這台機台" : name
+        return "要解除與「\(shown)」的上下游關係嗎？兩邊的關係會一起移除，機台本身與它的 PM／警報記錄都不會被刪掉。"
+    }
+}
+
+/// 上游／下游
+enum EquipmentLinkDirection: String, Identifiable {
+    case upstream, downstream
+    var id: String { rawValue }
+
+    var title: String { self == .upstream ? "上游機台" : "下游機台" }
+    var hint: String { self == .upstream ? "東西從這裡流過來" : "產出流到這裡去" }
+    var icon: String { self == .upstream ? "arrow.down.to.line" : "arrow.right.to.line" }
+    var color: Color { self == .upstream ? .indigo : .orange }
+    var isDownstream: Bool { self == .downstream }
+}
+
+// MARK: - 選擇要關聯的機台
+
+/// 從既有機台池挑一台，或直接新增一台再關聯。
+struct EquipmentLinkPicker: View {
+    @EnvironmentObject var lifeStore: LifeStore
+    @Environment(\.dismiss) private var dismiss
+
+    let equipmentId: UUID
+    let direction: EquipmentLinkDirection
+
+    @State private var query = ""
+    @State private var showNewEquipment = false
+    /// 新增機台前記下目前的機台池，存檔後比對出新的那一台並自動關聯
+    @State private var idsBeforeAdd: Set<UUID> = []
+
+    init(equipmentId: UUID, direction: EquipmentLinkDirection) {
+        self.equipmentId = equipmentId
+        self.direction = direction
+    }
+
+    private var candidates: [ManagedEquipment] {
+        let all = lifeStore.equipmentLinkCandidates(for: equipmentId)
+        let q = query.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !q.isEmpty else { return all }
+        return all.filter {
+            $0.name.lowercased().contains(q)
+                || $0.system.lowercased().contains(q)
+                || $0.note.lowercased().contains(q)
+        }
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    Button {
+                        idsBeforeAdd = Set(lifeStore.equipmentPool.map(\.id))
+                        showNewEquipment = true
+                    } label: {
+                        Label("新增一台機台並關聯", systemImage: "plus.circle.fill")
+                            .foregroundStyle(direction.color)
+                    }
+                } footer: {
+                    Text(Self.footnote(direction))
+                }
+
+                Section {
+                    if candidates.isEmpty {
+                        Text(query.isEmpty ? "沒有可以關聯的機台了" : "找不到符合的機台")
+                            .font(.caption).foregroundStyle(.secondary)
+                    } else {
+                        ForEach(candidates) { eq in
+                            Button {
+                                lifeStore.linkEquipment(equipmentId, with: eq.id,
+                                                        asDownstream: direction.isDownstream)
+                                dismiss()
+                            } label: {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(eq.name.isEmpty ? "未命名設備" : eq.name)
+                                        .foregroundStyle(.primary)
+                                    if !eq.system.isEmpty {
+                                        Text(eq.system).font(.caption2).foregroundStyle(.secondary)
+                                    }
+                                }
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                } header: {
+                    Text("從既有機台選擇")
+                }
+            }
+            .searchable(text: $query, prompt: "搜尋機台名稱、系統別")
+            .navigationTitle("選擇" + direction.title)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) { Button("取消") { dismiss() } }
+            }
+            .sheet(isPresented: $showNewEquipment, onDismiss: linkNewlyCreated) {
+                EquipmentEditorSheet(
+                    editing: nil,
+                    defaultDepartmentId: lifeStore.equipment(id: equipmentId)?.departmentId,
+                    defaultOwnerId: lifeStore.equipment(id: equipmentId)?.ownerId)
+            }
+        }
+    }
+
+    /// 新增畫面關掉後，找出剛剛多出來的那一台並自動建立關聯。
+    /// EquipmentEditorSheet 沒有回傳新機台 id 的管道，用「存檔前後的差集」是
+    /// 不動它的介面就能做到的最小改法；使用者按取消就不會有差集，什麼都不會發生。
+    private func linkNewlyCreated() {
+        let added = lifeStore.equipmentPool.map(\.id).filter { !idsBeforeAdd.contains($0) }
+        idsBeforeAdd = []
+        guard let newId = added.first else { return }
+        lifeStore.linkEquipment(equipmentId, with: newId, asDownstream: direction.isDownstream)
+        dismiss()
+    }
+
+    private static func footnote(_ direction: EquipmentLinkDirection) -> String {
+        direction == .upstream
+            ? "上游＝東西從那台流到這台。設定後兩邊都看得到關係，從那一台點進來也會顯示這台是它的下游。"
+            : "下游＝這台的產出流到那台去。設定後兩邊都看得到關係，從那一台點進來也會顯示這台是它的上游。"
     }
 }
