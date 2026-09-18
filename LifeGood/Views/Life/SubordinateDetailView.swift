@@ -1314,6 +1314,14 @@ struct SubordinateDetailView: View {
             chips.append(ItemChip(id: "sideRole", text: taskSideRoleName(back),
                                   color: .indigo, icon: "link"))
         }
+        // [v25.385] 手動指定的關聯機台（與警報自動掛的來源機台分開，圖示也不同）
+        if let eq = t.linkedEquipmentId.flatMap({ id in
+            lifeStore.equipmentPool.first { $0.id == id }
+        }) {
+            chips.append(ItemChip(id: "linkedEq",
+                                  text: eq.name.isEmpty ? "未命名設備" : eq.name,
+                                  color: .teal, icon: "gearshape.2.fill"))
+        }
         // 機台警報任務：機台與系統別膠囊，點一下暫時篩選（再點取消）
         if let info = taskLinkInfo(t) {
             let eqActive = taskFilterEquipmentId == info.equipmentId
@@ -3585,6 +3593,29 @@ struct TaskEditorSheet: View {
     @State private var scoreValue = ScoreWeights.actTask
     /// [v25.325] 應做未作為（缺失）：開啟時任務轉為扣分事項、分數自動設 -1
     @State private var isDereliction = false
+    /// [v25.385] 手動指定的關聯機台
+    @State private var linkedEquipmentId: UUID?
+
+    /// 機台選單的候選：這位部屬負責的機台排前面，其餘照名稱排。
+    /// 最常見的情況是「這件事跟我自己顧的機台有關」，不該從整個機台池裡慢慢找。
+    private var equipmentOptions: [ManagedEquipment] {
+        let byName: (ManagedEquipment, ManagedEquipment) -> Bool = {
+            ($0.name.isEmpty ? "未命名設備" : $0.name)
+                .localizedStandardCompare($1.name.isEmpty ? "未命名設備" : $1.name) == .orderedAscending
+        }
+        let mine = lifeStore.equipmentPool.filter { $0.ownerId == subordinateId }.sorted(by: byName)
+        let others = lifeStore.equipmentPool.filter { $0.ownerId != subordinateId }.sorted(by: byName)
+        return mine + others
+    }
+
+    private func equipmentPickerLabel(_ eq: ManagedEquipment) -> String {
+        let name = eq.name.isEmpty ? "未命名設備" : eq.name
+        return eq.system.isEmpty ? name : name + "（" + eq.system + "）"
+    }
+
+    private static let equipmentPickerFootnote =
+        "把任務掛到某台機台上，之後在任務列表與任務卡片都會顯示是哪一台。"
+        + "這位部屬負責的機台排在選單最前面。與警報自動掛上的任務不同，指定機台不需要回報處理措施。"
 
     /// 機台警報任務的來源機台顯示（優先現查機台池，機台被刪則用連結快照）
     private func equipmentDisplay(_ link: EquipmentAlarmLink) -> (name: String, system: String) {
@@ -3698,6 +3729,22 @@ struct TaskEditorSheet: View {
                         Text("儲存後此任務會移交給所選人員。")
                     }
                 }
+                // [v25.385] 手動指定關聯機台。警報自動掛的任務已經有來源機台了，
+                // 那一種走下面的「警報處理回報」，這裡就不再重複問一次。
+                if editing?.equipmentLink == nil {
+                    Section {
+                        Picker("關聯機台", selection: $linkedEquipmentId) {
+                            Text("不指定").tag(nil as UUID?)
+                            ForEach(equipmentOptions) { eq in
+                                Text(equipmentPickerLabel(eq)).tag(eq.id as UUID?)
+                            }
+                        }
+                    } header: {
+                        editorSectionHeader("關聯機台", icon: "gearshape.2.fill", tint: .teal)
+                    } footer: {
+                        Text(Self.equipmentPickerFootnote)
+                    }
+                }
                 // 機台警報任務：顯示來源機台並要求回報處理措施與回復結果
                 if let link = editing?.equipmentLink {
                     Section {
@@ -3770,6 +3817,10 @@ struct TaskEditorSheet: View {
                     responseAction = e.responseAction; responseResult = e.responseResult
                     scoreValue = e.customScore ?? ScoreWeights.actTask
                     isDereliction = e.isDereliction
+                    // 機台可能已經被刪掉，帶回來之前先確認它還在，不然選單會顯示空白
+                    linkedEquipmentId = e.linkedEquipmentId.flatMap { id in
+                        lifeStore.equipmentPool.contains { $0.id == id } ? id : nil
+                    }
                     if let d = e.dueDate { hasDueDate = true; dueDate = d }
                 } else {
                     // 新任務：預設時間用排程時段（整點/半點，過 18:00 則隔天 09:30）
@@ -3796,6 +3847,7 @@ struct TaskEditorSheet: View {
             sideRoleLink: editing?.sideRoleLink,
             reminderId: editing?.reminderId,
             equipmentLink: editing?.equipmentLink,
+            linkedEquipmentId: linkedEquipmentId,
             responseAction: responseAction.trimmingCharacters(in: .whitespacesAndNewlines),
             responseResult: responseResult.trimmingCharacters(in: .whitespacesAndNewlines),
             // 等於全域預設＝視同沒自訂（存 nil，進階設定調整權重時跟著變）；
@@ -4875,6 +4927,12 @@ struct SubordinateItemCard: View {
             if let info = cardEquipmentInfo(t.equipmentLink) {
                 lines.append("⚙️ 來源機台：\(info.name)" + (info.system.isEmpty ? "" : "（\(info.system)）"))
             }
+            if let eq = t.linkedEquipmentId.flatMap({ id in
+                lifeStore.equipmentPool.first { $0.id == id }
+            }) {
+                let n = eq.name.isEmpty ? "未命名設備" : eq.name
+                lines.append("⚙️ 關聯機台：\(n)" + (eq.system.isEmpty ? "" : "（\(eq.system)）"))
+            }
             lines.append("🗓 任務日期：\(fmt(t.date))")
             if let due = t.dueDate { lines.append("⏰ 截止日期：\(fmt(due))") }
             if t.isCompleted, let at = t.completedAt { lines.append("✅ 完成時間：\(fmt(at))") }
@@ -5033,6 +5091,13 @@ struct SubordinateItemCard: View {
             field("任務分數", taskScoreText(t))
             if let info = cardEquipmentInfo(t.equipmentLink) {
                 field("來源機台", info.name + (info.system.isEmpty ? "" : "（\(info.system)）"))
+            }
+            // [v25.385] 手動指定的關聯機台
+            if let eq = t.linkedEquipmentId.flatMap({ id in
+                lifeStore.equipmentPool.first { $0.id == id }
+            }) {
+                let n = eq.name.isEmpty ? "未命名設備" : eq.name
+                field("關聯機台", n + (eq.system.isEmpty ? "" : "（\(eq.system)）"))
             }
             field("任務日期", fmt(t.date))
             if let due = t.dueDate { field("截止日期", fmt(due)) }

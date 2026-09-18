@@ -510,6 +510,8 @@ struct EquipmentEditorSheet: View {
     @State private var pmRecords: [EquipmentPMRecord] = []
     @State private var alarms: [EquipmentAlarm] = []
     @State private var isSaving = false
+    /// [v25.385] 正在挑上游還是下游
+    @State private var linkPicking: EquipmentLinkDirection?
 
     /// 填寫過的系統別膠囊（全機台池去重、依名稱排序、上限 12）
     private var systemSuggestions: [String] {
@@ -704,6 +706,19 @@ struct EquipmentEditorSheet: View {
                     Text("機台有負責人時，新增的警報會自動掛到負責人的任務欄位（預設 3 天內處理，可再調整截止時間，並需回報處理措施與回復結果）。")
                 }
 
+                // [v25.385] 上下游。只有既有機台才給編輯——新機台還沒有 id，
+                // 關係無從建立；存檔之後在詳情頁或回來這裡再設。
+                if let eq = editing, let live = lifeStore.equipment(id: eq.id) {
+                    Section {
+                        linkRows(live, direction: .upstream)
+                        linkRows(live, direction: .downstream)
+                    } header: {
+                        editorSectionHeader("關聯機台（上下游）", icon: "point.3.connected.trianglepath.dotted", tint: .teal)
+                    } footer: {
+                        Text(Self.linkFootnote)
+                    }
+                }
+
                 Section {
                     TextField("位置、型號、保養注意事項等（選填）", text: $note, axis: .vertical)
                         .lineLimit(2...8)
@@ -747,6 +762,12 @@ struct EquipmentEditorSheet: View {
                     ownerId = defaultOwnerId
                 }
             }
+            // [v25.385] 挑上下游機台
+            .sheet(item: $linkPicking) { direction in
+                if let e = editing {
+                    EquipmentLinkPicker(equipmentId: e.id, direction: direction)
+                }
+            }
         }
     }
 
@@ -766,18 +787,79 @@ struct EquipmentEditorSheet: View {
         .buttonStyle(.borderless)
     }
 
+    // MARK: - [v25.385] 上下游列
+
+    /// 這一段刻意**不進 @State**：關係由 LifeStore.linkEquipment 兩邊一起寫、
+    /// 立刻生效（與 DeptManagerPicker 的即時寫入模式同一套）。
+    /// 如果照表單其他欄位的做法先放進 @State、按儲存才寫回，
+    /// 就沒辦法同時更新「對方那一台」的鏡像欄位。
+    @ViewBuilder
+    private func linkRows(_ eq: ManagedEquipment, direction: EquipmentLinkDirection) -> some View {
+        let items = lifeStore.relatedEquipment(of: eq.id, downstream: direction.isDownstream)
+        HStack(spacing: 6) {
+            Image(systemName: direction.icon)
+                .font(.system(size: 11, weight: .bold)).foregroundStyle(direction.color)
+            Text(direction.title).font(.system(size: 12, weight: .bold))
+                .foregroundStyle(direction.color)
+            Spacer()
+            Button {
+                linkPicking = direction
+            } label: {
+                Image(systemName: "plus.circle.fill")
+                    .font(.system(size: 17)).foregroundStyle(direction.color)
+            }
+            .buttonStyle(.plain)
+        }
+        if items.isEmpty {
+            Text("未設定").font(.caption).foregroundStyle(.tertiary)
+        } else {
+            ForEach(items) { item in
+                HStack(spacing: 8) {
+                    Image(systemName: "gearshape.2.fill")
+                        .font(.system(size: 11)).foregroundStyle(direction.color)
+                    Text(item.name.isEmpty ? "未命名設備" : item.name)
+                        .font(.subheadline)
+                    if !item.system.isEmpty {
+                        Text(item.system).font(.caption2).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Button(role: .destructive) {
+                        lifeStore.unlinkEquipment(eq.id, from: item.id)
+                    } label: {
+                        Image(systemName: "minus.circle.fill").foregroundStyle(.red)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+    }
+
+    private static let linkFootnote =
+        "上游＝東西從那台流過來；下游＝這台的產出流到那台去。"
+        + "這一段是按下去就立刻生效（不用等儲存），因為關係要同時寫進對方那一台——"
+        + "設好之後從對方點進來也會看到這台。"
+
     private func save() {
         guard !isSaving else { return }
         isSaving = true
+        let id = editing?.id ?? UUID()
+        // [v25.385] 上下游關係不是這個表單在管的（它由 LifeStore.linkEquipment
+        // 兩邊一起寫），但存檔是「重建一個 ManagedEquipment 再覆蓋」——
+        // 不把關係帶回去就會被這次存檔整個抹掉。
+        // 而且要從 store 現撈，不能用 editing 的快照：表單開著的時候，
+        // 下方的關聯區塊可能已經改過關係了。
+        let live = lifeStore.equipment(id: id)
         let eq = ManagedEquipment(
-            id: editing?.id ?? UUID(),
+            id: id,
             name: name.trimmingCharacters(in: .whitespaces),
             note: note.trimmingCharacters(in: .whitespaces),
             pmRecords: pmRecords,
             alarms: alarms,
             departmentId: departmentId,
             ownerId: ownerId,
-            system: system.trimmingCharacters(in: .whitespaces)
+            system: system.trimmingCharacters(in: .whitespaces),
+            upstreamIds: live?.upstreamIds ?? [],
+            downstreamIds: live?.downstreamIds ?? []
         )
         // 這次編輯新加的警報（編輯前不存在的 id）→ 自動掛到負責人的任務欄位
         let previousAlarmIds = Set((editing?.alarms ?? []).map(\.id))

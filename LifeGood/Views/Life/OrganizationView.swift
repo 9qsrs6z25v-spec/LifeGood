@@ -779,6 +779,8 @@ struct DepartmentDetailView: View {
     @State private var showManagerPicker = false
     @State private var addingEquipment = false
     @State private var viewingEquipment: ManagedEquipment?
+    /// [v25.385] 哪些機台展開了下游群組
+    @State private var expandedEquipment: Set<UUID> = []
     /// 設備清單暫時篩選：點負責人膠囊只看那個人、點系統膠囊只看該系統（可同時）
     @State private var eqFilterOwnerId: UUID?
     @State private var eqFilterSystem: String?
@@ -1141,9 +1143,13 @@ struct DepartmentDetailView: View {
                 }
                 .padding(.horizontal).padding(.bottom, 14)
             } else {
-                let lastId = equipments.last?.id
-                ForEach(equipments) { eq in
+                // [v25.385] 下游機台收進上游底下（比照廠區據點的重大決議）
+                let visibleIds = Set(equipments.map(\.id))
+                let roots = rootEquipments(equipments, within: visibleIds)
+                let lastId = roots.last?.id
+                ForEach(roots) { eq in
                     equipmentRow(eq)
+                    downstreamGroup(eq, within: visibleIds)
                     if eq.id != lastId {
                         Rectangle().fill(Color(.separator).opacity(0.20))
                             .frame(height: 0.5).padding(.leading, 60)
@@ -1190,6 +1196,115 @@ struct DepartmentDetailView: View {
 
     // 主體點按開機台詳情卡片（onTapGesture 而非整列 Button，讓內層負責人／系統
     // 膠囊 Button 可以各自吃掉自己的點擊——比照部屬總覽 personChip 的巢狀寫法）
+    // MARK: - [v25.385] 上下游巢狀
+
+    /// 最外層要列出哪些機台：有上游、而且那個上游也在這份清單裡的，收進上游底下。
+    ///
+    /// 兩個必須守住的例外：
+    /// ① 上游在別的部門、或被篩選條件擋掉時，這台仍然留在最外層——
+    ///    否則它會從整份清單裡憑空消失，使用者只會覺得機台不見了。
+    /// ② A→B→A 這種環會讓每一台都「有上游」，roots 變成空的、整份清單消失。
+    ///    偵測到就退回全部平鋪。
+    private func rootEquipments(_ equipments: [ManagedEquipment],
+                                within ids: Set<UUID>) -> [ManagedEquipment] {
+        let roots = equipments.filter { eq in
+            !eq.upstreamIds.contains(where: { ids.contains($0) })
+        }
+        return roots.isEmpty ? equipments : roots
+    }
+
+    /// 某台機台底下的下游群組：一顆可收合的膠囊，展開後是縮排的子機台列。
+    /// 只做一層——再深的鏈從子機台點進去看，避免無限巢狀與環狀關係打架。
+    @ViewBuilder
+    private func downstreamGroup(_ eq: ManagedEquipment, within ids: Set<UUID>) -> some View {
+        let children = eq.downstreamIds
+            .compactMap { cid in lifeStore.equipmentPool.first { $0.id == cid } }
+            .filter { ids.contains($0.id) }
+        if !children.isEmpty {
+            let isOpen = expandedEquipment.contains(eq.id)
+            VStack(alignment: .leading, spacing: 5) {
+                Button {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
+                        if isOpen { expandedEquipment.remove(eq.id) }
+                        else { expandedEquipment.insert(eq.id) }
+                    }
+                } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: "arrow.turn.down.right")
+                            .font(.system(size: 9, weight: .bold))
+                        Text("下游機台 \(children.count) 台")
+                            .font(.system(size: 10, weight: .bold))
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 8, weight: .bold))
+                            .rotationEffect(.degrees(isOpen ? 90 : 0))
+                    }
+                    .padding(.horizontal, 7).padding(.vertical, 3)
+                    .background(Color.orange.opacity(0.12), in: Capsule())
+                    .overlay(Capsule().stroke(Color.orange.opacity(0.22), lineWidth: 0.6))
+                    .foregroundStyle(.orange)
+                    .contentShape(Capsule())
+                }
+                .buttonStyle(.plain)
+
+                if isOpen {
+                    VStack(alignment: .leading, spacing: 0) {
+                        ForEach(children) { child in
+                            downstreamRow(child)
+                        }
+                    }
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+                }
+            }
+            // 對齊上層的文字起點：左邊距 16 ＋ 圖示 36 ＋ 間距 12
+            .padding(.leading, 64)
+            .padding(.trailing, 16)
+            .padding(.bottom, 8)
+        }
+    }
+
+    /// 縮排的子機台列。直接點就開那一台的詳情，不用先展開再按動作。
+    private func downstreamRow(_ eq: ManagedEquipment) -> some View {
+        Button {
+            viewingEquipment = eq
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "gearshape.2.fill")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.orange)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(eq.name.isEmpty ? "未命名設備" : eq.name)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                    Text(downstreamMeta(eq))
+                        .font(.system(size: 9))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(.vertical, 5)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// 字串在 ViewBuilder 外組好
+    private func downstreamMeta(_ eq: ManagedEquipment) -> String {
+        var parts: [String] = []
+        if !eq.system.isEmpty { parts.append(eq.system) }
+        parts.append("PM \(eq.pmRecords.count)")
+        parts.append("警報 \(eq.alarms.count)")
+        if let oid = eq.ownerId,
+           let n = lifeStore.subordinates.first(where: { $0.id == oid })?.name, !n.isEmpty {
+            parts.append(n)
+        }
+        return parts.joined(separator: "・")
+    }
+
     private func equipmentRow(_ eq: ManagedEquipment) -> some View {
         HStack(spacing: 12) {
             ZStack {

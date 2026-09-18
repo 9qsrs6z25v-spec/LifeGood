@@ -2087,6 +2087,11 @@ struct SubordinateTask: Identifiable, Codable {
     var reminderId: String?
     /// 機台警報任務連結（警報發生自動掛到負責人任務）；nil＝一般任務
     var equipmentLink: EquipmentAlarmLink?
+    /// [v25.385] 手動指定的關聯機台。與 equipmentLink 分開是刻意的：
+    /// 那個代表「這是警報自動掛的任務，要回報處理措施與回復結果」，
+    /// 這個只是「這件事跟哪台機台有關」，不觸發任何回報要求。
+    /// 機台被刪除時這個 id 會查不到，顯示端自動略過。
+    var linkedEquipmentId: UUID?
     /// 警報處理措施（機台警報任務需回報；一般任務不顯示此欄位）
     var responseAction: String
     /// 回復結果（機台警報任務需回報）
@@ -2103,6 +2108,7 @@ struct SubordinateTask: Identifiable, Codable {
          isCompleted: Bool = false, completedAt: Date? = nil,
          sideRoleLink: SideRoleBackLink? = nil, reminderId: String? = nil,
          equipmentLink: EquipmentAlarmLink? = nil,
+         linkedEquipmentId: UUID? = nil,
          responseAction: String = "", responseResult: String = "",
          customScore: Int? = nil, isDereliction: Bool = false) {
         self.id = id; self.topic = topic; self.content = content
@@ -2110,6 +2116,7 @@ struct SubordinateTask: Identifiable, Codable {
         self.isCompleted = isCompleted; self.completedAt = completedAt
         self.sideRoleLink = sideRoleLink; self.reminderId = reminderId
         self.equipmentLink = equipmentLink
+        self.linkedEquipmentId = linkedEquipmentId
         self.responseAction = responseAction; self.responseResult = responseResult
         self.customScore = customScore
         self.isDereliction = isDereliction
@@ -2120,6 +2127,7 @@ struct SubordinateTask: Identifiable, Codable {
     enum CodingKeys: String, CodingKey {
         case id, topic, content, date, dueDate, note, isCompleted, completedAt, sideRoleLink, reminderId,
              equipmentLink, responseAction, responseResult, customScore, isDereliction
+        case linkedEquipmentId
     }
 
     init(from decoder: Decoder) throws {
@@ -2135,6 +2143,7 @@ struct SubordinateTask: Identifiable, Codable {
         sideRoleLink = try? c.decodeIfPresent(SideRoleBackLink.self, forKey: .sideRoleLink)
         reminderId = try? c.decodeIfPresent(String.self, forKey: .reminderId)
         equipmentLink = try? c.decodeIfPresent(EquipmentAlarmLink.self, forKey: .equipmentLink)
+        linkedEquipmentId = try? c.decodeIfPresent(UUID.self, forKey: .linkedEquipmentId)
         responseAction = (try? c.decodeIfPresent(String.self, forKey: .responseAction)) ?? ""
         responseResult = (try? c.decodeIfPresent(String.self, forKey: .responseResult)) ?? ""
         customScore = try? c.decodeIfPresent(Int.self, forKey: .customScore)
