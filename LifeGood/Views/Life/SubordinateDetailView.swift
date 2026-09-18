@@ -1205,7 +1205,10 @@ struct SubordinateDetailView: View {
         let all = subordinate.tasks.filter { !$0.isCompleted }.sorted { $0.date > $1.date }
         // 機台／系統別篩選（點任務列上的膠囊設定；可疊加）
         let items = all.filter { t in
-            if let eid = taskFilterEquipmentId, t.equipmentLink?.equipmentId != eid { return false }
+            // [v25.386] 機台篩選同時涵蓋兩種連結：警報自動掛的來源機台，與手動指定的關聯機台。
+            // 原本只看 equipmentLink，點手動關聯的機台膠囊會篩出空清單。
+            if let eid = taskFilterEquipmentId,
+               t.equipmentLink?.equipmentId != eid, t.linkedEquipmentId != eid { return false }
             if let sys = taskFilterSystem, taskLinkInfo(t)?.system != sys { return false }
             return true
         }
@@ -1318,9 +1321,17 @@ struct SubordinateDetailView: View {
         if let eq = t.linkedEquipmentId.flatMap({ id in
             lifeStore.equipmentPool.first { $0.id == id }
         }) {
+            // [v25.386] 比照警報機台膠囊，點一下暫時只看這台的任務（再點取消）
+            let manualActive = taskFilterEquipmentId == eq.id
             chips.append(ItemChip(id: "linkedEq",
                                   text: eq.name.isEmpty ? "未命名設備" : eq.name,
-                                  color: .teal, icon: "gearshape.2.fill"))
+                                  color: .teal, icon: "gearshape.2.fill",
+                                  isActive: manualActive,
+                                  onTap: {
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                    taskFilterEquipmentId = manualActive ? nil : eq.id
+                }
+            }))
         }
         // 機台警報任務：機台與系統別膠囊，點一下暫時篩選（再點取消）
         if let info = taskLinkInfo(t) {
@@ -3576,6 +3587,17 @@ struct TaskEditorSheet: View {
 
     let subordinateId: UUID
     var editing: SubordinateTask?
+    /// [v25.386] 新任務的預設關聯機台（從機台詳情的「關聯任務」章節按＋進來時帶入）。
+    /// 只在 editing == nil 時生效，編輯既有任務一律以任務自己存的值為準。
+    var defaultEquipmentId: UUID?
+
+    /// 明確寫出初始化：本型別有一堆 private @State，合成的 memberwise init 會是 private，
+    /// 跨檔案（SubordinateEquipmentView 的關聯任務章節）就建不出來。
+    init(subordinateId: UUID, editing: SubordinateTask? = nil, defaultEquipmentId: UUID? = nil) {
+        self.subordinateId = subordinateId
+        self.editing = editing
+        self.defaultEquipmentId = defaultEquipmentId
+    }
 
     @State private var topic = ""
     @State private var content = ""
@@ -3826,6 +3848,10 @@ struct TaskEditorSheet: View {
                     // 新任務：預設時間用排程時段（整點/半點，過 18:00 則隔天 09:30）
                     date = FiveMinuteDateTimePicker.defaultSchedulingTime()
                     dueDate = date
+                    // [v25.386] 從機台詳情按＋進來時先選好那台機台（機台仍在才帶）
+                    linkedEquipmentId = defaultEquipmentId.flatMap { id in
+                        lifeStore.equipmentPool.contains { $0.id == id } ? id : nil
+                    }
                 }
             }
         }

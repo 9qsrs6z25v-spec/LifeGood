@@ -1009,6 +1009,8 @@ struct EquipmentDetailCard: View {
     @State private var quickAddKind: TimelineQuickAddKind?
     /// [v25.384] 點上下游機台時要跳去看哪一台
     @State private var jumpTarget: EquipmentJump?
+    /// [v25.386] 點關聯任務時要開哪一位部屬的明細
+    @State private var personTarget: EquipmentJump?
 
     /// 明確寫出初始化：本型別有 private @State，且被 OrganizationView 跨檔案建立
     init(equipmentId: UUID) {
@@ -1040,6 +1042,10 @@ struct EquipmentDetailCard: View {
                             EquipmentRelationCard(equipmentId: eq.id) { targetId in
                                 jumpTarget = EquipmentJump(id: targetId)
                             }
+                            // [v25.386] 關聯任務（警報自動掛的＋手動指定的），補上機台→任務這一向
+                            EquipmentTaskCard(equipmentId: eq.id) { ownerId in
+                                personTarget = EquipmentJump(id: ownerId)
+                            }
                         }
                         .padding(.vertical)
                     }
@@ -1070,6 +1076,13 @@ struct EquipmentDetailCard: View {
             // 再往同一個 stack 推會讓「關閉」的語意變得很奇怪。
             .sheet(item: $jumpTarget) { jump in
                 EquipmentDetailCard(equipmentId: jump.id)
+            }
+            // [v25.386] 點關聯任務就開那位部屬的明細（任務章節在裡面）。
+            // 機台被刪、人被刪的情況都可能發生，找不到人就不開。
+            .sheet(item: $personTarget) { jump in
+                if let sub = lifeStore.subordinates.first(where: { $0.id == jump.id }) {
+                    SubordinateDetailView(subordinate: sub)
+                }
             }
         }
     }
@@ -1853,5 +1866,366 @@ struct EquipmentLinkPicker: View {
         direction == .upstream
             ? "上游＝東西從那台流到這台。設定後兩邊都看得到關係，從那一台點進來也會顯示這台是它的下游。"
             : "下游＝這台的產出流到那台去。設定後兩邊都看得到關係，從那一台點進來也會顯示這台是它的上游。"
+    }
+}
+
+// MARK: - 關聯任務
+
+/// 從機台看回去的那一半：哪些部屬任務掛在這台機台上。
+/// 任務端有兩種指向機台的方式，這裡兩種都收，並且分開標示——
+/// `equipmentLink` 是警報自動掛的（要回報處理措施與回復結果），
+/// `linkedEquipmentId` 是手動指定的（只是標記相關，不要求回報）。
+struct EquipmentTaskCard: View {
+    @EnvironmentObject var lifeStore: LifeStore
+
+    let equipmentId: UUID
+    /// 點某筆任務時呼叫，由外層決定怎麼開（通常是開那位部屬的明細）
+    let onOpen: (UUID) -> Void
+
+    @State private var showCompleted = false
+    /// 新增任務的流程（nil＝沒在新增）。做成單一 sheet 是刻意的：
+    /// 同一個 view 疊兩個 sheet modifier 在 SwiftUI 上表現不穩，所以「挑人」那一步
+    /// 由 EquipmentTaskOwnerPicker 自己往下接編輯表單。
+    @State private var adding: EquipmentTaskAdd?
+
+    init(equipmentId: UUID, onOpen: @escaping (UUID) -> Void) {
+        self.equipmentId = equipmentId
+        self.onOpen = onOpen
+    }
+
+    private static let dateFmt: DateFormatter = {
+        let f = DateFormatter(); f.locale = Locale(identifier: "zh_Hant_TW"); f.dateFormat = "M/d"; return f
+    }()
+
+    // MARK: 取資料
+
+    private var entries: [EquipmentTaskEntry] {
+        var out: [EquipmentTaskEntry] = []
+        for sub in lifeStore.subordinates {
+            for t in sub.tasks {
+                let isAlarm = (t.equipmentLink?.equipmentId == equipmentId)
+                let isManual = (t.linkedEquipmentId == equipmentId)
+                guard isAlarm || isManual else { continue }
+                out.append(EquipmentTaskEntry(id: t.id, task: t,
+                                              ownerId: sub.id, ownerName: sub.name,
+                                              isAlarm: isAlarm))
+            }
+        }
+        // 未完成在前，同組再依任務日期新到舊
+        return out.sorted { (a: EquipmentTaskEntry, b: EquipmentTaskEntry) -> Bool in
+            if a.task.isCompleted != b.task.isCompleted { return !a.task.isCompleted }
+            return a.task.date > b.task.date
+        }
+    }
+
+    private var pending: [EquipmentTaskEntry] { entries.filter { !$0.task.isCompleted } }
+    private var done: [EquipmentTaskEntry] { entries.filter { $0.task.isCompleted } }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            header
+            if pending.isEmpty && done.isEmpty {
+                emptyHint
+            } else {
+                ForEach(pending) { entry in
+                    taskRow(entry)
+                }
+                if !done.isEmpty {
+                    if !pending.isEmpty { Divider().padding(.leading, 16) }
+                    completedToggle
+                    if showCompleted {
+                        ForEach(done) { entry in
+                            taskRow(entry)
+                        }
+                    }
+                }
+            }
+        }
+        .background(Color(.systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 18))
+        .overlay(RoundedRectangle(cornerRadius: 18)
+            .stroke(Color(.separator).opacity(0.12), lineWidth: 0.75))
+        .shadow(color: .black.opacity(0.05), radius: 8, x: 0, y: 3)
+        .padding(.horizontal)
+        .sheet(item: $adding) { mode in
+            switch mode {
+            case .owner(let oid):
+                TaskEditorSheet(subordinateId: oid, editing: nil, defaultEquipmentId: equipmentId)
+            case .choose:
+                EquipmentTaskOwnerPicker(equipmentId: equipmentId)
+            }
+        }
+    }
+
+    // MARK: 版塊
+
+    private var header: some View {
+        HStack(spacing: 8) {
+            Capsule()
+                .fill(LinearGradient(colors: [.cyan, .cyan.opacity(0.5)],
+                                     startPoint: .top, endPoint: .bottom))
+                .frame(width: 4, height: 16)
+            Text("關聯任務").font(.subheadline.weight(.semibold))
+            Text(countBadge)
+                .font(.system(size: 10, weight: .bold))
+                .padding(.horizontal, 6).padding(.vertical, 2)
+                .background(Color.cyan.opacity(0.13)).foregroundStyle(.cyan)
+                .clipShape(Capsule())
+            Spacer()
+            Button {
+                startAdding()
+            } label: {
+                Image(systemName: "plus.circle.fill")
+                    .font(.system(size: 17))
+                    .foregroundStyle(.cyan)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 16).padding(.top, 14).padding(.bottom, 10)
+    }
+
+    private var completedToggle: some View {
+        Button {
+            withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                showCompleted.toggle()
+            }
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: showCompleted ? "chevron.down" : "chevron.right")
+                    .font(.system(size: 10, weight: .bold))
+                Text("已完成 \(done.count)")
+                    .font(.system(size: 12, weight: .semibold))
+                Spacer()
+            }
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 16).padding(.vertical, 9)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func taskRow(_ entry: EquipmentTaskEntry) -> some View {
+        let t = entry.task
+        let tint = rowTint(entry)
+        return Button {
+            onOpen(entry.ownerId)
+        } label: {
+            HStack(spacing: 10) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(tint.opacity(0.14))
+                        .frame(width: 30, height: 30)
+                    Image(systemName: rowIcon(entry))
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(tint)
+                }
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(titleText(t))
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(.primary)
+                        .strikethrough(t.isCompleted, color: .secondary)
+                        .lineLimit(1)
+                    HStack(spacing: 5) {
+                        if entry.isAlarm {
+                            miniTag("警報", color: .orange)
+                        }
+                        if entry.isAlarm && needsReport(t) {
+                            miniTag("待回報", color: .red)
+                        }
+                        if t.isDereliction {
+                            miniTag("缺失", color: .red)
+                        }
+                        Text(metaLine(entry))
+                            .font(.caption2).foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                }
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(.horizontal, 16).padding(.vertical, 9)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .opacity(t.isCompleted ? 0.6 : 1)
+    }
+
+    private func miniTag(_ text: String, color: Color) -> some View {
+        Text(text)
+            .font(.system(size: 9, weight: .bold))
+            .padding(.horizontal, 5).padding(.vertical, 1.5)
+            .background(color.opacity(0.13)).foregroundStyle(color)
+            .clipShape(Capsule())
+    }
+
+    private var emptyHint: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "checklist")
+                .font(.system(size: 13, weight: .medium)).foregroundStyle(.tertiary)
+            Text("還沒有任務掛在這台機台上。按右邊的＋可以直接開一筆並自動關聯；在部屬的任務編輯畫面選「關聯機台」也會出現在這裡，機台警報產生的任務則會自動列入。")
+                .font(.caption).foregroundStyle(.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 16).padding(.bottom, 14)
+    }
+
+    // MARK: 動作
+
+    /// ＋：機台有負責人就直接幫他開任務；沒有負責人才跳出來讓使用者挑人。
+    private func startAdding() {
+        let ownerId = lifeStore.equipment(id: equipmentId)?.ownerId
+        if let oid = ownerId, lifeStore.subordinates.contains(where: { $0.id == oid }) {
+            adding = .owner(oid)
+        } else {
+            adding = .choose
+        }
+    }
+
+    // MARK: 字串（在 ViewBuilder 外組好，避免型別檢查爆掉）
+
+    private var countBadge: String {
+        done.isEmpty ? "\(pending.count)" : "\(pending.count) / \(entries.count)"
+    }
+
+    private func titleText(_ t: SubordinateTask) -> String {
+        let topic = t.topic.trimmingCharacters(in: .whitespaces)
+        if !topic.isEmpty { return topic }
+        let content = t.content.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !content.isEmpty { return content }
+        return "未命名任務"
+    }
+
+    private func metaLine(_ entry: EquipmentTaskEntry) -> String {
+        var parts: [String] = []
+        let name = entry.ownerName.trimmingCharacters(in: .whitespaces)
+        parts.append(name.isEmpty ? "未命名部屬" : name)
+        let t = entry.task
+        if t.isCompleted, let at = t.completedAt {
+            parts.append("完成 " + Self.dateFmt.string(from: at))
+        } else if let due = t.dueDate {
+            let overdue = due < Calendar.current.startOfDay(for: Date())
+            parts.append((overdue ? "逾期 " : "截止 ") + Self.dateFmt.string(from: due))
+        } else {
+            parts.append(Self.dateFmt.string(from: t.date))
+        }
+        return parts.joined(separator: "・")
+    }
+
+    private func needsReport(_ t: SubordinateTask) -> Bool {
+        t.responseAction.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || t.responseResult.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private func rowTint(_ entry: EquipmentTaskEntry) -> Color {
+        if entry.task.isCompleted { return .green }
+        if entry.task.isDereliction { return .red }
+        return entry.isAlarm ? .orange : .teal
+    }
+
+    private func rowIcon(_ entry: EquipmentTaskEntry) -> String {
+        if entry.task.isCompleted { return "checkmark.circle.fill" }
+        if entry.task.isDereliction { return "exclamationmark.octagon.fill" }
+        return entry.isAlarm ? "bolt.trianglebadge.exclamationmark.fill" : "checklist"
+    }
+}
+
+/// 一筆「掛在這台機台上的任務」，連同它的持有人一起帶著走
+private struct EquipmentTaskEntry: Identifiable {
+    let id: UUID
+    let task: SubordinateTask
+    let ownerId: UUID
+    let ownerName: String
+    /// true＝警報自動掛上的任務（要回報處理措施與回復結果）；false＝手動指定關聯
+    let isAlarm: Bool
+}
+
+/// 新增關聯任務的兩條路：機台有負責人就直接開表單，沒有就先挑人
+enum EquipmentTaskAdd: Identifiable {
+    /// 直接指派給這位部屬
+    case owner(UUID)
+    /// 先挑一位部屬
+    case choose
+
+    var id: String {
+        switch self {
+        case .owner(let uid): return uid.uuidString
+        case .choose: return "choose"
+        }
+    }
+}
+
+/// sheet(item:) 用的指派對象包裝
+struct EquipmentTaskOwnerPick: Identifiable {
+    let id: UUID
+}
+
+/// 機台沒有負責人時，新增任務前先挑一位部屬；挑完就地接上任務編輯表單，
+/// 讓呼叫端只需要掛一個 sheet。
+struct EquipmentTaskOwnerPicker: View {
+    @EnvironmentObject var lifeStore: LifeStore
+    @Environment(\.dismiss) private var dismiss
+
+    let equipmentId: UUID
+
+    @State private var query = ""
+    @State private var picked: EquipmentTaskOwnerPick?
+
+    init(equipmentId: UUID) {
+        self.equipmentId = equipmentId
+    }
+
+    private var people: [Subordinate] {
+        let q = query.trimmingCharacters(in: .whitespaces).lowercased()
+        let all = lifeStore.subordinates
+        guard !q.isEmpty else { return all }
+        return all.filter {
+            $0.name.lowercased().contains(q)
+                || $0.jobTitle.lowercased().contains(q)
+                || $0.department.lowercased().contains(q)
+        }
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                if people.isEmpty {
+                    Text(query.isEmpty ? "還沒有部屬可以指派" : "找不到符合的人員")
+                        .font(.caption).foregroundStyle(.secondary)
+                } else {
+                    ForEach(people) { sub in
+                        Button {
+                            picked = EquipmentTaskOwnerPick(id: sub.id)
+                        } label: {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(sub.name.isEmpty ? "未命名部屬" : sub.name)
+                                    .foregroundStyle(.primary)
+                                if !sub.jobTitle.isEmpty || !sub.department.isEmpty {
+                                    Text([sub.department, sub.jobTitle]
+                                        .filter { !$0.isEmpty }.joined(separator: "・"))
+                                        .font(.caption2).foregroundStyle(.secondary)
+                                }
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+            .searchable(text: $query, prompt: "搜尋姓名、職稱、部門")
+            .navigationTitle("指派給誰")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) { Button("取消") { dismiss() } }
+            }
+            // 挑完人接著開任務表單；表單關掉就把這一層也收掉，回到機台詳情
+            .sheet(item: $picked, onDismiss: { dismiss() }) { pick in
+                TaskEditorSheet(subordinateId: pick.id, editing: nil,
+                                defaultEquipmentId: equipmentId)
+            }
+        }
     }
 }
