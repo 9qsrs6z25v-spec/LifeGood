@@ -30,6 +30,7 @@ final class SubscriptionManager: ObservableObject {
 
     @Published private(set) var products: [Product] = []
     @Published private(set) var purchaseInProgress: Bool = false
+    @Published private(set) var restoreInProgress: Bool = false
     @Published private(set) var lastError: String?
     @Published private(set) var entitlementExpiresAt: Date?
     @Published private(set) var entitledProductID: String?
@@ -41,19 +42,52 @@ final class SubscriptionManager: ObservableObject {
         }
     }
 
-    private static let devOverrideKey = "subscription_dev_override"
+    /// 遠端「全功能免費」總開關（由 RemoteAdminManager 套用，預設 true）
+    @Published private(set) var remoteAllFree: Bool
 
-    /// 是否享有完整功能。包含：StoreKit 解鎖、開發旗標。
+    private static let devOverrideKey = "subscription_dev_override"
+    private static let remoteAllFreeKey = "ra_all_free"
+    private static let founderKey = "subscription_founder_unlocked"
+    private static let expirationDateFormatter: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "yyyy/M/d"; return f
+    }()
+
+    /// 是否享有完整功能：開發旗標 / 早鳥永久解鎖 / 遠端全免費 / 有效訂閱
     var isPremium: Bool {
         if devOverride { return true }
-        if let exp = entitlementExpiresAt, exp > Date() { return true }
-        return entitledProductID != nil
+        if isFounderUnlocked { return true }
+        if remoteAllFree { return true }
+        guard let exp = entitlementExpiresAt else { return false }
+        return exp > Date()
+    }
+
+    /// 早鳥永久解鎖標記（本機 + iCloud KV，重裝 / 換機保留）
+    var isFounderUnlocked: Bool {
+        UserDefaults.standard.bool(forKey: Self.founderKey)
+            || NSUbiquitousKeyValueStore.default.bool(forKey: Self.founderKey)
+    }
+
+    /// 由 RemoteAdminManager 在「伺服器確認」免費狀態後呼叫。
+    /// 免費中 → 蓋早鳥章（日後收回時這些早期使用者永久保留解鎖）。
+    @MainActor func applyRemoteFreeAccess(_ free: Bool) {
+        UserDefaults.standard.set(free, forKey: Self.remoteAllFreeKey)
+        remoteAllFree = free
+        if free, !isFounderUnlocked {
+            UserDefaults.standard.set(true, forKey: Self.founderKey)
+            NSUbiquitousKeyValueStore.default.set(true, forKey: Self.founderKey)
+            NSUbiquitousKeyValueStore.default.synchronize()
+        }
+        // 移除多餘的 objectWillChange.send()：
+        // @Published var remoteAllFree 的 willSet 已自動發送 objectWillChange，
+        // 重複手動呼叫會觸發第二次 SwiftUI 更新週期，造成不必要的重繪。
     }
 
     private var transactionListener: Task<Void, Never>?
 
     private init() {
         self.devOverride = UserDefaults.standard.bool(forKey: Self.devOverrideKey)
+        // 預設全功能免費（在伺服器回覆前先採樂觀值，避免免費期間短暫被鎖）
+        self.remoteAllFree = UserDefaults.standard.object(forKey: Self.remoteAllFreeKey) as? Bool ?? true
         transactionListener = listenForTransactions()
     }
 
@@ -83,6 +117,7 @@ final class SubscriptionManager: ObservableObject {
 
     @MainActor
     func purchase(_ product: Product) async {
+        guard !purchaseInProgress else { return }
         purchaseInProgress = true
         defer { purchaseInProgress = false }
 
@@ -107,6 +142,13 @@ final class SubscriptionManager: ObservableObject {
 
     @MainActor
     func restorePurchases() async {
+        // purchase(_:) 已有 purchaseInProgress 守衛防止連點重入，這裡原本缺同樣的防護：
+        // 使用者連續點擊「還原購買」會並發觸發多個 AppStore.sync()，並發的 refreshStatus()／
+        // lastError 寫入順序不定，可能出現「其中一次失敗訊息覆蓋掉另一次成功」的錯誤提示。
+        guard !restoreInProgress else { return }
+        restoreInProgress = true
+        defer { restoreInProgress = false }
+
         do {
             try await AppStore.sync()
             await refreshStatus()
@@ -127,8 +169,18 @@ final class SubscriptionManager: ObservableObject {
                   LifeGoodProduct.allCases.contains(where: { $0.rawValue == transaction.productID })
             else { continue }
             if transaction.revocationDate == nil {
-                foundID = transaction.productID
-                foundExp = transaction.expirationDate
+                if foundExp == nil {
+                    // 第一筆符合條件的 entitlement，直接採用
+                    foundID = transaction.productID
+                    foundExp = transaction.expirationDate
+                } else if let existingExp = foundExp, let newExp = transaction.expirationDate, newExp > existingExp {
+                    // 保留到期日最晚的訂閱，避免升級後舊方案覆蓋新方案的 expirationDate
+                    foundID = transaction.productID
+                    foundExp = newExp
+                }
+                // 其餘情況（本筆到期日較早，或本筆 expirationDate 為 nil）保留現有 foundExp，不覆蓋
+                // 舊寫法用 if let existingExp=foundExp, let newExp=transaction.expirationDate 當作
+                // 唯一分支條件，一旦 newExp 為 nil 就會落入 else 把已找到的合法 foundExp 洗成 nil
             }
         }
         self.entitledProductID = foundID
@@ -138,7 +190,7 @@ final class SubscriptionManager: ObservableObject {
     private func listenForTransactions() -> Task<Void, Never> {
         Task.detached { [weak self] in
             for await result in Transaction.updates {
-                guard let self else { return }
+                guard let self else { continue }
                 if case .verified(let transaction) = result {
                     await self.refreshStatus()
                     await transaction.finish()
@@ -165,8 +217,6 @@ final class SubscriptionManager: ObservableObject {
 
     var expirationText: String? {
         guard let date = entitlementExpiresAt else { return nil }
-        let f = DateFormatter()
-        f.dateFormat = "yyyy/M/d"
-        return "下次續訂：\(f.string(from: date))"
+        return "下次續訂：\(Self.expirationDateFormatter.string(from: date))"
     }
 }

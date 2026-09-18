@@ -1,14 +1,63 @@
 import SwiftUI
 
+// MARK: - 美化紀錄（IncomeView）
+// [2026-06 v1] 本次美化方向：
+//   1. emptyState：單層脈衝光環升級為雙層（外環延遲 0.3s 製造波紋），
+//      主圓尺寸從 82pt 對齊至 88pt，脈衝環從 100pt 對齊至 108pt，
+//      加入綠色 CTA 按鈕「新增第一筆收入」，對齊 VariableExpenseView.emptyStateView 設計規格
+//   2. incomeListSections：加入交錯淡入 + 向上進場動畫，
+//      對齊 VariableExpenseView.expenseListSections 規格
+//   3. summaryHeader：本月收入下方加入「日均收入」輔助文字，
+//      對齊 FixedExpenseView.fixedSummaryHeader 的日均顯示規格
+// [2026-06 v2] 本次美化方向（summaryHeader 升級）：
+//   4. 支出進度條：從 2 段（白/紅）升級為 3 段配色（白→暖黃警示→粉紅超支），
+//      與 OverviewView.monthlyBalanceCard / VariableExpenseView.monthSummaryHeader 雙軌規格對齊；
+//      判斷條件：spendingRatio ≤ monthProgress+8% → 白；> monthProgress+8% → 暖黃；> 90% → 粉紅。
+//   5. 進度條下方說明列加入條件式警告圖示（exclamationmark.triangle.fill 暖黃 / flame.fill 粉紅），
+//      對齊 OverviewView / VariableExpenseView 警示標示規格。
+//   6. 英雄卡底部加入「收入分類彩條」（mini allocation bar）：
+//      當有 ≥2 個收入分類時，顯示薪資/獎金/投資/禮金/幸運金比例的漸層彩條 + glow overlay，
+//      底下附各分類色圓點 + 名稱的橫排圖例，
+//      對齊 FinanceOverviewView.totalAssetsCard mini 資產配置彩條設計語言。
+// [2026-06 v3] 本次美化方向（incomeRow 升級 + 列表月份分頁）：
+//   7. incomeRow 存入銀行標籤：前景色從 .secondary 升級為 accent.opacity(0.85)，
+//      背景從 tertiarySystemFill 升級為 accent.opacity(0.08)，對齊 diningMember 膠囊
+//      （ExpenseRow）的主題色設計語言，強化收入列各標籤間的視覺一致性。
+//   8. incomeRow 股票連結指示：當 income.linkedStockId != nil 時，在副標籤列
+//      顯示 chart.line.uptrend.xyaxis（11pt 藍色），對齊 ExpenseRow.mappin 地點指示規格，
+//      讓使用者一眼看出這筆收入已連結股票配息，資訊揭露對齊 StockDetailView dividendRow。
+//   9. incomeListSections 月份分頁展開：新增 visibleMonths（預設 3），
+//      搜尋時顯示全部，非搜尋時只顯示近 N 個月，超出部分顯示「展開更早三個月」按鈕
+//      + 隱藏筆數膠囊，對齊 VariableExpenseView.expenseListSectionsFor.visibleWeeks 規格。
+// [2026-06 v4] 本次美化方向（summaryHeader 玻璃光澤 + 細節補齊）：
+//  10. summaryHeader 背景 ZStack 末層加入 LinearGradient [.white.opacity(0.18), .clear]
+//      top→center 玻璃反光覆蓋層，對齊 OverviewView.monthlyBalanceCard v3 /
+//      FinanceOverviewView.totalAssetsCard v3 英雄卡玻璃光澤設計規格；
+//      補齊全 App 六張英雄卡（收入、支出、固定、收支、理財總覽、資產）最後缺失的一張。
+//  11. useEstimate 說明文字：從純 HStack 文字升級為半透明 Capsule 膠囊徽章
+//      （white.opacity(0.14) 底 + white.opacity(0.22) stroke 邊框），
+//      對齊 summaryHeader 頂部「預估」badge 膠囊設計語言，提升卡片內信息層次均值性。
+//  12. 日均收入文字：加入 contentTransition(.numericText())，
+//      讓日均數值隨月份累積更新時有平滑數字過渡動畫，對齊主金額大字已有的 numericText 規格。
+
 struct IncomeView: View {
     @EnvironmentObject var store: ExpenseStore
     @EnvironmentObject var financeStore: FinanceStore
     @EnvironmentObject var lifeStore: LifeStore
     @State private var showAdd = false
     @State private var editingItem: Income?
+    /// 點列先開詳情卡片（FinanceItemCard 模組）；編輯是卡片右上的動作
+    @State private var viewingItem: Income?
     @State private var selectedCategory: IncomeCategory?
     @State private var searchText: String = ""
     @State private var headerAppeared = false
+    /// 英雄卡背景趨勢（單月收入逐月序列；HeroTrendBackground 標準模板）
+    @State private var heroSeries: [HeroTrendPoint] = []
+    @State private var listRowsAppeared = false
+    @State private var visibleMonths = 3
+    @State private var debouncedSearchText: String = ""
+    @State private var searchDebounceTask: Task<Void, Never>?
+    @State private var cachedFilteredIncomes: [Income] = []
 
     private static let currencyFormatter: NumberFormatter = {
         let f = NumberFormatter()
@@ -23,12 +72,25 @@ struct IncomeView: View {
         return f
     }()
 
-    var filteredIncomes: [Income] {
+    /// 分組 key 專用（含年份，"yyyy-MM-dd"）：groupDateFormatter 只到「月.日.星期幾」，沒有年份，
+    /// 只要兩筆不同年份的收入剛好落在同月同日且同星期幾（多年記帳幾乎必然出現），Dictionary 分組會把
+    /// 不同年份的資料誤合併成同一個 Section、金額加總混在一起。key 另外用含年份的格式避免碰撞，
+    /// 顯示文字仍用 groupDateFormatter（不動既有視覺樣式）。
+    private static let groupKeyFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd"
+        f.locale = Locale(identifier: "zh_TW")
+        return f
+    }()
+
+    var filteredIncomes: [Income] { cachedFilteredIncomes }
+
+    private func buildFilteredIncomes() -> [Income] {
         var list = store.incomes.sorted { $0.date > $1.date }
         if let cat = selectedCategory {
             list = list.filter { $0.category == cat }
         }
-        let q = searchText.trimmingCharacters(in: .whitespaces).lowercased()
+        let q = debouncedSearchText.trimmingCharacters(in: .whitespaces).lowercased()
         if !q.isEmpty {
             list = list.filter { inc in
                 inc.title.lowercased().contains(q)
@@ -43,17 +105,17 @@ struct IncomeView: View {
         NavigationStack {
             List {
                 Section {
-                    summaryHeader
-                        .listRowInsets(EdgeInsets())
-                        .listRowBackground(Color.clear)
-                        .listRowSeparator(.hidden)
-                        .opacity(headerAppeared ? 1 : 0)
-                        .offset(y: headerAppeared ? 0 : 22)
-                        .onAppear {
-                            withAnimation(.spring(response: 0.55, dampingFraction: 0.78)) {
-                                headerAppeared = true
-                            }
-                        }
+                    VStack(spacing: 0) {
+                        summaryHeader
+                        // 超支警示：emoji 小字提示掛在卡片下方（正常時不顯示）
+                        HeroOverspendHint(ratio: overspendRatio,
+                                          monthProgress: headerMonthProgress)
+                    }
+                    .listRowInsets(EdgeInsets())
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+                    .opacity(headerAppeared ? 1 : 0)
+                    .offset(y: headerAppeared ? 0 : 22)
                 }
                 Section {
                     categoryFilter
@@ -74,32 +136,57 @@ struct IncomeView: View {
                 }
             }
             .listStyle(.insetGrouped)
+            // onAppear/onDisappear 掛在 List 本身（而非 incomeListSections 內每個日期分組的
+            // ForEach，也不掛在 summaryHeader 自己的 Section 上）：List 延遲載入各 Section，
+            // 掛在子視圖上等同掛在各自的可視範圍上，捲動使其進出可視範圍就各自觸發一次，
+            // 共用旗標會被反覆重置，導致可視列表捲動時無謂淡出又重播進場動畫。改掛在 List
+            // 本身，比照 FamilyView 既有寫法，確保只在畫面進出時各觸發一次。
+            .onAppear {
+                withAnimation(.spring(response: 0.55, dampingFraction: 0.78)) {
+                    headerAppeared = true
+                }
+                withAnimation(.spring(response: 0.5, dampingFraction: 0.82).delay(0.05)) {
+                    listRowsAppeared = true
+                }
+            }
+            .onDisappear {
+                headerAppeared = false
+                listRowsAppeared = false
+            }
+            .task(id: store.modifyID) {
+                heroSeries = store.heroIncomeSeries()   // 壓縮/補點交給模板依進階設定即時處理
+            }
             .scrollContentBackground(.hidden)
             .background(Color(.systemGroupedBackground))
             .navigationTitle("收入")
             .navigationBarTitleDisplayMode(.large)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    HStack(spacing: 8) {
-                        VStack(alignment: .trailing, spacing: 0) {
-                            Text("總收入")
-                                .font(.caption2).foregroundStyle(.secondary)
-                            Text("\(fmtWan(totalIncomeAll)) 萬")
-                                .font(.subheadline.bold()).foregroundStyle(.green)
-                        }
-                        Button { showAdd = true } label: {
-                            Image(systemName: "plus.circle.fill").font(.title3).foregroundStyle(.green)
-                        }
+                    Button { showAdd = true } label: {
+                        Image(systemName: "plus.circle.fill").font(.title3).foregroundStyle(.green)
                     }
                 }
             }
             .sheet(isPresented: $showAdd) { AddIncomeView() }
             .sheet(item: $editingItem) { item in AddIncomeView(editing: item) }
+            .sheet(item: $viewingItem) { item in FinanceItemCard(target: .income(item.id)) }
             .searchable(
                 text: $searchText,
                 placement: .navigationBarDrawer(displayMode: .always),
                 prompt: "搜尋名稱 / 備註 / 分類"
             )
+            .onChange(of: searchText) { _, newValue in
+                searchDebounceTask?.cancel()
+                searchDebounceTask = Task {
+                    try? await Task.sleep(nanoseconds: 300_000_000)
+                    guard !Task.isCancelled else { return }
+                    debouncedSearchText = newValue
+                }
+            }
+            .onDisappear { searchDebounceTask?.cancel() }
+            .task(id: "\(store.modifyID)-\(selectedCategory?.rawValue ?? "")-\(debouncedSearchText)") {
+                cachedFilteredIncomes = buildFilteredIncomes()
+            }
         }
     }
 
@@ -112,20 +199,49 @@ struct IncomeView: View {
             case .once:
                 return sum + income.amount
             case .monthly:
-                let months = calendar.dateComponents([.month], from: income.date, to: now).month ?? 0
-                return sum + income.amount * Double(max(1, months + 1))
+                // 固定薪水設有結束日者，展開至結束日為止（不再累計到今天）
+                let end = income.endDate.map { min($0, now) } ?? now
+                // 起始日晚於截止日（例如剛新增了未來才生效的固定薪水）代表尚未發生任何一個月，計 0
+                guard income.date <= end else { return sum }
+                let months = calendar.dateComponents([.month], from: income.date, to: end).month ?? 0
+                return sum + income.amount * Double(months + 1)
             case .yearly:
-                let years = calendar.dateComponents([.year], from: income.date, to: now).year ?? 0
-                return sum + income.amount * Double(max(1, years + 1))
+                let end = income.endDate.map { min($0, now) } ?? now
+                guard income.date <= end else { return sum }
+                let years = calendar.dateComponents([.year], from: income.date, to: end).year ?? 0
+                return sum + income.amount * Double(years + 1)
             }
         }
     }
 
-    private func fmtWan(_ v: Double) -> String {
-        String(format: "%.0f", v / 10000)
+    // MARK: - 摘要
+
+    private var headerMonthProgress: Double {
+        let cal = Calendar.current
+        let now = Date()
+        let day = Double(cal.component(.day, from: now))
+        let total = Double(cal.range(of: .day, in: .month, for: now)?.count ?? 30)
+        return min(day / total, 1.0)
     }
 
-    // MARK: - 摘要
+    /// 累計收入 + 歷史月均收入（從最早一筆到現在）
+    private var monthlyStats: (cumulative: Double, average: Double) {
+        let total = totalIncomeAll
+        guard !store.incomes.isEmpty,
+              let earliest = store.incomes.min(by: { $0.date < $1.date })?.date else {
+            return (total, total)
+        }
+        let monthCount = max(1, (Calendar.current.dateComponents([.month], from: earliest, to: Date()).month ?? 0) + 1)
+        return (total, total / Double(monthCount))
+    }
+
+
+    /// 卡片下方超支提示用的比例（本月總支出 ÷ 本月收入；與卡內進度條同口徑、不夾住）
+    private var overspendRatio: Double {
+        let useEstimate = !store.hasCurrentMonthIncome && store.estimatedMonthlyIncome > 0
+        let income = useEstimate ? store.estimatedMonthlyIncome : store.currentMonthIncomeTotal
+        return income > 0 ? store.currentMonthTotal / income : 0
+    }
 
     private var summaryHeader: some View {
         let useEstimate = !store.hasCurrentMonthIncome && store.estimatedMonthlyIncome > 0
@@ -133,10 +249,20 @@ struct IncomeView: View {
         let displayedBalance = displayedIncome - store.currentMonthTotal
         let isPositive = displayedBalance >= 0
         let recurringMonthly = store.incomes
-            .filter { $0.period != .once }
+            .filter { $0.period != .once && $0.isActive(in: Date()) }
             .reduce(0.0) { $0 + $1.monthlyAmount }
+        // rawSpendingRatio 不夾住，供文字／顏色判斷；barSpendingRatio 才夾在 1.0，只用於進度條寬度
+        // （對齊 VariableExpenseView rawRatio/barRatio 既有規格）。先前兩者共用同一個已夾住的
+        // spendingRatio，超支超過 100% 時「支出 X%」文字會失真固定顯示 100%，看不出實際超支幅度。
+        let rawSpendingRatio = displayedIncome > 0 ? store.currentMonthTotal / displayedIncome : 0.0
+        let spendingRatio = min(rawSpendingRatio, 1.0)
+        let stats = monthlyStats
+        // mini 分類彩條資料（≥2 種分類才顯示）
+        let catAmounts = incomeCategoryAmounts
+        let totalCatIncome = catAmounts.reduce(0.0) { $0 + $1.amount }
 
         return VStack(spacing: 0) {
+            // 頂部：本月收入 + 收支餘額
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(spacing: 5) {
@@ -157,9 +283,21 @@ struct IncomeView: View {
                         }
                     }
                     Text(fmt(displayedIncome))
-                        .font(.system(size: 30, weight: .bold, design: .rounded))
+                        .heroBigValueFont()
                         .foregroundStyle(.white)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.5)
                         .contentTransition(.numericText())
+                    // 日均收入：對齊 FixedExpenseView.fixedSummaryHeader 輔助文字規格
+                    if displayedIncome > 0 {
+                        let day = Calendar.current.component(.day, from: Date())
+                        // [v4] 加入 contentTransition(.numericText())，讓日均數值更新有平滑過渡
+                        Text("日均 " + fmt(displayedIncome / Double(max(day, 1))))
+                            .font(.caption2.weight(.medium))
+                            .foregroundStyle(.white.opacity(0.72))
+                            .contentTransition(.numericText())
+                            .padding(.top, 1)
+                    }
                 }
                 Spacer()
                 VStack(alignment: .trailing, spacing: 3) {
@@ -169,6 +307,8 @@ struct IncomeView: View {
                     Text((isPositive ? "+" : "") + fmt(displayedBalance))
                         .font(.title3.bold())
                         .foregroundStyle(isPositive ? .white : Color(red: 1.0, green: 0.78, blue: 0.75))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.5)
                         .contentTransition(.numericText())
                         .shadow(
                             color: isPositive ? .clear : Color.red.opacity(0.40),
@@ -177,62 +317,164 @@ struct IncomeView: View {
                 }
             }
 
+            // [v4] useEstimate 說明文字升級為半透明 Capsule 膠囊徽章，對齊卡片頂部「預估」badge 設計語言
             if useEstimate {
                 HStack(spacing: 5) {
                     Image(systemName: "info.circle")
-                        .font(.caption2)
+                        .font(.system(size: 10, weight: .medium))
                     Text("顯示近 6 個月收入中位數預估值")
-                        .font(.caption2)
+                        .font(.system(size: 10, weight: .medium))
                     Spacer()
                 }
-                .foregroundStyle(.white.opacity(0.70))
-                .padding(.top, 10)
+                .foregroundStyle(.white.opacity(0.82))
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(.white.opacity(0.14))
+                .clipShape(Capsule())
+                .overlay(Capsule().stroke(.white.opacity(0.22), lineWidth: 0.75))
+                .padding(.top, 8)
             }
 
-            if recurringMonthly > 0 {
+            // KPI 橫列：累計收入 / 今年累計 / 月均收入 / 固定月收
+            HStack(spacing: 0) {
+                HeroKpiCell(label: "累計收入", value: fmt(stats.cumulative), icon: "sum")
+                HeroKpiDivider()
+                // 每年 1/1 重新起算的今年累計收入
+                HeroKpiCell(label: "今年累計", value: fmt(store.yearToDateIncomeTotal), icon: "calendar")
+                HeroKpiDivider()
+                HeroKpiCell(label: "月均收入", value: fmt(stats.average), icon: "chart.bar.fill")
+                if recurringMonthly > 0 {
+                    HeroKpiDivider()
+                    HeroKpiCell(label: "固定月收", value: fmt(recurringMonthly), icon: "arrow.clockwise")
+                }
+            }
+            .padding(.vertical, 10)
+            .background(.white.opacity(0.08))
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+            .padding(.top, 12)
+
+            // 分隔線
+            Rectangle()
+                .fill(.white.opacity(0.20))
+                .frame(height: 0.5)
+                .padding(.vertical, 12)
+
+            // 雙軌進度條：月進度（上，薄軌）+ 支出比例（下，厚軌 + 針）
+            if displayedIncome > 0 {
+                VStack(spacing: 5) {
+                    // ① 月進度軌（薄軌，半透明白）
+                    GeometryReader { geo in
+                        ZStack(alignment: .leading) {
+                            Capsule()
+                                .fill(.white.opacity(0.12))
+                                .frame(height: 3)
+                            Capsule()
+                                .fill(.white.opacity(0.44))
+                                .frame(width: geo.size.width * headerMonthProgress, height: 3)
+                                .animation(.spring(response: 0.7, dampingFraction: 0.8), value: headerMonthProgress)
+                        }
+                    }
+                    .frame(height: 3)
+
+                    // ② 支出比例軌（厚軌 + 月進度指示針；3 段配色對齊 OverviewView）
+                    GeometryReader { geo in
+                        ZStack(alignment: .leading) {
+                            Capsule()
+                                .fill(.white.opacity(0.18))
+                                .frame(height: 6)
+                            Capsule()
+                                // 3 段：正常白 → 超速暖黃 → 超支粉紅
+                                .fill(spendingRatio > 0.9
+                                      ? Color(red: 1.0, green: 0.78, blue: 0.75).opacity(0.90)
+                                      : spendingRatio > headerMonthProgress + 0.08
+                                        ? Color(red: 1.0, green: 0.65, blue: 0.22).opacity(0.90)
+                                        : .white.opacity(0.82))
+                                .frame(width: geo.size.width * spendingRatio, height: 6)
+                                .animation(.spring(response: 0.7, dampingFraction: 0.8), value: spendingRatio)
+                            // 月進度指示針（細白豎棒，指示月份走到哪）
+                            Capsule()
+                                .fill(.white.opacity(0.92))
+                                .frame(width: 2, height: 6)
+                                .shadow(color: .black.opacity(0.25), radius: 1.5, x: 0, y: 0)
+                                .offset(x: max(0, geo.size.width * headerMonthProgress - 1))
+                                .animation(.spring(response: 0.7, dampingFraction: 0.8), value: headerMonthProgress)
+                        }
+                    }
+                    .frame(height: 6)
+
+                    HStack {
+                        // 警示圖示已移至卡片下方的 HeroOverspendHint（emoji 小字提示），
+                        // 卡內只留純數值；門檻常數統一由 HeroOverspendHint 提供
+                        Text("支出 \(Int(rawSpendingRatio * 100))%")
+                        .font(.caption2)
+                        .foregroundStyle(spendingRatio > HeroOverspendHint.dangerRatio
+                                         ? Color(red: 1.0, green: 0.78, blue: 0.75)
+                                         : spendingRatio > headerMonthProgress + HeroOverspendHint.warnLead
+                                           ? Color(red: 1.0, green: 0.90, blue: 0.55)
+                                           : .white.opacity(0.62))
+                        Spacer()
+                        Text("月進度 \(Int(headerMonthProgress * 100))%")
+                            .font(.caption2)
+                            .foregroundStyle(.white.opacity(0.60))
+                    }
+                }
+            }
+
+            // 收入分類彩條（≥2 個分類才顯示；設計語言對齊 FinanceOverviewView totalAssetsCard）
+            if catAmounts.count > 1 && totalCatIncome > 0 {
                 Rectangle()
                     .fill(.white.opacity(0.20))
                     .frame(height: 0.5)
                     .padding(.vertical, 12)
 
-                HStack(spacing: 6) {
-                    Image(systemName: "arrow.clockwise")
-                        .font(.caption2)
-                    Text("固定月收入")
-                        .font(.caption)
-                    Spacer()
-                    Text(fmt(recurringMonthly))
-                        .font(.caption.bold())
+                VStack(spacing: 6) {
+                    // 比例彩條（glow overlay 增加立體感）
+                    GeometryReader { geo in
+                        HStack(spacing: 2) {
+                            ForEach(Array(catAmounts.enumerated()), id: \.offset) { _, item in
+                                RoundedRectangle(cornerRadius: 2)
+                                    .fill(incomeCategoryColor(item.category).opacity(0.90))
+                                    .frame(
+                                        width: max(3, CGFloat(item.amount / totalCatIncome) *
+                                                   (geo.size.width - CGFloat(max(0, catAmounts.count - 1)) * 2))
+                                    )
+                            }
+                        }
+                    }
+                    .frame(height: 6)
+                    .clipShape(RoundedRectangle(cornerRadius: 3))
+                    .overlay(
+                        // 頂部白色高亮 + 底部柔化，增加彩條立體感
+                        LinearGradient(
+                            colors: [.white.opacity(0.28), .clear, .black.opacity(0.08)],
+                            startPoint: .top, endPoint: .bottom
+                        )
+                        .clipShape(RoundedRectangle(cornerRadius: 3))
+                    )
+
+                    // 圖例：色圓點 + 分類名稱橫排
+                    HStack(spacing: 8) {
+                        ForEach(Array(catAmounts.enumerated()), id: \.offset) { _, item in
+                            HStack(spacing: 3) {
+                                Circle()
+                                    .fill(incomeCategoryColor(item.category))
+                                    .frame(width: 5, height: 5)
+                                Text(item.category.rawValue)
+                                    .font(.system(size: 9, weight: .medium))
+                                    .foregroundStyle(.white.opacity(0.80))
+                            }
+                        }
+                        Spacer(minLength: 0)
+                    }
                 }
-                .foregroundStyle(.white.opacity(0.88))
             }
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 20)
-        .background(
-            ZStack {
-                LinearGradient(
-                    colors: [
-                        Color(red: 0.16, green: 0.74, blue: 0.50),
-                        Color(red: 0.07, green: 0.50, blue: 0.38)
-                    ],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-                Circle()
-                    .fill(.white.opacity(0.13))
-                    .frame(width: 140, height: 140)
-                    .offset(x: 90, y: -55)
-                    .blur(radius: 14)
-                Circle()
-                    .fill(.white.opacity(0.08))
-                    .frame(width: 90, height: 90)
-                    .offset(x: -70, y: 55)
-                    .blur(radius: 10)
-            }
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 20))
-        .shadow(color: Color(red: 0.07, green: 0.50, blue: 0.38).opacity(0.40), radius: 16, x: 0, y: 8)
+        .heroCardShell(card: .income) {
+            // 單月收入趨勢曲線背景（HeroTrendBackground 標準模板）
+            HeroTrendBackground(points: heroSeries, stepBack: 2_592_000)
+        }
         .padding(.horizontal, 16)
         .padding(.top, 10)
         .padding(.bottom, 4)
@@ -313,77 +555,150 @@ struct IncomeView: View {
     // MARK: - 空狀態
 
     @State private var emptyIconPulse = false
+    @State private var emptyPulseTask: Task<Void, Never>?
 
     private var emptyState: some View {
         let isSearching = !searchText.trimmingCharacters(in: .whitespaces).isEmpty
         let accent = Color(red: 0.16, green: 0.74, blue: 0.50)
-        return VStack(spacing: 20) {
+        return VStack(spacing: 24) {
             ZStack {
                 if !isSearching {
+                    // 外層脈衝光環（對齊 VariableExpenseView emptyStateView 雙層環規格）
                     Circle()
                         .stroke(accent.opacity(emptyIconPulse ? 0 : 0.25), lineWidth: 1.5)
-                        .frame(width: 100, height: 100)
+                        .frame(width: 108, height: 108)
                         .scaleEffect(emptyIconPulse ? 1.35 : 1.0)
                         .animation(
                             .easeOut(duration: 2.0).repeatForever(autoreverses: false),
                             value: emptyIconPulse
                         )
+                    // 內層脈衝光環（延遲 0.3s，製造波紋層次）
+                    Circle()
+                        .stroke(accent.opacity(emptyIconPulse ? 0 : 0.13), lineWidth: 1)
+                        .frame(width: 108, height: 108)
+                        .scaleEffect(emptyIconPulse ? 1.62 : 1.0)
+                        .animation(
+                            .easeOut(duration: 2.0).delay(0.3).repeatForever(autoreverses: false),
+                            value: emptyIconPulse
+                        )
                 }
+                // 主圓底（漸層填色 + 細邊框，尺寸對齊至 88pt）
                 Circle()
                     .fill(
                         LinearGradient(
                             colors: isSearching
                                 ? [Color(.systemFill), Color(.secondarySystemFill)]
-                                : [accent.opacity(0.14), accent.opacity(0.05)],
+                                : [accent.opacity(0.15), accent.opacity(0.06)],
                             startPoint: .topLeading,
                             endPoint: .bottomTrailing
                         )
                     )
-                    .frame(width: 82, height: 82)
+                    .frame(width: 88, height: 88)
                     .overlay(
                         Circle()
                             .stroke(
-                                isSearching ? Color.clear : accent.opacity(0.20),
+                                isSearching ? Color.clear : accent.opacity(0.22),
                                 lineWidth: 1.2
                             )
                     )
                 Image(systemName: isSearching ? "magnifyingglass" : "banknote")
-                    .font(.system(size: 34, weight: .light))
-                    .foregroundStyle(isSearching ? .secondary : accent.opacity(0.75))
+                    .font(.system(size: 36, weight: .light))
+                    .foregroundStyle(isSearching ? .secondary : accent.opacity(0.72))
             }
             .onAppear {
+                emptyIconPulse = false
+                emptyPulseTask?.cancel()
                 if !isSearching {
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                    emptyPulseTask = Task {
+                        try? await Task.sleep(nanoseconds: 300_000_000)
+                        guard !Task.isCancelled else { return }
                         emptyIconPulse = true
                     }
                 }
             }
+            // [除錯] isSearching 只是本地計算值，不會改變外層 ZStack 的身分，
+            // 單靠 onAppear/onDisappear 不會在搜尋文字變化時重觸發；空清單時
+            // 搜尋一次再清空會讓脈衝動畫永久停止（對齊 FoodMapView.emptyOverlay 的既有修法）。
+            .onChange(of: isSearching) { _, searching in
+                emptyPulseTask?.cancel()
+                emptyIconPulse = false
+                if !searching {
+                    emptyPulseTask = Task {
+                        try? await Task.sleep(nanoseconds: 300_000_000)
+                        guard !Task.isCancelled else { return }
+                        emptyIconPulse = true
+                    }
+                }
+            }
+            .onDisappear {
+                emptyPulseTask?.cancel()
+            }
 
-            VStack(spacing: 8) {
+            VStack(spacing: 10) {
                 Text(isSearching ? "找不到符合的收入" : "尚無收入紀錄")
-                    .font(.headline.weight(.semibold))
-                    .foregroundStyle(.primary.opacity(0.65))
-                Text(isSearching ? "換個關鍵字試試" : "點擊右上角 + 新增收入")
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(.primary.opacity(0.75))
+                Text(isSearching ? "換個關鍵字試試" : "薪資、獎金、投資收益等\n各類收入都可以記錄在這裡")
                     .font(.subheadline)
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
+                    .lineSpacing(3)
+            }
+
+            // 非搜尋狀態下顯示 CTA 按鈕，對齊 VariableExpenseView 空狀態設計規格
+            if !isSearching {
+                Button {
+                    showAdd = true
+                } label: {
+                    Label("新增第一筆收入", systemImage: "plus.circle.fill")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 22)
+                        .padding(.vertical, 12)
+                        .background(
+                            LinearGradient(
+                                colors: [accent, Color(red: 0.07, green: 0.50, blue: 0.38)],
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
+                        )
+                        .clipShape(Capsule())
+                        .shadow(color: Color(red: 0.07, green: 0.50, blue: 0.38).opacity(0.35), radius: 10, y: 5)
+                }
+                .buttonStyle(.plain)
             }
         }
         .frame(maxWidth: .infinity)
-        .padding(.vertical, 52)
+        .padding(.vertical, 44)
     }
 
     // MARK: - 列表（List sections，包在外層的 List 內）
 
     @ViewBuilder
     private var incomeListSections: some View {
-        ForEach(groupedByDate(), id: \.key) { dateString, incomes in
+        let allGroups = groupedByDate()
+        let isSearching = !searchText.trimmingCharacters(in: .whitespaces).isEmpty
+        // 月份分頁：搜尋時顯示全部；非搜尋時只顯示近 N 個月
+        let cutoff = Calendar.current.date(byAdding: .month, value: -visibleMonths, to: Date()) ?? Date()
+        let visibleGroups = isSearching ? allGroups : allGroups.filter { group in
+            guard let d = group.value.first?.date else { return false }
+            return d >= cutoff
+        }
+        let hiddenGroups: [(key: String, value: [Income])] = isSearching ? [] : allGroups.filter { group in
+            guard let d = group.value.first?.date else { return true }
+            return d < cutoff
+        }
+        let hiddenCount = hiddenGroups.reduce(0) { $0 + $1.value.count }
+
+        ForEach(Array(visibleGroups.enumerated()), id: \.element.key) { groupIdx, pair in
+            let incomes = pair.value
+            let dateString = incomes.first.map { Self.groupDateFormatter.string(from: $0.date) } ?? pair.key
             Section(header: daySectionHeader(dateString: dateString, incomes: incomes)) {
-                ForEach(incomes) { income in
+                ForEach(Array(incomes.enumerated()), id: \.element.id) { rowIdx, income in
                     incomeRow(income)
                         .contentShape(Rectangle())
-                        .onTapGesture { editingItem = income }
-                        .swipeActions(edge: .trailing) {
+                        .onTapGesture { viewingItem = income }
+                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                             Button(role: .destructive) {
                                 if let idx = incomes.firstIndex(where: { $0.id == income.id }) {
                                     deleteIncomes(at: IndexSet(integer: idx), from: incomes)
@@ -395,7 +710,58 @@ struct IncomeView: View {
                             } label: { Label("複製", systemImage: "doc.on.doc") }
                             .tint(.blue)
                         }
+                        // 交錯淡入 + 向上進場，對齊 VariableExpenseView 規格
+                        .opacity(listRowsAppeared ? 1 : 0)
+                        .offset(y: listRowsAppeared ? 0 : 12)
+                        .animation(
+                            .spring(response: 0.44, dampingFraction: 0.82)
+                                .delay(0.04 * Double(min(groupIdx * 3 + rowIdx, 14))),
+                            value: listRowsAppeared
+                        )
                 }
+            }
+        }
+
+        // 展開更早紀錄按鈕（對齊 VariableExpenseView.expenseListSectionsFor 展開規格）
+        if hiddenCount > 0 {
+            Section {
+                Button {
+                    withAnimation(.spring(response: 0.42, dampingFraction: 0.78)) {
+                        visibleMonths += 3
+                    }
+                } label: {
+                    HStack(spacing: 12) {
+                        ZStack {
+                            Circle()
+                                .fill(Color.green.opacity(0.12))
+                                .frame(width: 36, height: 36)
+                            Image(systemName: "clock.arrow.circlepath")
+                                .font(.system(size: 15, weight: .medium))
+                                .foregroundStyle(.green)
+                        }
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("展開更早三個月")
+                                .font(.subheadline.weight(.medium))
+                                .foregroundStyle(.primary)
+                            Text("還有 \(hiddenCount) 筆隱藏中")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Text("\(hiddenCount)")
+                            .font(.caption.weight(.bold))
+                            .padding(.horizontal, 9)
+                            .padding(.vertical, 4)
+                            .background(Color.green.opacity(0.12))
+                            .foregroundStyle(.green)
+                            .clipShape(Capsule())
+                        Image(systemName: "chevron.down")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.green)
+                    }
+                    .padding(.vertical, 2)
+                }
+                .buttonStyle(.plain)
             }
         }
     }
@@ -406,7 +772,16 @@ struct IncomeView: View {
             let income = incomes[index]
             if let stockId = income.linkedStockId,
                var stock = financeStore.stocks.first(where: { $0.id == stockId }) {
-                stock.linkedIncomeId = nil
+                // 一檔股票可能同時有「賣出獲利」（stock.linkedIncomeId）與多筆「配息」
+                // （stock.dividends[i].linkedIncomeId）各自連結不同收入，只能清掉真正
+                // 對應本筆被刪收入的那個欄位，避免刪配息卻連帶清掉不相干的賣出獲利連結，
+                // 或刪賣出獲利卻留下配息指向已刪除收入的孤兒連結。
+                if stock.linkedIncomeId == income.id {
+                    stock.linkedIncomeId = nil
+                }
+                if let divIdx = stock.dividends.firstIndex(where: { $0.linkedIncomeId == income.id }) {
+                    stock.dividends[divIdx].linkedIncomeId = nil
+                }
                 financeStore.update(stock)
             }
             if let bankId = income.linkedBankMilestoneId,
@@ -460,6 +835,20 @@ struct IncomeView: View {
         }
     }
 
+    // mini 收入分類彩條用：依收入金額加總，取排名前 N 大的分類比例
+    private var incomeCategoryAmounts: [(category: IncomeCategory, amount: Double)] {
+        var amounts: [IncomeCategory: Double] = [:]
+        for income in store.incomes {
+            amounts[income.category, default: 0] += income.amount
+        }
+        return IncomeCategory.allCases
+            .compactMap { cat -> (category: IncomeCategory, amount: Double)? in
+                let v = amounts[cat, default: 0]
+                return v > 0 ? (cat, v) : nil
+            }
+            .sorted { $0.amount > $1.amount }
+    }
+
     private func incomeRow(_ income: Income) -> some View {
         let accent = incomeCategoryColor(income.category)
         return HStack(spacing: 12) {
@@ -500,6 +889,24 @@ struct IncomeView: View {
                             .foregroundStyle(accent.opacity(0.85))
                             .clipShape(Capsule())
                     }
+                    // 固定薪水結束標示：已過結束月 → 灰色「已結束」；尚未到 → 橘色「將結束」
+                    if income.isFixedSalary, let end = income.endDate {
+                        let ended = !income.isActive(in: Date())
+                        Label("\(income.endReason?.rawValue ?? "結束") \(endBadgeFmt(end))",
+                              systemImage: income.endReason?.icon ?? "calendar.badge.exclamationmark")
+                            .font(.system(size: 10, weight: .semibold))
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background((ended ? Color.gray : Color.orange).opacity(0.14))
+                            .foregroundStyle(ended ? Color.gray : Color.orange)
+                            .clipShape(Capsule())
+                    }
+                    // 股票連結指示：有配息連結時顯示圖示，對齊 ExpenseRow.mappin 地點指示規格
+                    if income.linkedStockId != nil {
+                        Image(systemName: "chart.line.uptrend.xyaxis")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(Color(red: 0.27, green: 0.67, blue: 0.99).opacity(0.80))
+                    }
                     if !income.note.isEmpty {
                         Text(income.note)
                             .font(.caption2)
@@ -517,16 +924,17 @@ struct IncomeView: View {
                     .foregroundStyle(accent)
                     .contentTransition(.numericText())
                 if let label = depositBankLabel(for: income) {
+                    // 銀行標籤：升級為分類主題色（對齊 ExpenseRow.diningMember 膠囊規格）
                     HStack(spacing: 3) {
                         Image(systemName: "building.columns.fill")
                             .font(.system(size: 9))
                         Text(label)
                             .font(.system(size: 10, weight: .medium))
                     }
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(accent.opacity(0.85))
                     .padding(.horizontal, 6)
                     .padding(.vertical, 2)
-                    .background(Color(.tertiarySystemFill))
+                    .background(accent.opacity(0.08))
                     .clipShape(Capsule())
                     .lineLimit(1)
                 }
@@ -547,7 +955,7 @@ struct IncomeView: View {
 
     private func groupedByDate() -> [(key: String, value: [Income])] {
         let grouped = Dictionary(grouping: filteredIncomes) { income in
-            Self.groupDateFormatter.string(from: income.date)
+            Self.groupKeyFormatter.string(from: income.date)
         }
 
         return grouped.sorted { pair1, pair2 in
@@ -556,7 +964,15 @@ struct IncomeView: View {
         }
     }
 
+    /// 金額格式化：未滿一萬照常顯示 NT$ 金額；達到一萬(含)以上改以「萬」為單位，
+    /// 例如 12,345 → NT$1.2萬、1,234,567 → NT$123.5萬，避免位數過多造成換行/難讀。
     private func fmt(_ v: Double) -> String {
-        Self.currencyFormatter.string(from: NSNumber(value: v)) ?? "NT$0"
+        v.ntdWanString
     }
+
+    private static let endBadgeFormatter: DateFormatter = {
+        let f = DateFormatter(); f.locale = Locale(identifier: "zh_Hant_TW"); f.dateFormat = "yyyy/M"; return f
+    }()
+    /// 固定薪水結束標示日期（僅到年月）。
+    private func endBadgeFmt(_ d: Date) -> String { Self.endBadgeFormatter.string(from: d) }
 }

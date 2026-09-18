@@ -1,5 +1,60 @@
 import SwiftUI
 
+// MARK: - 美化紀錄（FamilyOverviewMap）
+// [2026-06 v1] 本次美化方向：
+//   1. personChip 圖示圓：從 22pt 純色背景升級為 26pt LinearGradient 漸層底圓
+//      + 白色圖示 + 彩色外光暈陰影，對齊全 App 漸層圖示圓設計語言（ExpenseRow / incomeRow）。
+//   2. HouseView 雙層陰影：從單層 shadow 升級為「彩色頂光 + 黑色基底」雙層陰影，
+//      提升房子卡片的立體感，對齊 StockView.stockCard / VehicleView.vehicleCard 規格。
+//   3. 屋頂 stroke overlay：顏色從 roofColor.opacity(0.6) 改為 roofColor.opacity(0.80)，
+//      提升屋頂三角形與屋身接合處的對比度。
+//   4. 屋身 overlay stroke：lineWidth 從 1 改為 0.75、顏色微調，深色模式下邊框更細膩，
+//      對齊全 App overlay stroke 規格（StockView / VehicleView 0.75pt 邊框）。
+//   5. 屋頂標籤字重：.semibold → .bold，與全 App Capsule sectionHeader 字重一致。
+//   6. 人名字體：9pt → 10pt，提升最小可識別閾值，避免超小字在小螢幕閱讀困難。
+// [2026-06 v2] 本次美化方向：
+//   7. houseRowsAppeared 交錯進場動畫：上排房子 scale(0.85→1) + opacity(0→1) spring 動畫，
+//      下排延遲 0.08s 後跟進，各棟再各延 0.05s × idx，
+//      對齊 FamilyView.membersAppeared / SubordinateView.rowsAppeared 規格。
+//   8. 親子連接線漸層：Rectangle green.opacity(0.6) → LinearGradient (0.80→0.40)，
+//      上排從上往下淡出，下排從下往上淡出，連線與街道接點過渡更自然。
+//   9. streetLine 路面漸層 + shadow：路面從純色升級為 LinearGradient (深→淺，模擬頂光)，
+//      底部加 shadow(radius:4) 提升街道立體感，對齊 HouseView 雙層陰影設計規格。
+//  10. HouseView 屋頂漸層：RoofShape fill 從純色升至 LinearGradient (roofColor→opacity(0.78))，
+//      增加屋頂的光感與立體層次，對齊 FinanceOverviewView 漸層卡片設計語言。
+//  11. HouseView 屋身深色模式相容：background 改為 ZStack { Color(.secondarySystemGroupedBackground)
+//      + bodyColor.opacity(0.55) }，深色模式下屋身使用系統背景疊主題色，不再顯示固定淺色。
+//  12. HouseView 屋身分隔線：Divider() → Rectangle (roofColor.opacity(0.20), 0.5pt)，
+//      分隔線改用屋頂主題色，提升視覺凝聚感；標籤文字改用 roofColor 色，強化辨識性。
+//  13. personChip 圖示圓補 stroke：加入 Circle().stroke(roofColor.opacity(0.22), lineWidth:0.75)，
+//      對齊 OverviewView.recentRow v3 / ChildrenResumeView v2 圖示圓邊框規格。
+// [2026-07 v3] 深色模式配色修正：
+//  14. 街道場景外層背景：v2 已把 HouseView 屋身改為深色模式相容，但外層 ScrollView 背景
+//      仍是寫死的淺草綠 LinearGradient，深色模式下這塊「街道底圖」會維持刺眼的亮綠色，
+//      與其餘全深色的畫面格格不入。改為依 colorScheme 切換：淺色模式維持原本淺草綠，
+//      深色模式改用深墨綠（模擬夜間街景），兩者都以 systemGroupedBackground 起筆過渡。
+// [2026-07 v4] 大字自適應補強（本檔案自 v1 起字級只有調大，從未補過 minimumScaleFactor）：
+//  15. 屋頂標籤（house.label）與人名（personChip 內 Text）固定寬度 130pt／50pt 容器中
+//      只有 lineLimit(1)，遇到較長名字（4 字以上）或系統輔助模式加大字級時會直接被
+//      truncation 吃掉尾字；補上 minimumScaleFactor(0.75) 讓文字先等比縮小再截斷，
+//      下限 0.75 仍維持可辨識，對齊 ResumeGiftSection v2 / StockDetailView v3 等
+//      全 App「大字先縮小、不無限截斷」的自適應規格。純文字顯示調整，房子分組、
+//      成員歸類等既有商業邏輯完全未變動。
+//  16. topHouses 為空時（無爸媽／親屬）原本只留一塊等高 Color.clear 佔位，街道上方
+//      顯得像版面錯誤的空白破洞；改為淡化的虛線房屋外框佔位符（house.fill 圖示 +
+//      「尚無其他成員」提示文字，透明度 0.35），讓「這裡本來就沒有房子」與「資料還在
+//      載入」在視覺上有明確區隔，對齊全 App 其餘頁面「空狀態需有明確提示」規格。
+// [2026-08 v5] 邊框粗細一致性 + 空狀態進場動畫收尾：
+//  17. RoofShape overlay stroke 的 lineWidth 從本檔案 v1 起就寫死 1pt，與同一輪 v1
+//      同步調整的屋身 overlay stroke（0.75pt，對齊全 App「0.75pt 邊框」規格）始終沒對齊，
+//      是這棟房子屋頂與屋身接合處唯一粗細不一致的邊框；改為 0.75pt，讓整棟房子的邊框
+//      規格前後一致。
+//  18. topHousesEmptyPlaceholder（v4 新增的空狀態佔位符）原本是靜態顯示，與同排其餘
+//      實際房子的 houseRowsAppeared 交錯進場動畫脫節——有資料的房子會淡入+縮放進場，
+//      沒資料的佔位符卻是瞬間出現，兩者切換時視覺不連貫；補上同款 opacity/scale spring
+//      動畫（不額外 stagger，與上排房子同時觸發），讓「有房子」與「沒房子」兩種狀態
+//      共用一致的進場節奏。純視覺層調整，房子分組、成員歸類等既有商業邏輯完全未變動。
+
 // MARK: - 家庭總覽（街道式）
 
 /// 將家庭成員依關係分組成數個「房子」，並排列在一條橫向街道的上下兩側。
@@ -7,6 +62,10 @@ import SwiftUI
 struct FamilyOverviewMap: View {
     let myName: String
     let members: [FamilyMember]
+    // [v2] 進場動畫旗標：上/下排房子各自 stagger
+    @State private var houseRowsAppeared = false
+    // [v3] 深色模式下街道底圖改用深墨綠，避免刺眼亮綠背景
+    @Environment(\.colorScheme) private var colorScheme
 
     private var spouse: FamilyMember? { members.first { $0.role == .spouse } }
     private var children: [FamilyMember] {
@@ -40,7 +99,8 @@ struct FamilyOverviewMap: View {
                 id: "sib-\(s.id.uuidString)",
                 label: "\(s.role.rawValue)的家",
                 kind: .sibling,
-                occupants: [.init(name: s.chineseName.isEmpty ? s.role.rawValue : s.chineseName,
+                occupants: [.init(id: s.id.uuidString,
+                                   name: s.chineseName.isEmpty ? s.role.rawValue : s.chineseName,
                                    role: s.role)]
             ))
         }
@@ -51,7 +111,7 @@ struct FamilyOverviewMap: View {
                 id: "rel-\(r.id.uuidString)",
                 label: r.chineseName.isEmpty ? "親屬" : r.chineseName,
                 kind: .relative,
-                occupants: [.init(name: r.chineseName.isEmpty ? "親屬" : r.chineseName, role: r.role)]
+                occupants: [.init(id: r.id.uuidString, name: r.chineseName.isEmpty ? "親屬" : r.chineseName, role: r.role)]
             ))
         }
         return list
@@ -66,7 +126,7 @@ struct FamilyOverviewMap: View {
                 label: "爸媽的家",
                 kind: .parents,
                 occupants: parents.map { p in
-                    .init(name: p.chineseName.isEmpty ? p.role.rawValue : p.chineseName, role: p.role)
+                    .init(id: p.id.uuidString, name: p.chineseName.isEmpty ? p.role.rawValue : p.chineseName, role: p.role)
                 }
             ))
         }
@@ -77,19 +137,19 @@ struct FamilyOverviewMap: View {
                 id: "rel-top-\(r.id.uuidString)",
                 label: r.chineseName.isEmpty ? "親屬" : r.chineseName,
                 kind: .relative,
-                occupants: [.init(name: r.chineseName.isEmpty ? "親屬" : r.chineseName, role: r.role)]
+                occupants: [.init(id: r.id.uuidString, name: r.chineseName.isEmpty ? "親屬" : r.chineseName, role: r.role)]
             ))
         }
         return list
     }
 
     private var nuclearOccupants: [HouseOccupant] {
-        var list: [HouseOccupant] = [.init(name: myName.isEmpty ? "我" : myName, role: nil)]
+        var list: [HouseOccupant] = [.init(id: "me", name: myName.isEmpty ? "我" : myName, role: nil)]
         if let s = spouse {
-            list.append(.init(name: s.chineseName.isEmpty ? "配偶" : s.chineseName, role: .spouse))
+            list.append(.init(id: s.id.uuidString, name: s.chineseName.isEmpty ? "配偶" : s.chineseName, role: .spouse))
         }
         for c in children {
-            list.append(.init(name: c.chineseName.isEmpty ? c.role.rawValue : c.chineseName, role: c.role))
+            list.append(.init(id: c.id.uuidString, name: c.chineseName.isEmpty ? c.role.rawValue : c.chineseName, role: c.role))
         }
         return list
     }
@@ -101,25 +161,38 @@ struct FamilyOverviewMap: View {
             VStack(spacing: 0) {
                 // 上排（爸媽 + 部分親屬）
                 HStack(alignment: .bottom, spacing: 24) {
-                    ForEach(topHouses) { h in
+                    // [v2] 用 enumerated 取得 idx 以計算 stagger 延遲
+                    ForEach(Array(topHouses.enumerated()), id: \.element.id) { idx, h in
                         VStack(spacing: 4) {
                             HouseView(house: h)
-                            // 我家連到爸媽家：底部一條短線（街道下會接續）
+                                // [v2] 上排 scale + opacity spring 進場
+                                .opacity(houseRowsAppeared ? 1 : 0)
+                                .scaleEffect(houseRowsAppeared ? 1 : 0.85, anchor: .bottom)
+                                .animation(
+                                    .spring(response: 0.50, dampingFraction: 0.80)
+                                        .delay(0.05 * Double(idx)),
+                                    value: houseRowsAppeared
+                                )
+                            // [v2] 親子連接線改用漸層：上方深 → 下方淡（接街道方向）
                             if h.kind == .parents {
                                 Rectangle()
-                                    .fill(Color.green.opacity(0.6))
+                                    .fill(
+                                        LinearGradient(
+                                            colors: [Color.green.opacity(0.80), Color.green.opacity(0.40)],
+                                            startPoint: .top, endPoint: .bottom
+                                        )
+                                    )
                                     .frame(width: 2, height: 14)
                             } else {
-                                Rectangle()
-                                    .fill(Color.clear)
-                                    .frame(width: 2, height: 14)
+                                Color.clear.frame(width: 2, height: 14)
                             }
                         }
                         .frame(width: HouseView.fixedWidth)
                     }
                     if topHouses.isEmpty {
-                        // 占位：沒有上排房子時保留高度，街道仍會在中間
-                        Color.clear.frame(height: 130)
+                        // [v4] 占位：沒有上排房子時改用淡化虛線房屋提示，取代純空白，
+                        // 保留高度讓街道仍在中間，同時明確傳達「這裡本來就沒有房子」
+                        topHousesEmptyPlaceholder
                     }
                 }
                 .padding(.horizontal, 24)
@@ -132,19 +205,31 @@ struct FamilyOverviewMap: View {
                 // 下排（我家 + 兄弟姐妹 + 部分親屬）
                 // 上方負 padding 讓房子腰部疊到街道上
                 HStack(alignment: .top, spacing: 24) {
-                    ForEach(bottomHouses) { h in
+                    // [v2] 用 enumerated 取得 idx 以計算 stagger 延遲（下排整體延遲 0.08s）
+                    ForEach(Array(bottomHouses.enumerated()), id: \.element.id) { idx, h in
                         VStack(spacing: 4) {
-                            // 我家上方畫一條短線承接到街道（爸媽連結用）
+                            // [v2] 親子連接線改用漸層：下方深 → 上方淡（接街道方向）
                             if h.kind == .myFamily && !parents.isEmpty {
                                 Rectangle()
-                                    .fill(Color.green.opacity(0.6))
+                                    .fill(
+                                        LinearGradient(
+                                            colors: [Color.green.opacity(0.40), Color.green.opacity(0.80)],
+                                            startPoint: .top, endPoint: .bottom
+                                        )
+                                    )
                                     .frame(width: 2, height: 14)
                             } else {
-                                Rectangle()
-                                    .fill(Color.clear)
-                                    .frame(width: 2, height: 14)
+                                Color.clear.frame(width: 2, height: 14)
                             }
                             HouseView(house: h)
+                                // [v2] 下排延遲 0.08s 後再 stagger 各棟
+                                .opacity(houseRowsAppeared ? 1 : 0)
+                                .scaleEffect(houseRowsAppeared ? 1 : 0.85, anchor: .top)
+                                .animation(
+                                    .spring(response: 0.50, dampingFraction: 0.80)
+                                        .delay(0.08 + 0.05 * Double(idx)),
+                                    value: houseRowsAppeared
+                                )
                         }
                         .frame(width: HouseView.fixedWidth)
                     }
@@ -154,12 +239,27 @@ struct FamilyOverviewMap: View {
                 .frame(minWidth: scrollMinWidth, alignment: .center)
             }
             .padding(.vertical, 12)
+            .onAppear {
+                // [v2] 觸發所有房子進場動畫
+                withAnimation(.spring(response: 0.52, dampingFraction: 0.78).delay(0.08)) {
+                    houseRowsAppeared = true
+                }
+            }
+            .onDisappear { houseRowsAppeared = false }
         }
-        .background(
-            LinearGradient(
-                colors: [Color(.systemGroupedBackground), Color(red: 0.93, green: 0.96, blue: 0.92)],
-                startPoint: .top, endPoint: .bottom
-            )
+        .background(streetSceneBackground)
+    }
+
+    /// [v3] 街道底圖：淺色模式維持原本淺草綠，深色模式改用深墨綠模擬夜間街景
+    private var streetSceneBackground: LinearGradient {
+        LinearGradient(
+            colors: [
+                Color(.systemGroupedBackground),
+                colorScheme == .dark
+                    ? Color(red: 0.07, green: 0.11, blue: 0.08)
+                    : Color(red: 0.93, green: 0.96, blue: 0.92)
+            ],
+            startPoint: .top, endPoint: .bottom
         )
     }
 
@@ -171,13 +271,49 @@ struct FamilyOverviewMap: View {
         return CGFloat(count) * (HouseView.fixedWidth + 24) + 48
     }
 
+    /// [v4] 上排無房子時的淡化空狀態提示，取代原本的純空白佔位
+    /// [v5] 補上與同排實際房子一致的 opacity/scale 進場動畫，避免瞬間出現的不連貫感
+    private var topHousesEmptyPlaceholder: some View {
+        VStack(spacing: 4) {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(style: StrokeStyle(lineWidth: 1, dash: [4, 4]))
+                .foregroundStyle(.secondary.opacity(0.35))
+                .frame(width: HouseView.fixedWidth, height: 92)
+                .overlay(
+                    VStack(spacing: 6) {
+                        Image(systemName: "house.fill")
+                            .font(.system(size: 20))
+                        Text("尚無其他成員")
+                            .font(.caption2)
+                            .minimumScaleFactor(0.75)
+                            .lineLimit(1)
+                    }
+                    .foregroundStyle(.secondary.opacity(0.45))
+                )
+            Color.clear.frame(height: 34)
+        }
+        // [v5] 與上排房子共用同一組進場動畫，不額外 stagger
+        .opacity(houseRowsAppeared ? 1 : 0)
+        .scaleEffect(houseRowsAppeared ? 1 : 0.85, anchor: .bottom)
+        .animation(.spring(response: 0.50, dampingFraction: 0.80), value: houseRowsAppeared)
+    }
+
     // MARK: - 街道
 
     private var streetLine: some View {
         ZStack {
-            // 路面（深綠灰）
+            // [v2] 路面改漸層（頂部深 → 底部淺），模擬頂光照射路面的真實光感
             Rectangle()
-                .fill(Color(red: 0.55, green: 0.62, blue: 0.50))
+                .fill(
+                    LinearGradient(
+                        colors: [
+                            Color(red: 0.50, green: 0.57, blue: 0.46),
+                            Color(red: 0.58, green: 0.65, blue: 0.53)
+                        ],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
                 .frame(height: 32)
             // 雙黃線
             VStack(spacing: 4) {
@@ -205,13 +341,15 @@ struct FamilyOverviewMap: View {
             .frame(height: 32)
         }
         .frame(height: 32)
+        // [v2] 街道底部陰影，提升立體感
+        .shadow(color: .black.opacity(0.14), radius: 4, x: 0, y: 2)
     }
 }
 
 // MARK: - 房子資料
 
 struct HouseOccupant: Identifiable, Hashable {
-    var id: String { name + (role?.rawValue ?? "self") }
+    let id: String  // 直接傳入成員 UUID，避免同名同角色的成員產生重複 ID
     let name: String
     let role: FamilyMemberRole?
 }
@@ -253,23 +391,37 @@ struct HouseView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // 屋頂（三角形）
+            // [v2] 屋頂改漸層 fill，增加光感立體層次
             RoofShape()
-                .fill(house.kind.roofColor)
+                .fill(
+                    LinearGradient(
+                        colors: [house.kind.roofColor, house.kind.roofColor.opacity(0.78)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
                 .frame(height: 32)
                 .overlay(
                     RoofShape()
-                        .stroke(house.kind.roofColor.opacity(0.6), lineWidth: 1)
+                        // [v5] 1 → 0.75，對齊屋身 overlay stroke 與全 App 0.75pt 邊框規格
+                        .stroke(house.kind.roofColor.opacity(0.80), lineWidth: 0.75)
                 )
 
             // 屋身
             VStack(spacing: 4) {
+                // [v2] 標籤文字改用屋頂主題色，強化視覺關聯
                 Text(house.label)
-                    .font(.caption.weight(.semibold))
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(house.kind.roofColor)
                     .lineLimit(1)
+                    // [v4] 較長名字或加大字級時先等比縮小，避免直接被截斷
+                    .minimumScaleFactor(0.75)
                     .padding(.top, 6)
 
-                Divider()
+                // [v2] 分隔線改主題色細線（0.5pt），對齊全 App separator 規格
+                Rectangle()
+                    .fill(house.kind.roofColor.opacity(0.20))
+                    .frame(height: 0.5)
                     .padding(.horizontal, 8)
 
                 // 成員圈圈
@@ -288,27 +440,48 @@ struct HouseView: View {
                 .padding(.bottom, 6)
             }
             .frame(width: HouseView.fixedWidth)
-            .background(house.kind.bodyColor)
+            // [v2] 深色模式相容：系統背景色 + 主題色透明疊加，取代固定淺色 bodyColor
+            .background(
+                ZStack {
+                    Color(.secondarySystemGroupedBackground)
+                    house.kind.bodyColor.opacity(0.55)
+                }
+            )
             .overlay(
                 Rectangle()
-                    .stroke(house.kind.roofColor.opacity(0.5), lineWidth: 1)
+                    .stroke(house.kind.roofColor.opacity(0.45), lineWidth: 0.75)
             )
         }
-        .shadow(color: .black.opacity(0.12), radius: 4, y: 2)
+        // 雙層陰影：彩色頂光 + 黑色基底
+        .shadow(color: house.kind.roofColor.opacity(0.28), radius: 10, x: 0, y: 5)
+        .shadow(color: .black.opacity(0.10), radius: 3, x: 0, y: 1)
     }
 
     private func personChip(_ p: HouseOccupant) -> some View {
         VStack(spacing: 2) {
-            Image(systemName: p.role?.icon ?? "person.fill")
-                .font(.caption2)
-                .frame(width: 22, height: 22)
-                .background(house.kind.roofColor.opacity(0.18))
-                .foregroundStyle(house.kind.roofColor)
-                .clipShape(Circle())
+            ZStack {
+                Circle()
+                    .fill(
+                        LinearGradient(
+                            colors: [house.kind.roofColor, house.kind.roofColor.opacity(0.72)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 26, height: 26)
+                    // [v2] 補 stroke overlay，對齊 recentRow / ChildrenResumeView v2 圖示圓邊框規格
+                    .overlay(Circle().stroke(house.kind.roofColor.opacity(0.22), lineWidth: 0.75))
+                    .shadow(color: house.kind.roofColor.opacity(0.35), radius: 4, x: 0, y: 2)
+                Image(systemName: p.role?.icon ?? "person.fill")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.white)
+            }
             Text(p.name)
-                .font(.system(size: 9))
+                .font(.system(size: 10))
                 .lineLimit(1)
                 .truncationMode(.middle)
+                // [v4] 先等比縮小到 0.75 下限再觸發中間截斷，短名字在大字級下也不會被吃字
+                .minimumScaleFactor(0.75)
                 .frame(maxWidth: 50)
         }
     }
