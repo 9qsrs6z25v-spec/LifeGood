@@ -28,6 +28,10 @@ struct HealthView: View {
     @State private var editing: WorkoutSession?
     @State private var syncing = false
     @State private var syncMessage: String?
+    /// [v25.388] 複製訓練後的短暫提示（複製出來的那一筆是「現在」，會直接跳到清單最上面，
+    /// 使用者若是在下面幾筆按的複製，新的那一列可能根本不在畫面上，不講一聲會以為沒反應）
+    @State private var copiedNote: String?
+    @State private var copiedNoteTask: Task<Void, Never>?
     /// 上次同步時間，決定要往回抓多久（第一次抓 90 天）
     @AppStorage("health_hk_last_sync") private var lastSyncEpoch: Double = 0
     @AppStorage("health_hk_enabled") private var hkEnabled = false
@@ -216,6 +220,12 @@ struct HealthView: View {
                     Task { await pushToHealthKit(session) }
                 }
                 .environmentObject(lifeStore)
+            }
+            // 離開頁面時把還在倒數的提示收掉，不要留一個醒著的 Task
+            .onDisappear {
+                copiedNoteTask?.cancel()
+                copiedNoteTask = nil
+                copiedNote = nil
             }
         }
     }
@@ -456,6 +466,56 @@ struct HealthView: View {
     }
 
     /// 把新記的訓練寫回 Apple 健康（只有打開聯動、而且還沒寫過的才寫）
+    // MARK: 複製訓練
+
+    /// [v25.388] 把一筆訓練原封不動複製一份到現在，省得同一套菜單每次重打。
+    ///
+    /// 帶過去的是「訓練內容」：標題、每個動作（名稱／類型／次數／組數／負荷／距離／時間／
+    /// 備註）、整場時間、場地、備註。
+    ///
+    /// ⚠️ 刻意**不**帶的是「那一次實際量到的東西」——把它們複製過來等於憑空捏造一筆
+    ///    根本沒發生過的數據：
+    ///    • healthKitUUID：那是 Apple 健康的去重鍵。複製過去等於宣稱這兩筆是同一場訓練，
+    ///      下次同步的 known 集合會把新的這筆誤判成已匯入，而且寫回去也會打架。
+    ///    • route / elevationGainM：GPS 路徑是那天真的跑過的那條路，套到今天是假的。
+    ///    • activeEnergyKcal：量出來的熱量，不是你打算做的事。
+    ///    這幾個欄位都留給 WorkoutSession／WorkoutExercise 的預設值（nil／空陣列／0）。
+    ///
+    /// 每個動作也都會拿到新的 id——沿用舊 id 的話同一個 id 會同時存在於兩筆紀錄裡，
+    /// ForEach 與各種以 id 比對的地方都會開始出怪事。
+    private func duplicate(_ s: WorkoutSession) {
+        let copy = WorkoutSession(
+            date: Date(),
+            title: s.title,
+            exercises: s.exercises.map { e in
+                WorkoutExercise(name: e.name, kind: e.kind,
+                                reps: e.reps, sets: e.sets,
+                                loadType: e.loadType, loadKg: e.loadKg,
+                                distanceKm: e.distanceKm,
+                                durationMinutes: e.durationMinutes,
+                                note: e.note)
+            },
+            durationMinutes: s.durationMinutes,
+            place: s.place,
+            note: s.note
+        )
+        lifeStore.upsertWorkout(copy)
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        // 與編輯畫面存檔同一條路：使用者若開著 Apple 健康同步，新的一筆一樣寫回去
+        Task { await pushToHealthKit(copy) }
+
+        copiedNoteTask?.cancel()
+        let label = copy.displayTitle
+        withAnimation(.easeOut(duration: 0.2)) {
+            copiedNote = "已複製「\(label)」到現在，新的一筆排在清單最上面。"
+        }
+        copiedNoteTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeOut(duration: 0.25)) { copiedNote = nil }
+        }
+    }
+
     private func pushToHealthKit(_ session: WorkoutSession) async {
         guard hkEnabled, health.isAvailable, session.healthKitUUID == nil else { return }
         guard let uuid = await health.saveWorkout(session, bodyWeightKg: bodyWeight) else { return }
@@ -666,6 +726,20 @@ struct HealthView: View {
     private var sessionSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             sectionHeader("訓練紀錄", count: sessions.count)
+            if let note = copiedNote {
+                HStack(spacing: 6) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 12)).foregroundStyle(accent)
+                    Text(note)
+                        .font(.caption2.weight(.medium)).foregroundStyle(accent)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 9).padding(.vertical, 6)
+                .background(accent.opacity(0.10))
+                .clipShape(RoundedRectangle(cornerRadius: 9))
+                .transition(.opacity)
+            }
             if sessions.isEmpty {
                 emptyState
             } else {
@@ -703,6 +777,8 @@ struct HealthView: View {
                 }
                 Menu {
                     Button("編輯") { editing = s; showEditor = true }
+                    Button("複製到現在") { duplicate(s) }
+                    Divider()
                     Button("刪除", role: .destructive) { lifeStore.deleteWorkout(id: s.id) }
                 } label: {
                     Image(systemName: "ellipsis.circle")
