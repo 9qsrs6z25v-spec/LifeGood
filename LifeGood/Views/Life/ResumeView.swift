@@ -1389,6 +1389,19 @@ struct AddMilestoneView: View {
     @State private var idNumber = ""
     @State private var relativeNote = ""
 
+    // [v25.387] 寵物欄位（familyRole == .pet 才顯示）
+    @State private var petSpecies: PetSpecies = .dog
+    @State private var petSpeciesOther = ""
+    @State private var petBreed = ""
+    @State private var petGender: PetGender = .unknown
+    @State private var petIsNeutered = false
+    @State private var petMicrochipId = ""
+    @State private var petHasAdoptionDate = false
+    @State private var petAdoptionDate = Date()
+    @State private var petColorMark = ""
+    /// 流浪／中途認養常常根本不知道確切生日，所以生日在寵物這邊是選填
+    @State private var petHasBirthday = true
+
     enum RealEstateMode: String, CaseIterable, Identifiable {
         case existing = "連結既有"
         case new = "新增物件"
@@ -1587,10 +1600,22 @@ struct AddMilestoneView: View {
                 Label(role.rawValue, systemImage: role.icon).tag(role)
             }
         }
-        TextField("中文姓名", text: $familyChineseName)
-        TextField("英文姓名", text: $familyEnglishName)
+        TextField(familyRole == .pet ? "名字" : "中文姓名", text: $familyChineseName)
+        TextField(familyRole == .pet ? "英文名字 / 小名" : "英文姓名", text: $familyEnglishName)
             .autocapitalization(.words)
 
+        // [v25.387] 寵物走自己一套欄位——下面那串家族側／另一半／結婚離婚／身分證
+        // 對寵物一條都不適用，所以整段互斥，不是疊在後面。
+        if familyRole == .pet {
+            petFields
+        } else {
+            humanFamilyFields
+        }
+    }
+
+    /// 人類家人的欄位（原本 familyFields 的後半段，拆出來讓寵物那條路徑乾淨一點）
+    @ViewBuilder
+    private var humanFamilyFields: some View {
         // 家族側選擇：父母 / 兄姊弟妹 / 其他親屬才出現
         if familyRole.supportsFamilySide {
             Picker("家族側", selection: $familySide) {
@@ -1644,6 +1669,56 @@ struct AddMilestoneView: View {
                 .lineLimit(2...4)
         } else {
             DatePicker("出生日期", selection: $familyBirthday, in: ...Date(), displayedComponents: .date)
+        }
+    }
+
+    // MARK: - 寵物欄位
+
+    /// [v25.387] 寵物的基本資料。
+    ///
+    /// ⚠️ 拆成三段是必要的，不是為了好看：ViewBuilder 一個區塊最多只吃 10 個子項目，
+    ///    全部攤在同一個 var 裡剛好超過（11 個），編譯會直接過不了。
+    @ViewBuilder
+    private var petFields: some View {
+        petIdentityFields
+        petDateFields
+        TextField("晶片號碼（選填）", text: $petMicrochipId)
+            .keyboardType(.numbersAndPunctuation)
+        TextField("毛色與特徵（如 黑白虎斑、右耳缺角）", text: $petColorMark, axis: .vertical)
+            .lineLimit(2...4)
+    }
+
+    @ViewBuilder
+    private var petIdentityFields: some View {
+        Picker("物種", selection: $petSpecies) {
+            ForEach(PetSpecies.allCases) { s in
+                Label(s.rawValue, systemImage: s.icon).tag(s)
+            }
+        }
+        if petSpecies == .other {
+            TextField("物種名稱（如 刺蝟、蜜袋鼯）", text: $petSpeciesOther)
+        }
+        TextField("品種（如 柴犬、美國短毛貓）", text: $petBreed)
+        Picker("性別", selection: $petGender) {
+            ForEach(PetGender.allCases) { g in
+                Text(g.rawValue).tag(g)
+            }
+        }
+        .pickerStyle(.segmented)
+        Toggle("已結紮／絕育", isOn: $petIsNeutered)
+    }
+
+    /// 生日與到家日都是選填，而且分開問——中途認養的孩子多半只知道哪天到家，
+    /// 硬要填一個假生日會讓年齡跟著錯。
+    @ViewBuilder
+    private var petDateFields: some View {
+        Toggle("知道生日", isOn: $petHasBirthday)
+        if petHasBirthday {
+            DatePicker("出生日期", selection: $familyBirthday, in: ...Date(), displayedComponents: .date)
+        }
+        Toggle("填入到家日", isOn: $petHasAdoptionDate)
+        if petHasAdoptionDate {
+            DatePicker("到家日", selection: $petAdoptionDate, in: ...Date(), displayedComponents: .date)
         }
     }
 
@@ -2350,9 +2425,10 @@ struct AddMilestoneView: View {
     }
 
     private var navTitle: String {
-        if editingFamily != nil { return "編輯家庭成員" }
+        // [v25.387] 寵物也是家庭成員，但標題直接講「寵物」比較不會讓人愣一下
+        if editingFamily != nil { return familyRole == .pet ? "編輯寵物" : "編輯家庭成員" }
         if editing != nil { return "編輯里程碑" }
-        if isFamily { return "新增家庭成員" }
+        if isFamily { return familyRole == .pet ? "新增寵物" : "新增家庭成員" }
         return "新增里程碑"
     }
 
@@ -2374,13 +2450,33 @@ struct AddMilestoneView: View {
         if isFamily {
             let isSpouse = familyRole == .spouse
             let isOther = familyRole == .otherRelative
+            let isPet = familyRole == .pet
             let memberId = editingFamily?.id ?? UUID()
+            // [v25.387] 寵物欄位只在 role == .pet 時組出來；換成別的角色就存 nil，
+            // 不要讓上一個角色填到一半的物種／晶片跟著存進去（同 careerFields 的既有規矩）。
+            let petProfile: PetProfile? = isPet ? PetProfile(
+                species: petSpecies,
+                speciesOther: petSpecies == .other
+                    ? petSpeciesOther.trimmingCharacters(in: .whitespaces) : "",
+                breed: petBreed.trimmingCharacters(in: .whitespaces),
+                gender: petGender,
+                isNeutered: petIsNeutered,
+                microchipId: petMicrochipId.trimmingCharacters(in: .whitespaces),
+                adoptionDate: petHasAdoptionDate ? petAdoptionDate : nil,
+                colorMark: petColorMark.trimmingCharacters(in: .whitespacesAndNewlines)
+            ) : nil
+            // 配偶／其他親屬本來就不存生日；寵物則是「知道生日」關掉時不存
+            let birthdayToSave: Date? = {
+                if isSpouse || isOther { return nil }
+                if isPet { return petHasBirthday ? familyBirthday : nil }
+                return familyBirthday
+            }()
             let member = FamilyMember(
                 id: memberId,
                 role: familyRole,
                 chineseName: familyChineseName.trimmingCharacters(in: .whitespaces),
                 englishName: familyEnglishName.trimmingCharacters(in: .whitespaces),
-                birthday: (isSpouse || isOther) ? nil : familyBirthday,
+                birthday: birthdayToSave,
                 marriageDate: isSpouse && hasMarriageDate ? marriageDate : nil,
                 isDivorced: isSpouse && isDivorced,
                 divorceDate: isSpouse && isDivorced ? divorceDate : nil,
@@ -2388,7 +2484,8 @@ struct AddMilestoneView: View {
                 idNumber: isOther ? idNumber.trimmingCharacters(in: .whitespaces) : nil,
                 relativeNote: isOther ? relativeNote.trimmingCharacters(in: .whitespaces) : nil,
                 familySide: familyRole.supportsFamilySide ? familySide : nil,
-                spouseId: familyRole.spouseCandidateRole != nil ? familySpouseId : nil
+                spouseId: familyRole.spouseCandidateRole != nil ? familySpouseId : nil,
+                pet: petProfile
             )
             // 保留所有「不在這張表單上、但掛在這位成員底下」的集合。
             //
@@ -2398,6 +2495,8 @@ struct AddMilestoneView: View {
             //    這張表單上完全看不到，所以出事也不會當場察覺）。
             //    新增 agreements 時一併補上。日後再往 FamilyMember 加集合欄位，
             //    這裡一定要同步補一行。
+            //    （pet 不在這串裡是刻意的：它是這張表單自己管的欄位，
+            //    上面已經依 familyRole 組好，帶回舊值反而會蓋掉使用者剛改的設定。）
             var preserved = member
             if let original = editingFamily {
                 preserved.childRecords = original.childRecords
@@ -2717,6 +2816,19 @@ struct AddMilestoneView: View {
             relativeNote = f.relativeNote ?? ""
             familySide = f.familySide ?? .mine
             familySpouseId = f.spouseId
+            // [v25.387] 寵物欄位帶回。生日是選填，所以「知道生日」的開關要照實還原，
+            // 不然打開編輯再存一次就會憑空補上一個今天的生日。
+            petHasBirthday = f.birthday != nil
+            if let p = f.pet {
+                petSpecies = p.species
+                petSpeciesOther = p.speciesOther
+                petBreed = p.breed
+                petGender = p.gender
+                petIsNeutered = p.isNeutered
+                petMicrochipId = p.microchipId
+                petColorMark = p.colorMark
+                if let ad = p.adoptionDate { petHasAdoptionDate = true; petAdoptionDate = ad }
+            }
             return
         }
         category = initialCategory

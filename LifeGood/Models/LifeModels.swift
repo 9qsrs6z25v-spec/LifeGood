@@ -40,6 +40,11 @@ enum FamilyMemberRole: String, Codable, CaseIterable, Identifiable {
     case youngerBrother = "弟弟"
     case youngerSister = "妹妹"
     case otherRelative = "其他親屬"
+    /// [v25.387] 寵物也是家人。刻意做成 FamilyMemberRole 的一個 case、而不是另外開一份
+    /// 資料結構：這樣相簿、家庭事件、日常紀錄、成長／就醫紀錄、家庭待辦指派、
+    /// iCloud 同步、完整備份、桌機網頁檢視器全部原地沿用，一行同步設定都不用改。
+    /// 寵物專屬的欄位（物種／品種／晶片…）掛在 FamilyMember.pet 這個選填結構裡。
+    case pet = "寵物"
 
     var id: String { rawValue }
 
@@ -52,6 +57,7 @@ enum FamilyMemberRole: String, Codable, CaseIterable, Identifiable {
         case .elderBrother, .youngerBrother: return "figure.stand"
         case .elderSister, .youngerSister: return "figure.stand.dress"
         case .otherRelative: return "person.2.fill"
+        case .pet: return "pawprint.fill"
         }
     }
 
@@ -61,10 +67,13 @@ enum FamilyMemberRole: String, Codable, CaseIterable, Identifiable {
         case .father, .mother, .elderBrother, .elderSister,
              .youngerBrother, .youngerSister, .otherRelative:
             return true
-        case .spouse, .son, .daughter:
+        case .spouse, .son, .daughter, .pet:
             return false
         }
     }
+
+    /// 是不是寵物（供各處過濾用，避免到處寫 role == .pet）
+    var isPet: Bool { self == .pet }
 
     /// 父母 role 對應的「另一半」候選 role
     var spouseCandidateRole: FamilyMemberRole? {
@@ -73,6 +82,120 @@ enum FamilyMemberRole: String, Codable, CaseIterable, Identifiable {
         case .mother: return .father
         default: return nil
         }
+    }
+}
+
+// MARK: - 寵物
+
+/// [v25.387] 物種。決定圖示與配色，也決定「換算人類年齡」要不要算得出來
+/// （只有貓狗有大家公認的換算法，其餘一律不換算，不要自己編一個數字出來騙人）。
+enum PetSpecies: String, Codable, CaseIterable, Identifiable {
+    case dog = "狗"
+    case cat = "貓"
+    case bird = "鳥"
+    case fish = "魚"
+    case rabbit = "兔"
+    case rodent = "鼠"
+    case reptile = "爬蟲"
+    case other = "其他"
+
+    var id: String { rawValue }
+
+    var icon: String {
+        switch self {
+        case .dog: return "dog.fill"
+        case .cat: return "cat.fill"
+        case .bird: return "bird.fill"
+        case .fish: return "fish.fill"
+        case .rabbit: return "hare.fill"
+        case .rodent: return "pawprint.fill"
+        case .reptile: return "lizard.fill"
+        case .other: return "pawprint.circle.fill"
+        }
+    }
+
+    /// 有沒有公認的人類年齡換算
+    var hasHumanAgeFormula: Bool { self == .dog || self == .cat }
+}
+
+enum PetGender: String, Codable, CaseIterable, Identifiable {
+    case male = "男生"
+    case female = "女生"
+    case unknown = "未知"
+
+    var id: String { rawValue }
+
+    var icon: String {
+        switch self {
+        case .male: return "arrow.up.right.circle.fill"
+        case .female: return "arrow.down.circle.fill"
+        case .unknown: return "questionmark.circle.fill"
+        }
+    }
+}
+
+/// 寵物專屬欄位。掛在 FamilyMember.pet 上，role != .pet 時一律是 nil。
+///
+/// ⚠️ 全部給預設值：日後再加欄位時，舊存檔少 key 也能解出來（合成 Codable 對
+///    非 Optional 的欄位缺 key 會整筆解碼失敗，所以這裡自訂 init(from:)）。
+struct PetProfile: Codable, Equatable {
+    var species: PetSpecies
+    /// species == .other 時的自填物種名
+    var speciesOther: String
+    /// 品種（柴犬、美國短毛貓…）
+    var breed: String
+    var gender: PetGender
+    /// 已結紮／絕育
+    var isNeutered: Bool
+    /// 晶片號碼
+    var microchipId: String
+    /// 到家日（認養／購入日）。與生日分開：中途認養的孩子往往只知道到家日。
+    var adoptionDate: Date?
+    /// 毛色與外觀特徵
+    var colorMark: String
+
+    init(species: PetSpecies = .dog, speciesOther: String = "", breed: String = "",
+         gender: PetGender = .unknown, isNeutered: Bool = false,
+         microchipId: String = "", adoptionDate: Date? = nil, colorMark: String = "") {
+        self.species = species
+        self.speciesOther = speciesOther
+        self.breed = breed
+        self.gender = gender
+        self.isNeutered = isNeutered
+        self.microchipId = microchipId
+        self.adoptionDate = adoptionDate
+        self.colorMark = colorMark
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        species = (try? c.decode(PetSpecies.self, forKey: .species)) ?? .dog
+        speciesOther = (try? c.decode(String.self, forKey: .speciesOther)) ?? ""
+        breed = (try? c.decode(String.self, forKey: .breed)) ?? ""
+        gender = (try? c.decode(PetGender.self, forKey: .gender)) ?? .unknown
+        isNeutered = (try? c.decode(Bool.self, forKey: .isNeutered)) ?? false
+        microchipId = (try? c.decode(String.self, forKey: .microchipId)) ?? ""
+        adoptionDate = try? c.decodeIfPresent(Date.self, forKey: .adoptionDate)
+        colorMark = (try? c.decode(String.self, forKey: .colorMark)) ?? ""
+    }
+
+    /// 顯示用物種名：選「其他」且有自填就用自填的
+    var speciesLabel: String {
+        if species == .other {
+            let t = speciesOther.trimmingCharacters(in: .whitespaces)
+            if !t.isEmpty { return t }
+        }
+        return species.rawValue
+    }
+
+    /// 標題列副標：「柴犬・男生・已結紮」
+    var summaryLine: String {
+        var parts: [String] = []
+        let b = breed.trimmingCharacters(in: .whitespaces)
+        parts.append(b.isEmpty ? speciesLabel : b)
+        if gender != .unknown { parts.append(gender.rawValue) }
+        if isNeutered { parts.append("已結紮") }
+        return parts.joined(separator: "・")
     }
 }
 
@@ -279,6 +402,9 @@ struct FamilyMember: Identifiable, Codable {
     var vaccinations: [VaccineDose]
     /// 與這位家人談定的協定（目前只有配偶頁在用，掛在 FamilyMember 上讓它跟著人走）
     var agreements: [SpouseAgreement]?
+    /// [v25.387] 寵物專屬欄位（物種／品種／性別／結紮／晶片／到家日／毛色）。
+    /// role == .pet 才有值，其餘角色一律 nil。
+    var pet: PetProfile?
 
     init(id: UUID = UUID(), role: FamilyMemberRole = .spouse,
          chineseName: String = "", englishName: String = "",
@@ -288,7 +414,8 @@ struct FamilyMember: Identifiable, Codable {
          birthYear: Int? = nil, idNumber: String? = nil, relativeNote: String? = nil,
          familyEvents: [FamilyEvent] = [], familyPhotos: [FamilyAlbumPhoto] = [],
          familySide: FamilySide? = nil, spouseId: UUID? = nil,
-         vaccinations: [VaccineDose] = []) {
+         vaccinations: [VaccineDose] = [], pet: PetProfile? = nil) {
+        self.pet = pet
         self.id = id; self.role = role
         self.chineseName = chineseName; self.englishName = englishName
         self.birthday = birthday
@@ -328,6 +455,7 @@ struct FamilyMember: Identifiable, Codable {
         spouseId = try? c.decodeIfPresent(UUID.self, forKey: .spouseId)
         vaccinations = (try? c.decodeIfPresent([VaccineDose].self, forKey: .vaccinations)) ?? []
         agreements = try? c.decodeIfPresent([SpouseAgreement].self, forKey: .agreements)
+        pet = try? c.decodeIfPresent(PetProfile.self, forKey: .pet)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -354,6 +482,8 @@ struct FamilyMember: Identifiable, Codable {
         //    漏了這一行，協定永遠寫不進 JSON——而且完全不會編譯錯，
         //    只會在殺掉 App 重開後靜默消失。
         try c.encodeIfPresent(agreements, forKey: .agreements)
+        // 同上，寵物欄位也要自己寫一行，漏了就是重開 App 後靜默消失
+        try c.encodeIfPresent(pet, forKey: .pet)
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -361,6 +491,7 @@ struct FamilyMember: Identifiable, Codable {
         case birthYear, idNumber, relativeNote, familyEvents, familyPhotos
         case familySide, spouseId, vaccinations
         case agreements
+        case pet
     }
 
     /// 顯示用稱謂：依 familySide 與 role 自動套用「我的」或「配偶的」前綴
@@ -378,6 +509,66 @@ struct FamilyMember: Identifiable, Codable {
         case .otherRelative: return "配偶的親屬"
         default: return role.rawValue
         }
+    }
+}
+
+// MARK: - 寵物的年齡換算
+
+extension FamilyMember {
+    /// 顯示用名字（中文優先，都沒填就用角色名）
+    var petDisplayName: String {
+        let zh = chineseName.trimmingCharacters(in: .whitespaces)
+        if !zh.isEmpty { return zh }
+        let en = englishName.trimmingCharacters(in: .whitespaces)
+        if !en.isEmpty { return en }
+        return "未命名寵物"
+    }
+
+    /// 實際年齡（月數），沒生日就是 nil
+    var petAgeInMonths: Int? {
+        guard let bd = birthday else { return nil }
+        let m = Calendar.current.dateComponents([.month], from: bd, to: Date()).month ?? 0
+        return max(0, m)
+    }
+
+    /// 「3 歲 2 個月」／「5 個月」；沒生日回 nil
+    var petAgeText: String? {
+        guard let months = petAgeInMonths else { return nil }
+        let y = months / 12, m = months % 12
+        if y == 0 { return "\(m) 個月" }
+        return m == 0 ? "\(y) 歲" : "\(y) 歲 \(m) 個月"
+    }
+
+    /// 換算人類年齡。只有貓狗算得出來——其餘物種沒有公認換算法，
+    /// 與其掰一個數字給使用者看，不如不顯示。
+    ///
+    /// 用的是常見的簡化公式：第一年 15 歲、第二年再 +9（滿兩歲＝24），
+    /// 之後狗每年 +5、貓每年 +4。狗其實還會因體型差很多，這裡不細分，
+    /// 只當作「大概幾歲」的參考。
+    var petHumanAgeYears: Int? {
+        guard let profile = pet, profile.species.hasHumanAgeFormula,
+              let months = petAgeInMonths else { return nil }
+        let years = Double(months) / 12.0
+        let perYear: Double = profile.species == .cat ? 4 : 5
+        let human: Double
+        if years <= 1 {
+            human = years * 15
+        } else if years <= 2 {
+            human = 15 + (years - 1) * 9
+        } else {
+            human = 24 + (years - 2) * perYear
+        }
+        return max(0, Int(human.rounded()))
+    }
+
+    /// 在一起多久（以到家日起算，沒填到家日就用生日）
+    var petTogetherText: String? {
+        guard let start = pet?.adoptionDate ?? birthday else { return nil }
+        let comps = Calendar.current.dateComponents([.year, .month], from: start, to: Date())
+        let y = max(0, comps.year ?? 0), m = max(0, comps.month ?? 0)
+        if y == 0 && m == 0 { return "剛到家" }
+        if y == 0 { return "\(m) 個月" }
+        return m == 0 ? "\(y) 年" : "\(y) 年 \(m) 個月"
     }
 }
 

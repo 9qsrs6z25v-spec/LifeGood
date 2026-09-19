@@ -1175,6 +1175,14 @@ struct DailyRecordEditorSheet: View {
     let type: DailyRecordType
     var editing: DailyRecord?
 
+    /// [v25.387] 明確初始化：本型別有 private @State，合成的 memberwise init 是 private，
+    /// 跨檔案（PetDetailView）建不出來。childId 就是 FamilyMember.id，寵物也用同一組。
+    init(childId: UUID, type: DailyRecordType, editing: DailyRecord? = nil) {
+        self.childId = childId
+        self.type = type
+        self.editing = editing
+    }
+
     @State private var date = Date()
     @State private var milkBrand = ""
     @State private var mlText = ""
@@ -1342,6 +1350,13 @@ struct ChildRecordEditorSheet: View {
     let childId: UUID
     let type: ChildRecordType
     var editing: ChildRecord?
+
+    /// [v25.387] 明確初始化，理由同 DailyRecordEditorSheet
+    init(childId: UUID, type: ChildRecordType, editing: ChildRecord? = nil) {
+        self.childId = childId
+        self.type = type
+        self.editing = editing
+    }
 
     @State private var title = ""
     @State private var detail = ""

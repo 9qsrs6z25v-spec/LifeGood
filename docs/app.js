@@ -12,7 +12,7 @@
 // 常數
 // ---------------------------------------------------------------------------
 /** 網頁版自己的版本（與 App 版本無關；改網頁不再動 App 版號） */
-const WEB_VERSION = '1.9';
+const WEB_VERSION = '1.10';
 const CONTAINER_ID = 'iCloud.com.lifegood.app';
 const ZONE_NAME = 'LifeGoodZone';
 const TOKEN_KEY = 'lifegood_ck_token';
@@ -2709,7 +2709,36 @@ function giftRecipients(e) {
   return String(e.socialRecipient || '').split(/[,、，]/).map((x) => x.trim()).filter(Boolean);
 }
 const CHILD_ROLES = new Set(['兒子', '女兒']);
-const PET_ICON = { '狗': '🐶', '貓': '🐱', '鳥': '🐦', '魚': '🐟', '倉鼠': '🐹', '兔子': '🐰', '爬蟲': '🦎' };
+const PET_ICON = { '狗': '🐶', '貓': '🐱', '鳥': '🐦', '魚': '🐟', '鼠': '🐹', '兔': '🐰', '爬蟲': '🦎', '其他': '🐾',
+  // 舊的 life_pets 用的是這兩個字面值，保留著才不會變成沒有圖示的空白
+  '倉鼠': '🐹', '兔子': '🐰' };
+const PET_ROLE = '寵物';
+/** 寵物的物種顯示名（選「其他」且有自填就用自填的，對齊 App 的 PetProfile.speciesLabel） */
+function petTypeOf(m) {
+  const p = m.pet || {};
+  if (p.species === '其他' && p.speciesOther) return p.speciesOther;
+  return p.species || '其他';
+}
+/** [web v1.10] App v25.386 起，寵物是「角色＝寵物」的家庭成員（FamilyMember），
+ *  健康紀錄與相簿都掛在同一筆底下。這裡把它轉成本頁寵物卡片既有的資料形狀，
+ *  舊的 life_pets（一個從來沒有 App 介面、只可能留在舊備份裡的模型）仍然一併列出。 */
+function petsFromMembers(members) {
+  return (members || []).filter((m) => m.role === PET_ROLE).map((m) => {
+    const p = m.pet || {};
+    const recs = m.childRecords || [];
+    // 體重記在成長紀錄裡，取最新一筆
+    const weighed = recs.filter((r) => r.type === '成長記錄' && r.weightKg > 0)
+      .sort((a, b) => (a.date || 0) - (b.date || 0));
+    const last = weighed[weighed.length - 1];
+    const note = [p.colorMark, p.microchipId ? '晶片 ' + p.microchipId : '',
+      p.isNeutered ? '已結紮' : ''].filter(Boolean).join('・');
+    return {
+      id: m.id, name: memberName(m), type: petTypeOf(m), breed: p.breed || '',
+      birthday: m.birthday, weight: last ? last.weightKg : 0, note,
+      healthRecords: recs.map((r) => ({ date: r.date, title: r.title, type: r.type, note: r.detail || r.note || '' })),
+    };
+  });
+}
 const CHILD_REC_ICON = { '疫苗': '💉', '過敏': '🤧', '成長記錄': '📏', '就醫記錄': '🏥', '教育里程碑': '🎓', '興趣才藝': '🎨', '紀念時刻': '✨' };
 const CHILD_REC_COLOR = { '疫苗': 'blue', '過敏': 'orange', '成長記錄': 'green', '就醫記錄': 'red', '教育里程碑': 'indigo', '興趣才藝': 'purple', '紀念時刻': 'pink' };
 function ageOf(bday) {
@@ -2735,15 +2764,21 @@ function renderFamily(main, tab) {
   const now = new Date();
   const members = Store.familyMembers || [];
   const children = members.filter((m) => CHILD_ROLES.has(m.role));
-  const pets = Store.pets || [];
+  const legacyPets = Store.pets || [];
+  const pets = [...petsFromMembers(members), ...legacyPets];
   const tasks = Store.familyTasks || [];
   const rels = Store.relationships || [];
   const openTasks = tasks.filter((t) => !t.isCompleted);
   const overdueTasks = openTasks.filter((t) => t.dueDate && t.dueDate < now);
   // 近期生日：家庭成員＋寵物＋人際關係
   const bdays = [
-    ...members.map((m) => ({ name: memberName(m), sub: m.role, b: birthdayInfo(m.birthday) })),
-    ...pets.map((p) => ({ name: p.name, sub: (PET_ICON[p.type] || '🐾') + ' ' + (p.type || '寵物'), b: birthdayInfo(p.birthday) })),
+    ...members.map((m) => ({
+      name: memberName(m),
+      sub: m.role === PET_ROLE ? (PET_ICON[petTypeOf(m)] || '🐾') + ' ' + petTypeOf(m) : m.role,
+      b: birthdayInfo(m.birthday),
+    })),
+    // 只補舊模型的寵物——角色＝寵物的成員已經在上面那一行算過了，兩邊都算會出現兩次
+    ...legacyPets.map((p) => ({ name: p.name, sub: (PET_ICON[p.type] || '🐾') + ' ' + (p.type || '寵物'), b: birthdayInfo(p.birthday) })),
     ...rels.map((r) => ({ name: r.name, sub: r.group, b: birthdayInfo(r.birthday) })),
   ].filter((x) => x.b && x.b.days <= 60).sort((a, b) => a.b.days - b.b.days);
   const spouse = members.find((m) => m.role === '配偶' && !m.isDivorced);
@@ -2754,9 +2789,11 @@ function renderFamily(main, tab) {
   if (tab === 'members') {
     // App 的 familySide 只用在父母／兄姊弟妹／其他親屬（FamilyMemberRole.supportsFamilySide）；
     // 配偶與兒女不分家族側，familySide 一定是空的，所以要單獨成一段，不能丟進「未分家族」。
-    const bySide = { '核心': [], '我的': [], '配偶的': [], '其他': [] };
+    // [web v1.10] 寵物自成一段：牠既不分家族側、也不該跟配偶兒女混在「核心」裡
+    const bySide = { '核心': [], '寵物': [], '我的': [], '配偶的': [], '其他': [] };
     for (const m of members) {
-      if (!SIDE_ROLES.has(m.role)) bySide['核心'].push(m);
+      if (m.role === PET_ROLE) bySide['寵物'].push(m);
+      else if (!SIDE_ROLES.has(m.role)) bySide['核心'].push(m);
       else if (m.familySide === '我的') bySide['我的'].push(m);
       else if (m.familySide === '配偶的') bySide['配偶的'].push(m);
       else bySide['其他'].push(m);
@@ -2765,10 +2802,10 @@ function renderFamily(main, tab) {
       const a = ageOf(m.birthday);
       const recs = (m.childRecords || []).length, evts = (m.familyEvents || []).length, daily = (m.dailyRecords || []).length;
       return `<div class="card"><div class="row" style="align-items:flex-start;gap:10px">
-        <div class="avatar sm" style="background:linear-gradient(135deg,#ff2d55,#ff9500)">${esc(initial(memberName(m)))}</div>
+        <div class="avatar sm" style="background:linear-gradient(135deg,${m.role === PET_ROLE ? '#34c759,#30b0c7' : '#ff2d55,#ff9500'})">${m.role === PET_ROLE ? (PET_ICON[petTypeOf(m)] || '🐾') : esc(initial(memberName(m)))}</div>
         <div style="flex:1;min-width:0">
           <div style="font-weight:900;font-size:15px">${esc(memberName(m))}${m.englishName && m.chineseName ? ` <span class="muted" style="font-weight:600">${esc(m.englishName)}</span>` : ''}</div>
-          <div class="muted small">${esc(displayRole(m))}${a ? '・' + a.text : ''}</div>
+          <div class="muted small">${esc(m.role === PET_ROLE ? [petTypeOf(m), (m.pet || {}).breed].filter(Boolean).join('・') : displayRole(m))}${a ? '・' + a.text : ''}</div>
         </div>
         ${m.isDivorced ? '<span class="chip">已離婚</span>' : ''}
       </div>
@@ -2779,7 +2816,7 @@ function renderFamily(main, tab) {
         ${m.relativeNote ? `<div><span class="nc-lbl">備註</span>${esc(m.relativeNote)}</div>` : ''}
       </div>
       ${recs || evts || daily || (m.vaccinations || []).length ? `<div class="chips" style="margin-top:8px">
-        ${recs ? `<a class="chip green" href="#/life/family/children">兒女紀錄 ${recs}</a>` : ''}
+        ${recs ? `<a class="chip green" href="#/life/family/${m.role === PET_ROLE ? 'pets' : 'children'}">${m.role === PET_ROLE ? '健康紀錄' : '兒女紀錄'} ${recs}</a>` : ''}
         ${(m.vaccinations || []).length ? `<span class="chip blue">疫苗 ${(m.vaccinations || []).length}</span>` : ''}
         ${evts ? `<span class="chip orange">家庭事件 ${evts}</span>` : ''}
         ${daily ? `<span class="chip teal">日常紀錄 ${daily}</span>` : ''}
@@ -2788,8 +2825,8 @@ function renderFamily(main, tab) {
       ${(m.familyEvents || []).length ? `<details class="agenda"><summary>家庭事件 ${(m.familyEvents || []).length}</summary><div class="sub-items">${[...m.familyEvents].sort((a, b) => b.date - a.date).slice(0, 10).map((e) => `<div class="t-meta" style="padding:3px 0"><b>${fmtDate(e.date).split(' ')[0]}</b>　${esc(e.title || '')}${e.content ? '・' + esc(e.content) : ''}</div>`).join('')}</div></details>` : ''}
       </div>`;
     };
-    const SIDE_TITLE = { '核心': '配偶與兒女', '我的': '我的家', '配偶的': '配偶的家', '其他': '未分家族' };
-    body = ['核心', '我的', '配偶的', '其他'].filter((k) => bySide[k].length)
+    const SIDE_TITLE = { '核心': '配偶與兒女', '寵物': '毛小孩', '我的': '我的家', '配偶的': '配偶的家', '其他': '未分家族' };
+    body = ['核心', '寵物', '我的', '配偶的', '其他'].filter((k) => bySide[k].length)
       .map((k) => `<div class="section-title">${SIDE_TITLE[k]}（${bySide[k].length}）</div><div class="grid cols-3">${bySide[k].map(card).join('')}</div>`).join('')
       || '<div class="empty">尚無家庭成員</div>';
   } else if (tab === 'children') {

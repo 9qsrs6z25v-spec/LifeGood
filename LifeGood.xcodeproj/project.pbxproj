@@ -72,6 +72,8 @@
 		A01B000001000204 /* ChildVaccineSchedule.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000204 /* ChildVaccineSchedule.swift */; };
 		A01B000001000205 /* ChildVaccineScheduleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000205 /* ChildVaccineScheduleView.swift */; };
 		A01B000001000206 /* SubordinateEquipmentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000206 /* SubordinateEquipmentView.swift */; };
+		A01B000001000221 /* PetResumeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000221 /* PetResumeView.swift */; };
+		A01B000001000222 /* PetDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000222 /* PetDetailView.swift */; };
 		A01B000001000207 /* MapAlbumSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000207 /* MapAlbumSheet.swift */; };
 		A01B000001000208 /* QuickPickCapsules.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000208 /* QuickPickCapsules.swift */; };
 		A01B000001000209 /* HeroTrendChart.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000209 /* HeroTrendChart.swift */; };
@@ -226,6 +228,8 @@
 		A01A000001000203 /* MedicalMapView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MedicalMapView.swift; sourceTree = "<group>"; };
 		A01A000001000205 /* ChildVaccineScheduleView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChildVaccineScheduleView.swift; sourceTree = "<group>"; };
 		A01A000001000206 /* SubordinateEquipmentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubordinateEquipmentView.swift; sourceTree = "<group>"; };
+		A01A000001000221 /* PetResumeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PetResumeView.swift; sourceTree = "<group>"; };
+		A01A000001000222 /* PetDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PetDetailView.swift; sourceTree = "<group>"; };
 		A01A000001000207 /* MapAlbumSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MapAlbumSheet.swift; sourceTree = "<group>"; };
 		A01A000001000208 /* QuickPickCapsules.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickPickCapsules.swift; sourceTree = "<group>"; };
 		A01A000001000209 /* HeroTrendChart.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HeroTrendChart.swift; sourceTree = "<group>"; };
@@ -479,6 +483,8 @@
 				A01A000001000203 /* MedicalMapView.swift */,
 				A01A000001000205 /* ChildVaccineScheduleView.swift */,
 				A01A000001000206 /* SubordinateEquipmentView.swift */,
+				A01A000001000221 /* PetResumeView.swift */,
+				A01A000001000222 /* PetDetailView.swift */,
 				A01A000001000104 /* ResumeGiftSection.swift */,
 				A01A000001000105 /* OrganizationView.swift */,
 			);
@@ -671,6 +677,8 @@
 				A01B000001000204 /* ChildVaccineSchedule.swift in Sources */,
 				A01B000001000205 /* ChildVaccineScheduleView.swift in Sources */,
 				A01B000001000206 /* SubordinateEquipmentView.swift in Sources */,
+				A01B000001000221 /* PetResumeView.swift in Sources */,
+				A01B000001000222 /* PetDetailView.swift in Sources */,
 				A01B000001000207 /* MapAlbumSheet.swift in Sources */,
 				A01B000001000208 /* QuickPickCapsules.swift in Sources */,
 				A01B000001000209 /* HeroTrendChart.swift in Sources */,
@@ -738,7 +746,7 @@
 			buildSettings = {
 				CLANG_ENABLE_MODULES = YES;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1139;
+				CURRENT_PROJECT_VERSION = 1140;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = LifeGoodWidgets/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "美好人生";
@@ -749,7 +757,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 25.386;
+				MARKETING_VERSION = 25.387;
 				PRODUCT_BUNDLE_IDENTIFIER = com.lifegood.app.widgets;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
@@ -764,7 +772,7 @@
 			buildSettings = {
 				CLANG_ENABLE_MODULES = YES;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1139;
+				CURRENT_PROJECT_VERSION = 1140;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = LifeGoodWidgets/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "美好人生";
@@ -775,7 +783,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 25.386;
+				MARKETING_VERSION = 25.387;
 				PRODUCT_BUNDLE_IDENTIFIER = com.lifegood.app.widgets;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
@@ -792,7 +800,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = LifeGood/LifeGood.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1139;
+				CURRENT_PROJECT_VERSION = 1140;
 				DEVELOPMENT_ASSET_PATHS = "\"LifeGood/Preview Content\"";
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -823,7 +831,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 25.386;
+				MARKETING_VERSION = 25.387;
 				PRODUCT_BUNDLE_IDENTIFIER = com.lifegood.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -839,7 +847,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = LifeGood/LifeGood.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1139;
+				CURRENT_PROJECT_VERSION = 1140;
 				DEVELOPMENT_ASSET_PATHS = "\"LifeGood/Preview Content\"";
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -870,7 +878,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 25.386;
+				MARKETING_VERSION = 25.387;
 				PRODUCT_BUNDLE_IDENTIFIER = com.lifegood.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;

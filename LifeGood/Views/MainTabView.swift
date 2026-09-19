@@ -117,12 +117,14 @@ enum ManagementFeature: String, CaseIterable, Identifiable {
 }
 
 enum FamilyMgmtFeature: String, CaseIterable, Identifiable {
-    case spouseResume, childrenResume, relativeResume
+    /// [v25.387] petResume 排在 childrenResume 右邊——膠囊列與這個順序一致
+    case spouseResume, childrenResume, petResume, relativeResume
     var id: String { rawValue }
     var title: String {
         switch self {
         case .spouseResume:   return "配偶履歷"
         case .childrenResume: return "兒女履歷"
+        case .petResume:      return "寵物履歷"
         case .relativeResume: return "家人履歷"
         }
     }
@@ -130,6 +132,7 @@ enum FamilyMgmtFeature: String, CaseIterable, Identifiable {
         switch self {
         case .spouseResume:   return "heart.circle.fill"
         case .childrenResume: return "figure.2.and.child.holdinghands"
+        case .petResume:      return "pawprint.circle.fill"
         case .relativeResume: return "person.3.sequence.fill"
         }
     }
@@ -308,6 +311,11 @@ struct MainTabView: View {
         lifeStore.familyMembers.contains { $0.role == .son || $0.role == .daughter }
     }
 
+    /// [v25.387] 有寵物才出現寵物履歷
+    private var hasPets: Bool {
+        lifeStore.familyMembers.contains { $0.role == .pet }
+    }
+
     /// 是否有「直系（爸媽）+ 二等親屬（兄弟姐妹 / 其他親屬）」可進入家人履歷
     private var hasExtendedFamily: Bool {
         lifeStore.familyMembers.contains {
@@ -347,6 +355,7 @@ struct MainTabView: View {
         var list: [FamilyMgmtFeature] = []
         if hasSpouse { list.append(.spouseResume) }
         if hasChildren { list.append(.childrenResume) }
+        if hasPets { list.append(.petResume) }
         if hasExtendedFamily { list.append(.relativeResume) }
         return list
     }
@@ -451,6 +460,11 @@ struct MainTabView: View {
             // 變成一個沒有入口也退不出去的畫面。
             .onChange(of: availableManagementFeatures) { _, list in
                 if let m = managementFeature, !list.contains(m) { managementFeatureRaw = "" }
+            }
+            // [v25.387] 家庭子功能同理：刪掉最後一隻寵物（或最後一個小孩）之後，
+            // 路由若還停在那一頁，膠囊列不會有任何一顆反白，內容區卻照樣渲染。
+            .onChange(of: availableFamilyFeatures) { _, list in
+                if let f = familyMgmtFeature, !list.contains(f) { familyMgmtFeatureRaw = "" }
             }
 
             floatingActionButton
@@ -1410,8 +1424,12 @@ struct MainTabView: View {
     }
 
     /// 子功能切換：在目前大功能的子功能列表內前後移動（到頭/到尾即停，不循環）。
-    /// 人生模式只切換頂層子功能（職涯/家庭的第二層膠囊維持點選操作，
-    /// 切走時既有 onChange 會自動清除第二層選擇）。
+    ///
+    /// [v25.387] 人生模式改走「攤平後的膠囊順序」。原本無論人在哪裡都只切頂層，
+    /// 所以在職涯的子頁面（例如部屬）左右滑會直接跳去家庭或健康，等於把整個第二層
+    /// 跳過去；但畫面上第二層膠囊本來就是接在父功能右邊、排在同一條橫列裡的
+    /// （見 lifeAvailableFeatures 的 careerGroupedPills / familyGroupedPills），
+    /// 手勢應該跟著那條線走才對得起眼睛看到的順序。
     private func switchSubFeature(_ delta: Int) {
         guard !isSettingsActive else { return }
 
@@ -1432,7 +1450,77 @@ struct MainTabView: View {
         case .finance:
             advance(financeFeature) { financeFeatureRaw = $0.rawValue }
         case .life:
-            advance(lifeFeature) { lifeFeatureRaw = $0.rawValue }
+            advanceLifeStop(delta)
+        }
+    }
+
+    // MARK: 人生模式的攤平膠囊順序
+
+    /// 人生模式膠囊列的實際順序攤成一維。職涯／家庭展開時，第二層子功能就排在
+    /// 父功能的右邊——畫面上本來就是這樣畫的，滑動只要照著這條線走即可。
+    private enum LifeSwipeStop: Equatable {
+        /// 一般父功能，或處於「父功能自身被選取」狀態的職涯／家庭
+        case top(LifeFeature)
+        /// 職涯第二層
+        case management(ManagementFeature)
+        /// 家庭第二層
+        case family(FamilyMgmtFeature)
+    }
+
+    private var lifeSwipeStops: [LifeSwipeStop] {
+        var stops: [LifeSwipeStop] = []
+        for f in lifeAvailableFeatures {
+            stops.append(.top(f))
+            // 展開條件與膠囊列同一份判斷：沒展開的群組不佔位置，
+            // 滑到父功能時群組才會長出來，下一次滑動才進得去。
+            if f == .career, shouldExpandManagement {
+                stops.append(contentsOf: availableManagementFeatures.map { .management($0) })
+            } else if f == .family, shouldExpandFamily {
+                stops.append(contentsOf: availableFamilyFeatures.map { .family($0) })
+            }
+        }
+        return stops
+    }
+
+    private var currentLifeSwipeStop: LifeSwipeStop {
+        if lifeFeature == .career, let m = managementFeature { return .management(m) }
+        if lifeFeature == .family, let f = familyMgmtFeature { return .family(f) }
+        return .top(lifeFeature)
+    }
+
+    private func applyLifeSwipeStop(_ stop: LifeSwipeStop) {
+        switch stop {
+        case .top(let f):
+            lifeFeatureRaw = f.rawValue
+            // 回到父功能＝清掉第二層選擇，與膠囊列點父功能時的行為一致
+            if f == .career { managementFeatureRaw = "" }
+            if f == .family { familyMgmtFeatureRaw = "" }
+        case .management(let m):
+            lifeFeatureRaw = LifeFeature.career.rawValue
+            managementFeatureRaw = m.rawValue
+        case .family(let fm):
+            lifeFeatureRaw = LifeFeature.family.rawValue
+            familyMgmtFeatureRaw = fm.rawValue
+        }
+    }
+
+    private func advanceLifeStop(_ delta: Int) {
+        let stops = lifeSwipeStops
+        guard !stops.isEmpty else { return }
+        guard let i = stops.firstIndex(of: currentLifeSwipeStop) else {
+            // 目前停在一個已經不可用的頁（例如職涯里程碑被刪光、路由卻還停在職涯，
+            // 此時膠囊列沒有任何一顆反白）。滑動至少要有反應，把人帶回第一頁。
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            withAnimation(.spring(response: 0.28, dampingFraction: 0.70)) {
+                applyLifeSwipeStop(stops[0])
+            }
+            return
+        }
+        let n = min(max(i + delta, 0), stops.count - 1)
+        guard n != i else { return }
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        withAnimation(.spring(response: 0.28, dampingFraction: 0.70)) {
+            applyLifeSwipeStop(stops[n])
         }
     }
 
@@ -1523,6 +1611,8 @@ struct MainTabView: View {
                     if hasSpouse { SpouseResumeView() } else { FamilyView() }
                 case .childrenResume:
                     if hasChildren { ChildrenResumeView() } else { FamilyView() }
+                case .petResume:
+                    if hasPets { PetResumeView() } else { FamilyView() }
                 case .relativeResume:
                     if hasExtendedFamily { FamilyMembersResumeView() } else { FamilyView() }
                 }

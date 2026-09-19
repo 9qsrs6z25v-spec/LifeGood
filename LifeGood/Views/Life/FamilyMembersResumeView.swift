@@ -429,6 +429,7 @@ struct FamilyMembersResumeView: View {
         case .father, .elderBrother, .youngerBrother, .son:    return .orange
         case .mother, .elderSister, .youngerSister, .daughter: return .pink
         case .otherRelative:                                    return .indigo
+        case .pet:                                              return .green
         }
     }
 }
@@ -469,6 +470,7 @@ struct FamilyMemberDetailView: View {
         case .father, .elderBrother, .youngerBrother, .son:    return .orange
         case .mother, .elderSister, .youngerSister, .daughter: return .pink
         case .otherRelative:                                    return .indigo
+        case .pet:                                              return .green
         }
     }
 
@@ -1041,6 +1043,13 @@ struct FamilyAlbumPhotoEditor: View {
 
     let memberId: UUID
     let editing: FamilyAlbumPhoto?
+
+    /// [v25.387] 明確初始化：本型別有 private @State，合成的 memberwise init 是 private，
+    /// 跨檔案（PetDetailView）建不出來。
+    init(memberId: UUID, editing: FamilyAlbumPhoto?) {
+        self.memberId = memberId
+        self.editing = editing
+    }
 
     @State private var date: Date = Date()
     @State private var title: String = ""

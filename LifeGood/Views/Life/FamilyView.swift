@@ -464,7 +464,8 @@ struct FamilyView: View {
     private var statsStrip: some View {
         let spouseCount  = store.familyMembers.filter { $0.role == .spouse }.count
         let childrenCount = store.familyMembers.filter { $0.role == .son || $0.role == .daughter }.count
-        let items: [(title: String, count: Int, icon: String, color: Color, delay: Double)] = [
+        let petCount = store.familyMembers.filter { $0.role == .pet }.count
+        var items: [(title: String, count: Int, icon: String, color: Color, delay: Double)] = [
             ("總成員", store.familyMembers.count, "person.3.fill",
              Color(red: 1.00, green: 0.35, blue: 0.55), 0.06),
             ("配偶",   spouseCount,                "heart.fill",
@@ -472,6 +473,12 @@ struct FamilyView: View {
             ("兒女",   childrenCount,               "figure.2.and.child.holdinghands",
              Color(red: 1.00, green: 0.62, blue: 0.22), 0.22),
         ]
+        // [v25.387] 有寵物才多一格——沒養寵物的人不需要看到一個永遠是 0 的欄位，
+        // 四格擠在一行也會讓每格變得太窄。
+        if petCount > 0 {
+            items.append(("寵物", petCount, "pawprint.fill",
+                          Color(red: 0.42, green: 0.72, blue: 0.40), 0.30))
+        }
         return HStack(spacing: 10) {
             ForEach(Array(items.enumerated()), id: \.offset) { _, item in
                 VStack(spacing: 8) {
@@ -660,6 +667,8 @@ struct FamilyView: View {
             return Color(red: 0.68, green: 0.40, blue: 1.00)   // 紫色：姐妹
         case .otherRelative:
             return Color(.secondaryLabel)                        // 灰色：其他親屬
+        case .pet:
+            return Color(red: 0.42, green: 0.72, blue: 0.40)     // 草綠：寵物
         }
     }
 
@@ -734,6 +743,23 @@ struct FamilyView: View {
                                 .lineLimit(1)
                                 // [v4] 英文全名長度不可控，補防截斷保護
                                 .minimumScaleFactor(0.85)
+                        }
+                        // [v25.387] 寵物：角色膠囊旁再帶一顆品種／性別／結紮的小膠囊，
+                        // 不然一整排「寵物」看不出誰是誰
+                        if let p = member.pet {
+                            HStack(spacing: 3) {
+                                Image(systemName: p.species.icon)
+                                    .font(.system(size: 8))
+                                Text(p.summaryLine)
+                                    .font(.system(size: 10, weight: .medium))
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.85)
+                            }
+                            .foregroundStyle(accent)
+                            .padding(.horizontal, 6).padding(.vertical, 2)
+                            .background(accent.opacity(0.10))
+                            .clipShape(Capsule())
+                            .overlay(Capsule().stroke(accent.opacity(0.22), lineWidth: 0.6))
                         }
                         if let spouse = spouseDisplayName(for: member, membersById: membersById) {
                             HStack(spacing: 3) {
