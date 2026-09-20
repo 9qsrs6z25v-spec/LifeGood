@@ -2069,12 +2069,16 @@ struct SubordinateMeeting: Identifiable, Codable {
     var createdAt: Date
     /// 有狀態的場次（被取消／被改期／有議程項目）。沒動過的場次不會出現在這裡。
     var occurrences: [MeetingOccurrence]
+    /// [v25.391] 關聯機台（可多台）。掛在會議本身而不是各議程項目上：
+    /// 「這場會議在談哪幾台機台」是整場的屬性，逐項去掛會變成每次開會都要重設一遍。
+    var linkedEquipmentIds: [UUID]
 
     init(id: UUID = UUID(), topic: String = "", date: Date = Date(),
          durationMinutes: Int = 60, recurrence: MeetingRecurrence? = nil,
          rule: MeetingRecurrenceRule? = nil,
          items: [MeetingItem] = [], note: String = "", createdAt: Date? = nil,
-         occurrences: [MeetingOccurrence] = []) {
+         occurrences: [MeetingOccurrence] = [], linkedEquipmentIds: [UUID] = []) {
+        self.linkedEquipmentIds = linkedEquipmentIds
         self.id = id; self.topic = topic; self.date = date
         self.durationMinutes = durationMinutes
         self.rule = rule
@@ -2101,6 +2105,7 @@ struct SubordinateMeeting: Identifiable, Codable {
 
     enum CodingKeys: String, CodingKey {
         case id, topic, date, durationMinutes, recurrence, rule, items, note, createdAt, occurrences
+        case linkedEquipmentIds
     }
 
     // 自訂解碼：createdAt／rule／occurrences 為後加欄位。這裡的容錯粒度是「整個部屬」——
@@ -2116,6 +2121,7 @@ struct SubordinateMeeting: Identifiable, Codable {
         note = (try? c.decodeIfPresent(String.self, forKey: .note)) ?? ""
         createdAt = (try? c.decodeIfPresent(Date.self, forKey: .createdAt)) ?? date
         occurrences = (try? c.decodeIfPresent([MeetingOccurrence].self, forKey: .occurrences)) ?? []
+        linkedEquipmentIds = (try? c.decodeIfPresent([UUID].self, forKey: .linkedEquipmentIds)) ?? []
 
         if let r = try? c.decodeIfPresent(MeetingRecurrenceRule.self, forKey: .rule) {
             rule = r
@@ -2281,8 +2287,11 @@ struct SubordinateTask: Identifiable, Codable {
     /// [v25.385] 手動指定的關聯機台。與 equipmentLink 分開是刻意的：
     /// 那個代表「這是警報自動掛的任務，要回報處理措施與回復結果」，
     /// 這個只是「這件事跟哪台機台有關」，不觸發任何回報要求。
-    /// 機台被刪除時這個 id 會查不到，顯示端自動略過。
-    var linkedEquipmentId: UUID?
+    /// 機台被刪除時 id 會查不到，顯示端自動略過。
+    ///
+    /// [v25.391] 改成多選：一件事常常同時牽涉兩台（例如兩台純化器一起保養）。
+    /// 舊存檔的單一 linkedEquipmentId 會在解碼時折進這個陣列（見 LegacyKeys）。
+    var linkedEquipmentIds: [UUID]
     /// 警報處理措施（機台警報任務需回報；一般任務不顯示此欄位）
     var responseAction: String
     /// 回復結果（機台警報任務需回報）
@@ -2299,7 +2308,7 @@ struct SubordinateTask: Identifiable, Codable {
          isCompleted: Bool = false, completedAt: Date? = nil,
          sideRoleLink: SideRoleBackLink? = nil, reminderId: String? = nil,
          equipmentLink: EquipmentAlarmLink? = nil,
-         linkedEquipmentId: UUID? = nil,
+         linkedEquipmentIds: [UUID] = [],
          responseAction: String = "", responseResult: String = "",
          customScore: Int? = nil, isDereliction: Bool = false) {
         self.id = id; self.topic = topic; self.content = content
@@ -2307,7 +2316,7 @@ struct SubordinateTask: Identifiable, Codable {
         self.isCompleted = isCompleted; self.completedAt = completedAt
         self.sideRoleLink = sideRoleLink; self.reminderId = reminderId
         self.equipmentLink = equipmentLink
-        self.linkedEquipmentId = linkedEquipmentId
+        self.linkedEquipmentIds = linkedEquipmentIds
         self.responseAction = responseAction; self.responseResult = responseResult
         self.customScore = customScore
         self.isDereliction = isDereliction
@@ -2318,8 +2327,13 @@ struct SubordinateTask: Identifiable, Codable {
     enum CodingKeys: String, CodingKey {
         case id, topic, content, date, dueDate, note, isCompleted, completedAt, sideRoleLink, reminderId,
              equipmentLink, responseAction, responseResult, customScore, isDereliction
-        case linkedEquipmentId
+        case linkedEquipmentIds
     }
+
+    /// 舊版單一機台欄位。放在獨立的 CodingKey，讓 encode 仍可用合成版
+    ///（CodingKeys 裡出現沒有對應屬性的 case 會讓合成的 encode 編不過）。
+    /// 同一個寫法見 MeetingItem.LegacyKeys。
+    private enum TaskLegacyKeys: String, CodingKey { case linkedEquipmentId }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -2334,7 +2348,17 @@ struct SubordinateTask: Identifiable, Codable {
         sideRoleLink = try? c.decodeIfPresent(SideRoleBackLink.self, forKey: .sideRoleLink)
         reminderId = try? c.decodeIfPresent(String.self, forKey: .reminderId)
         equipmentLink = try? c.decodeIfPresent(EquipmentAlarmLink.self, forKey: .equipmentLink)
-        linkedEquipmentId = try? c.decodeIfPresent(UUID.self, forKey: .linkedEquipmentId)
+        if let list = try? c.decodeIfPresent([UUID].self, forKey: .linkedEquipmentIds) {
+            linkedEquipmentIds = list
+        } else {
+            // 舊存檔只有單一 linkedEquipmentId，折成單元素陣列。
+            // `?? nil` 是為了不依賴 try? 對 Optional 回傳值的扁平化行為，兩種都接得住。
+            var single: UUID?
+            if let legacy = try? decoder.container(keyedBy: TaskLegacyKeys.self) {
+                single = (try? legacy.decodeIfPresent(UUID.self, forKey: .linkedEquipmentId)) ?? nil
+            }
+            linkedEquipmentIds = single.map { [$0] } ?? []
+        }
         responseAction = (try? c.decodeIfPresent(String.self, forKey: .responseAction)) ?? ""
         responseResult = (try? c.decodeIfPresent(String.self, forKey: .responseResult)) ?? ""
         customScore = try? c.decodeIfPresent(Int.self, forKey: .customScore)
@@ -2411,18 +2435,25 @@ struct WeeklyReport: Identifiable, Codable {
     /// 也可自訂——key 過的自訂分類會變成膠囊供下次點選（比照重大決議的廠區）。
     /// 刻意不做列舉：報告種類是會長的（使用者第一版就要求「可新增」）。
     var reportType: String
+    /// [v25.391] 關聯機台（可多台）。與任務同一套語意：只是標記這份報告跟哪些
+    /// 機台有關，不觸發任何回報要求；機台詳情的時間軸會反過來列出這份報告。
+    var linkedEquipmentIds: [UUID]
 
     init(id: UUID = UUID(), topic: String = "", date: Date = Date(), note: String = "",
-         isCompleted: Bool = false, completedAt: Date? = nil, reportType: String = "") {
+         isCompleted: Bool = false, completedAt: Date? = nil, reportType: String = "",
+         linkedEquipmentIds: [UUID] = []) {
         self.id = id; self.topic = topic; self.date = date; self.note = note
         self.isCompleted = isCompleted; self.completedAt = completedAt
         self.reportType = reportType
+        self.linkedEquipmentIds = linkedEquipmentIds
     }
 
     /// 內建常用分類（顯示順序即此順序）
     static let builtinTypes = ["周報", "月報", "新人報", "PM"]
 
-    enum CodingKeys: String, CodingKey { case id, topic, date, note, isCompleted, completedAt, reportType }
+    enum CodingKeys: String, CodingKey {
+        case id, topic, date, note, isCompleted, completedAt, reportType, linkedEquipmentIds
+    }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(UUID.self, forKey: .id)
@@ -2432,6 +2463,7 @@ struct WeeklyReport: Identifiable, Codable {
         isCompleted = (try? c.decode(Bool.self, forKey: .isCompleted)) ?? false
         completedAt = try? c.decodeIfPresent(Date.self, forKey: .completedAt)
         reportType = (try? c.decodeIfPresent(String.self, forKey: .reportType)) ?? ""
+        linkedEquipmentIds = (try? c.decodeIfPresent([UUID].self, forKey: .linkedEquipmentIds)) ?? []
     }
 }
 

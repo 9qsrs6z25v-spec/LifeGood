@@ -1323,7 +1323,7 @@ struct SubordinateDetailView: View {
             // [v25.386] 機台篩選同時涵蓋兩種連結：警報自動掛的來源機台，與手動指定的關聯機台。
             // 原本只看 equipmentLink，點手動關聯的機台膠囊會篩出空清單。
             if let eid = taskFilterEquipmentId,
-               t.equipmentLink?.equipmentId != eid, t.linkedEquipmentId != eid { return false }
+               t.equipmentLink?.equipmentId != eid, !t.linkedEquipmentIds.contains(eid) { return false }
             if let sys = taskFilterSystem, taskLinkInfo(t)?.system != sys { return false }
             return true
         }
@@ -1434,12 +1434,13 @@ struct SubordinateDetailView: View {
                                   color: .indigo, icon: "link"))
         }
         // [v25.385] 手動指定的關聯機台（與警報自動掛的來源機台分開，圖示也不同）
-        if let eq = t.linkedEquipmentId.flatMap({ id in
+        // [v25.391] 多台就多顆膠囊
+        for eq in t.linkedEquipmentIds.compactMap({ id in
             lifeStore.equipmentPool.first { $0.id == id }
         }) {
             // [v25.386] 比照警報機台膠囊，點一下暫時只看這台的任務（再點取消）
             let manualActive = taskFilterEquipmentId == eq.id
-            chips.append(ItemChip(id: "linkedEq",
+            chips.append(ItemChip(id: "linkedEq-" + eq.id.uuidString,
                                   text: eq.name.isEmpty ? "未命名設備" : eq.name,
                                   color: .teal, icon: "gearshape.2.fill",
                                   isActive: manualActive,
@@ -2748,6 +2749,8 @@ struct MeetingEditorSheet: View {
     @State private var isSaving = false
     /// [v25.332] 會議負責人（可移交給其他部屬）
     @State private var assignedSubId = UUID()
+    /// [v25.391] 關聯機台（可多台）。掛在整場會議上，不是逐個議程項目。
+    @State private var linkedEquipmentIds: [UUID] = []
     /// 正在編輯的場次（以原定日期為鍵）。用 .sheet(item:) 開——本檔案的 Sheet 一律走這個模式。
     @State private var editingOccurrence: DateBox?
     /// 正在新增的臨時場次（規則之外加開的一場），值是預設的開會時間
@@ -2843,6 +2846,15 @@ struct MeetingEditorSheet: View {
                                            pickingAssigneeFor: $pickingAssigneeFor)
                         adHocSection
                     }
+                }
+
+                Section {
+                    EquipmentLinkField(selection: $linkedEquipmentIds,
+                                       preferredOwnerId: subordinateId)
+                } header: {
+                    editorSectionHeader("關聯機台", icon: "gearshape.2.fill", tint: .teal)
+                } footer: {
+                    Text(WeeklyReportEditorSheet.equipmentFootnote)
                 }
 
                 // [v25.332] 會議也能移交給其他部屬（比照任務編輯的「指派人員」）：
@@ -2946,6 +2958,9 @@ struct MeetingEditorSheet: View {
                         if let end = r.endDate { hasRuleEnd = true; ruleEndDate = end }
                     }
                     items = e.items; note = e.note; occurrences = e.occurrences
+                    linkedEquipmentIds = e.linkedEquipmentIds.filter { id in
+                        lifeStore.equipmentPool.contains { $0.id == id }
+                    }
                 } else {
                     // 新會議：預設時間用排程時段（整點/半點，過 18:00 則隔天 09:30）
                     date = FiveMinuteDateTimePicker.defaultSchedulingTime()
@@ -3018,7 +3033,8 @@ struct MeetingEditorSheet: View {
         SubordinateMeeting(id: editing?.id ?? UUID(), topic: topic, date: date,
                            durationMinutes: Int(durationText) ?? 60,
                            rule: currentRule, items: items, note: note,
-                           createdAt: createdAt, occurrences: occurrences)
+                           createdAt: createdAt, occurrences: occurrences,
+                           linkedEquipmentIds: linkedEquipmentIds)
     }
 
     /// 場次清單的顯示窗：只列「七天前」之後的場次，最多 40 筆。
@@ -3207,7 +3223,8 @@ struct MeetingEditorSheet: View {
             date: date, durationMinutes: Int(durationText) ?? 60,
             rule: currentRule,
             items: items, note: note.trimmingCharacters(in: .whitespaces),
-            createdAt: createdAt, occurrences: occurrences
+            createdAt: createdAt, occurrences: occurrences,
+            linkedEquipmentIds: linkedEquipmentIds
         )
         meeting.pruneOccurrences()
         // [v25.332] 移交：先從原負責人移除（比照 TaskEditorSheet.save 的換人流程）
@@ -3781,8 +3798,8 @@ struct TaskEditorSheet: View {
     @State private var scoreValue = ScoreWeights.actTask
     /// [v25.325] 應做未作為（缺失）：開啟時任務轉為扣分事項、分數自動設 -1
     @State private var isDereliction = false
-    /// [v25.385] 手動指定的關聯機台
-    @State private var linkedEquipmentId: UUID?
+    /// [v25.385] 手動指定的關聯機台（[v25.391] 改多選）
+    @State private var linkedEquipmentIds: [UUID] = []
     /// [v25.389] 強制準時完成：把完成時間壓在截止的那一刻，算準時。
     /// 太忙沒能在時間內按下去，但事情本來就是準時做完的，用這個補回來。
     @State private var forceOnTime = false
@@ -3924,12 +3941,8 @@ struct TaskEditorSheet: View {
                 // 那一種走下面的「警報處理回報」，這裡就不再重複問一次。
                 if editing?.equipmentLink == nil {
                     Section {
-                        Picker("關聯機台", selection: $linkedEquipmentId) {
-                            Text("不指定").tag(nil as UUID?)
-                            ForEach(equipmentOptions) { eq in
-                                Text(equipmentPickerLabel(eq)).tag(eq.id as UUID?)
-                            }
-                        }
+                        EquipmentLinkField(selection: $linkedEquipmentIds,
+                                           preferredOwnerId: subordinateId)
                     } header: {
                         editorSectionHeader("關聯機台", icon: "gearshape.2.fill", tint: .teal)
                     } footer: {
@@ -4018,8 +4031,9 @@ struct TaskEditorSheet: View {
                     scoreValue = e.customScore ?? ScoreWeights.actTask
                     isDereliction = e.isDereliction
                     // 機台可能已經被刪掉，帶回來之前先確認它還在，不然選單會顯示空白
-                    linkedEquipmentId = e.linkedEquipmentId.flatMap { id in
-                        lifeStore.equipmentPool.contains { $0.id == id } ? id : nil
+                    // 機台可能已經被刪掉，帶回來之前先濾掉查不到的
+                    linkedEquipmentIds = e.linkedEquipmentIds.filter { id in
+                        lifeStore.equipmentPool.contains { $0.id == id }
                     }
                     if let d = e.dueDate { hasDueDate = true; dueDate = d }
                     // 已經是壓線補登的就把開關打開，不然再存一次會看不出它被強制過
@@ -4029,9 +4043,9 @@ struct TaskEditorSheet: View {
                     date = FiveMinuteDateTimePicker.defaultSchedulingTime()
                     dueDate = date
                     // [v25.386] 從機台詳情按＋進來時先選好那台機台（機台仍在才帶）
-                    linkedEquipmentId = defaultEquipmentId.flatMap { id in
-                        lifeStore.equipmentPool.contains { $0.id == id } ? id : nil
-                    }
+                    linkedEquipmentIds = defaultEquipmentId.flatMap { id in
+                        lifeStore.equipmentPool.contains { $0.id == id } ? [id] : nil
+                    } ?? []
                 }
             }
         }
@@ -4080,7 +4094,7 @@ struct TaskEditorSheet: View {
             sideRoleLink: editing?.sideRoleLink,
             reminderId: editing?.reminderId,
             equipmentLink: editing?.equipmentLink,
-            linkedEquipmentId: linkedEquipmentId,
+            linkedEquipmentIds: linkedEquipmentIds,
             responseAction: responseAction.trimmingCharacters(in: .whitespacesAndNewlines),
             responseResult: responseResult.trimmingCharacters(in: .whitespacesAndNewlines),
             // 等於全域預設＝視同沒自訂（存 nil，進階設定調整權重時跟著變）；
@@ -4392,6 +4406,8 @@ struct WeeklyReportEditorSheet: View {
     /// [v25.389] 強制準時完成：把完成時間壓在報告日期那一刻，算準時。
     /// 報告沒有另外的截止欄位，它的「日期」就是該交的那一天。
     @State private var forceOnTime = false
+    /// [v25.391] 關聯機台（可多台）
+    @State private var linkedEquipmentIds: [UUID] = []
     /// 報告分類（空＝未分類）
     @State private var reportType = ""
     /// 自訂分類的輸入暫存
@@ -4467,6 +4483,14 @@ struct WeeklyReportEditorSheet: View {
                     Text("點膠囊選擇（再點取消）。自訂過的分類會自動出現在膠囊列，下次直接點選。")
                 }
                 Section {
+                    EquipmentLinkField(selection: $linkedEquipmentIds,
+                                       preferredOwnerId: subordinateId)
+                } header: {
+                    editorSectionHeader("關聯機台", icon: "gearshape.2.fill", tint: .teal)
+                } footer: {
+                    Text(Self.equipmentFootnote)
+                }
+                Section {
                     Toggle(isOn: $isCompleted) {
                         Label("標記為已完成", systemImage: isCompleted ? "checkmark.circle.fill" : "circle")
                             .foregroundStyle(isCompleted ? .green : .primary)
@@ -4517,12 +4541,19 @@ struct WeeklyReportEditorSheet: View {
                     topic = e.topic; date = e.date; note = e.note; isCompleted = e.isCompleted
                     reportType = e.reportType
                     forceOnTime = isOnTimeForced(completedAt: e.completedAt, due: e.date)
+                    linkedEquipmentIds = e.linkedEquipmentIds.filter { id in
+                        lifeStore.equipmentPool.contains { $0.id == id }
+                    }
                 } else {
                     date = FiveMinuteDateTimePicker.defaultSchedulingTime()
                 }
             }
         }
     }
+
+    static let equipmentFootnote =
+        "標記這件事跟哪幾台機台有關（可複選）。設定後從機台詳情的時間軸與「關聯項目」"
+        + "也看得到這一筆，兩邊都查得到。這只是標記，不會要求回報處理措施。"
 
     /// 「強制準時完成」要不要出現：已勾完成，而且這個戳記會被判逾期。
     /// 判斷不把 forceOnTime 算進去，開關打開後這一列才不會自己消失。
@@ -4581,7 +4612,8 @@ struct WeeklyReportEditorSheet: View {
             note: note.trimmingCharacters(in: .whitespaces),
             isCompleted: isCompleted,
             completedAt: stamp,
-            reportType: finalType
+            reportType: finalType,
+            linkedEquipmentIds: linkedEquipmentIds
         )
         if let idx = sub.weeklyReports.firstIndex(where: { $0.id == report.id }) { sub.weeklyReports[idx] = report }
         else { sub.weeklyReports.append(report) }
@@ -5194,12 +5226,8 @@ struct SubordinateItemCard: View {
             if let info = cardEquipmentInfo(t.equipmentLink) {
                 lines.append("⚙️ 來源機台：\(info.name)" + (info.system.isEmpty ? "" : "（\(info.system)）"))
             }
-            if let eq = t.linkedEquipmentId.flatMap({ id in
-                lifeStore.equipmentPool.first { $0.id == id }
-            }) {
-                let n = eq.name.isEmpty ? "未命名設備" : eq.name
-                lines.append("⚙️ 關聯機台：\(n)" + (eq.system.isEmpty ? "" : "（\(eq.system)）"))
-            }
+            let linkedNames = equipmentNameList(t.linkedEquipmentIds)
+            if !linkedNames.isEmpty { lines.append("⚙️ 關聯機台：" + linkedNames) }
             lines.append("🗓 任務日期：\(fmt(t.date))")
             if let due = t.dueDate { lines.append("⏰ 截止日期：\(fmt(due))") }
             if t.isCompleted, let at = t.completedAt { lines.append("✅ 完成時間：\(fmt(at))") }
@@ -5218,6 +5246,8 @@ struct SubordinateItemCard: View {
             lines.append("🕐 會議時間：\(fmt(m.date)) – \(MeetingTimeFormat.time24.string(from: m.endDate))")
             lines.append("⏱ 會議長度：\(m.durationMinutes) 分鐘")
             if let r = m.rule { lines.append("🔁 週期：\(ruleSummary(r))") }
+            let meetingEqs = equipmentNameList(m.linkedEquipmentIds)
+            if !meetingEqs.isEmpty { lines.append("⚙️ 關聯機台：" + meetingEqs) }
             if m.isRecurring || !m.occurrences.isEmpty {
                 // 有週期、或不開週期但有加開場次：都依場次分段
                 for occ in displayOccurrences(of: m) {
@@ -5244,6 +5274,8 @@ struct SubordinateItemCard: View {
             lines.append(divider)
             if !r.reportType.isEmpty { lines.append("🏷 分類：\(r.reportType)") }
             lines.append("🗓 報告日期：\(fmt(r.date))")
+            let reportEqs = equipmentNameList(r.linkedEquipmentIds)
+            if !reportEqs.isEmpty { lines.append("⚙️ 關聯機台：" + reportEqs) }
             if r.isCompleted, let at = r.completedAt { lines.append("✅ 完成時間：\(fmt(at))") }
             if !r.note.isEmpty { lines.append(""); lines.append("💬 備註"); lines.append(r.note) }
         case .leave(let subId, let snap), .record(let subId, let snap):
@@ -5360,13 +5392,9 @@ struct SubordinateItemCard: View {
             if let info = cardEquipmentInfo(t.equipmentLink) {
                 field("來源機台", info.name + (info.system.isEmpty ? "" : "（\(info.system)）"))
             }
-            // [v25.385] 手動指定的關聯機台
-            if let eq = t.linkedEquipmentId.flatMap({ id in
-                lifeStore.equipmentPool.first { $0.id == id }
-            }) {
-                let n = eq.name.isEmpty ? "未命名設備" : eq.name
-                field("關聯機台", n + (eq.system.isEmpty ? "" : "（\(eq.system)）"))
-            }
+            // [v25.385] 手動指定的關聯機台（[v25.391] 可多台）
+            let linkedNames = equipmentNameList(t.linkedEquipmentIds)
+            if !linkedNames.isEmpty { field("關聯機台", linkedNames) }
             field("任務日期", fmt(t.date))
             if let due = t.dueDate { field("截止日期", fmt(due)) }
             if t.isCompleted, let at = t.completedAt { field("完成時間", fmt(at)) }
@@ -5393,6 +5421,9 @@ struct SubordinateItemCard: View {
             field("會議時間", "\(fmt(m.date)) – \(MeetingTimeFormat.time24.string(from: m.endDate))")
             field("會議長度", "\(m.durationMinutes) 分鐘")
             if let r = m.rule { field("週期", ruleSummary(r)) }
+            // [v25.391] 關聯機台（可多台）
+            let meetingEqs = equipmentNameList(m.linkedEquipmentIds)
+            if !meetingEqs.isEmpty { field("關聯機台", meetingEqs) }
             if m.isRecurring || !m.occurrences.isEmpty {
                 // 有週期、或不開週期但有加開場次：議程項目屬於各場次，
                 // 攤平顯示會看不出哪一項是哪一場的
@@ -5439,6 +5470,9 @@ struct SubordinateItemCard: View {
             ownerBlock(subId: subId, accent: .purple)
             if !r.reportType.isEmpty { field("分類", r.reportType) }
             field("報告日期", fmt(r.date))
+            // [v25.391] 關聯機台（可多台）
+            let reportEqs = equipmentNameList(r.linkedEquipmentIds)
+            if !reportEqs.isEmpty { field("關聯機台", reportEqs) }
             if r.isCompleted, let at = r.completedAt { field("完成時間", fmt(at)) }
             editBlock("備註", r.note, accent: .purple, forExport: forExport) { new in
                 lifeStore.mutateWeeklyReportFields(subordinateId: subId, reportId: r.id) { $0.note = new }
@@ -5569,6 +5603,16 @@ struct SubordinateItemCard: View {
             }
             .buttonStyle(.plain)
         }
+    }
+
+    /// [v25.391] 關聯機台名稱清單（可多台）。名稱現撈，查不到的（已刪除）直接略過。
+    private func equipmentNameList(_ ids: [UUID]) -> String {
+        ids.compactMap { id in lifeStore.equipmentPool.first { $0.id == id } }
+            .map { eq in
+                let n = eq.name.isEmpty ? "未命名設備" : eq.name
+                return eq.system.isEmpty ? n : n + "（" + eq.system + "）"
+            }
+            .joined(separator: "、")
     }
 
     /// 機台警報任務的來源機台（優先現查機台池，機台被刪則用連結快照）

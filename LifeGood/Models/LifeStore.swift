@@ -1739,12 +1739,31 @@ class LifeStore: ObservableObject {
     }
 
     func deleteEquipment(id: UUID) {
+        // isLoading 批次保護：底下會動到 equipmentPool 與多位部屬，
+        // 不包起來的話每一次 subscript 寫入都各觸發一次 didSet → save() → CloudKit 推送。
+        // 用 defer 重置，避免日後在中間加 guard/return 讓旗標卡在 true（save() 永久停擺）。
+        isLoading = true
+        defer { isLoading = false; save() }
         equipmentPool.removeAll { $0.id == id }
         // [v25.384] 別台機台還指著這台的上下游關係要一起清掉，
         // 不然清單上會出現點不開的鬼影
         for i in equipmentPool.indices {
             equipmentPool[i].upstreamIds.removeAll { $0 == id }
             equipmentPool[i].downstreamIds.removeAll { $0 == id }
+        }
+        // [v25.391] 任務／報告／會議指著這台的關聯也一併清掉。
+        // 顯示端本來就會略過查不到的 id，所以留著不會壞畫面，但會一直累積在存檔與
+        // iCloud 同步裡；而且機台一刪，那些關聯在語意上就已經不存在了。
+        for i in subordinates.indices {
+            for j in subordinates[i].tasks.indices {
+                subordinates[i].tasks[j].linkedEquipmentIds.removeAll { $0 == id }
+            }
+            for j in subordinates[i].weeklyReports.indices {
+                subordinates[i].weeklyReports[j].linkedEquipmentIds.removeAll { $0 == id }
+            }
+            for j in subordinates[i].meetings.indices {
+                subordinates[i].meetings[j].linkedEquipmentIds.removeAll { $0 == id }
+            }
         }
     }
 
