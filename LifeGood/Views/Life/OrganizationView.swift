@@ -1144,16 +1144,17 @@ struct DepartmentDetailView: View {
                 .padding(.horizontal).padding(.bottom, 14)
             } else {
                 // [v25.385] 下游機台收進上游底下（比照廠區據點的重大決議）
+                // [v25.390] 改成完整的樹：A→B→C 時 C 會接在 B 下面再縮一層，
+                // 不再因為「有上游所以不是 root、又沒人把它展出來」而整台消失。
                 let visibleIds = Set(equipments.map(\.id))
-                let roots = rootEquipments(equipments, within: visibleIds)
-                let lastId = roots.last?.id
-                ForEach(roots) { eq in
-                    equipmentRow(eq)
-                    downstreamGroup(eq, within: visibleIds)
-                    if eq.id != lastId {
+                let rows = equipmentTree(equipments, within: visibleIds)
+                let firstId = rows.first?.id
+                ForEach(rows) { row in
+                    if row.depth == 0 && row.id != firstId {
                         Rectangle().fill(Color(.separator).opacity(0.20))
                             .frame(height: 0.5).padding(.leading, 60)
                     }
+                    equipmentTreeRow(row)
                 }
                 Spacer().frame(height: 4)
             }
@@ -1198,68 +1199,119 @@ struct DepartmentDetailView: View {
     // 膠囊 Button 可以各自吃掉自己的點擊——比照部屬總覽 personChip 的巢狀寫法）
     // MARK: - [v25.385] 上下游巢狀
 
+    /// 攤平後的一列：機台 + 縮排層級 + 直接下游數。
+    ///
+    /// 為什麼攤平而不是遞迴 View：SwiftUI 的 `some View` 沒辦法自己引用自己
+    /// （型別會無限遞迴），要嘛型別抹除成 AnyView、要嘛先把樹走成一維陣列。
+    /// 後者順便讓「收合」變得很單純：祖先只要有一層是收起來的，子孫就不入列。
+    private struct EquipmentTreeRow: Identifiable {
+        let equipment: ManagedEquipment
+        let depth: Int
+        /// 在可見集合內的直接下游數；> 0 才畫展開膠囊
+        let childCount: Int
+        var id: UUID { equipment.id }
+    }
+
+    /// 縮排量。第一層沿用既有的 64（左邊距 16 ＋ 圖示 36 ＋ 間距 12，對齊上層文字起點），
+    /// 之後每層 +18；深到一定程度就不再往右推，免得名字被擠成一個字一行。
+    private static func equipmentIndent(depth: Int) -> CGFloat {
+        64 + CGFloat(min(max(depth, 1), 8) - 1) * 18
+    }
+
     /// 最外層要列出哪些機台：有上游、而且那個上游也在這份清單裡的，收進上游底下。
     ///
-    /// 兩個必須守住的例外：
+    /// 三個必須守住的例外：
     /// ① 上游在別的部門、或被篩選條件擋掉時，這台仍然留在最外層——
     ///    否則它會從整份清單裡憑空消失，使用者只會覺得機台不見了。
     /// ② A→B→A 這種環會讓每一台都「有上游」，roots 變成空的、整份清單消失。
     ///    偵測到就退回全部平鋪。
-    private func rootEquipments(_ equipments: [ManagedEquipment],
+    /// ③ 環不一定含 root（A→B→C→B 這種）：環裡的成員有上游、所以不是 root，
+    ///    但從任何 root 也走不到它們。這種走不到的一律自己當 root 補在後面。
+    private func equipmentRoots(_ equipments: [ManagedEquipment],
                                 within ids: Set<UUID>) -> [ManagedEquipment] {
-        let roots = equipments.filter { eq in
+        var roots = equipments.filter { eq in
             !eq.upstreamIds.contains(where: { ids.contains($0) })
         }
-        return roots.isEmpty ? equipments : roots
+        if roots.isEmpty { return equipments }
+
+        let byId = Dictionary(equipments.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        var reachable = Set<UUID>()
+        var stack = roots.map(\.id)
+        while let id = stack.popLast() {
+            guard reachable.insert(id).inserted, let eq = byId[id] else { continue }
+            stack.append(contentsOf: eq.downstreamIds.filter { ids.contains($0) })
+        }
+        roots.append(contentsOf: equipments.filter { !reachable.contains($0.id) })
+        return roots
     }
 
-    /// 某台機台底下的下游群組：一顆可收合的膠囊，展開後是縮排的子機台列。
-    /// 只做一層——再深的鏈從子機台點進去看，避免無限巢狀與環狀關係打架。
-    @ViewBuilder
-    private func downstreamGroup(_ eq: ManagedEquipment, within ids: Set<UUID>) -> some View {
-        let children = eq.downstreamIds
-            .compactMap { cid in lifeStore.equipmentPool.first { $0.id == cid } }
-            .filter { ids.contains($0.id) }
-        if !children.isEmpty {
-            let isOpen = expandedEquipment.contains(eq.id)
-            VStack(alignment: .leading, spacing: 5) {
-                Button {
-                    withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
-                        if isOpen { expandedEquipment.remove(eq.id) }
-                        else { expandedEquipment.insert(eq.id) }
-                    }
-                } label: {
-                    HStack(spacing: 5) {
-                        Image(systemName: "arrow.turn.down.right")
-                            .font(.system(size: 9, weight: .bold))
-                        Text("下游機台 \(children.count) 台")
-                            .font(.system(size: 10, weight: .bold))
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: 8, weight: .bold))
-                            .rotationEffect(.degrees(isOpen ? 90 : 0))
-                    }
-                    .padding(.horizontal, 7).padding(.vertical, 3)
-                    .background(Color.orange.opacity(0.12), in: Capsule())
-                    .overlay(Capsule().stroke(Color.orange.opacity(0.22), lineWidth: 0.6))
-                    .foregroundStyle(.orange)
-                    .contentShape(Capsule())
-                }
-                .buttonStyle(.plain)
-
-                if isOpen {
-                    VStack(alignment: .leading, spacing: 0) {
-                        ForEach(children) { child in
-                            downstreamRow(child)
-                        }
-                    }
-                    .transition(.opacity.combined(with: .move(edge: .top)))
-                }
-            }
-            // 對齊上層的文字起點：左邊距 16 ＋ 圖示 36 ＋ 間距 12
-            .padding(.leading, 64)
-            .padding(.trailing, 16)
-            .padding(.bottom, 8)
+    /// 把機台樹走成畫面上的一維列表。收合的節點不往下展，所以收合＝子孫整批消失，
+    /// 而不是被丟到清單最後面。
+    private func equipmentTree(_ equipments: [ManagedEquipment],
+                               within ids: Set<UUID>) -> [EquipmentTreeRow] {
+        let byId = Dictionary(equipments.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        var out: [EquipmentTreeRow] = []
+        var placed = Set<UUID>()
+        // 用明確的堆疊而不是遞迴：機台關係是使用者手key的，環或超深的鏈都可能出現，
+        // placed 同時擋住環，也擋住「同一台是兩台的下游」時被列兩次。
+        var stack: [(eq: ManagedEquipment, depth: Int)] =
+            equipmentRoots(equipments, within: ids).reversed().map { ($0, 0) }
+        while let node = stack.popLast() {
+            guard placed.insert(node.eq.id).inserted else { continue }
+            let children = node.eq.downstreamIds.compactMap { byId[$0] }
+            out.append(EquipmentTreeRow(equipment: node.eq, depth: node.depth,
+                                        childCount: children.count))
+            guard expandedEquipment.contains(node.eq.id) else { continue }
+            for c in children.reversed() { stack.append((c, node.depth + 1)) }
         }
+        return out
+    }
+
+    /// 一列：主體（第一層用大列、以下用縮排小列）＋ 下游展開膠囊。
+    @ViewBuilder
+    private func equipmentTreeRow(_ row: EquipmentTreeRow) -> some View {
+        if row.depth == 0 {
+            equipmentRow(row.equipment)
+        } else {
+            downstreamRow(row.equipment)
+                .padding(.leading, Self.equipmentIndent(depth: row.depth))
+                .padding(.trailing, 16)
+        }
+        if row.childCount > 0 {
+            equipmentExpandCapsule(row)
+                // 膠囊比自己這一列再縮一層，剛好對齊展開後子機台的起點
+                .padding(.leading, Self.equipmentIndent(depth: row.depth + 1))
+                .padding(.trailing, 16)
+                .padding(.bottom, 8)
+        }
+    }
+
+    /// 「下游機台 N 台」收合膠囊。每一層都有，所以 A→B→C 可以一層一層點下去。
+    private func equipmentExpandCapsule(_ row: EquipmentTreeRow) -> some View {
+        let isOpen = expandedEquipment.contains(row.id)
+        return Button {
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
+                if isOpen { expandedEquipment.remove(row.id) }
+                else { expandedEquipment.insert(row.id) }
+            }
+        } label: {
+            HStack(spacing: 5) {
+                Image(systemName: "arrow.turn.down.right")
+                    .font(.system(size: 9, weight: .bold))
+                Text("下游機台 \(row.childCount) 台")
+                    .font(.system(size: 10, weight: .bold))
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 8, weight: .bold))
+                    .rotationEffect(.degrees(isOpen ? 90 : 0))
+            }
+            .padding(.horizontal, 7).padding(.vertical, 3)
+            .background(Color.orange.opacity(0.12), in: Capsule())
+            .overlay(Capsule().stroke(Color.orange.opacity(0.22), lineWidth: 0.6))
+            .foregroundStyle(.orange)
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     /// 縮排的子機台列。直接點就開那一台的詳情，不用先展開再按動作。

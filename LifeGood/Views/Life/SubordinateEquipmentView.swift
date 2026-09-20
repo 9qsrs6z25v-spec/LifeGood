@@ -501,6 +501,10 @@ struct EquipmentEditorSheet: View {
     /// 新增時預帶的所屬部門／負責人（從部門頁開＝該部門；從部屬執掌頁開＝該部屬與其部門）
     var defaultDepartmentId: UUID? = nil
     var defaultOwnerId: UUID? = nil
+    /// [v25.390] 複製來源。有值＝這是「複製一台」，editing 必為 nil：
+    /// 名稱／系統別／備註／部門／負責人與**上下游關係**都照抄，存檔時給新的 id。
+    /// PM 與警報記錄刻意不抄（見 save()）。
+    var duplicating: ManagedEquipment? = nil
 
     @State private var name = ""
     @State private var note = ""
@@ -718,6 +722,19 @@ struct EquipmentEditorSheet: View {
                         Text(Self.linkFootnote)
                     }
                 }
+                // [v25.390] 複製模式：關係要等存檔拿到新 id 才建得起來，
+                // 但使用者看不到任何東西會以為上下游沒跟過來，所以先講清楚。
+                if let src = duplicating, editing == nil, !duplicateRelationSummary(src).isEmpty {
+                    Section {
+                        Text(duplicateRelationSummary(src))
+                            .font(.caption).foregroundStyle(.secondary)
+                    } header: {
+                        editorSectionHeader("關聯機台（上下游）",
+                                            icon: "point.3.connected.trianglepath.dotted", tint: .teal)
+                    } footer: {
+                        Text("存檔後會自動比照原機台接上同樣的上下游，兩邊都看得到。存檔之後可以在這裡或機台詳情頁再調整。")
+                    }
+                }
 
                 Section {
                     TextField("位置、型號、保養注意事項等（選填）", text: $note, axis: .vertical)
@@ -734,7 +751,7 @@ struct EquipmentEditorSheet: View {
                     }
                 }
             }
-            .navigationTitle(editing != nil ? "編輯設備" : "新增設備")
+            .navigationTitle(editorTitle)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button("取消") { dismiss() } }
@@ -757,6 +774,13 @@ struct EquipmentEditorSheet: View {
                     departmentId = e.departmentId; ownerId = e.ownerId
                     pmRecords = e.pmRecords.sorted { $0.date > $1.date }
                     alarms = e.alarms.sorted { $0.date > $1.date }
+                } else if let src = duplicating {
+                    // 名稱照抄原本的（通常只要改一兩個字，例如 M608→M609），
+                    // 不加「複本」後綴省得還要先把後綴刪掉。
+                    name = src.name; note = src.note; system = src.system
+                    departmentId = src.departmentId; ownerId = src.ownerId
+                    // pmRecords／alarms 保持空的：那是原本那台機台真的發生過的
+                    // 保養與警報，抄到新機台上等於憑空捏造一份維修履歷。
                 } else {
                     departmentId = defaultDepartmentId
                     ownerId = defaultOwnerId
@@ -769,6 +793,26 @@ struct EquipmentEditorSheet: View {
                 }
             }
         }
+    }
+
+    private var editorTitle: String {
+        if editing != nil { return "編輯設備" }
+        return duplicating != nil ? "複製設備" : "新增設備"
+    }
+
+    /// 複製模式下「會跟著複製過來的上下游」摘要（字串在 ViewBuilder 外組好）。
+    /// 名稱現撈，來源快照上的機台可能已經被刪掉了。
+    private func duplicateRelationSummary(_ src: ManagedEquipment) -> String {
+        func names(_ ids: [UUID]) -> [String] {
+            ids.compactMap { lifeStore.equipment(id: $0) }
+                .map { $0.name.isEmpty ? "未命名設備" : $0.name }
+        }
+        var lines: [String] = []
+        let ups = names(src.upstreamIds)
+        let downs = names(src.downstreamIds)
+        if !ups.isEmpty { lines.append("上游：" + ups.joined(separator: "、")) }
+        if !downs.isEmpty { lines.append("下游：" + downs.joined(separator: "、")) }
+        return lines.joined(separator: "\n")
     }
 
     /// 系統別膠囊：點一下帶入輸入框、再點清空
@@ -865,8 +909,27 @@ struct EquipmentEditorSheet: View {
         let previousAlarmIds = Set((editing?.alarms ?? []).map(\.id))
         let newAlarms = alarms.filter { !previousAlarmIds.contains($0.id) }
         lifeStore.upsertEquipment(eq)
+        copyRelations(to: id)
         lifeStore.createTasksForNewAlarms(equipment: eq, newAlarms: newAlarms)
         dismiss()
+    }
+
+    /// [v25.390] 複製模式：把來源機台的上下游關係也複製一份到新機台上。
+    ///
+    /// ⚠️ 一定要走 LifeStore.linkEquipment，不能直接寫 upstreamIds／downstreamIds。
+    ///    關係是互為鏡像的（A 的下游有 B ⇔ B 的上游有 A），只寫自己這一邊的話，
+    ///    從對方那台點進來根本看不到新機台，而且以後任何一次存檔都會把這半邊抹掉。
+    ///    必須在 upsertEquipment 之後呼叫——linkEquipment 會去機台池裡找兩端。
+    ///
+    /// 對方機台可能在表單開著的期間被刪掉，所以逐一確認還在才連。
+    private func copyRelations(to newId: UUID) {
+        guard let src = duplicating, editing == nil else { return }
+        for up in src.upstreamIds where lifeStore.equipment(id: up) != nil {
+            lifeStore.linkEquipment(newId, with: up, asDownstream: false)
+        }
+        for down in src.downstreamIds where lifeStore.equipment(id: down) != nil {
+            lifeStore.linkEquipment(newId, with: down, asDownstream: true)
+        }
     }
 
     private func deleteEquipment() {
@@ -1005,6 +1068,8 @@ struct EquipmentDetailCard: View {
     let equipmentId: UUID
 
     @State private var showEditor = false
+    /// [v25.390] 複製這一台（開一張預填好的新增表單，改個名字就好）
+    @State private var showDuplicate = false
     /// [v25.303] 時間軸右上＋的快速新增（免進編輯畫面）
     @State private var quickAddKind: TimelineQuickAddKind?
     /// [v25.384] 點上下游機台時要跳去看哪一台
@@ -1060,12 +1125,22 @@ struct EquipmentDetailCard: View {
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button("關閉") { dismiss() } }
                 ToolbarItem(placement: .topBarTrailing) {
+                    Button("複製") { showDuplicate = true }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
                     Button("編輯") { showEditor = true }.bold()
                 }
             }
             .sheet(isPresented: $showEditor) {
                 if let eq = equipment {
                     EquipmentEditorSheet(editing: eq)
+                }
+            }
+            // [v25.390] 複製：同一張表單、預填好所有欄位（含上下游），存檔時給新的 id。
+            // PM 與警報不會跟過來——那是原本那台真的發生過的事。
+            .sheet(isPresented: $showDuplicate) {
+                if let eq = equipment {
+                    EquipmentEditorSheet(editing: nil, duplicating: eq)
                 }
             }
             .sheet(item: $quickAddKind) { kind in
