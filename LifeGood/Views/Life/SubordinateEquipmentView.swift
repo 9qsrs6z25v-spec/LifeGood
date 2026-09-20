@@ -1056,6 +1056,145 @@ struct EquipmentClaimPicker: View {
     }
 }
 
+// MARK: - [v25.393] 機台時間軸的資料模型
+//
+// 放在檔案層級（而不是 EquipmentDetailCard 裡的巢狀型別）是為了讓同檔案的
+// TimelineDetailDisclosure 也用得到——`private` 的巢狀型別只有所屬型別本身
+// 與它在同檔的 extension 看得到，兄弟型別是碰不到的。
+
+private enum CardEntryKind {
+    case pm, alarm, task, report, meeting
+}
+
+/// 展開後的一行明細
+private struct CardDetail: Identifiable {
+    let id: Int
+    let label: String
+    let value: String
+}
+
+/// 展開後的子項目（目前只有會議的議程項目）
+private struct CardSubItem: Identifiable {
+    let id: UUID
+    let text: String
+    let done: Bool
+}
+
+private struct CardEntry: Identifiable {
+    let id: UUID
+    let kind: CardEntryKind
+    let date: Date
+    let text: String
+    let daysSincePM: Int?
+    var phase: PMPhase? = nil
+    /// 任務／報告／會議才有：負責人姓名 + 完成狀態
+    var owner: String? = nil
+    var isDone: Bool = false
+    /// [v25.393] 這一筆其實是掛在隔壁機台上的（直接上游／下游）。
+    /// nil＝就掛在目前這台機台上。
+    var sourceName: String? = nil
+    var sourceDirection: EquipmentLinkDirection? = nil
+    /// 摺疊展開後要顯示的內容；兩個都空就不畫展開鈕
+    var details: [CardDetail] = []
+    var subItems: [CardSubItem] = []
+
+    var hasExpandable: Bool { !details.isEmpty || !subItems.isEmpty }
+}
+
+/// 時間軸上關聯項目的摺疊明細。
+///
+/// 獨立成一個 View 是因為展開狀態要各列各自持有——cardTimelineRow 是函式，
+/// 沒地方掛 @State（同樣理由見 AlarmResponseDisclosure）。
+private struct TimelineDetailDisclosure: View {
+    let entry: CardEntry
+    let color: Color
+
+    @State private var expanded = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Button {
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                    expanded.toggle()
+                }
+            } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: expanded ? "chevron.down" : "chevron.right")
+                        .font(.system(size: 8, weight: .bold))
+                    Text(expanded ? "收合" : summaryLabel)
+                        .font(.system(size: 10, weight: .bold))
+                }
+                .padding(.horizontal, 7).padding(.vertical, 3)
+                .background(color.opacity(0.10))
+                .foregroundStyle(color)
+                .clipShape(Capsule())
+                .overlay(Capsule().stroke(color.opacity(0.22), lineWidth: 0.6))
+                .contentShape(Capsule())
+            }
+            .buttonStyle(.plain)
+
+            if expanded {
+                VStack(alignment: .leading, spacing: 5) {
+                    ForEach(entry.details) { d in
+                        detailRow(d)
+                    }
+                    if !entry.subItems.isEmpty {
+                        Text("議程項目 \(entry.subItems.count)")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                            .padding(.top, 2)
+                        ForEach(entry.subItems) { item in
+                            subItemRow(item)
+                        }
+                    }
+                }
+                .padding(.horizontal, 9).padding(.vertical, 7)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color(.tertiarySystemFill).opacity(0.5))
+                .clipShape(RoundedRectangle(cornerRadius: 9))
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
+    }
+
+    /// 收合狀態的按鈕文字：先講裡面有什麼，使用者才知道值不值得點開
+    private var summaryLabel: String {
+        if !entry.subItems.isEmpty {
+            let done = entry.subItems.filter(\.done).count
+            return "議程 \(done)/\(entry.subItems.count)・展開明細"
+        }
+        return "展開明細"
+    }
+
+    private func detailRow(_ d: CardDetail) -> some View {
+        HStack(alignment: .top, spacing: 6) {
+            Text(d.label)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .frame(width: 52, alignment: .leading)
+            Text(d.value)
+                .font(.system(size: 11))
+                .foregroundStyle(.primary)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+        }
+    }
+
+    private func subItemRow(_ item: CardSubItem) -> some View {
+        HStack(alignment: .top, spacing: 6) {
+            Image(systemName: item.done ? "checkmark.circle.fill" : "circle")
+                .font(.system(size: 10))
+                .foregroundStyle(item.done ? Color.green : Color.secondary.opacity(0.5))
+            Text(item.text)
+                .font(.system(size: 11))
+                .strikethrough(item.done, color: .secondary)
+                .foregroundStyle(item.done ? .secondary : .primary)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+        }
+    }
+}
+
 // MARK: - 機台詳情卡片
 
 /// 部門所屬設備點開的檢視卡片（非編輯畫面）：
@@ -1284,22 +1423,6 @@ struct EquipmentDetailCard: View {
 
     /// [v25.391] 時間軸上的一筆。原本只有 PM 與警報，現在加上「關聯到這台機台的
     /// 任務／報告／會議」——雙向關聯的另一半就是在這裡看見的。
-    private enum CardEntryKind {
-        case pm, alarm, task, report, meeting
-    }
-
-    private struct CardEntry: Identifiable {
-        let id: UUID
-        let kind: CardEntryKind
-        let date: Date
-        let text: String
-        let daysSincePM: Int?
-        var phase: PMPhase? = nil
-        /// 任務／報告／會議才有：負責人姓名 + 完成狀態
-        var owner: String? = nil
-        var isDone: Bool = false
-    }
-
     private func entries(_ eq: ManagedEquipment) -> [CardEntry] {
         var out: [CardEntry] = []
         let pmDates = eq.pmRecords.map(\.date).sorted()
@@ -1320,39 +1443,137 @@ struct EquipmentDetailCard: View {
     }
 
     /// [v25.391] 關聯到這台機台的任務／報告／會議。
+    /// [v25.393] 連**直接上下游**機台上的關聯項目也一併帶出來。
+    ///
+    /// 這是**顯示時推導**，不是真的把關聯寫進對方的資料裡。寫進去會有三個問題：
+    /// ① 之後解除上下游關係，被抄過去的關聯會留下來變成孤兒；
+    /// ② 打開那筆任務的編輯畫面會看到自己沒選過的機台；
+    /// ③ A→B→C 時會一路往下傳染，最後每台都掛滿別人的東西。
+    /// 推導出來的每一筆都標著來源機台與方向，看得出「這是隔壁那台的事」。
+    ///
+    /// 只看直接相鄰一層：整條鏈全撈的話，長一點的製程線上每台機台都會看到一模一樣
+    /// 的清單，反而失去「這台附近發生什麼事」的意義。
+    private func linkedEntries(_ eq: ManagedEquipment) -> [CardEntry] {
+        var out: [CardEntry] = []
+        // 同一筆同時掛在本機與鄰居時只列一次，本機優先（所以先收本機）
+        var seen = Set<UUID>()
+        collectLinked(for: eq.id, source: nil, into: &out, seen: &seen)
+        for id in eq.upstreamIds {
+            guard let n = lifeStore.equipment(id: id) else { continue }
+            collectLinked(for: id, source: (equipmentDisplayName(n), .upstream),
+                          into: &out, seen: &seen)
+        }
+        for id in eq.downstreamIds {
+            guard let n = lifeStore.equipment(id: id) else { continue }
+            collectLinked(for: id, source: (equipmentDisplayName(n), .downstream),
+                          into: &out, seen: &seen)
+        }
+        return out
+    }
+
+    private func equipmentDisplayName(_ eq: ManagedEquipment) -> String {
+        let n = eq.name.trimmingCharacters(in: .whitespaces)
+        return n.isEmpty ? "未命名設備" : n
+    }
+
+    /// 收集掛在某一台機台上的任務／報告／會議。
     ///
     /// 任務有兩種來源：警報自動掛的（equipmentLink）與手動複選的（linkedEquipmentIds），
     /// 兩種都算。日期取「最能代表這件事發生在什麼時候」的那一個：任務優先用截止日，
     /// 報告與會議就是它們自己的日期。
-    private func linkedEntries(_ eq: ManagedEquipment) -> [CardEntry] {
-        var out: [CardEntry] = []
+    private func collectLinked(for eqId: UUID,
+                               source: (name: String, direction: EquipmentLinkDirection)?,
+                               into out: inout [CardEntry],
+                               seen: inout Set<UUID>) {
         for sub in lifeStore.subordinates {
             let who = sub.name.trimmingCharacters(in: .whitespaces)
             let owner = who.isEmpty ? "未命名部屬" : who
-            for t in sub.tasks where t.equipmentLink?.equipmentId == eq.id
-                || t.linkedEquipmentIds.contains(eq.id) {
+            for t in sub.tasks where t.equipmentLink?.equipmentId == eqId
+                || t.linkedEquipmentIds.contains(eqId) {
+                guard seen.insert(t.id).inserted else { continue }
                 let name = t.topic.trimmingCharacters(in: .whitespaces)
                 out.append(CardEntry(id: t.id, kind: .task, date: t.dueDate ?? t.date,
                                      text: name.isEmpty ? "未命名任務" : name,
-                                     daysSincePM: nil, owner: owner, isDone: t.isCompleted))
+                                     daysSincePM: nil, owner: owner, isDone: t.isCompleted,
+                                     sourceName: source?.name, sourceDirection: source?.direction,
+                                     details: taskDetails(t)))
             }
-            for r in sub.weeklyReports where r.linkedEquipmentIds.contains(eq.id) {
+            for r in sub.weeklyReports where r.linkedEquipmentIds.contains(eqId) {
+                guard seen.insert(r.id).inserted else { continue }
                 let name = r.topic.trimmingCharacters(in: .whitespaces)
                 out.append(CardEntry(id: r.id, kind: .report, date: r.date,
                                      text: name.isEmpty ? "未命名報告" : name,
-                                     daysSincePM: nil, owner: owner, isDone: r.isCompleted))
+                                     daysSincePM: nil, owner: owner, isDone: r.isCompleted,
+                                     sourceName: source?.name, sourceDirection: source?.direction,
+                                     details: reportDetails(r)))
             }
-            for m in sub.meetings where m.linkedEquipmentIds.contains(eq.id) {
+            for m in sub.meetings where m.linkedEquipmentIds.contains(eqId) {
+                guard seen.insert(m.id).inserted else { continue }
                 let name = m.topic.trimmingCharacters(in: .whitespaces)
                 // 會議沒有「完成」的概念，用議程項目全數完成當作已結案
                 let items = m.allItems
                 let done = !items.isEmpty && items.allSatisfy(\.isCompleted)
                 out.append(CardEntry(id: m.id, kind: .meeting, date: m.date,
                                      text: name.isEmpty ? "未命名會議" : name,
-                                     daysSincePM: nil, owner: owner, isDone: done))
+                                     daysSincePM: nil, owner: owner, isDone: done,
+                                     sourceName: source?.name, sourceDirection: source?.direction,
+                                     details: meetingDetails(m),
+                                     subItems: meetingSubItems(m)))
             }
         }
+    }
+
+    // MARK: [v25.393] 展開後的明細（字串一律在 ViewBuilder 外組好）
+
+    private func taskDetails(_ t: SubordinateTask) -> [CardDetail] {
+        var out: [CardDetail] = []
+        add(&out, "內容", t.content)
+        if let due = t.dueDate { add(&out, "截止", Self.dateTimeFmt.string(from: due)) }
+        add(&out, "任務日期", Self.dateFmt.string(from: t.date))
+        if t.isDereliction { add(&out, "性質", "應做未作為（缺失）") }
+        // 警報自動掛的任務要回報處理措施與回復結果
+        add(&out, "處理措施", t.responseAction)
+        add(&out, "回復結果", t.responseResult)
+        if t.isCompleted, let at = t.completedAt {
+            add(&out, "完成時間", Self.dateTimeFmt.string(from: at))
+        }
+        add(&out, "備註", t.note)
         return out
+    }
+
+    private func reportDetails(_ r: WeeklyReport) -> [CardDetail] {
+        var out: [CardDetail] = []
+        add(&out, "分類", r.reportType)
+        add(&out, "報告日期", Self.dateFmt.string(from: r.date))
+        if r.isCompleted, let at = r.completedAt {
+            add(&out, "完成時間", Self.dateTimeFmt.string(from: at))
+        }
+        add(&out, "備註", r.note)
+        return out
+    }
+
+    private func meetingDetails(_ m: SubordinateMeeting) -> [CardDetail] {
+        var out: [CardDetail] = []
+        add(&out, "會議時間", Self.dateTimeFmt.string(from: m.date))
+        add(&out, "會議長度", "\(m.durationMinutes) 分鐘")
+        if m.isRecurring { add(&out, "週期", "重複性會議") }
+        add(&out, "備註", m.note)
+        return out
+    }
+
+    private func meetingSubItems(_ m: SubordinateMeeting) -> [CardSubItem] {
+        m.allItems.map { item in
+            let c = item.content.trimmingCharacters(in: .whitespacesAndNewlines)
+            return CardSubItem(id: item.id, text: c.isEmpty ? "未填內容" : c,
+                               done: item.isCompleted)
+        }
+    }
+
+    /// 空值不佔一行——展開後只列真的有東西的欄位
+    private func add(_ out: inout [CardDetail], _ label: String, _ value: String) {
+        let v = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !v.isEmpty else { return }
+        out.append(CardDetail(id: out.count, label: label, value: v))
     }
 
     @ViewBuilder
@@ -1438,6 +1659,19 @@ struct EquipmentDetailCard: View {
         }
     }
 
+    /// 時間軸列的小膠囊（來源機台／負責人／完成狀態）
+    private func metaChip(_ text: String, color: Color, icon: String) -> some View {
+        HStack(spacing: 3) {
+            Image(systemName: icon).font(.system(size: 8, weight: .bold))
+            Text(text).lineLimit(1)
+        }
+        .font(.system(size: 9, weight: .semibold))
+        .padding(.horizontal, 5).padding(.vertical, 1.5)
+        .background(color.opacity(0.12))
+        .foregroundStyle(color)
+        .clipShape(Capsule())
+    }
+
     private func cardTimelineRow(_ e: CardEntry, isLast: Bool) -> some View {
         let style = timelineStyle(e)
         let color = style.color
@@ -1476,22 +1710,6 @@ struct EquipmentDetailCard: View {
                             .background(Color.orange.opacity(0.12)).foregroundStyle(.orange)
                             .clipShape(Capsule())
                     }
-                    // [v25.391] 關聯項目：誰負責、結了沒
-                    if let owner = e.owner {
-                        Text(owner)
-                            .font(.system(size: 9, weight: .semibold))
-                            .padding(.horizontal, 5).padding(.vertical, 1.5)
-                            .background(Color(.tertiarySystemFill)).foregroundStyle(.secondary)
-                            .clipShape(Capsule())
-                            .lineLimit(1)
-                        if e.isDone {
-                            Text("已完成")
-                                .font(.system(size: 9, weight: .semibold))
-                                .padding(.horizontal, 5).padding(.vertical, 1.5)
-                                .background(Color.green.opacity(0.12)).foregroundStyle(.green)
-                                .clipShape(Capsule())
-                        }
-                    }
                     Spacer()
                     // 有標階段的 PM（停機/復機）連時間一起顯示，同日停機→復機順序才分得出來
                     Text(e.kind == .pm && e.phase == nil
@@ -1504,11 +1722,32 @@ struct EquipmentDetailCard: View {
                     Text(e.text).font(.caption2).foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
+                // [v25.393] 關聯項目的來源機台／負責人／完成狀態自成一行，並且會自動
+                // 換行。原本全部擠在最上面那一排，加上來源機台之後在窄螢幕上一定爆版
+                //（標籤＋PM 後 N 天＋上游・機台名＋負責人＋已完成＋日期）。
+                if e.owner != nil || e.sourceName != nil {
+                    ChipFlowLayout(spacing: 5) {
+                        if let src = e.sourceName, let dir = e.sourceDirection {
+                            metaChip(dir == .upstream ? "上游・" + src : "下游・" + src,
+                                     color: dir.color, icon: dir.icon)
+                        }
+                        if let owner = e.owner {
+                            metaChip(owner, color: .secondary, icon: "person.fill")
+                        }
+                        if e.owner != nil && e.isDone {
+                            metaChip("已完成", color: .green, icon: "checkmark.circle.fill")
+                        }
+                    }
+                }
                 // [v25.315] 警報→任務的處理回報子項目（點開查看處理過程）。
                 // ⚠️ 判斷一定要用 kind == .alarm，不能用 !isPM——時間軸現在還有
                 //    任務／報告／會議，用 !isPM 會拿它們的 id 去查警報回報。
                 if e.kind == .alarm {
                     AlarmResponseDisclosure(alarmId: e.id)
+                }
+                // [v25.393] 關聯項目：下一行摺疊，展開看這筆的完整內容
+                if e.hasExpandable {
+                    TimelineDetailDisclosure(entry: e, color: color)
                 }
             }
             .padding(.bottom, isLast ? 4 : 12)
