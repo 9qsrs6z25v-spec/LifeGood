@@ -1770,6 +1770,15 @@ struct SettingsView: View {
             .onTapGesture { handleAboutTap() }
             .listRowInsets(EdgeInsets())
             .listRowBackground(Color(.systemBackground))
+
+            // [v25.392] 更新後跳出的「本次更新」看完就關掉了，想再看一次要有地方去。
+            // 這一列刻意放在品牌卡**外面**：卡片整塊掛著「連點 20 下開管理控制台」的
+            // 手勢，把可點的列放進去會兩邊互搶。
+            NavigationLink {
+                ChangelogListView()
+            } label: {
+                Label("版本更新紀錄", systemImage: "doc.text.clock")
+            }
         } header: {
             Text("關於")
         } footer: {

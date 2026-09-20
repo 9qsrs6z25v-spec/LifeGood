@@ -13,6 +13,14 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.392", build: 1145, date: "2026/08/19", notes: [
+            "【新增】更新版本後第一次打開 App，開場動畫謝幕之後會跳出「本次更新」視窗，直接告訴你這次改了什麼——就是你現在看到的這一個。",
+            "【說明】會顯示「上次看過的版本」到「目前版本」之間的**全部**內容：上次看到 25.389、現在開 25.390 就只顯示 25.390；上次停在 25.380、現在開 25.390 就一次把 25.381～25.390 全部列出來，跳過的版本不會漏掉。",
+            "【說明】記的是「已經看過哪一版」而不是「上次開啟的版本」。視窗還開著就把 App 殺掉的話，下次會再跳一次，不會有一版的內容就這樣錯過。",
+            "【說明】全新安裝不會跳（沒有「上一版」可以比，一打開就被一整面更新紀錄糊臉並不合理），只會把目前版本記下來，從下一次更新開始才有。已經在用的人則會看到目前這一版的內容。",
+            "【新增】每一條更新前面的【新增】【修正】【說明】會變成彩色標籤，一眼分得出是新功能、修好的問題還是補充說明。",
+            "【新增】設定 → 關於多了「版本更新紀錄」，可以隨時回去翻完整的歷史紀錄。「本次更新」視窗看完就關掉了，想再看一次要有地方去。"
+        ]),
         ChangelogEntry(version: "25.391", build: 1144, date: "2026/08/19", notes: [
             "【新增】關聯機台改成可複選。一件事常常同時牽涉兩台（例如兩台純化器一起保養），原本只能挑一台。原本挑過的那一台會自動變成清單裡的第一筆，不用重設。",
             "【新增】報告與會議也能關聯機台了，用的是跟任務同一個挑選畫面：可搜尋名稱與系統別，這位部屬負責的機台排在最前面另成一組，已選的用膠囊列出、點膠囊就移除。",
@@ -2623,4 +2631,45 @@ enum Changelog {
             "新增『部屬班表』：棋盤式燈號（縱軸部屬、橫軸整月），可排大夜 / 小夜輪班、依部門篩選。"
         ])
     ]
+
+    // MARK: - [v25.392] 更新後的「本次更新」視窗
+
+    /// 目前跑的版本（Info.plist 的 CFBundleShortVersionString，由 MARKETING_VERSION 產生）。
+    ///
+    /// 刻意讀 Info.plist 而不是 `entries.first?.version`：萬一改版時忘了補更新紀錄，
+    /// 拿最新一筆的版號當「目前版本」會把使用者的已讀進度推到那一版，
+    /// 之後真的補上紀錄時就再也不會顯示了。讀 Info.plist 最壞情況只是「沒東西可顯示」。
+    static var currentVersion: String {
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? ""
+    }
+
+    /// 版本號比大小。
+    ///
+    /// ⚠️ 一定要逐段比數字，不能直接比字串："25.9" > "25.10" 在字串比較下是**成立的**
+    ///    （'9' > '1'），版本號一過 x.9 全部的判斷就反了。
+    ///    段數不同時（"25.391" vs "25.391.1"）缺的段當 0。
+    static func compareVersions(_ a: String, _ b: String) -> ComparisonResult {
+        let lhs = a.split(separator: ".").map { Int($0) ?? 0 }
+        let rhs = b.split(separator: ".").map { Int($0) ?? 0 }
+        for i in 0..<max(lhs.count, rhs.count) {
+            let l = i < lhs.count ? lhs[i] : 0
+            let r = i < rhs.count ? rhs[i] : 0
+            if l < r { return .orderedAscending }
+            if l > r { return .orderedDescending }
+        }
+        return .orderedSame
+    }
+
+    /// 「上次看過 lastSeen、現在跑 current」要顯示哪幾版的更新內容（新到舊）。
+    ///
+    /// 區間是 (lastSeen, current]：上次看過的那一版不再顯示，目前這一版要顯示。
+    /// 上限卡在 current 是為了 TestFlight 降版的情況——不要把使用者還沒拿到的
+    /// 版本內容先攤給他看。
+    static func entries(after lastSeen: String, upTo current: String) -> [ChangelogEntry] {
+        guard !current.isEmpty else { return [] }
+        return entries.filter { e in
+            compareVersions(e.version, lastSeen) == .orderedDescending
+                && compareVersions(e.version, current) != .orderedDescending
+        }
+    }
 }

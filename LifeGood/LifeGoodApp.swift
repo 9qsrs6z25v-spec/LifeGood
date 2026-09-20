@@ -142,6 +142,14 @@ private struct LaunchGate<Content: View>: View {
     @State private var showSplash = true
     @State private var splashDismissed = false
 
+    // MARK: [v25.392] 更新後的「本次更新」視窗
+    //
+    // 記的是「已經看過哪一版的更新說明」，不是「上次開啟的版本」——使用者若在
+    // 視窗還開著時把 App 殺掉，下次會再跳一次，不會有一版的內容就這樣錯過。
+    @AppStorage("last_seen_changelog_version") private var lastSeenVersion = ""
+    @State private var whatsNew: [ChangelogEntry] = []
+    @State private var showWhatsNew = false
+
     var body: some View {
         ZStack {
             content
@@ -162,9 +170,63 @@ private struct LaunchGate<Content: View>: View {
                         splashDismissed = true
                         try? await Task.sleep(nanoseconds: 700_000_000)
                         showSplash = false
+                        // 謝幕之後才跳，不要跟開場動畫疊在一起
+                        presentWhatsNewIfNeeded()
                     }
             }
         }
+        .sheet(isPresented: $showWhatsNew) {
+            WhatsNewView(entries: whatsNew) { markWhatsNewSeen() }
+        }
+    }
+
+    /// 這次啟動要不要跳更新說明。
+    private func presentWhatsNewIfNeeded() {
+        let current = Changelog.currentVersion
+        guard !current.isEmpty else { return }
+        if lastSeenVersion.isEmpty {
+            // 沒有已讀紀錄有兩種可能，處理方式不一樣：
+            // ① 全新安裝 → 一打開就被一整面更新紀錄糊臉並不合理。記下目前版本、
+            //    什麼都不跳，從下一次更新開始才會有。
+            // ② 這個功能上線前就在用的舊使用者 → 他確實剛更新完，只是我們不知道
+            //    他上一版是哪一版，所以只跳「目前這一版」的內容，不要憑空往回補。
+            guard hasExistingData else {
+                lastSeenVersion = current
+                return
+            }
+            whatsNew = Changelog.entries.filter {
+                Changelog.compareVersions($0.version, current) == .orderedSame
+            }
+            if whatsNew.isEmpty { lastSeenVersion = current } else { showWhatsNew = true }
+            return
+        }
+        let pending = Changelog.entries(after: lastSeenVersion, upTo: current)
+        guard !pending.isEmpty else {
+            // 沒有新內容（含 TestFlight 降版的情況）也要把已讀推到目前版本，
+            // 否則降版再升回來會重跳一次
+            lastSeenVersion = current
+            return
+        }
+        whatsNew = pending
+        showWhatsNew = true
+    }
+
+    /// 這台裝置上已經有資料＝是既有使用者，不是全新安裝。
+    ///
+    /// 直接讀 UserDefaults 而不是注入 Store：LaunchGate 是開場的外殼，
+    /// 為了一個判斷把三個 Store 拉進來並不值得。這裡只看 key 在不在，不解碼內容。
+    private var hasExistingData: Bool {
+        let ud = UserDefaults.standard
+        let probes = ["lifegood_expenses", "lifegood_incomes",
+                      "life_milestones", "life_subordinates", "life_family"]
+        return probes.contains { ud.object(forKey: $0) != nil }
+    }
+
+    /// 看完（按「開始使用」、「完成」或下拉關閉）就記下已讀。冪等。
+    private func markWhatsNewSeen() {
+        lastSeenVersion = Changelog.currentVersion
+        whatsNew = []
+        showWhatsNew = false
     }
 }
 
