@@ -786,6 +786,8 @@ struct DepartmentDetailView: View {
     @State private var eqFilterSystem: String?
     // [v2] 進場動畫旗標
     @State private var peopleAppeared = false
+    /// [v25.394] 重複人員檢查
+    @State private var showDuplicateReview = false
 
     private var dept: Department {
         lifeStore.departments.first(where: { $0.id == deptId }) ?? Department(id: deptId)
@@ -845,6 +847,9 @@ struct DepartmentDetailView: View {
             }
             .sheet(isPresented: $addingEquipment) {
                 EquipmentEditorSheet(editing: nil, defaultDepartmentId: deptId)
+            }
+            .sheet(isPresented: $showDuplicateReview) {
+                OrgPersonDuplicateReview(focusDepartmentId: deptId)
             }
             .sheet(item: $viewingEquipment) { eq in
                 EquipmentDetailCard(equipmentId: eq.id)
@@ -1162,6 +1167,42 @@ struct DepartmentDetailView: View {
         .background(Color(.systemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 16))
         .padding(.horizontal)
+    }
+
+    /// [v25.394] 這個部門有同名重複人員時的提示。沒有重複就整段不出現。
+    @ViewBuilder
+    private var duplicateBanner: some View {
+        let extras = lifeStore.orgPersonDuplicateCount(departmentId: deptId)
+        if extras > 0 {
+            Button {
+                showDuplicateReview = true
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "person.2.badge.gearshape.fill")
+                        .font(.system(size: 14)).foregroundStyle(.orange)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("偵測到 \(extras) 筆重複人員")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.orange)
+                        Text("同名同部門的人員被建立了不只一筆，點這裡檢查並合併")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                    }
+                    Spacer(minLength: 0)
+                    Image(systemName: "chevron.right")
+                        .font(.caption2.weight(.semibold)).foregroundStyle(.tertiary)
+                }
+                .padding(.horizontal, 10).padding(.vertical, 8)
+                .background(Color.orange.opacity(0.10))
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+                .overlay(RoundedRectangle(cornerRadius: 10)
+                    .stroke(Color.orange.opacity(0.22), lineWidth: 0.6))
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .padding(.horizontal).padding(.bottom, 8)
+        }
     }
 
     /// 篩選中橫幅（比照部屬總覽）：說明目前只看誰／哪個系統，點 ✕ 全部清除
@@ -1498,6 +1539,8 @@ struct DepartmentDetailView: View {
                 }
             }
             .padding(.horizontal).padding(.top, 14).padding(.bottom, 10)
+
+            duplicateBanner
 
             if people.isEmpty {
                 HStack(spacing: 8) {
@@ -3034,5 +3077,186 @@ struct OrgPersonWorkEditor: View {
         }
         .presentationDetents([.medium])
         .presentationDragIndicator(.visible)
+    }
+}
+
+// MARK: - [v25.394] 重複人員檢查與合併
+
+/// 列出同名同部門的重複人員，讓使用者看清楚「會留哪一筆、會併掉哪幾筆」再決定。
+///
+/// 刻意不做自動合併：合併是不可逆的，而且「同名」不保證是同一個人
+///（公司裡真的有兩個同名同事是有可能的），一定要讓人先看過。
+struct OrgPersonDuplicateReview: View {
+    @EnvironmentObject var lifeStore: LifeStore
+    @Environment(\.dismiss) private var dismiss
+
+    /// 打開時所在的部門，該部門的群組排在最前面
+    let focusDepartmentId: UUID?
+
+    @State private var excluded: Set<String> = []
+    @State private var confirming = false
+    @State private var mergedCount: Int?
+
+    init(focusDepartmentId: UUID?) {
+        self.focusDepartmentId = focusDepartmentId
+    }
+
+    private var groups: [LifeStore.OrgPersonDuplicateGroup] {
+        let all = lifeStore.orgPersonDuplicateGroups()
+        guard let focus = focusDepartmentId else { return all }
+        // 目前這個部門的排前面，其他部門接在後面（一次順手全部處理掉）
+        return all.filter { $0.departmentId == focus } + all.filter { $0.departmentId != focus }
+    }
+
+    private var selected: [LifeStore.OrgPersonDuplicateGroup] {
+        groups.filter { !excluded.contains($0.id) }
+    }
+
+    private var selectedRemovals: Int {
+        selected.reduce(0) { $0 + $1.duplicates.count }
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                if groups.isEmpty {
+                    Section {
+                        Text(mergedCount.map { "已合併 \($0) 筆重複人員，目前沒有其他重複。" }
+                             ?? "沒有偵測到重複人員。")
+                            .font(.callout).foregroundStyle(.secondary)
+                    }
+                } else {
+                    Section {
+                        Text(explainer)
+                            .font(.caption).foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    } header: {
+                        Text("為什麼會重複")
+                    }
+                    ForEach(groups) { group in
+                        groupSection(group)
+                    }
+                }
+            }
+            .navigationTitle("重複人員")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) { Button("關閉") { dismiss() } }
+                ToolbarItem(placement: .topBarTrailing) {
+                    if !groups.isEmpty {
+                        Button("合併") { confirming = true }
+                            .bold()
+                            .disabled(selected.isEmpty)
+                    }
+                }
+            }
+            .confirmationDialog("合併重複人員", isPresented: $confirming, titleVisibility: .visible) {
+                Button("合併 \(selectedRemovals) 筆", role: .destructive) { merge() }
+                Button("取消", role: .cancel) {}
+            } message: {
+                Text("會保留每一組標示「保留」的那一筆，其餘 \(selectedRemovals) 筆的照片、生日、備註、關係與作品會併進保留的那一筆，然後移除。這個動作沒辦法復原。")
+            }
+        }
+    }
+
+    private static let explainer =
+        "刪除部屬時，公司組織裡的那個人會被保留下來（他還在公司，只是不再是你的部屬），"
+        + "只解除兩邊的連結。之後同一個人重新被加成部屬時——重新加、從備份還原、"
+        + "或換手機後 iCloud 把部屬資料拉回來——系統找不到「已連結」的人員，就會再建一筆新的。"
+        + "部屬清單曾經整批重來過的話，整個部門就會變成兩倍。\n\n"
+        + "v25.394 起，新增部屬時會先找有沒有同名、同部門、而且還沒連結的既有人員可以認領，"
+        + "不會再重複建立。這裡是把已經產生的重複清掉。"
+
+    private var explainer: String { Self.explainer }
+
+    @ViewBuilder
+    private func groupSection(_ group: LifeStore.OrgPersonDuplicateGroup) -> some View {
+        let on = !excluded.contains(group.id)
+        Section {
+            personRow(group.keeper, isKeeper: true, reason: group.keepReason)
+            ForEach(group.duplicates) { dup in
+                personRow(dup, isKeeper: false, reason: nil)
+            }
+            Toggle("合併這一組", isOn: Binding(
+                get: { on },
+                set: { keep in
+                    if keep { excluded.remove(group.id) } else { excluded.insert(group.id) }
+                }
+            ))
+            .tint(.green)
+        } header: {
+            HStack(spacing: 6) {
+                Text(group.name.isEmpty ? "未命名" : group.name)
+                Text(deptName(group.departmentId))
+                    .font(.caption2).foregroundStyle(.secondary)
+                Spacer()
+                Text("\(group.duplicates.count + 1) 筆")
+                    .font(.caption2).foregroundStyle(.orange)
+            }
+        } footer: {
+            if !on { Text("已略過——真的有兩位同名同事時把這一組關掉。") }
+        }
+    }
+
+    private func personRow(_ p: OrgPerson, isKeeper: Bool, reason: String?) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: isKeeper ? "checkmark.circle.fill" : "arrow.triangle.merge")
+                .font(.system(size: 15))
+                .foregroundStyle(isKeeper ? Color.green : Color.orange)
+                .frame(width: 20)
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 6) {
+                    Text(isKeeper ? "保留" : "併入並移除")
+                        .font(.system(size: 10, weight: .bold))
+                        .padding(.horizontal, 6).padding(.vertical, 2)
+                        .background((isKeeper ? Color.green : Color.orange).opacity(0.13))
+                        .foregroundStyle(isKeeper ? Color.green : Color.orange)
+                        .clipShape(Capsule())
+                    if let reason {
+                        Text(reason).font(.caption2).foregroundStyle(.secondary)
+                    }
+                }
+                Text(personMeta(p))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.vertical, 2)
+    }
+
+    /// 字串在 ViewBuilder 外組好
+    private func personMeta(_ p: OrgPerson) -> String {
+        var parts: [String] = []
+        let t = p.jobTitle.trimmingCharacters(in: .whitespaces)
+        parts.append(t.isEmpty ? "未填職稱" : t)
+        if p.linkedSubordinateId != nil { parts.append("已連結部屬") }
+        if p.photoFileName != nil { parts.append("有照片") }
+        if p.birthday != nil { parts.append("有生日") }
+        if !p.relations.isEmpty { parts.append("關係 \(p.relations.count)") }
+        if !p.works.isEmpty { parts.append("作品 \(p.works.count)") }
+        if !p.note.trimmingCharacters(in: .whitespaces).isEmpty { parts.append("有記事") }
+        parts.append("建立 " + Self.dateFmt.string(from: p.dateAdded))
+        return parts.joined(separator: "・")
+    }
+
+    private func deptName(_ id: UUID?) -> String {
+        guard let id, let d = lifeStore.departments.first(where: { $0.id == id }) else {
+            return "未分部門"
+        }
+        let n = d.name.isEmpty ? d.code : d.name
+        return n.isEmpty ? "未命名部門" : n
+    }
+
+    private static let dateFmt: DateFormatter = {
+        let f = DateFormatter(); f.locale = Locale(identifier: "zh_Hant_TW")
+        f.dateFormat = "yyyy/M/d"; return f
+    }()
+
+    private func merge() {
+        let n = lifeStore.mergeOrgPersonDuplicates(selected)
+        mergedCount = (mergedCount ?? 0) + n
+        excluded = []
     }
 }

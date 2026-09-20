@@ -1664,6 +1664,26 @@ class LifeStore: ObservableObject {
         }
         guard let deptId = sub.departmentId else { return }
 
+        // [v25.394] 建新的之前，先找有沒有「同名、同部門、而且還沒連到任何部屬」的
+        // 既有人員可以認領。
+        //
+        // ⚠️ 這是重複人員的主要成因：deleteSubordinate 會保留組織人員、只把
+        //    linkedSubordinateId 清成 nil（刻意的，人還在公司，只是不再是我的部屬）。
+        //    之後同一個人重新被加成部屬時（重新加、從備份還原、或 iCloud 把 subordinates
+        //    拉回來），這裡找不到有連結的人員就會再建一個全新的——同一個人兩筆。
+        //    subordinates 曾經整批重來過的話（換手機、首次雲端同步），全公司會整批變兩倍。
+        if let i = orgPeople.firstIndex(where: {
+            $0.linkedSubordinateId == nil
+                && $0.departmentId == deptId
+                && Self.normalizedPersonName($0.name) == Self.normalizedPersonName(sub.name)
+                && !Self.normalizedPersonName($0.name).isEmpty
+        }) {
+            orgPeople[i].linkedSubordinateId = sub.id
+            orgPeople[i].jobTitle = resolvedTitle
+            orgPeople[i].gradeTitleId = sub.gradeTitleId
+            return
+        }
+
         let personId = UUID()
         let cardId = UUID()
         let deptName = departments.first(where: { $0.id == deptId })?.name ?? sub.department
@@ -1995,6 +2015,195 @@ class LifeStore: ObservableObject {
         }
         orgPeople.removeAll { $0.id == item.id }
         save()
+    }
+
+    // MARK: - [v25.394] 公司組織人員重複偵測與合併
+
+    /// 比對用的正規化姓名：去掉前後與中間的空白（含全形），大小寫統一。
+    /// 「王小明」與「王 小明」是同一個人。
+    static func normalizedPersonName(_ s: String) -> String {
+        s.replacingOccurrences(of: " ", with: "")
+            .replacingOccurrences(of: "\u{3000}", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+    }
+
+    /// 一組重複人員（同名、同部門）。keeper 是要留下來的那一筆。
+    struct OrgPersonDuplicateGroup: Identifiable {
+        let id: String
+        let name: String
+        let departmentId: UUID?
+        let keeper: OrgPerson
+        let duplicates: [OrgPerson]
+        /// 留下這一筆的理由（顯示在檢查畫面上，讓使用者看得懂而不是盲按）
+        let keepReason: String
+    }
+
+    /// 這筆人員資料的「豐富度」——合併時用來決定留哪一筆。
+    private func orgPersonRichness(_ p: OrgPerson) -> Int {
+        var score = 0
+        if p.photoFileName != nil { score += 3 }
+        if p.birthday != nil { score += 2 }
+        if !p.relationship.trimmingCharacters(in: .whitespaces).isEmpty { score += 2 }
+        if !p.note.trimmingCharacters(in: .whitespaces).isEmpty { score += 2 }
+        score += p.children.count
+        score += p.relations.count
+        score += p.works.count
+        if p.linkedBusinessCardId != nil { score += 1 }
+        if p.gradeTitleId != nil { score += 1 }
+        return score
+    }
+
+    /// 找出同名同部門的重複人員。只比同一個部門內：同名的人被分到兩個部門，
+    /// 有可能是真的轉調過，不該自作主張合併。
+    func orgPersonDuplicateGroups() -> [OrgPersonDuplicateGroup] {
+        var buckets: [String: [OrgPerson]] = [:]
+        for p in orgPeople {
+            let key = Self.normalizedPersonName(p.name)
+            guard !key.isEmpty else { continue }   // 沒名字的不比對，避免全部黏成一坨
+            let deptKey = p.departmentId?.uuidString ?? "-"
+            buckets[key + "|" + deptKey, default: []].append(p)
+        }
+        var out: [OrgPersonDuplicateGroup] = []
+        for (key, group) in buckets where group.count > 1 {
+            // 留哪一筆：① 有連到部屬的（拆掉這條連結會讓部屬同步斷掉）
+            //           ② 資料比較完整的　③ 最早建立的
+            let sorted = group.sorted { a, b in
+                let la = a.linkedSubordinateId != nil, lb = b.linkedSubordinateId != nil
+                if la != lb { return la }
+                let ra = orgPersonRichness(a), rb = orgPersonRichness(b)
+                if ra != rb { return ra > rb }
+                return a.dateAdded < b.dateAdded
+            }
+            guard let keeper = sorted.first else { continue }
+            let reason: String
+            if keeper.linkedSubordinateId != nil {
+                reason = "已連結到部屬資料"
+            } else if orgPersonRichness(keeper) > 0 {
+                reason = "資料最完整"
+            } else {
+                reason = "最早建立"
+            }
+            out.append(OrgPersonDuplicateGroup(
+                id: key,
+                name: keeper.name.trimmingCharacters(in: .whitespaces),
+                departmentId: keeper.departmentId,
+                keeper: keeper,
+                duplicates: Array(sorted.dropFirst()),
+                keepReason: reason))
+        }
+        return out.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+    }
+
+    /// 某個部門裡「多出來的」人數（重複的份）。0＝沒有重複。
+    ///
+    /// 這個會在部門頁每次重繪時被呼叫，所以不走 orgPersonDuplicateGroups()——
+    /// 那個要排序、要組理由字串，只為了一個數字不值得。
+    func orgPersonDuplicateCount(departmentId: UUID?) -> Int {
+        var counts: [String: Int] = [:]
+        for p in orgPeople where p.departmentId == departmentId {
+            let key = Self.normalizedPersonName(p.name)
+            guard !key.isEmpty else { continue }
+            counts[key, default: 0] += 1
+        }
+        return counts.values.reduce(0) { $0 + max(0, $1 - 1) }
+    }
+
+    /// 合併重複人員：把要刪掉那幾筆身上「keeper 沒有的東西」搬過去，
+    /// 再把所有指向它們的參照改指到 keeper，最後才移除。
+    ///
+    /// ⚠️ 刻意不走 deleteOrgPerson：那個方法會刪照片檔與生日行事曆事件，
+    ///    但這裡的照片／事件可能剛剛才被 keeper 接收過去，刪掉就變成空頭參照。
+    @discardableResult
+    func mergeOrgPersonDuplicates(_ groups: [OrgPersonDuplicateGroup]) -> Int {
+        guard !groups.isEmpty else { return 0 }
+        isLoading = true
+        defer { isLoading = false; save() }
+
+        var removed = 0
+        for group in groups {
+            guard let ki = orgPeople.firstIndex(where: { $0.id == group.keeper.id }) else { continue }
+            var keeper = orgPeople[ki]
+            for dup in group.duplicates {
+                guard dup.id != keeper.id else { continue }
+                // ① 補齊 keeper 缺的欄位（有值的不覆蓋）
+                if keeper.photoFileName == nil { keeper.photoFileName = dup.photoFileName }
+                if keeper.birthday == nil {
+                    keeper.birthday = dup.birthday
+                    keeper.birthdayEventId = dup.birthdayEventId
+                }
+                if keeper.relationship.trimmingCharacters(in: .whitespaces).isEmpty {
+                    keeper.relationship = dup.relationship
+                }
+                if keeper.jobTitle.trimmingCharacters(in: .whitespaces).isEmpty {
+                    keeper.jobTitle = dup.jobTitle
+                }
+                if keeper.gradeTitleId == nil { keeper.gradeTitleId = dup.gradeTitleId }
+                if keeper.linkedBusinessCardId == nil {
+                    keeper.linkedBusinessCardId = dup.linkedBusinessCardId
+                }
+                if keeper.linkedSubordinateId == nil {
+                    keeper.linkedSubordinateId = dup.linkedSubordinateId
+                }
+                // 備註兩邊都有就接起來，不要丟掉任何一邊寫過的字
+                let dupNote = dup.note.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !dupNote.isEmpty && !keeper.note.contains(dupNote) {
+                    keeper.note = keeper.note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                        ? dupNote : keeper.note + "\n" + dupNote
+                }
+                // ② 子項目照 id 併入
+                let childIds = Set(keeper.children.map(\.id))
+                keeper.children.append(contentsOf: dup.children.filter { !childIds.contains($0.id) })
+                let workIds = Set(keeper.works.map(\.id))
+                keeper.works.append(contentsOf: dup.works.filter { !workIds.contains($0.id) })
+                // 人際關係依「對象」去重，不是依 relation 自己的 id——
+                // 兩筆重複人員對同一個人各記一筆，合併後會變成同一個人出現兩次
+                var relTargets = Set(keeper.relations.map(\.personId))
+                for r in dup.relations where !relTargets.contains(r.personId) && r.personId != keeper.id {
+                    keeper.relations.append(r)
+                    relTargets.insert(r.personId)
+                }
+
+                // ③ 把指向 dup 的參照改指 keeper
+                //
+                // ⚠️ keeper 的本地副本要自己改一次。下面那個迴圈掃的是 orgPeople 陣列，
+                //    keeper 在陣列上那一格確實會被改到，但這個函式最後是用本地副本
+                //    `keeper` 寫回去的——不同步改的話，剛改好的值會被舊值蓋回來。
+                for j in keeper.relations.indices where keeper.relations[j].personId == dup.id {
+                    keeper.relations[j].personId = keeper.id
+                }
+                for i in orgPeople.indices {
+                    for j in orgPeople[i].relations.indices
+                    where orgPeople[i].relations[j].personId == dup.id {
+                        orgPeople[i].relations[j].personId = keeper.id
+                    }
+                }
+                for i in departments.indices where departments[i].managerIds.contains(dup.id) {
+                    departments[i].managerIds.removeAll { $0 == dup.id }
+                    if !departments[i].managerIds.contains(keeper.id) {
+                        departments[i].managerIds.append(keeper.id)
+                    }
+                }
+                for i in businessCards.indices where businessCards[i].linkedOrgPersonId == dup.id {
+                    businessCards[i].linkedOrgPersonId = keeper.id
+                }
+                // ④ dup 的照片若沒被 keeper 接收才刪，否則會把剛接過去的檔案刪掉
+                if let name = dup.photoFileName, keeper.photoFileName != name {
+                    OrgPerson.deletePhoto(name)
+                }
+                orgPeople.removeAll { $0.id == dup.id }
+                removed += 1
+            }
+            // keeper 可能已經因為上面的 removeAll 換了位置，重新定位再寫回
+            if let idx = orgPeople.firstIndex(where: { $0.id == keeper.id }) {
+                orgPeople[idx] = keeper
+            }
+            // 自己不該是自己的關係人
+            if let idx = orgPeople.firstIndex(where: { $0.id == keeper.id }) {
+                orgPeople[idx].relations.removeAll { $0.personId == keeper.id }
+            }
+        }
+        return removed
     }
 
     func add(_ item: BusinessCard) { businessCards.append(item) }
