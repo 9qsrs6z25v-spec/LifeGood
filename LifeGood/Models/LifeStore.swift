@@ -557,11 +557,18 @@ class LifeStore: ObservableObject {
 
     /// 從部屬那一側打勾時呼叫：更新兼任待辦，再散布到同一則待辦的其他連結。
     /// 刻意不走 upsertSideRoleTask——那會再繞回來，形成來回同步。
-    func propagateCompletionToSideRole(_ back: SideRoleBackLink, isCompleted: Bool) {
+    /// [v25.389] completedAt：要押在兩邊的完成時間。nil＝押現在。
+    ///
+    /// ⚠️ 這個參數不是裝飾用的。本方法在最後會把兼任那筆的 completedAt 抄回
+    ///    **所有**連結的部屬任務／議程項目，包含剛剛觸發它的那一筆。若這裡自己
+    ///    另外呼叫一次 Date()，呼叫端剛寫好的壓線時間會在這裡被無聲蓋掉
+    ///    （強制準時完成就等於完全沒作用，而且不會有任何錯誤）。
+    func propagateCompletionToSideRole(_ back: SideRoleBackLink, isCompleted: Bool,
+                                       completedAt: Date? = nil) {
         guard let ri = milestones.firstIndex(where: { $0.id == back.roleId }),
               let ti = milestones[ri].sideRoleTasks?.firstIndex(where: { $0.id == back.taskId }) else { return }
         milestones[ri].sideRoleTasks?[ti].isCompleted = isCompleted
-        milestones[ri].sideRoleTasks?[ti].completedAt = isCompleted ? Date() : nil
+        milestones[ri].sideRoleTasks?[ti].completedAt = isCompleted ? (completedAt ?? Date()) : nil
         let task = milestones[ri].sideRoleTasks?[ti]
         for link in task?.links ?? [] {
             guard let si = subordinates.firstIndex(where: { $0.id == link.subordinateId }) else { continue }
@@ -1409,7 +1416,10 @@ class LifeStore: ObservableObject {
 
     /// 切換某位部屬底下某筆任務的完成狀態（總覽頁與詳情頁的快速打勾共用）。
     /// 標記完成時記下 completedAt，取消完成則清空。
-    func toggleTaskCompletion(subordinateId: UUID, taskId: UUID) {
+    /// [v25.389] forcedCompletedAt：打勾時要押的完成時間。nil＝押現在（原本的行為）；
+    /// 有值＝壓線補登（逾期確認視窗選「強制準時完成」時傳截止時間進來）。
+    /// 取消打勾時一律清成 nil，與這個參數無關。
+    func toggleTaskCompletion(subordinateId: UUID, taskId: UUID, forcedCompletedAt: Date? = nil) {
         guard let si = subordinates.firstIndex(where: { $0.id == subordinateId }),
               let ti = subordinates[si].tasks.firstIndex(where: { $0.id == taskId }) else { return }
         // isLoading = true 防止兩次 subscript 寫回各自觸發 didSet → save()，
@@ -1418,10 +1428,13 @@ class LifeStore: ObservableObject {
         isLoading = true
         defer { isLoading = false }
         subordinates[si].tasks[ti].isCompleted.toggle()
-        subordinates[si].tasks[ti].completedAt = subordinates[si].tasks[ti].isCompleted ? Date() : nil
+        subordinates[si].tasks[ti].completedAt =
+            subordinates[si].tasks[ti].isCompleted ? (forcedCompletedAt ?? Date()) : nil
         // 這筆若是某則兼任待辦的另一面，兩邊要一起完成（含指派給同一件事的其他人）
         if let back = subordinates[si].tasks[ti].sideRoleLink {
-            propagateCompletionToSideRole(back, isCompleted: subordinates[si].tasks[ti].isCompleted)
+            propagateCompletionToSideRole(back,
+                                          isCompleted: subordinates[si].tasks[ti].isCompleted,
+                                          completedAt: subordinates[si].tasks[ti].completedAt)
         }
         save()
         // Apple 提醒事項同步（開啟時）；hop 到 MainActor 是 ReminderBridge 的隔離要求
@@ -1432,7 +1445,9 @@ class LifeStore: ObservableObject {
 
     /// 切換某場會議底下某個議程項目的完成狀態（部屬詳情頁與總覽頁的打勾共用）。
     /// 標記完成時記下 completedAt，取消完成則清空。
-    func toggleMeetingItemCompletion(subordinateId: UUID, meetingId: UUID, itemId: UUID) {
+    /// forcedCompletedAt 的意義同 toggleTaskCompletion
+    func toggleMeetingItemCompletion(subordinateId: UUID, meetingId: UUID, itemId: UUID,
+                                     forcedCompletedAt: Date? = nil) {
         guard let si = subordinates.firstIndex(where: { $0.id == subordinateId }),
               let mi = subordinates[si].meetings.firstIndex(where: { $0.id == meetingId }) else { return }
         // isLoading 阻斷 didSet → save() 的隱式觸發，確保只有下方的顯式 save() 被執行一次
@@ -1442,26 +1457,35 @@ class LifeStore: ObservableObject {
         // 只找 items 的話，週期會議上的打勾會靜默失效（按了沒反應）。
         var back: SideRoleBackLink?
         var nowCompleted = false
+        var nowCompletedAt: Date?
         mutateMeetingItem(&subordinates[si].meetings[mi], itemId: itemId) { item in
             item.isCompleted.toggle()
-            item.completedAt = item.isCompleted ? Date() : nil
+            item.completedAt = item.isCompleted ? (forcedCompletedAt ?? Date()) : nil
             back = item.sideRoleLink
             nowCompleted = item.isCompleted
+            nowCompletedAt = item.completedAt
         }
-        // 這個項目若是某則兼任待辦的另一面，兩邊要一起完成
-        if let back { propagateCompletionToSideRole(back, isCompleted: nowCompleted) }
+        // 這個項目若是某則兼任待辦的另一面，兩邊要一起完成（時間也要一致，
+        // 不然壓線時間會被 propagate 裡的 Date() 蓋掉）
+        if let back {
+            propagateCompletionToSideRole(back, isCompleted: nowCompleted,
+                                          completedAt: nowCompletedAt)
+        }
         save()
     }
 
     /// 切換某份週報的完成狀態。標記完成時記下 completedAt，取消完成則清空。
-    func toggleWeeklyReportCompletion(subordinateId: UUID, reportId: UUID) {
+    /// forcedCompletedAt 的意義同 toggleTaskCompletion
+    func toggleWeeklyReportCompletion(subordinateId: UUID, reportId: UUID,
+                                      forcedCompletedAt: Date? = nil) {
         guard let si = subordinates.firstIndex(where: { $0.id == subordinateId }),
               let ri = subordinates[si].weeklyReports.firstIndex(where: { $0.id == reportId }) else { return }
         // isLoading 阻斷 didSet → save() 的隱式觸發，確保只有下方的顯式 save() 被執行一次
         isLoading = true
         defer { isLoading = false }
         subordinates[si].weeklyReports[ri].isCompleted.toggle()
-        subordinates[si].weeklyReports[ri].completedAt = subordinates[si].weeklyReports[ri].isCompleted ? Date() : nil
+        subordinates[si].weeklyReports[ri].completedAt =
+            subordinates[si].weeklyReports[ri].isCompleted ? (forcedCompletedAt ?? Date()) : nil
         save()
     }
 

@@ -72,6 +72,8 @@ struct SubordinateOverviewView: View {
     @State private var sectionAppeared = false
     @State private var showCompleted = false
     @State private var editTarget: OverviewEditTarget?
+    /// [v25.389] 逾期才打勾時跳出來問「要不要算壓線準時」的請求（見 LateCompletionGate）
+    @State private var lateRequest: LateCompletionRequest?
     @State private var addPersonalKind: PersonalEventKind?   // 新增我的會議 / 事務
     @State private var subAddKind: SubAddKind?               // 新增部屬任務 / 會議 / 報告
     @State private var sharePayload: OverviewSharePayload?   // 文字匯出分享
@@ -280,6 +282,7 @@ struct SubordinateOverviewView: View {
                 }
             }
             .onDisappear { heroAppeared = false; sectionAppeared = false }
+            .lateCompletionConfirm($lateRequest)
             .sheet(item: $editTarget) { target in
                 // 點項目先顯示預覽卡片（右上角「編輯」才進入編輯）
                 SubordinateItemCard(ref: target.itemRef)
@@ -784,7 +787,8 @@ struct SubordinateOverviewView: View {
             leading: {
                 ItemIconDisc(icon: report.isCompleted ? "checkmark.circle.fill" : "circle",
                              color: accent) {
-                    lifeStore.toggleWeeklyReportCompletion(subordinateId: sub.id, reportId: report.id)
+                    lateRequest = LateCompletionGate.report(
+                        lifeStore, subordinateId: sub.id, report: report)
                 }
             }
         )
@@ -921,7 +925,8 @@ struct SubordinateOverviewView: View {
         return HStack(alignment: .center, spacing: 12) {
             // v3：裸 circle 圖示升級為 36pt 漸層圓，對齊 taskRow / leaveRow 視覺規格
             Button {
-                lifeStore.toggleMeetingItemCompletion(subordinateId: sub.id, meetingId: meeting.id, itemId: item.id)
+                lateRequest = LateCompletionGate.meetingItem(
+                    lifeStore, subordinateId: sub.id, meetingId: meeting.id, item: item)
             } label: {
                 ZStack {
                     Circle()
@@ -1167,7 +1172,8 @@ struct SubordinateOverviewView: View {
                         ForEach(meeting.allItems) { item in
                             HStack(alignment: .top, spacing: 6) {
                                 Button {
-                                    lifeStore.toggleMeetingItemCompletion(subordinateId: sub.id, meetingId: meeting.id, itemId: item.id)
+                                    lateRequest = LateCompletionGate.meetingItem(
+                                        lifeStore, subordinateId: sub.id, meetingId: meeting.id, item: item)
                                 } label: {
                                     Image(systemName: item.isCompleted ? "checkmark.circle.fill" : "circle")
                                         .font(.system(size: 13))
@@ -1215,7 +1221,8 @@ struct SubordinateOverviewView: View {
             onTap: { editTarget = .task(subId: sub.id, task: task) },
             leading: {
                 ItemIconDisc(icon: icon, color: accent, iconSize: 16) {
-                    lifeStore.toggleTaskCompletion(subordinateId: sub.id, taskId: task.id)
+                    lateRequest = LateCompletionGate.task(
+                        lifeStore, subordinateId: sub.id, task: task)
                 }
             }
         )

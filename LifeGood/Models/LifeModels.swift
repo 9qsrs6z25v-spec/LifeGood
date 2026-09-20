@@ -3826,3 +3826,26 @@ func completionTiming(completedAt: Date?, due: Date?, calendar: Calendar = .curr
     if c > d { return .overdue }
     return .onTime
 }
+
+/// [v25.389] 在 `moment` 打勾的話會不會被判成逾期？
+///
+/// 粒度刻意與 completionTiming 完全一致（以「日」為單位），不是拿時分秒硬比：
+/// 18:00 截止、18:05 才按下去仍然算準時，那種情況不該跳出確認來煩人。
+/// 沒有截止時間（due == nil）就沒有「遲到」可言，一律回 false。
+func wouldBeOverdue(at moment: Date = Date(), due: Date?) -> Bool {
+    completionTiming(completedAt: moment, due: due) == .overdue
+}
+
+/// [v25.389] 「壓線完成」要押的時間＝截止的那一刻本身。
+///
+/// completionTiming 以日為單位判定，所以押在截止時間上會落在同一天 → .onTime。
+/// 存成截止時間而不是「截止前一秒」是刻意的：這個值會顯示在完成時間戳上，
+/// 壓線就該看得出來是壓在線上，不要出現 17:59:59 這種假裝自然的數字。
+func onTimeCompletionStamp(due: Date) -> Date { due }
+
+/// 某個完成時間是不是「壓線」補登的（用來決定編輯畫面的強制準時開關要不要預先打開）。
+/// 日期經過 JSON round-trip 會變成浮點秒數，留 1 秒容差比直接 == 保險。
+func isOnTimeForced(completedAt: Date?, due: Date?) -> Bool {
+    guard let completedAt, let due else { return false }
+    return abs(completedAt.timeIntervalSince(due)) < 1
+}

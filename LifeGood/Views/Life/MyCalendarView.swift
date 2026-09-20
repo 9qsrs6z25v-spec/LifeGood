@@ -51,6 +51,8 @@ struct MyCalendarView: View {
     @State private var debouncedSearchText = ""
     @State private var showSubCompleted = false
     @State private var openTarget: CalendarOpenTarget?
+    /// [v25.389] 逾期才打勾時跳出來問「要不要算壓線準時」的請求（見 LateCompletionGate）
+    @State private var lateRequest: LateCompletionRequest?
     /// 搜尋結果匯出圖片的分享面板
     @State private var searchSharePayload: CalendarSharePayload?
     /// 匯出前的每頁項目數選擇（PagedImageExporter 模組）
@@ -186,6 +188,7 @@ struct MyCalendarView: View {
                 CalendarEventCard(item: item)
             }
             .sheet(item: $searchSharePayload) { payload in ShareSheet(items: payload.items) }
+            .lateCompletionConfirm($lateRequest)
             .sheet(item: $openTarget) { target in
                 switch target {
                 // 部屬報告/任務/會議/請假：先顯示預覽卡片，右上角「編輯」才進入編輯
@@ -1090,7 +1093,8 @@ struct MyCalendarView: View {
                                       done: it.report.isCompleted, accent: meta.color,
                                       completedAt: it.report.completedAt, due: it.report.date,
                                       onOpen: { openTarget = .report(subId: it.sub.id, report: it.report) }) {
-                        lifeStore.toggleWeeklyReportCompletion(subordinateId: it.sub.id, reportId: it.report.id)
+                        lateRequest = LateCompletionGate.report(
+                            lifeStore, subordinateId: it.sub.id, report: it.report)
                     }
                 }
             }
@@ -1109,7 +1113,8 @@ struct MyCalendarView: View {
                                       detail: it.task.dueDate.map { "截止 " + subAgendaTime($0) },
                                       done: it.task.isCompleted, accent: .cyan,
                                       onOpen: { openTarget = .task(subId: it.sub.id, task: it.task) }) {
-                        lifeStore.toggleTaskCompletion(subordinateId: it.sub.id, taskId: it.task.id)
+                        lateRequest = LateCompletionGate.task(
+                            lifeStore, subordinateId: it.sub.id, task: it.task)
                     }
                 }
             }
@@ -1125,7 +1130,8 @@ struct MyCalendarView: View {
                                             + (it.item.dueDate.map { "・截止 " + subAgendaTime($0) } ?? ""),
                                       done: it.item.isCompleted, accent: .indigo,
                                       onOpen: { openTarget = .meeting(subId: it.sub.id, meeting: it.meeting) }) {
-                        lifeStore.toggleMeetingItemCompletion(subordinateId: it.sub.id, meetingId: it.meeting.id, itemId: it.item.id)
+                        lateRequest = LateCompletionGate.meetingItem(
+                            lifeStore, subordinateId: it.sub.id, meetingId: it.meeting.id, item: it.item)
                     }
                 }
             }
@@ -1137,7 +1143,8 @@ struct MyCalendarView: View {
                                       detail: it.task.dueDate.map { "截止 " + subAgendaTime($0) },
                                       done: it.task.isCompleted, accent: .orange,
                                       onOpen: { openTarget = .task(subId: it.sub.id, task: it.task) }) {
-                        lifeStore.toggleTaskCompletion(subordinateId: it.sub.id, taskId: it.task.id)
+                        lateRequest = LateCompletionGate.task(
+                            lifeStore, subordinateId: it.sub.id, task: it.task)
                     }
                 }
             }

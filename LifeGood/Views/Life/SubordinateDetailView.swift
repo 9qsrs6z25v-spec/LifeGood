@@ -71,6 +71,116 @@ struct CompletionStamp: View {
     }
 }
 
+// MARK: - 逾期打勾的確認（共用：部屬卡片 / 總覽 / 行事曆）
+
+/// [v25.389] 已經過了截止日才打勾時要問的那一句話。
+///
+/// 為什麼需要：有時候是自己太忙沒能當下按，但同仁其實是準時交的，
+/// 照實押現在的時間會讓他白白背一個「逾期」，不公平。
+struct LateCompletionRequest: Identifiable {
+    let id = UUID()
+    /// 顯示在對話框裡的項目名稱
+    let title: String
+    /// 截止時間
+    let due: Date
+    /// nil＝押現在（照實記逾期）；有值＝押這個時間（壓線，視為準時）
+    let apply: (Date?) -> Void
+}
+
+/// 決定「這一下打勾要不要先問」的單一出入口。
+///
+/// 三種項目（任務／會議議程項目／報告）各一個方法，行為一致：
+///   • 取消打勾、或根本不會被判逾期 → 直接切換，回傳 nil
+///   • 會被判逾期 → 不動任何資料，回傳一個 request 讓畫面跳確認視窗
+///
+/// 打勾點散在部屬卡片、部屬總覽、我的行事曆共 12 處，判斷寫在這裡才不會
+/// 12 份各自長歪。
+enum LateCompletionGate {
+
+    static func task(_ store: LifeStore, subordinateId: UUID,
+                     task: SubordinateTask) -> LateCompletionRequest? {
+        guard !task.isCompleted, wouldBeOverdue(due: task.dueDate), let due = task.dueDate else {
+            store.toggleTaskCompletion(subordinateId: subordinateId, taskId: task.id)
+            return nil
+        }
+        let name = task.topic.trimmingCharacters(in: .whitespaces)
+        return LateCompletionRequest(title: name.isEmpty ? "這筆任務" : name, due: due) { stamp in
+            store.toggleTaskCompletion(subordinateId: subordinateId, taskId: task.id,
+                                       forcedCompletedAt: stamp)
+        }
+    }
+
+    static func meetingItem(_ store: LifeStore, subordinateId: UUID, meetingId: UUID,
+                            item: MeetingItem) -> LateCompletionRequest? {
+        guard !item.isCompleted, wouldBeOverdue(due: item.dueDate), let due = item.dueDate else {
+            store.toggleMeetingItemCompletion(subordinateId: subordinateId,
+                                              meetingId: meetingId, itemId: item.id)
+            return nil
+        }
+        let name = item.content.trimmingCharacters(in: .whitespacesAndNewlines)
+        return LateCompletionRequest(title: name.isEmpty ? "這個議程項目" : name, due: due) { stamp in
+            store.toggleMeetingItemCompletion(subordinateId: subordinateId, meetingId: meetingId,
+                                              itemId: item.id, forcedCompletedAt: stamp)
+        }
+    }
+
+    /// 報告沒有另外的截止欄位，它的「日期」就是該交的那一天
+    static func report(_ store: LifeStore, subordinateId: UUID,
+                       report: WeeklyReport) -> LateCompletionRequest? {
+        guard !report.isCompleted, wouldBeOverdue(due: report.date) else {
+            store.toggleWeeklyReportCompletion(subordinateId: subordinateId, reportId: report.id)
+            return nil
+        }
+        let name = report.topic.trimmingCharacters(in: .whitespaces)
+        return LateCompletionRequest(title: name.isEmpty ? "這份報告" : name, due: report.date) { stamp in
+            store.toggleWeeklyReportCompletion(subordinateId: subordinateId, reportId: report.id,
+                                               forcedCompletedAt: stamp)
+        }
+    }
+}
+
+extension View {
+    /// 掛在畫面根層，配合 `@State var request: LateCompletionRequest?` 使用。
+    func lateCompletionConfirm(_ request: Binding<LateCompletionRequest?>) -> some View {
+        // titleVisibility 明寫 .visible：confirmationDialog 的預設是 .automatic，
+        // 標題不保證會出現，而這裡的標題正是「為什麼會跳這個視窗」的答案
+        confirmationDialog("已經超過截止時間", isPresented: Binding(
+            get: { request.wrappedValue != nil },
+            set: { if !$0 { request.wrappedValue = nil } }
+        ), titleVisibility: .visible, presenting: request.wrappedValue) { req in
+            Button("強制準時完成") {
+                req.apply(onTimeCompletionStamp(due: req.due))
+                request.wrappedValue = nil
+            }
+            Button("照實記錄逾期") {
+                req.apply(nil)
+                request.wrappedValue = nil
+            }
+            // 取消不呼叫 apply，所以什麼都不會被改到
+            Button("取消", role: .cancel) { request.wrappedValue = nil }
+        } message: { req in
+            Text(LateCompletionRequest.message(req))
+        }
+    }
+}
+
+extension LateCompletionRequest {
+    private static let dueFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "zh_Hant_TW")
+        f.dateFormat = "yyyy/M/d HH:mm"
+        return f
+    }()
+
+    /// 對話框說明（在 ViewBuilder 外組好）
+    static func message(_ req: LateCompletionRequest) -> String {
+        "「\(req.title)」的截止時間是 " + dueFormatter.string(from: req.due) + "。\n"
+            + "強制準時完成：把完成時間壓在截止的那一刻，算準時——自己太忙沒能當下按，"
+            + "但事情本來就是準時做完的，用這個補回來。\n"
+            + "照實記錄逾期：押上現在的時間，會標示為逾期。"
+    }
+}
+
 // MARK: - 已完成項目收合卡（共用：部屬卡片 / 總覽 / 行事曆）
 
 /// 已完成的單筆項目（報告 / 會議項目 / 任務）
@@ -245,6 +355,8 @@ struct SubordinateDetailView: View {
     @State private var showPromotion = false   // 升職表單
     @State private var showBirthdayReminder = false   // 生日提醒設定（看板鈴鐺）
     @State private var showPerformance = false   // [v25.348] 績效互評票
+    /// [v25.389] 逾期才打勾時跳出來問「要不要算壓線準時」的請求（見 LateCompletionGate）
+    @State private var lateRequest: LateCompletionRequest?
 
     /// 生日徽章的月/日顯示
     static let birthdayFmt: DateFormatter = {
@@ -526,6 +638,7 @@ struct SubordinateDetailView: View {
                 PerformanceBallotView(raterId: subordinateId)
             }
             .premiumLockAlert(isPresented: $showPremiumAlert)
+            .lateCompletionConfirm($lateRequest)
             .sheet(item: $addingType) { type in
                 RecordEditorSheet(subordinateId: subordinateId, type: type, editing: nil)
             }
@@ -781,7 +894,8 @@ struct SubordinateDetailView: View {
                 ForEach(Array(items.enumerated()), id: \.element.id) { idx, r in
                     HStack(alignment: .center, spacing: 10) {
                         Button {
-                            lifeStore.toggleWeeklyReportCompletion(subordinateId: subordinateId, reportId: r.id)
+                            lateRequest = LateCompletionGate.report(
+                                lifeStore, subordinateId: subordinateId, report: r)
                         } label: {
                             Image(systemName: r.isCompleted ? "checkmark.circle.fill" : "circle")
                                 .font(.title3)
@@ -1166,7 +1280,8 @@ struct SubordinateDetailView: View {
     private func meetingItemRow(meeting m: SubordinateMeeting, item: MeetingItem) -> some View {
         HStack(alignment: .top, spacing: 10) {
             Button {
-                lifeStore.toggleMeetingItemCompletion(subordinateId: subordinateId, meetingId: m.id, itemId: item.id)
+                lateRequest = LateCompletionGate.meetingItem(
+                    lifeStore, subordinateId: subordinateId, meetingId: m.id, item: item)
             } label: {
                 Image(systemName: item.isCompleted ? "checkmark.circle.fill" : "circle")
                     .font(.system(size: 16))
@@ -1276,7 +1391,8 @@ struct SubordinateDetailView: View {
             leading: {
                 // 左側可點打勾圓圈：直接切換完成，不進編輯頁
                 ItemCheckbox(isOn: t.isCompleted, color: .green, offColor: .cyan) {
-                    lifeStore.toggleTaskCompletion(subordinateId: subordinateId, taskId: t.id)
+                    lateRequest = LateCompletionGate.task(
+                        lifeStore, subordinateId: subordinateId, task: t)
                 }
             },
             accessory: {
@@ -3165,6 +3281,21 @@ struct MeetingItemsEditor: View {
 
     @EnvironmentObject var lifeStore: LifeStore
 
+    /// [v25.389] 這一列要不要出現「強制準時完成」：已勾完成、有截止時間，
+    /// 而且完成戳記會被判逾期（已經壓過線的也要繼續顯示，否則開關會自己消失）。
+    private func showForceOnTime(_ value: MeetingItem) -> Bool {
+        guard value.isCompleted, value.dueDate != nil else { return false }
+        if isOnTimeForced(completedAt: value.completedAt, due: value.dueDate) { return true }
+        return wouldBeOverdue(at: value.completedAt ?? Date(), due: value.dueDate)
+    }
+
+    static func forceOnTimeFootnote(_ due: Date?) -> String {
+        guard let due else { return "" }
+        return "開啟後完成時間會押在截止時間（"
+            + TaskEditorSheet.dueFootnoteFormatter.string(from: due)
+            + "），視為準時；關閉則押上現在的時間。"
+    }
+
     var body: some View {
         Section {
             if items.isEmpty {
@@ -3250,9 +3381,44 @@ struct MeetingItemsEditor: View {
                       systemImage: value.isCompleted ? "checkmark.circle.fill" : "circle")
                     .foregroundStyle(value.isCompleted ? Color.green : Color.secondary)
             }
+            forceOnTimeRow(item)
             MentionTextField(text: item.note, placeholder: "項目備註（可打 @ 標註人員）",
                              people: lifeStore.mentionPeople())
         }
+    }
+
+    /// [v25.389] 逾期才補登時，可以把完成時間壓回截止那一刻算準時。
+    ///
+    /// 這裡沒有自己的 @State：議程項目是動態陣列，開關狀態直接看 completedAt
+    /// 是不是等於截止時間，所以切換即時寫回 completedAt。
+    ///
+    /// 抽成獨立函式（連同下面明確標了回傳型別的 Binding 工廠）是刻意的：
+    /// itemEditor 本來就因為巢狀 Binding 太多撞過 Swift 型別推導逾時，
+    /// 不該再往那個 VStack 裡塞第二層 Binding(get:set:)。
+    @ViewBuilder
+    private func forceOnTimeRow(_ item: Binding<MeetingItem>) -> some View {
+        let value = item.wrappedValue
+        if showForceOnTime(value) {
+            Toggle(isOn: forceOnTimeBinding(item)) {
+                Label("強制準時完成", systemImage: "checkmark.seal.fill")
+            }
+            .tint(.blue)
+            Text(Self.forceOnTimeFootnote(value.dueDate))
+                .font(.caption2).foregroundStyle(.secondary)
+        }
+    }
+
+    private func forceOnTimeBinding(_ item: Binding<MeetingItem>) -> Binding<Bool> {
+        Binding(
+            get: {
+                isOnTimeForced(completedAt: item.wrappedValue.completedAt,
+                               due: item.wrappedValue.dueDate)
+            },
+            set: { on in
+                guard let due = item.wrappedValue.dueDate else { return }
+                item.wrappedValue.completedAt = on ? onTimeCompletionStamp(due: due) : Date()
+            }
+        )
     }
 
     /// 已選負責人膠囊。點一下即移除——挑錯人時不必再開一次挑人頁。
@@ -3617,6 +3783,9 @@ struct TaskEditorSheet: View {
     @State private var isDereliction = false
     /// [v25.385] 手動指定的關聯機台
     @State private var linkedEquipmentId: UUID?
+    /// [v25.389] 強制準時完成：把完成時間壓在截止的那一刻，算準時。
+    /// 太忙沒能在時間內按下去，但事情本來就是準時做完的，用這個補回來。
+    @State private var forceOnTime = false
 
     /// 機台選單的候選：這位部屬負責的機台排前面，其餘照名稱排。
     /// 最常見的情況是「這件事跟我自己顧的機台有關」，不該從整個機台池裡慢慢找。
@@ -3800,8 +3969,17 @@ struct TaskEditorSheet: View {
                             .foregroundStyle(isCompleted ? .green : .primary)
                     }
                     .tint(.green)
+                    if showForceOnTime {
+                        Toggle(isOn: $forceOnTime) {
+                            Label("強制準時完成", systemImage: "checkmark.seal.fill")
+                                .foregroundStyle(forceOnTime ? .blue : .primary)
+                        }
+                        .tint(.blue)
+                    }
                 } header: {
                     editorSectionHeader("完成狀態", icon: "checkmark.seal.fill", tint: .green)
+                } footer: {
+                    if showForceOnTime { Text(forceOnTimeFootnote) }
                 }
                 Section {
                     MentionTextField(text: $note, placeholder: "選填（可打 @ 標註人員）", people: lifeStore.mentionPeople())
@@ -3844,6 +4022,8 @@ struct TaskEditorSheet: View {
                         lifeStore.equipmentPool.contains { $0.id == id } ? id : nil
                     }
                     if let d = e.dueDate { hasDueDate = true; dueDate = d }
+                    // 已經是壓線補登的就把開關打開，不然再存一次會看不出它被強制過
+                    forceOnTime = isOnTimeForced(completedAt: e.completedAt, due: e.dueDate)
                 } else {
                     // 新任務：預設時間用排程時段（整點/半點，過 18:00 則隔天 09:30）
                     date = FiveMinuteDateTimePicker.defaultSchedulingTime()
@@ -3857,11 +4037,38 @@ struct TaskEditorSheet: View {
         }
     }
 
+    /// 「強制準時完成」這一列要不要出現：已勾完成、有截止日，而且**會被判逾期**。
+    ///
+    /// 判斷刻意用 editing?.completedAt ?? Date()（而不是把 forceOnTime 算進去），
+    /// 這樣開關打開後條件不會跟著翻轉、整列自己消失又把開關重設回去。
+    private var showForceOnTime: Bool {
+        guard isCompleted, hasDueDate else { return false }
+        return forceOnTime || wouldBeOverdue(at: editing?.completedAt ?? Date(), due: dueDate)
+    }
+
+    private var forceOnTimeFootnote: String {
+        "開啟後完成時間會押在截止時間（" + Self.dueFootnoteFormatter.string(from: dueDate)
+            + "），視為準時。太忙沒能當下按、但事情其實是準時做完的，用這個補回來；"
+            + "關閉則照實押上現在的時間，會標示為逾期。"
+    }
+
+    static let dueFootnoteFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "zh_Hant_TW")
+        f.dateFormat = "yyyy/M/d HH:mm"
+        return f
+    }()
+
     private func save() {
         guard !isSaving else { return }
         isSaving = true
-        // 完成時間：原本未完成→改完成時記下現在；維持完成則沿用舊時間；取消完成則清空
-        let completedAt: Date? = isCompleted ? (editing?.completedAt ?? Date()) : nil
+        // 完成時間：強制準時→押截止時間；否則原本未完成→改完成時記下現在、
+        // 維持完成則沿用舊時間；取消完成則清空
+        let completedAt: Date? = {
+            guard isCompleted else { return nil }
+            if forceOnTime, hasDueDate { return onTimeCompletionStamp(due: dueDate) }
+            return editing?.completedAt ?? Date()
+        }()
         let task = SubordinateTask(
             id: editing?.id ?? UUID(),
             topic: topic.trimmingCharacters(in: .whitespaces),
@@ -4182,6 +4389,9 @@ struct WeeklyReportEditorSheet: View {
     @State private var note = ""
     @State private var isCompleted = false
     @State private var isSaving = false
+    /// [v25.389] 強制準時完成：把完成時間壓在報告日期那一刻，算準時。
+    /// 報告沒有另外的截止欄位，它的「日期」就是該交的那一天。
+    @State private var forceOnTime = false
     /// 報告分類（空＝未分類）
     @State private var reportType = ""
     /// 自訂分類的輸入暫存
@@ -4262,8 +4472,17 @@ struct WeeklyReportEditorSheet: View {
                             .foregroundStyle(isCompleted ? .green : .primary)
                     }
                     .tint(.green)
+                    if showForceOnTime {
+                        Toggle(isOn: $forceOnTime) {
+                            Label("強制準時完成", systemImage: "checkmark.seal.fill")
+                                .foregroundStyle(forceOnTime ? .blue : .primary)
+                        }
+                        .tint(.blue)
+                    }
                 } header: {
                     editorSectionHeader("完成狀態", icon: "checkmark.seal.fill", tint: .green)
+                } footer: {
+                    if showForceOnTime { Text(forceOnTimeFootnote) }
                 }
                 Section {
                     MentionTextField(text: $note, placeholder: "選填（可打 @ 標註人員）", people: lifeStore.mentionPeople())
@@ -4297,11 +4516,25 @@ struct WeeklyReportEditorSheet: View {
                 if let e = editing {
                     topic = e.topic; date = e.date; note = e.note; isCompleted = e.isCompleted
                     reportType = e.reportType
+                    forceOnTime = isOnTimeForced(completedAt: e.completedAt, due: e.date)
                 } else {
                     date = FiveMinuteDateTimePicker.defaultSchedulingTime()
                 }
             }
         }
+    }
+
+    /// 「強制準時完成」要不要出現：已勾完成，而且這個戳記會被判逾期。
+    /// 判斷不把 forceOnTime 算進去，開關打開後這一列才不會自己消失。
+    private var showForceOnTime: Bool {
+        guard isCompleted else { return false }
+        return forceOnTime || wouldBeOverdue(at: editing?.completedAt ?? Date(), due: date)
+    }
+
+    private var forceOnTimeFootnote: String {
+        "開啟後完成時間會押在報告日期（" + TaskEditorSheet.dueFootnoteFormatter.string(from: date)
+            + "），視為準時。太忙沒能當下按、但報告其實是準時交的，用這個補回來；"
+            + "關閉則照實押上現在的時間，會標示為逾期。"
     }
 
     /// 分類膠囊：點選/取消（單選——一份報告就是一種報告）
@@ -4335,14 +4568,19 @@ struct WeeklyReportEditorSheet: View {
         // 避免使用者 key 完直接按儲存導致分類遺失。
         let pendingType = customTypeInput.trimmingCharacters(in: .whitespaces)
         let finalType = pendingType.isEmpty ? reportType.trimmingCharacters(in: .whitespaces) : pendingType
+        // 強制準時→押報告日期；否則仍完成→沿用既有戳記（首次完成記為現在）
+        let stamp: Date? = {
+            guard isCompleted else { return nil }
+            if forceOnTime { return onTimeCompletionStamp(due: date) }
+            return editing?.completedAt ?? Date()
+        }()
         let report = WeeklyReport(
             id: editing?.id ?? UUID(),
             topic: topic.trimmingCharacters(in: .whitespaces),
             date: date,
             note: note.trimmingCharacters(in: .whitespaces),
             isCompleted: isCompleted,
-            // 由切換保留／補上完成時間：仍完成→沿用既有戳記（首次完成則記為現在）；取消完成→清空
-            completedAt: isCompleted ? (editing?.completedAt ?? Date()) : nil,
+            completedAt: stamp,
             reportType: finalType
         )
         if let idx = sub.weeklyReports.firstIndex(where: { $0.id == report.id }) { sub.weeklyReports[idx] = report }
@@ -4738,6 +4976,8 @@ struct SubordinateItemCard: View {
     @State private var quickItemTarget: QuickItemTarget?
     // [v1] 卡片內容進場動畫旗標，對齊本檔案其餘 sheet／卡片一致採用的淡入進場規格
     @State private var cardAppeared = false
+    /// [v25.389] 逾期才打勾時跳出來問「要不要算壓線準時」的請求（見 LateCompletionGate）
+    @State private var lateRequest: LateCompletionRequest?
 
     struct QuickSessionTarget: Identifiable {
         let subId: UUID
@@ -4887,7 +5127,8 @@ struct SubordinateItemCard: View {
     private func agendaRow(_ item: MeetingItem, meetingId: UUID, subId: UUID) -> some View {
         HStack(alignment: .top, spacing: 8) {
             Button {
-                lifeStore.toggleMeetingItemCompletion(subordinateId: subId, meetingId: meetingId, itemId: item.id)
+                lateRequest = LateCompletionGate.meetingItem(
+                    lifeStore, subordinateId: subId, meetingId: meetingId, item: item)
             } label: {
                 Image(systemName: item.isCompleted ? "checkmark.circle.fill" : "circle")
                     .font(.system(size: 15)).foregroundStyle(item.isCompleted ? Color.green : Color.indigo)
@@ -5055,6 +5296,7 @@ struct SubordinateItemCard: View {
                     }
                 }
             }
+            .lateCompletionConfirm($lateRequest)
             .sheet(isPresented: $showEdit) { editor }
             .sheet(item: $openSub) { s in SubordinateDetailView(subordinate: s) }
             .sheet(item: $openCard) { box in BusinessCardDetailView(cardId: box.id) }
