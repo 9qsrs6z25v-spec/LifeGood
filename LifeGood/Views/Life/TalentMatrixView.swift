@@ -1168,7 +1168,7 @@ struct TalentStatsView: View {
     private func performExport(_ pending: PendingStatExport, focus: String?) {
         pendingExport = nil
         if let chartId = pending.chartId, let c = charts.first(where: { $0.id == chartId }) {
-            exportChart(maskedChart(c, focus: focus))
+            exportChart(maskedChart(c, focus: focus), highlight: focus)
         } else {
             exportAll(focus: focus)
         }
@@ -1193,8 +1193,13 @@ struct TalentStatsView: View {
 
     /// 橫條圖卡：依數值大到小排序、零值不畫（全部為零顯示空狀態提示）。
     /// forExport＝分享渲染版：隱藏右上小分享鈕。
+    /// [v25.395] highlight：指定某個名字要被強調（只挑一個人匯出時用）。
+    /// 做法是「聚光燈」——被指定的那位維持原本的主題色，其餘的條淡化到 0.28，
+    /// 名字與數值也一併加粗上色。只把某一條變色是不夠的：十幾條同色條並排時，
+    /// 單靠一條的色差在縮圖上根本看不出來，要把其他人壓暗才會跳出來。
     @ViewBuilder
-    private func statsBarCard(_ c: StatChart, forExport: Bool = false) -> some View {
+    private func statsBarCard(_ c: StatChart, forExport: Bool = false,
+                              highlight: String? = nil) -> some View {
         // [v25.322] 團隊平均：對「全部成員」取平均（含 0 值的人，才是真平均），
         // 以灰色條插進排序裡當對照基準
         let avg = c.values.isEmpty ? 0 : c.values.reduce(0.0) { $0 + $1.value } / Double(c.values.count)
@@ -1210,6 +1215,16 @@ struct TalentStatsView: View {
                 Image(systemName: c.icon)
                     .font(.system(size: 12, weight: .semibold)).foregroundStyle(c.color)
                 Text(c.title).font(.subheadline.weight(.bold))
+                if let h = highlight {
+                    Text(h)
+                        .font(.system(size: 10, weight: .bold))
+                        .padding(.horizontal, 7).padding(.vertical, 2.5)
+                        .background(c.color.opacity(0.15))
+                        .foregroundStyle(c.color)
+                        .clipShape(Capsule())
+                        .overlay(Capsule().stroke(c.color.opacity(0.35), lineWidth: 0.8))
+                        .lineLimit(1).minimumScaleFactor(0.7)
+                }
                 Spacer()
                 // [v25.321] 單張圖卡的小分享鈕
                 if !forExport {
@@ -1234,22 +1249,41 @@ struct TalentStatsView: View {
                         x: .value(c.unit, item.value),
                         y: .value("成員", item.name)
                     )
-                    .foregroundStyle(item.name == "團隊平均"
-                                     ? AnyShapeStyle(Color(.systemGray2).gradient)
-                                     : AnyShapeStyle(c.color.gradient))
+                    .foregroundStyle(barStyle(item.name, chart: c, highlight: highlight))
                     .cornerRadius(3)
                     .annotation(position: .trailing, spacing: 4) {
+                        let on = (highlight != nil && item.name == highlight)
                         Text(item.value == item.value.rounded()
                              ? String(format: "%.0f", item.value)
                              : String(format: "%.1f", item.value))
-                            .font(.system(size: 9, weight: .semibold))
-                            .foregroundStyle(.secondary)
+                            .font(.system(size: on ? 10 : 9, weight: on ? .heavy : .semibold))
+                            .foregroundStyle(on ? c.color : Color.secondary)
                     }
                 }
                 .chartXAxis {
                     AxisMarks { _ in AxisGridLine() }
                 }
+                // [v25.395] 被強調的那個人，左側的名字也要加粗上色——
+                // 只有條變色的話，看圖的人得先自己數到第幾條才知道是誰
+                .chartYAxis {
+                    AxisMarks(preset: .aligned, position: .leading) { value in
+                        AxisValueLabel {
+                            if let n = value.as(String.self) {
+                                let on = (highlight != nil && n == highlight)
+                                Text(n)
+                                    .font(.system(size: on ? 11 : 10,
+                                                  weight: on ? .heavy : .regular))
+                                    .foregroundStyle(on ? c.color : Color.secondary)
+                            }
+                        }
+                    }
+                }
                 .frame(height: max(60, CGFloat(sorted.count) * 30))
+                if let rank = rankLine(highlight, in: sorted, unit: c.unit) {
+                    Text(rank)
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(c.color)
+                }
             }
             if let footer = c.footer {
                 Text(footer).font(.caption2).foregroundStyle(.tertiary)
@@ -1259,6 +1293,41 @@ struct TalentStatsView: View {
         .background(Color(.systemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 16))
         .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color(.separator).opacity(0.12), lineWidth: 0.75))
+    }
+
+    /// 條的填色。團隊平均永遠是灰的（它是基準不是人）；有指定強調對象時，
+    /// 其餘的人壓到 0.28 當背景。沒有指定就維持原本全部同色。
+    private func barStyle(_ name: String, chart c: StatChart,
+                          highlight: String?) -> AnyShapeStyle {
+        if name == "團隊平均" { return AnyShapeStyle(Color(.systemGray2).gradient) }
+        guard let highlight else { return AnyShapeStyle(c.color.gradient) }
+        return name == highlight
+            ? AnyShapeStyle(c.color.gradient)
+            : AnyShapeStyle(c.color.opacity(0.28).gradient)
+    }
+
+    /// 強調對象在這張圖裡排第幾。只挑一個人匯出時，「第幾名」往往才是真正想問的事。
+    /// 名次不把「團隊平均」那條算進去——它不是人。
+    private func rankLine(_ highlight: String?,
+                          in sorted: [(name: String, value: Double)],
+                          unit: String) -> String? {
+        guard let highlight else { return nil }
+        let people = sorted.filter { $0.name != "團隊平均" }
+        guard let idx = people.firstIndex(where: { $0.name == highlight }) else {
+            // 值為 0 的人不會進圖（statsBarCard 會濾掉），這時講清楚比留白好
+            return highlight + "：此項目沒有資料"
+        }
+        let value = people[idx].value
+        let valueText = value == value.rounded()
+            ? String(format: "%.0f", value) : String(format: "%.1f", value)
+        var line = highlight + "：\(valueText) \(unit)・第 \(idx + 1) 名／共 \(people.count) 人"
+        if let avg = sorted.first(where: { $0.name == "團隊平均" })?.value, avg > 0 {
+            let diff = value - avg
+            let diffText = abs(diff) == abs(diff).rounded()
+                ? String(format: "%.0f", abs(diff)) : String(format: "%.1f", abs(diff))
+            line += diff >= 0 ? "・高於團隊平均 \(diffText)" : "・低於團隊平均 \(diffText)"
+        }
+        return line
     }
 
     // MARK: 分享（單張圖卡／全部圖表；規格對齊全 App：寬 420、scale ≥3、JPG 0.95、戳記）
@@ -1290,9 +1359,9 @@ struct TalentStatsView: View {
     }
 
     @MainActor
-    private func exportChart(_ c: StatChart) {
+    private func exportChart(_ c: StatChart, highlight: String? = nil) {
         let content = VStack(alignment: .leading, spacing: 10) {
-            statsBarCard(c, forExport: true)
+            statsBarCard(c, forExport: true, highlight: highlight)
             Text("美好人生・\(Self.statsDisplayStampFmt.string(from: Date())) 匯出")
                 .font(.caption2).foregroundStyle(.tertiary)
                 .frame(maxWidth: .infinity, alignment: .trailing)
@@ -1310,7 +1379,7 @@ struct TalentStatsView: View {
                 Spacer()
             }
             ForEach(charts.map { maskedChart($0, focus: focus) }) { c in
-                statsBarCard(c, forExport: true)
+                statsBarCard(c, forExport: true, highlight: focus)
             }
             Text("美好人生・\(Self.statsDisplayStampFmt.string(from: Date())) 匯出")
                 .font(.caption2).foregroundStyle(.tertiary)
