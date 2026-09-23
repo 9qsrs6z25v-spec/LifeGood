@@ -73,6 +73,8 @@ struct VehicleDetailView: View {
         store.vehicles.first(where: { $0.id == vehicleId }) ?? Vehicle(name: "")
     }
     @State private var showEdit = false
+    /// [v25.397] 充電與里程深入分析
+    @State private var showChargeAnalytics = false
     @State private var showDeleteConfirm = false
     @State private var showPremiumAlert = false
     // 照片紀錄（保養/稅費收據等，比照房地產裝潢照片）
@@ -132,6 +134,9 @@ struct VehicleDetailView: View {
                         }
                     }
                 }
+            }
+            .sheet(isPresented: $showChargeAnalytics) {
+                VehicleChargeAnalyticsView(vehicleId: vehicleId)
             }
             .sheet(isPresented: $showEdit) {
                 AddVehicleView(editing: vehicle)
@@ -697,6 +702,28 @@ struct VehicleDetailView: View {
                     Text("推估電池容量：\(String(format: "%.1f", estimates[0].kwh)) kWh（充電區間 ≥15% 的紀錄累積 2 筆後畫出走勢）")
                         .font(.caption2).foregroundStyle(.tertiary)
                 }
+
+                // [v25.397] 深入分析：續航、電池健康度、充電損耗、家充佔比、
+                // 地點排行、充電習慣、每月里程、停車熱點
+                Button {
+                    showChargeAnalytics = true
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "chart.line.uptrend.xyaxis")
+                            .font(.system(size: 12, weight: .semibold))
+                        Text("充電與里程分析")
+                            .font(.caption.weight(.semibold))
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.caption2.weight(.semibold)).foregroundStyle(.tertiary)
+                    }
+                    .foregroundStyle(.green)
+                    .padding(.horizontal, 10).padding(.vertical, 8)
+                    .background(Color.green.opacity(0.10))
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
             }
             .padding(14)
             .background(Color(.secondarySystemGroupedBackground))

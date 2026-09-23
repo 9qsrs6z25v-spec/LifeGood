@@ -42,6 +42,7 @@
 		A01B000001000019 /* VehicleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000019 /* VehicleView.swift */; };
 		A01B00000100001A /* AddVehicleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A00000100001A /* AddVehicleView.swift */; };
 		A01B00000100001E /* VehicleDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A00000100001E /* VehicleDetailView.swift */; };
+		A01B000001000224 /* VehicleChargeAnalyticsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000224 /* VehicleChargeAnalyticsView.swift */; };
 		A01B00000100001F /* RealEstateDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A00000100001F /* RealEstateDetailView.swift */; };
 		A01B000001000020 /* LifeModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000020 /* LifeModels.swift */; };
 		A01B000001000201 /* HealthModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000201 /* HealthModels.swift */; };
@@ -115,6 +116,7 @@
 		A01B00000100003E /* EInvoice.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A00000100003E /* EInvoice.swift */; };
 		A01B00000100003F /* KeychainHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A00000100003F /* KeychainHelper.swift */; };
 		A01B000001001800 /* CardVault.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001800 /* CardVault.swift */; };
+		A01B000001000225 /* VehicleChargeAnalytics.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000225 /* VehicleChargeAnalytics.swift */; };
 		A01B000001000040 /* EInvoiceClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000040 /* EInvoiceClient.swift */; };
 		A01B000001000041 /* InvoiceCategorizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000041 /* InvoiceCategorizer.swift */; };
 		A01B000001000042 /* EInvoiceSyncManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000042 /* EInvoiceSyncManager.swift */; };
@@ -199,6 +201,7 @@
 		A01A000001000019 /* VehicleView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VehicleView.swift; sourceTree = "<group>"; };
 		A01A00000100001A /* AddVehicleView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddVehicleView.swift; sourceTree = "<group>"; };
 		A01A00000100001E /* VehicleDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VehicleDetailView.swift; sourceTree = "<group>"; };
+		A01A000001000224 /* VehicleChargeAnalyticsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VehicleChargeAnalyticsView.swift; sourceTree = "<group>"; };
 		A01A00000100001F /* RealEstateDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RealEstateDetailView.swift; sourceTree = "<group>"; };
 		A01A000001000020 /* LifeModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LifeModels.swift; sourceTree = "<group>"; };
 		A01A000001000201 /* HealthModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthModels.swift; sourceTree = "<group>"; };
@@ -273,6 +276,7 @@
 		A01A00000100003E /* EInvoice.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EInvoice.swift; sourceTree = "<group>"; };
 		A01A00000100003F /* KeychainHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainHelper.swift; sourceTree = "<group>"; };
 		A01A000001001800 /* CardVault.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CardVault.swift; sourceTree = "<group>"; };
+		A01A000001000225 /* VehicleChargeAnalytics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VehicleChargeAnalytics.swift; sourceTree = "<group>"; };
 		A01A000001000040 /* EInvoiceClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EInvoiceClient.swift; sourceTree = "<group>"; };
 		A01A000001000041 /* InvoiceCategorizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InvoiceCategorizer.swift; sourceTree = "<group>"; };
 		A01A000001000042 /* EInvoiceSyncManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EInvoiceSyncManager.swift; sourceTree = "<group>"; };
@@ -379,6 +383,7 @@
 				A01A00000100003E /* EInvoice.swift */,
 				A01A00000100003F /* KeychainHelper.swift */,
 				A01A000001001800 /* CardVault.swift */,
+				A01A000001000225 /* VehicleChargeAnalytics.swift */,
 				A01A000002000005 /* DayTimelineController.swift */,
 				A01A000001000040 /* EInvoiceClient.swift */,
 				A01A000001000041 /* InvoiceCategorizer.swift */,
@@ -440,6 +445,7 @@
 				A01A000001000019 /* VehicleView.swift */,
 				A01A00000100001A /* AddVehicleView.swift */,
 				A01A00000100001E /* VehicleDetailView.swift */,
+				A01A000001000224 /* VehicleChargeAnalyticsView.swift */,
 				A01A000001000018 /* AddRealEstateView.swift */,
 				A01A00000100001F /* RealEstateDetailView.swift */,
 				A01A000001000048 /* RenovationPhotoEditor.swift */,
@@ -647,6 +653,7 @@
 				A01B000001000019 /* VehicleView.swift in Sources */,
 				A01B00000100001A /* AddVehicleView.swift in Sources */,
 				A01B00000100001E /* VehicleDetailView.swift in Sources */,
+				A01B000001000224 /* VehicleChargeAnalyticsView.swift in Sources */,
 				A01B00000100001F /* RealEstateDetailView.swift in Sources */,
 				A01B00000100001B /* Income.swift in Sources */,
 				A01B00000100001C /* IncomeView.swift in Sources */,
@@ -712,6 +719,7 @@
 				A01B00000100003E /* EInvoice.swift in Sources */,
 				A01B00000100003F /* KeychainHelper.swift in Sources */,
 				A01B000001001800 /* CardVault.swift in Sources */,
+				A01B000001000225 /* VehicleChargeAnalytics.swift in Sources */,
 				A01B000002000011 /* DayTimelineAttributes.swift in Sources */,
 				A01B000002000012 /* DayTimelineIntent.swift in Sources */,
 				A01B000002000013 /* DayTimelineController.swift in Sources */,
@@ -750,7 +758,7 @@
 			buildSettings = {
 				CLANG_ENABLE_MODULES = YES;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1149;
+				CURRENT_PROJECT_VERSION = 1150;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = LifeGoodWidgets/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "美好人生";
@@ -761,7 +769,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 25.396;
+				MARKETING_VERSION = 25.397;
 				PRODUCT_BUNDLE_IDENTIFIER = com.lifegood.app.widgets;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
@@ -776,7 +784,7 @@
 			buildSettings = {
 				CLANG_ENABLE_MODULES = YES;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1149;
+				CURRENT_PROJECT_VERSION = 1150;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = LifeGoodWidgets/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "美好人生";
@@ -787,7 +795,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 25.396;
+				MARKETING_VERSION = 25.397;
 				PRODUCT_BUNDLE_IDENTIFIER = com.lifegood.app.widgets;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
@@ -804,7 +812,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = LifeGood/LifeGood.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1149;
+				CURRENT_PROJECT_VERSION = 1150;
 				DEVELOPMENT_ASSET_PATHS = "\"LifeGood/Preview Content\"";
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -835,7 +843,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 25.396;
+				MARKETING_VERSION = 25.397;
 				PRODUCT_BUNDLE_IDENTIFIER = com.lifegood.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -851,7 +859,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = LifeGood/LifeGood.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1149;
+				CURRENT_PROJECT_VERSION = 1150;
 				DEVELOPMENT_ASSET_PATHS = "\"LifeGood/Preview Content\"";
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -882,7 +890,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 25.396;
+				MARKETING_VERSION = 25.397;
 				PRODUCT_BUNDLE_IDENTIFIER = com.lifegood.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;

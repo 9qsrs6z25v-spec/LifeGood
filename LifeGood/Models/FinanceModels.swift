@@ -1988,6 +1988,14 @@ struct Vehicle: Identifiable, Codable {
     var variableExpenses: [VehicleVariableExpense]  // 變動支出（依動力類型：油錢或電費等）
     var photoRecords: [VehiclePhotoRecord]          // 照片紀錄（保養/稅費收據/保險文件等）
     var note: String
+    /// [v25.397] 原廠標稱電池容量（kWh）。只有電車／混合動力／電動機車填得上。
+    /// 用途是算「充電損耗率」與「滿電續航」——**不是**拿來直接除推估容量當健康度，
+    /// 理由見 VehicleChargeAnalytics.soh 的註解。
+    var batteryCapacityKWh: Double? = nil
+    /// [v25.397] 家充地點的名稱關鍵字（例如「家」「自宅」「社區地下室」）。
+    /// 充電紀錄的地點含這段文字就算家充。家充與外面快充的電價與充電效率差很多，
+    /// 混在一起算出來的趨勢是假的，所以要有辦法分開。
+    var homeChargePlace: String? = nil
 
     init(
         id: UUID = UUID(),
@@ -2002,7 +2010,9 @@ struct Vehicle: Identifiable, Codable {
         fixedExpenses: [VehicleFixedExpense] = [],
         variableExpenses: [VehicleVariableExpense] = [],
         photoRecords: [VehiclePhotoRecord] = [],
-        note: String = ""
+        note: String = "",
+        batteryCapacityKWh: Double? = nil,
+        homeChargePlace: String? = nil
     ) {
         self.id = id
         self.name = name
@@ -2017,6 +2027,8 @@ struct Vehicle: Identifiable, Codable {
         self.variableExpenses = variableExpenses
         self.photoRecords = photoRecords
         self.note = note
+        self.batteryCapacityKWh = batteryCapacityKWh
+        self.homeChargePlace = homeChargePlace
     }
 
     // MARK: - 向下相容解碼
@@ -2035,6 +2047,8 @@ struct Vehicle: Identifiable, Codable {
         variableExpenses = lossyArray(c, forKey: .variableExpenses)
         photoRecords = lossyArray(c, forKey: .photoRecords)
         note = (try? c.decode(String.self, forKey: .note)) ?? ""
+        batteryCapacityKWh = try? c.decodeIfPresent(Double.self, forKey: .batteryCapacityKWh)
+        homeChargePlace = try? c.decodeIfPresent(String.self, forKey: .homeChargePlace)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -2052,11 +2066,21 @@ struct Vehicle: Identifiable, Codable {
         try c.encode(variableExpenses, forKey: .variableExpenses)
         try c.encode(photoRecords, forKey: .photoRecords)
         try c.encode(note, forKey: .note)
+        // Vehicle 有自訂 encode，新欄位一定要自己補一行——漏了不會編譯錯，
+        // 只會在殺掉 App 重開後靜默消失（同 FamilyMember.agreements 的教訓）
+        try c.encodeIfPresent(batteryCapacityKWh, forKey: .batteryCapacityKWh)
+        try c.encodeIfPresent(homeChargePlace, forKey: .homeChargePlace)
     }
 
     private enum CodingKeys: String, CodingKey {
         case id, name, brand, ownerName, powerType, purchaseDate, soldDate, purchasePrice, currentValue
         case fixedExpenses, variableExpenses, photoRecords, note
+        case batteryCapacityKWh, homeChargePlace
+    }
+
+    /// 這台車有沒有電池（電車／混合動力／電動機車）
+    var hasBattery: Bool {
+        powerType == .electric || powerType == .hybrid || powerType == .electricMotorcycle
     }
 
     /// 是否已售出

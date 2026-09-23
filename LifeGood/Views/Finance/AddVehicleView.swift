@@ -68,6 +68,9 @@ struct AddVehicleView: View {
     @State private var brand = ""
     @State private var ownerName = ""
     @State private var powerType: VehiclePowerType = .gasoline
+    /// [v25.397] 原廠標稱電池容量（kWh）與家充地點關鍵字。只有有電池的車型才問。
+    @State private var batteryCapacityText = ""
+    @State private var homeChargePlace = ""
     @State private var purchaseDate = Date()
     @State private var isSold = false
     @State private var soldDate = Date()
@@ -237,6 +240,21 @@ struct AddVehicleView: View {
                 ForEach(VehiclePowerType.allCases) { type in
                     Label(type.rawValue, systemImage: type.icon).tag(type)
                 }
+            }
+
+            // [v25.397] 電池相關欄位。填了才算得出充電損耗、續航與家充佔比；
+            // 不填不影響既有功能，所以維持選填。
+            if hasBatteryType {
+                HStack {
+                    Text("原廠電池容量")
+                    Spacer()
+                    TextField("選填", text: $batteryCapacityText)
+                        .keyboardType(.decimalPad)
+                        .multilineTextAlignment(.trailing)
+                        .frame(width: 90)
+                    Text("kWh").font(.caption).foregroundStyle(.secondary)
+                }
+                TextField("家充地點關鍵字（如 家、自宅）", text: $homeChargePlace)
             }
 
             DatePicker("購入日期", selection: $purchaseDate, displayedComponents: .date)
@@ -513,6 +531,8 @@ struct AddVehicleView: View {
             vehicle.purchasePrice = price
             vehicle.currentValue = currentVal
             vehicle.note = trimmedNote
+            vehicle.batteryCapacityKWh = batteryValue
+            vehicle.homeChargePlace = homeKeywordValue
             financeStore.update(vehicle)
         } else {
             let vehicle = Vehicle(
@@ -527,7 +547,9 @@ struct AddVehicleView: View {
                 currentValue: currentVal,
                 fixedExpenses: [],
                 variableExpenses: [],
-                note: trimmedNote
+                note: trimmedNote,
+                batteryCapacityKWh: batteryValue,
+                homeChargePlace: homeKeywordValue
             )
             financeStore.add(vehicle)
             hasAutoSaved = true
@@ -656,6 +678,8 @@ struct AddVehicleView: View {
             vehicle.purchasePrice = price
             vehicle.currentValue = currentVal
             vehicle.note = trimmedNote
+            vehicle.batteryCapacityKWh = batteryValue
+            vehicle.homeChargePlace = homeKeywordValue
             financeStore.update(vehicle)
         } else {
             let vehicle = Vehicle(
@@ -670,11 +694,30 @@ struct AddVehicleView: View {
                 currentValue: currentVal,
                 fixedExpenses: [],
                 variableExpenses: [],
-                note: trimmedNote
+                note: trimmedNote,
+                batteryCapacityKWh: batteryValue,
+                homeChargePlace: homeKeywordValue
             )
             financeStore.add(vehicle)
         }
         dismiss()
+    }
+
+    /// 這個動力類型有沒有電池
+    private var hasBatteryType: Bool {
+        powerType == .electric || powerType == .hybrid || powerType == .electricMotorcycle
+    }
+
+    /// 只有有電池的車型才存電池欄位；換成油車就存 nil，
+    /// 不要留著上一個車型填到一半的值（同 careerFields 的既有規矩）
+    private var batteryValue: Double? {
+        guard hasBatteryType, let v = Double(batteryCapacityText), v > 0 else { return nil }
+        return v
+    }
+
+    private var homeKeywordValue: String? {
+        let t = homeChargePlace.trimmingCharacters(in: .whitespaces)
+        return (hasBatteryType && !t.isEmpty) ? t : nil
     }
 
     // MARK: - 載入編輯
@@ -683,6 +726,8 @@ struct AddVehicleView: View {
         guard let e = editing else { return }
         name = e.name; brand = e.brand; ownerName = e.ownerName
         powerType = e.powerType
+        if let cap = e.batteryCapacityKWh { batteryCapacityText = String(format: "%g", cap) }
+        homeChargePlace = e.homeChargePlace ?? ""
         purchaseDate = e.purchaseDate
         if let sd = e.soldDate {
             isSold = true
