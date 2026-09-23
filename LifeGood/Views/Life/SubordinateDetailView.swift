@@ -2583,6 +2583,8 @@ struct AddSubItemSheet: View {
     @State private var pickedSubId: UUID?
     @State private var emptyIconPulse = false
     @State private var emptyPulseTask: Task<Void, Never>?
+    /// [v25.396] 部屬一多，從頭捲到尾找人很花時間
+    @State private var query = ""
 
     var body: some View {
         if let subId = pickedSubId {
@@ -2597,48 +2599,7 @@ struct AddSubItemSheet: View {
                     if lifeStore.subordinates.isEmpty {
                         emptyState
                     } else {
-                        List {
-                            ForEach(lifeStore.subordinates.sorted { $0.name < $1.name }) { sub in
-                                Button {
-                                    pickedSubId = sub.id
-                                } label: {
-                                    HStack(spacing: 12) {
-                                        // [v1] 36pt 漸層圖示圓 + 陰影 + 細邊框，對齊 recordRow／meetingSection
-                                        // 等本檔案既有清單列規格，取代先前裸 26pt 單色圖示；
-                                        // 色彩改用 kind.color（任務＝cyan／會議＝indigo／報告＝purple），
-                                        // 與下方對應編輯器 Section 識別色一致，不再固定寫死 .green。
-                                        ZStack {
-                                            Circle()
-                                                .fill(
-                                                    LinearGradient(
-                                                        colors: [kind.color.opacity(0.22), kind.color.opacity(0.09)],
-                                                        startPoint: .topLeading, endPoint: .bottomTrailing
-                                                    )
-                                                )
-                                                .frame(width: 36, height: 36)
-                                                .shadow(color: kind.color.opacity(0.20), radius: 5, x: 0, y: 2)
-                                            Circle()
-                                                .stroke(kind.color.opacity(0.22), lineWidth: 1.0)
-                                                .frame(width: 36, height: 36)
-                                            Image(systemName: kind.icon)
-                                                .font(.system(size: 14, weight: .semibold))
-                                                .foregroundStyle(kind.color)
-                                        }
-                                        VStack(alignment: .leading, spacing: 2) {
-                                            Text(sub.name.isEmpty ? "未命名" : sub.name)
-                                                .foregroundStyle(.primary)
-                                            let subtitle = [sub.department, sub.jobTitle]
-                                                .filter { !$0.isEmpty }.joined(separator: " · ")
-                                            if !subtitle.isEmpty {
-                                                Text(subtitle).font(.caption).foregroundStyle(.secondary)
-                                            }
-                                        }
-                                        Spacer()
-                                        Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
-                                    }
-                                }
-                            }
-                        }
+                        pickerList
                     }
                 }
                 .navigationTitle("選擇部屬")
@@ -2648,6 +2609,129 @@ struct AddSubItemSheet: View {
                 }
             }
         }
+    }
+
+    // MARK: [v25.396] 挑人清單（可搜尋、依課別分組）
+
+    private var pickerList: some View {
+        let groups = groupedSubordinates
+        return List {
+            if groups.isEmpty {
+                Text("找不到符合「\(query)」的部屬")
+                    .font(.callout).foregroundStyle(.secondary)
+            }
+            ForEach(groups, id: \.title) { group in
+                Section {
+                    ForEach(group.people) { sub in
+                        pickerRow(sub)
+                    }
+                } header: {
+                    HStack(spacing: 6) {
+                        Text(group.title)
+                        Text("\(group.people.count)")
+                            .font(.system(size: 10, weight: .bold))
+                            .padding(.horizontal, 5).padding(.vertical, 1.5)
+                            .background(kind.color.opacity(0.13))
+                            .foregroundStyle(kind.color)
+                            .clipShape(Capsule())
+                    }
+                }
+            }
+        }
+        .searchable(text: $query, prompt: "搜尋姓名、課別、職稱、廠區")
+    }
+
+    /// 這位部屬的課別顯示名：優先用連動的部門資料，沒有才用他自己填的文字。
+    /// 兩邊都空就歸到「未分課別」，不要讓沒分課的人整批消失。
+    private func deptTitle(_ sub: Subordinate) -> String {
+        if let did = sub.departmentId,
+           let d = lifeStore.departments.first(where: { $0.id == did }) {
+            let n = d.name.isEmpty ? d.code : d.name
+            if !n.isEmpty { return n }
+        }
+        let raw = sub.department.trimmingCharacters(in: .whitespaces)
+        return raw.isEmpty ? "未分課別" : raw
+    }
+
+    /// 搜尋比對：姓名、課別（含連動後的名稱）、職稱、廠區都能打
+    private func matches(_ sub: Subordinate) -> Bool {
+        let q = query.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !q.isEmpty else { return true }
+        let haystack = [sub.name, sub.department, sub.jobTitle, sub.plantArea, deptTitle(sub)]
+            .joined(separator: " ")
+            .lowercased()
+        return haystack.contains(q)
+    }
+
+    /// 依課別分組，組內依姓名排序。
+    /// 排序用 localizedStandardCompare 而不是 `<`：中文姓名用字串大小比出來的順序
+    /// 是 Unicode 碼位序，看起來像亂排的。
+    private var groupedSubordinates: [(title: String, people: [Subordinate])] {
+        var buckets: [String: [Subordinate]] = [:]
+        for sub in lifeStore.subordinates where matches(sub) {
+            buckets[deptTitle(sub), default: []].append(sub)
+        }
+        return buckets
+            .map { (title: $0.key,
+                    people: $0.value.sorted {
+                        $0.name.localizedStandardCompare($1.name) == .orderedAscending
+                    }) }
+            .sorted { a, b in
+                // 「未分課別」固定排最後，其餘依課別名稱
+                if (a.title == "未分課別") != (b.title == "未分課別") {
+                    return b.title == "未分課別"
+                }
+                return a.title.localizedStandardCompare(b.title) == .orderedAscending
+            }
+    }
+
+    private func pickerRow(_ sub: Subordinate) -> some View {
+        Button {
+            pickedSubId = sub.id
+        } label: {
+            HStack(spacing: 12) {
+                // [v1] 36pt 漸層圖示圓 + 陰影 + 細邊框，對齊 recordRow／meetingSection
+                // 等本檔案既有清單列規格；色彩用 kind.color（任務＝cyan／會議＝indigo／
+                // 報告＝purple），與下方對應編輯器 Section 識別色一致。
+                ZStack {
+                    Circle()
+                        .fill(
+                            LinearGradient(
+                                colors: [kind.color.opacity(0.22), kind.color.opacity(0.09)],
+                                startPoint: .topLeading, endPoint: .bottomTrailing
+                            )
+                        )
+                        .frame(width: 36, height: 36)
+                        .shadow(color: kind.color.opacity(0.20), radius: 5, x: 0, y: 2)
+                    Circle()
+                        .stroke(kind.color.opacity(0.22), lineWidth: 1.0)
+                        .frame(width: 36, height: 36)
+                    Image(systemName: kind.icon)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(kind.color)
+                }
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(sub.name.isEmpty ? "未命名" : sub.name)
+                        .foregroundStyle(.primary)
+                    let subtitle = rowSubtitle(sub)
+                    if !subtitle.isEmpty {
+                        Text(subtitle).font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                Spacer()
+                Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// 字串在 ViewBuilder 外組好。課別已經是區塊標題了，這裡改列職稱與廠區。
+    private func rowSubtitle(_ sub: Subordinate) -> String {
+        [sub.jobTitle, sub.plantArea]
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+            .joined(separator: " · ")
     }
 
     // MARK: 空狀態（雙圈脈衝，對齊 SubordinateEquipmentView.emptyState 規格）
