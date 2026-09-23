@@ -1,12 +1,77 @@
 import SwiftUI
 import StoreKit
 
+// MARK: - 美化紀錄（PaywallView）
+// [2026-06 v1] 本次美化方向：
+//   1. Hero 標題 / 說明文字：補 titleTextAppeared spring 進場動畫（opacity + Y 偏移），
+//      圓球動畫先出（0.45s 後）再帶出文字，依序錯開打造更有節奏的引導感，
+//      對齊 OverviewView.summaryCard 進場動畫規格。
+//   2. 功能亮點區塊：補 Capsule 綠色側條 + "功能亮點" 標題 + "N 項" 計數膠囊 header，
+//      對齊 LifeOverviewView.milestoneTimelineSection 標題規格；
+//      卡片背景從 secondarySystemBackground 升至 systemBackground + 統一 shadow 規格。
+//   3. 訂閱方案區塊：加 productsAppeared spring 進場動畫（opacity + Y 偏移，0.07s stagger），
+//      對齊 SubordinateView 列表進場動畫規格。
+//   4. 還原購買按鈕：從純 .secondary 文字升級為「帶圖示 Capsule 框線按鈕」，
+//      secondarySystemFill 底色 + separator 邊框 + 系統箭頭圖示，
+//      視覺重量適中（低於主 CTA，高於純文字連結），對齊次要操作按鈕規格。
+//   5. limitedFreeNotice：禮物卡加 giftAppeared spring 進場動畫（opacity + scale），
+//      卡片邊框加粗至 1pt + 加入右側散景圓提升立體感，
+//      對齊 FinanceOverviewView.cashFlowSection 精緻卡片規格。
+// [2026-06 v2] 本次美化方向：
+//   6. productRow / fallbackProductRow 背景 ZStack：補入第二（左下）、第三（中右）顆散景裝飾圓，
+//      並在 ZStack 末層加 LinearGradient [.white.opacity(0.18), .clear] top→center 玻璃光澤，
+//      對齊 VariableExpenseView / FixedExpenseView / RealEstateView 英雄卡三圓 + glass shine 規格；
+//      價格 Capsule 補 .overlay(Capsule().stroke(.white.opacity(0.35), lineWidth: 0.75)) 細邊框，
+//      對齊 summaryHeader 月現金流 Capsule 邊框規格。
+//   7. limitedFreeNotice 卡片：在 .clipShape 之後追加
+//      LinearGradient [.white.opacity(0.12), .clear] top→center overlay，
+//      讓推廣卡頂部有同款玻璃光澤，與 productRow 視覺語言一致。
+//   8. benefitRow 彩色 icon badge：補
+//      .overlay(RoundedRectangle(cornerRadius:10,style:.continuous).stroke(color.opacity(0.25),lineWidth:0.75))
+//      細邊框，對齊 SettingsView.actionRow badge 邊框規格，深色模式下 badge 輪廓更清晰。
+//   9. PremiumBanner 背景：補第二顆散景圓（左下）+ 頂部玻璃光澤，
+//      對齊 productRow v2 規格，橫幅與升級卡視覺語言統一。
+// [2026-07 v3] 本次美化方向（操作區「還原購買」載入狀態，聚焦這一個元件）：
+//   10. 還原購買按鈕：先前 SubscriptionManager.restoreInProgress 這個 @Published 旗標
+//       完全沒有被畫面讀取，使用者點下去後畫面毫無回饋、也能連續誤點（雖然 Model 端已有
+//       guard 防重入，但 UI 沒有對應顯示）。現補上：restoreInProgress 為 true 時，
+//       圖示替換為 ProgressView（tint 對齊按鈕次要文字色）並文案改為「還原中…」，
+//       按鈕加 .disabled(restoreInProgress)，對齊 productList 區 purchaseInProgress
+//       的「處理中，請稍候…」回饋規格，兩個非同步操作視覺語言一致。
+//   11. 訂閱方案價格 Capsule（productRow / fallbackProductRow）：補
+//       .lineLimit(1) + .minimumScaleFactor(0.7)，避免 Dynamic Type 開到最大級距或
+//       高單位金額（例如日後改參考幣別／較長貨幣符號）時文字被裁切或撐破 Capsule 邊框，
+//       對齊「大字自適應但不可小到無法辨識」的下限規格。
+// [2026-08 v4] 本次美化方向（fallbackProductRow 載入狀態，聚焦這一個元件）：
+//   12. fallbackProductRow「商品載入中…」文字先前是完全靜態的一行字，App Store 商品尚未
+//       回傳期間畫面看起來像是卡住、與 MultiPhotoGallery 載入佔位（漸層+文字）、
+//       PremiumBanner 升級膠囊 shimmer 等既有「進行中」回饋規格不一致。
+//       補上 loadingPulse 呼吸動畫（疊加 opacity 1.0 ↔ 0.45，easeInOut 1.1s repeatForever），
+//       只在 productList onAppear 時啟動，讓使用者一眼看出「商品資訊仍在向 App Store 讀取」
+//       而非畫面卡死；products 真正載入完成後 fallbackProductRow 不再顯示，動畫自然停止。
+//       純視覺回饋層調整，商品載入／購買流程完全未變動。
+
 // MARK: - 升級訂閱頁
 
 struct PaywallView: View {
+    // 靜態常數：Apple 官方連結不含非法字元，永不為 nil；集中於此方便維護
+    private static let eulaURL = URL(string: "https://www.apple.com/legal/internet-services/itunes/dev/stdeula/")!
+    private static let privacyURL = URL(string: "https://www.apple.com/legal/privacy/")!
+    private static let subscriptionsURL = URL(string: "https://apps.apple.com/account/subscriptions")!
+
     @EnvironmentObject var subscription: SubscriptionManager
     @Environment(\.dismiss) private var dismiss
     @State private var heroAppeared = false
+    @State private var heroPulse = false
+    @State private var benefitsAppeared = false
+    /// Hero 文字進場（延遲於圓球動畫之後，依序引導視線）
+    @State private var titleTextAppeared = false
+    /// 訂閱方案列進場旗標
+    @State private var productsAppeared = false
+    /// 限時免費通知卡進場旗標
+    @State private var giftAppeared = false
+    /// fallbackProductRow「商品載入中…」呼吸動畫旗標
+    @State private var loadingPulse = false
 
     var body: some View {
         NavigationStack {
@@ -14,8 +79,12 @@ struct PaywallView: View {
                 VStack(spacing: 28) {
                     header
                     benefits
-                    productList
-                    actions
+                    if subscription.remoteAllFree {
+                        limitedFreeNotice
+                    } else {
+                        productList
+                        actions
+                    }
                     legal
                 }
                 .padding(.horizontal, 20)
@@ -39,6 +108,24 @@ struct PaywallView: View {
     private var header: some View {
         VStack(spacing: 0) {
             ZStack {
+                // 向外擴散的脈衝光環（兩層錯開時序，與 todayCard 同風格）
+                Circle()
+                    .stroke(Color.green.opacity(heroPulse ? 0 : 0.40), lineWidth: 1.5)
+                    .frame(width: 108, height: 108)
+                    .scaleEffect(heroPulse ? 1.55 : 1.0)
+                    .animation(
+                        .easeOut(duration: 1.8).repeatForever(autoreverses: false),
+                        value: heroPulse
+                    )
+                Circle()
+                    .stroke(Color.green.opacity(heroPulse ? 0 : 0.22), lineWidth: 1)
+                    .frame(width: 108, height: 108)
+                    .scaleEffect(heroPulse ? 1.90 : 1.0)
+                    .animation(
+                        .easeOut(duration: 1.8).delay(0.30).repeatForever(autoreverses: false),
+                        value: heroPulse
+                    )
+
                 // 光暈底層
                 Circle()
                     .fill(
@@ -85,36 +172,155 @@ struct PaywallView: View {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
                     heroAppeared = true
                 }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.60) {
+                    heroPulse = true
+                }
+                // 文字延遲於圓球動畫之後依序展現
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) {
+                    withAnimation(.spring(response: 0.52, dampingFraction: 0.78)) {
+                        titleTextAppeared = true
+                    }
+                }
             }
 
-            Text("解鎖完整人生管理")
+            Text(subscription.remoteAllFree ? "全功能限時免費中" : "解鎖完整人生管理")
                 .font(.title2.weight(.bold))
                 .padding(.bottom, 10)
+                .opacity(titleTextAppeared ? 1 : 0)
+                .offset(y: titleTextAppeared ? 0 : 16)
+                .animation(.spring(response: 0.52, dampingFraction: 0.78).delay(0.0), value: titleTextAppeared)
 
-            Text("免費版本可使用記帳全部功能與理財模式的股票管理。訂閱後可解鎖儲蓄險、載具、房地產、人生履歷、家庭、管理等完整體驗。")
+            Text(subscription.remoteAllFree
+                 ? "推廣期間，所有進階功能（儲蓄險、載具、房地產、人生履歷、家庭、管理等）全部免費開放，無需訂閱即可使用。"
+                 : "免費版本可使用記帳全部功能與理財模式的股票管理。訂閱後可解鎖儲蓄險、載具、房地產、人生履歷、家庭、管理等完整體驗。")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .lineSpacing(3)
+                .opacity(titleTextAppeared ? 1 : 0)
+                .offset(y: titleTextAppeared ? 0 : 10)
+                .animation(.spring(response: 0.52, dampingFraction: 0.80).delay(0.10), value: titleTextAppeared)
         }
         .padding(.top, 8)
+    }
+
+    // MARK: - 限時免費提示（推廣期間取代購買區）
+
+    private var limitedFreeNotice: some View {
+        ZStack {
+            // 右側散景圓，提升卡片立體感
+            Circle()
+                .fill(Color.green.opacity(0.12))
+                .frame(width: 80, height: 80)
+                .offset(x: 90, y: -20)
+                .blur(radius: 16)
+            Circle()
+                .fill(Color.green.opacity(0.07))
+                .frame(width: 50, height: 50)
+                .offset(x: -80, y: 24)
+                .blur(radius: 10)
+
+            VStack(spacing: 10) {
+                HStack(spacing: 8) {
+                    Image(systemName: "gift.fill")
+                        .foregroundStyle(.green)
+                        .symbolEffect(.bounce, value: giftAppeared)
+                    Text("限時免費，全功能已解鎖")
+                        .font(.headline)
+                }
+                Text("推廣期間無需訂閱即可使用所有功能。現在開始使用的你，未來恢復訂閱後仍永久保留完整功能（早鳥回饋）。")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .lineSpacing(2)
+            }
+            .padding(18)
+        }
+        .frame(maxWidth: .infinity)
+        .background(Color.green.opacity(0.10))
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.green.opacity(0.32), lineWidth: 1))
+        // [v2] 頂部玻璃光澤，與 productRow 卡片視覺語言一致
+        .overlay(alignment: .top) {
+            LinearGradient(
+                colors: [.white.opacity(0.12), .clear],
+                startPoint: .top,
+                endPoint: .center
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 16))
+            .allowsHitTesting(false)
+        }
+        .opacity(giftAppeared ? 1 : 0)
+        .scaleEffect(giftAppeared ? 1.0 : 0.96)
+        .animation(.spring(response: 0.50, dampingFraction: 0.82), value: giftAppeared)
+        .onAppear {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                giftAppeared = true
+            }
+        }
     }
 
     // MARK: - 功能亮點
 
     private var benefits: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            benefitRow(icon: "shield.fill",   color: .indigo, title: "儲蓄險管理",   desc: "TWD/USD 雙幣別、複利試算、期滿領回。")
-            Divider().padding(.leading, 58)
-            benefitRow(icon: "car.fill",      color: .blue,   title: "載具與房地產", desc: "完整資產卡、貸款與支出連動、地圖呈現。")
-            Divider().padding(.leading, 58)
-            benefitRow(icon: "trophy.fill",   color: .orange, title: "人生履歷",     desc: "里程碑、家庭成員、職涯與管理工具。")
-            Divider().padding(.leading, 58)
-            benefitRow(icon: "icloud.fill",   color: .teal,   title: "資料完全離線", desc: "資料只存在你的裝置與 iCloud，不上傳伺服器。")
+        let items: [(icon: String, color: Color, title: String, desc: String)] = [
+            ("shield.fill",   .indigo, "儲蓄險管理",   "TWD/USD 雙幣別、複利試算、期滿領回。"),
+            ("car.fill",      .blue,   "載具與房地產", "完整資產卡、貸款與支出連動、地圖呈現。"),
+            ("trophy.fill",   .orange, "人生履歷",     "里程碑、家庭成員、職涯與管理工具。"),
+            ("icloud.fill",   .teal,   "資料完全離線", "資料只存在你的裝置與 iCloud，不上傳伺服器。"),
+        ]
+        return VStack(alignment: .leading, spacing: 10) {
+            // 區塊標題（Capsule 綠色側條 + 標題 + 計數膠囊）
+            HStack(spacing: 10) {
+                Capsule()
+                    .fill(
+                        LinearGradient(
+                            colors: [.green, .green.opacity(0.55)],
+                            startPoint: .top, endPoint: .bottom
+                        )
+                    )
+                    .frame(width: 4, height: 20)
+                Text("功能亮點")
+                    .font(.subheadline.weight(.bold))
+                Spacer()
+                Text("\(items.count) 項")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.green)
+                    .padding(.horizontal, 8).padding(.vertical, 3)
+                    .background(Color.green.opacity(0.10))
+                    .clipShape(Capsule())
+                    .overlay(Capsule().stroke(Color.green.opacity(0.22), lineWidth: 0.75))
+            }
+            .opacity(benefitsAppeared ? 1 : 0)
+            .offset(y: benefitsAppeared ? 0 : 10)
+            .animation(.spring(response: 0.46, dampingFraction: 0.80), value: benefitsAppeared)
+
+            // 功能列表卡片
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(Array(items.enumerated()), id: \.offset) { idx, item in
+                    benefitRow(icon: item.icon, color: item.color, title: item.title, desc: item.desc)
+                        .opacity(benefitsAppeared ? 1 : 0)
+                        .offset(x: benefitsAppeared ? 0 : -22)
+                        .animation(
+                            .spring(response: 0.50, dampingFraction: 0.80)
+                                .delay(0.06 + 0.08 * Double(idx)),
+                            value: benefitsAppeared
+                        )
+                    if idx < items.count - 1 {
+                        Divider().padding(.leading, 58)
+                    }
+                }
+            }
+            .background(Color(.systemBackground))
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .shadow(color: .black.opacity(0.06), radius: 10, x: 0, y: 4)
+            .shadow(color: .black.opacity(0.03), radius: 3, x: 0, y: 1)
         }
-        .background(Color(.secondarySystemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .shadow(color: .black.opacity(0.06), radius: 12, x: 0, y: 5)
+        .onAppear {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) {
+                benefitsAppeared = true
+            }
+        }
     }
 
     private func benefitRow(icon: String, color: Color, title: String, desc: String) -> some View {
@@ -136,6 +342,11 @@ struct PaywallView: View {
                     .foregroundStyle(.white)
                     .symbolRenderingMode(.hierarchical)
             }
+            // [v2] 細邊框，深色模式下 badge 輪廓更清晰，對齊 SettingsView.actionRow badge 規格
+            .overlay(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .stroke(color.opacity(0.25), lineWidth: 0.75)
+            )
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(title)
@@ -160,13 +371,35 @@ struct PaywallView: View {
     private var productList: some View {
         VStack(spacing: 12) {
             if subscription.products.isEmpty {
-                ForEach(LifeGoodProduct.allCases, id: \.rawValue) { p in
+                ForEach(Array(LifeGoodProduct.allCases.enumerated()), id: \.offset) { idx, p in
                     fallbackProductRow(p)
+                        .opacity(productsAppeared ? 1 : 0)
+                        .offset(y: productsAppeared ? 0 : 18)
+                        .animation(
+                            .spring(response: 0.45, dampingFraction: 0.82)
+                                .delay(0.07 * Double(idx)),
+                            value: productsAppeared
+                        )
                 }
             } else {
-                ForEach(subscription.products, id: \.id) { product in
+                ForEach(Array(subscription.products.enumerated()), id: \.offset) { idx, product in
                     productRow(product)
+                        .opacity(productsAppeared ? 1 : 0)
+                        .offset(y: productsAppeared ? 0 : 18)
+                        .animation(
+                            .spring(response: 0.45, dampingFraction: 0.82)
+                                .delay(0.07 * Double(idx)),
+                            value: productsAppeared
+                        )
                 }
+            }
+        }
+        .onAppear {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.30) {
+                productsAppeared = true
+            }
+            withAnimation(.easeInOut(duration: 1.1).repeatForever(autoreverses: true)) {
+                loadingPulse = true
             }
         }
     }
@@ -188,10 +421,14 @@ struct PaywallView: View {
                 Text(product.displayPrice)
                     .font(.headline.weight(.bold))
                     .foregroundStyle(.white)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 8)
                     .background(.white.opacity(0.22))
                     .clipShape(Capsule())
+                    // [v2] 細邊框，對齊 summaryHeader 月現金流 Capsule 邊框規格
+                    .overlay(Capsule().stroke(.white.opacity(0.35), lineWidth: 0.75))
             }
             .padding(.horizontal, 18)
             .padding(.vertical, 18)
@@ -205,12 +442,30 @@ struct PaywallView: View {
                         startPoint: .topLeading,
                         endPoint: .bottomTrailing
                     )
-                    // 裝飾性高光
+                    // [v2] 右上主散景圓
                     Circle()
                         .fill(.white.opacity(0.10))
                         .frame(width: 80, height: 80)
                         .offset(x: 80, y: -32)
                         .blur(radius: 10)
+                    // [v2] 左下次散景圓
+                    Circle()
+                        .fill(.white.opacity(0.07))
+                        .frame(width: 55, height: 55)
+                        .offset(x: -80, y: 30)
+                        .blur(radius: 10)
+                    // [v2] 中右小散景圓
+                    Circle()
+                        .fill(.white.opacity(0.05))
+                        .frame(width: 36, height: 36)
+                        .offset(x: 55, y: 28)
+                        .blur(radius: 7)
+                    // [v2] 頂部玻璃光澤，對齊全 App 英雄卡 glass shine 統一規格
+                    LinearGradient(
+                        colors: [.white.opacity(0.18), .clear],
+                        startPoint: .top,
+                        endPoint: .center
+                    )
                 }
             )
             .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
@@ -230,15 +485,21 @@ struct PaywallView: View {
                 Text("商品載入中…")
                     .font(.caption)
                     .foregroundStyle(.white.opacity(0.78))
+                    // [v4] 呼吸動畫回饋「仍在讀取中」，避免看起來像卡住
+                    .opacity(loadingPulse ? 0.45 : 1.0)
             }
             Spacer()
             Text(product.fallbackPriceText)
                 .font(.headline.weight(.bold))
                 .foregroundStyle(.white)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 8)
                 .background(.white.opacity(0.22))
                 .clipShape(Capsule())
+                // [v2] 細邊框，與 productRow 價格膠囊一致
+                .overlay(Capsule().stroke(.white.opacity(0.35), lineWidth: 0.75))
         }
         .padding(.horizontal, 18)
         .padding(.vertical, 18)
@@ -252,11 +513,30 @@ struct PaywallView: View {
                     startPoint: .topLeading,
                     endPoint: .bottomTrailing
                 )
+                // [v2] 右上主散景圓
                 Circle()
                     .fill(.white.opacity(0.10))
                     .frame(width: 80, height: 80)
                     .offset(x: 80, y: -32)
                     .blur(radius: 10)
+                // [v2] 左下次散景圓
+                Circle()
+                    .fill(.white.opacity(0.07))
+                    .frame(width: 55, height: 55)
+                    .offset(x: -80, y: 30)
+                    .blur(radius: 10)
+                // [v2] 中右小散景圓
+                Circle()
+                    .fill(.white.opacity(0.05))
+                    .frame(width: 36, height: 36)
+                    .offset(x: 55, y: 28)
+                    .blur(radius: 7)
+                // [v2] 頂部玻璃光澤，對齊全 App 英雄卡 glass shine 統一規格
+                LinearGradient(
+                    colors: [.white.opacity(0.18), .clear],
+                    startPoint: .top,
+                    endPoint: .center
+                )
             }
         )
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
@@ -266,40 +546,95 @@ struct PaywallView: View {
     // MARK: - 操作區
 
     private var actions: some View {
-        VStack(spacing: 10) {
+        VStack(spacing: 12) {
             if subscription.purchaseInProgress {
-                ProgressView().tint(.green)
+                HStack(spacing: 8) {
+                    ProgressView().tint(.green).scaleEffect(0.9)
+                    Text("處理中，請稍候…")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.horizontal, 16).padding(.vertical, 10)
+                .background(Color.green.opacity(0.08))
+                .clipShape(Capsule())
             }
             if let err = subscription.lastError {
-                Text(err)
-                    .font(.caption)
-                    .foregroundStyle(.red)
-                    .multilineTextAlignment(.center)
+                HStack(alignment: .top, spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.orange)
+                    Text(err)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.leading)
+                }
+                .padding(.horizontal, 14).padding(.vertical, 10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.orange.opacity(0.09))
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .stroke(Color.orange.opacity(0.25), lineWidth: 0.75)
+                )
             }
-            Button("還原購買") {
+            Button {
                 Task { await subscription.restorePurchases() }
+            } label: {
+                HStack(spacing: 6) {
+                    if subscription.restoreInProgress {
+                        ProgressView().tint(.secondary).scaleEffect(0.75)
+                    } else {
+                        Image(systemName: "arrow.clockwise.circle")
+                            .font(.footnote.weight(.medium))
+                    }
+                    Text(subscription.restoreInProgress ? "還原中…" : "還原購買")
+                        .font(.footnote.weight(.medium))
+                }
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 18)
+                .padding(.vertical, 9)
+                .background(Color(.secondarySystemFill))
+                .clipShape(Capsule())
+                .overlay(
+                    Capsule()
+                        .stroke(Color(.separator).opacity(0.55), lineWidth: 0.75)
+                )
             }
-            .font(.footnote.weight(.medium))
-            .foregroundStyle(.secondary)
+            .buttonStyle(.plain)
+            .disabled(subscription.restoreInProgress)
         }
     }
 
     // MARK: - 法律條款
 
     private var legal: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: 10) {
             Text("訂閱會於到期前 24 小時自動續訂，可隨時於 Apple ID 設定中取消。")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
-            HStack(spacing: 16) {
-                Link("使用條款", destination: URL(string: "https://www.apple.com/legal/internet-services/itunes/dev/stdeula/")!)
-                Link("隱私政策", destination: URL(string: "https://www.apple.com/legal/privacy/")!)
-                Link("管理訂閱", destination: URL(string: "https://apps.apple.com/account/subscriptions")!)
+
+            Rectangle()
+                .fill(Color(.separator).opacity(0.30))
+                .frame(height: 0.5)
+
+            HStack(spacing: 0) {
+                Spacer(minLength: 0)
+                Link("使用條款", destination: Self.eulaURL)
+                Text(" · ").foregroundStyle(.tertiary)
+                Link("隱私政策", destination: Self.privacyURL)
+                Text(" · ").foregroundStyle(.tertiary)
+                Link("管理訂閱", destination: Self.subscriptionsURL)
+                Spacer(minLength: 0)
             }
             .font(.caption2)
             .foregroundStyle(.secondary)
         }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
+        .background(Color(.secondarySystemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .shadow(color: .black.opacity(0.04), radius: 8, x: 0, y: 2)
     }
 }
 
@@ -349,6 +684,18 @@ struct PremiumBanner: View {
                         .frame(width: 60, height: 60)
                         .offset(x: 100, y: -20)
                         .blur(radius: 12)
+                    // [v2] 左下次散景圓，對齊 productRow v2 規格
+                    Circle()
+                        .fill(.white.opacity(0.07))
+                        .frame(width: 40, height: 40)
+                        .offset(x: -90, y: 18)
+                        .blur(radius: 8)
+                    // [v2] 頂部玻璃光澤，讓橫幅與升級卡視覺語言一致
+                    LinearGradient(
+                        colors: [.white.opacity(0.18), .clear],
+                        startPoint: .top,
+                        endPoint: .center
+                    )
                 }
             )
         }

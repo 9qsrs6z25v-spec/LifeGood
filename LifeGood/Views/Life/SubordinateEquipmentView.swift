@@ -1,0 +1,2818 @@
+import SwiftUI
+
+// MARK: - 部屬「執掌」分頁：設備清單 + PM／警報時間軸
+//
+// 讓使用者記錄部屬管理的設備、每台設備的預防保養（PM）時間與警報事件，
+// 頁面下方以單一時間軸並列 PM（綠）與警報（紅），一眼看出兩者的相關性；
+// 警報條目並標示「距該設備上次 PM N 天」輔助判讀。
+
+// MARK: - 美化紀錄（SubordinateEquipmentView）[2026-07]
+// 美化方向（對齊 SubordinateRosterView / GradeTitleView 等頁面規格，僅視覺調整，未動業務邏輯）：
+//   • 設備清單空狀態：靜態圖示 → 升級為 double-pulse ring（雙圈脈衝動畫），
+//     使用 Task + onAppear/onDisappear 取消，避免頁面切換後動畫殘留閃爍
+//   • 設備列（equipmentRow）加入 stagger opacity+Y offset 入場動畫，與部門/職等列一致
+//   • 時間軸列（timelineRow）同步加入 stagger 入場動畫
+//   • 設備名稱／時間軸設備名稱文字補 lineLimit(1)+minimumScaleFactor，避免長名稱在大字級下截斷或爆版
+//   • EquipmentEditorSheet 的 PM／警報空狀態提示補上圖示錨點（對齊 GradeTitleView noCandidatesHint 規格）
+// [2026-07 v2] EquipmentEditorSheet 補齊 PM／警報清單項目新增/刪除時的過場動畫：
+//   • 新增：Button 內的 append 包入 withAnimation(.spring(response:0.42, dampingFraction:0.78))；
+//     刪除：removeAll 同款包入，並在每筆 row 的 VStack 補上
+//     .transition(.opacity.combined(with: .move(edge: .top)))（對齊 AddExpenseView／
+//     ResumeGiftSection 既有清單新增/刪除過場規格），避免項目瞬間跳出/消失。
+//   純視覺調整，PM／警報記錄的儲存、排序（依日期新到舊）、刪除設備等既有商業邏輯完全未變動。
+// [2026-07 v3] equipmentRow 的「PM N／警報 N」數量標籤，補齊統一膠囊徽章樣式：
+//   • 原本是無底色裸 Label，與同一列「30天內 N 次」徽章及 TravelMapView.spotRow「造訪 N 次」
+//     既有膠囊規格（padding+background opacity+clipShape(Capsule)）不一致；
+//     統一補上膠囊底色，警報為 0 時改用中性 Color(.tertiarySystemFill) 避免誤讀為異常。
+//   純視覺調整，PM／警報筆數計算與顯示條件完全未變動。
+// [2026-07 v4] 補齊 v3 留下的待辦：SubordinateEquipmentTimelineSection.timelineRow 左側
+//   22pt 節點圖示原本只是單層 fill(color.opacity(0.15)) 純色圓，與 equipmentRow（36pt）／
+//   TravelMapView.spotRow（44pt）等錨點圖示既有的「LinearGradient 漸層 + Circle().stroke
+//   外框」規格不一致。改為同款漸層（topLeading→bottomTrailing，0.22→0.09）+
+//   Circle().stroke(color.opacity(0.28), lineWidth: 0.75)，小尺寸邊框寬度比照
+//   spotRow 44pt 規格而非 equipmentRow 36pt 的 1pt，避免小圓上邊框顯得過粗。
+//   純視覺調整，PM／警報時間軸排序、天數計算等既有商業邏輯完全未變動。
+//   （本檔案設備清單空狀態、equipmentRow、timelineRow 進場動畫、PM／警報膠囊徽章與
+//   節點圖示規格至此已全數收斂一致）
+// [2026-08 v5] EquipmentEditorSheet 工具列「儲存／新增」按鈕補齊載入狀態：
+//   • save()／deleteEquipment() 皆自帶 isSaving 忙碌守衛（guard !isSaving + disabled(isSaving)）
+//     避免快速連點造成重複寫入，但按鈕本身在存檔期間毫無視覺提示，與全 App「Add*View 儲存按鈕
+//     載入狀態」系列（AddExpenseView／AddIncomeView／AddVehicleView／AddStockView／
+//     AddRealEstateView／AddSavingsInsuranceView，v25.81～v25.91）已收斂一致的規格脫節。
+//   • 補上 ProgressView().scaleEffect(0.7).tint(.green)，isSaving 為 true 時顯示於按鈕左側，
+//     對齊上述系列既有做法。純視覺層調整，save()／deleteEquipment() 內部守衛判斷與設備／
+//     PM／警報寫回 lifeStore 等既有商業邏輯完全未變動。
+//   （下次美化本檔案時：可轉往其他仍留有待辦的畫面。另全 App 仍有多處編輯 Sheet 帶 isSaving
+//   忙碌守衛卻同樣缺此載入視覺——FamilyMembersResumeView／SubordinateView／GradeTitleView／
+//   OrganizationView／SubordinateDetailView／MyCalendarView／LifeFinanceView／ResumeView／
+//   ChildDetailView，可作為下次美化比照本次補齊的清單，逐步達成全 App 均值性。）
+
+// MARK: 設備清單章節
+
+struct SubordinateEquipmentSection: View {
+    @EnvironmentObject var lifeStore: LifeStore
+    @EnvironmentObject var subscription: SubscriptionManager
+    let subordinateId: UUID
+
+    @State private var addingEquipment = false
+    @State private var editingEquipment: ManagedEquipment?
+    @State private var pickingExisting = false
+    @State private var showPremiumAlert = false
+    @State private var rowsAppeared = false
+    @State private var rowsAppearedTask: Task<Void, Never>?
+    @State private var emptyIconPulse = false
+    @State private var emptyPulseTask: Task<Void, Never>?
+
+    private let accent = Color.teal
+
+    private var subordinate: Subordinate {
+        lifeStore.subordinates.first { $0.id == subordinateId } ?? Subordinate(name: "")
+    }
+
+    private static let dateFmt: DateFormatter = {
+        let f = DateFormatter(); f.locale = Locale(identifier: "zh_Hant_TW"); f.dateFormat = "yyyy/M/d"; return f
+    }()
+
+    var body: some View {
+        // 機台存放於共用機台池（機台屬於部門、生老病死跟著機台）；
+        // 這裡只列出「這位部屬目前擔任負責人」的機台
+        let equipments = lifeStore.equipmentPool
+            .filter { $0.ownerId == subordinateId }
+            .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+        return VStack(alignment: .leading, spacing: 0) {
+            // 段落標題（對齊本頁其他章節規格：漸層側條 + 圖示 + 標題 + 計數 + 新增鈕）
+            HStack(spacing: 10) {
+                Capsule()
+                    .fill(LinearGradient(colors: [accent, accent.opacity(0.55)], startPoint: .top, endPoint: .bottom))
+                    .frame(width: 4, height: 18)
+                Image(systemName: "wrench.and.screwdriver.fill")
+                    .font(.system(size: 13, weight: .semibold)).foregroundStyle(accent)
+                Text("執掌設備").font(.subheadline.weight(.semibold))
+                if !equipments.isEmpty {
+                    Text("\(equipments.count) 台")
+                        .font(.caption2.weight(.semibold)).foregroundStyle(accent)
+                        .padding(.horizontal, 7).padding(.vertical, 2.5)
+                        .background(accent.opacity(0.12)).clipShape(Capsule())
+                        .overlay(Capsule().stroke(accent.opacity(0.22), lineWidth: 0.6))
+                }
+                Spacer()
+                Menu {
+                    Button {
+                        if subscription.isPremium { addingEquipment = true }
+                        else { showPremiumAlert = true }
+                    } label: {
+                        Label("新增機台", systemImage: "plus")
+                    }
+                    Button {
+                        if subscription.isPremium { pickingExisting = true }
+                        else { showPremiumAlert = true }
+                    } label: {
+                        Label("選取現有機台", systemImage: "checklist")
+                    }
+                } label: {
+                    Image(systemName: "plus.circle.fill")
+                        .font(.system(size: 18, weight: .semibold)).foregroundStyle(accent)
+                }
+            }
+            .padding(.horizontal, 14).padding(.top, 14).padding(.bottom, 8)
+
+            if equipments.isEmpty {
+                emptyState
+            } else {
+                ForEach(Array(equipments.enumerated()), id: \.element.id) { idx, eq in
+                    equipmentRow(eq)
+                        .opacity(rowsAppeared ? 1 : 0)
+                        .offset(y: rowsAppeared ? 0 : 12)
+                        .animation(.spring(response: 0.50, dampingFraction: 0.78).delay(0.04 * Double(idx)), value: rowsAppeared)
+                    if idx < equipments.count - 1 {
+                        Rectangle().fill(Color(.separator).opacity(0.20))
+                            .frame(height: 0.5).padding(.leading, 56)
+                    }
+                }
+            }
+        }
+        .background(Color(.systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .overlay(RoundedRectangle(cornerRadius: 16).stroke(accent.opacity(0.08), lineWidth: 0.75))
+        .shadow(color: .black.opacity(0.05), radius: 8, x: 0, y: 3)
+        .padding(.horizontal)
+        .premiumLockAlert(isPresented: $showPremiumAlert)
+        .onAppear {
+            rowsAppearedTask?.cancel()
+            rowsAppearedTask = Task {
+                try? await Task.sleep(nanoseconds: 150_000_000)
+                guard !Task.isCancelled else { return }
+                rowsAppeared = true
+            }
+        }
+        .onDisappear {
+            rowsAppearedTask?.cancel()
+            rowsAppeared = false
+        }
+        .sheet(isPresented: $addingEquipment) {
+            EquipmentEditorSheet(editing: nil,
+                                 defaultDepartmentId: subordinate.departmentId,
+                                 defaultOwnerId: subordinateId)
+        }
+        .sheet(item: $editingEquipment) { eq in
+            // 點開一律先看機台詳情卡片（編輯在卡片右上），與部門所屬設備清單行為一致
+            EquipmentDetailCard(equipmentId: eq.id)
+        }
+        .sheet(isPresented: $pickingExisting) {
+            EquipmentClaimPicker(subordinateId: subordinateId)
+        }
+    }
+
+    // MARK: 空狀態（雙圈脈衝，對齊 SubordinateRosterView 規格）
+
+    private var emptyState: some View {
+        VStack(spacing: 10) {
+            ZStack {
+                Circle()
+                    .stroke(accent.opacity(emptyIconPulse ? 0 : 0.28), lineWidth: 1.5)
+                    .frame(width: 62, height: 62)
+                    .scaleEffect(emptyIconPulse ? 1.35 : 1.0)
+                    .animation(.easeOut(duration: 2.0).repeatForever(autoreverses: false), value: emptyIconPulse)
+                Circle()
+                    .stroke(accent.opacity(emptyIconPulse ? 0 : 0.14), lineWidth: 1)
+                    .frame(width: 62, height: 62)
+                    .scaleEffect(emptyIconPulse ? 1.62 : 1.0)
+                    .animation(.easeOut(duration: 2.0).delay(0.3).repeatForever(autoreverses: false), value: emptyIconPulse)
+                Circle()
+                    .fill(LinearGradient(colors: [accent.opacity(0.16), accent.opacity(0.06)],
+                                         startPoint: .topLeading, endPoint: .bottomTrailing))
+                    .frame(width: 48, height: 48)
+                    .overlay(Circle().stroke(accent.opacity(0.22), lineWidth: 1))
+                Image(systemName: "wrench.and.screwdriver")
+                    .font(.system(size: 20, weight: .light)).foregroundStyle(accent.opacity(0.75))
+            }
+            .onAppear {
+                emptyIconPulse = false
+                emptyPulseTask?.cancel()
+                emptyPulseTask = Task {
+                    try? await Task.sleep(nanoseconds: 300_000_000)
+                    guard !Task.isCancelled else { return }
+                    emptyIconPulse = true
+                }
+            }
+            .onDisappear {
+                emptyPulseTask?.cancel()
+                emptyIconPulse = false
+            }
+            Text("尚未執掌任何機台").font(.caption).foregroundStyle(.secondary)
+            Text("可新增機台，或從部門機台池選取現有機台").font(.caption2).foregroundStyle(.tertiary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 20)
+    }
+
+    /// 機台列膠囊的描述（icon 可無；dimmed＝灰色弱化，如警報 0 次）
+    private struct RowChip: Hashable {
+        let icon: String?
+        let text: String
+        let tint: Color
+        let dimmed: Bool
+    }
+
+    /// 機台列的膠囊清單：PM 數／警報數／30 天內警報／系統別／部門
+    private func rowChips(_ eq: ManagedEquipment, recentAlarms: Int) -> [RowChip] {
+        var chips: [RowChip] = [
+            RowChip(icon: "wrench.fill", text: "PM \(eq.pmRecords.count)", tint: .green, dimmed: false),
+            RowChip(icon: "bell.badge.fill", text: "警報 \(eq.alarms.count)", tint: .red, dimmed: eq.alarms.isEmpty)
+        ]
+        if recentAlarms > 0 {
+            chips.append(RowChip(icon: nil, text: "30天內 \(recentAlarms) 次", tint: .red, dimmed: false))
+        }
+        if !eq.system.isEmpty {
+            chips.append(RowChip(icon: nil, text: eq.system, tint: .cyan, dimmed: false))
+        }
+        if let deptName = lifeStore.departments.first(where: { $0.id == eq.departmentId })?.name,
+           !deptName.isEmpty {
+            chips.append(RowChip(icon: nil, text: deptName, tint: .indigo, dimmed: false))
+        }
+        return chips
+    }
+
+    private func rowChipView(_ chip: RowChip) -> some View {
+        HStack(spacing: 3) {
+            if let icon = chip.icon {
+                Image(systemName: icon).font(.system(size: 8, weight: .bold))
+            }
+            Text(chip.text)
+        }
+        .font(.system(size: 9, weight: .bold))
+        .padding(.horizontal, 5).padding(.vertical, 1.5)
+        .background(chip.dimmed ? Color(.tertiarySystemFill) : chip.tint.opacity(0.12))
+        .foregroundStyle(chip.dimmed ? Color.secondary : chip.tint)
+        .clipShape(Capsule())
+        .fixedSize()
+    }
+
+    @ViewBuilder
+    private func equipmentRow(_ eq: ManagedEquipment) -> some View {
+        let lastPM = eq.pmRecords.map(\.date).max()
+        let recentAlarms = eq.alarms.filter {
+            $0.date > (Calendar.current.date(byAdding: .day, value: -30, to: Date()) ?? Date())
+        }.count
+        Button {
+            if subscription.isPremium { editingEquipment = eq }
+            else { showPremiumAlert = true }
+        } label: {
+            HStack(alignment: .center, spacing: 12) {
+                ZStack {
+                    Circle()
+                        .fill(LinearGradient(colors: [accent.opacity(0.22), accent.opacity(0.09)],
+                                             startPoint: .topLeading, endPoint: .bottomTrailing))
+                        .frame(width: 36, height: 36)
+                    Circle().stroke(accent.opacity(0.22), lineWidth: 1).frame(width: 36, height: 36)
+                    Image(systemName: "gearshape.2.fill")
+                        .font(.system(size: 14, weight: .semibold)).foregroundStyle(accent)
+                }
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(eq.name.isEmpty ? "未命名設備" : eq.name)
+                        .font(.subheadline.weight(.medium)).foregroundStyle(.primary)
+                        .lineLimit(1).minimumScaleFactor(0.8)
+                    // [v25.296] 膠囊改用自動換行容器：系統別／部門名稱字多時
+                    // 換到下一行，不再擠在同一行互相壓縮變形
+                    FlexibleChipWrap(items: rowChips(eq, recentAlarms: recentAlarms)) { chip in
+                        rowChipView(chip)
+                    }
+                    if !eq.note.isEmpty {
+                        Text(eq.note).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                    }
+                }
+                Spacer(minLength: 4)
+                VStack(alignment: .trailing, spacing: 2) {
+                    if let last = lastPM {
+                        Text("上次 PM").font(.system(size: 9)).foregroundStyle(.tertiary)
+                        Text(Self.dateFmt.string(from: last)).font(.caption2).foregroundStyle(.secondary)
+                    }
+                }
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 11, weight: .semibold)).foregroundStyle(.tertiary)
+            }
+            .padding(.horizontal, 14).padding(.vertical, 9)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+// MARK: - PM／警報時間軸章節
+
+struct SubordinateEquipmentTimelineSection: View {
+    @EnvironmentObject var lifeStore: LifeStore
+    let subordinateId: UUID
+
+    @State private var rowsAppeared = false
+    @State private var rowsAppearedTask: Task<Void, Never>?
+
+    private enum EntryKind { case pm, alarm }
+    private struct TimelineEntry: Identifiable {
+        let id: UUID
+        let kind: EntryKind
+        let date: Date
+        let equipmentName: String
+        let text: String
+        /// 警報：距同設備上一次 PM 的天數（無 PM 紀錄則 nil）
+        let daysSincePM: Int?
+        var phase: PMPhase? = nil
+    }
+
+    private var entries: [TimelineEntry] {
+        var result: [TimelineEntry] = []
+        for eq in lifeStore.equipmentPool where eq.ownerId == subordinateId {
+            let name = eq.name.isEmpty ? "未命名設備" : eq.name
+            let pmDates = eq.pmRecords.map(\.date).sorted()
+            for pm in eq.pmRecords {
+                result.append(TimelineEntry(id: pm.id, kind: .pm, date: pm.date,
+                                            equipmentName: name, text: pm.note, daysSincePM: nil,
+                                            phase: pm.phase))
+            }
+            for al in eq.alarms {
+                // 該設備在警報發生前最近的一次 PM（pmDates 已排序，二分搜尋取代線性掃描）
+                let prior = Self.lastDate(lessThanOrEqualTo: al.date, in: pmDates)
+                let days = prior.flatMap {
+                    Calendar.current.dateComponents([.day], from: $0, to: al.date).day
+                }
+                result.append(TimelineEntry(id: al.id, kind: .alarm, date: al.date,
+                                            equipmentName: name, text: al.content, daysSincePM: days))
+            }
+        }
+        return result.sorted { $0.date > $1.date }
+    }
+
+    /// 在已遞增排序的 sortedDates 中，二分搜尋「不晚於 date」的最後一筆日期。
+    private static func lastDate(lessThanOrEqualTo date: Date, in sortedDates: [Date]) -> Date? {
+        var lo = 0, hi = sortedDates.count - 1
+        var result: Date? = nil
+        while lo <= hi {
+            let mid = (lo + hi) / 2
+            if sortedDates[mid] <= date {
+                result = sortedDates[mid]
+                lo = mid + 1
+            } else {
+                hi = mid - 1
+            }
+        }
+        return result
+    }
+
+    private static let dateTimeFmt: DateFormatter = {
+        let f = DateFormatter(); f.locale = Locale(identifier: "zh_Hant_TW"); f.dateFormat = "yyyy/M/d HH:mm"; return f
+    }()
+    private static let dateFmt: DateFormatter = {
+        let f = DateFormatter(); f.locale = Locale(identifier: "zh_Hant_TW"); f.dateFormat = "yyyy/M/d"; return f
+    }()
+    private func fmt(_ e: TimelineEntry) -> String {
+        // 警報與有標階段的 PM（停機/復機）帶時間，同日順序才分得出來
+        (e.kind == .alarm || e.phase != nil)
+            ? Self.dateTimeFmt.string(from: e.date) : Self.dateFmt.string(from: e.date)
+    }
+
+    var body: some View {
+        let all = entries
+        if !all.isEmpty {
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(spacing: 10) {
+                    Capsule()
+                        .fill(LinearGradient(colors: [.indigo, Color.indigo.opacity(0.55)], startPoint: .top, endPoint: .bottom))
+                        .frame(width: 4, height: 18)
+                    Image(systemName: "chart.xyaxis.line")
+                        .font(.system(size: 13, weight: .semibold)).foregroundStyle(.indigo)
+                    Text("PM／警報時間軸").font(.subheadline.weight(.semibold))
+                    Spacer()
+                    // 圖例
+                    HStack(spacing: 8) {
+                        HStack(spacing: 3) {
+                            Circle().fill(Color.orange).frame(width: 7, height: 7)
+                            Text("停機").font(.system(size: 9, weight: .semibold)).foregroundStyle(.secondary)
+                        }
+                        HStack(spacing: 3) {
+                            Circle().fill(Color.green).frame(width: 7, height: 7)
+                            Text("PM／復機").font(.system(size: 9, weight: .semibold)).foregroundStyle(.secondary)
+                        }
+                        HStack(spacing: 3) {
+                            Circle().fill(Color.red).frame(width: 7, height: 7)
+                            Text("警報").font(.system(size: 9, weight: .semibold)).foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                .padding(.horizontal, 14).padding(.top, 14).padding(.bottom, 10)
+
+                ForEach(Array(all.enumerated()), id: \.element.id) { idx, e in
+                    timelineRow(e, isLast: idx == all.count - 1)
+                        .opacity(rowsAppeared ? 1 : 0)
+                        .offset(y: rowsAppeared ? 0 : 10)
+                        .animation(.spring(response: 0.50, dampingFraction: 0.78).delay(0.03 * Double(idx)), value: rowsAppeared)
+                }
+                .padding(.bottom, 6)
+            }
+            .background(Color(.systemBackground))
+            .clipShape(RoundedRectangle(cornerRadius: 16))
+            .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.indigo.opacity(0.08), lineWidth: 0.75))
+            .shadow(color: .black.opacity(0.05), radius: 8, x: 0, y: 3)
+            .padding(.horizontal)
+            .onAppear {
+                rowsAppearedTask?.cancel()
+                rowsAppearedTask = Task {
+                    try? await Task.sleep(nanoseconds: 150_000_000)
+                    guard !Task.isCancelled else { return }
+                    rowsAppeared = true
+                }
+            }
+            .onDisappear {
+                rowsAppearedTask?.cancel()
+                rowsAppeared = false
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func timelineRow(_ e: TimelineEntry, isLast: Bool) -> some View {
+        // [v25.303] PM 依階段配色：停機橘、復機/一般 PM 綠、警報紅
+        let color: Color = e.kind == .pm ? (e.phase == .shutdown ? .orange : .green) : .red
+        HStack(alignment: .top, spacing: 12) {
+            // 左側：節點 + 連接線
+            VStack(spacing: 0) {
+                ZStack {
+                    Circle()
+                        .fill(LinearGradient(colors: [color.opacity(0.22), color.opacity(0.09)],
+                                             startPoint: .topLeading, endPoint: .bottomTrailing))
+                        .frame(width: 22, height: 22)
+                    Circle().stroke(color.opacity(0.28), lineWidth: 0.75).frame(width: 22, height: 22)
+                    Image(systemName: e.kind == .pm
+                          ? (e.phase == .shutdown ? "pause.fill" : e.phase == .restored ? "checkmark" : "wrench.fill")
+                          : "bell.fill")
+                        .font(.system(size: 9, weight: .bold)).foregroundStyle(color)
+                }
+                if !isLast {
+                    Rectangle().fill(Color(.separator).opacity(0.35))
+                        .frame(width: 1.5)
+                        .frame(maxHeight: .infinity)
+                }
+            }
+            .frame(width: 22)
+
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 6) {
+                    Text(e.equipmentName)
+                        .font(.caption.weight(.semibold)).foregroundStyle(.primary)
+                        .lineLimit(1).minimumScaleFactor(0.8)
+                    Text(e.kind == .pm
+                         ? (e.phase == .shutdown ? "PM 停機" : e.phase == .restored ? "PM 完成復機" : "PM 保養")
+                         : "警報")
+                        .font(.system(size: 9, weight: .bold))
+                        .padding(.horizontal, 5).padding(.vertical, 1.5)
+                        .background(color.opacity(0.12)).foregroundStyle(color)
+                        .clipShape(Capsule())
+                    if e.kind == .alarm, let days = e.daysSincePM {
+                        Text("PM 後 \(days) 天")
+                            .font(.system(size: 9, weight: .semibold))
+                            .padding(.horizontal, 5).padding(.vertical, 1.5)
+                            .background(Color.orange.opacity(0.12)).foregroundStyle(.orange)
+                            .clipShape(Capsule())
+                    }
+                    Spacer()
+                    Text(fmt(e)).font(.system(size: 10)).foregroundStyle(.tertiary)
+                }
+                if !e.text.isEmpty {
+                    Text(e.text).font(.caption2).foregroundStyle(.secondary).lineLimit(2)
+                }
+                // [v25.315] 警報→任務的處理回報子項目（點開查看處理過程）
+                if e.kind == .alarm {
+                    AlarmResponseDisclosure(alarmId: e.id)
+                }
+            }
+            .padding(.bottom, isLast ? 4 : 12)
+        }
+        .padding(.horizontal, 14)
+        .fixedSize(horizontal: false, vertical: true)
+    }
+}
+
+// MARK: - 設備編輯 Sheet
+
+struct EquipmentEditorSheet: View {
+    @EnvironmentObject var lifeStore: LifeStore
+    @Environment(\.dismiss) private var dismiss
+
+    var editing: ManagedEquipment?
+    /// 新增時預帶的所屬部門／負責人（從部門頁開＝該部門；從部屬執掌頁開＝該部屬與其部門）
+    var defaultDepartmentId: UUID? = nil
+    var defaultOwnerId: UUID? = nil
+    /// [v25.390] 複製來源。有值＝這是「複製一台」，editing 必為 nil：
+    /// 名稱／系統別／備註／部門／負責人與**上下游關係**都照抄，存檔時給新的 id。
+    /// PM 與警報記錄刻意不抄（見 save()）。
+    var duplicating: ManagedEquipment? = nil
+
+    @State private var name = ""
+    @State private var note = ""
+    @State private var system = ""
+    @State private var departmentId: UUID?
+    @State private var ownerId: UUID?
+    @State private var pmRecords: [EquipmentPMRecord] = []
+    @State private var alarms: [EquipmentAlarm] = []
+    @State private var isSaving = false
+    /// [v25.385] 正在挑上游還是下游
+    @State private var linkPicking: EquipmentLinkDirection?
+
+    /// 填寫過的系統別膠囊（全機台池去重、依名稱排序、上限 12）
+    private var systemSuggestions: [String] {
+        var seen = Set<String>()
+        var out: [String] = []
+        for s in lifeStore.equipmentPool.map({ $0.system.trimmingCharacters(in: .whitespaces) })
+        where !s.isEmpty && !seen.contains(s) {
+            seen.insert(s); out.append(s)
+        }
+        return Array(out.sorted { $0.localizedStandardCompare($1) == .orderedAscending }.prefix(12))
+    }
+
+    private var sortedDepartments: [Department] {
+        lifeStore.departments.sorted {
+            $0.name.localizedStandardCompare($1.name) == .orderedAscending
+        }
+    }
+
+    /// 部屬的有效部門：優先看連動的公司組織人員的部門（組織頁調過部門、
+    /// 部屬端還沒同步到的舊資料也對得上），沒有連動才用部屬自己的 departmentId。
+    private func effectiveDeptId(_ s: Subordinate) -> UUID? {
+        lifeStore.orgPeople.first(where: { $0.linkedSubordinateId == s.id })?.departmentId
+            ?? s.departmentId
+    }
+
+    /// 負責人候選：依所選部門分成「部門成員」與「其他部屬」兩組（各依姓名排序）；
+    /// 未指定部門則全部一組
+    private var ownerGroups: (members: [Subordinate], others: [Subordinate]) {
+        let sorted = lifeStore.subordinates.sorted {
+            $0.name.localizedStandardCompare($1.name) == .orderedAscending
+        }
+        guard let did = departmentId else { return (sorted, []) }
+        return (sorted.filter { effectiveDeptId($0) == did },
+                sorted.filter { effectiveDeptId($0) != did })
+    }
+
+    /// 負責人 Picker 的部門成員分組標題（「實驗室 成員」）
+    private var deptSectionTitle: String {
+        let name = departmentId.flatMap { did in
+            lifeStore.departments.first { $0.id == did }?.name
+        } ?? ""
+        return name.isEmpty ? "部門成員" : "\(name) 成員"
+    }
+
+    /// 統一 Section 標題（對齊 MeetingEditorSheet.editorSectionHeader 規格）
+    private func editorSectionHeader(_ title: String, icon: String, tint: Color) -> some View {
+        HStack(spacing: 8) {
+            Capsule()
+                .fill(LinearGradient(colors: [tint, tint.opacity(0.55)], startPoint: .top, endPoint: .bottom))
+                .frame(width: 4, height: 16)
+            Image(systemName: icon)
+                .font(.system(size: 11, weight: .semibold)).foregroundStyle(tint)
+            Text(title).font(.subheadline.weight(.bold))
+        }
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    TextField("設備名稱（如：CVD-01）", text: $name)
+                    VStack(alignment: .leading, spacing: 6) {
+                        TextField("系統別（如：CDA、冰水、廢水，選填）", text: $system)
+                        // 填過的系統別變膠囊：點一下帶入、再點取消（比照重大決議廠區）
+                        if !systemSuggestions.isEmpty {
+                            FlexibleChipWrap(items: systemSuggestions) { s in
+                                systemChip(s)
+                            }
+                            .padding(.bottom, 2)
+                        }
+                    }
+                    Picker("所屬部門", selection: $departmentId) {
+                        Text("未指定").tag(UUID?.none)
+                        ForEach(sortedDepartments) { d in
+                            Text(d.name.isEmpty ? "未命名部門" : d.name).tag(UUID?.some(d.id))
+                        }
+                    }
+                    // [v25.297] 依所選部門分組：部門成員一組在前、其他部屬一組在後，
+                    // 成員判定含公司組織頁設定的部門（組織人員連動），不再對不上
+                    Picker("負責人", selection: $ownerId) {
+                        Text("未指派").tag(UUID?.none)
+                        let groups = ownerGroups
+                        if departmentId != nil {
+                            Section(deptSectionTitle) {
+                                ForEach(groups.members) { s in
+                                    Text(s.name.isEmpty ? "未命名" : s.name).tag(UUID?.some(s.id))
+                                }
+                            }
+                            if !groups.others.isEmpty {
+                                Section("其他部屬") {
+                                    ForEach(groups.others) { s in
+                                        Text(s.name.isEmpty ? "未命名" : s.name).tag(UUID?.some(s.id))
+                                    }
+                                }
+                            }
+                        } else {
+                            ForEach(groups.members) { s in
+                                Text(s.name.isEmpty ? "未命名" : s.name).tag(UUID?.some(s.id))
+                            }
+                        }
+                    }
+                } header: {
+                    editorSectionHeader("設備資訊", icon: "gearshape.2.fill", tint: .teal)
+                } footer: {
+                    Text("機台屬於部門；PM／警報等歷史記錄跟著機台，換負責人不會搬動記錄。")
+                }
+
+                Section {
+                    if pmRecords.isEmpty {
+                        HStack(spacing: 6) {
+                            Spacer()
+                            Image(systemName: "wrench").font(.caption).foregroundStyle(.tertiary)
+                            Text("尚未新增 PM 記錄").font(.caption).foregroundStyle(.secondary)
+                            Spacer()
+                        }
+                        .padding(.vertical, 4)
+                    }
+                    ForEach($pmRecords) { $pm in
+                        VStack(spacing: 6) {
+                            if pmRecords.first?.id != pm.id { Divider() }
+                            HStack {
+                                DatePicker("保養日期", selection: $pm.date, displayedComponents: .date)
+                                Button(role: .destructive) {
+                                    withAnimation(.spring(response: 0.42, dampingFraction: 0.78)) {
+                                        pmRecords.removeAll { $0.id == pm.id }
+                                    }
+                                } label: {
+                                    Image(systemName: "minus.circle.fill").foregroundStyle(.red)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                            // [v25.303] PM 階段：停機／完成復機（時間軸依此切分停機區間）
+                            Picker("階段", selection: $pm.phase) {
+                                Text("一般").tag(PMPhase?.none)
+                                Text("停機").tag(PMPhase?.some(.shutdown))
+                                Text("復機").tag(PMPhase?.some(.restored))
+                            }
+                            .pickerStyle(.segmented)
+                            TextField("保養內容（選填）", text: $pm.note)
+                        }
+                        .transition(.opacity.combined(with: .move(edge: .top)))
+                    }
+                    Button {
+                        withAnimation(.spring(response: 0.42, dampingFraction: 0.78)) {
+                            pmRecords.append(EquipmentPMRecord())
+                        }
+                    } label: {
+                        Label("新增 PM 記錄", systemImage: "plus.circle").foregroundStyle(.green)
+                    }
+                } header: {
+                    editorSectionHeader("預防保養（PM）", icon: "wrench.fill", tint: .green)
+                }
+
+                Section {
+                    if alarms.isEmpty {
+                        HStack(spacing: 6) {
+                            Spacer()
+                            Image(systemName: "bell.slash").font(.caption).foregroundStyle(.tertiary)
+                            Text("尚未新增警報").font(.caption).foregroundStyle(.secondary)
+                            Spacer()
+                        }
+                        .padding(.vertical, 4)
+                    }
+                    ForEach($alarms) { $al in
+                        VStack(spacing: 6) {
+                            if alarms.first?.id != al.id { Divider() }
+                            HStack {
+                                DatePicker("發生時間", selection: $al.date, displayedComponents: [.date, .hourAndMinute])
+                                Button(role: .destructive) {
+                                    withAnimation(.spring(response: 0.42, dampingFraction: 0.78)) {
+                                        alarms.removeAll { $0.id == al.id }
+                                    }
+                                } label: {
+                                    Image(systemName: "minus.circle.fill").foregroundStyle(.red)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                            TextField("警報內容（如：高溫警報、壓力異常）", text: $al.content)
+                        }
+                        .transition(.opacity.combined(with: .move(edge: .top)))
+                    }
+                    Button {
+                        withAnimation(.spring(response: 0.42, dampingFraction: 0.78)) {
+                            alarms.append(EquipmentAlarm())
+                        }
+                    } label: {
+                        Label("新增警報", systemImage: "plus.circle").foregroundStyle(.red)
+                    }
+                } header: {
+                    editorSectionHeader("警報記錄", icon: "bell.badge.fill", tint: .red)
+                } footer: {
+                    Text("機台有負責人時，新增的警報會自動掛到負責人的任務欄位（預設 3 天內處理，可再調整截止時間，並需回報處理措施與回復結果）。")
+                }
+
+                // [v25.385] 上下游。只有既有機台才給編輯——新機台還沒有 id，
+                // 關係無從建立；存檔之後在詳情頁或回來這裡再設。
+                if let eq = editing, let live = lifeStore.equipment(id: eq.id) {
+                    Section {
+                        linkRows(live, direction: .upstream)
+                        linkRows(live, direction: .downstream)
+                    } header: {
+                        editorSectionHeader("關聯機台（上下游）", icon: "point.3.connected.trianglepath.dotted", tint: .teal)
+                    } footer: {
+                        Text(Self.linkFootnote)
+                    }
+                }
+                // [v25.390] 複製模式：關係要等存檔拿到新 id 才建得起來，
+                // 但使用者看不到任何東西會以為上下游沒跟過來，所以先講清楚。
+                if let src = duplicating, editing == nil, !duplicateRelationSummary(src).isEmpty {
+                    Section {
+                        Text(duplicateRelationSummary(src))
+                            .font(.caption).foregroundStyle(.secondary)
+                    } header: {
+                        editorSectionHeader("關聯機台（上下游）",
+                                            icon: "point.3.connected.trianglepath.dotted", tint: .teal)
+                    } footer: {
+                        Text("存檔後會自動比照原機台接上同樣的上下游，兩邊都看得到。存檔之後可以在這裡或機台詳情頁再調整。")
+                    }
+                }
+
+                Section {
+                    TextField("位置、型號、保養注意事項等（選填）", text: $note, axis: .vertical)
+                        .lineLimit(2...8)
+                } header: {
+                    editorSectionHeader("備註", icon: "note.text", tint: Color(.systemGray2))
+                }
+
+                if editing != nil {
+                    Section {
+                        Button(role: .destructive) { deleteEquipment() } label: {
+                            Label("刪除此設備", systemImage: "trash")
+                        }
+                    }
+                }
+            }
+            .navigationTitle(editorTitle)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) { Button("取消") { dismiss() } }
+                ToolbarItem(placement: .topBarTrailing) {
+                    HStack(spacing: 6) {
+                        // [美化 v25.92] 存檔中顯示同色 ProgressView，對齊 AddIncomeView／AddExpenseView／
+                        // AddVehicleView／AddStockView／AddRealEstateView 儲存按鈕載入狀態規格
+                        if isSaving {
+                            ProgressView().scaleEffect(0.7).tint(.green)
+                        }
+                        Button(editing != nil ? "儲存" : "新增") { save() }
+                            .bold().foregroundStyle(.green)
+                            .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty || isSaving)
+                    }
+                }
+            }
+            .onAppear {
+                if let e = editing {
+                    name = e.name; note = e.note; system = e.system
+                    departmentId = e.departmentId; ownerId = e.ownerId
+                    pmRecords = e.pmRecords.sorted { $0.date > $1.date }
+                    alarms = e.alarms.sorted { $0.date > $1.date }
+                } else if let src = duplicating {
+                    // 名稱照抄原本的（通常只要改一兩個字，例如 M608→M609），
+                    // 不加「複本」後綴省得還要先把後綴刪掉。
+                    name = src.name; note = src.note; system = src.system
+                    departmentId = src.departmentId; ownerId = src.ownerId
+                    // pmRecords／alarms 保持空的：那是原本那台機台真的發生過的
+                    // 保養與警報，抄到新機台上等於憑空捏造一份維修履歷。
+                } else {
+                    departmentId = defaultDepartmentId
+                    ownerId = defaultOwnerId
+                }
+            }
+            // [v25.385] 挑上下游機台
+            .sheet(item: $linkPicking) { direction in
+                if let e = editing {
+                    EquipmentLinkPicker(equipmentId: e.id, direction: direction)
+                }
+            }
+        }
+    }
+
+    private var editorTitle: String {
+        if editing != nil { return "編輯設備" }
+        return duplicating != nil ? "複製設備" : "新增設備"
+    }
+
+    /// 複製模式下「會跟著複製過來的上下游」摘要（字串在 ViewBuilder 外組好）。
+    /// 名稱現撈，來源快照上的機台可能已經被刪掉了。
+    private func duplicateRelationSummary(_ src: ManagedEquipment) -> String {
+        func names(_ ids: [UUID]) -> [String] {
+            ids.compactMap { lifeStore.equipment(id: $0) }
+                .map { $0.name.isEmpty ? "未命名設備" : $0.name }
+        }
+        var lines: [String] = []
+        let ups = names(src.upstreamIds)
+        let downs = names(src.downstreamIds)
+        if !ups.isEmpty { lines.append("上游：" + ups.joined(separator: "、")) }
+        if !downs.isEmpty { lines.append("下游：" + downs.joined(separator: "、")) }
+        return lines.joined(separator: "\n")
+    }
+
+    /// 系統別膠囊：點一下帶入輸入框、再點清空
+    private func systemChip(_ s: String) -> some View {
+        let on = system.trimmingCharacters(in: .whitespaces) == s
+        return Button {
+            system = on ? "" : s
+        } label: {
+            Text(s)
+                .font(.system(size: 12, weight: .semibold))
+                .padding(.horizontal, 9).padding(.vertical, 4)
+                .background(on ? Color.cyan.opacity(0.18) : Color(.tertiarySystemFill), in: Capsule())
+                .foregroundStyle(on ? Color.cyan : Color.secondary)
+                .overlay(Capsule().stroke(on ? Color.cyan.opacity(0.4) : .clear, lineWidth: 1))
+        }
+        .buttonStyle(.borderless)
+    }
+
+    // MARK: - [v25.385] 上下游列
+
+    /// 這一段刻意**不進 @State**：關係由 LifeStore.linkEquipment 兩邊一起寫、
+    /// 立刻生效（與 DeptManagerPicker 的即時寫入模式同一套）。
+    /// 如果照表單其他欄位的做法先放進 @State、按儲存才寫回，
+    /// 就沒辦法同時更新「對方那一台」的鏡像欄位。
+    @ViewBuilder
+    private func linkRows(_ eq: ManagedEquipment, direction: EquipmentLinkDirection) -> some View {
+        let items = lifeStore.relatedEquipment(of: eq.id, downstream: direction.isDownstream)
+        HStack(spacing: 6) {
+            Image(systemName: direction.icon)
+                .font(.system(size: 11, weight: .bold)).foregroundStyle(direction.color)
+            Text(direction.title).font(.system(size: 12, weight: .bold))
+                .foregroundStyle(direction.color)
+            Spacer()
+            Button {
+                linkPicking = direction
+            } label: {
+                Image(systemName: "plus.circle.fill")
+                    .font(.system(size: 17)).foregroundStyle(direction.color)
+            }
+            .buttonStyle(.plain)
+        }
+        if items.isEmpty {
+            Text("未設定").font(.caption).foregroundStyle(.tertiary)
+        } else {
+            ForEach(items) { item in
+                HStack(spacing: 8) {
+                    Image(systemName: "gearshape.2.fill")
+                        .font(.system(size: 11)).foregroundStyle(direction.color)
+                    Text(item.name.isEmpty ? "未命名設備" : item.name)
+                        .font(.subheadline)
+                    if !item.system.isEmpty {
+                        Text(item.system).font(.caption2).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Button(role: .destructive) {
+                        lifeStore.unlinkEquipment(eq.id, from: item.id)
+                    } label: {
+                        Image(systemName: "minus.circle.fill").foregroundStyle(.red)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+    }
+
+    private static let linkFootnote =
+        "上游＝東西從那台流過來；下游＝這台的產出流到那台去。"
+        + "這一段是按下去就立刻生效（不用等儲存），因為關係要同時寫進對方那一台——"
+        + "設好之後從對方點進來也會看到這台。"
+
+    private func save() {
+        guard !isSaving else { return }
+        isSaving = true
+        let id = editing?.id ?? UUID()
+        // [v25.385] 上下游關係不是這個表單在管的（它由 LifeStore.linkEquipment
+        // 兩邊一起寫），但存檔是「重建一個 ManagedEquipment 再覆蓋」——
+        // 不把關係帶回去就會被這次存檔整個抹掉。
+        // 而且要從 store 現撈，不能用 editing 的快照：表單開著的時候，
+        // 下方的關聯區塊可能已經改過關係了。
+        let live = lifeStore.equipment(id: id)
+        let eq = ManagedEquipment(
+            id: id,
+            name: name.trimmingCharacters(in: .whitespaces),
+            note: note.trimmingCharacters(in: .whitespaces),
+            pmRecords: pmRecords,
+            alarms: alarms,
+            departmentId: departmentId,
+            ownerId: ownerId,
+            system: system.trimmingCharacters(in: .whitespaces),
+            upstreamIds: live?.upstreamIds ?? [],
+            downstreamIds: live?.downstreamIds ?? []
+        )
+        // 這次編輯新加的警報（編輯前不存在的 id）→ 自動掛到負責人的任務欄位
+        let previousAlarmIds = Set((editing?.alarms ?? []).map(\.id))
+        let newAlarms = alarms.filter { !previousAlarmIds.contains($0.id) }
+        lifeStore.upsertEquipment(eq)
+        copyRelations(to: id)
+        lifeStore.createTasksForNewAlarms(equipment: eq, newAlarms: newAlarms)
+        dismiss()
+    }
+
+    /// [v25.390] 複製模式：把來源機台的上下游關係也複製一份到新機台上。
+    ///
+    /// ⚠️ 一定要走 LifeStore.linkEquipment，不能直接寫 upstreamIds／downstreamIds。
+    ///    關係是互為鏡像的（A 的下游有 B ⇔ B 的上游有 A），只寫自己這一邊的話，
+    ///    從對方那台點進來根本看不到新機台，而且以後任何一次存檔都會把這半邊抹掉。
+    ///    必須在 upsertEquipment 之後呼叫——linkEquipment 會去機台池裡找兩端。
+    ///
+    /// 對方機台可能在表單開著的期間被刪掉，所以逐一確認還在才連。
+    private func copyRelations(to newId: UUID) {
+        guard let src = duplicating, editing == nil else { return }
+        for up in src.upstreamIds where lifeStore.equipment(id: up) != nil {
+            lifeStore.linkEquipment(newId, with: up, asDownstream: false)
+        }
+        for down in src.downstreamIds where lifeStore.equipment(id: down) != nil {
+            lifeStore.linkEquipment(newId, with: down, asDownstream: true)
+        }
+    }
+
+    private func deleteEquipment() {
+        guard !isSaving else { return }
+        guard let e = editing else { dismiss(); return }
+        isSaving = true
+        lifeStore.deleteEquipment(id: e.id)
+        dismiss()
+    }
+}
+
+// MARK: - 選取現有機台（部屬執掌頁）
+
+/// 從機台池挑選機台給這位部屬執掌：點一下接手（成為負責人）、再點一下釋回。
+/// 直接寫回 store（比照 DeptManagerPicker 立即寫入模式），關閉即生效。
+struct EquipmentClaimPicker: View {
+    @EnvironmentObject var lifeStore: LifeStore
+    @Environment(\.dismiss) private var dismiss
+
+    let subordinateId: UUID
+
+    @State private var query = ""
+
+    /// 依部門分組（依部門名排序，未指定部門排最後），組內依機台名排序
+    private var grouped: [(deptName: String, items: [ManagedEquipment])] {
+        let q = query.trimmingCharacters(in: .whitespaces)
+        let pool = lifeStore.equipmentPool
+            .filter { q.isEmpty || $0.name.localizedCaseInsensitiveContains(q)
+                || $0.note.localizedCaseInsensitiveContains(q)
+                || $0.system.localizedCaseInsensitiveContains(q) }
+        var buckets: [UUID?: [ManagedEquipment]] = [:]
+        for eq in pool { buckets[eq.departmentId, default: []].append(eq) }
+        func deptName(_ id: UUID?) -> String {
+            guard let id, let d = lifeStore.departments.first(where: { $0.id == id }) else { return "未指定部門" }
+            return d.name.isEmpty ? "未命名部門" : d.name
+        }
+        return buckets
+            .map { (deptName($0.key), $0.value.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending },
+                    $0.key == nil) }
+            .sorted { a, b in
+                if a.2 != b.2 { return !a.2 }   // 未指定部門排最後
+                return a.0.localizedStandardCompare(b.0) == .orderedAscending
+            }
+            .map { (deptName: $0.0, items: $0.1) }
+    }
+
+    private func ownerName(_ id: UUID?) -> String? {
+        guard let id else { return nil }
+        let n = lifeStore.subordinates.first { $0.id == id }?.name ?? ""
+        return n.isEmpty ? "未命名" : n
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    TextField("搜尋機台名稱／系統別／備註", text: $query)
+                }
+                if grouped.isEmpty {
+                    Section {
+                        HStack(spacing: 6) {
+                            Spacer()
+                            Image(systemName: "gearshape.2").font(.caption).foregroundStyle(.tertiary)
+                            Text(query.isEmpty ? "機台池是空的，先在部門頁或執掌頁新增機台" : "找不到符合的機台")
+                                .font(.caption).foregroundStyle(.secondary)
+                            Spacer()
+                        }
+                        .padding(.vertical, 4)
+                    }
+                }
+                ForEach(grouped, id: \.deptName) { group in
+                    Section(group.deptName) {
+                        ForEach(group.items) { eq in
+                            claimRow(eq)
+                        }
+                    }
+                }
+            }
+            .navigationTitle("選取機台")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) { Button("完成") { dismiss() }.bold() }
+            }
+        }
+    }
+
+    private func claimRow(_ eq: ManagedEquipment) -> some View {
+        let mine = eq.ownerId == subordinateId
+        return Button {
+            // 點選接手／釋回：立即寫回（只改負責人欄位，機台記錄不動）
+            lifeStore.assignEquipmentOwner(equipmentId: eq.id, ownerId: mine ? nil : subordinateId)
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: mine ? "checkmark.circle.fill" : "circle")
+                    .font(.title3)
+                    .foregroundStyle(mine ? Color.teal : Color(.systemGray3))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(eq.name.isEmpty ? "未命名設備" : eq.name)
+                        .font(.subheadline.weight(.medium)).foregroundStyle(.primary)
+                    HStack(spacing: 6) {
+                        Text("PM \(eq.pmRecords.count)・警報 \(eq.alarms.count)")
+                            .font(.caption2).foregroundStyle(.secondary)
+                        if !eq.system.isEmpty {
+                            Text(eq.system)
+                                .font(.system(size: 9, weight: .bold))
+                                .padding(.horizontal, 5).padding(.vertical, 1.5)
+                                .background(Color.cyan.opacity(0.12)).foregroundStyle(.cyan)
+                                .clipShape(Capsule())
+                        }
+                        if !mine, let owner = ownerName(eq.ownerId) {
+                            Text("目前：\(owner)")
+                                .font(.system(size: 9, weight: .bold))
+                                .padding(.horizontal, 5).padding(.vertical, 1.5)
+                                .background(Color.orange.opacity(0.12)).foregroundStyle(.orange)
+                                .clipShape(Capsule())
+                        }
+                    }
+                }
+                Spacer()
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+// MARK: - [v25.393] 機台時間軸的資料模型
+//
+// 放在檔案層級（而不是 EquipmentDetailCard 裡的巢狀型別）是為了讓同檔案的
+// TimelineDetailDisclosure 也用得到——`private` 的巢狀型別只有所屬型別本身
+// 與它在同檔的 extension 看得到，兄弟型別是碰不到的。
+
+private enum CardEntryKind {
+    case pm, alarm, task, report, meeting
+}
+
+/// 展開後的一行明細
+private struct CardDetail: Identifiable {
+    let id: Int
+    let label: String
+    let value: String
+}
+
+/// 展開後的子項目（目前只有會議的議程項目）
+private struct CardSubItem: Identifiable {
+    let id: UUID
+    let text: String
+    let done: Bool
+}
+
+private struct CardEntry: Identifiable {
+    let id: UUID
+    let kind: CardEntryKind
+    let date: Date
+    let text: String
+    let daysSincePM: Int?
+    var phase: PMPhase? = nil
+    /// 任務／報告／會議才有：負責人姓名 + 完成狀態
+    var owner: String? = nil
+    var isDone: Bool = false
+    /// [v25.393] 這一筆其實是掛在隔壁機台上的（直接上游／下游）。
+    /// nil＝就掛在目前這台機台上。
+    var sourceName: String? = nil
+    var sourceDirection: EquipmentLinkDirection? = nil
+    /// 摺疊展開後要顯示的內容；兩個都空就不畫展開鈕
+    var details: [CardDetail] = []
+    var subItems: [CardSubItem] = []
+
+    var hasExpandable: Bool { !details.isEmpty || !subItems.isEmpty }
+}
+
+/// 時間軸上關聯項目的摺疊明細。
+///
+/// 獨立成一個 View 是因為展開狀態要各列各自持有——cardTimelineRow 是函式，
+/// 沒地方掛 @State（同樣理由見 AlarmResponseDisclosure）。
+private struct TimelineDetailDisclosure: View {
+    let entry: CardEntry
+    let color: Color
+
+    @State private var expanded = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Button {
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                    expanded.toggle()
+                }
+            } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: expanded ? "chevron.down" : "chevron.right")
+                        .font(.system(size: 8, weight: .bold))
+                    Text(expanded ? "收合" : summaryLabel)
+                        .font(.system(size: 10, weight: .bold))
+                }
+                .padding(.horizontal, 7).padding(.vertical, 3)
+                .background(color.opacity(0.10))
+                .foregroundStyle(color)
+                .clipShape(Capsule())
+                .overlay(Capsule().stroke(color.opacity(0.22), lineWidth: 0.6))
+                .contentShape(Capsule())
+            }
+            .buttonStyle(.plain)
+
+            if expanded {
+                VStack(alignment: .leading, spacing: 5) {
+                    ForEach(entry.details) { d in
+                        detailRow(d)
+                    }
+                    if !entry.subItems.isEmpty {
+                        Text("議程項目 \(entry.subItems.count)")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                            .padding(.top, 2)
+                        ForEach(entry.subItems) { item in
+                            subItemRow(item)
+                        }
+                    }
+                }
+                .padding(.horizontal, 9).padding(.vertical, 7)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color(.tertiarySystemFill).opacity(0.5))
+                .clipShape(RoundedRectangle(cornerRadius: 9))
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
+    }
+
+    /// 收合狀態的按鈕文字：先講裡面有什麼，使用者才知道值不值得點開
+    private var summaryLabel: String {
+        if !entry.subItems.isEmpty {
+            let done = entry.subItems.filter(\.done).count
+            return "議程 \(done)/\(entry.subItems.count)・展開明細"
+        }
+        return "展開明細"
+    }
+
+    private func detailRow(_ d: CardDetail) -> some View {
+        HStack(alignment: .top, spacing: 6) {
+            Text(d.label)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .frame(width: 52, alignment: .leading)
+            Text(d.value)
+                .font(.system(size: 11))
+                .foregroundStyle(.primary)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+        }
+    }
+
+    private func subItemRow(_ item: CardSubItem) -> some View {
+        HStack(alignment: .top, spacing: 6) {
+            Image(systemName: item.done ? "checkmark.circle.fill" : "circle")
+                .font(.system(size: 10))
+                .foregroundStyle(item.done ? Color.green : Color.secondary.opacity(0.5))
+            Text(item.text)
+                .font(.system(size: 11))
+                .strikethrough(item.done, color: .secondary)
+                .foregroundStyle(item.done ? .secondary : .primary)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+        }
+    }
+}
+
+// MARK: - 機台詳情卡片
+
+/// 部門所屬設備點開的檢視卡片（非編輯畫面）：
+/// 名稱＋系統/部門/負責人膠囊 → 四格 KPI（PM 總數/距上次 PM/警報總數/30 天警報）
+/// → 備註 → PM／警報時間軸（警報標示距同機台上次 PM 天數）。右上「編輯」才進編輯表單。
+struct EquipmentDetailCard: View {
+    @EnvironmentObject var lifeStore: LifeStore
+    @Environment(\.dismiss) private var dismiss
+
+    let equipmentId: UUID
+
+    @State private var showEditor = false
+    /// [v25.390] 複製這一台（開一張預填好的新增表單，改個名字就好）
+    @State private var showDuplicate = false
+    /// [v25.303] 時間軸右上＋的快速新增（免進編輯畫面）
+    @State private var quickAddKind: TimelineQuickAddKind?
+    /// [v25.384] 點上下游機台時要跳去看哪一台
+    @State private var jumpTarget: EquipmentJump?
+    /// [v25.386] 點關聯任務時要開哪一位部屬的明細
+    @State private var personTarget: EquipmentJump?
+
+    /// 明確寫出初始化：本型別有 private @State，且被 OrganizationView 跨檔案建立
+    init(equipmentId: UUID) {
+        self.equipmentId = equipmentId
+    }
+
+    private var equipment: ManagedEquipment? {
+        lifeStore.equipmentPool.first { $0.id == equipmentId }
+    }
+
+    private static let dateFmt: DateFormatter = {
+        let f = DateFormatter(); f.locale = Locale(identifier: "zh_Hant_TW"); f.dateFormat = "yyyy/M/d"; return f
+    }()
+    private static let dateTimeFmt: DateFormatter = {
+        let f = DateFormatter(); f.locale = Locale(identifier: "zh_Hant_TW"); f.dateFormat = "yyyy/M/d HH:mm"; return f
+    }()
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if let eq = equipment {
+                    ScrollView {
+                        VStack(spacing: 14) {
+                            heroCard(eq)
+                            kpiRow(eq)
+                            noteCard(eq)
+                            timelineCard(eq)
+                            // [v25.384] 關聯機台（上下游）
+                            EquipmentRelationCard(equipmentId: eq.id) { targetId in
+                                jumpTarget = EquipmentJump(id: targetId)
+                            }
+                            // [v25.386] 關聯任務（警報自動掛的＋手動指定的），補上機台→任務這一向
+                            EquipmentTaskCard(equipmentId: eq.id) { ownerId in
+                                personTarget = EquipmentJump(id: ownerId)
+                            }
+                        }
+                        .padding(.vertical)
+                    }
+                } else {
+                    // 機台已被刪除（例如編輯表單裡刪除）→ 自動關閉卡片
+                    Color.clear.onAppear { dismiss() }
+                }
+            }
+            .background(Color(.systemGroupedBackground))
+            .navigationTitle("機台詳情")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) { Button("關閉") { dismiss() } }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("複製") { showDuplicate = true }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("編輯") { showEditor = true }.bold()
+                }
+            }
+            .sheet(isPresented: $showEditor) {
+                if let eq = equipment {
+                    EquipmentEditorSheet(editing: eq)
+                }
+            }
+            // [v25.390] 複製：同一張表單、預填好所有欄位（含上下游），存檔時給新的 id。
+            // PM 與警報不會跟過來——那是原本那台真的發生過的事。
+            .sheet(isPresented: $showDuplicate) {
+                if let eq = equipment {
+                    EquipmentEditorSheet(editing: nil, duplicating: eq)
+                }
+            }
+            .sheet(item: $quickAddKind) { kind in
+                EquipmentTimelineQuickAddSheet(equipmentId: equipmentId, kind: kind)
+            }
+            // [v25.384] 點上下游機台就開那一台的詳情。
+            // 用 sheet 而不是 NavigationLink：這張卡本身常常已經是別人推出來的 sheet，
+            // 再往同一個 stack 推會讓「關閉」的語意變得很奇怪。
+            .sheet(item: $jumpTarget) { jump in
+                EquipmentDetailCard(equipmentId: jump.id)
+            }
+            // [v25.386] 點關聯任務就開那位部屬的明細（任務章節在裡面）。
+            // 機台被刪、人被刪的情況都可能發生，找不到人就不開。
+            .sheet(item: $personTarget) { jump in
+                if let sub = lifeStore.subordinates.first(where: { $0.id == jump.id }) {
+                    SubordinateDetailView(subordinate: sub)
+                }
+            }
+        }
+    }
+
+    // MARK: 標頭
+
+    private func heroCard(_ eq: ManagedEquipment) -> some View {
+        let deptName = lifeStore.departments.first { $0.id == eq.departmentId }?.name
+        let ownerName: String? = eq.ownerId.map { oid in
+            let n = lifeStore.subordinates.first { $0.id == oid }?.name ?? ""
+            return n.isEmpty ? "未命名" : n
+        }
+        return VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 13) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 12)
+                        .fill(LinearGradient(colors: [.teal, .cyan],
+                                             startPoint: .topLeading, endPoint: .bottomTrailing))
+                        .frame(width: 50, height: 50)
+                        .shadow(color: Color.teal.opacity(0.30), radius: 6, x: 0, y: 3)
+                    Image(systemName: "gearshape.2.fill")
+                        .font(.system(size: 20, weight: .semibold))
+                        .foregroundStyle(.white)
+                }
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(eq.name.isEmpty ? "未命名設備" : eq.name)
+                        .font(.title3.bold())
+                        .fixedSize(horizontal: false, vertical: true)
+                    FlexibleChipWrap(items: heroChips(eq, deptName: deptName, ownerName: ownerName)) { chip in
+                        Label(chip.text, systemImage: chip.icon)
+                            .font(.system(size: 10, weight: .bold))
+                            .padding(.horizontal, 7).padding(.vertical, 2.5)
+                            .background(chip.color.opacity(0.12))
+                            .foregroundStyle(chip.color)
+                            .clipShape(Capsule())
+                            .overlay(Capsule().stroke(chip.color.opacity(0.22), lineWidth: 0.6))
+                    }
+                }
+                Spacer(minLength: 0)
+            }
+        }
+        .padding(18)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(.systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 18))
+        .shadow(color: Color.teal.opacity(0.10), radius: 12, x: 0, y: 5)
+        .shadow(color: .black.opacity(0.04), radius: 3, x: 0, y: 1)
+        .padding(.horizontal)
+    }
+
+    private struct HeroChip: Hashable { let text: String; let icon: String; let colorTag: Int
+        var color: Color {
+            switch colorTag {
+            case 0: return .cyan
+            case 1: return .indigo
+            case 2: return .purple
+            default: return .secondary
+            }
+        }
+    }
+
+    private func heroChips(_ eq: ManagedEquipment, deptName: String?, ownerName: String?) -> [HeroChip] {
+        var chips: [HeroChip] = []
+        if !eq.system.isEmpty {
+            chips.append(HeroChip(text: eq.system, icon: "circle.hexagongrid.fill", colorTag: 0))
+        }
+        if let deptName, !deptName.isEmpty {
+            chips.append(HeroChip(text: deptName, icon: "building.2.fill", colorTag: 1))
+        }
+        chips.append(ownerName.map { HeroChip(text: "負責人 \($0)", icon: "person.fill", colorTag: 2) }
+                     ?? HeroChip(text: "未指派負責人", icon: "person.slash", colorTag: 3))
+        return chips
+    }
+
+    // MARK: 四格 KPI
+
+    private func kpiRow(_ eq: ManagedEquipment) -> some View {
+        let lastPM = eq.pmRecords.map(\.date).max()
+        let daysSincePM = lastPM.flatMap {
+            Calendar.current.dateComponents([.day], from: $0, to: Date()).day
+        }
+        let recentAlarms = eq.alarms.filter {
+            $0.date > (Calendar.current.date(byAdding: .day, value: -30, to: Date()) ?? Date())
+        }.count
+        return HStack(spacing: 10) {
+            kpiCell(value: "\(eq.pmRecords.count)", label: "PM 總數", color: .green)
+            kpiCell(value: daysSincePM.map { "\($0) 天" } ?? "—",
+                    label: "距上次 PM", color: (daysSincePM ?? 0) >= 90 ? .orange : .teal)
+            kpiCell(value: "\(eq.alarms.count)", label: "警報總數",
+                    color: eq.alarms.isEmpty ? .secondary : .red)
+            kpiCell(value: "\(recentAlarms)", label: "30天警報",
+                    color: recentAlarms == 0 ? .secondary : .red)
+        }
+        .padding(.horizontal)
+    }
+
+    private func kpiCell(value: String, label: String, color: Color) -> some View {
+        VStack(spacing: 3) {
+            Text(value)
+                .font(.system(size: 17, weight: .bold, design: .rounded))
+                .foregroundStyle(color)
+                .lineLimit(1).minimumScaleFactor(0.6)
+            Text(label).font(.system(size: 9, weight: .semibold)).foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 10)
+        .background(Color(.systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(color.opacity(0.14), lineWidth: 0.75))
+    }
+
+    // MARK: 備註（就地編輯：點鉛筆直接改，不必進編輯表單）
+
+    private func noteCard(_ eq: ManagedEquipment) -> some View {
+        InlineEditBlock(title: "備註", text: eq.note,
+                        emptyHint: "（未填）",
+                        accent: .teal) { new in
+            lifeStore.mutateEquipmentFields(equipmentId: eq.id) { $0.note = new }
+        }
+        .padding(.horizontal)
+    }
+
+    // MARK: 時間軸（PM 綠／警報紅，警報標示距上次 PM 天數）
+
+    /// [v25.391] 時間軸上的一筆。原本只有 PM 與警報，現在加上「關聯到這台機台的
+    /// 任務／報告／會議」——雙向關聯的另一半就是在這裡看見的。
+    private func entries(_ eq: ManagedEquipment) -> [CardEntry] {
+        var out: [CardEntry] = []
+        let pmDates = eq.pmRecords.map(\.date).sorted()
+        for pm in eq.pmRecords {
+            out.append(CardEntry(id: pm.id, kind: .pm, date: pm.date, text: pm.note,
+                                 daysSincePM: nil, phase: pm.phase))
+        }
+        for al in eq.alarms {
+            let prior = pmDates.last(where: { $0 <= al.date })
+            let days = prior.flatMap {
+                Calendar.current.dateComponents([.day], from: $0, to: al.date).day
+            }
+            out.append(CardEntry(id: al.id, kind: .alarm, date: al.date,
+                                 text: al.content, daysSincePM: days))
+        }
+        out.append(contentsOf: linkedEntries(eq))
+        return out.sorted { $0.date > $1.date }
+    }
+
+    /// [v25.391] 關聯到這台機台的任務／報告／會議。
+    /// [v25.393] 連**直接上下游**機台上的關聯項目也一併帶出來。
+    ///
+    /// 這是**顯示時推導**，不是真的把關聯寫進對方的資料裡。寫進去會有三個問題：
+    /// ① 之後解除上下游關係，被抄過去的關聯會留下來變成孤兒；
+    /// ② 打開那筆任務的編輯畫面會看到自己沒選過的機台；
+    /// ③ A→B→C 時會一路往下傳染，最後每台都掛滿別人的東西。
+    /// 推導出來的每一筆都標著來源機台與方向，看得出「這是隔壁那台的事」。
+    ///
+    /// 只看直接相鄰一層：整條鏈全撈的話，長一點的製程線上每台機台都會看到一模一樣
+    /// 的清單，反而失去「這台附近發生什麼事」的意義。
+    private func linkedEntries(_ eq: ManagedEquipment) -> [CardEntry] {
+        var out: [CardEntry] = []
+        // 同一筆同時掛在本機與鄰居時只列一次，本機優先（所以先收本機）
+        var seen = Set<UUID>()
+        collectLinked(for: eq.id, source: nil, into: &out, seen: &seen)
+        for id in eq.upstreamIds {
+            guard let n = lifeStore.equipment(id: id) else { continue }
+            collectLinked(for: id, source: (equipmentDisplayName(n), .upstream),
+                          into: &out, seen: &seen)
+        }
+        for id in eq.downstreamIds {
+            guard let n = lifeStore.equipment(id: id) else { continue }
+            collectLinked(for: id, source: (equipmentDisplayName(n), .downstream),
+                          into: &out, seen: &seen)
+        }
+        return out
+    }
+
+    private func equipmentDisplayName(_ eq: ManagedEquipment) -> String {
+        let n = eq.name.trimmingCharacters(in: .whitespaces)
+        return n.isEmpty ? "未命名設備" : n
+    }
+
+    /// 收集掛在某一台機台上的任務／報告／會議。
+    ///
+    /// 任務有兩種來源：警報自動掛的（equipmentLink）與手動複選的（linkedEquipmentIds），
+    /// 兩種都算。日期取「最能代表這件事發生在什麼時候」的那一個：任務優先用截止日，
+    /// 報告與會議就是它們自己的日期。
+    private func collectLinked(for eqId: UUID,
+                               source: (name: String, direction: EquipmentLinkDirection)?,
+                               into out: inout [CardEntry],
+                               seen: inout Set<UUID>) {
+        for sub in lifeStore.subordinates {
+            let who = sub.name.trimmingCharacters(in: .whitespaces)
+            let owner = who.isEmpty ? "未命名部屬" : who
+            for t in sub.tasks where t.equipmentLink?.equipmentId == eqId
+                || t.linkedEquipmentIds.contains(eqId) {
+                guard seen.insert(t.id).inserted else { continue }
+                let name = t.topic.trimmingCharacters(in: .whitespaces)
+                out.append(CardEntry(id: t.id, kind: .task, date: t.dueDate ?? t.date,
+                                     text: name.isEmpty ? "未命名任務" : name,
+                                     daysSincePM: nil, owner: owner, isDone: t.isCompleted,
+                                     sourceName: source?.name, sourceDirection: source?.direction,
+                                     details: taskDetails(t)))
+            }
+            for r in sub.weeklyReports where r.linkedEquipmentIds.contains(eqId) {
+                guard seen.insert(r.id).inserted else { continue }
+                let name = r.topic.trimmingCharacters(in: .whitespaces)
+                out.append(CardEntry(id: r.id, kind: .report, date: r.date,
+                                     text: name.isEmpty ? "未命名報告" : name,
+                                     daysSincePM: nil, owner: owner, isDone: r.isCompleted,
+                                     sourceName: source?.name, sourceDirection: source?.direction,
+                                     details: reportDetails(r)))
+            }
+            for m in sub.meetings where m.linkedEquipmentIds.contains(eqId) {
+                guard seen.insert(m.id).inserted else { continue }
+                let name = m.topic.trimmingCharacters(in: .whitespaces)
+                // 會議沒有「完成」的概念，用議程項目全數完成當作已結案
+                let items = m.allItems
+                let done = !items.isEmpty && items.allSatisfy(\.isCompleted)
+                out.append(CardEntry(id: m.id, kind: .meeting, date: m.date,
+                                     text: name.isEmpty ? "未命名會議" : name,
+                                     daysSincePM: nil, owner: owner, isDone: done,
+                                     sourceName: source?.name, sourceDirection: source?.direction,
+                                     details: meetingDetails(m),
+                                     subItems: meetingSubItems(m)))
+            }
+        }
+    }
+
+    // MARK: [v25.393] 展開後的明細（字串一律在 ViewBuilder 外組好）
+
+    private func taskDetails(_ t: SubordinateTask) -> [CardDetail] {
+        var out: [CardDetail] = []
+        add(&out, "內容", t.content)
+        if let due = t.dueDate { add(&out, "截止", Self.dateTimeFmt.string(from: due)) }
+        add(&out, "任務日期", Self.dateFmt.string(from: t.date))
+        if t.isDereliction { add(&out, "性質", "應做未作為（缺失）") }
+        // 警報自動掛的任務要回報處理措施與回復結果
+        add(&out, "處理措施", t.responseAction)
+        add(&out, "回復結果", t.responseResult)
+        if t.isCompleted, let at = t.completedAt {
+            add(&out, "完成時間", Self.dateTimeFmt.string(from: at))
+        }
+        add(&out, "備註", t.note)
+        return out
+    }
+
+    private func reportDetails(_ r: WeeklyReport) -> [CardDetail] {
+        var out: [CardDetail] = []
+        add(&out, "分類", r.reportType)
+        add(&out, "報告日期", Self.dateFmt.string(from: r.date))
+        if r.isCompleted, let at = r.completedAt {
+            add(&out, "完成時間", Self.dateTimeFmt.string(from: at))
+        }
+        add(&out, "備註", r.note)
+        return out
+    }
+
+    private func meetingDetails(_ m: SubordinateMeeting) -> [CardDetail] {
+        var out: [CardDetail] = []
+        add(&out, "會議時間", Self.dateTimeFmt.string(from: m.date))
+        add(&out, "會議長度", "\(m.durationMinutes) 分鐘")
+        if m.isRecurring { add(&out, "週期", "重複性會議") }
+        add(&out, "備註", m.note)
+        return out
+    }
+
+    private func meetingSubItems(_ m: SubordinateMeeting) -> [CardSubItem] {
+        m.allItems.map { item in
+            let c = item.content.trimmingCharacters(in: .whitespacesAndNewlines)
+            return CardSubItem(id: item.id, text: c.isEmpty ? "未填內容" : c,
+                               done: item.isCompleted)
+        }
+    }
+
+    /// 空值不佔一行——展開後只列真的有東西的欄位
+    private func add(_ out: inout [CardDetail], _ label: String, _ value: String) {
+        let v = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !v.isEmpty else { return }
+        out.append(CardDetail(id: out.count, label: label, value: v))
+    }
+
+    @ViewBuilder
+    private func timelineCard(_ eq: ManagedEquipment) -> some View {
+        let all = entries(eq)
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 8) {
+                Capsule()
+                    .fill(LinearGradient(colors: [.indigo, Color.indigo.opacity(0.55)],
+                                         startPoint: .top, endPoint: .bottom))
+                    .frame(width: 4, height: 16)
+                Image(systemName: "chart.xyaxis.line")
+                    .font(.system(size: 12, weight: .semibold)).foregroundStyle(.indigo)
+                Text("機台時間軸").font(.subheadline.weight(.bold))
+                Spacer()
+                HStack(spacing: 8) {
+                    HStack(spacing: 3) {
+                        Circle().fill(Color.orange).frame(width: 7, height: 7)
+                        Text("停機").font(.system(size: 9, weight: .semibold)).foregroundStyle(.secondary)
+                    }
+                    HStack(spacing: 3) {
+                        Circle().fill(Color.green).frame(width: 7, height: 7)
+                        Text("PM／復機").font(.system(size: 9, weight: .semibold)).foregroundStyle(.secondary)
+                    }
+                    HStack(spacing: 3) {
+                        Circle().fill(Color.red).frame(width: 7, height: 7)
+                        Text("警報").font(.system(size: 9, weight: .semibold)).foregroundStyle(.secondary)
+                    }
+                }
+                // [v25.303] 免進編輯畫面的快速新增：PM 停機／PM 完成復機／警報
+                Menu {
+                    Button { quickAddKind = .pmShutdown } label: {
+                        Label("PM 停機", systemImage: "pause.circle.fill")
+                    }
+                    Button { quickAddKind = .pmRestored } label: {
+                        Label("PM 完成復機", systemImage: "checkmark.circle.fill")
+                    }
+                    Button { quickAddKind = .alarm } label: {
+                        Label("警報", systemImage: "bell.badge.fill")
+                    }
+                } label: {
+                    Image(systemName: "plus.circle.fill")
+                        .font(.system(size: 17, weight: .semibold)).foregroundStyle(.indigo)
+                }
+            }
+            .padding(.horizontal, 14).padding(.top, 14).padding(.bottom, 10)
+
+            if all.isEmpty {
+                HStack(spacing: 8) {
+                    Image(systemName: "clock")
+                        .font(.system(size: 13, weight: .medium)).foregroundStyle(.tertiary)
+                    Text("尚無記錄。按右上「＋」新增 PM／警報；在任務、報告、會議的編輯畫面選這台機台，也會出現在這裡")
+                        .font(.caption).foregroundStyle(.tertiary)
+                }
+                .padding(.horizontal, 14).padding(.bottom, 14)
+            } else {
+                ForEach(Array(all.enumerated()), id: \.element.id) { idx, e in
+                    cardTimelineRow(e, isLast: idx == all.count - 1)
+                }
+                .padding(.bottom, 6)
+            }
+        }
+        .background(Color(.systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .padding(.horizontal)
+    }
+
+    /// 時間軸每一種項目的顏色／圖示／標籤。
+    /// [v25.303] PM 依階段配色：停機橘（機台停轉）、復機/一般 PM 綠、警報紅
+    /// [v25.391] 關聯項目：任務青、報告紫、會議靛，與各自在部屬頁的識別色一致
+    private func timelineStyle(_ e: CardEntry) -> (color: Color, icon: String, label: String) {
+        switch e.kind {
+        case .pm:
+            switch e.phase {
+            case .shutdown: return (.orange, "pause.fill", "PM 停機")
+            case .restored: return (.green, "checkmark", "PM 完成復機")
+            default:        return (.green, "wrench.fill", "PM 保養")
+            }
+        case .alarm:   return (.red, "bell.fill", "警報")
+        case .task:    return (.cyan, "checklist", "任務")
+        case .report:  return (.purple, "doc.text.fill", "報告")
+        case .meeting: return (.indigo, "person.3.fill", "會議")
+        }
+    }
+
+    /// 時間軸列的小膠囊（來源機台／負責人／完成狀態）
+    private func metaChip(_ text: String, color: Color, icon: String) -> some View {
+        HStack(spacing: 3) {
+            Image(systemName: icon).font(.system(size: 8, weight: .bold))
+            Text(text).lineLimit(1)
+        }
+        .font(.system(size: 9, weight: .semibold))
+        .padding(.horizontal, 5).padding(.vertical, 1.5)
+        .background(color.opacity(0.12))
+        .foregroundStyle(color)
+        .clipShape(Capsule())
+    }
+
+    private func cardTimelineRow(_ e: CardEntry, isLast: Bool) -> some View {
+        let style = timelineStyle(e)
+        let color = style.color
+        let icon = style.icon
+        let label = style.label
+        return HStack(alignment: .top, spacing: 12) {
+            VStack(spacing: 0) {
+                ZStack {
+                    Circle()
+                        .fill(LinearGradient(colors: [color.opacity(0.22), color.opacity(0.09)],
+                                             startPoint: .topLeading, endPoint: .bottomTrailing))
+                        .frame(width: 22, height: 22)
+                    Circle().stroke(color.opacity(0.28), lineWidth: 0.75).frame(width: 22, height: 22)
+                    Image(systemName: icon)
+                        .font(.system(size: 9, weight: .bold)).foregroundStyle(color)
+                }
+                if !isLast {
+                    Rectangle().fill(Color(.separator).opacity(0.35))
+                        .frame(width: 1.5)
+                        .frame(maxHeight: .infinity)
+                }
+            }
+            .frame(width: 22)
+
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 6) {
+                    Text(label)
+                        .font(.system(size: 9, weight: .bold))
+                        .padding(.horizontal, 5).padding(.vertical, 1.5)
+                        .background(color.opacity(0.12)).foregroundStyle(color)
+                        .clipShape(Capsule())
+                    if e.kind == .alarm, let days = e.daysSincePM {
+                        Text("PM 後 \(days) 天")
+                            .font(.system(size: 9, weight: .semibold))
+                            .padding(.horizontal, 5).padding(.vertical, 1.5)
+                            .background(Color.orange.opacity(0.12)).foregroundStyle(.orange)
+                            .clipShape(Capsule())
+                    }
+                    Spacer()
+                    // 有標階段的 PM（停機/復機）連時間一起顯示，同日停機→復機順序才分得出來
+                    Text(e.kind == .pm && e.phase == nil
+                         ? Self.dateFmt.string(from: e.date)
+                         : Self.dateTimeFmt.string(from: e.date))
+                        .font(.system(size: 10)).foregroundStyle(.tertiary)
+                }
+                if !e.text.isEmpty {
+                    // 檢視卡片以完整內容為主，不做行數截斷
+                    Text(e.text).font(.caption2).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                // [v25.393] 關聯項目的來源機台／負責人／完成狀態自成一行，並且會自動
+                // 換行。原本全部擠在最上面那一排，加上來源機台之後在窄螢幕上一定爆版
+                //（標籤＋PM 後 N 天＋上游・機台名＋負責人＋已完成＋日期）。
+                if e.owner != nil || e.sourceName != nil {
+                    ChipFlowLayout(spacing: 5) {
+                        if let src = e.sourceName, let dir = e.sourceDirection {
+                            metaChip(dir == .upstream ? "上游・" + src : "下游・" + src,
+                                     color: dir.color, icon: dir.icon)
+                        }
+                        if let owner = e.owner {
+                            metaChip(owner, color: .secondary, icon: "person.fill")
+                        }
+                        if e.owner != nil && e.isDone {
+                            metaChip("已完成", color: .green, icon: "checkmark.circle.fill")
+                        }
+                    }
+                }
+                // [v25.315] 警報→任務的處理回報子項目（點開查看處理過程）。
+                // ⚠️ 判斷一定要用 kind == .alarm，不能用 !isPM——時間軸現在還有
+                //    任務／報告／會議，用 !isPM 會拿它們的 id 去查警報回報。
+                if e.kind == .alarm {
+                    AlarmResponseDisclosure(alarmId: e.id)
+                }
+                // [v25.393] 關聯項目：下一行摺疊，展開看這筆的完整內容
+                if e.hasExpandable {
+                    TimelineDetailDisclosure(entry: e, color: color)
+                }
+            }
+            .padding(.bottom, isLast ? 4 : 12)
+        }
+        .padding(.horizontal, 14)
+        .fixedSize(horizontal: false, vertical: true)
+    }
+}
+
+// MARK: - 時間軸快速新增（v25.303：機台詳情右上＋，免進編輯畫面）
+
+/// 快速新增的種類：PM 停機／PM 完成復機／警報
+enum TimelineQuickAddKind: String, Identifiable {
+    case pmShutdown, pmRestored, alarm
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .pmShutdown: return "PM 停機"
+        case .pmRestored: return "PM 完成復機"
+        case .alarm:      return "警報"
+        }
+    }
+    var tint: Color {
+        switch self {
+        case .pmShutdown: return .orange
+        case .pmRestored: return .green
+        case .alarm:      return .red
+        }
+    }
+}
+
+/// 機台詳情時間軸的快速新增表單：日期時間＋內容，一鍵寫入機台池。
+/// 警報照走「警報→負責人任務」自動掛任務的既有流程。
+struct EquipmentTimelineQuickAddSheet: View {
+    @EnvironmentObject var lifeStore: LifeStore
+    @Environment(\.dismiss) private var dismiss
+
+    let equipmentId: UUID
+    let kind: TimelineQuickAddKind
+
+    @State private var date = Date()
+    @State private var text = ""
+
+    private var equipmentName: String {
+        let n = lifeStore.equipmentPool.first { $0.id == equipmentId }?.name ?? ""
+        return n.isEmpty ? "未命名設備" : n
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    HStack(spacing: 8) {
+                        Image(systemName: "gearshape.2.fill")
+                            .font(.system(size: 13, weight: .semibold)).foregroundStyle(.teal)
+                        Text(equipmentName).font(.subheadline.weight(.medium))
+                        Spacer()
+                        Text(kind.title)
+                            .font(.system(size: 10, weight: .bold))
+                            .padding(.horizontal, 7).padding(.vertical, 2)
+                            .background(kind.tint.opacity(0.12)).foregroundStyle(kind.tint)
+                            .clipShape(Capsule())
+                    }
+                    DatePicker(kind == .alarm ? "發生時間" : "時間",
+                               selection: $date, displayedComponents: [.date, .hourAndMinute])
+                    TextField(kind == .alarm ? "警報內容（如：高溫警報、壓力異常）"
+                              : "保養內容／項目（選填）",
+                              text: $text, axis: .vertical)
+                        .lineLimit(1...4)
+                } footer: {
+                    switch kind {
+                    case .pmShutdown: Text("記錄機台停機開始保養的時間點；保養結束後再快速新增一筆「PM 完成復機」，時間軸就能直觀切分停機區間。")
+                    case .pmRestored: Text("記錄保養完成、機台恢復運轉的時間點。")
+                    case .alarm:      Text("警報會照既有流程自動掛任務給機台負責人。")
+                    }
+                }
+            }
+            .navigationTitle("新增\(kind.title)")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("新增") { save() }.bold()
+                        .disabled(kind == .alarm && text.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+            }
+        }
+        .presentationDetents([.medium])
+        .presentationDragIndicator(.visible)
+    }
+
+    private func save() {
+        guard var eq = lifeStore.equipmentPool.first(where: { $0.id == equipmentId }) else { dismiss(); return }
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        switch kind {
+        case .pmShutdown:
+            eq.pmRecords.append(EquipmentPMRecord(date: date, note: trimmed, phase: .shutdown))
+            lifeStore.upsertEquipment(eq)
+        case .pmRestored:
+            eq.pmRecords.append(EquipmentPMRecord(date: date, note: trimmed, phase: .restored))
+            lifeStore.upsertEquipment(eq)
+        case .alarm:
+            let alarm = EquipmentAlarm(date: date, content: trimmed)
+            eq.alarms.append(alarm)
+            lifeStore.upsertEquipment(eq)
+            // 警報→負責人任務（與編輯表單同一條路）
+            lifeStore.createTasksForNewAlarms(equipment: eq, newAlarms: [alarm])
+        }
+        dismiss()
+    }
+}
+
+
+// MARK: - 警報處理回報子項目（v25.315）
+
+/// 警報→任務自動建立後，把任務的處理內容「回寫」到時間軸：
+/// 顯示在警報列下方的子項目，點一下展開查看處理過程
+///（處理人、處理措施、回復結果、完成時間）。任務還沒完成顯示「處理中」。
+/// 警報沒有對應任務（手動補登的舊警報、任務被刪）就什麼都不顯示。
+struct AlarmResponseDisclosure: View {
+    @EnvironmentObject var lifeStore: LifeStore
+    let alarmId: UUID
+
+    @State private var expanded = false
+
+    private static let doneFmt: DateFormatter = {
+        let f = DateFormatter(); f.locale = Locale(identifier: "zh_Hant_TW")
+        f.dateFormat = "yyyy/M/d HH:mm"; return f
+    }()
+
+    /// 全部屬掃描找出連到這則警報的任務（警報自動掛任務時寫入 equipmentLink.alarmId）
+    private var linked: (subName: String, task: SubordinateTask)? {
+        for sub in lifeStore.subordinates {
+            if let t = sub.tasks.first(where: { $0.equipmentLink?.alarmId == alarmId }) {
+                return (sub.name.isEmpty ? "未命名" : sub.name, t)
+            }
+        }
+        return nil
+    }
+
+    var body: some View {
+        if let l = linked {
+            let done = l.task.isCompleted
+            let color: Color = done ? .green : .orange
+            VStack(alignment: .leading, spacing: 6) {
+                Button {
+                    withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                        expanded.toggle()
+                    }
+                } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: expanded ? "chevron.down" : "chevron.right")
+                            .font(.system(size: 8, weight: .bold))
+                            .foregroundStyle(color)
+                        Image(systemName: done ? "checkmark.seal.fill" : "person.fill.checkmark")
+                            .font(.system(size: 9, weight: .semibold))
+                        Text(done ? "已完成回報" : "處理中")
+                            .font(.system(size: 10, weight: .bold))
+                        Text(l.subName)
+                            .font(.system(size: 10))
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.horizontal, 7).padding(.vertical, 3)
+                    .background(color.opacity(0.10))
+                    .foregroundStyle(color)
+                    .clipShape(Capsule())
+                    .overlay(Capsule().stroke(color.opacity(0.22), lineWidth: 0.6))
+                    .contentShape(Capsule())
+                }
+                .buttonStyle(.plain)
+
+                if expanded {
+                    VStack(alignment: .leading, spacing: 5) {
+                        responseRow("處理措施", l.task.responseAction)
+                        responseRow("回復結果", l.task.responseResult)
+                        if done, let at = l.task.completedAt {
+                            HStack(spacing: 5) {
+                                Text("完成時間").font(.system(size: 10, weight: .semibold))
+                                    .foregroundStyle(.secondary)
+                                Text(Self.doneFmt.string(from: at))
+                                    .font(.system(size: 10)).foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                    .padding(9)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color(.tertiarySystemFill))
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+                }
+            }
+            .padding(.top, 2)
+        }
+    }
+
+    private func responseRow(_ label: String, _ value: String) -> some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text(label).font(.system(size: 10, weight: .semibold)).foregroundStyle(.secondary)
+            Text(value.isEmpty ? "（未填）" : value)
+                .font(.caption2)
+                .foregroundStyle(value.isEmpty ? Color(.tertiaryLabel) : .primary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+}
+
+// MARK: - [v25.384] 關聯機台（製程上下游）
+
+/// 跳去看別台機台的目標
+struct EquipmentJump: Identifiable {
+    let id: UUID
+}
+
+/// 機台詳情頁的「關聯機台」章節。
+/// 上游＝東西從那些機台流過來；下游＝這台的產出流到那些機台去。
+/// 兩邊的關係是互為鏡像的（見 LifeStore.linkEquipment），所以從任一台點進去都看得到對方。
+struct EquipmentRelationCard: View {
+    @EnvironmentObject var lifeStore: LifeStore
+
+    let equipmentId: UUID
+    /// 點某一台關聯機台時呼叫，由外層決定怎麼開
+    let onOpen: (UUID) -> Void
+
+    @State private var picking: EquipmentLinkDirection?
+    @State private var removing: EquipmentJump?
+
+    init(equipmentId: UUID, onOpen: @escaping (UUID) -> Void) {
+        self.equipmentId = equipmentId
+        self.onOpen = onOpen
+    }
+
+    private var upstream: [ManagedEquipment] {
+        lifeStore.relatedEquipment(of: equipmentId, downstream: false)
+    }
+    private var downstream: [ManagedEquipment] {
+        lifeStore.relatedEquipment(of: equipmentId, downstream: true)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            header
+            group(.upstream, items: upstream)
+            Divider().padding(.leading, 16)
+            group(.downstream, items: downstream)
+            if upstream.isEmpty && downstream.isEmpty {
+                emptyHint
+            }
+        }
+        .background(Color(.systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 18))
+        .overlay(RoundedRectangle(cornerRadius: 18)
+            .stroke(Color(.separator).opacity(0.12), lineWidth: 0.75))
+        .shadow(color: .black.opacity(0.05), radius: 8, x: 0, y: 3)
+        .padding(.horizontal)
+        .sheet(item: $picking) { direction in
+            EquipmentLinkPicker(equipmentId: equipmentId, direction: direction)
+        }
+        .confirmationDialog("解除關聯", isPresented: Binding(
+            get: { removing != nil },
+            set: { if !$0 { removing = nil } }
+        ), presenting: removing) { target in
+            Button("解除關聯", role: .destructive) {
+                lifeStore.unlinkEquipment(equipmentId, from: target.id)
+                removing = nil
+            }
+            Button("取消", role: .cancel) { removing = nil }
+        } message: { target in
+            Text(unlinkMessage(target.id))
+        }
+    }
+
+    // MARK: 版塊
+
+    private var header: some View {
+        HStack(spacing: 8) {
+            Capsule()
+                .fill(LinearGradient(colors: [.teal, .teal.opacity(0.5)],
+                                     startPoint: .top, endPoint: .bottom))
+                .frame(width: 4, height: 16)
+            Text("關聯機台").font(.subheadline.weight(.semibold))
+            Text("\(upstream.count + downstream.count)")
+                .font(.system(size: 10, weight: .bold))
+                .padding(.horizontal, 6).padding(.vertical, 2)
+                .background(Color.teal.opacity(0.13)).foregroundStyle(.teal)
+                .clipShape(Capsule())
+            Spacer()
+        }
+        .padding(.horizontal, 16).padding(.top, 14).padding(.bottom, 10)
+    }
+
+    @ViewBuilder
+    private func group(_ direction: EquipmentLinkDirection, items: [ManagedEquipment]) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 6) {
+                Image(systemName: direction.icon)
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(direction.color)
+                Text(direction.title)
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(direction.color)
+                Text(direction.hint)
+                    .font(.system(size: 10))
+                    .foregroundStyle(.tertiary)
+                Spacer()
+                Button {
+                    picking = direction
+                } label: {
+                    Image(systemName: "plus.circle.fill")
+                        .font(.system(size: 17))
+                        .foregroundStyle(direction.color)
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.horizontal, 16).padding(.vertical, 8)
+
+            ForEach(items) { eq in
+                relatedRow(eq, direction: direction)
+            }
+        }
+    }
+
+    private func relatedRow(_ eq: ManagedEquipment, direction: EquipmentLinkDirection) -> some View {
+        Button {
+            onOpen(eq.id)
+        } label: {
+            HStack(spacing: 10) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(direction.color.opacity(0.14))
+                        .frame(width: 30, height: 30)
+                    Image(systemName: "gearshape.2.fill")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(direction.color)
+                }
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(eq.name.isEmpty ? "未命名設備" : eq.name)
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                    Text(metaLine(eq))
+                        .font(.caption2).foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(.horizontal, 16).padding(.vertical, 9)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        // 這裡不是 List，.swipeActions 掛上去不會有任何作用（也不會報錯），
+        // 所以解除關聯走長按選單——這是非 List 列在 iOS 上的標準做法。
+        .contextMenu {
+            Button("開啟這台") { onOpen(eq.id) }
+            Button("解除關聯", role: .destructive) { removing = EquipmentJump(id: eq.id) }
+        }
+    }
+
+    private var emptyHint: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "point.3.connected.trianglepath.dotted")
+                .font(.system(size: 13, weight: .medium)).foregroundStyle(.tertiary)
+            Text("還沒有設定上下游。按右邊的＋加上去，設好之後警報時可以直接點過去看相鄰機台的狀況；長按已關聯的機台可以解除。")
+                .font(.caption).foregroundStyle(.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 16).padding(.bottom, 14)
+    }
+
+    // MARK: 字串（在 ViewBuilder 外組好）
+
+    private func metaLine(_ eq: ManagedEquipment) -> String {
+        var parts: [String] = []
+        if !eq.system.isEmpty { parts.append(eq.system) }
+        if let did = eq.departmentId,
+           let d = lifeStore.departments.first(where: { $0.id == did }) {
+            let n = d.name.isEmpty ? d.code : d.name
+            if !n.isEmpty { parts.append(n) }
+        }
+        parts.append("PM \(eq.pmRecords.count)")
+        parts.append("警報 \(eq.alarms.count)")
+        return parts.joined(separator: "・")
+    }
+
+    private func unlinkMessage(_ id: UUID) -> String {
+        let name = lifeStore.equipment(id: id)?.name ?? ""
+        let shown = name.isEmpty ? "這台機台" : name
+        return "要解除與「\(shown)」的上下游關係嗎？兩邊的關係會一起移除，機台本身與它的 PM／警報記錄都不會被刪掉。"
+    }
+}
+
+/// 上游／下游
+enum EquipmentLinkDirection: String, Identifiable {
+    case upstream, downstream
+    var id: String { rawValue }
+
+    var title: String { self == .upstream ? "上游機台" : "下游機台" }
+    var hint: String { self == .upstream ? "東西從這裡流過來" : "產出流到這裡去" }
+    var icon: String { self == .upstream ? "arrow.down.to.line" : "arrow.right.to.line" }
+    var color: Color { self == .upstream ? .indigo : .orange }
+    var isDownstream: Bool { self == .downstream }
+}
+
+// MARK: - 選擇要關聯的機台
+
+/// 從既有機台池挑一台，或直接新增一台再關聯。
+struct EquipmentLinkPicker: View {
+    @EnvironmentObject var lifeStore: LifeStore
+    @Environment(\.dismiss) private var dismiss
+
+    let equipmentId: UUID
+    let direction: EquipmentLinkDirection
+
+    @State private var query = ""
+    @State private var showNewEquipment = false
+    /// 新增機台前記下目前的機台池，存檔後比對出新的那一台並自動關聯
+    @State private var idsBeforeAdd: Set<UUID> = []
+
+    init(equipmentId: UUID, direction: EquipmentLinkDirection) {
+        self.equipmentId = equipmentId
+        self.direction = direction
+    }
+
+    private var candidates: [ManagedEquipment] {
+        let all = lifeStore.equipmentLinkCandidates(for: equipmentId)
+        let q = query.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !q.isEmpty else { return all }
+        return all.filter {
+            $0.name.lowercased().contains(q)
+                || $0.system.lowercased().contains(q)
+                || $0.note.lowercased().contains(q)
+        }
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    Button {
+                        idsBeforeAdd = Set(lifeStore.equipmentPool.map(\.id))
+                        showNewEquipment = true
+                    } label: {
+                        Label("新增一台機台並關聯", systemImage: "plus.circle.fill")
+                            .foregroundStyle(direction.color)
+                    }
+                } footer: {
+                    Text(Self.footnote(direction))
+                }
+
+                Section {
+                    if candidates.isEmpty {
+                        Text(query.isEmpty ? "沒有可以關聯的機台了" : "找不到符合的機台")
+                            .font(.caption).foregroundStyle(.secondary)
+                    } else {
+                        ForEach(candidates) { eq in
+                            Button {
+                                lifeStore.linkEquipment(equipmentId, with: eq.id,
+                                                        asDownstream: direction.isDownstream)
+                                dismiss()
+                            } label: {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(eq.name.isEmpty ? "未命名設備" : eq.name)
+                                        .foregroundStyle(.primary)
+                                    if !eq.system.isEmpty {
+                                        Text(eq.system).font(.caption2).foregroundStyle(.secondary)
+                                    }
+                                }
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                } header: {
+                    Text("從既有機台選擇")
+                }
+            }
+            .searchable(text: $query, prompt: "搜尋機台名稱、系統別")
+            .navigationTitle("選擇" + direction.title)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) { Button("取消") { dismiss() } }
+            }
+            .sheet(isPresented: $showNewEquipment, onDismiss: linkNewlyCreated) {
+                EquipmentEditorSheet(
+                    editing: nil,
+                    defaultDepartmentId: lifeStore.equipment(id: equipmentId)?.departmentId,
+                    defaultOwnerId: lifeStore.equipment(id: equipmentId)?.ownerId)
+            }
+        }
+    }
+
+    /// 新增畫面關掉後，找出剛剛多出來的那一台並自動建立關聯。
+    /// EquipmentEditorSheet 沒有回傳新機台 id 的管道，用「存檔前後的差集」是
+    /// 不動它的介面就能做到的最小改法；使用者按取消就不會有差集，什麼都不會發生。
+    private func linkNewlyCreated() {
+        let added = lifeStore.equipmentPool.map(\.id).filter { !idsBeforeAdd.contains($0) }
+        idsBeforeAdd = []
+        guard let newId = added.first else { return }
+        lifeStore.linkEquipment(equipmentId, with: newId, asDownstream: direction.isDownstream)
+        dismiss()
+    }
+
+    private static func footnote(_ direction: EquipmentLinkDirection) -> String {
+        direction == .upstream
+            ? "上游＝東西從那台流到這台。設定後兩邊都看得到關係，從那一台點進來也會顯示這台是它的下游。"
+            : "下游＝這台的產出流到那台去。設定後兩邊都看得到關係，從那一台點進來也會顯示這台是它的上游。"
+    }
+}
+
+// MARK: - 關聯任務
+
+/// 從機台看回去的那一半：哪些部屬任務掛在這台機台上。
+/// 任務端有兩種指向機台的方式，這裡兩種都收，並且分開標示——
+/// `equipmentLink` 是警報自動掛的（要回報處理措施與回復結果），
+/// `linkedEquipmentIds` 是手動指定的（只是標記相關，不要求回報，可複選）。
+struct EquipmentTaskCard: View {
+    @EnvironmentObject var lifeStore: LifeStore
+
+    let equipmentId: UUID
+    /// 點某筆任務時呼叫，由外層決定怎麼開（通常是開那位部屬的明細）
+    let onOpen: (UUID) -> Void
+
+    @State private var showCompleted = false
+    /// 新增任務的流程（nil＝沒在新增）。做成單一 sheet 是刻意的：
+    /// 同一個 view 疊兩個 sheet modifier 在 SwiftUI 上表現不穩，所以「挑人」那一步
+    /// 由 EquipmentTaskOwnerPicker 自己往下接編輯表單。
+    @State private var adding: EquipmentTaskAdd?
+
+    init(equipmentId: UUID, onOpen: @escaping (UUID) -> Void) {
+        self.equipmentId = equipmentId
+        self.onOpen = onOpen
+    }
+
+    private static let dateFmt: DateFormatter = {
+        let f = DateFormatter(); f.locale = Locale(identifier: "zh_Hant_TW"); f.dateFormat = "M/d"; return f
+    }()
+
+    // MARK: 取資料
+
+    private var entries: [EquipmentTaskEntry] {
+        var out: [EquipmentTaskEntry] = []
+        for sub in lifeStore.subordinates {
+            for t in sub.tasks {
+                let isAlarm = (t.equipmentLink?.equipmentId == equipmentId)
+                let isManual = t.linkedEquipmentIds.contains(equipmentId)
+                guard isAlarm || isManual else { continue }
+                out.append(EquipmentTaskEntry(id: t.id, task: t,
+                                              ownerId: sub.id, ownerName: sub.name,
+                                              isAlarm: isAlarm))
+            }
+        }
+        // 未完成在前，同組再依任務日期新到舊
+        return out.sorted { (a: EquipmentTaskEntry, b: EquipmentTaskEntry) -> Bool in
+            if a.task.isCompleted != b.task.isCompleted { return !a.task.isCompleted }
+            return a.task.date > b.task.date
+        }
+    }
+
+    private var pending: [EquipmentTaskEntry] { entries.filter { !$0.task.isCompleted } }
+    private var done: [EquipmentTaskEntry] { entries.filter { $0.task.isCompleted } }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            header
+            if pending.isEmpty && done.isEmpty {
+                emptyHint
+            } else {
+                ForEach(pending) { entry in
+                    taskRow(entry)
+                }
+                if !done.isEmpty {
+                    if !pending.isEmpty { Divider().padding(.leading, 16) }
+                    completedToggle
+                    if showCompleted {
+                        ForEach(done) { entry in
+                            taskRow(entry)
+                        }
+                    }
+                }
+            }
+        }
+        .background(Color(.systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 18))
+        .overlay(RoundedRectangle(cornerRadius: 18)
+            .stroke(Color(.separator).opacity(0.12), lineWidth: 0.75))
+        .shadow(color: .black.opacity(0.05), radius: 8, x: 0, y: 3)
+        .padding(.horizontal)
+        .sheet(item: $adding) { mode in
+            switch mode {
+            case .owner(let oid):
+                TaskEditorSheet(subordinateId: oid, editing: nil, defaultEquipmentId: equipmentId)
+            case .choose:
+                EquipmentTaskOwnerPicker(equipmentId: equipmentId)
+            }
+        }
+    }
+
+    // MARK: 版塊
+
+    private var header: some View {
+        HStack(spacing: 8) {
+            Capsule()
+                .fill(LinearGradient(colors: [.cyan, .cyan.opacity(0.5)],
+                                     startPoint: .top, endPoint: .bottom))
+                .frame(width: 4, height: 16)
+            Text("關聯任務").font(.subheadline.weight(.semibold))
+            Text(countBadge)
+                .font(.system(size: 10, weight: .bold))
+                .padding(.horizontal, 6).padding(.vertical, 2)
+                .background(Color.cyan.opacity(0.13)).foregroundStyle(.cyan)
+                .clipShape(Capsule())
+            Spacer()
+            Button {
+                startAdding()
+            } label: {
+                Image(systemName: "plus.circle.fill")
+                    .font(.system(size: 17))
+                    .foregroundStyle(.cyan)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 16).padding(.top, 14).padding(.bottom, 10)
+    }
+
+    private var completedToggle: some View {
+        Button {
+            withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                showCompleted.toggle()
+            }
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: showCompleted ? "chevron.down" : "chevron.right")
+                    .font(.system(size: 10, weight: .bold))
+                Text("已完成 \(done.count)")
+                    .font(.system(size: 12, weight: .semibold))
+                Spacer()
+            }
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 16).padding(.vertical, 9)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func taskRow(_ entry: EquipmentTaskEntry) -> some View {
+        let t = entry.task
+        let tint = rowTint(entry)
+        return Button {
+            onOpen(entry.ownerId)
+        } label: {
+            HStack(spacing: 10) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(tint.opacity(0.14))
+                        .frame(width: 30, height: 30)
+                    Image(systemName: rowIcon(entry))
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(tint)
+                }
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(titleText(t))
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(.primary)
+                        .strikethrough(t.isCompleted, color: .secondary)
+                        .lineLimit(1)
+                    HStack(spacing: 5) {
+                        if entry.isAlarm {
+                            miniTag("警報", color: .orange)
+                        }
+                        if entry.isAlarm && needsReport(t) {
+                            miniTag("待回報", color: .red)
+                        }
+                        if t.isDereliction {
+                            miniTag("缺失", color: .red)
+                        }
+                        Text(metaLine(entry))
+                            .font(.caption2).foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                }
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(.horizontal, 16).padding(.vertical, 9)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .opacity(t.isCompleted ? 0.6 : 1)
+    }
+
+    private func miniTag(_ text: String, color: Color) -> some View {
+        Text(text)
+            .font(.system(size: 9, weight: .bold))
+            .padding(.horizontal, 5).padding(.vertical, 1.5)
+            .background(color.opacity(0.13)).foregroundStyle(color)
+            .clipShape(Capsule())
+    }
+
+    private var emptyHint: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "checklist")
+                .font(.system(size: 13, weight: .medium)).foregroundStyle(.tertiary)
+            Text("還沒有任務掛在這台機台上。按右邊的＋可以直接開一筆並自動關聯；在部屬的任務編輯畫面選「關聯機台」也會出現在這裡，機台警報產生的任務則會自動列入。")
+                .font(.caption).foregroundStyle(.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 16).padding(.bottom, 14)
+    }
+
+    // MARK: 動作
+
+    /// ＋：機台有負責人就直接幫他開任務；沒有負責人才跳出來讓使用者挑人。
+    private func startAdding() {
+        let ownerId = lifeStore.equipment(id: equipmentId)?.ownerId
+        if let oid = ownerId, lifeStore.subordinates.contains(where: { $0.id == oid }) {
+            adding = .owner(oid)
+        } else {
+            adding = .choose
+        }
+    }
+
+    // MARK: 字串（在 ViewBuilder 外組好，避免型別檢查爆掉）
+
+    private var countBadge: String {
+        done.isEmpty ? "\(pending.count)" : "\(pending.count) / \(entries.count)"
+    }
+
+    private func titleText(_ t: SubordinateTask) -> String {
+        let topic = t.topic.trimmingCharacters(in: .whitespaces)
+        if !topic.isEmpty { return topic }
+        let content = t.content.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !content.isEmpty { return content }
+        return "未命名任務"
+    }
+
+    private func metaLine(_ entry: EquipmentTaskEntry) -> String {
+        var parts: [String] = []
+        let name = entry.ownerName.trimmingCharacters(in: .whitespaces)
+        parts.append(name.isEmpty ? "未命名部屬" : name)
+        let t = entry.task
+        if t.isCompleted, let at = t.completedAt {
+            parts.append("完成 " + Self.dateFmt.string(from: at))
+        } else if let due = t.dueDate {
+            let overdue = due < Calendar.current.startOfDay(for: Date())
+            parts.append((overdue ? "逾期 " : "截止 ") + Self.dateFmt.string(from: due))
+        } else {
+            parts.append(Self.dateFmt.string(from: t.date))
+        }
+        return parts.joined(separator: "・")
+    }
+
+    private func needsReport(_ t: SubordinateTask) -> Bool {
+        t.responseAction.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || t.responseResult.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private func rowTint(_ entry: EquipmentTaskEntry) -> Color {
+        if entry.task.isCompleted { return .green }
+        if entry.task.isDereliction { return .red }
+        return entry.isAlarm ? .orange : .teal
+    }
+
+    private func rowIcon(_ entry: EquipmentTaskEntry) -> String {
+        if entry.task.isCompleted { return "checkmark.circle.fill" }
+        if entry.task.isDereliction { return "exclamationmark.octagon.fill" }
+        return entry.isAlarm ? "bolt.trianglebadge.exclamationmark.fill" : "checklist"
+    }
+}
+
+/// 一筆「掛在這台機台上的任務」，連同它的持有人一起帶著走
+private struct EquipmentTaskEntry: Identifiable {
+    let id: UUID
+    let task: SubordinateTask
+    let ownerId: UUID
+    let ownerName: String
+    /// true＝警報自動掛上的任務（要回報處理措施與回復結果）；false＝手動指定關聯
+    let isAlarm: Bool
+}
+
+/// 新增關聯任務的兩條路：機台有負責人就直接開表單，沒有就先挑人
+enum EquipmentTaskAdd: Identifiable {
+    /// 直接指派給這位部屬
+    case owner(UUID)
+    /// 先挑一位部屬
+    case choose
+
+    var id: String {
+        switch self {
+        case .owner(let uid): return uid.uuidString
+        case .choose: return "choose"
+        }
+    }
+}
+
+/// sheet(item:) 用的指派對象包裝
+struct EquipmentTaskOwnerPick: Identifiable {
+    let id: UUID
+}
+
+/// 機台沒有負責人時，新增任務前先挑一位部屬；挑完就地接上任務編輯表單，
+/// 讓呼叫端只需要掛一個 sheet。
+struct EquipmentTaskOwnerPicker: View {
+    @EnvironmentObject var lifeStore: LifeStore
+    @Environment(\.dismiss) private var dismiss
+
+    let equipmentId: UUID
+
+    @State private var query = ""
+    @State private var picked: EquipmentTaskOwnerPick?
+
+    init(equipmentId: UUID) {
+        self.equipmentId = equipmentId
+    }
+
+    private var people: [Subordinate] {
+        let q = query.trimmingCharacters(in: .whitespaces).lowercased()
+        let all = lifeStore.subordinates
+        guard !q.isEmpty else { return all }
+        return all.filter {
+            $0.name.lowercased().contains(q)
+                || $0.jobTitle.lowercased().contains(q)
+                || $0.department.lowercased().contains(q)
+        }
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                if people.isEmpty {
+                    Text(query.isEmpty ? "還沒有部屬可以指派" : "找不到符合的人員")
+                        .font(.caption).foregroundStyle(.secondary)
+                } else {
+                    ForEach(people) { sub in
+                        Button {
+                            picked = EquipmentTaskOwnerPick(id: sub.id)
+                        } label: {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(sub.name.isEmpty ? "未命名部屬" : sub.name)
+                                    .foregroundStyle(.primary)
+                                if !sub.jobTitle.isEmpty || !sub.department.isEmpty {
+                                    Text([sub.department, sub.jobTitle]
+                                        .filter { !$0.isEmpty }.joined(separator: "・"))
+                                        .font(.caption2).foregroundStyle(.secondary)
+                                }
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+            .searchable(text: $query, prompt: "搜尋姓名、職稱、部門")
+            .navigationTitle("指派給誰")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) { Button("取消") { dismiss() } }
+            }
+            // 挑完人接著開任務表單；表單關掉就把這一層也收掉，回到機台詳情
+            .sheet(item: $picked, onDismiss: { dismiss() }) { pick in
+                TaskEditorSheet(subordinateId: pick.id, editing: nil,
+                                defaultEquipmentId: equipmentId)
+            }
+        }
+    }
+}
+
+// MARK: - [v25.391] 關聯機台（多選，任務／報告／會議共用）
+
+/// 表單裡的「關聯機台」欄位：已選機台的膠囊列 + 一顆開挑選頁的按鈕。
+///
+/// 任務、報告、會議三張表單共用同一個元件，行為才不會三邊各長各的。
+/// 綁的是 [UUID]，顯示名稱一律現撈——機台被改名或刪掉時跟著變，不留快照。
+struct EquipmentLinkField: View {
+    @EnvironmentObject var lifeStore: LifeStore
+
+    @Binding var selection: [UUID]
+    /// 挑選頁裡要排在最前面的機台（通常是這位部屬負責的那幾台）
+    var preferredOwnerId: UUID?
+
+    @State private var picking = false
+
+    init(selection: Binding<[UUID]>, preferredOwnerId: UUID? = nil) {
+        self._selection = selection
+        self.preferredOwnerId = preferredOwnerId
+    }
+
+    /// 現存的已選機台（機台被刪掉時自動略過，不顯示點不開的鬼影）
+    private var chosen: [ManagedEquipment] {
+        selection.compactMap { lifeStore.equipment(id: $0) }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Button {
+                picking = true
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "gearshape.2.fill")
+                        .font(.system(size: 12)).foregroundStyle(.teal)
+                    Text(chosen.isEmpty ? "選擇關聯機台" : "關聯機台（\(chosen.count)）")
+                        .font(.subheadline)
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 11, weight: .semibold)).foregroundStyle(.tertiary)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if !chosen.isEmpty {
+                FlexibleChipWrap(items: chosen.map(\.id)) { id in
+                    chip(id)
+                }
+            }
+        }
+        .sheet(isPresented: $picking) {
+            EquipmentMultiPicker(selection: $selection, preferredOwnerId: preferredOwnerId)
+        }
+    }
+
+    /// 已選機台膠囊。點一下即移除——比照會議負責人膠囊的既有作法。
+    private func chip(_ id: UUID) -> some View {
+        // 名稱現撈；機台被刪時 chosen 已經濾掉，這裡的 fallback 只是保險
+        let raw = lifeStore.equipment(id: id)?.name.trimmingCharacters(in: .whitespaces) ?? ""
+        let name = raw.isEmpty ? "未命名設備" : raw
+        return Button {
+            selection.removeAll { $0 == id }
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: "gearshape.2.fill").font(.system(size: 9))
+                Text(name)
+                    .font(.system(size: 11, weight: .medium))
+                    .lineLimit(1)
+                Image(systemName: "xmark.circle.fill").font(.system(size: 10))
+            }
+            .foregroundStyle(.teal)
+            .padding(.horizontal, 8).padding(.vertical, 4)
+            .background(Color.teal.opacity(0.12), in: Capsule())
+            .overlay(Capsule().stroke(Color.teal.opacity(0.24), lineWidth: 0.6))
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+/// 多選機台。可搜尋名稱／系統別／備註；這位部屬負責的機台排在最前面另成一組。
+struct EquipmentMultiPicker: View {
+    @EnvironmentObject var lifeStore: LifeStore
+    @Environment(\.dismiss) private var dismiss
+
+    @Binding var selection: [UUID]
+    var preferredOwnerId: UUID?
+
+    @State private var query = ""
+
+    init(selection: Binding<[UUID]>, preferredOwnerId: UUID? = nil) {
+        self._selection = selection
+        self.preferredOwnerId = preferredOwnerId
+    }
+
+    private func matches(_ eq: ManagedEquipment) -> Bool {
+        let q = query.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !q.isEmpty else { return true }
+        return eq.name.lowercased().contains(q)
+            || eq.system.lowercased().contains(q)
+            || eq.note.lowercased().contains(q)
+    }
+
+    private var byName: (ManagedEquipment, ManagedEquipment) -> Bool {
+        { a, b in
+            (a.name.isEmpty ? "未命名設備" : a.name)
+                .localizedStandardCompare(b.name.isEmpty ? "未命名設備" : b.name) == .orderedAscending
+        }
+    }
+
+    private var mine: [ManagedEquipment] {
+        guard let oid = preferredOwnerId else { return [] }
+        return lifeStore.equipmentPool.filter { $0.ownerId == oid && matches($0) }.sorted(by: byName)
+    }
+
+    private var others: [ManagedEquipment] {
+        lifeStore.equipmentPool
+            .filter { $0.ownerId != preferredOwnerId && matches($0) }
+            .sorted(by: byName)
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                if !mine.isEmpty {
+                    Section {
+                        ForEach(mine) { row($0) }
+                    } header: {
+                        Text("這位負責的機台")
+                    }
+                }
+                Section {
+                    if others.isEmpty && mine.isEmpty {
+                        Text(query.isEmpty ? "還沒有任何機台" : "找不到符合的機台")
+                            .font(.caption).foregroundStyle(.secondary)
+                    } else {
+                        ForEach(others) { row($0) }
+                    }
+                } header: {
+                    if !mine.isEmpty { Text("其他機台") }
+                } footer: {
+                    Text("可以複選——一件事常常同時牽涉兩台（例如兩台純化器一起保養）。選好之後，從機台詳情的時間軸與關聯項目也看得到這一筆。")
+                }
+            }
+            .searchable(text: $query, prompt: "搜尋機台名稱、系統別")
+            .navigationTitle("關聯機台")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("完成") { dismiss() }.bold()
+                }
+            }
+        }
+    }
+
+    private func row(_ eq: ManagedEquipment) -> some View {
+        let on = selection.contains(eq.id)
+        return Button {
+            if on { selection.removeAll { $0 == eq.id } }
+            else { selection.append(eq.id) }
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: on ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 18))
+                    .foregroundStyle(on ? Color.teal : Color.secondary.opacity(0.5))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(eq.name.isEmpty ? "未命名設備" : eq.name)
+                        .foregroundStyle(.primary)
+                    Text(pickerMeta(eq))
+                        .font(.caption2).foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 0)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// 字串在 ViewBuilder 外組好
+    private func pickerMeta(_ eq: ManagedEquipment) -> String {
+        var parts: [String] = []
+        if !eq.system.isEmpty { parts.append(eq.system) }
+        if let did = eq.departmentId,
+           let d = lifeStore.departments.first(where: { $0.id == did }) {
+            let n = d.name.isEmpty ? d.code : d.name
+            if !n.isEmpty { parts.append(n) }
+        }
+        if let oid = eq.ownerId,
+           let n = lifeStore.subordinates.first(where: { $0.id == oid })?.name, !n.isEmpty {
+            parts.append(n)
+        }
+        return parts.isEmpty ? "未填系統別" : parts.joined(separator: "・")
+    }
+}

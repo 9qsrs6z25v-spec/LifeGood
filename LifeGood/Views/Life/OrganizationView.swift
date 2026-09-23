@@ -2,6 +2,71 @@ import SwiftUI
 import PhotosUI
 import UniformTypeIdentifiers
 
+// MARK: - 美化紀錄（OrganizationView）
+// [2026-06] 本次美化方向：
+//   1. statsHeader：statBox 純文字升級為圓形圖示底圓 + 粗體數值 + 雙層 shadow 卡片，
+//      對齊 FinanceOverviewView.allocationSection kpiRow 設計規格
+//   2. emptyState：平面圖示升級為雙層脈衝光環（indigo）+ 漸層底圓 + 細邊框，
+//      對齊 IncomeView.emptyState 規格
+//   3. departmentCard：人員計數改為彩色膠囊、陰影升級雙層、code 膠囊加細邊框，
+//      進一步對齊 GradeTitleView 組織節點卡規格
+//   4. DepartmentDetailView.headerCard：升級為圖示底色 + Capsule 色條 section 標題，
+//      對齊 LifeRealEstateView detail card 設計語言
+//   5. OrgPersonDetailView.headerCard：頭像加 overlay 邊框 + indigo 光暈陰影；
+//      部門標籤改為 Capsule 小膠囊，對齊 IncomeView incomeRow 設計
+//   6. OrgPersonDetailView.sectionCard：加左側漸層 Capsule 色條 section 標題，
+//      對齊 OverviewView / IncomeView 全 App section 標題規格
+//   7. OrgPersonDetailView.linkedCardButton：加圖示底圓 + overlay 邊框 + orange 光暈陰影，
+//      對齊 LifeFinanceView 連結按鈕設計規格
+
+// [2026-06 v2] 本次美化方向：
+//   8. OrgPersonDetailView.headerCard：升級為 indigo-purple 漸層英雄卡（散景裝飾圓 + 玻璃光澤），
+//      人名 .title3.bold 白色大字；部門改為白色半透明 Capsule；生日改為白色 calendar Capsule 徽章；
+//      加入 headerAppeared spring 進場動畫（opacity + Y 位移），對齊 SubordinateDetailView.headerCard 規格。
+//   9. OrgPersonDetailView.relationsCard：關係類型徽章從 RoundedRectangle(cornerRadius:3) 升級為 Capsule
+//      + stroke 邊框；每列加入 36pt LinearGradient 漸層圖示圓（依關係色彩）；
+//      列間加 0.5pt separator 分隔線，對齊 SubordinateDetailView / FamilyMembersResumeView 規格。
+//  10. OrgPersonDetailView.giftCard：禮金子分類徽章 RoundedRectangle → Capsule + stroke；
+//      累計列升級為 36pt 粉紅漸層圖示圓 + ntdWanString Capsule 金額標籤；
+//      日期改為 calendar 圖示 + tertiaryFill Capsule 徽章；金額改 ntdWanString，對齊 ResumeGiftSection 規格。
+//  11. OrgPersonDetailView.childrenCard：每行加入 30pt 粉紅漸層圖示圓；生日改為 Capsule 日期膠囊徽章；
+//      列間加 0.5pt separator 分隔線，對齊 FamilyView.memberRow / SubordinateDetailView 規格。
+//  12. OrgPersonDetailView.sectionCard 標題：.headline → .subheadline.weight(.bold)，
+//      與全 App section header 字重一致（OverviewView / IncomeView / VariableExpenseView）。
+//  13. DepartmentDetailView.peopleSection：section header 從裸 Text(.headline) 升級為
+//      「3pt 綠色漸層 Capsule 側條 + person.2.fill 圖示 + .subheadline.bold + 計數膠囊」；
+//      personRow 離職徽章 RoundedRectangle(cornerRadius:3) → Capsule + stroke；
+//      加入 peopleAppeared 交錯進場動畫（opacity + Y offset stagger），對齊 SubordinateView.subordinateRow 規格。
+//  14. DepartmentDetailView.relationsCard：上游/下游部門標籤升級為「3pt Capsule 側條 + 圖示 + .caption.semibold」；
+//      chipText 補 .overlay(Capsule().stroke(color.opacity(0.22), lineWidth:0.6)) 邊框；
+//      容器補雙層 shadow，對齊 VehicleView / StockView chipText 邊框規格。
+// [2026-07 v3] 本次美化方向（OrgPersonEditor「新增／編輯人員」表單 Section header 補齊）：
+//  15. OrgPersonEditor 是本檔案唯一仍在用系統預設純文字 Section 標頭（Section("基本資訊")／
+//      header: { Text("頭像") } 等 8 處）的地方，與同檔案 DepartmentDetailView.peopleSection／
+//      OrgPersonDetailView.sectionCard 早已升級的「4pt 漸層 Capsule 側條 + 圖示 + 粗體標題」
+//      規格脫節，也是全 App 新增/編輯表單中少數還沒補齊此規格的殘留頁面。新增共用
+//      orgPersonEditorSectionHeader(_:icon:color:)，寫法對齊 ChildDetailView.
+//      childEditorSectionHeader／ResumeView.profileEditorSectionHeader 既有做法；8 個 Section
+//      各自依內容給主題色（基本資訊＝indigo／頭像＝blue／利害關係＝purple／記事＝secondary／
+//      子女＝pink／派系與相關人員＝orange／名片連結＝teal／狀態＝gray），刪除人員 Section 維持
+//      無標頭（對齊 HealthProfileEditView／ChildDetailView 各編輯表單慣例）。順手移除
+//      OrgPersonDetailView.formatCurrency／currencyFormatter 兩處已無任何呼叫端的死碼
+//      （金額顯示改用 ntdWanString 後遺留）。純視覺層調整，欄位資料綁定、gradeTitleId／
+//      departmentId 連動邏輯、children／relations 新增刪除、save()／delete() 等既有商業邏輯
+//      完全未變動。
+//   （下次美化本檔案時，可轉往其他仍留有待辦的畫面）
+//
+// [2026-08 v25.96] 本次美化方向（OrgPersonEditor 工具列儲存按鈕補齊載入狀態）：
+//  16. OrgPersonEditor.save() 自帶 isSaving 忙碌守衛（disabled(isSaving)）避免快速連點造成
+//      重複人員紀錄，但按鈕本身在存檔期間毫無視覺提示。補上 ProgressView().scaleEffect(0.7)
+//      .tint(.green)，isSaving 為 true 時顯示於按鈕左側，對齊 v25.81～v25.95 全 App
+//      Add*View／SubordinateView／GradeTitleView 儲存按鈕載入狀態規格。
+//      純視覺層調整，save() 內部守衛判斷、photoFileName 換照片與 relations 過濾等
+//      既有商業邏輯完全未變動。
+//   （下次美化時：同批清單仍剩 SubordinateDetailView／MyCalendarView／LifeFinanceView／
+//      ResumeView／ChildDetailView 待比照補齊，此清單自 v25.81 起接續，每完成一檔即從
+//      清單移除，找不到待辦清單時可全樹搜尋 "isSaving" 交叉核對。）
+
 // MARK: - 公司組織頁
 
 /// 依 Department.upstreamIds / downstreamIds 計算組織樹，
@@ -11,7 +76,72 @@ struct OrganizationView: View {
     @EnvironmentObject var subscription: SubscriptionManager
     @State private var viewingDeptId: UUID?
     @State private var showPremiumAlert = false
-    @State private var pdfURL: URL?
+    // 直接存 IdentifiableURL（而非 URL? 再用 Binding(get:set:) 現包一次）：IdentifiableURL.id
+    // 是 init 時產生的隨機 UUID，若每次 body 重繪都重新包一次，id 會跟著變，SwiftUI 可能因此
+    // 把 .sheet(item:) 判定成「新項目」而中途關閉/重開分享面板。改成本檔案唯一一個違反此
+    // struct 既有用法（其餘檔案都是直接把它存進 @State）的地方，id 建立後即固定。
+    @State private var pdfURL: IdentifiableURL?
+    /// [v25.323] 頂部搜尋：人員／報告／改善項目
+    @State private var orgSearchText = ""
+    @State private var searchViewingPersonId: UUID?
+    // 美化：空狀態脈衝光環動畫旗標
+    @State private var orgEmptyPulse = false
+    @State private var orgEmptyPulseTask: Task<Void, Never>?
+    /// [v25.357] 從廠區據點的子項目點開某筆重大決議
+    @State private var openingResolution: ResolutionJump?
+    /// [v25.359] 新增／編輯廠區據點。sheet 要掛在這裡而不是 Section 上——
+    /// 掛在 Section 上時 List 重建內容會把剛打開的 sheet 一起收掉。
+    @State private var editingSite: SiteEditTarget?
+    /// [v25.360] 決議內容搜尋：固定在頂端，命中後把清單捲到該筆決議所屬的廠區
+    @State private var resolutionQuery = ""
+    @State private var hitIndex = 0
+    /// [v25.364] 匯出失敗的原因。出圖失敗時一定要講出來，不能按了沒反應
+    @State private var exportError: String?
+    /// [v25.367] 編年史出圖進度；非 nil＝正在出圖，畫面蓋一層 HUD 並擋住重複點擊
+    @State private var chronicleStage: ChronicleExportStage?
+    @State private var chronicleSubtitle = ""
+
+    struct ResolutionJump: Identifiable {
+        let roleId: UUID
+        let resolutionId: UUID
+        var id: String { "\(roleId)-\(resolutionId)" }
+    }
+
+    struct SiteEditTarget: Identifiable {
+        var site: CompanySite
+        var isNew: Bool
+        var id: UUID { site.id }
+    }
+
+    /// [v25.360] 符合關鍵字的重大決議，依時間新到舊；每一筆帶著它所屬的廠區
+    private var resolutionHits: [SiteResolutionHit] {
+        let q = resolutionQuery.trimmingCharacters(in: .whitespaces)
+        guard !q.isEmpty else { return [] }
+        let grouping = lifeStore.groupResolutionsByEra()
+        var siteOf: [UUID: UUID] = [:]          // 決議 id → 據點 id
+        for (siteId, pairs) in grouping.bySite {
+            for pair in pairs { siteOf[pair.resolution.id] = siteId }
+        }
+        for pair in grouping.beforeAny {
+            siteOf[pair.resolution.id] = CompanySiteSection.beforeAnyAnchor
+        }
+        return lifeStore.allSideRoleResolutions.compactMap { pair -> SiteResolutionHit? in
+            let r = pair.resolution
+            let haystack = [r.title, r.content, r.site, r.initiator, r.serialLabel]
+                + r.categories
+            guard haystack.contains(where: { $0.localizedCaseInsensitiveContains(q) }),
+                  let siteId = siteOf[r.id] else { return nil }
+            return SiteResolutionHit(siteId: siteId, resolutionId: r.id,
+                                     roleId: pair.role.id,
+                                     title: r.title.isEmpty ? "（未填標題）" : r.title)
+        }
+    }
+
+    private var currentHit: SiteResolutionHit? {
+        let hits = resolutionHits
+        guard !hits.isEmpty else { return nil }
+        return hits[min(max(0, hitIndex), hits.count - 1)]
+    }
 
     private var rootDepartments: [Department] {
         // root = 沒有 upstream 的部門；若全部都有 upstream（可能成環），退而求其次抓部門裡的全部，
@@ -21,42 +151,92 @@ struct OrganizationView: View {
         return lifeStore.departments
     }
 
+    /// 目錄 ⇄ 樹狀圖 檢視切換。預設目錄——樹狀圖要雙向捲動，
+    /// 部門一多就很難滑（使用者回報）；樹狀保留給想看全貌/匯出比對的時候。
+    @AppStorage("org_view_directory_mode") private var directoryMode = true
+
     var body: some View {
         NavigationStack {
             Group {
                 if lifeStore.departments.isEmpty {
                     emptyState
                 } else {
-                    ScrollView([.horizontal, .vertical]) {
-                        VStack(spacing: 24) {
-                            statsHeader
-                            ForEach(rootDepartments) { root in
-                                deptTreeNode(root, visited: [])
+                    VStack(spacing: 0) {
+                        orgSearchBar
+                        // 決議搜尋只在目錄模式有意義（要捲動到廠區那一列）
+                        if directoryMode,
+                           orgSearchText.trimmingCharacters(in: .whitespaces).isEmpty,
+                           !lifeStore.companySites.isEmpty {
+                            resolutionSearchBar
+                        }
+                        if !orgSearchText.trimmingCharacters(in: .whitespaces).isEmpty {
+                            orgSearchResults
+                        } else if directoryMode {
+                            directoryList
+                        } else {
+                            ScrollView([.horizontal, .vertical]) {
+                                let ctx = makeOrgContext()
+                                VStack(spacing: 24) {
+                                    statsHeader
+                                    ForEach(rootDepartments) { root in
+                                        deptTreeNode(root, visited: [], ctx: ctx)
+                                    }
+                                }
+                                .padding(24)
                             }
                         }
-                        .padding(24)
                     }
                 }
             }
             .background(Color(.systemGroupedBackground))
+            .sheet(item: Binding(
+                get: { searchViewingPersonId.map { IdentifiableUUID(id: $0) } },
+                set: { searchViewingPersonId = $0?.id }
+            )) { wrapper in
+                OrgPersonDetailView(personId: wrapper.id)
+            }
             .navigationTitle("公司組織")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     if !lifeStore.departments.isEmpty {
-                        Button {
-                            pdfURL = generatePDFURL()
-                        } label: {
-                            Image(systemName: "square.and.arrow.up")
-                                .foregroundStyle(.green)
+                        HStack(spacing: 14) {
+                            Button {
+                                withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) {
+                                    directoryMode.toggle()
+                                }
+                            } label: {
+                                Image(systemName: directoryMode
+                                      ? "rectangle.3.group" : "list.bullet.indent")
+                                    .foregroundStyle(.indigo)
+                            }
+                            Menu {
+                                Button {
+                                    pdfURL = generatePDFURL().map { IdentifiableURL(url: $0) }
+                                } label: {
+                                    Label("組織圖 PDF", systemImage: "doc.richtext")
+                                }
+                                if !lifeStore.companySites.isEmpty {
+                                    Button {
+                                        shareChronicle(.vertical)
+                                    } label: {
+                                        Label("廠區編年史（直式）", systemImage: "arrow.down.doc")
+                                    }
+                                    Button {
+                                        shareChronicle(.horizontal)
+                                    } label: {
+                                        Label("廠區編年史（橫式）", systemImage: "arrow.right.doc.on.clipboard")
+                                    }
+                                }
+                            } label: {
+                                Image(systemName: "square.and.arrow.up")
+                                    .foregroundStyle(.green)
+                            }
                         }
                     }
                 }
             }
-            .sheet(item: Binding(
-                get: { pdfURL.map { IdentifiableURL(url: $0) } },
-                set: { pdfURL = $0?.url }
-            )) { wrapper in
+            .sheet(item: $pdfURL) { wrapper in
                 ShareSheet(items: [wrapper.url])
             }
             .sheet(item: Binding(
@@ -64,6 +244,38 @@ struct OrganizationView: View {
                 set: { viewingDeptId = $0?.id }
             )) { wrapper in
                 DepartmentDetailView(deptId: wrapper.id)
+            }
+            // [v25.357] 從廠區據點展開的決議直接開決議卡片
+            .sheet(item: $openingResolution) { jump in
+                SideRoleResolutionCard(roleId: jump.roleId, resolutionId: jump.resolutionId)
+            }
+            .sheet(item: $editingSite) { target in
+                CompanySiteEditor(site: target.isNew ? nil : target.site,
+                                  draft: target.site) { saved in
+                    lifeStore.upsertCompanySite(saved)
+                } onDelete: { id in
+                    lifeStore.deleteCompanySite(id: id)
+                }
+            }
+            // [v25.367] 出圖進度：繪製本身綁在主執行緒（ImageRenderer 是 @MainActor），
+            // 但每個階段之間會 yield，這層才畫得出來；壓檔那段跑在背景執行緒。
+            .overlay {
+                if let stage = chronicleStage {
+                    ZStack {
+                        Color.black.opacity(0.12).ignoresSafeArea()
+                        ChronicleExportHUD(stage: stage, subtitle: chronicleSubtitle)
+                    }
+                    .transition(.opacity)
+                }
+            }
+            .animation(.easeInOut(duration: 0.18), value: chronicleStage)
+            .alert("匯出失敗", isPresented: Binding(
+                get: { exportError != nil },
+                set: { if !$0 { exportError = nil } }
+            )) {
+                Button("好") { exportError = nil }
+            } message: {
+                Text(exportError ?? "")
             }
             .premiumLockAlert(isPresented: $showPremiumAlert)
             .onAppear {
@@ -74,44 +286,112 @@ struct OrganizationView: View {
     }
 
     /// 頁面內統計列：部門數 / 在職人員 / 離職人員
+    // 美化：升級為圓形圖示底圓 + 粗體數值 + 雙層 shadow 卡片
     private var statsHeader: some View {
-        HStack(spacing: 24) {
-            statBox(value: "\(lifeStore.departments.count)", label: "部門", icon: "building.2.fill", color: .indigo)
-            Divider().frame(height: 36)
-            let active = lifeStore.orgPeople.filter { !$0.isInactive }.count
-            statBox(value: "\(active)", label: "在職人員", icon: "person.2.fill", color: .green)
-            let inactive = lifeStore.orgPeople.filter { $0.isInactive }.count
+        let active = lifeStore.orgPeople.filter { !$0.isInactive }.count
+        let inactive = lifeStore.orgPeople.filter { $0.isInactive }.count
+
+        return HStack(spacing: 0) {
+            statPill(value: "\(lifeStore.departments.count)", label: "部門", icon: "building.2.fill", color: .indigo)
+            statSeparator
+            statPill(value: "\(active)", label: "在職人員", icon: "person.2.fill", color: .green)
             if inactive > 0 {
-                Divider().frame(height: 36)
-                statBox(value: "\(inactive)", label: "離職", icon: "person.fill.xmark", color: .gray)
+                statSeparator
+                statPill(value: "\(inactive)", label: "離職", icon: "person.fill.xmark", color: .gray)
             }
         }
-        .padding(.vertical, 12)
-        .padding(.horizontal, 20)
+        .padding(.vertical, 14)
         .background(Color(.systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 12))
-        .shadow(color: .black.opacity(0.06), radius: 2, y: 1)
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .shadow(color: .black.opacity(0.07), radius: 10, x: 0, y: 4)
+        .shadow(color: .black.opacity(0.03), radius: 2, x: 0, y: 1)
     }
 
-    private func statBox(value: String, label: String, icon: String, color: Color) -> some View {
-        VStack(spacing: 4) {
-            Image(systemName: icon).font(.subheadline).foregroundStyle(color)
-            Text(value).font(.headline).foregroundStyle(color)
-            Text(label).font(.caption2).foregroundStyle(.secondary)
+    // 美化：KPI 格：圓形圖示底圓（對齊 FinanceOverviewView allocationRow 圖示規格）
+    private func statPill(value: String, label: String, icon: String, color: Color) -> some View {
+        VStack(spacing: 6) {
+            ZStack {
+                Circle()
+                    .fill(color.opacity(0.12))
+                    .frame(width: 34, height: 34)
+                Image(systemName: icon)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(color)
+            }
+            Text(value)
+                .font(.system(size: 18, weight: .bold, design: .rounded))
+                .foregroundStyle(color)
+                .contentTransition(.numericText())
+            Text(label)
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(.secondary)
         }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 2)
     }
 
+    private var statSeparator: some View {
+        Rectangle()
+            .fill(Color(.separator).opacity(0.28))
+            .frame(width: 0.5, height: 44)
+    }
+
+    // 美化：空狀態升級為雙層脈衝光環 + 漸層底圓，對齊 IncomeView.emptyState 規格
     private var emptyState: some View {
-        VStack(spacing: 16) {
-            Image(systemName: "building.2.crop.circle")
-                .font(.system(size: 56)).foregroundStyle(.tertiary)
-            Text("尚無部門資料").font(.headline).foregroundStyle(.secondary)
-            Text("到「部門職等」頁新增部門，並設定上下游關係，組織圖會自動繪製。")
-                .font(.caption).foregroundStyle(.tertiary)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 32)
+        VStack(spacing: 26) {
+            ZStack {
+                // 外層脈衝光環
+                Circle()
+                    .stroke(Color.indigo.opacity(orgEmptyPulse ? 0 : 0.22), lineWidth: 1.5)
+                    .frame(width: 108, height: 108)
+                    .scaleEffect(orgEmptyPulse ? 1.38 : 1.0)
+                    .animation(.easeOut(duration: 2.0).repeatForever(autoreverses: false), value: orgEmptyPulse)
+                // 內層脈衝光環（延遲 0.3s，波紋層次）
+                Circle()
+                    .stroke(Color.indigo.opacity(orgEmptyPulse ? 0 : 0.11), lineWidth: 1)
+                    .frame(width: 108, height: 108)
+                    .scaleEffect(orgEmptyPulse ? 1.68 : 1.0)
+                    .animation(.easeOut(duration: 2.0).delay(0.3).repeatForever(autoreverses: false), value: orgEmptyPulse)
+                // 主圓底（漸層填色 + 細邊框）
+                Circle()
+                    .fill(LinearGradient(
+                        colors: [Color.indigo.opacity(0.15), Color.indigo.opacity(0.06)],
+                        startPoint: .topLeading, endPoint: .bottomTrailing
+                    ))
+                    .frame(width: 88, height: 88)
+                    .overlay(Circle().stroke(Color.indigo.opacity(0.22), lineWidth: 1.2))
+                Image(systemName: "building.2.crop.circle")
+                    .font(.system(size: 36, weight: .light))
+                    .foregroundStyle(Color.indigo.opacity(0.72))
+            }
+            .onAppear {
+                orgEmptyPulse = false
+                orgEmptyPulseTask?.cancel()
+                orgEmptyPulseTask = Task {
+                    try? await Task.sleep(nanoseconds: 300_000_000)
+                    guard !Task.isCancelled else { return }
+                    orgEmptyPulse = true
+                }
+            }
+            .onDisappear {
+                orgEmptyPulseTask?.cancel()
+                orgEmptyPulse = false
+            }
+
+            VStack(spacing: 10) {
+                Text("尚無部門資料")
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(.primary.opacity(0.75))
+                Text("到「部門職等」頁新增部門\n並設定上下游關係，組織圖會自動繪製。")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .lineSpacing(3)
+                    .padding(.horizontal, 24)
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(.vertical, 60)
     }
 
     // MARK: - PDF 匯出
@@ -120,6 +400,7 @@ struct OrganizationView: View {
     @MainActor
     private func generatePDFURL() -> URL? {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("公司組織圖.pdf")
+        let exportCtx = makeOrgContext()
         let exportContent = VStack(spacing: 32) {
             HStack {
                 Text("公司組織圖")
@@ -129,7 +410,7 @@ struct OrganizationView: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
             ForEach(rootDepartments) { root in
-                deptTreeNode(root, visited: [])
+                deptTreeNode(root, visited: [], ctx: exportCtx)
             }
         }
         .padding(40)
@@ -155,22 +436,227 @@ struct OrganizationView: View {
         return url
     }
 
+    // MARK: - [v25.363] 廠區編年史出圖
+
+    /// 依時間由早到晚組出編年史資料；沒填啟用年月的據點不放進年表（排不進時間軸）
+    private var chronicleEntries: [ChronicleEntry] {
+        let grouping = lifeStore.groupResolutionsByEra()
+        return lifeStore.companySites
+            .filter { $0.startDate != nil }
+            .sorted { a, b in
+                if a.startYear != b.startYear { return a.startYear < b.startYear }
+                return a.startMonth < b.startMonth
+            }
+            .map { site in
+                let pairs = grouping.bySite[site.id] ?? []
+                return ChronicleEntry(
+                    site: site,
+                    eraEnd: grouping.eraEnd[site.id],
+                    // 年表由早到晚，決議也順著時間排
+                    resolutions: pairs.map(\.resolution).sorted { $0.date < $1.date })
+            }
+    }
+
+    private func shareChronicle(_ orientation: CompanyChronicleView.Orientation) {
+        // 出圖中再按一次就忽略：HUD 已經蓋在畫面上，重入只會白做一次工
+        guard chronicleStage == nil else { return }
+        let entries = chronicleEntries
+        guard !entries.isEmpty else {
+            exportError = "沒有可以排進年表的據點。編年史依啟用年月排序，"
+                + "請先到廠區據點把「啟用年月」填好（\(lifeStore.companySites.count) 筆據點目前都沒有年月）。"
+            return
+        }
+        let companies = Set(entries.map { $0.site.company.trimmingCharacters(in: .whitespaces) })
+            .filter { !$0.isEmpty }
+        let title = companies.count == 1 ? (companies.first ?? "廠區") : "廠區"
+        let total = entries.reduce(0) { $0 + $1.resolutions.count }
+        let span = [entries.first?.site.startText, entries.last?.site.startText]
+            .compactMap { $0 }.joined(separator: " ─ ")
+        let view = CompanyChronicleView(
+            title: title + "・廠區編年史",
+            subtitle: "\(entries.count) 個廠・\(total) 則重大決議" + (span.isEmpty ? "" : "・" + span),
+            entries: entries,
+            orientation: orientation)
+        let name = title + "編年史_" + CompanyChronicleView.stamp.string(from: Date())
+        chronicleSubtitle = (orientation == .vertical ? "直式・" : "橫式・")
+            + "\(entries.count) 個廠・\(total) 則決議"
+        chronicleStage = .measuring
+        Task { @MainActor in
+            defer { chronicleStage = nil }
+            do {
+                let url = try await ChronicleExporter.export(view, name: name) { stage in
+                    chronicleStage = stage
+                }
+                pdfURL = IdentifiableURL(url: url)
+            } catch {
+                exportError = error.localizedDescription
+            }
+        }
+    }
+
     private func formattedExportDate() -> String {
         let f = DateFormatter()
         f.dateFormat = "yyyy/M/d HH:mm"
         return f.string(from: Date())
     }
 
+    /// 組織樹批次查表：children/人員計數/peer 名稱原本在 deptTreeNode／departmentCard
+    /// 每個節點各自對 departments／orgPeople 全量 filter（O(D²) + O(D×P)），
+    /// 部門/人員數一多，每次 render（含任何導致本頁重繪的狀態變化）都會重複整棵樹的全量掃描。
+    /// 改為 body 進入樹狀繪製前一次建表，遞迴節點全部改查表 O(1)。
+    // MARK: - 目錄檢視
+
+    /// 目錄樹節點：OutlineGroup 需要 children 為 nil（葉）或子陣列
+    private struct DeptNode: Identifiable {
+        let dept: Department
+        var children: [DeptNode]?
+        var id: UUID { dept.id }
+    }
+
+    private func makeNodes(_ depts: [Department], visited: Set<UUID>, ctx: OrgContext) -> [DeptNode] {
+        depts.compactMap { d in
+            guard !visited.contains(d.id) else { return nil }   // 成環保險
+            let kids = (ctx.childrenByParent[d.id] ?? []).sorted {
+                $0.name.localizedStandardCompare($1.name) == .orderedAscending
+            }
+            let childNodes = makeNodes(kids, visited: visited.union([d.id]), ctx: ctx)
+            return DeptNode(dept: d, children: childNodes.isEmpty ? nil : childNodes)
+        }
+    }
+
+    /// 目錄型組織：List + OutlineGroup 逐層展開，單向捲動好滑；
+    /// 點列開部門詳細頁（人員與管理人員都在裡面設定）。
+    private var directoryList: some View {
+        let ctx = makeOrgContext()
+        let roots = rootDepartments.sorted {
+            $0.name.localizedStandardCompare($1.name) == .orderedAscending
+        }
+        let nodes = makeNodes(roots, visited: [], ctx: ctx)
+        return ScrollViewReader { proxy in
+            directoryBody(nodes: nodes, ctx: ctx)
+                // [v25.360] 搜尋切到下一筆時把清單捲到那筆決議所屬的廠區
+                .onChange(of: currentHit) { _, hit in
+                    guard let hit else { return }
+                    withAnimation(.easeInOut(duration: 0.35)) {
+                        proxy.scrollTo(hit.siteId, anchor: .center)
+                    }
+                }
+        }
+    }
+
+    private func directoryBody(nodes: [DeptNode], ctx: OrgContext) -> some View {
+        List {
+            Section {
+                statsHeader
+                    .listRowInsets(EdgeInsets())
+                    .listRowBackground(Color.clear)
+            }
+            Section {
+                OutlineGroup(nodes, children: \.children) { node in
+                    directoryRow(node.dept, ctx: ctx)
+                }
+            } footer: {
+                Text("點部門名稱進入詳細頁設定人員與管理人員；點箭頭展開下游部門。右上角可切回樹狀圖。")
+            }
+            // [v25.357] 廠區據點：項目＝廠，子項目＝掛在那個廠的重大決議
+            CompanySiteSection(onOpenResolution: { role, resolution in
+                openingResolution = ResolutionJump(roleId: role.id, resolutionId: resolution.id)
+            }, onEdit: { site in
+                editingSite = SiteEditTarget(site: site ?? CompanySite(), isNew: site == nil)
+            }, focus: currentHit)
+        }
+        .listStyle(.insetGrouped)
+        .scrollContentBackground(.hidden)
+    }
+
+    private func directoryRow(_ dept: Department, ctx: OrgContext) -> some View {
+        let managers = dept.managerIds.compactMap { mid in
+            lifeStore.orgPeople.first { $0.id == mid }
+        }
+        return Button {
+            viewingDeptId = dept.id
+        } label: {
+            HStack(spacing: 10) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(LinearGradient(colors: [.indigo, .purple],
+                                             startPoint: .topLeading, endPoint: .bottomTrailing))
+                        .frame(width: 32, height: 32)
+                    Image(systemName: "building.2.fill")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.white)
+                }
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 6) {
+                        Text(dept.name.isEmpty ? "未命名部門" : dept.name)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.primary)
+                        if !dept.code.isEmpty {
+                            Text(dept.code)
+                                .font(.system(size: 10, weight: .medium))
+                                .padding(.horizontal, 5).padding(.vertical, 1.5)
+                                .background(Color(.tertiarySystemFill))
+                                .foregroundStyle(.secondary)
+                                .clipShape(Capsule())
+                        }
+                    }
+                    HStack(spacing: 6) {
+                        if !managers.isEmpty {
+                            HStack(spacing: 3) {
+                                Image(systemName: "person.badge.shield.checkmark")
+                                    .font(.system(size: 9))
+                                Text(managers.map(\.name).joined(separator: "、"))
+                            }
+                            .font(.caption2)
+                            .foregroundStyle(.indigo)
+                            .lineLimit(1)
+                        }
+                        let count = ctx.peopleCountByDept[dept.id] ?? 0
+                        if count > 0 {
+                            Text("\(count) 人")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.tertiary)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private struct OrgContext {
+        let byId: [UUID: Department]
+        let childrenByParent: [UUID: [Department]]
+        let peopleCountByDept: [UUID: Int]
+    }
+    private func makeOrgContext() -> OrgContext {
+        let byId = Dictionary(lifeStore.departments.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        var childrenByParent: [UUID: [Department]] = [:]
+        for dept in lifeStore.departments {
+            childrenByParent[dept.id] = dept.downstreamIds.compactMap { byId[$0] }
+        }
+        var peopleCountByDept: [UUID: Int] = [:]
+        for person in lifeStore.orgPeople where !person.isInactive {
+            if let deptId = person.departmentId {
+                peopleCountByDept[deptId, default: 0] += 1
+            }
+        }
+        return OrgContext(byId: byId, childrenByParent: childrenByParent, peopleCountByDept: peopleCountByDept)
+    }
+
     /// 遞迴繪製：本節點 + 下方連線 + 下游節點 HStack。
     /// 回傳 AnyView 是必要的——SwiftUI 對遞迴 some View 無法推論型別。
-    private func deptTreeNode(_ dept: Department, visited: Set<UUID>) -> AnyView {
+    private func deptTreeNode(_ dept: Department, visited: Set<UUID>, ctx: OrgContext) -> AnyView {
         let nextVisited = visited.union([dept.id])
-        let children = lifeStore.departments.filter {
-            dept.downstreamIds.contains($0.id) && !visited.contains($0.id)
-        }
+        let children = (ctx.childrenByParent[dept.id] ?? []).filter { !visited.contains($0.id) }
         return AnyView(
             VStack(spacing: 12) {
-                departmentCard(dept)
+                departmentCard(dept, ctx: ctx)
                     .onTapGesture { viewingDeptId = dept.id }
 
                 if !children.isEmpty {
@@ -179,7 +665,7 @@ struct OrganizationView: View {
                         .frame(width: 2, height: 16)
                     HStack(alignment: .top, spacing: 24) {
                         ForEach(children) { child in
-                            deptTreeNode(child, visited: nextVisited)
+                            deptTreeNode(child, visited: nextVisited, ctx: ctx)
                         }
                     }
                     .overlay(alignment: .top) {
@@ -199,26 +685,46 @@ struct OrganizationView: View {
         )
     }
 
-    private func departmentCard(_ dept: Department) -> some View {
-        let peopleCount = lifeStore.orgPeople.filter { $0.departmentId == dept.id && !$0.isInactive }.count
+    // 美化：人員計數改為彩色膠囊、陰影升級雙層、code 膠囊加細邊框
+    private func departmentCard(_ dept: Department, ctx: OrgContext) -> some View {
+        let peopleCount = ctx.peopleCountByDept[dept.id] ?? 0
         let peerNames = dept.peerIds.compactMap { id in
-            lifeStore.departments.first(where: { $0.id == id })?.name
+            ctx.byId[id]?.name
         }.filter { !$0.isEmpty }
         return VStack(alignment: .leading, spacing: 6) {
-            HStack {
-                Image(systemName: "building.2.fill").foregroundStyle(.indigo)
+            HStack(spacing: 5) {
+                ZStack {
+                    Circle()
+                        .fill(Color.indigo.opacity(0.12))
+                        .frame(width: 22, height: 22)
+                    Image(systemName: "building.2.fill")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(.indigo)
+                }
                 if !dept.code.isEmpty {
                     Text(dept.code)
-                        .font(.caption2)
-                        .padding(.horizontal, 5).padding(.vertical, 1)
-                        .background(Color.indigo.opacity(0.15))
+                        .font(.system(size: 9, weight: .semibold))
+                        .padding(.horizontal, 5).padding(.vertical, 1.5)
+                        .background(Color.indigo.opacity(0.12))
                         .foregroundStyle(.indigo)
-                        .clipShape(RoundedRectangle(cornerRadius: 3))
+                        .clipShape(Capsule())
+                        .overlay(Capsule().stroke(Color.indigo.opacity(0.22), lineWidth: 0.6))
                 }
-                Spacer()
-                Text("\(peopleCount) 人")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+                Spacer(minLength: 0)
+                // 美化：人員計數改為彩色膠囊
+                if peopleCount > 0 {
+                    Text("\(peopleCount) 人")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(.green)
+                        .padding(.horizontal, 6).padding(.vertical, 2)
+                        .background(Color.green.opacity(0.10))
+                        .clipShape(Capsule())
+                        .overlay(Capsule().stroke(Color.green.opacity(0.22), lineWidth: 0.6))
+                } else {
+                    Text("0 人")
+                        .font(.system(size: 9, weight: .medium))
+                        .foregroundStyle(.secondary)
+                }
             }
             Text(dept.name.isEmpty ? "未命名部門" : dept.name)
                 .font(.subheadline.weight(.semibold))
@@ -242,19 +748,21 @@ struct OrganizationView: View {
                 .padding(.top, 2)
             }
         }
-        .padding(10)
-        .frame(width: 160)
+        .padding(11)
+        .frame(width: 168)
         .background(Color(.systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .clipShape(RoundedRectangle(cornerRadius: 14))
         .overlay(
-            RoundedRectangle(cornerRadius: 12)
+            RoundedRectangle(cornerRadius: 14)
                 .strokeBorder(
                     style: StrokeStyle(lineWidth: dept.peerIds.isEmpty ? 1 : 1.5,
                                        dash: dept.peerIds.isEmpty ? [] : [4])
                 )
-                .foregroundStyle(dept.peerIds.isEmpty ? Color.indigo.opacity(0.3) : Color.purple.opacity(0.6))
+                .foregroundStyle(dept.peerIds.isEmpty ? Color.indigo.opacity(0.28) : Color.purple.opacity(0.55))
         )
-        .shadow(color: .black.opacity(0.08), radius: 3, y: 1)
+        // 美化：雙層陰影（品牌色光暈 + 自然陰影），提升卡片立體感
+        .shadow(color: Color.indigo.opacity(0.12), radius: 8, x: 0, y: 3)
+        .shadow(color: .black.opacity(0.04), radius: 2, x: 0, y: 1)
     }
 }
 
@@ -268,6 +776,18 @@ struct DepartmentDetailView: View {
     @State private var addingPerson = false
     @State private var viewingPersonId: UUID?
     @State private var showEditDept = false
+    @State private var showManagerPicker = false
+    @State private var addingEquipment = false
+    @State private var viewingEquipment: ManagedEquipment?
+    /// [v25.385] 哪些機台展開了下游群組
+    @State private var expandedEquipment: Set<UUID> = []
+    /// 設備清單暫時篩選：點負責人膠囊只看那個人、點系統膠囊只看該系統（可同時）
+    @State private var eqFilterOwnerId: UUID?
+    @State private var eqFilterSystem: String?
+    // [v2] 進場動畫旗標
+    @State private var peopleAppeared = false
+    /// [v25.394] 重複人員檢查
+    @State private var showDuplicateReview = false
 
     private var dept: Department {
         lifeStore.departments.first(where: { $0.id == deptId }) ?? Department(id: deptId)
@@ -296,9 +816,11 @@ struct DepartmentDetailView: View {
             ScrollView {
                 VStack(spacing: 16) {
                     headerCard
+                    managerSection
                     if !upstreamDepts.isEmpty || !downstreamDepts.isEmpty {
                         relationsCard
                     }
+                    equipmentSection
                     peopleSection
                 }
                 .padding(.vertical)
@@ -315,8 +837,22 @@ struct DepartmentDetailView: View {
             .sheet(isPresented: $showEditDept) {
                 DepartmentEditor(editingId: deptId)
             }
+            .sheet(isPresented: $showManagerPicker) {
+                NavigationStack {
+                    DeptManagerPicker(deptId: deptId)
+                }
+            }
             .sheet(isPresented: $addingPerson) {
                 OrgPersonEditor(editingId: nil, defaultDepartmentId: deptId)
+            }
+            .sheet(isPresented: $addingEquipment) {
+                EquipmentEditorSheet(editing: nil, defaultDepartmentId: deptId)
+            }
+            .sheet(isPresented: $showDuplicateReview) {
+                OrgPersonDuplicateReview(focusDepartmentId: deptId)
+            }
+            .sheet(item: $viewingEquipment) { eq in
+                EquipmentDetailCard(equipmentId: eq.id)
             }
             .sheet(item: Binding(
                 get: { viewingPersonId.map { IdentifiableUUID(id: $0) } },
@@ -327,40 +863,192 @@ struct DepartmentDetailView: View {
         }
     }
 
-    private var headerCard: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Image(systemName: "building.2.fill")
-                    .font(.title2).foregroundStyle(.white)
-                    .frame(width: 44, height: 44)
-                    .background(LinearGradient(colors: [.indigo, .purple], startPoint: .topLeading, endPoint: .bottomTrailing))
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
-                VStack(alignment: .leading, spacing: 2) {
-                    if !dept.code.isEmpty {
-                        Text(dept.code).font(.caption2).foregroundStyle(.secondary)
-                    }
-                    Text(dept.name.isEmpty ? "未命名部門" : dept.name)
-                        .font(.title3.bold())
-                }
+    /// 我是否為本部門的管理職：履歷里程碑的「管理職＋管理單位」名稱與本部門相符
+    private var iAmManagerHere: Bool {
+        guard let unit = lifeStore.myCurrentManagedUnit else { return false }
+        return unit == dept.name.trimmingCharacters(in: .whitespaces)
+    }
+
+    /// 「我」在管理人員名單的顯示名：個資的中文名 → 英文名 → 「我」
+    private var myDisplayName: String {
+        let zh = lifeStore.profile.chineseName.trimmingCharacters(in: .whitespaces)
+        if !zh.isEmpty { return zh }
+        let en = lifeStore.profile.englishName.trimmingCharacters(in: .whitespaces)
+        return en.isEmpty ? "我" : en
+    }
+
+    /// 管理人員：這個部門的主管／代理人（可多位）。
+    /// 與「部門人員」分開一區——管理人不一定編制在本部門（例如由上級部門主管兼管）。
+    private var managerSection: some View {
+        let managers = dept.managerIds.compactMap { mid in
+            lifeStore.orgPeople.first { $0.id == mid }
+        }
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Capsule()
+                    .fill(LinearGradient(colors: [.orange, .orange.opacity(0.55)],
+                                         startPoint: .top, endPoint: .bottom))
+                    .frame(width: 4, height: 16)
+                Image(systemName: "person.badge.shield.checkmark")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.orange)
+                Text("管理人員")
+                    .font(.subheadline.weight(.bold))
                 Spacer()
+                Button {
+                    showManagerPicker = true
+                } label: {
+                    Text(managers.isEmpty ? "設定" : "編輯")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.orange)
+                }
             }
-            if !dept.function.isEmpty {
-                Divider().padding(.vertical, 4)
-                Text("部門功能").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                Text(dept.function).font(.subheadline)
+            // [v25.293] 我的履歷里程碑填了「管理職＋管理單位」且名稱與本部門相符
+            // → 自動把「我」列進管理人員名單（衍生顯示，不寫進 managerIds）
+            if iAmManagerHere {
+                HStack(spacing: 8) {
+                    ZStack {
+                        Circle()
+                            .fill(LinearGradient(colors: [.orange, .orange.opacity(0.6)],
+                                                 startPoint: .topLeading, endPoint: .bottomTrailing))
+                            .frame(width: 30, height: 30)
+                        Image(systemName: "person.fill")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(.white)
+                    }
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(myDisplayName)
+                            .font(.subheadline.weight(.medium))
+                        Text("依我的履歷里程碑（管理職）自動帶入")
+                            .font(.caption2).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Text("我")
+                        .font(.caption2.bold())
+                        .padding(.horizontal, 7).padding(.vertical, 2)
+                        .background(Color.orange.opacity(0.18))
+                        .foregroundStyle(.orange)
+                        .clipShape(Capsule())
+                        .overlay(Capsule().stroke(Color.orange.opacity(0.28), lineWidth: 0.6))
+                }
+            }
+            if managers.isEmpty && !iAmManagerHere {
+                Text("尚未設定管理人員")
+                    .font(.caption).foregroundStyle(.secondary)
+            } else {
+                ForEach(managers) { m in
+                    Button { viewingPersonId = m.id } label: {
+                        HStack(spacing: 8) {
+                            personAvatar(m)
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(m.name.isEmpty ? "未命名" : m.name)
+                                    .font(.subheadline.weight(.medium))
+                                    .foregroundStyle(.primary)
+                                let title = lifeStore.gradeTitles.first { $0.id == m.gradeTitleId }?.title ?? m.jobTitle
+                                if !title.isEmpty {
+                                    Text(title).font(.caption2).foregroundStyle(.secondary)
+                                }
+                            }
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(.tertiary)
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
             }
         }
-        .padding()
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(.systemBackground))
+        .padding(14)
+        .background(Color(.secondarySystemGroupedBackground))
         .clipShape(RoundedRectangle(cornerRadius: 16))
+        .overlay(RoundedRectangle(cornerRadius: 16)
+            .stroke(Color(.separator).opacity(0.12), lineWidth: 0.75))
         .padding(.horizontal)
     }
 
+    // 美化：加大圖示底圓、Capsule 色條 section 標題、雙層陰影（對齊 LifeRealEstateView detail card）
+    private var headerCard: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .top, spacing: 13) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 12)
+                        .fill(LinearGradient(
+                            colors: [.indigo, .purple],
+                            startPoint: .topLeading, endPoint: .bottomTrailing
+                        ))
+                        .frame(width: 50, height: 50)
+                        .shadow(color: Color.indigo.opacity(0.30), radius: 6, x: 0, y: 3)
+                    Image(systemName: "building.2.fill")
+                        .font(.system(size: 20, weight: .semibold))
+                        .foregroundStyle(.white)
+                }
+                VStack(alignment: .leading, spacing: 4) {
+                    if !dept.code.isEmpty {
+                        Text(dept.code)
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(.indigo)
+                            .padding(.horizontal, 7).padding(.vertical, 2)
+                            .background(Color.indigo.opacity(0.10))
+                            .clipShape(Capsule())
+                            .overlay(Capsule().stroke(Color.indigo.opacity(0.22), lineWidth: 0.6))
+                    }
+                    Text(dept.name.isEmpty ? "未命名部門" : dept.name)
+                        .font(.title3.bold())
+                    Text("\(people.count) 人")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 0)
+            }
+
+            if !dept.function.isEmpty {
+                Rectangle()
+                    .fill(Color(.separator).opacity(0.22))
+                    .frame(height: 0.5)
+                    .padding(.vertical, 13)
+
+                HStack(spacing: 8) {
+                    // 美化：Capsule 漸層色條 section 標題，對齊全 App section header 規格
+                    Capsule()
+                        .fill(LinearGradient(
+                            colors: [.indigo, .indigo.opacity(0.50)],
+                            startPoint: .top, endPoint: .bottom
+                        ))
+                        .frame(width: 3, height: 14)
+                    Text("部門功能")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.bottom, 5)
+                Text(dept.function).font(.subheadline)
+            }
+        }
+        .padding(18)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(.systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 18))
+        .shadow(color: Color.indigo.opacity(0.10), radius: 12, x: 0, y: 5)
+        .shadow(color: .black.opacity(0.04), radius: 3, x: 0, y: 1)
+        .padding(.horizontal)
+    }
+
+    // [v2] 上游/下游標籤升級為 Capsule 側條 + 圖示 + .caption.semibold；容器補雙層 shadow
     private var relationsCard: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 10) {
             if !upstreamDepts.isEmpty {
-                Text("上游部門").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                HStack(spacing: 6) {
+                    Capsule()
+                        .fill(LinearGradient(colors: [.blue, .blue.opacity(0.50)], startPoint: .top, endPoint: .bottom))
+                        .frame(width: 3, height: 12)
+                    Image(systemName: "arrow.up.circle.fill")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.blue)
+                    Text("上游部門")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 6) {
                         ForEach(upstreamDepts) { d in
@@ -370,7 +1058,17 @@ struct DepartmentDetailView: View {
                 }
             }
             if !downstreamDepts.isEmpty {
-                Text("下游部門").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                HStack(spacing: 6) {
+                    Capsule()
+                        .fill(LinearGradient(colors: [.orange, .orange.opacity(0.50)], startPoint: .top, endPoint: .bottom))
+                        .frame(width: 3, height: 12)
+                    Image(systemName: "arrow.down.circle.fill")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.orange)
+                    Text("下游部門")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 6) {
                         ForEach(downstreamDepts) { d in
@@ -384,50 +1082,498 @@ struct DepartmentDetailView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color(.systemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 16))
+        .shadow(color: Color.blue.opacity(0.06), radius: 6, x: 0, y: 2)
+        .shadow(color: .black.opacity(0.03), radius: 2, x: 0, y: 1)
         .padding(.horizontal)
     }
 
+    // [v2] chipText 補 stroke 邊框，對齊全 App 膠囊邊框規格
     private func chipText(_ text: String, color: Color) -> some View {
         Text(text)
-            .font(.caption)
+            .font(.caption.weight(.medium))
             .padding(.horizontal, 8).padding(.vertical, 4)
             .background(color.opacity(0.12))
             .foregroundStyle(color)
             .clipShape(Capsule())
+            .overlay(Capsule().stroke(color.opacity(0.22), lineWidth: 0.6))
     }
 
+    /// 部門所屬設備（機台池中 departmentId 為本部門者）。機台屬於部門、
+    /// 生老病死（PM／警報）跟著機台；點列開機台詳情卡片，點負責人／系統膠囊暫時篩選。
+    private var equipmentSection: some View {
+        let all = lifeStore.equipmentPool
+            .filter { $0.departmentId == deptId }
+            .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+        let equipments = all.filter { eq in
+            if let oid = eqFilterOwnerId, eq.ownerId != oid { return false }
+            if let sys = eqFilterSystem, eq.system != sys { return false }
+            return true
+        }
+        return VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 8) {
+                Capsule()
+                    .fill(LinearGradient(colors: [.teal, .teal.opacity(0.50)], startPoint: .top, endPoint: .bottom))
+                    .frame(width: 3, height: 16)
+                Image(systemName: "wrench.and.screwdriver.fill")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.teal)
+                Text("部門所屬設備")
+                    .font(.subheadline.weight(.bold))
+                Spacer()
+                Text(eqFilterOwnerId != nil || eqFilterSystem != nil
+                     ? "\(equipments.count)/\(all.count) 台" : "\(all.count) 台")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.teal)
+                    .padding(.horizontal, 7).padding(.vertical, 2.5)
+                    .background(Color.teal.opacity(0.10))
+                    .clipShape(Capsule())
+                    .overlay(Capsule().stroke(Color.teal.opacity(0.22), lineWidth: 0.6))
+                Button {
+                    addingEquipment = true
+                } label: {
+                    Image(systemName: "plus.circle.fill").font(.title3).foregroundStyle(.teal)
+                }
+            }
+            .padding(.horizontal).padding(.top, 14).padding(.bottom, 10)
+
+            equipmentFilterBanner
+
+            if equipments.isEmpty {
+                HStack(spacing: 8) {
+                    Image(systemName: "gearshape.2")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(.tertiary)
+                    Text(all.isEmpty ? "尚無設備，按右側 + 新增機台" : "沒有符合篩選的機台")
+                        .font(.caption).foregroundStyle(.tertiary)
+                }
+                .padding(.horizontal).padding(.bottom, 14)
+            } else {
+                // [v25.385] 下游機台收進上游底下（比照廠區據點的重大決議）
+                // [v25.390] 改成完整的樹：A→B→C 時 C 會接在 B 下面再縮一層，
+                // 不再因為「有上游所以不是 root、又沒人把它展出來」而整台消失。
+                let visibleIds = Set(equipments.map(\.id))
+                let rows = equipmentTree(equipments, within: visibleIds)
+                let firstId = rows.first?.id
+                ForEach(rows) { row in
+                    if row.depth == 0 && row.id != firstId {
+                        Rectangle().fill(Color(.separator).opacity(0.20))
+                            .frame(height: 0.5).padding(.leading, 60)
+                    }
+                    equipmentTreeRow(row)
+                }
+                Spacer().frame(height: 4)
+            }
+        }
+        .background(Color(.systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .padding(.horizontal)
+    }
+
+    /// [v25.394] 這個部門有同名重複人員時的提示。沒有重複就整段不出現。
+    @ViewBuilder
+    private var duplicateBanner: some View {
+        let extras = lifeStore.orgPersonDuplicateCount(departmentId: deptId)
+        if extras > 0 {
+            Button {
+                showDuplicateReview = true
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "person.2.badge.gearshape.fill")
+                        .font(.system(size: 14)).foregroundStyle(.orange)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("偵測到 \(extras) 筆重複人員")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.orange)
+                        Text("同名同部門的人員被建立了不只一筆，點這裡檢查並合併")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                    }
+                    Spacer(minLength: 0)
+                    Image(systemName: "chevron.right")
+                        .font(.caption2.weight(.semibold)).foregroundStyle(.tertiary)
+                }
+                .padding(.horizontal, 10).padding(.vertical, 8)
+                .background(Color.orange.opacity(0.10))
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+                .overlay(RoundedRectangle(cornerRadius: 10)
+                    .stroke(Color.orange.opacity(0.22), lineWidth: 0.6))
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .padding(.horizontal).padding(.bottom, 8)
+        }
+    }
+
+    /// 篩選中橫幅（比照部屬總覽）：說明目前只看誰／哪個系統，點 ✕ 全部清除
+    @ViewBuilder
+    private var equipmentFilterBanner: some View {
+        if eqFilterOwnerId != nil || eqFilterSystem != nil {
+            let ownerName: String? = eqFilterOwnerId.map { oid in
+                let n = lifeStore.subordinates.first { $0.id == oid }?.name ?? ""
+                return n.isEmpty ? "未命名" : n
+            }
+            HStack(spacing: 8) {
+                Image(systemName: "line.3.horizontal.decrease.circle.fill")
+                    .font(.system(size: 14)).foregroundStyle(.teal)
+                Text("只看：" + [ownerName, eqFilterSystem].compactMap { $0 }.joined(separator: "・"))
+                    .font(.caption.weight(.semibold))
+                Spacer()
+                Button {
+                    withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                        eqFilterOwnerId = nil; eqFilterSystem = nil
+                    }
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 15)).foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.horizontal, 10).padding(.vertical, 7)
+            .background(Color.teal.opacity(0.08))
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+            .padding(.horizontal).padding(.bottom, 8)
+        }
+    }
+
+    // 主體點按開機台詳情卡片（onTapGesture 而非整列 Button，讓內層負責人／系統
+    // 膠囊 Button 可以各自吃掉自己的點擊——比照部屬總覽 personChip 的巢狀寫法）
+    // MARK: - [v25.385] 上下游巢狀
+
+    /// 攤平後的一列：機台 + 縮排層級 + 直接下游數。
+    ///
+    /// 為什麼攤平而不是遞迴 View：SwiftUI 的 `some View` 沒辦法自己引用自己
+    /// （型別會無限遞迴），要嘛型別抹除成 AnyView、要嘛先把樹走成一維陣列。
+    /// 後者順便讓「收合」變得很單純：祖先只要有一層是收起來的，子孫就不入列。
+    private struct EquipmentTreeRow: Identifiable {
+        let equipment: ManagedEquipment
+        let depth: Int
+        /// 在可見集合內的直接下游數；> 0 才畫展開膠囊
+        let childCount: Int
+        var id: UUID { equipment.id }
+    }
+
+    /// 縮排量。第一層沿用既有的 64（左邊距 16 ＋ 圖示 36 ＋ 間距 12，對齊上層文字起點），
+    /// 之後每層 +18；深到一定程度就不再往右推，免得名字被擠成一個字一行。
+    private static func equipmentIndent(depth: Int) -> CGFloat {
+        64 + CGFloat(min(max(depth, 1), 8) - 1) * 18
+    }
+
+    /// 最外層要列出哪些機台：有上游、而且那個上游也在這份清單裡的，收進上游底下。
+    ///
+    /// 三個必須守住的例外：
+    /// ① 上游在別的部門、或被篩選條件擋掉時，這台仍然留在最外層——
+    ///    否則它會從整份清單裡憑空消失，使用者只會覺得機台不見了。
+    /// ② A→B→A 這種環會讓每一台都「有上游」，roots 變成空的、整份清單消失。
+    ///    偵測到就退回全部平鋪。
+    /// ③ 環不一定含 root（A→B→C→B 這種）：環裡的成員有上游、所以不是 root，
+    ///    但從任何 root 也走不到它們。這種走不到的一律自己當 root 補在後面。
+    private func equipmentRoots(_ equipments: [ManagedEquipment],
+                                within ids: Set<UUID>) -> [ManagedEquipment] {
+        var roots = equipments.filter { eq in
+            !eq.upstreamIds.contains(where: { ids.contains($0) })
+        }
+        if roots.isEmpty { return equipments }
+
+        let byId = Dictionary(equipments.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        var reachable = Set<UUID>()
+        var stack = roots.map(\.id)
+        while let id = stack.popLast() {
+            guard reachable.insert(id).inserted, let eq = byId[id] else { continue }
+            stack.append(contentsOf: eq.downstreamIds.filter { ids.contains($0) })
+        }
+        roots.append(contentsOf: equipments.filter { !reachable.contains($0.id) })
+        return roots
+    }
+
+    /// 把機台樹走成畫面上的一維列表。收合的節點不往下展，所以收合＝子孫整批消失，
+    /// 而不是被丟到清單最後面。
+    private func equipmentTree(_ equipments: [ManagedEquipment],
+                               within ids: Set<UUID>) -> [EquipmentTreeRow] {
+        let byId = Dictionary(equipments.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        var out: [EquipmentTreeRow] = []
+        var placed = Set<UUID>()
+        // 用明確的堆疊而不是遞迴：機台關係是使用者手key的，環或超深的鏈都可能出現，
+        // placed 同時擋住環，也擋住「同一台是兩台的下游」時被列兩次。
+        var stack: [(eq: ManagedEquipment, depth: Int)] =
+            equipmentRoots(equipments, within: ids).reversed().map { ($0, 0) }
+        while let node = stack.popLast() {
+            guard placed.insert(node.eq.id).inserted else { continue }
+            let children = node.eq.downstreamIds.compactMap { byId[$0] }
+            out.append(EquipmentTreeRow(equipment: node.eq, depth: node.depth,
+                                        childCount: children.count))
+            guard expandedEquipment.contains(node.eq.id) else { continue }
+            for c in children.reversed() { stack.append((c, node.depth + 1)) }
+        }
+        return out
+    }
+
+    /// 一列：主體（第一層用大列、以下用縮排小列）＋ 下游展開膠囊。
+    @ViewBuilder
+    private func equipmentTreeRow(_ row: EquipmentTreeRow) -> some View {
+        if row.depth == 0 {
+            equipmentRow(row.equipment)
+        } else {
+            downstreamRow(row.equipment)
+                .padding(.leading, Self.equipmentIndent(depth: row.depth))
+                .padding(.trailing, 16)
+        }
+        if row.childCount > 0 {
+            equipmentExpandCapsule(row)
+                // 膠囊比自己這一列再縮一層，剛好對齊展開後子機台的起點
+                .padding(.leading, Self.equipmentIndent(depth: row.depth + 1))
+                .padding(.trailing, 16)
+                .padding(.bottom, 8)
+        }
+    }
+
+    /// 「下游機台 N 台」收合膠囊。每一層都有，所以 A→B→C 可以一層一層點下去。
+    private func equipmentExpandCapsule(_ row: EquipmentTreeRow) -> some View {
+        let isOpen = expandedEquipment.contains(row.id)
+        return Button {
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
+                if isOpen { expandedEquipment.remove(row.id) }
+                else { expandedEquipment.insert(row.id) }
+            }
+        } label: {
+            HStack(spacing: 5) {
+                Image(systemName: "arrow.turn.down.right")
+                    .font(.system(size: 9, weight: .bold))
+                Text("下游機台 \(row.childCount) 台")
+                    .font(.system(size: 10, weight: .bold))
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 8, weight: .bold))
+                    .rotationEffect(.degrees(isOpen ? 90 : 0))
+            }
+            .padding(.horizontal, 7).padding(.vertical, 3)
+            .background(Color.orange.opacity(0.12), in: Capsule())
+            .overlay(Capsule().stroke(Color.orange.opacity(0.22), lineWidth: 0.6))
+            .foregroundStyle(.orange)
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// 縮排的子機台列。直接點就開那一台的詳情，不用先展開再按動作。
+    private func downstreamRow(_ eq: ManagedEquipment) -> some View {
+        Button {
+            viewingEquipment = eq
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "gearshape.2.fill")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.orange)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(eq.name.isEmpty ? "未命名設備" : eq.name)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                    Text(downstreamMeta(eq))
+                        .font(.system(size: 9))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(.vertical, 5)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// 字串在 ViewBuilder 外組好
+    private func downstreamMeta(_ eq: ManagedEquipment) -> String {
+        var parts: [String] = []
+        if !eq.system.isEmpty { parts.append(eq.system) }
+        parts.append("PM \(eq.pmRecords.count)")
+        parts.append("警報 \(eq.alarms.count)")
+        if let oid = eq.ownerId,
+           let n = lifeStore.subordinates.first(where: { $0.id == oid })?.name, !n.isEmpty {
+            parts.append(n)
+        }
+        return parts.joined(separator: "・")
+    }
+
+    private func equipmentRow(_ eq: ManagedEquipment) -> some View {
+        HStack(spacing: 12) {
+            ZStack {
+                Circle()
+                    .fill(LinearGradient(colors: [Color.teal.opacity(0.22), Color.teal.opacity(0.09)],
+                                         startPoint: .topLeading, endPoint: .bottomTrailing))
+                    .frame(width: 36, height: 36)
+                Circle().stroke(Color.teal.opacity(0.22), lineWidth: 1).frame(width: 36, height: 36)
+                Image(systemName: "gearshape.2.fill")
+                    .font(.system(size: 14, weight: .semibold)).foregroundStyle(.teal)
+            }
+            VStack(alignment: .leading, spacing: 3) {
+                Text(eq.name.isEmpty ? "未命名設備" : eq.name)
+                    .font(.subheadline.weight(.medium)).foregroundStyle(.primary)
+                    .lineLimit(1).minimumScaleFactor(0.8)
+                // [v25.296] 膠囊改用自動換行容器：系統別／負責人名稱字多時
+                // 換到下一行，不再擠在同一行互相壓縮變形（篩選點擊行為不變）
+                ChipFlowLayout(spacing: 6) {
+                    Label("PM \(eq.pmRecords.count)", systemImage: "wrench.fill")
+                        .font(.system(size: 9, weight: .bold))
+                        .padding(.horizontal, 5).padding(.vertical, 1.5)
+                        .background(Color.green.opacity(0.12)).foregroundStyle(.green)
+                        .clipShape(Capsule())
+                        .fixedSize()
+                    Label("警報 \(eq.alarms.count)", systemImage: "bell.badge.fill")
+                        .font(.system(size: 9, weight: .bold))
+                        .padding(.horizontal, 5).padding(.vertical, 1.5)
+                        .background(eq.alarms.isEmpty ? Color(.tertiarySystemFill) : Color.red.opacity(0.12))
+                        .foregroundStyle(eq.alarms.isEmpty ? Color.secondary : Color.red)
+                        .clipShape(Capsule())
+                        .fixedSize()
+                    if !eq.system.isEmpty {
+                        equipmentSystemChip(eq.system).fixedSize()
+                    }
+                    if let oid = eq.ownerId {
+                        equipmentOwnerChip(oid).fixedSize()
+                    } else {
+                        Text("未指派負責人")
+                            .font(.system(size: 9, weight: .bold))
+                            .padding(.horizontal, 5).padding(.vertical, 1.5)
+                            .background(Color(.tertiarySystemFill)).foregroundStyle(.secondary)
+                            .clipShape(Capsule())
+                            .fixedSize()
+                    }
+                }
+                if !eq.note.isEmpty {
+                    Text(eq.note).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                }
+            }
+            Spacer(minLength: 4)
+            Image(systemName: "chevron.right")
+                .font(.system(size: 11, weight: .semibold)).foregroundStyle(.tertiary)
+        }
+        .padding(.horizontal, 14).padding(.vertical, 9)
+        .contentShape(Rectangle())
+        .onTapGesture { viewingEquipment = eq }
+    }
+
+    /// 系統別膠囊：點一下只看該系統、已篩選中顯示 ✕、再點取消
+    private func equipmentSystemChip(_ system: String) -> some View {
+        let active = eqFilterSystem == system
+        return Button {
+            withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                eqFilterSystem = active ? nil : system
+            }
+        } label: {
+            HStack(spacing: 3) {
+                Text(system)
+                if active {
+                    Image(systemName: "xmark").font(.system(size: 7, weight: .bold))
+                }
+            }
+            .font(.system(size: 9, weight: .bold))
+            .padding(.horizontal, 5).padding(.vertical, 1.5)
+            .background(Color.cyan.opacity(active ? 0.20 : 0.12))
+            .foregroundStyle(.cyan)
+            .clipShape(Capsule())
+            .overlay(Capsule().stroke(Color.cyan.opacity(active ? 0.4 : 0), lineWidth: 0.8))
+            .lineLimit(1)
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// 負責人膠囊：點一下只看這個人負責的機台、已篩選中顯示 ✕、再點取消
+    private func equipmentOwnerChip(_ ownerId: UUID) -> some View {
+        let n = lifeStore.subordinates.first { $0.id == ownerId }?.name ?? ""
+        let name = n.isEmpty ? "未命名" : n
+        let active = eqFilterOwnerId == ownerId
+        return Button {
+            withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                eqFilterOwnerId = active ? nil : ownerId
+            }
+        } label: {
+            HStack(spacing: 3) {
+                Label(name, systemImage: "person.fill")
+                if active {
+                    Image(systemName: "xmark").font(.system(size: 7, weight: .bold))
+                }
+            }
+            .font(.system(size: 9, weight: .bold))
+            .padding(.horizontal, 5).padding(.vertical, 1.5)
+            .background(Color.purple.opacity(active ? 0.20 : 0.12))
+            .foregroundStyle(.purple)
+            .clipShape(Capsule())
+            .overlay(Capsule().stroke(Color.purple.opacity(active ? 0.4 : 0), lineWidth: 0.8))
+            .lineLimit(1)
+        }
+        .buttonStyle(.plain)
+    }
+
+    // [v2] section header 從裸 Text 升級為 Capsule 側條 + 計數膠囊；加入交錯進場動畫
     private var peopleSection: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                Text("部門人員").font(.headline)
+        // people 是 filter+sort，一次算好供整個 section（計數、空狀態檢查、ForEach、
+        // 分隔線判斷）共用，避免分隔線判斷在 ForEach 每一列都重新呼叫一次 people
+        // （對一家公司的全部人員重新 filter+sort，等同 O(該部門人數 × 全公司人數 log n)）。
+        let people = self.people
+        return VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 8) {
+                Capsule()
+                    .fill(LinearGradient(colors: [.green, .green.opacity(0.50)], startPoint: .top, endPoint: .bottom))
+                    .frame(width: 3, height: 16)
+                Image(systemName: "person.2.fill")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.green)
+                Text("部門人員")
+                    .font(.subheadline.weight(.bold))
                 Spacer()
                 Text("\(people.count) 人")
-                    .font(.caption2).foregroundStyle(.secondary)
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.green)
+                    .padding(.horizontal, 7).padding(.vertical, 2.5)
+                    .background(Color.green.opacity(0.10))
+                    .clipShape(Capsule())
+                    .overlay(Capsule().stroke(Color.green.opacity(0.22), lineWidth: 0.6))
                 Button {
                     addingPerson = true
                 } label: {
                     Image(systemName: "plus.circle.fill").font(.title3).foregroundStyle(.green)
                 }
             }
-            .padding(.horizontal).padding(.top, 12).padding(.bottom, 6)
+            .padding(.horizontal).padding(.top, 14).padding(.bottom, 10)
+
+            duplicateBanner
 
             if people.isEmpty {
-                Text("尚無人員，按右上角 + 新增")
-                    .font(.caption).foregroundStyle(.tertiary)
-                    .padding(.horizontal).padding(.bottom, 12)
+                HStack(spacing: 8) {
+                    Image(systemName: "person.badge.plus")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(.tertiary)
+                    Text("尚無人員，按右側 + 新增")
+                        .font(.caption).foregroundStyle(.tertiary)
+                }
+                .padding(.horizontal).padding(.bottom, 14)
             } else {
-                ForEach(people) { person in
+                let lastId = people.last?.id
+                ForEach(Array(people.enumerated()), id: \.element.id) { idx, person in
                     Button { viewingPersonId = person.id } label: {
                         personRow(person)
                     }
                     .buttonStyle(.plain)
-                    Divider().padding(.leading, 60)
+                    .opacity(peopleAppeared ? 1 : 0)
+                    .offset(y: peopleAppeared ? 0 : 12)
+                    .animation(.spring(response: 0.42, dampingFraction: 0.78).delay(0.05 + Double(idx) * 0.06), value: peopleAppeared)
+                    if person.id != lastId {
+                        Rectangle().fill(Color(.separator).opacity(0.20))
+                            .frame(height: 0.5).padding(.leading, 60)
+                    }
                 }
+                Spacer().frame(height: 4)
             }
         }
         .background(Color(.systemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 16))
         .padding(.horizontal)
+        .onAppear { withAnimation { peopleAppeared = true } }
+        .onDisappear { peopleAppeared = false }
     }
 
     private func personRow(_ p: OrgPerson) -> some View {
@@ -438,12 +1584,14 @@ struct DepartmentDetailView: View {
                     Text(p.name.isEmpty ? "未命名" : p.name)
                         .font(.subheadline.weight(.semibold))
                     if p.isInactive {
+                        // [v2] 離職徽章 RoundedRectangle → Capsule + stroke
                         Text("離職")
-                            .font(.caption2)
-                            .padding(.horizontal, 4).padding(.vertical, 1)
-                            .background(Color.gray.opacity(0.15))
+                            .font(.system(size: 9, weight: .semibold))
+                            .padding(.horizontal, 5).padding(.vertical, 1.5)
+                            .background(Color.gray.opacity(0.12))
                             .foregroundStyle(.gray)
-                            .clipShape(RoundedRectangle(cornerRadius: 3))
+                            .clipShape(Capsule())
+                            .overlay(Capsule().stroke(Color.gray.opacity(0.20), lineWidth: 0.5))
                     }
                 }
                 if !p.jobTitle.isEmpty {
@@ -463,23 +1611,33 @@ struct DepartmentDetailView: View {
     private func personAvatar(_ p: OrgPerson) -> some View {
         let ringColor = relationRingColor(for: p)
         Group {
-            if let url = p.photoURL, let img = UIImage(contentsOfFile: url.path) {
-                Image(uiImage: img)
-                    .resizable().scaledToFill()
-                    .frame(width: 40, height: 40)
-                    .clipShape(Circle())
-            } else {
-                ZStack {
-                    Circle().fill(LinearGradient(colors: [.indigo, .purple], startPoint: .topLeading, endPoint: .bottomTrailing))
-                        .frame(width: 40, height: 40)
-                    Text(String(p.name.prefix(1)))
-                        .font(.headline).foregroundStyle(.white)
+            if let url = p.photoURL {
+                AsyncLocalImage(url: url) { img, _ in
+                    if let img {
+                        Image(uiImage: img)
+                            .resizable().scaledToFill()
+                            .frame(width: 40, height: 40)
+                            .clipShape(Circle())
+                    } else {
+                        personAvatarPlaceholder(p)
+                    }
                 }
+            } else {
+                personAvatarPlaceholder(p)
             }
         }
         .overlay(
             Circle().stroke(ringColor, lineWidth: ringColor == .clear ? 0 : 2.5)
         )
+    }
+
+    private func personAvatarPlaceholder(_ p: OrgPerson) -> some View {
+        ZStack {
+            Circle().fill(LinearGradient(colors: [.indigo, .purple], startPoint: .topLeading, endPoint: .bottomTrailing))
+                .frame(width: 40, height: 40)
+            Text(String(p.name.prefix(1)))
+                .font(.headline).foregroundStyle(.white)
+        }
     }
 
     private func relationRingColor(for p: OrgPerson) -> Color {
@@ -492,6 +1650,105 @@ struct DepartmentDetailView: View {
         case .mentee: return .teal
         case .other: return .clear
         }
+    }
+}
+
+// [2026-07 v3] Section header：對齊 ChildDetailView.childEditorSectionHeader / ResumeView.profileEditorSectionHeader
+// 既有共用寫法（4pt 漸層 Capsule 色條 + 圖示 + .subheadline.semibold 標題）。
+// MARK: - 管理人員挑選
+
+/// 部門管理人員挑選（可多選）。候選＝全部在職組織人員——管理人不一定編制在
+/// 本部門；本部門的人排最前面。改動即時寫回 store（勾選當下生效，沒有草稿）。
+struct DeptManagerPicker: View {
+    let deptId: UUID
+
+    @EnvironmentObject var lifeStore: LifeStore
+    @Environment(\.dismiss) private var dismiss
+    @State private var query = ""
+
+    private var dept: Department? {
+        lifeStore.departments.first { $0.id == deptId }
+    }
+
+    private var candidates: [OrgPerson] {
+        let q = query.trimmingCharacters(in: .whitespaces)
+        return lifeStore.orgPeople
+            .filter { !$0.isInactive }
+            .filter {
+                q.isEmpty || $0.name.localizedCaseInsensitiveContains(q)
+                || $0.jobTitle.localizedCaseInsensitiveContains(q)
+            }
+            .sorted { a, b in
+                // 本部門的人排前面，其次依姓名
+                let aIn = a.departmentId == deptId, bIn = b.departmentId == deptId
+                if aIn != bIn { return aIn }
+                return a.name.localizedStandardCompare(b.name) == .orderedAscending
+            }
+    }
+
+    var body: some View {
+        List {
+            if candidates.isEmpty {
+                Text("沒有可選的人員。先到部門詳細頁新增人員，或確認搜尋條件。")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            ForEach(candidates) { p in
+                let isOn = dept?.managerIds.contains(p.id) == true
+                Button {
+                    guard var d = dept else { return }
+                    if isOn { d.managerIds.removeAll { $0 == p.id } }
+                    else { d.managerIds.append(p.id) }
+                    lifeStore.update(d)
+                } label: {
+                    HStack(spacing: 10) {
+                        Image(systemName: isOn ? "checkmark.circle.fill" : "circle")
+                            .font(.system(size: 18))
+                            .foregroundStyle(isOn ? .orange : .secondary)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(p.name.isEmpty ? "未命名" : p.name)
+                                .foregroundStyle(.primary)
+                            let title = lifeStore.gradeTitles.first { $0.id == p.gradeTitleId }?.title ?? p.jobTitle
+                            let deptName = p.departmentId.flatMap { did in
+                                lifeStore.departments.first { $0.id == did }?.name
+                            } ?? ""
+                            let sub = [title, deptName].filter { !$0.isEmpty }.joined(separator: " · ")
+                            if !sub.isEmpty {
+                                Text(sub).font(.caption2).foregroundStyle(.secondary)
+                            }
+                        }
+                        Spacer()
+                        if p.departmentId == deptId {
+                            Text("本部門")
+                                .font(.system(size: 10, weight: .semibold))
+                                .padding(.horizontal, 6).padding(.vertical, 2)
+                                .background(Color.indigo.opacity(0.12), in: Capsule())
+                                .foregroundStyle(.indigo)
+                        }
+                    }
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .searchable(text: $query, prompt: "搜尋姓名或職稱")
+        .navigationTitle("設定管理人員")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .confirmationAction) { Button("完成") { dismiss() }.bold() }
+        }
+    }
+}
+
+private func orgPersonEditorSectionHeader(_ title: String, icon: String, color: Color) -> some View {
+    HStack(spacing: 7) {
+        Capsule()
+            .fill(LinearGradient(colors: [color, color.opacity(0.70)], startPoint: .top, endPoint: .bottom))
+            .frame(width: 4, height: 18)
+        Image(systemName: icon)
+            .font(.system(size: 12, weight: .semibold))
+            .foregroundStyle(color)
+        Text(title)
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(.primary)
     }
 }
 
@@ -519,10 +1776,20 @@ struct OrgPersonEditor: View {
     @State private var relations: [OrgPersonRelation] = []
     @State private var linkedBusinessCardId: UUID?
     @State private var pendingImageData: Data?
+    // pendingImageData 解碼後的快取：photoSection 過去直接在 body 內對 pendingImageData
+    // 呼叫 UIImage(data:)，姓名／職稱等任何欄位按鍵都會觸發 Form body 重新求值，
+    // 導致選了新照片後每次按鍵都在主執行緒重新解碼一次完整 JPEG。改為只在照片來源
+    // （相機／相簿）產生 pendingImageData 當下解碼一次並快取。
+    @State private var pendingImage: UIImage?
     @State private var showCamera = false
     @State private var photoItem: PhotosPickerItem?
     @State private var isPresentingPhotoPicker = false
     @State private var showDeleteConfirm = false
+    // 選取照片後 loadTransferable 是非同步的（iCloud 圖片可能要等幾秒）。若使用者在等待
+    // 期間又重新開選單選了另一張、或按了「移除照片」，較慢完成的前一次選取不該覆蓋較新的
+    // 狀態；用世代編號讓每次 Task 完成時檢查自己是否仍是最新一次選取。
+    @State private var photoLoadGeneration = 0
+    @State private var isSaving = false
 
     private var isEditing: Bool { editingId != nil }
     private var existing: OrgPerson? {
@@ -533,7 +1800,7 @@ struct OrgPersonEditor: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("基本資訊") {
+                Section {
                     TextField("姓名", text: $name)
 
                     Picker("職等", selection: $gradeTitleId) {
@@ -563,25 +1830,27 @@ struct OrgPersonEditor: View {
                     if hasBirthday {
                         DatePicker("生日", selection: $birthday, displayedComponents: .date)
                     }
+                } header: {
+                    orgPersonEditorSectionHeader("基本資訊", icon: "person.fill", color: .indigo)
                 }
 
                 Section {
                     photoSection
                 } header: {
-                    Text("頭像")
+                    orgPersonEditorSectionHeader("頭像", icon: "photo.fill", color: .blue)
                 }
 
                 Section {
                     TextField("例：他是我直屬主管的好朋友、他掌握決策權…", text: $relationship, axis: .vertical)
                         .lineLimit(3...6)
                 } header: {
-                    Text("我與他的利害關係")
+                    orgPersonEditorSectionHeader("我與他的利害關係", icon: "person.2.fill", color: .purple)
                 }
 
                 Section {
                     TextField("選填記事", text: $note, axis: .vertical).lineLimit(2...5)
                 } header: {
-                    Text("記事")
+                    orgPersonEditorSectionHeader("記事", icon: "text.bubble.fill", color: .secondary)
                 }
 
                 Section {
@@ -604,17 +1873,19 @@ struct OrgPersonEditor: View {
                             .foregroundStyle(.green)
                     }
                 } header: {
-                    Text("他的子女")
+                    orgPersonEditorSectionHeader("他的子女", icon: "figure.2.and.child.holdinghands", color: .pink)
                 } footer: {
                     Text("方便記住對方家庭背景，找話題用。")
                 }
 
                 // 派系：跟其他公司組織人員的關係
                 Section {
+                    // 只算一次，避免在 ForEach($relations) 的每一列 row closure 中都重新掃描 lifeStore.orgPeople
+                    let candidates = otherPeopleCandidates
                     ForEach($relations) { $rel in
                         VStack(alignment: .leading, spacing: 6) {
                             Picker("對象", selection: $rel.personId) {
-                                ForEach(otherPeopleCandidates) { p in
+                                ForEach(candidates) { p in
                                     Text(p.name.isEmpty ? "未命名" : p.name).tag(p.id)
                                 }
                             }
@@ -628,7 +1899,7 @@ struct OrgPersonEditor: View {
                     }
                     .onDelete { offsets in relations.remove(atOffsets: offsets) }
 
-                    if let firstCandidate = otherPeopleCandidates.first {
+                    if let firstCandidate = candidates.first {
                         Button {
                             relations.append(OrgPersonRelation(personId: firstCandidate.id, type: .neutral))
                         } label: {
@@ -640,7 +1911,7 @@ struct OrgPersonEditor: View {
                             .font(.caption).foregroundStyle(.tertiary)
                     }
                 } header: {
-                    Text("派系與相關人員")
+                    orgPersonEditorSectionHeader("派系與相關人員", icon: "person.3.fill", color: .orange)
                 } footer: {
                     Text("標記同盟（綠）/ 對手（紅）/ 中立（灰）/ 前輩 / 後輩，組織圖頭像會用主導關係的顏色標示。")
                 }
@@ -654,7 +1925,7 @@ struct OrgPersonEditor: View {
                         }
                     }
                 } header: {
-                    Text("名片連結")
+                    orgPersonEditorSectionHeader("名片連結", icon: "person.text.rectangle.fill", color: .teal)
                 } footer: {
                     Text("連結後，名片詳細頁可一鍵跳轉至此人員，反之亦然。")
                 }
@@ -665,7 +1936,7 @@ struct OrgPersonEditor: View {
                         DatePicker("離職日期", selection: $leftDate, displayedComponents: .date)
                     }
                 } header: {
-                    Text("狀態")
+                    orgPersonEditorSectionHeader("狀態", icon: "briefcase.fill", color: .gray)
                 }
 
                 if isEditing {
@@ -683,22 +1954,41 @@ struct OrgPersonEditor: View {
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button("取消") { dismiss() } }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button(isEditing ? "儲存" : "新增") { save() }
-                        .bold().foregroundStyle(.green)
-                        .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
+                    // [美化 v25.96] 存檔中顯示同色 ProgressView，對齊 GradeTitleView v25.95／
+                    // SubordinateView v25.94 等 isSaving 忙碌守衛按鈕載入狀態規格。
+                    HStack(spacing: 6) {
+                        if isSaving {
+                            ProgressView().scaleEffect(0.7).tint(.green)
+                        }
+                        Button(isEditing ? "儲存" : "新增") { save() }
+                            .bold().foregroundStyle(.green)
+                            .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty || isSaving)
+                    }
                 }
             }
             .sheet(isPresented: $showCamera) {
                 CameraPicker { image in
+                    // 讓任何仍在進行中的相簿選取 Task 過期，避免它稍後才完成、
+                    // 把剛拍好的照片又蓋回相簿選的舊結果。
+                    photoLoadGeneration += 1
                     pendingImageData = image.jpegData(compressionQuality: 0.85)
+                    pendingImage = image
                 }
                 .ignoresSafeArea()
             }
             .photosPicker(isPresented: $isPresentingPhotoPicker, selection: $photoItem, matching: .images)
             .onChange(of: photoItem) { _, item in
+                photoLoadGeneration += 1
+                let generation = photoLoadGeneration
                 Task {
                     guard let item, let data = try? await item.loadTransferable(type: Data.self) else { return }
-                    await MainActor.run { pendingImageData = data }
+                    let decoded = UIImage(data: data)
+                    await MainActor.run {
+                        // 若載入期間使用者又選了下一張照片（或移除了照片），
+                        // generation 已經前進，這次結果已過期，不套用。
+                        guard generation == photoLoadGeneration else { return }
+                        pendingImageData = data; pendingImage = decoded
+                    }
                 }
             }
             .alert("確定要刪除這個人員嗎？", isPresented: $showDeleteConfirm) {
@@ -716,18 +2006,22 @@ struct OrgPersonEditor: View {
     private var photoSection: some View {
         HStack {
             ZStack {
-                if let data = pendingImageData, let img = UIImage(data: data) {
+                if let img = pendingImage {
                     Image(uiImage: img)
                         .resizable().scaledToFill()
                         .frame(width: 60, height: 60)
                         .clipShape(Circle())
                 } else if let name = photoFileName {
                     let url = OrgPerson.photosDirectory.appendingPathComponent(name)
-                    if let img = UIImage(contentsOfFile: url.path) {
-                        Image(uiImage: img)
-                            .resizable().scaledToFill()
-                            .frame(width: 60, height: 60)
-                            .clipShape(Circle())
+                    // 用既有的 AsyncLocalImage 背景讀檔快取，避免姓名／職稱等欄位每次按鍵
+                    // 觸發整個 Form body 重新求值時，同步在主執行緒重讀＋重解碼 JPEG。
+                    AsyncLocalImage(url: url) { img, _ in
+                        if let img {
+                            Image(uiImage: img)
+                                .resizable().scaledToFill()
+                                .frame(width: 60, height: 60)
+                                .clipShape(Circle())
+                        }
                     }
                 } else {
                     Circle().fill(Color.indigo.opacity(0.15))
@@ -741,9 +2035,13 @@ struct OrgPersonEditor: View {
                 Button { isPresentingPhotoPicker = true } label: { Label("從相簿選", systemImage: "photo.on.rectangle") }
                 if pendingImageData != nil || photoFileName != nil {
                     Button(role: .destructive) {
+                        // 讓任何仍在進行中的照片載入 Task 過期，避免它稍後才完成、
+                        // 把已被使用者移除的照片又重新蓋回來。
+                        photoLoadGeneration += 1
                         if let oldName = photoFileName { OrgPerson.deletePhoto(oldName) }
                         photoFileName = nil
                         pendingImageData = nil
+                        pendingImage = nil
                     } label: { Label("移除照片", systemImage: "trash") }
                 }
             } label: {
@@ -789,11 +2087,16 @@ struct OrgPersonEditor: View {
     }
 
     private func save() {
+        guard !isSaving else { return }
+        isSaving = true
         let id = editingId ?? UUID()
         var newPhoto = photoFileName
         if let data = pendingImageData {
             if let oldName = photoFileName { OrgPerson.deletePhoto(oldName) }
-            newPhoto = OrgPerson.savePhoto(data, id: id)
+            // 檔名用全新 UUID（而非沿用可能不變的 person id），確保換照片後 photoURL
+            // 一定改變，AsyncLocalImage 才會依 .task(id: url) 重新讀取新照片，
+            // 不會因舊照片檔名被同路徑覆寫而讓列表頭像停留在快取的舊圖。
+            newPhoto = OrgPerson.savePhoto(data, id: UUID())
         }
         // 過濾掉指向不存在人員的 relation
         let validRelations = relations.filter { rel in
@@ -813,13 +2116,21 @@ struct OrgPersonEditor: View {
             return jobTitle.trimmingCharacters(in: .whitespaces)
         }()
 
-        let person = OrgPerson(
+        // [v25.292] 生日提醒事件 id 必須跟著帶（比照部屬編輯的 promotions 教訓：
+        // 重建整個物件時漏帶欄位＝資料被清空）；生日被拿掉時連動刪除行事曆事件
+        var keptEventId = existing?.birthdayEventId
+        if !hasBirthday, let bid = keptEventId {
+            Task { @MainActor in AppleCalendarBridge.shared.delete(eventIdentifier: bid) }
+            keptEventId = nil
+        }
+        var person = OrgPerson(
             id: id,
             name: name.trimmingCharacters(in: .whitespaces),
             jobTitle: resolvedJobTitle,
             departmentId: departmentId,
             photoFileName: newPhoto,
             birthday: hasBirthday ? birthday : nil,
+            birthdayEventId: keptEventId,
             relationship: relationship.trimmingCharacters(in: .whitespaces),
             note: note.trimmingCharacters(in: .whitespaces),
             children: children,
@@ -831,6 +2142,8 @@ struct OrgPersonEditor: View {
             linkedSubordinateId: existing?.linkedSubordinateId,
             gradeTitleId: gradeTitleId
         )
+        // 簡易作品項目（不在 memberwise init）：編輯重建時帶回，不然存個檔就被清空
+        person.works = existing?.works ?? []
         if isEditing { lifeStore.update(person) } else { lifeStore.add(person) }
         syncBusinessCardLink(personId: id, oldCardId: existing?.linkedBusinessCardId, newCardId: finalCardId)
         dismiss()
@@ -896,8 +2209,13 @@ struct OrgPersonDetailView: View {
     let personId: UUID
     @State private var showEdit = false
     @State private var showDeleteConfirm = false
+    @State private var showBirthdayReminder = false
+    /// [v25.323] 新增簡易作品／報告項目
+    @State private var showAddWork = false
     @State private var viewingRelatedPersonId: UUID?
     @State private var viewingLinkedCardId: UUID?
+    // [v2] 英雄卡進場動畫旗標
+    @State private var headerAppeared = false
 
     private var person: OrgPerson {
         lifeStore.orgPeople.first(where: { $0.id == personId }) ?? OrgPerson(id: personId)
@@ -932,6 +2250,8 @@ struct OrgPersonDetailView: View {
                     if person.linkedBusinessCardId != nil {
                         linkedCardButton
                     }
+                    // [v25.323] 相關作品／報告／改善：部屬自動帶入＋手動記錄的簡易項目
+                    worksCard
                     if !person.relationship.isEmpty {
                         sectionCard("我與他的利害關係", systemImage: "link.circle.fill", color: .indigo) {
                             Text(person.relationship).font(.subheadline)
@@ -948,8 +2268,9 @@ struct OrgPersonDetailView: View {
                     if !person.children.isEmpty {
                         childrenCard
                     }
-                    if !giftHistory.isEmpty {
-                        giftCard
+                    let gifts = giftHistory
+                    if !gifts.isEmpty {
+                        giftCard(gifts)
                     }
                 }
                 .padding(.vertical)
@@ -968,6 +2289,12 @@ struct OrgPersonDetailView: View {
             }
             .sheet(isPresented: $showEdit) {
                 OrgPersonEditor(editingId: personId, defaultDepartmentId: nil)
+            }
+            .sheet(isPresented: $showBirthdayReminder) {
+                BirthdayReminderSheet(orgPersonId: personId)
+            }
+            .sheet(isPresented: $showAddWork) {
+                OrgPersonWorkEditor(personId: personId)
             }
             .sheet(item: Binding(
                 get: { viewingRelatedPersonId.map { IdentifiableUUID(id: $0) } },
@@ -998,54 +2325,200 @@ struct OrgPersonDetailView: View {
         }
     }
 
+    // MARK: 相關作品／報告／改善（v25.323）
+
+    private var linkedSub: Subordinate? {
+        person.linkedSubordinateId.flatMap { sid in
+            lifeStore.subordinates.first { $0.id == sid }
+        }
+    }
+
+    private static let workDateFmt: DateFormatter = {
+        let f = DateFormatter(); f.locale = Locale(identifier: "zh_Hant_TW"); f.dateFormat = "yyyy/M/d"; return f
+    }()
+
+    /// 相關作品／報告／改善：
+    /// ・是我的部屬 → 自動帶入他的報告與改善/成就紀錄（唯讀，最新在前、各取前 8 筆）
+    /// ・任何人（含非部屬的其他部門同仁）→ 可手動「新增項目」（項目名稱＋日期），長按可刪
+    private var worksCard: some View {
+        sectionCard("相關作品・報告・改善", systemImage: "doc.text.magnifyingglass", color: .purple) {
+            VStack(alignment: .leading, spacing: 10) {
+                // 手動記錄的簡易項目
+                ForEach(person.works.sorted { $0.date > $1.date }) { w in
+                    HStack(spacing: 8) {
+                        Image(systemName: "doc.text.fill")
+                            .font(.system(size: 11)).foregroundStyle(.purple)
+                        Text(w.title.isEmpty ? "（未命名項目）" : w.title)
+                            .font(.subheadline).lineLimit(2)
+                        Spacer()
+                        Text(Self.workDateFmt.string(from: w.date))
+                            .font(.caption2).foregroundStyle(.secondary)
+                    }
+                    .contentShape(Rectangle())
+                    .contextMenu {
+                        Button(role: .destructive) {
+                            var p = person
+                            p.works.removeAll { $0.id == w.id }
+                            lifeStore.update(p)
+                        } label: { Label("刪除此項目", systemImage: "trash") }
+                    }
+                }
+                // 部屬連動：報告
+                if let sub = linkedSub {
+                    let reports = sub.weeklyReports.sorted { $0.date > $1.date }.prefix(8)
+                    if !reports.isEmpty {
+                        Text("報告（部屬紀錄）").font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
+                        ForEach(Array(reports)) { r in
+                            HStack(spacing: 8) {
+                                Image(systemName: r.isCompleted ? "checkmark.circle.fill" : "doc.text")
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(r.isCompleted ? .green : .secondary)
+                                if !r.reportType.isEmpty {
+                                    Text(r.reportType)
+                                        .font(.system(size: 9, weight: .bold))
+                                        .padding(.horizontal, 5).padding(.vertical, 1.5)
+                                        .background(Color.purple.opacity(0.12)).foregroundStyle(.purple)
+                                        .clipShape(Capsule())
+                                }
+                                Text(r.topic.isEmpty ? "未命名報告" : r.topic)
+                                    .font(.subheadline).lineLimit(1)
+                                Spacer()
+                                Text(Self.workDateFmt.string(from: r.date))
+                                    .font(.caption2).foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                    // 部屬連動：改善／成就紀錄
+                    let improvements = sub.records
+                        .filter { $0.type == .improvement || $0.type == .achievement }
+                        .sorted { $0.date > $1.date }.prefix(8)
+                    if !improvements.isEmpty {
+                        Text("改善・成就（部屬紀錄）").font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
+                        ForEach(Array(improvements)) { rec in
+                            HStack(spacing: 8) {
+                                Image(systemName: rec.type == .improvement ? "arrow.up.right.circle.fill" : "trophy.fill")
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(rec.type == .improvement ? .teal : .orange)
+                                Text(rec.content.isEmpty ? "（未填內容）" : rec.content)
+                                    .font(.subheadline).lineLimit(2)
+                                Spacer()
+                                Text(Self.workDateFmt.string(from: rec.date))
+                                    .font(.caption2).foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                }
+                if person.works.isEmpty && linkedSub == nil {
+                    Text("還沒有紀錄。非部屬的同仁也可以按下方「新增項目」記下他報告過的東西（項目＋日期）。")
+                        .font(.caption).foregroundStyle(.tertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Button { showAddWork = true } label: {
+                    Label("新增項目", systemImage: "plus.circle.fill")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.purple)
+                }
+                .buttonStyle(.borderless)
+            }
+        }
+    }
+
+    // 美化：加圖示底圓 + overlay 邊框 + orange 光暈陰影，對齊 LifeFinanceView 連結按鈕規格
     private var linkedCardButton: some View {
         Button {
             viewingLinkedCardId = person.linkedBusinessCardId
         } label: {
-            HStack {
-                Image(systemName: "person.crop.rectangle.fill").foregroundStyle(.orange)
-                Text("查看對應名片").font(.subheadline.weight(.medium))
+            HStack(spacing: 12) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(Color.orange.opacity(0.12))
+                        .frame(width: 34, height: 34)
+                    Image(systemName: "person.crop.rectangle.fill")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(.orange)
+                }
+                Text("查看對應名片")
+                    .font(.subheadline.weight(.medium))
                 Spacer()
-                Image(systemName: "arrow.up.right.square").font(.caption).foregroundStyle(.tertiary)
+                Image(systemName: "arrow.up.right.square")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
             }
-            .padding()
+            .padding(16)
             .background(Color(.systemBackground))
-            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .clipShape(RoundedRectangle(cornerRadius: 14))
+            .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.orange.opacity(0.15), lineWidth: 0.75))
+            .shadow(color: Color.orange.opacity(0.10), radius: 8, x: 0, y: 3)
+            .shadow(color: .black.opacity(0.03), radius: 2, x: 0, y: 1)
             .padding(.horizontal)
         }
         .buttonStyle(.plain)
     }
 
+    // [v2] 每列加入 36pt LinearGradient 漸層圖示圓；關係類型徽章 RoundedRectangle → Capsule + stroke
     private var relationsCard: some View {
         sectionCard("派系與相關人員", systemImage: "person.2.circle.fill", color: .indigo) {
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 4) {
                 ForEach(person.relations) { rel in
                     if let other = lifeStore.orgPeople.first(where: { $0.id == rel.personId }) {
                         Button {
                             viewingRelatedPersonId = other.id
                         } label: {
-                            HStack {
-                                Circle()
-                                    .fill(relationColor(rel.type))
-                                    .frame(width: 10, height: 10)
-                                Text(other.name).font(.subheadline.weight(.medium))
-                                Text(rel.type.rawValue).font(.caption2)
-                                    .padding(.horizontal, 5).padding(.vertical, 1)
-                                    .background(relationColor(rel.type).opacity(0.15))
-                                    .foregroundStyle(relationColor(rel.type))
-                                    .clipShape(RoundedRectangle(cornerRadius: 3))
-                                Spacer()
-                                if !rel.note.isEmpty {
-                                    Text(rel.note).font(.caption2)
-                                        .foregroundStyle(.secondary).lineLimit(1)
+                            HStack(spacing: 10) {
+                                ZStack {
+                                    Circle()
+                                        .fill(LinearGradient(
+                                            colors: [relationColor(rel.type).opacity(0.22), relationColor(rel.type).opacity(0.09)],
+                                            startPoint: .topLeading, endPoint: .bottomTrailing
+                                        ))
+                                        .frame(width: 36, height: 36)
+                                        .overlay(Circle().stroke(relationColor(rel.type).opacity(0.20), lineWidth: 0.75))
+                                    Image(systemName: relationIcon(rel.type))
+                                        .font(.system(size: 14, weight: .semibold))
+                                        .foregroundStyle(relationColor(rel.type))
                                 }
+                                .shadow(color: relationColor(rel.type).opacity(0.14), radius: 4, x: 0, y: 2)
+
+                                VStack(alignment: .leading, spacing: 2) {
+                                    HStack(spacing: 5) {
+                                        Text(other.name).font(.subheadline.weight(.medium))
+                                        Text(rel.type.rawValue)
+                                            .font(.caption2.weight(.semibold))
+                                            .padding(.horizontal, 6).padding(.vertical, 2)
+                                            .background(relationColor(rel.type).opacity(0.12))
+                                            .foregroundStyle(relationColor(rel.type))
+                                            .clipShape(Capsule())
+                                            .overlay(Capsule().stroke(relationColor(rel.type).opacity(0.22), lineWidth: 0.6))
+                                    }
+                                    if !rel.note.isEmpty {
+                                        Text(rel.note).font(.caption2)
+                                            .foregroundStyle(.secondary).lineLimit(1)
+                                    }
+                                }
+                                Spacer()
                                 Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.tertiary)
                             }
+                            .padding(.vertical, 4)
                         }
                         .buttonStyle(.plain)
+                        if rel.id != person.relations.last?.id {
+                            Rectangle().fill(Color(.separator).opacity(0.20))
+                                .frame(height: 0.5).padding(.leading, 46)
+                        }
                     }
                 }
             }
+        }
+    }
+
+    private func relationIcon(_ type: OrgRelationType) -> String {
+        switch type {
+        case .ally: return "person.2.fill"
+        case .neutral: return "person.fill"
+        case .rival: return "person.fill.xmark"
+        case .mentor: return "graduationcap.fill"
+        case .mentee: return "figure.stand"
+        case .other: return "person.crop.circle"
         }
     }
 
@@ -1060,95 +2533,241 @@ struct OrgPersonDetailView: View {
         }
     }
 
+    // [v2] 升級為 indigo-purple 漸層英雄卡（散景裝飾圓 + 玻璃光澤 + spring 進場動畫），
+    // 對齊 SubordinateDetailView.headerCard / SpouseResumeView.heroCard 規格
     private var headerCard: some View {
-        HStack(spacing: 14) {
-            Group {
-                if let url = person.photoURL, let img = UIImage(contentsOfFile: url.path) {
-                    Image(uiImage: img).resizable().scaledToFill()
-                } else {
-                    LinearGradient(colors: [.indigo, .purple], startPoint: .topLeading, endPoint: .bottomTrailing)
-                        .overlay(
-                            Text(String(person.name.prefix(1)))
-                                .font(.title.bold()).foregroundStyle(.white)
-                        )
-                }
-            }
-            .frame(width: 72, height: 72)
-            .clipShape(Circle())
+        ZStack(alignment: .topLeading) {
+            // 背景漸層
+            LinearGradient(
+                colors: [Color(red: 0.28, green: 0.18, blue: 0.72), Color(red: 0.50, green: 0.28, blue: 0.88)],
+                startPoint: .topLeading, endPoint: .bottomTrailing
+            )
+            // 散景裝飾圓
+            Circle().fill(.white.opacity(0.07)).frame(width: 100, height: 100)
+                .offset(x: -30, y: -30)
+            Circle().fill(.white.opacity(0.04)).frame(width: 70, height: 70)
+                .offset(x: 260, y: 55)
+            Circle().fill(.white.opacity(0.06)).frame(width: 50, height: 50)
+                .offset(x: 290, y: -10)
+            // 玻璃頂部光澤
+            LinearGradient(
+                colors: [.white.opacity(0.18), .clear],
+                startPoint: .top, endPoint: .center
+            )
 
-            VStack(alignment: .leading, spacing: 3) {
-                HStack {
-                    Text(person.name.isEmpty ? "未命名" : person.name)
-                        .font(.title3.bold())
-                    if person.isInactive {
-                        Text("離職")
-                            .font(.caption2)
-                            .padding(.horizontal, 4).padding(.vertical, 1)
-                            .background(Color.gray.opacity(0.15))
-                            .foregroundStyle(.gray)
-                            .clipShape(RoundedRectangle(cornerRadius: 3))
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 14) {
+                    // 頭像圓
+                    Group {
+                        if let url = person.photoURL {
+                            // 改用 AsyncLocalImage 背景讀取，避免每次 body 求值（如開編輯/刪除
+                            // sheet、alert 轉場）都在主執行緒同步讀檔＋解碼一張完整大圖，對齊本檔案
+                            // personAvatar／photoSection 已套用的修復規格。
+                            AsyncLocalImage(url: url) { img, _ in
+                                if let img {
+                                    Image(uiImage: img).resizable().scaledToFill()
+                                        .frame(width: 64, height: 64).clipShape(Circle())
+                                } else {
+                                    ZStack {
+                                        Circle().fill(.white.opacity(0.22)).frame(width: 64, height: 64)
+                                        Text(String(person.name.prefix(1)))
+                                            .font(.title.bold()).foregroundStyle(.white)
+                                    }
+                                }
+                            }
+                        } else {
+                            ZStack {
+                                Circle().fill(.white.opacity(0.22)).frame(width: 64, height: 64)
+                                Text(String(person.name.prefix(1)))
+                                    .font(.title.bold()).foregroundStyle(.white)
+                            }
+                        }
+                    }
+                    .overlay(Circle().stroke(.white.opacity(0.28), lineWidth: 1.5))
+                    .shadow(color: .black.opacity(0.20), radius: 8, x: 0, y: 3)
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack(spacing: 6) {
+                            Text(person.name.isEmpty ? "未命名" : person.name)
+                                .font(.title3.bold())
+                                .foregroundStyle(.white)
+                            if person.isInactive {
+                                Text("離職")
+                                    .font(.system(size: 10, weight: .semibold))
+                                    .foregroundStyle(.white.opacity(0.90))
+                                    .padding(.horizontal, 7).padding(.vertical, 2)
+                                    .background(.white.opacity(0.18))
+                                    .clipShape(Capsule())
+                            }
+                        }
+                        if !person.jobTitle.isEmpty {
+                            Text(person.jobTitle)
+                                .font(.subheadline)
+                                .foregroundStyle(.white.opacity(0.80))
+                        }
+                        HStack(spacing: 4) {
+                            Image(systemName: "building.2.fill")
+                                .font(.system(size: 9, weight: .medium))
+                                .foregroundStyle(.white.opacity(0.75))
+                            Text(deptName)
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundStyle(.white.opacity(0.90))
+                        }
+                        .padding(.horizontal, 8).padding(.vertical, 3)
+                        .background(.white.opacity(0.18))
+                        .clipShape(Capsule())
+                        .overlay(Capsule().stroke(.white.opacity(0.22), lineWidth: 0.6))
+                    }
+                    Spacer(minLength: 0)
+                }
+
+                if let bd = person.birthday {
+                    // [v25.292] 補星座＋生日提醒鈴鐺（比照部屬看板：已建立提醒時亮黃色）
+                    HStack(spacing: 8) {
+                        HStack(spacing: 5) {
+                            Image(systemName: "birthday.cake.fill")
+                                .font(.system(size: 10))
+                                .foregroundStyle(.white.opacity(0.75))
+                            Text("生日：\(formatDate(bd))・\(zodiacSign(for: bd))")
+                                .font(.caption2)
+                                .foregroundStyle(.white.opacity(0.82))
+                        }
+                        .padding(.horizontal, 9).padding(.vertical, 3)
+                        .background(.white.opacity(0.12))
+                        .clipShape(Capsule())
+                        Button { showBirthdayReminder = true } label: {
+                            Image(systemName: person.birthdayEventId != nil ? "bell.fill" : "bell")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(person.birthdayEventId != nil
+                                                 ? Color.yellow : Color.white.opacity(0.88))
+                                .padding(6)
+                                .background(.white.opacity(0.16), in: Circle())
+                                .overlay(Circle().stroke(.white.opacity(0.25), lineWidth: 0.6))
+                        }
+                        .buttonStyle(.plain)
+                        Spacer(minLength: 0)
                     }
                 }
-                if !person.jobTitle.isEmpty {
-                    Text(person.jobTitle).font(.subheadline).foregroundStyle(.secondary)
-                }
-                Text(deptName).font(.caption).foregroundStyle(.tertiary)
-                if let bd = person.birthday {
-                    Text("生日：\(formatDate(bd))").font(.caption2).foregroundStyle(.tertiary)
-                }
             }
-            Spacer()
+            .padding(20)
         }
-        .padding()
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(.systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .clipShape(RoundedRectangle(cornerRadius: 20))
+        .shadow(color: Color.indigo.opacity(0.32), radius: 16, x: 0, y: 6)
+        .shadow(color: .black.opacity(0.08), radius: 4, x: 0, y: 2)
         .padding(.horizontal)
+        .opacity(headerAppeared ? 1 : 0)
+        .offset(y: headerAppeared ? 0 : 20)
+        .onAppear {
+            withAnimation(.spring(response: 0.52, dampingFraction: 0.80).delay(0.05)) {
+                headerAppeared = true
+            }
+        }
     }
 
+    // [v2] 每列加入 30pt 粉紅漸層圖示圓；生日改為 Capsule 日期膠囊徽章；列間加 separator
     private var childrenCard: some View {
         sectionCard("他的子女", systemImage: "figure.child", color: .pink) {
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 4) {
                 ForEach(person.children) { c in
-                    HStack {
-                        Text(c.name.isEmpty ? "未命名" : c.name).font(.subheadline.weight(.medium))
-                        if let bd = c.birthday {
-                            Text("· \(formatDate(bd))")
-                                .font(.caption2).foregroundStyle(.tertiary)
+                    HStack(spacing: 10) {
+                        ZStack {
+                            Circle()
+                                .fill(LinearGradient(
+                                    colors: [Color.pink.opacity(0.22), Color.pink.opacity(0.09)],
+                                    startPoint: .topLeading, endPoint: .bottomTrailing
+                                ))
+                                .frame(width: 30, height: 30)
+                                .overlay(Circle().stroke(Color.pink.opacity(0.20), lineWidth: 0.5))
+                            Image(systemName: "figure.child")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(.pink)
                         }
+                        Text(c.name.isEmpty ? "未命名" : c.name)
+                            .font(.subheadline.weight(.medium))
                         Spacer()
+                        if let bd = c.birthday {
+                            HStack(spacing: 3) {
+                                Image(systemName: "calendar")
+                                    .font(.system(size: 8))
+                                    .foregroundStyle(.secondary)
+                                Text(formatDate(bd))
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                            .padding(.horizontal, 6).padding(.vertical, 2)
+                            .background(Color(.tertiarySystemFill))
+                            .clipShape(Capsule())
+                        }
                         if !c.note.isEmpty {
                             Text(c.note).font(.caption2)
                                 .foregroundStyle(.secondary).lineLimit(1)
                         }
                     }
+                    .padding(.vertical, 3)
+                    if c.id != person.children.last?.id {
+                        Rectangle().fill(Color(.separator).opacity(0.20))
+                            .frame(height: 0.5).padding(.leading, 40)
+                    }
                 }
             }
         }
     }
 
-    private var giftCard: some View {
+    // [v2] 累計列升級為 36pt 漸層圖示圓 + ntdWanString Capsule 金額；日期改 Capsule；子分類標籤改 Capsule
+    // giftHistory（全量 filter+字串切分+sort）改由呼叫端（body）算一次傳入，避免本卡片
+    // 內的累計/列表/計數三處各自重觸發一次全量掃描（比照 memberGiftsSection(_ gifts:) 既有規格）。
+    private func giftCard(_ giftHistory: [Expense]) -> some View {
         sectionCard("我送過他的禮金", systemImage: "gift.fill", color: .pink) {
             let total = giftHistory.reduce(0) { $0 + $1.amount }
             VStack(alignment: .leading, spacing: 6) {
-                HStack {
-                    Text("累計").font(.caption).foregroundStyle(.secondary)
+                HStack(spacing: 10) {
+                    ZStack {
+                        Circle()
+                            .fill(LinearGradient(
+                                colors: [Color.pink.opacity(0.22), Color.pink.opacity(0.09)],
+                                startPoint: .topLeading, endPoint: .bottomTrailing
+                            ))
+                            .frame(width: 36, height: 36)
+                            .overlay(Circle().stroke(Color.pink.opacity(0.20), lineWidth: 0.75))
+                        Image(systemName: "gift.fill")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(.pink)
+                    }
+                    .shadow(color: Color.pink.opacity(0.14), radius: 4, x: 0, y: 2)
+                    Text("累計").font(.subheadline.weight(.medium))
                     Spacer()
-                    Text(formatCurrency(total)).font(.subheadline.weight(.semibold)).foregroundStyle(.red)
+                    Text(total.ntdWanString)
+                        .font(.subheadline.weight(.semibold))
+                        .padding(.horizontal, 8).padding(.vertical, 3)
+                        .background(Color.pink.opacity(0.10))
+                        .foregroundStyle(.pink)
+                        .clipShape(Capsule())
+                        .overlay(Capsule().stroke(Color.pink.opacity(0.20), lineWidth: 0.6))
                 }
-                Divider()
+                Rectangle().fill(Color(.separator).opacity(0.22)).frame(height: 0.5)
                 ForEach(giftHistory.prefix(8)) { e in
-                    HStack {
-                        Text(formatDate(e.date)).font(.caption2).foregroundStyle(.tertiary)
+                    HStack(spacing: 6) {
+                        HStack(spacing: 3) {
+                            Image(systemName: "calendar").font(.system(size: 8))
+                            Text(formatDate(e.date)).font(.caption2)
+                        }
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 6).padding(.vertical, 2)
+                        .background(Color(.tertiarySystemFill))
+                        .clipShape(Capsule())
                         if let sub = e.socialSubCategory {
-                            Text(sub.rawValue).font(.caption2)
-                                .padding(.horizontal, 4).padding(.vertical, 1)
+                            Text(sub.rawValue)
+                                .font(.caption2.weight(.semibold))
+                                .padding(.horizontal, 5).padding(.vertical, 1.5)
                                 .background(Color.pink.opacity(0.12))
                                 .foregroundStyle(.pink)
-                                .clipShape(RoundedRectangle(cornerRadius: 3))
+                                .clipShape(Capsule())
+                                .overlay(Capsule().stroke(Color.pink.opacity(0.22), lineWidth: 0.5))
                         }
                         Spacer()
-                        Text(formatCurrency(e.amount)).font(.caption.weight(.semibold)).foregroundStyle(.red)
+                        Text(e.amount.ntdWanString)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.red)
                     }
                 }
                 if giftHistory.count > 8 {
@@ -1158,6 +2777,7 @@ struct OrgPersonDetailView: View {
         }
     }
 
+    // 美化：加左側漸層 Capsule 色條 section 標題，對齊 OverviewView / IncomeView 全 App section header 規格
     @ViewBuilder
     private func sectionCard<Content: View>(
         _ title: String,
@@ -1165,28 +2785,478 @@ struct OrgPersonDetailView: View {
         color: Color,
         @ViewBuilder content: () -> Content
     ) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Image(systemName: systemImage).foregroundStyle(color)
-                Text(title).font(.headline)
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                // 美化：漸層 Capsule 色條，對齊全 App section header 一致性
+                Capsule()
+                    .fill(LinearGradient(
+                        colors: [color, color.opacity(0.50)],
+                        startPoint: .top, endPoint: .bottom
+                    ))
+                    .frame(width: 3, height: 18)
+                Image(systemName: systemImage)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(color)
+                Text(title)
+                    .font(.subheadline.weight(.bold))
                 Spacer()
             }
             content()
         }
-        .padding()
+        .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color(.systemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 16))
+        .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color(.separator).opacity(0.10), lineWidth: 0.75))
+        .shadow(color: color.opacity(0.07), radius: 8, x: 0, y: 3)
+        .shadow(color: .black.opacity(0.03), radius: 2, x: 0, y: 1)
         .padding(.horizontal)
     }
 
+    private static let dateFormatter: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "yyyy/M/d"; return f
+    }()
+
     private func formatDate(_ date: Date) -> String {
-        let f = DateFormatter(); f.dateFormat = "yyyy/M/d"; return f.string(from: date)
+        Self.dateFormatter.string(from: date)
+    }
+}
+
+// MARK: - 組織頁搜尋與簡易作品編輯（v25.323）
+
+extension OrganizationView {
+    /// 頂部搜尋列：人員／報告／改善項目
+    var orgSearchBar: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.secondary)
+            TextField("搜尋人員、報告或改善項目", text: $orgSearchText)
+                .autocorrectionDisabled()
+            if !orgSearchText.isEmpty {
+                Button { orgSearchText = "" } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 15)).foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, 12).padding(.vertical, 9)
+        .background(Color(.secondarySystemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .padding(.horizontal).padding(.top, 8).padding(.bottom, 6)
     }
 
-    private func formatCurrency(_ v: Double) -> String {
-        let f = NumberFormatter(); f.numberStyle = .currency
-        f.currencySymbol = "NT$"; f.maximumFractionDigits = 0
-        return f.string(from: NSNumber(value: v)) ?? "NT$0"
+    /// [v25.360] 決議內容搜尋列。固定在頂端不隨清單捲動；
+    /// 命中多筆時像 Word 一樣可以按上下箭頭逐一跳。
+    private var resolutionSearchBar: some View {
+        let hits = resolutionHits
+        let hasQuery = !resolutionQuery.trimmingCharacters(in: .whitespaces).isEmpty
+        return VStack(spacing: 4) {
+            HStack(spacing: 8) {
+                Image(systemName: "doc.text.magnifyingglass")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.brown)
+                TextField("搜尋重大決議，跳到所屬廠區", text: $resolutionQuery)
+                    .autocorrectionDisabled()
+                    .submitLabel(.search)
+                    .onChange(of: resolutionQuery) { _, _ in hitIndex = 0 }
+                if hasQuery {
+                    Text(hits.isEmpty ? "0" : "\(min(hitIndex, hits.count - 1) + 1) / \(hits.count)")
+                        .font(.system(size: 11, weight: .bold).monospacedDigit())
+                        // 兩邊都寫成 Color：只寫 .secondary 會讓型別推成 HierarchicalShapeStyle，
+                        // 另一邊的 .brown 就對不上
+                        .foregroundStyle(hits.isEmpty ? Color.secondary : Color.brown)
+                    Button { step(-1, total: hits.count) } label: {
+                        Image(systemName: "chevron.up").font(.system(size: 12, weight: .bold))
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(hits.count < 2)
+                    Button { step(1, total: hits.count) } label: {
+                        Image(systemName: "chevron.down").font(.system(size: 12, weight: .bold))
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(hits.count < 2)
+                    Button { resolutionQuery = ""; hitIndex = 0 } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 15)).foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, 12).padding(.vertical, 9)
+            .background(Color(.secondarySystemBackground))
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+
+            if hasQuery {
+                HStack(spacing: 4) {
+                    if let hit = currentHit {
+                        Image(systemName: "arrow.turn.down.right")
+                            .font(.system(size: 9, weight: .bold)).foregroundStyle(.brown)
+                        Text(hit.title)
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(.brown)
+                            .lineLimit(1)
+                    } else {
+                        Text("沒有符合的決議").font(.system(size: 11)).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                }
+                .padding(.horizontal, 4)
+            }
+        }
+        .padding(.horizontal).padding(.bottom, 6)
+    }
+
+    private func step(_ delta: Int, total: Int) {
+        guard total > 0 else { return }
+        hitIndex = ((hitIndex + delta) % total + total) % total
+    }
+
+    private func orgMatches(_ text: String) -> Bool {
+        let q = orgSearchText.trimmingCharacters(in: .whitespaces)
+        return !q.isEmpty && text.localizedCaseInsensitiveContains(q)
+    }
+
+    /// 搜尋結果：人員（姓名/職稱/部門）、報告（部屬報告＋人員簡易項目）、改善（部屬改善紀錄）。
+    /// 點任一列開啟該人員的卡片。
+    var orgSearchResults: some View {
+        // 人員
+        let people = lifeStore.orgPeople.filter { p in
+            let dept = p.departmentId.flatMap { id in
+                lifeStore.departments.first { $0.id == id }?.name
+            } ?? ""
+            return orgMatches(p.name) || orgMatches(p.jobTitle) || orgMatches(dept)
+        }
+        // 部屬 id → 組織人員 id（報告/改善命中時開對應人員卡）
+        let subToPerson = Dictionary(
+            lifeStore.orgPeople.compactMap { p in p.linkedSubordinateId.map { ($0, p.id) } },
+            uniquingKeysWith: { first, _ in first }
+        )
+        // 報告：部屬報告＋人員簡易項目
+        var reportRows: [(personId: UUID?, owner: String, title: String, date: Date)] = []
+        for sub in lifeStore.subordinates {
+            for r in sub.weeklyReports where orgMatches(r.topic) || orgMatches(r.reportType) {
+                reportRows.append((subToPerson[sub.id], sub.name.isEmpty ? "未命名" : sub.name,
+                                   r.topic.isEmpty ? "未命名報告" : r.topic, r.date))
+            }
+        }
+        for p in lifeStore.orgPeople {
+            for w in p.works where orgMatches(w.title) {
+                reportRows.append((p.id, p.name.isEmpty ? "未命名" : p.name,
+                                   w.title.isEmpty ? "（未命名項目）" : w.title, w.date))
+            }
+        }
+        reportRows.sort { $0.date > $1.date }
+        // 改善項目：部屬的改善／成就紀錄
+        var improveRows: [(personId: UUID?, owner: String, title: String, date: Date)] = []
+        for sub in lifeStore.subordinates {
+            for rec in sub.records
+            where (rec.type == .improvement || rec.type == .achievement) && orgMatches(rec.content) {
+                improveRows.append((subToPerson[sub.id], sub.name.isEmpty ? "未命名" : sub.name,
+                                    rec.content, rec.date))
+            }
+        }
+        improveRows.sort { $0.date > $1.date }
+
+        return List {
+            if people.isEmpty && reportRows.isEmpty && improveRows.isEmpty {
+                Text("找不到符合的人員、報告或改善項目")
+                    .font(.subheadline).foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .padding(.vertical, 8)
+            }
+            if !people.isEmpty {
+                Section("人員（\(people.count)）") {
+                    ForEach(people) { p in
+                        Button { searchViewingPersonId = p.id } label: {
+                            HStack(spacing: 10) {
+                                Image(systemName: "person.crop.circle.fill")
+                                    .font(.system(size: 16)).foregroundStyle(.indigo)
+                                VStack(alignment: .leading, spacing: 1) {
+                                    Text(p.name.isEmpty ? "未命名" : p.name)
+                                        .font(.subheadline.weight(.medium)).foregroundStyle(.primary)
+                                    let dept = p.departmentId.flatMap { id in
+                                        lifeStore.departments.first { $0.id == id }?.name
+                                    } ?? ""
+                                    Text([dept, p.jobTitle].filter { !$0.isEmpty }.joined(separator: "・"))
+                                        .font(.caption2).foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                Image(systemName: "chevron.right")
+                                    .font(.caption2).foregroundStyle(.tertiary)
+                            }
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+            if !reportRows.isEmpty {
+                orgSearchRowSection(title: "報告（\(reportRows.count)）",
+                                    icon: "doc.text.fill", color: .purple, rows: reportRows)
+            }
+            if !improveRows.isEmpty {
+                orgSearchRowSection(title: "改善・成就（\(improveRows.count)）",
+                                    icon: "arrow.up.right.circle.fill", color: .teal, rows: improveRows)
+            }
+        }
+        .listStyle(.insetGrouped)
+    }
+
+    private func orgSearchRowSection(title: String, icon: String, color: Color,
+                                     rows: [(personId: UUID?, owner: String, title: String, date: Date)]) -> some View {
+        Section(title) {
+            ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
+                Button {
+                    if let pid = row.personId { searchViewingPersonId = pid }
+                } label: {
+                    HStack(spacing: 10) {
+                        Image(systemName: icon)
+                            .font(.system(size: 13)).foregroundStyle(color)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(row.title)
+                                .font(.subheadline).foregroundStyle(.primary).lineLimit(2)
+                            Text(row.owner).font(.caption2).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Text(Self.searchDateFmt.string(from: row.date))
+                            .font(.caption2).foregroundStyle(.secondary)
+                        if row.personId != nil {
+                            Image(systemName: "chevron.right")
+                                .font(.caption2).foregroundStyle(.tertiary)
+                        }
+                    }
+                }
+                .buttonStyle(.plain)
+                .disabled(row.personId == nil)
+            }
+        }
+    }
+
+    static let searchDateFmt: DateFormatter = {
+        let f = DateFormatter(); f.locale = Locale(identifier: "zh_Hant_TW"); f.dateFormat = "yyyy/M/d"; return f
+    }()
+}
+
+/// 人員卡片「新增項目」的小表單：項目名稱＋日期（給非部屬同仁記他報告過的東西）
+struct OrgPersonWorkEditor: View {
+    @EnvironmentObject var lifeStore: LifeStore
+    @Environment(\.dismiss) private var dismiss
+
+    let personId: UUID
+
+    @State private var title = ""
+    @State private var date = Date()
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    TextField("項目名稱（例：改善提案發表、部門月報）", text: $title)
+                    DatePicker("日期", selection: $date, displayedComponents: .date)
+                } footer: {
+                    Text("簡易紀錄：只記項目與日期。這個人若是你的部屬，完整報告請照舊記在部屬頁，會自動顯示在卡片上。")
+                }
+            }
+            .navigationTitle("新增項目")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("新增") {
+                        guard var p = lifeStore.orgPeople.first(where: { $0.id == personId }) else { dismiss(); return }
+                        p.works.append(OrgPersonWorkItem(
+                            title: title.trimmingCharacters(in: .whitespaces), date: date))
+                        lifeStore.update(p)
+                        dismiss()
+                    }
+                    .bold()
+                    .disabled(title.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+            }
+        }
+        .presentationDetents([.medium])
+        .presentationDragIndicator(.visible)
+    }
+}
+
+// MARK: - [v25.394] 重複人員檢查與合併
+
+/// 列出同名同部門的重複人員，讓使用者看清楚「會留哪一筆、會併掉哪幾筆」再決定。
+///
+/// 刻意不做自動合併：合併是不可逆的，而且「同名」不保證是同一個人
+///（公司裡真的有兩個同名同事是有可能的），一定要讓人先看過。
+struct OrgPersonDuplicateReview: View {
+    @EnvironmentObject var lifeStore: LifeStore
+    @Environment(\.dismiss) private var dismiss
+
+    /// 打開時所在的部門，該部門的群組排在最前面
+    let focusDepartmentId: UUID?
+
+    @State private var excluded: Set<String> = []
+    @State private var confirming = false
+    @State private var mergedCount: Int?
+
+    init(focusDepartmentId: UUID?) {
+        self.focusDepartmentId = focusDepartmentId
+    }
+
+    private var groups: [LifeStore.OrgPersonDuplicateGroup] {
+        let all = lifeStore.orgPersonDuplicateGroups()
+        guard let focus = focusDepartmentId else { return all }
+        // 目前這個部門的排前面，其他部門接在後面（一次順手全部處理掉）
+        return all.filter { $0.departmentId == focus } + all.filter { $0.departmentId != focus }
+    }
+
+    private var selected: [LifeStore.OrgPersonDuplicateGroup] {
+        groups.filter { !excluded.contains($0.id) }
+    }
+
+    private var selectedRemovals: Int {
+        selected.reduce(0) { $0 + $1.duplicates.count }
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                if groups.isEmpty {
+                    Section {
+                        Text(mergedCount.map { "已合併 \($0) 筆重複人員，目前沒有其他重複。" }
+                             ?? "沒有偵測到重複人員。")
+                            .font(.callout).foregroundStyle(.secondary)
+                    }
+                } else {
+                    Section {
+                        Text(explainer)
+                            .font(.caption).foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    } header: {
+                        Text("為什麼會重複")
+                    }
+                    ForEach(groups) { group in
+                        groupSection(group)
+                    }
+                }
+            }
+            .navigationTitle("重複人員")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) { Button("關閉") { dismiss() } }
+                ToolbarItem(placement: .topBarTrailing) {
+                    if !groups.isEmpty {
+                        Button("合併") { confirming = true }
+                            .bold()
+                            .disabled(selected.isEmpty)
+                    }
+                }
+            }
+            .confirmationDialog("合併重複人員", isPresented: $confirming, titleVisibility: .visible) {
+                Button("合併 \(selectedRemovals) 筆", role: .destructive) { merge() }
+                Button("取消", role: .cancel) {}
+            } message: {
+                Text("會保留每一組標示「保留」的那一筆，其餘 \(selectedRemovals) 筆的照片、生日、備註、關係與作品會併進保留的那一筆，然後移除。這個動作沒辦法復原。")
+            }
+        }
+    }
+
+    private static let explainer =
+        "刪除部屬時，公司組織裡的那個人會被保留下來（他還在公司，只是不再是你的部屬），"
+        + "只解除兩邊的連結。之後同一個人重新被加成部屬時——重新加、從備份還原、"
+        + "或換手機後 iCloud 把部屬資料拉回來——系統找不到「已連結」的人員，就會再建一筆新的。"
+        + "部屬清單曾經整批重來過的話，整個部門就會變成兩倍。\n\n"
+        + "v25.394 起，新增部屬時會先找有沒有同名、同部門、而且還沒連結的既有人員可以認領，"
+        + "不會再重複建立。這裡是把已經產生的重複清掉。"
+
+    private var explainer: String { Self.explainer }
+
+    @ViewBuilder
+    private func groupSection(_ group: LifeStore.OrgPersonDuplicateGroup) -> some View {
+        let on = !excluded.contains(group.id)
+        Section {
+            personRow(group.keeper, isKeeper: true, reason: group.keepReason)
+            ForEach(group.duplicates) { dup in
+                personRow(dup, isKeeper: false, reason: nil)
+            }
+            Toggle("合併這一組", isOn: Binding(
+                get: { on },
+                set: { keep in
+                    if keep { excluded.remove(group.id) } else { excluded.insert(group.id) }
+                }
+            ))
+            .tint(.green)
+        } header: {
+            HStack(spacing: 6) {
+                Text(group.name.isEmpty ? "未命名" : group.name)
+                Text(deptName(group.departmentId))
+                    .font(.caption2).foregroundStyle(.secondary)
+                Spacer()
+                Text("\(group.duplicates.count + 1) 筆")
+                    .font(.caption2).foregroundStyle(.orange)
+            }
+        } footer: {
+            if !on { Text("已略過——真的有兩位同名同事時把這一組關掉。") }
+        }
+    }
+
+    private func personRow(_ p: OrgPerson, isKeeper: Bool, reason: String?) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: isKeeper ? "checkmark.circle.fill" : "arrow.triangle.merge")
+                .font(.system(size: 15))
+                .foregroundStyle(isKeeper ? Color.green : Color.orange)
+                .frame(width: 20)
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 6) {
+                    Text(isKeeper ? "保留" : "併入並移除")
+                        .font(.system(size: 10, weight: .bold))
+                        .padding(.horizontal, 6).padding(.vertical, 2)
+                        .background((isKeeper ? Color.green : Color.orange).opacity(0.13))
+                        .foregroundStyle(isKeeper ? Color.green : Color.orange)
+                        .clipShape(Capsule())
+                    if let reason {
+                        Text(reason).font(.caption2).foregroundStyle(.secondary)
+                    }
+                }
+                Text(personMeta(p))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.vertical, 2)
+    }
+
+    /// 字串在 ViewBuilder 外組好
+    private func personMeta(_ p: OrgPerson) -> String {
+        var parts: [String] = []
+        let t = p.jobTitle.trimmingCharacters(in: .whitespaces)
+        parts.append(t.isEmpty ? "未填職稱" : t)
+        if p.linkedSubordinateId != nil { parts.append("已連結部屬") }
+        if p.photoFileName != nil { parts.append("有照片") }
+        if p.birthday != nil { parts.append("有生日") }
+        if !p.relations.isEmpty { parts.append("關係 \(p.relations.count)") }
+        if !p.works.isEmpty { parts.append("作品 \(p.works.count)") }
+        if !p.note.trimmingCharacters(in: .whitespaces).isEmpty { parts.append("有記事") }
+        parts.append("建立 " + Self.dateFmt.string(from: p.dateAdded))
+        return parts.joined(separator: "・")
+    }
+
+    private func deptName(_ id: UUID?) -> String {
+        guard let id, let d = lifeStore.departments.first(where: { $0.id == id }) else {
+            return "未分部門"
+        }
+        let n = d.name.isEmpty ? d.code : d.name
+        return n.isEmpty ? "未命名部門" : n
+    }
+
+    private static let dateFmt: DateFormatter = {
+        let f = DateFormatter(); f.locale = Locale(identifier: "zh_Hant_TW")
+        f.dateFormat = "yyyy/M/d"; return f
+    }()
+
+    private func merge() {
+        let n = lifeStore.mergeOrgPersonDuplicates(selected)
+        mergedCount = (mergedCount ?? 0) + n
+        excluded = []
     }
 }
