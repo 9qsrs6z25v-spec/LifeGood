@@ -434,6 +434,12 @@ struct BusinessCardView: View {
     @EnvironmentObject var subscription: SubscriptionManager
     @State private var showAdd = false
     @State private var viewingCardId: UUID?
+    /// [v25.398] 要隱藏的公司，以 \n 分隔存進 AppStorage。
+    /// 存「名稱」而不是 id：名片沒有公司這個實體，公司只是名片上的一段文字。
+    /// 公司改名或整批刪光時，這裡會留下一個對不到任何名片的字串——
+    /// 篩選畫面只列目前實際存在的公司，所以不會變成看不見也刪不掉的幽靈。
+    @AppStorage("card_hidden_companies") private var hiddenCompaniesRaw = ""
+    @State private var showCompanyFilter = false
     @State private var searchText = ""
     @State private var debouncedSearchText = ""
     @State private var searchDebounceTask: Task<Void, Never>?
@@ -461,8 +467,25 @@ struct BusinessCardView: View {
         let photoData: Data?
     }
 
+    /// 分組／篩選用的公司鍵。沒填公司的歸「未分類」，才能一起被隱藏。
+    static func companyKey(_ card: BusinessCard) -> String {
+        card.company.trimmingCharacters(in: .whitespaces).isEmpty
+            ? "未分類" : card.company.trimmingCharacters(in: .whitespaces)
+    }
+
+    private var hiddenCompanies: Set<String> {
+        Set(hiddenCompaniesRaw.split(separator: "\n").map(String.init).filter { !$0.isEmpty })
+    }
+
+    private func setHiddenCompanies(_ set: Set<String>) {
+        hiddenCompaniesRaw = set.sorted().joined(separator: "\n")
+    }
+
     private var filteredCards: [BusinessCard] {
-        let sorted = lifeStore.businessCards.sorted { $0.date > $1.date }
+        let hidden = hiddenCompanies
+        let sorted = lifeStore.businessCards
+            .filter { hidden.isEmpty || !hidden.contains(Self.companyKey($0)) }
+            .sorted { $0.date > $1.date }
         if debouncedSearchText.isEmpty { return sorted }
         let q = debouncedSearchText.lowercased()
         return sorted.filter { card in
@@ -476,8 +499,54 @@ struct BusinessCardView: View {
         }
     }
 
+    /// 目前實際存在的公司與張數（含「未分類」），依張數多到少。
+    /// 只列現存的公司，所以 AppStorage 裡殘留的舊公司名不會變成看不見也關不掉的幽靈。
+    private var companyCounts: [(company: String, count: Int)] {
+        var buckets: [String: Int] = [:]
+        for c in lifeStore.businessCards { buckets[Self.companyKey(c), default: 0] += 1 }
+        return buckets
+            .map { (company: $0.key, count: $0.value) }
+            .sorted { a, b in
+                if a.count != b.count { return a.count > b.count }
+                return a.company.localizedStandardCompare(b.company) == .orderedAscending
+            }
+    }
+
+    /// 有隱藏公司時的橫幅：講清楚現在看到的是幾張、被藏了哪幾家，點 ✕ 全部還原
+    @ViewBuilder
+    private func companyFilterBanner(_ cards: [BusinessCard]) -> some View {
+        let hidden = hiddenCompanies
+        if !hidden.isEmpty {
+            HStack(spacing: 8) {
+                Image(systemName: "line.3.horizontal.decrease.circle.fill")
+                    .font(.system(size: 14)).foregroundStyle(.orange)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("顯示 \(cards.count) / \(lifeStore.businessCards.count) 張")
+                        .font(.caption.weight(.semibold)).foregroundStyle(.orange)
+                    Text("已隱藏：" + hidden.sorted().joined(separator: "、"))
+                        .font(.system(size: 10)).foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
+                Spacer(minLength: 0)
+                Button {
+                    withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                        hiddenCompaniesRaw = ""
+                    }
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 15)).foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.horizontal, 10).padding(.vertical, 7)
+            .background(Color.orange.opacity(0.10))
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+            .padding(.horizontal, 16).padding(.bottom, 8)
+        }
+    }
+
     private func groupedByCompany(_ cards: [BusinessCard]) -> [(key: String, value: [BusinessCard])] {
-        let grouped = Dictionary(grouping: cards) { $0.company.isEmpty ? "未分類" : $0.company }
+        let grouped = Dictionary(grouping: cards) { Self.companyKey($0) }
         return grouped.sorted { $0.key < $1.key }
     }
 
@@ -589,8 +658,26 @@ struct BusinessCardView: View {
 
     // MARK: - 空狀態（雙層脈衝光環 + 橘色 CTA）
 
+    /// 篩空與搜尋空要講不同的話——被公司篩掉時，叫人「換個關鍵字」是答非所問
+    private var emptyTitle: String {
+        let searching = !searchText.trimmingCharacters(in: .whitespaces).isEmpty
+        if !searching && !hiddenCompanies.isEmpty { return "這些公司目前被隱藏" }
+        return "找不到符合的名片"
+    }
+
+    private var emptyHint: String {
+        let searching = !searchText.trimmingCharacters(in: .whitespaces).isEmpty
+        if !searching && !hiddenCompanies.isEmpty {
+            return "右上角的篩選把所有公司都關掉了\n打開幾家就會看到名片"
+        }
+        return hiddenCompanies.isEmpty ? "換個關鍵字試試" : "換個關鍵字，或檢查右上角的公司篩選"
+    }
+
     private var emptyStateView: some View {
+        // [v25.398] 公司全被篩掉時也算「篩空了」，不能顯示「尚無名片紀錄」——
+        // 名片明明都還在，只是被自己藏起來了，那句話會讓人以為資料不見了
         let isSearching = !searchText.trimmingCharacters(in: .whitespaces).isEmpty
+            || (!hiddenCompanies.isEmpty && !lifeStore.businessCards.isEmpty)
         let accent = Color(red: 1.00, green: 0.55, blue: 0.25)
         return VStack(spacing: 24) {
             Spacer()
@@ -652,10 +739,10 @@ struct BusinessCardView: View {
             }
 
             VStack(spacing: 10) {
-                Text(isSearching ? "找不到符合的名片" : "尚無名片紀錄")
+                Text(isSearching ? emptyTitle : "尚無名片紀錄")
                     .font(.title3.weight(.semibold))
                     .foregroundStyle(.primary.opacity(0.75))
-                Text(isSearching ? "換個關鍵字試試" : "收集名片、拍照辨識\n或從聯絡人一鍵匯入")
+                Text(isSearching ? emptyHint : "收集名片、拍照辨識\n或從聯絡人一鍵匯入")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
@@ -742,6 +829,8 @@ struct BusinessCardView: View {
                     .padding(.vertical, 8)
                     .animation(.spring(response: 0.3, dampingFraction: 0.8), value: searchText.isEmpty)
                 }
+
+                companyFilterBanner(cards)
 
                 if cards.isEmpty {
                     // 改版空狀態（雙層脈衝光環 + CTA 按鈕）
@@ -874,6 +963,20 @@ struct BusinessCardView: View {
                             }
                         }
                     }
+                    // [v25.398] 公司篩選：有名片才出現
+                    ToolbarItem(placement: .topBarTrailing) {
+                        if !lifeStore.businessCards.isEmpty {
+                            Button {
+                                showCompanyFilter = true
+                            } label: {
+                                Image(systemName: hiddenCompanies.isEmpty
+                                      ? "line.3.horizontal.decrease.circle"
+                                      : "line.3.horizontal.decrease.circle.fill")
+                                    .font(.title3)
+                                    .foregroundStyle(hiddenCompanies.isEmpty ? Color.secondary : Color.orange)
+                            }
+                        }
+                    }
                     ToolbarItem(placement: .topBarTrailing) {
                         Menu {
                             Button {
@@ -907,6 +1010,12 @@ struct BusinessCardView: View {
                         }
                     }
                 }
+            }
+            .sheet(isPresented: $showCompanyFilter) {
+                BusinessCardCompanyFilterSheet(
+                    companies: companyCounts,
+                    hidden: hiddenCompanies,
+                    onApply: { setHiddenCompanies($0) })
             }
             .confirmationDialog(
                 "將 \(selectedIds.count) 張名片加入「聯絡人」？",
@@ -2293,5 +2402,103 @@ struct BusinessCardEditor: View {
         )
         if editing != nil { lifeStore.update(card) } else { lifeStore.add(card) }
         dismiss()
+    }
+}
+
+// MARK: - [v25.398] 公司篩選
+
+/// 勾選要「顯示」哪些公司。畫面上以顯示為主而不是隱藏為主——
+/// 使用者的心智是「我只要看這幾家」，用打勾表達比用叉叉直覺。
+/// 實際存進去的是「被隱藏的那幾家」，因為之後新增的公司預設要看得到。
+struct BusinessCardCompanyFilterSheet: View {
+    @Environment(\.dismiss) private var dismiss
+
+    let companies: [(company: String, count: Int)]
+    let onApply: (Set<String>) -> Void
+
+    @State private var hidden: Set<String>
+    @State private var query = ""
+
+    init(companies: [(company: String, count: Int)],
+         hidden: Set<String>,
+         onApply: @escaping (Set<String>) -> Void) {
+        self.companies = companies
+        self.onApply = onApply
+        // 只保留還存在的公司，順手清掉 AppStorage 裡的殘留
+        let live = Set(companies.map(\.company))
+        _hidden = State(initialValue: hidden.intersection(live))
+    }
+
+    private var listed: [(company: String, count: Int)] {
+        let q = query.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !q.isEmpty else { return companies }
+        return companies.filter { $0.company.lowercased().contains(q) }
+    }
+
+    private var shownCount: Int {
+        companies.filter { !hidden.contains($0.company) }.reduce(0) { $0 + $1.count }
+    }
+    private var totalCount: Int { companies.reduce(0) { $0 + $1.count } }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    HStack {
+                        Button("全部顯示") { hidden = [] }
+                            .disabled(hidden.isEmpty)
+                        Spacer()
+                        Button("全部隱藏") { hidden = Set(companies.map(\.company)) }
+                            .disabled(hidden.count == companies.count)
+                    }
+                    .font(.subheadline)
+                } footer: {
+                    Text("目前會顯示 \(shownCount) / \(totalCount) 張名片。這個設定只影響清單顯示，不會刪除任何名片，也不影響匯出或其他頁面。")
+                }
+
+                Section {
+                    if listed.isEmpty {
+                        Text("找不到符合的公司").font(.caption).foregroundStyle(.secondary)
+                    } else {
+                        ForEach(listed, id: \.company) { item in
+                            row(item)
+                        }
+                    }
+                } header: {
+                    Text("公司（\(companies.count)）")
+                }
+            }
+            .searchable(text: $query, prompt: "搜尋公司")
+            .navigationTitle("篩選公司")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) { Button("取消") { dismiss() } }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("完成") { onApply(hidden); dismiss() }.bold()
+                }
+            }
+        }
+    }
+
+    private func row(_ item: (company: String, count: Int)) -> some View {
+        let on = !hidden.contains(item.company)
+        return Button {
+            if on { hidden.insert(item.company) } else { hidden.remove(item.company) }
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: on ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 18))
+                    .foregroundStyle(on ? Color.green : Color.secondary.opacity(0.5))
+                Text(item.company)
+                    .foregroundStyle(on ? .primary : .secondary)
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+                Text("\(item.count)")
+                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.secondary)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 }
