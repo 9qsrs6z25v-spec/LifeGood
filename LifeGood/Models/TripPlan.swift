@@ -15,6 +15,7 @@ enum TripTravelMode: String, Codable, CaseIterable, Identifiable {
     case driving = "開車"
     case walking = "步行"
     case transit = "大眾運輸"
+    case plane = "飛機"
 
     var id: String { rawValue }
 
@@ -23,20 +24,28 @@ enum TripTravelMode: String, Codable, CaseIterable, Identifiable {
         case .driving: return "car.fill"
         case .walking: return "figure.walk"
         case .transit: return "tram.fill"
+        case .plane: return "airplane"
         }
     }
 
     /// MapKit 的對應運輸方式。
-    /// ⚠️ MKDirections 不提供大眾運輸的路線計算（Apple 只開放用 Maps App 開啟），
-    ///    所以 transit 會退回 automobile 當近似值，並在畫面上標明是估算。
+    /// ⚠️ MKDirections 只做開車與步行。大眾運輸 Apple 不開放路線計算（只允許用
+    ///    Maps App 開啟），飛機更是完全沒有——這兩種會走直線估算並在畫面上標「估」。
+    ///    這裡回傳 automobile 只是為了讓型別完整，supportsRouting == false 時用不到。
     var mkTransportType: MKDirectionsTransportType {
         switch self {
-        case .driving, .transit: return .automobile
+        case .driving, .transit, .plane: return .automobile
         case .walking: return .walking
         }
     }
 
-    var supportsRouting: Bool { self != .transit }
+    /// 能不能問 MKDirections 拿真實路徑
+    var supportsRouting: Bool {
+        switch self {
+        case .driving, .walking: return true
+        case .transit, .plane: return false
+        }
+    }
 
     /// 直線距離換算時間用的平均時速（km/h）。路線算不出來時的退路。
     var fallbackSpeedKmh: Double {
@@ -44,8 +53,35 @@ enum TripTravelMode: String, Codable, CaseIterable, Identifiable {
         case .driving: return 35      // 市區＋郊區混合的保守值
         case .walking: return 4.5
         case .transit: return 25      // 含等車與轉乘的體感速度
+        case .plane: return 700       // 巡航 800～900，含爬升下降的平均值
         }
     }
+
+    /// 直線距離要乘的迂迴係數。真實道路幾乎不可能是直線，1.0 會嚴重低估；
+    /// 但飛機幾乎就是走大圓航線，乘 1.35 反而會大幅高估。
+    var straightLineFactor: Double {
+        switch self {
+        case .driving: return 1.35
+        case .walking: return 1.25    // 人行道繞路比車道少一些
+        case .transit: return 1.30
+        case .plane: return 1.05      // 航線不是完全直線，但很接近
+        }
+    }
+
+    /// 與距離無關的固定耗時（分鐘）。
+    ///
+    /// 飛機的門到門時間裡，飛行本身常常不是最久的部分：報到、安檢、登機、
+    /// 下機、等行李加起來兩小時很正常。只算「距離 ÷ 時速」會嚴重低估。
+    /// ⚠️ 不含「去機場的路程」——那應該自己排成一段（機場當一個景點）。
+    var fixedOverheadMinutes: Int {
+        switch self {
+        case .plane: return 120
+        case .driving, .walking, .transit: return 0
+        }
+    }
+
+    /// 這個方式算出來的時間是不是一定是估的（不可能有真實路徑）
+    var isAlwaysEstimated: Bool { !supportsRouting }
 }
 
 // MARK: 子地點
@@ -75,6 +111,11 @@ struct TripStop: Identifiable, Codable {
     var longitude: Double?
     /// 預計停留時間（分鐘）
     var dwellMinutes: Int
+    /// 這一段（從**上一站**到這一站）要用的交通方式。nil＝用行程的預設。
+    ///
+    /// 放在「目的地那一站」上而不是獨立一個 leg 陣列，理由跟 legMeters／legSeconds
+    /// 一樣：站一插進來或搬動，覆寫就跟著那一段走，不會對不上。
+    var legModeOverride: TripTravelMode?
     /// 必去。排行程時用來標「這一站不能砍」——時間不夠要刪站時，先看沒標的那些。
     var isMustVisit: Bool
     /// 在這裡過夜。
@@ -107,7 +148,8 @@ struct TripStop: Identifiable, Codable {
 
     init(id: UUID = UUID(), name: String = "", address: String = "",
          latitude: Double? = nil, longitude: Double? = nil,
-         dwellMinutes: Int = 60, isMustVisit: Bool = false,
+         dwellMinutes: Int = 60, legModeOverride: TripTravelMode? = nil,
+         isMustVisit: Bool = false,
          isOvernight: Bool = false, checkOutTime: Date? = nil,
          arrivalOverride: Date? = nil, note: String = "",
          photoFileNames: [String] = [], subSpots: [TripSubSpot] = [],
@@ -116,6 +158,7 @@ struct TripStop: Identifiable, Codable {
         self.id = id; self.name = name; self.address = address
         self.latitude = latitude; self.longitude = longitude
         self.dwellMinutes = dwellMinutes
+        self.legModeOverride = legModeOverride
         self.isMustVisit = isMustVisit
         self.isOvernight = isOvernight; self.checkOutTime = checkOutTime
         self.arrivalOverride = arrivalOverride
@@ -133,6 +176,7 @@ struct TripStop: Identifiable, Codable {
         latitude = try? c.decodeIfPresent(Double.self, forKey: .latitude)
         longitude = try? c.decodeIfPresent(Double.self, forKey: .longitude)
         dwellMinutes = (try? c.decode(Int.self, forKey: .dwellMinutes)) ?? 60
+        legModeOverride = try? c.decodeIfPresent(TripTravelMode.self, forKey: .legModeOverride)
         isMustVisit = (try? c.decodeIfPresent(Bool.self, forKey: .isMustVisit)) ?? false
         isOvernight = (try? c.decodeIfPresent(Bool.self, forKey: .isOvernight)) ?? false
         checkOutTime = try? c.decodeIfPresent(Date.self, forKey: .checkOutTime)
@@ -148,7 +192,7 @@ struct TripStop: Identifiable, Codable {
 
     private enum CodingKeys: String, CodingKey {
         case id, name, address, latitude, longitude, dwellMinutes
-        case isMustVisit, isOvernight, checkOutTime, arrivalOverride, note
+        case legModeOverride, isMustVisit, isOvernight, checkOutTime, arrivalOverride, note
         case photoFileNames, subSpots, legMeters, legSeconds, legStamp, legIsEstimated
     }
 
@@ -287,6 +331,10 @@ struct TripPlan: Identifiable, Codable {
         let travelSeconds: Double?
         let travelMeters: Double?
         let isEstimated: Bool
+        /// 這一段實際用的交通方式（第一站沒有路段，放行程預設值佔位）
+        let mode: TripTravelMode
+        /// 這一段是使用者針對這段另外指定的方式，不是行程預設
+        let isModeOverridden: Bool
         /// 抵達時間是使用者指定的，不是推算的
         let isFixedArrival: Bool
         /// 推算出來的抵達時間（有指定時間時才有值，用來比對來不來得及）
@@ -297,6 +345,12 @@ struct TripPlan: Identifiable, Codable {
         let shortfallSeconds: Double
         /// 第幾天（0＝出發當天）。跨天行程用這個分色。
         let dayIndex: Int
+    }
+
+    /// 第 index 站「進來那一段」實際用的交通方式。第 0 站沒有路段，回傳預設值。
+    func effectiveMode(at index: Int) -> TripTravelMode {
+        guard stops.indices.contains(index) else { return travelMode }
+        return stops[index].legModeOverride ?? travelMode
     }
 
     /// 整條時間軸。沒有路線資料的段落交通時間算 0——寧可把它顯示成「未計算」，
@@ -334,6 +388,8 @@ struct TripPlan: Identifiable, Codable {
                             travelSeconds: secs,
                             travelMeters: i == 0 ? nil : stop.legMeters,
                             isEstimated: i == 0 ? false : stop.legIsEstimated,
+                            mode: effectiveMode(at: i),
+                            isModeOverridden: i > 0 && stop.legModeOverride != nil,
                             isFixedArrival: stop.arrivalOverride != nil,
                             estimatedArrival: stop.arrivalOverride == nil ? nil : estimated,
                             idleSeconds: idle, shortfallSeconds: shortfall,
@@ -380,6 +436,28 @@ struct TripPlan: Identifiable, Codable {
         stops.filter { !$0.isOvernight }.reduce(0) { $0 + max(0, $1.dwellMinutes) }
     }
 
+    /// 一種交通方式用了幾段。用具名結構而不是 tuple：Swift 的 key path 不支援 tuple 成員。
+    struct ModeSegmentCount: Identifiable {
+        let mode: TripTravelMode
+        let count: Int
+        var id: String { mode.rawValue }
+    }
+
+    /// 各種交通方式各幾段（只算有算出結果的段落）。摘要卡用來顯示混合了哪些方式。
+    var modeSegmentCounts: [ModeSegmentCount] {
+        var counts: [TripTravelMode: Int] = [:]
+        for i in stops.indices where i > 0 {
+            guard stops[i].legSeconds != nil else { continue }
+            counts[effectiveMode(at: i), default: 0] += 1
+        }
+        return TripTravelMode.allCases.compactMap { mode in
+            counts[mode].map { ModeSegmentCount(mode: mode, count: $0) }
+        }
+    }
+
+    /// 有沒有任何一段被單獨指定過交通方式
+    var hasModeOverride: Bool { stops.dropFirst().contains { $0.legModeOverride != nil } }
+
     /// 標了必去的站數
     var mustVisitCount: Int { stops.filter(\.isMustVisit).count }
     /// 過夜幾晚
@@ -398,7 +476,8 @@ struct TripPlan: Identifiable, Codable {
         for i in 1..<max(1, stops.count) {
             let cur = stops[i]
             guard stops[i - 1].coordinate != nil, cur.coordinate != nil else { continue }
-            if cur.legStamp != TripPlan.stamp(from: stops[i - 1], to: cur, mode: travelMode) { n += 1 }
+            if cur.legStamp != TripPlan.stamp(from: stops[i - 1], to: cur,
+                                              mode: effectiveMode(at: i)) { n += 1 }
         }
         return n
     }
@@ -422,9 +501,6 @@ struct TripPlan: Identifiable, Codable {
 /// 並把結果標成「估算」讓畫面說清楚。
 enum TripRouter {
 
-    /// 直線距離要乘的迂迴係數。真實道路幾乎不可能是直線，1.0 會嚴重低估。
-    static let detourFactor = 1.35
-
     struct Leg {
         let meters: Double
         let seconds: Double
@@ -446,11 +522,12 @@ enum TripRouter {
                            isEstimated: false)
             }
         }
-        // 退路：直線 × 迂迴係數
+        // 退路：直線 × 迂迴係數，再加上與距離無關的固定耗時（飛機的報到安檢登機）
         let straight = CLLocation(latitude: a.latitude, longitude: a.longitude)
             .distance(from: CLLocation(latitude: b.latitude, longitude: b.longitude))
-        let meters = straight * detourFactor
+        let meters = straight * mode.straightLineFactor
         let seconds = meters / 1000 / mode.fallbackSpeedKmh * 3600
+            + Double(mode.fixedOverheadMinutes) * 60
         return Leg(meters: meters, seconds: seconds, isEstimated: true)
     }
 
@@ -467,7 +544,9 @@ enum TripRouter {
         for i in 1..<plan.stops.count {
             let prev = plan.stops[i - 1]
             let cur = plan.stops[i]
-            let want = TripPlan.stamp(from: prev, to: cur, mode: plan.travelMode)
+            // 每一段各自的交通方式：使用者可以只把某一段改成步行或飛機
+            let mode = plan.effectiveMode(at: i)
+            let want = TripPlan.stamp(from: prev, to: cur, mode: mode)
             // 兩端都有座標才算；缺座標的段落把舊快取清掉，畫面才不會顯示對不上的數字
             guard prev.coordinate != nil, cur.coordinate != nil else {
                 if plan.stops[i].legMeters != nil || plan.stops[i].legSeconds != nil {
@@ -480,7 +559,7 @@ enum TripRouter {
                 continue
             }
             if cur.legStamp == want { continue }
-            guard let leg = await leg(from: prev, to: cur, mode: plan.travelMode) else { continue }
+            guard let leg = await leg(from: prev, to: cur, mode: mode) else { continue }
             plan.stops[i].legMeters = leg.meters
             plan.stops[i].legSeconds = leg.seconds
             plan.stops[i].legStamp = want

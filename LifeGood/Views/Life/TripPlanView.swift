@@ -294,13 +294,16 @@ struct TripPlanDetailView: View {
         }
     }
 
-    /// 觸發重算的條件指紋：站的順序／座標／交通方式任一改變就重跑
+    /// 觸發重算的條件指紋：站的順序／座標／交通方式任一改變就重跑。
+    /// 各段自己指定的交通方式也要算進來——只改某一段的方式時，
+    /// 行程預設值沒變，漏掉就不會重算那一段。
     private var routeTaskKey: String {
         guard let p = plan else { return "-" }
         return p.travelMode.rawValue + "|" + p.stops.map { s in
             let c = (s.latitude.map { String(format: "%.5f", $0) } ?? "-")
                 + "," + (s.longitude.map { String(format: "%.5f", $0) } ?? "-")
             return s.id.uuidString.prefix(8) + ":" + c
+                + ":" + (s.legModeOverride?.rawValue ?? "-")
         }.joined(separator: ";")
     }
 
@@ -314,6 +317,7 @@ struct TripPlanDetailView: View {
         // 直接覆蓋會把那些改動吃掉，所以寫回前先確認指紋還是同一份。
         guard changed, let live = plan,
               live.stops.map(\.id) == p.stops.map(\.id),
+              live.stops.map(\.legModeOverride) == p.stops.map(\.legModeOverride),
               live.travelMode == p.travelMode else { return }
         lifeStore.upsertTripPlan(p)
     }
@@ -353,6 +357,7 @@ struct TripPlanDetailView: View {
                 kpi("距離", p.totalMeters > 0
                     ? TripRouter.distanceText(p.totalMeters) : "—", "")
             }
+            if p.hasModeOverride { modeMixRow(p) }
             if p.mustVisitCount > 0 || p.overnightCount > 0 { marksRow(p) }
             if p.dayCount > 1 { dayLegend(p) }
             if isRouting {
@@ -388,6 +393,22 @@ struct TripPlanDetailView: View {
         )
         .clipShape(RoundedRectangle(cornerRadius: 20))
         .padding(.horizontal)
+    }
+
+    /// 有段落被單獨指定過交通方式時，列出整趟混了哪些方式各幾段
+    private func modeMixRow(_ p: TripPlan) -> some View {
+        HStack(spacing: 6) {
+            ForEach(p.modeSegmentCounts) { item in
+                HStack(spacing: 3) {
+                    Image(systemName: item.mode.icon).font(.system(size: 9))
+                    Text("\(item.count) 段").font(.system(size: 10, weight: .bold))
+                }
+                .foregroundStyle(.white)
+                .padding(.horizontal, 7).padding(.vertical, 3)
+                .background(Color.white.opacity(0.18), in: Capsule())
+            }
+            Spacer(minLength: 0)
+        }
     }
 
     /// 必去與住宿的計數。這兩個是排行程時最常看的標記，放在摘要卡上。
@@ -571,7 +592,15 @@ struct TripPlanDetailView: View {
             Rectangle().fill(c.opacity(0.28))
                 .frame(width: 1.5, height: 26)
             HStack(spacing: 5) {
-                Image(systemName: p.travelMode.icon).font(.system(size: 9, weight: .bold))
+                Image(systemName: slot.mode.icon).font(.system(size: 9, weight: .bold))
+                // 這一段被單獨指定過方式就把名稱寫出來，跟預設的那些區分開
+                if slot.isModeOverridden {
+                    Text(slot.mode.rawValue)
+                        .font(.system(size: 9, weight: .bold))
+                        .padding(.horizontal, 4).padding(.vertical, 1)
+                        .background(c.opacity(0.14)).foregroundStyle(c)
+                        .clipShape(Capsule())
+                }
                 Text(legText(slot)).font(.system(size: 10, weight: .semibold))
                 if slot.isEstimated {
                     Text("估").font(.system(size: 8, weight: .bold))
@@ -671,6 +700,16 @@ struct TripPlanDetailView: View {
                         Button("編輯") { editingStop = slot.stop }
                         Button(slot.stop.isMustVisit ? "取消必去" : "標為必去") {
                             toggleMustVisit(slot.stop.id)
+                        }
+                        if slot.index > 0 {
+                            Menu("這一段怎麼過來") {
+                                Button("用行程預設（" + (plan?.travelMode ?? .driving).rawValue + "）") {
+                                    setLegMode(slot.stop.id, nil)
+                                }
+                                ForEach(TripTravelMode.allCases) { m in
+                                    Button(m.rawValue) { setLegMode(slot.stop.id, m) }
+                                }
+                            }
                         }
                         Button("在這之後插入景點") {
                             insertIndex = slot.index + 1
@@ -783,6 +822,17 @@ struct TripPlanDetailView: View {
         }
     }
 
+    /// 這一段的交通方式。從時間軸直接改，不必開編輯畫面——
+    /// 「這段走過去就好」是排行程時很常做的微調。
+    private func setLegMode(_ stopId: UUID, _ mode: TripTravelMode?) {
+        guard var p = plan, let i = p.stops.firstIndex(where: { $0.id == stopId }),
+              i > 0, p.stops[i].legModeOverride != mode else { return }
+        p.stops[i].legModeOverride = mode
+        // 這一段要重算：清掉它的快取指紋，.task 會自己補上
+        p.stops[i].legStamp = nil
+        lifeStore.upsertTripPlan(p)
+    }
+
     /// 必去只是一個開關，不必為它開一次編輯畫面
     private func toggleMustVisit(_ stopId: UUID) {
         guard var p = plan, let i = p.stops.firstIndex(where: { $0.id == stopId }) else { return }
@@ -885,9 +935,7 @@ struct TripPlanSettingsSheet: View {
                 } header: {
                     Text("交通")
                 } footer: {
-                    Text(mode.supportsRouting
-                         ? "改交通方式會重新計算每一段路的距離與時間。"
-                         : "Apple 不開放大眾運輸的路線計算，所以這個模式是用直線距離乘上迂迴係數估的，段落上會標「估」。要精確時間請用地圖開啟該景點查。")
+                    Text(Self.modeFooter(mode))
                 }
                 Section {
                     TextField("備註", text: $note, axis: .vertical).lineLimit(2...6)
@@ -912,6 +960,25 @@ struct TripPlanSettingsSheet: View {
         }
     }
 
+    /// 字串在 ViewBuilder 外組好
+    private static func modeFooter(_ mode: TripTravelMode) -> String {
+        var t: String
+        switch mode {
+        case .driving, .walking:
+            t = "開車與步行會向地圖服務要真實路徑，算出來的是實際道路距離與行駛時間"
+                + "（依一般路況估算，不含即時路況）。"
+        case .transit:
+            t = "Apple 不開放大眾運輸的路線計算，所以這個方式是用直線距離乘上迂迴係數估的，"
+                + "段落上會標「估」。要精確時間請用地圖開啟該景點查。"
+        case .plane:
+            t = "飛機沒有路線服務可問，是用大圓距離估的，並加上 120 分鐘固定耗時"
+                + "（報到、安檢、登機、下機、等行李），段落上會標「估」。"
+        }
+        t += "\n\n這裡設的是整趟的預設值。單獨某一段想改成步行或飛機，"
+            + "到那一站的編輯畫面裡「怎麼過來」指定即可；沒指定的段落會跟著這個預設值變。"
+        return t
+    }
+
     private func save() {
         // 從 store 現撈，不要用打開這張表單那一刻的快照——
         // 使用者可能在這之前才剛加過景點（同 EquipmentEditorSheet v25.385 的教訓）
@@ -922,9 +989,13 @@ struct TripPlanSettingsSheet: View {
         live.note = note.trimmingCharacters(in: .whitespacesAndNewlines)
         if live.travelMode != mode {
             live.travelMode = mode
-            // 交通方式換了，每一段的距離時間都要重算——把快取指紋清掉即可，
-            // 詳情頁的 .task 會自己補算
-            for i in live.stops.indices { live.stops[i].legStamp = nil }
+            // 預設方式換了，跟著預設走的那些段落要重算——把它們的快取指紋清掉，
+            // 詳情頁的 .task 會自己補算。
+            // 被單獨指定過方式的段落不受影響，指紋留著，免得白打一次 MapKit
+            //（清成 nil 會讓 fillMissingLegs 認為過期而整段重算）。
+            for i in live.stops.indices where live.stops[i].legModeOverride == nil {
+                live.stops[i].legStamp = nil
+            }
         }
         lifeStore.upsertTripPlan(live)
         dismiss()
@@ -950,6 +1021,8 @@ struct TripStopEditorSheet: View {
     /// 指定抵達時間（關閉＝由上一站推算）
     @State private var hasArrivalTime = false
     @State private var arrivalTime = Date()
+    /// 這一段的交通方式；nil＝用行程的預設
+    @State private var legMode: TripTravelMode?
     @State private var isMustVisit = false
     @State private var isOvernight = false
     @State private var checkOutTime = TripStopEditorSheet.defaultCheckOut
@@ -1035,6 +1108,24 @@ struct TripStopEditorSheet: View {
                     Text(isOvernight
                          ? "這一站會成為當天的最後一站，時間軸在這裡換日；隔天從這裡開始，第一段路的交通時間從你設定的出發時刻算起。過夜的站不用填停留時間。"
                          : "必去的站會標星號，時間不夠要砍站時一眼看得出哪些不能砍。住宿的地方請打開「在這裡過夜」。")
+                }
+
+                if !isFirstStop {
+                    Section {
+                        Picker("交通方式", selection: Binding(
+                            get: { legMode?.rawValue ?? "" },
+                            set: { legMode = TripTravelMode(rawValue: $0) }
+                        )) {
+                            Text("用行程預設（" + planDefaultMode.rawValue + "）").tag("")
+                            ForEach(TripTravelMode.allCases) { m in
+                                Label(m.rawValue, systemImage: m.icon).tag(m.rawValue)
+                            }
+                        }
+                    } header: {
+                        Text("怎麼過來")
+                    } footer: {
+                        Text(legModeFooter)
+                    }
                 }
 
                 Section {
@@ -1132,6 +1223,7 @@ struct TripStopEditorSheet: View {
                 latitude = e.latitude; longitude = e.longitude
                 dwellMinutes = e.dwellMinutes; note = e.note
                 photoFileNames = e.photoFileNames; subSpots = e.subSpots
+                legMode = e.legModeOverride
                 isMustVisit = e.isMustVisit
                 isOvernight = e.isOvernight
                 if let out = e.checkOutTime { checkOutTime = out }
@@ -1142,6 +1234,33 @@ struct TripStopEditorSheet: View {
             }
             .onDisappear { searchDebounce?.cancel() }
         }
+    }
+
+    private var planDefaultMode: TripTravelMode {
+        lifeStore.tripPlan(id: planId)?.travelMode ?? .driving
+    }
+
+    /// 這一站是不是整條行程的第一站。第一站前面沒有路段，選交通方式沒有意義
+    ///（從家裡到第一站那一段本來就沒在算——要算就把家當成一個景點加進去）。
+    private var isFirstStop: Bool {
+        guard let plan = lifeStore.tripPlan(id: planId) else { return true }
+        if let e = editing { return plan.stops.first?.id == e.id }
+        return (insertAt ?? plan.stops.count) == 0
+    }
+
+    private var legModeFooter: String {
+        let m = legMode ?? planDefaultMode
+        var t = "從上一站到這一站要用的方式。不選就跟著行程設定走，改行程預設時這一段也會跟著變。"
+        if m == .plane {
+            t += "\n\n飛機沒有路線服務可問，是用大圓距離估的，並且加了 120 分鐘的固定耗時"
+            + "（報到、安檢、登機、下機、等行李）。不含「去機場的路程」——那段請把機場"
+            + "當成一個景點自己排進去。"
+        } else if m == .transit {
+            t += "\n\nApple 不開放大眾運輸的路線計算，這個方式是用直線距離估的，會標「估」。"
+        } else {
+            t += "\n\n開車與步行會向地圖服務要真實路徑，算出來的是實際道路距離與行駛時間。"
+        }
+        return t
     }
 
     /// 「必去」是一鍵切換，做成整列可點的按鈕而不是右邊那顆小開關——
@@ -1244,6 +1363,9 @@ struct TripStopEditorSheet: View {
         stop.latitude = latitude
         stop.longitude = longitude
         stop.dwellMinutes = max(0, dwellMinutes)
+        // 交通方式換了就把這一段的路線快取作廢（下面統一清 legStamp 時會處理，
+        // 這裡只負責存值）
+        stop.legModeOverride = legMode
         stop.isMustVisit = isMustVisit
         stop.isOvernight = isOvernight
         // 沒開過夜就不要留著退房時刻，免得之後重新打開時帶出上次改過的值
