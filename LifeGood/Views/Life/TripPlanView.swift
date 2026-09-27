@@ -201,8 +201,20 @@ struct TripPlanDetailView: View {
 
     @State private var editingStop: TripStop?
     /// 要插在哪個位置（nil＝加在最後）
-    @State private var insertIndex: Int?
-    @State private var addingStop = false
+    /// 新增景點要插在哪個位置。
+    ///
+    /// ⚠️ 刻意走 .sheet(item:) 而不是 .sheet(isPresented:) 搭一個另外的 @State 位置。
+    ///    v25.399～25.405 是後者，結果「在這之後插入景點」每次都插到最後面：
+    ///    sheet 的 content 閉包在讀位置時，拿到的是**寫入生效前**的那份快照
+    ///    （按下按鈕那一刻兩個 @State 一起寫，開關那個生效了、位置那個還沒），
+    ///    於是 insertAt 一律是 nil，也就是「加在最後」。
+    ///    把位置放進 item 裡，它就跟 presentation 綁在同一次寫入，不可能讀到舊的。
+    private struct StopInsertion: Identifiable {
+        let id = UUID()
+        /// nil＝加在最後
+        let at: Int?
+    }
+    @State private var insertion: StopInsertion?
     @State private var showSettings = false
     @State private var isRouting = false
     @State private var removingStop: TripStop?
@@ -265,8 +277,8 @@ struct TripPlanDetailView: View {
                     TripPlanSettingsSheet(plan: p).environmentObject(lifeStore)
                 }
             }
-            .sheet(isPresented: $addingStop) {
-                TripStopEditorSheet(planId: planId, editing: nil, insertAt: insertIndex)
+            .sheet(item: $insertion) { ins in
+                TripStopEditorSheet(planId: planId, editing: nil, insertAt: ins.at)
                     .environmentObject(lifeStore)
             }
             .sheet(item: $editingStop) { stop in
@@ -626,8 +638,7 @@ struct TripPlanDetailView: View {
             .foregroundStyle(.secondary)
             Spacer(minLength: 0)
             Button {
-                insertIndex = slot.index
-                addingStop = true
+                insertion = StopInsertion(at: slot.index)
             } label: {
                 Image(systemName: "plus.circle")
                     .font(.system(size: 14)).foregroundStyle(c)
@@ -712,8 +723,7 @@ struct TripPlanDetailView: View {
                             }
                         }
                         Button("在這之後插入景點") {
-                            insertIndex = slot.index + 1
-                            addingStop = true
+                            insertion = StopInsertion(at: slot.index + 1)
                         }
                         Divider()
                         if slot.index > 0 {
@@ -858,8 +868,7 @@ struct TripPlanDetailView: View {
 
     private func addButton(_ p: TripPlan) -> some View {
         Button {
-            insertIndex = nil
-            addingStop = true
+            insertion = StopInsertion(at: nil)
         } label: {
             HStack(spacing: 6) {
                 Image(systemName: "plus.circle.fill")
