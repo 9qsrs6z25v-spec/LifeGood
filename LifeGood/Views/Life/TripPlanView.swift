@@ -1,6 +1,7 @@
 import SwiftUI
 import MapKit
 import PhotosUI
+import UIKit
 
 // MARK: - 旅遊規劃
 //
@@ -39,6 +40,12 @@ struct TripPlanListView: View {
 
     @State private var openPlanId: UUID?
     @State private var removing: TripPlan?
+    @State private var sharing: SharePlanText?
+
+    private struct SharePlanText: Identifiable {
+        let id = UUID()
+        let text: String
+    }
     /// 剛用＋開出來、還沒填任何東西的行程 id。
     /// 不能在 onDismiss 才讀 openPlanId——sheet 關閉時綁定已經先被設成 nil 了。
     @State private var freshPlanId: UUID?
@@ -81,6 +88,9 @@ struct TripPlanListView: View {
                 set: { openPlanId = $0?.id }
             ), onDismiss: { discardIfBlank() }) { box in
                 TripPlanDetailView(planId: box.id).environmentObject(lifeStore)
+            }
+            .sheet(item: $sharing) { item in
+                ShareSheet(items: [item.text])
             }
             .confirmationDialog("刪除行程", isPresented: Binding(
                 get: { removing != nil }, set: { if !$0 { removing = nil } }
@@ -152,6 +162,12 @@ struct TripPlanListView: View {
             Button(role: .destructive) { removing = plan } label: {
                 Label("刪除", systemImage: "trash")
             }
+            Button {
+                sharing = SharePlanText(text: TripShare.planText(plan))
+            } label: {
+                Label("分享", systemImage: "square.and.arrow.up")
+            }
+            .tint(.indigo)
         }
     }
 
@@ -215,6 +231,19 @@ struct TripPlanDetailView: View {
         let at: Int?
     }
     @State private var insertion: StopInsertion?
+    /// 點路段打開的那一段的位置（index＝目的地那一站）
+    @State private var legDetail: LegBox?
+    /// 要分享的文字。一樣走 .sheet(item:)，內容跟著 item 一起進去
+    @State private var sharing: ShareText?
+
+    private struct LegBox: Identifiable {
+        let id = UUID()
+        let index: Int
+    }
+    private struct ShareText: Identifiable {
+        let id = UUID()
+        let text: String
+    }
     @State private var showSettings = false
     @State private var isRouting = false
     @State private var removingStop: TripStop?
@@ -269,6 +298,15 @@ struct TripPlanDetailView: View {
                     }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
+                    if let p = plan, !p.stops.isEmpty {
+                        Button {
+                            sharing = ShareText(text: TripShare.planText(p))
+                        } label: {
+                            Image(systemName: "square.and.arrow.up").foregroundStyle(accent)
+                        }
+                    }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
                     Button("設定") { showSettings = true }.bold()
                 }
             }
@@ -287,6 +325,14 @@ struct TripPlanDetailView: View {
             }
             .sheet(isPresented: $showMap) {
                 if let p = plan { TripRouteMapSheet(plan: p) }
+            }
+            .sheet(item: $legDetail) { box in
+                if let p = plan {
+                    TripLegDetailSheet(plan: p, index: box.index)
+                }
+            }
+            .sheet(item: $sharing) { item in
+                ShareSheet(items: [item.text])
             }
             .confirmationDialog("刪除景點", isPresented: Binding(
                 get: { removingStop != nil }, set: { if !$0 { removingStop = nil } }
@@ -636,6 +682,9 @@ struct TripPlanDetailView: View {
                 }
             }
             .foregroundStyle(.secondary)
+            // 這一段可以點開看地圖與真實路線
+            Image(systemName: "chevron.right")
+                .font(.system(size: 8, weight: .bold)).foregroundStyle(.tertiary)
             Spacer(minLength: 0)
             Button {
                 insertion = StopInsertion(at: slot.index)
@@ -647,6 +696,9 @@ struct TripPlanDetailView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 2)
+        // ＋ 那顆自己吃掉點擊，所以整列可點不會跟它打架
+        .contentShape(Rectangle())
+        .onTapGesture { legDetail = LegBox(index: slot.index) }
     }
 
     private func legText(_ slot: TripPlan.Slot) -> String {
@@ -732,8 +784,14 @@ struct TripPlanDetailView: View {
                         if slot.index < (plan?.stops.count ?? 0) - 1 {
                             Button("往後移一站") { move(slot.index, by: 1) }
                         }
-                        if slot.stop.coordinate != nil {
-                            Button("用地圖開啟") { openInMaps(slot.stop) }
+                        Divider()
+                        Button("用 Apple 地圖開啟") { TripShare.openPlaceInMaps(slot.stop) }
+                        Button("分享這一站") { shareStop(slot.stop) }
+                        if !slot.stop.address.trimmingCharacters(in: .whitespaces).isEmpty {
+                            Button("拷貝地址") {
+                                UIPasteboard.general.string =
+                                    slot.stop.address.trimmingCharacters(in: .whitespaces)
+                            }
                         }
                         Divider()
                         Button("刪除", role: .destructive) { removingStop = slot.stop }
@@ -857,11 +915,9 @@ struct TripPlanDetailView: View {
         lifeStore.moveTripStops(planId: planId, from: IndexSet(integer: index), to: dest)
     }
 
-    private func openInMaps(_ stop: TripStop) {
-        guard let c = stop.coordinate else { return }
-        let item = MKMapItem(placemark: MKPlacemark(coordinate: c))
-        item.name = stop.displayName
-        item.openInMaps()
+    private func shareStop(_ stop: TripStop) {
+        guard let p = plan else { return }
+        sharing = ShareText(text: TripShare.stopText(stop, in: p))
     }
 
     // MARK: 加景點 / 空狀態
@@ -1858,5 +1914,298 @@ struct TripRouteMapSheet: View {
             }
             loadedLegs += 1
         }
+    }
+}
+
+// MARK: - 單段路線詳情
+
+/// 點時間軸上兩站之間那一列打開的畫面：這一段的地圖、真實路線與數字。
+///
+/// 與整條行程的地圖分開做，是因為要看的東西不一樣：整條是看「順序合不合理」，
+/// 這裡是看「這一段到底怎麼走、要多久」，所以地圖只框這兩點，數字也攤開講。
+struct TripLegDetailSheet: View {
+    @Environment(\.dismiss) private var dismiss
+
+    let plan: TripPlan
+    /// 目的地那一站的位置（與 legMeters 的歸屬一致）
+    let index: Int
+
+    @State private var polyline: MKPolyline?
+    @State private var isLoading = false
+    @State private var sharing: ShareText?
+
+    private struct ShareText: Identifiable {
+        let id = UUID()
+        let text: String
+    }
+
+    init(plan: TripPlan, index: Int) {
+        self.plan = plan
+        self.index = index
+    }
+
+    private var slots: [TripPlan.Slot] { plan.timeline }
+    private var to: TripPlan.Slot? {
+        slots.indices.contains(index) && index > 0 ? slots[index] : nil
+    }
+    private var from: TripPlan.Slot? {
+        slots.indices.contains(index - 1) ? slots[index - 1] : nil
+    }
+
+    private var dayColor: Color { TripDayPalette.color(to?.dayIndex ?? 0) }
+
+    private static let timeFmt: DateFormatter = {
+        let f = DateFormatter(); f.locale = Locale(identifier: "zh_Hant_TW")
+        f.dateFormat = "HH:mm"; return f
+    }()
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if let from, let to {
+                    content(from: from, to: to)
+                } else {
+                    Color.clear.onAppear { dismiss() }
+                }
+            }
+            .background(Color(.systemGroupedBackground))
+            .navigationTitle("這一段")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) { Button("關閉") { dismiss() } }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        sharing = ShareText(text: TripShare.legText(plan, index: index))
+                    } label: {
+                        Image(systemName: "square.and.arrow.up").foregroundStyle(dayColor)
+                    }
+                }
+            }
+            .sheet(item: $sharing) { item in
+                ShareSheet(items: [item.text])
+            }
+            .task { await loadRoute() }
+        }
+    }
+
+    private func content(from: TripPlan.Slot, to: TripPlan.Slot) -> some View {
+        ScrollView {
+            VStack(spacing: 14) {
+                mapCard(from: from, to: to)
+                factsCard(from: from, to: to)
+                actionButtons(from: from, to: to)
+            }
+            .padding(.vertical)
+        }
+    }
+
+    // MARK: 地圖
+
+    private func mapCard(from: TripPlan.Slot, to: TripPlan.Slot) -> some View {
+        ZStack(alignment: .topTrailing) {
+            if from.stop.coordinate != nil && to.stop.coordinate != nil {
+                Map(initialPosition: .automatic) {
+                    if let poly = polyline {
+                        MapPolyline(poly)
+                            .stroke(dayColor, style: StrokeStyle(lineWidth: 5, lineCap: .round,
+                                                                 lineJoin: .round))
+                    } else if let a = from.stop.coordinate, let b = to.stop.coordinate {
+                        MapPolyline(coordinates: [a, b])
+                            .stroke(dayColor.opacity(0.6),
+                                    style: StrokeStyle(lineWidth: 3, lineCap: .round,
+                                                       dash: [7, 5]))
+                    }
+                    if let a = from.stop.coordinate {
+                        Annotation(from.stop.displayName, coordinate: a) {
+                            endpointMarker(systemName: "figure.walk.departure",
+                                           color: TripDayPalette.color(from.dayIndex))
+                        }
+                    }
+                    if let b = to.stop.coordinate {
+                        Annotation(to.stop.displayName, coordinate: b) {
+                            endpointMarker(systemName: "mappin", color: dayColor)
+                        }
+                    }
+                }
+                .mapStyle(.standard(pointsOfInterest: .excludingAll))
+                .frame(height: 260)
+                if isLoading {
+                    HStack(spacing: 5) {
+                        ProgressView().scaleEffect(0.6)
+                        Text("正在取得真實路線").font(.system(size: 10, weight: .semibold))
+                    }
+                    .padding(.horizontal, 8).padding(.vertical, 5)
+                    .background(.ultraThinMaterial, in: Capsule())
+                    .padding(8)
+                }
+            } else {
+                VStack(spacing: 8) {
+                    Image(systemName: "mappin.slash")
+                        .font(.system(size: 26)).foregroundStyle(.tertiary)
+                    Text("這一段有景點沒有設座標，畫不出地圖")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity)
+                .frame(height: 160)
+                .background(Color(.systemBackground))
+            }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 18))
+        .padding(.horizontal)
+    }
+
+    private func endpointMarker(systemName: String, color: Color) -> some View {
+        ZStack {
+            Circle().fill(color).frame(width: 26, height: 26).shadow(radius: 2)
+            Image(systemName: systemName)
+                .font(.system(size: 12, weight: .bold)).foregroundStyle(.white)
+        }
+    }
+
+    // MARK: 數字
+
+    private func factsCard(from: TripPlan.Slot, to: TripPlan.Slot) -> some View {
+        VStack(spacing: 0) {
+            endpointRow(label: "從", slot: from, time: from.departure)
+            Rectangle().fill(Color(.separator).opacity(0.18))
+                .frame(height: 0.5).padding(.leading, 44)
+            endpointRow(label: "到", slot: to, time: to.arrival)
+            Rectangle().fill(Color(.separator).opacity(0.18))
+                .frame(height: 0.5).padding(.leading, 44)
+            HStack(spacing: 10) {
+                Image(systemName: to.mode.icon)
+                    .font(.system(size: 13)).foregroundStyle(dayColor)
+                    .frame(width: 24)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(travelHeadline(to))
+                        .font(.subheadline.weight(.semibold))
+                    Text(travelDetail(to))
+                        .font(.caption2).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 14).padding(.vertical, 10)
+        }
+        .background(Color(.systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .padding(.horizontal)
+    }
+
+    private func endpointRow(label: String, slot: TripPlan.Slot, time: Date) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Text(label)
+                .font(.system(size: 11, weight: .bold))
+                .foregroundStyle(.white)
+                .frame(width: 24, height: 24)
+                .background(Circle().fill(TripDayPalette.color(slot.dayIndex)))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(slot.stop.displayName)
+                    .font(.subheadline.weight(.semibold))
+                    .fixedSize(horizontal: false, vertical: true)
+                let address = slot.stop.address.trimmingCharacters(in: .whitespaces)
+                if !address.isEmpty {
+                    Text(address).font(.caption2).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                if slot.stop.coordinate == nil {
+                    Text("沒有座標").font(.caption2).foregroundStyle(.orange)
+                }
+            }
+            Spacer(minLength: 0)
+            Text(Self.timeFmt.string(from: time))
+                .font(.system(size: 13, weight: .bold, design: .rounded))
+                .foregroundStyle(TripDayPalette.color(slot.dayIndex))
+        }
+        .padding(.horizontal, 14).padding(.vertical, 10)
+    }
+
+    /// 字串在 ViewBuilder 外組好
+    private func travelHeadline(_ slot: TripPlan.Slot) -> String {
+        guard let s = slot.travelSeconds else { return slot.mode.rawValue + "・未計算路線" }
+        var t = slot.mode.rawValue + "・" + TripRouter.durationText(s)
+        if let m = slot.travelMeters { t += "・" + TripRouter.distanceText(m) }
+        return t
+    }
+
+    private func travelDetail(_ slot: TripPlan.Slot) -> String {
+        if slot.travelSeconds == nil {
+            return "兩端都要有座標才算得出距離與時間。"
+        }
+        if slot.isEstimated {
+            var t = polyline == nil
+                ? "這是估算值：用直線距離乘上迂迴係數 \(String(format: "%.2f", slot.mode.straightLineFactor)) 換算，"
+                    + "不是真實路徑。"
+                : "這是估算值，不是真實路徑。"
+            if slot.mode.fixedOverheadMinutes > 0 {
+                t += "另外加了 \(slot.mode.fixedOverheadMinutes) 分鐘固定耗時"
+                    + "（報到、安檢、登機、下機、等行李），不含去機場的路程。"
+            }
+            if !slot.mode.supportsRouting {
+                t += "\(slot.mode.rawValue)沒有路線服務可問，要精確時間請用下面的按鈕開 Apple 地圖查。"
+            }
+            return t
+        }
+        return "向地圖服務要到的真實路徑：實際道路距離與行駛時間（依一般路況估算，不含即時路況）。"
+    }
+
+    // MARK: 按鈕
+
+    private func actionButtons(from: TripPlan.Slot, to: TripPlan.Slot) -> some View {
+        VStack(spacing: 10) {
+            Button {
+                TripShare.openDirectionsInMaps(from: from.stop, to: to.stop, mode: to.mode)
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "arrow.triangle.turn.up.right.diamond.fill")
+                    Text("用 Apple 地圖導航").font(.subheadline.weight(.semibold))
+                }
+                .foregroundStyle(.white)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 13)
+                .background(LinearGradient(colors: [dayColor, dayColor.opacity(0.75)],
+                                           startPoint: .leading, endPoint: .trailing))
+                .clipShape(RoundedRectangle(cornerRadius: 14))
+            }
+            .buttonStyle(.plain)
+
+            HStack(spacing: 10) {
+                Button {
+                    TripShare.openPlaceInMaps(to.stop)
+                } label: {
+                    secondaryLabel(icon: "mappin.circle.fill", text: "看目的地")
+                }
+                .buttonStyle(.plain)
+                Button {
+                    sharing = ShareText(text: TripShare.legText(plan, index: index))
+                } label: {
+                    secondaryLabel(icon: "square.and.arrow.up", text: "分享這一段")
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal)
+    }
+
+    private func secondaryLabel(icon: String, text: String) -> some View {
+        HStack(spacing: 5) {
+            Image(systemName: icon)
+            Text(text).font(.caption.weight(.semibold))
+        }
+        .foregroundStyle(dayColor)
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 11)
+        .background(dayColor.opacity(0.12))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+
+    // MARK: 真實路線
+
+    @MainActor
+    private func loadRoute() async {
+        guard let from, let to, to.mode.supportsRouting, polyline == nil else { return }
+        isLoading = true
+        defer { isLoading = false }
+        polyline = await TripRouter.routePolyline(from: from.stop, to: to.stop, mode: to.mode)
     }
 }
