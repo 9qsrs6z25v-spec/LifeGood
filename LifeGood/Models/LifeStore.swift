@@ -2226,6 +2226,312 @@ class LifeStore: ObservableObject {
         save()
     }
 
+    // MARK: - 名片重複檢查與合併（v25.400）
+
+    /// 一組可能重複的名片。keeper 是建議留下來的那一張。
+    struct BusinessCardDuplicateGroup: Identifiable {
+        let id: String
+        let name: String
+        let company: String
+        let keeper: BusinessCard
+        let duplicates: [BusinessCard]
+        /// 建議留這一張的理由（顯示在檢查畫面上，讓使用者看得懂而不是盲按）
+        let keepReason: String
+    }
+
+    /// 合併做了什麼的回報。刻意連「放棄了什麼」也回報——
+    /// 一張名片只能連一位組織人員，兩張都連了不同人時一定得放棄一條，
+    /// 那件事必須讓使用者知道，不能無聲無息地掉。
+    struct BusinessCardMergeReport {
+        var mergedCount = 0
+        var orgPeopleRelinked = 0
+        var meetingAssigneesRemapped = 0
+        var sideRoleMembersRemapped = 0
+        var sideRoleMembersCleared = 0
+        var droppedPersonLinks: [String] = []
+    }
+
+    /// 名片的「豐富度」——合併時用來決定留哪一張。
+    private func businessCardRichness(_ c: BusinessCard) -> Int {
+        var score = 0
+        if c.photoFileName != nil { score += 3 }
+        if c.linkedOrgPersonId != nil { score += 2 }
+        score += c.phones.filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }.count
+        score += c.emails.filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }.count
+        score += c.faxes.filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }.count
+        if !c.note.trimmingCharacters(in: .whitespaces).isEmpty { score += 2 }
+        if !c.address.trimmingCharacters(in: .whitespaces).isEmpty { score += 1 }
+        if !c.primaryBusiness.trimmingCharacters(in: .whitespaces).isEmpty { score += 1 }
+        if !c.jobTitle.trimmingCharacters(in: .whitespaces).isEmpty { score += 1 }
+        if !c.department.trimmingCharacters(in: .whitespaces).isEmpty { score += 1 }
+        return score
+    }
+
+    /// 找出「同名同公司」的重複名片。
+    ///
+    /// ⚠️ 刻意把公司也算進比對鍵：同名但在兩家公司，多半是兩個不同的人；
+    ///    就算真的是同一個人換了工作，舊公司那張名片本身就是一段歷史，
+    ///    合併掉等於把它抹掉。跨公司的同名一律不視為重複（比照
+    ///    orgPersonDuplicateGroups() 只比同部門的道理）。
+    func businessCardDuplicateGroups() -> [BusinessCardDuplicateGroup] {
+        var buckets: [String: [BusinessCard]] = [:]
+        for c in businessCards {
+            let nameKey = Self.normalizedPersonName(c.name)
+            guard !nameKey.isEmpty else { continue }   // 沒名字的不比對，避免全部黏成一坨
+            let companyKey = Self.normalizedPersonName(c.company)
+            buckets[nameKey + "|" + companyKey, default: []].append(c)
+        }
+        var out: [BusinessCardDuplicateGroup] = []
+        for (key, group) in buckets where group.count > 1 {
+            // 留哪一張：① 有連到組織人員的（拆掉這條連結會讓雙向同步斷掉）
+            //           ② 資料比較完整的　③ 最早建立的
+            let sorted = group.sorted { a, b in
+                let la = a.linkedOrgPersonId != nil, lb = b.linkedOrgPersonId != nil
+                if la != lb { return la }
+                let ra = businessCardRichness(a), rb = businessCardRichness(b)
+                if ra != rb { return ra > rb }
+                return a.date < b.date
+            }
+            guard let keeper = sorted.first else { continue }
+            let reason: String
+            if keeper.linkedOrgPersonId != nil {
+                reason = "已連結公司組織人員"
+            } else if businessCardRichness(keeper) > 0 {
+                reason = "資料最完整"
+            } else {
+                reason = "最早建立"
+            }
+            out.append(BusinessCardDuplicateGroup(
+                id: key,
+                name: keeper.name.trimmingCharacters(in: .whitespaces),
+                company: keeper.company.trimmingCharacters(in: .whitespaces),
+                keeper: keeper,
+                duplicates: Array(sorted.dropFirst()),
+                keepReason: reason))
+        }
+        return out.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+    }
+
+    /// 重複出來的張數（不是組數）。0＝沒有重複。
+    ///
+    /// 名片頁每次重繪都會問這個，所以不走 businessCardDuplicateGroups()——
+    /// 那個要排序、要組理由字串，只為了一個數字不值得。
+    func businessCardDuplicateCount() -> Int {
+        var counts: [String: Int] = [:]
+        for c in businessCards {
+            let nameKey = Self.normalizedPersonName(c.name)
+            guard !nameKey.isEmpty else { continue }
+            counts[nameKey + "|" + Self.normalizedPersonName(c.company), default: 0] += 1
+        }
+        return counts.values.reduce(0) { $0 + max(0, $1 - 1) }
+    }
+
+    /// 這幾張名片裡建議留哪一張（與重複檢查用的是同一套排序）。
+    /// 給多選合併畫面當預設值用——使用者還是可以自己改。
+    func suggestedBusinessCardKeeper(among ids: [UUID]) -> UUID? {
+        let cards = businessCards.filter { ids.contains($0.id) }
+        return cards.sorted { a, b in
+            let la = a.linkedOrgPersonId != nil, lb = b.linkedOrgPersonId != nil
+            if la != lb { return la }
+            let ra = businessCardRichness(a), rb = businessCardRichness(b)
+            if ra != rb { return ra > rb }
+            return a.date < b.date
+        }.first?.id
+    }
+
+    /// 合併名片：把被併掉那幾張身上「keeper 沒有的東西」搬過去，
+    /// 再把所有指向它們的參照改指到 keeper，最後才移除。
+    @discardableResult
+    func mergeBusinessCards(keepId: UUID, absorbIds: [UUID]) -> BusinessCardMergeReport {
+        isLoading = true
+        defer { isLoading = false; save() }
+        var report = BusinessCardMergeReport()
+        performBusinessCardMerge(keepId: keepId, absorbIds: absorbIds, into: &report)
+        return report
+    }
+
+    /// 一次合併多組（重複檢查畫面用）。
+    @discardableResult
+    func mergeBusinessCardDuplicates(_ groups: [BusinessCardDuplicateGroup]) -> BusinessCardMergeReport {
+        guard !groups.isEmpty else { return BusinessCardMergeReport() }
+        isLoading = true
+        defer { isLoading = false; save() }
+        var report = BusinessCardMergeReport()
+        for g in groups {
+            performBusinessCardMerge(keepId: g.keeper.id,
+                                     absorbIds: g.duplicates.map(\.id), into: &report)
+        }
+        return report
+    }
+
+    /// 合併的本體。
+    ///
+    /// ⚠️ 刻意**不**走 deleteBusinessCard，那個方法對合併來說是壞的：
+    ///    ① 它無條件刪掉 photoFileName 的檔案。keeper 沒照片時合併會把被併那張的
+    ///       照片接手過去，檔名不變（photoURL 只是把存的名字接到目錄後面，不需要改名），
+    ///       接著刪掉就把剛接手的檔案連 iCloud 一起刪了，keeper 只剩空頭檔名。
+    ///    ② 它把組織人員的 linkedBusinessCardId 設成 nil。合併要的是「改指到 keeper」，
+    ///       設成 nil 等於把這次要保住的關聯弄丟，而且只處理它自己記著的那一位，
+    ///       別人身上指過來的連結會留成懸空 id。
+    ///    ③ 它自己會 isLoading = true / defer { isLoading = false } 再 save()，
+    ///       包在外層的批次守衛裡會被它的 defer 提早關掉，變成每併一張存一次。
+    ///
+    /// ⚠️ 也**不**依賴 repairSideRoleMemberLinks()：那個只把名片 id 換成部屬 id，
+    ///    而且只在啟動與雲端重載時跑，這裡的改名換 id 它看不到。
+    private func performBusinessCardMerge(keepId: UUID, absorbIds: [UUID],
+                                          into report: inout BusinessCardMergeReport) {
+        guard let ki = businessCards.firstIndex(where: { $0.id == keepId }) else { return }
+        // 先把被併的那幾張抓成值：迴圈裡會一邊移除，索引會跑掉
+        let losers = absorbIds.filter { $0 != keepId }
+            .compactMap { id in businessCards.first(where: { $0.id == id }) }
+        guard !losers.isEmpty else { return }
+
+        var keeper = businessCards[ki]
+        for loser in losers {
+            let loserId = loser.id, keeperId = keeper.id
+
+            // ① 欄位：keeper 空的才補，有值的一律不覆蓋
+            if keeper.name.trimmingCharacters(in: .whitespaces).isEmpty { keeper.name = loser.name }
+            if keeper.company.trimmingCharacters(in: .whitespaces).isEmpty { keeper.company = loser.company }
+            if keeper.department.trimmingCharacters(in: .whitespaces).isEmpty { keeper.department = loser.department }
+            if keeper.jobTitle.trimmingCharacters(in: .whitespaces).isEmpty { keeper.jobTitle = loser.jobTitle }
+            if keeper.address.trimmingCharacters(in: .whitespaces).isEmpty { keeper.address = loser.address }
+            if keeper.primaryBusiness.trimmingCharacters(in: .whitespaces).isEmpty {
+                keeper.primaryBusiness = loser.primaryBusiness
+            }
+            // 電話／Email／傳真是多筆，合併後併集去重：兩張名片各記一支電話是
+            // 重複名片最常見的樣子，只取一邊等於把另一支丟掉
+            keeper.phones = Self.mergedContactList(keeper.phones, loser.phones)
+            keeper.emails = Self.mergedContactList(keeper.emails, loser.emails)
+            keeper.faxes = Self.mergedContactList(keeper.faxes, loser.faxes)
+            // 備註兩邊都有就接起來，不要丟掉任何一邊寫過的字
+            let loserNote = loser.note.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !loserNote.isEmpty && !keeper.note.contains(loserNote) {
+                keeper.note = keeper.note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    ? loserNote : keeper.note + "\n" + loserNote
+            }
+            // 日期取較早的那個：這欄是「拿到名片的日子」，先認識的那次才是真的
+            if loser.date < keeper.date { keeper.date = loser.date }
+            if keeper.photoFileName == nil { keeper.photoFileName = loser.photoFileName }
+
+            // ② 組織人員連結：改指到 keeper，不是設成 nil
+            //
+            // 掃全表而不是只看 loser.linkedOrgPersonId——那一欄可能是 nil 或過期的，
+            // 但人員身上指過來的連結還在，漏掉就留下懸空 id。
+            var keeperPersonId = keeper.linkedOrgPersonId
+            for i in orgPeople.indices where orgPeople[i].linkedBusinessCardId == loserId {
+                if keeperPersonId == nil || keeperPersonId == orgPeople[i].id {
+                    orgPeople[i].linkedBusinessCardId = keeperId
+                    keeperPersonId = orgPeople[i].id
+                    report.orgPeopleRelinked += 1
+                } else {
+                    // 留下的名片已經連到另一位人員。一張名片只能對一位，
+                    // 所以這條只能放棄——但要記下來回報，不能無聲無息地掉。
+                    orgPeople[i].linkedBusinessCardId = nil
+                    report.droppedPersonLinks.append(
+                        orgPeople[i].name.trimmingCharacters(in: .whitespaces))
+                }
+            }
+            // loser 自己記著的人員（反向連結沒建好的情況）：對方還沒被別張名片佔走才接手
+            if keeperPersonId == nil, let pid = loser.linkedOrgPersonId,
+               let pi = orgPeople.firstIndex(where: { $0.id == pid }),
+               orgPeople[pi].linkedBusinessCardId == nil {
+                orgPeople[pi].linkedBusinessCardId = keeperId
+                keeperPersonId = pid
+                report.orgPeopleRelinked += 1
+            }
+            keeper.linkedOrgPersonId = keeperPersonId
+
+            // ③ 會議議程項目的負責人：改指，不是移除
+            //
+            // deleteSubordinate 走的是 removeAll（那邊人真的走了），合併不能照抄——
+            // 移除等於把「這件事是誰負責的」弄掉，是有損的。
+            // 兩張名片同時被指派到同一個項目時，改指後要去重，否則同一人列兩次。
+            for si in subordinates.indices {
+                for mi in subordinates[si].meetings.indices {
+                    for ii in subordinates[si].meetings[mi].items.indices {
+                        if Self.remapAssignee(&subordinates[si].meetings[mi].items[ii].assigneeIds,
+                                              from: loserId, to: keeperId) {
+                            report.meetingAssigneesRemapped += 1
+                        }
+                    }
+                    // 週期性會議的每一次開會各存一份議程，兩邊都要掃
+                    for oi in subordinates[si].meetings[mi].occurrences.indices {
+                        for ii in subordinates[si].meetings[mi].occurrences[oi].items.indices {
+                            if Self.remapAssignee(&subordinates[si].meetings[mi]
+                                                    .occurrences[oi].items[ii].assigneeIds,
+                                                  from: loserId, to: keeperId) {
+                                report.meetingAssigneesRemapped += 1
+                            }
+                        }
+                    }
+                }
+            }
+
+            // ④ 兼任職務成員的 linkedPersonId
+            //
+            // 同一個職務裡已經有人指向 keeper 時，把這筆的連結清成 nil 就好，
+            // 不要製造兩列指向同一個人；成員那一列本身不刪——name／contact／dutyInRole
+            // 都是使用者自己編過的快照（比照 repairSideRoleMemberLinks 的既有做法）。
+            for i in milestones.indices {
+                guard var members = milestones[i].sideRoleMembers,
+                      members.contains(where: { $0.linkedPersonId == loserId }) else { continue }
+                for j in members.indices where members[j].linkedPersonId == loserId {
+                    if members.contains(where: { $0.linkedPersonId == keeperId }) {
+                        members[j].linkedPersonId = nil
+                        report.sideRoleMembersCleared += 1
+                    } else {
+                        members[j].linkedPersonId = keeperId
+                        report.sideRoleMembersRemapped += 1
+                    }
+                }
+                milestones[i].sideRoleMembers = members
+            }
+
+            // ⑤ 照片：keeper 沒接手才刪，否則會把剛交出去的檔案連 iCloud 一起刪掉
+            if let name = loser.photoFileName, keeper.photoFileName != name {
+                BusinessCard.deletePhoto(name)
+            }
+
+            // ⑥ 移除被併掉的那張
+            businessCards.removeAll { $0.id == loserId }
+            report.mergedCount += 1
+        }
+        // keeper 可能因為上面的 removeAll 換了位置，重新定位再寫回
+        if let idx = businessCards.firstIndex(where: { $0.id == keeper.id }) {
+            businessCards[idx] = keeper
+        }
+    }
+
+    /// 把一份負責人清單裡的 loser 換成 keeper 並去重；回傳有沒有改到。
+    /// 兩張名片同時被指派到同一個項目時，不去重會讓同一個人列兩次。
+    private static func remapAssignee(_ ids: inout [UUID],
+                                      from loserId: UUID, to keeperId: UUID) -> Bool {
+        guard ids.contains(loserId) else { return false }
+        var seen = Set<UUID>()
+        var out: [UUID] = []
+        for id in ids {
+            let mapped = (id == loserId) ? keeperId : id
+            if seen.insert(mapped).inserted { out.append(mapped) }
+        }
+        ids = out
+        return true
+    }
+
+    /// 兩份多值聯絡資料的併集（去空白、去重複，保留原有順序）。
+    static func mergedContactList(_ a: [String], _ b: [String]) -> [String] {
+        var seen = Set<String>()
+        var out: [String] = []
+        for v in a + b {
+            let t = v.trimmingCharacters(in: .whitespaces)
+            guard !t.isEmpty else { continue }
+            // 比對時去掉分隔符號：02-1234-5678 與 0212345678 是同一支
+            let key = t.filter { !" -()".contains($0) }
+            if seen.insert(key.isEmpty ? t : key).inserted { out.append(t) }
+        }
+        return out
+    }
+
     // MARK: - 家庭衍生里程碑
 
     /// 配偶（若有）

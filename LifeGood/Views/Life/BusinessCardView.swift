@@ -455,11 +455,22 @@ struct BusinessCardView: View {
     @State private var selectedIds: Set<UUID> = []
     @State private var showExportConfirm = false
     @State private var exportAlertMessage: String?
+    // [v25.400] 合併重複名片
+    @State private var showDuplicateReview = false
+    @State private var mergePlan: CardMergePlan?
+    @State private var mergeResultMessage: String?
     // 美化進場動畫旗標
     @State private var heroCardAppeared = false
     @State private var cardsAppeared = false
     @State private var emptyIconPulse = false
     @State private var emptyPulseTask: Task<Void, Never>?
+
+    /// 多選合併要處理的那幾張。用包裝型別而不是 Set 本身，是為了走 .sheet(item:)——
+    /// 打開那一刻就把 id 定住，之後篩選條件變了也不會把別的名片捲進來。
+    fileprivate struct CardMergePlan: Identifiable {
+        let id = UUID()
+        let ids: [UUID]
+    }
 
     fileprivate struct ScannedCardDraft: Identifiable {
         let id = UUID()
@@ -543,6 +554,73 @@ struct BusinessCardView: View {
             .clipShape(RoundedRectangle(cornerRadius: 10))
             .padding(.horizontal, 16).padding(.bottom, 8)
         }
+    }
+
+    /// [v25.400] 偵測到同名同公司的名片時提示一下。
+    /// 只在沒搜尋、沒在多選時出現，免得把清單上方塞滿橫幅。
+    @ViewBuilder
+    private func duplicateBanner() -> some View {
+        let extras = lifeStore.businessCardDuplicateCount()
+        if extras > 0 && searchText.isEmpty && !isMultiSelect {
+            Button {
+                if subscription.isPremium { showDuplicateReview = true }
+                else { showPremiumAlert = true }
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "arrow.triangle.merge")
+                        .font(.system(size: 14)).foregroundStyle(.orange)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("有 \(extras) 張可能重複的名片")
+                            .font(.caption.weight(.semibold)).foregroundStyle(.orange)
+                        Text("同名而且同公司。點這裡看要留哪一張再合併")
+                            .font(.system(size: 10)).foregroundStyle(.secondary)
+                    }
+                    Spacer(minLength: 0)
+                    Image(systemName: "chevron.right")
+                        .font(.caption2.weight(.semibold)).foregroundStyle(.tertiary)
+                }
+                .padding(.horizontal, 10).padding(.vertical, 7)
+                .background(Color.orange.opacity(0.10))
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+                .padding(.horizontal, 16).padding(.bottom, 8)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    /// 開合併畫面。
+    ///
+    /// ⚠️ 只收「畫面上看得到的」那幾張：selectedIds 是選的時候記下來的，
+    ///    選完之後若改了公司篩選或搜尋字，裡面可能留著現在看不到的名片 id。
+    ///    不過濾的話，使用者會在看不到的情況下把一張名片併掉。
+    private func startMerge(visible: [BusinessCard]) {
+        guard subscription.isPremium else { showPremiumAlert = true; return }
+        let visibleIds = Set(visible.map { $0.id })
+        let ids = visible.filter { selectedIds.contains($0.id) }.map { $0.id }
+        guard ids.count >= 2 else {
+            mergeResultMessage = selectedIds.count >= 2
+                ? "選到的名片有部分目前被篩選或搜尋條件擋住了，看不到的不會併。先清掉篩選再試一次。"
+                : "要合併請選兩張以上。"
+            return
+        }
+        // 順手把已經看不到的選取清掉，免得數字跟畫面對不上
+        selectedIds = selectedIds.filter { visibleIds.contains($0) }
+        mergePlan = CardMergePlan(ids: ids)
+    }
+
+    private func finishMerge(_ report: LifeStore.BusinessCardMergeReport) {
+        // 被併掉的 id 已經不存在了，選取與正在看的那張都要收掉，
+        // 否則詳情 sheet 會停在一張撈不到資料的空白名片上
+        if let vid = viewingCardId,
+           !lifeStore.businessCards.contains(where: { $0.id == vid }) {
+            viewingCardId = nil
+        }
+        withAnimation {
+            isMultiSelect = false
+            selectedIds = []
+        }
+        mergeResultMessage = report.summaryText
     }
 
     private func groupedByCompany(_ cards: [BusinessCard]) -> [(key: String, value: [BusinessCard])] {
@@ -831,6 +909,7 @@ struct BusinessCardView: View {
                 }
 
                 companyFilterBanner(cards)
+                duplicateBanner()
 
                 if cards.isEmpty {
                     // 改版空狀態（雙層脈衝光環 + CTA 按鈕）
@@ -942,6 +1021,14 @@ struct BusinessCardView: View {
                                       ? "checkmark.circle.fill" : "checklist")
                                     .foregroundStyle(.blue)
                             }
+                            // [v25.400] 兩張以上才有合併的意義
+                            Button {
+                                startMerge(visible: cards)
+                            } label: {
+                                Image(systemName: "arrow.triangle.merge")
+                                    .foregroundStyle(.orange)
+                            }
+                            .disabled(selectedIds.count < 2)
                             Button {
                                 if selectedIds.isEmpty { return }
                                 showExportConfirm = true
@@ -1091,6 +1178,23 @@ struct BusinessCardView: View {
                     importContact(contact)
                 }
                 .ignoresSafeArea()
+            }
+            // [v25.400] 重複檢查與多選合併
+            .sheet(isPresented: $showDuplicateReview) {
+                BusinessCardDuplicateReview()
+            }
+            .sheet(item: $mergePlan) { plan in
+                BusinessCardMergeSheet(cardIds: plan.ids) { report in
+                    finishMerge(report)
+                }
+            }
+            .alert("合併名片", isPresented: Binding(
+                get: { mergeResultMessage != nil },
+                set: { if !$0 { mergeResultMessage = nil } }
+            )) {
+                Button("好", role: .cancel) {}
+            } message: {
+                Text(mergeResultMessage ?? "")
             }
             .premiumLockAlert(isPresented: $showPremiumAlert)
         }
@@ -1668,6 +1772,13 @@ struct BusinessCardDetailView: View {
         }
         .sheet(isPresented: $showQRFullscreen) {
             qrFullscreenView
+        }
+        // [v25.400] 這張名片不在了就自動關掉。
+        // 名片可能在這張詳情開著的時候消失（被合併掉、或 iCloud 從別台裝置同步了刪除），
+        // 而上面的 `card` 撈不到時會退回一張空白名片——畫面會停在一張什麼都沒有的卡片上，
+        // 連編輯都能打開，看起來像資料壞了。
+        .onChange(of: lifeStore.businessCards.count) { _, _ in
+            if !lifeStore.businessCards.contains(where: { $0.id == cardId }) { dismiss() }
         }
     }
 
@@ -2500,5 +2611,418 @@ struct BusinessCardCompanyFilterSheet: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+    }
+}
+
+// MARK: - 合併回報的文字化（v25.400）
+
+extension LifeStore.BusinessCardMergeReport {
+    /// 合併完之後要跟使用者講什麼。刻意連「順手改掉了哪些別的地方」都講——
+    /// 合併會動到會議負責人與兼任成員名單，不講的話使用者會以為只是少了一張名片。
+    var summaryText: String {
+        guard mergedCount > 0 else { return "沒有可以合併的名片。" }
+        var lines = ["已把 \(mergedCount) 張名片併進保留的那一張。"]
+        var moved: [String] = []
+        if orgPeopleRelinked > 0 { moved.append("公司組織人員連結 \(orgPeopleRelinked) 筆") }
+        if meetingAssigneesRemapped > 0 { moved.append("會議議程負責人 \(meetingAssigneesRemapped) 處") }
+        if sideRoleMembersRemapped > 0 { moved.append("兼任職務成員 \(sideRoleMembersRemapped) 筆") }
+        if !moved.isEmpty { lines.append("已改指到保留的名片：" + moved.joined(separator: "、") + "。") }
+        if sideRoleMembersCleared > 0 {
+            lines.append("有 \(sideRoleMembersCleared) 筆兼任成員因為同一個職務裡已經有人指向保留的那張名片，"
+                         + "只解除了連結（成員那一列與名字都留著），避免同一個人在名單裡出現兩次。")
+        }
+        if !droppedPersonLinks.isEmpty {
+            let names = droppedPersonLinks.map { $0.isEmpty ? "未命名" : $0 }
+            lines.append("⚠️ 保留的名片已經連到別位人員，所以放棄了與「"
+                         + names.joined(separator: "、")
+                         + "」的連結。要改連結請到公司組織那邊重新指定。")
+        }
+        return lines.joined(separator: "\n\n")
+    }
+}
+
+// MARK: - 名片合併（多選）
+
+/// 從多選挑出來的幾張名片合併成一張。
+///
+/// 刻意讓使用者自己選要留哪一張：多選是「我知道這幾張是同一個人」的手動操作，
+/// 系統只給建議（資料最完整／有連結組織人員的那張），不能替使用者決定。
+struct BusinessCardMergeSheet: View {
+    @EnvironmentObject var lifeStore: LifeStore
+    @Environment(\.dismiss) private var dismiss
+
+    let cardIds: [UUID]
+    /// 合併完回報給呼叫端（讓名片頁收掉多選、顯示結果）
+    let onMerged: (LifeStore.BusinessCardMergeReport) -> Void
+
+    @State private var keepId: UUID?
+    @State private var confirming = false
+    @State private var loaded = false
+
+    init(cardIds: [UUID], onMerged: @escaping (LifeStore.BusinessCardMergeReport) -> Void) {
+        self.cardIds = cardIds
+        self.onMerged = onMerged
+    }
+
+    private var cards: [BusinessCard] {
+        // 照 cardIds 的順序撈，找不到的（同時被刪掉）就跳過
+        cardIds.compactMap { id in lifeStore.businessCards.first { $0.id == id } }
+    }
+
+    private var keeper: BusinessCard? {
+        guard let keepId else { return nil }
+        return cards.first { $0.id == keepId }
+    }
+
+    private var losers: [BusinessCard] {
+        cards.filter { $0.id != keepId }
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    Text(Self.explainer)
+                        .font(.caption).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                } header: {
+                    Text("合併會做什麼")
+                }
+
+                Section {
+                    ForEach(cards) { card in
+                        keeperRow(card)
+                    }
+                } header: {
+                    Text("要保留哪一張")
+                } footer: {
+                    Text("其餘 \(max(0, cards.count - 1)) 張會把資料併進這一張後移除。")
+                }
+
+                if let k = keeper, !losers.isEmpty {
+                    Section {
+                        ForEach(mergePreview(keeper: k), id: \.self) { line in
+                            HStack(alignment: .top, spacing: 8) {
+                                Image(systemName: "arrow.turn.down.right")
+                                    .font(.system(size: 11)).foregroundStyle(.green)
+                                    .padding(.top, 2)
+                                Text(line).font(.caption)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+                    } header: {
+                        Text("會併過去的內容")
+                    }
+
+                    let warnings = mergeWarnings(keeper: k)
+                    if !warnings.isEmpty {
+                        Section {
+                            ForEach(warnings, id: \.self) { line in
+                                HStack(alignment: .top, spacing: 8) {
+                                    Image(systemName: "exclamationmark.triangle.fill")
+                                        .font(.system(size: 11)).foregroundStyle(.orange)
+                                        .padding(.top, 2)
+                                    Text(line).font(.caption)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+                            }
+                        } header: {
+                            Text("要注意")
+                        }
+                    }
+                }
+            }
+            .navigationTitle("合併名片")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) { Button("取消") { dismiss() } }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("合併") { confirming = true }
+                        .bold()
+                        .disabled(keeper == nil || losers.isEmpty)
+                }
+            }
+            .confirmationDialog("合併名片", isPresented: $confirming, titleVisibility: .visible) {
+                Button("合併 \(losers.count) 張", role: .destructive) { merge() }
+                Button("取消", role: .cancel) {}
+            } message: {
+                Text("這個動作沒辦法復原。")
+            }
+            .onAppear {
+                guard !loaded else { return }
+                loaded = true
+                keepId = lifeStore.suggestedBusinessCardKeeper(among: cardIds) ?? cards.first?.id
+            }
+        }
+    }
+
+    private static let explainer =
+        "留下的那張名片，空著的欄位會由其他張補上（已經有值的一律不覆蓋）；"
+        + "電話、Email、傳真是併集去重，兩張各記一支都會留著；備註會接在後面。\n\n"
+        + "指向被併掉那幾張的東西會改指到保留的那一張，不是解除——"
+        + "包括公司組織人員的連結、部屬會議議程裡的負責人（含週期性會議的每一次），"
+        + "以及兼任職務的成員名單。"
+
+    private func keeperRow(_ card: BusinessCard) -> some View {
+        let isKeeper = card.id == keepId
+        return Button {
+            keepId = card.id
+        } label: {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: isKeeper ? "largecircle.fill.circle" : "circle")
+                    .font(.system(size: 17))
+                    .foregroundStyle(isKeeper ? Color.green : Color.secondary.opacity(0.5))
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 6) {
+                        Text(card.name.trimmingCharacters(in: .whitespaces).isEmpty
+                             ? "未命名" : card.name)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.primary)
+                        if isKeeper {
+                            Text("保留")
+                                .font(.system(size: 10, weight: .bold))
+                                .padding(.horizontal, 6).padding(.vertical, 2)
+                                .background(Color.green.opacity(0.13))
+                                .foregroundStyle(.green)
+                                .clipShape(Capsule())
+                        }
+                    }
+                    Text(Self.cardMeta(card))
+                        .font(.caption2).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 0)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// 字串在 ViewBuilder 外組好
+    static func cardMeta(_ c: BusinessCard) -> String {
+        var parts: [String] = []
+        let company = c.company.trimmingCharacters(in: .whitespaces)
+        parts.append(company.isEmpty ? "未填公司" : company)
+        let title = c.jobTitle.trimmingCharacters(in: .whitespaces)
+        if !title.isEmpty { parts.append(title) }
+        if c.photoFileName != nil { parts.append("有照片") }
+        if c.linkedOrgPersonId != nil { parts.append("已連結組織人員") }
+        if !c.phones.isEmpty { parts.append("電話 \(c.phones.count)") }
+        if !c.emails.isEmpty { parts.append("Email \(c.emails.count)") }
+        if !c.note.trimmingCharacters(in: .whitespaces).isEmpty { parts.append("有備註") }
+        parts.append("建立 " + dateFmt.string(from: c.date))
+        return parts.joined(separator: "・")
+    }
+
+    static let dateFmt: DateFormatter = {
+        let f = DateFormatter(); f.locale = Locale(identifier: "zh_Hant_TW")
+        f.dateFormat = "yyyy/M/d"; return f
+    }()
+
+    /// 預覽「會補上什麼」。只列真的會變的東西，不要列一堆沒差的項目。
+    private func mergePreview(keeper k: BusinessCard) -> [String] {
+        var out: [String] = []
+        func blank(_ s: String) -> Bool { s.trimmingCharacters(in: .whitespaces).isEmpty }
+        for l in losers {
+            var gains: [String] = []
+            if blank(k.company) && !blank(l.company) { gains.append("公司「\(l.company)」") }
+            if blank(k.department) && !blank(l.department) { gains.append("部門「\(l.department)」") }
+            if blank(k.jobTitle) && !blank(l.jobTitle) { gains.append("職稱「\(l.jobTitle)」") }
+            if blank(k.address) && !blank(l.address) { gains.append("地址") }
+            if blank(k.primaryBusiness) && !blank(l.primaryBusiness) { gains.append("主要業務") }
+            if k.photoFileName == nil && l.photoFileName != nil { gains.append("照片") }
+            let newPhones = LifeStore.mergedContactList(k.phones, l.phones).count - k.phones.count
+            if newPhones > 0 { gains.append("電話 \(newPhones) 支") }
+            let newEmails = LifeStore.mergedContactList(k.emails, l.emails).count - k.emails.count
+            if newEmails > 0 { gains.append("Email \(newEmails) 筆") }
+            let newFaxes = LifeStore.mergedContactList(k.faxes, l.faxes).count - k.faxes.count
+            if newFaxes > 0 { gains.append("傳真 \(newFaxes) 筆") }
+            if !blank(l.note) && !k.note.contains(l.note.trimmingCharacters(in: .whitespacesAndNewlines)) {
+                gains.append("備註")
+            }
+            let name = blank(l.name) ? "未命名" : l.name
+            out.append(gains.isEmpty
+                       ? "「\(name)」沒有保留的那張缺的欄位，只會被移除。"
+                       : "從「\(name)」補上：" + gains.joined(separator: "、"))
+        }
+        return out
+    }
+
+    /// 會被放棄或改動到別處的事，合併前先講。
+    private func mergeWarnings(keeper k: BusinessCard) -> [String] {
+        var out: [String] = []
+        // 兩張連到不同人員 → 一張名片只能對一位，一定得放棄一條
+        if let kp = k.linkedOrgPersonId {
+            for l in losers {
+                guard let lp = l.linkedOrgPersonId, lp != kp else { continue }
+                let lname = lifeStore.orgPeople.first { $0.id == lp }?.name ?? "某位人員"
+                let kname = lifeStore.orgPeople.first { $0.id == kp }?.name ?? "另一位人員"
+                out.append("保留的名片已經連到「\(kname)」，所以「\(lname)」的連結會被解除"
+                           + "（一張名片只能對一位組織人員）。要改請到公司組織那邊重新指定。")
+            }
+        }
+        // 被併掉的照片會真的被刪掉（keeper 已有照片時）
+        let droppedPhotos = losers.filter { $0.photoFileName != nil }.count
+            - (k.photoFileName == nil ? 1 : 0)
+        if droppedPhotos > 0 {
+            out.append("被併掉的名片還有 \(droppedPhotos) 張照片會一起刪掉（保留的那張已經有照片了）。")
+        }
+        return out
+    }
+
+    private func merge() {
+        guard let keepId else { return }
+        let report = lifeStore.mergeBusinessCards(keepId: keepId, absorbIds: losers.map(\.id))
+        onMerged(report)
+        dismiss()
+    }
+}
+
+// MARK: - 名片重複檢查
+
+/// 列出同名同公司的重複名片，讓使用者看清楚「會留哪一張、會併掉哪幾張」再決定。
+///
+/// 刻意不做自動合併：合併不可逆，而且「同名同公司」也不保證是同一個人
+///（大公司裡真的有同名同事），一定要讓人先看過（比照 OrgPersonDuplicateReview）。
+struct BusinessCardDuplicateReview: View {
+    @EnvironmentObject var lifeStore: LifeStore
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var excluded: Set<String> = []
+    @State private var confirming = false
+    @State private var resultText: String?
+
+    private var groups: [LifeStore.BusinessCardDuplicateGroup] {
+        lifeStore.businessCardDuplicateGroups()
+    }
+
+    private var selected: [LifeStore.BusinessCardDuplicateGroup] {
+        groups.filter { !excluded.contains($0.id) }
+    }
+
+    private var selectedRemovals: Int {
+        selected.reduce(0) { $0 + $1.duplicates.count }
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                if let resultText {
+                    Section {
+                        Text(resultText)
+                            .font(.caption).foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    } header: {
+                        Text("合併結果")
+                    }
+                }
+                if groups.isEmpty {
+                    Section {
+                        Text(resultText == nil
+                             ? "沒有偵測到重複的名片。"
+                             : "目前沒有其他重複的名片。")
+                            .font(.callout).foregroundStyle(.secondary)
+                    }
+                } else {
+                    Section {
+                        Text(Self.explainer)
+                            .font(.caption).foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    } header: {
+                        Text("怎麼判斷的")
+                    }
+                    ForEach(groups) { group in
+                        groupSection(group)
+                    }
+                }
+            }
+            .navigationTitle("重複名片")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) { Button("關閉") { dismiss() } }
+                ToolbarItem(placement: .topBarTrailing) {
+                    if !groups.isEmpty {
+                        Button("合併") { confirming = true }
+                            .bold()
+                            .disabled(selected.isEmpty)
+                    }
+                }
+            }
+            .confirmationDialog("合併重複名片", isPresented: $confirming, titleVisibility: .visible) {
+                Button("合併 \(selectedRemovals) 張", role: .destructive) { merge() }
+                Button("取消", role: .cancel) {}
+            } message: {
+                Text("會保留每一組標示「保留」的那一張，其餘 \(selectedRemovals) 張的欄位、電話、Email 與備註會併進去，"
+                     + "指向它們的組織人員連結、會議負責人與兼任成員會改指到保留的那一張，然後移除。這個動作沒辦法復原。")
+            }
+        }
+    }
+
+    private static let explainer =
+        "比對的是「姓名相同、而且公司也相同」的名片。\n\n"
+        + "跨公司的同名一律不算重複：多半是兩個不同的人；"
+        + "就算真的是同一個人換了工作，舊公司那張名片本身就是一段紀錄，"
+        + "併掉等於把它抹掉。那種情況請用多選（長按名片）自己挑要留哪一張。"
+
+    @ViewBuilder
+    private func groupSection(_ group: LifeStore.BusinessCardDuplicateGroup) -> some View {
+        let on = !excluded.contains(group.id)
+        Section {
+            cardRow(group.keeper, isKeeper: true, reason: group.keepReason)
+            ForEach(group.duplicates) { dup in
+                cardRow(dup, isKeeper: false, reason: nil)
+            }
+            Toggle("合併這一組", isOn: Binding(
+                get: { on },
+                set: { keep in
+                    if keep { excluded.remove(group.id) } else { excluded.insert(group.id) }
+                }
+            ))
+            .tint(.green)
+        } header: {
+            HStack(spacing: 6) {
+                Text(group.name.isEmpty ? "未命名" : group.name)
+                Text(group.company.isEmpty ? "未填公司" : group.company)
+                    .font(.caption2).foregroundStyle(.secondary)
+                Spacer()
+                Text("\(group.duplicates.count + 1) 張")
+                    .font(.caption2).foregroundStyle(.orange)
+            }
+        } footer: {
+            if !on { Text("已略過——真的有兩位同名同事時把這一組關掉。") }
+        }
+    }
+
+    private func cardRow(_ c: BusinessCard, isKeeper: Bool, reason: String?) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: isKeeper ? "checkmark.circle.fill" : "arrow.triangle.merge")
+                .font(.system(size: 15))
+                .foregroundStyle(isKeeper ? Color.green : Color.orange)
+                .frame(width: 20)
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 6) {
+                    Text(isKeeper ? "保留" : "併入並移除")
+                        .font(.system(size: 10, weight: .bold))
+                        .padding(.horizontal, 6).padding(.vertical, 2)
+                        .background((isKeeper ? Color.green : Color.orange).opacity(0.13))
+                        .foregroundStyle(isKeeper ? Color.green : Color.orange)
+                        .clipShape(Capsule())
+                    if let reason {
+                        Text(reason).font(.caption2).foregroundStyle(.secondary)
+                    }
+                }
+                Text(BusinessCardMergeSheet.cardMeta(c))
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.vertical, 2)
+    }
+
+    private func merge() {
+        let report = lifeStore.mergeBusinessCardDuplicates(selected)
+        resultText = report.summaryText
+        excluded = []
     }
 }
