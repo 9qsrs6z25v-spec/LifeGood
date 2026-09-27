@@ -10,11 +10,32 @@ import PhotosUI
 // 路線距離與時間由 TripRouter 算好存進 TripStop（見那邊的快取說明），
 // 所以時間軸重繪不會反覆打 MapKit，離線也看得到上次算過的結果。
 
+/// 跨天行程的分色。
+///
+/// 第一天沿用旅遊地圖的娛樂紫（整個旅遊模組的主題色），之後每天換一個色系；
+/// 超過六天就循環——顏色是用來分段的，不是用來當天數編號的。
+enum TripDayPalette {
+    static let colors: [Color] = [
+        Color(red: 0.68, green: 0.40, blue: 1.00),   // 娛樂紫
+        Color(red: 0.00, green: 0.66, blue: 0.62),   // 青
+        Color(red: 1.00, green: 0.55, blue: 0.20),   // 橘
+        Color(red: 0.93, green: 0.35, blue: 0.55),   // 桃紅
+        Color(red: 0.30, green: 0.58, blue: 0.95),   // 藍
+        Color(red: 0.42, green: 0.70, blue: 0.28)    // 綠
+    ]
+
+    static func color(_ dayIndex: Int) -> Color {
+        guard !colors.isEmpty else { return .purple }
+        let i = ((dayIndex % colors.count) + colors.count) % colors.count
+        return colors[i]
+    }
+}
+
 struct TripPlanListView: View {
     @EnvironmentObject var lifeStore: LifeStore
     @Environment(\.dismiss) private var dismiss
 
-    private let accent = Color(red: 0.68, green: 0.40, blue: 1.00)   // 沿用旅遊地圖的娛樂紫
+    private let accent = TripDayPalette.color(0)   // 沿用旅遊地圖的娛樂紫
 
     @State private var openPlanId: UUID?
     @State private var removing: TripPlan?
@@ -136,7 +157,9 @@ struct TripPlanListView: View {
 
     /// 字串在 ViewBuilder 外組好
     private func planMeta(_ plan: TripPlan) -> String {
-        var parts = ["\(plan.stops.count) 站", plan.travelMode.rawValue]
+        var parts = ["\(plan.stops.count) 站"]
+        if plan.dayCount > 1 { parts.append("\(plan.dayCount) 天") }
+        parts.append(plan.travelMode.rawValue)
         if plan.totalMeters > 0 { parts.append(TripRouter.distanceText(plan.totalMeters)) }
         if plan.totalSeconds > 0 { parts.append("全程 " + TripRouter.durationText(plan.totalSeconds)) }
         return parts.joined(separator: "・")
@@ -172,7 +195,7 @@ struct TripPlanDetailView: View {
 
     let planId: UUID
 
-    private let accent = Color(red: 0.68, green: 0.40, blue: 1.00)
+    private let accent = TripDayPalette.color(0)
 
     @State private var editingStop: TripStop?
     /// 要插在哪個位置（nil＝加在最後）
@@ -321,12 +344,14 @@ struct TripPlanDetailView: View {
             Rectangle().fill(Color.white.opacity(0.20)).frame(height: 0.5)
             HStack(spacing: 0) {
                 kpi("景點", "\(p.stops.count)", "站")
+                if p.dayCount > 1 { kpi("天數", "\(p.dayCount)", "天") }
                 kpi("停留", "\(p.totalDwellMinutes)", "分")
                 kpi("交通", p.totalTravelSeconds > 0
                     ? TripRouter.durationText(p.totalTravelSeconds) : "—", "")
                 kpi("距離", p.totalMeters > 0
                     ? TripRouter.distanceText(p.totalMeters) : "—", "")
             }
+            if p.dayCount > 1 { dayLegend(p) }
             if isRouting {
                 HStack(spacing: 6) {
                     ProgressView().scaleEffect(0.6).tint(.white)
@@ -334,6 +359,14 @@ struct TripPlanDetailView: View {
                 }
             } else if p.unroutedLegCount > 0 {
                 Text("有 \(p.unroutedLegCount) 段還沒算出路線")
+                    .font(.caption2).foregroundStyle(.white.opacity(0.85))
+            }
+            if p.unreachableCount > 0 {
+                Text("⚠️ 有 \(p.unreachableCount) 站的指定抵達時間比推算的還早，照這個排法趕不上")
+                    .font(.caption2).foregroundStyle(.white)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else if p.totalIdleSeconds > 300 {
+                Text("為了等指定時間，中間空著 " + TripRouter.durationText(p.totalIdleSeconds))
                     .font(.caption2).foregroundStyle(.white.opacity(0.85))
             }
         }
@@ -352,6 +385,38 @@ struct TripPlanDetailView: View {
         )
         .clipShape(RoundedRectangle(cornerRadius: 20))
         .padding(.horizontal)
+    }
+
+    /// 跨天時在摘要卡底下放一條色帶，說明哪個顏色是第幾天
+    private func dayLegend(_ p: TripPlan) -> some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                ForEach(0..<p.dayCount, id: \.self) { d in
+                    HStack(spacing: 4) {
+                        Circle().fill(TripDayPalette.color(d))
+                            .frame(width: 7, height: 7)
+                            .overlay(Circle().stroke(Color.white.opacity(0.7), lineWidth: 0.75))
+                        Text(Self.dayLabel(p, dayIndex: d))
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(.white.opacity(0.95))
+                    }
+                    .padding(.horizontal, 7).padding(.vertical, 3)
+                    .background(Color.white.opacity(0.16), in: Capsule())
+                }
+            }
+        }
+    }
+
+    /// 這一天是幾月幾號（星期幾）。字串在 ViewBuilder 外組好。
+    private static func dayDateText(_ p: TripPlan, dayIndex: Int) -> String {
+        let date = Calendar.current.date(byAdding: .day, value: dayIndex,
+                                         to: p.startDate) ?? p.startDate
+        return dayFmt.string(from: date)
+    }
+
+    /// 「第 2 天 8/20 (三)」
+    private static func dayLabel(_ p: TripPlan, dayIndex: Int) -> String {
+        "第 \(dayIndex + 1) 天 " + dayDateText(p, dayIndex: dayIndex)
     }
 
     private func kpi(_ title: String, _ value: String, _ unit: String) -> some View {
@@ -387,7 +452,13 @@ struct TripPlanDetailView: View {
             .padding(.horizontal, 16).padding(.top, 14).padding(.bottom, 8)
 
             let slots = p.timeline
+            // 用手上這份 slots 判斷，不要再叫 p.dayCount——那個會把整條時間軸重算一次
+            let multiDay = (slots.map(\.dayIndex).max() ?? 0) > 0
             ForEach(slots) { slot in
+                // 換日就先插一列日期標頭（只有跨天行程才需要）
+                if multiDay && slot.dayIndex != (slot.index == 0 ? -1 : slots[slot.index - 1].dayIndex) {
+                    dayHeaderRow(p, dayIndex: slot.dayIndex, isFirst: slot.index == 0)
+                }
                 // 第一站前面沒有路段；其餘每一站上面先畫「從上一站過來」那一條
                 if slot.index > 0 {
                     legRow(slot, plan: p)
@@ -404,12 +475,32 @@ struct TripPlanDetailView: View {
         .padding(.horizontal)
     }
 
+    /// 換日的分隔列。跨天行程一天一個色系，這一列把顏色與日期講明白。
+    private func dayHeaderRow(_ p: TripPlan, dayIndex: Int, isFirst: Bool) -> some View {
+        let c = TripDayPalette.color(dayIndex)
+        return HStack(spacing: 8) {
+            Text("第 \(dayIndex + 1) 天")
+                .font(.system(size: 11, weight: .bold))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 7).padding(.vertical, 3)
+                .background(c, in: Capsule())
+            Text(Self.dayDateText(p, dayIndex: dayIndex))
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(c)
+            Rectangle().fill(c.opacity(0.22)).frame(height: 0.75)
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, isFirst ? 2 : 10)
+        .padding(.bottom, 4)
+    }
+
     /// 兩站之間的那一段路。點「＋」就從這裡插一站進去。
     private func legRow(_ slot: TripPlan.Slot, plan p: TripPlan) -> some View {
-        HStack(spacing: 10) {
+        let c = TripDayPalette.color(slot.dayIndex)
+        return HStack(spacing: 10) {
             // 對齊上下的時間欄寬度，讓連接線與圓點在一條垂直線上
             Text("").frame(width: 42)
-            Rectangle().fill(accent.opacity(0.28))
+            Rectangle().fill(c.opacity(0.28))
                 .frame(width: 1.5, height: 26)
             HStack(spacing: 5) {
                 Image(systemName: p.travelMode.icon).font(.system(size: 9, weight: .bold))
@@ -420,6 +511,20 @@ struct TripPlanDetailView: View {
                         .background(Color.orange.opacity(0.18)).foregroundStyle(.orange)
                         .clipShape(Capsule())
                 }
+                // 指定抵達時間造成的空檔／趕不上，標在路段上（問題出在這一段路）
+                if slot.shortfallSeconds > 60 {
+                    Text("差 " + TripRouter.durationText(slot.shortfallSeconds) + " 趕不上")
+                        .font(.system(size: 9, weight: .bold))
+                        .padding(.horizontal, 4).padding(.vertical, 1)
+                        .background(Color.red.opacity(0.14)).foregroundStyle(.red)
+                        .clipShape(Capsule())
+                } else if slot.idleSeconds > 300 {
+                    Text("等 " + TripRouter.durationText(slot.idleSeconds))
+                        .font(.system(size: 9, weight: .semibold))
+                        .padding(.horizontal, 4).padding(.vertical, 1)
+                        .background(Color.secondary.opacity(0.12))
+                        .clipShape(Capsule())
+                }
             }
             .foregroundStyle(.secondary)
             Spacer(minLength: 0)
@@ -428,7 +533,7 @@ struct TripPlanDetailView: View {
                 addingStop = true
             } label: {
                 Image(systemName: "plus.circle")
-                    .font(.system(size: 14)).foregroundStyle(accent)
+                    .font(.system(size: 14)).foregroundStyle(c)
             }
             .buttonStyle(.plain)
         }
@@ -445,11 +550,18 @@ struct TripPlanDetailView: View {
 
     /// 一站。用既有的 ItemRow 模板畫——子地點就是它的摺疊區。
     private func stopRow(_ slot: TripPlan.Slot) -> some View {
-        HStack(alignment: .top, spacing: 10) {
+        let c = TripDayPalette.color(slot.dayIndex)
+        return HStack(alignment: .top, spacing: 10) {
             VStack(spacing: 2) {
-                Text(Self.timeFmt.string(from: slot.arrival))
-                    .font(.system(size: 12, weight: .bold, design: .rounded))
-                    .foregroundStyle(accent)
+                HStack(spacing: 2) {
+                    // 指定抵達時間的站加一個鎖，跟推算出來的時間區分開
+                    if slot.isFixedArrival {
+                        Image(systemName: "lock.fill").font(.system(size: 7, weight: .bold))
+                    }
+                    Text(Self.timeFmt.string(from: slot.arrival))
+                        .font(.system(size: 12, weight: .bold, design: .rounded))
+                }
+                .foregroundStyle(slot.shortfallSeconds > 60 ? Color.red : c)
                 Text(Self.timeFmt.string(from: slot.departure))
                     .font(.system(size: 10, design: .rounded))
                     .foregroundStyle(.tertiary)
@@ -462,12 +574,12 @@ struct TripPlanDetailView: View {
                 preview: stopPreview(slot.stop),
                 disclosures: subSpotDisclosures(slot.stop),
                 disclosureLabel: "子地點",
-                disclosureColor: accent,
+                disclosureColor: c,
                 onTap: { editingStop = slot.stop },
                 leading: {
                     ZStack {
                         Circle()
-                            .fill(LinearGradient(colors: [accent.opacity(0.9), accent.opacity(0.5)],
+                            .fill(LinearGradient(colors: [c.opacity(0.9), c.opacity(0.5)],
                                                  startPoint: .top, endPoint: .bottom))
                             .frame(width: 22, height: 22)
                         Text("\(slot.index + 1)")
@@ -505,9 +617,39 @@ struct TripPlanDetailView: View {
     }
 
     private func stopChips(_ slot: TripPlan.Slot) -> [ItemChip] {
+        let c = TripDayPalette.color(slot.dayIndex)
         var chips: [ItemChip] = []
+        if slot.dayIndex > 0 {
+            chips.append(ItemChip(id: "day", text: "第 \(slot.dayIndex + 1) 天",
+                                  color: c, icon: "sun.horizon"))
+        }
+        if slot.isFixedArrival {
+            chips.append(ItemChip(id: "fixed",
+                                  text: "指定 " + Self.timeFmt.string(from: slot.arrival) + " 抵達",
+                                  color: c, icon: "lock.fill"))
+        }
+        if slot.index == 0 {
+            // 第一站前面沒有算過的路段：出發時間到指定抵達之間就是去第一站的路上
+            if slot.shortfallSeconds > 60 {
+                chips.append(ItemChip(id: "late", text: "指定的時間比出發時間還早",
+                                      color: .red, icon: "exclamationmark.triangle.fill"))
+            } else if slot.idleSeconds > 60 {
+                chips.append(ItemChip(id: "idle",
+                                      text: "出發後 " + TripRouter.durationText(slot.idleSeconds) + " 抵達",
+                                      color: .secondary, icon: "car.fill"))
+            }
+        } else if slot.shortfallSeconds > 60 {
+            chips.append(ItemChip(id: "late",
+                                  text: "推算 " + Self.timeFmt.string(from: slot.estimatedArrival ?? slot.arrival)
+                                        + " 才到，差 " + TripRouter.durationText(slot.shortfallSeconds),
+                                  color: .red, icon: "exclamationmark.triangle.fill"))
+        } else if slot.idleSeconds > 300 {
+            chips.append(ItemChip(id: "idle",
+                                  text: "比預計早到，空 " + TripRouter.durationText(slot.idleSeconds),
+                                  color: .secondary, icon: "hourglass"))
+        }
         chips.append(ItemChip(id: "dwell", text: "停留 \(slot.stop.dwellMinutes) 分",
-                              color: accent, icon: "clock"))
+                              color: c, icon: "clock"))
         if !slot.stop.photoFileNames.isEmpty {
             chips.append(ItemChip(id: "photo", text: "\(slot.stop.photoFileNames.count) 張",
                                   color: .indigo, icon: "photo"))
@@ -677,7 +819,8 @@ struct TripPlanSettingsSheet: View {
         // 使用者可能在這之前才剛加過景點（同 EquipmentEditorSheet v25.385 的教訓）
         guard var live = lifeStore.tripPlan(id: plan.id) else { dismiss(); return }
         live.title = title.trimmingCharacters(in: .whitespaces)
-        live.startDate = startDate
+        // 用 setStartDate 而不是直接寫 startDate：換日時各站指定的抵達時間要跟著搬
+        live.setStartDate(startDate)
         live.note = note.trimmingCharacters(in: .whitespacesAndNewlines)
         if live.travelMode != mode {
             live.travelMode = mode
@@ -706,6 +849,9 @@ struct TripStopEditorSheet: View {
     @State private var latitude: Double?
     @State private var longitude: Double?
     @State private var dwellMinutes = 60
+    /// 指定抵達時間（關閉＝由上一站推算）
+    @State private var hasArrivalTime = false
+    @State private var arrivalTime = Date()
     @State private var note = ""
     @State private var photoFileNames: [String] = []
     @State private var subSpots: [TripSubSpot] = []
@@ -718,7 +864,7 @@ struct TripStopEditorSheet: View {
     @StateObject private var completer = RestaurantSearchCompleter()
     @State private var searchDebounce: Task<Void, Never>?
 
-    private let accent = Color(red: 0.68, green: 0.40, blue: 1.00)
+    private let accent = TripDayPalette.color(0)
 
     init(planId: UUID, editing: TripStop?, insertAt: Int?) {
         self.planId = planId
@@ -765,6 +911,24 @@ struct TripStopEditorSheet: View {
                     Text(latitude == nil
                          ? "打名稱會出現搜尋建議，選一個就會帶入地址與座標。沒有座標的景點不會被算進路線距離與時間。"
                          : "有座標才算得出與前後站之間的距離與交通時間。")
+                }
+
+                Section {
+                    Toggle("指定抵達時間", isOn: $hasArrivalTime)
+                        .tint(accent)
+                    if hasArrivalTime {
+                        HStack {
+                            Text("抵達")
+                            Spacer()
+                            FiveMinuteDateTimePicker(selection: $arrivalTime).fixedSize()
+                        }
+                    }
+                } header: {
+                    Text("抵達")
+                } footer: {
+                    Text(hasArrivalTime
+                         ? "時間軸會把這一站固定在這個時間。前一站提早到就顯示成等候；照交通時間根本來不及時會標紅字提醒，但時間軸還是照你指定的排。"
+                         : "不指定的話，抵達時間由上一站的離開時間加上路上的交通時間自動推算。餐廳訂位、船班、表演入場這種時間是死的，建議直接指定。")
                 }
 
                 Section {
@@ -836,14 +1000,32 @@ struct TripStopEditorSheet: View {
             .onAppear {
                 guard !loaded else { return }
                 loaded = true
+                arrivalTime = suggestedArrival
                 guard let e = editing else { return }
                 name = e.name; address = e.address
                 latitude = e.latitude; longitude = e.longitude
                 dwellMinutes = e.dwellMinutes; note = e.note
                 photoFileNames = e.photoFileNames; subSpots = e.subSpots
+                if let fixed = e.arrivalOverride {
+                    hasArrivalTime = true
+                    arrivalTime = fixed
+                }
             }
             .onDisappear { searchDebounce?.cancel() }
         }
+    }
+
+    /// 打開「指定抵達時間」時的預設值：就用目前時間軸算出來的抵達時間，
+    /// 使用者多半只想微調，不該從今天此刻開始選。
+    private var suggestedArrival: Date {
+        guard let plan = lifeStore.tripPlan(id: planId) else { return Date() }
+        let tl = plan.timeline
+        if let e = editing, let slot = tl.first(where: { $0.stop.id == e.id }) {
+            return slot.arrival
+        }
+        // 插在中間：用現在站在那個位置的那一站的抵達時間當起點
+        if let at = insertAt, tl.indices.contains(at) { return tl[at].arrival }
+        return plan.endDate
     }
 
     private func scheduleSearch(_ q: String) {
@@ -896,6 +1078,7 @@ struct TripStopEditorSheet: View {
         stop.latitude = latitude
         stop.longitude = longitude
         stop.dwellMinutes = max(0, dwellMinutes)
+        stop.arrivalOverride = hasArrivalTime ? arrivalTime : nil
         stop.note = note.trimmingCharacters(in: .whitespacesAndNewlines)
         stop.photoFileNames = photoFileNames
         stop.subSpots = subSpots.filter {
@@ -999,7 +1182,7 @@ struct TripRouteMapSheet: View {
 
     let plan: TripPlan
 
-    private let accent = Color(red: 0.68, green: 0.40, blue: 1.00)
+    private let accent = TripDayPalette.color(0)
 
     /// 用具名結構而不是 tuple：Swift 的 key path 不支援 tuple 成員（\.coord 會編不過）
     private struct Pin: Identifiable {
@@ -1007,11 +1190,40 @@ struct TripRouteMapSheet: View {
         let number: Int
         let name: String
         let coord: CLLocationCoordinate2D
+        /// 第幾天——大頭針跟時間軸用同一套分色
+        let dayIndex: Int
+    }
+
+    /// 一天一條線。跨日那一段畫在前一天的顏色上，線才不會斷在中間。
+    private struct DayLine: Identifiable {
+        let id: Int
+        let coords: [CLLocationCoordinate2D]
+    }
+
+    private var dayLines: [DayLine] {
+        let all = pins
+        guard all.count >= 2 else { return [] }
+        var out: [DayLine] = []
+        var current: [CLLocationCoordinate2D] = [all[0].coord]
+        var day = all[0].dayIndex
+        for pin in all.dropFirst() {
+            current.append(pin.coord)
+            if pin.dayIndex != day {
+                out.append(DayLine(id: day, coords: current))
+                current = [pin.coord]
+                day = pin.dayIndex
+            }
+        }
+        if current.count >= 2 { out.append(DayLine(id: day, coords: current)) }
+        return out
     }
 
     private var pins: [Pin] {
-        plan.stops.enumerated().compactMap { i, s in
-            s.coordinate.map { Pin(id: s.id, number: i + 1, name: s.displayName, coord: $0) }
+        plan.timeline.compactMap { slot in
+            slot.stop.coordinate.map {
+                Pin(id: slot.stop.id, number: slot.index + 1,
+                    name: slot.stop.displayName, coord: $0, dayIndex: slot.dayIndex)
+            }
         }
     }
 
@@ -1029,12 +1241,15 @@ struct TripRouteMapSheet: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
                     Map(initialPosition: .region(region)) {
-                        MapPolyline(coordinates: pins.map(\.coord))
-                            .stroke(accent, lineWidth: 3)
+                        ForEach(dayLines) { line in
+                            MapPolyline(coordinates: line.coords)
+                                .stroke(TripDayPalette.color(line.id), lineWidth: 3)
+                        }
                         ForEach(pins) { pin in
                             Annotation(pin.name, coordinate: pin.coord) {
                                 ZStack {
-                                    Circle().fill(accent).frame(width: 26, height: 26)
+                                    Circle().fill(TripDayPalette.color(pin.dayIndex))
+                                        .frame(width: 26, height: 26)
                                         .shadow(radius: 2)
                                     Text("\(pin.number)")
                                         .font(.caption2.weight(.bold)).foregroundStyle(.white)

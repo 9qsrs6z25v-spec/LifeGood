@@ -75,6 +75,11 @@ struct TripStop: Identifiable, Codable {
     var longitude: Double?
     /// 預計停留時間（分鐘）
     var dwellMinutes: Int
+    /// 使用者指定的抵達時間。nil＝由上一站的離開時間＋交通時間推算（預設）。
+    ///
+    /// 有值時時間軸一律照這個時間排：餐廳訂位、船班、表演入場這種「時間是死的」
+    /// 的站，推算出來的時間沒有意義。推算時間比它早就顯示成等候、比它晚就標來不及。
+    var arrivalOverride: Date?
     var note: String
     var photoFileNames: [String]
     var subSpots: [TripSubSpot]
@@ -92,13 +97,14 @@ struct TripStop: Identifiable, Codable {
 
     init(id: UUID = UUID(), name: String = "", address: String = "",
          latitude: Double? = nil, longitude: Double? = nil,
-         dwellMinutes: Int = 60, note: String = "",
+         dwellMinutes: Int = 60, arrivalOverride: Date? = nil, note: String = "",
          photoFileNames: [String] = [], subSpots: [TripSubSpot] = [],
          legMeters: Double? = nil, legSeconds: Double? = nil,
          legStamp: String? = nil, legIsEstimated: Bool = false) {
         self.id = id; self.name = name; self.address = address
         self.latitude = latitude; self.longitude = longitude
-        self.dwellMinutes = dwellMinutes; self.note = note
+        self.dwellMinutes = dwellMinutes; self.arrivalOverride = arrivalOverride
+        self.note = note
         self.photoFileNames = photoFileNames; self.subSpots = subSpots
         self.legMeters = legMeters; self.legSeconds = legSeconds
         self.legStamp = legStamp; self.legIsEstimated = legIsEstimated
@@ -112,6 +118,7 @@ struct TripStop: Identifiable, Codable {
         latitude = try? c.decodeIfPresent(Double.self, forKey: .latitude)
         longitude = try? c.decodeIfPresent(Double.self, forKey: .longitude)
         dwellMinutes = (try? c.decode(Int.self, forKey: .dwellMinutes)) ?? 60
+        arrivalOverride = try? c.decodeIfPresent(Date.self, forKey: .arrivalOverride)
         note = (try? c.decode(String.self, forKey: .note)) ?? ""
         photoFileNames = (try? c.decodeIfPresent([String].self, forKey: .photoFileNames)) ?? []
         subSpots = (try? c.decodeIfPresent([TripSubSpot].self, forKey: .subSpots)) ?? []
@@ -122,7 +129,7 @@ struct TripStop: Identifiable, Codable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, name, address, latitude, longitude, dwellMinutes, note
+        case id, name, address, latitude, longitude, dwellMinutes, arrivalOverride, note
         case photoFileNames, subSpots, legMeters, legSeconds, legStamp, legIsEstimated
     }
 
@@ -201,6 +208,24 @@ struct TripPlan: Identifiable, Codable {
         case id, title, startDate, travelMode, note, stops
     }
 
+    /// 改出發時間。
+    ///
+    /// 換的是「哪一天」時，各站指定的抵達時間跟著平移同樣的天數、鐘點不變；
+    /// 只是同一天內提早或延後出發就不動它們——餐廳訂位 18:00 不會因為你早出門
+    /// 就變成 17:30，那是兩件不同的事。
+    mutating func setStartDate(_ newValue: Date) {
+        let cal = Calendar.current
+        let days = cal.dateComponents([.day],
+                                      from: cal.startOfDay(for: startDate),
+                                      to: cal.startOfDay(for: newValue)).day ?? 0
+        startDate = newValue
+        guard days != 0 else { return }
+        for i in stops.indices {
+            guard let a = stops[i].arrivalOverride else { continue }
+            stops[i].arrivalOverride = cal.date(byAdding: .day, value: days, to: a)
+        }
+    }
+
     var displayTitle: String {
         let t = title.trimmingCharacters(in: .whitespaces)
         if !t.isEmpty { return t }
@@ -223,6 +248,16 @@ struct TripPlan: Identifiable, Codable {
         let travelSeconds: Double?
         let travelMeters: Double?
         let isEstimated: Bool
+        /// 抵達時間是使用者指定的，不是推算的
+        let isFixedArrival: Bool
+        /// 推算出來的抵達時間（有指定時間時才有值，用來比對來不來得及）
+        let estimatedArrival: Date?
+        /// 指定時間比推算的晚 → 中間的空檔（秒）
+        let idleSeconds: Double
+        /// 指定時間比推算的早 → 趕不上，差幾秒
+        let shortfallSeconds: Double
+        /// 第幾天（0＝出發當天）。跨天行程用這個分色。
+        let dayIndex: Int
     }
 
     /// 整條時間軸。沒有路線資料的段落交通時間算 0——寧可把它顯示成「未計算」，
@@ -230,22 +265,61 @@ struct TripPlan: Identifiable, Codable {
     var timeline: [Slot] {
         var out: [Slot] = []
         var cursor = startDate
+        let cal = Calendar.current
+        let firstDay = cal.startOfDay(for: startDate)
         for (i, stop) in stops.enumerated() {
             let secs: Double? = i == 0 ? nil : stop.legSeconds
             if let s = secs { cursor = cursor.addingTimeInterval(s) }
-            let arrival = cursor
+            let estimated = cursor
+            // 指定了抵達時間就照那個排，游標跟著跳過去——
+            // 使用者說「我 13:00 會到」，時間軸就該長那樣，推算值只拿來比對來不來得及。
+            let arrival: Date
+            var idle = 0.0, shortfall = 0.0
+            if let fixed = stop.arrivalOverride {
+                arrival = fixed
+                let delta = fixed.timeIntervalSince(estimated)
+                if delta >= 0 { idle = delta } else { shortfall = -delta }
+            } else {
+                arrival = estimated
+            }
             let departure = arrival.addingTimeInterval(Double(max(0, stop.dwellMinutes)) * 60)
+            let day = cal.dateComponents([.day], from: firstDay,
+                                         to: cal.startOfDay(for: arrival)).day ?? 0
             out.append(Slot(id: stop.id, index: i, stop: stop,
                             arrival: arrival, departure: departure,
                             travelSeconds: secs,
                             travelMeters: i == 0 ? nil : stop.legMeters,
-                            isEstimated: i == 0 ? false : stop.legIsEstimated))
+                            isEstimated: i == 0 ? false : stop.legIsEstimated,
+                            isFixedArrival: stop.arrivalOverride != nil,
+                            estimatedArrival: stop.arrivalOverride == nil ? nil : estimated,
+                            idleSeconds: idle, shortfallSeconds: shortfall,
+                            dayIndex: max(0, day)))
             cursor = departure
         }
         return out
     }
 
     var endDate: Date { timeline.last?.departure ?? startDate }
+
+    /// 這份行程橫跨幾天（1＝當天來回）。跨天時時間軸會分色分段。
+    var dayCount: Int {
+        // 最後一站不一定是天數最大的那一站（指定抵達時間可以把某一站排到更晚），
+        // 所以取最大值而不是看最後一筆
+        (timeline.map(\.dayIndex).max() ?? 0) + 1
+    }
+
+    /// 指定的抵達時間比推算的還早（來不及）的站數
+    var unreachableCount: Int {
+        timeline.filter { $0.shortfallSeconds > 60 }.count
+    }
+
+    /// 因為等固定時間而空著的總秒數。
+    ///
+    /// 第一站不算：它前面沒有計算過的路段，出發時間到第一站指定抵達時間之間的空檔
+    /// 就是「去第一站的路上」，那不是在等，是在移動。
+    var totalIdleSeconds: Double {
+        timeline.dropFirst().reduce(0.0) { $0 + $1.idleSeconds }
+    }
 
     /// 總時長（秒）＝最後一站離開 − 出發
     var totalSeconds: Double { endDate.timeIntervalSince(startDate) }
