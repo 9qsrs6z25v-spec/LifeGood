@@ -2707,6 +2707,66 @@ class LifeStore: ObservableObject {
         tripPlans[pi].stops[index].legStamp = nil
     }
 
+    // MARK: 住過的地方（v25.405）
+
+    /// 以前標過「在這裡過夜」的地方，供新增景點時快速選。
+    struct LodgingSuggestion: Identifiable {
+        let id: String
+        let name: String
+        let address: String
+        let latitude: Double?
+        let longitude: Double?
+        /// 上次在這裡設的退房時刻（沿用比重打一次快）
+        let checkOutTime: Date?
+        /// 最近一次住的行程出發日
+        let lastUsed: Date
+        /// 住過幾次
+        let useCount: Int
+    }
+
+    /// 地點的比對鍵：去空白、統一大小寫。
+    /// 名稱＋地址一起比，因為連鎖飯店同名不同家是常態。
+    private static func lodgingKey(name: String, address: String) -> String {
+        func norm(_ s: String) -> String {
+            s.replacingOccurrences(of: " ", with: "")
+                .replacingOccurrences(of: "\u{3000}", with: "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .lowercased()
+        }
+        return norm(name) + "|" + norm(address)
+    }
+
+    /// 住過的地方，去重後依最近使用排序。
+    ///
+    /// 座標取「最近那一次有座標的」而不是最新那一次：同一家飯店早期可能是手打的
+    /// 沒座標，後來才從地圖搜尋帶進來，反過來取會把座標弄丟。
+    func lodgingSuggestions(limit: Int = 12) -> [LodgingSuggestion] {
+        var byKey: [String: LodgingSuggestion] = [:]
+        // 依行程出發日由舊到新掃，後面的覆蓋前面的，最後留下的就是最新那一次
+        for plan in tripPlans.sorted(by: { $0.startDate < $1.startDate }) {
+            for stop in plan.stops where stop.isOvernight {
+                let name = stop.name.trimmingCharacters(in: .whitespaces)
+                let address = stop.address.trimmingCharacters(in: .whitespaces)
+                guard !name.isEmpty || !address.isEmpty else { continue }
+                let key = Self.lodgingKey(name: name, address: address)
+                let prev = byKey[key]
+                byKey[key] = LodgingSuggestion(
+                    id: key,
+                    name: name.isEmpty ? (prev?.name ?? "") : name,
+                    address: address.isEmpty ? (prev?.address ?? "") : address,
+                    latitude: stop.latitude ?? prev?.latitude,
+                    longitude: stop.longitude ?? prev?.longitude,
+                    checkOutTime: stop.checkOutTime ?? prev?.checkOutTime,
+                    lastUsed: plan.startDate,
+                    useCount: (prev?.useCount ?? 0) + 1)
+            }
+        }
+        return byKey.values
+            .sorted { $0.lastUsed > $1.lastUsed }
+            .prefix(limit)
+            .map { $0 }
+    }
+
     // MARK: - 持久化
 
     private func save() {

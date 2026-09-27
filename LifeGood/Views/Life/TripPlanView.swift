@@ -1023,6 +1023,8 @@ struct TripStopEditorSheet: View {
     @State private var arrivalTime = Date()
     /// 這一段的交通方式；nil＝用行程的預設
     @State private var legMode: TripTravelMode?
+    /// 已經從「住過的地方」挑過了 → 收掉那一區，不要一直擺在那裡
+    @State private var lodgingPicked = false
     @State private var isMustVisit = false
     @State private var isOvernight = false
     @State private var checkOutTime = TripStopEditorSheet.defaultCheckOut
@@ -1048,6 +1050,9 @@ struct TripStopEditorSheet: View {
 
     var body: some View {
         NavigationStack {
+            // ⚠️ 這個 Form 目前有 9 個直接子元素，SwiftUI 的 ViewBuilder 上限是 10。
+            // 還要再加區塊的話，先把相關的幾個 Section 收進一個 @ViewBuilder 屬性裡，
+            // 不然會編不過（而且錯誤訊息完全看不出是這個原因）。
             Form {
                 Section {
                     TextField("景點名稱", text: $name)
@@ -1085,6 +1090,22 @@ struct TripStopEditorSheet: View {
                     Text(latitude == nil
                          ? "打名稱會出現搜尋建議，選一個就會帶入地址與座標。沒有座標的景點不會被算進路線距離與時間。"
                          : "有座標才算得出與前後站之間的距離與交通時間。")
+                }
+
+                // [v25.405] 住過的地方：同一家飯店不用每次重打
+                if showLodgingSection {
+                    Section {
+                        ForEach(lodgingMatches) { item in
+                            lodgingRow(item)
+                        }
+                    } header: {
+                        HStack(spacing: 6) {
+                            Image(systemName: "bed.double.fill").font(.system(size: 10))
+                            Text("住過的地方")
+                        }
+                    } footer: {
+                        Text("選一個就會帶入名稱、地址與座標，並自動打開「在這裡過夜」與上次設的退房時刻。打字會跟著篩選。")
+                    }
                 }
 
                 Section {
@@ -1236,6 +1257,83 @@ struct TripStopEditorSheet: View {
         }
     }
 
+    /// 住過的地方要不要出現。
+    ///
+    /// 已經有座標就代表這一站的地點定下來了（新增時從地圖搜尋挑過、或編輯既有的站），
+    /// 這時候再擺一排飯店只會擋路——跟地圖搜尋建議用同一個判斷條件。
+    private var showLodgingSection: Bool {
+        !lodgingPicked && latitude == nil && !lodgingMatches.isEmpty
+    }
+
+    /// 依目前打的字篩選住過的地方；還沒打字就列最近幾筆
+    private var lodgingMatches: [LifeStore.LodgingSuggestion] {
+        let all = lifeStore.lodgingSuggestions()
+        let q = name.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !q.isEmpty else { return Array(all.prefix(5)) }
+        return all.filter {
+            $0.name.lowercased().contains(q) || $0.address.lowercased().contains(q)
+        }
+    }
+
+    private func lodgingRow(_ item: LifeStore.LodgingSuggestion) -> some View {
+        Button {
+            applyLodging(item)
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: "bed.double.fill")
+                    .font(.system(size: 13)).foregroundStyle(.indigo)
+                    .frame(width: 20)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(item.name.isEmpty ? "未命名住宿" : item.name)
+                        .font(.subheadline).foregroundStyle(.primary)
+                        .lineLimit(1)
+                    Text(Self.lodgingMeta(item))
+                        .font(.caption2).foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
+                Spacer(minLength: 0)
+                if item.useCount > 1 {
+                    Text("住過 \(item.useCount) 次")
+                        .font(.system(size: 9, weight: .bold))
+                        .padding(.horizontal, 5).padding(.vertical, 2)
+                        .background(Color.indigo.opacity(0.13))
+                        .foregroundStyle(.indigo)
+                        .clipShape(Capsule())
+                }
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// 字串在 ViewBuilder 外組好
+    private static func lodgingMeta(_ item: LifeStore.LodgingSuggestion) -> String {
+        var parts: [String] = []
+        if !item.address.isEmpty { parts.append(item.address) }
+        if item.latitude == nil { parts.append("沒有座標") }
+        parts.append("上次 " + lodgingDateFmt.string(from: item.lastUsed))
+        return parts.joined(separator: "・")
+    }
+
+    private static let lodgingDateFmt: DateFormatter = {
+        let f = DateFormatter(); f.locale = Locale(identifier: "zh_Hant_TW")
+        f.dateFormat = "yyyy/M/d"; return f
+    }()
+
+    private func applyLodging(_ item: LifeStore.LodgingSuggestion) {
+        name = item.name
+        address = item.address
+        latitude = item.latitude
+        longitude = item.longitude
+        isOvernight = true
+        if let t = item.checkOutTime { checkOutTime = t }
+        // 帶入名稱會觸發地圖搜尋，這裡先把待送出的查詢與既有建議清掉，
+        // 免得挑完之後下面又冒出一排地圖建議
+        searchDebounce?.cancel()
+        completer.queryFragment = ""
+        lodgingPicked = true
+    }
+
     private var planDefaultMode: TripTravelMode {
         lifeStore.tripPlan(id: planId)?.travelMode ?? .driving
     }
@@ -1318,6 +1416,8 @@ struct TripStopEditorSheet: View {
         // 但不主動清座標——使用者可能只是修錯字
         searchDebounce?.cancel()
         let text = q.trimmingCharacters(in: .whitespaces)
+        // 名稱清空＝重新開始選地點，「住過的地方」那一區該回來
+        if text.isEmpty { lodgingPicked = false }
         guard text.count >= 2 else { completer.queryFragment = ""; return }
         searchDebounce = Task {
             try? await Task.sleep(nanoseconds: 300_000_000)
