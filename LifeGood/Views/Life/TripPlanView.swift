@@ -1090,6 +1090,7 @@ struct TripStopEditorSheet: View {
     @State private var legMode: TripTravelMode?
     /// 已經從「住過的地方」挑過了 → 收掉那一區，不要一直擺在那裡
     @State private var lodgingPicked = false
+    @State private var showMapPicker = false
     @State private var isMustVisit = false
     @State private var isOvernight = false
     @State private var checkOutTime = TripStopEditorSheet.defaultCheckOut
@@ -1138,6 +1139,26 @@ struct TripStopEditorSheet: View {
                         }
                     }
                     TextField("地址", text: $address)
+                    Button {
+                        showMapPicker = true
+                    } label: {
+                        HStack(spacing: 8) {
+                            Image(systemName: "map.fill")
+                                .font(.system(size: 13)).foregroundStyle(accent)
+                                .frame(width: 20)
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text("在地圖上選位置")
+                                    .font(.subheadline).foregroundStyle(.primary)
+                                Text("搜尋找不到的地方，直接挪地圖對準就好")
+                                    .font(.caption2).foregroundStyle(.secondary)
+                            }
+                            Spacer(minLength: 0)
+                            Image(systemName: "chevron.right")
+                                .font(.caption2.weight(.semibold)).foregroundStyle(.tertiary)
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
                     if latitude != nil {
                         HStack {
                             Image(systemName: "mappin.circle.fill").foregroundStyle(accent)
@@ -1153,7 +1174,7 @@ struct TripStopEditorSheet: View {
                     Text("地點")
                 } footer: {
                     Text(latitude == nil
-                         ? "打名稱會出現搜尋建議，選一個就會帶入地址與座標。沒有座標的景點不會被算進路線距離與時間。"
+                         ? "打名稱會出現搜尋建議，選一個就會帶入地址與座標。搜尋找不到的地方（產業道路邊的景點、沒登記的民宿）用「在地圖上選位置」。沒有座標的景點不會被算進路線距離與時間。"
                          : "有座標才算得出與前後站之間的距離與交通時間。")
                 }
 
@@ -1318,6 +1339,11 @@ struct TripStopEditorSheet: View {
                     arrivalTime = fixed
                 }
             }
+            .sheet(isPresented: $showMapPicker) {
+                TripMapPickerSheet(initialCoordinate: mapPickerStart) { picked, addr, coord in
+                    applyPickedLocation(name: picked, address: addr, coordinate: coord)
+                }
+            }
             .onDisappear { searchDebounce?.cancel() }
         }
     }
@@ -1474,6 +1500,37 @@ struct TripStopEditorSheet: View {
         // 插在中間：用現在站在那個位置的那一站的抵達時間當起點
         if let at = insertAt, tl.indices.contains(at) { return tl[at].arrival }
         return plan.endDate
+    }
+
+    /// 地圖選位置要從哪裡開始看：這一站已有的座標 → 上一站的 → 這份行程最後一個有座標的站。
+    /// 都沒有就讓選位置畫面自己退回使用者位置。
+    private var mapPickerStart: CLLocationCoordinate2D? {
+        if let latitude, let longitude {
+            return CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
+        }
+        guard let plan = lifeStore.tripPlan(id: planId) else { return nil }
+        if let e = editing, let i = plan.stops.firstIndex(where: { $0.id == e.id }), i > 0 {
+            if let c = plan.stops[i - 1].coordinate { return c }
+        } else if let at = insertAt, at > 0, plan.stops.indices.contains(at - 1) {
+            if let c = plan.stops[at - 1].coordinate { return c }
+        }
+        return plan.stops.last(where: { $0.coordinate != nil })?.coordinate
+    }
+
+    private func applyPickedLocation(name picked: String?, address addr: String,
+                                     coordinate: CLLocationCoordinate2D) {
+        latitude = coordinate.latitude
+        longitude = coordinate.longitude
+        // 地址一律用反查到的（使用者是因為打不出來才來這裡的）；查不到就留著原本的
+        if !addr.isEmpty { address = addr }
+        // 名稱只在還空著時才補，不要蓋掉使用者自己取的名字
+        if name.trimmingCharacters(in: .whitespaces).isEmpty, let picked, !picked.isEmpty {
+            name = picked
+        }
+        // 帶入名稱會觸發地圖搜尋建議，這裡先把待送出的查詢與既有建議清掉
+        searchDebounce?.cancel()
+        completer.queryFragment = ""
+        lodgingPicked = true
     }
 
     private func scheduleSearch(_ q: String) {
@@ -2207,5 +2264,219 @@ struct TripLegDetailSheet: View {
         isLoading = true
         defer { isLoading = false }
         polyline = await TripRouter.routePolyline(from: from.stop, to: to.stop, mode: to.mode)
+    }
+}
+
+// MARK: - 在地圖上選位置
+
+/// 文字搜尋找不到的地方（產業道路邊的景點、沒登記的民宿、只知道大概在哪的海灘），
+/// 直接在地圖上挪到那個點就好。
+///
+/// 用「地圖動、準心不動」而不是「點一下放大頭針」：
+/// 手指點下去的位置會被自己的手指擋住，挪地圖才能看著目標對準；
+/// 而且這個做法不必把畫面座標換算回經緯度，少一個會出錯的環節。
+struct TripMapPickerSheet: View {
+    @Environment(\.dismiss) private var dismiss
+
+    /// 打開時要停在哪裡（這一站已有的座標、或上一站的、或使用者位置）
+    let initialCoordinate: CLLocationCoordinate2D?
+    /// 回傳：建議名稱（可能沒有）、地址、座標
+    let onPick: (String?, String, CLLocationCoordinate2D) -> Void
+
+    @StateObject private var locationProvider = LocationProvider.shared
+
+    @State private var position: MapCameraPosition
+    @State private var center: CLLocationCoordinate2D
+    @State private var address = ""
+    @State private var suggestedName: String?
+    @State private var isResolving = false
+    @State private var resolveTask: Task<Void, Never>?
+
+    private let accent = TripDayPalette.color(0)
+
+    /// 沒有任何線索時的起點：台北車站。總比落在大西洋上好。
+    private static let fallbackCenter = CLLocationCoordinate2D(latitude: 25.0478,
+                                                              longitude: 121.5170)
+
+    init(initialCoordinate: CLLocationCoordinate2D?,
+         onPick: @escaping (String?, String, CLLocationCoordinate2D) -> Void) {
+        self.initialCoordinate = initialCoordinate
+        self.onPick = onPick
+        let start = initialCoordinate
+            ?? LocationProvider.shared.lastLocation?.coordinate
+            ?? Self.fallbackCenter
+        _center = State(initialValue: start)
+        // 已經有座標就貼近一點（在微調），沒有就拉遠一點（在找地方）
+        let span = initialCoordinate == nil ? 0.05 : 0.004
+        _position = State(initialValue: .region(MKCoordinateRegion(
+            center: start,
+            span: MKCoordinateSpan(latitudeDelta: span, longitudeDelta: span))))
+    }
+
+    var body: some View {
+        NavigationStack {
+            ZStack(alignment: .bottom) {
+                mapLayer
+                infoCard
+            }
+            .navigationTitle("在地圖上選位置")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) { Button("取消") { dismiss() } }
+            }
+            .onAppear {
+                locationProvider.requestIfNeeded()
+                resolveNow()
+            }
+            .onDisappear { resolveTask?.cancel() }
+        }
+    }
+
+    private var mapLayer: some View {
+        ZStack {
+            Map(position: $position) {
+                UserAnnotation()
+            }
+            // POI 這裡要開著：使用者是靠地標認位置的，全部關掉就只剩一片空白底圖
+            .mapStyle(.standard(pointsOfInterest: .all))
+            .mapControls {
+                MapUserLocationButton()
+                MapCompass()
+            }
+            .onMapCameraChange(frequency: .onEnd) { context in
+                center = context.region.center
+                scheduleResolve()
+            }
+            .ignoresSafeArea(edges: .bottom)
+
+            // 準心固定在畫面正中央：小圓點就是真正會被記下來的那個座標（不位移），
+            // 大頭針往上移自己的高度，讓針尖正好落在圓點上。
+            ZStack {
+                Circle()
+                    .fill(accent)
+                    .frame(width: 7, height: 7)
+                    .overlay(Circle().stroke(Color.white.opacity(0.9), lineWidth: 1))
+                Image(systemName: "mappin")
+                    .font(.system(size: 30, weight: .semibold))
+                    .foregroundStyle(accent)
+                    .shadow(color: .black.opacity(0.25), radius: 2, y: 1)
+                    .offset(y: -17)
+            }
+            .allowsHitTesting(false)
+        }
+    }
+
+    private var infoCard: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: "mappin.and.ellipse")
+                    .font(.system(size: 11)).foregroundStyle(accent)
+                Text(suggestedName ?? "這個位置")
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(1)
+                if isResolving {
+                    ProgressView().scaleEffect(0.55)
+                }
+                Spacer(minLength: 0)
+            }
+            Text(address.isEmpty
+                 ? (isResolving ? "正在查地址…" : "查不到地址，仍然可以用這個座標")
+                 : address)
+                .font(.caption).foregroundStyle(.secondary)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+            Text(String(format: "%.5f, %.5f", center.latitude, center.longitude))
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundStyle(.tertiary)
+
+            Button {
+                onPick(suggestedName, address, center)
+                dismiss()
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "checkmark.circle.fill")
+                    Text("使用這個位置").font(.subheadline.weight(.semibold))
+                }
+                .foregroundStyle(.white)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 12)
+                .background(LinearGradient(colors: [accent, accent.opacity(0.75)],
+                                           startPoint: .leading, endPoint: .trailing))
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+            }
+            .buttonStyle(.plain)
+
+            Text("挪動地圖把準心對到目標，地址會自己帶出來。查不到地址也沒關係——路線計算靠的是座標。")
+                .font(.system(size: 10)).foregroundStyle(.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(12)
+        .background(.ultraThinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .overlay(RoundedRectangle(cornerRadius: 16)
+            .stroke(Color(.separator).opacity(0.15), lineWidth: 0.75))
+        .shadow(color: .black.opacity(0.12), radius: 6, y: 2)
+        .padding(.horizontal, 12)
+        .padding(.bottom, 12)
+    }
+
+    // MARK: 反查地址
+
+    /// 挪一下就查一次會被 CLGeocoder 擋（它有速率限制），所以等手放開之後再延遲一下才查。
+    private func scheduleResolve() {
+        resolveTask?.cancel()
+        let target = center
+        resolveTask = Task {
+            try? await Task.sleep(nanoseconds: 600_000_000)
+            guard !Task.isCancelled else { return }
+            await resolve(target)
+        }
+    }
+
+    /// 剛打開時直接查一次，不用等那 600 毫秒
+    private func resolveNow() {
+        resolveTask?.cancel()
+        let target = center
+        resolveTask = Task { await resolve(target) }
+    }
+
+    @MainActor
+    private func resolve(_ coordinate: CLLocationCoordinate2D) async {
+        isResolving = true
+        let loc = CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)
+        let placemark = try? await CLGeocoder().reverseGeocodeLocation(
+            loc, preferredLocale: Locale(identifier: "zh_Hant_TW")).first
+        // 查的期間使用者可能又挪走了，這時候這個結果已經不是在講畫面上那個點
+        guard !Task.isCancelled else { return }
+        isResolving = false
+        guard let placemark else {
+            address = ""
+            suggestedName = nil
+            return
+        }
+        address = Self.formattedAddress(placemark)
+        suggestedName = Self.landmarkName(placemark, address: address)
+    }
+
+    /// 組成台灣習慣的地址順序（郵遞區號 縣市 鄉鎮 路 號）
+    private static func formattedAddress(_ p: CLPlacemark) -> String {
+        [p.postalCode, p.administrativeArea, p.subAdministrativeArea,
+         p.locality, p.subLocality, p.thoroughfare, p.subThoroughfare]
+            .compactMap { $0 }
+            .filter { !$0.isEmpty }
+            // 同一段字有時會重複出現在兩個欄位（例：locality 與 subAdministrativeArea）
+            .reduce(into: [String]()) { acc, s in if !acc.contains(s) { acc.append(s) } }
+            .joined()
+    }
+
+    /// 可以拿來當景點名稱的地標名。
+    ///
+    /// CLPlacemark.name 在台灣常常就是門牌號碼本身（「9號」），拿它當名稱只會讓
+    /// 景點叫做「9號」，所以只收 areasOfInterest（真正的地標名），
+    /// 而且要跟地址不一樣才算數。
+    private static func landmarkName(_ p: CLPlacemark, address: String) -> String? {
+        guard let area = p.areasOfInterest?.first?.trimmingCharacters(in: .whitespaces),
+              !area.isEmpty, !address.contains(area) else { return nil }
+        return area
     }
 }
