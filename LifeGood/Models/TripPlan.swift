@@ -75,6 +75,16 @@ struct TripStop: Identifiable, Codable {
     var longitude: Double?
     /// 預計停留時間（分鐘）
     var dwellMinutes: Int
+    /// 必去。排行程時用來標「這一站不能砍」——時間不夠要刪站時，先看沒標的那些。
+    var isMustVisit: Bool
+    /// 在這裡過夜。
+    ///
+    /// 標了之後這一站就是當天的最後一站，隔天從這裡開始：離開時間不再用停留分鐘算，
+    /// 而是「抵達之後第一個到達的退房時刻」，所以下一站的交通時間是從隔天早上算的。
+    var isOvernight: Bool
+    /// 退房／隔天出發的時刻（只取時分，日期部分不用）。nil＝早上 9:00。
+    /// 只有 isOvernight 才有意義。
+    var checkOutTime: Date?
     /// 使用者指定的抵達時間。nil＝由上一站的離開時間＋交通時間推算（預設）。
     ///
     /// 有值時時間軸一律照這個時間排：餐廳訂位、船班、表演入場這種「時間是死的」
@@ -97,13 +107,18 @@ struct TripStop: Identifiable, Codable {
 
     init(id: UUID = UUID(), name: String = "", address: String = "",
          latitude: Double? = nil, longitude: Double? = nil,
-         dwellMinutes: Int = 60, arrivalOverride: Date? = nil, note: String = "",
+         dwellMinutes: Int = 60, isMustVisit: Bool = false,
+         isOvernight: Bool = false, checkOutTime: Date? = nil,
+         arrivalOverride: Date? = nil, note: String = "",
          photoFileNames: [String] = [], subSpots: [TripSubSpot] = [],
          legMeters: Double? = nil, legSeconds: Double? = nil,
          legStamp: String? = nil, legIsEstimated: Bool = false) {
         self.id = id; self.name = name; self.address = address
         self.latitude = latitude; self.longitude = longitude
-        self.dwellMinutes = dwellMinutes; self.arrivalOverride = arrivalOverride
+        self.dwellMinutes = dwellMinutes
+        self.isMustVisit = isMustVisit
+        self.isOvernight = isOvernight; self.checkOutTime = checkOutTime
+        self.arrivalOverride = arrivalOverride
         self.note = note
         self.photoFileNames = photoFileNames; self.subSpots = subSpots
         self.legMeters = legMeters; self.legSeconds = legSeconds
@@ -118,6 +133,9 @@ struct TripStop: Identifiable, Codable {
         latitude = try? c.decodeIfPresent(Double.self, forKey: .latitude)
         longitude = try? c.decodeIfPresent(Double.self, forKey: .longitude)
         dwellMinutes = (try? c.decode(Int.self, forKey: .dwellMinutes)) ?? 60
+        isMustVisit = (try? c.decodeIfPresent(Bool.self, forKey: .isMustVisit)) ?? false
+        isOvernight = (try? c.decodeIfPresent(Bool.self, forKey: .isOvernight)) ?? false
+        checkOutTime = try? c.decodeIfPresent(Date.self, forKey: .checkOutTime)
         arrivalOverride = try? c.decodeIfPresent(Date.self, forKey: .arrivalOverride)
         note = (try? c.decode(String.self, forKey: .note)) ?? ""
         photoFileNames = (try? c.decodeIfPresent([String].self, forKey: .photoFileNames)) ?? []
@@ -129,7 +147,8 @@ struct TripStop: Identifiable, Codable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, name, address, latitude, longitude, dwellMinutes, arrivalOverride, note
+        case id, name, address, latitude, longitude, dwellMinutes
+        case isMustVisit, isOvernight, checkOutTime, arrivalOverride, note
         case photoFileNames, subSpots, legMeters, legSeconds, legStamp, legIsEstimated
     }
 
@@ -145,6 +164,26 @@ struct TripStop: Identifiable, Codable {
 
     /// 子地點的分鐘加總。母景點停留時間比這個短時畫面會提醒。
     var subSpotMinutes: Int { subSpots.reduce(0) { $0 + max(0, $1.minutes) } }
+
+    /// 退房時刻是幾點幾分（從午夜起算的分鐘）。沒設就是早上 9:00。
+    var checkOutMinutesOfDay: Int {
+        guard let t = checkOutTime else { return 9 * 60 }
+        let c = Calendar.current.dateComponents([.hour, .minute], from: t)
+        return min(24 * 60 - 5, max(0, (c.hour ?? 9) * 60 + (c.minute ?? 0)))
+    }
+
+    /// 抵達之後「第一個」遇到的退房時刻。
+    ///
+    /// 晚上 21:00 入住、退房 09:00 → 隔天早上 09:00。
+    /// 但凌晨 01:00 才入住的話，同一天早上的 09:00 就是退房時間，不該再往後推一天。
+    static func nextCheckOut(after arrival: Date, minutesOfDay: Int) -> Date {
+        let cal = Calendar.current
+        let out = cal.startOfDay(for: arrival)
+            .addingTimeInterval(Double(minutesOfDay) * 60)
+        guard out <= arrival else { return out }
+        return cal.date(byAdding: .day, value: 1, to: out)
+            ?? out.addingTimeInterval(24 * 3600)
+    }
 
     // MARK: 照片
 
@@ -282,7 +321,12 @@ struct TripPlan: Identifiable, Codable {
             } else {
                 arrival = estimated
             }
-            let departure = arrival.addingTimeInterval(Double(max(0, stop.dwellMinutes)) * 60)
+            // 過夜的站不用停留分鐘算離開時間——沒有人會用分鐘去填一個晚上。
+            // 隔天早上退房才離開，所以下一站的交通時間自然是從隔天算起。
+            let departure = stop.isOvernight
+                ? TripStop.nextCheckOut(after: arrival,
+                                        minutesOfDay: stop.checkOutMinutesOfDay)
+                : arrival.addingTimeInterval(Double(max(0, stop.dwellMinutes)) * 60)
             let day = cal.dateComponents([.day], from: firstDay,
                                          to: cal.startOfDay(for: arrival)).day ?? 0
             out.append(Slot(id: stop.id, index: i, stop: stop,
@@ -303,9 +347,16 @@ struct TripPlan: Identifiable, Codable {
 
     /// 這份行程橫跨幾天（1＝當天來回）。跨天時時間軸會分色分段。
     var dayCount: Int {
+        let tl = timeline
         // 最後一站不一定是天數最大的那一站（指定抵達時間可以把某一站排到更晚），
         // 所以取最大值而不是看最後一筆
-        (timeline.map(\.dayIndex).max() ?? 0) + 1
+        let byArrival = tl.map(\.dayIndex).max() ?? 0
+        // 最後一站是過夜時，行程其實延到隔天早上退房才結束，那一天也要算進來
+        let cal = Calendar.current
+        let byEnd = cal.dateComponents([.day],
+                                       from: cal.startOfDay(for: startDate),
+                                       to: cal.startOfDay(for: tl.last?.departure ?? startDate)).day ?? 0
+        return max(byArrival, max(0, byEnd)) + 1
     }
 
     /// 指定的抵達時間比推算的還早（來不及）的站數
@@ -323,8 +374,16 @@ struct TripPlan: Identifiable, Codable {
 
     /// 總時長（秒）＝最後一站離開 − 出發
     var totalSeconds: Double { endDate.timeIntervalSince(startDate) }
-    /// 總停留（分鐘）
-    var totalDwellMinutes: Int { stops.reduce(0) { $0 + max(0, $1.dwellMinutes) } }
+    /// 總停留（分鐘）。過夜的站不算——那一站的「停留」是一個晚上，
+    /// 把它加進來只會讓這個數字失去意義。
+    var totalDwellMinutes: Int {
+        stops.filter { !$0.isOvernight }.reduce(0) { $0 + max(0, $1.dwellMinutes) }
+    }
+
+    /// 標了必去的站數
+    var mustVisitCount: Int { stops.filter(\.isMustVisit).count }
+    /// 過夜幾晚
+    var overnightCount: Int { stops.filter(\.isOvernight).count }
     /// 總交通時間（秒）；未計算的段落不計入
     var totalTravelSeconds: Double {
         stops.dropFirst().reduce(0.0) { $0 + ($1.legSeconds ?? 0) }

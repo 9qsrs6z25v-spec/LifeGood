@@ -159,6 +159,8 @@ struct TripPlanListView: View {
     private func planMeta(_ plan: TripPlan) -> String {
         var parts = ["\(plan.stops.count) 站"]
         if plan.dayCount > 1 { parts.append("\(plan.dayCount) 天") }
+        if plan.overnightCount > 0 { parts.append("住宿 \(plan.overnightCount) 晚") }
+        if plan.mustVisitCount > 0 { parts.append("必去 \(plan.mustVisitCount)") }
         parts.append(plan.travelMode.rawValue)
         if plan.totalMeters > 0 { parts.append(TripRouter.distanceText(plan.totalMeters)) }
         if plan.totalSeconds > 0 { parts.append("全程 " + TripRouter.durationText(plan.totalSeconds)) }
@@ -351,6 +353,7 @@ struct TripPlanDetailView: View {
                 kpi("距離", p.totalMeters > 0
                     ? TripRouter.distanceText(p.totalMeters) : "—", "")
             }
+            if p.mustVisitCount > 0 || p.overnightCount > 0 { marksRow(p) }
             if p.dayCount > 1 { dayLegend(p) }
             if isRouting {
                 HStack(spacing: 6) {
@@ -387,6 +390,31 @@ struct TripPlanDetailView: View {
         .padding(.horizontal)
     }
 
+    /// 必去與住宿的計數。這兩個是排行程時最常看的標記，放在摘要卡上。
+    private func marksRow(_ p: TripPlan) -> some View {
+        HStack(spacing: 6) {
+            if p.mustVisitCount > 0 {
+                HStack(spacing: 3) {
+                    Image(systemName: "star.fill").font(.system(size: 9))
+                    Text("必去 \(p.mustVisitCount) 站").font(.system(size: 10, weight: .bold))
+                }
+                .foregroundStyle(.white)
+                .padding(.horizontal, 7).padding(.vertical, 3)
+                .background(Color.white.opacity(0.18), in: Capsule())
+            }
+            if p.overnightCount > 0 {
+                HStack(spacing: 3) {
+                    Image(systemName: "bed.double.fill").font(.system(size: 9))
+                    Text("住宿 \(p.overnightCount) 晚").font(.system(size: 10, weight: .bold))
+                }
+                .foregroundStyle(.white)
+                .padding(.horizontal, 7).padding(.vertical, 3)
+                .background(Color.white.opacity(0.18), in: Capsule())
+            }
+            Spacer(minLength: 0)
+        }
+    }
+
     /// 跨天時在摘要卡底下放一條色帶，說明哪個顏色是第幾天
     private func dayLegend(_ p: TripPlan) -> some View {
         ScrollView(.horizontal, showsIndicators: false) {
@@ -405,6 +433,13 @@ struct TripPlanDetailView: View {
                 }
             }
         }
+    }
+
+    /// 離開時間。跨過午夜就加「翌」，否則 09:00 看起來像同一天早上就走了。
+    private static func departureText(_ slot: TripPlan.Slot) -> String {
+        let t = timeFmt.string(from: slot.departure)
+        return Calendar.current.isDate(slot.departure, inSameDayAs: slot.arrival)
+            ? t : "翌 " + t
     }
 
     /// 這一天是幾月幾號（星期幾）。字串在 ViewBuilder 外組好。
@@ -459,6 +494,10 @@ struct TripPlanDetailView: View {
                 if multiDay && slot.dayIndex != (slot.index == 0 ? -1 : slots[slot.index - 1].dayIndex) {
                     dayHeaderRow(p, dayIndex: slot.dayIndex, isFirst: slot.index == 0)
                 }
+                // 前一站是過夜的地方 → 它同時也是這一天的第一站，在新的一天開頭再出現一次
+                if slot.index > 0, slots[slot.index - 1].stop.isOvernight {
+                    overnightResumeRow(slots[slot.index - 1], dayIndex: slot.dayIndex)
+                }
                 // 第一站前面沒有路段；其餘每一站上面先畫「從上一站過來」那一條
                 if slot.index > 0 {
                     legRow(slot, plan: p)
@@ -492,6 +531,35 @@ struct TripPlanDetailView: View {
         .padding(.horizontal, 16)
         .padding(.top, isFirst ? 2 : 10)
         .padding(.bottom, 4)
+    }
+
+    /// 住宿的地方在隔天開頭再出現一次：它是當天最後一站，也是隔天的第一站。
+    /// 這一列不是另一個景點，只是把「早上從這裡出發」講清楚，所以刻意做得比景點列輕。
+    private func overnightResumeRow(_ slot: TripPlan.Slot, dayIndex: Int) -> some View {
+        let c = TripDayPalette.color(dayIndex)
+        return HStack(alignment: .center, spacing: 10) {
+            Text(Self.timeFmt.string(from: slot.departure))
+                .font(.system(size: 12, weight: .bold, design: .rounded))
+                .foregroundStyle(c)
+                .frame(width: 42)
+            Image(systemName: "bed.double.fill")
+                .font(.system(size: 10)).foregroundStyle(c)
+            Text("從「" + slot.stop.displayName + "」出發")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+            Spacer(minLength: 0)
+            Button {
+                editingStop = slot.stop
+            } label: {
+                Image(systemName: "pencil.circle")
+                    .font(.system(size: 13)).foregroundStyle(.tertiary)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 4)
+        .background(c.opacity(0.05))
     }
 
     /// 兩站之間的那一段路。點「＋」就從這裡插一站進去。
@@ -562,7 +630,7 @@ struct TripPlanDetailView: View {
                         .font(.system(size: 12, weight: .bold, design: .rounded))
                 }
                 .foregroundStyle(slot.shortfallSeconds > 60 ? Color.red : c)
-                Text(Self.timeFmt.string(from: slot.departure))
+                Text(Self.departureText(slot))
                     .font(.system(size: 10, design: .rounded))
                     .foregroundStyle(.tertiary)
             }
@@ -577,19 +645,33 @@ struct TripPlanDetailView: View {
                 disclosureColor: c,
                 onTap: { editingStop = slot.stop },
                 leading: {
-                    ZStack {
-                        Circle()
-                            .fill(LinearGradient(colors: [c.opacity(0.9), c.opacity(0.5)],
-                                                 startPoint: .top, endPoint: .bottom))
-                            .frame(width: 22, height: 22)
-                        Text("\(slot.index + 1)")
-                            .font(.system(size: 11, weight: .bold, design: .rounded))
-                            .foregroundStyle(.white)
+                    ZStack(alignment: .topTrailing) {
+                        ZStack {
+                            Circle()
+                                .fill(LinearGradient(colors: [c.opacity(0.9), c.opacity(0.5)],
+                                                     startPoint: .top, endPoint: .bottom))
+                                .frame(width: 22, height: 22)
+                            Text("\(slot.index + 1)")
+                                .font(.system(size: 11, weight: .bold, design: .rounded))
+                                .foregroundStyle(.white)
+                        }
+                        if slot.stop.isMustVisit {
+                            Image(systemName: "star.fill")
+                                .font(.system(size: 8))
+                                .foregroundStyle(.orange)
+                                .padding(1.5)
+                                .background(Circle().fill(Color(.systemBackground)))
+                                .offset(x: 4, y: -4)
+                        }
                     }
+                    .frame(width: 22, height: 22)
                 },
                 accessory: {
                     Menu {
                         Button("編輯") { editingStop = slot.stop }
+                        Button(slot.stop.isMustVisit ? "取消必去" : "標為必去") {
+                            toggleMustVisit(slot.stop.id)
+                        }
                         Button("在這之後插入景點") {
                             insertIndex = slot.index + 1
                             addingStop = true
@@ -648,8 +730,17 @@ struct TripPlanDetailView: View {
                                   text: "比預計早到，空 " + TripRouter.durationText(slot.idleSeconds),
                                   color: .secondary, icon: "hourglass"))
         }
-        chips.append(ItemChip(id: "dwell", text: "停留 \(slot.stop.dwellMinutes) 分",
-                              color: c, icon: "clock"))
+        if slot.stop.isMustVisit {
+            chips.append(ItemChip(id: "must", text: "必去", color: .orange, icon: "star.fill"))
+        }
+        if slot.stop.isOvernight {
+            chips.append(ItemChip(id: "night",
+                                  text: "過夜・隔天 " + Self.timeFmt.string(from: slot.departure) + " 出發",
+                                  color: .indigo, icon: "bed.double.fill"))
+        } else {
+            chips.append(ItemChip(id: "dwell", text: "停留 \(slot.stop.dwellMinutes) 分",
+                                  color: c, icon: "clock"))
+        }
         if !slot.stop.photoFileNames.isEmpty {
             chips.append(ItemChip(id: "photo", text: "\(slot.stop.photoFileNames.count) 張",
                                   color: .indigo, icon: "photo"))
@@ -690,6 +781,13 @@ struct TripPlanDetailView: View {
                 body: sub.note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                     ? "（沒有備註）" : sub.note)
         }
+    }
+
+    /// 必去只是一個開關，不必為它開一次編輯畫面
+    private func toggleMustVisit(_ stopId: UUID) {
+        guard var p = plan, let i = p.stops.firstIndex(where: { $0.id == stopId }) else { return }
+        p.stops[i].isMustVisit.toggle()
+        lifeStore.upsertTripPlan(p)
     }
 
     /// 換順序。往後移要 +2——SwiftUI 的 move(toOffset:) 算的是「移除前的索引」，
@@ -852,6 +950,9 @@ struct TripStopEditorSheet: View {
     /// 指定抵達時間（關閉＝由上一站推算）
     @State private var hasArrivalTime = false
     @State private var arrivalTime = Date()
+    @State private var isMustVisit = false
+    @State private var isOvernight = false
+    @State private var checkOutTime = TripStopEditorSheet.defaultCheckOut
     @State private var note = ""
     @State private var photoFileNames: [String] = []
     @State private var subSpots: [TripSubSpot] = []
@@ -914,6 +1015,29 @@ struct TripStopEditorSheet: View {
                 }
 
                 Section {
+                    mustVisitButton
+                    Toggle(isOn: $isOvernight) {
+                        Label("在這裡過夜", systemImage: "bed.double.fill")
+                    }
+                    .tint(.indigo)
+                    if isOvernight {
+                        HStack {
+                            Text("隔天出發")
+                            Spacer()
+                            DatePicker("", selection: $checkOutTime,
+                                       displayedComponents: .hourAndMinute)
+                                .labelsHidden()
+                        }
+                    }
+                } header: {
+                    Text("標記")
+                } footer: {
+                    Text(isOvernight
+                         ? "這一站會成為當天的最後一站，時間軸在這裡換日；隔天從這裡開始，第一段路的交通時間從你設定的出發時刻算起。過夜的站不用填停留時間。"
+                         : "必去的站會標星號，時間不夠要砍站時一眼看得出哪些不能砍。住宿的地方請打開「在這裡過夜」。")
+                }
+
+                Section {
                     Toggle("指定抵達時間", isOn: $hasArrivalTime)
                         .tint(accent)
                     if hasArrivalTime {
@@ -931,28 +1055,30 @@ struct TripStopEditorSheet: View {
                          : "不指定的話，抵達時間由上一站的離開時間加上路上的交通時間自動推算。餐廳訂位、船班、表演入場這種時間是死的，建議直接指定。")
                 }
 
-                Section {
-                    Stepper(value: $dwellMinutes, in: 0...1440, step: 15) {
-                        HStack {
-                            Text("停留時間")
-                            Spacer()
-                            Text("\(dwellMinutes) 分").foregroundStyle(.secondary)
+                if !isOvernight {
+                    Section {
+                        Stepper(value: $dwellMinutes, in: 0...1440, step: 15) {
+                            HStack {
+                                Text("停留時間")
+                                Spacer()
+                                Text("\(dwellMinutes) 分").foregroundStyle(.secondary)
+                            }
                         }
-                    }
-                    // 15 分一格對短停留太粗，補幾顆常用值
-                    HStack(spacing: 6) {
-                        ForEach([30, 60, 90, 120, 180], id: \.self) { m in
-                            Button("\(m)分") { dwellMinutes = m }
-                                .font(.caption.weight(.semibold))
-                                .padding(.horizontal, 9).padding(.vertical, 4)
-                                .background(dwellMinutes == m ? accent.opacity(0.18)
-                                            : Color(.tertiarySystemFill), in: Capsule())
-                                .foregroundStyle(dwellMinutes == m ? accent : .secondary)
-                                .buttonStyle(.plain)
+                        // 15 分一格對短停留太粗，補幾顆常用值
+                        HStack(spacing: 6) {
+                            ForEach([30, 60, 90, 120, 180], id: \.self) { m in
+                                Button("\(m)分") { dwellMinutes = m }
+                                    .font(.caption.weight(.semibold))
+                                    .padding(.horizontal, 9).padding(.vertical, 4)
+                                    .background(dwellMinutes == m ? accent.opacity(0.18)
+                                                : Color(.tertiarySystemFill), in: Capsule())
+                                    .foregroundStyle(dwellMinutes == m ? accent : .secondary)
+                                    .buttonStyle(.plain)
+                            }
                         }
+                    } header: {
+                        Text("停留")
                     }
-                } header: {
-                    Text("停留")
                 }
 
                 TripSubSpotEditor(subSpots: $subSpots, dwellMinutes: dwellMinutes, accent: accent)
@@ -1006,6 +1132,9 @@ struct TripStopEditorSheet: View {
                 latitude = e.latitude; longitude = e.longitude
                 dwellMinutes = e.dwellMinutes; note = e.note
                 photoFileNames = e.photoFileNames; subSpots = e.subSpots
+                isMustVisit = e.isMustVisit
+                isOvernight = e.isOvernight
+                if let out = e.checkOutTime { checkOutTime = out }
                 if let fixed = e.arrivalOverride {
                     hasArrivalTime = true
                     arrivalTime = fixed
@@ -1013,6 +1142,43 @@ struct TripStopEditorSheet: View {
             }
             .onDisappear { searchDebounce?.cancel() }
         }
+    }
+
+    /// 「必去」是一鍵切換，做成整列可點的按鈕而不是右邊那顆小開關——
+    /// 這是排行程時最常按的東西。
+    private var mustVisitButton: some View {
+        Button {
+            isMustVisit.toggle()
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: isMustVisit ? "star.fill" : "star")
+                    .font(.system(size: 16))
+                    .foregroundStyle(isMustVisit ? Color.orange : Color.secondary)
+                    .frame(width: 22)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("必去").font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.primary)
+                    Text(isMustVisit ? "已標記，時間軸上會加星號" : "這一站不能砍的話標一下")
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 0)
+                if isMustVisit {
+                    Text("必去")
+                        .font(.system(size: 10, weight: .bold))
+                        .padding(.horizontal, 7).padding(.vertical, 3)
+                        .background(Color.orange.opacity(0.15))
+                        .foregroundStyle(.orange)
+                        .clipShape(Capsule())
+                }
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// 預設退房時刻：早上 9:00（只有時分會被用到）
+    static var defaultCheckOut: Date {
+        Calendar.current.date(bySettingHour: 9, minute: 0, second: 0, of: Date()) ?? Date()
     }
 
     /// 打開「指定抵達時間」時的預設值：就用目前時間軸算出來的抵達時間，
@@ -1078,6 +1244,10 @@ struct TripStopEditorSheet: View {
         stop.latitude = latitude
         stop.longitude = longitude
         stop.dwellMinutes = max(0, dwellMinutes)
+        stop.isMustVisit = isMustVisit
+        stop.isOvernight = isOvernight
+        // 沒開過夜就不要留著退房時刻，免得之後重新打開時帶出上次改過的值
+        stop.checkOutTime = isOvernight ? checkOutTime : nil
         stop.arrivalOverride = hasArrivalTime ? arrivalTime : nil
         stop.note = note.trimmingCharacters(in: .whitespacesAndNewlines)
         stop.photoFileNames = photoFileNames
@@ -1192,6 +1362,8 @@ struct TripRouteMapSheet: View {
         let coord: CLLocationCoordinate2D
         /// 第幾天——大頭針跟時間軸用同一套分色
         let dayIndex: Int
+        let isMustVisit: Bool
+        let isOvernight: Bool
     }
 
     /// 一天一條線。跨日那一段畫在前一天的顏色上，線才不會斷在中間。
@@ -1222,7 +1394,9 @@ struct TripRouteMapSheet: View {
         plan.timeline.compactMap { slot in
             slot.stop.coordinate.map {
                 Pin(id: slot.stop.id, number: slot.index + 1,
-                    name: slot.stop.displayName, coord: $0, dayIndex: slot.dayIndex)
+                    name: slot.stop.displayName, coord: $0, dayIndex: slot.dayIndex,
+                    isMustVisit: slot.stop.isMustVisit,
+                    isOvernight: slot.stop.isOvernight)
             }
         }
     }
@@ -1247,13 +1421,31 @@ struct TripRouteMapSheet: View {
                         }
                         ForEach(pins) { pin in
                             Annotation(pin.name, coordinate: pin.coord) {
-                                ZStack {
-                                    Circle().fill(TripDayPalette.color(pin.dayIndex))
-                                        .frame(width: 26, height: 26)
-                                        .shadow(radius: 2)
-                                    Text("\(pin.number)")
-                                        .font(.caption2.weight(.bold)).foregroundStyle(.white)
+                                ZStack(alignment: .topTrailing) {
+                                    ZStack {
+                                        Circle().fill(TripDayPalette.color(pin.dayIndex))
+                                            .frame(width: 26, height: 26)
+                                            .shadow(radius: 2)
+                                        if pin.isOvernight {
+                                            Image(systemName: "bed.double.fill")
+                                                .font(.system(size: 11, weight: .bold))
+                                                .foregroundStyle(.white)
+                                        } else {
+                                            Text("\(pin.number)")
+                                                .font(.caption2.weight(.bold))
+                                                .foregroundStyle(.white)
+                                        }
+                                    }
+                                    if pin.isMustVisit {
+                                        Image(systemName: "star.fill")
+                                            .font(.system(size: 9))
+                                            .foregroundStyle(.orange)
+                                            .padding(1.5)
+                                            .background(Circle().fill(Color(.systemBackground)))
+                                            .offset(x: 5, y: -5)
+                                    }
                                 }
+                                .frame(width: 26, height: 26)
                             }
                         }
                     }
