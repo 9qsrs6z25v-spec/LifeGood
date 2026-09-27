@@ -235,6 +235,7 @@ struct TripPlanDetailView: View {
     @State private var legDetail: LegBox?
     /// 要分享的文字。一樣走 .sheet(item:)，內容跟著 item 一起進去
     @State private var sharing: ShareText?
+    @State private var showImageExport = false
 
     private struct LegBox: Identifiable {
         let id = UUID()
@@ -299,8 +300,17 @@ struct TripPlanDetailView: View {
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     if let p = plan, !p.stops.isEmpty {
-                        Button {
-                            sharing = ShareText(text: TripShare.planText(p))
+                        Menu {
+                            Button {
+                                sharing = ShareText(text: TripShare.planText(p))
+                            } label: {
+                                Label("分享文字行程", systemImage: "text.alignleft")
+                            }
+                            Button {
+                                showImageExport = true
+                            } label: {
+                                Label("分享成圖片…", systemImage: "photo")
+                            }
                         } label: {
                             Image(systemName: "square.and.arrow.up").foregroundStyle(accent)
                         }
@@ -333,6 +343,9 @@ struct TripPlanDetailView: View {
             }
             .sheet(item: $sharing) { item in
                 ShareSheet(items: [item.text])
+            }
+            .sheet(isPresented: $showImageExport) {
+                if let p = plan { TripPlanImageExportSheet(plan: p) }
             }
             .confirmationDialog("刪除景點", isPresented: Binding(
                 get: { removingStop != nil }, set: { if !$0 { removingStop = nil } }
@@ -1990,10 +2003,16 @@ struct TripLegDetailSheet: View {
     @State private var polyline: MKPolyline?
     @State private var isLoading = false
     @State private var sharing: ShareText?
+    @State private var sharingImage: ShareImageURL?
+    @State private var isExporting = false
 
     private struct ShareText: Identifiable {
         let id = UUID()
         let text: String
+    }
+    private struct ShareImageURL: Identifiable {
+        let id = UUID()
+        let url: URL
     }
 
     init(plan: TripPlan, index: Int) {
@@ -2031,15 +2050,31 @@ struct TripLegDetailSheet: View {
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button("關閉") { dismiss() } }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        sharing = ShareText(text: TripShare.legText(plan, index: index))
+                    Menu {
+                        Button {
+                            sharing = ShareText(text: TripShare.legText(plan, index: index))
+                        } label: {
+                            Label("分享文字", systemImage: "text.alignleft")
+                        }
+                        Button {
+                            Task { await shareImage() }
+                        } label: {
+                            Label("分享成圖片", systemImage: "photo")
+                        }
                     } label: {
-                        Image(systemName: "square.and.arrow.up").foregroundStyle(dayColor)
+                        if isExporting {
+                            ProgressView().tint(dayColor)
+                        } else {
+                            Image(systemName: "square.and.arrow.up").foregroundStyle(dayColor)
+                        }
                     }
                 }
             }
             .sheet(item: $sharing) { item in
                 ShareSheet(items: [item.text])
+            }
+            .sheet(item: $sharingImage) { item in
+                ShareSheet(items: [item.url])
             }
             .task { await loadRoute() }
         }
@@ -2257,6 +2292,25 @@ struct TripLegDetailSheet: View {
     }
 
     // MARK: 真實路線
+
+    /// 出圖。地圖不能直接用畫面上那張——ImageRenderer 畫不出 SwiftUI 的 Map
+    /// （那是包在 UIViewRepresentable 裡的 UIKit 元件，出圖會變成一塊空白），
+    /// 所以另外用 MKMapSnapshotter 做一張，路線與大頭針自己疊上去。
+    @MainActor
+    private func shareImage() async {
+        guard !isExporting else { return }
+        isExporting = true
+        defer { isExporting = false }
+        // 真實路線還沒回來就先等它（沒有的話圖上會是虛線，跟畫面一致）
+        if polyline == nil { await loadRoute() }
+        let image = await TripImageExporter.legMapImage(plan: plan, index: index,
+                                                        polyline: polyline)
+        let card = TripLegShareCard(plan: plan, index: index, mapImage: image)
+        let stamp = TripImageExporter.stampFormatter.string(from: Date())
+        let name = (to?.stop.displayName ?? "路線") + "_" + stamp
+        guard let url = TripImageExporter.writeJPG(card, name: name) else { return }
+        sharingImage = ShareImageURL(url: url)
+    }
 
     @MainActor
     private func loadRoute() async {
