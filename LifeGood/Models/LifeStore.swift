@@ -15,6 +15,8 @@ class LifeStore: ObservableObject {
     @Published var workouts: [WorkoutSession] = [] { didSet { if !isLoading { save() } } }
     /// [v25.357] 公司廠區據點：與重大決議的「廠區」欄位對應，長成每個廠的歷史年線
     @Published var companySites: [CompanySite] = [] { didSet { if !isLoading { save() } } }
+    /// [v25.399] 旅遊規劃（要去的行程；與旅遊地圖「去過的地點」是兩回事）
+    @Published var tripPlans: [TripPlan] = [] { didSet { if !isLoading { save() } } }
     @Published var gradeTitles: [GradeTitle] = [] { didSet { if !isLoading { save() } } }
     @Published var businessCards: [BusinessCard] = [] { didSet { if !isLoading { save() } } }
     @Published var personalEvents: [PersonalEvent] = [] { didSet { if !isLoading { save() } } }
@@ -40,7 +42,7 @@ class LifeStore: ObservableObject {
         "life_grade_titles", "life_business_cards", "life_personal_events",
         "life_org_people", "life_health_profile", "life_family_tasks",
         "life_equipment_pool", "life_performance_ballots", "life_workouts",
-        "life_company_sites"
+        "life_company_sites", "life_trip_plans"
     ]
 
     init() {
@@ -2349,6 +2351,56 @@ class LifeStore: ObservableObject {
         save()
     }
 
+    // MARK: - [v25.399] 旅遊規劃 CRUD
+
+    func upsertTripPlan(_ plan: TripPlan) {
+        if let i = tripPlans.firstIndex(where: { $0.id == plan.id }) { tripPlans[i] = plan }
+        else { tripPlans.append(plan) }
+    }
+
+    func deleteTripPlan(id: UUID) {
+        // 照片是實體檔案，跟著行程一起刪；只清陣列會留下孤兒檔，
+        // 而且 CloudKit 的照片同步會一直把它們當成「還沒上傳的本機照片」重傳
+        //（同 deleteOrgPerson／deleteBusinessCard 的既有寫法）
+        if let plan = tripPlans.first(where: { $0.id == id }) {
+            for stop in plan.stops {
+                for name in stop.photoFileNames { TripStop.deletePhoto(name) }
+            }
+        }
+        tripPlans.removeAll { $0.id == id }
+    }
+
+    func tripPlan(id: UUID) -> TripPlan? {
+        tripPlans.first { $0.id == id }
+    }
+
+    /// 刪掉某一站，連帶清掉它的照片，並讓「下一站」的路線快取失效
+    ///（前一站換人了，那段路就不是原來那段）。
+    func deleteTripStop(planId: UUID, stopId: UUID) {
+        guard let pi = tripPlans.firstIndex(where: { $0.id == planId }),
+              let si = tripPlans[pi].stops.firstIndex(where: { $0.id == stopId }) else { return }
+        for name in tripPlans[pi].stops[si].photoFileNames { TripStop.deletePhoto(name) }
+        tripPlans[pi].stops.remove(at: si)
+        invalidateLeg(planIndex: pi, at: si)
+    }
+
+    /// 搬動站的順序。搬完之後受影響的段落快取要作廢。
+    func moveTripStops(planId: UUID, from source: IndexSet, to destination: Int) {
+        guard let pi = tripPlans.firstIndex(where: { $0.id == planId }) else { return }
+        tripPlans[pi].stops.move(fromOffsets: source, toOffset: destination)
+        // 搬動會讓「哪一站接在哪一站後面」整批改變，逐段比指紋成本比猜哪幾段變了低，
+        // 所以直接全部作廢，讓路線計算自己重跑（它本來就只算指紋對不上的段落）。
+        for i in tripPlans[pi].stops.indices {
+            tripPlans[pi].stops[i].legStamp = nil
+        }
+    }
+
+    /// 讓第 index 站的「進站路線」失效（index 可能已超出範圍，代表刪的是最後一站）
+    private func invalidateLeg(planIndex pi: Int, at index: Int) {
+        guard tripPlans[pi].stops.indices.contains(index) else { return }
+        tripPlans[pi].stops[index].legStamp = nil
+    }
+
     // MARK: - 持久化
 
     private func save() {
@@ -2360,7 +2412,7 @@ class LifeStore: ObservableObject {
             businessCards: businessCards, personalEvents: personalEvents, orgPeople: orgPeople,
             healthProfile: healthProfile, familyTasks: familyTasks, equipmentPool: equipmentPool,
             performanceBallots: performanceBallots, workouts: workouts,
-            companySites: companySites
+            companySites: companySites, tripPlans: tripPlans
         )
         saveQueue.async {
             let encoder = JSONEncoder()
@@ -2383,6 +2435,7 @@ class LifeStore: ObservableObject {
             if let d = try? encoder.encode(snap.performanceBallots) { ud.set(d, forKey: "life_performance_ballots") }
             if let d = try? encoder.encode(snap.workouts)       { ud.set(d, forKey: "life_workouts") }
             if let d = try? encoder.encode(snap.companySites)   { ud.set(d, forKey: "life_company_sites") }
+            if let d = try? encoder.encode(snap.tripPlans)      { ud.set(d, forKey: "life_trip_plans") }
             CloudSyncManager.shared.pushAll()
         }
     }
@@ -2413,6 +2466,7 @@ class LifeStore: ObservableObject {
         if let items = lossyDecodeArray([PerformanceBallot].self, key: "life_performance_ballots", decoder: decoder) { performanceBallots = items }
         if let items = lossyDecodeArray([WorkoutSession].self, key: "life_workouts", decoder: decoder) { workouts = items }
         if let items = lossyDecodeArray([CompanySite].self, key: "life_company_sites", decoder: decoder) { companySites = items }
+        if let items = lossyDecodeArray([TripPlan].self, key: "life_trip_plans", decoder: decoder) { tripPlans = items }
         if let data = rawDataIfChanged("life_health_profile"),
            let h = try? decoder.decode(HealthProfile.self, from: data) {
             healthProfile = h
@@ -2489,6 +2543,13 @@ class LifeStore: ObservableObject {
         healthProfile = HealthProfile()
         workouts.removeAll()
         companySites.removeAll()
+        // 行程的照片檔也要一起清，不然會留下沒人指向的孤兒檔被雲端一直重傳
+        for plan in tripPlans {
+            for stop in plan.stops {
+                for name in stop.photoFileNames { TripStop.deletePhoto(name) }
+            }
+        }
+        tripPlans.removeAll()
         save()
     }
 }

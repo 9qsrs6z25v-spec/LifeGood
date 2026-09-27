@@ -40,6 +40,9 @@ struct UnifiedExport: Codable {
         /// 機台池（部門所屬設備）；舊備份沒有此欄位，其機台仍在各部屬的 equipments 裡，
         /// 匯入後由 migrateLegacyEquipmentsToPool() 搬遷
         var equipmentPool: [ManagedEquipment]?
+        /// [v25.399] 旅遊規劃。舊備份沒有這個欄位，所以是 Optional——
+        /// 少了它整份 LifeBundle 都會解不出來。
+        var tripPlans: [TripPlan]?
     }
 
     static func build(expense: ExpenseStore, finance: FinanceStore, life: LifeStore) -> UnifiedExport {
@@ -68,7 +71,8 @@ struct UnifiedExport: Codable {
                 personalEvents: life.personalEvents,
                 orgPeople: life.orgPeople,
                 familyTasks: life.familyTasks,
-                equipmentPool: life.equipmentPool
+                equipmentPool: life.equipmentPool,
+                tripPlans: life.tripPlans
             )
         )
     }
@@ -690,6 +694,7 @@ enum UnifiedImporter {
                 if let people = payload.life.orgPeople { life.orgPeople = people }
                 if let ft = payload.life.familyTasks { life.familyTasks = ft }
                 if let pool = payload.life.equipmentPool { life.equipmentPool = pool }
+                if let plans = payload.life.tripPlans { life.tripPlans = plans }
                 // 舊格式備份的機台在各部屬身上——覆蓋匯入後立刻搬進機台池
                 life.migrateLegacyEquipmentsToPool()
             }
@@ -857,6 +862,11 @@ enum UnifiedImporter {
                 if let pool = payload.life.equipmentPool {
                     let newEq = mergeItems(existing: life.equipmentPool, incoming: pool)
                     life.equipmentPool.append(contentsOf: newEq)
+                }
+
+                if let plans = payload.life.tripPlans {
+                    let newPlans = mergeItems(existing: life.tripPlans, incoming: plans)
+                    life.tripPlans.append(contentsOf: newPlans)
                 }
                 // 舊格式備份的機台上面 appendNewByID 進了部屬的 equipments——搬進機台池
                 life.migrateLegacyEquipmentsToPool()

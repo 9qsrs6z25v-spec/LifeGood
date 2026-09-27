@@ -1,0 +1,1072 @@
+import SwiftUI
+import MapKit
+import PhotosUI
+
+// MARK: - 旅遊規劃
+//
+// [v25.399] 旅遊地圖底部「旅遊規劃」進來的地方。
+//
+// 三層：行程清單 → 行程時間軸 → 景點編輯。
+// 路線距離與時間由 TripRouter 算好存進 TripStop（見那邊的快取說明），
+// 所以時間軸重繪不會反覆打 MapKit，離線也看得到上次算過的結果。
+
+struct TripPlanListView: View {
+    @EnvironmentObject var lifeStore: LifeStore
+    @Environment(\.dismiss) private var dismiss
+
+    private let accent = Color(red: 0.68, green: 0.40, blue: 1.00)   // 沿用旅遊地圖的娛樂紫
+
+    @State private var openPlanId: UUID?
+    @State private var removing: TripPlan?
+    /// 剛用＋開出來、還沒填任何東西的行程 id。
+    /// 不能在 onDismiss 才讀 openPlanId——sheet 關閉時綁定已經先被設成 nil 了。
+    @State private var freshPlanId: UUID?
+
+    private static let dayFmt: DateFormatter = {
+        let f = DateFormatter(); f.locale = Locale(identifier: "zh_Hant_TW")
+        f.dateFormat = "yyyy/M/d (E) HH:mm"; return f
+    }()
+
+    private var plans: [TripPlan] {
+        lifeStore.tripPlans.sorted { $0.startDate > $1.startDate }
+    }
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if plans.isEmpty {
+                    emptyState
+                } else {
+                    List {
+                        ForEach(plans) { plan in
+                            planRow(plan)
+                        }
+                    }
+                    .listStyle(.insetGrouped)
+                }
+            }
+            .navigationTitle("旅遊規劃")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) { Button("關閉") { dismiss() } }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button { newPlan() } label: {
+                        Image(systemName: "plus.circle.fill").font(.title3).foregroundStyle(accent)
+                    }
+                }
+            }
+            .sheet(item: Binding(
+                get: { openPlanId.map { IDBox(id: $0) } },
+                set: { openPlanId = $0?.id }
+            ), onDismiss: { discardIfBlank() }) { box in
+                TripPlanDetailView(planId: box.id).environmentObject(lifeStore)
+            }
+            .confirmationDialog("刪除行程", isPresented: Binding(
+                get: { removing != nil }, set: { if !$0 { removing = nil } }
+            ), titleVisibility: .visible, presenting: removing) { plan in
+                Button("刪除「\(plan.displayTitle)」", role: .destructive) {
+                    lifeStore.deleteTripPlan(id: plan.id)
+                    removing = nil
+                }
+                Button("取消", role: .cancel) { removing = nil }
+            } message: { plan in
+                Text("這份行程的 \(plan.stops.count) 個景點與所有照片都會一起刪掉，沒辦法復原。")
+            }
+        }
+    }
+
+    private func newPlan() {
+        // 預設出發時間用排程時段（整點/半點，過 18:00 則隔天 09:30），與全 App 一致
+        let plan = TripPlan(startDate: FiveMinuteDateTimePicker.defaultSchedulingTime())
+        lifeStore.upsertTripPlan(plan)
+        freshPlanId = plan.id
+        openPlanId = plan.id
+    }
+
+    /// 剛開的行程如果一個景點、標題、備註都沒有，關掉時就收掉，
+    /// 不要在清單上留一排「未命名行程」。有填任何東西就保留。
+    private func discardIfBlank() {
+        guard let id = freshPlanId else { return }
+        freshPlanId = nil
+        guard let p = lifeStore.tripPlan(id: id) else { return }
+        guard p.stops.isEmpty,
+              p.title.trimmingCharacters(in: .whitespaces).isEmpty,
+              p.note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        lifeStore.deleteTripPlan(id: id)
+    }
+
+    private func planRow(_ plan: TripPlan) -> some View {
+        Button {
+            freshPlanId = nil
+            openPlanId = plan.id
+        } label: {
+            HStack(spacing: 12) {
+                ZStack {
+                    Circle()
+                        .fill(LinearGradient(colors: [accent.opacity(0.22), accent.opacity(0.08)],
+                                             startPoint: .topLeading, endPoint: .bottomTrailing))
+                        .frame(width: 40, height: 40)
+                    Image(systemName: "map.fill")
+                        .font(.system(size: 16, weight: .semibold)).foregroundStyle(accent)
+                }
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(plan.displayTitle)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                    Text(Self.dayFmt.string(from: plan.startDate))
+                        .font(.caption2).foregroundStyle(.secondary)
+                    Text(planMeta(plan))
+                        .font(.caption2).foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right").font(.caption2.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+            Button(role: .destructive) { removing = plan } label: {
+                Label("刪除", systemImage: "trash")
+            }
+        }
+    }
+
+    /// 字串在 ViewBuilder 外組好
+    private func planMeta(_ plan: TripPlan) -> String {
+        var parts = ["\(plan.stops.count) 站", plan.travelMode.rawValue]
+        if plan.totalMeters > 0 { parts.append(TripRouter.distanceText(plan.totalMeters)) }
+        if plan.totalSeconds > 0 { parts.append("全程 " + TripRouter.durationText(plan.totalSeconds)) }
+        return parts.joined(separator: "・")
+    }
+
+    private var emptyState: some View {
+        VStack(spacing: 12) {
+            ZStack {
+                Circle()
+                    .fill(LinearGradient(colors: [accent.opacity(0.18), accent.opacity(0.06)],
+                                         startPoint: .topLeading, endPoint: .bottomTrailing))
+                    .frame(width: 78, height: 78)
+                Image(systemName: "map")
+                    .font(.system(size: 30, weight: .medium)).foregroundStyle(accent)
+            }
+            Text("還沒有行程").font(.headline)
+            Text("按右上的＋開一份行程，加入景點與停留時間，\n系統會自動排出時間軸並算出每段路的距離與時間。")
+                .font(.caption).foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, 36)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(.systemGroupedBackground))
+    }
+}
+
+// MARK: - 行程時間軸
+
+struct TripPlanDetailView: View {
+    @EnvironmentObject var lifeStore: LifeStore
+    @Environment(\.dismiss) private var dismiss
+
+    let planId: UUID
+
+    private let accent = Color(red: 0.68, green: 0.40, blue: 1.00)
+
+    @State private var editingStop: TripStop?
+    /// 要插在哪個位置（nil＝加在最後）
+    @State private var insertIndex: Int?
+    @State private var addingStop = false
+    @State private var showSettings = false
+    @State private var isRouting = false
+    @State private var removingStop: TripStop?
+    @State private var showMap = false
+
+    init(planId: UUID) {
+        self.planId = planId
+    }
+
+    private var plan: TripPlan? { lifeStore.tripPlan(id: planId) }
+
+    private static let timeFmt: DateFormatter = {
+        let f = DateFormatter(); f.locale = Locale(identifier: "zh_Hant_TW")
+        f.dateFormat = "HH:mm"; return f
+    }()
+    private static let dayFmt: DateFormatter = {
+        let f = DateFormatter(); f.locale = Locale(identifier: "zh_Hant_TW")
+        f.dateFormat = "M/d (E)"; return f
+    }()
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if let p = plan {
+                    ScrollView {
+                        VStack(spacing: 14) {
+                            summaryCard(p)
+                            if p.stops.isEmpty {
+                                emptyStops
+                            } else {
+                                timelineCard(p)
+                            }
+                            addButton(p)
+                        }
+                        .padding(.vertical)
+                    }
+                } else {
+                    // 行程在別處被刪掉了
+                    Color.clear.onAppear { dismiss() }
+                }
+            }
+            .background(Color(.systemGroupedBackground))
+            .navigationTitle(plan?.displayTitle ?? "行程")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) { Button("關閉") { dismiss() } }
+                ToolbarItem(placement: .topBarTrailing) {
+                    if (plan?.stops.count ?? 0) >= 2 {
+                        Button { showMap = true } label: {
+                            Image(systemName: "map").foregroundStyle(accent)
+                        }
+                    }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("設定") { showSettings = true }.bold()
+                }
+            }
+            .sheet(isPresented: $showSettings) {
+                if let p = plan {
+                    TripPlanSettingsSheet(plan: p).environmentObject(lifeStore)
+                }
+            }
+            .sheet(isPresented: $addingStop) {
+                TripStopEditorSheet(planId: planId, editing: nil, insertAt: insertIndex)
+                    .environmentObject(lifeStore)
+            }
+            .sheet(item: $editingStop) { stop in
+                TripStopEditorSheet(planId: planId, editing: stop, insertAt: nil)
+                    .environmentObject(lifeStore)
+            }
+            .sheet(isPresented: $showMap) {
+                if let p = plan { TripRouteMapSheet(plan: p) }
+            }
+            .confirmationDialog("刪除景點", isPresented: Binding(
+                get: { removingStop != nil }, set: { if !$0 { removingStop = nil } }
+            ), titleVisibility: .visible, presenting: removingStop) { stop in
+                Button("刪除「\(stop.displayName)」", role: .destructive) {
+                    lifeStore.deleteTripStop(planId: planId, stopId: stop.id)
+                    removingStop = nil
+                }
+                Button("取消", role: .cancel) { removingStop = nil }
+            } message: { stop in
+                Text(stop.photoFileNames.isEmpty
+                     ? "後面幾站的時間會跟著往前移。"
+                     : "這一站的 \(stop.photoFileNames.count) 張照片會一起刪掉，後面幾站的時間會跟著往前移。")
+            }
+            // 進來就把缺的路線補齊；只算指紋對不上的段落，所以不會每次都整條重打
+            .task(id: routeTaskKey) { await recalculate() }
+        }
+    }
+
+    /// 觸發重算的條件指紋：站的順序／座標／交通方式任一改變就重跑
+    private var routeTaskKey: String {
+        guard let p = plan else { return "-" }
+        return p.travelMode.rawValue + "|" + p.stops.map { s in
+            let c = (s.latitude.map { String(format: "%.5f", $0) } ?? "-")
+                + "," + (s.longitude.map { String(format: "%.5f", $0) } ?? "-")
+            return s.id.uuidString.prefix(8) + ":" + c
+        }.joined(separator: ";")
+    }
+
+    @MainActor
+    private func recalculate() async {
+        guard var p = plan, p.stops.count >= 2 else { return }
+        isRouting = true
+        defer { isRouting = false }
+        let changed = await TripRouter.fillMissingLegs(&p)
+        // 算的期間使用者可能又改了行程（插了一站、改了座標）。
+        // 直接覆蓋會把那些改動吃掉，所以寫回前先確認指紋還是同一份。
+        guard changed, let live = plan,
+              live.stops.map(\.id) == p.stops.map(\.id),
+              live.travelMode == p.travelMode else { return }
+        lifeStore.upsertTripPlan(p)
+    }
+
+    // MARK: 摘要
+
+    private func summaryCard(_ p: TripPlan) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 12) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(Self.dayFmt.string(from: p.startDate) + " 出發 "
+                         + Self.timeFmt.string(from: p.startDate))
+                        .font(.caption.weight(.semibold)).foregroundStyle(.white.opacity(0.9))
+                    Text(p.stops.isEmpty ? "尚未加入景點"
+                         : Self.timeFmt.string(from: p.startDate) + " – "
+                           + Self.timeFmt.string(from: p.endDate))
+                        .font(.title3.weight(.bold)).foregroundStyle(.white)
+                        .lineLimit(1).minimumScaleFactor(0.7)
+                }
+                Spacer(minLength: 0)
+                HStack(spacing: 4) {
+                    Image(systemName: p.travelMode.icon).font(.system(size: 10, weight: .bold))
+                    Text(p.travelMode.rawValue).font(.system(size: 11, weight: .bold))
+                }
+                .foregroundStyle(.white)
+                .padding(.horizontal, 8).padding(.vertical, 4)
+                .background(Color.white.opacity(0.18), in: Capsule())
+                .overlay(Capsule().stroke(Color.white.opacity(0.3), lineWidth: 0.75))
+            }
+            Rectangle().fill(Color.white.opacity(0.20)).frame(height: 0.5)
+            HStack(spacing: 0) {
+                kpi("景點", "\(p.stops.count)", "站")
+                kpi("停留", "\(p.totalDwellMinutes)", "分")
+                kpi("交通", p.totalTravelSeconds > 0
+                    ? TripRouter.durationText(p.totalTravelSeconds) : "—", "")
+                kpi("距離", p.totalMeters > 0
+                    ? TripRouter.distanceText(p.totalMeters) : "—", "")
+            }
+            if isRouting {
+                HStack(spacing: 6) {
+                    ProgressView().scaleEffect(0.6).tint(.white)
+                    Text("正在計算路線…").font(.caption2).foregroundStyle(.white.opacity(0.9))
+                }
+            } else if p.unroutedLegCount > 0 {
+                Text("有 \(p.unroutedLegCount) 段還沒算出路線")
+                    .font(.caption2).foregroundStyle(.white.opacity(0.85))
+            }
+        }
+        .padding(16)
+        .background(
+            ZStack {
+                LinearGradient(colors: [accent, accent.opacity(0.62)],
+                               startPoint: .topLeading, endPoint: .bottomTrailing)
+                Circle().fill(Color.white.opacity(0.10)).blur(radius: 18)
+                    .frame(width: 140, height: 140).offset(x: 110, y: -52)
+                Circle().fill(Color.white.opacity(0.08)).blur(radius: 12)
+                    .frame(width: 90, height: 90).offset(x: -118, y: 46)
+                LinearGradient(colors: [Color.white.opacity(0.18), .clear],
+                               startPoint: .top, endPoint: .center)
+            }
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 20))
+        .padding(.horizontal)
+    }
+
+    private func kpi(_ title: String, _ value: String, _ unit: String) -> some View {
+        VStack(spacing: 3) {
+            HStack(alignment: .firstTextBaseline, spacing: 2) {
+                Text(value)
+                    .font(.system(size: 16, weight: .bold, design: .rounded))
+                    .foregroundStyle(.white)
+                    .lineLimit(1).minimumScaleFactor(0.55)
+                if !unit.isEmpty {
+                    Text(unit).font(.system(size: 9)).foregroundStyle(.white.opacity(0.8))
+                }
+            }
+            Text(title).font(.system(size: 10)).foregroundStyle(.white.opacity(0.9))
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    // MARK: 時間軸
+
+    private func timelineCard(_ p: TripPlan) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 8) {
+                Capsule()
+                    .fill(LinearGradient(colors: [accent, accent.opacity(0.5)],
+                                         startPoint: .top, endPoint: .bottom))
+                    .frame(width: 4, height: 16)
+                Image(systemName: "clock.badge.checkmark")
+                    .font(.system(size: 11, weight: .semibold)).foregroundStyle(accent)
+                Text("時間軸").font(.subheadline.weight(.semibold))
+                Spacer()
+            }
+            .padding(.horizontal, 16).padding(.top, 14).padding(.bottom, 8)
+
+            let slots = p.timeline
+            ForEach(slots) { slot in
+                // 第一站前面沒有路段；其餘每一站上面先畫「從上一站過來」那一條
+                if slot.index > 0 {
+                    legRow(slot, plan: p)
+                }
+                stopRow(slot)
+            }
+            Spacer().frame(height: 6)
+        }
+        .background(Color(.systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 18))
+        .overlay(RoundedRectangle(cornerRadius: 18)
+            .stroke(Color(.separator).opacity(0.12), lineWidth: 0.75))
+        .shadow(color: .black.opacity(0.05), radius: 8, x: 0, y: 3)
+        .padding(.horizontal)
+    }
+
+    /// 兩站之間的那一段路。點「＋」就從這裡插一站進去。
+    private func legRow(_ slot: TripPlan.Slot, plan p: TripPlan) -> some View {
+        HStack(spacing: 10) {
+            // 對齊上下的時間欄寬度，讓連接線與圓點在一條垂直線上
+            Text("").frame(width: 42)
+            Rectangle().fill(accent.opacity(0.28))
+                .frame(width: 1.5, height: 26)
+            HStack(spacing: 5) {
+                Image(systemName: p.travelMode.icon).font(.system(size: 9, weight: .bold))
+                Text(legText(slot)).font(.system(size: 10, weight: .semibold))
+                if slot.isEstimated {
+                    Text("估").font(.system(size: 8, weight: .bold))
+                        .padding(.horizontal, 3).padding(.vertical, 1)
+                        .background(Color.orange.opacity(0.18)).foregroundStyle(.orange)
+                        .clipShape(Capsule())
+                }
+            }
+            .foregroundStyle(.secondary)
+            Spacer(minLength: 0)
+            Button {
+                insertIndex = slot.index
+                addingStop = true
+            } label: {
+                Image(systemName: "plus.circle")
+                    .font(.system(size: 14)).foregroundStyle(accent)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 2)
+    }
+
+    private func legText(_ slot: TripPlan.Slot) -> String {
+        guard let secs = slot.travelSeconds else { return "未計算路線" }
+        var t = TripRouter.durationText(secs)
+        if let m = slot.travelMeters { t += "・" + TripRouter.distanceText(m) }
+        return t
+    }
+
+    /// 一站。用既有的 ItemRow 模板畫——子地點就是它的摺疊區。
+    private func stopRow(_ slot: TripPlan.Slot) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            VStack(spacing: 2) {
+                Text(Self.timeFmt.string(from: slot.arrival))
+                    .font(.system(size: 12, weight: .bold, design: .rounded))
+                    .foregroundStyle(accent)
+                Text(Self.timeFmt.string(from: slot.departure))
+                    .font(.system(size: 10, design: .rounded))
+                    .foregroundStyle(.tertiary)
+            }
+            .frame(width: 42)
+
+            ItemRow(
+                chips: stopChips(slot),
+                title: slot.stop.displayName,
+                preview: stopPreview(slot.stop),
+                disclosures: subSpotDisclosures(slot.stop),
+                disclosureLabel: "子地點",
+                disclosureColor: accent,
+                onTap: { editingStop = slot.stop },
+                leading: {
+                    ZStack {
+                        Circle()
+                            .fill(LinearGradient(colors: [accent.opacity(0.9), accent.opacity(0.5)],
+                                                 startPoint: .top, endPoint: .bottom))
+                            .frame(width: 22, height: 22)
+                        Text("\(slot.index + 1)")
+                            .font(.system(size: 11, weight: .bold, design: .rounded))
+                            .foregroundStyle(.white)
+                    }
+                },
+                accessory: {
+                    Menu {
+                        Button("編輯") { editingStop = slot.stop }
+                        Button("在這之後插入景點") {
+                            insertIndex = slot.index + 1
+                            addingStop = true
+                        }
+                        Divider()
+                        if slot.index > 0 {
+                            Button("往前移一站") { move(slot.index, by: -1) }
+                        }
+                        if slot.index < (plan?.stops.count ?? 0) - 1 {
+                            Button("往後移一站") { move(slot.index, by: 1) }
+                        }
+                        if slot.stop.coordinate != nil {
+                            Button("用地圖開啟") { openInMaps(slot.stop) }
+                        }
+                        Divider()
+                        Button("刪除", role: .destructive) { removingStop = slot.stop }
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
+                            .font(.system(size: 15)).foregroundStyle(.secondary)
+                    }
+                }
+            )
+        }
+        .padding(.horizontal, 16)
+    }
+
+    private func stopChips(_ slot: TripPlan.Slot) -> [ItemChip] {
+        var chips: [ItemChip] = []
+        chips.append(ItemChip(id: "dwell", text: "停留 \(slot.stop.dwellMinutes) 分",
+                              color: accent, icon: "clock"))
+        if !slot.stop.photoFileNames.isEmpty {
+            chips.append(ItemChip(id: "photo", text: "\(slot.stop.photoFileNames.count) 張",
+                                  color: .indigo, icon: "photo"))
+        }
+        if !slot.stop.subSpots.isEmpty {
+            chips.append(ItemChip(id: "sub", text: "子地點 \(slot.stop.subSpots.count)",
+                                  color: .teal, icon: "mappin.and.ellipse"))
+        }
+        if slot.stop.coordinate == nil {
+            chips.append(ItemChip(id: "nocoord", text: "未設座標", color: .orange,
+                                  icon: "exclamationmark.triangle.fill"))
+        }
+        // 子地點的分鐘加起來超過母景點的停留時間 → 排程對不上，要講出來
+        if slot.stop.subSpotMinutes > slot.stop.dwellMinutes {
+            chips.append(ItemChip(id: "over",
+                                  text: "子地點共 \(slot.stop.subSpotMinutes) 分，超過停留時間",
+                                  color: .red, icon: "exclamationmark.circle.fill"))
+        }
+        return chips
+    }
+
+    private func stopPreview(_ stop: TripStop) -> String? {
+        var parts: [String] = []
+        let addr = stop.address.trimmingCharacters(in: .whitespaces)
+        if !addr.isEmpty { parts.append(addr) }
+        let note = stop.note.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !note.isEmpty { parts.append(note) }
+        return parts.isEmpty ? nil : parts.joined(separator: "\n")
+    }
+
+    private func subSpotDisclosures(_ stop: TripStop) -> [ItemDisclosure] {
+        stop.subSpots.map { sub in
+            ItemDisclosure(
+                id: sub.id.uuidString,
+                badge: sub.minutes > 0 ? "\(sub.minutes) 分" : nil,
+                title: sub.name.trimmingCharacters(in: .whitespaces).isEmpty
+                    ? "未命名子地點" : sub.name,
+                body: sub.note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    ? "（沒有備註）" : sub.note)
+        }
+    }
+
+    /// 換順序。往後移要 +2——SwiftUI 的 move(toOffset:) 算的是「移除前的索引」，
+    /// 給 index + 1 只會插回原位。
+    private func move(_ index: Int, by delta: Int) {
+        let dest = delta < 0 ? index - 1 : index + 2
+        lifeStore.moveTripStops(planId: planId, from: IndexSet(integer: index), to: dest)
+    }
+
+    private func openInMaps(_ stop: TripStop) {
+        guard let c = stop.coordinate else { return }
+        let item = MKMapItem(placemark: MKPlacemark(coordinate: c))
+        item.name = stop.displayName
+        item.openInMaps()
+    }
+
+    // MARK: 加景點 / 空狀態
+
+    private func addButton(_ p: TripPlan) -> some View {
+        Button {
+            insertIndex = nil
+            addingStop = true
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "plus.circle.fill")
+                Text(p.stops.isEmpty ? "加入第一個景點" : "在最後加一站")
+                    .font(.subheadline.weight(.semibold))
+            }
+            .foregroundStyle(.white)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 13)
+            .background(LinearGradient(colors: [accent, accent.opacity(0.75)],
+                                       startPoint: .leading, endPoint: .trailing))
+            .clipShape(RoundedRectangle(cornerRadius: 14))
+            .shadow(color: accent.opacity(0.28), radius: 8, x: 0, y: 3)
+        }
+        .buttonStyle(.plain)
+        .padding(.horizontal)
+    }
+
+    private var emptyStops: some View {
+        VStack(spacing: 8) {
+            Image(systemName: "mappin.slash")
+                .font(.system(size: 26)).foregroundStyle(.tertiary)
+            Text("還沒有景點")
+                .font(.subheadline.weight(.semibold)).foregroundStyle(.secondary)
+            Text("加了兩站以上就會自動算出每段路的距離與交通時間，\n並把抵達與離開時間排成時間軸。")
+                .font(.caption2).foregroundStyle(.tertiary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 26)
+        .background(Color(.systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 18))
+        .padding(.horizontal)
+    }
+}
+
+// MARK: - 行程設定
+
+struct TripPlanSettingsSheet: View {
+    @EnvironmentObject var lifeStore: LifeStore
+    @Environment(\.dismiss) private var dismiss
+
+    let plan: TripPlan
+
+    @State private var title = ""
+    @State private var startDate = Date()
+    @State private var mode: TripTravelMode = .driving
+    @State private var note = ""
+    @State private var loaded = false
+
+    init(plan: TripPlan) { self.plan = plan }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    TextField("行程名稱（如 宜蘭兩天一夜）", text: $title)
+                    HStack {
+                        Text("出發時間")
+                        Spacer()
+                        FiveMinuteDateTimePicker(selection: $startDate).fixedSize()
+                    }
+                } header: {
+                    Text("基本")
+                }
+                Section {
+                    Picker("交通方式", selection: $mode) {
+                        ForEach(TripTravelMode.allCases) { m in
+                            Label(m.rawValue, systemImage: m.icon).tag(m)
+                        }
+                    }
+                } header: {
+                    Text("交通")
+                } footer: {
+                    Text(mode.supportsRouting
+                         ? "改交通方式會重新計算每一段路的距離與時間。"
+                         : "Apple 不開放大眾運輸的路線計算，所以這個模式是用直線距離乘上迂迴係數估的，段落上會標「估」。要精確時間請用地圖開啟該景點查。")
+                }
+                Section {
+                    TextField("備註", text: $note, axis: .vertical).lineLimit(2...6)
+                } header: {
+                    Text("備註")
+                }
+            }
+            .navigationTitle("行程設定")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) { Button("取消") { dismiss() } }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("儲存") { save() }.bold()
+                }
+            }
+            .onAppear {
+                guard !loaded else { return }
+                loaded = true
+                title = plan.title; startDate = plan.startDate
+                mode = plan.travelMode; note = plan.note
+            }
+        }
+    }
+
+    private func save() {
+        // 從 store 現撈，不要用打開這張表單那一刻的快照——
+        // 使用者可能在這之前才剛加過景點（同 EquipmentEditorSheet v25.385 的教訓）
+        guard var live = lifeStore.tripPlan(id: plan.id) else { dismiss(); return }
+        live.title = title.trimmingCharacters(in: .whitespaces)
+        live.startDate = startDate
+        live.note = note.trimmingCharacters(in: .whitespacesAndNewlines)
+        if live.travelMode != mode {
+            live.travelMode = mode
+            // 交通方式換了，每一段的距離時間都要重算——把快取指紋清掉即可，
+            // 詳情頁的 .task 會自己補算
+            for i in live.stops.indices { live.stops[i].legStamp = nil }
+        }
+        lifeStore.upsertTripPlan(live)
+        dismiss()
+    }
+}
+
+// MARK: - 景點編輯
+
+struct TripStopEditorSheet: View {
+    @EnvironmentObject var lifeStore: LifeStore
+    @Environment(\.dismiss) private var dismiss
+
+    let planId: UUID
+    var editing: TripStop?
+    /// 新增時要插在第幾個位置；nil＝加在最後
+    var insertAt: Int?
+
+    @State private var name = ""
+    @State private var address = ""
+    @State private var latitude: Double?
+    @State private var longitude: Double?
+    @State private var dwellMinutes = 60
+    @State private var note = ""
+    @State private var photoFileNames: [String] = []
+    @State private var subSpots: [TripSubSpot] = []
+    @State private var loaded = false
+    @State private var isSaving = false
+    /// 新增的照片先記下來，取消時要刪掉——不然按取消也會留下檔案
+    @State private var addedPhotos: Set<String> = []
+
+    // 地點搜尋（沿用飲食／就醫紀錄那一套 MKLocalSearchCompleter）
+    @StateObject private var completer = RestaurantSearchCompleter()
+    @State private var searchDebounce: Task<Void, Never>?
+
+    private let accent = Color(red: 0.68, green: 0.40, blue: 1.00)
+
+    init(planId: UUID, editing: TripStop?, insertAt: Int?) {
+        self.planId = planId
+        self.editing = editing
+        self.insertAt = insertAt
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    TextField("景點名稱", text: $name)
+                        .onChange(of: name) { _, newValue in scheduleSearch(newValue) }
+                    if !completer.results.isEmpty && latitude == nil {
+                        ForEach(Array(completer.results.prefix(5).enumerated()), id: \.offset) { _, r in
+                            Button { pick(r) } label: {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(r.title).font(.subheadline).foregroundStyle(.primary)
+                                    if !r.subtitle.isEmpty {
+                                        Text(r.subtitle).font(.caption2).foregroundStyle(.secondary)
+                                    }
+                                }
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    TextField("地址", text: $address)
+                    if latitude != nil {
+                        HStack {
+                            Image(systemName: "mappin.circle.fill").foregroundStyle(accent)
+                            Text("已帶入座標").font(.caption).foregroundStyle(.secondary)
+                            Spacer()
+                            Button("清除") {
+                                latitude = nil; longitude = nil
+                            }
+                            .font(.caption)
+                        }
+                    }
+                } header: {
+                    Text("地點")
+                } footer: {
+                    Text(latitude == nil
+                         ? "打名稱會出現搜尋建議，選一個就會帶入地址與座標。沒有座標的景點不會被算進路線距離與時間。"
+                         : "有座標才算得出與前後站之間的距離與交通時間。")
+                }
+
+                Section {
+                    Stepper(value: $dwellMinutes, in: 0...1440, step: 15) {
+                        HStack {
+                            Text("停留時間")
+                            Spacer()
+                            Text("\(dwellMinutes) 分").foregroundStyle(.secondary)
+                        }
+                    }
+                    // 15 分一格對短停留太粗，補幾顆常用值
+                    HStack(spacing: 6) {
+                        ForEach([30, 60, 90, 120, 180], id: \.self) { m in
+                            Button("\(m)分") { dwellMinutes = m }
+                                .font(.caption.weight(.semibold))
+                                .padding(.horizontal, 9).padding(.vertical, 4)
+                                .background(dwellMinutes == m ? accent.opacity(0.18)
+                                            : Color(.tertiarySystemFill), in: Capsule())
+                                .foregroundStyle(dwellMinutes == m ? accent : .secondary)
+                                .buttonStyle(.plain)
+                        }
+                    }
+                } header: {
+                    Text("停留")
+                }
+
+                TripSubSpotEditor(subSpots: $subSpots, dwellMinutes: dwellMinutes, accent: accent)
+
+                Section {
+                    MultiPhotoGallery(
+                        fileNames: $photoFileNames,
+                        urlFor: { TripStop.photoURL($0) },
+                        onSaveImage: { data in
+                            guard let n = TripStop.savePhoto(data) else { return nil }
+                            addedPhotos.insert(n)
+                            return n
+                        },
+                        onDeleteFile: { n in
+                            TripStop.deletePhoto(n)
+                            addedPhotos.remove(n)
+                        },
+                        title: "景點照片")
+                } header: {
+                    Text("照片")
+                }
+
+                Section {
+                    TextField("備註（訂位、門票、注意事項…）", text: $note, axis: .vertical)
+                        .lineLimit(2...6)
+                } header: {
+                    Text("備註")
+                }
+            }
+            .navigationTitle(editing == nil ? "新增景點" : "編輯景點")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("取消") { cancel() }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    HStack(spacing: 6) {
+                        if isSaving { ProgressView().scaleEffect(0.7).tint(accent) }
+                        Button(editing == nil ? "新增" : "儲存") { save() }
+                            .bold()
+                            .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty || isSaving)
+                    }
+                }
+            }
+            .onAppear {
+                guard !loaded else { return }
+                loaded = true
+                guard let e = editing else { return }
+                name = e.name; address = e.address
+                latitude = e.latitude; longitude = e.longitude
+                dwellMinutes = e.dwellMinutes; note = e.note
+                photoFileNames = e.photoFileNames; subSpots = e.subSpots
+            }
+            .onDisappear { searchDebounce?.cancel() }
+        }
+    }
+
+    private func scheduleSearch(_ q: String) {
+        // 打字就打斷搜尋建議的既有選擇（改了名字座標通常也不對了），
+        // 但不主動清座標——使用者可能只是修錯字
+        searchDebounce?.cancel()
+        let text = q.trimmingCharacters(in: .whitespaces)
+        guard text.count >= 2 else { completer.queryFragment = ""; return }
+        searchDebounce = Task {
+            try? await Task.sleep(nanoseconds: 300_000_000)
+            guard !Task.isCancelled else { return }
+            await MainActor.run { completer.queryFragment = text }
+        }
+    }
+
+    private func pick(_ r: MKLocalSearchCompletion) {
+        name = r.title
+        completer.queryFragment = ""
+        // 建議只有文字，要再做一次 MKLocalSearch 才拿得到座標
+        Task {
+            let req = MKLocalSearch.Request(completion: r)
+            guard let item = try? await MKLocalSearch(request: req).start().mapItems.first else { return }
+            await MainActor.run {
+                let pm = item.placemark
+                latitude = pm.coordinate.latitude
+                longitude = pm.coordinate.longitude
+                if address.trimmingCharacters(in: .whitespaces).isEmpty {
+                    address = [pm.postalCode, pm.administrativeArea, pm.locality,
+                               pm.thoroughfare, pm.subThoroughfare]
+                        .compactMap { $0 }.joined()
+                }
+            }
+        }
+    }
+
+    private func cancel() {
+        // 這一次新加的照片沒存檔就不該留在磁碟上
+        for n in addedPhotos { TripStop.deletePhoto(n) }
+        dismiss()
+    }
+
+    private func save() {
+        guard !isSaving else { return }
+        isSaving = true
+        guard var plan = lifeStore.tripPlan(id: planId) else { dismiss(); return }
+
+        var stop = editing ?? TripStop()
+        stop.name = name.trimmingCharacters(in: .whitespaces)
+        stop.address = address.trimmingCharacters(in: .whitespaces)
+        stop.latitude = latitude
+        stop.longitude = longitude
+        stop.dwellMinutes = max(0, dwellMinutes)
+        stop.note = note.trimmingCharacters(in: .whitespacesAndNewlines)
+        stop.photoFileNames = photoFileNames
+        stop.subSpots = subSpots.filter {
+            !($0.name.trimmingCharacters(in: .whitespaces).isEmpty
+              && $0.note.trimmingCharacters(in: .whitespaces).isEmpty)
+        }
+
+        if let idx = plan.stops.firstIndex(where: { $0.id == stop.id }) {
+            // 編輯既有：座標可能動過，所以這一段與「下一段」的路線快取都要作廢
+            plan.stops[idx] = stop
+            plan.stops[idx].legStamp = nil
+            if plan.stops.indices.contains(idx + 1) { plan.stops[idx + 1].legStamp = nil }
+        } else {
+            let at = min(max(insertAt ?? plan.stops.count, 0), plan.stops.count)
+            plan.stops.insert(stop, at: at)
+            // 插進去只影響「進這一站」與「從這一站出去」兩段，不用整條重算
+            plan.stops[at].legStamp = nil
+            if plan.stops.indices.contains(at + 1) { plan.stops[at + 1].legStamp = nil }
+        }
+        // 已經寫進行程的照片不再算「這次新加的」，cancel 的清除邏輯不該碰它們
+        addedPhotos.removeAll()
+        lifeStore.upsertTripPlan(plan)
+        dismiss()
+    }
+}
+
+// MARK: - 子地點編輯
+
+/// 母景點底下的細項。刻意不給座標（見 TripSubSpot 的說明），
+/// 所以這裡只要名稱、分鐘與備註。
+struct TripSubSpotEditor: View {
+    @Binding var subSpots: [TripSubSpot]
+    let dwellMinutes: Int
+    let accent: Color
+
+    var body: some View {
+        Section {
+            if subSpots.isEmpty {
+                Text("還沒有子地點。像老街、園區這種一個景點裡有好幾攤的地方，可以拆進來。")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            ForEach($subSpots) { $sub in
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        TextField("子地點名稱", text: $sub.name)
+                        Button(role: .destructive) {
+                            subSpots.removeAll { $0.id == sub.id }
+                        } label: {
+                            Image(systemName: "minus.circle.fill").foregroundStyle(.red)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    Stepper(value: $sub.minutes, in: 0...600, step: 10) {
+                        HStack {
+                            Text("預計").font(.caption).foregroundStyle(.secondary)
+                            Spacer()
+                            Text(sub.minutes == 0 ? "未安排" : "\(sub.minutes) 分")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                    TextField("備註", text: $sub.note)
+                        .font(.caption)
+                }
+                .padding(.vertical, 2)
+            }
+            Button {
+                subSpots.append(TripSubSpot())
+            } label: {
+                Label("新增子地點", systemImage: "plus.circle.fill").foregroundStyle(accent)
+            }
+        } header: {
+            HStack(spacing: 6) {
+                Text("子地點")
+                if !subSpots.isEmpty {
+                    Text("\(subSpots.count)")
+                        .font(.system(size: 10, weight: .bold))
+                        .padding(.horizontal, 5).padding(.vertical, 1.5)
+                        .background(accent.opacity(0.14)).foregroundStyle(accent)
+                        .clipShape(Capsule())
+                }
+            }
+        } footer: {
+            let total = subSpots.reduce(0) { $0 + max(0, $1.minutes) }
+            if total > dwellMinutes {
+                Text("子地點加起來 \(total) 分，比這一站的停留時間 \(dwellMinutes) 分還長——時間軸會照停留時間排，記得調整。")
+                    .foregroundStyle(.orange)
+            } else {
+                Text("子地點只是這一站底下的細項，不會各自計算路線；時間軸上會收在這一站的摺疊區裡。")
+            }
+        }
+    }
+}
+
+// MARK: - 路線地圖
+
+/// 把整條行程畫在地圖上：編號大頭針 + 連線。
+/// 連的是直線而不是真實路徑——真實路徑要為每一段各留一份 MKRoute 的 polyline，
+/// 存進資料裡太重，而這張圖的用途是「看順序合不合理」，直線就夠了。
+struct TripRouteMapSheet: View {
+    @Environment(\.dismiss) private var dismiss
+
+    let plan: TripPlan
+
+    private let accent = Color(red: 0.68, green: 0.40, blue: 1.00)
+
+    /// 用具名結構而不是 tuple：Swift 的 key path 不支援 tuple 成員（\.coord 會編不過）
+    private struct Pin: Identifiable {
+        let id: UUID
+        let number: Int
+        let name: String
+        let coord: CLLocationCoordinate2D
+    }
+
+    private var pins: [Pin] {
+        plan.stops.enumerated().compactMap { i, s in
+            s.coordinate.map { Pin(id: s.id, number: i + 1, name: s.displayName, coord: $0) }
+        }
+    }
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if pins.count < 2 {
+                    VStack(spacing: 10) {
+                        Image(systemName: "mappin.slash")
+                            .font(.system(size: 30)).foregroundStyle(.tertiary)
+                        Text("至少要有兩個有座標的景點才畫得出路線")
+                            .font(.callout).foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    Map(initialPosition: .region(region)) {
+                        MapPolyline(coordinates: pins.map(\.coord))
+                            .stroke(accent, lineWidth: 3)
+                        ForEach(pins) { pin in
+                            Annotation(pin.name, coordinate: pin.coord) {
+                                ZStack {
+                                    Circle().fill(accent).frame(width: 26, height: 26)
+                                        .shadow(radius: 2)
+                                    Text("\(pin.number)")
+                                        .font(.caption2.weight(.bold)).foregroundStyle(.white)
+                                }
+                            }
+                        }
+                    }
+                    .mapStyle(.standard(pointsOfInterest: .excludingAll))
+                    .ignoresSafeArea(edges: .bottom)
+                }
+            }
+            .navigationTitle("行程路線")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) { Button("關閉") { dismiss() } }
+            }
+        }
+    }
+
+    /// 把所有點框進畫面；只有一個點時 span 會是 0，給一個固定的小範圍
+    private var region: MKCoordinateRegion {
+        let lats = pins.map { $0.coord.latitude }, lons = pins.map { $0.coord.longitude }
+        guard let minLat = lats.min(), let maxLat = lats.max(),
+              let minLon = lons.min(), let maxLon = lons.max() else {
+            return MKCoordinateRegion(
+                center: CLLocationCoordinate2D(latitude: 25.03, longitude: 121.56),
+                span: MKCoordinateSpan(latitudeDelta: 0.1, longitudeDelta: 0.1))
+        }
+        return MKCoordinateRegion(
+            center: CLLocationCoordinate2D(latitude: (minLat + maxLat) / 2,
+                                           longitude: (minLon + maxLon) / 2),
+            span: MKCoordinateSpan(latitudeDelta: max(0.01, (maxLat - minLat) * 1.4),
+                                   longitudeDelta: max(0.01, (maxLon - minLon) * 1.4)))
+    }
+}

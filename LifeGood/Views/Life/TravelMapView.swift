@@ -120,6 +120,8 @@ struct TravelSpotAggregate: Identifiable {
 
 struct TravelMapView: View {
     @EnvironmentObject var expenseStore: ExpenseStore
+    /// [v25.399] 旅遊規劃的資料放在 LifeStore（這頁其餘內容來自 expenseStore 的娛樂支出）
+    @EnvironmentObject var lifeStore: LifeStore
     @StateObject private var locationProvider = LocationProvider.shared
 
     private let accent = Color(red: 0.68, green: 0.40, blue: 1.00)   // 娛樂紫
@@ -132,6 +134,7 @@ struct TravelMapView: View {
     @State private var hasCenteredInitially = false
     @State private var showListSheet = false
     @State private var showAlbumSheet = false
+    @State private var showPlanSheet = false
     @State private var photoOnly = false
     @State private var emptyIconPulse = false
     @State private var emptyIconPulseTask: Task<Void, Never>?
@@ -168,6 +171,9 @@ struct TravelMapView: View {
                     .environmentObject(expenseStore)
             }
             .sheet(isPresented: $showListSheet) { listSheet(spots) }
+            .sheet(isPresented: $showPlanSheet) {
+                TripPlanListView().environmentObject(lifeStore)
+            }
             .sheet(isPresented: $showAlbumSheet) {
                 // [模板化] 改用共用 MapAlbumSheet（旅遊/美食/醫療三地圖共用），
                 // 新增依地點/依月份分組切換與摘要列；照片彙整邏輯不變
@@ -266,6 +272,13 @@ struct TravelMapView: View {
 
             Button { showAlbumSheet = true } label: {
                 pillLabel(icon: "photo.stack", text: "旅遊相簿", badge: nil)
+            }
+            .buttonStyle(.plain)
+
+            // [v25.399] 這頁其他按鈕看的是「去過」的地方，這顆看的是「要去」的地方
+            Button { showPlanSheet = true } label: {
+                pillLabel(icon: "map", text: "旅遊規劃",
+                          badge: lifeStore.tripPlans.isEmpty ? nil : "\(lifeStore.tripPlans.count)")
             }
             .buttonStyle(.plain)
 
