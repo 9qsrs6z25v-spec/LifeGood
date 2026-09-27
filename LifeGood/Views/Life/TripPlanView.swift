@@ -1466,15 +1466,22 @@ struct TripSubSpotEditor: View {
 
 // MARK: - 路線地圖
 
-/// 把整條行程畫在地圖上：編號大頭針 + 連線。
-/// 連的是直線而不是真實路徑——真實路徑要為每一段各留一份 MKRoute 的 polyline，
-/// 存進資料裡太重，而這張圖的用途是「看順序合不合理」，直線就夠了。
+/// 把整條行程畫在地圖上：編號大頭針 + 路線 + 第幾天的顏色圖例。
+///
+/// 開車與步行的段落打開地圖時現算真實路徑（實線）；大眾運輸與飛機沒有路線服務可問，
+/// 只能畫直線（虛線）。路徑刻意不存進資料裡——一條 polyline 動輒上百個座標點，
+/// 每段各存一份會讓行程資料膨脹好幾個數量級，還要跟著 iCloud 同步與備份一起搬。
 struct TripRouteMapSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     let plan: TripPlan
 
-    private let accent = TripDayPalette.color(0)
+    /// 已取回的真實路徑，key 是「目的地那一站」的 id（與 legMeters 的歸屬一致）
+    @State private var polylines: [UUID: MKPolyline] = [:]
+    @State private var isLoading = false
+    @State private var loadedLegs = 0
+    @State private var routableLegs = 0
+    @State private var showLegend = true
 
     /// 用具名結構而不是 tuple：Swift 的 key path 不支援 tuple 成員（\.coord 會編不過）
     private struct Pin: Identifiable {
@@ -1488,28 +1495,13 @@ struct TripRouteMapSheet: View {
         let isOvernight: Bool
     }
 
-    /// 一天一條線。跨日那一段畫在前一天的顏色上，線才不會斷在中間。
-    private struct DayLine: Identifiable {
-        let id: Int
-        let coords: [CLLocationCoordinate2D]
-    }
-
-    private var dayLines: [DayLine] {
-        let all = pins
-        guard all.count >= 2 else { return [] }
-        var out: [DayLine] = []
-        var current: [CLLocationCoordinate2D] = [all[0].coord]
-        var day = all[0].dayIndex
-        for pin in all.dropFirst() {
-            current.append(pin.coord)
-            if pin.dayIndex != day {
-                out.append(DayLine(id: day, coords: current))
-                current = [pin.coord]
-                day = pin.dayIndex
-            }
-        }
-        if current.count >= 2 { out.append(DayLine(id: day, coords: current)) }
-        return out
+    /// 一段路。有真實路徑就畫實線，沒有（大眾運輸／飛機／算不出來）就畫虛線直線。
+    private struct Segment: Identifiable {
+        /// 目的地那一站的 id
+        let id: UUID
+        let dayIndex: Int
+        let mode: TripTravelMode
+        let straight: [CLLocationCoordinate2D]
     }
 
     private var pins: [Pin] {
@@ -1521,6 +1513,28 @@ struct TripRouteMapSheet: View {
                     isOvernight: slot.stop.isOvernight)
             }
         }
+    }
+
+    /// 相鄰兩站都有座標才成為一段。中間夾著沒座標的站時就跳過那兩段——
+    /// 硬把它前後接起來會畫出一條根本不存在的路。
+    private var segments: [Segment] {
+        let slots = plan.timeline
+        guard slots.count >= 2 else { return [] }
+        var out: [Segment] = []
+        for i in 1..<slots.count {
+            guard let a = slots[i - 1].stop.coordinate,
+                  let b = slots[i].stop.coordinate else { continue }
+            out.append(Segment(id: slots[i].stop.id,
+                               dayIndex: slots[i].dayIndex,
+                               mode: slots[i].mode,
+                               straight: [a, b]))
+        }
+        return out
+    }
+
+    /// 這趟用到的天數（照 timeline 算，指定抵達時間可能把某一站排到更晚）
+    private var dayIndices: [Int] {
+        Array(Set(plan.timeline.map(\.dayIndex))).sorted()
     }
 
     var body: some View {
@@ -1536,66 +1550,204 @@ struct TripRouteMapSheet: View {
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
-                    Map(initialPosition: .region(region)) {
-                        ForEach(dayLines) { line in
-                            MapPolyline(coordinates: line.coords)
-                                .stroke(TripDayPalette.color(line.id), lineWidth: 3)
-                        }
-                        ForEach(pins) { pin in
-                            Annotation(pin.name, coordinate: pin.coord) {
-                                ZStack(alignment: .topTrailing) {
-                                    ZStack {
-                                        Circle().fill(TripDayPalette.color(pin.dayIndex))
-                                            .frame(width: 26, height: 26)
-                                            .shadow(radius: 2)
-                                        if pin.isOvernight {
-                                            Image(systemName: "bed.double.fill")
-                                                .font(.system(size: 11, weight: .bold))
-                                                .foregroundStyle(.white)
-                                        } else {
-                                            Text("\(pin.number)")
-                                                .font(.caption2.weight(.bold))
-                                                .foregroundStyle(.white)
-                                        }
-                                    }
-                                    if pin.isMustVisit {
-                                        Image(systemName: "star.fill")
-                                            .font(.system(size: 9))
-                                            .foregroundStyle(.orange)
-                                            .padding(1.5)
-                                            .background(Circle().fill(Color(.systemBackground)))
-                                            .offset(x: 5, y: -5)
-                                    }
-                                }
-                                .frame(width: 26, height: 26)
-                            }
-                        }
-                    }
-                    .mapStyle(.standard(pointsOfInterest: .excludingAll))
-                    .ignoresSafeArea(edges: .bottom)
+                    mapView
                 }
             }
             .navigationTitle("行程路線")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button("關閉") { dismiss() } }
+                ToolbarItem(placement: .topBarTrailing) {
+                    if pins.count >= 2 {
+                        Button {
+                            withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
+                                showLegend.toggle()
+                            }
+                        } label: {
+                            Image(systemName: showLegend ? "list.bullet.circle.fill"
+                                                         : "list.bullet.circle")
+                                .foregroundStyle(TripDayPalette.color(0))
+                        }
+                    }
+                }
             }
+            .task { await loadRealRoutes() }
         }
     }
 
-    /// 把所有點框進畫面；只有一個點時 span 會是 0，給一個固定的小範圍
-    private var region: MKCoordinateRegion {
-        let lats = pins.map { $0.coord.latitude }, lons = pins.map { $0.coord.longitude }
-        guard let minLat = lats.min(), let maxLat = lats.max(),
-              let minLon = lons.min(), let maxLon = lons.max() else {
-            return MKCoordinateRegion(
-                center: CLLocationCoordinate2D(latitude: 25.03, longitude: 121.56),
-                span: MKCoordinateSpan(latitudeDelta: 0.1, longitudeDelta: 0.1))
+    private var mapView: some View {
+        // .automatic 讓地圖自己把所有內容框進畫面——真實路徑繞出去的範圍也會被含進來，
+        // 自己算大頭針的外框會把繞路的部分切掉
+        Map(initialPosition: .automatic) {
+            ForEach(segments) { seg in
+                if let poly = polylines[seg.id] {
+                    MapPolyline(poly)
+                        .stroke(TripDayPalette.color(seg.dayIndex),
+                                style: StrokeStyle(lineWidth: 5, lineCap: .round,
+                                                   lineJoin: .round))
+                } else {
+                    // 沒有真實路徑可畫：虛線代表這一段只是把兩點連起來
+                    MapPolyline(coordinates: seg.straight)
+                        .stroke(TripDayPalette.color(seg.dayIndex).opacity(0.6),
+                                style: StrokeStyle(lineWidth: 3, lineCap: .round,
+                                                   dash: [7, 5]))
+                }
+            }
+            ForEach(pins) { pin in
+                Annotation(pin.name, coordinate: pin.coord) {
+                    pinMarker(pin)
+                }
+            }
         }
-        return MKCoordinateRegion(
-            center: CLLocationCoordinate2D(latitude: (minLat + maxLat) / 2,
-                                           longitude: (minLon + maxLon) / 2),
-            span: MKCoordinateSpan(latitudeDelta: max(0.01, (maxLat - minLat) * 1.4),
-                                   longitudeDelta: max(0.01, (maxLon - minLon) * 1.4)))
+        .mapStyle(.standard(pointsOfInterest: .excludingAll))
+        .ignoresSafeArea(edges: .bottom)
+        .overlay(alignment: .bottom) {
+            if showLegend { legend }
+        }
+    }
+
+    private func pinMarker(_ pin: Pin) -> some View {
+        ZStack(alignment: .topTrailing) {
+            ZStack {
+                Circle().fill(TripDayPalette.color(pin.dayIndex))
+                    .frame(width: 26, height: 26)
+                    .shadow(radius: 2)
+                if pin.isOvernight {
+                    Image(systemName: "bed.double.fill")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(.white)
+                } else {
+                    Text("\(pin.number)")
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(.white)
+                }
+            }
+            if pin.isMustVisit {
+                Image(systemName: "star.fill")
+                    .font(.system(size: 9))
+                    .foregroundStyle(.orange)
+                    .padding(1.5)
+                    .background(Circle().fill(Color(.systemBackground)))
+                    .offset(x: 5, y: -5)
+            }
+        }
+        .frame(width: 26, height: 26)
+    }
+
+    // MARK: 圖例
+
+    private var legend: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if isLoading {
+                HStack(spacing: 6) {
+                    ProgressView().scaleEffect(0.6)
+                    Text("正在取得真實路線 \(loadedLegs) / \(routableLegs)")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                }
+            }
+            // 天的顏色
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(dayIndices, id: \.self) { d in
+                        HStack(spacing: 4) {
+                            Capsule().fill(TripDayPalette.color(d))
+                                .frame(width: 14, height: 4)
+                            Text(dayText(d))
+                                .font(.system(size: 10, weight: .semibold))
+                        }
+                        .padding(.horizontal, 7).padding(.vertical, 4)
+                        .background(Color(.tertiarySystemFill), in: Capsule())
+                    }
+                }
+            }
+            // 線的意思與符號
+            HStack(spacing: 10) {
+                HStack(spacing: 4) {
+                    Capsule().fill(Color.secondary).frame(width: 16, height: 3)
+                    Text("實際路徑").font(.system(size: 9)).foregroundStyle(.secondary)
+                }
+                HStack(spacing: 3) {
+                    ForEach(0..<3, id: \.self) { _ in
+                        Capsule().fill(Color.secondary.opacity(0.6))
+                            .frame(width: 4, height: 2.5)
+                    }
+                    Text("直線估算").font(.system(size: 9)).foregroundStyle(.secondary)
+                }
+                HStack(spacing: 3) {
+                    Image(systemName: "bed.double.fill")
+                        .font(.system(size: 8)).foregroundStyle(.secondary)
+                    Text("住宿").font(.system(size: 9)).foregroundStyle(.secondary)
+                }
+                HStack(spacing: 3) {
+                    Image(systemName: "star.fill")
+                        .font(.system(size: 8)).foregroundStyle(.orange)
+                    Text("必去").font(.system(size: 9)).foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 0)
+            }
+            if !estimatedModesText.isEmpty {
+                Text(estimatedModesText)
+                    .font(.system(size: 9)).foregroundStyle(.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(10)
+        .background(.ultraThinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .overlay(RoundedRectangle(cornerRadius: 14)
+            .stroke(Color(.separator).opacity(0.15), lineWidth: 0.75))
+        .shadow(color: .black.opacity(0.12), radius: 5, y: 2)
+        .padding(.horizontal, 12)
+        .padding(.bottom, 14)
+        .transition(.move(edge: .bottom).combined(with: .opacity))
+    }
+
+    /// 「第 2 天 8/20 (三)」。字串在 ViewBuilder 外組好。
+    private func dayText(_ dayIndex: Int) -> String {
+        let date = Calendar.current.date(byAdding: .day, value: dayIndex,
+                                         to: plan.startDate) ?? plan.startDate
+        return "第 \(dayIndex + 1) 天 " + Self.dayFmt.string(from: date)
+    }
+
+    private static let dayFmt: DateFormatter = {
+        let f = DateFormatter(); f.locale = Locale(identifier: "zh_Hant_TW")
+        f.dateFormat = "M/d"; return f
+    }()
+
+    /// 哪些方式本來就畫不出真實路徑，在圖例裡講清楚，不然使用者會以為是壞掉
+    private var estimatedModesText: String {
+        let modes = Set(segments.filter { polylines[$0.id] == nil }.map(\.mode))
+        guard !modes.isEmpty else { return "" }
+        let names = TripTravelMode.allCases.filter { modes.contains($0) }.map(\.rawValue)
+        return "虛線：" + names.joined(separator: "、") + " 沒有路線服務可問，只能把兩點連起來"
+    }
+
+    // MARK: 取真實路徑
+
+    /// 逐段問 MKDirections 拿路徑。
+    ///
+    /// 循序做而不是一次全部並行：MKDirections 有速率限制，並行打十幾段很容易整批
+    /// 被擋掉，結果全部退回直線，反而更糟。
+    @MainActor
+    private func loadRealRoutes() async {
+        let segs = segments
+        let routable = segs.filter { $0.mode.supportsRouting && polylines[$0.id] == nil }
+        guard !routable.isEmpty else { return }
+        routableLegs = routable.count
+        loadedLegs = 0
+        isLoading = true
+        defer { isLoading = false }
+
+        let slots = plan.timeline
+        for seg in routable {
+            guard let i = slots.firstIndex(where: { $0.stop.id == seg.id }), i > 0 else { continue }
+            if let poly = await TripRouter.routePolyline(from: slots[i - 1].stop,
+                                                        to: slots[i].stop,
+                                                        mode: seg.mode) {
+                polylines[seg.id] = poly
+            }
+            loadedLegs += 1
+        }
     }
 }

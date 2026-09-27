@@ -508,15 +508,37 @@ enum TripRouter {
     }
 
     /// 算一段。兩端都要有座標，否則回 nil（呼叫端顯示「未設座標」）。
+    /// 問路線用的請求。leg() 與 routePolyline() 共用，免得兩邊的條件走鐘。
+    private static func request(from a: CLLocationCoordinate2D,
+                               to b: CLLocationCoordinate2D,
+                               mode: TripTravelMode) -> MKDirections.Request {
+        let req = MKDirections.Request()
+        req.source = MKMapItem(placemark: MKPlacemark(coordinate: a))
+        req.destination = MKMapItem(placemark: MKPlacemark(coordinate: b))
+        req.transportType = mode.mkTransportType
+        req.requestsAlternateRoutes = false
+        return req
+    }
+
+    /// 只要路線的形狀（地圖畫線用），不要距離與時間。
+    ///
+    /// 刻意**不**存進資料裡：一條 polyline 動輒上百個座標點，每一段各存一份會讓
+    /// 行程資料膨脹好幾個數量級，還要跟著 iCloud 同步與完整備份一起搬。
+    /// 打開地圖時現算、只放在畫面的記憶體裡就好。
+    static func routePolyline(from: TripStop, to: TripStop,
+                              mode: TripTravelMode) async -> MKPolyline? {
+        guard mode.supportsRouting,
+              let a = from.coordinate, let b = to.coordinate else { return nil }
+        let route = try? await MKDirections(request: request(from: a, to: b, mode: mode))
+            .calculate().routes.first
+        return route?.polyline
+    }
+
     static func leg(from: TripStop, to: TripStop, mode: TripTravelMode) async -> Leg? {
         guard let a = from.coordinate, let b = to.coordinate else { return nil }
 
         if mode.supportsRouting {
-            let req = MKDirections.Request()
-            req.source = MKMapItem(placemark: MKPlacemark(coordinate: a))
-            req.destination = MKMapItem(placemark: MKPlacemark(coordinate: b))
-            req.transportType = mode.mkTransportType
-            req.requestsAlternateRoutes = false
+            let req = request(from: a, to: b, mode: mode)
             if let route = try? await MKDirections(request: req).calculate().routes.first {
                 return Leg(meters: route.distance, seconds: route.expectedTravelTime,
                            isEstimated: false)
