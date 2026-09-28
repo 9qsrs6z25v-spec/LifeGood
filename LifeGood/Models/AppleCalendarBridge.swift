@@ -46,12 +46,10 @@ final class AppleCalendarBridge: ObservableObject {
         changeDebounceTimer?.invalidate()
     }
 
-    /// 是否拿到讀取權限（iOS 17 改名為 .fullAccess，舊版用 .authorized）
+    /// 是否拿到讀取權限（.fullAccess 是 iOS 17 起的名稱；v25.413 最低版本拉到
+    /// iOS 18 之後，舊的 .authorized 分支永遠走不到，已移除）
     var hasAccess: Bool {
-        if #available(iOS 17.0, *) {
-            return authorizationStatus == .fullAccess
-        }
-        return authorizationStatus == .authorized
+        authorizationStatus == .fullAccess
     }
 
     var isDenied: Bool {
@@ -65,11 +63,7 @@ final class AppleCalendarBridge: ObservableObject {
     /// 請求存取權；notDetermined 才會跳系統 prompt
     func requestAccess() async {
         do {
-            if #available(iOS 17.0, *) {
-                _ = try await eventStore.requestFullAccessToEvents()
-            } else {
-                _ = try await eventStore.requestAccess(to: .event)
-            }
+            _ = try await eventStore.requestFullAccessToEvents()
         } catch {
             // 忽略；refreshStatus 會反映最新狀態
         }
@@ -352,10 +346,7 @@ final class ReminderBridge: ObservableObject {
         set { UserDefaults.standard.set(newValue, forKey: Self.enabledKey); objectWillChange.send() }
     }
 
-    var hasAccess: Bool {
-        if #available(iOS 17.0, *) { return status == .fullAccess }
-        return status == .authorized
-    }
+    var hasAccess: Bool { status == .fullAccess }
     var isDenied: Bool { status == .denied || status == .restricted }
 
     private init() {}
@@ -368,11 +359,7 @@ final class ReminderBridge: ObservableObject {
     @discardableResult
     func requestAccess() async -> Bool {
         do {
-            if #available(iOS 17.0, *) {
-                _ = try await store.requestFullAccessToReminders()
-            } else {
-                _ = try await store.requestAccess(to: .reminder)
-            }
+            _ = try await store.requestFullAccessToReminders()
         } catch {}
         refreshStatus()
         return hasAccess
@@ -389,9 +376,7 @@ final class ReminderBridge: ObservableObject {
     /// 開關＋權限的快速判斷（nonisolated：背景佇列與呼叫端都要能問）
     nonisolated static var enabledAndAuthorized: Bool {
         guard UserDefaults.standard.bool(forKey: enabledKey) else { return false }
-        let status = EKEventStore.authorizationStatus(for: .reminder)
-        if #available(iOS 17.0, *) { return status == .fullAccess }
-        return status == .authorized
+        return EKEventStore.authorizationStatus(for: .reminder) == .fullAccess
     }
 
     /// 新增或更新一則提醒（背景佇列執行）。回傳提醒 id；失敗回傳原 id。

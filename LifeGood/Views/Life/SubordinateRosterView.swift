@@ -104,12 +104,6 @@ private struct RosterCell: Identifiable {
     let date: Date
 }
 
-/// 班表日格水平捲動位移（用來讓凍結的日期表頭與內容同步）
-private struct RosterHOffsetKey: PreferenceKey {
-    static var defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
-}
-
 /// 用獨立 ObservableObject 承載水平捲動位移：先前用 SubordinateRosterView 自身的
 /// @State 存放時，即使 1pt 節流門檻已生效，真實拖曳時位移量幾乎每影格都超過門檻，
 /// 導致整個 body（含棋盤格重建與 buildShiftLookup/buildLeaveLookup 查表建置）連帶重算，
@@ -466,14 +460,6 @@ struct SubordinateRosterView: View {
                     }
                 }
             }
-            .coordinateSpace(name: "rosterArea")
-            .onPreferenceChange(RosterHOffsetKey.self) { value in
-                // iOS 17 後援：由偏好值推算水平位移（捲右為負）；iOS 18+ 已由 onScrollGeometryChange
-                // 直接同步 hOffsetBox，此處若繼續生效會與其在同一捲動影格互相覆寫，故僅 iOS 17 以下才採用。
-                guard #unavailable(iOS 18.0) else { return }
-                let newOffset = value - nameColWidth
-                if abs(newOffset - hOffsetBox.value) > 0.5 { hOffsetBox.value = newOffset }
-            }
             .overlay(alignment: .topLeading) {
                 // 凍結表頭：以實際水平捲動量即時平移。抽成獨立子視圖只觀察 hOffsetBox，
                 // 讓每影格的位移更新只讓這一小塊表頭重繪，不會連帶讓整個棋盤格
@@ -542,26 +528,18 @@ struct SubordinateRosterView: View {
                     }
                 }
             }
-            .background(
-                GeometryReader { g in
-                    // iOS 17 後援：內容左緣相對外層固定容器的位置 = nameColWidth + 水平捲動量
-                    Color.clear.preference(key: RosterHOffsetKey.self,
-                                           value: g.frame(in: .named("rosterArea")).minX)
-                }
-            )
         }
-        if #available(iOS 18.0, *) {
-            content.onScrollGeometryChange(for: CGFloat.self) { geo in
-                geo.contentOffset.x
-            } action: { _, x in
-                // 捲右 contentOffset 為正，表頭需往左 → 取負
-                // 寫入獨立的 hOffsetBox（見上方 RosterHOffsetBox 註解），只讓凍結表頭子視圖重繪，
-                // 不會連帶讓整個棋盤格在每個捲動影格都重算一次
-                let newOffset = -x
-                if abs(newOffset - hOffsetBox.value) > 0.5 { hOffsetBox.value = newOffset }
-            }
-        } else {
-            content
+        // 水平捲動量直接從捲動幾何拿。
+        // v25.413 最低版本拉到 iOS 18 之後，原本給 iOS 17 用的 PreferenceKey 後援
+        // （GeometryReader 量內容左緣）永遠不會生效，留著只是每個影格白算一次，已移除。
+        return content.onScrollGeometryChange(for: CGFloat.self) { geo in
+            geo.contentOffset.x
+        } action: { _, x in
+            // 捲右 contentOffset 為正，表頭需往左 → 取負
+            // 寫入獨立的 hOffsetBox（見上方 RosterHOffsetBox 註解），只讓凍結表頭子視圖重繪，
+            // 不會連帶讓整個棋盤格在每個捲動影格都重算一次
+            let newOffset = -x
+            if abs(newOffset - hOffsetBox.value) > 0.5 { hOffsetBox.value = newOffset }
         }
     }
 

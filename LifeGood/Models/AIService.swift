@@ -656,9 +656,7 @@ final class SpeechRecognizer: NSObject, ObservableObject {
 
         let req = SFSpeechAudioBufferRecognitionRequest()
         req.shouldReportPartialResults = true
-        if #available(iOS 16.0, *) {
-            req.addsPunctuation = false
-        }
+        req.addsPunctuation = false
         request = req
 
         let input = audioEngine.inputNode
