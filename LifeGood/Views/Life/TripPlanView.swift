@@ -2435,7 +2435,8 @@ struct TripMapPickerSheet: View {
     @State private var address = ""
     @State private var suggestedName: String?
     @State private var isResolving = false
-    @State private var resolveTask: Task<Void, Never>?
+    /// 在地圖上點到的地標。有值時就用它，不看畫面中央的準心。
+    @State private var selection: MapSelection<MKMapItem>?
 
     private let accent = TripDayPalette.color(0)
 
@@ -2469,17 +2470,17 @@ struct TripMapPickerSheet: View {
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button("取消") { dismiss() } }
             }
-            .onAppear {
-                locationProvider.requestIfNeeded()
-                resolveNow()
-            }
-            .onDisappear { resolveTask?.cancel() }
+            .onAppear { locationProvider.requestIfNeeded() }
+            // 點到別的地標、或挪動地圖之後，都要重查一次地址
+            .task(id: resolveKey) { await resolve(pickedCoordinate) }
         }
     }
 
     private var mapLayer: some View {
         ZStack {
-            Map(position: $position) {
+            // selection 綁上去之後，地圖上的地標（POI）就可以直接點——
+            // 使用者看得到「一日拾樂」就點它，比把準心慢慢挪過去準確得多。
+            Map(position: $position, selection: $selection) {
                 UserAnnotation()
             }
             // POI 這裡要開著：使用者是靠地標認位置的，全部關掉就只剩一片空白底圖
@@ -2490,39 +2491,47 @@ struct TripMapPickerSheet: View {
             }
             .onMapCameraChange(frequency: .onEnd) { context in
                 center = context.region.center
-                scheduleResolve()
             }
             .ignoresSafeArea(edges: .bottom)
 
-            // 準心固定在畫面正中央：小圓點就是真正會被記下來的那個座標（不位移），
-            // 大頭針往上移自己的高度，讓針尖正好落在圓點上。
-            ZStack {
-                Circle()
-                    .fill(accent)
-                    .frame(width: 7, height: 7)
-                    .overlay(Circle().stroke(Color.white.opacity(0.9), lineWidth: 1))
-                Image(systemName: "mappin")
-                    .font(.system(size: 30, weight: .semibold))
-                    .foregroundStyle(accent)
-                    .shadow(color: .black.opacity(0.25), radius: 2, y: 1)
-                    .offset(y: -17)
-            }
-            .allowsHitTesting(false)
+            // 已經點到地標時就不要再畫準心——兩個「我選的是這裡」會互相打架
+            if pickedFeature == nil { crosshair }
         }
+    }
+
+    /// 準心固定在畫面正中央：小圓點就是真正會被記下來的那個座標（不位移），
+    /// 大頭針往上移自己的高度，讓針尖正好落在圓點上。
+    private var crosshair: some View {
+        ZStack {
+            Circle()
+                .fill(accent)
+                .frame(width: 7, height: 7)
+                .overlay(Circle().stroke(Color.white.opacity(0.9), lineWidth: 1))
+            Image(systemName: "mappin")
+                .font(.system(size: 30, weight: .semibold))
+                .foregroundStyle(accent)
+                .shadow(color: .black.opacity(0.25), radius: 2, y: 1)
+                .offset(y: -17)
+        }
+        .allowsHitTesting(false)
     }
 
     private var infoCard: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 6) {
-                Image(systemName: "mappin.and.ellipse")
+                Image(systemName: pickedFeature == nil ? "mappin.and.ellipse" : "mappin.circle.fill")
                     .font(.system(size: 11)).foregroundStyle(accent)
-                Text(suggestedName ?? "這個位置")
+                Text(pickedName ?? "這個位置")
                     .font(.subheadline.weight(.semibold))
                     .lineLimit(1)
                 if isResolving {
                     ProgressView().scaleEffect(0.55)
                 }
                 Spacer(minLength: 0)
+                if pickedFeature != nil {
+                    Button("改用準心") { selection = nil }
+                        .font(.caption2.weight(.semibold))
+                }
             }
             Text(address.isEmpty
                  ? (isResolving ? "正在查地址…" : "查不到地址，仍然可以用這個座標")
@@ -2530,17 +2539,19 @@ struct TripMapPickerSheet: View {
                 .font(.caption).foregroundStyle(.secondary)
                 .lineLimit(2)
                 .fixedSize(horizontal: false, vertical: true)
-            Text(String(format: "%.5f, %.5f", center.latitude, center.longitude))
+            Text(String(format: "%.5f, %.5f",
+                        pickedCoordinate.latitude, pickedCoordinate.longitude))
                 .font(.system(size: 10, design: .monospaced))
                 .foregroundStyle(.tertiary)
 
             Button {
-                onPick(suggestedName, address, center)
+                onPick(pickedName, address, pickedCoordinate)
                 dismiss()
             } label: {
                 HStack(spacing: 6) {
                     Image(systemName: "checkmark.circle.fill")
-                    Text("使用這個位置").font(.subheadline.weight(.semibold))
+                    Text(pickedFeature == nil ? "使用這個位置" : "使用這個地標")
+                        .font(.subheadline.weight(.semibold))
                 }
                 .foregroundStyle(.white)
                 .frame(maxWidth: .infinity)
@@ -2551,7 +2562,9 @@ struct TripMapPickerSheet: View {
             }
             .buttonStyle(.plain)
 
-            Text("挪動地圖把準心對到目標，地址會自己帶出來。查不到地址也沒關係——路線計算靠的是座標。")
+            Text(pickedFeature == nil
+                 ? "地圖上的店家、景點可以直接點選；沒有標示的地方就挪動地圖把準心對上去。查不到地址也沒關係——路線計算靠的是座標。"
+                 : "已選取地圖上的這個地標，名稱與座標都用它的。想改用畫面中央的準心就按右上角的「改用準心」。")
                 .font(.system(size: 10)).foregroundStyle(.tertiary)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -2565,29 +2578,46 @@ struct TripMapPickerSheet: View {
         .padding(.bottom, 12)
     }
 
+    // MARK: 選到什麼
+
+    /// 地圖上被點到的地標（沒點就是 nil，用畫面中央的準心）
+    private var pickedFeature: MapFeature? { selection?.feature }
+
+    /// 最後會被記下來的座標
+    private var pickedCoordinate: CLLocationCoordinate2D {
+        pickedFeature?.coordinate ?? center
+    }
+
+    /// 最後會被帶進景點名稱的字。
+    /// 點到的地標最準（那就是 Apple 地圖上寫的店名），反查來的地標名只是退路。
+    private var pickedName: String? {
+        if let title = pickedFeature?.title?.trimmingCharacters(in: .whitespaces),
+           !title.isEmpty {
+            return title
+        }
+        return suggestedName
+    }
+
+    /// 反查的觸發條件。用字串而不是座標本身：座標沒有 Equatable，
+    /// 而 .task(id:) 需要能比較。
+    private var resolveKey: String {
+        let c = pickedCoordinate
+        return (pickedFeature?.title ?? "-")
+            + String(format: "|%.5f,%.5f", c.latitude, c.longitude)
+    }
+
     // MARK: 反查地址
 
-    /// 挪一下就查一次會被 CLGeocoder 擋（它有速率限制），所以等手放開之後再延遲一下才查。
-    private func scheduleResolve() {
-        resolveTask?.cancel()
-        let target = center
-        resolveTask = Task {
-            try? await Task.sleep(nanoseconds: 600_000_000)
-            guard !Task.isCancelled else { return }
-            await resolve(target)
-        }
-    }
-
-    /// 剛打開時直接查一次，不用等那 600 毫秒
-    private func resolveNow() {
-        resolveTask?.cancel()
-        let target = center
-        resolveTask = Task { await resolve(target) }
-    }
-
+    /// 反查地址。
+    ///
+    /// 由 .task(id: resolveKey) 單一驅動：id 一變（挪了地圖、點了別的地標）
+    /// SwiftUI 就會取消前一個再跑新的，所以開頭這個等待天然就是防抖——
+    /// 手指還在挪的時候不會真的去打反查（CLGeocoder 有速率限制，連打會被擋）。
     @MainActor
     private func resolve(_ coordinate: CLLocationCoordinate2D) async {
         isResolving = true
+        try? await Task.sleep(nanoseconds: 500_000_000)
+        guard !Task.isCancelled else { return }
         let loc = CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)
         let placemark = try? await CLGeocoder().reverseGeocodeLocation(
             loc, preferredLocale: Locale(identifier: "zh_Hant_TW")).first
@@ -2614,14 +2644,31 @@ struct TripMapPickerSheet: View {
             .joined()
     }
 
+    /// 大到當不了景點名稱的 areasOfInterest。
+    ///
+    /// 反查一個路邊的座標時，Apple 很常回「臺灣島」這種整座島等級的名字，
+    /// 拿它當景點名稱只會讓使用者的行程出現一站叫「臺灣島」。
+    private static let tooBroadAreas: Set<String> = [
+        "臺灣島", "台灣島", "臺灣", "台灣", "Taiwan", "Taiwan Island",
+        "中華民國", "本州", "九州", "四國", "北海道", "Honshu", "Kyushu", "Hokkaido"
+    ]
+
     /// 可以拿來當景點名稱的地標名。
     ///
     /// CLPlacemark.name 在台灣常常就是門牌號碼本身（「9號」），拿它當名稱只會讓
     /// 景點叫做「9號」，所以只收 areasOfInterest（真正的地標名），
-    /// 而且要跟地址不一樣才算數。
+    /// 而且要跟地址不一樣、也不能是行政區或整座島那種大範圍的名字。
+    ///
+    /// 真正可靠的名稱來源是「使用者自己點的那個地標」（pickedName 會優先用它）；
+    /// 這裡只是沒東西可點時的退路，所以寧可回 nil 也不要亂猜一個。
     private static func landmarkName(_ p: CLPlacemark, address: String) -> String? {
         guard let area = p.areasOfInterest?.first?.trimmingCharacters(in: .whitespaces),
-              !area.isEmpty, !address.contains(area) else { return nil }
+              !area.isEmpty, !address.contains(area),
+              !tooBroadAreas.contains(area) else { return nil }
+        // 跟行政區同名的也不算地標（例：areasOfInterest 給「竹南鎮」）
+        let adminNames = [p.country, p.administrativeArea, p.subAdministrativeArea,
+                          p.locality, p.subLocality].compactMap { $0 }
+        guard !adminNames.contains(area) else { return nil }
         return area
     }
 }
