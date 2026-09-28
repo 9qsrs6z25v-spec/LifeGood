@@ -196,6 +196,7 @@ enum HeroCard: String, CaseIterable, Identifiable {
     case talentMatrix, calendar, businessCardList, businessCardDetail
     case gradeTitle, spouseResume
     case travelMapStats, travelMapDetail, foodMapStats, foodMapDetail
+    case tripPlan
     case resume, familyMembersResume, childrenResume, childDetail
     case subordinateDetail, taxOverview, medicalMap, calendarEvent
     case sideRoleHub, sideRoleWorkspace
@@ -252,6 +253,7 @@ enum HeroCard: String, CaseIterable, Identifiable {
         case .businessCardDetail:  return "名片明細"
         case .gradeTitle:          return "職等職稱"
         case .spouseResume:        return "另一半履歷"
+        case .tripPlan:            return "旅遊規劃 › 行程卡"
         case .travelMapStats:      return "旅遊地圖 › 統計卡"
         case .travelMapDetail:     return "旅遊地圖 › 詳情卡"
         case .foodMapStats:        return "美食地圖 › 統計卡"
@@ -383,6 +385,10 @@ enum HeroCard: String, CaseIterable, Identifiable {
         case .travelMapStats, .travelMapDetail:
             return [Color(red: 0.62, green: 0.36, blue: 1.00),
                     Color(red: 0.42, green: 0.16, blue: 0.82)]
+        case .tripPlan:
+            // 行程卡的娛樂紫＝TripDayPalette 的第一天，時間軸與大頭針都跟著它走
+            return [Color(red: 0.68, green: 0.40, blue: 1.00),
+                    Color(red: 0.45, green: 0.18, blue: 0.86)]
         case .eInvoice:
             return [Color(red: 0.38, green: 0.42, blue: 0.92),
                     Color(red: 0.22, green: 0.24, blue: 0.72)]

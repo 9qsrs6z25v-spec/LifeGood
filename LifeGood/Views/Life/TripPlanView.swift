@@ -408,14 +408,12 @@ struct TripPlanDetailView: View {
     // MARK: 摘要
 
     private func summaryCard(_ p: TripPlan) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 12) {
             summaryHeader(p)
-            summaryDivider
-            summaryMetricGrid(p)
+            summaryKpiPanel(p)
             let chips = summaryChips(p)
             if !chips.isEmpty {
-                summaryDivider
-                // 用會自動換行的版面，不要橫排硬擠——擠不下時字會被切掉或折成兩行
+                // 會自動換行的版面，擠不下時不會被切掉或折字
                 ChipFlowLayout(spacing: 6) {
                     ForEach(chips) { chip in summaryChip(chip) }
                 }
@@ -423,125 +421,119 @@ struct TripPlanDetailView: View {
             if p.dayCount > 1 { dayLegend(p) }
             summaryNotices(p)
         }
-        .padding(16)
-        .background(
-            ZStack {
-                LinearGradient(colors: [accent, accent.opacity(0.62)],
-                               startPoint: .topLeading, endPoint: .bottomTrailing)
-                Circle().fill(Color.white.opacity(0.10)).blur(radius: 18)
-                    .frame(width: 140, height: 140).offset(x: 110, y: -52)
-                Circle().fill(Color.white.opacity(0.08)).blur(radius: 12)
-                    .frame(width: 90, height: 90).offset(x: -118, y: 46)
-                LinearGradient(colors: [Color.white.opacity(0.18), .clear],
-                               startPoint: .top, endPoint: .center)
-            }
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 20))
-        .padding(.horizontal)
-    }
-
-    private var summaryDivider: some View {
-        Rectangle().fill(Color.white.opacity(0.20)).frame(height: 0.5)
+        .padding(.horizontal, 20).padding(.vertical, 18)
+        // 共用英雄卡殼層：漸層、散景圓、玻璃光澤、圓角與光暈都走同一套，
+        // 也才能在「設定 › 進階設定 › 卡片設定 › 英雄卡樣式」裡逐卡調整
+        .heroCardShell(card: .tripPlan)
+        .padding(.horizontal, 16)
     }
 
     // MARK: 摘要卡：標頭
 
     private func summaryHeader(_ p: TripPlan) -> some View {
-        HStack(alignment: .top, spacing: 10) {
+        HStack(alignment: .top) {
             VStack(alignment: .leading, spacing: 4) {
                 Text(Self.dayFmt.string(from: p.startDate) + " 出發")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.white.opacity(0.9))
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.80))
                 Text(p.stops.isEmpty ? "尚未加入景點"
                      : Self.timeFmt.string(from: p.startDate) + " – "
                        + Self.timeFmt.string(from: p.endDate))
-                    .font(.title3.weight(.bold)).foregroundStyle(.white)
-                    .lineLimit(1).minimumScaleFactor(0.7)
+                    .heroBigValueFont()
+                    .foregroundStyle(.white)
+                    .lineLimit(1).minimumScaleFactor(0.6)
+                // 只寫 14:40 – 15:29 的話，跨天行程看起來像當天來回
                 if p.dayCount > 1 && !p.stops.isEmpty {
-                    Text("跨 \(p.dayCount) 天，最後一站 "
-                         + Self.dayFmt.string(from: p.endDate) + " 結束")
+                    Text("跨 \(p.dayCount) 天，" + Self.dayFmt.string(from: p.endDate) + " 結束")
                         .font(.system(size: 10))
-                        .foregroundStyle(.white.opacity(0.8))
+                        .foregroundStyle(.white.opacity(0.80))
                         .lineLimit(1).minimumScaleFactor(0.8)
                 }
             }
             Spacer(minLength: 8)
             HStack(spacing: 4) {
                 Image(systemName: p.travelMode.icon).font(.system(size: 10, weight: .bold))
-                Text(p.travelMode.rawValue).font(.system(size: 11, weight: .bold)).lineLimit(1)
+                Text(p.travelMode.rawValue).font(.caption.weight(.semibold)).lineLimit(1)
             }
             .fixedSize()
+            .padding(.horizontal, 11).padding(.vertical, 5)
+            .background(.white.opacity(0.22))
+            .clipShape(Capsule())
+            .overlay(Capsule().stroke(.white.opacity(0.30), lineWidth: 0.75))
             .foregroundStyle(.white)
-            .padding(.horizontal, 8).padding(.vertical, 4)
-            .background(Color.white.opacity(0.18), in: Capsule())
-            .overlay(Capsule().stroke(Color.white.opacity(0.3), lineWidth: 0.75))
         }
     }
 
     // MARK: 摘要卡：數字
 
     private struct SummaryMetric: Identifiable {
+        /// 同時當標題與識別
         let id: String
         let value: String
-        let unit: String
+        let icon: String
     }
 
     /// 數字欄位。
     ///
-    /// 改成兩列三欄的格子而不是一列全部排開：一列塞五、六個時，
+    /// 排成每列三格的面板而不是一列全部攤開：一列塞五、六個時，
     /// 「15 小時 57 分」與「3136.4 km」這種長字串會直接貼在一起看不出分界。
+    /// 格與格之間用英雄卡標準的 HeroKpiDivider 隔開。
     private func summaryMetrics(_ p: TripPlan) -> [SummaryMetric] {
         var out: [SummaryMetric] = [
-            SummaryMetric(id: "景點", value: "\(p.stops.count)", unit: "站")
+            SummaryMetric(id: "景點", value: "\(p.stops.count) 站",
+                          icon: "mappin.and.ellipse")
         ]
         if p.dayCount > 1 {
-            out.append(SummaryMetric(id: "天數", value: "\(p.dayCount)", unit: "天"))
+            out.append(SummaryMetric(id: "天數", value: "\(p.dayCount) 天", icon: "calendar"))
         }
         if p.overnightCount > 0 {
-            out.append(SummaryMetric(id: "住宿", value: "\(p.overnightCount)", unit: "晚"))
+            out.append(SummaryMetric(id: "住宿", value: "\(p.overnightCount) 晚",
+                                     icon: "bed.double.fill"))
         }
         // 停留原本直接顯示分鐘數（例：2100 分），到了幾十小時就沒人讀得出來
         out.append(SummaryMetric(
             id: "停留",
             value: p.totalDwellMinutes > 0
                 ? TripRouter.durationText(Double(p.totalDwellMinutes) * 60) : "—",
-            unit: ""))
+            icon: "clock"))
         out.append(SummaryMetric(
             id: "交通",
             value: p.totalTravelSeconds > 0
                 ? TripRouter.durationText(p.totalTravelSeconds) : "—",
-            unit: ""))
+            icon: "arrow.triangle.turn.up.right.diamond.fill"))
         out.append(SummaryMetric(
             id: "距離",
             value: p.totalMeters > 0 ? TripRouter.distanceText(p.totalMeters) : "—",
-            unit: ""))
+            icon: "ruler"))
         return out
     }
 
-    private func summaryMetricGrid(_ p: TripPlan) -> some View {
-        LazyVGrid(
-            columns: Array(repeating: GridItem(.flexible(), spacing: 10, alignment: .leading),
-                           count: 3),
-            alignment: .leading, spacing: 12
-        ) {
-            ForEach(summaryMetrics(p)) { metric in
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack(alignment: .firstTextBaseline, spacing: 2) {
-                        Text(metric.value)
-                            .font(.system(size: 17, weight: .bold, design: .rounded))
-                            .foregroundStyle(.white)
-                            .lineLimit(1).minimumScaleFactor(0.6)
-                        if !metric.unit.isEmpty {
-                            Text(metric.unit)
-                                .font(.system(size: 10))
-                                .foregroundStyle(.white.opacity(0.85))
-                        }
-                    }
-                    Text(metric.id)
-                        .font(.system(size: 10))
-                        .foregroundStyle(.white.opacity(0.85))
+    private func summaryKpiPanel(_ p: TripPlan) -> some View {
+        let metrics = summaryMetrics(p)
+        return VStack(spacing: 8) {
+            summaryKpiRow(Array(metrics.prefix(3)))
+            if metrics.count > 3 {
+                Rectangle().fill(.white.opacity(0.18))
+                    .frame(height: 0.5).padding(.horizontal, 10)
+                summaryKpiRow(Array(metrics.dropFirst(3)))
+            }
+        }
+        .padding(.vertical, 10)
+        .background(.white.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+    }
+
+    /// 一列三格。不足三格時補上空白，第二列才會跟第一列切齊。
+    private func summaryKpiRow(_ metrics: [SummaryMetric]) -> some View {
+        HStack(spacing: 0) {
+            ForEach(Array(metrics.enumerated()), id: \.element.id) { index, metric in
+                if index > 0 { HeroKpiDivider() }
+                HeroKpiCell(label: metric.id, value: metric.value, icon: metric.icon)
+            }
+            if metrics.count < 3 {
+                ForEach(0..<(3 - metrics.count), id: \.self) { _ in
+                    Color.clear.frame(maxWidth: .infinity, maxHeight: 1)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
     }
