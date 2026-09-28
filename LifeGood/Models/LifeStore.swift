@@ -2723,6 +2723,29 @@ class LifeStore: ObservableObject {
         }
     }
 
+    /// 換掉某一站的照片清單（景點卡直接加減照片時用）
+    func updateTripStopPhotos(planId: UUID, stopId: UUID, fileNames: [String]) {
+        guard let pi = tripPlans.firstIndex(where: { $0.id == planId }),
+              let si = tripPlans[pi].stops.firstIndex(where: { $0.id == stopId }),
+              tripPlans[pi].stops[si].photoFileNames != fileNames else { return }
+        tripPlans[pi].stops[si].photoFileNames = fileNames
+    }
+
+    /// 直接把打卡時間設成指定值（景點卡上直接選狀態時用）。
+    /// departure 傳 nil＝收回「已離開」，人還在那一站。
+    func setTripStopCheckIn(planId: UUID, stopId: UUID,
+                            arrival: Date?, departure: Date?) {
+        guard let pi = tripPlans.firstIndex(where: { $0.id == planId }),
+              let si = tripPlans[pi].stops.firstIndex(where: { $0.id == stopId }) else { return }
+        tripPlans[pi].stops[si].actualArrival = arrival
+        // 離開不能早於抵達，否則停留時間會是負的
+        if let d = departure, let a = arrival {
+            tripPlans[pi].stops[si].actualDeparture = max(d, a)
+        } else {
+            tripPlans[pi].stops[si].actualDeparture = departure
+        }
+    }
+
     /// 清掉某一站的打卡紀錄
     func clearTripStopCheckIn(planId: UUID, stopId: UUID) {
         guard let pi = tripPlans.firstIndex(where: { $0.id == planId }),

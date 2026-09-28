@@ -237,6 +237,8 @@ struct TripPlanDetailView: View {
     @State private var sharing: ShareText?
     @State private var showImageExport = false
     @State private var showAlbum = false
+    /// 打開景點卡的那一站
+    @State private var openingStopId: UUID?
     @State private var viewingPhoto: IdentifiableURL?
 
     private struct LegBox: Identifiable {
@@ -369,6 +371,13 @@ struct TripPlanDetailView: View {
             }
             .sheet(item: $viewingPhoto) { wrapper in
                 PhotoLightbox(url: wrapper.url)
+            }
+            .sheet(item: Binding(
+                get: { openingStopId.map { IDBox(id: $0) } },
+                set: { openingStopId = $0?.id }
+            )) { box in
+                TripStopCardView(planId: planId, stopId: box.id)
+                    .environmentObject(lifeStore)
             }
             .confirmationDialog("刪除景點", isPresented: Binding(
                 get: { removingStop != nil }, set: { if !$0 { removingStop = nil } }
@@ -903,9 +912,9 @@ struct TripPlanDetailView: View {
                 // 照片直接鋪在這一站底下，不用點進編輯才看得到
                 extra: slot.stop.photoFileNames.isEmpty
                     ? nil : AnyView(photoStrip(slot.stop)),
-                // 點整列＝用 Apple 地圖看這個地方（當天最常做的動作）。
-                // 編輯改走「…」選單——行程排好之後就很少再改，但地圖天天要看。
-                onTap: { openStop(slot.stop) },
+                // 點整列＝打開景點卡。要去地圖、要編輯、要打卡都在卡片上選——
+                // 直接開地圖的話，其他事情就全被擠進「…」選單裡了（v25.421 的教訓）。
+                onTap: { openingStopId = slot.stop.id },
                 leading: {
                     HStack(spacing: 6) {
                         if showsCheckIn(slot) { checkInButton(slot) }
@@ -933,6 +942,7 @@ struct TripPlanDetailView: View {
                 },
                 accessory: {
                     Menu {
+                        Button("打開景點卡") { openingStopId = slot.stop.id }
                         Button("編輯") { editingStop = slot.stop }
                         if slot.stop.checkInState != .notArrived {
                             if slot.stop.actualDwellSeconds != nil {
@@ -1100,18 +1110,6 @@ struct TripPlanDetailView: View {
             .contentShape(Circle())
         }
         .buttonStyle(.plain)
-    }
-
-    /// 點一站＝用 Apple 地圖看那個地方。完全沒有地址也沒有座標時退回開編輯，
-    /// 不然那一下會什麼都沒發生。
-    private func openStop(_ stop: TripStop) {
-        let hasPlace = stop.coordinate != nil
-            || !stop.address.trimmingCharacters(in: .whitespaces).isEmpty
-        if hasPlace {
-            TripShare.openPlaceInMaps(stop)
-        } else {
-            editingStop = stop
-        }
     }
 
     private func stopChips(_ slot: TripPlan.Slot) -> [ItemChip] {
