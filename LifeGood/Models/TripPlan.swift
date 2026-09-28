@@ -588,6 +588,24 @@ enum TripRouter {
         await route(from: from, to: to, mode: mode)?.polyline
     }
 
+    /// 要路線，被擋下來就等一下再試。
+    ///
+    /// 畫面上的地圖跟算距離時間走的是同一個服務，處境也一樣：剛開完整份行程的
+    /// 路線圖、或剛補算完二十幾段，接著點開單一段落時很容易被擋。
+    /// 只試一次的話，會出現「數字是真實路徑、地圖卻畫直線」這種對不起來的畫面。
+    static func routeWithRetry(from: TripStop, to: TripStop, mode: TripTravelMode,
+                               attempts: Int = 3) async -> MKRoute? {
+        for attempt in 0..<max(1, attempts) {
+            if attempt > 0 {
+                // 每次等久一點：被擋下來時馬上再打通常還是被擋
+                try? await Task.sleep(nanoseconds: retryNanos * UInt64(attempt))
+            }
+            if Task.isCancelled { return nil }
+            if let route = await route(from: from, to: to, mode: mode) { return route }
+        }
+        return nil
+    }
+
     static func leg(from: TripStop, to: TripStop, mode: TripTravelMode) async -> Leg? {
         guard let a = from.coordinate, let b = to.coordinate else { return nil }
 

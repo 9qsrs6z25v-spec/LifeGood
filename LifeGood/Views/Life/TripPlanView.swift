@@ -1979,12 +1979,24 @@ struct TripRouteMapSheet: View {
         f.dateFormat = "M/d"; return f
     }()
 
-    /// 哪些方式本來就畫不出真實路徑，在圖例裡講清楚，不然使用者會以為是壞掉
+    /// 為什麼有些段落是虛線，在圖例裡講清楚，不然使用者會以為是壞掉。
+    ///
+    /// 要分成兩種：大眾運輸與飛機是**本來就沒有**路線服務可問；開車與步行則是
+    /// 這一次沒載到（多半被暫時擋下）。把後者也寫成「沒有路線服務可問」是錯的。
     private var estimatedModesText: String {
-        let modes = Set(segments.filter { polylines[$0.id] == nil }.map(\.mode))
-        guard !modes.isEmpty else { return "" }
-        let names = TripTravelMode.allCases.filter { modes.contains($0) }.map(\.rawValue)
-        return "虛線：" + names.joined(separator: "、") + " 沒有路線服務可問，只能把兩點連起來"
+        let missing = segments.filter { polylines[$0.id] == nil }
+        guard !missing.isEmpty else { return "" }
+        var parts: [String] = []
+        let noService = Set(missing.filter { !$0.mode.supportsRouting }.map(\.mode))
+        if !noService.isEmpty {
+            let names = TripTravelMode.allCases.filter { noService.contains($0) }.map(\.rawValue)
+            parts.append(names.joined(separator: "、") + "沒有路線服務可問，只能把兩點連起來")
+        }
+        let failed = missing.filter { $0.mode.supportsRouting }.count
+        if failed > 0 {
+            parts.append("有 \(failed) 段這次沒載到路線圖（多半是一次查太多被暫時擋下），先用直線代替")
+        }
+        return "虛線：" + parts.joined(separator: "；")
     }
 
     // MARK: 取真實路徑
@@ -2004,8 +2016,13 @@ struct TripRouteMapSheet: View {
         defer { isLoading = false }
 
         let slots = plan.timeline
+        var requested = false
         for seg in routable {
             guard let i = slots.firstIndex(where: { $0.stop.id == seg.id }), i > 0 else { continue }
+            // 每段之間隔一下：連著打十幾段一定會被地圖服務擋下來，
+            // 被擋的那幾段就只剩直線可畫（v25.410 算距離時間那邊踩過同一個坑）
+            if requested { try? await Task.sleep(nanoseconds: 350_000_000) }
+            requested = true
             if let route = await TripRouter.route(from: slots[i - 1].stop,
                                                   to: slots[i].stop, mode: seg.mode) {
                 polylines[seg.id] = route.polyline
@@ -2035,6 +2052,8 @@ struct TripLegDetailSheet: View {
 
     @State private var polyline: MKPolyline?
     @State private var isLoading = false
+    /// 路線圖要不到（多半是連續查太多被暫時擋下）。數字可能是對的，只有線畫不出來。
+    @State private var routeShapeFailed = false
     @State private var sharing: ShareText?
     @State private var sharingImage: ShareImageURL?
     @State private var isExporting = false
@@ -2135,6 +2154,7 @@ struct TripLegDetailSheet: View {
                             .stroke(dayColor, style: StrokeStyle(lineWidth: 5, lineCap: .round,
                                                                  lineJoin: .round))
                     } else if let a = from.stop.coordinate, let b = to.stop.coordinate {
+                        // 還沒拿到（或要不到）真實路徑時先把兩點連起來，虛線表示這不是路
                         MapPolyline(coordinates: [a, b])
                             .stroke(dayColor.opacity(0.6),
                                     style: StrokeStyle(lineWidth: 3, lineCap: .round,
@@ -2162,6 +2182,24 @@ struct TripLegDetailSheet: View {
                     .padding(.horizontal, 8).padding(.vertical, 5)
                     .background(.ultraThinMaterial, in: Capsule())
                     .padding(8)
+                } else if routeShapeFailed {
+                    // 數字可能是對的（先前算過），只有這次要不到「線的形狀」。
+                    // 不講的話畫面會變成「文字說真實路徑、地圖卻是直線」，看起來像壞掉。
+                    Button {
+                        Task { await loadRoute() }
+                    } label: {
+                        HStack(spacing: 5) {
+                            Image(systemName: "arrow.clockwise")
+                                .font(.system(size: 9, weight: .bold))
+                            Text("路線圖沒載到，畫的是直線・重試")
+                                .font(.system(size: 10, weight: .semibold))
+                        }
+                        .foregroundStyle(.orange)
+                        .padding(.horizontal, 8).padding(.vertical, 5)
+                        .background(.ultraThinMaterial, in: Capsule())
+                        .padding(8)
+                    }
+                    .buttonStyle(.plain)
                 }
             } else {
                 VStack(spacing: 8) {
@@ -2389,9 +2427,13 @@ struct TripLegDetailSheet: View {
     private func loadRoute() async {
         guard let from, let to, to.mode.supportsRouting, polyline == nil else { return }
         isLoading = true
+        routeShapeFailed = false
         defer { isLoading = false }
-        guard let route = await TripRouter.route(from: from.stop, to: to.stop,
-                                                 mode: to.mode) else { return }
+        guard let route = await TripRouter.routeWithRetry(from: from.stop, to: to.stop,
+                                                          mode: to.mode) else {
+            routeShapeFailed = true
+            return
+        }
         polyline = route.polyline
         // 同一次查詢順手把數字修正回真實值。
         // 這一段先前可能是「排隊查二十幾段時被擋下來」才退回估算的——
