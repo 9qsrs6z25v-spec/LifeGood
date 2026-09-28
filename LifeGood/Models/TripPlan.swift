@@ -126,6 +126,14 @@ struct TripStop: Identifiable, Codable {
     /// 退房／隔天出發的時刻（只取時分，日期部分不用）。nil＝早上 9:00。
     /// 只有 isOvernight 才有意義。
     var checkOutTime: Date?
+    /// 現場按「我到了」記下的實際抵達時間。
+    ///
+    /// 有值時時間軸就用它，不用推算的——而且**後面每一站都跟著往前／往後移**，
+    /// 因為游標是從這一站的離開時間接下去的。這就是當天邊玩邊打卡的意義：
+    /// 早到晚到都會即時反映到後面的行程，不用自己心算。
+    var actualArrival: Date?
+    /// 現場按「玩完了」記下的實際離開時間。與 actualArrival 一起就得到真正的停留時間。
+    var actualDeparture: Date?
     /// 使用者指定的抵達時間。nil＝由上一站的離開時間＋交通時間推算（預設）。
     ///
     /// 有值時時間軸一律照這個時間排：餐廳訂位、船班、表演入場這種「時間是死的」
@@ -156,6 +164,7 @@ struct TripStop: Identifiable, Codable {
     init(id: UUID = UUID(), name: String = "", address: String = "",
          latitude: Double? = nil, longitude: Double? = nil,
          dwellMinutes: Int = 60, legModeOverride: TripTravelMode? = nil,
+         actualArrival: Date? = nil, actualDeparture: Date? = nil,
          isMustVisit: Bool = false,
          isOvernight: Bool = false, checkOutTime: Date? = nil,
          arrivalOverride: Date? = nil, note: String = "",
@@ -167,6 +176,7 @@ struct TripStop: Identifiable, Codable {
         self.latitude = latitude; self.longitude = longitude
         self.dwellMinutes = dwellMinutes
         self.legModeOverride = legModeOverride
+        self.actualArrival = actualArrival; self.actualDeparture = actualDeparture
         self.isMustVisit = isMustVisit
         self.isOvernight = isOvernight; self.checkOutTime = checkOutTime
         self.arrivalOverride = arrivalOverride
@@ -186,6 +196,8 @@ struct TripStop: Identifiable, Codable {
         longitude = try? c.decodeIfPresent(Double.self, forKey: .longitude)
         dwellMinutes = (try? c.decode(Int.self, forKey: .dwellMinutes)) ?? 60
         legModeOverride = try? c.decodeIfPresent(TripTravelMode.self, forKey: .legModeOverride)
+        actualArrival = try? c.decodeIfPresent(Date.self, forKey: .actualArrival)
+        actualDeparture = try? c.decodeIfPresent(Date.self, forKey: .actualDeparture)
         isMustVisit = (try? c.decodeIfPresent(Bool.self, forKey: .isMustVisit)) ?? false
         isOvernight = (try? c.decodeIfPresent(Bool.self, forKey: .isOvernight)) ?? false
         checkOutTime = try? c.decodeIfPresent(Date.self, forKey: .checkOutTime)
@@ -203,6 +215,7 @@ struct TripStop: Identifiable, Codable {
     private enum CodingKeys: String, CodingKey {
         case id, name, address, latitude, longitude, dwellMinutes
         case legModeOverride, isMustVisit, isOvernight, checkOutTime, arrivalOverride, note
+        case actualArrival, actualDeparture
         case photoFileNames, subSpots, legMeters, legSeconds, legStamp, legIsEstimated
         case legNeedsRetry
     }
@@ -219,6 +232,28 @@ struct TripStop: Identifiable, Codable {
 
     /// 子地點的分鐘加總。母景點停留時間比這個短時畫面會提醒。
     var subSpotMinutes: Int { subSpots.reduce(0) { $0 + max(0, $1.minutes) } }
+
+    /// 現場打卡走到哪一步了
+    enum CheckInState {
+        /// 還沒到
+        case notArrived
+        /// 已經到了，還在這裡
+        case arrived
+        /// 玩完離開了
+        case departed
+    }
+
+    var checkInState: CheckInState {
+        if actualDeparture != nil { return .departed }
+        if actualArrival != nil { return .arrived }
+        return .notArrived
+    }
+
+    /// 真正待了多久（秒）。兩個時間都打卡了才有值。
+    var actualDwellSeconds: Double? {
+        guard let a = actualArrival, let d = actualDeparture, d > a else { return nil }
+        return d.timeIntervalSince(a)
+    }
 
     /// 退房時刻是幾點幾分（從午夜起算的分鐘）。沒設就是早上 9:00。
     var checkOutMinutesOfDay: Int {
@@ -350,6 +385,11 @@ struct TripPlan: Identifiable, Codable {
         let isModeOverridden: Bool
         /// 抵達時間是使用者指定的，不是推算的
         let isFixedArrival: Bool
+        /// 抵達／離開是現場打卡的實際時間，不是排出來的
+        let isActualArrival: Bool
+        let isActualDeparture: Bool
+        /// 沒有打卡的話這一站原本會排在幾點（打卡後用來比對早到還是晚到）
+        let plannedArrival: Date
         /// 推算出來的抵達時間（有指定時間時才有值，用來比對來不來得及）
         let estimatedArrival: Date?
         /// 指定時間比推算的晚 → 中間的空檔（秒）
@@ -379,21 +419,31 @@ struct TripPlan: Identifiable, Codable {
             let estimated = cursor
             // 指定了抵達時間就照那個排，游標跟著跳過去——
             // 使用者說「我 13:00 會到」，時間軸就該長那樣，推算值只拿來比對來不來得及。
-            let arrival: Date
+            let planned: Date
             var idle = 0.0, shortfall = 0.0
             if let fixed = stop.arrivalOverride {
-                arrival = fixed
+                planned = fixed
                 let delta = fixed.timeIntervalSince(estimated)
                 if delta >= 0 { idle = delta } else { shortfall = -delta }
             } else {
-                arrival = estimated
+                planned = estimated
             }
+            // 現場打卡過的，一律以實際時間為準：它比任何推算都準，
+            // 而且後面每一站都會跟著它重排（游標從這一站的離開時間接下去）。
+            let arrival = stop.actualArrival ?? planned
+            // 已經打卡抵達的站，「來不來得及」已成定局，不用再顯示預測的落差
+            if stop.actualArrival != nil { idle = 0; shortfall = 0 }
             // 過夜的站不用停留分鐘算離開時間——沒有人會用分鐘去填一個晚上。
             // 隔天早上退房才離開，所以下一站的交通時間自然是從隔天算起。
-            let departure = stop.isOvernight
-                ? TripStop.nextCheckOut(after: arrival,
-                                        minutesOfDay: stop.checkOutMinutesOfDay)
-                : arrival.addingTimeInterval(Double(max(0, stop.dwellMinutes)) * 60)
+            let departure: Date
+            if let actualOut = stop.actualDeparture {
+                departure = actualOut
+            } else if stop.isOvernight {
+                departure = TripStop.nextCheckOut(after: arrival,
+                                                  minutesOfDay: stop.checkOutMinutesOfDay)
+            } else {
+                departure = arrival.addingTimeInterval(Double(max(0, stop.dwellMinutes)) * 60)
+            }
             let day = cal.dateComponents([.day], from: firstDay,
                                          to: cal.startOfDay(for: arrival)).day ?? 0
             out.append(Slot(id: stop.id, index: i, stop: stop,
@@ -404,7 +454,10 @@ struct TripPlan: Identifiable, Codable {
                             canRetryRouting: i > 0 && stop.legNeedsRetry,
                             mode: effectiveMode(at: i),
                             isModeOverridden: i > 0 && stop.legModeOverride != nil,
-                            isFixedArrival: stop.arrivalOverride != nil,
+                            isFixedArrival: stop.arrivalOverride != nil && stop.actualArrival == nil,
+                            isActualArrival: stop.actualArrival != nil,
+                            isActualDeparture: stop.actualDeparture != nil,
+                            plannedArrival: planned,
                             estimatedArrival: stop.arrivalOverride == nil ? nil : estimated,
                             idleSeconds: idle, shortfallSeconds: shortfall,
                             dayIndex: max(0, day)))
@@ -497,6 +550,13 @@ struct TripPlan: Identifiable, Codable {
 
     /// 有沒有任何一段被單獨指定過交通方式
     var hasModeOverride: Bool { stops.dropFirst().contains { $0.legModeOverride != nil } }
+
+    /// 已經打卡離開的站數（當天進度）
+    var checkedOutCount: Int { stops.filter { $0.actualDeparture != nil }.count }
+    /// 目前人在哪一站（已抵達還沒離開）
+    var currentStopId: UUID? {
+        stops.first { $0.actualArrival != nil && $0.actualDeparture == nil }?.id
+    }
 
     /// 標了必去的站數
     var mustVisitCount: Int { stops.filter(\.isMustVisit).count }

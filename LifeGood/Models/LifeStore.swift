@@ -2701,6 +2701,45 @@ class LifeStore: ObservableObject {
         }
     }
 
+    // MARK: 現場打卡（v25.421）
+
+    /// 打卡：沒到 →（按一下）我到了 →（再按一下）玩完了 →（再按一下）回到沒到。
+    ///
+    /// 一顆按鈕走完三個狀態而不是分兩顆：當天站在景點門口，畫面上按鈕愈少愈好。
+    /// 按過頭就再按一圈回來，不必找「重設」藏在哪裡。
+    func advanceTripStopCheckIn(planId: UUID, stopId: UUID, now: Date = Date()) {
+        guard let pi = tripPlans.firstIndex(where: { $0.id == planId }),
+              let si = tripPlans[pi].stops.firstIndex(where: { $0.id == stopId }) else { return }
+        switch tripPlans[pi].stops[si].checkInState {
+        case .notArrived:
+            tripPlans[pi].stops[si].actualArrival = now
+        case .arrived:
+            // 離開時間不能早於抵達時間（連按兩下的話會是同一秒，這裡至少讓它是 0 分）
+            let arrival = tripPlans[pi].stops[si].actualArrival ?? now
+            tripPlans[pi].stops[si].actualDeparture = max(now, arrival)
+        case .departed:
+            tripPlans[pi].stops[si].actualArrival = nil
+            tripPlans[pi].stops[si].actualDeparture = nil
+        }
+    }
+
+    /// 清掉某一站的打卡紀錄
+    func clearTripStopCheckIn(planId: UUID, stopId: UUID) {
+        guard let pi = tripPlans.firstIndex(where: { $0.id == planId }),
+              let si = tripPlans[pi].stops.firstIndex(where: { $0.id == stopId }) else { return }
+        tripPlans[pi].stops[si].actualArrival = nil
+        tripPlans[pi].stops[si].actualDeparture = nil
+    }
+
+    /// 把某一站的實際停留時間寫回「預計停留」。
+    /// 當天玩完之後可以用它把計畫校正成真實的樣子，下次照抄就準了。
+    func adoptActualDwell(planId: UUID, stopId: UUID) {
+        guard let pi = tripPlans.firstIndex(where: { $0.id == planId }),
+              let si = tripPlans[pi].stops.firstIndex(where: { $0.id == stopId }),
+              let seconds = tripPlans[pi].stops[si].actualDwellSeconds else { return }
+        tripPlans[pi].stops[si].dwellMinutes = max(0, Int((seconds / 60).rounded()))
+    }
+
     /// 把真實路線的結果寫回某一段。
     ///
     /// 用「目的地那一站的 id」定位而不是索引：算路線是非同步的，回來的時候

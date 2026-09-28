@@ -560,6 +560,16 @@ struct TripPlanDetailView: View {
             out.append(SummaryChip(id: "must", icon: "star.fill",
                                    text: "必去 \(p.mustVisitCount) 站"))
         }
+        // 開始打卡之後就顯示進度，沒打卡的行程不用看到這個
+        if p.checkedOutCount > 0 {
+            out.append(SummaryChip(id: "done", icon: "checkmark.circle.fill",
+                                   text: "已完成 \(p.checkedOutCount)/\(p.stops.count) 站"))
+        }
+        if let currentId = p.currentStopId,
+           let here = p.stops.first(where: { $0.id == currentId }) {
+            out.append(SummaryChip(id: "here", icon: "mappin.circle.fill",
+                                   text: "現在在「" + here.displayName + "」"))
+        }
         return out
     }
 
@@ -852,6 +862,14 @@ struct TripPlanDetailView: View {
                 Text(Self.departureText(slot))
                     .font(.system(size: 10, design: .rounded))
                     .foregroundStyle(.tertiary)
+                // 打卡過的時間是事實，跟排出來的預估分開標示
+                if slot.isActualArrival || slot.isActualDeparture {
+                    Text("實際")
+                        .font(.system(size: 8, weight: .bold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 4).padding(.vertical, 1)
+                        .background(c, in: Capsule())
+                }
             }
             .frame(width: 42)
 
@@ -862,32 +880,49 @@ struct TripPlanDetailView: View {
                 disclosures: subSpotDisclosures(slot.stop),
                 disclosureLabel: "子地點",
                 disclosureColor: c,
-                onTap: { editingStop = slot.stop },
+                // 點整列＝用 Apple 地圖看這個地方（當天最常做的動作）。
+                // 編輯改走「…」選單——行程排好之後就很少再改，但地圖天天要看。
+                onTap: { openStop(slot.stop) },
                 leading: {
-                    ZStack(alignment: .topTrailing) {
-                        ZStack {
-                            Circle()
-                                .fill(LinearGradient(colors: [c.opacity(0.9), c.opacity(0.5)],
-                                                     startPoint: .top, endPoint: .bottom))
-                                .frame(width: 22, height: 22)
-                            Text("\(slot.index + 1)")
-                                .font(.system(size: 11, weight: .bold, design: .rounded))
-                                .foregroundStyle(.white)
+                    HStack(spacing: 6) {
+                        if showsCheckIn(slot) { checkInButton(slot) }
+                        ZStack(alignment: .topTrailing) {
+                            ZStack {
+                                Circle()
+                                    .fill(LinearGradient(colors: [c.opacity(0.9), c.opacity(0.5)],
+                                                         startPoint: .top, endPoint: .bottom))
+                                    .frame(width: 22, height: 22)
+                                Text("\(slot.index + 1)")
+                                    .font(.system(size: 11, weight: .bold, design: .rounded))
+                                    .foregroundStyle(.white)
+                            }
+                            if slot.stop.isMustVisit {
+                                Image(systemName: "star.fill")
+                                    .font(.system(size: 8))
+                                    .foregroundStyle(.orange)
+                                    .padding(1.5)
+                                    .background(Circle().fill(Color(.systemBackground)))
+                                    .offset(x: 4, y: -4)
+                            }
                         }
-                        if slot.stop.isMustVisit {
-                            Image(systemName: "star.fill")
-                                .font(.system(size: 8))
-                                .foregroundStyle(.orange)
-                                .padding(1.5)
-                                .background(Circle().fill(Color(.systemBackground)))
-                                .offset(x: 4, y: -4)
-                        }
+                        .frame(width: 22, height: 22)
                     }
-                    .frame(width: 22, height: 22)
                 },
                 accessory: {
                     Menu {
                         Button("編輯") { editingStop = slot.stop }
+                        if slot.stop.checkInState != .notArrived {
+                            if slot.stop.actualDwellSeconds != nil {
+                                Button("把實際停留寫回預計") {
+                                    lifeStore.adoptActualDwell(planId: planId,
+                                                               stopId: slot.stop.id)
+                                }
+                            }
+                            Button("清除打卡紀錄") {
+                                lifeStore.clearTripStopCheckIn(planId: planId,
+                                                               stopId: slot.stop.id)
+                            }
+                        }
                         Button(slot.stop.isMustVisit ? "取消必去" : "標為必去") {
                             toggleMustVisit(slot.stop.id)
                         }
@@ -932,6 +967,58 @@ struct TripPlanDetailView: View {
         .padding(.horizontal, 16)
     }
 
+    /// 這一站要不要顯示打卡方塊。
+    ///
+    /// 只在「今天或已經過去的日子」出現：整趟七天二十幾站全部掛一顆方塊只是雜訊，
+    /// 而且會讓人以為現在就該按。已經打過卡的一律顯示（才收得回去）。
+    private func showsCheckIn(_ slot: TripPlan.Slot) -> Bool {
+        if slot.stop.checkInState != .notArrived { return true }
+        return Calendar.current.startOfDay(for: slot.arrival)
+            <= Calendar.current.startOfDay(for: Date())
+    }
+
+    /// 打卡方塊：沒到 → 我到了 → 玩完了 → 回到沒到。
+    private func checkInButton(_ slot: TripPlan.Slot) -> some View {
+        let c = TripDayPalette.color(slot.dayIndex)
+        let state = slot.stop.checkInState
+        return Button {
+            lifeStore.advanceTripStopCheckIn(planId: planId, stopId: slot.stop.id)
+        } label: {
+            ZStack {
+                Circle()
+                    .stroke(state == .notArrived ? Color.secondary.opacity(0.5) : c,
+                            lineWidth: 1.6)
+                    .frame(width: 22, height: 22)
+                switch state {
+                case .notArrived:
+                    EmptyView()
+                case .arrived:
+                    // 人在這裡：實心點，跟「已完成」的勾區分開
+                    Circle().fill(c).frame(width: 10, height: 10)
+                case .departed:
+                    Circle().fill(c).frame(width: 22, height: 22)
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(.white)
+                }
+            }
+            .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// 點一站＝用 Apple 地圖看那個地方。完全沒有地址也沒有座標時退回開編輯，
+    /// 不然那一下會什麼都沒發生。
+    private func openStop(_ stop: TripStop) {
+        let hasPlace = stop.coordinate != nil
+            || !stop.address.trimmingCharacters(in: .whitespaces).isEmpty
+        if hasPlace {
+            TripShare.openPlaceInMaps(stop)
+        } else {
+            editingStop = stop
+        }
+    }
+
     private func stopChips(_ slot: TripPlan.Slot) -> [ItemChip] {
         let c = TripDayPalette.color(slot.dayIndex)
         var chips: [ItemChip] = []
@@ -966,6 +1053,35 @@ struct TripPlanDetailView: View {
         }
         if slot.stop.isMustVisit {
             chips.append(ItemChip(id: "must", text: "必去", color: .orange, icon: "star.fill"))
+        }
+        // 打卡之後就用事實說話：實際停留多久、比原本排的早到還是晚到
+        if let actual = slot.stop.actualDwellSeconds {
+            let planned = Double(max(0, slot.stop.dwellMinutes)) * 60
+            var text = "實際停留 " + TripRouter.durationText(actual)
+            if planned > 0, abs(actual - planned) >= 300 {
+                text += actual > planned
+                    ? "（多 " + TripRouter.durationText(actual - planned) + "）"
+                    : "（少 " + TripRouter.durationText(planned - actual) + "）"
+            }
+            chips.append(ItemChip(id: "actualDwell", text: text, color: c, icon: "checkmark.circle.fill"))
+        } else if slot.isActualArrival {
+            chips.append(ItemChip(id: "here",
+                                  text: "已抵達 " + Self.timeFmt.string(from: slot.arrival),
+                                  color: c, icon: "mappin.circle.fill"))
+        }
+        if slot.isActualArrival {
+            // 比的是「照前面實際發生的事推算，這一站本來會幾點到」，
+            // 所以它衡量的是這一段路＋上一站有沒有拖到，不是整趟累積的落差
+            let delta = slot.arrival.timeIntervalSince(slot.plannedArrival)
+            if abs(delta) >= 300 {
+                chips.append(ItemChip(
+                    id: "delta",
+                    text: delta > 0
+                        ? "比預估晚 " + TripRouter.durationText(delta)
+                        : "比預估早 " + TripRouter.durationText(-delta),
+                    color: delta > 0 ? .orange : .green,
+                    icon: delta > 0 ? "arrow.down.right" : "arrow.up.right"))
+            }
         }
         if slot.stop.isOvernight {
             chips.append(ItemChip(id: "night",
@@ -1053,14 +1169,23 @@ struct TripPlanDetailView: View {
         Button {
             insertion = StopInsertion(at: nil)
         } label: {
-            HStack(spacing: 6) {
-                Image(systemName: "plus.circle.fill")
-                Text(p.stops.isEmpty ? "加入第一個景點" : "在最後加一站")
-                    .font(.subheadline.weight(.semibold))
+            VStack(spacing: 2) {
+                HStack(spacing: 6) {
+                    Image(systemName: "plus.circle.fill")
+                    Text(p.stops.isEmpty ? "加入第一個景點" : "在最後加一站")
+                        .font(.subheadline.weight(.semibold))
+                }
+                // 打過卡之後這個時間是從「實際離開」接下去算的，不是原本排的
+                if let hint = nextStartHint(p) {
+                    Text(hint)
+                        .font(.system(size: 10))
+                        .foregroundStyle(.white.opacity(0.9))
+                        .lineLimit(1).minimumScaleFactor(0.8)
+                }
             }
             .foregroundStyle(.white)
             .frame(maxWidth: .infinity)
-            .padding(.vertical, 13)
+            .padding(.vertical, 12)
             .background(LinearGradient(colors: [accent, accent.opacity(0.75)],
                                        startPoint: .leading, endPoint: .trailing))
             .clipShape(RoundedRectangle(cornerRadius: 14))
@@ -1068,6 +1193,16 @@ struct TripPlanDetailView: View {
         }
         .buttonStyle(.plain)
         .padding(.horizontal)
+    }
+
+    /// 「從『某某』15:40 出發」。字串在 ViewBuilder 外組好。
+    private func nextStartHint(_ p: TripPlan) -> String? {
+        guard let last = p.timeline.last else { return nil }
+        let time = Self.timeFmt.string(from: last.departure)
+        let day = Calendar.current.isDate(last.departure, inSameDayAs: last.arrival)
+            ? "" : "翌 "
+        let prefix = last.isActualDeparture ? "已從" : "從"
+        return prefix + "「" + last.stop.displayName + "」" + day + time + " 出發"
     }
 
     private var emptyStops: some View {
