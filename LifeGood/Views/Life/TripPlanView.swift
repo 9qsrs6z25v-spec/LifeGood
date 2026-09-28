@@ -676,18 +676,6 @@ struct TripPlanDetailView: View {
             ? t : "翌 " + t
     }
 
-    /// 這一天是幾月幾號（星期幾）。字串在 ViewBuilder 外組好。
-    private static func dayDateText(_ p: TripPlan, dayIndex: Int) -> String {
-        let date = Calendar.current.date(byAdding: .day, value: dayIndex,
-                                         to: p.startDate) ?? p.startDate
-        return dayFmt.string(from: date)
-    }
-
-    /// 「第 2 天 8/20 (三)」
-    private static func dayLabel(_ p: TripPlan, dayIndex: Int) -> String {
-        "第 \(dayIndex + 1) 天 " + dayDateText(p, dayIndex: dayIndex)
-    }
-
     // MARK: 時間軸
 
     private func timelineCard(_ p: TripPlan) -> some View {
