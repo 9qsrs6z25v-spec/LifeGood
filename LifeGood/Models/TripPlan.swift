@@ -145,6 +145,13 @@ struct TripStop: Identifiable, Codable {
     var legStamp: String?
     /// true＝這段是用直線距離估的（路線服務失敗或大眾運輸），畫面要標示
     var legIsEstimated: Bool
+    /// true＝上面那個估算是「路線服務當下要不到」才退回來的（開車／步行），
+    /// 不是這個交通方式本來就沒有路線可問（大眾運輸／飛機）。
+    ///
+    /// 這兩件事以前混在 legIsEstimated 一個旗標裡，結果是：連續查二十幾段被服務
+    /// 暫時擋下 → 全部退回估算 → 指紋也一起寫下去 → 之後再也不會重試，
+    /// 那些段落就永遠是估算值。分開之後，這一種下次打開行程會自動再試一次。
+    var legNeedsRetry: Bool
 
     init(id: UUID = UUID(), name: String = "", address: String = "",
          latitude: Double? = nil, longitude: Double? = nil,
@@ -154,7 +161,8 @@ struct TripStop: Identifiable, Codable {
          arrivalOverride: Date? = nil, note: String = "",
          photoFileNames: [String] = [], subSpots: [TripSubSpot] = [],
          legMeters: Double? = nil, legSeconds: Double? = nil,
-         legStamp: String? = nil, legIsEstimated: Bool = false) {
+         legStamp: String? = nil, legIsEstimated: Bool = false,
+         legNeedsRetry: Bool = false) {
         self.id = id; self.name = name; self.address = address
         self.latitude = latitude; self.longitude = longitude
         self.dwellMinutes = dwellMinutes
@@ -166,6 +174,7 @@ struct TripStop: Identifiable, Codable {
         self.photoFileNames = photoFileNames; self.subSpots = subSpots
         self.legMeters = legMeters; self.legSeconds = legSeconds
         self.legStamp = legStamp; self.legIsEstimated = legIsEstimated
+        self.legNeedsRetry = legNeedsRetry
     }
 
     init(from decoder: Decoder) throws {
@@ -188,12 +197,14 @@ struct TripStop: Identifiable, Codable {
         legSeconds = try? c.decodeIfPresent(Double.self, forKey: .legSeconds)
         legStamp = try? c.decodeIfPresent(String.self, forKey: .legStamp)
         legIsEstimated = (try? c.decodeIfPresent(Bool.self, forKey: .legIsEstimated)) ?? false
+        legNeedsRetry = (try? c.decodeIfPresent(Bool.self, forKey: .legNeedsRetry)) ?? false
     }
 
     private enum CodingKeys: String, CodingKey {
         case id, name, address, latitude, longitude, dwellMinutes
         case legModeOverride, isMustVisit, isOvernight, checkOutTime, arrivalOverride, note
         case photoFileNames, subSpots, legMeters, legSeconds, legStamp, legIsEstimated
+        case legNeedsRetry
     }
 
     var coordinate: CLLocationCoordinate2D? {
@@ -331,6 +342,8 @@ struct TripPlan: Identifiable, Codable {
         let travelSeconds: Double?
         let travelMeters: Double?
         let isEstimated: Bool
+        /// 這一段的估算是路線服務當下要不到才退回來的，可以重算
+        let canRetryRouting: Bool
         /// 這一段實際用的交通方式（第一站沒有路段，放行程預設值佔位）
         let mode: TripTravelMode
         /// 這一段是使用者針對這段另外指定的方式，不是行程預設
@@ -388,6 +401,7 @@ struct TripPlan: Identifiable, Codable {
                             travelSeconds: secs,
                             travelMeters: i == 0 ? nil : stop.legMeters,
                             isEstimated: i == 0 ? false : stop.legIsEstimated,
+                            canRetryRouting: i > 0 && stop.legNeedsRetry,
                             mode: effectiveMode(at: i),
                             isModeOverridden: i > 0 && stop.legModeOverride != nil,
                             isFixedArrival: stop.arrivalOverride != nil,
@@ -455,6 +469,32 @@ struct TripPlan: Identifiable, Codable {
         }
     }
 
+    /// 有幾段是「路線服務當下要不到」才退回估算的（可以重算）
+    var retryableLegCount: Int {
+        stops.dropFirst().filter { $0.legNeedsRetry }.count
+    }
+
+    /// 把真實路線的結果寫進第 index 段。開地圖時順手把先前退回估算的段落修正回來。
+    /// 回傳有沒有真的改到東西。
+    @discardableResult
+    mutating func applyRoute(meters: Double, seconds: Double, at index: Int) -> Bool {
+        guard stops.indices.contains(index), index > 0 else { return false }
+        let wasEstimated = stops[index].legIsEstimated
+        // 差一公尺就重寫沒有意義，但只要原本是估算的就一定要換掉
+        if !wasEstimated, let old = stops[index].legMeters,
+           abs(old - meters) < 1, let oldS = stops[index].legSeconds,
+           abs(oldS - seconds) < 1 {
+            return false
+        }
+        stops[index].legMeters = meters
+        stops[index].legSeconds = seconds
+        stops[index].legIsEstimated = false
+        stops[index].legNeedsRetry = false
+        stops[index].legStamp = TripPlan.stamp(from: stops[index - 1], to: stops[index],
+                                               mode: effectiveMode(at: index))
+        return true
+    }
+
     /// 有沒有任何一段被單獨指定過交通方式
     var hasModeOverride: Bool { stops.dropFirst().contains { $0.legModeOverride != nil } }
 
@@ -483,12 +523,19 @@ struct TripPlan: Identifiable, Codable {
     }
 
     /// 路線快取的指紋：兩端座標 + 交通方式。任一改變就代表要重算。
+    ///
+    /// 前面那個版本號是給「計算方式本身改了」時用的搬遷把手：改了它，
+    /// 所有既有的快取都會對不上而重算一次。
+    /// v2（25.410）：修掉「一次查太多段被擋下來後，估算值被永久記住」的問題，
+    ///               既有行程需要重算才能拿回真實路線。
+    private static let stampVersion = "v2"
+
     static func stamp(from: TripStop, to: TripStop, mode: TripTravelMode) -> String {
         func c(_ s: TripStop) -> String {
             guard let la = s.latitude, let lo = s.longitude else { return "-" }
             return String(format: "%.5f,%.5f", la, lo)
         }
-        return c(from) + ">" + c(to) + "|" + mode.rawValue
+        return stampVersion + "|" + c(from) + ">" + c(to) + "|" + mode.rawValue
     }
 }
 
@@ -505,7 +552,18 @@ enum TripRouter {
         let meters: Double
         let seconds: Double
         let isEstimated: Bool
+        /// 估算是「當下要不到」造成的（之後該再試），不是這個方式本來就沒有路線
+        let needsRetry: Bool
     }
+
+    /// 連續查詢之間的間隔。
+    ///
+    /// MKDirections 對短時間內的大量請求會直接擋（MKError.loadingThrottled）。
+    /// 二十幾站的行程一次排隊打完，後面幾乎都會被擋下來退回估算——
+    /// v25.399～25.409 的行程就是這樣整片變成「估」的。
+    private static let pacingNanos: UInt64 = 400_000_000
+    /// 被擋下來之後等久一點再試一次
+    private static let retryNanos: UInt64 = 1_500_000_000
 
     /// 算一段。兩端都要有座標，否則回 nil（呼叫端顯示「未設座標」）。
     /// 問路線用的請求。leg() 與 routePolyline() 共用，免得兩邊的條件走鐘。
@@ -527,30 +585,54 @@ enum TripRouter {
     /// 打開地圖時現算、只放在畫面的記憶體裡就好。
     static func routePolyline(from: TripStop, to: TripStop,
                               mode: TripTravelMode) async -> MKPolyline? {
-        guard mode.supportsRouting,
-              let a = from.coordinate, let b = to.coordinate else { return nil }
-        let route = try? await MKDirections(request: request(from: a, to: b, mode: mode))
-            .calculate().routes.first
-        return route?.polyline
+        await route(from: from, to: to, mode: mode)?.polyline
     }
 
     static func leg(from: TripStop, to: TripStop, mode: TripTravelMode) async -> Leg? {
         guard let a = from.coordinate, let b = to.coordinate else { return nil }
 
+        var retryable = false
         if mode.supportsRouting {
             let req = request(from: a, to: b, mode: mode)
-            if let route = try? await MKDirections(request: req).calculate().routes.first {
-                return Leg(meters: route.distance, seconds: route.expectedTravelTime,
-                           isEstimated: false)
+            do {
+                if let route = try await MKDirections(request: req).calculate().routes.first {
+                    return Leg(meters: route.distance, seconds: route.expectedTravelTime,
+                               isEstimated: false, needsRetry: false)
+                }
+            } catch {
+                retryable = isTemporary(error)
             }
         }
-        // 退路：直線 × 迂迴係數，再加上與距離無關的固定耗時（飛機的報到安檢登機）
+        // 退路：直線 × 迂迴係數，再加上與距離無關的固定耗時（飛機的報到安檢登機）。
+        //
+        // needsRetry 只有在「錯誤是暫時的」時才成立（見 isTemporary）：
+        // 被擋下來或沒網路會再試，真的沒路可走（開車跨海）與大眾運輸／飛機則是最終答案。
         let straight = CLLocation(latitude: a.latitude, longitude: a.longitude)
             .distance(from: CLLocation(latitude: b.latitude, longitude: b.longitude))
         let meters = straight * mode.straightLineFactor
         let seconds = meters / 1000 / mode.fallbackSpeedKmh * 3600
             + Double(mode.fixedOverheadMinutes) * 60
-        return Leg(meters: meters, seconds: seconds, isEstimated: true)
+        return Leg(meters: meters, seconds: seconds, isEstimated: true,
+                   needsRetry: retryable)
+    }
+
+    /// 這個錯誤是暫時的嗎？
+    ///
+    /// 被擋下來（一次查太多段）、伺服器忙、網路斷線 → 等一下再試就會好。
+    /// 「找不到路線」與「找不到地點」則是真的沒有路可走——開車跨海就是這一類，
+    /// 那種再試一百次也一樣，標成可重試只會每次打開行程都白打一輪網路。
+    private static func isTemporary(_ error: Error) -> Bool {
+        guard let mkError = error as? MKError else { return true }
+        return mkError.code != .directionsNotFound && mkError.code != .placemarkNotFound
+    }
+
+    /// 要完整的路線物件（距離、時間、形狀都在裡面）。
+    /// 地圖畫線與「把先前退回估算的數字修正回來」共用同一次查詢，不要各打一次。
+    static func route(from: TripStop, to: TripStop, mode: TripTravelMode) async -> MKRoute? {
+        guard mode.supportsRouting,
+              let a = from.coordinate, let b = to.coordinate else { return nil }
+        return try? await MKDirections(request: request(from: a, to: b, mode: mode))
+            .calculate().routes.first
     }
 
     /// 把整份行程缺的段落補算齊。
@@ -563,6 +645,8 @@ enum TripRouter {
     static func fillMissingLegs(_ plan: inout TripPlan) async -> Bool {
         guard plan.stops.count >= 2 else { return false }
         var changed = false
+        /// 這一輪有沒有真的打過網路（決定要不要在下一段之前先等一下）
+        var requested = false
         for i in 1..<plan.stops.count {
             let prev = plan.stops[i - 1]
             let cur = plan.stops[i]
@@ -576,16 +660,33 @@ enum TripRouter {
                     plan.stops[i].legSeconds = nil
                     plan.stops[i].legStamp = nil
                     plan.stops[i].legIsEstimated = false
+                    plan.stops[i].legNeedsRetry = false
                     changed = true
                 }
                 continue
             }
-            if cur.legStamp == want { continue }
-            guard let leg = await leg(from: prev, to: cur, mode: mode) else { continue }
+            // 指紋對得上就跳過——除非上次是「當下要不到」才退回估算的，那種要再試
+            if cur.legStamp == want && !cur.legNeedsRetry { continue }
+
+            // 連續請求之間隔一下。不隔的話二十幾段一次打完，後面幾乎全被擋下來。
+            if requested { try? await Task.sleep(nanoseconds: pacingNanos) }
+            requested = true
+
+            var result = await leg(from: prev, to: cur, mode: mode)
+            // 被擋下來時等久一點再試一次；兩次都失敗才認了（留著 needsRetry 下次再說）
+            if result?.needsRetry == true {
+                try? await Task.sleep(nanoseconds: retryNanos)
+                if let second = await leg(from: prev, to: cur, mode: mode),
+                   !second.needsRetry {
+                    result = second
+                }
+            }
+            guard let leg = result else { continue }
             plan.stops[i].legMeters = leg.meters
             plan.stops[i].legSeconds = leg.seconds
             plan.stops[i].legStamp = want
             plan.stops[i].legIsEstimated = leg.isEstimated
+            plan.stops[i].legNeedsRetry = leg.needsRetry
             changed = true
         }
         return changed

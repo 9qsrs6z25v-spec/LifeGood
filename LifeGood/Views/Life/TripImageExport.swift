@@ -328,9 +328,13 @@ struct TripLegShareCard: View {
     private func noteText(_ slot: TripPlan.Slot) -> String {
         var parts: [String] = []
         if slot.isEstimated {
-            parts.append(slot.mode.supportsRouting
-                         ? "距離與時間是估算值，不是真實路徑。"
-                         : "\(slot.mode.rawValue)沒有路線服務可問，距離與時間是用直線估算的。")
+            if !slot.mode.supportsRouting {
+                parts.append("\(slot.mode.rawValue)沒有路線服務可問，距離與時間是用直線估算的。")
+            } else if slot.canRetryRouting {
+                parts.append("這一段暫時沒拿到真實路線，距離與時間是用直線估算的。")
+            } else {
+                parts.append("地圖服務找不到這兩點之間的路，距離與時間是用直線估算的。")
+            }
             if slot.mode.fixedOverheadMinutes > 0 {
                 parts.append("已含 \(slot.mode.fixedOverheadMinutes) 分鐘報到與登機等固定耗時，不含去機場的路程。")
             }

@@ -334,11 +334,14 @@ struct TripPlanDetailView: View {
                     .environmentObject(lifeStore)
             }
             .sheet(isPresented: $showMap) {
-                if let p = plan { TripRouteMapSheet(plan: p) }
+                if let p = plan {
+                    TripRouteMapSheet(plan: p).environmentObject(lifeStore)
+                }
             }
             .sheet(item: $legDetail) { box in
                 if let p = plan {
                     TripLegDetailSheet(plan: p, index: box.index)
+                        .environmentObject(lifeStore)
                 }
             }
             .sheet(item: $sharing) { item in
@@ -376,6 +379,15 @@ struct TripPlanDetailView: View {
             return s.id.uuidString.prefix(8) + ":" + c
                 + ":" + (s.legModeOverride?.rawValue ?? "-")
         }.joined(separator: ";")
+    }
+
+    /// 把「暫時要不到真實路線」的段落清掉重算。
+    /// 不能只清快取就等 .task 自己跑——那個的觸發條件是站的順序／座標／交通方式，
+    /// 清快取不會讓它改變，所以這裡自己叫一次。
+    @MainActor
+    private func retryRouting() async {
+        lifeStore.retryTripPlanRouting(planId: planId)
+        await recalculate()
     }
 
     @MainActor
@@ -439,6 +451,22 @@ struct TripPlanDetailView: View {
             } else if p.unroutedLegCount > 0 {
                 Text("有 \(p.unroutedLegCount) 段還沒算出路線")
                     .font(.caption2).foregroundStyle(.white.opacity(0.85))
+            }
+            if p.retryableLegCount > 0 {
+                Button {
+                    Task { await retryRouting() }
+                } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.system(size: 9, weight: .bold))
+                        Text("有 \(p.retryableLegCount) 段沒拿到真實路線，點這裡重新計算")
+                            .font(.caption2.weight(.semibold))
+                    }
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 8).padding(.vertical, 4)
+                    .background(Color.white.opacity(0.2), in: Capsule())
+                }
+                .buttonStyle(.plain)
             }
             if p.unreachableCount > 0 {
                 Text("⚠️ 有 \(p.unreachableCount) 站的指定抵達時間比推算的還早，照這個排法趕不上")
@@ -1707,6 +1735,7 @@ struct TripSubSpotEditor: View {
 /// 只能畫直線（虛線）。路徑刻意不存進資料裡——一條 polyline 動輒上百個座標點，
 /// 每段各存一份會讓行程資料膨脹好幾個數量級，還要跟著 iCloud 同步與備份一起搬。
 struct TripRouteMapSheet: View {
+    @EnvironmentObject var lifeStore: LifeStore
     @Environment(\.dismiss) private var dismiss
 
     let plan: TripPlan
@@ -1977,10 +2006,13 @@ struct TripRouteMapSheet: View {
         let slots = plan.timeline
         for seg in routable {
             guard let i = slots.firstIndex(where: { $0.stop.id == seg.id }), i > 0 else { continue }
-            if let poly = await TripRouter.routePolyline(from: slots[i - 1].stop,
-                                                        to: slots[i].stop,
-                                                        mode: seg.mode) {
-                polylines[seg.id] = poly
+            if let route = await TripRouter.route(from: slots[i - 1].stop,
+                                                  to: slots[i].stop, mode: seg.mode) {
+                polylines[seg.id] = route.polyline
+                // 順手把先前退回估算的數字修正回真實值（同一次查詢，不多打一次網路）
+                lifeStore.applyTripRoute(planId: plan.id, stopId: seg.id,
+                                         meters: route.distance,
+                                         seconds: route.expectedTravelTime)
             }
             loadedLegs += 1
         }
@@ -1994,6 +2026,7 @@ struct TripRouteMapSheet: View {
 /// 與整條行程的地圖分開做，是因為要看的東西不一樣：整條是看「順序合不合理」，
 /// 這裡是看「這一段到底怎麼走、要多久」，所以地圖只框這兩點，數字也攤開講。
 struct TripLegDetailSheet: View {
+    @EnvironmentObject var lifeStore: LifeStore
     @Environment(\.dismiss) private var dismiss
 
     let plan: TripPlan
@@ -2178,10 +2211,46 @@ struct TripLegDetailSheet: View {
                 Spacer(minLength: 0)
             }
             .padding(.horizontal, 14).padding(.vertical, 10)
+            // 「要不到路線」是暫時的，給一個重試的入口
+            if to.canRetryRouting {
+                Rectangle().fill(Color(.separator).opacity(0.18))
+                    .frame(height: 0.5).padding(.leading, 44)
+                retryRow
+            }
         }
         .background(Color(.systemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 16))
         .padding(.horizontal)
+    }
+
+    /// 重試那一列。要不到路線多半是暫時的，不該讓使用者只能看著估算值。
+    private var retryRow: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "arrow.clockwise.circle.fill")
+                .font(.system(size: 13)).foregroundStyle(.orange)
+                .frame(width: 24)
+            VStack(alignment: .leading, spacing: 3) {
+                Text("這一段沒拿到真實路線")
+                    .font(.caption.weight(.semibold))
+                Text("多半是一次查太多段被地圖服務暫時擋下（一份行程有幾十段），目前顯示的是直線估算值。")
+                    .font(.caption2).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button {
+                    Task { await recompute() }
+                } label: {
+                    Text(isLoading ? "計算中…" : "重新計算這一段")
+                        .font(.caption.weight(.semibold))
+                        .padding(.horizontal, 10).padding(.vertical, 5)
+                        .background(Color.orange.opacity(0.14), in: Capsule())
+                        .foregroundStyle(.orange)
+                }
+                .buttonStyle(.plain)
+                .disabled(isLoading)
+                .padding(.top, 2)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 28).padding(.vertical, 14)
     }
 
     private func endpointRow(label: String, slot: TripPlan.Slot, time: Date) -> some View {
@@ -2224,21 +2293,25 @@ struct TripLegDetailSheet: View {
         if slot.travelSeconds == nil {
             return "兩端都要有座標才算得出距離與時間。"
         }
-        if slot.isEstimated {
-            var t = polyline == nil
-                ? "這是估算值：用直線距離乘上迂迴係數 \(String(format: "%.2f", slot.mode.straightLineFactor)) 換算，"
-                    + "不是真實路徑。"
-                : "這是估算值，不是真實路徑。"
-            if slot.mode.fixedOverheadMinutes > 0 {
-                t += "另外加了 \(slot.mode.fixedOverheadMinutes) 分鐘固定耗時"
-                    + "（報到、安檢、登機、下機、等行李），不含去機場的路程。"
-            }
-            if !slot.mode.supportsRouting {
-                t += "\(slot.mode.rawValue)沒有路線服務可問，要精確時間請用下面的按鈕開 Apple 地圖查。"
-            }
-            return t
+        guard slot.isEstimated else {
+            return "向地圖服務要到的真實路徑：實際道路距離與行駛時間（依一般路況估算，不含即時路況）。"
         }
-        return "向地圖服務要到的真實路徑：實際道路距離與行駛時間（依一般路況估算，不含即時路況）。"
+        let factor = String(format: "%.2f", slot.mode.straightLineFactor)
+        var t: String
+        if !slot.mode.supportsRouting {
+            t = "\(slot.mode.rawValue)沒有路線服務可問（Apple 不開放），這裡是直線距離乘上迂迴係數 \(factor) 換算的。"
+                + "要精確時間請用下面的按鈕開 Apple 地圖查。"
+        } else if slot.canRetryRouting {
+            t = "這一段暫時沒拿到真實路線，先用直線距離乘上迂迴係數 \(factor) 估算。"
+        } else {
+            t = "地圖服務找不到這兩點之間的路（例如中間隔著海、或那段路不能用這個方式通過），"
+                + "所以用直線距離乘上迂迴係數 \(factor) 估算。"
+        }
+        if slot.mode.fixedOverheadMinutes > 0 {
+            t += "另外加了 \(slot.mode.fixedOverheadMinutes) 分鐘固定耗時"
+                + "（報到、安檢、登機、下機、等行李），不含去機場的路程。"
+        }
+        return t
     }
 
     // MARK: 按鈕
@@ -2317,7 +2390,25 @@ struct TripLegDetailSheet: View {
         guard let from, let to, to.mode.supportsRouting, polyline == nil else { return }
         isLoading = true
         defer { isLoading = false }
-        polyline = await TripRouter.routePolyline(from: from.stop, to: to.stop, mode: to.mode)
+        guard let route = await TripRouter.route(from: from.stop, to: to.stop,
+                                                 mode: to.mode) else { return }
+        polyline = route.polyline
+        // 同一次查詢順手把數字修正回真實值。
+        // 這一段先前可能是「排隊查二十幾段時被擋下來」才退回估算的——
+        // 線是真的、數字卻是直線估的，那很奇怪，而且使用者已經看到了。
+        lifeStore.applyTripRoute(planId: plan.id, stopId: to.stop.id,
+                                 meters: route.distance, seconds: route.expectedTravelTime)
+    }
+
+    /// 手動重算這一段
+    @MainActor
+    private func recompute() async {
+        guard let to else { return }
+        isLoading = true
+        defer { isLoading = false }
+        polyline = nil
+        lifeStore.invalidateTripLeg(planId: plan.id, stopId: to.stop.id)
+        await loadRoute()
     }
 }
 

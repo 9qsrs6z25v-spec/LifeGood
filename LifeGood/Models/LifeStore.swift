@@ -2701,6 +2701,44 @@ class LifeStore: ObservableObject {
         }
     }
 
+    /// 把真實路線的結果寫回某一段。
+    ///
+    /// 用「目的地那一站的 id」定位而不是索引：算路線是非同步的，回來的時候
+    /// 使用者可能已經搬過站的順序，用索引寫會寫到別段去。
+    func applyTripRoute(planId: UUID, stopId: UUID, meters: Double, seconds: Double) {
+        guard let pi = tripPlans.firstIndex(where: { $0.id == planId }),
+              let si = tripPlans[pi].stops.firstIndex(where: { $0.id == stopId }),
+              si > 0 else { return }
+        var plan = tripPlans[pi]
+        if plan.applyRoute(meters: meters, seconds: seconds, at: si) {
+            tripPlans[pi] = plan
+        }
+    }
+
+    /// 讓某一段重新計算路線（使用者按「重新計算」時用）
+    func invalidateTripLeg(planId: UUID, stopId: UUID) {
+        guard let pi = tripPlans.firstIndex(where: { $0.id == planId }),
+              let si = tripPlans[pi].stops.firstIndex(where: { $0.id == stopId }),
+              si > 0 else { return }
+        tripPlans[pi].stops[si].legStamp = nil
+        tripPlans[pi].stops[si].legNeedsRetry = false
+    }
+
+    /// 讓整份行程所有「當下要不到才退回估算」的段落重新計算
+    func retryTripPlanRouting(planId: UUID) {
+        guard let pi = tripPlans.firstIndex(where: { $0.id == planId }) else { return }
+        isLoading = true
+        defer { isLoading = false; save() }
+        for i in tripPlans[pi].stops.indices where i > 0 {
+            guard tripPlans[pi].stops[i].legNeedsRetry
+                    || tripPlans[pi].stops[i].legIsEstimated else { continue }
+            // 大眾運輸與飛機本來就沒有路線可問，清了也只是再估一次，不用動
+            guard tripPlans[pi].effectiveMode(at: i).supportsRouting else { continue }
+            tripPlans[pi].stops[i].legStamp = nil
+            tripPlans[pi].stops[i].legNeedsRetry = false
+        }
+    }
+
     /// 讓第 index 站的「進站路線」失效（index 可能已超出範圍，代表刪的是最後一站）
     private func invalidateLeg(planIndex pi: Int, at index: Int) {
         guard tripPlans[pi].stops.indices.contains(index) else { return }
