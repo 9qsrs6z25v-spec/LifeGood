@@ -2435,8 +2435,28 @@ struct TripMapPickerSheet: View {
     @State private var address = ""
     @State private var suggestedName: String?
     @State private var isResolving = false
-    /// 在地圖上點到的地標。有值時就用它，不看畫面中央的準心。
-    @State private var selection: MapSelection<MKMapItem>?
+    /// 在地圖上點到的那一點。有值時就用它，不看畫面中央的準心。
+    ///
+    /// ⚠️ 不用 Map(selection:) 那套：MapSelection 是 iOS 18 才有的，這個 App
+    ///    最低支援 iOS 17（送審時整包編不過就是卡在這裡）。改成自己接點擊：
+    ///    MapReader 把畫面座標換成經緯度，再就近找一筆地標，效果一樣而且 iOS 17 可用。
+    @State private var tapped: TappedPoint?
+    /// 正在找手指按到的是哪個地標
+    @State private var isPickingPOI = false
+    /// 畫面上下大約涵蓋幾公尺（用來換算點擊的容許誤差）
+    @State private var visibleMeters: Double = 1_000
+
+    struct TappedPoint: Equatable {
+        let coordinate: CLLocationCoordinate2D
+        /// 找到的地標名稱；nil＝那裡沒有地標，只是一個座標
+        let name: String?
+
+        static func == (a: TappedPoint, b: TappedPoint) -> Bool {
+            a.name == b.name
+                && abs(a.coordinate.latitude - b.coordinate.latitude) < 0.000_001
+                && abs(a.coordinate.longitude - b.coordinate.longitude) < 0.000_001
+        }
+    }
 
     private let accent = TripDayPalette.color(0)
 
@@ -2477,26 +2497,79 @@ struct TripMapPickerSheet: View {
     }
 
     private var mapLayer: some View {
-        ZStack {
-            // selection 綁上去之後，地圖上的地標（POI）就可以直接點——
-            // 使用者看得到「一日拾樂」就點它，比把準心慢慢挪過去準確得多。
-            Map(position: $position, selection: $selection) {
-                UserAnnotation()
-            }
-            // POI 這裡要開著：使用者是靠地標認位置的，全部關掉就只剩一片空白底圖
-            .mapStyle(.standard(pointsOfInterest: .all))
-            .mapControls {
-                MapUserLocationButton()
-                MapCompass()
-            }
-            .onMapCameraChange(frequency: .onEnd) { context in
-                center = context.region.center
-            }
-            .ignoresSafeArea(edges: .bottom)
+        // MapReader 才拿得到「畫面上的點 → 經緯度」的換算（iOS 17 就有）
+        MapReader { proxy in
+            ZStack {
+                Map(position: $position) {
+                    UserAnnotation()
+                    if let tapped {
+                        Annotation(tapped.name ?? "選取的位置", coordinate: tapped.coordinate) {
+                            selectedMarker
+                        }
+                    }
+                }
+                // POI 這裡要開著：使用者是靠地標認位置的，全部關掉就只剩一片空白底圖
+                .mapStyle(.standard(pointsOfInterest: .all))
+                .mapControls {
+                    MapUserLocationButton()
+                    MapCompass()
+                }
+                .onMapCameraChange(frequency: .onEnd) { context in
+                    center = context.region.center
+                    // 記下目前看到多大範圍，決定「點下去算是點到哪個地標」的容許距離
+                    visibleMeters = context.region.span.latitudeDelta * 111_000
+                }
+                // 拖曳與縮放是拖／捏的手勢，單點不會被地圖吃掉，所以可以直接接
+                .onTapGesture { screenPoint in
+                    guard let coordinate = proxy.convert(screenPoint, from: .local) else { return }
+                    Task { await pickPOI(at: coordinate) }
+                }
+                .ignoresSafeArea(edges: .bottom)
 
-            // 已經點到地標時就不要再畫準心——兩個「我選的是這裡」會互相打架
-            if pickedFeature == nil { crosshair }
+                // 已經點過地圖就不要再畫準心——兩個「我選的是這裡」會互相打架
+                if tapped == nil { crosshair }
+            }
         }
+    }
+
+    private var selectedMarker: some View {
+        ZStack {
+            Circle().fill(accent).frame(width: 26, height: 26)
+                .overlay(Circle().stroke(Color.white, lineWidth: 2.5))
+                .shadow(color: .black.opacity(0.25), radius: 3, y: 1)
+            Image(systemName: "checkmark")
+                .font(.system(size: 12, weight: .bold)).foregroundStyle(.white)
+        }
+    }
+
+    /// 手指按下去那一點是哪個地標。
+    ///
+    /// 點擊只會給座標，不會給名稱，所以就近找一筆 POI：容許範圍內最近的那個
+    /// 就當成使用者想點的。找不到就只記座標——那裡本來就沒有標示，
+    /// 使用者要的就是「這個位置」。
+    @MainActor
+    private func pickPOI(at coordinate: CLLocationCoordinate2D) async {
+        // 先把選取點放到手指按的地方：就算等一下找不到地標，位置也已經是對的
+        tapped = TappedPoint(coordinate: coordinate, name: nil)
+        isPickingPOI = true
+        defer { isPickingPOI = false }
+
+        // 容許誤差跟著縮放走：地圖拉遠時一個手指頭就蓋掉好幾百公尺，
+        // 固定 60 公尺會變成怎麼點都點不到；拉近時又不該把隔壁店家吸過來。
+        let tolerance = min(400, max(30, visibleMeters * 0.03))
+        let request = MKLocalPointsOfInterestRequest(center: coordinate, radius: tolerance)
+        guard let response = try? await MKLocalSearch(request: request).start() else { return }
+        let origin = CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)
+        let nearest = response.mapItems
+            .compactMap { item -> (MKMapItem, CLLocationDistance)? in
+                guard let location = item.placemark.location else { return nil }
+                return (item, location.distance(from: origin))
+            }
+            .min { $0.1 < $1.1 }
+        guard !Task.isCancelled, let nearest, nearest.1 <= tolerance,
+              let name = nearest.0.name?.trimmingCharacters(in: .whitespaces),
+              !name.isEmpty else { return }
+        tapped = TappedPoint(coordinate: nearest.0.placemark.coordinate, name: name)
     }
 
     /// 準心固定在畫面正中央：小圓點就是真正會被記下來的那個座標（不位移），
@@ -2519,17 +2592,17 @@ struct TripMapPickerSheet: View {
     private var infoCard: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 6) {
-                Image(systemName: pickedFeature == nil ? "mappin.and.ellipse" : "mappin.circle.fill")
+                Image(systemName: tapped == nil ? "mappin.and.ellipse" : "mappin.circle.fill")
                     .font(.system(size: 11)).foregroundStyle(accent)
                 Text(pickedName ?? "這個位置")
                     .font(.subheadline.weight(.semibold))
                     .lineLimit(1)
-                if isResolving {
+                if isResolving || isPickingPOI {
                     ProgressView().scaleEffect(0.55)
                 }
                 Spacer(minLength: 0)
-                if pickedFeature != nil {
-                    Button("改用準心") { selection = nil }
+                if tapped != nil {
+                    Button("改用準心") { tapped = nil }
                         .font(.caption2.weight(.semibold))
                 }
             }
@@ -2550,7 +2623,7 @@ struct TripMapPickerSheet: View {
             } label: {
                 HStack(spacing: 6) {
                     Image(systemName: "checkmark.circle.fill")
-                    Text(pickedFeature == nil ? "使用這個位置" : "使用這個地標")
+                    Text(tapped?.name == nil ? "使用這個位置" : "使用這個地標")
                         .font(.subheadline.weight(.semibold))
                 }
                 .foregroundStyle(.white)
@@ -2562,9 +2635,7 @@ struct TripMapPickerSheet: View {
             }
             .buttonStyle(.plain)
 
-            Text(pickedFeature == nil
-                 ? "地圖上的店家、景點可以直接點選；沒有標示的地方就挪動地圖把準心對上去。查不到地址也沒關係——路線計算靠的是座標。"
-                 : "已選取地圖上的這個地標，名稱與座標都用它的。想改用畫面中央的準心就按右上角的「改用準心」。")
+            Text(hintText)
                 .font(.system(size: 10)).foregroundStyle(.tertiary)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -2578,22 +2649,33 @@ struct TripMapPickerSheet: View {
         .padding(.bottom, 12)
     }
 
+    /// 字串在 ViewBuilder 外組好
+    private var hintText: String {
+        guard let tapped else {
+            return "地圖上的店家、景點可以直接點選；沒有標示的地方就挪動地圖把準心對上去。"
+                + "查不到地址也沒關係——路線計算靠的是座標。"
+        }
+        if tapped.name == nil {
+            return isPickingPOI
+                ? "正在看你點的位置上有沒有標示的店家或景點…"
+                : "你點的位置上沒有標示的地標，會直接記下這個座標。想換一個位置就再點一次地圖，"
+                    + "或按右上角的「改用準心」回到用準心對位置。"
+        }
+        return "已選取地圖上的這個地標，名稱與座標都用它的。想改用畫面中央的準心就按右上角的「改用準心」。"
+    }
+
     // MARK: 選到什麼
 
-    /// 地圖上被點到的地標（沒點就是 nil，用畫面中央的準心）
-    private var pickedFeature: MapFeature? { selection?.feature }
-
-    /// 最後會被記下來的座標
+    /// 最後會被記下來的座標（點過地圖就用那一點，否則用畫面中央的準心）
     private var pickedCoordinate: CLLocationCoordinate2D {
-        pickedFeature?.coordinate ?? center
+        tapped?.coordinate ?? center
     }
 
     /// 最後會被帶進景點名稱的字。
     /// 點到的地標最準（那就是 Apple 地圖上寫的店名），反查來的地標名只是退路。
     private var pickedName: String? {
-        if let title = pickedFeature?.title?.trimmingCharacters(in: .whitespaces),
-           !title.isEmpty {
-            return title
+        if let name = tapped?.name?.trimmingCharacters(in: .whitespaces), !name.isEmpty {
+            return name
         }
         return suggestedName
     }
@@ -2602,7 +2684,7 @@ struct TripMapPickerSheet: View {
     /// 而 .task(id:) 需要能比較。
     private var resolveKey: String {
         let c = pickedCoordinate
-        return (pickedFeature?.title ?? "-")
+        return (tapped?.name ?? "-")
             + String(format: "|%.5f,%.5f", c.latitude, c.longitude)
     }
 
