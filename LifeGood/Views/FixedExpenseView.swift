@@ -1040,6 +1040,8 @@ private struct FixedExpenseCard: View {
     /// [v25.300] 更新金額對話框
     @State private var showAmountUpdate = false
     @State private var newAmountText = ""
+    /// [v25.414] 金額紀錄編輯（打錯了要能改回來）
+    @State private var showHistoryEditor = false
     /// [v25.301] 走勢圖手指選取的 X（日期）；有值時顯示該點細項
     @State private var trendSelection: Date?
 
@@ -1121,6 +1123,10 @@ private struct FixedExpenseCard: View {
                 AddExpenseView(expenseType: .fixed, editingExpense: current)
             }
             .sheet(item: $shareItem) { item in ShareSheet(items: item.items) }
+            .sheet(isPresented: $showHistoryEditor) {
+                AmountHistoryEditor(expense: current, accent: accent)
+                    .environmentObject(store)
+            }
             .alert("更新金額", isPresented: $showAmountUpdate) {
                 TextField("新一期金額（目前 \(Self.decimalFmt.string(from: NSNumber(value: current.amount)) ?? "")）",
                           text: $newAmountText)
@@ -1345,6 +1351,20 @@ private struct FixedExpenseCard: View {
                     Text("金額走勢").font(.caption).foregroundStyle(.secondary)
                     Spacer()
                     if !forExport {
+                        // 打錯的金額要能改回來，所以更新旁邊一定要有編輯的入口
+                        if !actual.isEmpty {
+                            Button { showHistoryEditor = true } label: {
+                                HStack(spacing: 4) {
+                                    Image(systemName: "slider.horizontal.3")
+                                        .font(.system(size: 10, weight: .bold))
+                                    Text("\(actual.count) 筆").font(.caption.weight(.semibold))
+                                }
+                                .padding(.horizontal, 9).padding(.vertical, 4)
+                                .background(Color(.tertiarySystemFill), in: Capsule())
+                                .foregroundStyle(.secondary)
+                            }
+                            .buttonStyle(.borderless)
+                        }
                         Button { newAmountText = ""; showAmountUpdate = true } label: {
                             HStack(spacing: 4) {
                                 Image(systemName: "arrow.triangle.2.circlepath")
@@ -1374,7 +1394,7 @@ private struct FixedExpenseCard: View {
                 } else if !forExport {
                     Text(actual.isEmpty
                          ? "按「更新金額」記錄新一期金額（例：每年續保的乙式險）。首次更新會把目前金額列為起點，累積兩筆就會畫出走勢曲線與虛線預測。"
-                         : "已記錄 1 筆，再更新一次金額就會畫出走勢曲線與虛線預測。")
+                         : "已記錄 1 筆，再更新一次金額就會畫出走勢曲線與虛線預測。打錯的話按左邊的筆數可以修改或刪除。")
                         .font(.caption2).foregroundStyle(.tertiary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -1747,4 +1767,152 @@ private struct FixedExpenseCard: View {
 #Preview {
     FixedExpenseView()
         .environmentObject(ExpenseStore())
+}
+
+// MARK: - 金額紀錄編輯（v25.414）
+
+/// 「更新金額」只能一直往上加，打錯就卡在走勢圖上拿不掉——這裡負責改與刪。
+///
+/// 兩個要留意的地方：
+/// ① 這份清單的最後一筆（依日期）就是這筆固定支出「目前的金額」，
+///    所以改動之後要把 expense.amount 一起同步，不然卡片上的數字與走勢圖會對不起來。
+/// ② 更新金額當下記的是「按下去那一刻」，但實際續保多半是更早以前的事，
+///    所以日期也要能改，否則走勢圖的橫軸是錯的。
+private struct AmountHistoryEditor: View {
+    @EnvironmentObject var store: ExpenseStore
+    @Environment(\.dismiss) private var dismiss
+
+    let expense: Expense
+    let accent: Color
+
+    @State private var rows: [AmountSnapshot] = []
+    @State private var loaded = false
+    @State private var confirmingClear = false
+
+    private static let dateFmt: DateFormatter = {
+        let f = DateFormatter(); f.locale = Locale(identifier: "zh_Hant_TW")
+        f.dateFormat = "yyyy/M/d"; return f
+    }()
+    private static let decimalFmt: NumberFormatter = {
+        let f = NumberFormatter(); f.numberStyle = .decimal; f.maximumFractionDigits = 0; return f
+    }()
+
+    /// 依日期排好的結果（存檔與「目前金額」都看這個）
+    private var sortedRows: [AmountSnapshot] {
+        rows.filter { $0.amount > 0 }.sorted { $0.date < $1.date }
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    if rows.isEmpty {
+                        Text("沒有金額紀錄。")
+                            .font(.callout).foregroundStyle(.secondary)
+                    }
+                    ForEach($rows) { $row in
+                        rowEditor($row)
+                    }
+                    .onDelete { rows.remove(atOffsets: $0) }
+                } header: {
+                    Text("金額紀錄")
+                } footer: {
+                    Text(footerText)
+                }
+
+                if !rows.isEmpty {
+                    Section {
+                        Button(role: .destructive) {
+                            confirmingClear = true
+                        } label: {
+                            Text("清空所有紀錄")
+                        }
+                    } footer: {
+                        Text("清空之後走勢圖會消失，卡片上的目前金額維持不變。")
+                    }
+                }
+            }
+            .navigationTitle("編輯金額紀錄")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) { Button("取消") { dismiss() } }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("儲存") { save() }.bold()
+                }
+            }
+            .confirmationDialog("清空金額紀錄", isPresented: $confirmingClear,
+                                titleVisibility: .visible) {
+                Button("清空 \(rows.count) 筆", role: .destructive) { rows.removeAll() }
+                Button("取消", role: .cancel) {}
+            } message: {
+                Text("這只會清掉走勢圖用的歷史紀錄，不會動到這筆固定支出本身。按「儲存」之後才會生效。")
+            }
+            .onAppear {
+                guard !loaded else { return }
+                loaded = true
+                rows = expense.amountHistory.sorted { $0.date < $1.date }
+            }
+        }
+    }
+
+    private func rowEditor(_ row: Binding<AmountSnapshot>) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text("金額").font(.caption).foregroundStyle(.secondary)
+                Spacer()
+                TextField("金額", value: row.amount, format: .number)
+                    .keyboardType(.decimalPad)
+                    .multilineTextAlignment(.trailing)
+                    .font(.system(size: 17, weight: .semibold, design: .rounded))
+                    .foregroundStyle(row.wrappedValue.amount > 0 ? accent : Color.red)
+            }
+            HStack {
+                Text("日期").font(.caption).foregroundStyle(.secondary)
+                Spacer()
+                DatePicker("", selection: row.date, displayedComponents: .date)
+                    .labelsHidden()
+            }
+            if isLatest(row.wrappedValue) {
+                Text("這是最新的一筆，也就是卡片上的「目前金額」")
+                    .font(.caption2).foregroundStyle(accent)
+            }
+        }
+        .padding(.vertical, 2)
+    }
+
+    private func isLatest(_ snapshot: AmountSnapshot) -> Bool {
+        sortedRows.last?.id == snapshot.id
+    }
+
+    /// 字串在 ViewBuilder 外組好
+    private var footerText: String {
+        var t = "左滑可以刪除單筆。最後一筆（日期最新的那一筆）就是卡片上的「目前金額」，"
+            + "改了它，上面的金額會跟著變。"
+        if let last = sortedRows.last,
+           abs(last.amount - expense.amount) > 0.5 {
+            t += "\n\n儲存後目前金額會從 NT$"
+                + (Self.decimalFmt.string(from: NSNumber(value: expense.amount)) ?? "")
+                + " 變成 NT$"
+                + (Self.decimalFmt.string(from: NSNumber(value: last.amount)) ?? "")
+                + "。"
+        }
+        if rows.contains(where: { $0.amount <= 0 }) {
+            t += "\n\n金額填 0 或空白的那幾筆不會被存下來。"
+        }
+        return t
+    }
+
+    private func save() {
+        // 從 store 現撈，不要用打開這張表單那一刻的快照
+        guard var updated = store.expenses.first(where: { $0.id == expense.id }) else {
+            dismiss(); return
+        }
+        let cleaned = sortedRows
+        updated.amountHistory = cleaned
+        // 目前金額＝最後一筆。整份清空時維持原本的金額不動——
+        // 使用者要刪的是「走勢圖的歷史」，不是這筆支出現在要繳多少。
+        if let last = cleaned.last { updated.amount = last.amount }
+        store.update(updated)
+        dismiss()
+    }
 }
