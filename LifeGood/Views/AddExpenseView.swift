@@ -1869,7 +1869,12 @@ struct AddExpenseView: View {
 
     /// 沒有任何一趟旅遊涵蓋這一天就不要擺這一區——多數支出跟旅行無關，
     /// 平常不該在表單裡多一個看不懂的選單。
-    private var showTripLinkSection: Bool { !tripOptions.isEmpty }
+    ///
+    /// [v25.425] 基本模式也一律不出現：基本模式的用意就是「只填金額、分類、日期」，
+    /// 關聯資產、照片廊都收起來了，關聯旅遊沒道理是唯一冒出來的例外。
+    /// 要掛旅遊的人切到進階模式就看得到——已經掛好的關聯不會因為切回基本而掉，
+    /// 存檔時是照載入的值寫回去的。
+    private var showTripLinkSection: Bool { advancedMode && !tripOptions.isEmpty }
 
     private var tripLinkSection: some View {
         Section {

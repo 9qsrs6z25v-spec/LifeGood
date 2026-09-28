@@ -1503,6 +1503,9 @@ struct TripStopEditorSheet: View {
     @State private var note = ""
     @State private var photoFileNames: [String] = []
     @State private var subSpots: [TripSubSpot] = []
+    /// 正在編哪一個子地點。用推的（navigationDestination）而不是 sheet，
+    /// 見 TripSubSpotEditView 的說明。
+    @State private var editingSubId: UUID?
     @State private var loaded = false
     @State private var isSaving = false
     /// 新增的照片先記下來，取消時要刪掉——不然按取消也會留下檔案
@@ -1687,7 +1690,7 @@ struct TripStopEditorSheet: View {
 
                 TripSubSpotEditor(subSpots: $subSpots, dwellMinutes: dwellMinutes,
                                   accent: accent,
-                                  parentCoordinate: mapPickerStart)
+                                  onEdit: { editingSubId = $0 })
 
                 Section {
                     MultiPhotoGallery(
@@ -1750,6 +1753,22 @@ struct TripStopEditorSheet: View {
             .sheet(isPresented: $showMapPicker) {
                 TripMapPickerSheet(initialCoordinate: mapPickerStart) { picked, addr, coord in
                     applyPickedLocation(name: picked, address: addr, coordinate: coord)
+                }
+            }
+            // 掛在 Form（NavigationStack 的根內容）上，不是掛在某一列上——
+            // 掛在 List 的列裡會隨著列被回收而失效
+            .navigationDestination(item: $editingSubId) { id in
+                TripSubSpotEditView(sub: subSpotBinding(id), accent: accent,
+                                    parentCoordinate: mapPickerStart)
+            }
+            .onChange(of: editingSubId) { _, newValue in
+                // 返回時把「開了但什麼都沒填」的那一筆收掉，
+                // 不然按新增再返回就會留下一列空白
+                guard newValue == nil else { return }
+                subSpots.removeAll {
+                    $0.name.trimmingCharacters(in: .whitespaces).isEmpty
+                        && $0.address.trimmingCharacters(in: .whitespaces).isEmpty
+                        && $0.note.trimmingCharacters(in: .whitespaces).isEmpty
                 }
             }
             .onDisappear { searchDebounce?.cancel() }
@@ -1925,6 +1944,19 @@ struct TripStopEditorSheet: View {
         return plan.stops.last(where: { $0.coordinate != nil })?.coordinate
     }
 
+    /// 依 id 取得陣列裡那一筆的 Binding。
+    /// 用 id 而不是 index：編輯期間清單可能被刪改，index 會指到別人身上。
+    private func subSpotBinding(_ id: UUID) -> Binding<TripSubSpot> {
+        Binding(
+            get: { subSpots.first(where: { $0.id == id }) ?? TripSubSpot(id: id) },
+            set: { newValue in
+                if let i = subSpots.firstIndex(where: { $0.id == id }) {
+                    subSpots[i] = newValue
+                }
+            }
+        )
+    }
+
     private func applyPickedLocation(name picked: String?, address addr: String,
                                      coordinate: CLLocationCoordinate2D) {
         latitude = coordinate.latitude
@@ -2035,16 +2067,14 @@ struct TripSubSpotEditor: View {
     @Binding var subSpots: [TripSubSpot]
     let dwellMinutes: Int
     let accent: Color
-    /// 母景點的座標。子地點開地圖選位置時從這裡開始找，
-    /// 不然一打開會停在台灣正中央，要一路縮放過去。
-    var parentCoordinate: CLLocationCoordinate2D? = nil
-
-    /// [v25.424] 正在編哪一筆。
+    /// 點一筆要編輯時回報給上層。
     ///
-    /// ⚠️ 用 .sheet(item:) 而不是 isPresented + 另一個 @State：
-    ///    後者在 content closure 裡讀到的是**寫入前**的舊值（「插入景點」那個 bug
-    ///    就是這樣來的）。要編的東西一定要包在 item 裡一起傳。
-    @State private var editingSub: TripSubSpot?
+    /// ⚠️ [v25.425] 這裡刻意**不自己** .sheet 出去：這個型別的 body 是一個 Section，
+    ///    而 Section 在 Form 裡不是一個能穩定承載 presentation 的宿主——
+    ///    一旦 subSpots 改變、Section 被重建，presentation 的來源就失效，
+    ///    SwiftUI 會把整串 sheet（連同外面的景點編輯畫面）一起收掉。
+    ///    v25.424 的「按下子地點整個編輯畫面自己關掉」就是這樣來的。
+    let onEdit: (UUID) -> Void
 
     var body: some View {
         Section {
@@ -2053,7 +2083,7 @@ struct TripSubSpotEditor: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
             ForEach(subSpots) { sub in
-                Button { editingSub = sub } label: { row(sub) }
+                Button { onEdit(sub.id) } label: { row(sub) }
                     .buttonStyle(.plain)
                     .swipeActions(edge: .trailing) {
                         Button(role: .destructive) {
@@ -2064,9 +2094,12 @@ struct TripSubSpotEditor: View {
                     }
             }
             Button {
-                // 直接開編輯畫面，不要先塞一筆空的進清單——
-                // 使用者按取消的話那筆空白會留在那裡
-                editingSub = TripSubSpot()
+                // 先塞一筆空的再推進去編：編輯畫面直接綁著陣列裡的那一筆改，
+                // 不用再做一套「暫存 → 按完成寫回」。退出去時上層會把
+                // 完全沒填的那筆清掉，所以不會留下空白列。
+                let fresh = TripSubSpot()
+                subSpots.append(fresh)
+                onEdit(fresh.id)
             } label: {
                 Label("新增子地點", systemImage: "plus.circle.fill").foregroundStyle(accent)
             }
@@ -2088,16 +2121,6 @@ struct TripSubSpotEditor: View {
                     .foregroundStyle(.orange)
             } else {
                 Text("點一筆可以編名稱、地址與時間；往左滑刪除。子地點不會各自計算路線，時間軸上會收在這一站的摺疊區裡。")
-            }
-        }
-        .sheet(item: $editingSub) { sub in
-            TripSubSpotEditSheet(sub: sub, accent: accent,
-                                 parentCoordinate: parentCoordinate) { edited in
-                if let i = subSpots.firstIndex(where: { $0.id == edited.id }) {
-                    subSpots[i] = edited
-                } else {
-                    subSpots.append(edited)
-                }
             }
         }
     }
@@ -2136,143 +2159,121 @@ struct TripSubSpotEditor: View {
 
 /// 單一子地點的編輯畫面。
 ///
-/// [v25.424] 為什麼要獨立一張表單，而不是像以前那樣在清單裡直接打字：
+/// [v25.424] 為什麼要獨立一個畫面，而不是像以前那樣在清單裡直接打字：
 /// 子地點也要能搜尋地點、也要能在地圖上挑位置，而 MKLocalSearchCompleter
 /// 一個畫面只能有一個（每一列各養一個會互相蓋掉彼此的結果，還很耗電）。
 /// 一次只編一筆，就只需要一個 completer。
-struct TripSubSpotEditSheet: View {
-    @Environment(\.dismiss) private var dismiss
-
-    let sub: TripSubSpot
+///
+/// [v25.425] 從 sheet 改成**推進景點編輯畫面的導覽堆疊**。兩個理由：
+///   1. 地圖選位置本身還要再開一張 sheet。原本是「景點編輯 sheet →
+///      子地點 sheet → 地圖 sheet」三層疊在一起，SwiftUI 疊到第三層就很不穩。
+///      改成推進去之後只剩兩層，跟景點自己開地圖選位置是同一個深度。
+///   2. 推進去有返回鍵，回上一層還看得到剛編好的那一列，比關掉一張卡片自然。
+/// 也因為是推進去的，這裡直接綁著陣列裡的那一筆即時改，沒有「按完成才寫回」
+/// 這件事——返回就是保留，跟系統設定那類畫面的習慣一致。
+struct TripSubSpotEditView: View {
+    @Binding var sub: TripSubSpot
     let accent: Color
     let parentCoordinate: CLLocationCoordinate2D?
-    let onSave: (TripSubSpot) -> Void
 
-    @State private var name = ""
-    @State private var address = ""
-    @State private var latitude: Double?
-    @State private var longitude: Double?
-    @State private var minutes = 0
-    @State private var note = ""
     @State private var showMapPicker = false
-    @State private var loaded = false
 
     @StateObject private var completer = RestaurantSearchCompleter()
     @State private var searchDebounce: Task<Void, Never>?
 
     var body: some View {
-        NavigationStack {
-            Form {
-                Section {
-                    TextField("子地點名稱", text: $name)
-                        .onChange(of: name) { _, newValue in scheduleSearch(newValue) }
-                    if !completer.results.isEmpty && latitude == nil {
-                        ForEach(Array(completer.results.prefix(5).enumerated()), id: \.offset) { _, r in
-                            Button { pick(r) } label: {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(r.title).font(.subheadline).foregroundStyle(.primary)
-                                    if !r.subtitle.isEmpty {
-                                        Text(r.subtitle).font(.caption2).foregroundStyle(.secondary)
-                                    }
+        Form {
+            Section {
+                TextField("子地點名稱", text: $sub.name)
+                    .onChange(of: sub.name) { _, newValue in scheduleSearch(newValue) }
+                if !completer.results.isEmpty && sub.latitude == nil {
+                    ForEach(Array(completer.results.prefix(5).enumerated()), id: \.offset) { _, r in
+                        Button { pick(r) } label: {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(r.title).font(.subheadline).foregroundStyle(.primary)
+                                if !r.subtitle.isEmpty {
+                                    Text(r.subtitle).font(.caption2).foregroundStyle(.secondary)
                                 }
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .contentShape(Rectangle())
                             }
-                            .buttonStyle(.plain)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .contentShape(Rectangle())
                         }
+                        .buttonStyle(.plain)
                     }
-                    TextField("地址", text: $address)
-                    Button {
-                        showMapPicker = true
-                    } label: {
-                        HStack(spacing: 8) {
-                            Image(systemName: "map.fill")
-                                .font(.system(size: 13)).foregroundStyle(accent)
-                                .frame(width: 20)
-                            VStack(alignment: .leading, spacing: 1) {
-                                Text("在地圖上選位置")
-                                    .font(.subheadline).foregroundStyle(.primary)
-                                Text("老街裡的某一攤、園區裡的某個館，點地圖最快")
-                                    .font(.caption2).foregroundStyle(.secondary)
-                            }
-                            Spacer(minLength: 0)
-                            Image(systemName: "chevron.right")
-                                .font(.caption2.weight(.semibold)).foregroundStyle(.tertiary)
-                        }
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    if latitude != nil {
-                        HStack {
-                            Image(systemName: "mappin.circle.fill").foregroundStyle(accent)
-                            Text("已帶入座標").font(.caption).foregroundStyle(.secondary)
-                            Spacer()
-                            Button("清除") { latitude = nil; longitude = nil }
-                                .font(.caption)
-                        }
-                    }
-                } header: {
-                    Text("地點")
-                } footer: {
-                    Text("子地點的座標只拿來「用地圖開啟」，不會進路線計算——這一站要走的路一律以母景點為準。")
                 }
+                TextField("地址", text: $sub.address)
+                Button {
+                    showMapPicker = true
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "map.fill")
+                            .font(.system(size: 13)).foregroundStyle(accent)
+                            .frame(width: 20)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text("在地圖上選位置")
+                                .font(.subheadline).foregroundStyle(.primary)
+                            Text("老街裡的某一攤、園區裡的某個館，點地圖最快")
+                                .font(.caption2).foregroundStyle(.secondary)
+                        }
+                        Spacer(minLength: 0)
+                        Image(systemName: "chevron.right")
+                            .font(.caption2.weight(.semibold)).foregroundStyle(.tertiary)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                if sub.latitude != nil {
+                    HStack {
+                        Image(systemName: "mappin.circle.fill").foregroundStyle(accent)
+                        Text("已帶入座標").font(.caption).foregroundStyle(.secondary)
+                        Spacer()
+                        Button("清除") { sub.latitude = nil; sub.longitude = nil }
+                            .font(.caption)
+                    }
+                }
+            } header: {
+                Text("地點")
+            } footer: {
+                Text("子地點的座標只拿來「用地圖開啟」，不會進路線計算——這一站要走的路一律以母景點為準。")
+            }
 
-                Section {
-                    Stepper(value: $minutes, in: 0...600, step: 10) {
-                        HStack {
-                            Text("預計停留")
-                            Spacer()
-                            Text(minutes == 0 ? "未安排" : "\(minutes) 分")
-                                .foregroundStyle(.secondary)
-                        }
+            Section {
+                Stepper(value: $sub.minutes, in: 0...600, step: 10) {
+                    HStack {
+                        Text("預計停留")
+                        Spacer()
+                        Text(sub.minutes == 0 ? "未安排" : "\(sub.minutes) 分")
+                            .foregroundStyle(.secondary)
                     }
-                    TextField("備註", text: $note, axis: .vertical)
-                        .lineLimit(1...4)
-                } header: {
-                    Text("時間與備註")
                 }
+                TextField("備註", text: $sub.note, axis: .vertical)
+                    .lineLimit(1...4)
+            } header: {
+                Text("時間與備註")
+            } footer: {
+                Text("改了就直接存進這一站，返回即可。名稱與地址都留白的話這一筆會自動捨棄。")
             }
-            .navigationTitle(sub.name.isEmpty ? "新增子地點" : "編輯子地點")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button("取消") { dismiss() }
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("完成") { save() }
-                        .bold()
-                        .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
-                }
-            }
-            .onAppear {
-                guard !loaded else { return }
-                loaded = true
-                name = sub.name; address = sub.address
-                latitude = sub.latitude; longitude = sub.longitude
-                minutes = sub.minutes; note = sub.note
-            }
-            .sheet(isPresented: $showMapPicker) {
-                TripMapPickerSheet(initialCoordinate: mapPickerStart) { picked, addr, coord in
-                    latitude = coord.latitude
-                    longitude = coord.longitude
-                    if !addr.isEmpty { address = addr }
-                    if name.trimmingCharacters(in: .whitespaces).isEmpty,
-                       let picked, !picked.isEmpty {
-                        name = picked
-                    }
-                    searchDebounce?.cancel()
-                    completer.queryFragment = ""
-                }
-            }
-            .onDisappear { searchDebounce?.cancel() }
         }
+        .navigationTitle("子地點")
+        .navigationBarTitleDisplayMode(.inline)
+        .sheet(isPresented: $showMapPicker) {
+            TripMapPickerSheet(initialCoordinate: mapPickerStart) { picked, addr, coord in
+                sub.latitude = coord.latitude
+                sub.longitude = coord.longitude
+                if !addr.isEmpty { sub.address = addr }
+                if sub.name.trimmingCharacters(in: .whitespaces).isEmpty,
+                   let picked, !picked.isEmpty {
+                    sub.name = picked
+                }
+                searchDebounce?.cancel()
+                completer.queryFragment = ""
+            }
+        }
+        .onDisappear { searchDebounce?.cancel() }
     }
 
     private var mapPickerStart: CLLocationCoordinate2D? {
-        if let latitude, let longitude {
-            return CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
-        }
-        return parentCoordinate
+        sub.coordinate ?? parentCoordinate
     }
 
     private func scheduleSearch(_ q: String) {
@@ -2287,37 +2288,24 @@ struct TripSubSpotEditSheet: View {
     }
 
     private func pick(_ r: MKLocalSearchCompletion) {
-        name = r.title
+        sub.name = r.title
         completer.queryFragment = ""
         Task {
             let req = MKLocalSearch.Request(completion: r)
             guard let item = try? await MKLocalSearch(request: req).start().mapItems.first else { return }
             await MainActor.run {
                 let pm = item.placemark
-                latitude = pm.coordinate.latitude
-                longitude = pm.coordinate.longitude
-                if address.trimmingCharacters(in: .whitespaces).isEmpty {
-                    address = [pm.postalCode, pm.administrativeArea, pm.locality,
-                               pm.thoroughfare, pm.subThoroughfare]
+                sub.latitude = pm.coordinate.latitude
+                sub.longitude = pm.coordinate.longitude
+                if sub.address.trimmingCharacters(in: .whitespaces).isEmpty {
+                    sub.address = [pm.postalCode, pm.administrativeArea, pm.locality,
+                                   pm.thoroughfare, pm.subThoroughfare]
                         .compactMap { $0 }.joined()
                 }
             }
         }
     }
-
-    private func save() {
-        var edited = sub
-        edited.name = name.trimmingCharacters(in: .whitespaces)
-        edited.address = address.trimmingCharacters(in: .whitespaces)
-        edited.latitude = latitude
-        edited.longitude = longitude
-        edited.minutes = max(0, minutes)
-        edited.note = note.trimmingCharacters(in: .whitespacesAndNewlines)
-        onSave(edited)
-        dismiss()
-    }
 }
-
 
 // MARK: - 路線地圖
 
