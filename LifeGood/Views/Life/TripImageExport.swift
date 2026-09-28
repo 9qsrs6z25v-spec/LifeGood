@@ -167,8 +167,17 @@ enum TripCardStyle {
     static let subInk = Color(red: 0.42, green: 0.42, blue: 0.50)
     static let hairline = Color(red: 0.88, green: 0.88, blue: 0.92)
 
+    /// 整張圖的外框寬度
     static let pageWidth: CGFloat = 900
     static let legWidth: CGFloat = 820
+    /// 四邊留白。
+    ///
+    /// 圖片滿版到角落時，在 iPhone 上用相片 App 或訊息預覽都會被圓角螢幕吃掉四個角，
+    /// 標題與頁碼剛好都在那裡。留一圈邊之後角落是底色，切到也無所謂。
+    static let pageMargin: CGFloat = 26
+    /// 卡片本體的寬度（外框扣掉左右留白）
+    static var cardWidth: CGFloat { pageWidth - pageMargin * 2 }
+    static var legCardWidth: CGFloat { legWidth - pageMargin * 2 }
 }
 
 // MARK: - 單段路線卡
@@ -207,7 +216,7 @@ struct TripLegShareCard: View {
                     Image(uiImage: mapImage)
                         .resizable()
                         .aspectRatio(contentMode: .fill)
-                        .frame(width: TripCardStyle.legWidth, height: 380)
+                        .frame(width: TripCardStyle.legCardWidth, height: 380)
                         .clipped()
                 }
                 facts(from: from, to: to)
@@ -218,8 +227,11 @@ struct TripLegShareCard: View {
             }
             footer
         }
-        .frame(width: TripCardStyle.legWidth)
+        .frame(width: TripCardStyle.legCardWidth)
         .background(TripCardStyle.card)
+        .clipShape(RoundedRectangle(cornerRadius: 18))
+        .padding(TripCardStyle.pageMargin)
+        .background(TripCardStyle.paper)
     }
 
     private func header(from: TripPlan.Slot, to: TripPlan.Slot) -> some View {
@@ -260,7 +272,7 @@ struct TripLegShareCard: View {
             }
         }
         .padding(28)
-        .frame(width: TripCardStyle.legWidth, alignment: .leading)
+        .frame(width: TripCardStyle.legCardWidth, alignment: .leading)
         .background(
             LinearGradient(colors: [dayColor, dayColor.opacity(0.62)],
                            startPoint: .topLeading, endPoint: .bottomTrailing)
@@ -361,7 +373,7 @@ struct TripLegShareCard: View {
                 .font(.system(size: 12)).foregroundStyle(TripCardStyle.subInk.opacity(0.7))
         }
         .padding(.horizontal, 28).padding(.vertical, 16)
-        .frame(width: TripCardStyle.legWidth)
+        .frame(width: TripCardStyle.legCardWidth)
         .background(TripCardStyle.paper)
     }
 }
@@ -393,7 +405,7 @@ struct TripPlanShareCard: View {
                 Image(uiImage: mapImage)
                     .resizable()
                     .aspectRatio(contentMode: .fill)
-                    .frame(width: TripCardStyle.pageWidth, height: 420)
+                    .frame(width: TripCardStyle.cardWidth, height: 420)
                     .clipped()
             }
             VStack(alignment: .leading, spacing: 0) {
@@ -410,8 +422,11 @@ struct TripPlanShareCard: View {
             .padding(.vertical, 18)
             footer
         }
-        .frame(width: TripCardStyle.pageWidth)
+        .frame(width: TripCardStyle.cardWidth)
         .background(TripCardStyle.card)
+        .clipShape(RoundedRectangle(cornerRadius: 18))
+        .padding(TripCardStyle.pageMargin)
+        .background(TripCardStyle.paper)
     }
 
     // MARK: 標頭
@@ -452,7 +467,7 @@ struct TripPlanShareCard: View {
             }
         }
         .padding(30)
-        .frame(width: TripCardStyle.pageWidth, alignment: .leading)
+        .frame(width: TripCardStyle.cardWidth, alignment: .leading)
         .background(
             LinearGradient(colors: [TripDayPalette.color(0), TripDayPalette.color(0).opacity(0.6)],
                            startPoint: .topLeading, endPoint: .bottomTrailing)
@@ -640,7 +655,7 @@ struct TripPlanShareCard: View {
                 .font(.system(size: 12)).foregroundStyle(TripCardStyle.subInk.opacity(0.7))
         }
         .padding(.horizontal, 30).padding(.vertical, 16)
-        .frame(width: TripCardStyle.pageWidth)
+        .frame(width: TripCardStyle.cardWidth)
         .background(TripCardStyle.paper)
     }
 }
@@ -722,7 +737,7 @@ enum TripImageExporter {
             polylines: polyline.map { [($0, color)] } ?? [],
             straights: polyline == nil ? [([a, b], color)] : [],
             markers: markers,
-            size: CGSize(width: TripCardStyle.legWidth, height: 380),
+            size: CGSize(width: TripCardStyle.legCardWidth, height: 380),
             scale: 2)
     }
 
@@ -754,7 +769,7 @@ enum TripImageExporter {
             polylines: [],
             straights: straights,
             markers: markers,
-            size: CGSize(width: TripCardStyle.pageWidth, height: 420),
+            size: CGSize(width: TripCardStyle.cardWidth, height: 420),
             scale: 2)
     }
 

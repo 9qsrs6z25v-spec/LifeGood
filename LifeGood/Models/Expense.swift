@@ -367,6 +367,16 @@ struct Expense: Identifiable, Codable {
     /// [v25.313] 充電當下的里程錶讀數（km）；連續兩筆都有里程時可算電耗（km/kWh）
     var evOdometer: Double? = nil
 
+    /// [v25.424] 這筆變動支出屬於哪一趟旅遊規劃。
+    ///
+    /// 只是一個標籤，不動記帳本身：金額照樣進月支出、照樣算分類統計。
+    /// 綁上去之後這筆的照片會一起出現在那趟旅遊的相本裡——旅行時拍的收據、
+    /// 餐點、門票本來就跟景點照片是同一批回憶，沒道理分兩個地方找。
+    /// 同樣不進 memberwise init（那個 init 已 30+ 參數），由儲存端條件化指派。
+    var linkedTripPlanId: UUID? = nil
+    /// 綁到那趟旅遊的哪一站（可不指定＝算在整趟上）。相本用它來分組。
+    var linkedTripStopId: UUID? = nil
+
     /// [v25.347] 固定支出的結束日＝**最後一次扣款日**。nil＝持續中。
     ///
     /// 語意（使用者定義）：排定扣款日 <= endDate 的那幾期算數。
@@ -498,6 +508,8 @@ struct Expense: Identifiable, Codable {
         evFromPct = try? c.decodeIfPresent(Double.self, forKey: .evFromPct)
         evToPct = try? c.decodeIfPresent(Double.self, forKey: .evToPct)
         evOdometer = try? c.decodeIfPresent(Double.self, forKey: .evOdometer)
+        linkedTripPlanId = try? c.decodeIfPresent(UUID.self, forKey: .linkedTripPlanId)
+        linkedTripStopId = try? c.decodeIfPresent(UUID.self, forKey: .linkedTripStopId)
         endDate = try? c.decodeIfPresent(Date.self, forKey: .endDate)
         endReason = try? c.decodeIfPresent(FixedEndReason.self, forKey: .endReason)
     }
@@ -511,6 +523,7 @@ struct Expense: Identifiable, Codable {
         case linkedBankMilestoneId, linkedBankCurrency, linkedCreditCardMilestoneId
         case placeName, placeAddress, placeLatitude, placeLongitude, photoFileNames, amountHistory
         case evKwh, evFromPct, evToPct, evOdometer
+        case linkedTripPlanId, linkedTripStopId
         case endDate, endReason
     }
 

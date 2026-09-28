@@ -239,6 +239,10 @@ struct TripStopCardView: View {
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
+            // sectionBox 只管標題列的內距，內容要自己留——
+            // 不留的話按鈕與說明文字會貼到卡片圓角上被切掉
+            .padding(.horizontal, 14)
+            .padding(.bottom, 12)
         }
     }
 
@@ -431,9 +435,12 @@ struct TripStopCardView: View {
                         Circle().fill(dayColor.opacity(0.35))
                             .frame(width: 6, height: 6).padding(.top, 6)
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(sub.name.trimmingCharacters(in: .whitespaces).isEmpty
-                                 ? "未命名子地點" : sub.name)
+                            Text(sub.displayName)
                                 .font(.subheadline.weight(.medium))
+                            if !sub.address.trimmingCharacters(in: .whitespaces).isEmpty {
+                                Text(sub.address).font(.caption2).foregroundStyle(.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
                             if !sub.note.trimmingCharacters(in: .whitespaces).isEmpty {
                                 Text(sub.note).font(.caption2).foregroundStyle(.secondary)
                                     .fixedSize(horizontal: false, vertical: true)
@@ -444,6 +451,21 @@ struct TripStopCardView: View {
                             Text("\(sub.minutes) 分")
                                 .font(.caption2.weight(.semibold))
                                 .foregroundStyle(dayColor)
+                        }
+                        // [v25.424] 子地點自己有位置就給一顆地圖鈕。
+                        // 只有地址沒座標也能開（TripShare 會退回用地址查）。
+                        if sub.coordinate != nil
+                            || !sub.address.trimmingCharacters(in: .whitespaces).isEmpty {
+                            Button {
+                                TripShare.openPlaceInMaps(sub.asPlace)
+                            } label: {
+                                Image(systemName: "map.fill")
+                                    .font(.system(size: 12, weight: .semibold))
+                                    .foregroundStyle(dayColor)
+                                    .frame(width: 26, height: 26)
+                                    .background(dayColor.opacity(0.12), in: Circle())
+                            }
+                            .buttonStyle(.plain)
                         }
                     }
                     .padding(.horizontal, 14).padding(.vertical, 10)

@@ -172,7 +172,9 @@ struct TravelMapView: View {
             }
             .sheet(isPresented: $showListSheet) { listSheet(spots) }
             .sheet(isPresented: $showPlanSheet) {
-                TripPlanListView().environmentObject(lifeStore)
+                TripPlanListView()
+                    .environmentObject(lifeStore)
+                    .environmentObject(expenseStore)
             }
             .sheet(isPresented: $showAlbumSheet) {
                 // [模板化] 改用共用 MapAlbumSheet（旅遊/美食/醫療三地圖共用），

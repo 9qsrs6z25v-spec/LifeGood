@@ -34,6 +34,9 @@ enum TripDayPalette {
 
 struct TripPlanListView: View {
     @EnvironmentObject var lifeStore: LifeStore
+    /// 只是為了往下傳給詳細頁（相本要看關聯支出的照片）——
+    /// sheet 雖然會繼承環境，但這裡本來就一個一個明著傳，跟著慣例走
+    @EnvironmentObject var expenseStore: ExpenseStore
     @Environment(\.dismiss) private var dismiss
 
     private let accent = TripDayPalette.color(0)   // 沿用旅遊地圖的娛樂紫
@@ -87,7 +90,9 @@ struct TripPlanListView: View {
                 get: { openPlanId.map { IDBox(id: $0) } },
                 set: { openPlanId = $0?.id }
             ), onDismiss: { discardIfBlank() }) { box in
-                TripPlanDetailView(planId: box.id).environmentObject(lifeStore)
+                TripPlanDetailView(planId: box.id)
+                    .environmentObject(lifeStore)
+                    .environmentObject(expenseStore)
             }
             .sheet(item: $sharing) { item in
                 ShareSheet(items: [item.text])
@@ -209,6 +214,8 @@ struct TripPlanListView: View {
 
 struct TripPlanDetailView: View {
     @EnvironmentObject var lifeStore: LifeStore
+    /// [v25.424] 相本要把「掛在這趟旅遊上的變動支出」照片也收進來
+    @EnvironmentObject var expenseStore: ExpenseStore
     @Environment(\.dismiss) private var dismiss
 
     let planId: UUID
@@ -364,7 +371,7 @@ struct TripPlanDetailView: View {
                         title: p.displayTitle + " 的相本",
                         accent: accent,
                         emptyTitle: "這趟還沒有照片",
-                        emptyHint: "在景點編輯裡加照片，這裡就會依景點分組整理成相本。",
+                        emptyHint: "在景點編輯裡加照片，這裡就會依景點分組整理成相本；記帳時把變動支出關聯到這趟旅遊，那些照片也會一起進來。",
                         groupNoun: "景點",
                         items: albumItems(p))
                 }
@@ -599,8 +606,22 @@ struct TripPlanDetailView: View {
             out.append(SummaryChip(id: "here", icon: "mappin.circle.fill",
                                    text: "現在在「" + here.displayName + "」"))
         }
+        // [v25.424] 掛在這趟上的變動支出。只加總本國幣別：外幣要換算匯率，
+        // 而匯率是哪一天的又是另一件事，混在一起加會變成一個錯的數字。
+        let linked = expenseStore.expenses.filter { $0.linkedTripPlanId == p.id }
+        let spent = linked.filter { $0.currencyCode == "NT$" }.reduce(0) { $0 + $1.amount }
+        if spent > 0 {
+            let amount = Self.moneyFmt.string(from: NSNumber(value: spent)) ?? "\(Int(spent))"
+            out.append(SummaryChip(id: "spent", icon: "creditcard.fill",
+                                   text: "花費 NT$" + amount))
+        }
         return out
     }
+
+    private static let moneyFmt: NumberFormatter = {
+        let f = NumberFormatter(); f.numberStyle = .decimal; f.maximumFractionDigits = 0
+        return f
+    }()
 
     private func summaryChip(_ chip: SummaryChip) -> some View {
         HStack(spacing: 4) {
@@ -1022,7 +1043,9 @@ struct TripPlanDetailView: View {
     /// 整趟的相本入口。放在時間軸底下而不是工具列：
     /// 相本是「回頭看」的東西，跟排行程的工具不該擠在同一排。
     private func albumButton(_ p: TripPlan) -> some View {
-        let count = p.stops.reduce(0) { $0 + $1.photoFileNames.count }
+        // 相本裡看得到幾張就寫幾張——關聯支出的照片也算進來，
+        // 不然按鈕寫 8 張、點進去 14 張，只會讓人以為壞了
+        let count = albumItems(p).count
         return Button {
             showAlbum = true
         } label: {
@@ -1060,7 +1083,9 @@ struct TripPlanDetailView: View {
 
     /// 相本要吃的資料。分組字串帶上「第幾天」，依景點分組出來就是照日子與順序排好的。
     private func albumItems(_ p: TripPlan) -> [AlbumPhotoItem] {
-        p.timeline.flatMap { slot in
+        // timeline 是每次取用都重算的，先取一次——下面查站別的分組還要用
+        let slots = p.timeline
+        var items = slots.flatMap { slot in
             slot.stop.photoFileNames.map { name in
                 AlbumPhotoItem(
                     id: name,
@@ -1070,6 +1095,32 @@ struct TripPlanDetailView: View {
                     date: slot.arrival)
             }
         }
+        // [v25.424] 掛在這趟旅遊上的變動支出照片。
+        //
+        // 檔案照舊留在支出那邊（這裡只是多一個看得到的入口），所以相本裡刪不掉它們——
+        // 旅行時拍的收據、餐點、門票跟景點照片本來就是同一批回憶，只是各自有各自的家。
+        let indexOfStop = Dictionary(uniqueKeysWithValues:
+            p.stops.enumerated().map { ($0.element.id, $0.offset) })
+        for e in expenseStore.expenses where e.linkedTripPlanId == p.id {
+            guard !e.photoFileNames.isEmpty else { continue }
+            let group: String
+            if let sid = e.linkedTripStopId, let i = indexOfStop[sid], slots.indices.contains(i) {
+                group = (p.dayCount > 1 ? "第 \(slots[i].dayIndex + 1) 天・" : "")
+                    + p.stops[i].displayName
+            } else {
+                group = "旅途中的花費"
+            }
+            for name in e.photoFileNames {
+                items.append(AlbumPhotoItem(
+                    // 檔名前面加記號：支出與景點的照片存在不同資料夾，
+                    // 萬一撞名，相本的 id 不能跟著撞
+                    id: "expense-" + name,
+                    url: Expense.photoURL(for: name),
+                    group: group,
+                    date: e.date))
+            }
+        }
+        return items
     }
 
     /// 這一站要不要顯示打卡方塊。
@@ -1634,7 +1685,9 @@ struct TripStopEditorSheet: View {
                     }
                 }
 
-                TripSubSpotEditor(subSpots: $subSpots, dwellMinutes: dwellMinutes, accent: accent)
+                TripSubSpotEditor(subSpots: $subSpots, dwellMinutes: dwellMinutes,
+                                  accent: accent,
+                                  parentCoordinate: mapPickerStart)
 
                 Section {
                     MultiPhotoGallery(
@@ -1982,6 +2035,16 @@ struct TripSubSpotEditor: View {
     @Binding var subSpots: [TripSubSpot]
     let dwellMinutes: Int
     let accent: Color
+    /// 母景點的座標。子地點開地圖選位置時從這裡開始找，
+    /// 不然一打開會停在台灣正中央，要一路縮放過去。
+    var parentCoordinate: CLLocationCoordinate2D? = nil
+
+    /// [v25.424] 正在編哪一筆。
+    ///
+    /// ⚠️ 用 .sheet(item:) 而不是 isPresented + 另一個 @State：
+    ///    後者在 content closure 裡讀到的是**寫入前**的舊值（「插入景點」那個 bug
+    ///    就是這樣來的）。要編的東西一定要包在 item 裡一起傳。
+    @State private var editingSub: TripSubSpot?
 
     var body: some View {
         Section {
@@ -1989,32 +2052,21 @@ struct TripSubSpotEditor: View {
                 Text("還沒有子地點。像老街、園區這種一個景點裡有好幾攤的地方，可以拆進來。")
                     .font(.caption).foregroundStyle(.secondary)
             }
-            ForEach($subSpots) { $sub in
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack {
-                        TextField("子地點名稱", text: $sub.name)
+            ForEach(subSpots) { sub in
+                Button { editingSub = sub } label: { row(sub) }
+                    .buttonStyle(.plain)
+                    .swipeActions(edge: .trailing) {
                         Button(role: .destructive) {
                             subSpots.removeAll { $0.id == sub.id }
                         } label: {
-                            Image(systemName: "minus.circle.fill").foregroundStyle(.red)
-                        }
-                        .buttonStyle(.plain)
-                    }
-                    Stepper(value: $sub.minutes, in: 0...600, step: 10) {
-                        HStack {
-                            Text("預計").font(.caption).foregroundStyle(.secondary)
-                            Spacer()
-                            Text(sub.minutes == 0 ? "未安排" : "\(sub.minutes) 分")
-                                .font(.caption).foregroundStyle(.secondary)
+                            Label("刪除", systemImage: "trash")
                         }
                     }
-                    TextField("備註", text: $sub.note)
-                        .font(.caption)
-                }
-                .padding(.vertical, 2)
             }
             Button {
-                subSpots.append(TripSubSpot())
+                // 直接開編輯畫面，不要先塞一筆空的進清單——
+                // 使用者按取消的話那筆空白會留在那裡
+                editingSub = TripSubSpot()
             } label: {
                 Label("新增子地點", systemImage: "plus.circle.fill").foregroundStyle(accent)
             }
@@ -2035,11 +2087,237 @@ struct TripSubSpotEditor: View {
                 Text("子地點加起來 \(total) 分，比這一站的停留時間 \(dwellMinutes) 分還長——時間軸會照停留時間排，記得調整。")
                     .foregroundStyle(.orange)
             } else {
-                Text("子地點只是這一站底下的細項，不會各自計算路線；時間軸上會收在這一站的摺疊區裡。")
+                Text("點一筆可以編名稱、地址與時間；往左滑刪除。子地點不會各自計算路線，時間軸上會收在這一站的摺疊區裡。")
+            }
+        }
+        .sheet(item: $editingSub) { sub in
+            TripSubSpotEditSheet(sub: sub, accent: accent,
+                                 parentCoordinate: parentCoordinate) { edited in
+                if let i = subSpots.firstIndex(where: { $0.id == edited.id }) {
+                    subSpots[i] = edited
+                } else {
+                    subSpots.append(edited)
+                }
             }
         }
     }
+
+    private func row(_ sub: TripSubSpot) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: sub.coordinate == nil ? "circle.dotted" : "mappin.circle.fill")
+                .font(.system(size: 15))
+                .foregroundStyle(sub.coordinate == nil ? Color.secondary : accent)
+                .frame(width: 20)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(sub.displayName)
+                    .font(.subheadline)
+                    .foregroundStyle(sub.name.trimmingCharacters(in: .whitespaces).isEmpty
+                                     ? .secondary : .primary)
+                let addr = sub.address.trimmingCharacters(in: .whitespaces)
+                let note = sub.note.trimmingCharacters(in: .whitespaces)
+                if !addr.isEmpty {
+                    Text(addr).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                } else if !note.isEmpty {
+                    Text(note).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                }
+            }
+            Spacer(minLength: 0)
+            if sub.minutes > 0 {
+                Text("\(sub.minutes) 分")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Image(systemName: "chevron.right")
+                .font(.caption2.weight(.semibold)).foregroundStyle(.tertiary)
+        }
+        .padding(.vertical, 2)
+        .contentShape(Rectangle())
+    }
 }
+
+/// 單一子地點的編輯畫面。
+///
+/// [v25.424] 為什麼要獨立一張表單，而不是像以前那樣在清單裡直接打字：
+/// 子地點也要能搜尋地點、也要能在地圖上挑位置，而 MKLocalSearchCompleter
+/// 一個畫面只能有一個（每一列各養一個會互相蓋掉彼此的結果，還很耗電）。
+/// 一次只編一筆，就只需要一個 completer。
+struct TripSubSpotEditSheet: View {
+    @Environment(\.dismiss) private var dismiss
+
+    let sub: TripSubSpot
+    let accent: Color
+    let parentCoordinate: CLLocationCoordinate2D?
+    let onSave: (TripSubSpot) -> Void
+
+    @State private var name = ""
+    @State private var address = ""
+    @State private var latitude: Double?
+    @State private var longitude: Double?
+    @State private var minutes = 0
+    @State private var note = ""
+    @State private var showMapPicker = false
+    @State private var loaded = false
+
+    @StateObject private var completer = RestaurantSearchCompleter()
+    @State private var searchDebounce: Task<Void, Never>?
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    TextField("子地點名稱", text: $name)
+                        .onChange(of: name) { _, newValue in scheduleSearch(newValue) }
+                    if !completer.results.isEmpty && latitude == nil {
+                        ForEach(Array(completer.results.prefix(5).enumerated()), id: \.offset) { _, r in
+                            Button { pick(r) } label: {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(r.title).font(.subheadline).foregroundStyle(.primary)
+                                    if !r.subtitle.isEmpty {
+                                        Text(r.subtitle).font(.caption2).foregroundStyle(.secondary)
+                                    }
+                                }
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    TextField("地址", text: $address)
+                    Button {
+                        showMapPicker = true
+                    } label: {
+                        HStack(spacing: 8) {
+                            Image(systemName: "map.fill")
+                                .font(.system(size: 13)).foregroundStyle(accent)
+                                .frame(width: 20)
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text("在地圖上選位置")
+                                    .font(.subheadline).foregroundStyle(.primary)
+                                Text("老街裡的某一攤、園區裡的某個館，點地圖最快")
+                                    .font(.caption2).foregroundStyle(.secondary)
+                            }
+                            Spacer(minLength: 0)
+                            Image(systemName: "chevron.right")
+                                .font(.caption2.weight(.semibold)).foregroundStyle(.tertiary)
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    if latitude != nil {
+                        HStack {
+                            Image(systemName: "mappin.circle.fill").foregroundStyle(accent)
+                            Text("已帶入座標").font(.caption).foregroundStyle(.secondary)
+                            Spacer()
+                            Button("清除") { latitude = nil; longitude = nil }
+                                .font(.caption)
+                        }
+                    }
+                } header: {
+                    Text("地點")
+                } footer: {
+                    Text("子地點的座標只拿來「用地圖開啟」，不會進路線計算——這一站要走的路一律以母景點為準。")
+                }
+
+                Section {
+                    Stepper(value: $minutes, in: 0...600, step: 10) {
+                        HStack {
+                            Text("預計停留")
+                            Spacer()
+                            Text(minutes == 0 ? "未安排" : "\(minutes) 分")
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    TextField("備註", text: $note, axis: .vertical)
+                        .lineLimit(1...4)
+                } header: {
+                    Text("時間與備註")
+                }
+            }
+            .navigationTitle(sub.name.isEmpty ? "新增子地點" : "編輯子地點")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("取消") { dismiss() }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("完成") { save() }
+                        .bold()
+                        .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+            }
+            .onAppear {
+                guard !loaded else { return }
+                loaded = true
+                name = sub.name; address = sub.address
+                latitude = sub.latitude; longitude = sub.longitude
+                minutes = sub.minutes; note = sub.note
+            }
+            .sheet(isPresented: $showMapPicker) {
+                TripMapPickerSheet(initialCoordinate: mapPickerStart) { picked, addr, coord in
+                    latitude = coord.latitude
+                    longitude = coord.longitude
+                    if !addr.isEmpty { address = addr }
+                    if name.trimmingCharacters(in: .whitespaces).isEmpty,
+                       let picked, !picked.isEmpty {
+                        name = picked
+                    }
+                    searchDebounce?.cancel()
+                    completer.queryFragment = ""
+                }
+            }
+            .onDisappear { searchDebounce?.cancel() }
+        }
+    }
+
+    private var mapPickerStart: CLLocationCoordinate2D? {
+        if let latitude, let longitude {
+            return CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
+        }
+        return parentCoordinate
+    }
+
+    private func scheduleSearch(_ q: String) {
+        searchDebounce?.cancel()
+        let text = q.trimmingCharacters(in: .whitespaces)
+        guard text.count >= 2 else { completer.queryFragment = ""; return }
+        searchDebounce = Task {
+            try? await Task.sleep(nanoseconds: 300_000_000)
+            guard !Task.isCancelled else { return }
+            await MainActor.run { completer.queryFragment = text }
+        }
+    }
+
+    private func pick(_ r: MKLocalSearchCompletion) {
+        name = r.title
+        completer.queryFragment = ""
+        Task {
+            let req = MKLocalSearch.Request(completion: r)
+            guard let item = try? await MKLocalSearch(request: req).start().mapItems.first else { return }
+            await MainActor.run {
+                let pm = item.placemark
+                latitude = pm.coordinate.latitude
+                longitude = pm.coordinate.longitude
+                if address.trimmingCharacters(in: .whitespaces).isEmpty {
+                    address = [pm.postalCode, pm.administrativeArea, pm.locality,
+                               pm.thoroughfare, pm.subThoroughfare]
+                        .compactMap { $0 }.joined()
+                }
+            }
+        }
+    }
+
+    private func save() {
+        var edited = sub
+        edited.name = name.trimmingCharacters(in: .whitespaces)
+        edited.address = address.trimmingCharacters(in: .whitespaces)
+        edited.latitude = latitude
+        edited.longitude = longitude
+        edited.minutes = max(0, minutes)
+        edited.note = note.trimmingCharacters(in: .whitespacesAndNewlines)
+        onSave(edited)
+        dismiss()
+    }
+}
+
 
 // MARK: - 路線地圖
 

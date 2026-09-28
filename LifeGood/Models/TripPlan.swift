@@ -95,9 +95,50 @@ struct TripSubSpot: Identifiable, Codable, Equatable {
     /// 想在這個細項待多久（分鐘）。0＝沒特別安排。
     /// 母景點的停留時間若小於子地點加總，畫面會提醒對不上。
     var minutes: Int
+    /// [v25.424] 子地點自己的地址與座標。
+    ///
+    /// ⚠️ 有座標**不代表**它會進路線計算——路線一律只看母景點。
+    ///    這裡的座標是給「用地圖開啟」「知道這一攤在哪」用的：老街裡的某一家店、
+    ///    園區裡的某個館，走過去的路不值得排進行程，但要找得到。
+    var address: String
+    var latitude: Double?
+    var longitude: Double?
 
-    init(id: UUID = UUID(), name: String = "", note: String = "", minutes: Int = 0) {
+    init(id: UUID = UUID(), name: String = "", note: String = "", minutes: Int = 0,
+         address: String = "", latitude: Double? = nil, longitude: Double? = nil) {
         self.id = id; self.name = name; self.note = note; self.minutes = minutes
+        self.address = address; self.latitude = latitude; self.longitude = longitude
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = (try? c.decode(UUID.self, forKey: .id)) ?? UUID()
+        name = (try? c.decodeIfPresent(String.self, forKey: .name)) ?? ""
+        note = (try? c.decodeIfPresent(String.self, forKey: .note)) ?? ""
+        minutes = (try? c.decodeIfPresent(Int.self, forKey: .minutes)) ?? 0
+        address = (try? c.decodeIfPresent(String.self, forKey: .address)) ?? ""
+        latitude = try? c.decodeIfPresent(Double.self, forKey: .latitude)
+        longitude = try? c.decodeIfPresent(Double.self, forKey: .longitude)
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, name, note, minutes, address, latitude, longitude
+    }
+
+    var coordinate: CLLocationCoordinate2D? {
+        guard let latitude, let longitude else { return nil }
+        return CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
+    }
+
+    var displayName: String {
+        let n = name.trimmingCharacters(in: .whitespaces)
+        return n.isEmpty ? "未命名子地點" : n
+    }
+
+    /// 給 TripShare.openPlaceInMaps 用的臨時 TripStop（子地點沒有自己的站，
+    /// 但開地圖需要的欄位都一樣）
+    var asPlace: TripStop {
+        TripStop(name: name, address: address, latitude: latitude, longitude: longitude)
     }
 }
 

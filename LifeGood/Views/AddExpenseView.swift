@@ -204,6 +204,10 @@ struct AddExpenseView: View {
     // MARK: - 多張照片
     @State private var photoFileNames: [String] = []
 
+    // MARK: - 旅遊關聯（[v25.424] 變動支出）
+    @State private var linkedTripPlanId: UUID?
+    @State private var linkedTripStopId: UUID?
+
     // MARK: - 飲食店家自動完成
 
     @StateObject private var restaurantCompleter = RestaurantSearchCompleter()
@@ -373,6 +377,8 @@ struct AddExpenseView: View {
                     if !suppressCategory {
                         categorySection
                     }
+                    // [v25.424] 旅遊期間的花費可以直接掛到那一趟行程上
+                    if showTripLinkSection { tripLinkSection }
                     // 進階模式：分類區塊下方加照片廊
                     if advancedMode {
                         photoGallerySection
@@ -1829,6 +1835,80 @@ struct AddExpenseView: View {
 
     // MARK: - 關聯資產選擇
 
+    // MARK: - 旅遊關聯（[v25.424]）
+
+    /// 這筆支出的日期落在哪幾趟旅遊裡。
+    ///
+    /// 日期比對用「整天」：行程的 startDate/endDate 帶著時分，但一筆午餐不該
+    /// 因為比出發時刻早兩小時就被判定不在這趟裡。
+    private var tripCandidates: [TripPlan] {
+        let cal = Calendar.current
+        let day = cal.startOfDay(for: date)
+        return lifeStore.tripPlans
+            .filter { plan in
+                let from = cal.startOfDay(for: plan.startDate)
+                let to = cal.startOfDay(for: plan.endDate)
+                return day >= from && day <= to
+            }
+            .sorted { $0.startDate > $1.startDate }
+    }
+
+    /// 已經選了但日期不在範圍內的那一趟（改日期之後才會出現）。
+    /// 要一起列進選單，不然使用者會看到「選了卻不見了」。
+    private var linkedTripOutOfRange: TripPlan? {
+        guard let id = linkedTripPlanId,
+              !tripCandidates.contains(where: { $0.id == id }) else { return nil }
+        return lifeStore.tripPlan(id: id)
+    }
+
+    private var tripOptions: [TripPlan] {
+        var list = tripCandidates
+        if let extra = linkedTripOutOfRange { list.insert(extra, at: 0) }
+        return list
+    }
+
+    /// 沒有任何一趟旅遊涵蓋這一天就不要擺這一區——多數支出跟旅行無關，
+    /// 平常不該在表單裡多一個看不懂的選單。
+    private var showTripLinkSection: Bool { !tripOptions.isEmpty }
+
+    private var tripLinkSection: some View {
+        Section {
+            Picker("旅遊行程", selection: $linkedTripPlanId) {
+                Text("不關聯").tag(UUID?.none)
+                ForEach(tripOptions) { plan in
+                    Text(plan.displayTitle).tag(UUID?.some(plan.id))
+                }
+            }
+            .onChange(of: linkedTripPlanId) { _, _ in linkedTripStopId = nil }
+
+            if let planId = linkedTripPlanId, let plan = lifeStore.tripPlan(id: planId) {
+                Picker("算在哪一站", selection: $linkedTripStopId) {
+                    Text("整趟（不指定）").tag(UUID?.none)
+                    ForEach(Array(plan.stops.enumerated()), id: \.element.id) { index, stop in
+                        Text("\(index + 1). " + stop.displayName).tag(UUID?.some(stop.id))
+                    }
+                }
+                if !photoFileNames.isEmpty {
+                    HStack(spacing: 8) {
+                        Image(systemName: "photo.on.rectangle.angled")
+                            .font(.system(size: 13)).foregroundStyle(.purple)
+                        Text("這筆的 \(photoFileNames.count) 張照片會一起進「\(plan.displayTitle)」的相本")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+            }
+        } header: {
+            HStack(spacing: 6) {
+                Image(systemName: "airplane").font(.system(size: 10))
+                Text("旅遊")
+            }
+        } footer: {
+            Text(linkedTripOutOfRange == nil
+                 ? "這一天剛好在旅遊規劃的期間內。掛上去之後，這筆的照片會一起出現在那趟旅遊的相本裡；金額照舊算在這個月的支出與分類統計，不會重複計算。"
+                 : "目前選的行程沒有涵蓋這一天——改過日期的話記得確認一下。")
+        }
+    }
+
     private var assetLinkSection: some View {
         Section {
             Picker("關聯資產", selection: $selectedAssetLink) {
@@ -2803,6 +2883,17 @@ struct AddExpenseView: View {
         expense.evFromPct = isEVCharge ? Double(evFromText).flatMap { (0...100).contains($0) ? $0 : nil } : nil
         expense.evToPct = isEVCharge ? Double(evToText).flatMap { (0...100).contains($0) ? $0 : nil } : nil
         expense.evOdometer = isEVCharge ? Double(evOdoText).flatMap { $0 > 0 ? $0 : nil } : nil
+        // [v25.424] 旅遊關聯：只有變動支出有意義（固定支出是每月扣款，跟某一趟旅行無關）
+        if expenseType == .variable, let planId = linkedTripPlanId,
+           lifeStore.tripPlan(id: planId) != nil {
+            expense.linkedTripPlanId = planId
+            // 站別要確認還在那趟行程裡——站可能在這期間被刪掉了
+            expense.linkedTripStopId = lifeStore.tripPlan(id: planId)?
+                .stops.first(where: { $0.id == linkedTripStopId })?.id
+        } else {
+            expense.linkedTripPlanId = nil
+            expense.linkedTripStopId = nil
+        }
 
         if isEditing { store.update(expense) } else { store.add(expense) }
         syncBankWithdrawal(for: expense, previous: editingExpense)
@@ -3284,6 +3375,14 @@ struct AddExpenseView: View {
         if expense.expenseType == .fixed && expense.fixedCategory == .loan
            && expense.loanSubCategory == .car && expense.linkedVehicleId != nil {
             selectedVehicleId = expense.linkedVehicleId
+        }
+
+        // [v25.424] 載入旅遊關聯
+        if expense.expenseType == .variable,
+           let planId = expense.linkedTripPlanId,
+           lifeStore.tripPlan(id: planId) != nil {
+            linkedTripPlanId = planId
+            linkedTripStopId = expense.linkedTripStopId
         }
 
         // 載入變動支出的資產連結
