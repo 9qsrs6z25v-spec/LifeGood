@@ -614,3 +614,61 @@ extension View {
         modifier(ScrollEdgeFade(width: width))
     }
 }
+
+// MARK: - 細進度條（v25.422）
+
+/// 細進度條。版型取自底部導覽上方那條匯出進度條，抽出來讓別的地方也能用。
+///
+/// 用在「使用者按了之後要等，但畫面上看不出在等什麼」的地方——
+/// 最典型的就是從 iCloud 相簿選照片：原圖還在雲端時要先下載，
+/// 沒有任何提示的話看起來就像沒選到。
+struct ThinProgressBar: View {
+    let label: String
+    /// 0...1；nil＝不知道總量，畫成來回跑的不確定進度
+    var fraction: Double?
+    var tint: Color = Color(red: 0.16, green: 0.74, blue: 0.50)
+    var icon: String = "arrow.down.circle.fill"
+
+    var body: some View {
+        VStack(spacing: 3) {
+            HStack(spacing: 5) {
+                ZStack {
+                    Circle()
+                        .fill(LinearGradient(colors: [tint, tint.opacity(0.65)],
+                                             startPoint: .topLeading, endPoint: .bottomTrailing))
+                    Image(systemName: icon)
+                        .font(.system(size: 7.5, weight: .bold))
+                        .foregroundStyle(.white)
+                }
+                .frame(width: 14, height: 14)
+                Text(label)
+                    .font(.system(size: 9, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .contentTransition(.numericText())
+                Spacer(minLength: 0)
+            }
+            if let fraction {
+                GeometryReader { geo in
+                    ZStack(alignment: .leading) {
+                        Capsule()
+                            .fill(tint.opacity(0.14))
+                            .overlay(Capsule().stroke(tint.opacity(0.22), lineWidth: 0.6))
+                        Capsule()
+                            .fill(LinearGradient(colors: [tint, tint.opacity(0.7)],
+                                                 startPoint: .leading, endPoint: .trailing))
+                            .frame(width: max(0, geo.size.width * min(1, max(0, fraction))))
+                            .shadow(color: tint.opacity(0.40), radius: 3)
+                            .animation(.linear(duration: 0.2), value: fraction)
+                    }
+                }
+                .frame(height: 3)
+            } else {
+                // 不知道總量時用系統的不確定進度條，不要自己假裝在跑
+                ProgressView()
+                    .progressViewStyle(.linear)
+                    .tint(tint)
+                    .frame(height: 3)
+            }
+        }
+    }
+}

@@ -63,6 +63,10 @@ struct MultiPhotoGallery: View {
     @State private var viewingURL: IdentifiableURL?
     @State private var pendingDeleteName: String?
     @State private var photoLoadTask: Task<Void, Never>?
+    /// [v25.422] 正在載入的進度（已完成張數 / 總張數）。
+    /// iCloud 相簿的原圖要先下載，沒有提示的話按了打勾看起來就像沒選到。
+    @State private var loadingDone = 0
+    @State private var loadingTotal = 0
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -119,6 +123,18 @@ struct MultiPhotoGallery: View {
             }
             .padding(.horizontal, 4)
 
+            // [v25.422] 載入中的提示。從 iCloud 相簿選的照片要先把原圖下載回來，
+            // 這段期間畫面上原本什麼都不會變，使用者只會覺得「我剛剛是不是沒選到」。
+            if loadingTotal > 0 {
+                ThinProgressBar(
+                    label: loadingDone >= loadingTotal
+                        ? "正在存入…"
+                        : "正在取得照片 \(loadingDone + 1) / \(loadingTotal)（iCloud 的原圖要先下載）",
+                    fraction: Double(loadingDone) / Double(max(1, loadingTotal)))
+                    .padding(.horizontal, 4)
+                    .transition(.opacity)
+            }
+
             if fileNames.isEmpty {
                 emptyState
             } else {
@@ -167,6 +183,8 @@ struct MultiPhotoGallery: View {
             // 變成永久孤兒檔案。改用可取消的 Task：畫面消失時取消，且取消時把這批已寫入磁碟
             // 但還沒機會被採用的照片一併刪除。
             photoLoadTask?.cancel()
+            loadingDone = 0
+            loadingTotal = items.count
             // 用 Task.detached：原本裸 Task 會沿用 onChange 所在的 MainActor context，
             // 每張照片的 onSaveImage（savePhoto → ImageCompressor 壓縮 → 磁碟寫入）
             // 其實仍在主執行緒逐張跑完才輪到下一張，多選張數一多就會卡住畫面；
@@ -175,22 +193,29 @@ struct MultiPhotoGallery: View {
                 var added: [String] = []
                 for item in items {
                     guard !Task.isCancelled else { break }
+                    // 這一行就是會卡住的地方：照片只存在 iCloud 時要先整張下載回來
                     if let data = try? await item.loadTransferable(type: Data.self), let name = onSaveImage(data) {
                         added.append(name)
                     }
+                    await MainActor.run { loadingDone += 1 }
                 }
                 guard !Task.isCancelled else {
                     added.forEach(onDeleteFile)
+                    await MainActor.run { loadingTotal = 0; loadingDone = 0 }
                     return
                 }
                 await MainActor.run {
                     fileNames.append(contentsOf: added)
                     pickerItems = []
+                    loadingTotal = 0
+                    loadingDone = 0
                 }
             }
         }
         .onDisappear {
             photoLoadTask?.cancel()
+            loadingTotal = 0
+            loadingDone = 0
         }
         // [v25.311] 文件掃描：系統掃描器自動偵測邊框＋透視校正，可一次掃多頁；
         // 拍完逐頁存檔（JPEG 編碼與寫入走背景，比照相簿多選的做法）

@@ -236,6 +236,8 @@ struct TripPlanDetailView: View {
     /// 要分享的文字。一樣走 .sheet(item:)，內容跟著 item 一起進去
     @State private var sharing: ShareText?
     @State private var showImageExport = false
+    @State private var showAlbum = false
+    @State private var viewingPhoto: IdentifiableURL?
 
     private struct LegBox: Identifiable {
         let id = UUID()
@@ -276,6 +278,9 @@ struct TripPlanDetailView: View {
                                 emptyStops
                             } else {
                                 timelineCard(p)
+                            }
+                            if p.stops.contains(where: { !$0.photoFileNames.isEmpty }) {
+                                albumButton(p)
                             }
                             addButton(p)
                         }
@@ -349,6 +354,21 @@ struct TripPlanDetailView: View {
             }
             .sheet(isPresented: $showImageExport) {
                 if let p = plan { TripPlanImageExportSheet(plan: p) }
+            }
+            .sheet(isPresented: $showAlbum) {
+                if let p = plan {
+                    // 共用地圖相簿模板（旅遊／美食／醫療地圖與兒女相簿都是它）
+                    MapAlbumSheet(
+                        title: p.displayTitle + " 的相本",
+                        accent: accent,
+                        emptyTitle: "這趟還沒有照片",
+                        emptyHint: "在景點編輯裡加照片，這裡就會依景點分組整理成相本。",
+                        groupNoun: "景點",
+                        items: albumItems(p))
+                }
+            }
+            .sheet(item: $viewingPhoto) { wrapper in
+                PhotoLightbox(url: wrapper.url)
             }
             .confirmationDialog("刪除景點", isPresented: Binding(
                 get: { removingStop != nil }, set: { if !$0 { removingStop = nil } }
@@ -880,6 +900,9 @@ struct TripPlanDetailView: View {
                 disclosures: subSpotDisclosures(slot.stop),
                 disclosureLabel: "子地點",
                 disclosureColor: c,
+                // 照片直接鋪在這一站底下，不用點進編輯才看得到
+                extra: slot.stop.photoFileNames.isEmpty
+                    ? nil : AnyView(photoStrip(slot.stop)),
                 // 點整列＝用 Apple 地圖看這個地方（當天最常做的動作）。
                 // 編輯改走「…」選單——行程排好之後就很少再改，但地圖天天要看。
                 onTap: { openStop(slot.stop) },
@@ -965,6 +988,78 @@ struct TripPlanDetailView: View {
             )
         }
         .padding(.horizontal, 16)
+    }
+
+    /// 一站底下的照片。橫捲、點開全螢幕看。
+    private func photoStrip(_ stop: TripStop) -> some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                ForEach(stop.photoFileNames, id: \.self) { name in
+                    Button {
+                        viewingPhoto = IdentifiableURL(url: TripStop.photoURL(name))
+                    } label: {
+                        AsyncThumbnailView(url: TripStop.photoURL(name),
+                                           size: CGSize(width: 76, height: 58))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.vertical, 2)
+        }
+        .scrollEdgeFade(width: 12)
+    }
+
+    /// 整趟的相本入口。放在時間軸底下而不是工具列：
+    /// 相本是「回頭看」的東西，跟排行程的工具不該擠在同一排。
+    private func albumButton(_ p: TripPlan) -> some View {
+        let count = p.stops.reduce(0) { $0 + $1.photoFileNames.count }
+        return Button {
+            showAlbum = true
+        } label: {
+            HStack(spacing: 10) {
+                ZStack {
+                    Circle()
+                        .fill(LinearGradient(colors: [accent.opacity(0.22), accent.opacity(0.08)],
+                                             startPoint: .topLeading, endPoint: .bottomTrailing))
+                        .frame(width: 38, height: 38)
+                    Image(systemName: "photo.stack")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(accent)
+                }
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("這趟的相本")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.primary)
+                    Text("\(count) 張照片・依景點分組，點開看大圖")
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right")
+                    .font(.caption2.weight(.semibold)).foregroundStyle(.tertiary)
+            }
+            .padding(14)
+            .background(Color(.systemBackground))
+            .clipShape(RoundedRectangle(cornerRadius: 16))
+            .overlay(RoundedRectangle(cornerRadius: 16)
+                .stroke(Color(.separator).opacity(0.12), lineWidth: 0.75))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .padding(.horizontal)
+    }
+
+    /// 相本要吃的資料。分組字串帶上「第幾天」，依景點分組出來就是照日子與順序排好的。
+    private func albumItems(_ p: TripPlan) -> [AlbumPhotoItem] {
+        p.timeline.flatMap { slot in
+            slot.stop.photoFileNames.map { name in
+                AlbumPhotoItem(
+                    id: name,
+                    url: TripStop.photoURL(name),
+                    group: (p.dayCount > 1 ? "第 \(slot.dayIndex + 1) 天・" : "")
+                        + slot.stop.displayName,
+                    date: slot.arrival)
+            }
+        }
     }
 
     /// 這一站要不要顯示打卡方塊。
