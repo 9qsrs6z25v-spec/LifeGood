@@ -408,74 +408,20 @@ struct TripPlanDetailView: View {
     // MARK: 摘要
 
     private func summaryCard(_ p: TripPlan) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .top, spacing: 12) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(Self.dayFmt.string(from: p.startDate) + " 出發 "
-                         + Self.timeFmt.string(from: p.startDate))
-                        .font(.caption.weight(.semibold)).foregroundStyle(.white.opacity(0.9))
-                    Text(p.stops.isEmpty ? "尚未加入景點"
-                         : Self.timeFmt.string(from: p.startDate) + " – "
-                           + Self.timeFmt.string(from: p.endDate))
-                        .font(.title3.weight(.bold)).foregroundStyle(.white)
-                        .lineLimit(1).minimumScaleFactor(0.7)
+        VStack(alignment: .leading, spacing: 14) {
+            summaryHeader(p)
+            summaryDivider
+            summaryMetricGrid(p)
+            let chips = summaryChips(p)
+            if !chips.isEmpty {
+                summaryDivider
+                // 用會自動換行的版面，不要橫排硬擠——擠不下時字會被切掉或折成兩行
+                ChipFlowLayout(spacing: 6) {
+                    ForEach(chips) { chip in summaryChip(chip) }
                 }
-                Spacer(minLength: 0)
-                HStack(spacing: 4) {
-                    Image(systemName: p.travelMode.icon).font(.system(size: 10, weight: .bold))
-                    Text(p.travelMode.rawValue).font(.system(size: 11, weight: .bold))
-                }
-                .foregroundStyle(.white)
-                .padding(.horizontal, 8).padding(.vertical, 4)
-                .background(Color.white.opacity(0.18), in: Capsule())
-                .overlay(Capsule().stroke(Color.white.opacity(0.3), lineWidth: 0.75))
             }
-            Rectangle().fill(Color.white.opacity(0.20)).frame(height: 0.5)
-            HStack(spacing: 0) {
-                kpi("景點", "\(p.stops.count)", "站")
-                if p.dayCount > 1 { kpi("天數", "\(p.dayCount)", "天") }
-                kpi("停留", "\(p.totalDwellMinutes)", "分")
-                kpi("交通", p.totalTravelSeconds > 0
-                    ? TripRouter.durationText(p.totalTravelSeconds) : "—", "")
-                kpi("距離", p.totalMeters > 0
-                    ? TripRouter.distanceText(p.totalMeters) : "—", "")
-            }
-            if p.hasModeOverride { modeMixRow(p) }
-            if p.mustVisitCount > 0 || p.overnightCount > 0 { marksRow(p) }
             if p.dayCount > 1 { dayLegend(p) }
-            if isRouting {
-                HStack(spacing: 6) {
-                    ProgressView().scaleEffect(0.6).tint(.white)
-                    Text("正在計算路線…").font(.caption2).foregroundStyle(.white.opacity(0.9))
-                }
-            } else if p.unroutedLegCount > 0 {
-                Text("有 \(p.unroutedLegCount) 段還沒算出路線")
-                    .font(.caption2).foregroundStyle(.white.opacity(0.85))
-            }
-            if p.retryableLegCount > 0 {
-                Button {
-                    Task { await retryRouting() }
-                } label: {
-                    HStack(spacing: 5) {
-                        Image(systemName: "arrow.clockwise")
-                            .font(.system(size: 9, weight: .bold))
-                        Text("有 \(p.retryableLegCount) 段沒拿到真實路線，點這裡重新計算")
-                            .font(.caption2.weight(.semibold))
-                    }
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 8).padding(.vertical, 4)
-                    .background(Color.white.opacity(0.2), in: Capsule())
-                }
-                .buttonStyle(.plain)
-            }
-            if p.unreachableCount > 0 {
-                Text("⚠️ 有 \(p.unreachableCount) 站的指定抵達時間比推算的還早，照這個排法趕不上")
-                    .font(.caption2).foregroundStyle(.white)
-                    .fixedSize(horizontal: false, vertical: true)
-            } else if p.totalIdleSeconds > 300 {
-                Text("為了等指定時間，中間空著 " + TripRouter.durationText(p.totalIdleSeconds))
-                    .font(.caption2).foregroundStyle(.white.opacity(0.85))
-            }
+            summaryNotices(p)
         }
         .padding(16)
         .background(
@@ -494,43 +440,203 @@ struct TripPlanDetailView: View {
         .padding(.horizontal)
     }
 
-    /// 有段落被單獨指定過交通方式時，列出整趟混了哪些方式各幾段
-    private func modeMixRow(_ p: TripPlan) -> some View {
-        HStack(spacing: 6) {
-            ForEach(p.modeSegmentCounts) { item in
-                HStack(spacing: 3) {
-                    Image(systemName: item.mode.icon).font(.system(size: 9))
-                    Text("\(item.count) 段").font(.system(size: 10, weight: .bold))
+    private var summaryDivider: some View {
+        Rectangle().fill(Color.white.opacity(0.20)).frame(height: 0.5)
+    }
+
+    // MARK: 摘要卡：標頭
+
+    private func summaryHeader(_ p: TripPlan) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(Self.dayFmt.string(from: p.startDate) + " 出發")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.white.opacity(0.9))
+                Text(p.stops.isEmpty ? "尚未加入景點"
+                     : Self.timeFmt.string(from: p.startDate) + " – "
+                       + Self.timeFmt.string(from: p.endDate))
+                    .font(.title3.weight(.bold)).foregroundStyle(.white)
+                    .lineLimit(1).minimumScaleFactor(0.7)
+                if p.dayCount > 1 && !p.stops.isEmpty {
+                    Text("跨 \(p.dayCount) 天，最後一站 "
+                         + Self.dayFmt.string(from: p.endDate) + " 結束")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.white.opacity(0.8))
+                        .lineLimit(1).minimumScaleFactor(0.8)
                 }
-                .foregroundStyle(.white)
-                .padding(.horizontal, 7).padding(.vertical, 3)
-                .background(Color.white.opacity(0.18), in: Capsule())
             }
-            Spacer(minLength: 0)
+            Spacer(minLength: 8)
+            HStack(spacing: 4) {
+                Image(systemName: p.travelMode.icon).font(.system(size: 10, weight: .bold))
+                Text(p.travelMode.rawValue).font(.system(size: 11, weight: .bold)).lineLimit(1)
+            }
+            .fixedSize()
+            .foregroundStyle(.white)
+            .padding(.horizontal, 8).padding(.vertical, 4)
+            .background(Color.white.opacity(0.18), in: Capsule())
+            .overlay(Capsule().stroke(Color.white.opacity(0.3), lineWidth: 0.75))
         }
     }
 
-    /// 必去與住宿的計數。這兩個是排行程時最常看的標記，放在摘要卡上。
-    private func marksRow(_ p: TripPlan) -> some View {
-        HStack(spacing: 6) {
-            if p.mustVisitCount > 0 {
-                HStack(spacing: 3) {
-                    Image(systemName: "star.fill").font(.system(size: 9))
-                    Text("必去 \(p.mustVisitCount) 站").font(.system(size: 10, weight: .bold))
+    // MARK: 摘要卡：數字
+
+    private struct SummaryMetric: Identifiable {
+        let id: String
+        let value: String
+        let unit: String
+    }
+
+    /// 數字欄位。
+    ///
+    /// 改成兩列三欄的格子而不是一列全部排開：一列塞五、六個時，
+    /// 「15 小時 57 分」與「3136.4 km」這種長字串會直接貼在一起看不出分界。
+    private func summaryMetrics(_ p: TripPlan) -> [SummaryMetric] {
+        var out: [SummaryMetric] = [
+            SummaryMetric(id: "景點", value: "\(p.stops.count)", unit: "站")
+        ]
+        if p.dayCount > 1 {
+            out.append(SummaryMetric(id: "天數", value: "\(p.dayCount)", unit: "天"))
+        }
+        if p.overnightCount > 0 {
+            out.append(SummaryMetric(id: "住宿", value: "\(p.overnightCount)", unit: "晚"))
+        }
+        // 停留原本直接顯示分鐘數（例：2100 分），到了幾十小時就沒人讀得出來
+        out.append(SummaryMetric(
+            id: "停留",
+            value: p.totalDwellMinutes > 0
+                ? TripRouter.durationText(Double(p.totalDwellMinutes) * 60) : "—",
+            unit: ""))
+        out.append(SummaryMetric(
+            id: "交通",
+            value: p.totalTravelSeconds > 0
+                ? TripRouter.durationText(p.totalTravelSeconds) : "—",
+            unit: ""))
+        out.append(SummaryMetric(
+            id: "距離",
+            value: p.totalMeters > 0 ? TripRouter.distanceText(p.totalMeters) : "—",
+            unit: ""))
+        return out
+    }
+
+    private func summaryMetricGrid(_ p: TripPlan) -> some View {
+        LazyVGrid(
+            columns: Array(repeating: GridItem(.flexible(), spacing: 10, alignment: .leading),
+                           count: 3),
+            alignment: .leading, spacing: 12
+        ) {
+            ForEach(summaryMetrics(p)) { metric in
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(alignment: .firstTextBaseline, spacing: 2) {
+                        Text(metric.value)
+                            .font(.system(size: 17, weight: .bold, design: .rounded))
+                            .foregroundStyle(.white)
+                            .lineLimit(1).minimumScaleFactor(0.6)
+                        if !metric.unit.isEmpty {
+                            Text(metric.unit)
+                                .font(.system(size: 10))
+                                .foregroundStyle(.white.opacity(0.85))
+                        }
+                    }
+                    Text(metric.id)
+                        .font(.system(size: 10))
+                        .foregroundStyle(.white.opacity(0.85))
                 }
-                .foregroundStyle(.white)
-                .padding(.horizontal, 7).padding(.vertical, 3)
-                .background(Color.white.opacity(0.18), in: Capsule())
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            if p.overnightCount > 0 {
-                HStack(spacing: 3) {
-                    Image(systemName: "bed.double.fill").font(.system(size: 9))
-                    Text("住宿 \(p.overnightCount) 晚").font(.system(size: 10, weight: .bold))
+        }
+    }
+
+    // MARK: 摘要卡：標記膠囊
+
+    private struct SummaryChip: Identifiable {
+        let id: String
+        let icon: String
+        let text: String
+    }
+
+    /// 交通方式組成與必去標記。住宿改放進上面的數字格子，這裡不重複。
+    private func summaryChips(_ p: TripPlan) -> [SummaryChip] {
+        var out: [SummaryChip] = []
+        if p.hasModeOverride {
+            for item in p.modeSegmentCounts {
+                out.append(SummaryChip(id: "mode-" + item.mode.rawValue,
+                                       icon: item.mode.icon,
+                                       text: item.mode.rawValue + " \(item.count) 段"))
+            }
+        }
+        if p.mustVisitCount > 0 {
+            out.append(SummaryChip(id: "must", icon: "star.fill",
+                                   text: "必去 \(p.mustVisitCount) 站"))
+        }
+        return out
+    }
+
+    private func summaryChip(_ chip: SummaryChip) -> some View {
+        HStack(spacing: 4) {
+            Image(systemName: chip.icon).font(.system(size: 9))
+            Text(chip.text).font(.system(size: 10, weight: .bold)).lineLimit(1)
+        }
+        .fixedSize()
+        .foregroundStyle(.white)
+        .padding(.horizontal, 8).padding(.vertical, 4)
+        .background(Color.white.opacity(0.18), in: Capsule())
+    }
+
+    // MARK: 摘要卡：提醒
+
+    /// 進度與警告。統一成「圖示 + 一段文字」的排法，不要每一條各長一個樣子。
+    @ViewBuilder
+    private func summaryNotices(_ p: TripPlan) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if isRouting {
+                HStack(spacing: 6) {
+                    ProgressView().scaleEffect(0.6).tint(.white)
+                    Text("正在計算路線…")
+                        .font(.caption2).foregroundStyle(.white.opacity(0.9))
                 }
-                .foregroundStyle(.white)
-                .padding(.horizontal, 7).padding(.vertical, 3)
-                .background(Color.white.opacity(0.18), in: Capsule())
+            } else if p.unroutedLegCount > 0 {
+                summaryNotice(icon: "hourglass",
+                              text: "有 \(p.unroutedLegCount) 段還沒算出路線")
             }
+            if p.retryableLegCount > 0 {
+                Button {
+                    Task { await retryRouting() }
+                } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.system(size: 9, weight: .bold))
+                        Text("有 \(p.retryableLegCount) 段沒拿到真實路線，點這裡重新計算")
+                            .font(.caption2.weight(.semibold))
+                            .fixedSize(horizontal: false, vertical: true)
+                            .multilineTextAlignment(.leading)
+                    }
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 8).padding(.vertical, 5)
+                    .background(Color.white.opacity(0.2), in: Capsule())
+                }
+                .buttonStyle(.plain)
+            }
+            if p.unreachableCount > 0 {
+                summaryNotice(icon: "exclamationmark.triangle.fill",
+                              text: "有 \(p.unreachableCount) 站的指定抵達時間比推算的還早，照這個排法趕不上")
+            } else if p.totalIdleSeconds > 300 {
+                summaryNotice(icon: "hourglass.bottomhalf.filled",
+                              text: "為了等指定時間，中間空著 "
+                                  + TripRouter.durationText(p.totalIdleSeconds))
+            }
+        }
+    }
+
+    private func summaryNotice(icon: String, text: String) -> some View {
+        HStack(alignment: .top, spacing: 6) {
+            Image(systemName: icon)
+                .font(.system(size: 10))
+                .foregroundStyle(.white.opacity(0.9))
+                .frame(width: 12)
+            Text(text)
+                .font(.caption2).foregroundStyle(.white.opacity(0.95))
+                .fixedSize(horizontal: false, vertical: true)
+                .multilineTextAlignment(.leading)
             Spacer(minLength: 0)
         }
     }
@@ -547,12 +653,28 @@ struct TripPlanDetailView: View {
                         Text(Self.dayLabel(p, dayIndex: d))
                             .font(.system(size: 10, weight: .semibold))
                             .foregroundStyle(.white.opacity(0.95))
+                            .lineLimit(1)
                     }
+                    .fixedSize()
                     .padding(.horizontal, 7).padding(.vertical, 3)
                     .background(Color.white.opacity(0.16), in: Capsule())
                 }
             }
+            .padding(.vertical, 1)
         }
+        .scrollEdgeFade(width: 14)
+    }
+
+    /// 這一天是幾月幾號（星期幾）。字串在 ViewBuilder 外組好。
+    private static func dayDateText(_ p: TripPlan, dayIndex: Int) -> String {
+        let date = Calendar.current.date(byAdding: .day, value: dayIndex,
+                                         to: p.startDate) ?? p.startDate
+        return dayFmt.string(from: date)
+    }
+
+    /// 「第 2 天 8/20 (三)」
+    private static func dayLabel(_ p: TripPlan, dayIndex: Int) -> String {
+        "第 \(dayIndex + 1) 天 " + dayDateText(p, dayIndex: dayIndex)
     }
 
     /// 離開時間。跨過午夜就加「翌」，否則 09:00 看起來像同一天早上就走了。
@@ -572,22 +694,6 @@ struct TripPlanDetailView: View {
     /// 「第 2 天 8/20 (三)」
     private static func dayLabel(_ p: TripPlan, dayIndex: Int) -> String {
         "第 \(dayIndex + 1) 天 " + dayDateText(p, dayIndex: dayIndex)
-    }
-
-    private func kpi(_ title: String, _ value: String, _ unit: String) -> some View {
-        VStack(spacing: 3) {
-            HStack(alignment: .firstTextBaseline, spacing: 2) {
-                Text(value)
-                    .font(.system(size: 16, weight: .bold, design: .rounded))
-                    .foregroundStyle(.white)
-                    .lineLimit(1).minimumScaleFactor(0.55)
-                if !unit.isEmpty {
-                    Text(unit).font(.system(size: 9)).foregroundStyle(.white.opacity(0.8))
-                }
-            }
-            Text(title).font(.system(size: 10)).foregroundStyle(.white.opacity(0.9))
-        }
-        .frame(maxWidth: .infinity)
     }
 
     // MARK: 時間軸
