@@ -261,35 +261,49 @@ struct TravelMapView: View {
         }
     }
 
-    // MARK: - 下層 overlay：清單 + 相簿 + 照片開關
+    // MARK: - 下層 overlay：清單 + 相簿 + 規劃（可橫捲）+ 照片開關
 
     private func bottomOverlay(count: Int) -> some View {
         HStack(spacing: 8) {
-            Button { showListSheet = true } label: {
-                pillLabel(icon: "list.bullet.rectangle", text: "地點清單", badge: "\(count)")
+            // [v25.416] 三顆進入按鈕改成可橫捲。
+            //
+            // 原本是 HStack + Spacer 硬擠：v25.399 加入「旅遊規劃」變成四顆之後
+            // 一行放不下，每顆膠囊裡的字就各自換行（「地點／清單」「有照／片」），
+            // 看起來像版面壞掉。改成捲軸之後字一定是一行，放不下就捲，
+            // 兩側用共用的 scrollEdgeFade 淡出，看起來是捲進去而不是被切掉。
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    Button { showListSheet = true } label: {
+                        pillLabel(icon: "list.bullet.rectangle", text: "地點清單", badge: "\(count)")
+                    }
+                    .buttonStyle(.plain)
+
+                    Button { showAlbumSheet = true } label: {
+                        pillLabel(icon: "photo.stack", text: "旅遊相簿", badge: nil)
+                    }
+                    .buttonStyle(.plain)
+
+                    // [v25.399] 這頁其他按鈕看的是「去過」的地方，這顆看的是「要去」的地方
+                    Button { showPlanSheet = true } label: {
+                        pillLabel(icon: "map", text: "旅遊規劃",
+                                  badge: lifeStore.tripPlans.isEmpty
+                                      ? nil : "\(lifeStore.tripPlans.count)")
+                    }
+                    .buttonStyle(.plain)
+                }
+                // 膠囊有陰影，留一點空間免得被捲軸裁掉
+                .padding(.vertical, 2)
             }
-            .buttonStyle(.plain)
+            .scrollEdgeFade()
 
-            Button { showAlbumSheet = true } label: {
-                pillLabel(icon: "photo.stack", text: "旅遊相簿", badge: nil)
-            }
-            .buttonStyle(.plain)
-
-            // [v25.399] 這頁其他按鈕看的是「去過」的地方，這顆看的是「要去」的地方
-            Button { showPlanSheet = true } label: {
-                pillLabel(icon: "map", text: "旅遊規劃",
-                          badge: lifeStore.tripPlans.isEmpty ? nil : "\(lifeStore.tripPlans.count)")
-            }
-            .buttonStyle(.plain)
-
-            Spacer()
-
+            // 「有照片」是篩選開關不是入口，固定釘在右邊，不跟著捲走
             Button { photoOnly.toggle() } label: {
                 HStack(spacing: 6) {
                     Image(systemName: photoOnly ? "photo.fill" : "photo")
-                    Text("有照片").font(.caption.weight(.semibold))
+                    Text("有照片").font(.caption.weight(.semibold)).lineLimit(1)
                     Image(systemName: photoOnly ? "checkmark.circle.fill" : "circle").font(.caption2)
                 }
+                .fixedSize()
                 .padding(.horizontal, 12).padding(.vertical, 8)
                 .background(photoOnly ? AnyShapeStyle(accent) : AnyShapeStyle(.ultraThinMaterial))
                 .foregroundStyle(photoOnly ? .white : .primary)
@@ -303,7 +317,8 @@ struct TravelMapView: View {
     private func pillLabel(icon: String, text: String, badge: String?) -> some View {
         HStack(spacing: 6) {
             Image(systemName: icon)
-            Text(text).font(.caption.weight(.semibold))
+            // 不准換行：擠不下時要靠捲軸解決，不是把字折成兩行
+            Text(text).font(.caption.weight(.semibold)).lineLimit(1)
             if let badge {
                 Text(badge)
                     .font(.caption2.weight(.bold))
@@ -313,6 +328,7 @@ struct TravelMapView: View {
                     .clipShape(Capsule())
             }
         }
+        .fixedSize()
         .padding(.horizontal, 12).padding(.vertical, 8)
         .background(.ultraThinMaterial)
         .clipShape(Capsule())

@@ -418,18 +418,6 @@ struct ItemChipBar: View {
     let chips: [ItemChip]
     @Environment(\.itemRowChipsWrap) private var wrapChips
 
-    /// [v25.415] 兩側還有沒有捲得到的內容。有的話那一側的膠囊要淡出，
-    /// 讓它看起來是「捲進去了」而不是「被切掉」。
-    @State private var edges = ScrollEdges()
-
-    /// 淡出的寬度。太窄看不出來、太寬會把整顆膠囊吃掉，18pt 大約是一個字的寬度。
-    private static let fadeWidth: CGFloat = 18
-
-    private struct ScrollEdges: Equatable {
-        var leading = false
-        var trailing = false
-    }
-
     var body: some View {
         if wrapChips {
             ChipFlowLayout(spacing: 6) {
@@ -443,32 +431,7 @@ struct ItemChipBar: View {
                 // 膠囊本身可能有點按行為；留一點垂直空間避免描邊被裁掉
                 .padding(.vertical, 1)
             }
-            // 捲到底的那一側不要淡出——內容已經完整顯示了還淡，會看起來像沒對齊
-            .onScrollGeometryChange(for: ScrollEdges.self) { geo in
-                ScrollEdges(
-                    leading: geo.contentOffset.x > 1,
-                    trailing: geo.contentOffset.x + geo.containerSize.width
-                        < geo.contentSize.width - 1)
-            } action: { _, new in
-                guard new != edges else { return }
-                withAnimation(.easeOut(duration: 0.18)) { edges = new }
-            }
-            .mask(edgeMask)
-        }
-    }
-
-    /// 兩側的漸層遮罩。
-    ///
-    /// 用三段固定寬度拼出來而不是 GeometryReader 讀寬度算比例：這個模板在長清單裡
-    /// 一列就有一個，每列都塞一個 GeometryReader 不划算，而且淡出本來就該是固定寬度
-    /// ——列有多寬跟「隱沒感」該有多長沒有關係。
-    private var edgeMask: some View {
-        HStack(spacing: 0) {
-            LinearGradient(colors: [.clear, .black], startPoint: .leading, endPoint: .trailing)
-                .frame(width: edges.leading ? Self.fadeWidth : 0)
-            Color.black
-            LinearGradient(colors: [.black, .clear], startPoint: .leading, endPoint: .trailing)
-                .frame(width: edges.trailing ? Self.fadeWidth : 0)
+            .scrollEdgeFade()
         }
     }
 
@@ -594,5 +557,60 @@ struct ItemDateBadge: View {
                 .font(.system(size: 9, weight: .bold)).foregroundStyle(.secondary)
         }
         .frame(width: 34)
+    }
+}
+
+// MARK: - 橫向捲軸的隱沒感（v25.415 / 抽成共用 v25.416）
+
+/// 橫向捲軸兩側的淡出遮罩。
+///
+/// 內容超出寬度時，SwiftUI 預設是硬生生切一刀，看起來像版面壞掉；
+/// 淡出之後就變成「捲進去了」。**只淡「那一側真的還有東西」的那一邊**——
+/// 已經捲到底還淡，反而會看起來像沒對齊。
+struct ScrollEdgeFade: ViewModifier {
+    /// 淡出的寬度。太窄看不出來、太寬會把整個項目吃掉；18pt 大約是一個字的寬度。
+    var width: CGFloat = 18
+
+    @State private var edges = Edges()
+
+    struct Edges: Equatable {
+        var leading = false
+        var trailing = false
+    }
+
+    func body(content: Content) -> some View {
+        content
+            .onScrollGeometryChange(for: Edges.self) { geo in
+                Edges(
+                    leading: geo.contentOffset.x > 1,
+                    trailing: geo.contentOffset.x + geo.containerSize.width
+                        < geo.contentSize.width - 1)
+            } action: { _, new in
+                // 捲動過程中值不變就不要一直觸發動畫
+                guard new != edges else { return }
+                withAnimation(.easeOut(duration: 0.18)) { edges = new }
+            }
+            .mask(mask)
+    }
+
+    /// 用三段固定寬度拼出來而不是 GeometryReader 讀寬度算比例：
+    /// 這個修飾器會用在長清單的每一列上，每列塞一個 GeometryReader 不划算；
+    /// 而且容器有多寬跟「隱沒感該有多長」本來就沒有關係。
+    private var mask: some View {
+        HStack(spacing: 0) {
+            LinearGradient(colors: [.clear, .black], startPoint: .leading, endPoint: .trailing)
+                .frame(width: edges.leading ? width : 0)
+            Color.black
+            LinearGradient(colors: [.black, .clear], startPoint: .leading, endPoint: .trailing)
+                .frame(width: edges.trailing ? width : 0)
+        }
+    }
+}
+
+extension View {
+    /// 橫向捲軸兩側淡出，讓超出畫面的內容看起來是捲進去而不是被切掉。
+    /// 只能用在 ScrollView 上（靠捲動幾何判斷哪一側還有內容）。
+    func scrollEdgeFade(width: CGFloat = 18) -> some View {
+        modifier(ScrollEdgeFade(width: width))
     }
 }
