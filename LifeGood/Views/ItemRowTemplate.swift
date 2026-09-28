@@ -418,6 +418,18 @@ struct ItemChipBar: View {
     let chips: [ItemChip]
     @Environment(\.itemRowChipsWrap) private var wrapChips
 
+    /// [v25.415] 兩側還有沒有捲得到的內容。有的話那一側的膠囊要淡出，
+    /// 讓它看起來是「捲進去了」而不是「被切掉」。
+    @State private var edges = ScrollEdges()
+
+    /// 淡出的寬度。太窄看不出來、太寬會把整顆膠囊吃掉，18pt 大約是一個字的寬度。
+    private static let fadeWidth: CGFloat = 18
+
+    private struct ScrollEdges: Equatable {
+        var leading = false
+        var trailing = false
+    }
+
     var body: some View {
         if wrapChips {
             ChipFlowLayout(spacing: 6) {
@@ -431,6 +443,32 @@ struct ItemChipBar: View {
                 // 膠囊本身可能有點按行為；留一點垂直空間避免描邊被裁掉
                 .padding(.vertical, 1)
             }
+            // 捲到底的那一側不要淡出——內容已經完整顯示了還淡，會看起來像沒對齊
+            .onScrollGeometryChange(for: ScrollEdges.self) { geo in
+                ScrollEdges(
+                    leading: geo.contentOffset.x > 1,
+                    trailing: geo.contentOffset.x + geo.containerSize.width
+                        < geo.contentSize.width - 1)
+            } action: { _, new in
+                guard new != edges else { return }
+                withAnimation(.easeOut(duration: 0.18)) { edges = new }
+            }
+            .mask(edgeMask)
+        }
+    }
+
+    /// 兩側的漸層遮罩。
+    ///
+    /// 用三段固定寬度拼出來而不是 GeometryReader 讀寬度算比例：這個模板在長清單裡
+    /// 一列就有一個，每列都塞一個 GeometryReader 不划算，而且淡出本來就該是固定寬度
+    /// ——列有多寬跟「隱沒感」該有多長沒有關係。
+    private var edgeMask: some View {
+        HStack(spacing: 0) {
+            LinearGradient(colors: [.clear, .black], startPoint: .leading, endPoint: .trailing)
+                .frame(width: edges.leading ? Self.fadeWidth : 0)
+            Color.black
+            LinearGradient(colors: [.black, .clear], startPoint: .leading, endPoint: .trailing)
+                .frame(width: edges.trailing ? Self.fadeWidth : 0)
         }
     }
 
