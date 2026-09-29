@@ -1,6 +1,61 @@
 import SwiftUI
 import UIKit
 
+// MARK: - 出圖的尺寸上限
+
+/// 全 App 出圖共用的倍率保險。
+///
+/// [v25.426] 為什麼需要它：ImageRenderer 畫的是 CALayer，而圖層光柵化在任一邊
+/// 超過 16384 像素時會**整張變空白**——不會丟錯誤、不會回 nil，只會安靜地
+/// 給你一張空圖。全 App 的出圖都寫死 scale ≥ 3，所以只要內容高度超過大約
+/// 5400 點就會踩到。使用者遇到的「評分加總 23 人匯出全部，每張圖都 6KB
+/// 一片空白」就是這個。
+///
+/// 正解仍然是**出圖前先分頁**（見本檔的 PagedImageExporter）；這裡是最後一道
+/// 保險：分頁沒切夠細時寧可降倍率出一張看得到的圖，也不要出一張空白的。
+enum ImageExportLimits {
+
+    /// 在不超過光柵化上限的前提下能用的最大倍率。
+    /// 保底 1 倍——再大就只能靠分頁，不是降倍率能解決的。
+    static func safeScale(for size: CGSize, want: CGFloat? = nil) -> CGFloat {
+        let target = want ?? max(UIScreen.main.scale, 3)
+        guard size.width > 0, size.height > 0 else { return target }
+        let maxSidePx: CGFloat = 12_000            // 離 16384 留餘裕
+        let maxPixels: CGFloat = 40_000_000        // 約 160MB 的 RGBA，再大就開始吃記憶體
+        let bySide = maxSidePx / max(size.width, size.height)
+        let byArea = (maxPixels / (size.width * size.height)).squareRoot()
+        return max(1, min(target, bySide, byArea))
+    }
+
+    /// 呼叫端的慣用寫法（刻意不包成一個吃 ImageRenderer 的函式：
+    /// ImageRenderer 是 @MainActor 的型別，包起來會把隔離要求帶到每一個呼叫端）：
+    ///
+    ///     var measured = CGSize.zero
+    ///     renderer.render { size, _ in measured = size }
+    ///     renderer.scale = ImageExportLimits.safeScale(for: measured)
+    ///
+    /// render 的閉包裡不畫，所以這一次只跑版面計算，不會讓出圖時間變兩倍。
+
+    /// 這張圖是不是整片同一個顏色（＝空白）。
+    /// 縮到 12×12 再比，成本固定，不隨原圖大小增加。
+    static func isBlank(_ image: UIImage) -> Bool {
+        guard let cg = image.cgImage else { return false }
+        let side = 12
+        var buf = [UInt8](repeating: 0, count: side * side * 4)
+        guard let ctx = CGContext(data: &buf, width: side, height: side,
+                                  bitsPerComponent: 8, bytesPerRow: side * 4,
+                                  space: CGColorSpaceCreateDeviceRGB(),
+                                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+        else { return false }
+        ctx.draw(cg, in: CGRect(x: 0, y: 0, width: side, height: side))
+        let first = Array(buf[0..<4])
+        for i in stride(from: 4, to: buf.count, by: 4) {
+            if Array(buf[i..<(i + 4)]) != first { return false }
+        }
+        return true
+    }
+}
+
 // MARK: - 分頁產圖標準模組
 //
 // 舊做法（整張長圖 sliceTallImage 硬切）有兩個問題：第二頁起沒有抬頭、
@@ -121,8 +176,10 @@ enum PagedImageExporter {
             .background(Color(.systemGroupedBackground))
 
             let renderer = ImageRenderer(content: decorate(AnyView(page)))
-            renderer.scale = max(UIScreen.main.scale, 3)
-            guard let ui = renderer.uiImage,
+            var measured = CGSize.zero
+            renderer.render { size, _ in measured = size }
+            renderer.scale = ImageExportLimits.safeScale(for: measured)
+            guard let ui = renderer.uiImage, !ImageExportLimits.isBlank(ui),
                   let data = ui.jpegData(compressionQuality: 0.95) else { continue }
             let suffix = pageCount > 1 ? "_\(p + 1)之\(pageCount)" : ""
             let url = FileManager.default.temporaryDirectory

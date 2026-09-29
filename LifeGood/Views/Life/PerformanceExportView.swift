@@ -107,7 +107,27 @@ private func rankBadge(_ rank: Int, size: CGFloat = 30) -> some View {
     }
 }
 
+// MARK: - 分頁單位
+
+/// 匯出時「這一頁要畫哪些人」的一段。
+///
+/// [v25.426] 為什麼需要它：評分加總的每一位底下會列出**每一張票**給他排第幾名，
+/// 所以一個人的高度是 96 + 票數 × 17。23 個人配上七八張票就是五、六千點，
+/// 乘上 3 倍螢幕倍率超過 16000 像素——CALayer 光柵化在任一邊超過 16384 像素時
+/// 會整張變空白，而且不會報錯，只會安靜地給你一張空圖（使用者看到的就是
+/// 「23 人匯出全部，每張圖都 6KB 一片空白」）。
+///
+/// 解法不是把大圖切小，而是**出圖之前就先分頁**：每一頁各自算高度、各自出一張圖，
+/// 倍率維持 3 倍，字一樣清楚。職等跨頁時下一頁的標題會標「（續）」。
+struct PerformanceSummaryPageBlock: Identifiable {
+    let id = UUID()
+    /// scores 只含這一頁要畫的人；gradeId 與完整職等一致，所以名次查得回去
+    let section: PerformanceGradeSection
+    let isContinued: Bool
+}
+
 // MARK: - 1. 單張票
+
 
 /// 某位評分者填的排名票。用來回答「他把大家排成什麼順序」。
 struct PerformanceBallotExportView: View {
@@ -236,10 +256,17 @@ struct PerformanceSummaryExportView: View {
     /// 關掉時所有評分者一律顯示成「評分者 A／B／C……」，尚未送出的名單也只出人數——
     /// 這張圖多半是要給別人看的，誰把誰排在後面很容易變成嫌隙。
     let showRaterNames: Bool
+    /// [v25.426] 這一頁要畫的區塊。nil＝一次畫完（人少時不必分頁）
+    let page: [PerformanceSummaryPageBlock]?
+    /// 第幾頁／共幾頁（只有分頁時才標）
+    let pageIndex: Int
+    let pageCount: Int
 
     init(year: Int, sections: [PerformanceGradeSection], share: PerformanceShare,
          submittedCount: Int, pendingNames: [String], scopeLabel: String,
-         personIds: Set<UUID>, showRaterNames: Bool) {
+         personIds: Set<UUID>, showRaterNames: Bool,
+         page: [PerformanceSummaryPageBlock]? = nil,
+         pageIndex: Int = 0, pageCount: Int = 1) {
         self.year = year
         self.sections = sections
         self.share = share
@@ -248,6 +275,19 @@ struct PerformanceSummaryExportView: View {
         self.scopeLabel = scopeLabel
         self.personIds = personIds
         self.showRaterNames = showRaterNames
+        self.page = page
+        self.pageIndex = pageIndex
+        self.pageCount = pageCount
+    }
+
+    private var isFirstPage: Bool { pageIndex == 0 }
+    private var isLastPage: Bool { pageIndex >= pageCount - 1 }
+
+    /// 這一頁實際要畫的區塊
+    private var blocks: [PerformanceSummaryPageBlock] {
+        page ?? shownSections.map {
+            PerformanceSummaryPageBlock(section: $0, isContinued: false)
+        }
     }
 
     /// 匿名代號表。以 UUID 排序建立，跟姓名、職等、名次都無關，
@@ -281,9 +321,80 @@ struct PerformanceSummaryExportView: View {
 
     /// 套用「只出這些人」之後還有內容的分段
     private var shownSections: [PerformanceGradeSection] {
+        // 名次要維持在完整職等裡的名次，所以先編號再篩選
+        Self.visibleSections(sections, personIds: personIds)
+    }
+
+    // MARK: 分頁
+
+    /// 把要出的人切成幾頁。
+    ///
+    /// 高度是**估的**，不是量的：真的要量就得先把每一列做成 View 再跑一次
+    /// ImageRenderer，出圖時間會變成兩倍。估算只要「不要低估」就夠用——
+    /// 切得保守一點頂多多一頁，估太鬆才會又踩回空白圖那個坑。
+    static func paginate(_ shown: [PerformanceGradeSection],
+                         shareVoteCount: Int,
+                         shareConfigured: Bool) -> [[PerformanceSummaryPageBlock]] {
+        /// 一頁的內容高度上限（點）。乘上 3 倍倍率＝4500 像素，
+        /// 離 CALayer 的 16384 像素上限還有很大餘裕。
+        let budget: CGFloat = 1_500
+        let sectionHeader: CGFloat = 52
+        var pages: [[PerformanceSummaryPageBlock]] = []
+        var current: [PerformanceSummaryPageBlock] = []
+        // 第一頁上面還有標頭、看板與占比來源
+        var used: CGFloat = 80 + 120 + (shareConfigured ? 76 + CGFloat(shareVoteCount) * 18 : 0)
+
+        func closePage() {
+            guard !current.isEmpty else { return }
+            pages.append(current)
+            current = []
+            used = 80          // 後面每一頁只有標頭
+        }
+
+        for sec in shown {
+            var pending = sec.scores
+            var continued = false
+            while !pending.isEmpty {
+                // 連一列都塞不下就先翻頁（但空頁不翻，免得出一張只有標頭的圖）
+                if budget - used - sectionHeader < rowHeight(pending[0]), !current.isEmpty {
+                    closePage()
+                }
+                let room = budget - used - sectionHeader
+                var take: [PerformanceScore] = []
+                var h: CGFloat = 0
+                while let next = pending.first {
+                    let rh = rowHeight(next)
+                    // 至少放一列：一個人底下票數多到超過一整頁時也不能卡死
+                    if !take.isEmpty, h + rh > room { break }
+                    take.append(next)
+                    pending.removeFirst()
+                    h += rh
+                }
+                current.append(PerformanceSummaryPageBlock(
+                    section: PerformanceGradeSection(gradeId: sec.gradeId, label: sec.label,
+                                                     weight: sec.weight, scores: take),
+                    isContinued: continued))
+                used += sectionHeader + h
+                continued = true
+                if !pending.isEmpty { closePage() }
+            }
+        }
+        closePage()
+        return pages.isEmpty ? [[]] : pages
+    }
+
+    /// 一位的高度估算：徽章／姓名／分數那一段 + 公式 + 每一張票各一列
+    private static func rowHeight(_ s: PerformanceScore) -> CGFloat {
+        var h: CGFloat = 96
+        if !s.sources.isEmpty { h += 24 + CGFloat(s.sources.count) * 17 }
+        return h + 14          // 卡片之間的間距
+    }
+
+    /// 套用「只出這些人」之後的分段，給呼叫端分頁用
+    static func visibleSections(_ sections: [PerformanceGradeSection],
+                                personIds: Set<UUID>) -> [PerformanceGradeSection] {
         guard !personIds.isEmpty else { return sections }
         return sections.compactMap { sec in
-            // 名次要維持在完整職等裡的名次，所以先編號再篩選
             let kept = sec.scores.filter { personIds.contains($0.personId) }
             guard !kept.isEmpty else { return nil }
             return PerformanceGradeSection(gradeId: sec.gradeId, label: sec.label,
@@ -300,24 +411,38 @@ struct PerformanceSummaryExportView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            ExportHeader(title: "\(String(year)) 年度 評分加總", subtitle: headerSubtitle)
-            kpiBlock
-            if share.isConfigured { shareCard }
-            ForEach(shownSections) { section in
-                gradeBlock(section)
+            ExportHeader(title: headerTitle, subtitle: headerSubtitle)
+            // 看板、占比來源只放第一頁：每一頁都重印一次只是把後面幾頁推更長
+            if isFirstPage {
+                kpiBlock
+                if share.isConfigured { shareCard }
             }
-            if !pendingNames.isEmpty {
+            ForEach(blocks) { b in
+                gradeBlock(b.section, continued: b.isContinued)
+            }
+            if isLastPage, !pendingNames.isEmpty {
                 ExportCard {
                     Text(pendingLine)
                         .font(.system(size: 10)).foregroundStyle(.orange)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
-            ExportFooter(note: footerNote)
+            // 算式說明只放最後一頁；頁碼每一頁都要有
+            if isLastPage {
+                ExportFooter(note: footerNote)
+            } else {
+                ExportFooter(note: "接下一頁。")
+            }
         }
         .padding(.vertical, 20)
         .frame(width: exportWidth)
         .background(Color(.systemGroupedBackground))
+    }
+
+    private var headerTitle: String {
+        let base = "\(String(year)) 年度 評分加總"
+        guard pageCount > 1 else { return base }
+        return base + "（\(pageIndex + 1)／\(pageCount)）"
     }
 
     // MARK: 版塊
@@ -370,14 +495,16 @@ struct PerformanceSummaryExportView: View {
         }
     }
 
-    private func gradeBlock(_ section: PerformanceGradeSection) -> some View {
+    private func gradeBlock(_ section: PerformanceGradeSection,
+                            continued: Bool) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 8) {
                 Capsule()
                     .fill(LinearGradient(colors: [.orange, .orange.opacity(0.35)],
                                          startPoint: .top, endPoint: .bottom))
                     .frame(width: 3.5, height: 14)
-                Text(section.label).font(.subheadline.weight(.bold))
+                Text(continued ? section.label + "（續）" : section.label)
+                    .font(.subheadline.weight(.bold))
                 Spacer(minLength: 0)
                 if let w = section.weight {
                     Text("權重 ×" + PerformanceExporter.num(w))
@@ -526,8 +653,16 @@ enum PerformanceExporter {
     static func jpg<V: View>(_ view: V, name: String) -> [URL] {
         let renderer = ImageRenderer(content: view)
         renderer.proposedSize = .unspecified
-        renderer.scale = max(UIScreen.main.scale, 3)
-        guard let ui = renderer.uiImage else { return [] }
+        // [v25.426] 先量一次內容實際多大，再決定用幾倍。
+        //
+        // ImageRenderer 畫的是 CALayer，而圖層光柵化在任一邊超過 16384 像素時
+        // 會整張變空白——不會丟錯誤，只會安靜地給你一張空圖（使用者遇到的
+        // 「23 人匯出全部，每張都 6KB 一片空白」就是這個）。render 的閉包裡不畫，
+        // 所以這一次只跑版面計算，不會讓出圖時間變兩倍。
+        var measured = CGSize.zero
+        renderer.render { size, _ in measured = size }
+        renderer.scale = ImageExportLimits.safeScale(for: measured)
+        guard let ui = renderer.uiImage, !ImageExportLimits.isBlank(ui) else { return [] }
         let pages = SubordinateOverviewView.sliceTallImage(ui, maxPageHeightPt: 1600)
         var urls: [URL] = []
         for (i, page) in pages.enumerated() {
@@ -542,6 +677,22 @@ enum PerformanceExporter {
                 try data.write(to: url)
                 urls.append(url)
             } catch { continue }
+        }
+        return urls
+    }
+
+    /// 一次出多頁，每一頁各自出一張圖。回傳的順序就是頁序；
+    /// 其中任何一頁失敗就整批放棄（給使用者半套結果比明講失敗更糟）。
+    @MainActor
+    static func jpgPages<V: View>(_ views: [V], name: String) -> [URL] {
+        guard views.count > 1 else {
+            return views.first.map { jpg($0, name: name) } ?? []
+        }
+        var urls: [URL] = []
+        for (i, v) in views.enumerated() {
+            let page = jpg(v, name: "\(name)_\(i + 1)之\(views.count)")
+            guard !page.isEmpty else { return [] }
+            urls.append(contentsOf: page)
         }
         return urls
     }

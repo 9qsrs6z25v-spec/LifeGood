@@ -328,8 +328,11 @@ struct FinanceItemCard: View {
             .environmentObject(store)
             .environmentObject(lifeStore)
         let renderer = ImageRenderer(content: content)
-        renderer.scale = max(UIScreen.main.scale, 3)
-        guard let ui = renderer.uiImage, let data = ui.jpegData(compressionQuality: 0.95) else { return }
+        var measured = CGSize.zero
+        renderer.render { size, _ in measured = size }
+        renderer.scale = ImageExportLimits.safeScale(for: measured)
+        guard let ui = renderer.uiImage, !ImageExportLimits.isBlank(ui),
+              let data = ui.jpegData(compressionQuality: 0.95) else { return }
         let safeTitle = PagedImageExporter.sanitizeFileName(String(titleText.prefix(20)))
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("\(navTitle)_\(safeTitle)_\(Self.stampFmt.string(from: Date())).jpg")

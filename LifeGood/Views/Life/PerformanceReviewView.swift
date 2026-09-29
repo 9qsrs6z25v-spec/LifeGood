@@ -487,20 +487,34 @@ struct PerformanceSummaryView: View {
             exportError = "目前的篩選條件下沒有可以匯出的內容。"
             return
         }
-        let view = PerformanceSummaryExportView(
-            year: year,
-            sections: sections,
-            share: share,
-            submittedCount: submittedCount,
-            pendingNames: pending.map(\.name),
-            scopeLabel: exportScopeLabel,
-            personIds: exportSelection,
-            showRaterNames: exportShowRaterNames
-        )
-        .environmentObject(lifeStore)
-        let urls = PerformanceExporter.jpg(view, name: exportFileName)
+        // [v25.426] 出圖之前先分頁。
+        //
+        // 每一位底下會列出每一張票給他排第幾名，所以人多、票也多的時候整張圖
+        // 會高到幾千點；乘上 3 倍倍率超過 16384 像素之後，圖層光柵化會整張
+        // 變空白，而且完全不報錯。先切成幾頁、每頁各出一張，倍率就不必犧牲。
+        let shown = PerformanceSummaryExportView.visibleSections(
+            sections, personIds: exportSelection)
+        let pages = PerformanceSummaryExportView.paginate(
+            shown, shareVoteCount: share.votes.count, shareConfigured: share.isConfigured)
+        let views = pages.enumerated().map { i, blocks in
+            PerformanceSummaryExportView(
+                year: year,
+                sections: sections,
+                share: share,
+                submittedCount: submittedCount,
+                pendingNames: pending.map(\.name),
+                scopeLabel: exportScopeLabel,
+                personIds: exportSelection,
+                showRaterNames: exportShowRaterNames,
+                page: blocks,
+                pageIndex: i,
+                pageCount: pages.count
+            )
+            .environmentObject(lifeStore)
+        }
+        let urls = PerformanceExporter.jpgPages(views, name: exportFileName)
         guard !urls.isEmpty else {
-            exportError = "出圖失敗，可能是內容太長。試著只選幾個人再匯出。"
+            exportError = "出圖失敗。試著只選幾個人再匯出，或把「顯示評分者姓名」關掉（匿名時不列出未送出的名單，版面會短一些）。"
             return
         }
         sharePayload = PerfSharePayload(items: urls)

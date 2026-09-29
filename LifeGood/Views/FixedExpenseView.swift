@@ -1169,8 +1169,11 @@ private struct FixedExpenseCard: View {
         .environmentObject(lifeStore)
         .environmentObject(financeStore)
         let renderer = ImageRenderer(content: content)
-        renderer.scale = max(UIScreen.main.scale, 3)
-        guard let ui = renderer.uiImage, let data = ui.jpegData(compressionQuality: 0.95) else { return }
+        var measured = CGSize.zero
+        renderer.render { size, _ in measured = size }
+        renderer.scale = ImageExportLimits.safeScale(for: measured)
+        guard let ui = renderer.uiImage, !ImageExportLimits.isBlank(ui),
+              let data = ui.jpegData(compressionQuality: 0.95) else { return }
         let safeTitle = PagedImageExporter.sanitizeFileName(String(
             (current.title.isEmpty ? "未命名項目" : current.title).prefix(20)))
         let url = FileManager.default.temporaryDirectory

@@ -488,8 +488,12 @@ struct SubordinateOverviewView: View {
             .environment(\.itemRowChipsWrap, true)
             .environmentObject(lifeStore)
         let renderer = ImageRenderer(content: content)
-        renderer.scale = max(UIScreen.main.scale, 3)
-        guard let ui = renderer.uiImage else { return }
+        // [v25.426] 人多的時候整張圖會高到光柵化上限以上，出來會是一片空白。
+        // 先量再決定倍率，並擋掉空白圖——寧可明講失敗，也不要存一張空檔案。
+        var measured = CGSize.zero
+        renderer.render { size, _ in measured = size }
+        renderer.scale = ImageExportLimits.safeScale(for: measured)
+        guard let ui = renderer.uiImage, !ImageExportLimits.isBlank(ui) else { return }
         let pages = Self.sliceTallImage(ui, maxPageHeightPt: 1600)
         let stamp = Self.stampFmt.string(from: Date())
         var urls: [URL] = []

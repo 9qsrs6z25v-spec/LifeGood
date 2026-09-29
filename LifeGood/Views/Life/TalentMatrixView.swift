@@ -484,8 +484,11 @@ struct TalentMatrixView: View {
             .background(Color(.systemBackground))
             .environmentObject(lifeStore)
         let renderer = ImageRenderer(content: content)
-        renderer.scale = max(UIScreen.main.scale, 3)
-        guard let ui = renderer.uiImage, let data = ui.jpegData(compressionQuality: 0.95) else { return }
+        var measured = CGSize.zero
+        renderer.render { size, _ in measured = size }
+        renderer.scale = ImageExportLimits.safeScale(for: measured)
+        guard let ui = renderer.uiImage, !ImageExportLimits.isBlank(ui),
+              let data = ui.jpegData(compressionQuality: 0.95) else { return }
         let name = "人才矩陣_\(Self.stampFormatter.string(from: Date())).jpg"
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(name)
         do {
@@ -1348,8 +1351,11 @@ struct TalentStatsView: View {
             .background(Color(.systemGroupedBackground))
             .environmentObject(lifeStore)
         let renderer = ImageRenderer(content: framed)
-        renderer.scale = max(UIScreen.main.scale, 3)
-        guard let ui = renderer.uiImage, let data = ui.jpegData(compressionQuality: 0.95) else { return }
+        var measured = CGSize.zero
+        renderer.render { size, _ in measured = size }
+        renderer.scale = ImageExportLimits.safeScale(for: measured)
+        guard let ui = renderer.uiImage, !ImageExportLimits.isBlank(ui),
+              let data = ui.jpegData(compressionQuality: 0.95) else { return }
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("\(baseName)_\(Self.statsStampFmt.string(from: Date())).jpg")
         do {
