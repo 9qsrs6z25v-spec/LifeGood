@@ -95,6 +95,16 @@ struct OrganizationView: View {
     /// [v25.360] 決議內容搜尋：固定在頂端，命中後把清單捲到該筆決議所屬的廠區
     @State private var resolutionQuery = ""
     @State private var hitIndex = 0
+    /// [v25.427] 兩條搜尋列改成用完就收。
+    ///
+    /// 原本兩條都常駐在標題下面，佔掉兩排高度，而且多數時候只是要看組織——
+    /// 現在收進右上角的「…」，跟檢視切換與分享放在同一個地方，
+    /// 標題下面直接就是清單。
+    @State private var showOrgSearch = false
+    @State private var showResolutionSearch = false
+    @FocusState private var focusedSearch: OrgSearchField?
+
+    enum OrgSearchField: Hashable { case org, resolution }
     /// [v25.364] 匯出失敗的原因。出圖失敗時一定要講出來，不能按了沒反應
     @State private var exportError: String?
     /// [v25.367] 編年史出圖進度；非 nil＝正在出圖，畫面蓋一層 HUD 並擋住重複點擊
@@ -162,9 +172,9 @@ struct OrganizationView: View {
                     emptyState
                 } else {
                     VStack(spacing: 0) {
-                        orgSearchBar
+                        if showOrgSearch { orgSearchBar }
                         // 決議搜尋只在目錄模式有意義（要捲動到廠區那一列）
-                        if directoryMode,
+                        if showResolutionSearch, directoryMode,
                            orgSearchText.trimmingCharacters(in: .whitespaces).isEmpty,
                            !lifeStore.companySites.isEmpty {
                             resolutionSearchBar
@@ -199,41 +209,7 @@ struct OrganizationView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    if !lifeStore.departments.isEmpty {
-                        HStack(spacing: 14) {
-                            Button {
-                                withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) {
-                                    directoryMode.toggle()
-                                }
-                            } label: {
-                                Image(systemName: directoryMode
-                                      ? "rectangle.3.group" : "list.bullet.indent")
-                                    .foregroundStyle(.indigo)
-                            }
-                            Menu {
-                                Button {
-                                    pdfURL = generatePDFURL().map { IdentifiableURL(url: $0) }
-                                } label: {
-                                    Label("組織圖 PDF", systemImage: "doc.richtext")
-                                }
-                                if !lifeStore.companySites.isEmpty {
-                                    Button {
-                                        shareChronicle(.vertical)
-                                    } label: {
-                                        Label("廠區編年史（直式）", systemImage: "arrow.down.doc")
-                                    }
-                                    Button {
-                                        shareChronicle(.horizontal)
-                                    } label: {
-                                        Label("廠區編年史（橫式）", systemImage: "arrow.right.doc.on.clipboard")
-                                    }
-                                }
-                            } label: {
-                                Image(systemName: "square.and.arrow.up")
-                                    .foregroundStyle(.green)
-                            }
-                        }
-                    }
+                    if !lifeStore.departments.isEmpty { orgToolbarMenu }
                 }
             }
             .sheet(item: $pdfURL) { wrapper in
@@ -2825,6 +2801,96 @@ struct OrgPersonDetailView: View {
 // MARK: - 組織頁搜尋與簡易作品編輯（v25.323）
 
 extension OrganizationView {
+
+    // MARK: - [v25.427] 右上角的「…」
+
+    /// 檢視切換、兩種搜尋、分享全收在這一顆裡。
+    ///
+    /// 為什麼不留原本那兩顆獨立按鈕：標題列只有那麼寬，功能一路加上去之後
+    /// 開始互相擠；而搜尋原本是兩條常駐的列，等於用兩排高度換一個偶爾才用的
+    /// 功能。收進同一顆選單之後，標題下面直接就是組織清單。
+    var orgToolbarMenu: some View {
+        Menu {
+            Section("檢視") {
+                Button {
+                    withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) {
+                        directoryMode.toggle()
+                    }
+                } label: {
+                    Label(directoryMode ? "切換成樹狀圖" : "切換成目錄",
+                          systemImage: directoryMode ? "rectangle.3.group" : "list.bullet.indent")
+                }
+            }
+            Section("搜尋") {
+                Button { toggleOrgSearch() } label: {
+                    Label(showOrgSearch ? "收起人員搜尋" : "搜尋人員、報告或改善項目",
+                          systemImage: showOrgSearch ? "magnifyingglass.circle.fill" : "magnifyingglass")
+                }
+                // 決議搜尋要把清單捲到廠區那一列，樹狀圖沒有那一列可捲
+                if directoryMode, !lifeStore.companySites.isEmpty {
+                    Button { toggleResolutionSearch() } label: {
+                        Label(showResolutionSearch ? "收起決議搜尋" : "搜尋重大決議",
+                              systemImage: "doc.text.magnifyingglass")
+                    }
+                }
+            }
+            Section("分享") {
+                Button {
+                    pdfURL = generatePDFURL().map { IdentifiableURL(url: $0) }
+                } label: {
+                    Label("組織圖 PDF", systemImage: "doc.richtext")
+                }
+                if !lifeStore.companySites.isEmpty {
+                    Button {
+                        shareChronicle(.vertical)
+                    } label: {
+                        Label("廠區編年史（直式）", systemImage: "arrow.down.doc")
+                    }
+                    Button {
+                        shareChronicle(.horizontal)
+                    } label: {
+                        Label("廠區編年史（橫式）", systemImage: "arrow.right.doc.on.clipboard")
+                    }
+                }
+            }
+        } label: {
+            // 有搜尋條件還開著時把圖示填實，不然收起搜尋列之後
+            // 會看不出清單為什麼被篩過
+            Image(systemName: hasActiveSearch ? "ellipsis.circle.fill" : "ellipsis.circle")
+                .foregroundStyle(.indigo)
+        }
+    }
+
+    private var hasActiveSearch: Bool {
+        !orgSearchText.trimmingCharacters(in: .whitespaces).isEmpty
+            || !resolutionQuery.trimmingCharacters(in: .whitespaces).isEmpty
+    }
+
+    func toggleOrgSearch() {
+        let opening = !showOrgSearch
+        withAnimation(.easeInOut(duration: 0.18)) {
+            showOrgSearch = opening
+            // 收起來就把條件清掉：留著一個看不見的篩選條件，
+            // 下次進來只會覺得「人怎麼少了」
+            if !opening { orgSearchText = "" }
+        }
+        guard opening else { return }
+        // 要等這一輪 layout 跑完欄位才存在，同一個 runloop 設焦點不會生效
+        DispatchQueue.main.async { self.focusedSearch = .org }
+    }
+
+    func toggleResolutionSearch() {
+        let opening = !showResolutionSearch
+        withAnimation(.easeInOut(duration: 0.18)) {
+            showResolutionSearch = opening
+            if !opening { resolutionQuery = ""; hitIndex = 0 }
+        }
+        guard opening else { return }
+        DispatchQueue.main.async { self.focusedSearch = .resolution }
+    }
+
+    // MARK: - 搜尋列
+
     /// 頂部搜尋列：人員／報告／改善項目
     var orgSearchBar: some View {
         HStack(spacing: 8) {
@@ -2833,6 +2899,7 @@ extension OrganizationView {
                 .foregroundStyle(.secondary)
             TextField("搜尋人員、報告或改善項目", text: $orgSearchText)
                 .autocorrectionDisabled()
+                .focused($focusedSearch, equals: .org)
             if !orgSearchText.isEmpty {
                 Button { orgSearchText = "" } label: {
                     Image(systemName: "xmark.circle.fill")
@@ -2840,6 +2907,12 @@ extension OrganizationView {
                 }
                 .buttonStyle(.plain)
             }
+            // 清空與收起分成兩顆：打字打到一半想換關鍵字，不該連整條列一起消失
+            Button { toggleOrgSearch() } label: {
+                Image(systemName: "chevron.up")
+                    .font(.system(size: 12, weight: .bold)).foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
         }
         .padding(.horizontal, 12).padding(.vertical, 9)
         .background(Color(.secondarySystemBackground))
@@ -2860,6 +2933,7 @@ extension OrganizationView {
                 TextField("搜尋重大決議，跳到所屬廠區", text: $resolutionQuery)
                     .autocorrectionDisabled()
                     .submitLabel(.search)
+                    .focused($focusedSearch, equals: .resolution)
                     .onChange(of: resolutionQuery) { _, _ in hitIndex = 0 }
                 if hasQuery {
                     Text(hits.isEmpty ? "0" : "\(min(hitIndex, hits.count - 1) + 1) / \(hits.count)")
@@ -2883,6 +2957,11 @@ extension OrganizationView {
                     }
                     .buttonStyle(.plain)
                 }
+                Button { toggleResolutionSearch() } label: {
+                    Image(systemName: "chevron.up")
+                        .font(.system(size: 12, weight: .bold)).foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
             }
             .padding(.horizontal, 12).padding(.vertical, 9)
             .background(Color(.secondarySystemBackground))

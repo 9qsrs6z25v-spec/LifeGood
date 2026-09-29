@@ -102,16 +102,9 @@ struct CompanySiteSection: View {
     var body: some View {
         let grouping = lifeStore.groupResolutionsByEra()
         return Section {
-            if lifeStore.companySites.isEmpty {
-                emptyRow
-            } else {
-                ForEach(sortedSites) { site in
-                    siteRow(site, grouping: grouping)
-                }
-                if !grouping.beforeAny.isEmpty {
-                    beforeAnyRow(grouping.beforeAny)
-                }
-            }
+            // [v25.427] 新增與「還沒建成據點的廠區」擺在最上面。
+            // 擺在最下面時，廠一多就要整個章節捲到底才按得到——而這兩個
+            // 恰好是最常按的：據點是一次一次補進來的，補完才看得懂那條年線。
             Button {
                 onEdit(nil)
             } label: {
@@ -121,6 +114,16 @@ struct CompanySiteSection: View {
             }
             if !lifeStore.unregisteredResolutionSites.isEmpty {
                 unregisteredHint
+            }
+            if lifeStore.companySites.isEmpty {
+                emptyRow
+            } else {
+                ForEach(sortedSites) { site in
+                    siteRow(site, grouping: grouping)
+                }
+                if !grouping.beforeAny.isEmpty {
+                    beforeAnyRow(grouping.beforeAny)
+                }
             }
         } header: {
             HStack(spacing: 8) {
