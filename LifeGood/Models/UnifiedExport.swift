@@ -8,6 +8,85 @@ struct UnifiedExport: Codable {
     var expense: ExpenseBundle
     var finance: FinanceBundle
     var life: LifeBundle
+    /// [v25.429] 這份檔案裝的是哪一塊。
+    ///
+    /// Optional 是為了舊備份——沒有這個欄位就是「全部」。存的是 rawValue 而不是
+    /// enum 本身，將來多一種範圍時，舊版 App 讀到不認得的字也只會退回「全部」，
+    /// 不會整份檔案解不出來。
+    var scope: String?
+
+    /// 這份檔案負責的範圍；認不得或沒寫就是全部
+    var exportScope: Scope { Scope(rawValue: scope ?? "") ?? .all }
+
+    /// 匯出範圍。
+    ///
+    /// ⚠️ 範圍不只是「少寫幾個欄位」——匯入的「取代」模式要跟著收斂，
+    ///    否則拿一份只有旅遊的檔案去取代，會把記帳、部屬全部清空。
+    ///    每一種範圍都必須說清楚它「擁有」哪些集合，見 applyUnified。
+    enum Scope: String, Codable, CaseIterable, Identifiable {
+        case all = "全部"
+        case career = "職涯與組織"
+        case trips = "旅遊規劃"
+        case money = "記帳與理財"
+
+        var id: String { rawValue }
+
+        var icon: String {
+            switch self {
+            case .all: return "shippingbox.fill"
+            case .career: return "building.2.fill"
+            case .trips: return "airplane"
+            case .money: return "dollarsign.circle.fill"
+            }
+        }
+
+        var detail: String {
+            switch self {
+            case .all:
+                return "記帳、理財、人生三模式的完整資料。要備份或換手機就用這個。"
+            case .career:
+                return "職涯里程碑與兼任職務、部屬、部門與職等、公司組織人員、名片、機台池。"
+            case .trips:
+                return "旅遊規劃的所有行程，加上旅行里程碑，以及已經關聯到這些行程的變動支出。"
+            case .money:
+                return "所有支出與收入、匯率、保險、股票、載具、房地產，以及財富類里程碑（銀行帳戶）。"
+            }
+        }
+
+        /// 檔名要標出來，不然三個月後看到一堆 LifeGood_*.json 分不出誰是誰
+        var fileTag: String {
+            switch self {
+            case .all: return ""
+            case .career: return "_職涯"
+            case .trips: return "_旅遊"
+            case .money: return "_記帳理財"
+            }
+        }
+
+        // MARK: 這個範圍擁有哪些集合
+
+        /// 支出／收入／匯率整批由這份檔案負責（取代時可以整個換掉）
+        var ownsAllExpenses: Bool { self == .all || self == .money }
+        /// 有帶到一部分支出（旅遊只帶關聯到行程的那幾筆，取代時只能按 id 覆蓋）
+        var carriesSomeExpenses: Bool { self == .trips }
+        var carriesFinance: Bool { self == .all || self == .money }
+        var carriesCareer: Bool { self == .all || self == .career }
+        var carriesTrips: Bool { self == .all || self == .trips }
+        /// 個人／家庭那一塊（個人檔案、家庭成員、關係、寵物、行程表、健康、個人事件、家庭待辦）
+        var carriesPersonal: Bool { self == .all }
+
+        /// 這份檔案負責哪幾類里程碑；nil＝全部。
+        /// 里程碑是一個混著職涯、財富、旅行、家庭的集合，所以部分範圍的檔案
+        /// 只能換掉自己那幾類，不能整批覆蓋。
+        var milestoneCategories: Set<MilestoneCategory>? {
+            switch self {
+            case .all: return nil
+            case .career: return [.career]
+            case .trips: return [.travel]
+            case .money: return [.achievement, .realEstate]
+            }
+        }
+    }
 
     struct ExpenseBundle: Codable {
         var expenses: [Expense]
@@ -45,36 +124,89 @@ struct UnifiedExport: Codable {
         var tripPlans: [TripPlan]?
     }
 
-    static func build(expense: ExpenseStore, finance: FinanceStore, life: LifeStore) -> UnifiedExport {
-        UnifiedExport(
+    static func build(expense: ExpenseStore, finance: FinanceStore, life: LifeStore,
+                      scope: Scope = .all) -> UnifiedExport {
+        // 沒帶到的欄位一律留 nil（Optional）或空陣列。匯入端會依 scope 決定
+        // 哪些集合歸這份檔案管，所以「空」不等於「請清空」。
+        let plans = scope.carriesTrips ? life.tripPlans : []
+        let planIds = Set(plans.map(\.id))
+
+        let expenses: [Expense]
+        if scope.ownsAllExpenses {
+            expenses = expense.expenses
+        } else if scope.carriesSomeExpenses {
+            // 旅遊範圍帶上掛在這批行程上的變動支出——花費與照片跟著行程一起走，
+            // 不然搬過去的行程相本會缺一半
+            expenses = expense.expenses.filter {
+                guard let pid = $0.linkedTripPlanId else { return false }
+                return planIds.contains(pid)
+            }
+        } else {
+            expenses = []
+        }
+
+        let milestones: [LifeMilestone]
+        if let cats = scope.milestoneCategories {
+            milestones = life.milestones.filter { cats.contains($0.category) }
+        } else {
+            milestones = life.milestones
+        }
+
+        return UnifiedExport(
             version: "2",
             exportDate: Date(),
-            expense: ExpenseBundle(expenses: expense.expenses, incomes: expense.incomes, currencyRates: expense.currencyRates),
+            expense: ExpenseBundle(
+                expenses: expenses,
+                incomes: scope.ownsAllExpenses ? expense.incomes : [],
+                currencyRates: scope.ownsAllExpenses ? expense.currencyRates : nil),
             finance: FinanceBundle(
-                insurances: finance.insurances,
-                stocks: finance.stocks,
-                vehicles: finance.vehicles,
-                realEstates: finance.realEstates
+                insurances: scope.carriesFinance ? finance.insurances : [],
+                stocks: scope.carriesFinance ? finance.stocks : [],
+                vehicles: scope.carriesFinance ? finance.vehicles : [],
+                realEstates: scope.carriesFinance ? finance.realEstates : []
             ),
             life: LifeBundle(
-                profile: life.profile,
-                familyMembers: life.familyMembers,
-                milestones: life.milestones,
-                relationships: life.relationships,
-                pets: life.pets,
-                schedules: life.schedules,
-                subordinates: life.subordinates,
-                departments: life.departments,
-                gradeTitles: life.gradeTitles,
-                healthProfile: life.healthProfile,
-                businessCards: life.businessCards,
-                personalEvents: life.personalEvents,
-                orgPeople: life.orgPeople,
-                familyTasks: life.familyTasks,
-                equipmentPool: life.equipmentPool,
-                tripPlans: life.tripPlans
-            )
+                profile: scope.carriesPersonal ? life.profile : nil,
+                familyMembers: scope.carriesPersonal ? life.familyMembers : nil,
+                milestones: milestones,
+                relationships: scope.carriesPersonal ? life.relationships : [],
+                pets: scope.carriesPersonal ? life.pets : [],
+                schedules: scope.carriesPersonal ? life.schedules : [],
+                subordinates: scope.carriesCareer ? life.subordinates : nil,
+                departments: scope.carriesCareer ? life.departments : nil,
+                gradeTitles: scope.carriesCareer ? life.gradeTitles : nil,
+                healthProfile: scope.carriesPersonal ? life.healthProfile : nil,
+                businessCards: scope.carriesCareer ? life.businessCards : nil,
+                personalEvents: scope.carriesPersonal ? life.personalEvents : nil,
+                orgPeople: scope.carriesCareer ? life.orgPeople : nil,
+                familyTasks: scope.carriesPersonal ? life.familyTasks : nil,
+                equipmentPool: scope.carriesCareer ? life.equipmentPool : nil,
+                tripPlans: scope.carriesTrips ? plans : nil
+            ),
+            scope: scope.rawValue
         )
+    }
+
+    /// 這份檔案裡各類資料各有幾筆（給匯出前的預覽用）
+    var itemCounts: [(label: String, count: Int)] {
+        var out: [(String, Int)] = []
+        func add(_ label: String, _ n: Int) { if n > 0 { out.append((label, n)) } }
+        add("支出", expense.expenses.count)
+        add("收入", expense.incomes.count)
+        add("保險", finance.insurances.count)
+        add("股票", finance.stocks.count)
+        add("載具", finance.vehicles.count)
+        add("房地產", finance.realEstates.count)
+        add("里程碑", life.milestones.count)
+        add("行程規劃", life.tripPlans?.count ?? 0)
+        add("部屬", life.subordinates?.count ?? 0)
+        add("部門", life.departments?.count ?? 0)
+        add("組織人員", life.orgPeople?.count ?? 0)
+        add("名片", life.businessCards?.count ?? 0)
+        add("機台", life.equipmentPool?.count ?? 0)
+        add("家庭成員", life.familyMembers?.count ?? 0)
+        add("寵物", life.pets.count)
+        return out
     }
 }
 
@@ -612,16 +744,28 @@ enum UnifiedImporter {
     ) -> ImportResult {
         var result = ImportResult()
 
+        // [v25.429] 這份檔案負責哪一塊。
+        //
+        // 「取代」必須跟著範圍收斂，否則拿一份只有旅遊的檔案去取代，
+        // 會把記帳、部屬全部清空——那是使用者絕對沒有要的。原則是：
+        // 只換掉這份檔案「擁有」的集合，沒帶到的一律原封不動；
+        // 只擁有一部分的（旅遊帶的那幾筆支出、部分類別的里程碑）按 id 覆蓋。
+        let scope = payload.exportScope
+
         switch mode {
         case .replace:
-            let incomingIds = Set(payload.expense.expenses.map(\.id))
-            for old in expense.expenses where !incomingIds.contains(old.id) {
-                for name in old.photoFileNames { Expense.deletePhoto(name) }
+            if scope.ownsAllExpenses {
+                let incomingIds = Set(payload.expense.expenses.map(\.id))
+                for old in expense.expenses where !incomingIds.contains(old.id) {
+                    for name in old.photoFileNames { Expense.deletePhoto(name) }
+                }
             }
             // RealEstate 內嵌的電梯保養/水電繳費/裝潢照片/文件檔案未隨 replace 匯入被清掉的話，
             // 舊檔案會永久留在磁碟上並被 CloudKitManager.uploadAllLocalPhotos() 當成「未上傳的本機照片」
             // 反覆重傳，對齊上面 Expense 的清理方式，只清掉被 replace 淘汰、不在新資料中的 RealEstate。
-            let incomingRealEstateIds = Set(payload.finance.realEstates.map(\.id))
+            let incomingRealEstateIds = scope.carriesFinance
+                ? Set(payload.finance.realEstates.map(\.id))
+                : Set(finance.realEstates.map(\.id))      // 不碰財務時等於一筆都不淘汰
             for old in finance.realEstates where !incomingRealEstateIds.contains(old.id) {
                 for up in old.utilityPayments {
                     for name in up.photoFileNames { UtilityPayment.deletePhoto(name) }
@@ -642,7 +786,7 @@ enum UnifiedImporter {
             // 對齊上面 Expense／RealEstate 的清理方式；三者皆為 optional 欄位，只在匯入檔
             // 實際帶有該類資料（下方才會整批覆蓋本機）時才清理，避免匯入檔未帶該類別時
             // 誤刪本機既有照片。
-            if let members = payload.life.familyMembers {
+            if scope.carriesPersonal, let members = payload.life.familyMembers {
                 let incomingMemberIds = Set(members.map(\.id))
                 for old in life.familyMembers where !incomingMemberIds.contains(old.id) {
                     for record in old.childRecords {
@@ -653,13 +797,13 @@ enum UnifiedImporter {
                     }
                 }
             }
-            if let cards = payload.life.businessCards {
+            if scope.carriesCareer, let cards = payload.life.businessCards {
                 let incomingCardIds = Set(cards.map(\.id))
                 for old in life.businessCards where !incomingCardIds.contains(old.id) {
                     if let name = old.photoFileName { BusinessCard.deletePhoto(name) }
                 }
             }
-            if let people = payload.life.orgPeople {
+            if scope.carriesCareer, let people = payload.life.orgPeople {
                 let incomingPeopleIds = Set(people.map(\.id))
                 for old in life.orgPeople where !incomingPeopleIds.contains(old.id) {
                     if let name = old.photoFileName { OrgPerson.deletePhoto(name) }
@@ -670,33 +814,56 @@ enum UnifiedImporter {
             // 還原/覆蓋整批匯入時最多分別造成 2 次與 13 次完全重複的編碼與畫面重繪；
             // 比照 GradeTitleView 既有的 withBatch 用法，改成各自只存檔一次。
             expense.withBatch {
-                expense.expenses = payload.expense.expenses
-                expense.incomes = payload.expense.incomes
-                if let rates = payload.expense.currencyRates { expense.currencyRates = rates }
+                if scope.ownsAllExpenses {
+                    expense.expenses = payload.expense.expenses
+                    expense.incomes = payload.expense.incomes
+                    if let rates = payload.expense.currencyRates { expense.currencyRates = rates }
+                } else if scope.carriesSomeExpenses {
+                    // 只帶了一部分（旅遊關聯的那幾筆）：按 id 覆蓋，
+                    // 其餘的支出不是這份檔案管的，一筆都不能動
+                    let incoming = Set(payload.expense.expenses.map(\.id))
+                    expense.expenses = expense.expenses.filter { !incoming.contains($0.id) }
+                        + payload.expense.expenses
+                }
             }
-            finance.insurances = payload.finance.insurances
-            finance.stocks = payload.finance.stocks
-            finance.vehicles = payload.finance.vehicles
-            finance.realEstates = payload.finance.realEstates
+            if scope.carriesFinance {
+                finance.insurances = payload.finance.insurances
+                finance.stocks = payload.finance.stocks
+                finance.vehicles = payload.finance.vehicles
+                finance.realEstates = payload.finance.realEstates
+            }
             life.withBatch {
-                if let profile = payload.life.profile { life.profile = profile }
-                if let members = payload.life.familyMembers { life.familyMembers = members }
-                life.milestones = payload.life.milestones
-                life.relationships = payload.life.relationships
-                life.pets = payload.life.pets
-                life.schedules = payload.life.schedules
-                if let subs = payload.life.subordinates { life.subordinates = subs }
-                if let depts = payload.life.departments { life.departments = depts }
-                if let gts = payload.life.gradeTitles { life.gradeTitles = gts }
-                if let hp = payload.life.healthProfile { life.healthProfile = hp }
-                if let cards = payload.life.businessCards { life.businessCards = cards }
-                if let events = payload.life.personalEvents { life.personalEvents = events }
-                if let people = payload.life.orgPeople { life.orgPeople = people }
-                if let ft = payload.life.familyTasks { life.familyTasks = ft }
-                if let pool = payload.life.equipmentPool { life.equipmentPool = pool }
-                if let plans = payload.life.tripPlans { life.tripPlans = plans }
-                // 舊格式備份的機台在各部屬身上——覆蓋匯入後立刻搬進機台池
-                life.migrateLegacyEquipmentsToPool()
+                // 里程碑是職涯、財富、旅行、家庭混在一起的一個集合，
+                // 部分範圍的檔案只換掉自己那幾類，其他類別留著
+                if let cats = scope.milestoneCategories {
+                    life.milestones = life.milestones.filter { !cats.contains($0.category) }
+                        + payload.life.milestones
+                } else {
+                    life.milestones = payload.life.milestones
+                }
+                if scope.carriesPersonal {
+                    if let profile = payload.life.profile { life.profile = profile }
+                    if let members = payload.life.familyMembers { life.familyMembers = members }
+                    life.relationships = payload.life.relationships
+                    life.pets = payload.life.pets
+                    life.schedules = payload.life.schedules
+                    if let hp = payload.life.healthProfile { life.healthProfile = hp }
+                    if let events = payload.life.personalEvents { life.personalEvents = events }
+                    if let ft = payload.life.familyTasks { life.familyTasks = ft }
+                }
+                if scope.carriesCareer {
+                    if let subs = payload.life.subordinates { life.subordinates = subs }
+                    if let depts = payload.life.departments { life.departments = depts }
+                    if let gts = payload.life.gradeTitles { life.gradeTitles = gts }
+                    if let cards = payload.life.businessCards { life.businessCards = cards }
+                    if let people = payload.life.orgPeople { life.orgPeople = people }
+                    if let pool = payload.life.equipmentPool { life.equipmentPool = pool }
+                    // 舊格式備份的機台在各部屬身上——覆蓋匯入後立刻搬進機台池
+                    life.migrateLegacyEquipmentsToPool()
+                }
+                if scope.carriesTrips, let plans = payload.life.tripPlans {
+                    life.tripPlans = plans
+                }
             }
 
             result.expenses = payload.expense.expenses.count

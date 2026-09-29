@@ -248,6 +248,8 @@ struct SettingsView: View {
     @State private var diagResultText: String?
     @State private var verifyResultIsError = false
     @State private var showBackupRange = false     // 完整備份的時間範圍選擇
+    /// [v25.429] 匯出 JSON 前先選範圍（全部／職涯／旅遊／記帳理財）
+    @State private var showExportScope = false
     @State private var importResultMessage = ""
     @State private var showImportResult = false
 
@@ -371,6 +373,12 @@ struct SettingsView: View {
             // 隱藏管理控制台
             .sheet(isPresented: $showAdminConsole) {
                 AdminConsoleView()
+            }
+            // [v25.429] 匯出 JSON：先選範圍
+            .sheet(isPresented: $showExportScope) {
+                ExportScopeSheet(expense: store, finance: financeStore, life: lifeStore) { scope in
+                    exportJSON(scope: scope)
+                }
             }
             // 完整備份：照片時間範圍選擇
             .sheet(isPresented: $showBackupRange) {
@@ -1287,13 +1295,13 @@ struct SettingsView: View {
         Section {
             // 匯出 JSON
             Button {
-                exportJSON()
+                showExportScope = true
             } label: {
                 settingsActionRow(
                     icon: "square.and.arrow.up",
                     color: .green,
                     title: "匯出 JSON",
-                    subtitle: "完整資料備份，可重新匯入",
+                    subtitle: "可選全部、職涯、旅遊或記帳理財，可重新匯入",
                     busy: exportBusy
                 )
             }
@@ -1425,7 +1433,7 @@ struct SettingsView: View {
         } header: {
             Text("資料管理")
         } footer: {
-            Text("「匯出 JSON」會一次包含記帳/理財/人生三模式的完整資料；「匯出部屬資料」只含部屬（連同班表、任務、會議、請假紀錄），方便單獨在裝置間搬移。匯入時會自動辨識檔案類型，可選擇合併或取代。")
+            Text("「匯出 JSON」可以選範圍：全部（記帳/理財/人生三模式）、職涯與組織、旅遊規劃、記帳與理財。範圍會寫進檔案裡，所以用「取代」匯入一份只有旅遊的檔案時，只會換掉旅遊那一塊，其他資料原封不動。「匯出部屬資料」只含部屬（連同班表、任務、會議、請假紀錄）。匯入時會自動辨識檔案類型，可選擇合併或取代。")
         }
     }
 
@@ -1914,11 +1922,13 @@ struct SettingsView: View {
         }
     }
 
-    private func exportJSON() {
+    private func exportJSON(scope: UnifiedExport.Scope = .all) {
         guard !exportBusy else { return }
         exportBusy = true
-        let payload = UnifiedExport.build(expense: store, finance: financeStore, life: lifeStore)
-        let filename = "LifeGood_\(dateStamp()).json"
+        let payload = UnifiedExport.build(expense: store, finance: financeStore,
+                                          life: lifeStore, scope: scope)
+        // 檔名帶上範圍：三個月後看到一堆 LifeGood_*.json 才分得出誰是誰
+        let filename = "LifeGood\(scope.fileTag)_\(dateStamp()).json"
         Task.detached {
             let data = UnifiedExporter.exportJSON(payload)
             let url = FileManager.default.temporaryDirectory.appendingPathComponent(filename)
@@ -3650,5 +3660,112 @@ struct HeroPreviewCard: View {
             HeroTrendPoint(date: cal.date(byAdding: .month, value: i, to: base) ?? base,
                            value: v * 1_000)
         }
+    }
+}
+
+// MARK: - [v25.429] 匯出 JSON 的範圍選擇
+
+/// 匯出前先問「要匯出哪一塊」。
+///
+/// 為什麼值得一個獨立的畫面而不是直接匯出全部：整份備份動輒幾 MB，
+/// 但多數時候想帶走的只是其中一塊——換公司要帶職涯、跟旅伴分享要帶行程。
+///
+/// ⚠️ 範圍不只是「少寫幾個欄位」。範圍會寫進 JSON 裡（UnifiedExport.scope），
+///    匯入端的「取代」模式會跟著收斂，只換掉這份檔案負責的那幾個集合。
+///    沒有這一步的話，拿一份只有旅遊的檔案去取代就會把記帳、部屬全部清空。
+struct ExportScopeSheet: View {
+    @Environment(\.dismiss) private var dismiss
+
+    let expense: ExpenseStore
+    let finance: FinanceStore
+    let life: LifeStore
+    let onExport: (UnifiedExport.Scope) -> Void
+
+    @State private var scope: UnifiedExport.Scope = .all
+
+    /// 選到的範圍實際會帶走哪些東西、各幾筆。
+    /// 按下去才知道匯出了什麼太晚了，選的時候就該看得到。
+    private var counts: [(label: String, count: Int)] {
+        UnifiedExport.build(expense: expense, finance: finance, life: life, scope: scope)
+            .itemCounts
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    ForEach(UnifiedExport.Scope.allCases) { s in
+                        Button { scope = s } label: { row(s) }
+                            .buttonStyle(.plain)
+                    }
+                } header: {
+                    Text("匯出範圍")
+                } footer: {
+                    Text(scope == .all
+                         ? "完整備份。要換手機、或要留一份保險，用這個。"
+                         : "範圍會寫進檔案裡。之後用「取代」匯入這份檔案時，只會換掉這一塊，其他資料原封不動。")
+                }
+
+                Section {
+                    if counts.isEmpty {
+                        Text("這個範圍目前沒有資料可以匯出。")
+                            .font(.caption).foregroundStyle(.orange)
+                    } else {
+                        ForEach(counts, id: \.label) { item in
+                            HStack {
+                                Text(item.label).font(.subheadline)
+                                Spacer()
+                                Text("\(item.count)")
+                                    .font(.subheadline.monospacedDigit())
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                } header: {
+                    Text("這份檔案會包含")
+                } footer: {
+                    Text("JSON 只裝文字資料，照片與文件不在裡面——那要用下面的「完整備份」。")
+                }
+            }
+            .navigationTitle("匯出 JSON")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("取消") { dismiss() }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("匯出") {
+                        onExport(scope)
+                        dismiss()
+                    }
+                    .bold()
+                    .disabled(counts.isEmpty)
+                }
+            }
+        }
+    }
+
+    private func row(_ s: UnifiedExport.Scope) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: s.icon)
+                .font(.system(size: 15))
+                .foregroundStyle(s == scope ? Color.green : Color.secondary)
+                .frame(width: 24)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(s.rawValue)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.primary)
+                Text(s.detail)
+                    .font(.caption2).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 0)
+            if s == scope {
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundStyle(.green)
+            }
+        }
+        .padding(.vertical, 3)
+        .contentShape(Rectangle())
     }
 }
