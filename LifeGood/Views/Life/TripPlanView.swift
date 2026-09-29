@@ -3105,7 +3105,14 @@ struct TripMapPickerSheet: View {
         NavigationStack {
             ZStack(alignment: .bottom) {
                 mapLayer
-                infoCard
+                VStack(spacing: 8) {
+                    // [v25.428] 點到地方之後才出現：沒點之前那一片是地圖，
+                    // 擺一條空的照片列只是把地圖擋掉
+                    if tapped != nil {
+                        MapPickerPlaceGallery(coordinate: pickedCoordinate, accent: accent)
+                    }
+                    infoCard
+                }
             }
             .navigationTitle("在地圖上選位置")
             .navigationBarTitleDisplayMode(.inline)
@@ -3374,5 +3381,204 @@ struct TripMapPickerSheet: View {
                           p.locality, p.subLocality].compactMap { $0 }
         guard !adminNames.contains(area) else { return nil }
         return area
+    }
+}
+
+// MARK: - 選位置時的照片
+
+/// [v25.428] 在地圖上點到一個地方之後，在地圖與資訊卡之間鋪一排照片，
+/// 用來確認「我點到的是不是我想的那個地方」。
+///
+/// 照片有兩種來源，兩種都不是憑空生出來的：
+///
+///  1. **Apple 的「環視」實景影像**（Look Around）。這是 MapKit 唯一公開提供的
+///     實景照片，拍的是那個座標的街景。不是每個地方都有——巷弄、山區、
+///     非公開區域常常沒有，沒有就不佔位置。
+///  2. **這個 App 裡自己已經有的照片**：以前在 150 公尺內記過的旅遊景點與
+///     帶地點的變動支出。「我上次來拍的」比任何官方圖都更幫得上忙。
+///
+/// ⚠️ Apple 沒有公開「這家店的照片」這種 API——想直接拿到餐廳的美食照是做不到的。
+///    所以這裡誠實地只端出拿得到的這兩種，而不是去別的地方抓圖充數。
+struct MapPickerPlaceGallery: View {
+    @EnvironmentObject var lifeStore: LifeStore
+    @EnvironmentObject var expenseStore: ExpenseStore
+
+    let coordinate: CLLocationCoordinate2D
+    let accent: Color
+
+    /// 這個 App 自己拍過的一張
+    struct LocalShot: Identifiable {
+        let id: String
+        let url: URL
+        let caption: String
+    }
+
+    @State private var scene: MKLookAroundScene?
+    @State private var lookAroundImage: UIImage?
+    @State private var isLoading = false
+    @State private var showLookAround = false
+    @State private var viewingPhoto: IdentifiableURL?
+    /// 附近拍過的照片。放在 @State 而不是 computed：支出可能有好幾千筆，
+    /// 每次重繪都掃一遍會讓拖地圖變頓。
+    @State private var shots: [LocalShot] = []
+
+    /// 查過的那一點。座標只取到小數第 5 位（約 1 公尺），
+    /// 手指抖一下不該重送一次請求。
+    private var key: String {
+        String(format: "%.5f,%.5f", coordinate.latitude, coordinate.longitude)
+    }
+
+    var body: some View {
+        Group {
+            if lookAroundImage != nil || !shots.isEmpty || isLoading {
+                content
+            }
+        }
+        .task(id: key) { await load() }
+        .sheet(isPresented: $showLookAround) {
+            LookAroundPreview(initialScene: scene)
+                .ignoresSafeArea()
+        }
+        .sheet(item: $viewingPhoto) { wrapper in
+            PhotoLightbox(url: wrapper.url)
+        }
+    }
+
+    private var content: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(spacing: 5) {
+                Image(systemName: "photo.on.rectangle.angled")
+                    .font(.system(size: 9, weight: .bold))
+                Text(captionLine)
+                    .font(.system(size: 10, weight: .semibold))
+                if isLoading { ProgressView().scaleEffect(0.45) }
+                Spacer(minLength: 0)
+            }
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 4)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    if let img = lookAroundImage {
+                        Button { showLookAround = true } label: {
+                            lookAroundTile(img)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    ForEach(shots) { shot in
+                        Button { viewingPhoto = IdentifiableURL(url: shot.url) } label: {
+                            localTile(shot)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, 4)
+                .padding(.vertical, 2)
+            }
+            .scrollEdgeFade(width: 12)
+        }
+        .padding(8)
+        .background(.ultraThinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .overlay(RoundedRectangle(cornerRadius: 14)
+            .stroke(Color(.separator).opacity(0.15), lineWidth: 0.75))
+        .shadow(color: .black.opacity(0.10), radius: 5, y: 2)
+        .padding(.horizontal, 12)
+    }
+
+    /// 字串在 ViewBuilder 外組好
+    private var captionLine: String {
+        if isLoading && lookAroundImage == nil && shots.isEmpty { return "正在找這裡的實景…" }
+        var parts: [String] = []
+        if lookAroundImage != nil { parts.append("實景") }
+        if !shots.isEmpty { parts.append("我拍過 \(shots.count) 張") }
+        return parts.isEmpty ? "這裡沒有可看的照片" : parts.joined(separator: "・")
+    }
+
+    private func lookAroundTile(_ img: UIImage) -> some View {
+        ZStack(alignment: .bottomLeading) {
+            Image(uiImage: img)
+                .resizable().scaledToFill()
+                .frame(width: 128, height: 84)
+                .clipped()
+            HStack(spacing: 3) {
+                Image(systemName: "binoculars.fill").font(.system(size: 8, weight: .bold))
+                Text("環視").font(.system(size: 9, weight: .bold))
+            }
+            .foregroundStyle(.white)
+            .padding(.horizontal, 5).padding(.vertical, 2.5)
+            .background(.black.opacity(0.42), in: Capsule())
+            .padding(5)
+        }
+        .frame(width: 128, height: 84)
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10)
+            .stroke(Color.white.opacity(0.35), lineWidth: 0.75))
+    }
+
+    private func localTile(_ shot: LocalShot) -> some View {
+        VStack(spacing: 3) {
+            AsyncThumbnailView(url: shot.url, size: CGSize(width: 84, height: 62))
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+            Text(shot.caption)
+                .font(.system(size: 8))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .frame(width: 84)
+        }
+    }
+
+    // MARK: 取資料
+
+    private func load() async {
+        shots = nearbyShots()
+        isLoading = true
+        defer { isLoading = false }
+        lookAroundImage = nil
+        scene = nil
+        // 沒有實景的地方會回 nil（不是錯誤），拿不到就是沒有，不用重試
+        guard let s = try? await MKLookAroundSceneRequest(coordinate: coordinate).scene else {
+            return
+        }
+        // 中途又點了別的地方就不要把舊的縮圖蓋上去
+        guard !Task.isCancelled else { return }
+        scene = s
+        let options = MKLookAroundSnapshotter.Options()
+        options.size = CGSize(width: 256, height: 168)
+        let snapshotter = MKLookAroundSnapshotter(scene: s, options: options)
+        guard let snap = try? await snapshotter.snapshot, !Task.isCancelled else { return }
+        lookAroundImage = snap.image
+    }
+
+    /// 這個座標附近，App 裡已經有照片的地方。
+    /// 150 公尺是「走得到、看得見」的距離——再遠就不是同一個地方了。
+    private func nearbyShots() -> [LocalShot] {
+        let here = CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)
+        let radius: CLLocationDistance = 150
+        var out: [LocalShot] = []
+
+        for plan in lifeStore.tripPlans {
+            for stop in plan.stops where !stop.photoFileNames.isEmpty {
+                guard let c = stop.coordinate else { continue }
+                guard CLLocation(latitude: c.latitude, longitude: c.longitude)
+                    .distance(from: here) <= radius else { continue }
+                for n in stop.photoFileNames {
+                    out.append(LocalShot(id: "trip-" + n,
+                                         url: TripStop.photoURL(n),
+                                         caption: stop.displayName))
+                }
+            }
+        }
+        for e in expenseStore.expenses where !e.photoFileNames.isEmpty {
+            guard let la = e.placeLatitude, let lo = e.placeLongitude else { continue }
+            guard CLLocation(latitude: la, longitude: lo).distance(from: here) <= radius else { continue }
+            for n in e.photoFileNames {
+                out.append(LocalShot(id: "expense-" + n,
+                                     url: Expense.photoURL(for: n),
+                                     caption: e.placeDisplayName ?? "記過的一筆"))
+            }
+        }
+        // 太多張就只端出前面幾張——這是「確認位置」用的，不是相簿
+        return Array(out.prefix(20))
     }
 }
