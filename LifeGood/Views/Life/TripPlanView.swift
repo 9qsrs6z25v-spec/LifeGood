@@ -1515,6 +1515,26 @@ struct TripStopEditorSheet: View {
     @StateObject private var completer = RestaurantSearchCompleter()
     @State private var searchDebounce: Task<Void, Never>?
 
+    /// [v25.430] 上一次由「挑地點」自動帶進來的名稱與地址。
+    ///
+    /// 用來分辨欄位裡的字是「使用者自己打的」還是「上一次挑的地點留下的」。
+    /// 沒有這個判斷就只剩兩種爛選擇：
+    ///   • 永遠不蓋 → 重挑一個地方時名稱還停在舊的、地址卻換成新的，兩邊對不起來
+    ///                （使用者回報的就是這個）
+    ///   • 永遠蓋掉 → 把使用者自己取的名字（「阿姨介紹的民宿」）弄丟
+    @State private var autoFilledName = ""
+    @State private var autoFilledAddress = ""
+    /// 這次挑到的名稱／地址跟欄位裡的不一樣，而欄位裡那個是使用者自己打的。
+    /// 不自作主張改掉，改成擺一列問他要不要換。
+    @State private var offer = PlaceOffer()
+
+    /// 挑到的地點跟欄位裡的字對不上時，還沒被採用的那部分
+    struct PlaceOffer: Equatable {
+        var name: String?
+        var address: String?
+        var isEmpty: Bool { name == nil && address == nil }
+    }
+
     private let accent = TripDayPalette.color(0)
 
     init(planId: UUID, editing: TripStop?, insertAt: Int?) {
@@ -1568,6 +1588,9 @@ struct TripStopEditorSheet: View {
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
+                    if !offer.isEmpty {
+                        placeOfferRow(offer)
+                    }
                     if latitude != nil {
                         HStack {
                             Image(systemName: "mappin.circle.fill").foregroundStyle(accent)
@@ -1843,6 +1866,11 @@ struct TripStopEditorSheet: View {
         address = item.address
         latitude = item.latitude
         longitude = item.longitude
+        // 這兩欄是挑進來的、不是使用者打的，記下來——之後若在地圖上重挑一個地方，
+        // 才會跟著換掉，而不是卡在這家飯店的名字上
+        autoFilledName = item.name
+        autoFilledAddress = item.address
+        offer = PlaceOffer()
         isOvernight = true
         if let t = item.checkOutTime { checkOutTime = t }
         // 帶入名稱會觸發地圖搜尋，這裡先把待送出的查詢與既有建議清掉，
@@ -1957,20 +1985,81 @@ struct TripStopEditorSheet: View {
         )
     }
 
+    /// 地圖上挑到一個位置。座標一定跟著換（使用者就是為了定位才來的），
+    /// 名稱與地址則看欄位裡現在那個字是誰打的。
     private func applyPickedLocation(name picked: String?, address addr: String,
                                      coordinate: CLLocationCoordinate2D) {
         latitude = coordinate.latitude
         longitude = coordinate.longitude
-        // 地址一律用反查到的（使用者是因為打不出來才來這裡的）；查不到就留著原本的
-        if !addr.isEmpty { address = addr }
-        // 名稱只在還空著時才補，不要蓋掉使用者自己取的名字
-        if name.trimmingCharacters(in: .whitespaces).isEmpty, let picked, !picked.isEmpty {
-            name = picked
-        }
+        applyPlace(name: picked, address: addr)
         // 帶入名稱會觸發地圖搜尋建議，這裡先把待送出的查詢與既有建議清掉
         searchDebounce?.cancel()
         completer.queryFragment = ""
         lodgingPicked = true
+    }
+
+    /// 欄位裡的字能不能直接換掉：空的、或裡面還是上一次自動帶進來的那個字。
+    private func canReplace(_ current: String, lastAuto: String) -> Bool {
+        let c = current.trimmingCharacters(in: .whitespaces)
+        return c.isEmpty || c == lastAuto
+    }
+
+    /// 名稱與地址一起處理。
+    ///
+    /// ⚠️ 兩個欄位一定要用同一套規則。舊版的地址是無條件覆蓋、名稱只在空的時候補，
+    ///    於是重挑一個地方會變成「名稱還是舊的、地址卻換成新的」——兩邊指的不是
+    ///    同一個地方，而畫面上完全看不出來。
+    private func applyPlace(name picked: String?, address addr: String) {
+        var pending = PlaceOffer()
+
+        let n = (picked ?? "").trimmingCharacters(in: .whitespaces)
+        if !n.isEmpty {
+            if canReplace(name, lastAuto: autoFilledName) {
+                name = n
+                autoFilledName = n
+            } else if n != name.trimmingCharacters(in: .whitespaces) {
+                pending.name = n
+            }
+        }
+
+        let a = addr.trimmingCharacters(in: .whitespaces)
+        if !a.isEmpty {
+            if canReplace(address, lastAuto: autoFilledAddress) {
+                address = a
+                autoFilledAddress = a
+            } else if a != address.trimmingCharacters(in: .whitespaces) {
+                pending.address = a
+            }
+        }
+        offer = pending
+    }
+
+    private func placeOfferRow(_ o: PlaceOffer) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: "text.badge.checkmark")
+                .font(.system(size: 13)).foregroundStyle(.orange)
+                .frame(width: 20)
+            VStack(alignment: .leading, spacing: 2) {
+                if let n = o.name {
+                    Text("地圖上叫「" + n + "」").font(.caption).foregroundStyle(.primary)
+                }
+                if let a = o.address {
+                    Text(a).font(.caption2).foregroundStyle(.primary).lineLimit(2)
+                }
+                Text("這幾欄你自己改過，所以沒有自動蓋掉；座標已經換成新的了。")
+                    .font(.caption2).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 0)
+            Button("改用") {
+                if let n = o.name { name = n; autoFilledName = n }
+                if let a = o.address { address = a; autoFilledAddress = a }
+                offer = PlaceOffer()
+            }
+            .font(.caption.weight(.semibold))
+            .buttonStyle(.plain)
+            .foregroundStyle(.orange)
+        }
     }
 
     private func scheduleSearch(_ q: String) {
@@ -1978,6 +2067,8 @@ struct TripStopEditorSheet: View {
         // 但不主動清座標——使用者可能只是修錯字
         searchDebounce?.cancel()
         let text = q.trimmingCharacters(in: .whitespaces)
+        // 自己動手改過名字之後，那一列「要不要改用地圖上的」就沒意義了
+        if text != autoFilledName { offer.name = nil }
         // 名稱清空＝重新開始選地點，「住過的地方」那一區該回來
         if text.isEmpty { lodgingPicked = false }
         guard text.count >= 2 else { completer.queryFragment = ""; return }
@@ -1989,7 +2080,10 @@ struct TripStopEditorSheet: View {
     }
 
     private func pick(_ r: MKLocalSearchCompletion) {
+        // 點建議＝「我要的就是這個」，名稱直接用它的標題，不必問
         name = r.title
+        autoFilledName = r.title
+        offer = PlaceOffer()
         completer.queryFragment = ""
         // 建議只有文字，要再做一次 MKLocalSearch 才拿得到座標
         Task {
@@ -1999,11 +2093,10 @@ struct TripStopEditorSheet: View {
                 let pm = item.placemark
                 latitude = pm.coordinate.latitude
                 longitude = pm.coordinate.longitude
-                if address.trimmingCharacters(in: .whitespaces).isEmpty {
-                    address = [pm.postalCode, pm.administrativeArea, pm.locality,
-                               pm.thoroughfare, pm.subThoroughfare]
-                        .compactMap { $0 }.joined()
-                }
+                applyPlace(name: nil,
+                           address: [pm.postalCode, pm.administrativeArea, pm.locality,
+                                     pm.thoroughfare, pm.subThoroughfare]
+                            .compactMap { $0 }.joined())
             }
         }
     }
@@ -2180,6 +2273,10 @@ struct TripSubSpotEditView: View {
 
     @StateObject private var completer = RestaurantSearchCompleter()
     @State private var searchDebounce: Task<Void, Never>?
+    /// [v25.430] 跟景點編輯同一套：分辨欄位裡的字是使用者打的還是上一次挑的地點留下的
+    @State private var autoFilledName = ""
+    @State private var autoFilledAddress = ""
+    @State private var offeredName: String?
 
     var body: some View {
         Form {
@@ -2222,6 +2319,28 @@ struct TripSubSpotEditView: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                if let offered = offeredName {
+                    HStack(spacing: 8) {
+                        Image(systemName: "text.badge.checkmark")
+                            .font(.system(size: 13)).foregroundStyle(.orange)
+                            .frame(width: 20)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text("地圖上叫「" + offered + "」")
+                                .font(.caption).foregroundStyle(.primary)
+                            Text("名稱你自己改過，所以沒有自動蓋掉")
+                                .font(.caption2).foregroundStyle(.secondary)
+                        }
+                        Spacer(minLength: 0)
+                        Button("改用") {
+                            sub.name = offered
+                            autoFilledName = offered
+                            offeredName = nil
+                        }
+                        .font(.caption.weight(.semibold))
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.orange)
+                    }
+                }
                 if sub.latitude != nil {
                     HStack {
                         Image(systemName: "mappin.circle.fill").foregroundStyle(accent)
@@ -2260,11 +2379,7 @@ struct TripSubSpotEditView: View {
             TripMapPickerSheet(initialCoordinate: mapPickerStart) { picked, addr, coord in
                 sub.latitude = coord.latitude
                 sub.longitude = coord.longitude
-                if !addr.isEmpty { sub.address = addr }
-                if sub.name.trimmingCharacters(in: .whitespaces).isEmpty,
-                   let picked, !picked.isEmpty {
-                    sub.name = picked
-                }
+                applyPlace(name: picked, address: addr)
                 searchDebounce?.cancel()
                 completer.queryFragment = ""
             }
@@ -2279,6 +2394,7 @@ struct TripSubSpotEditView: View {
     private func scheduleSearch(_ q: String) {
         searchDebounce?.cancel()
         let text = q.trimmingCharacters(in: .whitespaces)
+        if text != autoFilledName { offeredName = nil }
         guard text.count >= 2 else { completer.queryFragment = ""; return }
         searchDebounce = Task {
             try? await Task.sleep(nanoseconds: 300_000_000)
@@ -2287,8 +2403,36 @@ struct TripSubSpotEditView: View {
         }
     }
 
+    /// 名稱與地址用同一套規則：欄位是空的、或裡面還是上一次挑地點帶進來的字，
+    /// 就跟著換；是使用者自己打的就留著，另外問他要不要改用。
+    /// 兩欄規則不一致就會出現「名稱沒變、地址卻變了」這種對不起來的狀態。
+    private func applyPlace(name picked: String?, address addr: String) {
+        let n = (picked ?? "").trimmingCharacters(in: .whitespaces)
+        if !n.isEmpty {
+            let current = sub.name.trimmingCharacters(in: .whitespaces)
+            if current.isEmpty || current == autoFilledName {
+                sub.name = n
+                autoFilledName = n
+                offeredName = nil
+            } else if n != current {
+                offeredName = n
+            }
+        }
+        let a = addr.trimmingCharacters(in: .whitespaces)
+        if !a.isEmpty {
+            let current = sub.address.trimmingCharacters(in: .whitespaces)
+            if current.isEmpty || current == autoFilledAddress {
+                sub.address = a
+                autoFilledAddress = a
+            }
+        }
+    }
+
     private func pick(_ r: MKLocalSearchCompletion) {
+        // 點建議＝「我要的就是這個」，名稱直接用它的標題
         sub.name = r.title
+        autoFilledName = r.title
+        offeredName = nil
         completer.queryFragment = ""
         Task {
             let req = MKLocalSearch.Request(completion: r)
@@ -2297,11 +2441,10 @@ struct TripSubSpotEditView: View {
                 let pm = item.placemark
                 sub.latitude = pm.coordinate.latitude
                 sub.longitude = pm.coordinate.longitude
-                if sub.address.trimmingCharacters(in: .whitespaces).isEmpty {
-                    sub.address = [pm.postalCode, pm.administrativeArea, pm.locality,
-                                   pm.thoroughfare, pm.subThoroughfare]
-                        .compactMap { $0 }.joined()
-                }
+                applyPlace(name: nil,
+                           address: [pm.postalCode, pm.administrativeArea, pm.locality,
+                                     pm.thoroughfare, pm.subThoroughfare]
+                            .compactMap { $0 }.joined())
             }
         }
     }
