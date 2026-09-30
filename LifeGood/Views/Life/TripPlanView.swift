@@ -3211,6 +3211,16 @@ struct TripMapPickerSheet: View {
     /// 畫面上下大約涵蓋幾公尺（用來換算點擊的容許誤差）
     @State private var visibleMeters: Double = 1_000
 
+    /// [v25.431] 搜尋地名／店名，選中就把地圖飛過去。
+    ///
+    /// 沒有它的時候，要選一個遠方的地點只能一路拖、一路縮——
+    /// 規劃國外行程時尤其難用（從台灣拖到福岡）。
+    @StateObject private var searchCompleter = RestaurantSearchCompleter()
+    @State private var query = ""
+    @State private var searchDebounce: Task<Void, Never>?
+    @State private var isJumping = false
+    @FocusState private var searchFocused: Bool
+
     struct TappedPoint: Equatable {
         let coordinate: CLLocationCoordinate2D
         /// 找到的地標名稱；nil＝那裡沒有地標，只是一個座標
@@ -3248,21 +3258,24 @@ struct TripMapPickerSheet: View {
         NavigationStack {
             ZStack(alignment: .bottom) {
                 mapLayer
-                VStack(spacing: 8) {
-                    // [v25.428] 點到地方之後才出現：沒點之前那一片是地圖，
-                    // 擺一條空的照片列只是把地圖擋掉
-                    if tapped != nil {
-                        MapPickerPlaceGallery(coordinate: pickedCoordinate, accent: accent)
-                    }
-                    infoCard
-                }
+                infoCard
             }
+            .overlay(alignment: .top) { searchOverlay }
             .navigationTitle("在地圖上選位置")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button("取消") { dismiss() } }
             }
-            .onAppear { locationProvider.requestIfNeeded() }
+            .onAppear {
+                locationProvider.requestIfNeeded()
+                // 這個畫面要能打地名與地址，不只是店名——預設的 POI-only
+                // 會讓「大名 115-30」這種查不到東西
+                searchCompleter.setResultTypes([.pointOfInterest, .address])
+                searchCompleter.setRegion(MKCoordinateRegion(
+                    center: center,
+                    span: MKCoordinateSpan(latitudeDelta: 0.5, longitudeDelta: 0.5)))
+            }
+            .onDisappear { searchDebounce?.cancel() }
             // 點到別的地標、或挪動地圖之後，都要重查一次地址
             .task(id: resolveKey) { await resolve(pickedCoordinate) }
         }
@@ -3290,9 +3303,14 @@ struct TripMapPickerSheet: View {
                     center = context.region.center
                     // 記下目前看到多大範圍，決定「點下去算是點到哪個地標」的容許距離
                     visibleMeters = context.region.span.latitudeDelta * 111_000
+                    // 搜尋建議以目前看到的範圍為優先：在福岡看地圖時打「7-11」
+                    // 該先給福岡的，不是台北的
+                    searchCompleter.setRegion(context.region)
                 }
                 // 拖曳與縮放是拖／捏的手勢，單點不會被地圖吃掉，所以可以直接接
                 .onTapGesture { screenPoint in
+                    // 點地圖就是不想再打字了，鍵盤先收起來
+                    searchFocused = false
                     guard let coordinate = proxy.convert(screenPoint, from: .local) else { return }
                     Task { await pickPOI(at: coordinate) }
                 }
@@ -3301,6 +3319,131 @@ struct TripMapPickerSheet: View {
                 // 已經點過地圖就不要再畫準心——兩個「我選的是這裡」會互相打架
                 if tapped == nil { crosshair }
             }
+        }
+    }
+
+    // MARK: 搜尋
+
+    /// 疊在地圖上方的搜尋列。做成疊層而不是把地圖往下推：
+    /// 地圖看得越大越好找，而搜尋列多數時候只是待在那裡不動。
+    private var searchOverlay: some View {
+        VStack(spacing: 6) {
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                TextField("搜尋地名、店名或地址", text: $query)
+                    .autocorrectionDisabled()
+                    .submitLabel(.search)
+                    .focused($searchFocused)
+                    .onChange(of: query) { _, newValue in scheduleSearch(newValue) }
+                    .onSubmit { jumpToFirstResult() }
+                if isJumping {
+                    ProgressView().scaleEffect(0.6)
+                } else if !query.isEmpty {
+                    Button {
+                        query = ""
+                        searchCompleter.clear()
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 15)).foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, 12).padding(.vertical, 9)
+            .background(.ultraThinMaterial)
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .overlay(RoundedRectangle(cornerRadius: 12)
+                .stroke(Color(.separator).opacity(0.18), lineWidth: 0.75))
+            .shadow(color: .black.opacity(0.10), radius: 5, y: 2)
+
+            if !searchCompleter.results.isEmpty {
+                VStack(spacing: 0) {
+                    ForEach(Array(searchCompleter.results.prefix(6).enumerated()),
+                            id: \.offset) { index, r in
+                        if index > 0 {
+                            Divider().padding(.leading, 12)
+                        }
+                        Button { jump(to: r) } label: {
+                            HStack(spacing: 8) {
+                                Image(systemName: "mappin.circle")
+                                    .font(.system(size: 12)).foregroundStyle(accent)
+                                VStack(alignment: .leading, spacing: 1) {
+                                    Text(r.title)
+                                        .font(.subheadline).foregroundStyle(.primary)
+                                        .lineLimit(1)
+                                    if !r.subtitle.isEmpty {
+                                        Text(r.subtitle)
+                                            .font(.caption2).foregroundStyle(.secondary)
+                                            .lineLimit(1)
+                                    }
+                                }
+                                Spacer(minLength: 0)
+                            }
+                            .padding(.horizontal, 12).padding(.vertical, 9)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .background(.ultraThinMaterial)
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .overlay(RoundedRectangle(cornerRadius: 12)
+                    .stroke(Color(.separator).opacity(0.18), lineWidth: 0.75))
+                .shadow(color: .black.opacity(0.12), radius: 6, y: 2)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.top, 8)
+    }
+
+    private func scheduleSearch(_ q: String) {
+        searchDebounce?.cancel()
+        let text = q.trimmingCharacters(in: .whitespaces)
+        guard text.count >= 2 else { searchCompleter.clear(); return }
+        searchDebounce = Task {
+            try? await Task.sleep(nanoseconds: 300_000_000)
+            guard !Task.isCancelled else { return }
+            await MainActor.run { searchCompleter.queryFragment = text }
+        }
+    }
+
+    /// 按鍵盤上的搜尋：沒有特別挑就用第一筆。
+    /// 打完字直接按搜尋是很自然的動作，不該什麼都沒發生。
+    private func jumpToFirstResult() {
+        guard let first = searchCompleter.results.first else { return }
+        jump(to: first)
+    }
+
+    /// 選了一筆搜尋建議：把地圖飛過去，並且直接當成「已經選到這個地標」。
+    ///
+    /// 只移動鏡頭是不夠的——使用者搜「大分縣福岡事務所」就是要選它，
+    /// 飛過去之後還要再點一次才算數的話，等於只做了一半。
+    private func jump(to completion: MKLocalSearchCompletion) {
+        searchFocused = false
+        isJumping = true
+        searchDebounce?.cancel()
+        Task { @MainActor in
+            // 刻意自己做一次搜尋，不用 completer.resolve()：那個方法把
+            // resultTypes 限成 POI（給飲食紀錄用的），拿它來解地址建議會回 nil，
+            // 使用者按下去等於沒反應
+            let request = MKLocalSearch.Request(completion: completion)
+            let item = try? await MKLocalSearch(request: request).start().mapItems.first
+            isJumping = false
+            guard let item else { return }
+            let coordinate = item.placemark.coordinate
+            center = coordinate
+            let name = item.name?.trimmingCharacters(in: .whitespaces)
+            tapped = TappedPoint(coordinate: coordinate,
+                                 name: (name?.isEmpty ?? true) ? nil : name)
+            withAnimation(.easeInOut(duration: 0.35)) {
+                position = .region(MKCoordinateRegion(
+                    center: coordinate,
+                    span: MKCoordinateSpan(latitudeDelta: 0.004, longitudeDelta: 0.004)))
+            }
+            query = ""
+            searchCompleter.clear()
         }
     }
 
@@ -3388,6 +3531,12 @@ struct TripMapPickerSheet: View {
                         pickedCoordinate.latitude, pickedCoordinate.longitude))
                 .font(.system(size: 10, design: .monospaced))
                 .foregroundStyle(.tertiary)
+
+            // [v25.431] 照片畫廊收進資訊卡裡，跟名稱、地址擺在一起。
+            // 這三樣回答的是同一個問題——「我點到的是不是我想的那個地方」。
+            if tapped != nil {
+                MapPickerPlaceGallery(coordinate: pickedCoordinate, accent: accent)
+            }
 
             Button {
                 onPick(pickedName, address, pickedCoordinate)
@@ -3620,13 +3769,9 @@ struct MapPickerPlaceGallery: View {
             }
             .scrollEdgeFade(width: 12)
         }
-        .padding(8)
-        .background(.ultraThinMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 14))
-        .overlay(RoundedRectangle(cornerRadius: 14)
-            .stroke(Color(.separator).opacity(0.15), lineWidth: 0.75))
-        .shadow(color: .black.opacity(0.10), radius: 5, y: 2)
-        .padding(.horizontal, 12)
+        // [v25.431] 這一塊現在住在資訊卡裡面，所以不要再自己包一層材質與陰影——
+        // 材質疊材質會糊成一片，而卡片外圍的內距已經留好了
+        .padding(.vertical, 2)
     }
 
     /// 字串在 ViewBuilder 外組好

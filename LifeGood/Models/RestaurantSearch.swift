@@ -101,6 +101,16 @@ final class RestaurantSearchCompleter: NSObject, ObservableObject, MKLocalSearch
         completer.region = region ?? MKCoordinateRegion(MKMapRect.world)
     }
 
+    /// [v25.431] 改變要搜尋哪幾種結果。
+    ///
+    /// 預設只搜 POI（店家、景點），這是飲食／就醫紀錄要的——那裡打的是店名。
+    /// 但「在地圖上選位置」還要能打地名與地址（「湯布院」「博多站」「大名 115-30」），
+    /// 所以那個畫面會自己加上 .address。改成可調而不是全域放寬：
+    /// 在飲食紀錄裡讓一堆路名混進建議清單只會更難挑。
+    func setResultTypes(_ types: MKLocalSearchCompleter.ResultType) {
+        completer.resultTypes = types
+    }
+
     /// 解析選擇的 completion，取得詳細的 MKMapItem（含座標、地址）。
     func resolve(_ completion: MKLocalSearchCompletion,
                  done: @escaping (MKMapItem?) -> Void) {
