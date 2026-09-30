@@ -13,6 +13,10 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.437", build: 1190, date: "2026/08/19", notes: [
+            "【修正】天氣取不到的時候，現在會直接寫出原因（沒網路／服務還沒授權／系統回的原文），不再只有一句「天氣暫時取不到」。只說取不到的話，沒網路、服務沒開、座標在海上這三種完全不同的狀況長得一模一樣，看的人不知道該怎麼辦。",
+            "【說明】翻譯過的說明後面一律附上系統回的原文——翻譯是猜的，原文才是事實，猜錯的時候原文才救得了你。"
+        ]),
         ChangelogEntry(version: "25.436", build: 1189, date: "2026/08/19", notes: [
             "【修正】上一版加的天氣檔案在 Xcode 專案裡掛錯群組，編譯直接失敗（Build input file cannot be found：Views/TripWeather.swift）。檔案實際放在 Models 底下，卻被登記在 Views 群組，Xcode 於是去錯的地方找。已改掛到正確的群組，功能本身沒有任何改動。"
         ]),

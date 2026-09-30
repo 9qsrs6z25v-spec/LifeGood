@@ -66,8 +66,13 @@ final class TripWeatherStore: ObservableObject {
     /// 同一個城市裡的二十個景點天氣幾乎一樣，一站一次請求既慢又浪費配額；
     /// 取到公里級之後，一趟市區行程通常只會打一兩次。
     @Published private(set) var cache: [String: [Date: TripDayWeather]] = [:]
-    /// 問過但失敗的（沒網路、entitlement 沒開…）。記下來才不會一直重試。
-    @Published private(set) var failedKeys: Set<String> = []
+    /// 問過但失敗的：key → 失敗原因。
+    ///
+    /// [v25.437] 原本只記一個「有沒有失敗」的布林值，畫面上就只能寫
+    /// 「天氣暫時取不到」——使用者看不出是沒網路、是能力沒開、還是這個座標
+    /// 本來就沒資料，我也沒辦法從回報裡判斷。錯誤訊息是唯一的線索，
+    /// 吞掉它等於把唯一的線索丟了。
+    @Published private(set) var failures: [String: String] = [:]
     /// 正在飛的請求，避免同一個 key 被二十個景點同時觸發
     private var inFlight: Set<String> = []
 
@@ -93,7 +98,12 @@ final class TripWeatherStore: ObservableObject {
     }
 
     func hasFailed(at coordinate: CLLocationCoordinate2D) -> Bool {
-        failedKeys.contains(Self.key(coordinate))
+        failures[Self.key(coordinate)] != nil
+    }
+
+    /// 失敗原因（已經翻成使用者看得懂的話）
+    func failureReason(at coordinate: CLLocationCoordinate2D) -> String? {
+        failures[Self.key(coordinate)]
     }
 
     /// 抓這個地點未來十天的每日預報。
@@ -101,7 +111,7 @@ final class TripWeatherStore: ObservableObject {
     @MainActor
     func load(_ coordinate: CLLocationCoordinate2D) async {
         let key = Self.key(coordinate)
-        guard cache[key] == nil, !inFlight.contains(key), !failedKeys.contains(key) else { return }
+        guard cache[key] == nil, !inFlight.contains(key), failures[key] == nil else { return }
         inFlight.insert(key)
         defer { inFlight.remove(key) }
 
@@ -120,17 +130,47 @@ final class TripWeatherStore: ObservableObject {
             }
             cache[key] = byDay
         } catch {
-            // 失敗的原因多半是三種：沒網路、App ID 還沒開 WeatherKit 能力、
-            // 或是這個座標落在海上。三種都不該重試到天荒地老，記下來就算了。
-            failedKeys.insert(key)
+            // 失敗的原因多半是幾種：沒網路、App ID 還沒開 WeatherKit 能力、
+            // 剛開好還沒生效、或這個座標落在海上。都不該重試到天荒地老，
+            // 記下原因就算了——原因要留著，那是使用者回報時唯一的線索。
+            failures[key] = Self.describe(error)
         }
+    }
+
+    /// 把錯誤翻成使用者看得懂的一句話，後面附上系統原文。
+    ///
+    /// 原文一定要留：翻譯是我猜的，原文才是事實。猜錯的時候，
+    /// 使用者截圖給我看的那一行原文才救得了他。
+    static func describe(_ error: Error) -> String {
+        let raw = (error as NSError).localizedDescription
+        let ns = error as NSError
+        // 沒網路是最常見也最容易自己解決的一種，單獨挑出來講
+        if ns.domain == NSURLErrorDomain {
+            switch ns.code {
+            case NSURLErrorNotConnectedToInternet, NSURLErrorNetworkConnectionLost:
+                return "看起來是沒有網路。天氣要連線才拿得到。"
+            case NSURLErrorTimedOut:
+                return "連線逾時，等一下再試。"
+            default:
+                return "連線出了問題：" + raw
+            }
+        }
+        let lowered = raw.lowercased()
+        if lowered.contains("auth") || lowered.contains("permission")
+            || lowered.contains("entitle") || lowered.contains("unauthorized")
+            || lowered.contains("token") {
+            return "這個 App 還沒拿到天氣服務的授權。"
+                + "要在 Apple Developer 後台替 App ID 開啟 WeatherKit，"
+                + "剛開好的話要等一段時間才會生效。（\(raw)）"
+        }
+        return raw
     }
 
     /// 重新再試一次（使用者按重試時用）
     @MainActor
     func retry(_ coordinate: CLLocationCoordinate2D) async {
         let key = Self.key(coordinate)
-        failedKeys.remove(key)
+        failures[key] = nil
         cache[key] = nil
         await load(coordinate)
     }
@@ -211,11 +251,22 @@ struct TripWeatherChip: View {
             Image(systemName: "cloud.slash")
                 .font(.system(size: 9)).foregroundStyle(.tertiary)
         } else {
-            HStack(spacing: 8) {
+            HStack(alignment: .top, spacing: 8) {
                 Image(systemName: "cloud.slash")
                     .font(.system(size: 15)).foregroundStyle(.secondary)
-                Text("天氣暫時取不到")
-                    .font(.caption).foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("天氣暫時取不到")
+                        .font(.caption).foregroundStyle(.secondary)
+                    if let coordinate,
+                       let reason = weather.failureReason(at: coordinate) {
+                        // 原因一定要寫出來。只說「取不到」的話，沒網路、
+                        // 服務沒開、座標在海上這三種完全不同的狀況長得一模一樣，
+                        // 使用者不知道該怎麼辦，我也無從判斷。
+                        Text(reason)
+                            .font(.system(size: 10)).foregroundStyle(.tertiary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
                 Spacer(minLength: 0)
                 if let coordinate {
                     Button("重試") {
