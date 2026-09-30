@@ -242,6 +242,14 @@ struct TripPlanDetailView: View {
     @State private var legDetail: LegBox?
     /// 要分享的文字。一樣走 .sheet(item:)，內容跟著 item 一起進去
     @State private var sharing: ShareText?
+    /// [v25.441] 分享這一站的圖片
+    @State private var sharingStopImage: ShareStopImage?
+    @State private var isExportingStop = false
+
+    struct ShareStopImage: Identifiable {
+        let id = UUID()
+        let url: URL
+    }
     @State private var showImageExport = false
     @State private var showAlbum = false
     /// 打開景點卡的那一站
@@ -366,6 +374,9 @@ struct TripPlanDetailView: View {
             }
             .sheet(item: $sharing) { item in
                 ShareSheet(items: [item.text])
+            }
+            .sheet(item: $sharingStopImage) { item in
+                ShareSheet(items: [item.url])
             }
             .sheet(isPresented: $showImageExport) {
                 if let p = plan { TripPlanImageExportSheet(plan: p) }
@@ -1043,7 +1054,10 @@ struct TripPlanDetailView: View {
                         }
                         Divider()
                         Button("用 Apple 地圖開啟") { TripShare.openPlaceInMaps(slot.stop) }
-                        Button("分享這一站") { shareStop(slot.stop) }
+                        Button("分享這一站（圖片）") {
+                            Task { await shareStopImage(slot.stop) }
+                        }
+                        Button("分享這一站（文字）") { shareStop(slot.stop) }
                         if !slot.stop.address.trimmingCharacters(in: .whitespaces).isEmpty {
                             Button("拷貝地址") {
                                 UIPasteboard.general.string =
@@ -1358,6 +1372,21 @@ struct TripPlanDetailView: View {
     private func move(_ index: Int, by delta: Int) {
         let dest = delta < 0 ? index - 1 : index + 2
         lifeStore.moveTripStops(planId: planId, from: IndexSet(integer: index), to: dest)
+    }
+
+    /// [v25.441] 把這一站做成一張圖再分享。
+    /// 地圖快照要等，所以先把旗標打起來擋住重複點擊——這個選單很容易連按。
+    @MainActor
+    private func shareStopImage(_ stop: TripStop) async {
+        guard !isExportingStop, let p = plan else { return }
+        isExportingStop = true
+        defer { isExportingStop = false }
+        let map = await TripImageExporter.stopMapImage(plan: p, stopId: stop.id)
+        let card = TripStopShareCard(plan: p, stopId: stop.id, mapImage: map)
+        let stamp = TripImageExporter.stampFormatter.string(from: Date())
+        guard let url = TripImageExporter.writeJPG(
+            card, name: stop.displayName + "_" + stamp) else { return }
+        sharingStopImage = ShareStopImage(url: url)
     }
 
     private func shareStop(_ stop: TripStop) {

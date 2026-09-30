@@ -20,6 +20,15 @@ struct TripStopCardView: View {
     @State private var showEdit = false
     @State private var showLegDetail = false
     @State private var sharing: ShareText?
+    /// [v25.441] 分享改以圖片為主：一張卡片傳出去，對方不用裝這個 App 也看得懂。
+    /// 文字留在選單裡——要把地址連結貼進訊息時還是文字方便。
+    @State private var sharingImage: ShareImageURL?
+    @State private var isExporting = false
+
+    private struct ShareImageURL: Identifiable {
+        let id = UUID()
+        let url: URL
+    }
     @State private var viewingPhoto: IdentifiableURL?
     @State private var confirmClearCheckIn = false
 
@@ -77,12 +86,25 @@ struct TripStopCardView: View {
                 ToolbarItem(placement: .topBarLeading) { Button("關閉") { dismiss() } }
                 ToolbarItem(placement: .topBarTrailing) {
                     HStack(spacing: 14) {
-                        Button {
-                            if let p = plan, let s = stop {
-                                sharing = ShareText(text: TripShare.stopText(s, in: p))
+                        Menu {
+                            Button {
+                                Task { await shareImage() }
+                            } label: {
+                                Label("分享成圖片", systemImage: "photo")
+                            }
+                            Button {
+                                if let p = plan, let s = stop {
+                                    sharing = ShareText(text: TripShare.stopText(s, in: p))
+                                }
+                            } label: {
+                                Label("分享文字", systemImage: "text.alignleft")
                             }
                         } label: {
-                            Image(systemName: "square.and.arrow.up")
+                            if isExporting {
+                                ProgressView().tint(dayColor)
+                            } else {
+                                Image(systemName: "square.and.arrow.up")
+                            }
                         }
                         Button("編輯") { showEdit = true }.bold()
                     }
@@ -101,6 +123,7 @@ struct TripStopCardView: View {
                 }
             }
             .sheet(item: $sharing) { item in ShareSheet(items: [item.text]) }
+            .sheet(item: $sharingImage) { item in ShareSheet(items: [item.url]) }
             .sheet(item: $viewingPhoto) { wrapper in PhotoLightbox(url: wrapper.url) }
             .confirmationDialog("清除打卡紀錄", isPresented: $confirmClearCheckIn,
                                 titleVisibility: .visible) {
@@ -112,6 +135,21 @@ struct TripStopCardView: View {
                 Text("抵達與離開的時間都會被清掉，這一站的時間會回到排程推算的結果，後面幾站也會跟著回去。")
             }
         }
+    }
+
+    /// 把這一站做成一張圖再分享。
+    /// 地圖快照要等，所以按下去先轉圈——不然使用者會以為沒反應而連按好幾下。
+    @MainActor
+    private func shareImage() async {
+        guard !isExporting, let p = plan else { return }
+        isExporting = true
+        defer { isExporting = false }
+        let map = await TripImageExporter.stopMapImage(plan: p, stopId: stopId)
+        let card = TripStopShareCard(plan: p, stopId: stopId, mapImage: map)
+        let stamp = TripImageExporter.stampFormatter.string(from: Date())
+        let name = (stop?.displayName ?? "景點") + "_" + stamp
+        guard let url = TripImageExporter.writeJPG(card, name: name) else { return }
+        sharingImage = ShareImageURL(url: url)
     }
 
     private func content(_ slot: TripPlan.Slot) -> some View {

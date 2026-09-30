@@ -378,6 +378,205 @@ struct TripLegShareCard: View {
     }
 }
 
+// MARK: - 單一景點卡（v25.441）
+
+/// 「這一站」的分享圖。版面對著 App 裡的景點卡做，但**只放傳出去有用的東西**：
+/// 什麼時候到、待多久、在哪裡、底下有哪幾攤、備註、照片。
+///
+/// 刻意不放的：打卡狀態（那是自己的紀錄，對收圖的人沒意義）、
+/// 交通方式與路線（那是「這一段」那張圖的事，混進來會變成兩張圖講同一件事）。
+struct TripStopShareCard: View {
+    let plan: TripPlan
+    let stopId: UUID
+    /// 事先做好的地圖圖片（nil＝沒有座標或做不出來，版面會省略地圖）
+    let mapImage: UIImage?
+    /// 最多帶幾張照片進來。帶太多會把圖拉得又長又重
+    static let maxPhotos = 3
+
+    private var slot: TripPlan.Slot? {
+        plan.timeline.first { $0.stop.id == stopId }
+    }
+    private var dayColor: Color { TripDayPalette.color(slot?.dayIndex ?? 0) }
+
+    private static let timeFmt: DateFormatter = {
+        let f = DateFormatter(); f.locale = Locale(identifier: "zh_Hant_TW")
+        f.dateFormat = "HH:mm"; return f
+    }()
+    private static let dayFmt: DateFormatter = {
+        let f = DateFormatter(); f.locale = Locale(identifier: "zh_Hant_TW")
+        f.dateFormat = "M/d (E)"; return f
+    }()
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if let slot {
+                header(slot)
+                if let mapImage {
+                    Image(uiImage: mapImage)
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                        .frame(width: TripCardStyle.legCardWidth, height: 340)
+                        .clipped()
+                }
+                facts(slot)
+                photos(slot.stop)
+            } else {
+                Text("這一站找不到資料")
+                    .font(.system(size: 20)).foregroundStyle(TripCardStyle.subInk)
+                    .padding(40)
+            }
+            footer
+        }
+        .frame(width: TripCardStyle.legCardWidth)
+        .background(TripCardStyle.card)
+        .clipShape(RoundedRectangle(cornerRadius: 18))
+        .padding(TripCardStyle.pageMargin)
+        .background(TripCardStyle.paper)
+    }
+
+    private func header(_ slot: TripPlan.Slot) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Text("第 \(slot.dayIndex + 1) 天")
+                    .font(.system(size: 15, weight: .bold))
+                Text(Self.dayFmt.string(from: slot.arrival))
+                    .font(.system(size: 15, weight: .semibold)).opacity(0.9)
+                if slot.stop.isMustVisit {
+                    Text("★ 必去")
+                        .font(.system(size: 13, weight: .bold))
+                        .padding(.horizontal, 8).padding(.vertical, 3)
+                        .background(Color.white.opacity(0.22), in: Capsule())
+                }
+                if slot.stop.isOvernight {
+                    Text("住宿")
+                        .font(.system(size: 13, weight: .bold))
+                        .padding(.horizontal, 8).padding(.vertical, 3)
+                        .background(Color.white.opacity(0.22), in: Capsule())
+                }
+                Spacer(minLength: 0)
+                Text("\(slot.index + 1)")
+                    .font(.system(size: 18, weight: .bold, design: .rounded))
+                    .frame(width: 40, height: 40)
+                    .background(Circle().fill(Color.white.opacity(0.22)))
+            }
+            .foregroundStyle(.white)
+
+            Text(slot.stop.displayName)
+                .font(.system(size: 34, weight: .bold))
+                .foregroundStyle(.white)
+                .fixedSize(horizontal: false, vertical: true)
+
+            HStack(spacing: 22) {
+                headerMetric(Self.timeFmt.string(from: slot.arrival)
+                             + " – " + Self.timeFmt.string(from: slot.departure), "在這裡")
+                if !slot.stop.isOvernight, slot.stop.dwellMinutes > 0 {
+                    headerMetric("\(slot.stop.dwellMinutes) 分", "停留")
+                }
+                if !slot.stop.subSpots.isEmpty {
+                    headerMetric("\(slot.stop.subSpots.count)", "子地點")
+                }
+                Spacer(minLength: 0)
+            }
+        }
+        .padding(28)
+        .frame(width: TripCardStyle.legCardWidth, alignment: .leading)
+        .background(
+            LinearGradient(colors: [dayColor, dayColor.opacity(0.62)],
+                           startPoint: .topLeading, endPoint: .bottomTrailing)
+        )
+    }
+
+    private func headerMetric(_ value: String, _ title: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(value).font(.system(size: 22, weight: .bold, design: .rounded))
+            Text(title).font(.system(size: 12)).opacity(0.85)
+        }
+        .foregroundStyle(.white)
+    }
+
+    @ViewBuilder
+    private func facts(_ slot: TripPlan.Slot) -> some View {
+        let address = slot.stop.address.trimmingCharacters(in: .whitespaces)
+        let note = slot.stop.note.trimmingCharacters(in: .whitespacesAndNewlines)
+        VStack(spacing: 0) {
+            if !address.isEmpty {
+                factRow(icon: "mappin.circle.fill", text: address)
+            }
+            if !slot.stop.subSpots.isEmpty {
+                if !address.isEmpty { hairline }
+                factRow(icon: "list.bullet.indent", text: subSpotText(slot.stop))
+            }
+            if !note.isEmpty {
+                if !address.isEmpty || !slot.stop.subSpots.isEmpty { hairline }
+                factRow(icon: "text.alignleft", text: note)
+            }
+        }
+    }
+
+    private var hairline: some View {
+        Rectangle().fill(TripCardStyle.hairline).frame(height: 1)
+    }
+
+    private func factRow(icon: String, text: String) -> some View {
+        HStack(alignment: .top, spacing: 14) {
+            Image(systemName: icon)
+                .font(.system(size: 17)).foregroundStyle(dayColor)
+                .frame(width: 24)
+            Text(text)
+                .font(.system(size: 16))
+                .foregroundStyle(TripCardStyle.ink)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 28).padding(.vertical, 18)
+    }
+
+    /// 字串在 ViewBuilder 外組好
+    private func subSpotText(_ stop: TripStop) -> String {
+        stop.subSpots.map { s in
+            s.displayName + (s.minutes > 0 ? "（\(s.minutes) 分）" : "")
+        }.joined(separator: "、")
+    }
+
+    /// 照片橫著鋪一排。讀圖失敗的就跳過——分享圖裡出現一塊灰色破圖比沒有照片更糟。
+    @ViewBuilder
+    private func photos(_ stop: TripStop) -> some View {
+        let images = stop.photoFileNames.prefix(Self.maxPhotos).compactMap {
+            UIImage(contentsOfFile: TripStop.photoURL($0).path)
+        }
+        if !images.isEmpty {
+            HStack(spacing: 10) {
+                ForEach(Array(images.enumerated()), id: \.offset) { _, img in
+                    Image(uiImage: img)
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                        .frame(height: 180)
+                        .frame(maxWidth: .infinity)
+                        .clipped()
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                }
+            }
+            .padding(.horizontal, 28).padding(.vertical, 18)
+        }
+    }
+
+    private var footer: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "map.fill")
+                .font(.system(size: 12)).foregroundStyle(dayColor)
+            Text(plan.displayTitle)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(TripCardStyle.subInk)
+            Spacer(minLength: 0)
+            Text("LifeGood 美好人生")
+                .font(.system(size: 12)).foregroundStyle(TripCardStyle.subInk.opacity(0.7))
+        }
+        .padding(.horizontal, 28).padding(.vertical, 16)
+        .frame(width: TripCardStyle.legCardWidth)
+        .background(TripCardStyle.paper)
+    }
+}
+
 // MARK: - 整份行程（單頁）
 
 /// 行程分享圖的一頁。slots 是這一頁要畫的那幾站。
@@ -738,6 +937,24 @@ enum TripImageExporter {
             straights: polyline == nil ? [([a, b], color)] : [],
             markers: markers,
             size: CGSize(width: TripCardStyle.legCardWidth, height: 380),
+            scale: 2)
+    }
+
+    /// [v25.441] 單一景點的地圖圖片。只有一個大頭針，鏡頭拉到「認得出是哪裡」的範圍。
+    static func stopMapImage(plan: TripPlan, stopId: UUID) async -> UIImage? {
+        let slots = plan.timeline
+        guard let slot = slots.first(where: { $0.stop.id == stopId }),
+              let c = slot.stop.coordinate else { return nil }
+        let color = UIColor(TripDayPalette.color(slot.dayIndex))
+        return await TripMapSnapshot.image(
+            coordinates: [c],
+            polylines: [],
+            straights: [],
+            markers: [TripMapSnapshot.Marker(coordinate: c, text: "\(slot.index + 1)",
+                                             color: color,
+                                             isLodging: slot.stop.isOvernight,
+                                             isMustVisit: slot.stop.isMustVisit)],
+            size: CGSize(width: TripCardStyle.legCardWidth, height: 340),
             scale: 2)
     }
 
