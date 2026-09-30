@@ -826,6 +826,16 @@ struct TripPlanDetailView: View {
         .padding(.bottom, 4)
     }
 
+    /// 時間軸左邊那一欄的寬度。
+    ///
+    /// [v25.440] 從 42 加寬到 52。指定抵達時間的站會在時間前面多一個鎖，
+    /// 42 放不下「🔒 12:40」，於是被折成「12:4 / 0」——一個時間被拆成兩行，
+    /// 掃時間軸時特別刺眼。
+    ///
+    /// ⚠️ 景點列、住宿接續列、路段列三個地方都要用同一個值：連接線與圓點
+    ///    靠它對齊在一條垂直線上，改一個沒改另外兩個，整條軸就歪了。
+    private static let timeColumnWidth: CGFloat = 52
+
     /// 住宿的地方在隔天開頭再出現一次：它是當天最後一站，也是隔天的第一站。
     /// 這一列不是另一個景點，只是把「早上從這裡出發」講清楚，所以刻意做得比景點列輕。
     private func overnightResumeRow(_ slot: TripPlan.Slot, dayIndex: Int) -> some View {
@@ -834,7 +844,7 @@ struct TripPlanDetailView: View {
             Text(Self.timeFmt.string(from: slot.departure))
                 .font(.system(size: 12, weight: .bold, design: .rounded))
                 .foregroundStyle(c)
-                .frame(width: 42)
+                .frame(width: Self.timeColumnWidth)
             Image(systemName: "bed.double.fill")
                 .font(.system(size: 10)).foregroundStyle(c)
             Text("從「" + slot.stop.displayName + "」出發")
@@ -860,7 +870,7 @@ struct TripPlanDetailView: View {
         let c = TripDayPalette.color(slot.dayIndex)
         return HStack(spacing: 10) {
             // 對齊上下的時間欄寬度，讓連接線與圓點在一條垂直線上
-            Text("").frame(width: 42)
+            Text("").frame(width: Self.timeColumnWidth)
             Rectangle().fill(c.opacity(0.28))
                 .frame(width: 1.5, height: 26)
             HStack(spacing: 5) {
@@ -935,9 +945,14 @@ struct TripPlanDetailView: View {
                     Text(Self.timeFmt.string(from: slot.arrival))
                         .font(.system(size: 12, weight: .bold, design: .rounded))
                 }
+                // 時間是一個整體，寧可整體縮一點也不要被折成兩行
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
                 .foregroundStyle(slot.shortfallSeconds > 60 ? Color.red : c)
                 Text(Self.departureText(slot))
                     .font(.system(size: 10, design: .rounded))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
                     .foregroundStyle(.tertiary)
                 // 打卡過的時間是事實，跟排出來的預估分開標示
                 if slot.isActualArrival || slot.isActualDeparture {
@@ -948,7 +963,7 @@ struct TripPlanDetailView: View {
                         .background(c, in: Capsule())
                 }
             }
-            .frame(width: 42)
+            .frame(width: Self.timeColumnWidth)
 
             ItemRow(
                 chips: stopChips(slot),
