@@ -35,6 +35,8 @@ import SwiftUI
 struct LifeOverviewView: View {
     @EnvironmentObject var store: LifeStore
     @EnvironmentObject var financeStore: FinanceStore
+    /// [v25.434] 「還沒解鎖的功能」要看支出（地圖與稅務的條件在那裡）
+    @EnvironmentObject var expenseStore: ExpenseStore
     @EnvironmentObject var subscription: SubscriptionManager
     @State private var showEditProfile = false
     @State private var showAddVariable = false
@@ -48,6 +50,10 @@ struct LifeOverviewView: View {
     @State private var emptyMilestonePulse = false
     @State private var emptyMilestonePulseTask: Task<Void, Never>?
     @State private var categoryRowsAppearedTask: Task<Void, Never>?
+    /// [v25.434] 還沒解鎖的功能：預設收起來。
+    /// 這一區是「想知道的時候才看」，不該每次打開總覽都先讀一遍還沒有的東西。
+    @AppStorage("life_locked_features_expanded") private var lockedExpanded = false
+    @State private var addingMilestoneCategory: MilestoneCategory?
 
     var body: some View {
         // 計算一次，避免 statsCard / milestoneTimeline / categoryBreakdown 各自重算（共 5 次）
@@ -67,6 +73,7 @@ struct LifeOverviewView: View {
                     statsCard(allMS)
                     milestoneTimelineSection(allMS)
                     categoryBreakdownSection(allMS)
+                    lockedFeaturesSection
                 }
                 .padding(.vertical)
             }
@@ -82,6 +89,11 @@ struct LifeOverviewView: View {
             .sheet(isPresented: $showAddFixed) { AddExpenseView(expenseType: .fixed) }
             .sheet(isPresented: $showAddStock) { AddStockView() }
             .sheet(isPresented: $showAddRealEstate) { AddRealEstateView() }
+            // .sheet(item:) 而不是 isPresented＋另一個 @State：後者在 content
+            // closure 裡讀到的會是寫入前的舊分類
+            .sheet(item: $addingMilestoneCategory) { cat in
+                AddMilestoneView(initialCategory: cat)
+            }
             .premiumLockAlert(isPresented: $showPremiumAlert)
         }
     }
@@ -559,5 +571,153 @@ struct LifeOverviewView: View {
 
     private func formatDate(_ date: Date) -> String {
         Self.milestoneDateFormatter.string(from: date)
+    }
+}
+
+// MARK: - 還沒解鎖的功能（v25.434）
+
+extension LifeOverviewView {
+
+    /// 人生分頁刻意不是十一個功能一次全開——新使用者第一天只看得到總覽與履歷，
+    /// 其餘跟著資料長出來。好處是不會一進來就被十一個分頁嚇到，
+    /// 代價是**功能發現不了**：使用者可能記了半年帳，都不知道有美食地圖，
+    /// 因為他從來沒在記帳時選過地點。
+    ///
+    /// 這一區就是那個代價的解法：藏起來可以，但要留一條看得到的路。
+    /// 每一列都寫清楚「要做什麼它才會出現」，而且點一下就直接幫他開那件事。
+    ///
+    /// ⚠️ 條件一律問 LifeFeatureGate，不在這裡重寫一份。兩邊各寫一份的話，
+    ///    改了條件就會出現「這裡說加一筆就會出現、加了卻還是沒出現」，
+    ///    那比沒有這個提示還糟。
+    @ViewBuilder
+    var lockedFeaturesSection: some View {
+        let locked = lockedFeatures
+        if !locked.isEmpty {
+            VStack(alignment: .leading, spacing: 0) {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.2)) { lockedExpanded.toggle() }
+                } label: {
+                    HStack(spacing: 10) {
+                        ZStack {
+                            Circle()
+                                .fill(LinearGradient(colors: [.gray.opacity(0.22), .gray.opacity(0.08)],
+                                                     startPoint: .topLeading, endPoint: .bottomTrailing))
+                                .frame(width: 32, height: 32)
+                            Image(systemName: "lock.fill")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(.secondary)
+                        }
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("還沒解鎖的功能")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(.primary)
+                            Text("人生分頁的功能跟著資料長出來，還有 \(locked.count) 個沒出現")
+                                .font(.caption2).foregroundStyle(.secondary)
+                        }
+                        Spacer(minLength: 0)
+                        Text("\(locked.count)")
+                            .font(.system(size: 11, weight: .bold).monospacedDigit())
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 7).padding(.vertical, 2.5)
+                            .background(Color(.tertiarySystemFill), in: Capsule())
+                        Image(systemName: "chevron.down")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.tertiary)
+                            .rotationEffect(.degrees(lockedExpanded ? 0 : -90))
+                    }
+                    .padding(14)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+
+                if lockedExpanded {
+                    ForEach(locked, id: \.self) { feature in
+                        Divider().padding(.leading, 56)
+                        lockedRow(feature)
+                    }
+                }
+            }
+            .background(Color(.secondarySystemGroupedBackground))
+            .clipShape(RoundedRectangle(cornerRadius: 16))
+            .padding(.horizontal)
+        }
+    }
+
+    /// 目前還沒解鎖的功能。順序沿用 LifeFeature 的宣告順序，
+    /// 跟功能列出現的順序一致——解鎖之後它就會出現在那個位置。
+    private var lockedFeatures: [LifeFeature] {
+        LifeFeature.allCases.filter {
+            !LifeFeatureGate.isUnlocked($0, life: store,
+                                        finance: financeStore, expense: expenseStore)
+        }
+    }
+
+    private func lockedRow(_ feature: LifeFeature) -> some View {
+        let action = LifeFeatureGate.unlockAction(feature)
+        return Button {
+            perform(action)
+        } label: {
+            HStack(spacing: 10) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(lockedTint(feature).opacity(0.14))
+                        .frame(width: 32, height: 32)
+                    Image(systemName: feature.icon)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(lockedTint(feature))
+                }
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(feature.title)
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(.primary)
+                    Text(LifeFeatureGate.unlockHint(feature))
+                        .font(.caption2).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 0)
+                if action != nil {
+                    Text("去做")
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(lockedTint(feature))
+                        .padding(.horizontal, 8).padding(.vertical, 4)
+                        .background(lockedTint(feature).opacity(0.12), in: Capsule())
+                }
+            }
+            .padding(.horizontal, 14).padding(.vertical, 11)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        // 沒有可以直接幫他開的動作時就不要假裝可以按
+        .disabled(action == nil)
+    }
+
+    private func perform(_ action: LifeFeatureGate.UnlockAction?) {
+        switch action {
+        case .addVariableExpense:
+            showAddVariable = true
+        case .addRealEstate:
+            // 房地產要訂閱，比照本頁右上角＋的處理
+            if subscription.isPremium { showAddRealEstate = true } else { showPremiumAlert = true }
+        case .addMilestone(let category):
+            addingMilestoneCategory = category
+        case nil:
+            break
+        }
+    }
+
+    /// 每個功能一個顏色，跟它在功能列上的角色對得起來
+    private func lockedTint(_ feature: LifeFeature) -> Color {
+        switch feature {
+        case .overview, .resume: return .secondary
+        case .finance:    return .green
+        case .health:     return .red
+        case .career:     return .blue
+        case .family:     return .orange
+        case .realEstate: return .brown
+        case .tax:        return .indigo
+        case .foodMap:    return .orange
+        case .travelMap:  return .purple
+        case .medicalMap: return .pink
+        }
     }
 }

@@ -86,6 +86,104 @@ enum LifeFeature: String, CaseIterable, Identifiable {
     }
 }
 
+/// [v25.434] 人生分頁的哪些功能現在看得到。
+///
+/// ⚠️ 這裡是**唯一**的判斷處。人生總覽底部的「還沒解鎖的功能」讀的也是這裡。
+///    兩邊各寫一份的話，改了條件就會出現「總覽說加一筆就會出現、加了卻還是沒出現」
+///    ——那比沒有這個提示還糟。
+///
+/// 設計取捨：人生分頁刻意不是十一個功能一次全開。新使用者第一天只會看到
+/// 總覽與履歷，其餘跟著資料長出來。代價是「功能發現不了」，所以才需要
+/// 那個「還沒解鎖」的清單——藏起來可以，但要留一條看得到的路。
+enum LifeFeatureGate {
+
+    static func isUnlocked(_ feature: LifeFeature,
+                           life: LifeStore, finance: FinanceStore,
+                           expense: ExpenseStore) -> Bool {
+        switch feature {
+        case .overview, .resume:
+            return true
+        case .finance:
+            return life.milestones.contains { $0.category == .achievement }
+        case .health:
+            if life.milestones.contains(where: { $0.category == .health }) { return true }
+            return !life.workouts.isEmpty
+        case .career:
+            return life.milestones.contains { $0.category == .career }
+        case .family:
+            return !life.familyMembers.isEmpty
+        case .realEstate:
+            return !finance.realEstates.isEmpty
+        case .tax:
+            // 任一稅費／節稅紀錄、可抵稅的固定支出，或有房產／車輛（會產生年度稅）
+            if expense.expenses.contains(where: {
+                $0.variableCategory == .tax || $0.variableCategory == .taxSaving ||
+                ($0.expenseType == .fixed && $0.effectivelyTaxDeductible)
+            }) { return true }
+            return !finance.realEstates.isEmpty || !finance.vehicles.isEmpty
+        case .foodMap:
+            // ⚠️ 看的是「有沒有座標」，不是「有沒有飲食支出」。
+            //    記了一堆飲食但都沒選地點的話，地圖上一個點也畫不出來。
+            return expense.expenses.contains {
+                $0.variableCategory == .food && $0.placeLatitude != nil && $0.placeLongitude != nil
+            }
+        case .travelMap:
+            return expense.expenses.contains {
+                $0.variableCategory == .entertainment && $0.placeLatitude != nil && $0.placeLongitude != nil
+            }
+        case .medicalMap:
+            if expense.expenses.contains(where: { $0.variableCategory == .medical }) { return true }
+            if life.milestones.contains(where: { $0.category == .health }) { return true }
+            return !life.healthProfile.isEmpty
+        }
+    }
+
+    /// 怎麼讓它出現。寫給使用者看的，所以講的是「做什麼」而不是「什麼欄位不為空」。
+    static func unlockHint(_ feature: LifeFeature) -> String {
+        switch feature {
+        case .overview, .resume:
+            return ""
+        case .finance:
+            return "記一筆「財富」類的里程碑（開戶、信用卡、一筆投資…）"
+        case .health:
+            return "記一筆「健康」類的里程碑，或在健康頁新增一次健身紀錄"
+        case .career:
+            return "記一筆「職涯」類的里程碑（到職、升遷、調動…）"
+        case .family:
+            return "新增一位家庭成員（配偶、兒女、父母、寵物都算）"
+        case .realEstate:
+            return "在理財新增一筆房地產"
+        case .tax:
+            return "記一筆稅費或節稅支出，或是有房產／車輛（會產生年度稅）"
+        case .foodMap:
+            return "記一筆飲食支出並且**選到地點**——沒有座標就畫不到地圖上"
+        case .travelMap:
+            return "記一筆娛樂支出並且**選到地點**——沒有座標就畫不到地圖上"
+        case .medicalMap:
+            return "記一筆醫療支出，或填好健康檔案"
+        }
+    }
+
+    /// 點一下要幫他開什麼。nil＝這件事得自己去那個頁面做。
+    static func unlockAction(_ feature: LifeFeature) -> UnlockAction? {
+        switch feature {
+        case .overview, .resume: return nil
+        case .finance:    return .addMilestone(.achievement)
+        case .health:     return .addMilestone(.health)
+        case .career:     return .addMilestone(.career)
+        case .family:     return .addMilestone(.family)
+        case .realEstate: return .addRealEstate
+        case .tax, .foodMap, .travelMap, .medicalMap: return .addVariableExpense
+        }
+    }
+
+    enum UnlockAction: Equatable {
+        case addVariableExpense
+        case addRealEstate
+        case addMilestone(MilestoneCategory)
+    }
+}
+
 enum ManagementFeature: String, CaseIterable, Identifiable {
     case calendar, overview, subordinates, businessCard, organization, gradeTitle
     /// 兼任職務管理中樞。列出所有已啟用專屬管理頁的兼任職務。
@@ -1640,63 +1738,25 @@ struct MainTabView: View {
         }
     }
 
+    /// 這兩個在 lifeContent 的分支裡還會用到，所以留著；判斷本身跟 LifeFeatureGate 一致
     private var hasCareerMilestones: Bool {
-        lifeStore.milestones.contains { $0.category == .career }
+        LifeFeatureGate.isUnlocked(.career, life: lifeStore,
+                                   finance: financeStore, expense: expenseStore)
     }
 
     private var hasFinanceMilestones: Bool {
-        lifeStore.milestones.contains { $0.category == .achievement }
+        LifeFeatureGate.isUnlocked(.finance, life: lifeStore,
+                                   finance: financeStore, expense: expenseStore)
     }
 
-    /// 有健康里程碑或健身紀錄 → 顯示健康頁
-    private var hasHealthData: Bool {
-        if lifeStore.milestones.contains(where: { $0.category == .health }) { return true }
-        return !lifeStore.workouts.isEmpty
-    }
 
+    /// 順序就是 LifeFeature 的宣告順序（總覽、履歷、財富、健康、職涯、家庭、
+    /// 房地產、稅務、美食地圖、旅遊地圖、醫療地圖），跟改寫前一模一樣
     private var lifeAvailableFeatures: [LifeFeature] {
-        var list: [LifeFeature] = [.overview, .resume]
-        if hasFinanceMilestones { list.append(.finance) }
-        if hasHealthData { list.append(.health) }
-        if hasCareerMilestones { list.append(.career) }
-        if !lifeStore.familyMembers.isEmpty { list.append(.family) }
-        if !financeStore.realEstates.isEmpty { list.append(.realEstate) }
-        if hasTaxData { list.append(.tax) }
-        if hasFoodMapData { list.append(.foodMap) }
-        if hasTravelMapData { list.append(.travelMap) }
-        if hasMedicalMapData { list.append(.medicalMap) }
-        return list
-    }
-
-    /// 任一稅費 / 節稅紀錄、有房產或車輛（會產生年度稅）→ 顯示稅務頁
-    private var hasTaxData: Bool {
-        if expenseStore.expenses.contains(where: {
-            $0.variableCategory == .tax || $0.variableCategory == .taxSaving ||
-            ($0.expenseType == .fixed && $0.effectivelyTaxDeductible)
-        }) { return true }
-        if !financeStore.realEstates.isEmpty || !financeStore.vehicles.isEmpty { return true }
-        return false
-    }
-
-    /// 任一飲食紀錄已附經緯度 → 顯示美食地圖頁
-    private var hasFoodMapData: Bool {
-        expenseStore.expenses.contains(where: {
-            $0.variableCategory == .food && $0.placeLatitude != nil && $0.placeLongitude != nil
-        })
-    }
-
-    /// 任一娛樂紀錄已附經緯度 → 顯示旅遊地圖頁
-    private var hasTravelMapData: Bool {
-        expenseStore.expenses.contains(where: {
-            $0.variableCategory == .entertainment && $0.placeLatitude != nil && $0.placeLongitude != nil
-        })
-    }
-
-    /// 有醫療支出、健康里程碑或已建立健康檔案 → 顯示醫療地圖頁
-    private var hasMedicalMapData: Bool {
-        if expenseStore.expenses.contains(where: { $0.variableCategory == .medical }) { return true }
-        if lifeStore.milestones.contains(where: { $0.category == .health }) { return true }
-        return !lifeStore.healthProfile.isEmpty
+        LifeFeature.allCases.filter {
+            LifeFeatureGate.isUnlocked($0, life: lifeStore,
+                                       finance: financeStore, expense: expenseStore)
+        }
     }
 }
 
