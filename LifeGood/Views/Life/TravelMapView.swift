@@ -183,18 +183,50 @@ struct TravelMapView: View {
                     title: "旅遊相簿",
                     accent: accent,
                     emptyTitle: "還沒有旅遊照片",
-                    emptyHint: "在「娛樂」變動支出記錄時附上照片，\n這裡就會集結成相簿。",
-                    items: spots.flatMap { spot in
-                        spot.visits.flatMap { v in
-                            v.photoFileNames.map {
-                                AlbumPhotoItem(id: $0, url: Expense.photoURL(for: $0),
-                                               group: spot.name, date: v.date)
-                            }
-                        }
-                    }
+                    emptyHint: "在「娛樂」變動支出記錄時附上照片，\n或在旅遊規劃的景點裡加照片，\n這裡就會集結成相簿。",
+                    items: albumItems
                 )
             }
         }
+    }
+
+    // MARK: - 相簿
+
+    /// 旅遊相簿要收哪些照片。
+    ///
+    /// [v25.439] 兩個來源，因為「去過哪裡」本來就有兩條記錄路徑：
+    ///   • 娛樂變動支出附的照片（這一頁其餘內容的來源）
+    ///   • 旅遊規劃景點裡加的照片
+    /// 以前只收前者，於是同一趟旅行的照片被拆成兩半——行程裡拍的在行程的相本，
+    /// 記帳時拍的在這裡，兩邊都不完整。相簿的意義就是收攏，所以兩邊都要進來。
+    ///
+    /// 一律依「地點名稱」分組，所以同一家店在記帳與行程各留過照片時會併在一起——
+    /// 那本來就是同一個地方。
+    private var albumItems: [AlbumPhotoItem] {
+        var items = spots.flatMap { spot in
+            spot.visits.flatMap { v in
+                v.photoFileNames.map {
+                    AlbumPhotoItem(id: $0, url: Expense.photoURL(for: $0),
+                                   group: spot.name, date: v.date)
+                }
+            }
+        }
+        for plan in lifeStore.tripPlans {
+            // timeline 每次取用都重算，一趟取一次就好
+            for slot in plan.timeline where !slot.stop.photoFileNames.isEmpty {
+                for name in slot.stop.photoFileNames {
+                    items.append(AlbumPhotoItem(
+                        // 景點照片與支出照片存在不同資料夾，萬一撞名，
+                        // 相簿的 id 不能跟著撞
+                        id: "trip-" + name,
+                        url: TripStop.photoURL(name),
+                        group: slot.stop.displayName,
+                        // 打過卡就用真正到的時間，沒有就用排程推算的那天
+                        date: slot.stop.actualArrival ?? slot.arrival))
+                }
+            }
+        }
+        return items
     }
 
     // MARK: - 地圖底層
