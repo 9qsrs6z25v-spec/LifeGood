@@ -217,6 +217,8 @@ struct AddExpenseView: View {
     @State private var placeLongitude: Double?
     /// [v25.365] 汽車變動支出專用的地點名稱（名稱欄被自動命名佔用，見 usesSeparatePlaceField）
     @State private var placeName: String = ""
+    /// [v25.432] 「欄位裡的字是誰打的」——跟旅遊規劃共用的模板，見 MapPlacePicker.swift
+    @State private var placeFill = PlaceFieldFill()
     /// [v25.365] 目前這組座標是「在哪個分類底下選的」（placeScopeKey 的快照）。
     /// 使用者選完飲食的餐廳又把分類改成汽車時，座標已經不適用於新分類，
     /// 存檔與顯示都要靠這個比對把它擋掉，不然停車紀錄會掛到餐廳的經緯度上。
@@ -886,6 +888,26 @@ struct AddExpenseView: View {
                     .lineLimit(1)
                     .padding(.leading, 32)
             }
+            // [v25.432] 打字搜不到的地方（路邊那攤、產業道路旁的維修廠），
+            // 直接在地圖上挪過去。跟旅遊規劃用的是同一個畫面。
+            VStack(alignment: .leading, spacing: 6) {
+                MapPlacePickerButton(
+                    startCoordinate: mapPickerStart,
+                    hasCoordinate: hasResolvedPlace,
+                    accent: placeIconColor,
+                    subtitle: "打字搜不到的店家，直接挪地圖對準就好",
+                    onPick: { picked, addr, coord in
+                        applyMapPickedPlace(name: picked, address: addr, coordinate: coord)
+                    },
+                    onClear: { clearPlace() })
+                if !placeFill.offer.isEmpty {
+                    PlaceOfferRow(offer: placeFill.offer) {
+                        placeFill.acceptOffer(into: placeQuery,
+                                              addressField: placeAddressText)
+                    }
+                }
+            }
+            .padding(.leading, 32)
             if titleFieldFocused {
                 placeSuggestionsList
             }
@@ -1160,6 +1182,9 @@ struct AddExpenseView: View {
             placeAddress = item.address
             placeLatitude = item.latitude
             placeLongitude = item.longitude
+            // 這個名稱與地址是挑進來的、不是打進來的——之後在地圖上重挑
+            // 一個地方時才會跟著換，而不是卡在上一家店的名字上
+            placeFill.markFilled(name: item.title, address: item.address ?? "")
             titleFieldFocused = false
         case .apple:
             // 先帶 fallback，再呼叫 resolve 補完整地址 / 座標
@@ -1180,11 +1205,44 @@ struct AddExpenseView: View {
                         placeAddress = resolved.isEmpty ? fallback : resolved
                         placeLatitude = lat
                         placeLongitude = lon
+                        placeFill.markFilled(name: item.title,
+                                             address: placeAddress ?? "")
                     }
                 }
             }
             titleFieldFocused = false
         }
+    }
+
+    /// 地圖選位置的起點：這一筆已經有座標就停在那裡，
+    /// 沒有就交給 MapPlacePickerSheet 用使用者目前位置
+    private var mapPickerStart: CLLocationCoordinate2D? {
+        guard hasResolvedPlace, let la = placeLatitude, let lo = placeLongitude else { return nil }
+        return CLLocationCoordinate2D(latitude: la, longitude: lo)
+    }
+
+    /// placeAddress 是 Optional，共用模板要的是 Binding<String>，這裡轉一層。
+    /// 空字串存回 nil——「有這個欄位但裡面是空的」跟「沒有地址」在儲存端是同一件事。
+    private var placeAddressText: Binding<String> {
+        Binding(
+            get: { placeAddress ?? "" },
+            set: { placeAddress = $0.isEmpty ? nil : $0 }
+        )
+    }
+
+    /// 從地圖上挑了一個位置。
+    private func applyMapPickedPlace(name picked: String?, address addr: String,
+                                     coordinate: CLLocationCoordinate2D) {
+        // 仍在飛行中的 Apple 候選 resolve 要作廢，不然它晚一點回來會蓋掉這次挑的座標
+        placeSelectionToken += 1
+        placeScopeStamp = placeScopeKey
+        placeLatitude = coordinate.latitude
+        placeLongitude = coordinate.longitude
+        placeFill.apply(name: picked, address: addr,
+                        into: placeQuery, addressField: placeAddressText)
+        // 帶入名稱會觸發搜尋候選，先擋掉這一次
+        suppressNextCompleterUpdate = true
+        titleFieldFocused = false
     }
 
     /// 清掉先前綁定的地點資料
