@@ -2,7 +2,6 @@ import Foundation
 import SwiftUI
 import WeatherKit
 import CoreLocation
-import Security
 
 // MARK: - 行程天氣預報（v25.435）
 //
@@ -138,21 +137,13 @@ final class TripWeatherStore: ObservableObject {
         }
     }
 
-    /// [v25.437] 這支正在跑的 App，到底有沒有把 WeatherKit 的授權簽進去。
-    ///
-    /// 為什麼值得特地問一次：天氣抓不到時有兩種完全不同的世界——
-    ///   • 授權根本不在這支 binary 裡 → 是專案／簽章／後台能力的問題，
-    ///     重試一百次也沒用，要去 Apple Developer 後台開 WeatherKit 再重簽。
-    ///   • 授權在，但服務回絕 → 多半是剛開好還沒生效（Apple 那邊要一段時間
-    ///     才會傳播開），等一下再試就會好。
-    /// 兩者在畫面上長得一模一樣，猜錯方向就會浪費一整個下午。
-    /// SecTaskCopyValueForEntitlement 是公開 API，問的是自己，不涉及任何隱私。
-    static var hasWeatherEntitlement: Bool {
-        guard let task = SecTaskCreateFromSelf(nil) else { return false }
-        let value = SecTaskCopyValueForEntitlement(
-            task, "com.apple.developer.weatherkit" as CFString, nil)
-        return (value as? Bool) == true
-    }
+    // [v25.442] 這裡本來想在執行期問「這支 App 有沒有把 WeatherKit 的授權簽進去」，
+    // 用的是 SecTaskCreateFromSelf / SecTaskCopyValueForEntitlement——**那是 macOS 專屬的**，
+    // iOS 上根本沒有這兩個符號，整包編不過。已經拿掉。
+    //
+    // iOS 沒有乾淨的方法讀自己的 entitlement：讀 embedded.mobileprovision 只在
+    // 開發／TestFlight 版存在（上架版沒有這個檔），而且要解 CMS，代價遠高於價值。
+    // 所以退回「看錯誤訊息判斷」——訊息裡帶授權字樣就往那個方向指，其餘照實顯示原文。
 
     /// 把錯誤翻成使用者看得懂的一句話，後面附上系統原文。
     ///
@@ -172,18 +163,13 @@ final class TripWeatherStore: ObservableObject {
                 return "連線出了問題：" + raw
             }
         }
-        // 授權沒簽進來的話，不管系統回什麼，根因都是同一個，直接講清楚
-        guard hasWeatherEntitlement else {
-            return "這支 App 沒有帶到天氣服務的授權（entitlement 不在簽章裡）。"
-                + "要在 Apple Developer 後台替 App ID 開啟 WeatherKit，"
-                + "再重新簽一次才會生效。（\(raw)）"
-        }
         let lowered = raw.lowercased()
         if lowered.contains("auth") || lowered.contains("permission")
             || lowered.contains("entitle") || lowered.contains("unauthorized")
-            || lowered.contains("token") {
-            return "授權有簽進來，但天氣服務回絕了——多半是後台剛開好還沒生效，"
-                + "等個 30 分鐘再按重試。（\(raw)）"
+            || lowered.contains("token") || lowered.contains("denied") {
+            return "天氣服務不讓這支 App 取用。兩種可能：Apple Developer 後台還沒替"
+                + "這個 App ID 開啟 WeatherKit；或剛開好還沒生效（要等一段時間才會傳播開）。"
+                + "（\(raw)）"
         }
         return raw
     }

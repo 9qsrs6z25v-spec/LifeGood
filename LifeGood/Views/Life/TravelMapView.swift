@@ -203,7 +203,9 @@ struct TravelMapView: View {
     /// 一律依「地點名稱」分組，所以同一家店在記帳與行程各留過照片時會併在一起——
     /// 那本來就是同一個地方。
     private var albumItems: [AlbumPhotoItem] {
-        var items = spots.flatMap { spot in
+        // ⚠️ 用 aggregates 而不是 spots：spots 是 body 裡的一個區域變數
+        //（let spots = aggregates），computed property 看不到它
+        var items = aggregates.flatMap { spot in
             spot.visits.flatMap { v in
                 v.photoFileNames.map {
                     AlbumPhotoItem(id: $0, url: Expense.photoURL(for: $0),
