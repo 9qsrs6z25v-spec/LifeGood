@@ -120,6 +120,7 @@ struct TripStopCardView: View {
                 hero(slot)
                 checkInSection(slot)
                 timingSection(slot)
+                weatherSection(slot)
                 if slot.index > 0 { legSection(slot) }
                 placeSection(slot)
                 if !slot.stop.subSpots.isEmpty { subSpotSection(slot.stop) }
@@ -158,7 +159,12 @@ struct TripStopCardView: View {
                 heroChip(Self.timeFmt.string(from: slot.arrival) + " – "
                          + Self.timeFmt.string(from: slot.departure),
                          icon: "clock")
-                if slot.stop.isMustVisit { heroChip("必去", icon: "star.fill") }
+                // [v25.435] 必去改成直接可按的一顆。
+                //
+                // 以前要標必去得走「…」選單或進編輯畫面——但「這站到底要不要去」
+                // 是排行程時反覆改的一件事，藏在兩層下面就不會有人用。
+                // 現在亮著＝必去，點一下切換，狀態與動作是同一個東西。
+                mustVisitButton(slot)
                 if slot.stop.isOvernight { heroChip("過夜", icon: "bed.double.fill") }
                 Spacer(minLength: 0)
             }
@@ -169,6 +175,32 @@ struct TripStopCardView: View {
         .heroCardShell(card: .tripPlan,
                        runtimeColors: [dayColor, dayColor.opacity(0.62)])
         .padding(.horizontal, 16)
+    }
+
+    /// 必去切換鈕。用 emoji 而不是 SF Symbol：⭐️ 在深色漸層上本來就是彩色的，
+    /// 不用再處理 symbolRenderingMode；沒選取時用灰階的 ☆ 對比也夠明顯。
+    private func mustVisitButton(_ slot: TripPlan.Slot) -> some View {
+        let on = slot.stop.isMustVisit
+        return Button {
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.6)) {
+                lifeStore.toggleTripStopMustVisit(planId: planId, stopId: stopId)
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Text(on ? "⭐️" : "☆")
+                    .font(.system(size: on ? 11 : 13))
+                Text("必去")
+                    .font(.system(size: 11, weight: .bold))
+            }
+            .fixedSize()
+            .foregroundStyle(.white.opacity(on ? 1 : 0.7))
+            .padding(.horizontal, 8).padding(.vertical, 4)
+            .background(.white.opacity(on ? 0.30 : 0.14), in: Capsule())
+            .overlay(Capsule().stroke(.white.opacity(on ? 0.5 : 0.2), lineWidth: 0.75))
+            .scaleEffect(on ? 1.04 : 1)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(on ? "取消必去" : "標為必去")
     }
 
     private func heroChip(_ text: String, icon: String) -> some View {
@@ -425,6 +457,26 @@ struct TripStopCardView: View {
     }
 
     // MARK: 子地點 / 備註 / 照片
+
+    /// [v25.435] 那天的天氣。
+    ///
+    /// 只在「有座標」且「日期在預報範圍內」時整塊出現——沒有的話連標題都不要留，
+    /// 一個永遠寫著「無法取得」的區塊只會讓人以為壞了。
+    @ViewBuilder
+    private func weatherSection(_ slot: TripPlan.Slot) -> some View {
+        if slot.stop.coordinate != nil,
+           TripWeatherStore.isWithinForecastRange(slot.arrival) {
+            sectionBox(title: "那天的天氣", icon: "cloud.sun.fill") {
+                VStack(alignment: .leading, spacing: 8) {
+                    TripWeatherChip(coordinate: slot.stop.coordinate,
+                                    date: slot.arrival, compact: false)
+                    WeatherAttributionRow()
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(14)
+            }
+        }
+    }
 
     private func subSpotSection(_ stop: TripStop) -> some View {
         sectionBox(title: "子地點", icon: "list.bullet.indent") {

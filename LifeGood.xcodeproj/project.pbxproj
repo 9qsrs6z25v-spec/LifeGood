@@ -94,6 +94,7 @@
 		A01B000001001600 /* CompanySiteSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001600 /* CompanySiteSection.swift */; };
 		A01B000001001500 /* ItemRowTemplate.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001500 /* ItemRowTemplate.swift */; };
 		A01B000001001501 /* MapPlacePicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001501 /* MapPlacePicker.swift */; };
+		A01B000001001502 /* TripWeather.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001502 /* TripWeather.swift */; };
 		A01B000001001400 /* RunTrackingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001400 /* RunTrackingView.swift */; };
 		A01B000001001300 /* RunTracker.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001300 /* RunTracker.swift */; };
 		A01B000001001200 /* HealthKitManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001200 /* HealthKitManager.swift */; };
@@ -259,6 +260,7 @@
 		A01A000001001600 /* CompanySiteSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompanySiteSection.swift; sourceTree = "<group>"; };
 		A01A000001001500 /* ItemRowTemplate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ItemRowTemplate.swift; sourceTree = "<group>"; };
 		A01A000001001501 /* MapPlacePicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MapPlacePicker.swift; sourceTree = "<group>"; };
+		A01A000001001502 /* TripWeather.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripWeather.swift; sourceTree = "<group>"; };
 		A01A000001001400 /* RunTrackingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunTrackingView.swift; sourceTree = "<group>"; };
 		A01A000001001300 /* RunTracker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunTracker.swift; sourceTree = "<group>"; };
 		A01A000001001200 /* HealthKitManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthKitManager.swift; sourceTree = "<group>"; };
@@ -435,6 +437,7 @@
 				A01A000001000217 /* InlineEditBlock.swift */,
 				A01A000001001500 /* ItemRowTemplate.swift */,
 				A01A000001001501 /* MapPlacePicker.swift */,
+				A01A000001001502 /* TripWeather.swift */,
 				A01A000001000218 /* AmountCalculator.swift */,
 				A01A000001000219 /* PagedImageExporter.swift */,
 				A01A000001000220 /* FinanceItemCard.swift */,
@@ -766,6 +769,7 @@
 				A01B000001001600 /* CompanySiteSection.swift in Sources */,
 				A01B000001001500 /* ItemRowTemplate.swift in Sources */,
 				A01B000001001501 /* MapPlacePicker.swift in Sources */,
+				A01B000001001502 /* TripWeather.swift in Sources */,
 				A01B000001001400 /* RunTrackingView.swift in Sources */,
 				A01B000001001300 /* RunTracker.swift in Sources */,
 				A01B000001001200 /* HealthKitManager.swift in Sources */,
@@ -782,7 +786,7 @@
 			buildSettings = {
 				CLANG_ENABLE_MODULES = YES;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1187;
+				CURRENT_PROJECT_VERSION = 1188;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = LifeGoodWidgets/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "美好人生";
@@ -793,7 +797,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 25.434;
+				MARKETING_VERSION = 25.435;
 				PRODUCT_BUNDLE_IDENTIFIER = com.lifegood.app.widgets;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
@@ -808,7 +812,7 @@
 			buildSettings = {
 				CLANG_ENABLE_MODULES = YES;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1187;
+				CURRENT_PROJECT_VERSION = 1188;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = LifeGoodWidgets/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "美好人生";
@@ -819,7 +823,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 25.434;
+				MARKETING_VERSION = 25.435;
 				PRODUCT_BUNDLE_IDENTIFIER = com.lifegood.app.widgets;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
@@ -836,7 +840,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = LifeGood/LifeGood.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1187;
+				CURRENT_PROJECT_VERSION = 1188;
 				DEVELOPMENT_ASSET_PATHS = "\"LifeGood/Preview Content\"";
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -867,7 +871,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 25.434;
+				MARKETING_VERSION = 25.435;
 				PRODUCT_BUNDLE_IDENTIFIER = com.lifegood.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -883,7 +887,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = LifeGood/LifeGood.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1187;
+				CURRENT_PROJECT_VERSION = 1188;
 				DEVELOPMENT_ASSET_PATHS = "\"LifeGood/Preview Content\"";
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -914,7 +918,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 25.434;
+				MARKETING_VERSION = 25.435;
 				PRODUCT_BUNDLE_IDENTIFIER = com.lifegood.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;

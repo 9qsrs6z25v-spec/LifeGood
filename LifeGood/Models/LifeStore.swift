@@ -2763,6 +2763,17 @@ class LifeStore: ObservableObject {
         tripPlans[pi].stops[si].dwellMinutes = max(0, Int((seconds / 60).rounded()))
     }
 
+    /// [v25.435] 切換某一站的「必去」。
+    ///
+    /// 抽到 store 來的理由：時間軸的「…」選單與景點卡上的星星鈕都要做同一件事，
+    /// 各寫一份就會有兩種讀寫方式（一個整份 upsert、一個改陣列），
+    /// 哪天加了副作用只會改到其中一邊。
+    func toggleTripStopMustVisit(planId: UUID, stopId: UUID) {
+        guard let pi = tripPlans.firstIndex(where: { $0.id == planId }),
+              let si = tripPlans[pi].stops.firstIndex(where: { $0.id == stopId }) else { return }
+        tripPlans[pi].stops[si].isMustVisit.toggle()
+    }
+
     /// 把真實路線的結果寫回某一段。
     ///
     /// 用「目的地那一站的 id」定位而不是索引：算路線是非同步的，回來的時候

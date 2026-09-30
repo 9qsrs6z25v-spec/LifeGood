@@ -292,6 +292,12 @@ struct TripPlanDetailView: View {
                                 albumButton(p)
                             }
                             addButton(p)
+                            // Apple 規定：顯示了 WeatherKit 的資料就必須標示出處
+                            if showsAnyWeather(p) {
+                                WeatherAttributionRow()
+                                    .frame(maxWidth: .infinity, alignment: .center)
+                                    .padding(.top, 2)
+                            }
                         }
                         .padding(.vertical)
                     }
@@ -676,7 +682,28 @@ struct TripPlanDetailView: View {
                               text: "為了等指定時間，中間空著 "
                                   + TripRouter.durationText(p.totalIdleSeconds))
             }
+            // [v25.435] 天氣預報只有十天。整趟都還太遠時在這裡講一次就好——
+            // 每一站各掛一句「太遠了」只是噪音。
+            if weatherOutOfRange(p) {
+                summaryNotice(icon: "calendar.badge.clock",
+                              text: "天氣預報只有未來 \(TripWeatherStore.forecastDays) 天，這趟還太遠，所以景點上還看不到天氣")
+            }
         }
+    }
+
+    /// 這趟有沒有任何一站真的顯示得出天氣
+    private func showsAnyWeather(_ p: TripPlan) -> Bool {
+        p.timeline.contains {
+            $0.stop.coordinate != nil && TripWeatherStore.isWithinForecastRange($0.arrival)
+        }
+    }
+
+    /// 整趟沒有任何一天在預報範圍內
+    private func weatherOutOfRange(_ p: TripPlan) -> Bool {
+        let slots = p.timeline
+        guard !slots.isEmpty,
+              slots.contains(where: { $0.stop.coordinate != nil }) else { return false }
+        return !slots.contains { TripWeatherStore.isWithinForecastRange($0.arrival) }
     }
 
     private func summaryNotice(icon: String, text: String) -> some View {
@@ -930,9 +957,8 @@ struct TripPlanDetailView: View {
                 disclosures: subSpotDisclosures(slot.stop),
                 disclosureLabel: "子地點",
                 disclosureColor: c,
-                // 照片直接鋪在這一站底下，不用點進編輯才看得到
-                extra: slot.stop.photoFileNames.isEmpty
-                    ? nil : AnyView(photoStrip(slot.stop)),
+                // 天氣與照片直接鋪在這一站底下，不用點進去才看得到
+                extra: stopExtra(slot),
                 // 點整列＝打開景點卡。要去地圖、要編輯、要打卡都在卡片上選——
                 // 直接開地圖的話，其他事情就全被擠進「…」選單裡了（v25.421 的教訓）。
                 onTap: { openingStopId = slot.stop.id },
@@ -1163,6 +1189,25 @@ struct TripPlanDetailView: View {
         .buttonStyle(.plain)
     }
 
+    /// 這一站底下要鋪什麼：天氣預報、照片。兩者都沒有就回 nil，不留空位。
+    ///
+    /// [v25.435] 天氣放在這裡而不是塞進上面的膠囊列：膠囊列是「這一站是什麼」
+    /// （第幾天、必去、停留多久），天氣是「那天會怎樣」，兩件事。
+    private func stopExtra(_ slot: TripPlan.Slot) -> AnyView? {
+        let hasPhotos = !slot.stop.photoFileNames.isEmpty
+        let hasWeather = slot.stop.coordinate != nil
+            && TripWeatherStore.isWithinForecastRange(slot.arrival)
+        guard hasPhotos || hasWeather else { return nil }
+        return AnyView(
+            VStack(alignment: .leading, spacing: 6) {
+                if hasWeather {
+                    TripWeatherChip(coordinate: slot.stop.coordinate, date: slot.arrival)
+                }
+                if hasPhotos { photoStrip(slot.stop) }
+            }
+        )
+    }
+
     private func stopChips(_ slot: TripPlan.Slot) -> [ItemChip] {
         let c = TripDayPalette.color(slot.dayIndex)
         var chips: [ItemChip] = []
@@ -1290,9 +1335,7 @@ struct TripPlanDetailView: View {
 
     /// 必去只是一個開關，不必為它開一次編輯畫面
     private func toggleMustVisit(_ stopId: UUID) {
-        guard var p = plan, let i = p.stops.firstIndex(where: { $0.id == stopId }) else { return }
-        p.stops[i].isMustVisit.toggle()
-        lifeStore.upsertTripPlan(p)
+        lifeStore.toggleTripStopMustVisit(planId: planId, stopId: stopId)
     }
 
     /// 換順序。往後移要 +2——SwiftUI 的 move(toOffset:) 算的是「移除前的索引」，
