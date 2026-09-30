@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.436", build: 1189, date: "2026/08/19", notes: [
+            "【修正】上一版加的天氣檔案在 Xcode 專案裡掛錯群組，編譯直接失敗（Build input file cannot be found：Views/TripWeather.swift）。檔案實際放在 Models 底下，卻被登記在 Views 群組，Xcode 於是去錯的地方找。已改掛到正確的群組，功能本身沒有任何改動。"
+        ]),
         ChangelogEntry(version: "25.435", build: 1188, date: "2026/08/19", notes: [
             "【新增】旅遊規劃的時間軸，每一站底下會顯示那天的天氣：圖示、高低溫，降雨機率 30% 以上才另外標出來（30% 以下講出來只是雜訊）。排行程時直接知道那天會不會下雨。",
             "【新增】點進景點卡也看得到，而且是完整的一塊：天氣描述、高低溫、降雨機率。",
