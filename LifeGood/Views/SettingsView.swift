@@ -2476,6 +2476,13 @@ struct AdvancedSettingsView: View {
                                 title: "浮動新增收支按鈕",
                                 note: "首頁右下角的「＋ 新增收支」")
                 }
+                NavigationLink {
+                    QuickPickSettingsView()
+                } label: {
+                    advancedRow(icon: "capsule.fill", color: .mint,
+                                title: "快速選取膠囊",
+                                note: "記過的店名／品牌最多列幾顆")
+                }
             } header: {
                 Text("介面")
             } footer: {
@@ -3767,5 +3774,83 @@ struct ExportScopeSheet: View {
         }
         .padding(.vertical, 3)
         .contentShape(Rectangle())
+    }
+}
+
+// MARK: 快速選取膠囊（v25.433）
+
+/// 進階設定 → 快速選取膠囊：那一列「記過的店名／品牌點一下帶入」最多列幾顆。
+///
+/// 為什麼要開放調：原本寫死 8 顆。8 顆對「喝哪個牌子的奶粉」剛好，
+/// 但對「這個月去過哪些餐廳」太少了——常去的店根本排不進前 8 名。
+/// 反過來說調太大也有代價，所以上限訂在 200 並且在畫面上講清楚。
+struct QuickPickSettingsView: View {
+    @AppStorage(QuickPickOptions.storageKey) private var limit: Int = QuickPickOptions.defaultLimit
+
+    /// 預覽用的假資料。用真實店名長度的字串，才看得出捲起來是什麼感覺
+    private static let sample = ["翰林茶棧", "馬辣頂級麻辣鴛鴦火鍋", "繼光香香雞",
+                                 "龜記茗品 新竹 SOGO 店", "清心福全", "五十嵐",
+                                 "鼎泰豐 101 店", "路易莎咖啡"]
+
+    var body: some View {
+        Form {
+            Section {
+                QuickPickCapsuleRow(options: Array(Self.sample.prefix(max(1, min(limit, Self.sample.count)))),
+                                    selection: .constant(""),
+                                    accent: .green)
+            } header: {
+                Text("預覽")
+            } footer: {
+                Text("最左邊那個數字是總共幾顆，不會跟著捲——一列看得到的永遠只有前三四顆，先給個數字才決定要不要往右捲。")
+            }
+
+            Section {
+                Stepper(value: $limit, in: 1...QuickPickOptions.maxLimit, step: 1) {
+                    HStack {
+                        Text("最多列幾顆")
+                        Spacer()
+                        Text("\(limit)")
+                            .font(.subheadline.weight(.semibold).monospacedDigit())
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                // 一顆一顆按到 200 太慢，給幾個常用值一鍵跳
+                HStack(spacing: 8) {
+                    ForEach([8, 20, 50, 100, 200], id: \.self) { n in
+                        Button {
+                            limit = n
+                        } label: {
+                            Text("\(n)")
+                                .font(.caption.weight(.semibold).monospacedDigit())
+                                .foregroundStyle(limit == n ? .white : Color.mint)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 6)
+                                .background(limit == n ? Color.mint : Color.mint.opacity(0.12),
+                                            in: RoundedRectangle(cornerRadius: 8))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                if limit != QuickPickOptions.defaultLimit {
+                    Button("恢復預設（\(QuickPickOptions.defaultLimit)）") {
+                        limit = QuickPickOptions.defaultLimit
+                    }
+                    .font(.caption)
+                }
+            } header: {
+                Text("數量上限")
+            } footer: {
+                Text("預設 \(QuickPickOptions.defaultLimit) 顆，最多 \(QuickPickOptions.maxLimit) 顆。列出來的一律是「最近用過的優先、重複的只留一顆」，所以調大只是讓更久以前用過的也排得進來。調到很大時那一列會變得很長，捲到手痠還不如直接打字——真的常用的通常在前二十顆裡。")
+            }
+
+            Section {
+                Text("這個設定是全 App 共用的：變動支出的店名、兒女喝奶的品牌與食物名稱、就醫與疫苗的院所，用的都是同一列膠囊。")
+                    .font(.caption).foregroundStyle(.secondary)
+            } header: {
+                Text("影響範圍")
+            }
+        }
+        .navigationTitle("快速選取膠囊")
+        .navigationBarTitleDisplayMode(.inline)
     }
 }
