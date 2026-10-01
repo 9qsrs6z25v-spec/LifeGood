@@ -1394,7 +1394,8 @@ struct StockTransactionEditor: View {
             .onAppear { loadInitial() }
             // [v25.452] 數量 ⇄ 總金額雙向換算。
             //
-            // ⚠️ 不用「靠收斂自己停下來」那套（本檔案配息編輯器的做法）。
+            // ⚠️ 不用「兩欄互相回寫、靠收斂自己停下來」那套（配息編輯器原本的做法，
+            //    已於 v25.453 一併改掉）。
             //    原因：由金額反推數量時，台股只能買整股，所以要把股數湊整；
             //    湊完再回寫金額，使用者打「10000」的過程中欄位會在每一次按鍵後
             //    被改成 9991 之類的值——等於跟鍵盤打架。
@@ -1584,6 +1585,8 @@ struct StockDividendEditor: View {
     @State private var sharesAtEventText: String = ""
     /// 總配息輸入欄：與每股配息雙向換算（輸入任一方，依基準股數自動算出另一方）
     @State private var totalText: String = ""
+    private enum DividendField: Hashable { case shares, perShare, total }
+    @FocusState private var focusedField: DividendField?
     @State private var note: String = ""
     @State private var showDeleteConfirm = false
     /// 存檔中鎖住儲存按鈕，避免 sheet 收合動畫播完前快速連點建立兩筆重複股利／收入／存款紀錄
@@ -1646,22 +1649,25 @@ struct StockDividendEditor: View {
                         HStack {
                             TextField("基準股數", text: $sharesAtEventText)
                                 .keyboardType(.decimalPad)
+                                .focused($focusedField, equals: .shares)
                             Text("股").foregroundStyle(.secondary)
                         }
                         HStack {
                             Text("每股 " + currencySymbol).foregroundStyle(.secondary)
                             TextField("每股配息", text: $perShareText)
                                 .keyboardType(.decimalPad)
+                                .focused($focusedField, equals: .perShare)
                         }
                         HStack {
                             Text("總計 " + currencySymbol).foregroundStyle(.secondary)
-                            TextField("總配息", text: $totalText)
+                            TextField("或直接填總配息", text: $totalText)
                                 .keyboardType(.decimalPad)
+                                .focused($focusedField, equals: .total)
                         }
                     } header: {
                         stockEditorSectionHeader("配息計算", icon: "dollarsign.circle.fill", color: .pink)
                     } footer: {
-                        Text("每股配息與總配息擇一輸入即可，另一欄會依基準股數自動換算。")
+                        Text("每股配息與總配息填任一個就好，另一個會依基準股數自動算出來。打字途中不會去動你正在打的那一欄；離開總配息欄時才把它校正成「每股 × 股數」的實際入帳金額。")
                             .font(.caption2)
                     }
                 }
@@ -1730,38 +1736,75 @@ struct StockDividendEditor: View {
                     sharesAtEventText = "\(Int(currentHeldShares))"
                 }
             }
-            // 雙向換算：每股 ↔ 總配息（以基準股數為橋）。以「數值差過小就不回寫」
-            // 作為回饋循環的終止條件——兩個 onChange 互相觸發時，第二輪算出的值與
-            // 既有值幾乎相同（只剩捨入誤差），即停止回寫，不需額外旗標。
+            // [v25.453] 雙向換算：每股 ↔ 總配息（以基準股數為橋）。
+            //
+            // 原本的寫法是兩個 onChange 互相回寫，靠「數值差過小就不回寫」自己收斂。
+            // 那在基準股數大的時候會吃掉輸入：股數 123,456、在總配息打「10000」，
+            // 第一個字「1」算出每股 0.0000（四捨五入到小數第 4 位就是 0），
+            // 回寫時 p > 0 不成立 → 總配息被清成空字串，接著「0000」原地累積，
+            // 每股一路空白。使用者打的那一欄被自己的回寫改掉，怎麼打都不對。
+            //
+            // 改成看**焦點在哪一欄**（與 StockTransactionEditor 同一套）：游標在哪一欄
+            // 就只算另一欄，絕不回寫使用者正在打的那一欄。離開總配息欄時才把它校正成
+            //「每股 × 股數」的實際入帳金額，那個時機改它不會打斷任何人。
             .onChange(of: perShareText) { _, _ in
-                let p = Double(perShareText) ?? 0
-                let s = Double(sharesAtEventText) ?? 0
-                guard s > 0 else { return }
-                let newTotal = p * s
-                if abs((Double(totalText) ?? 0) - newTotal) > 0.5 {
-                    totalText = p > 0 ? String(format: "%g", newTotal.rounded()) : ""
-                }
+                guard focusedField == .perShare else { return }
+                syncTotalFromPerShare()
             }
             .onChange(of: totalText) { _, _ in
-                let t = Double(totalText) ?? 0
-                let s = Double(sharesAtEventText) ?? 0
-                guard s > 0 else { return }
-                let newPer = (t / s * 10000).rounded() / 10000   // 每股保留到 4 位小數
-                if abs((Double(perShareText) ?? 0) - newPer) > 0.0001 {
-                    perShareText = t > 0 ? String(format: "%g", newPer) : ""
-                }
+                guard focusedField == .total else { return }
+                syncPerShareFromTotal()
             }
             .onChange(of: sharesAtEventText) { _, _ in
-                // 股數變動：以每股為準重算總額（每股是實際存檔欄位）
-                let p = Double(perShareText) ?? 0
-                let s = Double(sharesAtEventText) ?? 0
-                guard p > 0, s > 0 else { return }
-                let newTotal = p * s
-                if abs((Double(totalText) ?? 0) - newTotal) > 0.5 {
-                    totalText = String(format: "%g", newTotal.rounded())
-                }
+                // 股數變動：以每股為準重算總額（perShare 才是實際存檔欄位，
+                // 以總額為準的話，調一次基準股數就會把每股配息改掉）。
+                // 游標在總配息欄時不動——那表示股數是被 kind／date 自動帶入的，
+                // 使用者正在打的金額不該被蓋掉。
+                guard focusedField != .total else { return }
+                syncTotalFromPerShare()
+            }
+            .onChange(of: focusedField) { old, _ in
+                // 離開總配息欄 → 校正成每股 × 股數的實際金額
+                if old == .total { syncTotalFromPerShare() }
             }
         }
+    }
+
+    /// 由每股配息算總配息
+    private func syncTotalFromPerShare() {
+        let p = Double(perShareText) ?? 0
+        let s = Double(sharesAtEventText) ?? 0
+        guard s > 0 else { return }
+        let text = p > 0 ? String(format: "%g", (p * s).rounded()) : ""
+        if totalText != text { totalText = text }
+    }
+
+    /// 由總配息反推每股配息。
+    /// 每股保留到小數第 4 位（配息公告的常見精度）；但股數大到連第 4 位都壓成 0 時
+    /// 再放寬到第 6 位，否則每股會變成 0，離開欄位時整筆金額會被當成 0 清掉。
+    private func syncPerShareFromTotal() {
+        let t = Double(totalText) ?? 0
+        let s = Double(sharesAtEventText) ?? 0
+        guard s > 0 else { return }
+        guard t > 0 else {
+            if !perShareText.isEmpty { perShareText = "" }
+            return
+        }
+        let raw = t / s
+        var per = (raw * 10000).rounded() / 10000
+        if per == 0 { per = (raw * 1_000_000).rounded() / 1_000_000 }
+        let text = Self.perShareDisplay(per)
+        if perShareText != text { perShareText = text }
+    }
+
+    /// 每股配息顯示用：最多 6 位小數、去掉尾隨的 0，絕不吐科學記號。
+    /// 不能用 "%g"——0.000008 會變成 "8e-06" 出現在輸入欄裡。
+    private static func perShareDisplay(_ v: Double) -> String {
+        if v == v.rounded() { return String(format: "%.0f", v) }
+        var s = String(format: "%.6f", v)
+        while s.hasSuffix("0") { s.removeLast() }
+        if s.hasSuffix(".") { s.removeLast() }
+        return s
     }
 
     private var kindFooterText: String {
@@ -1803,7 +1846,7 @@ struct StockDividendEditor: View {
             kind = e.kind
             // 存檔的 lots 永遠是「股數 ÷ 1000」，畫面上要換成這支股票的單位
             lotsText = e.lots > 0 ? String(format: "%g", e.lots * 1000 / sharesPerUnit) : ""
-            perShareText = e.perShare > 0 ? String(format: "%g", e.perShare) : ""
+            perShareText = e.perShare > 0 ? Self.perShareDisplay(e.perShare) : ""
             sharesAtEventText = e.sharesAtEvent > 0 ? "\(Int(e.sharesAtEvent))" : ""
             if e.perShare > 0, e.sharesAtEvent > 0 {
                 totalText = String(format: "%g", (e.perShare * e.sharesAtEvent).rounded())
