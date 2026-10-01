@@ -53,6 +53,15 @@ struct MyCalendarView: View {
     @State private var openTarget: CalendarOpenTarget?
     /// [v25.389] 逾期才打勾時跳出來問「要不要算壓線準時」的請求（見 LateCompletionGate）
     @State private var lateRequest: LateCompletionRequest?
+    /// [v25.443] 改會議條目的「開會時間」（改期／另外加開一場）
+    @State private var sessionEdit: SessionEditTarget?
+
+    struct SessionEditTarget: Identifiable {
+        let id = UUID()
+        let subId: UUID
+        let meetingId: UUID
+        let itemId: UUID
+    }
     /// 搜尋結果匯出圖片的分享面板
     @State private var searchSharePayload: CalendarSharePayload?
     /// 匯出前的每頁項目數選擇（PagedImageExporter 模組）
@@ -189,6 +198,11 @@ struct MyCalendarView: View {
             }
             .sheet(item: $searchSharePayload) { payload in ShareSheet(items: payload.items) }
             .lateCompletionConfirm($lateRequest)
+            .sheet(item: $sessionEdit) { t in
+                MeetingSessionTimeSheet(subordinateId: t.subId, meetingId: t.meetingId,
+                                        itemId: t.itemId)
+                    .environmentObject(lifeStore)
+            }
             .sheet(item: $openTarget) { target in
                 switch target {
                 // 部屬報告/任務/會議/請假：先顯示預覽卡片，右上角「編輯」才進入編輯
@@ -1036,10 +1050,14 @@ struct MyCalendarView: View {
             }.map { (sub: sub, task: $0) }
         }
     }
-    private var subIncompleteMeetingItems: [(sub: Subordinate, meeting: SubordinateMeeting, item: MeetingItem)] {
+    /// [v25.443] 改用 itemContexts 而不是 allItems：要顯示並能修改「這一項在哪一場、
+    /// 那一場什麼時候開」，就必須帶著場次，allItems 把那個資訊攤掉了。
+    private var subIncompleteMeetingItems: [(sub: Subordinate, meeting: SubordinateMeeting,
+                                             ctx: SubordinateMeeting.ItemContext)] {
         lifeStore.subordinates.flatMap { sub in
             sub.meetings.flatMap { m in
-                m.allItems.filter { !$0.isCompleted }.map { (sub: sub, meeting: m, item: $0) }
+                m.itemContexts.filter { !$0.item.isCompleted }
+                    .map { (sub: sub, meeting: m, ctx: $0) }
             }
         }.sorted { $0.meeting.date > $1.meeting.date }
     }
@@ -1123,15 +1141,19 @@ struct MyCalendarView: View {
 
             subAgendaCard("未完成會議條目", "person.3.sequence.fill", .indigo,
                           count: allIncompleteMeetings.count, empty: "沒有未完成的會議條目") {
-                ForEach(Array(allIncompleteMeetings.enumerated()), id: \.element.item.id) { _, it in
+                ForEach(Array(allIncompleteMeetings.enumerated()), id: \.element.ctx.id) { _, it in
                     subAgendaCheckRow(name: it.sub.name,
-                                      text: it.item.content.isEmpty ? "未填內容" : it.item.content,
+                                      text: it.ctx.item.content.isEmpty ? "未填內容" : it.ctx.item.content,
                                       detail: (it.meeting.topic.isEmpty ? "會議" : it.meeting.topic)
-                                            + (it.item.dueDate.map { "・截止 " + subAgendaTime($0) } ?? ""),
-                                      done: it.item.isCompleted, accent: .indigo,
+                                            + (it.ctx.item.dueDate.map { "・截止 " + subAgendaTime($0) } ?? ""),
+                                      done: it.ctx.item.isCompleted, accent: .indigo,
+                                      // [v25.443] 開會時間另外一列，點了可以改期或另外加開一場。
+                                      // 截止是「什麼時候要交」，開會是「什麼時候談」，兩件事。
+                                      extra: AnyView(sessionChip(it.sub, it.meeting, it.ctx)),
                                       onOpen: { openTarget = .meeting(subId: it.sub.id, meeting: it.meeting) }) {
                         lateRequest = LateCompletionGate.meetingItem(
-                            lifeStore, subordinateId: it.sub.id, meetingId: it.meeting.id, item: it.item)
+                            lifeStore, subordinateId: it.sub.id, meetingId: it.meeting.id,
+                            item: it.ctx.item)
                     }
                 }
             }
@@ -1439,6 +1461,7 @@ struct MyCalendarView: View {
 
     private func subAgendaCheckRow(name: String, text: String, detail: String?, done: Bool,
                                    accent: Color, completedAt: Date? = nil, due: Date? = nil,
+                                   extra: AnyView? = nil,
                                    onOpen: (() -> Void)? = nil,
                                    toggle: @escaping () -> Void) -> some View {
         HStack(spacing: 10) {
@@ -1463,9 +1486,36 @@ struct MyCalendarView: View {
             }
             .buttonStyle(.plain)
             .disabled(onOpen == nil)
+            // extra 擺在整列那顆 Button **外面**：放進去的話點它會先被外層
+            // 的 onOpen 吃掉，變成怎麼點都是開會議編輯頁
+            if let extra { extra }
         }
         .padding(.horizontal, 14).padding(.vertical, 9)
         .opacity(done ? 0.7 : 1)
+    }
+
+    /// [v25.443] 開會時間膠囊。點一下開「開會時間」表單（改期／另外加開一場）。
+    private func sessionChip(_ sub: Subordinate, _ meeting: SubordinateMeeting,
+                             _ ctx: SubordinateMeeting.ItemContext) -> some View {
+        Button {
+            sessionEdit = SessionEditTarget(subId: sub.id, meetingId: meeting.id,
+                                            itemId: ctx.item.id)
+        } label: {
+            HStack(spacing: 3) {
+                Image(systemName: ctx.isAdHoc ? "calendar.badge.plus" : "calendar")
+                    .font(.system(size: 8, weight: .semibold))
+                Text(subAgendaTime(ctx.sessionDate))
+                if ctx.isRescheduled {
+                    Image(systemName: "arrow.triangle.swap").font(.system(size: 8, weight: .bold))
+                }
+            }
+            .font(.system(size: 10, weight: .semibold))
+            .foregroundStyle(ctx.isCancelled ? Color.secondary : Color.teal)
+            .padding(.horizontal, 7).padding(.vertical, 3)
+            .background((ctx.isCancelled ? Color.secondary : Color.teal).opacity(0.12))
+            .clipShape(Capsule())
+        }
+        .buttonStyle(.plain)
     }
 
     // MARK: - 輔助元件

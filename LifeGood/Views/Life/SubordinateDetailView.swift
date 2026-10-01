@@ -205,6 +205,161 @@ struct CompletedEntry: Identifiable {
     let onTap: () -> Void
 }
 
+/// [v25.443] 從部屬總覽／我的行事曆直接改「這一項要在哪一場、什麼時候談」。
+///
+/// 為什麼需要它：那兩個頁面上的會議條目只看得到**截止時間**（什麼時候要交），
+/// 看不到也改不了**開會時間**（什麼時候談）。要改開會時間得點進整個會議編輯頁，
+/// 在一堆欄位裡找到場次那一區——而排行程時最常做的就是「這件事往後挪一週」
+/// 或「這件事不等例會了，另外找時間談」。
+///
+/// 兩個模式刻意分開，因為後果完全不同：
+///   • 改這一場 → 整場會議（含同場其他議程項目）都跟著移動
+///   • 另外加開 → 只有這一項搬到新的一場，其他項目留在原場次
+struct MeetingSessionTimeSheet: View {
+    @EnvironmentObject var lifeStore: LifeStore
+    @Environment(\.dismiss) private var dismiss
+
+    let subordinateId: UUID
+    let meetingId: UUID
+    let itemId: UUID
+
+    private enum Mode: String, CaseIterable, Identifiable {
+        case move = "改這一場的時間"
+        case extraSession = "另外加開一場"
+        var id: String { rawValue }
+    }
+
+    @State private var mode: Mode = .move
+    @State private var date = Date()
+    @State private var loaded = false
+
+    private var meeting: SubordinateMeeting? {
+        lifeStore.subordinates.first { $0.id == subordinateId }?
+            .meetings.first { $0.id == meetingId }
+    }
+    private var context: SubordinateMeeting.ItemContext? {
+        meeting?.itemContexts.first { $0.item.id == itemId }
+    }
+
+    private static let fmt: DateFormatter = {
+        let f = DateFormatter(); f.locale = Locale(identifier: "zh_Hant_TW")
+        f.dateFormat = "M/d (E) HH:mm"; return f
+    }()
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                if let context {
+                    Section {
+                        Text(context.item.content.isEmpty ? "未填內容" : context.item.content)
+                            .font(.subheadline.weight(.medium))
+                        LabeledContent("會議", value: meeting?.topic.isEmpty == false
+                                       ? meeting!.topic : "未命名會議")
+                        LabeledContent("目前開會時間",
+                                       value: Self.fmt.string(from: context.sessionDate))
+                        if let due = context.item.dueDate {
+                            LabeledContent("項目截止", value: Self.fmt.string(from: due))
+                        }
+                        if context.isAdHoc {
+                            badge("臨時加開的場次", color: .indigo)
+                        }
+                        if context.isCancelled {
+                            badge("這一場已取消", color: .red)
+                        }
+                    } header: {
+                        Text("這一項")
+                    }
+
+                    Section {
+                        Picker("", selection: $mode) {
+                            ForEach(Mode.allCases) { Text($0.rawValue).tag($0) }
+                        }
+                        .pickerStyle(.segmented)
+                        .labelsHidden()
+                        DatePicker("時間", selection: $date)
+                            .datePickerStyle(.compact)
+                        if mode == .move, context.isRescheduled, let oid = context.occurrenceId {
+                            Button("恢復原定時間") {
+                                lifeStore.restoreMeetingSessionDate(
+                                    subordinateId: subordinateId, meetingId: meetingId,
+                                    occurrenceId: oid)
+                                dismiss()
+                            }
+                            .font(.subheadline)
+                        }
+                    } header: {
+                        Text(mode == .move ? "改到什麼時候" : "加開在什麼時候")
+                    } footer: {
+                        Text(modeFooter(context))
+                    }
+                } else {
+                    Text("找不到這一項，可能已經被刪掉了。")
+                        .font(.subheadline).foregroundStyle(.secondary)
+                }
+            }
+            .navigationTitle("開會時間")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) { Button("取消") { dismiss() } }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("儲存") { save() }.bold().disabled(context == nil)
+                }
+            }
+            .onAppear {
+                guard !loaded, let context else { return }
+                loaded = true
+                date = context.sessionDate
+            }
+        }
+    }
+
+    private func badge(_ text: String, color: Color) -> some View {
+        Text(text)
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(color)
+            .padding(.horizontal, 8).padding(.vertical, 3)
+            .background(color.opacity(0.12), in: Capsule())
+    }
+
+    /// 字串在 ViewBuilder 外組好
+    private func modeFooter(_ context: SubordinateMeeting.ItemContext) -> String {
+        switch mode {
+        case .move:
+            let others = sameSessionItemCount(context) - 1
+            var s = "整場會議移動到新的時間。"
+            if others > 0 {
+                s += "同一場還有 \(others) 項議程，會一起跟著移動。"
+            }
+            if context.occurrenceId != nil && !context.isAdHoc {
+                s += "原定時間會留著，之後可以恢復。"
+            }
+            return s
+        case .extraSession:
+            return "為這一項另外開一場，並把它搬過去；同一場的其他議程項目留在原本的時間。"
+                + "新的一場會標成「臨時」。"
+        }
+    }
+
+    private func sameSessionItemCount(_ context: SubordinateMeeting.ItemContext) -> Int {
+        guard let meeting else { return 1 }
+        return meeting.itemContexts.filter { $0.occurrenceId == context.occurrenceId }.count
+    }
+
+    private func save() {
+        guard let context else { return }
+        switch mode {
+        case .move:
+            lifeStore.setMeetingSessionDate(subordinateId: subordinateId, meetingId: meetingId,
+                                            occurrenceId: context.occurrenceId, to: date)
+        case .extraSession:
+            lifeStore.conveneExtraMeetingSession(subordinateId: subordinateId,
+                                                 meetingId: meetingId,
+                                                 itemId: itemId, at: date)
+        }
+        dismiss()
+    }
+}
+
 /// 已完成項目收合卡：可展開 / 收合，列出報告 / 會議 / 任務的完成項目 + 完成時間戳。
 struct CompletedCollapsibleCard: View {
     let entries: [CompletedEntry]

@@ -1941,6 +1941,60 @@ class LifeStore: ObservableObject {
         save()
     }
 
+    // MARK: - [v25.443] 會議的開會時間
+
+    /// 改這一場的開會時間。
+    ///
+    /// 不重複的會議直接改 meeting.date；週期會議的某一場改 movedTo——
+    /// ⚠️ scheduledDate 必須保持原值，它是「與規則推導結果配對的鍵」，
+    ///    改掉的話下次展開規則會對不回這一場，清單上就會多出一場。
+    func setMeetingSessionDate(subordinateId: UUID, meetingId: UUID,
+                               occurrenceId: UUID?, to newDate: Date) {
+        mutateSubordinateMeetingFields(subordinateId: subordinateId, meetingId: meetingId) { m in
+            guard let oid = occurrenceId else { m.date = newDate; return }
+            guard let i = m.occurrences.firstIndex(where: { $0.id == oid }) else { return }
+            if m.occurrences[i].isAdHoc {
+                // 臨時加開的場次沒有「原定時間」可言，改 scheduledDate 才符合直覺
+                //（否則它會一直顯示成「已改期」，但根本沒有原本的時間可以恢復）
+                m.occurrences[i].scheduledDate = newDate
+                m.occurrences[i].movedTo = nil
+            } else {
+                m.occurrences[i].movedTo = newDate
+            }
+        }
+    }
+
+    /// 取消改期，回到規則排出來的原定時間
+    func restoreMeetingSessionDate(subordinateId: UUID, meetingId: UUID, occurrenceId: UUID) {
+        mutateSubordinateMeetingFields(subordinateId: subordinateId, meetingId: meetingId) { m in
+            guard let i = m.occurrences.firstIndex(where: { $0.id == occurrenceId }) else { return }
+            m.occurrences[i].movedTo = nil
+        }
+    }
+
+    /// 為某一條議程項目「額外召開」一場，並把那一項搬過去。
+    ///
+    /// 搬而不是複製：同一件事出現在兩場會議上，完成狀態與評分都會算兩次。
+    func conveneExtraMeetingSession(subordinateId: UUID, meetingId: UUID,
+                                    itemId: UUID, at date: Date) {
+        mutateSubordinateMeetingFields(subordinateId: subordinateId, meetingId: meetingId) { m in
+            var moved: MeetingItem?
+            if let i = m.items.firstIndex(where: { $0.id == itemId }) {
+                moved = m.items.remove(at: i)
+            } else {
+                for oi in m.occurrences.indices {
+                    if let i = m.occurrences[oi].items.firstIndex(where: { $0.id == itemId }) {
+                        moved = m.occurrences[oi].items.remove(at: i)
+                        break
+                    }
+                }
+            }
+            guard let moved else { return }
+            m.occurrences.append(MeetingOccurrence(scheduledDate: date,
+                                                   items: [moved], isAdHoc: true))
+        }
+    }
+
     func mutateWeeklyReportFields(subordinateId: UUID, reportId: UUID,
                                   _ mutate: (inout WeeklyReport) -> Void) {
         guard let si = subordinates.firstIndex(where: { $0.id == subordinateId }),

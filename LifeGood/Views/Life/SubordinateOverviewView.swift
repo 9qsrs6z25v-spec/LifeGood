@@ -72,6 +72,15 @@ struct SubordinateOverviewView: View {
     @State private var sectionAppeared = false
     @State private var showCompleted = false
     @State private var editTarget: OverviewEditTarget?
+    /// [v25.443] 改會議條目的「開會時間」（改期／另外加開一場）
+    @State private var sessionEdit: SessionEditTarget?
+
+    struct SessionEditTarget: Identifiable {
+        let id = UUID()
+        let subId: UUID
+        let meetingId: UUID
+        let itemId: UUID
+    }
     /// [v25.389] 逾期才打勾時跳出來問「要不要算壓線準時」的請求（見 LateCompletionGate）
     @State private var lateRequest: LateCompletionRequest?
     @State private var addPersonalKind: PersonalEventKind?   // 新增我的會議 / 事務
@@ -211,10 +220,15 @@ struct SubordinateOverviewView: View {
     }
 
     /// 所有部屬、所有會議的「未完成」議程項目（依會議日期新到舊）
-    private var incompleteMeetingItems: [(sub: Subordinate, meeting: SubordinateMeeting, item: MeetingItem)] {
+    ///
+    /// [v25.443] 改用 itemContexts 而不是 allItems：要顯示並能修改「這一項在哪一場、
+    /// 那一場什麼時候開」，就必須帶著場次，allItems 把那個資訊攤掉了。
+    private var incompleteMeetingItems: [(sub: Subordinate, meeting: SubordinateMeeting,
+                                          ctx: SubordinateMeeting.ItemContext)] {
         visibleSubordinates.flatMap { sub in
             sub.meetings.flatMap { m in
-                m.allItems.filter { !$0.isCompleted }.map { (sub: sub, meeting: m, item: $0) }
+                m.itemContexts.filter { !$0.item.isCompleted }
+                    .map { (sub: sub, meeting: m, ctx: $0) }
             }
         }
         .sorted { $0.meeting.date > $1.meeting.date }
@@ -286,6 +300,11 @@ struct SubordinateOverviewView: View {
             .sheet(item: $editTarget) { target in
                 // 點項目先顯示預覽卡片（右上角「編輯」才進入編輯）
                 SubordinateItemCard(ref: target.itemRef)
+            }
+            .sheet(item: $sessionEdit) { t in
+                MeetingSessionTimeSheet(subordinateId: t.subId, meetingId: t.meetingId,
+                                        itemId: t.itemId)
+                    .environmentObject(lifeStore)
             }
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
@@ -439,7 +458,7 @@ struct SubordinateOverviewView: View {
             items.append(title("未完成會議條目", icon: "person.3.sequence.fill", color: .indigo,
                                count: incompleteMeetingItems.count))
             for it in incompleteMeetingItems {
-                items.append(.row(AnyView(meetingItemOverviewRow(it.sub, it.meeting, it.item))))
+                items.append(.row(AnyView(meetingItemOverviewRow(it.sub, it.meeting, it.ctx))))
             }
         case .tasks:
             items.append(title("未完成任務", icon: "tray.full.fill", color: .orange, count: incompleteTasks.count))
@@ -678,8 +697,9 @@ struct SubordinateOverviewView: View {
             lines.append("🗂 未完成會議條目（\(pendingItems.count)）")
             for it in pendingItems {
                 let who = it.sub.name.isEmpty ? "未命名" : it.sub.name
-                var row = "⬜️ \(it.item.content.isEmpty ? "未填內容" : it.item.content)｜\(who)・\(it.meeting.topic.isEmpty ? "會議" : it.meeting.topic)"
-                if let due = it.item.dueDate { row += "｜⏰ \(Self.shareShortFmt.string(from: due))" }
+                var row = "⬜️ \(it.ctx.item.content.isEmpty ? "未填內容" : it.ctx.item.content)｜\(who)・\(it.meeting.topic.isEmpty ? "會議" : it.meeting.topic)"
+                row += "｜🗓 開會 \(Self.shareShortFmt.string(from: it.ctx.sessionDate))"
+                if let due = it.ctx.item.dueDate { row += "｜⏰ 截止 \(Self.shareShortFmt.string(from: due))" }
                 lines.append(row)
             }
         }
@@ -907,7 +927,8 @@ struct SubordinateOverviewView: View {
     }
 
     /// 未完成會議條目卡
-    private func meetingItemsCard(_ items: [(sub: Subordinate, meeting: SubordinateMeeting, item: MeetingItem)]) -> some View {
+    private func meetingItemsCard(_ items: [(sub: Subordinate, meeting: SubordinateMeeting,
+                                             ctx: SubordinateMeeting.ItemContext)]) -> some View {
         cardWrap {
             VStack(alignment: .leading, spacing: 0) {
                 sectionHeader("未完成會議條目", icon: "person.3.sequence.fill", color: .indigo,
@@ -915,8 +936,8 @@ struct SubordinateOverviewView: View {
                 if items.isEmpty {
                     emptyHint("沒有未完成的會議條目", icon: "person.3.sequence.fill", color: .indigo)
                 } else {
-                    ForEach(Array(items.enumerated()), id: \.element.item.id) { idx, it in
-                        meetingItemOverviewRow(it.sub, it.meeting, it.item)
+                    ForEach(Array(items.enumerated()), id: \.element.ctx.id) { idx, it in
+                        meetingItemOverviewRow(it.sub, it.meeting, it.ctx)
                         if idx < items.count - 1 { Divider().padding(.leading, 62) }
                     }
                 }
@@ -924,7 +945,9 @@ struct SubordinateOverviewView: View {
         }
     }
 
-    private func meetingItemOverviewRow(_ sub: Subordinate, _ meeting: SubordinateMeeting, _ item: MeetingItem) -> some View {
+    private func meetingItemOverviewRow(_ sub: Subordinate, _ meeting: SubordinateMeeting,
+                                       _ ctx: SubordinateMeeting.ItemContext) -> some View {
+        let item = ctx.item
         let itemAccent: Color = item.isCompleted ? .green : .indigo
         return HStack(alignment: .center, spacing: 12) {
             // v3：裸 circle 圖示升級為 36pt 漸層圓，對齊 taskRow / leaveRow 視覺規格
@@ -973,6 +996,9 @@ struct SubordinateOverviewView: View {
                         .background((due < Date() ? Color.red : Color.indigo).opacity(0.12))
                         .clipShape(Capsule())
                     }
+                    // [v25.443] 開會時間：截止是「什麼時候要交」，這個是「什麼時候談」。
+                    // 點它可以改期或另外加開一場，不用進整個會議編輯頁翻欄位。
+                    sessionChip(sub, meeting, ctx)
                     personChip(sub)
                 }
             }
@@ -982,6 +1008,30 @@ struct SubordinateOverviewView: View {
         .padding(.vertical, 11)
         .contentShape(Rectangle())
         .onTapGesture { editTarget = .meeting(subId: sub.id, meeting: meeting) }
+    }
+
+    /// 開會時間膠囊。點一下開「開會時間」表單（改期／另外加開一場）。
+    private func sessionChip(_ sub: Subordinate, _ meeting: SubordinateMeeting,
+                             _ ctx: SubordinateMeeting.ItemContext) -> some View {
+        Button {
+            sessionEdit = SessionEditTarget(subId: sub.id, meetingId: meeting.id,
+                                            itemId: ctx.item.id)
+        } label: {
+            HStack(spacing: 3) {
+                Image(systemName: ctx.isAdHoc ? "calendar.badge.plus" : "calendar")
+                    .font(.system(size: 7, weight: .semibold))
+                Text("開會 \(fmtDateTime(ctx.sessionDate))")
+                if ctx.isRescheduled {
+                    Image(systemName: "arrow.triangle.swap").font(.system(size: 7, weight: .bold))
+                }
+            }
+            .font(.system(size: 10, weight: .semibold))
+            .foregroundStyle(ctx.isCancelled ? Color.secondary : Color.teal)
+            .padding(.horizontal, 6).padding(.vertical, 2)
+            .background((ctx.isCancelled ? Color.secondary : Color.teal).opacity(0.12))
+            .clipShape(Capsule())
+        }
+        .buttonStyle(.plain)
     }
 
     /// 請假列的姓名是粗體主標不是膠囊，篩選中在旁邊放一顆獨立的 ✕

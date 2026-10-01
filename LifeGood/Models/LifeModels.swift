@@ -2103,6 +2103,42 @@ struct SubordinateMeeting: Identifiable, Codable {
         items + occurrences.flatMap(\.items)
     }
 
+    /// [v25.443] 一條議程項目，連同「它屬於哪一場、那一場什麼時候開」。
+    ///
+    /// allItems 把項目攤平成一串，好用，但把**場次**丟掉了——而「這一項要在哪一場談」
+    /// 正是部屬總覽與我的行事曆上最需要看到、也最需要能改的東西：
+    /// 截止時間是「什麼時候要交」，開會時間是「什麼時候談」，兩件事。
+    struct ItemContext: Identifiable {
+        let item: MeetingItem
+        /// 所屬場次；nil＝不重複的會議，項目直接掛在會議上，開會時間就是 meeting.date
+        let occurrenceId: UUID?
+        /// 這一場實際的開會時間（已套用改期）
+        let sessionDate: Date
+        /// 臨時加開的場次
+        let isAdHoc: Bool
+        /// 這一場被改過期
+        let isRescheduled: Bool
+        let isCancelled: Bool
+        var id: UUID { item.id }
+    }
+
+    /// 收錄範圍刻意與 allItems 一致（含已取消的場次），
+    /// 不然總覽的筆數會跟著變，那是另一個決定、不該夾帶在這裡。
+    var itemContexts: [ItemContext] {
+        var out = items.map {
+            ItemContext(item: $0, occurrenceId: nil, sessionDate: date,
+                        isAdHoc: false, isRescheduled: false, isCancelled: false)
+        }
+        for occ in occurrences {
+            out.append(contentsOf: occ.items.map {
+                ItemContext(item: $0, occurrenceId: occ.id, sessionDate: occ.effectiveDate,
+                            isAdHoc: occ.isAdHoc, isRescheduled: occ.movedTo != nil,
+                            isCancelled: occ.isCancelled)
+            })
+        }
+        return out
+    }
+
     enum CodingKeys: String, CodingKey {
         case id, topic, date, durationMinutes, recurrence, rule, items, note, createdAt, occurrences
         case linkedEquipmentIds
