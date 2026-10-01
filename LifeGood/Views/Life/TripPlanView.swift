@@ -1230,6 +1230,7 @@ struct TripPlanDetailView: View {
         return AnyView(
             VStack(alignment: .leading, spacing: 6) {
                 if hasWeather {
+                    // 時間軸是緊湊版，不寫來源那一行——那裡一眼掃過去就好
                     TripWeatherChip(coordinate: slot.stop.coordinate, date: slot.arrival)
                 }
                 if hasPhotos { photoStrip(slot.stop) }

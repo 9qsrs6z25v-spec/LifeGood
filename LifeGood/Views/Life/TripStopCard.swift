@@ -507,7 +507,8 @@ struct TripStopCardView: View {
             sectionBox(title: "那天的天氣", icon: "cloud.sun.fill") {
                 VStack(alignment: .leading, spacing: 8) {
                     TripWeatherChip(coordinate: slot.stop.coordinate,
-                                    date: slot.arrival, compact: false)
+                                    date: slot.arrival, compact: false,
+                                    placeName: slot.stop.displayName)
                     WeatherAttributionRow()
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)

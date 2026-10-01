@@ -113,6 +113,36 @@ final class TripWeatherStore: ObservableObject {
     /// 同一個城市裡的二十個景點天氣幾乎一樣，一站一次請求既慢又浪費配額；
     /// 取到公里級之後，一趟市區行程通常只會打一兩次。
     @Published private(set) var cache: [String: [Date: TripDayWeather]] = [:]
+    /// [v25.449] 每一份預報「是哪裡、什麼時候讀的」。
+    ///
+    /// 為什麼要留：快取的 key 是座標取到小數第 2 位（約 1 公里），
+    /// 所以同一條街上的幾個景點會共用同一份預報——這是刻意省請求的取捨，
+    /// 但使用者有權知道他看的這份是以哪一點查的。
+    /// 另外 Apple 回的觀測點不一定就是你問的那一點（它有自己的網格），
+    /// 差得遠的時候更應該講出來。
+    @Published private(set) var sources: [String: SourceInfo] = [:]
+
+    struct SourceInfo: Equatable {
+        /// 這份預報實際是以哪一個座標查的（我們送出去的那一點）
+        let requested: CLLocationCoordinate2D
+        /// Apple 說這份資料對應的位置
+        let resolved: CLLocationCoordinate2D
+        /// 資料讀取時間
+        let readAt: Date
+
+        /// 問的點與 Apple 的觀測點差多遠（公尺）
+        var offsetMeters: CLLocationDistance {
+            CLLocation(latitude: requested.latitude, longitude: requested.longitude)
+                .distance(from: CLLocation(latitude: resolved.latitude,
+                                           longitude: resolved.longitude))
+        }
+
+        static func == (a: SourceInfo, b: SourceInfo) -> Bool {
+            a.readAt == b.readAt
+                && a.requested.latitude == b.requested.latitude
+                && a.requested.longitude == b.requested.longitude
+        }
+    }
     /// 問過但失敗的：key → 失敗原因。
     ///
     /// [v25.437] 原本只記一個「有沒有失敗」的布林值，畫面上就只能寫
@@ -157,6 +187,10 @@ final class TripWeatherStore: ObservableObject {
         cache[Self.key(coordinate)]?[Calendar.current.startOfDay(for: date)]
     }
 
+    func source(at coordinate: CLLocationCoordinate2D) -> SourceInfo? {
+        sources[Self.key(coordinate)]
+    }
+
     func hasFailed(at coordinate: CLLocationCoordinate2D) -> Bool {
         failures[Self.key(coordinate)] != nil
     }
@@ -195,6 +229,10 @@ final class TripWeatherStore: ObservableObject {
                     sunset: day.sun.sunset)
             }
             cache[key] = byDay
+            sources[key] = SourceInfo(
+                requested: coordinate,
+                resolved: daily.metadata.location.coordinate,
+                readAt: daily.metadata.date)
         } catch {
             // 失敗的原因多半是幾種：沒網路、App ID 還沒開 WeatherKit 能力、
             // 剛開好還沒生效、或這個座標落在海上。都不該重試到天荒地老，
@@ -258,6 +296,7 @@ final class TripWeatherStore: ObservableObject {
         let key = Self.key(coordinate)
         failures[key] = nil
         cache[key] = nil
+        sources[key] = nil
         await load(coordinate)
     }
 }
@@ -278,6 +317,8 @@ struct TripWeatherChip: View {
     let date: Date
     /// 緊湊版給時間軸的膠囊列，寬版給景點卡的區塊
     var compact: Bool = true
+    /// [v25.449] 這一份預報掛在哪個地點上（寬版會寫出來）
+    var placeName: String? = nil
 
     var body: some View {
         Group {
@@ -393,6 +434,41 @@ struct TripWeatherChip: View {
                 }
                 .padding(.top, 2)
             }
+
+            sourceLine
+        }
+    }
+
+    /// [v25.449] 這份預報到底是哪裡的。
+    ///
+    /// 不寫出來的話有兩件事會讓人誤會：
+    ///   1. 1 公里內的景點共用同一份（省請求的取捨），所以你在 B 看到的
+    ///      可能是以 A 的座標查的。
+    ///   2. Apple 有自己的觀測網格，回來的位置不一定就是你問的那一點。
+    ///      差在一兩百公尺無所謂，差好幾公里就該講。
+    @ViewBuilder
+    private var sourceLine: some View {
+        if let coordinate, let info = weather.source(at: coordinate) {
+            let offset = info.offsetMeters
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 4) {
+                    Image(systemName: "location.fill").font(.system(size: 8))
+                    Text(placeName.map { "以「" + $0 + "」的座標查詢" } ?? "以這一站的座標查詢")
+                    Text("・更新於 " + Self.clock.string(from: info.readAt))
+                }
+                // 1 公里以內就是同一個地方，講出來只是雜訊
+                if offset >= 1000 {
+                    HStack(spacing: 4) {
+                        Image(systemName: "exclamationmark.circle").font(.system(size: 8))
+                        Text("Apple 的觀測點在 \(Int((offset / 1000).rounded())) 公里外，"
+                             + "山區或海邊可能跟實際有落差")
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
+            .font(.system(size: 9))
+            .foregroundStyle(.tertiary)
+            .padding(.top, 2)
         }
     }
 
