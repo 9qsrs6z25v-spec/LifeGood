@@ -1262,6 +1262,14 @@ struct StockTransactionEditor: View {
     @State private var kind: StockTransactionKind = .buy
     @State private var lotsText: String = ""
     @State private var priceText: String = ""
+    private enum MoneyField: Hashable { case quantity, price, amount }
+    @FocusState private var focusedField: MoneyField?
+
+    /// [v25.452] 總金額也可以直接輸入。
+    ///
+    /// 實務上兩種下單方式都有：「我要買 2 張」與「我要投 10 萬」。
+    /// 以前只能填數量，想用金額下單的人得自己拿計算機除一次再回來填。
+    @State private var totalText: String = ""
     @State private var showDeleteConfirm = false
     /// 存檔中鎖住儲存按鈕，避免 sheet 收合動畫播完前快速連點建立兩筆重複交易紀錄
     @State private var isSaving = false
@@ -1283,12 +1291,16 @@ struct StockTransactionEditor: View {
     }
 
     /// 美股金額不講「萬」——那是中文的量級單位，US$1.2 萬只會讓人愣住
-    private var amountText: String {
+    private var amountSummary: String {
         guard stock?.isUSStock == true else { return amountPreview.ntdWanString }
         let f = NumberFormatter()
         f.numberStyle = .decimal; f.maximumFractionDigits = 2
         return "US$" + (f.string(from: NSNumber(value: amountPreview)) ?? "0")
     }
+
+    /// 由金額反推出來的股數（給「約合 N 股」用）。
+    /// 只是顯示，不回寫——回寫會在打字途中把使用者的輸入換掉。
+    private var sharesFromInput: Double { quantityInput * sharesPerUnit }
 
     var body: some View {
         NavigationStack {
@@ -1312,14 +1324,16 @@ struct StockTransactionEditor: View {
                     HStack {
                         TextField(unit + "數", text: $lotsText)
                             .keyboardType(.decimalPad)
+                            .focused($focusedField, equals: .quantity)
                         Text(unit).foregroundStyle(.secondary)
                     }
-                    // 美股的單位就是股，再寫一行「約合 N 股」只是把同一個數字講兩遍
-                    if sharesPerUnit != 1, quantityInput > 0 {
+                    // 台股論張，換算成股數才知道是不是整股；
+                    // 美股本來就論股，但用金額反推時會出現小數，所以也要寫出來
+                    if quantityInput > 0, sharesPerUnit != 1 || sharesFromInput != sharesFromInput.rounded() {
                         HStack {
                             Text("約合").font(.caption).foregroundStyle(.secondary)
                             Spacer()
-                            Text("\(Int(quantityInput * sharesPerUnit)) 股")
+                            Text(Self.sharesText(sharesFromInput) + " 股")
                                 .font(.caption).foregroundStyle(.secondary)
                         }
                     }
@@ -1327,18 +1341,29 @@ struct StockTransactionEditor: View {
                         Text(currencySymbol).foregroundStyle(.secondary)
                         TextField("每股單價", text: $priceText)
                             .keyboardType(.decimalPad)
+                            .focused($focusedField, equals: .price)
+                    }
+                    HStack {
+                        Text("總金額 " + currencySymbol).foregroundStyle(.secondary)
+                        TextField("或直接填總金額", text: $totalText)
+                            .keyboardType(.decimalPad)
+                            .focused($focusedField, equals: .amount)
                     }
                     if amountPreview > 0 {
                         HStack {
-                            Text("總金額").font(.caption).foregroundStyle(.secondary)
+                            Text("合計").font(.caption).foregroundStyle(.secondary)
                             Spacer()
-                            Text(amountText)
+                            Text(amountSummary)
                                 .font(.subheadline.weight(.semibold))
                                 .foregroundStyle(kind == .buy ? .red : .green)
                         }
                     }
                 } header: {
-                    stockEditorSectionHeader("張數 / 單價", icon: "chart.bar.fill", color: .orange)
+                    stockEditorSectionHeader(unit + "數 / 單價 / 金額",
+                                             icon: "chart.bar.fill", color: .orange)
+                } footer: {
+                    Text("數量與總金額填任一個就好，另一個會依單價自動算出來——想用「這次投 10 萬」下單時就填金額。")
+                        .font(.caption2)
                 }
 
                 if isEditing {
@@ -1367,7 +1392,81 @@ struct StockTransactionEditor: View {
                 Button("取消", role: .cancel) {}
             }
             .onAppear { loadInitial() }
+            // [v25.452] 數量 ⇄ 總金額雙向換算。
+            //
+            // ⚠️ 不用「靠收斂自己停下來」那套（本檔案配息編輯器的做法）。
+            //    原因：由金額反推數量時，台股只能買整股，所以要把股數湊整；
+            //    湊完再回寫金額，使用者打「10000」的過程中欄位會在每一次按鍵後
+            //    被改成 9991 之類的值——等於跟鍵盤打架。
+            //
+            // 改成看**焦點在哪一欄**：游標在哪一欄，就只算另一欄，絕不回寫
+            // 使用者正在打的那一欄。離開金額欄時才把它校正成實際買得到的金額
+            //（97 股 × 103 = 9991），這時候改它不會打斷任何人。
+            .onChange(of: totalText) { _, _ in
+                guard focusedField == .amount else { return }
+                syncQuantityFromTotal()
+            }
+            .onChange(of: lotsText) { _, _ in
+                guard focusedField == .quantity else { return }
+                syncTotalFromQuantity()
+            }
+            .onChange(of: priceText) { _, _ in
+                // 單價變了以**數量**為準重算金額：lots 才是真正存檔的欄位，
+                // 金額只是算出來的。以金額為準的話，改一次單價就會把股數改掉。
+                guard focusedField != .amount else { return }
+                syncTotalFromQuantity()
+            }
+            .onChange(of: focusedField) { old, _ in
+                // 離開金額欄 → 校正成實際買得到的金額
+                if old == .amount { syncTotalFromQuantity() }
+            }
         }
+    }
+
+    /// 由數量算金額
+    private func syncTotalFromQuantity() {
+        let q = Double(lotsText) ?? 0
+        let p = Double(priceText) ?? 0
+        guard p > 0 else { return }
+        let text = q > 0 ? Self.moneyText(q * sharesPerUnit * p) : ""
+        if totalText != text { totalText = text }
+    }
+
+    /// 由金額算數量。
+    /// 台股只能買整股，所以先把股數湊成整數再換回張數；
+    /// 美股有零股，保留到小數第 4 位就夠（券商大多也只到這個級距）。
+    private func syncQuantityFromTotal() {
+        let t = Double(totalText) ?? 0
+        let p = Double(priceText) ?? 0
+        guard p > 0 else { return }
+        guard t > 0 else {
+            if !lotsText.isEmpty { lotsText = "" }
+            return
+        }
+        let rawShares = t / p
+        let shares = sharesPerUnit == 1
+            ? (rawShares * 10000).rounded() / 10000
+            : rawShares.rounded()
+        let text = Self.quantityText(shares / sharesPerUnit)
+        if lotsText != text { lotsText = text }
+    }
+
+    /// 金額：最多兩位小數，不帶千分位（這是輸入欄，逗號會讓人以為要自己打）
+    private static func moneyText(_ v: Double) -> String {
+        let r = (v * 100).rounded() / 100
+        return r == r.rounded() ? String(format: "%.0f", r) : String(format: "%g", r)
+    }
+
+    /// 數量：台股的張數可能到小數第 4 位（0.0001 張 = 0.1 股），美股本來就可能有零股
+    private static func quantityText(_ v: Double) -> String {
+        let r = (v * 10000).rounded() / 10000
+        return r == r.rounded() ? String(format: "%.0f", r) : String(format: "%g", r)
+    }
+
+    /// 股數顯示：整數就不帶小數點
+    private static func sharesText(_ v: Double) -> String {
+        let r = (v * 100).rounded() / 100
+        return r == r.rounded() ? String(format: "%.0f", r) : String(format: "%g", r)
     }
 
     private var canSave: Bool {
@@ -1381,6 +1480,7 @@ struct StockTransactionEditor: View {
             // 存檔的 lots 永遠是「股數 ÷ 1000」，畫面上要換成這支股票的單位
             lotsText = formatLots(e.lots * 1000 / sharesPerUnit)
             priceText = String(format: "%.2f", e.price)
+            totalText = Self.moneyText(e.shares * e.price)
         }
     }
 
