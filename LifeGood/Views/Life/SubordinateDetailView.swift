@@ -2350,6 +2350,23 @@ struct RecordEditorSheet: View {
     @State private var leaveType: LeaveType = .personal
     @State private var leaveInfoAppeared = false
     @State private var isSaving = false
+    /// [v25.444] 這筆要記給誰。
+    ///
+    /// 以前人選寫死在「從誰的頁面開進來」那一刻，停在 A 的頁面想記 B 的請假，
+    /// 整張表單會安靜地記到 A 身上——而且在 A 的頁面上看起來完全正常，
+    /// 要到月底對帳才會發現。所以把它變成表單裡看得見、改得動的欄位。
+    @State private var ownerId: UUID?
+    @State private var showOwnerPicker = false
+
+    /// 實際要寫入的那位（還沒載入前先用開啟時帶進來的）
+    private var targetId: UUID { ownerId ?? subordinateId }
+    private var targetName: String {
+        let s = lifeStore.subordinates.first { $0.id == targetId }
+        let n = s?.name.trimmingCharacters(in: .whitespaces) ?? ""
+        return n.isEmpty ? "未命名" : n
+    }
+    /// 編輯既有紀錄時改了人＝要把這筆搬到另一個人身上
+    private var isMovingOwner: Bool { editing != nil && targetId != subordinateId }
 
     /// 對齊主畫面 colorFor(_:) 主題色，讓編輯頁 Section 色條與列表列行同色系。
     private var accent: Color {
@@ -2457,6 +2474,36 @@ struct RecordEditorSheet: View {
     var body: some View {
         NavigationStack {
             Form {
+                Section {
+                    Button {
+                        showOwnerPicker = true
+                    } label: {
+                        HStack(spacing: 10) {
+                            Image(systemName: "person.crop.circle")
+                                .font(.system(size: 15)).foregroundStyle(accent)
+                                .frame(width: 22)
+                            Text(targetName)
+                                .font(.subheadline.weight(.semibold)).foregroundStyle(.primary)
+                            Spacer(minLength: 0)
+                            Text("更換")
+                                .font(.caption.weight(.semibold)).foregroundStyle(accent)
+                            Image(systemName: "chevron.right")
+                                .font(.caption2.weight(.semibold)).foregroundStyle(.tertiary)
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                } header: {
+                    editorSectionHeader("記給誰", icon: "person.crop.circle")
+                } footer: {
+                    if isMovingOwner {
+                        Label("儲存後這筆會從「\(originalName)」搬到「\(targetName)」",
+                              systemImage: "arrow.left.arrow.right")
+                            .foregroundStyle(.orange)
+                    } else {
+                        Text("從別人的頁面開進來時，這裡可以直接換人，不必關掉重開。")
+                    }
+                }
                 Section {
                     TextField(placeholder, text: $content, axis: .vertical).lineLimit(2...5)
                 } header: {
@@ -2585,6 +2632,12 @@ struct RecordEditorSheet: View {
                     leaveInfoAppeared = true
                 }
             }
+            .sheet(isPresented: $showOwnerPicker) {
+                SubordinatePickerSheet(initial: targetId) { picked in
+                    ownerId = picked
+                }
+                .environmentObject(lifeStore)
+            }
         }
     }
 
@@ -2616,7 +2669,14 @@ struct RecordEditorSheet: View {
         }
     }
 
+    private var originalName: String {
+        let s = lifeStore.subordinates.first { $0.id == subordinateId }
+        let n = s?.name.trimmingCharacters(in: .whitespaces) ?? ""
+        return n.isEmpty ? "未命名" : n
+    }
+
     private func loadEditing() {
+        if ownerId == nil { ownerId = subordinateId }
         guard let e = editing else {
             // 新請假：預設用點選的格子日期（無則今日），時間預設 08:30–17:30
             if type == .leave {
@@ -2635,7 +2695,7 @@ struct RecordEditorSheet: View {
 
     private func save() {
         guard !isSaving else { return }
-        guard var sub = lifeStore.subordinates.first(where: { $0.id == subordinateId }) else { dismiss(); return }
+        guard var sub = lifeStore.subordinates.first(where: { $0.id == targetId }) else { dismiss(); return }
         isSaving = true
         let rec = SubordinateRecord(
             id: editing?.id ?? UUID(), type: type,
@@ -2646,6 +2706,12 @@ struct RecordEditorSheet: View {
             leaveType: type == .leave ? leaveType : nil,
             leaveHours: type == .leave ? computedLeaveHours : nil
         )
+        // 換了人＝把這筆搬過去。先從原本那位身上拿掉，不然兩邊都會有一份。
+        if isMovingOwner, let e = editing,
+           var old = lifeStore.subordinates.first(where: { $0.id == subordinateId }) {
+            old.records.removeAll { $0.id == e.id }
+            lifeStore.update(old)
+        }
         if let idx = sub.records.firstIndex(where: { $0.id == rec.id }) { sub.records[idx] = rec }
         else { sub.records.append(rec) }
         lifeStore.update(sub); dismiss()
@@ -3913,6 +3979,112 @@ struct MeetingBaseSessionEditor: View {
                 }
             }
         }
+    }
+}
+
+// MARK: - 挑一位部屬（v25.444）
+
+/// 單選一位部屬，可搜尋、依課別分組。
+///
+/// 為什麼需要它：部屬事項的編輯頁是從「目前這位部屬」開進來的，人選寫死在開啟的
+/// 那一刻。使用者如果停在 A 的頁面、想記 B 的請假，整張表單會安安靜靜地記到 A 身上
+/// ——而且存完之後在 A 的頁面上看起來完全正常，要到月底對帳才會發現。
+/// 所以把「記給誰」變成表單裡看得見、改得動的一個欄位。
+///
+/// 版型比照既有的 MeetingAssigneePicker（搜尋列 + 課別分組），差別在這裡是單選、
+/// 而且只從部屬裡挑——請假紀錄本來就只能掛在部屬身上。
+struct SubordinatePickerSheet: View {
+    let initial: UUID?
+    let onPick: (UUID) -> Void
+
+    @EnvironmentObject var lifeStore: LifeStore
+    @Environment(\.dismiss) private var dismiss
+    @State private var query = ""
+
+    private func matches(_ s: Subordinate) -> Bool {
+        let q = query.trimmingCharacters(in: .whitespaces)
+        guard !q.isEmpty else { return true }
+        return s.name.localizedCaseInsensitiveContains(q)
+            || s.jobTitle.localizedCaseInsensitiveContains(q)
+            || deptName(s).localizedCaseInsensitiveContains(q)
+    }
+
+    private func deptName(_ s: Subordinate) -> String {
+        if let id = s.departmentId,
+           let d = lifeStore.departments.first(where: { $0.id == id }) {
+            return d.name.isEmpty ? d.code : d.name
+        }
+        return s.department
+    }
+
+    private var grouped: [(dept: String, people: [Subordinate])] {
+        let list = lifeStore.subordinates.filter(matches)
+        var order: [String] = []
+        var map: [String: [Subordinate]] = [:]
+        for s in list {
+            let key = deptName(s).isEmpty ? "未分課別" : deptName(s)
+            if map[key] == nil { order.append(key) }
+            map[key, default: []].append(s)
+        }
+        // 明確標型別：本檔案曾因具名 tuple 的鏈式推導撞上 type-check 逾時
+        return order.map { (dept: String) -> (dept: String, people: [Subordinate]) in
+            (dept: dept, people: map[dept] ?? [])
+        }
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                ForEach(grouped, id: \.dept) { group in
+                    Section {
+                        ForEach(group.people) { s in row(s) }
+                    } header: {
+                        HStack(spacing: 6) {
+                            Text(group.dept)
+                            Text("\(group.people.count)")
+                                .font(.system(size: 10, weight: .bold))
+                                .padding(.horizontal, 5).padding(.vertical, 1.5)
+                                .background(Color.secondary.opacity(0.14), in: Capsule())
+                        }
+                    }
+                }
+                if grouped.isEmpty {
+                    Text("找不到符合的部屬。")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            .searchable(text: $query, prompt: "搜尋姓名、職稱或課別")
+            .navigationTitle("記給誰")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }
+            }
+        }
+    }
+
+    /// 單選：點一下就選定並關閉，不需要再按一次「完成」
+    private func row(_ s: Subordinate) -> some View {
+        let isOn = s.id == initial
+        return Button {
+            onPick(s.id)
+            dismiss()
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: isOn ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 18))
+                    .foregroundStyle(isOn ? .teal : .secondary)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(s.name.isEmpty ? "未命名" : s.name)
+                        .font(.subheadline.weight(.medium)).foregroundStyle(.primary)
+                    if !s.jobTitle.isEmpty {
+                        Text(s.jobTitle).font(.caption2).foregroundStyle(.secondary)
+                    }
+                }
+                Spacer(minLength: 0)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 }
 
