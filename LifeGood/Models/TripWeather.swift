@@ -290,6 +290,23 @@ final class TripWeatherStore: ObservableObject {
         return raw
     }
 
+    /// [v25.450] 出圖前先把需要的預報抓齊。
+    ///
+    /// 分享圖是用 ImageRenderer 同步畫出來的，畫的當下只讀得到快取——
+    /// 快取裡沒有就是一片空白，而且不會有任何提示。所以出圖前要先 await
+    /// 一次。座標會先去重（1 公里內本來就共用一份），一趟市區行程通常
+    /// 只會多打一兩次請求。
+    @MainActor
+    func preload(_ coordinates: [CLLocationCoordinate2D]) async {
+        var seen = Set<String>()
+        for c in coordinates {
+            let k = Self.key(c)
+            guard !seen.contains(k) else { continue }
+            seen.insert(k)
+            await load(c)
+        }
+    }
+
     /// 重新再試一次（使用者按重試時用）
     @MainActor
     func retry(_ coordinate: CLLocationCoordinate2D) async {

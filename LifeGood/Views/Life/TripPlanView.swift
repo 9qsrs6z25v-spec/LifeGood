@@ -1382,6 +1382,12 @@ struct TripPlanDetailView: View {
         guard !isExportingStop, let p = plan else { return }
         isExportingStop = true
         defer { isExportingStop = false }
+        // 出圖是同步畫的，先把這一站的天氣抓齊
+        if let c = stop.coordinate,
+           let when = p.timeline.first(where: { $0.stop.id == stop.id })?.arrival,
+           TripWeatherStore.isWithinForecastRange(when) {
+            await TripWeatherStore.shared.preload([c])
+        }
         let map = await TripImageExporter.stopMapImage(plan: p, stopId: stop.id)
         let card = TripStopShareCard(plan: p, stopId: stop.id, mapImage: map)
         let stamp = TripImageExporter.stampFormatter.string(from: Date())

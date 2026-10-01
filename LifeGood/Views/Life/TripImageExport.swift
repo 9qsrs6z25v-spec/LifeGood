@@ -498,8 +498,13 @@ struct TripStopShareCard: View {
     private func facts(_ slot: TripPlan.Slot) -> some View {
         let address = slot.stop.address.trimmingCharacters(in: .whitespaces)
         let note = slot.stop.note.trimmingCharacters(in: .whitespacesAndNewlines)
+        let weather = weatherLine(slot)
         VStack(spacing: 0) {
+            if let weather {
+                factRow(icon: weather.icon, text: weather.text)
+            }
             if !address.isEmpty {
+                if weather != nil { hairline }
                 factRow(icon: "mappin.circle.fill", text: address)
             }
             if !slot.stop.subSpots.isEmpty {
@@ -529,6 +534,23 @@ struct TripStopShareCard: View {
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 28).padding(.vertical, 18)
+    }
+
+    /// [v25.450] 那天的天氣。沒有座標、超出預報範圍、還沒抓到 → nil（整列不出現）。
+    /// 字串在 ViewBuilder 外組好。
+    private func weatherLine(_ slot: TripPlan.Slot) -> (icon: String, text: String)? {
+        guard let c = slot.stop.coordinate,
+              TripWeatherStore.isWithinForecastRange(slot.arrival),
+              let day = TripWeatherStore.shared.forecast(at: c, on: slot.arrival) else {
+            return nil
+        }
+        var parts = [day.conditionText + " " + day.temperatureText]
+        if day.showsRain { parts.append("降雨機率 " + day.rainText) }
+        if day.uvIndex >= 6 { parts.append("紫外線 \(day.uvIndex)（\(day.uvLabel)）") }
+        if let sunset = day.sunset {
+            parts.append("日落 " + Self.timeFmt.string(from: sunset))
+        }
+        return (day.symbolName, parts.joined(separator: "・"))
     }
 
     /// 字串在 ViewBuilder 外組好
@@ -831,6 +853,10 @@ struct TripPlanShareCard: View {
     private func chipTexts(_ slot: TripPlan.Slot) -> [String] {
         var out: [String] = []
         if slot.stop.isMustVisit { out.append("必去") }
+        // [v25.450] 天氣也放進來。分享行程給同伴時「那天會不會下雨」
+        // 跟「幾點到」一樣是要一起看的——分開兩份反而要對照。
+        // 用文字膠囊而不是 SF Symbol：出圖的版面已經很密，多一種元素只會更亂。
+        if let w = weatherText(slot) { out.append(w) }
         if slot.stop.isOvernight {
             out.append("過夜・隔天 " + Self.timeFmt.string(from: slot.departure) + " 出發")
         } else if slot.stop.dwellMinutes > 0 {
@@ -838,6 +864,18 @@ struct TripPlanShareCard: View {
         }
         if slot.isFixedArrival { out.append("指定抵達") }
         return out
+    }
+
+    /// 字串在 ViewBuilder 外組好。沒有座標、超出預報範圍、還沒抓到 → nil（整顆不出現）
+    private func weatherText(_ slot: TripPlan.Slot) -> String? {
+        guard let c = slot.stop.coordinate,
+              TripWeatherStore.isWithinForecastRange(slot.arrival),
+              let day = TripWeatherStore.shared.forecast(at: c, on: slot.arrival) else {
+            return nil
+        }
+        var s = day.conditionText + " " + day.temperatureText
+        if day.showsRain { s += "・雨 " + day.rainText }
+        return s
     }
 
     private var footer: some View {
@@ -1244,6 +1282,12 @@ struct TripPlanImageExportSheet: View {
     @MainActor
     private func loadMap() async {
         guard !mapLoaded else { return }
+        // 分享圖是同步畫出來的，畫的當下只讀得到快取——先把天氣抓齊，
+        // 不然圖上會缺一塊而且不會有任何提示
+        await TripWeatherStore.shared.preload(
+            plan.timeline
+                .filter { TripWeatherStore.isWithinForecastRange($0.arrival) }
+                .compactMap { $0.stop.coordinate })
         mapImage = await TripImageExporter.planMapImage(plan: plan)
         mapLoaded = true
         schedulePreview()

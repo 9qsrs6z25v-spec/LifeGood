@@ -144,6 +144,11 @@ struct TripStopCardView: View {
         guard !isExporting, let p = plan else { return }
         isExporting = true
         defer { isExporting = false }
+        // 出圖是同步畫的，先把這一站的天氣抓齊，不然圖上那一列會憑空消失
+        if let c = stop?.coordinate, let when = slot?.arrival,
+           TripWeatherStore.isWithinForecastRange(when) {
+            await TripWeatherStore.shared.preload([c])
+        }
         let map = await TripImageExporter.stopMapImage(plan: p, stopId: stopId)
         let card = TripStopShareCard(plan: p, stopId: stopId, mapImage: map)
         let stamp = TripImageExporter.stampFormatter.string(from: Date())
