@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.447", build: 1200, date: "2026/08/19", notes: [
+            "【改動】天氣取不到時，如果原因是「拿不到天氣服務的授權權杖」，會直接翻成一句看得懂的話並講出下一步，不再只丟一串系統類別名稱與編號。這是 WeatherKit 最常見的一種失敗，原本的訊息對看的人等於沒說。"
+        ]),
         ChangelogEntry(version: "25.446", build: 1199, date: "2026/08/19", notes: [
             "【修正】部屬總覽有兩個編譯錯誤，整包建置不過，已修正。前一版把會議條目改成帶著「在哪一場開會」的資訊，但中間有一個傳遞用的函式忘了跟著改型別。"
         ]),

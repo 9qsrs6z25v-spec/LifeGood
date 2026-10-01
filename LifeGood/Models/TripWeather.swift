@@ -164,6 +164,18 @@ final class TripWeatherStore: ObservableObject {
             }
         }
         let lowered = raw.lowercased()
+        // [v25.447] WeatherKit 拿不到授權權杖時固定回這一個。
+        //
+        // WDSJWTAuthenticatorServiceListener 是 WeatherKit 的 JWT 認證器；
+        // 錯誤 2 ＝「這支 App 的 App ID 沒有被授權使用天氣服務」。訊息本身只有
+        // 一串類別名稱與編號，對使用者等於沒說——這是 WeatherKit 最常見的一種
+        // 失敗，值得單獨翻成一句看得懂、而且講得出下一步的話。
+        if raw.contains("WDSJWT") || raw.contains("WeatherDaemon") {
+            return "這支 App 還沒拿到天氣服務的授權（WeatherKit 的認證權杖要不到）。"
+                + "要到 Apple Developer 後台替這個 App ID 開啟 WeatherKit，"
+                + "開好之後還要重新簽章再建置一次；剛開好的話 Apple 那邊要一段時間"
+                + "才會生效，等一下再按重試。"
+        }
         if lowered.contains("auth") || lowered.contains("permission")
             || lowered.contains("entitle") || lowered.contains("unauthorized")
             || lowered.contains("token") || lowered.contains("denied") {
