@@ -348,6 +348,65 @@ struct TripStop: Identifiable, Codable {
 
 // MARK: 行程
 
+/// [v25.451] 行前準備的一條：要帶的東西，或要帶回來的伴手禮。
+///
+/// 兩份清單共用同一個型別，因為它們的操作完全一樣（打勾、數量、備註）。
+/// 差別只在 forWhom——伴手禮多半是「買給誰」的，帶出門的東西沒有這個欄位要填。
+struct TripChecklistItem: Identifiable, Codable, Equatable {
+    let id: UUID
+    var name: String
+    /// 數量。0 或 1 都不顯示——「牙刷 ×1」是廢話
+    var quantity: Int
+    /// 買給誰（只有伴手禮用得到）
+    var forWhom: String
+    var note: String
+    var isDone: Bool
+
+    init(id: UUID = UUID(), name: String = "", quantity: Int = 1,
+         forWhom: String = "", note: String = "", isDone: Bool = false) {
+        self.id = id; self.name = name; self.quantity = quantity
+        self.forWhom = forWhom; self.note = note; self.isDone = isDone
+    }
+
+    var displayName: String {
+        let n = name.trimmingCharacters(in: .whitespaces)
+        return n.isEmpty ? "未命名" : n
+    }
+
+    /// 「名稱 ×3」。數量 1 不寫——每一條後面都掛一個 ×1 只是噪音
+    var titleWithQuantity: String {
+        quantity > 1 ? displayName + " ×\(quantity)" : displayName
+    }
+}
+
+/// 行前準備的兩份清單
+enum TripChecklistKind: String, CaseIterable, Identifiable, Codable {
+    case packing = "帶去"
+    case souvenir = "帶回"
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .packing: return "出門前要帶的"
+        case .souvenir: return "要帶回來的伴手禮"
+        }
+    }
+    var icon: String {
+        switch self {
+        case .packing: return "suitcase.fill"
+        case .souvenir: return "gift.fill"
+        }
+    }
+    var emptyHint: String {
+        switch self {
+        case .packing:
+            return "護照、充電線、常備藥、轉接頭…出發前一條一條打勾，就不會在機場才想起來。"
+        case .souvenir:
+            return "答應要帶的東西先記下來，寫上給誰，回程才不會在免稅店裡想半天。"
+        }
+    }
+}
+
 struct TripPlan: Identifiable, Codable {
     let id: UUID
     var title: String
@@ -356,12 +415,18 @@ struct TripPlan: Identifiable, Codable {
     var travelMode: TripTravelMode
     var note: String
     var stops: [TripStop]
+    /// [v25.451] 行前準備：要帶去的東西、要帶回來的伴手禮
+    var packingItems: [TripChecklistItem]
+    var souvenirItems: [TripChecklistItem]
 
     init(id: UUID = UUID(), title: String = "", startDate: Date = Date(),
          travelMode: TripTravelMode = .driving, note: String = "",
-         stops: [TripStop] = []) {
+         stops: [TripStop] = [],
+         packingItems: [TripChecklistItem] = [],
+         souvenirItems: [TripChecklistItem] = []) {
         self.id = id; self.title = title; self.startDate = startDate
         self.travelMode = travelMode; self.note = note; self.stops = stops
+        self.packingItems = packingItems; self.souvenirItems = souvenirItems
     }
 
     init(from decoder: Decoder) throws {
@@ -372,10 +437,34 @@ struct TripPlan: Identifiable, Codable {
         travelMode = (try? c.decode(TripTravelMode.self, forKey: .travelMode)) ?? .driving
         note = (try? c.decode(String.self, forKey: .note)) ?? ""
         stops = (try? c.decodeIfPresent([TripStop].self, forKey: .stops)) ?? []
+        // 舊備份沒有這兩個欄位，少了它們整份行程都會解不出來
+        packingItems = (try? c.decodeIfPresent([TripChecklistItem].self,
+                                               forKey: .packingItems)) ?? []
+        souvenirItems = (try? c.decodeIfPresent([TripChecklistItem].self,
+                                                forKey: .souvenirItems)) ?? []
     }
 
     private enum CodingKeys: String, CodingKey {
         case id, title, startDate, travelMode, note, stops
+        case packingItems, souvenirItems
+    }
+
+    // MARK: - 行前準備
+
+    func checklist(_ kind: TripChecklistKind) -> [TripChecklistItem] {
+        kind == .packing ? packingItems : souvenirItems
+    }
+
+    /// 打勾了幾條／共幾條
+    func checklistProgress(_ kind: TripChecklistKind) -> (done: Int, total: Int) {
+        let list = checklist(kind)
+        return (list.filter(\.isDone).count, list.count)
+    }
+
+    /// 兩份清單合計的進度，給摘要卡上那顆按鈕用
+    var checklistTotalProgress: (done: Int, total: Int) {
+        let a = checklistProgress(.packing), b = checklistProgress(.souvenir)
+        return (a.done + b.done, a.total + b.total)
     }
 
     /// 改出發時間。

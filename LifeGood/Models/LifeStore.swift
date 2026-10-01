@@ -2817,6 +2817,53 @@ class LifeStore: ObservableObject {
         tripPlans[pi].stops[si].dwellMinutes = max(0, Int((seconds / 60).rounded()))
     }
 
+    // MARK: - [v25.451] 行前準備清單
+
+    /// 兩份清單共用同一組 CRUD——它們的操作完全一樣，差別只在存在哪個欄位。
+    /// 分成兩套函式只會是同一段程式碼寫兩遍。
+    private func mutateChecklist(planId: UUID, kind: TripChecklistKind,
+                                 _ body: (inout [TripChecklistItem]) -> Void) {
+        guard let pi = tripPlans.firstIndex(where: { $0.id == planId }) else { return }
+        switch kind {
+        case .packing: body(&tripPlans[pi].packingItems)
+        case .souvenir: body(&tripPlans[pi].souvenirItems)
+        }
+    }
+
+    func addTripChecklistItem(planId: UUID, kind: TripChecklistKind,
+                              _ item: TripChecklistItem) {
+        mutateChecklist(planId: planId, kind: kind) { $0.append(item) }
+    }
+
+    func updateTripChecklistItem(planId: UUID, kind: TripChecklistKind,
+                                 _ item: TripChecklistItem) {
+        mutateChecklist(planId: planId, kind: kind) { list in
+            guard let i = list.firstIndex(where: { $0.id == item.id }) else { return }
+            list[i] = item
+        }
+    }
+
+    func toggleTripChecklistItem(planId: UUID, kind: TripChecklistKind, itemId: UUID) {
+        mutateChecklist(planId: planId, kind: kind) { list in
+            guard let i = list.firstIndex(where: { $0.id == itemId }) else { return }
+            list[i].isDone.toggle()
+        }
+    }
+
+    func deleteTripChecklistItem(planId: UUID, kind: TripChecklistKind, itemId: UUID) {
+        mutateChecklist(planId: planId, kind: kind) { $0.removeAll { $0.id == itemId } }
+    }
+
+    func moveTripChecklistItems(planId: UUID, kind: TripChecklistKind,
+                                from source: IndexSet, to destination: Int) {
+        mutateChecklist(planId: planId, kind: kind) { $0.move(fromOffsets: source, toOffset: destination) }
+    }
+
+    /// 把已經打勾的整批清掉（回程整理用）
+    func clearDoneTripChecklistItems(planId: UUID, kind: TripChecklistKind) {
+        mutateChecklist(planId: planId, kind: kind) { $0.removeAll(where: \.isDone) }
+    }
+
     /// [v25.435] 切換某一站的「必去」。
     ///
     /// 抽到 store 來的理由：時間軸的「…」選單與景點卡上的星星鈕都要做同一件事，

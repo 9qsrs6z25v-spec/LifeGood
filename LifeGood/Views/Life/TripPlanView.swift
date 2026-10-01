@@ -252,6 +252,8 @@ struct TripPlanDetailView: View {
     }
     @State private var showImageExport = false
     @State private var showAlbum = false
+    /// [v25.451] 行前準備清單（要帶去的／要帶回來的）
+    @State private var showChecklist = false
     /// 打開景點卡的那一站
     @State private var openingStopId: UUID?
     @State private var viewingPhoto: IdentifiableURL?
@@ -381,6 +383,10 @@ struct TripPlanDetailView: View {
             .sheet(isPresented: $showImageExport) {
                 if let p = plan { TripPlanImageExportSheet(plan: p) }
             }
+            .sheet(isPresented: $showChecklist) {
+                TripChecklistSheet(planId: planId)
+                    .environmentObject(lifeStore)
+            }
             .sheet(isPresented: $showAlbum) {
                 if let p = plan {
                     // 共用地圖相簿模板（旅遊／美食／醫療地圖與兒女相簿都是它）
@@ -481,6 +487,37 @@ struct TripPlanDetailView: View {
         .padding(.horizontal, 16)
     }
 
+    /// [v25.451] 摘要卡右上角那顆。
+    ///
+    /// 原本只是一塊顯示交通方式的死膠囊，點了沒反應。改成「行前準備」的入口，
+    /// 但交通方式仍然留著——那是這張卡上唯一會寫出預設交通方式的地方，
+    /// 拿掉等於把一個資訊換成一個功能。所以兩個並存：左邊照舊是交通方式，
+    /// 右邊接一個清單圖示與進度，整顆可按。
+    private func checklistButton(_ p: TripPlan) -> some View {
+        let progress = p.checklistTotalProgress
+        return Button {
+            showChecklist = true
+        } label: {
+            HStack(spacing: 5) {
+                Image(systemName: p.travelMode.icon).font(.system(size: 10, weight: .bold))
+                Text(p.travelMode.rawValue).font(.caption.weight(.semibold)).lineLimit(1)
+                Rectangle().fill(.white.opacity(0.35))
+                    .frame(width: 0.75, height: 11)
+                Image(systemName: "checklist").font(.system(size: 10, weight: .bold))
+                if progress.total > 0 {
+                    Text("\(progress.done)/\(progress.total)")
+                        .font(.system(size: 10, weight: .bold).monospacedDigit())
+                }
+            }
+            .fixedSize()
+            .foregroundStyle(.white)
+            .padding(.horizontal, 11).padding(.vertical, 5)
+            .background(.white.opacity(0.22))
+            .clipShape(Capsule())
+        }
+        .buttonStyle(.plain)
+    }
+
     // MARK: 摘要卡：標頭
 
     private func summaryHeader(_ p: TripPlan) -> some View {
@@ -504,14 +541,7 @@ struct TripPlanDetailView: View {
                 }
             }
             Spacer(minLength: 8)
-            HStack(spacing: 4) {
-                Image(systemName: p.travelMode.icon).font(.system(size: 10, weight: .bold))
-                Text(p.travelMode.rawValue).font(.caption.weight(.semibold)).lineLimit(1)
-            }
-            .fixedSize()
-            .padding(.horizontal, 11).padding(.vertical, 5)
-            .background(.white.opacity(0.22))
-            .clipShape(Capsule())
+            checklistButton(p)
             .overlay(Capsule().stroke(.white.opacity(0.30), lineWidth: 0.75))
             .foregroundStyle(.white)
         }
@@ -3086,5 +3116,265 @@ struct TripLegDetailSheet: View {
         polyline = nil
         lifeStore.invalidateTripLeg(planId: plan.id, stopId: to.stop.id)
         await loadRoute()
+    }
+}
+
+// MARK: - 行前準備（v25.451）
+
+/// 兩份清單：出門前要帶的東西、要帶回來的伴手禮。
+///
+/// 為什麼合在一張畫面而不是兩個入口：它們是同一件事的頭尾——出發前打勾「帶了」，
+/// 回程前打勾「買了」。分成兩個地方只會讓人回程時忘記還有一份。
+///
+/// 清單刻意不跟景點綁：伴手禮常常是「回程在機場買」，硬要掛在某一站上反而要先
+/// 決定在哪買，那是本末倒置。
+struct TripChecklistSheet: View {
+    @EnvironmentObject var lifeStore: LifeStore
+    @Environment(\.dismiss) private var dismiss
+
+    let planId: UUID
+    /// 從哪一份打開（摘要卡那顆按鈕預設開「帶去」）
+    var initialKind: TripChecklistKind = .packing
+
+    @State private var kind: TripChecklistKind = .packing
+    @State private var newName = ""
+    @State private var editing: TripChecklistItem?
+    @State private var loaded = false
+    @FocusState private var addFieldFocused: Bool
+
+    private var plan: TripPlan? { lifeStore.tripPlan(id: planId) }
+    private var items: [TripChecklistItem] { plan?.checklist(kind) ?? [] }
+    private let accent = TripDayPalette.color(0)
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    Picker("", selection: $kind) {
+                        ForEach(TripChecklistKind.allCases) { k in
+                            Label(k.title, systemImage: k.icon).tag(k)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .listRowBackground(Color.clear)
+                    .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
+                }
+
+                Section {
+                    // 新增欄固定在清單最上面：打包時是連續輸入好幾條，
+                    // 每加一條都要捲到底找按鈕會很煩
+                    HStack(spacing: 8) {
+                        Image(systemName: "plus.circle.fill")
+                            .foregroundStyle(accent)
+                        TextField(kind == .packing ? "要帶什麼？" : "要帶什麼回來？",
+                                  text: $newName)
+                            .focused($addFieldFocused)
+                            .submitLabel(.done)
+                            .onSubmit { addItem() }
+                        if !newName.trimmingCharacters(in: .whitespaces).isEmpty {
+                            Button("加入") { addItem() }
+                                .font(.subheadline.weight(.semibold))
+                                .buttonStyle(.plain)
+                                .foregroundStyle(accent)
+                        }
+                    }
+                } footer: {
+                    Text("打完直接按鍵盤的完成就會加進去，可以一條接一條打。點已經加入的項目可以改數量、給誰、備註。")
+                }
+
+                Section {
+                    if items.isEmpty {
+                        Text(kind.emptyHint)
+                            .font(.caption).foregroundStyle(.secondary)
+                    } else {
+                        ForEach(items) { item in row(item) }
+                            .onDelete { idx in
+                                for i in idx { deleteItem(items[i]) }
+                            }
+                            .onMove { from, to in
+                                lifeStore.moveTripChecklistItems(planId: planId, kind: kind,
+                                                                 from: from, to: to)
+                            }
+                    }
+                } header: {
+                    header
+                } footer: {
+                    if doneCount > 0 {
+                        Button("清掉已經打勾的 \(doneCount) 條") {
+                            lifeStore.clearDoneTripChecklistItems(planId: planId, kind: kind)
+                        }
+                        .font(.caption)
+                    }
+                }
+            }
+            .navigationTitle("行前準備")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) { Button("關閉") { dismiss() } }
+                ToolbarItem(placement: .topBarTrailing) { EditButton() }
+            }
+            .sheet(item: $editing) { item in
+                TripChecklistItemEditor(planId: planId, kind: kind, item: item)
+                    .environmentObject(lifeStore)
+            }
+            .onAppear {
+                guard !loaded else { return }
+                loaded = true
+                kind = initialKind
+            }
+        }
+    }
+
+    private var doneCount: Int { items.filter(\.isDone).count }
+
+    private var header: some View {
+        HStack(spacing: 6) {
+            Image(systemName: kind.icon).font(.system(size: 10))
+            Text(kind.title)
+            Spacer()
+            if !items.isEmpty {
+                Text("\(doneCount) / \(items.count)")
+                    .font(.system(size: 10, weight: .bold).monospacedDigit())
+                    .foregroundStyle(accent)
+                    .padding(.horizontal, 6).padding(.vertical, 2)
+                    .background(accent.opacity(0.14), in: Capsule())
+            }
+        }
+    }
+
+    private func row(_ item: TripChecklistItem) -> some View {
+        HStack(spacing: 10) {
+            Button {
+                lifeStore.toggleTripChecklistItem(planId: planId, kind: kind, itemId: item.id)
+            } label: {
+                Image(systemName: item.isDone ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 19))
+                    .foregroundStyle(item.isDone ? Color.green : accent)
+            }
+            .buttonStyle(.plain)
+
+            Button {
+                editing = item
+            } label: {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(item.titleWithQuantity)
+                        .font(.subheadline)
+                        .strikethrough(item.isDone, color: .secondary)
+                        .foregroundStyle(item.isDone ? .secondary : .primary)
+                    let detail = detailText(item)
+                    if !detail.isEmpty {
+                        Text(detail).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+        }
+        .opacity(item.isDone ? 0.65 : 1)
+    }
+
+    /// 字串在 ViewBuilder 外組好
+    private func detailText(_ item: TripChecklistItem) -> String {
+        var parts: [String] = []
+        let who = item.forWhom.trimmingCharacters(in: .whitespaces)
+        if !who.isEmpty { parts.append("給 " + who) }
+        let note = item.note.trimmingCharacters(in: .whitespaces)
+        if !note.isEmpty { parts.append(note) }
+        return parts.joined(separator: "・")
+    }
+
+    private func addItem() {
+        let name = newName.trimmingCharacters(in: .whitespaces)
+        guard !name.isEmpty else { return }
+        lifeStore.addTripChecklistItem(planId: planId, kind: kind,
+                                       TripChecklistItem(name: name))
+        newName = ""
+        // 連續輸入：加完游標留在原地，不要每加一條都要再點一次欄位
+        addFieldFocused = true
+    }
+
+    private func deleteItem(_ item: TripChecklistItem) {
+        lifeStore.deleteTripChecklistItem(planId: planId, kind: kind, itemId: item.id)
+    }
+}
+
+/// 單一條的細節：數量、給誰、備註。
+/// 主清單只放名稱與打勾——打包時要的是快，細節點進來再說。
+struct TripChecklistItemEditor: View {
+    @EnvironmentObject var lifeStore: LifeStore
+    @Environment(\.dismiss) private var dismiss
+
+    let planId: UUID
+    let kind: TripChecklistKind
+    let item: TripChecklistItem
+
+    @State private var name = ""
+    @State private var quantity = 1
+    @State private var forWhom = ""
+    @State private var note = ""
+    @State private var loaded = false
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    TextField("名稱", text: $name)
+                    Stepper(value: $quantity, in: 1...99) {
+                        HStack {
+                            Text("數量")
+                            Spacer()
+                            Text("\(quantity)").foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                // 帶出門的東西沒有「給誰」這回事，欄位只在伴手禮出現
+                if kind == .souvenir {
+                    Section {
+                        TextField("例：媽媽、同事、自己", text: $forWhom)
+                    } header: {
+                        Text("買給誰")
+                    }
+                }
+                Section {
+                    TextField("選填", text: $note, axis: .vertical).lineLimit(1...4)
+                } header: {
+                    Text("備註")
+                }
+                Section {
+                    Button("刪除這一條", role: .destructive) {
+                        lifeStore.deleteTripChecklistItem(planId: planId, kind: kind,
+                                                          itemId: item.id)
+                        dismiss()
+                    }
+                }
+            }
+            .navigationTitle(kind.rawValue)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) { Button("取消") { dismiss() } }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("儲存") { save() }.bold()
+                        .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+            }
+            .onAppear {
+                guard !loaded else { return }
+                loaded = true
+                name = item.name; quantity = max(1, item.quantity)
+                forWhom = item.forWhom; note = item.note
+            }
+        }
+    }
+
+    private func save() {
+        var edited = item
+        edited.name = name.trimmingCharacters(in: .whitespaces)
+        edited.quantity = max(1, quantity)
+        edited.forWhom = forWhom.trimmingCharacters(in: .whitespaces)
+        edited.note = note.trimmingCharacters(in: .whitespacesAndNewlines)
+        lifeStore.updateTripChecklistItem(planId: planId, kind: kind, edited)
+        dismiss()
     }
 }
