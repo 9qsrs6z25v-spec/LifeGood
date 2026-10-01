@@ -43,6 +43,53 @@ struct TripDayWeather: Equatable {
     var showsRain: Bool { precipitationChance >= 0.3 }
 
     var rainText: String { "\(Int((precipitationChance * 100).rounded()))%" }
+
+    // MARK: [v25.448] 排行程真正用得到的那幾項
+
+    /// 紫外線指數與分級。夏天的戶外行程，這比「晴」有用得多
+    let uvIndex: Int
+    let uvLabel: String
+    /// 風速（km/h）與風向
+    let windKmh: Double
+    let windDirection: String
+    /// 日出日落。排行程最實際的一件事就是「幾點天黑」——
+    /// 看夜景要等天黑，逛古蹟要趕在天黑前
+    let sunrise: Date?
+    let sunset: Date?
+
+    var dayNightGap: Int { Int((highC - lowC).rounded()) }
+
+    /// 依數字算出來的提醒。
+    ///
+    /// ⚠️ 全部是門檻判斷，沒有一句是憑空生出來的建議：
+    ///    有數字才有那一句，數字不到門檻就不出現。寧可少講，
+    ///    也不要讓人以為 App 有什麼它其實沒有的洞察。
+    var tips: [(icon: String, text: String)] {
+        var out: [(String, String)] = []
+        if precipitationChance >= 0.6 {
+            out.append(("umbrella.fill", "降雨機率 \(rainText)，傘直接帶著"))
+        } else if precipitationChance >= 0.3 {
+            out.append(("umbrella", "有 \(rainText) 的機會下雨，摺傘放包裡"))
+        }
+        if lowC <= 15 {
+            out.append(("thermometer.snowflake", "早晚只有 \(Int(lowC.rounded()))°，外套要帶"))
+        } else if dayNightGap >= 10 {
+            out.append(("thermometer", "日夜溫差 \(dayNightGap)°，洋蔥式穿法"))
+        }
+        if highC >= 32 {
+            out.append(("drop.fill", "白天 \(Int(highC.rounded()))°，水帶夠"))
+        }
+        if uvIndex >= 8 {
+            out.append(("sun.max.fill",
+                        "紫外線 \(uvIndex)（\(uvLabel)），防曬帽子別省"))
+        } else if uvIndex >= 6 {
+            out.append(("sun.max.fill", "紫外線 \(uvIndex)（\(uvLabel)），記得防曬"))
+        }
+        if windKmh >= 40 {
+            out.append(("wind", "風很大（\(Int(windKmh.rounded())) km/h），海邊與高處要留意"))
+        }
+        return out.map { (icon: $0.0, text: $0.1) }
+    }
 }
 
 /// ⚠️ 類別本身刻意**不**標 @MainActor：那樣一來 `TripWeatherStore.shared`
@@ -80,6 +127,19 @@ final class TripWeatherStore: ObservableObject {
 
     static func key(_ c: CLLocationCoordinate2D) -> String {
         String(format: "%.2f,%.2f", c.latitude, c.longitude)
+    }
+
+    /// 紫外線分級的中文。自己對照而不是用系統的 description：
+    /// 那個字串是跟著系統語言走的，而這個 App 的介面一律是繁中。
+    static func uvLabel(_ category: UVIndex.ExposureCategory) -> String {
+        switch category {
+        case .low: return "低"
+        case .moderate: return "中等"
+        case .high: return "高"
+        case .veryHigh: return "很高"
+        case .extreme: return "極高"
+        @unknown default: return "—"
+        }
     }
 
     /// 這一天有沒有可能拿得到預報（不看網路，只看日期）
@@ -126,7 +186,13 @@ final class TripWeatherStore: ObservableObject {
                     conditionText: day.condition.description,
                     highC: day.highTemperature.converted(to: .celsius).value,
                     lowC: day.lowTemperature.converted(to: .celsius).value,
-                    precipitationChance: day.precipitationChance)
+                    precipitationChance: day.precipitationChance,
+                    uvIndex: day.uvIndex.value,
+                    uvLabel: Self.uvLabel(day.uvIndex.category),
+                    windKmh: day.wind.speed.converted(to: .kilometersPerHour).value,
+                    windDirection: day.wind.compassDirection.abbreviation,
+                    sunrise: day.sun.sunrise,
+                    sunset: day.sun.sunset)
             }
             cache[key] = byDay
         } catch {
@@ -248,22 +314,114 @@ struct TripWeatherChip: View {
             .padding(.horizontal, 7).padding(.vertical, 3)
             .background(Color(.tertiarySystemFill), in: Capsule())
         } else {
-            HStack(spacing: 12) {
+            wide(day)
+        }
+    }
+
+    /// [v25.448] 景點卡上的完整版。
+    ///
+    /// 原本只有圖示＋天氣＋高低溫＋降雨機率，排行程時看完等於只知道「會不會下雨」。
+    /// WeatherKit 的每日預報本來就一起回了紫外線、風、日出日落——那幾項對
+    /// 「這天要怎麼安排」比「多雲」有用得多：幾點天黑決定夜景排得進去嗎，
+    /// 紫外線決定要不要帶帽子，風決定海邊那一站要不要改期。
+    private func wide(_ day: TripDayWeather) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            // 第一排：大圖示 + 天氣 + 溫度
+            HStack(alignment: .center, spacing: 14) {
                 Image(systemName: day.symbolName)
-                    .font(.system(size: 26))
+                    .font(.system(size: 38))
                     .symbolRenderingMode(.multicolor)
-                    .frame(width: 34)
-                VStack(alignment: .leading, spacing: 2) {
+                    .frame(width: 46)
+                VStack(alignment: .leading, spacing: 3) {
                     Text(day.conditionText)
-                        .font(.subheadline.weight(.semibold))
-                    Text(day.temperatureText
-                         + (day.showsRain ? "　降雨機率 " + day.rainText : ""))
-                        .font(.caption).foregroundStyle(.secondary)
+                        .font(.title3.weight(.bold))
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        Text("\(Int(day.highC.rounded()))°")
+                            .font(.system(size: 22, weight: .bold, design: .rounded))
+                            .foregroundStyle(.orange)
+                        Text("／")
+                            .font(.caption).foregroundStyle(.tertiary)
+                        Text("\(Int(day.lowC.rounded()))°")
+                            .font(.system(size: 18, weight: .semibold, design: .rounded))
+                            .foregroundStyle(.blue)
+                        if day.dayNightGap >= 8 {
+                            Text("溫差 \(day.dayNightGap)°")
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundStyle(.secondary)
+                                .padding(.horizontal, 6).padding(.vertical, 2)
+                                .background(Color(.tertiarySystemFill), in: Capsule())
+                        }
+                    }
                 }
                 Spacer(minLength: 0)
             }
+
+            // 第二排：那幾個真正會影響安排的數字
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 104), spacing: 8)],
+                      alignment: .leading, spacing: 8) {
+                statCell("umbrella.fill", "降雨機率", day.rainText,
+                         tint: day.showsRain ? .blue : .secondary)
+                statCell("sun.max.fill", "紫外線", "\(day.uvIndex)・\(day.uvLabel)",
+                         tint: day.uvIndex >= 6 ? .orange : .secondary)
+                statCell("wind", "風", "\(Int(day.windKmh.rounded())) km/h \(day.windDirection)",
+                         tint: day.windKmh >= 40 ? .teal : .secondary)
+                if let sunrise = day.sunrise {
+                    statCell("sunrise.fill", "日出", Self.clock.string(from: sunrise), tint: .orange)
+                }
+                if let sunset = day.sunset {
+                    statCell("sunset.fill", "日落", Self.clock.string(from: sunset), tint: .purple)
+                }
+            }
+
+            // 第三排：提醒。沒有符合門檻的就整段不出現，不硬湊
+            let tips = day.tips
+            if !tips.isEmpty {
+                VStack(alignment: .leading, spacing: 5) {
+                    ForEach(Array(tips.enumerated()), id: \.offset) { _, tip in
+                        HStack(alignment: .top, spacing: 7) {
+                            Image(systemName: tip.icon)
+                                .font(.system(size: 11))
+                                .foregroundStyle(.secondary)
+                                .frame(width: 16)
+                            Text(tip.text)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                            Spacer(minLength: 0)
+                        }
+                    }
+                }
+                .padding(.top, 2)
+            }
         }
     }
+
+    private func statCell(_ icon: String, _ label: String, _ value: String,
+                          tint: Color) -> some View {
+        HStack(spacing: 7) {
+            Image(systemName: icon)
+                .font(.system(size: 12))
+                .foregroundStyle(tint)
+                .frame(width: 16)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(label)
+                    .font(.system(size: 9)).foregroundStyle(.tertiary)
+                Text(value)
+                    .font(.system(size: 12, weight: .semibold).monospacedDigit())
+                    .foregroundStyle(.primary)
+                    .lineLimit(1).minimumScaleFactor(0.8)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 8).padding(.vertical, 6)
+        .background(Color(.tertiarySystemFill).opacity(0.5),
+                    in: RoundedRectangle(cornerRadius: 9))
+    }
+
+    private static let clock: DateFormatter = {
+        let f = DateFormatter(); f.locale = Locale(identifier: "zh_Hant_TW")
+        f.dateFormat = "HH:mm"; return f
+    }()
 
     @ViewBuilder
     private var failedLabel: some View {
