@@ -457,13 +457,13 @@ struct StockDetailView: View {
                     .background(color.opacity(0.12)).foregroundStyle(color)
                     .clipShape(Capsule())
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("\(Self.num(tx.lots)) 張 × \(Self.num(tx.price))")
+                    Text("\(Self.num(stock.displayQuantity(lots: tx.lots))) \(stock.quantityUnit) × \(Self.num(tx.price))")
                         .font(.subheadline.weight(.medium))
                     Text(Self.exportDateFmt.string(from: tx.date))
                         .font(.caption2).foregroundStyle(.secondary)
                 }
                 Spacer()
-                Text("NT$\(Self.num(tx.amount.rounded()))")
+                Text(stock.priceCurrencySymbol + Self.num(tx.amount.rounded()))
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(color)
             }
@@ -484,13 +484,15 @@ struct StockDetailView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(isCash
                          ? "每股 \(Self.num(d.perShare))・持股 \(Self.num(d.sharesAtEvent)) 股"
-                         : "配發 \(Self.num(d.lots)) 張")
+                         : "配發 \(Self.num(stock.displayQuantity(lots: d.lots))) \(stock.quantityUnit)")
                         .font(.subheadline.weight(.medium))
                     Text(Self.exportDateFmt.string(from: d.date))
                         .font(.caption2).foregroundStyle(.secondary)
                 }
                 Spacer()
-                Text(isCash ? "NT$\(Self.num(d.cashTotal.rounded()))" : "+\(Self.num(d.sharesEarned)) 股")
+                Text(isCash
+                     ? stock.priceCurrencySymbol + Self.num(d.cashTotal.rounded())
+                     : "+\(Self.num(d.sharesEarned)) 股")
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(color)
             }
@@ -748,13 +750,13 @@ struct StockDetailView: View {
                         .overlay(Capsule().stroke(accent.opacity(0.22), lineWidth: 0.5))
                     Text(fmtDate(tx.date)).font(.caption).foregroundStyle(.secondary)
                 }
-                Text("\(formatLots(tx.lots)) 張 × \(formatPrice(tx.price))")
+                Text("\(formatLots(stock.displayQuantity(lots: tx.lots))) \(stock.quantityUnit) × \(formatPrice(tx.price))")
                     .font(.caption2).foregroundStyle(.tertiary)
             }
 
             Spacer()
 
-            Text(fmt(tx.amount))
+            Text(fmtTrade(tx.amount))
                 .font(.system(size: 15, weight: .bold, design: .rounded))
                 .foregroundStyle(tx.kind == .buy ? Color.primary : Color.green)
                 .contentTransition(.numericText())
@@ -778,7 +780,7 @@ struct StockDetailView: View {
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
-                Text("\(formatLots(stock.shares / 1000)) 張")
+                Text("\(formatLots(stock.shares / stock.sharesPerUnit)) \(stock.quantityUnit)")
                     .font(.caption.weight(.bold))
                     .padding(.horizontal, 8).padding(.vertical, 3)
                     .background(Color.indigo.opacity(0.09))
@@ -982,8 +984,8 @@ struct StockDetailView: View {
 
     private func dividendRightLabel(_ div: StockDividend) -> String {
         switch div.kind {
-        case .stock: return "+\(formatLots(div.lots)) 張"
-        case .cash:  return fmt(div.cashTotal)
+        case .stock: return "+\(formatLots(stock.displayQuantity(lots: div.lots))) \(stock.quantityUnit)"
+        case .cash:  return fmtTrade(div.cashTotal)
         }
     }
 
@@ -1048,7 +1050,20 @@ struct StockDetailView: View {
         f.minimumFractionDigits = 2; f.maximumFractionDigits = 2; return f
     }()
     private func formatPrice(_ v: Double) -> String {
-        (stock.linkedBankCurrency ?? "NT$") + (Self._priceFmt.string(from: NSNumber(value: v)) ?? "0")
+        // ⚠️ 幣別要看**股票本身**，不是看連結的扣款帳戶。
+        //    用台幣帳戶買美股是常態，拿帳戶幣別當報價幣別，AAPL 的
+        //    每股 230 美元就會被標成「NT$230」。
+        stock.priceCurrencySymbol + (Self._priceFmt.string(from: NSNumber(value: v)) ?? "0")
+    }
+
+    /// 單筆交易／配息的金額是**原幣別**（美股＝美元）。
+    ///
+    /// ntdWanString 的字頭寫死 NT$，而且會換算成「萬／億」——
+    /// 那是中文的量級單位，美金金額講「US$1.2 萬」只會讓人愣住。
+    /// 所以美股走另一條：原樣的千分位 + US$。
+    private func fmtTrade(_ v: Double) -> String {
+        guard stock.isUSStock else { return v.ntdWanString }
+        return "US$" + (Self._priceFmt.string(from: NSNumber(value: v)) ?? "0")
     }
 
     // MARK: - 連結帳戶
@@ -1253,10 +1268,26 @@ struct StockTransactionEditor: View {
 
     private var isEditing: Bool { editing != nil }
 
+    /// [v25.445] 美股論「股」不論「張」，報價也是美元。
+    /// 查不到股票時退回台股規格——那只會發生在資料被同時刪掉的瞬間。
+    private var stock: Stock? { store.stocks.first { $0.id == stockId } }
+    private var unit: String { stock?.quantityUnit ?? "張" }
+    private var sharesPerUnit: Double { stock?.sharesPerUnit ?? 1000 }
+    private var currencySymbol: String { stock?.priceCurrencySymbol ?? "NT$" }
+
+    /// 畫面上輸入的數量（美股＝股數，台股＝張數）
+    private var quantityInput: Double { Double(lotsText) ?? 0 }
+    /// 總金額＝股數 × 每股價，原幣別
     private var amountPreview: Double {
-        let lots = Double(lotsText) ?? 0
-        let price = Double(priceText) ?? 0
-        return lots * 1000 * price
+        quantityInput * sharesPerUnit * (Double(priceText) ?? 0)
+    }
+
+    /// 美股金額不講「萬」——那是中文的量級單位，US$1.2 萬只會讓人愣住
+    private var amountText: String {
+        guard stock?.isUSStock == true else { return amountPreview.ntdWanString }
+        let f = NumberFormatter()
+        f.numberStyle = .decimal; f.maximumFractionDigits = 2
+        return "US$" + (f.string(from: NSNumber(value: amountPreview)) ?? "0")
     }
 
     var body: some View {
@@ -1279,20 +1310,21 @@ struct StockTransactionEditor: View {
 
                 Section {
                     HStack {
-                        TextField("張數", text: $lotsText)
+                        TextField(unit + "數", text: $lotsText)
                             .keyboardType(.decimalPad)
-                        Text("張").foregroundStyle(.secondary)
+                        Text(unit).foregroundStyle(.secondary)
                     }
-                    if let lots = Double(lotsText), lots > 0 {
+                    // 美股的單位就是股，再寫一行「約合 N 股」只是把同一個數字講兩遍
+                    if sharesPerUnit != 1, quantityInput > 0 {
                         HStack {
                             Text("約合").font(.caption).foregroundStyle(.secondary)
                             Spacer()
-                            Text("\(Int(lots * 1000)) 股")
+                            Text("\(Int(quantityInput * sharesPerUnit)) 股")
                                 .font(.caption).foregroundStyle(.secondary)
                         }
                     }
                     HStack {
-                        Text("NT$").foregroundStyle(.secondary)
+                        Text(currencySymbol).foregroundStyle(.secondary)
                         TextField("每股單價", text: $priceText)
                             .keyboardType(.decimalPad)
                     }
@@ -1300,7 +1332,7 @@ struct StockTransactionEditor: View {
                         HStack {
                             Text("總金額").font(.caption).foregroundStyle(.secondary)
                             Spacer()
-                            Text(amountPreview.ntdWanString)
+                            Text(amountText)
                                 .font(.subheadline.weight(.semibold))
                                 .foregroundStyle(kind == .buy ? .red : .green)
                         }
@@ -1346,7 +1378,8 @@ struct StockTransactionEditor: View {
         if let e = editing {
             date = e.date
             kind = e.kind
-            lotsText = formatLots(e.lots)
+            // 存檔的 lots 永遠是「股數 ÷ 1000」，畫面上要換成這支股票的單位
+            lotsText = formatLots(e.lots * 1000 / sharesPerUnit)
             priceText = String(format: "%.2f", e.price)
         }
     }
@@ -1356,7 +1389,9 @@ struct StockTransactionEditor: View {
         guard var s = store.stocks.first(where: { $0.id == stockId }) else { dismiss(); return }
         isSaving = true
         s.seedTransactionsFromLegacyIfNeeded()
-        let lots = Double(lotsText) ?? 0
+        // 畫面上輸入的是「股」（美股）或「張」（台股），存檔一律換回 lots。
+        // 存檔格式刻意不動，見 Stock.displayQuantity 的說明。
+        let lots = (Double(lotsText) ?? 0) * sharesPerUnit / 1000
         let price = Double(priceText) ?? 0
         let tx = StockTransaction(
             id: editing?.id ?? UUID(),
@@ -1456,6 +1491,10 @@ struct StockDividendEditor: View {
 
     private var isEditing: Bool { editing != nil }
     private var stock: Stock? { store.stocks.first(where: { $0.id == stockId }) }
+    /// [v25.445] 美股論「股」不論「張」，配息也是美元
+    private var unit: String { stock?.quantityUnit ?? "張" }
+    private var sharesPerUnit: Double { stock?.sharesPerUnit ?? 1000 }
+    private var currencySymbol: String { stock?.priceCurrencySymbol ?? "NT$" }
 
     private var canSave: Bool {
         switch kind {
@@ -1486,15 +1525,16 @@ struct StockDividendEditor: View {
                 if kind == .stock {
                     Section {
                         HStack {
-                            TextField("發放張數", text: $lotsText)
+                            TextField("發放" + unit + "數", text: $lotsText)
                                 .keyboardType(.decimalPad)
-                            Text("張").foregroundStyle(.secondary)
+                            Text(unit).foregroundStyle(.secondary)
                         }
-                        if let lots = Double(lotsText), lots > 0 {
+                        // 美股的單位就是股，再寫一行「約合 N 股」只是把同一個數字講兩遍
+                        if sharesPerUnit != 1, let q = Double(lotsText), q > 0 {
                             HStack {
                                 Text("約合").font(.caption).foregroundStyle(.secondary)
                                 Spacer()
-                                Text("\(Int(lots * 1000)) 股")
+                                Text("\(Int(q * sharesPerUnit)) 股")
                                     .font(.caption).foregroundStyle(.secondary)
                             }
                         }
@@ -1509,12 +1549,12 @@ struct StockDividendEditor: View {
                             Text("股").foregroundStyle(.secondary)
                         }
                         HStack {
-                            Text("每股 NT$").foregroundStyle(.secondary)
+                            Text("每股 " + currencySymbol).foregroundStyle(.secondary)
                             TextField("每股配息", text: $perShareText)
                                 .keyboardType(.decimalPad)
                         }
                         HStack {
-                            Text("總計 NT$").foregroundStyle(.secondary)
+                            Text("總計 " + currencySymbol).foregroundStyle(.secondary)
                             TextField("總配息", text: $totalText)
                                 .keyboardType(.decimalPad)
                         }
@@ -1661,7 +1701,8 @@ struct StockDividendEditor: View {
         if let e = editing {
             date = e.date
             kind = e.kind
-            lotsText = e.lots > 0 ? String(format: "%g", e.lots) : ""
+            // 存檔的 lots 永遠是「股數 ÷ 1000」，畫面上要換成這支股票的單位
+            lotsText = e.lots > 0 ? String(format: "%g", e.lots * 1000 / sharesPerUnit) : ""
             perShareText = e.perShare > 0 ? String(format: "%g", e.perShare) : ""
             sharesAtEventText = e.sharesAtEvent > 0 ? "\(Int(e.sharesAtEvent))" : ""
             if e.perShare > 0, e.sharesAtEvent > 0 {
@@ -1682,7 +1723,8 @@ struct StockDividendEditor: View {
         guard !isSaving else { return }
         guard var stock = store.stocks.first(where: { $0.id == stockId }) else { return }
         isSaving = true
-        let lots = Double(lotsText) ?? 0
+        // 畫面上輸入的是「股」（美股）或「張」（台股），存檔一律換回 lots
+        let lots = (Double(lotsText) ?? 0) * sharesPerUnit / 1000
         let perShare = Double(perShareText) ?? 0
         let sharesAtEvent = Double(sharesAtEventText) ?? 0
 

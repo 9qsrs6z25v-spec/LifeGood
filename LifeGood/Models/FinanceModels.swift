@@ -599,6 +599,29 @@ struct Stock: Identifiable, Codable {
         return r > 0 ? r : 31.0
     }
 
+    // MARK: 數量單位與幣別（v25.445）
+
+    /// 台股論「張」（1 張 = 1000 股）；美股沒有「張」這個東西，論「股」。
+    var quantityUnit: String { isUSStock ? "股" : "張" }
+
+    /// 畫面上的一個單位等於幾股
+    var sharesPerUnit: Double { isUSStock ? 1 : 1000 }
+
+    /// ⚠️ 存檔格式刻意**不動**：StockTransaction.lots 永遠是「股數 ÷ 1000」，
+    ///    shares 永遠是 lots × 1000。只有畫面上的單位會變。
+    ///
+    ///    為什麼不改存檔：改了的話，既有的美股交易會被重新解讀成 1/1000，
+    ///    使用者的持股與市值會在一次更新後安靜地縮水一千倍。寧可讓舊資料
+    ///    用新的單位**照實顯示**（以前輸入 10「張」的 AAPL 會顯示成 10,000 股）
+    ///    ——那是把已經存在的錯誤攤開來，不是製造新的錯誤。
+    func displayQuantity(lots: Double) -> Double { lots * 1000 / sharesPerUnit }
+    func lots(fromQuantity quantity: Double) -> Double { quantity * sharesPerUnit / 1000 }
+
+    /// 每股價格與單筆交易金額的幣別符號。
+    /// per-share 價格與單筆金額一律是**原幣別**（美股＝美元）；
+    /// 只有彙總（成本／市值／損益）才換算成 NT$。
+    var priceCurrencySymbol: String { isUSStock ? "US$" : "NT$" }
+
     /// 換算成 NT$ 用的係數。台股為 1；美股為 USD→TWD 匯率。
     /// per-share 價格（purchasePrice／currentPrice／soldPrice／交易價）一律存原幣別，
     /// 只在彙總（成本／市值／損益）時乘上係數——這樣總資產、圖表、英雄卡

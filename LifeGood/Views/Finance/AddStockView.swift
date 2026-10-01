@@ -83,6 +83,19 @@ struct AddStockView: View {
     @State private var symbol = ""
     @State private var purchaseDate = Date()
     @State private var lotsText = ""
+
+    // MARK: - [v25.445] 單位與幣別
+    //
+    // 美股沒有「張」這個東西，報價也是美元。判定跟 Stock.isUSStock 同一條規則
+    //（字母開頭＝美股），直接看使用者正在打的代號，所以打完 AAPL 的瞬間
+    // 下面的單位與幣別就跟著變。
+
+    private var isUSSymbol: Bool {
+        symbol.trimmingCharacters(in: .whitespaces).first?.isLetter == true
+    }
+    private var unit: String { isUSSymbol ? "股" : "張" }
+    private var sharesPerUnit: Double { isUSSymbol ? 1 : 1000 }
+    private var currencySymbol: String { isUSSymbol ? "US$" : "NT$" }
     @State private var purchasePriceText = ""
     @State private var currentPriceText = ""
     @State private var note = ""
@@ -178,32 +191,35 @@ struct AddStockView: View {
 
                 Section {
                     HStack {
-                        TextField("持有張數", text: $lotsText)
+                        TextField("持有" + unit + "數", text: $lotsText)
                             .keyboardType(.decimalPad)
-                        Text("張").foregroundStyle(.secondary)
+                        Text(unit).foregroundStyle(.secondary)
                     }
-                    if let lots = Double(lotsText), lots > 0 {
+                    // 美股的單位就是股，再寫一行「約合 N 股」只是把同一個數字講兩遍
+                    if sharesPerUnit != 1, let lots = Double(lotsText), lots > 0 {
                         HStack {
                             Text("約合").font(.caption).foregroundStyle(.secondary)
                             Spacer()
-                            Text(formatShares(lots * 1000) + " 股")
+                            Text(formatShares(lots * sharesPerUnit) + " 股")
                                 .font(.caption).foregroundStyle(.secondary)
                         }
                     }
                     HStack {
-                        Text("NT$").foregroundStyle(.secondary)
+                        Text(currencySymbol).foregroundStyle(.secondary)
                         TextField("買入價格（每股）", text: $purchasePriceText)
                             .keyboardType(.decimalPad)
                     }
                     HStack {
-                        Text("NT$").foregroundStyle(.secondary)
+                        Text(currencySymbol).foregroundStyle(.secondary)
                         TextField("目前價格（每股）", text: $currentPriceText)
                             .keyboardType(.decimalPad)
                     }
                 } header: {
                     sectionHeader("持股資訊", icon: "chart.bar.fill")
                 } footer: {
-                    Text("台股 1 張 = 1000 股，可輸入小數（例：0.5 = 500 股零股）")
+                    Text(isUSSymbol
+                         ? "美股論股計價，價格是美元；總市值會依匯率換算成台幣。"
+                         : "台股 1 張 = 1000 股，可輸入小數（例：0.5 = 500 股零股）")
                 }
 
                 calcSection
@@ -304,7 +320,7 @@ struct AddStockView: View {
         let lots = Double(lotsText) ?? 0
         let purchasePrice = Double(purchasePriceText) ?? 0
         let currentPrice = Double(currentPriceText) ?? 0
-        let shares = lots * 1000
+        let shares = lots * sharesPerUnit
         let totalCost = shares * purchasePrice
         let marketValue = shares * currentPrice
         let pl = marketValue - totalCost
@@ -393,9 +409,9 @@ struct AddStockView: View {
                     .padding(.vertical, 12)
 
                 HStack(spacing: 0) {
-                    HeroKpiCell(label: "張數", value: "\(lotsText) 張")
+                    HeroKpiCell(label: unit + "數", value: "\(lotsText) \(unit)")
                     HeroKpiDivider()
-                    HeroKpiCell(label: "買入均價", value: "NT$\(purchasePriceText)")
+                    HeroKpiCell(label: "買入均價", value: currencySymbol + purchasePriceText)
                     if hasCurrentPrice && totalCost > 0 {
                         HeroKpiDivider()
                         HeroKpiCell(label: "報酬率", value: String(format: "%@%.1f%%",
@@ -889,7 +905,7 @@ struct AddStockView: View {
     private var calcSection: some View {
         if let lots = Double(lotsText), let cost = Double(purchasePriceText),
            let current = Double(currentPriceText), lots > 0, cost > 0 {
-            let shares = lots * 1000
+            let shares = lots * sharesPerUnit
             let totalCost = shares * cost
             let marketValue = shares * current
             let pl = marketValue - totalCost
@@ -1031,7 +1047,7 @@ struct AddStockView: View {
         guard !name.trimmingCharacters(in: .whitespaces).isEmpty,
               let lots = Double(lotsText), lots > 0,
               let price = Double(purchasePriceText), price > 0 else {
-            errorText = "請輸入股票名稱、張數和買入價格"
+            errorText = "請輸入股票名稱、\(unit)數和買入價格"
             showError = true; return
         }
         // 已標記「已賣出」卻沒填賣出價格時，(Double(soldPriceText) ?? 0) 會靜默把賣出價當 0，
@@ -1042,7 +1058,8 @@ struct AddStockView: View {
         }
         showError = false
         isSaving = true
-        let shares = lots * 1000
+        // 畫面上輸入的是「股」（美股）或「張」（台股），存檔一律換成股數
+        let shares = lots * sharesPerUnit
         let stockId = editing?.id ?? UUID()
         let trimmedName = name.trimmingCharacters(in: .whitespaces)
         let trimmedNote = note.trimmingCharacters(in: .whitespaces)
@@ -1204,8 +1221,8 @@ struct AddStockView: View {
         guard let e = editing else { return }
         name = e.name; symbol = e.symbol
         purchaseDate = e.purchaseDate
-        // 從股數轉換回張數顯示（1 張 = 1000 股）
-        let lots = e.shares / 1000
+        // 從股數換回畫面上的單位（台股 1 張 = 1000 股；美股就是股）
+        let lots = e.shares / sharesPerUnit
         if lots == lots.rounded() {
             lotsText = String(format: "%.0f", lots)
         } else {
