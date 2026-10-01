@@ -879,7 +879,8 @@ struct SubordinateOverviewView: View {
 
     private func taskSection(incompleteTasks tasks: [(sub: Subordinate, task: SubordinateTask)],
                               todayTasks: [(sub: Subordinate, task: SubordinateTask)],
-                              meetingItems: [(sub: Subordinate, meeting: SubordinateMeeting, item: MeetingItem)],
+                              meetingItems: [(sub: Subordinate, meeting: SubordinateMeeting,
+                                              ctx: SubordinateMeeting.ItemContext)],
                               completedEntries: [CompletedEntry]) -> some View {
         VStack(spacing: 16) {
             // 當日任務（選取日期、未完成）
