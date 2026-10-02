@@ -3775,7 +3775,7 @@ enum MeetingAlertStyle: String, Codable, CaseIterable, Identifiable {
         case .notification:
             return "一則橫幅通知。手機轉靜音時只有震動，專注模式下可能被收起來。"
         case .alarm:
-            return "真的會響，穿透靜音與專注模式，全螢幕要你按「停止」才會停。需要 iOS 26 以上。"
+            return "真的會響，穿透靜音與專注模式，全螢幕要你按「停止」才會停。需要 iOS 26.1 以上。"
         }
     }
 }

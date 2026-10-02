@@ -2,7 +2,7 @@ import Foundation
 import SwiftUI
 import AppIntents
 // AlarmKit 是 iOS 26 才有的框架，但 import 本身不受部署目標限制——
-// 實際使用一律由 @available(iOS 26.0, *) 把關。
+// 實際使用一律由 @available(iOS 26.1, *) 把關。
 // 若這行報「no such module」，代表 Xcode 版本太舊，那就是該升 Xcode 的訊號。
 import AlarmKit
 
@@ -15,7 +15,17 @@ import AlarmKit
 //     實務上只發給醫療／公共安全／居家安防類 App，生活記錄 App 幾乎必被拒。
 //   • AlarmKit（iOS 26 起）——第三方 App 的正式鬧鐘 API，不需要特別申請，
 //     只要 Info.plist 有 NSAlarmKitUsageDescription 並取得使用者授權。
-// 所以走 AlarmKit。iOS 26 以下沒有這個 API，會自動退回通知（見 effectiveStyle）。
+// 所以走 AlarmKit。低於 iOS 26.1 沒有這個 API，會自動退回通知（見 effective）。
+//
+// ⚠️ 為什麼關卡是 26.1 而不是 AlarmKit 本身的 26.0：
+//    警示內容的建構子 AlarmPresentation.Alert(title:secondaryButton:secondaryButtonBehavior:)
+//    是 iOS 26.1 才有的。26.0 只有 init(title:stopButton:secondaryButton:...)，
+//    而那個已經被 Apple 標記 deprecated——停止鈕現在由系統自己提供，不該由 App 傳。
+//    為了多支援 26.0 去用一個已棄用的建構子，等於自己種一顆未來會爆的雷；
+//    26.0 與 26.1 之間的使用者本來就極少（26.1 已經發佈將近一年），
+//    而且他們還是會收到通知，不是什麼都沒有。
+//    ⚠️ 不要為了這件事去動專案的 IPHONEOS_DEPLOYMENT_TARGET（18.0）——
+//       那會讓整支 App 放棄 iOS 18～26.0 的所有使用者。該升的是這裡的關卡。
 //
 // ⚠️ 刻意只用 alert 狀態、不做 countdown presentation。
 //    Apple 的文件寫得很明白：「AlarmKit expects a widget extension if an app
@@ -42,7 +52,7 @@ enum MeetingAlertPreference {
 
     /// 單筆的覆寫值（nil＝跟隨全域）換算成實際要用的那一種。
     ///
-    /// 這一層還會做「降級」：使用者選了鬧鐘但這台手機是 iOS 26 以下，
+    /// 這一層還會做「降級」：使用者選了鬧鐘但這台手機低於 iOS 26.1，
     /// 就退回通知。不降級的話那些提醒會完全不存在——寧可響得不夠凶，
     /// 也不能安靜地什麼都不發生。
     static func effective(_ override: MeetingAlertStyle?) -> MeetingAlertStyle {
@@ -213,7 +223,7 @@ enum ReminderCenter {
 // MARK: - AlarmKit 鬧鐘
 
 /// AlarmKit 的封裝。所有 AlarmKit 的呼叫都關在這支裡面，
-/// 而且集中在底下那個 @available(iOS 26.0, *) 的 extension 裡——
+/// 而且集中在底下那個 @available(iOS 26.1, *) 的 extension 裡——
 /// 這個框架很新，簽名有變動時只有一處要改。
 final class MeetingAlarmScheduler: ObservableObject {
 
@@ -232,7 +242,7 @@ final class MeetingAlarmScheduler: ObservableObject {
 
     /// 這台手機支援不支援真鬧鐘
     static var isSupported: Bool {
-        if #available(iOS 26.0, *) { return true }
+        if #available(iOS 26.1, *) { return true }
         return false
     }
 
@@ -240,28 +250,28 @@ final class MeetingAlarmScheduler: ObservableObject {
 
     @MainActor
     func requestAuthorization() async -> Bool {
-        if #available(iOS 26.0, *) { return await requestAuthorizationImpl() }
-        lastError = "這台手機的 iOS 版本沒有鬧鐘功能（需要 iOS 26 以上），提醒會自動改用通知。"
+        if #available(iOS 26.1, *) { return await requestAuthorizationImpl() }
+        lastError = "這台手機的 iOS 版本沒有鬧鐘功能（需要 iOS 26.1 以上），提醒會自動改用通知。"
         return false
     }
 
     @MainActor
     var authorizationText: String {
-        if #available(iOS 26.0, *) { return authorizationTextImpl }
-        return "需要 iOS 26 以上"
+        if #available(iOS 26.1, *) { return authorizationTextImpl }
+        return "需要 iOS 26.1 以上"
     }
 
     @MainActor
     func rebuild(_ jobs: [ReminderJob]) async {
         guard Self.isSupported else { return }
-        if #available(iOS 26.0, *) {
+        if #available(iOS 26.1, *) {
             await rebuildImpl(Array(jobs.prefix(maxAlarms)))
         }
     }
 
     @MainActor
     func cancelAll() async {
-        if #available(iOS 26.0, *) { cancelAllImpl() }
+        if #available(iOS 26.1, *) { cancelAllImpl() }
         scheduledCount = 0
     }
 
@@ -270,16 +280,16 @@ final class MeetingAlarmScheduler: ObservableObject {
     @MainActor
     func fireTestAlarm() async {
         guard Self.isSupported else {
-            lastError = "這台手機的 iOS 版本沒有鬧鐘功能（需要 iOS 26 以上）。"
+            lastError = "這台手機的 iOS 版本沒有鬧鐘功能（需要 iOS 26.1 以上）。"
             return
         }
-        if #available(iOS 26.0, *) { await fireTestAlarmImpl() }
+        if #available(iOS 26.1, *) { await fireTestAlarmImpl() }
     }
 }
 
 // MARK: - AlarmKit 實作（唯一碰到 AlarmKit 的地方）
 
-@available(iOS 26.0, *)
+@available(iOS 26.1, *)
 extension MeetingAlarmScheduler {
 
     /// AlarmAttributes 是泛型，metadata 就算傳 nil 也得有個具體型別來定住泛型參數，
@@ -407,7 +417,7 @@ extension MeetingAlarmScheduler {
 ///
 /// 走 LiveActivityIntent 是 AlarmKit 的要求（secondaryIntent 的型別就是它）。
 /// 實際的落點交給 v25.454 做的 DeepLinkRouter，不另外長一套導覽邏輯。
-@available(iOS 26.0, *)
+@available(iOS 26.1, *)
 struct OpenMeetingAlarmIntent: LiveActivityIntent {
     static var title: LocalizedStringResource = "打開 LifeGood"
     static var description = IntentDescription("打開 LifeGood 看這場會議")
@@ -460,7 +470,7 @@ struct MeetingAlertStylePicker: View {
     private var hint: String {
         let wanted = selection ?? MeetingAlertPreference.globalDefault
         if wanted == .alarm, !MeetingAlarmScheduler.isSupported {
-            return "這台手機的 iOS 版本沒有鬧鐘功能（需要 iOS 26 以上），這一筆會自動改用通知。"
+            return "這台手機的 iOS 版本沒有鬧鐘功能（需要 iOS 26.1 以上），這一筆會自動改用通知。"
         }
         return wanted.hint
     }

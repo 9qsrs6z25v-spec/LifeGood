@@ -1210,7 +1210,7 @@ struct SettingsView: View {
                     HStack(alignment: .top, spacing: 6) {
                         Image(systemName: "exclamationmark.triangle.fill")
                             .font(.caption).foregroundStyle(.orange)
-                        Text("這台手機的 iOS 版本沒有鬧鐘功能（需要 iOS 26 以上）。選了鬧鐘也會自動改用通知，不會變成沒有提醒。")
+                        Text("這台手機的 iOS 版本沒有鬧鐘功能（需要 iOS 26.1 以上）。選了鬧鐘也會自動改用通知，不會變成沒有提醒。")
                             .font(.caption).foregroundStyle(.secondary)
                     }
                 } else {
@@ -1274,7 +1274,7 @@ struct SettingsView: View {
         + "【通知】一則橫幅，手機轉靜音時只有震動，專注模式下可能被收起來。"
         + "【鬧鐘】走 iOS 26 的 AlarmKit，真的會響、穿透靜音與專注模式，"
         + "全螢幕要你按「停止」才會停，警示上還有一顆「打開 LifeGood」直接跳到那場會議。"
-        + "鬧鐘需要獨立的權限（與通知權限分開），而且系統對鬧鐘數量有上限，"
+        + "鬧鐘需要 iOS 26.1 以上與一個獨立的權限（與通知權限分開），而且系統對鬧鐘數量有上限，"
         + "所以只會先掛最近幾場，每次打開 App 自動往後補。"
         + "部屬會議在 v25.455 之前完全沒有提醒，升級後預設仍是「不提醒」——"
         + "要提醒請到各會議的編輯頁打開，不會替你擅自全部開啟。"
