@@ -584,6 +584,11 @@ struct SideRoleWorkspaceView: View {
         lifeStore.milestones.first { $0.id == roleId }
     }
 
+    /// [v25.460] 這個職務的重大決議欄位設定（匯出列的欄位標題跟著它走）
+    private var resolutionSchema: SideRoleResolutionSchema {
+        role?.sideRoleResolutionSchema ?? SideRoleResolutionSchema()
+    }
+
     var body: some View {
         // role 是 Optional（可能在別處被刪除）。整頁內容抽成吃非 Optional 的
         // content(_:)，避免每個子區塊各自解包或誤用強制解包。
@@ -881,8 +886,10 @@ struct SideRoleWorkspaceView: View {
                                                 : "[\(r.categories.joined(separator: "/"))] ")
                                              + (r.title.isEmpty ? "（未填標題）" : r.title),
                                            lines: [
-                                             r.site.isEmpty ? nil : "廠區：\(r.site)",
-                                             r.initiator.isEmpty ? nil : "發起：\(r.initiator)",
+                                             r.site.isEmpty ? nil
+                                                : "\(resolutionSchema.site)：\(r.site)",
+                                             r.initiator.isEmpty ? nil
+                                                : "\(resolutionSchema.initiator)：\(r.initiator)",
                                              r.content.isEmpty ? nil : r.content
                                            ])))
             }
@@ -1421,7 +1428,7 @@ struct SideRoleWorkspaceView: View {
         )
     }
 
-    /// 決議列的膠囊：流水號／日期／廠區／系統分類／發起人。
+    /// 決議列的膠囊：流水號／日期／第一欄／分類／發起人（欄位名稱由職務設定決定）。
     /// 分類與發起人可點＝套用篩選，點第二次取消（模板的 isActive 會畫出 ✕）。
     private func resolutionChips(_ r: SideRoleResolution) -> [ItemChip] {
         var chips: [ItemChip] = []
@@ -1441,7 +1448,10 @@ struct SideRoleWorkspaceView: View {
         let person = r.initiator.trimmingCharacters(in: .whitespaces)
         if !person.isEmpty {
             chips.append(ItemChip(id: "person", text: person, color: .indigo,
-                                  leadingLabel: "發起",
+                                  // [v25.460] 跟著職務自訂的欄位名稱走。
+                                  // 取前兩個字當前綴——膠囊前綴要短，整個欄位名
+                                  //（例「決議發起人」）塞進去會把膠囊擠爆。
+                                  leadingLabel: String(resolutionSchema.initiator.prefix(2)),
                                   isActive: filterPerson == person,
                                   onTap: { togglePersonFilter(person) }))
         }
@@ -1867,15 +1877,17 @@ struct SideRoleTaskEditor: View {
         extraAssigneeInput = ""
     }
 
-    /// 分類膠囊清單：已選的排最前，接著是全部兼任職務（待辦＋重大決議）key 過的
+    /// 分類膠囊清單：已選的排最前，接著是**本職務**（待辦＋重大決議）key 過的
     /// 歷史分類，去重、上限已選 + 12（開放式分類——不再用固定代碼列舉）
+    ///
+    /// [v25.460] 與重大決議編輯頁一起從「跨全部職務」改成「只看本職務」。
+    /// 只改一邊的話，同一組分類在待辦與決議兩個編輯頁會給出不同的建議清單。
     private var categorySuggestions: [String] {
         var out = task.categories
         var seen = Set(out)
-        let history = lifeStore.sideRoles.flatMap { role in
-            (role.sideRoleTasks ?? []).flatMap(\.categories)
-                + (role.sideRoleResolutions ?? []).flatMap(\.categories)
-        }
+        let role = lifeStore.milestones.first { $0.id == roleId }
+        let history = (role?.sideRoleTasks ?? []).flatMap(\.categories)
+            + (role?.sideRoleResolutions ?? []).flatMap(\.categories)
         for c in history.map({ $0.trimmingCharacters(in: .whitespaces) })
         where !c.isEmpty && !seen.contains(c) {
             seen.insert(c); out.append(c)
@@ -2377,6 +2389,10 @@ struct SideRoleResolutionCard: View {
     private var resolution: SideRoleResolution? {
         role?.sideRoleResolutions?.first { $0.id == resolutionId }
     }
+    /// [v25.460] 欄位標題跟著這個職務的設定走（沒設過＝出廠預設）
+    private var schema: SideRoleResolutionSchema {
+        role?.sideRoleResolutionSchema ?? SideRoleResolutionSchema()
+    }
 
     private static let dateFmt: DateFormatter = {
         let f = DateFormatter(); f.locale = Locale(identifier: "zh_Hant_TW"); f.dateFormat = "yyyy/M/d (E)"; return f
@@ -2582,11 +2598,11 @@ struct SideRoleResolutionCard: View {
             metaRow(label: "決議日期", value: Self.dateFmt.string(from: r.date))
             if !r.site.isEmpty {
                 Divider().padding(.leading, 14)
-                metaRow(label: "廠區", value: r.site, tint: .teal)
+                metaRow(label: schema.site, value: r.site, tint: .teal)
             }
             if !r.initiator.isEmpty {
                 Divider().padding(.leading, 14)
-                metaRow(label: "發起人", value: r.initiator, tint: .indigo)
+                metaRow(label: schema.initiator, value: r.initiator, tint: .indigo)
             }
         }
         .background(Color(.systemBackground))
@@ -2608,7 +2624,7 @@ struct SideRoleResolutionCard: View {
 
     private func categoryBlock(_ r: SideRoleResolution) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("系統分類").font(.caption).foregroundStyle(.secondary)
+            Text(schema.category).font(.caption).foregroundStyle(.secondary)
             FlexibleChipWrap(items: r.categories) { c in
                 Text(c)
                     .font(.system(size: 12, weight: .semibold))
@@ -2684,9 +2700,11 @@ struct SideRoleResolutionCard: View {
         lines.append("──────────")
         lines.append("🏷 職務：\(SideRoleFormat.displayName(role))")
         lines.append("🗓 決議日期：\(Self.dateFmt.string(from: r.date))")
-        if !r.site.isEmpty { lines.append("🏭 廠區：\(r.site)") }
-        if !r.categories.isEmpty { lines.append("⚙️ 系統分類：\(r.categories.joined(separator: "、"))") }
-        if !r.initiator.isEmpty { lines.append("🙋 發起人：\(r.initiator)") }
+        if !r.site.isEmpty { lines.append("🏭 \(schema.site)：\(r.site)") }
+        if !r.categories.isEmpty {
+            lines.append("⚙️ \(schema.category)：\(r.categories.joined(separator: "、"))")
+        }
+        if !r.initiator.isEmpty { lines.append("🙋 \(schema.initiator)：\(r.initiator)") }
         // [v25.319] 參照前案章節放在決議內容上方（與卡片一致），帶前案內文
         let refs = r.references.compactMap { rid in
             role.sideRoleResolutions?.first { $0.id == rid }
@@ -2719,19 +2737,30 @@ struct SideRoleResolutionEditor: View {
     @State private var categoryInput = ""
     /// [v25.299] 參照前案挑選頁
     @State private var showReferencePicker = false
+    /// [v25.460] 多欄位內容只在第一次出現時把舊的單欄內容搬進第一欄，只做一次
+    @State private var didSeedContentFields = false
+
+    private var role: LifeMilestone? { lifeStore.milestones.first { $0.id == roleId } }
+
+    /// [v25.460] 這個職務自己的欄位設定（沒設過就是全預設）
+    private var schema: SideRoleResolutionSchema {
+        role?.sideRoleResolutionSchema ?? SideRoleResolutionSchema()
+    }
+    private var contentFields: [ResolutionContentField] { schema.usableContentFields }
 
     /// 是否為既有決議（決定刪除鈕）
     private var isEditing: Bool {
-        lifeStore.milestones.first { $0.id == roleId }?
-            .sideRoleResolutions?.contains { $0.id == resolution.id } == true
+        role?.sideRoleResolutions?.contains { $0.id == resolution.id } == true
     }
 
-    /// 歷史值建議：全部兼任職務的重大決議按日期新到舊去重，最多 12 個。
-    /// 跨職務共享——廠區與發起人本來就不是單一職務的概念，
-    /// 換一個職務還要重 key 一輪就失去建議的意義。
+    /// 歷史值建議：**本職務**的重大決議按日期新到舊去重，最多 12 個。
+    ///
+    /// [v25.460] 原本是跨全部兼任職務共用。當初的理由是「廠區與發起人不是單一職務
+    /// 的概念」，但使用者實際用起來相反：一個職務是尾牙籌辦、一個是廠務系統改造，
+    /// 兩邊的廠區與發起人池混在一起，每次都要在一串不相干的膠囊裡找自己要的那顆。
+    /// 改成只看本職務。
     private func recentValues(_ pick: (SideRoleResolution) -> String) -> [String] {
-        let all = lifeStore.sideRoles
-            .flatMap { $0.sideRoleResolutions ?? [] }
+        let all = (role?.sideRoleResolutions ?? [])
             .sorted { $0.date > $1.date }
             .map(pick)
             .map { $0.trimmingCharacters(in: .whitespaces) }
@@ -2761,15 +2790,15 @@ struct SideRoleResolutionEditor: View {
         .buttonStyle(.borderless)
     }
 
-    /// 分類膠囊清單：已選的排最前，接著是全部兼任職務（重大決議＋待辦）key 過的
+    /// 分類膠囊清單：已選的排最前，接著是**本職務**（重大決議＋待辦）key 過的
     /// 歷史分類，去重、上限已選 + 12（開放式分類——不再用固定代碼列舉）
+    ///
+    /// [v25.460] 與 recentValues 同一個理由：改成只看本職務。
     private var categorySuggestions: [String] {
         var out = resolution.categories
         var seen = Set(out)
-        let history = lifeStore.sideRoles.flatMap { role in
-            (role.sideRoleResolutions ?? []).flatMap(\.categories)
-                + (role.sideRoleTasks ?? []).flatMap(\.categories)
-        }
+        let history = (role?.sideRoleResolutions ?? []).flatMap(\.categories)
+            + (role?.sideRoleTasks ?? []).flatMap(\.categories)
         for c in history.map({ $0.trimmingCharacters(in: .whitespaces) })
         where !c.isEmpty && !seen.contains(c) {
             seen.insert(c); out.append(c)
@@ -2810,7 +2839,7 @@ struct SideRoleResolutionEditor: View {
                 DatePicker("決議日期", selection: $resolution.date, displayedComponents: .date)
                 // 廠區：自由文字 + 歷史值膠囊（key 過一次之後直接點選）
                 VStack(alignment: .leading, spacing: 6) {
-                    TextField("廠區（例：F1、竹科）", text: $resolution.site)
+                    TextField(schema.site, text: $resolution.site)
                     if !siteSuggestions.isEmpty {
                         FlexibleChipWrap(items: siteSuggestions) { site in
                             suggestionChip(site, isOn: resolution.site == site) {
@@ -2823,7 +2852,7 @@ struct SideRoleResolutionEditor: View {
                 // 系統分類（可多選；一則決議常橫跨多個系統）：開放式——
                 // 自由輸入＋key 過的歷史膠囊（比照廠區/發起人；使用者不一定是氣化專業）
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("系統分類（可多選，自由輸入；key 過的會變膠囊）")
+                    Text("\(schema.category)（可多選，自由輸入；key 過的會變膠囊）")
                         .font(.caption).foregroundStyle(.secondary)
                     let sugg = categorySuggestions
                     if !sugg.isEmpty {
@@ -2832,7 +2861,7 @@ struct SideRoleResolutionEditor: View {
                         }
                     }
                     HStack(spacing: 8) {
-                        TextField("自訂分類（例：CDA、冰水、消防）", text: $categoryInput)
+                        TextField("自訂\(schema.category)", text: $categoryInput)
                             .onSubmit { addCategory() }
                         Button { addCategory() } label: {
                             Image(systemName: "plus.circle.fill")
@@ -2848,7 +2877,7 @@ struct SideRoleResolutionEditor: View {
                 // 使用者以為挑選功能沒實裝。
                 VStack(alignment: .leading, spacing: 6) {
                     HStack(spacing: 8) {
-                        TextField("決議發起人（可輸入或挑選）", text: $resolution.initiator)
+                        TextField("\(schema.initiator)（可輸入或挑選）", text: $resolution.initiator)
                         Button { showInitiatorPicker = true } label: {
                             HStack(spacing: 3) {
                                 Image(systemName: "person.crop.circle.badge.magnifyingglass")
@@ -2937,9 +2966,28 @@ struct SideRoleResolutionEditor: View {
                 Text("參照的前案以獨立章節顯示（標題、日期、內文），在卡片上會插在決議內容上方並附可點的超連結；下方內容欄位只需要寫本次的內容。")
             }
             Section {
-                TextField("決議內容、脈絡、金額等（會被行事曆搜尋索引）",
-                          text: $resolution.content, axis: .vertical)
-                    .lineLimit(4...10)
+                if contentFields.isEmpty {
+                    TextField("決議內容、脈絡、金額等（會被行事曆搜尋索引）",
+                              text: $resolution.content, axis: .vertical)
+                        .lineLimit(4...10)
+                } else {
+                    // [v25.460] 這個職務設了多個內容欄位：逐欄顯示標題與輸入框。
+                    // 存檔時會組回單一 content（見儲存按鈕），所以卡片／匯出／
+                    // 行事曆搜尋那一端完全不用改。
+                    ForEach(contentFields) { field in
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(field.displayTitle)
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.indigo)
+                            TextField("填寫\(field.displayTitle)", text: Binding(
+                                get: { resolution.contentText(for: field) },
+                                set: { resolution.setContentText($0, for: field) }
+                            ), axis: .vertical)
+                                .lineLimit(2...8)
+                        }
+                        .padding(.vertical, 2)
+                    }
+                }
                 // [v25.353] v25.318 以前的版本會把前案內文貼進這個欄位；前案現在有自己的
                 // 摺疊區塊，這段舊文字只是重複。清單預覽已經自動濾掉，這裡讓你決定要不要
                 // 真的從內容裡刪掉——不自動改你的資料。
@@ -2953,8 +3001,13 @@ struct SideRoleResolutionEditor: View {
                     }
                 }
             } header: {
-                Text("內容")
+                Text(contentFields.isEmpty
+                     ? SideRoleResolutionSchema.defaultContentLabel
+                     : "\(SideRoleResolutionSchema.defaultContentLabel)（\(contentFields.count) 欄）")
             } footer: {
+                if !contentFields.isEmpty {
+                    Text("欄位由這個職務的「重大決議欄位」設定決定（職務右上角的編輯按鈕裡）。存檔時會合併成一段帶標題的內容，卡片、匯出與行事曆搜尋都看得到。")
+                }
                 if resolution.hasLegacyReferenceBlock {
                     Text("這筆決議的內容欄位裡還留著舊版貼進來的「── 參照前案 …」段落。前案已經在上面獨立列出，清單預覽也會自動略過那一段；要不要從內容裡真的刪掉由你決定。")
                 }
@@ -2986,11 +3039,25 @@ struct SideRoleResolutionEditor: View {
                     if !pending.isEmpty, !toSave.categories.contains(pending) {
                         toSave.categories.append(pending)
                     }
+                    // [v25.460] 多欄位模式：把各欄組回單一 content。
+                    // content 是唯一的顯示／搜尋／分享來源，不組回去的話
+                    // 卡片與匯出都會是空的。全部欄位都空就不要覆蓋掉原本的內容。
+                    if !contentFields.isEmpty {
+                        let composed = toSave.composedContent(fields: contentFields)
+                        if !composed.isEmpty { toSave.content = composed }
+                    }
                     lifeStore.upsertSideRoleResolution(toSave, in: roleId)
                     dismiss()
                 }
                 .disabled(resolution.title.trimmingCharacters(in: .whitespaces).isEmpty)
             }
+        }
+        .onAppear {
+            // [v25.460] 這個職務改成多欄位之後第一次打開一筆舊決議：
+            // 把原本單欄的內容搬進第一欄，否則畫面空白、一按儲存就把內容蓋掉。
+            guard !didSeedContentFields else { return }
+            didSeedContentFields = true
+            resolution.seedContentFieldsIfNeeded(fields: contentFields)
         }
         .sheet(isPresented: $showInitiatorPicker) {
             NavigationStack {
@@ -3901,3 +3968,90 @@ struct ChipFlowLayout: Layout {
 
 /// 分享項目的 Identifiable 包裝（供 .sheet(item:) 使用）
 private struct SideRoleSharePayload: Identifiable { let id = UUID(); let items: [Any] }
+
+// MARK: - 重大決議欄位設定（v25.460）
+
+/// 每個兼任職務各自設定重大決議要填什麼。
+///
+/// 使用者需求：不同兼任職務的重大決議該填的東西本來就不一樣——一個是尾牙籌辦、
+/// 一個是廠務系統改造。所以 (1) 三個固定欄位的標題可以改名，(2)「內容」可以
+/// 拆成自訂數量、自訂標題的多個欄位（例：設備及用量／內容物／作法）。
+///
+/// 綁的是 Binding 而不是直接寫 store：這一頁是從里程碑編輯頁（AddMilestoneView）
+/// 推進來的，那一頁本來就是「改完按儲存才落地」的語意。直接寫 store 會變成
+/// 在編輯頁按取消，欄位設定卻已經改掉了。
+struct SideRoleResolutionSchemaEditor: View {
+    @Binding var schema: SideRoleResolutionSchema
+
+    var body: some View {
+        Form {
+            Section {
+                labelField(title: "欄位一", placeholder: SideRoleResolutionSchema.defaultSiteLabel,
+                           text: $schema.siteLabel)
+                labelField(title: "欄位二", placeholder: SideRoleResolutionSchema.defaultCategoryLabel,
+                           text: $schema.categoryLabel)
+                labelField(title: "欄位三", placeholder: SideRoleResolutionSchema.defaultInitiatorLabel,
+                           text: $schema.initiatorLabel)
+            } header: {
+                Text("膠囊欄位的名稱")
+            } footer: {
+                Text("只改顯示的名稱，不改欄位的行為：第一欄仍然會對應到公司組織的廠區據點（廠區編年史靠它連結），第二欄仍然是可多選，第三欄仍然可以從人員清單挑。留空就用預設名稱。")
+            }
+
+            Section {
+                if schema.contentFields.isEmpty {
+                    Text("目前是單一個「內容」欄位。按下方「新增欄位」就會換成分欄填寫。")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                ForEach($schema.contentFields) { $field in
+                    HStack(spacing: 8) {
+                        Image(systemName: "text.alignleft")
+                            .font(.system(size: 12)).foregroundStyle(.indigo)
+                        TextField("欄位標題（例：設備及用量）", text: $field.title)
+                    }
+                }
+                .onDelete { idx in schema.contentFields.remove(atOffsets: idx) }
+                .onMove { from, to in schema.contentFields.move(fromOffsets: from, toOffset: to) }
+
+                Button {
+                    schema.contentFields.append(ResolutionContentField())
+                } label: {
+                    Label("新增欄位", systemImage: "plus.circle.fill")
+                        .foregroundStyle(.green)
+                }
+                if !schema.contentFields.isEmpty {
+                    Button(role: .destructive) {
+                        schema.contentFields.removeAll()
+                    } label: {
+                        Label("改回單一內容欄位", systemImage: "arrow.uturn.backward")
+                    }
+                }
+            } header: {
+                Text("內容要分成幾欄")
+            } footer: {
+                Text(Self.contentFootnote)
+            }
+        }
+        .navigationTitle("重大決議欄位")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar { EditButton() }
+    }
+
+    private func labelField(title: String, placeholder: String,
+                            text: Binding<String>) -> some View {
+        HStack {
+            Text(title).foregroundStyle(.secondary)
+            TextField(placeholder, text: text)
+                .multilineTextAlignment(.trailing)
+        }
+    }
+
+    /// 說明一次寫成單一字串常數，不要在 Text(...) 裡用 + 串接
+    private static let contentFootnote =
+        "設了幾個欄位，決議的編輯頁就會出現幾個帶標題的輸入框。"
+        + "存檔時會合併成一段帶標題的內容（【標題】換行內文），"
+        + "所以決議卡片、匯出圖片與文字、行事曆搜尋都看得到全部內容，不用另外設定。"
+        + "欄位改名不會弄掉已經填的字（每個欄位有自己的識別碼，不是用標題當鍵）。"
+        + "把欄位全部刪掉就回到單一「內容」欄位，之前寫的字仍然留在內容裡。"
+        + "注意：已經填好的決議在改成分欄之後，原本的內容會被放進第一個欄位。"
+}

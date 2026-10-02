@@ -1133,6 +1133,82 @@ struct SideRoleMeeting: Identifiable, Codable {
     }
 }
 
+/// [v25.460] 重大決議「內容」要拆成的一個欄位。
+///
+/// 有穩定 id 而不是只存標題：使用者改標題（「作法」→「施作方式」）時，
+/// 已經填進去的文字要留著。用標題當鍵的話改一次名字資料就對不回去了。
+struct ResolutionContentField: Identifiable, Codable, Equatable, Hashable {
+    let id: UUID
+    var title: String
+
+    init(id: UUID = UUID(), title: String = "") {
+        self.id = id; self.title = title
+    }
+
+    var displayTitle: String {
+        let t = title.trimmingCharacters(in: .whitespaces)
+        return t.isEmpty ? "未命名欄位" : t
+    }
+}
+
+/// [v25.460] 每個兼任職務自己的重大決議表單設定。
+///
+/// 使用者需求：不同兼任職務的重大決議該填什麼本來就不一樣——一個是尾牙籌辦、
+/// 一個是廠務系統改造，硬共用同一組欄位名稱與同一池歷史膠囊只會互相干擾。
+///
+/// 三個固定欄位只改**標題**、不改語意：site 仍然是「會對應到廠區據點」的那一欄
+///（公司組織頁的廠區編年史靠它連結），categories 仍然是多選、initiator 仍然可以
+/// 從人員清單挑。改名字不會動到那些連動。
+struct SideRoleResolutionSchema: Codable, Equatable {
+    /// 空字串＝用出廠預設。不存預設值進資料，日後改預設字串舊資料才會跟著變。
+    var siteLabel: String
+    var categoryLabel: String
+    var initiatorLabel: String
+    /// 內容要拆成哪幾個欄位。空陣列＝維持單一「內容」欄位（出廠行為）
+    var contentFields: [ResolutionContentField]
+
+    static let defaultSiteLabel = "廠區"
+    static let defaultCategoryLabel = "系統分類"
+    static let defaultInitiatorLabel = "決議發起人"
+    static let defaultContentLabel = "內容"
+
+    init(siteLabel: String = "", categoryLabel: String = "", initiatorLabel: String = "",
+         contentFields: [ResolutionContentField] = []) {
+        self.siteLabel = siteLabel
+        self.categoryLabel = categoryLabel
+        self.initiatorLabel = initiatorLabel
+        self.contentFields = contentFields
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        siteLabel = (try? c.decodeIfPresent(String.self, forKey: .siteLabel)) ?? ""
+        categoryLabel = (try? c.decodeIfPresent(String.self, forKey: .categoryLabel)) ?? ""
+        initiatorLabel = (try? c.decodeIfPresent(String.self, forKey: .initiatorLabel)) ?? ""
+        contentFields = (try? c.decodeIfPresent([ResolutionContentField].self,
+                                                forKey: .contentFields)) ?? []
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case siteLabel, categoryLabel, initiatorLabel, contentFields
+    }
+
+    var site: String { siteLabel.isEmpty ? Self.defaultSiteLabel : siteLabel }
+    var category: String { categoryLabel.isEmpty ? Self.defaultCategoryLabel : categoryLabel }
+    var initiator: String { initiatorLabel.isEmpty ? Self.defaultInitiatorLabel : initiatorLabel }
+
+    /// 有沒有被改過（全預設時里程碑上存 nil，不佔存檔也不必同步）
+    var isDefault: Bool {
+        siteLabel.isEmpty && categoryLabel.isEmpty
+            && initiatorLabel.isEmpty && contentFields.isEmpty
+    }
+
+    /// 標題有填的欄位才算（空標題的欄位是使用者按了＋還沒打字）
+    var usableContentFields: [ResolutionContentField] {
+        contentFields.filter { !$0.title.trimmingCharacters(in: .whitespaces).isEmpty }
+    }
+}
+
 /// 兼任職務的重大決議（例：預算核定、場地定案）。
 /// 與會議紀錄裡的「決議事項」不同：這是跨會議、值得單獨列出來查的定案，
 /// 有自己的標題、內容與系統分類，會被「我的行事曆」搜尋索引到（含分類代碼）。
@@ -1156,13 +1232,22 @@ struct SideRoleResolution: Identifiable, Codable {
     var serial: Int?
     /// 參照的前案決議 id（可多選；決議常參照前案持續更新）
     var references: [UUID]
+    /// [v25.460] 多欄位內容：欄位 id（uuidString）→ 該欄填的文字。
+    ///
+    /// ⚠️ content 仍然是唯一的顯示／搜尋／分享來源：存檔時由這些欄位組回去
+    ///（見 composedContent）。這樣卡片、匯出、行事曆搜尋索引、previewContent
+    ///   全部不用改，而且使用者把多欄位設定關掉之後，寫過的字還留在 content 裡。
+    ///   這裡存的是「編輯時的結構」，不是第二份真相。
+    var contentValues: [String: String]?
 
     init(id: UUID = UUID(), date: Date = Date(), title: String = "", content: String = "",
          site: String = "", categories: [String] = [], initiator: String = "",
-         serial: Int? = nil, references: [UUID] = []) {
+         serial: Int? = nil, references: [UUID] = [],
+         contentValues: [String: String]? = nil) {
         self.id = id; self.date = date; self.title = title; self.content = content
         self.site = site; self.categories = categories; self.initiator = initiator
         self.serial = serial; self.references = references
+        self.contentValues = contentValues
     }
 
     init(from decoder: Decoder) throws {
@@ -1184,12 +1269,50 @@ struct SideRoleResolution: Identifiable, Codable {
         site = (try? c.decodeIfPresent(String.self, forKey: .site)) ?? ""
         serial = try? c.decodeIfPresent(Int.self, forKey: .serial)
         references = (try? c.decodeIfPresent([UUID].self, forKey: .references)) ?? []
+        contentValues = try? c.decodeIfPresent([String: String].self, forKey: .contentValues)
     }
 
-    private enum CodingKeys: String, CodingKey { case id, date, title, content, site, categories, initiator, serial, references }
+    private enum CodingKeys: String, CodingKey {
+        case id, date, title, content, site, categories, initiator, serial, references
+        case contentValues
+    }
 
     /// 流水號顯示文字（#003）；舊資料尚未補號時為空字串
     var serialLabel: String { serial.map { String(format: "#%03d", $0) } ?? "" }
+
+    // MARK: 多欄位內容（v25.460）
+
+    func contentText(for field: ResolutionContentField) -> String {
+        contentValues?[field.id.uuidString] ?? ""
+    }
+
+    mutating func setContentText(_ text: String, for field: ResolutionContentField) {
+        var dict = contentValues ?? [:]
+        if text.isEmpty { dict.removeValue(forKey: field.id.uuidString) }
+        else { dict[field.id.uuidString] = text }
+        contentValues = dict.isEmpty ? nil : dict
+    }
+
+    /// 把各欄位組回單一 content。格式刻意做成「【標題】換行內文」——
+    /// 卡片、匯出圖片、分享文字、行事曆搜尋全部吃 content，組出來的東西
+    /// 必須是人直接讀得懂的，而不是只有程式看得懂的編碼。
+    func composedContent(fields: [ResolutionContentField]) -> String {
+        let blocks: [String] = fields.compactMap { f in
+            let text = contentText(for: f).trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !text.isEmpty else { return nil }
+            return "【\(f.displayTitle)】\n" + text
+        }
+        return blocks.joined(separator: "\n\n")
+    }
+
+    /// 第一次在「多欄位」模式下打開一筆舊決議時，把原本單欄的 content
+    /// 搬進第一個欄位。不搬的話畫面是空白的，使用者按儲存就把原本的內容蓋掉了。
+    mutating func seedContentFieldsIfNeeded(fields: [ResolutionContentField]) {
+        guard !fields.isEmpty, contentValues == nil || contentValues?.isEmpty == true else { return }
+        let existing = content.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !existing.isEmpty, let first = fields.first else { return }
+        setContentText(existing, for: first)
+    }
 
     /// [v25.353] v25.299～v25.318 的「參照前案」會把前案內容以
     /// 「── 參照前案 #001｜2026/01/02｜標題 ──」開頭的引用區塊直接貼進 content。
@@ -1312,6 +1435,9 @@ struct LifeMilestone: Identifiable, Codable {
     var sideRoleKeyDates: [SideRoleKeyDate]?
     /// 兼任職務的重大決議（放在會議紀錄下方）
     var sideRoleResolutions: [SideRoleResolution]?
+    /// [v25.460] 這個職務的重大決議表單設定（欄位標題、內容要拆幾欄）。
+    /// nil＝全部用出廠預設。
+    var sideRoleResolutionSchema: SideRoleResolutionSchema?
 
     // 理財專屬欄位
     var financeSubCategory: FinanceSubCategory?
@@ -1446,6 +1572,8 @@ struct LifeMilestone: Identifiable, Codable {
         sideRoleMeetings = try? c.decodeIfPresent([SideRoleMeeting].self, forKey: .sideRoleMeetings)
         sideRoleKeyDates = try? c.decodeIfPresent([SideRoleKeyDate].self, forKey: .sideRoleKeyDates)
         sideRoleResolutions = try? c.decodeIfPresent([SideRoleResolution].self, forKey: .sideRoleResolutions)
+        sideRoleResolutionSchema = try? c.decodeIfPresent(SideRoleResolutionSchema.self,
+                                                          forKey: .sideRoleResolutionSchema)
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -1465,6 +1593,7 @@ struct LifeMilestone: Identifiable, Codable {
         case sideRoleName, sideRoleOrg, sideRoleEndDate, sideRoleIsLead
         case sideRoleScope, sideRoleWorkspaceEnabled
         case sideRoleTasks, sideRoleMembers, sideRoleMeetings, sideRoleKeyDates, sideRoleResolutions
+        case sideRoleResolutionSchema
     }
 
     // MARK: 兼任職務便利屬性

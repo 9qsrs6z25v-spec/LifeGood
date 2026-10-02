@@ -1434,6 +1434,9 @@ struct AddMilestoneView: View {
     @State private var sideRoleEndDate = Date()
     @State private var sideRoleIsLead = false
     @State private var sideRoleWorkspaceEnabled = false
+    /// [v25.460] 這個職務的重大決議欄位設定（每個職務各自一份）。
+    /// 跟著這一頁的「儲存」才落地——直接寫 store 的話，在這裡按取消欄位設定卻已經變了。
+    @State private var resolutionSchema = SideRoleResolutionSchema()
 
     // 理財專屬
     @State private var financeSub: FinanceSubCategory = .bank
@@ -2017,6 +2020,45 @@ struct AddMilestoneView: View {
         } footer: {
             Text(sideRoleFooterText)
         }
+
+        // [v25.460] 重大決議的欄位設定（每個職務各自一份）。
+        // 只在有管理頁的職務才有意義——沒有管理頁就沒有重大決議這個區塊。
+        if sideRoleIsLead && sideRoleWorkspaceEnabled {
+            Section {
+                NavigationLink {
+                    SideRoleResolutionSchemaEditor(schema: $resolutionSchema)
+                } label: {
+                    HStack(spacing: 12) {
+                        Image(systemName: "list.bullet.rectangle.portrait")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .frame(width: 28, height: 28)
+                            .background(Color.indigo.gradient)
+                            .clipShape(RoundedRectangle(cornerRadius: 7))
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("重大決議欄位")
+                                .font(.subheadline.weight(.semibold))
+                            Text(resolutionSchemaSummary)
+                                .font(.caption2).foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            } header: {
+                milestoneSectionHeader("重大決議", icon: "list.bullet.rectangle.portrait",
+                                       color: .indigo)
+            } footer: {
+                Text("這個職務的重大決議要填什麼欄位，由這裡決定——欄位名稱可以改，「內容」也可以拆成好幾個帶標題的欄位。每個職務各自一份，不會互相影響。")
+            }
+        }
+    }
+
+    /// 欄位設定的一行摘要
+    private var resolutionSchemaSummary: String {
+        let fields = resolutionSchema.usableContentFields
+        let names = [resolutionSchema.site, resolutionSchema.category, resolutionSchema.initiator]
+        let head = names.joined(separator: "／")
+        if fields.isEmpty { return head + "；內容單一欄位" }
+        return head + "；內容分 \(fields.count) 欄（" + fields.map(\.displayTitle).joined(separator: "／") + "）"
     }
 
     /// 主辦單位建議選單：公司內部單位（部門表）＋ 過去填過的外部單位。
@@ -2593,6 +2635,12 @@ struct AddMilestoneView: View {
             // [修正 v25.293] 重大決議先前漏在這份帶回清單——編輯兼任職務里程碑
             // 存檔會把累積的重大決議整批清空
             item.sideRoleResolutions = editing?.sideRoleResolutions
+            // [v25.460] 全預設就存 nil——不把預設值寫進資料，日後改預設字串
+            // 舊資料才會跟著變，也不佔存檔與同步的額度。
+            // 與上面四份資料同理：不依 isSide 條件化。把子分類切走再切回來，
+            // 設定還在；條件化的話切一次就把使用者設好的欄位清掉了。
+            item.sideRoleResolutionSchema =
+                resolutionSchema.isDefault ? nil : resolutionSchema
             if editing != nil { store.update(item) } else { store.add(item) }
         } else if isFinance {
             let autoTitle = generateFinanceTitle()
@@ -2759,6 +2807,7 @@ struct AddMilestoneView: View {
             if let end = e.sideRoleEndDate { sideRoleEndDate = end }
             sideRoleIsLead = e.sideRoleIsLead ?? false
             sideRoleWorkspaceEnabled = e.sideRoleWorkspaceEnabled ?? false
+            resolutionSchema = e.sideRoleResolutionSchema ?? SideRoleResolutionSchema()
             // 理財欄位
             if let fs = e.financeSubCategory { financeSub = fs }
             bankName = e.bankName ?? ""
