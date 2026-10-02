@@ -996,11 +996,18 @@ class LifeStore: ObservableObject {
 
     /// 決議上填過、但還沒建成據點的廠區字串。
     /// v25.358 起歸屬看時間不看名字，這份清單只是「照著既有決議把廠區補建起來」的方便入口。
+    ///
+    /// [v25.461] 只收「第一欄還叫廠區」的職務。v25.460 開放每個兼任職務自訂欄位名稱後，
+    /// 那一欄可能已經被改成「活動場地」、「負責單位」之類與廠區無關的東西——
+    /// 照樣撈進來的話，這裡會一直提示使用者把那些值「建成廠區據點」，
+    /// 而那是個一按下去就產生垃圾資料的建議。
     var unregisteredResolutionSites: [String] {
         let known = Set(companySites.flatMap { $0.matchKeys.map { $0.lowercased() } })
         var seen: Set<String> = []
         var out: [String] = []
         for pair in allSideRoleResolutions {
+            let schema = pair.role.sideRoleResolutionSchema ?? SideRoleResolutionSchema()
+            guard schema.site == SideRoleResolutionSchema.defaultSiteLabel else { continue }
             let raw = pair.resolution.site.trimmingCharacters(in: .whitespaces)
             guard !raw.isEmpty else { continue }
             let key = raw.lowercased()

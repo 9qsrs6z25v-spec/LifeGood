@@ -2047,7 +2047,7 @@ struct AddMilestoneView: View {
                 milestoneSectionHeader("重大決議", icon: "list.bullet.rectangle.portrait",
                                        color: .indigo)
             } footer: {
-                Text("這個職務的重大決議要填什麼欄位，由這裡決定——欄位名稱可以改，「內容」也可以拆成好幾個帶標題的欄位。每個職務各自一份，不會互相影響。")
+                Text("這個職務的重大決議要填什麼欄位，由這裡決定——三個欄位的名稱都可以改，「內容」也可以拆成好幾個帶標題的欄位。每個職務各自一份，不會互相影響。")
             }
         }
     }

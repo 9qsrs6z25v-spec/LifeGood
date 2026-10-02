@@ -3995,7 +3995,7 @@ struct SideRoleResolutionSchemaEditor: View {
             } header: {
                 Text("膠囊欄位的名稱")
             } footer: {
-                Text("只改顯示的名稱，不改欄位的行為：第一欄仍然會對應到公司組織的廠區據點（廠區編年史靠它連結），第二欄仍然是可多選，第三欄仍然可以從人員清單挑。留空就用預設名稱。")
+                Text(Self.labelFootnote)
             }
 
             Section {
@@ -4036,6 +4036,14 @@ struct SideRoleResolutionSchemaEditor: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar { EditButton() }
     }
+
+    /// 說明一次寫成單一字串常數，不要在 Text(...) 裡用 + 串接
+    private static let labelFootnote =
+        "只改顯示的名稱，不改欄位的行為：第二欄仍然是可多選，第三欄仍然可以從人員清單挑。"
+        + "留空就用預設名稱。"
+        + "第一欄改名是安全的——公司組織的廠區編年史只看決議日期落在哪個據點的期間，"
+        + "不看這一欄的文字。唯一會讀它的是廠區據點那邊的「還沒建成據點」補建提示，"
+        + "而那個提示只對「第一欄還叫廠區」的職務顯示。"
 
     private func labelField(title: String, placeholder: String,
                             text: Binding<String>) -> some View {

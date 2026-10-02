@@ -1156,9 +1156,15 @@ struct ResolutionContentField: Identifiable, Codable, Equatable, Hashable {
 /// 使用者需求：不同兼任職務的重大決議該填什麼本來就不一樣——一個是尾牙籌辦、
 /// 一個是廠務系統改造，硬共用同一組欄位名稱與同一池歷史膠囊只會互相干擾。
 ///
-/// 三個固定欄位只改**標題**、不改語意：site 仍然是「會對應到廠區據點」的那一欄
-///（公司組織頁的廠區編年史靠它連結），categories 仍然是多選、initiator 仍然可以
-/// 從人員清單挑。改名字不會動到那些連動。
+/// 三個固定欄位只改**標題**、不改行為：categories 仍然是多選、initiator 仍然可以
+/// 從人員清單挑。
+///
+/// [v25.461] 更正 v25.460 的說明：site 這一欄**沒有**連到廠區編年史。
+/// 編年史的歸屬從 v25.358 起就只看時間（決議日期落在哪個據點的啟用期間），
+/// 完全不看決議上的廠區文字——見 CompanySite 上方那段註解。
+/// 唯一還在讀這個字串的是公司組織頁的「決議裡出現過這些廠區名稱，還沒建成據點」
+/// 提示，而那個提示已經改成只看「第一欄還叫廠區」的職務
+/// （LifeStore.unregisteredResolutionSites），所以改名也不會讓它亂跳。
 struct SideRoleResolutionSchema: Codable, Equatable {
     /// 空字串＝用出廠預設。不存預設值進資料，日後改預設字串舊資料才會跟著變。
     var siteLabel: String
@@ -1219,6 +1225,8 @@ struct SideRoleResolution: Identifiable, Codable {
     var content: String
     /// 廠區（自由文字；例：F1、F2、竹科、南科）。編輯頁會把 key 過的值
     /// 做成膠囊供快速選用，所以不做成列舉——每家公司的廠區叫法都不同。
+    /// [v25.460] 顯示名稱可由各職務自訂（SideRoleResolutionSchema.siteLabel），
+    /// 所以這一欄實際上就是「第一個自由文字欄位」，不必真的是廠區。
     var site: String
     /// 系統分類（可多選；空陣列＝未分類）。一則決議常橫跨多個系統
     ///（例：廢水處理動到 Waste + CHM），單選表達不了。
@@ -3332,7 +3340,9 @@ struct CompanySite: Identifiable, Codable {
     let id: UUID
     /// 公司（例：台積電）
     var company: String
-    /// 廠區／據點名稱（例：F12A 十二廠）。與重大決議的「廠區」欄位對應
+    /// 廠區／據點名稱（例：F12A 十二廠）。
+    /// ⚠️ 與重大決議的「廠區」欄位**沒有**歸屬關係——決議掛到哪個據點只看時間
+    ///（v25.358，見上方註解）。名字只用在「還沒建成據點」那個補建提示上。
     var name: String
     /// 地點（例：新竹科學園區）
     var location: String
