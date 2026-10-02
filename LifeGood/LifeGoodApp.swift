@@ -67,6 +67,13 @@ extension AppDelegate: UNUserNotificationCenterDelegate {
                 AppNavigation.goToTravelMap()
                 DeepLinkRouter.shared.requestTripPlan(id)
             }
+        } else if let raw = info[DeepLinkRouter.meetingNotificationKey] as? String {
+            // [v25.455] 部屬會議提醒 → 切到「我的行事曆」並打開那場會議的卡片
+            Task { @MainActor in
+                AppNavigation.goToMyCalendar()
+                DeepLinkRouter.shared.requestTimelineStop(
+                    DayTimelineLink.stopIdForMeeting(uuidString: raw))
+            }
         }
         completionHandler()
     }
@@ -118,8 +125,11 @@ struct LifeGoodApp: App {
                     await subscription.refreshStatus()
                     await subscription.loadProducts()
                     await einvoiceSync.syncIfDue(expenseStore: expenseStore)
-                    // 啟動時重排所有事件提醒，讓舊事件升級到新版 body / 截止日邏輯
-                    await NotificationManager.shared.rescheduleAll(events: lifeStore.personalEvents)
+                    // 啟動時重排所有提醒，讓舊事件升級到新版 body / 截止日邏輯。
+                    // [v25.455] 改走 ReminderCenter：它會把「通知 or 鬧鐘」分流，
+                    // 並且一併排部屬會議的提醒（部屬會議在此之前完全沒有提醒）。
+                    await ReminderCenter.rebuildAll(events: lifeStore.personalEvents,
+                                                    subordinates: lifeStore.subordinates)
                     // 冷啟動順帶刷新自訂幣別匯率（與設定頁那顆按鈕同一套邏輯，
                     // 認不得的幣別維持手動值）。放最後、結果不看：開場動畫期間
                     // 網路慢也不擋任何啟動流程，失敗就沿用上次的值。
@@ -154,6 +164,10 @@ struct LifeGoodApp: App {
                             // [v25.377] 回到前景就重算時間軸：8 小時到期被系統收掉的
                             // Live Activity 也會在這裡重新掛上
                             await DayTimelineController.shared.refresh(store: lifeStore)
+                            // [v25.455] 提醒也一併續上。鬧鐘一次只掛最近 8 個
+                            //（AlarmKit 有數量上限），靠每次回到前景往後補。
+                            await ReminderCenter.rebuildAll(events: lifeStore.personalEvents,
+                                                            subordinates: lifeStore.subordinates)
                         }
                     }
                 }

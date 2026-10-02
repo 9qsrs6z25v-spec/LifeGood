@@ -3035,6 +3035,13 @@ struct AddSubItemSheet: View {
 //     LifeFinanceView／ResumeView／ChildDetailView，下次可依序比照補齊。
 
 struct MeetingEditorSheet: View {
+    /// [v25.455] 說明一次寫成單一字串常數，不要在 Text(...) 裡用 + 串接
+    static let meetingReminderFootnote =
+        "週期會議的每一場都會提醒；被取消的場次不會，改過期的場次用改過的時間。"
+        + "往後 30 天內的場次會先排好，之後每次打開 App 會自動往後補。"
+        + "鬧鐘模式一次只掛最近幾場（系統對鬧鐘數量有上限），所以長假不開 App 回來後，"
+        + "請先打開一次 App 讓它補上。"
+
     @EnvironmentObject var lifeStore: LifeStore
     @Environment(\.dismiss) private var dismiss
 
@@ -3059,6 +3066,10 @@ struct MeetingEditorSheet: View {
     @State private var assignedSubId = UUID()
     /// [v25.391] 關聯機台（可多台）。掛在整場會議上，不是逐個議程項目。
     @State private var linkedEquipmentIds: [UUID] = []
+    /// [v25.455] 開會前多久提醒（部屬會議在此之前完全沒有提醒）
+    @State private var reminder: EventReminder = .none
+    /// [v25.455] 用通知還是鬧鐘。nil＝跟隨設定頁的全域預設。
+    @State private var alertStyle: MeetingAlertStyle?
     /// 正在編輯的場次（以原定日期為鍵）。用 .sheet(item:) 開——本檔案的 Sheet 一律走這個模式。
     @State private var editingOccurrence: DateBox?
     /// 正在新增的臨時場次（規則之外加開的一場），值是預設的開會時間
@@ -3154,6 +3165,25 @@ struct MeetingEditorSheet: View {
                                            pickingAssigneeFor: $pickingAssigneeFor)
                         adHocSection
                     }
+                }
+
+                // [v25.455] 開會提醒。部屬會議在此之前完全沒有提醒欄位——
+                // 它只會出現在時間軸與靈動島上，不會主動叫你。
+                Section {
+                    Picker("提前提醒", selection: $reminder) {
+                        ForEach(EventReminder.allCases) { r in
+                            Text(r.displayName).tag(r)
+                        }
+                    }
+                    if reminder != .none {
+                        MeetingAlertStylePicker(selection: $alertStyle)
+                    }
+                } header: {
+                    editorSectionHeader("提醒", icon: "bell.badge", tint: .orange)
+                } footer: {
+                    Text(reminder == .none
+                         ? "預設不提醒。週期會議設了提醒之後，每一場都會提醒（被取消的場次不會）。"
+                         : Self.meetingReminderFootnote)
                 }
 
                 Section {
@@ -3269,6 +3299,8 @@ struct MeetingEditorSheet: View {
                     linkedEquipmentIds = e.linkedEquipmentIds.filter { id in
                         lifeStore.equipmentPool.contains { $0.id == id }
                     }
+                    reminder = EventReminder(rawValue: e.reminderMinutes) ?? .none
+                    alertStyle = e.alertStyle
                 } else {
                     // 新會議：預設時間用排程時段（整點/半點，過 18:00 則隔天 09:30）
                     date = FiveMinuteDateTimePicker.defaultSchedulingTime()
@@ -3342,7 +3374,9 @@ struct MeetingEditorSheet: View {
                            durationMinutes: Int(durationText) ?? 60,
                            rule: currentRule, items: items, note: note,
                            createdAt: createdAt, occurrences: occurrences,
-                           linkedEquipmentIds: linkedEquipmentIds)
+                           linkedEquipmentIds: linkedEquipmentIds,
+                           reminderMinutes: reminder.rawValue,
+                           alertStyleRaw: alertStyle?.rawValue)
     }
 
     /// 場次清單的顯示窗：只列「七天前」之後的場次，最多 40 筆。
@@ -3532,7 +3566,9 @@ struct MeetingEditorSheet: View {
             rule: currentRule,
             items: items, note: note.trimmingCharacters(in: .whitespaces),
             createdAt: createdAt, occurrences: occurrences,
-            linkedEquipmentIds: linkedEquipmentIds
+            linkedEquipmentIds: linkedEquipmentIds,
+            reminderMinutes: reminder.rawValue,
+            alertStyleRaw: alertStyle?.rawValue
         )
         meeting.pruneOccurrences()
         // [v25.332] 移交：先從原負責人移除（比照 TaskEditorSheet.save 的換人流程）
@@ -3545,7 +3581,9 @@ struct MeetingEditorSheet: View {
         guard var target = lifeStore.subordinates.first(where: { $0.id == targetId }) else { dismiss(); return }
         if let idx = target.meetings.firstIndex(where: { $0.id == meeting.id }) { target.meetings[idx] = meeting }
         else { target.meetings.append(meeting) }
-        lifeStore.update(target); dismiss()
+        lifeStore.update(target)
+        rebuildReminders()
+        dismiss()
     }
 
     private func deleteMeeting() {
@@ -3553,7 +3591,20 @@ struct MeetingEditorSheet: View {
         guard let e = editing, var sub = lifeStore.subordinates.first(where: { $0.id == subordinateId }) else { dismiss(); return }
         isSaving = true
         sub.meetings.removeAll { $0.id == e.id }
-        lifeStore.update(sub); dismiss()
+        lifeStore.update(sub)
+        rebuildReminders()
+        dismiss()
+    }
+
+    /// [v25.455] 整批重排提醒。
+    ///
+    /// 不做增量（「只排這一場」）有兩個理由：改一場週期會議會動到它所有場次；
+    /// 而鬧鐘沒有「按來源取消」的介面（排的時候 id 是現場產生的），
+    /// 只有整批重建才能把舊的清乾淨。整批重算是純記憶體計算，很便宜。
+    private func rebuildReminders() {
+        let events = lifeStore.personalEvents
+        let subs = lifeStore.subordinates
+        Task { await ReminderCenter.rebuildAll(events: events, subordinates: subs) }
     }
 }
 

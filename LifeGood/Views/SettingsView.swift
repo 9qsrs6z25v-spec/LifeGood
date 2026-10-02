@@ -278,6 +278,11 @@ struct SettingsView: View {
     @StateObject private var appleCal = AppleCalendarBridge.shared
     /// [v25.454] 旅遊規劃的跨裝置通知
     @AppStorage(TripChangeNotifier.enabledKey) private var tripSyncPushEnabled = true
+    /// [v25.455] 會議提醒的全域預設：通知 or 鬧鐘
+    @AppStorage(MeetingAlertPreference.globalKey) private var meetingAlertRaw =
+        MeetingAlertStyle.notification.rawValue
+    @StateObject private var alarmScheduler = MeetingAlarmScheduler.shared
+    @State private var reminderExpanded = false
     @State private var dataManagementExpanded = false
     @State private var dataStatsExpanded = false
     @State private var restoreExpanded = false
@@ -325,6 +330,11 @@ struct SettingsView: View {
                 }
                 disclosureBlock("語音 AI 助手", icon: "waveform", color: .purple, isExpanded: $aiExpanded) {
                     aiAssistantSection
+                }
+                // [v25.455] 會議提醒：通知 or 鬧鐘
+                disclosureBlock("會議提醒", icon: "bell.badge.fill",
+                                color: .orange, isExpanded: $reminderExpanded) {
+                    meetingReminderSection
                 }
                 // [v25.377] 今日行程時間軸（靈動島 / 鎖定畫面）
                 disclosureBlock("靈動島今日行程", icon: "calendar.day.timeline.left",
@@ -1178,6 +1188,96 @@ struct SettingsView: View {
         + "一件 iOS 的限制：這種「叫 App 起來拉資料」的靜默推播，"
         + "在你把 App 從多工列表往上滑掉（強制結束）之後系統就不會再送，"
         + "下次打開 App 時才會補上通知。"
+
+    // MARK: - 會議提醒（v25.455）
+
+    @ViewBuilder
+    private var meetingReminderSection: some View {
+        Section {
+            Group {
+                Picker(selection: $meetingAlertRaw) {
+                    ForEach(MeetingAlertStyle.allCases) { style in
+                        Label(style.displayName, systemImage: style.icon).tag(style.rawValue)
+                    }
+                } label: {
+                    Label("預設提醒方式", systemImage: "bell.badge")
+                }
+
+                Text(MeetingAlertStyle(rawValue: meetingAlertRaw)?.hint ?? "")
+                    .font(.caption).foregroundStyle(.secondary)
+
+                if !MeetingAlarmScheduler.isSupported {
+                    HStack(alignment: .top, spacing: 6) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.caption).foregroundStyle(.orange)
+                        Text("這台手機的 iOS 版本沒有鬧鐘功能（需要 iOS 26 以上）。選了鬧鐘也會自動改用通知，不會變成沒有提醒。")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                } else {
+                    HStack {
+                        Label("鬧鐘權限", systemImage: "alarm.fill")
+                        Spacer()
+                        Text(alarmScheduler.authorizationText)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                    }
+                    Button {
+                        Task { await alarmScheduler.requestAuthorization() }
+                    } label: {
+                        settingsActionRow(icon: "checkmark.shield.fill", color: .orange,
+                                          title: "要求鬧鐘權限",
+                                          subtitle: "沒有這個權限，鬧鐘不會響")
+                    }
+                    Button {
+                        Task { await alarmScheduler.fireTestAlarm() }
+                    } label: {
+                        settingsActionRow(icon: "bell.and.waves.left.and.right.fill", color: .pink,
+                                          title: "試響一次（10 秒後）",
+                                          subtitle: "先看清楚鬧鐘長什麼樣，再決定要不要用")
+                    }
+                    if alarmScheduler.scheduledCount > 0 {
+                        HStack {
+                            Label("已掛上的鬧鐘", systemImage: "alarm.waves.left.and.right")
+                            Spacer()
+                            Text("\(alarmScheduler.scheduledCount) 個")
+                                .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                        }
+                    }
+                    Button {
+                        Task { await alarmScheduler.cancelAll() }
+                    } label: {
+                        settingsActionRow(icon: "bell.slash.fill", color: .secondary,
+                                          title: "清掉所有鬧鐘",
+                                          subtitle: "下次打開 App 會依目前的設定重新掛上")
+                    }
+                }
+
+                if let err = alarmScheduler.lastError {
+                    HStack(alignment: .top, spacing: 6) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.caption).foregroundStyle(.orange)
+                        Text(err).font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+            }
+        } header: {
+            Text("會議提醒")
+        } footer: {
+            Text(Self.meetingAlertFootnote)
+        }
+    }
+
+    /// 說明一次寫成單一字串常數，不要在 Text(...) 裡用 + 串接
+    private static let meetingAlertFootnote =
+        "這裡設的是**預設值**。每一筆事件或會議的提醒旁邊都可以單獨改，"
+        + "沒改的就跟著這裡走。"
+        + "【通知】一則橫幅，手機轉靜音時只有震動，專注模式下可能被收起來。"
+        + "【鬧鐘】走 iOS 26 的 AlarmKit，真的會響、穿透靜音與專注模式，"
+        + "全螢幕要你按「停止」才會停，警示上還有一顆「打開 LifeGood」直接跳到那場會議。"
+        + "鬧鐘需要獨立的權限（與通知權限分開），而且系統對鬧鐘數量有上限，"
+        + "所以只會先掛最近幾場，每次打開 App 自動往後補。"
+        + "部屬會議在 v25.455 之前完全沒有提醒，升級後預設仍是「不提醒」——"
+        + "要提醒請到各會議的編輯頁打開，不會替你擅自全部開啟。"
 
     private static let calendarDeniedHint =
         "系統行事曆的讀取權限目前是關閉的，時間軸上不會有 iOS 行事曆的事件。"

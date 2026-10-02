@@ -24,6 +24,9 @@ final class DeepLinkRouter: ObservableObject {
     static let shared = DeepLinkRouter()
     private init() {}
 
+    /// [v25.455] 部屬會議提醒通知的 userInfo 鍵。點通知要知道是哪一場會議。
+    static let meetingNotificationKey = "meeting_id"
+
     /// 靈動島點進來要打開哪一筆行程的卡片（場次 id，格式見 DayTimelineLink）
     @Published private(set) var pendingTimelineStopId: String?
     /// 旅遊推播點進來要打開哪一份行程
@@ -92,6 +95,16 @@ extension DayTimelineLink {
         AppNavigation.goToMyCalendar()
         DeepLinkRouter.shared.requestTimelineStop(stopId(from: url))
         return true
+    }
+
+    /// [v25.455] 反過來組一個「指向某場部屬會議」的場次 id。
+    ///
+    /// 給鬧鐘警示上的「打開 LifeGood」用：那裡只有會議 id，沒有場次時間。
+    /// 時間那一段（epoch）在 resolve 時並沒有被用到——反查只看來源字母與 UUID 前
+    /// 8 碼——所以補 0 就夠，不需要把開會時間一路傳下來。
+    /// 格式必須與 DayTimelineController.stopId 一致，長度也要過 resolve 的 > 9 檢查。
+    static func stopIdForMeeting(uuidString: String) -> String {
+        "m" + String(uuidString.prefix(8)) + "0"
     }
 
     /// 把場次 id 還原成實際的那一筆。

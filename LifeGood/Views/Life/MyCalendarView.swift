@@ -1730,6 +1730,8 @@ struct PersonalEventEditor: View {
     @State private var hasRecurrenceEnd: Bool = false
     @State private var recurrenceEndDate: Date = Date().addingTimeInterval(60 * 60 * 24 * 90)
     @State private var reminder: EventReminder = .none
+    /// [v25.455] 這一筆要用通知還是鬧鐘。nil＝跟隨設定頁的全域預設。
+    @State private var alertStyle: MeetingAlertStyle?
     @State private var showDeleteConfirm = false
     // 防止連續點擊「新增/儲存」在 performSave() 的多個 await 中間隙並發觸發，
     // 各自用不同 UUID 建立事件而互相偵測不到對方，造成重複事件／重複行事曆項目／重複通知
@@ -1852,6 +1854,8 @@ struct PersonalEventEditor: View {
                     if reminder != .none {
                         Text(reminderHint)
                             .font(.caption2).foregroundStyle(.secondary)
+                        // [v25.455] 不提醒的時候不顯示——沒有要提醒，用哪種方式是空問題
+                        MeetingAlertStylePicker(selection: $alertStyle)
                     }
                 } header: {
                     editorSectionHeader("提醒", icon: "bell.badge")
@@ -1914,6 +1918,7 @@ struct PersonalEventEditor: View {
                         recurrenceEndDate = endDate
                     }
                     reminder = EventReminder(rawValue: e.reminderMinutes) ?? .none
+                    alertStyle = e.alertStyle
                     location = e.location
                     syncToAppleCalendar = e.syncToAppleCalendar
                     selectedAppleCalendarId = e.appleCalendarId
@@ -2223,7 +2228,8 @@ struct PersonalEventEditor: View {
             location: location.trimmingCharacters(in: .whitespaces),
             syncToAppleCalendar: syncToAppleCalendar,
             appleCalendarId: selectedAppleCalendarId,
-            ekEventIdentifier: editing?.ekEventIdentifier
+            ekEventIdentifier: editing?.ekEventIdentifier,
+            alertStyleRaw: alertStyle?.rawValue
         )
 
         // Apple 行事曆同步
@@ -2249,14 +2255,24 @@ struct PersonalEventEditor: View {
             lifeStore.personalEvents.append(event)
         }
 
-        // 排程通知（會自動覆蓋舊的）
+        // 排程提醒（會自動覆蓋舊的）
         if reminder != .none {
-            let granted = await NotificationManager.shared.requestAuthorization()
+            // [v25.455] 選了鬧鐘就要鬧鐘權限，選了通知才要通知權限——
+            // 問錯一個的話，使用者會在不需要的對話框上按同意，真正要的那個卻沒問到。
+            let granted: Bool
+            if MeetingAlertPreference.effective(event.alertStyle) == .alarm {
+                granted = await MeetingAlarmScheduler.shared.requestAuthorization()
+            } else {
+                granted = await NotificationManager.shared.requestAuthorization()
+            }
             if !granted {
                 permissionDeniedAlert = true
             }
         }
-        await NotificationManager.shared.schedule(event)
+        // [v25.455] 整批重排：這一筆可能從通知改成鬧鐘（或反過來），
+        // 只排新的那一種會把舊的那一種留在系統裡，到時候響兩次。
+        await ReminderCenter.rebuildAll(events: lifeStore.personalEvents,
+                                        subordinates: lifeStore.subordinates)
         dismiss()
     }
 
@@ -2267,6 +2283,11 @@ struct PersonalEventEditor: View {
             appleCal.delete(eventIdentifier: ekId)
         }
         lifeStore.personalEvents.removeAll { $0.id == e.id }
+        // [v25.455] 鬧鐘沒有「按來源 id 取消」這種介面（排的時候 id 是現場產生的），
+        // 整批重排才會把這一筆的鬧鐘清掉。
+        let remaining = lifeStore.personalEvents
+        let subs = lifeStore.subordinates
+        Task { await ReminderCenter.rebuildAll(events: remaining, subordinates: subs) }
         dismiss()
     }
 

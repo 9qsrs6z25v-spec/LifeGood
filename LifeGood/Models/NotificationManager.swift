@@ -51,7 +51,13 @@ final class NotificationManager {
         }
     }
 
-    /// 為事件排定通知（會先清掉舊的）。已支援：
+    /// 為單一事件排定通知（會先清掉舊的）。
+    ///
+    /// ⚠️ [v25.455] 現在的主要入口是 ReminderCenter.rebuildAll——它會把「通知 or 鬧鐘」
+    ///    分流、並一併處理部屬會議。這支留著當單筆 API，改動提醒設定時不要只呼叫它，
+    ///    否則另一種提醒方式的殘留不會被清掉。
+    ///
+    /// 已支援：
     /// - 一次性事件：單一 trigger
     /// - 重複事件無截止日：repeats: true 的單一 trigger
     /// - 重複事件有截止日：逐次列出實際發生時間，分別建一次性 trigger（上限 60 筆，避開 iOS 64 上限）
@@ -60,6 +66,9 @@ final class NotificationManager {
         await Self.awaitRemovePending(prefix: event.id.uuidString)
 
         guard event.reminderMinutes >= 0 else { return }
+        // [v25.455] 這一筆選了鬧鐘 → 不排通知，交給 MeetingAlarmScheduler。
+        // 兩種都排的話使用者會被提醒兩次。
+        guard MeetingAlertPreference.effective(event.alertStyle) == .notification else { return }
         let authorized = await requestAuthorization()
         guard authorized else { return }
 
@@ -83,6 +92,8 @@ final class NotificationManager {
         }
 
         for event in events where event.reminderMinutes >= 0 {
+            // [v25.455] 鬧鐘型的交給 MeetingAlarmScheduler，這裡只管通知型
+            guard MeetingAlertPreference.effective(event.alertStyle) == .notification else { continue }
             await addScheduleRequests(for: event)
         }
     }
@@ -129,6 +140,47 @@ final class NotificationManager {
                 let req = UNNotificationRequest(identifier: event.id.uuidString, content: content, trigger: trigger)
                 try? await center.add(req)
             }
+        }
+    }
+
+    // MARK: - 部屬會議（v25.455）
+
+    /// 部屬會議提醒用的 request identifier 前綴。重排時靠它認出「哪些是我排的」。
+    private static let meetingPrefix = "mtg_"
+
+    /// 把 ReminderCenter 算好的會議提醒排成通知。
+    ///
+    /// 與個人事件那條路不同，這裡不做「無限重複用單一 repeats trigger」的優化——
+    /// 週期會議的每一場都可能被改期或取消，用 repeats 的單一 trigger 表達不了，
+    /// 只能逐場排一次性的。所以呼叫端必須先裁切數量（iOS 只保留最近 64 則待送）。
+    func scheduleMeetingJobs(_ jobs: [ReminderJob]) async {
+        let center = UNUserNotificationCenter.current()
+        // 先清掉上一輪排的全部會議提醒：場次會被改期／取消，殘留的舊通知會在
+        // 已經不存在的時間響起來。
+        let pending = await center.pendingNotificationRequests()
+        let stale = pending.map(\.identifier).filter { $0.hasPrefix(Self.meetingPrefix) }
+        if !stale.isEmpty {
+            center.removePendingNotificationRequests(withIdentifiers: stale)
+        }
+
+        guard !jobs.isEmpty else { return }
+        guard await requestAuthorization() else { return }
+
+        let cal = Calendar.current
+        for job in jobs where job.fireDate > Date() {
+            let comps = cal.dateComponents([.year, .month, .day, .hour, .minute], from: job.fireDate)
+            let trigger = UNCalendarNotificationTrigger(dateMatching: comps, repeats: false)
+            let content = UNMutableNotificationContent()
+            content.title = job.title
+            content.body = job.body
+            content.sound = .default
+            // 同一場會議的提醒在通知中心疊成一組
+            if let mid = job.meetingId {
+                content.threadIdentifier = Self.meetingPrefix + mid.uuidString
+                content.userInfo = [DeepLinkRouter.meetingNotificationKey: mid.uuidString]
+            }
+            let req = UNNotificationRequest(identifier: job.key, content: content, trigger: trigger)
+            try? await center.add(req)
         }
     }
 

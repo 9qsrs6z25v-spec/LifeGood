@@ -2072,13 +2072,23 @@ struct SubordinateMeeting: Identifiable, Codable {
     /// [v25.391] 關聯機台（可多台）。掛在會議本身而不是各議程項目上：
     /// 「這場會議在談哪幾台機台」是整場的屬性，逐項去掛會變成每次開會都要重設一遍。
     var linkedEquipmentIds: [UUID]
+    /// [v25.455] 開會前多久提醒。-1＝不提醒（舊資料一律是這個值，行為不變）、
+    /// 0＝開會當下、正整數＝N 分鐘前。語意與 PersonalEvent.reminderMinutes 完全相同，
+    /// 刻意共用 EventReminder 那組選項，不另立一套。
+    var reminderMinutes: Int
+    /// [v25.455] 這場會議要用通知還是鬧鐘。nil＝跟隨設定頁的全域預設。
+    var alertStyleRaw: String?
 
     init(id: UUID = UUID(), topic: String = "", date: Date = Date(),
          durationMinutes: Int = 60, recurrence: MeetingRecurrence? = nil,
          rule: MeetingRecurrenceRule? = nil,
          items: [MeetingItem] = [], note: String = "", createdAt: Date? = nil,
-         occurrences: [MeetingOccurrence] = [], linkedEquipmentIds: [UUID] = []) {
+         occurrences: [MeetingOccurrence] = [], linkedEquipmentIds: [UUID] = [],
+         reminderMinutes: Int = EventReminder.none.rawValue,
+         alertStyleRaw: String? = nil) {
         self.linkedEquipmentIds = linkedEquipmentIds
+        self.reminderMinutes = reminderMinutes
+        self.alertStyleRaw = alertStyleRaw
         self.id = id; self.topic = topic; self.date = date
         self.durationMinutes = durationMinutes
         self.rule = rule
@@ -2086,6 +2096,12 @@ struct SubordinateMeeting: Identifiable, Codable {
         self.items = items; self.note = note
         self.createdAt = createdAt ?? date
         self.occurrences = occurrences
+    }
+
+    /// [v25.455] nil＝跟隨全域預設。實際要用哪一種走 MeetingAlertPreference.effective(_:)。
+    var alertStyle: MeetingAlertStyle? {
+        get { alertStyleRaw.flatMap(MeetingAlertStyle.init(rawValue:)) }
+        set { alertStyleRaw = newValue?.rawValue }
     }
 
     /// 依時長推出的結束時間（編輯頁與清單顯示「14:00–15:00」用）
@@ -2142,6 +2158,7 @@ struct SubordinateMeeting: Identifiable, Codable {
     enum CodingKeys: String, CodingKey {
         case id, topic, date, durationMinutes, recurrence, rule, items, note, createdAt, occurrences
         case linkedEquipmentIds
+        case reminderMinutes, alertStyleRaw
     }
 
     // 自訂解碼：createdAt／rule／occurrences 為後加欄位。這裡的容錯粒度是「整個部屬」——
@@ -2158,6 +2175,10 @@ struct SubordinateMeeting: Identifiable, Codable {
         createdAt = (try? c.decodeIfPresent(Date.self, forKey: .createdAt)) ?? date
         occurrences = (try? c.decodeIfPresent([MeetingOccurrence].self, forKey: .occurrences)) ?? []
         linkedEquipmentIds = (try? c.decodeIfPresent([UUID].self, forKey: .linkedEquipmentIds)) ?? []
+        // [v25.455] 後加欄位。舊資料沒有＝不提醒，與升級前的行為一致
+        //（升級前部屬會議根本沒有提醒，不能讓它升級後突然開始響）。
+        reminderMinutes = (try? c.decodeIfPresent(Int.self, forKey: .reminderMinutes)) ?? EventReminder.none.rawValue
+        alertStyleRaw = try? c.decodeIfPresent(String.self, forKey: .alertStyleRaw)
 
         if let r = try? c.decodeIfPresent(MeetingRecurrenceRule.self, forKey: .rule) {
             rule = r
@@ -3726,6 +3747,39 @@ enum EventRecurrence: String, Codable, CaseIterable, Identifiable {
 }
 
 /// 事前提醒（單位：分鐘）
+/// [v25.455] 提醒要用「通知」還是「鬧鐘」。
+///
+/// 通知＝一直以來的做法：一則橫幅，看不看由你，靜音模式下只有震動。
+/// 鬧鐘＝AlarmKit（iOS 26 起）：真的會響，穿透靜音與專注模式，
+///       全螢幕要你按「停止」才會停。
+///
+/// 「跟隨全域」不是這個列舉的一個 case，而是 Optional 的 nil。
+/// 這支 App 的樣式覆寫就是同一套語意——「沒有這把鍵＝跟隨全域」，
+/// 不用哨兵值污染，也不會出現「跟隨全域」被存進資料庫這種狀態。
+enum MeetingAlertStyle: String, Codable, CaseIterable, Identifiable {
+    case notification = "通知"
+    case alarm = "鬧鐘"
+
+    var id: String { rawValue }
+    var displayName: String { rawValue }
+
+    var icon: String {
+        switch self {
+        case .notification: return "bell.fill"
+        case .alarm:        return "alarm.fill"
+        }
+    }
+
+    var hint: String {
+        switch self {
+        case .notification:
+            return "一則橫幅通知。手機轉靜音時只有震動，專注模式下可能被收起來。"
+        case .alarm:
+            return "真的會響，穿透靜音與專注模式，全螢幕要你按「停止」才會停。需要 iOS 26 以上。"
+        }
+    }
+}
+
 enum EventReminder: Int, Codable, CaseIterable, Identifiable {
     case none = -1
     case atTime = 0
@@ -3767,6 +3821,8 @@ struct PersonalEvent: Identifiable, Codable, Equatable {
     var appleCalendarId: String?
     /// 已寫入的 EKEvent 識別碼，用於更新與刪除
     var ekEventIdentifier: String?
+    /// [v25.455] 這一筆要用通知還是鬧鐘。nil＝跟隨設定頁的全域預設。
+    var alertStyleRaw: String?
 
     init(id: UUID = UUID(),
          title: String = "",
@@ -3780,7 +3836,8 @@ struct PersonalEvent: Identifiable, Codable, Equatable {
          location: String = "",
          syncToAppleCalendar: Bool = false,
          appleCalendarId: String? = nil,
-         ekEventIdentifier: String? = nil) {
+         ekEventIdentifier: String? = nil,
+         alertStyleRaw: String? = nil) {
         self.id = id
         self.title = title
         self.kind = kind
@@ -3794,6 +3851,15 @@ struct PersonalEvent: Identifiable, Codable, Equatable {
         self.syncToAppleCalendar = syncToAppleCalendar
         self.appleCalendarId = appleCalendarId
         self.ekEventIdentifier = ekEventIdentifier
+        self.alertStyleRaw = alertStyleRaw
+    }
+
+    /// [v25.455] nil＝跟隨全域預設。實際要用哪一種請走
+    /// MeetingAlertPreference.effective(_:)，不要自己 ?? 一個預設值——
+    /// 全域預設只能有一個來源。
+    var alertStyle: MeetingAlertStyle? {
+        get { alertStyleRaw.flatMap(MeetingAlertStyle.init(rawValue:)) }
+        set { alertStyleRaw = newValue?.rawValue }
     }
 
     /// 向下相容：舊版 JSON 沒有 recurrence / reminder / Apple 同步欄位
@@ -3812,11 +3878,13 @@ struct PersonalEvent: Identifiable, Codable, Equatable {
         syncToAppleCalendar = (try? c.decode(Bool.self, forKey: .syncToAppleCalendar)) ?? false
         appleCalendarId = try? c.decodeIfPresent(String.self, forKey: .appleCalendarId)
         ekEventIdentifier = try? c.decodeIfPresent(String.self, forKey: .ekEventIdentifier)
+        alertStyleRaw = try? c.decodeIfPresent(String.self, forKey: .alertStyleRaw)
     }
 
     private enum CodingKeys: String, CodingKey {
         case id, title, kind, date, durationMinutes, note, recurrence, recurrenceEndDate, reminderMinutes
         case location, syncToAppleCalendar, appleCalendarId, ekEventIdentifier
+        case alertStyleRaw
     }
 
     /// 結束時間
