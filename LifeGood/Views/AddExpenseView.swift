@@ -1243,6 +1243,10 @@ struct AddExpenseView: View {
         // 帶入名稱會觸發搜尋候選，先擋掉這一次
         suppressNextCompleterUpdate = true
         titleFieldFocused = false
+        // [v25.467] 先選旅遊、後選地點的順序也要能對上（只在還沒指定站別時）。
+        // 這裡不會無限遞迴：autoPickNearestStop 設了站別會觸發 fillPlaceFromStop，
+        // 而那一支要求「還沒有座標」——此刻座標剛設好，它會直接返回。
+        autoPickNearestStop()
     }
 
     /// 清掉先前綁定的地點資料
@@ -1942,7 +1946,16 @@ struct AddExpenseView: View {
                     Text(plan.displayTitle).tag(UUID?.some(plan.id))
                 }
             }
-            .onChange(of: linkedTripPlanId) { _, _ in linkedTripStopId = nil }
+            // [v25.467] 兩邊自動對上，少按一次。
+            //   選了旅遊 → 這筆已經有地點的話，自動挑距離最近的那一站
+            //   選了站   → 這筆還沒有地點的話，把那一站的地點帶進來
+            .onChange(of: linkedTripPlanId) { _, _ in
+                linkedTripStopId = nil
+                autoPickNearestStop()
+            }
+            .onChange(of: linkedTripStopId) { _, newValue in
+                fillPlaceFromStop(newValue)
+            }
 
             if let planId = linkedTripPlanId, let plan = lifeStore.tripPlan(id: planId) {
                 Picker("算在哪一站", selection: $linkedTripStopId) {
@@ -1966,10 +1979,79 @@ struct AddExpenseView: View {
                 Text("旅遊")
             }
         } footer: {
-            Text(linkedTripOutOfRange == nil
-                 ? "這一天剛好在旅遊規劃的期間內。掛上去之後，這筆的照片會一起出現在那趟旅遊的相本裡；金額照舊算在這個月的支出與分類統計，不會重複計算。"
-                 : "目前選的行程沒有涵蓋這一天——改過日期的話記得確認一下。")
+            VStack(alignment: .leading, spacing: 4) {
+                Text(linkedTripOutOfRange == nil
+                     ? "這一天剛好在旅遊規劃的期間內。掛上去之後，這筆的照片會一起出現在那趟旅遊的相本裡；金額照舊算在這個月的支出與分類統計，不會重複計算。"
+                     : "目前選的行程沒有涵蓋這一天——改過日期的話記得確認一下。")
+                // [v25.467] 自動挑的站不能是暗的：把距離寫出來，挑錯了看得出來
+                if let hint = stopDistanceHint {
+                    Text(hint)
+                }
+            }
         }
+    }
+
+    // MARK: - [v25.467] 旅遊與地點互相帶入
+
+    /// 自動挑站的距離上限。超過這個距離就不自動挑——最近的一站在三公里外時，
+    /// 那八成不是同一個地方（整趟行程可能散在一個城市裡），寧可留給使用者自己選。
+    private static let maxAutoStopMeters: CLLocationDistance = 3_000
+
+    /// 這筆支出目前的座標（要在對的分類底下選的才算，見 placeScopeStamp）
+    private var currentPlaceCoordinate: CLLocationCoordinate2D? {
+        guard placeScopeMatches,
+              let lat = placeLatitude, let lon = placeLongitude else { return nil }
+        return CLLocationCoordinate2D(latitude: lat, longitude: lon)
+    }
+
+    /// 選了旅遊之後，依這筆的地點自動挑最近的一站。
+    /// 沒有地點、或最近的一站太遠就不動——不自動挑比挑錯好。
+    private func autoPickNearestStop() {
+        // 已經指定站別就不要動——那可能是使用者手挑的
+        guard linkedTripStopId == nil,
+              let planId = linkedTripPlanId,
+              let plan = lifeStore.tripPlan(id: planId),
+              let here = currentPlaceCoordinate else { return }
+        let origin = CLLocation(latitude: here.latitude, longitude: here.longitude)
+        var best: (id: UUID, meters: CLLocationDistance)?
+        for stop in plan.stops {
+            guard let c = stop.coordinate else { continue }
+            let meters = origin.distance(from: CLLocation(latitude: c.latitude,
+                                                          longitude: c.longitude))
+            if best == nil || meters < best!.meters { best = (stop.id, meters) }
+        }
+        guard let best, best.meters <= Self.maxAutoStopMeters else { return }
+        linkedTripStopId = best.id
+    }
+
+    /// 反過來：選了站、而這筆還沒有地點 → 把那一站的地點帶進來。
+    ///
+    /// 只在「還沒有座標」時做。已經選過地點的就別動了——那是使用者刻意挑的，
+    /// 被一個站別選擇覆蓋掉會很惱人。名稱與地址走 PlaceFieldFill（與地圖選點
+    /// 同一套「空的或還是上次自動帶的才覆蓋」規則），不會蓋掉手打的店名。
+    private func fillPlaceFromStop(_ stopId: UUID?) {
+        guard supportsPlacePicker, currentPlaceCoordinate == nil,
+              let stopId, let planId = linkedTripPlanId,
+              let plan = lifeStore.tripPlan(id: planId),
+              let stop = plan.stops.first(where: { $0.id == stopId }),
+              let c = stop.coordinate else { return }
+        applyMapPickedPlace(name: stop.displayName, address: stop.address, coordinate: c)
+    }
+
+    /// 「這筆的地點離「清水寺」約 450 公尺」。兩邊都有座標才寫。
+    private var stopDistanceHint: String? {
+        guard let here = currentPlaceCoordinate,
+              let planId = linkedTripPlanId,
+              let plan = lifeStore.tripPlan(id: planId),
+              let stopId = linkedTripStopId,
+              let stop = plan.stops.first(where: { $0.id == stopId }),
+              let c = stop.coordinate else { return nil }
+        let meters = CLLocation(latitude: here.latitude, longitude: here.longitude)
+            .distance(from: CLLocation(latitude: c.latitude, longitude: c.longitude))
+        let text = meters < 1_000
+            ? "約 \(Int(meters.rounded())) 公尺"
+            : String(format: "約 %.1f 公里", meters / 1_000)
+        return "這筆的地點離「" + stop.displayName + "」" + text
     }
 
     private var assetLinkSection: some View {
