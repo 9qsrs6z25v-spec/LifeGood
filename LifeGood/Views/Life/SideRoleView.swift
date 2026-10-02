@@ -1419,8 +1419,9 @@ struct SideRoleWorkspaceView: View {
         ItemRow(
             chips: resolutionChips(r),
             title: r.title,
-            // 預覽去掉 v25.299～v25.318 寫進內容欄位的「── 參照前案 …」引用區塊
-            preview: r.previewContent,
+            // 預覽去掉 v25.299～v25.318 寫進內容欄位的「── 參照前案 …」引用區塊；
+            // [v25.463] 分章節的內容壓成「標題：內文　・　…」，不要露出【】記號
+            preview: r.previewLine(fields: resolutionSchema.usableContentFields),
             disclosures: resolutionReferences(r),
             disclosureLabel: "參照前案",
             disclosureColor: .indigo,
@@ -1470,7 +1471,7 @@ struct SideRoleWorkspaceView: View {
                 badge: ref.serialLabel.isEmpty ? nil : ref.serialLabel,
                 title: ref.title,
                 meta: SideRoleFormat.date(ref.date),
-                body: ref.previewContent,
+                body: ref.previewLine(fields: resolutionSchema.usableContentFields),
                 actionLabel: "開啟這筆決議",
                 action: { viewingResolution = ref })
         }
@@ -2393,6 +2394,7 @@ struct SideRoleResolutionCard: View {
     private var schema: SideRoleResolutionSchema {
         role?.sideRoleResolutionSchema ?? SideRoleResolutionSchema()
     }
+    private var contentFields: [ResolutionContentField] { schema.usableContentFields }
 
     private static let dateFmt: DateFormatter = {
         let f = DateFormatter(); f.locale = Locale(identifier: "zh_Hant_TW"); f.dateFormat = "yyyy/M/d (E)"; return f
@@ -2465,12 +2467,33 @@ struct SideRoleResolutionCard: View {
         if !r.references.isEmpty {
             referenceBlock(r, forExport: forExport)
         }
+        // [v25.463] 內容分章節顯示。使用者回報：設定裡把內容切成幾個部分之後，
+        // 卡片上還是一團文字、只靠【標題】這幾個字分隔，看不出章節。
         if forExport {
-            staticBlock("決議內容", r.content.isEmpty ? "（未填內容）" : r.content)
+            ForEach(r.contentSections(fields: contentFields)) { sec in
+                staticBlock(sec.title ?? "決議內容",
+                            sec.body.isEmpty ? "（未填內容）" : sec.body)
+            }
             Text("美好人生・\(Self.dateFmt.string(from: Date())) 匯出")
                 .font(.caption2).foregroundStyle(.tertiary)
                 .frame(maxWidth: .infinity, alignment: .trailing)
+        } else if !contentFields.isEmpty, r.hasStructuredContent {
+            // 每一欄一個可就地編輯的區塊。改完要把 content 重組回去——
+            // 它是搜尋與分享的唯一來源。
+            ForEach(contentFields) { field in
+                InlineEditBlock(title: field.displayTitle,
+                                text: r.contentText(for: field),
+                                emptyHint: "（未填）", accent: .indigo) { new in
+                    var updated = r
+                    updated.setContentText(new, for: field)
+                    updated.content = updated.composedContent(fields: contentFields)
+                    lifeStore.upsertSideRoleResolution(updated, in: roleId)
+                }
+            }
         } else {
+            // 還沒分欄填過（或這個職務沒設分欄）：維持單一個可編輯區塊。
+            // 這裡刻意不照欄位畫空章節——職務後來才改成分欄時，既有決議的內容
+            // 還在 content 裡，照欄位畫會變成一排空章節，看起來像資料不見了。
             InlineEditBlock(title: "決議內容", text: r.content,
                             emptyHint: "（未填）", accent: .indigo) { new in
                 var updated = r
@@ -2524,10 +2547,10 @@ struct SideRoleResolutionCard: View {
                             }
                             .buttonStyle(.plain)
                         }
-                        Text(ref.content.isEmpty ? "（未填內容）" : ref.content)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
+                        // [v25.463] 前案引文也照章節排。前案與本案同屬一個職務，
+                        // 所以用同一組欄位設定解析；不這樣做的話引文裡會出現
+                        //【標題】這種給程式看的記號。
+                        refContent(ref)
                             .padding(9)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .background(Color(.tertiarySystemFill))
@@ -2608,6 +2631,31 @@ struct SideRoleResolutionCard: View {
         .background(Color(.systemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 12))
         .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color(.separator).opacity(0.12), lineWidth: 0.75))
+    }
+
+    /// 前案引文：有章節就逐節排（小標＋內文），否則單段
+    @ViewBuilder
+    private func refContent(_ ref: SideRoleResolution) -> some View {
+        if ref.content.isEmpty {
+            Text("（未填內容）")
+                .font(.caption).foregroundStyle(.secondary)
+        } else {
+            VStack(alignment: .leading, spacing: 6) {
+                ForEach(ref.contentSections(fields: contentFields)) { sec in
+                    VStack(alignment: .leading, spacing: 2) {
+                        if let t = sec.title {
+                            Text(t)
+                                .font(.system(size: 10, weight: .bold))
+                                .foregroundStyle(.indigo)
+                        }
+                        Text(sec.body)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
+        }
     }
 
     private func metaRow(label: String, value: String, tint: Color = .primary) -> some View {

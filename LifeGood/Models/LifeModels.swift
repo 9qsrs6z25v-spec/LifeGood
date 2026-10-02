@@ -1313,6 +1313,103 @@ struct SideRoleResolution: Identifiable, Codable {
         return blocks.joined(separator: "\n\n")
     }
 
+    /// 這一筆有沒有分欄填過（決定卡片要畫成章節還是單一段落）。
+    ///
+    /// 看 contentValues 而不是看職務有沒有設定欄位：職務「後來」才改成分欄時，
+    /// 既有決議的內容還在 content 裡、contentValues 是空的——那時候照欄位畫
+    /// 會變成一排空章節，看起來像資料不見了。要等那一筆被編輯過（搬進欄位）才算。
+    var hasStructuredContent: Bool { !(contentValues?.isEmpty ?? true) }
+
+    /// [v25.463] 內容的章節，給卡片與匯出畫成看得出來的區塊用。
+    ///
+    /// 兩條來源，依序試：
+    ///   1. 職務設了欄位、而且這一筆分欄填過 → 直接用欄位（權威來源）
+    ///   2. 否則解析 content 裡的「【標題】換行內文」區塊——composedContent 寫出來的
+    ///      就是這個格式，所以舊資料、或是職務後來把分欄設定關掉的那些決議，
+    ///      一樣看得出章節，不會退回一團文字
+    /// 都不符合就回一個沒有標題的章節（＝今天的單段行為）。
+    func contentSections(fields: [ResolutionContentField]) -> [ContentSection] {
+        if !fields.isEmpty, hasStructuredContent {
+            let out = fields.compactMap { f -> ContentSection? in
+                let text = contentText(for: f).trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !text.isEmpty else { return nil }
+                return ContentSection(id: f.id.uuidString, title: f.displayTitle, body: text)
+            }
+            if !out.isEmpty { return out }
+        }
+        let parsed = Self.parseSections(content)
+        if !parsed.isEmpty { return parsed }
+        return [ContentSection(id: "all", title: nil, body: content)]
+    }
+
+    /// [v25.463] 清單列的預覽文字。
+    ///
+    /// 列上的預覽只有兩三行、而且只能吃 String，畫不出章節區塊，但也不該把
+    ///「【標題】」這種給程式看的記號原樣丟出來。壓成「標題：內文　・　標題：內文」，
+    /// 一行內讀得完也看得出來分了幾節。
+    func previewLine(fields: [ResolutionContentField]) -> String {
+        if !fields.isEmpty, hasStructuredContent {
+            let parts = fields.compactMap { f -> String? in
+                let t = contentText(for: f).trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !t.isEmpty else { return nil }
+                return f.displayTitle + "：" + t.replacingOccurrences(of: "\n", with: " ")
+            }
+            if !parts.isEmpty { return parts.joined(separator: "　・　") }
+        }
+        // 走 previewContent 而不是 content：舊版寫進內容的「── 參照前案 …」引用區塊
+        // 要先濾掉，不然預覽會被它佔滿（這是 previewContent 存在的理由）。
+        let base = previewContent
+        let secs = Self.parseSections(base)
+        guard !secs.isEmpty else { return base }
+        return secs.map { sec in
+            let body = sec.body.replacingOccurrences(of: "\n", with: " ")
+            guard let t = sec.title else { return body }
+            return t + "：" + body
+        }.joined(separator: "　・　")
+    }
+
+    struct ContentSection: Identifiable {
+        let id: String
+        /// nil＝沒有標題的單一段落
+        let title: String?
+        let body: String
+    }
+
+    /// 解析「【標題】換行內文」。沒有任何一行是【…】就回空陣列（代表這不是分章節的內容）。
+    private static func parseSections(_ raw: String) -> [ContentSection] {
+        var out: [ContentSection] = []
+        var title: String?
+        var buffer: [String] = []
+
+        func flush() {
+            guard let t = title else { buffer = []; return }
+            let body = buffer.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+            out.append(ContentSection(id: "\(out.count)-\(t)", title: t, body: body))
+            buffer = []
+        }
+
+        for line in raw.components(separatedBy: .newlines) {
+            let t = line.trimmingCharacters(in: .whitespaces)
+            if t.hasPrefix("【"), t.hasSuffix("】"), t.count > 2 {
+                flush()
+                title = String(t.dropFirst().dropLast())
+            } else {
+                buffer.append(line)
+            }
+        }
+        flush()
+        // 第一個【…】之前的文字（如果有）會被丟掉，所以只在真的解析出章節時才採用；
+        // 回空陣列＝呼叫端退回單段顯示，不會有內容憑空消失。
+        guard !out.isEmpty else { return [] }
+        let leading = raw.components(separatedBy: .newlines)
+            .prefix { !($0.trimmingCharacters(in: .whitespaces).hasPrefix("【")) }
+            .joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+        if !leading.isEmpty {
+            out.insert(ContentSection(id: "lead", title: nil, body: leading), at: 0)
+        }
+        return out
+    }
+
     /// 第一次在「多欄位」模式下打開一筆舊決議時，把原本單欄的 content
     /// 搬進第一個欄位。不搬的話畫面是空白的，使用者按儲存就把原本的內容蓋掉了。
     mutating func seedContentFieldsIfNeeded(fields: [ResolutionContentField]) {
