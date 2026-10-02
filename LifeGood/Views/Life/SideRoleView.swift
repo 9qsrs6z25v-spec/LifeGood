@@ -4035,6 +4035,16 @@ struct SideRoleResolutionSchemaEditor: View {
         .navigationTitle("重大決議欄位")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar { EditButton() }
+        // 這一頁沒有自己的儲存鈕——它編輯的是上一頁那張表單的草稿，
+        // 跟著職務一起存。使用者回報過「設完返回是空的」，所以把這件事寫在畫面上。
+        .safeAreaInset(edge: .bottom) {
+            Text("返回職務編輯頁後，按右上角「儲存」才會生效。")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 8)
+                .background(.bar)
+        }
     }
 
     /// 說明一次寫成單一字串常數，不要在 Text(...) 裡用 + 串接

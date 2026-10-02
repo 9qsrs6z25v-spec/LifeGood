@@ -1437,6 +1437,8 @@ struct AddMilestoneView: View {
     /// [v25.460] 這個職務的重大決議欄位設定（每個職務各自一份）。
     /// 跟著這一頁的「儲存」才落地——直接寫 store 的話，在這裡按取消欄位設定卻已經變了。
     @State private var resolutionSchema = SideRoleResolutionSchema()
+    /// [v25.462] loadEditing() 只能跑一次，見下方 onAppear 的註解
+    @State private var didLoadEditing = false
 
     // 理財專屬
     @State private var financeSub: FinanceSubCategory = .bank
@@ -1576,7 +1578,20 @@ struct AddMilestoneView: View {
                     }
                 }
             }
-            .onAppear { loadEditing() }
+            // [v25.462] 只載入一次。
+            //
+            // onAppear 在 NavigationStack 裡「推進子頁再返回」時會再觸發一次，
+            // 而 loadEditing() 是把整張表單從 store 重讀一遍——等於返回的那一刻
+            // 把使用者在這張表單上還沒按儲存的修改全部丟掉。
+            //
+            // v25.460 以前這張表單沒有任何可以推進去的子頁，所以這個漏洞碰不到；
+            // 「重大決議欄位」是第一個 NavigationLink，一加上去就踩到了
+            //（使用者回報：設完欄位返回，設定是空的）。
+            .onAppear {
+                guard !didLoadEditing else { return }
+                didLoadEditing = true
+                loadEditing()
+            }
             .onChange(of: category) { _, newValue in
                 if newValue == .realEstate && financeStore.realEstates.isEmpty {
                     realEstateMode = .new
@@ -2047,7 +2062,7 @@ struct AddMilestoneView: View {
                 milestoneSectionHeader("重大決議", icon: "list.bullet.rectangle.portrait",
                                        color: .indigo)
             } footer: {
-                Text("這個職務的重大決議要填什麼欄位，由這裡決定——三個欄位的名稱都可以改，「內容」也可以拆成好幾個帶標題的欄位。每個職務各自一份，不會互相影響。")
+                Text("這個職務的重大決議要填什麼欄位，由這裡決定——三個欄位的名稱都可以改，「內容」也可以拆成好幾個帶標題的欄位。每個職務各自一份，不會互相影響。設定完返回這一頁，要按右上角「儲存」才會生效。")
             }
         }
     }
