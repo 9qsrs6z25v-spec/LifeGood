@@ -319,17 +319,11 @@ struct SettingsView: View {
                 disclosureBlock("訂閱方案", icon: "crown.fill", color: .yellow, isExpanded: $subscriptionExpanded) {
                     subscriptionSection
                 }
-                disclosureBlock("電子發票自動匯入", icon: "doc.text.viewfinder", color: .indigo, isExpanded: $einvoiceExpanded) {
-                    einvoiceSection
-                }
                 disclosureBlock("自訂幣別匯率", icon: "dollarsign.arrow.circlepath", color: .blue, isExpanded: $currencyExpanded) {
                     currencyRateSection
                 }
                 disclosureBlock("iCloud 同步", icon: "icloud.fill", color: .blue, isExpanded: $iCloudExpanded) {
                     iCloudSyncSection
-                }
-                disclosureBlock("語音 AI 助手", icon: "waveform", color: .purple, isExpanded: $aiExpanded) {
-                    aiAssistantSection
                 }
                 // [v25.455] 會議提醒：通知 or 鬧鐘
                 disclosureBlock("會議提醒", icon: "bell.badge.fill",
@@ -341,24 +335,26 @@ struct SettingsView: View {
                                 color: .orange, isExpanded: $dayTimelineExpanded) {
                     dayTimelineSection
                 }
-                disclosureBlock("資料匯出 / 匯入", icon: "tray.and.arrow.up.fill", color: .green, isExpanded: $dataManagementExpanded) {
-                    dataManagementSection
-                }
                 disclosureBlock("資料統計", icon: "chart.bar.fill", color: .orange, isExpanded: $dataStatsExpanded) {
                     dataStatsSection
                 }
                 disclosureBlock("自動備份還原", icon: "clock.arrow.circlepath", color: .teal, isExpanded: $restoreExpanded) {
                     restoreSection
                 }
-                // 危險區一律外露不收合，避免使用者誤觸或找不到
-                dangerZoneSection
                 disclosureBlock("關於", icon: "info.circle.fill", color: .gray, isExpanded: $aboutExpanded) {
                     aboutSection
                 }
-                // 進階設定：內建模板的可調參數（曲線點數／透明度等）集中在獨立頁
+                // 進階設定：內建模板的可調參數，加上四塊不常動的功能與資料設定
+                //（使用者指定：電子發票／語音 AI／資料匯出匯入／清除所有資料）。
+                //
+                // 這四塊的程式碼仍然留在本檔案的 SettingsView 上——它們的狀態與
+                // presentation 修飾詞（sheet／fileImporter／confirmationDialog）都掛在
+                // 根層 List 上，搬成獨立 struct 就得連那些一起搬。匯出匯入會動到
+                // 使用者資料，不值得為了換位置冒那個風險。這裡只是把它們「畫在別頁」，
+                // SettingsView 仍是父層，sheet 照常彈得出來。
                 Section {
                     NavigationLink {
-                        AdvancedSettingsView()
+                        AdvancedSettingsView { advancedExtraSections }
                     } label: {
                         HStack(spacing: 12) {
                             Image(systemName: "slider.horizontal.3")
@@ -367,8 +363,14 @@ struct SettingsView: View {
                                 .frame(width: 30, height: 30)
                                 .background(Color.gray.gradient)
                                 .clipShape(RoundedRectangle(cornerRadius: 8))
-                            Text("進階設定")
-                                .font(.subheadline.weight(.semibold))
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("進階設定")
+                                    .font(.subheadline.weight(.semibold))
+                                // 搬進去的四塊在主清單上已經看不到了，這一行是它們唯一的指路牌
+                                Text("電子發票・語音 AI・資料匯出匯入・卡片與圖表樣式")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
                         }
                     }
                 }
@@ -619,6 +621,32 @@ struct SettingsView: View {
         } footer: {
             Text("免費版可使用記帳全部功能與理財模式的「股票」管理。訂閱後解鎖儲蓄險、載具、房地產、人生履歷、家庭、管理等完整功能。\(FeatureGate.viewOnlyMessage)：未訂閱時其他功能仍可閱覽，但無法新增 / 編輯 / 刪除。")
         }
+    }
+
+    // MARK: - 掛進「進階設定」的四塊
+
+    /// [v25.457] 電子發票／語音 AI／資料匯出匯入／清除所有資料。
+    ///
+    /// 收成一個 computed property 而不是直接寫在 body 的閉包裡：那四塊展開後是很深的
+    /// 泛型型別，塞在 body 中間會把型別檢查的負擔推上去（FamilySharingRow 教訓）。
+    /// 包成 some View 之後 body 只看到一個不透明型別。
+    @ViewBuilder
+    private var advancedExtraSections: some View {
+        disclosureBlock("電子發票自動匯入", icon: "doc.text.viewfinder",
+                        color: .indigo, isExpanded: $einvoiceExpanded) {
+            einvoiceSection
+        }
+        disclosureBlock("語音 AI 助手", icon: "waveform",
+                        color: .purple, isExpanded: $aiExpanded) {
+            aiAssistantSection
+        }
+        disclosureBlock("資料匯出 / 匯入", icon: "tray.and.arrow.up.fill",
+                        color: .green, isExpanded: $dataManagementExpanded) {
+            dataManagementSection
+        }
+        // 危險區在這一頁裡維持外露不收合：進到這一頁就是刻意要找它，
+        // 再收一層只會變成找不到。難找的那一層已經由「要先點進進階設定」承擔。
+        dangerZoneSection
     }
 
     // MARK: - 電子發票自動匯入
@@ -2598,9 +2626,25 @@ struct CloudSharingSheet: UIViewControllerRepresentable {
 ///      1.2 股票（項目卡成交量柱）
 /// 之後其他模板要開放的參數，依同樣的樹狀分類往下掛新頁。
 /// （注意：依 FamilySharingRow 教訓，子頁抽成獨立 struct，避免型別深度爆棧。）
-struct AdvancedSettingsView: View {
+///
+/// [v25.457] `extra` 讓呼叫端把自己的區塊掛在這一頁的最後面。
+///
+/// 使用者要求把「電子發票自動匯入／語音 AI 助手／資料匯出匯入／清除所有資料」
+/// 搬進這一頁。那四塊的狀態（匯出忙碌旗標、檔案匯入器、各種 sheet 與確認對話框）
+/// 全部長在 SettingsView 上，而且那些 presentation 修飾詞是掛在 SettingsView 根層的
+/// List 上的——那是刻意的，本專案踩過「.sheet 掛在 Section 上會讓整串 sheet 被收掉」
+/// 的坑。把區塊搬成獨立 struct 就得連狀態與修飾詞一起搬，是一次幾百行的搬遷，
+/// 而匯出匯入是會動到使用者資料的功能，不值得為了換個位置去冒那個風險。
+///
+/// 所以改成反過來：區塊留在 SettingsView（狀態與修飾詞一行都不動），
+/// 只把「畫在哪裡」交給這一頁。SettingsView 仍是它們的父層，sheet 照常彈得出來。
+struct AdvancedSettingsView<Extra: View>: View {
     /// 首頁浮動「新增收支」按鈕顯示開關（與 MainTabView 共用同一 key；預設顯示）
     @AppStorage("show_floating_add_button") private var showFloatingAddButton = true
+
+    private let extra: Extra
+
+    init(@ViewBuilder extra: () -> Extra) { self.extra = extra() }
 
     var body: some View {
         Form {
@@ -2682,6 +2726,8 @@ struct AdvancedSettingsView: View {
             } header: {
                 Text("卡片設定")
             }
+            // [v25.457] 呼叫端掛進來的區塊（電子發票／語音 AI／資料匯出匯入／危險操作）
+            extra
         }
         .navigationTitle("進階設定")
         .navigationBarTitleDisplayMode(.inline)
