@@ -946,93 +946,77 @@ struct SubordinateOverviewView: View {
         }
     }
 
+    /// [v25.459] 改走共用的 ItemRow 模板。
+    ///
+    /// 同一頁的 reportRow／leaveRow／taskRow 早就是 ItemRow 了，只有兩個會議列還是
+    /// 手刻的——膠囊擺在一個不會捲動的 HStack 裡，四顆膠囊（會議名稱／截止／開會時間／
+    /// 負責人）放不下時 SwiftUI 會去壓縮它們，膠囊裡的文字就被迫換行，
+    /// 變成使用者看到的「換行滿奇怪的」。
+    ///
+    /// ItemChipBar 的做法是橫向捲動 + 單行 + 左右隱沒漸層：放不下就捲，不換行；
+    /// 出圖時自動改成換行版（itemRowChipsWrap），分享圖片不會把膠囊捲出畫面。
+    ///
+    /// 順帶收斂：原本手刻的 36pt 漸層圓與 ItemIconDisc 規格完全相同
+    ///（0.22→0.08 漸層、0.18/5/0/2 陰影、0.22 描邊、36pt），換過去沒有視覺差異。
+    /// 版面上唯一的變化是膠囊從標題下方移到標題上方——那正是其餘三列的排法。
     private func meetingItemOverviewRow(_ sub: Subordinate, _ meeting: SubordinateMeeting,
                                        _ ctx: SubordinateMeeting.ItemContext) -> some View {
         let item = ctx.item
-        let itemAccent: Color = item.isCompleted ? .green : .indigo
-        return HStack(alignment: .center, spacing: 12) {
-            // v3：裸 circle 圖示升級為 36pt 漸層圓，對齊 taskRow / leaveRow 視覺規格
-            Button {
-                lateRequest = LateCompletionGate.meetingItem(
-                    lifeStore, subordinateId: sub.id, meetingId: meeting.id, item: item)
-            } label: {
-                ZStack {
-                    Circle()
-                        .fill(LinearGradient(
-                            colors: [itemAccent.opacity(0.22), itemAccent.opacity(0.08)],
-                            startPoint: .topLeading, endPoint: .bottomTrailing
-                        ))
-                        .frame(width: 36, height: 36)
-                        .shadow(color: itemAccent.opacity(0.18), radius: 5, x: 0, y: 2)
-                    Circle()
-                        .stroke(itemAccent.opacity(0.22), lineWidth: 1)
-                        .frame(width: 36, height: 36)
-                    Image(systemName: item.isCompleted ? "checkmark.circle.fill" : "circle")
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(itemAccent)
+        let accent: Color = item.isCompleted ? .green : .indigo
+        return ItemRow(
+            chips: meetingItemChips(sub, meeting, ctx),
+            title: item.content.isEmpty ? "未填內容" : item.content,
+            titleIsMuted: item.isCompleted,
+            titleStrikethrough: item.isCompleted,
+            onTap: { editTarget = .meeting(subId: sub.id, meeting: meeting) },
+            leading: {
+                ItemIconDisc(icon: item.isCompleted ? "checkmark.circle.fill" : "circle",
+                             color: accent) {
+                    lateRequest = LateCompletionGate.meetingItem(
+                        lifeStore, subordinateId: sub.id, meetingId: meeting.id, item: item)
                 }
             }
-            .buttonStyle(.plain)
+        )
+    }
 
-            VStack(alignment: .leading, spacing: 3) {
-                Text(item.content.isEmpty ? "未填內容" : item.content)
-                    .font(.subheadline.weight(.medium))
-                    .foregroundStyle(.primary)
-                    .lineLimit(2)
-                HStack(spacing: 6) {
-                    Text(meeting.topic.isEmpty ? "未命名會議" : meeting.topic)
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(.indigo)
-                        .padding(.horizontal, 6).padding(.vertical, 2)
-                        .background(Color.indigo.opacity(0.12))
-                        .clipShape(Capsule())
-                    if let due = item.dueDate {
-                        HStack(spacing: 3) {
-                            Image(systemName: "flag.fill").font(.system(size: 7, weight: .semibold))
-                            Text("截止 \(fmtDateTime(due))")
-                        }
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(due < Date() ? .red : .indigo)
-                        .padding(.horizontal, 6).padding(.vertical, 2)
-                        .background((due < Date() ? Color.red : Color.indigo).opacity(0.12))
-                        .clipShape(Capsule())
-                    }
-                    // [v25.443] 開會時間：截止是「什麼時候要交」，這個是「什麼時候談」。
-                    // 點它可以改期或另外加開一場，不用進整個會議編輯頁翻欄位。
-                    sessionChip(sub, meeting, ctx)
-                    personChip(sub)
-                }
-            }
-            Spacer(minLength: 4)
+    private func meetingChips(_ sub: Subordinate, _ meeting: SubordinateMeeting) -> [ItemChip] {
+        [ItemChip(id: "time", text: fmtTime(meeting.date), color: .secondary, icon: "clock"),
+         ItemChip(id: "dur", text: "\(meeting.durationMinutes) 分鐘", color: .indigo),
+         personItemChip(sub)]
+    }
+
+    private func meetingItemChips(_ sub: Subordinate, _ meeting: SubordinateMeeting,
+                                  _ ctx: SubordinateMeeting.ItemContext) -> [ItemChip] {
+        var chips: [ItemChip] = [
+            ItemChip(id: "meeting", text: meeting.topic.isEmpty ? "未命名會議" : meeting.topic,
+                     color: .indigo)
+        ]
+        if let due = ctx.item.dueDate {
+            chips.append(ItemChip(id: "due", text: "截止 \(fmtDateTime(due))",
+                                  color: due < Date() ? .red : .indigo, icon: "flag.fill"))
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 11)
-        .contentShape(Rectangle())
-        .onTapGesture { editTarget = .meeting(subId: sub.id, meeting: meeting) }
+        chips.append(sessionItemChip(sub, meeting, ctx))
+        chips.append(personItemChip(sub))
+        return chips
     }
 
     /// 開會時間膠囊。點一下開「開會時間」表單（改期／另外加開一場）。
-    private func sessionChip(_ sub: Subordinate, _ meeting: SubordinateMeeting,
-                             _ ctx: SubordinateMeeting.ItemContext) -> some View {
-        Button {
-            sessionEdit = SessionEditTarget(subId: sub.id, meetingId: meeting.id,
-                                            itemId: ctx.item.id)
-        } label: {
-            HStack(spacing: 3) {
-                Image(systemName: ctx.isAdHoc ? "calendar.badge.plus" : "calendar")
-                    .font(.system(size: 7, weight: .semibold))
-                Text("開會 \(fmtDateTime(ctx.sessionDate))")
-                if ctx.isRescheduled {
-                    Image(systemName: "arrow.triangle.swap").font(.system(size: 7, weight: .bold))
-                }
-            }
-            .font(.system(size: 10, weight: .semibold))
-            .foregroundStyle(ctx.isCancelled ? Color.secondary : Color.teal)
-            .padding(.horizontal, 6).padding(.vertical, 2)
-            .background((ctx.isCancelled ? Color.secondary : Color.teal).opacity(0.12))
-            .clipShape(Capsule())
-        }
-        .buttonStyle(.plain)
+    ///
+    /// [v25.459] 原本是「日曆圖示＋時間＋改期箭頭」三段。ItemChip 只有一個前置圖示，
+    /// 所以改成用圖示本身表達狀態。臨時加開與改期在資料上互斥
+    ///（setMeetingSessionDate 對臨時場次是直接改 scheduledDate 並清掉 movedTo），
+    /// 所以一個圖示就夠，不會有兩種狀態同時成立卻只顯示一種。
+    private func sessionItemChip(_ sub: Subordinate, _ meeting: SubordinateMeeting,
+                                 _ ctx: SubordinateMeeting.ItemContext) -> ItemChip {
+        let icon: String = ctx.isAdHoc ? "calendar.badge.plus"
+            : (ctx.isRescheduled ? "arrow.triangle.swap" : "calendar")
+        return ItemChip(id: "session", text: "開會 \(fmtDateTime(ctx.sessionDate))",
+                        color: ctx.isCancelled ? .secondary : .teal,
+                        icon: icon,
+                        onTap: {
+                            sessionEdit = SessionEditTarget(subId: sub.id, meetingId: meeting.id,
+                                                            itemId: ctx.item.id)
+                        })
     }
 
     /// 請假列的姓名是粗體主標不是膠囊，篩選中在旁邊放一顆獨立的 ✕
@@ -1042,34 +1026,6 @@ struct SubordinateOverviewView: View {
         } label: {
             Image(systemName: "xmark.circle.fill")
                 .font(.system(size: 13)).foregroundStyle(.indigo)
-        }
-        .buttonStyle(.plain)
-    }
-
-    /// 人名膠囊：點一下暫時只看這個人，已篩選中顯示 ✕、再點取消。
-    /// 全部清單（請假／報告／會議／任務／議程／已完成）共用同一顆。
-    private func personChip(_ sub: Subordinate, tint: Color = .secondary) -> some View {
-        let active = filterPersonId == sub.id
-        return Button {
-            withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
-                filterPersonId = active ? nil : sub.id
-            }
-        } label: {
-            HStack(spacing: 3) {
-                Text(sub.name.isEmpty ? "未命名" : sub.name)
-                    .font(.caption2.weight(.semibold))
-                if active {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 8, weight: .bold))
-                }
-            }
-            .padding(.horizontal, 7).padding(.vertical, 2)
-            .background(active ? Color.indigo.opacity(0.15)
-                               : (tint == .secondary ? Color(.tertiarySystemFill) : tint.opacity(0.12)))
-            .foregroundStyle(active ? Color.indigo : (tint == .secondary ? Color.secondary : tint))
-            .clipShape(Capsule())
-            .overlay(Capsule().stroke(
-                (active ? Color.indigo : tint).opacity(active ? 0.35 : 0.18), lineWidth: 0.6))
         }
         .buttonStyle(.plain)
     }
@@ -1200,28 +1156,11 @@ struct SubordinateOverviewView: View {
                 Text(meeting.topic.isEmpty ? "未命名會議" : meeting.topic)
                     .font(.subheadline.weight(.semibold))
                     .lineLimit(1)
-                HStack(spacing: 6) {
-                    HStack(spacing: 3) {
-                        Image(systemName: "clock")
-                            .font(.system(size: 9))
-                        Text(fmtTime(meeting.date))
-                    }
-                    .font(.caption2.weight(.medium))
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 7).padding(.vertical, 2.5)
-                    .background(Color(.tertiarySystemFill))
-                    .clipShape(Capsule())
-
-                    Text("\(meeting.durationMinutes) 分鐘")
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(.indigo)
-                        .padding(.horizontal, 7).padding(.vertical, 2.5)
-                        .background(Color.indigo.opacity(0.12))
-                        .clipShape(Capsule())
-                        .overlay(Capsule().stroke(Color.indigo.opacity(0.22), lineWidth: 0.6))
-
-                    personChip(sub)
-                }
+                // [v25.459] 膠囊改走共用的 ItemChipBar（橫向捲動、單行、左右隱沒漸層）。
+                // 這一列刻意沒有整列換成 ItemRow：它底下掛著一串可以逐項打勾的議程項目，
+                // 而 ItemRow 的 disclosures 是「可展開的文字子項目」，表達不了那些打勾
+                // 按鈕——整列換過去會把打勾功能弄掉。所以只換膠囊這一段。
+                ItemChipBar(chips: meetingChips(sub, meeting))
                 if !meeting.allItems.isEmpty {
                     VStack(alignment: .leading, spacing: 3) {
                         ForEach(meeting.allItems) { item in
