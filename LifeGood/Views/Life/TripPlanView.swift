@@ -427,6 +427,7 @@ struct TripPlanDetailView: View {
             )) { box in
                 TripStopCardView(planId: planId, stopId: box.id)
                     .environmentObject(lifeStore)
+                    .environmentObject(expenseStore)
             }
             .confirmationDialog("刪除景點", isPresented: Binding(
                 get: { removingStop != nil }, set: { if !$0 { removingStop = nil } }
@@ -769,6 +770,32 @@ struct TripPlanDetailView: View {
             .clipShape(RoundedRectangle(cornerRadius: 16))
             .padding(.horizontal)
         }
+    }
+
+    /// [v25.465] 指定算在某一站的花費。
+    ///
+    /// 只算「明確指定了這一站」的，沒指定站別的（記帳表單裡選「整趟（不指定）」）
+    /// 不會被攤到任何一站——那是使用者刻意沒分配的，硬塞進某一站只是猜。
+    private func stopExpenses(_ stopId: UUID) -> [Expense] {
+        expenseStore.expenses.filter {
+            $0.linkedTripPlanId == planId && $0.linkedTripStopId == stopId
+        }
+    }
+
+    /// 這一站的花費膠囊文字；沒有花費就回 nil（不要擺一顆「花費 NT$0」）。
+    /// 只加總台幣，外幣另外寫筆數——與整趟的合計同一個規則。
+    private func stopSpendText(_ stopId: UUID) -> String? {
+        let list = stopExpenses(stopId)
+        guard !list.isEmpty else { return nil }
+        let local = list.filter { $0.currencyCode == "NT$" }
+        let sum = local.reduce(0) { $0 + $1.amount }
+        let foreign = list.count - local.count
+        if sum <= 0 {
+            // 全部是外幣：寫筆數，不要硬湊一個台幣金額
+            return "花費 \(foreign) 筆外幣"
+        }
+        let amount = Self.moneyFmt.string(from: NSNumber(value: sum)) ?? "\(Int(sum))"
+        return "花費 NT$" + amount + (foreign > 0 ? "＋\(foreign) 筆外幣" : "")
     }
 
     /// 掛在這趟上的花費（新到舊）
@@ -1510,6 +1537,11 @@ struct TripPlanDetailView: View {
         }
         if slot.stop.isMustVisit {
             chips.append(ItemChip(id: "must", text: "必去", color: .orange, icon: "star.fill"))
+        }
+        // [v25.465] 記帳時可以指定「算在哪一站」，那就讓那一站看得到自己的花費。
+        // 沒指定站別的（整趟）不算進任何一站——它們在「這趟的花費」卡上看。
+        if let text = stopSpendText(slot.stop.id) {
+            chips.append(ItemChip(id: "spent", text: text, color: .green, icon: "creditcard.fill"))
         }
         // 打卡之後就用事實說話：實際停留多久、比原本排的早到還是晚到
         if let actual = slot.stop.actualDwellSeconds {

@@ -12,6 +12,8 @@ import MapKit
 
 struct TripStopCardView: View {
     @EnvironmentObject var lifeStore: LifeStore
+    /// [v25.465] 記帳時可以把花費指定「算在哪一站」，這一站要看得到自己的花費
+    @EnvironmentObject var expenseStore: ExpenseStore
     @Environment(\.dismiss) private var dismiss
 
     let planId: UUID
@@ -58,6 +60,11 @@ struct TripStopCardView: View {
     private static let dayFmt: DateFormatter = {
         let f = DateFormatter(); f.locale = Locale(identifier: "zh_Hant_TW")
         f.dateFormat = "M/d (E)"; return f
+    }()
+    /// [v25.465] 花費金額：不帶小數、帶千分位
+    private static let moneyFmt: NumberFormatter = {
+        let f = NumberFormatter(); f.numberStyle = .decimal; f.maximumFractionDigits = 0
+        return f
     }()
 
     /// 照片直接綁到 store：在卡片上加減照片就等於改那一站，不用先進編輯畫面
@@ -166,10 +173,16 @@ struct TripStopCardView: View {
                 weatherSection(slot)
                 if slot.index > 0 { legSection(slot) }
                 placeSection(slot)
-                if !slot.stop.subSpots.isEmpty { subSpotSection(slot.stop) }
-                if !slot.stop.note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    noteSection(slot.stop)
+                // [v25.465] 兩個「有才顯示」的區塊收進 Group：加上花費那一節之後
+                // 這裡剛好是 ViewBuilder 的 10 個子項上限，再加一個就會編譯失敗，
+                // 而那個錯誤訊息完全看不出是數量問題。先留出空間。
+                Group {
+                    if !slot.stop.subSpots.isEmpty { subSpotSection(slot.stop) }
+                    if !slot.stop.note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        noteSection(slot.stop)
+                    }
                 }
+                expenseSection(slot.stop)
                 photoSection
             }
             .padding(.vertical)
@@ -578,6 +591,59 @@ struct TripStopCardView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(14)
         }
+    }
+
+    // MARK: 花費（v25.465）
+
+    /// 指定算在這一站的花費。
+    ///
+    /// 只列「明確指定了這一站」的。記帳表單的站別選單有一個「整趟（不指定）」，
+    /// 那些刻意沒分配的不會被攤到任何一站——硬塞進某一站只是猜，而且會讓每一站
+    /// 的數字加起來不等於整趟。沒分配的在行程頁的「這趟的花費」卡上看。
+    @ViewBuilder
+    private func expenseSection(_ stop: TripStop) -> some View {
+        let list = expenseStore.expenses
+            .filter { $0.linkedTripPlanId == planId && $0.linkedTripStopId == stop.id }
+            .sorted { $0.date > $1.date }
+        if !list.isEmpty {
+            sectionBox(title: "這一站的花費", icon: "creditcard.fill") {
+                VStack(spacing: 0) {
+                    ForEach(Array(list.enumerated()), id: \.element.id) { idx, e in
+                        if idx > 0 { hairline }
+                        field(expenseLabel(e),
+                              e.currencyCode + (Self.moneyFmt.string(from: NSNumber(value: e.amount)) ?? ""))
+                    }
+                    hairline
+                    HStack {
+                        Text("合計").font(.subheadline.weight(.semibold))
+                        Spacer(minLength: 12)
+                        Text(totalText(list))
+                            .font(.system(.subheadline, design: .rounded).weight(.bold))
+                            .foregroundStyle(dayColor)
+                    }
+                    .padding(.horizontal, 14).padding(.vertical, 12)
+                }
+            }
+        }
+    }
+
+    /// 「10/3 · 午餐」。店名空的就用分類當名字（汽車類支出的 title 被自動命名佔用）
+    private func expenseLabel(_ e: Expense) -> String {
+        let name = e.title.trimmingCharacters(in: .whitespaces)
+        let head = Self.dayFmt.string(from: e.date)
+        let body = name.isEmpty ? (e.variableCategory?.rawValue ?? "花費") : name
+        return head + " · " + body
+    }
+
+    /// 合計只加台幣；有外幣就寫筆數，不混在一起加——
+    /// 外幣要換算匯率，而用哪一天的匯率又是另一件事（與行程頁同一個規則）。
+    private func totalText(_ list: [Expense]) -> String {
+        let local = list.filter { $0.currencyCode == "NT$" }
+        let sum = local.reduce(0) { $0 + $1.amount }
+        let foreign = list.count - local.count
+        if sum <= 0 { return "\(foreign) 筆外幣" }
+        let amount = Self.moneyFmt.string(from: NSNumber(value: sum)) ?? "\(Int(sum))"
+        return "NT$" + amount + (foreign > 0 ? "＋\(foreign) 筆外幣" : "")
     }
 
     /// 照片直接在卡片上加減，不用先進編輯畫面
