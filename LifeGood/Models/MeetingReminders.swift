@@ -75,6 +75,11 @@ struct ReminderJob: Identifiable, Hashable {
     let fireDate: Date
     /// 這一則來自哪一場會議（給鬧鐘的「看會議」按鈕用；個人事件沒有就是 nil）
     let meetingId: UUID?
+    /// [v25.458] 這一則要用通知還是鬧鐘。
+    ///
+    /// 由產生 job 的那一端解析好（全域 → 會議 → 場次 三層），而不是讓排程端
+    /// 再回頭去查來源：場次現在可以單獨覆寫提醒方式，回頭查只會查到會議那一層。
+    let style: MeetingAlertStyle
 
     var id: String { key }
 }
@@ -110,31 +115,25 @@ enum ReminderCenter {
         await NotificationManager.shared.rescheduleAll(events: events)
 
         // 2) 部屬會議的通知型
-        let notificationJobs = jobs
-            .filter { MeetingAlertPreference.effective(styleOfMeeting($0, subordinates)) == .notification }
+        let notificationJobs = jobs.filter { $0.style == .notification }
         await NotificationManager.shared.scheduleMeetingJobs(
             Array(notificationJobs.prefix(meetingNotificationLimit)))
 
         // 3) 鬧鐘型（個人事件 + 部屬會議一起排，因為鬧鐘的額度是共用的）
-        let alarmJobs = (eventAlarmJobs(events: events, now: now) + jobs.filter {
-            MeetingAlertPreference.effective(styleOfMeeting($0, subordinates)) == .alarm
-        }).sorted { $0.fireDate < $1.fireDate }
+        let alarmJobs = (eventAlarmJobs(events: events, now: now)
+                         + jobs.filter { $0.style == .alarm })
+            .sorted { $0.fireDate < $1.fireDate }
         await MeetingAlarmScheduler.shared.rebuild(alarmJobs)
-    }
-
-    /// job 對應的那場會議目前設的樣式
-    private static func styleOfMeeting(_ job: ReminderJob,
-                                       _ subordinates: [Subordinate]) -> MeetingAlertStyle? {
-        guard let mid = job.meetingId else { return nil }
-        for sub in subordinates {
-            if let m = sub.meetings.first(where: { $0.id == mid }) { return m.alertStyle }
-        }
-        return nil
     }
 
     // MARK: 挑出該提醒的東西
 
-    /// 部屬會議：展開未來 horizonDays 天內的場次，取還沒到的那些。
+    /// 部屬會議：展開未來 horizonDays 天內的**每一場**（含臨時加開與被改期的），
+    /// 取還沒到的那些。
+    ///
+    /// [v25.458] 提醒設定改成三層：全域 → 會議 → 場次。
+    /// 迴圈不再用 `where meeting.reminderMinutes >= 0` 過濾整場會議——那樣會讓
+    /// 「整場不提醒、但某一場要提醒」這種設定永遠生效不了。改成逐場解析。
     static func meetingJobs(subordinates: [Subordinate], now: Date) -> [ReminderJob] {
         let cal = Calendar.current
         let from = cal.date(byAdding: .day, value: -1, to: now) ?? now
@@ -142,21 +141,34 @@ enum ReminderCenter {
         var out: [ReminderJob] = []
 
         for sub in subordinates {
-            for meeting in sub.meetings where meeting.reminderMinutes >= 0 {
+            for meeting in sub.meetings {
+                // 場次覆寫以 scheduledDate 配對（與 expandedOccurrences 同一把鍵）。
+                // ResolvedMeetingOccurrence 是純顯示用的型別、不帶提醒欄位，
+                // 所以在這裡回頭查原始覆寫，而不是去擴充那個型別的全部建構點。
+                let overrides = Dictionary(
+                    meeting.occurrences.map { ($0.scheduledDate.timeIntervalSinceReferenceDate, $0) },
+                    uniquingKeysWith: { a, _ in a })
+
                 for occ in meeting.expandedOccurrences(from: from, horizon: horizon) {
                     guard !occ.isCancelled else { continue }
+                    let override = overrides[occ.scheduledDate.timeIntervalSinceReferenceDate]
+                    // 場次沒設就跟隨會議
+                    let minutes = override?.reminderMinutes ?? meeting.reminderMinutes
+                    guard minutes >= 0 else { continue }          // 這一場不提醒
                     let fire = cal.date(byAdding: .minute,
-                                        value: -meeting.reminderMinutes, to: occ.date) ?? occ.date
+                                        value: -minutes, to: occ.date) ?? occ.date
                     guard fire > now else { continue }
                     // 有週期的會議，議程項目掛在各場次上；不重複的會議掛在會議本身
                     let itemCount = occ.items.isEmpty ? meeting.items.count : occ.items.count
                     out.append(ReminderJob(
                         key: "mtg_\(meeting.id.uuidString)_\(Int(occ.date.timeIntervalSince1970))",
                         title: meeting.topic.isEmpty ? "部屬會議" : meeting.topic,
-                        body: meetingBody(sub: sub, meeting: meeting,
-                                          at: occ.date, itemCount: itemCount),
+                        body: meetingBody(sub: sub, meeting: meeting, at: occ.date,
+                                          itemCount: itemCount, isAdHoc: occ.isAdHoc),
                         fireDate: fire,
-                        meetingId: meeting.id))
+                        meetingId: meeting.id,
+                        style: MeetingAlertPreference.effective(
+                            override?.alertStyle ?? meeting.alertStyle)))
                 }
             }
         }
@@ -188,7 +200,8 @@ enum ReminderCenter {
                     title: event.title.isEmpty ? event.kind.rawValue : event.title,
                     body: eventBody(event, at: start),
                     fireDate: fire,
-                    meetingId: nil))
+                    meetingId: nil,
+                    style: .alarm))
             }
         }
         return out.sorted { $0.fireDate < $1.fireDate }
@@ -204,8 +217,10 @@ enum ReminderCenter {
     }()
 
     private static func meetingBody(sub: Subordinate, meeting: SubordinateMeeting,
-                                    at date: Date, itemCount: Int) -> String {
+                                    at date: Date, itemCount: Int,
+                                    isAdHoc: Bool) -> String {
         var pieces = [sub.name.isEmpty ? "部屬" : sub.name, dtFmt.string(from: date)]
+        if isAdHoc { pieces.append("臨時加開") }
         if meeting.durationMinutes > 0 { pieces.append("\(meeting.durationMinutes) 分鐘") }
         if itemCount > 0 { pieces.append("\(itemCount) 個議程項目") }
         return pieces.joined(separator: " · ")

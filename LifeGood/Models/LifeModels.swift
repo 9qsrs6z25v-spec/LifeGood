@@ -2009,20 +2009,46 @@ struct MeetingOccurrence: Identifiable, Codable {
     /// 臨時加開的一場（不是規則推導出來的）。這種場次「存在」本身就是狀態，
     /// 就算還沒填議程也不能被回收——回收了它就從清單上消失。
     var isAdHoc: Bool
+    /// [v25.458] 這一場自己的提醒時間。nil＝跟隨整場會議的設定。
+    ///
+    /// 有這個欄位是因為「加開的那一場」常常跟原本的節奏不同——例如週會一律
+    /// 15 分鐘前提醒就夠，但臨時加開的那場要提前一小時準備。
+    var reminderMinutes: Int?
+    /// [v25.458] 這一場自己的提醒方式（通知／鬧鐘）。nil＝跟隨整場會議。
+    var alertStyleRaw: String?
 
     /// 實際開會時間
     var effectiveDate: Date { movedTo ?? scheduledDate }
     /// 是否還留著任何「值得存檔」的狀態。全部清空的場次會被回收，避免存檔無限膨脹。
-    var isMeaningful: Bool { isCancelled || movedTo != nil || !items.isEmpty || isAdHoc }
+    ///
+    /// ⚠️ [v25.458] 提醒覆寫也算一種狀態。不列進來的話，一個「只改了提醒、
+    ///    沒改時間也沒填議程」的場次會在下一次 pruneOccurrences 被當成空殼回收，
+    ///    使用者設的提醒就靜靜消失了。
+    var isMeaningful: Bool {
+        isCancelled || movedTo != nil || !items.isEmpty || isAdHoc
+            || reminderMinutes != nil || alertStyleRaw != nil
+    }
+
+    /// nil＝跟隨整場會議
+    var alertStyle: MeetingAlertStyle? {
+        get { alertStyleRaw.flatMap(MeetingAlertStyle.init(rawValue:)) }
+        set { alertStyleRaw = newValue?.rawValue }
+    }
 
     init(id: UUID = UUID(), scheduledDate: Date, movedTo: Date? = nil,
-         isCancelled: Bool = false, items: [MeetingItem] = [], isAdHoc: Bool = false) {
+         isCancelled: Bool = false, items: [MeetingItem] = [], isAdHoc: Bool = false,
+         reminderMinutes: Int? = nil, alertStyleRaw: String? = nil) {
         self.id = id; self.scheduledDate = scheduledDate
         self.movedTo = movedTo; self.isCancelled = isCancelled; self.items = items
         self.isAdHoc = isAdHoc
+        self.reminderMinutes = reminderMinutes
+        self.alertStyleRaw = alertStyleRaw
     }
 
-    enum CodingKeys: String, CodingKey { case id, scheduledDate, movedTo, isCancelled, items, isAdHoc }
+    enum CodingKeys: String, CodingKey {
+        case id, scheduledDate, movedTo, isCancelled, items, isAdHoc
+        case reminderMinutes, alertStyleRaw
+    }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -2032,6 +2058,10 @@ struct MeetingOccurrence: Identifiable, Codable {
         isCancelled = (try? c.decodeIfPresent(Bool.self, forKey: .isCancelled)) ?? false
         items = (try? c.decodeIfPresent([MeetingItem].self, forKey: .items)) ?? []
         isAdHoc = (try? c.decodeIfPresent(Bool.self, forKey: .isAdHoc)) ?? false
+        // [v25.458] 後加欄位。沒有＝跟隨整場會議（nil），不是「不提醒」（-1）——
+        // 這兩件事差很多：舊資料一律該跟隨會議。
+        reminderMinutes = try? c.decodeIfPresent(Int.self, forKey: .reminderMinutes)
+        alertStyleRaw = try? c.decodeIfPresent(String.self, forKey: .alertStyleRaw)
     }
 }
 

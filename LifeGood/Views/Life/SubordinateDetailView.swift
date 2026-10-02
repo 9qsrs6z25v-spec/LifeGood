@@ -3037,7 +3037,9 @@ struct AddSubItemSheet: View {
 struct MeetingEditorSheet: View {
     /// [v25.455] 說明一次寫成單一字串常數，不要在 Text(...) 裡用 + 串接
     static let meetingReminderFootnote =
-        "週期會議的每一場都會提醒；被取消的場次不會，改過期的場次用改過的時間。"
+        "這裡設的是整場會議的預設。**每一場都會提醒**——包含臨時加開的那些；"
+        + "被取消的場次不會，改過期的場次用改過的時間。"
+        + "某一場要不一樣（例如加開的那場想提前一小時準備），點開那一場單獨改即可。"
         + "往後 30 天內的場次會先排好，之後每次打開 App 會自動往後補。"
         + "鬧鐘模式一次只掛最近幾場（系統對鬧鐘數量有上限），所以長假不開 App 回來後，"
         + "請先打開一次 App 讓它補上。"
@@ -3241,6 +3243,7 @@ struct MeetingEditorSheet: View {
                                         durationMinutes: Int(durationText) ?? 60,
                                         occurrence: occurrences.first { $0.scheduledDate == box.id },
                                         peopleIndex: peopleIndex,
+                                        meetingReminderMinutes: reminder.rawValue,
                                         onSave: applyOccurrence)
             }
             .sheet(item: $creatingAdHoc) { box in
@@ -3249,6 +3252,7 @@ struct MeetingEditorSheet: View {
                                         occurrence: nil,
                                         peopleIndex: peopleIndex,
                                         isAdHoc: true,
+                                        meetingReminderMinutes: reminder.rawValue,
                                         onSave: applyOccurrence)
             }
             .sheet(isPresented: $showBaseSessionEditor) {
@@ -3429,6 +3433,9 @@ struct MeetingEditorSheet: View {
                     if occ.isCancelled { occurrenceBadge("已取消", .red) }
                     else if occ.isMoved { occurrenceBadge("已改期", .orange) }
                     if occ.isAdHoc { occurrenceBadge("臨時", .indigo) }
+                    // [v25.458] 這一場單獨設了提醒。沒有這顆徽章的話，
+                    // 覆寫過的場次在清單上跟其他場完全長得一樣，看不出來。
+                    if let text = sessionReminderBadge(occ) { occurrenceBadge(text, .orange) }
                 }
                 HStack(spacing: 8) {
                     if occ.isMoved {
@@ -3449,6 +3456,14 @@ struct MeetingEditorSheet: View {
                 .font(.system(size: 11, weight: .semibold)).foregroundStyle(.tertiary)
         }
         .contentShape(Rectangle())
+    }
+
+    /// 這一場的提醒徽章文字；沒有單獨設過就回 nil（跟隨會議，不必標）
+    private func sessionReminderBadge(_ occ: ResolvedMeetingOccurrence) -> String? {
+        guard let o = occurrences.first(where: { $0.scheduledDate == occ.scheduledDate }),
+              let mins = o.reminderMinutes else { return nil }
+        let r = EventReminder(rawValue: mins) ?? .none
+        return r == .none ? "不提醒" : "提醒 " + r.displayName
     }
 
     private func occurrenceBadge(_ text: String, _ tint: Color) -> some View {
@@ -3833,6 +3848,9 @@ struct MeetingOccurrenceEditor: View {
     let peopleIndex: [UUID: SideRolePersonCandidate]
     /// 新增臨時場次模式：日期直接可編（沒有「原定／改期」的概念，這一場就不是規則生的）
     var isAdHoc: Bool = false
+    /// [v25.458] 整場會議目前的提醒設定（-1＝不提醒）。
+    /// 只用來把「跟隨會議」那一列的現值寫出來，讓人知道不改會是什麼結果。
+    let meetingReminderMinutes: Int
     let onSave: (MeetingOccurrence) -> Void
 
     @Environment(\.dismiss) private var dismiss
@@ -3843,6 +3861,9 @@ struct MeetingOccurrenceEditor: View {
     @State private var movedTo = Date()
     @State private var adHocDate = Date()
     @State private var loaded = false
+    /// [v25.458] 這一場自己的提醒；nil＝跟隨整場會議
+    @State private var reminderOverride: EventReminder?
+    @State private var alertStyle: MeetingAlertStyle?
     /// 挑負責人的彈頁：狀態在這裡、.sheet 掛在 Form 根層（掛在 Section 上
     /// 會把本編輯頁一併收掉，見 MeetingItemsEditor 註解）
     @State private var pickingAssigneeFor: IDBox?
@@ -3901,6 +3922,26 @@ struct MeetingOccurrenceEditor: View {
                          : "取消或改期只影響這一場，週期本身不變。")
                 }
 
+                // [v25.458] 這一場自己的提醒。使用者回報：整場會議設一個提醒之後，
+                // 臨時加開的那一場常常需要不一樣的提前時間。
+                if !isCancelled {
+                    Section {
+                        Picker("提前提醒", selection: $reminderOverride) {
+                            Text(followMeetingLabel).tag(EventReminder?.none)
+                            ForEach(EventReminder.allCases) { r in
+                                Text(r.displayName).tag(EventReminder?.some(r))
+                            }
+                        }
+                        if let r = reminderOverride, r != .none {
+                            MeetingAlertStylePicker(selection: $alertStyle)
+                        }
+                    } header: {
+                        Text("這一場的提醒")
+                    } footer: {
+                        Text(reminderFooter)
+                    }
+                }
+
                 MeetingItemsEditor(items: $items, title: "這一場的議程項目",
                                    peopleIndex: peopleIndex,
                                    pickingAssigneeFor: $pickingAssigneeFor)
@@ -3947,8 +3988,28 @@ struct MeetingOccurrenceEditor: View {
                 if let m = occurrence?.movedTo { isMoved = true; movedTo = m }
                 else { movedTo = scheduledDate }
                 adHocDate = scheduledDate
+                reminderOverride = occurrence?.reminderMinutes.flatMap { EventReminder(rawValue: $0) }
+                alertStyle = occurrence?.alertStyle
             }
         }
+    }
+
+    /// 「跟隨會議（15 分鐘前）」。整場設不提醒就寫出來，不要只寫「跟隨會議」
+    /// 讓人以為會提醒。
+    private var followMeetingLabel: String {
+        let r = EventReminder(rawValue: meetingReminderMinutes) ?? .none
+        return "跟隨會議（\(r.displayName)）"
+    }
+
+    /// 字串在 ViewBuilder 外組好
+    private var reminderFooter: String {
+        guard let r = reminderOverride else {
+            return "這一場跟著整場會議的提醒設定走。改了整場的設定，這一場也會跟著變。"
+        }
+        if r == .none {
+            return "只有這一場不提醒，其他場次不受影響。"
+        }
+        return "只改這一場：開會前 \(r.displayName)。整場會議的設定不受影響。"
     }
 
     private func commit() {
@@ -3959,7 +4020,9 @@ struct MeetingOccurrenceEditor: View {
                                  movedTo: isMoved ? movedTo : nil,
                                  isCancelled: isCancelled,
                                  items: items,
-                                 isAdHoc: isAdHoc || (occurrence?.isAdHoc ?? false)))
+                                 isAdHoc: isAdHoc || (occurrence?.isAdHoc ?? false),
+                                 reminderMinutes: reminderOverride?.rawValue,
+                                 alertStyleRaw: alertStyle?.rawValue))
         dismiss()
     }
 }

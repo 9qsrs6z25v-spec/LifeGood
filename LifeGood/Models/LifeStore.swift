@@ -1975,6 +1975,7 @@ class LifeStore: ObservableObject {
                 m.occurrences[i].movedTo = newDate
             }
         }
+        rebuildMeetingReminders()
     }
 
     /// 取消改期，回到規則排出來的原定時間
@@ -1983,6 +1984,22 @@ class LifeStore: ObservableObject {
             guard let i = m.occurrences.firstIndex(where: { $0.id == occurrenceId }) else { return }
             m.occurrences[i].movedTo = nil
         }
+        rebuildMeetingReminders()
+    }
+
+    /// [v25.458] 改動開會時間之後把提醒重排一次。
+    ///
+    /// 這是 v25.455 的漏洞：改期與「另外加開一場」都是走這幾支 mutator（不經過
+    /// 會議編輯頁的 save），所以新時間不會進到已排好的提醒裡——要等下次 App 回到
+    /// 前景才補上。剛加開一場、而那一場就在不久之後時，提醒就這樣被漏掉了。
+    ///
+    /// 刻意放在 mutator 裡而不是呼叫端：這三支就是「開會時間變了」的意思，
+    /// 日後多一個呼叫端也不會忘記重排。而非時間類的改動（例如打勾完成議程項目）
+    /// 不會經過這裡，不必為了那些去重排幾十則通知。
+    private func rebuildMeetingReminders() {
+        let events = personalEvents
+        let subs = subordinates
+        Task { await ReminderCenter.rebuildAll(events: events, subordinates: subs) }
     }
 
     /// 為某一條議程項目「額外召開」一場，並把那一項搬過去。
@@ -2006,6 +2023,7 @@ class LifeStore: ObservableObject {
             m.occurrences.append(MeetingOccurrence(scheduledDate: date,
                                                    items: [moved], isAdHoc: true))
         }
+        rebuildMeetingReminders()
     }
 
     func mutateWeeklyReportFields(subordinateId: UUID, reportId: UUID,
