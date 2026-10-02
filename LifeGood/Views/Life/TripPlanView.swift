@@ -317,6 +317,9 @@ struct TripPlanDetailView: View {
                             if p.stops.contains(where: { !$0.photoFileNames.isEmpty }) {
                                 albumButton(p)
                             }
+                            // [v25.464] 這趟的花費。使用者回報：記了幾筆花費，
+                            // 旅遊規劃項目裡完全看不到。
+                            expenseCard(p)
                             addButton(p)
                             // Apple 規定：顯示了 WeatherKit 的資料就必須標示出處
                             if showsAnyWeather(p) {
@@ -695,6 +698,195 @@ struct TripPlanDetailView: View {
         .foregroundStyle(.white)
         .padding(.horizontal, 8).padding(.vertical, 4)
         .background(Color.white.opacity(0.18), in: Capsule())
+    }
+
+    // MARK: 花費（v25.464）
+
+    /// 這趟的花費。
+    ///
+    /// 在此之前，支出與旅遊的關聯只體現在兩個地方：摘要卡上一顆「花費 NT$x」膠囊、
+    /// 以及相本會收進支出的照片。花費本身**從來沒有被列出來過**——使用者記了幾筆，
+    /// 回到行程裡什麼也看不到，只能回記帳頁翻。
+    ///
+    /// 另一半的問題是關聯本身很難發現：記帳表單的「關聯旅遊」只在**進階模式**才出現
+    /// （v25.425 的決定，基本模式刻意只留金額/分類/日期），所以用基本模式記的花費
+    /// 永遠不會掛上任何一趟。那條路不該改——基本模式的簡潔是它存在的理由——
+    /// 改成從旅遊這一端補：把「日期落在這趟期間、但還沒關聯」的花費列出來，一鍵掛上。
+    ///
+    /// 刻意**不自動**把期間內的花費算進這趟：旅行期間在家附近的加油、網購、房貸
+    /// 都落在同一段日期裡，自動歸戶會算出一個錯的旅費。要掛哪幾筆由使用者決定。
+    @ViewBuilder
+    private func expenseCard(_ p: TripPlan) -> some View {
+        let linked = linkedExpenses(p)
+        let candidates = candidateExpenses(p)
+        if !linked.isEmpty || !candidates.isEmpty {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 8) {
+                    Image(systemName: "creditcard.fill")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(accent)
+                    Text("這趟的花費")
+                        .font(.subheadline.weight(.bold))
+                    Spacer()
+                    if !linked.isEmpty {
+                        Text(totalText(linked))
+                            .font(.system(.subheadline, design: .rounded).weight(.bold))
+                            .foregroundStyle(accent)
+                    }
+                }
+
+                if linked.isEmpty {
+                    Text("還沒有花費掛在這趟上。")
+                        .font(.caption).foregroundStyle(.secondary)
+                } else {
+                    ForEach(linked) { e in
+                        expenseRow(e, plan: p)
+                    }
+                }
+
+                if !candidates.isEmpty {
+                    Divider()
+                    HStack(spacing: 6) {
+                        Image(systemName: "questionmark.circle.fill")
+                            .font(.system(size: 11)).foregroundStyle(.orange)
+                        Text("期間內還有 \(candidates.count) 筆花費沒掛上這趟")
+                            .font(.caption.weight(.semibold)).foregroundStyle(.orange)
+                        Spacer()
+                        Button("全部掛上") { linkAll(candidates, to: p) }
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(accent)
+                    }
+                    ForEach(candidates) { e in
+                        candidateRow(e)
+                    }
+                    Text("只列日期落在這趟期間內的變動支出。旅行期間在家附近的加油、網購也會落在同一段日期裡，所以不自動掛——要算進這趟的才按＋。")
+                        .font(.caption2).foregroundStyle(.tertiary)
+                }
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color(.secondarySystemGroupedBackground))
+            .clipShape(RoundedRectangle(cornerRadius: 16))
+            .padding(.horizontal)
+        }
+    }
+
+    /// 掛在這趟上的花費（新到舊）
+    private func linkedExpenses(_ p: TripPlan) -> [Expense] {
+        expenseStore.expenses
+            .filter { $0.linkedTripPlanId == p.id }
+            .sorted { $0.date > $1.date }
+    }
+
+    /// 日期落在這趟期間、但還沒關聯任何旅遊的變動支出。
+    /// 規則與記帳表單的「關聯旅遊」選單一致（AddExpenseView.tripCandidates）。
+    private func candidateExpenses(_ p: TripPlan) -> [Expense] {
+        let cal = Calendar.current
+        let from = cal.startOfDay(for: p.startDate)
+        let to = cal.startOfDay(for: p.endDate)
+        return expenseStore.expenses
+            .filter { e in
+                guard e.expenseType == .variable, e.linkedTripPlanId == nil else { return false }
+                let day = cal.startOfDay(for: e.date)
+                return day >= from && day <= to
+            }
+            .sorted { $0.date > $1.date }
+    }
+
+    /// 合計。只加本國幣別——外幣要換算匯率，而用哪一天的匯率又是另一件事，
+    /// 混在一起加會得到一個錯的數字（與摘要卡的花費膠囊同一個理由）。
+    private func totalText(_ list: [Expense]) -> String {
+        let sum = list.filter { $0.currencyCode == "NT$" }.reduce(0) { $0 + $1.amount }
+        let amount = Self.moneyFmt.string(from: NSNumber(value: sum)) ?? "\(Int(sum))"
+        let foreign = list.count - list.filter { $0.currencyCode == "NT$" }.count
+        return "NT$" + amount + (foreign > 0 ? "（另 \(foreign) 筆外幣）" : "")
+    }
+
+    private func expenseRow(_ e: Expense, plan: TripPlan) -> some View {
+        HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(e.title.isEmpty ? (e.variableCategory?.rawValue ?? "花費") : e.title)
+                    .font(.subheadline.weight(.medium))
+                    .lineLimit(1)
+                HStack(spacing: 6) {
+                    Text(Self.dayFmt.string(from: e.date))
+                        .font(.caption2).foregroundStyle(.secondary)
+                    if let c = e.variableCategory {
+                        Text(c.rawValue)
+                            .font(.system(size: 9, weight: .bold))
+                            .padding(.horizontal, 5).padding(.vertical, 1.5)
+                            .background(accent.opacity(0.12), in: Capsule())
+                            .foregroundStyle(accent)
+                    }
+                    if let sid = e.linkedTripStopId,
+                       let stop = plan.stops.first(where: { $0.id == sid }) {
+                        Text(stop.displayName)
+                            .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                    }
+                    if !e.photoFileNames.isEmpty {
+                        HStack(spacing: 2) {
+                            Image(systemName: "photo").font(.system(size: 8))
+                            Text("\(e.photoFileNames.count)")
+                        }
+                        .font(.caption2).foregroundStyle(.secondary)
+                    }
+                }
+            }
+            Spacer(minLength: 4)
+            Text(e.currencyCode + (Self.moneyFmt.string(from: NSNumber(value: e.amount)) ?? ""))
+                .font(.system(.subheadline, design: .rounded).weight(.semibold))
+            Button {
+                unlink(e)
+            } label: {
+                Image(systemName: "minus.circle.fill")
+                    .font(.system(size: 16)).foregroundStyle(.red.opacity(0.7))
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    private func candidateRow(_ e: Expense) -> some View {
+        HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(e.title.isEmpty ? (e.variableCategory?.rawValue ?? "花費") : e.title)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                Text(Self.dayFmt.string(from: e.date)
+                     + (e.variableCategory.map { " · " + $0.rawValue } ?? ""))
+                    .font(.caption2).foregroundStyle(.tertiary)
+            }
+            Spacer(minLength: 4)
+            Text(e.currencyCode + (Self.moneyFmt.string(from: NSNumber(value: e.amount)) ?? ""))
+                .font(.system(.subheadline, design: .rounded))
+                .foregroundStyle(.secondary)
+            Button {
+                link(e, to: planId)
+            } label: {
+                Image(systemName: "plus.circle.fill")
+                    .font(.system(size: 18)).foregroundStyle(accent)
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    private func link(_ e: Expense, to tripId: UUID) {
+        var updated = e
+        updated.linkedTripPlanId = tripId
+        expenseStore.update(updated)
+    }
+
+    private func linkAll(_ list: [Expense], to p: TripPlan) {
+        for e in list { link(e, to: p.id) }
+    }
+
+    /// 解除關聯。只動關聯欄位——這筆支出本身與它的照片都留在記帳那邊，
+    /// 從旅遊移除不該把人家的紀錄刪掉。
+    private func unlink(_ e: Expense) {
+        var updated = e
+        updated.linkedTripPlanId = nil
+        updated.linkedTripStopId = nil
+        expenseStore.update(updated)
     }
 
     // MARK: 摘要卡：提醒
