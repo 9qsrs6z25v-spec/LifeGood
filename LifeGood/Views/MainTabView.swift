@@ -128,6 +128,11 @@ enum LifeFeatureGate {
                 $0.variableCategory == .food && $0.placeLatitude != nil && $0.placeLongitude != nil
             }
         case .travelMap:
+            // [v25.454] 旅遊規劃住在旅遊地圖裡面，所以有行程就算解鎖。
+            // 原本只看「有座標的娛樂支出」：排了一堆行程、但還沒有一筆帶座標的
+            // 娛樂支出時，這一頁不會出現在選單上，那些行程就從分頁列進不去了
+            //（旅遊的跨裝置通知點進來也會落在一個選單上看不到的頁面）。
+            if !life.tripPlans.isEmpty { return true }
             return expense.expenses.contains {
                 $0.variableCategory == .entertainment && $0.placeLatitude != nil && $0.placeLongitude != nil
             }
@@ -158,7 +163,7 @@ enum LifeFeatureGate {
         case .foodMap:
             return "記一筆飲食支出並且**選到地點**——沒有座標就畫不到地圖上"
         case .travelMap:
-            return "記一筆娛樂支出並且**選到地點**——沒有座標就畫不到地圖上"
+            return "記一筆娛樂支出並且**選到地點**——沒有座標就畫不到地圖上；或是先排一份旅遊行程"
         case .medicalMap:
             return "記一筆醫療支出，或填好健康檔案"
         }

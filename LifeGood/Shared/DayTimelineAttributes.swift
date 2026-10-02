@@ -165,17 +165,42 @@ enum DayTimelineLink {
     /// 那至少要開到有用的地方——「我的行事曆」就是這條時間軸的完整版。
     static let today = URL(string: "lifegood://today")
 
-    /// App 端收到這個網址時要切到哪三個位置。
-    /// MainTabView 的導覽狀態全部是 @AppStorage，直接寫 UserDefaults 就會生效，
-    /// 不需要碰任何 navigation stack。
-    static func apply(_ url: URL) -> Bool {
-        guard url.scheme == "lifegood", url.host == "today" else { return false }
-        let d = UserDefaults.standard
-        d.set("life", forKey: "appMode")
-        d.set("career", forKey: "life_feature")
-        d.set("calendar", forKey: "management_feature")
-        return true
+    /// [v25.454] 點下去直接打開「軸上選中的那一筆」的卡片。
+    ///
+    /// 以前整條時間軸只有一個固定網址，所以不管在軸上選了哪一場，
+    /// 點進來都只是停在行事曆頁，還要自己再找一次。軸上的點是 Button（換 selectedIndex），
+    /// 不會開 App；真正會開 App 的是「點靈動島本體」，而那時候系統用的是 widgetURL。
+    /// 所以把 widgetURL 做成跟著 selectedIndex 變，選哪一場就開哪一場的卡片。
+    static func url(for stop: TimelineStop?) -> URL? {
+        guard let stop else { return today }
+        var comps = URLComponents()
+        comps.scheme = "lifegood"
+        comps.host = "today"
+        comps.queryItems = [URLQueryItem(name: "stop", value: stop.id)]
+        return comps.url ?? today
     }
+
+    /// 從網址取出場次 id（沒帶就回 nil，代表只要切到行事曆頁）
+    static func stopId(from url: URL) -> String? {
+        guard let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems else {
+            return nil
+        }
+        let raw = items.first { $0.name == "stop" }?.value ?? ""
+        return raw.isEmpty ? nil : raw
+    }
+
+    static func isTodayLink(_ url: URL) -> Bool {
+        url.scheme == "lifegood" && url.host == "today"
+    }
+
+    // apply(_:) 在主 App 側（DeepLinkRouter.swift）。
+    //
+    // 它原本就寫在這裡，用字面字串寫入 @AppStorage 的導覽鍵——
+    // 而那正是 v25.454 修掉的 bug：appMode 的 rawValue 是中文「人生」，
+    // 這裡卻寫了 "life"，AppMode(rawValue:) 解不出來就退回 .expense，
+    // 於是點靈動島永遠跳到記帳。這個檔案同時屬於 Widget target，
+    // 碰不到 AppMode / LifeFeature 這些列舉，只能寫字面字串，
+    // 也就無法在列舉改動時讓編譯器攔下來。搬到主 App 側才有這道保護。
 }
 
 // MARK: - 為什麼這裡沒有 App Group

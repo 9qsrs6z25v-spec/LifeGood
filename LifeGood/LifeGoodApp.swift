@@ -1,6 +1,7 @@
 import SwiftUI
 import UIKit
 import CloudKit
+import UserNotifications
 
 /// 處理 CloudKit silent remote notification 與 APNs 註冊。
 final class AppDelegate: NSObject, UIApplicationDelegate {
@@ -8,6 +9,11 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
                      didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
         // 註冊靜默推播以接收 CKRecordZoneSubscription 變更
         application.registerForRemoteNotifications()
+        // [v25.454] 接手通知的前景顯示與點擊：
+        //   • 前景顯示：沒有 delegate 時，App 開著收到的通知會被系統靜靜丟掉。
+        //     行事曆提醒一直是這樣——人正在用 App，提醒就不會出現。
+        //   • 點擊：旅遊的跨裝置通知要能點進那一份行程。
+        UNUserNotificationCenter.current().delegate = self
         return true
     }
 
@@ -34,6 +40,35 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
     func application(_ application: UIApplication,
                      didFailToRegisterForRemoteNotificationsWithError error: Error) {
         // CloudKit 仍可使用 foreground polling，這裡僅靜默忽略
+    }
+}
+
+// MARK: - 本機通知的前景顯示與點擊（v25.454）
+
+extension AppDelegate: UNUserNotificationCenterDelegate {
+
+    /// App 在前景時也要顯示。沒有這個方法，開著 App 收到的通知會被系統丟掉。
+    func userNotificationCenter(_ center: UNUserNotificationCenter,
+                                willPresent notification: UNNotification,
+                                withCompletionHandler completionHandler:
+                                @escaping (UNNotificationPresentationOptions) -> Void) {
+        completionHandler([.banner, .sound, .list])
+    }
+
+    /// 點通知：旅遊的跨裝置通知帶了行程 id，切到旅遊地圖並打開那一份行程。
+    /// 其他通知（行事曆提醒）沒帶 id，就只是開 App，維持原本行為。
+    func userNotificationCenter(_ center: UNUserNotificationCenter,
+                                didReceive response: UNNotificationResponse,
+                                withCompletionHandler completionHandler: @escaping () -> Void) {
+        let info = response.notification.request.content.userInfo
+        if let raw = info[TripChangeNotifier.planIdKey] as? String,
+           let id = UUID(uuidString: raw) {
+            Task { @MainActor in
+                AppNavigation.goToTravelMap()
+                DeepLinkRouter.shared.requestTripPlan(id)
+            }
+        }
+        completionHandler()
     }
 }
 

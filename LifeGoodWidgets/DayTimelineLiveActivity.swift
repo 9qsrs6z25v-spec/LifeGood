@@ -19,7 +19,8 @@ struct DayTimelineLiveActivityWidget: Widget {
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: DayTimelineAttributes.self) { context in
             LockScreenView(attributes: context.attributes, state: context.state)
-                .widgetURL(DayTimelineLink.today)
+                // [v25.454] 跟著軸上選中的那一筆走，點下去就開那一筆的卡片
+                .widgetURL(DayTimelineLink.url(for: context.state.selected))
                 .activityBackgroundTint(Color.black.opacity(0.55))
                 .activitySystemActionForegroundColor(.orange)
         } dynamicIsland: { context in
@@ -59,8 +60,10 @@ struct DayTimelineLiveActivityWidget: Widget {
                     .foregroundStyle(.orange)
             }
             // [v25.381] 點一下開 App 是系統行為，改不了；但開到哪裡可以決定。
-            // 導到「我的行事曆」——那就是這條時間軸的完整版。
-            .widgetURL(DayTimelineLink.today)
+            // [v25.454] 開到「軸上選中的那一筆的卡片」。軸上的點是 Button，按了只換
+            // selectedIndex 不開 App；真正開 App 的是點靈動島本體，用的就是這個網址。
+            // 所以先用點選好那一場、再點靈動島，就會直接開那一場的卡片。
+            .widgetURL(DayTimelineLink.url(for: context.state.selected))
             .keylineTint(.orange)
         }
     }

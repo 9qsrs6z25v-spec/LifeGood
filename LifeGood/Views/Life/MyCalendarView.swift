@@ -42,6 +42,8 @@ struct MyCalendarView: View {
     @EnvironmentObject var lifeStore: LifeStore
     @EnvironmentObject var financeStore: FinanceStore
     @StateObject private var appleCal = AppleCalendarBridge.shared
+    /// [v25.454] 從靈動島點進來要打開哪一筆的卡片
+    @ObservedObject private var deepLink = DeepLinkRouter.shared
 
     @State private var selectedDate = Date()
     @State private var addPersonalKind: PersonalEventKind?   // 新增我的會議 / 事務
@@ -229,11 +231,32 @@ struct MyCalendarView: View {
                     appleCal.refreshStatus()
                 }
             }
+            // [v25.454] 靈動島點進來。兩個時機都要接：
+            //   • onAppear：冷啟動時網址比這一頁先到
+            //   • onChange：已經停在這一頁時再點一次靈動島
+            .onAppear { openPendingTimelineStop() }
+            .onChange(of: deepLink.pendingTimelineStopId) { _, _ in openPendingTimelineStop() }
             .task(id: searchText) {
                 guard !searchText.isEmpty else { debouncedSearchText = ""; return }
                 try? await Task.sleep(nanoseconds: 300_000_000)
                 debouncedSearchText = searchText
             }
+        }
+    }
+
+    /// [v25.454] 把靈動島帶進來的場次換成畫面上的卡片。
+    ///
+    /// 以前這條連結只會把分頁切到這一頁，使用者還得自己在軸上找回剛剛看的那一場。
+    /// 現在軸上選中的那一筆會跟著網址進來，直接開它的卡片。
+    /// 認不出來（系統行事曆的事件，或那一筆已經被刪了）就只停在這一頁，不要彈空卡片。
+    private func openPendingTimelineStop() {
+        guard let stopId = deepLink.takeTimelineStop(),
+              let target = DayTimelineLink.resolve(stopId: stopId, store: lifeStore) else { return }
+        switch target {
+        case .meeting(let subId, let meeting):
+            openTarget = .meeting(subId: subId, meeting: meeting)
+        case .personalEvent(let event):
+            previewCalendarItem = .personalEvent(event)
         }
     }
 

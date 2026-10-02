@@ -123,6 +123,8 @@ struct TravelMapView: View {
     /// [v25.399] 旅遊規劃的資料放在 LifeStore（這頁其餘內容來自 expenseStore 的娛樂支出）
     @EnvironmentObject var lifeStore: LifeStore
     @StateObject private var locationProvider = LocationProvider.shared
+    /// [v25.454] 點旅遊的跨裝置通知進來時，要打開哪一份行程
+    @ObservedObject private var deepLink = DeepLinkRouter.shared
 
     private let accent = Color(red: 0.68, green: 0.40, blue: 1.00)   // 娛樂紫
 
@@ -163,7 +165,12 @@ struct TravelMapView: View {
             .onAppear {
                 LocationProvider.shared.requestIfNeeded()
                 tryInitialCenter(spots)
+                openPlanSheetIfRequested()
             }
+            // [v25.454] 通知點進來：先把「旅遊規劃」這張 sheet 掀開，
+            // 裡面的 TripPlanListView 再接手打開那一份行程（它才有 openPlanId）。
+            // 這裡刻意不取走 pendingTripPlanId——取走了下一層就沒東西可讀。
+            .onChange(of: deepLink.pendingTripPlanId) { _, _ in openPlanSheetIfRequested() }
             .onChange(of: locationProvider.lastLocation) { _, _ in tryInitialCenter(spots) }
             .onChange(of: spots.count) { _, _ in tryInitialCenter(spots) }
             .sheet(item: $selectedSpot) { spot in
@@ -667,6 +674,15 @@ struct TravelMapView: View {
         .buttonStyle(.plain)
         // 補上選中彈簧動畫，對齊 FoodMapView.chip 規格，避免膠囊縮放瞬間跳變
         .animation(.spring(response: 0.26, dampingFraction: 0.72), value: isSelected)
+    }
+
+    // MARK: - 通知點進來
+
+    /// [v25.454] 有待開的行程就把「旅遊規劃」掀開。
+    /// 已經開著的時候不重設——重設會讓 sheet 關了再開。
+    private func openPlanSheetIfRequested() {
+        guard deepLink.pendingTripPlanId != nil, !showPlanSheet else { return }
+        showPlanSheet = true
     }
 
     // MARK: - 地圖初始置中

@@ -38,6 +38,8 @@ struct TripPlanListView: View {
     /// sheet 雖然會繼承環境，但這裡本來就一個一個明著傳，跟著慣例走
     @EnvironmentObject var expenseStore: ExpenseStore
     @Environment(\.dismiss) private var dismiss
+    /// [v25.454] 點旅遊的跨裝置通知進來時要打開的那一份行程
+    @ObservedObject private var deepLink = DeepLinkRouter.shared
 
     private let accent = TripDayPalette.color(0)   // 沿用旅遊地圖的娛樂紫
 
@@ -108,7 +110,21 @@ struct TripPlanListView: View {
             } message: { plan in
                 Text("這份行程的 \(plan.stops.count) 個景點與所有照片都會一起刪掉，沒辦法復原。")
             }
+            // [v25.454] 點旅遊的跨裝置通知進來：直接開到那一份行程。
+            // onAppear 接 sheet 剛掀開的情況，onChange 接清單已經開著時又來一則通知。
+            .onAppear { openPendingPlan() }
+            .onChange(of: deepLink.pendingTripPlanId) { _, _ in openPendingPlan() }
         }
+    }
+
+    /// 取走待開的行程 id。找不到那份行程（已被刪掉）就什麼都不做，
+    /// 但一樣要取走——留著的話下次進這一頁又會試一次。
+    private func openPendingPlan() {
+        guard let id = deepLink.takeTripPlan() else { return }
+        guard lifeStore.tripPlans.contains(where: { $0.id == id }) else { return }
+        // 比照 planRow：這不是剛用＋開出來的空白行程，別讓關閉時的 discardIfBlank 誤刪
+        freshPlanId = nil
+        openPlanId = id
     }
 
     private func newPlan() {

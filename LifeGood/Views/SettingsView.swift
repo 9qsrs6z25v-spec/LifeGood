@@ -276,6 +276,8 @@ struct SettingsView: View {
     @StateObject private var dayTimeline = DayTimelineController.shared
     /// [v25.383] 系統行事曆的授權狀態（時間軸的第三個來源）
     @StateObject private var appleCal = AppleCalendarBridge.shared
+    /// [v25.454] 旅遊規劃的跨裝置通知
+    @AppStorage(TripChangeNotifier.enabledKey) private var tripSyncPushEnabled = true
     @State private var dataManagementExpanded = false
     @State private var dataStatsExpanded = false
     @State private var restoreExpanded = false
@@ -1040,10 +1042,29 @@ struct SettingsView: View {
                 )
             }
             .disabled(!cloudSync.isAccountAvailable || !cloudSync.isEnabled)
+
+            // [v25.454] 旅遊規劃的跨裝置通知
+            Toggle(isOn: $tripSyncPushEnabled) {
+                Label {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("旅遊規劃變更通知")
+                        Text("其他裝置新增行程／景點／攜帶物品／伴手禮時通知我")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                } icon: {
+                    Image(systemName: "bell.badge.fill")
+                        .foregroundStyle(.purple)
+                }
+            }
+            .disabled(!cloudSync.isAccountAvailable || !cloudSync.isEnabled)
         } header: {
             Text("iCloud 同步")
         } footer: {
-            Text("啟用後，記帳/理財/人生三模式的資料會透過 iCloud 在相同 Apple ID 的裝置間自動同步。資料完全儲存於你的 iCloud，LifeGood 不會收集或上傳任何資料。未登入 iCloud 帳號時無法啟用。「與家人共享資料」可邀請另一位 Apple ID（如配偶）共同編輯同一份資料，雙方即時互通。")
+            VStack(alignment: .leading, spacing: 6) {
+                Text("啟用後，記帳/理財/人生三模式的資料會透過 iCloud 在相同 Apple ID 的裝置間自動同步。資料完全儲存於你的 iCloud，LifeGood 不會收集或上傳任何資料。未登入 iCloud 帳號時無法啟用。「與家人共享資料」可邀請另一位 Apple ID（如配偶）共同編輯同一份資料，雙方即時互通。")
+                Text(Self.tripSyncPushFootnote)
+            }
         }
         .confirmationDialog(
             "iCloud 已有資料",
@@ -1146,6 +1167,18 @@ struct SettingsView: View {
         }
     }
 
+    /// [v25.454] 說明一次寫成單一字串常數，不要在 Text(...) 裡用 + 串接
+    private static let tripSyncPushFootnote =
+        "「旅遊規劃變更通知」：在另一台裝置新增行程、景點、要帶的東西或伴手禮時，"
+        + "這台會收到一則通知，點下去直接開那一份行程。"
+        + "靠的是 iCloud 同步本來就會發的變更推播，不經過任何伺服器，也不會多傳任何資料；"
+        + "所以 iCloud 同步關掉時這個也不會有作用。"
+        + "自己在這台新增的東西不會通知自己。"
+        + "另一台一次貼了很多筆時會收斂成一則總結，不會洗版。"
+        + "一件 iOS 的限制：這種「叫 App 起來拉資料」的靜默推播，"
+        + "在你把 App 從多工列表往上滑掉（強制結束）之後系統就不會再送，"
+        + "下次打開 App 時才會補上通知。"
+
     private static let calendarDeniedHint =
         "系統行事曆的讀取權限目前是關閉的，時間軸上不會有 iOS 行事曆的事件。"
         + "要開啟請到「設定 → 隱私權與安全性 → 行事曆 → LifeGood」。"
@@ -1156,7 +1189,8 @@ struct SettingsView: View {
         + "我的行事曆裡的個人事件（青點）、iOS 系統行事曆的事件（綠點），"
         + "週期與重複規則都會展開。"
         + "【長按】靈動島才會展開，軸上每個點點下去就看那一筆的時間、標題與內容；"
-        + "【點一下】是開啟 App，會直接跳到「我的行事曆」。"
+        + "【點一下】是開啟 App，會直接打開你剛剛在軸上選中的那一筆的卡片"
+        + "（部屬會議開會議卡、個人事件開事件卡；系統行事曆的事件沒有卡片可開，只會停在「我的行事曆」）。"
         + "點與長按的分工是 iOS 定的，所有 App 的即時動態都一樣，沒辦法改。"
         + "全日事件不會出現：時間軸是一條有時刻的線，沒有時間的項目放上去只會讓軸失真。"
         + "系統限制一次最多顯示 8 小時，超過會自動收起來，回到 App 就會重新掛上；"

@@ -75,6 +75,14 @@ class LifeStore: ObservableObject {
            Set(keys).isDisjoint(with: Self.ownedKeys) {
             return
         }
+        // [v25.454] 旅遊規劃的跨裝置通知：拉取前的樣子要在 load() 之前先留下來，
+        // 不然就只剩「拉完之後」，沒有東西可以比。
+        //
+        // 只有帶了 keys 且其中包含 life_trip_plans 的增量拉取才報。沒帶 keys 的
+        // 全量重載是「以雲端覆蓋這台」那種操作，整份行程都會算成新的——那不是
+        // 「別人剛新增了什麼」。
+        let tripKeyTouched = (note.userInfo?["keys"] as? [String])?.contains("life_trip_plans") ?? false
+        let tripsBefore = tripKeyTouched ? tripPlans : []
         load()
         // backfill 期間暫停 save()，避免剛從雲端拉取就立刻回寫；用 defer 重置，
         // 避免日後在中間加入 guard/return 導致 isLoading 卡死為 true（save() 永久停擺）
@@ -87,6 +95,11 @@ class LifeStore: ObservableObject {
         let didSerial = migrateResolutionSerials()
         // 若 backfill 新建了 OrgPerson/BusinessCard 或修復了成員連結，立即持久化避免重啟後消失
         if didBackfill || didRepair || didMigrateEq || didSerial { save() }
+        // [v25.454] 比對拉取前後的旅遊規劃，把別台裝置新增的行程／景點／攜帶物品／
+        // 伴手禮寫成本機通知。
+        if tripKeyTouched {
+            TripChangeNotifier.report(before: tripsBefore, after: tripPlans)
+        }
     }
 
     // MARK: - 個人檔案
