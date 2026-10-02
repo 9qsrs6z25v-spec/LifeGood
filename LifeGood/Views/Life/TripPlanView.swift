@@ -673,22 +673,18 @@ struct TripPlanDetailView: View {
             out.append(SummaryChip(id: "here", icon: "mappin.circle.fill",
                                    text: "現在在「" + here.displayName + "」"))
         }
-        // [v25.424] 掛在這趟上的變動支出。只加總本國幣別：外幣要換算匯率，
-        // 而匯率是哪一天的又是另一件事，混在一起加會變成一個錯的數字。
+        // [v25.424] 掛在這趟上的變動支出。
+        // [v25.466] 原本只加 currencyCode == "NT$" 的那些，理由寫的是「外幣要換算匯率」
+        // ——那是誤解：非儲蓄險的支出存檔時就已經用設定裡的匯率換算成台幣了，
+        // currencyCode 只記錄當初輸入的幣別。按它篩等於把一筆早就換算好的日圓消費
+        // 整筆丟掉，合計因此少算。改走 ExpenseStore.ntdTotal（規則集中在那裡）。
         let linked = expenseStore.expenses.filter { $0.linkedTripPlanId == p.id }
-        let spent = linked.filter { $0.currencyCode == "NT$" }.reduce(0) { $0 + $1.amount }
-        if spent > 0 {
-            let amount = Self.moneyFmt.string(from: NSNumber(value: spent)) ?? "\(Int(spent))"
+        if expenseStore.ntdTotal(linked) > 0 {
             out.append(SummaryChip(id: "spent", icon: "creditcard.fill",
-                                   text: "花費 NT$" + amount))
+                                   text: "花費 " + expenseStore.ntdTotalText(linked)))
         }
         return out
     }
-
-    private static let moneyFmt: NumberFormatter = {
-        let f = NumberFormatter(); f.numberStyle = .decimal; f.maximumFractionDigits = 0
-        return f
-    }()
 
     private func summaryChip(_ chip: SummaryChip) -> some View {
         HStack(spacing: 4) {
@@ -730,7 +726,7 @@ struct TripPlanDetailView: View {
                         .font(.subheadline.weight(.bold))
                     Spacer()
                     if !linked.isEmpty {
-                        Text(totalText(linked))
+                        Text(expenseStore.ntdTotalText(linked))
                             .font(.system(.subheadline, design: .rounded).weight(.bold))
                             .foregroundStyle(accent)
                     }
@@ -760,7 +756,7 @@ struct TripPlanDetailView: View {
                     ForEach(candidates) { e in
                         candidateRow(e)
                     }
-                    Text("只列日期落在這趟期間內的變動支出。旅行期間在家附近的加油、網購也會落在同一段日期裡，所以不自動掛——要算進這趟的才按＋。")
+                    Text(Self.candidateFootnote)
                         .font(.caption2).foregroundStyle(.tertiary)
                 }
             }
@@ -782,21 +778,18 @@ struct TripPlanDetailView: View {
         }
     }
 
-    /// 這一站的花費膠囊文字；沒有花費就回 nil（不要擺一顆「花費 NT$0」）。
-    /// 只加總台幣，外幣另外寫筆數——與整趟的合計同一個規則。
+    /// 這一站的花費膠囊文字；沒有花費就回 nil（不要擺一顆「花費 NT$0」）
     private func stopSpendText(_ stopId: UUID) -> String? {
         let list = stopExpenses(stopId)
-        guard !list.isEmpty else { return nil }
-        let local = list.filter { $0.currencyCode == "NT$" }
-        let sum = local.reduce(0) { $0 + $1.amount }
-        let foreign = list.count - local.count
-        if sum <= 0 {
-            // 全部是外幣：寫筆數，不要硬湊一個台幣金額
-            return "花費 \(foreign) 筆外幣"
-        }
-        let amount = Self.moneyFmt.string(from: NSNumber(value: sum)) ?? "\(Int(sum))"
-        return "花費 NT$" + amount + (foreign > 0 ? "＋\(foreign) 筆外幣" : "")
+        guard !list.isEmpty, expenseStore.ntdTotal(list) > 0 else { return nil }
+        return "花費 " + expenseStore.ntdTotalText(list)
     }
+
+    /// 說明一次寫成單一字串常數，不要在 Text(...) 裡用 + 串接
+    private static let candidateFootnote =
+        "只列日期落在這趟期間內的變動支出。旅行期間在家附近的加油、網購也會落在"
+        + "同一段日期裡，所以不自動掛——要算進這趟的才按＋。"
+        + "要移除已經掛上的，到記帳頁編輯那一筆把「關聯旅遊」改掉。"
 
     /// 掛在這趟上的花費（新到舊）
     private func linkedExpenses(_ p: TripPlan) -> [Expense] {
@@ -818,15 +811,6 @@ struct TripPlanDetailView: View {
                 return day >= from && day <= to
             }
             .sorted { $0.date > $1.date }
-    }
-
-    /// 合計。只加本國幣別——外幣要換算匯率，而用哪一天的匯率又是另一件事，
-    /// 混在一起加會得到一個錯的數字（與摘要卡的花費膠囊同一個理由）。
-    private func totalText(_ list: [Expense]) -> String {
-        let sum = list.filter { $0.currencyCode == "NT$" }.reduce(0) { $0 + $1.amount }
-        let amount = Self.moneyFmt.string(from: NSNumber(value: sum)) ?? "\(Int(sum))"
-        let foreign = list.count - list.filter { $0.currencyCode == "NT$" }.count
-        return "NT$" + amount + (foreign > 0 ? "（另 \(foreign) 筆外幣）" : "")
     }
 
     private func expenseRow(_ e: Expense, plan: TripPlan) -> some View {
@@ -860,15 +844,10 @@ struct TripPlanDetailView: View {
                 }
             }
             Spacer(minLength: 4)
-            Text(e.currencyCode + (Self.moneyFmt.string(from: NSNumber(value: e.amount)) ?? ""))
+            // [v25.466] 外幣顯示當初輸入的原幣金額（存檔的 amount 已是台幣等值，
+            // 要除回去才是使用者打的數字）。規則集中在 ExpenseStore。
+            Text(expenseStore.displayAmountText(e))
                 .font(.system(.subheadline, design: .rounded).weight(.semibold))
-            Button {
-                unlink(e)
-            } label: {
-                Image(systemName: "minus.circle.fill")
-                    .font(.system(size: 16)).foregroundStyle(.red.opacity(0.7))
-            }
-            .buttonStyle(.plain)
         }
     }
 
@@ -884,7 +863,7 @@ struct TripPlanDetailView: View {
                     .font(.caption2).foregroundStyle(.tertiary)
             }
             Spacer(minLength: 4)
-            Text(e.currencyCode + (Self.moneyFmt.string(from: NSNumber(value: e.amount)) ?? ""))
+            Text(expenseStore.displayAmountText(e))
                 .font(.system(.subheadline, design: .rounded))
                 .foregroundStyle(.secondary)
             Button {
@@ -905,15 +884,6 @@ struct TripPlanDetailView: View {
 
     private func linkAll(_ list: [Expense], to p: TripPlan) {
         for e in list { link(e, to: p.id) }
-    }
-
-    /// 解除關聯。只動關聯欄位——這筆支出本身與它的照片都留在記帳那邊，
-    /// 從旅遊移除不該把人家的紀錄刪掉。
-    private func unlink(_ e: Expense) {
-        var updated = e
-        updated.linkedTripPlanId = nil
-        updated.linkedTripStopId = nil
-        expenseStore.update(updated)
     }
 
     // MARK: 摘要卡：提醒

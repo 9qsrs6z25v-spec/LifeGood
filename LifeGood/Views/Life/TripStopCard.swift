@@ -61,11 +61,6 @@ struct TripStopCardView: View {
         let f = DateFormatter(); f.locale = Locale(identifier: "zh_Hant_TW")
         f.dateFormat = "M/d (E)"; return f
     }()
-    /// [v25.465] 花費金額：不帶小數、帶千分位
-    private static let moneyFmt: NumberFormatter = {
-        let f = NumberFormatter(); f.numberStyle = .decimal; f.maximumFractionDigits = 0
-        return f
-    }()
 
     /// 照片直接綁到 store：在卡片上加減照片就等於改那一站，不用先進編輯畫面
     private var photoBinding: Binding<[String]> {
@@ -610,14 +605,14 @@ struct TripStopCardView: View {
                 VStack(spacing: 0) {
                     ForEach(Array(list.enumerated()), id: \.element.id) { idx, e in
                         if idx > 0 { hairline }
-                        field(expenseLabel(e),
-                              e.currencyCode + (Self.moneyFmt.string(from: NSNumber(value: e.amount)) ?? ""))
+                        // [v25.466] 外幣顯示當初輸入的原幣金額；規則集中在 ExpenseStore
+                        field(expenseLabel(e), expenseStore.displayAmountText(e))
                     }
                     hairline
                     HStack {
                         Text("合計").font(.subheadline.weight(.semibold))
                         Spacer(minLength: 12)
-                        Text(totalText(list))
+                        Text(expenseStore.ntdTotalText(list))
                             .font(.system(.subheadline, design: .rounded).weight(.bold))
                             .foregroundStyle(dayColor)
                     }
@@ -633,17 +628,6 @@ struct TripStopCardView: View {
         let head = Self.dayFmt.string(from: e.date)
         let body = name.isEmpty ? (e.variableCategory?.rawValue ?? "花費") : name
         return head + " · " + body
-    }
-
-    /// 合計只加台幣；有外幣就寫筆數，不混在一起加——
-    /// 外幣要換算匯率，而用哪一天的匯率又是另一件事（與行程頁同一個規則）。
-    private func totalText(_ list: [Expense]) -> String {
-        let local = list.filter { $0.currencyCode == "NT$" }
-        let sum = local.reduce(0) { $0 + $1.amount }
-        let foreign = list.count - local.count
-        if sum <= 0 { return "\(foreign) 筆外幣" }
-        let amount = Self.moneyFmt.string(from: NSNumber(value: sum)) ?? "\(Int(sum))"
-        return "NT$" + amount + (foreign > 0 ? "＋\(foreign) 筆外幣" : "")
     }
 
     /// 照片直接在卡片上加減，不用先進編輯畫面

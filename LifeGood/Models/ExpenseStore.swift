@@ -331,6 +331,55 @@ class ExpenseStore: ObservableObject {
         return expense.amount * rate.rate
     }
 
+    // MARK: - 金額顯示與合計（v25.466）
+
+    /// 一組支出的台幣合計。
+    ///
+    /// ⚠️ 直接加 ntdValue 就對了，**不要**按 currencyCode 篩選或排除外幣。
+    ///    非儲蓄險的支出存檔時就已經用設定裡的匯率換算成台幣了
+    ///    （AddExpenseView：`rawAmount * currencyMultiplier`），currencyCode 只是
+    ///    記錄使用者當初輸入的幣別。拿 currencyCode == "NT$" 去篩，會把一筆
+    ///    早就換算好的日圓消費當成「外幣、算不進來」整筆丟掉，合計因此少算。
+    ///    旅遊的花費合計（v25.424／25.464／25.465）就是踩到這個，v25.466 修正。
+    func ntdTotal(_ list: [Expense]) -> Double {
+        list.reduce(0) { $0 + ntdValue(of: $1) }
+    }
+
+    /// 台幣合計文字（例「NT$12,300」）
+    func ntdTotalText(_ list: [Expense]) -> String {
+        let sum = ntdTotal(list)
+        let amount = Self.plainDecimal.string(from: NSNumber(value: sum)) ?? "\(Int(sum))"
+        return "NT$" + amount
+    }
+
+    /// 單筆支出的顯示金額文字：外幣顯示使用者當初輸入的原幣金額（例「JPY 3,000」），
+    /// 台幣顯示「NT$1,200」。
+    ///
+    /// 外幣要把存檔的台幣等值**除回去**才是當初輸入的數字——與
+    /// VariableExpenseView.formattedAmount 同一套規則。集中在這裡，
+    /// 免得每個要列支出的頁面各長一份、各錯一次。
+    func displayAmountText(_ e: Expense) -> String {
+        let code = e.currencyCode
+        let isSavingsIns = e.fixedCategory == .insurance && e.insuranceSubCategory == .savings
+        guard !isSavingsIns, code != "NT$", code != "TWD", !code.isEmpty else {
+            let amount = Self.plainDecimal.string(from: NSNumber(value: e.amount)) ?? "\(Int(e.amount))"
+            return (isSavingsIns && code != "NT$" && !code.isEmpty ? code + " " : "NT$") + amount
+        }
+        let shown: Double
+        if let rate = currencyRates.first(where: { $0.code == code }), rate.rate > 0 {
+            shown = e.amount / rate.rate
+        } else {
+            shown = e.amount
+        }
+        let amount = Self.plainDecimal.string(from: NSNumber(value: shown)) ?? "\(Int(shown))"
+        return code + " " + amount
+    }
+
+    private static let plainDecimal: NumberFormatter = {
+        let f = NumberFormatter(); f.numberStyle = .decimal; f.maximumFractionDigits = 0
+        return f
+    }()
+
     private func projectedAmount(for expense: Expense, in period: TimePeriod) -> Double {
         guard expense.expenseType == .fixed, let recurrence = expense.recurrence else {
             return expense.amount
