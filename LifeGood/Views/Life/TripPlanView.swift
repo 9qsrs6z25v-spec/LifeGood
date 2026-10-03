@@ -778,11 +778,12 @@ struct TripPlanDetailView: View {
         }
     }
 
-    /// 這一站的花費膠囊文字；沒有花費就回 nil（不要擺一顆「花費 NT$0」）
-    private func stopSpendText(_ stopId: UUID) -> String? {
+    /// 這一站的花費金額文字；沒有花費就回 nil（不要在時間欄留一個 NT$0）。
+    /// 只有金額、不帶「花費」兩個字——時間欄只有 52pt 寬，前綴會把數字擠到看不清楚。
+    private func stopSpendAmount(_ stopId: UUID) -> String? {
         let list = stopExpenses(stopId)
         guard !list.isEmpty, expenseStore.ntdTotal(list) > 0 else { return nil }
-        return "花費 " + expenseStore.ntdTotalText(list)
+        return expenseStore.ntdTotalText(list)
     }
 
     /// 說明一次寫成單一字串常數，不要在 Text(...) 裡用 + 串接
@@ -1208,6 +1209,21 @@ struct TripPlanDetailView: View {
                         .padding(.horizontal, 4).padding(.vertical, 1)
                         .background(c, in: Capsule())
                 }
+                // [v25.468] 這一站的花費（使用者指定放這裡）。
+                //
+                // v25.465 原本做成膠囊混在標題上方那一排裡，但那一排講的是「時間與
+                // 狀態」（第幾天、指定抵達、必去、比預估早到…），金額擠在中間要找。
+                // 時間欄本來就是「這一站的數字」那一欄，花費放這裡一眼就對得起來。
+                //
+                // 欄寬只有 52pt，所以不寫「花費」兩個字、只放金額，再讓它自己縮。
+                if let text = stopSpendAmount(slot.stop.id) {
+                    Text(text)
+                        .font(.system(size: 10, weight: .bold, design: .rounded))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.6)
+                        .foregroundStyle(.green)
+                        .padding(.top, 1)
+                }
             }
             .frame(width: Self.timeColumnWidth)
 
@@ -1507,11 +1523,6 @@ struct TripPlanDetailView: View {
         }
         if slot.stop.isMustVisit {
             chips.append(ItemChip(id: "must", text: "必去", color: .orange, icon: "star.fill"))
-        }
-        // [v25.465] 記帳時可以指定「算在哪一站」，那就讓那一站看得到自己的花費。
-        // 沒指定站別的（整趟）不算進任何一站——它們在「這趟的花費」卡上看。
-        if let text = stopSpendText(slot.stop.id) {
-            chips.append(ItemChip(id: "spent", text: text, color: .green, icon: "creditcard.fill"))
         }
         // 打卡之後就用事實說話：實際停留多久、比原本排的早到還是晚到
         if let actual = slot.stop.actualDwellSeconds {
