@@ -106,9 +106,14 @@ enum ReminderCenter {
     /// 一律整批重算而不是增量維護：提醒的來源有週期會議的展開、改期、加開場次、
     /// 取消場次，增量維護要處理的狀態轉移太多，而整批重算很便宜（純記憶體計算）。
     @MainActor
-    static func rebuildAll(events: [PersonalEvent], subordinates: [Subordinate]) async {
+    static func rebuildAll(events: [PersonalEvent], subordinates: [Subordinate],
+                           tripPlans: [TripPlan] = []) async {
         let now = Date()
-        let jobs = meetingJobs(subordinates: subordinates, now: now)
+        // [v25.470] 旅遊期間不提醒部屬會議（使用者：代理人會處理）。
+        // 判斷由呼叫端把行程傳進來，而不是在這裡讀 store——這一層是純計算，
+        // 伸手去拿 store 會讓它變成只能在 App 裡跑的東西。
+        let travelling = Self.travelCheck(tripPlans)
+        let jobs = meetingJobs(subordinates: subordinates, now: now, isTravelling: travelling)
 
         // 1) 個人事件。通知型走既有那條路（它有「無限重複用單一 repeats trigger」
         //    這種額度上的優化，不該為了統一而丟掉）；鬧鐘型改走鬧鐘。
@@ -126,6 +131,20 @@ enum ReminderCenter {
         await MeetingAlarmScheduler.shared.rebuild(alarmJobs)
     }
 
+    /// 「這一天在旅遊期間內嗎」。設定關掉、或沒有任何行程時一律回 false。
+    /// 比對規則與記帳表單的「關聯旅遊」選單一致：以「天」比對起訖日。
+    /// 先把區間算好再回傳閉包，不要每一場會議都重算一次 startOfDay。
+    static func travelCheck(_ plans: [TripPlan]) -> (Date) -> Bool {
+        guard LifeStore.hideMeetingsDuringTrip, !plans.isEmpty else { return { _ in false } }
+        let cal = Calendar.current
+        let ranges = plans.map { (cal.startOfDay(for: $0.startDate),
+                                  cal.startOfDay(for: $0.endDate)) }
+        return { date in
+            let day = cal.startOfDay(for: date)
+            return ranges.contains { day >= $0.0 && day <= $0.1 }
+        }
+    }
+
     // MARK: 挑出該提醒的東西
 
     /// 部屬會議：展開未來 horizonDays 天內的**每一場**（含臨時加開與被改期的），
@@ -134,7 +153,8 @@ enum ReminderCenter {
     /// [v25.458] 提醒設定改成三層：全域 → 會議 → 場次。
     /// 迴圈不再用 `where meeting.reminderMinutes >= 0` 過濾整場會議——那樣會讓
     /// 「整場不提醒、但某一場要提醒」這種設定永遠生效不了。改成逐場解析。
-    static func meetingJobs(subordinates: [Subordinate], now: Date) -> [ReminderJob] {
+    static func meetingJobs(subordinates: [Subordinate], now: Date,
+                            isTravelling: (Date) -> Bool = { _ in false }) -> [ReminderJob] {
         let cal = Calendar.current
         let from = cal.date(byAdding: .day, value: -1, to: now) ?? now
         let horizon = cal.date(byAdding: .day, value: horizonDays, to: now) ?? now
@@ -151,6 +171,10 @@ enum ReminderCenter {
 
                 for occ in meeting.expandedOccurrences(from: from, horizon: horizon) {
                     guard !occ.isCancelled else { continue }
+                    // [v25.470] 旅遊期間不提醒部屬會議（使用者：代理人會處理）。
+                    // 擋在這裡而不是擋整個 rebuild：一趟旅遊只蓋住那幾天，
+                    // 旅遊之後的場次照樣要提醒。
+                    guard !isTravelling(occ.date) else { continue }
                     let override = overrides[occ.scheduledDate.timeIntervalSinceReferenceDate]
                     // 場次沒設就跟隨會議
                     let minutes = override?.reminderMinutes ?? meeting.reminderMinutes

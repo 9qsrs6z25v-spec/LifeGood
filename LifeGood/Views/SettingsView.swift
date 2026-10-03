@@ -278,6 +278,8 @@ struct SettingsView: View {
     @StateObject private var appleCal = AppleCalendarBridge.shared
     /// [v25.454] 旅遊規劃的跨裝置通知
     @AppStorage(TripChangeNotifier.enabledKey) private var tripSyncPushEnabled = true
+    /// [v25.470] 旅遊期間不顯示／不提醒部屬會議（代理人會處理）
+    @AppStorage(LifeStore.hideMeetingsDuringTripKey) private var hideMeetingsDuringTrip = true
     /// [v25.455] 會議提醒的全域預設：通知 or 鬧鐘
     @AppStorage(MeetingAlertPreference.globalKey) private var meetingAlertRaw =
         MeetingAlertStyle.notification.rawValue
@@ -1280,6 +1282,21 @@ struct SettingsView: View {
                     }
                 }
 
+                // [v25.470] 旅遊期間把部屬會議整個讓開
+                Toggle(isOn: $hideMeetingsDuringTrip) {
+                    Label {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("旅遊期間不管部屬會議")
+                            Text("出去玩的那幾天，部屬會議不提醒也不進靈動島")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    } icon: {
+                        Image(systemName: "airplane.departure")
+                            .foregroundStyle(.purple)
+                    }
+                }
+
                 if let err = alarmScheduler.lastError {
                     HStack(alignment: .top, spacing: 6) {
                         Image(systemName: "exclamationmark.triangle.fill")
@@ -1306,6 +1323,10 @@ struct SettingsView: View {
         + "所以只會先掛最近幾場，每次打開 App 自動往後補。"
         + "部屬會議在 v25.455 之前完全沒有提醒，升級後預設仍是「不提醒」——"
         + "要提醒請到各會議的編輯頁打開，不會替你擅自全部開啟。"
+        + "【旅遊期間不管部屬會議】開著的時候，只要那一天落在任何一趟旅遊規劃的期間內，"
+        + "部屬會議就不會提醒、也不會出現在靈動島的時間軸上——"
+        + "只擋部屬會議，我的行事曆的個人事件與系統行事曆的事件照常顯示與提醒。"
+        + "會議本身沒有被取消或改動，回來之後一切照舊。"
 
     private static let calendarDeniedHint =
         "系統行事曆的讀取權限目前是關閉的，時間軸上不會有 iOS 行事曆的事件。"

@@ -140,19 +140,24 @@ final class DayTimelineController: ObservableObject {
         var out: [TimelineStop] = []
 
         // 1) 部屬會議
-        for sub in store.subordinates {
-            for meeting in sub.meetings {
-                for occ in meeting.expandedOccurrences(from: from, horizon: dayEnd) {
-                    guard !occ.isCancelled else { continue }
-                    guard occ.date >= dayStart, occ.date < dayEnd else { continue }
-                    out.append(TimelineStop(
-                        id: Self.stopId("m", meeting.id, occ.date),
-                        title: meeting.topic,
-                        start: occ.date,
-                        durationMinutes: max(5, meeting.durationMinutes),
-                        owner: sub.name,
-                        detail: detailText(meeting: meeting, occurrence: occ),
-                        kind: .meeting))
+        // [v25.470] 旅遊期間不收部屬會議（使用者：代理人會處理）。
+        // 只擋部屬會議——個人事件與系統行事曆是自己的事，旅行中照樣要看得到。
+        // 軸上只有 8 個位子，旅遊日把會議讓出來給景點也比較合理。
+        if !store.hidesMeetings(on: today) {
+            for sub in store.subordinates {
+                for meeting in sub.meetings {
+                    for occ in meeting.expandedOccurrences(from: from, horizon: dayEnd) {
+                        guard !occ.isCancelled else { continue }
+                        guard occ.date >= dayStart, occ.date < dayEnd else { continue }
+                        out.append(TimelineStop(
+                            id: Self.stopId("m", meeting.id, occ.date),
+                            title: meeting.topic,
+                            start: occ.date,
+                            durationMinutes: max(5, meeting.durationMinutes),
+                            owner: sub.name,
+                            detail: detailText(meeting: meeting, occurrence: occ),
+                            kind: .meeting))
+                    }
                 }
             }
         }

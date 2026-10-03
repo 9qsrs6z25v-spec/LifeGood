@@ -2006,7 +2006,9 @@ class LifeStore: ObservableObject {
     private func rebuildMeetingReminders() {
         let events = personalEvents
         let subs = subordinates
-        Task { await ReminderCenter.rebuildAll(events: events, subordinates: subs) }
+        let trips = tripPlans
+        Task { await ReminderCenter.rebuildAll(events: events, subordinates: subs,
+                                               tripPlans: trips) }
     }
 
     /// 為某一條議程項目「額外召開」一場，並把那一項搬過去。
@@ -2770,6 +2772,38 @@ class LifeStore: ObservableObject {
 
     func tripPlan(id: UUID) -> TripPlan? {
         tripPlans.first { $0.id == id }
+    }
+
+    // MARK: - 旅遊期間（v25.470）
+
+    /// 使用者設定：旅遊期間不顯示／不提醒部屬會議（代理人會處理）。預設開。
+    static let hideMeetingsDuringTripKey = "hide_meetings_during_trip"
+
+    static var hideMeetingsDuringTrip: Bool {
+        // 沒設定過的裝置要回 true；UserDefaults.bool 對不存在的 key 回 false，
+        // 直接用會讓預設變成「關」。
+        UserDefaults.standard.object(forKey: hideMeetingsDuringTripKey) as? Bool ?? true
+    }
+
+    /// 這一天落在哪一趟旅遊的期間內（沒有就回 nil）。
+    /// 判斷規則與記帳表單的「關聯旅遊」選單一致：以「天」比對起訖日。
+    func tripPlan(covering date: Date) -> TripPlan? {
+        let cal = Calendar.current
+        let day = cal.startOfDay(for: date)
+        return tripPlans.first { plan in
+            let from = cal.startOfDay(for: plan.startDate)
+            let to = cal.startOfDay(for: plan.endDate)
+            return day >= from && day <= to
+        }
+    }
+
+    /// 這一天要不要把部屬會議藏起來。
+    ///
+    /// 只管部屬會議——使用者的原話是「我的代理人會幫我處理」，那指的是部屬那一側的
+    /// 會議。我的行事曆的個人事件、系統行事曆的事件不受影響：那些是自己的事，
+    /// 旅行中照樣該看得到。
+    func hidesMeetings(on date: Date) -> Bool {
+        Self.hideMeetingsDuringTrip && tripPlan(covering: date) != nil
     }
 
     /// 刪掉某一站，連帶清掉它的照片，並讓「下一站」的路線快取失效

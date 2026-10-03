@@ -2272,7 +2272,8 @@ struct PersonalEventEditor: View {
         // [v25.455] 整批重排：這一筆可能從通知改成鬧鐘（或反過來），
         // 只排新的那一種會把舊的那一種留在系統裡，到時候響兩次。
         await ReminderCenter.rebuildAll(events: lifeStore.personalEvents,
-                                        subordinates: lifeStore.subordinates)
+                                        subordinates: lifeStore.subordinates,
+                                        tripPlans: lifeStore.tripPlans)
         dismiss()
     }
 
@@ -2287,7 +2288,9 @@ struct PersonalEventEditor: View {
         // 整批重排才會把這一筆的鬧鐘清掉。
         let remaining = lifeStore.personalEvents
         let subs = lifeStore.subordinates
-        Task { await ReminderCenter.rebuildAll(events: remaining, subordinates: subs) }
+        let trips = lifeStore.tripPlans
+        Task { await ReminderCenter.rebuildAll(events: remaining, subordinates: subs,
+                                               tripPlans: trips) }
         dismiss()
     }
 

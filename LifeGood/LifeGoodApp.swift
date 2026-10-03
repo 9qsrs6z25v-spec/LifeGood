@@ -129,7 +129,8 @@ struct LifeGoodApp: App {
                     // [v25.455] 改走 ReminderCenter：它會把「通知 or 鬧鐘」分流，
                     // 並且一併排部屬會議的提醒（部屬會議在此之前完全沒有提醒）。
                     await ReminderCenter.rebuildAll(events: lifeStore.personalEvents,
-                                                    subordinates: lifeStore.subordinates)
+                                                    subordinates: lifeStore.subordinates,
+                                                    tripPlans: lifeStore.tripPlans)
                     // 冷啟動順帶刷新自訂幣別匯率（與設定頁那顆按鈕同一套邏輯，
                     // 認不得的幣別維持手動值）。放最後、結果不看：開場動畫期間
                     // 網路慢也不擋任何啟動流程，失敗就沿用上次的值。
@@ -167,7 +168,8 @@ struct LifeGoodApp: App {
                             // [v25.455] 提醒也一併續上。鬧鐘一次只掛最近 8 個
                             //（AlarmKit 有數量上限），靠每次回到前景往後補。
                             await ReminderCenter.rebuildAll(events: lifeStore.personalEvents,
-                                                            subordinates: lifeStore.subordinates)
+                                                            subordinates: lifeStore.subordinates,
+                                                            tripPlans: lifeStore.tripPlans)
                         }
                     }
                 }

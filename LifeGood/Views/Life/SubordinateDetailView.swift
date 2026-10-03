@@ -3619,7 +3619,9 @@ struct MeetingEditorSheet: View {
     private func rebuildReminders() {
         let events = lifeStore.personalEvents
         let subs = lifeStore.subordinates
-        Task { await ReminderCenter.rebuildAll(events: events, subordinates: subs) }
+        let trips = lifeStore.tripPlans
+        Task { await ReminderCenter.rebuildAll(events: events, subordinates: subs,
+                                               tripPlans: trips) }
     }
 }
 
