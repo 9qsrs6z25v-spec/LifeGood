@@ -12,8 +12,9 @@ import ActivityKit
 // 所以時間軸上的每個點都是一顆 Button，按下去換 selectedIndex，
 // 下方固定區塊顯示那一場的時間、標題與內容。
 //
-// [v25.383] 軸上混了三種來源：部屬會議（橘）、我的行事曆的個人事件（青）、
-// iOS 系統行事曆（綠）。點的顏色與詳情的圖示都跟著來源走。
+// [v25.383] 軸上混了多種來源：部屬會議（橘）、我的行事曆的個人事件（青）、
+// iOS 系統行事曆（綠）、[v25.469] 旅遊行程的景點（紫）。
+// 點的顏色與詳情的圖示都跟著來源走。
 
 struct DayTimelineLiveActivityWidget: Widget {
     var body: some WidgetConfiguration {
@@ -181,6 +182,7 @@ enum DayTimelineStyle {
         case .meeting:       return .orange
         case .personal:      return .cyan
         case .appleCalendar: return .green
+        case .trip:          return .purple
         }
     }
 
@@ -189,6 +191,7 @@ enum DayTimelineStyle {
         case .meeting:       return "person.2.fill"
         case .personal:      return "calendar"
         case .appleCalendar: return "calendar.badge.clock"
+        case .trip:          return "airplane"
         }
     }
 }

@@ -88,12 +88,27 @@ enum TimelineRouteTarget {
 
 extension DayTimelineLink {
 
-    /// 主 App 收到 lifegood://today 時：切到「我的行事曆」，並記下要打開哪一筆。
+    /// 主 App 收到 lifegood://today 時要落在哪裡。
+    ///
+    /// [v25.469] 軸上多了旅遊景點之後，落點不再只有「我的行事曆」：
+    /// 景點要開的是那一趟行程，開到行事曆去等於什麼也沒找到。
+    /// 需要 store 是因為場次 id 只帶 UUID 的前 8 碼（ContentState 有 4KB 上限），
+    /// 要還原成真正的行程得查一次。
     @discardableResult
-    static func apply(_ url: URL) -> Bool {
+    static func apply(_ url: URL, store: LifeStore) -> Bool {
         guard isTodayLink(url) else { return false }
+        let stop = stopId(from: url)
+        if let stop, stop.first == "t" {
+            let prefix = String(stop.dropFirst().prefix(8)).uppercased()
+            if let plan = store.tripPlans.first(where: { $0.id.uuidString.hasPrefix(prefix) }) {
+                AppNavigation.goToTravelMap()
+                DeepLinkRouter.shared.requestTripPlan(plan.id)
+                return true
+            }
+            // 那趟行程已經被刪掉了：退回行事曆，至少不是停在原地沒反應
+        }
         AppNavigation.goToMyCalendar()
-        DeepLinkRouter.shared.requestTimelineStop(stopId(from: url))
+        DeepLinkRouter.shared.requestTimelineStop(stop)
         return true
     }
 
@@ -115,6 +130,7 @@ extension DayTimelineLink {
     ///
     /// 系統行事曆（'e'）的事件回 nil——它的 id 來自 EventKit，不在我們的資料裡，
     /// 沒有對應的卡片可以開，就只切到行事曆頁。
+    /// 旅遊景點（'t'）也回 nil：它在 apply 就被接走開旅遊了，不會走到這裡。
     static func resolve(stopId: String, store: LifeStore) -> TimelineRouteTarget? {
         guard let kind = stopId.first, stopId.count > 9 else { return nil }
         let uuidPrefix = String(stopId.dropFirst().prefix(8)).uppercased()

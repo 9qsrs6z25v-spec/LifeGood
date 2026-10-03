@@ -123,8 +123,8 @@ final class DayTimelineController: ObservableObject {
 
     // MARK: - 快照
 
-    /// 今天的行程：部屬會議（含週期展開）＋我的行事曆的個人事件（含重複），
-    /// 依開始時間排序後裁切。
+    /// 今天的行程：部屬會議（含週期展開）＋我的行事曆的個人事件（含重複）
+    /// ＋系統行事曆＋[v25.469] 旅遊行程今天的景點，依開始時間排序後裁切。
     ///
     /// 只收「有時間的」項目：時間軸是一條從早到晚的時間線，
     /// 全日事件（durationMinutes == 0）沒有落點，硬放上去只會讓軸失真。
@@ -196,6 +196,28 @@ final class DayTimelineController: ObservableObject {
             }
         }
 
+        // 4) [v25.469] 旅遊行程的景點。使用者要求：每個站點的時間也要進時間軸。
+        //
+        //    走 plan.timeline 而不是 stops 的原始欄位——抵達時間是推算出來的
+        //    （出發時間 ＋ 各段交通 ＋ 停留），而且打過卡的站會用實際時間。
+        //    那份推算只有 TripPlan.timeline 知道，自己重算一定會跟畫面對不起來。
+        for plan in store.tripPlans {
+            for slot in plan.timeline {
+                guard slot.arrival >= dayStart, slot.arrival < dayEnd else { continue }
+                // 已經離開的站不用再占位置——旅遊那一天站數多，軸上只有 8 個位子
+                if slot.stop.checkInState == .departed { continue }
+                out.append(TimelineStop(
+                    id: Self.stopId("t", plan.id, slot.arrival),
+                    title: slot.stop.displayName,
+                    start: slot.arrival,
+                    // 停留時間可能是 0（純經過），給個下限才有落點
+                    durationMinutes: max(5, slot.stop.dwellMinutes),
+                    owner: plan.displayTitle,
+                    detail: truncated(tripDetail(slot.stop)),
+                    kind: .trip))
+            }
+        }
+
         out.sort { $0.start < $1.start }
         // 超過上限時保留「從現在起最近的幾場」——早上八點看整天、下午三點看下半天
         if out.count > maxStops {
@@ -250,6 +272,13 @@ final class DayTimelineController: ObservableObject {
     private func eventOwnerText(_ event: PersonalEvent) -> String {
         let place = event.location.trimmingCharacters(in: .whitespacesAndNewlines)
         return place.isEmpty ? event.kind.rawValue : place
+    }
+
+    /// [v25.469] 景點的內容摘要：地址優先，沒填就用備註。
+    /// 旅遊那一天在外面跑，地址比備註有用——要導航的時候看的是它。
+    private func tripDetail(_ stop: TripStop) -> String {
+        let addr = stop.address.trimmingCharacters(in: .whitespacesAndNewlines)
+        return addr.isEmpty ? stop.note : addr
     }
 
     /// [v25.383] 系統行事曆事件的第二行標籤：有地點顯示地點，

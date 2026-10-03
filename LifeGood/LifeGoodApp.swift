@@ -139,7 +139,7 @@ struct LifeGoodApp: App {
                 }
                 // [v25.381] 從靈動島／鎖定畫面點進來：切到「我的行事曆」
                 .onOpenURL { url in
-                    _ = DayTimelineLink.apply(url)
+                    _ = DayTimelineLink.apply(url, store: lifeStore)
                 }
                 .onAppear {
                     BackupManager.shared.createSnapshotIfNeeded(

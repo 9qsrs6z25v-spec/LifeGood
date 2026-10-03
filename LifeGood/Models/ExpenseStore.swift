@@ -345,11 +345,14 @@ class ExpenseStore: ObservableObject {
         list.reduce(0) { $0 + ntdValue(of: $1) }
     }
 
-    /// 台幣合計文字（例「NT$12,300」）
+    /// 台幣合計文字。
+    ///
+    /// [v25.469] 走全 App 共用的 ntdWanString：一萬以上用「萬」、一億以上用「億」
+    /// （NT$13.8萬），一萬以下照常寫完整金額。合計是用來「一眼知道量級」的數字，
+    /// 完整位數只會把窄欄位擠爆（時間軸的時間欄只有 52pt）。
+    /// 逐筆的金額仍然寫完整——那是要核對的數字，不是看量級的。
     func ntdTotalText(_ list: [Expense]) -> String {
-        let sum = ntdTotal(list)
-        let amount = Self.plainDecimal.string(from: NSNumber(value: sum)) ?? "\(Int(sum))"
-        return "NT$" + amount
+        ntdTotal(list).ntdWanString
     }
 
     /// 單筆支出的顯示金額文字：外幣顯示使用者當初輸入的原幣金額（例「JPY 3,000」），
