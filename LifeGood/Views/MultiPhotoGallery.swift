@@ -1,5 +1,8 @@
 import SwiftUI
 import PhotosUI
+// [v25.471] 存進相簿要用 PHPhotoLibrary／PHAssetChangeRequest。
+// PhotosUI 是否轉出 Photos 不保證，明著 import 免得日後換 SDK 才爆。
+import Photos
 import UIKit
 import ImageIO
 import Combine
@@ -691,6 +694,9 @@ struct PhotoLightbox: View {
                     }
                     .padding()
                     Spacer()
+                    // [v25.471] 存到相簿／分享：關閉鈕的對角（使用者指定的位置）
+                    PhotoActionButtons(url: url)
+                        .padding()
                 }
                 Spacer()
                 // 照片資訊列：檔名 / 解析度 / 檔案大小
@@ -871,6 +877,132 @@ struct ZoomableImageView: UIViewRepresentable {
                     height: sv.bounds.height / 3
                 )
                 sv.zoom(to: zoomRect, animated: true)
+            }
+        }
+    }
+}
+
+// MARK: - 大圖預覽的「存到相簿／分享」（v25.471）
+
+/// 放在大圖預覽右上角（關閉鈕的對角）的兩顆按鈕。
+///
+/// 使用者要求：所有圖片預覽都要能存進相簿或分享出去。做成共用元件而不是在每個
+/// 檢視器各寫一份——App 裡有四個預覽（PhotoLightbox／CutePhotoViewer／
+/// PhotoViewerSheet／PDFLightbox），各寫一份就是四份會各自長歪的權限處理。
+///
+/// 存檔走 PHAssetChangeRequest(forAssetFromImageAtFileURL:) 而不是
+/// UIImageWriteToSavedPhotosAlbum：後者吃的是 UIImage，等於把原檔重新編碼一次
+/// （畫質損失、EXIF 也掉了）；前者是把原始檔案整個放進相簿。
+struct PhotoActionButtons: View {
+    let url: URL
+    /// 只有分享用得到的備用項目；nil 就分享檔案本身
+    var shareItems: [Any]?
+    /// 這個檔案存不存得進相簿（PDF 不行，只能分享）
+    var canSaveToPhotos: Bool = true
+    /// 掛在導覽列工具列上時不要自己的深色圓底——工具列已經有它自己的外框，
+    /// 再疊一層會變成一顆突兀的黑球。
+    var chromeless: Bool = false
+
+    @State private var saveState: SaveState = .idle
+    @State private var showShare = false
+    @State private var errorMessage: String?
+
+    enum SaveState { case idle, saving, saved }
+
+    var body: some View {
+        HStack(spacing: 10) {
+            if canSaveToPhotos { saveButton }
+            shareButton
+        }
+        .sheet(isPresented: $showShare) {
+            ShareSheet(items: shareItems ?? [url])
+        }
+        .alert("存不進相簿", isPresented: Binding(
+            get: { errorMessage != nil },
+            set: { if !$0 { errorMessage = nil } }
+        )) {
+            Button("好", role: .cancel) { errorMessage = nil }
+        } message: {
+            Text(errorMessage ?? "")
+        }
+    }
+
+    private var saveButton: some View {
+        Button {
+            save()
+        } label: {
+            circle(icon: saveState == .saved ? "checkmark" : "arrow.down.to.line",
+                   tint: saveState == .saved ? .green : .white,
+                   busy: saveState == .saving)
+        }
+        .disabled(saveState == .saving)
+        .accessibilityLabel("存到相簿")
+    }
+
+    private var shareButton: some View {
+        Button {
+            showShare = true
+        } label: {
+            circle(icon: "square.and.arrow.up", tint: .white, busy: false)
+        }
+        .accessibilityLabel("分享")
+    }
+
+    /// 與關閉鈕同一套規格：深色底＋白色描邊。
+    /// 淺色半透明材質在大面積白底照片（名片、登機證）上會整顆隱形——
+    /// v25.329 關閉鈕就是為了這件事改過一次，這兩顆直接沿用結論。
+    @ViewBuilder
+    private func circle(icon: String, tint: Color, busy: Bool) -> some View {
+        let content = ZStack {
+            if busy {
+                ProgressView().tint(.white).scaleEffect(0.7)
+            } else {
+                Image(systemName: icon)
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundStyle(tint)
+            }
+        }
+        if chromeless {
+            content
+        } else {
+            content
+                .frame(width: 36, height: 36)
+                .background(
+                    Circle()
+                        .fill(Color.black.opacity(0.55))
+                        .shadow(color: .black.opacity(0.35), radius: 6, x: 0, y: 3)
+                )
+                .overlay(Circle().stroke(Color.white.opacity(0.35), lineWidth: 1))
+        }
+    }
+
+    private func save() {
+        saveState = .saving
+        // .addOnly：只要「加入」的權限，不要求讀取整個相簿。
+        // 要讀取權限會讓系統問一個使用者根本不需要答應的問題。
+        PHPhotoLibrary.requestAuthorization(for: .addOnly) { status in
+            guard status == .authorized || status == .limited else {
+                DispatchQueue.main.async {
+                    saveState = .idle
+                    errorMessage = "沒有「加入相簿」的權限。要開啟請到「設定 → LifeGood → 照片」改成「加入照片」或「完整取用權」。"
+                }
+                return
+            }
+            PHPhotoLibrary.shared().performChanges {
+                PHAssetChangeRequest.creationRequestForAssetFromImage(atFileURL: url)
+            } completionHandler: { ok, error in
+                DispatchQueue.main.async {
+                    if ok {
+                        saveState = .saved
+                        // 打勾留兩秒就好——一直停在打勾會讓人以為按不了第二次
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                            if saveState == .saved { saveState = .idle }
+                        }
+                    } else {
+                        saveState = .idle
+                        errorMessage = error?.localizedDescription ?? "系統沒有說原因。"
+                    }
+                }
             }
         }
     }

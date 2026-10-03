@@ -3475,6 +3475,13 @@ struct CutePhotoViewer: View {
                     ))
             )
             .shadow(color: draft.kind.accent.opacity(0.35), radius: 6, y: 3)
+
+            // [v25.471] 存到相簿／分享（與其餘圖片預覽共用同一組按鈕）。
+            // 這個檢視器是左關閉、右來源膠囊，所以兩顆接在膠囊後面——
+            // 位置仍然是右上角，與其他預覽對得上。
+            if draft.urls.indices.contains(currentIndex) {
+                PhotoActionButtons(url: draft.urls[currentIndex])
+            }
         }
         .padding(.horizontal, 18)
         .padding(.top, 14)

@@ -19,15 +19,6 @@
 	<true/>
 	<key>CKSharingSupported</key>
 	<true/>
-	<!-- [v25.454] CloudKit 的 zone 訂閱靜默推播（shouldSendContentAvailable）需要這個
-	     背景模式才會在 App 不在前景時把它叫起來。少了它，
-	     application(_:didReceiveRemoteNotification:fetchCompletionHandler:)
-	     只有在前景才會被呼叫——也就是「要自己先打開 App 才會收到」，
-	     跨裝置通知等於沒有作用。 -->
-	<key>UIBackgroundModes</key>
-	<array>
-		<string>remote-notification</string>
-	</array>
 	<!-- [v25.455] AlarmKit（會議提醒的「鬧鐘」模式）必備。Apple 文件：
 	     「If the NSAlarmKitUsageDescription key is missing or its value is an
 	     empty string, apps can't schedule alarms with AlarmKit.」

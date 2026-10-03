@@ -2153,6 +2153,12 @@ struct PhotoViewerSheet: View {
                         }
                     }
                 }
+                // [v25.471] 存到相簿／分享（與其餘圖片預覽共用同一組按鈕）。
+                // 這個檢視器有導覽列，兩顆就掛在右上角的工具列上——位置與其他
+                // 預覽一致，只是外框由工具列提供，不再套深色圓底。
+                ToolbarItem(placement: .topBarTrailing) {
+                    PhotoActionButtons(url: url, chromeless: true)
+                }
             }
         }
     }
