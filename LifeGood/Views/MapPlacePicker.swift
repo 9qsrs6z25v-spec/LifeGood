@@ -573,8 +573,9 @@ struct MapPickerPlaceGallery: View {
             LookAroundPreview(initialScene: scene)
                 .ignoresSafeArea()
         }
+        // [v25.472] 這個地點的照片整組帶進去
         .sheet(item: $viewingPhoto) { wrapper in
-            PhotoLightbox(url: wrapper.url)
+            PhotoLightbox(urls: shots.map(\.url), current: wrapper.url)
         }
     }
 

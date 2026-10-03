@@ -760,7 +760,11 @@ struct MedicalPlaceDetailSheet: View {
                 cameraPosition = .region(MKCoordinateRegion(
                     center: place.coordinate, latitudinalMeters: 1000, longitudinalMeters: 1000))
             }
-            .sheet(item: $viewingPhotoURL) { w in PhotoLightbox(url: w.url) }
+            // [v25.472] 這個地點的照片整組帶進去
+            .sheet(item: $viewingPhotoURL) { w in
+                PhotoLightbox(urls: place.photoNames.map { Expense.photoURL(for: $0) },
+                              current: w.url)
+            }
         }
     }
 

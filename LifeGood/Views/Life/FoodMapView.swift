@@ -1023,8 +1023,10 @@ struct RestaurantDetailSheet: View {
         .background(Color(.systemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 16))
         .padding(.horizontal)
+        // [v25.472] 這家店的照片整組帶進去
         .sheet(item: $viewingPhotoURL) { wrapper in
-            PhotoLightbox(url: wrapper.url)
+            PhotoLightbox(urls: aggregatePhotos.map { Expense.photoURL(for: $0) },
+                          current: wrapper.url)
         }
     }
 

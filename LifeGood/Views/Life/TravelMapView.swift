@@ -848,7 +848,11 @@ struct TravelSpotDetailSheet: View {
                 cameraPosition = .region(MKCoordinateRegion(
                     center: spot.coordinate, latitudinalMeters: 1200, longitudinalMeters: 1200))
             }
-            .sheet(item: $viewingPhotoURL) { wrapper in PhotoLightbox(url: wrapper.url) }
+            // [v25.472] 這個景點的照片整組帶進去
+            .sheet(item: $viewingPhotoURL) { wrapper in
+                PhotoLightbox(urls: spot.photoNames.map { Expense.photoURL(for: $0) },
+                              current: wrapper.url)
+            }
         }
     }
 

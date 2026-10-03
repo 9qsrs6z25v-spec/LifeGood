@@ -418,8 +418,9 @@ struct TripPlanDetailView: View {
                         items: albumItems(p))
                 }
             }
+            // [v25.472] 從時間軸的照片條點進來：整站的照片一起帶，左右滑得動
             .sheet(item: $viewingPhoto) { wrapper in
-                PhotoLightbox(url: wrapper.url)
+                PhotoLightbox(urls: allStopPhotoURLs, current: wrapper.url)
             }
             .sheet(item: Binding(
                 get: { openingStopId.map { IDBox(id: $0) } },
@@ -1328,6 +1329,15 @@ struct TripPlanDetailView: View {
     }
 
     /// 一站底下的照片。橫捲、點開全螢幕看。
+    /// [v25.472] 這趟所有站的照片，依時間軸順序攤平。
+    ///
+    /// 用整趟而不是只有那一站：時間軸上照片條是一站一條，但使用者點進去之後
+    /// 想往下看的是「接下來的照片」，不是「這一站看完就停住」。順序照時間軸排，
+    /// 與畫面上看到的一致。
+    private var allStopPhotoURLs: [URL] {
+        (plan?.stops ?? []).flatMap { $0.photoFileNames.map { TripStop.photoURL($0) } }
+    }
+
     private func photoStrip(_ stop: TripStop) -> some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 6) {

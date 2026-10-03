@@ -126,7 +126,11 @@ struct TripStopCardView: View {
             }
             .sheet(item: $sharing) { item in ShareSheet(items: [item.text]) }
             .sheet(item: $sharingImage) { item in ShareSheet(items: [item.url]) }
-            .sheet(item: $viewingPhoto) { wrapper in PhotoLightbox(url: wrapper.url) }
+            // [v25.472] 這一站的照片整組帶進去，左右滑得動
+            .sheet(item: $viewingPhoto) { wrapper in
+                PhotoLightbox(urls: (stop?.photoFileNames ?? []).map { TripStop.photoURL($0) },
+                              current: wrapper.url)
+            }
             .confirmationDialog("清除打卡紀錄", isPresented: $confirmClearCheckIn,
                                 titleVisibility: .visible) {
                 Button("清除", role: .destructive) {

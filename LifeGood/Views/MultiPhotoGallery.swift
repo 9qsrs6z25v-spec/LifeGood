@@ -259,7 +259,10 @@ struct MultiPhotoGallery: View {
             if wrapper.url.pathExtension.lowercased() == "pdf" {
                 PDFLightbox(url: wrapper.url)
             } else {
-                PhotoLightbox(url: wrapper.url)
+                // [v25.472] 同一組照片一起帶進去（PDF 排除——燈箱不收 PDF）
+                PhotoLightbox(urls: fileNames.map(urlFor)
+                                .filter { $0.pathExtension.lowercased() != "pdf" },
+                              current: wrapper.url)
             }
         }
         .alert("移除這張照片？", isPresented: Binding(
@@ -570,8 +573,10 @@ struct AsyncLocalImage<Content: View>: View {
 // MARK: - 全螢幕燈箱檢視
 
 struct PhotoLightbox: View {
-    let url: URL
+    /// [v25.472] 整本相簿。單張的呼叫點走 init(url:)，陣列裡就只有一個元素。
+    let urls: [URL]
     @Environment(\.dismiss) private var dismiss
+    @State private var index: Int
     @State private var scale: CGFloat = 1.0
     @State private var lastScale: CGFloat = 1.0
     @State private var offset: CGSize = .zero
@@ -580,6 +585,29 @@ struct PhotoLightbox: View {
     @State private var imageAppeared = false
     /// [v25.329] 貼合狀態下的下滑關閉：跟手位移，超過門檻放開即關閉
     @State private var dismissDrag: CGFloat = 0
+    /// [v25.472] 左右換圖的跟手位移
+    @State private var pageDrag: CGFloat = 0
+    /// 這一次拖曳被鎖在哪個方向。不鎖的話手指稍微斜一點，
+    /// 畫面就會在「換圖」與「下滑關閉」之間來回跳。
+    @State private var dragAxis: DragAxis?
+
+    private enum DragAxis { case horizontal, vertical }
+
+    /// 單張：維持原本的呼叫方式
+    init(url: URL) {
+        self.urls = [url]
+        _index = State(initialValue: 0)
+    }
+
+    /// [v25.472] 相簿：可以左右滑看同一本的其他照片，下方有縮圖列
+    init(urls: [URL], current: URL) {
+        let list = urls.isEmpty ? [current] : urls
+        self.urls = list
+        _index = State(initialValue: list.firstIndex(of: current) ?? 0)
+    }
+
+    /// 目前這一張。index 永遠夾在範圍內（相簿在背後被刪到剩幾張也不會越界）
+    private var url: URL { urls[min(max(index, 0), urls.count - 1)] }
 
     var body: some View {
         ZStack {
@@ -614,7 +642,8 @@ struct PhotoLightbox: View {
                         .resizable()
                         .frame(width: fitted.width, height: fitted.height)
                         .scaleEffect(scale)
-                        .offset(CGSize(width: offset.width, height: offset.height + dismissDrag))
+                        .offset(CGSize(width: offset.width + pageDrag,
+                                       height: offset.height + dismissDrag))
                         .position(x: geo.size.width / 2, y: geo.size.height / 2)
                         .opacity(imageAppeared ? 1 : 0)
                 }
@@ -638,21 +667,59 @@ struct PhotoLightbox: View {
                                         // 放大狀態：平移
                                         offset = CGSize(width: lastOffset.width + v.translation.width,
                                                         height: lastOffset.height + v.translation.height)
-                                    } else {
-                                        // [v25.329] 貼合狀態：下滑跟手（照片檢視慣例的關閉手勢）
+                                        return
+                                    }
+                                    // [v25.472] 貼合狀態有兩種手勢：左右換圖、下滑關閉。
+                                    // 第一次動超過 12pt 就把方向鎖住——不鎖的話手指稍微斜一點，
+                                    // 畫面會在兩者之間來回跳。
+                                    if dragAxis == nil {
+                                        let t = v.translation
+                                        if max(abs(t.width), abs(t.height)) > 12 {
+                                            dragAxis = abs(t.width) > abs(t.height) ? .horizontal : .vertical
+                                        }
+                                    }
+                                    switch dragAxis {
+                                    case .horizontal:
+                                        // 已經是第一張還往右拉（或最後一張往左拉）就給阻尼，
+                                        // 讓「沒有下一張」這件事用手感說出來
+                                        let raw = v.translation.width
+                                        let atEdge = (raw > 0 && index == 0)
+                                            || (raw < 0 && index >= urls.count - 1)
+                                        pageDrag = atEdge ? raw * 0.25 : raw
+                                    case .vertical:
+                                        // [v25.329] 下滑跟手（照片檢視慣例的關閉手勢）
                                         dismissDrag = max(0, v.translation.height)
+                                    case nil:
+                                        break
                                     }
                                 }
                                 .onEnded { v in
                                     if scale > 1 {
                                         lastOffset = offset
-                                    } else if dismissDrag > 110 {
-                                        dismiss()
-                                    } else {
-                                        withAnimation(.spring(response: 0.32, dampingFraction: 0.85)) {
-                                            dismissDrag = 0
-                                        }
+                                        return
                                     }
+                                    switch dragAxis {
+                                    case .horizontal:
+                                        if pageDrag < -70, index < urls.count - 1 {
+                                            go(to: index + 1)
+                                        } else if pageDrag > 70, index > 0 {
+                                            go(to: index - 1)
+                                        }
+                                        withAnimation(.spring(response: 0.32, dampingFraction: 0.85)) {
+                                            pageDrag = 0
+                                        }
+                                    case .vertical:
+                                        if dismissDrag > 110 {
+                                            dismiss()
+                                        } else {
+                                            withAnimation(.spring(response: 0.32, dampingFraction: 0.85)) {
+                                                dismissDrag = 0
+                                            }
+                                        }
+                                    case nil:
+                                        break
+                                    }
+                                    dragAxis = nil
                                 }
                         )
                 )
@@ -694,6 +761,16 @@ struct PhotoLightbox: View {
                     }
                     .padding()
                     Spacer()
+                    // [v25.472] 第幾張／共幾張。相簿裡滑了幾下之後，
+                    // 沒有這個數字就不知道自己在哪裡、還有沒有下一張。
+                    if urls.count > 1 {
+                        Text("\(index + 1) / \(urls.count)")
+                            .font(.system(size: 13, weight: .semibold, design: .rounded))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 10).padding(.vertical, 5)
+                            .background(Capsule().fill(Color.black.opacity(0.45)))
+                        Spacer()
+                    }
                     // [v25.471] 存到相簿／分享：關閉鈕的對角（使用者指定的位置）
                     PhotoActionButtons(url: url)
                         .padding()
@@ -701,8 +778,12 @@ struct PhotoLightbox: View {
                 Spacer()
                 // 照片資訊列：檔名 / 解析度 / 檔案大小
                 PhotoInfoBar(url: url, image: image)
-                    .padding(.bottom, 18)
+                // [v25.472] 相簿縮圖列（比照系統相簿）。只有一張就不擺。
+                if urls.count > 1 {
+                    filmStrip.padding(.top, 6)
+                }
             }
+            .padding(.bottom, 14)
         }
         .task(id: url) {
             // 重置為載入中狀態：.task(id: url) 只在 url 改變時重新觸發，但先前用
@@ -716,6 +797,52 @@ struct PhotoLightbox: View {
             }.value
             image = loaded
         }
+    }
+
+    /// [v25.472] 底部縮圖列（系統相簿那條）。點一張直接跳過去。
+    private var filmStrip: some View {
+        ScrollViewReader { proxy in
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(Array(urls.enumerated()), id: \.offset) { i, u in
+                        Button {
+                            withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
+                                go(to: i)
+                            }
+                        } label: {
+                            AsyncThumbnailView(url: u, size: CGSize(width: 46, height: 46))
+                                .frame(width: 46, height: 46)
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 12)
+                                        .stroke(Color.white, lineWidth: i == index ? 2 : 0)
+                                )
+                                .opacity(i == index ? 1 : 0.5)
+                        }
+                        .buttonStyle(.plain)
+                        .id(i)
+                    }
+                }
+                .padding(.horizontal, 14)
+            }
+            .frame(height: 54)
+            // 用滑的換圖時，縮圖列要跟著捲——不跟的話滑幾張之後
+            // 目前這張就跑到看不見的地方，那條列就沒有意義了
+            .onChange(of: index) { _, new in
+                withAnimation(.easeOut(duration: 0.25)) { proxy.scrollTo(new, anchor: .center) }
+            }
+            .onAppear { proxy.scrollTo(index, anchor: .center) }
+        }
+    }
+
+    /// 換到第 n 張：縮放與平移一起歸零，不然上一張放大的狀態會跟著帶過去
+    private func go(to newIndex: Int) {
+        guard urls.indices.contains(newIndex), newIndex != index else { return }
+        index = newIndex
+        scale = 1
+        lastScale = 1
+        offset = .zero
+        lastOffset = .zero
+        imageAppeared = false
     }
 
     /// 貼合尺寸：取寬、高兩個方向縮放比的較小者——寬度 fit 會讓高度出血時
