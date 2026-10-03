@@ -110,7 +110,14 @@ enum BusinessCardOCR {
             request.recognitionLanguages = ["zh-Hant", "zh-Hans", "en-US"]
             let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
             DispatchQueue.global(qos: .userInitiated).async {
-                try? handler.perform([request])
+                do {
+                    try handler.perform([request])
+                } catch {
+                    // perform 拋錯時（例如相機拍到的圖檔損毀）request 的 completion handler
+                    // 不會被呼叫，繼續用 try? 吞掉錯誤會讓 continuation 永遠不 resume，
+                    // 呼叫端的 await 卡死、isProcessingScan/isRescanning 卡在 true 出不去。
+                    continuation.resume(returning: [])
+                }
             }
         }
     }
@@ -386,12 +393,56 @@ extension BusinessCard {
     }
 }
 
+// MARK: - 美化紀錄（BusinessCardView）
+// [2026-06 v1] 本次美化方向：
+//   1. summaryHeader：新增橘粉漸層英雄卡（總名片數 + 公司數 + 聯絡人數），
+//      對齊 VehicleView.summaryHeader / StockView.summaryHeader 設計語言；
+//      加入 heroCardAppeared spring 進場動畫
+//   2. emptyState：純圖示升級為雙層脈衝光環 + 漸層底圓 + 橘色 CTA 按鈕，
+//      搜尋無結果時改用搜尋圖示，對齊 IncomeView.emptyState 規格
+//   3. companyHeader：公司分組標題從 plain Text 升級為橘色 Capsule 強調條 +
+//      計數膠囊，對齊 IncomeView.daySectionHeader 規格
+//   4. cardRow：頭像從 48pt 升至 52pt + 職稱標籤改用 Capsule + 加入分隔色線，
+//      對齊 IncomeView.incomeRow 視覺規格
+//   5. 卡片列表加入 cardsAppeared 交錯淡入 + 向上進場動畫，
+//      對齊 IncomeView.incomeListSections 進場動畫規格
+// [2026-06 v2] 本次美化方向：
+//   1. summaryHeader：補第三顆散景裝飾圓（中右側 55pt, white.opacity(0.06), blur 8）
+//      + 玻璃光澤高光覆層（LinearGradient [.white.opacity(0.18), .clear] 頂→中），
+//      對齊 IncomeView / VariableExpenseView v4 三圓散景 + 玻璃光澤規格
+//   2. companyHeader：Capsule 強調條寬度 3pt → 4pt，標題字型
+//      .footnote.weight(.semibold) → .subheadline.weight(.bold)，對齊全 App 分組標題基準
+//   3. cardRow 職稱膠囊：補 Capsule stroke overlay (blue.opacity(0.22), 0.6pt)
+//      讓膠囊輪廓更立體，對齊 LifeOverview / Career 標籤規格
+//   4. cardRow 日期標籤：從 plain caption2 升級為 Capsule 日期膠囊
+//      (quaternarySystemFill 底 + 7/3pt padding)，對齊 FamilyView / SubordinateView 規格
+//   5. avatarView 首字母方塊：補 .white.opacity(0.30) stroke overlay，
+//      讓無照片頭像邊框更明確，對齊設計語言圖示圓邊框規格
+// [2026-08 v3] summaryHeader 頂部總名片數大字補齊自適應防截斷：
+//   1. 「\(totalCards) 張名片」30pt 大字原本沒有 lineLimit／minimumScaleFactor
+//      防截斷保護，是同系列英雄卡 OverviewView／IncomeView／FinanceOverviewView／
+//      FinanceChartView／ChartView／SavingsInsuranceView／FixedExpenseView 皆已
+//      修過、本檔案仍缺的同型缺口——名片數量搭配「張名片」文字在窄螢幕或名片數
+//      達三位數以上時可能被系統裁切。補上 .lineLimit(1) + .minimumScaleFactor(0.6)，
+//      對齊全 App 英雄卡同尺寸大字規格。純視覺層調整，totalCards／companyCount／
+//      contactCount 統計邏輯完全未變動。
+//      （下次美化本檔案時：可留意 quoteHeroCard 同型大字檔案，或轉往其他仍留有
+//      待辦的畫面，如 AddStockView.quoteHeroCard 即時股價大字）
+
 struct BusinessCardView: View {
     @EnvironmentObject var lifeStore: LifeStore
     @EnvironmentObject var subscription: SubscriptionManager
     @State private var showAdd = false
     @State private var viewingCardId: UUID?
+    /// [v25.398] 要隱藏的公司，以 \n 分隔存進 AppStorage。
+    /// 存「名稱」而不是 id：名片沒有公司這個實體，公司只是名片上的一段文字。
+    /// 公司改名或整批刪光時，這裡會留下一個對不到任何名片的字串——
+    /// 篩選畫面只列目前實際存在的公司，所以不會變成看不見也刪不掉的幽靈。
+    @AppStorage("card_hidden_companies") private var hiddenCompaniesRaw = ""
+    @State private var showCompanyFilter = false
     @State private var searchText = ""
+    @State private var debouncedSearchText = ""
+    @State private var searchDebounceTask: Task<Void, Never>?
     @State private var showPremiumAlert = false
     @State private var showContactPicker = false
     // 拍名片掃描
@@ -404,6 +455,22 @@ struct BusinessCardView: View {
     @State private var selectedIds: Set<UUID> = []
     @State private var showExportConfirm = false
     @State private var exportAlertMessage: String?
+    // [v25.400] 合併重複名片
+    @State private var showDuplicateReview = false
+    @State private var mergePlan: CardMergePlan?
+    @State private var mergeResultMessage: String?
+    // 美化進場動畫旗標
+    @State private var heroCardAppeared = false
+    @State private var cardsAppeared = false
+    @State private var emptyIconPulse = false
+    @State private var emptyPulseTask: Task<Void, Never>?
+
+    /// 多選合併要處理的那幾張。用包裝型別而不是 Set 本身，是為了走 .sheet(item:)——
+    /// 打開那一刻就把 id 定住，之後篩選條件變了也不會把別的名片捲進來。
+    fileprivate struct CardMergePlan: Identifiable {
+        let id = UUID()
+        let ids: [UUID]
+    }
 
     fileprivate struct ScannedCardDraft: Identifiable {
         let id = UUID()
@@ -411,10 +478,27 @@ struct BusinessCardView: View {
         let photoData: Data?
     }
 
+    /// 分組／篩選用的公司鍵。沒填公司的歸「未分類」，才能一起被隱藏。
+    static func companyKey(_ card: BusinessCard) -> String {
+        card.company.trimmingCharacters(in: .whitespaces).isEmpty
+            ? "未分類" : card.company.trimmingCharacters(in: .whitespaces)
+    }
+
+    private var hiddenCompanies: Set<String> {
+        Set(hiddenCompaniesRaw.split(separator: "\n").map(String.init).filter { !$0.isEmpty })
+    }
+
+    private func setHiddenCompanies(_ set: Set<String>) {
+        hiddenCompaniesRaw = set.sorted().joined(separator: "\n")
+    }
+
     private var filteredCards: [BusinessCard] {
-        let sorted = lifeStore.businessCards.sorted { $0.date > $1.date }
-        if searchText.isEmpty { return sorted }
-        let q = searchText.lowercased()
+        let hidden = hiddenCompanies
+        let sorted = lifeStore.businessCards
+            .filter { hidden.isEmpty || !hidden.contains(Self.companyKey($0)) }
+            .sorted { $0.date > $1.date }
+        if debouncedSearchText.isEmpty { return sorted }
+        let q = debouncedSearchText.lowercased()
         return sorted.filter { card in
             card.name.lowercased().contains(q)
             || card.company.lowercased().contains(q)
@@ -426,41 +510,427 @@ struct BusinessCardView: View {
         }
     }
 
-    private var groupedByCompany: [(key: String, value: [BusinessCard])] {
-        let grouped = Dictionary(grouping: filteredCards) { $0.company.isEmpty ? "未分類" : $0.company }
+    /// 目前實際存在的公司與張數（含「未分類」），依張數多到少。
+    /// 只列現存的公司，所以 AppStorage 裡殘留的舊公司名不會變成看不見也關不掉的幽靈。
+    private var companyCounts: [(company: String, count: Int)] {
+        var buckets: [String: Int] = [:]
+        for c in lifeStore.businessCards { buckets[Self.companyKey(c), default: 0] += 1 }
+        return buckets
+            .map { (company: $0.key, count: $0.value) }
+            .sorted { a, b in
+                if a.count != b.count { return a.count > b.count }
+                return a.company.localizedStandardCompare(b.company) == .orderedAscending
+            }
+    }
+
+    /// 有隱藏公司時的橫幅：講清楚現在看到的是幾張、被藏了哪幾家，點 ✕ 全部還原
+    @ViewBuilder
+    private func companyFilterBanner(_ cards: [BusinessCard]) -> some View {
+        let hidden = hiddenCompanies
+        if !hidden.isEmpty {
+            HStack(spacing: 8) {
+                Image(systemName: "line.3.horizontal.decrease.circle.fill")
+                    .font(.system(size: 14)).foregroundStyle(.orange)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("顯示 \(cards.count) / \(lifeStore.businessCards.count) 張")
+                        .font(.caption.weight(.semibold)).foregroundStyle(.orange)
+                    Text("已隱藏：" + hidden.sorted().joined(separator: "、"))
+                        .font(.system(size: 10)).foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
+                Spacer(minLength: 0)
+                Button {
+                    withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                        hiddenCompaniesRaw = ""
+                    }
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 15)).foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.horizontal, 10).padding(.vertical, 7)
+            .background(Color.orange.opacity(0.10))
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+            .padding(.horizontal, 16).padding(.bottom, 8)
+        }
+    }
+
+    /// [v25.400] 偵測到同名同公司的名片時提示一下。
+    /// 只在沒搜尋、沒在多選時出現，免得把清單上方塞滿橫幅。
+    @ViewBuilder
+    private func duplicateBanner() -> some View {
+        let extras = lifeStore.businessCardDuplicateCount()
+        if extras > 0 && searchText.isEmpty && !isMultiSelect {
+            Button {
+                if subscription.isPremium { showDuplicateReview = true }
+                else { showPremiumAlert = true }
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "arrow.triangle.merge")
+                        .font(.system(size: 14)).foregroundStyle(.orange)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("有 \(extras) 張可能重複的名片")
+                            .font(.caption.weight(.semibold)).foregroundStyle(.orange)
+                        Text("同名而且同公司。點這裡看要留哪一張再合併")
+                            .font(.system(size: 10)).foregroundStyle(.secondary)
+                    }
+                    Spacer(minLength: 0)
+                    Image(systemName: "chevron.right")
+                        .font(.caption2.weight(.semibold)).foregroundStyle(.tertiary)
+                }
+                .padding(.horizontal, 10).padding(.vertical, 7)
+                .background(Color.orange.opacity(0.10))
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+                .padding(.horizontal, 16).padding(.bottom, 8)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    /// 開合併畫面。
+    ///
+    /// ⚠️ 只收「畫面上看得到的」那幾張：selectedIds 是選的時候記下來的，
+    ///    選完之後若改了公司篩選或搜尋字，裡面可能留著現在看不到的名片 id。
+    ///    不過濾的話，使用者會在看不到的情況下把一張名片併掉。
+    private func startMerge(visible: [BusinessCard]) {
+        guard subscription.isPremium else { showPremiumAlert = true; return }
+        let visibleIds = Set(visible.map { $0.id })
+        let ids = visible.filter { selectedIds.contains($0.id) }.map { $0.id }
+        guard ids.count >= 2 else {
+            mergeResultMessage = selectedIds.count >= 2
+                ? "選到的名片有部分目前被篩選或搜尋條件擋住了，看不到的不會併。先清掉篩選再試一次。"
+                : "要合併請選兩張以上。"
+            return
+        }
+        // 順手把已經看不到的選取清掉，免得數字跟畫面對不上
+        selectedIds = selectedIds.filter { visibleIds.contains($0) }
+        mergePlan = CardMergePlan(ids: ids)
+    }
+
+    private func finishMerge(_ report: LifeStore.BusinessCardMergeReport) {
+        // 被併掉的 id 已經不存在了，選取與正在看的那張都要收掉，
+        // 否則詳情 sheet 會停在一張撈不到資料的空白名片上
+        if let vid = viewingCardId,
+           !lifeStore.businessCards.contains(where: { $0.id == vid }) {
+            viewingCardId = nil
+        }
+        withAnimation {
+            isMultiSelect = false
+            selectedIds = []
+        }
+        mergeResultMessage = report.summaryText
+    }
+
+    private func groupedByCompany(_ cards: [BusinessCard]) -> [(key: String, value: [BusinessCard])] {
+        let grouped = Dictionary(grouping: cards) { Self.companyKey($0) }
         return grouped.sorted { $0.key < $1.key }
     }
 
+    // MARK: - 英雄摘要卡片（橘粉漸層）
+
+    private var summaryHeader: some View {
+        let totalCards = lifeStore.businessCards.count
+        let companyCount = Set(lifeStore.businessCards.map { $0.company }.filter { !$0.isEmpty }).count
+        let contactCount = lifeStore.businessCards.filter { !$0.phones.isEmpty || !$0.emails.isEmpty }.count
+
+        return VStack(spacing: 0) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("名片總覽")
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.80))
+                    Text("\(totalCards) 張名片")
+                        .heroBigValueFont()
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.6)
+                        .contentTransition(.numericText())
+                    if companyCount > 0 {
+                        Text("涵蓋 \(companyCount) 家公司")
+                            .font(.caption2.weight(.medium))
+                            .foregroundStyle(.white.opacity(0.72))
+                            .padding(.top, 1)
+                    }
+                }
+                Spacer()
+                VStack(alignment: .trailing, spacing: 6) {
+                    Text("\(totalCards) 張")
+                        .font(.caption.weight(.semibold))
+                        .padding(.horizontal, 11).padding(.vertical, 5)
+                        .background(.white.opacity(0.22))
+                        .clipShape(Capsule())
+                        .foregroundStyle(.white)
+                    if contactCount > 0 {
+                        HStack(spacing: 3) {
+                            Image(systemName: "phone.fill")
+                                .font(.system(size: 9, weight: .bold))
+                            Text("\(contactCount) 有聯絡方式")
+                                .font(.system(size: 10, weight: .semibold))
+                                .lineLimit(1)
+                        }
+                        .foregroundStyle(.white.opacity(0.88))
+                        .padding(.horizontal, 9).padding(.vertical, 4)
+                        .background(.white.opacity(0.16))
+                        .clipShape(Capsule())
+                        .overlay(Capsule().stroke(.white.opacity(0.28), lineWidth: 0.75))
+                    }
+                }
+            }
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 18)
+        .heroCardShell(card: .businessCardList)
+        .padding(.horizontal, 16)
+        .padding(.top, 10)
+        .padding(.bottom, 4)
+        .opacity(heroCardAppeared ? 1 : 0)
+        .offset(y: heroCardAppeared ? 0 : 22)
+        .onAppear {
+            withAnimation(.spring(response: 0.55, dampingFraction: 0.78)) {
+                heroCardAppeared = true
+            }
+        }
+        .onDisappear {
+            heroCardAppeared = false
+        }
+    }
+
+    // MARK: - 公司分組標題列（橘色強調條 + 計數膠囊）
+
+    private func companyHeader(_ company: String, _ cards: [BusinessCard]) -> some View {
+        let accent = Color(red: 1.00, green: 0.55, blue: 0.25)
+        return HStack(spacing: 8) {
+            Capsule()
+                .fill(
+                    LinearGradient(
+                        colors: [accent, accent.opacity(0.55)],
+                        startPoint: .top, endPoint: .bottom
+                    )
+                )
+                .frame(width: 4, height: 14) // v2：3pt → 4pt 對齊全 App 分組標題規格
+            Text(company)
+                .font(.subheadline.weight(.bold)) // v2：footnote.semibold → subheadline.bold
+                .foregroundStyle(.primary.opacity(0.75))
+            Spacer(minLength: 6)
+            HStack(spacing: 4) {
+                Text("\(cards.count) 張")
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(accent)
+                Text("·")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                Text("名片")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(accent.opacity(0.10))
+            .clipShape(Capsule())
+            .overlay(Capsule().stroke(accent.opacity(0.22), lineWidth: 0.6))
+        }
+        .textCase(nil)
+    }
+
+    // MARK: - 空狀態（雙層脈衝光環 + 橘色 CTA）
+
+    /// 篩空與搜尋空要講不同的話——被公司篩掉時，叫人「換個關鍵字」是答非所問
+    private var emptyTitle: String {
+        let searching = !searchText.trimmingCharacters(in: .whitespaces).isEmpty
+        if !searching && !hiddenCompanies.isEmpty { return "這些公司目前被隱藏" }
+        return "找不到符合的名片"
+    }
+
+    private var emptyHint: String {
+        let searching = !searchText.trimmingCharacters(in: .whitespaces).isEmpty
+        if !searching && !hiddenCompanies.isEmpty {
+            return "右上角的篩選把所有公司都關掉了\n打開幾家就會看到名片"
+        }
+        return hiddenCompanies.isEmpty ? "換個關鍵字試試" : "換個關鍵字，或檢查右上角的公司篩選"
+    }
+
+    private var emptyStateView: some View {
+        // [v25.398] 公司全被篩掉時也算「篩空了」，不能顯示「尚無名片紀錄」——
+        // 名片明明都還在，只是被自己藏起來了，那句話會讓人以為資料不見了
+        let isSearching = !searchText.trimmingCharacters(in: .whitespaces).isEmpty
+            || (!hiddenCompanies.isEmpty && !lifeStore.businessCards.isEmpty)
+        let accent = Color(red: 1.00, green: 0.55, blue: 0.25)
+        return VStack(spacing: 24) {
+            Spacer()
+
+            ZStack {
+                if !isSearching {
+                    Circle()
+                        .stroke(accent.opacity(emptyIconPulse ? 0 : 0.28), lineWidth: 1.5)
+                        .frame(width: 108, height: 108)
+                        .scaleEffect(emptyIconPulse ? 1.35 : 1.0)
+                        .animation(
+                            .easeOut(duration: 2.0).repeatForever(autoreverses: false),
+                            value: emptyIconPulse
+                        )
+                    Circle()
+                        .stroke(accent.opacity(emptyIconPulse ? 0 : 0.14), lineWidth: 1)
+                        .frame(width: 108, height: 108)
+                        .scaleEffect(emptyIconPulse ? 1.60 : 1.0)
+                        .animation(
+                            .easeOut(duration: 2.0).delay(0.3).repeatForever(autoreverses: false),
+                            value: emptyIconPulse
+                        )
+                }
+                Circle()
+                    .fill(
+                        LinearGradient(
+                            colors: isSearching
+                                ? [Color(.systemFill), Color(.secondarySystemFill)]
+                                : [accent.opacity(0.14), accent.opacity(0.06)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 88, height: 88)
+                    .overlay(
+                        Circle()
+                            .stroke(
+                                isSearching ? Color.clear : accent.opacity(0.22),
+                                lineWidth: 1.2
+                            )
+                    )
+                Image(systemName: isSearching ? "magnifyingglass" : "person.crop.rectangle.stack")
+                    .font(.system(size: 34, weight: .light))
+                    .foregroundStyle(isSearching ? .secondary : accent.opacity(0.72))
+            }
+            .onAppear {
+                emptyIconPulse = false
+                emptyPulseTask?.cancel()
+                if !isSearching {
+                    emptyPulseTask = Task {
+                        try? await Task.sleep(nanoseconds: 300_000_000)
+                        guard !Task.isCancelled else { return }
+                        emptyIconPulse = true
+                    }
+                }
+            }
+            .onDisappear {
+                emptyPulseTask?.cancel()
+            }
+
+            VStack(spacing: 10) {
+                Text(isSearching ? emptyTitle : "尚無名片紀錄")
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(.primary.opacity(0.75))
+                Text(isSearching ? emptyHint : "收集名片、拍照辨識\n或從聯絡人一鍵匯入")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .lineSpacing(3)
+            }
+
+            if !isSearching {
+                Button {
+                    if subscription.isPremium { showAdd = true }
+                    else { showPremiumAlert = true }
+                } label: {
+                    Label("新增第一張名片", systemImage: "plus.circle.fill")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 22)
+                        .padding(.vertical, 12)
+                        .background(
+                            LinearGradient(
+                                colors: [
+                                    Color(red: 1.00, green: 0.58, blue: 0.28),
+                                    Color(red: 0.90, green: 0.28, blue: 0.55)
+                                ],
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
+                        )
+                        .clipShape(Capsule())
+                        .shadow(color: Color(red: 0.90, green: 0.28, blue: 0.55).opacity(0.38), radius: 10, y: 5)
+                }
+                .buttonStyle(.plain)
+            }
+
+            Spacer()
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal, 32)
+    }
+
     var body: some View {
-        NavigationStack {
+        // filteredCards（全量 sort + 多欄位 contains 篩選）改在此算一次，往下傳給
+        // List／groupedByCompany／toolbar 多選按鈕，避免原本 4 處各自獨立重新計算。
+        let cards = filteredCards
+        return NavigationStack {
             VStack(spacing: 0) {
+                // 有名片時顯示搜尋列（帶圖示 + 圓角背景，對齊其他 searchable 頁面規格）
                 if !lifeStore.businessCards.isEmpty {
-                    HStack {
-                        Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                    HStack(spacing: 8) {
+                        Image(systemName: "magnifyingglass")
+                            .foregroundStyle(.secondary)
+                            .font(.subheadline)
                         TextField("搜尋姓名、公司、職稱、主要業務", text: $searchText)
                             .textFieldStyle(.plain)
+                            .font(.subheadline)
+                            .onChange(of: searchText) { _, newValue in
+                                searchDebounceTask?.cancel()
+                                searchDebounceTask = Task {
+                                    try? await Task.sleep(nanoseconds: 300_000_000)
+                                    guard !Task.isCancelled else { return }
+                                    debouncedSearchText = newValue
+                                }
+                            }
+                            .onDisappear { searchDebounceTask?.cancel() }
+                        if !searchText.isEmpty {
+                            Button {
+                                searchText = ""
+                            } label: {
+                                Image(systemName: "xmark.circle.fill")
+                                    .foregroundStyle(.secondary)
+                                    .font(.subheadline)
+                            }
+                            .buttonStyle(.plain)
+                            .transition(.scale.combined(with: .opacity))
+                        }
                     }
-                    .padding(10)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 9)
                     .background(Color(.tertiarySystemFill))
                     .clipShape(RoundedRectangle(cornerRadius: 10))
-                    .padding(.horizontal)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10)
+                            .stroke(Color(.separator).opacity(0.12), lineWidth: 0.75)
+                    )
+                    .padding(.horizontal, 16)
                     .padding(.vertical, 8)
+                    .animation(.spring(response: 0.3, dampingFraction: 0.8), value: searchText.isEmpty)
                 }
 
-                if filteredCards.isEmpty {
-                    Spacer()
-                    VStack(spacing: 16) {
-                        Image(systemName: "person.crop.rectangle.stack")
-                            .font(.system(size: 48)).foregroundStyle(.secondary)
-                        Text("尚無名片").font(.headline).foregroundStyle(.secondary)
-                        Text("點擊右上角 + 新增名片").font(.subheadline).foregroundStyle(.tertiary)
-                    }
-                    Spacer()
+                companyFilterBanner(cards)
+                duplicateBanner()
+
+                if cards.isEmpty {
+                    // 改版空狀態（雙層脈衝光環 + CTA 按鈕）
+                    emptyStateView
                 } else {
                     List {
-                        ForEach(groupedByCompany, id: \.key) { company, cards in
-                            Section(header: Text(company)) {
-                                ForEach(cards) { card in
+                        // 英雄摘要卡（僅在非搜尋狀態 + 有名片時顯示）
+                        if searchText.isEmpty {
+                            Section {
+                                summaryHeader
+                                    .listRowInsets(EdgeInsets())
+                                    .listRowBackground(Color.clear)
+                                    .listRowSeparator(.hidden)
+                            }
+                        }
+
+                        // 各公司分組（加入交錯進場動畫）
+                        ForEach(Array(groupedByCompany(cards).enumerated()), id: \.element.key) { sectionIdx, pair in
+                            let (company, cards) = pair
+                            Section(header: companyHeader(company, cards)) {
+                                ForEach(Array(cards.enumerated()), id: \.element.id) { rowIdx, card in
                                     HStack(spacing: 12) {
                                         if isMultiSelect {
                                             Image(systemName: selectedIds.contains(card.id)
@@ -487,7 +957,7 @@ struct BusinessCardView: View {
                                         withAnimation { isMultiSelect = true }
                                         selectedIds = [card.id]
                                     }
-                                    .swipeActions(edge: .trailing) {
+                                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                                         if !isMultiSelect {
                                             Button(role: .destructive) {
                                                 if subscription.isPremium { lifeStore.deleteBusinessCard(card) }
@@ -501,11 +971,28 @@ struct BusinessCardView: View {
                                             .tint(.blue)
                                         }
                                     }
+                                    // 交錯淡入 + 向上進場動畫
+                                    .opacity(cardsAppeared ? 1 : 0)
+                                    .offset(y: cardsAppeared ? 0 : 12)
+                                    .animation(
+                                        .spring(response: 0.44, dampingFraction: 0.82)
+                                            .delay(0.04 * Double(min(sectionIdx * 3 + rowIdx, 14))),
+                                        value: cardsAppeared
+                                    )
                                 }
                             }
                         }
                     }
                     .listStyle(.insetGrouped)
+                    .scrollContentBackground(.hidden)
+                    .onAppear {
+                        withAnimation(.spring(response: 0.5, dampingFraction: 0.82).delay(0.05)) {
+                            cardsAppeared = true
+                        }
+                    }
+                    .onDisappear {
+                        cardsAppeared = false
+                    }
                 }
             }
             .background(Color(.systemGroupedBackground))
@@ -527,13 +1014,21 @@ struct BusinessCardView: View {
                     ToolbarItem(placement: .topBarTrailing) {
                         HStack(spacing: 12) {
                             Button {
-                                let all = Set(filteredCards.map { $0.id })
+                                let all = Set(cards.map { $0.id })
                                 selectedIds = (selectedIds == all) ? [] : all
                             } label: {
-                                Image(systemName: selectedIds.count == filteredCards.count && !filteredCards.isEmpty
+                                Image(systemName: selectedIds.count == cards.count && !cards.isEmpty
                                       ? "checkmark.circle.fill" : "checklist")
                                     .foregroundStyle(.blue)
                             }
+                            // [v25.400] 兩張以上才有合併的意義
+                            Button {
+                                startMerge(visible: cards)
+                            } label: {
+                                Image(systemName: "arrow.triangle.merge")
+                                    .foregroundStyle(.orange)
+                            }
+                            .disabled(selectedIds.count < 2)
                             Button {
                                 if selectedIds.isEmpty { return }
                                 showExportConfirm = true
@@ -552,6 +1047,20 @@ struct BusinessCardView: View {
                                     isMultiSelect = true
                                     selectedIds = []
                                 }
+                            }
+                        }
+                    }
+                    // [v25.398] 公司篩選：有名片才出現
+                    ToolbarItem(placement: .topBarTrailing) {
+                        if !lifeStore.businessCards.isEmpty {
+                            Button {
+                                showCompanyFilter = true
+                            } label: {
+                                Image(systemName: hiddenCompanies.isEmpty
+                                      ? "line.3.horizontal.decrease.circle"
+                                      : "line.3.horizontal.decrease.circle.fill")
+                                    .font(.title3)
+                                    .foregroundStyle(hiddenCompanies.isEmpty ? Color.secondary : Color.orange)
                             }
                         }
                     }
@@ -588,6 +1097,12 @@ struct BusinessCardView: View {
                         }
                     }
                 }
+            }
+            .sheet(isPresented: $showCompanyFilter) {
+                BusinessCardCompanyFilterSheet(
+                    companies: companyCounts,
+                    hidden: hiddenCompanies,
+                    onApply: { setHiddenCompanies($0) })
             }
             .confirmationDialog(
                 "將 \(selectedIds.count) 張名片加入「聯絡人」？",
@@ -664,116 +1179,196 @@ struct BusinessCardView: View {
                 }
                 .ignoresSafeArea()
             }
+            // [v25.400] 重複檢查與多選合併
+            .sheet(isPresented: $showDuplicateReview) {
+                BusinessCardDuplicateReview()
+            }
+            .sheet(item: $mergePlan) { plan in
+                BusinessCardMergeSheet(cardIds: plan.ids) { report in
+                    finishMerge(report)
+                }
+            }
+            .alert("合併名片", isPresented: Binding(
+                get: { mergeResultMessage != nil },
+                set: { if !$0 { mergeResultMessage = nil } }
+            )) {
+                Button("好", role: .cancel) {}
+            } message: {
+                Text(mergeResultMessage ?? "")
+            }
             .premiumLockAlert(isPresented: $showPremiumAlert)
         }
     }
 
-    /// 列表 row：頭像 + 姓名/職稱 + 公司/部門 + 聯絡方式列 + 日期
+    // 【美化方向 v25.80】cardRow 姓名補齊 .minimumScaleFactor 防截斷：
+    // card.name 是使用者掃描/自填、長度不可控的欄位，同檔案 BusinessCardDetailView.heroCard（下方
+    // 約 1500 行）顯示同一欄位早已用 .lineLimit(2) + .minimumScaleFactor(0.7) 防護，本列表 row 卻只有
+    // .lineLimit(1) 沒有縮放保護，輔助模式大字級下姓名偏長時會直接被省略號截斷、而非跟 heroCard 一樣先縮小顯示。
+    /// 列表 row：52pt 頭像圓角方形 + 姓名 / Capsule 職稱 / 公司部門 / 聯絡方式 + 日期
     private func cardRow(_ card: BusinessCard) -> some View {
-        HStack(alignment: .top, spacing: 12) {
+        let accent = Color(red: 1.00, green: 0.55, blue: 0.25)
+        let hasContact = !card.phones.isEmpty || !card.emails.isEmpty
+        let primaryPhone = card.phones.first ?? card.phone
+        let primaryEmail = card.emails.first ?? card.email
+
+        return HStack(alignment: .top, spacing: 12) {
             avatarView(card)
 
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 5) {
+                // 姓名 + 職稱 Capsule 膠囊
                 HStack(spacing: 6) {
                     Text(card.name.isEmpty ? "未命名" : card.name)
                         .font(.subheadline.weight(.semibold))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
                     if !card.jobTitle.isEmpty {
                         Text(card.jobTitle)
-                            .font(.caption2)
-                            .padding(.horizontal, 5).padding(.vertical, 1)
-                            .background(Color.blue.opacity(0.12))
+                            .font(.system(size: 10, weight: .semibold))
                             .foregroundStyle(.blue)
-                            .clipShape(RoundedRectangle(cornerRadius: 3))
+                            .padding(.horizontal, 6).padding(.vertical, 2.5)
+                            .background(Color.blue.opacity(0.10))
+                            .clipShape(Capsule())
+                            // v2：補 stroke 讓膠囊輪廓更立體
+                            .overlay(Capsule().stroke(Color.blue.opacity(0.22), lineWidth: 0.6))
+                            .lineLimit(1)
                     }
                 }
+
+                // 公司 · 部門
                 if !card.company.isEmpty || !card.department.isEmpty {
                     HStack(spacing: 4) {
                         if !card.company.isEmpty {
-                            Text(card.company).font(.caption)
+                            Text(card.company)
+                                .font(.caption)
                                 .foregroundStyle(.secondary)
                                 .lineLimit(1)
                         }
                         if !card.company.isEmpty && !card.department.isEmpty {
-                            Text("·").foregroundStyle(.tertiary)
+                            Text("·").font(.caption).foregroundStyle(.tertiary)
                         }
                         if !card.department.isEmpty {
-                            Text(card.department).font(.caption)
+                            Text(card.department)
+                                .font(.caption)
                                 .foregroundStyle(.secondary)
                                 .lineLimit(1)
                         }
                     }
                 }
-                if !card.phone.isEmpty || !card.email.isEmpty {
-                    HStack(spacing: 10) {
-                        if !card.phone.isEmpty {
-                            HStack(spacing: 3) {
+
+                // 聯絡方式（phone + email 各一行）
+                if hasContact || !card.address.isEmpty {
+                    VStack(alignment: .leading, spacing: 2) {
+                        if !primaryPhone.isEmpty {
+                            HStack(spacing: 4) {
                                 Image(systemName: "phone.fill")
                                     .font(.system(size: 9))
-                                Text(card.phone).font(.caption2)
+                                Text(primaryPhone)
+                                    .font(.caption2)
+                                    .lineLimit(1)
                             }
                             .foregroundStyle(.green)
                         }
-                        if !card.email.isEmpty {
-                            HStack(spacing: 3) {
+                        if !primaryEmail.isEmpty {
+                            HStack(spacing: 4) {
                                 Image(systemName: "envelope.fill")
                                     .font(.system(size: 9))
-                                Text(card.email).font(.caption2).lineLimit(1)
+                                Text(primaryEmail)
+                                    .font(.caption2)
+                                    .lineLimit(1)
                             }
                             .foregroundStyle(.indigo)
                         }
-                    }
-                }
-                if !card.address.isEmpty {
-                    HStack(spacing: 3) {
-                        Image(systemName: "mappin.and.ellipse")
-                            .font(.system(size: 9))
-                        Text(card.address).font(.caption2)
-                            .foregroundStyle(.tertiary)
-                            .lineLimit(1)
+                        if !card.address.isEmpty && primaryPhone.isEmpty && primaryEmail.isEmpty {
+                            HStack(spacing: 4) {
+                                Image(systemName: "mappin.and.ellipse")
+                                    .font(.system(size: 9))
+                                Text(card.address)
+                                    .font(.caption2)
+                                    .foregroundStyle(.tertiary)
+                                    .lineLimit(1)
+                            }
+                        }
                     }
                 }
             }
-            Spacer()
+
+            Spacer(minLength: 4)
+
+            // 右側：日期膠囊 + 箭頭
             VStack(alignment: .trailing, spacing: 4) {
+                // v2：plain caption2 → Capsule 日期膠囊
                 Text(fmtDate(card.date))
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(.secondary.opacity(0.7))
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 3)
+                    .background(Color(.quaternarySystemFill))
+                    .clipShape(Capsule())
                 Image(systemName: "chevron.right")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(Color(.tertiaryLabel))
             }
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, 6)
     }
 
+    // 52pt 圓角頭像：有照片則顯示照片 + 細邊框；無照片則顯示首字母漸層圓角方塊
     @ViewBuilder
     private func avatarView(_ card: BusinessCard) -> some View {
-        if let url = card.photoURL,
-           let img = UIImage(contentsOfFile: url.path) {
-            Image(uiImage: img)
-                .resizable()
-                .scaledToFill()
-                .frame(width: 48, height: 48)
-                .clipShape(RoundedRectangle(cornerRadius: 10))
-        } else {
-            let initial = String((card.name.isEmpty ? card.company : card.name).prefix(1))
-            ZStack {
-                RoundedRectangle(cornerRadius: 10)
-                    .fill(LinearGradient(
-                        colors: [.orange, .pink.opacity(0.8)],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    ))
-                    .frame(width: 48, height: 48)
-                Text(initial)
-                    .font(.title3.bold())
-                    .foregroundStyle(.white)
+        if let url = card.photoURL {
+            AsyncLocalImage(url: url) { img, _ in
+                if let img {
+                    Image(uiImage: img)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: 52, height: 52)
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12)
+                                .stroke(Color(.separator).opacity(0.25), lineWidth: 0.75)
+                        )
+                        .shadow(color: .black.opacity(0.12), radius: 4, x: 0, y: 2)
+                } else {
+                    avatarPlaceholder(card)
+                }
             }
+        } else {
+            avatarPlaceholder(card)
         }
     }
 
+    private func avatarPlaceholder(_ card: BusinessCard) -> some View {
+        let initial = String((card.name.isEmpty ? card.company : card.name).prefix(1))
+        return ZStack {
+            RoundedRectangle(cornerRadius: 12)
+                .fill(
+                    LinearGradient(
+                        colors: [
+                            Color(red: 1.00, green: 0.62, blue: 0.32),
+                            Color(red: 0.90, green: 0.30, blue: 0.60)
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+                .frame(width: 52, height: 52)
+                .shadow(color: Color(red: 0.90, green: 0.30, blue: 0.60).opacity(0.28), radius: 6, x: 0, y: 3)
+            Text(initial)
+                .font(.system(size: 20, weight: .bold, design: .rounded))
+                .foregroundStyle(.white)
+            // v2：補白色邊框讓無照片頭像更立體
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(.white.opacity(0.30), lineWidth: 0.75)
+                .frame(width: 52, height: 52)
+        }
+    }
+
+    private static let cardDateFormatter: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "yyyy/M/d"; return f
+    }()
+
     private func fmtDate(_ date: Date) -> String {
-        let f = DateFormatter(); f.dateFormat = "yyyy/M/d"; return f.string(from: date)
+        Self.cardDateFormatter.string(from: date)
     }
 
     // MARK: - 複製名片
@@ -906,6 +1501,28 @@ struct BusinessCardView: View {
     }
 }
 
+// MARK: - 美化紀錄（BusinessCardDetailView）
+// [2026-06 v2] 本次美化方向（BusinessCardDetailView — 名片詳細頁）：
+//   1. heroCard：background 升級為 ZStack（原漸層 + 兩顆散景裝飾圓），製造立體層次感，
+//      對齊 FinanceOverviewView.totalAssetsCard / OverviewView.monthlyBalanceCard 規格；
+//      shadow 從 .black.opacity(0.2) 升級為雙層 shadow（橘色主光暈 + 黑色基礎陰影），
+//      加入 cardAppeared spring 進場動畫（opacity + Y 位移），
+//      對齊 VehicleDetailView.flashCard / StockDetailView 進場規格。
+//   2. contactCard：加入 section header（Capsule 漸層側條 + "聯絡方式" + 計數膠囊），
+//      對齊 LifeOverviewView / CareerView.milestoneListSection 標題規格；
+//      Divider().padding(.leading,48) → Rectangle(.separator.opacity(0.20)) 0.5pt 細分隔線；
+//      容器加 overlay 細邊框 + 雙層陰影，對齊 VariableExpenseView / StockDetailView 卡片規格。
+//   3. contactRow：圖示圓 32pt → 36pt + LinearGradient(opacity:0.22→0.09) + stroke(opacity:0.22),
+//      對齊 FamilyMembersResumeView / IncomeView.incomeRow 圖示圓規格。
+//   4. metaCard：容器加 overlay 細邊框 + 雙層陰影；cornerRadius 16 → 14。
+//   5. metaRow：圖示圓 32pt → 36pt + LinearGradient + stroke，對齊 contactRow 規格。
+//   6. noteCard：加入 section header（Capsule 漸層側條 + "備註"），
+//      對齊全 App section 標題設計語言；容器加 overlay + shadow，對齊 noteCard 統一規格。
+// [2026-07 v3] 一致性小步美化：
+//   7. qrFullscreenView「關閉」按鈕：topBarTrailing → topBarLeading，
+//      對齊本檔案 BusinessCardDetailView 主頁與全 App「關閉／取消」一律置左的慣例
+//      （下次美化本檔案時，可從這裡接著找其他可統一之處）
+
 // MARK: - 名片詳細頁（點 row 開啟）
 
 struct BusinessCardDetailView: View {
@@ -925,8 +1542,14 @@ struct BusinessCardDetailView: View {
     @State private var showPhotosPicker = false
     @State private var showAvatarLightbox = false
     @State private var pickerItem: PhotosPickerItem?
+    // 選取頭像是非同步的（iCloud 圖片可能要等幾秒），若使用者在等待期間又重新選了一次
+    // （或改用拍照），較慢完成的前一次選取不該覆蓋較新的結果；用世代編號判斷完成時是否
+    // 仍是最新一次選取（同型修復見 OrgPersonEditor.photoLoadGeneration）。
+    @State private var avatarLoadGeneration = 0
     @State private var showQRFullscreen = false
     @State private var viewingLinkedOrgPersonId: UUID?
+    // 美化：英雄卡片進場動畫旗標（對齊 VehicleDetailView.flashCard / RealEstateDetailView 規格）
+    @State private var cardAppeared = false
 
     private var card: BusinessCard {
         lifeStore.businessCards.first(where: { $0.id == cardId })
@@ -1111,18 +1734,21 @@ struct BusinessCardDetailView: View {
         .padding(20)
         .frame(maxWidth: .infinity, alignment: .leading)
         .frame(minHeight: 200)
-        .background(
-            LinearGradient(
-                colors: [Color.orange, Color.pink.opacity(0.85), Color.purple.opacity(0.7)],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 18))
-        .shadow(color: .black.opacity(0.2), radius: 8, y: 4)
+        .heroCardShell(card: .businessCardDetail)
         .padding(.horizontal)
+        // 英雄卡片進場動畫（對齊 VehicleDetailView.flashCard / StockDetailView 進場規格）
+        .opacity(cardAppeared ? 1 : 0)
+        .offset(y: cardAppeared ? 0 : 22)
+        .onAppear {
+            withAnimation(.spring(response: 0.52, dampingFraction: 0.78)) {
+                cardAppeared = true
+            }
+        }
         .sheet(isPresented: $showCamera) {
             CameraPicker { image in
+                // 讓任何仍在進行中的相簿選取 Task 過期，避免它稍後才完成、
+                // 把剛拍好的頭像又蓋回相簿選的舊結果。
+                avatarLoadGeneration += 1
                 if let data = image.jpegData(compressionQuality: 0.85) {
                     saveAvatarData(data)
                 }
@@ -1131,9 +1757,14 @@ struct BusinessCardDetailView: View {
         }
         .photosPicker(isPresented: $showPhotosPicker, selection: $pickerItem, matching: .images)
         .onChange(of: pickerItem) { _, item in
+            avatarLoadGeneration += 1
+            let generation = avatarLoadGeneration
             Task {
                 guard let item, let data = try? await item.loadTransferable(type: Data.self) else { return }
                 await MainActor.run {
+                    // 若載入期間使用者又重選了一次（或改用拍照），這次結果已過期，不套用，
+                    // 避免較慢完成的舊選取覆蓋掉使用者實際想要的較新選取。
+                    guard generation == avatarLoadGeneration else { return }
                     saveAvatarData(data)
                     pickerItem = nil
                 }
@@ -1141,6 +1772,13 @@ struct BusinessCardDetailView: View {
         }
         .sheet(isPresented: $showQRFullscreen) {
             qrFullscreenView
+        }
+        // [v25.400] 這張名片不在了就自動關掉。
+        // 名片可能在這張詳情開著的時候消失（被合併掉、或 iCloud 從別台裝置同步了刪除），
+        // 而上面的 `card` 撈不到時會退回一張空白名片——畫面會停在一張什麼都沒有的卡片上，
+        // 連編輯都能打開，看起來像資料壞了。
+        .onChange(of: lifeStore.businessCards.count) { _, _ in
+            if !lifeStore.businessCards.contains(where: { $0.id == cardId }) { dismiss() }
         }
     }
 
@@ -1185,22 +1823,20 @@ struct BusinessCardDetailView: View {
     @ViewBuilder
     private var avatarContent: some View {
         ZStack {
-            if let url = card.photoURL,
-               let img = UIImage(contentsOfFile: url.path) {
-                Image(uiImage: img)
-                    .resizable()
-                    .scaledToFill()
-                    .frame(width: 76, height: 76)
-                    .clipShape(RoundedRectangle(cornerRadius: 14))
+            if let url = card.photoURL {
+                AsyncLocalImage(url: url) { img, _ in
+                    if let img {
+                        Image(uiImage: img)
+                            .resizable()
+                            .scaledToFill()
+                            .frame(width: 76, height: 76)
+                            .clipShape(RoundedRectangle(cornerRadius: 14))
+                    } else {
+                        avatarPlaceholder
+                    }
+                }
             } else {
-                RoundedRectangle(cornerRadius: 14)
-                    .fill(Color.white.opacity(0.2))
-                    .frame(width: 76, height: 76)
-                    .overlay(
-                        Image(systemName: "person.crop.rectangle.fill")
-                            .font(.system(size: 36))
-                            .foregroundStyle(.white.opacity(0.85))
-                    )
+                avatarPlaceholder
             }
             // 右下角小相機圖示提示可點選
             VStack {
@@ -1219,6 +1855,17 @@ struct BusinessCardDetailView: View {
             RoundedRectangle(cornerRadius: 14)
                 .stroke(Color.white.opacity(0.5), lineWidth: 1)
         )
+    }
+
+    private var avatarPlaceholder: some View {
+        RoundedRectangle(cornerRadius: 14)
+            .fill(Color.white.opacity(0.2))
+            .frame(width: 76, height: 76)
+            .overlay(
+                Image(systemName: "person.crop.rectangle.fill")
+                    .font(.system(size: 36))
+                    .foregroundStyle(.white.opacity(0.85))
+            )
     }
 
     // MARK: - QR Code
@@ -1274,7 +1921,7 @@ struct BusinessCardDetailView: View {
             .navigationTitle("名片 QR Code")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItem(placement: .topBarLeading) {
                     Button("關閉") { showQRFullscreen = false }
                 }
             }
@@ -1286,7 +1933,10 @@ struct BusinessCardDetailView: View {
     private func saveAvatarData(_ data: Data) {
         guard var c = lifeStore.businessCards.first(where: { $0.id == cardId }) else { return }
         if let oldName = c.photoFileName { BusinessCard.deletePhoto(oldName) }
-        c.photoFileName = BusinessCard.savePhoto(data, id: c.id)
+        // 檔名用全新 UUID（而非沿用不變的 card id），確保換頭像後 photoURL 一定改變，
+        // 讓清單列（AsyncLocalImage 依 url 快取讀取結果）能重新讀取新照片，
+        // 不會因新照片覆寫同一路徑而讓已載入過的舊圖快取停留在畫面上。
+        c.photoFileName = BusinessCard.savePhoto(data, id: UUID())
         lifeStore.update(c)
     }
 
@@ -1355,52 +2005,95 @@ struct BusinessCardDetailView: View {
     }
 
     private var contactCard: some View {
-        VStack(spacing: 0) {
-            ForEach(Array(card.phones.enumerated()), id: \.offset) { idx, ph in
-                contactRow(
-                    icon: "phone.fill",
-                    label: card.phones.count > 1 ? "電話 \(idx + 1)" : "電話",
-                    value: ph,
-                    color: .green
-                ) { callPhone(ph) }
-                if idx < card.phones.count - 1 || !card.faxes.isEmpty || !card.emails.isEmpty || !card.address.isEmpty {
-                    Divider().padding(.leading, 48)
+        let count = card.phones.count + card.faxes.count + card.emails.count + (card.address.isEmpty ? 0 : 1)
+        return VStack(alignment: .leading, spacing: 10) {
+            // 聯絡方式 section header（Capsule 側條 + 標題 + 計數膠囊，對齊 CareerView.milestoneListSection 規格）
+            HStack(spacing: 8) {
+                Capsule()
+                    .fill(
+                        LinearGradient(
+                            colors: [.green, .green.opacity(0.55)],
+                            startPoint: .top, endPoint: .bottom
+                        )
+                    )
+                    .frame(width: 4, height: 18)
+                Text("聯絡方式")
+                    .font(.subheadline.weight(.bold))
+                Spacer()
+                if count > 0 {
+                    Text("\(count) 項")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.green)
+                        .padding(.horizontal, 8).padding(.vertical, 3)
+                        .background(Color.green.opacity(0.10))
+                        .clipShape(Capsule())
+                        .overlay(Capsule().stroke(Color.green.opacity(0.22), lineWidth: 0.75))
                 }
             }
-            ForEach(Array(card.faxes.enumerated()), id: \.offset) { idx, fx in
-                contactRow(
-                    icon: "printer.fill",
-                    label: card.faxes.count > 1 ? "傳真 \(idx + 1)" : "傳真",
-                    value: fx,
-                    color: .gray
-                ) {
-                    // 傳真不支援撥號，改為複製到剪貼簿
-                    UIPasteboard.general.string = fx
+            .padding(.horizontal)
+
+            VStack(spacing: 0) {
+                ForEach(Array(card.phones.enumerated()), id: \.offset) { idx, ph in
+                    contactRow(
+                        icon: "phone.fill",
+                        label: card.phones.count > 1 ? "電話 \(idx + 1)" : "電話",
+                        value: ph,
+                        color: .green
+                    ) { callPhone(ph) }
+                    if idx < card.phones.count - 1 || !card.faxes.isEmpty || !card.emails.isEmpty || !card.address.isEmpty {
+                        // 細分隔線（對齊 VehicleDetailView / FinanceOverviewView 卡片分隔規格）
+                        Rectangle()
+                            .fill(Color(.separator).opacity(0.20))
+                            .frame(height: 0.5)
+                            .padding(.leading, 62)
+                    }
                 }
-                if idx < card.faxes.count - 1 || !card.emails.isEmpty || !card.address.isEmpty {
-                    Divider().padding(.leading, 48)
+                ForEach(Array(card.faxes.enumerated()), id: \.offset) { idx, fx in
+                    contactRow(
+                        icon: "printer.fill",
+                        label: card.faxes.count > 1 ? "傳真 \(idx + 1)" : "傳真",
+                        value: fx,
+                        color: .gray
+                    ) {
+                        // 傳真不支援撥號，改為複製到剪貼簿
+                        UIPasteboard.general.string = fx
+                    }
+                    if idx < card.faxes.count - 1 || !card.emails.isEmpty || !card.address.isEmpty {
+                        Rectangle()
+                            .fill(Color(.separator).opacity(0.20))
+                            .frame(height: 0.5)
+                            .padding(.leading, 62)
+                    }
+                }
+                ForEach(Array(card.emails.enumerated()), id: \.offset) { idx, em in
+                    contactRow(
+                        icon: "envelope.fill",
+                        label: card.emails.count > 1 ? "Email \(idx + 1)" : "Email",
+                        value: em,
+                        color: .indigo
+                    ) { sendEmail(em) }
+                    if idx < card.emails.count - 1 || !card.address.isEmpty {
+                        Rectangle()
+                            .fill(Color(.separator).opacity(0.20))
+                            .frame(height: 0.5)
+                            .padding(.leading, 62)
+                    }
+                }
+                if !card.address.isEmpty {
+                    contactRow(icon: "mappin.and.ellipse", label: "地址", value: card.address, color: .red) {
+                        openInMaps(card.address)
+                    }
                 }
             }
-            ForEach(Array(card.emails.enumerated()), id: \.offset) { idx, em in
-                contactRow(
-                    icon: "envelope.fill",
-                    label: card.emails.count > 1 ? "Email \(idx + 1)" : "Email",
-                    value: em,
-                    color: .indigo
-                ) { sendEmail(em) }
-                if idx < card.emails.count - 1 || !card.address.isEmpty {
-                    Divider().padding(.leading, 48)
-                }
-            }
-            if !card.address.isEmpty {
-                contactRow(icon: "mappin.and.ellipse", label: "地址", value: card.address, color: .red) {
-                    openInMaps(card.address)
-                }
-            }
+            .background(Color(.systemBackground))
+            .clipShape(RoundedRectangle(cornerRadius: 14))
+            .overlay(
+                RoundedRectangle(cornerRadius: 14)
+                    .stroke(Color(.separator).opacity(0.12), lineWidth: 0.75)
+            )
+            .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 3)
+            .padding(.horizontal)
         }
-        .background(Color(.systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 16))
-        .padding(.horizontal)
     }
 
     private func contactRow(icon: String, label: String, value: String,
@@ -1408,7 +2101,16 @@ struct BusinessCardDetailView: View {
         Button(action: action) {
             HStack(spacing: 14) {
                 ZStack {
-                    Circle().fill(color.opacity(0.14)).frame(width: 32, height: 32)
+                    // 美化：36pt LinearGradient 圖示圓 + stroke（對齊 FamilyMembersResumeView / IncomeView.incomeRow 規格）
+                    Circle()
+                        .fill(
+                            LinearGradient(
+                                colors: [color.opacity(0.22), color.opacity(0.09)],
+                                startPoint: .topLeading, endPoint: .bottomTrailing
+                            )
+                        )
+                        .frame(width: 36, height: 36)
+                        .overlay(Circle().stroke(color.opacity(0.22), lineWidth: 0.75))
                     Image(systemName: icon).font(.subheadline).foregroundStyle(color)
                 }
                 VStack(alignment: .leading, spacing: 2) {
@@ -1433,14 +2135,28 @@ struct BusinessCardDetailView: View {
             metaRow(icon: "calendar", label: "收集日期", value: fmtDate(card.date), color: .gray)
         }
         .background(Color(.systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14)
+                .stroke(Color(.separator).opacity(0.12), lineWidth: 0.75)
+        )
+        .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 3)
         .padding(.horizontal)
     }
 
     private func metaRow(icon: String, label: String, value: String, color: Color) -> some View {
         HStack(spacing: 14) {
             ZStack {
-                Circle().fill(color.opacity(0.14)).frame(width: 32, height: 32)
+                // 美化：36pt LinearGradient 圖示圓 + stroke（對齊 contactRow 規格）
+                Circle()
+                    .fill(
+                        LinearGradient(
+                            colors: [color.opacity(0.22), color.opacity(0.09)],
+                            startPoint: .topLeading, endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 36, height: 36)
+                    .overlay(Circle().stroke(color.opacity(0.22), lineWidth: 0.75))
                 Image(systemName: icon).font(.subheadline).foregroundStyle(color)
             }
             Text(label).font(.subheadline).foregroundStyle(.secondary)
@@ -1453,17 +2169,37 @@ struct BusinessCardDetailView: View {
     // MARK: - 備註
 
     private var noteCard: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("備註")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 10) {
+            // 備註 section header（Capsule 漸層側條 + 標題，對齊全 App section 標題設計語言）
+            HStack(spacing: 8) {
+                Capsule()
+                    .fill(
+                        LinearGradient(
+                            colors: [.orange, .orange.opacity(0.55)],
+                            startPoint: .top, endPoint: .bottom
+                        )
+                    )
+                    .frame(width: 4, height: 18)
+                Text("備註")
+                    .font(.subheadline.weight(.bold))
+                Spacer()
+            }
+            .padding(.horizontal)
+
             Text(card.note)
                 .font(.subheadline)
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal)
+                .padding(.bottom, 16)
         }
-        .padding()
+        .padding(.top, 14)
         .background(Color(.systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14)
+                .stroke(Color(.separator).opacity(0.12), lineWidth: 0.75)
+        )
+        .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 3)
         .padding(.horizontal)
     }
 
@@ -1496,8 +2232,12 @@ struct BusinessCardDetailView: View {
         openURL(url)
     }
 
+    private static let detailDateFormatter: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "yyyy/M/d"; return f
+    }()
+
     private func fmtDate(_ date: Date) -> String {
-        let f = DateFormatter(); f.dateFormat = "yyyy/M/d"; return f.string(from: date)
+        Self.detailDateFormatter.string(from: date)
     }
 }
 
@@ -1507,7 +2247,24 @@ struct IdentifiableUUID: Identifiable {
     let id: UUID
 }
 
-// MARK: - 名片編輯
+// MARK: - 美化紀錄（BusinessCardEditor）
+// [2026-07 v1] 本次美化方向（BusinessCardEditor — 新增／編輯名片表單）：
+//   1. Section header：6 個 Section（基本資訊／電話／Email／傳真／地址／其他）原本全用系統
+//      預設純文字 Section("...")，與同檔案 BusinessCardDetailView.contactCard／noteCard、
+//      OrganizationView.orgPersonEditorSectionHeader／ChildDetailView.childEditorSectionHeader／
+//      ResumeView.profileEditorSectionHeader 等全 App 編輯表單「4pt 漸層 Capsule 側條 + 圖示 +
+//      粗體標題」規格脫節。新增 businessCardEditorSectionHeader(_:icon:color:)，依內容給主題色
+//      （基本資訊＝indigo／電話＝blue／Email＝purple／傳真＝orange／地址＝teal／其他＝secondary）；
+//      刪除名片 Section 維持無標頭，對齊全 App 編輯表單「刪除區塊不加標頭」慣例。
+//   純視覺層調整，欄位資料綁定、OCR 預填／編輯載入、新增刪除電話與 Email／save() 等既有商業
+//   邏輯完全未變動。
+// [2026-08 v2] save() 自帶 isSaving 忙碌守衛（disabled(...||isSaving)）避免快速連點造成重複
+//   名片紀錄，但按鈕本身在存檔期間毫無視覺提示——v25.103 曾記錄「v25.96 起儲存按鈕載入狀態
+//   補齊清單全數完成」，複查後發現本檔案的 BusinessCardEditor 其實不在當時清單內，是唯一仍
+//   缺這道規格的新增／編輯表單儲存按鈕。補上 HStack { if isSaving { ProgressView()
+//   .scaleEffect(0.7).tint(.green) }；Button(...) }，對齊 ResumeView／ChildDetailView／
+//   MyCalendarView／LifeFinanceView 等既有儲存按鈕載入狀態規格。純視覺層調整，save() 內部
+//   守衛判斷與電話/Email 陣列寫入、聯絡人建立等既有商業邏輯完全未變動。
 
 struct BusinessCardEditor: View {
     @EnvironmentObject var lifeStore: LifeStore
@@ -1530,22 +2287,45 @@ struct BusinessCardEditor: View {
     @State private var address = ""
     @State private var note = ""
     @State private var date = Date()
+    /// 存檔中鎖住儲存按鈕，避免 sheet 收合動畫播完前快速連點建立兩筆重複紀錄
+    @State private var isSaving = false
+
+    // [2026-07 v1] 對齊 OrganizationView.orgPersonEditorSectionHeader / ChildDetailView.
+    // childEditorSectionHeader 既有共用寫法（4pt 漸層 Capsule 色條 + 圖示 + .subheadline.semibold 標題）。
+    private func businessCardEditorSectionHeader(_ title: String, icon: String, color: Color) -> some View {
+        HStack(spacing: 7) {
+            Capsule()
+                .fill(LinearGradient(colors: [color, color.opacity(0.70)], startPoint: .top, endPoint: .bottom))
+                .frame(width: 4, height: 18)
+            Image(systemName: icon)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(color)
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.primary)
+        }
+    }
 
     var body: some View {
         NavigationStack {
             Form {
-                Section("基本資訊") {
+                Section {
                     TextField("姓名", text: $name)
                     TextField("公司名稱", text: $company)
                     TextField("部門", text: $department)
                     TextField("職稱", text: $jobTitle)
                     TextField("主要業務（可搜尋）", text: $primaryBusiness)
+                } header: {
+                    businessCardEditorSectionHeader("基本資訊", icon: "person.text.rectangle.fill", color: .indigo)
                 }
-                Section("電話") {
+                Section {
                     ForEach(phones.indices, id: \.self) { idx in
                         HStack {
                             TextField("電話 \(phones.count > 1 ? "\(idx + 1)" : "")",
-                                      text: $phones[idx])
+                                      text: Binding(
+                                          get: { idx < phones.count ? phones[idx] : "" },
+                                          set: { if idx < phones.count { phones[idx] = $0 } }
+                                      ))
                                 .keyboardType(.phonePad)
                             if phones.count > 1 {
                                 Button(role: .destructive) {
@@ -1563,13 +2343,18 @@ struct BusinessCardEditor: View {
                     } label: {
                         Label("新增電話", systemImage: "plus.circle").foregroundStyle(.green)
                     }
+                } header: {
+                    businessCardEditorSectionHeader("電話", icon: "phone.fill", color: .blue)
                 }
 
-                Section("Email") {
+                Section {
                     ForEach(emails.indices, id: \.self) { idx in
                         HStack {
                             TextField("Email \(emails.count > 1 ? "\(idx + 1)" : "")",
-                                      text: $emails[idx])
+                                      text: Binding(
+                                          get: { idx < emails.count ? emails[idx] : "" },
+                                          set: { if idx < emails.count { emails[idx] = $0 } }
+                                      ))
                                 .keyboardType(.emailAddress)
                                 .autocapitalization(.none)
                                 .disableAutocorrection(true)
@@ -1589,13 +2374,18 @@ struct BusinessCardEditor: View {
                     } label: {
                         Label("新增 Email", systemImage: "plus.circle").foregroundStyle(.green)
                     }
+                } header: {
+                    businessCardEditorSectionHeader("Email", icon: "envelope.fill", color: .purple)
                 }
 
-                Section("傳真") {
+                Section {
                     ForEach(faxes.indices, id: \.self) { idx in
                         HStack {
                             TextField("傳真 \(faxes.count > 1 ? "\(idx + 1)" : "")",
-                                      text: $faxes[idx])
+                                      text: Binding(
+                                          get: { idx < faxes.count ? faxes[idx] : "" },
+                                          set: { if idx < faxes.count { faxes[idx] = $0 } }
+                                      ))
                                 .keyboardType(.phonePad)
                             Button(role: .destructive) {
                                 faxes.remove(at: idx)
@@ -1611,14 +2401,20 @@ struct BusinessCardEditor: View {
                     } label: {
                         Label("新增傳真", systemImage: "plus.circle").foregroundStyle(.green)
                     }
+                } header: {
+                    businessCardEditorSectionHeader("傳真", icon: "printer.fill", color: .orange)
                 }
 
-                Section("地址") {
+                Section {
                     TextField("地址", text: $address)
+                } header: {
+                    businessCardEditorSectionHeader("地址", icon: "mappin.circle.fill", color: .teal)
                 }
-                Section("其他") {
+                Section {
                     DatePicker("收集日期", selection: $date, displayedComponents: .date)
                     TextField("備註", text: $note, axis: .vertical).lineLimit(2...5)
+                } header: {
+                    businessCardEditorSectionHeader("其他", icon: "text.bubble.fill", color: .secondary)
                 }
                 if editing != nil {
                     Section {
@@ -1634,9 +2430,15 @@ struct BusinessCardEditor: View {
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button("取消") { dismiss() } }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button(editing != nil ? "儲存" : "新增") { save() }
-                        .bold().foregroundStyle(.green)
-                        .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
+                    // v25.145 美化：isSaving 忙碌守衛補齊載入視覺，對齊全 App 儲存按鈕載入狀態規格。
+                    HStack(spacing: 6) {
+                        if isSaving {
+                            ProgressView().scaleEffect(0.7).tint(.green)
+                        }
+                        Button(editing != nil ? "儲存" : "新增") { save() }
+                            .bold().foregroundStyle(.green)
+                            .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty || isSaving)
+                    }
                 }
             }
             .onAppear {
@@ -1651,6 +2453,9 @@ struct BusinessCardEditor: View {
                     note = p.note
                     date = editing?.date ?? Date()
                     department = editing?.department ?? ""
+                    // OCR 重新掃描抓不到「主要往來」，沿用 date／department 的既有寫法一併保留，
+                    // 否則重新拍照辨識存檔會把原本已填的主要往來靜默清空。
+                    primaryBusiness = editing?.primaryBusiness ?? ""
                 } else if let e = editing {
                     name = e.name; company = e.company; department = e.department
                     jobTitle = e.jobTitle
@@ -1665,6 +2470,8 @@ struct BusinessCardEditor: View {
     }
 
     private func save() {
+        guard !isSaving else { return }
+        isSaving = true
         let id = editing?.id ?? UUID()
         // 新增 / 重新拍照辨識：有新的掃描照片時就用它，並把舊照片刪掉
         var photoFileName = editing?.photoFileName
@@ -1672,7 +2479,10 @@ struct BusinessCardEditor: View {
             if let oldName = photoFileName {
                 BusinessCard.deletePhoto(oldName)
             }
-            photoFileName = BusinessCard.savePhoto(data, id: id)
+            // 檔名用全新 UUID（而非沿用編輯中卡片不變的 id），理由同
+            // BusinessCardDetailView.saveAvatarData：避免同路徑覆寫造成
+            // AsyncLocalImage 快取的舊圖不更新。
+            photoFileName = BusinessCard.savePhoto(data, id: UUID())
         }
         let cleanedPhones = phones
             .map { $0.trimmingCharacters(in: .whitespaces) }
@@ -1703,5 +2513,516 @@ struct BusinessCardEditor: View {
         )
         if editing != nil { lifeStore.update(card) } else { lifeStore.add(card) }
         dismiss()
+    }
+}
+
+// MARK: - [v25.398] 公司篩選
+
+/// 勾選要「顯示」哪些公司。畫面上以顯示為主而不是隱藏為主——
+/// 使用者的心智是「我只要看這幾家」，用打勾表達比用叉叉直覺。
+/// 實際存進去的是「被隱藏的那幾家」，因為之後新增的公司預設要看得到。
+struct BusinessCardCompanyFilterSheet: View {
+    @Environment(\.dismiss) private var dismiss
+
+    let companies: [(company: String, count: Int)]
+    let onApply: (Set<String>) -> Void
+
+    @State private var hidden: Set<String>
+    @State private var query = ""
+
+    init(companies: [(company: String, count: Int)],
+         hidden: Set<String>,
+         onApply: @escaping (Set<String>) -> Void) {
+        self.companies = companies
+        self.onApply = onApply
+        // 只保留還存在的公司，順手清掉 AppStorage 裡的殘留
+        let live = Set(companies.map(\.company))
+        _hidden = State(initialValue: hidden.intersection(live))
+    }
+
+    private var listed: [(company: String, count: Int)] {
+        let q = query.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !q.isEmpty else { return companies }
+        return companies.filter { $0.company.lowercased().contains(q) }
+    }
+
+    private var shownCount: Int {
+        companies.filter { !hidden.contains($0.company) }.reduce(0) { $0 + $1.count }
+    }
+    private var totalCount: Int { companies.reduce(0) { $0 + $1.count } }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    HStack {
+                        Button("全部顯示") { hidden = [] }
+                            .disabled(hidden.isEmpty)
+                        Spacer()
+                        Button("全部隱藏") { hidden = Set(companies.map(\.company)) }
+                            .disabled(hidden.count == companies.count)
+                    }
+                    .font(.subheadline)
+                } footer: {
+                    Text("目前會顯示 \(shownCount) / \(totalCount) 張名片。這個設定只影響清單顯示，不會刪除任何名片，也不影響匯出或其他頁面。")
+                }
+
+                Section {
+                    if listed.isEmpty {
+                        Text("找不到符合的公司").font(.caption).foregroundStyle(.secondary)
+                    } else {
+                        ForEach(listed, id: \.company) { item in
+                            row(item)
+                        }
+                    }
+                } header: {
+                    Text("公司（\(companies.count)）")
+                }
+            }
+            .searchable(text: $query, prompt: "搜尋公司")
+            .navigationTitle("篩選公司")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) { Button("取消") { dismiss() } }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("完成") { onApply(hidden); dismiss() }.bold()
+                }
+            }
+        }
+    }
+
+    private func row(_ item: (company: String, count: Int)) -> some View {
+        let on = !hidden.contains(item.company)
+        return Button {
+            if on { hidden.insert(item.company) } else { hidden.remove(item.company) }
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: on ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 18))
+                    .foregroundStyle(on ? Color.green : Color.secondary.opacity(0.5))
+                Text(item.company)
+                    .foregroundStyle(on ? .primary : .secondary)
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+                Text("\(item.count)")
+                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.secondary)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+// MARK: - 合併回報的文字化（v25.400）
+
+extension LifeStore.BusinessCardMergeReport {
+    /// 合併完之後要跟使用者講什麼。刻意連「順手改掉了哪些別的地方」都講——
+    /// 合併會動到會議負責人與兼任成員名單，不講的話使用者會以為只是少了一張名片。
+    var summaryText: String {
+        guard mergedCount > 0 else { return "沒有可以合併的名片。" }
+        var lines = ["已把 \(mergedCount) 張名片併進保留的那一張。"]
+        var moved: [String] = []
+        if orgPeopleRelinked > 0 { moved.append("公司組織人員連結 \(orgPeopleRelinked) 筆") }
+        if meetingAssigneesRemapped > 0 { moved.append("會議議程負責人 \(meetingAssigneesRemapped) 處") }
+        if sideRoleMembersRemapped > 0 { moved.append("兼任職務成員 \(sideRoleMembersRemapped) 筆") }
+        if !moved.isEmpty { lines.append("已改指到保留的名片：" + moved.joined(separator: "、") + "。") }
+        if sideRoleMembersCleared > 0 {
+            lines.append("有 \(sideRoleMembersCleared) 筆兼任成員因為同一個職務裡已經有人指向保留的那張名片，"
+                         + "只解除了連結（成員那一列與名字都留著），避免同一個人在名單裡出現兩次。")
+        }
+        if !droppedPersonLinks.isEmpty {
+            let names = droppedPersonLinks.map { $0.isEmpty ? "未命名" : $0 }
+            lines.append("⚠️ 保留的名片已經連到別位人員，所以放棄了與「"
+                         + names.joined(separator: "、")
+                         + "」的連結。要改連結請到公司組織那邊重新指定。")
+        }
+        return lines.joined(separator: "\n\n")
+    }
+}
+
+// MARK: - 名片合併（多選）
+
+/// 從多選挑出來的幾張名片合併成一張。
+///
+/// 刻意讓使用者自己選要留哪一張：多選是「我知道這幾張是同一個人」的手動操作，
+/// 系統只給建議（資料最完整／有連結組織人員的那張），不能替使用者決定。
+struct BusinessCardMergeSheet: View {
+    @EnvironmentObject var lifeStore: LifeStore
+    @Environment(\.dismiss) private var dismiss
+
+    let cardIds: [UUID]
+    /// 合併完回報給呼叫端（讓名片頁收掉多選、顯示結果）
+    let onMerged: (LifeStore.BusinessCardMergeReport) -> Void
+
+    @State private var keepId: UUID?
+    @State private var confirming = false
+    @State private var loaded = false
+
+    init(cardIds: [UUID], onMerged: @escaping (LifeStore.BusinessCardMergeReport) -> Void) {
+        self.cardIds = cardIds
+        self.onMerged = onMerged
+    }
+
+    private var cards: [BusinessCard] {
+        // 照 cardIds 的順序撈，找不到的（同時被刪掉）就跳過
+        cardIds.compactMap { id in lifeStore.businessCards.first { $0.id == id } }
+    }
+
+    private var keeper: BusinessCard? {
+        guard let keepId else { return nil }
+        return cards.first { $0.id == keepId }
+    }
+
+    private var losers: [BusinessCard] {
+        cards.filter { $0.id != keepId }
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    Text(Self.explainer)
+                        .font(.caption).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                } header: {
+                    Text("合併會做什麼")
+                }
+
+                Section {
+                    ForEach(cards) { card in
+                        keeperRow(card)
+                    }
+                } header: {
+                    Text("要保留哪一張")
+                } footer: {
+                    Text("其餘 \(max(0, cards.count - 1)) 張會把資料併進這一張後移除。")
+                }
+
+                if let k = keeper, !losers.isEmpty {
+                    Section {
+                        ForEach(mergePreview(keeper: k), id: \.self) { line in
+                            HStack(alignment: .top, spacing: 8) {
+                                Image(systemName: "arrow.turn.down.right")
+                                    .font(.system(size: 11)).foregroundStyle(.green)
+                                    .padding(.top, 2)
+                                Text(line).font(.caption)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+                    } header: {
+                        Text("會併過去的內容")
+                    }
+
+                    let warnings = mergeWarnings(keeper: k)
+                    if !warnings.isEmpty {
+                        Section {
+                            ForEach(warnings, id: \.self) { line in
+                                HStack(alignment: .top, spacing: 8) {
+                                    Image(systemName: "exclamationmark.triangle.fill")
+                                        .font(.system(size: 11)).foregroundStyle(.orange)
+                                        .padding(.top, 2)
+                                    Text(line).font(.caption)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+                            }
+                        } header: {
+                            Text("要注意")
+                        }
+                    }
+                }
+            }
+            .navigationTitle("合併名片")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) { Button("取消") { dismiss() } }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("合併") { confirming = true }
+                        .bold()
+                        .disabled(keeper == nil || losers.isEmpty)
+                }
+            }
+            .confirmationDialog("合併名片", isPresented: $confirming, titleVisibility: .visible) {
+                Button("合併 \(losers.count) 張", role: .destructive) { merge() }
+                Button("取消", role: .cancel) {}
+            } message: {
+                Text("這個動作沒辦法復原。")
+            }
+            .onAppear {
+                guard !loaded else { return }
+                loaded = true
+                keepId = lifeStore.suggestedBusinessCardKeeper(among: cardIds) ?? cards.first?.id
+            }
+        }
+    }
+
+    private static let explainer =
+        "留下的那張名片，空著的欄位會由其他張補上（已經有值的一律不覆蓋）；"
+        + "電話、Email、傳真是併集去重，兩張各記一支都會留著；備註會接在後面。\n\n"
+        + "指向被併掉那幾張的東西會改指到保留的那一張，不是解除——"
+        + "包括公司組織人員的連結、部屬會議議程裡的負責人（含週期性會議的每一次），"
+        + "以及兼任職務的成員名單。"
+
+    private func keeperRow(_ card: BusinessCard) -> some View {
+        let isKeeper = card.id == keepId
+        return Button {
+            keepId = card.id
+        } label: {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: isKeeper ? "largecircle.fill.circle" : "circle")
+                    .font(.system(size: 17))
+                    .foregroundStyle(isKeeper ? Color.green : Color.secondary.opacity(0.5))
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 6) {
+                        Text(card.name.trimmingCharacters(in: .whitespaces).isEmpty
+                             ? "未命名" : card.name)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.primary)
+                        if isKeeper {
+                            Text("保留")
+                                .font(.system(size: 10, weight: .bold))
+                                .padding(.horizontal, 6).padding(.vertical, 2)
+                                .background(Color.green.opacity(0.13))
+                                .foregroundStyle(.green)
+                                .clipShape(Capsule())
+                        }
+                    }
+                    Text(Self.cardMeta(card))
+                        .font(.caption2).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 0)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// 字串在 ViewBuilder 外組好
+    static func cardMeta(_ c: BusinessCard) -> String {
+        var parts: [String] = []
+        let company = c.company.trimmingCharacters(in: .whitespaces)
+        parts.append(company.isEmpty ? "未填公司" : company)
+        let title = c.jobTitle.trimmingCharacters(in: .whitespaces)
+        if !title.isEmpty { parts.append(title) }
+        if c.photoFileName != nil { parts.append("有照片") }
+        if c.linkedOrgPersonId != nil { parts.append("已連結組織人員") }
+        if !c.phones.isEmpty { parts.append("電話 \(c.phones.count)") }
+        if !c.emails.isEmpty { parts.append("Email \(c.emails.count)") }
+        if !c.note.trimmingCharacters(in: .whitespaces).isEmpty { parts.append("有備註") }
+        parts.append("建立 " + dateFmt.string(from: c.date))
+        return parts.joined(separator: "・")
+    }
+
+    static let dateFmt: DateFormatter = {
+        let f = DateFormatter(); f.locale = Locale(identifier: "zh_Hant_TW")
+        f.dateFormat = "yyyy/M/d"; return f
+    }()
+
+    /// 預覽「會補上什麼」。只列真的會變的東西，不要列一堆沒差的項目。
+    private func mergePreview(keeper k: BusinessCard) -> [String] {
+        var out: [String] = []
+        func blank(_ s: String) -> Bool { s.trimmingCharacters(in: .whitespaces).isEmpty }
+        for l in losers {
+            var gains: [String] = []
+            if blank(k.company) && !blank(l.company) { gains.append("公司「\(l.company)」") }
+            if blank(k.department) && !blank(l.department) { gains.append("部門「\(l.department)」") }
+            if blank(k.jobTitle) && !blank(l.jobTitle) { gains.append("職稱「\(l.jobTitle)」") }
+            if blank(k.address) && !blank(l.address) { gains.append("地址") }
+            if blank(k.primaryBusiness) && !blank(l.primaryBusiness) { gains.append("主要業務") }
+            if k.photoFileName == nil && l.photoFileName != nil { gains.append("照片") }
+            let newPhones = LifeStore.mergedContactList(k.phones, l.phones).count - k.phones.count
+            if newPhones > 0 { gains.append("電話 \(newPhones) 支") }
+            let newEmails = LifeStore.mergedContactList(k.emails, l.emails).count - k.emails.count
+            if newEmails > 0 { gains.append("Email \(newEmails) 筆") }
+            let newFaxes = LifeStore.mergedContactList(k.faxes, l.faxes).count - k.faxes.count
+            if newFaxes > 0 { gains.append("傳真 \(newFaxes) 筆") }
+            if !blank(l.note) && !k.note.contains(l.note.trimmingCharacters(in: .whitespacesAndNewlines)) {
+                gains.append("備註")
+            }
+            let name = blank(l.name) ? "未命名" : l.name
+            out.append(gains.isEmpty
+                       ? "「\(name)」沒有保留的那張缺的欄位，只會被移除。"
+                       : "從「\(name)」補上：" + gains.joined(separator: "、"))
+        }
+        return out
+    }
+
+    /// 會被放棄或改動到別處的事，合併前先講。
+    private func mergeWarnings(keeper k: BusinessCard) -> [String] {
+        var out: [String] = []
+        // 兩張連到不同人員 → 一張名片只能對一位，一定得放棄一條
+        if let kp = k.linkedOrgPersonId {
+            for l in losers {
+                guard let lp = l.linkedOrgPersonId, lp != kp else { continue }
+                let lname = lifeStore.orgPeople.first { $0.id == lp }?.name ?? "某位人員"
+                let kname = lifeStore.orgPeople.first { $0.id == kp }?.name ?? "另一位人員"
+                out.append("保留的名片已經連到「\(kname)」，所以「\(lname)」的連結會被解除"
+                           + "（一張名片只能對一位組織人員）。要改請到公司組織那邊重新指定。")
+            }
+        }
+        // 被併掉的照片會真的被刪掉（keeper 已有照片時）
+        let droppedPhotos = losers.filter { $0.photoFileName != nil }.count
+            - (k.photoFileName == nil ? 1 : 0)
+        if droppedPhotos > 0 {
+            out.append("被併掉的名片還有 \(droppedPhotos) 張照片會一起刪掉（保留的那張已經有照片了）。")
+        }
+        return out
+    }
+
+    private func merge() {
+        guard let keepId else { return }
+        let report = lifeStore.mergeBusinessCards(keepId: keepId, absorbIds: losers.map(\.id))
+        onMerged(report)
+        dismiss()
+    }
+}
+
+// MARK: - 名片重複檢查
+
+/// 列出同名同公司的重複名片，讓使用者看清楚「會留哪一張、會併掉哪幾張」再決定。
+///
+/// 刻意不做自動合併：合併不可逆，而且「同名同公司」也不保證是同一個人
+///（大公司裡真的有同名同事），一定要讓人先看過（比照 OrgPersonDuplicateReview）。
+struct BusinessCardDuplicateReview: View {
+    @EnvironmentObject var lifeStore: LifeStore
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var excluded: Set<String> = []
+    @State private var confirming = false
+    @State private var resultText: String?
+
+    private var groups: [LifeStore.BusinessCardDuplicateGroup] {
+        lifeStore.businessCardDuplicateGroups()
+    }
+
+    private var selected: [LifeStore.BusinessCardDuplicateGroup] {
+        groups.filter { !excluded.contains($0.id) }
+    }
+
+    private var selectedRemovals: Int {
+        selected.reduce(0) { $0 + $1.duplicates.count }
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                if let resultText {
+                    Section {
+                        Text(resultText)
+                            .font(.caption).foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    } header: {
+                        Text("合併結果")
+                    }
+                }
+                if groups.isEmpty {
+                    Section {
+                        Text(resultText == nil
+                             ? "沒有偵測到重複的名片。"
+                             : "目前沒有其他重複的名片。")
+                            .font(.callout).foregroundStyle(.secondary)
+                    }
+                } else {
+                    Section {
+                        Text(Self.explainer)
+                            .font(.caption).foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    } header: {
+                        Text("怎麼判斷的")
+                    }
+                    ForEach(groups) { group in
+                        groupSection(group)
+                    }
+                }
+            }
+            .navigationTitle("重複名片")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) { Button("關閉") { dismiss() } }
+                ToolbarItem(placement: .topBarTrailing) {
+                    if !groups.isEmpty {
+                        Button("合併") { confirming = true }
+                            .bold()
+                            .disabled(selected.isEmpty)
+                    }
+                }
+            }
+            .confirmationDialog("合併重複名片", isPresented: $confirming, titleVisibility: .visible) {
+                Button("合併 \(selectedRemovals) 張", role: .destructive) { merge() }
+                Button("取消", role: .cancel) {}
+            } message: {
+                Text("會保留每一組標示「保留」的那一張，其餘 \(selectedRemovals) 張的欄位、電話、Email 與備註會併進去，"
+                     + "指向它們的組織人員連結、會議負責人與兼任成員會改指到保留的那一張，然後移除。這個動作沒辦法復原。")
+            }
+        }
+    }
+
+    private static let explainer =
+        "比對的是「姓名相同、而且公司也相同」的名片。\n\n"
+        + "跨公司的同名一律不算重複：多半是兩個不同的人；"
+        + "就算真的是同一個人換了工作，舊公司那張名片本身就是一段紀錄，"
+        + "併掉等於把它抹掉。那種情況請用多選（長按名片）自己挑要留哪一張。"
+
+    @ViewBuilder
+    private func groupSection(_ group: LifeStore.BusinessCardDuplicateGroup) -> some View {
+        let on = !excluded.contains(group.id)
+        Section {
+            cardRow(group.keeper, isKeeper: true, reason: group.keepReason)
+            ForEach(group.duplicates) { dup in
+                cardRow(dup, isKeeper: false, reason: nil)
+            }
+            Toggle("合併這一組", isOn: Binding(
+                get: { on },
+                set: { keep in
+                    if keep { excluded.remove(group.id) } else { excluded.insert(group.id) }
+                }
+            ))
+            .tint(.green)
+        } header: {
+            HStack(spacing: 6) {
+                Text(group.name.isEmpty ? "未命名" : group.name)
+                Text(group.company.isEmpty ? "未填公司" : group.company)
+                    .font(.caption2).foregroundStyle(.secondary)
+                Spacer()
+                Text("\(group.duplicates.count + 1) 張")
+                    .font(.caption2).foregroundStyle(.orange)
+            }
+        } footer: {
+            if !on { Text("已略過——真的有兩位同名同事時把這一組關掉。") }
+        }
+    }
+
+    private func cardRow(_ c: BusinessCard, isKeeper: Bool, reason: String?) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: isKeeper ? "checkmark.circle.fill" : "arrow.triangle.merge")
+                .font(.system(size: 15))
+                .foregroundStyle(isKeeper ? Color.green : Color.orange)
+                .frame(width: 20)
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 6) {
+                    Text(isKeeper ? "保留" : "併入並移除")
+                        .font(.system(size: 10, weight: .bold))
+                        .padding(.horizontal, 6).padding(.vertical, 2)
+                        .background((isKeeper ? Color.green : Color.orange).opacity(0.13))
+                        .foregroundStyle(isKeeper ? Color.green : Color.orange)
+                        .clipShape(Capsule())
+                    if let reason {
+                        Text(reason).font(.caption2).foregroundStyle(.secondary)
+                    }
+                }
+                Text(BusinessCardMergeSheet.cardMeta(c))
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.vertical, 2)
+    }
+
+    private func merge() {
+        let report = lifeStore.mergeBusinessCardDuplicates(selected)
+        resultText = report.summaryText
+        excluded = []
     }
 }

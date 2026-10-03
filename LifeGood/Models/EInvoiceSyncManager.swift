@@ -28,6 +28,7 @@ final class EInvoiceSyncManager: ObservableObject {
     private let client = EInvoiceClient()
     private let historyURL: URL
     private let stateURL: URL
+    private let persistQueue = DispatchQueue(label: "com.lifegood.einvoice.persist", qos: .utility)
 
     private static let autoSyncKey = "einvoice_auto_sync"
     private static let intervalKey = "einvoice_sync_interval_hours"
@@ -88,11 +89,20 @@ final class EInvoiceSyncManager: ObservableObject {
 
     // MARK: - 同步入口
 
+    /// 財政部載具查詢平台的發票入帳有已知延遲（部分商家/特店延後批次上傳，常見 1～3 天），
+    /// 若每次都直接從「上次同步當下」當作查詢起點，lastSyncDate 逐次前進，
+    /// 一旦某張發票在它自己的開立日當天查不到、要等 1～3 天後才會出現在平台上，
+    /// 下一次同步的起點早已經過了它的開立日，之後永遠不會再查到那個區間 → 該筆消費永久漏匯入。
+    /// 每次同步固定往回多查 3 天當緩衝；重疊區間已查過的發票靠 alreadyImported（invNum）去重，
+    /// 不會造成重複匯入，只是多打幾天份的查詢。
+    private static let syncLookbackBuffer: TimeInterval = 3 * 86400
+
     /// 手動同步：從上次同步日（或預設 30 天前）到今天
     func syncNow(expenseStore: ExpenseStore) async {
         guard let carrier else { return }
         let end = Date()
-        let start = lastSyncDate ?? Calendar.current.date(byAdding: .day, value: -30, to: end) ?? end
+        let start = lastSyncDate.map { $0.addingTimeInterval(-Self.syncLookbackBuffer) }
+            ?? Calendar.current.date(byAdding: .day, value: -30, to: end) ?? end
         await performSync(carrier: carrier, from: start, to: end, expenseStore: expenseStore)
     }
 
@@ -117,6 +127,10 @@ final class EInvoiceSyncManager: ObservableObject {
         var failed = 0
         var errors: [String] = []
         let alreadyImported = Set(importHistory.map { $0.invNum })
+        // 收集所有待寫入的支出，迴圈結束後一次 append，只觸發一次 save() → CloudKit push
+        var pendingExpenses: [Expense] = []
+        // 同樣收集新紀錄，避免在迴圈內每次 insert(at:0) 造成 O(n²) 移位與 N 次 @Published 通知
+        var newHistoryRecords: [EInvoiceImportRecord] = []
 
         do {
             let headers = try await client.fetchHeaders(carrier: carrier, from: start, to: end)
@@ -125,17 +139,23 @@ final class EInvoiceSyncManager: ObservableObject {
                     skipped += 1
                     continue
                 }
+                // 作廢發票不應計入支出：政府 API 的 invStatus 非「開立」（例如「作廢」）代表商家已作廢此發票
+                if header.invStatus != "開立" {
+                    skipped += 1
+                    continue
+                }
                 do {
                     let items = try await client.fetchDetail(carrier: carrier, header: header)
                     let category = InvoiceCategorizer.shared.categorize(seller: header.sellerName,
                                                                         items: items)
-                    let expenseIds = writeExpenses(header: header, items: items,
-                                                    category: category, store: expenseStore)
+                    let newExpenses = buildExpenses(header: header, items: items, category: category)
+                    let expenseIds = newExpenses.map(\.id)
+                    pendingExpenses.append(contentsOf: newExpenses)
                     let record = EInvoiceImportRecord(
                         invNum: header.invNum, invDate: header.invDate,
                         sellerName: header.sellerName, amount: header.amount,
                         expenseIds: expenseIds, assignedCategory: category)
-                    importHistory.insert(record, at: 0)
+                    newHistoryRecords.append(record)
                     imported += 1
                 } catch {
                     failed += 1
@@ -145,6 +165,16 @@ final class EInvoiceSyncManager: ObservableObject {
         } catch {
             failed += 1
             errors.append(error.localizedDescription)
+        }
+
+        // 一次性 prepend，只觸發一次 @Published 通知
+        if !newHistoryRecords.isEmpty {
+            importHistory.insert(contentsOf: newHistoryRecords, at: 0)
+        }
+
+        // 一次性 append，只觸發一次 didSet → save() → CloudKit push
+        if !pendingExpenses.isEmpty {
+            expenseStore.addExpenses(pendingExpenses)
         }
 
         // Trim history to most recent 500
@@ -161,13 +191,13 @@ final class EInvoiceSyncManager: ObservableObject {
         UserDefaults.standard.set(result.timestamp, forKey: Self.lastSyncDateKey)
     }
 
-    private func writeExpenses(header: EInvoiceHeader, items: [EInvoiceItem],
-                                category: VariableCategory, store: ExpenseStore) -> [UUID] {
+    /// 將單張發票建成 Expense 物件列表，不直接寫入 store（由 performSync 統一批次寫入）
+    private func buildExpenses(header: EInvoiceHeader, items: [EInvoiceItem],
+                                category: VariableCategory) -> [Expense] {
         let note = "電子發票 \(header.invNum)"
 
         if splitItems && !items.isEmpty {
-            // 拆成多筆，每個品項一筆（一次性 append 避免每筆各觸發 didSet → save → CloudKit push）
-            let newExpenses = items.map { item in
+            return items.map { item in
                 Expense(
                     title: item.description.isEmpty ? header.sellerName : item.description,
                     amount: item.amount,
@@ -177,28 +207,29 @@ final class EInvoiceSyncManager: ObservableObject {
                     note: "\(note)（\(header.sellerName)）"
                 )
             }
-            store.expenses.append(contentsOf: newExpenses)
-            return newExpenses.map(\.id)
         } else {
-            // 整張一筆
-            let exp = Expense(
+            return [Expense(
                 title: header.sellerName,
                 amount: header.amount,
                 date: header.invDate,
                 expenseType: .variable,
                 variableCategory: category,
                 note: note
-            )
-            store.expenses.append(exp)
-            return [exp.id]
+            )]
         }
     }
 
     // MARK: - 歷史 / 取消匯入
 
     /// 撤銷已匯入的發票（連同對應的支出一起刪除）
+    @MainActor
     func revert(_ record: EInvoiceImportRecord, expenseStore: ExpenseStore) {
-        expenseStore.expenses.removeAll { record.expenseIds.contains($0.id) }
+        // 先轉成 Set，將每筆 expense 的查詢從 O(m) 降為 O(1)
+        let idsToRemove = Set(record.expenseIds)
+        for expense in expenseStore.expenses where idsToRemove.contains(expense.id) {
+            for name in expense.photoFileNames { Expense.deletePhoto(name) }
+        }
+        expenseStore.expenses.removeAll { idsToRemove.contains($0.id) }
         importHistory.removeAll { $0.id == record.id }
         persistHistory()
     }
@@ -209,13 +240,38 @@ final class EInvoiceSyncManager: ObservableObject {
     }
 
     private func loadHistory() {
-        guard let data = try? Data(contentsOf: historyURL),
-              let decoded = try? JSONDecoder().decode([EInvoiceImportRecord].self, from: data) else { return }
-        importHistory = decoded
+        guard let data = try? Data(contentsOf: historyURL) else { return }
+        // 逐筆容錯解碼：單一筆損壞的匯入紀錄不應讓整份發票匯入歷史消失
+        // （對齊 LifeStore/ExpenseStore/FinanceStore 既有的逐筆容錯規格）。
+        if let decoded = Self.lossyDecodeArray([EInvoiceImportRecord].self, from: data) {
+            importHistory = decoded
+        }
+    }
+
+    /// 逐筆容錯解碼：先試整批，失敗再逐筆解、跳過損壞的元素，保留其餘資料。
+    private static func lossyDecodeArray<Element: Decodable>(_ type: [Element].Type, from data: Data) -> [Element]? {
+        let decoder = JSONDecoder()
+        if let items = try? decoder.decode([Element].self, from: data) { return items }
+        if let raw = try? decoder.decode([FailableDecodable<Element>].self, from: data) {
+            return raw.compactMap { $0.value }
+        }
+        return nil
+    }
+
+    /// 包裝單一元素，解碼失敗時不丟錯、回傳 nil
+    private struct FailableDecodable<T: Decodable>: Decodable {
+        let value: T?
+        init(from decoder: Decoder) throws {
+            value = try? T(from: decoder)
+        }
     }
 
     private func persistHistory() {
-        guard let data = try? JSONEncoder().encode(importHistory) else { return }
-        try? data.write(to: historyURL, options: .atomic)
+        let snapshot = importHistory
+        let url = historyURL
+        persistQueue.async {
+            guard let data = try? JSONEncoder().encode(snapshot) else { return }
+            try? data.write(to: url, options: .atomic)
+        }
     }
 }

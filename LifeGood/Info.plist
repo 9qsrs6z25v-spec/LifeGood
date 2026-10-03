@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>CFBundleURLName</key>
+			<string>com.lifegood.app</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>lifegood</string>
+			</array>
+		</dict>
+	</array>
+	<key>NSSupportsLiveActivities</key>
+	<true/>
+	<key>CKSharingSupported</key>
+	<true/>
+	<!-- [v25.455] AlarmKit（會議提醒的「鬧鐘」模式）必備。Apple 文件：
+	     「If the NSAlarmKitUsageDescription key is missing or its value is an
+	     empty string, apps can't schedule alarms with AlarmKit.」
+	     這段字會出現在系統要求鬧鐘權限的對話框上。 -->
+	<key>NSAlarmKitUsageDescription</key>
+	<string>會議提醒選擇「鬧鐘」時，LifeGood 會替你排一個真正會響的鬧鐘，開會前叫你。</string>
+</dict>
+</plist>
