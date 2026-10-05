@@ -258,10 +258,18 @@ struct AddExpenseView: View {
     /// 是否為「需要選地點」的變動支出分類：飲食 / 娛樂 / 購物 / 日用品 / 醫療 / 汽車
     /// [v25.365] 加入汽車：停車場、充電站、加油站、保養廠都是實體地點，
     /// 記下座標之後才做得出汽車里程路線圖。
+    /// [v25.479] 哪些分類有「地點」。
+    ///
+    /// 原本是六個分類的白名單（飲食／娛樂／購物／日用品／醫療／汽車），
+    /// 使用者回報：選好地點之後把分類改成交通、停車之類的，地點欄整個不見。
+    /// 那條白名單沒有道理——交通要記車站、停車場要記停車場、教育要記補習班、
+    /// 連稅費都有監理站。地點是「這筆花費發生在哪」，跟分類無關。
+    ///
+    /// 只排除股票與房地產：那兩類的名稱欄被連結資產的自動名稱佔用
+    /// （「項目 N：型號-類別」那種），地點沒有地方放，硬塞只會互相覆蓋。
     private var supportsPlacePicker: Bool {
         guard expenseType == .variable else { return false }
-        return [.food, .entertainment, .shopping, .dailyNecessities, .medical, .vehicle]
-            .contains(selectedVariableCategory)
+        return ![.stock, .realEstate].contains(selectedVariableCategory)
     }
 
     /// [v25.365] 汽車變動支出的「名稱」欄會被 linkedAssetTitle（項目 N：型號-類別）
@@ -493,6 +501,19 @@ struct AddExpenseView: View {
                 if expenseType == .variable {
                     sheetDetent = advancedMode ? .large : .height(440)
                 }
+            }
+            // [v25.479] 換分類不該把已經選好的地點丟掉。
+            //
+            // v25.365 讓座標「只屬於選它的那個分類」，理由是改了分類之後
+            // 停車紀錄會掛到餐廳的經緯度上。但那個年代多數分類根本看不到
+            // 地點欄——使用者看不到也改不掉，只能靠系統偷偷作廢。現在幾乎
+            // 每個分類都看得到地點，留著並讓他自己改掉才是對的：
+            // 看得見的錯誤改得掉，看不見的消失只會讓人以為壞了。
+            .onChange(of: selectedVariableCategory) { _, _ in
+                if placeLatitude != nil { placeScopeStamp = placeScopeKey }
+            }
+            .onChange(of: selectedVehicleExpenseCategory) { _, _ in
+                if placeLatitude != nil { placeScopeStamp = placeScopeKey }
             }
             .onChange(of: selectedAssetLink) { _, newValue in
                 if newValue == .vehicle {
@@ -963,6 +984,10 @@ struct AddExpenseView: View {
         case .shopping: return "百貨 / 商家"
         case .dailyNecessities: return "賣場 / 超市"
         case .medical: return "醫院 / 診所 / 藥局"
+        // [v25.479] 這兩類是跟著地點白名單一起開放的，給它們自己的提示字，
+        // 不然一律寫「名稱」會看不出這一欄現在可以挑地點
+        case .transportation: return "車站 / 停車場 / 搭乘地點"
+        case .education: return "學校 / 補習班 / 書店"
         default: return "名稱"
         }
     }
@@ -1273,6 +1298,8 @@ struct AddExpenseView: View {
         case .shopping: return "bag.fill"
         case .dailyNecessities: return "house.fill"
         case .medical: return "cross.case.fill"
+        case .transportation: return "tram.circle.fill"
+        case .education: return "book.circle.fill"
         default: return "mappin.circle.fill"
         }
     }

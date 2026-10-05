@@ -270,6 +270,8 @@ struct TripPlanDetailView: View {
     @State private var dayOpen: [Int: Bool] = [:]
     /// [v25.475] 從某一站的「…」直接記一筆花費
     @State private var addingExpense: StopExpenseTarget?
+    /// [v25.479] 正被拖到哪一站上面（畫一條線告訴使用者會放在這裡）
+    @State private var dropTargetId: UUID?
 
     /// 走 .sheet(item:)：要帶的站與日期跟 presentation 綁在同一次寫入，
     /// 不會讀到寫入生效前的舊值（理由同上面 StopInsertion 的註解）。
@@ -1371,6 +1373,20 @@ struct TripPlanDetailView: View {
                         .foregroundStyle(.green)
                         .padding(.top, 1)
                 }
+                // [v25.479] 購物車（使用者指定位置：「實際」下面）。
+                // v25.475 已經把「記一筆這一站的花費」放進「…」選單，
+                // 但旅行當下最常做的就是記帳——藏在選單裡要點兩下才找得到。
+                Button {
+                    addingExpense = StopExpenseTarget(stopId: slot.stop.id,
+                                                      date: slot.arrival)
+                } label: {
+                    Image(systemName: "cart.badge.plus")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.green)
+                        .padding(.top, 3)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
             }
             .frame(width: Self.timeColumnWidth)
 
@@ -1411,75 +1427,158 @@ struct TripPlanDetailView: View {
                         .frame(width: 22, height: 22)
                     }
                 },
-                accessory: {
-                    Menu {
-                        Button("打開景點卡") { openingStopId = slot.stop.id }
-                        Button("編輯") { editingStop = slot.stop }
-                        // [v25.475] 使用者要求：在行程頁就能直接記這一站的花費，
-                        // 不用跳去記帳頁再回頭挑行程與站別。日期帶這一站的抵達
-                        // 時間（打過卡的話時間軸給的就是實際時間），行程與站別
-                        // 直接預填，開進去只要填金額。
-                        Button("記一筆這一站的花費") {
-                            addingExpense = StopExpenseTarget(stopId: slot.stop.id,
-                                                              date: slot.arrival)
-                        }
-                        if slot.stop.checkInState != .notArrived {
-                            if slot.stop.actualDwellSeconds != nil {
-                                Button("把實際停留寫回預計") {
-                                    lifeStore.adoptActualDwell(planId: planId,
-                                                               stopId: slot.stop.id)
-                                }
-                            }
-                            Button("清除打卡紀錄") {
-                                lifeStore.clearTripStopCheckIn(planId: planId,
-                                                               stopId: slot.stop.id)
-                            }
-                        }
-                        Button(slot.stop.isMustVisit ? "取消必去" : "標為必去") {
-                            toggleMustVisit(slot.stop.id)
-                        }
-                        if slot.index > 0 {
-                            Menu("這一段怎麼過來") {
-                                Button("用行程預設（" + (plan?.travelMode ?? .driving).rawValue + "）") {
-                                    setLegMode(slot.stop.id, nil)
-                                }
-                                ForEach(TripTravelMode.allCases) { m in
-                                    Button(m.rawValue) { setLegMode(slot.stop.id, m) }
-                                }
-                            }
-                        }
-                        Button("在這之後插入景點") {
-                            insertion = StopInsertion(at: slot.index + 1)
-                        }
-                        Divider()
-                        if slot.index > 0 {
-                            Button("往前移一站") { move(slot.index, by: -1) }
-                        }
-                        if slot.index < (plan?.stops.count ?? 0) - 1 {
-                            Button("往後移一站") { move(slot.index, by: 1) }
-                        }
-                        Divider()
-                        Button("用 Apple 地圖開啟") { TripShare.openPlaceInMaps(slot.stop) }
-                        Button("分享這一站（圖片）") {
-                            Task { await shareStopImage(slot.stop) }
-                        }
-                        Button("分享這一站（文字）") { shareStop(slot.stop) }
-                        if !slot.stop.address.trimmingCharacters(in: .whitespaces).isEmpty {
-                            Button("拷貝地址") {
-                                UIPasteboard.general.string =
-                                    slot.stop.address.trimmingCharacters(in: .whitespaces)
-                            }
-                        }
-                        Divider()
-                        Button("刪除", role: .destructive) { removingStop = slot.stop }
-                    } label: {
-                        Image(systemName: "ellipsis.circle")
-                            .font(.system(size: 15)).foregroundStyle(.secondary)
-                    }
-                }
+                accessory: { stopAccessory(slot) }
             )
         }
         .padding(.horizontal, 16)
+        // [v25.479] 整列是放置目標：把別站拖過來就插在這一站的位置
+        .dropDestination(for: String.self) { items, _ in
+            dropStop(items, onto: slot)
+        } isTargeted: { over in
+            dropTargetId = over ? slot.stop.id : nil
+        }
+        .overlay(alignment: .top) { dropIndicator(slot) }
+    }
+
+    /// 景點列右側：拖曳把手 ＋「…」選單
+    private func stopAccessory(_ slot: TripPlan.Slot) -> some View {
+        HStack(spacing: 8) {
+            reorderHandle(slot)
+            stopMenu(slot)
+        }
+    }
+
+    /// [v25.479] 拖曳把手（使用者指定：標題右邊的三條線）。
+    ///
+    /// 只有把手可以拖、不是整列：整列本身要能點開景點卡，而且時間軸是捲動的，
+    /// 整列可拖會跟捲動搶手勢。長按約一秒把它提起來，拖到想放的位置放開——
+    /// 這是系統拖放的既定手感，不是另外做一套。
+    ///
+    /// 選單裡的「往前移一站／往後移一站」保留：只差一格的時候點一下比拖準得多。
+    private func reorderHandle(_ slot: TripPlan.Slot) -> some View {
+        Image(systemName: "line.3.horizontal")
+            .font(.system(size: 13, weight: .semibold))
+            .foregroundStyle(.tertiary)
+            .padding(.vertical, 4).padding(.horizontal, 2)
+            .contentShape(Rectangle())
+            // 短按把手不要跑去開景點卡——它只負責拖
+            .onTapGesture { }
+            .draggable(slot.stop.id.uuidString) { dragPreview(slot) }
+    }
+
+    /// 提起來時跟著手指走的那張小卡
+    private func dragPreview(_ slot: TripPlan.Slot) -> some View {
+        HStack(spacing: 6) {
+            Text("\(slot.index + 1)")
+                .font(.system(size: 11, weight: .bold, design: .rounded))
+                .foregroundStyle(.white)
+                .frame(width: 20, height: 20)
+                .background(Circle().fill(TripDayPalette.color(slot.dayIndex)))
+            Text(slot.stop.displayName)
+                .font(.system(size: 12, weight: .semibold))
+                .lineLimit(1)
+        }
+        .padding(.horizontal, 10).padding(.vertical, 6)
+        .background(Color(.systemBackground), in: Capsule())
+    }
+
+    /// 拖到這一站上面時畫一條線：放開會落在這裡
+    @ViewBuilder
+    private func dropIndicator(_ slot: TripPlan.Slot) -> some View {
+        if dropTargetId == slot.stop.id {
+            Capsule()
+                .fill(TripDayPalette.color(slot.dayIndex))
+                .frame(height: 3)
+                .padding(.horizontal, 16)
+        }
+    }
+
+    /// 把拖著的那一站放到目標這一站的位置。
+    ///
+    /// 回傳 false＝這次放置沒有意義（放回自己身上，或拖進來的根本不是這趟的站——
+    /// 放置目標吃的是純文字，別的地方拖一段字進來也會走到這裡）。
+    private func dropStop(_ items: [String], onto target: TripPlan.Slot) -> Bool {
+        dropTargetId = nil
+        guard let raw = items.first,
+              let draggedId = UUID(uuidString: raw),
+              draggedId != target.stop.id,
+              let p = plan,
+              let from = p.stops.firstIndex(where: { $0.id == draggedId }),
+              let to = p.stops.firstIndex(where: { $0.id == target.stop.id })
+        else { return false }
+        // move(fromOffsets:toOffset:) 的 toOffset 是「插在這個位置之前」，
+        // 所以往後搬要 +1 才會落在目標那一站的後面；往前搬不用。
+        lifeStore.moveTripStops(planId: planId,
+                                from: IndexSet(integer: from),
+                                to: to > from ? to + 1 : to)
+        return true
+    }
+
+    private func stopMenu(_ slot: TripPlan.Slot) -> some View {
+        Menu {
+            Button("打開景點卡") { openingStopId = slot.stop.id }
+            Button("編輯") { editingStop = slot.stop }
+            // [v25.475] 使用者要求：在行程頁就能直接記這一站的花費，
+            // 不用跳去記帳頁再回頭挑行程與站別。日期帶這一站的抵達
+            // 時間（打過卡的話時間軸給的就是實際時間），行程與站別
+            // 直接預填，開進去只要填金額。
+            Button("記一筆這一站的花費") {
+                addingExpense = StopExpenseTarget(stopId: slot.stop.id,
+                                                  date: slot.arrival)
+            }
+            if slot.stop.checkInState != .notArrived {
+                if slot.stop.actualDwellSeconds != nil {
+                    Button("把實際停留寫回預計") {
+                        lifeStore.adoptActualDwell(planId: planId,
+                                                   stopId: slot.stop.id)
+                    }
+                }
+                Button("清除打卡紀錄") {
+                    lifeStore.clearTripStopCheckIn(planId: planId,
+                                                   stopId: slot.stop.id)
+                }
+            }
+            Button(slot.stop.isMustVisit ? "取消必去" : "標為必去") {
+                toggleMustVisit(slot.stop.id)
+            }
+            if slot.index > 0 {
+                Menu("這一段怎麼過來") {
+                    Button("用行程預設（" + (plan?.travelMode ?? .driving).rawValue + "）") {
+                        setLegMode(slot.stop.id, nil)
+                    }
+                    ForEach(TripTravelMode.allCases) { m in
+                        Button(m.rawValue) { setLegMode(slot.stop.id, m) }
+                    }
+                }
+            }
+            Button("在這之後插入景點") {
+                insertion = StopInsertion(at: slot.index + 1)
+            }
+            Divider()
+            if slot.index > 0 {
+                Button("往前移一站") { move(slot.index, by: -1) }
+            }
+            if slot.index < (plan?.stops.count ?? 0) - 1 {
+                Button("往後移一站") { move(slot.index, by: 1) }
+            }
+            Divider()
+            Button("用 Apple 地圖開啟") { TripShare.openPlaceInMaps(slot.stop) }
+            Button("分享這一站（圖片）") {
+                Task { await shareStopImage(slot.stop) }
+            }
+            Button("分享這一站（文字）") { shareStop(slot.stop) }
+            if !slot.stop.address.trimmingCharacters(in: .whitespaces).isEmpty {
+                Button("拷貝地址") {
+                    UIPasteboard.general.string =
+                        slot.stop.address.trimmingCharacters(in: .whitespaces)
+                }
+            }
+            Divider()
+            Button("刪除", role: .destructive) { removingStop = slot.stop }
+        } label: {
+            Image(systemName: "ellipsis.circle")
+                .font(.system(size: 15)).foregroundStyle(.secondary)
+        }
     }
 
     /// 一站底下的照片。橫捲、點開全螢幕看。
