@@ -3980,11 +3980,29 @@ struct FlexibleChipWrap<Item: Hashable, Content: View>: View {
 struct ChipFlowLayout: Layout {
     var spacing: CGFloat = 6
 
+    /// [v25.474] 沒有給寬度時，回「最寬的那一顆膠囊」，**不是**「全部排成一列的總寬」。
+    ///
+    /// 原本寫 `proposal.width ?? .infinity`／`proposal.width ?? x`：沒給寬度就當作
+    /// 可以無限寬，於是一列排完、回報總寬。SwiftUI 在真正排版之外還會用
+    /// 「不指定寬度」問一次理想尺寸，捲動區域拿這個答案當內容寬度——結果是
+    /// **版面排得好好的（膠囊照樣換行、卡片照樣是螢幕寬），但整頁可以左右拖進
+    /// 一片空白**。使用者看到的現象就是「這一頁為什麼可以左右滑動」，而且右邊
+    /// 什麼都沒有。旅遊行程頁最明顯（摘要卡上六顆膠囊加起來比螢幕寬一百多點），
+    /// 重大決議列、設備列、組織列與項目模板的換行模式也都是同一個容器。
+    ///
+    /// 換行排版本來就能一路擠到「一列一顆」，所以沒有寬度限制時，誠實的答案是
+    /// 「我最窄可以到最寬的那一顆」。寬度 0 的查詢（問最小值）走同一條路，
+    /// 答案剛好也正確。
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-        let maxWidth = proposal.width ?? .infinity
+        let sizes = subviews.map { $0.sizeThatFits(.unspecified) }
+        let widest = sizes.map(\.width).max() ?? 0
+        // 無限大也要擋：橫向捲動容器會提議 .infinity，那同樣不能當成內容寬度
+        let maxWidth: CGFloat = {
+            guard let w = proposal.width, w.isFinite, w > 0 else { return widest }
+            return w
+        }()
         var x: CGFloat = 0, y: CGFloat = 0, rowHeight: CGFloat = 0
-        for v in subviews {
-            let size = v.sizeThatFits(.unspecified)
+        for size in sizes {
             if x > 0 && x + size.width > maxWidth {
                 x = 0
                 y += rowHeight + spacing
@@ -3993,7 +4011,7 @@ struct ChipFlowLayout: Layout {
             x += size.width + spacing
             rowHeight = max(rowHeight, size.height)
         }
-        return CGSize(width: proposal.width ?? x, height: y + rowHeight)
+        return CGSize(width: maxWidth, height: y + rowHeight)
     }
 
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize,
