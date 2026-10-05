@@ -263,6 +263,21 @@ struct TripPlanDetailView: View {
     @State private var isExportingStop = false
     /// [v25.473] 整趟天氣正在重抓（底下那顆「更新天氣」要轉圈、要擋連按）
     @State private var isRefreshingWeather = false
+    /// [v25.475] 時間軸上哪幾天被手動展開／收起（dayIndex → 展開）。
+    ///
+    /// 只記「使用者點過的」那幾天，沒點過的走預設（過完的日子收起來）。
+    /// 不在進來時把預設值灌進這個字典：那樣一旦跨過午夜，昨天就不會自己收起來。
+    @State private var dayOpen: [Int: Bool] = [:]
+    /// [v25.475] 從某一站的「…」直接記一筆花費
+    @State private var addingExpense: StopExpenseTarget?
+
+    /// 走 .sheet(item:)：要帶的站與日期跟 presentation 綁在同一次寫入，
+    /// 不會讀到寫入生效前的舊值（理由同上面 StopInsertion 的註解）。
+    private struct StopExpenseTarget: Identifiable {
+        let id = UUID()
+        let stopId: UUID
+        let date: Date
+    }
 
     struct ShareStopImage: Identifiable {
         let id = UUID()
@@ -417,6 +432,14 @@ struct TripPlanDetailView: View {
                         groupNoun: "景點",
                         items: albumItems(p))
                 }
+            }
+            // [v25.475] 從某一站的「…」直接記一筆花費：行程、站別、日期都預填好
+            .sheet(item: $addingExpense) { target in
+                AddExpenseView(
+                    expenseType: .variable,
+                    preset: AddExpensePreset(linkedTripPlanId: planId,
+                                             linkedTripStopId: target.stopId,
+                                             date: target.date))
             }
             // [v25.472] 從時間軸的照片條點進來：整站的照片一起帶，左右滑得動
             .sheet(item: $viewingPhoto) { wrapper in
@@ -1053,7 +1076,11 @@ struct TripPlanDetailView: View {
     // MARK: 時間軸
 
     private func timelineCard(_ p: TripPlan) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
+        let slots = p.timeline
+        // 用手上這份 slots 判斷，不要再叫 p.dayCount——那個會把整條時間軸重算一次
+        let multiDay = (slots.map(\.dayIndex).max() ?? 0) > 0
+        let days = Array(Set(slots.map(\.dayIndex))).sorted()
+        return VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 8) {
                 Capsule()
                     .fill(LinearGradient(colors: [accent, accent.opacity(0.5)],
@@ -1063,26 +1090,29 @@ struct TripPlanDetailView: View {
                     .font(.system(size: 11, weight: .semibold)).foregroundStyle(accent)
                 Text("時間軸").font(.subheadline.weight(.semibold))
                 Spacer()
+                if multiDay { dayToggleAllButton(p, days: days) }
             }
             .padding(.horizontal, 16).padding(.top, 14).padding(.bottom, 8)
 
-            let slots = p.timeline
-            // 用手上這份 slots 判斷，不要再叫 p.dayCount——那個會把整條時間軸重算一次
-            let multiDay = (slots.map(\.dayIndex).max() ?? 0) > 0
             ForEach(slots) { slot in
                 // 換日就先插一列日期標頭（只有跨天行程才需要）
                 if multiDay && slot.dayIndex != (slot.index == 0 ? -1 : slots[slot.index - 1].dayIndex) {
-                    dayHeaderRow(p, dayIndex: slot.dayIndex, isFirst: slot.index == 0)
+                    dayHeaderRow(p, dayIndex: slot.dayIndex,
+                                 isFirst: slot.index == 0, slots: slots)
                 }
-                // 前一站是過夜的地方 → 它同時也是這一天的第一站，在新的一天開頭再出現一次
-                if slot.index > 0, slots[slot.index - 1].stop.isOvernight {
-                    overnightResumeRow(slots[slot.index - 1], dayIndex: slot.dayIndex)
+                // [v25.475] 收起來的那一天只留標頭。使用者回報：七天六夜要滑很久
+                // 才到得了今天。單日行程沒有標頭可點，所以永遠不收。
+                if !multiDay || isDayOpen(p, slot.dayIndex) {
+                    // 前一站是過夜的地方 → 它同時也是這一天的第一站，在新的一天開頭再出現一次
+                    if slot.index > 0, slots[slot.index - 1].stop.isOvernight {
+                        overnightResumeRow(slots[slot.index - 1], dayIndex: slot.dayIndex)
+                    }
+                    // 第一站前面沒有路段；其餘每一站上面先畫「從上一站過來」那一條
+                    if slot.index > 0 {
+                        legRow(slot, plan: p)
+                    }
+                    stopRow(slot)
                 }
-                // 第一站前面沒有路段；其餘每一站上面先畫「從上一站過來」那一條
-                if slot.index > 0 {
-                    legRow(slot, plan: p)
-                }
-                stopRow(slot)
             }
             Spacer().frame(height: 6)
         }
@@ -1094,23 +1124,100 @@ struct TripPlanDetailView: View {
         .padding(.horizontal)
     }
 
-    /// 換日的分隔列。跨天行程一天一個色系，這一列把顏色與日期講明白。
-    private func dayHeaderRow(_ p: TripPlan, dayIndex: Int, isFirst: Bool) -> some View {
-        let c = TripDayPalette.color(dayIndex)
-        return HStack(spacing: 8) {
-            Text("第 \(dayIndex + 1) 天")
-                .font(.system(size: 11, weight: .bold))
-                .foregroundStyle(.white)
-                .padding(.horizontal, 7).padding(.vertical, 3)
-                .background(c, in: Capsule())
-            Text(Self.dayDateText(p, dayIndex: dayIndex))
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(c)
-            Rectangle().fill(c.opacity(0.22)).frame(height: 0.75)
+    // MARK: 時間軸：把過完的日子收起來（v25.475）
+
+    /// 第 N 天是哪一天（以出發日起算）
+    private func dayDate(_ p: TripPlan, _ dayIndex: Int) -> Date {
+        Calendar.current.date(byAdding: .day, value: dayIndex, to: p.startDate) ?? p.startDate
+    }
+
+    /// 這一天已經過完了（整天都在今天之前）。今天不算過去——
+    /// 正在走的那一天才是最該看見的那一天。
+    private func isPastDay(_ p: TripPlan, _ dayIndex: Int) -> Bool {
+        let cal = Calendar.current
+        return cal.startOfDay(for: dayDate(p, dayIndex)) < cal.startOfDay(for: Date())
+    }
+
+    /// 這一天要不要展開。
+    ///
+    /// 預設過完的日子收起來、今天與之後展開；使用者點過哪一天就以他的為準。
+    /// 預設值是「算出來的」而不是進來時寫進字典的：寫進去的話跨過午夜之後，
+    /// 昨天不會自己收起來，而這正是這個功能要解決的事。
+    private func isDayOpen(_ p: TripPlan, _ dayIndex: Int) -> Bool {
+        dayOpen[dayIndex] ?? !isPastDay(p, dayIndex)
+    }
+
+    /// 收起來的那一天，標頭上要寫得出「裡面有什麼」，不然收合等於把東西藏掉。
+    private func daySummaryText(_ slots: [TripPlan.Slot], dayIndex: Int) -> String {
+        let daySlots = slots.filter { $0.dayIndex == dayIndex }
+        var parts = ["\(daySlots.count) 站"]
+        let done = daySlots.filter { $0.stop.checkInState == .departed }.count
+        if done > 0 { parts.append("已完成 \(done)") }
+        let spend = daySlots.flatMap { stopExpenses($0.stop.id) }
+        if expenseStore.ntdTotal(spend) > 0 {
+            parts.append(expenseStore.ntdTotalText(spend))
         }
-        .padding(.horizontal, 16)
-        .padding(.top, isFirst ? 2 : 10)
-        .padding(.bottom, 4)
+        return parts.joined(separator: "・")
+    }
+
+    /// 標頭右邊那顆：只要還有任何一天是收著的就是「全部展開」，否則「全部收合」。
+    private func dayToggleAllButton(_ p: TripPlan, days: [Int]) -> some View {
+        let anyClosed = days.contains { !isDayOpen(p, $0) }
+        return Button {
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
+                for d in days { dayOpen[d] = anyClosed }
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: anyClosed ? "chevron.down.circle" : "chevron.up.circle")
+                    .font(.system(size: 10, weight: .bold))
+                Text(anyClosed ? "全部展開" : "全部收合")
+                    .font(.system(size: 10, weight: .semibold))
+            }
+            .foregroundStyle(accent)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// 換日的分隔列。跨天行程一天一個色系，這一列把顏色與日期講明白。
+    /// [v25.475] 整列可點＝收合／展開這一天；收著的時候寫出站數、完成數與花費。
+    private func dayHeaderRow(_ p: TripPlan, dayIndex: Int, isFirst: Bool,
+                              slots: [TripPlan.Slot]) -> some View {
+        let c = TripDayPalette.color(dayIndex)
+        let open = isDayOpen(p, dayIndex)
+        return Button {
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
+                dayOpen[dayIndex] = !open
+            }
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(c)
+                    .rotationEffect(.degrees(open ? 90 : 0))
+                Text("第 \(dayIndex + 1) 天")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 7).padding(.vertical, 3)
+                    .background(c, in: Capsule())
+                Text(Self.dayDateText(p, dayIndex: dayIndex))
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(c)
+                if !open {
+                    Text(daySummaryText(slots, dayIndex: dayIndex))
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                Rectangle().fill(c.opacity(0.22)).frame(height: 0.75)
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, isFirst ? 2 : 10)
+            .padding(.bottom, 4)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     /// 時間軸左邊那一欄的寬度。
@@ -1308,6 +1415,14 @@ struct TripPlanDetailView: View {
                     Menu {
                         Button("打開景點卡") { openingStopId = slot.stop.id }
                         Button("編輯") { editingStop = slot.stop }
+                        // [v25.475] 使用者要求：在行程頁就能直接記這一站的花費，
+                        // 不用跳去記帳頁再回頭挑行程與站別。日期帶這一站的抵達
+                        // 時間（打過卡的話時間軸給的就是實際時間），行程與站別
+                        // 直接預填，開進去只要填金額。
+                        Button("記一筆這一站的花費") {
+                            addingExpense = StopExpenseTarget(stopId: slot.stop.id,
+                                                              date: slot.arrival)
+                        }
                         if slot.stop.checkInState != .notArrived {
                             if slot.stop.actualDwellSeconds != nil {
                                 Button("把實際停留寫回預計") {

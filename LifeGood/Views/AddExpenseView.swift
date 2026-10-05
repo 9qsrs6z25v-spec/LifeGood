@@ -207,6 +207,12 @@ struct AddExpenseView: View {
     // MARK: - 旅遊關聯（[v25.424] 變動支出）
     @State private var linkedTripPlanId: UUID?
     @State private var linkedTripStopId: UUID?
+    /// [v25.475] 這一次的站別變更是「只憑時間猜的」，不要跟著把地點帶進來。
+    ///
+    /// 依距離挑的、或使用者自己挑的站，帶入地點是合理的推論（v25.467）；
+    /// 但只憑時間接近就把店家與座標填成那一站，等於幫使用者捏造一個
+    /// 他可能根本沒在那裡消費的地點——路上買的、車站買的都會被安到景點頭上。
+    @State private var skipPlaceFillOnce = false
 
     // MARK: - 飲食店家自動完成
 
@@ -1244,9 +1250,9 @@ struct AddExpenseView: View {
         suppressNextCompleterUpdate = true
         titleFieldFocused = false
         // [v25.467] 先選旅遊、後選地點的順序也要能對上（只在還沒指定站別時）。
-        // 這裡不會無限遞迴：autoPickNearestStop 設了站別會觸發 fillPlaceFromStop，
+        // 這裡不會無限遞迴：autoPickStop 設了站別會觸發 fillPlaceFromStop，
         // 而那一支要求「還沒有座標」——此刻座標剛設好，它會直接返回。
-        autoPickNearestStop()
+        autoPickStop()
     }
 
     /// 清掉先前綁定的地點資料
@@ -1951,10 +1957,14 @@ struct AddExpenseView: View {
             //   選了站   → 這筆還沒有地點的話，把那一站的地點帶進來
             .onChange(of: linkedTripPlanId) { _, _ in
                 linkedTripStopId = nil
-                autoPickNearestStop()
+                autoPickStop()
             }
             .onChange(of: linkedTripStopId) { _, newValue in
-                fillPlaceFromStop(newValue)
+                if skipPlaceFillOnce {
+                    skipPlaceFillOnce = false
+                } else {
+                    fillPlaceFromStop(newValue)
+                }
             }
 
             if let planId = linkedTripPlanId, let plan = lifeStore.tripPlan(id: planId) {
@@ -1987,6 +1997,14 @@ struct AddExpenseView: View {
                 if let hint = stopDistanceHint {
                     Text(hint)
                 }
+                // [v25.475] 時間也一樣要寫出來——站是自動挑的，依據得看得見
+                if let hint = stopTimeHint {
+                    Text(hint)
+                }
+                if linkedTripStopId == nil {
+                    Text("掛上行程之後會自動挑一站：這筆有地點就挑最近的，"
+                         + "否則挑停留時間最接近的。挑錯了直接改上面的選單。")
+                }
             }
         }
     }
@@ -2004,14 +2022,36 @@ struct AddExpenseView: View {
         return CLLocationCoordinate2D(latitude: lat, longitude: lon)
     }
 
-    /// 選了旅遊之後，依這筆的地點自動挑最近的一站。
-    /// 沒有地點、或最近的一站太遠就不動——不自動挑比挑錯好。
-    private func autoPickNearestStop() {
+    /// 自動挑站的時間上限。離最近那一站的停留時間超過這麼久，就不猜了——
+    /// 那天根本沒排行程時，硬挑一站只是亂指。
+    private static let maxAutoStopSeconds: TimeInterval = 6 * 3600
+
+    /// 選了旅遊之後自動挑一站。兩個依據，依序試：
+    ///   1. 距離：這筆有地點 → 挑最近的一站（3 公里內）
+    ///   2. 時間：挑停留時間最接近這筆時刻的那一站
+    ///
+    /// [v25.475] 時間那一條是使用者要求的：「關聯旅程之後應該自動選時間最靠近的
+    /// 站別，而不是都預設整趟」。原本只有距離那一條，但多數花費是隨手記的、
+    /// 沒有地點，等於九成的情況都還是停在「整趟（不指定）」。
+    private func autoPickStop() {
         // 已經指定站別就不要動——那可能是使用者手挑的
         guard linkedTripStopId == nil,
               let planId = linkedTripPlanId,
-              let plan = lifeStore.tripPlan(id: planId),
-              let here = currentPlaceCoordinate else { return }
+              let plan = lifeStore.tripPlan(id: planId) else { return }
+        if let byPlace = nearestStopByDistance(plan) {
+            linkedTripStopId = byPlace
+            return
+        }
+        if let byTime = nearestStopByTime(plan) {
+            // 只憑時間猜的站不帶地點（理由見 skipPlaceFillOnce）
+            skipPlaceFillOnce = true
+            linkedTripStopId = byTime
+        }
+    }
+
+    /// 距離最近的一站（要有地點，且在 3 公里內）
+    private func nearestStopByDistance(_ plan: TripPlan) -> UUID? {
+        guard let here = currentPlaceCoordinate else { return nil }
         let origin = CLLocation(latitude: here.latitude, longitude: here.longitude)
         var best: (id: UUID, meters: CLLocationDistance)?
         for stop in plan.stops {
@@ -2020,8 +2060,31 @@ struct AddExpenseView: View {
                                                           longitude: c.longitude))
             if best == nil || meters < best!.meters { best = (stop.id, meters) }
         }
-        guard let best, best.meters <= Self.maxAutoStopMeters else { return }
-        linkedTripStopId = best.id
+        guard let best, best.meters <= Self.maxAutoStopMeters else { return nil }
+        return best.id
+    }
+
+    /// 時間上最接近的一站。
+    ///
+    /// 比的是時間軸的停留區間（抵達～離開，打過卡的話是實際時間），不是只比抵達：
+    /// 中午十二點半那筆午餐，落在「11:50–13:30 的那一站」裡面才對，
+    /// 只比抵達時刻的話會挑到下午那一站。落在區間內距離算 0。
+    private func nearestStopByTime(_ plan: TripPlan) -> UUID? {
+        let when = date
+        var best: (id: UUID, gap: TimeInterval)?
+        for slot in plan.timeline {
+            let gap: TimeInterval
+            if when < slot.arrival {
+                gap = slot.arrival.timeIntervalSince(when)
+            } else if when > slot.departure {
+                gap = when.timeIntervalSince(slot.departure)
+            } else {
+                gap = 0
+            }
+            if best == nil || gap < best!.gap { best = (slot.stop.id, gap) }
+        }
+        guard let best, best.gap <= Self.maxAutoStopSeconds else { return nil }
+        return best.id
     }
 
     /// 反過來：選了站、而這筆還沒有地點 → 把那一站的地點帶進來。
@@ -2037,6 +2100,25 @@ struct AddExpenseView: View {
               let c = stop.coordinate else { return }
         applyMapPickedPlace(name: stop.displayName, address: stop.address, coordinate: c)
     }
+
+    /// 「『清水寺』的停留時間是 13:40–15:10」。站是自動挑的，依據要看得見——
+    /// 暗著挑會讓人以為是自己選的，挑錯了也不會發現。
+    private var stopTimeHint: String? {
+        guard let planId = linkedTripPlanId,
+              let plan = lifeStore.tripPlan(id: planId),
+              let stopId = linkedTripStopId,
+              let slot = plan.timeline.first(where: { $0.stop.id == stopId }) else { return nil }
+        let window = Self.tripStopClock.string(from: slot.arrival)
+            + "–" + Self.tripStopClock.string(from: slot.departure)
+        let inside = date >= slot.arrival && date <= slot.departure
+        return "「" + slot.stop.displayName + "」的停留時間是 " + window
+            + (inside ? "，這筆的時間就在裡面。" : "。")
+    }
+
+    private static let tripStopClock: DateFormatter = {
+        let f = DateFormatter(); f.locale = Locale(identifier: "zh_Hant_TW")
+        f.dateFormat = "HH:mm"; return f
+    }()
 
     /// 「這筆的地點離「清水寺」約 450 公尺」。兩邊都有座標才寫。
     private var stopDistanceHint: String? {
@@ -3686,6 +3768,18 @@ struct AddExpenseView: View {
         if let fal = preset.fixedAssetLink { selectedFixedAssetLink = fal }
         if let rle = preset.realEstateLinkExisting { realEstateLinkExisting = rle }
         if let mle = preset.mortgageLinkExisting { mortgageLinkExisting = mle }
+        // [v25.475] 從旅遊行程頁的某一站進來：行程、站別、日期都已經知道了。
+        if let d = preset.date { date = d }
+        if let tripId = preset.linkedTripPlanId {
+            linkedTripPlanId = tripId
+            linkedTripStopId = preset.linkedTripStopId
+            // 關聯旅遊只在進階模式看得到。帶著行程進來卻看不到它掛在哪，
+            // 使用者會以為沒掛上——跟 loadEditing 遇到進階欄位時同樣的理由。
+            advancedMode = true
+            // 地點帶入走既有那條（它自己會判斷這個分類有沒有地點欄、
+            // 以及使用者是不是已經挑過地點了）
+            fillPlaceFromStop(linkedTripStopId)
+        }
     }
 }
 
@@ -3704,6 +3798,10 @@ struct AddExpensePreset {
     var fixedAssetLink: AddExpenseView.FixedAssetLinkType?
     var realEstateLinkExisting: Bool?
     var mortgageLinkExisting: Bool?
+    /// [v25.475] 從旅遊行程頁的某一站直接記帳時帶進來：行程、站別、日期
+    var linkedTripPlanId: UUID?
+    var linkedTripStopId: UUID?
+    var date: Date?
 }
 
 // MARK: - 地點候選資料型別
