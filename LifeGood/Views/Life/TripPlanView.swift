@@ -346,6 +346,8 @@ struct TripPlanDetailView: View {
                             }
                         }
                         .padding(.vertical)
+                        // [v25.481] 這一頁只能上下捲（使用者回報整頁會被左右拖）
+                        .scrollVerticalOnly()
                     }
                 } else {
                     // 行程在別處被刪掉了

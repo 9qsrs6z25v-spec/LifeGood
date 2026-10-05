@@ -185,6 +185,8 @@ struct TripStopCardView: View {
                 photoSection
             }
             .padding(.vertical)
+            // [v25.481] 同上：景點卡也有膠囊列與照片條，一樣只能上下捲
+            .scrollVerticalOnly()
         }
     }
 

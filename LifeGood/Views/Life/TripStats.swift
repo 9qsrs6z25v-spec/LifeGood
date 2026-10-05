@@ -308,6 +308,7 @@ struct TripExpenseSheet: View {
                             listCard
                         }
                         .padding(.vertical)
+                        .scrollVerticalOnly()
                     }
                 } else {
                     Color.clear.onAppear { dismiss() }
