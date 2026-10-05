@@ -572,6 +572,79 @@ struct AsyncLocalImage<Content: View>: View {
 
 // MARK: - 全螢幕燈箱檢視
 
+/// [v25.477] 大圖的記憶體快取（只給全螢幕檢視用）。
+///
+/// 為什麼不直接用既有的 ThumbnailCache：那一份是「降採樣的小縮圖、非同步讀」，
+/// 給相簿格子用的；這裡要的是**原解析度**（放大到 5 倍還要清楚）而且必須
+/// **同步讀得到**——左右滑到下一張時，如果還要等一個 await 才拿得到圖，
+/// 畫面就會先閃一下黑底再出現，那正是使用者說的割裂感。
+///
+/// 兩個細節：
+///   • 存進來之前先 preparingForDisplay()：UIImage(contentsOfFile:) 是延遲解碼的，
+///     真正的解碼會發生在第一次上畫面時、而且在主執行緒上。只放進快取不預先解碼
+///     的話，照片是「載好了」但滑過去還是會掉幀。
+///   • 數量壓得很低（原圖 1024×1536 解開就是 6MB，12MP 的照片是 48MB）。
+///     NSCache 本來就會在記憶體吃緊時自己清掉，這裡再加一層上限當保險。
+final class FullImageCache {
+    static let shared = FullImageCache()
+    private let cache = NSCache<NSString, UIImage>()
+    /// 正在預抓的，避免同一張被排好幾次。
+    /// 單例，所以背景工作直接回頭取 shared，不繞 weak self——
+    /// 那會變成「鎖與解鎖各自可能沒發生」的寫法。
+    fileprivate let lock = NSLock()
+    fileprivate var inFlight: Set<String> = []
+
+    private init() {
+        cache.countLimit = 8
+        cache.totalCostLimit = 160 * 1024 * 1024
+    }
+
+    func image(for url: URL) -> UIImage? {
+        cache.object(forKey: url.path as NSString)
+    }
+
+    func insert(_ image: UIImage, for url: URL) {
+        let cost = Int(image.size.width * image.size.height
+                       * image.scale * image.scale * 4)
+        cache.setObject(image, forKey: url.path as NSString, cost: cost)
+    }
+
+    /// 讀一張（已經在快取裡就直接回）。給「目前這一張」用。
+    func load(_ url: URL) async -> UIImage? {
+        if let cached = image(for: url) { return cached }
+        let path = url.path
+        let decoded = await Task.detached(priority: .userInitiated) {
+            UIImage(contentsOfFile: path)?.preparingForDisplay()
+                ?? UIImage(contentsOfFile: path)
+        }.value
+        if let decoded { insert(decoded, for: url) }
+        return decoded
+    }
+
+    /// 背景預抓（左右鄰居）。優先權刻意比目前這張低——
+    /// 搶在目前這張前面解碼只會讓使用者等更久。
+    func prefetch(_ urls: [URL]) {
+        for url in urls {
+            guard image(for: url) == nil else { continue }
+            let path = url.path
+            lock.lock()
+            let already = inFlight.contains(path)
+            if !already { inFlight.insert(path) }
+            lock.unlock()
+            guard !already else { continue }
+            Task.detached(priority: .utility) {
+                let img = UIImage(contentsOfFile: path)?.preparingForDisplay()
+                    ?? UIImage(contentsOfFile: path)
+                let shared = FullImageCache.shared
+                if let img { shared.insert(img, for: URL(fileURLWithPath: path)) }
+                shared.lock.lock()
+                shared.inFlight.remove(path)
+                shared.lock.unlock()
+            }
+        }
+    }
+}
+
 struct PhotoLightbox: View {
     /// [v25.472] 整本相簿。單張的呼叫點走 init(url:)，陣列裡就只有一個元素。
     let urls: [URL]
@@ -590,6 +663,11 @@ struct PhotoLightbox: View {
     /// 這一次拖曳被鎖在哪個方向。不鎖的話手指稍微斜一點，
     /// 畫面就會在「換圖」與「下滑關閉」之間來回跳。
     @State private var dragAxis: DragAxis?
+    /// [v25.477] 畫面寬度。翻頁動畫要知道「滑出去」是多遠，
+    /// 而手勢結束的地方讀不到 GeometryProxy，所以存下來。
+    @State private var containerWidth: CGFloat = 0
+    /// [v25.477] 翻頁動畫進行中：這段期間不收新的拖曳，不然會一次翻兩張
+    @State private var isPaging = false
 
     private enum DragAxis { case horizontal, vertical }
 
@@ -638,14 +716,23 @@ struct PhotoLightbox: View {
                 // 雙指縮放（可暫時縮小於 fit、放開回彈）、放大後可拖曳平移、雙擊切換。
                 GeometryReader { geo in
                     let fitted = Self.fittedSize(img.size, in: geo.size)
-                    Image(uiImage: img)
-                        .resizable()
-                        .frame(width: fitted.width, height: fitted.height)
-                        .scaleEffect(scale)
-                        .offset(CGSize(width: offset.width + pageDrag,
-                                       height: offset.height + dismissDrag))
-                        .position(x: geo.size.width / 2, y: geo.size.height / 2)
-                        .opacity(imageAppeared ? 1 : 0)
+                    ZStack {
+                        // [v25.477] 拖曳時把左右那一張也畫出來，跟著手指進來。
+                        // 只有目前這張在動的話，看起來像「把照片推走、再憑空換一張」；
+                        // 看得到下一張跟著進來，才像翻頁。
+                        neighbour(index - 1, in: geo, dx: -(geo.size.width + Self.pageGap))
+                        Image(uiImage: img)
+                            .resizable()
+                            .frame(width: fitted.width, height: fitted.height)
+                            .scaleEffect(scale)
+                            .offset(CGSize(width: offset.width + pageDrag,
+                                           height: offset.height + dismissDrag))
+                            .position(x: geo.size.width / 2, y: geo.size.height / 2)
+                            .opacity(imageAppeared ? 1 : 0)
+                        neighbour(index + 1, in: geo, dx: geo.size.width + Self.pageGap)
+                    }
+                    .onAppear { containerWidth = geo.size.width }
+                    .onChange(of: geo.size.width) { _, w in containerWidth = w }
                 }
                 .gesture(
                     MagnificationGesture()
@@ -663,6 +750,8 @@ struct PhotoLightbox: View {
                         .simultaneously(with:
                             DragGesture()
                                 .onChanged { v in
+                                    // 翻頁動畫還在跑就不要再收手勢（會一次翻兩張）
+                                    if isPaging { return }
                                     if scale > 1 {
                                         // 放大狀態：平移
                                         offset = CGSize(width: lastOffset.width + v.translation.width,
@@ -701,12 +790,14 @@ struct PhotoLightbox: View {
                                     switch dragAxis {
                                     case .horizontal:
                                         if pageDrag < -70, index < urls.count - 1 {
-                                            go(to: index + 1)
+                                            page(by: 1)
                                         } else if pageDrag > 70, index > 0 {
-                                            go(to: index - 1)
-                                        }
-                                        withAnimation(.spring(response: 0.32, dampingFraction: 0.85)) {
-                                            pageDrag = 0
+                                            page(by: -1)
+                                        } else {
+                                            withAnimation(.spring(response: 0.32,
+                                                                  dampingFraction: 0.85)) {
+                                                pageDrag = 0
+                                            }
                                         }
                                     case .vertical:
                                         if dismissDrag > 110 {
@@ -786,16 +877,18 @@ struct PhotoLightbox: View {
             .padding(.bottom, 14)
         }
         .task(id: url) {
-            // 重置為載入中狀態：.task(id: url) 只在 url 改變時重新觸發，但先前用
-            // `image == nil` 當作「是否已讀過」的判斷在 url 改變、image 已非 nil
-            // （上一張圖已快取）時會誤判為已載入而直接 return，導致换照片後畫面
-            // 停留在舊圖；改成每次 url 改變都清空重讀。
-            image = nil
-            let path = url.path
-            let loaded = await Task.detached(priority: .userInitiated) {
-                UIImage(contentsOfFile: path)
-            }.value
-            image = loaded
+            // [v25.477] 已經預抓到手邊的就直接換上去，不要先清空再讀——
+            // 清空會讓畫面閃一下黑底，而這一張明明就在記憶體裡。
+            if let cached = FullImageCache.shared.image(for: url) {
+                image = cached
+                // 直接顯示，不重跑淡入：手指才剛把它滑進畫面，再淡一次會像閃爍
+                imageAppeared = true
+            } else {
+                // 沒快取就照舊：先清空（不清的話會停在上一張），背景解碼後淡入
+                image = nil
+                image = await FullImageCache.shared.load(url)
+            }
+            prefetchNeighbours()
         }
     }
 
@@ -834,6 +927,59 @@ struct PhotoLightbox: View {
         }
     }
 
+    /// 兩張之間留的縫，跟系統相簿一樣不要黏在一起
+    private static let pageGap: CGFloat = 24
+
+    /// [v25.477] 拖曳中露出的左右鄰居。
+    ///
+    /// 只在「貼合狀態、而且正在左右拖」時出現，而且**只讀快取、不觸發載入**：
+    /// 還沒預抓到的就不畫，維持原本的黑底——總比在拖曳當下塞一個同步解碼進來，
+    /// 讓整個手勢卡住要好。
+    @ViewBuilder
+    private func neighbour(_ i: Int, in geo: GeometryProxy, dx: CGFloat) -> some View {
+        if scale <= 1, pageDrag != 0, urls.indices.contains(i),
+           let img = FullImageCache.shared.image(for: urls[i]) {
+            let fitted = Self.fittedSize(img.size, in: geo.size)
+            Image(uiImage: img)
+                .resizable()
+                .frame(width: fitted.width, height: fitted.height)
+                .position(x: geo.size.width / 2, y: geo.size.height / 2)
+                .offset(x: dx + pageDrag)
+        }
+    }
+
+    /// [v25.477] 翻一頁：先讓目前這張滑出去、鄰居滑進來，**動畫跑完才換 index**。
+    ///
+    /// 不能先換 index 再把位移收回 0：換的那一刻，原本停在右邊一個畫面寬的
+    /// 下一張會瞬間跳到手指那個位置，再從那裡滑回來——方向還是反的
+    /// （往左滑卻看到新照片從左邊進來）。等動畫跑完才換就沒有這個問題：
+    /// 那一刻鄰居剛好停在「換完之後它該在的位置」，畫面一格都不會動。
+    private func page(by step: Int) {
+        guard !isPaging else { return }
+        let target = index + step
+        guard urls.indices.contains(target) else { return }
+        isPaging = true
+        let distance = max(containerWidth, 1) + Self.pageGap
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.9)) {
+            pageDrag = step > 0 ? -distance : distance
+        } completion: {
+            go(to: target)
+            pageDrag = 0
+            isPaging = false
+        }
+    }
+
+    /// [v25.477] 先把左右各兩張解好放著。
+    ///
+    /// 兩張而不是一張：使用者連滑的時候，手指離開前下一張就該準備好了。
+    /// 順序是「先右一、再左一，然後右二、左二」——往前翻比往回翻常見。
+    private func prefetchNeighbours() {
+        let around = [index + 1, index - 1, index + 2, index - 2]
+            .filter { urls.indices.contains($0) }
+            .map { urls[$0] }
+        FullImageCache.shared.prefetch(around)
+    }
+
     /// 換到第 n 張：縮放與平移一起歸零，不然上一張放大的狀態會跟著帶過去
     private func go(to newIndex: Int) {
         guard urls.indices.contains(newIndex), newIndex != index else { return }
@@ -842,7 +988,15 @@ struct PhotoLightbox: View {
         lastScale = 1
         offset = .zero
         lastOffset = .zero
-        imageAppeared = false
+        // [v25.477] 已經在手邊的就當場換上去，並且**不要**重設 imageAppeared：
+        // .task 是下一輪才跑的，中間那一幀會是透明的——使用者看到的就是
+        // 「滑完先閃一下黑再出現」。沒快取的才回到淡入流程。
+        if let cached = FullImageCache.shared.image(for: urls[newIndex]) {
+            image = cached
+            imageAppeared = true
+        } else {
+            imageAppeared = false
+        }
     }
 
     /// 貼合尺寸：取寬、高兩個方向縮放比的較小者——寬度 fit 會讓高度出血時
