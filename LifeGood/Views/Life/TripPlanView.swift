@@ -287,6 +287,8 @@ struct TripPlanDetailView: View {
     }
     @State private var showImageExport = false
     @State private var showAlbum = false
+    /// [v25.480] 這趟的花費統計頁
+    @State private var showExpenses = false
     /// [v25.451] 行前準備清單（要帶去的／要帶回來的）
     @State private var showChecklist = false
     /// 打開景點卡的那一站
@@ -333,12 +335,10 @@ struct TripPlanDetailView: View {
                             } else {
                                 timelineCard(p)
                             }
-                            if p.stops.contains(where: { !$0.photoFileNames.isEmpty }) {
-                                albumButton(p)
-                            }
-                            // [v25.464] 這趟的花費。使用者回報：記了幾筆花費，
-                            // 旅遊規劃項目裡完全看不到。
-                            expenseCard(p)
+                            // [v25.480] 相本與花費改掛在摘要卡的 KPI 上（使用者指定）：
+                            // 那兩塊本來是獨立的卡片夾在時間軸與「加一站」之間，
+                            // 既是統計也是入口，擺在那裡等於把統計藏在半路上。
+                            // 現在它們是摘要卡上可以按的兩格，點開各自是一整頁。
                             addButton(p)
                             // Apple 規定：顯示了 WeatherKit 的資料就必須標示出處
                             if showsAnyWeather(p) {
@@ -432,8 +432,15 @@ struct TripPlanDetailView: View {
                         emptyTitle: "這趟還沒有照片",
                         emptyHint: "在景點編輯裡加照片，這裡就會依景點分組整理成相本；記帳時把變動支出關聯到這趟旅遊，那些照片也會一起進來。",
                         groupNoun: "景點",
-                        items: albumItems(p))
+                        items: albumItems(p),
+                        stats: { TripAlbumStatsPanel(plan: p, items: albumItems(p)) })
                 }
+            }
+            // [v25.480] 這趟的花費：統計 + 明細自成一頁
+            .sheet(isPresented: $showExpenses) {
+                TripExpenseSheet(planId: planId)
+                    .environmentObject(lifeStore)
+                    .environmentObject(expenseStore)
             }
             // [v25.475] 從某一站的「…」直接記一筆花費：行程、站別、日期都預填好
             .sheet(item: $addingExpense) { target in
@@ -600,6 +607,10 @@ struct TripPlanDetailView: View {
         let id: String
         let value: String
         let icon: String
+        /// [v25.480] 有動作的格子＝可以按（相本、花費）。nil 就是純數字。
+        var action: (() -> Void)? = nil
+        /// 可按的格子底下那一行小字（例「78 張・點開看相本」）
+        var hint: String? = nil
     }
 
     /// 數字欄位。
@@ -634,17 +645,44 @@ struct TripPlanDetailView: View {
             id: "距離",
             value: p.totalMeters > 0 ? TripRouter.distanceText(p.totalMeters) : "—",
             icon: "ruler"))
+        // [v25.480] 相本與花費：既是統計也是入口（使用者指定）。
+        // 沒有東西的時候不要擺一個 0 在那裡占位——點進去是空的只會白跑一趟。
+        let photos = albumItems(p).count
+        if photos > 0 {
+            out.append(SummaryMetric(id: "相本", value: "\(photos)", icon: "photo.stack",
+                                     action: { showAlbum = true }, hint: "張照片・點開"))
+        }
+        let linked = linkedExpenses(p)
+        let waiting = candidateExpenses(p).count
+        if !linked.isEmpty || waiting > 0 {
+            out.append(SummaryMetric(
+                id: "花費",
+                value: expenseStore.ntdTotalText(linked),
+                icon: "creditcard.fill",
+                action: { showExpenses = true },
+                hint: waiting > 0 ? "還有 \(waiting) 筆待確認" : "\(linked.count) 筆・點開"))
+        }
         return out
     }
 
+    /// [v25.480] 每三格一列，列數不限。
+    ///
+    /// 原本寫死「前三個一列、其餘一列」，第七格起會全部擠進第二列。
+    /// 相本與花費加進來之後剛好踩到，所以改成分段。
     private func summaryKpiPanel(_ p: TripPlan) -> some View {
         let metrics = summaryMetrics(p)
+        // 一次算完再切：summaryMetrics 會去數相簿張數與加總所有支出，
+        // 每一列各算一次等於整本翻三遍。
+        let rows = stride(from: 0, to: metrics.count, by: 3).map {
+            Array(metrics[$0..<min($0 + 3, metrics.count)])
+        }
         return VStack(spacing: 8) {
-            summaryKpiRow(Array(metrics.prefix(3)))
-            if metrics.count > 3 {
-                Rectangle().fill(.white.opacity(0.18))
-                    .frame(height: 0.5).padding(.horizontal, 10)
-                summaryKpiRow(Array(metrics.dropFirst(3)))
+            ForEach(Array(rows.enumerated()), id: \.offset) { index, row in
+                if index > 0 {
+                    Rectangle().fill(.white.opacity(0.18))
+                        .frame(height: 0.5).padding(.horizontal, 10)
+                }
+                summaryKpiRow(row)
             }
         }
         .padding(.vertical, 10)
@@ -657,13 +695,42 @@ struct TripPlanDetailView: View {
         HStack(spacing: 0) {
             ForEach(Array(metrics.enumerated()), id: \.element.id) { index, metric in
                 if index > 0 { HeroKpiDivider() }
-                HeroKpiCell(label: metric.id, value: metric.value, icon: metric.icon)
+                summaryKpiCell(metric)
             }
             if metrics.count < 3 {
                 ForEach(0..<(3 - metrics.count), id: \.self) { _ in
                     Color.clear.frame(maxWidth: .infinity, maxHeight: 1)
                 }
             }
+        }
+    }
+
+    /// 一格。可按的那幾格多一個小箭頭與一行提示——
+    /// 不標的話使用者不會知道這一格跟旁邊那幾格不一樣。
+    @ViewBuilder
+    private func summaryKpiCell(_ metric: SummaryMetric) -> some View {
+        if let action = metric.action {
+            Button(action: action) {
+                VStack(spacing: 2) {
+                    HeroKpiCell(label: metric.id, value: metric.value, icon: metric.icon)
+                    if let hint = metric.hint {
+                        HStack(spacing: 2) {
+                            Text(hint)
+                            Image(systemName: "chevron.right")
+                        }
+                        .font(.system(size: 8, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.75))
+                        .lineLimit(1).minimumScaleFactor(0.7)
+                    }
+                }
+                .padding(.vertical, 2)
+                .frame(maxWidth: .infinity)
+                .background(.white.opacity(0.10), in: RoundedRectangle(cornerRadius: 9))
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+        } else {
+            HeroKpiCell(label: metric.id, value: metric.value, icon: metric.icon)
         }
     }
 
@@ -704,11 +771,8 @@ struct TripPlanDetailView: View {
         // ——那是誤解：非儲蓄險的支出存檔時就已經用設定裡的匯率換算成台幣了，
         // currencyCode 只記錄當初輸入的幣別。按它篩等於把一筆早就換算好的日圓消費
         // 整筆丟掉，合計因此少算。改走 ExpenseStore.ntdTotal（規則集中在那裡）。
-        let linked = expenseStore.expenses.filter { $0.linkedTripPlanId == p.id }
-        if expenseStore.ntdTotal(linked) > 0 {
-            out.append(SummaryChip(id: "spent", icon: "creditcard.fill",
-                                   text: "花費 " + expenseStore.ntdTotalText(linked)))
-        }
+        // [v25.480] 原本這裡還有一顆「花費 NT$x」膠囊。花費已經是 KPI 的一格
+        // （而且點得開），同一個數字在同一張卡上寫兩次只是雜訊。
         return out
     }
 
@@ -721,77 +785,6 @@ struct TripPlanDetailView: View {
         .foregroundStyle(.white)
         .padding(.horizontal, 8).padding(.vertical, 4)
         .background(Color.white.opacity(0.18), in: Capsule())
-    }
-
-    // MARK: 花費（v25.464）
-
-    /// 這趟的花費。
-    ///
-    /// 在此之前，支出與旅遊的關聯只體現在兩個地方：摘要卡上一顆「花費 NT$x」膠囊、
-    /// 以及相本會收進支出的照片。花費本身**從來沒有被列出來過**——使用者記了幾筆，
-    /// 回到行程裡什麼也看不到，只能回記帳頁翻。
-    ///
-    /// 另一半的問題是關聯本身很難發現：記帳表單的「關聯旅遊」只在**進階模式**才出現
-    /// （v25.425 的決定，基本模式刻意只留金額/分類/日期），所以用基本模式記的花費
-    /// 永遠不會掛上任何一趟。那條路不該改——基本模式的簡潔是它存在的理由——
-    /// 改成從旅遊這一端補：把「日期落在這趟期間、但還沒關聯」的花費列出來，一鍵掛上。
-    ///
-    /// 刻意**不自動**把期間內的花費算進這趟：旅行期間在家附近的加油、網購、房貸
-    /// 都落在同一段日期裡，自動歸戶會算出一個錯的旅費。要掛哪幾筆由使用者決定。
-    @ViewBuilder
-    private func expenseCard(_ p: TripPlan) -> some View {
-        let linked = linkedExpenses(p)
-        let candidates = candidateExpenses(p)
-        if !linked.isEmpty || !candidates.isEmpty {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(spacing: 8) {
-                    Image(systemName: "creditcard.fill")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(accent)
-                    Text("這趟的花費")
-                        .font(.subheadline.weight(.bold))
-                    Spacer()
-                    if !linked.isEmpty {
-                        Text(expenseStore.ntdTotalText(linked))
-                            .font(.system(.subheadline, design: .rounded).weight(.bold))
-                            .foregroundStyle(accent)
-                    }
-                }
-
-                if linked.isEmpty {
-                    Text("還沒有花費掛在這趟上。")
-                        .font(.caption).foregroundStyle(.secondary)
-                } else {
-                    ForEach(linked) { e in
-                        expenseRow(e, plan: p)
-                    }
-                }
-
-                if !candidates.isEmpty {
-                    Divider()
-                    HStack(spacing: 6) {
-                        Image(systemName: "questionmark.circle.fill")
-                            .font(.system(size: 11)).foregroundStyle(.orange)
-                        Text("期間內還有 \(candidates.count) 筆花費沒掛上這趟")
-                            .font(.caption.weight(.semibold)).foregroundStyle(.orange)
-                        Spacer()
-                        Button("全部掛上") { linkAll(candidates, to: p) }
-                            .font(.caption.weight(.bold))
-                            .foregroundStyle(accent)
-                    }
-                    ForEach(candidates) { e in
-                        candidateRow(e)
-                    }
-                    Text(Self.candidateFootnote)
-                        .font(.caption2).foregroundStyle(.tertiary)
-                }
-            }
-            .padding(14)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color(.secondarySystemGroupedBackground))
-            .clipShape(RoundedRectangle(cornerRadius: 16))
-            .padding(.horizontal)
-        }
     }
 
     /// [v25.465] 指定算在某一站的花費。
@@ -811,12 +804,6 @@ struct TripPlanDetailView: View {
         guard !list.isEmpty, expenseStore.ntdTotal(list) > 0 else { return nil }
         return expenseStore.ntdTotalText(list)
     }
-
-    /// 說明一次寫成單一字串常數，不要在 Text(...) 裡用 + 串接
-    private static let candidateFootnote =
-        "只列日期落在這趟期間內的變動支出。旅行期間在家附近的加油、網購也會落在"
-        + "同一段日期裡，所以不自動掛——要算進這趟的才按＋。"
-        + "要移除已經掛上的，到記帳頁編輯那一筆把「關聯旅遊」改掉。"
 
     /// 掛在這趟上的花費（新到舊）
     private func linkedExpenses(_ p: TripPlan) -> [Expense] {
@@ -838,79 +825,6 @@ struct TripPlanDetailView: View {
                 return day >= from && day <= to
             }
             .sorted { $0.date > $1.date }
-    }
-
-    private func expenseRow(_ e: Expense, plan: TripPlan) -> some View {
-        HStack(spacing: 10) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(e.title.isEmpty ? (e.variableCategory?.rawValue ?? "花費") : e.title)
-                    .font(.subheadline.weight(.medium))
-                    .lineLimit(1)
-                HStack(spacing: 6) {
-                    Text(Self.dayFmt.string(from: e.date))
-                        .font(.caption2).foregroundStyle(.secondary)
-                    if let c = e.variableCategory {
-                        Text(c.rawValue)
-                            .font(.system(size: 9, weight: .bold))
-                            .padding(.horizontal, 5).padding(.vertical, 1.5)
-                            .background(accent.opacity(0.12), in: Capsule())
-                            .foregroundStyle(accent)
-                    }
-                    if let sid = e.linkedTripStopId,
-                       let stop = plan.stops.first(where: { $0.id == sid }) {
-                        Text(stop.displayName)
-                            .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
-                    }
-                    if !e.photoFileNames.isEmpty {
-                        HStack(spacing: 2) {
-                            Image(systemName: "photo").font(.system(size: 8))
-                            Text("\(e.photoFileNames.count)")
-                        }
-                        .font(.caption2).foregroundStyle(.secondary)
-                    }
-                }
-            }
-            Spacer(minLength: 4)
-            // [v25.466] 外幣顯示當初輸入的原幣金額（存檔的 amount 已是台幣等值，
-            // 要除回去才是使用者打的數字）。規則集中在 ExpenseStore。
-            Text(expenseStore.displayAmountText(e))
-                .font(.system(.subheadline, design: .rounded).weight(.semibold))
-        }
-    }
-
-    private func candidateRow(_ e: Expense) -> some View {
-        HStack(spacing: 10) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(e.title.isEmpty ? (e.variableCategory?.rawValue ?? "花費") : e.title)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                Text(Self.dayFmt.string(from: e.date)
-                     + (e.variableCategory.map { " · " + $0.rawValue } ?? ""))
-                    .font(.caption2).foregroundStyle(.tertiary)
-            }
-            Spacer(minLength: 4)
-            Text(expenseStore.displayAmountText(e))
-                .font(.system(.subheadline, design: .rounded))
-                .foregroundStyle(.secondary)
-            Button {
-                link(e, to: planId)
-            } label: {
-                Image(systemName: "plus.circle.fill")
-                    .font(.system(size: 18)).foregroundStyle(accent)
-            }
-            .buttonStyle(.plain)
-        }
-    }
-
-    private func link(_ e: Expense, to tripId: UUID) {
-        var updated = e
-        updated.linkedTripPlanId = tripId
-        expenseStore.update(updated)
-    }
-
-    private func linkAll(_ list: [Expense], to p: TripPlan) {
-        for e in list { link(e, to: p.id) }
     }
 
     // MARK: 摘要卡：提醒
@@ -1607,47 +1521,6 @@ struct TripPlanDetailView: View {
             .padding(.vertical, 2)
         }
         .scrollEdgeFade(width: 12)
-    }
-
-    /// 整趟的相本入口。放在時間軸底下而不是工具列：
-    /// 相本是「回頭看」的東西，跟排行程的工具不該擠在同一排。
-    private func albumButton(_ p: TripPlan) -> some View {
-        // 相本裡看得到幾張就寫幾張——關聯支出的照片也算進來，
-        // 不然按鈕寫 8 張、點進去 14 張，只會讓人以為壞了
-        let count = albumItems(p).count
-        return Button {
-            showAlbum = true
-        } label: {
-            HStack(spacing: 10) {
-                ZStack {
-                    Circle()
-                        .fill(LinearGradient(colors: [accent.opacity(0.22), accent.opacity(0.08)],
-                                             startPoint: .topLeading, endPoint: .bottomTrailing))
-                        .frame(width: 38, height: 38)
-                    Image(systemName: "photo.stack")
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(accent)
-                }
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("這趟的相本")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.primary)
-                    Text("\(count) 張照片・依景點分組，點開看大圖")
-                        .font(.caption2).foregroundStyle(.secondary)
-                }
-                Spacer(minLength: 0)
-                Image(systemName: "chevron.right")
-                    .font(.caption2.weight(.semibold)).foregroundStyle(.tertiary)
-            }
-            .padding(14)
-            .background(Color(.systemBackground))
-            .clipShape(RoundedRectangle(cornerRadius: 16))
-            .overlay(RoundedRectangle(cornerRadius: 16)
-                .stroke(Color(.separator).opacity(0.12), lineWidth: 0.75))
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .padding(.horizontal)
     }
 
     /// 相本要吃的資料。分組字串帶上「第幾天」，依景點分組出來就是照日子與順序排好的。

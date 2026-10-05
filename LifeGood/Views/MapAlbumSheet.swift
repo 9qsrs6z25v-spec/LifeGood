@@ -44,7 +44,7 @@ struct AlbumPhotoItem: Identifiable {
     let date: Date          // 所屬紀錄日期（依月份分組／排序用）
 }
 
-struct MapAlbumSheet: View {
+struct MapAlbumSheet<Stats: View>: View {
     @Environment(\.dismiss) private var dismiss
 
     let title: String               // 例：「旅遊相簿」「美食相簿」「醫療相簿」
@@ -55,6 +55,12 @@ struct MapAlbumSheet: View {
     /// 空分組 key「未命名<名詞>」。兒女相簿以記錄「類型」分組時傳入 "類型"。
     var groupNoun: String = "地點"
     let items: [AlbumPhotoItem]
+    /// [v25.480] 相簿頂端的統計看板插槽。
+    ///
+    /// 做成插槽而不是把統計寫進這裡：這張相簿是旅遊／美食／醫療地圖與
+    /// 兒女相簿共用的，各自要看的 KPI 根本不一樣（旅遊看「哪一天拍最多」，
+    /// 兒女相簿看那個沒有意義）。不傳就是沒有，版面完全不變。
+    @ViewBuilder var stats: () -> Stats
 
     private enum GroupMode: String, CaseIterable, Identifiable {
         case place = "依地點"
@@ -122,6 +128,12 @@ struct MapAlbumSheet: View {
                                 .opacity(albumAppeared ? 1 : 0)
                                 .offset(y: albumAppeared ? 0 : 10)
                                 .animation(.spring(response: 0.46, dampingFraction: 0.80), value: albumAppeared)
+
+                            stats()
+                                .opacity(albumAppeared ? 1 : 0)
+                                .offset(y: albumAppeared ? 0 : 10)
+                                .animation(.spring(response: 0.46, dampingFraction: 0.80).delay(0.02),
+                                           value: albumAppeared)
 
                             Picker("分組", selection: $groupMode) {
                                 ForEach(GroupMode.allCases) {
@@ -268,5 +280,17 @@ struct MapAlbumSheet: View {
         .shadow(color: .black.opacity(0.14), radius: 14, y: 4)
         .padding(.horizontal, 40)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+// MARK: - 沒有統計看板的用法（v25.480）
+
+/// 既有呼叫端（美食／醫療地圖、兒女相簿、旅遊地圖）維持原本的寫法。
+extension MapAlbumSheet where Stats == EmptyView {
+    init(title: String, accent: Color, emptyTitle: String, emptyHint: String,
+         groupNoun: String = "地點", items: [AlbumPhotoItem]) {
+        self.init(title: title, accent: accent, emptyTitle: emptyTitle,
+                  emptyHint: emptyHint, groupNoun: groupNoun, items: items,
+                  stats: { EmptyView() })
     }
 }
