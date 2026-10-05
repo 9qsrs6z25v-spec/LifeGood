@@ -666,6 +666,15 @@ struct TripPlanShareCard: View {
                         .foregroundStyle(.white)
                         .padding(.horizontal, 12).padding(.vertical, 5)
                         .background(Color.white.opacity(0.2), in: Capsule())
+                } else if let label = partialLabel {
+                    // [v25.476] 只有一張、但只涵蓋整趟的一部分（指定某一天）。
+                    // 標頭的數字講的是整趟，不講清楚這張是哪一段的話，
+                    // 收到圖的人會以為七天的行程只有五站。
+                    Text(label)
+                        .font(.system(size: 16, weight: .bold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 12).padding(.vertical, 5)
+                        .background(Color.white.opacity(0.2), in: Capsule())
                 }
             }
             Text(Self.dayFmt.string(from: plan.startDate) + " "
@@ -693,6 +702,14 @@ struct TripPlanShareCard: View {
             LinearGradient(colors: [TripDayPalette.color(0), TripDayPalette.color(0).opacity(0.6)],
                            startPoint: .topLeading, endPoint: .bottomTrailing)
         )
+    }
+
+    /// 這一張只涵蓋整趟的一部分時，標頭右上角要寫出是哪一段；整趟都在就回 nil。
+    private var partialLabel: String? {
+        guard slots.count < plan.stops.count else { return nil }
+        let days = Set(slots.map(\.dayIndex)).sorted()
+        if days.count == 1, let d = days.first { return "第 \(d + 1) 天" }
+        return "\(slots.count) 站"
     }
 
     private func metric(_ value: String, _ title: String) -> some View {
@@ -1032,12 +1049,19 @@ enum TripImageExporter {
 
     enum PageMode: Hashable, Identifiable {
         case single
+        /// [v25.476] 只出某一天，一張。
+        ///
+        /// 使用者回報：切成幾張其實用不太到，真正會做的是「整趟一張」或
+        /// 「我只想分享第三天」。後者原本做不到——`byDay` 是把每一天都出成
+        /// 一張，想單獨傳某一天還得自己從七張裡挑。
+        case day(Int)
         case byDay
         case count(Int)
 
         var id: String {
             switch self {
             case .single: return "1"
+            case .day(let d): return "d\(d)"
             case .byDay: return "day"
             case .count(let n): return "n\(n)"
             }
@@ -1046,6 +1070,7 @@ enum TripImageExporter {
         var label: String {
             switch self {
             case .single: return "一整張"
+            case .day(let d): return "第 \(d + 1) 天"
             case .byDay: return "一天一張"
             case .count(let n): return "\(n) 張"
             }
@@ -1061,6 +1086,14 @@ enum TripImageExporter {
         switch mode {
         case .single:
             return [slots]
+        case .day(let d):
+            // 直接借 byDay 的切法，取出那一天那一頁：住宿接續的規則
+            // （前一天的住宿站要留在這一頁開頭）才不會又寫一次。
+            // byDay 的頁是按順序來的，而第 d 天的那些站只會出現在
+            // 「第 d 天」那一頁的本文、以及「第 d+1 天」那一頁的開頭，
+            // 所以由前往後找第一頁含有這一天的，就是本文那一頁。
+            let byDay = paginate(slots, mode: .byDay)
+            return byDay.first { page in page.contains { $0.dayIndex == d } }.map { [$0] } ?? []
         case .byDay:
             var pages: [[TripPlan.Slot]] = []
             var current: [TripPlan.Slot] = []
@@ -1093,7 +1126,33 @@ struct TripPlanImageExportSheet: View {
 
     let plan: TripPlan
 
-    @State private var mode: TripImageExporter.PageMode = .single
+    /// [v25.476] 分享方式。先問「要分享什麼」，再問細節——
+    /// 原本第一個問題是「要切成幾張」，但那是三個選項裡最少用的那一個。
+    private enum ExportKind: String, CaseIterable, Identifiable {
+        case whole, oneDay, split
+        var id: String { rawValue }
+        var label: String {
+            switch self {
+            case .whole: return "整趟一張"
+            case .oneDay: return "指定某一天"
+            case .split: return "切成多張"
+            }
+        }
+        var icon: String {
+            switch self {
+            case .whole: return "doc.text.image"
+            case .oneDay: return "calendar.day.timeline.left"
+            case .split: return "rectangle.split.3x1"
+            }
+        }
+    }
+
+    @State private var kind: ExportKind = .whole
+    /// 「指定某一天」選的是第幾天（0 起算）
+    @State private var pickedDay = 0
+    @State private var didPickDefaultDay = false
+    /// 「切成多張」選的切法
+    @State private var splitMode: TripImageExporter.PageMode = .byDay
     @State private var includeMap = true
     @State private var previewImage: UIImage?
     @State private var isPreviewing = false
@@ -1113,12 +1172,38 @@ struct TripPlanImageExportSheet: View {
 
     private var slots: [TripPlan.Slot] { plan.timeline }
 
-    private var modes: [TripImageExporter.PageMode] {
-        var out: [TripImageExporter.PageMode] = [.single]
-        if plan.dayCount > 1 { out.append(.byDay) }
-        // 站數不夠就不要給一堆只有一兩站的分頁選項
+    /// 這趟有哪幾天（時間軸上真的有站的那幾天）
+    private var dayIndices: [Int] {
+        Array(Set(slots.map(\.dayIndex))).sorted()
+    }
+
+    /// 單日行程沒有「第幾天」可選，也沒有「一天一張」可切
+    private var isMultiDay: Bool { dayIndices.count > 1 }
+
+    private var kinds: [ExportKind] {
+        var out: [ExportKind] = [.whole]
+        if isMultiDay { out.append(.oneDay) }
+        // 站數太少時連「切成多張」都不給：切出來會是幾張只有一兩站的圖
+        if !splitOptions.isEmpty { out.append(.split) }
+        return out
+    }
+
+    /// 「切成多張」底下的切法。站數不夠就不要給一堆只有一兩站的分頁選項。
+    private var splitOptions: [TripImageExporter.PageMode] {
+        var out: [TripImageExporter.PageMode] = []
+        if isMultiDay { out.append(.byDay) }
         for n in [2, 3, 4, 6] where n < slots.count { out.append(.count(n)) }
         return out
+    }
+
+    /// 真正要出圖的切法。三個選項各自管自己的細節，合在這裡。
+    private var mode: TripImageExporter.PageMode {
+        switch kind {
+        case .whole: return .single
+        case .oneDay: return .day(pickedDay)
+        case .split: return splitOptions.contains(splitMode) ? splitMode
+            : (splitOptions.first ?? .single)
+        }
     }
 
     private var pages: [[TripPlan.Slot]] {
@@ -1142,6 +1227,13 @@ struct TripPlanImageExportSheet: View {
                 ToolbarItem(placement: .topBarLeading) { Button("關閉") { dismiss() } }
             }
             .task { await loadMap() }
+            // 預設挑今天那一天。一次性：這張表上面還會疊分享面板，
+            // 它關掉時 onAppear 可能再跑一次，不能把使用者選的那天蓋回去。
+            .onAppear {
+                guard !didPickDefaultDay else { return }
+                didPickDefaultDay = true
+                pickedDay = defaultDay
+            }
             .onChange(of: mode) { _, _ in schedulePreview() }
             .onChange(of: includeMap) { _, _ in schedulePreview() }
             .onDisappear { previewTask?.cancel() }
@@ -1160,29 +1252,39 @@ struct TripPlanImageExportSheet: View {
 
     private var optionCard: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("要切成幾張")
+            Text("要分享什麼")
                 .font(.subheadline.weight(.semibold))
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    ForEach(modes) { option in
-                        Button {
-                            mode = option
-                        } label: {
+            // 第一層：整趟／某一天／切成多張。三個並排，不用捲
+            HStack(spacing: 8) {
+                ForEach(kinds) { option in
+                    Button {
+                        kind = option
+                    } label: {
+                        VStack(spacing: 4) {
+                            Image(systemName: option.icon)
+                                .font(.system(size: 14, weight: .semibold))
                             Text(option.label)
-                                .font(.caption.weight(.semibold))
-                                .padding(.horizontal, 12).padding(.vertical, 7)
-                                .background(option == mode ? accent : Color(.tertiarySystemFill),
-                                            in: Capsule())
-                                .foregroundStyle(option == mode ? .white : .primary)
+                                .font(.system(size: 11, weight: .semibold))
+                                .lineLimit(1).minimumScaleFactor(0.8)
                         }
-                        .buttonStyle(.plain)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 10)
+                        .background(option == kind ? accent : Color(.tertiarySystemFill),
+                                    in: RoundedRectangle(cornerRadius: 12))
+                        .foregroundStyle(option == kind ? .white : .primary)
+                        .contentShape(Rectangle())
                     }
+                    .buttonStyle(.plain)
                 }
-                .padding(.horizontal, 2)
             }
+            // 第二層：選了哪一天／怎麼切
+            if kind == .oneDay { dayChips }
+            if kind == .split { splitChips }
             Toggle(isOn: $includeMap) {
                 VStack(alignment: .leading, spacing: 1) {
-                    Text("第一張帶路線地圖").font(.subheadline)
+                    // 只有一張時不要講「第一張」——那會讓人以為還有第二張
+                    Text(pages.count > 1 ? "第一張帶路線地圖" : "帶路線地圖")
+                        .font(.subheadline)
                     Text("把所有景點畫在地圖上，依天分色")
                         .font(.caption2).foregroundStyle(.secondary)
                 }
@@ -1199,14 +1301,90 @@ struct TripPlanImageExportSheet: View {
         .padding(.horizontal)
     }
 
+    /// 「指定某一天」的日期膠囊。顏色沿用時間軸那一天的色系，
+    /// 跟行程頁對得起來（第 3 天在哪一頁都是同一個橘）。
+    private var dayChips: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(dayIndices, id: \.self) { d in
+                    let c = TripDayPalette.color(d)
+                    Button {
+                        pickedDay = d
+                    } label: {
+                        HStack(spacing: 5) {
+                            Circle().fill(d == pickedDay ? Color.white : c)
+                                .frame(width: 6, height: 6)
+                            Text(dayChipText(d))
+                                .font(.caption.weight(.semibold))
+                        }
+                        .padding(.horizontal, 12).padding(.vertical, 7)
+                        .background(d == pickedDay ? c : Color(.tertiarySystemFill),
+                                    in: Capsule())
+                        .foregroundStyle(d == pickedDay ? .white : .primary)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, 2)
+        }
+    }
+
+    /// 「第 3 天 10/5」
+    private func dayChipText(_ d: Int) -> String {
+        let date = Calendar.current.date(byAdding: .day, value: d, to: plan.startDate)
+            ?? plan.startDate
+        return "第 \(d + 1) 天 " + Self.chipDayFmt.string(from: date)
+    }
+
+    private static let chipDayFmt: DateFormatter = {
+        let f = DateFormatter(); f.locale = Locale(identifier: "zh_Hant_TW")
+        f.dateFormat = "M/d"; return f
+    }()
+
+    /// 預設挑哪一天：今天就在這趟裡的話就是今天，否則第一天。
+    /// 出門在外要分享的九成是「今天走了哪些地方」。
+    private var defaultDay: Int {
+        let cal = Calendar.current
+        let today = cal.startOfDay(for: Date())
+        let start = cal.startOfDay(for: plan.startDate)
+        guard let diff = cal.dateComponents([.day], from: start, to: today).day,
+              dayIndices.contains(diff) else { return dayIndices.first ?? 0 }
+        return diff
+    }
+
+    /// 「切成多張」底下的切法膠囊
+    private var splitChips: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(splitOptions) { option in
+                    Button {
+                        splitMode = option
+                    } label: {
+                        Text(option.label)
+                            .font(.caption.weight(.semibold))
+                            .padding(.horizontal, 12).padding(.vertical, 7)
+                            .background(option == mode ? accent : Color(.tertiarySystemFill),
+                                        in: Capsule())
+                            .foregroundStyle(option == mode ? .white : .primary)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, 2)
+        }
+    }
+
     /// 字串在 ViewBuilder 外組好
     private var summaryText: String {
         let counts = pages.map(\.count)
-        var t = "會產生 \(pages.count) 張圖片"
+        var t = pages.count == 1 ? "會產生 1 張圖片" : "會產生 \(pages.count) 張圖片"
         if pages.count > 1, let least = counts.min(), let most = counts.max() {
             t += least == most ? "，每張 \(most) 站" : "，每張 \(least)～\(most) 站"
         } else if let first = counts.first {
             t += "，共 \(first) 站"
+        }
+        if case .day = mode, plan.overnightCount > 0 {
+            t += "。前一晚住宿的那一站會出現在開頭——不帶它的話，這一天的第一段路會不知道從哪來。"
         }
         if mode == .byDay && plan.overnightCount > 0 {
             t += "。住宿的那一站會同時出現在前一天的結尾與隔天的開頭——它本來就是兩天共用的。"
@@ -1262,7 +1440,8 @@ struct TripPlanImageExportSheet: View {
                 } else {
                     Image(systemName: "square.and.arrow.up")
                 }
-                Text(isExporting ? "正在產生…" : "產生並分享 \(pages.count) 張")
+                Text(isExporting ? "正在產生…"
+                     : (pages.count <= 1 ? "產生並分享" : "產生並分享 \(pages.count) 張"))
                     .font(.subheadline.weight(.semibold))
             }
             .foregroundStyle(.white)
