@@ -44,6 +44,24 @@ struct AlbumPhotoItem: Identifiable {
     let date: Date          // 所屬紀錄日期（依月份分組／排序用）
 }
 
+/// 相簿的日期格式器。
+///
+/// [v25.481] 放在型別外面，不是 MapAlbumSheet 的 static 成員：
+/// v25.480 把這個型別改成泛型（多了統計看板插槽）之後，Swift 不允許泛型型別
+/// 擁有 static 儲存屬性（每個特化版本都要有自己的一份，語意無解），
+/// 編譯會直接報「Static stored properties not supported in generic types」。
+/// 格式器又非快取不可——DateFormatter 建立成本高，相簿一次要跑幾百張照片。
+private enum AlbumDateFormat {
+    static let month: DateFormatter = {
+        let f = DateFormatter(); f.locale = Locale(identifier: "zh_Hant_TW")
+        f.dateFormat = "yyyy 年 M 月"; return f
+    }()
+    /// 月份分組 key 另用可排序格式，顯示文字才用 month（避免字串排序錯亂）
+    static let monthKey: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "yyyy-MM"; return f
+    }()
+}
+
 struct MapAlbumSheet<Stats: View>: View {
     @Environment(\.dismiss) private var dismiss
 
@@ -78,14 +96,6 @@ struct MapAlbumSheet<Stats: View>: View {
 
     private let columns = [GridItem(.adaptive(minimum: 104), spacing: 8)]
 
-    private static let monthFmt: DateFormatter = {
-        let f = DateFormatter(); f.locale = Locale(identifier: "zh_Hant_TW"); f.dateFormat = "yyyy 年 M 月"; return f
-    }()
-    /// 月份分組 key 另用可排序格式，顯示文字才用 monthFmt（避免字串排序錯亂）
-    private static let monthKeyFmt: DateFormatter = {
-        let f = DateFormatter(); f.dateFormat = "yyyy-MM"; return f
-    }()
-
     /// 依目前分組模式產生 (標題, 照片) 區段；區段內照片一律新到舊
     private var sections: [(title: String, photos: [AlbumPhotoItem])] {
         switch groupMode {
@@ -102,11 +112,11 @@ struct MapAlbumSheet<Stats: View>: View {
         case .month:
             var map: [String: [AlbumPhotoItem]] = [:]
             for item in items {
-                map[Self.monthKeyFmt.string(from: item.date), default: []].append(item)
+                map[AlbumDateFormat.monthKey.string(from: item.date), default: []].append(item)
             }
             return map.keys.sorted(by: >).map { key in
                 let photos = (map[key] ?? []).sorted { $0.date > $1.date }
-                let title = photos.first.map { Self.monthFmt.string(from: $0.date) } ?? key
+                let title = photos.first.map { AlbumDateFormat.month.string(from: $0.date) } ?? key
                 return (title, photos)
             }
         case .all:
