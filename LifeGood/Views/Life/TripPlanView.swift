@@ -261,6 +261,8 @@ struct TripPlanDetailView: View {
     /// [v25.441] 分享這一站的圖片
     @State private var sharingStopImage: ShareStopImage?
     @State private var isExportingStop = false
+    /// [v25.473] 整趟天氣正在重抓（底下那顆「更新天氣」要轉圈、要擋連按）
+    @State private var isRefreshingWeather = false
 
     struct ShareStopImage: Identifiable {
         let id = UUID()
@@ -323,9 +325,7 @@ struct TripPlanDetailView: View {
                             addButton(p)
                             // Apple 規定：顯示了 WeatherKit 的資料就必須標示出處
                             if showsAnyWeather(p) {
-                                WeatherAttributionRow()
-                                    .frame(maxWidth: .infinity, alignment: .center)
-                                    .padding(.top, 2)
+                                weatherFooter(p)
                             }
                         }
                         .padding(.vertical)
@@ -937,6 +937,45 @@ struct TripPlanDetailView: View {
                               text: "天氣預報只有未來 \(TripWeatherStore.forecastDays) 天，這趟還太遠，所以景點上還看不到天氣")
             }
         }
+    }
+
+    /// [v25.473] 時間軸上每一站的天氣膠囊是緊湊版，小到塞不進一顆按鈕
+    /// （而且那一列本身可以點開景點，再疊一顆按鈕只會互相搶手勢）。
+    /// 所以整趟共用一顆：按一下把這趟所有在預報範圍內的站一起重抓。
+    private func weatherFooter(_ p: TripPlan) -> some View {
+        VStack(spacing: 6) {
+            Button {
+                Task { await refreshWeather(p) }
+            } label: {
+                HStack(spacing: 5) {
+                    if isRefreshingWeather {
+                        ProgressView().scaleEffect(0.6).frame(width: 12, height: 12)
+                    } else {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.system(size: 10, weight: .semibold))
+                    }
+                    Text(isRefreshingWeather ? "更新天氣中…" : "更新天氣")
+                        .font(.caption.weight(.semibold))
+                }
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.tint)
+            .disabled(isRefreshingWeather)
+            WeatherAttributionRow()
+        }
+        .frame(maxWidth: .infinity, alignment: .center)
+        .padding(.top, 2)
+    }
+
+    @MainActor
+    private func refreshWeather(_ p: TripPlan) async {
+        guard !isRefreshingWeather else { return }
+        isRefreshingWeather = true
+        defer { isRefreshingWeather = false }
+        await TripWeatherStore.shared.refreshAll(
+            p.timeline
+                .filter { TripWeatherStore.isWithinForecastRange($0.arrival) }
+                .compactMap { $0.stop.coordinate })
     }
 
     /// 這趟有沒有任何一站真的顯示得出天氣

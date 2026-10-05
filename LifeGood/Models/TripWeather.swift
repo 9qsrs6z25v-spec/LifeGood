@@ -108,6 +108,13 @@ final class TripWeatherStore: ObservableObject {
     /// 不然一趟三個月後的行程會對每一站都白打一次網路。
     static let forecastDays = 10
 
+    /// [v25.473] 一份預報放多久就算舊。
+    ///
+    /// 每日預報一天之內不會變多少，所以不需要分鐘級的新鮮度；
+    /// 但超過一天就不能再叫「預報」了——昨天讀的高低溫掛在今天的行程上，
+    /// 旁邊那行「更新於 09:12」還讓人以為是剛剛讀的，比沒有天氣更糟。
+    static let maxAge: TimeInterval = 24 * 3600
+
     /// key＝座標取到小數第 2 位（約 1 公里）。
     ///
     /// 同一個城市裡的二十個景點天氣幾乎一樣，一站一次請求既慢又浪費配額；
@@ -150,8 +157,11 @@ final class TripWeatherStore: ObservableObject {
     /// 本來就沒資料，我也沒辦法從回報裡判斷。錯誤訊息是唯一的線索，
     /// 吞掉它等於把唯一的線索丟了。
     @Published private(set) var failures: [String: String] = [:]
-    /// 正在飛的請求，避免同一個 key 被二十個景點同時觸發
-    private var inFlight: Set<String> = []
+    /// 正在飛的請求，避免同一個 key 被二十個景點同時觸發。
+    ///
+    /// [v25.473] 改成 @Published：手動更新那顆按鈕要能轉圈，
+    /// 而「正在抓」只有這裡知道。
+    @Published private(set) var inFlight: Set<String> = []
 
     private init() {}
 
@@ -200,12 +210,44 @@ final class TripWeatherStore: ObservableObject {
         failures[Self.key(coordinate)]
     }
 
+    /// [v25.473] 手上這份預報是不是已經超過一天沒更新。
+    ///
+    /// 為什麼需要：`load` 原本的第一個條件是「快取裡沒有才抓」，
+    /// 所以一份預報一旦進了快取就永遠不會再更新——App 擺在背景過一夜，
+    /// 隔天打開看到的還是昨天那份。
+    func isStale(at coordinate: CLLocationCoordinate2D) -> Bool {
+        isStale(key: Self.key(coordinate))
+    }
+
+    private func isStale(key: String) -> Bool {
+        // 還沒有資料不叫「舊」，那是「還沒抓」，兩件事的處理方式不一樣
+        guard cache[key] != nil else { return false }
+        // 有資料卻不知道什麼時候讀的，當成舊的——寧可多打一次請求
+        guard let readAt = sources[key]?.readAt else { return true }
+        return Date().timeIntervalSince(readAt) > Self.maxAge
+    }
+
+    /// 這個座標正在抓（畫面上要轉圈、按鈕要擋住連按）
+    func isLoading(at coordinate: CLLocationCoordinate2D) -> Bool {
+        inFlight.contains(Self.key(coordinate))
+    }
+
     /// 抓這個地點未來十天的每日預報。
     /// 一次抓完整段，因為 WeatherKit 本來就是一次回一整組，分天問只是多打幾次。
+    ///
+    /// [v25.473] 三個條件分開寫，因為擋的是三件不一樣的事：
+    ///   • 正在飛的不要再打一次（同一個 key 可能被二十個景點同時觸發）
+    ///   • 已經有資料、而且還新的，不用再打
+    ///   • 失敗過的不要自動重試到天荒地老——要使用者按「更新／重試」才再試
+    /// `force` 就是那顆按鈕：三個條件裡只有「正在飛」仍然成立。
     @MainActor
-    func load(_ coordinate: CLLocationCoordinate2D) async {
+    func load(_ coordinate: CLLocationCoordinate2D, force: Bool = false) async {
         let key = Self.key(coordinate)
-        guard cache[key] == nil, !inFlight.contains(key), failures[key] == nil else { return }
+        guard !inFlight.contains(key) else { return }
+        if !force {
+            guard failures[key] == nil else { return }
+            guard cache[key] == nil || isStale(key: key) else { return }
+        }
         inFlight.insert(key)
         defer { inFlight.remove(key) }
 
@@ -233,10 +275,17 @@ final class TripWeatherStore: ObservableObject {
                 requested: coordinate,
                 resolved: daily.metadata.location.coordinate,
                 readAt: daily.metadata.date)
+            // 抓到了就把上一次的失敗記錄清掉，不然畫面會一直掛著
+            // 一句已經不成立的錯誤訊息
+            failures[key] = nil
         } catch {
             // 失敗的原因多半是幾種：沒網路、App ID 還沒開 WeatherKit 能力、
             // 剛開好還沒生效、或這個座標落在海上。都不該重試到天荒地老，
             // 記下原因就算了——原因要留著，那是使用者回報時唯一的線索。
+            //
+            // [v25.473] 注意這裡**不動 cache**：過期自動更新失敗時，
+            // 手上那份舊預報仍然比一片空白有用（一天前的高低溫還是對的），
+            // 畫面另外寫一行「更新失敗，顯示的是上次讀到的」講清楚就好。
             failures[key] = Self.describe(error)
         }
     }
@@ -307,14 +356,33 @@ final class TripWeatherStore: ObservableObject {
         }
     }
 
-    /// 重新再試一次（使用者按重試時用）
+    /// 重新抓一次（使用者按「更新」／「重試」時用）。
+    ///
+    /// [v25.473] 不再先把舊資料清掉：清了之後萬一這次也失敗（最常見的就是
+    /// 當下沒網路），畫面會從「昨天的天氣」變成一片空白——使用者按一下
+    /// 「更新」反而失去原本看得到的東西。舊的留著，抓到新的才覆蓋。
+    @MainActor
+    func refresh(_ coordinate: CLLocationCoordinate2D) async {
+        failures[Self.key(coordinate)] = nil
+        await load(coordinate, force: true)
+    }
+
     @MainActor
     func retry(_ coordinate: CLLocationCoordinate2D) async {
-        let key = Self.key(coordinate)
-        failures[key] = nil
-        cache[key] = nil
-        sources[key] = nil
-        await load(coordinate)
+        await refresh(coordinate)
+    }
+
+    /// 整趟一起更新（行程頁那顆「更新天氣」）。
+    /// 座標先去重——1 公里內本來就共用一份，一趟市區行程通常只會打一兩次。
+    @MainActor
+    func refreshAll(_ coordinates: [CLLocationCoordinate2D]) async {
+        var seen = Set<String>()
+        for c in coordinates {
+            let k = Self.key(c)
+            guard !seen.contains(k) else { continue }
+            seen.insert(k)
+            await refresh(c)
+        }
     }
 }
 
@@ -329,6 +397,7 @@ final class TripWeatherStore: ObservableObject {
 ///                   「太遠了」只是噪音；那句話在整趟的摘要講一次就夠。
 struct TripWeatherChip: View {
     @StateObject private var weather = TripWeatherStore.shared
+    @Environment(\.scenePhase) private var scenePhase
 
     let coordinate: CLLocationCoordinate2D?
     let date: Date
@@ -346,10 +415,31 @@ struct TripWeatherChip: View {
                     failedLabel
                 } else {
                     ProgressView().scaleEffect(compact ? 0.45 : 0.6)
-                        .task { await weather.load(coordinate) }
                 }
             }
         }
+        // [v25.473] 這個 .task 掛在整塊上，而不是掛在「還沒有資料」那個
+        // 分支裡。掛在分支裡的話，一旦抓到資料那段 View 就不存在了，
+        // 也就永遠不會再觸發；現在 load 自己會判斷「超過一天就重抓」，
+        // 所以同一個進場動作既負責第一次抓，也負責過期自動更新。
+        .task(id: taskKey) {
+            guard let coordinate,
+                  TripWeatherStore.isWithinForecastRange(date) else { return }
+            await weather.load(coordinate)
+        }
+        // 回到前景再確認一次。擺在背景過了一夜的話，View 沒有重建、
+        // .task 不會再跑，但手上那份預報已經是昨天的了。
+        .onChange(of: scenePhase) { _, phase in
+            guard phase == .active, let coordinate,
+                  TripWeatherStore.isWithinForecastRange(date) else { return }
+            Task { await weather.load(coordinate) }
+        }
+    }
+
+    /// 換站、換日期就重新判斷一次（同一顆膠囊被重用時也要）
+    private var taskKey: String {
+        (coordinate.map { TripWeatherStore.key($0) } ?? "-")
+            + "|" + String(Int(date.timeIntervalSince1970))
     }
 
     @ViewBuilder
@@ -467,11 +557,28 @@ struct TripWeatherChip: View {
     private var sourceLine: some View {
         if let coordinate, let info = weather.source(at: coordinate) {
             let offset = info.offsetMeters
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 4) {
                     Image(systemName: "location.fill").font(.system(size: 8))
                     Text(placeName.map { "以「" + $0 + "」的座標查詢" } ?? "以這一站的座標查詢")
-                    Text("・更新於 " + Self.clock.string(from: info.readAt))
+                    Text("・更新於 " + Self.stampText(info.readAt))
+                    Spacer(minLength: 6)
+                    refreshButton(coordinate)
+                }
+                // [v25.473] 更新失敗時，上面那份資料是舊的——這件事一定要講。
+                // 不講的話畫面看起來跟成功更新一模一樣。
+                if let reason = weather.failureReason(at: coordinate) {
+                    HStack(alignment: .top, spacing: 4) {
+                        Image(systemName: "exclamationmark.triangle").font(.system(size: 8))
+                        Text("更新失敗，上面顯示的是上次讀到的：" + reason)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                } else if weather.isStale(at: coordinate),
+                          !weather.isLoading(at: coordinate) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "clock.arrow.circlepath").font(.system(size: 8))
+                        Text("這份超過一天了，可以按「更新」重新抓")
+                    }
                 }
                 // 1 公里以內就是同一個地方，講出來只是雜訊
                 if offset >= 1000 {
@@ -488,6 +595,42 @@ struct TripWeatherChip: View {
             .padding(.top, 2)
         }
     }
+
+    /// [v25.473] 手動更新。自動更新只在「進場」與「回到前景」時判斷，
+    /// 使用者想當下重新抓一次（剛下飛機、天氣突然變了）要有得按。
+    private func refreshButton(_ coordinate: CLLocationCoordinate2D) -> some View {
+        let busy = weather.isLoading(at: coordinate)
+        return Button {
+            Task { await weather.refresh(coordinate) }
+        } label: {
+            HStack(spacing: 3) {
+                if busy {
+                    ProgressView().scaleEffect(0.45).frame(width: 10, height: 10)
+                } else {
+                    Image(systemName: "arrow.clockwise")
+                        .font(.system(size: 9, weight: .semibold))
+                }
+                Text(busy ? "更新中" : "更新")
+                    .font(.system(size: 10, weight: .semibold))
+            }
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(.tint)
+        .disabled(busy)
+    }
+
+    /// 讀取時間。今天讀的只寫時刻，不是今天的把日期也寫出來——
+    /// 只寫「更新於 09:12」會讓昨天讀的那份看起來像剛剛才讀的。
+    private static func stampText(_ date: Date) -> String {
+        Calendar.current.isDateInToday(date)
+            ? clock.string(from: date)
+            : dayClock.string(from: date)
+    }
+
+    private static let dayClock: DateFormatter = {
+        let f = DateFormatter(); f.locale = Locale(identifier: "zh_Hant_TW")
+        f.dateFormat = "M/d HH:mm"; return f
+    }()
 
     private func statCell(_ icon: String, _ label: String, _ value: String,
                           tint: Color) -> some View {
