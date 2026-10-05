@@ -406,6 +406,13 @@ struct TripWeatherChip: View {
     /// [v25.449] 這一份預報掛在哪個地點上（寬版會寫出來）
     var placeName: String? = nil
 
+    /// [v25.478] 手動更新剛結束時，在膠囊上頂一下回饋再換回天氣。
+    ///
+    /// 為什麼要有：更新完的數字十之八九跟更新前一模一樣（天氣一小時不會變），
+    /// 轉完圈就跳回原本的樣子，使用者分不出「更新好了」還是「根本沒反應」。
+    private enum RefreshAck { case done, failed }
+    @State private var ack: RefreshAck?
+
     var body: some View {
         Group {
             if let coordinate, TripWeatherStore.isWithinForecastRange(date) {
@@ -445,7 +452,48 @@ struct TripWeatherChip: View {
     @ViewBuilder
     private func content(_ day: TripDayWeather) -> some View {
         if compact {
-            HStack(spacing: 4) {
+            // [v25.478] 使用者指定：點時間軸上這顆膠囊就更新這一站的天氣。
+            //
+            // v25.473 刻意沒做，理由是「整列可以點開景點，再疊一顆按鈕會互相搶
+            // 手勢」——但那是我的顧慮，不是使用者的。實際上同一列的打卡圈與
+            // 「…」選單本來就是按鈕、也沒出過問題：按鈕自己吃掉點擊，
+            // 其餘地方才傳給整列。
+            if let coordinate {
+                Button {
+                    refreshNow(coordinate)
+                } label: {
+                    compactCapsule(day, coordinate: coordinate)
+                }
+                .buttonStyle(.plain)
+                .disabled(weather.isLoading(at: coordinate))
+            } else {
+                compactCapsule(day, coordinate: nil)
+            }
+        } else {
+            wide(day)
+        }
+    }
+
+    /// 緊湊版膠囊的內容。三種狀態共用同一顆膠囊的外型，
+    /// 寬度會跟著變——它本來就是 fixedSize，不會把整列推歪。
+    private func compactCapsule(_ day: TripDayWeather,
+                                coordinate: CLLocationCoordinate2D?) -> some View {
+        HStack(spacing: 4) {
+            if let coordinate, weather.isLoading(at: coordinate) {
+                ProgressView().scaleEffect(0.4).frame(width: 10, height: 10)
+                Text("更新資訊中")
+                    .font(.system(size: 10, weight: .bold))
+            } else if ack == .done {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 9)).foregroundStyle(.green)
+                Text("已更新")
+                    .font(.system(size: 10, weight: .bold))
+            } else if ack == .failed {
+                Image(systemName: "exclamationmark.circle.fill")
+                    .font(.system(size: 9)).foregroundStyle(.orange)
+                Text("更新失敗")
+                    .font(.system(size: 10, weight: .bold))
+            } else {
                 Image(systemName: day.symbolName)
                     .font(.system(size: 9))
                     .symbolRenderingMode(.multicolor)
@@ -457,12 +505,27 @@ struct TripWeatherChip: View {
                         .foregroundStyle(.blue)
                 }
             }
-            .fixedSize()
-            .foregroundStyle(.secondary)
-            .padding(.horizontal, 7).padding(.vertical, 3)
-            .background(Color(.tertiarySystemFill), in: Capsule())
-        } else {
-            wide(day)
+        }
+        .fixedSize()
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 7).padding(.vertical, 3)
+        .background(Color(.tertiarySystemFill), in: Capsule())
+        .contentShape(Capsule())
+    }
+
+    /// [v25.478] 手動更新這一站，並在膠囊上回報結果。
+    ///
+    /// 成功就寫「已更新」、失敗寫「更新失敗」，一秒半後換回天氣。
+    /// 不報結果的話，更新前後數字一樣的情況（最常見）看起來就像沒反應。
+    private func refreshNow(_ coordinate: CLLocationCoordinate2D) {
+        guard !weather.isLoading(at: coordinate) else { return }
+        Task { @MainActor in
+            ack = nil
+            await weather.refresh(coordinate)
+            let ok = weather.failureReason(at: coordinate) == nil
+            withAnimation(.easeOut(duration: 0.18)) { ack = ok ? .done : .failed }
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
+            withAnimation(.easeOut(duration: 0.18)) { ack = nil }
         }
     }
 
@@ -662,8 +725,32 @@ struct TripWeatherChip: View {
     @ViewBuilder
     private var failedLabel: some View {
         if compact {
-            Image(systemName: "cloud.slash")
-                .font(.system(size: 9)).foregroundStyle(.tertiary)
+            // [v25.478] 取不到的時候更需要點得動——這一顆就是重試鈕
+            if let coordinate {
+                Button {
+                    refreshNow(coordinate)
+                } label: {
+                    HStack(spacing: 4) {
+                        if weather.isLoading(at: coordinate) {
+                            ProgressView().scaleEffect(0.4).frame(width: 10, height: 10)
+                            Text("更新資訊中").font(.system(size: 10, weight: .bold))
+                        } else {
+                            Image(systemName: "cloud.slash").font(.system(size: 9))
+                            Text("重試").font(.system(size: 10, weight: .bold))
+                        }
+                    }
+                    .fixedSize()
+                    .foregroundStyle(.tertiary)
+                    .padding(.horizontal, 7).padding(.vertical, 3)
+                    .background(Color(.tertiarySystemFill), in: Capsule())
+                    .contentShape(Capsule())
+                }
+                .buttonStyle(.plain)
+                .disabled(weather.isLoading(at: coordinate))
+            } else {
+                Image(systemName: "cloud.slash")
+                    .font(.system(size: 9)).foregroundStyle(.tertiary)
+            }
         } else {
             HStack(alignment: .top, spacing: 8) {
                 Image(systemName: "cloud.slash")
