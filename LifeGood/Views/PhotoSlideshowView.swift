@@ -206,9 +206,6 @@ struct PhotoSlideshowView: View {
     @State private var chromeTask: Task<Void, Never>?
     @State private var showMusicPicker = false
     @State private var musicDenied = false
-    /// 這一張的 Ken Burns 進度（0→1 緩慢推進，製造「照片還活著」的感覺）
-    @State private var zoom: CGFloat = 1.0
-    @State private var drift: CGSize = .zero
     /// 這一張已經播了多久（底下那條細線）
     @State private var elapsed: Double = 0
 
@@ -223,29 +220,15 @@ struct PhotoSlideshowView: View {
     /// 節拍信心不足或沒波形可讀時，給使用者一句說明
     @State private var beatNote: String?
 
-    /// [v25.488] 滿版（裁切）還是完整（整張看得見）。預設完整——
-    /// 使用者回報「照片都被放大很大，主體跑出畫面外面」。
-    @AppStorage("slideshow_fill") private var fillScreen = false
-    /// 相框樣式
-    @AppStorage("slideshow_frame") private var frameRaw = SlideFrame.paper.rawValue
-    /// [v25.489] 背景（照片暈染／水墨山水／宣紙／純黑）
-    @AppStorage("slideshow_backdrop") private var backdropRaw = SlideBackdrop.photo.rawValue
-    /// [v25.489] 版面（單張／拼貼牆）
-    @AppStorage("slideshow_layout") private var layoutRaw = SlideLayout.single.rawValue
     /// 拼貼牆上目前有哪幾張
     @State private var wall: [WallPhoto] = []
     /// 跟拍模式（一個可以連點的大區塊）
     @State private var tapMode = false
 
-    private var frameStyle: SlideFrame { SlideFrame(rawValue: frameRaw) ?? .paper }
-    private var backdropStyle: SlideBackdrop { SlideBackdrop(rawValue: backdropRaw) ?? .photo }
-    private var layoutStyle: SlideLayout { SlideLayout(rawValue: layoutRaw) ?? .single }
-
-    /// 背景是亮的時候，字與按鈕要翻成深色——白字壓在宣紙上根本看不見
-    private var onBackdrop: Color { backdropStyle.isLight ? .black : .white }
-    private var chipFill: Color {
-        backdropStyle.isLight ? Color.black.opacity(0.10) : Color.white.opacity(0.18)
-    }
+    // [v25.490] 使用者定案：水墨山水 ＋ 水墨相框 ＋ 拼貼牆，其餘樣式全部移除。
+    // 背景永遠是宣紙色的亮底，所以文字一律用深墨色。
+    private var onBackdrop: Color { Color(red: 0.13, green: 0.13, blue: 0.15) }
+    private var chipFill: Color { Color.black.opacity(0.10) }
 
     /// 要不要跟著拍子換照片
     @AppStorage("slideshow_beat_sync") private var beatSync = true
@@ -334,10 +317,6 @@ struct PhotoSlideshowView: View {
                 .ignoresSafeArea()
         }
         .overlay { tapOverlay }
-        .onChange(of: layoutRaw) { _, _ in
-            wall.removeAll()
-            if layoutStyle == .collage, let img = image { pushToWall(img) }
-        }
         .onChange(of: music.lastError) { _, new in
             guard new != nil else { return }
             chromeTask?.cancel()
@@ -354,35 +333,11 @@ struct PhotoSlideshowView: View {
 
     // MARK: 畫面
 
-    @ViewBuilder
     private var slide: some View {
         ZStack {
-            backdropLayer
-            if layoutStyle == .collage {
-                collageWall
-            } else if let image {
-                photoCard(image)
-                    .id(index)
-                    .transition(transition(for: index))
-            } else {
-                ProgressView().tint(onBackdrop)
-            }
-        }
-    }
-
-    /// [v25.489] 背景自己一層，不跟著照片一起轉場——
-    /// 水墨山水是一直在動的場景，跟著每張照片重畫一次就不叫場景了。
-    @ViewBuilder
-    private var backdropLayer: some View {
-        switch backdropStyle {
-        case .photo:
-            if let image { photoBackdrop(image).id(index).transition(.opacity) }
-        case .ink:
+            // 背景自己一層，不跟著照片轉場——會動的場景每張重畫一次就不叫場景了
             InkLandscapeView()
-        case .paper:
-            RicePaperView()
-        case .dark:
-            Color.black.ignoresSafeArea()
+            collageWall
         }
     }
 
@@ -391,14 +346,16 @@ struct PhotoSlideshowView: View {
         GeometryReader { geo in
             ZStack {
                 ForEach(wall) { item in
-                    framedPhoto(item.image,
-                                size: PhotoLightbox.fittedSize(item.image.size,
-                                                               in: WallLayout.cardArea(geo.size)))
+                    InkFramedPhoto(image: item.image,
+                                   size: PhotoLightbox.fittedSize(
+                                        item.image.size,
+                                        in: WallLayout.cardArea(geo.size)))
                         .rotationEffect(.degrees(WallLayout.rotation(slot: item.slot)))
                         .position(WallLayout.position(slot: item.slot, in: geo.size))
                         .transition(.asymmetric(
-                            // 從稍微大一點、歪一點的狀態落下來，像把照片放到桌上
-                            insertion: .scale(scale: 1.22).combined(with: .opacity),
+                            // [v25.490] 新的一張用水墨暈開的方式出現，
+                            // 跟整個場景同一套語言；離場單純淡掉。
+                            insertion: .inkWash(seed: item.id),
                             removal: .opacity.combined(with: .scale(scale: 0.92))))
                         .zIndex(Double(item.id))
                 }
@@ -410,126 +367,10 @@ struct PhotoSlideshowView: View {
         .ignoresSafeArea()
     }
 
-    /// 背景：同一張照片放大糊掉當底色。
-    ///
-    /// [v25.488] 「完整顯示」一定會在上下（或左右）留白，留純黑會很像壞掉；
-    /// 用照片自己糊掉的顏色當底，整個畫面的色調是連著的。
-    private func photoBackdrop(_ img: UIImage) -> some View {
-        Color.clear
-            .overlay(
-                Image(uiImage: img)
-                    .resizable()
-                    .scaledToFill()
-            )
-            .clipped()
-            .blur(radius: 42, opaque: true)
-            .overlay(Color.black.opacity(0.42))
-            .ignoresSafeArea()
-    }
-
-    /// 照片本體（含相框）。
-    ///
-    /// 重點是**先算出要擺進多大的空間**，再把照片貼合進去：
-    /// 滿版模式仍然裁切（有人就愛整面都是照片），完整模式則是整張看得見。
-    private func photoCard(_ img: UIImage) -> some View {
-        GeometryReader { geo in
-            let margin = frameStyle.screenMargin
-            // 底下要留給說明文字與控制列，不然相框會被壓在按鈕底下
-            let area = CGSize(width: max(40, geo.size.width - margin * 2),
-                              height: max(40, geo.size.height - margin * 2 - 120))
-            let fitted = PhotoLightbox.fittedSize(img.size, in: area)
-            let size = fillScreen ? geo.size : fitted
-            framedPhoto(img, size: size)
-                // [v25.486] 每一拍輕輕彈一下（1.2%）。幅度刻意很小：
-                // 這是「照片跟著音樂呼吸」，不是把畫面搖來搖去。
-                .scaleEffect(zoom * (beatTick % 2 == 0 ? 1.0 : 1.012))
-                .animation(.spring(response: 0.16, dampingFraction: 0.45), value: beatTick)
-                .offset(drift)
-                .position(x: geo.size.width / 2, y: geo.size.height / 2)
-        }
-        .ignoresSafeArea()
-    }
-
-    @ViewBuilder
-    private func framedPhoto(_ img: UIImage, size: CGSize) -> some View {
-        let photo = Image(uiImage: img)
-            .resizable()
-            .aspectRatio(contentMode: fillScreen ? .fill : .fit)
-            .frame(width: size.width, height: size.height)
-            .clipped()
-
-        switch frameStyle {
-        case .none:
-            photo
-                .clipShape(RoundedRectangle(cornerRadius: fillScreen ? 0 : 8))
-                .shadow(color: .black.opacity(0.5), radius: 18, x: 0, y: 10)
-
-        case .paper:
-            // 相紙：四邊白框、底部留多一點（照片沖洗出來就是這個樣子）
-            VStack(spacing: 0) {
-                photo
-                    .clipShape(RoundedRectangle(cornerRadius: 2))
-                if let item = current {
-                    Text(Self.paperFmt.string(from: item.date))
-                        .font(.system(size: 11, weight: .medium, design: .serif))
-                        .foregroundStyle(.black.opacity(0.45))
-                        .padding(.top, 8)
-                }
-            }
-            .padding(.horizontal, 12)
-            .padding(.top, 12)
-            .padding(.bottom, 14)
-            .background(Color(red: 0.99, green: 0.98, blue: 0.96))
-            .clipShape(RoundedRectangle(cornerRadius: 4))
-            .shadow(color: .black.opacity(0.45), radius: 20, x: 0, y: 12)
-
-        case .gold:
-            photo
-                .clipShape(RoundedRectangle(cornerRadius: 4))
-                .padding(6)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 7)
-                        .stroke(LinearGradient(
-                            colors: [Color(red: 0.85, green: 0.72, blue: 0.42),
-                                     Color(red: 0.62, green: 0.48, blue: 0.22),
-                                     Color(red: 0.92, green: 0.82, blue: 0.56)],
-                            startPoint: .topLeading, endPoint: .bottomTrailing),
-                            lineWidth: 1.8)
-                )
-                .shadow(color: .black.opacity(0.55), radius: 22, x: 0, y: 12)
-
-        case .ink:
-            // 水墨：宣紙色的裱邊 + 糊開的墨線，照片四角壓一點暈
-            photo
-                .clipShape(RoundedRectangle(cornerRadius: 1))
-                .overlay(
-                    Rectangle()
-                        .stroke(Color.black.opacity(0.55), lineWidth: 1.2)
-                        .blur(radius: 1.6)
-                )
-                .padding(14)
-                .background(
-                    Color(red: 0.96, green: 0.94, blue: 0.89)
-                        .overlay(
-                            // 紙的髒感：很淡的墨暈，不然只是一塊米色
-                            RadialGradient(colors: [.black.opacity(0.07), .clear],
-                                           center: .topLeading, startRadius: 2, endRadius: 320)
-                        )
-                )
-                .overlay(
-                    Rectangle()
-                        .stroke(Color.black.opacity(0.30), lineWidth: 2.5)
-                        .blur(radius: 2.4)
-                )
-                .shadow(color: .black.opacity(0.5), radius: 18, x: 0, y: 10)
-        }
-    }
-
     /// 上下兩條黑色漸層：白底照片上文字才看得見
     private var scrim: some View {
-        // [v25.489] 亮背景（水墨、宣紙）要用白色的罩。黑罩會把整幅畫壓成灰的，
-        // 而深色字壓在黑罩上一樣看不見。
-        let veil: Color = backdropStyle.isLight ? .white : .black
+        // 背景是宣紙色的亮底，所以罩子用白色。黑罩會把整幅水墨壓成灰的。
+        let veil = Color.white
         return VStack {
             LinearGradient(colors: [veil.opacity(showChrome ? 0.55 : 0), .clear],
                            startPoint: .top, endPoint: .bottom)
@@ -561,7 +402,7 @@ struct PhotoSlideshowView: View {
             Button { finish() } label: {
                 Image(systemName: "xmark")
                     .font(.system(size: 14, weight: .bold))
-                    .foregroundStyle(backdropStyle.isLight ? .white : .black)
+                    .foregroundStyle(.white)
                     .frame(width: 36, height: 36)
                     .background(Circle().fill(onBackdrop.opacity(0.55)))
             }
@@ -572,7 +413,7 @@ struct PhotoSlideshowView: View {
             Spacer()
             Text("\(index + 1) / \(items.count)")
                 .font(.system(size: 13, weight: .semibold, design: .rounded))
-                .foregroundStyle(backdropStyle.isLight ? .white : .black)
+                .foregroundStyle(.white)
                 .padding(.horizontal, 10).padding(.vertical, 5)
                 .background(Capsule().fill(onBackdrop.opacity(0.55)))
         }
@@ -642,7 +483,7 @@ struct PhotoSlideshowView: View {
                 Button { playing ? pause() : resume() } label: {
                     Image(systemName: playing ? "pause.fill" : "play.fill")
                         .font(.system(size: 18, weight: .bold))
-                        .foregroundStyle(backdropStyle.isLight ? .white : .black)
+                        .foregroundStyle(.white)
                         .frame(width: 48, height: 48)
                         .background(Circle().fill(onBackdrop))
                 }
@@ -658,7 +499,6 @@ struct PhotoSlideshowView: View {
                     beatButton
                     musicButton
                     speedButton
-                    styleButton
                 }
                 .padding(.horizontal, 20)
             }
@@ -732,46 +572,10 @@ struct PhotoSlideshowView: View {
                     .font(.system(size: 11, weight: .semibold))
                     .lineLimit(1)
             }
-            .foregroundStyle(synced ? (backdropStyle.isLight ? .white : .black) : onBackdrop)
+            .foregroundStyle(synced ? .white : onBackdrop)
             .frame(height: 38)
             .padding(.horizontal, 12)
             .background(Capsule().fill(synced ? onBackdrop : chipFill))
-        }
-    }
-
-    /// [v25.488] 版面與相框
-    private var styleButton: some View {
-        Menu {
-            Picker("照片大小", selection: $fillScreen) {
-                Text("完整顯示（整張都看得到）").tag(false)
-                Text("滿版（裁切填滿畫面）").tag(true)
-            }
-            Picker("相框", selection: $frameRaw) {
-                ForEach(SlideFrame.allCases) { style in
-                    Text(style.label).tag(style.rawValue)
-                }
-            }
-            Picker("背景", selection: $backdropRaw) {
-                ForEach(SlideBackdrop.allCases) { style in
-                    Text(style.label).tag(style.rawValue)
-                }
-            }
-            Picker("版面", selection: $layoutRaw) {
-                ForEach(SlideLayout.allCases) { style in
-                    Text(style.label).tag(style.rawValue)
-                }
-            }
-        } label: {
-            HStack(spacing: 5) {
-                Image(systemName: "square.on.square.squareshape.controlhandles")
-                    .font(.system(size: 13, weight: .semibold))
-                Text(frameStyle.label)
-                    .font(.system(size: 11, weight: .semibold))
-            }
-            .foregroundStyle(onBackdrop)
-            .frame(height: 38)
-            .padding(.horizontal, 12)
-            .background(Capsule().fill(chipFill))
         }
     }
 
@@ -797,56 +601,13 @@ struct PhotoSlideshowView: View {
         Self.speeds.min { abs($0.value - seconds) < abs($1.value - seconds) }?.label ?? "中"
     }
 
-    // MARK: 轉場
-    //
-    // 固定依序輪替而不是隨機：隨機看起來像壞掉，輪替看起來像有人設計過。
-    //
-    // [v25.486] 從四種加到七種，而且**跟著小節走**：卡點時每四張是一個小節的
-    // 起頭，那一張給比較狠的轉場（圓形揭開／甩鏡／翻卡），其餘用溫和的
-    // （溶接／推近／模糊溶接）。全部都用狠的會暈，全部都溫和又看不出有在卡點。
-    private func transition(for i: Int) -> AnyTransition {
-        let punchy = synced && i % 4 == 0
-        if punchy {
-            // 選了水墨相框就固定用水墨暈開：框跟轉場是同一套語言，
-            // 混搭甩鏡會很突兀
-            if frameStyle == .ink { return .inkWash(seed: i) }
-            switch (i / 4) % 4 {
-            case 0: return .circleReveal
-            case 1: return .whipPan(from: .trailing)
-            case 2: return .inkWash(seed: i)
-            default: return .flipCard
-            }
-        }
-        if frameStyle == .ink && i % 2 == 1 { return .inkWash(seed: i) }
-        switch i % 6 {
-        case 0:
-            return .opacity
-        case 1:
-            return .asymmetric(
-                insertion: .scale(scale: 1.14).combined(with: .opacity),
-                removal: .opacity)
-        case 2:
-            return .asymmetric(
-                insertion: .move(edge: .trailing).combined(with: .opacity),
-                removal: .opacity)
-        case 3:
-            return .blurDissolve
-        case 4:
-            return .asymmetric(
-                insertion: .scale(scale: 0.88).combined(with: .opacity),
-                removal: .scale(scale: 1.06).combined(with: .opacity))
-        default:
-            return .whipPan(from: .leading)
-        }
-    }
-
-    /// 轉場要多快。
+    /// 照片落到牆上的動畫。
     ///
-    /// 卡點時刻意比較短（0.34 秒）：「踩在拍子上」靠的是**動作結束的瞬間**
-    /// 剛好落在拍點，拖太久就糊成一團、感覺不到節奏。
-    private var transitionAnimation: Animation {
-        synced ? .spring(response: 0.34, dampingFraction: 0.82)
-               : .easeInOut(duration: 0.55)
+    /// 比一般轉場慢一點——水墨要暈得開才看得出是墨，太快就只是一閃。
+    /// 卡點時收緊一些：「踩在拍子上」靠的是**動作收尾的瞬間**落在拍點。
+    private var arrivalAnimation: Animation {
+        synced ? .spring(response: 0.46, dampingFraction: 0.78)
+               : .spring(response: 0.58, dampingFraction: 0.74)
     }
 
     // MARK: 流程
@@ -886,7 +647,9 @@ struct PhotoSlideshowView: View {
             if delta > 0 { finish() }      // 播完就結束
             return
         }
-        withAnimation(transitionAnimation) { index = next }
+        // 換 index 本身不需要動畫：畫面上會動的是「新照片落到牆上」那一下，
+        // 由 pushToWall 負責。
+        index = next
         restartTimer()
     }
 
@@ -1094,8 +857,7 @@ struct PhotoSlideshowView: View {
         } else {
             image = await FullImageCache.shared.load(item.url)
         }
-        startKenBurns()
-        if layoutStyle == .collage, let img = image { pushToWall(img) }
+        if let img = image { pushToWall(img) }
         // 接下來兩張先解好，換場才不會卡一下
         FullImageCache.shared.prefetch(
             [index + 1, index + 2]
@@ -1109,37 +871,11 @@ struct PhotoSlideshowView: View {
     /// 全解析度的圖（一張 1200 萬畫素解開就是 48MB）。
     private func pushToWall(_ img: UIImage) {
         guard !wall.contains(where: { $0.id == index }) else { return }
-        withAnimation(.spring(response: 0.52, dampingFraction: 0.72)) {
+        withAnimation(arrivalAnimation) {
             wall.append(WallPhoto(id: index, image: img, slot: index))
             if wall.count > WallLayout.capacity { wall.removeFirst() }
         }
     }
-
-    /// 緩慢推近＋飄移。方向依序輪替，不然每一張都往同一邊飄會很機械。
-    private func startKenBurns() {
-        zoom = 1.0
-        drift = .zero
-        // [v25.486] 推近／拉遠交替，飄移方向四種輪流——
-        // 只會推近、只會往同一邊飄的話，看三十張就看得出是同一個公式。
-        // [v25.488] 完整顯示時幅度要小：推太多等於又把主體推出畫面，
-        // 那正是使用者回報的問題。滿版才用大幅度。
-        let amount: CGFloat = fillScreen ? 0.10 : 0.035
-        let shift: CGFloat = fillScreen ? 16 : 6
-        let dx: CGFloat = (index % 2 == 0) ? shift : -shift
-        let dy: CGFloat = (index % 4 < 2) ? -shift * 0.75 : shift * 0.6
-        let zoomsIn = index % 2 == 0
-        zoom = zoomsIn ? 1.0 : 1.0 + amount
-        withAnimation(.linear(duration: slideDuration + 0.6)) {
-            zoom = zoomsIn ? 1.0 + amount : 1.0
-            drift = CGSize(width: dx, height: dy)
-        }
-    }
-
-    /// 相紙下緣那行小字（沖洗出來的照片背面會寫的那種）
-    private static let paperFmt: DateFormatter = {
-        let f = DateFormatter(); f.locale = Locale(identifier: "zh_Hant_TW")
-        f.dateFormat = "yyyy.MM.dd"; return f
-    }()
 
     private static let dayFmt: DateFormatter = {
         let f = DateFormatter(); f.locale = Locale(identifier: "zh_Hant_TW")
@@ -1153,183 +889,6 @@ struct PhotoSlideshowView: View {
 // 這是一個轉場」的動作——圓形揭開、甩鏡、翻卡、模糊溶接。
 // 全部用 .modifier(active:identity:) 做：active 是「還沒進場／已經離場」的樣子，
 // identity 是「在畫面上」的樣子，SwiftUI 會在兩者之間補間。
-
-/// 模糊溶接：糊掉並微微放大後消失。最溫和的一種，適合連續的風景照。
-private struct BlurDissolveModifier: ViewModifier {
-    let active: Bool
-    func body(content: Content) -> some View {
-        content
-            .blur(radius: active ? 16 : 0)
-            .scaleEffect(active ? 1.06 : 1)
-            .opacity(active ? 0 : 1)
-    }
-}
-
-/// 圓形揭開：從中心擴散出來。小節的第一張用，一眼看得出「換段落了」。
-private struct CircleRevealModifier: ViewModifier {
-    let active: Bool
-    func body(content: Content) -> some View {
-        content
-            .mask(
-                Circle()
-                    // 2.4 倍才蓋得滿整個長方形畫面（對角線比邊長長）
-                    .scaleEffect(active ? 0.01 : 2.4)
-            )
-            .opacity(active ? 0 : 1)
-    }
-}
-
-/// 甩鏡：快速橫移＋殘影般的模糊。
-private struct WhipPanModifier: ViewModifier {
-    let active: Bool
-    let fromTrailing: Bool
-    func body(content: Content) -> some View {
-        content
-            .offset(x: active ? (fromTrailing ? 280 : -280) : 0)
-            .blur(radius: active ? 14 : 0)
-            .opacity(active ? 0 : 1)
-    }
-}
-
-/// 翻卡：繞 Y 軸轉一個角度。刻意只轉 26 度——轉到 90 度會看到紙片的背面，
-/// 那需要另外畫一面，在幻燈片裡不值得。
-private struct FlipCardModifier: ViewModifier {
-    let active: Bool
-    func body(content: Content) -> some View {
-        content
-            .rotation3DEffect(.degrees(active ? 26 : 0),
-                              axis: (x: 0, y: 1, z: 0),
-                              perspective: 0.55)
-            .scaleEffect(active ? 0.94 : 1)
-            .opacity(active ? 0 : 1)
-    }
-}
-
-extension AnyTransition {
-    static var blurDissolve: AnyTransition {
-        .modifier(active: BlurDissolveModifier(active: true),
-                  identity: BlurDissolveModifier(active: false))
-    }
-
-    static var circleReveal: AnyTransition {
-        .asymmetric(
-            insertion: .modifier(active: CircleRevealModifier(active: true),
-                                 identity: CircleRevealModifier(active: false)),
-            // 離場用單純的淡出：兩張同時做圓形遮罩會看到破圖
-            removal: .opacity)
-    }
-
-    static func whipPan(from edge: Edge) -> AnyTransition {
-        let fromTrailing = edge == .trailing
-        return .asymmetric(
-            insertion: .modifier(active: WhipPanModifier(active: true, fromTrailing: fromTrailing),
-                                 identity: WhipPanModifier(active: false, fromTrailing: fromTrailing)),
-            removal: .modifier(active: WhipPanModifier(active: true, fromTrailing: !fromTrailing),
-                               identity: WhipPanModifier(active: false, fromTrailing: !fromTrailing)))
-    }
-
-    static var flipCard: AnyTransition {
-        .modifier(active: FlipCardModifier(active: true),
-                  identity: FlipCardModifier(active: false))
-    }
-}
-
-// MARK: - 相框樣式（v25.488）
-
-/// 照片的裝裱方式。使用者回報「照片放很大、主體跑出畫面」之後補的——
-/// 相框不只是裝飾，它同時逼著版面留白，照片就不會被推到畫面外。
-enum SlideFrame: String, CaseIterable, Identifiable {
-    case none, paper, gold, ink
-
-    var id: String { rawValue }
-
-    var label: String {
-        switch self {
-        case .none:  return "無框"
-        case .paper: return "相紙"
-        case .gold:  return "金線"
-        case .ink:   return "水墨"
-        }
-    }
-
-    /// 照片離畫面邊緣至少留多少
-    var screenMargin: CGFloat {
-        switch self {
-        case .none:  return 16
-        case .paper: return 34
-        case .gold:  return 28
-        case .ink:   return 32
-        }
-    }
-}
-
-// MARK: - 水墨轉場（v25.488）
-//
-// 使用者指定「水墨過渡」。做法是拿一塊**會長大的墨漬**當遮罩：
-// 十幾個位置固定的墨點，各自在不同時間開始擴散，邊緣用模糊糊掉，
-// 看起來就像墨在宣紙上洇開。
-//
-// 兩個關鍵：
-//   • 墨點位置必須固定（用自己寫的固定種子亂數）。每一幀重骰的話會閃成雜訊。
-//   • ViewModifier 要遵從 Animatable，SwiftUI 才會替 progress 補間——
-//     不然它只會在 0 與 1 之間直接跳過去，根本看不到暈開的過程。
-
-/// 固定種子的亂數（LCG）。要的是「每次都一樣」而不是「夠亂」。
-private struct SeededRandom {
-    private var state: UInt64
-
-    init(_ seed: Int) {
-        state = UInt64(truncatingIfNeeded: seed) &* 6364136223846793005 &+ 1442695040888963407
-    }
-
-    mutating func next() -> Double {
-        state = state &* 6364136223846793005 &+ 1442695040888963407
-        return Double((state >> 33) & 0xFF_FFFF) / Double(0xFF_FFFF)
-    }
-}
-
-private struct InkBlobs: View {
-    let progress: Double
-    let seed: Int
-
-    var body: some View {
-        Canvas { context, size in
-            // 邊緣糊掉才像墨，銳利的圓只會像貼紙
-            context.addFilter(.blur(radius: 26))
-            var random = SeededRandom(seed)
-            let longest = max(size.width, size.height)
-            let count = 16
-            for i in 0..<count {
-                let cx = random.next() * size.width
-                let cy = random.next() * size.height
-                let scale = 0.35 + random.next() * 0.55
-                // 每一點開始暈開的時間錯開，才有「一點一點滲出來」的感覺
-                let delay = Double(i) / Double(count) * 0.45
-                let local = max(0, min(1, (progress - delay) / max(0.0001, 1 - delay)))
-                let radius = longest * 0.85 * scale * local
-                guard radius > 0.5 else { continue }
-                context.fill(
-                    Path(ellipseIn: CGRect(x: cx - radius, y: cy - radius,
-                                           width: radius * 2, height: radius * 2)),
-                    with: .color(.black))
-            }
-        }
-    }
-}
-
-private struct InkRevealModifier: ViewModifier, Animatable {
-    var progress: Double
-    var seed: Int
-
-    var animatableData: Double {
-        get { progress }
-        set { progress = newValue }
-    }
-
-    func body(content: Content) -> some View {
-        content.mask(InkBlobs(progress: progress, seed: seed))
-    }
-}
 
 extension AnyTransition {
     /// 水墨暈開。離場用淡出——兩張同時做遮罩會互相穿幫。

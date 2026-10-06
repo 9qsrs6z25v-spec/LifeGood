@@ -1,186 +1,457 @@
 import SwiftUI
 
-// MARK: - 動態相簿的背景與版面（v25.489）
+// MARK: - 動態相簿的水墨場景與拼貼版型（v25.490）
 //
-// 使用者要的兩件事：
-//   1. 會動的水墨背景（山、霧、飛鳥），不是把照片糊掉當底
-//   2. 一個畫面上慢慢跑出很多張照片的拼貼版型
+// 使用者定案：只留「水墨山水背景 ＋ 水墨相框 ＋ 拼貼牆」，其餘選項全部移除。
+// 這一版把山水的真實度再推一階。
 //
-// 水墨這一支完全用 Canvas 畫出來，沒有任何圖檔：
-//   • 不必打包素材（那些圖庫的圖有授權問題，而且一張就好幾 MB）
-//   • 任何螢幕尺寸都剛好，不會拉伸
-//   • 山形是幾條正弦波疊出來的，每一層速度不同＝視差，所以它會「活著」
-
-/// 背景樣式
-enum SlideBackdrop: String, CaseIterable, Identifiable {
-    /// 照片自己放大糊掉（v25.488 的做法）
-    case photo
-    /// 會動的水墨山水
-    case ink
-    /// 素的宣紙
-    case paper
-    /// 純黑
-    case dark
-
-    var id: String { rawValue }
-
-    var label: String {
-        switch self {
-        case .photo: return "照片暈染"
-        case .ink:   return "水墨山水"
-        case .paper: return "宣紙"
-        case .dark:  return "純黑"
-        }
-    }
-
-    /// 背景是亮的嗎——文字與按鈕要跟著換顏色，不然白字壓在宣紙上看不見
-    var isLight: Bool {
-        switch self {
-        case .ink, .paper: return true
-        case .photo, .dark: return false
-        }
-    }
-}
+// ── 這一版做了什麼讓它更像畫 ──
+// 1. 山的輪廓改用四個八度的疊加（fBm），而且頻率不是整數倍——
+//    原本兩條正弦疊出來的稜線有明顯週期感，看久了會發現它在重複。
+//    峰與谷再分開塑形：峰拉尖、谷壓平，山才不是一排對稱的波浪。
+// 2. 霧**夾在山之間**，不是全部蓋在最上面。這是空氣透視的本質：
+//    遠山之所以淡，是因為中間隔著空氣。順序一錯，再淡的遠山也像貼紙。
+// 3. 每一道稜線加「濕邊」：水墨的山脊是筆鋒壓下去那一下，最濃；
+//    山體往下才暈開。只有填色沒有濕邊，看起來像色塊不像筆。
+// 4. 近山加短皴筆（山的質感紋理），遠山不加——遠的地方本來就看不到筆觸。
+// 5. 水面：近山在水裡的倒影（上下翻轉、更淡、糊掉）＋幾道留白橫紋。
+// 6. 松樹長在近山的稜線上（位置跟著稜線一起飄），梅枝掛在右上角。
+// 7. 紙紋、月暈、暗角是靜態的，另外一層畫，不跟著每一幀重算。
 
 /// 會動的水墨山水。
 ///
-/// 每秒重畫 24 次就夠了（水墨本來就該慢），用 .periodic 而不是 .animation：
-/// 後者會跟著螢幕更新率跑到 120fps，畫一樣的東西卻多燒四倍的電。
+/// 靜態的東西（紙、月、梅枝、暗角）跟會動的東西（山、霧、水、鳥）分兩層：
+/// 靜態那層只畫一次，省掉每秒 24 次的重複勞動。
 struct InkLandscapeView: View {
-    /// 0...1，整體濃淡
+    /// 0...1，整體墨色濃淡
     var density: Double = 1.0
 
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 1.0 / 24.0)) { timeline in
-            Canvas { context, size in
-                let t = timeline.date.timeIntervalSinceReferenceDate
-                paper(&context, size)
-                // 由遠到近四層山：越近越濃、跑得越快（視差）
-                for layer in 0..<4 {
-                    ridge(&context, size, layer: layer, time: t)
+        ZStack {
+            InkPaperLayer(density: density)
+            TimelineView(.periodic(from: .now, by: 1.0 / 24.0)) { timeline in
+                Canvas { context, size in
+                    let t = timeline.date.timeIntervalSinceReferenceDate
+                    InkScene.draw(&context, size: size, time: t, density: density)
                 }
-                mist(&context, size, time: t)
-                birds(&context, size, time: t)
             }
+            .ignoresSafeArea()
+            // 暗角壓在最上面：讓視線收回畫面中央
+            InkVignette()
+        }
+        .ignoresSafeArea()
+    }
+}
+
+// MARK: 靜態層（紙、月、梅枝）
+
+private struct InkPaperLayer: View {
+    let density: Double
+
+    var body: some View {
+        Canvas { context, size in
+            // 宣紙：不是純白，暖一點、右下角再沉一點
+            context.fill(
+                Path(CGRect(origin: .zero, size: size)),
+                with: .linearGradient(
+                    Gradient(colors: [
+                        Color(red: 0.980, green: 0.974, blue: 0.962),
+                        Color(red: 0.946, green: 0.940, blue: 0.928),
+                        Color(red: 0.902, green: 0.898, blue: 0.890)
+                    ]),
+                    startPoint: .zero,
+                    endPoint: CGPoint(x: size.width * 0.3, y: size.height)))
+
+            moon(&context, size)
+            grain(&context, size)
+            plumBranch(&context, size)
         }
         .ignoresSafeArea()
     }
 
-    private func paper(_ context: inout GraphicsContext, _ size: CGSize) {
+    /// 淡淡的月輪。水墨畫裡的月亮是「留白＋一圈淡墨」，不是一顆發光的球。
+    private func moon(_ context: inout GraphicsContext, _ size: CGSize) {
+        let c = CGPoint(x: size.width * 0.74, y: size.height * 0.17)
+        let r = min(size.width, size.height) * 0.085
         context.fill(
-            Path(CGRect(origin: .zero, size: size)),
-            with: .linearGradient(
-                Gradient(colors: [
-                    Color(red: 0.985, green: 0.980, blue: 0.970),
-                    Color(red: 0.930, green: 0.930, blue: 0.925),
-                    Color(red: 0.890, green: 0.893, blue: 0.895)
-                ]),
-                startPoint: .zero,
-                endPoint: CGPoint(x: 0, y: size.height)))
+            Path(ellipseIn: CGRect(x: c.x - r * 2.6, y: c.y - r * 2.6,
+                                   width: r * 5.2, height: r * 5.2)),
+            with: .radialGradient(
+                Gradient(colors: [Color.white.opacity(0.75), Color.white.opacity(0)]),
+                center: c, startRadius: r * 0.6, endRadius: r * 2.6))
+        context.stroke(
+            Path(ellipseIn: CGRect(x: c.x - r, y: c.y - r, width: r * 2, height: r * 2)),
+            with: .color(.black.opacity(0.07)), lineWidth: 1)
     }
 
-    /// 一層山脊。兩個不同週期的正弦疊起來，才不會像心電圖。
-    private func ridge(_ context: inout GraphicsContext, _ size: CGSize,
-                       layer: Int, time: Double) {
-        let depth = Double(layer) / 3.0                 // 0＝最遠
-        let baseY = size.height * (0.40 + 0.15 * depth)
-        let amp = size.height * (0.055 + 0.055 * (1 - depth))
-        let drift = time * (1.6 + Double(layer) * 2.4) / 120.0
-
-        var path = Path()
-        path.move(to: CGPoint(x: 0, y: size.height))
-        var x: CGFloat = 0
-        let step: CGFloat = 5
-        while x <= size.width {
-            let u = Double(x / max(size.width, 1))
-            let y = baseY
-                - amp * sin((u * 3.1 + drift + Double(layer) * 0.7) * .pi)
-                - amp * 0.45 * sin((u * 7.7 - drift * 1.6 + Double(layer) * 1.9) * .pi)
-            path.addLine(to: CGPoint(x: x, y: CGFloat(y)))
-            x += step
-        }
-        path.addLine(to: CGPoint(x: size.width, y: size.height))
-        path.closeSubpath()
-
-        let ink = (0.08 + 0.20 * depth) * density
-        context.fill(path, with: .linearGradient(
-            Gradient(colors: [Color.black.opacity(ink),
-                              Color.black.opacity(ink * 0.18)]),
-            startPoint: CGPoint(x: 0, y: baseY - amp),
-            endPoint: CGPoint(x: 0, y: size.height)))
-    }
-
-    /// 橫向飄的霧帶。模糊半徑開很大，邊界才不會像一條白色香腸。
-    private func mist(_ context: inout GraphicsContext, _ size: CGSize, time: Double) {
-        context.drawLayer { layer in
-            layer.addFilter(.blur(radius: 42))
-            for i in 0..<3 {
-                let speed = 5.0 + Double(i) * 3.5
-                let cycle = ((time * speed / 100).truncatingRemainder(dividingBy: 1.6)) - 0.3
-                let cx = CGFloat(cycle) * size.width
-                let cy = size.height * CGFloat(0.47 + 0.11 * Double(i))
-                let w = size.width * 1.05
-                let h = size.height * (0.055 + 0.02 * CGFloat(i))
-                layer.fill(
-                    Path(ellipseIn: CGRect(x: cx - w / 2, y: cy - h / 2, width: w, height: h)),
-                    with: .color(.white.opacity(0.55)))
-            }
+    /// 紙紋。固定種子的細點，數量壓在 140 顆——靜態層只畫一次，不心疼。
+    private func grain(_ context: inout GraphicsContext, _ size: CGSize) {
+        var random = InkRandom(20260819)
+        for _ in 0..<140 {
+            let x = random.next() * size.width
+            let y = random.next() * size.height
+            let r = 0.4 + random.next() * 0.9
+            context.fill(
+                Path(ellipseIn: CGRect(x: x, y: y, width: r, height: r)),
+                with: .color(.black.opacity(0.025 + random.next() * 0.03)))
         }
     }
 
-    /// 幾隻飛鳥。兩段二次曲線就是一隻鳥，多了反而假。
-    private func birds(_ context: inout GraphicsContext, _ size: CGSize, time: Double) {
-        for i in 0..<5 {
-            let cycle = ((time / 34 + Double(i) * 0.21).truncatingRemainder(dividingBy: 1))
-            let x = CGFloat(cycle) * size.width * 1.25 - size.width * 0.12
-            let y = size.height * CGFloat(0.22 + 0.055 * Double(i % 3))
-                + CGFloat(sin(time * 0.7 + Double(i)) * 5)
-            let s: CGFloat = 5 + CGFloat(i % 3) * 1.6
-            var path = Path()
-            path.move(to: CGPoint(x: x - s, y: y))
-            path.addQuadCurve(to: CGPoint(x: x, y: y - s * 0.12),
-                              control: CGPoint(x: x - s * 0.5, y: y - s * 0.6))
-            path.addQuadCurve(to: CGPoint(x: x + s, y: y),
-                              control: CGPoint(x: x + s * 0.5, y: y - s * 0.6))
-            context.stroke(path, with: .color(.black.opacity(0.42 * density)),
-                           lineWidth: 1.1)
+    /// 右上角的梅枝：一條主幹、兩條分枝、幾朵紅梅。
+    /// 這是整張畫的「落款位置」——有它才有中國畫的樣子。
+    private func plumBranch(_ context: inout GraphicsContext, _ size: CGSize) {
+        let ink = Color.black.opacity(0.62 * density)
+        var trunk = Path()
+        let start = CGPoint(x: size.width * 1.02, y: size.height * 0.02)
+        trunk.move(to: start)
+        trunk.addCurve(to: CGPoint(x: size.width * 0.66, y: size.height * 0.165),
+                       control1: CGPoint(x: size.width * 0.92, y: size.height * 0.05),
+                       control2: CGPoint(x: size.width * 0.80, y: size.height * 0.08))
+        context.stroke(trunk, with: .color(ink),
+                       style: StrokeStyle(lineWidth: 3.4, lineCap: .round))
+
+        var branch1 = Path()
+        branch1.move(to: CGPoint(x: size.width * 0.86, y: size.height * 0.072))
+        branch1.addQuadCurve(to: CGPoint(x: size.width * 0.80, y: size.height * 0.195),
+                             control: CGPoint(x: size.width * 0.86, y: size.height * 0.14))
+        context.stroke(branch1, with: .color(ink.opacity(0.8)),
+                       style: StrokeStyle(lineWidth: 1.7, lineCap: .round))
+
+        var branch2 = Path()
+        branch2.move(to: CGPoint(x: size.width * 0.75, y: size.height * 0.123))
+        branch2.addQuadCurve(to: CGPoint(x: size.width * 0.70, y: size.height * 0.062),
+                             control: CGPoint(x: size.width * 0.70, y: size.height * 0.10))
+        context.stroke(branch2, with: .color(ink.opacity(0.8)),
+                       style: StrokeStyle(lineWidth: 1.5, lineCap: .round))
+
+        // 梅花：五個點一朵太細了，用一個紅圓加一點深色花心就夠
+        let blossoms: [(CGFloat, CGFloat, CGFloat)] = [
+            (0.69, 0.060, 5.0), (0.73, 0.118, 4.2), (0.795, 0.192, 4.6),
+            (0.845, 0.118, 3.6), (0.885, 0.063, 4.4), (0.805, 0.072, 3.2)
+        ]
+        for (ux, uy, r) in blossoms {
+            let c = CGPoint(x: size.width * ux, y: size.height * uy)
+            context.fill(
+                Path(ellipseIn: CGRect(x: c.x - r, y: c.y - r, width: r * 2, height: r * 2)),
+                with: .color(Color(red: 0.78, green: 0.16, blue: 0.22).opacity(0.85)))
+            context.fill(
+                Path(ellipseIn: CGRect(x: c.x - r * 0.28, y: c.y - r * 0.28,
+                                       width: r * 0.56, height: r * 0.56)),
+                with: .color(.black.opacity(0.45)))
         }
     }
 }
 
-/// 素宣紙（不會動，給想安靜一點的人）
-struct RicePaperView: View {
+private struct InkVignette: View {
     var body: some View {
-        ZStack {
-            LinearGradient(colors: [
-                Color(red: 0.98, green: 0.97, blue: 0.95),
-                Color(red: 0.93, green: 0.92, blue: 0.90)
-            ], startPoint: .topLeading, endPoint: .bottomTrailing)
-            // 很淡的墨暈，不然只是一塊米色
-            RadialGradient(colors: [.black.opacity(0.05), .clear],
-                           center: .topTrailing, startRadius: 10, endRadius: 420)
-            RadialGradient(colors: [.black.opacity(0.04), .clear],
-                           center: .bottomLeading, startRadius: 10, endRadius: 380)
+        RadialGradient(colors: [.clear, .black.opacity(0.16)],
+                       center: .center, startRadius: 120, endRadius: 520)
+            .ignoresSafeArea()
+            .allowsHitTesting(false)
+            .blendMode(.multiply)
+    }
+}
+
+// MARK: 動態層
+
+enum InkScene {
+    /// 幾層山。遠到近，最後一層是前景。
+    private static let layers = 5
+
+    static func draw(_ context: inout GraphicsContext, size: CGSize,
+                     time: Double, density: Double) {
+        // 水面在這個高度，近山要在它上面
+        let waterY = size.height * 0.80
+
+        for layer in 0..<layers {
+            ridge(&context, size, layer: layer, time: time, density: density, waterY: waterY)
+            // 霧夾在山之間（空氣透視）：第 1、2 層之後各鋪一道
+            if layer == 1 { mist(&context, size, time: time, band: 0) }
+            if layer == 2 { mist(&context, size, time: time, band: 1) }
         }
-        .ignoresSafeArea()
+
+        water(&context, size, time: time, density: density, waterY: waterY)
+        mist(&context, size, time: time, band: 2)
+        birds(&context, size, time: time, density: density)
+    }
+
+    // MARK: 山
+
+    /// 稜線高度。四個八度疊加，頻率用非整數倍——整數倍會讓波形週期性重複，
+    /// 一眼就看出是公式畫的。
+    private static func ridgeY(_ u: Double, layer: Int, drift: Double,
+                               baseY: CGFloat, amp: CGFloat) -> CGFloat {
+        var value = 0.0
+        var weight = 1.0
+        var freq = 1.5
+        for octave in 0..<4 {
+            let phase = drift * (1 + Double(octave) * 0.22) + Double(layer) * 5.7 + Double(octave) * 2.3
+            value += weight * sin((u * freq + phase) * .pi)
+            weight *= 0.5
+            freq *= 2.13
+        }
+        value /= 1.9
+        // 峰拉尖、谷壓平：山的輪廓不是對稱的波浪
+        let shaped = value >= 0 ? pow(value, 1.45) : value * 0.42
+        return baseY - amp * CGFloat(shaped)
+    }
+
+    private static func ridgePath(_ size: CGSize, layer: Int, drift: Double,
+                                  baseY: CGFloat, amp: CGFloat,
+                                  bottom: CGFloat) -> (Path, Path) {
+        var fill = Path()
+        var crest = Path()
+        fill.move(to: CGPoint(x: 0, y: bottom))
+        var x: CGFloat = 0
+        let step: CGFloat = 4
+        var first = true
+        while x <= size.width {
+            let y = ridgeY(Double(x / max(size.width, 1)), layer: layer,
+                           drift: drift, baseY: baseY, amp: amp)
+            fill.addLine(to: CGPoint(x: x, y: y))
+            if first {
+                crest.move(to: CGPoint(x: x, y: y))
+                first = false
+            } else {
+                crest.addLine(to: CGPoint(x: x, y: y))
+            }
+            x += step
+        }
+        fill.addLine(to: CGPoint(x: size.width, y: bottom))
+        fill.closeSubpath()
+        return (fill, crest)
+    }
+
+    private static func ridge(_ context: inout GraphicsContext, _ size: CGSize,
+                              layer: Int, time: Double, density: Double, waterY: CGFloat) {
+        let depth = Double(layer) / Double(layers - 1)       // 0＝最遠
+        let baseY = size.height * CGFloat(0.30 + 0.34 * depth)
+        let amp = size.height * CGFloat(0.075 + 0.055 * (1 - depth))
+        let drift = time * (1.1 + Double(layer) * 2.0) / 140.0
+        let bottom = layer == layers - 1 ? size.height : waterY + size.height * 0.06
+
+        let (fill, crest) = ridgePath(size, layer: layer, drift: drift,
+                                      baseY: baseY, amp: amp, bottom: bottom)
+
+        // 山體：從稜線往下暈開
+        let ink = (0.07 + 0.26 * depth) * density
+        context.fill(fill, with: .linearGradient(
+            Gradient(colors: [Color.black.opacity(ink),
+                              Color.black.opacity(ink * 0.16)]),
+            startPoint: CGPoint(x: 0, y: baseY - amp),
+            endPoint: CGPoint(x: 0, y: bottom)))
+
+        // 濕邊：筆鋒壓在稜線上那一下，比山體濃
+        context.stroke(crest, with: .color(.black.opacity((0.10 + 0.34 * depth) * density)),
+                       style: StrokeStyle(lineWidth: 0.6 + 1.5 * CGFloat(depth),
+                                          lineCap: .round, lineJoin: .round))
+
+        // 皴筆：只有近的兩層畫得到筆觸
+        if layer >= layers - 2 {
+            var random = InkRandom(layer * 977 + 31)
+            let count = 26
+            for _ in 0..<count {
+                let u = random.next()
+                let x = CGFloat(u) * size.width
+                let top = ridgeY(u, layer: layer, drift: drift, baseY: baseY, amp: amp)
+                let length = CGFloat(10 + random.next() * 26) * CGFloat(0.6 + depth)
+                guard top + length < bottom else { continue }
+                var stroke = Path()
+                stroke.move(to: CGPoint(x: x, y: top + 3))
+                stroke.addQuadCurve(
+                    to: CGPoint(x: x + CGFloat(random.next() * 8 - 4), y: top + 3 + length),
+                    control: CGPoint(x: x + CGFloat(random.next() * 10 - 5), y: top + length * 0.5))
+                context.stroke(stroke,
+                               with: .color(.black.opacity((0.05 + random.next() * 0.10) * density)),
+                               style: StrokeStyle(lineWidth: 0.8, lineCap: .round))
+            }
+            // 松樹長在稜線上，跟著山一起飄
+            if layer == layers - 1 {
+                for (i, u) in [0.17, 0.235, 0.80, 0.86].enumerated() {
+                    let x = CGFloat(u) * size.width
+                    let y = ridgeY(u, layer: layer, drift: drift, baseY: baseY, amp: amp)
+                    pine(&context, at: CGPoint(x: x, y: y + 1),
+                         scale: 0.85 + CGFloat(i % 2) * 0.35, density: density)
+                }
+            }
+        }
+    }
+
+    /// 一棵松：一條微彎的幹，三層往下垂的枝。
+    private static func pine(_ context: inout GraphicsContext, at base: CGPoint,
+                             scale: CGFloat, density: Double) {
+        let h = 26 * scale
+        let ink = Color.black.opacity(0.62 * density)
+        var trunk = Path()
+        trunk.move(to: base)
+        trunk.addQuadCurve(to: CGPoint(x: base.x + 2 * scale, y: base.y - h),
+                           control: CGPoint(x: base.x - 2 * scale, y: base.y - h * 0.55))
+        context.stroke(trunk, with: .color(ink),
+                       style: StrokeStyle(lineWidth: 1.5 * scale, lineCap: .round))
+
+        for i in 0..<3 {
+            let level = base.y - h * (0.55 + 0.17 * CGFloat(i))
+            let span = (11 - CGFloat(i) * 2.4) * scale
+            var bough = Path()
+            bough.move(to: CGPoint(x: base.x - span, y: level + 3 * scale))
+            bough.addQuadCurve(to: CGPoint(x: base.x + span, y: level + 3 * scale),
+                               control: CGPoint(x: base.x, y: level - 4 * scale))
+            context.stroke(bough, with: .color(ink.opacity(0.85)),
+                           style: StrokeStyle(lineWidth: 1.2 * scale, lineCap: .round))
+        }
+    }
+
+    // MARK: 霧
+
+    /// 一道橫向飄的霧。三道各自速度不同，而且濃度會慢慢起伏——
+    /// 固定濃度的霧看久了會發現它只是在平移。
+    private static func mist(_ context: inout GraphicsContext, _ size: CGSize,
+                             time: Double, band: Int) {
+        let speed = 4.5 + Double(band) * 3.2
+        let cycle = ((time * speed / 100).truncatingRemainder(dividingBy: 1.8)) - 0.4
+        let cx = CGFloat(cycle) * size.width
+        let cy = size.height * CGFloat(0.44 + 0.13 * Double(band))
+        let w = size.width * 1.15
+        let h = size.height * (0.05 + 0.022 * CGFloat(band))
+        let breath = 0.42 + 0.18 * sin(time * 0.21 + Double(band) * 1.7)
+
+        context.drawLayer { layer in
+            layer.addFilter(.blur(radius: 38))
+            layer.fill(
+                Path(ellipseIn: CGRect(x: cx - w / 2, y: cy - h / 2, width: w, height: h)),
+                with: .color(.white.opacity(breath)))
+            // 第二團錯開一點，霧才不是一條
+            layer.fill(
+                Path(ellipseIn: CGRect(x: cx - w * 0.15, y: cy + h * 0.35,
+                                       width: w * 0.8, height: h * 0.8)),
+                with: .color(.white.opacity(breath * 0.75)))
+        }
+    }
+
+    // MARK: 水
+
+    /// 水面：近山的倒影（翻過來、更淡、糊掉）＋幾道留白橫紋。
+    private static func water(_ context: inout GraphicsContext, _ size: CGSize,
+                              time: Double, density: Double, waterY: CGFloat) {
+        let drift = time * (1.1 + Double(layers - 1) * 2.0) / 140.0
+        let baseY = size.height * CGFloat(0.30 + 0.34 * 1.0)
+        let amp = size.height * 0.075
+
+        context.drawLayer { layer in
+            layer.addFilter(.blur(radius: 6))
+            // 把近山的稜線以水平線為軸翻下來
+            var reflection = Path()
+            reflection.move(to: CGPoint(x: 0, y: waterY))
+            var x: CGFloat = 0
+            while x <= size.width {
+                let y = ridgeY(Double(x / max(size.width, 1)), layer: layers - 1,
+                               drift: drift, baseY: baseY, amp: amp)
+                reflection.addLine(to: CGPoint(x: x, y: waterY + (waterY - y) * 0.42))
+                x += 6
+            }
+            reflection.addLine(to: CGPoint(x: size.width, y: waterY))
+            reflection.closeSubpath()
+            layer.fill(reflection, with: .linearGradient(
+                Gradient(colors: [Color.black.opacity(0.13 * density), .clear]),
+                startPoint: CGPoint(x: 0, y: waterY),
+                endPoint: CGPoint(x: 0, y: size.height)))
+        }
+
+        // 留白橫紋：水墨的水面是「不畫」畫出來的
+        for i in 0..<4 {
+            let y = waterY + size.height * CGFloat(0.035 + 0.035 * Double(i))
+            let phase = time * 0.12 + Double(i)
+            let w = size.width * CGFloat(0.26 + 0.16 * Double(i % 2))
+            let x = size.width * CGFloat(0.12 + 0.3 * (sin(phase) * 0.5 + 0.5))
+            var line = Path()
+            line.move(to: CGPoint(x: x, y: y))
+            line.addLine(to: CGPoint(x: x + w, y: y))
+            context.stroke(line, with: .color(.white.opacity(0.55)),
+                           style: StrokeStyle(lineWidth: 1.6, lineCap: .round))
+        }
+    }
+
+    // MARK: 鳥
+
+    private static func birds(_ context: inout GraphicsContext, _ size: CGSize,
+                              time: Double, density: Double) {
+        // 鬆散的人字隊形：三前兩後
+        let formation: [(CGFloat, CGFloat, CGFloat)] = [
+            (0, 0, 1.0), (-0.055, 0.022, 0.85), (0.052, 0.026, 0.85),
+            (-0.105, 0.046, 0.7), (0.100, 0.052, 0.7)
+        ]
+        let cycle = ((time / 48).truncatingRemainder(dividingBy: 1))
+        let headX = CGFloat(cycle) * size.width * 1.3 - size.width * 0.15
+        let headY = size.height * 0.20 + CGFloat(sin(time * 0.33) * 10)
+
+        for (dx, dy, scale) in formation {
+            let x = headX + dx * size.width
+            let y = headY + dy * size.height
+            let s: CGFloat = 5.2 * scale
+            var path = Path()
+            path.move(to: CGPoint(x: x - s, y: y))
+            path.addQuadCurve(to: CGPoint(x: x, y: y - s * 0.14),
+                              control: CGPoint(x: x - s * 0.52, y: y - s * 0.62))
+            path.addQuadCurve(to: CGPoint(x: x + s, y: y),
+                              control: CGPoint(x: x + s * 0.52, y: y - s * 0.62))
+            context.stroke(path, with: .color(.black.opacity(0.40 * density * Double(scale))),
+                           style: StrokeStyle(lineWidth: 1.0 * scale, lineCap: .round))
+        }
+    }
+}
+
+/// 固定種子的亂數（LCG）。要的是「每次都一樣」而不是「夠亂」——
+/// 每一幀重骰的話，紙紋與皴筆會閃成雜訊。
+struct InkRandom {
+    private var state: UInt64
+
+    init(_ seed: Int) {
+        state = UInt64(truncatingIfNeeded: seed) &* 6364136223846793005 &+ 1442695040888963407
+    }
+
+    mutating func next() -> Double {
+        state = state &* 6364136223846793005 &+ 1442695040888963407
+        return Double((state >> 33) & 0xFF_FFFF) / Double(0xFF_FFFF)
+    }
+}
+
+// MARK: - 水墨相框
+
+/// 裱在宣紙上的照片。動態相簿唯一的相框樣式（v25.490 使用者定案）。
+struct InkFramedPhoto: View {
+    let image: UIImage
+    let size: CGSize
+
+    var body: some View {
+        Image(uiImage: image)
+            .resizable()
+            .aspectRatio(contentMode: .fit)
+            .frame(width: size.width, height: size.height)
+            .clipped()
+            // 照片邊緣壓一道糊開的墨線，像是拓在紙上的
+            .overlay(
+                Rectangle()
+                    .stroke(Color.black.opacity(0.55), lineWidth: 1.1)
+                    .blur(radius: 1.5)
+            )
+            .padding(13)
+            .background(
+                Color(red: 0.965, green: 0.952, blue: 0.930)
+                    .overlay(
+                        RadialGradient(colors: [.black.opacity(0.06), .clear],
+                                       center: .topLeading, startRadius: 2, endRadius: 300)
+                    )
+            )
+            .overlay(
+                Rectangle()
+                    .stroke(Color.black.opacity(0.28), lineWidth: 2.2)
+                    .blur(radius: 2.2)
+            )
+            .shadow(color: .black.opacity(0.28), radius: 14, x: 0, y: 8)
     }
 }
 
 // MARK: - 拼貼牆
-
-/// 版面：一次一張，還是一張一張疊上同一個畫面
-enum SlideLayout: String, CaseIterable, Identifiable {
-    case single, collage
-
-    var id: String { rawValue }
-
-    var label: String {
-        switch self {
-        case .single:  return "單張"
-        case .collage: return "拼貼牆"
-        }
-    }
-}
 
 /// 拼貼牆上的一張照片
 struct WallPhoto: Identifiable, Equatable {
