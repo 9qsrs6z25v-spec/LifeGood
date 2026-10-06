@@ -14,7 +14,7 @@ struct PhotoImportLiveActivityWidget: Widget {
 
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: PhotoImportAttributes.self) { context in
-            LockScreenView(state: context.state, tint: tint)
+            PhotoImportLockScreen(state: context.state, tint: tint)
                 .activityBackgroundTint(Color.black.opacity(0.55))
                 .activitySystemActionForegroundColor(tint)
         } dynamicIsland: { context in
@@ -34,7 +34,7 @@ struct PhotoImportLiveActivityWidget: Widget {
                 }
                 DynamicIslandExpandedRegion(.bottom) {
                     VStack(alignment: .leading, spacing: 6) {
-                        ProgressBar(fraction: context.state.fraction, tint: tint)
+                        PhotoImportProgressBar(fraction: context.state.fraction, tint: tint)
                         Text(context.state.finished
                              ? "照片已經存好了"
                              : "iCloud 的原圖要先下載回來，可以先去忙別的")
@@ -54,7 +54,7 @@ struct PhotoImportLiveActivityWidget: Widget {
                     .foregroundStyle(tint)
             } minimal: {
                 // 最小化時只剩一顆圓：畫成環狀進度比放圖示有用
-                MinimalRing(fraction: context.state.fraction, tint: tint)
+                PhotoImportRing(fraction: context.state.fraction, tint: tint)
             }
             .keylineTint(tint)
         }
@@ -63,7 +63,7 @@ struct PhotoImportLiveActivityWidget: Widget {
 
 // MARK: - 零件
 
-private struct ProgressBar: View {
+private struct PhotoImportProgressBar: View {
     let fraction: Double
     let tint: Color
 
@@ -81,7 +81,7 @@ private struct ProgressBar: View {
     }
 }
 
-private struct MinimalRing: View {
+private struct PhotoImportRing: View {
     let fraction: Double
     let tint: Color
 
@@ -97,7 +97,12 @@ private struct MinimalRing: View {
     }
 }
 
-private struct LockScreenView: View {
+/// 鎖定畫面／展開時的那張卡。
+///
+/// [v25.485] 名字一定要帶前綴：Widget Extension 裡已經有一個 internal 的
+/// LockScreenView（今日行程那一支），同名就算自己這邊寫 private 也會撞——
+/// private 只是「別人看不到我」，不是「我看不到別人」。
+private struct PhotoImportLockScreen: View {
     let state: PhotoImportAttributes.ContentState
     let tint: Color
 
@@ -122,7 +127,7 @@ private struct LockScreenView: View {
                         .font(.subheadline.weight(.bold).monospacedDigit())
                         .foregroundStyle(tint)
                 }
-                ProgressBar(fraction: state.fraction, tint: tint)
+                PhotoImportProgressBar(fraction: state.fraction, tint: tint)
                 Text(state.finished
                      ? state.label
                      : state.label + "・" + state.countText + "（iCloud 的原圖要先下載）")

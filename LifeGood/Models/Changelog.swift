@@ -13,6 +13,11 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.485", build: 1238, date: "2026/08/19", notes: [
+            "【修正】v25.484 的 Widget Extension 編譯失敗（4 個錯誤都在 PhotoImportLiveActivity.swift）。根源只有一個：我在照片匯入的靈動島畫面裡寫了一個叫 LockScreenView 的元件，撞到今日行程那支既有的同名元件。",
+            "【說明】我以為寫 private 就不會撞——那是誤解。private 的意思是「別人看不到我」，不是「我看不到別人」；對方那個是整個模組都看得到的，所以在我的檔案裡同時存在兩個 LockScreenView。另外三個錯誤（型別對不上、少一個參數、多一個 tint）全是同一個名字打架的連鎖反應，不是獨立的問題。",
+            "【說明】三個元件都改成帶前綴的名字，另外補了一支掃描全專案「跨檔案同名型別」的檢查，以後新增檔案前會先跑。這次掃完 135 個檔案，確認沒有其他同名衝突。"
+        ]),
         ChangelogEntry(version: "25.484", build: 1237, date: "2026/08/19", notes: [
             "【新增】相本右上角多了播放鍵（使用者指定位置）：整本照片做成動態相簿直接播。全 App 的相本都有——旅遊、美食、醫療地圖與兒女相簿。",
             "【新增】轉場四種輪流換：淡入、放大溶接、橫移、縮放交錯；每一張都有緩慢推近與飄移（Ken Burns），方向跟著輪替，不會每張都往同一邊飄。照片上寫著是哪一站、哪一天拍的。",
