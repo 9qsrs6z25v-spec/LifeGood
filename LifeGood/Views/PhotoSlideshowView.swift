@@ -333,11 +333,17 @@ struct PhotoSlideshowView: View {
 
     // MARK: 畫面
 
+    /// [v25.493] 三層：景在後、照片在中、景在前。
+    ///
+    /// 使用者說得對——東西全部在照片後面，看起來就是「照片貼在一張圖上」。
+    /// 梅枝、近處的落梅、貼著地面流的霧、岸邊的蘆葦移到照片前面之後，
+    /// 照片才真的坐進這幅畫裡。
     private var slide: some View {
         ZStack {
             // 背景自己一層，不跟著照片轉場——會動的場景每張重畫一次就不叫場景了
             InkLandscapeView()
             collageWall
+            InkForegroundView()
             colophon
         }
     }

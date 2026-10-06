@@ -36,8 +36,6 @@ struct InkLandscapeView: View {
                 }
             }
             .ignoresSafeArea()
-            // 暗角壓在最上面：讓視線收回畫面中央
-            InkVignette()
         }
         .ignoresSafeArea()
     }
@@ -64,7 +62,6 @@ private struct InkPaperLayer: View {
 
             moon(&context, size)
             grain(&context, size)
-            plumBranch(&context, size)
         }
         .ignoresSafeArea()
     }
@@ -97,49 +94,6 @@ private struct InkPaperLayer: View {
         }
     }
 
-    /// 右上角的梅枝：一條主幹、兩條分枝、幾朵紅梅。
-    /// 這是整張畫的「落款位置」——有它才有中國畫的樣子。
-    private func plumBranch(_ context: inout GraphicsContext, _ size: CGSize) {
-        let ink = Color.black.opacity(0.62 * density)
-        var trunk = Path()
-        let start = CGPoint(x: size.width * 1.02, y: size.height * 0.02)
-        trunk.move(to: start)
-        trunk.addCurve(to: CGPoint(x: size.width * 0.66, y: size.height * 0.165),
-                       control1: CGPoint(x: size.width * 0.92, y: size.height * 0.05),
-                       control2: CGPoint(x: size.width * 0.80, y: size.height * 0.08))
-        context.stroke(trunk, with: .color(ink),
-                       style: StrokeStyle(lineWidth: 3.4, lineCap: .round))
-
-        var branch1 = Path()
-        branch1.move(to: CGPoint(x: size.width * 0.86, y: size.height * 0.072))
-        branch1.addQuadCurve(to: CGPoint(x: size.width * 0.80, y: size.height * 0.195),
-                             control: CGPoint(x: size.width * 0.86, y: size.height * 0.14))
-        context.stroke(branch1, with: .color(ink.opacity(0.8)),
-                       style: StrokeStyle(lineWidth: 1.7, lineCap: .round))
-
-        var branch2 = Path()
-        branch2.move(to: CGPoint(x: size.width * 0.75, y: size.height * 0.123))
-        branch2.addQuadCurve(to: CGPoint(x: size.width * 0.70, y: size.height * 0.062),
-                             control: CGPoint(x: size.width * 0.70, y: size.height * 0.10))
-        context.stroke(branch2, with: .color(ink.opacity(0.8)),
-                       style: StrokeStyle(lineWidth: 1.5, lineCap: .round))
-
-        // 梅花：五個點一朵太細了，用一個紅圓加一點深色花心就夠
-        let blossoms: [(CGFloat, CGFloat, CGFloat)] = [
-            (0.69, 0.060, 5.0), (0.73, 0.118, 4.2), (0.795, 0.192, 4.6),
-            (0.845, 0.118, 3.6), (0.885, 0.063, 4.4), (0.805, 0.072, 3.2)
-        ]
-        for (ux, uy, r) in blossoms {
-            let c = CGPoint(x: size.width * ux, y: size.height * uy)
-            context.fill(
-                Path(ellipseIn: CGRect(x: c.x - r, y: c.y - r, width: r * 2, height: r * 2)),
-                with: .color(Color(red: 0.78, green: 0.16, blue: 0.22).opacity(0.85)))
-            context.fill(
-                Path(ellipseIn: CGRect(x: c.x - r * 0.28, y: c.y - r * 0.28,
-                                       width: r * 0.56, height: r * 0.56)),
-                with: .color(.black.opacity(0.45)))
-        }
-    }
 }
 
 private struct InkVignette: View {
@@ -178,23 +132,25 @@ enum InkScene {
 
     // MARK: 落梅
 
-    /// [v25.492] 從右上角那枝梅飄下來的花瓣。
+    /// [v25.492] 從右上角那枝梅飄下來的花瓣（**遠處那幾片**，前景另有一組）。
     ///
     /// 七片就夠——再多就變成櫻吹雪，那是另一個季節的畫。
     /// 每一片的下落速度、起始位置、搖擺相位都不同，而且快落地時會淡掉：
     /// 整片同時消失在同一條線上，一眼就看得出是程式畫的。
+    ///
+    /// [v25.493] 這一組改小、改淡、掉得慢——它們在照片後面，是遠景。
     private static func petals(_ context: inout GraphicsContext, _ size: CGSize, time: Double) {
         var random = InkRandom(48219)
-        for i in 0..<7 {
+        for i in 0..<5 {
             let startX = random.next()
             let phase = random.next()
             let speedSeed = random.next()
-            let fallSeconds = 26.0 + speedSeed * 20.0
+            let fallSeconds = 34.0 + speedSeed * 22.0
             let cycle = ((time / fallSeconds) + phase).truncatingRemainder(dividingBy: 1)
             let y = CGFloat(cycle) * size.height * 1.08 - size.height * 0.04
             let sway = CGFloat(sin(time * 0.55 + Double(i) * 1.37) * 18)
             let x = CGFloat(0.58 + startX * 0.40) * size.width + sway
-            let r = 2.4 + CGFloat(speedSeed) * 1.9
+            let r = 1.9 + CGFloat(speedSeed) * 1.3
             // 快到底的時候淡出
             let fade = cycle > 0.82 ? (1 - (cycle - 0.82) / 0.18) : 1
             let petal = Path(ellipseIn: CGRect(x: -r, y: -r * 0.6,
@@ -203,7 +159,7 @@ enum InkScene {
                     .concatenating(CGAffineTransform(translationX: x, y: y)))
             context.fill(petal,
                          with: .color(Color(red: 0.78, green: 0.26, blue: 0.32)
-                            .opacity(0.52 * fade)))
+                            .opacity(0.34 * fade)))
         }
     }
 
@@ -712,5 +668,191 @@ struct WallCard: View {
                     breathing = true
                 }
             }
+    }
+}
+
+// MARK: - 前景（v25.493）
+//
+// 使用者說得對：東西全部在照片後面，看起來就是「照片貼在一張圖上」。
+// 有東西從照片**前面**飄過去，才會有空間感——而空間感就是詩意的來源。
+//
+// 分前後的規則，照真實的距離走：
+//   背後  紙、月、遠山、霧、水、雁、幾片遠處的落梅
+//   前面  梅枝（它就長在鏡頭前）、近處的落梅、貼著地面流的霧、岸邊的蘆葦
+//
+// 前面的東西一律更大、更糊、更淡——離鏡頭近的東西本來就這樣。
+// 這條規則比畫什麼更重要：同樣大小、同樣清晰的東西擺在前面只會像貼紙。
+
+/// 掛在照片前面的那一層
+struct InkForegroundView: View {
+    var density: Double = 1.0
+
+    var body: some View {
+        ZStack {
+            // 梅枝不會動，單獨一層只畫一次
+            Canvas { context, size in
+                InkForeground.plumBranch(&context, size, density: density)
+            }
+            .ignoresSafeArea()
+
+            TimelineView(.periodic(from: .now, by: 1.0 / 24.0)) { timeline in
+                Canvas { context, size in
+                    let t = timeline.date.timeIntervalSinceReferenceDate
+                    InkForeground.draw(&context, size: size, time: t, density: density)
+                }
+            }
+            .ignoresSafeArea()
+
+            // 暗角壓在最上面：讓視線收回畫面中央
+            InkVignette()
+        }
+        .allowsHitTesting(false)
+        .ignoresSafeArea()
+    }
+}
+
+enum InkForeground {
+    static func draw(_ context: inout GraphicsContext, size: CGSize,
+                     time: Double, density: Double) {
+        reeds(&context, size, time: time, density: density)
+        nearMist(&context, size, time: time)
+        nearPetals(&context, size, time: time)
+    }
+
+    // MARK: 梅枝
+
+    /// 右上角的梅枝。v25.492 之前它在背景層——那等於照片蓋在樹枝上，
+    /// 樹明明比山近。搬到前面之後，花枝是垂在照片上的。
+    static func plumBranch(_ context: inout GraphicsContext, _ size: CGSize,
+                           density: Double) {
+        let ink = Color.black.opacity(0.66 * density)
+        var trunk = Path()
+        trunk.move(to: CGPoint(x: size.width * 1.02, y: size.height * 0.015))
+        trunk.addCurve(to: CGPoint(x: size.width * 0.62, y: size.height * 0.185),
+                       control1: CGPoint(x: size.width * 0.92, y: size.height * 0.045),
+                       control2: CGPoint(x: size.width * 0.78, y: size.height * 0.075))
+        context.stroke(trunk, with: .color(ink),
+                       style: StrokeStyle(lineWidth: 3.8, lineCap: .round))
+
+        var branch1 = Path()
+        branch1.move(to: CGPoint(x: size.width * 0.86, y: size.height * 0.068))
+        branch1.addQuadCurve(to: CGPoint(x: size.width * 0.805, y: size.height * 0.225),
+                             control: CGPoint(x: size.width * 0.87, y: size.height * 0.155))
+        context.stroke(branch1, with: .color(ink.opacity(0.82)),
+                       style: StrokeStyle(lineWidth: 1.8, lineCap: .round))
+
+        var branch2 = Path()
+        branch2.move(to: CGPoint(x: size.width * 0.73, y: size.height * 0.132))
+        branch2.addQuadCurve(to: CGPoint(x: size.width * 0.675, y: size.height * 0.058),
+                             control: CGPoint(x: size.width * 0.675, y: size.height * 0.105))
+        context.stroke(branch2, with: .color(ink.opacity(0.82)),
+                       style: StrokeStyle(lineWidth: 1.6, lineCap: .round))
+
+        // 梅花：一個紅圓加一點深色花心就夠，五瓣畫出來在這個尺寸只會糊成一團
+        let blossoms: [(CGFloat, CGFloat, CGFloat)] = [
+            (0.665, 0.055, 5.2), (0.715, 0.122, 4.4), (0.800, 0.222, 4.8),
+            (0.848, 0.115, 3.8), (0.888, 0.060, 4.6), (0.805, 0.070, 3.4),
+            (0.760, 0.168, 3.6)
+        ]
+        for (ux, uy, r) in blossoms {
+            let center = CGPoint(x: size.width * ux, y: size.height * uy)
+            context.fill(
+                Path(ellipseIn: CGRect(x: center.x - r, y: center.y - r,
+                                       width: r * 2, height: r * 2)),
+                with: .color(Color(red: 0.78, green: 0.16, blue: 0.22).opacity(0.88)))
+            context.fill(
+                Path(ellipseIn: CGRect(x: center.x - r * 0.28, y: center.y - r * 0.28,
+                                       width: r * 0.56, height: r * 0.56)),
+                with: .color(.black.opacity(0.45)))
+        }
+    }
+
+    // MARK: 近景的霧
+
+    /// 貼著畫面下緣流過去的霧。它會從照片前面經過，照片因此「坐在」景裡，
+    /// 而不是貼在上面。
+    static func nearMist(_ context: inout GraphicsContext, _ size: CGSize, time: Double) {
+        context.drawLayer { layer in
+            layer.addFilter(.blur(radius: 55))
+            for i in 0..<2 {
+                let speed = 3.2 + Double(i) * 2.1
+                let cycle = ((time * speed / 100).truncatingRemainder(dividingBy: 2.0)) - 0.5
+                let cx = CGFloat(cycle) * size.width
+                let cy = size.height * CGFloat(0.84 + 0.10 * Double(i))
+                let w = size.width * 1.3
+                let h = size.height * (0.10 + 0.03 * CGFloat(i))
+                let breath = 0.26 + 0.10 * sin(time * 0.17 + Double(i) * 2.1)
+                layer.fill(
+                    Path(ellipseIn: CGRect(x: cx - w / 2, y: cy - h / 2, width: w, height: h)),
+                    with: .color(.white.opacity(breath)))
+            }
+        }
+    }
+
+    // MARK: 近處的落梅
+
+    /// 離鏡頭近的花瓣：更大、更糊、掉得更快。
+    /// 跟背景那幾片一起看，就有了前後。
+    static func nearPetals(_ context: inout GraphicsContext, _ size: CGSize, time: Double) {
+        var random = InkRandom(90210)
+        context.drawLayer { layer in
+            layer.addFilter(.blur(radius: 1.2))
+            for i in 0..<4 {
+                let startX = random.next()
+                let phase = random.next()
+                let speedSeed = random.next()
+                let fallSeconds = 13.0 + speedSeed * 9.0
+                let cycle = ((time / fallSeconds) + phase).truncatingRemainder(dividingBy: 1)
+                let y = CGFloat(cycle) * size.height * 1.12 - size.height * 0.06
+                let sway = CGFloat(sin(time * 0.8 + Double(i) * 1.9) * 26)
+                let x = CGFloat(0.5 + startX * 0.48) * size.width + sway
+                let r = 4.6 + CGFloat(speedSeed) * 3.0
+                let fade = cycle > 0.86 ? (1 - (cycle - 0.86) / 0.14) : 1
+                let petal = Path(ellipseIn: CGRect(x: -r, y: -r * 0.58,
+                                                   width: r * 2, height: r * 1.16))
+                    .applying(CGAffineTransform(rotationAngle: time * 1.1 + Double(i) * 0.8)
+                        .concatenating(CGAffineTransform(translationX: x, y: y)))
+                layer.fill(petal,
+                           with: .color(Color(red: 0.76, green: 0.24, blue: 0.30)
+                            .opacity(0.42 * fade)))
+            }
+        }
+    }
+
+    // MARK: 岸邊的蘆葦
+
+    /// 畫面下緣的幾叢蘆葦，隨風輕擺。
+    ///
+    /// 前景放草不是裝飾：它給了「鏡頭站在這裡」的位置感——
+    /// 看畫的人是蹲在岸邊看出去的。
+    static func reeds(_ context: inout GraphicsContext, _ size: CGSize,
+                      time: Double, density: Double) {
+        let clusters: [(CGFloat, CGFloat, Int)] = [
+            (0.06, 1.0, 5), (0.17, 0.82, 4), (0.88, 0.95, 5), (0.78, 0.74, 3)
+        ]
+        for (ux, scale, count) in clusters {
+            let baseX = size.width * ux
+            for i in 0..<count {
+                let offset = CGFloat(i - count / 2) * 7 * scale
+                let height = size.height * (0.13 + 0.045 * CGFloat(i % 3)) * scale
+                let sway = CGFloat(sin(time * 0.6 + Double(i) * 0.9 + Double(ux) * 6) * 7) * scale
+                let bottom = CGPoint(x: baseX + offset, y: size.height + 4)
+                let top = CGPoint(x: bottom.x + sway, y: size.height - height)
+                var stem = Path()
+                stem.move(to: bottom)
+                stem.addQuadCurve(to: top,
+                                  control: CGPoint(x: bottom.x + sway * 0.3,
+                                                   y: size.height - height * 0.45))
+                context.stroke(stem, with: .color(.black.opacity(0.52 * density)),
+                               style: StrokeStyle(lineWidth: 1.3 * scale, lineCap: .round))
+                // 穗
+                var head = Path()
+                head.move(to: top)
+                head.addQuadCurve(to: CGPoint(x: top.x + sway * 0.25, y: top.y - 11 * scale),
+                                  control: CGPoint(x: top.x + 4 * scale, y: top.y - 6 * scale))
+                context.stroke(head, with: .color(.black.opacity(0.42 * density)),
+                               style: StrokeStyle(lineWidth: 2.6 * scale, lineCap: .round))
+            }
+        }
     }
 }
