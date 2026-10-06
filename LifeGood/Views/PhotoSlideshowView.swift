@@ -228,10 +228,24 @@ struct PhotoSlideshowView: View {
     @AppStorage("slideshow_fill") private var fillScreen = false
     /// 相框樣式
     @AppStorage("slideshow_frame") private var frameRaw = SlideFrame.paper.rawValue
+    /// [v25.489] 背景（照片暈染／水墨山水／宣紙／純黑）
+    @AppStorage("slideshow_backdrop") private var backdropRaw = SlideBackdrop.photo.rawValue
+    /// [v25.489] 版面（單張／拼貼牆）
+    @AppStorage("slideshow_layout") private var layoutRaw = SlideLayout.single.rawValue
+    /// 拼貼牆上目前有哪幾張
+    @State private var wall: [WallPhoto] = []
     /// 跟拍模式（一個可以連點的大區塊）
     @State private var tapMode = false
 
     private var frameStyle: SlideFrame { SlideFrame(rawValue: frameRaw) ?? .paper }
+    private var backdropStyle: SlideBackdrop { SlideBackdrop(rawValue: backdropRaw) ?? .photo }
+    private var layoutStyle: SlideLayout { SlideLayout(rawValue: layoutRaw) ?? .single }
+
+    /// 背景是亮的時候，字與按鈕要翻成深色——白字壓在宣紙上根本看不見
+    private var onBackdrop: Color { backdropStyle.isLight ? .black : .white }
+    private var chipFill: Color {
+        backdropStyle.isLight ? Color.black.opacity(0.10) : Color.white.opacity(0.18)
+    }
 
     /// 要不要跟著拍子換照片
     @AppStorage("slideshow_beat_sync") private var beatSync = true
@@ -320,6 +334,10 @@ struct PhotoSlideshowView: View {
                 .ignoresSafeArea()
         }
         .overlay { tapOverlay }
+        .onChange(of: layoutRaw) { _, _ in
+            wall.removeAll()
+            if layoutStyle == .collage, let img = image { pushToWall(img) }
+        }
         .onChange(of: music.lastError) { _, new in
             guard new != nil else { return }
             chromeTask?.cancel()
@@ -338,23 +356,65 @@ struct PhotoSlideshowView: View {
 
     @ViewBuilder
     private var slide: some View {
-        if let image {
-            ZStack {
-                backdrop(image)
+        ZStack {
+            backdropLayer
+            if layoutStyle == .collage {
+                collageWall
+            } else if let image {
                 photoCard(image)
+                    .id(index)
+                    .transition(transition(for: index))
+            } else {
+                ProgressView().tint(onBackdrop)
             }
-            .id(index)
-            .transition(transition(for: index))
-        } else {
-            ProgressView().tint(.white)
         }
+    }
+
+    /// [v25.489] 背景自己一層，不跟著照片一起轉場——
+    /// 水墨山水是一直在動的場景，跟著每張照片重畫一次就不叫場景了。
+    @ViewBuilder
+    private var backdropLayer: some View {
+        switch backdropStyle {
+        case .photo:
+            if let image { photoBackdrop(image).id(index).transition(.opacity) }
+        case .ink:
+            InkLandscapeView()
+        case .paper:
+            RicePaperView()
+        case .dark:
+            Color.black.ignoresSafeArea()
+        }
+    }
+
+    /// 拼貼牆：照片一張一張飄進同一個畫面，滿了就把最舊的那張推掉。
+    private var collageWall: some View {
+        GeometryReader { geo in
+            ZStack {
+                ForEach(wall) { item in
+                    framedPhoto(item.image,
+                                size: PhotoLightbox.fittedSize(item.image.size,
+                                                               in: WallLayout.cardArea(geo.size)))
+                        .rotationEffect(.degrees(WallLayout.rotation(slot: item.slot)))
+                        .position(WallLayout.position(slot: item.slot, in: geo.size))
+                        .transition(.asymmetric(
+                            // 從稍微大一點、歪一點的狀態落下來，像把照片放到桌上
+                            insertion: .scale(scale: 1.22).combined(with: .opacity),
+                            removal: .opacity.combined(with: .scale(scale: 0.92))))
+                        .zIndex(Double(item.id))
+                }
+            }
+            // 整面牆跟著拍子呼吸
+            .scaleEffect(beatTick % 2 == 0 ? 1.0 : 1.008)
+            .animation(.spring(response: 0.16, dampingFraction: 0.45), value: beatTick)
+        }
+        .ignoresSafeArea()
     }
 
     /// 背景：同一張照片放大糊掉當底色。
     ///
     /// [v25.488] 「完整顯示」一定會在上下（或左右）留白，留純黑會很像壞掉；
     /// 用照片自己糊掉的顏色當底，整個畫面的色調是連著的。
-    private func backdrop(_ img: UIImage) -> some View {
+    private func photoBackdrop(_ img: UIImage) -> some View {
         Color.clear
             .overlay(
                 Image(uiImage: img)
@@ -467,12 +527,15 @@ struct PhotoSlideshowView: View {
 
     /// 上下兩條黑色漸層：白底照片上文字才看得見
     private var scrim: some View {
-        VStack {
-            LinearGradient(colors: [.black.opacity(showChrome ? 0.55 : 0), .clear],
+        // [v25.489] 亮背景（水墨、宣紙）要用白色的罩。黑罩會把整幅畫壓成灰的，
+        // 而深色字壓在黑罩上一樣看不見。
+        let veil: Color = backdropStyle.isLight ? .white : .black
+        return VStack {
+            LinearGradient(colors: [veil.opacity(showChrome ? 0.55 : 0), .clear],
                            startPoint: .top, endPoint: .bottom)
                 .frame(height: 180)
             Spacer()
-            LinearGradient(colors: [.clear, .black.opacity(0.65)],
+            LinearGradient(colors: [.clear, veil.opacity(0.65)],
                            startPoint: .top, endPoint: .bottom)
                 .frame(height: 220)
         }
@@ -498,20 +561,20 @@ struct PhotoSlideshowView: View {
             Button { finish() } label: {
                 Image(systemName: "xmark")
                     .font(.system(size: 14, weight: .bold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(backdropStyle.isLight ? .white : .black)
                     .frame(width: 36, height: 36)
-                    .background(Circle().fill(.black.opacity(0.45)))
+                    .background(Circle().fill(onBackdrop.opacity(0.55)))
             }
             Text(title)
                 .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.9))
+                .foregroundStyle(onBackdrop.opacity(0.9))
                 .lineLimit(1)
             Spacer()
             Text("\(index + 1) / \(items.count)")
                 .font(.system(size: 13, weight: .semibold, design: .rounded))
-                .foregroundStyle(.white)
+                .foregroundStyle(backdropStyle.isLight ? .white : .black)
                 .padding(.horizontal, 10).padding(.vertical, 5)
-                .background(Capsule().fill(.black.opacity(0.45)))
+                .background(Capsule().fill(onBackdrop.opacity(0.55)))
         }
         .padding(.horizontal, 16)
         .padding(.top, 8)
@@ -524,11 +587,11 @@ struct PhotoSlideshowView: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text(item.group)
                     .font(.title3.weight(.bold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(onBackdrop)
                     .lineLimit(1)
                 Text(Self.dayFmt.string(from: item.date))
                     .font(.caption)
-                    .foregroundStyle(.white.opacity(0.85))
+                    .foregroundStyle(onBackdrop.opacity(0.85))
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 20)
@@ -566,8 +629,8 @@ struct PhotoSlideshowView: View {
             // 這一張播到哪裡
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
-                    Capsule().fill(.white.opacity(0.22))
-                    Capsule().fill(.white)
+                    Capsule().fill(onBackdrop.opacity(0.22))
+                    Capsule().fill(onBackdrop)
                         .frame(width: geo.size.width * min(1, elapsed / max(slideDuration, 0.1)))
                 }
             }
@@ -579,9 +642,9 @@ struct PhotoSlideshowView: View {
                 Button { playing ? pause() : resume() } label: {
                     Image(systemName: playing ? "pause.fill" : "play.fill")
                         .font(.system(size: 18, weight: .bold))
-                        .foregroundStyle(.black)
+                        .foregroundStyle(backdropStyle.isLight ? .white : .black)
                         .frame(width: 48, height: 48)
-                        .background(Circle().fill(.white))
+                        .background(Circle().fill(onBackdrop))
                 }
                 Button { step(1) } label: { icon("forward.end.fill") }
                 Spacer(minLength: 0)
@@ -605,9 +668,9 @@ struct PhotoSlideshowView: View {
     private func icon(_ name: String) -> some View {
         Image(systemName: name)
             .font(.system(size: 14, weight: .semibold))
-            .foregroundStyle(.white)
+            .foregroundStyle(onBackdrop)
             .frame(width: 38, height: 38)
-            .background(Circle().fill(.white.opacity(0.18)))
+            .background(Circle().fill(chipFill))
     }
 
     private var musicButton: some View {
@@ -632,10 +695,10 @@ struct PhotoSlideshowView: View {
                     Text(t).font(.system(size: 11, weight: .semibold)).lineLimit(1)
                 }
             }
-            .foregroundStyle(.white)
+            .foregroundStyle(onBackdrop)
             .frame(height: 38)
             .padding(.horizontal, 12)
-            .background(Capsule().fill(.white.opacity(0.18)))
+            .background(Capsule().fill(chipFill))
         }
     }
 
@@ -669,22 +732,32 @@ struct PhotoSlideshowView: View {
                     .font(.system(size: 11, weight: .semibold))
                     .lineLimit(1)
             }
-            .foregroundStyle(synced ? .black : .white)
+            .foregroundStyle(synced ? (backdropStyle.isLight ? .white : .black) : onBackdrop)
             .frame(height: 38)
             .padding(.horizontal, 12)
-            .background(Capsule().fill(synced ? Color.white : Color.white.opacity(0.18)))
+            .background(Capsule().fill(synced ? onBackdrop : chipFill))
         }
     }
 
     /// [v25.488] 版面與相框
     private var styleButton: some View {
         Menu {
-            Picker("版面", selection: $fillScreen) {
+            Picker("照片大小", selection: $fillScreen) {
                 Text("完整顯示（整張都看得到）").tag(false)
                 Text("滿版（裁切填滿畫面）").tag(true)
             }
             Picker("相框", selection: $frameRaw) {
                 ForEach(SlideFrame.allCases) { style in
+                    Text(style.label).tag(style.rawValue)
+                }
+            }
+            Picker("背景", selection: $backdropRaw) {
+                ForEach(SlideBackdrop.allCases) { style in
+                    Text(style.label).tag(style.rawValue)
+                }
+            }
+            Picker("版面", selection: $layoutRaw) {
+                ForEach(SlideLayout.allCases) { style in
                     Text(style.label).tag(style.rawValue)
                 }
             }
@@ -695,10 +768,10 @@ struct PhotoSlideshowView: View {
                 Text(frameStyle.label)
                     .font(.system(size: 11, weight: .semibold))
             }
-            .foregroundStyle(.white)
+            .foregroundStyle(onBackdrop)
             .frame(height: 38)
             .padding(.horizontal, 12)
-            .background(Capsule().fill(.white.opacity(0.18)))
+            .background(Capsule().fill(chipFill))
         }
     }
 
@@ -713,10 +786,10 @@ struct PhotoSlideshowView: View {
         } label: {
             Text(speedLabel)
                 .font(.system(size: 12, weight: .bold))
-                .foregroundStyle(.white)
+                .foregroundStyle(onBackdrop)
                 .frame(height: 38)
                 .padding(.horizontal, 12)
-                .background(Capsule().fill(.white.opacity(0.18)))
+                .background(Capsule().fill(chipFill))
         }
     }
 
@@ -1022,11 +1095,24 @@ struct PhotoSlideshowView: View {
             image = await FullImageCache.shared.load(item.url)
         }
         startKenBurns()
+        if layoutStyle == .collage, let img = image { pushToWall(img) }
         // 接下來兩張先解好，換場才不會卡一下
         FullImageCache.shared.prefetch(
             [index + 1, index + 2]
                 .filter { items.indices.contains($0) }
                 .map { items[$0].url })
+    }
+
+    /// [v25.489] 把這一張放上拼貼牆。
+    ///
+    /// 超過上限就把最舊的推掉：再多就看不清楚，而且記憶體要同時扛好幾張
+    /// 全解析度的圖（一張 1200 萬畫素解開就是 48MB）。
+    private func pushToWall(_ img: UIImage) {
+        guard !wall.contains(where: { $0.id == index }) else { return }
+        withAnimation(.spring(response: 0.52, dampingFraction: 0.72)) {
+            wall.append(WallPhoto(id: index, image: img, slot: index))
+            if wall.count > WallLayout.capacity { wall.removeFirst() }
+        }
     }
 
     /// 緩慢推近＋飄移。方向依序輪替，不然每一張都往同一邊飄會很機械。
