@@ -1,6 +1,5 @@
 import SwiftUI
 import MediaPlayer
-import AVFoundation
 
 // MARK: - 動態相簿（v25.484）
 //
@@ -34,6 +33,12 @@ final class SlideshowMusic: NSObject, ObservableObject {
     /// **Apple Music 串流下載的歌是 nil**——那是加密檔案，任何 App 都讀不到波形
     /// （讀得到就等於能側錄）。那種情況只能靠手動跟拍。
     @Published private(set) var assetURL: URL?
+    /// 佇列還在準備（setQueue 是非同步的）
+    @Published private(set) var isPreparing = false
+    /// 播放失敗的原因。有值就要讓使用者看見。
+    @Published private(set) var lastError: String?
+
+    private var verifyTask: Task<Void, Never>?
 
     private let player = MPMusicPlayerController.applicationMusicPlayer
     private let lastIdKey = "slideshow_music_persistent_id"
@@ -50,17 +55,68 @@ final class SlideshowMusic: NSObject, ObservableObject {
         play(MPMediaItemCollection(items: [item]))
     }
 
+    /// [v25.487] 選好歌卻一直沒聲音的修法。
+    ///
+    /// 兩個原因疊在一起：
+    ///
+    /// 1. **setQueue 是非同步的**。接著馬上呼叫 play() 時佇列還沒備妥，
+    ///    系統就把這次播放要求丟掉——而且不會報錯，什麼都不會發生。
+    ///    正確做法是等 prepareToPlay 的回呼回來再 play。
+    ///
+    /// 2. **我多設了一個 AVAudioSession**。系統音樂播放器的聲音是媒體服務
+    ///    程序發出來的，它自己管音訊工作階段；App 這邊再把 .playback 設起來
+    ///    並 setActive(true)，等於跟它搶路由，有機會直接把音樂按停。
+    ///    這個 App 的幻燈片本來就沒有自己的聲音，不需要工作階段——整段拿掉。
+    ///    （靜音開關也不用擔心：音樂播放器本來就不受靜音開關影響。）
     func play(_ collection: MPMediaItemCollection) {
-        prepareAudioSession()
+        let first = collection.items.first
+        trackTitle = first?.title
+        assetURL = first?.assetURL
+        lastError = nil
+        isPreparing = true
+        if let id = first?.persistentID {
+            UserDefaults.standard.set(String(id), forKey: lastIdKey)
+        }
+
         player.setQueue(with: collection)
         player.repeatMode = .all          // 照片還在播，歌放完要接下去
         player.shuffleMode = .off
-        player.play()
-        isPlaying = true
-        trackTitle = collection.items.first?.title
-        assetURL = collection.items.first?.assetURL
-        if let id = collection.items.first?.persistentID {
-            UserDefaults.standard.set(String(id), forKey: lastIdKey)
+        player.prepareToPlay { [weak self] error in
+            Task { @MainActor in
+                guard let self else { return }
+                self.isPreparing = false
+                if let error {
+                    self.isPlaying = false
+                    self.lastError = "這首歌放不出來：" + error.localizedDescription
+                    return
+                }
+                self.player.play()
+                self.isPlaying = true
+                self.verifyStarted(item: first)
+            }
+        }
+    }
+
+    /// 按了播放之後真的有在播嗎。
+    ///
+    /// 沒有回報的失敗是最糟的失敗——使用者看了十幾張照片才發現沒聲音，
+    /// 而畫面上的音符圖示還亮著。1.2 秒後確認一次播放狀態，沒播就講原因。
+    private func verifyStarted(item: MPMediaItem?) {
+        verifyTask?.cancel()
+        verifyTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 1_200_000_000)
+            guard !Task.isCancelled else { return }
+            guard player.playbackState != .playing else {
+                lastError = nil
+                return
+            }
+            isPlaying = false
+            if item?.isCloudItem == true {
+                lastError = "這首在 iCloud 音樂資料庫裡，裝置上沒有檔案，所以放不出來。"
+                    + "到音樂 App 把它下載起來，或換一首已經下載的。"
+            } else {
+                lastError = "音樂沒有播起來。到音樂 App 確認這首放得動，或換一首試試。"
+            }
         }
     }
 
@@ -70,8 +126,8 @@ final class SlideshowMusic: NSObject, ObservableObject {
     }
 
     func resume() {
-        guard trackTitle != nil else { return }
-        prepareAudioSession()
+        // 佇列還在準備就別插隊——prepareToPlay 的回呼會自己接著播
+        guard trackTitle != nil, !isPreparing else { return }
         player.play()
         isPlaying = true
     }
@@ -80,21 +136,13 @@ final class SlideshowMusic: NSObject, ObservableObject {
     var currentTime: Double { player.currentPlaybackTime }
 
     func stop() {
+        verifyTask?.cancel()
         player.stop()
         isPlaying = false
+        isPreparing = false
+        lastError = nil
         trackTitle = nil
         assetURL = nil
-        // 音訊工作階段還給系統，不然離開之後別的 App 的聲音會變小
-        try? AVAudioSession.sharedInstance().setActive(false,
-                                                       options: .notifyOthersOnDeactivation)
-    }
-
-    /// 靜音開關撥到靜音時也要出得了聲——這是使用者主動按播放的音樂，
-    /// 不是突然跳出來的提示音。
-    private func prepareAudioSession() {
-        let session = AVAudioSession.sharedInstance()
-        try? session.setCategory(.playback, mode: .default)
-        try? session.setActive(true)
     }
 
     private func rememberedItem() -> MPMediaItem? {
@@ -261,6 +309,11 @@ struct PhotoSlideshowView: View {
                 })
                 .ignoresSafeArea()
         }
+        .onChange(of: music.lastError) { _, new in
+            guard new != nil else { return }
+            chromeTask?.cancel()
+            withAnimation(.easeOut(duration: 0.25)) { showChrome = true }
+        }
         .task(id: index) { await loadCurrent() }
         .onAppear { start() }
         .onDisappear {
@@ -317,6 +370,7 @@ struct PhotoSlideshowView: View {
             topBar
             Spacer()
             caption
+            musicNotice
             controls
         }
         .padding(.bottom, 10)
@@ -365,6 +419,29 @@ struct PhotoSlideshowView: View {
             .padding(.bottom, 10)
             .id(item.id)
             .transition(.opacity)
+        }
+    }
+
+    /// [v25.487] 音樂沒播起來時把原因寫出來。
+    ///
+    /// 這一塊存在的理由就是使用者那句「為什麼選好音樂看了十幾張還是沒聽到」：
+    /// 失敗卻不說話，使用者只能自己猜。
+    @ViewBuilder
+    private var musicNotice: some View {
+        if let error = music.lastError {
+            HStack(alignment: .top, spacing: 7) {
+                Image(systemName: "speaker.slash.fill")
+                    .font(.system(size: 12, weight: .semibold))
+                Text(error)
+                    .font(.caption2)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
+            }
+            .foregroundStyle(.white)
+            .padding(.horizontal, 12).padding(.vertical, 9)
+            .background(Color.red.opacity(0.75), in: RoundedRectangle(cornerRadius: 12))
+            .padding(.horizontal, 20)
+            .padding(.bottom, 8)
         }
     }
 
@@ -424,7 +501,9 @@ struct PhotoSlideshowView: View {
             HStack(spacing: 5) {
                 Image(systemName: music.isPlaying ? "music.note.list" : "music.note")
                     .font(.system(size: 13, weight: .semibold))
-                if let t = music.trackTitle {
+                if music.isPreparing {
+                    Text("準備中…").font(.system(size: 11, weight: .semibold))
+                } else if let t = music.trackTitle {
                     Text(t).font(.system(size: 11, weight: .semibold)).lineLimit(1)
                 }
             }
@@ -632,6 +711,8 @@ struct PhotoSlideshowView: View {
     /// 三秒沒碰就把控制列收起來——看照片的時候那些按鈕是礙事的
     private func scheduleChromeHide() {
         chromeTask?.cancel()
+        // 有話要講的時候就不要自動收起來
+        guard music.lastError == nil else { return }
         chromeTask = Task { @MainActor in
             try? await Task.sleep(nanoseconds: 3_000_000_000)
             guard !Task.isCancelled else { return }
