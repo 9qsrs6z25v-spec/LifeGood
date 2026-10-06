@@ -882,20 +882,3 @@ struct PhotoSlideshowView: View {
         f.dateFormat = "M 月 d 日 (E) HH:mm"; return f
     }()
 }
-
-// MARK: - 自訂轉場（v25.486）
-//
-// SwiftUI 內建的只有淡入、縮放、位移那幾種。相簿要好看，靠的是「一眼看得出
-// 這是一個轉場」的動作——圓形揭開、甩鏡、翻卡、模糊溶接。
-// 全部用 .modifier(active:identity:) 做：active 是「還沒進場／已經離場」的樣子，
-// identity 是「在畫面上」的樣子，SwiftUI 會在兩者之間補間。
-
-extension AnyTransition {
-    /// 水墨暈開。離場用淡出——兩張同時做遮罩會互相穿幫。
-    static func inkWash(seed: Int) -> AnyTransition {
-        .asymmetric(
-            insertion: .modifier(active: InkRevealModifier(progress: 0, seed: seed),
-                                 identity: InkRevealModifier(progress: 1, seed: seed)),
-            removal: .opacity)
-    }
-}

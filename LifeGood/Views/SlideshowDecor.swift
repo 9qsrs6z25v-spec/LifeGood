@@ -506,3 +506,67 @@ enum WallLayout {
         CGSize(width: size.width * 0.46, height: size.height * 0.30)
     }
 }
+
+// MARK: - 水墨轉場
+
+// 照片落到牆上時用的進場效果：一塊**會長大的墨漬**當遮罩。
+// 十幾個位置固定的墨點各自在不同時間開始擴散，邊緣糊開，
+// 看起來就像墨在宣紙上洇開。
+//
+// 兩個關鍵（兩個都踩過）：
+//   • 墨點位置必須固定（InkRandom 是固定種子的）。每一幀重骰會閃成雜訊。
+//   • ViewModifier 要遵從 Animatable，SwiftUI 才會替 progress 補間；
+//     不然它只會在 0 與 1 之間直接跳過去，根本看不到暈開的過程。
+
+private struct InkBlobs: View {
+    let progress: Double
+    let seed: Int
+
+    var body: some View {
+        Canvas { context, size in
+            // 邊緣糊掉才像墨，銳利的圓只會像貼紙
+            context.addFilter(.blur(radius: 22))
+            var random = InkRandom(seed &* 131 &+ 7)
+            let longest = max(size.width, size.height)
+            let count = 14
+            for i in 0..<count {
+                let cx = random.next() * size.width
+                let cy = random.next() * size.height
+                let scale = 0.35 + random.next() * 0.55
+                // 每一點開始暈開的時間錯開，才有「一點一點滲出來」的感覺
+                let delay = Double(i) / Double(count) * 0.45
+                let local = max(0, min(1, (progress - delay) / max(0.0001, 1 - delay)))
+                let radius = longest * 0.9 * scale * local
+                guard radius > 0.5 else { continue }
+                context.fill(
+                    Path(ellipseIn: CGRect(x: cx - radius, y: cy - radius,
+                                           width: radius * 2, height: radius * 2)),
+                    with: .color(.black))
+            }
+        }
+    }
+}
+
+private struct InkRevealModifier: ViewModifier, Animatable {
+    var progress: Double
+    var seed: Int
+
+    var animatableData: Double {
+        get { progress }
+        set { progress = newValue }
+    }
+
+    func body(content: Content) -> some View {
+        content.mask(InkBlobs(progress: progress, seed: seed))
+    }
+}
+
+extension AnyTransition {
+    /// 水墨暈開。離場用淡出——兩張同時做遮罩會互相穿幫。
+    static func inkWash(seed: Int) -> AnyTransition {
+        .asymmetric(
+            insertion: .modifier(active: InkRevealModifier(progress: 0, seed: seed),
+                                 identity: InkRevealModifier(progress: 1, seed: seed)),
+            removal: .opacity)
+    }
+}
