@@ -338,25 +338,51 @@ struct PhotoSlideshowView: View {
             // 背景自己一層，不跟著照片轉場——會動的場景每張重畫一次就不叫場景了
             InkLandscapeView()
             collageWall
+            colophon
         }
+    }
+
+    /// [v25.492] 題款與鈐印。
+    ///
+    /// 這是畫的一部分，不是控制列——所以收起控制列之後它還在。
+    /// 中國畫的三件套是「畫、題款、印」，少了後面兩個，再像水墨也只是背景圖。
+    private var colophon: some View {
+        InkColophon(title: colophonTitle, dateText: colophonDate)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .padding(.leading, 18)
+            .padding(.top, 92)
+            .allowsHitTesting(false)
+    }
+
+    /// 落款題的是畫名，不是畫面標題——所以把「…的相本」去掉
+    private var colophonTitle: String {
+        title.replacingOccurrences(of: " 的相本", with: "")
+             .replacingOccurrences(of: "的相本", with: "")
+    }
+
+    /// 落款上的日期：寫目前這張照片拍的那一天
+    private var colophonDate: String? {
+        guard let item = current else { return nil }
+        return Self.colophonFmt.string(from: item.date)
     }
 
     /// 拼貼牆：照片一張一張飄進同一個畫面，滿了就把最舊的那張推掉。
     private var collageWall: some View {
         GeometryReader { geo in
             ZStack {
-                ForEach(wall) { item in
-                    InkFramedPhoto(image: item.image,
-                                   size: PhotoLightbox.fittedSize(
-                                        item.image.size,
-                                        in: WallLayout.cardArea(geo.size)))
-                        .rotationEffect(.degrees(WallLayout.rotation(slot: item.slot)))
-                        .position(WallLayout.position(slot: item.slot, in: geo.size))
+                ForEach(Array(wall.enumerated()), id: \.element.id) { position, item in
+                    WallCard(item: item,
+                             cardSize: PhotoLightbox.fittedSize(
+                                item.image.size,
+                                in: WallLayout.cardArea(geo.size)),
+                             container: geo.size,
+                             age: wall.count - 1 - position)
                         .transition(.asymmetric(
-                            // [v25.490] 新的一張用水墨暈開的方式出現，
-                            // 跟整個場景同一套語言；離場單純淡掉。
+                            // 新的一張用水墨暈開的方式出現，跟整個場景同一套語言
                             insertion: .inkWash(seed: item.id),
-                            removal: .opacity.combined(with: .scale(scale: 0.92))))
+                            // [v25.492] 離場往上飄，像把這一頁揭起來
+                            removal: .opacity.combined(with: .offset(y: -38))
+                                .combined(with: .scale(scale: 0.94))))
                         .zIndex(Double(item.id))
                 }
             }
@@ -427,11 +453,11 @@ struct PhotoSlideshowView: View {
         if let item = current {
             VStack(alignment: .leading, spacing: 3) {
                 Text(item.group)
-                    .font(.title3.weight(.bold))
+                    .font(.system(.title3, design: .serif).weight(.semibold))
                     .foregroundStyle(onBackdrop)
                     .lineLimit(1)
                 Text(Self.dayFmt.string(from: item.date))
-                    .font(.caption)
+                    .font(.system(.caption, design: .serif))
                     .foregroundStyle(onBackdrop.opacity(0.85))
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -871,11 +897,25 @@ struct PhotoSlideshowView: View {
     /// 全解析度的圖（一張 1200 萬畫素解開就是 48MB）。
     private func pushToWall(_ img: UIImage) {
         guard !wall.contains(where: { $0.id == index }) else { return }
+        // [v25.492] 滿一頁就整面揭掉，新的一張落在空白的紙上。
+        //
+        // 原本是「擠掉最舊的那一張」——那會讓畫面永遠是滿的、永遠在換，
+        // 看久了很疲勞。八張一頁的節奏給了一個呼吸點，而且空紙上落下
+        // 第一張的那一下最好看。
+        if wall.count >= WallLayout.capacity {
+            withAnimation(.easeInOut(duration: 0.55)) { wall.removeAll() }
+        }
         withAnimation(arrivalAnimation) {
             wall.append(WallPhoto(id: index, image: img, slot: index))
-            if wall.count > WallLayout.capacity { wall.removeFirst() }
         }
     }
+
+    /// 落款的日期寫法：直書時「二〇二六年十月五日」太長，用「丙午年十月初五」
+    /// 又太假，取中間——數字年月日，直書讀起來剛好。
+    private static let colophonFmt: DateFormatter = {
+        let f = DateFormatter(); f.locale = Locale(identifier: "zh_Hant_TW")
+        f.dateFormat = "yyyy年M月d日"; return f
+    }()
 
     private static let dayFmt: DateFormatter = {
         let f = DateFormatter(); f.locale = Locale(identifier: "zh_Hant_TW")

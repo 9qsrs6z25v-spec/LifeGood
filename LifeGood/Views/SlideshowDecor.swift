@@ -173,6 +173,38 @@ enum InkScene {
         water(&context, size, time: time, density: density, waterY: waterY)
         mist(&context, size, time: time, band: 2)
         birds(&context, size, time: time, density: density)
+        petals(&context, size, time: time)
+    }
+
+    // MARK: 落梅
+
+    /// [v25.492] 從右上角那枝梅飄下來的花瓣。
+    ///
+    /// 七片就夠——再多就變成櫻吹雪，那是另一個季節的畫。
+    /// 每一片的下落速度、起始位置、搖擺相位都不同，而且快落地時會淡掉：
+    /// 整片同時消失在同一條線上，一眼就看得出是程式畫的。
+    private static func petals(_ context: inout GraphicsContext, _ size: CGSize, time: Double) {
+        var random = InkRandom(48219)
+        for i in 0..<7 {
+            let startX = random.next()
+            let phase = random.next()
+            let speedSeed = random.next()
+            let fallSeconds = 26.0 + speedSeed * 20.0
+            let cycle = ((time / fallSeconds) + phase).truncatingRemainder(dividingBy: 1)
+            let y = CGFloat(cycle) * size.height * 1.08 - size.height * 0.04
+            let sway = CGFloat(sin(time * 0.55 + Double(i) * 1.37) * 18)
+            let x = CGFloat(0.58 + startX * 0.40) * size.width + sway
+            let r = 2.4 + CGFloat(speedSeed) * 1.9
+            // 快到底的時候淡出
+            let fade = cycle > 0.82 ? (1 - (cycle - 0.82) / 0.18) : 1
+            let petal = Path(ellipseIn: CGRect(x: -r, y: -r * 0.6,
+                                               width: r * 2, height: r * 1.2))
+                .applying(CGAffineTransform(rotationAngle: time * 0.7 + Double(i))
+                    .concatenating(CGAffineTransform(translationX: x, y: y)))
+            context.fill(petal,
+                         with: .color(Color(red: 0.78, green: 0.26, blue: 0.32)
+                            .opacity(0.52 * fade)))
+        }
     }
 
     // MARK: 山
@@ -557,7 +589,18 @@ private struct InkRevealModifier: ViewModifier, Animatable {
     }
 
     func body(content: Content) -> some View {
-        content.mask(InkBlobs(progress: progress, seed: seed))
+        content
+            .mask(InkBlobs(progress: progress, seed: seed))
+            // [v25.492] 照片落在紙上的那一下，墨會往外化開一圈。
+            // 只在進場的過程中看得到——progress 到 1 就完全透明。
+            .background(
+                Circle()
+                    .stroke(Color.black.opacity((1 - progress) * 0.16),
+                            lineWidth: 1 + 9 * (1 - progress))
+                    .blur(radius: 9)
+                    .scaleEffect(0.45 + progress * 1.15)
+                    .allowsHitTesting(false)
+            )
     }
 }
 
@@ -568,5 +611,106 @@ extension AnyTransition {
             insertion: .modifier(active: InkRevealModifier(progress: 0, seed: seed),
                                  identity: InkRevealModifier(progress: 1, seed: seed)),
             removal: .opacity)
+    }
+}
+
+// MARK: - 落款與鈐印（v25.492）
+//
+// 中國畫的三件套是「畫、題款、印」。前面兩版把畫做出來了，題款與印一直缺著——
+// 那正是「看起來像水墨」與「看起來是一幅畫」之間的差別。
+//
+// 題款直書（由上往下、字與字之間收緊），印是紅底白文的方章，略微歪一點：
+// 蓋章本來就不會蓋得完全正。
+
+/// 直書的墨字
+struct VerticalInkText: View {
+    let text: String
+    var size: CGFloat = 16
+    var weight: Font.Weight = .regular
+    var opacity: Double = 0.78
+
+    var body: some View {
+        VStack(spacing: size * 0.12) {
+            ForEach(Array(text.enumerated()), id: \.offset) { _, ch in
+                Text(String(ch))
+                    .font(.system(size: size, weight: weight, design: .serif))
+                    .foregroundStyle(Color.black.opacity(opacity))
+                    .fixedSize()
+            }
+        }
+    }
+}
+
+/// 鈐印：紅底白文的方章
+struct InkSeal: View {
+    var text: String = "美好"
+    var size: CGFloat = 30
+
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: size * 0.1)
+                .fill(Color(red: 0.72, green: 0.14, blue: 0.16).opacity(0.88))
+            VStack(spacing: -size * 0.06) {
+                ForEach(Array(text.prefix(2).enumerated()), id: \.offset) { _, ch in
+                    Text(String(ch))
+                        .font(.system(size: size * 0.38, weight: .bold, design: .serif))
+                        .foregroundStyle(Color(red: 0.98, green: 0.96, blue: 0.94))
+                }
+            }
+        }
+        .frame(width: size, height: size)
+        // 蓋章不會正，歪一點才像手蓋的
+        .rotationEffect(.degrees(-3))
+        .shadow(color: .black.opacity(0.12), radius: 1.5, x: 0.5, y: 1)
+    }
+}
+
+/// 畫面左側的落款：相簿名、日期、印。
+struct InkColophon: View {
+    let title: String
+    let dateText: String?
+
+    var body: some View {
+        VStack(alignment: .center, spacing: 10) {
+            VerticalInkText(text: title, size: 17, weight: .semibold, opacity: 0.80)
+            if let dateText {
+                VerticalInkText(text: dateText, size: 10.5, opacity: 0.55)
+            }
+            InkSeal()
+        }
+    }
+}
+
+// MARK: - 拼貼牆上的一張（v25.492）
+
+/// 牆上的照片。
+///
+/// 兩件事讓它不只是「貼上去」：
+///   • 每一張都在很慢地呼吸（五、六秒一個來回，各自錯開），幅度小到說不出
+///     哪裡在動，但畫面不會死。
+///   • 舊的照片退後一點、淡一點——視線自然會落在最新落下的那一張。
+struct WallCard: View {
+    let item: WallPhoto
+    let cardSize: CGSize
+    let container: CGSize
+    /// 0＝最新落下的那一張
+    let age: Int
+
+    @State private var breathing = false
+
+    var body: some View {
+        InkFramedPhoto(image: item.image, size: cardSize)
+            .rotationEffect(.degrees(WallLayout.rotation(slot: item.slot)
+                                     + (breathing ? 0.9 : -0.9)))
+            .scaleEffect((breathing ? 1.005 : 0.995) * (age == 0 ? 1.0 : 0.97))
+            .opacity(age == 0 ? 1 : max(0.5, 1 - Double(age) * 0.075))
+            .position(WallLayout.position(slot: item.slot, in: container))
+            .onAppear {
+                // 每張的週期都不一樣，不然整面牆會一起起伏，像在呼吸的是牆不是照片
+                withAnimation(.easeInOut(duration: 5.4 + Double(item.slot % 5) * 0.8)
+                    .repeatForever(autoreverses: true)) {
+                    breathing = true
+                }
+            }
     }
 }
