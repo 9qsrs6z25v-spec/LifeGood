@@ -18,6 +18,7 @@
 		A01B000002000013 /* DayTimelineController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000005 /* DayTimelineController.swift */; };
 		A01B000002000014 /* PhotoImportAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000008 /* PhotoImportAttributes.swift */; };
 		A01B000001001506 /* PhotoImportCenter.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001506 /* PhotoImportCenter.swift */; };
+		A01B000001001507 /* PhotoSlideshowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001507 /* PhotoSlideshowView.swift */; };
 		A01B000002000020 /* LifeGoodWidgets.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = A01A000002000100 /* LifeGoodWidgets.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		A01B000001000001 /* LifeGoodApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000001 /* LifeGoodApp.swift */; };
 		A01B000001000002 /* Expense.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000002 /* Expense.swift */; };
@@ -186,6 +187,7 @@
 		A01A000002000002 /* DayTimelineLiveActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DayTimelineLiveActivity.swift; sourceTree = "<group>"; };
 		A01A000002000008 /* PhotoImportAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoImportAttributes.swift; sourceTree = "<group>"; };
 		A01A000002000007 /* PhotoImportLiveActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoImportLiveActivity.swift; sourceTree = "<group>"; };
+		A01A000001001507 /* PhotoSlideshowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoSlideshowView.swift; sourceTree = "<group>"; };
 		A01A000001001506 /* PhotoImportCenter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoImportCenter.swift; sourceTree = "<group>"; };
 		A01A000002000003 /* DayTimelineAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DayTimelineAttributes.swift; sourceTree = "<group>"; };
 		A01A000002000004 /* DayTimelineIntent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DayTimelineIntent.swift; sourceTree = "<group>"; };
@@ -450,6 +452,7 @@
 				A01A000001000043 /* EInvoiceSetupView.swift */,
 				A01A000001000103 /* MultiPhotoGallery.swift */,
 				A01A000001000207 /* MapAlbumSheet.swift */,
+				A01A000001001507 /* PhotoSlideshowView.swift */,
 				A01A000001000223 /* WhatsNewView.swift */,
 				A01A000001000208 /* QuickPickCapsules.swift */,
 				A01A000001000209 /* HeroTrendChart.swift */,
@@ -776,6 +779,7 @@
 				A01B000002000013 /* DayTimelineController.swift in Sources */,
 				A01B000002000014 /* PhotoImportAttributes.swift in Sources */,
 				A01B000001001506 /* PhotoImportCenter.swift in Sources */,
+				A01B000001001507 /* PhotoSlideshowView.swift in Sources */,
 				A01B000001000040 /* EInvoiceClient.swift in Sources */,
 				A01B000001000041 /* InvoiceCategorizer.swift in Sources */,
 				A01B000001000042 /* EInvoiceSyncManager.swift in Sources */,
@@ -816,7 +820,7 @@
 			buildSettings = {
 				CLANG_ENABLE_MODULES = YES;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1236;
+				CURRENT_PROJECT_VERSION = 1237;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = LifeGoodWidgets/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "美好人生";
@@ -827,7 +831,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 25.483;
+				MARKETING_VERSION = 25.484;
 				PRODUCT_BUNDLE_IDENTIFIER = com.lifegood.app.widgets;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
@@ -842,7 +846,7 @@
 			buildSettings = {
 				CLANG_ENABLE_MODULES = YES;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1236;
+				CURRENT_PROJECT_VERSION = 1237;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = LifeGoodWidgets/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "美好人生";
@@ -853,7 +857,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 25.483;
+				MARKETING_VERSION = 25.484;
 				PRODUCT_BUNDLE_IDENTIFIER = com.lifegood.app.widgets;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
@@ -870,7 +874,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = LifeGood/LifeGood.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1236;
+				CURRENT_PROJECT_VERSION = 1237;
 				DEVELOPMENT_ASSET_PATHS = "\"LifeGood/Preview Content\"";
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -891,6 +895,7 @@
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "LifeGood 用語音辨識把你說的內容轉成文字，再交給 AI 解析成支出項目。";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "LifeGood 需要存取相簿讀取裝潢照片或收據。";
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "LifeGood 需要把你在大圖預覽裡按下「存到相簿」的那張照片存進相簿。";
+				INFOPLIST_KEY_NSAppleMusicUsageDescription = "LifeGood 需要讀取你的音樂資料庫，才能讓你挑一首歌當動態相簿的配樂。";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -902,7 +907,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 25.483;
+				MARKETING_VERSION = 25.484;
 				PRODUCT_BUNDLE_IDENTIFIER = com.lifegood.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -918,7 +923,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = LifeGood/LifeGood.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1236;
+				CURRENT_PROJECT_VERSION = 1237;
 				DEVELOPMENT_ASSET_PATHS = "\"LifeGood/Preview Content\"";
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -939,6 +944,7 @@
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "LifeGood 用語音辨識把你說的內容轉成文字，再交給 AI 解析成支出項目。";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "LifeGood 需要存取相簿讀取裝潢照片或收據。";
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "LifeGood 需要把你在大圖預覽裡按下「存到相簿」的那張照片存進相簿。";
+				INFOPLIST_KEY_NSAppleMusicUsageDescription = "LifeGood 需要讀取你的音樂資料庫，才能讓你挑一首歌當動態相簿的配樂。";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -950,7 +956,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 25.483;
+				MARKETING_VERSION = 25.484;
 				PRODUCT_BUNDLE_IDENTIFIER = com.lifegood.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;

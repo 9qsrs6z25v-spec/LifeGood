@@ -89,6 +89,8 @@ struct MapAlbumSheet<Stats: View>: View {
 
     @State private var groupMode: GroupMode = .place
     @State private var viewingPhotoURL: IdentifiableURL?
+    /// [v25.484] 動態相簿（配樂幻燈片）
+    @State private var showSlideshow = false
     @State private var emptyIconPulse = false
     @State private var emptyIconPulseTask: Task<Void, Never>?
     /// Sheet 首次開啟的交錯進場旗標（切換分組不重播，見 v2 美化紀錄）
@@ -188,6 +190,24 @@ struct MapAlbumSheet<Stats: View>: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button("關閉") { dismiss() } }
+                // [v25.484] 動態相簿：整本依畫面上的順序播一遍（使用者指定位置）
+                if !items.isEmpty {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button {
+                            showSlideshow = true
+                        } label: {
+                            Image(systemName: "play.circle.fill")
+                                .font(.system(size: 20))
+                                .foregroundStyle(accent)
+                        }
+                        .accessibilityLabel("播放動態相簿")
+                    }
+                }
+            }
+            // 順序用 sections 攤平後的順序，與畫面上看到的排列一致——
+            // 另外排一次的話，播出來的順序跟使用者剛剛捲過的不一樣。
+            .fullScreenCover(isPresented: $showSlideshow) {
+                PhotoSlideshowView(items: sections.flatMap { $0.photos }, title: title)
             }
             // [v25.472] 整本相簿一起帶進去：左右滑就能看其他張，底下有縮圖列。
             // 順序用 sections 攤平後的順序——與畫面上看到的排列一致，
