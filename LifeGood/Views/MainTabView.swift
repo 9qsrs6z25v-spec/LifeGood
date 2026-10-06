@@ -585,6 +585,8 @@ struct MainTabView: View {
                 // 讓整個 MainTabView.body（分頁切換、全域手勢等）重新求值一次，不只是這條細
                 // 進度條；改由子 View 自己訂閱，變化只會讓這一小塊重繪。
                 ExportProgressBarView()
+                // [v25.483] 照片匯入（iCloud 原圖下載）的進度，與匯出同一個位置
+                PhotoImportBarView()
                 bottomTabBar(namespace: tabBarNamespace)
             }
 
@@ -1376,6 +1378,66 @@ struct MainTabView: View {
                 .padding(.bottom, 1)
                 .background(.ultraThinMaterial)
                 // [v4] 頂部 0.5pt 分隔線，對齊 bottomTabBar 上緣分隔線規格，與下方導覽列劃出清楚交界
+                .overlay(
+                    Rectangle()
+                        .fill(Color(.separator).opacity(0.18))
+                        .frame(height: 0.5),
+                    alignment: .top
+                )
+                .transition(.opacity)
+            }
+        }
+    }
+
+    // MARK: - 照片匯入進度條（v25.483）
+
+    /// 與匯出那一條同規格、同位置（壓在底部導覽上方），只是換成紫色與照片語彙。
+    /// 一樣獨立訂閱，免得每張照片的進度更新都讓整個 MainTabView.body 重算。
+    private struct PhotoImportBarView: View {
+        @ObservedObject private var center = PhotoImportCenter.shared
+
+        private let tint = Color(red: 0.62, green: 0.40, blue: 0.95)
+
+        var body: some View {
+            if center.isImporting {
+                VStack(spacing: 1) {
+                    HStack(spacing: 5) {
+                        Spacer()
+                        ZStack {
+                            Circle()
+                                .fill(LinearGradient(
+                                    colors: [tint, tint.opacity(0.65)],
+                                    startPoint: .topLeading, endPoint: .bottomTrailing))
+                            Image(systemName: "photo.badge.arrow.down.fill")
+                                .font(.system(size: 7.5, weight: .bold))
+                                .foregroundStyle(.white)
+                        }
+                        .frame(width: 14, height: 14)
+                        Text(center.statusText + "・\(Int(center.fraction * 100))%")
+                            .font(.system(size: 9, weight: .medium))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .contentTransition(.numericText())
+                            .animation(.easeInOut(duration: 0.2), value: center.done)
+                            .padding(.trailing, 14)
+                    }
+                    GeometryReader { geo in
+                        ZStack(alignment: .leading) {
+                            Capsule()
+                                .fill(tint.opacity(0.14))
+                                .overlay(Capsule().stroke(tint.opacity(0.22), lineWidth: 0.6))
+                            Capsule()
+                                .fill(LinearGradient(colors: [tint, tint.opacity(0.65)],
+                                                     startPoint: .leading, endPoint: .trailing))
+                                .frame(width: max(0, geo.size.width * center.fraction))
+                                .shadow(color: tint.opacity(0.40), radius: 3, x: 0, y: 0)
+                                .animation(.linear(duration: 0.2), value: center.fraction)
+                        }
+                    }
+                    .frame(height: 3.5)
+                }
+                .padding(.bottom, 1)
+                .background(.ultraThinMaterial)
                 .overlay(
                     Rectangle()
                         .fill(Color(.separator).opacity(0.18))

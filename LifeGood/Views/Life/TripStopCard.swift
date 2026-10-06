@@ -644,7 +644,17 @@ struct TripStopCardView: View {
                 urlFor: { TripStop.photoURL($0) },
                 onSaveImage: { TripStop.savePhoto($0) },
                 onDeleteFile: { TripStop.deletePhoto($0) },
-                title: "景點照片")
+                title: "景點照片",
+                // [v25.483] 這一站的照片是直接寫回 LifeStore 的，所以匯入可以離開
+                // 這張卡繼續跑。store 先取出來綁進閉包，不要在匯入結束時才去碰
+                // @EnvironmentObject——那時這個 View 早就不在畫面上了。
+                onBackgroundCommit: { [store = lifeStore, planId, stopId] names in
+                    guard !names.isEmpty else { return }
+                    let current = store.tripPlan(id: planId)?
+                        .stops.first(where: { $0.id == stopId })?.photoFileNames ?? []
+                    store.updateTripStopPhotos(planId: planId, stopId: stopId,
+                                               fileNames: current + names)
+                })
                 .padding(14)
         }
         .background(Color(.secondarySystemGroupedBackground))

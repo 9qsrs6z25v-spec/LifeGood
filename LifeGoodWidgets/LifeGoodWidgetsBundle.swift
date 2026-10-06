@@ -10,5 +10,7 @@ import WidgetKit
 struct LifeGoodWidgetsBundle: WidgetBundle {
     var body: some Widget {
         DayTimelineLiveActivityWidget()
+        // [v25.483] 照片匯入進度（跳出 App 時用靈動島顯示百分比）
+        PhotoImportLiveActivityWidget()
     }
 }

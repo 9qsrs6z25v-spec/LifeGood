@@ -56,6 +56,13 @@ struct MultiPhotoGallery: View {
     var allowAdding: Bool = true
     /// 縮圖大小
     var thumbnailSize: CGSize = CGSize(width: 110, height: 90)
+    /// [v25.483] 從相簿多選時，把匯入交給 PhotoImportCenter 在背景跑完，
+    /// 跑完之後用這個閉包把檔名寫回去。
+    ///
+    /// 只有「檔名直接落地到 store」的呼叫端可以傳（例：旅遊景點照片寫回 LifeStore）。
+    /// 記帳表單那種「按儲存才落地」的畫面**不要傳**——表單一關就沒有人認領那些檔名，
+    /// 寫回去只會變成孤兒檔案，那種情況維持原本「離開畫面就取消並清掉」的行為。
+    var onBackgroundCommit: (([String]) -> Void)? = nil
 
     @State private var pickerItems: [PhotosPickerItem] = []
     @State private var showCamera: Bool = false
@@ -70,6 +77,8 @@ struct MultiPhotoGallery: View {
     /// iCloud 相簿的原圖要先下載，沒有提示的話按了打勾看起來就像沒選到。
     @State private var loadingDone = 0
     @State private var loadingTotal = 0
+    /// [v25.483] 背景匯入的進度（這個畫面還開著的時候也要看得到）
+    @ObservedObject private var importCenter = PhotoImportCenter.shared
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -136,6 +145,14 @@ struct MultiPhotoGallery: View {
                     fraction: Double(loadingDone) / Double(max(1, loadingTotal)))
                     .padding(.horizontal, 4)
                     .transition(.opacity)
+            } else if onBackgroundCommit != nil && importCenter.isImporting {
+                // [v25.483] 背景匯入：這裡照樣看得到，但關掉畫面也不會中斷，
+                // 所以要明講「可以先離開」——不然使用者還是會乖乖在這裡等。
+                ThinProgressBar(
+                    label: importCenter.statusText + "（可以先離開這個畫面）",
+                    fraction: importCenter.fraction)
+                    .padding(.horizontal, 4)
+                    .transition(.opacity)
             }
 
             if fileNames.isEmpty {
@@ -185,6 +202,13 @@ struct MultiPhotoGallery: View {
             // 但寫完後 append 的對象已是脫離畫面的 fileNames，資料從未被任何紀錄引用到，
             // 變成永久孤兒檔案。改用可取消的 Task：畫面消失時取消，且取消時把這批已寫入磁碟
             // 但還沒機會被採用的照片一併刪除。
+            // [v25.483] 有 commit 閉包的呼叫端：交給匯入中心，離開畫面也會跑完
+            if let commit = onBackgroundCommit {
+                PhotoImportCenter.shared.enqueue(items: items, label: title,
+                                                 save: onSaveImage, commit: commit)
+                pickerItems = []
+                return
+            }
             photoLoadTask?.cancel()
             loadingDone = 0
             loadingTotal = items.count
