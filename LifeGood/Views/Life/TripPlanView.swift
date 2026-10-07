@@ -1558,33 +1558,127 @@ struct TripPlanDetailView: View {
         .padding(.top, 1)
     }
 
-    /// 一站底下那一層（v25.507）。
+    /// 一站右下角那一小塊城市（v25.508，使用者指定）。
     ///
-    /// 這一列的右半邊本來是空的——名字、地址、膠囊都靠左，右邊一路空到
-    /// 「…」底下。空白本身沒有錯，但它是**沒有被安排過**的空白：
-    /// 不是留白，只是沒東西。
+    /// v25.507 我在這個位置放的是「放到很大的站號」——會錯意了，使用者要的
+    /// 是**實際的建築**。所以這裡畫的是一個真的街角：幾棟高低不一的樓、
+    /// 亮著的窗、屋頂的光邊、高樓上的天線與航警燈，底下壓一條地面線。
     ///
-    /// 放進去的是兩樣都有意義的東西，不是圖案：
+    /// 關鍵是**每一站的城市都不一樣**：亂數種子取自這一站的序號，所以捲過
+    /// 三十四站就是三十四個不同的街角。同一張圖重複三十四次是壁紙；
+    /// 每一次都不同，才是「這裡有一座城，而你正在穿過它」。
     ///
-    /// 1. **幽靈編號**。這一站的序號放大到六十幾點、壓到 0.06 的濃度沉在底下。
-    ///    海報與雜誌的跨頁常用這一招（大數字當版面的錨），它同時回答了
-    ///    「我捲到第幾站了」——左上角那顆小圓圈要瞇著眼睛才看得到。
+    /// 濃度壓在 0.07～0.22（亮著的窗例外，那是整塊唯一該被看見的東西）。
+    /// 功能性清單上的藝術只有一條底線：可以被看見，不可以被讀。
+    private struct StopCityCorner: View {
+        let color: Color
+        let seed: Int
+
+        var body: some View {
+            Canvas { context, size in
+                var random = InkRandom(9137 + seed * 37)
+                let ground = size.height - 1
+
+                // 遠景：一排矮的、淡的，把地平線填滿。
+                // 沒有這一排，近景那幾棟會像浮在白紙上的積木。
+                var fx: CGFloat = 0
+                while fx < size.width {
+                    let w = 5 + CGFloat(random.next()) * 9
+                    let h = 3 + CGFloat(random.next()) * 10
+                    context.fill(Path(CGRect(x: fx, y: ground - h, width: w, height: h)),
+                                 with: .color(color.opacity(0.07)))
+                    fx += w + 1
+                }
+
+                // 近景：三到五棟，有窗、有屋頂光邊、高的那幾棟有天線
+                var bx: CGFloat = size.width * 0.03
+                var count = 0
+                while bx < size.width - 10, count < 5 {
+                    let w = 10 + CGFloat(random.next()) * 15
+                    let roll = random.next()
+                    let tall = roll > 0.74 ? 1.0 : (roll > 0.40 ? 0.58 : 0.33)
+                    // 上緣留 10pt 給天線，不然它會被畫布切掉
+                    let h = min(9 + CGFloat(tall) * CGFloat(11 + random.next() * 19),
+                                size.height - 11)
+                    let rect = CGRect(x: bx, y: ground - h, width: w, height: h)
+
+                    context.fill(Path(rect), with: .linearGradient(
+                        Gradient(colors: [color.opacity(0.22), color.opacity(0.10)]),
+                        startPoint: CGPoint(x: 0, y: rect.minY),
+                        endPoint: CGPoint(x: 0, y: ground)))
+
+                    var edge = Path()
+                    edge.move(to: CGPoint(x: rect.minX, y: rect.minY))
+                    edge.addLine(to: CGPoint(x: rect.maxX, y: rect.minY))
+                    context.stroke(edge, with: .color(color.opacity(0.40)),
+                                   style: StrokeStyle(lineWidth: 0.7))
+
+                    // 窗。大部分是暗的（比樓身深一點），少數亮著（暖黃）——
+                    // 真的大樓晚上就是這樣，整片亮的是點陣圖。
+                    var wy = rect.minY + 3
+                    while wy + 2.4 < ground - 1.5 {
+                        var wx = rect.minX + 2
+                        while wx + 1.8 < rect.maxX - 2 {
+                            let r = random.next()
+                            if r < 0.46 {
+                                context.fill(
+                                    Path(CGRect(x: wx, y: wy, width: 1.8, height: 2.3)),
+                                    with: .color(r < 0.13
+                                                 ? CyberPalette.amber.opacity(0.70)
+                                                 : color.opacity(0.30)))
+                            }
+                            wx += 3.4
+                        }
+                        wy += 4.2
+                    }
+
+                    if tall > 0.9 {
+                        var mast = Path()
+                        mast.move(to: CGPoint(x: rect.midX, y: rect.minY))
+                        mast.addLine(to: CGPoint(x: rect.midX, y: rect.minY - 7))
+                        context.stroke(mast, with: .color(color.opacity(0.34)),
+                                       style: StrokeStyle(lineWidth: 0.8))
+                        context.fill(
+                            Path(ellipseIn: CGRect(x: rect.midX - 1.1, y: rect.minY - 8.4,
+                                                   width: 2.2, height: 2.2)),
+                            with: .color(CyberPalette.magenta.opacity(0.55)))
+                    }
+
+                    bx += w + 2 + CGFloat(random.next()) * 6
+                    count += 1
+                }
+
+                // 地面：往左淡出，讓這一塊自己收掉，不要切一條硬邊
+                var base = Path()
+                base.move(to: CGPoint(x: 0, y: ground + 0.5))
+                base.addLine(to: CGPoint(x: size.width, y: ground + 0.5))
+                context.stroke(base, with: .linearGradient(
+                    Gradient(colors: [.clear, color.opacity(0.32)]),
+                    startPoint: .zero, endPoint: CGPoint(x: size.width, y: 0)),
+                               style: StrokeStyle(lineWidth: 0.8))
+            }
+            .frame(width: 124, height: 48)
+            .allowsHitTesting(false)
+        }
+    }
+
+    /// 一站底下那一層。
+    ///
+    /// 兩樣東西，都有意義，不是圖案：
+    ///
+    /// 1. **右下角的街角**（見 StopCityCorner）。那一塊本來是沒有被安排過的
+    ///    空白——不是留白，只是沒東西。
     /// 2. **打卡過的站會透出光**。軌道的顏色從左緣往右暈開一小段。
     ///    那是「這一站已經走過了」的視覺證據，而且光從軌道來——
     ///    跟那條會發光的主幹是同一個光源，不是另外加的裝飾。
-    ///
-    /// 兩樣都在 0.06～0.085 之間。再亮一點就會開始跟內容搶，那就不是底層了。
     @ViewBuilder
     private func stopArtLayer(_ slot: TripPlan.Slot, color c: Color) -> some View {
-        ZStack(alignment: .trailing) {
+        ZStack(alignment: .bottomTrailing) {
             if slot.isActualArrival || slot.isActualDeparture {
                 LinearGradient(colors: [c.opacity(0.085), .clear],
                                startPoint: .leading, endPoint: .trailing)
             }
-            Text("\(slot.index + 1)")
-                .font(.system(size: 62, weight: .black, design: .rounded))
-                .foregroundStyle(c.opacity(0.06))
-                .padding(.trailing, 4)
+            StopCityCorner(color: c, seed: slot.index)
         }
         .allowsHitTesting(false)
     }
