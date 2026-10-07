@@ -177,8 +177,7 @@ enum InkScene {
             let r = 1.9 + CGFloat(speedSeed) * 1.3
             // 快到底的時候淡出
             let fade = cycle > 0.82 ? (1 - (cycle - 0.82) / 0.18) : 1
-            let petal = Path(ellipseIn: CGRect(x: -r, y: -r * 0.6,
-                                               width: r * 2, height: r * 1.2))
+            let petal = InkBrush.petalPath(length: r * 2, width: r * 1.0)
                 .applying(CGAffineTransform(rotationAngle: time * 0.7 + Double(i))
                     .concatenating(CGAffineTransform(translationX: x, y: y)))
             context.fill(petal,
@@ -275,9 +274,23 @@ enum InkScene {
             }
             band.closeSubpath()
             context.fill(band, with: .linearGradient(
-                Gradient(colors: [Color.black.opacity(0.13 * depth * density), .clear]),
+                Gradient(colors: [Color.black.opacity(0.21 * depth * density), .clear]),
                 startPoint: CGPoint(x: 0, y: baseY - amp),
-                endPoint: CGPoint(x: 0, y: baseY - amp + bandHeight * 1.6)))
+                endPoint: CGPoint(x: 0, y: baseY - amp + bandHeight * 1.5)))
+
+            // [v25.495] 緊貼稜線再壓一道更短更重的：山脊是整座山最暗的地方，
+            // 只有一道慢慢淡下去的帶子，山還是看起來像一張剪紙。
+            var crestBand = Path()
+            crestBand.move(to: head)
+            for pt in points.dropFirst() { crestBand.addLine(to: pt) }
+            for pt in points.reversed() {
+                crestBand.addLine(to: CGPoint(x: pt.x, y: pt.y + bandHeight * 0.24))
+            }
+            crestBand.closeSubpath()
+            context.fill(crestBand, with: .linearGradient(
+                Gradient(colors: [Color.black.opacity(0.17 * depth * density), .clear]),
+                startPoint: CGPoint(x: 0, y: baseY - amp),
+                endPoint: CGPoint(x: 0, y: baseY - amp + bandHeight * 0.3)))
         }
 
         // [v25.494] 濕邊改成「飛白」：一條連續等粗的線是向量圖，不是毛筆。
@@ -347,24 +360,32 @@ enum InkScene {
     /// 一棵松：一條微彎的幹，三層往下垂的枝。
     private static func pine(_ context: inout GraphicsContext, at base: CGPoint,
                              scale: CGFloat, density: Double) {
-        let h = 26 * scale
-        let ink = Color.black.opacity(0.62 * density)
-        var trunk = Path()
-        trunk.move(to: base)
-        trunk.addQuadCurve(to: CGPoint(x: base.x + 2 * scale, y: base.y - h),
-                           control: CGPoint(x: base.x - 2 * scale, y: base.y - h * 0.55))
-        context.stroke(trunk, with: .color(ink),
-                       style: StrokeStyle(lineWidth: 1.5 * scale, lineCap: .round))
+        // [v25.495] 幹改成會收鋒的一筆。等粗的 1.5pt 直線在真機上像一根天線，
+        // 樹幹本來就是下粗上細的。
+        let h = 30 * scale
+        let ink = Color.black.opacity(0.68 * density)
+        InkBrush.taper(&context,
+                       from: base,
+                       control1: CGPoint(x: base.x - 2.4 * scale, y: base.y - h * 0.45),
+                       control2: CGPoint(x: base.x + 1.2 * scale, y: base.y - h * 0.8),
+                       to: CGPoint(x: base.x + 2 * scale, y: base.y - h),
+                       startWidth: 2.6 * scale, endWidth: 0.7 * scale, color: ink)
 
         for i in 0..<3 {
-            let level = base.y - h * (0.55 + 0.17 * CGFloat(i))
-            let span = (11 - CGFloat(i) * 2.4) * scale
-            var bough = Path()
-            bough.move(to: CGPoint(x: base.x - span, y: level + 3 * scale))
-            bough.addQuadCurve(to: CGPoint(x: base.x + span, y: level + 3 * scale),
-                               control: CGPoint(x: base.x, y: level - 4 * scale))
-            context.stroke(bough, with: .color(ink.opacity(0.85)),
-                           style: StrokeStyle(lineWidth: 1.2 * scale, lineCap: .round))
+            let level = base.y - h * (0.5 + 0.18 * CGFloat(i))
+            let span = (13 - CGFloat(i) * 2.6) * scale
+            // 一層枝葉分左右兩筆，各自從幹上收出去
+            for side in [CGFloat(-1), 1] {
+                InkBrush.taper(&context,
+                               from: CGPoint(x: base.x, y: level + 2 * scale),
+                               control1: CGPoint(x: base.x + side * span * 0.4,
+                                                y: level - 2 * scale),
+                               control2: CGPoint(x: base.x + side * span * 0.8,
+                                                y: level + 1 * scale),
+                               to: CGPoint(x: base.x + side * span, y: level + 4 * scale),
+                               startWidth: 2.0 * scale, endWidth: 0.5 * scale,
+                               color: ink.opacity(0.82))
+            }
         }
     }
 
@@ -443,17 +464,43 @@ enum InkScene {
                 endPoint: CGPoint(x: 0, y: size.height)))
         }
 
-        // 留白橫紋：水墨的水面是「不畫」畫出來的
-        for i in 0..<4 {
-            let y = waterY + size.height * CGFloat(0.035 + 0.035 * Double(i))
+        // [v25.495] 水面先鋪一層極淡的墨。
+        //
+        // 上一版沒有這一層：倒影只有 0.13 的墨，再往下就是空白的紙，
+        // 然後我在那片白紙上又畫了四條不透明的白線——白壓白，看起來不是
+        // 留白，是四條發亮的槓。留白要有墨才看得出來，所以先給水一點調子。
+        var wash = Path()
+        wash.addRect(CGRect(x: 0, y: waterY, width: size.width,
+                            height: size.height - waterY))
+        context.fill(wash, with: .linearGradient(
+            Gradient(colors: [Color.black.opacity(0.085 * density),
+                              Color.black.opacity(0.015 * density)]),
+            startPoint: CGPoint(x: 0, y: waterY),
+            endPoint: CGPoint(x: 0, y: size.height)))
+
+        // 留白橫紋：水墨的水面是「不畫」畫出來的。
+        // 兩頭要收掉——真的留白沒有邊界，有頭有尾的白線就是一條白線。
+        for i in 0..<5 {
+            let y = waterY + size.height * CGFloat(0.03 + 0.032 * Double(i))
             let phase = time * 0.12 + Double(i)
-            let w = size.width * CGFloat(0.26 + 0.16 * Double(i % 2))
-            let x = size.width * CGFloat(0.12 + 0.3 * (sin(phase) * 0.5 + 0.5))
+            let w = size.width * CGFloat(0.30 + 0.18 * Double(i % 2))
+            let x = size.width * CGFloat(0.08 + 0.32 * (sin(phase) * 0.5 + 0.5))
             var line = Path()
             line.move(to: CGPoint(x: x, y: y))
             line.addLine(to: CGPoint(x: x + w, y: y))
-            context.stroke(line, with: .color(.white.opacity(0.55)),
-                           style: StrokeStyle(lineWidth: 1.6, lineCap: .round))
+            context.drawLayer { layer in
+                layer.addFilter(.blur(radius: 2.6))
+                layer.stroke(line, with: .linearGradient(
+                    Gradient(stops: [
+                        .init(color: .white.opacity(0), location: 0),
+                        .init(color: .white.opacity(0.46), location: 0.28),
+                        .init(color: .white.opacity(0.46), location: 0.70),
+                        .init(color: .white.opacity(0), location: 1)]),
+                    startPoint: CGPoint(x: x, y: y),
+                    endPoint: CGPoint(x: x + w, y: y)),
+                    style: StrokeStyle(lineWidth: 2.2 + CGFloat(i % 2) * 1.4,
+                                       lineCap: .round))
+            }
         }
     }
 
@@ -556,16 +603,25 @@ struct WallPhoto: Identifiable, Equatable {
 /// 用一組排好的落點依序輪流，再加上固定的小偏移，看起來像隨手擺、
 /// 其實每一張都有自己的位子。
 enum WallLayout {
-    /// 以畫面寬高的比例表示的落點
+    /// 以畫面寬高的比例表示的落點。
+    ///
+    /// [v25.495] 兩件事跟上一版不同：
+    ///
+    /// 1. **左邊讓出來。** 題款與鈐印寫在畫面左緣（約到寬度的 0.13），
+    ///    上一版的落點左到 0.24、卡片半寬 0.25，等於每一張都壓在字上，
+    ///    真機上「勇闖福岡親子行」有一半是看不見的。中國畫把款題在留白處，
+    ///    那塊留白就不該再放東西。
+    /// 2. **先鋪開再補滿。** 上一版前四個落點是 0.27／0.22／0.44／0.60，
+    ///    照片不多的時候全擠在上半，下面空一大片。現在前四張就把上下站滿。
     static let slots: [CGPoint] = [
-        CGPoint(x: 0.30, y: 0.27),
-        CGPoint(x: 0.71, y: 0.22),
-        CGPoint(x: 0.50, y: 0.44),
-        CGPoint(x: 0.24, y: 0.60),
-        CGPoint(x: 0.76, y: 0.55),
-        CGPoint(x: 0.42, y: 0.71),
-        CGPoint(x: 0.70, y: 0.78),
-        CGPoint(x: 0.27, y: 0.83)
+        CGPoint(x: 0.52, y: 0.26),
+        CGPoint(x: 0.60, y: 0.71),
+        CGPoint(x: 0.43, y: 0.47),
+        CGPoint(x: 0.67, y: 0.31),
+        CGPoint(x: 0.47, y: 0.83),
+        CGPoint(x: 0.70, y: 0.55),
+        CGPoint(x: 0.41, y: 0.64),
+        CGPoint(x: 0.58, y: 0.39)
     ]
 
     /// 同時最多留幾張。再多就看不清楚，而且記憶體要吃好幾張全解析度的圖。
@@ -575,7 +631,8 @@ enum WallLayout {
         let base = slots[((slot % slots.count) + slots.count) % slots.count]
         // 每一輪偏一點點，第二圈疊上去才不會完全重合
         let round = Double(slot / slots.count)
-        let jitterX = CGFloat(sin(round * 2.3 + Double(slot)) * 0.035)
+        // 偏移幅度收小：再大就會把卡片推回題款那一欄
+        let jitterX = CGFloat(sin(round * 2.3 + Double(slot)) * 0.018)
         let jitterY = CGFloat(cos(round * 1.7 + Double(slot) * 0.6) * 0.03)
         return CGPoint(x: (base.x + jitterX) * size.width,
                        y: (base.y + jitterY) * size.height)
@@ -587,9 +644,122 @@ enum WallLayout {
         return pattern[((slot % pattern.count) + pattern.count) % pattern.count]
     }
 
-    /// 每一張佔畫面多大
+    /// 每一張佔畫面多大。
+    /// [v25.495] 0.46 → 0.42：卡片要旋轉 ±8°，轉過之後的實際寬度比這個數字
+    /// 大一成，不縮一點就擠不進「讓開題款」之後剩下的範圍。
     static func cardArea(_ size: CGSize) -> CGSize {
-        CGSize(width: size.width * 0.46, height: size.height * 0.30)
+        CGSize(width: size.width * 0.42, height: size.height * 0.30)
+    }
+}
+
+// MARK: - 筆（v25.495）
+
+/// 毛筆的兩件事：**線條會收鋒**，**花不是圓點**。
+///
+/// 等粗的線是向量圖工具畫的，不是筆——筆鋒落紙重、提起來輕，一條枝子
+/// 從根到梢一定越來越細。SwiftUI 的 `stroke` 只能給一個固定寬度，
+/// 所以這裡沿著曲線取樣，自己把兩側的輪廓算出來，填成一塊實心的形狀。
+enum InkBrush {
+    /// 三次貝茲曲線上 t 處的點
+    static func point(_ p0: CGPoint, _ c0: CGPoint, _ c1: CGPoint,
+                      _ p1: CGPoint, _ t: CGFloat) -> CGPoint {
+        // 權重先各自算好。四個項目寫成一條式子的話，光是推導那幾個
+        // 整數字面量的型別就能讓編譯器卡到放棄（expression too complex）。
+        let u: CGFloat = 1 - t
+        let w0: CGFloat = u * u * u
+        let w1: CGFloat = 3 * u * u * t
+        let w2: CGFloat = 3 * u * t * t
+        let w3: CGFloat = t * t * t
+        let x: CGFloat = w0 * p0.x + w1 * c0.x + w2 * c1.x + w3 * p1.x
+        let y: CGFloat = w0 * p0.y + w1 * c0.y + w2 * c1.y + w3 * p1.y
+        return CGPoint(x: x, y: y)
+    }
+
+    /// 一筆有粗細變化的線：from 粗、to 細（或反過來）。
+    static func taper(_ context: inout GraphicsContext,
+                      from p0: CGPoint, control1 c0: CGPoint,
+                      control2 c1: CGPoint, to p1: CGPoint,
+                      startWidth: CGFloat, endWidth: CGFloat,
+                      color: Color, steps: Int = 24) {
+        var left: [CGPoint] = []
+        var right: [CGPoint] = []
+        for i in 0...steps {
+            let t = CGFloat(i) / CGFloat(steps)
+            let here = point(p0, c0, c1, p1, t)
+            // 方向取前後各一小段，端點才不會退化成零向量
+            let back = point(p0, c0, c1, p1, max(t - 0.02, 0))
+            let ahead = point(p0, c0, c1, p1, min(t + 0.02, 1))
+            var dx = ahead.x - back.x
+            var dy = ahead.y - back.y
+            let len = max(sqrt(dx * dx + dy * dy), 0.0001)
+            dx /= len; dy /= len
+            let half = (startWidth + (endWidth - startWidth) * t) / 2
+            left.append(CGPoint(x: here.x - dy * half, y: here.y + dx * half))
+            right.append(CGPoint(x: here.x + dy * half, y: here.y - dx * half))
+        }
+        guard let head = left.first else { return }
+        var path = Path()
+        path.move(to: head)
+        for pt in left.dropFirst() { path.addLine(to: pt) }
+        for pt in right.reversed() { path.addLine(to: pt) }
+        path.closeSubpath()
+        context.fill(path, with: .color(color))
+    }
+
+    /// 一片花瓣：一頭尖、一頭圓（橢圓畫出來是藥丸，不是花）
+    static func petalPath(length: CGFloat, width: CGFloat) -> Path {
+        var p = Path()
+        p.move(to: CGPoint(x: -length * 0.5, y: 0))          // 尖端（連在枝上那頭）
+        p.addQuadCurve(to: CGPoint(x: length * 0.5, y: 0),
+                       control: CGPoint(x: 0, y: -width))
+        p.addQuadCurve(to: CGPoint(x: -length * 0.5, y: 0),
+                       control: CGPoint(x: 0, y: width))
+        p.closeSubpath()
+        return p
+    }
+
+    /// 一朵梅：五瓣、一點花心、幾根蕊。
+    ///
+    /// 上一版是「一個紅圓加一點深色花心」，理由是這個尺寸畫五瓣會糊成一團。
+    /// 實際跑出來才知道判斷錯了——440pt 寬的螢幕上一朵花半徑 5pt，
+    /// 在 3x 螢幕是 30 個像素，五瓣綽綽有餘。而完美的正圓一看就是程式畫的，
+    /// 整枝梅因此像一張流程圖。
+    static func plumBlossom(_ context: inout GraphicsContext, at center: CGPoint,
+                            radius r: CGFloat, rotation: Double, tone: Double) {
+        let red = Color(red: 0.72, green: 0.14, blue: 0.20)
+        // 先一層很淡的暈：花要滲進紙裡，不是貼上去的
+        context.drawLayer { layer in
+            layer.addFilter(.blur(radius: r * 0.55))
+            layer.fill(Path(ellipseIn: CGRect(x: center.x - r, y: center.y - r,
+                                              width: r * 2, height: r * 2)),
+                       with: .color(red.opacity(0.26 * tone)))
+        }
+        for k in 0..<5 {
+            let angle = rotation + Double(k) * (.pi * 2 / 5)
+            let cx = center.x + CGFloat(cos(angle)) * r * 0.46
+            let cy = center.y + CGFloat(sin(angle)) * r * 0.46
+            let petal = petalPath(length: r * 1.08, width: r * 0.72)
+                .applying(CGAffineTransform(rotationAngle: angle)
+                    .concatenating(CGAffineTransform(translationX: cx, y: cy)))
+            context.fill(petal, with: .color(red.opacity(0.72 * tone)))
+        }
+        // 蕊：五根短線，長度不一
+        for k in 0..<5 {
+            let angle = rotation + 0.55 + Double(k) * (.pi * 2 / 5)
+            let reach = r * CGFloat(0.5 + Double(k % 3) * 0.12)
+            var stamen = Path()
+            stamen.move(to: center)
+            stamen.addLine(to: CGPoint(x: center.x + CGFloat(cos(angle)) * reach,
+                                       y: center.y + CGFloat(sin(angle)) * reach))
+            context.stroke(stamen,
+                           with: .color(Color(red: 0.33, green: 0.06, blue: 0.09)
+                            .opacity(0.52 * tone)),
+                           style: StrokeStyle(lineWidth: 0.7, lineCap: .round))
+        }
+        context.fill(Path(ellipseIn: CGRect(x: center.x - r * 0.17, y: center.y - r * 0.17,
+                                            width: r * 0.34, height: r * 0.34)),
+                     with: .color(Color(red: 0.36, green: 0.06, blue: 0.09)
+                        .opacity(0.86 * tone)))
     }
 }
 
@@ -748,45 +918,71 @@ enum InkForeground {
     /// 樹明明比山近。搬到前面之後，花枝是垂在照片上的。
     static func plumBranch(_ context: inout GraphicsContext, _ size: CGSize,
                            density: Double) {
-        let ink = Color.black.opacity(0.66 * density)
-        var trunk = Path()
-        trunk.move(to: CGPoint(x: size.width * 1.02, y: size.height * 0.015))
-        trunk.addCurve(to: CGPoint(x: size.width * 0.62, y: size.height * 0.185),
-                       control1: CGPoint(x: size.width * 0.92, y: size.height * 0.045),
-                       control2: CGPoint(x: size.width * 0.78, y: size.height * 0.075))
-        context.stroke(trunk, with: .color(ink),
-                       style: StrokeStyle(lineWidth: 3.8, lineCap: .round))
+        // [v25.495] 枝子改成會收鋒的筆畫。
+        //
+        // 上一版是三條等粗的 stroke 加七個正紅圓點——真機上看就是一張
+        // 流程圖：直徑一樣、顏色一樣、邊緣硬的圓，沒有一樣是毛筆做得出來的。
+        // 現在幹從根部 7pt 收到梢 1pt，花改成五瓣帶蕊、大小與角度各不相同。
+        let ink = Color.black.opacity(0.70 * density)
+        let w = size.width
+        let h = size.height
 
-        var branch1 = Path()
-        branch1.move(to: CGPoint(x: size.width * 0.86, y: size.height * 0.068))
-        branch1.addQuadCurve(to: CGPoint(x: size.width * 0.805, y: size.height * 0.225),
-                             control: CGPoint(x: size.width * 0.87, y: size.height * 0.155))
-        context.stroke(branch1, with: .color(ink.opacity(0.82)),
-                       style: StrokeStyle(lineWidth: 1.8, lineCap: .round))
+        // 主幹：從畫面外伸進來，越往裡越細
+        InkBrush.taper(&context,
+                       from: CGPoint(x: w * 1.04, y: h * 0.008),
+                       control1: CGPoint(x: w * 0.93, y: h * 0.048),
+                       control2: CGPoint(x: w * 0.78, y: h * 0.072),
+                       to: CGPoint(x: w * 0.60, y: h * 0.195),
+                       startWidth: 7.0, endWidth: 1.1, color: ink, steps: 30)
 
-        var branch2 = Path()
-        branch2.move(to: CGPoint(x: size.width * 0.73, y: size.height * 0.132))
-        branch2.addQuadCurve(to: CGPoint(x: size.width * 0.675, y: size.height * 0.058),
-                             control: CGPoint(x: size.width * 0.675, y: size.height * 0.105))
-        context.stroke(branch2, with: .color(ink.opacity(0.82)),
-                       style: StrokeStyle(lineWidth: 1.6, lineCap: .round))
+        // 往下垂的側枝
+        InkBrush.taper(&context,
+                       from: CGPoint(x: w * 0.875, y: h * 0.060),
+                       control1: CGPoint(x: w * 0.885, y: h * 0.120),
+                       control2: CGPoint(x: w * 0.845, y: h * 0.180),
+                       to: CGPoint(x: w * 0.795, y: h * 0.238),
+                       startWidth: 3.2, endWidth: 0.6, color: ink.opacity(0.88))
 
-        // 梅花：一個紅圓加一點深色花心就夠，五瓣畫出來在這個尺寸只會糊成一團
-        let blossoms: [(CGFloat, CGFloat, CGFloat)] = [
-            (0.665, 0.055, 5.2), (0.715, 0.122, 4.4), (0.800, 0.222, 4.8),
-            (0.848, 0.115, 3.8), (0.888, 0.060, 4.6), (0.805, 0.070, 3.4),
-            (0.760, 0.168, 3.6)
+        // 往上翹的側枝（梅的枝一定有往上衝的那一條，全部下垂就是柳）
+        InkBrush.taper(&context,
+                       from: CGPoint(x: w * 0.745, y: h * 0.126),
+                       control1: CGPoint(x: w * 0.688, y: h * 0.108),
+                       control2: CGPoint(x: w * 0.676, y: h * 0.078),
+                       to: CGPoint(x: w * 0.662, y: h * 0.044),
+                       startWidth: 2.8, endWidth: 0.5, color: ink.opacity(0.88))
+
+        // 小枝：短、細、方向亂一點
+        InkBrush.taper(&context,
+                       from: CGPoint(x: w * 0.818, y: h * 0.088),
+                       control1: CGPoint(x: w * 0.845, y: h * 0.070),
+                       control2: CGPoint(x: w * 0.872, y: h * 0.056),
+                       to: CGPoint(x: w * 0.902, y: h * 0.040),
+                       startWidth: 1.9, endWidth: 0.4, color: ink.opacity(0.75))
+
+        // 花：半徑、轉角、濃淡都不一樣。花苞（小而濃）混在裡面，
+        // 整枝才有「開到一半」的樣子——全部盛開是塑膠花。
+        let blossoms: [(CGFloat, CGFloat, CGFloat, Double, Double)] = [
+            (0.662, 0.044, 6.2, 0.4, 1.00),
+            (0.716, 0.124, 5.0, 1.9, 0.92),
+            (0.795, 0.238, 5.6, 2.7, 0.96),
+            (0.852, 0.112, 4.3, 0.9, 0.85),
+            (0.902, 0.040, 5.4, 3.5, 0.90),
+            (0.812, 0.068, 3.6, 1.3, 0.78),
+            (0.762, 0.170, 4.0, 2.2, 0.88)
         ]
-        for (ux, uy, r) in blossoms {
-            let center = CGPoint(x: size.width * ux, y: size.height * uy)
-            context.fill(
-                Path(ellipseIn: CGRect(x: center.x - r, y: center.y - r,
-                                       width: r * 2, height: r * 2)),
-                with: .color(Color(red: 0.78, green: 0.16, blue: 0.22).opacity(0.88)))
-            context.fill(
-                Path(ellipseIn: CGRect(x: center.x - r * 0.28, y: center.y - r * 0.28,
-                                       width: r * 0.56, height: r * 0.56)),
-                with: .color(.black.opacity(0.45)))
+        for (ux, uy, r, rotation, tone) in blossoms {
+            InkBrush.plumBlossom(&context, at: CGPoint(x: w * ux, y: h * uy),
+                                 radius: r, rotation: rotation, tone: tone * density)
+        }
+
+        // 花苞：兩個，小小一點紅，枝梢上
+        for (ux, uy, r) in [(CGFloat(0.638), CGFloat(0.168), CGFloat(2.4)),
+                            (CGFloat(0.868), CGFloat(0.168), CGFloat(2.0))] {
+            let c = CGPoint(x: w * ux, y: h * uy)
+            context.fill(Path(ellipseIn: CGRect(x: c.x - r, y: c.y - r,
+                                                width: r * 2, height: r * 2)),
+                         with: .color(Color(red: 0.66, green: 0.12, blue: 0.18)
+                            .opacity(0.80 * density)))
         }
     }
 
@@ -819,7 +1015,10 @@ enum InkForeground {
     static func nearPetals(_ context: inout GraphicsContext, _ size: CGSize, time: Double) {
         var random = InkRandom(90210)
         context.drawLayer { layer in
-            layer.addFilter(.blur(radius: 1.2))
+            // [v25.495] 模糊從 1.2 降到 0.5。原本的糊度加上橢圓形狀，
+            // 在真機上就是四團紅色污漬——近景要的是「快到看不清」，
+            // 不是「髒」，所以形狀改成有尖端的花瓣，糊度拿掉大半。
+            layer.addFilter(.blur(radius: 0.5))
             for i in 0..<4 {
                 let startX = random.next()
                 let phase = random.next()
@@ -829,15 +1028,14 @@ enum InkForeground {
                 let y = CGFloat(cycle) * size.height * 1.12 - size.height * 0.06
                 let sway = CGFloat(sin(time * 0.8 + Double(i) * 1.9) * 26)
                 let x = CGFloat(0.5 + startX * 0.48) * size.width + sway
-                let r = 4.6 + CGFloat(speedSeed) * 3.0
+                let r = 4.0 + CGFloat(speedSeed) * 2.6
                 let fade = cycle > 0.86 ? (1 - (cycle - 0.86) / 0.14) : 1
-                let petal = Path(ellipseIn: CGRect(x: -r, y: -r * 0.58,
-                                                   width: r * 2, height: r * 1.16))
+                let petal = InkBrush.petalPath(length: r * 2, width: r * 0.95)
                     .applying(CGAffineTransform(rotationAngle: time * 1.1 + Double(i) * 0.8)
                         .concatenating(CGAffineTransform(translationX: x, y: y)))
                 layer.fill(petal,
-                           with: .color(Color(red: 0.76, green: 0.24, blue: 0.30)
-                            .opacity(0.42 * fade)))
+                           with: .color(Color(red: 0.74, green: 0.20, blue: 0.26)
+                            .opacity(0.52 * fade)))
             }
         }
     }
@@ -850,31 +1048,54 @@ enum InkForeground {
     /// 看畫的人是蹲在岸邊看出去的。
     static func reeds(_ context: inout GraphicsContext, _ size: CGSize,
                       time: Double, density: Double) {
+        // [v25.495] 每一根都改成收鋒的筆畫，高度與粗細用亂數拉開。
+        //
+        // 上一版是等粗 1.3pt 的線，一叢裡每根只差 0.045 的高度——真機上
+        // 看起來是一排刮痕，不是草。草的重點就在「沒有兩根一樣高」。
         let clusters: [(CGFloat, CGFloat, Int)] = [
-            (0.06, 1.0, 5), (0.17, 0.82, 4), (0.88, 0.95, 5), (0.78, 0.74, 3)
+            (0.05, 1.05, 7), (0.17, 0.80, 5), (0.33, 0.58, 4),
+            (0.90, 1.00, 7), (0.78, 0.76, 5), (0.64, 0.54, 3)
         ]
         for (ux, scale, count) in clusters {
+            var random = InkRandom(Int(ux * 1000) + count)
             let baseX = size.width * ux
             for i in 0..<count {
-                let offset = CGFloat(i - count / 2) * 7 * scale
-                let height = size.height * (0.13 + 0.045 * CGFloat(i % 3)) * scale
-                let sway = CGFloat(sin(time * 0.6 + Double(i) * 0.9 + Double(ux) * 6) * 7) * scale
-                let bottom = CGPoint(x: baseX + offset, y: size.height + 4)
-                let top = CGPoint(x: bottom.x + sway, y: size.height - height)
-                var stem = Path()
-                stem.move(to: bottom)
-                stem.addQuadCurve(to: top,
-                                  control: CGPoint(x: bottom.x + sway * 0.3,
-                                                   y: size.height - height * 0.45))
-                context.stroke(stem, with: .color(.black.opacity(0.52 * density)),
-                               style: StrokeStyle(lineWidth: 1.3 * scale, lineCap: .round))
-                // 穗
-                var head = Path()
-                head.move(to: top)
-                head.addQuadCurve(to: CGPoint(x: top.x + sway * 0.25, y: top.y - 11 * scale),
-                                  control: CGPoint(x: top.x + 4 * scale, y: top.y - 6 * scale))
-                context.stroke(head, with: .color(.black.opacity(0.42 * density)),
-                               style: StrokeStyle(lineWidth: 2.6 * scale, lineCap: .round))
+                let spread = CGFloat(random.next() * 2 - 1) * 16 * scale
+                // 高度拉到 0.10～0.24，差距夠大才像一叢草
+                let height = size.height * CGFloat(0.10 + random.next() * 0.14) * scale
+                let lean = CGFloat(random.next() * 2 - 1) * 18 * scale
+                let sway = CGFloat(sin(time * 0.55 + random.next() * 6 + Double(ux) * 9)
+                                   * (5 + 6 * random.next())) * scale
+                let bottom = CGPoint(x: baseX + spread, y: size.height + 6)
+                let top = CGPoint(x: bottom.x + lean + sway, y: size.height - height)
+                let tone = 0.34 + random.next() * 0.26
+                InkBrush.taper(&context,
+                               from: bottom,
+                               control1: CGPoint(x: bottom.x + lean * 0.15,
+                                                y: size.height - height * 0.42),
+                               control2: CGPoint(x: bottom.x + lean * 0.65 + sway * 0.5,
+                                                y: size.height - height * 0.78),
+                               to: top,
+                               startWidth: (2.2 + CGFloat(random.next()) * 1.2) * scale,
+                               endWidth: 0.35 * scale,
+                               color: .black.opacity(tone * density))
+
+                // 穗：兩三筆往同一邊散開，不是一根棒子
+                let plume = 2 + Int(random.next() * 2)
+                for k in 0..<plume {
+                    let fan = CGFloat(k) - CGFloat(plume - 1) / 2
+                    let tip = CGPoint(x: top.x + fan * 4 * scale + sway * 0.3,
+                                      y: top.y - CGFloat(9 + random.next() * 7) * scale)
+                    InkBrush.taper(&context,
+                                   from: top,
+                                   control1: CGPoint(x: top.x + fan * 1.5 * scale,
+                                                    y: top.y - 4 * scale),
+                                   control2: CGPoint(x: tip.x - fan * 0.8 * scale,
+                                                    y: tip.y + 3 * scale),
+                                   to: tip,
+                                   startWidth: 2.0 * scale, endWidth: 0.3 * scale,
+                                   color: .black.opacity(tone * 0.8 * density))
+                }
             }
         }
     }

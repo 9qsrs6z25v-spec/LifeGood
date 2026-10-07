@@ -191,6 +191,46 @@ struct MusicPickerSheet: UIViewControllerRepresentable {
 
 // MARK: - 幻燈片本體
 
+/// 播放順序（v25.495）。
+///
+/// 三種順序講的是三種看相簿的方式，不是三種排序演算法：
+/// 逐站是「再走一次這趟行程」，新增時間是「照拍的先後重看一遍」，
+/// 隨機是「讓我忘掉的那幾張自己冒出來」。
+enum SlideshowOrder: String, CaseIterable, Identifiable {
+    /// 照相簿畫面上的分組順序（依地點或月份攤平）
+    case station
+    /// 照檔案進到手機裡的先後
+    case added
+    /// 隨機
+    case shuffled
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .station:  return "逐站播放"
+        case .added:    return "依新增時間"
+        case .shuffled: return "隨機"
+        }
+    }
+
+    var detail: String {
+        switch self {
+        case .station:  return "照相簿上的分組，一站一站走完"
+        case .added:    return "照存進手機的先後，重走一次時間軸"
+        case .shuffled: return "每次播的順序都不一樣"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .station:  return "signpost.right.fill"
+        case .added:    return "clock.fill"
+        case .shuffled: return "shuffle"
+        }
+    }
+}
+
 struct PhotoSlideshowView: View {
     let items: [AlbumPhotoItem]
     var title: String = "相本"
@@ -225,6 +265,23 @@ struct PhotoSlideshowView: View {
     /// 跟拍模式（一個可以連點的大區塊）
     @State private var tapMode = false
 
+    // [v25.495] 播放順序
+    /// 記住上次選的，下次開啟直接是那一個
+    @AppStorage("slideshow_order") private var orderRaw = SlideshowOrder.station.rawValue
+    /// 排好順序的播放清單。畫面上跑的是這個，不是 items。
+    @State private var queue: [AlbumPhotoItem] = []
+    /// 還停在開場畫面（還沒按「開始播放」）
+    @State private var started = false
+
+    private var order: SlideshowOrder {
+        SlideshowOrder(rawValue: orderRaw) ?? .station
+    }
+
+    /// 載圖的觸發條件：第幾張、開始了沒、清單是哪一份
+    private var taskKey: String {
+        "\(index)#\(started)#\(queue.count)#\(queue.first?.id ?? "")"
+    }
+
     // [v25.490] 使用者定案：水墨山水 ＋ 水墨相框 ＋ 拼貼牆，其餘樣式全部移除。
     // 背景永遠是宣紙色的亮底，所以文字一律用深墨色。
     private var onBackdrop: Color { Color(red: 0.13, green: 0.13, blue: 0.15) }
@@ -243,8 +300,33 @@ struct PhotoSlideshowView: View {
     ]
 
     private var current: AlbumPhotoItem? {
-        guard items.indices.contains(index) else { return nil }
-        return items[index]
+        guard queue.indices.contains(index) else { return nil }
+        return queue[index]
+    }
+
+    /// 這張照片存進手機的時間。
+    ///
+    /// 不能用 AlbumPhotoItem.date——那是「紀錄的日期」（使用者填的那一天），
+    /// 同一天補進去的十張照片 date 全部一樣，排不出先後。檔案本身的建立時間
+    /// 才是真正的新增順序。
+    private static func addedAt(_ item: AlbumPhotoItem) -> Date {
+        let values = try? item.url.resourceValues(forKeys: [.creationDateKey])
+        return values?.creationDate ?? item.date
+    }
+
+    private func ordered(_ order: SlideshowOrder) -> [AlbumPhotoItem] {
+        switch order {
+        case .station:
+            return items
+        case .added:
+            // 先把時間讀出來再排。在比較函式裡讀檔的話，sort 會呼叫它
+            // O(n log n) 次，每一次都碰一下磁碟——幾百張照片就卡住了。
+            return items.map { ($0, Self.addedAt($0)) }
+                .sorted { $0.1 < $1.1 }
+                .map { $0.0 }
+        case .shuffled:
+            return items.shuffled()
+        }
     }
 
     // MARK: 卡點
@@ -281,15 +363,20 @@ struct PhotoSlideshowView: View {
         ZStack {
             Color.black.ignoresSafeArea()
             slide
-            scrim
-            if showChrome { chrome }
+            if started {
+                scrim
+                if showChrome { chrome }
+            } else {
+                startCard
+            }
         }
         .statusBarHidden(true)
         .contentShape(Rectangle())
-        .onTapGesture { toggleChrome() }
+        .onTapGesture { if started { toggleChrome() } }
         .gesture(
             DragGesture(minimumDistance: 30)
                 .onEnded { v in
+                    guard started else { return }
                     if v.translation.height > 80 { finish() }
                     else if v.translation.width < -50 { step(1) }
                     else if v.translation.width > 50 { step(-1) }
@@ -322,8 +409,11 @@ struct PhotoSlideshowView: View {
             chromeTask?.cancel()
             withAnimation(.easeOut(duration: 0.25)) { showChrome = true }
         }
-        .task(id: index) { await loadCurrent() }
-        .onAppear { start() }
+        // 清單換了順序、或剛按下開始，都要重跑一次：
+        // 只看 index 的話，開場畫面把 queue 排好之後 index 還是 0，
+        // task 不會再觸發，第一張就永遠載不進來。
+        .task(id: taskKey) { await loadCurrent() }
+        .onAppear { prepare() }
         .onDisappear {
             ticker?.cancel()
             chromeTask?.cancel()
@@ -348,12 +438,123 @@ struct PhotoSlideshowView: View {
         }
     }
 
+    // MARK: 開場（v25.495）
+
+    /// 按下播放之後先問一句「照什麼順序走」。
+    ///
+    /// 為什麼值得多一個畫面：順序決定了這本相簿講的是哪一個故事。
+    /// 逐站是行程、新增時間是時間軸、隨機是回憶。直接開播等於幫使用者
+    /// 決定了故事，而且事後沒有地方可以改。
+    ///
+    /// 這個畫面長在同一幅水墨上，不另外蓋一層黑底——開場與正片是同一幅畫，
+    /// 按下開始只是畫裡開始落照片而已。
+    private var startCard: some View {
+        VStack(spacing: 0) {
+            Spacer(minLength: 0)
+
+            Text(colophonTitle)
+                .font(.system(size: 26, weight: .semibold, design: .serif))
+                .foregroundStyle(onBackdrop)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 36)
+
+            Text("共 \(items.count) 張")
+                .font(.system(size: 13, weight: .medium, design: .serif))
+                .foregroundStyle(onBackdrop.opacity(0.55))
+                .padding(.top, 6)
+
+            VStack(spacing: 8) {
+                ForEach(SlideshowOrder.allCases) { option in
+                    orderRow(option)
+                }
+            }
+            .padding(.top, 26)
+            .padding(.horizontal, 26)
+
+            Button {
+                begin()
+            } label: {
+                Label("開始播放", systemImage: "play.fill")
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 50)
+                    .background(Capsule().fill(onBackdrop))
+            }
+            .padding(.top, 24)
+            .padding(.horizontal, 26)
+
+            HStack(spacing: 18) {
+                Button {
+                    showMusicPicker = true
+                } label: {
+                    Label(music.trackTitle ?? "選配樂", systemImage: "music.note")
+                        .font(.system(size: 13, weight: .semibold))
+                        .lineLimit(1)
+                }
+                Button("關閉") { dismiss() }
+                    .font(.system(size: 13, weight: .semibold))
+            }
+            .foregroundStyle(onBackdrop.opacity(0.7))
+            .padding(.top, 16)
+
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(
+            // 紙的顏色淡淡壓一層，字壓在山上才讀得到
+            Color(red: 0.96, green: 0.95, blue: 0.93).opacity(0.72)
+                .ignoresSafeArea())
+        .transition(.opacity)
+    }
+
+    private func orderRow(_ option: SlideshowOrder) -> some View {
+        let picked = option == order
+        return Button {
+            orderRaw = option.rawValue
+            queue = ordered(option)
+            index = 0
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: option.icon)
+                    .font(.system(size: 15, weight: .semibold))
+                    .frame(width: 24)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(option.label)
+                        .font(.system(size: 15, weight: .semibold))
+                    Text(option.detail)
+                        .font(.system(size: 11))
+                        .foregroundStyle(onBackdrop.opacity(0.55))
+                }
+                Spacer(minLength: 0)
+                Image(systemName: picked ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 17))
+                    .foregroundStyle(picked ? onBackdrop : onBackdrop.opacity(0.25))
+            }
+            .foregroundStyle(onBackdrop)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 11)
+            .background(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(Color.black.opacity(picked ? 0.08 : 0.03))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .stroke(Color.black.opacity(picked ? 0.30 : 0.10),
+                                    lineWidth: picked ? 1.2 : 0.8)))
+        }
+        .buttonStyle(.plain)
+    }
+
     /// [v25.492] 題款與鈐印。
     ///
     /// 這是畫的一部分，不是控制列——所以收起控制列之後它還在。
     /// 中國畫的三件套是「畫、題款、印」，少了後面兩個，再像水墨也只是背景圖。
     private var colophon: some View {
         InkColophon(title: colophonTitle, dateText: colophonDate)
+            // [v25.495] 墊一層紙色的光暈。落點已經讓開左邊這一欄了，
+            // 但卡片會旋轉、會抖動，萬一邊角飄過來，字還讀得到。
+            .shadow(color: Color(red: 0.96, green: 0.95, blue: 0.93).opacity(0.95),
+                    radius: 7)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .padding(.leading, 18)
             .padding(.top, 92)
@@ -648,6 +849,22 @@ struct PhotoSlideshowView: View {
 
     // MARK: 流程
 
+    /// 開場畫面要用的東西：排好清單、把上次的歌讀回來。
+    /// 這裡**不**開計時器——還沒按開始，照片不該自己往下跑。
+    private func prepare() {
+        queue = ordered(order)
+        music.refreshRemembered()
+    }
+
+    private func begin() {
+        queue = ordered(order)
+        index = 0
+        withAnimation(.easeOut(duration: 0.4)) { started = true }
+        // 開場畫面期間第一張就先解好了，這裡把它放上牆
+        if let img = image { pushToWall(img) }
+        start()
+    }
+
     private func start() {
         playing = true
         restartTimer()
@@ -672,14 +889,17 @@ struct PhotoSlideshowView: View {
     }
 
     private func resume() {
-        playing = true
         music.resume()
+        // 還停在開場畫面就不要開計時器——不然選完歌回來，
+        // 照片會在那張問順序的紙後面自己跑掉好幾張。
+        guard started else { return }
+        playing = true
         restartTimer()
     }
 
     private func step(_ delta: Int) {
         let next = index + delta
-        guard items.indices.contains(next) else {
+        guard queue.indices.contains(next) else {
             if delta > 0 { finish() }      // 播完就結束
             return
         }
@@ -893,12 +1113,14 @@ struct PhotoSlideshowView: View {
         } else {
             image = await FullImageCache.shared.load(item.url)
         }
-        if let img = image { pushToWall(img) }
+        // 還在開場畫面就先不要上牆——那一下淡入會被開場的紙蓋住，
+        // 等於白白用掉了第一張最好看的進場。改由 begin() 放上去。
+        if started, let img = image { pushToWall(img) }
         // 接下來兩張先解好，換場才不會卡一下
         FullImageCache.shared.prefetch(
             [index + 1, index + 2]
-                .filter { items.indices.contains($0) }
-                .map { items[$0].url })
+                .filter { queue.indices.contains($0) }
+                .map { queue[$0].url })
     }
 
     /// [v25.489] 把這一張放上拼貼牆。
