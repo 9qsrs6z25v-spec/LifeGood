@@ -1195,8 +1195,13 @@ struct TripPlanDetailView: View {
                 var random = InkRandom(40127)
                 var x: CGFloat = size.width * 0.06
                 while x < size.width - 5 {
-                    let w = 2 + CGFloat(random.next()) * 3.5
-                    let h = 2 + CGFloat(random.next()) * 8
+                    // [v25.507] 寬度與高度的變化都拉大。上一版兩者都太平均，
+                    // 看起來像一張長條圖——而長條圖會讓人以為那是資料。
+                    // 天際線之所以是天際線，就在於它高低寬窄都不講道理。
+                    let w = 1.5 + CGFloat(random.next()) * 6
+                    let roll = random.next()
+                    let tall = roll > 0.84 ? 1.0 : (roll > 0.5 ? 0.55 : 0.28)
+                    let h = 1.5 + CGFloat(tall) * CGFloat(random.next()) * 11
                     // 越往右越淡，跟地平線一起消失在遠方
                     let fade = 1 - Double(x / max(size.width, 1)) * 0.9
                     context.fill(Path(CGRect(x: x, y: baseY - h, width: w, height: h)),
@@ -1506,6 +1511,9 @@ struct TripPlanDetailView: View {
             leading: { timeColumn },
             accessory: { stopAccessory(slot) }
         )
+        .background { stopArtLayer(slot, color: c) }
+        // 幽靈編號比列還高，不裁掉會溢到上下兩站去
+        .clipped()
         .padding(.horizontal, 16)
         // [v25.479] 整列是放置目標：把別站拖過來就插在這一站的位置
         .dropDestination(for: String.self) { items, _ in
@@ -1548,6 +1556,37 @@ struct TripPlanDetailView: View {
         // 圓圈沒有基線，跟多行標題放在同一個 .top 的 HStack 裡會貼齊頂端，
         // 看起來比第一行的字高一點點。往下推 1pt 就對上了。
         .padding(.top, 1)
+    }
+
+    /// 一站底下那一層（v25.507）。
+    ///
+    /// 這一列的右半邊本來是空的——名字、地址、膠囊都靠左，右邊一路空到
+    /// 「…」底下。空白本身沒有錯，但它是**沒有被安排過**的空白：
+    /// 不是留白，只是沒東西。
+    ///
+    /// 放進去的是兩樣都有意義的東西，不是圖案：
+    ///
+    /// 1. **幽靈編號**。這一站的序號放大到六十幾點、壓到 0.06 的濃度沉在底下。
+    ///    海報與雜誌的跨頁常用這一招（大數字當版面的錨），它同時回答了
+    ///    「我捲到第幾站了」——左上角那顆小圓圈要瞇著眼睛才看得到。
+    /// 2. **打卡過的站會透出光**。軌道的顏色從左緣往右暈開一小段。
+    ///    那是「這一站已經走過了」的視覺證據，而且光從軌道來——
+    ///    跟那條會發光的主幹是同一個光源，不是另外加的裝飾。
+    ///
+    /// 兩樣都在 0.06～0.085 之間。再亮一點就會開始跟內容搶，那就不是底層了。
+    @ViewBuilder
+    private func stopArtLayer(_ slot: TripPlan.Slot, color c: Color) -> some View {
+        ZStack(alignment: .trailing) {
+            if slot.isActualArrival || slot.isActualDeparture {
+                LinearGradient(colors: [c.opacity(0.085), .clear],
+                               startPoint: .leading, endPoint: .trailing)
+            }
+            Text("\(slot.index + 1)")
+                .font(.system(size: 62, weight: .black, design: .rounded))
+                .foregroundStyle(c.opacity(0.06))
+                .padding(.trailing, 4)
+        }
+        .allowsHitTesting(false)
     }
 
     /// 景點列右側：拖曳把手 ＋「…」選單
