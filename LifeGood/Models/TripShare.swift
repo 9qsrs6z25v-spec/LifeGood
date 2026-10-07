@@ -185,6 +185,11 @@ enum TripShare {
         }
         let address = stop.address.trimmingCharacters(in: .whitespaces)
         if !address.isEmpty { out.append(address) }
+        // [v25.500] 電話跟著一起分享。分享行程最常見的情境就是傳給開車的那個人，
+        // 而在日本他要輸進車機的正是這一串數字。
+        if let raw = stop.phone, !raw.trimmingCharacters(in: .whitespaces).isEmpty {
+            out.append("☎ " + TripPhone.navDigits(raw))
+        }
         if !stop.subSpots.isEmpty {
             out.append("子地點：" + stop.subSpots.map { s in
                 let n = s.name.trimmingCharacters(in: .whitespaces)
@@ -246,6 +251,9 @@ enum TripShare {
         }
         let address = slot.stop.address.trimmingCharacters(in: .whitespaces)
         if !address.isEmpty { lines.append("       " + address) }
+        if let raw = slot.stop.phone, !raw.trimmingCharacters(in: .whitespaces).isEmpty {
+            lines.append("       ☎ " + TripPhone.navDigits(raw))
+        }
         if !slot.stop.subSpots.isEmpty {
             lines.append("       ・" + slot.stop.subSpots.map { s in
                 let n = s.name.trimmingCharacters(in: .whitespaces)

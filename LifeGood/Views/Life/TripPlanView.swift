@@ -379,6 +379,17 @@ struct TripPlanDetailView: View {
                             } label: {
                                 Label("分享成圖片…", systemImage: "photo")
                             }
+                            Divider()
+                            // [v25.500] 電話是這一版才開始存的，而使用者手上
+                            // 那趟行程已經排了三十幾站。一站一站重新挑地點
+                            // 才拿得到電話是不合理的，所以給一個整趟補的。
+                            Button {
+                                Task { await fillMissingPhones() }
+                            } label: {
+                                Label(fillingPhones ? "正在查電話…" : "補齊所有電話",
+                                      systemImage: "phone.badge.plus")
+                            }
+                            .disabled(fillingPhones)
                         } label: {
                             Image(systemName: "square.and.arrow.up").foregroundStyle(accent)
                         }
@@ -387,6 +398,13 @@ struct TripPlanDetailView: View {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("設定") { showSettings = true }.bold()
                 }
+            }
+            .overlay(alignment: .bottom) { bannerStrip }
+            .task(id: banner) {
+                guard banner != nil else { return }
+                try? await Task.sleep(nanoseconds: 1_800_000_000)
+                guard !Task.isCancelled else { return }
+                withAnimation(.easeOut(duration: 0.25)) { banner = nil }
             }
             .sheet(isPresented: $showSettings) {
                 if let p = plan {
@@ -1489,6 +1507,22 @@ struct TripPlanDetailView: View {
                         slot.stop.address.trimmingCharacters(in: .whitespaces)
                 }
             }
+            // [v25.500] 日本車機用電話找目的地，所以「拷貝電話」跟「拷貝地址」
+            // 是同一層的動作，不是藏在聯絡資訊裡的附加功能。
+            if let raw = slot.stop.phone,
+               !raw.trimmingCharacters(in: .whitespaces).isEmpty {
+                Button("拷貝電話（車機導航用）") {
+                    let digits = TripPhone.navDigits(raw)
+                    UIPasteboard.general.string = digits
+                    banner = "已複製 " + digits
+                }
+                Button("撥打電話") {
+                    let dial = TripPhone.dialDigits(raw)
+                    if let url = URL(string: "tel://" + dial) {
+                        UIApplication.shared.open(url)
+                    }
+                }
+            }
             Divider()
             Button("刪除", role: .destructive) { removingStop = slot.stop }
         } label: {
@@ -1627,9 +1661,78 @@ struct TripPlanDetailView: View {
         )
     }
 
+    @ViewBuilder
+    private var bannerStrip: some View {
+        if let banner {
+            Text(banner)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 14).padding(.vertical, 8)
+                .background(Capsule().fill(Color.black.opacity(0.82)))
+                .padding(.bottom, 24)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+                .allowsHitTesting(false)
+        }
+    }
+
+    /// 替整趟行程裡還沒有電話的站補上。
+    ///
+    /// 一次查一站，查完才查下一站：三十幾個 MKLocalSearch 同時打出去會被
+    /// Apple 節流，結果是大部分都查不到。慢一點但補得齊。
+    ///
+    /// 每補一筆就重讀一次行程才寫回去——查詢要花好幾秒，這期間使用者可能
+    /// 還在改行程，拿一開始那份舊的整包蓋回去會把他剛做的事抹掉。
+    @MainActor
+    private func fillMissingPhones() async {
+        guard !fillingPhones, let snapshot = plan else { return }
+        fillingPhones = true
+        defer { fillingPhones = false }
+
+        let targets = snapshot.stops.filter {
+            !$0.hasPhone && $0.coordinate != nil
+                && !$0.name.trimmingCharacters(in: .whitespaces).isEmpty
+        }
+        guard !targets.isEmpty else {
+            banner = "每一站都已經有電話了"
+            return
+        }
+
+        var filled = 0
+        for (i, stop) in targets.enumerated() {
+            banner = "正在查電話… \(i + 1) / \(targets.count)"
+            guard let coordinate = stop.coordinate else { continue }
+            guard let found = await TripPhoneLookup.phone(
+                name: stop.name.trimmingCharacters(in: .whitespaces),
+                coordinate: coordinate) else { continue }
+            guard var latest = lifeStore.tripPlan(id: planId),
+                  let idx = latest.stops.firstIndex(where: { $0.id == stop.id })
+            else { continue }
+            latest.stops[idx].phone = found
+            lifeStore.upsertTripPlan(latest)
+            filled += 1
+        }
+        // 查不到就說查不到。Apple 地圖沒有的電話，我編不出來。
+        banner = filled == 0
+            ? "這 \(targets.count) 站都查不到電話"
+            : "補上了 \(filled) 支電話（共查 \(targets.count) 站）"
+    }
+
     private func stopChips(_ slot: TripPlan.Slot) -> [ItemChip] {
         let c = TripDayPalette.color(slot.dayIndex)
         var chips: [ItemChip] = []
+        // [v25.500] 電話。顯示的是**車機要輸入的那一種寫法**（純數字、國碼
+        // 換回開頭的 0），不是 Apple 給的國際格式——輸 +81 車機找不到。
+        // 點一下就複製，因為它的用途就是「打進車機裡」。
+        if let raw = slot.stop.phone,
+           !raw.trimmingCharacters(in: .whitespaces).isEmpty {
+            let digits = TripPhone.navDigits(raw)
+            chips.append(ItemChip(id: "phone", text: digits, color: .blue,
+                                  icon: "phone.fill",
+                                  onTap: {
+                                      UIPasteboard.general.string = digits
+                                      banner = "已複製 " + digits
+                                  }))
+        }
         if slot.dayIndex > 0 {
             chips.append(ItemChip(id: "day", text: "第 \(slot.dayIndex + 1) 天",
                                   color: c, icon: "sun.horizon"))
@@ -1740,6 +1843,12 @@ struct TripPlanDetailView: View {
                     ? "（沒有備註）" : sub.note)
         }
     }
+
+    /// 畫面下方那一行短暫的回饋（複製了什麼、補了幾支電話）。
+    /// 沒有回饋的複製等於沒發生——使用者會再按一次，然後懷疑它壞了。
+    @State private var banner: String?
+    /// 正在替整趟行程補電話
+    @State private var fillingPhones = false
 
     /// 這一段的交通方式。從時間軸直接改，不必開編輯畫面——
     /// 「這段走過去就好」是排行程時很常做的微調。
@@ -1971,6 +2080,10 @@ struct TripStopEditorSheet: View {
     @State private var address = ""
     @State private var latitude: Double?
     @State private var longitude: Double?
+    /// [v25.500] 電話。在日本這是導航欄位——見 TripStop.phone
+    @State private var phone = ""
+    /// 正在向 Apple 地圖查這個地方的電話
+    @State private var lookingUpPhone = false
     @State private var dwellMinutes = 60
     /// 指定抵達時間（關閉＝由上一站推算）
     @State private var hasArrivalTime = false
@@ -2041,12 +2154,33 @@ struct TripStopEditorSheet: View {
                         }
                     }
                     TextField("地址", text: $address)
+                    // [v25.500] 電話。
+                    //
+                    // 擺在地址正下方，因為在日本它們是同一件事的兩種寫法——
+                    // 而且車機只吃得下其中一種。日文地址在車機的鍵盤上幾乎
+                    // 打不出來，當地的做法是輸入電話號碼，機器直接定位。
+                    HStack(spacing: 8) {
+                        TextField("電話（日本車機導航用）", text: $phone)
+                            .keyboardType(.phonePad)
+                            .textContentType(.telephoneNumber)
+                        if lookingUpPhone {
+                            ProgressView().scaleEffect(0.7)
+                        } else if phone.trimmingCharacters(in: .whitespaces).isEmpty,
+                                  latitude != nil {
+                            // 這一站是以前排的（那時候還不會存電話），
+                            // 給一個按鈕現在補回來，不用重新挑一次地點
+                            Button("查詢") { lookUpPhone() }
+                                .font(.caption.weight(.semibold))
+                                .buttonStyle(.plain)
+                                .foregroundStyle(accent)
+                        }
+                    }
                     MapPlacePickerButton(
                         startCoordinate: mapPickerStart,
                         hasCoordinate: latitude != nil,
                         accent: accent,
-                        onPick: { picked, addr, coord in
-                            applyPickedLocation(name: picked, address: addr, coordinate: coord)
+                        onPick: { place in
+                            applyPickedLocation(place)
                         },
                         onClear: { latitude = nil; longitude = nil })
                     if !fill.offer.isEmpty {
@@ -2214,6 +2348,7 @@ struct TripStopEditorSheet: View {
                 guard let e = editing else { return }
                 name = e.name; address = e.address
                 latitude = e.latitude; longitude = e.longitude
+                phone = e.phone ?? ""
                 dwellMinutes = e.dwellMinutes; note = e.note
                 photoFileNames = e.photoFileNames; subSpots = e.subSpots
                 legMode = e.legModeOverride
@@ -2444,11 +2579,17 @@ struct TripStopEditorSheet: View {
 
     /// 地圖上挑到一個位置。座標一定跟著換（使用者就是為了定位才來的），
     /// 名稱與地址則看欄位裡現在那個字是誰打的。
-    private func applyPickedLocation(name picked: String?, address addr: String,
-                                     coordinate: CLLocationCoordinate2D) {
-        latitude = coordinate.latitude
-        longitude = coordinate.longitude
-        fill.apply(name: picked, address: addr, into: $name, addressField: $address)
+    private func applyPickedLocation(_ place: PickedPlace) {
+        latitude = place.coordinate.latitude
+        longitude = place.coordinate.longitude
+        // 地圖上挑到的地標帶電話就收下。已經填過的不覆蓋——
+        // 使用者可能自己打了分機或訂位專線。
+        if let picked = place.phone, !picked.isEmpty,
+           phone.trimmingCharacters(in: .whitespaces).isEmpty {
+            phone = picked
+        }
+        fill.apply(name: place.name, address: place.address,
+                   into: $name, addressField: $address)
         // 帶入名稱會觸發地圖搜尋建議，這裡先把待送出的查詢與既有建議清掉
         searchDebounce?.cancel()
         completer.queryFragment = ""
@@ -2489,11 +2630,36 @@ struct TripStopEditorSheet: View {
                 let pm = item.placemark
                 latitude = pm.coordinate.latitude
                 longitude = pm.coordinate.longitude
+                if let found = item.phoneNumber, !found.isEmpty,
+                   phone.trimmingCharacters(in: .whitespaces).isEmpty {
+                    phone = found
+                }
                 fill.apply(name: nil,
                            address: [pm.postalCode, pm.administrativeArea, pm.locality,
                                      pm.thoroughfare, pm.subThoroughfare]
                             .compactMap { $0 }.joined(),
                            into: $name, addressField: $address)
+            }
+        }
+    }
+
+    /// 替這一站補上電話。
+    ///
+    /// 以前排的行程沒有存電話（那時候還沒有這個欄位），而一趟日本行程常常
+    /// 有三、四十站，要使用者一站一站重新挑地點是不合理的。這裡用已經存著的
+    /// 座標與名稱去問一次 Apple 地圖——它本來就知道，只是以前沒跟它要。
+    private func lookUpPhone() {
+        guard !lookingUpPhone, let latitude, let longitude else { return }
+        let target = name.trimmingCharacters(in: .whitespaces)
+        guard !target.isEmpty else { return }
+        lookingUpPhone = true
+        Task {
+            let found = await TripPhoneLookup.phone(
+                name: target,
+                coordinate: CLLocationCoordinate2D(latitude: latitude, longitude: longitude))
+            await MainActor.run {
+                lookingUpPhone = false
+                if let found { phone = found }
             }
         }
     }
@@ -2514,6 +2680,8 @@ struct TripStopEditorSheet: View {
         stop.address = address.trimmingCharacters(in: .whitespaces)
         stop.latitude = latitude
         stop.longitude = longitude
+        let trimmedPhone = phone.trimmingCharacters(in: .whitespaces)
+        stop.phone = trimmedPhone.isEmpty ? nil : trimmedPhone
         stop.dwellMinutes = max(0, dwellMinutes)
         // 交通方式換了就把這一段的路線快取作廢（下面統一清 legStamp 時會處理，
         // 這裡只負責存值）
@@ -2699,15 +2867,24 @@ struct TripSubSpotEditView: View {
                     }
                 }
                 TextField("地址", text: $sub.address)
+                TextField("電話（日本車機導航用）",
+                          text: Binding(get: { sub.phone ?? "" },
+                                        set: { sub.phone = $0.isEmpty ? nil : $0 }))
+                    .keyboardType(.phonePad)
+                    .textContentType(.telephoneNumber)
                 MapPlacePickerButton(
                     startCoordinate: mapPickerStart,
                     hasCoordinate: sub.latitude != nil,
                     accent: accent,
                     subtitle: "老街裡的某一攤、園區裡的某個館，點地圖最快",
-                    onPick: { picked, addr, coord in
-                        sub.latitude = coord.latitude
-                        sub.longitude = coord.longitude
-                        fill.apply(name: picked, address: addr,
+                    onPick: { place in
+                        sub.latitude = place.coordinate.latitude
+                        sub.longitude = place.coordinate.longitude
+                        if let picked = place.phone, !picked.isEmpty,
+                           (sub.phone ?? "").isEmpty {
+                            sub.phone = picked
+                        }
+                        fill.apply(name: place.name, address: place.address,
                                    into: $sub.name, addressField: $sub.address)
                         searchDebounce?.cancel()
                         completer.queryFragment = ""
@@ -2785,6 +2962,9 @@ struct TripSubSpotEditView: View {
                 let pm = item.placemark
                 sub.latitude = pm.coordinate.latitude
                 sub.longitude = pm.coordinate.longitude
+                if let found = item.phoneNumber, !found.isEmpty, (sub.phone ?? "").isEmpty {
+                    sub.phone = found
+                }
                 fill.apply(name: nil,
                            address: [pm.postalCode, pm.administrativeArea, pm.locality,
                                      pm.thoroughfare, pm.subThoroughfare]

@@ -25,6 +25,20 @@ import UIKit
 /// 用「地圖動、準心不動」而不是「點一下放大頭針」：
 /// 手指點下去的位置會被自己的手指擋住，挪地圖才能看著目標對準；
 /// 而且這個做法不必把畫面座標換算回經緯度，少一個會出錯的環節。
+/// 挑到的地點（v25.500）。
+///
+/// 本來是三個散的參數（名稱、地址、座標）。改成一個結構是因為多了電話——
+/// 而且**電話不會是最後一個**：挑一個地方回來，之後還可能要營業時間、
+/// 網站、評分。每多一樣就改一次所有呼叫端的函式簽名是沒有盡頭的。
+struct PickedPlace {
+    /// 地標名稱；nil＝那裡沒有標示，只是一個座標
+    var name: String?
+    var address: String
+    var coordinate: CLLocationCoordinate2D
+    /// 電話。日本的車機導航是用電話號碼找目的地的，所以這是導航欄位。
+    var phone: String?
+}
+
 /// 搜尋建議右邊那一塊距離（v25.499）。
 ///
 /// 使用者回報：「每次都跑出地址沒有距離，導致我常常不知道要選哪個」。
@@ -63,8 +77,8 @@ struct MapPlacePickerSheet: View {
 
     /// 打開時要停在哪裡（這一站已有的座標、或上一站的、或使用者位置）
     let initialCoordinate: CLLocationCoordinate2D?
-    /// 回傳：建議名稱（可能沒有）、地址、座標
-    let onPick: (String?, String, CLLocationCoordinate2D) -> Void
+    /// 回傳挑到的地點（名稱、地址、座標、電話）
+    let onPick: (PickedPlace) -> Void
     /// 主色。各畫面各有自己的色系（旅遊紫、飲食橘…），預設沿用旅遊的
     var accent: Color = TripDayPalette.color(0)
 
@@ -100,6 +114,9 @@ struct MapPlacePickerSheet: View {
         let coordinate: CLLocationCoordinate2D
         /// 找到的地標名稱；nil＝那裡沒有地標，只是一個座標
         let name: String?
+        /// 這個地標的電話。只有「點到真的地標」或「從搜尋選進來」才有——
+        /// 空白處的座標本來就沒有電話可言。
+        var phone: String? = nil
 
         static func == (a: TappedPoint, b: TappedPoint) -> Bool {
             a.name == b.name
@@ -114,7 +131,7 @@ struct MapPlacePickerSheet: View {
 
     init(initialCoordinate: CLLocationCoordinate2D?,
          accent: Color = TripDayPalette.color(0),
-         onPick: @escaping (String?, String, CLLocationCoordinate2D) -> Void) {
+         onPick: @escaping (PickedPlace) -> Void) {
         self.initialCoordinate = initialCoordinate
         self.accent = accent
         self.onPick = onPick
@@ -324,7 +341,8 @@ struct MapPlacePickerSheet: View {
             center = coordinate
             let name = item.name?.trimmingCharacters(in: .whitespaces)
             tapped = TappedPoint(coordinate: coordinate,
-                                 name: (name?.isEmpty ?? true) ? nil : name)
+                                 name: (name?.isEmpty ?? true) ? nil : name,
+                                 phone: item.phoneNumber)
             withAnimation(.easeInOut(duration: 0.35)) {
                 position = .region(MKCoordinateRegion(
                     center: coordinate,
@@ -372,7 +390,8 @@ struct MapPlacePickerSheet: View {
         guard !Task.isCancelled, let nearest, nearest.1 <= tolerance,
               let name = nearest.0.name?.trimmingCharacters(in: .whitespaces),
               !name.isEmpty else { return }
-        tapped = TappedPoint(coordinate: nearest.0.placemark.coordinate, name: name)
+        tapped = TappedPoint(coordinate: nearest.0.placemark.coordinate, name: name,
+                             phone: nearest.0.phoneNumber)
     }
 
     /// 準心固定在畫面正中央：小圓點就是真正會被記下來的那個座標（不位移），
@@ -409,6 +428,14 @@ struct MapPlacePickerSheet: View {
                         .font(.caption2.weight(.semibold))
                 }
             }
+            if let phone = tapped?.phone, !phone.isEmpty {
+                // [v25.500] 日本的車機導航是用電話找目的地的——日文地址在車機
+                // 的鍵盤上幾乎打不出來。所以挑地點的時候就要看得到電話，
+                // 不是存進去之後才發現沒有。
+                Label(phone, systemImage: "phone.fill")
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(accent)
+            }
             Text(address.isEmpty
                  ? (isResolving ? "正在查地址…" : "查不到地址，仍然可以用這個座標")
                  : address)
@@ -427,7 +454,9 @@ struct MapPlacePickerSheet: View {
             }
 
             Button {
-                onPick(pickedName, address, pickedCoordinate)
+                onPick(PickedPlace(name: pickedName, address: address,
+                                   coordinate: pickedCoordinate,
+                                   phone: tapped?.phone))
                 dismiss()
             } label: {
                 HStack(spacing: 6) {
@@ -777,8 +806,8 @@ struct MapPlacePickerButton: View {
     var accent: Color = .accentColor
     var title: String = "在地圖上選位置"
     var subtitle: String = "搜尋找不到的地方，直接挪地圖對準就好"
-    /// 選到了：名稱（可能沒有）、地址、座標
-    let onPick: (String?, String, CLLocationCoordinate2D) -> Void
+    /// 選到了
+    let onPick: (PickedPlace) -> Void
     /// 按「清除」；nil＝不提供清除
     var onClear: (() -> Void)?
 
@@ -818,8 +847,8 @@ struct MapPlacePickerButton: View {
             }
         }
         .sheet(isPresented: $showPicker) {
-            MapPlacePickerSheet(initialCoordinate: startCoordinate, accent: accent) { name, addr, coord in
-                onPick(name, addr, coord)
+            MapPlacePickerSheet(initialCoordinate: startCoordinate, accent: accent) { picked in
+                onPick(picked)
             }
         }
     }

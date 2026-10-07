@@ -923,8 +923,9 @@ struct AddExpenseView: View {
                     hasCoordinate: hasResolvedPlace,
                     accent: placeIconColor,
                     subtitle: "打字搜不到的店家，直接挪地圖對準就好",
-                    onPick: { picked, addr, coord in
-                        applyMapPickedPlace(name: picked, address: addr, coordinate: coord)
+                    onPick: { place in
+                        applyMapPickedPlace(name: place.name, address: place.address,
+                                            coordinate: place.coordinate)
                     },
                     onClear: { clearPlace() })
                 if !placeFill.offer.isEmpty {

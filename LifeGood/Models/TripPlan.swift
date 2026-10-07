@@ -103,11 +103,15 @@ struct TripSubSpot: Identifiable, Codable, Equatable {
     var address: String
     var latitude: Double?
     var longitude: Double?
+    /// [v25.500] 電話。見 TripStop.phone——在日本這是導航欄位，不是聯絡資訊。
+    var phone: String?
 
     init(id: UUID = UUID(), name: String = "", note: String = "", minutes: Int = 0,
-         address: String = "", latitude: Double? = nil, longitude: Double? = nil) {
+         address: String = "", latitude: Double? = nil, longitude: Double? = nil,
+         phone: String? = nil) {
         self.id = id; self.name = name; self.note = note; self.minutes = minutes
         self.address = address; self.latitude = latitude; self.longitude = longitude
+        self.phone = phone
     }
 
     init(from decoder: Decoder) throws {
@@ -119,10 +123,11 @@ struct TripSubSpot: Identifiable, Codable, Equatable {
         address = (try? c.decodeIfPresent(String.self, forKey: .address)) ?? ""
         latitude = try? c.decodeIfPresent(Double.self, forKey: .latitude)
         longitude = try? c.decodeIfPresent(Double.self, forKey: .longitude)
+        phone = try? c.decodeIfPresent(String.self, forKey: .phone)
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, name, note, minutes, address, latitude, longitude
+        case id, name, note, minutes, address, latitude, longitude, phone
     }
 
     var coordinate: CLLocationCoordinate2D? {
@@ -144,12 +149,102 @@ struct TripSubSpot: Identifiable, Codable, Equatable {
 
 // MARK: 景點
 
+/// 電話號碼的兩種寫法（v25.500）。
+///
+/// Apple 回給我們的是國際格式（「+81 92-291-0001」）。要打電話用這個最可靠，
+/// 但**輸進車機會找不到**——日本車機要的是國內格式（0922910001），
+/// 而且只吃數字，連字號都不要。
+///
+/// 所以這裡提供兩種：顯示與撥號用原樣，拷貝給導航用純數字。
+enum TripPhone {
+    /// 用開頭的 0 代替國碼的國家。
+    ///
+    /// 不是每個國家都這樣：香港（+852）、澳門（+853）、新加坡（+65）、
+    /// 美國（+1）沒有這個 0，硬加上去號碼就壞了。所以用白名單，不用通則。
+    private static let trunkZero: [String] = [
+        "81",   // 日本
+        "886",  // 台灣
+        "82",   // 韓國
+        "86",   // 中國
+        "66",   // 泰國
+        "84",   // 越南
+        "60",   // 馬來西亞
+        "62",   // 印尼
+        "63",   // 菲律賓
+        "44",   // 英國
+        "61",   // 澳洲
+        "33",   // 法國
+        "39"    // 義大利（這個其實不去 0，但它本來就不帶國碼前綴，列著無害）
+    ]
+
+    /// 車機導航要輸入的號碼：只有數字，國碼換回開頭的 0。
+    static func navDigits(_ raw: String) -> String {
+        let trimmed = raw.trimmingCharacters(in: .whitespaces)
+        let digits = trimmed.filter(\.isNumber)
+        guard trimmed.hasPrefix("+") else { return digits }
+        for code in trunkZero where digits.hasPrefix(code) {
+            return "0" + digits.dropFirst(code.count)
+        }
+        return digits
+    }
+
+    /// 撥號用（tel: URL）。原樣去掉空白與連字號就好，國碼留著最保險。
+    static func dialDigits(_ raw: String) -> String {
+        let kept = raw.filter { $0.isNumber || $0 == "+" }
+        return kept
+    }
+}
+
+/// 替已經排好的站補電話（v25.500）。
+///
+/// 為什麼需要這個：電話是這一版才開始存的，而使用者手上那趟福岡行程已經有
+/// 三十幾站。要他一站一站重新挑地點才拿得到電話是不合理的——Apple 地圖本來
+/// 就知道這些店家的電話，只是以前沒跟它要。
+enum TripPhoneLookup {
+    /// 用名稱＋座標問一次 Apple 地圖。問不到就回 nil（不要瞎猜）。
+    ///
+    /// 比對刻意保守：搜回來的結果必須**離這個座標 300 公尺以內**才採用。
+    /// 只靠名字比對一定會出事——「ファミリーマート」全日本有一萬六千多家，
+    /// 配錯一支電話比沒有電話糟得多：到了現場才發現導航把你帶到別的區。
+    static func phone(name: String,
+                      coordinate: CLLocationCoordinate2D) async -> String? {
+        let request = MKLocalSearch.Request()
+        request.naturalLanguageQuery = name
+        request.region = MKCoordinateRegion(center: coordinate,
+                                            latitudinalMeters: 1500,
+                                            longitudinalMeters: 1500)
+        guard let response = try? await MKLocalSearch(request: request).start() else {
+            return nil
+        }
+        let origin = CLLocation(latitude: coordinate.latitude,
+                                longitude: coordinate.longitude)
+        let best = response.mapItems
+            .compactMap { item -> (String, CLLocationDistance)? in
+                guard let location = item.placemark.location,
+                      let phone = item.phoneNumber,
+                      !phone.trimmingCharacters(in: .whitespaces).isEmpty
+                else { return nil }
+                return (phone, location.distance(from: origin))
+            }
+            .min { $0.1 < $1.1 }
+        guard let best, best.1 <= 300 else { return nil }
+        return best.0
+    }
+}
+
 struct TripStop: Identifiable, Codable {
     let id: UUID
     var name: String
     var address: String
     var latitude: Double?
     var longitude: Double?
+    /// [v25.500] 這個地方的電話。
+    ///
+    /// 為什麼它跟地址一樣重要：**日本的車機導航是用電話號碼找目的地的。**
+    /// 日文地址（福岡県福岡市博多区下川端町3-1）在車機的注音鍵盤上幾乎打不出來，
+    /// 當地人的做法是輸入店家電話，機器直接定位。所以對一趟日本行程來說，
+    /// 電話不是「順便留著的聯絡方式」，是導航欄位。
+    var phone: String?
     /// 預計停留時間（分鐘）
     var dwellMinutes: Int
     /// 這一段（從**上一站**到這一站）要用的交通方式。nil＝用行程的預設。
@@ -203,7 +298,7 @@ struct TripStop: Identifiable, Codable {
     var legNeedsRetry: Bool
 
     init(id: UUID = UUID(), name: String = "", address: String = "",
-         latitude: Double? = nil, longitude: Double? = nil,
+         latitude: Double? = nil, longitude: Double? = nil, phone: String? = nil,
          dwellMinutes: Int = 60, legModeOverride: TripTravelMode? = nil,
          actualArrival: Date? = nil, actualDeparture: Date? = nil,
          isMustVisit: Bool = false,
@@ -215,6 +310,7 @@ struct TripStop: Identifiable, Codable {
          legNeedsRetry: Bool = false) {
         self.id = id; self.name = name; self.address = address
         self.latitude = latitude; self.longitude = longitude
+        self.phone = phone
         self.dwellMinutes = dwellMinutes
         self.legModeOverride = legModeOverride
         self.actualArrival = actualArrival; self.actualDeparture = actualDeparture
@@ -235,6 +331,7 @@ struct TripStop: Identifiable, Codable {
         address = (try? c.decode(String.self, forKey: .address)) ?? ""
         latitude = try? c.decodeIfPresent(Double.self, forKey: .latitude)
         longitude = try? c.decodeIfPresent(Double.self, forKey: .longitude)
+        phone = try? c.decodeIfPresent(String.self, forKey: .phone)
         dwellMinutes = (try? c.decode(Int.self, forKey: .dwellMinutes)) ?? 60
         legModeOverride = try? c.decodeIfPresent(TripTravelMode.self, forKey: .legModeOverride)
         actualArrival = try? c.decodeIfPresent(Date.self, forKey: .actualArrival)
@@ -254,7 +351,7 @@ struct TripStop: Identifiable, Codable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, name, address, latitude, longitude, dwellMinutes
+        case id, name, address, latitude, longitude, phone, dwellMinutes
         case legModeOverride, isMustVisit, isOvernight, checkOutTime, arrivalOverride, note
         case actualArrival, actualDeparture
         case photoFileNames, subSpots, legMeters, legSeconds, legStamp, legIsEstimated
@@ -269,6 +366,11 @@ struct TripStop: Identifiable, Codable {
     var displayName: String {
         let n = name.trimmingCharacters(in: .whitespaces)
         return n.isEmpty ? "未命名景點" : n
+    }
+
+    /// 有沒有電話可用
+    var hasPhone: Bool {
+        !(phone ?? "").trimmingCharacters(in: .whitespaces).isEmpty
     }
 
     /// 子地點的分鐘加總。母景點停留時間比這個短時畫面會提醒。
