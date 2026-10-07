@@ -134,9 +134,16 @@ struct ItemRow<Leading: View, Accessory: View>: View {
     /// 順便把膠囊從標題**上面**移到**下面**——名字該先被讀到。
     var spansTitle: Bool = false
 
-    /// spansTitle 模式下，標題底下那一塊往右縮排多少（＝指示器寬度 ＋ 間距）。
-    /// 呼叫端自己算，因為只有它知道自己的指示器多寬；也因此務必給**固定寬度**，
-    /// 不然有打卡圈與沒打卡圈的兩列會對不齊，那比不縮排還難看。
+    /// [v25.503] spansTitle 模式下，標題左邊那一個小東西（例：編號圈）。
+    ///
+    /// 做成 AnyView 而不是第三個泛型插槽：Swift 的泛型參數沒有預設值，
+    /// 多開一個就要替所有便利初始化補 `where TitleLeading == EmptyView`，
+    /// 為了一顆編號圈不值得。這個檔案的 extra 本來就是這樣處理的。
+    var titleLeading: AnyView?
+
+    /// spansTitle 模式下，`leading` 不在標題那一列，而在標題**底下**那一列的
+    /// 最左邊（行程時間軸放的是時間欄）。這個值不再需要，留著只是不想動
+    /// 既有呼叫端的參數順序。
     var bodyInset: CGFloat = 0
 
     /// 列底下的淡色分隔線。
@@ -144,8 +151,9 @@ struct ItemRow<Leading: View, Accessory: View>: View {
     /// 時間軸上一站接一站，中間只有一條很淡的交通資訊，區塊與區塊之間
     /// 沒有邊界——眼睛要自己判斷哪幾行屬於同一站。一條髮絲線就夠了。
     var showsSeparator: Bool = false
-    /// 分隔線從左邊再縮排多少（0＝切齊內容左緣，像 iOS 原生清單）
-    var separatorInset: CGFloat = 0
+    /// 分隔線從列的左緣往右縮多少。
+    /// 14＝切齊內容（iOS 原生清單的樣子）；0＝整條貫穿。
+    var separatorInset: CGFloat = 14
 
     @ViewBuilder var leading: () -> Leading
     @ViewBuilder var accessory: () -> Accessory
@@ -164,8 +172,9 @@ struct ItemRow<Leading: View, Accessory: View>: View {
          disclosureLabel: String = "子項目", disclosureColor: Color = .indigo,
          extra: AnyView? = nil, forceOpen: Bool = false, highlightId: String? = nil,
          onTap: (() -> Void)? = nil,
-         spansTitle: Bool = false, bodyInset: CGFloat = 0,
-         showsSeparator: Bool = false, separatorInset: CGFloat = 0,
+         spansTitle: Bool = false, titleLeading: AnyView? = nil,
+         bodyInset: CGFloat = 0,
+         showsSeparator: Bool = false, separatorInset: CGFloat = 14,
          @ViewBuilder leading: @escaping () -> Leading,
          @ViewBuilder accessory: @escaping () -> Accessory) {
         self.chips = chips
@@ -185,6 +194,7 @@ struct ItemRow<Leading: View, Accessory: View>: View {
         self.highlightId = highlightId
         self.onTap = onTap
         self.spansTitle = spansTitle
+        self.titleLeading = titleLeading
         self.bodyInset = bodyInset
         self.showsSeparator = showsSeparator
         self.separatorInset = separatorInset
@@ -199,7 +209,7 @@ struct ItemRow<Leading: View, Accessory: View>: View {
                 Rectangle()
                     .fill(Color(.separator).opacity(0.55))
                     .frame(height: 0.5)
-                    .padding(.leading, 14 + separatorInset)
+                    .padding(.leading, separatorInset)
             }
         }
         .background(Color(.systemBackground))
@@ -229,41 +239,56 @@ struct ItemRow<Leading: View, Accessory: View>: View {
         .padding(.horizontal, 14).padding(.vertical, 10)
     }
 
-    /// [v25.502] 標題貫穿：名字自成一列，其餘縮排在底下。
+    /// 標題以外的內容。兩種版面共用，差別只在它被放在哪裡。
+    private var contentStack: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            if let p = progress { progressBar(p) }
+            if let preview, !preview.isEmpty {
+                Text(preview)
+                    .font(.caption2).foregroundStyle(.secondary)
+                    .lineLimit(previewLineLimit)
+            }
+            if !chips.isEmpty { ItemChipBar(chips: chips) }
+            if let extra { extra }
+            if !disclosures.isEmpty { disclosureSection }
+        }
+    }
+
+    /// [v25.503] 標題貫穿：名字從最左邊一路排到最右邊。
+    ///
+    /// v25.502 的版本只讓標題跨過指示器，時間欄還擋在它左邊，所以寬度只從
+    /// 189 加到 226pt——長站名照樣折三行。使用者說的是「標題在最上面就可以
+    /// **貫穿全部**」，意思是連時間欄一起跨過去。
+    ///
+    /// 現在的結構：
+    ///
+    ///   ────────────────────────────────────────────  ← 區塊下緣的全寬細線
+    ///   ㉘  THE ROYAL PARL CANVAS FUKUOKA NAKASU  ≡ ⋯  ← 標題列
+    ///   00:04 │ 〒810-0801 福岡縣福岡市博多區中洲 56-20
+    ///   10:38 │ 實際停留 10 小時 34 分
+    ///   實際  │ ☀24°/17°  ☎092 291 1188
+    ///
+    /// 標題因此有 307pt——「THE ROYAL PARL CANVAS FUKUOKA NAKASU」剛好一行。
     private var spanningLayout: some View {
-        VStack(alignment: .leading, spacing: 7) {
-            HStack(alignment: .top, spacing: 10) {
-                leading()
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .top, spacing: 8) {
+                if let titleLeading { titleLeading }
                 // 不用 Spacer 把右邊的動作推過去，改讓標題自己吃掉剩餘寬度。
                 //
                 // HStack 的 spacing 是**每一對相鄰元素之間**都算一次，所以
                 // 夾一個 Spacer(minLength: 0) 進來不是「零寬度」——它是
-                // 10pt ＋ 0 ＋ 10pt，白白從標題身上拿走 20pt。
-                // 這一列能給標題的本來就只有兩百出頭，20pt 是一成。
+                // 8pt ＋ 0 ＋ 8pt，白白從標題身上拿走 16pt。
                 titleView
                     .frame(maxWidth: .infinity, alignment: .leading)
                 accessory()
             }
-            // 順序跟 inline 版不一樣，是刻意的：
-            //
-            // 1. 膠囊在標題**下面**。排在名字前面的話，一列最先被讀到的是
-            //    「第 5 天」而不是地名——附註不該站在身分前面。
-            // 2. 地址緊跟著名字。「這是哪裡」是名字的下一個問題，
-            //    中間不該插著狀態膠囊。
-            // 3. 狀態膠囊（停留多久、指定抵達）與附註膠囊（天氣、電話）
-            //    併在一起收尾。同一種形狀的東西擠在同一區，掃過去是一次。
-            VStack(alignment: .leading, spacing: 5) {
-                if let p = progress { progressBar(p) }
-                if let preview, !preview.isEmpty {
-                    Text(preview)
-                        .font(.caption2).foregroundStyle(.secondary)
-                        .lineLimit(previewLineLimit)
-                }
-                if !chips.isEmpty { ItemChipBar(chips: chips) }
-                if let extra { extra }
-                if !disclosures.isEmpty { disclosureSection }
+            // 底下才是「左欄 ＋ 內容」兩欄。左欄放的是時間（行程時間軸），
+            // 它在標題底下，不再跟標題搶寬度。
+            HStack(alignment: .top, spacing: 10) {
+                leading()
+                contentStack
+                Spacer(minLength: 0)
             }
-            .padding(.leading, bodyInset)
         }
         .padding(.horizontal, 14).padding(.vertical, 11)
     }

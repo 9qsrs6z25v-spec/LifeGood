@@ -1164,6 +1164,10 @@ struct TripPlanDetailView: View {
     ///
     /// ⚠️ 景點列、住宿接續列、路段列三個地方都要用同一個值：連接線與圓點
     ///    靠它對齊在一條垂直線上，改一個沒改另外兩個，整條軸就歪了。
+    /// 一列內容的左緣：頁面邊距 16 ＋ ItemRow 自己的內距 14。
+    /// 交通列沒有包在 ItemRow 裡，要自己補上這 14 才對得齊。
+    static let rowContentInset: CGFloat = 30
+
     /// [v25.502] 52 → 46。
     ///
     /// 這一欄最寬的內容是「12:49」與「NT$470」，12pt 的圓體量起來 40pt 出頭，
@@ -1194,7 +1198,10 @@ struct TripPlanDetailView: View {
             }
             .buttonStyle(.plain)
         }
-        .padding(.horizontal, 16)
+        // 這一列也有時間欄，一樣要補上 ItemRow 的 14pt，不然住宿那一列的
+        // 時間會比上下兩站往左凸出 14pt
+        .padding(.leading, Self.rowContentInset)
+        .padding(.trailing, 16)
         .padding(.vertical, 4)
         .background(c.opacity(0.05))
     }
@@ -1203,10 +1210,18 @@ struct TripPlanDetailView: View {
     private func legRow(_ slot: TripPlan.Slot, plan p: TripPlan) -> some View {
         let c = TripDayPalette.color(slot.dayIndex)
         return HStack(spacing: 10) {
-            // 對齊上下的時間欄寬度，讓連接線與圓點在一條垂直線上
-            Text("").frame(width: Self.timeColumnWidth)
-            Rectangle().fill(c.opacity(0.28))
-                .frame(width: 1.5, height: 26)
+            // [v25.503] 對齊上下兩站的時間欄，連接線才會跟它們的主幹線接上。
+            //
+            // 時間欄搬進 ItemRow 之後，它的左緣多了 ItemRow 自己的 14pt 內距
+            // （16 ＋ 14 ＝ 30），這一列如果還停在 16 就會整整差 14pt——
+            // 線接不起來的時間軸比沒有線還糟。連接線也改成貼在同一個寬度的
+            // 右緣上，兩邊用的是同一個算式，不是兩個湊出來一樣的數字。
+            Text("")
+                .frame(width: Self.timeColumnWidth)
+                .overlay(alignment: .trailing) {
+                    Rectangle().fill(c.opacity(0.28))
+                        .frame(width: 1.5, height: 26)
+                }
             HStack(spacing: 5) {
                 Image(systemName: slot.mode.icon).font(.system(size: 9, weight: .bold))
                 // 這一段被單獨指定過方式就把名稱寫出來，跟預設的那些區分開
@@ -1252,7 +1267,8 @@ struct TripPlanDetailView: View {
             }
             .buttonStyle(.plain)
         }
-        .padding(.horizontal, 16)
+        .padding(.leading, Self.rowContentInset)
+        .padding(.trailing, 16)
         .padding(.vertical, 2)
         // ＋ 那顆自己吃掉點擊，所以整列可點不會跟它打架
         .contentShape(Rectangle())
@@ -1267,124 +1283,120 @@ struct TripPlanDetailView: View {
     }
 
     /// 一站。用既有的 ItemRow 模板畫——子地點就是它的摺疊區。
+    ///
+    /// [v25.503] 時間欄從「ItemRow 左邊的兄弟」搬進 ItemRow 的 leading。
+    /// 擺在外面的時候它跟標題同一列，等於在名字左邊永遠擋著 56pt；
+    /// 搬進去之後它排在標題**底下**，標題就能從最左邊一路貫穿到最右邊。
     private func stopRow(_ slot: TripPlan.Slot) -> some View {
         let c = TripDayPalette.color(slot.dayIndex)
-        return HStack(alignment: .top, spacing: 10) {
-            VStack(spacing: 2) {
-                HStack(spacing: 2) {
-                    // 指定抵達時間的站加一個鎖，跟推算出來的時間區分開
-                    if slot.isFixedArrival {
-                        Image(systemName: "lock.fill").font(.system(size: 7, weight: .bold))
-                    }
-                    Text(Self.timeFmt.string(from: slot.arrival))
-                        .font(.system(size: 12, weight: .bold, design: .rounded))
+        // ViewBuilder 的 closure 裡宣告 let 不保險（不同 Swift 版本的支援度
+        // 不一樣），所以時間欄在 return 之前就組好，當成一個普通的區域變數傳進去。
+        let timeColumn = VStack(spacing: 2) {
+            // [v25.503] 打卡圈從標題列搬到時間欄最上面。
+            //
+            // 它記的就是「我幾點到的／幾點走的」，本來就該跟時間放在一起；
+            // 而且把它從標題那一列挪開，名字多拿到 30pt——
+            // 「THE ROYAL PARL CANVAS FUKUOKA NAKASU」因此排得進一行。
+            if showsCheckIn(slot) {
+                checkInButton(slot)
+                    .padding(.bottom, 2)
+            }
+            HStack(spacing: 2) {
+                // 指定抵達時間的站加一個鎖，跟推算出來的時間區分開
+                if slot.isFixedArrival {
+                    Image(systemName: "lock.fill").font(.system(size: 7, weight: .bold))
                 }
-                // 時間是一個整體，寧可整體縮一點也不要被折成兩行
+                Text(Self.timeFmt.string(from: slot.arrival))
+                    .font(.system(size: 12, weight: .bold, design: .rounded))
+            }
+            // 時間是一個整體，寧可整體縮一點也不要被折成兩行
+            .lineLimit(1)
+            .minimumScaleFactor(0.75)
+            .foregroundStyle(slot.shortfallSeconds > 60 ? Color.red : c)
+            Text(Self.departureText(slot))
+                .font(.system(size: 10, design: .rounded))
                 .lineLimit(1)
                 .minimumScaleFactor(0.75)
-                .foregroundStyle(slot.shortfallSeconds > 60 ? Color.red : c)
-                Text(Self.departureText(slot))
-                    .font(.system(size: 10, design: .rounded))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.75)
-                    .foregroundStyle(.tertiary)
-                // 打卡過的時間是事實，跟排出來的預估分開標示
-                if slot.isActualArrival || slot.isActualDeparture {
-                    Text("實際")
-                        .font(.system(size: 8, weight: .bold))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 4).padding(.vertical, 1)
-                        .background(c, in: Capsule())
-                }
-                // [v25.468] 這一站的花費（使用者指定放這裡）。
-                //
-                // v25.465 原本做成膠囊混在標題上方那一排裡，但那一排講的是「時間與
-                // 狀態」（第幾天、指定抵達、必去、比預估早到…），金額擠在中間要找。
-                // 時間欄本來就是「這一站的數字」那一欄，花費放這裡一眼就對得起來。
-                //
-                // 欄寬只有 52pt，所以不寫「花費」兩個字、只放金額，再讓它自己縮。
-                if let text = stopSpendAmount(slot.stop.id) {
-                    Text(text)
-                        .font(.system(size: 10, weight: .bold, design: .rounded))
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.6)
-                        .foregroundStyle(.green)
-                        .padding(.top, 1)
-                }
-                // [v25.479] 購物車（使用者指定位置：「實際」下面）。
-                // v25.475 已經把「記一筆這一站的花費」放進「…」選單，
-                // 但旅行當下最常做的就是記帳——藏在選單裡要點兩下才找得到。
-                Button {
-                    addingExpense = StopExpenseTarget(stopId: slot.stop.id,
-                                                      date: slot.arrival)
-                } label: {
-                    Image(systemName: "cart.badge.plus")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(.green)
-                        .padding(.top, 3)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
+                .foregroundStyle(.tertiary)
+            // 打卡過的時間是事實，跟排出來的預估分開標示
+            if slot.isActualArrival || slot.isActualDeparture {
+                Text("實際")
+                    .font(.system(size: 8, weight: .bold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 4).padding(.vertical, 1)
+                    .background(c, in: Capsule())
             }
-            .frame(width: Self.timeColumnWidth)
-
-            ItemRow(
-                chips: stopChips(slot),
-                title: slot.stop.displayName,
-                preview: stopPreview(slot.stop),
-                disclosures: subSpotDisclosures(slot.stop),
-                disclosureLabel: "子地點",
-                disclosureColor: c,
-                // 天氣與照片直接鋪在這一站底下，不用點進去才看得到
-                extra: stopExtra(slot),
-                // 點整列＝打開景點卡。要去地圖、要編輯、要打卡都在卡片上選——
-                // 直接開地圖的話，其他事情就全被擠進「…」選單裡了（v25.421 的教訓）。
-                onTap: { openingStopId = slot.stop.id },
-                // [v25.502] 標題橫向貫穿（使用者指定）。
-                //
-                // 量過真機：標題原本只分到 207pt，不到畫面寬度的一半，所以
-                // 「福岡 Anpanman Kodomo Museum in Mall」折成三行。讓標題
-                // 自己佔一列、跨過左邊的打卡圈與編號圈之後是 270pt 上下。
-                //
-                // bodyInset 要跟 indicatorWidth ＋ HStack 的 10pt 間距對齊，
-                // 底下的地址才會剛好接在名字的第一個字下面。
-                spansTitle: true,
-                bodyInset: Self.indicatorWidth + 10,
-                // 一站接一站，中間只有一條很淡的交通資訊，區塊之間沒有邊界。
-                // 一條髮絲線就夠把「這幾行是同一站」框起來。
-                showsSeparator: true,
-                leading: {
-                    HStack(spacing: 4) {
-                        if showsCheckIn(slot) { checkInButton(slot) }
-                        ZStack(alignment: .topTrailing) {
-                            ZStack {
-                                Circle()
-                                    .fill(LinearGradient(colors: [c.opacity(0.9), c.opacity(0.5)],
-                                                         startPoint: .top, endPoint: .bottom))
-                                    .frame(width: 20, height: 20)
-                                Text("\(slot.index + 1)")
-                                    .font(.system(size: 10.5, weight: .bold, design: .rounded))
-                                    .foregroundStyle(.white)
-                            }
-                            if slot.stop.isMustVisit {
-                                Image(systemName: "star.fill")
-                                    .font(.system(size: 8))
-                                    .foregroundStyle(.orange)
-                                    .padding(1.5)
-                                    .background(Circle().fill(Color(.systemBackground)))
-                                    .offset(x: 4, y: -4)
-                            }
-                        }
-                        .frame(width: 20, height: 20)
-                    }
-                    // 固定寬度、靠右對齊：有打卡圈與沒打卡圈的兩列，
-                    // 編號圈都停在同一個 x，標題與底下的地址才對得齊。
-                    // 不釘住的話，縮排過的內容會一列一個樣，比不縮排更亂。
-                    .frame(width: Self.indicatorWidth, alignment: .trailing)
-                },
-                accessory: { stopAccessory(slot) }
-            )
+            // [v25.468] 這一站的花費（使用者指定放這裡）。
+            //
+            // v25.465 原本做成膠囊混在標題上方那一排裡，但那一排講的是「時間與
+            // 狀態」（第幾天、指定抵達、必去、比預估早到…），金額擠在中間要找。
+            // 時間欄本來就是「這一站的數字」那一欄，花費放這裡一眼就對得起來。
+            //
+            // 欄寬只有 52pt，所以不寫「花費」兩個字、只放金額，再讓它自己縮。
+            if let text = stopSpendAmount(slot.stop.id) {
+                Text(text)
+                    .font(.system(size: 10, weight: .bold, design: .rounded))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
+                    .foregroundStyle(.green)
+                    .padding(.top, 1)
+            }
+            // [v25.479] 購物車（使用者指定位置：「實際」下面）。
+            // v25.475 已經把「記一筆這一站的花費」放進「…」選單，
+            // 但旅行當下最常做的就是記帳——藏在選單裡要點兩下才找得到。
+            Button {
+                addingExpense = StopExpenseTarget(stopId: slot.stop.id,
+                                                  date: slot.arrival)
+            } label: {
+                Image(systemName: "cart.badge.plus")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.green)
+                    .padding(.top, 3)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
         }
+        .frame(width: Self.timeColumnWidth)
+        // [v25.503] 時間軸的主幹（使用者要的「線條」）。
+        //
+        // 畫在時間欄的右緣，與交通列的連接線同一個 x，所以整天從上到下
+        // 看起來是同一條線穿過每一站。顏色用當天的色、壓得很淡——
+        // 線是用來把東西串起來的，不是用來被看見的。
+        .overlay(alignment: .trailing) {
+            Rectangle()
+                .fill(c.opacity(0.22))
+                .frame(width: 1.5)
+        }
+
+        return ItemRow(
+            chips: stopChips(slot),
+            title: slot.stop.displayName,
+            preview: stopPreview(slot.stop),
+            disclosures: subSpotDisclosures(slot.stop),
+            disclosureLabel: "子地點",
+            disclosureColor: c,
+            // 天氣與照片直接鋪在這一站底下，不用點進去才看得到
+            extra: stopExtra(slot),
+            // 點整列＝打開景點卡。要去地圖、要編輯、要打卡都在卡片上選——
+            // 直接開地圖的話，其他事情就全被擠進「…」選單裡了（v25.421 的教訓）。
+            onTap: { openingStopId = slot.stop.id },
+            // [v25.503] 標題從最左邊貫穿到最右邊（使用者指定）。
+            //
+            // v25.502 只讓標題跨過指示器，時間欄還擋在左邊，所以寬度只從
+            // 189 加到 226pt，長站名照樣折三行。現在時間欄與打卡圈都移到
+            // 標題底下，標題拿到 307pt——「THE ROYAL PARL CANVAS FUKUOKA
+            // NAKASU」剛好排得進一行。
+            spansTitle: true,
+            // 編號圈跟著名字走——它是這一站的序號，是標題的一部分
+            titleLeading: AnyView(stopBadge(slot, color: c)),
+            // 區塊下緣一條貫穿整列的細線（使用者指定）。separatorInset 0
+            // ＝不縮排：縮排過的線會跟底下那條交通資訊的直線打架，
+            // 整片看起來像沒對齊的格線。
+            showsSeparator: true,
+            separatorInset: 0,
+            leading: { timeColumn },
+            accessory: { stopAccessory(slot) }
+        )
         .padding(.horizontal, 16)
         // [v25.479] 整列是放置目標：把別站拖過來就插在這一站的位置
         .dropDestination(for: String.self) { items, _ in
@@ -1395,9 +1407,32 @@ struct TripPlanDetailView: View {
         .overlay(alignment: .top) { dropIndicator(slot) }
     }
 
-    /// 打卡圈（22）＋ 間距（4）＋ 編號圈（20）。寫成常數是因為
-    /// ItemRow 的 bodyInset 要拿它來對齊，兩邊各寫一個數字遲早會走散。
-    static let indicatorWidth: CGFloat = 46
+    /// 這一站的序號圈（必去的話右上角加一顆星）。
+    private func stopBadge(_ slot: TripPlan.Slot, color c: Color) -> some View {
+        ZStack(alignment: .topTrailing) {
+            ZStack {
+                Circle()
+                    .fill(LinearGradient(colors: [c.opacity(0.9), c.opacity(0.5)],
+                                         startPoint: .top, endPoint: .bottom))
+                    .frame(width: 22, height: 22)
+                Text("\(slot.index + 1)")
+                    .font(.system(size: 11, weight: .bold, design: .rounded))
+                    .foregroundStyle(.white)
+            }
+            if slot.stop.isMustVisit {
+                Image(systemName: "star.fill")
+                    .font(.system(size: 8))
+                    .foregroundStyle(.orange)
+                    .padding(1.5)
+                    .background(Circle().fill(Color(.systemBackground)))
+                    .offset(x: 4, y: -4)
+            }
+        }
+        .frame(width: 22, height: 22)
+        // 圓圈沒有基線，跟多行標題放在同一個 .top 的 HStack 裡會貼齊頂端，
+        // 看起來比第一行的字高一點點。往下推 1pt 就對上了。
+        .padding(.top, 1)
+    }
 
     /// 景點列右側：拖曳把手 ＋「…」選單
     private func stopAccessory(_ slot: TripPlan.Slot) -> some View {
