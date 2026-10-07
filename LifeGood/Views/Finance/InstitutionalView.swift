@@ -1350,6 +1350,9 @@ struct StockAIAnalysisView: View {
         var portfolio: String?
         var risks: [String] = []
         var rawFallback: String?        // JSON 解析失敗時的純文字保底
+        /// [v25.512] 這份結果是從**殘缺的 JSON 裡撿回來**的（回應被截斷）。
+        /// 畫面要說一聲，不然使用者會以為 AI 只分析了前面幾檔。
+        var wasTruncated = false
     }
 
     private enum Phase {
@@ -1411,14 +1414,31 @@ struct StockAIAnalysisView: View {
             case .done(let result):
                 resultHeader
                 if let raw = result.rawFallback {
-                    // JSON 解析失敗保底：仍以純文字卡呈現
-                    sectionCard(title: "分析結果", icon: "sparkles", color: accent) {
-                        Text(raw)
-                            .font(.subheadline)
-                            .textSelection(.enabled)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                    // [v25.512] 連逐段撿都撿不到東西時才會走到這裡。
+                    //
+                    // 原本直接把 AI 的回應原封不動印出來——那串如果是 JSON，
+                    // 使用者看到的就是一整片引號與大括號（他回報的畫面）。
+                    // 把失敗丟給使用者看不叫保底，所以先說清楚發生什麼事，
+                    // 原文收在底下給想看的人。
+                    sectionCard(title: "這次沒分析成功", icon: "exclamationmark.triangle.fill",
+                                color: .orange) {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("AI 回來的格式不對，沒辦法整理成卡片。按右上角「重新分析」通常就好了。")
+                                .font(.subheadline)
+                            DisclosureGroup("看 AI 的原始回應") {
+                                Text(raw)
+                                    .font(.caption2.monospaced())
+                                    .textSelection(.enabled)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .padding(.top, 4)
+                            }
+                            .font(.caption)
+                            .tint(.secondary)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     }
                 } else {
+                    if result.wasTruncated { truncatedNotice }
                     if let summary = result.marketSummary {
                         marketCard(summary: summary, sentiment: result.marketSentiment)
                     }
@@ -1654,6 +1674,25 @@ struct StockAIAnalysisView: View {
         .clipShape(RoundedRectangle(cornerRadius: 16))
     }
 
+    /// AI 的回答在中途被切斷時的提示。
+    ///
+    /// 一定要說：撿回來的卡片看起來跟正常的一模一樣，不說的話使用者會以為
+    /// 「AI 覺得後面那幾檔不用講」，而不是「它根本沒講完」。
+    private var truncatedNotice: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "scissors")
+                .font(.caption).foregroundStyle(.orange)
+            Text("AI 的回答在中途被截斷，下面只列出完整收到的部分，後面幾檔可能沒分析到。按「重新分析」再試一次。")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Spacer(minLength: 0)
+        }
+        .padding(10)
+        .background(Color.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10)
+            .stroke(Color.orange.opacity(0.22), lineWidth: 0.5))
+    }
+
     private func bulletRow(_ text: String) -> some View {
         HStack(alignment: .top, spacing: 6) {
             Text("•").foregroundStyle(accent)
@@ -1677,16 +1716,35 @@ struct StockAIAnalysisView: View {
          "risks":["風險提醒（2~4 條）"]}
         所有文字用繁體中文、語氣務實直接、不吹捧；某檔資料不足就在對應欄位直說。stocks 必須涵蓋使用者提供的每一檔持股。
         """
+        // [v25.512] token 上限跟著持股數量走。
+        //
+        // 原本固定 2000。但每一檔要寫 reason（2~3 句）＋ technical ＋ chips，
+        // 中文大約一個字一個 token，一檔就要兩百多；再加上大盤簡評、
+        // 整體配置與風險提醒，持股一過七、八檔就會在中途被切斷——
+        // JSON 收不了尾，整份解不開，畫面就吐出一整片原始 JSON。
+        // 使用者回報的正是這個。
+        let holdingCount = store.stocks.filter { !$0.isSold }.count
+        let budget = min(8000, 1200 + holdingCount * 320)
         do {
             let out = try await AIExpenseParserService.shared.completeText(
-                system: system, prompt: prompt, maxTokens: 2000)
+                system: system, prompt: prompt, maxTokens: budget)
             phase = .done(Self.parseResult(out))
         } catch {
             phase = .failed(error.localizedDescription)
         }
     }
 
-    /// 解析 AI 回傳的 JSON；失敗時整段當純文字保底
+    /// 解析 AI 回傳的 JSON。
+    ///
+    /// [v25.512] 兩段式：先照正常的 JSON 解；解不動就**逐段撿**。
+    ///
+    /// 為什麼需要第二段：回應被 token 上限截斷時，JSON 會停在半路
+    ///（少了收尾的 `}]}`），整份就解不出來——但前面那幾檔其實是完整的。
+    /// 使用者回報「AI 持股健檢畫面吐出一整片原始 JSON」就是這個情況：
+    /// 保底路徑把那串沒解開的 JSON 原封不動印在畫面上。
+    ///
+    /// 原始 JSON 不是「保底」，是把失敗丟給使用者看。真正的保底是
+    /// 「能撿多少算多少，並且說清楚少了什麼」。
     fileprivate static func parseResult(_ raw: String) -> AIResult {
         var s = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         // 容錯：去掉 markdown 圍欄、抓第一個 { 到最後一個 } 之間
@@ -1695,7 +1753,7 @@ struct StockAIAnalysisView: View {
         }
         guard let data = s.data(using: .utf8),
               let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
-            return AIResult(rawFallback: raw)
+            return salvage(raw)
         }
         var result = AIResult()
         if let market = json["market"] as? [String: Any] {
@@ -1714,11 +1772,111 @@ struct StockAIAnalysisView: View {
         }
         result.portfolio = json["portfolio"] as? String
         result.risks = (json["risks"] as? [String]) ?? []
-        // 解析出來什麼都沒有：退回純文字
+        // 解析出來什麼都沒有：再試一次逐段撿
+        if result.stocks.isEmpty && (result.marketSummary ?? "").isEmpty {
+            return salvage(raw)
+        }
+        return result
+    }
+
+    /// 從殘缺的 JSON 裡把能撿的撿回來。
+    ///
+    /// 做法是**不管整體結構**，只掃出每一組成對的大括號，一組一組單獨解析。
+    /// 被截斷的最後那一檔會缺收尾的 `}`，自然就撿不到——那正是我們要的：
+    /// 完整的留下，不完整的丟掉，不要猜。
+    ///
+    /// 掃的時候要記得字串裡的大括號不算數（中文敘述裡出現 `{` 的機會不高，
+    /// 但一次就夠毀掉整份結果），所以同時追蹤「現在在不在字串裡」與跳脫字元。
+    fileprivate static func salvage(_ raw: String) -> AIResult {
+        var result = AIResult()
+        let chars = Array(raw)
+
+        // "stocks" 之前那一段放的是大盤簡評，從那裡抓 summary / sentiment
+        var stocksAt = chars.count
+        if let r = raw.range(of: "\"stocks\"") {
+            stocksAt = raw.distance(from: raw.startIndex, to: r.lowerBound)
+        }
+        let head = String(chars[0..<stocksAt])
+        result.marketSummary = value(of: "summary", in: head)
+        result.marketSentiment = value(of: "sentiment", in: head)
+
+        var depth = 0
+        var inString = false
+        var escaped = false
+        var start: Int?
+        var i = min(stocksAt, chars.count)
+        while i < chars.count {
+            let c = chars[i]
+            if escaped {
+                escaped = false
+            } else if c == "\\" {
+                escaped = true
+            } else if c == "\"" {
+                inString.toggle()
+            } else if !inString {
+                if c == "{" {
+                    if depth == 0 { start = i }
+                    depth += 1
+                } else if c == "}" {
+                    depth -= 1
+                    if depth <= 0 {
+                        if let s = start, depth == 0 {
+                            appendStock(String(chars[s...i]), into: &result)
+                        }
+                        depth = 0
+                        start = nil
+                    }
+                }
+            }
+            i += 1
+        }
+
+        // 真的什麼都撿不到才認輸——而且認輸時給的是人看得懂的話，
+        // 不是一整片 JSON（見 rawFallback 的顯示）
         if result.stocks.isEmpty && (result.marketSummary ?? "").isEmpty {
             return AIResult(rawFallback: raw)
         }
+        result.wasTruncated = true
         return result
+    }
+
+    private static func appendStock(_ piece: String, into result: inout AIResult) {
+        guard let d = piece.data(using: .utf8),
+              let o = (try? JSONSerialization.jsonObject(with: d)) as? [String: Any],
+              let symbol = (o["symbol"] as? String)?
+                .trimmingCharacters(in: .whitespaces), !symbol.isEmpty
+        else { return }
+        result.stocks.append(StockAdvice(
+            symbol: symbol,
+            name: (o["name"] as? String ?? "").trimmingCharacters(in: .whitespaces),
+            action: o["action"] as? String ?? "續抱觀察",
+            reason: o["reason"] as? String ?? "",
+            technical: o["technical"] as? String,
+            chips: o["chips"] as? String))
+    }
+
+    /// 從一段文字裡抓出 `"key":"value"` 的 value。
+    /// 自己寫而不是用 JSONSerialization：這一段本來就解不開才會走到這裡。
+    private static func value(of key: String, in text: String) -> String? {
+        guard let r = text.range(of: "\"\(key)\"") else { return nil }
+        var i = r.upperBound
+        while i < text.endIndex, text[i] == ":" || text[i] == " " {
+            i = text.index(after: i)
+        }
+        guard i < text.endIndex, text[i] == "\"" else { return nil }
+        i = text.index(after: i)
+        var out = ""
+        var escaped = false
+        while i < text.endIndex {
+            let c = text[i]
+            if escaped { out.append(c); escaped = false }
+            else if c == "\\" { escaped = true }
+            else if c == "\"" { break }
+            else { out.append(c) }
+            i = text.index(after: i)
+        }
+        let trimmed = out.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 
     private func fmt2(_ v: Double) -> String { String(format: "%.2f", v) }
