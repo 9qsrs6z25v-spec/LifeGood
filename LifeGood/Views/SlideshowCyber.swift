@@ -1235,6 +1235,114 @@ struct CyberHUD: View {
     }
 }
 
+// MARK: - 卡片用的靜態天際線（v25.504）
+
+/// 英雄卡底下那一層霓虹天際線。
+///
+/// 這是賽博龐克第一次走出動態相簿、進到 App 本身的畫面裡。規矩跟場景那一套
+/// 完全不同，因為它的工作不一樣：
+///
+/// 1. **完全靜態。** 動態相簿是一幅在看的畫，這裡是一張卡的底。會動的東西
+///    放在卡片底下只會搶走卡片上的字；而且這張卡在捲動清單的最上面，
+///    每秒重畫二十四次就是 v25.498 修掉的那個問題再來一次。
+/// 2. **只在下緣。** 卡片上半是標題與 KPI，天際線壓在底下三分之一，
+///    像城市落在卡片的地平線上。裝飾要知道自己是裝飾。
+/// 3. **透明度極低。** 整層最亮的東西也只有 0.3——它是質感，不是內容。
+///    看得出「這裡有一座城」就夠了，看清楚哪一棟是哪一棟就過頭了。
+struct CyberSkylineDecor: View {
+    /// 霓虹的主色。卡片自己是什麼色系，這座城就跟著偏那個色。
+    var tint: Color = CyberPalette.cyan
+    /// 整層的濃度
+    var strength: Double = 1.0
+
+    var body: some View {
+        Canvas { context, size in
+            draw(&context, size)
+        }
+        .allowsHitTesting(false)
+    }
+
+    private func draw(_ context: inout GraphicsContext, _ size: CGSize) {
+        guard size.width > 1, size.height > 1 else { return }
+        let skyline = size.height * 0.46          // 天際線最高到這裡
+        var random = InkRandom(70451)
+
+        // 兩排樓：遠的那排淡、矮、密；近的那排深、高、疏。
+        // 一排的天際線是一條鋸齒，兩排才有深度。
+        for row in 0..<2 {
+            let far = row == 0
+            let base = size.height * (far ? 0.80 : 1.02)
+            let minW = size.width * (far ? 0.035 : 0.055)
+            let varW = size.width * (far ? 0.030 : 0.060)
+            let maxH = size.height * (far ? 0.30 : 0.46)
+            var x: CGFloat = -size.width * 0.04
+
+            while x < size.width * 1.04 {
+                let w = minW + CGFloat(random.next()) * varW
+                // 高度不平均：大部分中等，偶爾一棟特別高。
+                // 平均分佈畫出來是柵欄，不是天際線。
+                let roll = random.next()
+                let tall = roll > 0.85 ? 1.0 : (roll > 0.5 ? 0.6 : 0.32)
+                let h = maxH * CGFloat(0.3 + tall * random.next() * 0.9)
+                let top = max(base - h, skyline * 0.2)
+                let rect = CGRect(x: x, y: top, width: w, height: size.height - top)
+
+                context.fill(Path(rect), with: .linearGradient(
+                    Gradient(colors: [
+                        Color.black.opacity((far ? 0.10 : 0.20) * strength),
+                        Color.black.opacity((far ? 0.03 : 0.08) * strength)]),
+                    startPoint: CGPoint(x: 0, y: top),
+                    endPoint: CGPoint(x: 0, y: size.height)))
+
+                // 屋頂那一道光邊：天際線要咬得出來才叫天際線
+                var edge = Path()
+                edge.move(to: CGPoint(x: rect.minX, y: top))
+                edge.addLine(to: CGPoint(x: rect.maxX, y: top))
+                context.stroke(edge,
+                               with: .color(tint.opacity((far ? 0.12 : 0.26) * strength)),
+                               style: StrokeStyle(lineWidth: 0.8))
+
+                windows(&context, in: rect, far: far, random: &random)
+                x += w + CGFloat(random.next()) * size.width * 0.012 + 1.5
+            }
+        }
+
+        // 地平線的輝光：城市的燈把下緣染開
+        context.drawLayer { layer in
+            layer.addFilter(.blur(radius: 12))
+            layer.fill(Path(CGRect(x: 0, y: size.height - 18,
+                                   width: size.width, height: 18)),
+                       with: .color(tint.opacity(0.16 * strength)))
+        }
+    }
+
+    /// 窗。遠的那排只點幾顆，近的那排排成格子——
+    /// 格子才讀得出「這棟有幾層」，而遠處本來就看不清楚。
+    private func windows(_ context: inout GraphicsContext, in rect: CGRect,
+                         far: Bool, random: inout InkRandom) {
+        guard rect.width > 5 else { return }
+        let cell = CGFloat(far ? 1.4 : 2.2)
+        let gapX = CGFloat(far ? 2.2 : 3.0)
+        let gapY = CGFloat(far ? 2.6 : 3.6)
+        var y = rect.minY + 3
+        while y + cell < rect.maxY, y < rect.minY + 90 {
+            var x = rect.minX + 2
+            while x + cell < rect.maxX - 2 {
+                if random.next() < (far ? 0.26 : 0.34) {
+                    let warm = random.next()
+                    let color = warm < 0.72 ? CyberPalette.amber : tint
+                    context.fill(
+                        Path(CGRect(x: x, y: y, width: cell, height: cell * 1.3)),
+                        with: .color(color.opacity((far ? 0.18 : 0.30) * strength
+                                                   * (0.5 + random.next() * 0.5))))
+                }
+                x += cell + gapX
+            }
+            y += cell * 1.3 + gapY
+        }
+    }
+}
+
 // MARK: - 照片進場
 
 /// 賽博龐克版的三秒淡入：**訊號對焦**。

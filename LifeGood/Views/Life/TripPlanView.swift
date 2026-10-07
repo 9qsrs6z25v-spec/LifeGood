@@ -555,8 +555,17 @@ struct TripPlanDetailView: View {
         }
         .padding(.horizontal, 20).padding(.vertical, 18)
         // 共用英雄卡殼層：漸層、散景圓、玻璃光澤、圓角與光暈都走同一套，
-        // 也才能在「設定 › 進階設定 › 卡片設定 › 英雄卡樣式」裡逐卡調整
-        .heroCardShell(card: .tripPlan)
+        // 也才能在「設定 › 進階設定 › 卡片設定 › 英雄卡樣式」裡逐卡調整。
+        //
+        // [v25.504] 多了一層霓虹天際線（使用者：「可以開始做一些藝術元素了」）。
+        // 走的是殼層本來就留好的 extraBackground 插槽——不是另外疊一個背景，
+        // 所以漸層、散景、光澤、圓角、陰影全部照舊，逐卡設定也照樣有效。
+        //
+        // 擺在旅遊卡而不是全部的卡：一座城市落在「行程」的地平線上是說得通的，
+        // 落在「本月支出」上就只是貼圖。藝術元素要跟它待的地方有關係。
+        .heroCardShell(card: .tripPlan) {
+            CyberSkylineDecor(tint: CyberPalette.cyan, strength: 0.85)
+        }
         .padding(.horizontal, 16)
     }
 
@@ -822,7 +831,12 @@ struct TripPlanDetailView: View {
     private func stopSpendAmount(_ stopId: UUID) -> String? {
         let list = stopExpenses(stopId)
         guard !list.isEmpty, expenseStore.ntdTotal(list) > 0 else { return nil }
+        // [v25.504] 時間欄只有 46pt，「NT$1,014」八個字塞不進去，
+        // 原本是靠 minimumScaleFactor 硬縮——縮過的字跟同一欄的其他數字
+        // 不一樣大，一眼就看得出是擠出來的。這一欄的金額一律是台幣，
+        // 「NT」兩個字在這裡不帶任何資訊，拿掉就剛好。
         return expenseStore.ntdTotalText(list)
+            .replacingOccurrences(of: "NT$", with: "$")
     }
 
     /// 掛在這趟上的花費（新到舊）
@@ -1299,7 +1313,7 @@ struct TripPlanDetailView: View {
             // 「THE ROYAL PARL CANVAS FUKUOKA NAKASU」因此排得進一行。
             if showsCheckIn(slot) {
                 checkInButton(slot)
-                    .padding(.bottom, 2)
+                    .padding(.bottom, 6)
             }
             HStack(spacing: 2) {
                 // 指定抵達時間的站加一個鎖，跟推算出來的時間區分開
@@ -1349,9 +1363,12 @@ struct TripPlanDetailView: View {
                                                   date: slot.arrival)
             } label: {
                 Image(systemName: "cart.badge.plus")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.green)
-                    .padding(.top, 3)
+                    .font(.system(size: 12.5, weight: .semibold))
+                    // 已經有金額時，購物車是「再記一筆」——退成淡綠不要跟
+                    // 金額搶；還沒有金額時它是這一欄唯一的綠色，維持原樣。
+                    .foregroundStyle(stopSpendAmount(slot.stop.id) == nil
+                                     ? Color.green : Color.green.opacity(0.55))
+                    .padding(.top, stopSpendAmount(slot.stop.id) == nil ? 7 : 3)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
