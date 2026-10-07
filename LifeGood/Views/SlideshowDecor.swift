@@ -32,7 +32,7 @@ struct InkLandscapeView: View {
             TimelineView(.periodic(from: .now, by: 1.0 / 24.0)) { timeline in
                 Canvas { context, size in
                     let t = timeline.date.timeIntervalSinceReferenceDate
-                    InkScene.draw(&context, size: size, time: t, rawDensity: density)
+                    InkScene.draw(&context, size: size, time: t, density: density)
                 }
             }
             .ignoresSafeArea()
@@ -134,10 +134,11 @@ enum InkScene {
     private static let layers = 5
 
     static func draw(_ context: inout GraphicsContext, size: CGSize,
-                     time: Double, rawDensity: Double) {
-        // [v25.494] 墨色每兩分鐘極慢地濃淡一次（±7%）。
-        // 固定濃度的畫面看久了會「平」——真的墨會隨著紙的濕度與光線變。
-        let density = rawDensity * (1 + 0.07 * sin(time / 115))
+                     time: Double, density: Double) {
+        // [v25.496] v25.494 讓整幅畫的墨色每兩分鐘濃淡一次（±7%），理由是
+        // 「固定濃度看久了會平」。那個理由站不住：畫掛在牆上，墨不會自己變淡。
+        // 而且那個係數是乘在**所有東西**上的，包括山——等於山也在呼吸。
+        // 畫面要活，靠的是會動的東西真的在動，不是讓不動的東西微微發抖。
         // 水面在這個高度，近山要在它上面
         let waterY = size.height * 0.80
 
@@ -190,13 +191,19 @@ enum InkScene {
 
     /// 稜線高度。四個八度疊加，頻率用非整數倍——整數倍會讓波形週期性重複，
     /// 一眼就看出是公式畫的。
-    private static func ridgeY(_ u: Double, layer: Int, drift: Double,
+    /// [v25.496] 拿掉了 drift 參數。
+    ///
+    /// 原本每一層山的波形都隨時間推移（越近的推得越快，想做出視差），
+    /// 結果是**山的形狀一直在變**——稜線會長出新的峰、舊的峰會縮回去。
+    /// 使用者講得很準：會動的應該限制在小東西，樹、花草、落葉；山不會動。
+    /// 山是一幅畫裡唯一的定點，它一動，前面所有「這是一幅畫」的功夫都白做了。
+    private static func ridgeY(_ u: Double, layer: Int,
                                baseY: CGFloat, amp: CGFloat) -> CGFloat {
         var value = 0.0
         var weight = 1.0
         var freq = 1.5
         for octave in 0..<4 {
-            let phase = drift * (1 + Double(octave) * 0.22) + Double(layer) * 5.7 + Double(octave) * 2.3
+            let phase = Double(layer) * 5.7 + Double(octave) * 2.3
             value += weight * sin((u * freq + phase) * .pi)
             weight *= 0.5
             freq *= 2.13
@@ -207,7 +214,7 @@ enum InkScene {
         return baseY - amp * CGFloat(shaped)
     }
 
-    private static func ridgePath(_ size: CGSize, layer: Int, drift: Double,
+    private static func ridgePath(_ size: CGSize, layer: Int,
                                   baseY: CGFloat, amp: CGFloat,
                                   bottom: CGFloat) -> (Path, Path) {
         var fill = Path()
@@ -218,7 +225,7 @@ enum InkScene {
         var first = true
         while x <= size.width {
             let y = ridgeY(Double(x / max(size.width, 1)), layer: layer,
-                           drift: drift, baseY: baseY, amp: amp)
+                           baseY: baseY, amp: amp)
             fill.addLine(to: CGPoint(x: x, y: y))
             if first {
                 crest.move(to: CGPoint(x: x, y: y))
@@ -238,10 +245,9 @@ enum InkScene {
         let depth = Double(layer) / Double(layers - 1)       // 0＝最遠
         let baseY = size.height * CGFloat(0.30 + 0.34 * depth)
         let amp = size.height * CGFloat(0.075 + 0.055 * (1 - depth))
-        let drift = time * (1.1 + Double(layer) * 2.0) / 140.0
         let bottom = layer == layers - 1 ? size.height : waterY + size.height * 0.06
 
-        let (fill, crest) = ridgePath(size, layer: layer, drift: drift,
+        let (fill, crest) = ridgePath(size, layer: layer,
                                       baseY: baseY, amp: amp, bottom: bottom)
 
         // 山體：從稜線往下暈開
@@ -262,7 +268,7 @@ enum InkScene {
             var points: [CGPoint] = []
             while x <= size.width {
                 let u = Double(x / max(size.width, 1))
-                let y = ridgeY(u, layer: layer, drift: drift, baseY: baseY, amp: amp)
+                let y = ridgeY(u, layer: layer, baseY: baseY, amp: amp)
                 points.append(CGPoint(x: x, y: y))
                 x += step
             }
@@ -303,7 +309,7 @@ enum InkScene {
             for i in 0...segments {
                 let u = Double(i) / Double(segments)
                 let point = CGPoint(x: CGFloat(u) * size.width,
-                                    y: ridgeY(u, layer: layer, drift: drift,
+                                    y: ridgeY(u, layer: layer,
                                               baseY: baseY, amp: amp))
                 defer { previous = point }
                 guard let start = previous else { continue }
@@ -333,7 +339,7 @@ enum InkScene {
             for _ in 0..<count {
                 let u = random.next()
                 let x = CGFloat(u) * size.width
-                let top = ridgeY(u, layer: layer, drift: drift, baseY: baseY, amp: amp)
+                let top = ridgeY(u, layer: layer, baseY: baseY, amp: amp)
                 let length = CGFloat(10 + random.next() * 26) * CGFloat(0.6 + depth)
                 guard top + length < bottom else { continue }
                 var stroke = Path()
@@ -345,21 +351,26 @@ enum InkScene {
                                with: .color(.black.opacity((0.05 + random.next() * 0.10) * density)),
                                style: StrokeStyle(lineWidth: 0.8, lineCap: .round))
             }
-            // 松樹長在稜線上，跟著山一起飄
+            // [v25.496] 松樹長在稜線上，位置固定；會動的是枝葉。
+            // 每棵的相位錯開——整排一起晃就像被按了同一個開關。
             if layer == layers - 1 {
                 for (i, u) in [0.17, 0.235, 0.80, 0.86].enumerated() {
                     let x = CGFloat(u) * size.width
-                    let y = ridgeY(u, layer: layer, drift: drift, baseY: baseY, amp: amp)
+                    let y = ridgeY(u, layer: layer, baseY: baseY, amp: amp)
+                    let sway = CGFloat(sin(time * 0.45 + Double(i) * 1.7) * 1.1
+                                       + sin(time * 0.27 + Double(i) * 0.9) * 0.7)
                     pine(&context, at: CGPoint(x: x, y: y + 1),
-                         scale: 0.85 + CGFloat(i % 2) * 0.35, density: density)
+                         scale: 0.85 + CGFloat(i % 2) * 0.35,
+                         density: density, sway: sway)
                 }
             }
         }
     }
 
     /// 一棵松：一條微彎的幹，三層往下垂的枝。
+    /// `sway` 是這一瞬間風吹的幅度（點）——根不動，越往梢擺得越多。
     private static func pine(_ context: inout GraphicsContext, at base: CGPoint,
-                             scale: CGFloat, density: Double) {
+                             scale: CGFloat, density: Double, sway: CGFloat) {
         // [v25.495] 幹改成會收鋒的一筆。等粗的 1.5pt 直線在真機上像一根天線，
         // 樹幹本來就是下粗上細的。
         let h = 30 * scale
@@ -367,22 +378,26 @@ enum InkScene {
         InkBrush.taper(&context,
                        from: base,
                        control1: CGPoint(x: base.x - 2.4 * scale, y: base.y - h * 0.45),
-                       control2: CGPoint(x: base.x + 1.2 * scale, y: base.y - h * 0.8),
-                       to: CGPoint(x: base.x + 2 * scale, y: base.y - h),
+                       control2: CGPoint(x: base.x + 1.2 * scale + sway * 0.5,
+                                         y: base.y - h * 0.8),
+                       to: CGPoint(x: base.x + 2 * scale + sway, y: base.y - h),
                        startWidth: 2.6 * scale, endWidth: 0.7 * scale, color: ink)
 
         for i in 0..<3 {
             let level = base.y - h * (0.5 + 0.18 * CGFloat(i))
             let span = (13 - CGFloat(i) * 2.6) * scale
             // 一層枝葉分左右兩筆，各自從幹上收出去
+            // 高處的枝擺得比低處多（0.4→0.9），一棵樹才不是整塊在平移
+            let reach = sway * (0.4 + 0.25 * CGFloat(i))
             for side in [CGFloat(-1), 1] {
                 InkBrush.taper(&context,
-                               from: CGPoint(x: base.x, y: level + 2 * scale),
-                               control1: CGPoint(x: base.x + side * span * 0.4,
+                               from: CGPoint(x: base.x + reach * 0.2, y: level + 2 * scale),
+                               control1: CGPoint(x: base.x + side * span * 0.4 + reach * 0.5,
                                                 y: level - 2 * scale),
-                               control2: CGPoint(x: base.x + side * span * 0.8,
+                               control2: CGPoint(x: base.x + side * span * 0.8 + reach * 0.8,
                                                 y: level + 1 * scale),
-                               to: CGPoint(x: base.x + side * span, y: level + 4 * scale),
+                               to: CGPoint(x: base.x + side * span + reach,
+                                           y: level + 4 * scale),
                                startWidth: 2.0 * scale, endWidth: 0.5 * scale,
                                color: ink.opacity(0.82))
             }
@@ -434,7 +449,6 @@ enum InkScene {
     /// 水面：近山的倒影（翻過來、更淡、糊掉）＋幾道留白橫紋。
     private static func water(_ context: inout GraphicsContext, _ size: CGSize,
                               time: Double, density: Double, waterY: CGFloat) {
-        let drift = time * (1.1 + Double(layers - 1) * 2.0) / 140.0
         let baseY = size.height * CGFloat(0.30 + 0.34 * 1.0)
         let amp = size.height * 0.075
 
@@ -446,8 +460,8 @@ enum InkScene {
             var x: CGFloat = 0
             while x <= size.width {
                 let u = Double(x / max(size.width, 1))
-                let y = ridgeY(u, layer: layers - 1,
-                               drift: drift, baseY: baseY, amp: amp)
+                // 倒影照的是那座不動的山；會晃的是水面，不是山
+                let y = ridgeY(u, layer: layers - 1, baseY: baseY, amp: amp)
                 // [v25.494] 水面會晃：倒影不是鏡子，是一面在動的水。
                 // 不加這個扭曲，倒影看起來就是把山貼過去而已。
                 let ripple = CGFloat(sin(u * 11 + time * 1.3) * 2.2
@@ -882,12 +896,8 @@ struct InkForegroundView: View {
 
     var body: some View {
         ZStack {
-            // 梅枝不會動，單獨一層只畫一次
-            Canvas { context, size in
-                InkForeground.plumBranch(&context, size, density: density)
-            }
-            .ignoresSafeArea()
-
+            // [v25.496] 梅枝從「只畫一次的靜態層」搬進會動的這一層。
+            // 山不動了，但樹該動——一枝梅垂在鏡頭前紋風不動才是最假的。
             TimelineView(.periodic(from: .now, by: 1.0 / 24.0)) { timeline in
                 Canvas { context, size in
                     let t = timeline.date.timeIntervalSinceReferenceDate
@@ -907,6 +917,7 @@ struct InkForegroundView: View {
 enum InkForeground {
     static func draw(_ context: inout GraphicsContext, size: CGSize,
                      time: Double, density: Double) {
+        plumBranch(&context, size, time: time, density: density)
         reeds(&context, size, time: time, density: density)
         nearMist(&context, size, time: time)
         nearPetals(&context, size, time: time)
@@ -917,7 +928,7 @@ enum InkForeground {
     /// 右上角的梅枝。v25.492 之前它在背景層——那等於照片蓋在樹枝上，
     /// 樹明明比山近。搬到前面之後，花枝是垂在照片上的。
     static func plumBranch(_ context: inout GraphicsContext, _ size: CGSize,
-                           density: Double) {
+                           time: Double, density: Double) {
         // [v25.495] 枝子改成會收鋒的筆畫。
         //
         // 上一版是三條等粗的 stroke 加七個正紅圓點——真機上看就是一張
@@ -927,58 +938,70 @@ enum InkForeground {
         let w = size.width
         let h = size.height
 
+        // [v25.496] 風。兩個週期疊起來（約 22 秒與 37 秒），不會數出節奏。
+        // 幅度只有四個點上下——枝子是木頭，不是旗子。
+        let sway = CGFloat(sin(time * 0.28) * 2.4 + sin(time * 0.17 + 1.3) * 1.3)
+
+        /// 枝上某一點被風吹到哪。
+        /// `flex` 是「離固定端多遠」：主幹跟畫面外的樹連著，那一頭不動（0），
+        /// 越往梢越軟（1 以上）。木頭主要是上下擺，所以 y 給足、x 只給六成。
+        func bend(_ ux: CGFloat, _ uy: CGFloat, _ flex: CGFloat) -> CGPoint {
+            CGPoint(x: w * ux + sway * flex * 0.6, y: h * uy + sway * flex)
+        }
+
         // 主幹：從畫面外伸進來，越往裡越細
         InkBrush.taper(&context,
-                       from: CGPoint(x: w * 1.04, y: h * 0.008),
-                       control1: CGPoint(x: w * 0.93, y: h * 0.048),
-                       control2: CGPoint(x: w * 0.78, y: h * 0.072),
-                       to: CGPoint(x: w * 0.60, y: h * 0.195),
+                       from: bend(1.04, 0.008, 0),
+                       control1: bend(0.93, 0.048, 0.25),
+                       control2: bend(0.78, 0.072, 0.60),
+                       to: bend(0.60, 0.195, 1.00),
                        startWidth: 7.0, endWidth: 1.1, color: ink, steps: 30)
 
         // 往下垂的側枝
         InkBrush.taper(&context,
-                       from: CGPoint(x: w * 0.875, y: h * 0.060),
-                       control1: CGPoint(x: w * 0.885, y: h * 0.120),
-                       control2: CGPoint(x: w * 0.845, y: h * 0.180),
-                       to: CGPoint(x: w * 0.795, y: h * 0.238),
+                       from: bend(0.875, 0.060, 0.35),
+                       control1: bend(0.885, 0.120, 0.60),
+                       control2: bend(0.845, 0.180, 0.90),
+                       to: bend(0.795, 0.238, 1.15),
                        startWidth: 3.2, endWidth: 0.6, color: ink.opacity(0.88))
 
         // 往上翹的側枝（梅的枝一定有往上衝的那一條，全部下垂就是柳）
         InkBrush.taper(&context,
-                       from: CGPoint(x: w * 0.745, y: h * 0.126),
-                       control1: CGPoint(x: w * 0.688, y: h * 0.108),
-                       control2: CGPoint(x: w * 0.676, y: h * 0.078),
-                       to: CGPoint(x: w * 0.662, y: h * 0.044),
+                       from: bend(0.745, 0.126, 0.55),
+                       control1: bend(0.688, 0.108, 0.80),
+                       control2: bend(0.676, 0.078, 1.00),
+                       to: bend(0.662, 0.044, 1.20),
                        startWidth: 2.8, endWidth: 0.5, color: ink.opacity(0.88))
 
         // 小枝：短、細、方向亂一點
         InkBrush.taper(&context,
-                       from: CGPoint(x: w * 0.818, y: h * 0.088),
-                       control1: CGPoint(x: w * 0.845, y: h * 0.070),
-                       control2: CGPoint(x: w * 0.872, y: h * 0.056),
-                       to: CGPoint(x: w * 0.902, y: h * 0.040),
+                       from: bend(0.818, 0.088, 0.45),
+                       control1: bend(0.845, 0.070, 0.58),
+                       control2: bend(0.872, 0.056, 0.70),
+                       to: bend(0.902, 0.040, 0.80),
                        startWidth: 1.9, endWidth: 0.4, color: ink.opacity(0.75))
 
-        // 花：半徑、轉角、濃淡都不一樣。花苞（小而濃）混在裡面，
-        // 整枝才有「開到一半」的樣子——全部盛開是塑膠花。
-        let blossoms: [(CGFloat, CGFloat, CGFloat, Double, Double)] = [
-            (0.662, 0.044, 6.2, 0.4, 1.00),
-            (0.716, 0.124, 5.0, 1.9, 0.92),
-            (0.795, 0.238, 5.6, 2.7, 0.96),
-            (0.852, 0.112, 4.3, 0.9, 0.85),
-            (0.902, 0.040, 5.4, 3.5, 0.90),
-            (0.812, 0.068, 3.6, 1.3, 0.78),
-            (0.762, 0.170, 4.0, 2.2, 0.88)
+        // 花：半徑、轉角、濃淡都不一樣，而且各自長在枝的哪一段（flex）
+        // 要跟上面對得起來，不然風一吹花會從枝子上飛出去。
+        // 花苞（小而濃）混在裡面，整枝才有「開到一半」的樣子——全部盛開是塑膠花。
+        let blossoms: [(CGFloat, CGFloat, CGFloat, CGFloat, Double, Double)] = [
+            (0.662, 0.044, 1.20, 6.2, 0.4, 1.00),
+            (0.716, 0.124, 0.85, 5.0, 1.9, 0.92),
+            (0.795, 0.238, 1.15, 5.6, 2.7, 0.96),
+            (0.852, 0.112, 0.62, 4.3, 0.9, 0.85),
+            (0.902, 0.040, 0.80, 5.4, 3.5, 0.90),
+            (0.812, 0.068, 0.45, 3.6, 1.3, 0.78),
+            (0.762, 0.170, 0.75, 4.0, 2.2, 0.88)
         ]
-        for (ux, uy, r, rotation, tone) in blossoms {
-            InkBrush.plumBlossom(&context, at: CGPoint(x: w * ux, y: h * uy),
+        for (ux, uy, flex, r, rotation, tone) in blossoms {
+            InkBrush.plumBlossom(&context, at: bend(ux, uy, flex),
                                  radius: r, rotation: rotation, tone: tone * density)
         }
 
         // 花苞：兩個，小小一點紅，枝梢上
-        for (ux, uy, r) in [(CGFloat(0.638), CGFloat(0.168), CGFloat(2.4)),
-                            (CGFloat(0.868), CGFloat(0.168), CGFloat(2.0))] {
-            let c = CGPoint(x: w * ux, y: h * uy)
+        for (ux, uy, flex, r) in [(CGFloat(0.638), CGFloat(0.168), CGFloat(1.10), CGFloat(2.4)),
+                                  (CGFloat(0.868), CGFloat(0.168), CGFloat(0.95), CGFloat(2.0))] {
+            let c = bend(ux, uy, flex)
             context.fill(Path(ellipseIn: CGRect(x: c.x - r, y: c.y - r,
                                                 width: r * 2, height: r * 2)),
                          with: .color(Color(red: 0.66, green: 0.12, blue: 0.18)
