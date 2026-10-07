@@ -491,7 +491,10 @@ struct StockDetailView: View {
                 }
                 Spacer()
                 Text(isCash
-                     ? stock.priceCurrencySymbol + Self.num(d.cashTotal.rounded())
+                     // [v25.510] 不要 .rounded()。台股配息動輒上千，少個一塊
+                     // 看不出來；美股一筆才十幾美元，US$16.63 捨成 US$17
+                     // 等於憑空多了 2% ——幣值越小，分位越不能丟。
+                     ? fmtTrade(d.cashTotal)
                      : "+\(Self.num(d.sharesEarned)) 股")
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(color)
@@ -922,7 +925,13 @@ struct StockDetailView: View {
             .reduce(0.0) { $0 + $1.cashTotal }
         var parts: [String] = []
         if stockCount > 0 { parts.append("\(stockCount) 次配股") }
-        if totalCash > 0 { parts.append("配息 \(fmt(totalCash))") }
+        // [v25.510] 用 fmtTrade 不是 fmt。
+        //
+        // StockDividend.cashTotal ＝ perShare × sharesAtEvent，**沒有乘匯率**，
+        // 所以它是原幣別（美股＝美元）。fmt 走的是 ntdWanString，字頭寫死 NT$
+        // 又會四捨五入到整數——美股的 US$16.63 就被印成「NT$17」，
+        // 幣別錯了，連分也不見了。
+        if totalCash > 0 { parts.append("配息 \(fmtTrade(totalCash))") }
         return parts.isEmpty ? "0 筆" : parts.joined(separator: "・")
     }
 
@@ -1027,7 +1036,8 @@ struct StockDetailView: View {
                         Text("累計配息").font(.caption2).foregroundStyle(.secondary)
                     }
                     Spacer()
-                    Text(fmt(cashTotal))
+                    // [v25.510] 同上：配息是原幣別，不能用 NT$ 的格式器
+                    Text(fmtTrade(cashTotal))
                         .font(.caption.weight(.bold))
                         .padding(.horizontal, 8).padding(.vertical, 3)
                         .background(Color.pink.opacity(0.09))
