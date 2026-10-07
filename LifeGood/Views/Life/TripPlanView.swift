@@ -1508,12 +1508,13 @@ struct TripPlanDetailView: View {
             // 整片看起來像沒對齊的格線。
             showsSeparator: true,
             separatorInset: 0,
+            // [v25.509] 底圖要交給 ItemRow 畫，不能在外面掛 .background——
+            // ItemRow 自己鋪了一層不透明的 systemBackground，外面那層會被
+            // 整個蓋掉（25.507 與 25.508 兩版的藝術層都是這樣消失的）。
+            backdrop: AnyView(stopArtLayer(slot, color: c)),
             leading: { timeColumn },
             accessory: { stopAccessory(slot) }
         )
-        .background { stopArtLayer(slot, color: c) }
-        // 幽靈編號比列還高，不裁掉會溢到上下兩站去
-        .clipped()
         .padding(.horizontal, 16)
         // [v25.479] 整列是放置目標：把別站拖過來就插在這一站的位置
         .dropDestination(for: String.self) { items, _ in
@@ -1657,7 +1658,9 @@ struct TripPlanDetailView: View {
                     startPoint: .zero, endPoint: CGPoint(x: size.width, y: 0)),
                                style: StrokeStyle(lineWidth: 0.8))
             }
-            .frame(width: 124, height: 48)
+            // 量過真機：一站的右下角大約空著 130pt 寬、50pt 高。
+            // 124×48 剛好只能貼在角落，像一張郵票；撐到 164×56 才像一個街角。
+            .frame(width: 164, height: 56)
             .allowsHitTesting(false)
         }
     }
@@ -1680,6 +1683,10 @@ struct TripPlanDetailView: View {
             }
             StopCityCorner(color: c, seed: slot.index)
         }
+        // 一定要自己撐滿並靠右下。沒打卡的站沒有那層漸層，ZStack 會縮到
+        // 街角那麼大，然後被置中——城市就跑到列的正中間去了。
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+        .clipped()
         .allowsHitTesting(false)
     }
 

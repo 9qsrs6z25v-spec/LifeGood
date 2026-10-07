@@ -155,6 +155,15 @@ struct ItemRow<Leading: View, Accessory: View>: View {
     /// 14＝切齊內容（iOS 原生清單的樣子）；0＝整條貫穿。
     var separatorInset: CGFloat = 14
 
+    /// [v25.509] 列的底圖（畫在不透明底色之上、內容之下）。
+    ///
+    /// 為什麼非得開這個參數不可：ItemRow **自己就鋪了一層不透明的
+    /// `Color(.systemBackground)`**。呼叫端在外面掛 `.background { … }`
+    /// 是沒有用的——那一層被壓在這張白紙底下，一個像素都看不到。
+    /// v25.507／25.508 的藝術層就是這樣整整兩版都沒畫出來，
+    /// 而我每一版都說「推上去了」。
+    var backdrop: AnyView?
+
     @ViewBuilder var leading: () -> Leading
     @ViewBuilder var accessory: () -> Accessory
 
@@ -175,6 +184,7 @@ struct ItemRow<Leading: View, Accessory: View>: View {
          spansTitle: Bool = false, titleLeading: AnyView? = nil,
          bodyInset: CGFloat = 0,
          showsSeparator: Bool = false, separatorInset: CGFloat = 14,
+         backdrop: AnyView? = nil,
          @ViewBuilder leading: @escaping () -> Leading,
          @ViewBuilder accessory: @escaping () -> Accessory) {
         self.chips = chips
@@ -198,6 +208,7 @@ struct ItemRow<Leading: View, Accessory: View>: View {
         self.bodyInset = bodyInset
         self.showsSeparator = showsSeparator
         self.separatorInset = separatorInset
+        self.backdrop = backdrop
         self.leading = leading
         self.accessory = accessory
     }
@@ -212,7 +223,14 @@ struct ItemRow<Leading: View, Accessory: View>: View {
                     .padding(.leading, separatorInset)
             }
         }
-        .background(Color(.systemBackground))
+        .background {
+            // 底色仍然不透明（清單要靠它蓋住捲動時後面的東西），
+            // 底圖疊在它上面、內容下面。
+            ZStack {
+                Color(.systemBackground)
+                if let backdrop { backdrop }
+            }
+        }
         .contentShape(Rectangle())
         .onTapGesture { onTap?() }
     }
