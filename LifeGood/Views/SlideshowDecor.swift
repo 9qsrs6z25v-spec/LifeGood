@@ -858,11 +858,27 @@ struct WallCard: View {
     let container: CGSize
     /// 0＝最新落下的那一張
     let age: Int
+    /// [v25.497] 相框照主題換。版型（落點、角度、呼吸、老化）是共用的——
+    /// 那一層講的是「照片怎麼擺在一個畫面裡」，跟畫的是山還是街無關。
+    var theme: SlideshowTheme = .ink
 
     @State private var breathing = false
 
+    @ViewBuilder
+    private var framed: some View {
+        switch theme {
+        case .ink:
+            InkFramedPhoto(image: item.image, size: cardSize)
+        case .cyber:
+            CyberFramedPhoto(image: item.image, size: cardSize,
+                             tag: String(format: "%02d / %02d",
+                                         item.slot % WallLayout.capacity + 1,
+                                         WallLayout.capacity))
+        }
+    }
+
     var body: some View {
-        InkFramedPhoto(image: item.image, size: cardSize)
+        framed
             .rotationEffect(.degrees(WallLayout.rotation(slot: item.slot)
                                      + (breathing ? 0.9 : -0.9)))
             .scaleEffect((breathing ? 1.005 : 0.995) * (age == 0 ? 1.0 : 0.97))

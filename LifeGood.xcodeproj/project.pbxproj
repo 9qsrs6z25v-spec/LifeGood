@@ -21,6 +21,7 @@
 		A01B000001001507 /* PhotoSlideshowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001507 /* PhotoSlideshowView.swift */; };
 		A01B000001001508 /* BeatDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001508 /* BeatDetector.swift */; };
 		A01B000001001509 /* SlideshowDecor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001509 /* SlideshowDecor.swift */; };
+		A01B000001001510 /* SlideshowCyber.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001510 /* SlideshowCyber.swift */; };
 		A01B000002000020 /* LifeGoodWidgets.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = A01A000002000100 /* LifeGoodWidgets.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		A01B000001000001 /* LifeGoodApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000001 /* LifeGoodApp.swift */; };
 		A01B000001000002 /* Expense.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000002 /* Expense.swift */; };
@@ -190,6 +191,7 @@
 		A01A000002000008 /* PhotoImportAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoImportAttributes.swift; sourceTree = "<group>"; };
 		A01A000002000007 /* PhotoImportLiveActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoImportLiveActivity.swift; sourceTree = "<group>"; };
 		A01A000001001509 /* SlideshowDecor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SlideshowDecor.swift; sourceTree = "<group>"; };
+		A01A000001001510 /* SlideshowCyber.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SlideshowCyber.swift; sourceTree = "<group>"; };
 		A01A000001001508 /* BeatDetector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BeatDetector.swift; sourceTree = "<group>"; };
 		A01A000001001507 /* PhotoSlideshowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoSlideshowView.swift; sourceTree = "<group>"; };
 		A01A000001001506 /* PhotoImportCenter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoImportCenter.swift; sourceTree = "<group>"; };
@@ -459,6 +461,7 @@
 				A01A000001000207 /* MapAlbumSheet.swift */,
 				A01A000001001507 /* PhotoSlideshowView.swift */,
 				A01A000001001509 /* SlideshowDecor.swift */,
+				A01A000001001510 /* SlideshowCyber.swift */,
 				A01A000001000223 /* WhatsNewView.swift */,
 				A01A000001000208 /* QuickPickCapsules.swift */,
 				A01A000001000209 /* HeroTrendChart.swift */,
@@ -787,6 +790,7 @@
 				A01B000001001506 /* PhotoImportCenter.swift in Sources */,
 				A01B000001001507 /* PhotoSlideshowView.swift in Sources */,
 				A01B000001001509 /* SlideshowDecor.swift in Sources */,
+				A01B000001001510 /* SlideshowCyber.swift in Sources */,
 				A01B000001001508 /* BeatDetector.swift in Sources */,
 				A01B000001000040 /* EInvoiceClient.swift in Sources */,
 				A01B000001000041 /* InvoiceCategorizer.swift in Sources */,
@@ -828,7 +832,7 @@
 			buildSettings = {
 				CLANG_ENABLE_MODULES = YES;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1249;
+				CURRENT_PROJECT_VERSION = 1250;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = LifeGoodWidgets/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "美好人生";
@@ -839,7 +843,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 25.496;
+				MARKETING_VERSION = 25.497;
 				PRODUCT_BUNDLE_IDENTIFIER = com.lifegood.app.widgets;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
@@ -854,7 +858,7 @@
 			buildSettings = {
 				CLANG_ENABLE_MODULES = YES;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1249;
+				CURRENT_PROJECT_VERSION = 1250;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = LifeGoodWidgets/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "美好人生";
@@ -865,7 +869,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 25.496;
+				MARKETING_VERSION = 25.497;
 				PRODUCT_BUNDLE_IDENTIFIER = com.lifegood.app.widgets;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
@@ -882,7 +886,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = LifeGood/LifeGood.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1249;
+				CURRENT_PROJECT_VERSION = 1250;
 				DEVELOPMENT_ASSET_PATHS = "\"LifeGood/Preview Content\"";
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -915,7 +919,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 25.496;
+				MARKETING_VERSION = 25.497;
 				PRODUCT_BUNDLE_IDENTIFIER = com.lifegood.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -931,7 +935,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = LifeGood/LifeGood.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1249;
+				CURRENT_PROJECT_VERSION = 1250;
 				DEVELOPMENT_ASSET_PATHS = "\"LifeGood/Preview Content\"";
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -964,7 +968,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 25.496;
+				MARKETING_VERSION = 25.497;
 				PRODUCT_BUNDLE_IDENTIFIER = com.lifegood.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;

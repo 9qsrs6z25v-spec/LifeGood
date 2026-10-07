@@ -191,6 +191,64 @@ struct MusicPickerSheet: UIViewControllerRepresentable {
 
 // MARK: - 幻燈片本體
 
+/// 主題（v25.497）。
+///
+/// 一套主題不是換配色，是換一整個世界：背景、前景、相框、落款、照片怎麼出現，
+/// 全部都要照那個世界的物理重做一次。所以這裡只會有少數幾套，
+/// 每一套都做到站得住為止。
+enum SlideshowTheme: String, CaseIterable, Identifiable {
+    /// 水墨山水（v25.489～25.496）
+    case ink
+    /// 賽博龐克（v25.497）
+    case cyber
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .ink:   return "水墨山水"
+        case .cyber: return "賽博龐克"
+        }
+    }
+
+    var detail: String {
+        switch self {
+        case .ink:   return "宣紙、遠山、落梅，照片一張張落在紙上"
+        case .cyber: return "夜雨、霓虹、濕地面，照片懸在街上的全像面板裡"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .ink:   return "mountain.2.fill"
+        case .cyber: return "building.2.fill"
+        }
+    }
+
+    /// 底是亮的還是暗的。字、膠囊、罩子全看這一個。
+    var isLight: Bool { self == .ink }
+
+    /// 壓在背景上的文字顏色
+    var onBackdrop: Color {
+        isLight ? Color(red: 0.13, green: 0.13, blue: 0.15) : .white
+    }
+
+    /// 膠囊按鈕的底色
+    var chipFill: Color {
+        isLight ? Color.black.opacity(0.10) : Color.white.opacity(0.16)
+    }
+
+    /// 上下兩條漸層罩的顏色。亮底要用白罩——黑罩會把整幅畫壓成灰的；
+    /// 暗底反過來，白罩會讓夜景整個發灰。
+    var veil: Color { isLight ? .white : .black }
+
+    /// 開場那張紙（或面板）的底色
+    var sheet: Color {
+        isLight ? Color(red: 0.96, green: 0.95, blue: 0.93)
+                : Color(red: 0.04, green: 0.04, blue: 0.07)
+    }
+}
+
 /// 播放順序（v25.495）。
 ///
 /// 三種順序講的是三種看相簿的方式，不是三種排序演算法：
@@ -282,10 +340,18 @@ struct PhotoSlideshowView: View {
         "\(index)#\(started)#\(queue.count)#\(queue.first?.id ?? "")"
     }
 
-    // [v25.490] 使用者定案：水墨山水 ＋ 水墨相框 ＋ 拼貼牆，其餘樣式全部移除。
-    // 背景永遠是宣紙色的亮底，所以文字一律用深墨色。
-    private var onBackdrop: Color { Color(red: 0.13, green: 0.13, blue: 0.15) }
-    private var chipFill: Color { Color.black.opacity(0.10) }
+    // [v25.497] 顏色跟著主題走。
+    //
+    // v25.490 曾經把這兩個寫死成亮底的值，理由是「背景永遠是宣紙」——
+    // 當時只有一套主題，那是對的。現在有第二套暗底的，就得還給主題決定。
+    @AppStorage("slideshow_theme") private var themeRaw = SlideshowTheme.ink.rawValue
+
+    private var theme: SlideshowTheme {
+        SlideshowTheme(rawValue: themeRaw) ?? .ink
+    }
+
+    private var onBackdrop: Color { theme.onBackdrop }
+    private var chipFill: Color { theme.chipFill }
 
     /// 要不要跟著拍子換照片
     @AppStorage("slideshow_beat_sync") private var beatSync = true
@@ -428,12 +494,20 @@ struct PhotoSlideshowView: View {
     /// 使用者說得對——東西全部在照片後面，看起來就是「照片貼在一張圖上」。
     /// 梅枝、近處的落梅、貼著地面流的霧、岸邊的蘆葦移到照片前面之後，
     /// 照片才真的坐進這幅畫裡。
+    @ViewBuilder
     private var slide: some View {
         ZStack {
             // 背景自己一層，不跟著照片轉場——會動的場景每張重畫一次就不叫場景了
-            InkLandscapeView()
-            collageWall
-            InkForegroundView()
+            switch theme {
+            case .ink:
+                InkLandscapeView()
+                collageWall
+                InkForegroundView()
+            case .cyber:
+                CyberCityView()
+                collageWall
+                CyberForegroundView()
+            }
             colophon
         }
     }
@@ -464,11 +538,17 @@ struct PhotoSlideshowView: View {
                 .padding(.top, 6)
 
             VStack(spacing: 8) {
+                sectionLabel("主題")
+                ForEach(SlideshowTheme.allCases) { option in
+                    themeRow(option)
+                }
+                sectionLabel("順序")
+                    .padding(.top, 8)
                 ForEach(SlideshowOrder.allCases) { option in
                     orderRow(option)
                 }
             }
-            .padding(.top, 26)
+            .padding(.top, 22)
             .padding(.horizontal, 26)
 
             Button {
@@ -502,29 +582,56 @@ struct PhotoSlideshowView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(
-            // 紙的顏色淡淡壓一層，字壓在山上才讀得到
-            Color(red: 0.96, green: 0.95, blue: 0.93).opacity(0.72)
-                .ignoresSafeArea())
+            // 底色淡淡壓一層，字壓在景上才讀得到
+            theme.sheet.opacity(theme.isLight ? 0.72 : 0.80).ignoresSafeArea())
         .transition(.opacity)
     }
 
+    private func sectionLabel(_ text: String) -> some View {
+        HStack {
+            Text(text)
+                .font(.system(size: 11, weight: .bold))
+                .foregroundStyle(onBackdrop.opacity(0.45))
+            Spacer(minLength: 0)
+        }
+        .padding(.leading, 2)
+    }
+
+    private func themeRow(_ option: SlideshowTheme) -> some View {
+        pickerRow(icon: option.icon, label: option.label, detail: option.detail,
+                  picked: option == theme) {
+            themeRaw = option.rawValue
+        }
+    }
+
     private func orderRow(_ option: SlideshowOrder) -> some View {
-        let picked = option == order
-        return Button {
+        pickerRow(icon: option.icon, label: option.label, detail: option.detail,
+                  picked: option == order) {
             orderRaw = option.rawValue
             queue = ordered(option)
             index = 0
-        } label: {
+        }
+    }
+
+    /// 開場那張紙上的一列選項。主題與順序長得一樣——
+    /// 兩種外觀不同的清單會讓人以為它們是兩種不同的東西。
+    private func pickerRow(icon: String, label: String, detail: String,
+                           picked: Bool, action: @escaping () -> Void) -> some View {
+        // 暗底的時候輪廓要用亮色畫，黑線在黑底上等於沒畫
+        let line = theme.isLight ? Color.black : Color.white
+        return Button(action: action) {
             HStack(spacing: 12) {
-                Image(systemName: option.icon)
+                Image(systemName: icon)
                     .font(.system(size: 15, weight: .semibold))
                     .frame(width: 24)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(option.label)
+                    Text(label)
                         .font(.system(size: 15, weight: .semibold))
-                    Text(option.detail)
+                    Text(detail)
                         .font(.system(size: 11))
                         .foregroundStyle(onBackdrop.opacity(0.55))
+                        .lineLimit(2)
+                        .multilineTextAlignment(.leading)
                 }
                 Spacer(minLength: 0)
                 Image(systemName: picked ? "checkmark.circle.fill" : "circle")
@@ -536,10 +643,10 @@ struct PhotoSlideshowView: View {
             .padding(.vertical, 11)
             .background(
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(Color.black.opacity(picked ? 0.08 : 0.03))
+                    .fill(line.opacity(picked ? 0.10 : 0.035))
                     .overlay(
                         RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .stroke(Color.black.opacity(picked ? 0.30 : 0.10),
+                            .stroke(line.opacity(picked ? 0.38 : 0.12),
                                     lineWidth: picked ? 1.2 : 0.8)))
         }
         .buttonStyle(.plain)
@@ -549,12 +656,25 @@ struct PhotoSlideshowView: View {
     ///
     /// 這是畫的一部分，不是控制列——所以收起控制列之後它還在。
     /// 中國畫的三件套是「畫、題款、印」，少了後面兩個，再像水墨也只是背景圖。
+    @ViewBuilder
     private var colophon: some View {
-        InkColophon(title: colophonTitle, dateText: colophonDate)
-            // [v25.495] 墊一層紙色的光暈。落點已經讓開左邊這一欄了，
-            // 但卡片會旋轉、會抖動，萬一邊角飄過來，字還讀得到。
-            .shadow(color: Color(red: 0.96, green: 0.95, blue: 0.93).opacity(0.95),
-                    radius: 7)
+        Group {
+            switch theme {
+            case .ink:
+                InkColophon(title: colophonTitle, dateText: colophonDate)
+                    // [v25.495] 墊一層紙色的光暈。落點已經讓開左邊這一欄了，
+                    // 但卡片會旋轉、會抖動，萬一邊角飄過來，字還讀得到。
+                    .shadow(color: Color(red: 0.96, green: 0.95, blue: 0.93).opacity(0.95),
+                            radius: 7)
+            case .cyber:
+                // [v25.497] 賽博龐克版的題款。中國畫的「畫、題款、印」在這裡的
+                // 對應物是 HUD：帶刻度的側軌加等寬字。位置一樣在左緣——
+                // 照片的落點早就為這一欄讓開了，兩套主題共用同一份版型。
+                CyberHUD(title: colophonTitle, dateText: colophonDate,
+                         counter: String(format: "%02d / %02d",
+                                         min(index + 1, items.count), items.count))
+            }
+        }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .padding(.leading, 18)
             .padding(.top, 92)
@@ -583,10 +703,14 @@ struct PhotoSlideshowView: View {
                                 item.image.size,
                                 in: WallLayout.cardArea(geo.size)),
                              container: geo.size,
-                             age: wall.count - 1 - position)
+                             age: wall.count - 1 - position,
+                             theme: theme)
                         .transition(.asymmetric(
-                            // [v25.494] 使用者指定：三秒淡入
-                            insertion: .inkFadeIn,
+                            // [v25.494] 使用者指定：三秒淡入。
+                            // [v25.497] 淡入是兩套主題共同的骨架，差別在於
+                            // 「淡入的時候還發生了什麼」：水墨是墨化開一圈，
+                            // 賽博是鏡頭在對焦。
+                            insertion: theme == .ink ? .inkFadeIn : .cyberFocusIn,
                             // [v25.492] 離場往上飄，像把這一頁揭起來
                             removal: .opacity.combined(with: .offset(y: -38))
                                 .combined(with: .scale(scale: 0.94))))
@@ -602,8 +726,9 @@ struct PhotoSlideshowView: View {
 
     /// 上下兩條黑色漸層：白底照片上文字才看得見
     private var scrim: some View {
-        // 背景是宣紙色的亮底，所以罩子用白色。黑罩會把整幅水墨壓成灰的。
-        let veil = Color.white
+        // 亮底用白罩（黑罩會把整幅水墨壓成灰的），暗底用黑罩
+        // （白罩會讓夜景整個發灰）。
+        let veil = theme.veil
         return VStack {
             LinearGradient(colors: [veil.opacity(showChrome ? 0.55 : 0), .clear],
                            startPoint: .top, endPoint: .bottom)
