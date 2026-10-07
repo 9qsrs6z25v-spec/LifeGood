@@ -32,7 +32,7 @@ struct InkLandscapeView: View {
             TimelineView(.periodic(from: .now, by: 1.0 / 24.0)) { timeline in
                 Canvas { context, size in
                     let t = timeline.date.timeIntervalSinceReferenceDate
-                    InkScene.draw(&context, size: size, time: t, density: density)
+                    InkScene.draw(&context, size: size, time: t, rawDensity: density)
                 }
             }
             .ignoresSafeArea()
@@ -61,6 +61,7 @@ private struct InkPaperLayer: View {
                     endPoint: CGPoint(x: size.width * 0.3, y: size.height)))
 
             moon(&context, size)
+            fibers(&context, size)
             grain(&context, size)
         }
         .ignoresSafeArea()
@@ -82,6 +83,26 @@ private struct InkPaperLayer: View {
     }
 
     /// 紙紋。固定種子的細點，數量壓在 140 顆——靜態層只畫一次，不心疼。
+    ///
+    /// [v25.494] 另外加 26 根纖維：宣紙是縱橫交錯的纖維壓出來的，
+    /// 迎光看得到一根一根的筋。只有點沒有筋，看起來像噴砂的紙。
+    private func fibers(_ context: inout GraphicsContext, _ size: CGSize) {
+        var random = InkRandom(77131)
+        for _ in 0..<26 {
+            let x = random.next() * size.width
+            let y = random.next() * size.height
+            let length = 40 + random.next() * 160
+            let angle = (random.next() - 0.5) * 0.5          // 幾乎是橫的
+            var fiber = Path()
+            fiber.move(to: CGPoint(x: x, y: y))
+            fiber.addLine(to: CGPoint(x: x + CGFloat(cos(angle) * length),
+                                      y: y + CGFloat(sin(angle) * length)))
+            context.stroke(fiber,
+                           with: .color(.black.opacity(0.018 + random.next() * 0.022)),
+                           style: StrokeStyle(lineWidth: 0.6, lineCap: .round))
+        }
+    }
+
     private func grain(_ context: inout GraphicsContext, _ size: CGSize) {
         var random = InkRandom(20260819)
         for _ in 0..<140 {
@@ -113,7 +134,10 @@ enum InkScene {
     private static let layers = 5
 
     static func draw(_ context: inout GraphicsContext, size: CGSize,
-                     time: Double, density: Double) {
+                     time: Double, rawDensity: Double) {
+        // [v25.494] 墨色每兩分鐘極慢地濃淡一次（±7%）。
+        // 固定濃度的畫面看久了會「平」——真的墨會隨著紙的濕度與光線變。
+        let density = rawDensity * (1 + 0.07 * sin(time / 115))
         // 水面在這個高度，近山要在它上面
         let waterY = size.height * 0.80
 
@@ -229,10 +253,65 @@ enum InkScene {
             startPoint: CGPoint(x: 0, y: baseY - amp),
             endPoint: CGPoint(x: 0, y: bottom)))
 
-        // 濕邊：筆鋒壓在稜線上那一下，比山體濃
-        context.stroke(crest, with: .color(.black.opacity((0.10 + 0.34 * depth) * density)),
-                       style: StrokeStyle(lineWidth: 0.6 + 1.5 * CGFloat(depth),
-                                          lineCap: .round, lineJoin: .round))
+        // [v25.494] 墨分五色：稜線底下再壓一道重墨，山才有體積。
+        // 只有一層平塗的山是剪影，不是畫。
+        if layer >= 2 {
+            let bandHeight = amp * 0.5
+            var band = Path()
+            var x: CGFloat = 0
+            let step: CGFloat = 6
+            var points: [CGPoint] = []
+            while x <= size.width {
+                let u = Double(x / max(size.width, 1))
+                let y = ridgeY(u, layer: layer, drift: drift, baseY: baseY, amp: amp)
+                points.append(CGPoint(x: x, y: y))
+                x += step
+            }
+            guard let head = points.first else { return }
+            band.move(to: head)
+            for pt in points.dropFirst() { band.addLine(to: pt) }
+            for pt in points.reversed() {
+                band.addLine(to: CGPoint(x: pt.x, y: pt.y + bandHeight))
+            }
+            band.closeSubpath()
+            context.fill(band, with: .linearGradient(
+                Gradient(colors: [Color.black.opacity(0.13 * depth * density), .clear]),
+                startPoint: CGPoint(x: 0, y: baseY - amp),
+                endPoint: CGPoint(x: 0, y: baseY - amp + bandHeight * 1.6)))
+        }
+
+        // [v25.494] 濕邊改成「飛白」：一條連續等粗的線是向量圖，不是毛筆。
+        // 真的筆鋒走過宣紙，墨會斷斷續續、粗細不均——那叫飛白，
+        // 是「這是手畫的」最強的訊號。遠山維持細線（遠到看不見筆觸）。
+        if layer >= 2 {
+            var brush = InkRandom(layer * 613 + 7)
+            let segments = 34
+            var previous: CGPoint?
+            for i in 0...segments {
+                let u = Double(i) / Double(segments)
+                let point = CGPoint(x: CGFloat(u) * size.width,
+                                    y: ridgeY(u, layer: layer, drift: drift,
+                                              baseY: baseY, amp: amp))
+                defer { previous = point }
+                guard let start = previous else { continue }
+                let bite = brush.next()
+                if bite < 0.14 { continue }      // 這一段紙面沒吃到墨
+                var segment = Path()
+                segment.move(to: start)
+                segment.addLine(to: point)
+                context.stroke(
+                    segment,
+                    with: .color(.black.opacity((0.10 + 0.32 * depth) * density
+                                                * (0.45 + bite * 0.75))),
+                    style: StrokeStyle(
+                        lineWidth: (0.6 + 1.6 * CGFloat(depth)) * CGFloat(0.55 + bite * 0.9),
+                        lineCap: .round))
+            }
+        } else {
+            context.stroke(crest, with: .color(.black.opacity((0.10 + 0.34 * depth) * density)),
+                           style: StrokeStyle(lineWidth: 0.6 + 1.5 * CGFloat(depth),
+                                              lineCap: .round, lineJoin: .round))
+        }
 
         // 皴筆：只有近的兩層畫得到筆觸
         if layer >= layers - 2 {
@@ -303,16 +382,29 @@ enum InkScene {
         let h = size.height * (0.05 + 0.022 * CGFloat(band))
         let breath = 0.42 + 0.18 * sin(time * 0.21 + Double(band) * 1.7)
 
+        // [v25.494] 霧改成「把墨擦掉」，不是「蓋一層白」。
+        //
+        // 水墨的雲霧是留白——紙本來就是白的，畫的時候那一塊根本不落墨。
+        // 蓋白色是油畫的思路，蓋出來的霧永遠浮在山前面像一團棉花；
+        // 擦掉之後，山是「溶進」霧裡的，而且露出來的是真正的紙色
+        //（紙在另一層畫，擦掉這一層就會看見它）。
+        var eraser = context
+        eraser.blendMode = .destinationOut
+        eraser.addFilter(.blur(radius: 40))
+        eraser.fill(
+            Path(ellipseIn: CGRect(x: cx - w / 2, y: cy - h / 2, width: w, height: h)),
+            with: .color(.black.opacity(min(1, breath * 1.55))))
+        eraser.fill(
+            Path(ellipseIn: CGRect(x: cx - w * 0.15, y: cy + h * 0.35,
+                                   width: w * 0.8, height: h * 0.8)),
+            with: .color(.black.opacity(min(1, breath * 1.1))))
+
+        // 再補一點點白：霧本身會亮一些，純擦會顯得太空
         context.drawLayer { layer in
-            layer.addFilter(.blur(radius: 38))
+            layer.addFilter(.blur(radius: 44))
             layer.fill(
                 Path(ellipseIn: CGRect(x: cx - w / 2, y: cy - h / 2, width: w, height: h)),
-                with: .color(.white.opacity(breath)))
-            // 第二團錯開一點，霧才不是一條
-            layer.fill(
-                Path(ellipseIn: CGRect(x: cx - w * 0.15, y: cy + h * 0.35,
-                                       width: w * 0.8, height: h * 0.8)),
-                with: .color(.white.opacity(breath * 0.75)))
+                with: .color(.white.opacity(breath * 0.42)))
         }
     }
 
@@ -332,9 +424,15 @@ enum InkScene {
             reflection.move(to: CGPoint(x: 0, y: waterY))
             var x: CGFloat = 0
             while x <= size.width {
-                let y = ridgeY(Double(x / max(size.width, 1)), layer: layers - 1,
+                let u = Double(x / max(size.width, 1))
+                let y = ridgeY(u, layer: layers - 1,
                                drift: drift, baseY: baseY, amp: amp)
-                reflection.addLine(to: CGPoint(x: x, y: waterY + (waterY - y) * 0.42))
+                // [v25.494] 水面會晃：倒影不是鏡子，是一面在動的水。
+                // 不加這個扭曲，倒影看起來就是把山貼過去而已。
+                let ripple = CGFloat(sin(u * 11 + time * 1.3) * 2.2
+                                     + sin(u * 23 - time * 0.9) * 1.1)
+                reflection.addLine(to: CGPoint(x: x,
+                                               y: waterY + (waterY - y) * 0.42 + ripple))
                 x += 6
             }
             reflection.addLine(to: CGPoint(x: size.width, y: waterY))
@@ -492,81 +590,6 @@ enum WallLayout {
     /// 每一張佔畫面多大
     static func cardArea(_ size: CGSize) -> CGSize {
         CGSize(width: size.width * 0.46, height: size.height * 0.30)
-    }
-}
-
-// MARK: - 水墨轉場
-
-// 照片落到牆上時用的進場效果：一塊**會長大的墨漬**當遮罩。
-// 十幾個位置固定的墨點各自在不同時間開始擴散，邊緣糊開，
-// 看起來就像墨在宣紙上洇開。
-//
-// 兩個關鍵（兩個都踩過）：
-//   • 墨點位置必須固定（InkRandom 是固定種子的）。每一幀重骰會閃成雜訊。
-//   • ViewModifier 要遵從 Animatable，SwiftUI 才會替 progress 補間；
-//     不然它只會在 0 與 1 之間直接跳過去，根本看不到暈開的過程。
-
-private struct InkBlobs: View {
-    let progress: Double
-    let seed: Int
-
-    var body: some View {
-        Canvas { context, size in
-            // 邊緣糊掉才像墨，銳利的圓只會像貼紙
-            context.addFilter(.blur(radius: 22))
-            var random = InkRandom(seed &* 131 &+ 7)
-            let longest = max(size.width, size.height)
-            let count = 14
-            for i in 0..<count {
-                let cx = random.next() * size.width
-                let cy = random.next() * size.height
-                let scale = 0.35 + random.next() * 0.55
-                // 每一點開始暈開的時間錯開，才有「一點一點滲出來」的感覺
-                let delay = Double(i) / Double(count) * 0.45
-                let local = max(0, min(1, (progress - delay) / max(0.0001, 1 - delay)))
-                let radius = longest * 0.9 * scale * local
-                guard radius > 0.5 else { continue }
-                context.fill(
-                    Path(ellipseIn: CGRect(x: cx - radius, y: cy - radius,
-                                           width: radius * 2, height: radius * 2)),
-                    with: .color(.black))
-            }
-        }
-    }
-}
-
-private struct InkRevealModifier: ViewModifier, Animatable {
-    var progress: Double
-    var seed: Int
-
-    var animatableData: Double {
-        get { progress }
-        set { progress = newValue }
-    }
-
-    func body(content: Content) -> some View {
-        content
-            .mask(InkBlobs(progress: progress, seed: seed))
-            // [v25.492] 照片落在紙上的那一下，墨會往外化開一圈。
-            // 只在進場的過程中看得到——progress 到 1 就完全透明。
-            .background(
-                Circle()
-                    .stroke(Color.black.opacity((1 - progress) * 0.16),
-                            lineWidth: 1 + 9 * (1 - progress))
-                    .blur(radius: 9)
-                    .scaleEffect(0.45 + progress * 1.15)
-                    .allowsHitTesting(false)
-            )
-    }
-}
-
-extension AnyTransition {
-    /// 水墨暈開。離場用淡出——兩張同時做遮罩會互相穿幫。
-    static func inkWash(seed: Int) -> AnyTransition {
-        .asymmetric(
-            insertion: .modifier(active: InkRevealModifier(progress: 0, seed: seed),
-                                 identity: InkRevealModifier(progress: 1, seed: seed)),
-            removal: .opacity)
     }
 }
 
@@ -854,5 +877,51 @@ enum InkForeground {
                                style: StrokeStyle(lineWidth: 2.6 * scale, lineCap: .round))
             }
         }
+    }
+}
+
+// MARK: - 照片進場（v25.494）
+
+// 使用者指定：照片用 fade in、三秒。
+//
+// 原本是「墨漬長大」的遮罩：好看，但它是一個**動作**——三秒長的動作會變成
+// 一段表演，照片反而被動畫搶走。淡入三秒是另一種時間感：照片像是從紙裡
+// 慢慢浮出來，看的人有時間把目光移過去。
+//
+// 保留的是落下那一圈墨暈（照片壓在紙上的痕跡），跟著同一條曲線淡掉，
+// 所以只在前段看得到。
+
+private struct InkFadeInModifier: ViewModifier, Animatable {
+    /// 0＝還沒出現，1＝完全出現
+    var progress: Double
+
+    var animatableData: Double {
+        get { progress }
+        set { progress = newValue }
+    }
+
+    func body(content: Content) -> some View {
+        content
+            .opacity(progress)
+            // 落定：從大 1.5% 收回原寸。幅度刻意極小——
+            // 三秒的縮放只要看得出來就會變成「在動」，那就不是淡入了。
+            .scaleEffect(1.015 - 0.015 * progress)
+            .background(
+                // 墨壓在紙上化開的那一圈：前段看得到，後段自己收掉
+                Circle()
+                    .stroke(Color.black.opacity((1 - progress) * 0.14),
+                            lineWidth: 1 + 8 * (1 - progress))
+                    .blur(radius: 10)
+                    .scaleEffect(0.5 + progress * 1.1)
+                    .allowsHitTesting(false)
+            )
+    }
+}
+
+extension AnyTransition {
+    /// 淡入（實際秒數由呼叫端的 withAnimation 決定）
+    static var inkFadeIn: AnyTransition {
+        .modifier(active: InkFadeInModifier(progress: 0),
+                  identity: InkFadeInModifier(progress: 1))
     }
 }

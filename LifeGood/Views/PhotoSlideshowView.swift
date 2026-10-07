@@ -384,8 +384,8 @@ struct PhotoSlideshowView: View {
                              container: geo.size,
                              age: wall.count - 1 - position)
                         .transition(.asymmetric(
-                            // 新的一張用水墨暈開的方式出現，跟整個場景同一套語言
-                            insertion: .inkWash(seed: item.id),
+                            // [v25.494] 使用者指定：三秒淡入
+                            insertion: .inkFadeIn,
                             // [v25.492] 離場往上飄，像把這一頁揭起來
                             removal: .opacity.combined(with: .offset(y: -38))
                                 .combined(with: .scale(scale: 0.94))))
@@ -633,13 +633,17 @@ struct PhotoSlideshowView: View {
         Self.speeds.min { abs($0.value - seconds) < abs($1.value - seconds) }?.label ?? "中"
     }
 
-    /// 照片落到牆上的動畫。
+    /// [v25.494] 照片淡入三秒（使用者指定）。
     ///
-    /// 比一般轉場慢一點——水墨要暈得開才看得出是墨，太快就只是一閃。
-    /// 卡點時收緊一些：「踩在拍子上」靠的是**動作收尾的瞬間**落在拍點。
+    /// 只有一個地方要讓步：每張停留時間比三秒短的時候（快速模式 2.2 秒），
+    /// 整面牆會永遠停在半透明狀態——那看起來不是淡入，是沒載好。
+    /// 所以淡入時間最多取停留時間的 85%。
+    private var fadeInSeconds: Double {
+        min(3.0, max(0.8, slideDuration * 0.85))
+    }
+
     private var arrivalAnimation: Animation {
-        synced ? .spring(response: 0.46, dampingFraction: 0.78)
-               : .spring(response: 0.58, dampingFraction: 0.74)
+        .easeInOut(duration: fadeInSeconds)
     }
 
     // MARK: 流程
