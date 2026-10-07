@@ -2661,13 +2661,31 @@ struct CloudSharingSheet: UIViewControllerRepresentable {
 ///
 /// 所以改成反過來：區塊留在 SettingsView（狀態與修飾詞一行都不動），
 /// 只把「畫在哪裡」交給這一頁。SettingsView 仍是它們的父層，sheet 照常彈得出來。
-struct AdvancedSettingsView<Extra: View>: View {
+/// [v25.506] 這個型別**不再是泛型**了——修的是設定頁一打開就閃退。
+///
+/// 當機紀錄是 `EXC_BAD_ACCESS / Thread stack size exceeded`，而且堆疊上
+/// 七十幾層全是 Swift runtime 的 `decodeMangledType` 與 `decodeGenericArgs`
+/// 在互相遞迴。那不是空指標也不是陣列越界，是**型別的名字太長**：
+/// Swift 要替一個泛型型別建 metadata 時，得把它的名字從頭解一遍，
+/// 名字裡每一層泛型參數就是一層遞迴，深到一個程度就把主執行緒的堆疊用完。
+///
+/// 而這裡原本是 `AdvancedSettingsView<Extra>`，Extra 被實際代入的是
+/// 「電子發票 ＋ 語音 AI ＋ 匯出匯入」三整塊設定攤平之後的結構型別——
+/// 每一塊裡面又是 DisclosureGroup 包 Section 包幾十個控制項。
+/// 這一個泛型參數就背著整棵樹，而它又長在 SettingsView.body 的型別裡面。
+///
+/// 把它收進 AnyView 之後，型別名字從一整棵樹變成一個 token。
+/// AnyView 的代價是「這一塊沒辦法做結構化比對，更新時整塊重算」——
+/// 對一頁點進去才看得到、而且幾乎不會即時變動的設定來說，這個代價是零。
+struct AdvancedSettingsView: View {
     /// 首頁浮動「新增收支」按鈕顯示開關（與 MainTabView 共用同一 key；預設顯示）
     @AppStorage("show_floating_add_button") private var showFloatingAddButton = true
 
-    private let extra: Extra
+    private let extra: AnyView
 
-    init(@ViewBuilder extra: () -> Extra) { self.extra = extra() }
+    /// 初始化仍然收 @ViewBuilder，所以呼叫端一個字都不用改；
+    /// 型別在**進到這裡的那一刻**就被抹掉，不會外洩到 SettingsView 的 body 型別上。
+    init<Extra: View>(@ViewBuilder extra: () -> Extra) { self.extra = AnyView(extra()) }
 
     var body: some View {
         Form {
