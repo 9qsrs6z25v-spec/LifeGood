@@ -1272,7 +1272,7 @@ struct StockTransactionEditor: View {
     @State private var kind: StockTransactionKind = .buy
     @State private var lotsText: String = ""
     @State private var priceText: String = ""
-    private enum MoneyField: Hashable { case quantity, price, amount }
+    private enum MoneyField: Hashable { case quantity, price, amount, ntd, rate, cumShares }
     @FocusState private var focusedField: MoneyField?
 
     /// [v25.452] 總金額也可以直接輸入。
@@ -1280,6 +1280,17 @@ struct StockTransactionEditor: View {
     /// 實務上兩種下單方式都有：「我要買 2 張」與「我要投 10 萬」。
     /// 以前只能填數量，想用金額下單的人得自己拿計算機除一次再回來填。
     @State private var totalText: String = ""
+
+    // [v25.511] 台幣扣款（定期定額）
+    //
+    // 使用者回報：「定期定額每次都給我這個資訊，我都不知道怎麼新增單次的交易」。
+    // 複委託／定期定額的對帳單給的是**台幣扣款金額、參考匯率、累計庫存股數**，
+    // 而這個輸入框要的是**股數 × 每股美元價**。中間那兩次換算一直在使用者
+    // 腦子裡做——而且第二次還得自己記得上一次的累計股數去相減。
+    @State private var ntdText: String = ""
+    @State private var rateText: String = ""
+    @State private var cumSharesText: String = ""
+
     @State private var showDeleteConfirm = false
     /// 存檔中鎖住儲存按鈕，避免 sheet 收合動畫播完前快速連點建立兩筆重複交易紀錄
     @State private var isSaving = false
@@ -1311,6 +1322,65 @@ struct StockTransactionEditor: View {
     /// 由金額反推出來的股數（給「約合 N 股」用）。
     /// 只是顯示，不回寫——回寫會在打字途中把使用者的輸入換掉。
     private var sharesFromInput: Double { quantityInput * sharesPerUnit }
+
+    // MARK: 台幣扣款（v25.511）
+
+    /// 台幣金額 ÷ 匯率 ＝ 這一筆的美元金額
+    private var usdFromNtd: Double {
+        let ntd = Double(ntdText) ?? 0
+        let rate = Double(rateText) ?? 0
+        guard ntd > 0, rate > 0 else { return 0 }
+        return ntd / rate
+    }
+
+    /// 這一筆**之前**的庫存股數。
+    ///
+    /// 對帳單上的「庫存股數」是累計的，所以這一次買到幾股＝累計 − 之前。
+    /// 編輯既有交易時要把它自己扣掉，不然會拿自己減自己。
+    private var sharesBeforeThisTx: Double {
+        guard let s = stock else { return 0 }
+        var total = s.dividends
+            .filter { $0.kind == .stock }
+            .reduce(0.0) { $0 + $1.sharesEarned }
+        for tx in s.transactions where tx.id != editing?.id {
+            total += tx.kind == .buy ? tx.shares : -tx.shares
+        }
+        return total
+    }
+
+    /// 由「對帳單累計股數」回推出來的本次股數與每股價。
+    /// 兩者都算不出來就回 nil（欄位沒填齊、或累計數比現有庫存還少）。
+    private var derivedFromStatement: (shares: Double, price: Double)? {
+        guard let cum = Double(cumSharesText), cum > 0 else { return nil }
+        let shares = cum - sharesBeforeThisTx
+        guard shares > 0.000_001, usdFromNtd > 0 else { return nil }
+        return (shares, usdFromNtd / shares)
+    }
+
+    private static func decimalText(_ v: Double, max digits: Int) -> String {
+        let f = NumberFormatter()
+        f.numberStyle = .decimal
+        f.usesGroupingSeparator = false
+        f.maximumFractionDigits = digits
+        return f.string(from: NSNumber(value: v)) ?? "0"
+    }
+
+    /// 把換算結果填進上面三個欄位。
+    ///
+    /// 做成一顆按鈕而不是邊打邊自動回填：上面那組欄位本來就有一套
+    /// 「數量 ⇄ 總金額」的雙向換算（v25.452），自動回填會跟它打架。
+    /// 按下去才寫，使用者也看得到自己按了什麼。
+    private func applyNtdConversion() {
+        focusedField = nil
+        guard usdFromNtd > 0 else { return }
+        totalText = Self.decimalText(usdFromNtd, max: 2)
+        if let d = derivedFromStatement {
+            lotsText = Self.decimalText(d.shares, max: 6)
+            priceText = Self.decimalText(d.price, max: 4)
+        } else if let price = Double(priceText), price > 0 {
+            lotsText = Self.decimalText(usdFromNtd / price, max: 6)
+        }
+    }
 
     var body: some View {
         NavigationStack {
@@ -1374,6 +1444,74 @@ struct StockTransactionEditor: View {
                 } footer: {
                     Text("數量與總金額填任一個就好，另一個會依單價自動算出來——想用「這次投 10 萬」下單時就填金額。")
                         .font(.caption2)
+                }
+
+                // [v25.511] 定期定額：直接照著對帳單填
+                if stock?.isUSStock == true, kind == .buy {
+                    Section {
+                        HStack {
+                            Text("NT$").foregroundStyle(.secondary)
+                            TextField("台幣扣款金額", text: $ntdText)
+                                .keyboardType(.decimalPad)
+                                .focused($focusedField, equals: .ntd)
+                        }
+                        HStack {
+                            Text("匯率").foregroundStyle(.secondary)
+                            TextField("對帳單上的參考匯率", text: $rateText)
+                                .keyboardType(.decimalPad)
+                                .focused($focusedField, equals: .rate)
+                        }
+                        if usdFromNtd > 0 {
+                            HStack {
+                                Text("＝ 美元金額").font(.caption).foregroundStyle(.secondary)
+                                Spacer()
+                                Text("US$" + Self.decimalText(usdFromNtd, max: 2))
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(.red)
+                            }
+                        }
+                        HStack {
+                            Text("累計股數").foregroundStyle(.secondary)
+                            TextField("對帳單上的庫存股數（選填）", text: $cumSharesText)
+                                .keyboardType(.decimalPad)
+                                .focused($focusedField, equals: .cumShares)
+                        }
+                        if sharesBeforeThisTx > 0 {
+                            HStack {
+                                Text("這一筆之前").font(.caption).foregroundStyle(.secondary)
+                                Spacer()
+                                Text(Self.sharesText(sharesBeforeThisTx) + " 股")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
+                        if let d = derivedFromStatement {
+                            HStack {
+                                Text("＝ 本次").font(.caption).foregroundStyle(.secondary)
+                                Spacer()
+                                Text(Self.sharesText(d.shares) + " 股 · 每股 US$"
+                                     + Self.decimalText(d.price, max: 4))
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(.red)
+                            }
+                        }
+                        Button {
+                            applyNtdConversion()
+                        } label: {
+                            Label("套用到上面的欄位", systemImage: "arrow.up.doc.on.clipboard")
+                        }
+                        .disabled(usdFromNtd <= 0)
+                    } header: {
+                        stockEditorSectionHeader("台幣扣款（定期定額）",
+                                                 icon: "arrow.left.arrow.right",
+                                                 color: .teal)
+                    } footer: {
+                        Text("複委託的對帳單只給「台幣扣款金額、參考匯率、累計庫存股數」，"
+                             + "不會直接告訴你這一筆買到幾股、每股多少美元。照著填，"
+                             + "按下套用就會自動換算並帶到上面。\n\n"
+                             + "累計股數是用「對帳單的累計 − 這一筆之前的庫存」回推的，"
+                             + "所以補登請照日期順序。不填也可以，那就自己填每股單價。")
+                            .font(.caption2)
+                    }
                 }
 
                 if isEditing {
