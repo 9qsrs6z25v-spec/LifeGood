@@ -294,6 +294,7 @@ struct PhotoSlideshowView: View {
     var title: String = "相本"
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.scenePhase) private var scenePhase
     @StateObject private var music = SlideshowMusic.shared
 
     @State private var index = 0
@@ -349,6 +350,16 @@ struct PhotoSlideshowView: View {
     private var theme: SlideshowTheme {
         SlideshowTheme(rawValue: themeRaw) ?? .ink
     }
+
+    /// [v25.498] 背景的動畫要不要停。
+    ///
+    /// 使用者回報「截圖之後，截圖編輯畫面會卡」。原因是背景真的一直在算圖：
+    /// TimelineView(.periodic) 只要還在畫面上就不會停，App 退到背景、
+    /// 或被系統畫面（截圖編輯器正是）蓋住，底下兩個全螢幕 Canvas 照樣
+    /// 每秒各重畫二十四次。
+    ///
+    /// 挑歌的時候也停——那時候整幅景被全螢幕的歌單蓋住，一幀都看不到。
+    private var paused: Bool { scenePhase != .active || showMusicPicker }
 
     private var onBackdrop: Color { theme.onBackdrop }
     private var chipFill: Color { theme.chipFill }
@@ -500,13 +511,13 @@ struct PhotoSlideshowView: View {
             // 背景自己一層，不跟著照片轉場——會動的場景每張重畫一次就不叫場景了
             switch theme {
             case .ink:
-                InkLandscapeView()
+                InkLandscapeView(paused: paused)
                 collageWall
-                InkForegroundView()
+                InkForegroundView(paused: paused)
             case .cyber:
-                CyberCityView()
+                CyberCityView(paused: paused)
                 collageWall
-                CyberForegroundView()
+                CyberForegroundView(paused: paused)
             }
             colophon
         }

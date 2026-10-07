@@ -26,16 +26,34 @@ struct InkLandscapeView: View {
     /// 0...1，整體墨色濃淡
     var density: Double = 1.0
 
+    /// [v25.498] 停格。
+    ///
+    /// TimelineView(.periodic) 只要還在畫面上就會一直叫 Canvas 重畫，
+    /// **App 退到背景、或被系統畫面蓋住（截圖編輯器就是）都不會停**。
+    /// 使用者回報截圖後編輯畫面會卡，原因就在這：底下兩個全螢幕 Canvas
+    /// 還在每秒各算二十四次。
+    ///
+    /// 停格的時候換成一個不會滴答的 Canvas，畫同一個固定時刻——
+    /// 畫面長得一樣，只是不再重算。
+    var paused: Bool = false
+
     var body: some View {
         ZStack {
             InkPaperLayer(density: density)
-            TimelineView(.periodic(from: .now, by: 1.0 / 24.0)) { timeline in
+            if paused {
                 Canvas { context, size in
-                    let t = timeline.date.timeIntervalSinceReferenceDate
-                    InkScene.draw(&context, size: size, time: t, density: density)
+                    InkScene.draw(&context, size: size, time: 0, density: density)
                 }
+                .ignoresSafeArea()
+            } else {
+                TimelineView(.periodic(from: .now, by: 1.0 / 24.0)) { timeline in
+                    Canvas { context, size in
+                        let t = timeline.date.timeIntervalSinceReferenceDate
+                        InkScene.draw(&context, size: size, time: t, density: density)
+                    }
+                }
+                .ignoresSafeArea()
             }
-            .ignoresSafeArea()
         }
         .ignoresSafeArea()
     }
@@ -594,7 +612,10 @@ struct InkFramedPhoto: View {
                     .stroke(Color.black.opacity(0.28), lineWidth: 2.2)
                     .blur(radius: 2.2)
             )
-            .shadow(color: .black.opacity(0.28), radius: 14, x: 0, y: 8)
+            // [v25.498] 半徑從 14 收到 9。牆上同時有八張卡片，每一張都在做
+            // 永不停止的呼吸動畫，所以這層陰影每一幀都要重算八次模糊——
+            // 半徑越大越貴，而紙照片本來也不會有那麼深的影子。
+            .shadow(color: .black.opacity(0.30), radius: 9, x: 0, y: 6)
     }
 }
 
@@ -909,18 +930,27 @@ struct WallCard: View {
 /// 掛在照片前面的那一層
 struct InkForegroundView: View {
     var density: Double = 1.0
+    /// 見 InkLandscapeView.paused
+    var paused: Bool = false
 
     var body: some View {
         ZStack {
             // [v25.496] 梅枝從「只畫一次的靜態層」搬進會動的這一層。
             // 山不動了，但樹該動——一枝梅垂在鏡頭前紋風不動才是最假的。
-            TimelineView(.periodic(from: .now, by: 1.0 / 24.0)) { timeline in
+            if paused {
                 Canvas { context, size in
-                    let t = timeline.date.timeIntervalSinceReferenceDate
-                    InkForeground.draw(&context, size: size, time: t, density: density)
+                    InkForeground.draw(&context, size: size, time: 0, density: density)
                 }
+                .ignoresSafeArea()
+            } else {
+                TimelineView(.periodic(from: .now, by: 1.0 / 24.0)) { timeline in
+                    Canvas { context, size in
+                        let t = timeline.date.timeIntervalSinceReferenceDate
+                        InkForeground.draw(&context, size: size, time: t, density: density)
+                    }
+                }
+                .ignoresSafeArea()
             }
-            .ignoresSafeArea()
 
             // 暗角壓在最上面：讓視線收回畫面中央
             InkVignette()

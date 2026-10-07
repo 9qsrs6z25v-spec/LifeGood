@@ -117,8 +117,9 @@ struct CyberCable {
 }
 
 enum CyberCity {
-    /// 幾排建築，遠到近
-    static let blocks = 4
+    /// 幾排建築，遠到近。[v25.498] 4 → 5：上一版天際線只佔畫面中間一條，
+    /// 上面三分之一是空的黑。城市要堆得夠高，夜景才有壓迫感。
+    static let blocks = 5
 
     /// 長出整座城。純函式、固定種子——靜態層與動態層各呼叫一次，
     /// 拿到的是完全一樣的城市。
@@ -130,10 +131,10 @@ enum CyberCity {
             let depth = Double(block) / Double(blocks - 1)        // 0＝最遠
             var random = InkRandom(4700 + block * 131)
             // 越近的樓越高、底線越低（站在街上往上看）
-            let baseline = size.height * CGFloat(0.40 + 0.20 * depth)
-            let maxRise = size.height * CGFloat(0.16 + 0.20 * depth)
-            let minWidth = size.width * CGFloat(0.045 + 0.035 * depth)
-            let widthRange = size.width * CGFloat(0.045 + 0.075 * depth)
+            let baseline = size.height * CGFloat(0.355 + 0.245 * depth)
+            let maxRise = size.height * CGFloat(0.20 + 0.26 * depth)
+            let minWidth = size.width * CGFloat(0.040 + 0.032 * depth)
+            let widthRange = size.width * CGFloat(0.040 + 0.070 * depth)
 
             var x: CGFloat = -size.width * 0.06
             while x < size.width * 1.06 {
@@ -169,21 +170,34 @@ enum CyberCity {
     private static func windows(in rect: CGRect, block: Int,
                                 random: inout InkRandom) -> [CyberWindow] {
         guard rect.height > 6, rect.width > 6 else { return [] }
+        // [v25.498] 格子縮小約三成。上一版的窗又大又方又等距，整棟樓看起來
+        // 像一張棋盤——窗格的大小就是「這棟樓幾層」，格子一大，樓就矮了。
         let depth = Double(block) / Double(blocks - 1)
-        let cellW = CGFloat(2.6 + 3.4 * depth)
-        let cellH = CGFloat(3.0 + 4.6 * depth)
-        let gapW = CGFloat(1.6 + 1.8 * depth)
-        let gapH = CGFloat(2.2 + 2.6 * depth)
-        let inset = CGFloat(2.0 + 2.5 * depth)
+        let cellW = CGFloat(1.8 + 2.4 * depth)
+        let cellH = CGFloat(2.0 + 3.2 * depth)
+        let gapW = CGFloat(1.3 + 1.5 * depth)
+        let gapH = CGFloat(1.7 + 2.0 * depth)
+        let inset = CGFloat(1.8 + 2.2 * depth)
 
         var out: [CyberWindow] = []
         var y = rect.minY + inset + 4
         while y + cellH < rect.maxY {
+            // [v25.498] 整層亮著的走廊。真的大樓有這種——一整排同樣的燈，
+            // 那是公共空間，不是住戶。它給了「這一條線是同一層樓」的訊息，
+            // 而純隨機的窗永遠讀不出樓層。
+            let corridor = random.next() < 0.085
+            let corridorColor = CyberPalette.window(random.next())
             var x = rect.minX + inset
             while x + cellW < rect.maxX - inset {
                 let roll = random.next()
-                if roll < 0.42 {
-                    let seed = random.next() < 0.055 ? Int(random.next() * 9999) : nil
+                if corridor {
+                    out.append(CyberWindow(
+                        rect: CGRect(x: x, y: y, width: cellW, height: cellH),
+                        color: corridorColor,
+                        brightness: 0.55 + roll * 0.25,
+                        flickerSeed: nil))
+                } else if roll < 0.40 {
+                    let seed = random.next() < 0.05 ? Int(random.next() * 9999) : nil
                     out.append(CyberWindow(
                         rect: CGRect(x: x, y: y, width: cellW, height: cellH),
                         color: CyberPalette.window(random.next()),
@@ -203,23 +217,29 @@ enum CyberCity {
     private static func signs(_ size: CGSize) -> [CyberSign] {
         let w = size.width
         let h = size.height
+        // [v25.498] 招牌全部讓開左上那一欄。
+        //
+        // 上一版把最大的那面「美好人生」擺在 x=0.045、y=0.30～0.49，
+        // 正好壓在 HUD 的直書標題上——兩個都是亮的，疊在一起兩個都讀不到。
+        // 畫面左緣那一欄是留給落款的（水墨那一版就定下來了），招牌是景，
+        // 景不該跟款搶位置。
         return [
-            CyberSign(rect: CGRect(x: w * 0.045, y: h * 0.300,
-                                   width: w * 0.062, height: h * 0.185),
+            CyberSign(rect: CGRect(x: w * 0.770, y: h * 0.180,
+                                   width: w * 0.060, height: h * 0.190),
                       color: CyberPalette.magenta, vertical: true,
                       text: "美好人生", flickerSeed: 11, power: 1.0),
-            CyberSign(rect: CGRect(x: w * 0.845, y: h * 0.255,
-                                   width: w * 0.058, height: h * 0.150),
+            CyberSign(rect: CGRect(x: w * 0.893, y: h * 0.395,
+                                   width: w * 0.054, height: h * 0.140),
                       color: CyberPalette.cyan, vertical: true,
                       text: "記憶所", flickerSeed: 37, power: 0.9),
-            CyberSign(rect: CGRect(x: w * 0.700, y: h * 0.470,
-                                   width: w * 0.175, height: h * 0.038),
+            CyberSign(rect: CGRect(x: w * 0.590, y: h * 0.600,
+                                   width: w * 0.195, height: h * 0.036),
                       color: CyberPalette.amber, vertical: false,
-                      text: "24H 営業", flickerSeed: 73, power: 0.7),
-            CyberSign(rect: CGRect(x: w * 0.140, y: h * 0.545,
-                                   width: w * 0.150, height: h * 0.032),
+                      text: "24H 営業", flickerSeed: 73, power: 0.75),
+            CyberSign(rect: CGRect(x: w * 0.052, y: h * 0.650,
+                                   width: w * 0.170, height: h * 0.034),
                       color: CyberPalette.acid, vertical: false,
-                      text: "麵 · 酒 · 電", flickerSeed: 5, power: 0.6)
+                      text: "麵·酒·電", flickerSeed: 5, power: 0.65)
         ]
     }
 
@@ -280,6 +300,17 @@ enum CyberCity {
 struct CyberCityView: View {
     var density: Double = 1.0
 
+    /// [v25.498] 停格。
+    ///
+    /// TimelineView(.periodic) 只要還在畫面上就會一直叫 Canvas 重畫，
+    /// **App 退到背景、或被系統畫面蓋住（截圖編輯器就是）都不會停**。
+    /// 使用者回報截圖後編輯畫面會卡，原因就在這：底下兩個全螢幕 Canvas
+    /// 還在每秒各算二十四次。
+    ///
+    /// 停格的時候換成一個不會滴答的 Canvas，畫同一個固定時刻——
+    /// 畫面長得一樣，只是不再重算。
+    var paused: Bool = false
+
     @State private var plan: CyberCityPlan?
     @State private var builtFor: CGSize = .zero
 
@@ -293,12 +324,20 @@ struct CyberCityView: View {
                 CyberStaticLayer(plan: plan, density: density)
 
                 // 每秒 24 次：會閃的窗、招牌的輝光、雨、蒸汽、飛車、水紋、滾動條
-                TimelineView(.periodic(from: .now, by: 1.0 / 24.0)) { timeline in
+                if paused {
                     Canvas { context, size in
                         guard let plan else { return }
                         CyberScene.draw(&context, size: size, plan: plan,
-                                        time: timeline.date.timeIntervalSinceReferenceDate,
-                                        density: density)
+                                        time: 0, density: density)
+                    }
+                } else {
+                    TimelineView(.periodic(from: .now, by: 1.0 / 24.0)) { timeline in
+                        Canvas { context, size in
+                            guard let plan else { return }
+                            CyberScene.draw(&context, size: size, plan: plan,
+                                            time: timeline.date.timeIntervalSinceReferenceDate,
+                                            density: density)
+                        }
                     }
                 }
             }
@@ -325,6 +364,7 @@ private struct CyberStaticLayer: View {
     var body: some View {
         Canvas { context, size in
             sky(&context, size)
+            skyStructures(&context, size)
             guard let plan else { return }
             city(&context, size, plan)
             ground(&context, size, plan)
@@ -356,6 +396,66 @@ private struct CyberStaticLayer: View {
                 layer.fill(Path(ellipseIn: CGRect(x: cx - w / 2, y: cy - h / 2,
                                                   width: w, height: h)),
                            with: .color(tint.opacity(0.055 + random.next() * 0.05)))
+            }
+        }
+    }
+
+    /// 天上那兩面全像廣告，還有遠得只剩一個影子的巨塔。
+    ///
+    /// 上一版畫面上面三分之一是純黑的——只有電線。夜景的天空不是空的：
+    /// 這種城市的天上一定掛著幾面大得不合理的廣告，那是「有人在這裡賣東西
+    /// 給所有人」的證據，也是整個類型最早的那張圖就有的東西。
+    ///
+    /// 透明度壓得很低（0.10 以下）：它在照片後面，不能跟照片搶。
+    private func skyStructures(_ context: inout GraphicsContext, _ size: CGSize) {
+        // 遠得只剩輪廓的巨塔。比最遠那一排還遠，所以更淡、更藍。
+        var random = InkRandom(8812)
+        for _ in 0..<3 {
+            let w = size.width * CGFloat(0.045 + random.next() * 0.05)
+            let x = CGFloat(random.next()) * size.width
+            let top = size.height * CGFloat(0.13 + random.next() * 0.10)
+            let rect = CGRect(x: x - w / 2, y: top, width: w, height: size.height * 0.5)
+            context.fill(Path(rect), with: .linearGradient(
+                Gradient(colors: [Color(red: 0.14, green: 0.12, blue: 0.26).opacity(0.75),
+                                  Color(red: 0.10, green: 0.08, blue: 0.19).opacity(0.3)]),
+                startPoint: CGPoint(x: 0, y: top),
+                endPoint: CGPoint(x: 0, y: top + size.height * 0.3)))
+            // 塔頂的航警燈
+            let r: CGFloat = 1.4
+            context.fill(Path(ellipseIn: CGRect(x: rect.midX - r, y: top - r,
+                                                width: r * 2, height: r * 2)),
+                         with: .color(CyberPalette.magenta.opacity(0.65)))
+        }
+
+        // 全像看板：兩面，一青一洋紅，裡面有橫向掃描帶
+        let boards: [(CGRect, Color)] = [
+            (CGRect(x: size.width * 0.05, y: size.height * 0.040,
+                    width: size.width * 0.40, height: size.height * 0.105),
+             CyberPalette.cyan),
+            (CGRect(x: size.width * 0.56, y: size.height * 0.098,
+                    width: size.width * 0.39, height: size.height * 0.090),
+             CyberPalette.magenta)
+        ]
+        for (rect, tint) in boards {
+            context.fill(Path(roundedRect: rect, cornerRadius: 3),
+                         with: .linearGradient(
+                            Gradient(colors: [tint.opacity(0.085), tint.opacity(0.02)]),
+                            startPoint: CGPoint(x: rect.minX, y: rect.minY),
+                            endPoint: CGPoint(x: rect.maxX, y: rect.maxY)))
+            context.stroke(Path(roundedRect: rect, cornerRadius: 3),
+                           with: .color(tint.opacity(0.22)),
+                           style: StrokeStyle(lineWidth: 0.7))
+            // 投影不是實的：裡面是一條一條的掃描帶，不是一塊面
+            var y = rect.minY + 4
+            var i = 0
+            while y < rect.maxY - 2 {
+                let inset = CGFloat(i % 3) * rect.width * 0.08
+                context.fill(
+                    Path(CGRect(x: rect.minX + 5 + inset, y: y,
+                                width: rect.width - 10 - inset * 1.6, height: 1.2)),
+                    with: .color(tint.opacity(i % 4 == 0 ? 0.16 : 0.07)))
+                y += 5
+                i += 1
             }
         }
     }
@@ -393,6 +493,28 @@ private struct CyberStaticLayer: View {
                 context.fill(Path(window.rect),
                              with: .color(window.color
                                 .opacity(window.brightness * (0.30 + 0.55 * depth) * density)))
+            }
+        }
+
+        // [v25.498] 招牌打進雨裡的光錐搬到這裡來。
+        //
+        // 它是整幀裡最貴的一個東西：面積接近半個螢幕、模糊半徑 28，
+        // 四面招牌就是四次。而它根本看不出有沒有在閃——光錐是空氣裡的散射，
+        // 本來就比燈管本身遲鈍。固定下來，每秒省四次大面積模糊。
+        context.drawLayer { layer in
+            layer.addFilter(.blur(radius: 26))
+            for sign in plan.signs {
+                var cone = Path()
+                cone.move(to: CGPoint(x: sign.rect.midX, y: sign.rect.midY))
+                cone.addLine(to: CGPoint(x: sign.rect.midX - sign.rect.width * 1.9,
+                                         y: plan.groundY))
+                cone.addLine(to: CGPoint(x: sign.rect.midX + sign.rect.width * 1.9,
+                                         y: plan.groundY))
+                cone.closeSubpath()
+                layer.fill(cone, with: .linearGradient(
+                    Gradient(colors: [sign.color.opacity(0.15 * sign.power), .clear]),
+                    startPoint: CGPoint(x: 0, y: sign.rect.midY),
+                    endPoint: CGPoint(x: 0, y: plan.groundY)))
             }
         }
 
@@ -463,6 +585,28 @@ private struct CyberStaticLayer: View {
                 startPoint: CGPoint(x: 0, y: groundY),
                 endPoint: CGPoint(x: 0, y: size.height)))
 
+        // [v25.498] 先把**整排樓**翻下來。
+        //
+        // 上一版的地面只有招牌的倒影加一條亮帶，所以它讀起來是「地上有光」，
+        // 不是「地是濕的」。濕地面之所以成立，是因為你在上面看得到**城市的
+        // 形狀**——倒影要有樓的輪廓，不然那只是一塊發亮的柏油。
+        context.drawLayer { layer in
+            layer.addFilter(.blur(radius: 7))
+            for building in plan.buildings where building.block >= CyberCity.blocks - 2 {
+                let depth = Double(building.block) / Double(CyberCity.blocks - 1)
+                let height = groundY - building.rect.minY
+                guard height > 4 else { continue }
+                let mirrored = CGRect(x: building.rect.minX, y: groundY,
+                                      width: building.rect.width, height: height * 0.85)
+                layer.fill(Path(mirrored), with: .linearGradient(
+                    Gradient(colors: [
+                        Color(red: 0.30, green: 0.26, blue: 0.48).opacity(0.30 * depth),
+                        .clear]),
+                    startPoint: CGPoint(x: 0, y: groundY),
+                    endPoint: CGPoint(x: 0, y: mirrored.maxY)))
+            }
+        }
+
         // 把招牌翻下來，往下拉長、糊掉。水面的倒影永遠比本體**長**，
         // 因為每一道波都把光再往你這邊帶一點。
         context.drawLayer { layer in
@@ -487,11 +631,33 @@ private struct CyberStaticLayer: View {
                         endPoint: CGPoint(x: 0, y: groundY + size.height * 0.07)))
         }
 
-        // 地平線那一條：地面與城市的交界要有一道亮線，不然城市像浮在空中
+        // 積水：地上不是一整片鏡子，是一塊一塊的水窪。
+        // 水窪的邊緣才是「剛下過雨」最直接的證據。
+        var puddle = InkRandom(44190)
+        for _ in 0..<7 {
+            let w = size.width * CGFloat(0.12 + puddle.next() * 0.3)
+            let x = CGFloat(puddle.next()) * size.width - w * 0.3
+            let y = groundY + (size.height - groundY) * CGFloat(0.08 + puddle.next() * 0.8)
+            let h = CGFloat(3 + puddle.next() * 9)
+            context.drawLayer { layer in
+                layer.addFilter(.blur(radius: 4))
+                layer.fill(Path(ellipseIn: CGRect(x: x, y: y, width: w, height: h)),
+                           with: .color(.white.opacity(0.035 + puddle.next() * 0.045)))
+            }
+        }
+
+        // 地平線那一條：地面與城市的交界要有一道亮線，不然城市像浮在空中。
+        // [v25.498] 加了一層往上散的輝光——街燈打在濕地上就是這樣。
+        context.drawLayer { layer in
+            layer.addFilter(.blur(radius: 14))
+            layer.fill(Path(CGRect(x: 0, y: groundY - size.height * 0.035,
+                                   width: size.width, height: size.height * 0.07)),
+                       with: .color(CyberPalette.amber.opacity(0.10)))
+        }
         var horizon = Path()
         horizon.move(to: CGPoint(x: 0, y: groundY))
         horizon.addLine(to: CGPoint(x: size.width, y: groundY))
-        context.stroke(horizon, with: .color(CyberPalette.cyan.opacity(0.14)),
+        context.stroke(horizon, with: .color(CyberPalette.cyan.opacity(0.22)),
                        style: StrokeStyle(lineWidth: 1))
     }
 
@@ -547,44 +713,39 @@ enum CyberScene {
     /// 你看到的顏色是它周圍的氣體在發光。
     private static func neon(_ context: inout GraphicsContext, _ size: CGSize,
                              plan: CyberCityPlan, time: Double, density: Double) {
-        for sign in plan.signs {
+        // [v25.498] 四面招牌的同一圈輝光畫在**同一個**模糊層裡。
+        //
+        // 一個 drawLayer 配一個 blur filter 就是一次離屏繪製加一次高斯模糊；
+        // 上一版每面招牌開三個、四面十二個，每秒二十四次。模糊半徑一樣的
+        // 東西本來就可以疊在同一層畫——每一層的透明度各自算，不受影響。
+        // 十二層變兩層。
+        let states = plan.signs.map { sign -> (CyberSign, Path, Double) in
             let level = CyberCity.flicker(time: time, seed: sign.flickerSeed)
-            guard level > 0.08 else { continue }
-            let alpha = level * sign.power * density
-            let shape = Path(roundedRect: sign.rect.insetBy(dx: 2.5, dy: 2.5),
-                             cornerRadius: 2)
+            return (sign,
+                    Path(roundedRect: sign.rect.insetBy(dx: 2.5, dy: 2.5), cornerRadius: 2),
+                    level * sign.power * density)
+        }
 
-            context.drawLayer { layer in
-                layer.addFilter(.blur(radius: 18))
+        context.drawLayer { layer in
+            layer.addFilter(.blur(radius: 17))
+            for (sign, shape, alpha) in states where alpha > 0.05 {
                 layer.stroke(shape, with: .color(sign.color.opacity(0.55 * alpha)),
                              style: StrokeStyle(lineWidth: 7))
             }
-            context.drawLayer { layer in
-                layer.addFilter(.blur(radius: 5))
+        }
+        context.drawLayer { layer in
+            layer.addFilter(.blur(radius: 5))
+            for (sign, shape, alpha) in states where alpha > 0.05 {
                 layer.stroke(shape, with: .color(sign.color.opacity(0.85 * alpha)),
                              style: StrokeStyle(lineWidth: 3))
             }
+        }
+        // 管芯：幾乎純白，不模糊。真的霓虹管中心是白的，
+        // 你看到的顏色是它周圍的氣體在發光。
+        for (sign, shape, alpha) in states where alpha > 0.05 {
             context.stroke(shape, with: .color(.white.opacity(0.80 * alpha)),
                            style: StrokeStyle(lineWidth: 1))
-
-            // 招牌上的字：直書就一個字一個字往下排
             text(&context, sign, alpha: alpha)
-
-            // 光打進雨裡的那道錐形
-            context.drawLayer { layer in
-                layer.addFilter(.blur(radius: 28))
-                var cone = Path()
-                cone.move(to: CGPoint(x: sign.rect.midX, y: sign.rect.midY))
-                cone.addLine(to: CGPoint(x: sign.rect.midX - sign.rect.width * 1.9,
-                                         y: plan.groundY))
-                cone.addLine(to: CGPoint(x: sign.rect.midX + sign.rect.width * 1.9,
-                                         y: plan.groundY))
-                cone.closeSubpath()
-                layer.fill(cone, with: .linearGradient(
-                    Gradient(colors: [sign.color.opacity(0.17 * alpha), .clear]),
-                    startPoint: CGPoint(x: 0, y: sign.rect.midY),
-                    endPoint: CGPoint(x: 0, y: plan.groundY)))
-            }
         }
     }
 
@@ -605,8 +766,12 @@ enum CyberScene {
                     at: point, anchor: .center)
             }
         } else {
+            // [v25.498] 字寬要分中英文算。全部當成一個字寬的話，
+            // 「24H 営業」會被算得比實際寬，字就縮得太小；反過來則會爆框
+            // （上一版的「麵·酒·電」最後一個字就被切掉了）。
+            let units = sign.text.reduce(0.0) { $0 + ($1.isASCII ? 0.56 : 1.0) }
             let fontSize = min(sign.rect.height * 0.62,
-                               sign.rect.width / CGFloat(characters.count) * 1.2)
+                               sign.rect.width * 0.86 / CGFloat(max(units, 1)))
             context.draw(
                 Text(sign.text)
                     .font(.system(size: fontSize, weight: .bold))
@@ -622,7 +787,7 @@ enum CyberScene {
     private static func rain(_ context: inout GraphicsContext, _ size: CGSize,
                              plan: CyberCityPlan, time: Double, density: Double) {
         var random = InkRandom(7731)
-        for _ in 0..<150 {
+        for _ in 0..<190 {
             let lane = random.next()
             let depth = random.next()                    // 0＝遠，1＝近
             let phase = random.next()
@@ -634,7 +799,7 @@ enum CyberScene {
                     + CGFloat(cycle) * size.width * 0.075
             let length = CGFloat(7 + depth * 26)
             let lit = CyberCity.lightAt(x, y, signs: plan.signs, size: size)
-            let alpha = (0.045 + lit * 0.42) * (0.35 + depth * 0.65) * density
+            let alpha = (0.075 + lit * 0.50) * (0.35 + depth * 0.65) * density
             guard alpha > 0.02 else { continue }
 
             var streak = Path()
@@ -650,34 +815,40 @@ enum CyberScene {
     /// 一個會動的小點，用來說明「這個世界是活的，而且很大」。
     private static func vehicles(_ context: inout GraphicsContext, _ size: CGSize,
                                  time: Double, density: Double) {
-        for i in 0..<3 {
+        // 先把三台的位置算出來，尾跡才能共用同一個模糊層
+        let craft: [(CGPoint, CGFloat, CGFloat)] = (0..<3).map { i in
             let speed = 0.016 + Double(i) * 0.009
             let cycle = ((time * speed) + Double(i) * 0.41)
                 .truncatingRemainder(dividingBy: 1)
             let rightward = i % 2 == 0
             let travel = CGFloat(cycle) * size.width * 1.3 - size.width * 0.15
             let x = rightward ? travel : size.width - travel
-            let y = size.height * CGFloat(0.13 + 0.085 * Double(i))
-            let scale = CGFloat(0.7 + Double(i) * 0.35)
-            let dir: CGFloat = rightward ? 1 : -1
+            let y = size.height * CGFloat(0.11 + 0.075 * Double(i))
+            return (CGPoint(x: x, y: y),
+                    CGFloat(0.7 + Double(i) * 0.35),
+                    rightward ? 1 : -1)
+        }
 
-            // 尾跡：往後拉的一道糊光
-            context.drawLayer { layer in
-                layer.addFilter(.blur(radius: 3))
+        context.drawLayer { layer in
+            layer.addFilter(.blur(radius: 3))
+            for (point, scale, dir) in craft {
                 var trail = Path()
-                trail.move(to: CGPoint(x: x, y: y))
-                trail.addLine(to: CGPoint(x: x - dir * 30 * scale, y: y + 1.5 * scale))
+                trail.move(to: point)
+                trail.addLine(to: CGPoint(x: point.x - dir * 30 * scale,
+                                          y: point.y + 1.5 * scale))
                 layer.stroke(trail,
                              with: .color(CyberPalette.magenta.opacity(0.42 * density)),
                              style: StrokeStyle(lineWidth: 1.6 * scale, lineCap: .round))
             }
-            // 前白後紅，跟真的飛機一樣
+        }
+        // 前白後紅，跟真的飛機一樣
+        for (point, scale, dir) in craft {
             let r = 1.5 * scale
-            context.fill(Path(ellipseIn: CGRect(x: x - r, y: y - r,
+            context.fill(Path(ellipseIn: CGRect(x: point.x - r, y: point.y - r,
                                                 width: r * 2, height: r * 2)),
                          with: .color(.white.opacity(0.95 * density)))
-            context.fill(Path(ellipseIn: CGRect(x: x - dir * 7 * scale - r * 0.7,
-                                                y: y - r * 0.7,
+            context.fill(Path(ellipseIn: CGRect(x: point.x - dir * 7 * scale - r * 0.7,
+                                                y: point.y - r * 0.7,
                                                 width: r * 1.4, height: r * 1.4)),
                          with: .color(CyberPalette.magenta.opacity(0.9 * density)))
         }
@@ -687,24 +858,25 @@ enum CyberScene {
     private static func ripples(_ context: inout GraphicsContext, _ size: CGSize,
                                 plan: CyberCityPlan, time: Double, density: Double) {
         var random = InkRandom(60221)
-        for i in 0..<9 {
-            let depth = random.next()
-            let y = plan.groundY + (size.height - plan.groundY)
-                * CGFloat(0.04 + depth * 0.92)
-            let phase = time * (0.25 + depth * 0.5) + random.next() * 6
-            let width = size.width * CGFloat(0.12 + random.next() * 0.3)
-            let x = size.width * CGFloat(0.5 + sin(phase) * 0.42) - width / 2
-            let tint = i % 3 == 0 ? CyberPalette.cyan
-                : (i % 3 == 1 ? CyberPalette.magenta : CyberPalette.amber)
-            var line = Path()
-            line.move(to: CGPoint(x: x, y: y))
-            line.addLine(to: CGPoint(x: x + width, y: y))
-            context.drawLayer { layer in
-                layer.addFilter(.blur(radius: 2.2))
+        // 九道共用一個模糊層（半徑一樣的東西沒有理由分九次畫）
+        context.drawLayer { layer in
+            layer.addFilter(.blur(radius: 2.2))
+            for i in 0..<9 {
+                let depth = random.next()
+                let y = plan.groundY + (size.height - plan.groundY)
+                    * CGFloat(0.04 + depth * 0.92)
+                let phase = time * (0.25 + depth * 0.5) + random.next() * 6
+                let width = size.width * CGFloat(0.12 + random.next() * 0.3)
+                let x = size.width * CGFloat(0.5 + sin(phase) * 0.42) - width / 2
+                let tint = i % 3 == 0 ? CyberPalette.cyan
+                    : (i % 3 == 1 ? CyberPalette.magenta : CyberPalette.amber)
+                var line = Path()
+                line.move(to: CGPoint(x: x, y: y))
+                line.addLine(to: CGPoint(x: x + width, y: y))
                 layer.stroke(line, with: .linearGradient(
                     Gradient(stops: [
                         .init(color: .clear, location: 0),
-                        .init(color: tint.opacity((0.16 + depth * 0.26) * density),
+                        .init(color: tint.opacity((0.20 + depth * 0.30) * density),
                               location: 0.35),
                         .init(color: .clear, location: 1)]),
                     startPoint: CGPoint(x: x, y: y),
@@ -735,23 +907,42 @@ enum CyberScene {
 /// 看起來就只是「照片貼在一張圖上」。
 struct CyberForegroundView: View {
     var density: Double = 1.0
+    /// 見 CyberCityView.paused
+    var paused: Bool = false
 
-    var body: some View {
-        TimelineView(.periodic(from: .now, by: 1.0 / 24.0)) { timeline in
+    @ViewBuilder
+    private var layer: some View {
+        if paused {
             Canvas { context, size in
-                let t = timeline.date.timeIntervalSinceReferenceDate
-                CyberForeground.cables(&context, size, time: t, density: density)
-                CyberForeground.steam(&context, size, time: t, density: density)
-                CyberForeground.nearRain(&context, size, time: t, density: density)
+                CyberForeground.draw(&context, size, time: 0, density: density)
+            }
+        } else {
+            TimelineView(.periodic(from: .now, by: 1.0 / 24.0)) { timeline in
+                Canvas { context, size in
+                    CyberForeground.draw(&context, size,
+                                         time: timeline.date.timeIntervalSinceReferenceDate,
+                                         density: density)
+                }
             }
         }
-        .overlay(CyberVignette())
-        .allowsHitTesting(false)
-        .ignoresSafeArea()
+    }
+
+    var body: some View {
+        layer
+            .overlay(CyberVignette())
+            .allowsHitTesting(false)
+            .ignoresSafeArea()
     }
 }
 
 enum CyberForeground {
+    static func draw(_ context: inout GraphicsContext, _ size: CGSize,
+                     time: Double, density: Double) {
+        cables(&context, size, time: time, density: density)
+        steam(&context, size, time: time, density: density)
+        nearRain(&context, size, time: time, density: density)
+    }
+
     /// 纜線。走向固定，會動的是風吹的那一點點晃。
     ///
     /// 掛在線上的小燈籠才是重點——它給了「有人住在這裡」的證據。
@@ -874,8 +1065,8 @@ enum CyberForeground {
 /// 暗角。比水墨那一版重——夜景本來就只有中間看得見。
 private struct CyberVignette: View {
     var body: some View {
-        RadialGradient(colors: [.clear, .black.opacity(0.52)],
-                       center: .center, startRadius: 100, endRadius: 560)
+        RadialGradient(colors: [.clear, .black.opacity(0.36)],
+                       center: .center, startRadius: 170, endRadius: 600)
             .ignoresSafeArea()
             .allowsHitTesting(false)
     }
@@ -906,26 +1097,33 @@ struct CyberFramedPhoto: View {
                 .overlay(corners)
             dataStrip
         }
-        .padding(7)
+        .padding(6)
         .background(
             Rectangle()
-                .fill(Color(red: 0.05, green: 0.05, blue: 0.075).opacity(0.88))
-                .overlay(Rectangle().stroke(CyberPalette.cyan.opacity(0.40),
-                                            lineWidth: 0.8))
+                .fill(Color(red: 0.05, green: 0.05, blue: 0.075).opacity(0.90))
+                .overlay(Rectangle().stroke(CyberPalette.cyan.opacity(0.28),
+                                            lineWidth: 0.6))
         )
-        .shadow(color: CyberPalette.cyan.opacity(0.30), radius: 16)
-        .shadow(color: .black.opacity(0.65), radius: 10, x: 0, y: 7)
+        // [v25.498] 只留一層陰影。
+        //
+        // 原本是兩層（青色輝光＋黑色落影），但牆上同時有八張卡片，每一張都在
+        // 做永不停止的呼吸動畫——每一幀八張 × 兩層陰影都要重算一次模糊。
+        // 那是截圖編輯器會卡的第二個原因。青色的留著（它是這套主題的語言），
+        // 黑色那層改由面板本身的深色底負責。
+        .shadow(color: CyberPalette.cyan.opacity(0.26), radius: 11)
     }
 
     /// 色差：兩條錯開一點點的細邊，一青一洋紅。
     private var chromaticEdge: some View {
         ZStack {
+            // [v25.498] 淡一點、細一點。原本在真機上糊成一圈發白的粗邊，
+            // 色差應該是「看得出有點不對勁」，不是一條白框。
             Rectangle()
-                .stroke(CyberPalette.cyan.opacity(0.55), lineWidth: 1)
-                .offset(x: -0.8, y: -0.8)
+                .stroke(CyberPalette.cyan.opacity(0.42), lineWidth: 0.7)
+                .offset(x: -0.7, y: -0.7)
             Rectangle()
-                .stroke(CyberPalette.magenta.opacity(0.55), lineWidth: 1)
-                .offset(x: 0.8, y: 0.8)
+                .stroke(CyberPalette.magenta.opacity(0.42), lineWidth: 0.7)
+                .offset(x: 0.7, y: 0.7)
         }
         .blendMode(.screen)
     }
@@ -946,7 +1144,7 @@ struct CyberFramedPhoto: View {
                 path.move(to: CGPoint(x: arm, y: h));    path.addLine(to: CGPoint(x: 0, y: h))
                 path.addLine(to: CGPoint(x: 0, y: h - arm))
             }
-            .stroke(CyberPalette.cyan.opacity(0.92), lineWidth: 1.6)
+            .stroke(CyberPalette.cyan.opacity(0.95), lineWidth: 1.3)
         }
     }
 
