@@ -177,6 +177,27 @@ enum TripPhone {
         "39"    // 義大利（這個其實不去 0，但它本來就不帶國碼前綴，列著無害）
     ]
 
+    /// 給人看的寫法：**沿用 Apple 自己的分組**，只把國碼換成開頭的 0。
+    ///
+    /// [v25.501] 原本畫面上直接顯示 navDigits，所以每一站頂著一串
+    /// 「0922635615」——十位數字連在一起，眼睛沒有地方可以停，念也念不出來。
+    ///
+    /// 但自己重新分組是個陷阱：日本的區碼長度不一（東京 03、大阪 06 是兩碼，
+    /// 福岡 092、札幌 011 是三碼，鄉下還有四碼、五碼的），一套 3-3-4 的規則
+    /// 到處都會切錯。Apple 回來的字串（「+81 92-291-0001」）已經照當地習慣
+    /// 分好組了——照用就好，我們只要動開頭那一段。
+    static func display(_ raw: String) -> String {
+        let trimmed = raw.trimmingCharacters(in: .whitespaces)
+        guard trimmed.hasPrefix("+") else { return trimmed }
+        let body = trimmed.dropFirst()                  // 去掉 +
+        for code in trunkZero where body.hasPrefix(code) {
+            let rest = body.dropFirst(code.count)
+                .drop { $0 == " " || $0 == "-" }        // 國碼後面的分隔符不要
+            return "0" + rest
+        }
+        return trimmed
+    }
+
     /// 車機導航要輸入的號碼：只有數字，國碼換回開頭的 0。
     static func navDigits(_ raw: String) -> String {
         let trimmed = raw.trimmingCharacters(in: .whitespaces)
@@ -192,6 +213,43 @@ enum TripPhone {
     static func dialDigits(_ raw: String) -> String {
         let kept = raw.filter { $0.isNumber || $0 == "+" }
         return kept
+    }
+}
+
+/// 地址的排版（v25.501）。
+///
+/// 畫面上每一站的地址長這樣：「812-0027福岡縣福岡市博多區下川端町3-1」。
+/// 郵遞區號黏在縣名上、番地黏在町名上，整串沒有一個可以停的地方。
+///
+/// 成因是 v25.424 把 Apple 分開給的欄位**直接 joined() 串起來**，沒有分隔符。
+/// 但這裡要小心：日文地址的「縣市區町」本來就是連著寫的（福岡県福岡市博多区
+/// 下川端町），那一段串在一起是對的。真正錯的只有兩個邊界——
+/// 郵遞區號的後面，和番地的前面。所以這裡只動那兩個地方，不是整串重排。
+enum TripAddress {
+    /// 把地址整理成讀得順的樣子。已經整齊的字串原樣返回。
+    static func tidy(_ raw: String) -> String {
+        var text = raw.trimmingCharacters(in: .whitespaces)
+        guard !text.isEmpty else { return text }
+
+        // 郵遞區號：開頭的「###-####」。日本的寫法是〒812-0027，後面空一格。
+        // 台灣的郵遞區號是三碼或五碼、沒有連字號，所以不會符合這個樣式——
+        // 這條規則因此天生只對日本地址生效，不必另外判斷國家。
+        let c = Array(text)
+        if c.count >= 8, c[3] == "-",
+           c[0..<3].allSatisfy(\.isNumber), c[4..<8].allSatisfy(\.isNumber) {
+            let rest = String(c[8...]).trimmingCharacters(in: .whitespaces)
+            text = "〒" + String(c[0..<8]) + (rest.isEmpty ? "" : " " + rest)
+        }
+
+        // 番地：結尾那串數字（含連字號）如果直接黏在漢字後面，中間補一個空格。
+        // 「下川端町3-1」→「下川端町 3-1」、「中洲55-12」→「中洲 55-12」。
+        var out = Array(text)
+        var i = out.count - 1
+        while i > 0, out[i].isNumber || out[i] == "-" { i -= 1 }
+        if i > 0, i < out.count - 1, out[i] != " ", !out[i].isNumber {
+            out.insert(" ", at: i + 1)
+        }
+        return String(out)
     }
 }
 
@@ -367,6 +425,12 @@ struct TripStop: Identifiable, Codable {
         let n = name.trimmingCharacters(in: .whitespaces)
         return n.isEmpty ? "未命名景點" : n
     }
+
+    /// 畫面上要顯示的地址（排版過的，見 TripAddress）。
+    ///
+    /// 做成顯示時才整理、而不是只在存檔時整理：使用者手上那趟行程的三十幾站
+    /// 都是用舊的方式存進去的，只改存檔那一邊的話，他要重挑一次地點才會變好看。
+    var displayAddress: String { TripAddress.tidy(address) }
 
     /// 有沒有電話可用
     var hasPhone: Bool {

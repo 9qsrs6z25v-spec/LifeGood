@@ -1649,16 +1649,67 @@ struct TripPlanDetailView: View {
         let hasPhotos = !slot.stop.photoFileNames.isEmpty
         let hasWeather = slot.stop.coordinate != nil
             && TripWeatherStore.isWithinForecastRange(slot.arrival)
-        guard hasPhotos || hasWeather else { return nil }
+        let phone = slot.stop.phone?.trimmingCharacters(in: .whitespaces)
+        let hasPhone = !(phone ?? "").isEmpty
+        guard hasPhotos || hasWeather || hasPhone else { return nil }
         return AnyView(
             VStack(alignment: .leading, spacing: 6) {
-                if hasWeather {
-                    // 時間軸是緊湊版，不寫來源那一行——那裡一眼掃過去就好
-                    TripWeatherChip(coordinate: slot.stop.coordinate, date: slot.arrival)
+                // [v25.501] 天氣與電話併成**同一行**。
+                //
+                // 它們是同一類東西：都是「等一下才會用到」的附註，都不該
+                // 搶在地名前面。擠在一行、同一個灰度，眼睛掃過去是一次，
+                // 不是三次——上一版是上面一顆藍膠囊、下面一顆灰膠囊，
+                // 中間夾著名字跟地址，整列被切成四段。
+                if hasWeather || hasPhone {
+                    HStack(spacing: 6) {
+                        if hasWeather {
+                            // 時間軸是緊湊版，不寫來源那一行
+                            TripWeatherChip(coordinate: slot.stop.coordinate,
+                                            date: slot.arrival)
+                        }
+                        if let phone, hasPhone {
+                            StopPhoneTag(raw: phone) { digits in
+                                banner = "已複製 " + digits
+                            }
+                        }
+                    }
                 }
                 if hasPhotos { photoStrip(slot.stop) }
             }
         )
+    }
+
+    /// 一站的電話（標題下面那一行）。
+    ///
+    /// 樣式刻意跟天氣膠囊**一模一樣**（10pt 粗體、灰字、tertiarySystemFill
+    /// 的膠囊底）：它們並排在同一行，長得不一樣只會讓那一行看起來是拼湊的。
+    ///
+    /// 顯示用 Apple 分好組的寫法（092-291-0001），複製給車機用的是純數字
+    /// （0922910001）——看的人要斷點，機器不要。
+    private struct StopPhoneTag: View {
+        let raw: String
+        let onCopy: (String) -> Void
+
+        var body: some View {
+            Button {
+                let digits = TripPhone.navDigits(raw)
+                UIPasteboard.general.string = digits
+                onCopy(digits)
+            } label: {
+                HStack(spacing: 3) {
+                    Image(systemName: "phone.fill")
+                        .font(.system(size: 9))
+                    Text(TripPhone.display(raw))
+                        .font(.system(size: 10, weight: .bold).monospacedDigit())
+                }
+                .fixedSize()
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 7).padding(.vertical, 3)
+                .background(Color(.tertiarySystemFill), in: Capsule())
+                .contentShape(Capsule())
+            }
+            .buttonStyle(.plain)
+        }
     }
 
     @ViewBuilder
@@ -1720,19 +1771,12 @@ struct TripPlanDetailView: View {
     private func stopChips(_ slot: TripPlan.Slot) -> [ItemChip] {
         let c = TripDayPalette.color(slot.dayIndex)
         var chips: [ItemChip] = []
-        // [v25.500] 電話。顯示的是**車機要輸入的那一種寫法**（純數字、國碼
-        // 換回開頭的 0），不是 Apple 給的國際格式——輸 +81 車機找不到。
-        // 點一下就複製，因為它的用途就是「打進車機裡」。
-        if let raw = slot.stop.phone,
-           !raw.trimmingCharacters(in: .whitespaces).isEmpty {
-            let digits = TripPhone.navDigits(raw)
-            chips.append(ItemChip(id: "phone", text: digits, color: .blue,
-                                  icon: "phone.fill",
-                                  onTap: {
-                                      UIPasteboard.general.string = digits
-                                      banner = "已複製 " + digits
-                                  }))
-        }
+        // [v25.501] 電話不在這裡了，搬到標題下面那一行（見 stopExtra）。
+        //
+        // 這一列在**標題上面**，所以 v25.500 把電話放進來之後，整個畫面
+        // 最亮、最先被讀到的是一串十位數字，而不是「Familymart 博多中洲
+        // 五丁目店」。一站的名字是它的身分，其他都是附註——附註排在身分
+        // 前面，看起來就沒有秩序。
         if slot.dayIndex > 0 {
             chips.append(ItemChip(id: "day", text: "第 \(slot.dayIndex + 1) 天",
                                   color: c, icon: "sun.horizon"))
@@ -1825,7 +1869,7 @@ struct TripPlanDetailView: View {
 
     private func stopPreview(_ stop: TripStop) -> String? {
         var parts: [String] = []
-        let addr = stop.address.trimmingCharacters(in: .whitespaces)
+        let addr = stop.displayAddress
         if !addr.isEmpty { parts.append(addr) }
         let note = stop.note.trimmingCharacters(in: .whitespacesAndNewlines)
         if !note.isEmpty { parts.append(note) }
@@ -2635,9 +2679,10 @@ struct TripStopEditorSheet: View {
                     phone = found
                 }
                 fill.apply(name: nil,
-                           address: [pm.postalCode, pm.administrativeArea, pm.locality,
-                                     pm.thoroughfare, pm.subThoroughfare]
-                            .compactMap { $0 }.joined(),
+                           address: TripAddress.tidy(
+                            [pm.postalCode, pm.administrativeArea, pm.locality,
+                             pm.thoroughfare, pm.subThoroughfare]
+                                .compactMap { $0 }.joined()),
                            into: $name, addressField: $address)
             }
         }
@@ -2966,9 +3011,10 @@ struct TripSubSpotEditView: View {
                     sub.phone = found
                 }
                 fill.apply(name: nil,
-                           address: [pm.postalCode, pm.administrativeArea, pm.locality,
-                                     pm.thoroughfare, pm.subThoroughfare]
-                            .compactMap { $0 }.joined(),
+                           address: TripAddress.tidy(
+                            [pm.postalCode, pm.administrativeArea, pm.locality,
+                             pm.thoroughfare, pm.subThoroughfare]
+                                .compactMap { $0 }.joined()),
                            into: $sub.name, addressField: $sub.address)
             }
         }

@@ -183,7 +183,7 @@ enum TripShare {
                        + "–" + timeFmt.string(from: slot.departure)
                        + (stop.isOvernight ? "" : "・停留 \(stop.dwellMinutes) 分"))
         }
-        let address = stop.address.trimmingCharacters(in: .whitespaces)
+        let address = stop.displayAddress
         if !address.isEmpty { out.append(address) }
         // [v25.500] 電話跟著一起分享。分享行程最常見的情境就是傳給開車的那個人，
         // 而在日本他要輸進車機的正是這一串數字。
@@ -249,7 +249,7 @@ enum TripShare {
             lines.append("       停留 \(slot.stop.dwellMinutes) 分，"
                          + timeFmt.string(from: slot.departure) + " 離開")
         }
-        let address = slot.stop.address.trimmingCharacters(in: .whitespaces)
+        let address = slot.stop.displayAddress
         if !address.isEmpty { lines.append("       " + address) }
         if let raw = slot.stop.phone, !raw.trimmingCharacters(in: .whitespaces).isEmpty {
             lines.append("       ☎ " + TripPhone.navDigits(raw))
