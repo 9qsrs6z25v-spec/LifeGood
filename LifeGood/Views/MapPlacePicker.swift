@@ -25,6 +25,39 @@ import UIKit
 /// 用「地圖動、準心不動」而不是「點一下放大頭針」：
 /// 手指點下去的位置會被自己的手指擋住，挪地圖才能看著目標對準；
 /// 而且這個做法不必把畫面座標換算回經緯度，少一個會出錯的環節。
+/// 搜尋建議右邊那一塊距離（v25.499）。
+///
+/// 使用者回報：「每次都跑出地址沒有距離，導致我常常不知道要選哪個」。
+/// 搜一個地名跳出五筆長得幾乎一樣的地址，沒有距離就只能亂猜。
+///
+/// 六個搜尋清單共用同一個寫法——六種不同的距離格式會讓人以為它們是
+/// 六種不同的東西。圖示說明距離是從哪裡量的：location 是「離你」，
+/// mappin 是「離這一站」。沒有這個圖示的話，規劃福岡行程時看到
+/// 「300 公尺」會不知道是離台北的家三百公尺還是離飯店三百公尺。
+struct PlaceDistanceBadge: View {
+    let meters: CLLocationDistance?
+    /// 量距離的起點：離使用者（預設）還是離某個地點
+    var icon: String = "location.fill"
+
+    var body: some View {
+        HStack(spacing: 2.5) {
+            Image(systemName: icon)
+                .font(.system(size: 8, weight: .semibold))
+            Text(meters.map { RestaurantSearchCompleter.distanceText($0) } ?? "⋯")
+                .font(.caption2.weight(.semibold))
+                .monospacedDigit()
+        }
+        // 還在查的時候先佔住位置：算出來才撐開的話，整列會往旁邊跳一下，
+        // 剛好是使用者準備按下去的那一刻
+        .frame(minWidth: 52, alignment: .trailing)
+        .foregroundStyle(meters == nil ? .tertiary : .secondary)
+        .padding(.horizontal, 6)
+        .padding(.vertical, 2.5)
+        .background(Capsule().fill(Color(.secondarySystemFill).opacity(meters == nil ? 0.5 : 1)))
+        .animation(.easeOut(duration: 0.18), value: meters == nil)
+    }
+}
+
 struct MapPlacePickerSheet: View {
     @Environment(\.dismiss) private var dismiss
 
@@ -113,6 +146,11 @@ struct MapPlacePickerSheet: View {
                 // 這個畫面要能打地名與地址，不只是店名——預設的 POI-only
                 // 會讓「大名 115-30」這種查不到東西
                 searchCompleter.setResultTypes([.pointOfInterest, .address])
+                // 距離從**地圖現在看的地方**量，不是從使用者身上量。
+                // 在台北規劃福岡的行程時，每一筆都是「1200 公里」，
+                // 那個數字沒有幫任何人挑到任何東西。
+                searchCompleter.setReference(CLLocation(latitude: center.latitude,
+                                                        longitude: center.longitude))
                 searchCompleter.setRegion(MKCoordinateRegion(
                     center: center,
                     span: MKCoordinateSpan(latitudeDelta: 0.5, longitudeDelta: 0.5)))
@@ -148,6 +186,11 @@ struct MapPlacePickerSheet: View {
                     // 搜尋建議以目前看到的範圍為優先：在福岡看地圖時打「7-11」
                     // 該先給福岡的，不是台北的
                     searchCompleter.setRegion(context.region)
+                    // 距離也跟著重新量：地圖挪到哪，「多遠」就是從那裡算起。
+                    // 移動不到 200 公尺不會重算（見 setReference）。
+                    searchCompleter.setReference(
+                        CLLocation(latitude: context.region.center.latitude,
+                                   longitude: context.region.center.longitude))
                 }
                 // 拖曳與縮放是拖／捏的手勢，單點不會被地圖吃掉，所以可以直接接
                 .onTapGesture { screenPoint in
@@ -222,6 +265,9 @@ struct MapPlacePickerSheet: View {
                                     }
                                 }
                                 Spacer(minLength: 0)
+                                PlaceDistanceBadge(
+                                    meters: searchCompleter.distance(for: r),
+                                    icon: "scope")
                             }
                             .padding(.horizontal, 12).padding(.vertical, 9)
                             .contentShape(Rectangle())

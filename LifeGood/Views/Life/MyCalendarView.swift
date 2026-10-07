@@ -2137,6 +2137,12 @@ struct PersonalEventEditor: View {
                 }
             }
             Spacer()
+                    // [v25.499] 距離。使用者回報：搜尋只跳地址、沒有距離，
+                    // 常常不知道該選哪一個。past 來源沒有座標可算，所以只有
+                    // Apple Maps 那幾筆有。
+            if let completion = item.completion {
+                PlaceDistanceBadge(meters: locationCompleter.distance(for: completion))
+            }
             Image(systemName: "arrow.up.left").font(.caption2).foregroundStyle(.tertiary)
         }
         .padding(.vertical, 6).padding(.horizontal, 8)

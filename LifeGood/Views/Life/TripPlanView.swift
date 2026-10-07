@@ -2020,11 +2020,19 @@ struct TripStopEditorSheet: View {
                     if !completer.results.isEmpty && latitude == nil {
                         ForEach(Array(completer.results.prefix(5).enumerated()), id: \.offset) { _, r in
                             Button { pick(r) } label: {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(r.title).font(.subheadline).foregroundStyle(.primary)
-                                    if !r.subtitle.isEmpty {
-                                        Text(r.subtitle).font(.caption2).foregroundStyle(.secondary)
+                                HStack(spacing: 8) {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(r.title).font(.subheadline).foregroundStyle(.primary)
+                                        if !r.subtitle.isEmpty {
+                                            Text(r.subtitle).font(.caption2).foregroundStyle(.secondary)
+                                        }
                                     }
+                                    Spacer(minLength: 0)
+                                    // [v25.499] 距離是從這趟行程的所在地量的，
+                                    // 不是從使用者身上——在台北排福岡的行程，
+                                    // 「離我 1200 公里」挑不出任何東西。
+                                    PlaceDistanceBadge(meters: completer.distance(for: r),
+                                                       icon: "mappin")
                                 }
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .contentShape(Rectangle())
@@ -2396,6 +2404,18 @@ struct TripStopEditorSheet: View {
 
     /// 地圖選位置要從哪裡開始看：這一站已有的座標 → 上一站的 → 這份行程最後一個有座標的站。
     /// 都沒有就讓選位置畫面自己退回使用者位置。
+    /// 把搜尋偏向與距離起點一起對準某個座標。
+    /// 兩件事一定要一起做：只偏向不算距離，使用者還是不知道選哪個；
+    /// 只算距離不偏向，清單裡根本不會出現那個地方。
+    private func aimSearch(at coordinate: CLLocationCoordinate2D?) {
+        guard let coordinate else { return }
+        completer.setRegion(MKCoordinateRegion(center: coordinate,
+                                               latitudinalMeters: 40000,
+                                               longitudinalMeters: 40000))
+        completer.setReference(CLLocation(latitude: coordinate.latitude,
+                                          longitude: coordinate.longitude))
+    }
+
     private var mapPickerStart: CLLocationCoordinate2D? {
         if let latitude, let longitude {
             return CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
@@ -2445,6 +2465,11 @@ struct TripStopEditorSheet: View {
         // 名稱清空＝重新開始選地點，「住過的地方」那一區該回來
         if text.isEmpty { lodgingPicked = false }
         guard text.count >= 2 else { completer.queryFragment = ""; return }
+        // [v25.499] 搜尋偏向與距離起點都用**這趟行程所在的地方**
+        //（自己的座標 → 上一站 → 行程錨點），不是使用者現在站的地方。
+        // 在台北排福岡的行程時，「離我 1200 公里」挑不出任何東西，
+        // 而搜「7-11」先跳台北的門市更是直接幫倒忙。
+        aimSearch(at: mapPickerStart)
         searchDebounce = Task {
             try? await Task.sleep(nanoseconds: 300_000_000)
             guard !Task.isCancelled else { return }
@@ -2654,11 +2679,18 @@ struct TripSubSpotEditView: View {
                 if !completer.results.isEmpty && sub.latitude == nil {
                     ForEach(Array(completer.results.prefix(5).enumerated()), id: \.offset) { _, r in
                         Button { pick(r) } label: {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(r.title).font(.subheadline).foregroundStyle(.primary)
-                                if !r.subtitle.isEmpty {
-                                    Text(r.subtitle).font(.caption2).foregroundStyle(.secondary)
+                            HStack(spacing: 8) {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(r.title).font(.subheadline).foregroundStyle(.primary)
+                                    if !r.subtitle.isEmpty {
+                                        Text(r.subtitle).font(.caption2).foregroundStyle(.secondary)
+                                    }
                                 }
+                                Spacer(minLength: 0)
+                                // 子地點量的是「離這一站多遠」——老街裡的某一攤，
+                                // 你要知道的是它離你排的那個點走不走得到。
+                                PlaceDistanceBadge(meters: completer.distance(for: r),
+                                                   icon: "mappin")
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .contentShape(Rectangle())
@@ -2718,11 +2750,23 @@ struct TripSubSpotEditView: View {
         sub.coordinate ?? parentCoordinate
     }
 
+    /// 見 TripStopEditView.aimSearch
+    private func aimSearch(at coordinate: CLLocationCoordinate2D?) {
+        guard let coordinate else { return }
+        completer.setRegion(MKCoordinateRegion(center: coordinate,
+                                               latitudinalMeters: 40000,
+                                               longitudinalMeters: 40000))
+        completer.setReference(CLLocation(latitude: coordinate.latitude,
+                                          longitude: coordinate.longitude))
+    }
+
     private func scheduleSearch(_ q: String) {
         searchDebounce?.cancel()
         let text = q.trimmingCharacters(in: .whitespaces)
         fill.userEditedName(text)
         guard text.count >= 2 else { completer.queryFragment = ""; return }
+        // 子地點搜的是「這一站附近還有什麼」，所以起點是這一站
+        aimSearch(at: mapPickerStart)
         searchDebounce = Task {
             try? await Task.sleep(nanoseconds: 300_000_000)
             guard !Task.isCancelled else { return }
