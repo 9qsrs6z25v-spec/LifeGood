@@ -1130,6 +1130,93 @@ struct TripPlanDetailView: View {
         .buttonStyle(.plain)
     }
 
+    // MARK: 時間軸的藝術元素（v25.505）
+    //
+    // 規矩跟行程卡上那座天際線一樣：**藝術元素要跟它待的地方有關係**。
+    // 這裡待的是一條時間軸，所以做的是「把線變成一條會發光的軌道」，
+    // 不是在列與列之間貼圖案。功能性的清單加裝飾，加的必須是結構本身，
+    // 不然就是在資訊上面灑亮粉。
+
+    /// 時間軸的主幹。
+    ///
+    /// 上一版是一條 0.22 的實線——對齊對了，但它只是一條線。
+    /// 霓虹不是一條亮線，是**一條線加上它周圍發亮的空氣**，所以這裡是三層：
+    /// 糊開的輝光、清楚的芯、起點那一顆亮點。
+    ///
+    /// 芯由上往下淡掉：這一站從上面開始，往下是它持續的時間。
+    /// 平均亮度的線講不出方向，而時間軸整件事就是方向。
+    private struct TimelineRail: View {
+        let color: Color
+
+        var body: some View {
+            ZStack(alignment: .top) {
+                Rectangle()
+                    .fill(LinearGradient(colors: [color.opacity(0.42), color.opacity(0.05)],
+                                         startPoint: .top, endPoint: .bottom))
+                    .frame(width: 4)
+                    .blur(radius: 2.5)
+                Rectangle()
+                    .fill(LinearGradient(colors: [color.opacity(0.80), color.opacity(0.10)],
+                                         startPoint: .top, endPoint: .bottom))
+                    .frame(width: 1.5)
+                Circle()
+                    .fill(color)
+                    .frame(width: 4.5, height: 4.5)
+                    .shadow(color: color.opacity(0.85), radius: 3)
+                    .offset(y: -1)
+            }
+            .allowsHitTesting(false)
+        }
+    }
+
+    /// 日期標頭右邊那條線：城市落在地平線上。
+    ///
+    /// 原本是一條 0.22 的灰線，把剩下的空間填掉而已。改成一條**由亮到淡**的
+    /// 地平線，上面站著幾棟高低不一的小樓——跟行程卡底下那座天際線是同一座城，
+    /// 只是遠到剩下輪廓。線與樓一起往右淡出，所以它不會跟右邊的內容打架。
+    private struct DayHorizonRule: View {
+        let color: Color
+
+        var body: some View {
+            Canvas { context, size in
+                guard size.width > 8 else { return }
+                let baseY = size.height - 2.5
+
+                var line = Path()
+                line.move(to: CGPoint(x: 0, y: baseY))
+                line.addLine(to: CGPoint(x: size.width, y: baseY))
+                context.stroke(line, with: .linearGradient(
+                    Gradient(colors: [color.opacity(0.45), color.opacity(0.05)]),
+                    startPoint: .zero,
+                    endPoint: CGPoint(x: size.width, y: 0)),
+                               style: StrokeStyle(lineWidth: 0.9))
+
+                // 固定種子：每次重畫都是同一座城，捲動時才不會一直在變
+                var random = InkRandom(40127)
+                var x: CGFloat = size.width * 0.06
+                while x < size.width - 5 {
+                    let w = 2 + CGFloat(random.next()) * 3.5
+                    let h = 2 + CGFloat(random.next()) * 8
+                    // 越往右越淡，跟地平線一起消失在遠方
+                    let fade = 1 - Double(x / max(size.width, 1)) * 0.9
+                    context.fill(Path(CGRect(x: x, y: baseY - h, width: w, height: h)),
+                                 with: .color(color.opacity(0.34 * fade)))
+                    // 偶爾一根天線
+                    if random.next() > 0.78 {
+                        var mast = Path()
+                        mast.move(to: CGPoint(x: x + w / 2, y: baseY - h))
+                        mast.addLine(to: CGPoint(x: x + w / 2, y: baseY - h - 3))
+                        context.stroke(mast, with: .color(color.opacity(0.26 * fade)),
+                                       style: StrokeStyle(lineWidth: 0.7))
+                    }
+                    x += w + 2 + CGFloat(random.next()) * 8
+                }
+            }
+            .frame(height: 15)
+            .allowsHitTesting(false)
+        }
+    }
+
     /// 換日的分隔列。跨天行程一天一個色系，這一列把顏色與日期講明白。
     /// [v25.475] 整列可點＝收合／展開這一天；收著的時候寫出站數、完成數與花費。
     private func dayHeaderRow(_ p: TripPlan, dayIndex: Int, isFirst: Bool,
@@ -1160,7 +1247,7 @@ struct TripPlanDetailView: View {
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
-                Rectangle().fill(c.opacity(0.22)).frame(height: 0.75)
+                DayHorizonRule(color: c)
             }
             .padding(.horizontal, 16)
             .padding(.top, isFirst ? 2 : 10)
@@ -1233,8 +1320,15 @@ struct TripPlanDetailView: View {
             Text("")
                 .frame(width: Self.timeColumnWidth)
                 .overlay(alignment: .trailing) {
-                    Rectangle().fill(c.opacity(0.28))
-                        .frame(width: 1.5, height: 26)
+                    // 兩站之間這一段用同一套：糊開的輝光 ＋ 清楚的芯。
+                    // 跟上下兩站的主幹接在一起，整天看起來是同一條軌道。
+                    ZStack {
+                        Rectangle().fill(c.opacity(0.30))
+                            .frame(width: 4, height: 26)
+                            .blur(radius: 2.5)
+                        Rectangle().fill(c.opacity(0.55))
+                            .frame(width: 1.5, height: 26)
+                    }
                 }
             HStack(spacing: 5) {
                 Image(systemName: slot.mode.icon).font(.system(size: 9, weight: .bold))
@@ -1380,9 +1474,7 @@ struct TripPlanDetailView: View {
         // 看起來是同一條線穿過每一站。顏色用當天的色、壓得很淡——
         // 線是用來把東西串起來的，不是用來被看見的。
         .overlay(alignment: .trailing) {
-            Rectangle()
-                .fill(c.opacity(0.22))
-                .frame(width: 1.5)
+            TimelineRail(color: c)
         }
 
         return ItemRow(
@@ -1431,6 +1523,13 @@ struct TripPlanDetailView: View {
                 Circle()
                     .fill(LinearGradient(colors: [c.opacity(0.9), c.opacity(0.5)],
                                          startPoint: .top, endPoint: .bottom))
+                    .frame(width: 22, height: 22)
+                // [v25.505] 外圈一道細亮環：序號圈因此看起來是軌道上的一個
+                // **節點**，不是一顆貼上去的圓點。只加環不加輝光——
+                // 一列裡已經有一條會發光的軌道了，發光的東西多過一個就不是
+                // 重點，是聖誕樹。
+                Circle()
+                    .stroke(Color.white.opacity(0.55), lineWidth: 0.8)
                     .frame(width: 22, height: 22)
                 Text("\(slot.index + 1)")
                     .font(.system(size: 11, weight: .bold, design: .rounded))
