@@ -117,6 +117,36 @@ struct ItemRow<Leading: View, Accessory: View>: View {
     var highlightId: String?
     var onTap: (() -> Void)?
 
+    // MARK: 版面（v25.502）
+
+    /// 標題橫向貫穿。
+    ///
+    /// 預設 false，所有既有畫面維持原樣。
+    ///
+    /// 為什麼要有這個模式：行程時間軸那一列，左邊是時間欄（52pt）加打卡圈
+    /// 加編號圈，右邊是拖曳把手與「…」，中間留給標題的只剩 207pt——
+    /// 不到畫面寬度的一半。「福岡 Anpanman Kodomo Museum in Mall」因此折成
+    /// 三行。一站的名字是這一列的主角，主角分到的寬度比配角少，
+    /// 怎麼排都不會好看。
+    ///
+    /// 開啟後：指示器、標題、右側動作自成**一列**，標題吃掉整條剩餘寬度；
+    /// 其餘內容（膠囊、地址、附註）排在底下，縮排 bodyInset 對齊標題的起點。
+    /// 順便把膠囊從標題**上面**移到**下面**——名字該先被讀到。
+    var spansTitle: Bool = false
+
+    /// spansTitle 模式下，標題底下那一塊往右縮排多少（＝指示器寬度 ＋ 間距）。
+    /// 呼叫端自己算，因為只有它知道自己的指示器多寬；也因此務必給**固定寬度**，
+    /// 不然有打卡圈與沒打卡圈的兩列會對不齊，那比不縮排還難看。
+    var bodyInset: CGFloat = 0
+
+    /// 列底下的淡色分隔線。
+    ///
+    /// 時間軸上一站接一站，中間只有一條很淡的交通資訊，區塊與區塊之間
+    /// 沒有邊界——眼睛要自己判斷哪幾行屬於同一站。一條髮絲線就夠了。
+    var showsSeparator: Bool = false
+    /// 分隔線從左邊再縮排多少（0＝切齊內容左緣，像 iOS 原生清單）
+    var separatorInset: CGFloat = 0
+
     @ViewBuilder var leading: () -> Leading
     @ViewBuilder var accessory: () -> Accessory
 
@@ -134,6 +164,8 @@ struct ItemRow<Leading: View, Accessory: View>: View {
          disclosureLabel: String = "子項目", disclosureColor: Color = .indigo,
          extra: AnyView? = nil, forceOpen: Bool = false, highlightId: String? = nil,
          onTap: (() -> Void)? = nil,
+         spansTitle: Bool = false, bodyInset: CGFloat = 0,
+         showsSeparator: Bool = false, separatorInset: CGFloat = 0,
          @ViewBuilder leading: @escaping () -> Leading,
          @ViewBuilder accessory: @escaping () -> Accessory) {
         self.chips = chips
@@ -152,11 +184,31 @@ struct ItemRow<Leading: View, Accessory: View>: View {
         self.forceOpen = forceOpen
         self.highlightId = highlightId
         self.onTap = onTap
+        self.spansTitle = spansTitle
+        self.bodyInset = bodyInset
+        self.showsSeparator = showsSeparator
+        self.separatorInset = separatorInset
         self.leading = leading
         self.accessory = accessory
     }
 
     var body: some View {
+        VStack(spacing: 0) {
+            if spansTitle { spanningLayout } else { inlineLayout }
+            if showsSeparator {
+                Rectangle()
+                    .fill(Color(.separator).opacity(0.55))
+                    .frame(height: 0.5)
+                    .padding(.leading, 14 + separatorInset)
+            }
+        }
+        .background(Color(.systemBackground))
+        .contentShape(Rectangle())
+        .onTapGesture { onTap?() }
+    }
+
+    /// 原本的樣子：左指示器、中間一疊內容、右動作。
+    private var inlineLayout: some View {
         HStack(alignment: .top, spacing: 10) {
             leading()
             VStack(alignment: .leading, spacing: 5) {
@@ -175,9 +227,45 @@ struct ItemRow<Leading: View, Accessory: View>: View {
             accessory()
         }
         .padding(.horizontal, 14).padding(.vertical, 10)
-        .background(Color(.systemBackground))
-        .contentShape(Rectangle())
-        .onTapGesture { onTap?() }
+    }
+
+    /// [v25.502] 標題貫穿：名字自成一列，其餘縮排在底下。
+    private var spanningLayout: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            HStack(alignment: .top, spacing: 10) {
+                leading()
+                // 不用 Spacer 把右邊的動作推過去，改讓標題自己吃掉剩餘寬度。
+                //
+                // HStack 的 spacing 是**每一對相鄰元素之間**都算一次，所以
+                // 夾一個 Spacer(minLength: 0) 進來不是「零寬度」——它是
+                // 10pt ＋ 0 ＋ 10pt，白白從標題身上拿走 20pt。
+                // 這一列能給標題的本來就只有兩百出頭，20pt 是一成。
+                titleView
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                accessory()
+            }
+            // 順序跟 inline 版不一樣，是刻意的：
+            //
+            // 1. 膠囊在標題**下面**。排在名字前面的話，一列最先被讀到的是
+            //    「第 5 天」而不是地名——附註不該站在身分前面。
+            // 2. 地址緊跟著名字。「這是哪裡」是名字的下一個問題，
+            //    中間不該插著狀態膠囊。
+            // 3. 狀態膠囊（停留多久、指定抵達）與附註膠囊（天氣、電話）
+            //    併在一起收尾。同一種形狀的東西擠在同一區，掃過去是一次。
+            VStack(alignment: .leading, spacing: 5) {
+                if let p = progress { progressBar(p) }
+                if let preview, !preview.isEmpty {
+                    Text(preview)
+                        .font(.caption2).foregroundStyle(.secondary)
+                        .lineLimit(previewLineLimit)
+                }
+                if !chips.isEmpty { ItemChipBar(chips: chips) }
+                if let extra { extra }
+                if !disclosures.isEmpty { disclosureSection }
+            }
+            .padding(.leading, bodyInset)
+        }
+        .padding(.horizontal, 14).padding(.vertical, 11)
     }
 
     // MARK: 標題

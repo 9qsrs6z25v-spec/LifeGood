@@ -1164,7 +1164,11 @@ struct TripPlanDetailView: View {
     ///
     /// ⚠️ 景點列、住宿接續列、路段列三個地方都要用同一個值：連接線與圓點
     ///    靠它對齊在一條垂直線上，改一個沒改另外兩個，整條軸就歪了。
-    private static let timeColumnWidth: CGFloat = 52
+    /// [v25.502] 52 → 46。
+    ///
+    /// 這一欄最寬的內容是「12:49」與「NT$470」，12pt 的圓體量起來 40pt 出頭，
+    /// 52 本來就有多。整條時間軸最缺的是名字的寬度，能還給它的都要還。
+    private static let timeColumnWidth: CGFloat = 46
 
     /// 住宿的地方在隔天開頭再出現一次：它是當天最後一站，也是隔天的第一站。
     /// 這一列不是另一個景點，只是把「早上從這裡出發」講清楚，所以刻意做得比景點列輕。
@@ -1336,17 +1340,30 @@ struct TripPlanDetailView: View {
                 // 點整列＝打開景點卡。要去地圖、要編輯、要打卡都在卡片上選——
                 // 直接開地圖的話，其他事情就全被擠進「…」選單裡了（v25.421 的教訓）。
                 onTap: { openingStopId = slot.stop.id },
+                // [v25.502] 標題橫向貫穿（使用者指定）。
+                //
+                // 量過真機：標題原本只分到 207pt，不到畫面寬度的一半，所以
+                // 「福岡 Anpanman Kodomo Museum in Mall」折成三行。讓標題
+                // 自己佔一列、跨過左邊的打卡圈與編號圈之後是 270pt 上下。
+                //
+                // bodyInset 要跟 indicatorWidth ＋ HStack 的 10pt 間距對齊，
+                // 底下的地址才會剛好接在名字的第一個字下面。
+                spansTitle: true,
+                bodyInset: Self.indicatorWidth + 10,
+                // 一站接一站，中間只有一條很淡的交通資訊，區塊之間沒有邊界。
+                // 一條髮絲線就夠把「這幾行是同一站」框起來。
+                showsSeparator: true,
                 leading: {
-                    HStack(spacing: 6) {
+                    HStack(spacing: 4) {
                         if showsCheckIn(slot) { checkInButton(slot) }
                         ZStack(alignment: .topTrailing) {
                             ZStack {
                                 Circle()
                                     .fill(LinearGradient(colors: [c.opacity(0.9), c.opacity(0.5)],
                                                          startPoint: .top, endPoint: .bottom))
-                                    .frame(width: 22, height: 22)
+                                    .frame(width: 20, height: 20)
                                 Text("\(slot.index + 1)")
-                                    .font(.system(size: 11, weight: .bold, design: .rounded))
+                                    .font(.system(size: 10.5, weight: .bold, design: .rounded))
                                     .foregroundStyle(.white)
                             }
                             if slot.stop.isMustVisit {
@@ -1358,8 +1375,12 @@ struct TripPlanDetailView: View {
                                     .offset(x: 4, y: -4)
                             }
                         }
-                        .frame(width: 22, height: 22)
+                        .frame(width: 20, height: 20)
                     }
+                    // 固定寬度、靠右對齊：有打卡圈與沒打卡圈的兩列，
+                    // 編號圈都停在同一個 x，標題與底下的地址才對得齊。
+                    // 不釘住的話，縮排過的內容會一列一個樣，比不縮排更亂。
+                    .frame(width: Self.indicatorWidth, alignment: .trailing)
                 },
                 accessory: { stopAccessory(slot) }
             )
@@ -1374,9 +1395,13 @@ struct TripPlanDetailView: View {
         .overlay(alignment: .top) { dropIndicator(slot) }
     }
 
+    /// 打卡圈（22）＋ 間距（4）＋ 編號圈（20）。寫成常數是因為
+    /// ItemRow 的 bodyInset 要拿它來對齊，兩邊各寫一個數字遲早會走散。
+    static let indicatorWidth: CGFloat = 46
+
     /// 景點列右側：拖曳把手 ＋「…」選單
     private func stopAccessory(_ slot: TripPlan.Slot) -> some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 6) {
             reorderHandle(slot)
             stopMenu(slot)
         }
@@ -1771,16 +1796,18 @@ struct TripPlanDetailView: View {
     private func stopChips(_ slot: TripPlan.Slot) -> [ItemChip] {
         let c = TripDayPalette.color(slot.dayIndex)
         var chips: [ItemChip] = []
-        // [v25.501] 電話不在這裡了，搬到標題下面那一行（見 stopExtra）。
+        // [v25.501] 電話不在這一排，在 stopExtra（天氣旁邊）。
         //
-        // 這一列在**標題上面**，所以 v25.500 把電話放進來之後，整個畫面
-        // 最亮、最先被讀到的是一串十位數字，而不是「Familymart 博多中洲
-        // 五丁目店」。一站的名字是它的身分，其他都是附註——附註排在身分
-        // 前面，看起來就沒有秩序。
-        if slot.dayIndex > 0 {
-            chips.append(ItemChip(id: "day", text: "第 \(slot.dayIndex + 1) 天",
-                                  color: c, icon: "sun.horizon"))
-        }
+        // v25.500 把它放進這一排，而那時候這一排在標題**上面**，於是整個
+        // 畫面最亮、最先被讀到的是一串十位數字，不是「Familymart 博多中洲
+        // 五丁目店」。v25.502 這一排已經移到標題底下了，但電話還是留在
+        // stopExtra——它跟天氣是同一類東西（等一下才會用到的附註），
+        // 併成一行比分成兩排好。
+        // [v25.502] 「第 N 天」不再出現在每一列。
+        //
+        // 跨天行程的每一列本來就排在「第 6 天 10/8（週四）」那個日期標頭底下，
+        // 所以這顆膠囊是把標頭的內容在每一列再抄一次。三十四站就抄三十四次，
+        // 而且它還排在地名前面。重複的資訊不是資訊，是雜訊。
         if slot.isFixedArrival {
             chips.append(ItemChip(id: "fixed",
                                   text: "指定 " + Self.timeFmt.string(from: slot.arrival) + " 抵達",
