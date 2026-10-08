@@ -826,17 +826,17 @@ struct TripPlanDetailView: View {
         }
     }
 
-    /// 這一站的花費金額文字；沒有花費就回 nil（不要在時間欄留一個 NT$0）。
-    /// 只有金額、不帶「花費」兩個字——時間欄只有 52pt 寬，前綴會把數字擠到看不清楚。
+    /// 這一站的花費金額文字；沒有花費就回 nil（不要留一個 NT$0）。
     private func stopSpendAmount(_ stopId: UUID) -> String? {
         let list = stopExpenses(stopId)
         guard !list.isEmpty, expenseStore.ntdTotal(list) > 0 else { return nil }
-        // [v25.504] 時間欄只有 46pt，「NT$1,014」八個字塞不進去，
-        // 原本是靠 minimumScaleFactor 硬縮——縮過的字跟同一欄的其他數字
-        // 不一樣大，一眼就看得出是擠出來的。這一欄的金額一律是台幣，
-        // 「NT」兩個字在這裡不帶任何資訊，拿掉就剛好。
+        // [v25.513] 把 NT$ 拔掉的那一行移除了。
+        //
+        // v25.504 拔它的理由是「時間欄只有 46pt，八個字塞不下」。金額這一版
+        // 已經搬離時間欄（改成右下角的招牌，寬度不再是問題），而那一行讓
+        // 這裡成為**全專案唯一**會把 NT$ 改寫成 $ 的地方——同一天的日標頭
+        // 寫「NT$1,014」、站上寫「$1,014」，同一個數字兩種寫法。
         return expenseStore.ntdTotalText(list)
-            .replacingOccurrences(of: "NT$", with: "$")
     }
 
     /// 掛在這趟上的花費（新到舊）
@@ -1103,11 +1103,29 @@ struct TripPlanDetailView: View {
         var parts = ["\(daySlots.count) 站"]
         let done = daySlots.filter { $0.stop.checkInState == .departed }.count
         if done > 0 { parts.append("已完成 \(done)") }
-        let spend = daySlots.flatMap { stopExpenses($0.stop.id) }
-        if expenseStore.ntdTotal(spend) > 0 {
-            parts.append(expenseStore.ntdTotalText(spend))
-        }
         return parts.joined(separator: "・")
+    }
+
+    /// 這一天總共花了多少。
+    ///
+    /// [v25.513] 從 daySummaryText 拆出來單獨一格，原因有兩個，都是真機上
+    /// 看得到的毛病：
+    ///
+    /// 1. **它只在收合時出現。** 展開的那一天完全不寫金額，而過完的日子
+    ///    預設是收合的——所以行程結束後，每一站的金額不在畫面上（整列
+    ///    根本沒被建出來），唯一寫著錢的地方就是收合的日標頭。使用者說
+    ///    「當站花費好像不見了」，這才是真正的原因。
+    /// 2. **它被截斷成「NT$…」。** 原本整串「9 站・已完成 9・NT$3,480」
+    ///    是同一個 Text 配 lineLimit(1)，空間不夠時系統從尾巴切——
+    ///    被切掉的正好是金額。
+    ///
+    /// 現在它是獨立的一格、永遠顯示、而且 fixedSize：寧可讓右邊那條
+    /// 地平線短一點，也不能把錢切掉。
+    private func daySpendText(_ slots: [TripPlan.Slot], dayIndex: Int) -> String? {
+        let spend = slots.filter { $0.dayIndex == dayIndex }
+            .flatMap { stopExpenses($0.stop.id) }
+        guard expenseStore.ntdTotal(spend) > 0 else { return nil }
+        return expenseStore.ntdTotalText(spend)
     }
 
     /// 標頭右邊那顆：只要還有任何一天是收著的就是「全部展開」，否則「全部收合」。
@@ -1252,6 +1270,15 @@ struct TripPlanDetailView: View {
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
+                // [v25.513] 當天花費：收合或展開都顯示，而且 fixedSize——
+                // 擠不下時縮的是右邊那條地平線，不是錢。
+                if let money = daySpendText(slots, dayIndex: dayIndex) {
+                    Text(money)
+                        .font(.system(size: 10, weight: .bold, design: .rounded))
+                        .foregroundStyle(.green)
+                        .lineLimit(1)
+                        .fixedSize()
+                }
                 DayHorizonRule(color: c)
             }
             .padding(.horizontal, 16)
@@ -1276,8 +1303,9 @@ struct TripPlanDetailView: View {
 
     /// [v25.502] 52 → 46。
     ///
-    /// 這一欄最寬的內容是「12:49」與「NT$470」，12pt 的圓體量起來 40pt 出頭，
-    /// 52 本來就有多。整條時間軸最缺的是名字的寬度，能還給它的都要還。
+    /// 這一欄最寬的內容是「12:49」，12pt 的圓體量起來 40pt 出頭，52 本來就有多。
+    /// 整條時間軸最缺的是名字的寬度，能還給它的都要還。
+    /// （v25.513 起金額已經不在這一欄，所以 46 更寬鬆了。）
     private static let timeColumnWidth: CGFloat = 46
 
     /// 住宿的地方在隔天開頭再出現一次：它是當天最後一站，也是隔天的第一站。
@@ -1402,9 +1430,21 @@ struct TripPlanDetailView: View {
     /// 搬進去之後它排在標題**底下**，標題就能從最左邊一路貫穿到最右邊。
     private func stopRow(_ slot: TripPlan.Slot) -> some View {
         let c = TripDayPalette.color(slot.dayIndex)
+        // [v25.513] 一列只算一次。這個函式會跑 expenses.filter 加總，
+        // 原本一列裡被呼叫三次（金額、購物車顏色、購物車間距）。
+        let spend = stopSpendAmount(slot.stop.id)
         // ViewBuilder 的 closure 裡宣告 let 不保險（不同 Swift 版本的支援度
         // 不一樣），所以時間欄在 return 之前就組好，當成一個普通的區域變數傳進去。
-        let timeColumn = VStack(spacing: 2) {
+        // [v25.513] 補上 v25.504 宣稱做了、實際沒落地的分組。
+        //
+        // 那一版的補丁腳本在中途失敗，而我的 patchlib 是**全部改完才寫檔**，
+        // 所以前面幾個改動一起被丟掉；我卻照著腳本的意圖寫了版本紀錄。
+        // 教訓記在這裡：腳本中途失敗要整支重跑，不能只補失敗的那一段。
+        //
+        // 分組的理由不變：抵達與離開是一組（一段停留），「實際」在講那一組
+        // 的性質，購物車是另一回事。六個東西用同一個間距平均攤開，等於說
+        // 「這些同等重要」，眼睛只好從頭讀到尾。
+        let timeColumn = VStack(spacing: 0) {
             // [v25.503] 打卡圈從標題列搬到時間欄最上面。
             //
             // 它記的就是「我幾點到的／幾點走的」，本來就該跟時間放在一起；
@@ -1433,27 +1473,23 @@ struct TripPlanDetailView: View {
                 .foregroundStyle(.tertiary)
             // 打卡過的時間是事實，跟排出來的預估分開標示
             if slot.isActualArrival || slot.isActualDeparture {
+                // [v25.513] 實心膠囊白字 → 淡底彩字（v25.504 宣稱改過，沒落地）。
+                // 這一欄原本有三個實心色塊（打卡圈、實際、購物車），
+                // 彩度比它要說明的時間還高——標籤不該比它標的東西顯眼。
                 Text("實際")
-                    .font(.system(size: 8, weight: .bold))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 4).padding(.vertical, 1)
-                    .background(c, in: Capsule())
+                    .font(.system(size: 8, weight: .heavy))
+                    .foregroundStyle(c)
+                    .padding(.horizontal, 5).padding(.vertical, 1)
+                    .background(c.opacity(0.16), in: Capsule())
+                    .padding(.top, 3)
             }
-            // [v25.468] 這一站的花費（使用者指定放這裡）。
+            // [v25.513] 金額搬到右下角的招牌（使用者指定：「顯示在右下那個
+            // 建築物上好」）。
             //
-            // v25.465 原本做成膠囊混在標題上方那一排裡，但那一排講的是「時間與
-            // 狀態」（第幾天、指定抵達、必去、比預估早到…），金額擠在中間要找。
-            // 時間欄本來就是「這一站的數字」那一欄，花費放這裡一眼就對得起來。
-            //
-            // 欄寬只有 52pt，所以不寫「花費」兩個字、只放金額，再讓它自己縮。
-            if let text = stopSpendAmount(slot.stop.id) {
-                Text(text)
-                    .font(.system(size: 10, weight: .bold, design: .rounded))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.6)
-                    .foregroundStyle(.green)
-                    .padding(.top, 1)
-            }
+            // v25.468 把它放進時間欄的理由是「時間欄本來就是這一站的數字那一
+            // 欄」——說得通，但 46pt 寬逼得它必須拔掉 NT$、還要 minimumScaleFactor
+            // 硬縮，縮過的字跟同欄其他數字不一樣大。右下角那塊空白比它寬六倍，
+            // 而且那裡現在有一座小城，錢掛在上面像招牌，本來就該在那裡。
             // [v25.479] 購物車（使用者指定位置：「實際」下面）。
             // v25.475 已經把「記一筆這一站的花費」放進「…」選單，
             // 但旅行當下最常做的就是記帳——藏在選單裡要點兩下才找得到。
@@ -1465,9 +1501,8 @@ struct TripPlanDetailView: View {
                     .font(.system(size: 12.5, weight: .semibold))
                     // 已經有金額時，購物車是「再記一筆」——退成淡綠不要跟
                     // 金額搶；還沒有金額時它是這一欄唯一的綠色，維持原樣。
-                    .foregroundStyle(stopSpendAmount(slot.stop.id) == nil
-                                     ? Color.green : Color.green.opacity(0.55))
-                    .padding(.top, stopSpendAmount(slot.stop.id) == nil ? 7 : 3)
+                    .foregroundStyle(spend == nil ? Color.green : Color.green.opacity(0.55))
+                    .padding(.top, 7)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -1515,6 +1550,11 @@ struct TripPlanDetailView: View {
             leading: { timeColumn },
             accessory: { stopAccessory(slot) }
         )
+        // 招牌疊在**內容之上**。backdrop 在內容之下，金額放進去會被
+        // 地址與照片蓋住——而且那一層本來就不該放要讀的東西。
+        .overlay(alignment: .bottomTrailing) {
+            stopSpendSign(slot, amount: spend, color: c)
+        }
         .padding(.horizontal, 16)
         // [v25.479] 整列是放置目標：把別站拖過來就插在這一站的位置
         .dropDestination(for: String.self) { items, _ in
@@ -1688,6 +1728,50 @@ struct TripPlanDetailView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
         .clipped()
         .allowsHitTesting(false)
+    }
+
+    /// 這一站花了多少——掛在右下角那座小城上的招牌（v25.513，使用者指定）。
+    ///
+    /// **刻意不畫進 Canvas 裡。** 直覺做法是把金額當成霓虹招牌畫在建築上，
+    /// 但那條路整條是壞的，三個理由都是硬傷：
+    ///
+    /// 1. **塞不下。** 那座城最寬的一棟樓只有 25pt 上下，照本專案既有的
+    ///    招牌字級公式算，「$1,014」會變成三到六點的字——比現在的 10pt 還小，
+    ///    跟「我看不到金額」這個訴求正好相反。
+    /// 2. **對比不夠。** 日期色是六個寫死的 sRGB 常數，不分深淺色模式；
+    ///    全濃度壓在系統背景上最高只有 3.4:1，連 WCAG AA 都不到。
+    /// 3. **讀不到也按不到。** Canvas 的內容不在輔助使用的樹裡，VoiceOver
+    ///    唸不出來；而且整個底圖層是 allowsHitTesting(false)。
+    ///
+    /// 底圖層自己的規矩就是答案：「可以被看見，不可以被讀」。金額是這一列
+    /// 唯一非讀不可的數字，它不屬於那一層。所以做成真正的 Text，疊在
+    /// **內容之上**（overlay，不是 backdrop），白字壓在當天色的實心牌子上——
+    /// 深淺色模式都過得了對比，而且看起來仍然是立在那座城上的一塊招牌。
+    @ViewBuilder
+    private func stopSpendSign(_ slot: TripPlan.Slot, amount: String?,
+                               color c: Color) -> some View {
+        if let amount {
+            Button {
+                openingStopId = slot.stop.id
+            } label: {
+                Text(amount)
+                    .font(.system(size: 11, weight: .bold, design: .rounded))
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+                    // 不用 minimumScaleFactor：牌子跟著字長，字不跟著牌子縮。
+                    // 縮過的數字跟畫面上其他數字不一樣大，一看就是擠出來的。
+                    .fixedSize()
+                    .padding(.horizontal, 8).padding(.vertical, 3)
+                    .background(
+                        RoundedRectangle(cornerRadius: 6, style: .continuous).fill(c)
+                    )
+                    .shadow(color: c.opacity(0.5), radius: 5)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("這一站花費 \(amount)，點開可以看明細")
+            .padding(.trailing, 14)
+            .padding(.bottom, 12)
+        }
     }
 
     /// 景點列右側：拖曳把手 ＋「…」選單
@@ -1967,6 +2051,7 @@ struct TripPlanDetailView: View {
             && TripWeatherStore.isWithinForecastRange(slot.arrival)
         let phone = slot.stop.phone?.trimmingCharacters(in: .whitespaces)
         let hasPhone = !(phone ?? "").isEmpty
+        let hasSpend = stopSpendAmount(slot.stop.id) != nil
         guard hasPhotos || hasWeather || hasPhone else { return nil }
         return AnyView(
             VStack(alignment: .leading, spacing: 6) {
@@ -1990,8 +2075,16 @@ struct TripPlanDetailView: View {
                         }
                     }
                 }
-                if hasPhotos { photoStrip(slot.stop) }
+                if hasPhotos {
+                    photoStrip(slot.stop)
+                        // [v25.513] 有招牌就把右邊讓出來。照片條是橫向捲軸，
+                        // 會一路鋪到內容區的右緣，不讓的話兩三張縮圖就把
+                        // 招牌整個蓋掉——而且蓋不蓋得到還要看那一站的亂數。
+                        .padding(.trailing, hasSpend ? 76 : 0)
+                }
             }
+            // 招牌本身佔 24pt 高，最後一列內容要讓開，不然會疊在一起
+            .padding(.bottom, hasSpend ? 16 : 0)
         )
     }
 
