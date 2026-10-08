@@ -669,6 +669,141 @@ struct Expense: Identifiable, Codable {
     }
 }
 
+// MARK: - 站內清單的列標籤（v25.515）
+
+extension Expense {
+
+    /// 這筆是用外幣輸入的嗎。儲蓄險那條路不算——它的 amount 本來就存原幣
+    /// （見 ExpenseStore.ntdValue 的註解）。
+    ///
+    /// 原本是 TripPlanDetailView 的私有 isForeign(_:)；popover 與景點卡都要用，
+    /// 而它只讀單筆欄位、不需要 currencyRates，所以掛在 Expense 而不是 ExpenseStore
+    /// （界線見 ExpenseStore.swift 的 displayAmountText 註解）。
+    var isForeignCurrencyInput: Bool {
+        let code = currencyCode
+        guard !code.isEmpty, code != "NT$", code != "TWD" else { return false }
+        return !(fixedCategory == .insurance && insuranceSubCategory == .savings)
+    }
+
+    /// 「站內清單」一列要寫的字。
+    ///
+    /// 站內清單 ＝ 上下文**已經印出地點名**的清單：行程頁的花費氣泡、
+    /// 景點卡的「這一站的花費」、統計頁明細裡掛了站別的那幾筆。
+    struct StopRowLabel {
+        enum Kind {
+            /// 使用者自己打的名字（店名／品項）
+            case title
+            /// 沒有名字，但有備註
+            case note
+            /// 兩個都沒有，只剩分類名
+            case category
+        }
+        let kind: Kind
+        /// 主標。永遠非空。
+        let primary: String
+        /// 副標要補的分類名；primary 本身就是分類名時為 nil（同一列不印兩次）
+        let category: String?
+        /// 副標要補的備註；備註已經當了主標時為 nil
+        let note: String?
+        /// 這一列有沒有「使用者自己寫的字」。false ＝ 只剩分類名。
+        var hasOwnText: Bool { kind != .category }
+    }
+
+    /// 站內清單一列的標籤。
+    ///
+    /// - Parameter names: 這個畫面**已經印出來過**的地點名。
+    ///   慣例是傳「這一筆所屬的站名 ＋ 同一趟所有站名」：只傳當下那一站會漏掉
+    ///   autoPickStop 先挑了別站、使用者之後手改站別的那一批——fillPlaceFromStop
+    ///   的 `guard currentPlaceCoordinate == nil` 會擋掉第二次填入
+    ///   （AddExpenseView.swift），於是 title 停在另一站的名字。
+    ///   傳空陣列 ＝ 沒有地點上下文（全域清單、統計頁的候選卡）→ title 一律照用。
+    ///
+    /// ⚠️ 不要改用 placeDisplayName：它是「這筆記在哪」的規則（placeName ?? title），
+    ///    非汽車分類會原封不動吐回 title，也就是 fillPlaceFromStop 寫進去的那個站名
+    ///    （AddExpenseView.applyMapPickedPlace → placeQuery，非汽車分類 placeQuery
+    ///    綁的就是 $title）。
+    ///
+    /// ⚠️ 全域清單（VariableExpenseView、履歷三頁、信用卡明細、節稅、最近交易）
+    ///    **不要**用這支。那裡沒有站名上下文，title ＝ 店名是唯一的地點線索，
+    ///    換成分類名會讓使用者更不知道錢花在哪。兩邊的 fallback 方向是相反的。
+    func stopRowLabel(suppressing names: [String]) -> StopRowLabel {
+        let echoes = Set(names.compactMap { Self.normalizedLabelText($0) })
+        let cat = categoryName
+        // 比 categoryName 不夠：saveExpense 在 title 留空時自動補的是 **bare
+        // rawValue**（「社交」），而 categoryName 會展開成「社交 - 生日禮金」。
+        // 兩個都要擋，否則有子分類的那四類（社交／節稅／汽車／房地產）
+        // 會出現主標「社交」＋副標「社交 - 生日禮金」，同一列講兩次同一件事。
+        let bareCat = variableCategory?.rawValue ?? fixedCategory?.rawValue ?? ""
+        let memo = note.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        /// 這個字串算不算「使用者自己打的名字」
+        func ownText(_ raw: String?) -> String? {
+            guard var t = raw?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !t.isEmpty else { return nil }
+            // 整個就是站名 → 標頭已經寫過
+            if let n = Self.normalizedLabelText(t), echoes.contains(n) { return nil }
+            // 「海の中道海浜公園 門票」：站名被自動帶進來、使用者在後面補了品項
+            if let rest = Self.strippingStopPrefix(t, names: names) { t = rest }
+            guard !t.isEmpty else { return nil }
+            // 存檔時自動填的分類名，不是名字
+            if t == cat || (!bareCat.isEmpty && t == bareCat) { return nil }
+            // linkedAssetTitle 的自動命名「項目 3：Model 3-加油」也不是名字。
+            // 那串對使用者毫無意義，categoryName 的「汽車 - 加油」還比較有用。
+            if t.hasPrefix("項目 "), t.contains("：") { return nil }
+            return t
+        }
+
+        // 1. 使用者自己打的名字。汽車類的使用者文字在 placeName（title 被
+        //    linkedAssetTitle 的自動命名佔住），其餘分類 placeName 一律是 nil，
+        //    所以先問 placeName 對所有分類都安全。
+        if let own = ownText(placeName) ?? ownText(title) {
+            return StopRowLabel(kind: .title, primary: own,
+                                category: cat, note: memo.isEmpty ? nil : memo)
+        }
+        // 2. 備註——同一站多筆之中唯一真的會不一樣的文字。
+        //    備註也可能被打成站名，一樣要擋。
+        if !memo.isEmpty, let n = Self.normalizedLabelText(memo), !echoes.contains(n) {
+            return StopRowLabel(kind: .note, primary: memo, category: cat, note: nil)
+        }
+        // 3. 只剩分類。categoryName 自己就有「未分類」兜底——不要再發明第六種
+        //    兜底字串（「花費」／「未分類」／「（未命名）」／「支出照片」已經各自
+        //    散在不同畫面，這次收斂到這一支）。
+        return StopRowLabel(kind: .category, primary: cat, category: nil, note: nil)
+    }
+
+    /// 站名比對用的正規化：trim → 全角空白換半角 → 壓縮連續空白 → 小寫。
+    /// 日文站名常夾全角空白，使用者整理站名時也常只動空白。
+    static func normalizedLabelText(_ s: String) -> String? {
+        let x = s.replacingOccurrences(of: "\u{3000}", with: " ")
+            .components(separatedBy: .whitespacesAndNewlines)
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+            .lowercased()
+        return x.isEmpty ? nil : x
+    }
+
+    private static let stopPrefixSeparators =
+        CharacterSet(charactersIn: " 　-－—–·・,，、/／:：|｜()（）")
+
+    /// 「站名＋分隔符＋其他字」時剝掉站名前綴。
+    ///
+    /// ⚠️ 一定要確認緊接在站名後面的那個字元是分隔符。少了這道檢查，
+    ///    站名「博多駅」會把使用者從地圖挑的「博多駅前郵便局」剝成「前郵便局」
+    ///    ——顯示一個世界上不存在的名字，比印重複的站名更糟。
+    private static func strippingStopPrefix(_ t: String, names: [String]) -> String? {
+        for name in names {
+            let n = name.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard n.count >= 2, t.count > n.count, t.hasPrefix(n) else { continue }
+            let rest = t.dropFirst(n.count)
+            guard let first = rest.unicodeScalars.first,
+                  stopPrefixSeparators.contains(first) else { continue }
+            let cleaned = String(rest).trimmingCharacters(in: stopPrefixSeparators)
+            if !cleaned.isEmpty { return cleaned }
+        }
+        return nil
+    }
+}
+
 // MARK: - 支出照片儲存（多張）
 
 extension Expense {

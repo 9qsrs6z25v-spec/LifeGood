@@ -354,7 +354,9 @@ struct TripExpenseSheet: View {
             .background(.white.opacity(0.08))
             .clipShape(RoundedRectangle(cornerRadius: 10))
             if let largest {
-                Text("最大一筆：" + title(of: largest) + "・"
+                // 刻意不套 stopRowLabel：這一行沒有站名上下文，
+                // 站名在這裡是「這趟最大一筆花在哪」，是資訊不是重複。
+                Text("最大一筆：" + (largest.title.isEmpty ? largest.categoryName : largest.title) + "・"
                      + TripDayMath.shortDay.string(from: largest.date))
                     .font(.system(size: 10))
                     .foregroundStyle(.white.opacity(0.85))
@@ -538,25 +540,43 @@ struct TripExpenseSheet: View {
 
     // MARK: 列與小工具
 
+    /// [v25.515] 主標不再直接讀 e.title。這一列原本把站名印了兩次：主標
+    /// title(of:) 就是站名（記帳表單從某一站進來時自動填進名稱欄的），
+    /// 底下又從 linkedTripStopId 查出同一個 stop.displayName 再印一次。
+    ///
+    /// ⚠️ 底下那個站名**要留著**：這是跨站清單，站名在這裡是「這筆花在哪」，
+    ///    是定位資訊不是重複。拔掉會讓使用者更不知道錢花在哪。
+    /// ⚠️ 候選卡（還沒掛上這趟的那些）共用這支 row，那些沒有 linkedTripStopId、
+    ///    title 是使用者自己打的真店名，所以 suppressing 必須是空的——
+    ///    無條件把 title 換成分類名會把對的資訊弄壞。
     private func row<Trailing: View>(_ e: Expense,
                                      @ViewBuilder trailing: () -> Trailing) -> some View {
-        HStack(spacing: 10) {
+        let stop = e.linkedTripStopId.flatMap { sid in
+            plan?.stops.first(where: { $0.id == sid })
+        }
+        let names: [String] = stop == nil
+            ? []
+            : [stop!.displayName] + (plan?.stops.map { $0.displayName } ?? [])
+        let label = e.stopRowLabel(suppressing: names)
+
+        return HStack(spacing: 10) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(title(of: e))
+                Text(label.primary)
                     .font(.subheadline.weight(.medium))
+                    .foregroundStyle(label.hasOwnText ? Color.primary : Color.secondary)
                     .lineLimit(1)
                 HStack(spacing: 6) {
                     Text(TripDayMath.shortDay.string(from: e.date))
                         .font(.caption2).foregroundStyle(.secondary)
-                    if let c = e.variableCategory {
+                    // 主標已經是分類名時不印膠囊（同一列不印兩次同一個字串）
+                    if label.category != nil, let c = e.variableCategory {
                         Text(c.rawValue)
                             .font(.system(size: 9, weight: .bold))
                             .padding(.horizontal, 5).padding(.vertical, 1.5)
                             .background(c.accentColor.opacity(0.14), in: Capsule())
                             .foregroundStyle(c.accentColor)
                     }
-                    if let sid = e.linkedTripStopId,
-                       let stop = plan?.stops.first(where: { $0.id == sid }) {
+                    if let stop {
                         Text(stop.displayName)
                             .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
                     }
@@ -567,6 +587,10 @@ struct TripExpenseSheet: View {
                         }
                         .font(.caption2).foregroundStyle(.secondary)
                     }
+                    // [v25.515] 備註本來一個字都沒顯示過
+                    if let n = label.note {
+                        Text(n).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                    }
                 }
             }
             Spacer(minLength: 4)
@@ -576,10 +600,6 @@ struct TripExpenseSheet: View {
         }
         .padding(.vertical, 6)
         .contentShape(Rectangle())
-    }
-
-    private func title(of e: Expense) -> String {
-        e.title.isEmpty ? (e.variableCategory?.rawValue ?? "花費") : e.title
     }
 
     private func percentText(_ amount: Double) -> String? {

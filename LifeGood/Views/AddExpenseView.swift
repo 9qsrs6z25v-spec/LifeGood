@@ -724,7 +724,7 @@ struct AddExpenseView: View {
 
             // 備註（移到基本資訊最下方；變動支出基本模式時隱藏）
             if expenseType == .fixed || advancedMode {
-                TextField("備註", text: $note, axis: .vertical).lineLimit(3)
+                TextField(notePrompt, text: $note, axis: .vertical).lineLimit(3)
             }
         } header: {
             // 美化：左側 Capsule 色條 + 強化標題字重，進階 Toggle 加圖示
@@ -991,6 +991,19 @@ struct AddExpenseView: View {
         case .education: return "學校 / 補習班 / 書店"
         default: return "名稱"
         }
+    }
+
+    /// [v25.515] 從行程某一站記帳時，名稱欄已經被那一站的地點名佔住
+    /// （fillPlaceFromStop → applyMapPickedPlace → placeQuery，非汽車分類
+    /// placeQuery 綁的就是 $title），而同一站常常會有三、四筆，唯一能寫
+    /// 「這筆是什麼」的欄位就是備註。提示字直接講它要幹什麼——那一欄只寫
+    /// 「備註」看起來是可以不填的，結果行程頁上好幾筆都只剩分類名。
+    ///
+    /// 這不是改根因：prompt 不會進存檔、不碰 placeQuery、不碰三張地圖的聚合鍵
+    /// （FoodMapView／TravelMapView／MedicalMapView 都拿 exp.title 當 key），
+    /// 也不碰編輯載入路徑。只是讓那一欄說出自己的用途。
+    private var notePrompt: String {
+        linkedTripStopId != nil ? "備註（這筆是什麼：門票／紀念品／點心）" : "備註"
     }
 
     /// 沒有任何候選時的說明。字串在 ViewBuilder 外組好再丟進 Text，避免型別檢查逾時。

@@ -236,6 +236,9 @@ struct TripPlanDetailView: View {
 
     let planId: UUID
 
+    /// [v25.515] 花費氣泡沒有 ScrollView、也不能被壓縮，大字級要自己減列數
+    @Environment(\.dynamicTypeSize) private var typeSize
+
     private let accent = TripDayPalette.color(0)
 
     @State private var editingStop: TripStop?
@@ -1798,26 +1801,31 @@ struct TripPlanDetailView: View {
         }
     }
 
-    /// 點金額跳出來的那張消費清單（v25.514，使用者指定）。
+    /// 點金額跳出來的那張消費清單（v25.514 新增，v25.515 改標籤與版面）。
     ///
-    /// 內容上有三個坑是真的會算錯給使用者看的，都處理掉了：
+    /// v25.514 已經處理掉的三個坑，繼續由共用件守著：外幣逐筆加不起來
+    /// （右邊一律寫台幣，原幣當註記）、合計被縮成「NT$1.4萬」
+    /// （ExpenseStore.ntdPlainTotalText）、排序跟景點卡不一致
+    /// （ExpenseStore.stopRowSorted）。
     ///
-    /// 1. **外幣逐筆加不起來。** 非儲蓄險的支出存檔時 amount 就已經換算成
-    ///    台幣了，displayAmountText 是把它**除回原幣**顯示。所以逐筆照
-    ///    displayAmountText 列會變成「日圓 3,000 / 日圓 1,200」，底下合計
-    ///    卻是「NT$2,794」——使用者看到 12,700 和 2,794 對不起來。
-    ///    這裡反過來：右邊一律寫台幣（所以加得起來），原幣當作副標寫在
-    ///    品項底下給對帳用。
-    /// 2. **合計被縮成「NT$1.4萬」。** 共用的格式器一萬以上就換量級單位，
-    ///    但逐筆是完整位數，兩者只隔 8pt 擺在一起特別刺眼。合計走完整位數。
-    /// 3. **排序跟景點卡不一致。** stopExpenses 沒有排序，景點卡是新到舊。
-    ///    點招牌看到 A,B,C、按「看全部」看到 C,B,A 會讓人以為資料不一樣。
-    ///    這裡跟著景點卡排。
+    /// [v25.515] 使用者回報「都顯示一樣的名字」。原因是每一行主標直接讀 e.title，
+    /// 而記帳表單從某一站進來時會把站名寫進名稱欄（fillPlaceFromStop →
+    /// applyMapPickedPlace → placeQuery，非汽車分類的 placeQuery 就是 $title），
+    /// 所以同一站每一筆的 title 都是同一個站名——而上面的標頭已經寫過一次了。
+    /// 行內改走 Expense.stopRowLabel，站名在行內出現 0 次。
     @ViewBuilder
     private func stopSpendDetail(_ slot: TripPlan.Slot, color c: Color) -> some View {
-        let all = stopExpenses(slot.stop.id).sorted { $0.date > $1.date }
-        let shown = Array(all.prefix(5))
-        let total = expenseStore.ntdTotal(all)
+        let all = expenseStore.stopRowSorted(stopExpenses(slot.stop.id))
+        // 大字級時列數跟著減：每列多一行副標，AX 級別會把合計與「看全部」頂出螢幕
+        let limit = typeSize >= .accessibility1 ? 3 : (typeSize >= .xxLarge ? 4 : 5)
+        let shown = Array(all.prefix(limit))
+        let hidden = Array(all.dropFirst(shown.count))
+        // 純運算式，不要寫成 var ＋ if：這支是 @ViewBuilder，函式本體裡的 if
+        // 會被當成「條件式的 View」去建，而 names.append(...) 回傳 Void 不是 View。
+        let names = [slot.stop.displayName] + (plan?.stops.map { $0.displayName } ?? [])
+        // 提示列的條件用**整站全部**算，景點卡也是同一批——否則同一份資料兩種答案
+        let needNoteHint = stopRowsNeedNoteHint(all, suppressing: names)
+
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 6) {
                 Image(systemName: "cart.fill")
@@ -1831,29 +1839,34 @@ struct TripPlanDetailView: View {
             .padding(.bottom, 8)
 
             ForEach(shown) { e in
-                HStack(alignment: .firstTextBaseline, spacing: 10) {
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(e.title.isEmpty ? "（未命名）" : e.title)
-                            .font(.subheadline)
-                            .lineLimit(1)
-                        // 外幣才寫原幣；台幣寫了只是重複一次右邊的數字
-                        if isForeign(e) {
-                            Text(expenseStore.displayAmountText(e))
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    Spacer(minLength: 0)
-                    Text(Self.plainNTD(expenseStore.ntdValue(of: e)))
-                        .font(.system(size: 13, weight: .semibold, design: .rounded))
-                        .monospacedDigit()
-                        .lineLimit(1)
-                }
-                .padding(.vertical, 5)
+                StopExpenseRow(expense: e,
+                               suppressing: names,
+                               contextDay: slot.arrival,
+                               compact: true,
+                               fallbackAccent: c,
+                               store: expenseStore)
+                    .padding(.vertical, 5)
             }
 
-            if all.count > shown.count {
-                Text("還有 \(all.count - shown.count) 筆")
+            if needNoteHint {
+                // 這一行不是常駐的：有寫備註的人永遠看不到它。
+                // 它指向「看全部」而不是「下次記帳時」——那張卡的每一列現在
+                // 可以點開，當場就補得到備註。氣泡上的列刻意不做可點：
+                // popover 上再疊一層 sheet 是在跟 presentation 層賭運氣。
+                HStack(alignment: .top, spacing: 4) {
+                    Image(systemName: "square.and.pencil")
+                        .font(.system(size: 9, weight: .semibold))
+                    Text("分不出來的那幾筆，點「看全部」補上「備註」就會顯示在這一行")
+                        .font(.caption2)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .foregroundStyle(.secondary)
+                .padding(.top, 4)
+            }
+
+            // 沒列出來的也要寫小計，否則列出的那幾筆加不到下面的合計
+            if !hidden.isEmpty {
+                Text("還有 \(hidden.count) 筆（\(expenseStore.ntdPlainTotalText(hidden))）")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .padding(.top, 2)
@@ -1864,8 +1877,9 @@ struct TripPlanDetailView: View {
             HStack {
                 Text("合計").font(.caption).foregroundStyle(.secondary)
                 Spacer(minLength: 0)
-                Text(Self.plainNTD(total))
-                    .font(.system(size: 15, weight: .bold, design: .rounded))
+                // 值走 ntdTotal，與招牌（stopSpendAmount）同一個來源
+                Text(expenseStore.ntdPlainTotalText(all))
+                    .font(.system(size: 17, weight: .bold, design: .rounded))
                     .monospacedDigit()
                     .foregroundStyle(c)
             }
@@ -1886,28 +1900,17 @@ struct TripPlanDetailView: View {
             .padding(.top, 8)
         }
         .padding(14)
-        .frame(width: 250)
+        // 250 → 288：窄的時候主標只放得下七、八個中文字，備註一填就被切掉。
+        // 原幣搬到右欄又還了約 60pt 給左邊的文字。
+        // 上限壓在 288 是因為最小的 iPhone（SE3／13 mini）直向只有 375pt：
+        // 288 ＋ 兩側 16pt 安全邊 ＝ 320，氣泡才會指著招牌而不是橫跨整列。
+        .frame(width: 288)
         .fixedSize(horizontal: false, vertical: true)
+        // 固定寬度沒辦法誠實支援 accessibility 全部級別；夾在 AX2，
+        // 配上面的 limit，最壞 3 列 ＋ 提示 ＋ 溢出仍放得下。
+        .dynamicTypeSize(...DynamicTypeSize.accessibility2)
         // iPhone 上預設會退化成 sheet，指定 .popover 才會是真的氣泡
         .presentationCompactAdaptation(.popover)
-    }
-
-    /// 這筆是不是用外幣記的（儲蓄險那條路不算，它的 amount 本來就存原幣）
-    private func isForeign(_ e: Expense) -> Bool {
-        let code = e.currencyCode
-        guard !code.isEmpty, code != "NT$", code != "TWD" else { return false }
-        return !(e.fixedCategory == .insurance && e.insuranceSubCategory == .savings)
-    }
-
-    /// 完整位數的台幣，不走萬／億量級——逐筆與合計要能對得起來
-    private static let plainNTDFmt: NumberFormatter = {
-        let f = NumberFormatter()
-        f.numberStyle = .decimal
-        f.maximumFractionDigits = 0
-        return f
-    }()
-    private static func plainNTD(_ v: Double) -> String {
-        "NT$" + (plainNTDFmt.string(from: NSNumber(value: v)) ?? "0")
     }
 
     /// 景點列右側：拖曳把手 ＋「…」選單

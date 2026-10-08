@@ -378,6 +378,43 @@ class ExpenseStore: ObservableObject {
         return code + " " + amount
     }
 
+    // MARK: - 站內清單（v25.515）
+
+    /// 站內清單的排序。花費氣泡與景點卡**必須**共用這一支。
+    ///
+    /// ⚠️ 不能只比 date：同一站每一筆的 date 完全相同（記帳表單是從行程帶進來的，
+    ///    preset 帶的是那一站的 arrival，而表單的 DatePicker 只有 .date，
+    ///    使用者改不到時分）。Swift 的 sorted 在語意上不保證穩定，所以第二、
+    ///    第三層鍵要顯式寫出來，否則同一份資料每次重繪順序可能不同。
+    ///    金額降序順便讓「都沒填備註」的那種清單至少變成一條可比較的金額階梯。
+    ///    也正因為順序不是內容決定的，那些列不可以標①②③當區分——刪一筆全跳號。
+    func stopRowSorted(_ list: [Expense]) -> [Expense] {
+        list.sorted { a, b in
+            if a.date != b.date { return a.date > b.date }
+            let x = ntdValue(of: a), y = ntdValue(of: b)
+            if x != y { return x > y }
+            return a.id.uuidString < b.id.uuidString
+        }
+    }
+
+    /// 單筆台幣、完整位數。逐筆是拿去跟收據核對的數字，不走 ntdWanString 的「萬」量級。
+    func ntdPlainText(of e: Expense) -> String { Self.ntdPlainText(ntdValue(of: e)) }
+
+    /// 一組支出的台幣合計、完整位數。
+    ///
+    /// ⚠️ 值一律走 ntdTotal，**不要**改成「逐列四捨五入再相加」。那樣算會讓氣泡寫
+    ///    NT$699、它指著的那塊招牌（走 ntdTotalText → ntdTotal）寫 NT$698，
+    ///    把一個要滑一下才比得出來的不一致，換成一個同時出現在畫面上的。
+    ///    逐列 180+399+120=699 對上合計 698 是**顯示捨入**：非儲蓄險的 amount
+    ///    存檔時已經是 rawAmount × 匯率的小數（179.55／399.00／119.70），
+    ///    逐列各自四捨五入後相加 ≠ 總和四捨五入。要讓它字面上加得起來，
+    ///    唯一正確的位置是存檔時就把台幣值 .rounded()——那是改資料，不是改顯示。
+    func ntdPlainTotalText(_ list: [Expense]) -> String { Self.ntdPlainText(ntdTotal(list)) }
+
+    static func ntdPlainText(_ v: Double) -> String {
+        "NT$" + (plainDecimal.string(from: NSNumber(value: v)) ?? "0")
+    }
+
     private static let plainDecimal: NumberFormatter = {
         let f = NumberFormatter(); f.numberStyle = .decimal; f.maximumFractionDigits = 0
         return f
