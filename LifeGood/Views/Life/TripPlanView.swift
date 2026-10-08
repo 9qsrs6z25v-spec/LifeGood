@@ -275,6 +275,13 @@ struct TripPlanDetailView: View {
     @State private var addingExpense: StopExpenseTarget?
     /// [v25.479] 正被拖到哪一站上面（畫一條線告訴使用者會放在這裡）
     @State private var dropTargetId: UUID?
+    /// [v25.517] 時間軸的卡寬（＝螢幕寬 − 32）。整條量一次，每張卡共用。
+    @State private var timelineWidth: CGFloat = 0
+    /// [v25.517] 正在被拖的那一站。放置提示線要畫在目標的上面還是下面，
+    /// 得先知道被拖的是誰——isTargeted 只給一個 Bool。
+    @State private var draggingStopId: UUID?
+    /// [v25.517] 當天色拿來寫字前要依深淺色模式處理對比（TripInk）
+    @Environment(\.colorScheme) private var colorScheme
 
     /// 走 .sheet(item:)：要帶的站與日期跟 presentation 綁在同一次寫入，
     /// 不會讀到寫入生效前的舊值（理由同上面 StopInsertion 的註解）。
@@ -479,7 +486,8 @@ struct TripPlanDetailView: View {
                                              linkedTripStopId: target.stopId,
                                              date: target.date))
             }
-            // [v25.472] 從時間軸的照片條點進來：整站的照片一起帶，左右滑得動
+            // [v25.472] 從時間軸點照片進來（v25.517 起是每張卡左邊的主圖）：
+            // 整趟的照片一起帶，左右滑得動
             .sheet(item: $viewingPhoto) { wrapper in
                 PhotoLightbox(urls: allStopPhotoURLs, current: wrapper.url)
             }
@@ -1034,11 +1042,28 @@ struct TripPlanDetailView: View {
 
     // MARK: 時間軸
 
+    /// 時間軸。
+    ///
+    /// [v25.517] 一站一張卡（使用者的設計稿）。原本外面包著一張大卡（白底＋
+    /// clipShape 圓角 18），每一站在裡面再內縮 16pt，所以一站實際只有
+    /// 「螢幕寬 − 64」：440 寬的手機量起來 376pt，375 寬只剩 311pt。
+    /// 那層大卡拿掉之後每張卡是「螢幕寬 − 32」，而且外面那層裁切也沒了——
+    /// 它會切掉卡片的陰影，也是花費氣泡當初不能自己畫的原因（zIndex 擋不住裁切）。
     private func timelineCard(_ p: TripPlan) -> some View {
         let slots = p.timeline
         // 用手上這份 slots 判斷，不要再叫 p.dayCount——那個會把整條時間軸重算一次
         let multiDay = (slots.map(\.dayIndex).max() ?? 0) > 0
         let days = Array(Set(slots.map(\.dayIndex))).sorted()
+        // 地址切城市名：整條切一次（每張卡要自己的，也要前一站的）
+        let places = slots.map { TripPlaceName.parse($0.stop.address) }
+        // 第一次排版還沒量到寬度：先用「螢幕寬 − 32」頂著（iPhone 直向就是實際卡寬），量到就換掉。
+        // 不寫死 361（393 寬手機的卡寬）：375 寬在 xxLarge、430／440 寬在 xxxLarge 時，
+        // 量到實際寬度後 stacked 會翻一次，整頁的卡（含天氣膠囊、主圖的 .task）全部
+        // 拆掉重建（審查抓到）。
+        let metrics = TripCardMetrics(cardWidth: timelineWidth > 0
+                                          ? timelineWidth
+                                          : UIScreen.main.bounds.width - 32,
+                                      typeSize: typeSize)
         return VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 8) {
                 Capsule()
@@ -1051,7 +1076,9 @@ struct TripPlanDetailView: View {
                 Spacer()
                 if multiDay { dayToggleAllButton(p, days: days) }
             }
-            .padding(.horizontal, 16).padding(.top, 14).padding(.bottom, 8)
+            .padding(.horizontal, 4)
+            .padding(.top, 2)
+            .padding(.bottom, 4)
 
             ForEach(slots) { slot in
                 // 換日就先插一列日期標頭（只有跨天行程才需要）
@@ -1061,25 +1088,28 @@ struct TripPlanDetailView: View {
                 }
                 // [v25.475] 收起來的那一天只留標頭。使用者回報：七天六夜要滑很久
                 // 才到得了今天。單日行程沒有標頭可點，所以永遠不收。
+                // （收合的那天不建卡，所以主圖、衛星快照也只會在展開的日子觸發）
                 if !multiDay || isDayOpen(p, slot.dayIndex) {
-                    // 前一站是過夜的地方 → 它同時也是這一天的第一站，在新的一天開頭再出現一次
-                    if slot.index > 0, slots[slot.index - 1].stop.isOvernight {
+                    // 前一站是過夜的地方、而且真的換了一天 → 在新的一天開頭寫「從哪裡出發」。
+                    // [v25.517] 補上「換了一天」：凌晨 01:00 才入住時飯店跟下一站同一天，
+                    // 原本這一列會緊貼在飯店卡底下，重複一次卡上已經寫的出發時間。
+                    if slot.index > 0,
+                       slots[slot.index - 1].stop.isOvernight,
+                       slots[slot.index - 1].dayIndex != slot.dayIndex {
                         overnightResumeRow(slots[slot.index - 1], dayIndex: slot.dayIndex)
                     }
-                    // 第一站前面沒有路段；其餘每一站上面先畫「從上一站過來」那一條
-                    if slot.index > 0 {
-                        legRow(slot, plan: p)
-                    }
-                    stopRow(slot)
+                    // 原本兩站之間獨立的那一列路段，併進這張卡的右上角
+                    stopCard(slot, plan: p, slots: slots, places: places, metrics: metrics)
                 }
             }
-            Spacer().frame(height: 6)
         }
-        .background(Color(.systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 18))
-        .overlay(RoundedRectangle(cornerRadius: 18)
-            .stroke(Color(.separator).opacity(0.12), lineWidth: 0.75))
-        .shadow(color: .black.opacity(0.05), radius: 8, x: 0, y: 3)
+        // 卡寬量一次、所有卡共用（每張卡各量一次是四十個 GeometryReader）。
+        // 差距超過 0.5 才寫入，不會因為小數點來回跳而排版迴圈。
+        .onGeometryChange(for: CGFloat.self) { proxy in
+            proxy.size.width
+        } action: { width in
+            if abs(width - timelineWidth) > 0.5 { timelineWidth = width }
+        }
         .padding(.horizontal)
     }
 
@@ -1164,37 +1194,9 @@ struct TripPlanDetailView: View {
     // 不是在列與列之間貼圖案。功能性的清單加裝飾，加的必須是結構本身，
     // 不然就是在資訊上面灑亮粉。
 
-    /// 時間軸的主幹。
-    ///
-    /// 上一版是一條 0.22 的實線——對齊對了，但它只是一條線。
-    /// 霓虹不是一條亮線，是**一條線加上它周圍發亮的空氣**，所以這裡是三層：
-    /// 糊開的輝光、清楚的芯、起點那一顆亮點。
-    ///
-    /// 芯由上往下淡掉：這一站從上面開始，往下是它持續的時間。
-    /// 平均亮度的線講不出方向，而時間軸整件事就是方向。
-    private struct TimelineRail: View {
-        let color: Color
-
-        var body: some View {
-            ZStack(alignment: .top) {
-                Rectangle()
-                    .fill(LinearGradient(colors: [color.opacity(0.42), color.opacity(0.05)],
-                                         startPoint: .top, endPoint: .bottom))
-                    .frame(width: 4)
-                    .blur(radius: 2.5)
-                Rectangle()
-                    .fill(LinearGradient(colors: [color.opacity(0.80), color.opacity(0.10)],
-                                         startPoint: .top, endPoint: .bottom))
-                    .frame(width: 1.5)
-                Circle()
-                    .fill(color)
-                    .frame(width: 4.5, height: 4.5)
-                    .shadow(color: color.opacity(0.85), radius: 3)
-                    .offset(y: -1)
-            }
-            .allowsHitTesting(false)
-        }
-    }
+    // [v25.517] 時間軸的主幹線 TimelineRail（v25.503，使用者要的「線條」）拿掉了：
+    // 一站一張卡之後，卡片的邊與卡與卡之間的空隙就是分隔，再畫一條穿過每張卡的線
+    // 會切過照片。版本紀錄與回覆都講明了，不是默默拿掉。
 
     /// 日期標頭右邊那條線：城市落在地平線上。
     ///
@@ -1290,139 +1292,58 @@ struct TripPlanDetailView: View {
                 }
                 DayHorizonRule(color: c)
             }
-            .padding(.horizontal, 16)
-            .padding(.top, isFirst ? 2 : 10)
-            .padding(.bottom, 4)
+            // [v25.517] 外面沒有那張大卡了：跟卡片左緣對齊，換日前多留一點
+            .padding(.horizontal, 4)
+            .padding(.top, isFirst ? 4 : 14)
+            .padding(.bottom, 2)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }
 
-    /// 時間軸左邊那一欄的寬度。
+    /// 住宿的地方在隔天開頭再出現一次：它是前一天最後一站，也是今天的第一站。
     ///
-    /// [v25.440] 從 42 加寬到 52。指定抵達時間的站會在時間前面多一個鎖，
-    /// 42 放不下「🔒 12:40」，於是被折成「12:4 / 0」——一個時間被拆成兩行，
-    /// 掃時間軸時特別刺眼。
-    ///
-    /// ⚠️ 景點列、住宿接續列、路段列三個地方都要用同一個值：連接線與圓點
-    ///    靠它對齊在一條垂直線上，改一個沒改另外兩個，整條軸就歪了。
-    /// 一列內容的左緣：頁面邊距 16 ＋ ItemRow 自己的內距 14。
-    /// 交通列沒有包在 ItemRow 裡，要自己補上這 14 才對得齊。
-    static let rowContentInset: CGFloat = 30
-
-    /// [v25.502] 52 → 46。
-    ///
-    /// 這一欄最寬的內容是「12:49」，12pt 的圓體量起來 40pt 出頭，52 本來就有多。
-    /// 整條時間軸最缺的是名字的寬度，能還給它的都要還。
-    /// （v25.513 起金額已經不在這一欄，所以 46 更寬鬆了。）
-    private static let timeColumnWidth: CGFloat = 46
-
-    /// 住宿的地方在隔天開頭再出現一次：它是當天最後一站，也是隔天的第一站。
-    /// 這一列不是另一個景點，只是把「早上從這裡出發」講清楚，所以刻意做得比景點列輕。
+    /// [v25.517] 新卡片之後**這一列一定要留**：隔天早上前一天已經過完、預設收合，
+    /// 飯店那張卡（寫著大字 07:00）根本沒有被建出來。這一列是今天唯一寫著
+    /// 「幾點從哪裡出發」的地方，也是下一張卡右上那段路的起點。
+    /// 刻意做成一條細膠囊，不做成卡片（v25.402：「刻意做得比景點列輕」）。
     private func overnightResumeRow(_ slot: TripPlan.Slot, dayIndex: Int) -> some View {
         let c = TripDayPalette.color(dayIndex)
-        return HStack(alignment: .center, spacing: 10) {
-            Text(Self.timeFmt.string(from: slot.departure))
-                .font(.system(size: 12, weight: .bold, design: .rounded))
-                .foregroundStyle(c)
-                .frame(width: Self.timeColumnWidth)
+        let ink = TripInk.text(c, colorScheme)
+        let time = Self.timeFmt.string(from: slot.departure)
+        return HStack(alignment: .center, spacing: 8) {
             Image(systemName: "bed.double.fill")
-                .font(.system(size: 10)).foregroundStyle(c)
+                .font(.system(size: 10))
+                .foregroundStyle(ink)
+            Text(time)
+                .font(.system(size: 12, weight: .bold, design: .rounded).monospacedDigit())
+                .foregroundStyle(ink)
+            // 不用 Spacer 把鉛筆推到右邊：HStack 的 spacing 會在 Spacer 兩側各加一次
             Text("從「" + slot.stop.displayName + "」出發")
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
-            Spacer(minLength: 0)
+                .frame(maxWidth: .infinity, alignment: .leading)
             Button {
                 editingStop = slot.stop
             } label: {
                 Image(systemName: "pencil.circle")
-                    .font(.system(size: 13)).foregroundStyle(.tertiary)
+                    .font(.system(size: 15))
+                    .foregroundStyle(.tertiary)
+                    .frame(width: 30, height: 24)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .accessibilityLabel("修改退房時間")
         }
-        // 這一列也有時間欄，一樣要補上 ItemRow 的 14pt，不然住宿那一列的
-        // 時間會比上下兩站往左凸出 14pt
-        .padding(.leading, Self.rowContentInset)
-        .padding(.trailing, 16)
+        .padding(.leading, 12)
+        .padding(.trailing, 4)
         .padding(.vertical, 4)
-        .background(c.opacity(0.05))
-    }
-
-    /// 兩站之間的那一段路。點「＋」就從這裡插一站進去。
-    private func legRow(_ slot: TripPlan.Slot, plan p: TripPlan) -> some View {
-        let c = TripDayPalette.color(slot.dayIndex)
-        return HStack(spacing: 10) {
-            // [v25.503] 對齊上下兩站的時間欄，連接線才會跟它們的主幹線接上。
-            //
-            // 時間欄搬進 ItemRow 之後，它的左緣多了 ItemRow 自己的 14pt 內距
-            // （16 ＋ 14 ＝ 30），這一列如果還停在 16 就會整整差 14pt——
-            // 線接不起來的時間軸比沒有線還糟。連接線也改成貼在同一個寬度的
-            // 右緣上，兩邊用的是同一個算式，不是兩個湊出來一樣的數字。
-            Text("")
-                .frame(width: Self.timeColumnWidth)
-                .overlay(alignment: .trailing) {
-                    // 兩站之間這一段用同一套：糊開的輝光 ＋ 清楚的芯。
-                    // 跟上下兩站的主幹接在一起，整天看起來是同一條軌道。
-                    ZStack {
-                        Rectangle().fill(c.opacity(0.30))
-                            .frame(width: 4, height: 26)
-                            .blur(radius: 2.5)
-                        Rectangle().fill(c.opacity(0.55))
-                            .frame(width: 1.5, height: 26)
-                    }
-                }
-            HStack(spacing: 5) {
-                Image(systemName: slot.mode.icon).font(.system(size: 9, weight: .bold))
-                // 這一段被單獨指定過方式就把名稱寫出來，跟預設的那些區分開
-                if slot.isModeOverridden {
-                    Text(slot.mode.rawValue)
-                        .font(.system(size: 9, weight: .bold))
-                        .padding(.horizontal, 4).padding(.vertical, 1)
-                        .background(c.opacity(0.14)).foregroundStyle(c)
-                        .clipShape(Capsule())
-                }
-                Text(legText(slot)).font(.system(size: 10, weight: .semibold))
-                if slot.isEstimated {
-                    Text("估").font(.system(size: 8, weight: .bold))
-                        .padding(.horizontal, 3).padding(.vertical, 1)
-                        .background(Color.orange.opacity(0.18)).foregroundStyle(.orange)
-                        .clipShape(Capsule())
-                }
-                // 指定抵達時間造成的空檔／趕不上，標在路段上（問題出在這一段路）
-                if slot.shortfallSeconds > 60 {
-                    Text("差 " + TripRouter.durationText(slot.shortfallSeconds) + " 趕不上")
-                        .font(.system(size: 9, weight: .bold))
-                        .padding(.horizontal, 4).padding(.vertical, 1)
-                        .background(Color.red.opacity(0.14)).foregroundStyle(.red)
-                        .clipShape(Capsule())
-                } else if slot.idleSeconds > 300 {
-                    Text("等 " + TripRouter.durationText(slot.idleSeconds))
-                        .font(.system(size: 9, weight: .semibold))
-                        .padding(.horizontal, 4).padding(.vertical, 1)
-                        .background(Color.secondary.opacity(0.12))
-                        .clipShape(Capsule())
-                }
-            }
-            .foregroundStyle(.secondary)
-            // 這一段可以點開看地圖與真實路線
-            Image(systemName: "chevron.right")
-                .font(.system(size: 8, weight: .bold)).foregroundStyle(.tertiary)
-            Spacer(minLength: 0)
-            Button {
-                insertion = StopInsertion(at: slot.index)
-            } label: {
-                Image(systemName: "plus.circle")
-                    .font(.system(size: 14)).foregroundStyle(c)
-            }
-            .buttonStyle(.plain)
-        }
-        .padding(.leading, Self.rowContentInset)
-        .padding(.trailing, 16)
-        .padding(.vertical, 2)
-        // ＋ 那顆自己吃掉點擊，所以整列可點不會跟它打架
-        .contentShape(Rectangle())
-        .onTapGesture { legDetail = LegBox(index: slot.index) }
+        .background(c.opacity(0.08), in: Capsule())
+        .padding(.top, 6)
+        .padding(.bottom, 2)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(time + " 從「" + slot.stop.displayName + "」出發")
     }
 
     private func legText(_ slot: TripPlan.Slot) -> String {
@@ -1432,311 +1353,561 @@ struct TripPlanDetailView: View {
         return t
     }
 
-    /// 一站。用既有的 ItemRow 模板畫——子地點就是它的摺疊區。
+    // MARK: 時間軸：一站一張卡（v25.517）
+
+    /// 一站。骨架與零件在 TripTimelineCard.swift，這裡只負責「放什麼」。
     ///
-    /// [v25.503] 時間欄從「ItemRow 左邊的兄弟」搬進 ItemRow 的 leading。
-    /// 擺在外面的時候它跟標題同一列，等於在名字左邊永遠擋著 56pt；
-    /// 搬進去之後它排在標題**底下**，標題就能從最左邊一路貫穿到最右邊。
-    private func stopRow(_ slot: TripPlan.Slot) -> some View {
+    /// 回傳 AnyView：一張卡裡塞了十幾種東西，不在這裡把型別抹掉，
+    /// ForEach 底下的泛型型別名稱會長到 runtime demangle 時爆棧（設定頁閃退過）。
+    private func stopCard(_ slot: TripPlan.Slot, plan p: TripPlan,
+                          slots: [TripPlan.Slot], places: [TripPlaceName.Place?],
+                          metrics m: TripCardMetrics) -> AnyView {
         let c = TripDayPalette.color(slot.dayIndex)
-        // [v25.513] 一列只算一次。這個函式會跑 expenses.filter 加總，
-        // 原本一列裡被呼叫三次（金額、購物車顏色、購物車間距）。
+        // [v25.513] 一張卡只算一次（這支會跑 expenses.filter 加總）
         let spend = stopSpendAmount(slot.stop.id)
-        // ViewBuilder 的 closure 裡宣告 let 不保險（不同 Swift 版本的支援度
-        // 不一樣），所以時間欄在 return 之前就組好，當成一個普通的區域變數傳進去。
-        // [v25.513] 補上 v25.504 宣稱做了、實際沒落地的分組。
-        //
-        // 那一版的補丁腳本在中途失敗，而我的 patchlib 是**全部改完才寫檔**，
-        // 所以前面幾個改動一起被丟掉；我卻照著腳本的意圖寫了版本紀錄。
-        // 教訓記在這裡：腳本中途失敗要整支重跑，不能只補失敗的那一段。
-        //
-        // 分組的理由不變：抵達與離開是一組（一段停留），「實際」在講那一組
-        // 的性質，購物車是另一回事。六個東西用同一個間距平均攤開，等於說
-        // 「這些同等重要」，眼睛只好從頭讀到尾。
-        let timeColumn = VStack(spacing: 0) {
-            // [v25.503] 打卡圈從標題列搬到時間欄最上面。
-            //
-            // 它記的就是「我幾點到的／幾點走的」，本來就該跟時間放在一起；
-            // 而且把它從標題那一列挪開，名字多拿到 30pt——
-            // 「THE ROYAL PARL CANVAS FUKUOKA NAKASU」因此排得進一行。
-            if showsCheckIn(slot) {
-                checkInButton(slot)
-                    .padding(.bottom, 6)
-            }
-            HStack(spacing: 2) {
-                // 指定抵達時間的站加一個鎖，跟推算出來的時間區分開
-                if slot.isFixedArrival {
-                    Image(systemName: "lock.fill").font(.system(size: 7, weight: .bold))
+        let place = places.indices.contains(slot.index) ? places[slot.index] : nil
+        let prevPlace: TripPlaceName.Place? = (slot.index > 0 && places.indices.contains(slot.index - 1))
+            ? places[slot.index - 1] : nil
+        let firstOfDay = slot.index == 0 || slots[slot.index - 1].dayIndex != slot.dayIndex
+        // 地標只畫在「進入這座城市」的那一站：二十站都在福岡，福岡塔只出現一次
+        let entersCity = place != nil && (firstOfDay || prevPlace?.key != place?.key)
+        let fliesNext = slots.indices.contains(slot.index + 1) && slots[slot.index + 1].mode == .plane
+        // 「Have a nice trip!」整趟只說一次：第一站（送行的話）
+        let greeting = slot.index == 0
+        // 底帶＝天際線的高度（天際線不往上探，免得透到膠囊排的字後面）：
+        // 一般 14；有花費招牌 28（招牌約 19 高、離底 4，跟膠囊排之間留 5）；
+        // 第一站 26（要放那一句手寫字）
+        let band: CGFloat = max(spend == nil ? 14 : 28, greeting ? 26 : 0)
+        let card = TripStopCardFrame(
+            metrics: m,
+            topCapsule: topCapsule(slot, plan: p, color: c),
+            hero: AnyView(heroView(slot, color: c)),
+            heroOverlay: AnyView(heroOverlay(slot, color: c, place: place,
+                                             hasSpend: spend != nil, metrics: m)),
+            column: AnyView(cardColumn(slot, color: c, metrics: m)),
+            chipRow: chipRow(slot, color: c, place: place, metrics: m),
+            skyline: AnyView(TripCardSkyline(
+                color: c, seed: slot.index,
+                landmarks: entersCity ? TripLandmark.forCity(place?.zh) : [],
+                planeTrail: greeting || fliesNext,
+                greeting: greeting)),
+            spendSign: spend.map { AnyView(stopSpendSign(slot, amount: $0, color: c)) },
+            bottomBand: band,
+            footer: slot.stop.subSpots.isEmpty ? nil : AnyView(
+                TripSubSpotList(items: subSpotDisclosures(slot.stop), color: c,
+                                isOver: slot.stop.subSpotMinutes > slot.stop.dwellMinutes)),
+            // 點整張卡＝打開景點卡（v25.421 的教訓：要去地圖、編輯、打卡都在卡片上選）
+            onTap: { openingStopId = slot.stop.id })
+        let below = dropLandsBelow(slot)
+        return AnyView(
+            card
+                // 卡與卡之間 12pt：放置提示線畫在這個空隙的正中間
+                .padding(.vertical, 6)
+                // 空隙也要算放置目標：透明的 padding 不在判定範圍裡，而提示線就畫在這裡——
+                // 手指移到線上就進了死區，線消失、放手沒反應（審查抓到）。
+                // （點空隙不會誤開景點卡：整卡的 onTapGesture 在裡層的 TripStopCardFrame 上）
+                .contentShape(Rectangle())
+                // [v25.479] 整張卡是放置目標（含右上的路段膠囊）
+                .dropDestination(for: String.self) { items, _ in
+                    dropStop(items, onto: slot)
+                } isTargeted: { over in
+                    if over {
+                        dropTargetId = slot.stop.id
+                    } else if dropTargetId == slot.stop.id {
+                        // 從 A 拖到 B 時，B 的 true 可能比 A 的 false 先到；
+                        // 只清自己的，不要把 B 剛設好的清掉
+                        dropTargetId = nil
+                    }
                 }
-                Text(Self.timeFmt.string(from: slot.arrival))
-                    .font(.system(size: 12, weight: .bold, design: .rounded))
-            }
-            // 時間是一個整體，寧可整體縮一點也不要被折成兩行
-            .lineLimit(1)
-            .minimumScaleFactor(0.75)
-            .foregroundStyle(slot.shortfallSeconds > 60 ? Color.red : c)
-            Text(Self.departureText(slot))
-                .font(.system(size: 10, design: .rounded))
-                .lineLimit(1)
-                .minimumScaleFactor(0.75)
-                .foregroundStyle(.tertiary)
-            // 打卡過的時間是事實，跟排出來的預估分開標示
-            if slot.isActualArrival || slot.isActualDeparture {
-                // [v25.513] 實心膠囊白字 → 淡底彩字（v25.504 宣稱改過，沒落地）。
-                // 這一欄原本有三個實心色塊（打卡圈、實際、購物車），
-                // 彩度比它要說明的時間還高——標籤不該比它標的東西顯眼。
-                Text("實際")
-                    .font(.system(size: 8, weight: .heavy))
-                    .foregroundStyle(c)
-                    .padding(.horizontal, 5).padding(.vertical, 1)
-                    .background(c.opacity(0.16), in: Capsule())
-                    .padding(.top, 3)
-            }
-            // [v25.513] 金額搬到右下角的招牌（使用者指定：「顯示在右下那個
-            // 建築物上好」）。
-            //
-            // v25.468 把它放進時間欄的理由是「時間欄本來就是這一站的數字那一
-            // 欄」——說得通，但 46pt 寬逼得它必須拔掉 NT$、還要 minimumScaleFactor
-            // 硬縮，縮過的字跟同欄其他數字不一樣大。右下角那塊空白比它寬六倍，
-            // 而且那裡現在有一座小城，錢掛在上面像招牌，本來就該在那裡。
-            // [v25.479] 購物車（使用者指定位置：「實際」下面）。
-            // v25.475 已經把「記一筆這一站的花費」放進「…」選單，
-            // 但旅行當下最常做的就是記帳——藏在選單裡要點兩下才找得到。
+                .overlay(alignment: below ? .bottom : .top) {
+                    dropIndicator(slot, below: below)
+                }
+        )
+    }
+
+    // MARK: 卡片右上：路段膠囊（第一站是「出發」膠囊）
+
+    private func topCapsule(_ slot: TripPlan.Slot, plan p: TripPlan, color c: Color) -> AnyView {
+        if slot.index == 0 { return AnyView(departureCapsule(slot, plan: p, color: c)) }
+        return AnyView(
+            TripLegCapsule(
+                icon: slot.mode.icon,
+                // [v25.403] 單獨指定過交通方式的段落要分得出來
+                modeLabel: slot.isModeOverridden ? slot.mode.rawValue : nil,
+                text: legText(slot),
+                note: nil,
+                // [v25.399／403] 估算的數字一定要標「估」
+                isEstimated: slot.isEstimated,
+                // 趕不上：整顆轉紅；「推算幾點才到，差多少」寫在狀態面板底下那一行
+                isLate: slot.shortfallSeconds > 60,
+                color: c,
+                art: Self.legArt(slot.mode),
+                seed: slot.index,
+                a11yLabel: legA11y(slot),
+                insertA11yLabel: "在第 \(slot.index + 1) 站前面插入景點",
+                onOpen: { legDetail = LegBox(index: slot.index) },
+                onInsert: { insertion = StopInsertion(at: slot.index) })
+            .dynamicTypeSize(...DynamicTypeSize.accessibility2)
+            // 長按換交通方式（「…」選單裡的「這一段怎麼過來」也還在）
+            .contextMenu { legModeMenu(slot) }
+        )
+    }
+
+    /// 第一站前面沒有路段。那一格不空著：寫「幾點出發」，⊕ 插在第一站前面
+    /// （原本做不到——路段的 ⊕ 只出現在第 2 站以後，選單只能插在某站後面）。
+    private func departureCapsule(_ slot: TripPlan.Slot, plan p: TripPlan, color c: Color) -> some View {
+        let start = Self.timeFmt.string(from: p.startDate)
+        let late = slot.shortfallSeconds > 60
+        let note: String? = (!late && slot.idleSeconds > 60)
+            ? "出發後 " + TripRouter.durationText(slot.idleSeconds) + " 抵達"
+            : nil
+        var a11y = "行程 " + start + " 出發"
+        if late { a11y += "，第一站指定的時間比出發時間還早" }
+        if let note { a11y += "，" + note }
+        a11y += "。點兩下修改出發時間"
+        return TripLegCapsule(
+            icon: "flag.fill",
+            modeLabel: nil,
+            text: "出發 " + start,
+            note: note,
+            isEstimated: false,
+            isLate: late,
+            color: c,
+            art: .start,
+            seed: slot.index,
+            a11yLabel: a11y,
+            insertA11yLabel: "在第一站前面插入景點",
+            // 出發時間在行程設定裡改
+            onOpen: { showSettings = true },
+            onInsert: { insertion = StopInsertion(at: 0) })
+        .dynamicTypeSize(...DynamicTypeSize.accessibility2)
+    }
+
+    private static func legArt(_ mode: TripTravelMode) -> TripLegStreetArt.Style {
+        switch mode {
+        case .walking: return .walk
+        case .plane: return .flight
+        case .driving, .transit: return .road
+        }
+    }
+
+    private func legA11y(_ slot: TripPlan.Slot) -> String {
+        var parts = ["從上一站" + slot.mode.rawValue]
+        parts.append(slot.travelSeconds == nil
+                     ? "還沒算出路線"
+                     : legText(slot).replacingOccurrences(of: "・", with: "，"))
+        if slot.isEstimated { parts.append("時間是估的") }
+        if slot.shortfallSeconds > 60 {
+            parts.append("差 " + TripRouter.durationText(slot.shortfallSeconds) + " 趕不上")
+        } else if slot.idleSeconds > 300 {
+            parts.append("到了要等 " + TripRouter.durationText(slot.idleSeconds))
+        }
+        return parts.joined(separator: "，") + "。點兩下看這一段路線"
+    }
+
+    /// 路段膠囊的長按選單：就是「…」裡的「這一段怎麼過來」
+    @ViewBuilder
+    private func legModeMenu(_ slot: TripPlan.Slot) -> some View {
+        Button("用行程預設（" + (plan?.travelMode ?? .driving).rawValue + "）") {
+            setLegMode(slot.stop.id, nil)
+        }
+        ForEach(TripTravelMode.allCases) { mode in
+            Button(mode.rawValue) { setLegMode(slot.stop.id, mode) }
+        }
+        Divider()
+        Button("看這一段的路線") { legDetail = LegBox(index: slot.index) }
+    }
+
+    // MARK: 卡片左邊：照片
+
+    @ViewBuilder
+    private func heroView(_ slot: TripPlan.Slot, color c: Color) -> some View {
+        let first = slot.stop.photoFileNames.first.map { TripStop.photoURL($0) }
+        let count = slot.stop.photoFileNames.count
+        let image = TripHeroImage(photoURL: first,
+                                  coordinate: slot.stop.coordinate,
+                                  dayColor: c,
+                                  pinKey: ((slot.dayIndex % 6) + 6) % 6,
+                                  seed: slot.index)
+        if let first {
+            // 使用者自己的照片：點了開大圖（整趟的照片一起帶，左右滑得動）
             Button {
-                addingExpense = StopExpenseTarget(stopId: slot.stop.id,
-                                                  date: slot.arrival)
+                viewingPhoto = IdentifiableURL(url: first)
             } label: {
-                Image(systemName: "cart.badge.plus")
-                    .font(.system(size: 12.5, weight: .semibold))
-                    // 已經有金額時，購物車是「再記一筆」——退成淡綠不要跟
-                    // 金額搶；還沒有金額時它是這一欄唯一的綠色，維持原樣。
-                    .foregroundStyle(spend == nil ? Color.green : Color.green.opacity(0.55))
-                    .padding(.top, 7)
-                    .contentShape(Rectangle())
+                image
             }
             .buttonStyle(.plain)
-        }
-        .frame(width: Self.timeColumnWidth)
-        // [v25.503] 時間軸的主幹（使用者要的「線條」）。
-        //
-        // 畫在時間欄的右緣，與交通列的連接線同一個 x，所以整天從上到下
-        // 看起來是同一條線穿過每一站。顏色用當天的色、壓得很淡——
-        // 線是用來把東西串起來的，不是用來被看見的。
-        .overlay(alignment: .trailing) {
-            TimelineRail(color: c)
-        }
-
-        return ItemRow(
-            chips: stopChips(slot),
-            title: slot.stop.displayName,
-            preview: stopPreview(slot.stop),
-            disclosures: subSpotDisclosures(slot.stop),
-            disclosureLabel: "子地點",
-            disclosureColor: c,
-            // 天氣與照片直接鋪在這一站底下，不用點進去才看得到
-            extra: stopExtra(slot),
-            // 點整列＝打開景點卡。要去地圖、要編輯、要打卡都在卡片上選——
-            // 直接開地圖的話，其他事情就全被擠進「…」選單裡了（v25.421 的教訓）。
-            onTap: { openingStopId = slot.stop.id },
-            // [v25.503] 標題從最左邊貫穿到最右邊（使用者指定）。
-            //
-            // v25.502 只讓標題跨過指示器，時間欄還擋在左邊，所以寬度只從
-            // 189 加到 226pt，長站名照樣折三行。現在時間欄與打卡圈都移到
-            // 標題底下，標題拿到 307pt——「THE ROYAL PARL CANVAS FUKUOKA
-            // NAKASU」剛好排得進一行。
-            spansTitle: true,
-            // 編號圈跟著名字走——它是這一站的序號，是標題的一部分
-            titleLeading: AnyView(stopBadge(slot, color: c)),
-            // 區塊下緣一條貫穿整列的細線（使用者指定）。separatorInset 0
-            // ＝不縮排：縮排過的線會跟底下那條交通資訊的直線打架，
-            // 整片看起來像沒對齊的格線。
-            showsSeparator: true,
-            separatorInset: 0,
-            // [v25.509] 底圖要交給 ItemRow 畫，不能在外面掛 .background——
-            // ItemRow 自己鋪了一層不透明的 systemBackground，外面那層會被
-            // 整個蓋掉（25.507 與 25.508 兩版的藝術層都是這樣消失的）。
-            backdrop: AnyView(stopArtLayer(slot, color: c)),
-            leading: { timeColumn },
-            accessory: { stopAccessory(slot) }
-        )
-        // 招牌疊在**內容之上**。backdrop 在內容之下，金額放進去會被
-        // 地址與照片蓋住——而且那一層本來就不該放要讀的東西。
-        .overlay(alignment: .bottomTrailing) {
-            stopSpendSign(slot, amount: spend, color: c)
-        }
-        .padding(.horizontal, 16)
-        // [v25.479] 整列是放置目標：把別站拖過來就插在這一站的位置
-        .dropDestination(for: String.self) { items, _ in
-            dropStop(items, onto: slot)
-        } isTargeted: { over in
-            dropTargetId = over ? slot.stop.id : nil
-        }
-        .overlay(alignment: .top) { dropIndicator(slot) }
-    }
-
-    /// 這一站的序號圈（必去的話右上角加一顆星）。
-    private func stopBadge(_ slot: TripPlan.Slot, color c: Color) -> some View {
-        ZStack(alignment: .topTrailing) {
-            ZStack {
-                Circle()
-                    .fill(LinearGradient(colors: [c.opacity(0.9), c.opacity(0.5)],
-                                         startPoint: .top, endPoint: .bottom))
-                    .frame(width: 22, height: 22)
-                // [v25.505] 外圈一道細亮環：序號圈因此看起來是軌道上的一個
-                // **節點**，不是一顆貼上去的圓點。只加環不加輝光——
-                // 一列裡已經有一條會發光的軌道了，發光的東西多過一個就不是
-                // 重點，是聖誕樹。
-                Circle()
-                    .stroke(Color.white.opacity(0.55), lineWidth: 0.8)
-                    .frame(width: 22, height: 22)
-                Text("\(slot.index + 1)")
-                    .font(.system(size: 11, weight: .bold, design: .rounded))
-                    .foregroundStyle(.white)
+            .accessibilityLabel(count > 1 ? "這一站的照片，共 \(count) 張" : "這一站的照片")
+            .accessibilityHint("點兩下放大")
+        } else if slot.stop.coordinate == nil {
+            // 沒有座標：沒有衛星圖、天氣、路線。這一格最有用的事就是叫人去選位置
+            Button {
+                editingStop = slot.stop
+            } label: {
+                image
             }
-            if slot.stop.isMustVisit {
-                Image(systemName: "star.fill")
-                    .font(.system(size: 8))
-                    .foregroundStyle(.orange)
-                    .padding(1.5)
-                    .background(Circle().fill(Color(.systemBackground)))
-                    .offset(x: 4, y: -4)
-            }
-        }
-        .frame(width: 22, height: 22)
-        // 圓圈沒有基線，跟多行標題放在同一個 .top 的 HStack 裡會貼齊頂端，
-        // 看起來比第一行的字高一點點。往下推 1pt 就對上了。
-        .padding(.top, 1)
-    }
-
-    /// 一站右下角那一小塊城市（v25.508，使用者指定）。
-    ///
-    /// v25.507 我在這個位置放的是「放到很大的站號」——會錯意了，使用者要的
-    /// 是**實際的建築**。所以這裡畫的是一個真的街角：幾棟高低不一的樓、
-    /// 亮著的窗、屋頂的光邊、高樓上的天線與航警燈，底下壓一條地面線。
-    ///
-    /// 關鍵是**每一站的城市都不一樣**：亂數種子取自這一站的序號，所以捲過
-    /// 三十四站就是三十四個不同的街角。同一張圖重複三十四次是壁紙；
-    /// 每一次都不同，才是「這裡有一座城，而你正在穿過它」。
-    ///
-    /// 濃度壓在 0.07～0.22（亮著的窗例外，那是整塊唯一該被看見的東西）。
-    /// 功能性清單上的藝術只有一條底線：可以被看見，不可以被讀。
-    private struct StopCityCorner: View {
-        let color: Color
-        let seed: Int
-
-        var body: some View {
-            Canvas { context, size in
-                var random = InkRandom(9137 + seed * 37)
-                let ground = size.height - 1
-
-                // 遠景：一排矮的、淡的，把地平線填滿。
-                // 沒有這一排，近景那幾棟會像浮在白紙上的積木。
-                var fx: CGFloat = 0
-                while fx < size.width {
-                    let w = 5 + CGFloat(random.next()) * 9
-                    let h = 3 + CGFloat(random.next()) * 10
-                    context.fill(Path(CGRect(x: fx, y: ground - h, width: w, height: h)),
-                                 with: .color(color.opacity(0.07)))
-                    fx += w + 1
-                }
-
-                // 近景：三到五棟，有窗、有屋頂光邊、高的那幾棟有天線
-                var bx: CGFloat = size.width * 0.03
-                var count = 0
-                while bx < size.width - 10, count < 5 {
-                    let w = 10 + CGFloat(random.next()) * 15
-                    let roll = random.next()
-                    let tall = roll > 0.74 ? 1.0 : (roll > 0.40 ? 0.58 : 0.33)
-                    // 上緣留 10pt 給天線，不然它會被畫布切掉
-                    let h = min(9 + CGFloat(tall) * CGFloat(11 + random.next() * 19),
-                                size.height - 11)
-                    let rect = CGRect(x: bx, y: ground - h, width: w, height: h)
-
-                    context.fill(Path(rect), with: .linearGradient(
-                        Gradient(colors: [color.opacity(0.22), color.opacity(0.10)]),
-                        startPoint: CGPoint(x: 0, y: rect.minY),
-                        endPoint: CGPoint(x: 0, y: ground)))
-
-                    var edge = Path()
-                    edge.move(to: CGPoint(x: rect.minX, y: rect.minY))
-                    edge.addLine(to: CGPoint(x: rect.maxX, y: rect.minY))
-                    context.stroke(edge, with: .color(color.opacity(0.40)),
-                                   style: StrokeStyle(lineWidth: 0.7))
-
-                    // 窗。大部分是暗的（比樓身深一點），少數亮著（暖黃）——
-                    // 真的大樓晚上就是這樣，整片亮的是點陣圖。
-                    var wy = rect.minY + 3
-                    while wy + 2.4 < ground - 1.5 {
-                        var wx = rect.minX + 2
-                        while wx + 1.8 < rect.maxX - 2 {
-                            let r = random.next()
-                            if r < 0.46 {
-                                context.fill(
-                                    Path(CGRect(x: wx, y: wy, width: 1.8, height: 2.3)),
-                                    with: .color(r < 0.13
-                                                 ? CyberPalette.amber.opacity(0.70)
-                                                 : color.opacity(0.30)))
-                            }
-                            wx += 3.4
-                        }
-                        wy += 4.2
-                    }
-
-                    if tall > 0.9 {
-                        var mast = Path()
-                        mast.move(to: CGPoint(x: rect.midX, y: rect.minY))
-                        mast.addLine(to: CGPoint(x: rect.midX, y: rect.minY - 7))
-                        context.stroke(mast, with: .color(color.opacity(0.34)),
-                                       style: StrokeStyle(lineWidth: 0.8))
-                        context.fill(
-                            Path(ellipseIn: CGRect(x: rect.midX - 1.1, y: rect.minY - 8.4,
-                                                   width: 2.2, height: 2.2)),
-                            with: .color(CyberPalette.magenta.opacity(0.55)))
-                    }
-
-                    bx += w + 2 + CGFloat(random.next()) * 6
-                    count += 1
-                }
-
-                // 地面：往左淡出，讓這一塊自己收掉，不要切一條硬邊
-                var base = Path()
-                base.move(to: CGPoint(x: 0, y: ground + 0.5))
-                base.addLine(to: CGPoint(x: size.width, y: ground + 0.5))
-                context.stroke(base, with: .linearGradient(
-                    Gradient(colors: [.clear, color.opacity(0.32)]),
-                    startPoint: .zero, endPoint: CGPoint(x: size.width, y: 0)),
-                               style: StrokeStyle(lineWidth: 0.8))
-            }
-            // 量過真機：一站的右下角大約空著 130pt 寬、50pt 高。
-            // 124×48 剛好只能貼在角落，像一張郵票；撐到 164×56 才像一個街角。
-            .frame(width: 164, height: 56)
-            .allowsHitTesting(false)
+            .buttonStyle(.plain)
+            .accessibilityLabel("還沒有設定位置")
+            .accessibilityHint("點兩下選位置")
+        } else {
+            // 衛星快照：純裝飾，點了跟點卡片一樣
+            image.accessibilityHidden(true)
         }
     }
 
-    /// 一站底下那一層。
-    ///
-    /// 兩樣東西，都有意義，不是圖案：
-    ///
-    /// 1. **右下角的街角**（見 StopCityCorner）。那一塊本來是沒有被安排過的
-    ///    空白——不是留白，只是沒東西。
-    /// 2. **打卡過的站會透出光**。軌道的顏色從左緣往右暈開一小段。
-    ///    那是「這一站已經走過了」的視覺證據，而且光從軌道來——
-    ///    跟那條會發光的主幹是同一個光源，不是另外加的裝飾。
+    /// 照片上疊的東西：左上序號、左下手寫城市名、「實際入住」、購物車。
+    /// （序號、張數、城市名、「實際入住」都不吃點擊，點到它們會落到底下的照片）
     @ViewBuilder
-    private func stopArtLayer(_ slot: TripPlan.Slot, color c: Color) -> some View {
-        ZStack(alignment: .bottomTrailing) {
-            if slot.isActualArrival || slot.isActualDeparture {
-                LinearGradient(colors: [c.opacity(0.085), .clear],
-                               startPoint: .leading, endPoint: .trailing)
+    private func heroOverlay(_ slot: TripPlan.Slot, color c: Color,
+                             place: TripPlaceName.Place?, hasSpend: Bool,
+                             metrics m: TripCardMetrics) -> some View {
+        let tag = checkInTag(slot)
+        let photos = slot.stop.photoFileNames.count
+        // 衛星快照底部可能有 Apple 地圖的標誌，左下那疊東西要讓開
+        let inset: CGFloat = (photos == 0 && slot.stop.coordinate != nil)
+            ? TripHeroStore.mapAttributionInset : 0
+        if m.stacked {
+            ZStack(alignment: .topLeading) {
+                HStack(spacing: 4) {
+                    TripCardBadge(number: slot.index + 1, color: c,
+                                  isMustVisit: slot.stop.isMustVisit)
+                    if photos >= 2 { TripPhotoCountTag(count: photos) }
+                }
+                .padding(8)
+                HStack(alignment: .bottom, spacing: 6) {
+                    if let tag { TripCheckInTag(text: tag.text, icon: tag.icon, color: c) }
+                    cartButton(slot, hasSpend: hasSpend)
+                    Spacer(minLength: 8)
+                    TripCityScript(place: place, coordinate: slot.stop.coordinate, maxWidth: 150)
+                }
+                .padding(.horizontal, 8)
+                .padding(.bottom, 8 + inset)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
             }
-            StopCityCorner(color: c, seed: slot.index)
+            .dynamicTypeSize(...DynamicTypeSize.accessibility2)
+        } else {
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(spacing: 4) {
+                    TripCardBadge(number: slot.index + 1, color: c,
+                                  isMustVisit: slot.stop.isMustVisit)
+                    if photos >= 2 { TripPhotoCountTag(count: photos) }
+                }
+                Spacer(minLength: 6)
+                TripCityScript(place: place, coordinate: slot.stop.coordinate,
+                               maxWidth: m.photoBottom - 12)
+                if let tag {
+                    TripCheckInTag(text: tag.text, icon: tag.icon, color: c)
+                        .padding(.top, 6)
+                }
+                // [v25.479] 購物車（使用者指定位置：「實際」下面）。
+                // 「實際」變成照片左下的「實際入住」之後，購物車跟著貼在它底下。
+                cartButton(slot, hasSpend: hasSpend)
+                    .padding(.top, 6)
+            }
+            .padding(.leading, 8)
+            .padding(.top, 8)
+            .padding(.bottom, 8 + inset)
+            .dynamicTypeSize(...DynamicTypeSize.accessibility2)
         }
-        // 一定要自己撐滿並靠右下。沒打卡的站沒有那層漸層，ZStack 會縮到
-        // 街角那麼大，然後被置中——城市就跑到列的正中間去了。
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
-        .clipped()
-        .allowsHitTesting(false)
+    }
+
+    /// 原本時間欄的「實際」：打過卡的時間是事實，跟排出來的分開標示。
+    /// 設計稿照片左下的「🛏 實際入住」就是它（這個對應是推測，回覆裡跟使用者確認）。
+    private func checkInTag(_ slot: TripPlan.Slot) -> (text: String, icon: String)? {
+        if slot.isActualArrival {
+            return slot.stop.isOvernight
+                ? (text: "實際入住", icon: "bed.double.fill")
+                : (text: "實際抵達", icon: "mappin.circle.fill")
+        }
+        if slot.isActualDeparture { return (text: "實際離開", icon: "figure.walk.departure") }
+        return nil
+    }
+
+    /// [v25.479] 購物車：記一筆這一站的花費（行程、站別、日期預填）。
+    /// 不可以只留在「…」選單裡——v25.479 就是因為藏在選單裡要點兩下才拉出來的。
+    private func cartButton(_ slot: TripPlan.Slot, hasSpend: Bool) -> some View {
+        Button {
+            addingExpense = StopExpenseTarget(stopId: slot.stop.id, date: slot.arrival)
+        } label: {
+            Image(systemName: "cart.badge.plus")
+                .font(.system(size: 12.5, weight: .semibold))
+                // 已經有金額時是「再記一筆」，退淡一點不要跟招牌搶
+                .foregroundStyle(hasSpend ? Color.green.opacity(0.7) : Color.green)
+                .frame(width: 28, height: 28)
+                .background(Color.black.opacity(0.45), in: Circle())
+                .overlay(Circle().stroke(Color.white.opacity(0.35), lineWidth: 0.6))
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(hasSpend ? "再記一筆這一站的花費" : "記一筆這一站的花費")
+    }
+
+    // MARK: 卡片右欄：標題、地址、備註、狀態面板、提醒
+
+    private func cardColumn(_ slot: TripPlan.Slot, color c: Color,
+                            metrics m: TripCardMetrics) -> some View {
+        let address = TripCardText.addressWithoutPostal(slot.stop.displayAddress)
+        let note = slot.stop.note.trimmingCharacters(in: .whitespacesAndNewlines)
+        let flags = cardFlags(slot)
+        let noCoordinate = slot.stop.coordinate == nil
+        let stopId = slot.stop.id
+        let a11yTitle = "第 \(slot.index + 1) 站，" + slot.stop.displayName
+            + (slot.stop.isMustVisit ? "，必去" : "")
+        return VStack(alignment: .leading, spacing: 0) {
+            // 不用 Spacer 把右邊兩顆推過去：HStack 的 spacing 會在 Spacer 兩側各加一次，
+            // 白白從標題拿走寬度。標題自己吃掉剩餘寬度。
+            // ⚠️ 兩顆圓鈕各 28＋三段 spacing 2 ＝ 60，要跟 TripCardMetrics.titleAccessoryWidth 一致
+            HStack(alignment: .top, spacing: 2) {
+                // [v25.517] 標題退回右欄（設計稿），**一行、放不下就跑馬燈**
+                // （使用者指定：「不做折行，可以用跑馬燈方式」）。
+                // 右欄只有兩百出頭 pt，照設計稿折行的話長名字要三行，整張卡跟著變高。
+                // 不套 .textCase(.uppercase)：設計稿的大寫是資料本來就大寫，套上去
+                // 「Familymart Hakata…」會變全大寫、寬 16.5%。
+                TripMarqueeText(text: slot.stop.displayName,
+                                font: .subheadline.weight(.semibold),
+                                accessibilityText: a11yTitle)
+                    .foregroundStyle(.primary)
+                    .padding(.top, 3)
+                    .accessibilityHint("點兩下打開景點卡")
+                    .accessibilityAddTraits(.isButton)
+                    .accessibilityAction { openingStopId = stopId }
+                reorderHandle(slot)
+                stopMenu(slot, color: c)
+            }
+            if !address.isEmpty {
+                HStack(alignment: .firstTextBaseline, spacing: 3) {
+                    // 沒座標就把 📍 換成橘色 ⚠︎（底下那一行講原因）
+                    Image(systemName: noCoordinate ? "exclamationmark.triangle.fill" : "mappin")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(noCoordinate ? Color.orange : TripInk.text(c, colorScheme))
+                    Text(address)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                .padding(.top, 3)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("地址 " + address)
+            }
+            // 備註原本跟地址擠在同一段 preview 裡；設計稿只有地址一行，
+            // 不另外給它一行的話備註就默默消失了
+            if !note.isEmpty {
+                Text(note)
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(2)
+                    .padding(.top, 2)
+            }
+            statusPanel(slot, color: c, metrics: m)
+                .dynamicTypeSize(...DynamicTypeSize.accessibility2)
+                .padding(.top, 8)
+            if !flags.isEmpty {
+                TripCardFlagList(flags: flags, dayColor: c)
+                    .dynamicTypeSize(...DynamicTypeSize.accessibility2)
+                    .padding(.top, 6)
+            }
+        }
+    }
+
+    /// 「✓ 已抵達 23:05 ｜ 🛏 過夜・隔天出發 07:00 ›」。
+    /// 原本時間欄的抵達／離開時間、鎖、紅字、打卡圈，與膠囊列的
+    /// 「已抵達」「過夜」「停留 N 分」「指定 HH:mm 抵達」都收進這裡。
+    private func statusPanel(_ slot: TripPlan.Slot, color c: Color,
+                             metrics m: TripCardMetrics) -> TripStatusPanel {
+        let ink = TripInk.text(c, colorScheme)
+        let arrival = Self.timeFmt.string(from: slot.arrival)
+        let late = slot.shortfallSeconds > 60
+        let leftLabel = slot.isActualArrival ? "已抵達" : (slot.isFixedArrival ? "指定抵達" : "預計抵達")
+        let left = TripStatusPanel.Half(
+            glyph: "clock",
+            label: leftLabel,
+            time: arrival,
+            tint: c,
+            ink: late ? Color.red : ink,
+            showsLock: slot.isFixedArrival,
+            a11y: leftLabel + " " + arrival + (late ? "，照推算會趕不上" : ""))
+
+        // 右半的長標籤（「過夜・隔天出發」）只在寬卡、而且字沒放大時用：
+        // 440 寬設 xxxLarge 時長標籤會被截（審查抓到）
+        let longLabel = m.roomy && typeSize < .xxLarge
+        let right: TripStatusPanel.Half
+        if slot.isActualDeparture {
+            let t = Self.departureText(slot)
+            right = TripStatusPanel.Half(glyph: "checkmark", label: "已離開", time: t,
+                                         tint: c, ink: ink, showsLock: false,
+                                         a11y: "已離開 " + t)
+        } else if slot.stop.isOvernight {
+            // 「隔天」要照實算：凌晨 01:00 入住、09:00 退房是同一天
+            // （原本的「過夜」膠囊寫死「隔天」，那種情況寫錯了）
+            let nextDay = !Calendar.current.isDate(slot.departure, inSameDayAs: slot.arrival)
+            let t = Self.timeFmt.string(from: slot.departure)
+            let label: String
+            if nextDay {
+                label = longLabel ? "過夜・隔天出發" : "隔天出發"
+            } else {
+                label = longLabel ? "過夜・退房出發" : "退房出發"
+            }
+            right = TripStatusPanel.Half(glyph: "bed.double.fill", label: label, time: t,
+                                         tint: .indigo, ink: TripInk.indigo(colorScheme),
+                                         showsLock: false,
+                                         a11y: "過夜，" + (nextDay ? "隔天 " : "") + t + " 出發")
+        } else {
+            let t = Self.departureText(slot)
+            // 沿用原本膠囊的寫法「停留 N 分」：375 寬時右半只剩約 65pt，
+            // 「停留 1 小時 30 分」放不下
+            let dwell = "停留 \(max(0, slot.stop.dwellMinutes)) 分"
+            right = TripStatusPanel.Half(glyph: "hourglass", label: dwell, time: t,
+                                         tint: c, ink: ink, showsLock: false,
+                                         a11y: dwell + "，" + t + " 離開")
+        }
+
+        var checkIn: TripStatusPanel.CheckIn?
+        if showsCheckIn(slot) {
+            let id = slot.stop.id
+            checkIn = TripStatusPanel.CheckIn(state: slot.stop.checkInState,
+                                              a11y: checkInA11y(slot),
+                                              action: {
+                lifeStore.advanceTripStopCheckIn(planId: planId, stopId: id)
+            })
+        }
+        return TripStatusPanel(left: left, right: right,
+                               rightDone: slot.isActualDeparture,
+                               color: c, checkIn: checkIn)
+    }
+
+    private func checkInA11y(_ slot: TripPlan.Slot) -> String {
+        switch slot.stop.checkInState {
+        case .notArrived: return "打卡：還沒到。點兩下記錄現在抵達"
+        case .arrived: return "打卡：已抵達。點兩下記錄現在離開"
+        case .departed: return "打卡：已離開。點兩下清除這一站的打卡"
+        }
+    }
+
+    /// 原本 stopChips 裡**不能消失**的那些，一行一行寫在狀態面板底下。
+    /// （stopChips 每一種的去向：fixed→面板左半的鎖；here／night／dwell→面板；
+    ///  must→序號圈的星；photo→照片左上的張數；sub→子地點那一列）
+    private func cardFlags(_ slot: TripPlan.Slot) -> [TripCardFlag] {
+        var out: [TripCardFlag] = []
+        if slot.index == 0 {
+            if slot.shortfallSeconds > 60 {
+                out.append(TripCardFlag(id: "late", icon: "exclamationmark.triangle.fill",
+                                        text: "指定的時間比出發時間還早", tone: .red))
+            }
+        } else if slot.shortfallSeconds > 60 {
+            let est = Self.timeFmt.string(from: slot.estimatedArrival ?? slot.arrival)
+            out.append(TripCardFlag(id: "late", icon: "exclamationmark.triangle.fill",
+                                    text: "推算 " + est + " 才到，差 "
+                                        + TripRouter.durationText(slot.shortfallSeconds),
+                                    tone: .red))
+        } else if slot.idleSeconds > 300 {
+            // 跟原本路段上的「等 N」是同一件事（門檻都是 300 秒），合併後只留這一個
+            out.append(TripCardFlag(id: "idle", icon: "hourglass",
+                                    text: "比預計早到，空 " + TripRouter.durationText(slot.idleSeconds),
+                                    tone: .neutral))
+        }
+        // 打卡之後用事實說話：實際停留多久
+        if let actual = slot.stop.actualDwellSeconds {
+            let planned = Double(max(0, slot.stop.dwellMinutes)) * 60
+            var text = "實際停留 " + TripRouter.durationText(actual)
+            // 過夜的站不比多少：停留分鐘對過夜的站沒有意義（離開時間是退房時刻）
+            if !slot.stop.isOvernight, planned > 0, abs(actual - planned) >= 300 {
+                text += actual > planned
+                    ? "（多 " + TripRouter.durationText(actual - planned) + "）"
+                    : "（少 " + TripRouter.durationText(planned - actual) + "）"
+            }
+            out.append(TripCardFlag(id: "actualDwell", icon: "checkmark.circle.fill",
+                                    text: text, tone: .day))
+        }
+        // 比原本推算的早到還是晚到（衡量的是這一段路＋上一站有沒有拖到）
+        if slot.isActualArrival {
+            let delta = slot.arrival.timeIntervalSince(slot.plannedArrival)
+            if abs(delta) >= 300 {
+                out.append(TripCardFlag(
+                    id: "delta",
+                    icon: delta > 0 ? "arrow.down.right" : "arrow.up.right",
+                    text: delta > 0
+                        ? "比預估晚 " + TripRouter.durationText(delta)
+                        : "比預估早 " + TripRouter.durationText(-delta),
+                    tone: delta > 0 ? .orange : .green))
+            }
+        }
+        if slot.stop.coordinate == nil {
+            let stop = slot.stop
+            out.append(TripCardFlag(id: "nocoord", icon: "exclamationmark.triangle.fill",
+                                    text: "未設座標：沒有路線、天氣與地圖。點這裡選位置",
+                                    tone: .orange,
+                                    action: { editingStop = stop }))
+        }
+        // 子地點的分鐘加起來超過停留時間 → 排程對不上
+        if slot.stop.subSpotMinutes > slot.stop.dwellMinutes {
+            out.append(TripCardFlag(id: "over", icon: "exclamationmark.circle.fill",
+                                    text: "子地點共 \(slot.stop.subSpotMinutes) 分，超過停留時間",
+                                    tone: .red))
+        }
+        return out
+    }
+
+    // MARK: 卡片底排：天氣、電話、查看地圖
+
+    private func chipRow(_ slot: TripPlan.Slot, color c: Color,
+                         place: TripPlaceName.Place?, metrics m: TripCardMetrics) -> AnyView? {
+        let stop = slot.stop
+        let hasWeather = stop.coordinate != nil && TripWeatherStore.isWithinForecastRange(slot.arrival)
+        let phone = stop.phone?.trimmingCharacters(in: .whitespaces) ?? ""
+        let hasPhone = !phone.isEmpty
+        let hasMap = stop.coordinate != nil
+            || !stop.address.trimmingCharacters(in: .whitespaces).isEmpty
+        // 三顆都沒有就整排不建：照片下段也就不內收，曲線一路到底
+        guard hasWeather || hasPhone || hasMap else { return nil }
+        // 天氣兩行（「25°／15°」＋「福岡・晴時多雲」）只在 430／440 寬：
+        // 窄的手機兩行版會把電話或地圖擠出這一排
+        let twoLine = hasWeather && m.roomy && !m.stacked
+        let height: CGFloat? = twoLine ? 28 : nil
+        let openMap = { TripShare.openPlaceInMaps(stop) }
+        if m.stacked {
+            // 字很大時可以換行（ChipFlowLayout 只會建一份天氣膠囊，不會重複載入）
+            return AnyView(
+                ChipFlowLayout(spacing: 6) {
+                    if hasWeather {
+                        TripWeatherChip(coordinate: stop.coordinate, date: slot.arrival,
+                                        cityName: place?.zh)
+                    }
+                    if hasPhone {
+                        StopPhoneTag(raw: phone, minHeight: nil) { digits in
+                            banner = "已複製 " + digits
+                        }
+                    }
+                    if hasMap {
+                        TripMapChip(style: .full, color: c, minHeight: nil, action: openMap)
+                    }
+                }
+            )
+        }
+        return AnyView(
+            HStack(spacing: 6) {
+                if hasWeather {
+                    // [v25.478] 點了更新這一站的天氣（使用者指定），重試、☂、更新中的回饋都照舊
+                    TripWeatherChip(coordinate: stop.coordinate, date: slot.arrival,
+                                    twoLine: twoLine, cityName: place?.zh)
+                }
+                if hasPhone {
+                    // [v25.500] 點了複製給車機用的純數字（日本車機用電話找目的地）
+                    StopPhoneTag(raw: phone, minHeight: height) { digits in
+                        banner = "已複製 " + digits
+                    }
+                }
+                if hasMap {
+                    // ⚠️ ViewThatFits 只包這一顆：天氣膠囊自己帶 @StateObject 與 .task，
+                    //    放進好幾個候選會被建好幾份、重複載入
+                    ViewThatFits(in: .horizontal) {
+                        TripMapChip(style: .full, color: c, minHeight: height, action: openMap)
+                        TripMapChip(style: .short, color: c, minHeight: height, action: openMap)
+                        TripMapChip(style: .icon, color: c, minHeight: height, action: openMap)
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        )
     }
 
     /// 這一站花了多少——掛在右下角那座小城上的招牌（v25.513，使用者指定）。
@@ -1754,8 +1925,12 @@ struct TripPlanDetailView: View {
     ///
     /// 底圖層自己的規矩就是答案：「可以被看見，不可以被讀」。金額是這一列
     /// 唯一非讀不可的數字，它不屬於那一層。所以做成真正的 Text，疊在
-    /// **內容之上**（overlay，不是 backdrop），白字壓在當天色的實心牌子上——
-    /// 深淺色模式都過得了對比，而且看起來仍然是立在那座城上的一塊招牌。
+    /// **內容之上**（overlay，不是 backdrop），白字壓在當天色的實心牌子上，
+    /// 看起來仍然是立在那座城上的一塊招牌。
+    ///
+    /// [v25.517] 更正：上面原本寫「深淺色模式都過得了對比」，算出來不成立——
+    /// 11pt 粗白字壓在原色上只有 2.32（橘）～3.43（紫），11pt 不算大字，要 4.5。
+    /// 牌子改用壓暗 40% 的當天色（TripInk.solid），5.8～7.7。
     @ViewBuilder
     private func stopSpendSign(_ slot: TripPlan.Slot, amount: String?,
                                color c: Color) -> some View {
@@ -1773,9 +1948,10 @@ struct TripPlanDetailView: View {
                     .fixedSize()
                     .padding(.horizontal, 8).padding(.vertical, 3)
                     .background(
-                        RoundedRectangle(cornerRadius: 6, style: .continuous).fill(c)
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .fill(TripInk.solid(c))
                     )
-                    .shadow(color: c.opacity(0.5), radius: 5)
+                    .shadow(color: c.opacity(0.35), radius: 4)
             }
             .buttonStyle(.plain)
             .accessibilityLabel(isOpen ? "這一站花費 \(amount)，明細已展開，點一下收起"
@@ -1783,7 +1959,8 @@ struct TripPlanDetailView: View {
             // [v25.514] 用系統 popover，不是自己在列上疊一個氣泡。
             //
             // 自己疊的那條路整條是壞的，而且是幾何問題不是風格問題：
-            // 包住所有列的那個 VStack 套了 .clipShape(cornerRadius: 18)，
+            // 包住所有列的那個 VStack 套了 .clipShape(cornerRadius: 18)
+            // （v25.517 一站一張卡之後那層裁切拿掉了，但下面那筆帳還在），
             // 任何溢出卡片的東西都會被裁掉——**zIndex 只排序繪製，擋不住裁切**。
             // 算過：三筆花費的氣泡約 153pt 高，而「只有一站、剛記了午餐」
             // 的那張卡整張才 135pt，氣泡比卡片還高，往上往下都無解。
@@ -1796,8 +1973,9 @@ struct TripPlanDetailView: View {
                 set: { spendPopoverStopId = $0 ? slot.stop.id : nil })) {
                 stopSpendDetail(slot, color: c)
             }
-            .padding(.trailing, 14)
-            .padding(.bottom, 12)
+            // [v25.513 使用者指定「顯示在右下那個建築物上」] 新卡片右下就是線稿天際線
+            .padding(.trailing, 10)
+            .padding(.bottom, 4)
         }
     }
 
@@ -1914,30 +2092,37 @@ struct TripPlanDetailView: View {
         .presentationCompactAdaptation(.popover)
     }
 
-    /// 景點列右側：拖曳把手 ＋「…」選單
-    private func stopAccessory(_ slot: TripPlan.Slot) -> some View {
-        HStack(spacing: 6) {
-            reorderHandle(slot)
-            stopMenu(slot)
-        }
-    }
-
     /// [v25.479] 拖曳把手（使用者指定：標題右邊的三條線）。
     ///
-    /// 只有把手可以拖、不是整列：整列本身要能點開景點卡，而且時間軸是捲動的，
-    /// 整列可拖會跟捲動搶手勢。長按約一秒把它提起來，拖到想放的位置放開——
+    /// 只有把手可以拖、不是整張卡：整張卡要能點開景點卡，而且時間軸是捲動的，
+    /// 整張可拖會跟捲動搶手勢。長按約一秒把它提起來，拖到想放的位置放開——
     /// 這是系統拖放的既定手感，不是另外做一套。
     ///
     /// 選單裡的「往前移一站／往後移一站」保留：只差一格的時候點一下比拖準得多。
+    /// [v25.517] 樣子換成設計稿的灰底圓鈕（24pt，點擊範圍 28）。
     private func reorderHandle(_ slot: TripPlan.Slot) -> some View {
         Image(systemName: "line.3.horizontal")
-            .font(.system(size: 13, weight: .semibold))
-            .foregroundStyle(.tertiary)
-            .padding(.vertical, 4).padding(.horizontal, 2)
+            .font(.system(size: 11, weight: .semibold))
+            .foregroundStyle(.secondary)
+            .frame(width: 24, height: 24)
+            .background(Color(.tertiarySystemFill), in: Circle())
+            .frame(width: 28, height: 28)
             .contentShape(Rectangle())
             // 短按把手不要跑去開景點卡——它只負責拖
             .onTapGesture { }
-            .draggable(slot.stop.id.uuidString) { dragPreview(slot) }
+            // payload 是 autoclosure：系統真的開始拖的時候才求值，
+            // 所以在這裡記下「被拖的是誰」（提示線要靠它決定畫上面還是下面）
+            .draggable(dragPayload(slot)) { dragPreview(slot) }
+            .accessibilityLabel("拖曳調整順序")
+            .accessibilityHint("長按後拖到想放的位置。只差一格時，用「更多動作」的往前移、往後移比較準")
+    }
+
+    private func dragPayload(_ slot: TripPlan.Slot) -> String {
+        let id = slot.stop.id
+        // 不在這個呼叫裡直接寫 @State：萬一系統是在畫面更新途中求值，會變成
+        // 「在 view update 時改狀態」。排到下一輪主執行緒。
+        DispatchQueue.main.async { draggingStopId = id }
+        return id.uuidString
     }
 
     /// 提起來時跟著手指走的那張小卡
@@ -1947,7 +2132,7 @@ struct TripPlanDetailView: View {
                 .font(.system(size: 11, weight: .bold, design: .rounded))
                 .foregroundStyle(.white)
                 .frame(width: 20, height: 20)
-                .background(Circle().fill(TripDayPalette.color(slot.dayIndex)))
+                .background(Circle().fill(TripInk.solid(TripDayPalette.color(slot.dayIndex))))
             Text(slot.stop.displayName)
                 .font(.system(size: 12, weight: .semibold))
                 .lineLimit(1)
@@ -1956,14 +2141,34 @@ struct TripPlanDetailView: View {
         .background(Color(.systemBackground), in: Capsule())
     }
 
-    /// 拖到這一站上面時畫一條線：放開會落在這裡
+    /// 放開後會落在目標的上面還是下面。
+    ///
+    /// [v25.517] 修一個 v25.479 就有的錯：往下拖時 dropStop 用 to + 1，那一站實際落在
+    /// 目標的**下面**，但提示線永遠畫在上面——跟「上方會出現一條線告訴你會落在
+    /// 哪裡」那句說明不符。現在線畫在它真的會落下的那一側。
+    private func dropLandsBelow(_ target: TripPlan.Slot) -> Bool {
+        guard let dragging = draggingStopId, dragging != target.stop.id,
+              let stops = plan?.stops,
+              let from = stops.firstIndex(where: { $0.id == dragging }) else { return false }
+        return from < target.index
+    }
+
+    /// 拖到這一站上面時，在卡與卡之間的空隙畫一條線：放開會落在這裡。
+    ///
+    /// [v25.517] 不再貼著卡片頂邊畫：路段併進卡片之後，卡片頂邊就是路段膠囊，
+    /// 貼著畫會壓在膠囊上。卡片外面已經沒有裁切，所以畫到卡片外面不會被切掉。
     @ViewBuilder
-    private func dropIndicator(_ slot: TripPlan.Slot) -> some View {
-        if dropTargetId == slot.stop.id {
+    private func dropIndicator(_ slot: TripPlan.Slot, below: Bool) -> some View {
+        // 懸停在被拖的那一站自己身上不畫線：dropStop 對自己是無效放置，畫了等於騙人
+        // （v25.479 就有）。draggingStopId 還是 nil 時照舊畫，不會比原本更糟。
+        if dropTargetId == slot.stop.id && draggingStopId != slot.stop.id {
             Capsule()
                 .fill(TripDayPalette.color(slot.dayIndex))
                 .frame(height: 3)
-                .padding(.horizontal, 16)
+                .padding(.horizontal, 8)
+                // 卡片上下各 6pt 內距，間隙 12pt：線的中心對準間隙正中間
+                .offset(y: below ? 1.5 : -1.5)
+                .allowsHitTesting(false)
         }
     }
 
@@ -1973,6 +2178,7 @@ struct TripPlanDetailView: View {
     /// 放置目標吃的是純文字，別的地方拖一段字進來也會走到這裡）。
     private func dropStop(_ items: [String], onto target: TripPlan.Slot) -> Bool {
         dropTargetId = nil
+        draggingStopId = nil
         guard let raw = items.first,
               let draggedId = UUID(uuidString: raw),
               draggedId != target.stop.id,
@@ -1988,7 +2194,7 @@ struct TripPlanDetailView: View {
         return true
     }
 
-    private func stopMenu(_ slot: TripPlan.Slot) -> some View {
+    private func stopMenu(_ slot: TripPlan.Slot, color c: Color) -> some View {
         Menu {
             Button("打開景點卡") { openingStopId = slot.stop.id }
             Button("編輯") { editingStop = slot.stop }
@@ -2066,37 +2272,27 @@ struct TripPlanDetailView: View {
             Divider()
             Button("刪除", role: .destructive) { removingStop = slot.stop }
         } label: {
-            Image(systemName: "ellipsis.circle")
-                .font(.system(size: 15)).foregroundStyle(.secondary)
+            // [v25.517] 設計稿的圓鈕：當天色 12% 底，24pt，點擊範圍 28
+            Image(systemName: "ellipsis")
+                .font(.system(size: 12, weight: .bold))
+                .foregroundStyle(TripInk.text(c, colorScheme))
+                .frame(width: 24, height: 24)
+                .background(c.opacity(0.12), in: Circle())
+                .overlay(Circle().stroke(c.opacity(0.35), lineWidth: 0.75))
+                .frame(width: 28, height: 28)
+                .contentShape(Rectangle())
         }
+        .accessibilityLabel("更多動作")
     }
 
-    /// 一站底下的照片。橫捲、點開全螢幕看。
     /// [v25.472] 這趟所有站的照片，依時間軸順序攤平。
     ///
-    /// 用整趟而不是只有那一站：時間軸上照片條是一站一條，但使用者點進去之後
+    /// 用整趟而不是只有那一站：時間軸上照片是一站一張（v25.517 起是卡片左邊的
+    /// 主圖，原本是一站一條照片條），但使用者點進去之後
     /// 想往下看的是「接下來的照片」，不是「這一站看完就停住」。順序照時間軸排，
     /// 與畫面上看到的一致。
     private var allStopPhotoURLs: [URL] {
         (plan?.stops ?? []).flatMap { $0.photoFileNames.map { TripStop.photoURL($0) } }
-    }
-
-    private func photoStrip(_ stop: TripStop) -> some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 6) {
-                ForEach(stop.photoFileNames, id: \.self) { name in
-                    Button {
-                        viewingPhoto = IdentifiableURL(url: TripStop.photoURL(name))
-                    } label: {
-                        AsyncThumbnailView(url: TripStop.photoURL(name),
-                                           size: CGSize(width: 76, height: 58))
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-            .padding(.vertical, 2)
-        }
-        .scrollEdgeFade(width: 12)
     }
 
     /// 相本要吃的資料。分組字串帶上「第幾天」，依景點分組出來就是照日子與順序排好的。
@@ -2151,102 +2347,26 @@ struct TripPlanDetailView: View {
             <= Calendar.current.startOfDay(for: Date())
     }
 
-    /// 打卡方塊：沒到 → 我到了 → 玩完了 → 回到沒到。
-    private func checkInButton(_ slot: TripPlan.Slot) -> some View {
-        let c = TripDayPalette.color(slot.dayIndex)
-        let state = slot.stop.checkInState
-        return Button {
-            lifeStore.advanceTripStopCheckIn(planId: planId, stopId: slot.stop.id)
-        } label: {
-            ZStack {
-                Circle()
-                    .stroke(state == .notArrived ? Color.secondary.opacity(0.5) : c,
-                            lineWidth: 1.6)
-                    .frame(width: 22, height: 22)
-                switch state {
-                case .notArrived:
-                    EmptyView()
-                case .arrived:
-                    // 人在這裡：實心點，跟「已完成」的勾區分開
-                    Circle().fill(c).frame(width: 10, height: 10)
-                case .departed:
-                    Circle().fill(c).frame(width: 22, height: 22)
-                    Image(systemName: "checkmark")
-                        .font(.system(size: 11, weight: .bold))
-                        .foregroundStyle(.white)
-                }
-            }
-            .contentShape(Circle())
-        }
-        .buttonStyle(.plain)
-    }
-
-    /// 這一站底下要鋪什麼：天氣預報、照片。兩者都沒有就回 nil，不留空位。
-    ///
-    /// [v25.435] 天氣放在這裡而不是塞進上面的膠囊列：膠囊列是「這一站是什麼」
-    /// （第幾天、必去、停留多久），天氣是「那天會怎樣」，兩件事。
-    private func stopExtra(_ slot: TripPlan.Slot) -> AnyView? {
-        let hasPhotos = !slot.stop.photoFileNames.isEmpty
-        let hasWeather = slot.stop.coordinate != nil
-            && TripWeatherStore.isWithinForecastRange(slot.arrival)
-        let phone = slot.stop.phone?.trimmingCharacters(in: .whitespaces)
-        let hasPhone = !(phone ?? "").isEmpty
-        // [v25.514] 這裡原本又跑了一次 stopSpendAmount（整個陣列 filter 加總），
-        // 所以「一列只算一次」那句話在 v25.513 當下就不成立了。改成只問
-        // 「有沒有」，不要為了一個 Bool 去組一個格式化字串。
-        let hasSpend = expenseStore.ntdTotal(stopExpenses(slot.stop.id)) > 0
-        guard hasPhotos || hasWeather || hasPhone else { return nil }
-        return AnyView(
-            VStack(alignment: .leading, spacing: 6) {
-                // [v25.501] 天氣與電話併成**同一行**。
-                //
-                // 它們是同一類東西：都是「等一下才會用到」的附註，都不該
-                // 搶在地名前面。擠在一行、同一個灰度，眼睛掃過去是一次，
-                // 不是三次——上一版是上面一顆藍膠囊、下面一顆灰膠囊，
-                // 中間夾著名字跟地址，整列被切成四段。
-                if hasWeather || hasPhone {
-                    HStack(spacing: 6) {
-                        if hasWeather {
-                            // 時間軸是緊湊版，不寫來源那一行
-                            TripWeatherChip(coordinate: slot.stop.coordinate,
-                                            date: slot.arrival)
-                        }
-                        if let phone, hasPhone {
-                            StopPhoneTag(raw: phone) { digits in
-                                banner = "已複製 " + digits
-                            }
-                        }
-                    }
-                }
-                if hasPhotos {
-                    photoStrip(slot.stop)
-                        // [v25.513] 有招牌就把右邊讓出來。照片條是橫向捲軸，
-                        // 會一路鋪到內容區的右緣，不讓的話兩三張縮圖就把
-                        // 招牌整個蓋掉——而且蓋不蓋得到還要看那一站的亂數。
-                        .padding(.trailing, hasSpend ? 76 : 0)
-                }
-            }
-            // 招牌本身佔 24pt 高，最後一列內容要讓開，不然會疊在一起
-            .padding(.bottom, hasSpend ? 16 : 0)
-        )
-    }
-
-    /// 一站的電話（標題下面那一行）。
+    /// 一站的電話（卡片底排中間那顆）。
     ///
     /// 樣式刻意跟天氣膠囊**一模一樣**（10pt 粗體、灰字、tertiarySystemFill
     /// 的膠囊底）：它們並排在同一行，長得不一樣只會讓那一行看起來是拼湊的。
     ///
     /// 顯示用 Apple 分好組的寫法（092-291-0001），複製給車機用的是純數字
     /// （0922910001）——看的人要斷點，機器不要。
+    ///
+    /// [v25.517] 設計稿在號碼後面畫了一個 ›，但這顆的動作是「複製」不是「進下一層」，
+    /// 畫 › 會讓人以為點了會打開什麼，所以不畫。撥打放在長按選單（「…」裡也有）。
     private struct StopPhoneTag: View {
         let raw: String
+        /// 底排三顆要一樣高（天氣兩行時是 28）。nil＝照字的高度。
+        /// ⚠️ 宣告在 onCopy 前面：呼叫端用尾隨閉包傳 onCopy，參數順序要對得上
+        var minHeight: CGFloat? = nil
         let onCopy: (String) -> Void
 
         var body: some View {
             Button {
-                let digits = TripPhone.navDigits(raw)
-                UIPasteboard.general.string = digits
-                onCopy(digits)
+                copy()
             } label: {
                 HStack(spacing: 3) {
                     Image(systemName: "phone.fill")
@@ -2257,10 +2377,33 @@ struct TripPlanDetailView: View {
                 .fixedSize()
                 .foregroundStyle(.secondary)
                 .padding(.horizontal, 7).padding(.vertical, 3)
+                .frame(minHeight: minHeight)
                 .background(Color(.tertiarySystemFill), in: Capsule())
                 .contentShape(Capsule())
             }
             .buttonStyle(.plain)
+            .contextMenu {
+                Button {
+                    copy()
+                } label: {
+                    Label("拷貝電話（車機導航用）", systemImage: "doc.on.doc")
+                }
+                Button {
+                    if let url = URL(string: "tel://" + TripPhone.dialDigits(raw)) {
+                        UIApplication.shared.open(url)
+                    }
+                } label: {
+                    Label("撥打電話", systemImage: "phone")
+                }
+            }
+            .accessibilityLabel("電話 " + TripPhone.display(raw))
+            .accessibilityHint("點兩下拷貝給車機導航用的號碼；長按可以撥打")
+        }
+
+        private func copy() {
+            let digits = TripPhone.navDigits(raw)
+            UIPasteboard.general.string = digits
+            onCopy(digits)
         }
     }
 
@@ -2318,116 +2461,6 @@ struct TripPlanDetailView: View {
         banner = filled == 0
             ? "這 \(targets.count) 站都查不到電話"
             : "補上了 \(filled) 支電話（共查 \(targets.count) 站）"
-    }
-
-    private func stopChips(_ slot: TripPlan.Slot) -> [ItemChip] {
-        let c = TripDayPalette.color(slot.dayIndex)
-        var chips: [ItemChip] = []
-        // [v25.501] 電話不在這一排，在 stopExtra（天氣旁邊）。
-        //
-        // v25.500 把它放進這一排，而那時候這一排在標題**上面**，於是整個
-        // 畫面最亮、最先被讀到的是一串十位數字，不是「Familymart 博多中洲
-        // 五丁目店」。v25.502 這一排已經移到標題底下了，但電話還是留在
-        // stopExtra——它跟天氣是同一類東西（等一下才會用到的附註），
-        // 併成一行比分成兩排好。
-        // [v25.502] 「第 N 天」不再出現在每一列。
-        //
-        // 跨天行程的每一列本來就排在「第 6 天 10/8（週四）」那個日期標頭底下，
-        // 所以這顆膠囊是把標頭的內容在每一列再抄一次。三十四站就抄三十四次，
-        // 而且它還排在地名前面。重複的資訊不是資訊，是雜訊。
-        if slot.isFixedArrival {
-            chips.append(ItemChip(id: "fixed",
-                                  text: "指定 " + Self.timeFmt.string(from: slot.arrival) + " 抵達",
-                                  color: c, icon: "lock.fill"))
-        }
-        if slot.index == 0 {
-            // 第一站前面沒有算過的路段：出發時間到指定抵達之間就是去第一站的路上
-            if slot.shortfallSeconds > 60 {
-                chips.append(ItemChip(id: "late", text: "指定的時間比出發時間還早",
-                                      color: .red, icon: "exclamationmark.triangle.fill"))
-            } else if slot.idleSeconds > 60 {
-                chips.append(ItemChip(id: "idle",
-                                      text: "出發後 " + TripRouter.durationText(slot.idleSeconds) + " 抵達",
-                                      color: .secondary, icon: "car.fill"))
-            }
-        } else if slot.shortfallSeconds > 60 {
-            chips.append(ItemChip(id: "late",
-                                  text: "推算 " + Self.timeFmt.string(from: slot.estimatedArrival ?? slot.arrival)
-                                        + " 才到，差 " + TripRouter.durationText(slot.shortfallSeconds),
-                                  color: .red, icon: "exclamationmark.triangle.fill"))
-        } else if slot.idleSeconds > 300 {
-            chips.append(ItemChip(id: "idle",
-                                  text: "比預計早到，空 " + TripRouter.durationText(slot.idleSeconds),
-                                  color: .secondary, icon: "hourglass"))
-        }
-        if slot.stop.isMustVisit {
-            chips.append(ItemChip(id: "must", text: "必去", color: .orange, icon: "star.fill"))
-        }
-        // 打卡之後就用事實說話：實際停留多久、比原本排的早到還是晚到
-        if let actual = slot.stop.actualDwellSeconds {
-            let planned = Double(max(0, slot.stop.dwellMinutes)) * 60
-            var text = "實際停留 " + TripRouter.durationText(actual)
-            if planned > 0, abs(actual - planned) >= 300 {
-                text += actual > planned
-                    ? "（多 " + TripRouter.durationText(actual - planned) + "）"
-                    : "（少 " + TripRouter.durationText(planned - actual) + "）"
-            }
-            chips.append(ItemChip(id: "actualDwell", text: text, color: c, icon: "checkmark.circle.fill"))
-        } else if slot.isActualArrival {
-            chips.append(ItemChip(id: "here",
-                                  text: "已抵達 " + Self.timeFmt.string(from: slot.arrival),
-                                  color: c, icon: "mappin.circle.fill"))
-        }
-        if slot.isActualArrival {
-            // 比的是「照前面實際發生的事推算，這一站本來會幾點到」，
-            // 所以它衡量的是這一段路＋上一站有沒有拖到，不是整趟累積的落差
-            let delta = slot.arrival.timeIntervalSince(slot.plannedArrival)
-            if abs(delta) >= 300 {
-                chips.append(ItemChip(
-                    id: "delta",
-                    text: delta > 0
-                        ? "比預估晚 " + TripRouter.durationText(delta)
-                        : "比預估早 " + TripRouter.durationText(-delta),
-                    color: delta > 0 ? .orange : .green,
-                    icon: delta > 0 ? "arrow.down.right" : "arrow.up.right"))
-            }
-        }
-        if slot.stop.isOvernight {
-            chips.append(ItemChip(id: "night",
-                                  text: "過夜・隔天 " + Self.timeFmt.string(from: slot.departure) + " 出發",
-                                  color: .indigo, icon: "bed.double.fill"))
-        } else {
-            chips.append(ItemChip(id: "dwell", text: "停留 \(slot.stop.dwellMinutes) 分",
-                                  color: c, icon: "clock"))
-        }
-        if !slot.stop.photoFileNames.isEmpty {
-            chips.append(ItemChip(id: "photo", text: "\(slot.stop.photoFileNames.count) 張",
-                                  color: .indigo, icon: "photo"))
-        }
-        if !slot.stop.subSpots.isEmpty {
-            chips.append(ItemChip(id: "sub", text: "子地點 \(slot.stop.subSpots.count)",
-                                  color: .teal, icon: "mappin.and.ellipse"))
-        }
-        if slot.stop.coordinate == nil {
-            chips.append(ItemChip(id: "nocoord", text: "未設座標", color: .orange,
-                                  icon: "exclamationmark.triangle.fill"))
-        }
-        // 子地點的分鐘加起來超過母景點的停留時間 → 排程對不上，要講出來
-        if slot.stop.subSpotMinutes > slot.stop.dwellMinutes {
-            chips.append(ItemChip(id: "over",
-                                  text: "子地點共 \(slot.stop.subSpotMinutes) 分，超過停留時間",
-                                  color: .red, icon: "exclamationmark.circle.fill"))
-        }
-        return chips
-    }
-
-    private func stopPreview(_ stop: TripStop) -> String? {
-        var parts: [String] = []
-        let addr = stop.displayAddress
-        if !addr.isEmpty { parts.append(addr) }
-        let note = stop.note.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !note.isEmpty { parts.append(note) }
-        return parts.isEmpty ? nil : parts.joined(separator: "\n")
     }
 
     private func subSpotDisclosures(_ stop: TripStop) -> [ItemDisclosure] {

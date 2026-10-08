@@ -405,6 +405,12 @@ struct TripWeatherChip: View {
     var compact: Bool = true
     /// [v25.449] 這一份預報掛在哪個地點上（寬版會寫出來）
     var placeName: String? = nil
+    /// [v25.517] 時間軸新卡片的底排：寫成兩行（「25°／15°」＋「福岡・晴時多雲」）。
+    /// 只有卡片夠寬（430／440 寬的手機）才用；窄的手機兩行版會把電話或地圖擠出去。
+    /// （加在 placeName 後面、有預設值：既有的呼叫端一個都不用改）
+    var twoLine: Bool = false
+    /// [v25.517] 兩行版第二行開頭的城市名（從地址切出來的；切不出來是 nil，只寫天氣）
+    var cityName: String? = nil
 
     /// [v25.478] 手動更新剛結束時，在膠囊上頂一下回饋再換回天氣。
     ///
@@ -422,6 +428,7 @@ struct TripWeatherChip: View {
                     failedLabel
                 } else {
                     ProgressView().scaleEffect(compact ? 0.45 : 0.6)
+                        .frame(minHeight: twoLine ? 28 : nil)
                 }
             }
         }
@@ -466,6 +473,7 @@ struct TripWeatherChip: View {
                 }
                 .buttonStyle(.plain)
                 .disabled(weather.isLoading(at: coordinate))
+                .accessibilityHint("點兩下更新這一站的天氣")
             } else {
                 compactCapsule(day, coordinate: nil)
             }
@@ -476,6 +484,7 @@ struct TripWeatherChip: View {
 
     /// 緊湊版膠囊的內容。三種狀態共用同一顆膠囊的外型，
     /// 寬度會跟著變——它本來就是 fixedSize，不會把整列推歪。
+    /// [v25.517] twoLine 時高度固定 28：更新中／已更新／更新失敗切換時不會跳。
     private func compactCapsule(_ day: TripDayWeather,
                                 coordinate: CLLocationCoordinate2D?) -> some View {
         HStack(spacing: 4) {
@@ -493,6 +502,26 @@ struct TripWeatherChip: View {
                     .font(.system(size: 9)).foregroundStyle(.orange)
                 Text("更新失敗")
                     .font(.system(size: 10, weight: .bold))
+            } else if twoLine {
+                // [v25.517] 時間軸新卡片的兩行版：「25°／15°」＋「福岡・晴時多雲」
+                Image(systemName: day.symbolName)
+                    .font(.system(size: 14))
+                    .symbolRenderingMode(.multicolor)
+                VStack(alignment: .leading, spacing: 0) {
+                    HStack(spacing: 4) {
+                        Text(day.temperatureText)
+                            .font(.system(size: 11, weight: .bold).monospacedDigit())
+                        if day.showsRain {
+                            Text("☂" + day.rainText)
+                                .font(.system(size: 10, weight: .bold).monospacedDigit())
+                                .foregroundStyle(.blue)
+                        }
+                    }
+                    Text(twoLineCaption(day))
+                        .font(.system(size: 9, weight: .medium))
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                }
             } else {
                 Image(systemName: day.symbolName)
                     .font(.system(size: 9))
@@ -508,9 +537,18 @@ struct TripWeatherChip: View {
         }
         .fixedSize()
         .foregroundStyle(.secondary)
-        .padding(.horizontal, 7).padding(.vertical, 3)
+        .padding(.horizontal, 7).padding(.vertical, twoLine ? 2 : 3)
+        .frame(minHeight: twoLine ? 28 : nil)
         .background(Color(.tertiarySystemFill), in: Capsule())
         .contentShape(Capsule())
+    }
+
+    /// 「福岡・晴時多雲」。城市名切不出來就只寫天氣（不猜）。
+    private func twoLineCaption(_ day: TripDayWeather) -> String {
+        [cityName, day.conditionText]
+            .compactMap { $0 }
+            .filter { !$0.isEmpty }
+            .joined(separator: "・")
     }
 
     /// [v25.478] 手動更新這一站，並在膠囊上回報結果。
@@ -742,6 +780,7 @@ struct TripWeatherChip: View {
                     .fixedSize()
                     .foregroundStyle(.tertiary)
                     .padding(.horizontal, 7).padding(.vertical, 3)
+                    .frame(minHeight: twoLine ? 28 : nil)
                     .background(Color(.tertiarySystemFill), in: Capsule())
                     .contentShape(Capsule())
                 }
