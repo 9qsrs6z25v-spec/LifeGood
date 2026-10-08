@@ -747,9 +747,19 @@ extension Expense {
             guard !t.isEmpty else { return nil }
             // 存檔時自動填的分類名，不是名字
             if t == cat || (!bareCat.isEmpty && t == bareCat) { return nil }
-            // linkedAssetTitle 的自動命名「項目 3：Model 3-加油」也不是名字。
-            // 那串對使用者毫無意義，categoryName 的「汽車 - 加油」還比較有用。
-            if t.hasPrefix("項目 "), t.contains("：") { return nil }
+            // linkedAssetTitle 的自動命名「項目 3：Model 3-加油」：
+            // 「項目 N」那段對使用者毫無意義，但後面的車名／物件名是。
+            // [v25.516] 只剝前綴，不整串丟掉。v25.515 整串丟掉，統計頁的明細與
+            // 候選卡（那裡沒有站名上下文）因此從「項目 3：Model 3-加油」退成
+            // 「汽車 - 加油」，車名整個不見——多台車、多間房的人分不出是哪一台
+            // 哪一間（房地產連 placeName 都沒有可退）。
+            if t.hasPrefix("項目 "), let colon = t.firstIndex(of: "：") {
+                let rest = t[t.index(after: colon)...]
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !rest.isEmpty else { return nil }
+                t = rest
+                if t == cat || (!bareCat.isEmpty && t == bareCat) { return nil }
+            }
             return t
         }
 

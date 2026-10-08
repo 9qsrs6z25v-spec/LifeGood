@@ -332,6 +332,13 @@ struct TripExpenseSheet: View {
         let days = max(p.dayCount, 1)
         let perDay = total / Double(days)
         let largest = linked.max { expenseStore.ntdValue(of: $0) < expenseStore.ntdValue(of: $1) }
+        // [v25.516] 字串在 ViewBuilder 外組好再丟進 Text（本專案的房規，
+        // 見 AddExpenseView.noPlaceMatchHint）：四段串接夾一個三元，
+        // 直接塞進 Text(...) 是型別檢查逾時的常見來源。
+        let largestLine: String? = largest.map {
+            "最大一筆：" + ($0.title.isEmpty ? $0.categoryName : $0.title)
+                + "・" + TripDayMath.shortDay.string(from: $0.date)
+        }
         return VStack(alignment: .leading, spacing: 12) {
             VStack(alignment: .leading, spacing: 2) {
                 Text("這趟總共花了")
@@ -353,11 +360,10 @@ struct TripExpenseSheet: View {
             .padding(.vertical, 10)
             .background(.white.opacity(0.08))
             .clipShape(RoundedRectangle(cornerRadius: 10))
-            if let largest {
+            if let largestLine {
                 // 刻意不套 stopRowLabel：這一行沒有站名上下文，
                 // 站名在這裡是「這趟最大一筆花在哪」，是資訊不是重複。
-                Text("最大一筆：" + (largest.title.isEmpty ? largest.categoryName : largest.title) + "・"
-                     + TripDayMath.shortDay.string(from: largest.date))
+                Text(largestLine)
                     .font(.system(size: 10))
                     .foregroundStyle(.white.opacity(0.85))
                     .lineLimit(1)
@@ -554,9 +560,9 @@ struct TripExpenseSheet: View {
         let stop = e.linkedTripStopId.flatMap { sid in
             plan?.stops.first(where: { $0.id == sid })
         }
-        let names: [String] = stop == nil
-            ? []
-            : [stop!.displayName] + (plan?.stops.map { $0.displayName } ?? [])
+        let names: [String] = stop.map {
+            [$0.displayName] + (plan?.stops.map { $0.displayName } ?? [])
+        } ?? []
         let label = e.stopRowLabel(suppressing: names)
 
         return HStack(spacing: 10) {
@@ -577,8 +583,10 @@ struct TripExpenseSheet: View {
                             .foregroundStyle(c.accentColor)
                     }
                     if let stop {
+                        // 跨站清單唯一的「錢花在哪」線索，壓縮時最後才截
                         Text(stop.displayName)
                             .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                            .layoutPriority(1)
                     }
                     if !e.photoFileNames.isEmpty {
                         HStack(spacing: 2) {
@@ -587,10 +595,13 @@ struct TripExpenseSheet: View {
                         }
                         .font(.caption2).foregroundStyle(.secondary)
                     }
-                    // [v25.515] 備註本來一個字都沒顯示過
-                    if let n = label.note {
-                        Text(n).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
-                    }
+                }
+                // [v25.515] 備註本來一個字都沒顯示過。
+                // [v25.516] 自成一行（多約 14pt 列高）。v25.515 把它擠進上面那條
+                // HStack 當第五個兄弟，站名與備註只好對分剩下的一百多 pt，
+                // 兩個都只剩四、五個字——被壓掉的偏偏是要留著的站名。
+                if let n = label.note {
+                    Text(n).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
                 }
             }
             Spacer(minLength: 4)

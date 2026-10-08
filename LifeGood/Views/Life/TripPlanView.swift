@@ -1831,8 +1831,9 @@ struct TripPlanDetailView: View {
                 Image(systemName: "cart.fill")
                     .font(.system(size: 10, weight: .bold))
                     .foregroundStyle(c)
+                // [v25.516] 相對字級：寫死 12pt 的話大字級時它會變成整張氣泡最小的字
                 Text(slot.stop.displayName)
-                    .font(.system(size: 12, weight: .bold))
+                    .font(.caption.weight(.bold))
                     .lineLimit(1)
                 Spacer(minLength: 0)
             }
@@ -1878,8 +1879,9 @@ struct TripPlanDetailView: View {
                 Text("合計").font(.caption).foregroundStyle(.secondary)
                 Spacer(minLength: 0)
                 // 值走 ntdTotal，與招牌（stopSpendAmount）同一個來源
+                // [v25.516] 相對字級：寫死 17pt 配會放大的「合計」，大字級時標籤比數字大
                 Text(expenseStore.ntdPlainTotalText(all))
-                    .font(.system(size: 17, weight: .bold, design: .rounded))
+                    .font(.system(.title3, design: .rounded).weight(.bold))
                     .monospacedDigit()
                     .foregroundStyle(c)
             }
@@ -1901,7 +1903,6 @@ struct TripPlanDetailView: View {
         }
         .padding(14)
         // 250 → 288：窄的時候主標只放得下七、八個中文字，備註一填就被切掉。
-        // 原幣搬到右欄又還了約 60pt 給左邊的文字。
         // 上限壓在 288 是因為最小的 iPhone（SE3／13 mini）直向只有 375pt：
         // 288 ＋ 兩側 16pt 安全邊 ＝ 320，氣泡才會指著招牌而不是橫跨整列。
         .frame(width: 288)

@@ -723,7 +723,12 @@ struct AddExpenseView: View {
             }
 
             // 備註（移到基本資訊最下方；變動支出基本模式時隱藏）
-            if expenseType == .fixed || advancedMode {
+            // [v25.516] 掛在某一站的例外。景點卡與花費氣泡的提示列叫使用者
+            // 點進來補「備註」，而這一欄原本只綁 advancedMode——那是
+            // @AppStorage、不跨裝置、使用者也關得掉（表單標頭那顆「進階」）。
+            // 換機或關掉之後，提示列會指向一張沒有那個欄位的表單。
+            // 承諾只跟「這筆有掛站別」有關，不該綁在一顆全域開關上。
+            if expenseType == .fixed || advancedMode || linkedTripStopId != nil {
                 TextField(notePrompt, text: $note, axis: .vertical).lineLimit(3)
             }
         } header: {
@@ -3534,6 +3539,10 @@ struct AddExpenseView: View {
                 || expense.linkedInsuranceId != nil
                 || expense.linkedBankMilestoneId != nil
                 || expense.linkedCreditCardMilestoneId != nil
+                // [v25.516] 掛了旅遊的也算進階：不展開的話「關聯旅遊／算在哪一站」
+                // 那一區（showTripLinkSection，同樣綁 advancedMode）會不見，
+                // 使用者看得到備註欄，卻看不到自己改的是哪一站。
+                || expense.linkedTripPlanId != nil
             if hasAdvancedFields { advancedMode = true }
         }
 

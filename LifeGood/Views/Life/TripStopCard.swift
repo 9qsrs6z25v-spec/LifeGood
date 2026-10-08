@@ -862,8 +862,11 @@ struct StopExpenseRow: View {
             // 右欄一律台幣（所以逐列與合計是同一種數字），原幣當註記貼在它底下。
             // 原幣是對帳數字，擺在左欄只是跟「這筆是什麼」搶那一百多 pt。
             VStack(alignment: .trailing, spacing: 1) {
+                // [v25.516] 相對字級。v25.515 是絕對 15pt 配會跟著放大的 caption2
+                // 註記，系統字放大到 AX 級別時，原幣註記會比它要註記的主金額
+                // 又大又寬，視覺層級整個反過來。
                 Text(ntd)
-                    .font(.system(size: 15, weight: .semibold, design: .rounded))
+                    .font(.system(.subheadline, design: .rounded).weight(.semibold))
                     .monospacedDigit()
                     .foregroundStyle(.primary)
                 if expense.isForeignCurrencyInput {
@@ -874,8 +877,11 @@ struct StopExpenseRow: View {
                 }
             }
             .lineLimit(1)
-            .minimumScaleFactor(0.8)   // 大字級時縮的是數字，不是把主標擠光
-            .layoutPriority(1)         // 壓縮時先截主標，金額永遠完整
+            .minimumScaleFactor(0.8)
+            // [v25.516] 拿掉 layoutPriority(1)。它讓 HStack 先把「理想寬度」給
+            // 這一欄，而大字級時這一欄被放大的原幣註記撐寬，結果主標被擠到
+            // 只剩兩三個字——跟原本「金額永遠完整、先截主標」的意圖是反的。
+            // 金額已經有 lineLimit(1) ＋ minimumScaleFactor 保底，不需要搶寬度。
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(a11yLabel(label, ntd: ntd, tail: tail))
@@ -971,6 +977,10 @@ private struct StopExpenseThumb: View {
             .padding(.top, 1)
             .accessibilityHidden(true)
             .task(id: url) {
+                // [v25.516] 先清空再讀，對齊 ThumbnailImageView 的同型修復：
+                // ForEach 的 id 是 Expense.id，換掉第一張照片時這個實例留著
+                // 而 url 變了，新圖不在快取、要讀磁碟，那段時間會顯示舊照片。
+                image = nil
                 image = await ThumbnailCache.shared.thumbnail(for: url, maxPixel: 96)
             }
     }
@@ -983,5 +993,12 @@ private struct StopExpenseThumb: View {
 /// ⚠️ 條件測的是「主標有沒有使用者自己的字」，不是「備註空不空」——
 ///    使用者自己打了店名、只是沒填備註的清單一眼就分得出來，不該被嘮叨。
 func stopRowsNeedNoteHint(_ list: [Expense], suppressing names: [String]) -> Bool {
-    list.filter { !$0.stopRowLabel(suppressing: names).hasOwnText }.count >= 2
+    // [v25.516] 測「同一個主標出現兩次以上」，而不是「有兩筆以上沒有自己的字」。
+    // 三筆分類各不相同（飲食／娛樂／購物）時每一筆都沒有自己的字，
+    // 但那三列圖示不同、字也不同，一眼就分得出來——氣泡那句
+    // 「分不出來的那幾筆」在那種情況是錯的。
+    let primaries = list.map { $0.stopRowLabel(suppressing: names) }
+        .filter { !$0.hasOwnText }
+        .map { $0.primary }
+    return Dictionary(grouping: primaries, by: { $0 }).values.contains { $0.count >= 2 }
 }
