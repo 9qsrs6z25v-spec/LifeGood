@@ -253,7 +253,10 @@ enum HeroCard: String, CaseIterable, Identifiable {
         case .businessCardDetail:  return "名片明細"
         case .gradeTitle:          return "職等職稱"
         case .spouseResume:        return "另一半履歷"
-        case .tripPlan:            return "旅遊規劃 › 行程卡"
+        // [v25.518] 行程頁最上面的看板改成固定的天空插畫、不再走這套殼層；
+        // 這個身分現在是景點卡（TripStopCard）與花費統計頁（TripStats）在用。
+        // rawValue 不能改（UserDefaults／iCloud 的鍵名），只改顯示的名字。
+        case .tripPlan:            return "旅遊規劃 › 景點卡・花費頁"
         case .travelMapStats:      return "旅遊地圖 › 統計卡"
         case .travelMapDetail:     return "旅遊地圖 › 詳情卡"
         case .foodMapStats:        return "美食地圖 › 統計卡"
@@ -386,7 +389,8 @@ enum HeroCard: String, CaseIterable, Identifiable {
             return [Color(red: 0.62, green: 0.36, blue: 1.00),
                     Color(red: 0.42, green: 0.16, blue: 0.82)]
         case .tripPlan:
-            // 行程卡的娛樂紫＝TripDayPalette 的第一天，時間軸與大頭針都跟著它走
+            // 景點卡與花費頁的娛樂紫＝TripDayPalette 的第一天，時間軸與大頭針都跟著它走
+            // （景點卡打開時會換成那一站當天的顏色；行程頁的看板 v25.518 起不吃這組漸層）
             return [Color(red: 0.68, green: 0.40, blue: 1.00),
                     Color(red: 0.45, green: 0.18, blue: 0.86)]
         case .eInvoice:

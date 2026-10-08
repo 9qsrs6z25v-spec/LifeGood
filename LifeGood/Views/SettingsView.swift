@@ -3713,6 +3713,13 @@ struct HeroCardOverrideView: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
+                    // [v25.518] 行程頁最上面的看板改成固定的天空插畫，不走英雄卡殼層了
+                    if card == .tripPlan {
+                        Label("這裡的設定套在景點卡（點時間軸上的一站打開的那張）與「這趟的花費」頁。行程頁最上面的看板是固定的天空插畫，跟著淺色／深色模式，只有「圓角」會跟著這裡，漸層、KPI 與大字的設定不會作用在它上面。",
+                              systemImage: "info.circle.fill")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
                 Section("顏色") {
                     ForEach(HeroTint.allCases) { t in

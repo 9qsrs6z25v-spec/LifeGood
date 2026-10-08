@@ -17,8 +17,11 @@ import Combine
 //   │  Fukuoka    ╭╯ │  23:05    │   07:00              │
 //   │   JAPAN    ╭╯  └──────────┴──────────────────────┘
 //   │ [🛏實際入住] │ [☀ 25°/15° 福岡・晴時多雲][☎ 092…][地圖]
-//   │ (🛒)        │ ‿‿樓群‿‿塔‿‿橋‿‿  Have a nice trip! ✈  [NT$1,014]
+//   │ (🛒)        │ ‿‿樓群‿‿塔‿‿橋‿‿          ✈  [NT$1,014]
 //   ╰─────────────┴──────────────────────────────────────────╯
+//
+// （v25.518 起「Have a nice trip!」寫在行程頁最上面的看板，第一站不再寫，
+//  見 TripSummaryBoard.swift。）
 //
 // 但字級、比例都以手機讀得到為準：設計稿是平板比例，照縮到 393pt 寬的手機上
 // 標題只剩 11pt、狀態小標不到 5pt。這裡的數字見規格「手機幾何」。
@@ -1476,8 +1479,12 @@ struct TripSubSpotList: View {
 /// 或是當天第一站）——二十站都在福岡的話，福岡塔只出現一次，不是二十次。
 enum TripLandmark {
     case tower, bridge, pagoda, wheel
+    /// [v25.518] 以下四種**只給行程頁最上面的看板**（forBoard）：鳥居、台北 101、
+    /// 高雄 85 大樓、廟宇的燕尾脊。時間軸那條 14pt 的底帶不畫它們（forCity 不會回傳）。
+    case torii, tower101, tower85, templeRoof
 
     /// 只收畫得出、認得出的。台北 101 是一節一節的，不是這座塔，所以不收。
+    /// （[v25.518] 101 後來有了自己的畫法 .tower101，但只在看板上出現）
     static func forCity(_ zh: String?) -> [TripLandmark] {
         guard let zh else { return [] }
         switch zh {
@@ -1490,127 +1497,63 @@ enum TripLandmark {
         default: return []
         }
     }
+
+    /// [v25.518] 看板（整趟的目的地）用的地標。
+    ///
+    /// 日本的城市前面多一座鳥居：日本才有、一眼認得出。台灣的縣市各給一個：
+    /// 台北 101、高雄 85 大樓，其他縣市是廟宇的燕尾脊。
+    /// forCity 不動——時間軸每進一座日本城市就多一座鳥居會變成壁紙。
+    /// 「臺／台」先統一：同一座台北兩種寫法，不能一個有 101、一個沒有。
+    static func forBoard(_ place: TripPlaceName.Place?) -> [TripLandmark] {
+        guard let place else { return [] }
+        let zh = place.zh.replacingOccurrences(of: "臺", with: "台")
+        switch place.country {
+        case "JP":
+            return [.torii] + forCity(zh)
+        case "TW":
+            switch zh {
+            case "台北": return [.tower101]
+            case "高雄": return [.tower85]
+            default: return [.templeRoof]
+            }
+        default:
+            return []
+        }
+    }
 }
 
-/// 卡片底部那一條淡淡的城市線稿（設計稿右下的樓群、塔、斜張橋）。
-///
-/// 規矩沿用 v25.505～513：**可以被看見，不可以被讀**——要讀的東西（金額）是疊在
-/// 上面的招牌，不畫進這裡。**每一站都不一樣**：樓群的種子取站序號。
-/// 「Have a nice trip!」只出現在整趟的第一站（送行的話，說一次）；
-/// 小飛機與虛線航線出現在第一站，以及「下一段要搭飛機」的那一站。
-///
-/// 畫布的高度就是卡片的底帶（沒花費 14、有花費 28、第一站 26），所有樓與地標都夾在
-/// 畫布裡、**不往上探**：正上方就是膠囊排，膠囊的底是半透明的。
-/// 地標擺在左邊 12～32% 的位置，右下角留給花費招牌（它「掛在建築物上」）。
-struct TripCardSkyline: View {
-    let color: Color
-    let seed: Int
-    let landmarks: [TripLandmark]
-    let planeTrail: Bool
-    let greeting: Bool
-
-    init(color: Color, seed: Int, landmarks: [TripLandmark], planeTrail: Bool, greeting: Bool) {
-        self.color = color
-        self.seed = seed
-        self.landmarks = landmarks
-        self.planeTrail = planeTrail
-        self.greeting = greeting
-    }
-
-    var body: some View {
-        ZStack(alignment: .bottom) {
-            Canvas { ctx, size in
-                Self.draw(&ctx, size: size, color: color, seed: seed,
-                          landmarks: landmarks, planeTrail: planeTrail)
-            }
-            if greeting {
-                Text("Have a nice trip!")
-                    .font(TripScriptFont.greeting(12))
-                    .foregroundStyle(color.opacity(0.75))
-                    .rotationEffect(.degrees(-7))
-                    .padding(.bottom, 5)
-                    .offset(x: -12)
-            }
-        }
-        .allowsHitTesting(false)
-        .accessibilityHidden(true)
-    }
-
-    private static func draw(_ ctx: inout GraphicsContext, size: CGSize, color: Color,
-                             seed: Int, landmarks: [TripLandmark], planeTrail: Bool) {
-        guard size.width > 40, size.height > 12 else { return }
-        var r = InkRandom(20117 + seed * 131)
-        let ground = size.height - 1.5
-        let line = color.opacity(0.30)
-        let faint = color.opacity(0.16)
-        let outline = StrokeStyle(lineWidth: 0.8, lineCap: .round, lineJoin: .round)
-
-        // 地面：從左邊淡入，不切一條硬邊
-        var base = Path()
-        base.move(to: CGPoint(x: 0, y: ground))
-        base.addLine(to: CGPoint(x: size.width, y: ground))
-        ctx.stroke(base, with: .linearGradient(Gradient(colors: [.clear, line, faint]),
-                                               startPoint: .zero,
-                                               endPoint: CGPoint(x: size.width, y: 0)),
-                   style: StrokeStyle(lineWidth: 0.8))
-
-        // 地標先佔位置，樓群繞開它
-        var reserved: [ClosedRange<CGFloat>] = []
-        var lx = size.width * CGFloat(0.12 + r.next() * 0.2)
-        for mark in landmarks {
-            let w = width(of: mark)
-            if lx + w > size.width - 4 { break }
-            drawLandmark(mark, at: lx, ground: ground, height: size.height, ctx: &ctx, color: color)
-            reserved.append((lx - 3)...(lx + w + 3))
-            lx += w + CGFloat(18 + r.next() * 30)
-        }
-
-        // 樓群：只有輪廓，窗是幾條短虛線（整片亮著的點陣窗會像資料）
-        var x: CGFloat = size.width * 0.02
-        while x < size.width - 6 {
-            let w = CGFloat(6 + r.next() * 12)
-            if reserved.contains(where: { $0.overlaps(x...(x + w)) }) {
-                x += w + 3
-                continue
-            }
-            let roll = r.next()
-            let tall: CGFloat = roll > 0.8 ? 1.0 : (roll > 0.45 ? 0.6 : 0.32)
-            let h = min(size.height - 4, 5 + tall * CGFloat(6 + r.next() * 20))
-            let rect = CGRect(x: x, y: ground - h, width: w, height: h)
-            ctx.fill(Path(rect), with: .color(color.opacity(0.05)))
-            ctx.stroke(Path(rect), with: .color(line), style: outline)
-            var wy = rect.minY + 3
-            while wy < ground - 3 {
-                if r.next() > 0.45 {
-                    var win = Path()
-                    win.move(to: CGPoint(x: rect.minX + 2, y: wy))
-                    win.addLine(to: CGPoint(x: rect.maxX - 2, y: wy))
-                    ctx.stroke(win, with: .color(faint),
-                               style: StrokeStyle(lineWidth: 0.6, dash: [1.4, 1.6]))
-                }
-                wy += 3.5
-            }
-            x += w + CGFloat(1.5 + r.next() * 6)
-        }
-
-        if planeTrail { drawPlane(&ctx, size: size, color: color, random: &r) }
-    }
-
-    private static func width(of m: TripLandmark) -> CGFloat {
-        switch m {
+// [v25.518] 地標的幾何從 TripCardSkyline 裡搬出來（原本是它的兩支 private 函式），
+// 看板要用同一套畫法，不要再寫第二份。時間軸畫出來的樣子完全不變。
+extension TripLandmark {
+    /// 佔多寬（點）
+    var span: CGFloat {
+        switch self {
         case .tower: return 14
         case .bridge: return 62
         case .pagoda: return 18
         case .wheel: return 30
+        case .torii: return 20
+        case .tower101: return 12
+        case .tower85: return 16
+        case .templeRoof: return 26
         }
     }
 
-    private static func drawLandmark(_ m: TripLandmark, at x: CGFloat, ground: CGFloat,
-                                     height: CGFloat, ctx: inout GraphicsContext,
-                                     color: Color) {
+    /// 封閉的形狀（看板可以填色）。其餘四種是線稿，填色會連成奇怪的面，只能描線。
+    var isSolid: Bool {
+        switch self {
+        case .torii, .tower101, .tower85, .templeRoof: return true
+        case .tower, .bridge, .pagoda, .wheel: return false
+        }
+    }
+
+    /// 輪廓（純 Path）。height＝畫布高度，ground＝地面的 y，地標頂端在 ground − (height − 4)。
+    /// 尺寸是照 14～40pt 高的底帶調的（橋塔、五重塔、摩天輪各有上限），
+    /// 放到更高的畫布上不會等比例長大——要更大就整個 scaleBy。
+    func outline(x: CGFloat, ground: CGFloat, height: CGFloat) -> Path {
         let top = max(2, ground - (height - 4))
         var p = Path()
-        switch m {
+        switch self {
         case .tower:
             // 收斂的塔身＋展望台＋天線，加三道橫帶
             let cx = x + 7
@@ -1685,9 +1628,177 @@ struct TripCardSkyline: View {
             p.addLine(to: CGPoint(x: c.x - 7, y: ground))
             p.move(to: c)
             p.addLine(to: CGPoint(x: c.x + 7, y: ground))
+        case .torii:
+            // 鳥居：兩端上翹的笠木、島木、兩根柱、貫、中間的額束。全部是封閉的形狀
+            let h = ground - top
+            p.move(to: CGPoint(x: x - 1, y: top))
+            p.addQuadCurve(to: CGPoint(x: x + 21, y: top),
+                           control: CGPoint(x: x + 10, y: top + 3.2))
+            p.addLine(to: CGPoint(x: x + 20.4, y: top + 2.4))
+            p.addQuadCurve(to: CGPoint(x: x - 0.4, y: top + 2.4),
+                           control: CGPoint(x: x + 10, y: top + 5.4))
+            p.closeSubpath()
+            p.addRect(CGRect(x: x + 0.8, y: top + 3.6, width: 18.4, height: 1.3))
+            let pillarTop = top + 3.6
+            p.addRect(CGRect(x: x + 3.6, y: pillarTop, width: 2.2, height: max(0, ground - pillarTop)))
+            p.addRect(CGRect(x: x + 14.2, y: pillarTop, width: 2.2, height: max(0, ground - pillarTop)))
+            p.addRect(CGRect(x: x + 1.6, y: top + h * 0.36, width: 16.8, height: 1.6))
+            p.addRect(CGRect(x: x + 9.4, y: top + 4.9, width: 1.2, height: max(0, h * 0.36 - 4.9)))
+        case .tower101:
+            // 台北 101：基座＋八節（每一節上寬下窄）＋頂部平台與天線
+            let cx = x + 6
+            let h = ground - top
+            let podiumTop = ground - h * 0.16
+            let bodyTop = top + h * 0.2
+            p.addRect(CGRect(x: cx - 5, y: podiumTop, width: 10, height: max(0, ground - podiumTop)))
+            let seg = (podiumTop - bodyTop) / 8
+            for i in 0..<8 {
+                let y0 = bodyTop + CGFloat(i) * seg
+                p.move(to: CGPoint(x: cx - 2.6, y: y0 + seg))
+                p.addLine(to: CGPoint(x: cx - 3.6, y: y0 + 0.35))
+                p.addLine(to: CGPoint(x: cx + 3.6, y: y0 + 0.35))
+                p.addLine(to: CGPoint(x: cx + 2.6, y: y0 + seg))
+                p.closeSubpath()
+            }
+            p.addRect(CGRect(x: cx - 1.8, y: bodyTop - 2.2, width: 3.6, height: 2.2))
+            p.addRect(CGRect(x: cx - 0.45, y: top, width: 0.9, height: max(0, bodyTop - 2.2 - top)))
+        case .tower85:
+            // 高雄 85 大樓：兩支腳往上合成一棟，頂上收尖、一根天線
+            let h = ground - top
+            let split = ground - h * 0.42
+            let shoulder = top + h * 0.22
+            p.addRect(CGRect(x: x + 2, y: split, width: 4.2, height: max(0, ground - split)))
+            p.addRect(CGRect(x: x + 9.8, y: split, width: 4.2, height: max(0, ground - split)))
+            p.move(to: CGPoint(x: x + 2, y: split + 0.5))
+            p.addLine(to: CGPoint(x: x + 2, y: shoulder))
+            p.addLine(to: CGPoint(x: x + 8, y: top + h * 0.08))
+            p.addLine(to: CGPoint(x: x + 14, y: shoulder))
+            p.addLine(to: CGPoint(x: x + 14, y: split + 0.5))
+            p.closeSubpath()
+            p.addRect(CGRect(x: x + 7.6, y: top, width: 0.8, height: h * 0.08))
+        case .templeRoof:
+            // 廟宇：殿身、兩端下彎的屋頂、屋脊兩端往上翹的燕尾
+            let h = ground - top
+            let eave = ground - h * 0.42
+            let ridge = ground - h * 0.62
+            let tip = max(top, ridge - h * 0.28)
+            p.addRect(CGRect(x: x + 5, y: eave, width: 16, height: max(0, ground - eave)))
+            p.move(to: CGPoint(x: x + 1, y: eave + 0.5))
+            p.addQuadCurve(to: CGPoint(x: x + 6, y: ridge), control: CGPoint(x: x + 5, y: eave))
+            p.addLine(to: CGPoint(x: x + 20, y: ridge))
+            p.addQuadCurve(to: CGPoint(x: x + 25, y: eave + 0.5), control: CGPoint(x: x + 21, y: eave))
+            p.closeSubpath()
+            // 左邊的燕尾（順時針，跟其他形狀同一個方向，重疊處才不會被挖空）
+            p.move(to: CGPoint(x: x + 7, y: ridge + 0.6))
+            p.addQuadCurve(to: CGPoint(x: x - 1, y: tip), control: CGPoint(x: x + 2.5, y: ridge + 0.4))
+            p.addLine(to: CGPoint(x: x + 0.4, y: tip + 0.4))
+            p.addQuadCurve(to: CGPoint(x: x + 7, y: ridge - 1), control: CGPoint(x: x + 3.5, y: ridge - 1.2))
+            p.closeSubpath()
+            // 右邊的燕尾（同樣順時針）
+            p.move(to: CGPoint(x: x + 19, y: ridge - 1))
+            p.addQuadCurve(to: CGPoint(x: x + 25.6, y: tip + 0.4), control: CGPoint(x: x + 22.5, y: ridge - 1.2))
+            p.addLine(to: CGPoint(x: x + 27, y: tip))
+            p.addQuadCurve(to: CGPoint(x: x + 19, y: ridge + 0.6), control: CGPoint(x: x + 23.5, y: ridge + 0.4))
+            p.closeSubpath()
+            p.addRect(CGRect(x: x + 6, y: ridge - 1, width: 14, height: 1.6))
         }
-        ctx.stroke(p, with: .color(color.opacity(0.36)),
-                   style: StrokeStyle(lineWidth: 0.9, lineCap: .round, lineJoin: .round))
+        return p
+    }
+}
+
+/// 卡片底部那一條淡淡的城市線稿（設計稿右下的樓群、塔、斜張橋）。
+///
+/// 規矩沿用 v25.505～513：**可以被看見，不可以被讀**——要讀的東西（金額）是疊在
+/// 上面的招牌，不畫進這裡。**每一站都不一樣**：樓群的種子取站序號。
+/// 小飛機與虛線航線只出現在「下一段要搭飛機」的那一站。
+/// （v25.517 第一站還有一句「Have a nice trip!」與航線；v25.518 起那句寫在
+///  行程頁最上面的看板，第一站不再重複——上下連著兩次是雜訊。）
+///
+/// 畫布的高度就是卡片的底帶（沒花費 14、有花費 28），所有樓與地標都夾在
+/// 畫布裡、**不往上探**：正上方就是膠囊排，膠囊的底是半透明的。
+/// 地標擺在左邊 12～32% 的位置，右下角留給花費招牌（它「掛在建築物上」）。
+struct TripCardSkyline: View {
+    let color: Color
+    let seed: Int
+    let landmarks: [TripLandmark]
+    let planeTrail: Bool
+
+    init(color: Color, seed: Int, landmarks: [TripLandmark], planeTrail: Bool) {
+        self.color = color
+        self.seed = seed
+        self.landmarks = landmarks
+        self.planeTrail = planeTrail
+    }
+
+    var body: some View {
+        Canvas { ctx, size in
+            Self.draw(&ctx, size: size, color: color, seed: seed,
+                      landmarks: landmarks, planeTrail: planeTrail)
+        }
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+
+    private static func draw(_ ctx: inout GraphicsContext, size: CGSize, color: Color,
+                             seed: Int, landmarks: [TripLandmark], planeTrail: Bool) {
+        guard size.width > 40, size.height > 12 else { return }
+        var r = InkRandom(20117 + seed * 131)
+        let ground = size.height - 1.5
+        let line = color.opacity(0.30)
+        let faint = color.opacity(0.16)
+        let outline = StrokeStyle(lineWidth: 0.8, lineCap: .round, lineJoin: .round)
+
+        // 地面：從左邊淡入，不切一條硬邊
+        var base = Path()
+        base.move(to: CGPoint(x: 0, y: ground))
+        base.addLine(to: CGPoint(x: size.width, y: ground))
+        ctx.stroke(base, with: .linearGradient(Gradient(colors: [.clear, line, faint]),
+                                               startPoint: .zero,
+                                               endPoint: CGPoint(x: size.width, y: 0)),
+                   style: StrokeStyle(lineWidth: 0.8))
+
+        // 地標先佔位置，樓群繞開它
+        var reserved: [ClosedRange<CGFloat>] = []
+        var lx = size.width * CGFloat(0.12 + r.next() * 0.2)
+        for mark in landmarks {
+            let w = mark.span
+            if lx + w > size.width - 4 { break }
+            ctx.stroke(mark.outline(x: lx, ground: ground, height: size.height),
+                       with: .color(color.opacity(0.36)),
+                       style: StrokeStyle(lineWidth: 0.9, lineCap: .round, lineJoin: .round))
+            reserved.append((lx - 3)...(lx + w + 3))
+            lx += w + CGFloat(18 + r.next() * 30)
+        }
+
+        // 樓群：只有輪廓，窗是幾條短虛線（整片亮著的點陣窗會像資料）
+        var x: CGFloat = size.width * 0.02
+        while x < size.width - 6 {
+            let w = CGFloat(6 + r.next() * 12)
+            if reserved.contains(where: { $0.overlaps(x...(x + w)) }) {
+                x += w + 3
+                continue
+            }
+            let roll = r.next()
+            let tall: CGFloat = roll > 0.8 ? 1.0 : (roll > 0.45 ? 0.6 : 0.32)
+            let h = min(size.height - 4, 5 + tall * CGFloat(6 + r.next() * 20))
+            let rect = CGRect(x: x, y: ground - h, width: w, height: h)
+            ctx.fill(Path(rect), with: .color(color.opacity(0.05)))
+            ctx.stroke(Path(rect), with: .color(line), style: outline)
+            var wy = rect.minY + 3
+            while wy < ground - 3 {
+                if r.next() > 0.45 {
+                    var win = Path()
+                    win.move(to: CGPoint(x: rect.minX + 2, y: wy))
+                    win.addLine(to: CGPoint(x: rect.maxX - 2, y: wy))
+                    ctx.stroke(win, with: .color(faint),
+                               style: StrokeStyle(lineWidth: 0.6, dash: [1.4, 1.6]))
+                }
+                wy += 3.5
+            }
+            x += w + CGFloat(1.5 + r.next() * 6)
+        }
+
+        if planeTrail { drawPlane(&ctx, size: size, color: color, random: &r) }
     }
 
     private static func drawPlane(_ ctx: inout GraphicsContext, size: CGSize,
@@ -1695,18 +1806,29 @@ struct TripCardSkyline: View {
         let start = CGPoint(x: size.width * 0.18, y: size.height * 0.78)
         let end = CGPoint(x: size.width * CGFloat(0.62 + r.next() * 0.12),
                           y: size.height * 0.22)
+        drawTrail(&ctx, from: start, to: end,
+                  control: CGPoint(x: (start.x + end.x) / 2, y: size.height * 0.9),
+                  color: color.opacity(0.32), lineWidth: 0.9,
+                  icon: "airplane", iconColor: color.opacity(0.55),
+                  iconSize: 12, iconAngle: -24)
+    }
+
+    /// 一條虛線航跡＋尾端一個小圖示（飛機、車、電車、行人）。
+    /// [v25.518] 從 drawPlane 抽出來：看板的「Have a nice trip!」後面那條航線也用這一支。
+    static func drawTrail(_ ctx: inout GraphicsContext, from start: CGPoint, to end: CGPoint,
+                          control: CGPoint, color: Color, lineWidth: CGFloat,
+                          icon: String, iconColor: Color, iconSize: CGFloat, iconAngle: Double) {
         var trail = Path()
         trail.move(to: start)
-        trail.addQuadCurve(to: end, control: CGPoint(x: (start.x + end.x) / 2,
-                                                     y: size.height * 0.9))
-        ctx.stroke(trail, with: .color(color.opacity(0.32)),
-                   style: StrokeStyle(lineWidth: 0.9, lineCap: .round, dash: [3, 3]))
-        var plane = ctx.resolve(Image(systemName: "airplane"))
-        plane.shading = .color(color.opacity(0.55))
+        trail.addQuadCurve(to: end, control: control)
+        ctx.stroke(trail, with: .color(color),
+                   style: StrokeStyle(lineWidth: lineWidth, lineCap: .round, dash: [3, 3]))
+        var mark = ctx.resolve(Image(systemName: icon))
+        mark.shading = .color(iconColor)
         var g = ctx
-        g.translateBy(x: end.x + 6, y: end.y - 1)
-        g.rotate(by: .degrees(-24))
-        g.draw(plane, in: CGRect(x: -6, y: -6, width: 12, height: 12))
+        g.translateBy(x: end.x + iconSize / 2, y: end.y - 1)
+        g.rotate(by: .degrees(iconAngle))
+        g.draw(mark, in: CGRect(x: -iconSize / 2, y: -iconSize / 2, width: iconSize, height: iconSize))
     }
 }
 

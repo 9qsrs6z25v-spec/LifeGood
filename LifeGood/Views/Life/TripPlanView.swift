@@ -303,6 +303,13 @@ struct TripPlanDetailView: View {
     @State private var showChecklist = false
     /// 打開景點卡的那一站
     @State private var openingStopId: UUID?
+    /// [v25.518] 看板上點了哪一天（時間軸要捲過去）。
+    /// 帶一個新的 id：連點同一天也要再捲一次（只放 Int 的話第二次 onChange 不會觸發）。
+    private struct DayJump: Equatable {
+        let id = UUID()
+        let anchor: String
+    }
+    @State private var dayJump: DayJump?
     @State private var viewingPhoto: IdentifiableURL?
 
     private struct LegBox: Identifiable {
@@ -337,28 +344,7 @@ struct TripPlanDetailView: View {
         NavigationStack {
             Group {
                 if let p = plan {
-                    ScrollView {
-                        VStack(spacing: 14) {
-                            summaryCard(p)
-                            if p.stops.isEmpty {
-                                emptyStops
-                            } else {
-                                timelineCard(p)
-                            }
-                            // [v25.480] 相本與花費改掛在摘要卡的 KPI 上（使用者指定）：
-                            // 那兩塊本來是獨立的卡片夾在時間軸與「加一站」之間，
-                            // 既是統計也是入口，擺在那裡等於把統計藏在半路上。
-                            // 現在它們是摘要卡上可以按的兩格，點開各自是一整頁。
-                            addButton(p)
-                            // Apple 規定：顯示了 WeatherKit 的資料就必須標示出處
-                            if showsAnyWeather(p) {
-                                weatherFooter(p)
-                            }
-                        }
-                        .padding(.vertical)
-                        // [v25.481] 這一頁只能上下捲（使用者回報整頁會被左右拖）
-                        .scrollVerticalOnly()
-                    }
+                    planScroll(p)
                 } else {
                     // 行程在別處被刪掉了
                     Color.clear.onAppear { dismiss() }
@@ -517,6 +503,50 @@ struct TripPlanDetailView: View {
         }
     }
 
+    /// [v25.518] 整頁的捲動區。
+    ///
+    /// 時間軸（slots）與每一站的城市（places）在這裡算一次，看板與時間軸共用——
+    /// 原本兩邊各算各的，看板那邊為了相本張數還會把時間軸重算幾百次（見 albumItems）。
+    /// 外面包一層 ScrollViewReader：看板上的日期膠囊點了要捲到時間軸上的那一天。
+    private func planScroll(_ p: TripPlan) -> some View {
+        let slots = p.timeline
+        let places = slots.map { TripPlaceName.parse($0.stop.address) }
+        return ScrollViewReader { proxy in
+            ScrollView {
+                VStack(spacing: 14) {
+                    summaryCard(p, slots: slots, places: places)
+                    if p.stops.isEmpty {
+                        emptyStops
+                    } else {
+                        timelineCard(p, slots: slots, places: places)
+                    }
+                    // [v25.480] 相本與花費改掛在摘要卡的 KPI 上（使用者指定）：
+                    // 那兩塊本來是獨立的卡片夾在時間軸與「加一站」之間，
+                    // 既是統計也是入口，擺在那裡等於把統計藏在半路上。
+                    // 現在它們是摘要卡上可以按的兩格，點開各自是一整頁。
+                    addButton(p)
+                    // Apple 規定：顯示了 WeatherKit 的資料就必須標示出處
+                    if showsAnyWeather(p) {
+                        weatherFooter(p)
+                    }
+                }
+                .padding(.vertical)
+                // [v25.481] 這一頁只能上下捲（使用者回報整頁會被左右拖）
+                .scrollVerticalOnly()
+            }
+            .onChange(of: dayJump) { _, jump in
+                guard let jump else { return }
+                // 等這一輪把那一天展開完再捲。日標頭的位置不受它自己那一天展開的影響，
+                // 所以不會捲到一半跳掉。
+                DispatchQueue.main.async {
+                    withAnimation(.easeInOut(duration: 0.35)) {
+                        proxy.scrollTo(jump.anchor, anchor: .top)
+                    }
+                }
+            }
+        }
+    }
+
     /// 觸發重算的條件指紋：站的順序／座標／交通方式任一改變就重跑。
     /// 各段自己指定的交通方式也要算進來——只改某一段的方式時，
     /// 行程預設值沒變，漏掉就不會重算那一段。
@@ -554,284 +584,273 @@ struct TripPlanDetailView: View {
         lifeStore.upsertTripPlan(p)
     }
 
-    // MARK: 摘要
+    // MARK: 摘要看板（v25.518）
 
-    private func summaryCard(_ p: TripPlan) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            summaryHeader(p)
-            summaryKpiPanel(p)
-            let chips = summaryChips(p)
-            if !chips.isEmpty {
-                // 會自動換行的版面，擠不下時不會被切掉或折字
-                ChipFlowLayout(spacing: 6) {
-                    ForEach(chips) { chip in summaryChip(chip) }
-                }
-            }
-            if p.dayCount > 1 { dayLegend(p) }
-            summaryNotices(p)
-        }
-        .padding(.horizontal, 20).padding(.vertical, 18)
-        // 共用英雄卡殼層：漸層、散景圓、玻璃光澤、圓角與光暈都走同一套，
-        // 也才能在「設定 › 進階設定 › 卡片設定 › 英雄卡樣式」裡逐卡調整。
-        //
-        // [v25.504] 多了一層霓虹天際線（使用者：「可以開始做一些藝術元素了」）。
-        // 走的是殼層本來就留好的 extraBackground 插槽——不是另外疊一個背景，
-        // 所以漸層、散景、光澤、圓角、陰影全部照舊，逐卡設定也照樣有效。
-        //
-        // 擺在旅遊卡而不是全部的卡：一座城市落在「行程」的地平線上是說得通的，
-        // 落在「本月支出」上就只是貼圖。藝術元素要跟它待的地方有關係。
-        .heroCardShell(card: .tripPlan) {
-            CyberSkylineDecor(tint: CyberPalette.cyan, strength: 0.85)
-        }
-        .padding(.horizontal, 16)
-    }
-
-    /// [v25.451] 摘要卡右上角那顆。
+    /// 行程頁最上面的看板（使用者的設計稿）。畫法與版面在 TripSummaryBoard.swift，
+    /// 這裡只負責「放什麼」與「按了做什麼」。
     ///
-    /// 原本只是一塊顯示交通方式的死膠囊，點了沒反應。改成「行前準備」的入口，
-    /// 但交通方式仍然留著——那是這張卡上唯一會寫出預設交通方式的地方，
-    /// 拿掉等於把一個資訊換成一個功能。所以兩個並存：左邊照舊是交通方式，
-    /// 右邊接一個清單圖示與進度，整顆可按。
-    private func checklistButton(_ p: TripPlan) -> some View {
-        let progress = p.checklistTotalProgress
-        return Button {
-            showChecklist = true
-        } label: {
-            HStack(spacing: 5) {
-                Image(systemName: p.travelMode.icon).font(.system(size: 10, weight: .bold))
-                Text(p.travelMode.rawValue).font(.caption.weight(.semibold)).lineLimit(1)
-                Rectangle().fill(.white.opacity(0.35))
-                    .frame(width: 0.75, height: 11)
-                Image(systemName: "checklist").font(.system(size: 10, weight: .bold))
-                if progress.total > 0 {
-                    Text("\(progress.done)/\(progress.total)")
-                        .font(.system(size: 10, weight: .bold).monospacedDigit())
-                }
-            }
-            .fixedSize()
-            .foregroundStyle(.white)
-            .padding(.horizontal, 11).padding(.vertical, 5)
-            .background(.white.opacity(0.22))
-            .clipShape(Capsule())
-        }
-        .buttonStyle(.plain)
-    }
-
-    // MARK: 摘要卡：標頭
-
-    private func summaryHeader(_ p: TripPlan) -> some View {
-        HStack(alignment: .top) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(Self.dayFmt.string(from: p.startDate) + " 出發")
-                    .font(.caption)
-                    .foregroundStyle(.white.opacity(0.80))
-                Text(p.stops.isEmpty ? "尚未加入景點"
-                     : Self.timeFmt.string(from: p.startDate) + " – "
-                       + Self.timeFmt.string(from: p.endDate))
-                    .heroBigValueFont()
-                    .foregroundStyle(.white)
-                    .lineLimit(1).minimumScaleFactor(0.6)
-                // 只寫 14:40 – 15:29 的話，跨天行程看起來像當天來回
-                if p.dayCount > 1 && !p.stops.isEmpty {
-                    Text("跨 \(p.dayCount) 天，" + Self.dayFmt.string(from: p.endDate) + " 結束")
-                        .font(.system(size: 10))
-                        .foregroundStyle(.white.opacity(0.80))
-                        .lineLimit(1).minimumScaleFactor(0.8)
-                }
-            }
-            Spacer(minLength: 8)
-            checklistButton(p)
-            .overlay(Capsule().stroke(.white.opacity(0.30), lineWidth: 0.75))
-            .foregroundStyle(.white)
-        }
-    }
-
-    // MARK: 摘要卡：數字
-
-    private struct SummaryMetric: Identifiable {
-        /// 同時當標題與識別
-        let id: String
-        let value: String
-        let icon: String
-        /// [v25.480] 有動作的格子＝可以按（相本、花費）。nil 就是純數字。
-        var action: (() -> Void)? = nil
-        /// 可按的格子底下那一行小字（例「78 張・點開看相本」）
-        var hint: String? = nil
-    }
-
-    /// 數字欄位。
+    /// [v25.518] 原本這張卡走共用的英雄卡殼層（.heroCardShell(card: .tripPlan)＋霓虹天際線），
+    /// 改成淺色的天空插畫之後就不吃那套漸層與 KPI 樣式了，只跟著「圓角」。
+    /// .tripPlan 這個身分還有景點卡（TripStopCard）與花費統計頁（TripStats）在用，
+    /// 所以設定頁的那一格留著、改了名字並寫明（HeroStyleKit、SettingsView）。
     ///
-    /// 排成每列三格的面板而不是一列全部攤開：一列塞五、六個時，
-    /// 「15 小時 57 分」與「3136.4 km」這種長字串會直接貼在一起看不出分界。
-    /// 格與格之間用英雄卡標準的 HeroKpiDivider 隔開。
-    private func summaryMetrics(_ p: TripPlan) -> [SummaryMetric] {
-        var out: [SummaryMetric] = [
-            SummaryMetric(id: "景點", value: "\(p.stops.count) 站",
-                          icon: "mappin.and.ellipse")
-        ]
-        if p.dayCount > 1 {
-            out.append(SummaryMetric(id: "天數", value: "\(p.dayCount) 天", icon: "calendar"))
+    /// 回傳 AnyView：看板裡塞了十幾種東西，在這裡把型別抹掉（深層泛型在 runtime
+    /// demangle 時爆棧，設定頁閃退過）。
+    private func summaryCard(_ p: TripPlan, slots: [TripPlan.Slot],
+                             places: [TripPlaceName.Place?]) -> AnyView {
+        let data = boardData(p, slots: slots, places: places)
+        let actions = TripBoardActions(
+            // [v25.451] 行前準備（交通方式＋清單進度）
+            openChecklist: { showChecklist = true },
+            // [v25.480] 相本與花費：既是統計也是入口
+            openAlbum: { showAlbum = true },
+            openExpenses: { showExpenses = true },
+            // 「現在在」與「趕不上」展開後的每一站：打開景點卡（sheet，那一天收合著也打得開）
+            openStop: { openingStopId = $0 },
+            jumpToDay: { jumpToDay($0, slots: slots) },
+            retryRouting: { Task { await retryRouting() } })
+        return AnyView(
+            TripSummaryBoard(data: data, actions: actions)
+                .dynamicTypeSize(...DynamicTypeSize.accessibility3)
+                .padding(.horizontal, 16)
+        )
+    }
+
+    /// 看板要畫的東西，一次算好。
+    ///
+    /// slots／places 是 planScroll 算好傳進來的（時間軸也用同一份）。這裡刻意不叫
+    /// p.unreachableCount、p.totalIdleSeconds、p.endDate 這種每叫一次就把整條時間軸
+    /// 重算一遍的屬性，直接從 slots 數。
+    /// 還剩幾次重算沒拿掉：p.dayCount、TripDayMath.dayIndex（裡面叫 dayCount）、
+    /// albumItems 的 p.dayCount、candidateExpenses 的 p.endDate。天數的規則集中在
+    /// TripPlan.dayCount／TripDayMath，不在這裡抄第二份。已經比 v25.517 少很多
+    /// （相本原本每張照片重算一次），之後要再省就是讓它們改吃 slots。
+    private func boardData(_ p: TripPlan, slots: [TripPlan.Slot],
+                           places: [TripPlaceName.Place?]) -> TripBoardData {
+        var d = TripBoardData()
+        let legs = Array(slots.dropFirst())
+        let dayCount = p.dayCount
+        let today = TripDayMath.dayIndex(Date(), in: p)
+        let city = TripBoardCity.pick(slots: slots, places: places)
+        let endDate = slots.last?.departure ?? p.startDate
+
+        // 標頭
+        d.seed = Self.boardSeed(p.id)
+        d.departText = Self.dayFmt.string(from: p.startDate) + " 出發"
+        if !p.stops.isEmpty {
+            d.timeStart = Self.timeFmt.string(from: p.startDate)
+            d.timeEnd = Self.timeFmt.string(from: endDate)
+            // 只寫 14:40 → 15:29 的話，跨天行程看起來像當天來回
+            if dayCount > 1 {
+                d.spanText = "跨 \(dayCount) 天，" + Self.dayFmt.string(from: endDate) + " 結束"
+            }
         }
-        if p.overnightCount > 0 {
-            out.append(SummaryMetric(id: "住宿", value: "\(p.overnightCount) 晚",
-                                     icon: "bed.double.fill"))
+        d.travelMode = p.travelMode
+        let checklist = p.checklistTotalProgress
+        d.checklistDone = checklist.done
+        d.checklistTotal = checklist.total
+        d.scene = TripBoardScene.pick(legModes: legs.map(\.mode), fallback: p.travelMode)
+        d.city = city
+        d.landmarks = TripLandmark.forBoard(city?.place)
+
+        // 數字格子。停留原本直接寫分鐘數（2100 分），到了幾十小時就沒人讀得出來，所以寫成時長
+        let dwellSeconds = Double(p.totalDwellMinutes) * 60
+        let travelSeconds = p.totalTravelSeconds
+        var stats = [TripBoardStat(kind: .stops, parts: TripBoardValue.count(p.stops.count, "站"),
+                                   label: "景點")]
+        if dayCount > 1 {
+            stats.append(TripBoardStat(kind: .days, parts: TripBoardValue.count(dayCount, "天"),
+                                       label: "天數"))
         }
-        // 停留原本直接顯示分鐘數（例：2100 分），到了幾十小時就沒人讀得出來
-        out.append(SummaryMetric(
-            id: "停留",
-            value: p.totalDwellMinutes > 0
-                ? TripRouter.durationText(Double(p.totalDwellMinutes) * 60) : "—",
-            icon: "clock"))
-        out.append(SummaryMetric(
-            id: "交通",
-            value: p.totalTravelSeconds > 0
-                ? TripRouter.durationText(p.totalTravelSeconds) : "—",
-            icon: "arrow.triangle.turn.up.right.diamond.fill"))
-        out.append(SummaryMetric(
-            id: "距離",
-            value: p.totalMeters > 0 ? TripRouter.distanceText(p.totalMeters) : "—",
-            icon: "ruler"))
-        // [v25.480] 相本與花費：既是統計也是入口（使用者指定）。
-        // 沒有東西的時候不要擺一個 0 在那裡占位——點進去是空的只會白跑一趟。
-        let photos = albumItems(p).count
-        if photos > 0 {
-            out.append(SummaryMetric(id: "相本", value: "\(photos)", icon: "photo.stack",
-                                     action: { showAlbum = true }, hint: "張照片・點開"))
+        let nights = p.overnightCount
+        if nights > 0 {
+            stats.append(TripBoardStat(kind: .nights, parts: TripBoardValue.count(nights, "晚"),
+                                       label: "住宿"))
+        }
+        stats.append(TripBoardStat(kind: .dwell, parts: TripBoardValue.duration(dwellSeconds),
+                                   label: "停留"))
+        stats.append(TripBoardStat(kind: .travel, parts: TripBoardValue.duration(travelSeconds),
+                                   label: "交通"))
+        stats.append(TripBoardStat(kind: .distance, parts: TripBoardValue.distance(p.totalMeters),
+                                   label: "距離"))
+        d.stats = stats
+
+        // 格子右下角的插圖：用這趟自己的資料畫
+        var art = TripBoardArt()
+        art.landmark = d.landmarks.first
+        art.dayCount = dayCount
+        art.todayIndex = today
+        art.pastDays = (0..<dayCount).filter { isPastDay(p, $0) }.count
+        art.stayPhotoURL = Self.stayPhoto(slots, today: today)
+        let busy = dwellSeconds + travelSeconds
+        art.dwellRatio = busy > 0 ? dwellSeconds / busy : 0
+        art.modesUsed = Self.modesByUse(legs)
+        art.route = TripBoardRoutePoint.from(slots)
+        d.art = art
+
+        // [v25.480] 相本與花費：沒有東西的時候不擺一個 0 占位（點進去是空的只會白跑一趟）
+        let album = albumItems(p, slots: slots)
+        if !album.isEmpty {
+            d.album = TripBoardAlbum(count: album.count, previews: Self.albumPreviews(album))
         }
         let linked = linkedExpenses(p)
         let waiting = candidateExpenses(p).count
         if !linked.isEmpty || waiting > 0 {
-            out.append(SummaryMetric(
-                id: "花費",
-                value: expenseStore.ntdTotalText(linked),
-                icon: "creditcard.fill",
-                action: { showExpenses = true },
-                hint: waiting > 0 ? "還有 \(waiting) 筆待確認" : "\(linked.count) 筆・點開"))
+            let total = expenseStore.ntdTotalText(linked)
+            d.spend = TripBoardSpend(
+                parts: TripBoardValue.money(total),
+                hint: waiting > 0 ? "還有 \(waiting) 筆待確認" : "\(linked.count) 筆・點開",
+                isWaiting: waiting > 0,
+                receiptLines: linked.count,
+                spoken: total)
         }
-        return out
-    }
 
-    /// [v25.480] 每三格一列，列數不限。
-    ///
-    /// 原本寫死「前三個一列、其餘一列」，第七格起會全部擠進第二列。
-    /// 相本與花費加進來之後剛好踩到，所以改成分段。
-    private func summaryKpiPanel(_ p: TripPlan) -> some View {
-        let metrics = summaryMetrics(p)
-        // 一次算完再切：summaryMetrics 會去數相簿張數與加總所有支出，
-        // 每一列各算一次等於整本翻三遍。
-        let rows = stride(from: 0, to: metrics.count, by: 3).map {
-            Array(metrics[$0..<min($0 + 3, metrics.count)])
+        // 行程進度：開始打卡之後才出現（沒打卡的行程不用看到這個）
+        let done = p.checkedOutCount
+        if done > 0 && !p.stops.isEmpty {
+            d.progress = TripBoardProgress(done: done, total: p.stops.count)
         }
-        return VStack(spacing: 8) {
-            ForEach(Array(rows.enumerated()), id: \.offset) { index, row in
-                if index > 0 {
-                    Rectangle().fill(.white.opacity(0.18))
-                        .frame(height: 0.5).padding(.horizontal, 10)
-                }
-                summaryKpiRow(row)
-            }
-        }
-        .padding(.vertical, 10)
-        .background(.white.opacity(0.08))
-        .clipShape(RoundedRectangle(cornerRadius: 10))
-    }
 
-    /// 一列三格。不足三格時補上空白，第二列才會跟第一列切齊。
-    private func summaryKpiRow(_ metrics: [SummaryMetric]) -> some View {
-        HStack(spacing: 0) {
-            ForEach(Array(metrics.enumerated()), id: \.element.id) { index, metric in
-                if index > 0 { HeroKpiDivider() }
-                summaryKpiCell(metric)
-            }
-            if metrics.count < 3 {
-                ForEach(0..<(3 - metrics.count), id: \.self) { _ in
-                    Color.clear.frame(maxWidth: .infinity, maxHeight: 1)
-                }
-            }
-        }
-    }
-
-    /// 一格。可按的那幾格多一個小箭頭與一行提示——
-    /// 不標的話使用者不會知道這一格跟旁邊那幾格不一樣。
-    @ViewBuilder
-    private func summaryKpiCell(_ metric: SummaryMetric) -> some View {
-        if let action = metric.action {
-            Button(action: action) {
-                VStack(spacing: 2) {
-                    HeroKpiCell(label: metric.id, value: metric.value, icon: metric.icon)
-                    if let hint = metric.hint {
-                        HStack(spacing: 2) {
-                            Text(hint)
-                            Image(systemName: "chevron.right")
-                        }
-                        .font(.system(size: 8, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.75))
-                        .lineLimit(1).minimumScaleFactor(0.7)
-                    }
-                }
-                .padding(.vertical, 2)
-                .frame(maxWidth: .infinity)
-                .background(.white.opacity(0.10), in: RoundedRectangle(cornerRadius: 9))
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-        } else {
-            HeroKpiCell(label: metric.id, value: metric.value, icon: metric.icon)
-        }
-    }
-
-    // MARK: 摘要卡：標記膠囊
-
-    private struct SummaryChip: Identifiable {
-        let id: String
-        let icon: String
-        let text: String
-    }
-
-    /// 交通方式組成與必去標記。住宿改放進上面的數字格子，這裡不重複。
-    private func summaryChips(_ p: TripPlan) -> [SummaryChip] {
-        var out: [SummaryChip] = []
+        // 膠囊：交通方式的組成（有個別指定過才列，否則每一段都是右上角寫的那個方式）＋必去。
+        // 「已完成 N/M 站」搬到行程進度卡（同一個數字寫兩次是雜訊）；
+        // 「現在在」改成自己一條、可以點；住宿與花費在格子裡，這裡都不重複。
+        var chips: [TripBoardChip] = []
         if p.hasModeOverride {
             for item in p.modeSegmentCounts {
-                out.append(SummaryChip(id: "mode-" + item.mode.rawValue,
-                                       icon: item.mode.icon,
-                                       text: item.mode.rawValue + " \(item.count) 段"))
+                chips.append(TripBoardChip(id: "mode-" + item.mode.rawValue, icon: item.mode.icon,
+                                           text: item.mode.rawValue + " \(item.count) 段",
+                                           tone: .mode(item.mode)))
             }
         }
         if p.mustVisitCount > 0 {
-            out.append(SummaryChip(id: "must", icon: "star.fill",
-                                   text: "必去 \(p.mustVisitCount) 站"))
+            chips.append(TripBoardChip(id: "must", icon: "star.fill",
+                                       text: "必去 \(p.mustVisitCount) 站", tone: .must))
         }
-        // 開始打卡之後就顯示進度，沒打卡的行程不用看到這個
-        if p.checkedOutCount > 0 {
-            out.append(SummaryChip(id: "done", icon: "checkmark.circle.fill",
-                                   text: "已完成 \(p.checkedOutCount)/\(p.stops.count) 站"))
-        }
+        d.chips = chips
+
+        // 現在在哪一站（已抵達、還沒離開）
         if let currentId = p.currentStopId,
-           let here = p.stops.first(where: { $0.id == currentId }) {
-            out.append(SummaryChip(id: "here", icon: "mappin.circle.fill",
-                                   text: "現在在「" + here.displayName + "」"))
+           let slot = slots.first(where: { $0.stop.id == currentId }) {
+            let place: TripPlaceName.Place? = places.indices.contains(slot.index) ? places[slot.index] : nil
+            d.current = TripBoardCurrent(
+                stopId: currentId,
+                name: slot.stop.displayName,
+                photoURL: slot.stop.photoFileNames.first.map { TripStop.photoURL($0) },
+                isAirport: Self.isAirport(slot.stop),
+                place: place,
+                latitude: slot.stop.latitude,
+                longitude: slot.stop.longitude)
         }
-        // [v25.424] 掛在這趟上的變動支出。
-        // [v25.466] 原本只加 currencyCode == "NT$" 的那些，理由寫的是「外幣要換算匯率」
-        // ——那是誤解：非儲蓄險的支出存檔時就已經用設定裡的匯率換算成台幣了，
-        // currencyCode 只記錄當初輸入的幣別。按它篩等於把一筆早就換算好的日圓消費
-        // 整筆丟掉，合計因此少算。改走 ExpenseStore.ntdTotal（規則集中在那裡）。
-        // [v25.480] 原本這裡還有一顆「花費 NT$x」膠囊。花費已經是 KPI 的一格
-        // （而且點得開），同一個數字在同一張卡上寫兩次只是雜訊。
+
+        // 日期膠囊（跨天才有）
+        if dayCount > 1 {
+            d.days = (0..<dayCount).map { i in
+                TripBoardDay(index: i, title: "第 \(i + 1) 天", date: Self.dayDateText(p, dayIndex: i))
+            }
+        }
+        d.todayIndex = today
+
+        // 提醒：原本的六種一個都沒拿掉
+        var n = TripBoardNotices()
+        n.isRouting = isRouting
+        n.unroutedLegs = p.unroutedLegCount
+        n.retryableLegs = p.retryableLegCount
+        n.late = slots.filter { $0.shortfallSeconds > 60 }.map { lateItem($0) }
+        if n.late.isEmpty {
+            // 第一站不算（同 TripPlan.totalIdleSeconds）：出發到第一站之間是在路上，不是在等
+            let idle = legs.reduce(0.0) { $0 + $1.idleSeconds }
+            if idle > 300 {
+                n.idleText = "為了等指定時間，中間空著 " + TripRouter.durationText(idle)
+            }
+        }
+        // [v25.435] 天氣預報只有十天。整趟都還太遠時在這裡講一次就好——
+        // 每一站各掛一句「太遠了」只是噪音。
+        if Self.weatherOutOfRange(slots) {
+            n.weatherText = "天氣預報只有未來 \(TripWeatherStore.forecastDays) 天，這趟還太遠，所以景點上還看不到天氣"
+        }
+        d.notices = n
+        return d
+    }
+
+    /// 「趕不上」展開後的一列。字跟時間軸卡片底下那一行同一套（cardFlags）：
+    /// 第一站沒有路段可以推算，寫「指定的時間比出發時間還早」。
+    private func lateItem(_ slot: TripPlan.Slot) -> TripBoardLate {
+        let title = "第 \(slot.index + 1) 站「" + slot.stop.displayName + "」"
+        let detail: String
+        if slot.index == 0 {
+            detail = "指定的時間比出發時間還早"
+        } else {
+            let est = Self.timeFmt.string(from: slot.estimatedArrival ?? slot.arrival)
+            detail = "推算 " + est + " 才到，差 " + TripRouter.durationText(slot.shortfallSeconds)
+        }
+        return TripBoardLate(stopId: slot.stop.id, title: title, detail: detail)
+    }
+
+    /// 看板插畫的種子。同一趟每次打開都是同一座城：UUID 的 hashValue 每次開 App 都不一樣，不能用
+    private static func boardSeed(_ id: UUID) -> Int {
+        let u = id.uuid
+        return Int(u.0) << 8 | Int(u.1)
+    }
+
+    /// 住宿格的照片：今晚住的那一站有照片就用它，不然第一個有照片的過夜站。
+    /// 都沒有回 nil（畫向量的床）。
+    private static func stayPhoto(_ slots: [TripPlan.Slot], today: Int?) -> URL? {
+        let stays = slots.filter { $0.stop.isOvernight && !$0.stop.photoFileNames.isEmpty }
+        let pick = stays.first(where: { $0.dayIndex == today }) ?? stays.first
+        return pick?.stop.photoFileNames.first.map { TripStop.photoURL($0) }
+    }
+
+    /// 這趟用到的交通方式，段數多的在前，最多三種（交通格的插圖）
+    private static func modesByUse(_ legs: [TripPlan.Slot]) -> [TripTravelMode] {
+        var counts: [TripTravelMode: Int] = [:]
+        for s in legs { counts[s.mode, default: 0] += 1 }
+        let used = TripTravelMode.allCases.filter { (counts[$0] ?? 0) > 0 }
+        let sorted = used.sorted { (counts[$0] ?? 0) > (counts[$1] ?? 0) }
+        return Array(sorted.prefix(3))
+    }
+
+    /// 相本格右邊疊的照片：只挑景點照片（花費的照片多半是收據），一站一張、新的在前，最多三張。
+    /// 一張景點照片都沒有才退到花費的照片。
+    private static func albumPreviews(_ items: [AlbumPhotoItem]) -> [URL] {
+        let stopPhotos = items.filter { !$0.id.hasPrefix("expense-") }
+        let pool = (stopPhotos.isEmpty ? items : stopPhotos).sorted { $0.date > $1.date }
+        var seen: Set<String> = []
+        var out: [URL] = []
+        for item in pool where !seen.contains(item.group) {
+            seen.insert(item.group)
+            out.append(item.url)
+            if out.count == 3 { break }
+        }
         return out
     }
 
-    private func summaryChip(_ chip: SummaryChip) -> some View {
-        HStack(spacing: 4) {
-            Image(systemName: chip.icon).font(.system(size: 9))
-            Text(chip.text).font(.system(size: 10, weight: .bold)).lineLimit(1)
-        }
-        .fixedSize()
-        .foregroundStyle(.white)
-        .padding(.horizontal, 8).padding(.vertical, 4)
-        .background(Color.white.opacity(0.18), in: Capsule())
+    /// 「現在在」的那一站是不是機場（是的話右半邊畫航廈，不是就放這一站的照片）
+    private static func isAirport(_ stop: TripStop) -> Bool {
+        let text = stop.name + " " + stop.address
+        return ["機場", "空港", "航廈", "Airport", "AIRPORT", "airport"].contains { text.contains($0) }
     }
+
+    /// [v25.518] 看板上點了第 d 天：展開那一天、捲到它的日標頭。
+    ///
+    /// 日期膠囊列的是「第 1 天到最後一天」每一天，但時間軸只有「有站的那幾天」才有
+    /// 日標頭（最後一站過夜時的退房日、指定時間跳過的日子都沒有）。點到沒有標頭的那一天，
+    /// 捲到它前面最近一個有站的日子——退房日的內容就是前一天那間飯店。
+    /// 整趟的站都在同一天（只是最後一站過夜）時沒有日標頭，捲到時間軸的開頭。
+    private func jumpToDay(_ d: Int, slots: [TripPlan.Slot]) {
+        let days = Set(slots.map(\.dayIndex))
+        guard (days.max() ?? 0) > 0 else {
+            dayJump = DayJump(anchor: Self.timelineTopAnchor)
+            return
+        }
+        let target = days.filter { $0 <= d }.max() ?? days.min() ?? 0
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
+            dayOpen[target] = true
+        }
+        dayJump = DayJump(anchor: Self.dayAnchor(target))
+    }
+
+    private static func dayAnchor(_ d: Int) -> String { "tripday-\(d)" }
+    private static let timelineTopAnchor = "tripday-top"
 
     /// [v25.465] 指定算在某一站的花費。
     ///
@@ -876,57 +895,6 @@ struct TripPlanDetailView: View {
                 return day >= from && day <= to
             }
             .sorted { $0.date > $1.date }
-    }
-
-    // MARK: 摘要卡：提醒
-
-    /// 進度與警告。統一成「圖示 + 一段文字」的排法，不要每一條各長一個樣子。
-    @ViewBuilder
-    private func summaryNotices(_ p: TripPlan) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            if isRouting {
-                HStack(spacing: 6) {
-                    ProgressView().scaleEffect(0.6).tint(.white)
-                    Text("正在計算路線…")
-                        .font(.caption2).foregroundStyle(.white.opacity(0.9))
-                }
-            } else if p.unroutedLegCount > 0 {
-                summaryNotice(icon: "hourglass",
-                              text: "有 \(p.unroutedLegCount) 段還沒算出路線")
-            }
-            if p.retryableLegCount > 0 {
-                Button {
-                    Task { await retryRouting() }
-                } label: {
-                    HStack(spacing: 5) {
-                        Image(systemName: "arrow.clockwise")
-                            .font(.system(size: 9, weight: .bold))
-                        Text("有 \(p.retryableLegCount) 段沒拿到真實路線，點這裡重新計算")
-                            .font(.caption2.weight(.semibold))
-                            .fixedSize(horizontal: false, vertical: true)
-                            .multilineTextAlignment(.leading)
-                    }
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 8).padding(.vertical, 5)
-                    .background(Color.white.opacity(0.2), in: Capsule())
-                }
-                .buttonStyle(.plain)
-            }
-            if p.unreachableCount > 0 {
-                summaryNotice(icon: "exclamationmark.triangle.fill",
-                              text: "有 \(p.unreachableCount) 站的指定抵達時間比推算的還早，照這個排法趕不上")
-            } else if p.totalIdleSeconds > 300 {
-                summaryNotice(icon: "hourglass.bottomhalf.filled",
-                              text: "為了等指定時間，中間空著 "
-                                  + TripRouter.durationText(p.totalIdleSeconds))
-            }
-            // [v25.435] 天氣預報只有十天。整趟都還太遠時在這裡講一次就好——
-            // 每一站各掛一句「太遠了」只是噪音。
-            if weatherOutOfRange(p) {
-                summaryNotice(icon: "calendar.badge.clock",
-                              text: "天氣預報只有未來 \(TripWeatherStore.forecastDays) 天，這趟還太遠，所以景點上還看不到天氣")
-            }
-        }
     }
 
     /// [v25.473] 時間軸上每一站的天氣膠囊是緊湊版，小到塞不進一顆按鈕
@@ -976,49 +944,10 @@ struct TripPlanDetailView: View {
     }
 
     /// 整趟沒有任何一天在預報範圍內
-    private func weatherOutOfRange(_ p: TripPlan) -> Bool {
-        let slots = p.timeline
+    private static func weatherOutOfRange(_ slots: [TripPlan.Slot]) -> Bool {
         guard !slots.isEmpty,
               slots.contains(where: { $0.stop.coordinate != nil }) else { return false }
         return !slots.contains { TripWeatherStore.isWithinForecastRange($0.arrival) }
-    }
-
-    private func summaryNotice(icon: String, text: String) -> some View {
-        HStack(alignment: .top, spacing: 6) {
-            Image(systemName: icon)
-                .font(.system(size: 10))
-                .foregroundStyle(.white.opacity(0.9))
-                .frame(width: 12)
-            Text(text)
-                .font(.caption2).foregroundStyle(.white.opacity(0.95))
-                .fixedSize(horizontal: false, vertical: true)
-                .multilineTextAlignment(.leading)
-            Spacer(minLength: 0)
-        }
-    }
-
-    /// 跨天時在摘要卡底下放一條色帶，說明哪個顏色是第幾天
-    private func dayLegend(_ p: TripPlan) -> some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 6) {
-                ForEach(0..<p.dayCount, id: \.self) { d in
-                    HStack(spacing: 4) {
-                        Circle().fill(TripDayPalette.color(d))
-                            .frame(width: 7, height: 7)
-                            .overlay(Circle().stroke(Color.white.opacity(0.7), lineWidth: 0.75))
-                        Text(Self.dayLabel(p, dayIndex: d))
-                            .font(.system(size: 10, weight: .semibold))
-                            .foregroundStyle(.white.opacity(0.95))
-                            .lineLimit(1)
-                    }
-                    .fixedSize()
-                    .padding(.horizontal, 7).padding(.vertical, 3)
-                    .background(Color.white.opacity(0.16), in: Capsule())
-                }
-            }
-            .padding(.vertical, 1)
-        }
-        .scrollEdgeFade(width: 14)
     }
 
     /// 這一天是幾月幾號（星期幾）。字串在 ViewBuilder 外組好。
@@ -1026,11 +955,6 @@ struct TripPlanDetailView: View {
         let date = Calendar.current.date(byAdding: .day, value: dayIndex,
                                          to: p.startDate) ?? p.startDate
         return dayFmt.string(from: date)
-    }
-
-    /// 「第 2 天 8/20 (三)」
-    private static func dayLabel(_ p: TripPlan, dayIndex: Int) -> String {
-        "第 \(dayIndex + 1) 天 " + dayDateText(p, dayIndex: dayIndex)
     }
 
     /// 離開時間。跨過午夜就加「翌」，否則 09:00 看起來像同一天早上就走了。
@@ -1049,13 +973,14 @@ struct TripPlanDetailView: View {
     /// 「螢幕寬 − 64」：440 寬的手機量起來 376pt，375 寬只剩 311pt。
     /// 那層大卡拿掉之後每張卡是「螢幕寬 − 32」，而且外面那層裁切也沒了——
     /// 它會切掉卡片的陰影，也是花費氣泡當初不能自己畫的原因（zIndex 擋不住裁切）。
-    private func timelineCard(_ p: TripPlan) -> some View {
-        let slots = p.timeline
+    ///
+    /// [v25.518] slots 與 places（地址切出的城市，每張卡要自己的也要前一站的）由 planScroll
+    /// 算好傳進來，看板也用同一份。
+    private func timelineCard(_ p: TripPlan, slots: [TripPlan.Slot],
+                              places: [TripPlaceName.Place?]) -> some View {
         // 用手上這份 slots 判斷，不要再叫 p.dayCount——那個會把整條時間軸重算一次
         let multiDay = (slots.map(\.dayIndex).max() ?? 0) > 0
         let days = Array(Set(slots.map(\.dayIndex))).sorted()
-        // 地址切城市名：整條切一次（每張卡要自己的，也要前一站的）
-        let places = slots.map { TripPlaceName.parse($0.stop.address) }
         // 第一次排版還沒量到寬度：先用「螢幕寬 − 32」頂著（iPhone 直向就是實際卡寬），量到就換掉。
         // 不寫死 361（393 寬手機的卡寬）：375 寬在 xxLarge、430／440 寬在 xxxLarge 時，
         // 量到實際寬度後 stacked 會翻一次，整頁的卡（含天氣膠囊、主圖的 .task）全部
@@ -1079,12 +1004,16 @@ struct TripPlanDetailView: View {
             .padding(.horizontal, 4)
             .padding(.top, 2)
             .padding(.bottom, 4)
+            // [v25.518] 看板的日期膠囊捲過來的位置（整趟沒有日標頭時）
+            .id(Self.timelineTopAnchor)
 
             ForEach(slots) { slot in
                 // 換日就先插一列日期標頭（只有跨天行程才需要）
                 if multiDay && slot.dayIndex != (slot.index == 0 ? -1 : slots[slot.index - 1].dayIndex) {
                     dayHeaderRow(p, dayIndex: slot.dayIndex,
                                  isFirst: slot.index == 0, slots: slots)
+                        // [v25.518] 看板的日期膠囊點了捲到這裡。標頭不管那一天收合或展開都在
+                        .id(Self.dayAnchor(slot.dayIndex))
                 }
                 // [v25.475] 收起來的那一天只留標頭。使用者回報：七天六夜要滑很久
                 // 才到得了今天。單日行程沒有標頭可點，所以永遠不收。
@@ -1189,7 +1118,7 @@ struct TripPlanDetailView: View {
 
     // MARK: 時間軸的藝術元素（v25.505）
     //
-    // 規矩跟行程卡上那座天際線一樣：**藝術元素要跟它待的地方有關係**。
+    // 規矩跟行程頁最上面那張看板一樣：**藝術元素要跟它待的地方有關係**。
     // 這裡待的是一條時間軸，所以做的是「把線變成一條會發光的軌道」，
     // 不是在列與列之間貼圖案。功能性的清單加裝飾，加的必須是結構本身，
     // 不然就是在資訊上面灑亮粉。
@@ -1201,7 +1130,7 @@ struct TripPlanDetailView: View {
     /// 日期標頭右邊那條線：城市落在地平線上。
     ///
     /// 原本是一條 0.22 的灰線，把剩下的空間填掉而已。改成一條**由亮到淡**的
-    /// 地平線，上面站著幾棟高低不一的小樓——跟行程卡底下那座天際線是同一座城，
+    /// 地平線，上面站著幾棟高低不一的小樓——跟看板上那座天際線是同一座城，
     /// 只是遠到剩下輪廓。線與樓一起往右淡出，所以它不會跟右邊的內容打架。
     private struct DayHorizonRule: View {
         let color: Color
@@ -1372,12 +1301,10 @@ struct TripPlanDetailView: View {
         // 地標只畫在「進入這座城市」的那一站：二十站都在福岡，福岡塔只出現一次
         let entersCity = place != nil && (firstOfDay || prevPlace?.key != place?.key)
         let fliesNext = slots.indices.contains(slot.index + 1) && slots[slot.index + 1].mode == .plane
-        // 「Have a nice trip!」整趟只說一次：第一站（送行的話）
-        let greeting = slot.index == 0
         // 底帶＝天際線的高度（天際線不往上探，免得透到膠囊排的字後面）：
-        // 一般 14；有花費招牌 28（招牌約 19 高、離底 4，跟膠囊排之間留 5）；
-        // 第一站 26（要放那一句手寫字）
-        let band: CGFloat = max(spend == nil ? 14 : 28, greeting ? 26 : 0)
+        // 一般 14；有花費招牌 28（招牌約 19 高、離底 4，跟膠囊排之間留 5）。
+        // [v25.518] 第一站原本 26（要放「Have a nice trip!」），那句搬到看板上寫，這裡收回來。
+        let band: CGFloat = spend == nil ? 14 : 28
         let card = TripStopCardFrame(
             metrics: m,
             topCapsule: topCapsule(slot, plan: p, color: c),
@@ -1389,8 +1316,8 @@ struct TripPlanDetailView: View {
             skyline: AnyView(TripCardSkyline(
                 color: c, seed: slot.index,
                 landmarks: entersCity ? TripLandmark.forCity(place?.zh) : [],
-                planeTrail: greeting || fliesNext,
-                greeting: greeting)),
+                // 下一段要搭飛機才畫（v25.517 第一站也畫，那是配那句手寫字的）
+                planeTrail: fliesNext)),
             spendSign: spend.map { AnyView(stopSpendSign(slot, amount: $0, color: c)) },
             bottomBand: band,
             footer: slot.stop.subSpots.isEmpty ? nil : AnyView(
@@ -2298,13 +2225,20 @@ struct TripPlanDetailView: View {
     /// 相本要吃的資料。分組字串帶上「第幾天」，依景點分組出來就是照日子與順序排好的。
     private func albumItems(_ p: TripPlan) -> [AlbumPhotoItem] {
         // timeline 是每次取用都重算的，先取一次——下面查站別的分組還要用
-        let slots = p.timeline
+        albumItems(p, slots: p.timeline)
+    }
+
+    /// [v25.518] 原本在「每一張照片」的閉包裡叫 p.dayCount，而 dayCount 每叫一次就把整條
+    /// 時間軸重算一遍：293 張照片＝重算 293 次，每次 47 站，看板每次重畫都要跑一輪。
+    /// 改成迴圈外算一次（結果一模一樣，只是不重算）。
+    private func albumItems(_ p: TripPlan, slots: [TripPlan.Slot]) -> [AlbumPhotoItem] {
+        let dayPrefix = p.dayCount > 1
         var items = slots.flatMap { slot in
             slot.stop.photoFileNames.map { name in
                 AlbumPhotoItem(
                     id: name,
                     url: TripStop.photoURL(name),
-                    group: (p.dayCount > 1 ? "第 \(slot.dayIndex + 1) 天・" : "")
+                    group: (dayPrefix ? "第 \(slot.dayIndex + 1) 天・" : "")
                         + slot.stop.displayName,
                     date: slot.arrival)
             }
@@ -2319,7 +2253,7 @@ struct TripPlanDetailView: View {
             guard !e.photoFileNames.isEmpty else { continue }
             let group: String
             if let sid = e.linkedTripStopId, let i = indexOfStop[sid], slots.indices.contains(i) {
-                group = (p.dayCount > 1 ? "第 \(slots[i].dayIndex + 1) 天・" : "")
+                group = (dayPrefix ? "第 \(slots[i].dayIndex + 1) 天・" : "")
                     + p.stops[i].displayName
             } else {
                 group = "旅途中的花費"
