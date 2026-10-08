@@ -400,6 +400,12 @@ struct TripPlanDetailView: View {
                 }
             }
             .overlay(alignment: .bottom) { bannerStrip }
+            // [v25.514] 在別的地方把這一站的花費刪光時，招牌會消失（金額回 nil），
+            // 但氣泡是掛在那顆按鈕上的——錨點沒了就會留一個沒有主人的氣泡。
+            .onChange(of: expenseStore.expenses.count) { _, _ in
+                guard let id = spendPopoverStopId else { return }
+                if expenseStore.ntdTotal(stopExpenses(id)) <= 0 { spendPopoverStopId = nil }
+            }
             .task(id: banner) {
                 guard banner != nil else { return }
                 try? await Task.sleep(nanoseconds: 1_800_000_000)
@@ -1751,8 +1757,9 @@ struct TripPlanDetailView: View {
     private func stopSpendSign(_ slot: TripPlan.Slot, amount: String?,
                                color c: Color) -> some View {
         if let amount {
+            let isOpen = spendPopoverStopId == slot.stop.id
             Button {
-                openingStopId = slot.stop.id
+                spendPopoverStopId = isOpen ? nil : slot.stop.id
             } label: {
                 Text(amount)
                     .font(.system(size: 11, weight: .bold, design: .rounded))
@@ -1768,10 +1775,139 @@ struct TripPlanDetailView: View {
                     .shadow(color: c.opacity(0.5), radius: 5)
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("這一站花費 \(amount)，點開可以看明細")
+            .accessibilityLabel(isOpen ? "這一站花費 \(amount)，明細已展開，點一下收起"
+                                       : "這一站花費 \(amount)，點開可以看明細")
+            // [v25.514] 用系統 popover，不是自己在列上疊一個氣泡。
+            //
+            // 自己疊的那條路整條是壞的，而且是幾何問題不是風格問題：
+            // 包住所有列的那個 VStack 套了 .clipShape(cornerRadius: 18)，
+            // 任何溢出卡片的東西都會被裁掉——**zIndex 只排序繪製，擋不住裁切**。
+            // 算過：三筆花費的氣泡約 153pt 高，而「只有一站、剛記了午餐」
+            // 的那張卡整張才 135pt，氣泡比卡片還高，往上往下都無解。
+            //
+            // popover 是 presentation 層：不受那層裁切影響、自己翻邊、
+            // 自己夾進螢幕、內容過高自己可捲，點外面關閉與 VoiceOver 的
+            // modal 行為都是系統給的。代價是箭頭是系統的樣式，不是手繪的尾巴。
+            .popover(isPresented: Binding(
+                get: { spendPopoverStopId == slot.stop.id },
+                set: { spendPopoverStopId = $0 ? slot.stop.id : nil })) {
+                stopSpendDetail(slot, color: c)
+            }
             .padding(.trailing, 14)
             .padding(.bottom, 12)
         }
+    }
+
+    /// 點金額跳出來的那張消費清單（v25.514，使用者指定）。
+    ///
+    /// 內容上有三個坑是真的會算錯給使用者看的，都處理掉了：
+    ///
+    /// 1. **外幣逐筆加不起來。** 非儲蓄險的支出存檔時 amount 就已經換算成
+    ///    台幣了，displayAmountText 是把它**除回原幣**顯示。所以逐筆照
+    ///    displayAmountText 列會變成「日圓 3,000 / 日圓 1,200」，底下合計
+    ///    卻是「NT$2,794」——使用者看到 12,700 和 2,794 對不起來。
+    ///    這裡反過來：右邊一律寫台幣（所以加得起來），原幣當作副標寫在
+    ///    品項底下給對帳用。
+    /// 2. **合計被縮成「NT$1.4萬」。** 共用的格式器一萬以上就換量級單位，
+    ///    但逐筆是完整位數，兩者只隔 8pt 擺在一起特別刺眼。合計走完整位數。
+    /// 3. **排序跟景點卡不一致。** stopExpenses 沒有排序，景點卡是新到舊。
+    ///    點招牌看到 A,B,C、按「看全部」看到 C,B,A 會讓人以為資料不一樣。
+    ///    這裡跟著景點卡排。
+    @ViewBuilder
+    private func stopSpendDetail(_ slot: TripPlan.Slot, color c: Color) -> some View {
+        let all = stopExpenses(slot.stop.id).sorted { $0.date > $1.date }
+        let shown = Array(all.prefix(5))
+        let total = expenseStore.ntdTotal(all)
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 6) {
+                Image(systemName: "cart.fill")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(c)
+                Text(slot.stop.displayName)
+                    .font(.system(size: 12, weight: .bold))
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+            }
+            .padding(.bottom, 8)
+
+            ForEach(shown) { e in
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(e.title.isEmpty ? "（未命名）" : e.title)
+                            .font(.subheadline)
+                            .lineLimit(1)
+                        // 外幣才寫原幣；台幣寫了只是重複一次右邊的數字
+                        if isForeign(e) {
+                            Text(expenseStore.displayAmountText(e))
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    Spacer(minLength: 0)
+                    Text(Self.plainNTD(expenseStore.ntdValue(of: e)))
+                        .font(.system(size: 13, weight: .semibold, design: .rounded))
+                        .monospacedDigit()
+                        .lineLimit(1)
+                }
+                .padding(.vertical, 5)
+            }
+
+            if all.count > shown.count {
+                Text("還有 \(all.count - shown.count) 筆")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .padding(.top, 2)
+            }
+
+            Divider().padding(.vertical, 7)
+
+            HStack {
+                Text("合計").font(.caption).foregroundStyle(.secondary)
+                Spacer(minLength: 0)
+                Text(Self.plainNTD(total))
+                    .font(.system(size: 15, weight: .bold, design: .rounded))
+                    .monospacedDigit()
+                    .foregroundStyle(c)
+            }
+
+            Button {
+                spendPopoverStopId = nil
+                openingStopId = slot.stop.id
+            } label: {
+                HStack(spacing: 4) {
+                    Text("看全部").font(.caption.weight(.semibold))
+                    Image(systemName: "chevron.right").font(.system(size: 9, weight: .bold))
+                }
+                .foregroundStyle(c)
+                .frame(maxWidth: .infinity, alignment: .trailing)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .padding(.top, 8)
+        }
+        .padding(14)
+        .frame(width: 250)
+        .fixedSize(horizontal: false, vertical: true)
+        // iPhone 上預設會退化成 sheet，指定 .popover 才會是真的氣泡
+        .presentationCompactAdaptation(.popover)
+    }
+
+    /// 這筆是不是用外幣記的（儲蓄險那條路不算，它的 amount 本來就存原幣）
+    private func isForeign(_ e: Expense) -> Bool {
+        let code = e.currencyCode
+        guard !code.isEmpty, code != "NT$", code != "TWD" else { return false }
+        return !(e.fixedCategory == .insurance && e.insuranceSubCategory == .savings)
+    }
+
+    /// 完整位數的台幣，不走萬／億量級——逐筆與合計要能對得起來
+    private static let plainNTDFmt: NumberFormatter = {
+        let f = NumberFormatter()
+        f.numberStyle = .decimal
+        f.maximumFractionDigits = 0
+        return f
+    }()
+    private static func plainNTD(_ v: Double) -> String {
+        "NT$" + (plainNTDFmt.string(from: NSNumber(value: v)) ?? "0")
     }
 
     /// 景點列右側：拖曳把手 ＋「…」選單
@@ -2051,7 +2187,10 @@ struct TripPlanDetailView: View {
             && TripWeatherStore.isWithinForecastRange(slot.arrival)
         let phone = slot.stop.phone?.trimmingCharacters(in: .whitespaces)
         let hasPhone = !(phone ?? "").isEmpty
-        let hasSpend = stopSpendAmount(slot.stop.id) != nil
+        // [v25.514] 這裡原本又跑了一次 stopSpendAmount（整個陣列 filter 加總），
+        // 所以「一列只算一次」那句話在 v25.513 當下就不成立了。改成只問
+        // 「有沒有」，不要為了一個 Bool 去組一個格式化字串。
+        let hasSpend = expenseStore.ntdTotal(stopExpenses(slot.stop.id)) > 0
         guard hasPhotos || hasWeather || hasPhone else { return nil }
         return AnyView(
             VStack(alignment: .leading, spacing: 6) {
@@ -2298,6 +2437,9 @@ struct TripPlanDetailView: View {
                     ? "（沒有備註）" : sub.note)
         }
     }
+
+    /// [v25.514] 哪一站的花費清單氣泡開著（使用者要求：點金額跳出消費清單）
+    @State private var spendPopoverStopId: UUID?
 
     /// 畫面下方那一行短暫的回饋（複製了什麼、補了幾支電話）。
     /// 沒有回饋的複製等於沒發生——使用者會再按一次，然後懷疑它壞了。
