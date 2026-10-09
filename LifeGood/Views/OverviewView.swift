@@ -49,6 +49,8 @@ import SwiftUI
 
 struct OverviewView: View {
     @EnvironmentObject var store: ExpenseStore
+    @EnvironmentObject var lifeStore: LifeStore
+    @EnvironmentObject var financeStore: FinanceStore
     @State private var showAddVariable = false
     @State private var showAddFixed = false
     @State private var showAddStock = false
@@ -62,25 +64,17 @@ struct OverviewView: View {
     @State private var editingFixed: Expense?
     /// 看板格子點下去切到收入／變動／固定那一頁（跟頂部子功能列同一個值）
     @AppStorage("expense_feature") private var expenseFeatureRaw: String = ExpenseFeature.overview.rawValue
-    @State private var cachedRecentItems: [RecentItem] = []
-    @State private var cachedCategoryTotals: [(category: VariableCategory, amount: Double)] = []
+    /// [v25.524] 最近交易（已經組好成卡片要寫的字）與本月各分類
+    @State private var cachedRecent: [RecentEntry] = []
+    @State private var categoryStats: [CategoryStat] = []
+    /// 點最近交易的一筆：先看那一筆的卡片（跟各頁點一筆一樣）
+    @State private var previewVariable: Expense?
+    @State private var previewFixed: Expense?
+    @State private var previewIncome: Income?
+    /// 點分類明信片：切到變動支出並只看那一類（VariableExpenseView 讀到就清掉）
+    @AppStorage(VariableExpenseView.filterRequestKey) private var variableFilterRequest = ""
 
-    private static let currencyFormatter: NumberFormatter = {
-        let f = NumberFormatter()
-        f.numberStyle = .currency
-        f.currencyCode = "TWD"
-        f.currencySymbol = "NT$"
-        f.maximumFractionDigits = 0
-        return f
-    }()
-
-    private static let timeFormatter: DateFormatter = {
-        let f = DateFormatter()
-        f.dateFormat = "HH:mm"
-        return f
-    }()
-
-    private static let shortDateFormatter: DateFormatter = {
+    private static let badgeFormatter: DateFormatter = {
         let f = DateFormatter()
         f.dateFormat = "M/d"
         return f
@@ -142,9 +136,12 @@ struct OverviewView: View {
             .sheet(isPresented: $showAddStock) { AddStockView() }
             .sheet(isPresented: $showAddRealEstate) { AddRealEstateView() }
             .sheet(item: $editingFixed) { e in AddExpenseView(expenseType: .fixed, editingExpense: e) }
+            .sheet(item: $previewVariable) { e in FinanceItemCard(target: .variableExpense(e.id)) }
+            .sheet(item: $previewFixed) { e in FixedExpenseCard(expense: e) }
+            .sheet(item: $previewIncome) { i in FinanceItemCard(target: .income(i.id)) }
             .task(id: store.modifyID) {
-                cachedRecentItems = buildRecentItems()
-                cachedCategoryTotals = store.variableCategoryTotals()
+                cachedRecent = buildRecent()
+                categoryStats = Self.buildCategoryStats(store)
                 // .task 每次出現都會重跑（切回這頁、跨過午夜再打開），日期相關的數字跟著更新
                 board = OverviewBoardData.build(store: store)
             }
@@ -170,313 +167,186 @@ struct OverviewView: View {
         }
     }
 
-    // MARK: - 分類配色（委派給 VariableCategory.accentColor）
-    private func categoryColor(_ category: VariableCategory) -> Color {
-        category.accentColor
+    // MARK: - 本月花在哪裡（v25.524：分類明信片）
+    //
+    // 使用者：「項目的藝術感跟質感都差太多了」。原本是一張白卡上一列一列的圖示圓＋進度條；
+    // 改成最上面一條分類比例的彩帶，下面兩欄「明信片」：每一類一張，上半是那一類的插畫
+    // 與手寫英文字（MoneyArt.swift），下半是金額、占比、筆數、比上月同期。
+    // 點一張 → 切到變動支出、只看那一類。
+
+    /// 一個分類這個月的數字
+    struct CategoryStat: Identifiable, Equatable {
+        let category: VariableCategory
+        let amount: Double
+        let count: Int
+        /// 上個月到同一天為止（月初跟上個月整個月比，每一類都會是「少很多」）
+        let lastMonth: Double
+        var id: String { category.rawValue }
     }
 
-    // MARK: - 分類支出（帶比例條）
+    static func buildCategoryStats(_ store: ExpenseStore, now: Date = Date()) -> [CategoryStat] {
+        let cal = Calendar.current
+        guard let monthStart = cal.date(from: cal.dateComponents([.year, .month], from: now)),
+              let lastStart = cal.date(byAdding: .month, value: -1, to: monthStart) else { return [] }
+        let day = cal.component(.day, from: now)
+        let lastDays = cal.range(of: .day, in: .month, for: lastStart)?.count ?? 30
+        let lastCut = cal.date(byAdding: .day, value: min(day, lastDays), to: lastStart) ?? monthStart
+        var amount: [VariableCategory: Double] = [:]
+        var count: [VariableCategory: Int] = [:]
+        var last: [VariableCategory: Double] = [:]
+        for e in store.expenses where e.expenseType == .variable {
+            let c = e.variableCategory ?? .other
+            if cal.isDate(e.date, equalTo: now, toGranularity: .month) {
+                amount[c, default: 0] += e.amount
+                count[c, default: 0] += 1
+            } else if e.date >= lastStart && e.date < lastCut {
+                last[c, default: 0] += e.amount
+            }
+        }
+        return amount
+            .map { CategoryStat(category: $0.key, amount: $0.value, count: count[$0.key] ?? 0,
+                                lastMonth: last[$0.key] ?? 0) }
+            .filter { $0.amount > 0 }
+            .sorted { a, b in a.amount != b.amount ? a.amount > b.amount : a.id < b.id }
+    }
 
     private var categoryBreakdownSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            let categoryTotals = cachedCategoryTotals
-            let maxAmount = categoryTotals.map(\.amount).max() ?? 1
-            // variableCategoryTotals() 已過濾本月變動支出，直接加總即可，
-            // 避免在每個 categoryRow 內重複呼叫 currentMonthVariableTotal（O(n)×列數）
-            let totalVar = categoryTotals.reduce(0) { $0 + $1.amount }
-
-            HStack(spacing: 10) {
-                Capsule()
-                    .fill(
-                        LinearGradient(
-                            colors: [.green, .green.opacity(0.55)],
-                            startPoint: .top,
-                            endPoint: .bottom
-                        )
-                    )
-                    .frame(width: 4, height: 20)
-                Text("本月變動支出分類")
-                    .font(.subheadline.weight(.bold))
-                Spacer()
-                if !categoryTotals.isEmpty {
-                    Text("\(categoryTotals.count) 項")
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(.green)
-                        .padding(.horizontal, 8).padding(.vertical, 3)
-                        .background(Color.green.opacity(0.10))
-                        .clipShape(Capsule())
-                        .overlay(Capsule().stroke(Color.green.opacity(0.22), lineWidth: 0.75))
-                }
-            }
-            .padding(.horizontal)
-
-            if categoryTotals.isEmpty {
+        let stats = categoryStats
+        let total = stats.reduce(0) { $0 + $1.amount }
+        return VStack(alignment: .leading, spacing: 10) {
+            MoneySectionHeader(title: "本月花在哪裡",
+                               trailing: stats.isEmpty ? nil : "\(stats.count) 類・" + total.ntdWanString)
+            if stats.isEmpty {
                 emptyPlaceholder(
                     icon: "chart.bar.xaxis",
                     title: "尚無分類紀錄",
                     subtitle: "新增變動支出後顯示分類統計"
                 )
-                .padding(.horizontal)
             } else {
-                VStack(spacing: 0) {
-                    ForEach(Array(categoryTotals.enumerated()), id: \.element.category.rawValue) { idx, item in
-                        categoryRow(item: item, maxAmount: maxAmount, totalVar: totalVar)
-                            .opacity(categoryListAppeared ? 1 : 0)
-                            .offset(y: categoryListAppeared ? 0 : 14)
-                            .animation(
-                                .spring(response: 0.45, dampingFraction: 0.82)
-                                    .delay(0.06 * Double(idx)),
-                                value: categoryListAppeared
-                            )
-
-                        if idx < categoryTotals.count - 1 {
-                            Divider().padding(.leading, 46)
+                MoneyShareRibbon(segments: stats.map {
+                    MoneyShareRibbon.Segment(theme: MoneyArtTheme.of($0.category), value: $0.amount)
+                })
+                .padding(.bottom, 2)
+                LazyVGrid(columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)],
+                          spacing: 10) {
+                    ForEach(Array(stats.enumerated()), id: \.element.id) { idx, s in
+                        Button {
+                            openCategory(s.category)
+                        } label: {
+                            MoneyCategoryPostcard(
+                                theme: MoneyArtTheme.of(s.category),
+                                name: s.category.rawValue,
+                                amount: s.amount.ntdWanString,
+                                share: total > 0 ? s.amount / total : 0,
+                                count: s.count,
+                                change: s.lastMonth > 0 ? MoneyFormat.change(s.amount, vs: s.lastMonth) : nil,
+                                changeTone: MoneyTone.spendingChange(s.amount, vs: s.lastMonth))
                         }
+                        .buttonStyle(MoneyPressStyle())
+                        .accessibilityHint("切到變動支出，只看這一類")
+                        .opacity(categoryListAppeared ? 1 : 0)
+                        .offset(y: categoryListAppeared ? 0 : 14)
+                        .animation(
+                            .spring(response: 0.45, dampingFraction: 0.82)
+                                .delay(0.05 * Double(min(idx, 8))),
+                            value: categoryListAppeared
+                        )
                     }
-                }
-                .background(Color(.systemBackground))
-                .clipShape(RoundedRectangle(cornerRadius: 14))
-                .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 3)
-                .padding(.horizontal)
-                .onAppear {
-                    withAnimation(.spring(response: 0.5, dampingFraction: 0.82).delay(0.05)) {
-                        categoryListAppeared = true
-                    }
-                }
-                .onDisappear {
-                    categoryListAppeared = false
                 }
             }
         }
-    }
-
-    private func categoryRow(item: (category: VariableCategory, amount: Double), maxAmount: Double, totalVar: Double) -> some View {
-        let ratio = maxAmount > 0 ? item.amount / maxAmount : 0
-        let pct = totalVar > 0 ? Int(item.amount / totalVar * 100) : 0
-        let accent = categoryColor(item.category)
-
-        return VStack(spacing: 8) {
-            HStack(spacing: 12) {
-                // 40pt 漸層圖示圓 + 細邊框（對齊 LifeOverviewView.categoryBreakdownSection 統計情境規格）
-                ZStack {
-                    Circle()
-                        .fill(
-                            LinearGradient(
-                                colors: [accent.opacity(0.20), accent.opacity(0.08)],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
-                        .frame(width: 40, height: 40)
-                    Circle()
-                        .stroke(accent.opacity(0.22), lineWidth: 1.2)
-                        .frame(width: 40, height: 40)
-                    Image(systemName: item.category.icon)
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(accent)
-                }
-                Text(item.category.rawValue)
-                    .font(.subheadline)
-                Spacer()
-                // 金額 + 百分比彩色膠囊（對齊 LifeOverviewView categoryBreakdownSection 規格）
-                HStack(spacing: 8) {
-                    Text(smartCurrency(item.amount))
-                        .font(.system(size: 14, weight: .bold, design: .rounded))
-                        .foregroundStyle(.primary)
-                    Text("\(pct)%")
-                        .font(.system(size: 10, weight: .bold))
-                        .foregroundStyle(accent)
-                        .padding(.horizontal, 7)
-                        .padding(.vertical, 3)
-                        .background(accent.opacity(0.12))
-                        .clipShape(Capsule())
-                        .overlay(Capsule().stroke(accent.opacity(0.22), lineWidth: 0.6))
-                }
+        .padding(.horizontal)
+        .onAppear {
+            withAnimation(.spring(response: 0.5, dampingFraction: 0.82).delay(0.05)) {
+                categoryListAppeared = true
             }
-
-            // 漸層比例進度條（高度 6pt，圓角 3pt，對齊 FinanceOverviewView.allocationSection 規格）
-            GeometryReader { geo in
-                ZStack(alignment: .leading) {
-                    Capsule()
-                        .fill(Color(.systemFill))
-                        .frame(height: 6)
-                    Capsule()
-                        .fill(
-                            LinearGradient(
-                                colors: [accent, accent.opacity(0.55)],
-                                startPoint: .leading, endPoint: .trailing
-                            )
-                        )
-                        .frame(width: geo.size.width * ratio, height: 6)
-                        .animation(.spring(response: 0.6, dampingFraction: 0.78), value: ratio)
-                    // [v3] glow overlay：彩條頂部白色光澤 + 底部柔化，對齊 ChartView.expenseTypeBreakdown 規格
-                    Capsule()
-                        .fill(
-                            LinearGradient(
-                                colors: [.white.opacity(0.28), .clear, .black.opacity(0.08)],
-                                startPoint: .top,
-                                endPoint: .bottom
-                            )
-                        )
-                        .frame(width: geo.size.width * ratio, height: 6)
-                }
-            }
-            .frame(height: 6)
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
+        .onDisappear {
+            categoryListAppeared = false
+        }
     }
 
-    // MARK: - 最近交易
-
-    private struct RecentItem: Identifiable {
-        let id: UUID
-        let title: String
-        let icon: String
-        let category: String
-        let amount: Double
-        let date: Date
-        let isIncome: Bool
+    private func openCategory(_ category: VariableCategory) {
+        variableFilterRequest = category.rawValue
+        open(.variable)
     }
 
-    private var recentItems: [RecentItem] { cachedRecentItems }
+    // MARK: - 最近交易（v25.524：交易卡）
 
-    private func buildRecentItems() -> [RecentItem] {
+    private enum RecentTarget: Equatable {
+        case variable(UUID), fixed(UUID), income(UUID)
+    }
+
+    private struct RecentEntry: Identifiable, Equatable {
+        let item: MoneyItem
+        let target: RecentTarget
+        var id: UUID { item.id }
+    }
+
+    private func buildRecent() -> [RecentEntry] {
         // 「最近交易」只顯示已發生的紀錄；排除未來日期（如尚未開始的分階段貸款等固定支出投射），
         // 避免未來項目因日期最大而排到最前、擠掉真正的近期消費。
         let now = Date()
-        let recentExp = store.expenses.filter { $0.date <= now }.sorted { $0.date > $1.date }.prefix(5).map { e in
-            RecentItem(id: e.id, title: e.title, icon: e.categoryIcon,
-                       category: e.categoryName, amount: e.amount, date: e.date, isIncome: false)
+        let ctx = MoneyItemContext(lifeStore: lifeStore, store: store)
+        var list: [(date: Date, entry: RecentEntry)] = []
+        for e in store.expenses.filter({ $0.date <= now }).sorted(by: { $0.date > $1.date }).prefix(5) {
+            let badge = Self.badgeFormatter.string(from: e.date)
+            if e.expenseType == .fixed {
+                var item = MoneyItem.fixed(e, ctx: ctx, financeStore: financeStore, now: now)
+                item.badge = badge
+                list.append((e.date, RecentEntry(item: item, target: .fixed(e.id))))
+            } else {
+                list.append((e.date, RecentEntry(item: MoneyItem.expense(e, ctx: ctx, badge: badge),
+                                                 target: .variable(e.id))))
+            }
         }
-        let recentInc = store.incomes.filter { $0.date <= now }.sorted { $0.date > $1.date }.prefix(5).map { i in
-            RecentItem(id: i.id, title: i.title, icon: i.category.icon,
-                       category: i.category.rawValue, amount: i.amount, date: i.date, isIncome: true)
+        for i in store.incomes.filter({ $0.date <= now }).sorted(by: { $0.date > $1.date }).prefix(5) {
+            let item = MoneyItem.income(i, ctx: ctx, badge: Self.badgeFormatter.string(from: i.date), now: now)
+            list.append((i.date, RecentEntry(item: item, target: .income(i.id))))
         }
-        return Array((recentExp + recentInc).sorted { $0.date > $1.date }.prefix(5))
+        return Array(list.sorted { $0.date > $1.date }.prefix(5).map { $0.entry })
+    }
+
+    private func openRecent(_ target: RecentTarget) {
+        switch target {
+        case .variable(let id): previewVariable = store.expenses.first { $0.id == id }
+        case .fixed(let id): previewFixed = store.expenses.first { $0.id == id }
+        case .income(let id): previewIncome = store.incomes.first { $0.id == id }
+        }
     }
 
     private var recentTransactionsSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            let items = recentItems
-            HStack(spacing: 10) {
-                Capsule()
-                    .fill(
-                        LinearGradient(
-                            colors: [.green, .green.opacity(0.55)],
-                            startPoint: .top,
-                            endPoint: .bottom
-                        )
-                    )
-                    .frame(width: 4, height: 20)
-                Text("最近交易")
-                    .font(.subheadline.weight(.bold))
-                Spacer()
-                if !items.isEmpty {
-                    Text("\(items.count) 筆")
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(.green)
-                        .padding(.horizontal, 8).padding(.vertical, 3)
-                        .background(Color.green.opacity(0.10))
-                        .clipShape(Capsule())
-                        .overlay(Capsule().stroke(Color.green.opacity(0.22), lineWidth: 0.75))
-                }
-            }
-            .padding(.horizontal)
-
-            if items.isEmpty {
+        let entries = cachedRecent
+        return VStack(alignment: .leading, spacing: 10) {
+            MoneySectionHeader(title: "最近交易", trailing: entries.isEmpty ? nil : "\(entries.count) 筆")
+            if entries.isEmpty {
                 emptyPlaceholder(
                     icon: "list.bullet.rectangle",
                     title: "尚無交易紀錄",
                     subtitle: "新增收入或支出後顯示於此"
                 )
-                .padding(.horizontal)
             } else {
-                VStack(spacing: 0) {
-                    ForEach(Array(items.enumerated()), id: \.element.id) { idx, item in
-                        recentRow(item)
-                            .opacity(recentListAppeared ? 1 : 0)
-                            .offset(y: recentListAppeared ? 0 : 14)
-                            .animation(
-                                .spring(response: 0.45, dampingFraction: 0.80)
-                                    .delay(0.06 * Double(idx)),
-                                value: recentListAppeared
-                            )
-
-                        if idx < items.count - 1 {
-                            Divider().padding(.leading, 56)
+                VStack(spacing: 10) {
+                    ForEach(Array(entries.enumerated()), id: \.element.id) { idx, entry in
+                        Button {
+                            openRecent(entry.target)
+                        } label: {
+                            MoneyItemCard(item: entry.item)
                         }
+                        .buttonStyle(MoneyPressStyle())
+                        .accessibilityHint("點兩下打開這一筆")
+                        .opacity(recentListAppeared ? 1 : 0)
+                        .offset(y: recentListAppeared ? 0 : 14)
+                        .animation(
+                            .spring(response: 0.45, dampingFraction: 0.80)
+                                .delay(0.06 * Double(idx)),
+                            value: recentListAppeared
+                        )
                     }
                 }
-                .background(Color(.systemBackground))
-                .clipShape(RoundedRectangle(cornerRadius: 14))
-                .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 3)
-                .padding(.horizontal)
             }
         }
-    }
-
-    private func recentRow(_ item: RecentItem) -> some View {
-        // 收入用綠色，支出用紅色（與其他列表頁配色一致）
-        let accentColor: Color = item.isIncome ? .green : Color(red: 0.90, green: 0.25, blue: 0.25)
-
-        return HStack(spacing: 12) {
-            // 44pt 漸層圖示圓 + 陰影（對齊 incomeRow / ExpenseRow 圖示圓規格）
-            ZStack {
-                Circle()
-                    .fill(
-                        LinearGradient(
-                            colors: [accentColor.opacity(0.22), accentColor.opacity(0.09)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-                    .frame(width: 44, height: 44)
-                    .shadow(color: accentColor.opacity(0.22), radius: 6, x: 0, y: 3)
-                // [v3] stroke border：補齊 categoryRow 的邊框規格，兩 Section 圖示圓視覺一致
-                Circle()
-                    .stroke(accentColor.opacity(0.18), lineWidth: 0.75)
-                    .frame(width: 44, height: 44)
-                Image(systemName: item.icon)
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(accentColor)
-            }
-
-            // 標題 + 彩色分類膠囊（對齊 incomeRow.category Capsule 規格）
-            VStack(alignment: .leading, spacing: 4) {
-                // [v25.520] 交易名稱過長改跑馬燈（原本切成「…」）
-                MarqueeText(item.title)
-                    .font(.subheadline.weight(.semibold))
-                // [v4] 補入 overlay stroke 細邊框，對齊 ExpenseRow / incomeRow category Capsule 規格
-                Text(item.category)
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(accentColor)
-                    .padding(.horizontal, 7)
-                    .padding(.vertical, 2.5)
-                    .background(accentColor.opacity(0.10))
-                    .clipShape(Capsule())
-                    .overlay(Capsule().stroke(accentColor.opacity(0.22), lineWidth: 0.6))
-            }
-
-            Spacer(minLength: 4)
-
-            // 金額 + 日期小膠囊
-            VStack(alignment: .trailing, spacing: 4) {
-                Text("\(item.isIncome ? "+" : "-")\(smartCurrency(item.amount))")
-                    .font(.system(size: 15, weight: .bold, design: .rounded))
-                    .foregroundStyle(accentColor)
-                    .contentTransition(.numericText())
-                Text(formatDate(item.date))
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(Color(.tertiarySystemFill))
-                    .clipShape(Capsule())
-            }
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
+        .padding(.horizontal)
     }
 
     // MARK: - 空狀態元件
@@ -516,34 +386,6 @@ struct OverviewView: View {
         .background(Color(.systemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 16))
         .shadow(color: .black.opacity(0.05), radius: 8, x: 0, y: 3)
-    }
-
-    // MARK: - Helpers
-
-    private func formatCurrency(_ value: Double) -> String {
-        Self.currencyFormatter.string(from: NSNumber(value: value)) ?? "NT$0"
-    }
-
-    // 【美化 2026-06】加入億量級：≥1億 → "X.X 億"；≥1萬 → "X.X 萬"；<1萬 → NT$X
-    private func smartCurrency(_ value: Double) -> String {
-        let absVal = abs(value)
-        if absVal >= 100_000_000 {                               // ≥ 1億
-            return String(format: "%.1f 億", value / 100_000_000)
-        }
-        if absVal >= 10_000 {                                    // ≥ 1萬
-            let wan = value / 10_000
-            // %.1f 格式化後若捨入到 10000，改以億顯示，避免「10000.0萬」
-            if abs(wan) >= 9_999.95 { return String(format: "%.1f 億", value / 100_000_000) }
-            return String(format: abs(wan) >= 10 ? "%.1f 萬" : "%.2f 萬", wan)
-        }
-        return formatCurrency(value)
-    }
-
-    private func formatDate(_ date: Date) -> String {
-        let cal = Calendar.current
-        if cal.isDateInToday(date) { return Self.timeFormatter.string(from: date) }
-        if cal.isDateInYesterday(date) { return "昨天" }
-        return Self.shortDateFormatter.string(from: date)
     }
 }
 

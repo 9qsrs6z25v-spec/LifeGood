@@ -58,6 +58,8 @@ struct IncomeView: View {
     @State private var debouncedSearchText: String = ""
     @State private var searchDebounceTask: Task<Void, Never>?
     @State private var cachedFilteredIncomes: [Income] = []
+    /// [v25.524] 緊湊模式（變動支出、收入、固定支出三頁共用一個開關）
+    @AppStorage(MoneyItemCard.compactKey) private var compact = false
 
     private static let currencyFormatter: NumberFormatter = {
         let f = NumberFormatter()
@@ -136,6 +138,7 @@ struct IncomeView: View {
                 }
             }
             .listStyle(.insetGrouped)
+            .listSectionSpacing(.compact)
             // onAppear/onDisappear 掛在 List 本身（而非 incomeListSections 內每個日期分組的
             // ForEach，也不掛在 summaryHeader 自己的 Section 上）：List 延遲載入各 Section，
             // 掛在子視圖上等同掛在各自的可視範圍上，捲動使其進出可視範圍就各自觸發一次，
@@ -161,6 +164,9 @@ struct IncomeView: View {
             .navigationTitle("收入")
             .navigationBarTitleDisplayMode(.large)
             .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    MoneyCompactToggle(compact: $compact)
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button { showAdd = true } label: {
                         Image(systemName: "plus.circle.fill").font(.title3).foregroundStyle(.green)
@@ -514,47 +520,6 @@ struct IncomeView: View {
         }
     }
 
-    // MARK: - 日期 Section Header（含日計合計）
-
-    private func daySectionHeader(dateString: String, incomes: [Income]) -> some View {
-        let dayTotal = incomes.reduce(0.0) { $0 + $1.amount }
-        let accent = Color(red: 0.16, green: 0.74, blue: 0.50)
-        return HStack(spacing: 8) {
-            RoundedRectangle(cornerRadius: 3)
-                .fill(
-                    LinearGradient(
-                        colors: [accent, accent.opacity(0.55)],
-                        startPoint: .top, endPoint: .bottom
-                    )
-                )
-                .frame(width: 3, height: 14)
-
-            Text(dateString)
-                .font(.footnote.weight(.semibold))
-                .foregroundStyle(.primary.opacity(0.75))
-
-            Spacer(minLength: 6)
-
-            HStack(spacing: 4) {
-                Text("+\(fmt(dayTotal))")
-                    .font(.caption2.weight(.bold))
-                    .foregroundStyle(accent)
-                Text("· \(incomes.count) 筆")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 3)
-            .background(accent.opacity(0.10))
-            .clipShape(Capsule())
-            .overlay(
-                Capsule()
-                    .stroke(accent.opacity(0.22), lineWidth: 0.6)
-            )
-        }
-        .textCase(nil)
-    }
-
     // MARK: - 空狀態
 
     @State private var emptyIconPulse = false
@@ -693,12 +658,21 @@ struct IncomeView: View {
         }
         let hiddenCount = hiddenGroups.reduce(0) { $0 + $1.value.count }
 
+        // [v25.524] 每一筆改成收入卡（MoneyItemCard），日期標頭改成日曆式（MoneyDayHeader）
+        let ctx = MoneyItemContext(lifeStore: lifeStore, store: store)
+
         ForEach(Array(visibleGroups.enumerated()), id: \.element.key) { groupIdx, pair in
             let incomes = pair.value
-            let dateString = incomes.first.map { Self.groupDateFormatter.string(from: $0.date) } ?? pair.key
-            Section(header: daySectionHeader(dateString: dateString, incomes: incomes)) {
+            let dayDate = incomes.first?.date ?? Date()
+            Section(header: MoneyDayHeader(date: dayDate, count: incomes.count,
+                                           total: "+" + fmt(incomes.reduce(0.0) { $0 + $1.amount }),
+                                           totalTone: .good)) {
                 ForEach(Array(incomes.enumerated()), id: \.element.id) { rowIdx, income in
-                    incomeRow(income)
+                    MoneyItemCard(item: MoneyItem.income(income, ctx: ctx, badge: nil), compact: compact)
+                        .listRowInsets(EdgeInsets(top: compact ? 4 : 6, leading: 16,
+                                                  bottom: compact ? 4 : 6, trailing: 16))
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
                         .contentShape(Rectangle())
                         .onTapGesture { viewingItem = income }
                         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
@@ -852,108 +826,6 @@ struct IncomeView: View {
             .sorted { $0.amount > $1.amount }
     }
 
-    private func incomeRow(_ income: Income) -> some View {
-        let accent = incomeCategoryColor(income.category)
-        return HStack(spacing: 12) {
-            ZStack {
-                Circle()
-                    .fill(
-                        LinearGradient(
-                            colors: [accent.opacity(0.22), accent.opacity(0.09)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-                    .frame(width: 44, height: 44)
-                    .shadow(color: accent.opacity(0.22), radius: 6, x: 0, y: 3)
-                Image(systemName: income.category.icon)
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(accent)
-            }
-
-            VStack(alignment: .leading, spacing: 4) {
-                // [v25.520] 名稱過長改跑馬燈（原本 lineLimit(1) 切成「…」）
-                MarqueeText(income.title)
-                    .font(.subheadline.weight(.semibold))
-                HStack(spacing: 5) {
-                    Text(income.category.rawValue)
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(accent)
-                        .padding(.horizontal, 7)
-                        .padding(.vertical, 2.5)
-                        .background(accent.opacity(0.12))
-                        .clipShape(Capsule())
-                    if income.period != .once {
-                        Text(income.period.rawValue)
-                            .font(.system(size: 10, weight: .semibold))
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(accent.opacity(0.10))
-                            .foregroundStyle(accent.opacity(0.85))
-                            .clipShape(Capsule())
-                    }
-                    // 固定薪水結束標示：已過結束月 → 灰色「已結束」；尚未到 → 橘色「將結束」
-                    if income.isFixedSalary, let end = income.endDate {
-                        let ended = !income.isActive(in: Date())
-                        Label("\(income.endReason?.rawValue ?? "結束") \(endBadgeFmt(end))",
-                              systemImage: income.endReason?.icon ?? "calendar.badge.exclamationmark")
-                            .font(.system(size: 10, weight: .semibold))
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background((ended ? Color.gray : Color.orange).opacity(0.14))
-                            .foregroundStyle(ended ? Color.gray : Color.orange)
-                            .clipShape(Capsule())
-                    }
-                    // 股票連結指示：有配息連結時顯示圖示，對齊 ExpenseRow.mappin 地點指示規格
-                    if income.linkedStockId != nil {
-                        Image(systemName: "chart.line.uptrend.xyaxis")
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(Color(red: 0.27, green: 0.67, blue: 0.99).opacity(0.80))
-                    }
-                    if !income.note.isEmpty {
-                        Text(income.note)
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                    }
-                }
-            }
-
-            Spacer(minLength: 4)
-
-            VStack(alignment: .trailing, spacing: 4) {
-                Text(fmt(income.amount))
-                    .font(.system(size: 16, weight: .bold, design: .rounded))
-                    .foregroundStyle(accent)
-                    .contentTransition(.numericText())
-                if let label = depositBankLabel(for: income) {
-                    // 銀行標籤：升級為分類主題色（對齊 ExpenseRow.diningMember 膠囊規格）
-                    HStack(spacing: 3) {
-                        Image(systemName: "building.columns.fill")
-                            .font(.system(size: 9))
-                        Text(label)
-                            .font(.system(size: 10, weight: .medium))
-                    }
-                    .foregroundStyle(accent.opacity(0.85))
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(accent.opacity(0.08))
-                    .clipShape(Capsule())
-                    .lineLimit(1)
-                }
-            }
-        }
-        .padding(.vertical, 6)
-    }
-
-    private func depositBankLabel(for income: Income) -> String? {
-        guard let bankId = income.linkedBankMilestoneId,
-              let ms = lifeStore.milestones.first(where: { $0.id == bankId }) else { return nil }
-        let name = ms.bankName ?? ms.title
-        let currency = income.linkedBankCurrency ?? "NT$"
-        return currency == "NT$" ? name : "\(name) · \(currency)"
-    }
-
     // MARK: - 分組
 
     private func groupedByDate() -> [(key: String, value: [Income])] {
@@ -973,9 +845,4 @@ struct IncomeView: View {
         v.ntdWanString
     }
 
-    private static let endBadgeFormatter: DateFormatter = {
-        let f = DateFormatter(); f.locale = Locale(identifier: "zh_Hant_TW"); f.dateFormat = "yyyy/M"; return f
-    }()
-    /// 固定薪水結束標示日期（僅到年月）。
-    private func endBadgeFmt(_ d: Date) -> String { Self.endBadgeFormatter.string(from: d) }
 }

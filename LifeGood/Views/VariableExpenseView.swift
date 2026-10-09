@@ -57,6 +57,19 @@ struct VariableExpenseView: View {
     @State private var debouncedSearchText: String = ""
     @State private var searchDebounceTask: Task<Void, Never>?
     @State private var cachedFilteredExpenses: [Expense] = []
+    /// [v25.524] 緊湊模式（三頁共用一個開關）
+    @AppStorage(MoneyItemCard.compactKey) private var compact = false
+    /// [v25.524] 總覽的分類明信片點進來：切到這一頁並只看那一類（讀到就清掉）
+    @AppStorage(VariableExpenseView.filterRequestKey) private var filterRequest = ""
+
+    static let filterRequestKey = "variable_filter_request"
+
+    /// 卡面左上的時間
+    private static let timeFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "HH:mm"
+        return f
+    }()
 
     private static let groupDateFormatter: DateFormatter = {
         let f = DateFormatter()
@@ -142,6 +155,7 @@ struct VariableExpenseView: View {
                 }
             }
             .listStyle(.insetGrouped)
+            .listSectionSpacing(.compact)
             // onAppear/onDisappear 掛在 List 本身（而非 expenseListSectionsFor 內每個日期分組的
             // ForEach）：List 延遲載入各 Section，掛在 ForEach 上等同掛在每組各自的子視圖上，
             // 捲動使某組進出可視範圍就各自觸發一次，所有列共用的 listRowsAppeared 旗標會被
@@ -161,6 +175,9 @@ struct VariableExpenseView: View {
             .navigationBarTitleDisplayMode(.large)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
+                    MoneyCompactToggle(compact: $compact)
+                }
+                ToolbarItem(placement: .topBarTrailing) {
                     Button {
                         showingAddSheet = true
                     } label: {
@@ -170,6 +187,8 @@ struct VariableExpenseView: View {
                     }
                 }
             }
+            .onAppear { applyFilterRequest() }
+            .onChange(of: filterRequest) { _, _ in applyFilterRequest() }
             .sheet(isPresented: $showingAddSheet) {
                 AddExpenseView(expenseType: .variable)
             }
@@ -204,6 +223,15 @@ struct VariableExpenseView: View {
                 cachedFilteredExpenses = buildFilteredExpenses()
             }
         }
+    }
+
+    /// 總覽的分類明信片點進來：套上那一類的篩選，然後把請求清掉（下次手動切回來不會又被篩）
+    private func applyFilterRequest() {
+        guard !filterRequest.isEmpty else { return }
+        if let c = VariableCategory(rawValue: filterRequest) {
+            selectedCategory = c
+        }
+        filterRequest = ""
     }
 
     // MARK: - KPI 計算輔助
@@ -427,49 +455,6 @@ struct VariableExpenseView: View {
         }
     }
 
-    // MARK: - 日期 Section Header（含日計合計）
-
-    private func daySectionHeader(dateString: String, expenses: [Expense]) -> some View {
-        let dayTotal = expenses.reduce(0.0) { $0 + $1.amount }
-        let accent = Color(red: 1.00, green: 0.62, blue: 0.22)
-        return HStack(spacing: 8) {
-            // 小方形日期標記，與左側列表色系呼應
-            RoundedRectangle(cornerRadius: 3)
-                .fill(
-                    LinearGradient(
-                        colors: [accent, accent.opacity(0.60)],
-                        startPoint: .top, endPoint: .bottom
-                    )
-                )
-                .frame(width: 3, height: 14)
-
-            Text(dateString)
-                .font(.footnote.weight(.semibold))
-                .foregroundStyle(.primary.opacity(0.75))
-
-            Spacer(minLength: 6)
-
-            // 當日合計膠囊：帶淡橘背景 + 細邊框
-            HStack(spacing: 4) {
-                Text(formatCurrency(dayTotal))
-                    .font(.caption2.weight(.bold))
-                    .foregroundStyle(accent)
-                Text("· \(expenses.count) 筆")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 3)
-            .background(accent.opacity(0.10))
-            .clipShape(Capsule())
-            .overlay(
-                Capsule()
-                    .stroke(accent.opacity(0.22), lineWidth: 0.6)
-            )
-        }
-        .textCase(nil)
-    }
-
     // MARK: - 空狀態
 
     @State private var emptyIconPulse = false
@@ -608,12 +593,22 @@ struct VariableExpenseView: View {
         }
         let hiddenCount = hiddenGroups.reduce(0) { $0 + $1.value.count }
 
+        // [v25.524] 每一筆改成交易卡（MoneyItemCard），日期標頭改成日曆式（MoneyDayHeader）
+        let ctx = MoneyItemContext(lifeStore: lifeStore, store: store)
+
         ForEach(Array(visibleGroups.enumerated()), id: \.element.key) { groupIdx, group in
             let expenses = group.value
-            let dateString = expenses.first.map { Self.groupDateFormatter.string(from: $0.date) } ?? group.key
-            Section(header: daySectionHeader(dateString: dateString, expenses: expenses)) {
+            let dayDate = expenses.first?.date ?? Date()
+            Section(header: MoneyDayHeader(date: dayDate, count: expenses.count,
+                                           total: formatCurrency(expenses.reduce(0.0) { $0 + $1.amount }))) {
                 ForEach(Array(expenses.enumerated()), id: \.element.id) { rowIdx, expense in
-                    ExpenseRow(expense: expense)
+                    MoneyItemCard(item: MoneyItem.expense(expense, ctx: ctx,
+                                                          badge: Self.timeFormatter.string(from: expense.date)),
+                                  compact: compact)
+                        .listRowInsets(EdgeInsets(top: compact ? 4 : 6, leading: 16,
+                                                  bottom: compact ? 4 : 6, trailing: 16))
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
                         .contentShape(Rectangle())
                         .onTapGesture { previewExpense = expense }
                         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
@@ -806,190 +801,6 @@ struct FilterChip: View {
         .buttonStyle(.plain)
         .scaleEffect(isSelected ? 1.04 : 1.0)
         .animation(.spring(response: 0.26, dampingFraction: 0.72), value: isSelected)
-    }
-}
-
-// MARK: - 支出列
-
-struct ExpenseRow: View {
-    @EnvironmentObject var lifeStore: LifeStore
-    @EnvironmentObject var store: ExpenseStore
-    let expense: Expense
-
-    private static let currencyFormatter: NumberFormatter = {
-        let f = NumberFormatter()
-        f.numberStyle = .currency
-        f.currencyCode = "TWD"
-        f.currencySymbol = "NT$"
-        f.maximumFractionDigits = 0
-        return f
-    }()
-
-    private static let decimalFormatter: NumberFormatter = {
-        let f = NumberFormatter()
-        f.numberStyle = .decimal
-        f.maximumFractionDigits = 0
-        return f
-    }()
-
-    private var categoryAccent: Color {
-        expense.variableCategory?.accentColor ?? .secondary
-    }
-
-    var body: some View {
-        HStack(spacing: 12) {
-            // 分類圖示圓（加大 + 陰影）
-            ZStack {
-                Circle()
-                    .fill(
-                        LinearGradient(
-                            colors: [categoryAccent.opacity(0.22), categoryAccent.opacity(0.09)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-                    .frame(width: 44, height: 44)
-                    .shadow(color: categoryAccent.opacity(0.22), radius: 6, x: 0, y: 3)
-                Image(systemName: expense.categoryIcon)
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(categoryAccent)
-            }
-
-            // 標題 + 副資訊
-            VStack(alignment: .leading, spacing: 4) {
-                // [v25.520] 支出名稱過長改跑馬燈（原本被切成「…」）
-                MarqueeText(expense.title)
-                    .font(.subheadline.weight(.semibold))
-
-                // 分類膠囊標籤 + 地點指示 + 備註
-                HStack(spacing: 5) {
-                    Text(expense.categoryName)
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(categoryAccent)
-                        .padding(.horizontal, 7)
-                        .padding(.vertical, 2.5)
-                        .background(categoryAccent.opacity(0.12))
-                        .clipShape(Capsule())
-                    // 地點指示（有 GPS 座標時顯示，對應美食地圖功能入口）
-                    if expense.placeLatitude != nil {
-                        Image(systemName: "mappin.circle.fill")
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(.green.opacity(0.72))
-                    }
-                    // [v25.365] 汽車的地點名稱不在 title 裡（title 是「項目 N：型號-類別」），
-                    // 列表上看不到停在哪、在哪充電，所以額外補一段
-                    if let place = expense.placeName, !place.isEmpty {
-                        Text(place)
-                            .font(.caption2)
-                            .foregroundStyle(.teal)
-                            .lineLimit(1)
-                    }
-                    if !expense.note.isEmpty {
-                        Text(expense.note)
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                    }
-                }
-
-                // 扣款帳戶標籤（信用卡 / 銀行）
-                if let label = deductionTargetLabel {
-                    HStack(spacing: 3) {
-                        Image(systemName: deductionIcon)
-                            .font(.system(size: 9, weight: .medium))
-                        Text(label)
-                            .font(.system(size: 10, weight: .medium))
-                    }
-                    .foregroundStyle(categoryAccent.opacity(0.85))
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(categoryAccent.opacity(0.08))
-                    .clipShape(Capsule())
-                    .lineLimit(1)
-                }
-            }
-
-            Spacer(minLength: 4)
-
-            // 金額 + 同行者
-            VStack(alignment: .trailing, spacing: 4) {
-                Text(formattedAmount)
-                    .font(.system(size: 16, weight: .bold, design: .rounded))
-                    .foregroundStyle(Color(red: 0.90, green: 0.25, blue: 0.25))
-                    .contentTransition(.numericText())
-
-                if let member = expense.diningMember, !member.isEmpty {
-                    HStack(spacing: 3) {
-                        Image(systemName: "person.2.fill")
-                            .font(.system(size: 9))
-                        Text(member)
-                            .font(.system(size: 10, weight: .medium))
-                    }
-                    .foregroundStyle(.orange)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(Color.orange.opacity(0.10))
-                    .clipShape(Capsule())
-                    .lineLimit(1)
-                }
-                // 社交禮金收受人（社交分類才顯示）
-                if expense.variableCategory == .social,
-                   let recipient = expense.socialRecipient,
-                   !recipient.isEmpty {
-                    HStack(spacing: 3) {
-                        Image(systemName: "gift.fill")
-                            .font(.system(size: 9))
-                        Text(recipient)
-                            .font(.system(size: 10, weight: .medium))
-                    }
-                    .foregroundStyle(.pink)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(Color.pink.opacity(0.10))
-                    .clipShape(Capsule())
-                    .lineLimit(1)
-                }
-            }
-        }
-        .padding(.vertical, 5)
-    }
-
-    private var deductionIcon: String {
-        expense.linkedCreditCardMilestoneId != nil ? "creditcard.fill" : "building.columns.fill"
-    }
-
-    private var deductionTargetLabel: String? {
-        if let cardId = expense.linkedCreditCardMilestoneId,
-           let card = lifeStore.milestones.first(where: { $0.id == cardId }) {
-            return card.cardName ?? card.title
-        }
-        if let bankId = expense.linkedBankMilestoneId,
-           let ms = lifeStore.milestones.first(where: { $0.id == bankId }) {
-            let name = ms.bankName ?? ms.title
-            let currency = expense.linkedBankCurrency ?? "NT$"
-            return currency == "NT$" ? name : "\(name) · \(currency)"
-        }
-        return nil
-    }
-
-    private func formatCurrency(_ value: Double) -> String {
-        value.ntdWanString
-    }
-
-    /// 顯示用金額：外幣時將儲存的台幣等值除以匯率還原原幣金額
-    private var formattedAmount: String {
-        let code = expense.currencyCode
-        if code != "NT$" && code != "TWD" && !code.isEmpty {
-            let displayAmount: Double
-            if let rate = store.currencyRates.first(where: { $0.code == code }), rate.rate > 0 {
-                displayAmount = expense.amount / rate.rate
-            } else {
-                displayAmount = expense.amount
-            }
-            let str = Self.decimalFormatter.string(from: NSNumber(value: displayAmount)) ?? "0"
-            return "\(code) \(str)"
-        }
-        return formatCurrency(expense.amount)
     }
 }
 

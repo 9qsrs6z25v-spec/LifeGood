@@ -156,17 +156,27 @@ final class TripHeroStore {
         return img
     }
 
+    /// 時間軸卡片的針放在照片的哪裡（見 options 的說明）
+    static let defaultPinAt = CGPoint(x: 0.45, y: 0.38)
+
     /// 這個座標的衛星快照，中間偏左上畫一顆不帶號碼的針（號碼已經在左上角）。
+    ///
+    /// [v25.524] size／pinAt 給收支卡片用（卡面是近正方形、比時間軸的照片矮）：
+    /// 預設值就是時間軸原本的尺寸與針的位置，快取的檔名也跟原本一模一樣。
     @MainActor
     func satellite(_ c: CLLocationCoordinate2D, pin: UIColor, pinKey: Int,
-                   scale: CGFloat) async -> UIImage? {
+                   scale: CGFloat, size: CGSize = TripHeroStore.snapshotSize,
+                   pinAt: CGPoint = TripHeroStore.defaultPinAt) async -> UIImage? {
         let s = max(1, min(3, scale.rounded()))
-        let key = "sat_v1_" + String(format: "%.4f_%.4f", c.latitude, c.longitude)
-            + "_\(Int(Self.snapshotSize.width))x\(Int(Self.snapshotSize.height))"
+        var key = "sat_v1_" + String(format: "%.4f_%.4f", c.latitude, c.longitude)
+            + "_\(Int(size.width))x\(Int(size.height))"
             + "@\(Int(s))_c\(pinKey)"
+        if pinAt != Self.defaultPinAt {
+            key += "_p\(Int((pinAt.x * 100).rounded()))_\(Int((pinAt.y * 100).rounded()))"
+        }
         if let hit = memory.object(forKey: key as NSString) { return hit }
         let file = Self.directory.appendingPathComponent(key + ".jpg")
-        if let img = await diskHit(file, key: key) { return img }
+        if let img = await diskHit(file, key: key, size: size) { return img }
         if let t = failedAt[key], Date().timeIntervalSince(t) < Self.retryCooldown { return nil }
 
         let gate = TripHeroGate.shared
@@ -174,10 +184,11 @@ final class TripHeroStore {
         defer { gate.release() }
         guard await gate.waitIfPaused() else { return nil }
         // 排隊的時候，別張卡（同一個座標的另一站）可能已經拍好了
-        if let img = await diskHit(file, key: key) { return img }
+        if let img = await diskHit(file, key: key, size: size) { return img }
 
         do {
-            let snap = try await MKMapSnapshotter(options: Self.options(c, scale: s)).start()
+            let snap = try await MKMapSnapshotter(options: Self.options(c, scale: s, size: size,
+                                                                        pinAt: pinAt)).start()
             let img = Self.drawPin(snap, at: c, color: pin, scale: s)
             memory.setObject(img, forKey: key as NSString, cost: Self.cost(img))
             await Self.writeJPEG(img, to: file)
@@ -197,27 +208,29 @@ final class TripHeroStore {
     // MARK: 內部
 
     @MainActor
-    private func diskHit(_ file: URL, key: String) async -> UIImage? {
+    private func diskHit(_ file: URL, key: String,
+                         size: CGSize = TripHeroStore.snapshotSize) async -> UIImage? {
         guard FileManager.default.fileExists(atPath: file.path) else { return nil }
-        let px = max(Self.snapshotSize.width, Self.snapshotSize.height) * 3
+        let px = max(size.width, size.height) * 3
         guard let img = await Self.decode(file, maxPixel: px) else { return nil }
         memory.setObject(img, forKey: key as NSString, cost: Self.cost(img))
         return img
     }
 
-    private static func options(_ c: CLLocationCoordinate2D,
-                                scale: CGFloat) -> MKMapSnapshotter.Options {
-        let size = snapshotSize
-        // 縱向 420 公尺：看得出街廓與河道，又不會小到只剩一片屋頂
-        let spanLat: CLLocationDistance = 420
+    private static func options(_ c: CLLocationCoordinate2D, scale: CGFloat,
+                                size: CGSize = TripHeroStore.snapshotSize,
+                                pinAt: CGPoint = TripHeroStore.defaultPinAt) -> MKMapSnapshotter.Options {
+        // 縱向 420 公尺（240pt 高）：看得出街廓與河道，又不會小到只剩一片屋頂。
+        // 別的尺寸照同一個比例尺（每點 1.75 公尺），街廓在卡面上看起來一樣大
+        let spanLat: CLLocationDistance = 420 * Double(size.height / snapshotSize.height)
         let spanLon = spanLat * Double(size.width / size.height)
-        // 針放在照片 (45%, 38%) 的位置：右緣是波浪切線、左下有城市名與膠囊，
+        // 針放在照片 (45%, 38%) 的位置（pinAt 的預設值）：右緣是波浪切線、左下有城市名與膠囊，
         // 擺正中間會被擋住。所以中心點往東、往南偏。
         let metersPerDegLat = 111_320.0
         let metersPerDegLon = max(1, 111_320.0 * cos(c.latitude * .pi / 180))
         let center = CLLocationCoordinate2D(
-            latitude: c.latitude - (0.5 - 0.38) * spanLat / metersPerDegLat,
-            longitude: c.longitude + (0.5 - 0.45) * spanLon / metersPerDegLon)
+            latitude: c.latitude - (0.5 - Double(pinAt.y)) * spanLat / metersPerDegLat,
+            longitude: c.longitude + (0.5 - Double(pinAt.x)) * spanLon / metersPerDegLon)
         let o = MKMapSnapshotter.Options()
         o.region = MKCoordinateRegion(center: center,
                                       latitudinalMeters: spanLat,

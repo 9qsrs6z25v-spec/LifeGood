@@ -60,6 +60,8 @@ struct FixedExpenseView: View {
     @State private var cachedGroupedByCategory: [(key: FixedCategory, value: [Expense])] = []
     /// 英雄卡背景趨勢（月固定支出逐月序列；HeroTrendBackground 標準模板）
     @State private var heroSeries: [HeroTrendPoint] = []
+    /// [v25.524] 緊湊模式（變動支出、收入、固定支出三頁共用一個開關）
+    @AppStorage(MoneyItemCard.compactKey) private var compact = false
 
     private static let currencyFormatter: NumberFormatter = {
         let f = NumberFormatter()
@@ -125,6 +127,7 @@ struct FixedExpenseView: View {
                 }
             }
             .listStyle(.insetGrouped)
+            .listSectionSpacing(.compact)
             // onAppear/onDisappear 掛在 List 本身（而非 fixedExpenseSections 內每個分類的
             // ForEach）：List 延遲載入各 Section，掛在 ForEach 上等同掛在每組各自的子視圖上，
             // 捲動使某組進出可視範圍就各自觸發一次，所有列共用的 categoryListAppeared 旗標會被
@@ -143,6 +146,9 @@ struct FixedExpenseView: View {
             .navigationTitle("固定支出")
             .navigationBarTitleDisplayMode(.large)
             .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    MoneyCompactToggle(compact: $compact)
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
                         showingAddSheet = true
@@ -448,11 +454,21 @@ struct FixedExpenseView: View {
 
     @ViewBuilder
     private var fixedExpenseSections: some View {
+        // [v25.524] 每一筆改成固定支出卡（MoneyItemCard），分類標頭改成插畫小方塊＋分類名＋每月合計
+        let ctx = MoneyItemContext(lifeStore: lifeStore, store: store)
+
         ForEach(Array(cachedGroupedByCategory.enumerated()), id: \.element.key) { groupIdx, pair in
             let (category, expenses) = pair
-            Section(header: categoryHeader(category: category, expenses: expenses)) {
+            Section(header: MoneyGroupHeader(theme: MoneyArtTheme.of(category), title: category.rawValue,
+                                             count: expenses.count,
+                                             total: headerTotalText(category: category, expenses: expenses) + "/月")) {
                 ForEach(Array(expenses.enumerated()), id: \.element.id) { rowIdx, expense in
-                    FixedExpenseRow(expense: expense)
+                    MoneyItemCard(item: MoneyItem.fixed(expense, ctx: ctx, financeStore: financeStore),
+                                  compact: compact)
+                        .listRowInsets(EdgeInsets(top: compact ? 4 : 6, leading: 16,
+                                                  bottom: compact ? 4 : 6, trailing: 16))
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
                         .contentShape(Rectangle())
                         .onTapGesture {
                             previewExpense = expense
@@ -480,93 +496,25 @@ struct FixedExpenseView: View {
         }
     }
 
-    private func categoryAccentColor(_ category: FixedCategory) -> Color {
-        switch category {
-        case .rent:         return .blue
-        case .utilities:    return Color(red: 1.0, green: 0.75, blue: 0.10)
-        case .insurance:    return .green
-        case .subscription: return .purple
-        case .loan:         return Color(red: 0.90, green: 0.25, blue: 0.30)
-        case .telecom:      return .cyan
-        case .management:   return Color(red: 0.55, green: 0.45, blue: 0.35)
-        case .other:        return .secondary
-        }
-    }
-
-    private func categoryHeader(category: FixedCategory, expenses: [Expense]) -> some View {
+    /// 分類標頭右邊的每月合計（已開始、未停止的才算）。
+    ///
+    /// 保險分幣別小計：只有儲蓄險的 amount 是原幣別存值，其餘保險（含外幣保費）在 AddExpenseView 儲存時
+    /// 就已換算成 NT$（見 AddExpenseView.saveExpense() 的 amount 計算），currencyCode 卻仍
+    /// 保留原幣別代碼。直接用 currencyCode 分組會把已換算的 NT$ 金額誤標成外幣顯示
+    /// （例如 100 美元保費換算後存成 NT$3,100，卻顯示成「USD 3,100」），所以用 headerCurrencyCode 分組。
+    private func headerTotalText(category: FixedCategory, expenses: [Expense]) -> String {
         let now = Date()
-        let activeExpenses = expenses.filter { $0.date <= now }
-        let accent = categoryAccentColor(category)
-
-        return HStack(spacing: 9) {
-            // 分類圖示（圓角方形，帶漸層 + 外框 + 陰影）
-            ZStack {
-                RoundedRectangle(cornerRadius: 9, style: .continuous)
-                    .fill(
-                        LinearGradient(
-                            colors: [accent.opacity(0.20), accent.opacity(0.09)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-                    .frame(width: 32, height: 32)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 9, style: .continuous)
-                            .stroke(accent.opacity(0.22), lineWidth: 0.75)
-                    )
-                    .shadow(color: accent.opacity(0.18), radius: 5, x: 0, y: 2)
-                Image(systemName: category.icon)
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(accent)
-            }
-            Text(category.rawValue)
-                .font(.subheadline.weight(.bold))
-                .foregroundStyle(accent)
-
-            // 項目計數膠囊徽章（對齊 recentTransactionsSection 的計數規格）
-            Text("\(expenses.count) 項")
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(accent.opacity(0.80))
-                .padding(.horizontal, 7).padding(.vertical, 2.5)
-                .background(accent.opacity(0.10))
-                .clipShape(Capsule())
-                .overlay(Capsule().stroke(accent.opacity(0.20), lineWidth: 0.6))
-
-            Spacer()
-
-            // 月費用小計膠囊（加強邊框）
-            Group {
-                if category == .insurance {
-                    insuranceHeaderAmount(activeExpenses)
-                        .font(.caption.weight(.bold))
-                } else {
-                    Text(formatCurrency(activeExpenses.reduce(0) { $0 + monthlyEquivalent($1) }))
-                        .font(.caption.weight(.bold))
-                }
-            }
-            .padding(.horizontal, 10).padding(.vertical, 4.5)
-            .background(accent.opacity(0.10))
-            .foregroundStyle(accent)
-            .clipShape(Capsule())
-            .overlay(Capsule().stroke(accent.opacity(0.25), lineWidth: 0.7))
+        let active = expenses.filter { $0.date <= now && !$0.isFixedEnded }
+        guard category == .insurance else {
+            return formatCurrency(active.reduce(0) { $0 + monthlyEquivalent($1) })
         }
-        .textCase(nil)
-    }
-
-    @ViewBuilder
-    private func insuranceHeaderAmount(_ expenses: [Expense]) -> some View {
-        // 只有儲蓄險的 amount 是原幣別存值，其餘保險（含外幣保費）在 AddExpenseView 儲存時
-        // 就已換算成 NT$（見 AddExpenseView.saveExpense() 的 amount 計算），currencyCode 卻仍
-        // 保留原幣別代碼。先前直接用 currencyCode 分組會把已換算的 NT$ 金額誤標成外幣顯示
-        // （例如 100 美元保費換算後存成 NT$3,100，卻顯示成「USD 3,100」），比照
-        // FixedExpenseRow.formattedAmount 的 isSavingsIns 判斷改用正確的分組幣別。
-        let byCurrency = Dictionary(grouping: expenses) { headerCurrencyCode($0) }
-        let parts = byCurrency.sorted(by: { $0.key < $1.key }).map { (code, exps) -> String in
+        let byCurrency = Dictionary(grouping: active) { headerCurrencyCode($0) }
+        guard !byCurrency.isEmpty else { return formatCurrency(0) }
+        return byCurrency.sorted(by: { $0.key < $1.key }).map { (code, exps) -> String in
             let total = exps.reduce(0.0) { $0 + monthlyEquivalent($1) }
             return formatCurrencyWithCode(total, code: code)
         }
-        Text(parts.joined(separator: " + "))
-            .font(.caption.bold())
+        .joined(separator: " + ")
     }
 
     private func headerCurrencyCode(_ expense: Expense) -> String {
@@ -675,345 +623,6 @@ struct FixedExpenseView: View {
         case .none:
             return expense.date <= yearEnd ? 1 : 0
         }
-    }
-}
-
-// MARK: - 固定支出列
-
-struct FixedExpenseRow: View {
-    @EnvironmentObject var lifeStore: LifeStore
-    @EnvironmentObject var store: ExpenseStore
-    @EnvironmentObject var financeStore: FinanceStore   // 儲蓄險進度條需查連結保單
-    let expense: Expense
-
-    private static let currencyFormatter: NumberFormatter = {
-        let f = NumberFormatter()
-        f.numberStyle = .currency
-        f.currencyCode = "TWD"
-        f.currencySymbol = "NT$"
-        f.maximumFractionDigits = 0
-        return f
-    }()
-
-    private static let decimalFormatter: NumberFormatter = {
-        let f = NumberFormatter()
-        f.numberStyle = .decimal
-        f.maximumFractionDigits = 0
-        return f
-    }()
-
-    private var categoryAccent: Color {
-        switch expense.fixedCategory {
-        case .rent:         return .blue
-        case .utilities:    return Color(red: 1.0, green: 0.75, blue: 0.10)
-        case .insurance:    return .green
-        case .subscription: return .purple
-        case .loan:         return Color(red: 0.90, green: 0.25, blue: 0.30)
-        case .telecom:      return .cyan
-        case .management:   return Color(red: 0.55, green: 0.45, blue: 0.35)
-        case .other, .none: return .secondary
-        }
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            mainRow
-            loanProgressSection
-        }
-    }
-
-    private var mainRow: some View {
-        HStack(spacing: 0) {
-            // 左側分類色彩強調條（加粗至 4pt，圓角加大增加視覺重量）
-            RoundedRectangle(cornerRadius: 3)
-                .fill(
-                    LinearGradient(
-                        colors: [categoryAccent, categoryAccent.opacity(0.40)],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                )
-                .frame(width: 4)
-                .padding(.vertical, 8)
-                .padding(.trailing, 14)
-
-            HStack(spacing: 12) {
-                // 分類圖示圓（與 ExpenseRow 對齊：44pt、陰影、18pt 圖示）
-                ZStack {
-                    Circle()
-                        .fill(
-                            LinearGradient(
-                                colors: [categoryAccent.opacity(0.22), categoryAccent.opacity(0.10)],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
-                        .frame(width: 44, height: 44)
-                        .shadow(color: categoryAccent.opacity(0.22), radius: 6, x: 0, y: 3)
-                    Image(systemName: expense.fixedCategory?.icon ?? "pin.circle.fill")
-                        .font(.system(size: 18, weight: .semibold))
-                        .foregroundStyle(categoryAccent)
-                }
-
-                VStack(alignment: .leading, spacing: 4) {
-                    // [v25.520] 項目名稱過長改跑馬燈（原本被切成「…」）
-                    MarqueeText(expense.title)
-                        .font(.subheadline.weight(.semibold))
-                    HStack(spacing: 4) {
-                        // [v25.347] 已停止（取消訂閱／繳清／退租⋯）
-                        if expense.isFixedEnded {
-                            HStack(spacing: 2) {
-                                Image(systemName: "stop.circle.fill").font(.system(size: 8))
-                                Text(expense.endReason?.rawValue ?? "已停止")
-                                    .font(.system(size: 9, weight: .bold))
-                            }
-                            .padding(.horizontal, 5).padding(.vertical, 2)
-                            .background(Color.orange.opacity(0.14))
-                            .foregroundStyle(Color.orange)
-                            .clipShape(Capsule())
-                        }
-                        if let recurrence = expense.recurrence {
-                            Text(recurrence.rawValue)
-                                .font(.system(size: 10, weight: .semibold))
-                                .padding(.horizontal, 7)
-                                .padding(.vertical, 2.5)
-                                .background(categoryAccent.opacity(0.12))
-                                .foregroundStyle(categoryAccent)
-                                .clipShape(Capsule())
-                        }
-                        if expense.effectivelyTaxDeductible {
-                            HStack(spacing: 2) {
-                                Image(systemName: "leaf.fill")
-                                    .font(.system(size: 8))
-                                Text("節稅")
-                                    .font(.system(size: 9, weight: .bold))
-                            }
-                            .padding(.horizontal, 5).padding(.vertical, 2)
-                            .background(Color.green.opacity(0.12))
-                            .foregroundStyle(Color.green)
-                            .clipShape(Capsule())
-                        }
-                        if !expense.note.isEmpty {
-                            Text(expense.note)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                        }
-                    }
-                }
-
-                Spacer(minLength: 4)
-
-                VStack(alignment: .trailing, spacing: 4) {
-                    Text(formattedAmount)
-                        .font(.system(size: 16, weight: .bold, design: .rounded))
-                        .foregroundStyle(Color(red: 0.92, green: 0.28, blue: 0.28))
-                        .contentTransition(.numericText())
-
-                    // 季繳 / 年繳：顯示月均換算，幫助使用者快速理解月度負擔
-                    monthlyAverageBadge
-
-                    deductionLabelBadge
-                }
-            }
-            .padding(.vertical, 7)
-        }
-        // 已停止的項目整列淡化，但仍留在清單裡（歷史與統計都保留）
-        .opacity(expense.isFixedEnded ? 0.55 : 1)
-    }
-
-    /// 繳費進度條（貸款＋儲蓄險共用；使用者指定兩者顯示方式對齊）。
-    /// 4pt 膠囊軌＋分類色漸層＋glow，右側標「已繳/總期」；繳清顯示「已繳清/已繳滿」。
-    @ViewBuilder
-    private var loanProgressSection: some View {
-        if let lp = rowProgress {
-            HStack(spacing: 8) {
-                GeometryReader { geo in
-                    ZStack(alignment: .leading) {
-                        Capsule()
-                            .fill(Color(.systemFill))
-                            .frame(height: 4)
-                        Capsule()
-                            .fill(
-                                LinearGradient(
-                                    colors: [categoryAccent, categoryAccent.opacity(0.60)],
-                                    startPoint: .leading,
-                                    endPoint: .trailing
-                                )
-                            )
-                            .frame(width: geo.size.width * lp.ratio, height: 4)
-                        // glow overlay 對齊 SavingsInsuranceView 進度條規格
-                        Capsule()
-                            .fill(
-                                LinearGradient(
-                                    colors: [.white.opacity(0.28), .clear, .black.opacity(0.08)],
-                                    startPoint: .top,
-                                    endPoint: .bottom
-                                )
-                            )
-                            .frame(width: geo.size.width * lp.ratio, height: 4)
-                    }
-                }
-                .frame(height: 4)
-                Text(lp.text)
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-                    .fixedSize()
-            }
-            .padding(.leading, 18)   // 對齊左側 4pt 強調條後的內容起點
-            .padding(.trailing, 2)
-            .padding(.bottom, 9)
-        }
-    }
-
-    /// 列表進度（貸款＋儲蓄險）：
-    /// - 貸款：優先用「貸款年期」推總期數，沒填年期時用「貸款總額 ÷ 月付」推估；
-    ///   起始日即繳第一期（比照儲蓄險 elapsedPeriods 規則）
-    /// - 儲蓄險：查連結保單的已繳/總期數（正向 linkedInsuranceId、反向 linkedExpenseId 都試）
-    /// 資料不足不顯示。
-    private var rowProgress: (ratio: Double, text: String)? {
-        if expense.fixedCategory == .loan {
-            let monthly = monthlyEquivalentAmount(expense)
-            var totalMonths = 0
-            if let years = expense.loanYears, years > 0 {
-                totalMonths = Int((years * 12).rounded())
-            } else if let total = expense.loanTotalAmount, total > 0, monthly > 0 {
-                totalMonths = Int((total / monthly).rounded())
-            }
-            guard totalMonths > 0 else { return nil }
-            let months = Calendar.current.dateComponents([.month], from: expense.date, to: Date()).month ?? 0
-            let elapsed = max(0, min(months + 1, totalMonths))
-            return (Double(elapsed) / Double(totalMonths),
-                    elapsed >= totalMonths ? "已繳清" : "\(elapsed)/\(totalMonths) 期")
-        }
-        if expense.fixedCategory == .insurance, expense.insuranceSubCategory == .savings,
-           let ins = linkedSavingsForRow, ins.totalPeriods > 0 {
-            let elapsed = ins.elapsedPeriods
-            let total = ins.totalPeriods
-            return (min(1, Double(elapsed) / Double(total)),
-                    elapsed >= total ? "已繳滿" : "\(elapsed)/\(total) 期")
-        }
-        return nil
-    }
-
-    private var linkedSavingsForRow: SavingsInsurance? {
-        if let id = expense.linkedInsuranceId,
-           let ins = financeStore.insurances.first(where: { $0.id == id }) {
-            return ins
-        }
-        return financeStore.insurances.first { $0.linkedExpenseId == expense.id }
-    }
-
-    /// 季繳 / 年繳的「月均」膠囊（抽出以降低主 body 型別檢查複雜度）
-    @ViewBuilder
-    private var monthlyAverageBadge: some View {
-        let monthly = monthlyEquivalentAmount(expense)
-        if let recurrence = expense.recurrence, recurrence != .monthly, monthly > 0 {
-            HStack(spacing: 2) {
-                Image(systemName: "arrow.down.to.line")
-                    .font(.system(size: 8, weight: .medium))
-                Text("月均 \(monthlyAverageText(monthly))")
-                    .font(.system(size: 10, weight: .semibold))
-            }
-            .foregroundStyle(Color(red: 0.92, green: 0.28, blue: 0.28).opacity(0.65))
-            .padding(.horizontal, 6).padding(.vertical, 2)
-            .background(Color(red: 0.92, green: 0.28, blue: 0.28).opacity(0.08))
-            .clipShape(Capsule())
-        }
-    }
-
-    /// 扣款對象（信用卡 / 銀行）標籤膠囊
-    @ViewBuilder
-    private var deductionLabelBadge: some View {
-        if let label = deductionTargetLabel {
-            HStack(spacing: 3) {
-                Image(systemName: deductionIcon)
-                    .font(.system(size: 9))
-                Text(label)
-                    .font(.system(size: 10, weight: .medium))
-            }
-            .foregroundStyle(categoryAccent.opacity(0.85))
-            .padding(.horizontal, 6)
-            .padding(.vertical, 2)
-            .background(categoryAccent.opacity(0.08))
-            .clipShape(Capsule())
-            .lineLimit(1)
-        }
-    }
-
-    private var formattedAmount: String {
-        let code = expense.currencyCode
-        // 儲蓄險的 amount 已是原幣別存值（沒乘匯率），其他類型存的是換算後的 NT$。
-        let isSavingsIns = expense.fixedCategory == .insurance
-            && expense.insuranceSubCategory == .savings
-        if code != "NT$" && code != "TWD" && !code.isEmpty {
-            let displayAmount: Double
-            if isSavingsIns {
-                displayAmount = expense.amount
-            } else if let rate = store.currencyRates.first(where: { $0.code == code }), rate.rate > 0 {
-                displayAmount = expense.amount / rate.rate
-            } else {
-                displayAmount = expense.amount
-            }
-            let str = Self.decimalFormatter.string(from: NSNumber(value: displayAmount)) ?? "0"
-            return "\(code) \(str)"
-        }
-        return formatCurrency(expense.amount)
-    }
-
-    private var deductionIcon: String {
-        expense.linkedCreditCardMilestoneId != nil ? "creditcard.fill" : "building.columns.fill"
-    }
-
-    private var deductionTargetLabel: String? {
-        if let cardId = expense.linkedCreditCardMilestoneId,
-           let card = lifeStore.milestones.first(where: { $0.id == cardId }) {
-            return card.cardName ?? card.title
-        }
-        if let bankId = expense.linkedBankMilestoneId,
-           let ms = lifeStore.milestones.first(where: { $0.id == bankId }) {
-            let name = ms.bankName ?? ms.title
-            let currency = expense.linkedBankCurrency ?? "NT$"
-            return currency == "NT$" ? name : "\(name) · \(currency)"
-        }
-        return nil
-    }
-
-    private func formatCurrency(_ value: Double) -> String {
-        value.ntdWanString
-    }
-
-    /// 月均膠囊文字：儲蓄險 amount 是原幣別存值，外幣要標原幣別
-    /// （修正：USD 5,000 年繳曾顯示成「月均 NT$417」——數字是美元卻掛 NT$ 字頭）
-    private func monthlyAverageText(_ monthly: Double) -> String {
-        let code = expense.currencyCode
-        let isSavingsIns = expense.fixedCategory == .insurance
-            && expense.insuranceSubCategory == .savings
-        if isSavingsIns && code != "NT$" && code != "TWD" && !code.isEmpty {
-            let str = Self.decimalFormatter.string(from: NSNumber(value: monthly)) ?? "0"
-            return "\(code) \(str)"
-        }
-        return formatCurrencyCompact(monthly)
-    }
-
-    /// 依週期換算月均金額（與 FixedExpenseView.monthlyEquivalent 邏輯一致）
-    private func monthlyEquivalentAmount(_ expense: Expense) -> Double {
-        switch expense.recurrence {
-        case .monthly:   return expense.amount
-        case .quarterly: return expense.amount / 3
-        case .yearly:    return expense.amount / 12
-        case .none:      return 0
-        }
-    }
-
-    /// 金額緊湊格式：≥1萬顯示「N萬 / N.N萬」，否則顯示「NT$X」
-    private func formatCurrencyCompact(_ value: Double) -> String {
-        if abs(value) >= 10_000 {
-            let wan = value / 10_000
-            let str = (wan == wan.rounded()) ? String(format: "%.0f", wan) : String(format: "%.1f", wan)
-            return "\(str)萬"
-        }
-        return Self.currencyFormatter.string(from: NSNumber(value: value)) ?? "NT$0"
     }
 }
 
