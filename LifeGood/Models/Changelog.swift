@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.525", build: 1278, date: "2026/08/19", notes: [
+            "【修正】v25.524 編譯失敗（'FixedExpenseCard' is inaccessible due to 'private' protection level）：總覽「最近交易」點一筆固定支出要打開固定支出的預覽卡片，但那張卡原本只開放給固定支出頁自己用。改成全 App 都能用，卡片本身沒有任何改變。v25.524 的內容（收支五頁的項目改版）都在這一版裡。"
+        ]),
         ChangelogEntry(version: "25.524", build: 1277, date: "2026/08/19", notes: [
             "【改版】收支五頁（總覽、變動支出、收入、固定支出、圖表）的**項目**改成跟旅遊項目同一套設計（你說：「我覺得項目的藝術感跟質感都差太多了」，看過樣稿後：「好直接五個項目做一做」）。",
             "【說明】每一筆是一張卡。左邊的卡面依序放：① 你替這筆支出拍的照片；② 有店家位置的話，那裡的**衛星空照＋手寫城市名**（例如 Fukuoka／JAPAN，跟行程卡同一套）；③ 都沒有就是**分類插畫**——分類色漸層、一層紋理、裁出畫面的大圖示、手寫英文字（Dining、Transit、Shopping…）。插畫一共 27 張：變動支出 14 類、固定支出 8 類、收入 5 類，同一套構圖，看起來是一整組。",

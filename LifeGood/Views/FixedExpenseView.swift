@@ -638,7 +638,9 @@ private struct Line: Shape {
     }
 }
 
-private struct FixedExpenseCard: View {
+// [v25.525] 拿掉 private：總覽的「最近交易」點一筆固定支出也要打開這張卡（v25.524 編譯失敗：
+// 'FixedExpenseCard' is inaccessible due to 'private' protection level）
+struct FixedExpenseCard: View {
     @EnvironmentObject var store: ExpenseStore
     @EnvironmentObject var lifeStore: LifeStore
     @EnvironmentObject var financeStore: FinanceStore
