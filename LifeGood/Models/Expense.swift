@@ -611,6 +611,32 @@ struct Expense: Identifiable, Codable {
         return cal.date(byAdding: .month, value: max(1, months), to: date)
     }
 
+    /// 下一次扣款日（在 from 那一天或之後；今天要扣的就回今天）。
+    ///
+    /// 規則跟 fixedPeriodCount 一樣：第一期是起始日（貸款是起始日的下一期），之後每期
+    /// 加一個週期，結束日當期仍算。不是週期性固定支出、或已經沒有下一期了，回 nil。
+    ///
+    /// 第 k 期是「第一期 ＋ k 個週期」一次算出來，不是一期一期往上加：1/31 一期一期加
+    /// 會變成 2/28、3/28、4/28…（之後每個月都少三天），一次加才會是 3/31、4/30。
+    func nextFixedDueDate(onOrAfter from: Date = Date(), calendar: Calendar = .current) -> Date? {
+        guard isRecurringFixed, let rec = recurrence else { return nil }
+        let (component, step) = rec.componentValue
+        let first = fixedCategory == .loan
+            ? (calendar.date(byAdding: component, value: step, to: date) ?? date)
+            : date
+        let target = calendar.startOfDay(for: from)
+        var k = 0
+        var due = first
+        while calendar.startOfDay(for: due) < target && k < 1200 {
+            k += 1
+            due = calendar.date(byAdding: component, value: step * k, to: first) ?? due
+        }
+        if let end = endDate, calendar.startOfDay(for: due) > calendar.startOfDay(for: end) {
+            return nil
+        }
+        return due
+    }
+
     /// 從起始日到 until 為止，實際會發生幾期扣款（含結束日當期）。
     func fixedPeriodCount(until: Date = Date(), calendar: Calendar = .current) -> Int {
         guard isRecurringFixed, let rec = recurrence else { return 0 }

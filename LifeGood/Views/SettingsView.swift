@@ -3721,6 +3721,13 @@ struct HeroCardOverrideView: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
+                    // [v25.522] 收支總覽最上面改成看板（OverviewBoard），不走英雄卡殼層了
+                    if card == .overview {
+                        Label("收支總覽最上面的看板是固定的設計（右上角的太陽跟著月進度走），跟著淺色／深色模式，只有「圓角」會跟著這裡，漸層、KPI 與大字的設定不會作用在它上面。",
+                              systemImage: "info.circle.fill")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
                 Section("顏色") {
                     ForEach(HeroTint.allCases) { t in

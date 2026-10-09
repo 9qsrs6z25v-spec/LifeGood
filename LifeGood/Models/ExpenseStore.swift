@@ -189,6 +189,29 @@ class ExpenseStore: ObservableObject {
         return sorted[count / 2]
     }
 
+    // MARK: - 預算基準（v25.522）
+
+    /// 這個月拿來算「錢花了幾成、每天還能花多少」的收入基準。
+    ///
+    /// ⚠️ 不能直接用「本月已入帳」：月初薪水還沒進來、只有一筆幾百塊的配息入帳時，
+    ///    分母就是那幾百塊，比例會變成「本月支出已超出 638%」（使用者實機截圖，
+    ///    10/5 一筆 NT$530 配息、薪水 25 號才入帳）。原本只有「本月一筆收入都沒有」
+    ///    才改用近 6 個月中位數，只要有一筆就整個換成實際入帳。
+    ///    改成取「本月已入帳」與「近 6 個月中位數」較大的那個：薪水進來之後自然就用實際的。
+    var budgetBaseIncome: Double {
+        max(currentMonthIncomeTotal, estimatedMonthlyIncome)
+    }
+
+    /// 預算基準是不是用預估的（本月實際入帳還比近 6 個月中位數少）
+    var budgetBaseIsEstimate: Bool {
+        estimatedMonthlyIncome > currentMonthIncomeTotal
+    }
+
+    /// 指定月份的固定支出月等值（跟「本月固定支出」同一套規則：週期換算成月、只算當時有效的）
+    func fixedMonthlyTotal(for date: Date) -> Double {
+        projectedFixedTotal(for: date, period: .monthly, calendar: Calendar.current)
+    }
+
     /// 今年累計收入（每年 1/1 重新起算）：逐月加總今年 1 月至本月的收入合計，
     /// 單次收入計實際發生月份、週期收入依月金額逐月累計（年薪攤 12 個月），
     /// 固定薪水設有結束日者結束月後不再計入（與 incomeTotal(for:) 同一套規則）。

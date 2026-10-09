@@ -236,11 +236,14 @@ struct IncomeView: View {
     }
 
 
-    /// 卡片下方超支提示用的比例（本月總支出 ÷ 本月收入；與卡內進度條同口徑、不夾住）
+    /// 卡片下方超支提示用的比例（本月總支出 ÷ 預算基準；不夾住）
+    ///
+    /// [v25.522] 原本只要本月有任何一筆收入就拿「已入帳」當分母：月初只進了一筆
+    /// NT$530 的股利，支出 NT$3,400 就變成「已花 638%」。改用 store.budgetBaseIncome
+    /// （已入帳與近 6 個月中位數取大），薪水還沒進來之前先用估的。
     private var overspendRatio: Double {
-        let useEstimate = !store.hasCurrentMonthIncome && store.estimatedMonthlyIncome > 0
-        let income = useEstimate ? store.estimatedMonthlyIncome : store.currentMonthIncomeTotal
-        return income > 0 ? store.currentMonthTotal / income : 0
+        let base = store.budgetBaseIncome
+        return base > 0 ? store.currentMonthTotal / base : 0
     }
 
     private var summaryHeader: some View {

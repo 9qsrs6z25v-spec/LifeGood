@@ -53,12 +53,15 @@ struct OverviewView: View {
     @State private var showAddFixed = false
     @State private var showAddStock = false
     @State private var showAddRealEstate = false
-    @State private var appearedCards: Set<String> = []
-    @State private var ringPulse = false
-    @State private var ringPulseTask: Task<Void, Never>?
+    @State private var boardAppeared = false
     @State private var recentListAppeared = false
     @State private var categoryListAppeared = false
-    @State private var todayCardAppeared = false
+    /// 看板的數字一次算好（.task(id: store.modifyID)），不要在 body 裡掃支出
+    @State private var board = OverviewBoardData()
+    /// 從「未來 7 天要扣」點進來編輯的那筆固定支出
+    @State private var editingFixed: Expense?
+    /// 看板格子點下去切到收入／變動／固定那一頁（跟頂部子功能列同一個值）
+    @AppStorage("expense_feature") private var expenseFeatureRaw: String = ExpenseFeature.overview.rawValue
     @State private var cachedRecentItems: [RecentItem] = []
     @State private var cachedCategoryTotals: [(category: VariableCategory, amount: Double)] = []
 
@@ -83,107 +86,31 @@ struct OverviewView: View {
         return f
     }()
 
-    private static let monthFormatter: DateFormatter = {
-        let f = DateFormatter()
-        f.dateFormat = "yyyy年M月"
-        return f
-    }()
-
-    private var displayedIncome: Double {
-        store.hasCurrentMonthIncome ? store.currentMonthIncomeTotal : store.estimatedMonthlyIncome
-    }
-
-    private var isEstimated: Bool {
-        !store.hasCurrentMonthIncome && store.estimatedMonthlyIncome > 0
-    }
-
-    // 本月過了幾天 / 共幾天
-    private var monthProgress: Double {
-        let cal = Calendar.current
-        let now = Date()
-        let day = Double(cal.component(.day, from: now))
-        let range = cal.range(of: .day, in: .month, for: now)
-        let total = Double(range?.count ?? 30)
-        return min(day / total, 1.0)
-    }
-
     var body: some View {
-        // [效能] displayedIncome／isEstimated 各自都會掃描 incomes 陣列（isEstimated 內部
-        // 還會呼叫 estimatedMonthlyIncome 逐月重算），原本 monthlyBalanceCard 與下方
-        // summaryCard 各自獨立存取，同一次 body render 會重複觸發 4~6 次相同掃描；
-        // 在此一次性計算後以參數傳入，兩處共用同一份結果。
-        let income = displayedIncome
-        let estimated = isEstimated
-        return NavigationStack {
+        NavigationStack {
             ScrollView {
                 VStack(spacing: 20) {
-                    VStack(spacing: 0) {
-                        monthlyBalanceCard(income: income, isEstimated: estimated)
-                            .padding(.horizontal)
-                        // 超支警示：emoji 小字提示掛在卡片下方（正常時不顯示）
-                        HeroOverspendHint(
-                            ratio: income > 0 ? store.currentMonthTotal / income : 0,
-                            monthProgress: monthProgress)
-                    }
-                        .opacity(appearedCards.contains("header") ? 1 : 0)
-                        .offset(y: appearedCards.contains("header") ? 0 : 20)
+                    // [v25.522] 原本的「收支結餘英雄卡＋三格摘要＋今日卡」換成一塊看板
+                    // （OverviewBoard.swift）：結餘與儲蓄率、六格 KPI、燒錢進度、這個月的小事、
+                    // 未來 7 天要扣的固定支出。
+                    OverviewBoard(
+                        data: board,
+                        openIncome: { open(.income) },
+                        openVariable: { open(.variable) },
+                        openFixed: { open(.fixed) },
+                        editFixed: { id in
+                            editingFixed = store.expenses.first { $0.id == id }
+                        })
+                        .padding(.horizontal)
+                        .opacity(boardAppeared ? 1 : 0)
+                        .offset(y: boardAppeared ? 0 : 20)
                         .onAppear {
                             withAnimation(.spring(response: 0.55, dampingFraction: 0.78)) {
-                                _ = appearedCards.insert("header")
+                                boardAppeared = true
                             }
                         }
                         .onDisappear {
-                            appearedCards.remove("header")
-                        }
-
-                    HStack(alignment: .top, spacing: 12) {
-                        summaryCard(
-                            title: estimated ? "收入 (預估)" : "收入",
-                            amount: income,
-                            icon: "banknote.fill",
-                            color: .green,
-                            key: "income"
-                        )
-                        summaryCard(
-                            title: "變動支出",
-                            amount: store.currentMonthVariableTotal,
-                            icon: "arrow.up.arrow.down.circle.fill",
-                            color: .orange,
-                            key: "variable"
-                        )
-                        summaryCard(
-                            title: "固定支出",
-                            amount: store.currentMonthFixedTotal,
-                            icon: "pin.circle.fill",
-                            color: .blue,
-                            key: "fixed"
-                        )
-                    }
-                    .padding(.horizontal)
-
-                    todayCard
-                        .padding(.horizontal)
-                        .opacity(todayCardAppeared ? 1 : 0)
-                        .offset(y: todayCardAppeared ? 0 : 16)
-                        .onAppear {
-                            withAnimation(.spring(response: 0.52, dampingFraction: 0.80).delay(0.10)) {
-                                todayCardAppeared = true
-                            }
-                            // 先重置為 false，確保即使殘留 Task 搶先將 ringPulse 設為 true，
-                            // 下方的 Task 仍能產生 false→true 的變化讓 animation(value:) 重新作用
-                            ringPulse = false
-                            ringPulseTask?.cancel()
-                            ringPulseTask = Task {
-                                try? await Task.sleep(nanoseconds: 600_000_000)
-                                guard !Task.isCancelled else { return }
-                                ringPulse = true
-                            }
-                        }
-                        .onDisappear {
-                            // 重置旗標，讓下次 onAppear 時脈衝動畫與進場動畫都能重新觸發
-                            ringPulseTask?.cancel()
-                            ringPulse = false
-                            todayCardAppeared = false
+                            boardAppeared = false
                         }
 
                     categoryBreakdownSection
@@ -211,9 +138,12 @@ struct OverviewView: View {
             .sheet(isPresented: $showAddFixed) { AddExpenseView(expenseType: .fixed) }
             .sheet(isPresented: $showAddStock) { AddStockView() }
             .sheet(isPresented: $showAddRealEstate) { AddRealEstateView() }
+            .sheet(item: $editingFixed) { e in AddExpenseView(expenseType: .fixed, editingExpense: e) }
             .task(id: store.modifyID) {
                 cachedRecentItems = buildRecentItems()
                 cachedCategoryTotals = store.variableCategoryTotals()
+                // .task 每次出現都會重跑（切回這頁、跨過午夜再打開），日期相關的數字跟著更新
+                board = OverviewBoardData.build(store: store)
             }
         }
     }
@@ -229,408 +159,12 @@ struct OverviewView: View {
         }
     }
 
-    // MARK: - KPI 格（對齊 IncomeView / VariableExpenseView / FixedExpenseView kpiCell 規格）
-
-
-    // MARK: - 本月收支摘要卡片
-
-    private func monthlyBalanceCard(income: Double, isEstimated: Bool) -> some View {
-        // 一次計算 currentMonthTotal（含兩次 O(n) 掃描），避免透過原先 spendingRatio /
-        // spendingBarColor 兩個 struct-level computed property 在 body 內重複呼叫 10+ 次
-        let total = store.currentMonthTotal
-        let balance = income - total
-        let isPositive = balance >= 0
-        let spendingRatio = income > 0 ? min(total / income, 1.0) : 0.0
-        let barColor: Color = {
-            if spendingRatio > HeroOverspendHint.dangerRatio { return Color.red.opacity(0.85) }
-            if spendingRatio > monthProgress + HeroOverspendHint.warnLead {
-                return Color(red: 1.0, green: 0.65, blue: 0.22).opacity(0.90)
-            }
-            return .white.opacity(0.85)
-        }()
-        // [v4] KPI 橫列計算：一次讀取，避免 closure 內重複呼叫 store
-        let day = Calendar.current.component(.day, from: Date())
-        let todayTotalKPI = store.todayTotal
-        let fixedTotalKPI = store.currentMonthFixedTotal
-
-        return VStack(spacing: 0) {
-            // 頂部：收入 vs 支出
-            HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 3) {
-                    HStack(spacing: 5) {
-                        Text(isEstimated ? "本月收入（預估）" : "本月收入")
-                            .font(.caption)
-                            .foregroundStyle(.white.opacity(0.75))
-                        if isEstimated {
-                            Text("預估")
-                                .font(.system(size: 9, weight: .semibold))
-                                .padding(.horizontal, 5).padding(.vertical, 1)
-                                .background(.white.opacity(0.22))
-                                .clipShape(Capsule())
-                                .foregroundStyle(.white)
-                        }
-                    }
-                    // [v4] 補入 minimumScaleFactor + lineLimit + contentTransition，防大數字截斷
-                    Text(smartCurrency(income))
-                        .font(.title3.bold())
-                        .foregroundStyle(.white)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.72)
-                        .contentTransition(.numericText())
-                }
-                Spacer()
-                VStack(alignment: .trailing, spacing: 3) {
-                    Text("本月支出")
-                        .font(.caption)
-                        .foregroundStyle(.white.opacity(0.75))
-                    // [v4] 補入 minimumScaleFactor + lineLimit + contentTransition
-                    Text(smartCurrency(total))
-                        .font(.title3.bold())
-                        .foregroundStyle(.white)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.72)
-                        .contentTransition(.numericText())
-                }
-            }
-
-            // [v4] KPI 橫列：今日花費 / 日均支出 / 本月固定，
-            // 對齊 IncomeView / VariableExpenseView / FixedExpenseView summaryHeader KPI 三格規格
-            HStack(spacing: 0) {
-                HeroKpiCell(label: "今日花費", value: smartCurrency(todayTotalKPI))
-                HeroKpiDivider()
-                HeroKpiCell(label: "日均支出", value: smartCurrency(total / Double(max(day, 1))))
-                HeroKpiDivider()
-                HeroKpiCell(label: "本月固定", value: smartCurrency(fixedTotalKPI))
-            }
-            .padding(.vertical, 10)
-            .background(.white.opacity(0.08))
-            .clipShape(RoundedRectangle(cornerRadius: 10))
-            .padding(.top, 12)
-
-            // 分隔線
-            Rectangle()
-                .fill(.white.opacity(0.2))
-                .frame(height: 0.5)
-                .padding(.vertical, 14)
-
-            // 收支餘額
-            HStack(alignment: .bottom) {
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: 4) {
-                        Text("收支餘額")
-                            .font(.subheadline)
-                            .foregroundStyle(.white.opacity(0.8))
-                        if isEstimated {
-                            Text("預估")
-                                .font(.system(size: 9, weight: .semibold))
-                                .padding(.horizontal, 5).padding(.vertical, 1)
-                                .background(.white.opacity(0.22))
-                                .clipShape(Capsule())
-                                .foregroundStyle(.white)
-                        }
-                    }
-                    Text(currentMonthString())
-                        .font(.caption2)
-                        .foregroundStyle(.white.opacity(0.45))
-                }
-                Spacer()
-                // [v5] 補入 minimumScaleFactor + lineLimit，收支餘額是本卡三個數字中最寬的一個
-                // （"+"／"-" 符號 + 金額），v4 只補了收入／支出兩個子欄位，漏了這裡，
-                // 大額結餘（含負數）在小螢幕上原本沒有防截斷保護。
-                Text((isPositive ? "+" : "") + smartCurrency(balance))
-                    .heroBigValueFont()
-                    .foregroundStyle(isPositive ? .white : Color(red: 1.0, green: 0.78, blue: 0.75))
-                    .contentTransition(.numericText())
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.6)
-                    .shadow(
-                        color: isPositive ? .clear : Color.red.opacity(0.45),
-                        radius: 8, x: 0, y: 2
-                    )
-            }
-
-            // 雙軌進度條：月進度（上）+ 支出比例（下，附月進度指示針）
-            if income > 0 {
-                VStack(spacing: 5) {
-                    // ① 月進度軌（薄軌，半透明白）
-                    GeometryReader { geo in
-                        ZStack(alignment: .leading) {
-                            Capsule()
-                                .fill(.white.opacity(0.12))
-                                .frame(height: 3)
-                            Capsule()
-                                .fill(.white.opacity(0.44))
-                                .frame(width: geo.size.width * monthProgress, height: 3)
-                                .animation(.spring(response: 0.7, dampingFraction: 0.8), value: monthProgress)
-                        }
-                    }
-                    .frame(height: 3)
-
-                    // ② 支出比例軌（厚軌 + 月進度指示針）
-                    GeometryReader { geo in
-                        ZStack(alignment: .leading) {
-                            Capsule()
-                                .fill(.white.opacity(0.18))
-                                .frame(height: 6)
-                            Capsule()
-                                .fill(barColor)
-                                .frame(width: geo.size.width * spendingRatio, height: 6)
-                                .animation(.spring(response: 0.7, dampingFraction: 0.8), value: spendingRatio)
-                            // 月進度指示針（細白豎棒，指示月份走到哪）
-                            Capsule()
-                                .fill(.white.opacity(0.92))
-                                .frame(width: 2, height: 6)
-                                .shadow(color: .black.opacity(0.25), radius: 1.5, x: 0, y: 0)
-                                .offset(x: max(0, geo.size.width * monthProgress - 1))
-                                .animation(.spring(response: 0.7, dampingFraction: 0.8), value: monthProgress)
-                        }
-                    }
-                    .frame(height: 6)
-
-                    HStack {
-                        // 警示圖示已移至卡片下方的 HeroOverspendHint（emoji 小字提示）
-                        Text("支出 \(Int(spendingRatio * 100))%")
-                        .font(.caption2)
-                        .foregroundStyle(spendingRatio > monthProgress + HeroOverspendHint.warnLead
-                                         ? (spendingRatio > HeroOverspendHint.dangerRatio
-                                            ? Color(red: 1.0, green: 0.78, blue: 0.75)
-                                            : Color(red: 1.0, green: 0.90, blue: 0.55))
-                                         : .white.opacity(0.60))
-                        Spacer()
-                        Text("月進度 \(Int(monthProgress * 100))%")
-                            .font(.caption2)
-                            .foregroundStyle(.white.opacity(0.60))
-                    }
-                }
-                .padding(.top, 12)
-            }
+    /// 看板格子 → 切到那一頁（同頂部子功能列、同左右滑的動畫）
+    private func open(_ feature: ExpenseFeature) {
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        withAnimation(.spring(response: 0.28, dampingFraction: 0.70)) {
+            expenseFeatureRaw = feature.rawValue
         }
-        .padding(20)
-        .heroCardShell(card: .overview)
-    }
-
-    // MARK: - 摘要小卡
-
-    private func cardDelay(_ key: String) -> Double {
-        switch key {
-        case "income":   return 0.08
-        case "variable": return 0.16
-        case "fixed":    return 0.24
-        default:         return 0.0
-        }
-    }
-
-    private func summaryCard(title: String, amount: Double, icon: String, color: Color, key: String) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            // 彩色頂端條
-            RoundedRectangle(cornerRadius: 2)
-                .fill(
-                    LinearGradient(
-                        colors: [color, color.opacity(0.55)],
-                        startPoint: .leading, endPoint: .trailing
-                    )
-                )
-                .frame(height: 4)
-                .padding(.bottom, 10)
-
-            HStack(spacing: 6) {
-                // [v3] 圖示圓：純色 opacity.0.16 → LinearGradient (0.20→0.08) + stroke border，對齊 categoryRow 規格
-                ZStack {
-                    Circle()
-                        .fill(
-                            LinearGradient(
-                                colors: [color.opacity(0.20), color.opacity(0.08)],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
-                        .frame(width: 32, height: 32)
-                    Circle()
-                        .stroke(color.opacity(0.18), lineWidth: 0.75)
-                        .frame(width: 32, height: 32)
-                    Image(systemName: icon)
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(color)
-                }
-                Text(title)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
-            }
-
-            Spacer(minLength: 8)
-
-            Text(smartCurrency(amount))
-                .font(.system(size: 15, weight: .bold, design: .rounded))
-                .foregroundStyle(.primary)
-                .minimumScaleFactor(0.7)
-                .lineLimit(1)
-                .contentTransition(.numericText())
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 12)
-        .padding(.top, 12)
-        .padding(.bottom, 14)
-        .background(
-            ZStack {
-                Color(.systemBackground)
-                color.opacity(0.04)
-            }
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 16))
-        .overlay(
-            RoundedRectangle(cornerRadius: 16)
-                .stroke(color.opacity(0.12), lineWidth: 0.75)
-        )
-        .shadow(color: color.opacity(0.13), radius: 10, x: 0, y: 4)
-        .shadow(color: .black.opacity(0.04), radius: 4, x: 0, y: 1)
-        .opacity(appearedCards.contains(key) ? 1 : 0)
-        .offset(y: appearedCards.contains(key) ? 0 : 18)
-        .onAppear {
-            withAnimation(.spring(response: 0.50, dampingFraction: 0.78).delay(cardDelay(key))) {
-                _ = appearedCards.insert(key)
-            }
-        }
-    }
-
-    // MARK: - 今日花費
-
-    private var todayCard: some View {
-        let cal = Calendar.current
-        let day = cal.component(.day, from: Date())
-        let weekday = cal.component(.weekday, from: Date())
-        let weekdays = ["日", "一", "二", "三", "四", "五", "六"]
-        let weekdayIdx = weekday - 1
-        let weekdayStr = weekdays.indices.contains(weekdayIdx) ? weekdays[weekdayIdx] : ""
-        let todayTotal = store.todayTotal
-        let hasSpending = todayTotal > 0
-        // [v3] 今日交易筆數，用於右側計數膠囊
-        let todayCount = store.expenses.filter { cal.isDateInToday($0.date) }.count
-
-        return HStack(spacing: 0) {
-            // 左側綠色強調條
-            RoundedRectangle(cornerRadius: 2)
-                .fill(
-                    LinearGradient(
-                        colors: [.green, .green.opacity(0.40)],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                )
-                .frame(width: 4)
-                .padding(.vertical, 10)
-                .padding(.trailing, 14)
-
-            // 日期圓形徽章
-            ZStack {
-                // 向外擴散的脈衝光環
-                Circle()
-                    .stroke(Color.green.opacity(ringPulse ? 0 : 0.42), lineWidth: 1.5)
-                    .frame(width: 52, height: 52)
-                    .scaleEffect(ringPulse ? 1.55 : 1.0)
-                    .animation(
-                        .easeOut(duration: 1.6).repeatForever(autoreverses: false),
-                        value: ringPulse
-                    )
-                Circle()
-                    .stroke(Color.green.opacity(ringPulse ? 0 : 0.20), lineWidth: 1)
-                    .frame(width: 52, height: 52)
-                    .scaleEffect(ringPulse ? 1.85 : 1.0)
-                    .animation(
-                        .easeOut(duration: 1.6).delay(0.25).repeatForever(autoreverses: false),
-                        value: ringPulse
-                    )
-                Circle()
-                    .fill(
-                        LinearGradient(
-                            colors: [.green.opacity(0.22), .green.opacity(0.07)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-                    .frame(width: 52, height: 52)
-                VStack(spacing: 0) {
-                    Text("\(day)")
-                        .font(.system(size: 20, weight: .bold, design: .rounded))
-                        .foregroundStyle(.green)
-                    Text("週\(weekdayStr)")
-                        .font(.system(size: 9, weight: .medium))
-                        .foregroundStyle(.green.opacity(0.7))
-                }
-            }
-            .padding(.trailing, 14)
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text("今日花費")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Text(smartCurrency(todayTotal))
-                    .font(.system(size: 22, weight: .bold, design: .rounded))
-                    .foregroundStyle(hasSpending ? .primary : Color.green.opacity(0.5))
-                    .contentTransition(.numericText())
-            }
-
-            Spacer()
-
-            // [v3] 右側情境膠囊：有支出→ N 筆計數膠囊；零支出→成就徽章
-            if hasSpending {
-                HStack(spacing: 4) {
-                    Image(systemName: "list.bullet")
-                        .font(.system(size: 11, weight: .semibold))
-                    Text("今日 \(todayCount) 筆")
-                        .font(.caption.weight(.semibold))
-                }
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 6)
-                .background(Color(.tertiarySystemFill))
-                .clipShape(Capsule())
-            } else {
-                // 零支出成就徽章：綠色膠囊 + 圖示
-                HStack(spacing: 5) {
-                    Image(systemName: "checkmark.seal.fill")
-                        .font(.system(size: 14, weight: .semibold))
-                    Text("今日零支出")
-                        .font(.caption.weight(.semibold))
-                }
-                .foregroundStyle(.green)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 6)
-                .background(Color.green.opacity(0.10))
-                .clipShape(Capsule())
-                .overlay(
-                    Capsule()
-                        .stroke(Color.green.opacity(0.20), lineWidth: 0.75)
-                )
-            }
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 18)
-        .background(
-            ZStack {
-                Color(.systemBackground)
-                // 左上角淡綠色散景光暈，增加卡片層次感
-                Circle()
-                    .fill(Color.green.opacity(0.06))
-                    .frame(width: 110, height: 110)
-                    .offset(x: -10, y: -35)
-                    .blur(radius: 18)
-                // 右下補光
-                Circle()
-                    .fill(Color.green.opacity(0.04))
-                    .frame(width: 70, height: 70)
-                    .offset(x: 80, y: 32)
-                    .blur(radius: 12)
-            }
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 16))
-        .overlay(
-            RoundedRectangle(cornerRadius: 16)
-                .stroke(Color.green.opacity(0.10), lineWidth: 0.75)
-        )
-        .shadow(color: Color.green.opacity(0.12), radius: 14, x: 0, y: 6)
-        .shadow(color: .black.opacity(0.04), radius: 4, x: 0, y: 2)
     }
 
     // MARK: - 分類配色（委派給 VariableCategory.accentColor）
@@ -1007,10 +541,6 @@ struct OverviewView: View {
         if cal.isDateInToday(date) { return Self.timeFormatter.string(from: date) }
         if cal.isDateInYesterday(date) { return "昨天" }
         return Self.shortDateFormatter.string(from: date)
-    }
-
-    private func currentMonthString() -> String {
-        Self.monthFormatter.string(from: Date())
     }
 }
 
