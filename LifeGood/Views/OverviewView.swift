@@ -91,16 +91,19 @@ struct OverviewView: View {
             ScrollView {
                 VStack(spacing: 20) {
                     // [v25.522] 原本的「收支結餘英雄卡＋三格摘要＋今日卡」換成一塊看板
-                    // （OverviewBoard.swift）：結餘與儲蓄率、六格 KPI、燒錢進度、這個月的小事、
-                    // 未來 7 天要扣的固定支出。
-                    OverviewBoard(
-                        data: board,
-                        openIncome: { open(.income) },
-                        openVariable: { open(.variable) },
-                        openFixed: { open(.fixed) },
-                        editFixed: { id in
-                            editingFixed = store.expenses.first { $0.id == id }
-                        })
+                    // （OverviewBoard.swift）；v25.523 重做：還能花多少、本月支出走勢圖、四格，
+                    // 「未來 7 天要扣」另外一塊放在看板下面。
+                    VStack(spacing: 14) {
+                        OverviewBoard(
+                            data: board,
+                            openIncome: { open(.income) },
+                            openVariable: { open(.variable) })
+                        if !board.upcoming.isEmpty {
+                            OverviewUpcomingCard(bills: board.upcoming) { id in
+                                editingFixed = store.expenses.first { $0.id == id }
+                            }
+                        }
+                    }
                         .padding(.horizontal)
                         .opacity(boardAppeared ? 1 : 0)
                         .offset(y: boardAppeared ? 0 : 20)

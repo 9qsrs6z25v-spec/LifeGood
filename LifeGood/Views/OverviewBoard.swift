@@ -1,17 +1,21 @@
 import SwiftUI
 
-// MARK: - 總覽看板（v25.522）
+// MARK: - 總覽看板（v25.522，v25.523 重做）
 //
 // 使用者：「你幫我規劃完整的 KPI 對於使用者會想看的」。打開總覽的人想知道的是
-// 「這個月到目前為止怎麼樣、接下來還能花多少」，所以看板回答的依序是：
+// 「這個月到目前為止怎麼樣、接下來還能花多少」。
 //
-// 1. 這個月會剩多少（結餘、儲蓄率）
-// 2. 收入進來多少、支出花了多少（跟上個月同一天比）
-// 3. 今天起每天還能花多少（扣掉這個月還要付的固定支出之後）
-// 4. 花的速度：月過了幾成 vs 可以自由花的錢用了幾成，照這個速度月底會怎樣
-// 5. 日均、固定支出占收入幾成、今天花了多少
-// 6. 這個月的小事：最大一筆、最常去的店、無消費天數、記了幾筆
-// 7. 未來 7 天要扣哪些固定支出
+// [v25.523] 第一版使用者說「質感差很多，這個好亂」：六格擠成兩列三格、迷你圖壓在數字上、
+// 大字寫「結餘 +32.7萬」底下又說「會超出 23.4萬」兩句打架、膠囊列同一家店名出現兩次。
+// 這一版只回答四件事，一件一個位置：
+//
+// 1. 大字：本月還能花多少（收入 − 已花），底下一行「收入 X・已花 N%」
+// 2. 一張圖：這個月的支出一路累計上去的線、收入那條線、照平常的花法到月底會到哪
+//    （圖下面一行圖例寫固定／變動／月底預估的金額，再一行結論：月底可以存多少或會超出多少）
+// 3. 四格：本月收入、本月支出（跟上個月同一天比）、每天還能花、今天花了
+// 4. 未來 7 天要扣的固定支出（看板下面另外一塊）
+//
+// 日均、最大一筆、最常去的店、無消費天數這些是「變動支出」的事，搬到變動支出頁的看板。
 //
 // 插畫：右上角一道「太陽的軌跡」，太陽的位置就是月進度（月初在東邊剛升起、
 // 月底在西邊落下）；深色模式是月亮。跟資料有關，不是貼圖。
@@ -33,7 +37,9 @@ struct OverviewBoardData: Equatable {
     var daysInMonth = 30
     /// 本月已入帳
     var income: Double = 0
-    /// 預算基準：本月已入帳與近 6 個月中位數取大（ExpenseStore.budgetBaseIncome）
+    /// 近 6 個月收入中位數（ExpenseStore.estimatedMonthlyIncome）
+    var incomeMedian: Double = 0
+    /// 拿來算「還能花」的收入：本月已入帳與近 6 個月中位數取大（ExpenseStore.budgetBaseIncome）
     var base: Double = 0
     var baseIsEstimate = false
     /// 本月變動支出
@@ -46,20 +52,8 @@ struct OverviewBoardData: Equatable {
     var todayCount = 0
     /// 近 3 個月的變動支出日均（有花錢的月份才算）
     var prev3DailyAvg: Double? = nil
-    /// 近 7 天每天的變動支出（最後一個是今天）
-    var last7: [Double] = []
     /// 本月 1 號到今天，每天累計的變動支出
     var cumulative: [Double] = []
-    /// 近 6 個月每月收入（最後一個是本月）
-    var incomeMonths: [Double] = []
-    var largestTitle: String? = nil
-    var largestAmount: Double = 0
-    var topPlace: String? = nil
-    var topPlaceCount = 0
-    /// 本月 1 號到昨天，沒有任何變動支出的天數（今天還沒過完不算）
-    var noSpendDays = 0
-    /// 本月記帳筆數（變動支出＋收入）
-    var entryCount = 0
     var upcoming: [OverviewUpcomingBill] = []
 
     // MARK: 推導
@@ -69,31 +63,21 @@ struct OverviewBoardData: Equatable {
     var monthProgress: Double { Double(day) / Double(max(daysInMonth, 1)) }
     /// 今天起還剩幾天（含今天）
     var remainingDays: Int { max(1, daysInMonth - day + 1) }
-    var balance: Double { base - spending }
-    var savingRate: Double? { hasBase ? balance / base : nil }
-
-    /// 扣掉固定支出之後可以自由花的錢。
-    ///
-    /// 「燒錢進度」比的是這個，不是「總支出 ÷ 收入」：固定支出在月初就整筆算進來，
-    /// 用總支出比的話，月初第 9 天就會顯示「錢花了 50%、月過了 29%」而跳警告，
-    /// 其實一點事都沒有。
-    var free: Double { base - fixed }
-    var freeRatio: Double {
-        if free > 0 { return variable / free }
-        return variable > 0 ? 1.01 : 0
-    }
-
+    /// 本月還能花（負的＝已經超支）
+    var left: Double { base - spending }
     /// 今天起每天還能花多少（負的＝已經超支）
-    var allowancePerDay: Double { (base - spending) / Double(remainingDays) }
+    var allowancePerDay: Double { left / Double(remainingDays) }
     var variableDailyAvg: Double { variable / Double(max(day, 1)) }
-    /// 照目前的速度，月底的總支出
-    var projectedSpending: Double { fixed + variableDailyAvg * Double(daysInMonth) }
 
-    var paceTone: MoneyTone {
-        if freeRatio > 1 { return .bad }
-        if freeRatio > monthProgress + HeroOverspendHint.warnLead { return .warn }
-        return .good
-    }
+    /// 剩下的日子每天大概花多少：有前 3 個月的紀錄就用那個（「平常的花法」），
+    /// 沒有才用這個月到目前的日均。
+    ///
+    /// 不直接拿這個月的日均乘到月底：月初出去玩一趟，日均就被那幾天撐到平常的三倍，
+    /// 再乘 31 天會預估出一個不可能的數字（第一版就是這樣，說月底會花 90 萬）。
+    var typicalDaily: Double { prev3DailyAvg ?? variableDailyAvg }
+    var usesTypicalDaily: Bool { prev3DailyAvg != nil }
+    /// 月底預估的總支出＝已經花的＋剩下的日子照平常的花法
+    var projectedSpending: Double { spending + typicalDaily * Double(max(0, daysInMonth - day)) }
 }
 
 extension OverviewBoardData {
@@ -106,9 +90,9 @@ extension OverviewBoardData {
         d.day = cal.component(.day, from: now)
         d.daysInMonth = cal.range(of: .day, in: .month, for: now)?.count ?? 30
         d.income = store.currentMonthIncomeTotal
-        let estimate = store.estimatedMonthlyIncome
-        d.base = max(d.income, estimate)
-        d.baseIsEstimate = estimate > d.income
+        d.incomeMedian = store.estimatedMonthlyIncome
+        d.base = max(d.income, d.incomeMedian)
+        d.baseIsEstimate = d.incomeMedian > d.income
         d.fixed = store.currentMonthFixedTotal
 
         let today = cal.startOfDay(for: now)
@@ -119,15 +103,13 @@ extension OverviewBoardData {
 
         // 本月每天的變動支出
         var daily = Array(repeating: 0.0, count: d.daysInMonth)
-        var thisMonth: [Expense] = []
         for e in variables where cal.isDate(e.date, equalTo: now, toGranularity: .month) {
-            thisMonth.append(e)
+            d.variable += e.amount
+            if cal.isDate(e.date, inSameDayAs: now) { d.todayCount += 1 }
             let i = cal.component(.day, from: e.date) - 1
             if daily.indices.contains(i) { daily[i] += e.amount }
         }
-        d.variable = thisMonth.reduce(0) { $0 + $1.amount }
         if daily.indices.contains(d.day - 1) { d.todayVariable = daily[d.day - 1] }
-        d.todayCount = thisMonth.filter { cal.isDate($0.date, inSameDayAs: now) }.count
 
         var running = 0.0
         var cumulative: [Double] = []
@@ -136,31 +118,6 @@ extension OverviewBoardData {
             cumulative.append(running)
         }
         d.cumulative = cumulative
-
-        // 從「開始記帳的那一天」算起：這個月中才開始用的人，前面那些天不是沒花錢，是還沒記
-        // 一筆變動支出都沒記過的人不顯示（不是「無消費 N 天」）
-        let lastIndex = min(d.day - 1, daily.count)
-        var firstIndex = lastIndex
-        if let first = variables.map(\.date).min() {
-            firstIndex = first >= monthStart ? cal.component(.day, from: first) - 1 : 0
-        }
-        var quiet = 0
-        if firstIndex < lastIndex {
-            for i in firstIndex..<lastIndex where daily[i] == 0 {
-                quiet += 1
-            }
-        }
-        d.noSpendDays = quiet
-
-        // 近 7 天（含今天，可能跨月）
-        var last7: [Double] = []
-        for back in stride(from: 6, through: 0, by: -1) {
-            guard let start = cal.date(byAdding: .day, value: -back, to: today),
-                  let end = cal.date(byAdding: .day, value: 1, to: start) else { continue }
-            let sum = variables.filter { $0.date >= start && $0.date < end }.reduce(0) { $0 + $1.amount }
-            last7.append(sum)
-        }
-        d.last7 = last7
 
         // 上個月到同一天為止：變動支出照實算，固定支出用上個月那時候的月等值
         if let lastStart = cal.date(byAdding: .month, value: -1, to: monthStart) {
@@ -190,28 +147,6 @@ extension OverviewBoardData {
         }
         d.prev3DailyAvg = prevDays > 0 ? prevSum / Double(prevDays) : nil
 
-        d.incomeMonths = Array(store.heroIncomeSeries().suffix(6).map { $0.value })
-
-        if let big = thisMonth.max(by: { $0.amount < $1.amount }), big.amount > 0 {
-            d.largestTitle = big.stopRowLabel(suppressing: []).primary
-            d.largestAmount = big.amount
-        }
-
-        // 最常去：只算有地點座標的（真的是一個地方），去兩次以上才算「常去」
-        var counts: [String: Int] = [:]
-        for e in thisMonth where e.hasPlaceCoordinate {
-            if let name = e.placeDisplayName { counts[name, default: 0] += 1 }
-        }
-        let ranked = counts.sorted { a, b in
-            a.value != b.value ? a.value > b.value : a.key < b.key
-        }
-        if let top = ranked.first, top.value >= 2 {
-            d.topPlace = top.key
-            d.topPlaceCount = top.value
-        }
-
-        d.entryCount = thisMonth.count + store.currentMonthIncomes.count
-
         // 未來 7 天要扣的固定支出（今天要扣的也算）
         let horizon = cal.date(byAdding: .day, value: 7, to: today) ?? today
         var bills: [OverviewUpcomingBill] = []
@@ -238,40 +173,19 @@ struct OverviewBoard: View {
     let data: OverviewBoardData
     let openIncome: () -> Void
     let openVariable: () -> Void
-    let openFixed: () -> Void
-    let editFixed: (UUID) -> Void
 
     @Environment(\.colorScheme) private var scheme
     /// 只讀「圓角」（看板不吃英雄卡的漸層與 KPI 樣式，同行程看板）
     @ObservedObject private var heroStyle = HeroStyleStore.shared
-    @State private var showAllUpcoming = false
-
-    private static let dueFmt: DateFormatter = {
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "zh_Hant_TW")
-        f.dateFormat = "M/d (E)"
-        return f
-    }()
 
     var body: some View {
         let pal = TripBoardPalette(scheme)
-        let chips = chipList()
-        return VStack(alignment: .leading, spacing: 10) {
+        return VStack(alignment: .leading, spacing: 0) {
             header(pal)
-            tileGrid(pal)
-            if data.hasBase {
-                paceCard(pal)
-            }
-            if !chips.isEmpty {
-                ChipFlowLayout(spacing: 6) {
-                    ForEach(chips) { chip in
-                        MoneyChipView(chip: chip, pal: pal)
-                    }
-                }
-            }
-            if !data.upcoming.isEmpty {
-                upcomingCard(pal)
-            }
+            chartCard(pal)
+                .padding(.top, 12)
+            MoneyTileGrid(tiles: [incomeTile(pal), spendingTile(pal), allowanceTile(pal), todayTile(pal)])
+                .padding(.top, 8)
         }
         .padding(14)
         .modifier(MoneyBoardChrome(pal: pal, corner: CGFloat(heroStyle.value(.corner, .overview))))
@@ -282,20 +196,24 @@ struct OverviewBoard: View {
 
     private func header(_ pal: TripBoardPalette) -> some View {
         let d = data
-        let title = d.hasBase ? "本月結餘" : "本月支出"
-        let big = d.hasBase ? MoneyFormat.signed(d.balance) : MoneyFormat.short(d.spending)
-        let bigTone: MoneyTone? = (d.hasBase && d.balance < 0) ? .bad : nil
-        let dayLine = "\(d.month) 月・第 \(d.day) 天／共 \(d.daysInMonth) 天"
-        let rateText: String? = d.savingRate.map { "儲蓄率 " + MoneyFormat.percent($0) }
-        let note: String?
+        let title: String
+        let big: String
+        let bigTone: MoneyTone?
         if !d.hasBase {
-            note = "記下收入之後，這裡會算出結餘、儲蓄率和每天還能花多少。"
-        } else if d.baseIsEstimate {
-            note = "收入還沒全部入帳，先用近 6 個月的中位數 " + MoneyFormat.short(d.base) + " 估。"
+            title = "本月支出"
+            big = MoneyFormat.short(d.spending)
+            bigTone = nil
+        } else if d.left >= 0 {
+            title = "本月還能花"
+            big = MoneyFormat.short(d.left)
+            bigTone = nil
         } else {
-            note = nil
+            title = "本月已超支"
+            big = MoneyFormat.short(-d.left)
+            bigTone = .bad
         }
-        return VStack(alignment: .leading, spacing: 4) {
+        let dayLine = "\(d.month) 月・第 \(d.day) 天／共 \(d.daysInMonth) 天"
+        return VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .top, spacing: 8) {
                 VStack(alignment: .leading, spacing: 6) {
                     Text(dayLine)
@@ -308,87 +226,189 @@ struct OverviewBoard: View {
                 Spacer(minLength: 8)
                 OverviewSunArc(progress: d.monthProgress, dark: pal.dark, sky: pal.boardTop)
                     .equatable()
-                    .frame(width: 118, height: 40)
+                    .frame(width: 104, height: 36)
                     .accessibilityHidden(true)
             }
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text(big)
-                    .font(.system(size: 34, weight: .heavy, design: .rounded))
-                    .monospacedDigit()
-                    .foregroundStyle(bigTone?.color(pal) ?? pal.ink)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.55)
-                if let rateText {
-                    tag(rateText, pal: pal)
-                }
-                if d.baseIsEstimate {
-                    tag("預估", pal: pal)
-                }
-            }
-            if let note {
-                Text(note)
-                    .font(.caption2)
-                    .foregroundStyle(pal.label)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
+            Text(big)
+                .font(.system(size: 36, weight: .heavy, design: .rounded))
+                .monospacedDigit()
+                .foregroundStyle(bigTone?.color(pal) ?? pal.ink)
+                .lineLimit(1)
+                .minimumScaleFactor(0.55)
+                .padding(.top, 2)
+            subLine(pal)
+                .padding(.top, 2)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .combine)
     }
 
-    private func tag(_ text: String, pal: TripBoardPalette) -> some View {
-        Text(text)
-            .font(.caption2.weight(.bold))
-            .foregroundStyle(pal.capsuleText)
+    @ViewBuilder
+    private func subLine(_ pal: TripBoardPalette) -> some View {
+        let d = data
+        if d.hasBase {
+            HStack(spacing: 6) {
+                Text("收入 " + MoneyFormat.short(d.base))
+                if d.baseIsEstimate {
+                    Text("預估")
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(pal.capsuleText)
+                        .padding(.horizontal, 6).padding(.vertical, 1.5)
+                        .background(pal.capsuleFill, in: Capsule())
+                        .overlay(Capsule().stroke(pal.capsuleStroke, lineWidth: 0.75))
+                }
+                Text("・已花 " + MoneyFormat.percent(d.spending / d.base))
+            }
+            .font(.caption)
+            .foregroundStyle(pal.label)
             .lineLimit(1)
-            .fixedSize()
-            .padding(.horizontal, 7).padding(.vertical, 2)
-            .background(pal.capsuleFill, in: Capsule())
-            .overlay(Capsule().stroke(pal.capsuleStroke, lineWidth: 0.75))
-    }
-
-    // MARK: 格子
-
-    private func tileGrid(_ pal: TripBoardPalette) -> some View {
-        VStack(spacing: 8) {
-            MoneyTileRow(tiles: [incomeTile(pal), spendingTile(pal), allowanceTile(pal)])
-            MoneyTileRow(tiles: [dailyTile(pal), fixedTile(pal), todayTile(pal)])
+            .minimumScaleFactor(0.8)
+        } else {
+            Text("記下收入之後，這裡會算出這個月還能花多少。")
+                .font(.caption)
+                .foregroundStyle(pal.label)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
-    private func artColor(_ tint: TripBoardTint, _ pal: TripBoardPalette) -> Color {
-        pal.badge(tint).last ?? pal.label
+    // MARK: 走勢圖
+
+    private func chartCard(_ pal: TripBoardPalette) -> some View {
+        let d = data
+        let projected = d.projectedSpending
+        let overProjected = d.hasBase && projected > d.base
+        let lineColor = d.hasBase && d.left < 0 ? MoneyTone.bad.color(pal) : pal.progressInk
+        return VStack(alignment: .leading, spacing: 0) {
+            MoneySpendChart(month: d.month, daysInMonth: d.daysInMonth, day: d.day,
+                            fixed: d.fixed, cumulative: d.cumulative,
+                            projected: d.cumulative.isEmpty ? nil : projected,
+                            ceiling: d.hasBase ? d.base : nil,
+                            ceilingLabel: d.hasBase
+                                ? (d.baseIsEstimate ? "預估收入 " : "收入 ") + MoneyFormat.short(d.base)
+                                : nil,
+                            line: lineColor,
+                            projection: overProjected ? MoneyTone.warn.color(pal) : lineColor,
+                            band: MoneyInk.fixedBand(pal),
+                            rule: pal.label.opacity(0.35),
+                            label: pal.label,
+                            halo: pal.cellFill)
+                .equatable()
+                .frame(height: 118)
+                .accessibilityHidden(true)
+
+            legend(pal, projected: projected, lineColor: lineColor)
+                .padding(.top, 6)
+
+            Rectangle()
+                .fill(pal.label.opacity(0.18))
+                .frame(height: 0.5)
+                .padding(.top, 8)
+
+            verdict(pal, projected: projected)
+                .padding(.top, 8)
+        }
+        .padding(.horizontal, 12)
+        .padding(.top, 12)
+        .padding(.bottom, 10)
+        .modifier(TripBoardCellChrome(pal: pal))
     }
+
+    private func legend(_ pal: TripBoardPalette, projected: Double, lineColor: Color) -> some View {
+        let d = data
+        let fixed = MoneyLegendItem(mark: .swatch, color: MoneyInk.fixed(pal),
+                                    text: "固定 " + MoneyFormat.short(d.fixed), pal: pal)
+        let variable = MoneyLegendItem(mark: .swatch, color: lineColor,
+                                       text: "變動 " + MoneyFormat.short(d.variable), pal: pal)
+        let month = MoneyLegendItem(mark: .dash, color: lineColor,
+                                    text: "月底 " + MoneyFormat.short(projected), pal: pal)
+        // 放得下排一列，放不下（字放大、窄螢幕）換成兩列
+        return ViewThatFits(in: .horizontal) {
+            HStack(spacing: 12) {
+                fixed
+                variable
+                month
+            }
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 12) {
+                    fixed
+                    variable
+                }
+                month
+            }
+        }
+    }
+
+    private func verdict(_ pal: TripBoardPalette, projected: Double) -> some View {
+        let d = data
+        let how = d.usesTypicalDaily ? "照平常的花法" : "照這個月的速度"
+        let lead: String
+        let amount: String
+        let tone: MoneyTone
+        if !d.hasBase {
+            lead = how + "，月底大約花"
+            amount = MoneyFormat.short(projected)
+            tone = .neutral
+        } else if d.left < 0 {
+            lead = "已經超出收入"
+            amount = MoneyFormat.short(-d.left)
+            tone = .bad
+        } else if projected > d.base {
+            lead = how + "，月底會超出"
+            amount = MoneyFormat.short(projected - d.base)
+            tone = .warn
+        } else {
+            lead = how + "，月底可以存"
+            amount = MoneyFormat.short(d.base - projected)
+            tone = .good
+        }
+        let color = tone == .neutral ? pal.ink : tone.color(pal)
+        return HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Circle()
+                .fill(color)
+                .frame(width: 6, height: 6)
+                .alignmentGuide(.firstTextBaseline) { $0[.bottom] - 1 }
+            Text("\(lead) \(Text(amount).fontWeight(.bold).foregroundStyle(color))")
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(pal.label)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    // MARK: 四格
 
     private func incomeTile(_ pal: TripBoardPalette) -> AnyView {
         let d = data
-        let detail = d.baseIsEstimate ? "預期 " + MoneyFormat.short(d.base) : "已入帳"
+        let detail: String
+        if d.baseIsEstimate {
+            detail = "預期 " + MoneyFormat.short(d.base)
+        } else if d.incomeMedian > 0 {
+            detail = "近 6 月中位數 " + MoneyFormat.short(d.incomeMedian)
+        } else {
+            detail = d.income > 0 ? "本月已入帳" : "還沒有紀錄"
+        }
         return AnyView(MoneyTile(
             icon: "banknote.fill", tint: .green, label: "本月收入",
             value: MoneyFormat.short(d.income),
             detail: detail,
-            art: d.incomeMonths.count >= 2
-                ? AnyView(MoneyBars(values: d.incomeMonths, color: artColor(.green, pal)).equatable())
-                : nil,
-            action: openIncome, pal: pal))
+            action: openIncome, actionHint: "切到收入頁", pal: pal))
     }
 
     private func spendingTile(_ pal: TripBoardPalette) -> AnyView {
         let d = data
-        var detail = "變動＋固定"
+        var detail = "固定＋變動"
+        var accent: String? = nil
         var tone: MoneyTone = .neutral
         if let last = d.lastMonthSameDay, let change = MoneyFormat.change(d.spending, vs: last) {
-            detail = "比上月同期 " + change
-            if d.spending > last * 1.05 { tone = .warn } else if d.spending < last * 0.95 { tone = .good }
+            detail = "比上月同期"
+            accent = change
+            tone = MoneyTone.spendingChange(d.spending, vs: last)
         }
         return AnyView(MoneyTile(
             icon: "cart.fill", tint: .pink, label: "本月支出",
             value: MoneyFormat.short(d.spending),
-            detail: detail, detailTone: tone,
-            art: d.cumulative.count >= 2
-                ? AnyView(MoneySparkline(values: d.cumulative, color: artColor(.pink, pal)).equatable())
-                : nil,
-            action: openVariable, pal: pal))
+            detail: detail, accent: accent, accentTone: tone,
+            action: openVariable, actionHint: "切到變動支出頁", pal: pal))
     }
 
     private func allowanceTile(_ pal: TripBoardPalette) -> AnyView {
@@ -396,178 +416,115 @@ struct OverviewBoard: View {
         let value: String
         let valueTone: MoneyTone?
         let detail: String
-        let detailTone: MoneyTone
         if !d.hasBase {
             value = "—"
             valueTone = nil
-            detail = "還沒有收入紀錄"
-            detailTone = .neutral
+            detail = "需要收入紀錄"
         } else if d.allowancePerDay >= 0 {
             value = MoneyFormat.short(d.allowancePerDay)
             valueTone = nil
             detail = "還有 \(d.remainingDays) 天"
-            detailTone = .neutral
         } else {
             value = "已超支"
             valueTone = .bad
-            detail = "超出 " + MoneyFormat.short(d.spending - d.base)
-            detailTone = .bad
+            detail = "還有 \(d.remainingDays) 天"
         }
         return AnyView(MoneyTile(
             icon: "wallet.pass.fill", tint: .blue, label: "每天還能花",
             value: value, valueTone: valueTone,
-            detail: detail, detailTone: detailTone,
-            art: d.hasBase
-                ? AnyView(MoneyRing(fraction: max(0, 1 - d.freeRatio),
-                                    color: artColor(.blue, pal), track: pal.progressTrack).equatable())
-                : nil,
-            pal: pal))
-    }
-
-    private func dailyTile(_ pal: TripBoardPalette) -> AnyView {
-        let d = data
-        var detail = "近 7 天"
-        var tone: MoneyTone = .neutral
-        if let prev = d.prev3DailyAvg, let change = MoneyFormat.change(d.variableDailyAvg, vs: prev) {
-            detail = "比近 3 月 " + change
-            if d.variableDailyAvg > prev * 1.05 { tone = .warn } else if d.variableDailyAvg < prev * 0.95 { tone = .good }
-        }
-        return AnyView(MoneyTile(
-            icon: "chart.bar.fill", tint: .orange, label: "日均花費",
-            value: MoneyFormat.short(d.variableDailyAvg),
-            detail: detail, detailTone: tone,
-            art: d.last7.count >= 2
-                ? AnyView(MoneyBars(values: d.last7, color: artColor(.orange, pal)).equatable())
-                : nil,
-            action: openVariable, pal: pal))
-    }
-
-    private func fixedTile(_ pal: TripBoardPalette) -> AnyView {
-        let d = data
-        let share = d.hasBase ? d.fixed / d.base : 0
-        let detail = d.hasBase ? "占收入 " + MoneyFormat.percent(share) : "每月等值"
-        let tone: MoneyTone = d.hasBase && share > 0.5 ? .warn : .neutral
-        return AnyView(MoneyTile(
-            icon: "pin.fill", tint: .purple, label: "固定支出",
-            value: MoneyFormat.short(d.fixed),
-            detail: detail, detailTone: tone,
-            art: d.hasBase
-                ? AnyView(MoneyRing(fraction: share, color: artColor(.purple, pal),
-                                    track: pal.progressTrack).equatable())
-                : nil,
-            action: openFixed, pal: pal))
+            detail: detail, pal: pal))
     }
 
     private func todayTile(_ pal: TripBoardPalette) -> AnyView {
         let d = data
-        let detail = d.todayCount > 0 ? "\(d.todayCount) 筆" : "零支出 ✓"
         return AnyView(MoneyTile(
-            icon: "calendar", tint: .mint, label: "今天花了",
+            icon: "calendar", tint: .orange, label: "今天花了",
             value: MoneyFormat.short(d.todayVariable),
-            detail: detail, detailTone: d.todayCount > 0 ? .neutral : .good,
-            pal: pal))
+            detail: d.todayCount > 0 ? "\(d.todayCount) 筆" : nil,
+            accent: d.todayCount > 0 ? nil : "還沒花錢",
+            accentTone: .good,
+            action: openVariable, actionHint: "切到變動支出頁", pal: pal))
     }
+}
 
-    // MARK: 燒錢進度
+// MARK: - 未來 7 天要扣
 
-    private func paceCard(_ pal: TripBoardPalette) -> some View {
-        let d = data
-        let status: String
-        if d.free <= 0 {
-            status = "固定支出（" + MoneyFormat.short(d.fixed) + "）已經吃掉整個收入（"
-                + MoneyFormat.short(d.base) + "），每一筆變動支出都是超支。"
-        } else if d.freeRatio > 1 {
-            status = "扣掉固定支出可以花的 " + MoneyFormat.short(d.free) + " 已經用完，超出 "
-                + MoneyFormat.short(d.variable - d.free) + "。"
-        } else if d.projectedSpending > d.base {
-            status = "照這個速度，月底大約花 " + MoneyFormat.short(d.projectedSpending) + "，會超出 "
-                + MoneyFormat.short(d.projectedSpending - d.base) + "。"
-        } else {
-            status = "照這個速度，月底大約花 " + MoneyFormat.short(d.projectedSpending) + "，可以剩 "
-                + MoneyFormat.short(d.base - d.projectedSpending) + "。"
-        }
-        return MoneyPaceCard(title: "燒錢進度", icon: "flame.fill",
-                             monthProgress: d.monthProgress,
-                             spentLabel: "可花的錢用了", spentRatio: d.freeRatio,
-                             tone: d.paceTone, status: status,
-                             tag: d.baseIsEstimate ? "預估" : nil, pal: pal)
-    }
+/// 總覽看板下面另外一塊：接下來一週會扣款的固定支出。點一筆直接編輯。
+struct OverviewUpcomingCard: View {
+    let bills: [OverviewUpcomingBill]
+    let editFixed: (UUID) -> Void
 
-    // MARK: 膠囊
+    @Environment(\.colorScheme) private var scheme
+    @ObservedObject private var heroStyle = HeroStyleStore.shared
+    @State private var showAll = false
 
-    private func chipList() -> [MoneyChip] {
-        let d = data
-        var out: [MoneyChip] = []
-        if let t = d.largestTitle, d.largestAmount > 0 {
-            out.append(MoneyChip(id: "big", icon: "crown.fill",
-                                 text: "最大一筆 " + Self.clip(t) + " " + MoneyFormat.short(d.largestAmount)))
-        }
-        if let p = d.topPlace {
-            out.append(MoneyChip(id: "place", icon: "mappin.and.ellipse",
-                                 text: "最常去 " + Self.clip(p) + " ×\(d.topPlaceCount)"))
-        }
-        if d.noSpendDays > 0 {
-            out.append(MoneyChip(id: "quiet", icon: "leaf.fill", text: "無消費 \(d.noSpendDays) 天"))
-        }
-        if d.entryCount > 0 {
-            out.append(MoneyChip(id: "count", icon: "square.and.pencil", text: "本月記了 \(d.entryCount) 筆"))
-        }
-        return out
-    }
+    private static let shownByDefault = 3
 
-    /// 膠囊不換行、不捲動，太長的名字截到 10 個字
-    private static func clip(_ s: String) -> String {
-        s.count > 10 ? String(s.prefix(10)) + "…" : s
-    }
+    private static let dueFmt: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "zh_Hant_TW")
+        f.dateFormat = "M/d (E)"
+        return f
+    }()
 
-    // MARK: 未來 7 天要扣
-
-    private func upcomingCard(_ pal: TripBoardPalette) -> some View {
-        let all = data.upcoming
-        let shown = showAllUpcoming ? all : Array(all.prefix(3))
-        let total = all.reduce(0) { $0 + $1.amount }
-        let summary = "\(all.count) 筆・" + MoneyFormat.short(total)
-        return VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 6) {
-                Image(systemName: "calendar.badge.clock")
-                    .font(.footnote.weight(.bold))
-                    .foregroundStyle(artColor(.blue, pal))
+    var body: some View {
+        let pal = TripBoardPalette(scheme)
+        let shown = showAll ? bills : Array(bills.prefix(Self.shownByDefault))
+        let total = bills.reduce(0) { $0 + $1.amount }
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
                 Text("未來 7 天要扣")
-                    .font(.footnote.weight(.semibold))
+                    .font(.subheadline.weight(.semibold))
                     .foregroundStyle(pal.ink)
                 Spacer(minLength: 4)
-                Text(summary)
+                Text("\(bills.count) 筆・" + MoneyFormat.short(total))
                     .font(.caption.weight(.semibold).monospacedDigit())
                     .foregroundStyle(pal.label)
             }
-            .padding(.bottom, 4)
-            ForEach(shown) { bill in
-                Button {
-                    editFixed(bill.id)
-                } label: {
-                    upcomingRow(bill, pal: pal)
+            .padding(.horizontal, 2)
+            .accessibilityElement(children: .combine)
+
+            VStack(spacing: 0) {
+                ForEach(Array(shown.enumerated()), id: \.element.id) { i, bill in
+                    if i > 0 {
+                        Rectangle()
+                            .fill(pal.label.opacity(0.15))
+                            .frame(height: 0.5)
+                            .padding(.leading, 38)
+                    }
+                    Button {
+                        editFixed(bill.id)
+                    } label: {
+                        row(bill, pal: pal)
+                    }
+                    .buttonStyle(MoneyPressStyle())
                 }
-                .buttonStyle(.plain)
-            }
-            if all.count > 3 {
-                Button {
-                    withAnimation(.easeInOut(duration: 0.2)) { showAllUpcoming.toggle() }
-                } label: {
-                    Text(showAllUpcoming ? "收起" : "還有 \(all.count - 3) 筆")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(pal.hint)
-                        .frame(maxWidth: .infinity, alignment: .center)
-                        .padding(.top, 6)
-                        .contentShape(Rectangle())
+                if bills.count > Self.shownByDefault {
+                    Rectangle()
+                        .fill(pal.label.opacity(0.15))
+                        .frame(height: 0.5)
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.2)) { showAll.toggle() }
+                    } label: {
+                        Text(showAll ? "收起" : "還有 \(bills.count - Self.shownByDefault) 筆")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(pal.hint)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 9)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.plain)
             }
+            .padding(.horizontal, 12)
+            .modifier(TripBoardCellChrome(pal: pal))
         }
-        .padding(12)
-        .modifier(TripBoardCellChrome(pal: pal))
+        .padding(14)
+        .modifier(MoneyBoardChrome(pal: pal, corner: CGFloat(heroStyle.value(.corner, .overview))))
+        .dynamicTypeSize(...DynamicTypeSize.accessibility2)
     }
 
-    private func upcomingRow(_ bill: OverviewUpcomingBill, pal: TripBoardPalette) -> some View {
+    private func row(_ bill: OverviewUpcomingBill, pal: TripBoardPalette) -> some View {
         let when: String
         switch bill.daysAway {
         case 0: when = "今天扣款"
@@ -576,7 +533,7 @@ struct OverviewBoard: View {
         }
         let soon = bill.daysAway <= 1
         return HStack(spacing: 10) {
-            TripBoardIconBadge(icon: bill.icon, colors: pal.badge(.blue), diameter: 26, dark: pal.dark)
+            TripBoardIconBadge(icon: bill.icon, colors: pal.badge(.purple), diameter: 28, dark: pal.dark)
             VStack(alignment: .leading, spacing: 1) {
                 MarqueeText(bill.title)
                     .font(.subheadline.weight(.semibold))
@@ -593,7 +550,7 @@ struct OverviewBoard: View {
                 .lineLimit(1)
                 .fixedSize()
         }
-        .padding(.vertical, 6)
+        .padding(.vertical, 9)
         .contentShape(Rectangle())
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(bill.title + "，" + when + "，" + MoneyFormat.short(bill.amount))
@@ -618,7 +575,11 @@ struct OverviewSunArc: View, Equatable {
             let h = size.height
             let p0 = CGPoint(x: 6, y: h - 3)
             let p2 = CGPoint(x: w - 6, y: h - 3)
-            let c = CGPoint(x: w / 2, y: -h + 6)
+            // 弧頂（月中）留出太陽加光暈的高度，不然月中那幾天太陽會被切掉一截
+            let r: CGFloat = 7
+            let halo = r * 1.9
+            let apex = halo + 1
+            let c = CGPoint(x: w / 2, y: 2 * apex - p0.y)
 
             func point(_ t: CGFloat) -> CGPoint {
                 let a = (1 - t) * (1 - t)
@@ -656,7 +617,6 @@ struct OverviewSunArc: View, Equatable {
                        style: StrokeStyle(lineWidth: 1.1, lineCap: .round, dash: [2, 3.5]))
 
             let sun = point(t)
-            let r: CGFloat = 7
             if dark {
                 // 幾顆固定位置的星（每次重畫都一樣，不會閃）
                 let stars: [CGPoint] = [CGPoint(x: w * 0.18, y: h * 0.30), CGPoint(x: w * 0.34, y: h * 0.12),
@@ -667,10 +627,10 @@ struct OverviewSunArc: View, Equatable {
                              with: .color(.white.opacity(0.7)))
                 }
                 let glow = Color(tb: 0xF4F1DE)
-                ctx.fill(Path(ellipseIn: CGRect(x: sun.x - r * 2.2, y: sun.y - r * 2.2,
-                                                width: r * 4.4, height: r * 4.4)),
+                ctx.fill(Path(ellipseIn: CGRect(x: sun.x - halo, y: sun.y - halo,
+                                                width: halo * 2, height: halo * 2)),
                          with: .radialGradient(Gradient(colors: [glow.opacity(0.28), glow.opacity(0)]),
-                                               center: sun, startRadius: r * 0.6, endRadius: r * 2.2))
+                                               center: sun, startRadius: r * 0.6, endRadius: halo))
                 ctx.fill(Path(ellipseIn: CGRect(x: sun.x - r, y: sun.y - r, width: r * 2, height: r * 2)),
                          with: .color(glow))
                 // 挖掉一塊變月牙
@@ -678,10 +638,10 @@ struct OverviewSunArc: View, Equatable {
                          with: .color(sky))
             } else {
                 let glow = Color(tb: 0xFFC94D)
-                ctx.fill(Path(ellipseIn: CGRect(x: sun.x - r * 2.4, y: sun.y - r * 2.4,
-                                                width: r * 4.8, height: r * 4.8)),
+                ctx.fill(Path(ellipseIn: CGRect(x: sun.x - halo, y: sun.y - halo,
+                                                width: halo * 2, height: halo * 2)),
                          with: .radialGradient(Gradient(colors: [glow.opacity(0.45), glow.opacity(0)]),
-                                               center: sun, startRadius: r * 0.6, endRadius: r * 2.4))
+                                               center: sun, startRadius: r * 0.6, endRadius: halo))
                 ctx.fill(Path(ellipseIn: CGRect(x: sun.x - r, y: sun.y - r, width: r * 2, height: r * 2)),
                          with: .color(Color(tb: 0xFFB020)))
             }
