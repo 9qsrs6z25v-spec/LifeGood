@@ -91,21 +91,241 @@ struct TripCardMetrics: Equatable {
 ///
 /// 六個當天色是寫死的 sRGB 常數，不分深淺色模式。直接拿來寫在淺灰底上
 /// 只有 2.1～3.1:1，連大字的 3:1 都過不了；混 40% 黑之後是 4.8～6.2。
-/// 深色模式用原色就夠（在 #2C2C2E 上 3.5～4.9，大字過）。
+///
+/// [v25.519] 深色模式改成混 30% 白（原本用原色）。原本的註解寫「在 #2C2C2E 上 3.5～4.9，大字過」，
+/// 但狀態面板的小標是 10pt、不是大字，要 4.5：紫 3.58、青 4.14、桃 3.79、藍 3.96 本來就不及格。
+/// 夜晚的卡片（整張卡變深色，見 TripCardSky）面板是藏青，用原色更只剩 3.26～4.34。
+/// 混 30% 白之後：深色面板 5.31～6.44、夜晚面板 4.83～7.21、查看地圖 6.09～9.14。
 /// ⚠️ 數字是用 sRGB 近似算的；Color.mix 預設在 perceptual 色彩空間混，實機要再驗一次。
 enum TripInk {
     /// 寫字用
     static func text(_ c: Color, _ scheme: ColorScheme) -> Color {
-        scheme == .dark ? c : c.mix(with: .black, by: 0.4)
+        scheme == .dark ? c.mix(with: .white, by: 0.3) : c.mix(with: .black, by: 0.4)
     }
     /// 白字壓上去的實心底（兩種模式都壓暗）。花費招牌原本白字壓原色只有
     /// 2.32～3.43:1，改用這個是 5.8～7.7:1。
     static func solid(_ c: Color) -> Color {
         c.mix(with: .black, by: 0.4)
     }
-    /// 過夜的靛藍。系統靛藍在深色模式的 #2C2C2E 上只有 2.75:1，混 30% 白後 4.77:1
+    /// 過夜的靛藍。系統靛藍在深色模式的 #2C2C2E 上只有 2.75:1。
+    /// [v25.519] 混白從 30% 加到 45%：30% 在 #2C2C2E 上 4.45、在夜晚的藏青面板上 4.04～4.86，
+    /// 差一點點；45% 是 5.74（#2C2C2E）、5.21～6.26（夜晚面板）。
     static func indigo(_ scheme: ColorScheme) -> Color {
-        scheme == .dark ? Color.indigo.mix(with: .white, by: 0.3) : Color.indigo
+        scheme == .dark ? Color.indigo.mix(with: .white, by: 0.45) : Color.indigo
+    }
+}
+
+// MARK: - 天空（v25.519）
+
+/// 卡片的天空跟著**那一站的抵達時間**走：早上淡藍、下午晴藍、傍晚橘粉、晚上深藍夜空加星星、
+/// 深夜更暗。往下滑時間軸，像看著一天過去（使用者回報：「項目清單右邊有點白的單調」）。
+///
+/// 跟的是資料上的抵達時間，不是現在幾點，所以是靜態的，不需要 TimelineView。
+enum TripSkyTime: Int, CaseIterable {
+    case dawn, morning, afternoon, dusk, evening, lateNight
+
+    /// 小時用 Calendar.current 取——時間軸算第幾天（TripPlan.timeline）用的是它，
+    /// 卡上寫的 HH:mm（DateFormatter 預設）也是目前時區，天空才會跟卡上寫的時間對得上。
+    ///
+    ///   05:00–06:59 清晨　07:00–11:59 早上　12:00–16:59 下午
+    ///   17:00–18:59 傍晚　19:00–22:59 晚上　23:00–04:59 深夜
+    static func of(_ date: Date, calendar: Calendar = .current) -> TripSkyTime {
+        switch calendar.component(.hour, from: date) {
+        case 5..<7: return .dawn
+        case 7..<12: return .morning
+        case 12..<17: return .afternoon
+        case 17..<19: return .dusk
+        case 19..<23: return .evening
+        default: return .lateNight
+        }
+    }
+
+    /// 晚上與深夜：整張卡變深色（淺色模式也是）
+    var isNight: Bool { self == .evening || self == .lateNight }
+}
+
+/// 一張卡在某個時段的配色。淺色、深色模式各六組（規格「每個時段的配色表」）。
+///
+/// 設計：
+/// • 白天四個時段：卡底照舊是白（深色模式 #1C1C1E），天空只是淡淡一層——從卡身頂端開始，
+///   上方最濃、往下淡出，淡到「狀態面板上緣 −6pt」就沒了，不墊到面板後面。
+/// • 晚上、深夜：**整張卡變深色**（卡底藏青、內容套深色模式），不做「只有上半是夜空」：
+///   地址與面板之間只有 8pt，從藏青淡到白的那一段一定壓到字；而且整張套深色之後，
+///   系統色（.primary／.secondary／分隔線／膠囊底）全部自動換成驗過的深色版。
+/// • 當天色（TripDayPalette）不鋪大面積：天空講「幾點」，當天色講「哪一天」
+///   （序號圈、面板、路段膠囊、查看地圖、…、花費招牌、天際線上的地標都還是當天色）。
+///
+/// 對比（sRGB 近似，scratchpad/v519/sky_contrast*.py）：標題 14.8～19.6；
+/// 地址改用各時段的墨色，在天空最濃處 6.56～7.13、白底 8.09～9.52，夜晚 9.50～11.57。
+struct TripCardSky: Equatable {
+    let time: TripSkyTime
+    /// 整頁是不是深色模式
+    let pageDark: Bool
+    /// 星星的種子（站序號）
+    let seed: Int
+    /// 天空最濃處（卡身頂端）
+    let top: Color
+    /// 天空中段（55% 處），再往下淡成同色相的透明
+    let mid: Color
+    /// 卡底。nil＝系統的 secondarySystemGroupedBackground（白天時段，淺色白、深色 #1C1C1E）
+    let base: Color?
+    /// 地址、備註的字色（取代原本的 .secondary／.tertiary：.secondary 在白底上只有 3.44，
+    /// 疊上天空剩 2.99～3.24）
+    let ink: Color
+    /// 狀態面板的底。nil＝照舊 tertiarySystemGroupedBackground（白天時段不動）
+    let panel: Color?
+    /// 底帶的樓群色票
+    let skyline: TripSkylineInk
+    /// 底帶的地平線暖光（夜晚），0＝沒有
+    let glow: Double
+    /// 撒幾顆星，0＝不撒（只有夜晚）
+    let stars: Int
+
+    var isNight: Bool { time.isNight }
+
+    /// 這張卡用哪一套配色：夜晚時段不管整頁是什麼模式都是深色
+    var scheme: ColorScheme { (pageDark || time.isNight) ? .dark : .light }
+
+    /// 狀態面板的框：面板跟夜晚卡底的對比只有 1.14～1.27，邊界靠這條框（看板格子同一條）
+    var panelEdge: Color? { isNight ? TripBoardPalette(.dark).cellStroke : nil }
+
+    /// 白天天空上的 ≡ 把手：灰底（tertiarySystemFill）疊在天空上只剩 2.86～3.00，
+    /// 改成白 70% 的底＋看板標籤的藍（6.00～6.32）。夜晚與深色模式照舊。
+    var handleFill: Color? { scheme == .light ? Color.white.opacity(0.7) : nil }
+    var handleInk: Color? { scheme == .light ? TripBoardPalette(.light).label : nil }
+
+    init(time: TripSkyTime, pageDark: Bool, seed: Int) {
+        self.time = time
+        self.pageDark = pageDark
+        self.seed = seed
+        // 夜晚的地址：看板夜裡日期的那個淡藍（深色模式所有時段也用它：.secondary 在深色「下午」只有 4.31）
+        let nightInk = TripBoardPalette(.dark).inkDate
+        var base: Color? = nil
+        var panel: Color? = nil
+        var glow = 0.0
+        var stars = 0
+        let top: Color, mid: Color, ink: Color, skyline: TripSkylineInk
+        switch (pageDark, time) {
+        // ── 淺色模式 ──
+        case (false, .dawn):
+            top = Color(tb: 0xFBE3D6); mid = Color(tb: 0xECE6F8); ink = Color(tb: 0x5A4A63)
+            skyline = .dawnLight
+        case (false, .morning):
+            top = Color(tb: 0xDDF0FE); mid = Color(tb: 0xEEF7FF); ink = Color(tb: 0x33507F)
+            skyline = .morningLight
+        case (false, .afternoon):
+            // 看板白天天空的中段與下段
+            top = TripBoardSkyArt.dayHigh; mid = TripBoardSkyArt.dayLow; ink = Color(tb: 0x24476F)
+            skyline = .boardDay
+        case (false, .dusk):
+            top = Color(tb: 0xFFCFB0); mid = Color(tb: 0xFBDDE6); ink = Color(tb: 0x6A3A2E)
+            skyline = .duskLight
+        case (false, .evening):
+            top = Color(tb: 0x0B1636); mid = Color(tb: 0x111C40); ink = nightInk
+            base = Color(tb: 0x16203F); panel = Color(tb: 0x24315C)
+            skyline = .boardNight; glow = 0.18; stars = 8
+        case (false, .lateNight):
+            top = Color(tb: 0x050B22); mid = Color(tb: 0x080F2B); ink = nightInk
+            base = Color(tb: 0x0C1229); panel = Color(tb: 0x1C2648)
+            skyline = .lateNight; glow = 0.08; stars = 12
+        // ── 深色模式 ──
+        case (true, .dawn):
+            top = Color(tb: 0x3B2C3F); mid = Color(tb: 0x2A2433); ink = nightInk
+            skyline = .dayDark
+        case (true, .morning):
+            top = Color(tb: 0x1C3550); mid = Color(tb: 0x1C2735); ink = nightInk
+            skyline = .dayDark
+        case (true, .afternoon):
+            top = Color(tb: 0x1B4166); mid = Color(tb: 0x1A2C44); ink = nightInk
+            skyline = .dayDark
+        case (true, .dusk):
+            top = Color(tb: 0x4A2C2A); mid = Color(tb: 0x3A2433); ink = nightInk
+            skyline = .duskDark
+        case (true, .evening):
+            // 看板夜空的天頂；卡底＝看板夜裡的卡頂色；面板＝看板夜裡格子的底
+            top = TripBoardSkyArt.nightZenith; mid = Color(tb: 0x0F1A3D); ink = nightInk
+            base = TripBoardPalette(.dark).boardTop; panel = Color(tb: 0x1C2646)
+            skyline = .boardNight; glow = 0.16; stars = 8
+        case (true, .lateNight):
+            top = Color(tb: 0x050A1E); mid = Color(tb: 0x080E26); ink = nightInk
+            base = Color(tb: 0x0A0F24); panel = Color(tb: 0x1A2444)
+            skyline = .lateNight; glow = 0.08; stars = 12
+        }
+        self.top = top
+        self.mid = mid
+        self.base = base
+        self.ink = ink
+        self.panel = panel
+        self.skyline = skyline
+        self.glow = glow
+        self.stars = stars
+    }
+}
+
+/// 卡片底帶各時段的樓群色票（看板的 .boardDay／.boardNight 在 TripSummaryBoard.swift）。
+/// 藝術元素只要看得到：近排對卡底的可見度白天 2.04～3.00、深色白天 1.64～1.81；
+/// 夜晚的樓本身只有 1.05～1.37，靠地平線暖光和亮窗撐。
+extension TripSkylineInk {
+    static let dawnLight = TripSkylineInk(
+        far: Color(tb: 0xD9CFE6, 0.8), farLight: nil, near: [Color(tb: 0xA7A3C9)],
+        glint: Color.white.opacity(0.35), windowLine: Color.white.opacity(0.28), lit: nil)
+    static let morningLight = TripSkylineInk(
+        far: Color(tb: 0xC9DCEF, 0.8), farLight: nil, near: [Color(tb: 0x9DB8DA)],
+        glint: Color.white.opacity(0.35), windowLine: Color.white.opacity(0.28), lit: nil)
+    /// 傍晚：樓帶一點紫，亮邊與窗線是夕陽的暖色
+    static let duskLight = TripSkylineInk(
+        far: Color(tb: 0xE7C3C9, 0.8), farLight: nil, near: [Color(tb: 0xA98BB0)],
+        glint: Color(tb: 0xFFD9B0, 0.45), windowLine: Color(tb: 0xFFE2B8, 0.55), lit: nil)
+    /// 深夜（兩種模式共用）：比晚上更暗，窗只亮一成多
+    static let lateNight = TripSkylineInk(
+        far: Color(tb: 0x121A3A), farLight: nil, near: [Color(tb: 0x1E2A55), Color(tb: 0x182247)],
+        glint: nil, windowLine: nil,
+        lit: Lit(rate: 0.12, warm: Color(tb: 0xFFC56B), cool: Color(tb: 0x9ED8FF), warmShare: 0.72))
+    /// 深色模式的清晨、早上、下午
+    static let dayDark = TripSkylineInk(
+        far: Color(tb: 0x2A3550, 0.8), farLight: nil, near: [Color(tb: 0x34466B)],
+        glint: Color.white.opacity(0.10), windowLine: Color.white.opacity(0.12), lit: nil)
+    /// 深色模式的傍晚
+    static let duskDark = TripSkylineInk(
+        far: Color(tb: 0x3A2E40, 0.8), farLight: nil, near: [Color(tb: 0x4A3A55)],
+        glint: Color.white.opacity(0.10), windowLine: Color(tb: 0xFFC56B, 0.30), lit: nil)
+}
+
+/// cardColumn 裡要讓天空知道位置的幾段字（TripBoardAnchorKey 的 key，跟看板共用同一個 PreferenceKey）。
+/// 天空淡到面板上緣就停；星星避開標題、地址、備註。
+enum TripCardAnchor {
+    static let title = "card.title"
+    static let address = "card.address"
+    static let note = "card.note"
+    static let panel = "card.panel"
+}
+
+/// 夜晚卡片天空上的星星。用看板同一支 paintStars，只撒 8～12 顆，避開標題、地址、備註。
+///
+/// Equatable＋.equatable()：時間軸不是 lazy，四十張卡同時在；Canvas 的閉包比不出有沒有變，
+/// 不擋的話整頁任何狀態一變就全部重畫。避開的範圍先取整數（.integral）：標題的跑馬燈
+/// 每秒 30 格在動，小數點的版面抖動不能讓它重畫。
+struct TripCardStars: View, Equatable {
+    /// 天空的上緣（卡身頂）與星星撒到哪裡為止（卡片座標）
+    let top: CGFloat
+    let bottom: CGFloat
+    /// 照片的右緣：再往左是照片，撒了也看不到
+    let left: CGFloat
+    let avoid: [CGRect]
+    let seed: Int
+    let count: Int
+
+    var body: some View {
+        Canvas { ctx, size in
+            guard bottom - top > 14, size.width - left > 40 else { return }
+            var g = ctx
+            g.translateBy(x: left, y: top)
+            let local = avoid.map { $0.offsetBy(dx: -left, dy: -top) }
+            TripBoardSkyArt.paintStars(&g, width: size.width - left - 8, bottom: bottom - top,
+                                       avoid: local, seed: seed, count: count)
+        }
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
     }
 }
 
@@ -279,10 +499,15 @@ private struct TripChipRowAnchorKey: PreferenceKey {
 
 /// 一張卡的骨架。內容全部由呼叫端組好傳進來。
 ///
-/// 圖層（後 → 前）：卡片底（含路段膠囊的底）→ 天際線 → 照片 → 內容 → 照片上的標記與招牌。
+/// 圖層（後 → 前）：卡片底（含路段膠囊的底）→ 天空（v25.519）→ 天際線 → 照片 → 內容
+/// → 照片上的標記與招牌。
 ///
 /// ⚠️ 這一層**不准**掛 .clipShape／.clipped：花費招牌的 popover、拖曳時畫在卡與卡
-///    之間的那條線都在卡片邊界上或外面。要裁的只有照片自己（照片自己 clipShape）。
+///    之間的那條線都在卡片邊界上或外面。要裁的只有照片自己（照片自己 clipShape），
+///    以及天空、天際線各自那一層（[v25.519] 實心的樓會凸出卡片右下的圓角）。
+///
+/// [v25.519] 夜晚時段的卡片整張是深色：呼叫端在這張卡外面套 .environment(\.colorScheme, sky.scheme)，
+/// 骨架只負責換卡底、畫天空與星星。
 struct TripStopCardFrame: View {
     let metrics: TripCardMetrics
     let topCapsule: AnyView?
@@ -296,8 +521,15 @@ struct TripStopCardFrame: View {
     let bottomBand: CGFloat
     let footer: AnyView?
     let onTap: () -> Void
+    /// [v25.519] 這張卡的天空（跟著抵達時間）。nil＝照舊的白卡
+    let sky: TripCardSky?
+    /// [v25.519] 長按照片跳出的選單（更換封面）。掛在照片裁成波浪切線**之後**，
+    /// 長按浮起來的預覽才是切好的形狀，不是整張沒裁的長方形。nil＝沒有選單
+    let heroMenu: AnyView?
 
     @Environment(\.colorScheme) private var scheme
+    /// 「增加對比」打開時天空淡一半
+    @Environment(\.colorSchemeContrast) private var contrast
     /// 路段膠囊的高度。字放大時跟著長，照片頂端的缺口跟著它走。
     @ScaledMetric(relativeTo: .caption2) private var scaledCapsuleHeight: CGFloat = 26
     private let capsuleGap: CGFloat = 4
@@ -311,7 +543,8 @@ struct TripStopCardFrame: View {
     init(metrics: TripCardMetrics, topCapsule: AnyView?, hero: AnyView,
          heroOverlay: AnyView, column: AnyView, chipRow: AnyView?,
          skyline: AnyView, spendSign: AnyView?, bottomBand: CGFloat,
-         footer: AnyView?, onTap: @escaping () -> Void) {
+         footer: AnyView?, onTap: @escaping () -> Void,
+         sky: TripCardSky? = nil, heroMenu: AnyView? = nil) {
         self.metrics = metrics
         self.topCapsule = topCapsule
         self.hero = hero
@@ -323,6 +556,8 @@ struct TripStopCardFrame: View {
         self.bottomBand = bottomBand
         self.footer = footer
         self.onTap = onTap
+        self.sky = sky
+        self.heroMenu = heroMenu
     }
 
     var body: some View {
@@ -333,11 +568,19 @@ struct TripStopCardFrame: View {
         // 天氣、電話、地圖、照片）自己吃掉點擊，其餘地方才傳到這裡。
         .contentShape(Rectangle())
         .onTapGesture(perform: onTap)
+        // [v25.519] 標題、地址、面板的位置只給這張卡的天空用。讀完就清掉，
+        // 不讓四十張卡的字典一路往上合併到整頁（看板的標頭也用同一個 key，但在別的子樹）。
+        .transformPreference(TripBoardAnchorKey.self) { $0 = [:] }
     }
 
     private var shadowColor: Color {
         // 深色模式卡片是 #1C1C1E 放在 #000 上，本來就分得開；陰影在黑底上也看不到
         Color.black.opacity(scheme == .dark ? 0 : 0.07)
+    }
+
+    /// 卡底：白天時段照舊（淺色白、深色 #1C1C1E），夜晚時段是藏青
+    private var cardFill: Color {
+        sky?.base ?? Color(.secondarySystemGroupedBackground)
     }
 
     // MARK: 照片在左（預設）
@@ -358,7 +601,7 @@ struct TripStopCardFrame: View {
             TripCardSilhouette(capsuleLeading: metrics.photoTop + 6,
                                capsuleHeight: topCapsule == nil ? 0 : capsuleHeight,
                                gap: capsuleGap)
-                .fill(Color(.secondarySystemGroupedBackground))
+                .fill(cardFill)
                 .shadow(color: shadowColor, radius: 6, x: 0, y: 2)
         }
     }
@@ -407,9 +650,21 @@ struct TripStopCardFrame: View {
             // 樓的輪廓和福岡塔就會從溫度與電話號碼後面透出來（設計審查時抓到，
             // 初稿給的是「底帶＋14」）。藝術疊到要讀的字後面，違反「可以被看見，
             // 不可以被讀」。樓高與地標在 Canvas 裡本來就夾在畫布高度內。
+            //
+            // [v25.519] 樓改成實心有顏色（看板的畫法）之後，右下角會凸出卡片 18pt 的圓角
+            // （約 10×8pt 的樓角壓在頁面底上），所以這一層自己裁成卡片右下角的形狀。
+            // 有子地點 footer 時這裡不是卡片的底，不用裁。
             skyline
                 .frame(width: max(0, m.cardWidth - m.photoBottom - 4),
                        height: bottomBand)
+                .clipShape(UnevenRoundedRectangle(bottomTrailingRadius: footer == nil ? 18 : 0,
+                                                  style: .continuous))
+        }
+        // [v25.519] 天空：掛在天際線**之後**＝畫在它後面（background 越晚掛越在後面），
+        // 所以疊起來是「卡底 → 天空 → 天際線 → 照片」，照片右緣的波浪缺口自然透出天空。
+        // 位置要知道狀態面板在哪（天空淡到面板上緣 −6pt 就停，不墊到面板後面）。
+        .backgroundPreferenceValue(TripBoardAnchorKey.self) { anchors in
+            skyBackground(anchors)
         }
         .overlay(alignment: .topLeading) {
             heroOverlay
@@ -421,6 +676,7 @@ struct TripStopCardFrame: View {
         }
     }
 
+    @ViewBuilder
     private func photoLayer(size: CGSize, rowTop: CGFloat?) -> some View {
         let m = metrics
         let shape = TripPhotoCutShape(topBand: band,
@@ -429,12 +685,67 @@ struct TripStopCardFrame: View {
                                       bottomWidth: m.photoBottom,
                                       rowTop: rowTop,
                                       bottomLeftRadius: footer == nil ? 18 : 14)
-        return hero
+        let clipped = hero
             .frame(width: m.photo + 2, height: size.height)
             .frame(width: size.width, height: size.height, alignment: .topLeading)
             .clipShape(shape)
             // clipShape 不管點擊範圍；照片的點擊要跟著曲線，不能吃到右邊的內容
             .contentShape(shape)
+        if let heroMenu {
+            // [v25.519] 長按照片＝更換封面。點一下照舊是放大（Button 吃掉單點，長按才是選單）；
+            // 拖曳只在右欄的 ≡ 把手上，不會跟這個搶。預覽形狀跟著波浪切線。
+            clipped
+                .contentShape(.contextMenuPreview, shape)
+                .contextMenu { heroMenu }
+        } else {
+            clipped
+        }
+    }
+
+    // MARK: 天空（v25.519）
+
+    @ViewBuilder
+    private func skyBackground(_ anchors: [String: Anchor<CGRect>]) -> some View {
+        if let sky {
+            GeometryReader { geo in
+                skyLayer(sky, size: geo.size, anchors: anchors.mapValues { geo[$0] })
+            }
+        }
+    }
+
+    /// 天空：卡身頂端（路段膠囊底下）開始，上方最濃、往下淡成同色相的透明，
+    /// 淡到「狀態面板上緣 −6pt」就沒了，不墊到面板後面。字落在最濃處到卡底之間，
+    /// 對比是單調變化，驗頭尾兩端就夠（見 TripCardSky）。
+    ///
+    /// 只用 LinearGradient 填形狀（GPU 合成），不開點陣圖：不用 mask、blur、shadow、
+    /// drawingGroup——四十張卡每一個都是一次離屏繪製。星星只有夜晚才有。
+    private func skyLayer(_ sky: TripCardSky, size: CGSize, anchors: [String: CGRect]) -> some View {
+        let top = band
+        let panelTop = anchors[TripCardAnchor.panel]?.minY ?? size.height * 0.6
+        let bottom = max(top + 12, panelTop - 6)
+        let strength = contrast == .increased ? 0.5 : 1.0
+        let avoid = [TripCardAnchor.title, TripCardAnchor.address, TripCardAnchor.note]
+            .compactMap { anchors[$0] }
+            .map { $0.integral.insetBy(dx: -4, dy: -3) }
+        return ZStack(alignment: .topLeading) {
+            UnevenRoundedRectangle(topLeadingRadius: 18, topTrailingRadius: 18, style: .continuous)
+                .fill(LinearGradient(stops: [.init(color: sky.top, location: 0),
+                                             .init(color: sky.mid, location: 0.55),
+                                             .init(color: sky.mid.opacity(0), location: 1)],
+                                     startPoint: .top, endPoint: .bottom))
+                .opacity(strength)
+                .frame(width: size.width, height: bottom - top)
+                .offset(y: top)
+            if sky.stars > 0 {
+                TripCardStars(top: top.rounded(), bottom: (bottom - 4).rounded(),
+                              left: (metrics.photo + 2).rounded(),
+                              avoid: avoid, seed: sky.seed, count: sky.stars)
+                    .equatable()
+            }
+        }
+        .frame(width: size.width, height: size.height, alignment: .topLeading)
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
     }
 
     // MARK: 上下排（字放很大時）
@@ -454,7 +765,7 @@ struct TripStopCardFrame: View {
                     .padding(.top, 8)
             }
             ZStack(alignment: .topLeading) {
-                hero
+                stackedHero
                 heroOverlay
             }
             .frame(maxWidth: .infinity)
@@ -473,9 +784,13 @@ struct TripStopCardFrame: View {
             }
             ZStack(alignment: .bottomTrailing) {
                 // 同上：天際線不往上探，免得透到膠囊排的字後面
+                // [v25.519] 實心的樓會凸出卡片下面兩個圓角：沒有 footer 時這一條就是卡片的底，裁成那個形狀
                 skyline
                     .frame(maxWidth: .infinity)
                     .frame(height: bottomBand)
+                    .clipShape(UnevenRoundedRectangle(bottomLeadingRadius: footer == nil ? 18 : 0,
+                                                      bottomTrailingRadius: footer == nil ? 18 : 0,
+                                                      style: .continuous))
                 if let spendSign { spendSign }
             }
             .frame(height: bottomBand, alignment: .bottom)
@@ -487,17 +802,36 @@ struct TripStopCardFrame: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        // [v25.519] 上下排（字很大時）不畫天空漸層：上面是 112pt 的照片橫幅，天空只會剩一條帶子。
+        // 卡底（夜晚是藏青）、夜晚的深色、底帶的彩色樓群照樣跟著時段。
         .background {
             RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(Color(.secondarySystemGroupedBackground))
+                .fill(cardFill)
                 .shadow(color: shadowColor, radius: 6, x: 0, y: 2)
+        }
+    }
+
+    /// 上下排的照片橫幅。長按選單（更換封面）掛在照片自己身上，不掛在整個 ZStack：
+    /// 那樣購物車按鈕上長按也會跳出照片的選單。
+    @ViewBuilder
+    private var stackedHero: some View {
+        if let heroMenu {
+            let shape = RoundedRectangle(cornerRadius: 14, style: .continuous)
+            hero
+                .contentShape(shape)
+                .contentShape(.contextMenuPreview, shape)
+                .contextMenu { heroMenu }
+        } else {
+            hero
         }
     }
 }
 
 // MARK: - 主圖
 
-/// 左邊那張照片。來源：使用者的第一張照片 → 衛星快照 → 當天色的街角線稿。
+/// 左邊那張照片。來源：使用者的照片 → 衛星快照 → 當天色的街角線稿。
+/// [v25.519] 「使用者的照片」是這一站的封面（TripStop.coverPhotoURL：指定的那張，或自動的第一張）；
+/// 封面指定成衛星空照時呼叫端傳 photoURL＝nil。這裡不用改：taskKey 帶著檔名，換封面就重新載入。
 ///
 /// 只有卡片**捲進畫面**才載入；捲出去就把圖放掉（非 lazy 的列不會被銷毀，
 /// 不放的話 40 站 × 1.4MB 一直留在記憶體）。放掉的圖還在 TripHeroStore 的
@@ -1080,17 +1414,24 @@ struct TripStatusPanel: View {
     let rightDone: Bool
     let color: Color
     let checkIn: CheckIn?
+    /// [v25.519] 面板的底。nil＝照舊 tertiarySystemGroupedBackground。夜晚的卡片傳藏青
+    let surface: Color?
+    /// [v25.519] 面板的框（0.5pt）。夜晚的卡片面板跟卡底只差 1.14～1.27，邊界靠它
+    let edge: Color?
 
     @ScaledMetric(relativeTo: .callout) private var timeSize: CGFloat = 16
     @ScaledMetric(relativeTo: .caption2) private var labelSize: CGFloat = 10
     @ScaledMetric(relativeTo: .callout) private var glyph: CGFloat = 22
 
-    init(left: Half, right: Half, rightDone: Bool, color: Color, checkIn: CheckIn?) {
+    init(left: Half, right: Half, rightDone: Bool, color: Color, checkIn: CheckIn?,
+         surface: Color? = nil, edge: Color? = nil) {
         self.left = left
         self.right = right
         self.rightDone = rightDone
         self.color = color
         self.checkIn = checkIn
+        self.surface = surface
+        self.edge = edge
     }
 
     var body: some View {
@@ -1122,8 +1463,15 @@ struct TripStatusPanel: View {
                     .background(right.tint.opacity(0.08))
             }
         }
-        .background(Color(.tertiarySystemGroupedBackground))
+        .background(surface ?? Color(.tertiarySystemGroupedBackground))
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay {
+            if let edge {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .strokeBorder(edge, lineWidth: 0.5)
+                    .allowsHitTesting(false)
+            }
+        }
     }
 
     /// 左右並排（設計稿）。兩半一樣高：左半取理想寬度，右半吃剩下的。
@@ -1717,88 +2065,86 @@ extension TripLandmark {
 /// 畫布的高度就是卡片的底帶（沒花費 14、有花費 28），所有樓與地標都夾在
 /// 畫布裡、**不往上探**：正上方就是膠囊排，膠囊的底是半透明的。
 /// 地標擺在左邊 12～32% 的位置，右下角留給花費招牌（它「掛在建築物上」）。
-struct TripCardSkyline: View {
+///
+/// [v25.519] 樓從淡淡的當天色線稿（0.05 填色、0.30 描邊，白底上幾乎看不見）改成看板那樣
+/// **實心、有顏色**的兩排樓，色票跟著那一站的時段（TripCardSky.skyline）：白天藍灰、傍晚帶紫、
+/// 夜裡深藍加亮窗與地平線暖光。畫法直接呼叫看板的 paintFarRow／paintNearRow，不寫第二份。
+/// 地標與航線改用當天色的墨色（淺色壓暗 40%、深色混 30% 白）：天際線上仍看得出「哪一天」。
+///
+/// Equatable＋.equatable()（呼叫端在包 AnyView 之前掛）：時間軸不是 lazy、四十張卡同時在，
+/// Canvas 的閉包比不出有沒有變，不擋的話整頁任何狀態一變（橫幅、拖曳目標、路線計算進度）
+/// 就全部重畫。⚠️ 這個型別裡不能放 @Environment（合成的 == 比不了屬性包裝器），
+/// 深淺色由呼叫端明確傳進來。
+struct TripCardSkyline: View, Equatable {
     let color: Color
     let seed: Int
     let landmarks: [TripLandmark]
     let planeTrail: Bool
+    /// [v25.519] 樓群的色票
+    let ink: TripSkylineInk
+    /// [v25.519] 地平線暖光的濃度（夜晚），0＝沒有。用漸層畫，不用模糊
+    let glow: Double
+    /// [v25.519] 這張卡是深色（深色模式或夜晚時段）：地標與航線的墨色用哪一套
+    let dark: Bool
 
-    init(color: Color, seed: Int, landmarks: [TripLandmark], planeTrail: Bool) {
+    init(color: Color, seed: Int, landmarks: [TripLandmark], planeTrail: Bool,
+         ink: TripSkylineInk = .boardDay, glow: Double = 0, dark: Bool = false) {
         self.color = color
         self.seed = seed
         self.landmarks = landmarks
         self.planeTrail = planeTrail
+        self.ink = ink
+        self.glow = glow
+        self.dark = dark
     }
 
     var body: some View {
         Canvas { ctx, size in
-            Self.draw(&ctx, size: size, color: color, seed: seed,
-                      landmarks: landmarks, planeTrail: planeTrail)
+            Self.draw(&ctx, size: size, art: self)
         }
         .allowsHitTesting(false)
         .accessibilityHidden(true)
     }
 
-    private static func draw(_ ctx: inout GraphicsContext, size: CGSize, color: Color,
-                             seed: Int, landmarks: [TripLandmark], planeTrail: Bool) {
+    private static func draw(_ ctx: inout GraphicsContext, size: CGSize, art a: TripCardSkyline) {
         guard size.width > 40, size.height > 12 else { return }
-        var r = InkRandom(20117 + seed * 131)
-        let ground = size.height - 1.5
-        let line = color.opacity(0.30)
-        let faint = color.opacity(0.16)
-        let outline = StrokeStyle(lineWidth: 0.8, lineCap: .round, lineJoin: .round)
+        var r = InkRandom(20117 + a.seed * 131)
+        let ground = size.height
+        // 地標與航線：當天色的墨色（深色混 30% 白，淺色壓暗 40%）
+        let mark = a.dark ? a.color.mix(with: .white, by: 0.3).opacity(0.85)
+                          : TripInk.solid(a.color).opacity(0.9)
 
-        // 地面：從左邊淡入，不切一條硬邊
-        var base = Path()
-        base.move(to: CGPoint(x: 0, y: ground))
-        base.addLine(to: CGPoint(x: size.width, y: ground))
-        ctx.stroke(base, with: .linearGradient(Gradient(colors: [.clear, line, faint]),
-                                               startPoint: .zero,
-                                               endPoint: CGPoint(x: size.width, y: 0)),
-                   style: StrokeStyle(lineWidth: 0.8))
+        // 夜裡地平線一層暖光（看板夜空同一個色）。看板用的是模糊，四十張卡不能用——
+        // 這裡是一條由透明到暖色的漸層，效果接近、成本是零
+        if a.glow > 0 {
+            ctx.fill(Path(CGRect(origin: .zero, size: size)), with: .linearGradient(
+                Gradient(colors: [TripBoardSkyArt.horizonGlow.opacity(0),
+                                  TripBoardSkyArt.horizonGlow.opacity(a.glow)]),
+                startPoint: .zero, endPoint: CGPoint(x: 0, y: size.height)))
+        }
 
-        // 地標先佔位置，樓群繞開它
+        // 遠排（看板同一支）
+        TripBoardSkyArt.paintFarRow(&ctx, width: size.width, ground: ground, band: size.height,
+                                    ink: a.ink, seed: a.seed)
+
+        // 地標先佔位置，近排的樓繞開它
         var reserved: [ClosedRange<CGFloat>] = []
         var lx = size.width * CGFloat(0.12 + r.next() * 0.2)
-        for mark in landmarks {
-            let w = mark.span
+        for landmark in a.landmarks {
+            let w = landmark.span
             if lx + w > size.width - 4 { break }
-            ctx.stroke(mark.outline(x: lx, ground: ground, height: size.height),
-                       with: .color(color.opacity(0.36)),
-                       style: StrokeStyle(lineWidth: 0.9, lineCap: .round, lineJoin: .round))
+            ctx.stroke(landmark.outline(x: lx, ground: ground - 0.5, height: size.height),
+                       with: .color(mark),
+                       style: StrokeStyle(lineWidth: 1.0, lineCap: .round, lineJoin: .round))
             reserved.append((lx - 3)...(lx + w + 3))
             lx += w + CGFloat(18 + r.next() * 30)
         }
 
-        // 樓群：只有輪廓，窗是幾條短虛線（整片亮著的點陣窗會像資料）
-        var x: CGFloat = size.width * 0.02
-        while x < size.width - 6 {
-            let w = CGFloat(6 + r.next() * 12)
-            if reserved.contains(where: { $0.overlaps(x...(x + w)) }) {
-                x += w + 3
-                continue
-            }
-            let roll = r.next()
-            let tall: CGFloat = roll > 0.8 ? 1.0 : (roll > 0.45 ? 0.6 : 0.32)
-            let h = min(size.height - 4, 5 + tall * CGFloat(6 + r.next() * 20))
-            let rect = CGRect(x: x, y: ground - h, width: w, height: h)
-            ctx.fill(Path(rect), with: .color(color.opacity(0.05)))
-            ctx.stroke(Path(rect), with: .color(line), style: outline)
-            var wy = rect.minY + 3
-            while wy < ground - 3 {
-                if r.next() > 0.45 {
-                    var win = Path()
-                    win.move(to: CGPoint(x: rect.minX + 2, y: wy))
-                    win.addLine(to: CGPoint(x: rect.maxX - 2, y: wy))
-                    ctx.stroke(win, with: .color(faint),
-                               style: StrokeStyle(lineWidth: 0.6, dash: [1.4, 1.6]))
-                }
-                wy += 3.5
-            }
-            x += w + CGFloat(1.5 + r.next() * 6)
-        }
+        // 近排（看板同一支）：白天亮邊＋窗線，夜裡亮窗
+        TripBoardSkyArt.paintNearRow(&ctx, width: size.width, ground: ground, band: size.height,
+                                     ink: a.ink, seed: a.seed, reserved: reserved)
 
-        if planeTrail { drawPlane(&ctx, size: size, color: color, random: &r) }
+        if a.planeTrail { drawPlane(&ctx, size: size, color: mark, random: &r) }
     }
 
     private static func drawPlane(_ ctx: inout GraphicsContext, size: CGSize,
@@ -1808,8 +2154,8 @@ struct TripCardSkyline: View {
                           y: size.height * 0.22)
         drawTrail(&ctx, from: start, to: end,
                   control: CGPoint(x: (start.x + end.x) / 2, y: size.height * 0.9),
-                  color: color.opacity(0.32), lineWidth: 0.9,
-                  icon: "airplane", iconColor: color.opacity(0.55),
+                  color: color.opacity(0.6), lineWidth: 0.9,
+                  icon: "airplane", iconColor: color,
                   iconSize: 12, iconAngle: -24)
     }
 

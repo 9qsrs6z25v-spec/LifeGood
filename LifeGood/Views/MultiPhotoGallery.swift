@@ -63,6 +63,12 @@ struct MultiPhotoGallery: View {
     /// 記帳表單那種「按儲存才落地」的畫面**不要傳**——表單一關就沒有人認領那些檔名，
     /// 寫回去只會變成孤兒檔案，那種情況維持原本「離開畫面就取消並清掉」的行為。
     var onBackgroundCommit: (([String]) -> Void)? = nil
+    /// [v25.519] 哪一張是封面（縮圖左下角標「封面」）。nil＝這個畫面沒有封面的概念。
+    /// 目前只有旅遊景點卡傳（傳的是這一站實際顯示的那張：指定的、或自動的第一張）。
+    var coverName: String? = nil
+    /// [v25.519] 長按縮圖「設為封面」。nil＝不提供——其他八個呼叫端都是 nil，外觀與行為不變。
+    /// 點縮圖照舊是看大圖，長按才是選單。
+    var onSetCover: ((String) -> Void)? = nil
 
     @State private var pickerItems: [PhotosPickerItem] = []
     @State private var showCamera: Bool = false
@@ -304,6 +310,18 @@ struct MultiPhotoGallery: View {
         }
     }
 
+    /// [v25.519] 縮圖左下的「封面」小標
+    private static var coverTag: some View {
+        Text("封面")
+            .font(.system(size: 9, weight: .bold))
+            .foregroundStyle(.white)
+            .padding(.horizontal, 5).padding(.vertical, 2)
+            .background(Color.black.opacity(0.6), in: Capsule())
+            .padding(5)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+    }
+
     // 空狀態：36pt 漸層圓（topLeading→bottomTrailing 0.22→0.09）+ strokeBorder + 圖示 + 提示文字
     @ViewBuilder
     private var emptyState: some View {
@@ -340,11 +358,17 @@ struct MultiPhotoGallery: View {
     @ViewBuilder
     private func thumbnail(for name: String) -> some View {
         let url = urlFor(name)
+        let isPDF = name.lowercased().hasSuffix(".pdf")
+        let isCover = !isPDF && coverName == name
+        // 字串先組好（規矩：三元不直接塞進 Text／Label）
+        let coverValue: String = isCover ? "封面" : ""
+        let coverMenuTitle: String = isCover ? "這張是封面" : "設為封面"
+        let coverMenuIcon: String = isCover ? "checkmark.circle" : "rectangle.portrait.inset.filled"
         ZStack(alignment: .topTrailing) {
-            Button {
+            let face = Button {
                 viewingURL = IdentifiableURL(url: url)
             } label: {
-                if name.lowercased().hasSuffix(".pdf") {
+                if isPDF {
                     PDFThumbView(url: url, size: thumbnailSize)
                 } else {
                     AsyncThumbnailView(url: url, size: thumbnailSize)
@@ -353,6 +377,26 @@ struct MultiPhotoGallery: View {
             .buttonStyle(PressableScaleStyle())
             .shadow(color: .black.opacity(0.10), radius: 6, x: 0, y: 3)
             .shadow(color: .black.opacity(0.04), radius: 2, x: 0, y: 1)
+            // [v25.519] 封面那張左下角一個小標（右上角是刪除的 ×，不搶位置）
+            .overlay(alignment: .bottomLeading) {
+                if isCover { Self.coverTag }
+            }
+            .accessibilityValue(coverValue)
+
+            if let onSetCover, !isPDF {
+                face
+                    .contextMenu {
+                        Button {
+                            onSetCover(name)
+                        } label: {
+                            Label(coverMenuTitle, systemImage: coverMenuIcon)
+                        }
+                        .disabled(isCover)
+                    }
+                    .accessibilityAction(named: "設為封面") { onSetCover(name) }
+            } else {
+                face
+            }
 
             if allowAdding {
                 Button {

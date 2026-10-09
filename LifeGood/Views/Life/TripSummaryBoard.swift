@@ -37,7 +37,9 @@ import Combine
 // 6. 字級不照設計稿縮：設計稿是插畫比例，照比例縮到 375 寬的手機上標籤只剩 6.7pt。
 //    字級固定、版面去適應（放不下的時長在「小時」後面斷成兩行，不硬縮）。
 
-fileprivate extension Color {
+// [v25.519] 拿掉 fileprivate：時間軸卡片的天空色票（TripCardSky，在 TripTimelineCard.swift）
+// 也用這一支寫色值，不再寫第二支 hex 轉換。模組裡另一支 hex 初始化是 init?(heroHex:)，不撞名。
+extension Color {
     /// 0xRRGGBB（sRGB）
     init(tb hex: UInt32, _ alpha: Double = 1) {
         self.init(.sRGB,
@@ -221,7 +223,10 @@ struct TripBoardChip: Identifiable {
 struct TripBoardCurrent {
     let stopId: UUID
     let name: String
+    /// 這一站的代表照片（＝封面，TripStop.coverPhotoURL）。強制用衛星空照的站是 nil
     let photoURL: URL?
+    /// [v25.519] 使用者**明確指定**了哪一張當封面：那就連機場也放那張照片，不畫航廈
+    let coverIsChosen: Bool
     let isAirport: Bool
     let place: TripPlaceName.Place?
     let latitude: Double?
@@ -823,9 +828,13 @@ struct TripSummaryBoard: View {
             .foregroundStyle(pal.label)
     }
 
+    /// [v25.519] 跟封面的規則一致：明確指定的照片最優先（連機場也是）；自動的時候機場照舊畫航廈；
+    /// 強制用衛星空照的站沒有代表照片（photoURL 是 nil），機場畫航廈、其他留白。
     @ViewBuilder
     private func currentArt(_ c: TripBoardCurrent, pal: TripBoardPalette) -> some View {
-        if c.isAirport {
+        if c.coverIsChosen, let url = c.photoURL {
+            TripBoardPhoto(url: url)
+        } else if c.isAirport {
             TripBoardAirportArt(dark: pal.dark, sign: airportSign(c))
                 .equatable()
         } else if let url = c.photoURL {
@@ -1343,6 +1352,57 @@ struct TripBoardTerminalFrame {
     func roofY(_ x: CGFloat, ground: CGFloat) -> CGFloat {
         ground - leftHeight - (x - x0) * slope
     }
+
+    /// 屋簷帶的左端：比牆往左出挑 8pt
+    var eaveLeft: CGFloat { x0 - 8 }
+
+    /// 航廈讓出來的界線：屋簷左端再往左 4pt。近排的樓、客機的機頭都停在這條線左邊。
+    var clearLeft: CGFloat { eaveLeft - 4 }
+}
+
+/// [v25.519] 天際線（遠排＋近排的樓）的色票。
+///
+/// 原本 paintFarRow／paintNearRow 用 dark: Bool 寫死兩組顏色；時間軸卡片的底帶要照
+/// 「那一站的時段」換樓的顏色（清晨、傍晚、深夜各一組），畫法跟看板同一支，所以把顏色抽出來。
+/// 看板傳 .boardDay／.boardNight，值跟原本一模一樣；亂數的取用次數也跟原本一樣
+/// （遠排的燈看 farLight、近排的窗看 lit，跟原本看 dark 的分支一一對應），所以看板一筆都不會變。
+struct TripSkylineInk: Equatable {
+    /// 夜裡亮著的窗：每一格以 rate 的機率亮，亮的裡面 warmShare 是暖色、其餘冷色
+    struct Lit: Equatable {
+        let rate: Double
+        let warm: Color
+        let cool: Color
+        let warmShare: Double
+    }
+
+    /// 遠排：淡、矮、密
+    let far: Color
+    /// 遠排偶爾一兩顆燈（夜裡）。nil＝不點燈
+    let farLight: Color?
+    /// 近排的樓色，依序輪流（夜裡兩色交替，白天一色）
+    let near: [Color]
+    /// 白天每棟左邊那條亮邊（玻璃反光，寬 25%）。nil＝不畫
+    let glint: Color?
+    /// 白天的窗線（短虛線）。nil＝不畫
+    let windowLine: Color?
+    /// 夜裡亮燈的窗。有值就走夜裡的畫法（亮窗），沒有就走白天的（亮邊＋窗線）
+    let lit: Lit?
+
+    /// 看板白天（＝原本 dark == false 的顏色）
+    static let boardDay = TripSkylineInk(
+        far: Color(tb: 0xB4CCE6, 0.75), farLight: nil,
+        near: [Color(tb: 0x87A9D1, 0.95)],
+        glint: Color.white.opacity(0.35), windowLine: Color.white.opacity(0.28),
+        lit: nil)
+
+    /// 看板夜裡（＝原本 dark == true 的顏色）
+    static let boardNight = TripSkylineInk(
+        far: Color(tb: 0x1A2550), farLight: Color(tb: 0xFFCF7A, 0.55),
+        near: [Color(tb: 0x0E1730), Color(tb: 0x16234A)],
+        glint: nil, windowLine: nil,
+        lit: Lit(rate: 0.3, warm: Color(tb: 0xFFC56B), cool: Color(tb: 0x9ED8FF), warmShare: 0.72))
+
+    static func board(dark: Bool) -> TripSkylineInk { dark ? .boardNight : .boardDay }
 }
 
 extension TripBoardSkyArt {
@@ -1369,16 +1429,17 @@ extension TripBoardSkyArt {
         let term: TripBoardTerminalFrame? = a.scene == .flight
             ? terminalFrame(width: w, ground: ground, band: a.band, headTop: headTop)
             : nil
-        paintFarRow(&ctx, width: w, ground: ground, band: a.band, dark: a.dark, seed: a.seed)
+        let skyline = TripSkylineInk.board(dark: a.dark)
+        paintFarRow(&ctx, width: w, ground: ground, band: a.band, ink: skyline, seed: a.seed)
         let landmarkLimit = min(term.map { $0.x0 - 10 } ?? w, w * 0.62)
         var reserved = paintLandmarks(&ctx, marks: a.landmarks, width: w, ground: ground,
                                       band: a.band, limit: landmarkLimit, dark: a.dark, seed: a.seed)
         if let term {
-            reserved.append((term.x0 - 12)...(w + 4))
+            reserved.append(term.clearLeft...(w + 4))
         } else if a.scene == .drive {
             reserved.append((w * 0.56)...(w + 4))
         }
-        paintNearRow(&ctx, width: w, ground: ground, band: a.band, dark: a.dark,
+        paintNearRow(&ctx, width: w, ground: ground, band: a.band, ink: skyline,
                      seed: a.seed, reserved: reserved)
         paintTrees(&ctx, width: w, ground: ground, dark: a.dark, seed: a.seed, reserved: reserved)
 
@@ -1386,8 +1447,12 @@ extension TripBoardSkyArt {
         case .flight:
             if let term {
                 terminal(&ctx, frame: term, ground: ground, sign: a.sign, signSize: 9, dark: a.dark)
+                // 機頭停在航廈左邊，不伸進航廈（v25.519）。原本伸進航廈四成寬，機頭剛好蓋住
+                // 招牌開頭的兩三個字（「FUKUOKA」只讀得到「KUOKA」）。招牌最寬是屋簷的 82%、
+                // 置中，左緣不會比 x0 − 2.1 更左；機頭停在 x0 − 12，離招牌字至少 9pt，
+                // 不用量字、什麼城市名都一樣。
                 paintAirliner(&ctx, width: w, ground: ground, rects: r,
-                              rightLimit: term.x0 + (w - term.x0) * 0.4, dark: a.dark)
+                              rightLimit: term.clearLeft, dark: a.dark)
             }
         case .drive:
             paintRoad(&ctx, width: w, ground: ground, band: a.band, rects: r, sign: a.sign, dark: a.dark)
@@ -1422,17 +1487,28 @@ extension TripBoardSkyArt {
 
     // MARK: 天空
 
+    // [v25.519] 天空的幾個色抽成具名常數：時間軸卡片「下午」的天空、深色模式「晚上」的夜空、
+    // 夜裡底帶的地平線暖光直接拿這幾個色，不另外抄一份 hex。
+    /// 白天天空的中段（設計稿的晴藍）
+    static let dayHigh = Color(tb: 0xBEE4FF)
+    /// 白天天空靠近地平線那一段
+    static let dayLow = Color(tb: 0xE1F1FE)
+    /// 夜空的天頂
+    static let nightZenith = Color(tb: 0x0A1433)
+    /// 夜裡城市的燈把地平線染開的暖色
+    static let horizonGlow = Color(tb: 0xFF9A4D)
+
     static func paintSky(_ ctx: inout GraphicsContext, size: CGSize, dark: Bool) {
         let stops: [Gradient.Stop]
         if dark {
-            stops = [Gradient.Stop(color: Color(tb: 0x0A1433), location: 0),
+            stops = [Gradient.Stop(color: nightZenith, location: 0),
                      Gradient.Stop(color: Color(tb: 0x13224A), location: 0.5),
                      Gradient.Stop(color: Color(tb: 0x18264E), location: 0.82),
                      Gradient.Stop(color: Color(tb: 0x121B38), location: 1)]
         } else {
             stops = [Gradient.Stop(color: Color(tb: 0x8FD3FF), location: 0),
-                     Gradient.Stop(color: Color(tb: 0xBEE4FF), location: 0.45),
-                     Gradient.Stop(color: Color(tb: 0xE1F1FE), location: 0.82),
+                     Gradient.Stop(color: dayHigh, location: 0.45),
+                     Gradient.Stop(color: dayLow, location: 0.82),
                      Gradient.Stop(color: Color(tb: 0xEAF4FD), location: 1)]
         }
         let rect = Path(CGRect(origin: .zero, size: size))
@@ -1443,7 +1519,7 @@ extension TripBoardSkyArt {
             ctx.drawLayer { layer in
                 layer.addFilter(.blur(radius: 14))
                 layer.fill(Path(CGRect(x: 0, y: size.height - 26, width: size.width, height: 26)),
-                           with: .color(Color(tb: 0xFF9A4D, 0.16)))
+                           with: .color(horizonGlow.opacity(0.16)))
             }
         } else {
             // 右上的日光（不畫太陽：太陽會變成一個要看的東西）
@@ -1454,11 +1530,13 @@ extension TripBoardSkyArt {
         }
     }
 
+    /// count：撒幾顆（落在 avoid 裡的那幾顆直接跳過，所以畫出來的會少一點）。
+    /// [v25.519] 時間軸夜晚的卡片也用這一支，只撒 8～12 顆；看板維持 34。
     static func paintStars(_ ctx: inout GraphicsContext, width w: CGFloat, bottom: CGFloat,
-                           avoid: [CGRect], seed: Int) {
-        guard bottom > 10 else { return }
+                           avoid: [CGRect], seed: Int, count: Int = 34) {
+        guard bottom > 10, count > 0 else { return }
         var r = InkRandom(seed &* 31 &+ 7)
-        for i in 0..<34 {
+        for i in 0..<count {
             let p = CGPoint(x: CGFloat(r.next()) * w, y: 3 + CGFloat(r.next()) * (bottom - 3))
             let radius = CGFloat(0.4 + r.next() * 0.7)
             let alpha = 0.35 + r.next() * 0.55
@@ -1549,10 +1627,14 @@ extension TripBoardSkyArt {
     // MARK: 天際線
 
     /// 遠排：淡、矮、密
+    ///
+    /// [v25.519] 顏色改吃 TripSkylineInk（時間軸卡片的底帶也用這一支）。
+    /// ⚠️ 亂數的取用順序不能動：夜裡點燈那一步原本是 `dark && r.next() > 0.6`（白天短路、不取亂數），
+    ///    現在是 `farLight != nil` 才取——看板的 .boardDay 沒有 farLight、.boardNight 有，一一對應。
     static func paintFarRow(_ ctx: inout GraphicsContext, width w: CGFloat, ground: CGFloat,
-                            band: CGFloat, dark: Bool, seed: Int) {
+                            band: CGFloat, ink: TripSkylineInk, seed: Int) {
         var r = InkRandom(seed &* 7 &+ 3)
-        let fill = dark ? Color(tb: 0x1A2550) : Color(tb: 0xB4CCE6, 0.75)
+        let fill = ink.far
         var x: CGFloat = -4
         while x < w + 4 {
             let bw = CGFloat(5 + r.next() * 10)
@@ -1561,11 +1643,11 @@ extension TripBoardSkyArt {
             let h = min(band * 0.75, 6 + tall * CGFloat(r.next()) * band * 0.6)
             let rect = CGRect(x: x, y: ground - h, width: bw, height: h)
             ctx.fill(Path(rect), with: .color(fill))
-            if dark && r.next() > 0.6 {
+            if let light = ink.farLight, r.next() > 0.6 {
                 // 遠處只點一兩顆燈
                 let wy = rect.minY + 2 + CGFloat(r.next()) * max(1, h - 5)
                 ctx.fill(Path(CGRect(x: rect.minX + bw * 0.4, y: wy, width: 1.2, height: 1.4)),
-                         with: .color(Color(tb: 0xFFCF7A, 0.55)))
+                         with: .color(light))
             }
             x += bw + CGFloat(r.next() * 3)
         }
@@ -1573,11 +1655,16 @@ extension TripBoardSkyArt {
 
     /// 近排：深、高、疏。白天每棟左邊一條亮邊（玻璃反光）；夜裡窗戶亮燈
     /// （七成琥珀、三成冷藍，跟原本霓虹城市的窗是同一個比例）
+    ///
+    /// [v25.519] 顏色改吃 TripSkylineInk。⚠️ 走哪一個分支看 `ink.lit`（原本看 dark）：
+    ///    夜裡的分支每一格窗都取一次亂數、白天的分支不取，分支一換亂數序列就整個不一樣。
     static func paintNearRow(_ ctx: inout GraphicsContext, width w: CGFloat, ground: CGFloat,
-                             band: CGFloat, dark: Bool, seed: Int, reserved: [ClosedRange<CGFloat>]) {
+                             band: CGFloat, ink: TripSkylineInk, seed: Int,
+                             reserved: [ClosedRange<CGFloat>]) {
         var r = InkRandom(seed &* 13 &+ 5)
         var x: CGFloat = -2
         var i = 0
+        let palette = ink.near.isEmpty ? [ink.far] : ink.near
         while x < w {
             let bw = CGFloat(7 + r.next() * 12)
             if reserved.contains(where: { $0.overlaps(x...(x + bw)) }) {
@@ -1588,34 +1675,37 @@ extension TripBoardSkyArt {
             let tall: CGFloat = roll > 0.8 ? 1 : (roll > 0.42 ? 0.62 : 0.34)
             let h = min(band - 3, 8 + tall * CGFloat(r.next()) * (band - 6))
             let rect = CGRect(x: x, y: ground - h, width: bw, height: h)
-            if dark {
-                ctx.fill(Path(rect), with: .color(i % 2 == 0 ? Color(tb: 0x0E1730) : Color(tb: 0x16234A)))
+            ctx.fill(Path(rect), with: .color(palette[i % palette.count]))
+            if let lit = ink.lit {
                 var wy = rect.minY + 2.5
                 while wy < ground - 2.5 {
                     var wx = rect.minX + 1.8
                     while wx < rect.maxX - 2.4 {
-                        if r.next() < 0.3 {
-                            let warm = r.next() < 0.72
+                        if r.next() < lit.rate {
+                            let warm = r.next() < lit.warmShare
                             let alpha = 0.5 + r.next() * 0.4
                             ctx.fill(Path(CGRect(x: wx, y: wy, width: 1.4, height: 1.8)),
-                                     with: .color(warm ? Color(tb: 0xFFC56B, alpha) : Color(tb: 0x9ED8FF, alpha)))
+                                     with: .color((warm ? lit.warm : lit.cool).opacity(alpha)))
                         }
                         wx += 3.2
                     }
                     wy += 3.6
                 }
             } else {
-                ctx.fill(Path(rect), with: .color(Color(tb: 0x87A9D1, 0.95)))
-                ctx.fill(Path(CGRect(x: rect.minX, y: rect.minY, width: bw * 0.25, height: h)),
-                         with: .color(Color.white.opacity(0.35)))
-                var wy = rect.minY + 3
-                while wy < ground - 3 {
-                    var line = Path()
-                    line.move(to: CGPoint(x: rect.minX + 2, y: wy))
-                    line.addLine(to: CGPoint(x: rect.maxX - 2, y: wy))
-                    ctx.stroke(line, with: .color(Color.white.opacity(0.28)),
-                               style: StrokeStyle(lineWidth: 0.6, dash: [1.4, 1.6]))
-                    wy += 4
+                if let glint = ink.glint {
+                    ctx.fill(Path(CGRect(x: rect.minX, y: rect.minY, width: bw * 0.25, height: h)),
+                             with: .color(glint))
+                }
+                if let windowLine = ink.windowLine {
+                    var wy = rect.minY + 3
+                    while wy < ground - 3 {
+                        var line = Path()
+                        line.move(to: CGPoint(x: rect.minX + 2, y: wy))
+                        line.addLine(to: CGPoint(x: rect.maxX - 2, y: wy))
+                        ctx.stroke(line, with: .color(windowLine),
+                                   style: StrokeStyle(lineWidth: 0.6, dash: [1.4, 1.6]))
+                        wy += 4
+                    }
                 }
             }
             x += bw + CGFloat(1 + r.next() * 4)
@@ -1771,7 +1861,7 @@ extension TripBoardSkyArt {
                          ground: CGFloat, sign: String?, signSize: CGFloat, dark: Bool) {
         let width = f.x1 - f.x0
         guard width > 20 else { return }
-        let eaveL = CGPoint(x: f.x0 - 8, y: f.roofY(f.x0 - 8, ground: ground))
+        let eaveL = CGPoint(x: f.eaveLeft, y: f.roofY(f.eaveLeft, ground: ground))
         let eaveR = CGPoint(x: f.x1, y: f.roofY(f.x1, ground: ground))
         let wallL = f.roofY(f.x0, ground: ground) + f.eave
         let wallR = eaveR.y + f.eave
@@ -1869,6 +1959,7 @@ extension TripBoardSkyArt {
 
     /// 客機的位置：大字時間下面、「跨 N 天」那一行的右邊，機頭朝右上起飛。
     /// 機尾那一端如果落在大字時間的範圍裡，整架往下放，不壓到字。
+    /// 機頭尖端就在 rightLimit（差不到 1pt），右邊不會再有機身；夜裡的落地燈光錐會往右照出去。
     static func paintAirliner(_ ctx: inout GraphicsContext, width w: CGFloat, ground: CGFloat,
                               rects r: TripBoardTextRects, rightLimit: CGFloat, dark: Bool) {
         let textBottom = r.time.isEmpty ? ground * 0.5 : r.time.maxY

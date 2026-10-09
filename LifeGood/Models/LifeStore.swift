@@ -2850,11 +2850,70 @@ class LifeStore: ObservableObject {
     }
 
     /// 換掉某一站的照片清單（景點卡直接加減照片時用）
+    /// [v25.519] 刪掉的剛好是封面那張的話，TripStop.photoFileNames 的 didSet 會把封面退回自動
     func updateTripStopPhotos(planId: UUID, stopId: UUID, fileNames: [String]) {
         guard let pi = tripPlans.firstIndex(where: { $0.id == planId }),
               let si = tripPlans[pi].stops.firstIndex(where: { $0.id == stopId }),
               tripPlans[pi].stops[si].photoFileNames != fileNames else { return }
         tripPlans[pi].stops[si].photoFileNames = fileNames
+    }
+
+    /// [v25.519] 換某一站的封面（自動／某一張照片／衛星空照）。
+    ///
+    /// 跟 toggleTripStopMustVisit 一樣就地改那一站（等於拿最新的那份來改），
+    /// 不帶整份行程的快照去 upsert——那樣會蓋掉別處剛做的改動。
+    /// 指定的照片不在這一站的照片裡（剛被刪掉）就不設：不留一個指向不存在照片的封面。
+    func setTripStopCover(planId: UUID, stopId: UUID, cover: TripStopCover) {
+        // 使用者明確選了一個：還在背景跑的「從相簿加一張當封面」寫回時只加照片、不再改封面
+        // （見 coverImportTokens）。放在最前面：選的跟現在一樣、提早 return 的情況也算數。
+        coverImportTokens[stopId] = nil
+        guard let pi = tripPlans.firstIndex(where: { $0.id == planId }),
+              let si = tripPlans[pi].stops.firstIndex(where: { $0.id == stopId }) else { return }
+        if case .photo(let name) = cover,
+           !tripPlans[pi].stops[si].photoFileNames.contains(name) { return }
+        guard tripPlans[pi].stops[si].cover != cover else { return }
+        tripPlans[pi].stops[si].cover = cover
+    }
+
+    /// [v25.519] 「從相簿加一張當封面」還在背景匯入的那一批：stopId → 那一批的記號。
+    ///
+    /// 匯入要等 iCloud 原圖下載（加上匯入中心前面排著的別批），可能好幾十秒；畫面上還寫著
+    /// 「可以先離開這個畫面」，這段時間使用者可能又點了「自動」、另一張照片，或從長按選單「改回自動」。
+    /// 匯入寫回時記號已經對不上，就只把照片加進去、不動封面：**後來的明確選擇優先**。
+    /// 只活在這次啟動，不存檔、不同步（App 被關掉，匯入本來就跟著沒了）。
+    private var coverImportTokens: [UUID: UUID] = [:]
+
+    /// [v25.519] 開始一批「從相簿加一張當封面」。回傳這一批的記號，匯入完成時帶回 addTripStopCoverPhotos。
+    /// 同一站連選兩次相簿，第二次會換掉記號：第一批只加照片，第二批才設封面。
+    func beginTripStopCoverImport(stopId: UUID) -> UUID {
+        let token = UUID()
+        coverImportTokens[stopId] = token
+        return token
+    }
+
+    /// [v25.519] 「從相簿加一張當封面」匯入完成：照片加進這一站；這一批還是最後一次要求的話，
+    /// 第一張同時設成封面——**一次寫入**（tripPlans 的 didSet 每改一次就存一次檔、推一次 iCloud，分兩步就是兩次）。
+    ///
+    /// 記號對不上（匯入期間使用者自己選了封面，或又從相簿選了另一批）：照片照樣加進去
+    /// （使用者確實選了這張，不能丟），封面不動。
+    ///
+    /// - Parameter fileNames: 空的（讀圖或存檔失敗）也要交回來，這一批的記號才會收掉。
+    /// - Returns: false＝那一站已經不在了（匯入期間被刪掉），呼叫端要把剛寫好的檔案刪掉，不留孤兒檔。
+    @discardableResult
+    func addTripStopCoverPhotos(planId: UUID, stopId: UUID, fileNames: [String], token: UUID) -> Bool {
+        // 不管成不成，這一批都結束了。記號對得上才收掉：對不上＝後面還有一批，或使用者已經自己選了
+        let isLatest = coverImportTokens[stopId] == token
+        if isLatest { coverImportTokens[stopId] = nil }
+        guard let first = fileNames.first else { return true }
+        guard let pi = tripPlans.firstIndex(where: { $0.id == planId }),
+              let si = tripPlans[pi].stops.firstIndex(where: { $0.id == stopId }) else { return false }
+        var stop = tripPlans[pi].stops[si]
+        for name in fileNames where !stop.photoFileNames.contains(name) {
+            stop.photoFileNames.append(name)
+        }
+        if isLatest { stop.cover = .photo(first) }
+        tripPlans[pi].stops[si] = stop
+        return true
     }
 
     /// 直接把打卡時間設成指定值（景點卡上直接選狀態時用）。

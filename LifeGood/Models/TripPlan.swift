@@ -290,6 +290,37 @@ enum TripPhoneLookup {
     }
 }
 
+/// [v25.519] 一站的封面：時間軸卡片左邊那張用哪一個。
+///
+/// 存在 TripStop.coverRaw（單一個字串）；這個 enum 只是讀寫時的樣子。
+/// 認不得的值（例如日後的新選項）會被當成檔名，而它不在照片清單裡，解碼時就退回自動——不會 throw。
+enum TripStopCover: Equatable {
+    /// 預設：第一張照片，沒有照片就用衛星空照
+    case auto
+    /// 這一站自己的某一張照片（檔名）
+    case photo(String)
+    /// 就算有照片也用衛星空照（沒有座標時沒有衛星可用，退回自動）
+    case satellite
+
+    static let satelliteRaw = "satellite"
+
+    init(raw: String?) {
+        guard let raw, !raw.isEmpty else {
+            self = .auto
+            return
+        }
+        self = raw == Self.satelliteRaw ? .satellite : .photo(raw)
+    }
+
+    var raw: String? {
+        switch self {
+        case .auto: return nil
+        case .satellite: return Self.satelliteRaw
+        case .photo(let name): return name
+        }
+    }
+}
+
 struct TripStop: Identifiable, Codable {
     let id: UUID
     var name: String
@@ -334,8 +365,25 @@ struct TripStop: Identifiable, Codable {
     /// 的站，推算出來的時間沒有意義。推算時間比它早就顯示成等候、比它晚就標來不及。
     var arrivalOverride: Date?
     var note: String
-    var photoFileNames: [String]
+    var photoFileNames: [String] {
+        // [v25.519] 照片清單一變（刪照片、整批換掉），封面指的那張不在了就退回自動。
+        // 所有寫照片的路徑（景點卡的相片廊、編輯表單存檔、store 就地改）都會經過這裡；
+        // init 不會觸發 didSet，所以兩個 init 最後各自再做一次。
+        didSet { dropStaleCover() }
+    }
     var subSpots: [TripSubSpot]
+    /// [v25.519] 封面：時間軸卡片左邊那張、看板上代表這一站的那張用哪一個。
+    ///
+    /// 存成單一個字串（JSON 的 "cover"）：nil＝自動、"satellite"＝衛星空照、其他＝這一站自己的
+    /// 照片檔名（檔名都是「UUID.jpg」，不會跟 "satellite" 撞）。不直接存帶關聯值的 enum：合成的
+    /// Codable 會編成 {"photo":{"_0":"x.jpg"}}，難讀，日後改形狀也容易解不出來。
+    /// 程式裡一律透過 cover（TripStopCover）讀寫。
+    ///
+    /// ⚠️ 一定要在 CodingKeys 裡：encode 是編譯器合成的，漏寫不會編譯失敗，只會每次存檔都被悄悄丟掉。
+    /// ⚠️ 舊版（≤25.518）讀得到新資料（認不得的 key 直接略過），但它 LifeStore 任何一次 save()
+    ///    （不只改行程：save() 每次都把 life_trip_plans 一起重新編碼；打開行程頁補算路線也會存）
+    ///    都不會帶這個欄位，同步上去之後所有裝置的封面會退回「自動」——是降級，不會壞、照片不會少。
+    var coverRaw: String?
 
     /// 從**上一站**到這一站的路線快取。
     ///
@@ -365,7 +413,7 @@ struct TripStop: Identifiable, Codable {
          photoFileNames: [String] = [], subSpots: [TripSubSpot] = [],
          legMeters: Double? = nil, legSeconds: Double? = nil,
          legStamp: String? = nil, legIsEstimated: Bool = false,
-         legNeedsRetry: Bool = false) {
+         legNeedsRetry: Bool = false, cover: TripStopCover = .auto) {
         self.id = id; self.name = name; self.address = address
         self.latitude = latitude; self.longitude = longitude
         self.phone = phone
@@ -380,6 +428,8 @@ struct TripStop: Identifiable, Codable {
         self.legMeters = legMeters; self.legSeconds = legSeconds
         self.legStamp = legStamp; self.legIsEstimated = legIsEstimated
         self.legNeedsRetry = legNeedsRetry
+        self.coverRaw = cover.raw
+        dropStaleCover()
     }
 
     init(from decoder: Decoder) throws {
@@ -406,6 +456,13 @@ struct TripStop: Identifiable, Codable {
         legStamp = try? c.decodeIfPresent(String.self, forKey: .legStamp)
         legIsEstimated = (try? c.decodeIfPresent(Bool.self, forKey: .legIsEstimated)) ?? false
         legNeedsRetry = (try? c.decodeIfPresent(Bool.self, forKey: .legNeedsRetry)) ?? false
+        // [v25.519] 一定要 try?：TripPlan 解 stops 是整個陣列一起 try?，只要有一站丟錯，
+        // 整份行程的站都會變成空的，下一次存檔還會把空陣列推上 iCloud。
+        // 舊資料沒有這個 key → nil → 自動。
+        coverRaw = try? c.decodeIfPresent(String.self, forKey: .coverRaw)
+        if coverRaw?.isEmpty == true { coverRaw = nil }
+        // 雲端拉下來、匯入、舊備份都是整包換掉，不經過 photoFileNames 的 didSet
+        dropStaleCover()
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -414,6 +471,75 @@ struct TripStop: Identifiable, Codable {
         case actualArrival, actualDeparture
         case photoFileNames, subSpots, legMeters, legSeconds, legStamp, legIsEstimated
         case legNeedsRetry
+        // [v25.519] JSON 裡叫 "cover"
+        case coverRaw = "cover"
+    }
+
+    // MARK: 封面（v25.519）
+
+    var cover: TripStopCover {
+        get { TripStopCover(raw: coverRaw) }
+        set {
+            coverRaw = newValue.raw
+            // 指定的照片不在這一站的照片裡就不收（不留一個指向不存在照片的封面）
+            dropStaleCover()
+        }
+    }
+
+    /// 封面指的那張照片已經不在這一站的照片清單裡 → 退回自動。
+    ///
+    /// 只看「檔名還在不在清單裡」，**不看檔案在不在**：照片檔走另一條 iCloud 同步線，
+    /// 常常比行程資料晚到；檔案還沒下來時顯示端自己先墊衛星圖（TripHeroImage），不能把封面清掉。
+    private mutating func dropStaleCover() {
+        if case .photo(let name) = cover, !photoFileNames.contains(name) {
+            coverRaw = nil
+        }
+    }
+
+    /// 這一站的**代表照片**的檔名。時間軸卡片的主圖、看板的住宿格／「現在在」／相本預覽都吃這一個。
+    ///
+    ///   指定了某一張照片、而且還在 → 那一張
+    ///   強制衛星空照、而且有座標   → nil（沒有代表照片，畫衛星）
+    ///   其他（自動、強制衛星但沒座標、指定的那張已經不在）→ 第一張照片（沒有照片就 nil）
+    var coverPhotoName: String? {
+        switch cover {
+        case .photo(let name) where photoFileNames.contains(name):
+            return name
+        case .satellite where coordinate != nil:
+            return nil
+        default:
+            return photoFileNames.first
+        }
+    }
+
+    /// 畫面上「目前選的是哪一個」用這個（打勾、說明文字、長按選單出不出現「改回自動」），不要直接比 cover：
+    /// 指定用衛星空照、但這一站已經沒有位置 → 沒有衛星可用，卡片實際上照自動顯示，就標成自動。
+    /// （編輯表單清掉位置時會把這種封面存回自動；這裡是雙保險，例如另一台裝置的資料。）
+    var effectiveCover: TripStopCover {
+        if cover == .satellite, coordinate == nil { return .auto }
+        return cover
+    }
+
+    var coverPhotoURL: URL? { coverPhotoName.map { TripStop.photoURL($0) } }
+
+    /// 主圖實際上畫的是衛星空照（沒有代表照片、有座標）。照片左下那疊東西要讓開地圖的標誌
+    var coverIsSatellite: Bool { coverPhotoName == nil && coordinate != nil }
+
+    /// 使用者**明確指定**了哪一張照片當封面（而且那張還在）
+    var hasChosenCoverPhoto: Bool {
+        if case .photo(let name) = cover { return photoFileNames.contains(name) }
+        return false
+    }
+
+    /// 照片清單，封面那張排第一（分享這一站的圖片用）。沒有代表照片就是原本的順序
+    var photoFileNamesCoverFirst: [String] {
+        guard let c = coverPhotoName, let i = photoFileNames.firstIndex(of: c), i > 0 else {
+            return photoFileNames
+        }
+        var out = photoFileNames
+        out.remove(at: i)
+        out.insert(c, at: 0)
+        return out
     }
 
     var coordinate: CLLocationCoordinate2D? {
@@ -648,6 +774,23 @@ struct TripPlan: Identifiable, Codable {
         for i in stops.indices {
             guard let a = stops[i].arrivalOverride else { continue }
             stops[i].arrivalOverride = cal.date(byAdding: .day, value: days, to: a)
+        }
+    }
+
+    /// [v25.519] 把另一份（拿去算路線、算了好幾秒的那份拷貝）算好的路段快取搬過來。
+    ///
+    /// 只動 leg* 五個欄位，依站的 id 對應；其他欄位（封面、照片、打卡、必去、備註…）一律以自己為準。
+    /// 原本是把整份拷貝 upsert 回去，算路線那段時間裡的改動全被蓋掉。
+    mutating func adoptLegs(from other: TripPlan) {
+        var byId: [UUID: TripStop] = [:]
+        for s in other.stops where byId[s.id] == nil { byId[s.id] = s }
+        for i in stops.indices {
+            guard let s = byId[stops[i].id] else { continue }
+            stops[i].legMeters = s.legMeters
+            stops[i].legSeconds = s.legSeconds
+            stops[i].legStamp = s.legStamp
+            stops[i].legIsEstimated = s.legIsEstimated
+            stops[i].legNeedsRetry = s.legNeedsRetry
         }
     }
 

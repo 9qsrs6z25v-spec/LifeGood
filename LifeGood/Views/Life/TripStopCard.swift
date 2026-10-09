@@ -1,5 +1,7 @@
 import SwiftUI
 import MapKit
+// [v25.519] 更換封面的「從相簿加一張」要用 PhotosPickerItem／.photosPicker
+import PhotosUI
 
 // MARK: - 景點卡（v25.423）
 //
@@ -708,6 +710,11 @@ struct TripStopCardView: View {
                         .stops.first(where: { $0.id == stopId })?.photoFileNames ?? []
                     store.updateTripStopPhotos(planId: planId, stopId: stopId,
                                                fileNames: current + names)
+                },
+                // [v25.519] 封面：標出時間軸上顯示的那一張，長按任一張「設為封面」
+                coverName: stop?.coverPhotoName,
+                onSetCover: { [store = lifeStore, planId, stopId] name in
+                    store.setTripStopCover(planId: planId, stopId: stopId, cover: .photo(name))
                 })
                 .padding(14)
         }
@@ -1001,4 +1008,248 @@ func stopRowsNeedNoteHint(_ list: [Expense], suppressing names: [String]) -> Boo
         .filter { !$0.hasOwnText }
         .map { $0.primary }
     return Dictionary(grouping: primaries, by: { $0 }).values.contains { $0.count >= 2 }
+}
+
+// MARK: - 更換封面（v25.519）
+
+/// 時間軸卡片左邊那張（＝這一站的封面）用哪一個：自動、這一站的某一張照片、衛星空照，
+/// 或從相簿加一張新的當封面。點了就生效（跟「必去」一樣是一個選擇，不用再按儲存）。
+///
+/// 從時間軸卡片的照片長按「更換封面…」或「…」選單進來。
+/// 這一站一律從 store 現撈；寫回走 store 的就地修改（setTripStopCover／addTripStopCoverPhotos），
+/// 不帶整份行程的快照去蓋。
+struct TripStopCoverSheet: View {
+    @EnvironmentObject var lifeStore: LifeStore
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.colorScheme) private var scheme
+
+    let planId: UUID
+    let stopId: UUID
+
+    @State private var showPicker = false
+    @State private var pickerItem: PhotosPickerItem?
+    /// 從相簿加的照片在匯入中心背景跑：畫面關掉也會跑完、寫回這一站
+    @ObservedObject private var importCenter = PhotoImportCenter.shared
+
+    init(planId: UUID, stopId: UUID) {
+        self.planId = planId
+        self.stopId = stopId
+    }
+
+    /// 這一站（要 dayIndex 決定顏色與衛星圖的針，所以從時間軸找）
+    private var slot: TripPlan.Slot? {
+        lifeStore.tripPlan(id: planId)?.timeline.first { $0.stop.id == stopId }
+    }
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if let slot {
+                    content(slot)
+                } else {
+                    // 這一站在別處被刪掉了
+                    Color.clear.onAppear { dismiss() }
+                }
+            }
+            .navigationTitle("更換封面")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("完成") { dismiss() }.bold()
+                }
+            }
+            .photosPicker(isPresented: $showPicker, selection: $pickerItem, matching: .images)
+            .onChange(of: pickerItem) { _, item in
+                guard let item else { return }
+                pickerItem = nil
+                addFromAlbum(item)
+            }
+        }
+        .presentationDetents([.medium, .large])
+    }
+
+    private func content(_ slot: TripPlan.Slot) -> some View {
+        let stop = slot.stop
+        let c = TripDayPalette.color(slot.dayIndex)
+        let ink = TripInk.text(c, scheme)
+        // 實際生效的那一個（指定衛星但已經沒有位置＝自動），跟卡片上顯示的一致
+        let current = stop.effectiveCover
+        let hasCoordinate = stop.coordinate != nil
+        let satelliteDetail = hasCoordinate
+            ? "就算有照片，也用這個位置的衛星空照"
+            : "這一站還沒有位置，沒有衛星空照可以用"
+        return Form {
+            Section {
+                HStack(spacing: 14) {
+                    // 跟時間軸卡片同一支（同一個快取）：照片還沒從 iCloud 下來時先墊衛星圖。
+                    // ⚠️ 它只在捲進畫面時才載入（onScrollVisibilityChange），所以一定要放在 Form／List 裡
+                    TripHeroImage(photoURL: stop.coverPhotoURL,
+                                  coordinate: stop.coordinate,
+                                  dayColor: c,
+                                  pinKey: ((slot.dayIndex % 6) + 6) % 6,
+                                  seed: slot.index)
+                        .frame(width: 84, height: 112)
+                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        .accessibilityHidden(true)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(stop.displayName)
+                            .font(.subheadline.weight(.semibold))
+                            .lineLimit(2)
+                        Text(Self.currentText(stop))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .padding(.vertical, 2)
+            } header: {
+                Text("時間軸上現在顯示")
+            }
+
+            Section {
+                optionRow(title: "自動（預設）",
+                          detail: "第一張照片；沒有照片就用衛星空照",
+                          icon: "sparkles", ink: ink,
+                          selected: current == .auto) {
+                    set(.auto)
+                }
+                optionRow(title: "用衛星空照", detail: satelliteDetail,
+                          icon: "globe.asia.australia.fill", ink: ink,
+                          selected: current == .satellite) {
+                    set(.satellite)
+                }
+                .disabled(!hasCoordinate)
+            } header: {
+                Text("封面")
+            }
+
+            Section {
+                if stop.photoFileNames.isEmpty {
+                    Text("這一站還沒有照片")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 84), spacing: 8)],
+                              alignment: .leading, spacing: 8) {
+                        ForEach(stop.photoFileNames, id: \.self) { name in
+                            photoTile(name, selected: current == .photo(name), ink: ink)
+                        }
+                    }
+                    .padding(.vertical, 4)
+                }
+                Button {
+                    showPicker = true
+                } label: {
+                    Label("從相簿加一張當封面", systemImage: "photo.badge.plus")
+                }
+                if importCenter.isImporting {
+                    ThinProgressBar(label: importCenter.statusText + "（可以先離開這個畫面）",
+                                    fraction: importCenter.fraction)
+                }
+            } header: {
+                Text("這一站的照片")
+            } footer: {
+                Text("點一張就設成封面。從相簿加的那張也會一起加進這一站的照片。")
+            }
+        }
+    }
+
+    /// 「時間軸上現在顯示」底下那一行。字串在 ViewBuilder 外組好
+    private static func currentText(_ stop: TripStop) -> String {
+        let shown: String
+        if stop.coverPhotoName != nil {
+            shown = "這一站的照片"
+        } else if stop.coordinate != nil {
+            shown = "衛星空照"
+        } else {
+            shown = "當天顏色的街道線稿（還沒有位置與照片）"
+        }
+        switch stop.effectiveCover {
+        case .auto: return shown + "（自動）"
+        case .photo: return shown + "（你指定的那一張）"
+        case .satellite: return shown + "（你指定用衛星空照）"
+        }
+    }
+
+    private func optionRow(title: String, detail: String, icon: String, ink: Color,
+                           selected: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 12) {
+                Image(systemName: icon)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(ink)
+                    .frame(width: 24)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(.subheadline)
+                        .foregroundStyle(.primary)
+                    Text(detail)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                if selected {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundStyle(ink)
+                }
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+
+    private func photoTile(_ name: String, selected: Bool, ink: Color) -> some View {
+        let label: String = selected ? "照片，目前的封面" : "照片"
+        return Button {
+            set(.photo(name))
+        } label: {
+            AsyncThumbnailView(url: TripStop.photoURL(name), size: CGSize(width: 84, height: 84))
+                .overlay {
+                    if selected {
+                        RoundedRectangle(cornerRadius: 12)
+                            .strokeBorder(ink, lineWidth: 3)
+                    }
+                }
+                .overlay(alignment: .topTrailing) {
+                    if selected {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 18))
+                            .foregroundStyle(.white, ink)
+                            .padding(4)
+                    }
+                }
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(label)
+        .accessibilityHint("點兩下設為封面")
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+
+    private func set(_ cover: TripStopCover) {
+        lifeStore.setTripStopCover(planId: planId, stopId: stopId, cover: cover)
+    }
+
+    /// 從相簿加一張：存檔走 TripStop.savePhoto（壓縮、寫檔、上傳 iCloud），寫回時照片加進這一站、
+    /// 同時設成封面（一次寫入）。交給匯入中心：iCloud 的原圖要先下載，關掉這個畫面也會跑完。
+    /// commit 閉包不碰 @EnvironmentObject（那時這個畫面可能早就關了），store 先抓進來。
+    ///
+    /// 這一批先跟 store 領一個記號：匯入期間使用者如果又自己選了封面（這個畫面的其他選項、
+    /// 長按選單、景點卡的「設為封面」），記號就作廢，寫回時只加照片、不蓋掉他後來的選擇。
+    private func addFromAlbum(_ item: PhotosPickerItem) {
+        let token = lifeStore.beginTripStopCoverImport(stopId: stopId)
+        PhotoImportCenter.shared.enqueue(
+            items: [item], label: "封面照片",
+            save: { TripStop.savePhoto($0) },
+            commit: { [store = lifeStore, planId, stopId, token] names in
+                // 空的（讀圖或存檔失敗）也交回去：store 要把這一批的記號收掉。
+                // 匯入期間那一站被刪掉了（回傳 false）：檔案沒有人認領，刪掉（不留孤兒檔）
+                if !store.addTripStopCoverPhotos(planId: planId, stopId: stopId,
+                                                 fileNames: names, token: token) {
+                    for name in names { TripStop.deletePhoto(name) }
+                }
+            })
+    }
 }

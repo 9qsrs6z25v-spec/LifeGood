@@ -561,9 +561,10 @@ struct TripStopShareCard: View {
     }
 
     /// 照片橫著鋪一排。讀圖失敗的就跳過——分享圖裡出現一塊灰色破圖比沒有照片更糟。
+    /// [v25.519] 封面那張排第一（跟時間軸卡片上看到的同一張）
     @ViewBuilder
     private func photos(_ stop: TripStop) -> some View {
-        let images = stop.photoFileNames.prefix(Self.maxPhotos).compactMap {
+        let images = stop.photoFileNamesCoverFirst.prefix(Self.maxPhotos).compactMap {
             UIImage(contentsOfFile: TripStop.photoURL($0).path)
         }
         if !images.isEmpty {

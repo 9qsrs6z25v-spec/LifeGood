@@ -303,6 +303,8 @@ struct TripPlanDetailView: View {
     @State private var showChecklist = false
     /// 打開景點卡的那一站
     @State private var openingStopId: UUID?
+    /// [v25.519] 正在換封面的那一站（長按照片、「…」選單的「更換封面…」）
+    @State private var coverStopId: UUID?
     /// [v25.518] 看板上點了哪一天（時間軸要捲過去）。
     /// 帶一個新的 id：連點同一天也要再捲一次（只放 Int 的話第二次 onChange 不會觸發）。
     private struct DayJump: Equatable {
@@ -544,6 +546,15 @@ struct TripPlanDetailView: View {
                     }
                 }
             }
+            // [v25.519] 更換封面。掛在這裡、不掛在 body 那一長串 .sheet 後面：
+            // 那一串已經十幾層，再疊一層只會讓型別更深（本專案踩過 runtime demangle 爆棧）。
+            .sheet(item: Binding(
+                get: { coverStopId.map { IDBox(id: $0) } },
+                set: { coverStopId = $0?.id }
+            )) { box in
+                TripStopCoverSheet(planId: planId, stopId: box.id)
+                    .environmentObject(lifeStore)
+            }
         }
     }
 
@@ -577,11 +588,15 @@ struct TripPlanDetailView: View {
         let changed = await TripRouter.fillMissingLegs(&p)
         // 算的期間使用者可能又改了行程（插了一站、改了座標）。
         // 直接覆蓋會把那些改動吃掉，所以寫回前先確認指紋還是同一份。
-        guard changed, let live = plan,
+        guard changed, var live = plan,
               live.stops.map(\.id) == p.stops.map(\.id),
               live.stops.map(\.legModeOverride) == p.stops.map(\.legModeOverride),
               live.travelMode == p.travelMode else { return }
-        lifeStore.upsertTripPlan(p)
+        // [v25.519] 只把算好的路段搬回**現在**這一份，不拿開始算時的整份拷貝去蓋。
+        // 補算一段要打一次 MKDirections、段與段之間還要等，四十站要算好幾十秒；
+        // 這段時間裡換的封面、加的照片、打的卡、標的必去，原本都會被那份舊拷貝蓋回去。
+        live.adoptLegs(from: p)
+        lifeStore.upsertTripPlan(live)
     }
 
     // MARK: 摘要看板（v25.518）
@@ -691,7 +706,8 @@ struct TripPlanDetailView: View {
         // [v25.480] 相本與花費：沒有東西的時候不擺一個 0 占位（點進去是空的只會白跑一趟）
         let album = albumItems(p, slots: slots)
         if !album.isEmpty {
-            d.album = TripBoardAlbum(count: album.count, previews: Self.albumPreviews(album))
+            d.album = TripBoardAlbum(count: album.count,
+                                     previews: Self.albumPreviews(album, slots: slots))
         }
         let linked = linkedExpenses(p)
         let waiting = candidateExpenses(p).count
@@ -735,7 +751,9 @@ struct TripPlanDetailView: View {
             d.current = TripBoardCurrent(
                 stopId: currentId,
                 name: slot.stop.displayName,
-                photoURL: slot.stop.photoFileNames.first.map { TripStop.photoURL($0) },
+                // [v25.519] 跟時間軸的主圖同一條規則（封面）
+                photoURL: slot.stop.coverPhotoURL,
+                coverIsChosen: slot.stop.hasChosenCoverPhoto,
                 isAirport: Self.isAirport(slot.stop),
                 place: place,
                 latitude: slot.stop.latitude,
@@ -794,10 +812,13 @@ struct TripPlanDetailView: View {
 
     /// 住宿格的照片：今晚住的那一站有照片就用它，不然第一個有照片的過夜站。
     /// 都沒有回 nil（畫向量的床）。
+    ///
+    /// [v25.519] 「照片」＝那一站的代表照片（封面，TripStop.coverPhotoName）：指定的那張優先；
+    /// 強制用衛星空照的站當作沒有照片，跳過。
     private static func stayPhoto(_ slots: [TripPlan.Slot], today: Int?) -> URL? {
-        let stays = slots.filter { $0.stop.isOvernight && !$0.stop.photoFileNames.isEmpty }
+        let stays = slots.filter { $0.stop.isOvernight && $0.stop.coverPhotoName != nil }
         let pick = stays.first(where: { $0.dayIndex == today }) ?? stays.first
-        return pick?.stop.photoFileNames.first.map { TripStop.photoURL($0) }
+        return pick?.stop.coverPhotoURL
     }
 
     /// 這趟用到的交通方式，段數多的在前，最多三種（交通格的插圖）
@@ -811,9 +832,17 @@ struct TripPlanDetailView: View {
 
     /// 相本格右邊疊的照片：只挑景點照片（花費的照片多半是收據），一站一張、新的在前，最多三張。
     /// 一張景點照片都沒有才退到花費的照片。
-    private static func albumPreviews(_ items: [AlbumPhotoItem]) -> [URL] {
-        let stopPhotos = items.filter { !$0.id.hasPrefix("expense-") }
-        let pool = (stopPhotos.isEmpty ? items : stopPhotos).sorted { $0.date > $1.date }
+    ///
+    /// [v25.519] 「一站一張」挑的是那一站的代表照片（封面），跟時間軸的主圖一致；
+    /// 強制用衛星空照的站在這裡跳過（相本本身照舊全部列出）。
+    private static func albumPreviews(_ items: [AlbumPhotoItem], slots: [TripPlan.Slot]) -> [URL] {
+        let covers = slots
+            .filter { $0.stop.coverPhotoName != nil }
+            .sorted { $0.arrival > $1.arrival }
+            .compactMap { $0.stop.coverPhotoURL }
+        if !covers.isEmpty { return Array(covers.prefix(3)) }
+        // 景點都沒有代表照片：退到花費的照片，一組一張
+        let pool = items.filter { $0.id.hasPrefix("expense-") }.sorted { $0.date > $1.date }
         var seen: Set<String> = []
         var out: [URL] = []
         for item in pool where !seen.contains(item.group) {
@@ -1305,29 +1334,46 @@ struct TripPlanDetailView: View {
         // 一般 14；有花費招牌 28（招牌約 19 高、離底 4，跟膠囊排之間留 5）。
         // [v25.518] 第一站原本 26（要放「Have a nice trip!」），那句搬到看板上寫，這裡收回來。
         let band: CGFloat = spend == nil ? 14 : 28
+        // [v25.519] 這張卡的天空跟著這一站的抵達時間（往下滑像看著一天過去）。
+        // 晚上、深夜整張卡是深色：cardScheme 傳進所有「自己算墨色」的地方（📍、面板、…、把手），
+        // 不能用整頁的 colorScheme——淺色模式的夜晚卡片會把壓暗的深色字寫在藏青上。
+        let sky = TripCardSky(time: TripSkyTime.of(slot.arrival),
+                              pageDark: colorScheme == .dark, seed: slot.index)
+        let cardScheme = sky.scheme
         let card = TripStopCardFrame(
             metrics: m,
             topCapsule: topCapsule(slot, plan: p, color: c),
             hero: AnyView(heroView(slot, color: c)),
             heroOverlay: AnyView(heroOverlay(slot, color: c, place: place,
                                              hasSpend: spend != nil, metrics: m)),
-            column: AnyView(cardColumn(slot, color: c, metrics: m)),
+            column: AnyView(cardColumn(slot, color: c, metrics: m, sky: sky)),
             chipRow: chipRow(slot, color: c, place: place, metrics: m),
             skyline: AnyView(TripCardSkyline(
                 color: c, seed: slot.index,
                 landmarks: entersCity ? TripLandmark.forCity(place?.zh) : [],
                 // 下一段要搭飛機才畫（v25.517 第一站也畫，那是配那句手寫字的）
-                planeTrail: fliesNext)),
-            spendSign: spend.map { AnyView(stopSpendSign(slot, amount: $0, color: c)) },
+                planeTrail: fliesNext,
+                ink: sky.skyline, glow: sky.glow, dark: cardScheme == .dark)
+                // Canvas 的閉包比不出有沒有變；輸入都是值，相同就不重畫（同看板的天空）
+                .equatable()),
+            spendSign: spend.map { AnyView(stopSpendSign(slot, amount: $0, color: c,
+                                                         onNight: sky.isNight)) },
             bottomBand: band,
             footer: slot.stop.subSpots.isEmpty ? nil : AnyView(
-                TripSubSpotList(items: subSpotDisclosures(slot.stop), color: c,
+                // [v25.519] 子地點原本直接用當天色寫 10～11pt 的字（白卡上只有 2.1～3.1，
+                // 夜晚的藏青上更低），改用處理過對比的墨色
+                TripSubSpotList(items: subSpotDisclosures(slot.stop), color: TripInk.text(c, cardScheme),
                                 isOver: slot.stop.subSpotMinutes > slot.stop.dwellMinutes)),
             // 點整張卡＝打開景點卡（v25.421 的教訓：要去地圖、編輯、打卡都在卡片上選）
-            onTap: { openingStopId = slot.stop.id })
+            onTap: { openingStopId = slot.stop.id },
+            sky: sky,
+            // [v25.519] 長按照片＝更換封面
+            heroMenu: AnyView(coverMenu(slot)))
         let below = dropLandsBelow(slot)
         return AnyView(
             card
+                // [v25.519] 夜晚時段整張卡是深色（淺色模式也是），系統色全部換成深色版
+                .environment(\.colorScheme, cardScheme)
                 // 卡與卡之間 12pt：放置提示線畫在這個空隙的正中間
                 .padding(.vertical, 6)
                 // 空隙也要算放置目標：透明的 padding 不在判定範圍裡，而提示線就畫在這裡——
@@ -1447,25 +1493,30 @@ struct TripPlanDetailView: View {
 
     // MARK: 卡片左邊：照片
 
+    /// [v25.519] 主圖＝這一站的**封面**（TripStop.coverPhotoURL）：指定的那張照片 → 強制衛星就沒有照片
+    /// → 其他情況第一張。原本寫死第一張。燈箱一樣帶整趟的照片，從封面那一張開始。
     @ViewBuilder
     private func heroView(_ slot: TripPlan.Slot, color c: Color) -> some View {
-        let first = slot.stop.photoFileNames.first.map { TripStop.photoURL($0) }
+        let cover = slot.stop.coverPhotoURL
         let count = slot.stop.photoFileNames.count
-        let image = TripHeroImage(photoURL: first,
+        let stopId = slot.stop.id
+        let image = TripHeroImage(photoURL: cover,
                                   coordinate: slot.stop.coordinate,
                                   dayColor: c,
                                   pinKey: ((slot.dayIndex % 6) + 6) % 6,
                                   seed: slot.index)
-        if let first {
+        if let cover {
             // 使用者自己的照片：點了開大圖（整趟的照片一起帶，左右滑得動）
             Button {
-                viewingPhoto = IdentifiableURL(url: first)
+                viewingPhoto = IdentifiableURL(url: cover)
             } label: {
                 image
             }
             .buttonStyle(.plain)
             .accessibilityLabel(count > 1 ? "這一站的照片，共 \(count) 張" : "這一站的照片")
             .accessibilityHint("點兩下放大")
+            // 長按選單 VoiceOver 摸不到，另外給一個動作
+            .accessibilityAction(named: "更換封面") { coverStopId = stopId }
         } else if slot.stop.coordinate == nil {
             // 沒有座標：沒有衛星圖、天氣、路線。這一格最有用的事就是叫人去選位置
             Button {
@@ -1482,6 +1533,37 @@ struct TripPlanDetailView: View {
         }
     }
 
+    /// [v25.519] 長按照片跳出來的選單（「…」選單裡也有「更換封面…」：衛星那一支對 VoiceOver 是隱藏的，
+    /// 不能只靠長按）。兩個快速切換只在有意義的時候出現。
+    @ViewBuilder
+    private func coverMenu(_ slot: TripPlan.Slot) -> some View {
+        let stop = slot.stop
+        let stopId = stop.id
+        // 實際生效的那一個：指定衛星但已經沒有位置＝自動，不出現一個按了沒變化的「改回自動」
+        let cover = stop.effectiveCover
+        let canSatellite = stop.coordinate != nil && !stop.photoFileNames.isEmpty
+            && cover != .satellite
+        Button {
+            coverStopId = stopId
+        } label: {
+            Label("更換封面…", systemImage: "photo.on.rectangle")
+        }
+        if canSatellite {
+            Button {
+                lifeStore.setTripStopCover(planId: planId, stopId: stopId, cover: .satellite)
+            } label: {
+                Label("改用衛星空照", systemImage: "globe.asia.australia")
+            }
+        }
+        if cover != .auto {
+            Button {
+                lifeStore.setTripStopCover(planId: planId, stopId: stopId, cover: .auto)
+            } label: {
+                Label("改回自動", systemImage: "arrow.uturn.backward")
+            }
+        }
+    }
+
     /// 照片上疊的東西：左上序號、左下手寫城市名、「實際入住」、購物車。
     /// （序號、張數、城市名、「實際入住」都不吃點擊，點到它們會落到底下的照片）
     @ViewBuilder
@@ -1490,9 +1572,10 @@ struct TripPlanDetailView: View {
                              metrics m: TripCardMetrics) -> some View {
         let tag = checkInTag(slot)
         let photos = slot.stop.photoFileNames.count
-        // 衛星快照底部可能有 Apple 地圖的標誌，左下那疊東西要讓開
-        let inset: CGFloat = (photos == 0 && slot.stop.coordinate != nil)
-            ? TripHeroStore.mapAttributionInset : 0
+        // 衛星快照底部可能有 Apple 地圖的標誌，左下那疊東西要讓開。
+        // [v25.519] 看「主圖實際上是不是衛星」，不是「有沒有照片」：封面可以指定成衛星空照，
+        // 那時候照片有好幾張，原本的判斷會讓膠囊與購物車蓋住地圖的法律標示。
+        let inset: CGFloat = slot.stop.coverIsSatellite ? TripHeroStore.mapAttributionInset : 0
         if m.stacked {
             ZStack(alignment: .topLeading) {
                 HStack(spacing: 4) {
@@ -1571,8 +1654,11 @@ struct TripPlanDetailView: View {
 
     // MARK: 卡片右欄：標題、地址、備註、狀態面板、提醒
 
+    /// [v25.519] sky：這張卡的天空（時段）。地址與備註的字色、📍、面板、≡、… 都照它算，
+    /// 夜晚的卡片是深色（sky.scheme），不是整頁的 colorScheme。
+    /// 標題列、地址、備註、面板各自回報位置（TripBoardAnchorKey），天空淡到面板上緣、星星避開字。
     private func cardColumn(_ slot: TripPlan.Slot, color c: Color,
-                            metrics m: TripCardMetrics) -> some View {
+                            metrics m: TripCardMetrics, sky: TripCardSky) -> some View {
         let address = TripCardText.addressWithoutPostal(slot.stop.displayAddress)
         let note = slot.stop.note.trimmingCharacters(in: .whitespacesAndNewlines)
         let flags = cardFlags(slot)
@@ -1580,6 +1666,7 @@ struct TripPlanDetailView: View {
         let stopId = slot.stop.id
         let a11yTitle = "第 \(slot.index + 1) 站，" + slot.stop.displayName
             + (slot.stop.isMustVisit ? "，必去" : "")
+        let cardScheme = sky.scheme
         return VStack(alignment: .leading, spacing: 0) {
             // 不用 Spacer 把右邊兩顆推過去：HStack 的 spacing 會在 Spacer 兩側各加一次，
             // 白白從標題拿走寬度。標題自己吃掉剩餘寬度。
@@ -1598,35 +1685,43 @@ struct TripPlanDetailView: View {
                     .accessibilityHint("點兩下打開景點卡")
                     .accessibilityAddTraits(.isButton)
                     .accessibilityAction { openingStopId = stopId }
-                reorderHandle(slot)
-                stopMenu(slot, color: c)
+                reorderHandle(slot, sky: sky)
+                stopMenu(slot, color: c, scheme: cardScheme)
             }
+            .anchorPreference(key: TripBoardAnchorKey.self, value: .bounds) { [TripCardAnchor.title: $0] }
             if !address.isEmpty {
                 HStack(alignment: .firstTextBaseline, spacing: 3) {
                     // 沒座標就把 📍 換成橘色 ⚠︎（底下那一行講原因）
                     Image(systemName: noCoordinate ? "exclamationmark.triangle.fill" : "mappin")
                         .font(.system(size: 9, weight: .semibold))
-                        .foregroundStyle(noCoordinate ? Color.orange : TripInk.text(c, colorScheme))
+                        .foregroundStyle(noCoordinate ? Color.orange : TripInk.text(c, cardScheme))
+                    // [v25.519] 不用 .secondary：它在白底上只有 3.44，疊上天空剩 2.99～3.24。
+                    // 各時段自己的墨色是 6.56～11.6（TripCardSky.ink）
                     Text(address)
                         .font(.caption2)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(sky.ink)
                         .lineLimit(1)
                 }
                 .padding(.top, 3)
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel("地址 " + address)
+                .anchorPreference(key: TripBoardAnchorKey.self, value: .bounds) { [TripCardAnchor.address: $0] }
             }
             // 備註原本跟地址擠在同一段 preview 裡；設計稿只有地址一行，
             // 不另外給它一行的話備註就默默消失了
             if !note.isEmpty {
+                // [v25.519] 原本是 .tertiary（白底上 1.74）。跟地址同一個墨色、不打折
+                // （打八折會掉到 4.13～4.45，不及格）
                 Text(note)
                     .font(.caption2)
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(sky.ink)
                     .lineLimit(2)
                     .padding(.top, 2)
+                    .anchorPreference(key: TripBoardAnchorKey.self, value: .bounds) { [TripCardAnchor.note: $0] }
             }
-            statusPanel(slot, color: c, metrics: m)
+            statusPanel(slot, color: c, metrics: m, sky: sky)
                 .dynamicTypeSize(...DynamicTypeSize.accessibility2)
+                .anchorPreference(key: TripBoardAnchorKey.self, value: .bounds) { [TripCardAnchor.panel: $0] }
                 .padding(.top, 8)
             if !flags.isEmpty {
                 TripCardFlagList(flags: flags, dayColor: c)
@@ -1640,8 +1735,12 @@ struct TripPlanDetailView: View {
     /// 原本時間欄的抵達／離開時間、鎖、紅字、打卡圈，與膠囊列的
     /// 「已抵達」「過夜」「停留 N 分」「指定 HH:mm 抵達」都收進這裡。
     private func statusPanel(_ slot: TripPlan.Slot, color c: Color,
-                             metrics m: TripCardMetrics) -> TripStatusPanel {
-        let ink = TripInk.text(c, colorScheme)
+                             metrics m: TripCardMetrics, sky: TripCardSky) -> TripStatusPanel {
+        // [v25.519] 墨色照這張卡的配色算（夜晚的卡片是深色），不是整頁的
+        let cardScheme = sky.scheme
+        let ink = TripInk.text(c, cardScheme)
+        // 夜晚的面板是藏青：圓章的圖示用原色只有 3 上下，改用同一個墨色（混 30% 白）
+        let tint = sky.isNight ? ink : c
         let arrival = Self.timeFmt.string(from: slot.arrival)
         let late = slot.shortfallSeconds > 60
         let leftLabel = slot.isActualArrival ? "已抵達" : (slot.isFixedArrival ? "指定抵達" : "預計抵達")
@@ -1649,7 +1748,7 @@ struct TripPlanDetailView: View {
             glyph: "clock",
             label: leftLabel,
             time: arrival,
-            tint: c,
+            tint: tint,
             ink: late ? Color.red : ink,
             showsLock: slot.isFixedArrival,
             a11y: leftLabel + " " + arrival + (late ? "，照推算會趕不上" : ""))
@@ -1661,7 +1760,7 @@ struct TripPlanDetailView: View {
         if slot.isActualDeparture {
             let t = Self.departureText(slot)
             right = TripStatusPanel.Half(glyph: "checkmark", label: "已離開", time: t,
-                                         tint: c, ink: ink, showsLock: false,
+                                         tint: tint, ink: ink, showsLock: false,
                                          a11y: "已離開 " + t)
         } else if slot.stop.isOvernight {
             // 「隔天」要照實算：凌晨 01:00 入住、09:00 退房是同一天
@@ -1675,7 +1774,8 @@ struct TripPlanDetailView: View {
                 label = longLabel ? "過夜・退房出發" : "退房出發"
             }
             right = TripStatusPanel.Half(glyph: "bed.double.fill", label: label, time: t,
-                                         tint: .indigo, ink: TripInk.indigo(colorScheme),
+                                         tint: sky.isNight ? TripInk.indigo(cardScheme) : .indigo,
+                                         ink: TripInk.indigo(cardScheme),
                                          showsLock: false,
                                          a11y: "過夜，" + (nextDay ? "隔天 " : "") + t + " 出發")
         } else {
@@ -1684,7 +1784,7 @@ struct TripPlanDetailView: View {
             // 「停留 1 小時 30 分」放不下
             let dwell = "停留 \(max(0, slot.stop.dwellMinutes)) 分"
             right = TripStatusPanel.Half(glyph: "hourglass", label: dwell, time: t,
-                                         tint: c, ink: ink, showsLock: false,
+                                         tint: tint, ink: ink, showsLock: false,
                                          a11y: dwell + "，" + t + " 離開")
         }
 
@@ -1697,9 +1797,11 @@ struct TripPlanDetailView: View {
                 lifeStore.advanceTripStopCheckIn(planId: planId, stopId: id)
             })
         }
+        // 白天時段面板不動（天空在面板上緣 6pt 前就淡完了）；夜晚換藏青底、加一條框
         return TripStatusPanel(left: left, right: right,
                                rightDone: slot.isActualDeparture,
-                               color: c, checkIn: checkIn)
+                               color: c, checkIn: checkIn,
+                               surface: sky.panel, edge: sky.panelEdge)
     }
 
     private func checkInA11y(_ slot: TripPlan.Slot) -> String {
@@ -1858,9 +1960,12 @@ struct TripPlanDetailView: View {
     /// [v25.517] 更正：上面原本寫「深淺色模式都過得了對比」，算出來不成立——
     /// 11pt 粗白字壓在原色上只有 2.32（橘）～3.43（紫），11pt 不算大字，要 4.5。
     /// 牌子改用壓暗 40% 的當天色（TripInk.solid），5.8～7.7。
+    ///
+    /// [v25.519] onNight：夜晚的卡片（深色、底帶是深藍的樓）。壓暗的牌子跟夜裡的樓只差 2.29～3.08，
+    /// 加一圈白色細框（同照片上「實際入住」那顆膠囊的做法）才分得出來。
     @ViewBuilder
     private func stopSpendSign(_ slot: TripPlan.Slot, amount: String?,
-                               color c: Color) -> some View {
+                               color c: Color, onNight: Bool = false) -> some View {
         if let amount {
             let isOpen = spendPopoverStopId == slot.stop.id
             Button {
@@ -1878,6 +1983,12 @@ struct TripPlanDetailView: View {
                         RoundedRectangle(cornerRadius: 6, style: .continuous)
                             .fill(TripInk.solid(c))
                     )
+                    .overlay {
+                        if onNight {
+                            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                .stroke(Color.white.opacity(0.5), lineWidth: 0.75)
+                        }
+                    }
                     .shadow(color: c.opacity(0.35), radius: 4)
             }
             .buttonStyle(.plain)
@@ -2015,6 +2126,9 @@ struct TripPlanDetailView: View {
         // 固定寬度沒辦法誠實支援 accessibility 全部級別；夾在 AX2，
         // 配上面的 limit，最壞 3 列 ＋ 提示 ＋ 溢出仍放得下。
         .dynamicTypeSize(...DynamicTypeSize.accessibility2)
+        // [v25.519] 氣泡照整頁的深淺色：夜晚的卡片外面套了深色，不蓋回來的話
+        // 淺色模式下點夜晚那幾站的金額，會跳出一個深色的氣泡
+        .environment(\.colorScheme, colorScheme)
         // iPhone 上預設會退化成 sheet，指定 .popover 才會是真的氣泡
         .presentationCompactAdaptation(.popover)
     }
@@ -2027,12 +2141,17 @@ struct TripPlanDetailView: View {
     ///
     /// 選單裡的「往前移一站／往後移一站」保留：只差一格的時候點一下比拖準得多。
     /// [v25.517] 樣子換成設計稿的灰底圓鈕（24pt，點擊範圍 28）。
-    private func reorderHandle(_ slot: TripPlan.Slot) -> some View {
-        Image(systemName: "line.3.horizontal")
+    ///
+    /// [v25.519] 白天的天空上灰底只剩 2.86～3.00（清晨、下午、傍晚），圖示連 3:1 都不到：
+    /// 白天時段改成白 70% 的底＋看板標籤的藍（6.00～6.32）。夜晚與深色模式照舊。
+    private func reorderHandle(_ slot: TripPlan.Slot, sky: TripCardSky) -> some View {
+        let ink: AnyShapeStyle = sky.handleInk.map { AnyShapeStyle($0) }
+            ?? AnyShapeStyle(HierarchicalShapeStyle.secondary)
+        return Image(systemName: "line.3.horizontal")
             .font(.system(size: 11, weight: .semibold))
-            .foregroundStyle(.secondary)
+            .foregroundStyle(ink)
             .frame(width: 24, height: 24)
-            .background(Color(.tertiarySystemFill), in: Circle())
+            .background(sky.handleFill ?? Color(.tertiarySystemFill), in: Circle())
             .frame(width: 28, height: 28)
             .contentShape(Rectangle())
             // 短按把手不要跑去開景點卡——它只負責拖
@@ -2121,10 +2240,13 @@ struct TripPlanDetailView: View {
         return true
     }
 
-    private func stopMenu(_ slot: TripPlan.Slot, color c: Color) -> some View {
+    /// [v25.519] scheme：這張卡的配色（夜晚的卡片是深色），… 的墨色照它算
+    private func stopMenu(_ slot: TripPlan.Slot, color c: Color, scheme: ColorScheme) -> some View {
         Menu {
             Button("打開景點卡") { openingStopId = slot.stop.id }
             Button("編輯") { editingStop = slot.stop }
+            // [v25.519] 長按照片也可以；衛星那一支對 VoiceOver 是隱藏的，選單裡一定要有
+            Button("更換封面…") { coverStopId = slot.stop.id }
             // [v25.475] 使用者要求：在行程頁就能直接記這一站的花費，
             // 不用跳去記帳頁再回頭挑行程與站別。日期帶這一站的抵達
             // 時間（打過卡的話時間軸給的就是實際時間），行程與站別
@@ -2202,7 +2324,7 @@ struct TripPlanDetailView: View {
             // [v25.517] 設計稿的圓鈕：當天色 12% 底，24pt，點擊範圍 28
             Image(systemName: "ellipsis")
                 .font(.system(size: 12, weight: .bold))
-                .foregroundStyle(TripInk.text(c, colorScheme))
+                .foregroundStyle(TripInk.text(c, scheme))
                 .frame(width: 24, height: 24)
                 .background(c.opacity(0.12), in: Circle())
                 .overlay(Circle().stroke(c.opacity(0.35), lineWidth: 0.75))
@@ -2673,6 +2795,10 @@ struct TripStopEditorSheet: View {
     @State private var isSaving = false
     /// 新增的照片先記下來，取消時要刪掉——不然按取消也會留下檔案
     @State private var addedPhotos: Set<String> = []
+    /// [v25.519] 表單裡移除的**既有**照片（開表單前就在行程裡的）。等按「儲存」才真的刪檔：
+    /// 原本是當場刪，按「取消」之後行程裡那個檔名還在、檔案卻沒了——刪的剛好是封面的話，
+    /// 封面就指向一個不存在的檔案。
+    @State private var removedPhotos: Set<String> = []
 
     // 地點搜尋（沿用飲食／就醫紀錄那一套 MKLocalSearchCompleter）
     @StateObject private var completer = RestaurantSearchCompleter()
@@ -2879,8 +3005,14 @@ struct TripStopEditorSheet: View {
                             return n
                         },
                         onDeleteFile: { n in
-                            TripStop.deletePhoto(n)
-                            addedPhotos.remove(n)
+                            if editing?.photoFileNames.contains(n) == true {
+                                // 開表單前就在行程裡的：等存檔才刪（見 removedPhotos）
+                                removedPhotos.insert(n)
+                            } else {
+                                // 這次才加的、還沒寫進行程：直接刪檔（同原本）
+                                TripStop.deletePhoto(n)
+                                addedPhotos.remove(n)
+                            }
                         },
                         title: "景點照片")
                 } header: {
@@ -3234,9 +3366,26 @@ struct TripStopEditorSheet: View {
     }
 
     private func cancel() {
-        // 這一次新加的照片沒存檔就不該留在磁碟上
+        // 這一次新加的照片沒存檔就不該留在磁碟上。
+        // 表單裡移除的既有照片（removedPhotos）不動：取消＝行程裡那幾張照舊在
         for n in addedPhotos { TripStop.deletePhoto(n) }
         dismiss()
+    }
+
+    /// [v25.519] 表單的照片清單跟「現在行程裡那一站」合起來。
+    ///
+    /// - 表單裡有的照樣留、順序照表單；但「開表單時就在、現在行程裡已經沒有」的拿掉
+    ///   （在別處被刪了，檔案也沒了）。
+    /// - 開表單之後才在別處加進那一站的（景點卡的背景匯入、「從相簿加一張當封面」）接在後面，
+    ///   不被表單開著那一刻的快照蓋掉、也不變成孤兒檔。
+    /// - 表單裡移除的既有照片：在 opened 裡、不在 form 裡，兩邊都不會撿回來。
+    static func mergedPhotos(form: [String], opened: [String], live: [String]) -> [String] {
+        let openedSet = Set(opened)
+        let liveSet = Set(live)
+        let formSet = Set(form)
+        let kept = form.filter { !openedSet.contains($0) || liveSet.contains($0) }
+        let addedElsewhere = live.filter { !openedSet.contains($0) && !formSet.contains($0) }
+        return kept + addedElsewhere
     }
 
     private func save() {
@@ -3244,11 +3393,19 @@ struct TripStopEditorSheet: View {
         isSaving = true
         guard var plan = lifeStore.tripPlan(id: planId) else { dismiss(); return }
 
-        var stop = editing ?? TripStop()
+        // [v25.519] 從**現在**行程裡的那一站起頭，不是從開表單那一刻的快照（editing）。
+        // 表單開著的時候，別處可能改了這一站：背景匯入的照片、換了封面、打了卡、路線補算——
+        // 原本整站用快照寫回去，這些全部被蓋掉。現在只覆寫表單管的欄位，其他照 live 的。
+        let liveIndex = editing.flatMap { e in plan.stops.firstIndex(where: { $0.id == e.id }) }
+        let liveStop = liveIndex.map { plan.stops[$0] }
+        var stop = liveStop ?? editing ?? TripStop()
         stop.name = name.trimmingCharacters(in: .whitespaces)
         stop.address = address.trimmingCharacters(in: .whitespaces)
         stop.latitude = latitude
         stop.longitude = longitude
+        // [v25.519] 位置清掉了就沒有衛星空照可用：指定的「用衛星空照」存回自動。
+        // 不留一個畫面上看不出來、之後重新設位置時又自己冒出來的設定。
+        if stop.coordinate == nil, stop.cover == .satellite { stop.cover = .auto }
         let trimmedPhone = phone.trimmingCharacters(in: .whitespaces)
         stop.phone = trimmedPhone.isEmpty ? nil : trimmedPhone
         stop.dwellMinutes = max(0, dwellMinutes)
@@ -3261,7 +3418,10 @@ struct TripStopEditorSheet: View {
         stop.checkOutTime = isOvernight ? checkOutTime : nil
         stop.arrivalOverride = hasArrivalTime ? arrivalTime : nil
         stop.note = note.trimmingCharacters(in: .whitespacesAndNewlines)
-        stop.photoFileNames = photoFileNames
+        // 照片要合併（見 mergedPhotos）。封面那張被移除的話，photoFileNames 的 didSet 會退回自動
+        stop.photoFileNames = Self.mergedPhotos(form: photoFileNames,
+                                                opened: editing?.photoFileNames ?? [],
+                                                live: liveStop?.photoFileNames ?? [])
         stop.subSpots = subSpots.filter {
             !($0.name.trimmingCharacters(in: .whitespaces).isEmpty
               && $0.note.trimmingCharacters(in: .whitespaces).isEmpty)
@@ -3282,6 +3442,10 @@ struct TripStopEditorSheet: View {
         // 已經寫進行程的照片不再算「這次新加的」，cancel 的清除邏輯不該碰它們
         addedPhotos.removeAll()
         lifeStore.upsertTripPlan(plan)
+        // [v25.519] 表單裡移除的既有照片，行程寫好之後才真的刪檔（本機＋iCloud）
+        let kept = Set(stop.photoFileNames)
+        for n in removedPhotos where !kept.contains(n) { TripStop.deletePhoto(n) }
+        removedPhotos.removeAll()
         dismiss()
     }
 }
