@@ -421,9 +421,9 @@ struct StockView: View {
                 let totalSoldPL = sold.reduce(0) { $0 + $1.profitLoss }
                 let soldPLPositive = totalSoldPL >= 0
                 HStack(spacing: 6) {
-                    Text(top.name)
+                    // [v25.520] 股票名稱過長改跑馬燈（原本切成「…」）
+                    MarqueeText(top.name)
                         .font(.caption.weight(.medium))
-                        .lineLimit(1)
                     if !top.symbol.isEmpty {
                         Text(top.symbol).font(.caption2)
                             .foregroundStyle(.secondary)
@@ -748,9 +748,9 @@ struct StockView: View {
 
                 // 名稱 + 代號膠囊 + 持股數
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(item.name)
+                    // [v25.520] 股票名稱過長改跑馬燈（原本切成「…」）
+                    MarqueeText(item.name)
                         .font(.subheadline.weight(.semibold))
-                        .lineLimit(1)
                     HStack(spacing: 5) {
                         if !item.symbol.isEmpty {
                             Text(item.symbol)

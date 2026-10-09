@@ -93,9 +93,8 @@ struct VehicleChargeAnalyticsView: View {
                         .foregroundStyle(.white)
                 }
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(vehicle?.name ?? "載具")
+                    MarqueeText(vehicle?.name ?? "載具")
                         .font(.title3.weight(.bold)).foregroundStyle(.white)
-                        .lineLimit(1).minimumScaleFactor(0.7)
                     Text(overviewSubtitle(a))
                         .font(.caption.weight(.medium)).foregroundStyle(.white.opacity(0.9))
                 }
@@ -310,9 +309,8 @@ struct VehicleChargeAnalyticsView: View {
                 if p.isHome {
                     Image(systemName: "house.fill").font(.system(size: 9)).foregroundStyle(.blue)
                 }
-                Text(p.place)
+                MarqueeText(p.place)
                     .font(.subheadline.weight(.medium))
-                    .lineLimit(1)
                 Spacer(minLength: 0)
                 Text(p.pricePerKwh.map { num($0, 2) + " 元/度" } ?? "—")
                     .font(.system(size: 11, weight: .bold, design: .rounded))
@@ -511,7 +509,7 @@ struct VehicleChargeAnalyticsView: View {
                             Text("\(idx + 1)")
                                 .font(.system(size: 10, weight: .bold, design: .rounded))
                                 .frame(width: 16).foregroundStyle(.secondary)
-                            Text(s.place).font(.subheadline).lineLimit(1)
+                            MarqueeText(s.place).font(.subheadline)
                             Spacer(minLength: 0)
                             Text("\(s.count) 次・" + num(s.cost, 0) + " 元")
                                 .font(.system(size: 11, weight: .semibold, design: .rounded))

@@ -410,7 +410,8 @@ struct PaywallView: View {
         } label: {
             HStack(spacing: 14) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(product.displayName)
+                    // [v25.520] 方案名稱（App Store 後台設定、長度不定）放不下就跑馬燈（原本折行）
+                    MarqueeText(product.displayName)
                         .font(.headline)
                         .foregroundStyle(.white)
                     Text(product.description)

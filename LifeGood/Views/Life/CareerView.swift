@@ -263,10 +263,8 @@ struct CareerView: View {
 
             Spacer(minLength: 8)
 
-            Text(value)
+            MarqueeText(value)
                 .font(.system(size: 15, weight: .bold, design: .rounded))
-                .lineLimit(2)
-                .minimumScaleFactor(0.72)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
         .frame(maxWidth: .infinity, minHeight: 80, alignment: .topLeading)
@@ -717,9 +715,8 @@ struct CareerView: View {
 
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 6) {
-                        Text(item.title)
+                        MarqueeText(item.title)
                             .font(.subheadline.weight(.semibold))
-                            .lineLimit(1)
                         if item.isManagerial == true {
                             // [v3] 管理職徽章補 stroke 細邊框，對齊全 App 膠囊設計語言
                             // [v25.293] 有填管理單位時一併顯示（管理職・製造一課）

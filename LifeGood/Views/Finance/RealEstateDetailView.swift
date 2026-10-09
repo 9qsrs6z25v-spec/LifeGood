@@ -727,10 +727,9 @@ struct RealEstateDetailView: View {
                                         .clipShape(Capsule())
                                         .overlay(Capsule().stroke(Color.orange.opacity(0.22), lineWidth: 0.6))
                                     if !ve.name.isEmpty {
-                                        Text(ve.name)
+                                        MarqueeText(ve.name)
                                             .font(.caption2)
                                             .foregroundStyle(.secondary)
-                                            .lineLimit(1)
                                     }
                                     Text(fmtDate(ve.date))
                                         .font(.caption2)
@@ -1147,9 +1146,8 @@ struct RealEstateDetailView: View {
                         .background(Color.orange.opacity(0.10))
                         .clipShape(Capsule())
                         .overlay(Capsule().stroke(Color.orange.opacity(0.22), lineWidth: 0.6))
-                    Text(asset.name.isEmpty ? "—" : asset.name)
+                    MarqueeText(asset.name.isEmpty ? "—" : asset.name)
                         .font(.subheadline.weight(.semibold))
-                        .lineLimit(1)
                     Spacer(minLength: 4)
                     if asset.amount > 0 {
                         Text(fmt(asset.amount))
@@ -1241,7 +1239,7 @@ struct RealEstateDetailView: View {
             HStack(spacing: 6) {
                 Image(systemName: "square.stack.3d.up.fill")
                     .foregroundStyle(Self.cyanColor)
-                Text(floor.floorNumber.isEmpty ? "樓層" : floor.floorNumber)
+                MarqueeText(floor.floorNumber.isEmpty ? "樓層" : floor.floorNumber)
                     .font(.subheadline.weight(.semibold))
                 Spacer()
                 Button {
@@ -1324,9 +1322,8 @@ struct RealEstateDetailView: View {
                 .font(.caption2)
                 .foregroundStyle(Self.cyanColor)
                 .padding(.trailing, 4)
-            Text(item.name.isEmpty ? "未命名" : item.name)
+            MarqueeText(item.name.isEmpty ? "未命名" : item.name)
                 .font(.caption.weight(.medium))
-                .lineLimit(1)
             Spacer()
             // 新增子項目
             Button {
@@ -1640,9 +1637,8 @@ struct RealEstateDetailView: View {
                 Image(systemName: item.badgeIcon)
                     .font(.system(size: 9))
                     .foregroundStyle(item.badgeColor)
-                Text(item.displayTitle)
+                MarqueeText(item.displayTitle)
                     .font(.caption.weight(.medium))
-                    .lineLimit(1)
             }
             .frame(width: 140, alignment: .leading)
             Text(fmtDate(item.date))
@@ -1754,9 +1750,8 @@ struct RealEstateDetailView: View {
             } else {
                 renovationSinglePhoto(url: p.photoURL)
             }
-            Text(displayTitle(for: p))
+            MarqueeText(displayTitle(for: p))
                 .font(.caption.weight(.medium))
-                .lineLimit(1)
                 .frame(width: 130, alignment: .leading)
             Text(fmtDate(p.date))
                 .font(.caption2)
@@ -3244,7 +3239,7 @@ struct ExpensePhotoStackViewer: View {
                     panelContent
                 }
             }
-            .navigationTitle(displayTitle)
+            .marqueeNavigationTitle(displayTitle)
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackground(.visible, for: .navigationBar)
             .toolbar {
@@ -3266,7 +3261,7 @@ struct ExpensePhotoStackViewer: View {
         let trimmedNote = expense.note.trimmingCharacters(in: .whitespaces)
         VStack(alignment: .leading, spacing: 6) {
             HStack {
-                Text(displayTitle)
+                MarqueeText(displayTitle)
                     .font(.subheadline.weight(.bold))
                     .foregroundStyle(.white)
                 Spacer()
@@ -3279,10 +3274,9 @@ struct ExpensePhotoStackViewer: View {
                     .clipShape(Capsule())
             }
             if !expense.title.isEmpty && !trimmedNote.isEmpty {
-                Text(expense.title)
+                MarqueeText(expense.title)
                     .font(.caption)
                     .foregroundStyle(.white.opacity(0.85))
-                    .lineLimit(1)
             }
             // 日期加 calendar 圖示前綴，對齊 RenovationStackViewer 日期 icon+text 語言。
             HStack(spacing: 4) {
@@ -3587,10 +3581,9 @@ struct CutePhotoViewer: View {
             HStack(spacing: 8) {
                 Text("📸")
                     .font(.title3)
-                Text(draft.title)
+                MarqueeText(draft.title)
                     .font(.headline.weight(.semibold))
                     .foregroundStyle(Color(red: 0.25, green: 0.18, blue: 0.35))
-                    .lineLimit(2)
                 Spacer()
                 if draft.urls.count > 1 {
                     Text("\(currentIndex + 1) / \(draft.urls.count)")

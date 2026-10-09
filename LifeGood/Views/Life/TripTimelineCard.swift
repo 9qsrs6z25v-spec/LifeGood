@@ -1796,10 +1796,10 @@ struct TripSubSpotList: View {
                             .background(color.opacity(0.12), in: Capsule())
                             .foregroundStyle(color)
                     }
-                    Text(d.title.isEmpty ? "（未填標題）" : d.title)
+                    // [v25.520] 子地點標題一行、放不下跑馬燈（跟 ItemRow 的子項目同一套）。
+                    // 原本收合時截成「…」、展開時折三行；現在兩種狀態都是同一行。
+                    MarqueeText(d.title.isEmpty ? "（未填標題）" : d.title)
                         .font(.system(size: 11, weight: .semibold))
-                        .lineLimit(open ? 3 : 1)
-                        .multilineTextAlignment(.leading)
                     Spacer(minLength: 4)
                 }
                 .contentShape(Rectangle())
@@ -2178,127 +2178,4 @@ struct TripCardSkyline: View, Equatable {
     }
 }
 
-// MARK: - 跑馬燈標題（v25.517）
-
-/// 一行放不下的名字用跑馬燈，不折行（使用者指定：「不做折行，可以用跑馬燈方式」）。
-///
-/// 放得下就是一般的一行字，不會動。放不下才捲：停 2 秒讓人先讀開頭，
-/// 再以每秒 32pt 往左捲，字尾後面隔一段空白接著第二份，捲到第二份的開頭
-/// 剛好回到原位——那一格跟第一格長得一模一樣，所以接回去看不出跳動。
-///
-/// ⚠️ 用 TimelineView 從「現在幾點」算出位移，不用 withAnimation(.repeatForever)。
-///    repeatForever 一旦開始就很難停、寬度一變（轉向、字級）就會從錯的位置繼續捲，
-///    而時間軸上這種卡有幾十張。用時間算的話，暫停就是 paused: true，
-///    寬度變了下一格自己就對。
-///
-/// ⚠️ 只在卡片捲進畫面時才捲：四十站同時在動是雜訊，也耗電。
-///    「看不到」是要被明確回報才算——onScrollVisibilityChange 萬一沒回報初始狀態，
-///    寧可多捲幾張看不到的，也不要讓眼前那張永遠不動。
-///
-/// ⚠️ 「減少動態效果」打開時不捲，退回一般的尾端省略（…）。VoiceOver 一律唸全名。
-struct TripMarqueeText: View {
-    let text: String
-    var font: Font = .subheadline.weight(.semibold)
-    /// VoiceOver 要唸的字（例如「第 43 站，THE ROYAL…，必去」）；nil＝唸 text
-    var accessibilityText: String? = nil
-
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    /// 這一行實際拿到的寬度
-    @State private var boxWidth: CGFloat = 0
-    /// 這串字一行排開的自然寬度
-    @State private var textWidth: CGFloat = 0
-    @State private var onScreen = true
-    /// 這一輪從什麼時候開始算（捲回畫面、換字的時候重來，先停在開頭）
-    @State private var cycleStart = Date()
-
-    /// 兩份字之間的空白
-    private static let gap: CGFloat = 36
-    /// 每輪開頭停多久（秒）
-    private static let hold: Double = 2.0
-    /// 捲動速度（pt／秒）。再快就讀不到了
-    private static let speed: Double = 32
-
-    private var overflows: Bool { boxWidth > 0 && textWidth > boxWidth + 0.5 }
-
-    var body: some View {
-        // 佔位：決定這一行的高度與可用寬度。本身不畫（hidden 也會把它移出輔助使用的樹）。
-        Text(text)
-            .font(font)
-            .lineLimit(1)
-            .hidden()
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .onGeometryChange(for: CGFloat.self) { proxy in
-                proxy.size.width
-            } action: { w in
-                boxWidth = w
-            }
-            // 量自然寬度：fixedSize 讓它照整串排開。掛在 background 裡不影響版面。
-            .background(alignment: .leading) {
-                Text(text)
-                    .font(font)
-                    .fixedSize()
-                    .hidden()
-                    .onGeometryChange(for: CGFloat.self) { proxy in
-                        proxy.size.width
-                    } action: { w in
-                        textWidth = w
-                    }
-            }
-            .overlay(alignment: .leading) { visible }
-            .onScrollVisibilityChange(threshold: 0.2) { shown in
-                if shown && !onScreen { cycleStart = Date() }
-                onScreen = shown
-            }
-            .onChange(of: text) { _, _ in cycleStart = Date() }
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel(accessibilityText ?? text)
-    }
-
-    @ViewBuilder
-    private var visible: some View {
-        if !overflows || reduceMotion {
-            Text(text)
-                .font(font)
-                .lineLimit(1)
-                .truncationMode(.tail)
-        } else {
-            TimelineView(.animation(minimumInterval: 1.0 / 30, paused: !onScreen)) { context in
-                marquee(offset: Self.offset(at: context.date, since: cycleStart,
-                                            distance: textWidth + Self.gap))
-            }
-        }
-    }
-
-    private func marquee(offset x: CGFloat) -> some View {
-        HStack(spacing: Self.gap) {
-            Text(text).font(font).fixedSize()
-            Text(text).font(font).fixedSize()
-        }
-        .offset(x: x)
-        .frame(width: boxWidth, alignment: .leading)
-        .clipped()
-        // 右緣一律淡出（告訴人後面還有字）；左緣只在捲動中才淡出——
-        // 停在開頭的時候淡左緣會把第一個字吃掉一半。
-        .mask {
-            HStack(spacing: 0) {
-                LinearGradient(colors: [.clear, .black],
-                               startPoint: .leading, endPoint: .trailing)
-                    .frame(width: x < 0 ? 10 : 0)
-                Rectangle()
-                LinearGradient(colors: [.black, .clear],
-                               startPoint: .leading, endPoint: .trailing)
-                    .frame(width: 14)
-            }
-        }
-    }
-
-    /// 這一刻該往左移多少。一輪＝停 hold 秒＋捲 distance。
-    /// 捲到 −distance 時第二份字剛好在原位，下一輪從 0 開始看起來是同一格。
-    static func offset(at now: Date, since start: Date, distance: CGFloat) -> CGFloat {
-        guard distance > 0 else { return 0 }
-        let travel = Double(distance) / speed
-        let t = max(0, now.timeIntervalSince(start))
-        let phase = t.truncatingRemainder(dividingBy: hold + travel)
-        return phase < hold ? 0 : -CGFloat((phase - hold) * speed)
-    }
-}
+// [v25.520] 跑馬燈搬到 Views/MarqueeText.swift（MarqueeText），全 App 共用。

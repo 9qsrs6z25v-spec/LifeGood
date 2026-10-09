@@ -162,10 +162,10 @@ struct TripPlanListView: View {
                         .font(.system(size: 16, weight: .semibold)).foregroundStyle(accent)
                 }
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(plan.displayTitle)
+                    // [v25.520] 行程名稱過長改跑馬燈（原本被切成「…」）
+                    MarqueeText(plan.displayTitle)
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(.primary)
-                        .lineLimit(1)
                     Text(Self.dayFmt.string(from: plan.startDate))
                         .font(.caption2).foregroundStyle(.secondary)
                     Text(planMeta(plan))
@@ -353,7 +353,8 @@ struct TripPlanDetailView: View {
                 }
             }
             .background(Color(.systemGroupedBackground))
-            .navigationTitle(plan?.displayTitle ?? "行程")
+            // [v25.520] 行程名稱過長時導覽列標題改跑馬燈
+            .marqueeNavigationTitle(plan?.displayTitle ?? "行程")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button("關閉") { dismiss() } }
@@ -1277,10 +1278,10 @@ struct TripPlanDetailView: View {
                 .font(.system(size: 12, weight: .bold, design: .rounded).monospacedDigit())
                 .foregroundStyle(ink)
             // 不用 Spacer 把鉛筆推到右邊：HStack 的 spacing 會在 Spacer 兩側各加一次
-            Text("從「" + slot.stop.displayName + "」出發")
+            // [v25.520] 住宿名稱過長改跑馬燈（原本被切成「…」）
+            MarqueeText("從「" + slot.stop.displayName + "」出發")
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(.secondary)
-                .lineLimit(1)
                 .frame(maxWidth: .infinity, alignment: .leading)
             Button {
                 editingStop = slot.stop
@@ -1677,10 +1678,13 @@ struct TripPlanDetailView: View {
                 // 右欄只有兩百出頭 pt，照設計稿折行的話長名字要三行，整張卡跟著變高。
                 // 不套 .textCase(.uppercase)：設計稿的大寫是資料本來就大寫，套上去
                 // 「Familymart Hakata…」會變全大寫、寬 16.5%。
-                TripMarqueeText(text: slot.stop.displayName,
+                MarqueeText(text: slot.stop.displayName,
                                 font: .subheadline.weight(.semibold),
                                 accessibilityText: a11yTitle)
                     .foregroundStyle(.primary)
+                    // [v25.520] 跑馬燈改成跟 Text 一樣貼著字（全 App 共用之後要能直接取代 Text），
+                    // 這裡要撐滿，右邊的 ≡ 與 … 才會留在最右邊
+                    .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.top, 3)
                     .accessibilityHint("點兩下打開景點卡")
                     .accessibilityAddTraits(.isButton)
@@ -2048,9 +2052,9 @@ struct TripPlanDetailView: View {
                     .font(.system(size: 10, weight: .bold))
                     .foregroundStyle(c)
                 // [v25.516] 相對字級：寫死 12pt 的話大字級時它會變成整張氣泡最小的字
-                Text(slot.stop.displayName)
+                // [v25.520] 站名過長改跑馬燈（原本被切成「…」）
+                MarqueeText(slot.stop.displayName)
                     .font(.caption.weight(.bold))
-                    .lineLimit(1)
                 Spacer(minLength: 0)
             }
             .padding(.bottom, 8)
@@ -2829,7 +2833,8 @@ struct TripStopEditorSheet: View {
                             Button { pick(r) } label: {
                                 HStack(spacing: 8) {
                                     VStack(alignment: .leading, spacing: 2) {
-                                        Text(r.title).font(.subheadline).foregroundStyle(.primary)
+                                        // [v25.520] 地點名稱過長改一行跑馬燈（原本會折成多行）
+                                        MarqueeText(r.title).font(.subheadline).foregroundStyle(.primary)
                                         if !r.subtitle.isEmpty {
                                             Text(r.subtitle).font(.caption2).foregroundStyle(.secondary)
                                         }
@@ -3107,9 +3112,9 @@ struct TripStopEditorSheet: View {
                     .font(.system(size: 13)).foregroundStyle(.indigo)
                     .frame(width: 20)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(item.name.isEmpty ? "未命名住宿" : item.name)
+                    // [v25.520] 住宿名稱過長改跑馬燈（原本被切成「…」）
+                    MarqueeText(item.name.isEmpty ? "未命名住宿" : item.name)
                         .font(.subheadline).foregroundStyle(.primary)
-                        .lineLimit(1)
                     Text(Self.lodgingMeta(item))
                         .font(.caption2).foregroundStyle(.secondary)
                         .lineLimit(2)
@@ -3523,7 +3528,8 @@ struct TripSubSpotEditor: View {
                 .foregroundStyle(sub.coordinate == nil ? Color.secondary : accent)
                 .frame(width: 20)
             VStack(alignment: .leading, spacing: 2) {
-                Text(sub.displayName)
+                // [v25.520] 子地點名稱過長改一行跑馬燈（原本會折成多行）
+                MarqueeText(sub.displayName)
                     .font(.subheadline)
                     .foregroundStyle(sub.name.trimmingCharacters(in: .whitespaces).isEmpty
                                      ? .secondary : .primary)
@@ -3582,7 +3588,8 @@ struct TripSubSpotEditView: View {
                         Button { pick(r) } label: {
                             HStack(spacing: 8) {
                                 VStack(alignment: .leading, spacing: 2) {
-                                    Text(r.title).font(.subheadline).foregroundStyle(.primary)
+                                    // [v25.520] 地點名稱過長改一行跑馬燈（原本會折成多行）
+                                    MarqueeText(r.title).font(.subheadline).foregroundStyle(.primary)
                                     if !r.subtitle.isEmpty {
                                         Text(r.subtitle).font(.caption2).foregroundStyle(.secondary)
                                     }
@@ -4281,9 +4288,9 @@ struct TripLegDetailSheet: View {
                 .frame(width: 24, height: 24)
                 .background(Circle().fill(TripDayPalette.color(slot.dayIndex)))
             VStack(alignment: .leading, spacing: 2) {
-                Text(slot.stop.displayName)
+                // [v25.520] 站名過長改一行跑馬燈（原本會折成多行）
+                MarqueeText(slot.stop.displayName)
                     .font(.subheadline.weight(.semibold))
-                    .fixedSize(horizontal: false, vertical: true)
                 let address = slot.stop.address.trimmingCharacters(in: .whitespaces)
                 if !address.isEmpty {
                     Text(address).font(.caption2).foregroundStyle(.secondary)
@@ -4575,7 +4582,8 @@ struct TripChecklistSheet: View {
                 editing = item
             } label: {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(item.titleWithQuantity)
+                    // [v25.520] 項目名稱過長改一行跑馬燈（原本會折成多行）
+                    MarqueeText(item.titleWithQuantity)
                         .font(.subheadline)
                         .strikethrough(item.isDone, color: .secondary)
                         .foregroundStyle(item.isDone ? .secondary : .primary)

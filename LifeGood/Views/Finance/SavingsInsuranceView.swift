@@ -510,9 +510,9 @@ struct SavingsInsuranceView: View {
                 VStack(alignment: .leading, spacing: 6) {
                     // 名稱 + 幣別膠囊 + 週期膠囊
                     HStack(spacing: 6) {
-                        Text(item.name)
+                        // [v25.520] 保單名稱過長改跑馬燈（原本被切成「…」）
+                        MarqueeText(item.name)
                             .font(.subheadline.weight(.semibold))
-                            .lineLimit(1)
                         Text(item.currencyCode)
                             .font(.caption2.weight(.medium))
                             .padding(.horizontal, 6).padding(.vertical, 2)

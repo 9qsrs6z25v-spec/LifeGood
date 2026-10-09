@@ -342,9 +342,9 @@ struct ChildrenResumeView: View {
 
     private func childCardNameRow(_ child: FamilyMember, accent: Color) -> some View {
         HStack(spacing: 6) {
-            Text(childDisplayName(child))
+            // [v25.520] 名字放不下改跑馬燈（原本 lineLimit(1) 切成「…」）
+            MarqueeText(childDisplayName(child))
                 .font(.subheadline.weight(.semibold))
-                .lineLimit(1)
             // [v3] 角色膠囊補細邊框，對齊 FamilyView v2 / CareerView v3 膠囊規格
             Text(child.role.rawValue)
                 .font(.system(size: 10, weight: .semibold))

@@ -756,9 +756,9 @@ struct FixedExpenseRow: View {
                 }
 
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(expense.title)
+                    // [v25.520] 項目名稱過長改跑馬燈（原本被切成「…」）
+                    MarqueeText(expense.title)
                         .font(.subheadline.weight(.semibold))
-                        .lineLimit(1)
                     HStack(spacing: 4) {
                         // [v25.347] 已停止（取消訂閱／繳清／退租⋯）
                         if expense.isFixedEnded {

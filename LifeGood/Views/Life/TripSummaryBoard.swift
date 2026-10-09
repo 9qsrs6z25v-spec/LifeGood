@@ -788,7 +788,7 @@ struct TripSummaryBoard: View {
                         currentChevron(pal)
                     }
                     HStack(spacing: 4) {
-                        TripMarqueeText(text: text, font: .subheadline.weight(.semibold))
+                        MarqueeText(text: text, font: .subheadline.weight(.semibold))
                         currentChevron(pal)
                     }
                 }
@@ -1066,10 +1066,11 @@ struct TripSummaryBoard: View {
             } label: {
                 HStack(spacing: 6) {
                     VStack(alignment: .leading, spacing: 1) {
-                        Text(item.title)
+                        // [v25.520] 「第 N 站「景點名」」放不下改跑馬燈（原本切成「…」）。
+                        // VoiceOver 讀的是外面 Button 的 a11y 標籤，不受影響。
+                        MarqueeText(item.title)
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(c.text)
-                            .lineLimit(1)
                         Text(item.detail)
                             .font(.caption2.weight(.medium))
                             .foregroundStyle(c.text.opacity(0.85))

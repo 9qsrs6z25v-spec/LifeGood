@@ -775,10 +775,10 @@ struct PhotoSlideshowView: View {
                     .frame(width: 36, height: 36)
                     .background(Circle().fill(onBackdrop.opacity(0.55)))
             }
-            Text(title)
+            // [v25.520] 相簿名放不下就跑馬燈（原本切成「…」）
+            MarqueeText(title)
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(onBackdrop.opacity(0.9))
-                .lineLimit(1)
             Spacer()
             Text("\(index + 1) / \(items.count)")
                 .font(.system(size: 13, weight: .semibold, design: .rounded))
@@ -795,10 +795,10 @@ struct PhotoSlideshowView: View {
     private var caption: some View {
         if let item = current {
             VStack(alignment: .leading, spacing: 3) {
-                Text(item.group)
+                // [v25.520] 站名放不下就跑馬燈（原本切成「…」）
+                MarqueeText(item.group)
                     .font(.system(.title3, design: .serif).weight(.semibold))
                     .foregroundStyle(onBackdrop)
-                    .lineLimit(1)
                 Text(Self.dayFmt.string(from: item.date))
                     .font(.system(.caption, design: .serif))
                     .foregroundStyle(onBackdrop.opacity(0.85))

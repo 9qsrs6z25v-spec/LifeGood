@@ -528,7 +528,8 @@ struct TravelMapView: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 8) {
                 Image(systemName: "mappin.and.ellipse").font(.caption).foregroundStyle(accent)
-                Text(city).font(.subheadline.weight(.bold))
+                // [v25.520] 縣市名過長改跑馬燈（原本折行）
+                MarqueeText(city).font(.subheadline.weight(.bold))
                 Spacer()
                 Text("\(items.count) 個地點")
                     .font(.caption2.weight(.semibold))
@@ -573,8 +574,9 @@ struct TravelMapView: View {
                 Image(systemName: "figure.walk").font(.system(size: 17, weight: .semibold)).foregroundStyle(accent)
             }
             VStack(alignment: .leading, spacing: 4) {
-                Text(spot.name.isEmpty ? "未命名地點" : spot.name)
-                    .font(.subheadline.weight(.semibold)).foregroundStyle(.primary).lineLimit(1)
+                // [v25.520] 地點名稱過長改跑馬燈（原本切成「…」）
+                MarqueeText(spot.name.isEmpty ? "未命名地點" : spot.name)
+                    .font(.subheadline.weight(.semibold)).foregroundStyle(.primary)
                 HStack(spacing: 5) {
                     Text("造訪 \(spot.visitCount) 次")
                         .font(.caption2.weight(.semibold)).foregroundStyle(accent)
@@ -839,7 +841,8 @@ struct TravelSpotDetailSheet: View {
                 .padding(.vertical, 12)
             }
             .background(Color(.systemGroupedBackground))
-            .navigationTitle(spot.name.isEmpty ? "地點" : spot.name)
+            // [v25.520] 地點名稱過長改跑馬燈（inline 導覽列、本畫面沒有 principal 項目）
+            .marqueeNavigationTitle(spot.name.isEmpty ? "地點" : spot.name)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button("關閉") { dismiss() } }
@@ -859,8 +862,9 @@ struct TravelSpotDetailSheet: View {
     private var headerCard: some View {
         VStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 4) {
-                Text(spot.name.isEmpty ? "未命名地點" : spot.name)
-                    .font(.title3.bold()).foregroundStyle(.white).lineLimit(2).minimumScaleFactor(0.7)
+                // [v25.520] 地點名稱過長改跑馬燈（原本折兩行＋縮字；導覽列也寫著全名）
+                MarqueeText(spot.name.isEmpty ? "未命名地點" : spot.name)
+                    .font(.title3.bold()).foregroundStyle(.white)
                 if !spot.address.isEmpty {
                     HStack(spacing: 4) {
                         Image(systemName: "mappin").font(.caption2)
@@ -913,8 +917,8 @@ struct TravelSpotDetailSheet: View {
             }
             VStack(alignment: .leading, spacing: 2) {
                 Text("最常同行").font(.caption2).foregroundStyle(.white.opacity(0.8))
-                Text(name).font(.subheadline.weight(.bold)).foregroundStyle(.white)
-                    .lineLimit(1).minimumScaleFactor(0.7)
+                // [v25.520] 同行者名字過長改跑馬燈（原本縮字）
+                MarqueeText(name).font(.subheadline.weight(.bold)).foregroundStyle(.white)
             }
             Spacer()
         }

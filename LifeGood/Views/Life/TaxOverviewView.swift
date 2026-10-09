@@ -494,9 +494,9 @@ struct TaxOverviewView: View {
                                     .foregroundStyle(Color.red.opacity(0.85))
                             }
                             VStack(alignment: .leading, spacing: 3) {
-                                Text(exp.title)
+                                // [v25.520] 名稱過長改跑馬燈（原本 lineLimit(1) 切成「…」）
+                                MarqueeText(exp.title)
                                     .font(.subheadline.weight(.semibold))
-                                    .lineLimit(1)
                                 Text(fmtDate(exp.date))
                                     .font(.system(size: 10, weight: .medium))
                                     .foregroundStyle(.secondary)

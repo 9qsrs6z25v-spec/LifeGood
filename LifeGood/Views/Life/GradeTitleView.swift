@@ -321,7 +321,8 @@ struct GradeTitleView: View {
                             .clipShape(Capsule())
                             .overlay(Capsule().stroke(Color.indigo.opacity(0.22), lineWidth: 0.75))
                     }
-                    Text(dept.name.isEmpty ? "未命名部門" : dept.name)
+                    // [v25.520] 部門名稱放不下改跑馬燈（原本折成多行）
+                    MarqueeText(dept.name.isEmpty ? "未命名部門" : dept.name)
                         .font(.subheadline.weight(.medium))
                 }
                 if !dept.function.isEmpty {
@@ -838,7 +839,8 @@ struct DepartmentEditor: View {
                         .overlay(Capsule().stroke(color.opacity(0.22), lineWidth: 0.75))
                 }
                 // [v3] 選中時 .primary／未選 .secondary，加強勾選狀態的文字對比
-                Text(label)
+                // [v25.520] 部門名稱放不下改跑馬燈（原本折成多行）
+                MarqueeText(label)
                     .foregroundStyle(isOn ? .primary : .secondary)
                 Spacer()
             }

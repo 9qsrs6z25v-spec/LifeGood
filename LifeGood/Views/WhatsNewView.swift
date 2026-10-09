@@ -106,10 +106,10 @@ struct WhatsNewView: View {
                         .foregroundStyle(.white)
                 }
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(headline)
+                    // [v25.520] 放不下改跑馬燈（原本縮小字級）
+                    MarqueeText(headline)
                         .font(.title3.weight(.bold))
                         .foregroundStyle(.white)
-                        .lineLimit(1).minimumScaleFactor(0.7)
                     Text(subheadline)
                         .font(.caption.weight(.medium))
                         .foregroundStyle(.white.opacity(0.9))

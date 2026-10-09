@@ -600,9 +600,9 @@ struct VehicleView: View {
                     }
 
                     VStack(alignment: .leading, spacing: 5) {
-                        Text(item.name)
+                        // [v25.520] 車名過長改跑馬燈（原本被切成「…」）
+                        MarqueeText(item.name)
                             .font(.subheadline.weight(.semibold))
-                            .lineLimit(1)
 
                         // 品牌 + 燃料類型膠囊標籤
                         HStack(spacing: 5) {

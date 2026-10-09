@@ -250,7 +250,8 @@ struct FamilyView: View {
             if !tasks.isEmpty {
                 items.append(sectionTitle("家庭待辦（\(tasks.count)）", icon: "checklist", color: .orange))
                 for t in tasks {
-                    items.append(.row(AnyView(familyTaskRow(t)
+                    // [v25.520] 圖片不會動：匯出時標題維持原本的靜態排法（不用跑馬燈）
+                    items.append(.row(AnyView(familyTaskRow(t, forExport: true)
                         .padding(.horizontal, 14).padding(.vertical, 6))))
                 }
             }
@@ -263,7 +264,8 @@ struct FamilyView: View {
                 items.append(sectionTitle("家庭成員（\(store.familyMembers.count)）", icon: "person.3.fill",
                                           color: Color(red: 1.00, green: 0.35, blue: 0.55)))
                 for m in store.familyMembers {
-                    items.append(.row(AnyView(memberRow(m, membersById: membersById)
+                    // [v25.520] 圖片不會動：匯出時名字維持原本的靜態排法（不用跑馬燈）
+                    items.append(.row(AnyView(memberRow(m, membersById: membersById, forExport: true)
                         .padding(.horizontal, 14).padding(.vertical, 6))))
                 }
             }
@@ -364,7 +366,26 @@ struct FamilyView: View {
         .buttonStyle(.plain)
     }
 
-    private func familyTaskRow(_ t: FamilyTask) -> some View {
+    /// [v25.520] 待辦標題：畫面上一行放不下就跑馬燈（原本折兩行再切「…」）。
+    /// 匯出成圖片時圖不會動，維持原本最多兩行的靜態排法。
+    @ViewBuilder
+    private func familyTaskTitle(_ t: FamilyTask, forExport: Bool) -> some View {
+        let title = t.content.isEmpty ? "未命名待辦" : t.content
+        if forExport {
+            Text(title)
+                .font(.subheadline.weight(.medium))
+                .strikethrough(t.isCompleted, color: .secondary)
+                .foregroundStyle(t.isCompleted ? .secondary : .primary)
+                .lineLimit(2)
+        } else {
+            MarqueeText(title)
+                .font(.subheadline.weight(.medium))
+                .strikethrough(t.isCompleted, color: .secondary)
+                .foregroundStyle(t.isCompleted ? .secondary : .primary)
+        }
+    }
+
+    private func familyTaskRow(_ t: FamilyTask, forExport: Bool = false) -> some View {
         let assignees = t.assigneeIds.compactMap { id -> String? in
             guard let m = store.familyMembers.first(where: { $0.id == id }) else { return nil }
             return m.chineseName.isEmpty ? m.englishName : m.chineseName
@@ -380,11 +401,7 @@ struct FamilyView: View {
             }
             .buttonStyle(.plain)
             VStack(alignment: .leading, spacing: 3) {
-                Text(t.content.isEmpty ? "未命名待辦" : t.content)
-                    .font(.subheadline.weight(.medium))
-                    .strikethrough(t.isCompleted, color: .secondary)
-                    .foregroundStyle(t.isCompleted ? .secondary : .primary)
-                    .lineLimit(2)
+                familyTaskTitle(t, forExport: forExport)
                 HStack(spacing: 5) {
                     if !assignees.isEmpty {
                         HStack(spacing: 3) {
@@ -674,7 +691,23 @@ struct FamilyView: View {
 
     // MARK: - 成員列（44pt 圖示圓 + 角色色彩強調條 + 膠囊標籤）
 
-    private func memberRow(_ member: FamilyMember, membersById: [UUID: FamilyMember]) -> some View {
+    /// [v25.520] 成員名：畫面上放不下就跑馬燈（原本縮字）。
+    /// 匯出成圖片時圖不會動，維持原本的一行縮字。
+    @ViewBuilder
+    private func memberNameText(_ name: String, forExport: Bool) -> some View {
+        if forExport {
+            Text(name)
+                .font(.subheadline.weight(.semibold))
+                .lineLimit(1)
+                .minimumScaleFactor(0.85)
+        } else {
+            MarqueeText(name)
+                .font(.subheadline.weight(.semibold))
+        }
+    }
+
+    private func memberRow(_ member: FamilyMember, membersById: [UUID: FamilyMember],
+                           forExport: Bool = false) -> some View {
         let accent = roleAccentColor(member.role)
         let displayName = member.chineseName.isEmpty ? member.englishName : member.chineseName
 
@@ -716,11 +749,9 @@ struct FamilyView: View {
                 }
 
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(displayName.isEmpty ? "（未命名）" : displayName)
-                        .font(.subheadline.weight(.semibold))
-                        .lineLimit(1)
-                        // [v4] 中文名為使用者自填、長度不可控，補防截斷保護
-                        .minimumScaleFactor(0.85)
+                    // [v4] 中文名為使用者自填、長度不可控
+                    memberNameText(displayName.isEmpty ? "（未命名）" : displayName,
+                                   forExport: forExport)
 
                     // 角色膠囊 + 英文名 + 配偶名
                     HStack(spacing: 5) {
@@ -891,7 +922,8 @@ struct FamilyTaskEditor: View {
                                         .font(.system(size: 18))
                                         .foregroundStyle(isOn ? .orange : .secondary)
                                     let display = m.chineseName.isEmpty ? m.englishName : m.chineseName
-                                    Text(display.isEmpty ? "未命名" : display)
+                                    // [v25.520] 名字放不下就跑馬燈（原本折行）
+                                    MarqueeText(display.isEmpty ? "未命名" : display)
                                         .foregroundStyle(.primary)
                                     Text(m.role.rawValue).font(.caption2).foregroundStyle(.secondary)
                                     Spacer()

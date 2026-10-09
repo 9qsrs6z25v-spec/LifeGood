@@ -698,7 +698,8 @@ struct HealthView: View {
                                 .foregroundStyle(accent)
                         }
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(st.name).font(.subheadline.weight(.bold))
+                            // [v25.520] 動作名稱過長改一行跑馬燈（原本會折成多行）
+                            MarqueeText(st.name).font(.subheadline.weight(.bold))
                             Text(statMeta(st))
                                 .font(.caption2).foregroundStyle(.secondary)
                         }
@@ -765,7 +766,8 @@ struct HealthView: View {
                 }
                 .frame(width: 38)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(s.displayTitle).font(.subheadline.weight(.bold))
+                    // [v25.520] 訓練名稱過長改一行跑馬燈（原本會折成多行）
+                    MarqueeText(s.displayTitle).font(.subheadline.weight(.bold))
                     Text(sessionMeta(s))
                         .font(.caption2).foregroundStyle(.secondary)
                 }
@@ -791,7 +793,8 @@ struct HealthView: View {
                         .font(.system(size: 10, weight: .bold))
                         .foregroundStyle(e.kind == .strength ? accent : Color.blue)
                         .frame(width: 15)
-                    Text(e.name.isEmpty ? e.kind.rawValue : e.name)
+                    // [v25.520] 動作名稱過長改一行跑馬燈（原本會折成多行）
+                    MarqueeText(e.name.isEmpty ? e.kind.rawValue : e.name)
                         .font(.caption.weight(.semibold))
                     Text(e.summary(bodyWeightKg: bodyWeight))
                         .font(.caption2).foregroundStyle(.secondary)
@@ -845,7 +848,8 @@ struct HealthView: View {
                         Image(systemName: "heart.fill").font(.system(size: 12)).foregroundStyle(.pink)
                     }
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(m.title.isEmpty ? "未命名" : m.title).font(.subheadline.weight(.semibold))
+                        // [v25.520] 里程碑標題過長改一行跑馬燈（原本會折成多行）
+                        MarqueeText(m.title.isEmpty ? "未命名" : m.title).font(.subheadline.weight(.semibold))
                         Text(milestoneMeta(m))
                             .font(.caption2).foregroundStyle(.secondary).lineLimit(2)
                     }

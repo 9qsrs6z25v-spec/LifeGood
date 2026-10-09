@@ -186,7 +186,7 @@ struct MapAlbumSheet<Stats: View>: View {
                 }
             }
             .background(Color(.systemGroupedBackground))
-            .navigationTitle(title)
+            .marqueeNavigationTitle(title)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button("關閉") { dismiss() } }
@@ -246,9 +246,8 @@ struct MapAlbumSheet<Stats: View>: View {
             Capsule()
                 .fill(LinearGradient(colors: [accent, accent.opacity(0.55)], startPoint: .top, endPoint: .bottom))
                 .frame(width: 4, height: 15)
-            Text(title)
+            MarqueeText(title)
                 .font(.subheadline.weight(.bold))
-                .lineLimit(1)
             Text("\(count)")
                 .font(.caption2.weight(.semibold)).foregroundStyle(accent)
                 .padding(.horizontal, 6).padding(.vertical, 2)

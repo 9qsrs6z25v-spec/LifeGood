@@ -337,7 +337,8 @@ struct FamilyMembersResumeView: View {
 
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
-                    Text(m.chineseName.isEmpty ? m.role.rawValue : m.chineseName)
+                    // [v25.520] 名字放不下改跑馬燈（原本折成多行）
+                    MarqueeText(m.chineseName.isEmpty ? m.role.rawValue : m.chineseName)
                         .font(.subheadline.weight(.semibold))
                     Text(m.role.rawValue)
                         .font(.caption2.weight(.medium))
@@ -582,7 +583,8 @@ struct FamilyMemberDetailView: View {
                 .padding(.vertical)
             }
             .background(Color(.systemGroupedBackground))
-            .navigationTitle(displayName)
+            // [v25.520] 名字放不下改跑馬燈（同一個 view 沒有 principal 項目）
+            .marqueeNavigationTitle(displayName)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button("關閉") { dismiss() } }
@@ -664,9 +666,12 @@ struct FamilyMemberDetailView: View {
                         .foregroundStyle(.white)
                 }
 
-                Text(displayName)
+                // [v25.520] 名字放不下改跑馬燈（原本折成多行；導覽列也有同一個名字）。
+                // 這個 VStack 沒有左右內距，捲動時會貼到卡片邊緣——比照下面備註那行留 20。
+                MarqueeText(displayName)
                     .font(.title3.bold())
                     .foregroundStyle(.white)
+                    .padding(.horizontal, 20)
                 Text(member.role.rawValue)
                     .font(.caption.weight(.medium))
                     .padding(.horizontal, 10).padding(.vertical, 3)
@@ -742,7 +747,7 @@ struct FamilyMemberDetailView: View {
                                     .foregroundStyle(.white)
                             }
                             VStack(alignment: .leading, spacing: 3) {
-                                Text(ev.title.isEmpty ? "未命名紀錄" : ev.title)
+                                MarqueeText(ev.title.isEmpty ? "未命名紀錄" : ev.title)
                                     .font(.subheadline.weight(.medium))
                                     .foregroundStyle(.primary)
                                 if !ev.content.isEmpty {
@@ -842,9 +847,8 @@ struct FamilyMemberDetailView: View {
                         )
                 }
             }
-            Text(p.title.isEmpty ? "未命名" : p.title)
+            MarqueeText(p.title.isEmpty ? "未命名" : p.title)
                 .font(.caption.weight(.medium))
-                .lineLimit(1)
                 .frame(width: 130, alignment: .leading)
             // [v3] 日期升級為 Capsule 徽章，對齊 eventsSection 日期規格
             HStack(spacing: 4) {

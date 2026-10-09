@@ -410,12 +410,10 @@ struct HouseView: View {
             // 屋身
             VStack(spacing: 4) {
                 // [v2] 標籤文字改用屋頂主題色，強化視覺關聯
-                Text(house.label)
+                // [v25.520] 「○○○的家」放不下就跑馬燈（原本縮字到 0.75 再切「…」）
+                MarqueeText(house.label)
                     .font(.caption.weight(.bold))
                     .foregroundStyle(house.kind.roofColor)
-                    .lineLimit(1)
-                    // [v4] 較長名字或加大字級時先等比縮小，避免直接被截斷
-                    .minimumScaleFactor(0.75)
                     .padding(.top, 6)
 
                 // [v2] 分隔線改主題色細線（0.5pt），對齊全 App separator 規格

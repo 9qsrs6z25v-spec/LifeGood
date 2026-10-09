@@ -3659,7 +3659,8 @@ struct HeroCardOverrideListView: View {
                                      startPoint: .topLeading, endPoint: .bottomTrailing))
                 .frame(width: 22, height: 22)
             VStack(alignment: .leading, spacing: 1) {
-                Text(card.title).font(.subheadline)
+                // [v25.520] 卡名放不下就跑馬燈（例如「旅遊規劃 › 景點卡・花費頁」）
+                MarqueeText(card.title).font(.subheadline)
                 // 殼層還沒遷移的卡：先講清楚調了不會動，免得被當成壞掉
                 if !card.isWired {
                     Text("殼層尚未接上，調整暫時不會生效")
@@ -3743,7 +3744,8 @@ struct HeroCardOverrideView: View {
             }
         }
         .background(Color(.systemGroupedBackground))
-        .navigationTitle(card.title)
+        // [v25.520] 卡名是變數（最長「旅遊規劃 › 景點卡・花費頁」），放不下就跑馬燈
+        .marqueeNavigationTitle(card.title)
         .navigationBarTitleDisplayMode(.inline)
     }
 
@@ -3845,7 +3847,8 @@ struct HeroPreviewCard: View {
         VStack(spacing: 0) {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 5) {
-                    Text(card.title)
+                    // [v25.520] 卡名放不下就跑馬燈
+                    MarqueeText(card.title)
                         .font(.caption)
                         .foregroundStyle(.white.opacity(0.80))
                     Text("NT$1,284.6億")

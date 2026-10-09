@@ -193,7 +193,8 @@ struct HealthProfileEditView: View {
                         rowIcon("allergens", color: .orange)
                         VStack(alignment: .leading, spacing: 2) {
                             HStack {
-                                Text(a.name.isEmpty ? "未命名過敏原" : a.name).foregroundStyle(.primary)
+                                // [v25.520] 過敏原名稱放不下就跑馬燈（原本折行）
+                                MarqueeText(a.name.isEmpty ? "未命名過敏原" : a.name).foregroundStyle(.primary)
                                 if let s = a.severity {
                                     Text(s.rawValue).font(.caption2)
                                         .foregroundStyle(severityColor(s))
@@ -231,7 +232,8 @@ struct HealthProfileEditView: View {
                     HStack(spacing: 12) {
                         rowIcon("pills.fill", color: .blue)
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(m.name.isEmpty ? "未命名藥物" : m.name).foregroundStyle(.primary)
+                            // [v25.520] 藥名放不下就跑馬燈（原本折行）
+                            MarqueeText(m.name.isEmpty ? "未命名藥物" : m.name).foregroundStyle(.primary)
                             if !m.dosage.isEmpty {
                                 Text(m.dosage).font(.caption).foregroundStyle(.secondary)
                             }
@@ -316,7 +318,8 @@ struct HealthProfileEditView: View {
                     HStack(spacing: 12) {
                         rowIcon("stethoscope", color: .purple)
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(c.title.isEmpty ? "健檢" : c.title).foregroundStyle(.primary)
+                            // [v25.520] 健檢項目名放不下就跑馬燈（原本折行）
+                            MarqueeText(c.title.isEmpty ? "健檢" : c.title).foregroundStyle(.primary)
                             HStack(spacing: 6) {
                                 Text(Self.dateFmt.string(from: c.date))
                                 if !c.place.isEmpty { Text("· \(c.place)") }
@@ -354,7 +357,8 @@ struct HealthProfileEditView: View {
     private func conditionRow(_ text: String) -> some View {
         HStack(spacing: 12) {
             rowIcon("list.bullet.clipboard.fill", color: .indigo)
-            Text(text).foregroundStyle(.primary)
+            // [v25.520] 病史名稱放不下就跑馬燈（原本折行）
+            MarqueeText(text).foregroundStyle(.primary)
         }
     }
 

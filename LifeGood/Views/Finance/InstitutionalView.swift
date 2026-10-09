@@ -525,10 +525,10 @@ struct InstitutionalBuyView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(row.symbol)
                     .font(.subheadline.weight(.semibold))
-                Text(row.name)
+                // [v25.520] 股名放不下就跑馬燈（原本切成「…」）
+                MarqueeText(row.name)
                     .font(.caption2)
                     .foregroundStyle(.secondary)
-                    .lineLimit(1)
             }
             Spacer()
             Text("連買 \(row.streak) 天")
@@ -754,7 +754,8 @@ struct InstSignalTrackView: View {
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
                     Text(e.symbol).font(.subheadline.weight(.semibold))
-                    Text(e.name).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                    // [v25.520] 股名放不下就跑馬燈（原本切成「…」）
+                    MarqueeText(e.name).font(.caption2).foregroundStyle(.secondary)
                 }
                 HStack(spacing: 5) {
                     Text("\(shortDate(e.signalDate)) 完成連買 \(threshold) 天")
@@ -1535,7 +1536,8 @@ struct StockAIAnalysisView: View {
     private func stockAdviceCard(_ advice: StockAdvice) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
-                Text(advice.name.isEmpty ? advice.symbol : advice.name)
+                // [v25.520] 股名放不下就跑馬燈（原本折行）
+                MarqueeText(advice.name.isEmpty ? advice.symbol : advice.name)
                     .font(.subheadline.weight(.bold))
                 if !advice.symbol.isEmpty {
                     Text(advice.symbol)

@@ -180,7 +180,7 @@ struct FinanceItemCard: View {
         infoCard
         // [v25.328] 電動車充電支出：卡片顯示充電資訊與該車的每度電價走勢
         if let e = expense, isEVCharge(e) {
-            evChargeBlock(e)
+            evChargeBlock(e, forExport: forExport)
         }
         if forExport {
             if !noteText.isEmpty { staticNoteBlock }
@@ -404,11 +404,13 @@ extension FinanceItemCard {
 
     /// 充電資訊卡：度數／電量區間／里程錶／每度電價／本次推估容量，
     /// 下方附「這輛車」的每度電價走勢（本筆以大圓點標示）。畫面與匯出共用。
+    /// [v25.520] forExport：匯出成圖片時圖不會動，標題維持原本可折行的靜態排法
     @ViewBuilder
-    func evChargeBlock(_ e: Expense) -> some View {
+    func evChargeBlock(_ e: Expense, forExport: Bool = false) -> some View {
         let vehicleName = e.linkedVehicleId.flatMap { vid in
             financeStore.vehicles.first { $0.id == vid }?.name
         } ?? ""
+        let header = "充電資訊" + (vehicleName.isEmpty ? "" : "・\(vehicleName)")
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 8) {
                 Capsule()
@@ -417,8 +419,14 @@ extension FinanceItemCard {
                     .frame(width: 4, height: 16)
                 Image(systemName: "bolt.car.fill")
                     .font(.system(size: 12, weight: .semibold)).foregroundStyle(.green)
-                Text("充電資訊" + (vehicleName.isEmpty ? "" : "・\(vehicleName)"))
-                    .font(.subheadline.weight(.bold))
+                if forExport {
+                    Text(header)
+                        .font(.subheadline.weight(.bold))
+                } else {
+                    // [v25.520] 車名放不下就跑馬燈（原本折行）
+                    MarqueeText(header)
+                        .font(.subheadline.weight(.bold))
+                }
                 Spacer()
             }
             .padding(.horizontal, 14).padding(.top, 12).padding(.bottom, 6)

@@ -225,12 +225,7 @@ struct FlashCardView<Subtitle: View, MiddleExtra: View, ExtraBackground: View>: 
 
             // 名稱 + 副標槽
             VStack(spacing: 6) {
-                Text(title)
-                    .font(.title.weight(.bold))
-                    .foregroundStyle(rarity.primaryTextColor)
-                    .multilineTextAlignment(.center)
-                    .lineLimit(2)
-                    .minimumScaleFactor(0.7)
+                titleText
                 subtitle()
             }
             .padding(.top, 16)
@@ -321,5 +316,24 @@ struct FlashCardView<Subtitle: View, MiddleExtra: View, ExtraBackground: View>: 
         .animation(.spring(response: 0.50, dampingFraction: 0.78).delay(0.04), value: appeared)
         .onAppear { appeared = true }
         .onDisappear { appeared = false }
+    }
+
+    /// 名稱大字。[v25.520] 畫面上放不下改一行跑馬燈（原本 lineLimit(2)＋縮到 0.7 倍，
+    /// 再長就切成「…」）。匯出圖（animated: false，ImageRenderer 靜態渲染）捲不動，
+    /// 維持原本兩行＋縮字，讓圖上看得到完整名稱。
+    @ViewBuilder
+    private var titleText: some View {
+        if animated {
+            MarqueeText(title)
+                .font(.title.weight(.bold))
+                .foregroundStyle(rarity.primaryTextColor)
+        } else {
+            Text(title)
+                .font(.title.weight(.bold))
+                .foregroundStyle(rarity.primaryTextColor)
+                .multilineTextAlignment(.center)
+                .lineLimit(2)
+                .minimumScaleFactor(0.7)
+        }
     }
 }

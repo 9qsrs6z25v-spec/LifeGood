@@ -4,7 +4,7 @@ import SwiftUI
 //
 // 從兼任職務「重大決議」列收斂而成的列式項目模板，三個組成部分：
 //   1. 膠囊橫向捲軸（ItemChipBar）：標籤多到擠爆標題時自己左右捲，不壓縮標題
-//   2. 標題與預覽（標題完整換行、預覽限行數）
+//   2. 標題與預覽（標題一行、放不下跑馬燈〔v25.520〕；預覽限行數）
 //   3. 摺疊子項目（ItemDisclosure）：預設收合成一顆計數膠囊，
 //      展開列出子項目標題，再點一次在原地展開看內文
 //
@@ -170,6 +170,8 @@ struct ItemRow<Leading: View, Accessory: View>: View {
     /// 哪些子項目展開了內文（列自己管，呼叫端不用傳狀態進來）
     @State private var openBodies: Set<String> = []
     @State private var listOpen = false
+    /// [v25.520] 出圖模式（見檔尾「出圖模式」）：標題改回完整折行，不用跑馬燈
+    @Environment(\.itemRowChipsWrap) private var exportLayout
 
     /// 明確寫出初始化，不靠合成的 memberwise init——
     /// 上面有 private 的 @State，合成版會跟著變成 private，跨檔案叫不到。
@@ -313,16 +315,19 @@ struct ItemRow<Leading: View, Accessory: View>: View {
 
     // MARK: 標題
 
+    /// [v25.520] 標題一行，放不下就跑馬燈（使用者：「標題如果過長就變成跑馬燈」）。
+    ///
+    /// 原本是 `fixedSize(horizontal: false, vertical: true)` 完整折行（v25.345 起，
+    /// 為了不要截成「…」）。跑馬燈一樣看得到全名，而且每一列高度一致。
+    /// MarqueeText 的版面跟 `Text.lineLimit(1)` 一樣（貼著字、擠不下被壓縮），
+    /// 所以 inline／spansTitle 兩種版面、titleTap 的 ✕ 位置都不用動。
+    /// 刪除線、淡色都用 View 版本的修飾子從外面掛，跑馬燈裡的字吃得到。
     @ViewBuilder
     private var titleView: some View {
-        let text = Text(title.isEmpty ? "（未填標題）" : title)
-            .font(.subheadline.weight(.medium))
-            .foregroundStyle(titleIsMuted ? Color.secondary : Color.primary)
-            .strikethrough(titleStrikethrough, color: .secondary)
         if let titleTap {
             Button(action: titleTap) {
                 HStack(spacing: 4) {
-                    text.fixedSize(horizontal: false, vertical: true)
+                    titleLabel
                     if titleIsFiltering {
                         Image(systemName: "xmark.circle.fill")
                             .font(.system(size: 12)).foregroundStyle(.indigo)
@@ -332,7 +337,27 @@ struct ItemRow<Leading: View, Accessory: View>: View {
             }
             .buttonStyle(.plain)
         } else {
-            text.fixedSize(horizontal: false, vertical: true)
+            titleLabel
+        }
+    }
+
+    /// 標題字本身。出圖模式（ImageRenderer 靜態圖）維持原本的完整折行：
+    /// 靜態圖只畫一格、跑馬燈捲不動，會變成一行「…」，分享出去的圖就少字了
+    /// （部屬卡片 exportJPG、部屬總覽 exportImage／分頁匯出都會畫 ItemRow）。
+    /// 兩支型別不同，所以不能先 let 一個共用的再分支。
+    @ViewBuilder
+    private var titleLabel: some View {
+        if exportLayout {
+            Text(title.isEmpty ? "（未填標題）" : title)
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(titleIsMuted ? Color.secondary : Color.primary)
+                .strikethrough(titleStrikethrough, color: .secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        } else {
+            MarqueeText(title.isEmpty ? "（未填標題）" : title)
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(titleIsMuted ? Color.secondary : Color.primary)
+                .strikethrough(titleStrikethrough, color: .secondary)
         }
     }
 
@@ -416,10 +441,19 @@ struct ItemRow<Leading: View, Accessory: View>: View {
                             .background(disclosureColor.opacity(0.12), in: Capsule())
                             .foregroundStyle(disclosureColor)
                     }
-                    Text(d.title.isEmpty ? "（未填標題）" : d.title)
-                        .font(.system(size: 11, weight: .semibold))
-                        .lineLimit(open ? 3 : 1)
-                        .multilineTextAlignment(.leading)
+                    // [v25.520] 子項目標題（例：參照前案的決議名）一行、放不下跑馬燈。
+                    // 原本收合時截成「…」、展開時折三行；現在兩種狀態都是同一行，
+                    // 展開時列高也不會因為標題突然變高而跳一下。
+                    // 出圖模式照舊（收合一行、展開最多三行）：靜態圖裡跑馬燈捲不動。
+                    if exportLayout {
+                        Text(d.title.isEmpty ? "（未填標題）" : d.title)
+                            .font(.system(size: 11, weight: .semibold))
+                            .lineLimit(open ? 3 : 1)
+                            .multilineTextAlignment(.leading)
+                    } else {
+                        MarqueeText(d.title.isEmpty ? "（未填標題）" : d.title)
+                            .font(.system(size: 11, weight: .semibold))
+                    }
                     if let meta = d.meta, !meta.isEmpty {
                         Text(meta).font(.system(size: 9)).foregroundStyle(.secondary)
                     }
@@ -535,6 +569,8 @@ extension EnvironmentValues {
     /// （出圖的版面有固定寬度，ScrollView 只會把超出的部分裁掉）。
     /// 匯出前在最外層掛 `.environment(\.itemRowChipsWrap, true)`，
     /// 底下所有 ItemRow 自動改用換行排版，呼叫端一行都不用改。
+    /// [v25.520] 同一個旗標也讓 ItemRow 的標題、子項目標題改回靜態折行（不用跑馬燈），
+    /// 部屬卡片英雄卡姓名、執掌分頁的機台名也讀它——等於「這是靜態出圖」。
     var itemRowChipsWrap: Bool {
         get { self[ItemRowChipsWrapKey.self] }
         set { self[ItemRowChipsWrapKey.self] = newValue }

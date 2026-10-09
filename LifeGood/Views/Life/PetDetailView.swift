@@ -135,10 +135,10 @@ struct PetDetailView: View {
                         .foregroundStyle(.white)
                 }
                 VStack(alignment: .leading, spacing: 5) {
-                    Text(p.petDisplayName)
+                    // [v25.520] 名字放不下改跑馬燈（原本縮小字級）
+                    MarqueeText(p.petDisplayName)
                         .font(.title2.weight(.bold))
                         .foregroundStyle(.white)
-                        .lineLimit(1).minimumScaleFactor(0.7)
                     Text(p.pet?.summaryLine ?? "尚未填寫物種資料")
                         .font(.caption.weight(.medium))
                         .foregroundStyle(.white.opacity(0.9))
@@ -366,10 +366,9 @@ struct PetDetailView: View {
                         .foregroundStyle(kind.color)
                 }
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(recordTitle(rec))
+                    MarqueeText(recordTitle(rec))
                         .font(.subheadline.weight(.medium))
                         .foregroundStyle(.primary)
-                        .lineLimit(1)
                     Text(recordMeta(rec))
                         .font(.caption2).foregroundStyle(.secondary)
                         .lineLimit(1)
@@ -466,10 +465,9 @@ struct PetDetailView: View {
                             .font(.system(size: 11, weight: .bold, design: .rounded))
                             .foregroundStyle(kind.color)
                             .frame(width: 38, alignment: .leading)
-                        Text(dailyText(rec))
+                        MarqueeText(dailyText(rec))
                             .font(.subheadline)
                             .foregroundStyle(.primary)
-                            .lineLimit(1)
                         Spacer(minLength: 0)
                         Image(systemName: "chevron.right")
                             .font(.caption2.weight(.semibold))
@@ -551,10 +549,9 @@ struct PetDetailView: View {
                             .foregroundStyle(.tertiary)
                     }
                 }
-                Text(photo.title.isEmpty ? Self.shortFmt.string(from: photo.date) : photo.title)
+                MarqueeText(photo.title.isEmpty ? Self.shortFmt.string(from: photo.date) : photo.title)
                     .font(.caption2)
                     .foregroundStyle(.secondary)
-                    .lineLimit(1)
                     .frame(width: 104, alignment: .leading)
             }
             .contentShape(Rectangle())

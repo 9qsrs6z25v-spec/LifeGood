@@ -53,6 +53,9 @@ struct SubordinateEquipmentSection: View {
     @EnvironmentObject var lifeStore: LifeStore
     @EnvironmentObject var subscription: SubscriptionManager
     let subordinateId: UUID
+    /// [v25.520] 部屬卡片 exportJPG 會把這一節畫進靜態圖（外層掛了出圖旗標）：
+    /// 機台名在圖裡維持原本的縮字，不用跑馬燈（靜態圖捲不動）
+    @Environment(\.itemRowChipsWrap) private var exportLayout
 
     @State private var addingEquipment = false
     @State private var editingEquipment: ManagedEquipment?
@@ -269,9 +272,15 @@ struct SubordinateEquipmentSection: View {
                         .font(.system(size: 14, weight: .semibold)).foregroundStyle(accent)
                 }
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(eq.name.isEmpty ? "未命名設備" : eq.name)
-                        .font(.subheadline.weight(.medium)).foregroundStyle(.primary)
-                        .lineLimit(1).minimumScaleFactor(0.8)
+                    // [v25.520] 機台名放不下就跑馬燈（原本縮字；出圖時照舊縮字）
+                    if exportLayout {
+                        Text(eq.name.isEmpty ? "未命名設備" : eq.name)
+                            .font(.subheadline.weight(.medium)).foregroundStyle(.primary)
+                            .lineLimit(1).minimumScaleFactor(0.8)
+                    } else {
+                        MarqueeText(eq.name.isEmpty ? "未命名設備" : eq.name)
+                            .font(.subheadline.weight(.medium)).foregroundStyle(.primary)
+                    }
                     // [v25.296] 膠囊改用自動換行容器：系統別／部門名稱字多時
                     // 換到下一行，不再擠在同一行互相壓縮變形
                     FlexibleChipWrap(items: rowChips(eq, recentAlarms: recentAlarms)) { chip in
@@ -303,6 +312,8 @@ struct SubordinateEquipmentSection: View {
 struct SubordinateEquipmentTimelineSection: View {
     @EnvironmentObject var lifeStore: LifeStore
     let subordinateId: UUID
+    /// [v25.520] 同 SubordinateEquipmentSection：出圖時機台名維持原本的縮字
+    @Environment(\.itemRowChipsWrap) private var exportLayout
 
     @State private var rowsAppeared = false
     @State private var rowsAppearedTask: Task<Void, Never>?
@@ -456,9 +467,15 @@ struct SubordinateEquipmentTimelineSection: View {
 
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
-                    Text(e.equipmentName)
-                        .font(.caption.weight(.semibold)).foregroundStyle(.primary)
-                        .lineLimit(1).minimumScaleFactor(0.8)
+                    // [v25.520] 機台名放不下就跑馬燈（原本縮字；出圖時照舊縮字）
+                    if exportLayout {
+                        Text(e.equipmentName)
+                            .font(.caption.weight(.semibold)).foregroundStyle(.primary)
+                            .lineLimit(1).minimumScaleFactor(0.8)
+                    } else {
+                        MarqueeText(e.equipmentName)
+                            .font(.caption.weight(.semibold)).foregroundStyle(.primary)
+                    }
                     Text(e.kind == .pm
                          ? (e.phase == .shutdown ? "PM 停機" : e.phase == .restored ? "PM 完成復機" : "PM 保養")
                          : "警報")
@@ -861,7 +878,8 @@ struct EquipmentEditorSheet: View {
                 HStack(spacing: 8) {
                     Image(systemName: "gearshape.2.fill")
                         .font(.system(size: 11)).foregroundStyle(direction.color)
-                    Text(item.name.isEmpty ? "未命名設備" : item.name)
+                    // [v25.520] 機台名放不下就跑馬燈（原本折行）
+                    MarqueeText(item.name.isEmpty ? "未命名設備" : item.name)
                         .font(.subheadline)
                     if !item.system.isEmpty {
                         Text(item.system).font(.caption2).foregroundStyle(.secondary)
@@ -1027,7 +1045,8 @@ struct EquipmentClaimPicker: View {
                     .font(.title3)
                     .foregroundStyle(mine ? Color.teal : Color(.systemGray3))
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(eq.name.isEmpty ? "未命名設備" : eq.name)
+                    // [v25.520] 機台名放不下就跑馬燈（原本折行）
+                    MarqueeText(eq.name.isEmpty ? "未命名設備" : eq.name)
                         .font(.subheadline.weight(.medium)).foregroundStyle(.primary)
                     HStack(spacing: 6) {
                         Text("PM \(eq.pmRecords.count)・警報 \(eq.alarms.count)")
@@ -1804,7 +1823,8 @@ struct EquipmentTimelineQuickAddSheet: View {
                     HStack(spacing: 8) {
                         Image(systemName: "gearshape.2.fill")
                             .font(.system(size: 13, weight: .semibold)).foregroundStyle(.teal)
-                        Text(equipmentName).font(.subheadline.weight(.medium))
+                        // [v25.520] 機台名放不下就跑馬燈（原本折行）
+                        MarqueeText(equipmentName).font(.subheadline.weight(.medium))
                         Spacer()
                         Text(kind.title)
                             .font(.system(size: 10, weight: .bold))
@@ -2084,10 +2104,10 @@ struct EquipmentRelationCard: View {
                         .foregroundStyle(direction.color)
                 }
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(eq.name.isEmpty ? "未命名設備" : eq.name)
+                    // [v25.520] 機台名放不下就跑馬燈（原本切成「…」）
+                    MarqueeText(eq.name.isEmpty ? "未命名設備" : eq.name)
                         .font(.subheadline.weight(.medium))
                         .foregroundStyle(.primary)
-                        .lineLimit(1)
                     Text(metaLine(eq))
                         .font(.caption2).foregroundStyle(.secondary)
                         .lineLimit(1)
@@ -2213,7 +2233,8 @@ struct EquipmentLinkPicker: View {
                                 dismiss()
                             } label: {
                                 VStack(alignment: .leading, spacing: 2) {
-                                    Text(eq.name.isEmpty ? "未命名設備" : eq.name)
+                                    // [v25.520] 機台名放不下就跑馬燈（原本折行）
+                                    MarqueeText(eq.name.isEmpty ? "未命名設備" : eq.name)
                                         .foregroundStyle(.primary)
                                     if !eq.system.isEmpty {
                                         Text(eq.system).font(.caption2).foregroundStyle(.secondary)
@@ -2413,11 +2434,12 @@ struct EquipmentTaskCard: View {
                         .foregroundStyle(tint)
                 }
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(titleText(t))
+                    // [v25.520] 任務標題放不下就跑馬燈（原本切成「…」）；
+                    // strikethrough 用的是 View 版本，從外面掛一樣有效
+                    MarqueeText(titleText(t))
                         .font(.subheadline.weight(.medium))
                         .foregroundStyle(.primary)
                         .strikethrough(t.isCompleted, color: .secondary)
-                        .lineLimit(1)
                     HStack(spacing: 5) {
                         if entry.isAlarm {
                             miniTag("警報", color: .orange)
@@ -2593,7 +2615,8 @@ struct EquipmentTaskOwnerPicker: View {
                             picked = EquipmentTaskOwnerPick(id: sub.id)
                         } label: {
                             VStack(alignment: .leading, spacing: 2) {
-                                Text(sub.name.isEmpty ? "未命名部屬" : sub.name)
+                                // [v25.520] 姓名放不下就跑馬燈（原本折行）
+                                MarqueeText(sub.name.isEmpty ? "未命名部屬" : sub.name)
                                     .foregroundStyle(.primary)
                                 if !sub.jobTitle.isEmpty || !sub.department.isEmpty {
                                     Text([sub.department, sub.jobTitle]
@@ -2787,7 +2810,8 @@ struct EquipmentMultiPicker: View {
                     .font(.system(size: 18))
                     .foregroundStyle(on ? Color.teal : Color.secondary.opacity(0.5))
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(eq.name.isEmpty ? "未命名設備" : eq.name)
+                    // [v25.520] 機台名放不下就跑馬燈（原本折行）
+                    MarqueeText(eq.name.isEmpty ? "未命名設備" : eq.name)
                         .foregroundStyle(.primary)
                     Text(pickerMeta(eq))
                         .font(.caption2).foregroundStyle(.secondary)

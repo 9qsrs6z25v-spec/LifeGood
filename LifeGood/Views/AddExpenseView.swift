@@ -1124,10 +1124,10 @@ struct AddExpenseView: View {
                     .font(.callout)
             }
             VStack(alignment: .leading, spacing: 2) {
-                Text(item.title)
+                // [v25.520] 地點名稱過長改跑馬燈（原本切成「…」）
+                MarqueeText(item.title)
                     .font(.subheadline.weight(.medium))
                     .foregroundStyle(.primary)
-                    .lineLimit(1)
                 if !item.subtitle.isEmpty {
                     Text(item.subtitle)
                         .font(.caption2)

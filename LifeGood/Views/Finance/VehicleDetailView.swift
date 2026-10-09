@@ -474,10 +474,10 @@ struct VehicleDetailView: View {
             .background(Color.orange.opacity(0.10))
             .clipShape(Capsule())
 
-            Text(e.title.isEmpty ? "支出照片" : e.title)
+            // [v25.520] 標題過長改跑馬燈（原本 lineLimit(1) 切成「…」）
+            MarqueeText(e.title.isEmpty ? "支出照片" : e.title)
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.primary)
-                .lineLimit(1)
             Text(formatRowDate(e.date))
                 .font(.caption2)
                 .foregroundStyle(.secondary)
@@ -548,12 +548,12 @@ struct VehicleDetailView: View {
             .background(rec.category.color.opacity(0.10))
             .clipShape(Capsule())
 
-            Text(rec.title.isEmpty
+            // [v25.520] 標題過長改跑馬燈（原本 lineLimit(1) 切成「…」）
+            MarqueeText(rec.title.isEmpty
                  ? (rec.photoFileNames.count >= 2 ? "\(rec.photoFileNames.count) 張照片" : rec.category.rawValue)
                  : rec.title)
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.primary)
-                .lineLimit(1)
             Text(formatRowDate(rec.date))
                 .font(.caption2)
                 .foregroundStyle(.secondary)

@@ -869,9 +869,9 @@ struct IncomeView: View {
             }
 
             VStack(alignment: .leading, spacing: 4) {
-                Text(income.title)
+                // [v25.520] 名稱過長改跑馬燈（原本 lineLimit(1) 切成「…」）
+                MarqueeText(income.title)
                     .font(.subheadline.weight(.semibold))
-                    .lineLimit(1)
                 HStack(spacing: 5) {
                     Text(income.category.rawValue)
                         .font(.system(size: 10, weight: .semibold))

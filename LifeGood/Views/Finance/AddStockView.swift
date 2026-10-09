@@ -361,11 +361,10 @@ struct AddStockView: View {
                             .clipShape(Capsule())
                             .foregroundStyle(.white)
                     } else {
-                        Text(name.isEmpty ? "輸入股票資訊" : name)
+                        // [v25.520] 股票名稱過長改跑馬燈（原本 minimumScaleFactor 縮字）
+                        MarqueeText(name.isEmpty ? "輸入股票資訊" : name)
                             .font(.system(size: 22, weight: .bold, design: .rounded))
                             .foregroundStyle(.white.opacity(name.isEmpty ? 0.45 : 1.0))
-                            .minimumScaleFactor(0.7)
-                            .lineLimit(1)
                         Text(name.isEmpty ? "填入後即時預覽" : "輸入張數與股價預覽")
                             .font(.system(size: 10, weight: .semibold))
                             .padding(.horizontal, 8).padding(.vertical, 3)

@@ -207,8 +207,8 @@ struct ChildVaccineScheduleView: View {
                             .frame(width: 36)
                         VStack(alignment: .leading, spacing: 2) {
                             HStack(spacing: 6) {
-                                Text(rec.title.isEmpty ? "疫苗" : rec.title).font(.subheadline).foregroundStyle(.primary)
-                                    .lineLimit(1).minimumScaleFactor(0.85)
+                                // [v25.520] 疫苗名稱過長改跑馬燈（原本縮字後切成「…」）
+                                MarqueeText(rec.title.isEmpty ? "疫苗" : rec.title).font(.subheadline).foregroundStyle(.primary)
                                 if let dose = rec.dose, !dose.isEmpty {
                                     Text(dose).font(.caption2)
                                         .padding(.horizontal, 6).padding(.vertical, 1.5)
@@ -297,8 +297,8 @@ struct ChildVaccineScheduleView: View {
                 statusIcon(st)
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(spacing: 6) {
-                        Text(item.name).font(.subheadline.weight(.medium)).foregroundStyle(.primary)
-                            .lineLimit(1).minimumScaleFactor(0.85)
+                        // [v25.520] 疫苗名稱過長改跑馬燈（原本縮字後切成「…」）
+                        MarqueeText(item.name).font(.subheadline.weight(.medium)).foregroundStyle(.primary)
                         Text(item.dose)
                             .font(.caption2.weight(.medium))
                             .padding(.horizontal, 6).padding(.vertical, 1.5)
@@ -448,7 +448,8 @@ struct VaccineDoseEditorSheet: View {
                     vaccineEditorSectionHeader("備註", icon: "note.text", color: .secondary)
                 }
             }
-            .navigationTitle(item.name)
+            // [v25.520] 導覽列標題放不下改跑馬燈
+            .marqueeNavigationTitle(item.name)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button("取消") { dismiss() } }

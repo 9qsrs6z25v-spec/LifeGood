@@ -131,17 +131,15 @@ struct ProfileFlashCard: View {
 
                 // 姓名
                 VStack(spacing: 4) {
-                    Text(profile.chineseName.isEmpty ? "未設定姓名" : profile.chineseName)
+                    // [v25.520] 姓名過長改跑馬燈（原本 minimumScaleFactor 縮字）
+                    MarqueeText(profile.chineseName.isEmpty ? "未設定姓名" : profile.chineseName)
                         .font(.title.weight(.bold))
                         .foregroundStyle(.white)
-                        .minimumScaleFactor(0.7)
-                        .lineLimit(1)
                     if !profile.englishName.isEmpty {
-                        Text(profile.englishName)
+                        // [v25.520] 英文名過長改跑馬燈（原本 minimumScaleFactor 縮字）
+                        MarqueeText(profile.englishName)
                             .font(.subheadline.weight(.medium))
                             .foregroundStyle(.white.opacity(0.7))
-                            .minimumScaleFactor(0.75)
-                            .lineLimit(1)
                     }
                 }
                 .padding(.top, 14)
@@ -873,10 +871,9 @@ struct ResumeView: View {
             .padding(.trailing, 10)
 
             VStack(alignment: .leading, spacing: 3) {
-                Text(e.title.isEmpty ? (e.variableCategory?.rawValue ?? "未分類") : e.title)
+                // [v25.520] 消費名稱過長改跑馬燈（原本縮字後切成「…」）
+                MarqueeText(e.title.isEmpty ? (e.variableCategory?.rawValue ?? "未分類") : e.title)
                     .font(.subheadline.weight(.medium))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.85)
                 HStack(spacing: 5) {
                     // 日期：tertiarySystemFill Capsule 徽章（對齊 OverviewView.recentRow 日期規格）
                     Text(formatExpenseDate(e.date))
@@ -1147,10 +1144,9 @@ struct ResumeView: View {
 
             // 標題 + 副資訊
             VStack(alignment: .leading, spacing: 4) {
-                Text(item.title)
+                // [v25.520] 里程碑標題過長改跑馬燈（原本縮字後切成「…」）
+                MarqueeText(item.title)
                     .font(.subheadline.weight(.semibold))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.85)
 
                 HStack(spacing: 5) {
                     // 分類膠囊徽章：[v3] 補 Capsule stroke 細邊框（對齊 FamilyView v2 / SubordinateView v2 規格）

@@ -515,7 +515,8 @@ struct RenovationStackViewer: View {
                     if !record.title.isEmpty || !record.note.isEmpty {
                         VStack(alignment: .leading, spacing: 6) {
                             HStack {
-                                Text(record.title.isEmpty ? "未命名" : record.title)
+                                // [v25.520] 名稱過長改跑馬燈（原本折行）
+                                MarqueeText(record.title.isEmpty ? "未命名" : record.title)
                                     .font(.subheadline.weight(.bold))
                                     .foregroundStyle(.white)
                                 Spacer()
@@ -560,7 +561,8 @@ struct RenovationStackViewer: View {
                     }
                 }
             }
-            .navigationTitle(record.title.isEmpty ? "裝潢照片" : record.title)
+            // [v25.520] 名稱過長改跑馬燈（inline 導覽列、本畫面沒有 principal 項目）
+            .marqueeNavigationTitle(record.title.isEmpty ? "裝潢照片" : record.title)
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackground(.visible, for: .navigationBar)
             .toolbar {

@@ -585,7 +585,7 @@ struct SubordinateView: View {
     private func plantAreaHeader(_ area: String) -> some View {
         HStack(spacing: 6) {
             Image(systemName: "building.2.fill").font(.system(size: 10, weight: .semibold))
-            Text(area).font(.system(size: 12, weight: .bold)).lineLimit(1)
+            MarqueeText(area).font(.system(size: 12, weight: .bold))
             Spacer(minLength: 0)
         }
         .foregroundStyle(.blue)
@@ -605,10 +605,9 @@ struct SubordinateView: View {
                     )
                 )
                 .frame(width: 4, height: 16)
-            Text(title)
+            MarqueeText(title)
                 .font(.subheadline.weight(.bold))
                 .foregroundStyle(.primary)
-                .lineLimit(1)
             Spacer()
             // 計數徽章
             Text("\(count) 位")
@@ -780,9 +779,8 @@ struct SubordinateView: View {
 
             // 姓名 + 職等 + 到職年數
             VStack(alignment: .leading, spacing: 4) {
-                Text(sub.name)
+                MarqueeText(sub.name)
                     .font(.subheadline.weight(.semibold))
-                    .lineLimit(1)
 
                 // 職等 + 部門膠囊橫列
                 HStack(spacing: 5) {

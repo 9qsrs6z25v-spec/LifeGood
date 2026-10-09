@@ -509,9 +509,9 @@ struct FinanceChartView: View {
                                     .foregroundStyle(plC)
                             }
                             VStack(alignment: .leading, spacing: 3) {
-                                Text(stock.name)
+                                // [v25.520] 股票名稱過長改跑馬燈（原本被切成「…」）
+                                MarqueeText(stock.name)
                                     .font(.subheadline.weight(.semibold))
-                                    .lineLimit(1)
                                 // 代號膠囊（若有）
                                 if !stock.symbol.isEmpty {
                                     Text(stock.symbol)
@@ -603,9 +603,9 @@ struct FinanceChartView: View {
                             }
 
                             VStack(alignment: .leading, spacing: 5) {
-                                Text(item.name)
+                                // [v25.520] 房地產名稱過長改跑馬燈（原本被切成「…」）
+                                MarqueeText(item.name)
                                     .font(.subheadline.weight(.semibold))
-                                    .lineLimit(1)
                                 HStack(spacing: 6) {
                                     // 升值率膠囊
                                     HStack(spacing: 3) {
@@ -703,9 +703,9 @@ struct FinanceChartView: View {
                             }
 
                             VStack(alignment: .leading, spacing: 5) {
-                                Text(item.name)
+                                // [v25.520] 保單名稱過長改跑馬燈（原本被切成「…」）
+                                MarqueeText(item.name)
                                     .font(.subheadline.weight(.semibold))
-                                    .lineLimit(1)
                                 HStack(spacing: 5) {
                                     Text("已繳 \(fmtShort(item.totalPaid))\(item.currencyCode == "NT$" ? "" : " \(item.currencyCode)")")
                                         .font(.system(size: 10, weight: .medium))

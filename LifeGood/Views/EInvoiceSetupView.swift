@@ -767,7 +767,8 @@ struct CategoryRulesEditorView: View {
             }
 
             VStack(alignment: .leading, spacing: 3) {
-                Text(rule.keyword).font(.subheadline)
+                // [v25.520] 關鍵字過長改一行跑馬燈（原本會折成多行）
+                MarqueeText(rule.keyword).font(.subheadline)
                 HStack(spacing: 5) {
                     if rule.matchSeller {
                         Text("商家").font(.caption2)
@@ -900,9 +901,9 @@ struct EInvoiceHistoryView: View {
 
             VStack(alignment: .leading, spacing: 4) {
                 HStack {
-                    Text(record.sellerName)
+                    // [v25.520] 商家名稱過長改跑馬燈（原本切成「…」）
+                    MarqueeText(record.sellerName)
                         .font(.subheadline.weight(.semibold))
-                        .lineLimit(1)
                     Spacer()
                     // [v2] 智慧量級金額（對齊 VariableExpenseView / IncomeView 規格）
                     Text(record.amount.ntdWanString)

@@ -654,10 +654,10 @@ struct LifeRealEstateView: View {
             .padding(.trailing, 12)
 
             VStack(alignment: .leading, spacing: 4) {
-                Text(item.name)
+                // [v25.520] 物件名稱放不下改跑馬燈（原本 lineLimit(1) 切成「…」）
+                MarqueeText(item.name)
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(.primary)
-                    .lineLimit(1)
                 if !item.address.isEmpty {
                     Text(item.address)
                         .font(.caption)

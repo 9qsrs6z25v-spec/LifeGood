@@ -272,9 +272,8 @@ struct MapPlacePickerSheet: View {
                                 Image(systemName: "mappin.circle")
                                     .font(.system(size: 12)).foregroundStyle(accent)
                                 VStack(alignment: .leading, spacing: 1) {
-                                    Text(r.title)
+                                    MarqueeText(r.title)
                                         .font(.subheadline).foregroundStyle(.primary)
-                                        .lineLimit(1)
                                     if !r.subtitle.isEmpty {
                                         Text(r.subtitle)
                                             .font(.caption2).foregroundStyle(.secondary)
@@ -416,9 +415,8 @@ struct MapPlacePickerSheet: View {
             HStack(spacing: 6) {
                 Image(systemName: tapped == nil ? "mappin.and.ellipse" : "mappin.circle.fill")
                     .font(.system(size: 11)).foregroundStyle(accent)
-                Text(pickedName ?? "這個位置")
+                MarqueeText(pickedName ?? "這個位置")
                     .font(.subheadline.weight(.semibold))
-                    .lineLimit(1)
                 if isResolving || isPickingPOI {
                     ProgressView().scaleEffect(0.55)
                 }

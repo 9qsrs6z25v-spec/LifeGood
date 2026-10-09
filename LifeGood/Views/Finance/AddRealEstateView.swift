@@ -551,10 +551,10 @@ struct AddRealEstateView: View {
                     HStack(spacing: 12) {
                         reIconCircle(icon: "building.columns.fill", color: .blue)
                         VStack(alignment: .leading, spacing: 3) {
-                            Text(m.title.isEmpty ? "房貸" : m.title)
+                            // [v25.520] 名稱放不下改跑馬燈（原本 lineLimit(1) 切成「…」）
+                            MarqueeText(m.title.isEmpty ? "房貸" : m.title)
                                 .font(.subheadline.weight(.medium))
                                 .foregroundStyle(.primary)
-                                .lineLimit(1)
                             HStack(spacing: 5) {
                                 if m.totalPeriods > 0 {
                                     Text("\(m.elapsedPeriods)/\(m.totalPeriods) 期")
@@ -614,10 +614,9 @@ struct AddRealEstateView: View {
                     HStack(spacing: 12) {
                         reIconCircle(icon: "banknote.fill", color: .green)
                         VStack(alignment: .leading, spacing: 3) {
-                            Text(p.title.isEmpty ? "房屋價金" : p.title)
+                            MarqueeText(p.title.isEmpty ? "房屋價金" : p.title)
                                 .font(.subheadline.weight(.medium))
                                 .foregroundStyle(.primary)
-                                .lineLimit(1)
                             Text(fmtDate(p.date))
                                 .font(.system(size: 10, weight: .medium))
                                 .foregroundStyle(.secondary)
@@ -688,7 +687,7 @@ struct AddRealEstateView: View {
                                 .overlay(Capsule().stroke(Color.orange.opacity(0.22), lineWidth: 0.6))
                             HStack(spacing: 5) {
                                 if !ve.name.isEmpty {
-                                    Text(ve.name).font(.subheadline.weight(.medium)).foregroundStyle(.primary).lineLimit(1)
+                                    MarqueeText(ve.name).font(.subheadline.weight(.medium)).foregroundStyle(.primary)
                                 }
                                 Text(fmtDate(ve.date))
                                     .font(.caption2).foregroundStyle(.secondary)
@@ -1889,11 +1888,10 @@ struct AddRealEstateView: View {
                 // ── 標題列 ──
                 HStack {
                     VStack(alignment: .leading, spacing: 3) {
-                        Text(name.isEmpty ? "新增房地產" : name)
+                        // [v25.520] 物件名稱放不下改跑馬燈（原本縮小字級）
+                        MarqueeText(name.isEmpty ? "新增房地產" : name)
                             .font(.title3.weight(.bold))
                             .foregroundStyle(.white)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.80)
                         if !city.isEmpty {
                             HStack(spacing: 4) {
                                 Image(systemName: "mappin.circle.fill").font(.system(size: 10))

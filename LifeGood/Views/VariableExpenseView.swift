@@ -857,9 +857,9 @@ struct ExpenseRow: View {
 
             // 標題 + 副資訊
             VStack(alignment: .leading, spacing: 4) {
-                Text(expense.title)
+                // [v25.520] 支出名稱過長改跑馬燈（原本被切成「…」）
+                MarqueeText(expense.title)
                     .font(.subheadline.weight(.semibold))
-                    .lineLimit(1)
 
                 // 分類膠囊標籤 + 地點指示 + 備註
                 HStack(spacing: 5) {

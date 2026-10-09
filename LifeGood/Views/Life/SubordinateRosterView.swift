@@ -545,9 +545,9 @@ struct SubordinateRosterView: View {
 
     private func nameCell(_ sub: Subordinate) -> some View {
         HStack {
-            Text(sub.name.isEmpty ? "未命名" : sub.name)
+            // [v25.520] 姓名放不下改跑馬燈（原本縮字後切成「…」）
+            MarqueeText(sub.name.isEmpty ? "未命名" : sub.name)
                 .font(.system(size: 12, weight: .medium))
-                .lineLimit(1).minimumScaleFactor(0.7)
             Spacer(minLength: 0)
         }
         .padding(.leading, 8)
@@ -559,7 +559,8 @@ struct SubordinateRosterView: View {
     private func nameHeaderCell(_ area: String) -> some View {
         HStack(spacing: 4) {
             Image(systemName: "building.2.fill").font(.system(size: 9))
-            Text(area).font(.system(size: 11, weight: .bold)).lineLimit(1).minimumScaleFactor(0.6)
+            // [v25.520] 廠區名放不下改跑馬燈（原本縮字後切成「…」）
+            MarqueeText(area).font(.system(size: 11, weight: .bold))
             Spacer(minLength: 0)
         }
         .foregroundStyle(.blue)
@@ -739,7 +740,8 @@ private struct RosterCellDetailSheet: View {
             }
             .scrollContentBackground(.hidden)
             .background(Color(.systemGroupedBackground))
-            .navigationTitle(headerTitle)
+            // [v25.520] 「姓名　日期」放不下改跑馬燈
+            .marqueeNavigationTitle(headerTitle)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .topBarLeading) { Button("完成") { dismiss() } } }
             .sheet(isPresented: $showAddLeave) {
@@ -776,9 +778,9 @@ private struct RosterCellDetailSheet: View {
                 }
 
                 VStack(alignment: .leading, spacing: 5) {
-                    Text(sub.flatMap { $0.name.isEmpty ? nil : $0.name } ?? "未知部屬")
+                    // [v25.520] 姓名放不下改跑馬燈（原本切成「…」）
+                    MarqueeText(sub.flatMap { $0.name.isEmpty ? nil : $0.name } ?? "未知部屬")
                         .font(.subheadline.weight(.semibold))
-                        .lineLimit(1)
                     HStack(spacing: 5) {
                         // 日期膠囊：假日用紅色，平日用藍色
                         Text(Self.headerDateFormatter.string(from: selectedDate))
@@ -864,10 +866,10 @@ private struct RosterCellDetailSheet: View {
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(color)
             }
-            Text(title)
+            // [v25.520] 會議／任務主題過長改一行跑馬燈（原本折兩行後切成「…」）
+            MarqueeText(title)
                 .font(.subheadline)
                 .foregroundStyle(.primary)
-                .lineLimit(2)
         }
     }
 

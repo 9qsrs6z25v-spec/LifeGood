@@ -826,7 +826,8 @@ struct TalentMatrixView: View {
                         .foregroundStyle(accent)
                 }
                 VStack(alignment: .leading, spacing: 5) {
-                    Text(m.name.isEmpty ? "未命名" : m.name)
+                    // [v25.520] 姓名放不下改一行跑馬燈（原本會折成多行）
+                    MarqueeText(m.name.isEmpty ? "未命名" : m.name)
                         .font(.subheadline.weight(.bold))
                     // [v3] 象限標籤：直觀顯示此人的矩陣位置，對應象限色
                     let ql = quadrantLabel(m, ctx)
@@ -1148,7 +1149,8 @@ struct TalentStatsView: View {
                                 HStack(spacing: 10) {
                                     Image(systemName: "person.crop.circle")
                                         .foregroundStyle(.secondary)
-                                    Text(name(m)).foregroundStyle(.primary)
+                                    // [v25.520] 姓名放不下改一行跑馬燈（原本會折成多行）
+                                    MarqueeText(name(m)).foregroundStyle(.primary)
                                 }
                             }
                         }

@@ -253,12 +253,12 @@ private struct FloorTagView: View {
         Button(action: onTap) {
             VStack(alignment: .leading, spacing: 1) {
                 HStack(spacing: 4) {
-                    Text(floor.floorNumber.isEmpty ? "—" : floor.floorNumber)
+                    // [v25.520] 樓層名（使用者輸入，如「B2-地下停車場」）過長改跑馬燈，
+                    // 原本 lineLimit(1)＋縮到 0.7 倍，再長就切成「…」
+                    MarqueeText(floor.floorNumber.isEmpty ? "—" : floor.floorNumber)
                         .font(.system(size: 13, weight: .bold, design: .monospaced))
                         .foregroundStyle(isSelected ? .white : Color.white.opacity(0.95))
                         .shadow(color: isSelected ? HoloPalette.neonCyan : .clear, radius: 4)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.7)
                     Spacer(minLength: 0)
                 }
                 if !floor.functions.isEmpty {

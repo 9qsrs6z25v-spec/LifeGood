@@ -33,7 +33,9 @@ struct InlineEditBlock: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 6) {
-                Text(title).font(.caption).foregroundStyle(.secondary)
+                // [v25.520] 區塊標題可能是使用者自訂的欄位名（兼任職務決議的分欄），
+                // 過長改一行跑馬燈（原本會折成好幾行）
+                MarqueeText(title).font(.caption).foregroundStyle(.secondary)
                 Spacer()
                 if !isEditing {
                     Button {

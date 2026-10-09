@@ -422,11 +422,11 @@ struct CompletedCollapsibleCard: View {
                                 }
                                 VStack(alignment: .leading, spacing: 3) {
                                     HStack(spacing: 6) {
-                                        Text(e.title.isEmpty ? "未命名\(e.kind.label)" : e.title)
+                                        // [v25.520] 標題過長改跑馬燈（原本 lineLimit(1) 切成「…」）
+                                        MarqueeText(e.title.isEmpty ? "未命名\(e.kind.label)" : e.title)
                                             .font(.subheadline.weight(.medium))
                                             .strikethrough(true, color: .secondary)
                                             .foregroundStyle(.secondary)
-                                            .lineLimit(1)
                                         Text(e.kind.label)
                                             .font(.caption2.weight(.bold))
                                             .padding(.horizontal, 6).padding(.vertical, 1.5)
@@ -845,7 +845,8 @@ struct SubordinateDetailView: View {
         return (done, total)
     }
 
-    private func headerCard(mentionedCount: Int) -> some View {
+    /// forExport：給 exportJPG 的 ImageRenderer 用（靜態圖，跑馬燈捲不動）——姓名維持原本的縮字。
+    private func headerCard(mentionedCount: Int, forExport: Bool = false) -> some View {
         let initials = String(subordinate.name.prefix(2))
         // 一次計算所有類型計數，避免 KPI 橫列 5 個 statBadge 各自 O(n) 掃描 records
         let recordCounts = subordinate.records.reduce(into: [SubordinateRecordType: Int]()) { $0[$1.type, default: 0] += 1 }
@@ -866,11 +867,19 @@ struct SubordinateDetailView: View {
                 }
 
                 VStack(alignment: .leading, spacing: 6) {
-                    Text(subordinate.name)
-                        .font(.title3.bold())
-                        .foregroundStyle(.white)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.8)
+                    // [v25.520] 姓名過長改跑馬燈（原本縮到 0.8 倍再切成「…」）。
+                    // 匯出圖維持原本的縮字：靜態圖只畫一格，跑馬燈只會是一行「…」。
+                    if forExport {
+                        Text(subordinate.name)
+                            .font(.title3.bold())
+                            .foregroundStyle(.white)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
+                    } else {
+                        MarqueeText(subordinate.name)
+                            .font(.title3.bold())
+                            .foregroundStyle(.white)
+                    }
 
                     // 職等 + 部門膠囊
                     HStack(spacing: 5) {
@@ -1072,11 +1081,11 @@ struct SubordinateDetailView: View {
                                             .foregroundStyle(.purple)
                                             .clipShape(Capsule())
                                     }
-                                    Text(r.topic.isEmpty ? "未命名報告" : r.topic)
+                                    // [v25.520] 標題過長改跑馬燈（原本 lineLimit(1) 切成「…」）
+                                    MarqueeText(r.topic.isEmpty ? "未命名報告" : r.topic)
                                         .font(.subheadline.weight(.medium))
                                         .strikethrough(r.isCompleted, color: .secondary)
                                         .foregroundStyle(r.isCompleted ? .secondary : .primary)
-                                        .lineLimit(1)
                                 }
                                 HStack(spacing: 3) {
                                     Image(systemName: "calendar").font(.system(size: 8))
@@ -1255,8 +1264,9 @@ struct SubordinateDetailView: View {
             }
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
-                    Text(SideRoleFormat.displayName(role))
-                        .font(.subheadline.weight(.medium)).foregroundStyle(.primary).lineLimit(1)
+                    // [v25.520] 名稱過長改跑馬燈（原本 lineLimit(1) 切成「…」）
+                    MarqueeText(SideRoleFormat.displayName(role))
+                        .font(.subheadline.weight(.medium)).foregroundStyle(.primary)
                     if role.isActiveSideRole {
                         Text("在任").font(.caption2.weight(.bold))
                             .padding(.horizontal, 6).padding(.vertical, 1.5)
@@ -1297,7 +1307,8 @@ struct SubordinateDetailView: View {
             }
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
-                    Text(info.title).font(.subheadline.weight(.medium)).foregroundStyle(.primary).lineLimit(1)
+                    // [v25.520] 標題過長改跑馬燈（原本 lineLimit(1) 切成「…」）
+                    MarqueeText(info.title).font(.subheadline.weight(.medium)).foregroundStyle(.primary)
                     Text(info.kind).font(.caption2.weight(.bold))
                         .padding(.horizontal, 6).padding(.vertical, 1.5)
                         .background(info.color.opacity(0.14)).foregroundStyle(info.color).clipShape(Capsule())
@@ -1353,10 +1364,10 @@ struct SubordinateDetailView: View {
                             }
 
                             VStack(alignment: .leading, spacing: 4) {
-                                Text(m.topic.isEmpty ? "未命名會議" : m.topic)
+                                // [v25.520] 會議名過長改跑馬燈（原本 lineLimit(1) 切成「…」）
+                                MarqueeText(m.topic.isEmpty ? "未命名會議" : m.topic)
                                     .font(.subheadline.weight(.semibold))
                                     .foregroundStyle(.primary)
-                                    .lineLimit(1)
                                 HStack(spacing: 5) {
                                     // 日期膠囊
                                     HStack(spacing: 3) {
@@ -2136,7 +2147,7 @@ struct SubordinateDetailView: View {
     @ViewBuilder
     private func exportContent(mentioned: [SubordinateItemRef]) -> some View {
         VStack(spacing: 16) {
-            headerCard(mentionedCount: mentioned.count)
+            headerCard(mentionedCount: mentioned.count, forExport: true)
             switch detailTab {
             case .daily:
                 weeklyReportSection
@@ -2851,7 +2862,8 @@ struct AddSubItemSheet: View {
                     }
                 } header: {
                     HStack(spacing: 6) {
-                        Text(group.title)
+                        // [v25.520] 課別名過長改跑馬燈（原本會折行）
+                        MarqueeText(group.title)
                         Text("\(group.people.count)")
                             .font(.system(size: 10, weight: .bold))
                             .padding(.horizontal, 5).padding(.vertical, 1.5)
@@ -2935,7 +2947,8 @@ struct AddSubItemSheet: View {
                         .foregroundStyle(kind.color)
                 }
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(sub.name.isEmpty ? "未命名" : sub.name)
+                    // [v25.520] 姓名過長改跑馬燈（原本會折行）
+                    MarqueeText(sub.name.isEmpty ? "未命名" : sub.name)
                         .foregroundStyle(.primary)
                     let subtitle = rowSubtitle(sub)
                     if !subtitle.isEmpty {
@@ -4156,7 +4169,8 @@ struct SubordinatePickerSheet: View {
                         ForEach(group.people) { s in row(s) }
                     } header: {
                         HStack(spacing: 6) {
-                            Text(group.dept)
+                            // [v25.520] 課別名過長改跑馬燈（原本會折行）
+                            MarqueeText(group.dept)
                             Text("\(group.people.count)")
                                 .font(.system(size: 10, weight: .bold))
                                 .padding(.horizontal, 5).padding(.vertical, 1.5)
@@ -4190,7 +4204,8 @@ struct SubordinatePickerSheet: View {
                     .font(.system(size: 18))
                     .foregroundStyle(isOn ? .teal : .secondary)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(s.name.isEmpty ? "未命名" : s.name)
+                    // [v25.520] 姓名過長改跑馬燈（原本會折行）
+                    MarqueeText(s.name.isEmpty ? "未命名" : s.name)
                         .font(.subheadline.weight(.medium)).foregroundStyle(.primary)
                     if !s.jobTitle.isEmpty {
                         Text(s.jobTitle).font(.caption2).foregroundStyle(.secondary)
@@ -4280,7 +4295,8 @@ struct MeetingAssigneePicker: View {
                     .font(.system(size: 12))
                     .foregroundStyle(.indigo.opacity(0.7))
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(p.name).foregroundStyle(.primary)
+                    // [v25.520] 姓名過長改跑馬燈（原本會折行）
+                    MarqueeText(p.name).foregroundStyle(.primary)
                     if !p.subtitle.isEmpty {
                         Text(p.subtitle).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
                     }
@@ -5440,9 +5456,8 @@ struct MentionTextField: View {
             }
             VStack(alignment: .leading, spacing: 1) {
                 // [v25.77] 補齊 lineLimit/minimumScaleFactor，對齊下方 subtitle 與 headerCard subordinate.name 規格
-                Text(p.name).font(.subheadline.weight(.medium)).foregroundStyle(.primary)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
+                // [v25.520] 改跑馬燈（原本縮到 0.8 倍再切成「…」），跟 headerCard 的姓名一致
+                MarqueeText(p.name).font(.subheadline.weight(.medium)).foregroundStyle(.primary)
                 if !p.subtitle.isEmpty {
                     Text(p.subtitle).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
                 }
@@ -5914,7 +5929,8 @@ struct SubordinateItemCard: View {
             // [v25.325] 應做未作為＝紅色缺失抬頭
             titleBlock(icon: t.isDereliction ? "exclamationmark.triangle.fill" : "checklist",
                        color: t.isDereliction ? .red : .cyan,
-                       title: t.topic.isEmpty ? "未命名任務" : t.topic)
+                       title: t.topic.isEmpty ? "未命名任務" : t.topic,
+                       forExport: forExport)
             if t.isDereliction {
                 field("性質", "應做未作為（缺失）")
             }
@@ -5949,7 +5965,8 @@ struct SubordinateItemCard: View {
             }
         case .meeting(let refSubId, let snap):
             let (subId, m) = liveMeeting(refSubId, snap)
-            titleBlock(icon: "person.3.fill", color: .indigo, title: m.topic.isEmpty ? "未命名會議" : m.topic)
+            titleBlock(icon: "person.3.fill", color: .indigo, title: m.topic.isEmpty ? "未命名會議" : m.topic,
+                       forExport: forExport)
             ownerBlock(subId: subId, accent: .indigo)
             field("會議時間", "\(fmt(m.date)) – \(MeetingTimeFormat.time24.string(from: m.endDate))")
             field("會議長度", "\(m.durationMinutes) 分鐘")
@@ -5999,7 +6016,8 @@ struct SubordinateItemCard: View {
             field("會議產生", fmt(m.createdAt))
         case .report(let subId, let snap):
             let r = lifeStore.subordinates.first { $0.id == subId }?.weeklyReports.first { $0.id == snap.id } ?? snap
-            titleBlock(icon: "doc.text.fill", color: .purple, title: r.topic.isEmpty ? "未命名報告" : r.topic)
+            titleBlock(icon: "doc.text.fill", color: .purple, title: r.topic.isEmpty ? "未命名報告" : r.topic,
+                       forExport: forExport)
             ownerBlock(subId: subId, accent: .purple)
             if !r.reportType.isEmpty { field("分類", r.reportType) }
             field("報告日期", fmt(r.date))
@@ -6012,7 +6030,8 @@ struct SubordinateItemCard: View {
             }
         case .leave(let subId, let snap):
             let rec = lifeStore.subordinates.first { $0.id == subId }?.records.first { $0.id == snap.id } ?? snap
-            titleBlock(icon: "calendar.badge.minus", color: .teal, title: rec.leaveType?.rawValue ?? "請假")
+            titleBlock(icon: "calendar.badge.minus", color: .teal, title: rec.leaveType?.rawValue ?? "請假",
+                       forExport: forExport)
             ownerBlock(subId: subId, accent: .teal)
             field("開始", fmt(rec.date))
             if let end = rec.endDate { field("結束", fmt(end)) }
@@ -6025,7 +6044,8 @@ struct SubordinateItemCard: View {
             }
         case .record(let subId, let snap):
             let rec = lifeStore.subordinates.first { $0.id == subId }?.records.first { $0.id == snap.id } ?? snap
-            titleBlock(icon: rec.type.icon, color: recordColor(rec.type), title: rec.type.rawValue)
+            titleBlock(icon: rec.type.icon, color: recordColor(rec.type), title: rec.type.rawValue,
+                       forExport: forExport)
             ownerBlock(subId: subId, accent: recordColor(rec.type))
             field("日期", fmt(rec.date))
             if let end = rec.endDate { field("結束", fmt(end)) }
@@ -6201,7 +6221,9 @@ struct SubordinateItemCard: View {
 
     // [v1] 補 Circle().stroke + shadow，對齊本檔案 meetingSection 等章節既有 44pt 圖示圓規格；
     // 標題補 lineLimit + minimumScaleFactor，避免超長主題在大字級輔助模式下裁切或撐高版面。
-    private func titleBlock(icon: String, color: Color, title: String) -> some View {
+    // [v25.520] 畫面上標題過長改一行跑馬燈（原本 lineLimit(2)＋縮到 0.7 倍，再長就切成「…」）；
+    // 匯出圖片（forExport，ImageRenderer 靜態渲染）捲不動，維持兩行＋縮字。
+    private func titleBlock(icon: String, color: Color, title: String, forExport: Bool = false) -> some View {
         HStack(spacing: 12) {
             ZStack {
                 Circle().fill(LinearGradient(colors: [color.opacity(0.22), color.opacity(0.08)],
@@ -6211,8 +6233,12 @@ struct SubordinateItemCard: View {
                 Circle().stroke(color.opacity(0.22), lineWidth: 0.75).frame(width: 44, height: 44)
                 Image(systemName: icon).font(.system(size: 18, weight: .semibold)).foregroundStyle(color)
             }
-            Text(title).font(.title3.weight(.bold)).foregroundStyle(.primary)
-                .lineLimit(2).minimumScaleFactor(0.7)
+            if forExport {
+                Text(title).font(.title3.weight(.bold)).foregroundStyle(.primary)
+                    .lineLimit(2).minimumScaleFactor(0.7)
+            } else {
+                MarqueeText(title).font(.title3.weight(.bold)).foregroundStyle(.primary)
+            }
             Spacer(minLength: 0)
         }
     }
@@ -6426,7 +6452,8 @@ struct MeetingQuickAddSessionSheet: View {
                     HStack(spacing: 8) {
                         Image(systemName: "person.3.fill")
                             .font(.system(size: 13, weight: .semibold)).foregroundStyle(.indigo)
-                        Text(meetingTopic).font(.subheadline.weight(.medium)).lineLimit(1)
+                        // [v25.520] 會議名過長改跑馬燈（原本 lineLimit(1) 切成「…」）
+                        MarqueeText(meetingTopic).font(.subheadline.weight(.medium))
                         Spacer()
                         Text("臨時場次")
                             .font(.system(size: 10, weight: .bold))
@@ -6502,7 +6529,8 @@ struct MeetingQuickAddItemSheet: View {
                     HStack(spacing: 8) {
                         Image(systemName: "person.3.fill")
                             .font(.system(size: 13, weight: .semibold)).foregroundStyle(.indigo)
-                        Text(meetingTopic).font(.subheadline.weight(.medium)).lineLimit(1)
+                        // [v25.520] 會議名過長改跑馬燈（原本 lineLimit(1) 切成「…」）
+                        MarqueeText(meetingTopic).font(.subheadline.weight(.medium))
                         Spacer()
                         Text(scheduledDate.map { MeetingTimeFormat.dateTime24.string(from: $0) } ?? "不分場次")
                             .font(.system(size: 10, weight: .bold))

@@ -397,9 +397,9 @@ struct SideRoleHubView: View {
                         .foregroundStyle(.indigo)
                 }
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(SideRoleFormat.displayName(role))
+                    // [v25.520] 職務名稱放不下改跑馬燈（原本 lineLimit(1) 切成「…」）
+                    MarqueeText(SideRoleFormat.displayName(role))
                         .font(.subheadline.weight(.semibold))
-                        .lineLimit(1)
                     Text(SideRoleFormat.subtitle(role))
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -482,9 +482,8 @@ struct SideRoleHubView: View {
                     let c = role.sideRoleContentCount
                     HStack(spacing: 8) {
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(SideRoleFormat.displayName(role))
+                            MarqueeText(SideRoleFormat.displayName(role))
                                 .font(.subheadline)
-                                .lineLimit(1)
                             Text("保留 \(c.tasks) 待辦 · \(c.members) 成員 · \(c.meetings) 會議 · \(c.resolutions) 決議 · \(c.keyDates) 日期")
                                 .font(.caption2)
                                 .foregroundStyle(.secondary)
@@ -646,7 +645,8 @@ struct SideRoleWorkspaceView: View {
                 }
                 .padding(.vertical, 8)
             }
-            .navigationTitle(SideRoleFormat.displayName(role))
+            // [v25.520] 職務名稱放不下改跑馬燈（同一個 view 沒有 principal 項目）
+            .marqueeNavigationTitle(SideRoleFormat.displayName(role))
             .navigationBarTitleDisplayMode(.inline)
             .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .automatic),
                         prompt: "搜尋待辦、成員、會議、決議、日期")
@@ -1199,9 +1199,8 @@ struct SideRoleWorkspaceView: View {
             }
             .frame(width: 44)
             VStack(alignment: .leading, spacing: 2) {
-                Text(kd.title.isEmpty ? "（未命名）" : kd.title)
+                MarqueeText(kd.title.isEmpty ? "（未命名）" : kd.title)
                     .font(.subheadline)
-                    .lineLimit(1)
                 if !kd.note.isEmpty {
                     Text(kd.note).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
                 }
@@ -1288,9 +1287,8 @@ struct SideRoleWorkspaceView: View {
             }
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 5) {
-                    Text(m.name.isEmpty ? "（未填姓名）" : m.name)
+                    MarqueeText(m.name.isEmpty ? "（未填姓名）" : m.name)
                         .font(.subheadline)
-                        .lineLimit(1)
                     if let id = m.linkedPersonId, let p = peopleIndex[id] {
                         Image(systemName: p.kind.icon)
                             .font(.system(size: 9))
@@ -1363,9 +1361,8 @@ struct SideRoleWorkspaceView: View {
                         .padding(.horizontal, 6).padding(.vertical, 2)
                         .background(Color.indigo.opacity(0.12))
                         .clipShape(Capsule())
-                    Text(mt.topic.isEmpty ? "（未填主題）" : mt.topic)
+                    MarqueeText(mt.topic.isEmpty ? "（未填主題）" : mt.topic)
                         .font(.subheadline)
-                        .lineLimit(1)
                 }
                 if !mt.attendees.isEmpty {
                     Text("出席：" + mt.attendees.joined(separator: "、"))
@@ -1415,6 +1412,7 @@ struct SideRoleWorkspaceView: View {
     /// 分類多也不會把標題擠掉；第二行才是標題，過長自動換行不再截成「…」。
     /// [v25.354] 改用共用的 ItemRow 模板（膠囊捲軸＋摺疊子項目都在模板裡），
     /// 這一頁只負責把決議轉成模板要的資料。
+    /// [v25.520] ItemRow 標題改成一行、放不下跑馬燈（不再折行）；出圖時仍完整折行。
     private func resolutionRow(_ r: SideRoleResolution) -> some View {
         ItemRow(
             chips: resolutionChips(r),
@@ -1645,7 +1643,7 @@ struct SideRoleTaskEditor: View {
             Image(systemName: link.kind == .task ? "checklist" : "person.3.fill")
                 .font(.system(size: 13)).foregroundStyle(.indigo)
             VStack(alignment: .leading, spacing: 1) {
-                Text(info.title).font(.subheadline).lineLimit(1)
+                MarqueeText(info.title).font(.subheadline)
                 Text(info.subtitle).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
             }
             Spacer()
@@ -1686,7 +1684,7 @@ struct SideRoleTaskEditor: View {
                                     .font(.system(size: 18))
                                     .foregroundStyle(isAssigned(m.id) ? .indigo : .secondary)
                                 VStack(alignment: .leading, spacing: 1) {
-                                    Text(m.name.isEmpty ? "（未填姓名）" : m.name)
+                                    MarqueeText(m.name.isEmpty ? "（未填姓名）" : m.name)
                                         .foregroundStyle(.primary)
                                     if !m.dutyInRole.isEmpty {
                                         Text(m.dutyInRole)
@@ -2181,7 +2179,7 @@ struct SideRolePersonPicker: View {
                     .foregroundStyle(.indigo)
             }
             VStack(alignment: .leading, spacing: 2) {
-                Text(p.name).font(.subheadline).foregroundStyle(.primary)
+                MarqueeText(p.name).font(.subheadline).foregroundStyle(.primary)
                 if !p.subtitle.isEmpty {
                     Text(p.subtitle).font(.caption2).foregroundStyle(.secondary)
                         .lineLimit(1)
@@ -2531,11 +2529,10 @@ struct SideRoleResolutionCard: View {
                                             .background(Color.indigo.opacity(0.12)).foregroundStyle(.indigo)
                                             .clipShape(Capsule())
                                     }
-                                    Text(ref.title.isEmpty ? "（未填標題）" : ref.title)
+                                    MarqueeText(ref.title.isEmpty ? "（未填標題）" : ref.title)
                                         .font(.subheadline.weight(.medium))
                                         .foregroundStyle(.indigo)
                                         .underline()
-                                        .lineLimit(1)
                                     Text(Self.refDateFmt.string(from: ref.date))
                                         .font(.caption2).foregroundStyle(.secondary)
                                     Spacer()
@@ -2972,8 +2969,8 @@ struct SideRoleResolutionEditor: View {
                                             .foregroundStyle(.indigo)
                                             .clipShape(Capsule())
                                     }
-                                    Text(ref.title.isEmpty ? "（未填標題）" : ref.title)
-                                        .font(.subheadline.weight(.medium)).lineLimit(1)
+                                    MarqueeText(ref.title.isEmpty ? "（未填標題）" : ref.title)
+                                        .font(.subheadline.weight(.medium))
                                 }
                                 Text(Self.refDateFmt.string(from: ref.date))
                                     .font(.caption2).foregroundStyle(.secondary)
@@ -3184,10 +3181,9 @@ struct ResolutionReferencePicker: View {
                                         .foregroundStyle(.indigo)
                                         .clipShape(Capsule())
                                 }
-                                Text(ref.title.isEmpty ? "（未填標題）" : ref.title)
+                                MarqueeText(ref.title.isEmpty ? "（未填標題）" : ref.title)
                                     .font(.subheadline.weight(.medium))
                                     .foregroundStyle(.primary)
-                                    .lineLimit(1)
                             }
                             Text("\(Self.dateFmt.string(from: ref.date))\(ref.content.isEmpty ? "" : "｜\(ref.content)")")
                                 .font(.caption2).foregroundStyle(.secondary)
@@ -3306,7 +3302,7 @@ struct SideRoleInitiatorPicker: View {
                     .font(.system(size: isCurrent ? 18 : 12))
                     .foregroundStyle(isCurrent ? .indigo : .indigo.opacity(0.7))
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(trimmed.isEmpty ? "（未填姓名）" : trimmed)
+                    MarqueeText(trimmed.isEmpty ? "（未填姓名）" : trimmed)
                         .foregroundStyle(.primary)
                     if !sub.isEmpty {
                         Text(sub).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
@@ -3367,7 +3363,8 @@ struct SideRoleMemberDetailView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
-            .navigationTitle(member?.name.isEmpty == false ? member!.name : "成員")
+            // [v25.520] 姓名放不下改跑馬燈（同一個 view 沒有 principal 項目）
+            .marqueeNavigationTitle(member?.name.isEmpty == false ? member!.name : "成員")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
@@ -3425,7 +3422,7 @@ struct SideRoleMemberDetailView: View {
                         .foregroundStyle(.white)
                 }
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(member.name.isEmpty ? "（未填姓名）" : member.name)
+                    MarqueeText(member.name.isEmpty ? "（未填姓名）" : member.name)
                         .font(.headline.weight(.bold))
                         .foregroundStyle(.white)
                     Text(SideRoleFormat.displayName(role))
@@ -3557,8 +3554,8 @@ struct SideRoleMemberDetailView: View {
                                 .padding(.horizontal, 6).padding(.vertical, 2)
                                 .background(Color.indigo.opacity(0.12))
                                 .clipShape(Capsule())
-                            Text(mt.topic.isEmpty ? "（未填主題）" : mt.topic)
-                                .font(.subheadline).lineLimit(1)
+                            MarqueeText(mt.topic.isEmpty ? "（未填主題）" : mt.topic)
+                                .font(.subheadline)
                         }
                         if !mt.decisions.isEmpty {
                             Text(mt.decisions)
@@ -3796,7 +3793,7 @@ struct SideRoleJoinPicker: View {
                                         .foregroundStyle(.indigo)
                                 }
                                 VStack(alignment: .leading, spacing: 2) {
-                                    Text(SideRoleFormat.displayName(role))
+                                    MarqueeText(SideRoleFormat.displayName(role))
                                         .foregroundStyle(.primary)
                                     Text(SideRoleFormat.subtitle(role))
                                         .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
@@ -3823,7 +3820,7 @@ struct SideRoleJoinPicker: View {
                 Section("已經在名單裡") {
                     ForEach(joined) { role in
                         HStack {
-                            Text(SideRoleFormat.displayName(role))
+                            MarqueeText(SideRoleFormat.displayName(role))
                                 .font(.subheadline)
                                 .foregroundStyle(.secondary)
                             Spacer()
@@ -3946,7 +3943,7 @@ struct SideRoleAttendeePicker: View {
                     .font(.system(size: 12))
                     .foregroundStyle(.indigo.opacity(0.7))
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(trimmed.isEmpty ? "（未填姓名）" : trimmed)
+                    MarqueeText(trimmed.isEmpty ? "（未填姓名）" : trimmed)
                         .foregroundStyle(.primary)
                     if !sub.isEmpty {
                         Text(sub).font(.caption2).foregroundStyle(.secondary).lineLimit(1)

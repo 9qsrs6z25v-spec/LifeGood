@@ -701,9 +701,9 @@ struct FoodMapView: View {
             }
 
             VStack(alignment: .leading, spacing: 4) {
-                Text(agg.name)
+                // [v25.520] 餐廳名稱過長改跑馬燈（原本被切成「…」）
+                MarqueeText(agg.name)
                     .font(.subheadline.weight(.semibold))
-                    .lineLimit(1)
                 if !agg.address.isEmpty {
                     Text(agg.address)
                         .font(.caption2)
@@ -905,7 +905,8 @@ struct RestaurantDetailSheet: View {
                 .padding(.vertical)
             }
             .background(Color(.systemGroupedBackground))
-            .navigationTitle(aggregate.name)
+            // [v25.520] 餐廳名稱過長時導覽列標題改跑馬燈
+            .marqueeNavigationTitle(aggregate.name)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
@@ -927,11 +928,11 @@ struct RestaurantDetailSheet: View {
             // [v3] 餐廳名稱大字（.title3.bold 白色，提升視覺層次）
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(aggregate.name)
+                    // [v25.520] 過長改一行跑馬燈（原本兩行＋縮小，再長還是被切成「…」）。
+                    // 導覽列也寫了同一個名字，這裡不是唯一讀全名的地方，所以不保留折行
+                    MarqueeText(aggregate.name)
                         .font(.title3.weight(.bold))
                         .foregroundStyle(.white)
-                        .lineLimit(2)
-                        .minimumScaleFactor(0.7)
                     if !aggregate.address.isEmpty {
                         HStack(spacing: 4) {
                             Image(systemName: "mappin.circle.fill")
@@ -1159,11 +1160,10 @@ struct RestaurantDetailSheet: View {
                 Text("最常一起用餐")
                     .font(.caption2)
                     .foregroundStyle(.white.opacity(0.72))
-                Text(name)
+                // [v25.520] 人名過長改跑馬燈（原本縮小後還是被切成「…」）
+                MarqueeText(name)
                     .font(.system(size: 16, weight: .bold, design: .rounded))
                     .foregroundStyle(.white)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.7)
             }
 
             Spacer()

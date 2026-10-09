@@ -265,9 +265,9 @@ struct ResumeGiftSection: View {
 
             VStack(alignment: .leading, spacing: 3) {
                 if !e.title.isEmpty {
-                    Text(e.title)
+                    // [v25.520] 禮金標題過長改跑馬燈（原本被切成「…」）
+                    MarqueeText(e.title)
                         .font(.subheadline.weight(.medium))
-                        .lineLimit(1)
                 }
                 HStack(spacing: 5) {
                     // 日期改為粉紅 Capsule 膠囊徽章

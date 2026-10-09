@@ -47,7 +47,7 @@ struct WorkoutEditorView: View {
                         exerciseFields($e)
                     } header: {
                         HStack {
-                            Text(e.name.isEmpty ? "動作" : e.name)
+                            MarqueeText(e.name.isEmpty ? "動作" : e.name)
                             Spacer()
                             Button(role: .destructive) {
                                 exercises.removeAll { $0.id == e.id }

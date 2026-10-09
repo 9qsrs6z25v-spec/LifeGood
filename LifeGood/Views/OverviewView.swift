@@ -907,9 +907,9 @@ struct OverviewView: View {
 
             // 標題 + 彩色分類膠囊（對齊 incomeRow.category Capsule 規格）
             VStack(alignment: .leading, spacing: 4) {
-                Text(item.title)
+                // [v25.520] 交易名稱過長改跑馬燈（原本切成「…」）
+                MarqueeText(item.title)
                     .font(.subheadline.weight(.semibold))
-                    .lineLimit(1)
                 // [v4] 補入 overlay stroke 細邊框，對齊 ExpenseRow / incomeRow category Capsule 規格
                 Text(item.category)
                     .font(.system(size: 10, weight: .semibold))

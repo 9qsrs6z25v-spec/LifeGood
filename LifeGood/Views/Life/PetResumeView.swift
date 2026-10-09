@@ -232,9 +232,9 @@ struct PetResumeView: View {
                 }
 
                 VStack(alignment: .leading, spacing: 5) {
-                    Text(pet.petDisplayName)
+                    // [v25.520] 名字過長改跑馬燈（原本縮到 0.85 倍再切成「…」）
+                    MarqueeText(pet.petDisplayName)
                         .font(.body.weight(.semibold))
-                        .lineLimit(1).minimumScaleFactor(0.85)
 
                     HStack(spacing: 5) {
                         chip(pet.pet?.summaryLine ?? "未填寫資料", color: accent)

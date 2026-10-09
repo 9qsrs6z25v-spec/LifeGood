@@ -64,7 +64,8 @@ struct PerformanceBallotView: View {
                     emptyState
                 }
             }
-            .navigationTitle(isSelf ? "我的績效評分" : "\(raterName)的評分")
+            // [v25.520] 評分者姓名放不下改跑馬燈（同一個 view 沒有 principal 項目）
+            .marqueeNavigationTitle(isSelf ? "我的績效評分" : "\(raterName)的評分")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button("關閉") { dismiss() } }
@@ -137,7 +138,7 @@ struct PerformanceBallotView: View {
                         .font(.system(size: 17, weight: .semibold)).foregroundStyle(.orange)
                 }
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(raterName).font(.subheadline.weight(.bold))
+                    MarqueeText(raterName).font(.subheadline.weight(.bold))
                     HStack(spacing: 6) {
                         Text(raterGrade?.displayLabel ?? "未設職等")
                             .font(.system(size: 10, weight: .bold))
@@ -228,7 +229,7 @@ struct PerformanceBallotView: View {
                 .fill(LinearGradient(colors: [.orange, .orange.opacity(0.55)],
                                      startPoint: .top, endPoint: .bottom))
                 .frame(width: 4, height: 14)
-            Text(group.title).font(.subheadline.weight(.bold))
+            MarqueeText(group.title).font(.subheadline.weight(.bold))
             Spacer()
             Text("\(group.entries.count) 人")
                 .font(.system(size: 10, weight: .bold))
@@ -253,7 +254,7 @@ struct PerformanceBallotView: View {
             }
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 5) {
-                    Text(entry.name).font(.subheadline.weight(.semibold))
+                    MarqueeText(entry.name).font(.subheadline.weight(.semibold))
                     if isMe {
                         Text("自己")
                             .font(.system(size: 9, weight: .bold))
@@ -591,7 +592,7 @@ struct PerformanceSummaryView: View {
                     .fill(LinearGradient(colors: [.orange, .orange.opacity(0.35)],
                                          startPoint: .top, endPoint: .bottom))
                     .frame(width: 4, height: 16)
-                Text(section.label).font(.subheadline.weight(.bold))
+                MarqueeText(section.label).font(.subheadline.weight(.bold))
                 Text("\(section.scores.count) 人")
                     .font(.system(size: 10, weight: .bold))
                     .padding(.horizontal, 6).padding(.vertical, 2)
@@ -688,10 +689,9 @@ struct PerformanceSummaryView: View {
 
     private func shareVoteRow(_ v: PerformanceShareVote) -> some View {
         HStack(spacing: 8) {
-            Text(v.raterName)
+            MarqueeText(v.raterName)
                 .font(.caption.weight(.semibold))
                 .frame(width: 68, alignment: .leading)
-                .lineLimit(1)
             Text(v.raterGradeLabel)
                 .font(.system(size: 10, weight: .bold))
                 .padding(.horizontal, 6).padding(.vertical, 2)
@@ -767,7 +767,7 @@ struct PerformanceSummaryView: View {
                     }
                     VStack(alignment: .leading, spacing: 3) {
                         HStack(spacing: 5) {
-                            Text(score.name).font(.subheadline.weight(.bold))
+                            MarqueeText(score.name).font(.subheadline.weight(.bold))
                             if sub == nil {
                                 Text("已轉出")
                                     .font(.system(size: 9, weight: .bold))
@@ -916,10 +916,9 @@ struct PerformanceSummaryView: View {
 
     private func sourceRow(_ src: PerformanceScoreSource) -> some View {
         HStack(spacing: 8) {
-            Text(src.raterName)
+            MarqueeText(src.raterName)
                 .font(.caption.weight(.semibold))
                 .frame(width: 68, alignment: .leading)
-                .lineLimit(1)
             Text("第 \(src.rank)/\(src.groupSize) 名")
                 .font(.system(size: 10, weight: .bold))
                 .padding(.horizontal, 6).padding(.vertical, 2)
@@ -1058,7 +1057,7 @@ struct PerformanceExportPicker: View {
                         }
                     } header: {
                         HStack {
-                            Text(section.label)
+                            MarqueeText(section.label)
                             Spacer()
                             Button(allSelected(section) ? "取消本職等" : "選取本職等") {
                                 toggleSection(section)
@@ -1092,7 +1091,7 @@ struct PerformanceExportPicker: View {
                     .font(.system(size: 11, weight: .black, design: .rounded))
                     .foregroundStyle(.secondary)
                     .frame(width: 18)
-                Text(score.name.isEmpty ? "未命名" : score.name)
+                MarqueeText(score.name.isEmpty ? "未命名" : score.name)
                     .foregroundStyle(.primary)
                 Spacer()
                 Text(PerformanceExporter.num(score.finalScore))

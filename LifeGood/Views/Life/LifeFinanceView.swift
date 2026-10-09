@@ -650,10 +650,10 @@ struct LifeFinanceView: View {
             }
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
-                    Text(card.cardName ?? card.title)
+                    // [v25.520] 卡名放不下改跑馬燈（原本 lineLimit(1) 切成「…」）
+                    MarqueeText(card.cardName ?? card.title)
                         .font(.caption.weight(.medium))
                         .foregroundStyle(disabled ? .secondary : .primary)
-                        .lineLimit(1)
                     if disabled {
                         Text("已停用")
                             .font(.system(size: 9, weight: .semibold))
@@ -703,7 +703,7 @@ struct LifeFinanceView: View {
                     .foregroundStyle(accent)
             }
             VStack(alignment: .leading, spacing: 4) {
-                Text(item.title).font(.subheadline.weight(.semibold)).lineLimit(1)
+                MarqueeText(item.title).font(.subheadline.weight(.semibold))
                 subtitle(for: item)
             }
             Spacer()
@@ -1109,7 +1109,8 @@ struct FinanceCardView: View {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 4) {
                     if let bn = bankName, !bn.isEmpty {
-                        Text(bn)
+                        // [v25.520] 銀行名放不下改跑馬燈（原本折成多行，把卡面撐歪）
+                        MarqueeText(bn)
                             .font(.subheadline.weight(.semibold))
                             .foregroundStyle(.white.opacity(0.92))
                     }
@@ -1160,10 +1161,9 @@ struct FinanceCardView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("CARD HOLDER").font(.system(size: 9)).tracking(1.5)
                         .foregroundStyle(.white.opacity(0.7))
-                    Text(cardName.uppercased())
+                    MarqueeText(cardName.uppercased())
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(.white)
-                        .lineLimit(1)
                 }
                 Spacer()
                 if !cardRevealCode.isEmpty {
@@ -1858,10 +1858,9 @@ struct FinanceCardView: View {
                             }
 
                             VStack(alignment: .leading, spacing: 3) {
-                                Text(row.expense.title)
+                                MarqueeText(row.expense.title)
                                     .font(.subheadline.weight(.semibold))
                                     .foregroundStyle(.primary)
-                                    .lineLimit(1)
                                 // 日期 Capsule 徽章
                                 HStack(spacing: 4) {
                                     Text(fmtDate(row.date))
@@ -2053,10 +2052,9 @@ struct FinanceCardView: View {
                             }
                             VStack(alignment: .leading, spacing: 4) {
                                 HStack(spacing: 5) {
-                                    Text(card.title)
+                                    MarqueeText(card.title)
                                         .font(.subheadline.weight(.semibold))
                                         .foregroundStyle(disabled ? .secondary : .primary)
-                                        .lineLimit(1)
                                     if disabled {
                                         Text("已停用")
                                             .font(.system(size: 9, weight: .semibold))
@@ -2556,7 +2554,8 @@ struct DepositEditorSheet: View {
                     }
                 }
             }
-            .navigationTitle(editing != nil ? "編輯" : "新增存款 / 提款 / 轉帳")
+            // [v25.520] 字面標題超過 9 個中文字寬，放不下改跑馬燈（同一個 view 沒有 principal 項目）
+            .marqueeNavigationTitle(editing != nil ? "編輯" : "新增存款 / 提款 / 轉帳")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button("取消") { dismiss() } }

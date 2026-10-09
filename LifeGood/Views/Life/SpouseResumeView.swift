@@ -198,19 +198,16 @@ struct SpouseResumeView: View {
                     Text("配偶")
                         .font(.caption)
                         .foregroundStyle(.white.opacity(0.75))
-                    Text(s.chineseName.isEmpty ? "未填寫姓名" : s.chineseName)
+                    // [v25.520] 姓名過長改跑馬燈（原本 minimumScaleFactor 縮字）
+                    MarqueeText(s.chineseName.isEmpty ? "未填寫姓名" : s.chineseName)
                         .heroBigValueFont()
                         .foregroundStyle(.white)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.65)
                         .contentTransition(.numericText())
                     if !s.englishName.isEmpty {
-                        // [v25.74] 補齊 lineLimit/minimumScaleFactor，對齊上方 chineseName 與 ResumeView 姊妹規格
-                        Text(s.englishName)
+                        // [v25.520] 英文名過長改跑馬燈（原本 minimumScaleFactor 縮字）
+                        MarqueeText(s.englishName)
                             .font(.caption.weight(.medium))
                             .foregroundStyle(.white.opacity(0.68))
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.75)
                             .padding(.top, 1)
                     }
                 }
@@ -495,11 +492,11 @@ struct SpouseResumeView: View {
                     .foregroundStyle(accent)
             }
             VStack(alignment: .leading, spacing: 3) {
-                Text(ag.title.isEmpty ? "（未填內容）" : ag.title)
+                // [v25.520] 協定標題過長改跑馬燈（原本折兩行）
+                MarqueeText(ag.title.isEmpty ? "（未填內容）" : ag.title)
                     .font(.subheadline.weight(.medium))
                     .strikethrough(isArchived, color: .secondary)
                     .foregroundStyle(isArchived ? .secondary : .primary)
-                    .lineLimit(2)
                 HStack(spacing: 5) {
                     Text(ag.category.title)
                         .font(.system(size: 10, weight: .semibold))
@@ -617,9 +614,9 @@ struct SpouseResumeView: View {
 
             // 標題 + 日期膠囊
             VStack(alignment: .leading, spacing: 5) {
-                Text(m.title)
+                // [v25.520] 里程碑標題過長改跑馬燈（原本切成「…」）
+                MarqueeText(m.title)
                     .font(.subheadline.weight(.semibold))
-                    .lineLimit(1)
                 Text(Self.dateFormatter.string(from: m.date))
                     .font(.system(size: 10, weight: .medium))
                     .foregroundStyle(.secondary)
@@ -731,9 +728,9 @@ struct SpouseResumeView: View {
             }
 
             VStack(alignment: .leading, spacing: 4) {
-                Text(e.title.isEmpty ? (e.variableCategory?.rawValue ?? "未分類") : e.title)
+                // [v25.520] 消費名稱過長改跑馬燈（原本切成「…」）
+                MarqueeText(e.title.isEmpty ? (e.variableCategory?.rawValue ?? "未分類") : e.title)
                     .font(.subheadline.weight(.semibold))
-                    .lineLimit(1)
                 HStack(spacing: 5) {
                     if let cat = e.variableCategory {
                         Text(cat.rawValue)

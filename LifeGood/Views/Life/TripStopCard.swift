@@ -556,7 +556,8 @@ struct TripStopCardView: View {
                         Circle().fill(dayColor.opacity(0.35))
                             .frame(width: 6, height: 6).padding(.top, 6)
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(sub.displayName)
+                            // [v25.520] 子地點名過長改一行跑馬燈（原本會折成好幾行）
+                            MarqueeText(sub.displayName)
                                 .font(.subheadline.weight(.medium))
                             if !sub.address.trimmingCharacters(in: .whitespaces).isEmpty {
                                 Text(sub.address).font(.caption2).foregroundStyle(.secondary)
@@ -847,12 +848,11 @@ struct StopExpenseRow: View {
             leading(accent: accent)
 
             VStack(alignment: .leading, spacing: 2) {
-                Text(label.primary)
+                // [v25.520] 主標過長改一行跑馬燈（原本氣泡 1 行、景點卡 2 行，再長就切成「…」）。
+                // VoiceOver 由整列的合成 label 唸（外層 children: .ignore）。
+                MarqueeText(label.primary)
                     .font(label.hasOwnText ? .subheadline.weight(.medium) : .subheadline)
                     .foregroundStyle(label.hasOwnText ? Color.primary : Color.secondary)
-                    .lineLimit(compact ? 1 : 2)
-                    .truncationMode(.tail)
-                    .fixedSize(horizontal: false, vertical: true)
                 if let tail {
                     // 分類名刻意不上色：11pt 的社交金／日用品綠在白底對比不足
                     Text(tail)
@@ -1092,9 +1092,9 @@ struct TripStopCoverSheet: View {
                         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                         .accessibilityHidden(true)
                     VStack(alignment: .leading, spacing: 4) {
-                        Text(stop.displayName)
+                        // [v25.520] 站名過長改跑馬燈（原本 lineLimit(2) 切成「…」）
+                        MarqueeText(stop.displayName)
                             .font(.subheadline.weight(.semibold))
-                            .lineLimit(2)
                         Text(Self.currentText(stop))
                             .font(.caption)
                             .foregroundStyle(.secondary)

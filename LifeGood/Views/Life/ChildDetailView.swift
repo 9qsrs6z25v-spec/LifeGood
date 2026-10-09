@@ -208,7 +208,8 @@ struct ChildDetailView: View {
                 .padding(.vertical)
             }
             .background(Color(.systemGroupedBackground))
-            .navigationTitle("\(displayName) 履歷")
+            // [v25.520] 名字長時導覽列標題改跑馬燈
+            .marqueeNavigationTitle("\(displayName) 履歷")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
@@ -309,12 +310,10 @@ struct ChildDetailView: View {
                             .overlay(Capsule().stroke(.white.opacity(0.25), lineWidth: 0.6))
                     }
                 }
-                // 姓名
-                Text(displayName)
+                // 姓名（[v25.520] 放不下改跑馬燈，原本縮字後切成「…」）
+                MarqueeText(displayName)
                     .font(.title2.bold())
                     .foregroundStyle(.white)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.7)
                 // 生日（calendar 圖示 + 日期文字 → Capsule 徽章，對齊角色/年齡膠囊描邊節奏）
                 if let bd = child.birthday {
                     HStack(spacing: 4) {
@@ -618,7 +617,8 @@ struct ChildDetailView: View {
                 case .milk:
                     HStack(spacing: 6) {
                         if let brand = rec.milkBrand, !brand.isEmpty {
-                            Text(brand).font(.subheadline.weight(.medium))
+                            // [v25.520] 品牌名過長改一行跑馬燈（原本會折成多行）
+                            MarqueeText(brand).font(.subheadline.weight(.medium))
                         }
                         if let ml = rec.mlAmount, ml > 0 {
                             // ml 數值改為彩色膠囊標籤
@@ -633,7 +633,8 @@ struct ChildDetailView: View {
                 case .food:
                     HStack(spacing: 6) {
                         if let name = rec.foodName, !name.isEmpty {
-                            Text(name).font(.subheadline.weight(.medium))
+                            // [v25.520] 食物名過長改一行跑馬燈（原本會折成多行）
+                            MarqueeText(name).font(.subheadline.weight(.medium))
                         }
                         if let ml = rec.mlAmount, ml > 0 {
                             Text("\(Int(ml)) ml")
@@ -806,9 +807,9 @@ struct ChildDetailView: View {
                     .foregroundStyle(.orange)
             }
             VStack(alignment: .leading, spacing: 3) {
-                Text(e.title.isEmpty ? (e.variableCategory?.rawValue ?? "未分類") : e.title)
+                // [v25.520] 消費名稱過長改跑馬燈（原本切成「…」）
+                MarqueeText(e.title.isEmpty ? (e.variableCategory?.rawValue ?? "未分類") : e.title)
                     .font(.subheadline.weight(.medium))
-                    .lineLimit(1)
                 HStack(spacing: 6) {
                     Text(Self.shortDateFormatter.string(from: e.date))
                         .font(.system(size: 10, weight: .medium))
@@ -967,7 +968,8 @@ struct ChildDetailView: View {
                 }
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 6) {
-                        Text(primaryText(rec)).font(.subheadline.weight(.medium)).foregroundStyle(.primary)
+                        // [v25.520] 紀錄標題過長改一行跑馬燈（原本會折成多行）
+                        MarqueeText(primaryText(rec)).font(.subheadline.weight(.medium)).foregroundStyle(.primary)
                         if rec.type == .allergy, let sev = rec.severity {
                             // Capsule 標籤（對齊 ChildrenResumeView 規格，取代 RoundedRectangle(cornerRadius:3)）
                             Text(sev.rawValue).font(.caption2.weight(.medium))
@@ -1742,7 +1744,8 @@ struct ChildRecordEditorSheet: View {
                     .font(.caption)
             }
             VStack(alignment: .leading, spacing: 1) {
-                Text(item.title).font(.subheadline.weight(.medium)).lineLimit(1)
+                // [v25.520] 院所名稱過長改跑馬燈（原本切成「…」）
+                MarqueeText(item.title).font(.subheadline.weight(.medium))
                 if !item.subtitle.isEmpty {
                     Text(item.subtitle).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
                 }

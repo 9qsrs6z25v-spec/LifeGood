@@ -813,12 +813,10 @@ struct AddVehicleView: View {
                             .overlay(Capsule().stroke(.white.opacity(0.25), lineWidth: 0.5))
                     }
                 }
-                // 車名
-                Text(name.isEmpty ? "車輛名稱" : name)
+                // 車名（[v25.520] 過長改跑馬燈，原本 minimumScaleFactor 縮字）
+                MarqueeText(name.isEmpty ? "車輛名稱" : name)
                     .font(.system(size: 22, weight: .bold, design: .rounded))
                     .foregroundStyle(name.isEmpty ? .white.opacity(0.45) : .white)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.72)
                 // 購入價大字
                 HStack(alignment: .firstTextBaseline, spacing: 5) {
                     Text(purchaseWan > 0 ? purchase.ntdWanString : "NT$ —")

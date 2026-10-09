@@ -336,8 +336,9 @@ struct MedicalMapView: View {
         HStack(spacing: 12) {
             rowIcon("cross.case", color: accent)
             VStack(alignment: .leading, spacing: 2) {
-                Text(place.name.isEmpty ? "就醫地點" : place.name)
-                    .font(.subheadline.weight(.medium)).foregroundStyle(.primary).lineLimit(1)
+                // [v25.520] 名稱過長改跑馬燈（原本 lineLimit(1) 切成「…」）
+                MarqueeText(place.name.isEmpty ? "就醫地點" : place.name)
+                    .font(.subheadline.weight(.medium)).foregroundStyle(.primary)
                 Text("就診 \(place.visitCount) 次").font(.caption2).foregroundStyle(.secondary)
             }
             Spacer()
@@ -398,7 +399,8 @@ struct MedicalMapView: View {
                             HStack(spacing: 12) {
                                 rowIcon("allergens", color: .orange)
                                 VStack(alignment: .leading, spacing: 2) {
-                                    Text(a.name.isEmpty ? "未命名" : a.name).font(.subheadline.weight(.medium))
+                                    // [v25.520] 名稱過長改一行跑馬燈（原本會折成好幾行）
+                                    MarqueeText(a.name.isEmpty ? "未命名" : a.name).font(.subheadline.weight(.medium))
                                     if !a.reaction.isEmpty {
                                         Text(a.reaction).font(.caption).foregroundStyle(.secondary)
                                     }
@@ -438,7 +440,8 @@ struct MedicalMapView: View {
                             HStack(spacing: 12) {
                                 rowIcon("pills.fill", color: .blue)
                                 VStack(alignment: .leading, spacing: 2) {
-                                    Text(m.name.isEmpty ? "未命名藥物" : m.name).font(.subheadline.weight(.medium))
+                                    // [v25.520] 名稱過長改一行跑馬燈（原本會折成好幾行）
+                                    MarqueeText(m.name.isEmpty ? "未命名藥物" : m.name).font(.subheadline.weight(.medium))
                                     if !m.dosage.isEmpty {
                                         Text(m.dosage).font(.caption).foregroundStyle(.secondary)
                                     }
@@ -484,7 +487,8 @@ struct MedicalMapView: View {
                                 HStack(alignment: .top, spacing: 12) {
                                     rowIcon("stethoscope", color: .purple)
                                     VStack(alignment: .leading, spacing: 2) {
-                                        Text(c.title.isEmpty ? "健檢" : c.title).font(.subheadline.weight(.medium))
+                                        // [v25.520] 名稱過長改一行跑馬燈（原本會折成好幾行）
+                                        MarqueeText(c.title.isEmpty ? "健檢" : c.title).font(.subheadline.weight(.medium))
                                         HStack(spacing: 6) {
                                             Text(Self.dateFmt.string(from: c.date))
                                             if !c.place.isEmpty { Text("· \(c.place)") }
@@ -522,7 +526,8 @@ struct MedicalMapView: View {
                             HStack(alignment: .top, spacing: 12) {
                                 rowIcon("cross.fill", color: accent)
                                 VStack(alignment: .leading, spacing: 2) {
-                                    Text(ms.title.isEmpty ? "健康事件" : ms.title).font(.subheadline.weight(.medium))
+                                    // [v25.520] 名稱過長改一行跑馬燈（原本會折成好幾行）
+                                    MarqueeText(ms.title.isEmpty ? "健康事件" : ms.title).font(.subheadline.weight(.medium))
                                     Text(Self.dateFmt.string(from: ms.date)).font(.caption).foregroundStyle(.secondary)
                                     if !ms.note.isEmpty {
                                         Text(ms.note).font(.caption).foregroundStyle(.secondary).lineLimit(2)
@@ -556,7 +561,8 @@ struct MedicalMapView: View {
                             HStack(spacing: 12) {
                                 rowIcon("checkmark.shield.fill", color: accent)
                                 VStack(alignment: .leading, spacing: 2) {
-                                    Text(insuranceTitle(ms)).font(.subheadline.weight(.medium))
+                                    // [v25.520] 名稱過長改一行跑馬燈（原本會折成好幾行）
+                                    MarqueeText(insuranceTitle(ms)).font(.subheadline.weight(.medium))
                                     if let company = ms.insuranceCompany, !company.isEmpty {
                                         Text(company).font(.caption).foregroundStyle(.secondary)
                                     }
@@ -753,7 +759,8 @@ struct MedicalPlaceDetailSheet: View {
                 .padding(.vertical, 12)
             }
             .background(Color(.systemGroupedBackground))
-            .navigationTitle(place.name.isEmpty ? "就醫地點" : place.name)
+            // [v25.520] 地點名（使用者記帳時填的名稱）過長改跑馬燈
+            .marqueeNavigationTitle(place.name.isEmpty ? "就醫地點" : place.name)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .topBarLeading) { Button("關閉") { dismiss() } } }
             .onAppear {

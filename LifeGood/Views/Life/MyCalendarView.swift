@@ -628,9 +628,9 @@ struct MyCalendarView: View {
             VStack(alignment: .leading, spacing: 4) {
                 // 標題 + 類型膠囊
                 HStack(spacing: 6) {
-                    Text(ev.title)
+                    // [v25.520] 事件標題過長改跑馬燈（原本被切成「…」）
+                    MarqueeText(ev.title)
                         .font(.subheadline.weight(.medium))
-                        .lineLimit(1)
                     Text(ev.type.name)
                         .font(.system(size: 10, weight: .semibold))
                         .padding(.horizontal, 6).padding(.vertical, 2)
@@ -851,9 +851,9 @@ struct MyCalendarView: View {
                                 .foregroundStyle(msColor)
                         }
                         VStack(alignment: .leading, spacing: 3) {
-                            Text(ms.title)
+                            // [v25.520] 里程碑標題過長改跑馬燈（原本被切成「…」）
+                            MarqueeText(ms.title)
                                 .font(.subheadline.weight(.medium))
-                                .lineLimit(1)
                             HStack(spacing: 5) {
                                 HStack(spacing: 3) {
                                     Image(systemName: "calendar")
@@ -1429,7 +1429,9 @@ struct MyCalendarView: View {
             }
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
-                    Text(h.title).font(.subheadline.weight(.medium)).foregroundStyle(.primary).lineLimit(1)
+                    // [v25.520] 標題過長改跑馬燈（原本被切成「…」）。分頁匯出成圖片時
+                    // 只畫一格靜態的：停在開頭、尾端放不下的被切掉，跟原本的「…」差不多
+                    MarqueeText(h.title).font(.subheadline.weight(.medium)).foregroundStyle(.primary)
                     Text(h.typeLabel).font(.caption2.weight(.bold))
                         .padding(.horizontal, 6).padding(.vertical, 1.5)
                         .background(h.color.opacity(0.14)).foregroundStyle(h.color).clipShape(Capsule())
@@ -1469,7 +1471,8 @@ struct MyCalendarView: View {
             HStack(spacing: 10) {
                 Image(systemName: icon).font(.system(size: 12)).foregroundStyle(accent).frame(width: 22)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(lead).font(.subheadline.weight(.medium)).lineLimit(1)
+                    // [v25.520] 會議主題過長改跑馬燈（原本被切成「…」）
+                    MarqueeText(lead).font(.subheadline.weight(.medium))
                     if !sub.isEmpty { Text(sub).font(.caption2).foregroundStyle(.secondary).lineLimit(1) }
                 }
                 Spacer(minLength: 4)
@@ -1496,9 +1499,10 @@ struct MyCalendarView: View {
             Button { onOpen?() } label: {
                 HStack(spacing: 10) {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(text).font(.subheadline.weight(.medium))
+                        // [v25.520] 報告／任務／會議條目標題過長改一行跑馬燈（原本兩行後被切成「…」）
+                        MarqueeText(text).font(.subheadline.weight(.medium))
                             .strikethrough(done, color: .secondary)
-                            .foregroundStyle(done ? .secondary : .primary).lineLimit(2)
+                            .foregroundStyle(done ? .secondary : .primary)
                         if let detail { Text(detail).font(.caption2).foregroundStyle(.secondary).lineLimit(1) }
                         if done { CompletionStamp(completedAt: completedAt, due: due) }
                     }
@@ -2131,7 +2135,8 @@ struct PersonalEventEditor: View {
                     .font(.caption)
             }
             VStack(alignment: .leading, spacing: 1) {
-                Text(item.title).font(.subheadline.weight(.medium)).lineLimit(1)
+                // [v25.520] 地點名稱過長改跑馬燈（原本被切成「…」）
+                MarqueeText(item.title).font(.subheadline.weight(.medium))
                 if !item.subtitle.isEmpty {
                     Text(item.subtitle).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
                 }

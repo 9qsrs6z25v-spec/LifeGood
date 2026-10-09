@@ -564,7 +564,8 @@ struct OrganizationView: View {
                 }
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 6) {
-                        Text(dept.name.isEmpty ? "未命名部門" : dept.name)
+                        // [v25.520] 部門名稱過長改一行跑馬燈（原本會折成多行）
+                        MarqueeText(dept.name.isEmpty ? "未命名部門" : dept.name)
                             .font(.subheadline.weight(.semibold))
                             .foregroundStyle(.primary)
                         if !dept.code.isEmpty {
@@ -702,9 +703,10 @@ struct OrganizationView: View {
                         .foregroundStyle(.secondary)
                 }
             }
-            Text(dept.name.isEmpty ? "未命名部門" : dept.name)
+            // [v25.520] 部門名稱放不下改跑馬燈（原本切成「…」）。
+            // PDF 匯出（ImageRenderer）只畫一格靜態畫面，那裡照舊是切成「…」的一行。
+            MarqueeText(dept.name.isEmpty ? "未命名部門" : dept.name)
                 .font(.subheadline.weight(.semibold))
-                .lineLimit(1)
             if !dept.function.isEmpty {
                 Text(dept.function)
                     .font(.caption2)
@@ -802,7 +804,8 @@ struct DepartmentDetailView: View {
                 .padding(.vertical)
             }
             .background(Color(.systemGroupedBackground))
-            .navigationTitle(dept.name.isEmpty ? "部門" : dept.name)
+            // [v25.520] 部門名稱放不下改跑馬燈
+            .marqueeNavigationTitle(dept.name.isEmpty ? "部門" : dept.name)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button("關閉") { dismiss() } }
@@ -893,7 +896,8 @@ struct DepartmentDetailView: View {
                             .foregroundStyle(.white)
                     }
                     VStack(alignment: .leading, spacing: 1) {
-                        Text(myDisplayName)
+                        // [v25.520] 姓名過長改一行跑馬燈（原本會折成多行）
+                        MarqueeText(myDisplayName)
                             .font(.subheadline.weight(.medium))
                         Text("依我的履歷里程碑（管理職）自動帶入")
                             .font(.caption2).foregroundStyle(.secondary)
@@ -917,7 +921,8 @@ struct DepartmentDetailView: View {
                         HStack(spacing: 8) {
                             personAvatar(m)
                             VStack(alignment: .leading, spacing: 1) {
-                                Text(m.name.isEmpty ? "未命名" : m.name)
+                                // [v25.520] 姓名過長改一行跑馬燈（原本會折成多行）
+                                MarqueeText(m.name.isEmpty ? "未命名" : m.name)
                                     .font(.subheadline.weight(.medium))
                                     .foregroundStyle(.primary)
                                 let title = lifeStore.gradeTitles.first { $0.id == m.gradeTitleId }?.title ?? m.jobTitle
@@ -970,7 +975,8 @@ struct DepartmentDetailView: View {
                             .clipShape(Capsule())
                             .overlay(Capsule().stroke(Color.indigo.opacity(0.22), lineWidth: 0.6))
                     }
-                    Text(dept.name.isEmpty ? "未命名部門" : dept.name)
+                    // [v25.520] 部門名稱放不下改一行跑馬燈（原本會折成多行；導覽列也有同一個名字）
+                    MarqueeText(dept.name.isEmpty ? "未命名部門" : dept.name)
                         .font(.title3.bold())
                     Text("\(people.count) 人")
                         .font(.caption2)
@@ -1341,10 +1347,10 @@ struct DepartmentDetailView: View {
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(.orange)
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(eq.name.isEmpty ? "未命名設備" : eq.name)
+                    // [v25.520] 設備名稱過長改跑馬燈（原本切成「…」）
+                    MarqueeText(eq.name.isEmpty ? "未命名設備" : eq.name)
                         .font(.system(size: 12, weight: .medium))
                         .foregroundStyle(.primary)
-                        .lineLimit(1)
                     Text(downstreamMeta(eq))
                         .font(.system(size: 9))
                         .foregroundStyle(.secondary)
@@ -1386,9 +1392,9 @@ struct DepartmentDetailView: View {
                     .font(.system(size: 14, weight: .semibold)).foregroundStyle(.teal)
             }
             VStack(alignment: .leading, spacing: 3) {
-                Text(eq.name.isEmpty ? "未命名設備" : eq.name)
+                // [v25.520] 設備名稱過長改跑馬燈（原本縮字後切成「…」）
+                MarqueeText(eq.name.isEmpty ? "未命名設備" : eq.name)
                     .font(.subheadline.weight(.medium)).foregroundStyle(.primary)
-                    .lineLimit(1).minimumScaleFactor(0.8)
                 // [v25.296] 膠囊改用自動換行容器：系統別／負責人名稱字多時
                 // 換到下一行，不再擠在同一行互相壓縮變形（篩選點擊行為不變）
                 ChipFlowLayout(spacing: 6) {
@@ -1557,7 +1563,8 @@ struct DepartmentDetailView: View {
             personAvatar(p)
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
-                    Text(p.name.isEmpty ? "未命名" : p.name)
+                    // [v25.520] 姓名過長改一行跑馬燈（原本會折成多行）
+                    MarqueeText(p.name.isEmpty ? "未命名" : p.name)
                         .font(.subheadline.weight(.semibold))
                     if p.isInactive {
                         // [v2] 離職徽章 RoundedRectangle → Capsule + stroke
@@ -1681,7 +1688,8 @@ struct DeptManagerPicker: View {
                             .font(.system(size: 18))
                             .foregroundStyle(isOn ? .orange : .secondary)
                         VStack(alignment: .leading, spacing: 1) {
-                            Text(p.name.isEmpty ? "未命名" : p.name)
+                            // [v25.520] 姓名過長改一行跑馬燈（原本會折成多行）
+                            MarqueeText(p.name.isEmpty ? "未命名" : p.name)
                                 .foregroundStyle(.primary)
                             let title = lifeStore.gradeTitles.first { $0.id == p.gradeTitleId }?.title ?? p.jobTitle
                             let deptName = p.departmentId.flatMap { did in
@@ -2252,7 +2260,8 @@ struct OrgPersonDetailView: View {
                 .padding(.vertical)
             }
             .background(Color(.systemGroupedBackground))
-            .navigationTitle(person.name.isEmpty ? "人員" : person.name)
+            // [v25.520] 姓名放不下改跑馬燈
+            .marqueeNavigationTitle(person.name.isEmpty ? "人員" : person.name)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button("關閉") { dismiss() } }
@@ -2324,8 +2333,9 @@ struct OrgPersonDetailView: View {
                     HStack(spacing: 8) {
                         Image(systemName: "doc.text.fill")
                             .font(.system(size: 11)).foregroundStyle(.purple)
-                        Text(w.title.isEmpty ? "（未命名項目）" : w.title)
-                            .font(.subheadline).lineLimit(2)
+                        // [v25.520] 項目名稱過長改一行跑馬燈（原本折兩行後切成「…」）
+                        MarqueeText(w.title.isEmpty ? "（未命名項目）" : w.title)
+                            .font(.subheadline)
                         Spacer()
                         Text(Self.workDateFmt.string(from: w.date))
                             .font(.caption2).foregroundStyle(.secondary)
@@ -2356,8 +2366,9 @@ struct OrgPersonDetailView: View {
                                         .background(Color.purple.opacity(0.12)).foregroundStyle(.purple)
                                         .clipShape(Capsule())
                                 }
-                                Text(r.topic.isEmpty ? "未命名報告" : r.topic)
-                                    .font(.subheadline).lineLimit(1)
+                                // [v25.520] 報告主題過長改跑馬燈（原本切成「…」）
+                                MarqueeText(r.topic.isEmpty ? "未命名報告" : r.topic)
+                                    .font(.subheadline)
                                 Spacer()
                                 Text(Self.workDateFmt.string(from: r.date))
                                     .font(.caption2).foregroundStyle(.secondary)
@@ -2457,7 +2468,8 @@ struct OrgPersonDetailView: View {
 
                                 VStack(alignment: .leading, spacing: 2) {
                                     HStack(spacing: 5) {
-                                        Text(other.name).font(.subheadline.weight(.medium))
+                                        // [v25.520] 姓名過長改一行跑馬燈（原本會折成多行）
+                                        MarqueeText(other.name).font(.subheadline.weight(.medium))
                                         Text(rel.type.rawValue)
                                             .font(.caption2.weight(.semibold))
                                             .padding(.horizontal, 6).padding(.vertical, 2)
@@ -2564,7 +2576,8 @@ struct OrgPersonDetailView: View {
 
                     VStack(alignment: .leading, spacing: 4) {
                         HStack(spacing: 6) {
-                            Text(person.name.isEmpty ? "未命名" : person.name)
+                            // [v25.520] 姓名放不下改一行跑馬燈（原本會折成多行；導覽列也有同一個名字）
+                            MarqueeText(person.name.isEmpty ? "未命名" : person.name)
                                 .font(.title3.bold())
                                 .foregroundStyle(.white)
                             if person.isInactive {
@@ -2658,7 +2671,8 @@ struct OrgPersonDetailView: View {
                                 .font(.system(size: 11, weight: .semibold))
                                 .foregroundStyle(.pink)
                         }
-                        Text(c.name.isEmpty ? "未命名" : c.name)
+                        // [v25.520] 姓名過長改一行跑馬燈（原本會折成多行）
+                        MarqueeText(c.name.isEmpty ? "未命名" : c.name)
                             .font(.subheadline.weight(.medium))
                         Spacer()
                         if let bd = c.birthday {
@@ -2972,10 +2986,10 @@ extension OrganizationView {
                     if let hit = currentHit {
                         Image(systemName: "arrow.turn.down.right")
                             .font(.system(size: 9, weight: .bold)).foregroundStyle(.brown)
-                        Text(hit.title)
+                        // [v25.520] 命中的決議標題過長改跑馬燈（原本切成「…」）
+                        MarqueeText(hit.title)
                             .font(.system(size: 11, weight: .semibold))
                             .foregroundStyle(.brown)
-                            .lineLimit(1)
                     } else {
                         Text("沒有符合的決議").font(.system(size: 11)).foregroundStyle(.secondary)
                     }
@@ -3053,7 +3067,8 @@ extension OrganizationView {
                                 Image(systemName: "person.crop.circle.fill")
                                     .font(.system(size: 16)).foregroundStyle(.indigo)
                                 VStack(alignment: .leading, spacing: 1) {
-                                    Text(p.name.isEmpty ? "未命名" : p.name)
+                                    // [v25.520] 姓名過長改一行跑馬燈（原本會折成多行）
+                                    MarqueeText(p.name.isEmpty ? "未命名" : p.name)
                                         .font(.subheadline.weight(.medium)).foregroundStyle(.primary)
                                     let dept = p.departmentId.flatMap { id in
                                         lifeStore.departments.first { $0.id == id }?.name
@@ -3093,8 +3108,9 @@ extension OrganizationView {
                         Image(systemName: icon)
                             .font(.system(size: 13)).foregroundStyle(color)
                         VStack(alignment: .leading, spacing: 1) {
-                            Text(row.title)
-                                .font(.subheadline).foregroundStyle(.primary).lineLimit(2)
+                            // [v25.520] 報告主題／項目名稱過長改一行跑馬燈（原本折兩行後切成「…」）
+                            MarqueeText(row.title)
+                                .font(.subheadline).foregroundStyle(.primary)
                             Text(row.owner).font(.caption2).foregroundStyle(.secondary)
                         }
                         Spacer()
@@ -3265,7 +3281,8 @@ struct OrgPersonDuplicateReview: View {
             .tint(.green)
         } header: {
             HStack(spacing: 6) {
-                Text(group.name.isEmpty ? "未命名" : group.name)
+                // [v25.520] 姓名過長改一行跑馬燈（原本會折成多行）
+                MarqueeText(group.name.isEmpty ? "未命名" : group.name)
                 Text(deptName(group.departmentId))
                     .font(.caption2).foregroundStyle(.secondary)
                 Spacer()

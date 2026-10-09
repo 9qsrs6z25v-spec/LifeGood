@@ -51,9 +51,9 @@ struct TripShareBar: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
             HStack(spacing: 6) {
-                Text(label)
+                // [v25.520] 景點名、站名會很長：放不下改跑馬燈（原本被切成「…」）
+                MarqueeText(label)
                     .font(.system(size: 12, weight: .semibold))
-                    .lineLimit(1)
                 if let sub {
                     Text(sub)
                         .font(.system(size: 9))
@@ -567,10 +567,10 @@ struct TripExpenseSheet: View {
 
         return HStack(spacing: 10) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(label.primary)
+                // [v25.520] 花費名稱過長改跑馬燈（原本被切成「…」）
+                MarqueeText(label.primary)
                     .font(.subheadline.weight(.medium))
                     .foregroundStyle(label.hasOwnText ? Color.primary : Color.secondary)
-                    .lineLimit(1)
                 HStack(spacing: 6) {
                     Text(TripDayMath.shortDay.string(from: e.date))
                         .font(.caption2).foregroundStyle(.secondary)

@@ -469,7 +469,9 @@ struct SubordinateOverviewView: View {
             itemsPerPage: perPage,
             header: header,
             items: items,
-            decorate: { AnyView($0.environmentObject(lifeStore)) }
+            // [v25.520] 出圖模式：ItemRow 的標題改回完整折行（靜態圖裡跑馬燈捲不動），
+            // 膠囊列也跟整張匯出（exportImage）一樣改換行，不會被裁掉
+            decorate: { AnyView($0.environmentObject(lifeStore).environment(\.itemRowChipsWrap, true)) }
         )
         guard !urls.isEmpty else { return }
         sharePayload = OverviewSharePayload(items: urls)
@@ -1153,9 +1155,8 @@ struct SubordinateOverviewView: View {
             }
 
             VStack(alignment: .leading, spacing: 4) {
-                Text(meeting.topic.isEmpty ? "未命名會議" : meeting.topic)
+                MarqueeText(meeting.topic.isEmpty ? "未命名會議" : meeting.topic)
                     .font(.subheadline.weight(.semibold))
-                    .lineLimit(1)
                 // [v25.459] 膠囊改走共用的 ItemChipBar（橫向捲動、單行、左右隱沒漸層）。
                 // 這一列刻意沒有整列換成 ItemRow：它底下掛著一串可以逐項打勾的議程項目，
                 // 而 ItemRow 的 disclosures 是「可展開的文字子項目」，表達不了那些打勾
@@ -1569,7 +1570,7 @@ struct BirthdayOverviewSheet: View {
                     .foregroundStyle(.white)
             }
             VStack(alignment: .leading, spacing: 2) {
-                Text(p.name)
+                MarqueeText(p.name)
                     .font(.subheadline.weight(.semibold))
                 if !p.roleLine.isEmpty {
                     Text(p.roleLine)

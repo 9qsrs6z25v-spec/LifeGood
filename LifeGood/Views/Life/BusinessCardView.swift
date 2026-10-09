@@ -710,7 +710,7 @@ struct BusinessCardView: View {
                     )
                 )
                 .frame(width: 4, height: 14) // v2：3pt → 4pt 對齊全 App 分組標題規格
-            Text(company)
+            MarqueeText(company)
                 .font(.subheadline.weight(.bold)) // v2：footnote.semibold → subheadline.bold
                 .foregroundStyle(.primary.opacity(0.75))
             Spacer(minLength: 6)
@@ -1204,6 +1204,7 @@ struct BusinessCardView: View {
     // card.name 是使用者掃描/自填、長度不可控的欄位，同檔案 BusinessCardDetailView.heroCard（下方
     // 約 1500 行）顯示同一欄位早已用 .lineLimit(2) + .minimumScaleFactor(0.7) 防護，本列表 row 卻只有
     // .lineLimit(1) 沒有縮放保護，輔助模式大字級下姓名偏長時會直接被省略號截斷、而非跟 heroCard 一樣先縮小顯示。
+    // [v25.520] 列表姓名與 heroCard 姓名都改成跑馬燈（放不下就捲），上面講的縮字已經不用了。
     /// 列表 row：52pt 頭像圓角方形 + 姓名 / Capsule 職稱 / 公司部門 / 聯絡方式 + 日期
     private func cardRow(_ card: BusinessCard) -> some View {
         let accent = Color(red: 1.00, green: 0.55, blue: 0.25)
@@ -1217,10 +1218,8 @@ struct BusinessCardView: View {
             VStack(alignment: .leading, spacing: 5) {
                 // 姓名 + 職稱 Capsule 膠囊
                 HStack(spacing: 6) {
-                    Text(card.name.isEmpty ? "未命名" : card.name)
+                    MarqueeText(card.name.isEmpty ? "未命名" : card.name)
                         .font(.subheadline.weight(.semibold))
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.7)
                     if !card.jobTitle.isEmpty {
                         Text(card.jobTitle)
                             .font(.system(size: 10, weight: .semibold))
@@ -1694,11 +1693,9 @@ struct BusinessCardDetailView: View {
         HStack(alignment: .top, spacing: 16) {
             // 左側文字資訊
             VStack(alignment: .leading, spacing: 6) {
-                Text(card.name.isEmpty ? "未命名" : card.name)
+                MarqueeText(card.name.isEmpty ? "未命名" : card.name)
                     .font(.title.bold())
                     .foregroundStyle(.white)
-                    .lineLimit(2)
-                    .minimumScaleFactor(0.7)
                 if !card.jobTitle.isEmpty {
                     Text(card.jobTitle)
                         .font(.subheadline.weight(.medium))
@@ -1908,7 +1905,7 @@ struct BusinessCardDetailView: View {
                         .clipShape(RoundedRectangle(cornerRadius: 16))
                         .padding()
                 }
-                Text(card.name.isEmpty ? "名片 QR Code" : "\(card.name) 的名片")
+                MarqueeText(card.name.isEmpty ? "名片 QR Code" : "\(card.name) 的名片")
                     .font(.headline)
                 Text("掃描後可直接匯入聯絡人")
                     .font(.caption)
@@ -2600,9 +2597,8 @@ struct BusinessCardCompanyFilterSheet: View {
                 Image(systemName: on ? "checkmark.circle.fill" : "circle")
                     .font(.system(size: 18))
                     .foregroundStyle(on ? Color.green : Color.secondary.opacity(0.5))
-                Text(item.company)
+                MarqueeText(item.company)
                     .foregroundStyle(on ? .primary : .secondary)
-                    .lineLimit(1)
                 Spacer(minLength: 0)
                 Text("\(item.count)")
                     .font(.system(size: 11, weight: .semibold, design: .rounded))
@@ -2774,8 +2770,8 @@ struct BusinessCardMergeSheet: View {
                     .foregroundStyle(isKeeper ? Color.green : Color.secondary.opacity(0.5))
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(spacing: 6) {
-                        Text(card.name.trimmingCharacters(in: .whitespaces).isEmpty
-                             ? "未命名" : card.name)
+                        MarqueeText(card.name.trimmingCharacters(in: .whitespaces).isEmpty
+                                    ? "未命名" : card.name)
                             .font(.subheadline.weight(.semibold))
                             .foregroundStyle(.primary)
                         if isKeeper {
@@ -2981,7 +2977,7 @@ struct BusinessCardDuplicateReview: View {
             .tint(.green)
         } header: {
             HStack(spacing: 6) {
-                Text(group.name.isEmpty ? "未命名" : group.name)
+                MarqueeText(group.name.isEmpty ? "未命名" : group.name)
                 Text(group.company.isEmpty ? "未填公司" : group.company)
                     .font(.caption2).foregroundStyle(.secondary)
                 Spacer()

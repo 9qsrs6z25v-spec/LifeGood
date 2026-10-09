@@ -290,9 +290,9 @@ struct LifeOverviewView: View {
 
                             // 標題 + 分類徽章 + 日期
                             VStack(alignment: .leading, spacing: 5) {
-                                Text(m.title)
+                                // [v25.520] 里程碑標題過長改跑馬燈（原本切成「…」）
+                                MarqueeText(m.title)
                                     .font(.subheadline.weight(.semibold))
-                                    .lineLimit(1)
                                 HStack(spacing: 6) {
                                     // 彩色分類膠囊徽章
                                     Text(m.category.displayName)

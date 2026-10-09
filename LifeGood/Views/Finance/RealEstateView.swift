@@ -523,9 +523,9 @@ struct RealEstateView: View {
                     }
 
                     VStack(alignment: .leading, spacing: 4) {
-                        Text(item.name)
+                        // [v25.520] 物件名稱過長改跑馬燈（原本 lineLimit(1) 切成「…」）
+                        MarqueeText(item.name)
                             .font(.subheadline.weight(.semibold))
-                            .lineLimit(1)
                         if !item.fullAddress.isEmpty {
                             Text(item.fullAddress)
                                 .font(.caption2)
