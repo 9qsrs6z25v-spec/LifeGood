@@ -58,8 +58,8 @@ struct FixedExpenseView: View {
     @State private var emptyPulseTask: Task<Void, Never>?
     @State private var categoryListAppeared = false
     @State private var cachedGroupedByCategory: [(key: FixedCategory, value: [Expense])] = []
-    /// 英雄卡背景趨勢（月固定支出逐月序列；HeroTrendBackground 標準模板）
-    @State private var heroSeries: [HeroTrendPoint] = []
+    /// [v25.526] 最上面的看板（天空＋列車）。放在 .task(id: store.modifyID) 裡算
+    @State private var board = FixedBoardData()
     /// [v25.524] 緊湊模式（變動支出、收入、固定支出三頁共用一個開關）
     @AppStorage(MoneyItemCard.compactKey) private var compact = false
 
@@ -99,7 +99,12 @@ struct FixedExpenseView: View {
             List {
                 // 月固定支出摘要（嵌入 List，與列表一起捲動）
                 Section {
-                    fixedSummaryHeader
+                    // [v25.526] 英雄卡（三格 KPI＋雙軌進度條）換成看板：天空＋列車
+                    // （這個月一筆扣款一個車站，電車停在今天），見 MoneyBoards.swift
+                    FixedBoard(data: board)
+                        .padding(.horizontal, 16)
+                        .padding(.top, 10)
+                        .padding(.bottom, 4)
                         .listRowInsets(EdgeInsets())
                         .listRowBackground(Color.clear)
                         .listRowSeparator(.hidden)
@@ -161,7 +166,8 @@ struct FixedExpenseView: View {
             }
             .task(id: store.modifyID) {
                 cachedGroupedByCategory = buildGroupedByCategory()
-                heroSeries = store.heroFixedSeries()   // 壓縮/補點交給模板依進階設定即時處理
+                // .task 每次出現都會重跑（切回這頁、跨過午夜再打開），日期相關的數字跟著更新
+                board = FixedBoardData.build(store: store)
             }
             .sheet(isPresented: $showingAddSheet) {
                 AddExpenseView(expenseType: .fixed)
@@ -171,190 +177,6 @@ struct FixedExpenseView: View {
                 FixedExpenseCard(expense: expense)
             }
         }
-    }
-
-    // MARK: - 摘要
-
-    private var monthProgress: Double {
-        let cal = Calendar.current
-        let now = Date()
-        let day = Double(cal.component(.day, from: now))
-        let total = Double(cal.range(of: .day, in: .month, for: now)?.count ?? 30)
-        return min(day / total, 1.0)
-    }
-
-
-    private var fixedSummaryHeader: some View {
-        // 先計算一次，避免 store.fixedExpenses（每次都 filter+sort 全部支出）被呼叫 3 次
-        let fixed = store.fixedExpenses
-        // 外幣儲蓄險以 NT$ 等值加總（store.ntdValue；修正 USD 原幣金額被當 NT$ 低估）
-        let yearlyEstimate = fixed.reduce(0.0) { total, expense in
-            total + store.ntdValue(of: expense) * Double(occurrencesThisYear(for: expense))
-        }
-        let count = fixed.count
-        let monthlyTotal = store.currentMonthFixedTotal
-        let taxTotal = fixed
-            .filter { $0.effectivelyTaxDeductible }
-            .reduce(0.0) { $0 + monthlyEquivalentNTD($1) }
-        let dailyFixed = monthlyTotal / max(1, Double(Calendar.current.component(.day, from: Date())))
-
-        // 雙軌進度條計算（v3 升級）
-        let monthlyAvg = yearlyEstimate / 12           // 年均月支出
-        let monthVsAvgRatio = monthlyAvg > 0 ? monthlyTotal / monthlyAvg : 0.0
-        let barRatio = min(monthVsAvgRatio, 1.0)       // 條寬上限 1.0
-        let monthVsAvgBarColor: Color = {
-            if monthVsAvgRatio > 1.5 { return Color(red: 1.0, green: 0.78, blue: 0.75).opacity(0.90) }
-            if monthVsAvgRatio > 1.05 { return Color(red: 1.0, green: 0.65, blue: 0.22).opacity(0.90) }
-            return .white.opacity(0.82)
-        }()
-
-        return VStack(spacing: 0) {
-            HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 5) {
-                    Text("本月固定支出")
-                        .font(.caption)
-                        .foregroundStyle(.white.opacity(0.80))
-                    Text(formatCurrency(monthlyTotal))
-                        .heroBigValueFont()
-                        .foregroundStyle(.white)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.5)
-                        .contentTransition(.numericText())
-                }
-                Spacer()
-                VStack(alignment: .trailing, spacing: 6) {
-                    Text("\(count) 筆")
-                        .font(.caption.weight(.semibold))
-                        .padding(.horizontal, 11)
-                        .padding(.vertical, 5)
-                        .background(.white.opacity(0.22))
-                        .clipShape(Capsule())
-                        .foregroundStyle(.white)
-                    if taxTotal > 0 {
-                        HStack(spacing: 4) {
-                            Image(systemName: "leaf.fill")
-                                .font(.system(size: 9))
-                            Text("節稅 " + formatCurrency(taxTotal))
-                                .font(.system(size: 10, weight: .semibold))
-                        }
-                        .padding(.horizontal, 8).padding(.vertical, 4)
-                        .background(.white.opacity(0.18))
-                        .clipShape(Capsule())
-                        .foregroundStyle(.white.opacity(0.90))
-                    }
-                }
-            }
-
-            // KPI 橫列：年度預估 / 日均負擔 / 月節稅（對齊 VariableExpenseView / IncomeView 三格規格）
-            HStack(spacing: 0) {
-                HeroKpiCell(label: "年度預估", value: formatCurrency(yearlyEstimate))
-                HeroKpiDivider()
-                HeroKpiCell(label: "日均負擔", value: formatCurrency(dailyFixed))
-                HeroKpiDivider()
-                HeroKpiCell(label: "月節稅", value: taxTotal > 0 ? formatCurrency(taxTotal) : "NT$0")
-            }
-            .padding(.vertical, 10)
-            .background(.white.opacity(0.08))
-            .clipShape(RoundedRectangle(cornerRadius: 10))
-            .padding(.top, 12)
-
-            // 分隔線（對齊 VariableExpenseView 規格）
-            Rectangle()
-                .fill(.white.opacity(0.20))
-                .frame(height: 0.5)
-                .padding(.vertical, 12)
-
-            // 雙軌進度條（有年度估算時）：月進度（上薄軌）+ 本月vs月均（下厚軌 + 月進度針）
-            if monthlyAvg > 0 {
-                VStack(spacing: 5) {
-                    // ① 月進度軌（薄軌 3pt，半透明白）
-                    GeometryReader { geo in
-                        ZStack(alignment: .leading) {
-                            Capsule().fill(.white.opacity(0.12)).frame(height: 3)
-                            Capsule().fill(.white.opacity(0.44))
-                                .frame(width: geo.size.width * monthProgress, height: 3)
-                                .animation(.spring(response: 0.7, dampingFraction: 0.8), value: monthProgress)
-                        }
-                    }
-                    .frame(height: 3)
-
-                    // ② 本月 vs 月均比率軌（厚軌 6pt + 月進度指示針）
-                    GeometryReader { geo in
-                        ZStack(alignment: .leading) {
-                            Capsule().fill(.white.opacity(0.18)).frame(height: 6)
-                            Capsule()
-                                .fill(monthVsAvgBarColor)
-                                .frame(width: geo.size.width * barRatio, height: 6)
-                                .animation(.spring(response: 0.7, dampingFraction: 0.8), value: barRatio)
-                            // 月進度指示針（細白豎棒，指示月份走到哪）
-                            Capsule()
-                                .fill(.white.opacity(0.92))
-                                .frame(width: 2, height: 6)
-                                .shadow(color: .black.opacity(0.25), radius: 1.5, x: 0, y: 0)
-                                .offset(x: max(0, geo.size.width * monthProgress - 1))
-                                .animation(.spring(response: 0.7, dampingFraction: 0.8), value: monthProgress)
-                        }
-                    }
-                    .frame(height: 6)
-
-                    HStack {
-                        HStack(spacing: 3) {
-                            // 季/年繳集中月警示圖示
-                            if monthVsAvgRatio > 1.05 {
-                                Image(systemName: monthVsAvgRatio > 1.5
-                                      ? "flame.fill"
-                                      : "exclamationmark.triangle.fill")
-                                    .font(.system(size: 8))
-                            }
-                            Text("本月 \(Int(monthVsAvgRatio * 100))% 月均")
-                        }
-                        .font(.caption2)
-                        .foregroundStyle({
-                            if monthVsAvgRatio > 1.5 { return Color(red: 1.0, green: 0.78, blue: 0.75) }
-                            if monthVsAvgRatio > 1.05 { return Color(red: 1.0, green: 0.90, blue: 0.55) }
-                            return .white.opacity(0.62) as Color
-                        }())
-                        Spacer()
-                        Text("月進度 \(Int(monthProgress * 100))%")
-                            .font(.caption2)
-                            .foregroundStyle(.white.opacity(0.60))
-                    }
-                }
-            } else {
-                // 降級：無年度估算時顯示單軌月進度
-                VStack(spacing: 5) {
-                    GeometryReader { geo in
-                        ZStack(alignment: .leading) {
-                            Capsule().fill(.white.opacity(0.18)).frame(height: 5)
-                            Capsule().fill(.white.opacity(0.80))
-                                .frame(width: geo.size.width * monthProgress, height: 5)
-                                .animation(.spring(response: 0.7, dampingFraction: 0.8), value: monthProgress)
-                        }
-                    }
-                    .frame(height: 5)
-                    HStack {
-                        HStack(spacing: 4) {
-                            Image(systemName: "calendar.badge.clock")
-                                .font(.system(size: 10))
-                            Text("月進度 \(Int(monthProgress * 100))%")
-                        }
-                        .font(.caption2).foregroundStyle(.white.opacity(0.60))
-                        Spacer()
-                        Text("剩 \(Int((1 - monthProgress) * 100))%")
-                            .font(.caption2).foregroundStyle(.white.opacity(0.60))
-                    }
-                }
-            }
-        }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 18)
-        .heroCardShell(card: .fixedExpense) {
-            // 月固定支出趨勢曲線背景（HeroTrendBackground 標準模板）
-            HeroTrendBackground(points: heroSeries, stepBack: 2_592_000)
-        }
-        .padding(.horizontal, 16)
-        .padding(.top, 10)
-        .padding(.bottom, 4)
     }
 
     // MARK: - 空狀態
@@ -531,18 +353,6 @@ struct FixedExpenseView: View {
         }
     }
 
-    /// 月均（NT$ 等值）：外幣儲蓄險先經 store.ntdValue 換算再攤月。
-    /// 注意 insuranceHeaderAmount 的分幣別小計要用「原幣」monthlyEquivalent，不可改用本函式。
-    private func monthlyEquivalentNTD(_ expense: Expense) -> Double {
-        let ntd = store.ntdValue(of: expense)
-        switch expense.recurrence {
-        case .monthly: return ntd
-        case .quarterly: return ntd / 3
-        case .yearly: return ntd / 12
-        case .none: return ntd
-        }
-    }
-
     private static let currencyFormatterCache = NSCache<NSString, NumberFormatter>()
     private func formatCurrencyWithCode(_ value: Double, code: String) -> String {
         if let f = Self.currencyFormatterCache.object(forKey: code as NSString) {
@@ -596,33 +406,6 @@ struct FixedExpenseView: View {
 
     private func formatCurrency(_ value: Double) -> String {
         value.ntdWanString
-    }
-
-    /// 依開始日期與週期，估算該筆固定支出在當年度內發生的次數
-    private func occurrencesThisYear(for expense: Expense) -> Int {
-        let calendar = Calendar.current
-        let now = Date()
-        let year = calendar.component(.year, from: now)
-        guard let yearStart = calendar.date(from: DateComponents(year: year, month: 1, day: 1)),
-              let yearEndDay = calendar.date(from: DateComponents(year: year, month: 12, day: 31)),
-              let yearEnd = calendar.date(bySettingHour: 23, minute: 59, second: 59, of: yearEndDay) else {
-            return 0
-        }
-        let effectiveStart = max(expense.date, yearStart)
-        if effectiveStart > yearEnd { return 0 }
-
-        switch expense.recurrence {
-        case .monthly:
-            let months = calendar.dateComponents([.month], from: effectiveStart, to: yearEnd).month ?? 0
-            return max(0, months + 1)
-        case .quarterly:
-            let months = calendar.dateComponents([.month], from: effectiveStart, to: yearEnd).month ?? 0
-            return max(0, months / 3 + 1)
-        case .yearly:
-            return expense.date <= yearEnd ? 1 : 0
-        case .none:
-            return expense.date <= yearEnd ? 1 : 0
-        }
     }
 }
 

@@ -50,10 +50,8 @@ struct VariableExpenseView: View {
     @State private var visibleWeeks = 1
     @State private var searchText: String = ""
     @State private var listRowsAppeared = false
-    @State private var cachedTrailingMonthlyAvg: Double = 0
-    /// 英雄卡背景趨勢（單月變動支出逐月序列；HeroTrendBackground 標準模板）
-    @State private var heroSeries: [HeroTrendPoint] = []
-    @State private var cachedTodayVariableTotal: Double = 0
+    /// [v25.526] 最上面的看板（天空＋市集）。放在 .task(id: store.modifyID) 裡算
+    @State private var board = VariableBoardData()
     @State private var debouncedSearchText: String = ""
     @State private var searchDebounceTask: Task<Void, Never>?
     @State private var cachedFilteredExpenses: [Expense] = []
@@ -124,16 +122,15 @@ struct VariableExpenseView: View {
         NavigationStack {
             List {
                 Section {
-                    VStack(spacing: 0) {
-                        monthSummaryHeader
-                        // 超支警示：emoji 小字提示掛在卡片下方（正常時不顯示）
-                        HeroOverspendHint(ratio: overspendRatio,
-                                          monthProgress: monthProgress,
-                                          noun: "變動支出")
-                    }
-                    .listRowInsets(EdgeInsets())
-                    .listRowBackground(Color.clear)
-                    .listRowSeparator(.hidden)
+                    // [v25.526] 英雄卡（三格 KPI＋雙軌進度條＋超支小字）換成看板：天空＋市集
+                    // （一家店一個分類，店面寬＝這個月那一類花多少），見 MoneyBoards.swift
+                    VariableBoard(data: board)
+                        .padding(.horizontal, 16)
+                        .padding(.top, 10)
+                        .padding(.bottom, 4)
+                        .listRowInsets(EdgeInsets())
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
                 }
                 Section {
                     categoryFilter
@@ -213,11 +210,8 @@ struct VariableExpenseView: View {
             }
             .onDisappear { searchDebounceTask?.cancel() }
             .task(id: store.modifyID) {
-                cachedTrailingMonthlyAvg = computeTrailingMonthlyAvg()
-                cachedTodayVariableTotal = store.variableExpenses
-                    .filter { Calendar.current.isDateInToday($0.date) }
-                    .reduce(0) { $0 + $1.amount }
-                heroSeries = store.heroVariableSeries()   // 壓縮/補點交給模板依進階設定即時處理
+                // .task 每次出現都會重跑（切回這頁、跨過午夜再打開），日期相關的數字跟著更新
+                board = VariableBoardData.build(store: store)
             }
             .task(id: "\(store.modifyID)-\(selectedCategory?.rawValue ?? "")-\(debouncedSearchText)") {
                 cachedFilteredExpenses = buildFilteredExpenses()
@@ -232,191 +226,6 @@ struct VariableExpenseView: View {
             selectedCategory = c
         }
         filterRequest = ""
-    }
-
-    // MARK: - KPI 計算輔助
-
-    private func computeTrailingMonthlyAvg() -> Double {
-        let calendar = Calendar.current
-        let now = Date()
-        var totals: [Double] = []
-        for i in 1...3 {
-            guard let base = calendar.date(byAdding: .month, value: -i, to: now),
-                  let interval = calendar.dateInterval(of: .month, for: base) else { continue }
-            let total = store.expenses
-                .filter { $0.expenseType == .variable && $0.date >= interval.start && $0.date < interval.end }
-                .reduce(0) { $0 + $1.amount }
-            totals.append(total)
-        }
-        guard !totals.isEmpty else { return 0 }
-        return totals.reduce(0, +) / Double(totals.count)
-    }
-
-    private var todayVariableTotal: Double { cachedTodayVariableTotal }
-
-    private var trailingMonthlyAverageVariable: Double { cachedTrailingMonthlyAvg }
-
-
-
-    // MARK: - 月摘要
-
-    private var monthProgress: Double {
-        let cal = Calendar.current
-        let now = Date()
-        let day = Double(cal.component(.day, from: now))
-        let total = Double(cal.range(of: .day, in: .month, for: now)?.count ?? 30)
-        return min(day / total, 1.0)
-    }
-
-    /// 卡片下方超支提示用的比例（本月變動支出 ÷ 近 3 月均值；與卡內進度條同口徑、不夾住）
-    private var overspendRatio: Double {
-        let avg = trailingMonthlyAverageVariable
-        return avg > 0 ? store.currentMonthVariableTotal / avg : 0
-    }
-
-    private var monthSummaryHeader: some View {
-        // 一次 filter 同時算筆數與總額，避免 currentMonthExpenses（掃全部支出）被呼叫兩次
-        let monthlyVariable = store.currentMonthExpenses.filter { $0.expenseType == .variable }
-        let count = monthlyVariable.count
-        let total = monthlyVariable.reduce(0) { $0 + $1.amount }
-        let dayOfMonth = Calendar.current.component(.day, from: Date())
-        let dailyAvg = total / Double(max(dayOfMonth, 1))
-
-        return VStack(spacing: 0) {
-            HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 5) {
-                    Text("本月變動支出")
-                        .font(.caption)
-                        .foregroundStyle(.white.opacity(0.80))
-                    Text(formatCurrency(total))
-                        .heroBigValueFont()
-                        .foregroundStyle(.white)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.5)
-                        .contentTransition(.numericText())
-                }
-                Spacer()
-                VStack(alignment: .trailing, spacing: 6) {
-                    Text("\(count) 筆")
-                        .font(.caption.weight(.semibold))
-                        .padding(.horizontal, 11)
-                        .padding(.vertical, 5)
-                        .background(.white.opacity(0.22))
-                        .clipShape(Capsule())
-                        .foregroundStyle(.white)
-                }
-            }
-
-            // KPI 橫列：今日花費 / 日均支出 / 近3月均值
-            HStack(spacing: 0) {
-                HeroKpiCell(label: "今日花費", value: formatCurrency(todayVariableTotal))
-                HeroKpiDivider()
-                HeroKpiCell(label: "日均支出", value: formatCurrency(dailyAvg))
-                HeroKpiDivider()
-                HeroKpiCell(label: "近3月均值", value: formatCurrency(trailingMonthlyAverageVariable))
-            }
-            .padding(.vertical, 10)
-            .background(.white.opacity(0.08))
-            .clipShape(RoundedRectangle(cornerRadius: 10))
-            .padding(.top, 12)
-
-            // 分隔線
-            Rectangle()
-                .fill(.white.opacity(0.20))
-                .frame(height: 0.5)
-                .padding(.vertical, 12)
-
-            // 雙軌進度條（有近3月均值時）：月進度（上薄軌）+ 支出進度（下厚軌 + 指示針）
-            if trailingMonthlyAverageVariable > 0 {
-                // rawRatio 計算一次，供進度條寬度、配色、標籤文字共用，
-                // 避免在各 closure 內重複呼叫 store.currentMonthVariableTotal
-                let avg = trailingMonthlyAverageVariable
-                let rawRatio = total / avg
-                let barRatio = min(rawRatio, 1.0)
-                let barColor: Color = {
-                    if rawRatio > 1.0 { return Color(red: 1.0, green: 0.78, blue: 0.75).opacity(0.90) }
-                    if rawRatio > monthProgress + HeroOverspendHint.warnLead {
-                        return Color(red: 1.0, green: 0.65, blue: 0.22).opacity(0.90)
-                    }
-                    return .white.opacity(0.82)
-                }()
-                VStack(spacing: 5) {
-                    // ① 月進度軌（薄軌，半透明白）
-                    GeometryReader { geo in
-                        ZStack(alignment: .leading) {
-                            Capsule().fill(.white.opacity(0.12)).frame(height: 3)
-                            Capsule().fill(.white.opacity(0.44))
-                                .frame(width: geo.size.width * monthProgress, height: 3)
-                                .animation(.spring(response: 0.7, dampingFraction: 0.8), value: monthProgress)
-                        }
-                    }
-                    .frame(height: 3)
-                    // ② 支出進度軌（厚軌 + 月進度指示針）
-                    GeometryReader { geo in
-                        ZStack(alignment: .leading) {
-                            Capsule().fill(.white.opacity(0.18)).frame(height: 6)
-                            Capsule()
-                                .fill(barColor)
-                                .frame(width: geo.size.width * barRatio, height: 6)
-                                .animation(.spring(response: 0.7, dampingFraction: 0.8), value: barRatio)
-                            // 月進度指示針（細白豎棒）
-                            Capsule()
-                                .fill(.white.opacity(0.92))
-                                .frame(width: 2, height: 6)
-                                .shadow(color: .black.opacity(0.25), radius: 1.5, x: 0, y: 0)
-                                .offset(x: max(0, geo.size.width * monthProgress - 1))
-                                .animation(.spring(response: 0.7, dampingFraction: 0.8), value: monthProgress)
-                        }
-                    }
-                    .frame(height: 6)
-                    HStack {
-                        // 警示圖示已移至卡片下方的 HeroOverspendHint（emoji 小字提示）
-                        Text("支出 \(Int(rawRatio * 100))%（均）")
-                        .font(.caption2)
-                        .foregroundStyle({
-                            if rawRatio > 1.0 { return Color(red: 1.0, green: 0.78, blue: 0.75) }
-                            if rawRatio > monthProgress + HeroOverspendHint.warnLead {
-                                return Color(red: 1.0, green: 0.90, blue: 0.55)
-                            }
-                            return .white.opacity(0.60) as Color
-                        }())
-                        Spacer()
-                        Text("月進度 \(Int(monthProgress * 100))%")
-                            .font(.caption2)
-                            .foregroundStyle(.white.opacity(0.60))
-                    }
-                }
-            } else {
-                // 無近3月均值時降級為單軌（初次使用兼容）
-                VStack(spacing: 5) {
-                    GeometryReader { geo in
-                        ZStack(alignment: .leading) {
-                            Capsule().fill(.white.opacity(0.18)).frame(height: 5)
-                            Capsule().fill(.white.opacity(0.80))
-                                .frame(width: geo.size.width * monthProgress, height: 5)
-                                .animation(.spring(response: 0.7, dampingFraction: 0.8), value: monthProgress)
-                        }
-                    }
-                    .frame(height: 5)
-                    HStack {
-                        Text("本月進度 \(Int(monthProgress * 100))%")
-                            .font(.caption2).foregroundStyle(.white.opacity(0.60))
-                        Spacer()
-                        Text("剩 \(Int((1 - monthProgress) * 100))%")
-                            .font(.caption2).foregroundStyle(.white.opacity(0.60))
-                    }
-                }
-            }
-        }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 18)
-        .heroCardShell(card: .variableExpense) {
-            // 單月變動支出趨勢曲線背景（HeroTrendBackground 標準模板）
-            HeroTrendBackground(points: heroSeries, stepBack: 2_592_000)
-        }
-        .padding(.horizontal, 16)
-        .padding(.top, 10)
-        .padding(.bottom, 4)
     }
 
     // MARK: - 分類篩選

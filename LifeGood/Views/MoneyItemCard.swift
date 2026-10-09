@@ -765,7 +765,8 @@ extension MoneyItem {
 
     /// 名稱：使用者打的名字照用（全域清單裡店名是唯一的地點線索，見 stopRowLabel 的說明）；
     /// 沒打名字才退到備註或分類名
-    private static func title(_ e: Expense) -> String {
+    /// [v25.526] 拿掉 private：收支看板的「最大一筆」、列車的下一站也用這個名字
+    static func title(_ e: Expense) -> String {
         let t = e.title.moneyTrimmed
         return t.isEmpty ? e.stopRowLabel(suppressing: []).primary : t
     }
@@ -879,27 +880,11 @@ extension MoneyItem {
         // 繳費進度：貸款（年期，或總額 ÷ 月付）、儲蓄險（連結保單的期數）
         var progress: MoneyItemProgress? = nil
         if e.fixedCategory == .loan {
-            let monthly: Double
-            switch e.recurrence {
-            case .monthly: monthly = e.amount
-            case .quarterly: monthly = e.amount / 3
-            case .yearly: monthly = e.amount / 12
-            case .none: monthly = 0
-            }
-            var totalMonths = 0
-            if let years = e.loanYears, years > 0 {
-                totalMonths = Int((years * 12).rounded())
-            } else if let total = e.loanTotalAmount, total > 0, monthly > 0 {
-                totalMonths = Int((total / monthly).rounded())
-            }
-            if totalMonths > 0 {
-                let months = cal.dateComponents([.month], from: e.date, to: now).month ?? 0
-                let elapsed = max(0, min(months + 1, totalMonths))
-                let left = Double(totalMonths - elapsed) * monthly
+            if let s = e.moneyLoanSchedule(now: now, calendar: cal) {
                 progress = MoneyItemProgress(
-                    fraction: Double(elapsed) / Double(totalMonths),
-                    leading: elapsed >= totalMonths ? "已繳清" : "已繳 \(elapsed)／\(totalMonths) 期",
-                    trailing: elapsed >= totalMonths || left <= 0 ? nil : "還要繳 " + left.ntdWanString)
+                    fraction: Double(s.elapsed) / Double(s.total),
+                    leading: s.isDone ? "已繳清" : "已繳 \(s.elapsed)／\(s.total) 期",
+                    trailing: s.isDone || s.left <= 0 ? nil : "還要繳 " + s.left.ntdWanString)
             }
         } else if isSavingsIns {
             let ins = e.linkedInsuranceId.flatMap { id in financeStore.insurances.first { $0.id == id } }
@@ -966,5 +951,43 @@ extension MoneyItem {
             category: i.category.rawValue,
             detail: memo.isEmpty || memo == t ? nil : memo,
             badge: badge, chips: chips, dimmed: ended)
+    }
+}
+
+// MARK: - 貸款的期數（v25.526 從 MoneyItem.fixed 抽出來：固定支出看板的「貸款還要繳」也要用）
+
+struct MoneyLoanSchedule: Equatable {
+    /// 已經繳了幾期（起始那個月算第一期）
+    let elapsed: Int
+    let total: Int
+    /// 每月要繳多少（季繳 ÷ 3、年繳 ÷ 12）
+    let monthly: Double
+
+    var isDone: Bool { elapsed >= total }
+    /// 剩下的期數 × 月付
+    var left: Double { Double(max(0, total - elapsed)) * monthly }
+}
+
+extension Expense {
+    /// 貸款繳到第幾期：期數看年期，沒有年期就用總額 ÷ 月付。不是貸款、或兩個都沒填是 nil。
+    func moneyLoanSchedule(now: Date = Date(), calendar cal: Calendar = .current) -> MoneyLoanSchedule? {
+        guard fixedCategory == .loan else { return nil }
+        let monthly: Double
+        switch recurrence {
+        case .monthly: monthly = amount
+        case .quarterly: monthly = amount / 3
+        case .yearly: monthly = amount / 12
+        case .none: monthly = 0
+        }
+        var totalMonths = 0
+        if let years = loanYears, years > 0 {
+            totalMonths = Int((years * 12).rounded())
+        } else if let total = loanTotalAmount, total > 0, monthly > 0 {
+            totalMonths = Int((total / monthly).rounded())
+        }
+        guard totalMonths > 0 else { return nil }
+        let months = cal.dateComponents([.month], from: date, to: now).month ?? 0
+        let elapsed = max(0, min(months + 1, totalMonths))
+        return MoneyLoanSchedule(elapsed: elapsed, total: totalMonths, monthly: monthly)
     }
 }

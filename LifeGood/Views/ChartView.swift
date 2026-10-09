@@ -177,15 +177,6 @@ struct ChartView: View {
         return f
     }()
 
-    var totalForPeriod: Double {
-        chartData.reduce(0) { $0 + $1.amount }
-    }
-
-    var averageForPeriod: Double {
-        let nonZeroCount = chartData.filter { $0.amount > 0 }.count
-        return nonZeroCount > 0 ? totalForPeriod / Double(nonZeroCount) : 0
-    }
-
     var body: some View {
         NavigationStack {
             ScrollView {
@@ -194,7 +185,12 @@ struct ChartView: View {
                     // 取代原本平面的 periodPicker + statisticsSummary 雙區塊，
                     // 與 OverviewView / VariableExpenseView / IncomeView 設計語言保持均值。
                     // v2: 補 heroCardAppeared spring 進場動畫，對齊 FinanceChartView 英雄卡規格。
-                    chartHeroCard
+                    // [v25.526] 英雄卡換成星空看板（固定是夜空：這一段期間每一期花多少連成星座），
+                    // 期間切換放在看板下面
+                    ChartStarBoard(period: selectedPeriod, points: chartData,
+                                   loading: isLoading && chartData.isEmpty,
+                                   periodChips: AnyView(periodChipRow))
+                        .environment(\.colorScheme, .dark)
                         .padding(.horizontal)
                         .opacity(heroCardAppeared ? 1 : 0)
                         .offset(y: heroCardAppeared ? 0 : 20)
@@ -342,103 +338,17 @@ struct ChartView: View {
     // 取代舊版分離的 periodPicker（白底卡片）+ statisticsSummary（三個獨立 StatCard），
     // 視覺密度降低、層次感提升，與其他主要頁面的 hero card 設計保持均值。
 
-    private var periodHeroLabel: String {
-        switch selectedPeriod {
-        case .daily:     return "近30天支出總計"
-        case .weekly:    return "近12週支出總計"
-        case .monthly:   return "近12個月支出總計"
-        case .quarterly: return "近8季支出總計"
-        case .yearly:    return "近5年支出總計"
-        }
-    }
-
-    private var chartHeroCard: some View {
-        let maxAmount = chartData.map(\.amount).max() ?? 0
-
-        return VStack(spacing: 0) {
-            // 頂部：區間總計 + 最高值徽章
-            HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(spacing: 6) {
-                        Text(periodHeroLabel)
-                            .font(.caption)
-                            .foregroundStyle(.white.opacity(0.78))
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.8)
-                        if isLoading {
-                            // [v7 美化] 原本是白色系統原生 ProgressView（0.65 倍縮小 spinner），
-                            // 與下方大卡「載入圖表資料…」改用的漸層圖示圓＋旋轉圖示語言不一致，
-                            // 是本檔案最後一處殘留系統 spinner 的地方。改為迷你版同款造型
-                            // （白色系漸層圓 + chart.bar.fill 旋轉圖示），共用大卡的 chartLoadingSpin
-                            // 旗標，兩處圖示同步旋轉、視覺語言完全統一。純視覺層調整，載入狀態
-                            // 判斷邏輯（isLoading）本身未變動。
-                            ZStack {
-                                Circle()
-                                    .fill(.white.opacity(0.18))
-                                    .overlay(Circle().stroke(.white.opacity(0.32), lineWidth: 0.75))
-                                Image(systemName: "chart.bar.fill")
-                                    .font(.system(size: 7, weight: .semibold))
-                                    .foregroundStyle(.white.opacity(0.88))
-                                    .rotationEffect(.degrees(chartLoadingSpin ? 360 : 0))
-                                    .animation(.linear(duration: 1.1).repeatForever(autoreverses: false), value: chartLoadingSpin)
-                            }
-                            .frame(width: 14, height: 14)
-                        }
-                    }
-                    Text(isLoading ? "---" : formatCurrency(totalForPeriod))
-                        .heroBigValueFont()
-                        .foregroundStyle(.white)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.6)
-                        .contentTransition(.numericText())
-                    if !isLoading && averageForPeriod > 0 {
-                        Text("期均 " + formatCurrency(averageForPeriod))
-                            .font(.caption2.weight(.medium))
-                            .foregroundStyle(.white.opacity(0.72))
-                            .padding(.top, 1)
-                    }
-                }
-                Spacer()
-                if !isLoading && maxAmount > 0 {
-                    VStack(alignment: .trailing, spacing: 3) {
-                        Text("最高")
-                            .font(.system(size: 9, weight: .semibold))
-                            .foregroundStyle(.white.opacity(0.62))
-                            .lineLimit(1)
-                        Text(formatCurrency(maxAmount))
-                            .font(.caption.weight(.bold))
-                            .foregroundStyle(.white)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.6)
-                            .contentTransition(.numericText())
-                    }
-                    .padding(.horizontal, 11)
-                    .padding(.vertical, 6)
-                    .background(.white.opacity(0.20))
-                    .clipShape(Capsule())
-                    .layoutPriority(1)
+    /// 期間切換（日／週／月／季／年），放在星空看板下面
+    private var periodChipRow: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(TimePeriod.allCases, id: \.self) { period in
+                    heroPeriodChip(period)
                 }
             }
-
-            // 分隔線
-            Rectangle()
-                .fill(.white.opacity(0.20))
-                .frame(height: 0.5)
-                .padding(.vertical, 14)
-
-            // 週期篩選 pill（在卡片底部，白色系）
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    ForEach(TimePeriod.allCases, id: \.self) { period in
-                        heroPeriodChip(period)
-                    }
-                }
-                .padding(.horizontal, 2)
-            }
+            .padding(.horizontal, 2)
+            .padding(.vertical, 4)
         }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 18)
-        .heroCardShell(card: .chart)
     }
 
     private func heroPeriodChip(_ period: TimePeriod) -> some View {
@@ -1295,7 +1205,82 @@ private extension ChartMode {
 
 // MARK: - TimePeriod chip UI helpers
 
+// MARK: - 星空看板（v25.526）
+
+/// 圖表頁最上面的看板。固定是夜空（外面套 .environment(\.colorScheme, .dark)）：
+/// 這一段期間每一期花多少連成一個星座，最多的那一期是最亮的星（MoneyBoardScenes.swift）。
+/// 期間切換由 ChartView 傳進來，放在看板下面。
+private struct ChartStarBoard: View {
+    let period: TimePeriod
+    let points: [ChartDataPoint]
+    /// 第一次載入、還沒有任何資料
+    let loading: Bool
+    let periodChips: AnyView
+
+    @Environment(\.colorScheme) private var scheme
+
+    var body: some View {
+        let pal = TripBoardPalette(scheme)
+        let total = points.reduce(0) { $0 + $1.amount }
+        let spent = points.filter { $0.amount > 0 }
+        let average = spent.isEmpty ? 0 : total / Double(spent.count)
+        let top = points.max { $0.amount < $1.amount }
+        let topLabel: String? = top.flatMap { $0.amount > 0 ? period.boardMaxLabel($0.label) : nil }
+        MoneyBoardCard(
+            card: .chart,
+            header: MoneyBoardHeader(
+                date: period.boardTitle,
+                dateIcon: period.chipIcon,
+                label: "支出總計",
+                big: loading ? "—" : MoneyFormat.short(total),
+                line: line(pal, total: total, average: average, top: top?.amount ?? 0),
+                greeting: ["Starry", "trends"],
+                scene: .stars(MoneyStarScene(values: points.map(\.amount), maxLabel: topLabel)),
+                seed: period.boardSeed),
+            content: periodChips)
+    }
+
+    private func line(_ pal: TripBoardPalette, total: Double, average: Double, top: Double) -> Text {
+        if loading { return Text("載入中…") }
+        if total <= 0 { return Text("這段期間還沒有支出") }
+        return Text("期均 \(MoneyFormat.short(average))・最高 \(MoneyFormat.short(top))")
+    }
+}
+
 private extension TimePeriod {
+    /// 看板左上的日期列
+    var boardTitle: String {
+        switch self {
+        case .daily:     return "近 30 天"
+        case .weekly:    return "近 12 週"
+        case .monthly:   return "近 12 個月"
+        case .quarterly: return "近 8 季"
+        case .yearly:    return "近 5 年"
+        }
+    }
+
+    /// 最亮那顆星旁邊的字（label 是 ChartDataPoint 的標籤：10/3、2026/3、2026Q1…）
+    func boardMaxLabel(_ label: String) -> String {
+        switch self {
+        case .daily:     return "最多的一天 " + label
+        case .weekly:    return "最多的一週 " + label + " 起"
+        case .monthly:   return "最多的月份 " + label
+        case .quarterly: return "最多的一季 " + label
+        case .yearly:    return "最多的一年 " + label
+        }
+    }
+
+    /// 星空的亂數種子：每個期間固定一組（切換期間時星星的位置不會亂跳）
+    var boardSeed: Int {
+        switch self {
+        case .daily:     return 11
+        case .weekly:    return 13
+        case .monthly:   return 17
+        case .quarterly: return 19
+        case .yearly:    return 23
+        }
+    }
+
     var chipIcon: String {
         switch self {
         case .daily:     return "sun.max.fill"

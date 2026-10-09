@@ -51,8 +51,8 @@ struct IncomeView: View {
     @State private var selectedCategory: IncomeCategory?
     @State private var searchText: String = ""
     @State private var headerAppeared = false
-    /// 英雄卡背景趨勢（單月收入逐月序列；HeroTrendBackground 標準模板）
-    @State private var heroSeries: [HeroTrendPoint] = []
+    /// [v25.526] 最上面的看板（天空＋山）。放在 .task(id: store.modifyID) 裡算
+    @State private var board = IncomeBoardData()
     @State private var listRowsAppeared = false
     @State private var visibleMonths = 3
     @State private var debouncedSearchText: String = ""
@@ -107,17 +107,17 @@ struct IncomeView: View {
         NavigationStack {
             List {
                 Section {
-                    VStack(spacing: 0) {
-                        summaryHeader
-                        // 超支警示：emoji 小字提示掛在卡片下方（正常時不顯示）
-                        HeroOverspendHint(ratio: overspendRatio,
-                                          monthProgress: headerMonthProgress)
-                    }
-                    .listRowInsets(EdgeInsets())
-                    .listRowBackground(Color.clear)
-                    .listRowSeparator(.hidden)
-                    .opacity(headerAppeared ? 1 : 0)
-                    .offset(y: headerAppeared ? 0 : 22)
+                    // [v25.526] 英雄卡（四格 KPI＋雙軌進度條＋分類彩條＋超支小字）換成看板：
+                    // 天空＋山（近 6 個月一個月一座山，這個月用虛線畫出預期的高度），見 MoneyBoards.swift
+                    IncomeBoard(data: board)
+                        .padding(.horizontal, 16)
+                        .padding(.top, 10)
+                        .padding(.bottom, 4)
+                        .listRowInsets(EdgeInsets())
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                        .opacity(headerAppeared ? 1 : 0)
+                        .offset(y: headerAppeared ? 0 : 22)
                 }
                 Section {
                     categoryFilter
@@ -157,7 +157,8 @@ struct IncomeView: View {
                 listRowsAppeared = false
             }
             .task(id: store.modifyID) {
-                heroSeries = store.heroIncomeSeries()   // 壓縮/補點交給模板依進階設定即時處理
+                // .task 每次出現都會重跑（切回這頁、跨過午夜再打開），日期相關的數字跟著更新
+                board = IncomeBoardData.build(store: store)
             }
             .scrollContentBackground(.hidden)
             .background(Color(.systemGroupedBackground))
@@ -194,299 +195,6 @@ struct IncomeView: View {
                 cachedFilteredIncomes = buildFilteredIncomes()
             }
         }
-    }
-
-    /// 所有收入加總（含已繳的固定薪水展開到每一個已發生月份）
-    private var totalIncomeAll: Double {
-        let calendar = Calendar.current
-        let now = Date()
-        return store.incomes.reduce(0.0) { sum, income in
-            switch income.period {
-            case .once:
-                return sum + income.amount
-            case .monthly:
-                // 固定薪水設有結束日者，展開至結束日為止（不再累計到今天）
-                let end = income.endDate.map { min($0, now) } ?? now
-                // 起始日晚於截止日（例如剛新增了未來才生效的固定薪水）代表尚未發生任何一個月，計 0
-                guard income.date <= end else { return sum }
-                let months = calendar.dateComponents([.month], from: income.date, to: end).month ?? 0
-                return sum + income.amount * Double(months + 1)
-            case .yearly:
-                let end = income.endDate.map { min($0, now) } ?? now
-                guard income.date <= end else { return sum }
-                let years = calendar.dateComponents([.year], from: income.date, to: end).year ?? 0
-                return sum + income.amount * Double(years + 1)
-            }
-        }
-    }
-
-    // MARK: - 摘要
-
-    private var headerMonthProgress: Double {
-        let cal = Calendar.current
-        let now = Date()
-        let day = Double(cal.component(.day, from: now))
-        let total = Double(cal.range(of: .day, in: .month, for: now)?.count ?? 30)
-        return min(day / total, 1.0)
-    }
-
-    /// 累計收入 + 歷史月均收入（從最早一筆到現在）
-    private var monthlyStats: (cumulative: Double, average: Double) {
-        let total = totalIncomeAll
-        guard !store.incomes.isEmpty,
-              let earliest = store.incomes.min(by: { $0.date < $1.date })?.date else {
-            return (total, total)
-        }
-        let monthCount = max(1, (Calendar.current.dateComponents([.month], from: earliest, to: Date()).month ?? 0) + 1)
-        return (total, total / Double(monthCount))
-    }
-
-
-    /// 卡片下方超支提示用的比例（本月總支出 ÷ 預算基準；不夾住）
-    ///
-    /// [v25.522] 原本只要本月有任何一筆收入就拿「已入帳」當分母：月初只進了一筆
-    /// NT$530 的股利，支出 NT$3,400 就變成「已花 638%」。改用 store.budgetBaseIncome
-    /// （已入帳與近 6 個月中位數取大），薪水還沒進來之前先用估的。
-    private var overspendRatio: Double {
-        let base = store.budgetBaseIncome
-        return base > 0 ? store.currentMonthTotal / base : 0
-    }
-
-    private var summaryHeader: some View {
-        let useEstimate = !store.hasCurrentMonthIncome && store.estimatedMonthlyIncome > 0
-        let displayedIncome = useEstimate ? store.estimatedMonthlyIncome : store.currentMonthIncomeTotal
-        let displayedBalance = displayedIncome - store.currentMonthTotal
-        let isPositive = displayedBalance >= 0
-        let recurringMonthly = store.incomes
-            .filter { $0.period != .once && $0.isActive(in: Date()) }
-            .reduce(0.0) { $0 + $1.monthlyAmount }
-        // rawSpendingRatio 不夾住，供文字／顏色判斷；barSpendingRatio 才夾在 1.0，只用於進度條寬度
-        // （對齊 VariableExpenseView rawRatio/barRatio 既有規格）。先前兩者共用同一個已夾住的
-        // spendingRatio，超支超過 100% 時「支出 X%」文字會失真固定顯示 100%，看不出實際超支幅度。
-        let rawSpendingRatio = displayedIncome > 0 ? store.currentMonthTotal / displayedIncome : 0.0
-        let spendingRatio = min(rawSpendingRatio, 1.0)
-        let stats = monthlyStats
-        // mini 分類彩條資料（≥2 種分類才顯示）
-        let catAmounts = incomeCategoryAmounts
-        let totalCatIncome = catAmounts.reduce(0.0) { $0 + $1.amount }
-
-        return VStack(spacing: 0) {
-            // 頂部：本月收入 + 收支餘額
-            HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 3) {
-                    HStack(spacing: 5) {
-                        Text(useEstimate ? "本月收入（預估）" : "本月收入")
-                            .font(.caption)
-                            .foregroundStyle(.white.opacity(0.78))
-                        if useEstimate {
-                            HStack(spacing: 3) {
-                                Image(systemName: "chart.line.uptrend.xyaxis")
-                                    .font(.system(size: 8))
-                                Text("預估")
-                                    .font(.system(size: 9, weight: .semibold))
-                            }
-                            .padding(.horizontal, 6).padding(.vertical, 2)
-                            .background(.white.opacity(0.22))
-                            .clipShape(Capsule())
-                            .foregroundStyle(.white)
-                        }
-                    }
-                    Text(fmt(displayedIncome))
-                        .heroBigValueFont()
-                        .foregroundStyle(.white)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.5)
-                        .contentTransition(.numericText())
-                    // 日均收入：對齊 FixedExpenseView.fixedSummaryHeader 輔助文字規格
-                    if displayedIncome > 0 {
-                        let day = Calendar.current.component(.day, from: Date())
-                        // [v4] 加入 contentTransition(.numericText())，讓日均數值更新有平滑過渡
-                        Text("日均 " + fmt(displayedIncome / Double(max(day, 1))))
-                            .font(.caption2.weight(.medium))
-                            .foregroundStyle(.white.opacity(0.72))
-                            .contentTransition(.numericText())
-                            .padding(.top, 1)
-                    }
-                }
-                Spacer()
-                VStack(alignment: .trailing, spacing: 3) {
-                    Text("收支餘額")
-                        .font(.caption)
-                        .foregroundStyle(.white.opacity(0.78))
-                    Text((isPositive ? "+" : "") + fmt(displayedBalance))
-                        .font(.title3.bold())
-                        .foregroundStyle(isPositive ? .white : Color(red: 1.0, green: 0.78, blue: 0.75))
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.5)
-                        .contentTransition(.numericText())
-                        .shadow(
-                            color: isPositive ? .clear : Color.red.opacity(0.40),
-                            radius: 6, x: 0, y: 2
-                        )
-                }
-            }
-
-            // [v4] useEstimate 說明文字升級為半透明 Capsule 膠囊徽章，對齊卡片頂部「預估」badge 設計語言
-            if useEstimate {
-                HStack(spacing: 5) {
-                    Image(systemName: "info.circle")
-                        .font(.system(size: 10, weight: .medium))
-                    Text("顯示近 6 個月收入中位數預估值")
-                        .font(.system(size: 10, weight: .medium))
-                    Spacer()
-                }
-                .foregroundStyle(.white.opacity(0.82))
-                .padding(.horizontal, 10)
-                .padding(.vertical, 5)
-                .background(.white.opacity(0.14))
-                .clipShape(Capsule())
-                .overlay(Capsule().stroke(.white.opacity(0.22), lineWidth: 0.75))
-                .padding(.top, 8)
-            }
-
-            // KPI 橫列：累計收入 / 今年累計 / 月均收入 / 固定月收
-            HStack(spacing: 0) {
-                HeroKpiCell(label: "累計收入", value: fmt(stats.cumulative), icon: "sum")
-                HeroKpiDivider()
-                // 每年 1/1 重新起算的今年累計收入
-                HeroKpiCell(label: "今年累計", value: fmt(store.yearToDateIncomeTotal), icon: "calendar")
-                HeroKpiDivider()
-                HeroKpiCell(label: "月均收入", value: fmt(stats.average), icon: "chart.bar.fill")
-                if recurringMonthly > 0 {
-                    HeroKpiDivider()
-                    HeroKpiCell(label: "固定月收", value: fmt(recurringMonthly), icon: "arrow.clockwise")
-                }
-            }
-            .padding(.vertical, 10)
-            .background(.white.opacity(0.08))
-            .clipShape(RoundedRectangle(cornerRadius: 10))
-            .padding(.top, 12)
-
-            // 分隔線
-            Rectangle()
-                .fill(.white.opacity(0.20))
-                .frame(height: 0.5)
-                .padding(.vertical, 12)
-
-            // 雙軌進度條：月進度（上，薄軌）+ 支出比例（下，厚軌 + 針）
-            if displayedIncome > 0 {
-                VStack(spacing: 5) {
-                    // ① 月進度軌（薄軌，半透明白）
-                    GeometryReader { geo in
-                        ZStack(alignment: .leading) {
-                            Capsule()
-                                .fill(.white.opacity(0.12))
-                                .frame(height: 3)
-                            Capsule()
-                                .fill(.white.opacity(0.44))
-                                .frame(width: geo.size.width * headerMonthProgress, height: 3)
-                                .animation(.spring(response: 0.7, dampingFraction: 0.8), value: headerMonthProgress)
-                        }
-                    }
-                    .frame(height: 3)
-
-                    // ② 支出比例軌（厚軌 + 月進度指示針；3 段配色對齊 OverviewView）
-                    GeometryReader { geo in
-                        ZStack(alignment: .leading) {
-                            Capsule()
-                                .fill(.white.opacity(0.18))
-                                .frame(height: 6)
-                            Capsule()
-                                // 3 段：正常白 → 超速暖黃 → 超支粉紅
-                                .fill(spendingRatio > 0.9
-                                      ? Color(red: 1.0, green: 0.78, blue: 0.75).opacity(0.90)
-                                      : spendingRatio > headerMonthProgress + 0.08
-                                        ? Color(red: 1.0, green: 0.65, blue: 0.22).opacity(0.90)
-                                        : .white.opacity(0.82))
-                                .frame(width: geo.size.width * spendingRatio, height: 6)
-                                .animation(.spring(response: 0.7, dampingFraction: 0.8), value: spendingRatio)
-                            // 月進度指示針（細白豎棒，指示月份走到哪）
-                            Capsule()
-                                .fill(.white.opacity(0.92))
-                                .frame(width: 2, height: 6)
-                                .shadow(color: .black.opacity(0.25), radius: 1.5, x: 0, y: 0)
-                                .offset(x: max(0, geo.size.width * headerMonthProgress - 1))
-                                .animation(.spring(response: 0.7, dampingFraction: 0.8), value: headerMonthProgress)
-                        }
-                    }
-                    .frame(height: 6)
-
-                    HStack {
-                        // 警示圖示已移至卡片下方的 HeroOverspendHint（emoji 小字提示），
-                        // 卡內只留純數值；門檻常數統一由 HeroOverspendHint 提供
-                        Text("支出 \(Int(rawSpendingRatio * 100))%")
-                        .font(.caption2)
-                        .foregroundStyle(spendingRatio > HeroOverspendHint.dangerRatio
-                                         ? Color(red: 1.0, green: 0.78, blue: 0.75)
-                                         : spendingRatio > headerMonthProgress + HeroOverspendHint.warnLead
-                                           ? Color(red: 1.0, green: 0.90, blue: 0.55)
-                                           : .white.opacity(0.62))
-                        Spacer()
-                        Text("月進度 \(Int(headerMonthProgress * 100))%")
-                            .font(.caption2)
-                            .foregroundStyle(.white.opacity(0.60))
-                    }
-                }
-            }
-
-            // 收入分類彩條（≥2 個分類才顯示；設計語言對齊 FinanceOverviewView totalAssetsCard）
-            if catAmounts.count > 1 && totalCatIncome > 0 {
-                Rectangle()
-                    .fill(.white.opacity(0.20))
-                    .frame(height: 0.5)
-                    .padding(.vertical, 12)
-
-                VStack(spacing: 6) {
-                    // 比例彩條（glow overlay 增加立體感）
-                    GeometryReader { geo in
-                        HStack(spacing: 2) {
-                            ForEach(Array(catAmounts.enumerated()), id: \.offset) { _, item in
-                                RoundedRectangle(cornerRadius: 2)
-                                    .fill(incomeCategoryColor(item.category).opacity(0.90))
-                                    .frame(
-                                        width: max(3, CGFloat(item.amount / totalCatIncome) *
-                                                   (geo.size.width - CGFloat(max(0, catAmounts.count - 1)) * 2))
-                                    )
-                            }
-                        }
-                    }
-                    .frame(height: 6)
-                    .clipShape(RoundedRectangle(cornerRadius: 3))
-                    .overlay(
-                        // 頂部白色高亮 + 底部柔化，增加彩條立體感
-                        LinearGradient(
-                            colors: [.white.opacity(0.28), .clear, .black.opacity(0.08)],
-                            startPoint: .top, endPoint: .bottom
-                        )
-                        .clipShape(RoundedRectangle(cornerRadius: 3))
-                    )
-
-                    // 圖例：色圓點 + 分類名稱橫排
-                    HStack(spacing: 8) {
-                        ForEach(Array(catAmounts.enumerated()), id: \.offset) { _, item in
-                            HStack(spacing: 3) {
-                                Circle()
-                                    .fill(incomeCategoryColor(item.category))
-                                    .frame(width: 5, height: 5)
-                                Text(item.category.rawValue)
-                                    .font(.system(size: 9, weight: .medium))
-                                    .foregroundStyle(.white.opacity(0.80))
-                            }
-                        }
-                        Spacer(minLength: 0)
-                    }
-                }
-            }
-        }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 20)
-        .heroCardShell(card: .income) {
-            // 單月收入趨勢曲線背景（HeroTrendBackground 標準模板）
-            HeroTrendBackground(points: heroSeries, stepBack: 2_592_000)
-        }
-        .padding(.horizontal, 16)
-        .padding(.top, 10)
-        .padding(.bottom, 4)
     }
 
     // MARK: - 篩選
@@ -800,30 +508,6 @@ struct IncomeView: View {
             ms.bankDeposits = list
             lifeStore.update(ms)
         }
-    }
-
-    private func incomeCategoryColor(_ category: IncomeCategory) -> Color {
-        switch category {
-        case .salary:     return Color(red: 0.16, green: 0.74, blue: 0.50)
-        case .bonus:      return Color(red: 1.00, green: 0.72, blue: 0.18)
-        case .gift:       return Color(red: 1.00, green: 0.35, blue: 0.55)
-        case .luck:       return Color(red: 0.68, green: 0.40, blue: 1.00)
-        case .investment: return Color(red: 0.27, green: 0.67, blue: 0.99)
-        }
-    }
-
-    // mini 收入分類彩條用：依收入金額加總，取排名前 N 大的分類比例
-    private var incomeCategoryAmounts: [(category: IncomeCategory, amount: Double)] {
-        var amounts: [IncomeCategory: Double] = [:]
-        for income in store.incomes {
-            amounts[income.category, default: 0] += income.amount
-        }
-        return IncomeCategory.allCases
-            .compactMap { cat -> (category: IncomeCategory, amount: Double)? in
-                let v = amounts[cat, default: 0]
-                return v > 0 ? (cat, v) : nil
-            }
-            .sorted { $0.amount > $1.amount }
     }
 
     // MARK: - 分組

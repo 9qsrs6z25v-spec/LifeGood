@@ -3722,8 +3722,9 @@ struct HeroCardOverrideView: View {
                             .foregroundStyle(.secondary)
                     }
                     // [v25.522] 收支總覽最上面改成看板（OverviewBoard），不走英雄卡殼層了
-                    if card == .overview {
-                        Label("收支總覽最上面的看板是固定的設計（右上角的太陽跟著月進度走），跟著淺色／深色模式，只有「圓角」會跟著這裡，漸層、KPI 與大字的設定不會作用在它上面。",
+                    // [v25.526] 變動支出、收入、固定支出、圖表四頁也一起換成看板（天空＋風景）
+                    if [HeroCard.overview, .variableExpense, .income, .fixedExpense, .chart].contains(card) {
+                        Label("這一頁最上面的看板是固定的天空插畫，下面那幅風景用你這個月的資料畫（總覽是城市、變動支出是市集、收入是山、固定支出是列車、圖表是星空）。看板跟著淺色／深色模式（圖表固定是夜空），只有「圓角」會跟著這裡，漸層、KPI 與大字的設定不會作用在它上面。",
                               systemImage: "info.circle.fill")
                             .font(.caption)
                             .foregroundStyle(.secondary)
