@@ -324,6 +324,8 @@ struct TripExpenseSheet: View {
                 AddExpenseView(expenseType: e.expenseType, editingExpense: e)
             }
         }
+        // [v25.521] iPad／Mac：這一頁撐到接近視窗大小（電腦版「介面有點小」）
+        .windowSizedPage()
     }
 
     // MARK: 量級

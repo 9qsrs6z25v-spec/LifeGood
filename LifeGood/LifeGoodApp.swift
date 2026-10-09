@@ -115,6 +115,8 @@ struct LifeGoodApp: App {
             // 直接賦值，使用者永遠看到硬切。搬進 View 之後才是一般的、可靠的動畫路徑。
             LaunchGate {
             MainTabView()
+                // [v25.521] 量主畫面大小（iPad／Mac 的視窗可以拉伸了），一整頁的 sheet 照它撐開
+                .measuresAppWindow()
                 .environmentObject(expenseStore)
                 .environmentObject(financeStore)
                 .environmentObject(lifeStore)

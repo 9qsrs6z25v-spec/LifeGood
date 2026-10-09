@@ -330,6 +330,8 @@ struct MainTabView: View {
     /// 家庭子功能；空字串代表選的是「家庭」本身
     @AppStorage("family_mgmt_feature") private var familyMgmtFeatureRaw: String = ""
     @State private var isSettingsActive: Bool = false
+    /// [v25.521] 主畫面的大小（LifeGoodApp 量好放進環境）。邊緣滑動判斷「右緣」用它
+    @Environment(\.appWindowSize) private var appWindowSize
     // UI美化：matchedGeometryEffect 讓底部 Tab Bar 選中指示器在頁籤間滑動而非消失/出現
     @Namespace private var tabBarNamespace
     // 佔位用（.hidden()）bottomTabBar 副本專用的獨立 namespace：避免與下方真正顯示的
@@ -1553,7 +1555,9 @@ struct MainTabView: View {
         let dx = value.translation.width
         let dy = value.translation.height
         guard abs(dx) > abs(dy) * 1.5 else { return }   // 必須以水平為主，斜向/垂直不觸發
-        let screenW = UIScreen.main.bounds.width
+        // [v25.521] 用主畫面的寬，不用螢幕寬：iPad／Mac 的視窗可以拉伸之後兩者不一樣，
+        // 視窗比螢幕窄時「右緣」永遠碰不到，右緣滑動就失效了
+        let screenW = appWindowSize.width > 0 ? appWindowSize.width : UIScreen.main.bounds.width
         let startX = value.startLocation.x
 
         if startX <= Self.edgeSwipeWidth, dx > 60 {

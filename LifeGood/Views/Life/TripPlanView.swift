@@ -115,6 +115,8 @@ struct TripPlanListView: View {
             .onAppear { openPendingPlan() }
             .onChange(of: deepLink.pendingTripPlanId) { _, _ in openPendingPlan() }
         }
+        // [v25.521] iPad／Mac：這一頁撐到接近視窗大小（電腦版「介面有點小」）
+        .windowSizedPage()
     }
 
     /// 取走待開的行程 id。找不到那份行程（已被刪掉）就什麼都不做，
@@ -504,6 +506,8 @@ struct TripPlanDetailView: View {
             // 進來就把缺的路線補齊；只算指紋對不上的段落，所以不會每次都整條重打
             .task(id: routeTaskKey) { await recalculate() }
         }
+        // [v25.521] iPad／Mac：這一頁撐到接近視窗大小（電腦版「介面有點小」）
+        .windowSizedPage()
     }
 
     /// [v25.518] 整頁的捲動區。
