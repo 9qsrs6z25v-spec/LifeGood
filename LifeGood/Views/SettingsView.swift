@@ -3729,6 +3729,13 @@ struct HeroCardOverrideView: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
+                    // [v25.527] 理財六頁也換成看板（資產小鎮、熱氣球、果園、今年這條路、街景、極光）
+                    if [HeroCard.financeOverview, .stock, .savings, .vehicle, .realEstate, .financeChart].contains(card) {
+                        Label("這一頁最上面的看板是固定的天空插畫，下面那幅風景用你的資料畫（理財總覽是資產小鎮、股票是熱氣球、儲蓄險是果園、載具是今年這條路、房地產是街景、理財圖表是極光）。看板跟著淺色／深色模式（理財圖表固定是夜空），只有「圓角」會跟著這裡，漸層、KPI 與大字的設定不會作用在它上面。",
+                              systemImage: "info.circle.fill")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
                 Section("顏色") {
                     ForEach(HeroTint.allCases) { t in

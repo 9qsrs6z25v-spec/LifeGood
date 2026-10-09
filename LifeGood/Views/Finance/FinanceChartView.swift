@@ -86,9 +86,20 @@ import Charts
 //      純視覺層調整，未變動任何金額計算或資料邏輯。
 //      （下次美化本檔案時，可轉往其他仍留有待辦的畫面）
 
+// [v25.527] 理財介面重做（使用者：「就照你建議的吧，一次做完」）：
+//   - 英雄卡換成極光看板（FinanceBoards.swift 的 FinanceChartBoard，一定是夜空）：極光的上緣是
+//     每個月的淨資產，底下切換近 1 年／近 3 年／全部；下面多一張「淨資產走勢」（資產、貸款、淨資產三條線）。
+//   - 資產配置改用跟總覽同一套數字（FinanceSnapshot）：儲蓄險用今天的價值、外幣換成台幣、
+//     賣掉的車不算。
+//   - 股票損益、房地產增值照「紅漲綠跌」。
+
 struct FinanceChartView: View {
     @EnvironmentObject var store: FinanceStore
     @EnvironmentObject var expenseStore: ExpenseStore
+    @Environment(\.colorScheme) private var colorScheme
+    @State private var period: FinanceChartPeriod = .year
+    /// 極光看板與淨資產走勢（回推每個月的淨資產，放在 .task 裡算）
+    @State private var chartBoard = FinanceChartBoardData()
 
     @State private var heroCardAppeared = false
     @State private var sectionsAppeared = false
@@ -101,8 +112,8 @@ struct FinanceChartView: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 20) {
-                    // 英雄摘要卡
-                    financeChartHeroCard
+                    // 極光看板
+                    FinanceChartBoard(data: chartBoard, period: $period)
                         .padding(.horizontal)
                         .opacity(heroCardAppeared ? 1 : 0)
                         .offset(y: heroCardAppeared ? 0 : 20)
@@ -111,6 +122,12 @@ struct FinanceChartView: View {
                                 heroCardAppeared = true
                             }
                         }
+
+                    FinanceNetWorthCard(points: chartBoard.points)
+                        .padding(.horizontal)
+                        .opacity(sectionsAppeared ? 1 : 0)
+                        .offset(y: sectionsAppeared ? 0 : 16)
+                        .animation(.spring(response: 0.50, dampingFraction: 0.80).delay(0.04), value: sectionsAppeared)
 
                     allocationChart
                         .opacity(sectionsAppeared ? 1 : 0)
@@ -136,6 +153,9 @@ struct FinanceChartView: View {
             }
             .background(Color(.systemGroupedBackground))
             .navigationTitle("理財圖表")
+            .task(id: "\(store.modifyID)-\(expenseStore.modifyID)-\(period.rawValue)") {
+                chartBoard = FinanceChartBoardData.build(finance: store, expense: expenseStore, period: period)
+            }
             .onAppear {
                 withAnimation(.spring(response: 0.52, dampingFraction: 0.82).delay(0.12)) {
                     sectionsAppeared = true
@@ -168,31 +188,21 @@ struct FinanceChartView: View {
         }
     }
 
-    // MARK: - 英雄卡片
+    // MARK: - 資產配置的數字
 
-    /// 儲蓄險 currentValue／totalPaid 是以保單自己的 currencyCode 存值（非一律 NT$，
-    /// 可在 AddSavingsInsuranceView 選擇 USD/JPY 等幣別），但 FinanceStore.totalInsuranceValue／
-    /// assetAllocations 直接加總未做匯率換算，會讓外幣保單的原始數字被當成 NT$ 計入總資產與
-    /// 圓餅圖，與 FinanceOverviewView（已比照 insuranceSummaryNTD 換算）互相矛盾。這裡補上同型換算。
-    private var insuranceSummaryNTD: (value: Double, paid: Double) {
-        let rates = expenseStore.currencyRates.reduce(into: ["NT$": 1.0]) { $0[$1.code] = $1.rate }
-        return store.insurances.reduce(into: (value: 0.0, paid: 0.0)) { acc, ins in
-            let rate = rates[ins.currencyCode] ?? 1
-            acc.value += ins.currentValue * rate
-            acc.paid += ins.totalPaid * rate
-        }
+    /// [v25.527] 漲跌的顏色照台股習慣「紅漲綠跌」（跟股票頁同一套 MoneyTone）
+    private func upDownColor(_ v: Double) -> Color {
+        (v >= 0 ? MoneyTone.up : MoneyTone.down).color(TripBoardPalette(colorScheme))
     }
 
-    private var totalAssetsValue: Double {
-        insuranceSummaryNTD.value + store.totalStockValue + store.totalVehicleValue + store.totalRealEstateValue
-    }
-
-    /// 對齊 FinanceStore.assetAllocations 的分類/排序邏輯，唯獨儲蓄險改用換算後的 NTD 現值。
+    /// [v25.527] 跟理財總覽同一套數字（FinanceSnapshot）：儲蓄險用今天的價值（存檔裡的 currentValue
+    /// 是最後一次編輯那天算的）、外幣換成台幣、滿期的保單與賣掉的車不算。
     private var assetAllocationsNTD: [AssetAllocation] {
-        let ins = insuranceSummaryNTD.value
-        let stk = store.totalStockValue
-        let veh = store.totalVehicleValue
-        let re  = store.totalRealEstateValue
+        let s = chartBoard.snapshot
+        let ins = s.savings
+        let stk = s.stock
+        let veh = s.vehicle
+        let re  = s.realEstate
         let total = ins + stk + veh + re
         guard total > 0 else { return [] }
         var result: [AssetAllocation] = []
@@ -202,66 +212,6 @@ struct FinanceChartView: View {
         if re  > 0 { result.append(AssetAllocation(type: .realEstate,       value: re,  percentage: re  / total * 100)) }
         return result.sorted { $0.value > $1.value }
     }
-
-    private var financeChartHeroCard: some View {
-        let activeStockCount = store.stocks.filter { !$0.isSold }.count
-        let activeRealEstateCount = store.realEstates.filter { !$0.isSold }.count
-        return VStack(spacing: 0) {
-            // 頂部：總資產 + 計數膠囊
-            HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("理財資產總覽")
-                        .font(.caption)
-                        .foregroundStyle(.white.opacity(0.78))
-                    Text(fmtShort(totalAssetsValue))
-                        .heroBigValueFont()
-                        .foregroundStyle(.white)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.6)
-                        .contentTransition(.numericText())
-                    Text("NT$ 市值估算")
-                        .font(.caption2.weight(.medium))
-                        .foregroundStyle(.white.opacity(0.60))
-                        .padding(.top, 1)
-                }
-                Spacer()
-                // 與下方 KPI 橫列的房地產筆數口徑一致（排除已出售），避免同一張卡片上總數與明細互相矛盾
-                let totalCount = activeStockCount + activeRealEstateCount + store.insurances.count
-                Text("\(totalCount) 項")
-                    .font(.caption.weight(.semibold))
-                    .padding(.horizontal, 11)
-                    .padding(.vertical, 5)
-                    .background(.white.opacity(0.22))
-                    .clipShape(Capsule())
-                    .foregroundStyle(.white)
-            }
-
-            // 分隔線
-            Rectangle()
-                .fill(.white.opacity(0.20))
-                .frame(height: 0.5)
-                .padding(.vertical, 14)
-
-            // KPI 橫列：股票 / 房地產 / 儲蓄險 筆數
-            HStack(spacing: 0) {
-                HeroKpiCell(label: "股票", value: "\(activeStockCount) 檔",
-                             icon: "chart.line.uptrend.xyaxis")
-                HeroKpiDivider()
-                HeroKpiCell(label: "房地產", value: "\(activeRealEstateCount) 筆",
-                             icon: "building.2.fill")
-                HeroKpiDivider()
-                HeroKpiCell(label: "儲蓄險", value: "\(store.insurances.count) 張",
-                             icon: "shield.fill")
-            }
-            .padding(.vertical, 10)
-            .background(.white.opacity(0.08))
-            .clipShape(RoundedRectangle(cornerRadius: 10))
-        }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 18)
-        .heroCardShell(card: .financeChart)
-    }
-
 
     // MARK: - 資產配置圖
 
@@ -413,7 +363,7 @@ struct FinanceChartView: View {
                 let sortedStocks = Array(stocksSortedByProfitLoss.enumerated())
                 // 加總損益摘要卡
                 let totalPL = store.stocks.reduce(0.0) { $0 + $1.profitLoss }
-                let plColor: Color = totalPL >= 0 ? .green : .red
+                let plColor = upDownColor(totalPL)
                 HStack(spacing: 12) {
                     ZStack {
                         Circle()
@@ -462,9 +412,7 @@ struct FinanceChartView: View {
                     )
                     .foregroundStyle(
                         LinearGradient(
-                            colors: stock.profitLoss >= 0
-                                ? [Color.green, Color.green.opacity(0.65)]
-                                : [Color.red, Color.red.opacity(0.65)],
+                            colors: [upDownColor(stock.profitLoss), upDownColor(stock.profitLoss).opacity(0.65)],
                             startPoint: .top, endPoint: .bottom
                         )
                     )
@@ -489,7 +437,7 @@ struct FinanceChartView: View {
                 VStack(spacing: 0) {
                     ForEach(sortedStocks, id: \.element.id) { i, stock in
                         let pl = stock.profitLoss
-                        let plC: Color = pl >= 0 ? .green : .red
+                        let plC = upDownColor(pl)
 
                         HStack(spacing: 12) {
                             ZStack {
@@ -581,7 +529,7 @@ struct FinanceChartView: View {
             } else {
                 VStack(spacing: 0) {
                     ForEach(Array(store.realEstates.enumerated()), id: \.element.id) { i, item in
-                        let appColor: Color = item.appreciationRate >= 0 ? .green : .red
+                        let appColor = upDownColor(item.appreciationRate)
 
                         HStack(spacing: 12) {
                             ZStack {
@@ -729,7 +677,8 @@ struct FinanceChartView: View {
                             Spacer()
 
                             VStack(alignment: .trailing, spacing: 1) {
-                                Text(fmtShort(item.currentValue))
+                                // [v25.527] 今天的價值（存檔裡的 currentValue 是最後一次編輯那天算的）
+                                Text(fmtShort(item.moneyIsLive() ? item.calculatedCurrentValue : item.calculatedExpectedReturn))
                                     .font(.system(size: 15, weight: .bold, design: .rounded))
                                     .foregroundStyle(.primary)
                                     .lineLimit(1)

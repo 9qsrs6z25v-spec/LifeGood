@@ -92,6 +92,13 @@ enum MoneyBoardScene: Equatable {
     case mountains(MoneyMountainScene)
     case railway(MoneyRailScene)
     case stars(MoneyStarScene)
+    // [v25.527] 理財六頁（資料與畫法在 FinanceBoardScenes.swift）
+    case town(FinTownScene)
+    case balloons(FinBalloonScene)
+    case orchard(FinOrchardScene)
+    case road(FinRoadScene)
+    case street(FinStreetScene)
+    case aurora(FinAuroraScene)
 }
 
 // MARK: - 頭部的字
@@ -124,6 +131,8 @@ struct MoneyBoardHeader: View {
     var dateIcon: String = "calendar"
     var capsule: String? = nil
     var capsuleIcon: String? = nil
+    /// 膠囊的字色（股票的今日漲跌：紅漲綠跌）；nil＝一般的膠囊字色
+    var capsuleTint: Color? = nil
     let label: String
     let big: String
     var bigTone: MoneyTone? = nil
@@ -215,7 +224,7 @@ struct MoneyBoardHeader: View {
                     .lineLimit(1)
             }
             .fixedSize()
-            .foregroundStyle(pal.capsuleText)
+            .foregroundStyle(capsuleTint ?? pal.capsuleText)
             .padding(.horizontal, 11)
             .frame(minHeight: 26)
             .background(pal.capsuleFill, in: Capsule())
@@ -305,6 +314,12 @@ extension MoneyBoardSky {
         case .mountains(let s): paintMountains(&ctx, rect: bandRect, scene: s, dark: a.dark, seed: a.seed)
         case .railway(let s): paintRailway(&ctx, rect: bandRect, scene: s, dark: a.dark, seed: a.seed)
         case .stars(let s): paintConstellation(&ctx, rect: bandRect, scene: s, seed: a.seed)
+        case .town(let s): paintTown(&ctx, rect: bandRect, scene: s, dark: a.dark, seed: a.seed)
+        case .balloons(let s): paintBalloons(&ctx, rect: bandRect, scene: s, dark: a.dark, seed: a.seed)
+        case .orchard(let s): paintOrchard(&ctx, rect: bandRect, scene: s, dark: a.dark, seed: a.seed)
+        case .road(let s): paintYearRoad(&ctx, rect: bandRect, scene: s, dark: a.dark, seed: a.seed)
+        case .street(let s): paintStreet(&ctx, rect: bandRect, scene: s, dark: a.dark, seed: a.seed)
+        case .aurora(let s): paintAurora(&ctx, rect: bandRect, scene: s, seed: a.seed)
         }
 
         if let greeting {

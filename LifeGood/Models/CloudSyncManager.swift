@@ -46,6 +46,8 @@ final class CloudSyncManager: ObservableObject {
         // 少用的裝置會先拉到主力機的完整歷史，記錄本週快照時是在完整清單上加點再推回，
         // 歷史只增不減；不需自訂合併邏輯
         "stock_value_weekly_history",
+        // [v25.527] 理財每個月的淨資產（FinanceHistory.key）：同上，先拉後推、歷史只增不減
+        "finance_month_records_v1",
         // 進階設定＋AI 供應商選擇的打包 blob（KV 機制只搬 Data，散裝 Double/Int/Bool
         // 由 AppPreferenceSync 推送前打包／拉取後解包）
         AppPreferenceSync.blobKey

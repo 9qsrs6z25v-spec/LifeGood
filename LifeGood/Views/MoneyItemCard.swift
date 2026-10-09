@@ -35,6 +35,14 @@ struct MoneyItemProgress: Equatable {
     let trailing: String?
 }
 
+/// 股票卡面上的一根 K 棒（v25.527）
+struct MoneyCandle: Equatable {
+    let open: Double
+    let high: Double
+    let low: Double
+    let close: Double
+}
+
 /// 綁了旅程的支出：卡片底下那條天際線
 struct MoneyItemSkyline: Equatable {
     let landmarks: [TripLandmark]
@@ -68,6 +76,13 @@ struct MoneyItem: Identifiable, Equatable {
     var progress: MoneyItemProgress? = nil
     /// 已停止的固定支出、已結束的固定薪水：整張淡一點，但還在清單裡
     var dimmed: Bool = false
+    /// [v25.527] 股票：卡面換成近期的 K 線（沒有日線快取就是一般的插畫）
+    var candles: [MoneyCandle]? = nil
+    /// [v25.527] 卡面左下的手寫字（沒給就寫分類的英文字；有城市名時寫城市）
+    var scriptWord: String? = nil
+    var scriptCaps: String? = nil
+    /// [v25.527] 金額的字色（股票的損益：紅漲綠跌）；nil＝收入綠、其他一般字色
+    var amountTone: MoneyTone? = nil
 
     /// UUID 的雜湊每次開 App 都不一樣；紋理要每次都長一樣，所以用位元組算
     static func seed(_ id: UUID) -> Int {
@@ -155,7 +170,8 @@ struct MoneyItemCard: View {
         .background(alignment: .leading) {
             MoneyPanel(theme: item.theme, seed: item.seed, monogram: item.monogram, badge: item.badge,
                        photoURL: item.photoURL, latitude: item.latitude, longitude: item.longitude,
-                       place: item.place, width: w)
+                       place: item.place, candles: item.candles, scriptWord: item.scriptWord,
+                       scriptCaps: item.scriptCaps, width: w)
                 .frame(width: w)
                 .clipShape(MoneyPanelShape())
         }
@@ -194,7 +210,8 @@ struct MoneyItemCard: View {
             Text(item.amount)
                 .font(.system(.headline, design: .rounded).weight(.heavy))
                 .monospacedDigit()
-                .foregroundStyle(item.amountStyle == .income ? MoneyTone.good.color(pal) : Color.primary)
+                .foregroundStyle(item.amountTone.map { $0.color(pal) }
+                                 ?? (item.amountStyle == .income ? MoneyTone.good.color(pal) : Color.primary))
             if let unit = item.unit {
                 Text(unit)
                     .font(.caption2.weight(.bold))
@@ -422,6 +439,8 @@ struct MoneyGroupHeader: View {
     let title: String
     let count: Int
     let total: String
+    /// 「3 項」的單位（股票是「檔」、保單是「張」）
+    var unit: String = "項"
 
     var body: some View {
         HStack(spacing: 9) {
@@ -432,7 +451,7 @@ struct MoneyGroupHeader: View {
             Text(title)
                 .font(.headline)
                 .foregroundStyle(.primary)
-            Text("\(count) 項")
+            Text("\(count) \(unit)")
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.secondary)
             Spacer(minLength: 6)
@@ -554,6 +573,9 @@ struct MoneyCategoryPostcard: View {
     /// 比上個月同一段時間（↑20%／↓8%／持平）；上個月那段時間沒花就是 nil
     let change: String?
     let changeTone: MoneyTone
+    /// [v25.527] 理財總覽的明信片：底下那一行換成自己的字（「房貸還要繳 756萬」）
+    var customFooter: Text? = nil
+    var customFooterA11y: String? = nil
 
     @Environment(\.colorScheme) private var scheme
 
@@ -621,13 +643,16 @@ struct MoneyCategoryPostcard: View {
                 radius: 6, x: 0, y: 2)
         .dynamicTypeSize(...DynamicTypeSize.accessibility2)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(name + "，" + amount + "，占 " + MoneyFormat.percent(share) + "，\(count) 筆"
-                            + (change.map { "，比上月同期 " + $0 } ?? ""))
+        .accessibilityLabel(name + "，" + amount + "，占 " + MoneyFormat.percent(share)
+                            + (customFooterA11y.map { "，" + $0 }
+                               ?? ("，\(count) 筆" + (change.map { "，比上月同期 " + $0 } ?? ""))))
     }
 
     private func footer(_ pal: TripBoardPalette) -> some View {
         Group {
-            if let change {
+            if let customFooter {
+                customFooter
+            } else if let change {
                 Text("\(count) 筆・比上月同期 \(Text(change).foregroundStyle(changeTone.color(pal)))")
             } else {
                 Text("\(count) 筆")

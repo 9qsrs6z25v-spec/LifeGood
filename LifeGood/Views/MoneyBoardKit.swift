@@ -42,8 +42,11 @@ enum MoneyFormat {
 }
 
 /// 好、注意、超過——三種狀態的字色（淺色 4.5:1 以上；深色同色相調亮）
+///
+/// [v25.527] 加 up／down：股價的漲跌照台股習慣「紅漲綠跌」（使用者選的）。
+/// 跟 good／bad 分開，因為意思不一樣：花得少是好（綠），股票漲是紅。
 enum MoneyTone {
-    case good, warn, bad, neutral
+    case good, warn, bad, neutral, up, down
 
     func color(_ pal: TripBoardPalette) -> Color {
         switch self {
@@ -51,7 +54,18 @@ enum MoneyTone {
         case .warn: return pal.dark ? Color(tb: 0xFFC14D) : Color(tb: 0xA65300)
         case .bad: return pal.dark ? Color(tb: 0xFF7A8A) : Color(tb: 0xC4243C)
         case .neutral: return pal.label
+        case .up: return pal.dark ? Color(tb: 0xFF6B6B) : Color(tb: 0xD62F3A)
+        case .down: return pal.dark ? Color(tb: 0x5BD99A) : Color(tb: 0x1F8A50)
         }
+    }
+
+    /// 漲跌（紅漲綠跌）；差不到 0.05% 算平盤
+    static func change(_ v: Double, base: Double = 1) -> MoneyTone {
+        guard base != 0 else { return .neutral }
+        let r = v / abs(base)
+        if r > 0.0005 { return .up }
+        if r < -0.0005 { return .down }
+        return .neutral
     }
 
     /// 花得比較多是「注意」、比較少是「好」；差不到 5% 不上色

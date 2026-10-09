@@ -90,6 +90,7 @@ struct StockDetailView: View {
     @EnvironmentObject var lifeStore: LifeStore
     @EnvironmentObject var subscription: SubscriptionManager
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.colorScheme) private var colorScheme
 
     /// @State 而非 let：左右滑動可切換上下一檔（同一張卡換內容，不重開 sheet）
     @State private var stockId: UUID
@@ -300,7 +301,7 @@ struct StockDetailView: View {
         // animated: false 供 ImageRenderer 匯出分享圖（靜態渲染跳過進場動畫）。
         let market = splitWan(stock.marketValue)
         let pl = stock.profitLoss
-        let plColor: Color = pl >= 0 ? .green : .red
+        let plColor = stockPLColor(pl)
         return FlashCardView(
             rarity: rarity,
             categoryLabel: "股票",
@@ -448,7 +449,8 @@ struct StockDetailView: View {
     }
 
     private func exportTransactionRow(_ tx: StockTransaction) -> AnyView {
-        let color: Color = tx.kind == .buy ? .green : .red
+        // [v25.527] 跟畫面上的交易列同一套：買進紅、賣出綠（台股習慣）
+        let color: Color = tx.kind == .buy ? .red : .green
         return AnyView(
             HStack(spacing: 10) {
                 Text(tx.kind.rawValue)
@@ -599,12 +601,12 @@ struct StockDetailView: View {
             // [v2] 損益 / 報酬率改為彩色 Capsule 膠囊（帶 stroke），對齊 StockView.stockCard 損益膠囊規格
             infoRow(label: "損益",
                     value: (pl >= 0 ? "+" : "") + fmt(pl),
-                    color: pl >= 0 ? .green : .red,
+                    color: stockPLColor(pl),
                     useCapsule: true)
             Divider().padding(.leading, 14)
             infoRow(label: "報酬率",
                     value: String(format: "%@%.2f%%", pl >= 0 ? "+" : "", stock.returnRate),
-                    color: pl >= 0 ? .green : .red,
+                    color: stockPLColor(pl),
                     useCapsule: true)
             Divider().padding(.leading, 14)
             infoRow(label: "購入日期", value: fmtDate(stock.purchaseDate), color: .secondary, useDateBadge: true)
@@ -1214,6 +1216,11 @@ struct StockDetailView: View {
             }
         }
         .padding(.horizontal, 14).padding(.vertical, 10)
+    }
+
+    /// [v25.527] 損益的顏色照台股習慣「紅漲綠跌」（跟股票頁的看板、卡片同一套 MoneyTone）
+    private func stockPLColor(_ pl: Double) -> Color {
+        MoneyTone.change(pl, base: max(stock.totalCost, 1)).color(TripBoardPalette(colorScheme))
     }
 
     private func fmt(_ v: Double) -> String {

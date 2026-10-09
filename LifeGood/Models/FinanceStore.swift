@@ -1,10 +1,13 @@
 import Foundation
 
 class FinanceStore: ObservableObject {
-    @Published var insurances: [SavingsInsurance] = [] { didSet { if !isLoading { saveInsurances() } } }
-    @Published var stocks: [Stock] = [] { didSet { if !isLoading { saveStocks() } } }
-    @Published var vehicles: [Vehicle] = [] { didSet { if !isLoading { saveVehicles() } } }
-    @Published var realEstates: [RealEstate] = [] { didSet { if !isLoading { saveRealEstates() } } }
+    @Published var insurances: [SavingsInsurance] = [] { didSet { modifyID = UUID(); if !isLoading { saveInsurances() } } }
+    @Published var stocks: [Stock] = [] { didSet { modifyID = UUID(); if !isLoading { saveStocks() } } }
+    @Published var vehicles: [Vehicle] = [] { didSet { modifyID = UUID(); if !isLoading { saveVehicles() } } }
+    @Published var realEstates: [RealEstate] = [] { didSet { modifyID = UUID(); if !isLoading { saveRealEstates() } } }
+    /// [v25.527] 任何一筆理財資料變了就換一個（含雲端同步拉下來的）：理財看板用
+    /// .task(id:) 只在資料真的變了才重算（同 ExpenseStore.modifyID）
+    @Published private(set) var modifyID = UUID()
 
     private let insKey = "lifegood_insurances"
     private let stockKey = "lifegood_stocks"

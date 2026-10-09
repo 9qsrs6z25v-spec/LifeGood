@@ -389,9 +389,10 @@ struct AddStockView: View {
                                 .minimumScaleFactor(0.7)
                                 .contentTransition(.numericText())
                         }
+                        // [v25.527] 紅漲綠跌（台股習慣）：賺是淡紅、賠是淡綠
                         .foregroundStyle(pl >= 0
-                            ? Color(red: 0.60, green: 1.00, blue: 0.75)
-                            : Color(red: 1.0, green: 0.78, blue: 0.75))
+                            ? Color(red: 1.0, green: 0.78, blue: 0.75)
+                            : Color(red: 0.60, green: 1.00, blue: 0.75))
                         .padding(.horizontal, 10).padding(.vertical, 6)
                         .background(.white.opacity(0.18))
                         .clipShape(Capsule())
@@ -762,9 +763,10 @@ struct AddStockView: View {
     private func quoteHeroCard(_ q: StockQuote) -> some View {
         let displayPrice = q.lastPrice > 0 ? q.lastPrice : q.yesterdayClose
         let isUp = q.isUp
+        // [v25.527] 紅漲綠跌（台股習慣）：漲是紅底、跌是綠底
         let plColor: Color = isUp
-            ? Color(red: 0.60, green: 1.00, blue: 0.75)
-            : Color(red: 1.0, green: 0.78, blue: 0.75)
+            ? Color(red: 1.0, green: 0.78, blue: 0.75)
+            : Color(red: 0.60, green: 1.00, blue: 0.75)
         let sign = isUp ? "+" : ""
 
         return VStack(spacing: 0) {
@@ -852,8 +854,8 @@ struct AddStockView: View {
             ZStack {
                 LinearGradient(
                     colors: isUp
-                        ? [Color(red: 0.15, green: 0.60, blue: 0.30), Color(red: 0.07, green: 0.40, blue: 0.20)]
-                        : [Color(red: 0.65, green: 0.18, blue: 0.22), Color(red: 0.42, green: 0.08, blue: 0.12)],
+                        ? [Color(red: 0.65, green: 0.18, blue: 0.22), Color(red: 0.42, green: 0.08, blue: 0.12)]
+                        : [Color(red: 0.15, green: 0.60, blue: 0.30), Color(red: 0.07, green: 0.40, blue: 0.20)],
                     startPoint: .topLeading,
                     endPoint: .bottomTrailing
                 )
@@ -885,7 +887,7 @@ struct AddStockView: View {
             )
             .clipShape(RoundedRectangle(cornerRadius: 20))
         )
-        .shadow(color: (isUp ? Color.green : Color.red).opacity(0.35), radius: 16, x: 0, y: 7)
+        .shadow(color: (isUp ? Color.red : Color.green).opacity(0.35), radius: 16, x: 0, y: 7)
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
     }
@@ -927,18 +929,18 @@ struct AddStockView: View {
                                 .foregroundStyle(.secondary)
                             Text((soldPL >= 0 ? "+" : "") + formatCurrency(soldPL))
                                 .font(.system(size: 16, weight: .bold, design: .rounded))
-                                .foregroundStyle(soldPL >= 0 ? .green : .red)
+                                .foregroundStyle(soldPL >= 0 ? .red : .green)
                                 .contentTransition(.numericText())
                         }
                         Spacer()
                         Text(String(format: "%@%.1f%%", soldRR >= 0 ? "+" : "", soldRR))
                             .font(.system(size: 12, weight: .bold, design: .rounded))
                             .padding(.horizontal, 9).padding(.vertical, 4)
-                            .background((soldPL >= 0 ? Color.green : Color.red).opacity(0.12))
-                            .foregroundStyle(soldPL >= 0 ? .green : .red)
+                            .background((soldPL >= 0 ? Color.red : Color.green).opacity(0.12))
+                            .foregroundStyle(soldPL >= 0 ? .red : .green)
                             .clipShape(Capsule())
                             .overlay(Capsule().stroke(
-                                (soldPL >= 0 ? Color.green : Color.red).opacity(0.22), lineWidth: 0.75
+                                (soldPL >= 0 ? Color.red : Color.green).opacity(0.22), lineWidth: 0.75
                             ))
                     }
                 }
@@ -964,18 +966,19 @@ struct AddStockView: View {
                         .foregroundStyle(.secondary)
                     Text((pl >= 0 ? "+" : "") + formatCurrency(pl))
                         .font(.system(size: 18, weight: .bold, design: .rounded))
-                        .foregroundStyle(pl >= 0 ? .green : .red)
+                        .foregroundStyle(pl >= 0 ? .red : .green)
                         .contentTransition(.numericText())
                 }
                 Spacer()
                 Text(String(format: "%@%.1f%%", returnRate >= 0 ? "+" : "", returnRate))
                     .font(.system(size: 13, weight: .bold, design: .rounded))
                     .padding(.horizontal, 10).padding(.vertical, 5)
-                    .background((pl >= 0 ? Color.green : Color.red).opacity(0.12))
-                    .foregroundStyle(pl >= 0 ? .green : .red)
+                    // [v25.527] 紅漲綠跌（台股習慣）
+                    .background((pl >= 0 ? Color.red : Color.green).opacity(0.12))
+                    .foregroundStyle(pl >= 0 ? .red : .green)
                     .clipShape(Capsule())
                     .overlay(Capsule().stroke(
-                        (pl >= 0 ? Color.green : Color.red).opacity(0.25), lineWidth: 0.75
+                        (pl >= 0 ? Color.red : Color.green).opacity(0.25), lineWidth: 0.75
                     ))
             }
             .padding(.horizontal, 14).padding(.vertical, 12)

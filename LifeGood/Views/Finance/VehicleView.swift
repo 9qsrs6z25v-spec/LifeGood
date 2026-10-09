@@ -69,6 +69,14 @@ enum VehicleSortOption: String, CaseIterable, Identifiable {
     }
 }
 
+// [v25.527] 理財介面重做（使用者：「就照你建議的吧，一次做完」）：
+//   - 青色英雄卡換成「今年這條路」看板（FinanceBoards.swift 的 VehicleBoard）：1 月到 12 月，
+//     車停在今天，路邊一個月一個圓標（大小＝那個月花多少），前面的路牌是接下來要繳的；
+//     膠囊是每度電、每公里、折舊、車貸還要繳。
+//   - 看板只算還持有的車（原本的總估值連賣掉的也加進去）。
+//   - 車輛卡換成跟收支同一張項目卡（MoneyItemCard）：卡面是最新的一張照片，沒有就是插畫；
+//     有車貸的多一條「車貸 已繳 28／60 期・還要 NT$38萬」。賣掉的另外一段、淡一點。
+
 struct VehicleView: View {
     @EnvironmentObject var store: FinanceStore
     @EnvironmentObject var expenseStore: ExpenseStore
@@ -85,10 +93,9 @@ struct VehicleView: View {
     @State private var cardsAppeared = false
     @State private var emptyIconPulse = false
     @State private var emptyPulseTask: Task<Void, Never>?
-    @State private var vehiclesSectionHeaderAppeared = false  // [v2] Section 標頭進場動畫旗標
-    // [v3] mini allocation bar 左展開動畫旗標
-    @State private var miniBarAppeared = false
-    @State private var miniBarTask: Task<Void, Never>?
+    /// 每台車的幾個數字（每度電、車貸…）與看板：掃記帳的支出算，放在 .task 裡
+    @State private var facts: [UUID: VehicleFacts] = [:]
+    @State private var board = VehicleBoardData()
 
     private let heroAccent    = Color(red: 0.18, green: 0.68, blue: 0.68)
     private let heroAccentDark = Color(red: 0.08, green: 0.46, blue: 0.48)
@@ -108,11 +115,17 @@ struct VehicleView: View {
     }
 
     var body: some View {
-        NavigationStack {
+        let sorted = sortedVehicles
+        let active = sorted.filter { !$0.isSold }
+        let sold = sorted.filter(\.isSold)
+        return NavigationStack {
             List {
-                // 英雄摘要卡片嵌入 List，與列表一起捲動
+                // 看板嵌入 List，與列表一起捲動
                 Section {
-                    summaryHeader
+                    VehicleBoard(data: board)
+                        .padding(.horizontal, 16)
+                        .padding(.top, 10)
+                        .padding(.bottom, 4)
                         .listRowInsets(EdgeInsets())
                         .listRowBackground(Color.clear)
                         .listRowSeparator(.hidden)
@@ -121,13 +134,6 @@ struct VehicleView: View {
                         .onAppear {
                             withAnimation(.spring(response: 0.55, dampingFraction: 0.78)) {
                                 headerAppeared = true
-                            }
-                            // [v3] 英雄卡進場後 0.45s 觸發 mini 彩條左展開
-                            miniBarTask?.cancel()
-                            miniBarTask = Task { @MainActor in
-                                try? await Task.sleep(nanoseconds: 450_000_000)
-                                guard !Task.isCancelled else { return }
-                                miniBarAppeared = true
                             }
                         }
                 }
@@ -140,64 +146,26 @@ struct VehicleView: View {
                             .listRowSeparator(.hidden)
                     }
                 } else {
-                    Section {
-                        ForEach(Array(sortedVehicles.enumerated()), id: \.element.id) { idx, item in
-                            vehicleCard(item)
-                                .listRowBackground(Color.clear)
-                                .listRowSeparator(.hidden)
-                                .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
-                                .opacity(cardsAppeared ? 1 : 0)
-                                .offset(y: cardsAppeared ? 0 : 18)
-                                .animation(
-                                    .spring(response: 0.45, dampingFraction: 0.82)
-                                        .delay(0.05 * Double(idx)),
-                                    value: cardsAppeared
-                                )
-                                .onTapGesture { viewingItem = item }
-                                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                                    Button(role: .destructive) {
-                                        guard subscription.isPremium else {
-                                            showPremiumAlert = true
-                                            return
-                                        }
-                                        var linkedIds = Set<UUID>()
-                                        for fe in item.fixedExpenses {
-                                            if let id = fe.linkedExpenseId { linkedIds.insert(id) }
-                                        }
-                                        for ve in item.variableExpenses {
-                                            if let id = ve.linkedExpenseId { linkedIds.insert(id) }
-                                        }
-                                        if !linkedIds.isEmpty {
-                                            for exp in expenseStore.expenses where linkedIds.contains(exp.id) {
-                                                for name in exp.photoFileNames { Expense.deletePhoto(name) }
-                                            }
-                                            expenseStore.expenses.removeAll { linkedIds.contains($0.id) }
-                                        }
-                                        store.deleteVehicle(item)
-                                    } label: {
-                                        Label("刪除", systemImage: "trash")
-                                    }
-                                }
-                        }
-                    } header: {
-                        // [v2] 持有中 N 輛 Section 標頭，帶進場動畫
-                        activeVehiclesSectionHeader
-                            .opacity(vehiclesSectionHeaderAppeared ? 1 : 0)
-                            .offset(y: vehiclesSectionHeaderAppeared ? 0 : 8)
-                            .onAppear {
-                                withAnimation(.spring(response: 0.45, dampingFraction: 0.82).delay(0.12)) {
-                                    vehiclesSectionHeaderAppeared = true
-                                }
+                    if !active.isEmpty {
+                        Section(header: MoneyGroupHeader(theme: .finDrive, title: "持有中", count: active.count,
+                                                         total: MoneyFormat.short(board.value), unit: "輛")) {
+                            ForEach(Array(active.enumerated()), id: \.element.id) { idx, item in
+                                row(item, index: idx)
                             }
+                        }
                     }
-                    .onAppear {
-                        withAnimation(.spring(response: 0.50, dampingFraction: 0.82).delay(0.08)) {
-                            cardsAppeared = true
+                    if !sold.isEmpty {
+                        Section(header: MoneyGroupHeader(theme: .finDrive, title: "已售出", count: sold.count,
+                                                         total: "", unit: "輛")) {
+                            ForEach(Array(sold.enumerated()), id: \.element.id) { idx, item in
+                                row(item, index: active.count + idx)
+                            }
                         }
                     }
                 }
             }
             .listStyle(.insetGrouped)
+            .listSectionSpacing(.compact)
             .scrollContentBackground(.hidden)
             .background(Color(.systemGroupedBackground))
             .navigationTitle("汽車、機車")
@@ -244,6 +212,7 @@ struct VehicleView: View {
                     }
                 }
             }
+            .task(id: "\(store.modifyID)-\(expenseStore.modifyID)") { rebuild() }
             .sheet(isPresented: $showAdd) { AddVehicleView() }
             .sheet(item: $viewingItem) { item in VehicleDetailView(vehicleId: item.id) }
             .sheet(item: $editingItem) { item in AddVehicleView(editing: item) }
@@ -276,191 +245,68 @@ struct VehicleView: View {
             } message: {
                 Text("將以每年 15% 折舊率計算後的金額覆蓋所有車輛目前的「目前估值」，覆蓋後無法復原，請先確認目前估值沒有其他來源的手動紀錄。")
             }
+            .onAppear {
+                withAnimation(.spring(response: 0.50, dampingFraction: 0.82).delay(0.08)) {
+                    cardsAppeared = true
+                }
+            }
             .onDisappear {
                 headerAppeared = false
                 cardsAppeared = false
                 emptyIconPulse = false
-                vehiclesSectionHeaderAppeared = false
-                miniBarAppeared = false
-                miniBarTask?.cancel()
-                miniBarTask = nil
             }
         }
     }
 
-    // MARK: - 車輛 Section 標頭 (v2)
-    // 對齊 StockView activeStocksSectionHeader：左側 4pt Capsule 漸層條 + 持有中文字 + 輛數膠囊
-
-    private var activeVehiclesSectionHeader: some View {
-        HStack(spacing: 8) {
-            Capsule()
-                .fill(
-                    LinearGradient(
-                        colors: [heroAccent, heroAccent.opacity(0.55)],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                )
-                .frame(width: 4, height: 16)
-            Text("持有中")
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.secondary)
-            Text("\(store.vehicles.count) 輛")
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(heroAccent)
-                .padding(.horizontal, 7).padding(.vertical, 2.5)
-                .background(heroAccent.opacity(0.10))
-                .clipShape(Capsule())
-                .overlay(Capsule().stroke(heroAccent.opacity(0.22), lineWidth: 0.6))
-            Spacer()
+    /// 看板與每台車的數字（每度電、車貸…）
+    private func rebuild() {
+        let now = Date()
+        var map: [UUID: VehicleFacts] = [:]
+        for v in store.vehicles {
+            map[v.id] = VehicleFacts.build(v, expense: expenseStore, now: now)
         }
-        .padding(.horizontal, 4)
-        .textCase(nil)
+        facts = map
+        board = VehicleBoardData.build(vehicles: store.vehicles, facts: map, expense: expenseStore, now: now)
     }
 
-    // MARK: - 英雄摘要卡片
+    // MARK: - 車輛卡片
 
-    private var summaryHeader: some View {
-        let totalValue = store.totalVehicleValue
-        let totalCost = store.vehicles.reduce(0.0) { $0 + $1.purchasePrice }
-        let monthly = store.vehicles.reduce(0.0) { $0 + $1.monthlyExpense }
-        let count = store.vehicles.count
-        let depreciationLoss = totalCost - totalValue
-        // [v2] 迷你估值佔比彩條：按估值由高到低排序，最多顯示 5 輛圖例
-        let valueSorted = store.vehicles.sorted { $0.currentValue > $1.currentValue }
-        let barColors: [Color] = [
-            heroAccent,
-            Color(red: 0.12, green: 0.55, blue: 0.90),
-            Color(red: 0.25, green: 0.78, blue: 0.62),
-            Color(red: 0.75, green: 0.55, blue: 0.88),
-            Color(red: 0.95, green: 0.65, blue: 0.25),
-        ]
-
-        return VStack(spacing: 0) {
-            // 頂部：總估值 + 車輛計數膠囊
-            HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 5) {
-                    Text("車輛總估值")
-                        .font(.caption)
-                        .foregroundStyle(.white.opacity(0.80))
-                    Text(fmtShort(totalValue))
-                        .heroBigValueFont()
-                        .foregroundStyle(.white)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.6)
-                        .contentTransition(.numericText())
-                    if totalValue > 0 {
-                        Text("購入成本 \(fmtShort(totalCost))")
-                            .font(.caption2.weight(.medium))
-                            .foregroundStyle(.white.opacity(0.72))
-                            .padding(.top, 1)
+    private func row(_ item: Vehicle, index: Int) -> some View {
+        MoneyItemCard(item: .vehicle(item, facts: facts[item.id]))
+            .listRowBackground(Color.clear)
+            .listRowSeparator(.hidden)
+            .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
+            .contentShape(Rectangle())
+            .opacity(cardsAppeared ? 1 : 0)
+            .offset(y: cardsAppeared ? 0 : 18)
+            .animation(.spring(response: 0.45, dampingFraction: 0.82).delay(0.05 * Double(min(index, 10))),
+                       value: cardsAppeared)
+            .onTapGesture { viewingItem = item }
+            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                Button(role: .destructive) {
+                    guard subscription.isPremium else {
+                        showPremiumAlert = true
+                        return
                     }
-                }
-                Spacer()
-                VStack(alignment: .trailing, spacing: 6) {
-                    // 車輛計數膠囊
-                    Text("\(count) 輛")
-                        .font(.caption.weight(.semibold))
-                        .padding(.horizontal, 11)
-                        .padding(.vertical, 5)
-                        .background(.white.opacity(0.22))
-                        .clipShape(Capsule())
-                        .foregroundStyle(.white)
-
-                    // 折舊損失 KPI 膠囊（有資料時顯示）
-                    if depreciationLoss > 0 {
-                        HStack(spacing: 3) {
-                            Image(systemName: "arrow.down.right")
-                                .font(.system(size: 9, weight: .bold))
-                            Text("-\(fmtShort(depreciationLoss))")
-                                .font(.system(size: 11, weight: .bold, design: .rounded))
-                                .lineLimit(1)
-                                .minimumScaleFactor(0.7)
+                    var linkedIds = Set<UUID>()
+                    for fe in item.fixedExpenses {
+                        if let id = fe.linkedExpenseId { linkedIds.insert(id) }
+                    }
+                    for ve in item.variableExpenses {
+                        if let id = ve.linkedExpenseId { linkedIds.insert(id) }
+                    }
+                    if !linkedIds.isEmpty {
+                        for exp in expenseStore.expenses where linkedIds.contains(exp.id) {
+                            for name in exp.photoFileNames { Expense.deletePhoto(name) }
                         }
-                        .foregroundStyle(Color(red: 1.0, green: 0.78, blue: 0.75))
-                        .padding(.horizontal, 10).padding(.vertical, 5)
-                        .background(.white.opacity(0.18))
-                        .clipShape(Capsule())
-                        .overlay(Capsule().stroke(.white.opacity(0.25), lineWidth: 0.75))
+                        expenseStore.expenses.removeAll { linkedIds.contains($0.id) }
                     }
+                    store.deleteVehicle(item)
+                } label: {
+                    Label("刪除", systemImage: "trash")
                 }
             }
-
-            // KPI 橫列：購入成本 / 月養車費
-            HStack(spacing: 0) {
-                HeroKpiCell(label: "折舊估損", value: depreciationLoss > 0 ? "-\(fmtShort(depreciationLoss))" : "—")
-                HeroKpiDivider()
-                HeroKpiCell(label: "月養車費", value: monthly > 0 ? fmt(monthly) : "—")
-                HeroKpiDivider()
-                HeroKpiCell(label: "持有輛數", value: "\(count) 輛")
-            }
-            .padding(.vertical, 10)
-            .background(.white.opacity(0.08))
-            .clipShape(RoundedRectangle(cornerRadius: 10))
-            .padding(.top, 14)
-
-            // ── 迷你車輛估值佔比彩條 (v2) ─────────────────────────────────────
-            // 對齊 FinanceOverviewView totalAssetsCard mini allocation bar 規格
-            if count > 0 && totalValue > 0 {
-                VStack(alignment: .leading, spacing: 8) {
-                    Rectangle()
-                        .fill(.white.opacity(0.20))
-                        .frame(height: 0.5)
-
-                    GeometryReader { geo in
-                        HStack(spacing: 2) {
-                            ForEach(Array(valueSorted.enumerated()), id: \.element.id) { idx, v in
-                                RoundedRectangle(cornerRadius: 3)
-                                    .fill(barColors[idx % barColors.count].opacity(0.88))
-                                    .frame(width: max(6, geo.size.width * CGFloat(v.currentValue / totalValue)))
-                            }
-                        }
-                    }
-                    .frame(height: 6)
-                    .clipShape(RoundedRectangle(cornerRadius: 3))
-                    // [v3] glow overlay：頂部白色高亮 + 底部柔化，對齊 StockView.allocationMiniBar v3 規格
-                    .overlay(
-                        LinearGradient(
-                            colors: [.white.opacity(0.28), .clear, .black.opacity(0.08)],
-                            startPoint: .top,
-                            endPoint: .bottom
-                        )
-                        .clipShape(RoundedRectangle(cornerRadius: 3))
-                    )
-                    // [v3] 左展開動畫：scaleEffect x: 0.04→1.0 anchor: .leading，對齊 FinanceOverviewView v4 規格
-                    .scaleEffect(x: miniBarAppeared ? 1.0 : 0.04, y: 1, anchor: .leading)
-                    .animation(.spring(response: 0.70, dampingFraction: 0.82), value: miniBarAppeared)
-
-                    HStack(spacing: 10) {
-                        ForEach(Array(valueSorted.prefix(5).enumerated()), id: \.element.id) { idx, v in
-                            HStack(spacing: 4) {
-                                Circle()
-                                    .fill(barColors[idx % barColors.count])
-                                    .frame(width: 6, height: 6)
-                                Text(v.name)
-                                    .font(.system(size: 9, weight: .medium))
-                                    .foregroundStyle(.white.opacity(0.82))
-                                    .lineLimit(1)
-                            }
-                        }
-                        if valueSorted.count > 5 {
-                            Text("+\(valueSorted.count - 5)")
-                                .font(.system(size: 9, weight: .medium))
-                                .foregroundStyle(.white.opacity(0.55))
-                        }
-                    }
-                }
-                .padding(.top, 12)
-            }
-        }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 18)
-        .heroCardShell(card: .vehicle)
-        .padding(.horizontal, 16)
-        .padding(.top, 10)
-        .padding(.bottom, 4)
     }
-
 
     // MARK: - 空狀態
 
@@ -555,214 +401,6 @@ struct VehicleView: View {
         .frame(maxWidth: .infinity)
     }
 
-    // MARK: - 車輛卡片
-
-    private func vehicleCard(_ item: Vehicle) -> some View {
-        let powerColor: Color = item.powerType == .electric ? .green :
-                                item.powerType == .hybrid   ? .blue  : .orange
-
-        return HStack(spacing: 0) {
-            // 左側 4pt teal 漸層強調條
-            RoundedRectangle(cornerRadius: 3)
-                .fill(
-                    LinearGradient(
-                        colors: [heroAccent, heroAccent.opacity(0.40)],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                )
-                .frame(width: 4)
-                .padding(.vertical, 10)
-                .padding(.trailing, 14)
-
-            VStack(alignment: .leading, spacing: 10) {
-                // ① 頂部：圖示圓 + 名稱 + 品牌/燃料膠囊
-                HStack(spacing: 12) {
-                    // 44pt 漸層圖示圓 + 陰影（對齊 ExpenseRow 規格）
-                    ZStack {
-                        Circle()
-                            .fill(
-                                LinearGradient(
-                                    colors: [heroAccent.opacity(0.22), heroAccent.opacity(0.09)],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                )
-                            )
-                            .frame(width: 44, height: 44)
-                            .shadow(color: heroAccent.opacity(0.22), radius: 6, x: 0, y: 3)
-                        // [v3] 圖示圓邊框：對齊 StockView.stockCard / SavingsInsuranceView.insuranceCard 規格
-                        Circle()
-                            .stroke(heroAccent.opacity(0.18), lineWidth: 0.75)
-                            .frame(width: 44, height: 44)
-                        Image(systemName: "car.fill")
-                            .font(.system(size: 18, weight: .semibold))
-                            .foregroundStyle(heroAccent)
-                    }
-
-                    VStack(alignment: .leading, spacing: 5) {
-                        // [v25.520] 車名過長改跑馬燈（原本被切成「…」）
-                        MarqueeText(item.name)
-                            .font(.subheadline.weight(.semibold))
-
-                        // 品牌 + 燃料類型膠囊標籤
-                        HStack(spacing: 5) {
-                            if !item.brand.isEmpty {
-                                Text(item.brand)
-                                    .font(.system(size: 10, weight: .semibold))
-                                    .foregroundStyle(heroAccent)
-                                    .padding(.horizontal, 7).padding(.vertical, 2.5)
-                                    .background(heroAccent.opacity(0.12))
-                                    .clipShape(Capsule())
-                                    // [v3] 細邊框：對齊 StockView.stockCard symbol Capsule 規格
-                                    .overlay(Capsule().stroke(heroAccent.opacity(0.22), lineWidth: 0.6))
-                                    .lineLimit(1)
-                            }
-                            HStack(spacing: 3) {
-                                Image(systemName: item.powerType.icon)
-                                    .font(.system(size: 9))
-                                Text(item.powerType.rawValue)
-                                    .font(.system(size: 10, weight: .semibold))
-                            }
-                            .foregroundStyle(powerColor)
-                            .padding(.horizontal, 7).padding(.vertical, 2.5)
-                            .background(powerColor.opacity(0.12))
-                            .clipShape(Capsule())
-                            // [v3] 細邊框：對齊全 App 動力/類型 Capsule 規格
-                            .overlay(Capsule().stroke(powerColor.opacity(0.22), lineWidth: 0.6))
-                        }
-                    }
-
-                    Spacer(minLength: 4)
-
-                    // 右側：估值大字 + 折舊膠囊
-                    VStack(alignment: .trailing, spacing: 4) {
-                        Text(fmtShort(item.currentValue))
-                            .font(.system(size: 17, weight: .bold, design: .rounded))
-                            .foregroundStyle(.primary)
-                            .contentTransition(.numericText())
-                        HStack(spacing: 3) {
-                            Image(systemName: "arrow.down.right")
-                                .font(.system(size: 8, weight: .bold))
-                            Text(String(format: "%.1f%%", item.depreciationRate))
-                                .font(.system(size: 10, weight: .semibold))
-                        }
-                        .foregroundStyle(Color(red: 0.90, green: 0.25, blue: 0.25))
-                        .padding(.horizontal, 6).padding(.vertical, 2)
-                        .background(Color(red: 0.90, green: 0.25, blue: 0.25).opacity(0.10))
-                        .clipShape(Capsule())
-                        // [v3] 折舊率膠囊細邊框：對齊 FinanceOverviewView / StockView 損益膠囊規格
-                        .overlay(Capsule().stroke(Color(red: 0.90, green: 0.25, blue: 0.25).opacity(0.22), lineWidth: 0.6))
-                    }
-                }
-
-                // ② 分隔線
-                Rectangle()
-                    .fill(Color(.separator).opacity(0.20))
-                    .frame(height: 0.5)
-
-                // ③ 定期支出明細（精簡 Capsule 標籤）
-                if !item.fixedExpenses.isEmpty {
-                    VStack(alignment: .leading, spacing: 4) {
-                        ForEach(item.fixedExpenses) { fe in
-                            HStack {
-                                HStack(spacing: 4) {
-                                    Text(fe.category.rawValue)
-                                        .font(.system(size: 10, weight: .semibold))
-                                        .foregroundStyle(.blue)
-                                        .padding(.horizontal, 6).padding(.vertical, 2)
-                                        .background(Color.blue.opacity(0.10))
-                                        .clipShape(Capsule())
-                                    Text(fe.period == .monthly ? "每月" : "每年")
-                                        .font(.caption2).foregroundStyle(.tertiary)
-                                }
-                                Spacer()
-                                Text(fmt(fe.amount))
-                                    .font(.caption.weight(.medium))
-                                    .foregroundStyle(.primary)
-                            }
-                        }
-                    }
-                }
-
-                // ④ 變動支出明細（最近 3 筆）
-                if !item.variableExpenses.isEmpty {
-                    VStack(alignment: .leading, spacing: 4) {
-                        ForEach(item.variableExpenses.suffix(3)) { ve in
-                            HStack {
-                                Text(ve.category.rawValue)
-                                    .font(.system(size: 10, weight: .semibold))
-                                    .foregroundStyle(.orange)
-                                    .padding(.horizontal, 6).padding(.vertical, 2)
-                                    .background(Color.orange.opacity(0.10))
-                                    .clipShape(Capsule())
-                                Spacer()
-                                Text(fmt(ve.amount))
-                                    .font(.caption.weight(.medium))
-                                    .foregroundStyle(.primary)
-                            }
-                        }
-                        if item.variableExpenses.count > 3 {
-                            Text("還有 \(item.variableExpenses.count - 3) 筆...")
-                                .font(.caption2).foregroundStyle(.tertiary)
-                        }
-                    }
-                }
-
-                // ⑤ 底部：購入成本 + 持有年數 + 月費合計
-                HStack(spacing: 6) {
-                    HStack(spacing: 3) {
-                        Image(systemName: "tag")
-                            .font(.system(size: 10))
-                        Text("購入 \(fmtShort(item.purchasePrice))")
-                    }
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-
-                    Text("·")
-                        .font(.caption2).foregroundStyle(.tertiary)
-
-                    Text(String(format: "持有 %.1f 年", item.yearsOwned))
-                        .font(.caption2).foregroundStyle(.secondary)
-
-                    Spacer()
-
-                    let totalVar = item.variableTotal
-                    if item.monthlyExpense > 0 || totalVar > 0 {
-                        HStack(spacing: 3) {
-                            Image(systemName: "creditcard")
-                                .font(.system(size: 9))
-                            Text(item.monthlyExpense > 0 ? "月費 \(fmt(item.monthlyExpense))" : "變動 \(fmt(totalVar))")
-                        }
-                        .font(.caption2.weight(.medium))
-                        .foregroundStyle(.orange)
-                    }
-                }
-            }
-            .padding(.vertical, 12)
-        }
-        .padding(.horizontal, 14)
-        .background(Color(.systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 14))
-        .overlay(
-            RoundedRectangle(cornerRadius: 14)
-                .stroke(
-                    AngularGradient(
-                        colors: CardRarity(price: item.purchasePrice).borderGradient,
-                        center: .center
-                    ),
-                    lineWidth: CardRarity(price: item.purchasePrice).borderWidth
-                )
-        )
-        .shadow(color: CardRarity(price: item.purchasePrice).shadowColor, radius: 6, y: 2)
-        .overlay(alignment: .topLeading) {
-            if item.isSold {
-                // 貼齊卡片內緣：先前 -8 偏移讓印章凸出卡片外，凸出部分被 List 列邊界裁切遮擋
-                SoldStamp(size: 16)
-                    .offset(x: 4, y: 4)
-            }
-        }
-    }
-
     // MARK: - 折舊計算
 
     private func applyDepreciation() {
@@ -776,16 +414,4 @@ struct VehicleView: View {
         store.vehicles = updated
     }
 
-    // MARK: - Helpers
-
-    private func fmt(_ v: Double) -> String {
-        v.ntdWanString
-    }
-
-    private func fmtShort(_ v: Double) -> String {
-        if v >= 100_000_000 { return String(format: "%.1f億", v / 100_000_000) }
-        // [v3] NT$ 前綴改移至 fmt()，加 1 位小數，對齊 TaxOverviewView v3 / OverviewView.smartCurrency 規格
-        if v >= 10_000 { return String(format: "%.1f萬", v / 10_000) }
-        return fmt(v)
-    }
 }

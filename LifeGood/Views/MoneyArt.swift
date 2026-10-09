@@ -161,6 +161,31 @@ extension MoneyArtTheme {
                                         hero: "square.split.2x1.fill", accent: "scalemass.fill",
                                         pattern: .stripes, word: "Balance", caps: "FIXED VS VARIABLE")
 
+    // ── 理財（v25.527）：資產類別的明信片、項目卡、看板的建築都用這幾個顏色 ──
+    // 顏色沿用理財頁原本的分類色：房地產紫、儲蓄險藍、股票橘、載具青。
+    static let finHome = MoneyArtTheme(id: 51, top: 0xB79CFF, bottom: 0x6B4BE0, tint: 0x6B4BE0,
+                                       hero: "house.fill", accent: "key.fill", pattern: .skyline,
+                                       word: "Home", caps: "REAL ESTATE")
+    static let finSavings = MoneyArtTheme(id: 52, top: 0x8EC5FF, bottom: 0x3A6FE0, tint: 0x2F5BD8,
+                                          hero: "shield.lefthalf.filled", accent: "dollarsign.circle.fill",
+                                          pattern: .waves, word: "Savings", caps: "INSURANCE")
+    static let finStock = MoneyArtTheme(id: 53, top: 0xFFB45E, bottom: 0xF07A2A, tint: 0xD9650F,
+                                        hero: "chart.line.uptrend.xyaxis", accent: "dollarsign.circle.fill",
+                                        pattern: .grid, word: "Stocks", caps: "MARKET")
+    static let finDrive = MoneyArtTheme(id: 54, top: 0x7FE3D0, bottom: 0x1A9C8C, tint: 0x138A7E,
+                                        hero: "car.fill", accent: "fuelpump.fill", pattern: .road,
+                                        word: "Drive", caps: "ON THE ROAD")
+    static let finElectric = MoneyArtTheme(id: 55, top: 0x7FE3D0, bottom: 0x1A9C8C, tint: 0x138A7E,
+                                           hero: "car.fill", accent: "bolt.fill", pattern: .road,
+                                           word: "Electric", caps: "CHARGE UP")
+    static let finScooter = MoneyArtTheme(id: 56, top: 0x8DB3D6, bottom: 0x3C5A86, tint: 0x4A6FA5,
+                                          hero: "scooter", accent: "bolt.fill", pattern: .road,
+                                          word: "Ride", caps: "SCOOTER")
+    /// 燃油機車（電動機車用上面那張：右上是閃電）
+    static let finMoto = MoneyArtTheme(id: 57, top: 0x8DB3D6, bottom: 0x3C5A86, tint: 0x4A6FA5,
+                                       hero: "scooter", accent: "fuelpump.fill", pattern: .road,
+                                       word: "Ride", caps: "MOTORCYCLE")
+
     static func of(_ c: VariableCategory?) -> MoneyArtTheme {
         switch c {
         case .food: return .food
@@ -605,6 +630,11 @@ struct MoneyPanel: View {
     let latitude: Double?
     let longitude: Double?
     let place: TripPlaceName.Place?
+    /// [v25.527] 股票：卡面畫近期的 K 線（取代分類插畫）
+    var candles: [MoneyCandle]? = nil
+    /// [v25.527] 左下手寫字（沒給就用分類的英文字）
+    var scriptWord: String? = nil
+    var scriptCaps: String? = nil
     let width: CGFloat
 
     @Environment(\.displayScale) private var displayScale
@@ -636,8 +666,13 @@ struct MoneyPanel: View {
         Color.clear
             .overlay {
                 ZStack {
-                    MoneyArtwork(theme: theme, seed: seed, monogram: monogram, layout: .panel)
-                        .equatable()
+                    if let candles, candles.count >= 2 {
+                        MoneyCandlePanel(candles: candles)
+                            .equatable()
+                    } else {
+                        MoneyArtwork(theme: theme, seed: seed, monogram: monogram, layout: .panel)
+                            .equatable()
+                    }
                     if let image {
                         // 衛星圖貼齊下緣：快照左下角可能有 Apple 地圖的標誌，不能切掉
                         Color.clear
@@ -666,8 +701,8 @@ struct MoneyPanel: View {
             }
             .overlay(alignment: .bottomLeading) {
                 // 城市名查得到就寫城市（衛星圖、或使用者的照片拍在有地址的地方），不然寫分類
-                let word = city?.romaji ?? theme.word
-                let caps = city?.country ?? theme.caps
+                let word = city?.romaji ?? scriptWord ?? theme.word
+                let caps = city?.country ?? scriptCaps ?? theme.caps
                 MoneyArtScript(word: word, caps: caps, maxWidth: width * 0.84 - 8)
                     .padding(.leading, 8)
                     // 衛星圖左下角讓出 Apple 地圖的標誌（TripHeroStore.mapAttributionInset）
@@ -722,6 +757,69 @@ struct MoneyPanel: View {
         isSatellite = satellite
         showingUserPhoto = userPhoto
         withAnimation(.easeOut(duration: 0.2)) { image = img }
+    }
+}
+
+/// 股票的卡面：深藍底、淡格線、近期的 K 棒（紅漲綠跌）＋一條 5 日均線（v25.527）。
+/// 只畫在卡面切線左邊（寬 84%），下面三分之一留給手寫字。
+struct MoneyCandlePanel: View, Equatable {
+    let candles: [MoneyCandle]
+
+    var body: some View {
+        Canvas { ctx, size in
+            let w = size.width
+            let h = size.height
+            ctx.fill(Path(CGRect(origin: .zero, size: size)), with: .linearGradient(
+                Gradient(colors: [Color(tb: 0x1B2A52), Color(tb: 0x0B1430)]),
+                startPoint: .zero, endPoint: CGPoint(x: w, y: h)))
+            var grid = Path()
+            var gy: CGFloat = 14
+            while gy < h {
+                grid.move(to: CGPoint(x: 0, y: gy))
+                grid.addLine(to: CGPoint(x: w, y: gy))
+                gy += 14
+            }
+            ctx.stroke(grid, with: .color(Color.white.opacity(0.06)), lineWidth: 0.5)
+            let list = Array(candles.suffix(14))
+            let lo = list.map(\.low).min() ?? 0
+            let hi = list.map(\.high).max() ?? 1
+            let span = max(hi - lo, max(abs(hi) * 0.002, 0.0001))
+            let top = h * 0.16
+            let bottom = h * 0.6
+            func y(_ v: Double) -> CGFloat { bottom - (bottom - top) * CGFloat((v - lo) / span) }
+            let left: CGFloat = 6
+            let usable = w * 0.84 - 10 - left
+            let step = usable / CGFloat(list.count)
+            let bodyW = max(2, step * 0.62)
+            var closes: [CGPoint] = []
+            for (i, c) in list.enumerated() {
+                let cx = left + step * (CGFloat(i) + 0.5)
+                let up = c.close >= c.open
+                let color = up ? Color(tb: 0xFF5A5F) : Color(tb: 0x2FBF71)
+                var wick = Path()
+                wick.move(to: CGPoint(x: cx, y: y(c.high)))
+                wick.addLine(to: CGPoint(x: cx, y: y(c.low)))
+                ctx.stroke(wick, with: .color(color), lineWidth: 1)
+                let y0 = y(max(c.open, c.close))
+                let y1 = y(min(c.open, c.close))
+                ctx.fill(Path(CGRect(x: cx - bodyW / 2, y: y0, width: bodyW, height: max(1.2, y1 - y0))),
+                         with: .color(color))
+                closes.append(CGPoint(x: cx, y: y(c.close)))
+            }
+            // 5 日均線
+            if list.count >= 5 {
+                var ma = Path()
+                for i in 4..<list.count {
+                    let avg = list[(i - 4)...i].reduce(0) { $0 + $1.close } / 5
+                    let p = CGPoint(x: closes[i].x, y: y(avg))
+                    if i == 4 { ma.move(to: p) } else { ma.addLine(to: p) }
+                }
+                ctx.stroke(ma, with: .color(Color(tb: 0xFFB45E, 0.9)),
+                           style: StrokeStyle(lineWidth: 1.3, lineCap: .round, lineJoin: .round))
+            }
+        }
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
     }
 }
 
