@@ -294,8 +294,8 @@ enum RealEstateDeletion {
         if s.photoCount > 0 { parts.append("\(s.photoCount) 張照片") }
         if s.documentCount > 0 { parts.append("\(s.documentCount) 份文件") }
         guard !parts.isEmpty else { return "這間房子會從理財裡刪除，不能復原。" }
-        let list = parts.count == 1 ? parts[0] : parts.dropLast().joined(separator: "、") + "和" + parts[parts.count - 1]
-        return "會一起刪掉連到這間房子的\(list)，不能復原。"
+        let list = parts.count == 1 ? parts[0] : parts.dropLast().joined(separator: "、") + "和 " + parts[parts.count - 1]
+        return "會一起刪掉連到這間房子的 \(list)，不能復原。"
     }
 
     /// 刪掉這些記帳支出（含照片）和它們在銀行帳戶裡的扣款紀錄。

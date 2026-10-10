@@ -92,6 +92,8 @@ struct AddRealEstateView: View {
     @State private var addingPaid = false
     @State private var addingVariableCategory: RealEstateExpenseCategory?
     @State private var showVariableCategoryPicker = false
+    /// [v25.530] 「＋變動支出 → 水電瓦斯」直接開水電繳費（同卡片頁），不再繞去記帳、存完跑到別區
+    @State private var addingUtilityPayment = false
 
     private var currentEstate: RealEstate? {
         financeStore.realEstates.first(where: { $0.id == stableEstateId })
@@ -153,11 +155,16 @@ struct AddRealEstateView: View {
     // 且若無條件清空，會把後續、仍在執行中的新選取 Task 的登記一併清掉，
     // 導致下一次選取時 cancel() 變成 no-op、新舊 Task 並行互刪對方檔案）。
     @State private var elevatorPhotoLoadGeneration: [UUID: Int] = [:]
+    // [v25.530] 換掉、刪掉的保養照片先不刪檔，按儲存才刪：按取消時房子資料還指著舊檔，先刪就救不回來。
+    // 這次新選進來的照片也記著，按取消時刪掉，免得變成沒人用的孤兒檔。
+    @State private var elevatorPhotosDropped: Set<String> = []
+    @State private var elevatorPhotosAdded: Set<String> = []
 
     struct ElevatorItemState: Identifiable {
         let id: UUID
         var date: Date
-        var photoFileName: String?
+        // [v25.530] 存整個照片陣列：以前只留第一張，存一次其餘照片就從資料裡掉了
+        var photoFileNames: [String] = []
     }
     @State private var pingCountText = ""
     @State private var landOwner = ""
@@ -204,8 +211,30 @@ struct AddRealEstateView: View {
     @State private var gasMeterOwner = ""
     @State private var gasUserNumber = ""
     @State private var extraMeters: [UtilityMeter] = []
+    // [v25.530] 水電瓦斯「所有權人」目前是「從家人選」的那幾個（water／electricity／gas，額外的表用它的 id）。
+    // 以前用「文字是不是某位家人」決定顯示選單還是輸入框，手動輸入打第一個字輸入框就不見了。
+    @State private var ownerPickedFromList: Set<String> = []
     @State private var insuranceItems: [InsuranceItemState] = []
     @State private var assetItems: [AssetItemState] = []
+    // [v25.530] 保險／附屬資產按減號時，連到的記帳支出先記在這裡，按儲存才刪；按取消就什麼都不刪
+    @State private var pendingRemovedExpenseIds: Set<UUID> = []
+    // [v25.530] 左滑刪貸款／房屋價金／變動支出：先記下來跳確認，確認後才刪
+    @State private var pendingSwipeDeletion: SwipeDeletionRequest?
+
+    struct SwipeDeletionRequest {
+        enum Kind { case mortgage, paid, variable }
+        let kind: Kind
+        let itemIds: Set<UUID>
+        let expenseIds: Set<UUID>
+    }
+
+    /// [v25.530] save() 同步保險／附屬資產的連結支出時先改副本，最後 expenses 只寫一次
+    struct LinkedExpenseBatch {
+        var expenses: [Expense]
+        var changed = false
+        /// 金額或日期變了、要重寫銀行扣款紀錄的支出
+        var bankSyncIds = Set<UUID>()
+    }
 
     struct InsuranceItemState: Identifiable {
         let id: UUID
@@ -399,15 +428,31 @@ struct AddRealEstateView: View {
                     )
                 )
             }
+            .sheet(isPresented: $addingUtilityPayment) {
+                UtilityPaymentEditor(estateId: stableEstateId, editing: nil)
+            }
             .confirmationDialog("選擇變動支出類別", isPresented: $showVariableCategoryPicker, titleVisibility: .visible) {
                 ForEach(RealEstateExpenseCategory.allCases.filter { $0 != .housePayment }) { cat in
                     Button(cat.rawValue) {
-                        addingVariableCategory = cat
+                        if cat == .utility { addingUtilityPayment = true } else { addingVariableCategory = cat }
                     }
                 }
                 Button("取消", role: .cancel) {}
             }
+            .alert("刪除項目？", isPresented: swipeDeletionPresented, presenting: pendingSwipeDeletion) { request in
+                Button("刪除", role: .destructive) { confirmSwipeDeletion(request) }
+                Button("取消", role: .cancel) {}
+            } message: { request in
+                Text(swipeDeletionMessage(request))
+            }
         }
+    }
+
+    private var swipeDeletionPresented: Binding<Bool> {
+        Binding(
+            get: { pendingSwipeDeletion != nil },
+            set: { if !$0 { pendingSwipeDeletion = nil } }
+        )
     }
 
     // MARK: - 功能選別選單
@@ -657,7 +702,12 @@ struct AddRealEstateView: View {
     }
 
     private static let fmtDateFormatter: DateFormatter = {
-        let f = DateFormatter(); f.dateFormat = "yyyy/M/d"; return f
+        // [v25.530] 固定西元曆：手機設成民國曆時才不會印出「0115/10/10」
+        let f = DateFormatter()
+        f.calendar = Calendar(identifier: .gregorian)
+        f.locale = Locale(identifier: "zh_TW")
+        f.dateFormat = "yyyy/M/d"
+        return f
     }()
 
     private func fmtDate(_ d: Date) -> String {
@@ -855,7 +905,7 @@ struct AddRealEstateView: View {
 
                     Spacer()
 
-                    if let photoFileName = item.photoFileName {
+                    if let photoFileName = item.photoFileNames.first {
                         Button {
                             let url = ElevatorMaintenance.photosDirectory
                                 .appendingPathComponent(photoFileName)
@@ -887,11 +937,16 @@ struct AddRealEstateView: View {
                                     // 永久遺失原本的照片。
                                     let fileName = ElevatorMaintenance.savePhoto(data, id: UUID())
                                     guard let fileName else { return }
-                                    if let oldName = elevatorItems.first(where: { $0.id == itemId })?.photoFileName {
-                                        ElevatorMaintenance.deletePhoto(oldName)
-                                    }
                                     if let idx = elevatorItems.firstIndex(where: { $0.id == itemId }) {
-                                        elevatorItems[idx].photoFileName = fileName
+                                        // [v25.530] 這裡只能換一張：只換第一張，其餘照片原樣留著。
+                                        // 舊檔先不刪，記進 elevatorPhotosDropped，按儲存才刪（取消時房子還指著它）。
+                                        elevatorPhotosAdded.insert(fileName)
+                                        if let oldName = elevatorItems[idx].photoFileNames.first {
+                                            elevatorPhotosDropped.insert(oldName)
+                                            elevatorItems[idx].photoFileNames[0] = fileName
+                                        } else {
+                                            elevatorItems[idx].photoFileNames = [fileName]
+                                        }
                                     } else {
                                         // item 已在等待期間被刪除，剛存好的新檔案要一併清掉，避免孤兒檔案
                                         ElevatorMaintenance.deletePhoto(fileName)
@@ -906,7 +961,7 @@ struct AddRealEstateView: View {
                             }
                         }
                     ), matching: .images) {
-                        Image(systemName: item.photoFileName == nil ? "photo.badge.plus" : "arrow.triangle.2.circlepath.camera")
+                        Image(systemName: item.photoFileNames.isEmpty ? "photo.badge.plus" : "arrow.triangle.2.circlepath.camera")
                             .font(.title3).foregroundStyle(.green)
                     }
                     .buttonStyle(.plain)
@@ -916,9 +971,8 @@ struct AddRealEstateView: View {
                         // 把照片存進磁碟卻已找不到對應的 item，變成永久孤兒檔案。
                         elevatorPhotoLoadTasks[item.id]?.cancel()
                         elevatorPhotoLoadTasks[item.id] = nil
-                        if let fn = item.photoFileName {
-                            ElevatorMaintenance.deletePhoto(fn)
-                        }
+                        // [v25.530] 照片檔等按儲存才刪（按取消時房子資料還指著它）
+                        elevatorPhotosDropped.formUnion(item.photoFileNames)
                         elevatorItems.removeAll { $0.id == item.id }
                     } label: {
                         Image(systemName: "minus.circle.fill").foregroundStyle(.red)
@@ -1026,14 +1080,14 @@ struct AddRealEstateView: View {
                         }
                         .frame(width: 32)
                     }
-                    ownerPicker(selection: $waterMeterOwner, placeholder: "所有權人")
+                    ownerPicker(selection: $waterMeterOwner, placeholder: "所有權人", key: "water")
                 }
             }
             HStack {
                 Image(systemName: "bolt.fill").foregroundStyle(.yellow).frame(width: 24)
                 VStack(alignment: .leading, spacing: 6) {
                     TextField("電號", text: $electricityMeterNumber)
-                    ownerPicker(selection: $electricityMeterOwner, placeholder: "所有權人")
+                    ownerPicker(selection: $electricityMeterOwner, placeholder: "所有權人", key: "electricity")
                 }
             }
             HStack {
@@ -1041,7 +1095,7 @@ struct AddRealEstateView: View {
                 VStack(alignment: .leading, spacing: 6) {
                     TextField("用戶編號", text: $gasUserNumber)
                     TextField("表號", text: $gasMeterNumber)
-                    ownerPicker(selection: $gasMeterOwner, placeholder: "所有權人")
+                    ownerPicker(selection: $gasMeterOwner, placeholder: "所有權人", key: "gas")
                 }
             }
         } header: {
@@ -1074,7 +1128,7 @@ struct AddRealEstateView: View {
                         TextField("用戶編號", text: $meter.userNumber)
                     }
                     TextField(meterNumberLabel(for: meter.type), text: $meter.meterNumber)
-                    ownerPicker(selection: $meter.owner, placeholder: "所有權人")
+                    ownerPicker(selection: $meter.owner, placeholder: "所有權人", key: meter.id.uuidString)
                 }
                 .padding(.vertical, 4)
             }
@@ -1104,20 +1158,38 @@ struct AddRealEstateView: View {
         return parts.joined(separator: "-")
     }
 
-    private func ownerPicker(selection: Binding<String>, placeholder: String) -> some View {
-        Group {
+    private func ownerPicker(selection: Binding<String>, placeholder: String, key: String) -> some View {
+        // [v25.530] 選單只管「選家人／手動輸入」這個模式（ownerPickedFromList），不再直接綁文字，
+        // 手動輸入打字時不會因為文字變了就切回選單。
+        let pickedFromList = ownerPickedFromList.contains(key)
+        let pickerSelection = Binding<String>(
+            get: { ownerPickedFromList.contains(key) ? selection.wrappedValue : "" },
+            set: { newValue in
+                if newValue.isEmpty {
+                    // 從某位家人切回手動輸入：照舊清空，讓你重新打
+                    if ownerPickedFromList.contains(key) {
+                        ownerPickedFromList.remove(key)
+                        selection.wrappedValue = ""
+                    }
+                } else {
+                    ownerPickedFromList.insert(key)
+                    selection.wrappedValue = newValue
+                }
+            }
+        )
+        return Group {
             if ownerCandidates.isEmpty {
                 TextField(placeholder, text: selection)
                     .font(.subheadline).foregroundStyle(.secondary)
             } else {
-                Picker(placeholder, selection: selection) {
+                Picker(placeholder, selection: pickerSelection) {
                     Text("手動輸入").tag("")
                     ForEach(ownerCandidates, id: \.self) { name in
                         Text(name).tag(name)
                     }
                 }
                 .font(.subheadline)
-                if selection.wrappedValue.isEmpty {
+                if !pickedFromList {
                     TextField(placeholder, text: selection)
                         .font(.subheadline).foregroundStyle(.secondary)
                 }
@@ -1138,11 +1210,9 @@ struct AddRealEstateView: View {
                             .font(.subheadline.weight(.medium))
                         Spacer()
                         Button(role: .destructive) {
-                            // 改用 expenseStore.delete(_:)（對齊本檔案售出損益同步等處既有規格），
-                            // 確保連結支出附加的照片一併從磁碟移除，避免直接 removeAll 留下孤兒照片檔。
-                            if let linkedId = item.linkedExpenseId,
-                               let exp = expenseStore.expenses.first(where: { $0.id == linkedId }) {
-                                expenseStore.delete(exp)
+                            // [v25.530] 先只從表單拿掉；連到的記帳支出記進待刪，按儲存才刪（按取消就救得回來）
+                            if let linkedId = item.linkedExpenseId {
+                                pendingRemovedExpenseIds.insert(linkedId)
                             }
                             insuranceItems.removeAll { $0.id == item.id }
                         } label: {
@@ -1187,11 +1257,9 @@ struct AddRealEstateView: View {
                             .font(.subheadline.weight(.medium))
                         Spacer()
                         Button(role: .destructive) {
-                            // 改用 expenseStore.delete(_:)（對齊本檔案售出損益同步等處既有規格），
-                            // 確保連結支出附加的照片一併從磁碟移除，避免直接 removeAll 留下孤兒照片檔。
-                            if let linkedId = item.linkedExpenseId,
-                               let exp = expenseStore.expenses.first(where: { $0.id == linkedId }) {
-                                expenseStore.delete(exp)
+                            // [v25.530] 同保險：先只從表單拿掉，連到的記帳支出按儲存才刪
+                            if let linkedId = item.linkedExpenseId {
+                                pendingRemovedExpenseIds.insert(linkedId)
                             }
                             assetItems.removeAll { $0.id == item.id }
                         } label: {
@@ -1337,32 +1405,71 @@ struct AddRealEstateView: View {
         let trimmedNote = note.trimmingCharacters(in: .whitespaces)
         let reId = stableEstateId
 
+        // [v25.530] 減號拿掉的、價格清空的保險／附屬資產，連到的記帳支出（含銀行扣款）到按儲存這裡才一起刪。
+        // 還有項目連著的 id 不刪。
+        var keptLinkedIds = Set<UUID>()
+        var expenseIdsToRemove = pendingRemovedExpenseIds
+        for item in insuranceItems {
+            guard let id = item.linkedExpenseId else { continue }
+            if item.amount > 0 { keptLinkedIds.insert(id) } else { expenseIdsToRemove.insert(id) }
+        }
+        for item in assetItems {
+            guard let id = item.linkedExpenseId else { continue }
+            if item.amount > 0 { keptLinkedIds.insert(id) } else { expenseIdsToRemove.insert(id) }
+        }
+        expenseIdsToRemove.subtract(keptLinkedIds)
+        RealEstateDeletion.removeExpenses(expenseIdsToRemove, expenseStore: expenseStore, lifeStore: lifeStore)
+
         // 貸款/已支出/變動支出由 AddExpenseView 直接寫入 financeStore，這裡保留 store 內既有資料
         let syncedMortgages: [RealEstateMortgageItem] = currentEstate?.mortgageItems ?? []
-        let syncedPaids: [RealEstatePaidItem] = currentEstate?.paidItems ?? []
-        let syncedVariable: [RealEstateVariableExpense] = currentEstate?.variableExpenses ?? []
-        let existingUtilityPayments: [UtilityPayment] = currentEstate?.utilityPayments ?? []
+        // [v25.530] 剛刪掉的支出若也被舊版記帳重複記在房屋價金／變動支出裡，一併拿掉，免得留下指向不存在支出的項目（金額還照算進合計）
+        let syncedPaids: [RealEstatePaidItem] = (currentEstate?.paidItems ?? []).filter { p in
+            guard let id = p.linkedExpenseId else { return true }
+            return !expenseIdsToRemove.contains(id)
+        }
+        let syncedVariable: [RealEstateVariableExpense] = (currentEstate?.variableExpenses ?? []).filter { ve in
+            guard let id = ve.linkedExpenseId else { return true }
+            return !expenseIdsToRemove.contains(id)
+        }
+        // [v25.530] 水電繳費有自己的收據照片，不刪，只解除指向已刪支出的連結
+        let existingUtilityPayments: [UtilityPayment] = (currentEstate?.utilityPayments ?? []).map { (payment: UtilityPayment) -> UtilityPayment in
+            var up = payment
+            if let id = up.linkedExpenseId, expenseIdsToRemove.contains(id) { up.linkedExpenseId = nil }
+            return up
+        }
         // 房屋資料集錦由詳細頁 RenovationPhotoEditor 直接寫入，這裡保留既有資料避免被清空
         let existingRenovationPhotos: [RenovationPhoto] = currentEstate?.renovationPhotos ?? []
         let existingDocuments: [RealEstateDocument] = currentEstate?.documents ?? []
 
-        // 同步保險項目到變動支出（有價格才連動）
+        // [v25.530] 保險、附屬資產連到的記帳支出：還在就只改跟著項目變的欄位，不再整筆重建
+        // （以前每存一次就把日期蓋成購入日、標題重產、備註清空）；找不到了才新建一筆。
+        // 「名稱／日期改了沒」跟進編輯頁時的原始項目（editing）比。
+        var batch = LinkedExpenseBatch(expenses: expenseStore.expenses)
+        let originalName = editing?.name ?? trimmedName
+        let purchaseDayChanged = editing.map { !Calendar.current.isDate($0.purchaseDate, inSameDayAs: purchaseDate) } ?? false
+
         var syncedInsurance: [RealEstateInsuranceItem] = []
         for item in insuranceItems {
             if item.amount > 0 {
-                let expId = syncInsuranceExpense(reId: reId, reName: trimmedName, item: item)
+                let before = editing?.insuranceItems.first(where: { $0.id == item.id })
+                let expId = syncLinkedExpense(
+                    linkedId: item.linkedExpenseId,
+                    amount: item.amount,
+                    title: Self.insuranceExpenseTitle(trimmedName, item.policyNumber),
+                    oldAutoTitle: before.map { Self.insuranceExpenseTitle(originalName, $0.policyNumber) },
+                    nameChanged: before.map { $0.policyNumber != item.policyNumber } ?? false,
+                    category: .insurance,
+                    categoryChanged: false,
+                    reId: reId,
+                    purchaseDayChanged: purchaseDayChanged,
+                    batch: &batch
+                )
                 syncedInsurance.append(RealEstateInsuranceItem(
                     id: item.id, policyNumber: item.policyNumber,
                     amount: item.amount, linkedExpenseId: expId
                 ))
             } else {
-                // 金額被清空前若已連動過一筆變動支出，這裡只是把 linkedExpenseId 設為 nil，
-                // 不會刪掉舊的 Expense；該筆孤兒紀錄會繼續留在變動支出總額裡且從此無從察覺，
-                // 需比照上面「有價格」分支一併清掉。
-                if let oldExpId = item.linkedExpenseId,
-                   let oldExp = expenseStore.expenses.first(where: { $0.id == oldExpId }) {
-                    expenseStore.delete(oldExp)
-                }
+                // 價格清空：連到的支出已在上面一起刪掉
                 syncedInsurance.append(RealEstateInsuranceItem(
                     id: item.id, policyNumber: item.policyNumber,
                     amount: 0, linkedExpenseId: nil
@@ -1370,22 +1477,30 @@ struct AddRealEstateView: View {
             }
         }
 
-        // 同步附屬資產到變動支出（有價格才連動）
         var syncedAssets: [RealEstatePropertyAsset] = []
         for item in assetItems {
             if item.amount > 0 {
-                let expId = syncAssetExpense(reId: reId, reName: trimmedName, item: item)
+                let before = editing?.propertyAssets.first(where: { $0.id == item.id })
+                let label = Self.assetExpenseLabel(item.name, item.category)
+                let oldLabel: String? = before.map { Self.assetExpenseLabel($0.name, $0.category) }
+                let expId = syncLinkedExpense(
+                    linkedId: item.linkedExpenseId,
+                    amount: item.amount,
+                    title: "\(trimmedName) - \(label)",
+                    oldAutoTitle: oldLabel.map { "\(originalName) - \($0)" },
+                    nameChanged: oldLabel.map { $0 != label } ?? false,
+                    category: item.category,
+                    categoryChanged: before.map { $0.category != item.category } ?? false,
+                    reId: reId,
+                    purchaseDayChanged: purchaseDayChanged,
+                    batch: &batch
+                )
                 syncedAssets.append(RealEstatePropertyAsset(
                     id: item.id, category: item.category, name: item.name,
                     brand: item.brand, floorLocation: item.floorLocation,
                     amount: item.amount, linkedExpenseId: expId
                 ))
             } else {
-                // 同上：金額清空前若已連動過變動支出，須一併刪除，避免孤兒 Expense 繼續計入總額。
-                if let oldExpId = item.linkedExpenseId,
-                   let oldExp = expenseStore.expenses.first(where: { $0.id == oldExpId }) {
-                    expenseStore.delete(oldExp)
-                }
                 syncedAssets.append(RealEstatePropertyAsset(
                     id: item.id, category: item.category, name: item.name,
                     brand: item.brand, floorLocation: item.floorLocation,
@@ -1393,6 +1508,8 @@ struct AddRealEstateView: View {
                 ))
             }
         }
+        if batch.changed { expenseStore.expenses = batch.expenses }
+        syncBankWithdrawals(for: batch.bankSyncIds, in: batch.expenses)
 
         // 售出損益同步
         var saleExpId = editing?.saleLinkedExpenseId
@@ -1421,16 +1538,36 @@ struct AddRealEstateView: View {
         // 建物類型改為非透天厝、或關閉「有電梯」開關時，電梯保養記錄會整批不再寫入，
         // 比照上方逐筆刪除鈕（elevatorPhotoLoadTasks 刪除按鈕）做法，一併刪除磁碟上的
         // 保養照片，避免存檔後這些照片變成沒有任何欄位引用得到的孤兒檔案。
+        // [v25.530] 換掉／刪掉的保養照片也是到這裡才刪；最後還存在房子裡的照片一張都不刪。
         let elevatorSectionKept = buildingType == .townhouse && hasElevator
-        if !elevatorSectionKept {
-            for item in elevatorItems {
-                if let fn = item.photoFileName {
-                    ElevatorMaintenance.deletePhoto(fn)
-                }
-            }
+        let keptElevatorPhotos: Set<String> = elevatorSectionKept
+            ? Set(elevatorItems.flatMap { $0.photoFileNames })
+            : []
+        let elevatorPhotoCandidates = elevatorPhotosDropped.union(elevatorItems.flatMap { $0.photoFileNames })
+        for fn in elevatorPhotoCandidates.subtracting(keptElevatorPhotos) {
+            ElevatorMaintenance.deletePhoto(fn)
         }
 
-        let re = RealEstate(
+        // [v25.530] 樓層要從 store 裡這間房子的最新資料改起：物品樹（items）只在卡片頁編輯、這頁沒有，
+        // 以前直接 new 一個 FloorInfo，存一次整棵物品樹就不見了。新加的樓層才是空的。
+        let storeFloors: [FloorInfo] = currentEstate?.floors ?? []
+        let syncedFloors: [FloorInfo] = floorItems.map { item -> FloorInfo in
+            var info = storeFloors.first(where: { $0.id == item.id }) ?? FloorInfo(id: item.id)
+            info.floorNumber = item.floorNumber
+            // 功能沒動就保留原本順序（Set 轉陣列順序不固定）
+            if Set(info.functions) != item.functions {
+                info.functions = FloorFunction.allCases.filter { item.functions.contains($0) }
+            }
+            info.area = Double(item.areaText) ?? 0
+            return info
+        }
+
+        // [v25.530] 水號三格都沒動就原樣存回（不論原本幾段），動了才用「站所-編號-檢號」重組
+        let loadedWaterParts: [String] = Self.splitWaterNumber(waterMeterNumber)
+        let waterUntouched: Bool = loadedWaterParts == [waterStation, waterCode, waterCheck]
+        let savedWaterNumber: String = waterUntouched ? waterMeterNumber : combinedWaterNumber
+
+        var re = RealEstate(
             id: reId, name: trimmedName,
             city: city,
             address: address.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -1447,7 +1584,7 @@ struct AddRealEstateView: View {
             buildingType: buildingType,
             hasElevator: elevatorSectionKept,
             elevatorMaintenances: elevatorSectionKept
-                ? elevatorItems.map { ElevatorMaintenance(id: $0.id, date: $0.date, photoFileName: $0.photoFileName) }
+                ? elevatorItems.map { ElevatorMaintenance(id: $0.id, date: $0.date, photoFileNames: $0.photoFileNames) }
                 : [],
             pingCount: Double(pingCountText) ?? 0,
             landOwner: landOwner.trimmingCharacters(in: .whitespaces),
@@ -1459,8 +1596,8 @@ struct AddRealEstateView: View {
             totalFloors: floorItems.count,
             fromFloor: 0,
             toFloor: 0,
-            floors: floorItems.map { FloorInfo(id: $0.id, floorNumber: $0.floorNumber, functions: Array($0.functions), area: Double($0.areaText) ?? 0) },
-            waterMeterNumber: combinedWaterNumber,
+            floors: syncedFloors,
+            waterMeterNumber: savedWaterNumber,
             waterMeterOwner: waterMeterOwner.trimmingCharacters(in: .whitespaces),
             electricityMeterNumber: electricityMeterNumber.trimmingCharacters(in: .whitespaces),
             electricityMeterOwner: electricityMeterOwner.trimmingCharacters(in: .whitespaces),
@@ -1480,6 +1617,14 @@ struct AddRealEstateView: View {
             renovationPhotos: existingRenovationPhotos,
             documents: existingDocuments
         )
+        // [v25.530] 這頁沒有編輯、init 也沒帶的欄位要從原本那間帶回來：舊版單筆房貸連結
+        // （linkedExpenseId）以前存一次就被清掉，那筆房貸支出從此跟房子斷線；
+        // 大樓的起訖樓層也不要歸零（樓層解析在下一版換掉）。
+        if let old = currentEstate {
+            re.linkedExpenseId = old.linkedExpenseId
+            re.fromFloor = old.fromFloor
+            re.toFloor = old.toFloor
+        }
         if currentEstate != nil { financeStore.update(re) } else { financeStore.add(re) }
         dismiss()
     }
@@ -1519,144 +1664,178 @@ struct AddRealEstateView: View {
     /// 「取消」按鈕：新增流程中若已因新增貸款/已支出/變動支出等子項目觸發過
     /// ensureRealEstateSavedInStore() 自動建檔，「取消」原本只單純 dismiss、完全不檢查
     /// hasAutoSaved，導致這筆使用者明確想放棄的房地產連同已建立的支出/照片永久留在 store
-    /// 並同步上 CloudKit。這裡補上回滾（清理邏輯對齊 RealEstateView.deleteEstate）：
+    /// 並同步上 CloudKit。這裡補上回滾：
     /// 僅在「新增流程」（editing == nil）且已自動存檔時才移除，編輯既有房地產時
     /// 「取消」維持原樣不動任何資料。
     private func cancelAndRollback() {
+        // [v25.530] 這次新選、還沒存進房子的保養照片刪掉；換掉的舊照片沒刪過，房子還指著它
+        for task in elevatorPhotoLoadTasks.values { task.cancel() }
+        for name in elevatorPhotosAdded { ElevatorMaintenance.deletePhoto(name) }
         if editing == nil, hasAutoSaved, let re = currentEstate {
-            var expenseIds = Set<UUID>()
-            for m in re.mortgageItems { if let id = m.linkedExpenseId { expenseIds.insert(id) } }
-            for p in re.paidItems { if let id = p.linkedExpenseId { expenseIds.insert(id) } }
-            for ve in re.variableExpenses { if let id = ve.linkedExpenseId { expenseIds.insert(id) } }
-            for ins in re.insuranceItems { if let id = ins.linkedExpenseId { expenseIds.insert(id) } }
-            for asset in re.propertyAssets { if let id = asset.linkedExpenseId { expenseIds.insert(id) } }
-            for up in re.utilityPayments {
-                if let id = up.linkedExpenseId { expenseIds.insert(id) }
-                for name in up.photoFileNames { UtilityPayment.deletePhoto(name) }
-            }
-            for rp in re.renovationPhotos {
-                for name in rp.photoFileNames { RenovationPhoto.deletePhoto(name) }
-            }
-            // 清除電梯保養照片、附件文件檔案（先前遺漏，取消時會孤兒化）
-            for em in re.elevatorMaintenances {
-                if let name = em.photoFileName { ElevatorMaintenance.deletePhoto(name) }
-            }
-            for doc in re.documents {
-                RealEstateDocument.deleteDocument(doc.fileName)
-            }
-            if let id = re.linkedExpenseId { expenseIds.insert(id) }
-            if let id = re.saleLinkedExpenseId { expenseIds.insert(id) }
-
-            if !expenseIds.isEmpty {
-                for exp in expenseStore.expenses where expenseIds.contains(exp.id) {
-                    for name in exp.photoFileNames { Expense.deletePhoto(name) }
-                }
-                expenseStore.expenses.removeAll { expenseIds.contains($0.id) }
-            }
-            if let saleIncId = re.saleLinkedIncomeId {
-                expenseStore.incomes.removeAll { $0.id == saleIncId }
-            }
-            financeStore.deleteRealEstate(re)
+            // [v25.530] 改走共用的刪整間：以前只刪記帳支出，銀行帳戶裡的扣款紀錄會留下來
+            RealEstateDeletion.deleteEstate(re, financeStore: financeStore,
+                                            expenseStore: expenseStore, lifeStore: lifeStore)
         }
         dismiss()
     }
 
     // MARK: - 刪除項目
 
+    // [v25.530] 左滑刪除不再直接刪：先記下要刪哪幾筆、連到哪些記帳支出，跳確認框，
+    // 確認後才連記帳支出＋銀行扣款紀錄一起刪（confirmSwipeDeletion）。
+
     private func deleteMortgageItems(at offsets: IndexSet) {
-        guard var re = currentEstate else { return }
-        let items = re.mortgageItems
-        // 這些項目可透過「已支出項目」點擊進入 AddExpenseView 附加照片，
-        // 刪除前先清除照片檔案避免孤兒檔（對齊 VehicleView/VehicleDetailView.deleteVehicle 既有修復規格）
-        var linkedIds = Set<UUID>()
-        for index in offsets {
-            let item = items[index]
-            if let expId = item.linkedExpenseId { linkedIds.insert(expId) }
-            re.mortgageItems.removeAll { $0.id == item.id }
-        }
-        if !linkedIds.isEmpty {
-            for exp in expenseStore.expenses where linkedIds.contains(exp.id) {
-                for name in exp.photoFileNames { Expense.deletePhoto(name) }
-            }
-            expenseStore.expenses.removeAll { linkedIds.contains($0.id) }
-        }
-        financeStore.update(re)
+        let items = storeMortgageItems
+        let picked = offsets.filter { $0 < items.count }.map { items[$0] }
+        pendingSwipeDeletion = SwipeDeletionRequest(
+            kind: .mortgage,
+            itemIds: Set(picked.map { $0.id }),
+            expenseIds: Set(picked.compactMap { $0.linkedExpenseId })
+        )
     }
 
     private func deletePaidItems(at offsets: IndexSet) {
-        guard var re = currentEstate else { return }
-        let items = re.paidItems
-        var linkedIds = Set<UUID>()
-        for index in offsets {
-            let item = items[index]
-            if let expId = item.linkedExpenseId { linkedIds.insert(expId) }
-            re.paidItems.removeAll { $0.id == item.id }
-        }
-        if !linkedIds.isEmpty {
-            for exp in expenseStore.expenses where linkedIds.contains(exp.id) {
-                for name in exp.photoFileNames { Expense.deletePhoto(name) }
-            }
-            expenseStore.expenses.removeAll { linkedIds.contains($0.id) }
-        }
-        financeStore.update(re)
+        let items = storePaidItems
+        let picked = offsets.filter { $0 < items.count }.map { items[$0] }
+        pendingSwipeDeletion = SwipeDeletionRequest(
+            kind: .paid,
+            itemIds: Set(picked.map { $0.id }),
+            expenseIds: Set(picked.compactMap { $0.linkedExpenseId }).subtracting(expenseIdsOwnedByItems)
+        )
     }
 
     private func deleteVariableItems(at offsets: IndexSet) {
-        guard var re = currentEstate else { return }
-        let items = re.variableExpenses
-        var linkedIds = Set<UUID>()
-        for index in offsets {
-            let item = items[index]
-            if let expId = item.linkedExpenseId { linkedIds.insert(expId) }
-            re.variableExpenses.removeAll { $0.id == item.id }
+        let items = storeVariableItems
+        let picked = offsets.filter { $0 < items.count }.map { items[$0] }
+        pendingSwipeDeletion = SwipeDeletionRequest(
+            kind: .variable,
+            itemIds: Set(picked.map { $0.id }),
+            expenseIds: Set(picked.compactMap { $0.linkedExpenseId }).subtracting(expenseIdsOwnedByItems)
+        )
+    }
+
+    /// [v25.530] 保險／附屬資產還連著的記帳支出 id（表單裡的＋store 裡的）。
+    /// 舊版記帳再存一次這類支出，會把它重複加進變動支出（類別是房屋價金的加進房屋價金）；
+    /// 左滑刪那種重複列時只拿掉那一列，支出還被保險／附屬資產連著，不能刪。
+    /// 水電繳費連著的也算（跟卡片頁 isExpenseShared 同一套），不然刪重複列會讓繳費紀錄連到不存在的支出。
+    private var expenseIdsOwnedByItems: Set<UUID> {
+        var ids = Set(insuranceItems.compactMap { $0.linkedExpenseId })
+        ids.formUnion(assetItems.compactMap { $0.linkedExpenseId })
+        ids.formUnion((currentEstate?.insuranceItems ?? []).compactMap { $0.linkedExpenseId })
+        ids.formUnion((currentEstate?.propertyAssets ?? []).compactMap { $0.linkedExpenseId })
+        ids.formUnion((currentEstate?.utilityPayments ?? []).compactMap { $0.linkedExpenseId })
+        return ids
+    }
+
+    private func swipeDeletionMessage(_ request: SwipeDeletionRequest) -> String {
+        let expenseCount = request.expenseIds.count
+        if expenseCount == 1 {
+            return "會一起刪掉記帳裡這筆支出，以及銀行的扣款紀錄，不能復原。"
         }
-        if !linkedIds.isEmpty {
-            for exp in expenseStore.expenses where linkedIds.contains(exp.id) {
-                for name in exp.photoFileNames { Expense.deletePhoto(name) }
-            }
-            expenseStore.expenses.removeAll { linkedIds.contains($0.id) }
+        if expenseCount > 1 {
+            return "會一起刪掉記帳裡這 \(expenseCount) 筆支出，以及銀行的扣款紀錄，不能復原。"
+        }
+        return "這個項目會刪除，不能復原。"
+    }
+
+    private func confirmSwipeDeletion(_ request: SwipeDeletionRequest) {
+        guard var re = currentEstate else { return }
+        // 記帳支出（含照片）＋所有銀行帳戶裡對得上的扣款紀錄
+        RealEstateDeletion.removeExpenses(request.expenseIds, expenseStore: expenseStore, lifeStore: lifeStore)
+        switch request.kind {
+        case .mortgage:
+            re.mortgageItems.removeAll { request.itemIds.contains($0.id) }
+        case .paid:
+            re.paidItems.removeAll { request.itemIds.contains($0.id) }
+        case .variable:
+            re.variableExpenses.removeAll { request.itemIds.contains($0.id) }
         }
         financeStore.update(re)
     }
 
     // MARK: - 同步函式
 
-    private func syncInsuranceExpense(reId: UUID, reName: String, item: InsuranceItemState) -> UUID {
-        let expenseId = item.linkedExpenseId ?? UUID()
-        let title = item.policyNumber.isEmpty ? "\(reName) - 保險" : "\(reName) - \(item.policyNumber)"
-        // 帶回既有 photoFileNames：這幾個 item state 沒有自己的照片欄位，但連結的 Expense
-        // 本身可在 AddExpenseView 一般編輯時另外附加照片；本函式每次存檔都整筆重建 Expense，
-        // 若不帶回會把使用者在 AddExpenseView 附加的照片默默清空、原始檔案變孤兒（同一 bug
-        // class 也修過 RealEstateDetailView.UtilityPaymentEditor.save()，見該處註解）。
-        let existingPhotos = item.linkedExpenseId.flatMap { id in expenseStore.expenses.first(where: { $0.id == id })?.photoFileNames } ?? []
-        let expense = Expense(
-            id: expenseId, title: title, amount: item.amount, date: purchaseDate,
-            expenseType: .variable, variableCategory: .realEstate,
-            linkedRealEstateId: reId,
-            realEstateExpenseCategory: .insurance, note: "",
-            photoFileNames: existingPhotos
-        )
-        if item.linkedExpenseId != nil { expenseStore.update(expense) }
-        else { expenseStore.add(expense) }
-        return expenseId
+    private static func insuranceExpenseTitle(_ estateName: String, _ policyNumber: String) -> String {
+        policyNumber.isEmpty ? "\(estateName) - 保險" : "\(estateName) - \(policyNumber)"
     }
 
-    private func syncAssetExpense(reId: UUID, reName: String, item: AssetItemState) -> UUID {
-        let expenseId = item.linkedExpenseId ?? UUID()
-        let label = item.name.isEmpty ? item.category.rawValue : item.name
-        // 帶回既有 photoFileNames，理由同 syncInsuranceExpense 上方註解。
-        let existingPhotos = item.linkedExpenseId.flatMap { id in expenseStore.expenses.first(where: { $0.id == id })?.photoFileNames } ?? []
-        let expense = Expense(
-            id: expenseId, title: "\(reName) - \(label)",
-            amount: item.amount, date: purchaseDate,
+    private static func assetExpenseLabel(_ name: String, _ category: RealEstateExpenseCategory) -> String {
+        name.isEmpty ? category.rawValue : name
+    }
+
+    /// [v25.530] 保險／附屬資產連到的記帳支出（save() 用，改在 batch 副本上）。
+    /// 支出還在：只改跟著項目變的欄位——金額；項目名稱改了（或標題還是舊的自動標題，例如只改了房子名稱）才改標題；
+    /// 購入日改了、而且支出日期還停在原本的購入日才改日期；附屬資產類別改了才改子分類。
+    /// 備註、照片、地點、付款方式、銀行等其他欄位原樣保留，id 不變（以前每存一次就整筆重建）。
+    /// 支出已經不在（在記帳那邊被刪了）：才新建一筆，回傳新的 id 讓項目改連過去。
+    private func syncLinkedExpense(
+        linkedId: UUID?, amount: Double, title: String, oldAutoTitle: String?, nameChanged: Bool,
+        category: RealEstateExpenseCategory, categoryChanged: Bool,
+        reId: UUID, purchaseDayChanged: Bool, batch: inout LinkedExpenseBatch
+    ) -> UUID {
+        if let id = linkedId, let idx = batch.expenses.firstIndex(where: { $0.id == id }) {
+            var exp = batch.expenses[idx]
+            let oldAmount = exp.amount
+            let oldDate = exp.date
+            let oldTitle = exp.title
+            let oldCategory = exp.realEstateExpenseCategory
+            exp.amount = amount
+            if nameChanged || exp.title == oldAutoTitle {
+                exp.title = title
+            }
+            if purchaseDayChanged, let oldPurchaseDate = editing?.purchaseDate,
+               Calendar.current.isDate(exp.date, inSameDayAs: oldPurchaseDate) {
+                exp.date = purchaseDate
+            }
+            if categoryChanged {
+                exp.realEstateExpenseCategory = category
+            }
+            let moneyChanged = exp.amount != oldAmount || exp.date != oldDate
+            if moneyChanged || exp.title != oldTitle || exp.realEstateExpenseCategory != oldCategory {
+                batch.expenses[idx] = exp
+                batch.changed = true
+            }
+            if moneyChanged { batch.bankSyncIds.insert(id) }
+            return id
+        }
+        let newExpense = Expense(
+            id: UUID(), title: title, amount: amount, date: purchaseDate,
             expenseType: .variable, variableCategory: .realEstate,
             linkedRealEstateId: reId,
-            realEstateExpenseCategory: item.category, note: "",
-            photoFileNames: existingPhotos
+            realEstateExpenseCategory: category, note: ""
         )
-        if item.linkedExpenseId != nil { expenseStore.update(expense) }
-        else { expenseStore.add(expense) }
-        return expenseId
+        batch.expenses.append(newExpense)
+        batch.changed = true
+        return newExpense.id
+    }
+
+    /// [v25.530] 金額或日期改了的連結支出，照 AddExpenseView.syncBankWithdrawal 重寫它的銀行扣款紀錄：
+    /// 移掉舊的、寫入新的；信用卡扣款、週期性固定支出不寫單筆。milestones 只寫一次。
+    private func syncBankWithdrawals(for ids: Set<UUID>, in expenses: [Expense]) {
+        guard !ids.isEmpty else { return }
+        var milestones = lifeStore.milestones
+        var changed = false
+        for exp in expenses where ids.contains(exp.id) {
+            guard exp.linkedCreditCardMilestoneId == nil else { continue }
+            if exp.expenseType == .fixed && exp.recurrence != nil { continue }
+            guard let bankId = exp.linkedBankMilestoneId,
+                  let mi = milestones.firstIndex(where: { $0.id == bankId }) else { continue }
+            var list = milestones[mi].bankDeposits ?? []
+            list.removeAll { $0.linkedExpenseId == exp.id }
+            // 台幣支出扣外幣子帳戶時照匯率換算（同水電瓦斯編輯器）；支出本身就是那個幣別才原樣記
+            let isNTD = exp.currencyCode == "NT$" || exp.currencyCode == "TWD"
+            let value: (amount: Double, code: String) = isNTD
+                ? realEstateBankWithdrawalValue(ntd: exp.amount, currency: exp.linkedBankCurrency, rates: expenseStore.currencyRates)
+                : (amount: exp.amount, code: exp.linkedBankCurrency ?? exp.currencyCode)
+            list.append(BankDeposit(
+                id: UUID(), date: exp.date, amount: value.amount,
+                currencyCode: value.code,
+                isWithdrawal: true, linkedExpenseId: exp.id
+            ))
+            milestones[mi].bankDeposits = list
+            changed = true
+        }
+        if changed { lifeStore.milestones = milestones }
     }
 
     // MARK: - 載入編輯
@@ -1682,9 +1861,10 @@ struct AddRealEstateView: View {
         } else {
             isSold = false; soldDate = Date()
         }
-        purchasePriceText = e.purchasePrice > 0 ? String(format: "%g", e.purchasePrice / 10000) : ""
-        currentValueText = e.currentValue > 0 ? String(format: "%g", e.currentValue / 10000) : ""
-        monthlyRentalText = e.monthlyRental > 0 ? String(format: "%.0f", e.monthlyRental) : ""
+        // [v25.530] 金額帶回輸入框不能丟精度：%g 只有 6 位有效數字，每存一次「萬」就漂一點
+        purchasePriceText = e.purchasePrice > 0 ? Self.editableAmountText(e.purchasePrice / 10000, decimals: 4) : ""
+        currentValueText = e.currentValue > 0 ? Self.editableAmountText(e.currentValue / 10000, decimals: 4) : ""
+        monthlyRentalText = e.monthlyRental > 0 ? Self.editableAmountText(e.monthlyRental, decimals: 2) : ""
         note = e.note
 
         // mortgageItems / paidItems / variableExpenses 已從 store 直接讀取，無須載入到本地 state
@@ -1693,7 +1873,7 @@ struct AddRealEstateView: View {
         buildingType = e.buildingType
         hasElevator = e.hasElevator
         elevatorItems = e.elevatorMaintenances.map {
-            ElevatorItemState(id: $0.id, date: $0.date, photoFileName: $0.photoFileName)
+            ElevatorItemState(id: $0.id, date: $0.date, photoFileNames: $0.photoFileNames)
         }
         pingCountText = e.pingCount > 0 ? String(format: "%g", e.pingCount) : ""
         landOwner = e.landOwner
@@ -1714,13 +1894,11 @@ struct AddRealEstateView: View {
         floorItems = e.floors.map { f in
             FloorItemState(id: f.id, floorNumber: f.floorNumber, functions: Set(f.functions), areaText: f.area > 0 ? String(format: "%g", f.area) : "")
         }
+        // waterMeterNumber 留著原值：save() 用它判斷三格有沒有被改過
         waterMeterNumber = e.waterMeterNumber
-        let waterParts = e.waterMeterNumber.split(separator: "-", omittingEmptySubsequences: false).map(String.init)
-        if waterParts.count >= 3 {
-            waterStation = waterParts[0]; waterCode = waterParts[1]; waterCheck = waterParts[2]
-        } else if waterParts.count == 1 && !waterParts[0].isEmpty {
-            waterCode = waterParts[0]
-        }
+        // [v25.530] 任何段數都拆得回三格（以前剛好兩段時三格全空，再存就被清掉）
+        let waterParts = Self.splitWaterNumber(e.waterMeterNumber)
+        waterStation = waterParts[0]; waterCode = waterParts[1]; waterCheck = waterParts[2]
         waterMeterOwner = e.waterMeterOwner
         electricityMeterNumber = e.electricityMeterNumber
         electricityMeterOwner = e.electricityMeterOwner
@@ -1728,11 +1906,20 @@ struct AddRealEstateView: View {
         gasMeterOwner = e.gasMeterOwner
         gasUserNumber = e.gasUserNumber
         extraMeters = e.extraMeters
+        // [v25.530] 讀回時剛好是某位家人的，才用「從家人選」模式；其餘（含空白）是手動輸入
+        var picked = Set<String>()
+        if ownerCandidates.contains(e.waterMeterOwner) { picked.insert("water") }
+        if ownerCandidates.contains(e.electricityMeterOwner) { picked.insert("electricity") }
+        if ownerCandidates.contains(e.gasMeterOwner) { picked.insert("gas") }
+        for m in e.extraMeters where ownerCandidates.contains(m.owner) {
+            picked.insert(m.id.uuidString)
+        }
+        ownerPickedFromList = picked
 
         insuranceItems = e.insuranceItems.map { ins in
             InsuranceItemState(
                 id: ins.id, policyNumber: ins.policyNumber,
-                amountText: ins.amount > 0 ? String(format: "%.0f", ins.amount) : "",
+                amountText: ins.amount > 0 ? Self.editableAmountText(ins.amount, decimals: 2) : "",
                 linkedExpenseId: ins.linkedExpenseId
             )
         }
@@ -1741,9 +1928,38 @@ struct AddRealEstateView: View {
             AssetItemState(
                 id: a.id, category: a.category, name: a.name,
                 brand: a.brand, floorLocation: a.floorLocation,
-                amountText: a.amount > 0 ? String(format: "%.0f", a.amount) : "",
+                amountText: a.amount > 0 ? Self.editableAmountText(a.amount, decimals: 2) : "",
                 linkedExpenseId: a.linkedExpenseId
             )
+        }
+    }
+
+    /// [v25.530] 金額帶回輸入框：四捨五入到指定小數位後去掉多餘的 0。
+    /// 「萬」用 4 位（＝1 元精度），元用 2 位。只給可編輯的文字用，顯示用的格式不走這裡。
+    private static func editableAmountText(_ value: Double, decimals: Int) -> String {
+        var text = String(format: "%.\(decimals)f", value)
+        if text.contains(".") {
+            while text.hasSuffix("0") { text.removeLast() }
+            if text.hasSuffix(".") { text.removeLast() }
+        }
+        return text
+    }
+
+    /// [v25.530] 水號拆成「站所、編號、檢號」三格，一定回傳 3 個元素：
+    /// 1 段放編號；2 段末段只有 1 個字當「編號-檢號」，否則當「站所-編號」；
+    /// 3 段以上頭尾是站所、檢號，中間全部（含 -）放編號。
+    private static func splitWaterNumber(_ raw: String) -> [String] {
+        let parts = raw.split(separator: "-", omittingEmptySubsequences: false).map(String.init)
+        switch parts.count {
+        case 0:
+            return ["", "", ""]
+        case 1:
+            return ["", parts[0], ""]
+        case 2:
+            return parts[1].count <= 1 ? ["", parts[0], parts[1]] : [parts[0], parts[1], ""]
+        default:
+            let middle = parts[1..<(parts.count - 1)].joined(separator: "-")
+            return [parts[0], middle, parts[parts.count - 1]]
         }
     }
 
@@ -1764,7 +1980,7 @@ struct AddRealEstateView: View {
 
     private func syncSaleExpense(reId: UUID, name: String, loss: Double, date: Date, existingId: UUID?) -> UUID {
         let expId = existingId ?? UUID()
-        // 帶回既有 photoFileNames，理由同 syncInsuranceExpense 上方註解。
+        // 帶回既有 photoFileNames：連結的支出可能在記帳那邊附加過照片，整筆重建時不帶回會被清空、檔案變孤兒。
         let existingPhotos = existingId.flatMap { id in expenseStore.expenses.first(where: { $0.id == id })?.photoFileNames } ?? []
         let expense = Expense(
             id: expId, title: "售出 \(name)（虧損）",

@@ -184,6 +184,8 @@ struct AddExpenseView: View {
     @State private var selectedRealEstateLinkId: UUID?
     @State private var selectedRealEstateExpenseCategory: RealEstateExpenseCategory = .renovation
     @State private var realEstateLinkExisting: Bool = true
+    /// [v25.530] 水電瓦斯是哪一種；nil＝自動（從名稱、備註判斷）
+    @State private var selectedUtilityType: UtilityType?
 
     // MARK: - 固定支出關聯資產
 
@@ -2312,6 +2314,17 @@ struct AddExpenseView: View {
                     Label(cat.rawValue, systemImage: cat.icon).tag(cat)
                 }
             }
+
+            // [v25.530] 選了既有物件時名稱是自動的「項目 N：房名-水電瓦斯」，看不出是水、電還是瓦斯，
+            // 讓你直接選；留在「自動」才從名稱和備註判斷。
+            if selectedRealEstateExpenseCategory == .utility {
+                Picker("水電類型", selection: $selectedUtilityType) {
+                    Text("自動").tag(nil as UtilityType?)
+                    ForEach(UtilityType.allCases) { kind in
+                        Label(kind.rawValue, systemImage: kind.icon).tag(kind as UtilityType?)
+                    }
+                }
+            }
         } header: {
             sectionHeader(title: "房地產（連動理財模式）", accentColor: .purple)
         } footer: {
@@ -3238,6 +3251,20 @@ struct AddExpenseView: View {
     private func syncRealEstateVariableExpense(realEstateId: UUID, expenseId: UUID, amount: Double) {
         guard var re = financeStore.realEstates.first(where: { $0.id == realEstateId }) else { return }
 
+        // [v25.530] 房子編輯頁的保險、附屬資產建出來的支出，在房子裡已經有自己那一項；
+        // 以前在記帳這邊再存一次，會被當成變動支出又加一列，同一筆錢算兩次。
+        // 改成只把金額寫回那一項（兩種項目都沒有日期欄位），並清掉以前多加出來的重複列。
+        let insuranceIdx = re.insuranceItems.firstIndex(where: { $0.linkedExpenseId == expenseId })
+        let assetIdx = re.propertyAssets.firstIndex(where: { $0.linkedExpenseId == expenseId })
+        if insuranceIdx != nil || assetIdx != nil {
+            if let i = insuranceIdx { re.insuranceItems[i].amount = amount }
+            if let i = assetIdx { re.propertyAssets[i].amount = amount }
+            re.variableExpenses.removeAll { $0.linkedExpenseId == expenseId }
+            re.paidItems.removeAll { $0.linkedExpenseId == expenseId }
+            financeStore.update(re)
+            return
+        }
+
         if selectedRealEstateExpenseCategory == .housePayment {
             // 房屋價金 → paidItems（已支出房屋金額）
             let newPaid = RealEstatePaidItem(
@@ -3251,13 +3278,16 @@ struct AddExpenseView: View {
             re.variableExpenses.removeAll { $0.linkedExpenseId == expenseId }
 
             if let idx = re.paidItems.firstIndex(where: { $0.linkedExpenseId == expenseId }) {
+                let keptId = re.paidItems[idx].id
                 re.paidItems[idx] = RealEstatePaidItem(
-                    id: re.paidItems[idx].id,
+                    id: keptId,
                     title: title.trimmingCharacters(in: .whitespaces),
                     amount: amount,
                     date: date,
                     linkedExpenseId: expenseId
                 )
+                // [v25.530] 同一筆支出只留一列（以前重複加進來的一起收掉）
+                re.paidItems.removeAll { $0.linkedExpenseId == expenseId && $0.id != keptId }
             } else {
                 re.paidItems.append(newPaid)
             }
@@ -3266,26 +3296,26 @@ struct AddExpenseView: View {
             re.paidItems.removeAll { $0.linkedExpenseId == expenseId }
             re.variableExpenses.removeAll { $0.linkedExpenseId == expenseId }
 
-            let inferredType: UtilityType = {
-                let lower = title.lowercased()
-                if lower.contains("水") || lower.contains("water") { return .water }
-                if lower.contains("電") || lower.contains("electric") { return .electricity }
-                if lower.contains("瓦斯") || lower.contains("gas") { return .gas }
-                return .electricity
-            }()
-
+            // [v25.530] 類型的優先順序：上面選擇器選的 > 原本連著的那筆繳費紀錄（編輯既有的就沿用，不重猜）
+            // > 從名稱／備註判斷（guessUtilityType，跟 AI 記帳共用）。
             if let idx = re.utilityPayments.firstIndex(where: { $0.linkedExpenseId == expenseId }) {
                 let old = re.utilityPayments[idx]
                 re.utilityPayments[idx] = UtilityPayment(
-                    id: old.id, type: old.type, date: date, amount: amount,
+                    id: old.id, type: selectedUtilityType ?? old.type, date: date, amount: amount,
                     photoFileName: old.photoFileName,
                     photoFileNames: old.photoFileNames,
                     note: note.trimmingCharacters(in: .whitespaces),
                     linkedExpenseId: expenseId
                 )
             } else {
+                // 編輯時換了房子：舊房子那筆還在（存完才清），沿用它的類型
+                let previousType = financeStore.realEstates
+                    .flatMap { $0.utilityPayments }
+                    .first(where: { $0.linkedExpenseId == expenseId })?.type
+                let resolvedType: UtilityType = selectedUtilityType ?? previousType
+                    ?? guessUtilityType(title: title, note: note, estateName: re.name)
                 re.utilityPayments.append(UtilityPayment(
-                    type: inferredType, date: date, amount: amount,
+                    type: resolvedType, date: date, amount: amount,
                     note: note.trimmingCharacters(in: .whitespaces),
                     linkedExpenseId: expenseId
                 ))
@@ -3306,14 +3336,17 @@ struct AddExpenseView: View {
             re.utilityPayments.removeAll { $0.linkedExpenseId == expenseId }
 
             if let idx = re.variableExpenses.firstIndex(where: { $0.linkedExpenseId == expenseId }) {
+                let keptId = re.variableExpenses[idx].id
                 re.variableExpenses[idx] = RealEstateVariableExpense(
-                    id: re.variableExpenses[idx].id,
+                    id: keptId,
                     category: selectedRealEstateExpenseCategory,
                     name: trimmedNote,
                     amount: amount,
                     date: date,
                     linkedExpenseId: expenseId
                 )
+                // [v25.530] 同一筆支出只留一列（以前重複加進來的一起收掉）
+                re.variableExpenses.removeAll { $0.linkedExpenseId == expenseId && $0.id != keptId }
             } else {
                 re.variableExpenses.append(newEntry)
             }
@@ -3329,7 +3362,10 @@ struct AddExpenseView: View {
         let trimmedName = reName.trimmingCharacters(in: .whitespaces)
         let resolvedName = trimmedName.isEmpty ? title.trimmingCharacters(in: .whitespaces) : trimmedName
         let purchasePrice = (Double(rePurchasePriceText) ?? 0) * 10000
-        let currentValue = (Double(reCurrentValueText) ?? 0) * 10000
+        // [v25.530] 估值沒填（或 ≤ 0）就用購入價，跟 AddRealEstateView 一樣；
+        // 以前存成 0，房子變成增值 −100%，淨資產少一大截。
+        let enteredValue = (Double(reCurrentValueText) ?? 0) * 10000
+        let currentValue = enteredValue > 0 ? enteredValue : purchasePrice
 
         if var re = existingRE {
             re.name = resolvedName
@@ -3399,7 +3435,10 @@ struct AddExpenseView: View {
         let trimmedName = reName.trimmingCharacters(in: .whitespaces)
         let resolvedName = trimmedName.isEmpty ? title.trimmingCharacters(in: .whitespaces) : trimmedName
         let purchasePrice = (Double(rePurchasePriceText) ?? 0) * 10000
-        let currentValue = (Double(reCurrentValueText) ?? 0) * 10000
+        // [v25.530] 估值沒填（或 ≤ 0）就用購入價，跟 AddRealEstateView 一樣；
+        // 以前存成 0，房子變成增值 −100%，淨資產少一大截。
+        let enteredValue = (Double(reCurrentValueText) ?? 0) * 10000
+        let currentValue = enteredValue > 0 ? enteredValue : purchasePrice
 
         if var re = existingRE {
             re.name = resolvedName
@@ -3703,6 +3742,10 @@ struct AddExpenseView: View {
                 if let reCat = expense.realEstateExpenseCategory {
                     selectedRealEstateExpenseCategory = reCat
                 }
+                // [v25.530] 水電瓦斯：選擇器帶出原本那筆繳費紀錄的類型，存檔時沿用、不重猜
+                selectedUtilityType = financeStore.realEstates
+                    .flatMap { $0.utilityPayments }
+                    .first(where: { $0.linkedExpenseId == expense.id })?.type
             }
         }
 
@@ -3858,6 +3901,40 @@ struct AddExpensePreset {
     var linkedTripPlanId: UUID?
     var linkedTripStopId: UUID?
     var date: Date?
+}
+
+// MARK: - 水電瓦斯類型判斷
+
+/// [v25.530] 從標題（和備註）猜水電瓦斯帳單是哪一種；記帳存檔和 AI 記帳（MainTabView）共用這一份。
+/// 以前只看標題有沒有「水」字，房子叫「水岸花園」，電費也被當成水費。
+/// 所以先把房子名稱、自動標題裡的「水電瓦斯」字樣拿掉（標題和備註都拿），再照「瓦斯 → 電 → 水」的順序找；
+/// 標題找不到才看備註；都沒有就用原本的預設（電費）。
+func guessUtilityType(title: String, note: String = "", estateName: String) -> UtilityType {
+    func match(_ text: String) -> UtilityType? {
+        let lower = text.lowercased()
+        let gasWords = ["瓦斯", "天然氣", "gas"]
+        let electricWords = ["電", "台電", "electric"]
+        let waterWords = ["水費", "自來水", "台水", "水", "water"]
+        if gasWords.contains(where: { lower.contains($0) }) { return .gas }
+        if electricWords.contains(where: { lower.contains($0) }) { return .electricity }
+        if waterWords.contains(where: { lower.contains($0) }) { return .water }
+        return nil
+    }
+    var cleaned = title
+    let name = estateName.trimmingCharacters(in: .whitespaces)
+    // 新增物件沒填名稱時，房子名稱就是拿標題當的；整段拿掉就什麼都不剩，這時不拿
+    if !name.isEmpty && name != title.trimmingCharacters(in: .whitespaces) {
+        cleaned = cleaned.replacingOccurrences(of: name, with: " ")
+    }
+    cleaned = cleaned.replacingOccurrences(of: RealEstateExpenseCategory.utility.rawValue, with: " ")
+    // 選既有物件時標題是自動的，備註才是真的資訊，常會打房子名稱（「水岸花園 9月」），所以備註也一樣清；
+    // 備註不會被拿去當房子名稱，不需要上面那個例外
+    var cleanedNote = note
+    if !name.isEmpty {
+        cleanedNote = cleanedNote.replacingOccurrences(of: name, with: " ")
+    }
+    cleanedNote = cleanedNote.replacingOccurrences(of: RealEstateExpenseCategory.utility.rawValue, with: " ")
+    return match(cleaned) ?? match(cleanedNote) ?? .electricity
 }
 
 // MARK: - 地點候選資料型別

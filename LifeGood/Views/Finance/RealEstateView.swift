@@ -255,12 +255,15 @@ struct RealEstateView: View {
             .contentShape(Rectangle())
             .onTapGesture { viewingItem = item }
             .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                Button(role: .destructive) {
+                // [v25.530] 不用 role: .destructive：那會讓 List 一按就把這列滑掉，
+                // 確認框按取消時卡片已經不見；改用紅色 tint，按確認才真的刪
+                Button {
                     if subscription.isPremium { pendingDelete = item }
                     else { showPremiumAlert = true }
                 } label: {
                     Label("刪除", systemImage: "trash")
                 }
+                .tint(.red)
             }
     }
 

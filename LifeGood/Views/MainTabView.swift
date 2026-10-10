@@ -1017,13 +1017,8 @@ struct MainTabView: View {
                 date: expense.date, linkedExpenseId: expense.id
             ))
         case .utility:
-            let lower = expense.title.lowercased()
-            let inferredType: UtilityType = {
-                if lower.contains("水") || lower.contains("water") { return .water }
-                if lower.contains("電") || lower.contains("electric") { return .electricity }
-                if lower.contains("瓦斯") || lower.contains("gas") { return .gas }
-                return .electricity
-            }()
+            // [v25.530] 跟記帳頁共用同一套判斷（先拿掉房子名稱，「水岸花園 電費」才不會被當成水費）
+            let inferredType = guessUtilityType(title: expense.title, note: expense.note, estateName: re.name)
             re.utilityPayments.append(UtilityPayment(
                 type: inferredType, date: expense.date, amount: expense.amount,
                 note: expense.note, linkedExpenseId: expense.id

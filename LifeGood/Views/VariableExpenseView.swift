@@ -505,6 +505,10 @@ struct VariableExpenseView: View {
                 re.variableExpenses.removeAll { $0.linkedExpenseId == expense.id }
                 re.insuranceItems.removeAll { $0.linkedExpenseId == expense.id }
                 re.propertyAssets.removeAll { $0.linkedExpenseId == expense.id }
+                // [v25.530] 水電繳費的收據照片存在 UtilityPhotos，跟支出照片是兩份；紀錄拿掉前先刪，不然變孤兒檔
+                for up in re.utilityPayments where up.linkedExpenseId == expense.id {
+                    up.photoFileNames.forEach { UtilityPayment.deletePhoto($0) }
+                }
                 re.utilityPayments.removeAll { $0.linkedExpenseId == expense.id }
                 financeStore.update(re)
             }
