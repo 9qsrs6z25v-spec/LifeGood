@@ -12,6 +12,8 @@ import SwiftUI
 //            前面的路牌是接下來要繳的
 //   房地產   街景：透天畫出樓層、大樓標出你那幾層，斜線＝還欠的，出租的掛牌子
 //   圖表     極光：簾幕的上緣是每個月的淨資產
+//   股票卡片 股價山稜（v25.528）：稜線是這一檔近一年的收盤價，均價是一道水平面——
+//            露出水面的是賺的、泡在水裡是套牢；買賣插小旗子，配息是浮在水面上的金幣
 // 規矩跟收支看板一樣：要讀的數字在頭部與膠囊的 Text 裡，這裡畫的是「看得到、不給讀」的。
 
 // MARK: - 風景的資料
@@ -108,6 +110,30 @@ struct FinAuroraScene: Equatable {
     var values: [Double]
     var startLabel: String? = nil
     var endLabel: String? = nil
+    var ticks: [Tick] = []
+}
+
+/// 股票卡片：股價山稜
+struct FinRidgeScene: Equatable {
+    enum MarkKind: Equatable { case buy, sell, dividend }
+    struct Mark: Equatable {
+        let index: Int
+        let kind: MarkKind
+    }
+    struct Tick: Equatable {
+        let index: Int
+        let label: String
+    }
+    /// 一週一點的收盤價（最後一點是現在）；不到兩點畫一片遠山就好
+    var values: [Double]
+    /// 均價（水平面）；沒有成本是 nil（不畫水）
+    var cost: Double? = nil
+    var costLabel: String? = nil
+    /// 最後一點旁邊的牌子（現價）
+    var priceLabel: String? = nil
+    /// 最後一點的顏色：漲（紅）還是跌（綠）
+    var up: Bool = true
+    var marks: [Mark] = []
     var ticks: [Tick] = []
 }
 
@@ -818,6 +844,187 @@ extension MoneyBoardSky {
         for tick in s.ticks where tick.index >= 0 && tick.index < n {
             let t = ctx.resolve(Text(tick.label).font(.system(size: 7.5, weight: .bold)).foregroundStyle(Color(tb: 0xA3B2D9)))
             ctx.draw(t, at: CGPoint(x: X(tick.index), y: r.maxY - 2), anchor: .bottom)
+        }
+    }
+
+    // MARK: 股票卡片：股價山稜（v25.528）
+
+    /// 紅漲綠跌（畫在風景裡的那一組，比字色亮一點：白字要壓得上去）
+    static func ridgeUp(dark: Bool) -> Color { dark ? Color(tb: 0xFF6B6B) : Color(tb: 0xE5383B) }
+    static func ridgeDown(dark: Bool) -> Color { dark ? Color(tb: 0x5BD99A) : Color(tb: 0x1F9D57) }
+    /// 均價（紫）：水平面的牌子、K 線的均價線、價格位置的菱形都是這個顏色
+    static func ridgeCost(dark: Bool) -> Color { dark ? Color(tb: 0xB79CFF) : Color(tb: 0x6B4BE0) }
+
+    private static func ridgePillText(_ ctx: GraphicsContext, _ s: String) -> GraphicsContext.ResolvedText {
+        ctx.resolve(Text(s).font(.system(size: 8.5, weight: .heavy)).foregroundStyle(Color.white))
+    }
+
+    /// 彩色底、白字的小牌子。anchor：牌子的哪一點對齊 p（.leading＝牌子的左邊中間）
+    @discardableResult
+    private static func ridgePill(_ ctx: inout GraphicsContext, _ s: String, at p: CGPoint, anchor: UnitPoint,
+                                  fill: Color, bounds: CGFloat) -> CGRect {
+        let t = ridgePillText(ctx, s)
+        let m = t.measure(in: CGSize(width: 300, height: 40))
+        let w = (m.width + 10).rounded()
+        let h: CGFloat = 14
+        let x = min(max(2, (p.x - w * anchor.x).rounded()), bounds - w - 2)
+        let box = CGRect(x: x, y: (p.y - h * anchor.y).rounded(), width: w, height: h)
+        ctx.fill(Path(roundedRect: box, cornerRadius: h / 2), with: .color(fill))
+        ctx.draw(t, at: CGPoint(x: box.midX, y: box.midY), anchor: .center)
+        return box
+    }
+
+    static func paintRidge(_ ctx: inout GraphicsContext, rect r: CGRect, scene s: FinRidgeScene, dark: Bool, seed: Int) {
+        let w = r.width
+        let ground = r.maxY - 12
+        // 上面留 30pt 給插在山頂的小旗子
+        let top = r.minY + 30
+        // 遠山：每一檔的起伏不一樣（seed 錯開相位）
+        let phase = Double(seed % 628) / 100
+        func farY(_ x: CGFloat) -> CGFloat {
+            ground - 16 - CGFloat(9 * sin(Double(x) / 37 + phase) + 6 * sin(Double(x) / 13 + phase * 2))
+        }
+        var far = Path()
+        far.move(to: CGPoint(x: 0, y: ground))
+        var fx: CGFloat = 0
+        while fx < w {
+            far.addLine(to: CGPoint(x: fx, y: farY(fx)))
+            fx += 6
+        }
+        far.addLine(to: CGPoint(x: w, y: farY(w)))
+        far.addLine(to: CGPoint(x: w, y: ground))
+        far.closeSubpath()
+        ctx.fill(far, with: .color(dark ? Color(tb: 0x1A2550) : Color(tb: 0xCFDDF3)))
+        let groundRect = CGRect(x: 0, y: ground, width: w, height: r.maxY - ground)
+        let v = s.values
+        guard v.count >= 2 else {
+            ctx.fill(Path(groundRect), with: .color(groundFill(dark: dark)))
+            return
+        }
+        let n = v.count
+        // 範圍連均價一起算：水平面一定在畫面裡（套很深的時候，整座山泡在水裡）
+        var vmin = v.min() ?? 0
+        var vmax = v.max() ?? 1
+        if let c = s.cost {
+            vmin = min(vmin, c)
+            vmax = max(vmax, c)
+        }
+        let pad = max((vmax - vmin) * 0.18, abs(vmax) * 0.01, 0.01)
+        let lo = vmin - pad
+        let hi = vmax + pad * 0.15
+        func X(_ i: Int) -> CGFloat { 12 + (w - 56) * CGFloat(i) / CGFloat(n - 1) }
+        func Y(_ p: Double) -> CGFloat { ground - 4 - (ground - 4 - top) * CGFloat((p - lo) / (hi - lo)) }
+        let pts = v.enumerated().map { CGPoint(x: X($0.offset), y: Y($0.element)) }
+        let first = pts[0]
+        let last = pts[n - 1]
+        func addRidge(_ p: inout Path) {
+            for i in 1..<n {
+                let p0 = pts[i - 1]
+                let p1 = pts[i]
+                let mx = (p0.x + p1.x) / 2
+                p.addCurve(to: p1, control1: CGPoint(x: mx, y: p0.y), control2: CGPoint(x: mx, y: p1.y))
+            }
+        }
+        var ridge = Path()
+        ridge.move(to: first)
+        addRidge(&ridge)
+        // 山：稜線往下收到地面，左右兩邊斜斜地收（不要一面直直的牆）
+        var mountain = Path()
+        mountain.move(to: CGPoint(x: first.x - 18, y: ground))
+        mountain.addCurve(to: first, control1: CGPoint(x: first.x - 10, y: ground - 6),
+                          control2: CGPoint(x: first.x - 8, y: first.y + 6))
+        addRidge(&mountain)
+        let endX = min(w + 2, last.x + 26)
+        mountain.addCurve(to: CGPoint(x: endX, y: ground), control1: CGPoint(x: last.x + 10, y: last.y + 6),
+                          control2: CGPoint(x: endX - 8, y: ground - 6))
+        mountain.closeSubpath()
+        let rock = dark ? Gradient(colors: [Color(tb: 0x34458A), Color(tb: 0x1B264D)])
+                        : Gradient(colors: [Color(tb: 0x9DB0E6), Color(tb: 0xC9D6F2)])
+        ctx.fill(mountain, with: .linearGradient(rock, startPoint: CGPoint(x: 0, y: top), endPoint: CGPoint(x: 0, y: ground)))
+        let costY = s.cost.map { Y($0) }
+        // 露出水面的那一截是賺的：暖色
+        if let cy = costY, cy > top - 30 {
+            var g = ctx
+            g.clip(to: Path(CGRect(x: 0, y: 0, width: w, height: cy)))
+            let warm = dark ? Gradient(colors: [Color(tb: 0xC2566A), Color(tb: 0x6B3A6E)])
+                            : Gradient(colors: [Color(tb: 0xF6A39A), Color(tb: 0xE9C3CF)])
+            g.fill(mountain, with: .linearGradient(warm, startPoint: CGPoint(x: 0, y: top), endPoint: CGPoint(x: 0, y: cy)))
+        }
+        ctx.stroke(ridge, with: .color(Color.white.opacity(dark ? 0.75 : 0.95)), lineWidth: 1.6)
+        // 水：均價以下（泡在水裡的是套牢的那幾段）
+        if let cy = costY {
+            let wg = dark ? Gradient(colors: [Color(tb: 0x4C8DFF, 0.42), Color(tb: 0x2A5BD8, 0.55)])
+                          : Gradient(colors: [Color(tb: 0x7CC4FF, 0.55), Color(tb: 0x3E8CE6, 0.62)])
+            ctx.fill(Path(CGRect(x: 0, y: cy, width: w, height: max(0, ground - cy))),
+                     with: .linearGradient(wg, startPoint: CGPoint(x: 0, y: cy), endPoint: CGPoint(x: 0, y: ground)))
+            var surface = Path()
+            surface.move(to: CGPoint(x: 0, y: cy))
+            surface.addLine(to: CGPoint(x: w, y: cy))
+            ctx.stroke(surface, with: .color(Color.white.opacity(dark ? 0.55 : 0.9)),
+                       style: StrokeStyle(lineWidth: 1.1, dash: [7, 5]))
+            for k in 0..<6 {
+                let yy = cy + 6 + CGFloat(k) * 5
+                if yy > ground - 2 { break }
+                var wave = Path()
+                wave.move(to: CGPoint(x: 0, y: yy))
+                wave.addLine(to: CGPoint(x: w, y: yy))
+                ctx.stroke(wave, with: .color(Color.white.opacity(0.35 - Double(k) * 0.05)),
+                           style: StrokeStyle(lineWidth: 0.8, dash: [3, 9], dashPhase: CGFloat(k) * 4))
+            }
+        }
+        ctx.fill(Path(groundRect), with: .color(groundFill(dark: dark)))
+        // 均價的牌子：水面的左邊
+        var costPill: CGRect = .null
+        if let cy = costY, let cl = s.costLabel {
+            costPill = ridgePill(&ctx, cl, at: CGPoint(x: 10, y: cy), anchor: .leading,
+                                 fill: ridgeCost(dark: dark).opacity(0.95), bounds: w)
+        }
+        // 配息：浮在水面上的金幣（沒有水就擺在地面上）
+        let coinY = costY ?? (ground - 7)
+        let coinText = ctx.resolve(Text("息").font(.system(size: 6.5, weight: .black)).foregroundStyle(Color.white))
+        for m in s.marks where m.kind == .dividend && m.index >= 0 && m.index < n {
+            let x = X(m.index)
+            if !costPill.isNull, x - 6 < costPill.maxX { continue }
+            let coin = CGRect(x: x - 5, y: coinY - 5, width: 10, height: 10)
+            ctx.fill(Path(ellipseIn: coin), with: .color(Color(tb: 0xE8A317)))
+            ctx.stroke(Path(ellipseIn: coin), with: .color(Color(tb: 0xFFF1C2)), lineWidth: 0.8)
+            ctx.draw(coinText, at: CGPoint(x: x, y: coinY), anchor: .center)
+        }
+        // 買賣：插在稜線上的小旗子（買紅、賣綠）
+        let pole = dark ? Color.white.opacity(0.8) : Color(tb: 0x3A4466)
+        for m in s.marks where m.kind != .dividend && m.index >= 0 && m.index < n {
+            let p = pts[m.index]
+            let buy = m.kind == .buy
+            let col = buy ? ridgeUp(dark: dark) : ridgeDown(dark: dark)
+            var stick = Path()
+            stick.move(to: p)
+            stick.addLine(to: CGPoint(x: p.x, y: p.y - 20))
+            ctx.stroke(stick, with: .color(pole), lineWidth: 1.1)
+            let flag = CGRect(x: p.x, y: p.y - 20, width: 15, height: 11)
+            ctx.fill(Path(roundedRect: flag, cornerRadius: 2.5), with: .color(col))
+            let t = ctx.resolve(Text(buy ? "買" : "賣").font(.system(size: 8, weight: .black)).foregroundStyle(Color.white))
+            ctx.draw(t, at: CGPoint(x: flag.midX, y: flag.midY), anchor: .center)
+            ctx.fill(Path(ellipseIn: CGRect(x: p.x - 2, y: p.y - 2, width: 4, height: 4)), with: .color(col))
+        }
+        // 現在：最後一點＋現價的牌子（右邊放不下就放在上面）
+        let tone = s.up ? ridgeUp(dark: dark) : ridgeDown(dark: dark)
+        ctx.fill(Path(ellipseIn: CGRect(x: last.x - 6, y: last.y - 6, width: 12, height: 12)), with: .color(tone.opacity(0.25)))
+        let dot = CGRect(x: last.x - 3.5, y: last.y - 3.5, width: 7, height: 7)
+        ctx.fill(Path(ellipseIn: dot), with: .color(tone))
+        ctx.stroke(Path(ellipseIn: dot), with: .color(.white), lineWidth: 1.2)
+        if let pl = s.priceLabel {
+            let pw = ridgePillText(ctx, pl).measure(in: CGSize(width: 300, height: 40)).width + 10
+            if last.x + 7 + pw <= w - 2 {
+                ridgePill(&ctx, pl, at: CGPoint(x: last.x + 7, y: last.y), anchor: .leading, fill: tone, bounds: w)
+            } else {
+                ridgePill(&ctx, pl, at: CGPoint(x: last.x, y: last.y - 8), anchor: .bottom, fill: tone, bounds: w)
+            }
+        }
+        // 月份
+        let monthInk = dark ? Color(tb: 0xA3B2D9) : Color(tb: 0x4A5B8C)
+        for tick in s.ticks where tick.index >= 0 && tick.index < n {
+            let t = ctx.resolve(Text(tick.label).font(.system(size: 7.5, weight: .bold)).foregroundStyle(monthInk))
+            ctx.draw(t, at: CGPoint(x: X(tick.index), y: r.maxY - 1), anchor: .bottom)
         }
     }
 }

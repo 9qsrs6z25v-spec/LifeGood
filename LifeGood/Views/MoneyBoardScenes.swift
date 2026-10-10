@@ -99,6 +99,8 @@ enum MoneyBoardScene: Equatable {
     case road(FinRoadScene)
     case street(FinStreetScene)
     case aurora(FinAuroraScene)
+    // [v25.528] 股票卡片：這一檔近一年的股價山稜
+    case ridge(FinRidgeScene)
 }
 
 // MARK: - 頭部的字
@@ -320,6 +322,7 @@ extension MoneyBoardSky {
         case .road(let s): paintYearRoad(&ctx, rect: bandRect, scene: s, dark: a.dark, seed: a.seed)
         case .street(let s): paintStreet(&ctx, rect: bandRect, scene: s, dark: a.dark, seed: a.seed)
         case .aurora(let s): paintAurora(&ctx, rect: bandRect, scene: s, seed: a.seed)
+        case .ridge(let s): paintRidge(&ctx, rect: bandRect, scene: s, dark: a.dark, seed: a.seed)
         }
 
         if let greeting {

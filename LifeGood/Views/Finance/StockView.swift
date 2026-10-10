@@ -689,6 +689,19 @@ enum TWQuoteService {
     /// 美股判定（與 Stock.isUSStock 同一條規則）：字母開頭＝美股、數字開頭＝台股。
     static func isUSSymbol(_ s: String) -> Bool { s.first?.isLetter == true }
 
+    /// [v25.528] 這一檔在哪個市場（股票卡片看板的「2330・台股・上市」）：
+    /// 查報價時學到的（MIS 的 tse／otc、興櫃名冊）；還沒查過、或是美股是 nil
+    static func tierLabel(symbol: String) -> String? {
+        guard !symbol.isEmpty, !isUSSymbol(symbol) else { return nil }
+        if (UserDefaults.standard.stringArray(forKey: emergingSetKey) ?? []).contains(symbol) { return "興櫃" }
+        let map = (UserDefaults.standard.dictionary(forKey: exchangeMapKey) as? [String: String]) ?? [:]
+        switch map[symbol] {
+        case "tse": return "上市"
+        case "otc": return "上櫃"
+        default: return nil
+        }
+    }
+
     /// 整批查報價。回傳 symbol → Quote；查不到的代號不會出現在結果裡。
     static func batch(symbols: [String]) async -> [String: Quote] {
         let all = Set(symbols.filter { !$0.isEmpty })

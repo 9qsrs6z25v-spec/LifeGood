@@ -83,6 +83,12 @@ import Charts
 //      stock.name 等既有資料完全未變動。
 //      （下次美化本檔案時：兩個編輯 sheet 已對齊全檔案 section header／金額規格，
 //      可轉往其他仍留有待辦的畫面）
+// [v25.528] 整張重做（使用者：「接下来換股票卡片介面，幫我深入規劃」→「好 先照你的建議做」）：
+//   閃卡（稀有度外框）拿掉，換成理財頁同一套看板：換股列 → 股價山稜看板＋價格位置 →
+//   走勢（K 線標出買賣點、配息、均價線）→ 籌碼（法人、融資融券合成一張）→
+//   我的帳本（交易與股利合成一條時間軸）→ 股利 → 資料。看板與各張卡在 StockCardViews.swift。
+//   上面 1～25 條寫的閃卡、交易資訊、兩本紀錄、帳戶卡、備註卡都已經不在了；
+//   兩個編輯 sheet（StockTransactionEditor／StockDividendEditor）照舊，只多了「一開始選哪一種」。
 
 struct StockDetailView: View {
     @EnvironmentObject var store: FinanceStore
@@ -90,9 +96,8 @@ struct StockDetailView: View {
     @EnvironmentObject var lifeStore: LifeStore
     @EnvironmentObject var subscription: SubscriptionManager
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.colorScheme) private var colorScheme
 
-    /// @State 而非 let：左右滑動可切換上下一檔（同一張卡換內容，不重開 sheet）
+    /// @State 而非 let：換股列點選、左右滑動都可以換一檔（同一張卡換內容，不重開 sheet）
     @State private var stockId: UUID
     /// 切換方向（+1 下一檔／-1 上一檔），驅動滑動轉場的進出方向
     @State private var slideDirection: Int = 1
@@ -102,17 +107,21 @@ struct StockDetailView: View {
     @State private var askExportPageSize = false
     @State private var showPremiumAlert = false
     @State private var addingTransaction = false
+    /// [v25.528] 帳本「＋」選單選的是買進還是賣出
+    @State private var newTransactionKind: StockTransactionKind = .buy
     @State private var editingTransaction: StockTransaction?
     @State private var addingDividend = false
+    /// [v25.528] 帳本「＋」選單選的是配息還是配股
+    @State private var newDividendKind: StockDividendKind = .cash
     @State private var editingDividend: StockDividend?
-    // 進場動畫：閃卡 / 交易紀錄 / 股利紀錄各自獨立控制
-    @State private var transactionsAppeared = false
-    @State private var dividendsAppeared = false
-    // 閃卡背景日線（收盤價曲線＋成交量柱；與股票列表卡同一套資料快取）
-    @State private var heroPrices: [HeroTrendPoint] = []
-    @State private var heroVolumes: [HeroTrendPoint] = []
-    // 完整日線（含開高低；技術線圖 K 棒＋均線用）
+    /// 一年份的日線（含開高低）：看板的股價山稜、價格位置、走勢的 K 線都用這一份
     @State private var dailyPoints: [StockDailyPoint] = []
+    /// [v25.528] 籌碼（法人、融資融券）：換一檔就重讀
+    @State private var chipData: StockChipData?
+    /// [v25.528] 已賣出的股票打開時抓一次的現價（算「賣出後」漲跌；只放在畫面上，不寫回股票資料）
+    @State private var soldNowPrices: [UUID: Double] = [:]
+    /// [v25.528] 換股列上每一檔的今日漲跌
+    @State private var siblingRates: [UUID: Double] = [:]
 
     init(stock: Stock) {
         _stockId = State(initialValue: stock.id)
@@ -122,99 +131,77 @@ struct StockDetailView: View {
         store.stocks.first(where: { $0.id == stockId }) ?? Stock(name: "")
     }
 
-    /// 可左右切換的同組股票：持有中看持有中、已賣出看已賣出，
+    /// 可切換的同組股票：持有中看持有中、已賣出看已賣出，
     /// 順序與股票列表一致（store 原始順序）。
     private var siblings: [Stock] {
         store.stocks.filter { $0.isSold == stock.isSold }
     }
 
-    /// 目前在同組裡的位置（1-based；找不到回 nil，指示器就不顯示）
-    private var siblingPosition: (index: Int, count: Int)? {
-        guard let i = siblings.firstIndex(where: { $0.id == stockId }) else { return nil }
-        return (i + 1, siblings.count)
+    /// 這一張卡的數字（看板、帳本、股利、資料都從這裡拿）
+    private var cardData: StockCardData {
+        StockCardData.build(stock, all: store.stocks, points: dailyPoints, soldNowPrice: soldNowPrices[stockId])
     }
 
     /// 切到上一檔（-1）／下一檔（+1）。端點不環繞——滑到底沒反應比
-    /// 突然跳回第一檔更符合預期。切換時重置該股的日線資料，由 task(id:) 重載。
+    /// 突然跳回第一檔更符合預期。
     private func switchStock(_ delta: Int) {
         let list = siblings
         guard let i = list.firstIndex(where: { $0.id == stockId }) else { return }
         let target = i + delta
         guard list.indices.contains(target) else { return }
-        slideDirection = delta
+        jump(to: list[target].id, direction: delta)
+    }
+
+    /// 換股列點的那一檔：在右邊就從右邊滑進來
+    private func select(_ id: UUID) {
+        let list = siblings
+        let from = list.firstIndex { $0.id == stockId } ?? 0
+        let to = list.firstIndex { $0.id == id } ?? 0
+        jump(to: id, direction: to >= from ? 1 : -1)
+    }
+
+    /// 換到某一檔。日線、籌碼先清掉，由 task(id:) 重載（不然會短暫看到上一檔的 K 線）
+    private func jump(to id: UUID, direction: Int) {
+        guard id != stockId else { return }
+        slideDirection = direction
         withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
-            stockId = list[target].id
-            heroPrices = []; heroVolumes = []; dailyPoints = []
+            stockId = id
+            dailyPoints = []
+            chipData = nil
         }
     }
 
-    /// 用市值決定稀有度（已賣出則用最後賣出價市值）
-    private var rarity: CardRarity {
-        CardRarity.stock(value: stock.marketValue)
-    }
-
-    /// 「◂ x / N ▸」位置指示器：點左右箭頭也能切換（不只滑動）
-    private func swipeIndicator(_ pos: (index: Int, count: Int)) -> some View {
-        HStack(spacing: 10) {
-            Button { switchStock(-1) } label: {
-                Image(systemName: "chevron.left")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(pos.index > 1 ? Color.secondary : Color(.quaternaryLabel))
-            }
-            .buttonStyle(.plain)
-            .disabled(pos.index <= 1)
-            Text("\(pos.index) / \(pos.count)")
-                .font(.caption2.weight(.semibold).monospacedDigit())
-                .foregroundStyle(.secondary)
-            Button { switchStock(1) } label: {
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(pos.index < pos.count ? Color.secondary : Color(.quaternaryLabel))
-            }
-            .buttonStyle(.plain)
-            .disabled(pos.index >= pos.count)
+    private func switcherItems(_ card: StockCardData) -> [StockSwitcherStrip.Item] {
+        siblings.map { s in
+            let rate: Double? = s.isSold
+                ? StockCardData.realizedReturn(s)
+                : (siblingRates[s.id] ?? (s.id == stockId ? card.dayRate : nil))
+            return StockSwitcherStrip.Item(id: s.id, symbol: s.symbol, name: s.name, rate: rate, isDay: !s.isSold)
         }
-        .padding(.horizontal, 10).padding(.vertical, 4)
-        .background(Color(.secondarySystemBackground), in: Capsule())
     }
 
     var body: some View {
+        let card = cardData
+        let candles = candlePoints
         NavigationStack {
             ScrollView {
-                VStack(spacing: 24) {
-                    if let pos = siblingPosition, pos.count > 1 {
-                        swipeIndicator(pos)
+                VStack(spacing: 22) {
+                    StockCardBoard(data: card)
+                    if !candles.isEmpty {
+                        trendSection(candles)
                     }
-                    flashCard
-                    // 技術線圖：日 K 棒＋MA5/MA20（Yahoo 日線含開高低，本地算均線）
-                    if !candlePoints.isEmpty {
-                        CandleChartCard(candles: candlePoints)
-                            .padding(.horizontal, 24)
+                    chipsSection
+                    StockLedgerCard(data: card,
+                                    onAdd: { kind in addLedgerEntry(kind) },
+                                    onOpen: { e in openLedgerEntry(e) })
+                    if !stock.dividends.isEmpty {
+                        StockDividendCard(data: card)
                     }
-                    // 法人買賣超柱狀圖（每日收集的快照；未收集到該股資料時整卡隱藏）
-                    InstNetBarCard(symbol: stock.symbol)
-                        .padding(.horizontal, 24)
-                    // 融資融券餘額走勢＋券資比＋外資持股比率（同一批每日快照；無資料整卡隱藏）
-                    MarginChipCard(symbol: stock.symbol)
-                        .padding(.horizontal, 24)
-                    infoSection
-                    transactionsSection
-                    dividendsSection
-                    if let bankInfo = bankAccountInfo {
-                        accountSection(label: "扣款 / 入帳銀行",
-                                       icon: "building.columns.fill",
-                                       value: bankInfo,
-                                       color: .blue)
-                    }
-                    if let secInfo = securitiesInfo {
-                        accountSection(label: "證券帳戶",
-                                       icon: "chart.bar.doc.horizontal.fill",
-                                       value: secInfo,
-                                       color: .purple)
-                    }
-                    if !stock.note.isEmpty { noteCard }
+                    StockInfoCard(data: card, bank: bankAccountInfo, securities: securitiesInfo)
                 }
-                .padding(.vertical)
+                .padding(.horizontal, 16)
+                .padding(.top, 10)
+                .padding(.bottom, 28)
                 // 換檔時整包內容依方向滑入（id 變更觸發 transition；在一般視圖
                 // 層級的轉場可靠，App 根層那個「轉場不播」的坑不適用於這裡）
                 .id(stockId)
@@ -236,9 +223,25 @@ struct StockDetailView: View {
                         switchStock(dx < 0 ? 1 : -1)
                     }
             )
-            // stockId 變更即重載該股日線（切換上下一檔用）；首次出現也會跑一次
+            // 換股列（取代原本的「◂ 2 / 5 ▸」）：同一組不只一檔才出現。
+            // 放在捲動區外面、釘在最上面：往下看帳本時也能換；而且它自己會左右捲，
+            // 放在上面那個「左右滑換一檔」的手勢範圍外，捲換股列才不會順便換掉股票
+            .safeAreaInset(edge: .top, spacing: 0) {
+                if siblings.count > 1 {
+                    StockSwitcherStrip(items: switcherItems(card), selected: stockId) { id in
+                        select(id)
+                    }
+                    .padding(.vertical, 4)
+                    .background(.bar)
+                }
+            }
+            // stockId 變更即重載該股的資料（換一檔用）；首次出現也會跑一次。
+            // 三件事各跑各的：抓現價、讀快照不用等日線
             .task(id: stockId) { await loadDailySeries() }
-            .navigationTitle("股票卡片")
+            .task(id: stockId) { await loadChips() }
+            .task(id: stockId) { await loadSoldQuote() }
+            .task(id: siblings.map(\.id)) { await loadSiblingRates() }
+            .navigationTitle(card.title)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
@@ -246,15 +249,15 @@ struct StockDetailView: View {
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     HStack(spacing: 16) {
-                        // 分享：改走共用分頁匯出模板（v25.304）——閃卡＋K線＋基本資訊
-                        // ＋交易/配息逐筆列，先跳「每頁項目數」（可選全部一頁）。
-                        // 沒有任何交易/配息時維持舊的單張閃卡＋K線匯出。
+                        // 分享：看板＋走勢＋帳本逐筆（v25.528），先跳「每頁項目數」（可選全部一頁）。
+                        // 帳本沒有任何一筆時直接匯出一張看板＋走勢
                         Button {
-                            if exportRowCount == 0 { exportCardImage() }
+                            if card.events.isEmpty { exportCardImage() }
                             else { askExportPageSize = true }
                         } label: {
                             Image(systemName: "square.and.arrow.up")
                         }
+                        .accessibilityLabel("分享")
                         Button {
                             if subscription.isPremium { showEdit = true }
                             else { showPremiumAlert = true }
@@ -271,96 +274,77 @@ struct StockDetailView: View {
             }
             .sheet(item: $shareItem) { item in ShareSheet(items: item.items) }
             .sheet(isPresented: $addingTransaction) {
-                StockTransactionEditor(stockId: stockId, editing: nil)
+                StockTransactionEditor(stockId: stockId, editing: nil, initialKind: newTransactionKind)
             }
             .sheet(item: $editingTransaction) { tx in
                 StockTransactionEditor(stockId: stockId, editing: tx)
             }
             .sheet(isPresented: $addingDividend) {
-                StockDividendEditor(stockId: stockId, editing: nil)
+                StockDividendEditor(stockId: stockId, editing: nil, initialKind: newDividendKind)
             }
             .sheet(item: $editingDividend) { div in
                 StockDividendEditor(stockId: stockId, editing: div)
             }
             .premiumLockAlert(isPresented: $showPremiumAlert)
             .exportPageSizeDialog(isPresented: $askExportPageSize,
-                                  itemCount: exportRowCount) { per in
+                                  itemCount: card.events.count) { per in
                 exportPaged(perPage: per)
             }
         }
     }
 
-    // MARK: - 閃卡
+    // MARK: - 走勢、籌碼
 
-    private var flashCard: some View { flashCardContent(animated: true) }
+    private func trendSection(_ candles: [CandlePoint]) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            MoneySectionHeader(title: "走勢", trailing: "日K・點一下看那一天")
+            CandleChartCard(candles: candles,
+                            cost: stock.purchasePrice > 0 ? stock.purchasePrice : nil,
+                            marks: StockChartMark.marks(stock))
+        }
+    }
 
-    private func flashCardContent(animated: Bool) -> some View {
-        // [v7] 改用 FlashCardView 標準模板（FlashCardView.swift）：殼層（背景/邊框/
-        // 陰影/售出章/進場動畫）與版面骨架由模板統一，本頁只填內容；
-        // 圓角/邊框/大字字級等樣式參數由「設定 > 進階設定 > 閃卡樣式」控制。
-        // animated: false 供 ImageRenderer 匯出分享圖（靜態渲染跳過進場動畫）。
-        let market = splitWan(stock.marketValue)
-        let pl = stock.profitLoss
-        let plColor = stockPLColor(pl)
-        return FlashCardView(
-            rarity: rarity,
-            categoryLabel: "股票",
-            categoryIcon: "chart.line.uptrend.xyaxis",
-            title: stock.name,
-            bigNumber: market.number,
-            bigCaption: stock.isSold ? "賣出市值（\(market.unit)元）" : "目前市值（\(market.unit)元）",
-            columns: [
-                FlashCardInfoColumn("股數", "\(Int(stock.shares))"),
-                // 每股價格是原幣別（美股＝美元），欄名標明幣別，市值大字才是 NT$
-                FlashCardInfoColumn((stock.isSold ? "賣出價" : "目前價") + (stock.isUSStock ? "(US$)" : ""),
-                                    String(format: "%.2f", stock.isSold ? stock.soldPrice : stock.currentPrice)),
-                FlashCardInfoColumn("成本價" + (stock.isUSStock ? "(US$)" : ""),
-                                    String(format: "%.2f", stock.purchasePrice))
-            ],
-            isSold: stock.isSold,
-            animated: animated
-        ) {
-            if !stock.symbol.isEmpty {
-                Text(stock.symbol)
-                    .font(.subheadline.weight(.medium))
-                    .padding(.horizontal, 11).padding(.vertical, 4)
-                    .background((rarity == .legendary ? Color.white.opacity(0.18) : Color(.systemGray5)),
-                                in: Capsule())
-                    .overlay(Capsule().stroke(
-                        rarity == .legendary ? Color.white.opacity(0.30) : Color(.separator).opacity(0.25),
-                        lineWidth: 0.75
-                    ))
-                    .foregroundStyle(rarity.primaryTextColor)
-            }
-        } middleExtra: {
-            // 損益百分比醒目膠囊
-            HStack(spacing: 6) {
-                Image(systemName: pl >= 0 ? "arrow.up.right" : "arrow.down.right")
-                    .font(.caption)
-                Text((pl >= 0 ? "+" : "") + fmt(pl))
-                    .font(.subheadline.weight(.semibold))
-                Text(String(format: "(%@%.2f%%)", pl >= 0 ? "+" : "", stock.returnRate))
-                    .font(.caption2)
-            }
-            .padding(.horizontal, 12).padding(.vertical, 6)
-            .background(plColor.opacity(0.15), in: Capsule())
-            .overlay(Capsule().stroke(plColor.opacity(0.22), lineWidth: 0.6))
-            .foregroundStyle(plColor)
-            .padding(.bottom, 16)
-        } extraBackground: {
-            // 個股 3 個月日線（收盤價曲線＋成交量柱）：傳說卡深色底用白、其他淺色底用橙
-            if heroPrices.count >= 2 {
-                HeroPriceVolumeBackground(
-                    prices: heroPrices,
-                    volumes: heroVolumes,
-                    tint: rarity == .legendary
-                        ? .white
-                        : Color(red: 1.00, green: 0.62, blue: 0.22)
-                )
+    /// 籌碼：只有台股上市櫃有官方資料。快照庫整個是空的（收集還沒跑完）才說明為什麼沒有；
+    /// 快照有、但沒有這一檔（興櫃）就整段不出現
+    @ViewBuilder
+    private var chipsSection: some View {
+        if let chips = chipData, !stock.isUSStock {
+            if !chips.isEmpty {
+                StockChipsCard(data: chips, tier: TWQuoteService.tierLabel(symbol: stock.symbol))
+            } else if chips.storeIsEmpty {
+                StockChipsCollectingHint()
             }
         }
-        .padding(.horizontal, 24)
-        .padding(.top, 16)
+    }
+
+    // MARK: - 帳本
+
+    /// 帳本的「＋」選單（新增要 Premium，跟原本的 ＋ 按鈕一樣）
+    private func addLedgerEntry(_ kind: StockLedgerAdd) {
+        guard subscription.isPremium else {
+            showPremiumAlert = true
+            return
+        }
+        switch kind {
+        case .buy, .sell:
+            newTransactionKind = kind == .buy ? .buy : .sell
+            addingTransaction = true
+        case .cash, .stock:
+            newDividendKind = kind == .cash ? .cash : .stock
+            addingDividend = true
+        }
+    }
+
+    /// 點帳本的一筆：交易、股利開各自的編輯；沒有交易紀錄的舊資料開「編輯股票」
+    private func openLedgerEntry(_ e: StockLedgerEvent) {
+        switch e.source {
+        case .transaction(let t):
+            editingTransaction = t
+        case .dividend(let d):
+            editingDividend = d
+        case .legacy:
+            if subscription.isPremium { showEdit = true } else { showPremiumAlert = true }
+        }
     }
 
     // MARK: - 分享圖片匯出
@@ -369,17 +353,21 @@ struct StockDetailView: View {
         let f = DateFormatter(); f.dateFormat = "yyyyMMdd_HHmm"; return f
     }()
 
-    /// 把閃卡＋技術線圖渲染成 JPG 並開啟系統分享面板
+    /// 把看板＋走勢渲染成 JPG 並開啟系統分享面板
     /// （對齊 SubordinateDetailView.exportJPG 規格：寬 430、scale ≥3、JPG 0.95）
     @MainActor
     private func exportCardImage() {
+        let card = cardData
+        let candles = candlePoints
         let content = VStack(spacing: 16) {
-            flashCardContent(animated: false)
-            if !candlePoints.isEmpty {
-                CandleChartCard(candles: candlePoints)
-                    .padding(.horizontal, 24)
+            StockCardBoard(data: card)
+            if !candles.isEmpty {
+                CandleChartCard(candles: candles,
+                                cost: stock.purchasePrice > 0 ? stock.purchasePrice : nil,
+                                marks: StockChartMark.marks(stock))
             }
         }
+        .padding(.horizontal, 16)
         .frame(width: 430)
         .padding(.vertical, 20)
         .background(Color(.systemGroupedBackground))
@@ -390,30 +378,12 @@ struct StockDetailView: View {
         renderer.scale = ImageExportLimits.safeScale(for: measured)
         guard let ui = renderer.uiImage, !ImageExportLimits.isBlank(ui),
               let data = ui.jpegData(compressionQuality: 0.95) else { return }
-        let stockName = stock.name.isEmpty ? "股票" : stock.name
-        let name = "股票卡片_\(stockName)_\(Self.shareStampFmt.string(from: Date())).jpg"
+        let name = "股票卡片_\(card.title)_\(Self.shareStampFmt.string(from: Date())).jpg"
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(name)
         do {
             try data.write(to: url)
             shareItem = StockCardSharePayload(items: [url])
         } catch { }
-    }
-
-    // MARK: - 分頁匯出（v25.304：改接 PagedImageExporter 共用模板）
-
-    /// 可分頁的列數＝交易紀錄＋配息紀錄
-    private var exportRowCount: Int {
-        stock.transactions.count + stock.dividends.count
-    }
-
-    private static let exportDateFmt: DateFormatter = {
-        let f = DateFormatter(); f.locale = Locale(identifier: "zh_Hant_TW"); f.dateFormat = "yyyy/M/d"; return f
-    }()
-    private static let exportNumFmt: NumberFormatter = {
-        let f = NumberFormatter(); f.numberStyle = .decimal; f.maximumFractionDigits = 2; return f
-    }()
-    private static func num(_ v: Double) -> String {
-        exportNumFmt.string(from: NSNumber(value: v)) ?? "\(v)"
     }
 
     /// 每頁重複的抬頭：📈 股票｜名稱（代號）
@@ -428,110 +398,39 @@ struct StockDetailView: View {
         )
     }
 
-    /// 匯出用區塊標題（膠囊側條＋圖示＋計數，對齊 App 內 section header 樣式）
-    private func exportSectionTitle(_ title: String, icon: String, color: Color, count: Int) -> AnyView {
-        AnyView(
-            HStack(spacing: 8) {
-                Capsule()
-                    .fill(LinearGradient(colors: [color, color.opacity(0.55)],
-                                         startPoint: .top, endPoint: .bottom))
-                    .frame(width: 4, height: 16)
-                Image(systemName: icon)
-                    .font(.system(size: 12, weight: .semibold)).foregroundStyle(color)
-                Text(title).font(.subheadline.weight(.bold))
-                Text("\(count) 筆")
-                    .font(.caption2.weight(.semibold)).foregroundStyle(color)
-                    .padding(.horizontal, 7).padding(.vertical, 2)
-                    .background(color.opacity(0.10)).clipShape(Capsule())
-                Spacer()
-            }
-        )
-    }
-
-    private func exportTransactionRow(_ tx: StockTransaction) -> AnyView {
-        // [v25.527] 跟畫面上的交易列同一套：買進紅、賣出綠（台股習慣）
-        let color: Color = tx.kind == .buy ? .red : .green
-        return AnyView(
-            HStack(spacing: 10) {
-                Text(tx.kind.rawValue)
-                    .font(.system(size: 10, weight: .bold))
-                    .padding(.horizontal, 7).padding(.vertical, 2.5)
-                    .background(color.opacity(0.12)).foregroundStyle(color)
-                    .clipShape(Capsule())
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("\(Self.num(stock.displayQuantity(lots: tx.lots))) \(stock.quantityUnit) × \(Self.num(tx.price))")
-                        .font(.subheadline.weight(.medium))
-                    Text(Self.exportDateFmt.string(from: tx.date))
-                        .font(.caption2).foregroundStyle(.secondary)
-                }
-                Spacer()
-                Text(stock.priceCurrencySymbol + Self.num(tx.amount.rounded()))
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(color)
-            }
-            .padding(.horizontal, 14).padding(.vertical, 9)
-        )
-    }
-
-    private func exportDividendRow(_ d: StockDividend) -> AnyView {
-        let isCash = d.kind == .cash
-        let color: Color = isCash ? .orange : .teal
-        return AnyView(
-            HStack(spacing: 10) {
-                Text(isCash ? "配息" : "配股")
-                    .font(.system(size: 10, weight: .bold))
-                    .padding(.horizontal, 7).padding(.vertical, 2.5)
-                    .background(color.opacity(0.12)).foregroundStyle(color)
-                    .clipShape(Capsule())
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(isCash
-                         ? "每股 \(Self.num(d.perShare))・持股 \(Self.num(d.sharesAtEvent)) 股"
-                         : "配發 \(Self.num(stock.displayQuantity(lots: d.lots))) \(stock.quantityUnit)")
-                        .font(.subheadline.weight(.medium))
-                    Text(Self.exportDateFmt.string(from: d.date))
-                        .font(.caption2).foregroundStyle(.secondary)
-                }
-                Spacer()
-                Text(isCash
-                     // [v25.510] 不要 .rounded()。台股配息動輒上千，少個一塊
-                     // 看不出來；美股一筆才十幾美元，US$16.63 捨成 US$17
-                     // 等於憑空多了 2% ——幣值越小，分位越不能丟。
-                     ? fmtTrade(d.cashTotal)
-                     : "+\(Self.num(d.sharesEarned)) 股")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(color)
-            }
-            .padding(.horizontal, 14).padding(.vertical, 9)
-        )
-    }
-
-    /// 分頁匯出：閃卡＋K線＋交易/配息逐筆列（每頁重複抬頭與區塊標題、頁尾頁碼）
+    /// 分頁匯出（v25.304 共用模板）：第一頁是看板＋走勢，接著帳本逐筆
+    /// （每頁重複抬頭與區塊標題、頁尾頁碼）
     @MainActor
     private func exportPaged(perPage: Int) {
+        let card = cardData
+        let candles = candlePoints
+        let pal = TripBoardPalette(.light)
         var items: [PagedExportItem] = []
-        // 閃卡與 K 線當非分頁的開頭區塊（只出現在第一頁）
+        // 看板與 K 線當非分頁的開頭區塊（只出現在第一頁）。區塊標題左右留 20，往外推 4 跟帳本的卡對齊
         items.append(.sectionHeader(AnyView(
-            flashCardContent(animated: false).environmentObject(store)
+            StockCardBoard(data: card).padding(.horizontal, -4)
         )))
-        if !candlePoints.isEmpty {
+        if !candles.isEmpty {
             items.append(.sectionHeader(AnyView(
-                CandleChartCard(candles: candlePoints).padding(.horizontal, 4)
+                VStack(alignment: .leading, spacing: 8) {
+                    MoneySectionHeader(title: "走勢", trailing: "日K")
+                    CandleChartCard(candles: candles,
+                                    cost: stock.purchasePrice > 0 ? stock.purchasePrice : nil,
+                                    marks: StockChartMark.marks(stock))
+                }
+                .padding(.horizontal, -4)
             )))
         }
-        let txs = stock.transactions.sorted { $0.date > $1.date }
-        if !txs.isEmpty {
-            items.append(.sectionHeader(exportSectionTitle("交易紀錄", icon: "arrow.left.arrow.right",
-                                                           color: .orange, count: txs.count)))
-            items += txs.map { .row(exportTransactionRow($0)) }
-        }
-        let divs = stock.dividends.sorted { $0.date > $1.date }
-        if !divs.isEmpty {
-            items.append(.sectionHeader(exportSectionTitle("股利紀錄", icon: "gift.fill",
-                                                           color: .pink, count: divs.count)))
-            items += divs.map { .row(exportDividendRow($0)) }
+        if !card.events.isEmpty {
+            items.append(.sectionHeader(AnyView(
+                MoneySectionHeader(title: "我的帳本", trailing: "\(card.events.count) 筆")
+            )))
+            items += card.events.map { e -> PagedExportItem in
+                .row(AnyView(StockLedgerRow(event: e, stock: card.stock, pal: pal)))
+            }
         }
         let urls = PagedImageExporter.exportSections(
-            baseName: "股票_\(stock.name.isEmpty ? "未命名" : stock.name)",
+            baseName: "股票_\(card.title)",
             itemsPerPage: perPage,
             header: exportPageHeader,
             items: items,
@@ -541,7 +440,7 @@ struct StockDetailView: View {
         shareItem = StockCardSharePayload(items: urls)
     }
 
-    // MARK: - 閃卡背景日線載入
+    // MARK: - 資料載入
 
     /// 與股票列表卡共用 StockDailyHistory 快取：先載快取、過期才網路補抓；
     /// 解碼在背景執行緒，轉換完成的最終形態才寫回 @State。
@@ -552,27 +451,54 @@ struct StockDetailView: View {
         // 寫進去會把 A 股的 K 線畫在 B 股卡上
         let requestedId = stockId
         guard !symbol.isEmpty else { return }
-        let cached = await Task.detached(priority: .userInitiated) {
-            StockDailyHistory.cached(symbol: symbol)
+        let (cached, fresh) = await Task.detached(priority: .userInitiated) {
+            (StockDailyHistory.cached(symbol: symbol), StockDailyHistory.isFresh(symbol: symbol))
         }.value
         guard stockId == requestedId else { return }
-        applyDailySeries(cached)
+        if cached.count >= 2 { dailyPoints = cached }
         let lacksOHLC = cached.isEmpty || cached.allSatisfy { $0.open == nil }
-        if lacksOHLC || !StockDailyHistory.isFresh(symbol: symbol) {
-            let fresh = await StockDailyHistory.fetch(symbol: symbol)
-            guard stockId == requestedId else { return }
-            applyDailySeries(fresh)
+        if lacksOHLC || !fresh {
+            let latest = await StockDailyHistory.fetch(symbol: symbol)
+            guard stockId == requestedId, latest.count >= 2 else { return }
+            dailyPoints = latest
         }
     }
 
-    private func applyDailySeries(_ pts: [StockDailyPoint]) {
-        guard pts.count >= 2 else { return }
-        // 快取自 v25.238 起存一整年；英雄卡背景趨勢維持近 3 個月的觀感只取尾段，
-        // K 線圖（dailyPoints）拿整年，由卡片內的顯示窗自行切 3月/6月/1年。
-        let tail = Array(pts.suffix(66))
-        heroPrices = tail.map { HeroTrendPoint(date: $0.date, value: $0.close) }
-        heroVolumes = tail.map { HeroTrendPoint(date: $0.date, value: $0.volume) }
-        dailyPoints = pts
+    /// 籌碼快照（每個交易日一個檔案）：在背景讀
+    private func loadChips() async {
+        let s = stock
+        let requestedId = stockId
+        guard !s.symbol.isEmpty, !s.isUSStock else { return }
+        let symbol = s.symbol
+        let data = await Task.detached(priority: .utility) {
+            StockChipData.load(symbol: symbol)
+        }.value
+        guard stockId == requestedId else { return }
+        chipData = data
+    }
+
+    /// 已賣出的股票：打開時抓一次現價，看賣掉之後漲還是跌。
+    /// 只放在畫面上（soldNowPrices），不寫回股票資料：賣掉的那一檔不再參與報價刷新。
+    private func loadSoldQuote() async {
+        let s = stock
+        guard s.isSold, !s.symbol.isEmpty, soldNowPrices[s.id] == nil else { return }
+        guard let q = await TWQuoteService.single(symbol: s.symbol), q.price > 0 else { return }
+        StockPreviousClose.remember([s.symbol: q])
+        soldNowPrices[s.id] = q.price
+    }
+
+    /// 換股列上每一檔的今日漲跌（報價時記下的前一日收盤；沒有就讀日線快取，在背景算）
+    private func loadSiblingRates() async {
+        let list = siblings.filter { !$0.isSold && $0.currentPrice > 0 }
+        guard siblings.count > 1, !list.isEmpty else { return }
+        let rates = await Task.detached(priority: .utility) { () -> [UUID: Double] in
+            var out: [UUID: Double] = [:]
+            for s in list {
+                if let p = s.moneyPreviousClose(), p > 0 { out[s.id] = s.currentPrice / p - 1 }
+            }
+            return out
+        }.value
+        siblingRates = rates
     }
 
     /// K 棒資料：只取開高低齊全的日子（舊快取或部分停牌日可能缺）
@@ -583,499 +509,6 @@ struct StockDetailView: View {
             return CandlePoint(date: p.date, open: o, high: h, low: l, close: p.close,
                                volume: p.volume)
         }
-    }
-
-    // MARK: - 資訊清單
-
-    private var infoSection: some View {
-        let pl = stock.profitLoss
-        let rowCount = 5 + (stock.isSold && stock.soldDate != nil ? 1 : 0)
-        return VStack(alignment: .leading, spacing: 0) {
-            // [v2] 橙色 sectionHeader + 計數膠囊
-            sectionHeader("交易資訊", count: rowCount)
-
-            infoRow(label: "成本總額", value: fmt(stock.totalCost), color: .primary, useCapsule: false)
-            Divider().padding(.leading, 14)
-            infoRow(label: "市值總額", value: fmt(stock.marketValue), color: .primary, useCapsule: false)
-            Divider().padding(.leading, 14)
-            // [v2] 損益 / 報酬率改為彩色 Capsule 膠囊（帶 stroke），對齊 StockView.stockCard 損益膠囊規格
-            infoRow(label: "損益",
-                    value: (pl >= 0 ? "+" : "") + fmt(pl),
-                    color: stockPLColor(pl),
-                    useCapsule: true)
-            Divider().padding(.leading, 14)
-            infoRow(label: "報酬率",
-                    value: String(format: "%@%.2f%%", pl >= 0 ? "+" : "", stock.returnRate),
-                    color: stockPLColor(pl),
-                    useCapsule: true)
-            Divider().padding(.leading, 14)
-            infoRow(label: "購入日期", value: fmtDate(stock.purchaseDate), color: .secondary, useDateBadge: true)
-            if stock.isSold, let sd = stock.soldDate {
-                Divider().padding(.leading, 14)
-                infoRow(label: "賣出日期", value: fmtDate(sd), color: .secondary, useDateBadge: true)
-            }
-        }
-        .background(Color(.systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 16))
-        .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 3)
-        .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color(.separator).opacity(0.10), lineWidth: 0.75))
-        .padding(.horizontal)
-    }
-
-    // MARK: - 交易紀錄
-
-    private var sortedTransactions: [StockTransaction] {
-        stock.transactions.sorted { $0.date > $1.date }
-    }
-
-    @ViewBuilder
-    private var transactionsSection: some View {
-        // 只算一次，避免下方 isEmpty／count／ForEach 三處各自重新呼叫 .sorted
-        let sortedTransactions = sortedTransactions
-        VStack(alignment: .leading, spacing: 0) {
-            // 【美化】Capsule 色條 + subheadline.bold + 計數膠囊，對齊其他頁面區塊標題設計語言
-            HStack(spacing: 10) {
-                Capsule()
-                    .fill(LinearGradient(
-                        colors: [.indigo, .indigo.opacity(0.55)],
-                        startPoint: .top, endPoint: .bottom
-                    ))
-                    .frame(width: 4, height: 20)
-                Text("交易紀錄")
-                    .font(.subheadline.weight(.bold))
-                if !sortedTransactions.isEmpty {
-                    Text("\(sortedTransactions.count) 筆")
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(.indigo)
-                        .padding(.horizontal, 8).padding(.vertical, 3)
-                        .background(Color.indigo.opacity(0.10))
-                        .clipShape(Capsule())
-                        .overlay(Capsule().stroke(Color.indigo.opacity(0.22), lineWidth: 0.75))
-                }
-                Spacer()
-                Button {
-                    if subscription.isPremium { addingTransaction = true }
-                    else { showPremiumAlert = true }
-                } label: {
-                    Image(systemName: "plus.circle.fill").font(.title3).foregroundStyle(.green)
-                }
-            }
-            .padding(.horizontal, 16).padding(.top, 16).padding(.bottom, 10)
-
-            if sortedTransactions.isEmpty {
-                // [v2] 升級為 40pt 圖示圓 + 說明文字，對齊全 App 空狀態佔位設計規格
-                VStack(spacing: 8) {
-                    ZStack {
-                        Circle()
-                            .fill(LinearGradient(
-                                colors: [Color.indigo.opacity(0.15), Color.indigo.opacity(0.06)],
-                                startPoint: .topLeading, endPoint: .bottomTrailing
-                            ))
-                            .frame(width: 40, height: 40)
-                        Circle()
-                            .stroke(Color.indigo.opacity(0.18), lineWidth: 0.75)
-                            .frame(width: 40, height: 40)
-                        Image(systemName: "arrow.left.arrow.right.circle")
-                            .font(.system(size: 16, weight: .medium))
-                            .foregroundStyle(Color.indigo.opacity(0.65))
-                    }
-                    Text("尚無交易紀錄")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                    Text("點右上角 + 新增買入或賣出")
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 18)
-                .padding(.horizontal, 16)
-            } else {
-                // 【美化】交錯淡入 + 向上進場動畫，對齊 VariableExpenseView 規格
-                ForEach(Array(sortedTransactions.enumerated()), id: \.element.id) { idx, tx in
-                    Button {
-                        editingTransaction = tx
-                    } label: {
-                        transactionRow(tx)
-                    }
-                    .buttonStyle(.plain)
-                    .opacity(transactionsAppeared ? 1 : 0)
-                    .offset(y: transactionsAppeared ? 0 : 12)
-                    .animation(
-                        .spring(response: 0.44, dampingFraction: 0.82)
-                            .delay(0.06 * Double(min(idx, 8))),
-                        value: transactionsAppeared
-                    )
-                    // [v2] Divider leading 66 → 72（對齊 44pt 圖示 + 12pt spacing）
-                    Divider().padding(.leading, 72)
-                }
-                summaryFooter
-            }
-        }
-        .background(Color(.systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 16))
-        .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 3)
-        // [v2] 補入 overlay 細邊框，對齊 infoSection / noteCard 深色模式邊界感
-        .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color(.separator).opacity(0.10), lineWidth: 0.75))
-        .padding(.horizontal)
-        .onAppear {
-            withAnimation(.spring(response: 0.5, dampingFraction: 0.82).delay(0.08)) {
-                transactionsAppeared = true
-            }
-        }
-    }
-
-    private func transactionRow(_ tx: StockTransaction) -> some View {
-        let accent: Color = tx.kind == .buy ? .red : .green
-        // [v2] 圖示圓 38pt → 44pt + stroke 細邊框；種類標籤 RoundedRectangle → Capsule + stroke
-        return HStack(spacing: 12) {
-            ZStack {
-                Circle()
-                    .fill(LinearGradient(
-                        colors: [accent.opacity(0.22), accent.opacity(0.09)],
-                        startPoint: .topLeading, endPoint: .bottomTrailing
-                    ))
-                    .frame(width: 44, height: 44)
-                    .shadow(color: accent.opacity(0.18), radius: 5, x: 0, y: 2)
-                Circle()
-                    .stroke(accent.opacity(0.18), lineWidth: 0.75)
-                    .frame(width: 44, height: 44)
-                Image(systemName: tx.kind == .buy ? "arrow.down.circle.fill" : "arrow.up.circle.fill")
-                    .font(.system(size: 19, weight: .semibold))
-                    .foregroundStyle(accent)
-            }
-
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: 6) {
-                    Text(tx.kind.rawValue)
-                        .font(.system(size: 10, weight: .semibold))
-                        .padding(.horizontal, 7).padding(.vertical, 2.5)
-                        .background(accent.opacity(0.12))
-                        .foregroundStyle(accent)
-                        .clipShape(Capsule())
-                        .overlay(Capsule().stroke(accent.opacity(0.22), lineWidth: 0.5))
-                    Text(fmtDate(tx.date)).font(.caption).foregroundStyle(.secondary)
-                }
-                Text("\(formatLots(stock.displayQuantity(lots: tx.lots))) \(stock.quantityUnit) × \(formatPrice(tx.price))")
-                    .font(.caption2).foregroundStyle(.tertiary)
-            }
-
-            Spacer()
-
-            Text(fmtTrade(tx.amount))
-                .font(.system(size: 15, weight: .bold, design: .rounded))
-                .foregroundStyle(tx.kind == .buy ? Color.primary : Color.green)
-                .contentTransition(.numericText())
-        }
-        .padding(.horizontal, 14).padding(.vertical, 10)
-        .contentShape(Rectangle())
-    }
-
-    /// 顯示成本均價（不一定 = 最新一筆買入價）
-    // [v2] 膠囊補入 stroke 細邊框，對齊全 App 膠囊設計語言
-    private var summaryFooter: some View {
-        VStack(spacing: 0) {
-            Divider()
-            HStack {
-                HStack(spacing: 4) {
-                    Image(systemName: "chart.bar.fill")
-                        .font(.system(size: 9, weight: .semibold))
-                        .foregroundStyle(.indigo)
-                    Text("目前持股")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-                Text("\(formatLots(stock.shares / stock.sharesPerUnit)) \(stock.quantityUnit)")
-                    .font(.caption.weight(.bold))
-                    .padding(.horizontal, 8).padding(.vertical, 3)
-                    .background(Color.indigo.opacity(0.09))
-                    .foregroundStyle(.indigo)
-                    .clipShape(Capsule())
-                    .overlay(Capsule().stroke(Color.indigo.opacity(0.22), lineWidth: 0.5))
-            }
-            .padding(.horizontal, 14).padding(.vertical, 7)
-
-            HStack {
-                HStack(spacing: 4) {
-                    Image(systemName: "dollarsign.circle.fill")
-                        .font(.system(size: 9, weight: .semibold))
-                        .foregroundStyle(.blue)
-                    Text("成本均價")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-                Text(formatPrice(stock.purchasePrice))
-                    .font(.caption.weight(.bold))
-                    .padding(.horizontal, 8).padding(.vertical, 3)
-                    .background(Color.blue.opacity(0.09))
-                    .foregroundStyle(.blue)
-                    .clipShape(Capsule())
-                    .overlay(Capsule().stroke(Color.blue.opacity(0.22), lineWidth: 0.5))
-            }
-            .padding(.horizontal, 14).padding(.vertical, 7)
-        }
-    }
-
-    // MARK: - 股利章節
-
-    private var sortedDividends: [StockDividend] {
-        stock.dividends.sorted { $0.date > $1.date }
-    }
-
-    @ViewBuilder
-    private var dividendsSection: some View {
-        // 只算一次，避免下方 isEmpty／ForEach 兩處各自重新呼叫 .sorted
-        let sortedDividends = sortedDividends
-        VStack(alignment: .leading, spacing: 0) {
-            // 【美化】Capsule 色條 + subheadline.bold + 計數膠囊，對齊 transactionsSection 設計語言
-            HStack(spacing: 10) {
-                Capsule()
-                    .fill(LinearGradient(
-                        colors: [.pink, .pink.opacity(0.55)],
-                        startPoint: .top, endPoint: .bottom
-                    ))
-                    .frame(width: 4, height: 20)
-                Text("股票股利 / 現金股利")
-                    .font(.subheadline.weight(.bold))
-                if !sortedDividends.isEmpty {
-                    Text(dividendsSummaryLabel)
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(.pink)
-                        .padding(.horizontal, 8).padding(.vertical, 3)
-                        .background(Color.pink.opacity(0.10))
-                        .clipShape(Capsule())
-                        .overlay(Capsule().stroke(Color.pink.opacity(0.22), lineWidth: 0.75))
-                }
-                Spacer()
-                Button {
-                    if subscription.isPremium { addingDividend = true }
-                    else { showPremiumAlert = true }
-                } label: {
-                    Image(systemName: "plus.circle.fill")
-                        .font(.title3).foregroundStyle(.green)
-                }
-            }
-            .padding(.horizontal, 16).padding(.top, 16).padding(.bottom, 10)
-
-            if sortedDividends.isEmpty {
-                // [v2] 升級為 40pt 圖示圓 + 說明文字，對齊全 App 空狀態佔位設計規格
-                VStack(spacing: 8) {
-                    ZStack {
-                        Circle()
-                            .fill(LinearGradient(
-                                colors: [Color.pink.opacity(0.15), Color.pink.opacity(0.06)],
-                                startPoint: .topLeading, endPoint: .bottomTrailing
-                            ))
-                            .frame(width: 40, height: 40)
-                        Circle()
-                            .stroke(Color.pink.opacity(0.18), lineWidth: 0.75)
-                            .frame(width: 40, height: 40)
-                        Image(systemName: "banknote")
-                            .font(.system(size: 16, weight: .medium))
-                            .foregroundStyle(Color.pink.opacity(0.65))
-                    }
-                    Text("尚無股利紀錄")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                    Text("點右上角 + 新增配股或配息")
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 18)
-                .padding(.horizontal, 16)
-            } else {
-                // 【美化】交錯淡入 + 向上進場動畫
-                ForEach(Array(sortedDividends.enumerated()), id: \.element.id) { idx, div in
-                    Button {
-                        editingDividend = div
-                    } label: {
-                        dividendRow(div)
-                    }
-                    .buttonStyle(.plain)
-                    .opacity(dividendsAppeared ? 1 : 0)
-                    .offset(y: dividendsAppeared ? 0 : 12)
-                    .animation(
-                        .spring(response: 0.44, dampingFraction: 0.82)
-                            .delay(0.06 * Double(min(idx, 8))),
-                        value: dividendsAppeared
-                    )
-                    // [v2] Divider leading 66 → 72（對齊 44pt 圖示 + 12pt spacing）
-                    Divider().padding(.leading, 72)
-                }
-                dividendsFooter
-            }
-        }
-        .background(Color(.systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 16))
-        .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 3)
-        // [v2] 補入 overlay 細邊框，對齊 transactionsSection 深色模式邊界感
-        .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color(.separator).opacity(0.10), lineWidth: 0.75))
-        .padding(.horizontal)
-        .onAppear {
-            withAnimation(.spring(response: 0.5, dampingFraction: 0.82).delay(0.12)) {
-                dividendsAppeared = true
-            }
-        }
-    }
-
-    private var dividendsSummaryLabel: String {
-        let stockCount = stock.dividends.filter { $0.kind == .stock }.count
-        let totalCash = stock.dividends
-            .filter { $0.kind == .cash }
-            .reduce(0.0) { $0 + $1.cashTotal }
-        var parts: [String] = []
-        if stockCount > 0 { parts.append("\(stockCount) 次配股") }
-        // [v25.510] 用 fmtTrade 不是 fmt。
-        //
-        // StockDividend.cashTotal ＝ perShare × sharesAtEvent，**沒有乘匯率**，
-        // 所以它是原幣別（美股＝美元）。fmt 走的是 ntdWanString，字頭寫死 NT$
-        // 又會四捨五入到整數——美股的 US$16.63 就被印成「NT$17」，
-        // 幣別錯了，連分也不見了。
-        if totalCash > 0 { parts.append("配息 \(fmtTrade(totalCash))") }
-        return parts.isEmpty ? "0 筆" : parts.joined(separator: "・")
-    }
-
-    private func dividendRow(_ div: StockDividend) -> some View {
-        let accent: Color = div.kind == .stock ? .green : .pink
-        // [v2] 圖示圓 38pt → 44pt + stroke 細邊框；種類標籤 → Capsule + stroke
-        return HStack(spacing: 12) {
-            ZStack {
-                Circle()
-                    .fill(LinearGradient(
-                        colors: [accent.opacity(0.22), accent.opacity(0.09)],
-                        startPoint: .topLeading, endPoint: .bottomTrailing
-                    ))
-                    .frame(width: 44, height: 44)
-                    .shadow(color: accent.opacity(0.18), radius: 5, x: 0, y: 2)
-                Circle()
-                    .stroke(accent.opacity(0.18), lineWidth: 0.75)
-                    .frame(width: 44, height: 44)
-                Image(systemName: div.kind.icon)
-                    .foregroundStyle(accent)
-                    .font(.system(size: 17, weight: .semibold))
-            }
-
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: 6) {
-                    Text(div.kind.rawValue)
-                        .font(.system(size: 10, weight: .semibold))
-                        .padding(.horizontal, 7).padding(.vertical, 2.5)
-                        .background(accent.opacity(0.12))
-                        .foregroundStyle(accent)
-                        .clipShape(Capsule())
-                        .overlay(Capsule().stroke(accent.opacity(0.22), lineWidth: 0.5))
-                    Text(fmtDate(div.date)).font(.caption).foregroundStyle(.secondary)
-                }
-                Text(dividendSubtitle(div))
-                    .font(.caption2).foregroundStyle(.tertiary)
-            }
-
-            Spacer()
-
-            Text(dividendRightLabel(div))
-                .font(.system(size: 15, weight: .bold, design: .rounded))
-                .foregroundStyle(accent)
-                .contentTransition(.numericText())
-        }
-        .padding(.horizontal, 14).padding(.vertical, 10)
-        .contentShape(Rectangle())
-    }
-
-    private func dividendSubtitle(_ div: StockDividend) -> String {
-        switch div.kind {
-        case .stock:
-            return "+\(formatLots(div.lots)) 張 (\(Int(div.sharesEarned)) 股)"
-        case .cash:
-            let p = String(format: "%.2f", div.perShare)
-            return "每股 \(p) × \(Int(div.sharesAtEvent)) 股"
-        }
-    }
-
-    private func dividendRightLabel(_ div: StockDividend) -> String {
-        switch div.kind {
-        case .stock: return "+\(formatLots(stock.displayQuantity(lots: div.lots))) \(stock.quantityUnit)"
-        case .cash:  return fmtTrade(div.cashTotal)
-        }
-    }
-
-    private var dividendsFooter: some View {
-        let stockTotal = stock.dividends
-            .filter { $0.kind == .stock }
-            .reduce(0.0) { $0 + $1.sharesEarned }
-        let cashTotal = stock.dividends
-            .filter { $0.kind == .cash }
-            .reduce(0.0) { $0 + $1.cashTotal }
-        // [v2] 膠囊補入 stroke 細邊框；累計配息改為彩色膠囊，對齊 summaryFooter 規格
-        return VStack(spacing: 0) {
-            Divider()
-            if stockTotal > 0 {
-                HStack {
-                    HStack(spacing: 4) {
-                        Image(systemName: "chart.bar.fill")
-                            .font(.system(size: 9, weight: .semibold))
-                            .foregroundStyle(.green)
-                        Text("累計配股").font(.caption2).foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                    Text("\(formatLots(stockTotal / 1000)) 張 (\(Int(stockTotal)) 股)")
-                        .font(.caption.weight(.bold))
-                        .padding(.horizontal, 8).padding(.vertical, 3)
-                        .background(Color.green.opacity(0.09))
-                        .foregroundStyle(.green)
-                        .clipShape(Capsule())
-                        .overlay(Capsule().stroke(Color.green.opacity(0.22), lineWidth: 0.5))
-                }
-                .padding(.horizontal, 14).padding(.vertical, 7)
-            }
-            if cashTotal > 0 {
-                HStack {
-                    HStack(spacing: 4) {
-                        Image(systemName: "banknote.fill")
-                            .font(.system(size: 9, weight: .semibold))
-                            .foregroundStyle(.pink)
-                        Text("累計配息").font(.caption2).foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                    // [v25.510] 同上：配息是原幣別，不能用 NT$ 的格式器
-                    Text(fmtTrade(cashTotal))
-                        .font(.caption.weight(.bold))
-                        .padding(.horizontal, 8).padding(.vertical, 3)
-                        .background(Color.pink.opacity(0.09))
-                        .foregroundStyle(.pink)
-                        .clipShape(Capsule())
-                        .overlay(Capsule().stroke(Color.pink.opacity(0.22), lineWidth: 0.5))
-                }
-                .padding(.horizontal, 14).padding(.vertical, 7)
-            }
-        }
-    }
-
-    private func formatLots(_ v: Double) -> String {
-        if v == v.rounded() { return String(format: "%.0f", v) }
-        return String(format: "%g", v)
-    }
-
-    private static let _priceFmt: NumberFormatter = {
-        let f = NumberFormatter(); f.numberStyle = .decimal
-        f.minimumFractionDigits = 2; f.maximumFractionDigits = 2; return f
-    }()
-    private func formatPrice(_ v: Double) -> String {
-        // ⚠️ 幣別要看**股票本身**，不是看連結的扣款帳戶。
-        //    用台幣帳戶買美股是常態，拿帳戶幣別當報價幣別，AAPL 的
-        //    每股 230 美元就會被標成「NT$230」。
-        stock.priceCurrencySymbol + (Self._priceFmt.string(from: NSNumber(value: v)) ?? "0")
-    }
-
-    /// 單筆交易／配息的金額是**原幣別**（美股＝美元）。
-    ///
-    /// ntdWanString 的字頭寫死 NT$，而且會換算成「萬／億」——
-    /// 那是中文的量級單位，美金金額講「US$1.2 萬」只會讓人愣住。
-    /// 所以美股走另一條：原樣的千分位 + US$。
-    private func fmtTrade(_ v: Double) -> String {
-        guard stock.isUSStock else { return v.ntdWanString }
-        return "US$" + (Self._priceFmt.string(from: NSNumber(value: v)) ?? "0")
     }
 
     // MARK: - 連結帳戶
@@ -1092,156 +525,6 @@ struct StockDetailView: View {
         guard let id = stock.linkedSecuritiesMilestoneId,
               let ms = lifeStore.milestones.first(where: { $0.id == id }) else { return nil }
         return ms.title
-    }
-
-    // 【美化】圖示改用彩色圓形背景，加 overlay 邊框，對齊 FinanceOverviewView 卡片規格
-    // [v3] 圖示圓：38pt → 44pt + stroke，對齊 StockView.stockCard / VehicleView v3 規格
-    private func accountSection(label: String, icon: String, value: String, color: Color) -> some View {
-        HStack(spacing: 12) {
-            ZStack {
-                Circle()
-                    .fill(LinearGradient(
-                        colors: [color.opacity(0.20), color.opacity(0.08)],
-                        startPoint: .topLeading, endPoint: .bottomTrailing
-                    ))
-                    .frame(width: 44, height: 44)
-                    .shadow(color: color.opacity(0.15), radius: 5, x: 0, y: 2)
-                Circle()
-                    .stroke(color.opacity(0.18), lineWidth: 0.75)
-                    .frame(width: 44, height: 44)
-                Image(systemName: icon)
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(color)
-            }
-            VStack(alignment: .leading, spacing: 2) {
-                Text(label).font(.caption).foregroundStyle(.secondary)
-                Text(value).font(.subheadline.weight(.medium))
-            }
-            Spacer()
-        }
-        .padding(.horizontal, 14).padding(.vertical, 12)
-        .background(Color(.systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 16))
-        .overlay(
-            RoundedRectangle(cornerRadius: 16)
-                .stroke(color.opacity(0.10), lineWidth: 0.75)
-        )
-        .shadow(color: color.opacity(0.10), radius: 8, x: 0, y: 3)
-        .padding(.horizontal)
-    }
-
-    // 【美化】加入 Capsule 色條 + 圖示的段落標題，對齊其他卡片標題設計語言
-    private var noteCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 8) {
-                // [v3] height 16 → 20，對齊全 App sectionHeader Capsule 高度規格
-                Capsule()
-                    .fill(LinearGradient(
-                        colors: [.brown, .brown.opacity(0.55)],
-                        startPoint: .top, endPoint: .bottom
-                    ))
-                    .frame(width: 4, height: 20)
-                Image(systemName: "text.quote")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                Text("備註")
-                    .font(.subheadline.weight(.bold))
-            }
-            Text(stock.note)
-                .font(.subheadline)
-                .foregroundStyle(.primary.opacity(0.80))
-                .lineSpacing(2)
-        }
-        .padding(.horizontal, 14).padding(.vertical, 14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(.systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 16))
-        .overlay(
-            RoundedRectangle(cornerRadius: 16)
-                .stroke(Color(.separator).opacity(0.12), lineWidth: 0.75)
-        )
-        .padding(.horizontal)
-    }
-
-    // MARK: - Helpers
-
-    // [v2] 色條升級為橙色漸層 + 補入計數膠囊，對齊 transactionsSection / dividendsSection header 規格
-    private func sectionHeader(_ title: String, count: Int? = nil) -> some View {
-        HStack(spacing: 10) {
-            Capsule()
-                .fill(LinearGradient(
-                    colors: [Color.orange, Color.orange.opacity(0.55)],
-                    startPoint: .top, endPoint: .bottom
-                ))
-                .frame(width: 4, height: 20)
-            Text(title)
-                .font(.subheadline.weight(.bold))
-            if let n = count {
-                Text("\(n) 項")
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(.orange)
-                    .padding(.horizontal, 8).padding(.vertical, 3)
-                    .background(Color.orange.opacity(0.10))
-                    .clipShape(Capsule())
-                    .overlay(Capsule().stroke(Color.orange.opacity(0.22), lineWidth: 0.75))
-            }
-            Spacer()
-        }
-        .padding(.horizontal, 16).padding(.top, 16).padding(.bottom, 8)
-    }
-
-    // [v2] useCapsule: 損益/報酬率用彩色 Capsule + stroke，其他欄位維持純文字
-    // [v3] useDateBadge: 日期欄位升級為 tertiarySystemFill Capsule 徽章，對齊 CareerView / OverviewView 日期規格
-    private func infoRow(label: String, value: String, color: Color, useCapsule: Bool = false, useDateBadge: Bool = false) -> some View {
-        HStack {
-            Text(label).font(.subheadline).foregroundStyle(.secondary)
-            Spacer()
-            if useCapsule {
-                Text(value)
-                    .font(.system(size: 13, weight: .semibold, design: .rounded))
-                    .foregroundStyle(color)
-                    .padding(.horizontal, 9).padding(.vertical, 3)
-                    .background(color.opacity(0.10))
-                    .clipShape(Capsule())
-                    .overlay(Capsule().stroke(color.opacity(0.22), lineWidth: 0.6))
-            } else if useDateBadge {
-                Text(value)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 8).padding(.vertical, 3)
-                    .background(Color(.tertiarySystemFill), in: Capsule())
-                    .overlay(Capsule().stroke(Color(.separator).opacity(0.20), lineWidth: 0.6))
-            } else {
-                Text(value).font(.subheadline.weight(.medium)).foregroundStyle(color)
-            }
-        }
-        .padding(.horizontal, 14).padding(.vertical, 10)
-    }
-
-    /// [v25.527] 損益的顏色照台股習慣「紅漲綠跌」（跟股票頁的看板、卡片同一套 MoneyTone）
-    private func stockPLColor(_ pl: Double) -> Color {
-        MoneyTone.change(pl, base: max(stock.totalCost, 1)).color(TripBoardPalette(colorScheme))
-    }
-
-    private func fmt(_ v: Double) -> String {
-        v.ntdWanString
-    }
-
-    /// [v4] 從共用 ntdWanString 拆出「數字」與「萬／億」量級單位，供大字市值沿用既有字級／
-    /// 動畫設計；跟進 ntdWanString 既有的萬→億進位邊界，取代僅換算到萬的舊版 fmtWan。
-    private func splitWan(_ v: Double) -> (number: String, unit: String) {
-        var s = v.ntdWanString
-        if s.hasPrefix("NT$") { s.removeFirst(3) }
-        if s.hasSuffix("億") { return (String(s.dropLast()), "億") }
-        if s.hasSuffix("萬") { return (String(s.dropLast()), "萬") }
-        return (s, "")
-    }
-
-    private static let _dateFmt: DateFormatter = {
-        let f = DateFormatter(); f.dateFormat = "yyyy/M/d"; return f
-    }()
-    private func fmtDate(_ d: Date) -> String {
-        Self._dateFmt.string(from: d)
     }
 }
 
@@ -1274,6 +557,8 @@ struct StockTransactionEditor: View {
 
     let stockId: UUID
     let editing: StockTransaction?
+    /// [v25.528] 新增時一開始選哪一種（帳本的「＋」選單：買進／賣出）
+    var initialKind: StockTransactionKind = .buy
 
     @State private var date: Date = Date()
     @State private var kind: StockTransactionKind = .buy
@@ -1637,6 +922,8 @@ struct StockTransactionEditor: View {
             lotsText = formatLots(e.lots * 1000 / sharesPerUnit)
             priceText = String(format: "%.2f", e.price)
             totalText = Self.moneyText(e.shares * e.price)
+        } else {
+            kind = initialKind
         }
     }
 
@@ -1732,6 +1019,8 @@ struct StockDividendEditor: View {
 
     let stockId: UUID
     let editing: StockDividend?
+    /// [v25.528] 新增時一開始選哪一種（帳本的「＋」選單：配息／配股）
+    var initialKind: StockDividendKind = .cash
 
     @State private var date: Date = Date()
     @State private var kind: StockDividendKind = .cash
@@ -2008,6 +1297,7 @@ struct StockDividendEditor: View {
             }
             note = e.note
         } else {
+            kind = initialKind
             // 新增時，配息預設帶入當下持股股數
             if kind == .cash {
                 sharesAtEventText = "\(Int(currentHeldShares))"
@@ -2222,20 +1512,47 @@ private struct CandlePoint: Identifiable {
 /// 技術線圖卡：日 K 棒（台股慣例紅漲綠跌）＋ MA5／MA20 均線。
 /// 資料來自 Yahoo 日線快取（含開高低，一年份），均線本地滾動計算；
 /// 顯示窗可切 3月/6月/1年，點按 K 棒顯示當日明細（開高低收／漲跌／量／均線）。
+/// [v25.528] 加上自己的紀錄：買進在 K 棒下面一個紅色 ▲（「買 1,036」）、賣出在上面一個綠色 ▼、
+/// 配息是底下一枚「息」金幣；均價在畫面附近就畫一條紫色虛線，太遠就只在圖例寫「均價 895 ↓」
+/// （為了框進一條很遠的均價把 K 棒壓扁，就看不出走勢了）。
 /// 抽成獨立 struct 降低 StockDetailView body 型別深度（FamilySharingRow 教訓）。
 private struct CandleChartCard: View {
     let candles: [CandlePoint]
+    /// 均價（原幣別）
+    var cost: Double? = nil
+    /// 買賣點、配息
+    var marks: [StockChartMark] = []
 
     /// 顯示窗（月數）。存全域偏好：看盤習慣是跨個股的，不必每檔各記一份。
     @AppStorage("stock_kline_window_months") private var windowMonths = 3
     /// 點選中的 K 棒日期（Charts 的 X 軸選取）
     @State private var selectedDate: Date?
+    @Environment(\.colorScheme) private var scheme
 
     // 台股慣例：紅漲綠跌
     private let upColor = Color(red: 0.92, green: 0.26, blue: 0.21)
     private let downColor = Color(red: 0.13, green: 0.65, blue: 0.37)
     private let ma5Color = Color.orange
     private let ma20Color = Color.blue
+    private var costColor: Color { MoneyBoardSky.ridgeCost(dark: scheme == .dark) }
+
+    /// 標在 K 棒上的一個點（同一天同一種合成一個：價錢用股數加權）
+    private struct PlacedMark: Identifiable {
+        let candle: CandlePoint
+        let kind: StockChartMark.Kind
+        let price: Double
+        /// 寫不寫「買 1,036」的牌子（只寫最近幾筆）
+        var labeled = true
+        var id: String { "\(candle.date.timeIntervalSince1970)-\(kind)" }
+    }
+
+    /// 價格軸的範圍，以及均價有沒有框進來
+    private struct PriceDomain {
+        let range: ClosedRange<Double>
+        let costInside: Bool
+        /// 三角形離 K 棒多遠（價格單位）
+        let gap: Double
+    }
 
     /// 顯示窗內的 K 棒
     private var visibleCandles: [CandlePoint] {
@@ -2269,6 +1586,64 @@ private struct CandleChartCard: View {
         return out
     }
 
+    /// 顯示窗內的買賣點、配息：放到那一天的 K 棒上（假日、停牌找四天內最近的一根）
+    private func placedMarks(_ shown: [CandlePoint]) -> [PlacedMark] {
+        guard !shown.isEmpty, !marks.isEmpty else { return [] }
+        struct Bucket {
+            let candle: CandlePoint
+            let kind: StockChartMark.Kind
+            var shares: Double = 0
+            var amount: Double = 0
+        }
+        let cal = Calendar.current
+        var groups: [String: Bucket] = [:]
+        for m in marks {
+            var hit = shown.first { cal.isDate($0.date, inSameDayAs: m.date) }
+            if hit == nil,
+               let near = shown.min(by: { abs($0.date.timeIntervalSince(m.date)) < abs($1.date.timeIntervalSince(m.date)) }),
+               abs(near.date.timeIntervalSince(m.date)) <= 4 * 86_400 {
+                hit = near
+            }
+            guard let c = hit else { continue }
+            let key = "\(c.date.timeIntervalSince1970)-\(m.kind)"
+            var g = groups[key] ?? Bucket(candle: c, kind: m.kind)
+            g.shares += m.shares
+            g.amount += m.shares * m.price
+            groups[key] = g
+        }
+        var out = groups.values
+            .map { PlacedMark(candle: $0.candle, kind: $0.kind, price: $0.shares > 0 ? $0.amount / $0.shares : 0) }
+            .sorted { $0.candle.date < $1.candle.date }
+        // 牌子只寫最近四個買、四個賣（定期定額一年十幾筆，全部寫字會糊成一片）
+        for kind in [StockChartMark.Kind.buy, .sell] {
+            let idx = out.indices.filter { out[$0].kind == kind }
+            for i in idx.dropLast(4) { out[i].labeled = false }
+        }
+        return out
+    }
+
+    /// 價格軸：K 棒的高低；均價在附近（差不到這段高低差的一成半）就把它也框進來。
+    /// 有買點、配息的話下面多留一點給三角形和金幣，有賣點上面多留一點
+    private func priceDomain(_ shown: [CandlePoint], placed: [PlacedMark]) -> PriceDomain {
+        let pLo = shown.map(\.low).min() ?? 0
+        let pHi = shown.map(\.high).max() ?? 1
+        let span = max(pHi - pLo, pHi * 0.01, 0.01)
+        var lo = pLo
+        var hi = pHi
+        var inside = false
+        if let c = cost, c > 0, c >= pLo - span * 0.15, c <= pHi + span * 0.15 {
+            inside = true
+            lo = min(lo, c)
+            hi = max(hi, c)
+        }
+        let s2 = max(hi - lo, hi * 0.01, 0.01)
+        let below = placed.contains { $0.kind != .sell } ? 0.16 : 0.0
+        let above = placed.contains { $0.kind == .sell } ? 0.14 : 0.0
+        let pad = max(s2 * 0.03, hi * 0.008)
+        return PriceDomain(range: (lo - pad - s2 * below)...(hi + pad + s2 * above),
+                           costInside: inside, gap: s2 * 0.045)
+    }
+
     /// 被點選的 K 棒（取最接近選取日期的那根）
     private var selectedCandle: CandlePoint? {
         guard let selectedDate else { return nil }
@@ -2284,42 +1659,33 @@ private struct CandleChartCard: View {
     }
 
     var body: some View {
+        let shown = visibleCandles
+        let placed = placedMarks(shown)
+        let domain = priceDomain(shown, placed: placed)
         VStack(alignment: .leading, spacing: 10) {
-            // 標題列（Capsule 側條規格對齊全 App section header）
             HStack(spacing: 8) {
-                RoundedRectangle(cornerRadius: 3)
-                    .fill(
-                        LinearGradient(colors: [.orange, .orange.opacity(0.55)],
-                                       startPoint: .top, endPoint: .bottom)
-                    )
-                    .frame(width: 4, height: 14)
-                Text("技術線圖")
-                    .font(.subheadline.weight(.bold))
-                Text("日K")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                Spacer()
                 windowPicker
+                Spacer(minLength: 6)
+                if !marks.isEmpty {
+                    Text("買賣、配息都標在線上")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                }
             }
-
             if let c = selectedCandle {
                 selectedDetail(c)
             } else {
-                legendRow
+                legendRow(domain: domain, shown: shown)
             }
-            chartView
+            chartView(shown: shown, placed: placed, domain: domain)
             // 成交量柱狀圖（張）：與上方 K 線同一組日期、同步選取十字線。
             // X 軸日期標籤只在這裡顯示（上方價格圖隱藏），兩張圖共用一條時間軸的觀感。
-            volumeChart
+            volumeChart(shown)
         }
         .padding(14)
-        .background(Color(.systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 16))
-        .overlay(
-            RoundedRectangle(cornerRadius: 16)
-                .stroke(Color(.separator).opacity(0.12), lineWidth: 0.75)
-        )
-        .shadow(color: .black.opacity(0.05), radius: 6, x: 0, y: 2)
+        .modifier(StockCardChrome())
     }
 
     /// 顯示窗切換（3月/6月/1年）。快取本來就存一整年，切換純本地、不重新請求。
@@ -2332,13 +1698,14 @@ private struct CandleChartCard: View {
                     selectedDate = nil
                 } label: {
                     Text(label)
-                        .font(.system(size: 11, weight: .semibold))
-                        .padding(.horizontal, 8).padding(.vertical, 3)
+                        .font(.system(size: 12, weight: .bold))
+                        .padding(.horizontal, 10).padding(.vertical, 4)
                         .background(on ? Color.orange.opacity(0.15) : Color(.tertiarySystemFill),
                                     in: Capsule())
                         .foregroundStyle(on ? Color.orange : Color.secondary)
                 }
                 .buttonStyle(.plain)
+                .accessibilityAddTraits(on ? .isSelected : [])
             }
         }
     }
@@ -2379,7 +1746,7 @@ private struct CandleChartCard: View {
             }
         }
         .padding(.horizontal, 10).padding(.vertical, 6)
-        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 8))
+        .background(Color(.tertiarySystemFill), in: RoundedRectangle(cornerRadius: 8))
     }
 
     private func detailPair(_ label: String, _ value: Double, color: Color = .primary) -> some View {
@@ -2396,8 +1763,8 @@ private struct CandleChartCard: View {
         f.dateFormat = "yyyy/M/d (E)"; return f
     }()
 
-    private var legendRow: some View {
-        HStack(spacing: 12) {
+    private func legendRow(domain: PriceDomain, shown: [CandlePoint]) -> some View {
+        ChipFlowLayout(spacing: 10) {
             HStack(spacing: 4) {
                 RoundedRectangle(cornerRadius: 1.5).fill(upColor).frame(width: 8, height: 8)
                 Text("漲").font(.caption2).foregroundStyle(.secondary)
@@ -2407,31 +1774,58 @@ private struct CandleChartCard: View {
             if let v = ma5.last?.value {
                 HStack(spacing: 4) {
                     Capsule().fill(ma5Color).frame(width: 12, height: 2.5)
-                    Text(String(format: "MA5 %.2f", v))
+                    Text("MA5 " + StockCardText.price(v))
                         .font(.caption2).foregroundStyle(.secondary)
                 }
             }
             if let v = ma20.last?.value {
                 HStack(spacing: 4) {
                     Capsule().fill(ma20Color).frame(width: 12, height: 2.5)
-                    Text(String(format: "MA20 %.2f", v))
+                    Text("MA20 " + StockCardText.price(v))
                         .font(.caption2).foregroundStyle(.secondary)
                 }
             }
-            Spacer()
+            if let c = cost, c > 0 {
+                if domain.costInside {
+                    HStack(spacing: 4) {
+                        Path { p in
+                            p.move(to: CGPoint(x: 0, y: 1))
+                            p.addLine(to: CGPoint(x: 12, y: 1))
+                        }
+                        .stroke(costColor, style: StrokeStyle(lineWidth: 2, dash: [3, 2]))
+                        .frame(width: 12, height: 2)
+                        Text("均價 " + StockCardText.price(c))
+                            .font(.caption2).foregroundStyle(.secondary)
+                    }
+                } else {
+                    // 均價離這段很遠：不畫線（會把 K 棒壓扁），寫它在上面還是下面
+                    let below = c < (shown.map(\.low).min() ?? c)
+                    Text("均價 " + StockCardText.price(c) + (below ? " ↓" : " ↑"))
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(costColor)
+                }
+            }
         }
     }
 
-    private var chartView: some View {
-        let shown = visibleCandles
-        let minLow = shown.map(\.low).min() ?? 0
-        let maxHigh = shown.map(\.high).max() ?? 1
+    private func chartView(shown: [CandlePoint], placed: [PlacedMark], domain: PriceDomain) -> some View {
+        let width = candleWidth(count: shown.count)
+        let gap = domain.gap
+        let coinY = domain.range.lowerBound + gap * 0.9
         return Chart {
             if let sel = selectedCandle {
                 // 選取十字線（畫在 K 棒後面）
                 RuleMark(x: .value("選取", sel.date))
                     .foregroundStyle(Color.secondary.opacity(0.35))
                     .lineStyle(StrokeStyle(lineWidth: 1, dash: [3, 3]))
+            }
+            if domain.costInside, let c = cost {
+                RuleMark(y: .value("均價", c))
+                    .foregroundStyle(costColor.opacity(0.9))
+                    .lineStyle(StrokeStyle(lineWidth: 1.2, dash: [5, 4]))
+                    .annotation(position: .top, alignment: .trailing, spacing: 2) {
+                        markPill("均價 " + StockCardText.price(c), costColor)
+                    }
             }
             ForEach(shown) { c in
                 // 影線（高–低）
@@ -2445,7 +1839,7 @@ private struct CandleChartCard: View {
                 RectangleMark(x: .value("日", c.date),
                               yStart: .value("開", min(c.open, c.close)),
                               yEnd: .value("收", candleBodyTop(c)),
-                              width: .fixed(candleWidth(count: shown.count)))
+                              width: .fixed(width))
                     .foregroundStyle(c.isUp ? upColor : downColor)
             }
             ForEach(ma5) { p in
@@ -2460,21 +1854,71 @@ private struct CandleChartCard: View {
                     .foregroundStyle(ma20Color)
                     .lineStyle(StrokeStyle(lineWidth: 1.5))
             }
+            ForEach(placed) { m in
+                if m.kind == .buy {
+                    PointMark(x: .value("日", m.candle.date), y: .value("買", m.candle.low - gap))
+                        .symbol {
+                            Image(systemName: "arrowtriangle.up.fill")
+                                .font(.system(size: 9))
+                                .foregroundStyle(upColor)
+                        }
+                        .annotation(position: .bottom, spacing: 1,
+                                    overflowResolution: .init(x: .fit(to: .chart), y: .fit(to: .chart))) {
+                            if m.labeled {
+                                markPill("買 " + StockCardText.price(m.price), upColor)
+                            }
+                        }
+                } else if m.kind == .sell {
+                    PointMark(x: .value("日", m.candle.date), y: .value("賣", m.candle.high + gap))
+                        .symbol {
+                            Image(systemName: "arrowtriangle.down.fill")
+                                .font(.system(size: 9))
+                                .foregroundStyle(downColor)
+                        }
+                        .annotation(position: .top, spacing: 1,
+                                    overflowResolution: .init(x: .fit(to: .chart), y: .fit(to: .chart))) {
+                            if m.labeled {
+                                markPill("賣 " + StockCardText.price(m.price), downColor)
+                            }
+                        }
+                } else {
+                    PointMark(x: .value("日", m.candle.date), y: .value("息", coinY))
+                        .symbol {
+                            Text("息")
+                                .font(.system(size: 7, weight: .black))
+                                .foregroundStyle(Color.white)
+                                .frame(width: 13, height: 13)
+                                .background(Color(tb: 0xE8A317), in: Circle())
+                        }
+                }
+            }
         }
-        .chartYScale(domain: (minLow * 0.985)...(maxHigh * 1.015))
+        .chartYScale(domain: domain.range)
         // 日期標籤移到下方成交量圖，這裡隱藏（保留格線）
         .chartXAxis { AxisMarks(values: .automatic(desiredCount: 4)) { _ in AxisGridLine() } }
         .chartYAxis { AxisMarks(position: .trailing, values: .automatic(desiredCount: 4)) }
         .chartLegend(.hidden)
         // 點按／拖曳選取 K 棒：selectedCandle 取最近的那根，明細顯示在圖上方
         .chartXSelection(value: $selectedDate)
-        .frame(height: 200)
+        .frame(height: 210)
+    }
+
+    private func markPill(_ s: String, _ color: Color) -> some View {
+        Text(s)
+            .font(.system(size: 9, weight: .heavy))
+            .monospacedDigit()
+            .foregroundStyle(Color.white)
+            .lineLimit(1)
+            .fixedSize()
+            .padding(.horizontal, 5)
+            .padding(.vertical, 1.5)
+            .background(color, in: Capsule())
     }
 
     /// 成交量柱狀圖（張）。柱色跟隨當日紅漲綠跌，寬度與 K 棒一致。
     /// Y 軸標籤用「k 張」縮寫，讓左右兩張圖的軸寬接近、時間軸對得起來。
-    private var volumeChart: some View {
-        let shown = visibleCandles
+    private func volumeChart(_ shown: [CandlePoint]) -> some View {
+        let width = candleWidth(count: shown.count)
         return Chart {
             if let sel = selectedCandle {
                 RuleMark(x: .value("選取", sel.date))
@@ -2484,7 +1928,7 @@ private struct CandleChartCard: View {
             ForEach(shown) { c in
                 BarMark(x: .value("日", c.date),
                         y: .value("張", c.volume / 1000),
-                        width: .fixed(candleWidth(count: shown.count)))
+                        width: .fixed(width))
                     .foregroundStyle((c.isUp ? upColor : downColor).opacity(0.55))
             }
         }
