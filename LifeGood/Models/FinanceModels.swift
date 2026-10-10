@@ -41,8 +41,11 @@ extension Double {
     /// 例：12,345 → NT$1.2萬；150,000,000 → NT$1.5億。
     /// 理財/收支各頁共用，確保顯示規則一致。
     var ntdWanString: String {
+        // [v25.530] 先四捨五入到一位小數再判斷是不是整數：以前先判斷再格式化，
+        // 3,480,000.4 這種會被 %.1f 進位成「348.0萬」，三個這樣的數加起來就寫成「860.0萬」。
         func trimmed(_ x: Double) -> String {
-            (x == x.rounded()) ? String(format: "%.0f", x) : String(format: "%.1f", x)
+            let r = (x * 10).rounded() / 10
+            return (r == r.rounded()) ? String(format: "%.0f", r) : String(format: "%.1f", r)
         }
         let a = Swift.abs(self)
         let sign = self < 0 ? "-" : ""
@@ -62,8 +65,9 @@ extension Double {
     /// 非台幣）餘額不可套用寫死的「NT$」字首時使用。
     /// 例：("USD", 12345) → USD 1.2萬；("JPY", 150_000_000) → JPY 1.5億。
     func wanString(symbolPrefix: String) -> String {
-        func trimmed(_ x: Double) -> String {
-            (x == x.rounded()) ? String(format: "%.0f", x) : String(format: "%.1f", x)
+        func trimmed(_ x: Double) -> String {   // 同 ntdWanString：先進位到一位小數再判斷整數
+            let r = (x * 10).rounded() / 10
+            return (r == r.rounded()) ? String(format: "%.0f", r) : String(format: "%.1f", r)
         }
         let a = Swift.abs(self)
         let sign = self < 0 ? "-" : ""

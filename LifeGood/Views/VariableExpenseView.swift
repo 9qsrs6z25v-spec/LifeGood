@@ -496,10 +496,15 @@ struct VariableExpenseView: View {
                 vehicle.variableExpenses.removeAll { $0.linkedExpenseId == expense.id }
                 financeStore.update(vehicle)
             }
-            // 同步刪除房地產變動支出與水電瓦斯繳費紀錄
+            // 同步刪除房地產底下連到這筆的項目。[v25.530] 以前只清變動支出和水電，
+            // 刪掉「房屋價金」那筆時 paidItems 留下孤兒，還繼續算進已支出和總額；
+            // 保險、附屬資產也一樣，比照 FixedExpenseView 五個陣列都清。
             if let reId = expense.linkedRealEstateId,
                var re = financeStore.realEstates.first(where: { $0.id == reId }) {
+                re.paidItems.removeAll { $0.linkedExpenseId == expense.id }
                 re.variableExpenses.removeAll { $0.linkedExpenseId == expense.id }
+                re.insuranceItems.removeAll { $0.linkedExpenseId == expense.id }
+                re.propertyAssets.removeAll { $0.linkedExpenseId == expense.id }
                 re.utilityPayments.removeAll { $0.linkedExpenseId == expense.id }
                 financeStore.update(re)
             }

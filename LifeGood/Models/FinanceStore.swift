@@ -246,3 +246,111 @@ class FinanceStore: ObservableObject {
         saveRealEstates()
     }
 }
+
+// MARK: - 房地產刪除（v25.530）
+
+/// 刪整間房子、或刪掉房子底下一筆連到記帳的項目時共用。
+/// 以前有三份刪整間的程式（列表左滑、卡片右上、編輯頁取消回滾），三份都只刪記帳支出，
+/// 沒刪銀行帳戶裡那筆扣款，銀行會留下對不到支出的幽靈提款；單筆左滑刪除也一樣。
+/// 收成這一個地方：記帳支出（含照片）＋銀行扣款紀錄一起清，而且各個陣列只寫一次。
+enum RealEstateDeletion {
+    struct Summary {
+        /// 會一起刪掉的記帳支出筆數（只算記帳裡真的找得到的）
+        let expenseCount: Int
+        /// 照片張數：記帳支出附的照片＋裝潢照片＋水電收據＋電梯保養照片
+        let photoCount: Int
+        let documentCount: Int
+    }
+
+    /// 這間房子身上連到記帳的支出 id：貸款、房屋價金、變動支出、保險、附屬資產、水電，
+    /// 加上舊版單筆房貸連結和售出虧損那一筆。
+    static func linkedExpenseIds(of estate: RealEstate) -> Set<UUID> {
+        var ids = Set<UUID>()
+        estate.mortgageItems.forEach { if let id = $0.linkedExpenseId { ids.insert(id) } }
+        estate.paidItems.forEach { if let id = $0.linkedExpenseId { ids.insert(id) } }
+        estate.variableExpenses.forEach { if let id = $0.linkedExpenseId { ids.insert(id) } }
+        estate.insuranceItems.forEach { if let id = $0.linkedExpenseId { ids.insert(id) } }
+        estate.propertyAssets.forEach { if let id = $0.linkedExpenseId { ids.insert(id) } }
+        estate.utilityPayments.forEach { if let id = $0.linkedExpenseId { ids.insert(id) } }
+        if let id = estate.linkedExpenseId { ids.insert(id) }
+        if let id = estate.saleLinkedExpenseId { ids.insert(id) }
+        return ids
+    }
+
+    static func summary(of estate: RealEstate, expenseStore: ExpenseStore) -> Summary {
+        let ids = linkedExpenseIds(of: estate)
+        let linked = expenseStore.expenses.filter { ids.contains($0.id) }
+        var photos = linked.reduce(0) { $0 + $1.photoFileNames.count }
+        photos += estate.renovationPhotos.reduce(0) { $0 + $1.photoFileNames.count }
+        photos += estate.utilityPayments.reduce(0) { $0 + $1.photoFileNames.count }
+        photos += estate.elevatorMaintenances.reduce(0) { $0 + $1.photoFileNames.count }
+        return Summary(expenseCount: linked.count, photoCount: photos, documentCount: estate.documents.count)
+    }
+
+    /// 刪整間之前的確認文字，例如「會一起刪掉連到這間房子的 81 筆記帳支出（含銀行扣款紀錄）、48 張照片和 3 份文件，不能復原。」
+    static func confirmMessage(_ s: Summary) -> String {
+        var parts: [String] = []
+        if s.expenseCount > 0 { parts.append("\(s.expenseCount) 筆記帳支出（含銀行扣款紀錄）") }
+        if s.photoCount > 0 { parts.append("\(s.photoCount) 張照片") }
+        if s.documentCount > 0 { parts.append("\(s.documentCount) 份文件") }
+        guard !parts.isEmpty else { return "這間房子會從理財裡刪除，不能復原。" }
+        let list = parts.count == 1 ? parts[0] : parts.dropLast().joined(separator: "、") + "和" + parts[parts.count - 1]
+        return "會一起刪掉連到這間房子的\(list)，不能復原。"
+    }
+
+    /// 刪掉這些記帳支出（含照片）和它們在銀行帳戶裡的扣款紀錄。
+    /// 銀行那邊不只看支出上記的 linkedBankMilestoneId：所有帳戶裡 linkedExpenseId 對得上的都清掉，
+    /// 連以前換過扣款帳戶留下的舊紀錄也一起收乾淨。expenses、milestones 各只寫一次。
+    static func removeExpenses(_ ids: Set<UUID>, expenseStore: ExpenseStore, lifeStore: LifeStore) {
+        guard !ids.isEmpty else { return }
+        if expenseStore.expenses.contains(where: { ids.contains($0.id) }) {
+            for exp in expenseStore.expenses where ids.contains(exp.id) {
+                for name in exp.photoFileNames { Expense.deletePhoto(name) }
+            }
+            expenseStore.expenses.removeAll { ids.contains($0.id) }
+        }
+        removeBankRecords(linkedTo: ids, lifeStore: lifeStore)
+    }
+
+    /// 只清銀行扣款／入帳紀錄（linkedExpenseId 在 ids 裡的）；沒有對得上的帳戶就不動 milestones。
+    static func removeBankRecords(linkedTo ids: Set<UUID>, lifeStore: LifeStore) {
+        guard !ids.isEmpty else { return }
+        func isLinked(_ d: BankDeposit) -> Bool {
+            guard let id = d.linkedExpenseId else { return false }
+            return ids.contains(id)
+        }
+        var milestones = lifeStore.milestones
+        var changed = false
+        for i in milestones.indices {
+            guard let deposits = milestones[i].bankDeposits, deposits.contains(where: isLinked) else { continue }
+            milestones[i].bankDeposits = deposits.filter { !isLinked($0) }
+            changed = true
+        }
+        if changed { lifeStore.milestones = milestones }
+    }
+
+    /// 刪整間房子：連到的記帳支出＋銀行扣款、售出獲利那筆收入＋它的入帳紀錄、房子本身（含照片與文件檔案）。
+    /// 其他還指著這間房子、但不在房子陣列裡的支出（例如手動連過去的管理費），只解除連結、不刪，
+    /// 免得刪掉你沒預期的帳，也不會留下指向不存在房子的連結。
+    static func deleteEstate(_ estate: RealEstate, financeStore: FinanceStore,
+                             expenseStore: ExpenseStore, lifeStore: LifeStore) {
+        let ids = linkedExpenseIds(of: estate)
+        var bankIds = ids
+        if let incomeId = estate.saleLinkedIncomeId { bankIds.insert(incomeId) }
+
+        var expenses = expenseStore.expenses
+        for exp in expenses where ids.contains(exp.id) {
+            for name in exp.photoFileNames { Expense.deletePhoto(name) }
+        }
+        expenses.removeAll { ids.contains($0.id) }
+        for i in expenses.indices where expenses[i].linkedRealEstateId == estate.id {
+            expenses[i].linkedRealEstateId = nil
+        }
+        expenseStore.expenses = expenses
+        if let incomeId = estate.saleLinkedIncomeId {
+            expenseStore.incomes.removeAll { $0.id == incomeId }
+        }
+        removeBankRecords(linkedTo: bankIds, lifeStore: lifeStore)
+        financeStore.deleteRealEstate(estate)
+    }
+}

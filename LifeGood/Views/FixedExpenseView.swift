@@ -386,6 +386,7 @@ struct FixedExpenseView: View {
                 re.variableExpenses.removeAll { $0.linkedExpenseId == expense.id }
                 re.insuranceItems.removeAll { $0.linkedExpenseId == expense.id }
                 re.propertyAssets.removeAll { $0.linkedExpenseId == expense.id }
+                re.utilityPayments.removeAll { $0.linkedExpenseId == expense.id }   // [v25.530] 同 VariableExpenseView
                 financeStore.update(re)
             }
             // 刪除連結的汽車定期支出項目

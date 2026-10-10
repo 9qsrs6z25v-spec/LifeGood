@@ -74,8 +74,11 @@ enum RealEstateSortOption: String, CaseIterable, Identifiable {
 struct RealEstateView: View {
     @EnvironmentObject var store: FinanceStore
     @EnvironmentObject var expenseStore: ExpenseStore
+    @EnvironmentObject var lifeStore: LifeStore
     @EnvironmentObject var subscription: SubscriptionManager
     @ObservedObject private var geocoder = RealEstateGeocoder.shared
+    /// [v25.530] 左滑刪整間先問一次：以前按下去就連記帳支出一起刪掉，沒有確認
+    @State private var pendingDelete: RealEstate?
     @State private var showAdd = false
     @State private var editingItem: RealEstate?
     @State private var viewingItem: RealEstate?
@@ -213,6 +216,14 @@ struct RealEstateView: View {
             .sheet(item: $viewingItem) { item in RealEstateDetailView(estate: item) }
             .sheet(item: $editingItem) { item in AddRealEstateView(editing: item) }
             .premiumLockAlert(isPresented: $showPremiumAlert)
+            .alert("刪除這間房子？",
+                   isPresented: Binding(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } }),
+                   presenting: pendingDelete) { item in
+                Button("刪除", role: .destructive) { deleteEstate(item) }
+                Button("取消", role: .cancel) {}
+            } message: { item in
+                Text("「\(item.name)」\(RealEstateDeletion.confirmMessage(RealEstateDeletion.summary(of: item, expenseStore: expenseStore)))")
+            }
             .onAppear {
                 withAnimation(.spring(response: 0.6, dampingFraction: 0.8)) {
                     headerAppeared = true
@@ -245,7 +256,7 @@ struct RealEstateView: View {
             .onTapGesture { viewingItem = item }
             .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                 Button(role: .destructive) {
-                    if subscription.isPremium { deleteEstate(item) }
+                    if subscription.isPremium { pendingDelete = item }
                     else { showPremiumAlert = true }
                 } label: {
                     Label("刪除", systemImage: "trash")
@@ -254,33 +265,9 @@ struct RealEstateView: View {
     }
 
     private func deleteEstate(_ item: RealEstate) {
-        // 先收集所有關聯支出 ID，最後一次 removeAll，避免每個 ID 各自觸發一次 @Published 更新與 save() 磁碟寫入
-        var expenseIds = Set<UUID>()
-        for m in item.mortgageItems { if let id = m.linkedExpenseId { expenseIds.insert(id) } }
-        for p in item.paidItems { if let id = p.linkedExpenseId { expenseIds.insert(id) } }
-        for ve in item.variableExpenses { if let id = ve.linkedExpenseId { expenseIds.insert(id) } }
-        for ins in item.insuranceItems { if let id = ins.linkedExpenseId { expenseIds.insert(id) } }
-        for asset in item.propertyAssets { if let id = asset.linkedExpenseId { expenseIds.insert(id) } }
-        // 水電繳費／裝潢照片／電梯保養照片／附件文件的磁碟＋CloudKit 清理，
-        // FinanceStore.deleteRealEstate(_:) 下方已統一做（cleanupRealEstateFiles），
-        // 這裡只需收集 linkedExpenseId；重複呼叫 deletePhoto/deleteDocument 只會讓
-        // 已刪除的檔案再觸發一次多餘的 CloudKit 刪除網路請求，磁碟端則因 try? 靜默忽略。
-        for up in item.utilityPayments {
-            if let id = up.linkedExpenseId { expenseIds.insert(id) }
-        }
-        if let id = item.linkedExpenseId { expenseIds.insert(id) }
-        if let id = item.saleLinkedExpenseId { expenseIds.insert(id) }
-
-        if !expenseIds.isEmpty {
-            for exp in expenseStore.expenses where expenseIds.contains(exp.id) {
-                for name in exp.photoFileNames { Expense.deletePhoto(name) }
-            }
-            expenseStore.expenses.removeAll { expenseIds.contains($0.id) }
-        }
-        if let saleIncId = item.saleLinkedIncomeId {
-            expenseStore.incomes.removeAll { $0.id == saleIncId }
-        }
-        store.deleteRealEstate(item)
+        // [v25.530] 收成 RealEstateDeletion：記帳支出（含照片）、銀行扣款紀錄、售出收入一起清，
+        // 檔案清理在 FinanceStore.deleteRealEstate 裡；卡片右上角與編輯頁回滾也走同一個。
+        RealEstateDeletion.deleteEstate(item, financeStore: store, expenseStore: expenseStore, lifeStore: lifeStore)
     }
 
     // MARK: - 空狀態
