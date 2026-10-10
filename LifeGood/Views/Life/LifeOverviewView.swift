@@ -1,8 +1,42 @@
 import SwiftUI
 
+// MARK: - 美化紀錄（LifeOverviewView）
+// [2026-06 v1] 本次美化方向：
+//   1. statsCard：為三個 statBadge 加入錯落進場動畫（對齊 OverviewView summaryCard 規格）
+//   2. 「最近里程碑」區塊標題計數徽章：改用橘色 accent（對齊其他頁面 accent 膠囊規格）
+//   3. 「分類統計」區塊標題計數徽章：改用藍色 accent（統一 badge 配色語言）
+//   4. emptyMilestonePlaceholder：升級為雙層脈衝光環 + 漸層底 icon 圓 + 橘色 accent，
+//      對齊 VariableExpenseView.emptyStateView 的空狀態設計規格
+// [2026-06 v2] categoryBreakdownSection 精修：
+//   5. 分類圖示圓 36pt → 40pt、圖示字體 14pt → 16pt（對齊 app 標準 44pt 系統，
+//      統計情境取中間值 40pt，避免與 44pt 列表行視覺重量衝突）
+//   6. 筆數徽章加入佔比百分比：「N 筆 · X%」（以總里程碑數為分母，提升資訊密度）
+//   7. 進度條改用佔總數比率（total ratio）取代最大值相對比率（max ratio），
+//      讓長條能直觀反映各分類實際份額
+//   8. categoryRowsAppeared 觸發動畫加入 0.05s 延遲，確保 view 完成佈局後再啟動，
+//      對齊 milestoneTimelineSection 的觸發規格
+// [2026-06 v3] 三處細節對齊全 App 最高視覺均值：
+//   9. categoryBreakdownSection 進度條：加入 glow overlay（頂部白色高亮 + 底部柔化），
+//      提升彩條立體感，對齊 OverviewView.categoryRow / FinanceOverviewView.allocationSection 彩條規格。
+//  10. categoryBreakdownSection 筆數/佔比膠囊：加入 overlay Capsule stroke 細邊框
+//      （accent.opacity(0.22), 0.75pt），對齊 OverviewView.categoryRow 百分比膠囊邊框規格。
+//  11. milestoneTimelineSection 日期文字：從純 .caption2 .tertiary 升級為小型 Capsule
+//      徽章（calendar 圖示 + tertiarySystemFill 底色），對齊 OverviewView.recentRow
+//      日期 Capsule 設計語言，強化行內視覺層次。
+// [2026-07 v4] 補齊 statBadge 大字防截斷缺口：
+//  12. statBadge 22pt 數字大字（總里程碑／本年新增／分類數）原本沒有 lineLimit/
+//      minimumScaleFactor，是本頁唯一沒有防截斷保護的大字（同頁 categoryBreakdown 筆數
+//      膠囊、milestoneTimeline 計數膠囊皆為短字串無此風險，但里程碑累積多年後總數可能
+//      達 3～4 位數，擠壓固定寬度欄位）。補上 .lineLimit(1) + .minimumScaleFactor(0.6)，
+//      對齊 ChildrenResumeView.heroKpiCell / AdminConsoleView「目前人數」既有規格。
+//      純視覺層調整，milestone 統計計算等既有商業邏輯完全未變動。
+//      （下次美化本檔案時，可轉往其他仍留有待辦的畫面）
+
 struct LifeOverviewView: View {
     @EnvironmentObject var store: LifeStore
     @EnvironmentObject var financeStore: FinanceStore
+    /// [v25.434] 「還沒解鎖的功能」要看支出（地圖與稅務的條件在那裡）
+    @EnvironmentObject var expenseStore: ExpenseStore
     @EnvironmentObject var subscription: SubscriptionManager
     @State private var showEditProfile = false
     @State private var showAddVariable = false
@@ -12,31 +46,36 @@ struct LifeOverviewView: View {
     @State private var showPremiumAlert = false
     @State private var timelineRowsAppeared = false
     @State private var categoryRowsAppeared = false
+    @State private var statsCardAppeared = false
+    @State private var emptyMilestonePulse = false
+    @State private var emptyMilestonePulseTask: Task<Void, Never>?
+    @State private var categoryRowsAppearedTask: Task<Void, Never>?
+    /// [v25.434] 還沒解鎖的功能：預設收起來。
+    /// 這一區是「想知道的時候才看」，不該每次打開總覽都先讀一遍還沒有的東西。
+    @AppStorage("life_locked_features_expanded") private var lockedExpanded = false
+    @State private var addingMilestoneCategory: MilestoneCategory?
 
     var body: some View {
         // 計算一次，避免 statsCard / milestoneTimeline / categoryBreakdown 各自重算（共 5 次）
         let allMS = store.combinedMilestones(realEstates: financeStore.realEstates)
         return NavigationStack {
-            VStack(spacing: 0) {
-                ProfileFlashCard(
-                    profile: store.profile,
-                    totalAssets: financeStore.totalAssets,
-                    spouse: store.spouse,
-                    onEdit: {
-                        if subscription.isPremium { showEditProfile = true }
-                        else { showPremiumAlert = true }
-                    }
-                )
-                .padding(.bottom, 8)
-
-                ScrollView {
-                    VStack(spacing: 20) {
-                        statsCard(allMS)
-                        milestoneTimelineSection(allMS)
-                        categoryBreakdownSection(allMS)
-                    }
-                    .padding(.vertical)
+            ScrollView {
+                VStack(spacing: 20) {
+                    ProfileFlashCard(
+                        profile: store.profile,
+                        totalAssets: financeStore.totalAssets,
+                        spouse: store.spouse,
+                        onEdit: {
+                            if subscription.isPremium { showEditProfile = true }
+                            else { showPremiumAlert = true }
+                        }
+                    )
+                    statsCard(allMS)
+                    milestoneTimelineSection(allMS)
+                    categoryBreakdownSection(allMS)
+                    lockedFeaturesSection
                 }
+                .padding(.vertical)
             }
             .background(Color(.systemGroupedBackground))
             .navigationTitle("人生總覽")
@@ -50,6 +89,11 @@ struct LifeOverviewView: View {
             .sheet(isPresented: $showAddFixed) { AddExpenseView(expenseType: .fixed) }
             .sheet(isPresented: $showAddStock) { AddStockView() }
             .sheet(isPresented: $showAddRealEstate) { AddRealEstateView() }
+            // .sheet(item:) 而不是 isPresented＋另一個 @State：後者在 content
+            // closure 裡讀到的會是寫入前的舊分類
+            .sheet(item: $addingMilestoneCategory) { cat in
+                AddMilestoneView(initialCategory: cat)
+            }
             .premiumLockAlert(isPresented: $showPremiumAlert)
         }
     }
@@ -90,16 +134,28 @@ struct LifeOverviewView: View {
     // MARK: - 統計卡
 
     private func statsCard(_ allMS: [LifeMilestone]) -> some View {
-        HStack(spacing: 12) {
-            statBadge(title: "總里程碑",
-                      count: allMS.count,
-                      icon: "trophy.fill", color: .orange)
-            statBadge(title: "本年新增", count: milestonesThisYear(allMS),
-                      icon: "calendar.badge.plus", color: .green)
-            statBadge(title: "分類數", count: usedCategories(allMS),
-                      icon: "square.grid.2x2.fill", color: .blue)
+        let items: [(title: String, count: Int, icon: String, color: Color, delay: Double)] = [
+            ("總里程碑", allMS.count, "trophy.fill",          .orange, 0.06),
+            ("本年新增", milestonesThisYear(allMS), "calendar.badge.plus", .green,  0.14),
+            ("分類數",   usedCategories(allMS),      "square.grid.2x2.fill", .blue, 0.22),
+        ]
+        return HStack(spacing: 12) {
+            ForEach(Array(items.enumerated()), id: \.offset) { idx, item in
+                statBadge(title: item.title, count: item.count, icon: item.icon, color: item.color)
+                    .opacity(statsCardAppeared ? 1 : 0)
+                    .offset(y: statsCardAppeared ? 0 : 18)
+                    .animation(
+                        .spring(response: 0.50, dampingFraction: 0.78)
+                            .delay(item.delay),
+                        value: statsCardAppeared
+                    )
+            }
         }
         .padding(.horizontal)
+        .onAppear {
+            withAnimation { statsCardAppeared = true }
+        }
+        .onDisappear { statsCardAppeared = false }
     }
 
     private func statBadge(title: String, count: Int, icon: String, color: Color) -> some View {
@@ -124,6 +180,8 @@ struct LifeOverviewView: View {
             Text("\(count)")
                 .font(.system(size: 22, weight: .bold, design: .rounded))
                 .foregroundStyle(.primary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
                 .contentTransition(.numericText())
             Text(title)
                 .font(.caption2)
@@ -181,10 +239,11 @@ struct LifeOverviewView: View {
                 if !recent.isEmpty {
                     Text("\(recent.count) / \(allMS.count) 筆")
                         .font(.caption2.weight(.semibold))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.orange)
                         .padding(.horizontal, 8).padding(.vertical, 3)
-                        .background(Color(.tertiarySystemFill))
+                        .background(Color.orange.opacity(0.10))
                         .clipShape(Capsule())
+                        .overlay(Capsule().stroke(Color.orange.opacity(0.22), lineWidth: 0.75))
                 }
             }
             .padding(.horizontal)
@@ -231,9 +290,9 @@ struct LifeOverviewView: View {
 
                             // 標題 + 分類徽章 + 日期
                             VStack(alignment: .leading, spacing: 5) {
-                                Text(m.title)
+                                // [v25.520] 里程碑標題過長改跑馬燈（原本切成「…」）
+                                MarqueeText(m.title)
                                     .font(.subheadline.weight(.semibold))
-                                    .lineLimit(1)
                                 HStack(spacing: 6) {
                                     // 彩色分類膠囊徽章
                                     Text(m.category.displayName)
@@ -242,9 +301,17 @@ struct LifeOverviewView: View {
                                         .background(accent.opacity(0.13))
                                         .foregroundStyle(accent)
                                         .clipShape(Capsule())
-                                    Text(formatDate(m.date))
-                                        .font(.caption2)
-                                        .foregroundStyle(.tertiary)
+                                    // [v3] 日期升級為小型 Capsule 徽章，對齊 OverviewView.recentRow 日期膠囊規格
+                                    HStack(spacing: 3) {
+                                        Image(systemName: "calendar")
+                                            .font(.system(size: 9, weight: .medium))
+                                        Text(formatDate(m.date))
+                                            .font(.system(size: 10, weight: .medium))
+                                    }
+                                    .foregroundStyle(.secondary)
+                                    .padding(.horizontal, 6).padding(.vertical, 2.5)
+                                    .background(Color(.tertiarySystemFill))
+                                    .clipShape(Capsule())
                                 }
                             }
 
@@ -276,32 +343,79 @@ struct LifeOverviewView: View {
                 .onAppear {
                     withAnimation { timelineRowsAppeared = true }
                 }
+                .onDisappear { timelineRowsAppeared = false }
             }
         }
     }
 
     private var emptyMilestonePlaceholder: some View {
-        VStack(spacing: 12) {
+        let accent = Color.orange
+        return VStack(spacing: 20) {
             ZStack {
+                // 外層脈衝光環
                 Circle()
-                    .fill(Color(.systemFill))
-                    .frame(width: 64, height: 64)
+                    .stroke(accent.opacity(emptyMilestonePulse ? 0 : 0.28), lineWidth: 1.5)
+                    .frame(width: 108, height: 108)
+                    .scaleEffect(emptyMilestonePulse ? 1.38 : 1.0)
+                    .animation(
+                        .easeOut(duration: 2.0).repeatForever(autoreverses: false),
+                        value: emptyMilestonePulse
+                    )
+                // 內層脈衝光環（波紋層次）
+                Circle()
+                    .stroke(accent.opacity(emptyMilestonePulse ? 0 : 0.14), lineWidth: 1)
+                    .frame(width: 108, height: 108)
+                    .scaleEffect(emptyMilestonePulse ? 1.65 : 1.0)
+                    .animation(
+                        .easeOut(duration: 2.0).delay(0.3).repeatForever(autoreverses: false),
+                        value: emptyMilestonePulse
+                    )
+                // 主圓底（漸層填色）
+                Circle()
+                    .fill(
+                        LinearGradient(
+                            colors: [accent.opacity(0.15), accent.opacity(0.06)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 86, height: 86)
+                    .overlay(
+                        Circle()
+                            .stroke(accent.opacity(0.22), lineWidth: 1.2)
+                    )
                 Image(systemName: "trophy")
-                    .font(.system(size: 26, weight: .light))
-                    .foregroundStyle(.secondary)
+                    .font(.system(size: 34, weight: .light))
+                    .foregroundStyle(accent.opacity(0.72))
             }
-            Text("暫無里程碑")
-                .font(.subheadline.weight(.medium))
-                .foregroundStyle(.secondary)
-            Text("新增生命中的重要時刻")
-                .font(.caption)
-                .foregroundStyle(.tertiary)
+            .onAppear {
+                emptyMilestonePulse = false
+                emptyMilestonePulseTask?.cancel()
+                emptyMilestonePulseTask = Task {
+                    try? await Task.sleep(nanoseconds: 300_000_000)
+                    guard !Task.isCancelled else { return }
+                    emptyMilestonePulse = true
+                }
+            }
+            .onDisappear {
+                emptyMilestonePulseTask?.cancel()
+            }
+
+            VStack(spacing: 8) {
+                Text("暫無里程碑")
+                    .font(.headline.weight(.semibold))
+                    .foregroundStyle(.primary.opacity(0.70))
+                Text("記錄生命中每一個重要時刻")
+                    .font(.subheadline)
+                    .foregroundStyle(.tertiary)
+                    .multilineTextAlignment(.center)
+            }
         }
         .frame(maxWidth: .infinity)
-        .padding(.vertical, 28)
+        .padding(.vertical, 44)
         .background(Color(.systemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 16))
-        .shadow(color: .black.opacity(0.04), radius: 6, x: 0, y: 2)
+        .shadow(color: .black.opacity(0.05), radius: 8, x: 0, y: 3)
         .padding(.horizontal)
     }
 
@@ -314,7 +428,8 @@ struct LifeOverviewView: View {
                 guard let count = grouped[cat]?.count, count > 0 else { return nil }
                 return (cat, count)
             }
-        let maxCount = entries.map(\.1).max() ?? 1
+        // 改用總數計算佔比（絕對份額），讓進度條直觀反映各分類實際比例
+        let totalCount = max(allMS.count, 1)
 
         return Group {
             if !entries.isEmpty {
@@ -333,20 +448,24 @@ struct LifeOverviewView: View {
                         Spacer()
                         Text("\(entries.count) 類")
                             .font(.caption2.weight(.semibold))
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(.blue)
                             .padding(.horizontal, 8).padding(.vertical, 3)
-                            .background(Color(.tertiarySystemFill))
+                            .background(Color.blue.opacity(0.10))
                             .clipShape(Capsule())
+                            .overlay(Capsule().stroke(Color.blue.opacity(0.22), lineWidth: 0.75))
                     }
                     .padding(.horizontal)
 
                     VStack(spacing: 0) {
                         ForEach(Array(entries.enumerated()), id: \.element.0) { index, entry in
                             let accent = milestoneColor(entry.0)
-                            let ratio = maxCount > 0 ? Double(entry.1) / Double(maxCount) : 0
+                            // 改用佔總數比率，條寬直接等於實際份額百分比
+                            let totalRatio = Double(entry.1) / Double(totalCount)
+                            let pct = Int((totalRatio * 100).rounded())
 
                             VStack(spacing: 8) {
                                 HStack(spacing: 12) {
+                                    // 圖示圓升級至 40pt（統計情境中間值，對齊 app 標準體系）
                                     ZStack {
                                         Circle()
                                             .fill(
@@ -356,24 +475,26 @@ struct LifeOverviewView: View {
                                                     endPoint: .bottomTrailing
                                                 )
                                             )
-                                            .frame(width: 36, height: 36)
+                                            .frame(width: 40, height: 40)
                                         Circle()
-                                            .stroke(accent.opacity(0.22), lineWidth: 1)
-                                            .frame(width: 36, height: 36)
+                                            .stroke(accent.opacity(0.22), lineWidth: 1.2)
+                                            .frame(width: 40, height: 40)
                                         Image(systemName: entry.0.icon)
-                                            .font(.system(size: 14, weight: .semibold))
+                                            .font(.system(size: 16, weight: .semibold))
                                             .foregroundStyle(accent)
                                     }
                                     Text(entry.0.displayName)
                                         .font(.subheadline)
                                     Spacer()
-                                    // 筆數徽章
-                                    Text("\(entry.1) 筆")
+                                    // 筆數 + 佔比膠囊徽章（提升資訊密度）
+                                    // [v3] 加入 overlay Capsule stroke 細邊框，對齊 OverviewView.categoryRow 百分比膠囊規格
+                                    Text("\(entry.1) 筆 · \(pct)%")
                                         .font(.system(size: 12, weight: .bold))
                                         .padding(.horizontal, 9).padding(.vertical, 4)
                                         .background(accent.opacity(0.12))
                                         .foregroundStyle(accent)
                                         .clipShape(Capsule())
+                                        .overlay(Capsule().stroke(accent.opacity(0.22), lineWidth: 0.75))
                                 }
 
                                 GeometryReader { geo in
@@ -388,15 +509,25 @@ struct LifeOverviewView: View {
                                                     startPoint: .leading, endPoint: .trailing
                                                 )
                                             )
-                                            .frame(width: geo.size.width * ratio, height: 5)
-                                            .animation(.spring(response: 0.6, dampingFraction: 0.78), value: ratio)
+                                            .frame(width: geo.size.width * totalRatio, height: 5)
+                                            .animation(.spring(response: 0.6, dampingFraction: 0.78), value: totalRatio)
+                                        // [v3] glow overlay：白色高亮 + 底部柔化，對齊 OverviewView.categoryRow 彩條規格
+                                        Capsule()
+                                            .fill(
+                                                LinearGradient(
+                                                    colors: [.white.opacity(0.28), .clear, .black.opacity(0.08)],
+                                                    startPoint: .top,
+                                                    endPoint: .bottom
+                                                )
+                                            )
+                                            .frame(width: geo.size.width * totalRatio, height: 5)
                                     }
                                 }
                                 .frame(height: 5)
                             }
                             .padding(.horizontal, 16)
                             .padding(.vertical, 12)
-                            // 錯落淡入動畫
+                            // 錯落淡入動畫（0.05s 延遲確保佈局完成後再啟動）
                             .opacity(categoryRowsAppeared ? 1 : 0)
                             .offset(y: categoryRowsAppeared ? 0 : 12)
                             .animation(
@@ -406,7 +537,7 @@ struct LifeOverviewView: View {
                             )
 
                             if index < entries.count - 1 {
-                                Divider().padding(.leading, 64)
+                                Divider().padding(.leading, 68)
                             }
                         }
                     }
@@ -415,7 +546,17 @@ struct LifeOverviewView: View {
                     .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 3)
                     .padding(.horizontal)
                     .onAppear {
-                        withAnimation { categoryRowsAppeared = true }
+                        // 0.05s 延遲確保 view 完成佈局後再啟動動畫（對齊 milestoneTimelineSection）
+                        categoryRowsAppearedTask?.cancel()
+                        categoryRowsAppearedTask = Task {
+                            try? await Task.sleep(nanoseconds: 50_000_000)
+                            guard !Task.isCancelled else { return }
+                            withAnimation { categoryRowsAppeared = true }
+                        }
+                    }
+                    .onDisappear {
+                        categoryRowsAppearedTask?.cancel()
+                        categoryRowsAppeared = false
                     }
                 }
             }
@@ -430,5 +571,153 @@ struct LifeOverviewView: View {
 
     private func formatDate(_ date: Date) -> String {
         Self.milestoneDateFormatter.string(from: date)
+    }
+}
+
+// MARK: - 還沒解鎖的功能（v25.434）
+
+extension LifeOverviewView {
+
+    /// 人生分頁刻意不是十一個功能一次全開——新使用者第一天只看得到總覽與履歷，
+    /// 其餘跟著資料長出來。好處是不會一進來就被十一個分頁嚇到，
+    /// 代價是**功能發現不了**：使用者可能記了半年帳，都不知道有美食地圖，
+    /// 因為他從來沒在記帳時選過地點。
+    ///
+    /// 這一區就是那個代價的解法：藏起來可以，但要留一條看得到的路。
+    /// 每一列都寫清楚「要做什麼它才會出現」，而且點一下就直接幫他開那件事。
+    ///
+    /// ⚠️ 條件一律問 LifeFeatureGate，不在這裡重寫一份。兩邊各寫一份的話，
+    ///    改了條件就會出現「這裡說加一筆就會出現、加了卻還是沒出現」，
+    ///    那比沒有這個提示還糟。
+    @ViewBuilder
+    var lockedFeaturesSection: some View {
+        let locked = lockedFeatures
+        if !locked.isEmpty {
+            VStack(alignment: .leading, spacing: 0) {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.2)) { lockedExpanded.toggle() }
+                } label: {
+                    HStack(spacing: 10) {
+                        ZStack {
+                            Circle()
+                                .fill(LinearGradient(colors: [.gray.opacity(0.22), .gray.opacity(0.08)],
+                                                     startPoint: .topLeading, endPoint: .bottomTrailing))
+                                .frame(width: 32, height: 32)
+                            Image(systemName: "lock.fill")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(.secondary)
+                        }
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("還沒解鎖的功能")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(.primary)
+                            Text("人生分頁的功能跟著資料長出來，還有 \(locked.count) 個沒出現")
+                                .font(.caption2).foregroundStyle(.secondary)
+                        }
+                        Spacer(minLength: 0)
+                        Text("\(locked.count)")
+                            .font(.system(size: 11, weight: .bold).monospacedDigit())
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 7).padding(.vertical, 2.5)
+                            .background(Color(.tertiarySystemFill), in: Capsule())
+                        Image(systemName: "chevron.down")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.tertiary)
+                            .rotationEffect(.degrees(lockedExpanded ? 0 : -90))
+                    }
+                    .padding(14)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+
+                if lockedExpanded {
+                    ForEach(locked, id: \.self) { feature in
+                        Divider().padding(.leading, 56)
+                        lockedRow(feature)
+                    }
+                }
+            }
+            .background(Color(.secondarySystemGroupedBackground))
+            .clipShape(RoundedRectangle(cornerRadius: 16))
+            .padding(.horizontal)
+        }
+    }
+
+    /// 目前還沒解鎖的功能。順序沿用 LifeFeature 的宣告順序，
+    /// 跟功能列出現的順序一致——解鎖之後它就會出現在那個位置。
+    private var lockedFeatures: [LifeFeature] {
+        LifeFeature.allCases.filter {
+            !LifeFeatureGate.isUnlocked($0, life: store,
+                                        finance: financeStore, expense: expenseStore)
+        }
+    }
+
+    private func lockedRow(_ feature: LifeFeature) -> some View {
+        let action = LifeFeatureGate.unlockAction(feature)
+        return Button {
+            perform(action)
+        } label: {
+            HStack(spacing: 10) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(lockedTint(feature).opacity(0.14))
+                        .frame(width: 32, height: 32)
+                    Image(systemName: feature.icon)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(lockedTint(feature))
+                }
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(feature.title)
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(.primary)
+                    Text(LifeFeatureGate.unlockHint(feature))
+                        .font(.caption2).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 0)
+                if action != nil {
+                    Text("去做")
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(lockedTint(feature))
+                        .padding(.horizontal, 8).padding(.vertical, 4)
+                        .background(lockedTint(feature).opacity(0.12), in: Capsule())
+                }
+            }
+            .padding(.horizontal, 14).padding(.vertical, 11)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        // 沒有可以直接幫他開的動作時就不要假裝可以按
+        .disabled(action == nil)
+    }
+
+    private func perform(_ action: LifeFeatureGate.UnlockAction?) {
+        switch action {
+        case .addVariableExpense:
+            showAddVariable = true
+        case .addRealEstate:
+            // 房地產要訂閱，比照本頁右上角＋的處理
+            if subscription.isPremium { showAddRealEstate = true } else { showPremiumAlert = true }
+        case .addMilestone(let category):
+            addingMilestoneCategory = category
+        case nil:
+            break
+        }
+    }
+
+    /// 每個功能一個顏色，跟它在功能列上的角色對得起來
+    private func lockedTint(_ feature: LifeFeature) -> Color {
+        switch feature {
+        case .overview, .resume: return .secondary
+        case .finance:    return .green
+        case .health:     return .red
+        case .career:     return .blue
+        case .family:     return .orange
+        case .realEstate: return .brown
+        case .tax:        return .indigo
+        case .foodMap:    return .orange
+        case .travelMap:  return .purple
+        case .medicalMap: return .pink
+        }
     }
 }

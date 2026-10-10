@@ -27,7 +27,7 @@ enum VariableCategory: String, Codable, Identifiable {
     var id: String { rawValue }
 
     static var allCases: [VariableCategory] {
-        [.food, .vehicle, .stock, .realEstate, .tax, .taxSaving, .entertainment, .shopping, .dailyNecessities, .medical, .education, .social, .other]
+        [.food, .transportation, .vehicle, .stock, .realEstate, .tax, .taxSaving, .entertainment, .shopping, .dailyNecessities, .medical, .education, .social, .other]
     }
 
     var icon: String {
@@ -113,6 +113,54 @@ enum SocialSubCategory: String, Codable, CaseIterable, Identifiable {
         case .promotionHousewarming: return "sparkles"
         case .other: return "ellipsis.circle.fill"
         }
+    }
+}
+
+// MARK: - 固定支出停止原因
+
+/// [v25.347] 固定支出的停止原因。只作標示用途，不影響金額計算；
+/// 各子分類常見的原因不同，編輯畫面會依 fixedCategory 把最可能的排在前面。
+enum FixedEndReason: String, Codable, CaseIterable, Identifiable {
+    case cancelled = "取消訂閱"
+    case contractEnded = "合約到期"
+    case paidOff = "貸款繳清"
+    case matured = "保單期滿"
+    case surrendered = "保單解約"
+    case moved = "搬遷／退租"
+    case switched = "換方案／換供應商"
+    case assetSold = "資產已出售"
+    case other = "其他"
+
+    var id: String { rawValue }
+
+    var icon: String {
+        switch self {
+        case .cancelled:     return "xmark.circle.fill"
+        case .contractEnded: return "calendar.badge.checkmark"
+        case .paidOff:       return "checkmark.seal.fill"
+        case .matured:       return "flag.checkered"
+        case .surrendered:   return "arrow.uturn.backward.circle.fill"
+        case .moved:         return "shippingbox.fill"
+        case .switched:      return "arrow.triangle.swap"
+        case .assetSold:     return "tag.slash.fill"
+        case .other:         return "ellipsis.circle.fill"
+        }
+    }
+
+    /// 依固定支出子分類排出「最可能的原因」在前，其餘照原順序接在後面。
+    static func suggested(for category: FixedCategory?) -> [FixedEndReason] {
+        let head: [FixedEndReason]
+        switch category {
+        case .subscription: head = [.cancelled, .switched, .contractEnded]
+        case .telecom:      head = [.contractEnded, .switched, .cancelled]
+        case .rent:         head = [.moved, .contractEnded]
+        case .loan:         head = [.paidOff, .assetSold]
+        case .insurance:    head = [.matured, .surrendered, .switched]
+        case .management:   head = [.assetSold, .moved]
+        case .utilities:    head = [.moved, .assetSold]
+        default:            head = [.cancelled, .contractEnded]
+        }
+        return head + allCases.filter { !head.contains($0) }
     }
 }
 
@@ -214,6 +262,15 @@ enum Recurrence: String, Codable, CaseIterable {
     case monthly = "每月"
     case quarterly = "每季"
     case yearly = "每年"
+
+    /// 推進一期用的 Calendar 元件與步長（展開週期時共用，避免各處各寫一份 switch）
+    var componentValue: (Calendar.Component, Int) {
+        switch self {
+        case .monthly:   return (.month, 1)
+        case .quarterly: return (.month, 3)
+        case .yearly:    return (.year, 1)
+        }
+    }
 }
 
 // MARK: - 保險子分類
@@ -237,6 +294,18 @@ enum LoanSubCategory: String, Codable, CaseIterable, Identifiable {
 }
 
 // MARK: - 支出資料模型
+/// 固定支出的金額歷史快照（例：乙式險每年續保金額都變）。
+/// 卡片的「更新金額」會補一筆快照，走勢圖據此畫實線＋虛線預測。
+struct AmountSnapshot: Identifiable, Codable, Equatable {
+    let id: UUID
+    var date: Date
+    var amount: Double
+
+    init(id: UUID = UUID(), date: Date = Date(), amount: Double) {
+        self.id = id; self.date = date; self.amount = amount
+    }
+}
+
 struct Expense: Identifiable, Codable {
     let id: UUID
     var title: String
@@ -267,9 +336,15 @@ struct Expense: Identifiable, Codable {
     var loanTotalAmount: Double?
     var loanYears: Double?
     var loanRate: Double?
+    /// 儲蓄險複利年利率（%）。同步存一份於支出本身，避免連結的理財儲蓄險遺失時利率帶不出來。
+    var insuranceRate: Double?
     var linkedBankMilestoneId: UUID?
     var linkedBankCurrency: String?
     var linkedCreditCardMilestoneId: UUID?
+    /// [v25.365] 地點名稱。飲食／娛樂／購物／日用品／醫療是把店名直接存在 title，
+    /// 但汽車變動支出的 title 被「項目 N：型號-類別」自動命名佔用，店名無處可放，
+    /// 因此另開這個欄位。其餘分類一律為 nil，讀取時用 placeDisplayName 取代直接讀。
+    var placeName: String?
     /// 飲食記錄附帶的店家地址（MKLocalSearch 解析）
     var placeAddress: String?
     /// 飲食記錄附帶的店家緯度
@@ -278,6 +353,39 @@ struct Expense: Identifiable, Codable {
     var placeLongitude: Double?
     /// 此筆支出附帶的照片檔名（多張）
     var photoFileNames: [String]
+    /// 金額歷史快照（固定支出「更新金額」累積；刻意不進 memberwise init——
+    /// 那個 init 已 30+ 參數，編輯重建時由呼叫端帶回，比照 bankDeposits 慣例）
+    var amountHistory: [AmountSnapshot] = []
+    // [v25.312] 電動車充電資訊（變動支出＋關聯汽車＋分類=電費才有意義；
+    // 同樣不進 memberwise init，儲存端條件化指派）
+    /// 充電度數（kWh）
+    var evKwh: Double? = nil
+    /// 充電起始電量（%）
+    var evFromPct: Double? = nil
+    /// 充電結束電量（%）
+    var evToPct: Double? = nil
+    /// [v25.313] 充電當下的里程錶讀數（km）；連續兩筆都有里程時可算電耗（km/kWh）
+    var evOdometer: Double? = nil
+
+    /// [v25.424] 這筆變動支出屬於哪一趟旅遊規劃。
+    ///
+    /// 只是一個標籤，不動記帳本身：金額照樣進月支出、照樣算分類統計。
+    /// 綁上去之後這筆的照片會一起出現在那趟旅遊的相本裡——旅行時拍的收據、
+    /// 餐點、門票本來就跟景點照片是同一批回憶，沒道理分兩個地方找。
+    /// 同樣不進 memberwise init（那個 init 已 30+ 參數），由儲存端條件化指派。
+    var linkedTripPlanId: UUID? = nil
+    /// 綁到那趟旅遊的哪一站（可不指定＝算在整趟上）。相本用它來分組。
+    var linkedTripStopId: UUID? = nil
+
+    /// [v25.347] 固定支出的結束日＝**最後一次扣款日**。nil＝持續中。
+    ///
+    /// 語意（使用者定義）：排定扣款日 <= endDate 的那幾期算數。
+    /// 例：8/15 起每月扣，結束日 9/14 → 只有 8/15 一期；結束日 9/16 → 8/15 與 9/15 共兩期。
+    /// 與 Income.endDate 的「月粒度」不同，這裡用實際扣款日逐日比對，因為固定支出
+    /// 的每一期都對應一個明確的扣款日，用月份比會在跨月帳單日（如 8/15 起）算錯。
+    var endDate: Date?
+    /// 結束原因（僅標示用途，不影響計算）
+    var endReason: FixedEndReason?
 
     init(
         id: UUID = UUID(),
@@ -306,13 +414,17 @@ struct Expense: Identifiable, Codable {
         loanTotalAmount: Double? = nil,
         loanYears: Double? = nil,
         loanRate: Double? = nil,
+        insuranceRate: Double? = nil,
         linkedBankMilestoneId: UUID? = nil,
         linkedBankCurrency: String? = nil,
         linkedCreditCardMilestoneId: UUID? = nil,
+        placeName: String? = nil,
         placeAddress: String? = nil,
         placeLatitude: Double? = nil,
         placeLongitude: Double? = nil,
-        photoFileNames: [String] = []
+        photoFileNames: [String] = [],
+        endDate: Date? = nil,
+        endReason: FixedEndReason? = nil
     ) {
         self.id = id
         self.title = title
@@ -340,13 +452,17 @@ struct Expense: Identifiable, Codable {
         self.loanTotalAmount = loanTotalAmount
         self.loanYears = loanYears
         self.loanRate = loanRate
+        self.insuranceRate = insuranceRate
         self.linkedBankMilestoneId = linkedBankMilestoneId
         self.linkedBankCurrency = linkedBankCurrency
         self.linkedCreditCardMilestoneId = linkedCreditCardMilestoneId
+        self.placeName = placeName
         self.placeAddress = placeAddress
         self.placeLatitude = placeLatitude
         self.placeLongitude = placeLongitude
         self.photoFileNames = photoFileNames
+        self.endDate = endDate
+        self.endReason = endReason
     }
 
     // MARK: - 向下相容解碼
@@ -378,13 +494,24 @@ struct Expense: Identifiable, Codable {
         loanTotalAmount = try? c.decode(Double.self, forKey: .loanTotalAmount)
         loanYears = try? c.decode(Double.self, forKey: .loanYears)
         loanRate = try? c.decode(Double.self, forKey: .loanRate)
+        insuranceRate = try? c.decodeIfPresent(Double.self, forKey: .insuranceRate)
         linkedBankMilestoneId = try? c.decode(UUID.self, forKey: .linkedBankMilestoneId)
         linkedBankCurrency = try? c.decode(String.self, forKey: .linkedBankCurrency)
         linkedCreditCardMilestoneId = try? c.decodeIfPresent(UUID.self, forKey: .linkedCreditCardMilestoneId)
+        placeName = try? c.decodeIfPresent(String.self, forKey: .placeName)
         placeAddress = try? c.decodeIfPresent(String.self, forKey: .placeAddress)
         placeLatitude = try? c.decodeIfPresent(Double.self, forKey: .placeLatitude)
         placeLongitude = try? c.decodeIfPresent(Double.self, forKey: .placeLongitude)
         photoFileNames = (try? c.decodeIfPresent([String].self, forKey: .photoFileNames)) ?? []
+        amountHistory = (try? c.decodeIfPresent([AmountSnapshot].self, forKey: .amountHistory)) ?? []
+        evKwh = try? c.decodeIfPresent(Double.self, forKey: .evKwh)
+        evFromPct = try? c.decodeIfPresent(Double.self, forKey: .evFromPct)
+        evToPct = try? c.decodeIfPresent(Double.self, forKey: .evToPct)
+        evOdometer = try? c.decodeIfPresent(Double.self, forKey: .evOdometer)
+        linkedTripPlanId = try? c.decodeIfPresent(UUID.self, forKey: .linkedTripPlanId)
+        linkedTripStopId = try? c.decodeIfPresent(UUID.self, forKey: .linkedTripStopId)
+        endDate = try? c.decodeIfPresent(Date.self, forKey: .endDate)
+        endReason = try? c.decodeIfPresent(FixedEndReason.self, forKey: .endReason)
     }
     private enum CodingKeys: String, CodingKey {
         case id, title, amount, date, expenseType, variableCategory, fixedCategory, recurrence
@@ -392,10 +519,27 @@ struct Expense: Identifiable, Codable {
         case linkedInsuranceId, linkedStockId, linkedRealEstateId, linkedVehicleId
         case vehicleExpenseCategory, realEstateExpenseCategory, taxSavingSubCategory
         case socialSubCategory, socialRecipient, taxDeductibleOverride, note, currencyCode, diningMember
-        case loanTotalAmount, loanYears, loanRate
+        case loanTotalAmount, loanYears, loanRate, insuranceRate
         case linkedBankMilestoneId, linkedBankCurrency, linkedCreditCardMilestoneId
-        case placeAddress, placeLatitude, placeLongitude, photoFileNames
+        case placeName, placeAddress, placeLatitude, placeLongitude, photoFileNames, amountHistory
+        case evKwh, evFromPct, evToPct, evOdometer
+        case linkedTripPlanId, linkedTripStopId
+        case endDate, endReason
     }
+
+    // MARK: - 地點
+
+    /// [v25.365] 這筆支出的地點名稱：優先用獨立的 placeName（汽車），
+    /// 沒有才退回 title（飲食／娛樂／購物／日用品／醫療把店名存在 title）。
+    /// 兩者都空時回傳 nil，呼叫端可直接 if let。
+    var placeDisplayName: String? {
+        if let n = placeName?.trimmingCharacters(in: .whitespaces), !n.isEmpty { return n }
+        let t = title.trimmingCharacters(in: .whitespaces)
+        return t.isEmpty ? nil : t
+    }
+
+    /// 是否已綁定實際座標（可畫在地圖／路線圖上）
+    var hasPlaceCoordinate: Bool { placeLatitude != nil && placeLongitude != nil }
 
     var categoryName: String {
         switch expenseType {
@@ -422,6 +566,90 @@ struct Expense: Identifiable, Codable {
             }
             return fixedCategory?.rawValue ?? "未分類"
         }
+    }
+
+    // MARK: - 固定支出的停止（結束日）
+
+    /// 是否為「會逐期展開」的固定支出
+    var isRecurringFixed: Bool { expenseType == .fixed && recurrence != nil }
+
+    /// 已經停止（結束日在今天之前）。結束日當天仍算進行中。
+    var isFixedEnded: Bool {
+        guard isRecurringFixed, let end = endDate else { return false }
+        return Calendar.current.startOfDay(for: end) < Calendar.current.startOfDay(for: Date())
+    }
+
+    /// 這筆固定支出在某一天是否仍在有效期內（起始日 <= day <= 結束日）
+    func isFixedActive(on day: Date, calendar: Calendar = .current) -> Bool {
+        guard isRecurringFixed else { return true }
+        let d = calendar.startOfDay(for: day)
+        guard calendar.startOfDay(for: date) <= d else { return false }
+        guard let end = endDate else { return true }
+        return d <= calendar.startOfDay(for: end)
+    }
+
+    /// 逐期展開的截止時間：min(現在, 結束日)。所有展開迴圈都應該用這個當上界，
+    /// 這樣「排定扣款日 <= 結束日才算一期」的規則只寫一次。
+    func fixedExpansionLimit(now: Date = Date()) -> Date {
+        guard let end = endDate else { return now }
+        return min(now, end)
+    }
+
+    /// 貸款／綁約類的建議結束日（最後一期扣款日）。
+    /// 貸款的第一期是「起始日的下一期」（見固定支出展開規則），所以
+    /// 最後一期＝起始日 +（期數 × 週期）。沒有年期資料時回傳 nil。
+    var suggestedEndDate: Date? {
+        guard isRecurringFixed, let rec = recurrence, fixedCategory == .loan,
+              let years = loanYears, years > 0 else { return nil }
+        let cal = Calendar.current
+        let months: Int
+        switch rec {
+        case .monthly:   months = Int((years * 12).rounded())
+        case .quarterly: months = Int((years * 12).rounded() / 3) * 3
+        case .yearly:    months = Int(years.rounded()) * 12
+        }
+        return cal.date(byAdding: .month, value: max(1, months), to: date)
+    }
+
+    /// 下一次扣款日（在 from 那一天或之後；今天要扣的就回今天）。
+    ///
+    /// 規則跟 fixedPeriodCount 一樣：第一期是起始日（貸款是起始日的下一期），之後每期
+    /// 加一個週期，結束日當期仍算。不是週期性固定支出、或已經沒有下一期了，回 nil。
+    ///
+    /// 第 k 期是「第一期 ＋ k 個週期」一次算出來，不是一期一期往上加：1/31 一期一期加
+    /// 會變成 2/28、3/28、4/28…（之後每個月都少三天），一次加才會是 3/31、4/30。
+    func nextFixedDueDate(onOrAfter from: Date = Date(), calendar: Calendar = .current) -> Date? {
+        guard isRecurringFixed, let rec = recurrence else { return nil }
+        let (component, step) = rec.componentValue
+        let first = fixedCategory == .loan
+            ? (calendar.date(byAdding: component, value: step, to: date) ?? date)
+            : date
+        let target = calendar.startOfDay(for: from)
+        var k = 0
+        var due = first
+        while calendar.startOfDay(for: due) < target && k < 1200 {
+            k += 1
+            due = calendar.date(byAdding: component, value: step * k, to: first) ?? due
+        }
+        if let end = endDate, calendar.startOfDay(for: due) > calendar.startOfDay(for: end) {
+            return nil
+        }
+        return due
+    }
+
+    /// 從起始日到 until 為止，實際會發生幾期扣款（含結束日當期）。
+    func fixedPeriodCount(until: Date = Date(), calendar: Calendar = .current) -> Int {
+        guard isRecurringFixed, let rec = recurrence else { return 0 }
+        let limit = calendar.startOfDay(for: min(until, endDate ?? until))
+        var cur = fixedCategory == .loan
+            ? (calendar.date(byAdding: rec.componentValue.0, value: rec.componentValue.1, to: date) ?? date)
+            : date
+        var n = 0
+        while calendar.startOfDay(for: cur) <= limit && n < 1200 {
+            n += 1
+            cur = calendar.date(byAdding: rec.componentValue.0, value: rec.componentValue.1, to: cur) ?? cur
+        }
+        return n
     }
 
     // MARK: - 節稅推斷（固定支出）
@@ -467,6 +695,151 @@ struct Expense: Identifiable, Codable {
     }
 }
 
+// MARK: - 站內清單的列標籤（v25.515）
+
+extension Expense {
+
+    /// 這筆是用外幣輸入的嗎。儲蓄險那條路不算——它的 amount 本來就存原幣
+    /// （見 ExpenseStore.ntdValue 的註解）。
+    ///
+    /// 原本是 TripPlanDetailView 的私有 isForeign(_:)；popover 與景點卡都要用，
+    /// 而它只讀單筆欄位、不需要 currencyRates，所以掛在 Expense 而不是 ExpenseStore
+    /// （界線見 ExpenseStore.swift 的 displayAmountText 註解）。
+    var isForeignCurrencyInput: Bool {
+        let code = currencyCode
+        guard !code.isEmpty, code != "NT$", code != "TWD" else { return false }
+        return !(fixedCategory == .insurance && insuranceSubCategory == .savings)
+    }
+
+    /// 「站內清單」一列要寫的字。
+    ///
+    /// 站內清單 ＝ 上下文**已經印出地點名**的清單：行程頁的花費氣泡、
+    /// 景點卡的「這一站的花費」、統計頁明細裡掛了站別的那幾筆。
+    struct StopRowLabel {
+        enum Kind {
+            /// 使用者自己打的名字（店名／品項）
+            case title
+            /// 沒有名字，但有備註
+            case note
+            /// 兩個都沒有，只剩分類名
+            case category
+        }
+        let kind: Kind
+        /// 主標。永遠非空。
+        let primary: String
+        /// 副標要補的分類名；primary 本身就是分類名時為 nil（同一列不印兩次）
+        let category: String?
+        /// 副標要補的備註；備註已經當了主標時為 nil
+        let note: String?
+        /// 這一列有沒有「使用者自己寫的字」。false ＝ 只剩分類名。
+        var hasOwnText: Bool { kind != .category }
+    }
+
+    /// 站內清單一列的標籤。
+    ///
+    /// - Parameter names: 這個畫面**已經印出來過**的地點名。
+    ///   慣例是傳「這一筆所屬的站名 ＋ 同一趟所有站名」：只傳當下那一站會漏掉
+    ///   autoPickStop 先挑了別站、使用者之後手改站別的那一批——fillPlaceFromStop
+    ///   的 `guard currentPlaceCoordinate == nil` 會擋掉第二次填入
+    ///   （AddExpenseView.swift），於是 title 停在另一站的名字。
+    ///   傳空陣列 ＝ 沒有地點上下文（全域清單、統計頁的候選卡）→ title 一律照用。
+    ///
+    /// ⚠️ 不要改用 placeDisplayName：它是「這筆記在哪」的規則（placeName ?? title），
+    ///    非汽車分類會原封不動吐回 title，也就是 fillPlaceFromStop 寫進去的那個站名
+    ///    （AddExpenseView.applyMapPickedPlace → placeQuery，非汽車分類 placeQuery
+    ///    綁的就是 $title）。
+    ///
+    /// ⚠️ 全域清單（VariableExpenseView、履歷三頁、信用卡明細、節稅、最近交易）
+    ///    **不要**用這支。那裡沒有站名上下文，title ＝ 店名是唯一的地點線索，
+    ///    換成分類名會讓使用者更不知道錢花在哪。兩邊的 fallback 方向是相反的。
+    func stopRowLabel(suppressing names: [String]) -> StopRowLabel {
+        let echoes = Set(names.compactMap { Self.normalizedLabelText($0) })
+        let cat = categoryName
+        // 比 categoryName 不夠：saveExpense 在 title 留空時自動補的是 **bare
+        // rawValue**（「社交」），而 categoryName 會展開成「社交 - 生日禮金」。
+        // 兩個都要擋，否則有子分類的那四類（社交／節稅／汽車／房地產）
+        // 會出現主標「社交」＋副標「社交 - 生日禮金」，同一列講兩次同一件事。
+        let bareCat = variableCategory?.rawValue ?? fixedCategory?.rawValue ?? ""
+        let memo = note.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        /// 這個字串算不算「使用者自己打的名字」
+        func ownText(_ raw: String?) -> String? {
+            guard var t = raw?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !t.isEmpty else { return nil }
+            // 整個就是站名 → 標頭已經寫過
+            if let n = Self.normalizedLabelText(t), echoes.contains(n) { return nil }
+            // 「海の中道海浜公園 門票」：站名被自動帶進來、使用者在後面補了品項
+            if let rest = Self.strippingStopPrefix(t, names: names) { t = rest }
+            guard !t.isEmpty else { return nil }
+            // 存檔時自動填的分類名，不是名字
+            if t == cat || (!bareCat.isEmpty && t == bareCat) { return nil }
+            // linkedAssetTitle 的自動命名「項目 3：Model 3-加油」：
+            // 「項目 N」那段對使用者毫無意義，但後面的車名／物件名是。
+            // [v25.516] 只剝前綴，不整串丟掉。v25.515 整串丟掉，統計頁的明細與
+            // 候選卡（那裡沒有站名上下文）因此從「項目 3：Model 3-加油」退成
+            // 「汽車 - 加油」，車名整個不見——多台車、多間房的人分不出是哪一台
+            // 哪一間（房地產連 placeName 都沒有可退）。
+            if t.hasPrefix("項目 "), let colon = t.firstIndex(of: "：") {
+                let rest = t[t.index(after: colon)...]
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !rest.isEmpty else { return nil }
+                t = rest
+                if t == cat || (!bareCat.isEmpty && t == bareCat) { return nil }
+            }
+            return t
+        }
+
+        // 1. 使用者自己打的名字。汽車類的使用者文字在 placeName（title 被
+        //    linkedAssetTitle 的自動命名佔住），其餘分類 placeName 一律是 nil，
+        //    所以先問 placeName 對所有分類都安全。
+        if let own = ownText(placeName) ?? ownText(title) {
+            return StopRowLabel(kind: .title, primary: own,
+                                category: cat, note: memo.isEmpty ? nil : memo)
+        }
+        // 2. 備註——同一站多筆之中唯一真的會不一樣的文字。
+        //    備註也可能被打成站名，一樣要擋。
+        if !memo.isEmpty, let n = Self.normalizedLabelText(memo), !echoes.contains(n) {
+            return StopRowLabel(kind: .note, primary: memo, category: cat, note: nil)
+        }
+        // 3. 只剩分類。categoryName 自己就有「未分類」兜底——不要再發明第六種
+        //    兜底字串（「花費」／「未分類」／「（未命名）」／「支出照片」已經各自
+        //    散在不同畫面，這次收斂到這一支）。
+        return StopRowLabel(kind: .category, primary: cat, category: nil, note: nil)
+    }
+
+    /// 站名比對用的正規化：trim → 全角空白換半角 → 壓縮連續空白 → 小寫。
+    /// 日文站名常夾全角空白，使用者整理站名時也常只動空白。
+    static func normalizedLabelText(_ s: String) -> String? {
+        let x = s.replacingOccurrences(of: "\u{3000}", with: " ")
+            .components(separatedBy: .whitespacesAndNewlines)
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+            .lowercased()
+        return x.isEmpty ? nil : x
+    }
+
+    private static let stopPrefixSeparators =
+        CharacterSet(charactersIn: " 　-－—–·・,，、/／:：|｜()（）")
+
+    /// 「站名＋分隔符＋其他字」時剝掉站名前綴。
+    ///
+    /// ⚠️ 一定要確認緊接在站名後面的那個字元是分隔符。少了這道檢查，
+    ///    站名「博多駅」會把使用者從地圖挑的「博多駅前郵便局」剝成「前郵便局」
+    ///    ——顯示一個世界上不存在的名字，比印重複的站名更糟。
+    private static func strippingStopPrefix(_ t: String, names: [String]) -> String? {
+        for name in names {
+            let n = name.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard n.count >= 2, t.count > n.count, t.hasPrefix(n) else { continue }
+            let rest = t.dropFirst(n.count)
+            guard let first = rest.unicodeScalars.first,
+                  stopPrefixSeparators.contains(first) else { continue }
+            let cleaned = String(rest).trimmingCharacters(in: stopPrefixSeparators)
+            if !cleaned.isEmpty { return cleaned }
+        }
+        return nil
+    }
+}
+
 // MARK: - 支出照片儲存（多張）
 
 extension Expense {
@@ -478,11 +851,22 @@ extension Expense {
         return dir
     }
 
-    /// 將 jpeg 資料寫入並回傳檔名（同時推送 CloudKit）
-    static func savePhoto(_ data: Data, expenseId: UUID, photoId: UUID = UUID()) -> String {
+    /// 將 jpeg 資料寫入並回傳檔名（同時推送 CloudKit）；寫入失敗回傳 nil，避免呼叫端存進一筆指向不存在檔案的紀錄
+    static func savePhoto(_ data: Data, expenseId: UUID, photoId: UUID = UUID()) -> String? {
+        let data = ImageCompressor.compressForStorage(data)   // 存檔前統一壓縮：1080P 長邊 + JPEG 80%
         let name = "\(expenseId.uuidString)_\(photoId.uuidString).jpg"
         let url = photosDirectory.appendingPathComponent(name)
-        try? data.write(to: url)
+        guard (try? data.write(to: url)) != nil else { return nil }
+        PhotoCloudSync.upload(directory: "ExpensePhotos", fileName: name)
+        return name
+    }
+
+    /// [v25.306] 將 PDF 帳單原檔寫入並回傳檔名（原檔保留不壓縮；同步推送 CloudKit）。
+    /// 與照片共用同一個資料夾與檔名規則，只差副檔名——刪除／雲端同步走同一條路。
+    static func savePDF(_ data: Data, expenseId: UUID, fileId: UUID = UUID()) -> String? {
+        let name = "\(expenseId.uuidString)_\(fileId.uuidString).pdf"
+        let url = photosDirectory.appendingPathComponent(name)
+        guard (try? data.write(to: url)) != nil else { return nil }
         PhotoCloudSync.upload(directory: "ExpensePhotos", fileName: name)
         return name
     }

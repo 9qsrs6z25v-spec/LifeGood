@@ -31,8 +31,13 @@ final class EInvoiceClient {
     /// ⚠️ 申請後填入此處（個人/公司皆可申請，免費）。
     static var appID: String = ""
 
-    /// API 入口
-    private let endpoint = URL(string: "https://api.einvoice.nat.gov.tw/PB2CAPIVAN/invServ/InvServ")!
+    /// API 入口（硬編碼字串不含非法字元，使用閉包初始化讓意圖明確；若 URL 格式日後變更會在啟動時即失敗）
+    private let endpoint: URL = {
+        guard let url = URL(string: "https://api.einvoice.nat.gov.tw/PB2CAPIVAN/invServ/InvServ") else {
+            fatalError("EInvoiceClient: endpoint URL 格式錯誤，請確認字串內容")
+        }
+        return url
+    }()
 
     /// 裝置識別（一次產生後固定）
     private let deviceUUID: String = {
@@ -47,14 +52,6 @@ final class EInvoiceClient {
     private let session: URLSession = .shared
 
     private static let dateFormatter: DateFormatter = {
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "en_US_POSIX")
-        f.timeZone = TimeZone(identifier: "Asia/Taipei")
-        f.dateFormat = "yyyy/MM/dd"
-        return f
-    }()
-
-    private static let twDateParser: DateFormatter = {
         let f = DateFormatter()
         f.locale = Locale(identifier: "en_US_POSIX")
         f.timeZone = TimeZone(identifier: "Asia/Taipei")
@@ -179,7 +176,7 @@ final class EInvoiceClient {
     private func parseHeader(_ raw: [String: Any]) -> EInvoiceHeader? {
         guard let invNum = raw["invNum"] as? String,
               let dateStr = raw["invDate"] as? String,
-              let date = Self.twDateParser.date(from: dateStr) else { return nil }
+              let date = Self.dateFormatter.date(from: dateStr) else { return nil }
         let seller = (raw["sellerName"] as? String) ?? ""
         let amount = parseDouble(raw["amount"]) ?? 0
         let status = (raw["invStatus"] as? String) ?? "開立"

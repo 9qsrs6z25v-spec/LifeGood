@@ -1,54 +1,85 @@
 import SwiftUI
 
+// MARK: - 美化紀錄（FinanceOverviewView）
+// [2026-06 v1] 本次美化方向：
+//   1. 頂部加入正式美化紀錄文件，方便後續美化時快速掌握均值規格。
+//   2. totalAssetsCard：已有「投資損益 KPI 膠囊」+ 「mini 資產配置彩條」+ 進場動畫，
+//      設計語言對齊 OverviewView.monthlyBalanceCard 規格。
+//   3. cashFlowSection：補入缺少的進場動畫（cashFlowSectionAppeared 旗標）；
+//      入場效果為 opacity + Y 位移 spring，與 allocationSection 動畫規格一致。
+//   4. emptyPlaceholder：主圓底從純 Color(.systemFill) 升級為 LinearGradient 漸層填色
+//      + 細邊框 stroke，對齊 OverviewView.emptyPlaceholder 設計規格；
+//      圖示尺寸從 26pt → 28pt，與 OverviewView 統一。
+// [2026-06 v2] 本次美化方向：
+//   5. allocationSection 行圖示：RoundedRectangle(cornerRadius:7) 30pt →
+//      Circle 36pt + LinearGradient + stroke，對齊全 App icon circle 統一規格
+//      （OverviewView.categoryRow / LifeOverviewView.categoryBreakdownSection 40pt 規格降一級至 36pt）；
+//      Divider leading padding 同步從 58 → 62 對齊新圖示尺寸。
+//   6. allocationSection 標題列：補入「N 類」計數膠囊徽章，
+//      對齊 OverviewView.categoryBreakdownSection 標題規格。
+//   7. allocationSection 橫向彩條：加入 glow overlay（頂部白色高亮 + 底部柔化），
+//      視覺更立體，對齊 totalAssetsCard mini 彩條設計語言。
+//   8. cashFlowSideItem 圖示：RoundedRectangle(cornerRadius:10) → Circle + LinearGradient + stroke，
+//      補齊與 cashFlowNetItem（已用 Circle）的視覺一致性，對齊同卡片內設計均值。
+// [2026-06 v3] 本次美化方向：
+//   9. totalAssetsCard 頂部玻璃光澤：background ZStack 最後加入
+//      LinearGradient [white.opacity(0.18), clear] top→center，
+//      對齊 OverviewView.monthlyBalanceCard v3 玻璃反光規格。
+//  10. assetCard 圖示圓：30pt pure color.opacity(0.15) →
+//      34pt LinearGradient (0.22→0.08) + stroke border (0.18, 0.75pt)，
+//      對齊 OverviewView.summaryCard v3 圖示圓規格；圖示字體 13→14pt。
+//  11. assetCard 頂端色條 glow overlay：疊加 LinearGradient [white.opacity(0.30), clear]
+//      top→bottom，讓色條呈現立體光澤，對齊 ChartView.expenseTypeBreakdown v3 glow 規格。
+//  12. cashFlowNetItem 圖示圓：Circle().fill(netColor.opacity(0.14)) →
+//      LinearGradient (0.20→0.08) + stroke (0.22, 1pt)，
+//      補齊 cashFlowSideItem v2 升級後 cashFlowNetItem 殘留的視覺不一致。
+//  13. assetCard 筆數文字：加入 lineLimit(1) + minimumScaleFactor(0.8) +
+//      contentTransition(.numericText())，防止長數字換行且數值變化流暢。
+// [2026-06 v4] 本次美化方向：
+//  14. totalAssetsCard mini 彩條：補入 glow overlay（白色頂部高亮 + 底部柔化）+ 左展開
+//      spring 動畫（miniBarAppeared / scaleEffect x: 0.04→1, anchor: .leading），
+//      對齊 allocationSection 14pt 彩條規格，消除卡片內與下方區塊的視覺落差。
+//  15. cashFlowSection 空狀態圖示圓：純 Color(.systemFill) →
+//      LinearGradient (secondarySystemFill→systemFill) + stroke (separator.0.35, 1pt)，
+//      對齊 emptyPlaceholder 設計規格，保持全頁空狀態視覺一致性。
+// [2026-08 v5] 本次美化方向：
+//  16. totalAssetsCard 頂部「總資產」34pt 大字：補上 lineLimit(1) + minimumScaleFactor(0.6)，
+//      是本卡片內唯一缺少防截斷保護的數字（右側「投資損益」KPI 與下方「N 項資產」膠囊皆已有），
+//      也是全頁彙總四大類資產（房地產＋股票＋保險＋車輛）後金額最大的一個欄位，
+//      對齊同型 hero 卡規格（Finance/RealEstateView.swift 房產總估值／Finance/VehicleView.swift 車輛總估值等），
+//      避免資產達億級量級時在小螢幕上被系統裁切。
+
+// [v25.527] 整頁換成理財總覽看板（FinanceBoards.swift）：
+//   使用者：「接著我們來做理財介面，幫我仔細規劃完整」→ 看過規劃與樣稿：「就照你建議的吧，一次做完」。
+//   - 大數字從「總資產」改成「淨資產」（資產 − 貸款還要繳），頭部是資產小鎮：一類資產一棟樓、
+//     樓高是金額，房貸、車貸畫成樓上斜線的那一截。
+//   - 原本的總資產卡、四張資產卡、資產配置、每月現金流拿掉，換成看板裡的
+//     「錢放在哪裡」（四張明信片，點了切到那一頁）、「每個月的現金流」（租金、股利、房貸、保費、養車）、
+//     「接下來 30 天」。
+//   - 儲蓄險改用今天的價值、外幣換成台幣；賣掉的車不再算（算法說明在 FinanceInsights.swift）。
+
 struct FinanceOverviewView: View {
     @EnvironmentObject var store: FinanceStore
     @EnvironmentObject var expenseStore: ExpenseStore
     @EnvironmentObject var subscription: SubscriptionManager
+    @AppStorage("finance_feature") private var financeFeatureRaw: String = FinanceFeature.overview.rawValue
     @State private var showAddVariable = false
     @State private var showAddFixed = false
     @State private var showAddStock = false
     @State private var showAddRealEstate = false
     @State private var showPremiumAlert = false
-    @State private var appearedCards: Set<String> = []
-    @State private var allocationBarAppeared = false
-    @State private var allocationRowsAppeared = false
-
-    private func rateForCode(_ code: String) -> Double {
-        if code == "NT$" { return 1 }
-        return expenseStore.currencyRates.first(where: { $0.code == code })?.rate ?? 1
-    }
-
-    private var insuranceValueNTD: Double {
-        store.insurances.reduce(0) { $0 + $1.currentValue * rateForCode($1.currencyCode) }
-    }
-
-    private var insurancePaidNTD: Double {
-        store.insurances.reduce(0) { $0 + $1.totalPaid * rateForCode($1.currencyCode) }
-    }
-
-    private var insuranceProfitLoss: Double {
-        insuranceValueNTD - insurancePaidNTD
-    }
+    /// 看板的數字（會掃全部的支出找貸款，放在 .task 裡算，不在 body 裡算）
+    @State private var board = FinanceOverviewData()
 
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(spacing: 20) {
-                    totalAssetsCard
-                        .padding(.horizontal)
-                        .opacity(appearedCards.contains("total") ? 1 : 0)
-                        .offset(y: appearedCards.contains("total") ? 0 : 20)
-                        .onAppear {
-                            withAnimation(.spring(response: 0.55, dampingFraction: 0.78)) {
-                                _ = appearedCards.insert("total")
-                            }
-                        }
-
-                    assetCards
-                    allocationSection
-                    cashFlowSection
+                FinanceOverviewBoard(data: board) { feature in
+                    financeFeatureRaw = feature.rawValue
                 }
-                .padding(.vertical)
+                .padding(.horizontal, 16)
+                .padding(.top, 10)
+                .padding(.bottom, 24)
             }
             .background(Color(.systemGroupedBackground))
             .navigationTitle("理財總覽")
@@ -56,6 +87,9 @@ struct FinanceOverviewView: View {
                 ToolbarItem(placement: .topBarTrailing) {
                     quickAddMenu
                 }
+            }
+            .task(id: "\(store.modifyID)-\(expenseStore.modifyID)") {
+                board = FinanceOverviewData.build(finance: store, expense: expenseStore)
             }
             .sheet(isPresented: $showAddVariable) { AddExpenseView(expenseType: .variable) }
             .sheet(isPresented: $showAddFixed) { AddExpenseView(expenseType: .fixed) }
@@ -80,470 +114,5 @@ struct FinanceOverviewView: View {
         } label: {
             Image(systemName: "plus.circle.fill").font(.title3).foregroundStyle(.green)
         }
-    }
-
-    private var totalAssetsNTD: Double {
-        insuranceValueNTD + store.totalStockValue + store.totalVehicleValue + store.totalRealEstateValue
-    }
-
-    private var totalAssetCount: Int {
-        store.insurances.count + store.stocks.count + store.vehicles.count +
-        store.realEstates.filter { !$0.isSold }.count
-    }
-
-    // MARK: - 總資產卡片
-
-    private var totalAssetsCard: some View {
-        HStack(alignment: .bottom) {
-            VStack(alignment: .leading, spacing: 5) {
-                Text("總資產")
-                    .font(.caption)
-                    .foregroundStyle(.white.opacity(0.80))
-                Text(fmt(totalAssetsNTD))
-                    .font(.system(size: 34, weight: .bold, design: .rounded))
-                    .foregroundStyle(.white)
-                    .contentTransition(.numericText())
-                Text("\(totalAssetCount) 項資產")
-                    .font(.caption2.weight(.medium))
-                    .foregroundStyle(.white.opacity(0.65))
-                    .padding(.top, 1)
-            }
-            Spacer()
-            VStack(alignment: .trailing, spacing: 6) {
-                Image(systemName: "chart.pie.fill")
-                    .font(.system(size: 32, weight: .light))
-                    .foregroundStyle(.white.opacity(0.30))
-            }
-        }
-        .padding(20)
-        .background(
-            ZStack {
-                LinearGradient(
-                    colors: [
-                        Color(red: 0.14, green: 0.64, blue: 0.60),
-                        Color(red: 0.07, green: 0.46, blue: 0.42)
-                    ],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-                Circle()
-                    .fill(.white.opacity(0.13))
-                    .frame(width: 140, height: 140)
-                    .offset(x: 90, y: -55)
-                    .blur(radius: 14)
-                Circle()
-                    .fill(.white.opacity(0.08))
-                    .frame(width: 90, height: 90)
-                    .offset(x: -70, y: 55)
-                    .blur(radius: 10)
-            }
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 20))
-        .shadow(color: Color(red: 0.07, green: 0.46, blue: 0.42).opacity(0.42), radius: 18, x: 0, y: 9)
-    }
-
-    // MARK: - 資產類別卡片
-
-    private var stockProfitLoss: Double { store.totalStockProfitLoss }
-
-    private var assetCards: some View {
-        VStack(spacing: 10) {
-            HStack(spacing: 12) {
-                assetCard(title: "儲蓄險", amount: insuranceValueNTD,
-                          profitLoss: insuranceProfitLoss,
-                          icon: "shield.fill", color: .blue,
-                          count: store.insurances.count, key: "insurance")
-                assetCard(title: "股票", amount: store.totalStockValue,
-                          profitLoss: stockProfitLoss,
-                          icon: "chart.line.uptrend.xyaxis", color: .orange,
-                          count: store.stocks.count, key: "stock")
-            }
-            HStack(spacing: 12) {
-                assetCard(title: "汽車", amount: store.totalVehicleValue,
-                          profitLoss: nil,
-                          icon: "car.fill", color: .teal,
-                          count: store.vehicles.count, key: "vehicle")
-                assetCard(title: "房地產", amount: store.totalRealEstateValue,
-                          profitLoss: nil,
-                          icon: "building.2.fill", color: .purple,
-                          count: store.realEstates.filter { !$0.isSold }.count, key: "realEstate")
-            }
-        }
-        .padding(.horizontal)
-    }
-
-    private let assetCardDelays: [String: Double] = [
-        "insurance": 0.06, "stock": 0.12, "vehicle": 0.18, "realEstate": 0.24
-    ]
-
-    private func assetCard(title: String, amount: Double, profitLoss: Double?,
-                           icon: String, color: Color, count: Int, key: String) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            RoundedRectangle(cornerRadius: 2)
-                .fill(
-                    LinearGradient(
-                        colors: [color, color.opacity(0.55)],
-                        startPoint: .leading, endPoint: .trailing
-                    )
-                )
-                .frame(height: 4)
-                .padding(.bottom, 10)
-
-            HStack(spacing: 7) {
-                ZStack {
-                    Circle()
-                        .fill(color.opacity(0.15))
-                        .frame(width: 30, height: 30)
-                    Image(systemName: icon)
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(color)
-                }
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(title)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                    Text("\(count) 筆")
-                        .font(.system(size: 10))
-                        .foregroundStyle(.tertiary)
-                }
-                Spacer(minLength: 0)
-            }
-
-            Spacer(minLength: 8)
-
-            Text(fmtShort(amount))
-                .font(.system(size: 15, weight: .bold, design: .rounded))
-                .foregroundStyle(.primary)
-                .minimumScaleFactor(0.7)
-                .lineLimit(1)
-                .contentTransition(.numericText())
-
-            if let pl = profitLoss {
-                HStack(spacing: 3) {
-                    Image(systemName: pl >= 0 ? "arrow.up.right" : "arrow.down.right")
-                        .font(.system(size: 9, weight: .bold))
-                    Text((pl >= 0 ? "+" : "") + fmtShort(pl))
-                        .font(.system(size: 11, weight: .bold))
-                }
-                .foregroundStyle(pl >= 0 ? .green : .red)
-                .padding(.top, 2)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 12)
-        .padding(.top, 12)
-        .padding(.bottom, 14)
-        .background(
-            ZStack {
-                Color(.systemBackground)
-                color.opacity(0.04)
-            }
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 16))
-        .overlay(
-            RoundedRectangle(cornerRadius: 16)
-                .stroke(color.opacity(0.12), lineWidth: 0.75)
-        )
-        .shadow(color: color.opacity(0.13), radius: 10, x: 0, y: 4)
-        .shadow(color: .black.opacity(0.04), radius: 4, x: 0, y: 1)
-        .opacity(appearedCards.contains(key) ? 1 : 0)
-        .offset(y: appearedCards.contains(key) ? 0 : 18)
-        .onAppear {
-            let delay = assetCardDelays[key] ?? 0
-            withAnimation(.spring(response: 0.50, dampingFraction: 0.78).delay(delay)) {
-                _ = appearedCards.insert(key)
-            }
-        }
-    }
-
-    // MARK: - 資產配置
-
-    private var ntdAllocations: [AssetAllocation] {
-        let total = totalAssetsNTD
-        guard total > 0 else { return [] }
-        var result: [AssetAllocation] = []
-        if insuranceValueNTD > 0 {
-            result.append(AssetAllocation(type: .savingsInsurance, value: insuranceValueNTD,
-                                          percentage: insuranceValueNTD / total * 100))
-        }
-        if store.totalStockValue > 0 {
-            result.append(AssetAllocation(type: .stock, value: store.totalStockValue,
-                                          percentage: store.totalStockValue / total * 100))
-        }
-        if store.totalVehicleValue > 0 {
-            result.append(AssetAllocation(type: .vehicle, value: store.totalVehicleValue,
-                                          percentage: store.totalVehicleValue / total * 100))
-        }
-        if store.totalRealEstateValue > 0 {
-            result.append(AssetAllocation(type: .realEstate, value: store.totalRealEstateValue,
-                                          percentage: store.totalRealEstateValue / total * 100))
-        }
-        return result.sorted { $0.value > $1.value }
-    }
-
-    private var allocationSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 10) {
-                Capsule()
-                    .fill(
-                        LinearGradient(
-                            colors: [.purple, .purple.opacity(0.55)],
-                            startPoint: .top, endPoint: .bottom
-                        )
-                    )
-                    .frame(width: 4, height: 18)
-                Text("資產配置")
-                    .font(.subheadline.weight(.bold))
-                Spacer()
-            }
-            .padding(.horizontal)
-
-            let allocations = ntdAllocations
-            if allocations.isEmpty {
-                emptyPlaceholder(
-                    icon: "chart.pie",
-                    title: "尚無資產資料",
-                    subtitle: "新增資產後顯示配置比例"
-                )
-                .padding(.horizontal)
-            } else {
-                // 橫向比例彩條（從左展開進場動畫）
-                GeometryReader { geo in
-                    HStack(spacing: 2) {
-                        ForEach(allocations) { a in
-                            RoundedRectangle(cornerRadius: 3)
-                                .fill(colorFor(a.type))
-                                .frame(
-                                    width: max(4, CGFloat(a.percentage / 100) *
-                                               (geo.size.width - CGFloat(max(0, allocations.count - 1)) * 2))
-                                )
-                        }
-                    }
-                }
-                .frame(height: 14)
-                .clipShape(RoundedRectangle(cornerRadius: 7))
-                .scaleEffect(x: allocationBarAppeared ? 1.0 : 0.04, y: 1, anchor: .leading)
-                .animation(.spring(response: 0.78, dampingFraction: 0.82), value: allocationBarAppeared)
-                .padding(.horizontal)
-
-                // 各類別明細列（含圖示 + 漸層進度條 + 錯落進場）
-                VStack(spacing: 0) {
-                    ForEach(Array(allocations.enumerated()), id: \.element.id) { idx, a in
-                        let color = colorFor(a.type)
-                        let ratio = a.percentage / 100.0
-
-                        VStack(spacing: 7) {
-                            HStack(spacing: 12) {
-                                ZStack {
-                                    RoundedRectangle(cornerRadius: 7)
-                                        .fill(
-                                            LinearGradient(
-                                                colors: [color.opacity(0.22), color.opacity(0.09)],
-                                                startPoint: .topLeading,
-                                                endPoint: .bottomTrailing
-                                            )
-                                        )
-                                        .frame(width: 30, height: 30)
-                                    Image(systemName: iconFor(a.type))
-                                        .font(.system(size: 13, weight: .semibold))
-                                        .foregroundStyle(color)
-                                }
-                                Text(a.type.rawValue)
-                                    .font(.subheadline)
-                                Spacer()
-                                Text(fmtShort(a.value))
-                                    .font(.subheadline.bold())
-                                    .contentTransition(.numericText())
-                                Text(String(format: "%.1f%%", a.percentage))
-                                    .font(.caption.weight(.semibold))
-                                    .foregroundStyle(color)
-                                    .padding(.horizontal, 7)
-                                    .padding(.vertical, 3)
-                                    .background(color.opacity(0.12))
-                                    .clipShape(Capsule())
-                            }
-
-                            // 漸層進度條（帶延遲動畫）
-                            GeometryReader { barGeo in
-                                ZStack(alignment: .leading) {
-                                    Capsule()
-                                        .fill(Color(.systemFill))
-                                        .frame(height: 4)
-                                    Capsule()
-                                        .fill(
-                                            LinearGradient(
-                                                colors: [color, color.opacity(0.55)],
-                                                startPoint: .leading, endPoint: .trailing
-                                            )
-                                        )
-                                        .frame(
-                                            width: barGeo.size.width * (allocationBarAppeared ? ratio : 0),
-                                            height: 4
-                                        )
-                                        .animation(
-                                            .spring(response: 0.70, dampingFraction: 0.78)
-                                                .delay(0.10 + 0.08 * Double(idx)),
-                                            value: allocationBarAppeared
-                                        )
-                                }
-                            }
-                            .frame(height: 4)
-                        }
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 13)
-                        .opacity(allocationRowsAppeared ? 1 : 0)
-                        .offset(y: allocationRowsAppeared ? 0 : 14)
-                        .animation(
-                            .spring(response: 0.50, dampingFraction: 0.80)
-                                .delay(0.06 * Double(idx)),
-                            value: allocationRowsAppeared
-                        )
-
-                        if idx < allocations.count - 1 {
-                            Divider().padding(.leading, 58)
-                        }
-                    }
-                }
-                .background(Color(.systemBackground))
-                .clipShape(RoundedRectangle(cornerRadius: 14))
-                .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 3)
-                .padding(.horizontal)
-            }
-        }
-        .onAppear {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
-                allocationBarAppeared = true
-            }
-            withAnimation(.spring(response: 0.50, dampingFraction: 0.80).delay(0.18)) {
-                allocationRowsAppeared = true
-            }
-        }
-    }
-
-    // MARK: - 每月現金流
-
-    private var cashFlowSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 10) {
-                Capsule()
-                    .fill(
-                        LinearGradient(
-                            colors: [.green, .green.opacity(0.55)],
-                            startPoint: .top, endPoint: .bottom
-                        )
-                    )
-                    .frame(width: 4, height: 18)
-                Text("每月現金流")
-                    .font(.subheadline.weight(.bold))
-                Spacer()
-            }
-            .padding(.horizontal)
-
-            let flow = store.monthlyCashFlow
-            HStack(spacing: 0) {
-                cashFlowItem(label: "租金收入",
-                             value: store.monthlyRentalIncome,
-                             icon: "house.fill",
-                             color: .green)
-                Divider().frame(height: 44)
-                cashFlowItem(label: "房貸支出",
-                             value: store.monthlyMortgagePayment,
-                             icon: "building.columns.fill",
-                             color: .red)
-                Divider().frame(height: 44)
-                cashFlowItem(label: "淨現金流",
-                             value: flow,
-                             icon: flow >= 0 ? "arrow.up.circle.fill" : "arrow.down.circle.fill",
-                             color: flow >= 0 ? .green : .red)
-            }
-            .padding(.vertical, 16)
-            .background(Color(.systemBackground))
-            .clipShape(RoundedRectangle(cornerRadius: 14))
-            .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 3)
-            .padding(.horizontal)
-        }
-    }
-
-    private func cashFlowItem(label: String, value: Double,
-                              icon: String, color: Color) -> some View {
-        VStack(spacing: 6) {
-            ZStack {
-                Circle()
-                    .fill(color.opacity(0.12))
-                    .frame(width: 34, height: 34)
-                Image(systemName: icon)
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(color)
-            }
-            Text(label)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            Text(fmtShort(value))
-                .font(.system(size: 13, weight: .bold, design: .rounded))
-                .foregroundStyle(color)
-                .lineLimit(1)
-                .minimumScaleFactor(0.7)
-        }
-        .frame(maxWidth: .infinity)
-    }
-
-    // MARK: - 空狀態
-
-    private func emptyPlaceholder(icon: String, title: String, subtitle: String) -> some View {
-        VStack(spacing: 12) {
-            ZStack {
-                Circle()
-                    .fill(Color(.systemFill))
-                    .frame(width: 64, height: 64)
-                Image(systemName: icon)
-                    .font(.system(size: 26, weight: .light))
-                    .foregroundStyle(.secondary)
-            }
-            Text(title)
-                .font(.subheadline.weight(.medium))
-                .foregroundStyle(.secondary)
-            Text(subtitle)
-                .font(.caption)
-                .foregroundStyle(.tertiary)
-                .multilineTextAlignment(.center)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 28)
-        .background(Color(.systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 14))
-        .shadow(color: .black.opacity(0.04), radius: 6, x: 0, y: 2)
-    }
-
-    // MARK: - Helpers
-
-    private func colorFor(_ type: AssetType) -> Color {
-        switch type {
-        case .savingsInsurance: return .blue
-        case .stock: return .orange
-        case .vehicle: return .teal
-        case .realEstate: return .purple
-        }
-    }
-
-    private func iconFor(_ type: AssetType) -> String {
-        switch type {
-        case .savingsInsurance: return "shield.fill"
-        case .stock: return "chart.line.uptrend.xyaxis"
-        case .vehicle: return "car.fill"
-        case .realEstate: return "building.2.fill"
-        }
-    }
-
-    private func fmt(_ v: Double) -> String {
-        let f = NumberFormatter()
-        f.numberStyle = .currency; f.currencySymbol = "NT$"; f.maximumFractionDigits = 0
-        return f.string(from: NSNumber(value: v)) ?? "NT$0"
-    }
-
-    private func fmtShort(_ v: Double) -> String {
-        if v >= 100_000_000 { return String(format: "%.1f億", v / 100_000_000) }
-        if v >= 10_000 { return String(format: "%.0f萬", v / 10_000) }
-        return fmt(v)
     }
 }
