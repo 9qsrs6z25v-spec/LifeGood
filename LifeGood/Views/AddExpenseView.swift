@@ -1658,7 +1658,14 @@ struct AddExpenseView: View {
                 seen.insert(c.name)
                 unique.append(c)
             }
-            if !unique.isEmpty { groups.append(RecipientGroup(title: title, people: unique)) }
+            guard !unique.isEmpty else { return }
+            // 同名的組（家人履歷的「家人」和人際關係的「家人」）併成一組：
+            // 兩組同一個 id，List 在搜尋時增減分組會出錯
+            if let i = groups.firstIndex(where: { $0.title == title }) {
+                groups[i] = RecipientGroup(title: title, people: groups[i].people + unique)
+            } else {
+                groups.append(RecipientGroup(title: title, people: unique))
+            }
         }
         add("家人", lifeStore.familyMembers.map { RecipientCandidate(name: $0.chineseName, detail: "") })
         let relGroups = Dictionary(grouping: lifeStore.relationships) { $0.group.rawValue }
@@ -1671,11 +1678,14 @@ struct AddExpenseView: View {
         return groups
     }
 
-    /// 部門顯示名：名稱優先，沒有才用代碼
-    private func recipientDepartmentName(_ id: UUID?) -> String? {
-        guard let id, let d = lifeStore.departments.first(where: { $0.id == id }) else { return nil }
-        let n = d.name.isEmpty ? d.code : d.name
-        return n.isEmpty ? nil : n
+    /// 部門顯示名（名稱優先，沒有才用代碼），先整理成表，免得每個人都把部門清單掃一遍
+    private var recipientDepartmentNames: [UUID: String] {
+        var out: [UUID: String] = [:]
+        for d in lifeStore.departments {
+            let n = d.name.isEmpty ? d.code : d.name
+            if !n.isEmpty { out[d.id] = n }
+        }
+        return out
     }
 
     private static func recipientSorted(_ list: [RecipientCandidate]) -> [RecipientCandidate] {
@@ -1690,10 +1700,12 @@ struct AddExpenseView: View {
 
     /// 部屬，依課別分組（跟「選擇部屬」同一套課別名）
     private var subordinateRecipientGroups: [RecipientGroup] {
+        let deptNames = recipientDepartmentNames
         var buckets: [String: [RecipientCandidate]] = [:]
         for sub in lifeStore.subordinates {
             let raw = sub.department.trimmingCharacters(in: .whitespaces)
-            let dept = recipientDepartmentName(sub.departmentId) ?? (raw.isEmpty ? "未分課別" : raw)
+            let linked = sub.departmentId.flatMap { deptNames[$0] }
+            let dept = linked ?? (raw.isEmpty ? "未分課別" : raw)
             buckets[dept, default: []].append(
                 RecipientCandidate(name: sub.name, detail: Self.joinedDetail([sub.jobTitle, sub.plantArea])))
         }
@@ -1707,12 +1719,14 @@ struct AddExpenseView: View {
 
     /// 組織圖裡的同事，依部門分組；已離職的放最後一組
     private var orgPersonRecipientGroups: [RecipientGroup] {
+        let deptNames = recipientDepartmentNames
         var buckets: [String: [RecipientCandidate]] = [:]
         var left: [RecipientCandidate] = []
         for p in lifeStore.orgPeople {
             let c = RecipientCandidate(name: p.name, detail: Self.joinedDetail([p.jobTitle]))
             if p.isInactive { left.append(c); continue }
-            buckets[recipientDepartmentName(p.departmentId) ?? "未分部門", default: []].append(c)
+            let dept = p.departmentId.flatMap { deptNames[$0] } ?? "未分部門"
+            buckets[dept, default: []].append(c)
         }
         var out = buckets.keys
             .sorted { a, b in
