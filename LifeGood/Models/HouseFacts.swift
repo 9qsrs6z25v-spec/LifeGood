@@ -736,3 +736,13 @@ struct FloorLabel: Equatable {
         return levels.isEmpty ? floors.count : levels.count
     }
 }
+
+// MARK: - [v25.534] 卡片要讀的唯讀數字（只新增，不動上面的算法）
+
+extension HouseFacts {
+    /// 照合約全部繳完的總額（Σ 合約期數 × 每期金額，不看停扣與賣出）。反推利率用的就是這一串扣款，
+    /// 「要確認」區靠它分辨算不出利率的原因：借款本金比它還多，還是利率要超過每月 2%。
+    var contractTotal: Double {
+        segments.reduce(0.0) { $0 + Double($1.contractPeriods) * $1.perPeriod }
+    }
+}

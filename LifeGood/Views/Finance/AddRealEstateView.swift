@@ -64,19 +64,34 @@ import PhotosUI
 //      邏輯完全未變動。
 //      （下次美化本檔案時，可轉往其他仍留有待辦的畫面）
 // [v25.532] 上面 5、7、11 的試算區和英雄預覽卡已拿掉：用的是另一套房貸算法，跟卡片、看板對不起來。
+// [v25.534] 房屋卡片的「去填」「去改」、點借款本金那格會帶 focus 進來：打開後捲到那一欄、游標放進去。
+//           卡片上拿掉了「刪除」，刪整間改放在這頁最下面（編輯時才有）。
+
+/// 從卡片打開編輯頁時要捲到哪一欄
+enum HouseEditFocus: Hashable { case none, loanPrincipal, currentValue, soldPrice, floors, address }
 
 struct AddRealEstateView: View {
     @EnvironmentObject var financeStore: FinanceStore
     @EnvironmentObject var expenseStore: ExpenseStore
     @EnvironmentObject var lifeStore: LifeStore
+    @EnvironmentObject var subscription: SubscriptionManager
     @Environment(\.dismiss) private var dismiss
 
     let editing: RealEstate?
+    /// [v25.534] 打開後要捲到哪一欄（.none＝不捲）
+    var focus: HouseEditFocus = .none
     private let stableEstateId: UUID
     @State private var hasAutoSaved: Bool
+    /// [v25.534] 捲到 focus 那一欄只做一次（從子頁回來 onAppear 會再跑）
+    @State private var didApplyFocus = false
+    @FocusState private var focusedField: HouseEditFocus?
+    /// [v25.534] 最下面「刪除這間房子」的確認框、付費提示
+    @State private var showDeleteEstateConfirm = false
+    @State private var showPremiumAlert = false
 
-    init(editing: RealEstate? = nil) {
+    init(editing: RealEstate? = nil, focus: HouseEditFocus = .none) {
         self.editing = editing
+        self.focus = focus
         self.stableEstateId = editing?.id ?? UUID()
         _hasAutoSaved = State(initialValue: editing != nil)
     }
@@ -263,7 +278,10 @@ struct AddRealEstateView: View {
 
     var body: some View {
         NavigationStack {
-            withEditorPresentations(editorForm)
+            ScrollViewReader { proxy in
+                withDeletePresentations(withEditorPresentations(editorForm))
+                    .onAppear { applyFocus(proxy) }
+            }
         }
     }
 
@@ -354,6 +372,10 @@ struct AddRealEstateView: View {
                     .listRowInsets(EdgeInsets())
                     .listRowBackground(Color.clear)
                 }
+            }
+
+            if editing != nil {
+                deleteEstateSection
             }
         }
         .tint(.purple)
@@ -465,6 +487,102 @@ struct AddRealEstateView: View {
         )
     }
 
+    // MARK: - [v25.534] 從卡片打開：捲到那一欄
+
+    /// 先切到那一欄所在的分頁、把那一區打開，等表單畫好再捲過去；金額欄位順便把游標放進去
+    private func applyFocus(_ proxy: ScrollViewProxy) {
+        guard focus != HouseEditFocus.none, !didApplyFocus else { return }
+        didApplyFocus = true
+        let target = focus
+        // 表單自己的 onAppear（loadEditing）會依存過的開關設定各區，這裡排在它後面才改
+        DispatchQueue.main.async {
+            revealSection(for: target)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                withAnimation(.easeInOut(duration: 0.3)) {
+                    proxy.scrollTo(target, anchor: .center)
+                }
+                if Self.focusesTextField(target) { focusedField = target }
+            }
+        }
+    }
+
+    /// 那一欄所在的分頁、區塊（只改畫面狀態，不動「功能選別」存起來的開關）
+    private func revealSection(for target: HouseEditFocus) {
+        switch target {
+        case .loanPrincipal:
+            editTab = .finance
+            showMortgage = true
+        case .currentValue:
+            editTab = .finance
+        case .floors:
+            // 卡片「樓層與物品」的新增樓層、新增家電家具都走這裡：兩區一起打開
+            editTab = .house
+            showFloor = true
+            showAsset = true
+        case .soldPrice, .address, .none:
+            break
+        }
+    }
+
+    /// 樓層、地址只捲到那一區；金額欄位直接把游標放進去
+    private static func focusesTextField(_ target: HouseEditFocus) -> Bool {
+        switch target {
+        case .loanPrincipal, .currentValue, .soldPrice: return true
+        case .floors, .address, .none: return false
+        }
+    }
+
+    // MARK: - [v25.534] 刪除這間房子
+
+    /// 卡片上不再放「刪除」：刪整間只在列表左滑和這裡。要付費、先確認，確認文字寫出會一起刪掉多少東西
+    private var deleteEstateSection: some View {
+        Section {
+            Button(role: .destructive) {
+                if subscription.isPremium { showDeleteEstateConfirm = true }
+                else { showPremiumAlert = true }
+            } label: {
+                Label("刪除這間房子", systemImage: "trash")
+                    .foregroundStyle(.red)
+            }
+        } footer: {
+            Text("連到這間房子的記帳支出、銀行扣款紀錄、照片和文件會一起刪掉。")
+        }
+    }
+
+    private func withDeletePresentations<Content: View>(_ content: Content) -> some View {
+        content
+            .alert("刪除這間房子？", isPresented: $showDeleteEstateConfirm) {
+                Button("刪除", role: .destructive) { deleteWholeEstate() }
+                Button("取消", role: .cancel) {}
+            } message: {
+                Text(deleteEstateMessage)
+            }
+            .premiumLockAlert(isPresented: $showPremiumAlert)
+    }
+
+    private var deleteEstateMessage: String {
+        guard let re = currentEstate else { return "這間房子會從理財裡刪除，不能復原。" }
+        let summary = RealEstateDeletion.summary(of: re, expenseStore: expenseStore)
+        return RealEstateDeletion.confirmMessage(summary)
+    }
+
+    /// 先關掉這頁、下一個 runloop 才刪（卡片還開在下面，同一個交易裡改 store 容易閃退）。
+    /// 卡片看到房子不見了會自己關掉。
+    private func deleteWholeEstate() {
+        // 這次新選、還沒存的保養照片沒人會用了（同「取消」）
+        for task in elevatorPhotoLoadTasks.values { task.cancel() }
+        for name in elevatorPhotosAdded { ElevatorMaintenance.deletePhoto(name) }
+        let finance = financeStore
+        let expenses = expenseStore
+        let life = lifeStore
+        let estateId = stableEstateId
+        dismiss()
+        DispatchQueue.main.async {
+            guard let re = finance.realEstates.first(where: { $0.id == estateId }) else { return }
+            RealEstateDeletion.deleteEstate(re, financeStore: finance, expenseStore: expenses, lifeStore: life)
+        }
+    }
+
     // MARK: - 功能選別選單
 
     private var featureToggleList: some View {
@@ -530,6 +648,8 @@ struct AddRealEstateView: View {
 
             TextField("地址（可多行）", text: $address, axis: .vertical)
                 .lineLimit(2...5)
+                .focused($focusedField, equals: .address)
+                .id(HouseEditFocus.address)
 
             DatePicker("購入日期", selection: $purchaseDate, displayedComponents: .date)
                 .onChange(of: purchaseDate) { _, v in
@@ -551,8 +671,10 @@ struct AddRealEstateView: View {
         HStack {
             TextField("成交價（沒填用目前估值）", text: $soldPriceText)
                 .keyboardType(.decimalPad)
+                .focused($focusedField, equals: .soldPrice)
             Text("萬元").foregroundStyle(.secondary)
         }
+        .id(HouseEditFocus.soldPrice)
     }
 
     // MARK: - 價值
@@ -581,6 +703,7 @@ struct AddRealEstateView: View {
             HStack {
                 HStack {
                     TextField("目前估值", text: $currentValueText).keyboardType(.decimalPad)
+                        .focused($focusedField, equals: .currentValue)
                     Text("萬元").foregroundStyle(.secondary)
                 }
                 if pingCount > 0, let pp = perPingText(currentValueText) as String?, !pp.isEmpty {
@@ -589,6 +712,7 @@ struct AddRealEstateView: View {
                         .frame(minWidth: 80, alignment: .trailing)
                 }
             }
+            .id(HouseEditFocus.currentValue)
         } header: {
             reSectionHeader("價值", icon: "tag.fill", color: .indigo)
         } footer: {
@@ -706,8 +830,10 @@ struct AddRealEstateView: View {
             TextField(placeholder, text: $loanPrincipalText)
                 .keyboardType(.decimalPad)
                 .multilineTextAlignment(.trailing)
+                .focused($focusedField, equals: .loanPrincipal)
             Text("萬元").foregroundStyle(.secondary)
         }
+        .id(HouseEditFocus.loanPrincipal)
     }
 
     /// 沒填時 HouseFacts 會用哪個數，只寫在提示字裡（同一套順序：記帳的總貸款金額 → 購入價 − 自備款）。
@@ -1111,6 +1237,7 @@ struct AddRealEstateView: View {
                 Spacer()
                 Text("\(floorItems.count) 層").foregroundStyle(.secondary)
             }
+            .id(HouseEditFocus.floors)
 
             ForEach($floorItems) { $item in
                 VStack(spacing: 8) {
@@ -1359,6 +1486,13 @@ struct AddRealEstateView: View {
 
     // MARK: - 房屋附屬資產（人生）
 
+    /// [v25.534] 附屬資產（家電家具）的類別不放房屋價金、買房費用、水電瓦斯：
+    /// 選了的話帳本會把冷氣算成自備款或水電。舊資料已經是這幾類的照樣留在選單裡，不會被偷改掉。
+    private func assetCategoryChoices(current: RealEstateExpenseCategory) -> [RealEstateExpenseCategory] {
+        let excluded: Set<RealEstateExpenseCategory> = [.housePayment, .purchaseCost, .utility]
+        return RealEstateExpenseCategory.allCases.filter { !excluded.contains($0) || $0 == current }
+    }
+
     private var propertyAssetSection: some View {
         Section {
             ForEach($assetItems) { $item in
@@ -1381,7 +1515,7 @@ struct AddRealEstateView: View {
                     }
 
                     Picker("類別", selection: $item.category) {
-                        ForEach(RealEstateExpenseCategory.allCases) { cat in
+                        ForEach(assetCategoryChoices(current: item.category)) { cat in
                             Label(cat.rawValue, systemImage: cat.icon).tag(cat)
                         }
                     }

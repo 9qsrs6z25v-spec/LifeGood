@@ -101,6 +101,8 @@ enum MoneyBoardScene: Equatable {
     case aurora(FinAuroraScene)
     // [v25.528] 股票卡片：這一檔近一年的股價山稜
     case ridge(FinRidgeScene)
+    // [v25.534] 房屋卡片：這一間的剖面（資料與畫法在 FinHouseScene.swift）
+    case house(FinHouseScene)
 }
 
 // MARK: - 頭部的字
@@ -323,6 +325,7 @@ extension MoneyBoardSky {
         case .street(let s): paintStreet(&ctx, rect: bandRect, scene: s, dark: a.dark, seed: a.seed)
         case .aurora(let s): paintAurora(&ctx, rect: bandRect, scene: s, seed: a.seed)
         case .ridge(let s): paintRidge(&ctx, rect: bandRect, scene: s, dark: a.dark, seed: a.seed)
+        case .house(let s): paintHouse(&ctx, rect: bandRect, scene: s, dark: a.dark, seed: a.seed)
         }
 
         if let greeting {

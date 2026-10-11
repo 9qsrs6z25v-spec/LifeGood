@@ -80,7 +80,6 @@ struct RealEstateView: View {
     /// [v25.530] 左滑刪整間先問一次：以前按下去就連記帳支出一起刪掉，沒有確認
     @State private var pendingDelete: RealEstate?
     @State private var showAdd = false
-    @State private var editingItem: RealEstate?
     @State private var viewingItem: RealEstate?
     @State private var sortOption: RealEstateSortOption = .purchaseDate
     @State private var sortAscending = false
@@ -100,6 +99,11 @@ struct RealEstateView: View {
 
     private var soldEstates: [RealEstate] {
         sorted(store.realEstates.filter { $0.isSold })
+    }
+
+    /// [v25.534] 點開的那間所在的那一組（持有中／已售出），照畫面上的排序
+    private func siblingOrder(of item: RealEstate) -> [UUID] {
+        (item.isSold ? soldEstates : activeEstates).map(\.id)
     }
 
     private func sorted(_ list: [RealEstate]) -> [RealEstate] {
@@ -217,8 +221,11 @@ struct RealEstateView: View {
                 }
             }
             .sheet(isPresented: $showAdd) { AddRealEstateView() }
-            .sheet(item: $viewingItem) { item in RealEstateDetailView(estate: item) }
-            .sheet(item: $editingItem) { item in AddRealEstateView(editing: item) }
+            // [v25.534] 卡片上的換房列照這份清單的排序（同一組：持有中／已售出）；
+            // 排序選項沒有存起來，卡片自己拿不到，所以把排好的 id 傳進去
+            .sheet(item: $viewingItem) { item in
+                RealEstateDetailView(estate: item, order: siblingOrder(of: item))
+            }
             .premiumLockAlert(isPresented: $showPremiumAlert)
             .alert("刪除這間房子？",
                    isPresented: Binding(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } }),

@@ -121,6 +121,15 @@ struct LifeRealEstateView: View {
         financeStore.realEstates.filter { $0.city.isEmpty }
     }
 
+    /// [v25.534] 卡片換房列的順序：跟點開的那間同一組（同縣市；沒填縣市的是「未設定縣市」那組），
+    /// 再只留同樣持有中／已售出的（store 順序，跟這頁的清單一樣）
+    private func siblingOrder(of item: RealEstate) -> [UUID] {
+        let group: [RealEstate] = item.city.isEmpty
+            ? unclassifiedItems
+            : financeStore.realEstates.filter { $0.city == item.city }
+        return group.filter { $0.isSold == item.isSold }.map(\.id)
+    }
+
     var body: some View {
         // 單次計算，避免 summaryHeader / miniCityBar / mapView 各自重複 Dictionary(grouping:)
         let cities = propertiesByCity
@@ -148,7 +157,10 @@ struct LifeRealEstateView: View {
             }
             .navigationBarTitleDisplayMode(.large)
             .sheet(isPresented: $showAdd) { AddRealEstateView() }
-            .sheet(item: $viewingItem) { item in RealEstateDetailView(estate: item) }
+            // [v25.534] 從人生模式打開直接捲到「房屋資料」；換房列只放同一個縣市分組裡、同樣持有中／已售出的
+            .sheet(item: $viewingItem) { item in
+                RealEstateDetailView(estate: item, order: siblingOrder(of: item), startAt: .info)
+            }
             .premiumLockAlert(isPresented: $showPremiumAlert)
         }
     }

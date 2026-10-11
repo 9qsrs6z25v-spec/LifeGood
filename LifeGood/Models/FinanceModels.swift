@@ -826,6 +826,9 @@ struct RealEstatePaidItem: Identifiable, Codable {
 
 enum RealEstateExpenseCategory: String, Codable, CaseIterable, Identifiable {
     case housePayment = "房屋價金"
+    // [v25.534] 仲介費、代書費、契稅、登記規費、印花稅：買房時付的、但不是房子本身的價錢。
+    // 帳本歸「一次性」，不算自備款，HouseFacts 推算借款本金也不扣它（購入價 − 房屋價金才是貸款）。
+    case purchaseCost = "買房費用"
     case renovation = "裝修"
     case repair = "維修"
     case furniture = "家具"
@@ -840,6 +843,7 @@ enum RealEstateExpenseCategory: String, Codable, CaseIterable, Identifiable {
     var icon: String {
         switch self {
         case .housePayment: return "banknote"
+        case .purchaseCost: return "signature"
         case .renovation: return "paintbrush"
         case .repair: return "wrench"
         case .furniture: return "sofa"

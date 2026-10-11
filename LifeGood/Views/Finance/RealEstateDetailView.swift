@@ -1,154 +1,14 @@
 import SwiftUI
-import PhotosUI
 import UniformTypeIdentifiers
-import QuickLook
-import ImageIO
 
-// MARK: - 美化紀錄（RealEstateDetailView）
-// [2026-06 v1] 本次美化方向：
-//   1. flashCard：加入 cardAppeared spring 進場動畫（透明度 + Y 位移），
-//      對齊 SavingsInsuranceView / StockDetailView 閃卡進場規格。
-//   2. tabPicker：從系統 .segmented 升級為自訂彩色 Capsule Pill 列（@Namespace + matchedGeometryEffect），
-//      理財 → 紫色、房屋 → teal、資產 → 藍色，對齊 MainTabView bottomTabBar 動畫規格；
-//      每個 tab 搭配對應 SF Symbol，提升識別性。
-//   3. collapsibleSection header：加入彩色 Capsule 側條（summaryColor 對應色）+
-//      標題升至 .subheadline.semibold；summary 改為彩色膠囊（帶細邊框），
-//      對齊 OverviewView / FinanceOverviewView section 標題設計語言；
-//      chevron 改為與 summaryColor 同色（透明度 0.6），視覺層次更一致。
-//   4. sectionHeader：補 Capsule 側條（.secondary 色），對齊 collapsibleSection 規格。
-//   5. emptySectionRow：加入 tray 圖示，對齊 FixedExpenseView 空狀態佔位規格，
-//      避免空白感。
-//
-// [2026-06 v2] 本次美化方向：
-//   6. mortgageItems 列（理財分頁）→ 36pt 藍色漸層圖示圓（building.columns.fill）+
-//      標題標籤 RoundedRectangle(cornerRadius:4) → Capsule + 0.6pt 細邊框 +
-//      繳期標籤改為 tertiarySystemFill 底色 Capsule 膠囊；
-//      金額字型升級 .subheadline.bold() → .system(size:15,weight:.bold,design:.rounded)
-//      + contentTransition(.numericText())，對齊 IncomeView.incomeRow 數值規格。
-//   7. paidItems 列 → 36pt 紫色漸層圖示圓（banknote.fill）+ 標題 Capsule 升級；
-//      日期從純文字升級為 tertiarySystemFill Capsule 膠囊徽章，對齊 CareerView.careerRow 規格；
-//      金額字型同步升級。
-//   8. variableExpenses 列 → 36pt 橘色漸層圖示圓（依 ve.category.icon 取圖示）+ 分類 Capsule 升級；
-//      名稱從 Spacer 分開改為標籤列同排（.caption2 secondary），日期 Capsule 膠囊化；
-//      金額字型升級，對齊 ExpenseRow / VehicleDetailView 視覺規格。
-//   9. insuranceContent → 36pt indigo 漸層圖示圓（shield.fill）替代原 24pt 平面圖示；
-//      保單號 .foregroundStyle 改為 .primary（有效）/ .tertiary（空），
-//      金額升級 .system(size:15,weight:.bold,design:.rounded)，
-//      對齊 SavingsInsuranceView.insuranceCard 保險圖示視覺規格。
-//  10. propertyAssetsContent 分類標籤 RoundedRectangle(cornerRadius:4) → Capsule + 細邊框，
-//      對齊全 App 統一 Capsule 標籤規格。
-//  11. calcRow 金額字型：.subheadline.bold() → .system(size:14,weight:.bold,design:.rounded)
-//      對齊 kpiCell / collapsibleSection summary 字型層級。
-//
-// [2026-06 v3] 本次美化方向：
-//  12. flashCard 背景升級：加入三個 bokeh 裝飾圓（opacity 0.06 / 0.04 / 0.035）+
-//      頂部→中央玻璃光澤覆層（LinearGradient [.white.opacity(0.18), .clear]），
-//      對齊 VehicleView / StockView / IncomeView summaryHeader 英雄卡規格；
-//      背景改為 ZStack 包裹，所有裝飾層均 allowsHitTesting(false)。
-//  13. flashCard 主金額文字（52pt currentValue）加入 minimumScaleFactor(0.5) +
-//      lineLimit(1) + contentTransition(.numericText())，防止長數字溢出並對齊
-//      全 App 數值動態縮放規格（OverviewView / FinanceOverviewView / RealEstateView）。
-//  14. houseInfoSection 空狀態升級：56pt teal 漸層圖示圓（doc.text.magnifyingglass）
-//      + Circle stroke 細邊框 + .weight(.medium) 標題，對齊 CareerView /
-//      VariableExpenseView 空狀態 ZStack 漸層圓規格。
-//  15. assetsSection 空狀態升級：56pt 藍色漸層圖示圓（shippingbox）+ Circle stroke 細邊框，
-//      .weight(.medium) 標題，視覺均值化。
-//
-// [2026-06 v4] 本次美化方向：
-//  16. elevatorContent 列 → 36pt 藍綠色漸層圖示圓（wrench.and.screwdriver.fill）替代
-//      原 .caption icon，日期升級為 tertiarySystemFill Capsule 膠囊，對齊其他列規格；
-//      照片圖示由 .foregroundStyle(.blue) 升級加入 Capsule 背景標籤。
-//  17. utilityRow → 36pt 對應色（水=藍/電=黃/瓦斯=橘）漸層圖示圓替代原 24pt icon；
-//      水號/電號欄位文字升級 font(.subheadline.weight(.medium))，對齊 infoRow 規格。
-//  18. paymentRow → 36pt 對應色漸層圖示圓替代原 caption icon；金額字型升級
-//      .system(size:15,weight:.bold,design:.rounded) + contentTransition(.numericText())，
-//      對齊 mortgageItems / paidItems 金額規格。
-//  19. latestPaymentRow → 金額字型升級 .system(size:14,weight:.bold,design:.rounded) +
-//      contentTransition(.numericText())，對齊 calcRow 規格。
-//
-// [2026-07 v5] 空狀態一致性修復：
-//  20. elevatorContent 空狀態：原本是唯一手刻裸 HStack + Text("尚無保養記錄")，
-//      同檔案 mortgageItems／paidItems／variableExpenses 三處空狀態都已改用共用
-//      emptySectionRow(_:)（tray 圖示 + .caption/.tertiary + 14/9pt padding），
-//      只有電梯保養這格漏改、垂直 padding 也不同（6pt vs 9pt），
-//      切分頁時視覺不連貫。改呼叫 emptySectionRow("尚無保養記錄") 對齊其餘三處。
-//      純視覺調整，未變動保養記錄新增/刪除或任何既有資料邏輯。
-//
-// [2026-07 v6] 空狀態一致性修復（v5 補漏）：
-//  21. floorItemsTree（樓層物件樹）與 renovationPhotosContent（房屋資料集錦）
-//      兩處空狀態仍是手刻裸 HStack + Text，垂直 padding 各自為 10pt / 6pt，
-//      是 v5 掃描後全檔案僅剩的兩處未接上共用 emptySectionRow(_:) 的空狀態，
-//      與 mortgageItems／paidItems／variableExpenses／elevatorContent 四處不一致。
-//      改呼叫既有 emptySectionRow(_:)，至此全檔案六處空狀態視覺統一。
-//      純視覺調整，未變動樓層物件或房屋資料集錦的任何既有資料邏輯。
-//
-// [2026-07 v7] ExpensePhotoStackViewer 補齊 v24.91 留下的待辦（與姊妹元件
-//   RenovationStackViewer 對齊規格，詳見 RenovationPhotoEditor.swift）：
-//  22. 空狀態從裸 Text("沒有照片") 升級為 52pt 圓形圖示（photo，白 0.10 底 +
-//      0.18 邊框）+ subheadline 說明文字；圖片載入完成加入
-//      .transition(.opacity) + .animation(.easeOut(duration:0.28), value: img != nil)
-//      淡入；頁碼從純文字改為半透明 Capsule 膠囊徽章；日期加 calendar 圖示前綴；
-//      標題字重 .semibold → .bold 對齊；底部資訊面板加入 infoPanelAppeared 進場動畫
-//      （opacity 0→1 + 上移 20pt，spring 0.55/0.78），onDisappear 歸零避免重播殘留。
-//      純視覺層調整，支出照片讀取、翻頁、刪除等既有商業邏輯完全未變動。
-//
-// [2026-07 v8] 補齊 StockDetailView v4／VehicleDetailView v4 留下的待辦：金額量級單位
-//   （萬／億）一致性：
-//  23. flashCard 估值大字、底部「購入」值原本各自呼叫私有 fmtWan(_:)（僅 `%g` 除以萬，
-//      無條件只顯示「萬」），估值一旦達 1 億以上會顯示成 5～6 位數的鉅額「萬」數字，與
-//      同檔案 mortgageItems／paidItems／calcRow 等皆已改用共用 Double.ntdWanString
-//      不一致。新增 splitWan(_:)／splitWanLabel(_:) 從 ntdWanString 拆出「數字／單位」
-//      二段供大字沿用既有字級與 contentTransition 動畫設計，移除已無呼叫端的私有
-//      fmtWan 死碼；作法對齊 VehicleDetailView.splitWan 既有規格。純顯示層調整，估值、
-//      購入價、增值率等既有試算邏輯完全未變動。
-//
-// [2026-07 v9] 電梯保養／水電繳費「新增／編輯」表單 Section header 補齊：
-//  24. ElevatorMaintenanceEditor（保養記錄）與 UtilityPaymentEditor（基本資訊／收據照片／
-//      備註）共 4 處，是本檔案唯二仍在用系統預設純文字 Section("...") 標頭的獨立編輯
-//      sheet，與同檔案 RealEstateDetailView.sectionHeader／collapsibleSection 早已升級的
-//      Capsule 側條規格脫節，也是全 App「表單 Section header 補齊」系列（ResumeView.
-//      AddMilestoneView／BusinessCardEditor／FamilyMembersResumeView／OrgPersonEditor 等）
-//      尚未覆蓋到的兩個編輯 sheet。新增檔案層級共用 realEstateEditorSectionHeader(_:icon:
-//      color:)，主題色沿用既有列規格（保養記錄＝teal，對齊 elevatorContent 列圖示色；
-//      基本資訊＝indigo／收據照片＝teal／備註＝secondary，對齊全 App 慣例配色），刪除
-//      Section／扣款目標 Section（原本就無標頭）維持不變。純視覺層調整，欄位資料綁定、
-//      save()／deleteRecord() 等既有商業邏輯完全未變動。
-//
-// [2026-08 v10] FloorItemEditor（樓層物件命名 sheet）Section header 補齊（v9 補漏）：
-//  25. v9 筆記聲稱 ElevatorMaintenanceEditor／UtilityPaymentEditor 是「本檔案唯二」仍用系統
-//      預設純文字 Section("...") 的編輯 sheet，實際上早於 v9 就存在的 FloorItemEditor（新增／
-//      重新命名樓層物件的極簡 sheet）也是裸 Section("物件名稱")，當時複查漏掉，是本檔案目前
-//      僅剩一處未接上 realEstateEditorSectionHeader 的獨立編輯 sheet。改呼叫既有
-//      realEstateEditorSectionHeader("物件名稱", icon: "shippingbox.fill", color: .brown)，
-//      主題色與圖示對齊 assetsSection 空狀態（v3 已用 shippingbox 代表「物件」語意）。純視覺層
-//      調整，name／isSaving／onSave 等既有新增、重新命名商業邏輯完全未變動。
-//      （下次美化本檔案時：可全檔案複查是否還有其他手刻金額格式殘留待統一）
-//
-// [2026-08 v11] flashCard 房地產名稱補齊防截斷：
-//  26. Text(estate.name)（.title.bold()，已置中對齊）原本沒有 lineLimit／minimumScaleFactor，
-//      是 Vehicle／RealEstate／Stock 三款同型閃卡車名/物件名/股票名大字中，唯二仍缺這道防護的
-//      其中一處（另一處 StockDetailView 同步補齊）。長物件名稱（例如含棟別/樓層完整命名）
-//      理論上會無限換行撐高卡片。補上 .lineLimit(2) + .minimumScaleFactor(0.7)，對齊
-//      VehicleDetailView v5 同批規格，讓超長名稱自動縮字換行但不致無法辨識。純視覺層調整，
-//      estate.name 等既有資料完全未變動。
-//
-// [2026-08 v12] CutePhotoViewer.photoArea 載入狀態補上主題色：
-//  27. 找不到照片時的圖示已用 draft.kind.accent.opacity(0.6) 上色（裝潢＝粉紫／支出＝蜜桃／
-//      水電＝對應色／電梯＝薄荷綠），緊接在同一個 else 分支裡的載入中 ProgressView() 卻是
-//      系統預設灰色，是本檔案「可愛風照片瀏覽器」四種色系裡唯一沒有跟上主題色的狀態、也是全檔
-//      案唯一沒有 .tint() 的 ProgressView（AddRealEstateView.PhotoViewerSheet 已於 v25.23
-//      補上 .tint(.white)）。補上 .tint(draft.kind.accent)，讓「載入中→找不到」轉場時顏色
-//      一致，不會從灰轉彩。純視覺層調整，didLoad／urls 等既有讀取邏輯完全未變動。
-//
-// [2026-08 v13] CutePhotoViewer.topBar 關閉按鈕改回左側，修正全 App 唯一的右側殘留：
-//  28. 全 App「關閉」按鈕統一放在畫面左上角（ToolbarItem(.topBarLeading) 或自訂 HStack 把
-//      Button 放在 Spacer() 之前），例如同檔案 ExpensePhotoStackViewer／MultiPhotoGallery
-//      的 PhotoLightbox 皆是如此。CutePhotoViewer.topBar 卻是「來源膠囊」在前、Spacer()、
-//      關閉按鈕在後，把 xmark 推到右上角，是全 App 唯一一處關閉鈕落在右側的照片檢視器
-//      （CutePhotoViewer 正是裝潢／支出／水電／電梯保養四類照片實際會開啟的檢視器，見上方
-//      v25.65 筆記）。調整 HStack 順序：關閉按鈕移到最前面（左側），來源膠囊移到 Spacer() 之後
-//      （右側），視覺樣式（.ultraThinMaterial 圓底、描邊、陰影等）完全不變，只調換左右位置。
-//      純視覺層調整，dismiss()／draft.kind 等既有邏輯完全未變動。
+// [v25.534] 房屋卡片（換新卡片）的外殼：跟股票卡片同一個樣子（換房列、看板、一欄捲到底、分享）。
+// - 卡片上的字和數字全在 HouseCardData.build 一次算好（只在 .task 裡算，換房、記帳或房子改了才重算）；
+//   各區畫面在 HouseCardViews.swift，這裡只管排列順序、彈出頁、確認框、付費和分享。
+// - 看資料免費；新增、編輯、刪除、修正都先過 requirePremium，選單在打開前就擋。
+// - 彈出頁收成一個 HouseSheet＋一個 .sheet(item:)，確認框一個 HouseConfirm；fileImporter 單獨掛在穩定的容器上。
+// - 「樓層與物品」「照片與文件」綁著物品樹和照片匯入，留在這個檔案畫（物品樹攤平＋單一 ForEach、
+//   寫回 store 延後一個 runloop，兩個都是真機閃退的修正，不能拿掉）。
+// - 編輯頁、照片檢視器、縮圖都搬到 RealEstateEditors.swift。
 
 struct RealEstateDetailView: View {
     @EnvironmentObject var store: FinanceStore
@@ -156,2263 +16,808 @@ struct RealEstateDetailView: View {
     @EnvironmentObject var lifeStore: LifeStore
     @EnvironmentObject var subscription: SubscriptionManager
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.colorScheme) private var scheme
 
-    let estateId: UUID
-    @State private var showEdit = false
-    @State private var showDeleteConfirm = false
-    @State private var viewingPhotoURL: URL?
-    @State private var addingElevatorMaintenance = false
-    @State private var editingElevatorMaintenance: ElevatorMaintenance?
-    @State private var addingUtilityPayment = false
-    @State private var editingUtilityPayment: UtilityPayment?
-    @State private var utilityExpanded = false
-    @State private var addingRenovationPhoto = false
-    @State private var editingRenovationPhoto: RenovationPhoto?
-    /// 房屋資料集錦中點任何一張照片，都用這個 cute viewer 呈現
-    @State private var cutePhotoDraft: CutePhotoDraft?
-    /// 文件上傳 picker
-    @State private var showDocumentPicker = false
-    /// 點擊文件後 QuickLook 預覽
-    @State private var previewingDocumentURL: IdentifiableURL?
+    /// @State 而不是 let：換房列點一下就換一間（同一張卡換內容，不重開 sheet）
+    @State private var estateId: UUID
+    /// 列表傳進來的順序（同一組：持有中／已售出）；空的時候用 store 的順序
+    private let order: [UUID]
+    /// 打開時要捲到哪一區（人生模式打開捲到「房屋資料」）；捲過一次就清掉
+    @State private var startAnchor: HouseAnchor?
+    /// 換房的方向（+1 往右邊那間、-1 往左邊），決定滑入的方向
+    @State private var slideDirection: Int = 1
+
+    /// 卡片上全部的字與數字：只在 .task(id: cardTaskKey) 裡算
+    @State private var card: HouseCardData?
+    @State private var ledgerFilter: HouseLedgerFilter = .all
+    /// 「樓層與物品」展開的那一層（一次只開一層）
+    @State private var expandedFloorId: UUID?
+
+    @State private var sheet: HouseSheet?
+    @State private var pendingConfirm: HouseConfirm?
+    @State private var pendingChoice: HouseChoice?
     @State private var showPremiumAlert = false
-    /// 已展開備註的變動支出項目 IDs
-    @State private var expandedVariableExpenseIds: Set<UUID> = []
-    /// 用於在子 sheet 關閉後強制刷新水電瓦斯區塊（解決 SwiftUI 巢狀 sheet 偶爾不更新的問題）
-    // 只給水電瓦斯區塊用（見 utilitiesContent.id(utilitiesRefreshID)）；
-    // 不要讓其他不相關的 sheet 也 bump 這個值，否則會強制整個水電瓦斯子樹重建身分、造成閃爍
-    @State private var utilitiesRefreshID = UUID()
+    @State private var showDocumentPicker = false
+    @State private var askExportPageSize = false
 
-    // 美化：閃卡進場動畫旗標（對齊 SavingsInsuranceView headerAppeared 規格）
-    // 美化：自訂 tabPicker matchedGeometryEffect namespace
-    @Namespace private var tabNamespace
-
-    // MARK: - 收合狀態（理財分頁）
-    /// 試算章節預設展開
-    @State private var calcSectionExpanded = true
-    @State private var mortgageSectionExpanded = false
-    @State private var paidSectionExpanded = false
-    @State private var variableSectionExpanded = false
-    @State private var incomeSectionExpanded = false
-
-    // MARK: - 收合狀態（房屋資料分頁）
-    @State private var hiBasicExpanded = false
-    /// 集錦預設展開（房屋資料分頁的主視覺）
-    @State private var hiGalleryExpanded = true
-    @State private var hiElevatorExpanded = false
-    @State private var hiUtilitiesExpanded = false
-    @State private var hiInsuranceExpanded = false
-    @State private var hiAssetsExpanded = false
-
-    /// 物件編輯 sheet：依（樓層 id, 項目 id, 是否為新增）開啟
-    @State private var editingFloorItemTarget: FloorItemEditTarget?
-
-    // MARK: - 直接從卡片新增支出項目
-    @State private var addingMortgageItem = false
-    @State private var addingPaidItem = false
-    @State private var addingVariableCategory: RealEstateExpenseCategory?
-    /// 點章節項目時開啟編輯該筆 Expense
-    @State private var editingLinkedExpense: Expense?
-
-    /// [v25.530] 等待確認的刪除：左滑刪掉的列會連記帳支出和銀行扣款一起刪、
-    /// 文件會連 iCloud 一起刪、樓層物品會連整棵子樹一起刪，都先跳確認框再動手
-    @State private var pendingDeletion: PendingDeletion?
-
-    private enum PendingDeletion {
-        case mortgage(RealEstateMortgageItem)
-        case paid(RealEstatePaidItem)
-        case variable(RealEstateVariableExpense)
-        case document(RealEstateDocument)
-        case floorItem(floorId: UUID, item: FloorItem)
+    init(estate: RealEstate, order: [UUID] = [], startAt: HouseAnchor? = nil) {
+        _estateId = State(initialValue: estate.id)
+        self.order = order
+        _startAnchor = State(initialValue: startAt)
     }
 
-    enum DetailTab: String, CaseIterable {
-        case finance = "理財"
-        case house = "房屋資料"
-        case assets = "資產"
-    }
-    @State private var detailTab: DetailTab = .finance
+    private static let placeholder = RealEstate(name: "")
 
-    private var estate: RealEstate {
-        store.realEstates.first(where: { $0.id == estateId }) ?? placeholder
+    /// 目前這間（store 裡最新的那一份；被刪掉時是空的佔位，.task 會把卡片關掉）
+    fileprivate var estate: RealEstate {
+        store.realEstates.first(where: { $0.id == estateId }) ?? Self.placeholder
     }
 
-    private let placeholder = RealEstate(name: "")
-
-    init(estate: RealEstate) {
-        self.estateId = estate.id
+    /// 換房列：列表傳進來的順序，只留跟目前這間同一組（持有中／已售出）的
+    private var siblings: [RealEstate] {
+        let current = estate
+        let all = store.realEstates
+        var list: [RealEstate]
+        if order.isEmpty {
+            list = all
+        } else {
+            let byId = Dictionary(all.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+            list = order.compactMap { byId[$0] }
+            if !list.contains(where: { $0.id == current.id }), byId[current.id] != nil {
+                list.append(current)
+            }
+        }
+        return list.filter { $0.isSold == current.isSold }
     }
 
-    private var rarity: CardRarity { CardRarity.realEstate(price: estate.purchasePrice) }
+    private var titleText: String {
+        if let card { return card.name }
+        let name = estate.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        return name.isEmpty ? "未命名房屋" : name
+    }
+
+    /// 換房、記帳改了、房子改了都要重算
+    private var cardTaskKey: String {
+        "\(estateId.uuidString)-\(store.modifyID)-\(expenseStore.modifyID)"
+    }
 
     var body: some View {
         NavigationStack {
+            withPresentations(scroller)
+        }
+    }
+
+    private var scroller: some View {
+        ScrollViewReader { proxy in
             ScrollView {
-                VStack(spacing: 24) {
-                    // 進場動畫改由 FlashCardView 模板內建（進階設定可關閉）
-                    flashCard
-                    tabPicker
-                    switch detailTab {
-                    case .finance: infoSection
-                    case .house:   houseInfoSection
-                    case .assets:  assetsSection
-                    }
-                }
-                .padding(.vertical)
+                cardContent(proxy)
             }
             .background(Color(.systemGroupedBackground))
-            .navigationTitle("房地產卡片")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button("關閉") { dismiss() }
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    HStack(spacing: 16) {
-                        Button {
-                            if subscription.isPremium { showEdit = true }
-                            else { showPremiumAlert = true }
-                        } label: {
-                            Text("編輯").foregroundStyle(.green)
-                        }
-                        Button {
-                            if subscription.isPremium { showDeleteConfirm = true }
-                            else { showPremiumAlert = true }
-                        } label: {
-                            Text("刪除").foregroundStyle(.red)
-                        }
-                    }
-                }
+            .task(id: cardTaskKey) { rebuildCard(proxy) }
+        }
+        // 換房列釘在導覽列下面：同一組不只一間才出現。不做整頁左右滑（會跟照片橫捲、長按、階梯圖打架）
+        .safeAreaInset(edge: .top, spacing: 0) { switcherBar }
+        .navigationTitle(titleText)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar { toolbarItems }
+    }
+
+    // MARK: - 算卡片、換房
+
+    /// 只有這裡會算 HouseCardData（在主執行緒：MoneyFormat 共用一個 NumberFormatter）
+    private func rebuildCard(_ proxy: ScrollViewProxy) {
+        guard let re = store.realEstates.first(where: { $0.id == estateId }) else {
+            // 房子被刪掉了（編輯頁最下面刪的、或別台裝置同步過來的）：卡片沒有東西可看了。
+            // 晚一點才關：編輯頁可能還在往下收，一邊收一邊關卡片會被 UIKit 擋掉
+            card = nil
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { dismiss() }
+            return
+        }
+        card = HouseCardData.build(re, expense: expenseStore)
+        guard let anchor = startAnchor else { return }
+        startAnchor = nil
+        // 等各區真的畫出來再捲：只排到下一個 main.async 的話，可能比這次畫面更新還早跑，
+        // 那時候還是空的佔位，找不到「房屋資料」就不會捲
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+            proxy.scrollTo(anchor, anchor: .top)
+        }
+    }
+
+    private func select(_ id: UUID, in list: [RealEstate]) {
+        let from = list.firstIndex { $0.id == estateId } ?? 0
+        let to = list.firstIndex { $0.id == id } ?? 0
+        jump(to: id, direction: to >= from ? 1 : -1)
+    }
+
+    /// 換到另一間：卡片、帳本篩選、展開的樓層、還沒按的確認框一起清掉，.task 會用新的 id 重算
+    private func jump(to id: UUID, direction: Int) {
+        guard id != estateId else { return }
+        slideDirection = direction
+        withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+            estateId = id
+            card = nil
+            ledgerFilter = .all
+            expandedFloorId = nil
+            pendingConfirm = nil
+            pendingChoice = nil
+        }
+    }
+
+    @ViewBuilder
+    private var switcherBar: some View {
+        let list = siblings
+        if list.count > 1 {
+            FinanceSwitcherStrip(items: switcherItems(list), selected: estateId) { id in
+                select(id, in: list)
             }
-            .sheet(isPresented: $showEdit) {
-                AddRealEstateView(editing: estate)
+            .padding(.vertical, 4)
+            .background(.bar)
+        }
+    }
+
+    private func switcherItems(_ list: [RealEstate]) -> [FinanceSwitcherItem] {
+        list.map { re -> FinanceSwitcherItem in
+            let trailing = HouseCardData.switcherTrailing(re)
+            let name = re.name.trimmingCharacters(in: .whitespacesAndNewlines)
+            let title = MoneyBoardText.short(name.isEmpty ? "未命名房屋" : name, max: 6)
+            return FinanceSwitcherItem(id: re.id, title: title,
+                                       trailing: trailing?.text ?? "", tone: trailing?.tone ?? .neutral)
+        }
+    }
+
+    // MARK: - 工具列
+
+    @ToolbarContentBuilder
+    private var toolbarItems: some ToolbarContent {
+        ToolbarItem(placement: .topBarLeading) {
+            Button("關閉") { dismiss() }
+        }
+        // 標題就是房名，太長跑馬燈
+        ToolbarItem(placement: .principal) {
+            MarqueeText(titleText)
+                .font(.headline)
+                .accessibilityAddTraits(.isHeader)
+        }
+        ToolbarItem(placement: .topBarTrailing) {
+            HStack(spacing: 16) {
+                Button {
+                    shareTapped()
+                } label: {
+                    Image(systemName: "square.and.arrow.up")
+                }
+                .accessibilityLabel("分享")
+                .disabled(card == nil)
+                Button {
+                    requirePremium { sheet = .edit(HouseEditFocus.none) }
+                } label: {
+                    Text("編輯").foregroundStyle(.green)
+                }
+                // 刪除整間只在列表左滑、編輯頁最下面（都會先確認）
+            }
+        }
+    }
+
+    // MARK: - 內容
+
+    private var slideTransition: AnyTransition {
+        .asymmetric(
+            insertion: .move(edge: slideDirection > 0 ? .trailing : .leading).combined(with: .opacity),
+            removal: .move(edge: slideDirection > 0 ? .leading : .trailing).combined(with: .opacity)
+        )
+    }
+
+    private func cardContent(_ proxy: ScrollViewProxy) -> some View {
+        VStack(spacing: 22) {
+            if let card {
+                let actions = makeActions(proxy)
+                upperSections(card, actions: actions, proxy: proxy)
+                lowerSections(card, actions: actions)
+            } else {
+                Color.clear.frame(height: 360)
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 10)
+        .padding(.bottom, 28)
+        // 換房時整包內容依方向滑入（id 變了就觸發轉場）
+        .id(estateId)
+        .transition(slideTransition)
+    }
+
+    /// 看板、要確認、房貸、每個月住這裡、出租、帳本（各區自己決定整區要不要出現）
+    @ViewBuilder
+    private func upperSections(_ card: HouseCardData, actions: HouseCardActions, proxy: ScrollViewProxy) -> some View {
+        HouseCardBoard(data: card, onTapProgress: { scroll(proxy, to: .mortgage) })
+            .id(HouseAnchor.top)
+        HouseChecksSection(data: card, actions: actions)
+            .id(HouseAnchor.checks)
+        HouseMortgageSection(data: card, actions: actions)
+            .id(HouseAnchor.mortgage)
+        HouseLivingSection(data: card, actions: actions)
+            .id(HouseAnchor.living)
+        HouseRentalSection(data: card)
+            .id(HouseAnchor.rental)
+        HouseLedgerSection(data: card, filter: $ledgerFilter, actions: actions)
+            .id(HouseAnchor.ledger)
+    }
+
+    /// 房屋資料、樓層與物品、照片與文件、水電瓦斯、電梯保養
+    @ViewBuilder
+    private func lowerSections(_ card: HouseCardData, actions: HouseCardActions) -> some View {
+        HouseInfoSection(estate: card.estate, data: card, actions: actions)
+            .id(HouseAnchor.info)
+        floorsSection(card)
+            .id(HouseAnchor.floors)
+        photosSection(card)
+            .id(HouseAnchor.photos)
+        HouseUtilitiesSection(estate: card.estate, data: card, actions: actions)
+            .id(HouseAnchor.utilities)
+        HouseElevatorSection(estate: card.estate, data: card, actions: actions)
+            .id(HouseAnchor.elevator)
+    }
+
+    fileprivate func scroll(_ proxy: ScrollViewProxy, to anchor: HouseAnchor) {
+        withAnimation(.easeInOut(duration: 0.35)) {
+            proxy.scrollTo(anchor, anchor: .top)
+        }
+    }
+
+    // MARK: - 彈出頁、確認框
+
+    private func withPresentations<Content: View>(_ content: Content) -> some View {
+        withAlerts(withSheets(content))
+    }
+
+    private static let documentTypes: [UTType] = [
+        .pdf, .presentation, .spreadsheet, .text, .commaSeparatedText,
+        .plainText, .rtf, .image, .data
+    ]
+
+    private func withSheets<Content: View>(_ content: Content) -> some View {
+        content
+            .sheet(item: $sheet) { s in sheetView(s) }
+            // fileImporter 掛在穩定的 NavigationStack 上（不要掛在「＋」選單的 label：
+            // 那是暫態 view，關閉檔案選單時回寫 binding 會閃退）
+            .fileImporter(isPresented: $showDocumentPicker,
+                          allowedContentTypes: Self.documentTypes,
+                          allowsMultipleSelection: true) { result in
+                if case .success(let urls) = result { importDocuments(urls) }
+            }
+            .exportPageSizeDialog(isPresented: $askExportPageSize,
+                                  itemCount: card?.ledger.events.count ?? 0) { per in
+                exportPaged(perPage: per)
+            }
+    }
+
+    private func withAlerts<Content: View>(_ content: Content) -> some View {
+        content
+            .alert(pendingConfirm?.title ?? "", isPresented: confirmPresented, presenting: pendingConfirm) { c in
+                confirmButtons(c)
+            } message: { c in
+                Text(c.message)
+            }
+            .confirmationDialog(pendingChoice?.title ?? "", isPresented: choicePresented,
+                                titleVisibility: .visible, presenting: pendingChoice) { c in
+                choiceButtons(c)
+            } message: { c in
+                Text(c.message)
             }
             .premiumLockAlert(isPresented: $showPremiumAlert)
-            .sheet(item: $viewingPhotoURL) { url in
-                PhotoViewerSheet(url: url)
-            }
-            .sheet(isPresented: $addingElevatorMaintenance) {
-                ElevatorMaintenanceEditor(estateId: estateId, editing: nil)
-            }
-            .sheet(item: $editingElevatorMaintenance) { m in
-                ElevatorMaintenanceEditor(estateId: estateId, editing: m)
-            }
-            .sheet(isPresented: $addingUtilityPayment,
-                   onDismiss: { utilitiesRefreshID = UUID() }) {
-                UtilityPaymentEditor(estateId: estateId, editing: nil)
-            }
-            .sheet(item: $editingUtilityPayment,
-                   onDismiss: { utilitiesRefreshID = UUID() }) { p in
-                UtilityPaymentEditor(estateId: estateId, editing: p)
-            }
-            .sheet(isPresented: $addingRenovationPhoto) {
-                RenovationPhotoEditor(estateId: estateId, editing: nil)
-            }
-            .sheet(item: $editingRenovationPhoto) { p in
-                RenovationPhotoEditor(estateId: estateId, editing: p)
-            }
-            .sheet(item: $cutePhotoDraft) { draft in
-                CutePhotoViewer(draft: draft)
-            }
-            // fileImporter 掛在穩定的 NavigationStack 上（不要掛在 galleryAddMenu 的
-            // Menu label，那是暫態 view，關閉檔案選單時回寫 binding 會閃退）。
-            .fileImporter(
-                isPresented: $showDocumentPicker,
-                allowedContentTypes: [
-                    .pdf, .presentation, .spreadsheet, .text, .commaSeparatedText,
-                    .plainText, .rtf, .image, .data
-                ],
-                allowsMultipleSelection: true
-            ) { result in
-                if case .success(let urls) = result {
-                    importDocuments(urls)
-                }
-            }
-            .sheet(item: $previewingDocumentURL) { wrapper in
-                DocumentQuickLookView(url: wrapper.url)
-            }
-            .sheet(item: $editingFloorItemTarget) { target in
-                FloorItemEditor(
-                    initialName: target.currentName,
-                    isEditing: target.itemId != nil
-                ) { newName in
-                    if let itemId = target.itemId {
-                        renameFloorItem(floorId: target.floorId, itemId: itemId, newName: newName)
-                    } else {
-                        addFloorItem(floorId: target.floorId, parentItemId: target.parentItemId, name: newName)
-                    }
-                }
-            }
-            .sheet(isPresented: $addingMortgageItem) {
-                AddExpenseView(
-                    expenseType: .fixed,
-                    preset: AddExpensePreset(
-                        fixedCategory: .loan,
-                        loanSubCategory: .mortgage,
-                        recurrence: .monthly,
-                        linkedRealEstateId: estateId,
-                        mortgageLinkExisting: true
-                    )
-                )
-            }
-            .sheet(isPresented: $addingPaidItem) {
-                AddExpenseView(
-                    expenseType: .variable,
-                    preset: AddExpensePreset(
-                        variableCategory: .realEstate,
-                        realEstateExpenseCategory: .housePayment,
-                        linkedRealEstateId: estateId,
-                        assetLink: .realEstate,
-                        realEstateLinkExisting: true
-                    )
-                )
-            }
-            .sheet(item: $addingVariableCategory) { cat in
-                AddExpenseView(
-                    expenseType: .variable,
-                    preset: AddExpensePreset(
-                        variableCategory: .realEstate,
-                        realEstateExpenseCategory: cat,
-                        linkedRealEstateId: estateId,
-                        assetLink: .realEstate,
-                        realEstateLinkExisting: true
-                    )
-                )
-            }
-            .sheet(item: $editingLinkedExpense) { exp in
-                AddExpenseView(expenseType: exp.expenseType, editingExpense: exp)
-            }
-            .alert("確定要刪除這筆房地產嗎？", isPresented: $showDeleteConfirm) {
-                Button("刪除", role: .destructive) {
-                    deleteEstate()
-                    dismiss()
-                }
-                Button("取消", role: .cancel) {}
-            } message: {
-                // [v25.530] 寫清楚會一起刪掉幾筆支出、幾張照片、幾份文件
-                Text(estateDeletionMessage)
-            }
-            .alert("確定要刪除嗎？", isPresented: isConfirmingDeletion, presenting: pendingDeletion) { target in
-                Button("刪除", role: .destructive) { performDeletion(target) }
-                Button("取消", role: .cancel) {}
-            } message: { target in
-                Text(deletionMessage(for: target))
-            }
+    }
+
+    private var confirmPresented: Binding<Bool> {
+        Binding(get: { pendingConfirm != nil }, set: { if !$0 { pendingConfirm = nil } })
+    }
+
+    private var choicePresented: Binding<Bool> {
+        Binding(get: { pendingChoice != nil }, set: { if !$0 { pendingChoice = nil } })
+    }
+
+    @ViewBuilder
+    private func confirmButtons(_ c: HouseConfirm) -> some View {
+        if let label = c.button {
+            Button(label, role: c.destructive ? .destructive : nil) { c.action() }
+            Button("取消", role: .cancel) {}
+        } else {
+            Button("好", role: .cancel) {}
         }
     }
 
-    // MARK: - 刪除確認（v25.530）
-
-    private var estateDeletionMessage: String {
-        RealEstateDeletion.confirmMessage(RealEstateDeletion.summary(of: estate, expenseStore: expenseStore))
+    @ViewBuilder
+    private func choiceButtons(_ c: HouseChoice) -> some View {
+        ForEach(c.options) { o in
+            Button(o.label, role: o.destructive ? .destructive : nil) { o.action() }
+        }
+        Button("取消", role: .cancel) {}
     }
 
-    private var isConfirmingDeletion: Binding<Bool> {
-        Binding(
-            get: { pendingDeletion != nil },
-            set: { if !$0 { pendingDeletion = nil } }
-        )
-    }
-
-    private func deletionMessage(for target: PendingDeletion) -> String {
-        switch target {
-        case .mortgage(let m):
-            return linkedItemDeletionMessage(expenseId: m.linkedExpenseId)
-        case .paid(let p):
-            return linkedItemDeletionMessage(expenseId: p.linkedExpenseId)
-        case .variable(let v):
-            return linkedItemDeletionMessage(expenseId: v.linkedExpenseId)
-        case .document(let d):
-            let name = d.displayName.isEmpty ? d.fileName : d.displayName
-            return "刪除「\(name)」？iCloud 上的也會一起刪掉。"
-        case .floorItem(_, let item):
-            let name = item.name.isEmpty ? "未命名" : item.name
-            let count = descendantCount(of: item)
-            if count > 0 { return "刪除「\(name)」？底下 \(count) 件也會一起刪掉。" }
-            return "刪除「\(name)」？"
+    @ViewBuilder
+    private func sheetView(_ s: HouseSheet) -> some View {
+        switch s {
+        case .edit, .share, .newExpense, .editExpense, .floorItem:
+            recordSheet(s)
+        default:
+            mediaSheet(s)
         }
     }
 
-    /// 連著記帳支出的才提支出和扣款；沒有連結（或那筆已經不在）的舊資料只是拿掉項目
-    private func linkedItemDeletionMessage(expenseId: UUID?) -> String {
-        if let id = expenseId, isExpenseShared(id, in: estate) {
-            return "這一列跟保險／附屬資產／水電瓦斯是同一筆記帳支出，只會從這份清單拿掉，記帳裡的支出留著。"
-        }
-        if let id = expenseId, expenseStore.expenses.contains(where: { $0.id == id }) {
-            return "會一起刪掉記帳裡這筆支出，以及銀行的扣款紀錄，不能復原。"
-        }
-        return "這個項目會從房子裡刪除，不能復原。"
-    }
-
-    /// [v25.530] 舊版在記帳裡再存一次保險／附屬資產的支出，會多出一列共用同一筆支出的變動支出；
-    /// 這種列刪除時不能連那筆支出一起刪
-    private func isExpenseShared(_ expId: UUID, in re: RealEstate) -> Bool {
-        if re.insuranceItems.contains(where: { $0.linkedExpenseId == expId }) { return true }
-        if re.propertyAssets.contains(where: { $0.linkedExpenseId == expId }) { return true }
-        return re.utilityPayments.contains(where: { $0.linkedExpenseId == expId })
-    }
-
-    /// 物品底下一共幾件（子、孫…都算），刪除確認框用
-    private func descendantCount(of item: FloorItem) -> Int {
-        item.children.reduce(0) { $0 + 1 + descendantCount(of: $1) }
-    }
-
-    private func performDeletion(_ target: PendingDeletion) {
-        switch target {
-        case .mortgage(let m):
-            deleteEstateItem(itemId: m.id, linkedExpenseId: m.linkedExpenseId)
-        case .paid(let p):
-            deleteEstateItem(itemId: p.id, linkedExpenseId: p.linkedExpenseId)
-        case .variable(let v):
-            deleteEstateItem(itemId: v.id, linkedExpenseId: v.linkedExpenseId)
-        case .document(let d):
-            deleteDocument(d)
-        case .floorItem(let floorId, let item):
-            deleteFloorItem(floorId: floorId, itemId: item.id)
-        }
-    }
-
-    // MARK: - 閃卡主體
-
-    private var flashCard: some View {
-        // 改用 FlashCardView 標準模板：殼層與版面骨架由模板統一，本頁只填內容；
-        // 樣式參數由「設定 > 進階設定 > 閃卡樣式」控制。
-        let estimate = splitWan(estate.currentValue)
-        return FlashCardView(
-            rarity: rarity,
-            categoryLabel: "房地產",
-            categoryIcon: "building.2.fill",
-            title: estate.name,
-            bigNumber: estimate.number,
-            bigCaption: "\(estimate.unit)元",
-            columns: [
-                FlashCardInfoColumn("購入", splitWanLabel(estate.purchasePrice)),
-                FlashCardInfoColumn("增值率",
-                                    String(format: "%@%.1f%%",
-                                           estate.appreciationRate >= 0 ? "+" : "",
-                                           estate.appreciationRate),
-                                    valueColor: estate.appreciationRate >= 0 ? .green : .red),
-                FlashCardInfoColumn("月租", estate.monthlyRental > 0 ? fmt(estate.monthlyRental) : "—")
-            ],
-            isSold: estate.isSold
-        ) {
-            if !estate.fullAddress.isEmpty {
-                Text(estate.fullAddress)
-                    .font(.subheadline)
-                    .foregroundStyle(rarity.secondaryTextColor)
-                    .multilineTextAlignment(.center)
-                    .lineLimit(3)
-            }
-        } middleExtra: {
-            EmptyView()
-        } extraBackground: {
+    /// 編輯頁、分享、記帳、樓層物品
+    @ViewBuilder
+    private func recordSheet(_ s: HouseSheet) -> some View {
+        switch s {
+        case .edit(let focus):
+            AddRealEstateView(editing: estate, focus: focus)
+        case .share(let payload):
+            ShareSheet(items: payload.items)
+        case .newExpense(let request):
+            AddExpenseView(expenseType: request.expenseType, preset: request.preset)
+        case .editExpense(let ex):
+            AddExpenseView(expenseType: ex.expenseType, editingExpense: ex)
+        case .floorItem(let target):
+            floorItemEditor(target)
+        default:
             EmptyView()
         }
-        .padding(.horizontal, 24)
-        .padding(.top, 16)
     }
 
-    // MARK: - 詳細資訊
-
-    /// [v25.532] 房貸的數字一律讀 HouseFacts（跟看板、項目卡、理財總覽同一套期數規則）：
-    /// 每月房貸＝這個月房貸、貸款總額＝全部要繳（含利息）、已繳＝已繳期數 × 每期金額
-    private var houseFacts: HouseFacts {
-        HouseFacts.build(estate, expense: expenseStore)
-    }
-
+    /// 水電、電梯、裝潢照片、看照片、看文件
     @ViewBuilder
-    private func calcSummary(_ facts: HouseFacts) -> some View {
-        let rental = estate.monthlyRental
-        let mortgageMonthly = facts.monthlyMortgage
-        let mortgageTotal = facts.scheduledTotal
-        let mortgagePaidTotal = facts.paid
-        let paidTotal = estate.totalPaid
-        let varTotal = estate.variableTotal
-        let allPaid = paidTotal + mortgagePaidTotal + varTotal
-        // 預售屋還沒開始扣時這個月房貸是 0，有排定的房貸也要顯示
-        let hasMortgage = mortgageMonthly > 0 || mortgageTotal > 0
-
-        if rental > 0 || hasMortgage || paidTotal > 0 || varTotal > 0 {
-            collapsibleSection(
-                title: "試算",
-                summary: fmt(allPaid),
-                summaryColor: .red,
-                isExpanded: $calcSectionExpanded
-            ) {
-                VStack(spacing: 0) {
-                    if rental > 0 || mortgageMonthly > 0 {
-                        calcRow("每月淨現金流", fmt(rental - mortgageMonthly),
-                                color: rental - mortgageMonthly >= 0 ? .green : .red)
-                    }
-                    if mortgageTotal > 0 {
-                        calcRow("貸款總額", fmt(mortgageTotal), color: .secondary)
-                    }
-                    if mortgagePaidTotal > 0 {
-                        calcRow("已繳貸款金額", fmt(mortgagePaidTotal), color: .blue)
-                    }
-                    if paidTotal > 0 {
-                        calcRow("已支出房屋金額", fmt(paidTotal), color: .purple)
-                    }
-                    if varTotal > 0 {
-                        calcRow("變動支出累計", fmt(varTotal), color: .orange)
-                    }
-                    HStack {
-                        Text("房屋總已支出").font(.caption).foregroundStyle(.secondary)
-                        Spacer()
-                        Text(fmt(allPaid)).font(.subheadline.bold()).foregroundStyle(.red)
-                    }
-                    .padding(.horizontal).padding(.vertical, 8)
-                }
-            }
+    private func mediaSheet(_ s: HouseSheet) -> some View {
+        switch s {
+        case .newUtility:
+            UtilityPaymentEditor(estateId: estateId, editing: nil)
+        case .editUtility(let payment):
+            UtilityPaymentEditor(estateId: estateId, editing: payment)
+        case .newElevator:
+            ElevatorMaintenanceEditor(estateId: estateId, editing: nil)
+        case .editElevator(let record):
+            ElevatorMaintenanceEditor(estateId: estateId, editing: record)
+        case .newRenovation:
+            RenovationPhotoEditor(estateId: estateId, editing: nil)
+        case .editRenovation(let photo):
+            RenovationPhotoEditor(estateId: estateId, editing: photo)
+        case .photos(let draft):
+            CutePhotoViewer(draft: draft)
+        case .document(let wrapper):
+            DocumentQuickLookView(url: wrapper.url)
+        default:
+            EmptyView()
         }
     }
 
-    private func calcRow(_ label: String, _ value: String, color: Color) -> some View {
-        HStack {
-            Text(label).font(.caption).foregroundStyle(.secondary)
-            Spacer()
-            Text(value)
-                .font(.system(size: 14, weight: .bold, design: .rounded))
-                .foregroundStyle(color)
-                .contentTransition(.numericText())
-        }
-        .padding(.horizontal).padding(.vertical, 6)
-    }
-
-    /// [v25.532] 這一段繳到第幾期／一共幾期，讀 HouseFacts 的段（第一期＝起始日＋1 個週期、扣款日 ≤ 今天才算繳了，
-    /// 賣掉的停在賣出日）。每期金額或期數是 0 的段不算數、賣在第一期之前（算數的期數是 0），就不顯示期數。
-    private func mortgagePeriodsText(_ m: RealEstateMortgageItem, facts: HouseFacts) -> String? {
-        guard let seg = facts.segments.first(where: { $0.id == m.id }), seg.countedPeriods > 0 else { return nil }
-        let paid = seg.paidPeriods
-        let total = seg.countedPeriods
-        return "\(paid)/\(total) 期"
-    }
-
-    /// [v25.532] 每期金額以記帳那筆為準（房貸項目的金額可能是舊的）；季繳、年繳不再寫成「/月」
-    private func mortgageAmountText(_ m: RealEstateMortgageItem, facts: HouseFacts) -> String {
-        guard let seg = facts.segments.first(where: { $0.id == m.id }) else { return fmt(m.amount) + "/月" }
-        let unit: String
-        switch seg.periodMonths {
-        case 3: unit = "/季"
-        case 12: unit = "/年"
-        default: unit = "/月"
-        }
-        return fmt(seg.perPeriod) + unit
-    }
-
-    private var infoSection: some View {
-        VStack(spacing: 0) {
-            // [v25.532] 整個理財分頁只建一次（每段期數、已繳、這個月房貸都從這裡讀）
-            let facts = houseFacts
-            let mortgagePaidText: String = fmt(facts.paid)
-            let mortgageSummary: String? = estate.mortgageItems.isEmpty ? nil : "已繳 \(mortgagePaidText)"
-            calcSummary(facts)
-
-            collapsibleSection(
-                title: "貸款明細 (\(estate.mortgageItems.count) 筆)",
-                summary: mortgageSummary,
-                summaryColor: .blue,
-                isExpanded: $mortgageSectionExpanded,
-                trailing: {
-                    Button {
-                        if subscription.isPremium { addingMortgageItem = true }
-                        else { showPremiumAlert = true }
-                    } label: {
-                        Image(systemName: "plus.circle.fill")
-                            .font(.subheadline).foregroundStyle(.green)
-                    }
-                    .buttonStyle(.plain)
-                }
-            ) {
-                if estate.mortgageItems.isEmpty {
-                    emptySectionRow("尚無貸款項目")
-                } else {
-                    ForEach(estate.mortgageItems.sorted { $0.startDate > $1.startDate }) { m in
-                        // [v25.530] 房貸不給複製（會從今天起多出一整筆貸款）；刪除先確認
-                        SwipeableRow(
-                            onDelete: { pendingDeletion = .mortgage(m) }
-                        ) {
-                            // [v2] 36pt 藍色漸層圖示圓 + Capsule 標籤 + 繳期膠囊 + 升級金額字型
-                            HStack(spacing: 10) {
-                                ZStack {
-                                    Circle()
-                                        .fill(LinearGradient(
-                                            colors: [Color.blue.opacity(0.18), Color.blue.opacity(0.07)],
-                                            startPoint: .topLeading, endPoint: .bottomTrailing
-                                        ))
-                                        .frame(width: 36, height: 36)
-                                        .shadow(color: Color.blue.opacity(0.16), radius: 4, x: 0, y: 2)
-                                        .overlay(Circle().stroke(Color.blue.opacity(0.18), lineWidth: 0.8))
-                                    Image(systemName: "building.columns.fill")
-                                        .font(.system(size: 14, weight: .semibold))
-                                        .foregroundStyle(Color.blue)
-                                }
-                                VStack(alignment: .leading, spacing: 4) {
-                                    HStack(spacing: 5) {
-                                        Text(m.title.isEmpty ? "房貸" : m.title)
-                                            .font(.system(size: 11, weight: .semibold))
-                                            .foregroundStyle(.blue)
-                                            .padding(.horizontal, 7).padding(.vertical, 2.5)
-                                            .background(Color.blue.opacity(0.10))
-                                            .clipShape(Capsule())
-                                            .overlay(Capsule().stroke(Color.blue.opacity(0.22), lineWidth: 0.6))
-                                        if let periods = mortgagePeriodsText(m, facts: facts) {
-                                            Text(periods)
-                                                .font(.caption2)
-                                                .foregroundStyle(.secondary)
-                                                .padding(.horizontal, 6).padding(.vertical, 2)
-                                                .background(Color(.tertiarySystemFill))
-                                                .clipShape(Capsule())
-                                        }
-                                    }
-                                    Text(mortgageAmountText(m, facts: facts))
-                                        .font(.system(size: 15, weight: .bold, design: .rounded))
-                                        .foregroundStyle(.primary)
-                                        .contentTransition(.numericText())
-                                }
-                                Spacer(minLength: 4)
-                            }
-                            .padding(.horizontal, 12).padding(.vertical, 10)
-                            .contentShape(Rectangle())
-                            .onTapGesture { openLinkedExpense(id: m.linkedExpenseId) }
-                        }
-                    }
-                    HStack {
-                        Text("已繳貸款").font(.caption).foregroundStyle(.secondary)
-                        Spacer()
-                        Text(mortgagePaidText)
-                            .font(.system(size: 14, weight: .bold, design: .rounded))
-                            .foregroundStyle(.blue)
-                            .contentTransition(.numericText())
-                    }
-                    .padding(.horizontal).padding(.vertical, 6)
-                }
-            }
-
-            let paidTotal = estate.paidItems.reduce(0.0) { $0 + $1.amount }
-            collapsibleSection(
-                title: "已支出 (\(estate.paidItems.count) 筆)",
-                summary: estate.paidItems.isEmpty ? nil : fmt(paidTotal),
-                summaryColor: .purple,
-                isExpanded: $paidSectionExpanded,
-                trailing: {
-                    Button {
-                        if subscription.isPremium { addingPaidItem = true }
-                        else { showPremiumAlert = true }
-                    } label: {
-                        Image(systemName: "plus.circle.fill")
-                            .font(.subheadline).foregroundStyle(.green)
-                    }
-                    .buttonStyle(.plain)
-                }
-            ) {
-                if estate.paidItems.isEmpty {
-                    emptySectionRow("尚無已支出項目")
-                } else {
-                    ForEach(estate.paidItems.sorted { $0.date > $1.date }) { p in
-                        // [v25.530] 房屋價金不給複製（複製頭期款等於再付一次）；刪除先確認
-                        SwipeableRow(
-                            onDelete: { pendingDeletion = .paid(p) }
-                        ) {
-                            // [v2] 36pt 紫色漸層圖示圓 + Capsule 標籤 + 日期 Capsule 膠囊 + 升級金額字型
-                            HStack(spacing: 10) {
-                                ZStack {
-                                    Circle()
-                                        .fill(LinearGradient(
-                                            colors: [Color.purple.opacity(0.18), Color.purple.opacity(0.07)],
-                                            startPoint: .topLeading, endPoint: .bottomTrailing
-                                        ))
-                                        .frame(width: 36, height: 36)
-                                        .shadow(color: Color.purple.opacity(0.16), radius: 4, x: 0, y: 2)
-                                        .overlay(Circle().stroke(Color.purple.opacity(0.18), lineWidth: 0.8))
-                                    Image(systemName: "banknote.fill")
-                                        .font(.system(size: 14, weight: .semibold))
-                                        .foregroundStyle(Color.purple)
-                                }
-                                VStack(alignment: .leading, spacing: 4) {
-                                    HStack(spacing: 5) {
-                                        Text(p.title.isEmpty ? "已付款" : p.title)
-                                            .font(.system(size: 11, weight: .semibold))
-                                            .foregroundStyle(.purple)
-                                            .padding(.horizontal, 7).padding(.vertical, 2.5)
-                                            .background(Color.purple.opacity(0.10))
-                                            .clipShape(Capsule())
-                                            .overlay(Capsule().stroke(Color.purple.opacity(0.22), lineWidth: 0.6))
-                                        Text(fmtDate(p.date))
-                                            .font(.caption2)
-                                            .foregroundStyle(.secondary)
-                                            .padding(.horizontal, 6).padding(.vertical, 2)
-                                            .background(Color(.tertiarySystemFill))
-                                            .clipShape(Capsule())
-                                    }
-                                    Text(fmt(p.amount))
-                                        .font(.system(size: 15, weight: .bold, design: .rounded))
-                                        .foregroundStyle(.primary)
-                                        .contentTransition(.numericText())
-                                }
-                                Spacer(minLength: 4)
-                            }
-                            .padding(.horizontal, 12).padding(.vertical, 10)
-                            .contentShape(Rectangle())
-                            .onTapGesture { openLinkedExpense(id: p.linkedExpenseId) }
-                        }
-                    }
-                }
-            }
-
-            variableExpensesContent
-
-            if estate.monthlyRental > 0 {
-                let flow = estate.monthlyRental - facts.monthlyMortgage
-                collapsibleSection(
-                    title: "收益",
-                    summary: fmt(flow) + "/月",
-                    summaryColor: flow >= 0 ? .green : .red,
-                    isExpanded: $incomeSectionExpanded
-                ) {
-                    HStack {
-                        Text("月淨現金流").font(.caption).foregroundStyle(.secondary)
-                        Spacer()
-                        Text(fmt(flow))
-                            .font(.system(size: 14, weight: .bold, design: .rounded))
-                            .foregroundStyle(flow >= 0 ? .green : .red)
-                            .contentTransition(.numericText())
-                    }
-                    .padding(.horizontal).padding(.vertical, 8)
-                    HStack {
-                        Text("年租金報酬率").font(.caption).foregroundStyle(.secondary)
-                        Spacer()
-                        Text(String(format: "%.2f%%", estate.rentalYield))
-                            .font(.system(size: 14, weight: .bold, design: .rounded))
-                            .foregroundStyle(.blue)
-                    }
-                    .padding(.horizontal).padding(.vertical, 8)
-                }
-            }
-        }
-        .padding(.bottom, 8)
-        .background(Color(.systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 12))
-        .padding(.horizontal)
-    }
-
-    @ViewBuilder
-    private var variableExpensesContent: some View {
-        collapsibleSection(
-            title: "變動支出 (\(estate.variableExpenses.count) 筆)",
-            summary: estate.variableExpenses.isEmpty ? nil : fmt(estate.variableTotal),
-            summaryColor: .orange,
-            isExpanded: $variableSectionExpanded,
-            trailing: {
-                Menu {
-                    ForEach(RealEstateExpenseCategory.allCases.filter { $0 != .housePayment }) { cat in
-                        Button {
-                            if !subscription.isPremium {
-                                showPremiumAlert = true
-                            } else if cat == .utility {
-                                // [v25.530] 水電瓦斯直接開繳費編輯器：走記帳表單存檔後會被轉存成水電繳費，
-                                // 不會出現在這份清單，看起來像沒記到
-                                addingUtilityPayment = true
-                            } else {
-                                addingVariableCategory = cat
-                            }
-                        } label: {
-                            Label(cat.rawValue, systemImage: cat.icon)
-                        }
-                    }
-                } label: {
-                    Image(systemName: "plus.circle.fill")
-                        .font(.subheadline).foregroundStyle(.green)
-                }
-                .buttonStyle(.plain)
-            }
-        ) {
-            if estate.variableExpenses.isEmpty {
-                emptySectionRow("尚無變動支出")
+    private func floorItemEditor(_ target: FloorItemEditTarget) -> some View {
+        FloorItemEditor(initialName: target.currentName, isEditing: target.itemId != nil) { newName in
+            if let itemId = target.itemId {
+                renameFloorItem(floorId: target.floorId, itemId: itemId, newName: newName)
             } else {
-                ForEach(estate.variableExpenses.sorted { $0.date > $1.date }) { ve in
-                    SwipeableRow(
-                        onCopy: { duplicateVariableExpenseItem(ve) },
-                        onDelete: { pendingDeletion = .variable(ve) }
-                    ) {
-                        // [v2] 36pt 橘色漸層圖示圓（用 ve.category.icon）+ Capsule 標籤 + 日期膠囊 + 升級金額字型
-                        HStack(spacing: 10) {
-                            ZStack {
-                                Circle()
-                                    .fill(LinearGradient(
-                                        colors: [Color.orange.opacity(0.18), Color.orange.opacity(0.07)],
-                                        startPoint: .topLeading, endPoint: .bottomTrailing
-                                    ))
-                                    .frame(width: 36, height: 36)
-                                    .shadow(color: Color.orange.opacity(0.16), radius: 4, x: 0, y: 2)
-                                    .overlay(Circle().stroke(Color.orange.opacity(0.18), lineWidth: 0.8))
-                                Image(systemName: ve.category.icon)
-                                    .font(.system(size: 14, weight: .semibold))
-                                    .foregroundStyle(Color.orange)
-                            }
-                            VStack(alignment: .leading, spacing: 4) {
-                                HStack(spacing: 5) {
-                                    Text(ve.category.rawValue)
-                                        .font(.system(size: 11, weight: .semibold))
-                                        .foregroundStyle(.orange)
-                                        .padding(.horizontal, 7).padding(.vertical, 2.5)
-                                        .background(Color.orange.opacity(0.10))
-                                        .clipShape(Capsule())
-                                        .overlay(Capsule().stroke(Color.orange.opacity(0.22), lineWidth: 0.6))
-                                    if !ve.name.isEmpty {
-                                        MarqueeText(ve.name)
-                                            .font(.caption2)
-                                            .foregroundStyle(.secondary)
-                                    }
-                                    Text(fmtDate(ve.date))
-                                        .font(.caption2)
-                                        .foregroundStyle(.secondary)
-                                        .padding(.horizontal, 6).padding(.vertical, 2)
-                                        .background(Color(.tertiarySystemFill))
-                                        .clipShape(Capsule())
-                                }
-                                Text(fmt(ve.amount))
-                                    .font(.system(size: 15, weight: .bold, design: .rounded))
-                                    .foregroundStyle(.primary)
-                                    .contentTransition(.numericText())
-                            }
-                            Spacer(minLength: 4)
-                        }
-                        .padding(.horizontal, 12).padding(.vertical, 10)
-                        .contentShape(Rectangle())
-                        .onTapGesture { openLinkedExpense(id: ve.linkedExpenseId) }
-                    }
-                }
+                addFloorItem(floorId: target.floorId, parentItemId: target.parentItemId, name: newName)
             }
         }
     }
+}
 
-    // 【美化】emptySectionRow 加 tray 圖示，對齊 FixedExpenseView 空狀態佔位規格
-    private func emptySectionRow(_ text: String) -> some View {
-        HStack(spacing: 8) {
-            Image(systemName: "tray")
-                .font(.system(size: 12, weight: .light))
-                .foregroundStyle(.quaternary)
-            Text(text)
-                .font(.caption)
-                .foregroundStyle(.tertiary)
-            Spacer()
-        }
-        .padding(.horizontal, 14).padding(.vertical, 9)
-    }
+// MARK: - 動作（HouseCardActions 的每一個 closure）
 
-    // MARK: - 分頁選擇器
-    // 【美化】從 .segmented 升級為彩色 Capsule Pill 列，帶 matchedGeometryEffect 滑動指示器
-
-    private var tabPicker: some View {
-        HStack(spacing: 8) {
-            ForEach(DetailTab.allCases, id: \.self) { tab in
-                let isActive = detailTab == tab
-                Button {
-                    withAnimation(.spring(response: 0.28, dampingFraction: 0.72)) {
-                        detailTab = tab
-                    }
-                } label: {
-                    HStack(spacing: 5) {
-                        Image(systemName: tabIcon(tab))
-                            .font(.system(size: 12, weight: isActive ? .semibold : .medium))
-                        Text(tab.rawValue)
-                            .font(.system(size: 13, weight: isActive ? .semibold : .regular))
-                    }
-                    .foregroundStyle(isActive ? .white : .primary)
-                    .padding(.horizontal, 14).padding(.vertical, 8)
-                    .background {
-                        if isActive {
-                            Capsule()
-                                .fill(tabAccent(tab))
-                                .matchedGeometryEffect(id: "detailTabIndicator", in: tabNamespace)
-                                .shadow(color: tabAccent(tab).opacity(0.38), radius: 7, x: 0, y: 3)
-                        } else {
-                            Capsule()
-                                .fill(Color(.tertiarySystemFill))
-                        }
-                    }
-                }
-                .buttonStyle(.plain)
-                .scaleEffect(isActive ? 1.03 : 1.0)
-                .animation(.spring(response: 0.26, dampingFraction: 0.72), value: isActive)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal)
-    }
-
-    /// 每個分頁對應的 SF Symbol 圖示
-    private func tabIcon(_ tab: DetailTab) -> String {
-        switch tab {
-        case .finance: return "chart.bar.xaxis"
-        case .house:   return "house.fill"
-        case .assets:  return "shippingbox.fill"
-        }
-    }
-
-    /// 每個分頁的主題色（理財紫 / 房屋 teal / 資產藍）
-    private func tabAccent(_ tab: DetailTab) -> Color {
-        switch tab {
-        case .finance: return Color(red: 0.50, green: 0.25, blue: 0.85)
-        case .house:   return Color(red: 0.18, green: 0.62, blue: 0.62)
-        case .assets:  return Color(red: 0.22, green: 0.50, blue: 0.90)
-        }
-    }
-
-    // MARK: - 房屋資料（人生）
-
-    private var houseInfoSection: some View {
-        VStack(spacing: 0) {
-            let hasProperty = estate.pingCount > 0 || !estate.landOwner.isEmpty
-            let hasDeeds = !estate.landDeeds.isEmpty || !estate.buildingDeeds.isEmpty
-            let hasBasic = hasProperty || hasDeeds
-
-            // 1. 房屋基本資料（坪數 / 所有權人 / 權狀）
-            if hasBasic {
-                collapsibleSection(
-                    title: "房屋基本資料",
-                    summary: basicSummary,
-                    summaryColor: .secondary,
-                    isExpanded: $hiBasicExpanded
-                ) {
-                    basicAndDeedsContent
-                }
-            }
-
-            // 3. 房屋資料集錦（預設展開；右側 + Menu）
-            // gallerySummary／renovationPhotosContent 過去各自獨立呼叫 linkedExpensePhotos
-            // （對 expenseStore.expenses 全量 filter），summary 又不受展開狀態影響、每次都會算，
-            // 同一次 render 因此重複掃描兩次；改由呼叫端算一次後往下傳參數。
-            let expPhotos = linkedExpensePhotos
-            collapsibleSection(
-                title: "房屋資料集錦",
-                summary: gallerySummary(expensePhotos: expPhotos),
-                summaryColor: .green,
-                isExpanded: $hiGalleryExpanded,
-                trailing: { galleryAddMenu }
-            ) {
-                renovationPhotosContent(expensePhotos: expPhotos)
-            }
-
-            // 4. 電梯資料
-            if estate.hasElevator {
-                collapsibleSection(
-                    title: "電梯資料",
-                    summary: estate.elevatorMaintenances.isEmpty
-                        ? "尚無紀錄"
-                        : "\(estate.elevatorMaintenances.count) 筆保養",
-                    summaryColor: .blue,
-                    isExpanded: $hiElevatorExpanded,
-                    trailing: { addButton { addingElevatorMaintenance = true } }
-                ) {
-                    elevatorContent
-                }
-            }
-
-            // 5. 水電瓦斯
-            let hasUtilities = !estate.waterMeterNumber.isEmpty || !estate.waterMeterOwner.isEmpty
-                || !estate.electricityMeterNumber.isEmpty || !estate.electricityMeterOwner.isEmpty
-                || !estate.gasMeterNumber.isEmpty || !estate.gasMeterOwner.isEmpty || !estate.gasUserNumber.isEmpty
-                || !estate.utilityPayments.isEmpty
-                || !estate.extraMeters.isEmpty
-
-            if hasUtilities {
-                collapsibleSection(
-                    title: "水電瓦斯",
-                    summary: utilitiesSummary,
-                    summaryColor: .teal,
-                    isExpanded: $hiUtilitiesExpanded,
-                    trailing: { addButton { addingUtilityPayment = true } }
-                ) {
-                    utilitiesContent
-                        .id(utilitiesRefreshID)
-                }
-            }
-
-            // 6. 保險項目
-            if !estate.insuranceItems.isEmpty {
-                let total = estate.insuranceItems.reduce(0.0) { $0 + $1.amount }
-                collapsibleSection(
-                    title: "保險項目 (\(estate.insuranceItems.count) 筆)",
-                    summary: total > 0 ? fmt(total) : nil,
-                    summaryColor: .orange,
-                    isExpanded: $hiInsuranceExpanded
-                ) {
-                    insuranceContent
-                }
-            }
-
-            // 7. 房屋附屬資產
-            if !estate.propertyAssets.isEmpty {
-                let total = estate.propertyAssets.reduce(0.0) { $0 + $1.amount }
-                collapsibleSection(
-                    title: "房屋附屬資產 (\(estate.propertyAssets.count) 筆)",
-                    summary: total > 0 ? fmt(total) : nil,
-                    summaryColor: .orange,
-                    isExpanded: $hiAssetsExpanded
-                ) {
-                    propertyAssetsContent
-                }
-            }
-
-            // 空狀態
-            if !hasBasic && estate.floors.isEmpty && !hasUtilities
-                && estate.insuranceItems.isEmpty && estate.propertyAssets.isEmpty {
-                // [v3] 空狀態升級：56pt teal 漸層圖示圓，對齊 CareerView 空狀態規格
-                VStack(spacing: 12) {
-                    ZStack {
-                        Circle()
-                            .fill(LinearGradient(
-                                colors: [Color.teal.opacity(0.20), Color.teal.opacity(0.08)],
-                                startPoint: .topLeading, endPoint: .bottomTrailing
-                            ))
-                            .frame(width: 56, height: 56)
-                            .overlay(Circle().stroke(Color.teal.opacity(0.18), lineWidth: 0.8))
-                        Image(systemName: "doc.text.magnifyingglass")
-                            .font(.system(size: 24, weight: .semibold))
-                            .foregroundStyle(.teal)
-                    }
-                    Text("尚未填寫房屋資料")
-                        .font(.subheadline.weight(.medium))
-                        .foregroundStyle(.secondary)
-                    Text("點擊下方編輯按鈕填寫")
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 36)
-            }
-        }
-        .padding(.bottom, 8)
-        .background(Color(.systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 12))
-        .padding(.horizontal)
-    }
-
-    /// 通用的「+」按鈕（給 collapsibleSection trailing 用）
-    private func addButton(action: @escaping () -> Void) -> some View {
-        Button {
-            if subscription.isPremium { action() }
-            else { showPremiumAlert = true }
-        } label: {
-            Image(systemName: "plus.circle.fill")
-                .font(.subheadline).foregroundStyle(.green)
-        }
-        .buttonStyle(.plain)
-    }
-
-    // MARK: - 房屋基本資料章節（坪數 + 所有權人 + 權狀）
-
-    private var basicSummary: String? {
-        var parts: [String] = []
-        if estate.pingCount > 0 { parts.append(String(format: "%g 坪", estate.pingCount)) }
-        let deedCount = estate.landDeeds.count + estate.buildingDeeds.count
-        if deedCount > 0 { parts.append("\(deedCount) 份權狀") }
-        return parts.isEmpty ? nil : parts.joined(separator: "・")
-    }
-
-    @ViewBuilder
-    private var basicAndDeedsContent: some View {
-        if estate.pingCount > 0 { infoRow("坪數", String(format: "%g 坪", estate.pingCount)) }
-        if !estate.landOwner.isEmpty { infoRow("所有權人", estate.landOwner) }
-        ForEach(Array(estate.landDeeds.enumerated()), id: \.element.id) { i, d in
-            sectionHeader("土地權狀\(estate.landDeeds.count > 1 ? " \(i + 1)" : "")")
-            if !d.situation.isEmpty { infoRow("坐落", d.situation) }
-            if !d.number.isEmpty { infoRow("地號", d.number) }
-            if d.area > 0 { infoRow("面積", String(format: "%g ㎡", d.area)) }
-        }
-        ForEach(Array(estate.buildingDeeds.enumerated()), id: \.element.id) { i, d in
-            sectionHeader("建物權狀\(estate.buildingDeeds.count > 1 ? " \(i + 1)" : "")")
-            if !d.situation.isEmpty { infoRow("坐落", d.situation) }
-            if !d.number.isEmpty { infoRow("建號", d.number) }
-            if !d.address.isEmpty { infoRow("門牌", d.address) }
-            if let cd = d.completionDate {
-                infoRow("完工日", fmtDate(cd))
-            }
-            if !d.usage.isEmpty { infoRow("用途", d.usage) }
-            if !d.annex.isEmpty { infoRow("附屬建物", d.annex) }
-            if d.area > 0 { infoRow("面積", String(format: "%g ㎡", d.area)) }
-        }
-    }
-
-    // MARK: - 集錦摘要
-
-    private func gallerySummary(expensePhotos: [Expense]) -> String? {
-        let photoCount = estate.renovationPhotos.reduce(0) { $0 + max(1, $1.photoFileNames.count) }
-        let expensePhotoCount = expensePhotos.reduce(0) { $0 + $1.photoFileNames.count }
-        let docCount = estate.documents.count
-        let utilityPhotoCount = estate.utilityPayments.reduce(0) { $0 + $1.photoFileNames.count }
-        let elevatorPhotoCount = estate.elevatorMaintenances.reduce(0) { $0 + $1.photoFileNames.count }
-        let total = photoCount + expensePhotoCount + docCount + utilityPhotoCount + elevatorPhotoCount
-        return total > 0 ? "\(total) 筆" : "尚無"
-    }
-
-    // MARK: - 電梯章節 content
-
-    @ViewBuilder
-    private var elevatorContent: some View {
-        if estate.elevatorMaintenances.isEmpty {
-            emptySectionRow("尚無保養記錄")
+extension RealEstateDetailView {
+    /// 新增、編輯、刪除、修正的唯一一道門：看資料免費，改資料付費
+    fileprivate func requirePremium(_ action: () -> Void) {
+        if subscription.isPremium {
+            action()
         } else {
-            ForEach(estate.elevatorMaintenances) { m in
-                Button { editingElevatorMaintenance = m } label: {
-                    // [v4] 36pt teal 漸層圖示圓 + 日期 Capsule 膠囊，對齊 paidItems 列規格
-                    HStack(spacing: 10) {
-                        ZStack {
-                            Circle()
-                                .fill(LinearGradient(
-                                    colors: [Color.teal.opacity(0.18), Color.teal.opacity(0.07)],
-                                    startPoint: .topLeading, endPoint: .bottomTrailing
-                                ))
-                                .frame(width: 36, height: 36)
-                                .shadow(color: Color.teal.opacity(0.16), radius: 4, x: 0, y: 2)
-                                .overlay(Circle().stroke(Color.teal.opacity(0.18), lineWidth: 0.8))
-                            Image(systemName: "wrench.and.screwdriver.fill")
-                                .font(.system(size: 14, weight: .semibold))
-                                .foregroundStyle(.teal)
-                        }
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(fmtDate(m.date))
-                                .font(.system(size: 11, weight: .semibold))
-                                .foregroundStyle(.teal)
-                                .padding(.horizontal, 7).padding(.vertical, 2.5)
-                                .background(Color.teal.opacity(0.10))
-                                .clipShape(Capsule())
-                                .overlay(Capsule().stroke(Color.teal.opacity(0.22), lineWidth: 0.6))
-                        }
-                        Spacer(minLength: 4)
-                        if !m.photoFileNames.isEmpty {
-                            Button {
-                                if let url = m.photoURL { viewingPhotoURL = url }
-                            } label: {
-                                HStack(spacing: 3) {
-                                    Image(systemName: "photo.fill").font(.caption2)
-                                    if m.photoFileNames.count > 1 {
-                                        Text("\(m.photoFileNames.count)")
-                                            .font(.system(size: 9, weight: .bold))
-                                    }
-                                }
-                                .foregroundStyle(.teal)
-                                .padding(5)
-                                .background(Color.teal.opacity(0.10))
-                                .clipShape(Capsule())
-                            }
-                            .buttonStyle(.plain)
-                        }
-                        Image(systemName: "chevron.right")
-                            .font(.caption2).foregroundStyle(.tertiary)
-                    }
-                    .padding(.horizontal, 12).padding(.vertical, 10)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-            }
+            showPremiumAlert = true
         }
     }
 
-    // MARK: - 水電瓦斯摘要
-
-    private var utilitiesSummary: String? {
-        var parts: [String] = []
-        if !estate.utilityPayments.isEmpty {
-            parts.append("\(estate.utilityPayments.count) 筆繳費")
+    fileprivate func makeActions(_ proxy: ScrollViewProxy) -> HouseCardActions {
+        var a = HouseCardActions()
+        a.scrollTo = { anchor in scroll(proxy, to: anchor) }
+        // 篩選只改變顯示：跟篩選膠囊同一個動畫（easeOut 0.25）
+        a.setLedgerFilter = { filter in
+            withAnimation(.easeOut(duration: 0.25)) { ledgerFilter = filter }
         }
-        let meterCount = (estate.waterMeterNumber.isEmpty ? 0 : 1)
-            + (estate.electricityMeterNumber.isEmpty ? 0 : 1)
-            + (estate.gasMeterNumber.isEmpty ? 0 : 1)
-            + estate.extraMeters.count
-        if meterCount > 0 { parts.append("\(meterCount) 個表") }
-        return parts.isEmpty ? "尚無" : parts.joined(separator: "・")
+        a.edit = { focus in requirePremium { sheet = .edit(focus) } }
+        a.fixCheck = { check in fixCheck(check) }
+        a.openSegment = { seg in requirePremium { openSegmentRecord(seg) } }
+        a.deleteSegment = { seg in requirePremium { confirmDeleteSegment(seg) } }
+        a.addSegment = { requirePremium { presentNewMortgage() } }
+        a.addLedger = { kind in requirePremium { presentAdd(kind) } }
+        a.openLedger = { event in openLedger(event, proxy: proxy) }
+        a.deleteLedger = { event in deleteLedger(event) }
+        a.openExpense = { id in requirePremium { openExpenseRecord(id) } }
+        a.openUtility = { payment in requirePremium { presentUtility(payment) } }
+        a.openElevator = { record in requirePremium { presentElevator(record) } }
+        a.showPhotos = { draft in sheet = .photos(draft) }
+        // 「＋ 記一筆」選單在打開前就擋：沒付費時畫面換成普通按鈕，按了跳付費說明
+        a.canEdit = subscription.isPremium
+        a.askPremium = { showPremiumAlert = true }
+        return a
     }
 
-    // MARK: - 保險章節 content
+    /// 只是告訴你一件事（只有「好」）
+    fileprivate func presentNotice(_ title: String, _ message: String) {
+        pendingConfirm = HouseConfirm(title: title, message: message)
+    }
 
-    @ViewBuilder
-    private var insuranceContent: some View {
-        // [v2] 36pt indigo 漸層圖示圓 + 升級金額字型，對齊 SavingsInsuranceView.insuranceCard 視覺規格
-        ForEach(estate.insuranceItems) { ins in
-            HStack(spacing: 10) {
-                ZStack {
-                    Circle()
-                        .fill(LinearGradient(
-                            colors: [Color.indigo.opacity(0.18), Color.indigo.opacity(0.07)],
-                            startPoint: .topLeading, endPoint: .bottomTrailing
-                        ))
-                        .frame(width: 36, height: 36)
-                        .shadow(color: Color.indigo.opacity(0.16), radius: 4, x: 0, y: 2)
-                        .overlay(Circle().stroke(Color.indigo.opacity(0.18), lineWidth: 0.8))
-                    Image(systemName: "shield.fill")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(Color.indigo)
-                }
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(ins.policyNumber.isEmpty ? "未填險號" : ins.policyNumber)
-                        .font(.subheadline.weight(.medium))
-                        .foregroundStyle(ins.policyNumber.isEmpty ? .tertiary : .primary)
-                    if ins.amount > 0 {
-                        Text(fmt(ins.amount))
-                            .font(.system(size: 15, weight: .bold, design: .rounded))
-                            .foregroundStyle(.orange)
-                            .contentTransition(.numericText())
-                    }
-                }
-                Spacer(minLength: 4)
-            }
-            .padding(.horizontal, 12).padding(.vertical, 10)
+    /// 從選單（confirmationDialog）選了之後再跳確認框：等選單收完再出來，不然確認框會被吃掉
+    fileprivate func presentConfirmLater(_ c: HouseConfirm) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+            pendingConfirm = c
         }
     }
 
-    // MARK: - 房屋附屬資產 content
-
-    @ViewBuilder
-    private var propertyAssetsContent: some View {
-        // [v2] 分類標籤 RoundedRectangle(cornerRadius:4) → Capsule + 細邊框，
-        //      金額字型升級，對齊全 App 統一 Capsule 標籤規格
-        ForEach(estate.propertyAssets) { asset in
-            VStack(alignment: .leading, spacing: 5) {
-                HStack {
-                    Text(asset.category.rawValue)
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(.orange)
-                        .padding(.horizontal, 7).padding(.vertical, 2.5)
-                        .background(Color.orange.opacity(0.10))
-                        .clipShape(Capsule())
-                        .overlay(Capsule().stroke(Color.orange.opacity(0.22), lineWidth: 0.6))
-                    MarqueeText(asset.name.isEmpty ? "—" : asset.name)
-                        .font(.subheadline.weight(.semibold))
-                    Spacer(minLength: 4)
-                    if asset.amount > 0 {
-                        Text(fmt(asset.amount))
-                            .font(.system(size: 15, weight: .bold, design: .rounded))
-                            .foregroundStyle(.orange)
-                            .contentTransition(.numericText())
-                    }
-                }
-                HStack(spacing: 10) {
-                    if !asset.brand.isEmpty {
-                        Text("廠牌 \(asset.brand)")
-                            .font(.caption2).foregroundStyle(.secondary)
-                    }
-                    if !asset.floorLocation.isEmpty {
-                        Text("位置 \(asset.floorLocation)")
-                            .font(.caption2).foregroundStyle(.secondary)
-                    }
-                }
-            }
-            .padding(.horizontal, 12).padding(.vertical, 10)
+    fileprivate func presentUtility(_ payment: UtilityPayment?) {
+        if let payment {
+            sheet = .editUtility(payment)
+        } else {
+            sheet = .newUtility(UUID())
         }
     }
 
-    // MARK: - 建物立體圖
-
-    private static let cyanColor = Color(red: 0, green: 0.85, blue: 1.0)
-
-    /// [v25.532] 樓層是自由輸入的字（一樓、地下1樓、RF、夾層…），以前只認得「數字＋F」，其餘全排在 0；
-    /// 改用 FloorLabel 統一解析，跟街景、項目卡同一套排序
-    private var sortedFloors: [FloorInfo] {
-        FloorLabel.sorted(estate.floors)
+    fileprivate func presentElevator(_ record: ElevatorMaintenance?) {
+        if let record {
+            sheet = .editElevator(record)
+        } else {
+            sheet = .newElevator(UUID())
+        }
     }
 
-    // MARK: - 資產分頁（依樓層分組的物件樹）
-
-    /// 「資產」分頁：依樓層分組，列出每一層可新增/重新命名/刪除的物件樹。
-    /// 從原本「樓層 3D」章節獨立出來，畫面更乾淨，也避開與 3D 視圖耦合的閃退路徑。
-    private var assetsSection: some View {
-        VStack(spacing: 16) {
-            if estate.floors.isEmpty {
-                // [v3] 空狀態升級：56pt 藍色漸層圖示圓，視覺均值化
-                VStack(spacing: 12) {
-                    ZStack {
-                        Circle()
-                            .fill(LinearGradient(
-                                colors: [Color.blue.opacity(0.20), Color.blue.opacity(0.08)],
-                                startPoint: .topLeading, endPoint: .bottomTrailing
-                            ))
-                            .frame(width: 56, height: 56)
-                            .overlay(Circle().stroke(Color.blue.opacity(0.18), lineWidth: 0.8))
-                        Image(systemName: "shippingbox")
-                            .font(.system(size: 24, weight: .semibold))
-                            .foregroundStyle(.blue)
-                    }
-                    Text("尚未建立樓層")
-                        .font(.subheadline.weight(.medium))
-                        .foregroundStyle(.secondary)
-                    Text("請先用上方「編輯」新增樓層，再回來這裡建立各樓層的資產物件")
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
-                        .multilineTextAlignment(.center)
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 40)
-                .padding(.horizontal)
-            } else {
-                ForEach(sortedFloors) { floor in
-                    floorItemsTree(for: floor)
-                }
-            }
+    /// 打開記帳裡那一筆（保險列、家電、帳本列）。賣出虧損那筆是跟著成交價自動算的，不給改
+    fileprivate func openExpenseRecord(_ id: UUID) {
+        if id == estate.saleLinkedExpenseId {
+            presentNotice("這一筆是賣房的虧損",
+                          "它跟著購入價和成交價自動算，要改請到「編輯」改成交價。")
+            return
         }
-        .padding(.vertical, 8)
+        guard let ex = expenseStore.expenses.first(where: { $0.id == id }) else {
+            presentNotice("找不到這筆記帳", "記帳裡已經沒有這一筆了（可能在記帳那邊刪掉了）。")
+            return
+        }
+        sheet = .editExpense(ex)
     }
 
-    // MARK: - 樓層物件樹
+    // MARK: 記一筆、加一段
 
-    /// 樓層物件樹：根節點是樓層、底下可遞迴展開。每個節點旁有「+」加子項目。
-    @ViewBuilder
-    private func floorItemsTree(for floor: FloorInfo) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            // 樓層標題列：floor 1 / 2F …
-            HStack(spacing: 6) {
-                Image(systemName: "square.stack.3d.up.fill")
-                    .foregroundStyle(Self.cyanColor)
-                MarqueeText(floor.floorNumber.isEmpty ? "樓層" : floor.floorNumber)
-                    .font(.subheadline.weight(.semibold))
-                Spacer()
-                Button {
-                    editingFloorItemTarget = FloorItemEditTarget(
-                        floorId: floor.id, parentItemId: nil, itemId: nil, currentName: ""
-                    )
-                } label: {
-                    HStack(spacing: 3) {
-                        Image(systemName: "plus.circle.fill")
-                        Text("新增物件").font(.caption.weight(.medium))
-                    }
-                    .foregroundStyle(Self.cyanColor)
-                }
-                .buttonStyle(.plain)
-            }
-            .padding(.horizontal, 12).padding(.top, 10)
-
-            if floor.items.isEmpty {
-                emptySectionRow("尚無物件，點右上「新增物件」開始建立")
-            } else {
-                VStack(alignment: .leading, spacing: 2) {
-                    // 先把樹狀物件攤平成一維列表，再用單一 ForEach 渲染。
-                    // 避免遞迴回傳 AnyView：遞迴型別抹除在物件新增/刪除時會讓
-                    // SwiftUI AttributeGraph 崩潰（按「儲存」即閃退的根因）。
-                    ForEach(flattenedFloorItems(floor.items)) { row in
-                        floorItemRow(floor: floor, row: row)
-                    }
-                }
-                .padding(.horizontal, 12).padding(.bottom, 10)
-            }
-        }
-        .background(
-            RoundedRectangle(cornerRadius: 10)
-                .fill(Color(.secondarySystemBackground))
+    /// 「＋ 加一段」、記一筆的「房貸一段」：起始日接在最後一段的最後一期（貸款第一期是起始日的下一期，剛好接上）
+    fileprivate func presentNewMortgage() {
+        let start = card?.mortgage?.newSegmentStart ?? Date()
+        let preset = AddExpensePreset(
+            fixedCategory: .loan,
+            loanSubCategory: .mortgage,
+            recurrence: .monthly,
+            linkedRealEstateId: estateId,
+            mortgageLinkExisting: true,
+            date: start
         )
-        .padding(.horizontal, 8)
+        sheet = .newExpense(NewExpenseRequest(expenseType: .fixed, preset: preset))
     }
 
-    /// 攤平後的單筆物件列：預先算好樹狀前綴需要的 depth / isLast / 祖先資訊，
-    /// 讓畫面層用單一 ForEach 渲染，不必遞迴。
-    fileprivate struct FlatFloorItem: Identifiable {
-        let id: UUID
-        let item: FloorItem
-        let depth: Int
-        let isLast: Bool
-        let ancestorIsLast: [Bool]
-    }
-
-    /// 將樹狀物件以深度優先攤平成一維陣列；每列帶有畫前綴所需資訊。
-    /// 以此取代「遞迴回傳 AnyView」的渲染方式，避免資料變動時的 SwiftUI 崩潰。
-    private func flattenedFloorItems(_ items: [FloorItem],
-                                     depth: Int = 0,
-                                     ancestorIsLast: [Bool] = []) -> [FlatFloorItem] {
-        var result: [FlatFloorItem] = []
-        for (idx, item) in items.enumerated() {
-            let isLast = idx == items.count - 1
-            result.append(FlatFloorItem(id: item.id, item: item, depth: depth,
-                                        isLast: isLast, ancestorIsLast: ancestorIsLast))
-            if !item.children.isEmpty {
-                result.append(contentsOf: flattenedFloorItems(item.children,
-                                                              depth: depth + 1,
-                                                              ancestorIsLast: ancestorIsLast + [isLast]))
-            }
-        }
-        return result
-    }
-
-    /// 單筆物件列：用「│  ├──」風格繪製樹狀分支。前綴由 flatten 時算好的 row 提供，
-    /// 非遞迴、回傳具體型別，徹底避開遞迴 AnyView 在資料變動時造成的閃退。
-    @ViewBuilder
-    private func floorItemRow(floor: FloorInfo, row: FlatFloorItem) -> some View {
-        let item = row.item
-        HStack(spacing: 0) {
-            // 把祖先的「│  / 空白」前綴 + 本層的 ├── / └──  組成單一字串渲染，
-            // 避免 ForEach(0..<dynamic, id: \.self) 在動態 Range 上的未定義行為（會閃退）。
-            Text(treePrefix(depth: row.depth, isLast: row.isLast, ancestorIsLast: row.ancestorIsLast))
-                .font(.system(.caption, design: .monospaced))
-                .foregroundStyle(.tertiary)
-            Image(systemName: item.children.isEmpty ? "cube" : "cube.fill")
-                .font(.caption2)
-                .foregroundStyle(Self.cyanColor)
-                .padding(.trailing, 4)
-            MarqueeText(item.name.isEmpty ? "未命名" : item.name)
-                .font(.caption.weight(.medium))
-            Spacer()
-            // 新增子項目
-            Button {
-                editingFloorItemTarget = FloorItemEditTarget(
-                    floorId: floor.id, parentItemId: item.id, itemId: nil, currentName: ""
-                )
-            } label: {
-                Image(systemName: "plus.circle")
-                    .font(.subheadline)
-                    .foregroundStyle(Self.cyanColor)
-            }
-            .buttonStyle(.plain)
-            .padding(.leading, 6)
-            // 編輯 / 刪除 menu
-            Menu {
-                Button {
-                    editingFloorItemTarget = FloorItemEditTarget(
-                        floorId: floor.id, parentItemId: nil, itemId: item.id, currentName: item.name
-                    )
-                } label: { Label("重新命名", systemImage: "pencil") }
-                Button(role: .destructive) {
-                    // [v25.530] 刪一個節點會連整棵子樹一起刪，先確認
-                    pendingDeletion = .floorItem(floorId: floor.id, item: item)
-                } label: { Label("刪除", systemImage: "trash") }
-            } label: {
-                Image(systemName: "ellipsis.circle")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            }
-            .buttonStyle(.plain)
-            .padding(.leading, 4)
-        }
-        .contentShape(Rectangle())
-        .onTapGesture {
-            editingFloorItemTarget = FloorItemEditTarget(
-                floorId: floor.id, parentItemId: nil, itemId: item.id, currentName: item.name
+    /// 「＋ 記一筆」：水電瓦斯直接開繳費編輯器；其他開記帳（分類先帶好）。賣掉的房子日期預設賣出日
+    fileprivate func presentAdd(_ kind: HouseLedgerAddKind) {
+        switch kind {
+        case .mortgageSegment:
+            presentNewMortgage()
+        case .utility:
+            sheet = .newUtility(UUID())
+        default:
+            guard let category = kind.category else { return }
+            var preset = AddExpensePreset(
+                variableCategory: .realEstate,
+                realEstateExpenseCategory: category,
+                linkedRealEstateId: estateId,
+                assetLink: .realEstate,
+                realEstateLinkExisting: true
             )
+            if estate.isSold, let sold = estate.soldDate { preset.date = sold }
+            sheet = .newExpense(NewExpenseRequest(expenseType: .variable, preset: preset))
         }
     }
 
-    // MARK: - 樓層物件 CRUD
+    // MARK: 帳本列
 
-    /// 組合樹狀分支前綴字串：祖先層用「│  」或「   」，本層用「├── 」或「└── 」（root 不加）
-    private func treePrefix(depth: Int, isLast: Bool, ancestorIsLast: [Bool]) -> String {
-        var s = ""
-        for ancestor in ancestorIsLast {
-            s += ancestor ? "   " : "│  "
+    /// 房貸年列捲到房貸區（不用付費）；其他都是去改資料（付費）
+    fileprivate func openLedger(_ e: HouseLedgerEvent, proxy: ScrollViewProxy) {
+        if case .mortgageYear = e.source {
+            scroll(proxy, to: .mortgage)
+            return
         }
-        if depth > 0 {
-            s += isLast ? "└── " : "├── "
-        }
-        return s
+        requirePremium { openLedgerRecord(e) }
     }
 
-    /// 新增物件：parentItemId 為 nil → 加在 floor.items 根層；否則加在指定 parent 的 children
-    private func addFloorItem(floorId: UUID, parentItemId: UUID?, name: String) {
-        let trimmed = name.trimmingCharacters(in: .whitespaces)
-        guard !trimmed.isEmpty,
-              var estate = store.realEstates.first(where: { $0.id == estateId }),
-              let fIdx = estate.floors.firstIndex(where: { $0.id == floorId }) else { return }
-        let newItem = FloorItem(name: trimmed)
-        if let parentId = parentItemId {
-            estate.floors[fIdx].items = insertChild(into: estate.floors[fIdx].items, parentId: parentId, child: newItem)
-        } else {
-            estate.floors[fIdx].items.append(newItem)
-        }
-        commitFloorEstate(estate)
-    }
-
-    private func renameFloorItem(floorId: UUID, itemId: UUID, newName: String) {
-        let trimmed = newName.trimmingCharacters(in: .whitespaces)
-        guard !trimmed.isEmpty,
-              var estate = store.realEstates.first(where: { $0.id == estateId }),
-              let fIdx = estate.floors.firstIndex(where: { $0.id == floorId }) else { return }
-        estate.floors[fIdx].items = renameInTree(estate.floors[fIdx].items, targetId: itemId, newName: trimmed)
-        commitFloorEstate(estate)
-    }
-
-    private func deleteFloorItem(floorId: UUID, itemId: UUID) {
-        guard var estate = store.realEstates.first(where: { $0.id == estateId }),
-              let fIdx = estate.floors.firstIndex(where: { $0.id == floorId }) else { return }
-        estate.floors[fIdx].items = removeFromTree(estate.floors[fIdx].items, targetId: itemId)
-        commitFloorEstate(estate)
-    }
-
-    /// 將樓層物件變更寫回 store。刻意延後到下一個 runloop 才改動 @Published store：
-    /// 樓層物件的新增/重新命名是在 FloorItemEditor「儲存」按鈕裡同步觸發，緊接著 sheet
-    /// 會 dismiss；刪除則來自 Menu 按鈕。若在這個 view-update 交易裡同步改動 observed
-    /// state（此 NavigationStack 疊了多個 sheet），SwiftUI 會閃退。延後一個 runloop 即可
-    /// 讓存檔脫離 sheet 關閉 / 按鈕點擊的更新交易。
-    private func commitFloorEstate(_ estate: RealEstate) {
-        DispatchQueue.main.async {
-            store.update(estate)
+    fileprivate func openLedgerRecord(_ e: HouseLedgerEvent) {
+        switch e.source {
+        case .expense(let id):
+            openExpenseRecord(id)
+        case .utility(let paymentId):
+            if let payment = estate.utilityPayments.first(where: { $0.id == paymentId }) {
+                sheet = .editUtility(payment)
+            } else if let id = e.expenseId {
+                openExpenseRecord(id)
+            }
+        case .mortgageYear:
+            break
+        case .fixedYear(let id, _):
+            openExpenseRecord(id)
+        case .legacy(let kind, let itemId):
+            offerLegacyChoices(e, kind: kind, itemId: itemId)
         }
     }
 
-    private func insertChild(into items: [FloorItem], parentId: UUID, child: FloorItem) -> [FloorItem] {
-        items.map { node in
-            var node = node
-            if node.id == parentId {
-                node.children.append(child)
+    /// 長按刪除：房貸年列、固定支出年列不是一筆真的記帳，不能刪
+    fileprivate func deleteLedger(_ e: HouseLedgerEvent) {
+        guard e.canDelete, !e.isYearRow else { return }
+        requirePremium { confirmDeleteLedger(e) }
+    }
+
+    fileprivate func confirmDeleteLedger(_ e: HouseLedgerEvent) {
+        let title = "刪除「\(e.title) \(e.amountText)」？"
+        if let expId = e.expenseId, expenseStore.expenses.contains(where: { $0.id == expId }) {
+            var message = "記帳裡這筆支出"
+            if let bank = bankName(forExpense: expId) {
+                message += "和\(bank)的扣款紀錄會一起刪除，不能復原。"
             } else {
-                node.children = insertChild(into: node.children, parentId: parentId, child: child)
+                message += "會一起刪除，不能復原。"
             }
-            return node
+            message += ledgerDeleteExtra(expId)
+            pendingConfirm = HouseConfirm(title: title, message: message, button: "刪除",
+                                          action: { deleteLedgerExpense(expId) })
+        } else if case .legacy(let kind, let itemId) = e.source {
+            pendingConfirm = HouseConfirm(title: title, message: legacyDeleteMessage(kind), button: "刪除",
+                                          action: { deleteLegacyItem(kind, itemId: itemId) })
         }
     }
 
-    private func renameInTree(_ items: [FloorItem], targetId: UUID, newName: String) -> [FloorItem] {
-        items.map { node in
-            var node = node
-            if node.id == targetId {
-                node.name = newName
-            } else {
-                node.children = renameInTree(node.children, targetId: targetId, newName: newName)
-            }
-            return node
+    /// 銀行帳戶裡真的有這筆扣款才提銀行名（信用卡、週期性固定支出不會有單筆扣款）
+    fileprivate func bankName(forExpense id: UUID) -> String? {
+        for ms in lifeStore.milestones {
+            let deposits = ms.bankDeposits ?? []
+            guard deposits.contains(where: { $0.linkedExpenseId == id }) else { continue }
+            let bank = (ms.bankName ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            return bank.isEmpty ? ms.title : bank
         }
+        return nil
     }
 
-    private func removeFromTree(_ items: [FloorItem], targetId: UUID) -> [FloorItem] {
-        var result: [FloorItem] = []
-        for node in items where node.id != targetId {
-            var copy = node
-            copy.children = removeFromTree(node.children, targetId: targetId)
-            result.append(copy)
+    /// 刪的是保險或家電那筆支出時，房子那邊的那一項也會拿掉：先講清楚
+    fileprivate func ledgerDeleteExtra(_ expId: UUID) -> String {
+        let re = estate
+        if re.insuranceItems.contains(where: { $0.linkedExpenseId == expId }) {
+            return "「房屋資料」裡的這張保單也會一起拿掉。"
         }
-        return result
-    }
-
-    private func infoRow(_ label: String, _ value: String) -> some View {
-        HStack {
-            Text(label).font(.caption).foregroundStyle(.secondary)
-            Spacer()
-            Text(value).font(.subheadline.weight(.medium))
+        if re.propertyAssets.contains(where: { $0.linkedExpenseId == expId }) {
+            return "「樓層與物品」裡的這件家電家具也會一起拿掉。"
         }
-        .padding(.horizontal).padding(.vertical, 8)
-    }
-
-    // MARK: - 房屋資料集錦（裝潢照片 + 關聯支出照片 + PDF / PPT / Excel 等文件）
-
-    /// 集錦章節右側「+」Menu（給 collapsibleSection trailing 用）
-    private var galleryAddMenu: some View {
-        Menu {
-            Button {
-                if subscription.isPremium { addingRenovationPhoto = true }
-                else { showPremiumAlert = true }
-            } label: {
-                Label("新增照片及描述", systemImage: "photo")
-            }
-            Divider()
-            Button {
-                if subscription.isPremium { showDocumentPicker = true }
-                else { showPremiumAlert = true }
-            } label: {
-                Label("上傳文件 (PDF / PPT / Excel…)", systemImage: "doc.badge.plus")
-            }
-        } label: {
-            Image(systemName: "plus.circle.fill")
-                .font(.subheadline).foregroundStyle(.green)
+        if re.utilityPayments.contains(where: { $0.linkedExpenseId == expId }) {
+            return "水電的這筆繳費紀錄和收據照片也會一起刪掉。"
         }
-        .buttonStyle(.plain)
+        return ""
     }
 
-    /// 該房地產關聯的、有附照片的支出（變動 + 固定皆含）
-    private var linkedExpensePhotos: [Expense] {
-        expenseStore.expenses
-            .filter { $0.linkedRealEstateId == estateId && !$0.photoFileNames.isEmpty }
-    }
-
-    @ViewBuilder
-    private func renovationPhotosContent(expensePhotos: [Expense]) -> some View {
-        let renovationItems = estate.renovationPhotos.map { HousePhotoItem.renovation($0) }
-        let expenseItems = expensePhotos.map { HousePhotoItem.expense($0) }
-        let documentItems = estate.documents.map { HousePhotoItem.document($0) }
-        let utilityItems = estate.utilityPayments
-            .filter { $0.photoFileName != nil }
-            .map { HousePhotoItem.utility($0) }
-        let elevatorItems = estate.elevatorMaintenances
-            .filter { !$0.photoFileNames.isEmpty }
-            .map { HousePhotoItem.elevator($0) }
-        let allItems = (renovationItems + expenseItems + documentItems + utilityItems + elevatorItems)
-            .sorted { $0.date > $1.date }
-
-        if allItems.isEmpty {
-            emptySectionRow("尚無房屋資料（裝潢照片 / 關聯支出 / 文件 / 水電瓦斯收據 / 電梯保養）")
-        } else {
-            ScrollView(.horizontal, showsIndicators: false) {
-                LazyHStack(spacing: 14) {
-                    ForEach(allItems) { item in
-                        Button {
-                            handleHousePhotoTap(item)
-                        } label: {
-                            housePhotoCard(item)
-                        }
-                        .buttonStyle(.plain)
-                        .contextMenu {
-                            if case .renovation(let p) = item.kind {
-                                Button {
-                                    editingRenovationPhoto = p
-                                } label: {
-                                    Label("編輯資訊", systemImage: "pencil")
-                                }
-                            }
-                            if case .document(let d) = item.kind {
-                                Button(role: .destructive) {
-                                    // [v25.530] 文件連 iCloud 上的一起刪，先確認
-                                    pendingDeletion = .document(d)
-                                } label: {
-                                    Label("刪除文件", systemImage: "trash")
-                                }
-                            }
-                            if case .utility(let u) = item.kind {
-                                Button {
-                                    editingUtilityPayment = u
-                                } label: {
-                                    Label("編輯繳費紀錄", systemImage: "pencil")
-                                }
-                            }
-                            if case .elevator(let m) = item.kind {
-                                Button {
-                                    editingElevatorMaintenance = m
-                                } label: {
-                                    Label("編輯保養紀錄", systemImage: "pencil")
-                                }
-                            }
-                        }
-                    }
-                }
-                .padding(.horizontal, 14)
-                .padding(.bottom, 12)
-            }
-        }
-    }
-
-    private func handleHousePhotoTap(_ item: HousePhotoItem) {
-        switch item.kind {
-        case .renovation(let p):
-            guard !p.photoFileNames.isEmpty else {
-                editingRenovationPhoto = p
-                return
-            }
-            let urls = p.photoFileNames.map { RenovationPhoto.photoURL(for: $0) }
-            let title = p.title.isEmpty ? "裝潢紀錄" : p.title
-            cutePhotoDraft = CutePhotoDraft(
-                urls: urls,
-                title: title,
-                note: p.note,
-                date: p.date,
-                kind: .renovation
-            )
-        case .expense(let e):
-            guard !e.photoFileNames.isEmpty else { return }
-            let urls = e.photoFileNames.map { Expense.photoURL(for: $0) }
-            let trimmedNote = e.note.trimmingCharacters(in: .whitespaces)
-            let title: String = {
-                if !trimmedNote.isEmpty { return trimmedNote }
-                return e.title.isEmpty ? "支出照片" : e.title
-            }()
-            cutePhotoDraft = CutePhotoDraft(
-                urls: urls,
-                title: title,
-                note: (trimmedNote.isEmpty || trimmedNote == title) ? "" : trimmedNote,
-                date: e.date,
-                kind: .expense
-            )
-        case .document(let d):
-            previewingDocumentURL = IdentifiableURL(url: d.fileURL)
-        case .utility(let u):
-            guard !u.photoFileNames.isEmpty else {
-                editingUtilityPayment = u
-                return
-            }
-            let urls = u.photoFileNames.map { UtilityPayment.photosDirectory.appendingPathComponent($0) }
-            let amountText: String = u.amount > 0 ? fmt(u.amount) : ""
-            let noteParts = [amountText, u.note.trimmingCharacters(in: .whitespaces)]
-                .filter { !$0.isEmpty }
-            cutePhotoDraft = CutePhotoDraft(
-                urls: urls,
-                title: "\(u.type.rawValue) 繳費",
-                note: noteParts.joined(separator: "・"),
-                date: u.date,
-                kind: .utility(u.type)
-            )
-        case .elevator(let m):
-            guard !m.photoFileNames.isEmpty else {
-                editingElevatorMaintenance = m
-                return
-            }
-            let urls = m.photoFileNames.map { ElevatorMaintenance.photoURL(for: $0) }
-            cutePhotoDraft = CutePhotoDraft(
-                urls: urls,
-                title: "電梯保養",
-                note: "",
-                date: m.date,
-                kind: .elevator
-            )
-        }
-    }
-
-    private func housePhotoCard(_ item: HousePhotoItem) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            if case .document(let d) = item.kind {
-                documentThumbnail(for: d)
-            } else if item.fileNames.count >= 2 {
-                stackedHousePhotos(fileNames: item.fileNames, urlFor: item.urlForFileName)
-            } else if let url = item.primaryURL {
-                renovationSinglePhoto(url: url)
-            } else {
-                renovationSinglePhoto(url: nil)
-            }
-            HStack(spacing: 4) {
-                Image(systemName: item.badgeIcon)
-                    .font(.system(size: 9))
-                    .foregroundStyle(item.badgeColor)
-                MarqueeText(item.displayTitle)
-                    .font(.caption.weight(.medium))
-            }
-            .frame(width: 140, alignment: .leading)
-            Text(fmtDate(item.date))
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
-        }
-        .padding(8)
-    }
-
-    /// 文件縮圖卡片：大張的彩色 icon + 副檔名標籤，與照片卡片同尺寸
-    private func documentThumbnail(for doc: RealEstateDocument) -> some View {
-        let ext = (doc.fileName as NSString).pathExtension.uppercased()
-        return ZStack(alignment: .bottomTrailing) {
-            RoundedRectangle(cornerRadius: 10)
-                .fill(doc.iconColor.opacity(0.12))
-                .frame(width: 130, height: 100)
-            VStack(spacing: 6) {
-                Image(systemName: doc.icon)
-                    .font(.system(size: 38))
-                    .foregroundStyle(doc.iconColor)
-                if !ext.isEmpty {
-                    Text(ext)
-                        .font(.caption2.weight(.bold))
-                        .foregroundStyle(doc.iconColor)
-                        .padding(.horizontal, 6).padding(.vertical, 2)
-                        .background(doc.iconColor.opacity(0.18))
-                        .clipShape(Capsule())
-                }
-            }
-            .frame(width: 130, height: 100)
-        }
-        .frame(width: 130, height: 100)
-        .clipShape(RoundedRectangle(cornerRadius: 10))
-        .shadow(color: .black.opacity(0.12), radius: 3, y: 2)
-        .frame(width: 140, height: 110)
-    }
-
-    // MARK: - 文件匯入 / 刪除
-
-    private func importDocuments(_ urls: [URL]) {
-        guard var estate = store.realEstates.first(where: { $0.id == estateId }) else { return }
-        for url in urls {
-            if let doc = RealEstateDocument.importDocument(from: url) {
-                estate.documents.append(doc)
-            }
-        }
-        store.update(estate)
-    }
-
-    private func deleteDocument(_ doc: RealEstateDocument) {
-        guard var estate = store.realEstates.first(where: { $0.id == estateId }) else { return }
-        RealEstateDocument.deleteDocument(doc.fileName)
-        estate.documents.removeAll { $0.id == doc.id }
-        store.update(estate)
-    }
-
-    /// 通用堆疊照片視圖：用一個 urlFor 閉包來支援 RenovationPhoto / Expense 兩種來源
-    private func stackedHousePhotos(fileNames: [String], urlFor: (String) -> URL) -> some View {
-        let visible = Array(fileNames.prefix(3))
-        return ZStack {
-            if visible.count >= 3 {
-                stackedHousePhotoLayer(url: urlFor(visible[2]))
-                    .rotationEffect(.degrees(7))
-                    .offset(x: 7, y: 4)
-                    .opacity(0.85)
-            }
-            if visible.count >= 2 {
-                stackedHousePhotoLayer(url: urlFor(visible[1]))
-                    .rotationEffect(.degrees(-5))
-                    .offset(x: -4, y: 2)
-                    .opacity(0.92)
-            }
-            stackedHousePhotoLayer(url: urlFor(visible[0]))
-
-            VStack {
-                HStack {
-                    Spacer()
-                    HStack(spacing: 3) {
-                        Image(systemName: "square.stack.3d.up.fill").font(.system(size: 10))
-                        Text("\(fileNames.count)").font(.caption2.weight(.bold))
-                    }
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 7).padding(.vertical, 3)
-                    .background(Color.black.opacity(0.65))
-                    .clipShape(Capsule())
-                    .padding(6)
-                }
-                Spacer()
-            }
-            .frame(width: 130, height: 100)
-        }
-        .frame(width: 140, height: 110)
-    }
-
-    @ViewBuilder
-    private func stackedHousePhotoLayer(url: URL) -> some View {
-        ThumbnailImageView(url: url)
-            .frame(width: 130, height: 100)
-            .clipped()
-            .clipShape(RoundedRectangle(cornerRadius: 10))
-            // 去掉突兀的白色外框，改用陰影分層（疊張之間靠旋轉位移 + 陰影區隔）
-            .shadow(color: .black.opacity(0.2), radius: 3, y: 2)
-    }
-
-    private func renovationPhotoCard(_ p: RenovationPhoto) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            if p.photoFileNames.count >= 2 {
-                renovationStackedPhotos(for: p.photoFileNames)
-            } else {
-                renovationSinglePhoto(url: p.photoURL)
-            }
-            MarqueeText(displayTitle(for: p))
-                .font(.caption.weight(.medium))
-                .frame(width: 130, alignment: .leading)
-            Text(fmtDate(p.date))
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
-        }
-        .padding(8)
-    }
-
-    /// 顯示用標題：使用者填的 title 優先；多張時 fallback 到「N 張照片」
-    private func displayTitle(for p: RenovationPhoto) -> String {
-        if !p.title.isEmpty { return p.title }
-        if p.photoFileNames.count >= 2 { return "\(p.photoFileNames.count) 張照片" }
-        return "未命名"
-    }
-
-    /// 單張照片卡片：footprint 與堆疊卡片一致（140×110，內容 130×100 置中），
-    /// 不再自帶白框與 onTapGesture，由外層 Button 統一導向 CutePhotoViewer。
-    @ViewBuilder
-    private func renovationSinglePhoto(url: URL?) -> some View {
-        ThumbnailImageView(url: url, placeholderIcon: "photo")
-            .frame(width: 130, height: 100)
-            .clipped()
-            .clipShape(RoundedRectangle(cornerRadius: 10))
-            .shadow(color: .black.opacity(0.18), radius: 3, y: 2)
-            .frame(width: 140, height: 110)
-    }
-
-    /// 多張照片堆疊卡片：3 張往後遞減旋轉位移，最上層放第一張，右上角徽章顯示總張數
-    private func renovationStackedPhotos(for fileNames: [String]) -> some View {
-        let visible = Array(fileNames.prefix(3))
-        return ZStack {
-            // 最後一張（背景）
-            if visible.count >= 3 {
-                stackedPhotoLayer(visible[2])
-                    .rotationEffect(.degrees(7))
-                    .offset(x: 7, y: 4)
-                    .opacity(0.85)
-            }
-            // 中間
-            if visible.count >= 2 {
-                stackedPhotoLayer(visible[1])
-                    .rotationEffect(.degrees(-5))
-                    .offset(x: -4, y: 2)
-                    .opacity(0.92)
-            }
-            // 最上層封面
-            stackedPhotoLayer(visible[0])
-
-            // 數量徽章
-            VStack {
-                HStack {
-                    Spacer()
-                    HStack(spacing: 3) {
-                        Image(systemName: "square.stack.3d.up.fill")
-                            .font(.system(size: 10))
-                        Text("\(fileNames.count)")
-                            .font(.caption2.weight(.bold))
-                    }
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 7).padding(.vertical, 3)
-                    .background(Color.black.opacity(0.65))
-                    .clipShape(Capsule())
-                    .padding(6)
-                }
-                Spacer()
-            }
-            .frame(width: 130, height: 100)
-        }
-        .frame(width: 140, height: 110)
-    }
-
-    @ViewBuilder
-    private func stackedPhotoLayer(_ name: String) -> some View {
-        ThumbnailImageView(url: RenovationPhoto.photoURL(for: name))
-            .frame(width: 130, height: 100)
-            .clipped()
-            .clipShape(RoundedRectangle(cornerRadius: 10))
-            .overlay(
-                RoundedRectangle(cornerRadius: 10)
-                    .stroke(Color.white, lineWidth: 2)
-            )
-            .shadow(color: .black.opacity(0.18), radius: 3, y: 2)
-    }
-
-    @ViewBuilder
-    private var utilitiesContent: some View {
-        // 水（主表）
-        if !estate.waterMeterNumber.isEmpty || !estate.waterMeterOwner.isEmpty {
-            utilityRow(icon: "drop.fill", color: .blue,
-                       number: estate.waterMeterNumber, owner: estate.waterMeterOwner,
-                       numberLabel: "水號")
-        }
-        // 額外的水表
-        ForEach(estate.extraMeters.filter { $0.type == .water }) { m in
-            extraMeterRow(m)
-        }
-        latestPaymentRow(type: .water)
-
-        // 電（主表）
-        if !estate.electricityMeterNumber.isEmpty || !estate.electricityMeterOwner.isEmpty {
-            utilityRow(icon: "bolt.fill", color: .yellow,
-                       number: estate.electricityMeterNumber, owner: estate.electricityMeterOwner,
-                       numberLabel: "電號")
-        }
-        ForEach(estate.extraMeters.filter { $0.type == .electricity }) { m in
-            extraMeterRow(m)
-        }
-        latestPaymentRow(type: .electricity)
-
-        // 瓦斯（主表）
-        if !estate.gasUserNumber.isEmpty || !estate.gasMeterNumber.isEmpty || !estate.gasMeterOwner.isEmpty {
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 8) {
-                    Image(systemName: "flame.fill").foregroundStyle(.orange).frame(width: 20)
-                    VStack(alignment: .leading, spacing: 2) {
-                        if !estate.gasUserNumber.isEmpty {
-                            Text("用戶編號 \(estate.gasUserNumber)").font(.caption2).foregroundStyle(.secondary)
-                        }
-                        if !estate.gasMeterNumber.isEmpty {
-                            Text("表號 \(estate.gasMeterNumber)").font(.caption2).foregroundStyle(.secondary)
-                        }
-                    }
-                    Spacer()
-                    if !estate.gasMeterOwner.isEmpty {
-                        Text(estate.gasMeterOwner).font(.caption).foregroundStyle(.secondary)
-                    }
-                }
-            }
-            .padding(.horizontal).padding(.vertical, 8)
-        }
-        ForEach(estate.extraMeters.filter { $0.type == .gas }) { m in
-            extraMeterRow(m)
-        }
-        latestPaymentRow(type: .gas)
-
-        // 展開：顯示所有歷史繳費紀錄
-        // 各類型最新一筆的 id 只算一次，避免對每一筆繳費都重新掃描+排序整個 utilityPayments（O(n²)）
-        let latestIDs = latestPaymentIDs()
-        let allPayments = estate.utilityPayments.sorted { $0.date > $1.date }
-        let olderPayments = allPayments.filter { p in
-            !latestIDs.contains(p.id)
-        }
-        if utilityExpanded {
-            if !olderPayments.isEmpty {
-                Divider().padding(.horizontal)
-                ForEach(olderPayments) { p in
-                    paymentRow(p)
-                }
-            }
-        }
-        if !olderPayments.isEmpty {
-            Button {
-                withAnimation { utilityExpanded.toggle() }
-            } label: {
-                HStack {
-                    Spacer()
-                    Image(systemName: utilityExpanded ? "chevron.up" : "chevron.down")
-                        .font(.caption2)
-                    Text(utilityExpanded ? "收起歷史紀錄" : "展開歷史紀錄（\(olderPayments.count) 筆）")
-                        .font(.caption.weight(.medium))
-                    Spacer()
-                }
-                .foregroundStyle(.green)
-                .padding(.vertical, 8)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-        }
-    }
-
-    private func extraMeterRow(_ m: UtilityMeter) -> some View {
-        let color: Color = {
-            switch m.type {
-            case .water: return .blue
-            case .electricity: return .yellow
-            case .gas: return .orange
-            }
-        }()
-        return HStack(alignment: .top, spacing: 8) {
-            Image(systemName: m.type.icon).foregroundStyle(color).frame(width: 20)
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 6) {
-                    if !m.label.isEmpty {
-                        Text(m.label)
-                            .font(.system(size: 10, weight: .semibold))
-                            .foregroundStyle(color)
-                            .padding(.horizontal, 6).padding(.vertical, 2)
-                            .background(color.opacity(0.12))
-                            .clipShape(Capsule())
-                            .overlay(Capsule().stroke(color.opacity(0.22), lineWidth: 0.6))
-                    }
-                    if !m.userNumber.isEmpty {
-                        Text("用戶編號 \(m.userNumber)").font(.caption2).foregroundStyle(.secondary)
-                    }
-                }
-                if !m.meterNumber.isEmpty {
-                    let label: String = {
-                        switch m.type {
-                        case .water: return "水號"
-                        case .electricity: return "電號"
-                        case .gas: return "表號"
-                        }
-                    }()
-                    Text("\(label) \(m.meterNumber)").font(.caption2).foregroundStyle(.secondary)
-                }
-            }
-            Spacer()
-            if !m.owner.isEmpty {
-                Text(m.owner).font(.caption).foregroundStyle(.secondary)
-            }
-        }
-        .padding(.horizontal).padding(.vertical, 6)
-    }
-
-    // [v4] 36pt 對應色漸層圖示圓 + 升級欄位字型，對齊 infoRow / mortgageItems 視覺規格
-    private func utilityRow(icon: String, color: Color, number: String, owner: String, numberLabel: String) -> some View {
-        HStack(spacing: 10) {
-            ZStack {
-                Circle()
-                    .fill(LinearGradient(
-                        colors: [color.opacity(0.18), color.opacity(0.07)],
-                        startPoint: .topLeading, endPoint: .bottomTrailing
-                    ))
-                    .frame(width: 36, height: 36)
-                    .shadow(color: color.opacity(0.16), radius: 4, x: 0, y: 2)
-                    .overlay(Circle().stroke(color.opacity(0.18), lineWidth: 0.8))
-                Image(systemName: icon)
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(color)
-            }
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 5) {
-                    Text(numberLabel)
-                        .font(.caption2).foregroundStyle(.secondary)
-                    Text(number.isEmpty ? "—" : number)
-                        .font(.subheadline.weight(.medium))
-                }
-                if !owner.isEmpty {
-                    Text("所有權人：\(owner)")
-                        .font(.caption2).foregroundStyle(.tertiary)
-                }
-            }
-            Spacer()
-        }
-        .padding(.horizontal, 12).padding(.vertical, 8)
-    }
-
-    // MARK: - 輔助
-
-    /// 該類型最新一筆繳費
-    private func latestPayment(for type: UtilityType) -> UtilityPayment? {
-        estate.utilityPayments
-            .filter { $0.type == type }
-            .sorted { $0.date > $1.date }
-            .first
-    }
-
-    /// 各水電瓦斯類型最新一筆繳費的 id 集合（一次分組取得，取代逐筆呼叫 latestPayment(for:) 的 O(n²) 掃描）
-    private func latestPaymentIDs() -> Set<UUID> {
-        var latestByType: [UtilityType: UtilityPayment] = [:]
-        for p in estate.utilityPayments {
-            if let cur = latestByType[p.type], cur.date >= p.date { continue }
-            latestByType[p.type] = p
-        }
-        return Set(latestByType.values.map { $0.id })
-    }
-
-    // [v4] 最新一筆繳費：金額字型升級 + contentTransition，對齊 calcRow 規格
-    @ViewBuilder
-    private func latestPaymentRow(type: UtilityType) -> some View {
-        if let p = latestPayment(for: type) {
-            Button { editingUtilityPayment = p } label: {
-                HStack(spacing: 8) {
-                    Rectangle().fill(Color.clear).frame(width: 20)
-                    Text(fmtDate(p.date))
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .padding(.horizontal, 6).padding(.vertical, 2)
-                        .background(Color(.tertiarySystemFill))
-                        .clipShape(Capsule())
-                    if !p.photoFileNames.isEmpty {
-                        Button {
-                            if let url = p.photoURL { viewingPhotoURL = url }
-                        } label: {
-                            Image(systemName: "photo.fill").font(.caption2).foregroundStyle(.blue)
-                        }
-                        .buttonStyle(.plain)
-                    }
-                    Spacer()
-                    Text(fmt(p.amount))
-                        .font(.system(size: 14, weight: .bold, design: .rounded))
-                        .foregroundStyle(.red)
-                        .contentTransition(.numericText())
-                    Image(systemName: "chevron.right")
-                        .font(.caption2).foregroundStyle(.tertiary)
-                }
-                .padding(.horizontal, 12).padding(.vertical, 5)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-        }
-    }
-
-    // [v4] 36pt 對應色漸層圖示圓 + 金額字型升級 + contentTransition，對齊 paidItems 規格
-    private func paymentRow(_ p: UtilityPayment) -> some View {
-        let color = utilityColor(p.type)
-        return Button { editingUtilityPayment = p } label: {
-            HStack(spacing: 10) {
-                ZStack {
-                    Circle()
-                        .fill(LinearGradient(
-                            colors: [color.opacity(0.18), color.opacity(0.07)],
-                            startPoint: .topLeading, endPoint: .bottomTrailing
-                        ))
-                        .frame(width: 36, height: 36)
-                        .shadow(color: color.opacity(0.16), radius: 4, x: 0, y: 2)
-                        .overlay(Circle().stroke(color.opacity(0.18), lineWidth: 0.8))
-                    Image(systemName: p.type.icon)
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(color)
-                }
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(spacing: 5) {
-                        Text(p.type.rawValue)
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(color)
-                            .padding(.horizontal, 7).padding(.vertical, 2.5)
-                            .background(color.opacity(0.10))
-                            .clipShape(Capsule())
-                            .overlay(Capsule().stroke(color.opacity(0.22), lineWidth: 0.6))
-                        Text(fmtDate(p.date))
-                            .font(.caption2).foregroundStyle(.secondary)
-                            .padding(.horizontal, 6).padding(.vertical, 2)
-                            .background(Color(.tertiarySystemFill))
-                            .clipShape(Capsule())
-                    }
-                    Text(fmt(p.amount))
-                        .font(.system(size: 15, weight: .bold, design: .rounded))
-                        .foregroundStyle(.red)
-                        .contentTransition(.numericText())
-                }
-                Spacer(minLength: 4)
-                if !p.photoFileNames.isEmpty {
-                    Button {
-                        if let url = p.photoURL { viewingPhotoURL = url }
-                    } label: {
-                        Image(systemName: "photo.fill")
-                            .font(.caption2)
-                            .foregroundStyle(.blue)
-                            .padding(5)
-                            .background(Color.blue.opacity(0.10))
-                            .clipShape(Circle())
-                    }
-                    .buttonStyle(.plain)
-                }
-                Image(systemName: "chevron.right")
-                    .font(.caption2).foregroundStyle(.tertiary)
-            }
-            .padding(.horizontal, 12).padding(.vertical, 10)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-    }
-
-    private func utilityColor(_ type: UtilityType) -> Color {
-        switch type {
-        case .water: return .blue
-        case .electricity: return .yellow
-        case .gas: return .orange
-        }
-    }
-
-    // 【美化】sectionHeader 加 Capsule 側條，對齊 collapsibleSection 標題規格
-    private func sectionHeader(_ title: String) -> some View {
-        HStack(spacing: 10) {
-            Capsule()
-                .fill(
-                    LinearGradient(
-                        colors: [Color.secondary.opacity(0.7), Color.secondary.opacity(0.30)],
-                        startPoint: .top, endPoint: .bottom
-                    )
-                )
-                .frame(width: 3, height: 12)
-            Text(title)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
-            Spacer()
-        }
-        .padding(.horizontal, 14).padding(.top, 12).padding(.bottom, 4)
-    }
-
-    /// 可收合區塊：未展開時顯示摘要金額；點 header 切換展開
-    @ViewBuilder
-    private func collapsibleSection<Content: View>(
-        title: String,
-        summary: String?,
-        summaryColor: Color = .secondary,
-        isExpanded: Binding<Bool>,
-        @ViewBuilder content: @escaping () -> Content
-    ) -> some View {
-        collapsibleSection(
-            title: title, summary: summary, summaryColor: summaryColor,
-            isExpanded: isExpanded,
-            trailing: { EmptyView() },
-            content: content
-        )
-    }
-
-    /// 可收合區塊（含右側自訂按鈕，例：「+」新增鈕、Menu 等）
-    // 【美化】header 加彩色 Capsule 側條 + subheadline.semibold 標題；summary 改為帶細邊框膠囊
-    @ViewBuilder
-    private func collapsibleSection<Content: View, Trailing: View>(
-        title: String,
-        summary: String?,
-        summaryColor: Color = .secondary,
-        isExpanded: Binding<Bool>,
-        @ViewBuilder trailing: () -> Trailing,
-        @ViewBuilder content: @escaping () -> Content
-    ) -> some View {
-        HStack(spacing: 8) {
-            Button {
-                withAnimation(.spring(response: 0.28, dampingFraction: 0.78)) {
-                    isExpanded.wrappedValue.toggle()
-                }
-            } label: {
-                HStack(spacing: 10) {
-                    // 左側彩色 Capsule 側條（對齊 OverviewView / FinanceOverviewView 分節標題規格）
-                    Capsule()
-                        .fill(
-                            LinearGradient(
-                                colors: [summaryColor, summaryColor.opacity(0.45)],
-                                startPoint: .top, endPoint: .bottom
-                            )
-                        )
-                        .frame(width: 3, height: 16)
-                    Text(title)
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.primary)
-                    Spacer()
-                    if let summary, !isExpanded.wrappedValue {
-                        Text(summary)
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(summaryColor)
-                            .padding(.horizontal, 8).padding(.vertical, 3)
-                            .background(summaryColor.opacity(0.10))
-                            .clipShape(Capsule())
-                            .overlay(Capsule().stroke(summaryColor.opacity(0.22), lineWidth: 0.6))
-                            .lineLimit(1)
-                    }
-                    Image(systemName: isExpanded.wrappedValue ? "chevron.up" : "chevron.down")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(summaryColor.opacity(0.60))
-                }
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            trailing()
-        }
-        .padding(.horizontal, 14).padding(.top, 12).padding(.bottom, 4)
-
-        if isExpanded.wrappedValue {
-            content()
-        }
-    }
-
-    private func sectionHeaderWithAdd(_ title: String, action: @escaping () -> Void) -> some View {
-        HStack {
-            Text(title).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-            Spacer()
-            Button {
-                if subscription.isPremium { action() }
-                else { showPremiumAlert = true }
-            } label: {
-                Image(systemName: "plus.circle.fill")
-                    .font(.subheadline).foregroundStyle(.green)
-            }
-            .buttonStyle(.plain)
-        }
-        .padding(.horizontal).padding(.top, 12).padding(.bottom, 4)
-    }
-
-    /// [v25.530] 改走共用的 RealEstateDeletion.deleteEstate：以前這裡自己收集支出來刪，
-    /// 漏了銀行扣款紀錄和售出收入的入帳紀錄；照片、文件檔案由 deleteRealEstate 清。
-    private func deleteEstate() {
-        guard let target = store.realEstates.first(where: { $0.id == estateId }) else { return }
-        RealEstateDeletion.deleteEstate(target, financeStore: store,
-                                        expenseStore: expenseStore, lifeStore: lifeStore)
-    }
-
-    private func fmt(_ v: Double) -> String {
-        v.ntdWanString
-    }
-
-    /// v8：從共用 ntdWanString 拆出「數字」與「萬／億」量級單位，供大字估值沿用既有字級／
-    /// 動畫設計；跟進 ntdWanString 既有的萬→億進位邊界，取代僅換算到萬的舊版 fmtWan。
-    private func splitWan(_ v: Double) -> (number: String, unit: String) {
-        var s = v.ntdWanString
-        if s.hasPrefix("NT$") { s.removeFirst(3) }
-        if s.hasSuffix("億") { return (String(s.dropLast()), "億") }
-        if s.hasSuffix("萬") { return (String(s.dropLast()), "萬") }
-        return (s, "")
-    }
-
-    /// v8：「數字 單位」單行組字（無單位時省略空格），供底部資訊列等窄欄位使用。
-    private func splitWanLabel(_ v: Double) -> String {
-        let parts = splitWan(v)
-        return parts.unit.isEmpty ? parts.number : "\(parts.number) \(parts.unit)"
-    }
-
-    private static let _dateFmt: DateFormatter = {
-        // [v25.530] 固定西元曆＋台灣中文：手機設成民國曆時才不會印出「0115/10/10」
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "zh_TW")
-        f.calendar = Calendar(identifier: .gregorian)
-        f.dateFormat = "yyyy/M/d"
-        return f
-    }()
-    private func fmtDate(_ d: Date) -> String { Self._dateFmt.string(from: d) }
-
-    // MARK: - 章節項目：點擊編輯 / 複製 / 刪除
-
-    /// 依 linkedExpenseId 查找對應的 Expense（找不到時 sheet 不會開啟）
-    private func openLinkedExpense(id: UUID?) {
-        guard let id, let exp = expenseStore.expenses.first(where: { $0.id == id }) else { return }
-        editingLinkedExpense = exp
-    }
-
-    /// [v25.530] 貸款／房屋價金／變動支出左滑刪除（確認後才走這裡）：連到的記帳支出（含照片）
-    /// 和所有帳戶裡它的扣款紀錄由 removeExpenses 一起清——以前只清支出上記的那個帳戶，換過帳戶的
-    /// 舊紀錄會留著；再把房子上這一項、以及其他指著同一筆支出的項目拿掉。沒有連結的舊資料只拿掉項目。
-    private func deleteEstateItem(itemId: UUID, linkedExpenseId: UUID?) {
+    /// 刪記帳支出（含照片、所有銀行帳戶裡的扣款），再把房子所有陣列裡連到它的項目拿掉。
+    /// 新帳本已經用支出 id 去重：一筆只會出現一列，所以這裡不用再分「共用支出的重複列」
+    fileprivate func deleteLedgerExpense(_ expId: UUID) {
         guard var re = store.realEstates.first(where: { $0.id == estateId }) else { return }
-        // [v25.530] 跟保險／附屬資產／水電瓦斯共用同一筆支出的重複列，只拿掉這一列；
-        // 那筆支出（和照片、扣款）是它們的，刪了會讓它們連到不存在的支出
+        RealEstateDeletion.removeExpenses([expId], expenseStore: expenseStore, lifeStore: lifeStore)
+        for p in re.utilityPayments where p.linkedExpenseId == expId {
+            p.photoFileNames.forEach { UtilityPayment.deletePhoto($0) }
+        }
+        re.utilityPayments.removeAll { $0.linkedExpenseId == expId }
+        re.paidItems.removeAll { $0.linkedExpenseId == expId }
+        re.variableExpenses.removeAll { $0.linkedExpenseId == expId }
+        re.insuranceItems.removeAll { $0.linkedExpenseId == expId }
+        re.propertyAssets.removeAll { $0.linkedExpenseId == expId }
+        re.mortgageItems.removeAll { $0.linkedExpenseId == expId }
+        if re.linkedExpenseId == expId { re.linkedExpenseId = nil }
+        store.update(re)
+    }
+
+    // MARK: 沒連到記帳的舊資料
+
+    fileprivate func offerLegacyChoices(_ e: HouseLedgerEvent, kind: HouseLedgerEvent.LegacyKind, itemId: UUID) {
+        let message = "這筆 \(e.amountText) 只記在房子這邊，記帳裡沒有：不會算進記帳的支出，也沒有地方改。補建一筆記帳支出之後，點這一列就能編輯。"
+        let backfill = HouseChoice.Option(label: "補建記帳支出", action: {
+            presentConfirmLater(HouseConfirm(
+                title: "補建記帳支出？",
+                message: "在記帳新增一筆 \(e.amountText)（\(HouseCardFormat.ymd(e.date))），連到這間房子。不會動銀行帳戶。",
+                button: "補建", destructive: false,
+                action: { backfillLegacy(kind, itemId: itemId) }))
+        })
+        let remove = HouseChoice.Option(label: "刪除這一筆", destructive: true, action: {
+            presentConfirmLater(HouseConfirm(
+                title: "刪除「\(e.title) \(e.amountText)」？",
+                message: legacyDeleteMessage(kind), button: "刪除",
+                action: { deleteLegacyItem(kind, itemId: itemId) }))
+        })
+        pendingChoice = HouseChoice(title: "「\(e.title)」沒連到記帳", message: message, options: [backfill, remove])
+    }
+
+    fileprivate func legacyDeleteMessage(_ kind: HouseLedgerEvent.LegacyKind) -> String {
+        switch kind {
+        case .utility: return "這筆繳費紀錄只記在房子這邊（沒連到記帳），會連收據照片一起刪除，不能復原。"
+        case .asset: return "這件家電家具只記在房子這邊（沒連到記帳），會從「樓層與物品」一起拿掉，不能復原。"
+        case .insurance: return "這張保單只記在房子這邊（沒連到記帳），會從「房屋資料」一起拿掉，不能復原。"
+        case .paid, .variable: return "這一筆只記在房子這邊（沒連到記帳），會從房子裡刪除，不能復原。"
+        }
+    }
+
+    fileprivate func deleteLegacyItem(_ kind: HouseLedgerEvent.LegacyKind, itemId: UUID) {
+        guard var re = store.realEstates.first(where: { $0.id == estateId }) else { return }
+        switch kind {
+        case .paid:
+            re.paidItems.removeAll { $0.id == itemId }
+        case .variable:
+            re.variableExpenses.removeAll { $0.id == itemId }
+        case .utility:
+            for p in re.utilityPayments where p.id == itemId {
+                p.photoFileNames.forEach { UtilityPayment.deletePhoto($0) }
+            }
+            re.utilityPayments.removeAll { $0.id == itemId }
+        case .insurance:
+            re.insuranceItems.removeAll { $0.id == itemId }
+        case .asset:
+            re.propertyAssets.removeAll { $0.id == itemId }
+        }
+        store.update(re)
+    }
+
+    /// 補建：照編輯頁建保險／附屬資產支出的欄位建一筆房地產變動支出，再把那一項改連過去（不寫銀行扣款）
+    fileprivate func backfillLegacy(_ kind: HouseLedgerEvent.LegacyKind, itemId: UUID) {
+        guard var re = store.realEstates.first(where: { $0.id == estateId }) else { return }
+        guard let made = Self.legacyExpense(kind, itemId: itemId, in: re) else { return }
+        let old = Self.legacyLink(kind, itemId: itemId, in: re)
+        Self.setLegacyLink(kind, itemId: itemId, to: made.id, in: &re)
+        // 同一個找不到的舊連結如果還掛在別的陣列，它們本來就是同一筆：一起改連到新的這筆
+        if let old { Self.relink(&re, from: old, to: made.id) }
+        expenseStore.add(made)
+        store.update(re)
+    }
+
+    fileprivate static func legacyExpense(_ kind: HouseLedgerEvent.LegacyKind, itemId: UUID,
+                                          in re: RealEstate) -> Expense? {
+        let name = re.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        func make(_ title: String, _ amount: Double, _ date: Date,
+                  _ category: RealEstateExpenseCategory, note: String = "") -> Expense {
+            Expense(title: title, amount: amount, date: date, expenseType: .variable,
+                    variableCategory: .realEstate, linkedRealEstateId: re.id,
+                    realEstateExpenseCategory: category, note: note)
+        }
+        switch kind {
+        case .paid:
+            guard let it = re.paidItems.first(where: { $0.id == itemId }) else { return nil }
+            let title = it.title.trimmingCharacters(in: .whitespacesAndNewlines)
+            return make(title.isEmpty ? "\(name) - 房屋價金" : title, it.amount, it.date, .housePayment)
+        case .variable:
+            guard let v = re.variableExpenses.first(where: { $0.id == itemId }) else { return nil }
+            return make("\(name) - \(v.category.rawValue)", v.amount, v.date, v.category, note: v.name)
+        case .utility:
+            guard let p = re.utilityPayments.first(where: { $0.id == itemId }) else { return nil }
+            return make("\(name) - \(p.type.rawValue)", p.amount, p.date, .utility, note: p.note)
+        case .insurance:
+            guard let it = re.insuranceItems.first(where: { $0.id == itemId }) else { return nil }
+            let policy = it.policyNumber.trimmingCharacters(in: .whitespacesAndNewlines)
+            return make(policy.isEmpty ? "\(name) - 保險" : "\(name) - \(policy)", it.amount, re.purchaseDate, .insurance)
+        case .asset:
+            guard let a = re.propertyAssets.first(where: { $0.id == itemId }) else { return nil }
+            let label = a.name.trimmingCharacters(in: .whitespacesAndNewlines)
+            return make("\(name) - \(label.isEmpty ? a.category.rawValue : label)", a.amount, re.purchaseDate, a.category)
+        }
+    }
+
+    fileprivate static func legacyLink(_ kind: HouseLedgerEvent.LegacyKind, itemId: UUID, in re: RealEstate) -> UUID? {
+        switch kind {
+        case .paid: return re.paidItems.first(where: { $0.id == itemId })?.linkedExpenseId
+        case .variable: return re.variableExpenses.first(where: { $0.id == itemId })?.linkedExpenseId
+        case .utility: return re.utilityPayments.first(where: { $0.id == itemId })?.linkedExpenseId
+        case .insurance: return re.insuranceItems.first(where: { $0.id == itemId })?.linkedExpenseId
+        case .asset: return re.propertyAssets.first(where: { $0.id == itemId })?.linkedExpenseId
+        }
+    }
+
+    fileprivate static func setLegacyLink(_ kind: HouseLedgerEvent.LegacyKind, itemId: UUID, to id: UUID,
+                                          in re: inout RealEstate) {
+        switch kind {
+        case .paid:
+            for i in re.paidItems.indices where re.paidItems[i].id == itemId { re.paidItems[i].linkedExpenseId = id }
+        case .variable:
+            for i in re.variableExpenses.indices where re.variableExpenses[i].id == itemId {
+                re.variableExpenses[i].linkedExpenseId = id
+            }
+        case .utility:
+            for i in re.utilityPayments.indices where re.utilityPayments[i].id == itemId {
+                re.utilityPayments[i].linkedExpenseId = id
+            }
+        case .insurance:
+            for i in re.insuranceItems.indices where re.insuranceItems[i].id == itemId {
+                re.insuranceItems[i].linkedExpenseId = id
+            }
+        case .asset:
+            for i in re.propertyAssets.indices where re.propertyAssets[i].id == itemId {
+                re.propertyAssets[i].linkedExpenseId = id
+            }
+        }
+    }
+
+    fileprivate static func relink(_ re: inout RealEstate, from old: UUID, to new: UUID) {
+        for i in re.paidItems.indices where re.paidItems[i].linkedExpenseId == old { re.paidItems[i].linkedExpenseId = new }
+        for i in re.variableExpenses.indices where re.variableExpenses[i].linkedExpenseId == old {
+            re.variableExpenses[i].linkedExpenseId = new
+        }
+        for i in re.utilityPayments.indices where re.utilityPayments[i].linkedExpenseId == old {
+            re.utilityPayments[i].linkedExpenseId = new
+        }
+        for i in re.insuranceItems.indices where re.insuranceItems[i].linkedExpenseId == old {
+            re.insuranceItems[i].linkedExpenseId = new
+        }
+        for i in re.propertyAssets.indices where re.propertyAssets[i].linkedExpenseId == old {
+            re.propertyAssets[i].linkedExpenseId = new
+        }
+    }
+
+    // MARK: 房貸段
+
+    /// 點一段：連到記帳的開那筆固定支出；沒連到記帳的舊段說明一下，可以補建
+    fileprivate func openSegmentRecord(_ seg: HouseFacts.Segment) {
+        // 只在記帳裡、沒有房貸項目的段：seg.id 是支出 id，linkedExpenseId 也是它
+        if let expId = seg.linkedExpenseId, let ex = expenseStore.expenses.first(where: { $0.id == expId }) {
+            sheet = .editExpense(ex)
+            return
+        }
+        guard let item = estate.mortgageItems.first(where: { $0.id == seg.id }) else {
+            presentNotice("找不到這一段", "記帳和房子裡都已經沒有這段房貸了。")
+            return
+        }
+        let message = "這段房貸（每期 \(MoneyFormat.short(item.amount))、\(HouseCardFormat.ym(item.startDate)) 起 \(item.totalPeriods) 期）只記在房子這邊，記帳的固定支出裡沒有，所以沒有地方改金額和年限。補建一筆記帳固定支出之後，點這一段就能編輯。"
+        pendingConfirm = HouseConfirm(title: "「\(seg.displayTitle)」沒連到記帳", message: message,
+                                      button: "補建記帳固定支出", destructive: false,
+                                      action: { backfillSegment(itemId: item.id) })
+    }
+
+    /// 照 AddExpenseView 建房貸固定支出的欄位補一筆：固定、貸款、房貸、每月、起始日、每期金額、年限、連到這間
+    fileprivate func backfillSegment(itemId: UUID) {
+        guard var re = store.realEstates.first(where: { $0.id == estateId }),
+              let i = re.mortgageItems.firstIndex(where: { $0.id == itemId }) else { return }
+        let item = re.mortgageItems[i]
+        let segName = item.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let years: Double? = item.totalPeriods > 0 ? Double(item.totalPeriods) / 12 : nil
+        var ex = Expense(title: "【\(re.name)】" + (segName.isEmpty ? "房貸" : segName),
+                         amount: item.amount, date: item.startDate, expenseType: .fixed,
+                         fixedCategory: .loan, recurrence: .monthly, loanSubCategory: .mortgage,
+                         linkedRealEstateId: re.id, loanYears: years)
+        // 已經賣掉的房子：照賣房的規則停在賣出日，不然「要確認」又會說賣掉還在扣
+        if let sold = re.soldDate {
+            ex.endDate = sold
+            ex.endReason = .assetSold
+        }
+        re.mortgageItems[i].linkedExpenseId = ex.id
+        expenseStore.add(ex)
+        store.update(re)
+    }
+
+    fileprivate func confirmDeleteSegment(_ seg: HouseFacts.Segment) {
+        let hasExpense = seg.linkedExpenseId.map { id in expenseStore.expenses.contains { $0.id == id } } ?? false
+        let message = hasExpense
+            ? "會一起刪掉記帳裡這筆每月房貸，以及銀行的扣款紀錄，不能復原。"
+            : "這一段會從房子裡刪除，不能復原。"
+        pendingConfirm = HouseConfirm(title: "刪除「\(seg.displayTitle)」？", message: message, button: "刪除",
+                                      action: { deleteSegment(seg) })
+    }
+
+    fileprivate func deleteSegment(_ seg: HouseFacts.Segment) {
+        if estate.mortgageItems.contains(where: { $0.id == seg.id }) {
+            deleteEstateItem(itemId: seg.id, linkedExpenseId: seg.linkedExpenseId)
+            return
+        }
+        // 只在記帳裡的段（seg.id 是支出 id）：刪那筆支出；房子這邊還指著它的連結一起清
+        guard let expId = seg.linkedExpenseId else { return }
+        RealEstateDeletion.removeExpenses([expId], expenseStore: expenseStore, lifeStore: lifeStore)
+        guard var re = store.realEstates.first(where: { $0.id == estateId }) else { return }
+        re.mortgageItems.removeAll { $0.linkedExpenseId == expId }
+        if re.linkedExpenseId == expId { re.linkedExpenseId = nil }
+        store.update(re)
+    }
+
+    /// 刪房子底下一筆連到記帳的項目（v25.530）：跟保險／附屬資產／水電共用同一筆支出的重複列只拿掉列、不刪支出
+    fileprivate func deleteEstateItem(itemId: UUID, linkedExpenseId: UUID?) {
+        guard var re = store.realEstates.first(where: { $0.id == estateId }) else { return }
         let shared: Bool = linkedExpenseId.map { isExpenseShared($0, in: re) } ?? false
         if let expId = linkedExpenseId, !shared {
             RealEstateDeletion.removeExpenses([expId], expenseStore: expenseStore, lifeStore: lifeStore)
@@ -2428,725 +833,1161 @@ struct RealEstateDetailView: View {
         store.update(re)
     }
 
-    /// 複製一個 Expense（新 id、日期改為今天）並重新觸發房地產 / 銀行同步
-    private func duplicateLinkedExpense(_ source: Expense) {
-        let newId = UUID()
-        let copy = Expense(
-            id: newId,
-            title: source.title,
-            amount: source.amount,
-            date: Date(),
-            expenseType: source.expenseType,
-            variableCategory: source.variableCategory,
-            fixedCategory: source.fixedCategory,
-            recurrence: source.recurrence,
-            insuranceSubCategory: source.insuranceSubCategory,
-            loanSubCategory: source.loanSubCategory,
-            linkedInsuranceId: source.linkedInsuranceId,
-            linkedStockId: source.linkedStockId,
-            linkedRealEstateId: source.linkedRealEstateId,
-            linkedVehicleId: source.linkedVehicleId,
-            vehicleExpenseCategory: source.vehicleExpenseCategory,
-            realEstateExpenseCategory: source.realEstateExpenseCategory,
-            taxSavingSubCategory: source.taxSavingSubCategory,
-            socialSubCategory: source.socialSubCategory,
-            socialRecipient: source.socialRecipient,
-            taxDeductibleOverride: source.taxDeductibleOverride,
-            note: source.note,
-            currencyCode: source.currencyCode,
-            diningMember: source.diningMember,
-            // 複製房地產連動的貸款支出時，若漏了這四個欄位，計算機資料會靜默消失，
-            // 使用者複製一筆有填貸款試算的房貸項目後，開啟複製品會發現貸款總額／年期／
-            // 利率／保費率全部變空白（同型修復見 AddExpenseView.loadInitial 的讀取端）。
-            loanTotalAmount: source.loanTotalAmount,
-            loanYears: source.loanYears,
-            loanRate: source.loanRate,
-            insuranceRate: source.insuranceRate,
-            linkedBankMilestoneId: source.linkedBankMilestoneId,
-            linkedBankCurrency: source.linkedBankCurrency,
-            linkedCreditCardMilestoneId: source.linkedCreditCardMilestoneId,
-            placeName: source.placeName,
-            placeAddress: source.placeAddress,
-            placeLatitude: source.placeLatitude,
-            placeLongitude: source.placeLongitude
-            // photoFileNames 刻意不沿用：直接複製檔名會讓複製品與原始支出指向磁碟上
-            // 同一批照片檔，之後刪除任一邊都會把檔案實體刪掉、讓另一邊的照片憑空找不到
-            // （同型修復見 VariableExpenseView.duplicateExpense，該處本就不帶這個欄位）。
-        )
-        expenseStore.expenses.append(copy)
-        // 房地產項目層級同步：只複製變動支出那一項
-        // [v25.530] 房貸、房屋價金不再跟著複製（會多出一整筆貸款／再付一次頭期款）
-        if var re = store.realEstates.first(where: { $0.id == estateId }) {
-            if let v = re.variableExpenses.first(where: { $0.linkedExpenseId == source.id }) {
-                re.variableExpenses.append(RealEstateVariableExpense(
-                    id: UUID(), category: v.category, name: v.name,
-                    amount: v.amount, date: Date(), linkedExpenseId: newId
-                ))
+    fileprivate func isExpenseShared(_ expId: UUID, in re: RealEstate) -> Bool {
+        if re.insuranceItems.contains(where: { $0.linkedExpenseId == expId }) { return true }
+        if re.propertyAssets.contains(where: { $0.linkedExpenseId == expId }) { return true }
+        return re.utilityPayments.contains(where: { $0.linkedExpenseId == expId })
+    }
+
+    // MARK: 要確認
+
+    /// 每顆修正鈕：先付費，有確認文字的先確認；「去填／去改／去看」直接開編輯頁
+    fileprivate func fixCheck(_ check: HouseCheck) {
+        requirePremium {
+            guard let confirm = check.confirm else {
+                performFix(check.fix)
+                return
             }
-            store.update(re)
-        }
-        // 銀行扣款由 syncBankWithdrawal 模式自動接管（週期性會虛擬展開，
-        // 一次性會由原 Expense 流程處理；這裡未走 AddExpenseView 故手動處理一次性）
-        if copy.linkedCreditCardMilestoneId == nil,
-           !(copy.expenseType == .fixed && copy.recurrence != nil),
-           let bankId = copy.linkedBankMilestoneId,
-           var ms = lifeStore.milestones.first(where: { $0.id == bankId }) {
-            // [v25.530] 外幣子帳戶要換算，跟水電瓦斯編輯器同一套（不能把台幣數字標成外幣）
-            let value = realEstateBankWithdrawalValue(ntd: copy.amount, currency: copy.linkedBankCurrency, rates: expenseStore.currencyRates)
-            var list = ms.bankDeposits ?? []
-            list.append(BankDeposit(
-                id: UUID(), date: copy.date, amount: value.amount,
-                currencyCode: value.code,
-                isWithdrawal: true, linkedExpenseId: copy.id
-            ))
-            ms.bankDeposits = list
-            lifeStore.update(ms)
+            let fix = check.fix
+            pendingConfirm = HouseConfirm(title: fixTitle(check.kind), message: confirm, button: check.button,
+                                          destructive: check.kind == .orphans,
+                                          action: { performFix(fix) })
         }
     }
 
-    // [v25.530] 只剩變動支出能複製（那是合理的「再記一筆」）；刪除改成先確認再走 deleteEstateItem
+    fileprivate func fixTitle(_ kind: HouseCheck.Kind) -> String {
+        switch kind {
+        case .soldStillCharging: return "停掉賣出後的房貸扣款？"
+        case .orphans: return "拿掉房子這邊留下的項目？"
+        case .duplicates: return "整理重複的項目？"
+        default: return "確定要修正嗎？"
+        }
+    }
 
-    private func duplicateVariableExpenseItem(_ v: RealEstateVariableExpense) {
-        if let expId = v.linkedExpenseId,
-           let exp = expenseStore.expenses.first(where: { $0.id == expId }) {
-            duplicateLinkedExpense(exp)
-        } else if var re = store.realEstates.first(where: { $0.id == estateId }) {
-            // linkedExpenseId 為 nil 的舊資料（iCloud 還原等）補上本地複製，避免滑動複製靜默無反應。
-            re.variableExpenses.append(RealEstateVariableExpense(
-                id: UUID(), category: v.category, name: v.name, amount: v.amount, date: Date()
-            ))
-            store.update(re)
+    fileprivate func performFix(_ fix: HouseCheck.Fix) {
+        switch fix {
+        case .stopMortgagesAtSale:
+            stopMortgagesAtSale()
+        case .openSegment(let seg):
+            openSegmentRecord(seg)
+        case .removeOrphans(let links):
+            removeOrphans(links)
+        case .mergeDuplicates(let dups):
+            mergeDuplicates(dups)
+        case .edit(let focus):
+            sheet = .edit(focus)
+        }
+    }
+
+    /// 賣掉還在扣：連到這間的房貸固定支出停在賣出日（跟編輯頁存檔時同一個函式），記帳只寫一次
+    fileprivate func stopMortgagesAtSale() {
+        guard let re = store.realEstates.first(where: { $0.id == estateId }), let sold = re.soldDate else { return }
+        var list = expenseStore.expenses
+        if RealEstateSale.syncMortgageStops(of: re, soldDate: sold, in: &list) {
+            expenseStore.expenses = list
+        }
+    }
+
+    /// 記帳那邊已經刪掉的：房子這邊的項目拿掉；水電只解除連結（收據照片留著）；房子身上的連結清掉
+    fileprivate func removeOrphans(_ links: [HouseItemLink]) {
+        guard var re = store.realEstates.first(where: { $0.id == estateId }) else { return }
+        let alive = Set(expenseStore.expenses.map(\.id))
+        for link in links where !alive.contains(link.expenseId) {
+            switch link.place {
+            case .mortgage: re.mortgageItems.removeAll { $0.id == link.itemId }
+            case .paid: re.paidItems.removeAll { $0.id == link.itemId }
+            case .variable: re.variableExpenses.removeAll { $0.id == link.itemId }
+            case .insurance: re.insuranceItems.removeAll { $0.id == link.itemId }
+            case .asset: re.propertyAssets.removeAll { $0.id == link.itemId }
+            case .utility:
+                for i in re.utilityPayments.indices where re.utilityPayments[i].id == link.itemId {
+                    re.utilityPayments[i].linkedExpenseId = nil
+                }
+            case .estateMortgage:
+                if re.linkedExpenseId == link.expenseId { re.linkedExpenseId = nil }
+            case .estateSale:
+                if re.saleLinkedExpenseId == link.expenseId { re.saleLinkedExpenseId = nil }
+            }
+        }
+        store.update(re)
+    }
+
+    /// 同一筆支出掛在好幾處：只留在 keep 那個陣列（同陣列重複留第一列），其餘拿掉；記帳的支出不刪
+    fileprivate func mergeDuplicates(_ dups: [HouseDuplicate]) {
+        guard var re = store.realEstates.first(where: { $0.id == estateId }) else { return }
+        let paymentsBefore = re.utilityPayments
+        for d in dups {
+            let id = d.expenseId
+            re.insuranceItems = Self.keepOne(re.insuranceItems, expenseId: id, keep: d.keep == .insurance) { $0.linkedExpenseId }
+            re.propertyAssets = Self.keepOne(re.propertyAssets, expenseId: id, keep: d.keep == .asset) { $0.linkedExpenseId }
+            re.utilityPayments = Self.keepOne(re.utilityPayments, expenseId: id, keep: d.keep == .utility) { $0.linkedExpenseId }
+            re.paidItems = Self.keepOne(re.paidItems, expenseId: id, keep: d.keep == .paid) { $0.linkedExpenseId }
+            re.variableExpenses = Self.keepOne(re.variableExpenses, expenseId: id, keep: d.keep == .variable) { $0.linkedExpenseId }
+        }
+        // 拿掉的水電列：收據照片沒有別的列在用才刪檔
+        let keptIds = Set(re.utilityPayments.map(\.id))
+        let stillUsed = Set(re.utilityPayments.flatMap(\.photoFileNames))
+        for p in paymentsBefore where !keptIds.contains(p.id) {
+            for name in p.photoFileNames where !stillUsed.contains(name) { UtilityPayment.deletePhoto(name) }
+        }
+        store.update(re)
+    }
+
+    /// 連到 expenseId 的列：keep 是 true 時留第一列，其餘（或全部）拿掉
+    fileprivate static func keepOne<T>(_ list: [T], expenseId: UUID, keep: Bool, link: (T) -> UUID?) -> [T] {
+        var kept = false
+        return list.filter { item in
+            guard link(item) == expenseId else { return true }
+            if keep && !kept {
+                kept = true
+                return true
+            }
+            return false
         }
     }
 }
 
-// MARK: - 章節項目向左滑動顯示複製 / 刪除
+// MARK: - 樓層與物品（物品樹 CRUD 留在這裡）
 
-/// 房地產卡片章節項目用的可滑動 row：向左拖曳露出複製 / 刪除按鈕。
-/// content 內可放 .onTapGesture 來開啟編輯頁面。
-fileprivate struct SwipeableRow<Content: View>: View {
-    let content: Content
-    /// [v25.530] nil 就只露出「刪除」：房貸、房屋價金的列不給複製
-    let onCopy: (() -> Void)?
-    let onDelete: () -> Void
+extension RealEstateDetailView {
+    fileprivate static let treeIndent: CGFloat = 16
 
-    init(
-        onCopy: (() -> Void)? = nil,
-        onDelete: @escaping () -> Void,
-        @ViewBuilder content: () -> Content
-    ) {
-        self.onCopy = onCopy
-        self.onDelete = onDelete
-        self.content = content()
-    }
-
-    private let actionWidth: CGFloat = 64
-    private let rowMinHeight: CGFloat = 56
-    private var revealOffset: CGFloat {
-        let buttonCount: CGFloat = onCopy == nil ? 1 : 2
-        return -(actionWidth * buttonCount)
-    }
-
-    @State private var offset: CGFloat = 0
-    @State private var settledOffset: CGFloat = 0
-    @State private var dragAxis: DragAxis? = nil
-
-    private enum DragAxis { case horizontal, vertical }
-
-    var body: some View {
-        ZStack(alignment: .trailing) {
-            // 滑開後露出的按鈕
-            HStack(spacing: 0) {
-                Spacer()
-                if let onCopy {
-                    Button {
-                        close()
-                        onCopy()
-                    } label: {
-                        VStack(spacing: 2) {
-                            Image(systemName: "doc.on.doc.fill").font(.system(size: 16))
-                            Text("複製").font(.caption2.bold())
-                        }
-                        .foregroundStyle(.white)
-                        .frame(width: actionWidth)
-                        .frame(maxHeight: .infinity)
-                        .background(Color.blue)
-                    }
-                    .buttonStyle(.plain)
-                }
-                Button {
-                    close()
-                    onDelete()
-                } label: {
-                    VStack(spacing: 2) {
-                        Image(systemName: "trash.fill").font(.system(size: 16))
-                        Text("刪除").font(.caption2.bold())
-                    }
-                    .foregroundStyle(.white)
-                    .frame(width: actionWidth)
-                    .frame(maxHeight: .infinity)
-                    .background(Color.red)
-                }
-                .buttonStyle(.plain)
+    fileprivate func floorsSection(_ card: HouseCardData) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            sectionHeader("樓層與物品", trailing: card.floors.trailing) {
+                premiumAddMenu("新增樓層或物品") { floorsAddItems(card) }
             }
-
-            // 前景內容
-            // minHeight 與按鈕一致 → 短內容也能完全蓋住背後的「複製 / 刪除」按鈕，
-            // 避免項目高度太短時按鈕從上下露出馬腳。
-            content
-                .frame(maxWidth: .infinity, minHeight: rowMinHeight, alignment: .leading)
-                .background(Color(.systemBackground))
-                .offset(x: offset)
-                // simultaneousGesture + 大 minimumDistance：讓外層 ScrollView
-                // 有時間先取得垂直滾動主導權；我們只在使用者明顯做「水平大幅度」
-                // 滑動時才接管，否則完全不插手垂直滑動。
-                .simultaneousGesture(
-                    DragGesture(minimumDistance: 18, coordinateSpace: .local)
-                        .onChanged { value in
-                            let dx = abs(value.translation.width)
-                            let dy = abs(value.translation.height)
-                            if dragAxis == nil {
-                                // 已經滑開過視為水平
-                                if offset != 0 {
-                                    dragAxis = .horizontal
-                                }
-                                // 垂直主導：dy 明顯大於 dx → 永不接管
-                                else if dy > dx, dy > 10 {
-                                    dragAxis = .vertical
-                                }
-                                // 水平主導：dx 至少是 dy 的 1.5 倍、且超過 14pt
-                                else if dx > dy * 1.5, dx > 14 {
-                                    dragAxis = .horizontal
-                                }
-                            }
-                            guard dragAxis == .horizontal else { return }
-                            let proposed = settledOffset + value.translation.width
-                            if proposed > 0 {
-                                offset = proposed / 4
-                            } else if proposed < revealOffset {
-                                offset = revealOffset + (proposed - revealOffset) / 3
-                            } else {
-                                offset = proposed
-                            }
-                        }
-                        .onEnded { value in
-                            defer { dragAxis = nil }
-                            guard dragAxis == .horizontal else { return }
-                            let predicted = settledOffset + value.predictedEndTranslation.width
-                            withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
-                                offset = predicted < revealOffset / 2 ? revealOffset : 0
-                                settledOffset = offset
-                            }
-                        }
-                )
-        }
-        .clipped()
-    }
-
-    private func close() {
-        withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
-            offset = 0
-            settledOffset = 0
+            floorsCard(card)
         }
     }
-}
 
-// MARK: - 編輯 sheet 共用 Section header
-// 【美化 v9】ElevatorMaintenanceEditor／UtilityPaymentEditor 共用，4pt 漸層 Capsule 側條
-// + 圖示 + 粗體標題，對齊全 App「表單 Section header 補齊」系列規格
-// （ResumeView.AddMilestoneView／BusinessCardEditor／FamilyMembersResumeView 等既有做法）。
-fileprivate func realEstateEditorSectionHeader(_ title: String, icon: String, color: Color) -> some View {
-    HStack(spacing: 8) {
-        Capsule()
-            .fill(LinearGradient(colors: [color, color.opacity(0.45)], startPoint: .top, endPoint: .bottom))
-            .frame(width: 4, height: 14)
-        Image(systemName: icon)
-            .font(.caption.weight(.semibold))
-            .foregroundStyle(color)
-        Text(title)
-            .font(.subheadline.weight(.semibold))
-            .foregroundStyle(.primary)
-    }
-}
-
-// MARK: - 電梯保養編輯
-
-struct ElevatorMaintenanceEditor: View {
-    @EnvironmentObject var store: FinanceStore
-    @Environment(\.dismiss) private var dismiss
-
-    let estateId: UUID
-    let editing: ElevatorMaintenance?
-
-    @State private var date = Date()
-    /// [v25.308] 多張照片：共用 MultiPhotoGallery 模組（拍照連拍/相簿多選/燈箱/刪除），
-    /// 取代手刻的單張 PhotosPicker＋CameraPicker
-    @State private var photoFileNames: [String] = []
-    @State private var showDeleteConfirm = false
-    // 儲存/刪除已 dismiss + 延後一個 runloop 才寫回 store，快速連點會讓兩次呼叫
-    // 各自讀到同一份舊 estate 快照、後寫回者蓋掉先寫回者；比照 UtilityPaymentEditor
-    // 既有修法補上忙碌守衛。
-    @State private var isSaving = false
-
-    var body: some View {
-        NavigationStack {
-            Form {
-                Section {
-                    DatePicker("保養日期", selection: $date, displayedComponents: .date)
-
-                    MultiPhotoGallery(
-                        fileNames: $photoFileNames,
-                        urlFor: { ElevatorMaintenance.photoURL(for: $0) },
-                        onSaveImage: { ElevatorMaintenance.savePhoto($0, id: UUID()) },
-                        onDeleteFile: { ElevatorMaintenance.deletePhoto($0) },
-                        title: "保養照片"
-                    )
-                    .padding(.vertical, 4)
-                } header: {
-                    realEstateEditorSectionHeader("保養記錄", icon: "wrench.and.screwdriver.fill", color: .teal)
-                } footer: {
-                    Text("可拍照連拍或從相簿多選（保養單、銘板、現場照）。")
-                }
-
-                if editing != nil {
-                    Section {
-                        Button(role: .destructive) { showDeleteConfirm = true } label: {
-                            Label("刪除此記錄", systemImage: "trash")
-                        }
-                    }
-                }
+    /// 右上綠色「＋」：新增物品（選哪一層）、新增家電家具、新增樓層（後兩個到編輯頁）
+    @ViewBuilder
+    fileprivate func floorsAddItems(_ card: HouseCardData) -> some View {
+        let floors = card.floors.floors
+        if floors.count == 1, let only = floors.first {
+            Button { newFloorItem(floorId: only.id, parent: nil) } label: {
+                Label("新增物品", systemImage: "shippingbox")
             }
-            .navigationTitle(editing == nil ? "新增保養記錄" : "編輯保養記錄")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) { Button("取消") { dismiss() } }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("儲存") { save() }.bold().foregroundStyle(.green).disabled(isSaving)
+        } else if floors.count > 1 {
+            Menu {
+                ForEach(floors) { f in
+                    Button(f.label) { newFloorItem(floorId: f.id, parent: nil) }
                 }
-            }
-            .onAppear {
-                if let e = editing {
-                    date = e.date
-                    photoFileNames = e.photoFileNames
-                }
-            }
-            .alert("確定刪除？", isPresented: $showDeleteConfirm) {
-                Button("刪除", role: .destructive) { deleteRecord() }
-                Button("取消", role: .cancel) {}
+            } label: {
+                Label("新增物品", systemImage: "shippingbox")
             }
         }
-    }
-
-    private func save() {
-        guard !isSaving else { return }
-        guard var estate = store.realEstates.first(where: { $0.id == estateId }) else { return }
-        isSaving = true
-        let recordId = editing?.id ?? UUID()
-        let record = ElevatorMaintenance(id: recordId, date: date, photoFileNames: photoFileNames)
-        if let idx = estate.elevatorMaintenances.firstIndex(where: { $0.id == recordId }) {
-            estate.elevatorMaintenances[idx] = record
-        } else {
-            estate.elevatorMaintenances.append(record)
+        Button { sheet = .edit(.floors) } label: {
+            Label("新增家電家具", systemImage: "sofa")
         }
-        // 先關閉 sheet，下一個 runloop 才改 @Published store，避免在 sheet 關閉的
-        // view-update 交易裡同步改 observed state（父頁堆多個 sheet）造成真機閃退。
-        let financeStore = store
-        dismiss()
-        DispatchQueue.main.async { financeStore.update(estate) }
-    }
-
-    private func deleteRecord() {
-        guard !isSaving else { return }
-        guard var estate = store.realEstates.first(where: { $0.id == estateId }),
-              let e = editing else { return }
-        isSaving = true
-        e.photoFileNames.forEach { ElevatorMaintenance.deletePhoto($0) }
-        estate.elevatorMaintenances.removeAll { $0.id == e.id }
-        let financeStore = store
-        dismiss()
-        DispatchQueue.main.async { financeStore.update(estate) }
-    }
-}
-
-// MARK: - 水電瓦斯繳費編輯
-
-struct UtilityPaymentEditor: View {
-    @EnvironmentObject var store: FinanceStore
-    @EnvironmentObject var expenseStore: ExpenseStore
-    @EnvironmentObject var lifeStore: LifeStore
-    @Environment(\.dismiss) private var dismiss
-
-    let estateId: UUID
-    let editing: UtilityPayment?
-
-    @State private var type: UtilityType = .water
-    @State private var date = Date()
-    @State private var amountText = ""
-    @State private var note = ""
-    // 收據照片（多張）：改用 MultiPhotoGallery（可拍照連拍 / 相簿多選 / 燈箱檢視 / 刪除）
-    @State private var photoFileNames: [String] = []
-    @State private var showDeleteConfirm = false
-    @State private var showError = false
-    @State private var selectedBankMilestoneId: UUID?
-    @State private var selectedBankCurrency: String = "NT$"
-    @State private var selectedCreditCardMilestoneId: UUID?
-    // 防止「儲存」連點：save() 把實際寫回 store 的動作延後到下個 runloop（見 save() 內註解），
-    // 快速連點兩下會在第一次寫入完成前就再次進入 save()，各自建立一筆 Expense、並各自捕捉
-    // 自己的 estate 快照非同步寫回，後寫入者會蓋掉前者剛 append 的 UtilityPayment，留下孤兒 Expense。
-    @State private var isSaving = false
-
-    private var bankMilestones: [LifeMilestone] {
-        lifeStore.milestones.filter {
-            $0.category == .achievement && $0.financeSubCategory == .bank
+        Button { sheet = .edit(.floors) } label: {
+            Label("新增樓層", systemImage: "square.stack.3d.up")
         }
-    }
-
-    private var creditCardMilestones: [LifeMilestone] {
-        lifeStore.milestones.filter {
-            $0.category == .achievement && $0.financeSubCategory == .creditCard
-        }
-    }
-
-    private var hasPaymentTargets: Bool {
-        !bankMilestones.isEmpty || !creditCardMilestones.isEmpty
-    }
-
-    private var bankPickerLabel: String {
-        if let id = selectedCreditCardMilestoneId,
-           let card = creditCardMilestones.first(where: { $0.id == id }) {
-            return card.cardName ?? card.title
-        }
-        if let id = selectedBankMilestoneId,
-           let ms = bankMilestones.first(where: { $0.id == id }) {
-            let name = ms.bankName ?? ms.title
-            return "\(name) · \(selectedBankCurrency)"
-        }
-        return "未選擇"
-    }
-
-    private func bankCurrencies(for ms: LifeMilestone) -> [String] {
-        let codes = (ms.bankDeposits ?? [])
-            .filter { !$0.isWithdrawal }
-            .map(\.currencyCode)
-        var unique: [String] = []
-        for c in codes where !unique.contains(c) { unique.append(c) }
-        return unique.isEmpty ? ["NT$"] : unique
     }
 
     @ViewBuilder
-    private func bankSubMenu(for ms: LifeMilestone) -> some View {
-        let name = ms.bankName ?? ms.title
-        let currencies = bankCurrencies(for: ms)
-        if currencies.count > 1 {
-            Menu(name) {
-                ForEach(currencies, id: \.self) { code in
-                    Button(code) {
-                        selectedBankMilestoneId = ms.id
-                        selectedBankCurrency = code
-                        selectedCreditCardMilestoneId = nil
-                    }
+    fileprivate func floorsCard(_ card: HouseCardData) -> some View {
+        let data = card.floors
+        if data.isEmpty {
+            floorsEmptyRow
+        } else {
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(data.floors) { floor in
+                    floorBlock(floor)
+                    if floor.id != data.floors.last?.id { Divider() }
+                }
+                if !data.otherAssets.isEmpty {
+                    if !data.floors.isEmpty { Divider() }
+                    assetGroup("其他位置", data.otherAssets)
+                        .padding(.vertical, 10)
+                }
+                if let summary = data.assetSummary {
+                    Text(summary)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .padding(.top, 10)
                 }
             }
-        } else {
-            Button(name) {
-                selectedBankMilestoneId = ms.id
-                selectedBankCurrency = currencies.first ?? "NT$"
-                selectedCreditCardMilestoneId = nil
+            .padding(14)
+            .modifier(FinanceCardChrome())
+        }
+    }
+
+    fileprivate var floorsEmptyRow: some View {
+        HStack(spacing: 12) {
+            Text("到「編輯」新增樓層（例如 B1、1F、2F），這裡就會一層一層列出來")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 8)
+            Button {
+                requirePremium { sheet = .edit(.floors) }
+            } label: {
+                Text("去加樓層")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(TripBoardPalette(scheme).hint)
+                    .fixedSize()
+            }
+            .buttonStyle(MoneyPressStyle())
+        }
+        .padding(14)
+        .modifier(FinanceCardChrome())
+    }
+
+    /// 一層：一列＋點了在原地展開（展開、收起不用付費）
+    fileprivate func floorBlock(_ floor: HouseFloorsData.Floor) -> some View {
+        let open = expandedFloorId == floor.id
+        return VStack(alignment: .leading, spacing: 6) {
+            floorRow(floor, open: open)
+            if open {
+                floorDetail(floor)
             }
         }
     }
 
-    var body: some View {
-        NavigationStack {
-            Form {
-                Section {
-                    Picker("類型", selection: $type) {
-                        ForEach(UtilityType.allCases) { t in
-                            Label(t.rawValue, systemImage: t.icon).tag(t)
-                        }
+    fileprivate func floorRow(_ floor: HouseFloorsData.Floor, open: Bool) -> some View {
+        Button {
+            withAnimation(.easeInOut(duration: 0.2)) {
+                expandedFloorId = open ? nil : floor.id
+            }
+        } label: {
+            HStack(spacing: 12) {
+                floorBadge(floor)
+                floorMiddle(floor)
+                Spacer(minLength: 8)
+                HStack(spacing: 4) {
+                    if !floor.countText.isEmpty {
+                        Text(floor.countText)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.secondary)
                     }
-                    DatePicker("繳費日期", selection: $date, displayedComponents: .date)
-                    HStack {
-                        Text("NT$").foregroundStyle(.secondary)
-                        TextField("金額", text: $amountText).keyboardType(.decimalPad)
-                    }
-                } header: {
-                    realEstateEditorSectionHeader("基本資訊", icon: "list.bullet.rectangle.fill", color: .indigo)
-                }
-
-                if hasPaymentTargets {
-                    Section {
-                        HStack {
-                            Text("扣款目標").foregroundStyle(.secondary)
-                            Spacer()
-                            Menu {
-                                Button("不指定") {
-                                    selectedBankMilestoneId = nil
-                                    selectedBankCurrency = "NT$"
-                                    selectedCreditCardMilestoneId = nil
-                                }
-                                if !bankMilestones.isEmpty {
-                                    Section("銀行") {
-                                        ForEach(bankMilestones) { ms in
-                                            bankSubMenu(for: ms)
-                                        }
-                                    }
-                                }
-                                if !creditCardMilestones.isEmpty {
-                                    Section("信用卡") {
-                                        ForEach(creditCardMilestones) { card in
-                                            Button(card.cardName ?? card.title) {
-                                                selectedCreditCardMilestoneId = card.id
-                                                selectedBankMilestoneId = card.linkedBankMilestoneId
-                                                selectedBankCurrency = "NT$"
-                                            }
-                                        }
-                                    }
-                                }
-                            } label: {
-                                HStack(spacing: 4) {
-                                    Text(bankPickerLabel)
-                                        .foregroundStyle((selectedBankMilestoneId == nil && selectedCreditCardMilestoneId == nil) ? .secondary : .primary)
-                                    Image(systemName: "chevron.down").font(.caption2).foregroundStyle(.secondary)
-                                }
-                            }
-                        }
-                    } footer: {
-                        Text("選擇扣款銀行或信用卡，繳費會自動連動該帳戶圖表。")
-                    }
-                }
-
-                Section {
-                    MultiPhotoGallery(
-                        fileNames: $photoFileNames,
-                        urlFor: { UtilityPayment.photosDirectory.appendingPathComponent($0) },
-                        onSaveImage: { UtilityPayment.savePhoto($0, id: UUID()) },
-                        onDeleteFile: { UtilityPayment.deletePhoto($0) },
-                        title: "收據照片"
-                    )
-                } header: {
-                    realEstateEditorSectionHeader("收據照片", icon: "photo.on.rectangle.angled", color: .teal)
-                }
-
-                Section {
-                    TextField("選填備註", text: $note, axis: .vertical).lineLimit(3)
-                } header: {
-                    realEstateEditorSectionHeader("備註", icon: "note.text", color: .secondary)
-                }
-
-                if editing != nil {
-                    Section {
-                        Button(role: .destructive) { showDeleteConfirm = true } label: {
-                            Label("刪除此記錄", systemImage: "trash")
-                        }
-                    }
-                }
-
-                if showError {
-                    Section {
-                        Text("請輸入有效金額").foregroundStyle(.red).font(.caption)
-                    }
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.tertiary)
+                        .rotationEffect(.degrees(open ? 90 : 0))
                 }
             }
-            .navigationTitle(editing == nil ? "新增繳費紀錄" : "編輯繳費紀錄")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button("取消") {
-                        // 本次 session 新拍/新選的照片已寫入磁碟但未儲存進紀錄，
-                        // 取消時清掉避免孤兒檔案（既有照片不動；同型寫法見 RenovationPhotoEditor.cancel）
-                        let original = Set(editing?.photoFileNames ?? [])
-                        for name in photoFileNames where !original.contains(name) {
-                            UtilityPayment.deletePhoto(name)
-                        }
-                        dismiss()
-                    }
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("儲存") { save() }.bold().foregroundStyle(.green).disabled(isSaving)
-                }
+            .padding(.vertical, 8)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(floor.accessibilityText)
+        .accessibilityHint(open ? "點兩下收起" : "點兩下展開")
+        .accessibilityAddTraits(.isButton)
+    }
+
+    /// 中間：房間小膠囊，下面一行灰字面積
+    fileprivate func floorMiddle(_ floor: HouseFloorsData.Floor) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            if floor.rooms.isEmpty {
+                Text("沒填用途")
+                    .font(.subheadline)
+                    .foregroundStyle(.tertiary)
+            } else {
+                roomChips(floor.rooms)
             }
-            .onAppear {
-                if let e = editing {
-                    type = e.type
-                    date = e.date
-                    // [v25.530] 不用 %.0f：有小數的金額讀回來會被四捨五入，再存一次就改掉了
-                    amountText = e.amount > 0 ? Self.editableAmountText(e.amount) : ""
-                    note = e.note
-                    photoFileNames = e.photoFileNames
-                    // 載入既有的扣款目標（從連結的 Expense 讀回）
-                    if let expId = e.linkedExpenseId,
-                       let exp = expenseStore.expenses.first(where: { $0.id == expId }) {
-                        selectedBankMilestoneId = exp.linkedBankMilestoneId
-                        selectedBankCurrency = exp.linkedBankCurrency ?? "NT$"
-                        selectedCreditCardMilestoneId = exp.linkedCreditCardMilestoneId
-                    }
-                }
-            }
-            .alert("確定刪除？", isPresented: $showDeleteConfirm) {
-                Button("刪除", role: .destructive) { deleteRecord() }
-                Button("取消", role: .cancel) {}
+            if let area = floor.areaText {
+                Text(area)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
         }
     }
 
-    private func save() {
-        guard !isSaving else { return }
-        guard let amount = Double(amountText), amount > 0 else {
-            showError = true; return
-        }
-        guard var estate = store.realEstates.first(where: { $0.id == estateId }) else { return }
-        isSaving = true
-        let recordId = editing?.id ?? UUID()
-        let trimmedNote = note.trimmingCharacters(in: .whitespaces)
-        let bankCurrency: String? = selectedBankMilestoneId != nil ? selectedBankCurrency : nil
+    /// 左邊 40pt 方塊「3F」；地下室深灰，其他用房子的紫
+    fileprivate func floorBadge(_ floor: HouseFloorsData.Floor) -> some View {
+        let dark = scheme == .dark
+        let purpleHex: UInt32 = dark ? 0xB79CFF : 0x6B4BE0
+        let basementHex: UInt32 = dark ? 0x4A5263 : 0x4A5568
+        let purple = Color(tb: purpleHex)
+        let tintAlpha: Double = dark ? 0.22 : 0.12
+        let fill: Color = floor.isBasement ? Color(tb: basementHex) : purple.opacity(tintAlpha)
+        let ink: Color = floor.isBasement ? Color.white : purple
+        return Text(floor.label)
+            .font(.system(size: 14, weight: .heavy, design: .rounded))
+            .lineLimit(1)
+            .minimumScaleFactor(0.6)
+            .foregroundStyle(ink)
+            .padding(.horizontal, 2)
+            .frame(width: 40, height: 40)
+            .background(fill, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
 
-        // [v25.530] 連結的支出還在：只改這個編輯器管的欄位（金額、日期、分類、扣款帳戶），
-        // 你在記帳那邊改過的標題、地點、備註、照片都留著，id 也不變——以前每存一次就整筆重建蓋掉。
-        // 找不到（被刪了，或這筆是新增的）才新建一筆並重新連結，不留指向不存在支出的連結。
-        let previousExpense: Expense? = {
-            guard let id = editing?.linkedExpenseId else { return nil }
-            return expenseStore.expenses.first(where: { $0.id == id })
-        }()
-        let expense: Expense
-        if var existing = previousExpense {
-            existing.amount = amount
-            existing.date = date
-            existing.expenseType = .variable
-            existing.variableCategory = .realEstate
-            existing.fixedCategory = nil
-            existing.recurrence = nil
-            existing.realEstateExpenseCategory = .utility
-            existing.linkedRealEstateId = estate.id
-            existing.linkedBankMilestoneId = selectedBankMilestoneId
-            existing.linkedBankCurrency = bankCurrency
-            existing.linkedCreditCardMilestoneId = selectedCreditCardMilestoneId
-            // 水電類型真的換了才動標題：標題裡有舊類型的字就只換那幾個字，其餘照你改過的留著
-            if let oldType = editing?.type, oldType != type {
-                if let r = existing.title.range(of: oldType.rawValue, options: .backwards) {
-                    existing.title.replaceSubrange(r, with: type.rawValue)
-                } else {
-                    existing.title = "\(estate.name) - \(type.rawValue)"
+    fileprivate func roomChips(_ rooms: [String]) -> some View {
+        ChipFlowLayout(spacing: 5) {
+            ForEach(rooms, id: \.self) { room in
+                Text(room)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(Color.secondary.opacity(0.12), in: Capsule())
+            }
+        }
+    }
+
+    /// 展開後：「家電家具」（附屬資產）＋「收納」（物品樹）
+    fileprivate func floorDetail(_ floor: HouseFloorsData.Floor) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if !floor.assets.isEmpty {
+                assetGroup("家電家具", floor.assets)
+            }
+            storageGroup(floorId: floor.id)
+        }
+        .padding(.leading, 52)
+        .padding(.bottom, 10)
+    }
+
+    fileprivate func groupTitle(_ title: String) -> some View {
+        Text(title)
+            .font(.caption.weight(.bold))
+            .foregroundStyle(.secondary)
+    }
+
+    fileprivate func assetGroup(_ title: String, _ assets: [HouseFloorsData.Asset]) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            groupTitle(title)
+            ForEach(assets) { asset in
+                assetRow(asset)
+            }
+        }
+    }
+
+    /// 點家電：打開它連結的記帳支出（付費）；沒連到記帳的不能點
+    fileprivate func assetRow(_ asset: HouseFloorsData.Asset) -> some View {
+        Button {
+            guard let id = asset.expenseId else { return }
+            requirePremium { openExpenseRecord(id) }
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "sofa.fill")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                MarqueeText(asset.text)
+                    .font(.subheadline)
+                Spacer(minLength: 4)
+                if asset.expenseId != nil {
+                    Image(systemName: "chevron.right")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
                 }
             }
-            expenseStore.update(existing)
-            expense = existing
-        } else {
-            let created = Expense(
-                id: UUID(),
-                title: "\(estate.name) - \(type.rawValue)",
-                amount: amount,
-                date: date,
-                expenseType: .variable,
-                variableCategory: .realEstate,
-                linkedRealEstateId: estate.id,
-                realEstateExpenseCategory: .utility,
-                note: trimmedNote,
-                linkedBankMilestoneId: selectedBankMilestoneId,
-                linkedBankCurrency: bankCurrency,
-                linkedCreditCardMilestoneId: selectedCreditCardMilestoneId
-            )
-            expenseStore.add(created)
-            expense = created
+            .frame(minHeight: 30)
+            .contentShape(Rectangle())
         }
-        // 舊連結指向的支出已經不在時，它留在銀行的扣款紀錄也一起清掉
-        var clearIds: Set<UUID> = [expense.id]
-        if let oldId = editing?.linkedExpenseId { clearIds.insert(oldId) }
-        syncBankWithdrawal(for: expense, clearing: clearIds)
+        .buttonStyle(.plain)
+        .disabled(asset.expenseId == nil)
+    }
 
-        let record = UtilityPayment(
-            id: recordId, type: type, date: date, amount: amount,
-            photoFileName: photoFileNames.first,
-            photoFileNames: photoFileNames,
-            note: trimmedNote,
-            linkedExpenseId: expense.id
+    /// 這一層的物品樹（讀 store 最新的一份，新增、改名之後馬上看得到）
+    fileprivate func floorItems(_ floorId: UUID) -> [FloorItem] {
+        estate.floors.first(where: { $0.id == floorId })?.items ?? []
+    }
+
+    fileprivate func storageGroup(floorId: UUID) -> some View {
+        let rows = flattenedFloorItems(floorItems(floorId))
+        return VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                groupTitle("收納")
+                Spacer(minLength: 8)
+                Button {
+                    requirePremium { newFloorItem(floorId: floorId, parent: nil) }
+                } label: {
+                    Label("新增物品", systemImage: "plus")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.green)
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.bottom, 4)
+            if rows.isEmpty {
+                Text("還沒有物品，點「新增物品」開始建立")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+            } else {
+                // 先把樹攤平成一維再用單一 ForEach：遞迴回傳 AnyView 在新增／刪除時會讓 AttributeGraph 崩潰
+                ForEach(rows) { row in
+                    floorItemRow(floorId: floorId, row: row)
+                }
+            }
+        }
+    }
+
+    /// 一件物品：縮排＋細線（不再用 │├└ 字元）。點一下改名、長按新增子項目／改名／刪除（都要付費）
+    fileprivate func floorItemRow(floorId: UUID, row: FlatFloorItem) -> some View {
+        let item = row.item
+        let name = item.name.isEmpty ? "未命名" : item.name
+        let indent = CGFloat(row.depth) * Self.treeIndent
+        let count = descendantCount(of: item)
+        return HStack(spacing: 6) {
+            Image(systemName: item.children.isEmpty ? "cube" : "cube.fill")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            MarqueeText(name)
+                .font(.subheadline)
+            if count > 0 {
+                Text("\(count)")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 4)
+        }
+        .padding(.leading, indent)
+        .frame(minHeight: 34)
+        .background(alignment: .leading) {
+            FloorTreeGuide(depth: row.depth, isLast: row.isLast, ancestorIsLast: row.ancestorIsLast,
+                           indent: Self.treeIndent)
+                .stroke(Color.secondary.opacity(0.35), lineWidth: 1)
+                .frame(width: indent)
+        }
+        .contentShape(Rectangle())
+        .onTapGesture { requirePremium { renameFloorItemSheet(floorId: floorId, item: item) } }
+        .contextMenu { floorItemMenu(floorId: floorId, item: item) }
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityHint("點兩下重新命名")
+        .accessibilityAction(named: "新增子項目") { requirePremium { newFloorItem(floorId: floorId, parent: item.id) } }
+        .accessibilityAction(named: "重新命名") { requirePremium { renameFloorItemSheet(floorId: floorId, item: item) } }
+        .accessibilityAction(named: "刪除") { requirePremium { confirmDeleteFloorItem(floorId: floorId, item: item) } }
+    }
+
+    @ViewBuilder
+    fileprivate func floorItemMenu(floorId: UUID, item: FloorItem) -> some View {
+        Button {
+            requirePremium { newFloorItem(floorId: floorId, parent: item.id) }
+        } label: {
+            Label("新增子項目", systemImage: "plus")
+        }
+        Button {
+            requirePremium { renameFloorItemSheet(floorId: floorId, item: item) }
+        } label: {
+            Label("重新命名", systemImage: "pencil")
+        }
+        Button(role: .destructive) {
+            requirePremium { confirmDeleteFloorItem(floorId: floorId, item: item) }
+        } label: {
+            Label("刪除", systemImage: "trash")
+        }
+    }
+
+    fileprivate func newFloorItem(floorId: UUID, parent: UUID?) {
+        sheet = .floorItem(FloorItemEditTarget(floorId: floorId, parentItemId: parent, itemId: nil, currentName: ""))
+    }
+
+    fileprivate func renameFloorItemSheet(floorId: UUID, item: FloorItem) {
+        sheet = .floorItem(FloorItemEditTarget(floorId: floorId, parentItemId: nil, itemId: item.id, currentName: item.name))
+    }
+
+    /// 刪一個會連整棵子樹一起刪：先確認，寫出底下有幾件
+    fileprivate func confirmDeleteFloorItem(floorId: UUID, item: FloorItem) {
+        let name = item.name.isEmpty ? "未命名" : item.name
+        let count = descendantCount(of: item)
+        let message = count > 0 ? "底下 \(count) 件也會一起刪掉。" : "刪除後不能復原。"
+        let itemId = item.id
+        pendingConfirm = HouseConfirm(title: "刪除「\(name)」？", message: message, button: "刪除",
+                                      action: { deleteFloorItem(floorId: floorId, itemId: itemId) })
+    }
+
+    fileprivate func descendantCount(of item: FloorItem) -> Int {
+        item.children.reduce(0) { $0 + 1 + descendantCount(of: $1) }
+    }
+
+    /// 樹深度優先攤平成一維（每列帶畫細線要的 depth／isLast／祖先資訊）
+    fileprivate func flattenedFloorItems(_ items: [FloorItem], depth: Int = 0,
+                                         ancestorIsLast: [Bool] = []) -> [FlatFloorItem] {
+        var result: [FlatFloorItem] = []
+        for (idx, item) in items.enumerated() {
+            let isLast = idx == items.count - 1
+            result.append(FlatFloorItem(id: item.id, item: item, depth: depth,
+                                        isLast: isLast, ancestorIsLast: ancestorIsLast))
+            if !item.children.isEmpty {
+                result.append(contentsOf: flattenedFloorItems(item.children, depth: depth + 1,
+                                                              ancestorIsLast: ancestorIsLast + [isLast]))
+            }
+        }
+        return result
+    }
+
+    /// 新增物品：parentItemId 是 nil 加在這一層的最上層，否則加在那一件底下
+    fileprivate func addFloorItem(floorId: UUID, parentItemId: UUID?, name: String) {
+        let trimmed = name.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty,
+              var re = store.realEstates.first(where: { $0.id == estateId }),
+              let fIdx = re.floors.firstIndex(where: { $0.id == floorId }) else { return }
+        let newItem = FloorItem(name: trimmed)
+        if let parentId = parentItemId {
+            re.floors[fIdx].items = insertChild(into: re.floors[fIdx].items, parentId: parentId, child: newItem)
+        } else {
+            re.floors[fIdx].items.append(newItem)
+        }
+        commitFloorEstate(re)
+    }
+
+    fileprivate func renameFloorItem(floorId: UUID, itemId: UUID, newName: String) {
+        let trimmed = newName.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty,
+              var re = store.realEstates.first(where: { $0.id == estateId }),
+              let fIdx = re.floors.firstIndex(where: { $0.id == floorId }) else { return }
+        re.floors[fIdx].items = renameInTree(re.floors[fIdx].items, targetId: itemId, newName: trimmed)
+        commitFloorEstate(re)
+    }
+
+    fileprivate func deleteFloorItem(floorId: UUID, itemId: UUID) {
+        guard var re = store.realEstates.first(where: { $0.id == estateId }),
+              let fIdx = re.floors.firstIndex(where: { $0.id == floorId }) else { return }
+        re.floors[fIdx].items = removeFromTree(re.floors[fIdx].items, targetId: itemId)
+        commitFloorEstate(re)
+    }
+
+    /// 樓層物品寫回 store 刻意延後一個 runloop：新增／改名是在 FloorItemEditor「儲存」裡觸發、
+    /// 緊接著 sheet 關閉，在這個 view-update 交易裡同步改 observed state 會閃退。
+    fileprivate func commitFloorEstate(_ re: RealEstate) {
+        DispatchQueue.main.async {
+            store.update(re)
+        }
+    }
+
+    fileprivate func insertChild(into items: [FloorItem], parentId: UUID, child: FloorItem) -> [FloorItem] {
+        items.map { node in
+            var node = node
+            if node.id == parentId {
+                node.children.append(child)
+            } else {
+                node.children = insertChild(into: node.children, parentId: parentId, child: child)
+            }
+            return node
+        }
+    }
+
+    fileprivate func renameInTree(_ items: [FloorItem], targetId: UUID, newName: String) -> [FloorItem] {
+        items.map { node in
+            var node = node
+            if node.id == targetId {
+                node.name = newName
+            } else {
+                node.children = renameInTree(node.children, targetId: targetId, newName: newName)
+            }
+            return node
+        }
+    }
+
+    fileprivate func removeFromTree(_ items: [FloorItem], targetId: UUID) -> [FloorItem] {
+        var result: [FloorItem] = []
+        for node in items where node.id != targetId {
+            var copy = node
+            copy.children = removeFromTree(node.children, targetId: targetId)
+            result.append(copy)
+        }
+        return result
+    }
+
+    // MARK: 區塊標題＋「＋」選單
+
+    fileprivate func sectionHeader<Add: View>(_ title: String, trailing: String?,
+                                              @ViewBuilder add: () -> Add) -> some View {
+        let addView = add()
+        return HStack(alignment: .center, spacing: 10) {
+            MoneySectionHeader(title: title, trailing: trailing)
+                .accessibilityAddTraits(.isHeader)
+            addView
+        }
+    }
+
+    /// 區塊標題右邊的綠色小「＋」（跟其他各區同一個樣子）
+    fileprivate var addIcon: some View {
+        Image(systemName: "plus")
+            .font(.system(size: 12, weight: .heavy))
+            .foregroundStyle(Color.white)
+            .frame(width: 24, height: 24)
+            .background(Color(tb: 0x1F9D57), in: Circle())
+            .frame(width: 34, height: 30)
+            .contentShape(Rectangle())
+    }
+
+    /// 付費才打開的「＋」選單：沒付費時換成普通按鈕，按了跳付費說明（選單打開前就擋）
+    @ViewBuilder
+    fileprivate func premiumAddMenu<Items: View>(_ label: String, @ViewBuilder items: () -> Items) -> some View {
+        let content = items()
+        if subscription.isPremium {
+            Menu {
+                content
+            } label: {
+                addIcon
+            }
+            .accessibilityLabel(label)
+        } else {
+            Button {
+                showPremiumAlert = true
+            } label: {
+                addIcon
+            }
+            .buttonStyle(MoneyPressStyle())
+            .accessibilityLabel(label)
+        }
+    }
+}
+
+// MARK: - 照片與文件
+
+extension RealEstateDetailView {
+    fileprivate func photosSection(_ card: HouseCardData) -> some View {
+        let items = photoItems(card)
+        return VStack(alignment: .leading, spacing: 10) {
+            sectionHeader("照片與文件", trailing: card.media.trailing) {
+                if !items.isEmpty {
+                    premiumAddMenu("新增照片或文件") { photoAddItems }
+                }
+            }
+            if items.isEmpty {
+                photosEmptyRow
+            } else {
+                photoStrip(items)
+            }
+        }
+    }
+
+    /// 集錦要列的：裝潢照片、有圖片的關聯支出（跟張數同一批）、文件、有收據的水電、有照片的電梯保養
+    fileprivate func photoItems(_ card: HouseCardData) -> [HousePhotoItem] {
+        let re = card.estate
+        let ids = Set(card.media.photoExpenseIds)
+        var items: [HousePhotoItem] = re.renovationPhotos.map { HousePhotoItem.renovation($0) }
+        items += expenseStore.expenses.filter { ids.contains($0.id) }.map { HousePhotoItem.expense($0) }
+        items += re.documents.map { HousePhotoItem.document($0) }
+        items += re.utilityPayments.filter { !$0.photoFileNames.isEmpty }.map { HousePhotoItem.utility($0) }
+        items += re.elevatorMaintenances.filter { !$0.photoFileNames.isEmpty }.map { HousePhotoItem.elevator($0) }
+        return items.sorted { $0.date > $1.date }
+    }
+
+    @ViewBuilder
+    fileprivate var photoAddItems: some View {
+        Button {
+            sheet = .newRenovation(UUID())
+        } label: {
+            Label("新增照片及描述", systemImage: "photo")
+        }
+        Button {
+            showDocumentPicker = true
+        } label: {
+            Label("上傳文件（PDF、PPT、Excel…）", systemImage: "doc.badge.plus")
+        }
+    }
+
+    /// 沒有任何照片和文件：整區縮成一行「＋ 加照片或文件」（付費才打開選單）
+    fileprivate var photosEmptyRow: some View {
+        let label = HStack(spacing: 8) {
+            Text("＋ 加照片或文件")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(TripBoardPalette(scheme).hint)
+            Spacer(minLength: 0)
+        }
+        .padding(14)
+        .contentShape(Rectangle())
+        return Group {
+            if subscription.isPremium {
+                Menu {
+                    photoAddItems
+                } label: {
+                    label
+                }
+            } else {
+                Button {
+                    showPremiumAlert = true
+                } label: {
+                    label
+                }
+                .buttonStyle(MoneyPressStyle())
+            }
+        }
+        .modifier(FinanceCardChrome())
+    }
+
+    fileprivate func photoStrip(_ items: [HousePhotoItem]) -> some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            LazyHStack(spacing: 14) {
+                ForEach(items) { item in
+                    Button {
+                        handleHousePhotoTap(item)
+                    } label: {
+                        housePhotoCard(item)
+                    }
+                    .buttonStyle(.plain)
+                    .contextMenu { photoMenu(item) }
+                }
+            }
+            .padding(.horizontal, 6)
+            .padding(.vertical, 6)
+        }
+        .modifier(FinanceCardChrome())
+    }
+
+    /// 長按：編輯資訊、打開那筆記帳、刪除文件（都要付費；刪文件先確認）
+    @ViewBuilder
+    fileprivate func photoMenu(_ item: HousePhotoItem) -> some View {
+        switch item {
+        case .renovation(let p):
+            Button {
+                requirePremium { sheet = .editRenovation(p) }
+            } label: {
+                Label("編輯資訊", systemImage: "pencil")
+            }
+        case .expense(let e):
+            Button {
+                requirePremium { openExpenseRecord(e.id) }
+            } label: {
+                Label("打開那筆記帳", systemImage: "list.bullet.rectangle")
+            }
+        case .document(let d):
+            Button(role: .destructive) {
+                requirePremium { confirmDeleteDocument(d) }
+            } label: {
+                Label("刪除文件", systemImage: "trash")
+            }
+        case .utility(let u):
+            Button {
+                requirePremium { sheet = .editUtility(u) }
+            } label: {
+                Label("編輯繳費紀錄", systemImage: "pencil")
+            }
+        case .elevator(let m):
+            Button {
+                requirePremium { sheet = .editElevator(m) }
+            } label: {
+                Label("編輯保養紀錄", systemImage: "pencil")
+            }
+        }
+    }
+
+    /// 點照片一律用 CutePhotoViewer 看全部（看不用付費）；沒照片的裝潢紀錄點了是去編輯（付費）
+    fileprivate func handleHousePhotoTap(_ item: HousePhotoItem) {
+        switch item {
+        case .renovation(let p):
+            guard !p.photoFileNames.isEmpty else {
+                requirePremium { sheet = .editRenovation(p) }
+                return
+            }
+            let urls = p.photoFileNames.map { RenovationPhoto.photoURL(for: $0) }
+            let title = p.title.isEmpty ? "裝潢紀錄" : p.title
+            sheet = .photos(CutePhotoDraft(urls: urls, title: title, note: p.note, date: p.date, kind: .renovation))
+        case .expense(let e):
+            let urls = item.fileNames.map { Expense.photoURL(for: $0) }
+            guard !urls.isEmpty else { return }
+            let trimmedNote = e.note.trimmingCharacters(in: .whitespaces)
+            let fallback: String = e.title.isEmpty ? "支出照片" : e.title
+            let title: String = trimmedNote.isEmpty ? fallback : trimmedNote
+            let note: String = (trimmedNote.isEmpty || trimmedNote == title) ? "" : trimmedNote
+            sheet = .photos(CutePhotoDraft(urls: urls, title: title, note: note, date: e.date, kind: .expense))
+        case .document(let d):
+            sheet = .document(IdentifiableURL(url: d.fileURL))
+        case .utility(let u):
+            let urls = u.photoFileNames.map { UtilityPayment.photosDirectory.appendingPathComponent($0) }
+            let amountText: String = u.amount > 0 ? MoneyFormat.short(u.amount) : ""
+            let noteParts = [amountText, u.note.trimmingCharacters(in: .whitespaces)].filter { !$0.isEmpty }
+            sheet = .photos(CutePhotoDraft(urls: urls, title: "\(u.type.rawValue) 繳費",
+                                           note: noteParts.joined(separator: "・"), date: u.date, kind: .utility(u.type)))
+        case .elevator(let m):
+            let urls = m.photoFileNames.map { ElevatorMaintenance.photoURL(for: $0) }
+            sheet = .photos(CutePhotoDraft(urls: urls, title: "電梯保養", note: "", date: m.date, kind: .elevator))
+        }
+    }
+
+    fileprivate func housePhotoCard(_ item: HousePhotoItem) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            housePhotoThumb(item)
+            HStack(spacing: 4) {
+                Image(systemName: item.badgeIcon)
+                    .font(.system(size: 9))
+                    .foregroundStyle(item.badgeColor)
+                MarqueeText(item.displayTitle)
+                    .font(.caption.weight(.medium))
+            }
+            .frame(width: 140, alignment: .leading)
+            Text(HouseCardFormat.ymd(item.date))
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+        }
+        .padding(8)
+    }
+
+    @ViewBuilder
+    fileprivate func housePhotoThumb(_ item: HousePhotoItem) -> some View {
+        if case .document(let d) = item {
+            documentThumbnail(for: d)
+        } else if item.fileNames.count >= 2 {
+            stackedHousePhotos(fileNames: item.fileNames, urlFor: item.urlForFileName)
+        } else {
+            singlePhoto(url: item.primaryURL)
+        }
+    }
+
+    /// 文件縮圖：大張彩色圖示＋副檔名，跟照片卡同尺寸
+    fileprivate func documentThumbnail(for doc: RealEstateDocument) -> some View {
+        let ext = (doc.fileName as NSString).pathExtension.uppercased()
+        return ZStack(alignment: .bottomTrailing) {
+            RoundedRectangle(cornerRadius: 10)
+                .fill(doc.iconColor.opacity(0.12))
+                .frame(width: 130, height: 100)
+            VStack(spacing: 6) {
+                Image(systemName: doc.icon)
+                    .font(.system(size: 38))
+                    .foregroundStyle(doc.iconColor)
+                if !ext.isEmpty {
+                    Text(ext)
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(doc.iconColor)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(doc.iconColor.opacity(0.18))
+                        .clipShape(Capsule())
+                }
+            }
+            .frame(width: 130, height: 100)
+        }
+        .frame(width: 130, height: 100)
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .shadow(color: .black.opacity(0.12), radius: 3, y: 2)
+        .frame(width: 140, height: 110)
+    }
+
+    /// 多張照片疊起來：往後三張遞減旋轉位移，右上角寫總張數
+    fileprivate func stackedHousePhotos(fileNames: [String], urlFor: (String) -> URL) -> some View {
+        let visible = Array(fileNames.prefix(3))
+        let urls = visible.map { urlFor($0) }
+        return ZStack {
+            if urls.count >= 3 {
+                stackedPhotoLayer(url: urls[2])
+                    .rotationEffect(.degrees(7))
+                    .offset(x: 7, y: 4)
+                    .opacity(0.85)
+            }
+            if urls.count >= 2 {
+                stackedPhotoLayer(url: urls[1])
+                    .rotationEffect(.degrees(-5))
+                    .offset(x: -4, y: 2)
+                    .opacity(0.92)
+            }
+            if let first = urls.first {
+                stackedPhotoLayer(url: first)
+            }
+            photoCountBadge(fileNames.count)
+        }
+        .frame(width: 140, height: 110)
+    }
+
+    fileprivate func photoCountBadge(_ count: Int) -> some View {
+        VStack {
+            HStack {
+                Spacer()
+                HStack(spacing: 3) {
+                    Image(systemName: "square.stack.3d.up.fill")
+                        .font(.system(size: 10))
+                    Text("\(count)")
+                        .font(.caption2.weight(.bold))
+                }
+                .foregroundStyle(.white)
+                .padding(.horizontal, 7)
+                .padding(.vertical, 3)
+                .background(Color.black.opacity(0.65))
+                .clipShape(Capsule())
+                .padding(6)
+            }
+            Spacer()
+        }
+        .frame(width: 130, height: 100)
+    }
+
+    fileprivate func stackedPhotoLayer(url: URL) -> some View {
+        ThumbnailImageView(url: url)
+            .frame(width: 130, height: 100)
+            .clipped()
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+            .shadow(color: .black.opacity(0.2), radius: 3, y: 2)
+    }
+
+    /// 單張照片卡：跟疊起來的卡同一個大小（140×110，內容 130×100）
+    fileprivate func singlePhoto(url: URL?) -> some View {
+        ThumbnailImageView(url: url, placeholderIcon: "photo")
+            .frame(width: 130, height: 100)
+            .clipped()
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+            .shadow(color: .black.opacity(0.18), radius: 3, y: 2)
+            .frame(width: 140, height: 110)
+    }
+
+    // MARK: 文件匯入／刪除
+
+    /// 讀檔、複製搬到背景執行緒（以前在主執行緒同步讀整個檔，大檔會卡住）；寫回 store 回主執行緒，
+    /// 而且寫回「選檔那時候」那一間，不會寫到換過去的那間。讀不到的檔案跳提示（以前默默略過）
+    fileprivate func importDocuments(_ urls: [URL]) {
+        let requestedId = estateId
+        Task {
+            let results: [RealEstateDocument?] = await Task.detached(priority: .userInitiated) {
+                urls.map { RealEstateDocument.importDocument(from: $0) }
+            }.value
+            let docs = results.compactMap { $0 }
+            let failed = results.count - docs.count
+            if var re = store.realEstates.first(where: { $0.id == requestedId }) {
+                if !docs.isEmpty {
+                    re.documents.append(contentsOf: docs)
+                    store.update(re)
+                }
+            } else {
+                // 匯入途中房子被刪掉了：剛複製進來的檔案沒人用，刪掉
+                docs.forEach { RealEstateDocument.deleteDocument($0.fileName) }
+            }
+            guard failed > 0 else { return }
+            let message = failed == results.count
+                ? "選的檔案讀不到，沒有匯入。可以先存到「檔案」App 再選一次。"
+                : "有 \(failed) 個檔案讀不到，沒有匯入；其他的已經加進「照片與文件」。"
+            presentNotice("有檔案沒匯入", message)
+        }
+    }
+
+    fileprivate func confirmDeleteDocument(_ doc: RealEstateDocument) {
+        let name = doc.displayName.isEmpty ? doc.fileName : doc.displayName
+        pendingConfirm = HouseConfirm(title: "刪除「\(name)」？", message: "iCloud 上的也會刪掉，不能復原。",
+                                      button: "刪除", action: { deleteDocument(doc) })
+    }
+
+    fileprivate func deleteDocument(_ doc: RealEstateDocument) {
+        guard var re = store.realEstates.first(where: { $0.id == estateId }) else { return }
+        RealEstateDocument.deleteDocument(doc.fileName)
+        re.documents.removeAll { $0.id == doc.id }
+        store.update(re)
+    }
+}
+
+// MARK: - 分享圖片
+
+extension RealEstateDetailView {
+    fileprivate static let shareStampFmt: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.calendar = Calendar(identifier: .gregorian)
+        f.dateFormat = "yyyyMMdd_HHmm"
+        return f
+    }()
+
+    /// 帳本沒有任何一列：直接出一張（看板＋房貸）；有紀錄：先問每頁幾筆
+    fileprivate func shareTapped() {
+        guard let card else { return }
+        if card.ledger.events.isEmpty {
+            exportCardImage(card)
+        } else {
+            askExportPageSize = true
+        }
+    }
+
+    /// 算圖一律淺色；看板、各區讀的環境物件都補上（缺了 ImageRenderer 會當掉）。
+    /// 不輸出房屋資料、水電、照片：門牌、權狀、表號、所有權人、衛星圖都在那幾區
+    fileprivate func exportDecorate(_ view: AnyView) -> AnyView {
+        AnyView(
+            view
+                .environmentObject(store)
+                .environmentObject(expenseStore)
+                .environmentObject(lifeStore)
+                .environmentObject(subscription)
+                .environment(\.colorScheme, .light)
         )
-        if let idx = estate.utilityPayments.firstIndex(where: { $0.id == recordId }) {
-            estate.utilityPayments[idx] = record
-        } else {
-            estate.utilityPayments.append(record)
-        }
-        // 先關閉 sheet，下一個 runloop 才改 @Published store（避免真機 present/dismiss 交易期間改 observed state 閃退）
-        let financeStore = store
-        dismiss()
-        DispatchQueue.main.async { financeStore.update(estate) }
     }
 
-    private func deleteRecord() {
-        guard !isSaving else { return }
-        guard var estate = store.realEstates.first(where: { $0.id == estateId }),
-              let e = editing else { return }
-        isSaving = true
-        for name in e.photoFileNames { UtilityPayment.deletePhoto(name) }
-        // [v25.530] 連結的支出（含照片）和所有帳戶裡它的扣款紀錄一起清；
-        // 以前只清支出上記的那個帳戶，換過帳戶留下的舊紀錄會一直扣著
-        if let linkedId = e.linkedExpenseId {
-            RealEstateDeletion.removeExpenses([linkedId], expenseStore: expenseStore, lifeStore: lifeStore)
-        }
-        estate.utilityPayments.removeAll { $0.id == e.id }
-        let financeStore = store
-        dismiss()
-        DispatchQueue.main.async { financeStore.update(estate) }
+    fileprivate func exportPageHeader(_ card: HouseCardData) -> AnyView {
+        AnyView(
+            HStack {
+                Text("🏠 房地產｜\(card.name)")
+                    .font(.subheadline.weight(.semibold))
+                Spacer()
+            }
+            .padding(.horizontal, 20)
+        )
     }
 
-    /// [v25.530] 同步銀行扣款紀錄：先把所有帳戶裡連到 ids 的舊紀錄清掉（換了扣款帳戶時，舊帳戶那筆
-    /// 也要清，不管金額有沒有變），再寫一筆到目前的扣款帳戶。milestones 只寫一次。
-    private func syncBankWithdrawal(for expense: Expense, clearing ids: Set<UUID>) {
-        func isLinked(_ d: BankDeposit) -> Bool {
-            guard let id = d.linkedExpenseId else { return false }
-            return ids.contains(id)
+    fileprivate func exportSingleContent(_ card: HouseCardData) -> some View {
+        VStack(spacing: 16) {
+            HouseCardBoard(data: card, onTapProgress: nil)
+            if card.mortgage != nil {
+                HouseMortgageSection(data: card, actions: HouseCardActions(), forExport: true)
+            }
         }
-        var milestones = lifeStore.milestones
-        var changed = false
-        for i in milestones.indices {
-            guard let deposits = milestones[i].bankDeposits, deposits.contains(where: isLinked) else { continue }
-            milestones[i].bankDeposits = deposits.filter { !isLinked($0) }
-            changed = true
-        }
-        // 信用卡扣款不寫入 BankDeposit；改在顯示時依月份彙總
-        if expense.linkedCreditCardMilestoneId == nil,
-           let bankId = expense.linkedBankMilestoneId,
-           let idx = milestones.firstIndex(where: { $0.id == bankId }) {
-            let value = realEstateBankWithdrawalValue(ntd: expense.amount, currency: expense.linkedBankCurrency, rates: expenseStore.currencyRates)
-            var list = milestones[idx].bankDeposits ?? []
-            list.append(BankDeposit(
-                id: UUID(), date: expense.date, amount: value.amount,
-                currencyCode: value.code,
-                isWithdrawal: true, linkedExpenseId: expense.id
-            ))
-            milestones[idx].bankDeposits = list
-            changed = true
-        }
-        if changed { lifeStore.milestones = milestones }
+        .padding(.horizontal, 16)
+        .frame(width: 430)
+        .padding(.vertical, 20)
+        .background(Color(.systemGroupedBackground))
     }
 
-    /// [v25.530] 金額帶回輸入框：四捨五入到 2 位小數再去掉多餘的 0（1234.5 → "1234.5"、1200 → "1200"）
-    private static func editableAmountText(_ value: Double) -> String {
-        let rounded: Double = (value * 100).rounded() / 100
-        var s = String(format: "%.2f", rounded)
-        while s.hasSuffix("0") { s.removeLast() }
-        if s.hasSuffix(".") { s.removeLast() }
-        return s
+    /// 單張 JPG（寬 430、scale 照 ImageExportLimits、品質 0.95），檔名「房屋卡片_<房名>_yyyyMMdd_HHmm.jpg」
+    @MainActor
+    fileprivate func exportCardImage(_ card: HouseCardData) {
+        let content = exportDecorate(AnyView(exportSingleContent(card)))
+        let renderer = ImageRenderer(content: content)
+        var measured = CGSize.zero
+        renderer.render { size, _ in measured = size }
+        renderer.scale = ImageExportLimits.safeScale(for: measured)
+        guard let ui = renderer.uiImage, !ImageExportLimits.isBlank(ui),
+              let data = ui.jpegData(compressionQuality: 0.95) else { return }
+        let safeName = PagedImageExporter.sanitizeFileName(card.name)
+        let name = "房屋卡片_\(safeName)_\(Self.shareStampFmt.string(from: Date())).jpg"
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(name)
+        do {
+            try data.write(to: url)
+            sheet = .share(StockCardSharePayload(items: [url]))
+        } catch { }
+    }
+
+    /// 分頁：看板、房貸、每個月住這裡、帳本總表當第一頁的開頭區塊，接著帳本逐筆（含房貸、固定支出年列）
+    @MainActor
+    fileprivate func exportPaged(perPage: Int) {
+        guard let card else { return }
+        let actions = HouseCardActions()
+        var items: [PagedExportItem] = []
+        // 區塊標題左右留 20，往外推 4 跟逐筆的卡對齊
+        items.append(.sectionHeader(AnyView(HouseCardBoard(data: card, onTapProgress: nil).padding(.horizontal, -4))))
+        if card.mortgage != nil {
+            let mortgage = HouseMortgageSection(data: card, actions: actions, forExport: true)
+            items.append(.sectionHeader(AnyView(mortgage.padding(.horizontal, -4))))
+        }
+        if card.living != nil {
+            let living = HouseLivingSection(data: card, actions: actions)
+            items.append(.sectionHeader(AnyView(living.padding(.horizontal, -4))))
+        }
+        items.append(.sectionHeader(AnyView(exportLedgerSummary(card, actions: actions).padding(.horizontal, -4))))
+        if !card.ledger.events.isEmpty {
+            let trailing: String? = card.ledger.recordCount > 0 ? "\(card.ledger.recordCount) 筆" : nil
+            items.append(.sectionHeader(AnyView(MoneySectionHeader(title: "紀錄", trailing: trailing))))
+            items += card.ledger.events.map { e -> PagedExportItem in
+                .row(AnyView(HouseLedgerRowView(event: e)))
+            }
+        }
+        let urls = PagedImageExporter.exportSections(
+            baseName: "房屋卡片_\(card.name)",
+            itemsPerPage: perPage,
+            header: exportPageHeader(card),
+            items: items,
+            decorate: { exportDecorate($0) }
+        )
+        guard !urls.isEmpty else { return }
+        sheet = .share(StockCardSharePayload(items: urls))
+    }
+
+    fileprivate func exportLedgerSummary(_ card: HouseCardData, actions: HouseCardActions) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            MoneySectionHeader(title: "我的帳本", trailing: card.ledger.headerTrailing)
+            HouseLedgerSummaryCard(data: card, actions: actions)
+        }
     }
 }
 
-/// [v25.530] 扣款帳戶是外幣子帳戶時，台幣金額用設定裡的匯率換成那個幣別再記
-/// （銀行頁也是用同一個匯率把外幣換回台幣，兩邊對得上）。AddExpenseView 目前是直接把台幣數字
-/// 標成外幣，沒有可照抄的換算，所以改用 currencyRates；設定裡找不到這個幣別的匯率時，
-/// 就記成 NT$ 原額，至少不會把台幣數字標成外幣。水電瓦斯編輯器、卡片頁複製支出、編輯頁保險／附屬資產共用這一個。
-func realEstateBankWithdrawalValue(ntd: Double, currency: String?, rates: [CurrencyRate]) -> (amount: Double, code: String) {
-    guard let code = currency, !code.isEmpty else { return (ntd, "NT$") }
-    if code == "NT$" || code == "TWD" { return (ntd, code) }
-    if let rate = rates.first(where: { $0.code == code }), rate.rate > 0 {
-        let converted: Double = (ntd / rate.rate * 100).rounded() / 100
-        return (converted, code)
+// MARK: - 彈出頁與確認框的型別
+
+/// 卡片上所有彈出頁（一個 .sheet(item:)）。每次「新增」都帶一個新的 UUID：
+/// 跟「打開」綁在一起，不會帶到上一次的內容（v25.532 教訓：不要先設值再 set Bool）
+private enum HouseSheet: Identifiable {
+    case edit(HouseEditFocus)
+    case share(StockCardSharePayload)
+    case newExpense(NewExpenseRequest)
+    case editExpense(Expense)
+    case floorItem(FloorItemEditTarget)
+    case newUtility(UUID)
+    case editUtility(UtilityPayment)
+    case newElevator(UUID)
+    case editElevator(ElevatorMaintenance)
+    case newRenovation(UUID)
+    case editRenovation(RenovationPhoto)
+    case photos(CutePhotoDraft)
+    case document(IdentifiableURL)
+
+    var id: String {
+        switch self {
+        case .edit(let focus): return "edit-\(focus)"
+        case .share(let payload): return "share-" + payload.id.uuidString
+        case .newExpense(let request): return "newExpense-" + request.id.uuidString
+        case .editExpense(let ex): return "expense-" + ex.id.uuidString
+        case .floorItem(let target): return "floorItem-" + target.id.uuidString
+        case .newUtility(let token): return "newUtility-" + token.uuidString
+        case .editUtility(let payment): return "utility-" + payment.id.uuidString
+        case .newElevator(let token): return "newElevator-" + token.uuidString
+        case .editElevator(let record): return "elevator-" + record.id.uuidString
+        case .newRenovation(let token): return "newRenovation-" + token.uuidString
+        case .editRenovation(let photo): return "renovation-" + photo.id.uuidString
+        case .photos(let draft): return "photos-" + draft.id.uuidString
+        case .document(let wrapper): return "document-" + wrapper.id.uuidString
+        }
     }
-    return (ntd, "NT$")
 }
 
-// MARK: - 房屋照片集錦：彙整裝潢 + 關聯支出照片
+/// 新增一筆記帳：種類和預設值跟「打開」綁在一起
+private struct NewExpenseRequest {
+    let id = UUID()
+    let expenseType: ExpenseType
+    let preset: AddExpensePreset
+}
 
-fileprivate enum HousePhotoItem: Identifiable {
+/// 一個確認框（button 是 nil 時只是告訴你一件事，只有「好」）
+private struct HouseConfirm: Identifiable {
+    let id = UUID()
+    let title: String
+    let message: String
+    var button: String? = nil
+    var destructive = true
+    var action: () -> Void = {}
+}
+
+/// 一個選單（沒連到記帳的舊資料：補建或刪除）
+private struct HouseChoice: Identifiable {
+    struct Option: Identifiable {
+        let id = UUID()
+        let label: String
+        var destructive = false
+        let action: () -> Void
+    }
+    let id = UUID()
+    let title: String
+    let message: String
+    let options: [Option]
+}
+
+// MARK: - 物品樹的一列、縮排細線
+
+/// 攤平後的一件物品：先算好畫細線要的 depth／isLast／祖先資訊，畫面用單一 ForEach、不遞迴
+private struct FlatFloorItem: Identifiable {
+    let id: UUID
+    let item: FloorItem
+    let depth: Int
+    let isLast: Bool
+    let ancestorIsLast: [Bool]
+}
+
+/// 物品樹的縮排細線（取代 │├└ 字元）：一個 Shape 畫完整列，不用 ForEach 一段一段畫
+/// （動態範圍的 ForEach 在新增／刪除時會閃退）
+private struct FloorTreeGuide: Shape {
+    let depth: Int
+    let isLast: Bool
+    let ancestorIsLast: [Bool]
+    let indent: CGFloat
+
+    func path(in rect: CGRect) -> Path {
+        var p = Path()
+        guard depth > 0 else { return p }
+        // 祖先那一層後面還有兄弟：那一欄整列畫直線接下去
+        for level in 1..<depth where level < ancestorIsLast.count && !ancestorIsLast[level] {
+            let x = indent * (CGFloat(level - 1) + 0.5)
+            p.move(to: CGPoint(x: x, y: rect.minY))
+            p.addLine(to: CGPoint(x: x, y: rect.maxY))
+        }
+        // 自己這一層：直線到中間（後面還有兄弟就畫到底）＋往右一小段橫線
+        let x = indent * (CGFloat(depth - 1) + 0.5)
+        p.move(to: CGPoint(x: x, y: rect.minY))
+        p.addLine(to: CGPoint(x: x, y: isLast ? rect.midY : rect.maxY))
+        p.move(to: CGPoint(x: x, y: rect.midY))
+        p.addLine(to: CGPoint(x: indent * CGFloat(depth) - 3, y: rect.midY))
+        return p
+    }
+}
+
+// MARK: - 照片與文件的一張卡
+
+private enum HousePhotoItem: Identifiable {
     case renovation(RenovationPhoto)
     case expense(Expense)
     case document(RealEstateDocument)
@@ -3163,8 +2004,6 @@ fileprivate enum HousePhotoItem: Identifiable {
         }
     }
 
-    var kind: HousePhotoItem { self }
-
     var date: Date {
         switch self {
         case .renovation(let p): return p.date
@@ -3175,7 +2014,6 @@ fileprivate enum HousePhotoItem: Identifiable {
         }
     }
 
-    /// 顯示用標題
     var displayTitle: String {
         switch self {
         case .renovation(let p):
@@ -3187,8 +2025,7 @@ fileprivate enum HousePhotoItem: Identifiable {
             if !trimmedNote.isEmpty { return trimmedNote }
             return e.title.isEmpty ? "支出照片" : e.title
         case .document(let d):
-            if !d.displayName.isEmpty { return d.displayName }
-            return "文件"
+            return d.displayName.isEmpty ? "文件" : d.displayName
         case .utility(let u):
             return "\(u.type.rawValue) 收據"
         case .elevator:
@@ -3196,10 +2033,11 @@ fileprivate enum HousePhotoItem: Identifiable {
         }
     }
 
+    /// 照片檔名；記帳存的 PDF 帳單不算照片（跟張數同一套）
     var fileNames: [String] {
         switch self {
         case .renovation(let p): return p.photoFileNames
-        case .expense(let e): return e.photoFileNames
+        case .expense(let e): return e.photoFileNames.filter { HouseCardFormat.isImage($0) }
         case .document: return []
         case .utility(let u): return u.photoFileNames
         case .elevator(let m): return m.photoFileNames
@@ -3221,7 +2059,7 @@ fileprivate enum HousePhotoItem: Identifiable {
         }
     }
 
-    /// 卡片標題前的徽章圖示：分辨來源
+    /// 卡片標題前的小圖示：分辨來源
     var badgeIcon: String {
         switch self {
         case .renovation: return "paintbrush.fill"
@@ -3240,641 +2078,10 @@ fileprivate enum HousePhotoItem: Identifiable {
         case .utility(let u):
             switch u.type {
             case .water: return .blue
-            case .electricity: return .yellow
+            case .electricity: return Color(tb: 0xC27400)
             case .gas: return .orange
             }
         case .elevator: return .teal
-        }
-    }
-}
-
-// MARK: - 支出多張照片展開瀏覽器
-
-/// 把一筆 Expense 的所有照片以左右滑動方式逐張展開（與 RenovationStackViewer 對等）。
-struct ExpensePhotoStackViewer: View {
-    let expense: Expense
-    @Environment(\.dismiss) private var dismiss
-    @State private var currentIndex: Int = 0
-    // [v7] 底部資訊面板進場動畫旗標，對齊 RenovationStackViewer.infoPanelAppeared 規格。
-    @State private var infoPanelAppeared = false
-
-    var body: some View {
-        NavigationStack {
-            ZStack {
-                Color.black.ignoresSafeArea()
-
-                if expense.photoFileNames.isEmpty {
-                    VStack(spacing: 10) {
-                        ZStack {
-                            Circle()
-                                .fill(Color.white.opacity(0.10))
-                                .frame(width: 52, height: 52)
-                            Circle()
-                                .strokeBorder(Color.white.opacity(0.18), lineWidth: 1)
-                                .frame(width: 52, height: 52)
-                            Image(systemName: "photo")
-                                .font(.system(size: 20, weight: .semibold))
-                                .foregroundStyle(.white.opacity(0.55))
-                        }
-                        Text("沒有照片")
-                            .font(.subheadline)
-                            .foregroundStyle(.white.opacity(0.55))
-                    }
-                } else {
-                    TabView(selection: $currentIndex) {
-                        ForEach(Array(expense.photoFileNames.enumerated()), id: \.offset) { idx, name in
-                            let url = Expense.photoURL(for: name)
-                            AsyncLocalImage(url: url) { img, _ in
-                                ZStack {
-                                    if let img {
-                                        ZoomableImageView(image: img)
-                                            .transition(.opacity)
-                                    } else {
-                                        ProgressView().tint(.white)
-                                    }
-                                }
-                                .animation(.easeOut(duration: 0.28), value: img != nil)
-                            }
-                            .tag(idx)
-                        }
-                    }
-                    .tabViewStyle(.page(indexDisplayMode: .always))
-                    .indexViewStyle(.page(backgroundDisplayMode: .always))
-                }
-
-                VStack {
-                    Spacer()
-                    // 目前這張的照片資訊：檔名 / 解析度 / 檔案大小（與 PhotoLightbox 共用 PhotoInfoBar）
-                    if expense.photoFileNames.indices.contains(currentIndex) {
-                        PhotoInfoBar(url: Expense.photoURL(for: expense.photoFileNames[currentIndex]))
-                            .padding(.bottom, 8)
-                    }
-                    panelContent
-                }
-            }
-            .marqueeNavigationTitle(displayTitle)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackground(.visible, for: .navigationBar)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button("關閉") { dismiss() }
-                }
-            }
-        }
-    }
-
-    private var displayTitle: String {
-        let trimmedNote = expense.note.trimmingCharacters(in: .whitespaces)
-        if !trimmedNote.isEmpty { return trimmedNote }
-        return expense.title.isEmpty ? "支出照片" : expense.title
-    }
-
-    @ViewBuilder
-    private var panelContent: some View {
-        let trimmedNote = expense.note.trimmingCharacters(in: .whitespaces)
-        VStack(alignment: .leading, spacing: 6) {
-            HStack {
-                MarqueeText(displayTitle)
-                    .font(.subheadline.weight(.bold))
-                    .foregroundStyle(.white)
-                Spacer()
-                // 頁碼升級為半透明 Capsule 膠囊徽章，對齊 RenovationStackViewer 規格。
-                Text("\(currentIndex + 1) / \(expense.photoFileNames.count)")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.90))
-                    .padding(.horizontal, 9).padding(.vertical, 3)
-                    .background(.white.opacity(0.20))
-                    .clipShape(Capsule())
-            }
-            if !expense.title.isEmpty && !trimmedNote.isEmpty {
-                MarqueeText(expense.title)
-                    .font(.caption)
-                    .foregroundStyle(.white.opacity(0.85))
-            }
-            // 日期加 calendar 圖示前綴，對齊 RenovationStackViewer 日期 icon+text 語言。
-            HStack(spacing: 4) {
-                Image(systemName: "calendar")
-                    .font(.system(size: 10, weight: .medium))
-                Text(fmtDate(expense.date))
-                    .font(.caption2)
-            }
-            .foregroundStyle(.white.opacity(0.65))
-        }
-        .padding()
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.ultraThinMaterial)
-        .padding(.bottom, 32)
-        // [v7] 底部資訊面板進場動畫：opacity 0→1 + 上移 20pt，spring(0.55/0.78)，
-        // 對齊 RenovationStackViewer 規格，取代原本一開啟就直接定位的生硬手感。
-        .opacity(infoPanelAppeared ? 1 : 0)
-        .offset(y: infoPanelAppeared ? 0 : 20)
-        .onAppear {
-            withAnimation(.spring(response: 0.55, dampingFraction: 0.78)) {
-                infoPanelAppeared = true
-            }
-        }
-        .onDisappear { infoPanelAppeared = false }
-    }
-
-    private static let _dateFmt: DateFormatter = {
-        // [v25.530] 固定西元曆＋台灣中文（手機設成民國曆時不會印出「0115/10/10」）
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "zh_TW")
-        f.calendar = Calendar(identifier: .gregorian)
-        f.dateFormat = "yyyy/M/d"
-        return f
-    }()
-    private func fmtDate(_ date: Date) -> String { Self._dateFmt.string(from: date) }
-}
-
-// MARK: - 房屋資料集錦：可愛風照片瀏覽器
-
-struct CutePhotoDraft: Identifiable {
-    enum Kind {
-        case renovation
-        case expense
-        case utility(UtilityType)
-        case elevator
-        case vehicle(VehiclePhotoCategory)   // 車輛照片紀錄（VehicleDetailView 共用本瀏覽器）
-
-        var label: String {
-            switch self {
-            case .renovation: return "裝潢紀錄"
-            case .expense: return "支出照片"
-            case .utility(let t): return "\(t.rawValue) 收據"
-            case .elevator: return "電梯保養"
-            case .vehicle(let c): return c.rawValue
-            }
-        }
-        var icon: String {
-            switch self {
-            case .renovation: return "paintbrush.fill"
-            case .expense: return "tag.fill"
-            case .utility(let t): return t.icon
-            case .elevator: return "arrow.up.arrow.down.square.fill"
-            case .vehicle(let c): return c.icon
-            }
-        }
-        var accent: Color {
-            switch self {
-            case .renovation: return Color(red: 0.82, green: 0.55, blue: 0.92)   // 粉紫
-            case .expense:    return Color(red: 0.98, green: 0.62, blue: 0.45)   // 蜜桃
-            case .utility(let t):
-                switch t {
-                case .water:       return Color(red: 0.40, green: 0.70, blue: 0.95)   // 海藍
-                case .electricity: return Color(red: 0.98, green: 0.78, blue: 0.30)   // 暖黃
-                case .gas:         return Color(red: 0.96, green: 0.55, blue: 0.35)   // 蜜橘
-                }
-            case .elevator: return Color(red: 0.45, green: 0.78, blue: 0.70)   // 薄荷綠
-            case .vehicle(let c): return c.color
-            }
-        }
-    }
-
-    let id = UUID()
-    let urls: [URL]
-    let title: String
-    let note: String
-    let date: Date
-    let kind: Kind
-}
-
-/// 可愛風照片瀏覽器：粉色漸層背景 + 圓角描邊照片 + 自訂頁碼點 + 友善資訊卡。
-/// 支援雙指縮放（內含 ZoomableImageView）+ 多張左右滑動切換。
-struct CutePhotoViewer: View {
-    let draft: CutePhotoDraft
-    @Environment(\.dismiss) private var dismiss
-    @State private var currentIndex: Int = 0
-
-    var body: some View {
-        ZStack {
-            backgroundGradient
-            decorativeOrbs
-
-            VStack(spacing: 0) {
-                topBar
-                Spacer(minLength: 4)
-                photoArea
-                Spacer(minLength: 4)
-                // 目前這張的照片資訊：檔名 / 解析度 / 檔案大小（與 PhotoLightbox 共用 PhotoInfoBar）。
-                // 本視圖（CutePhotoViewer）才是裝潢／支出／水電／電梯保養四類照片實際會開啟的檢視器；
-                // RenovationStackViewer／ExpensePhotoStackViewer 是同語意但從未被任何呼叫端建立的死碼，
-                // v25.65 當時把 PhotoInfoBar 接到了那兩個死碼元件，本體 CutePhotoViewer 反而漏接。
-                if draft.urls.indices.contains(currentIndex) {
-                    PhotoInfoBar(url: draft.urls[currentIndex])
-                        .padding(.bottom, 4)
-                }
-                if draft.urls.count > 1 {
-                    pageDots
-                        .padding(.bottom, 4)
-                }
-                infoCard
-            }
-        }
-        .presentationDragIndicator(.visible)
-    }
-
-    // MARK: 背景
-
-    private var backgroundGradient: some View {
-        LinearGradient(
-            colors: [
-                Color(red: 1.00, green: 0.94, blue: 0.93),    // 淡桃
-                Color(red: 1.00, green: 0.90, blue: 0.94),    // 淡粉
-                Color(red: 0.94, green: 0.90, blue: 1.00)     // 淡紫
-            ],
-            startPoint: .topLeading,
-            endPoint: .bottomTrailing
-        )
-        .ignoresSafeArea()
-    }
-
-    /// 角落漂浮的兩顆柔光圓球，讓畫面更活潑
-    private var decorativeOrbs: some View {
-        GeometryReader { geo in
-            ZStack {
-                Circle()
-                    .fill(draft.kind.accent.opacity(0.18))
-                    .frame(width: 220, height: 220)
-                    .blur(radius: 50)
-                    .offset(x: -geo.size.width * 0.35, y: -geo.size.height * 0.32)
-                Circle()
-                    .fill(Color.pink.opacity(0.12))
-                    .frame(width: 280, height: 280)
-                    .blur(radius: 60)
-                    .offset(x: geo.size.width * 0.32, y: geo.size.height * 0.18)
-            }
-        }
-        .ignoresSafeArea()
-        .allowsHitTesting(false)
-    }
-
-    // MARK: 上方 chrome
-
-    private var topBar: some View {
-        HStack {
-            // 關閉按鈕：改放左側，對齊全 App「關閉／取消」統一放左側的慣例（見 PhotoLightbox）
-            Button {
-                dismiss()
-            } label: {
-                Image(systemName: "xmark")
-                    .font(.system(size: 13, weight: .bold))
-                    .foregroundStyle(draft.kind.accent)
-                    .frame(width: 34, height: 34)
-                    .background(Circle().fill(.ultraThinMaterial))
-                    .overlay(Circle().stroke(draft.kind.accent.opacity(0.25), lineWidth: 1))
-                    .shadow(color: .black.opacity(0.08), radius: 4, y: 2)
-            }
-            .buttonStyle(.plain)
-
-            Spacer()
-
-            // 來源膠囊
-            HStack(spacing: 6) {
-                Image(systemName: draft.kind.icon)
-                    .font(.caption.weight(.bold))
-                Text(draft.kind.label)
-                    .font(.caption.weight(.semibold))
-            }
-            .foregroundStyle(.white)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 7)
-            .background(
-                Capsule()
-                    .fill(LinearGradient(
-                        colors: [draft.kind.accent, draft.kind.accent.opacity(0.75)],
-                        startPoint: .topLeading, endPoint: .bottomTrailing
-                    ))
-            )
-            .shadow(color: draft.kind.accent.opacity(0.35), radius: 6, y: 3)
-
-            // [v25.471] 存到相簿／分享（與其餘圖片預覽共用同一組按鈕）。
-            // 這個檢視器是左關閉、右來源膠囊，所以兩顆接在膠囊後面——
-            // 位置仍然是右上角，與其他預覽對得上。
-            if draft.urls.indices.contains(currentIndex) {
-                PhotoActionButtons(url: draft.urls[currentIndex])
-            }
-        }
-        .padding(.horizontal, 18)
-        .padding(.top, 14)
-    }
-
-    // MARK: 主照片區
-
-    private var photoArea: some View {
-        TabView(selection: $currentIndex) {
-            ForEach(Array(draft.urls.enumerated()), id: \.offset) { idx, url in
-                photoCard(url: url)
-                    .tag(idx)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 8)
-            }
-        }
-        .tabViewStyle(.page(indexDisplayMode: .never))
-    }
-
-    private func photoCard(url: URL) -> some View {
-        GeometryReader { geo in
-            AsyncLocalImage(url: url) { img, didLoad in
-                Group {
-                    if let img {
-                        ZStack {
-                            // 模糊填底：填滿卡片、補滿留白；裁切在白框內不外溢
-                            Image(uiImage: img)
-                                .resizable()
-                                .scaledToFill()
-                                .frame(width: geo.size.width, height: geo.size.height)
-                                .blur(radius: 18, opaque: true)
-                                .overlay(Color.black.opacity(0.06))
-
-                            // 原圖：完整顯示（橫圖也不會超出，可雙指縮放）
-                            ZoomableImageView(image: img)
-                                .frame(width: geo.size.width, height: geo.size.height)
-                        }
-                        .frame(width: geo.size.width, height: geo.size.height)
-                        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                                .stroke(Color.white, lineWidth: 4)
-                        )
-                        .shadow(color: Color.black.opacity(0.15), radius: 14, y: 6)
-                    } else {
-                        RoundedRectangle(cornerRadius: 22, style: .continuous)
-                            .fill(.ultraThinMaterial)
-                            .overlay(
-                                VStack(spacing: 10) {
-                                    if didLoad {
-                                        Image(systemName: "photo.fill.on.rectangle.fill")
-                                            .font(.system(size: 40))
-                                            .foregroundStyle(draft.kind.accent.opacity(0.6))
-                                        Text("找不到照片")
-                                            .font(.subheadline.weight(.medium))
-                                            .foregroundStyle(.secondary)
-                                    } else {
-                                        // [v12] 補齊主題色，避免載入中→找不到照片切換時顏色從灰轉彩
-                                        ProgressView()
-                                            .tint(draft.kind.accent)
-                                    }
-                                }
-                            )
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 22, style: .continuous)
-                                    .stroke(Color.white, lineWidth: 4)
-                            )
-                            .shadow(color: Color.black.opacity(0.1), radius: 10, y: 4)
-                            .frame(width: geo.size.width, height: geo.size.height)
-                    }
-                }
-                .frame(width: geo.size.width, height: geo.size.height)
-            }
-        }
-    }
-
-    // MARK: 自訂頁碼點
-
-    private var pageDots: some View {
-        HStack(spacing: 6) {
-            ForEach(0..<draft.urls.count, id: \.self) { idx in
-                Capsule()
-                    .fill(idx == currentIndex
-                          ? draft.kind.accent
-                          : Color.gray.opacity(0.3))
-                    .frame(
-                        width: idx == currentIndex ? 18 : 6,
-                        height: 6
-                    )
-                    .animation(.spring(response: 0.32, dampingFraction: 0.7),
-                               value: currentIndex)
-            }
-        }
-        .padding(.horizontal, 14).padding(.vertical, 6)
-        .background(Capsule().fill(.ultraThinMaterial))
-        .overlay(Capsule().stroke(Color.white.opacity(0.6), lineWidth: 0.5))
-    }
-
-    // MARK: 底部資訊卡
-
-    private var infoCard: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 8) {
-                Text("📸")
-                    .font(.title3)
-                MarqueeText(draft.title)
-                    .font(.headline.weight(.semibold))
-                    .foregroundStyle(Color(red: 0.25, green: 0.18, blue: 0.35))
-                Spacer()
-                if draft.urls.count > 1 {
-                    Text("\(currentIndex + 1) / \(draft.urls.count)")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(draft.kind.accent)
-                        .padding(.horizontal, 9).padding(.vertical, 3)
-                        .background(
-                            Capsule().fill(draft.kind.accent.opacity(0.15))
-                        )
-                }
-            }
-            if !draft.note.isEmpty {
-                HStack(alignment: .top, spacing: 6) {
-                    Text("💬")
-                    Text(draft.note)
-                        .font(.subheadline)
-                        .foregroundStyle(Color(red: 0.35, green: 0.3, blue: 0.45))
-                        .lineLimit(4)
-                }
-            }
-            HStack(spacing: 6) {
-                Text("📅")
-                Text(fmtDate(draft.date))
-                    .font(.caption.weight(.medium))
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .padding(18)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            ZStack {
-                RoundedRectangle(cornerRadius: 26, style: .continuous)
-                    .fill(Color.white.opacity(0.85))
-                RoundedRectangle(cornerRadius: 26, style: .continuous)
-                    .fill(
-                        LinearGradient(colors: [
-                            Color.white.opacity(0.6),
-                            draft.kind.accent.opacity(0.08)
-                        ], startPoint: .topLeading, endPoint: .bottomTrailing)
-                    )
-            }
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 26, style: .continuous)
-                .stroke(Color.white.opacity(0.7), lineWidth: 1)
-        )
-        .shadow(color: Color.black.opacity(0.08), radius: 14, y: -2)
-        .padding(.horizontal, 14)
-        .padding(.bottom, 18)
-    }
-
-    private static let _dateFmt: DateFormatter = {
-        let f = DateFormatter()
-        f.dateFormat = "yyyy 年 M 月 d 日"
-        f.locale = Locale(identifier: "zh_TW")
-        // [v25.530] 固定西元曆（手機設成民國曆時不會印出「0115 年」）
-        f.calendar = Calendar(identifier: .gregorian)
-        return f
-    }()
-    private func fmtDate(_ d: Date) -> String { Self._dateFmt.string(from: d) }
-}
-
-// MARK: - 文件預覽（QuickLook 包裝）
-
-/// 用 QLPreviewController 預覽 PDF / PPT / Excel / Word 等，支援 Apple 內建的縮放與分享。
-/// 以 sheet 包裹呈現，使用者下拉即可關閉。
-struct DocumentQuickLookView: UIViewControllerRepresentable {
-    let url: URL
-
-    func makeUIViewController(context: Context) -> QLPreviewController {
-        let preview = QLPreviewController()
-        preview.dataSource = context.coordinator
-        return preview
-    }
-
-    func updateUIViewController(_ uiViewController: QLPreviewController, context: Context) {}
-
-    func makeCoordinator() -> Coordinator { Coordinator(url: url) }
-
-    final class Coordinator: NSObject, QLPreviewControllerDataSource {
-        let url: URL
-        init(url: URL) { self.url = url }
-        func numberOfPreviewItems(in controller: QLPreviewController) -> Int { 1 }
-        func previewController(_ controller: QLPreviewController, previewItemAt index: Int) -> QLPreviewItem {
-            url as QLPreviewItem
-        }
-    }
-}
-
-// MARK: - 樓層物件編輯
-
-/// 樓層物件編輯目標：
-/// - itemId 為 nil → 新增（parentItemId 為 nil = 加到樓層根，否則加到指定父節點底下）
-/// - itemId 非 nil → 重新命名既有節點
-fileprivate struct FloorItemEditTarget: Identifiable {
-    let id = UUID()
-    let floorId: UUID
-    let parentItemId: UUID?
-    let itemId: UUID?
-    let currentName: String
-}
-
-/// 簡單的樓層物件命名 sheet：一個 TextField + 取消 / 儲存
-fileprivate struct FloorItemEditor: View {
-    let initialName: String
-    let isEditing: Bool
-    let onSave: (String) -> Void
-    @Environment(\.dismiss) private var dismiss
-    @State private var name: String = ""
-    @FocusState private var focused: Bool
-    /// onSave 最終寫回 store 是延後一個 runloop 的非同步操作（見 commitFloorEstate 註解），
-    /// sheet 收合動畫播完前快速連點「儲存」會讓兩次呼叫都讀到同一份舊 estate 快照各自
-    /// append，較晚落地的一次會覆蓋掉較早一次的結果，其中一筆新增物件會憑空消失；
-    /// 比照既有 isSaving 寫法鎖住按鈕，確保只送出一次。
-    @State private var isSaving = false
-
-    var body: some View {
-        NavigationStack {
-            Form {
-                Section {
-                    TextField("例如：衣櫃 / 第一格", text: $name)
-                        .focused($focused)
-                } header: {
-                    realEstateEditorSectionHeader("物件名稱", icon: "shippingbox.fill", color: .brown)
-                }
-            }
-            .navigationTitle(isEditing ? "重新命名物件" : "新增物件")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button("取消") { dismiss() }
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("儲存") {
-                        guard !isSaving else { return }
-                        isSaving = true
-                        onSave(name)
-                        dismiss()
-                    }
-                    .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty || isSaving)
-                }
-            }
-            .onAppear {
-                name = initialName
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-                    focused = true
-                }
-            }
-        }
-        .presentationDetents([.height(220)])
-    }
-}
-
-// MARK: - 縮圖快取（降採樣 + 非同步 + NSCache）
-
-/// 以 ImageIO 降採樣產生小縮圖，避免主執行緒解碼全解析度大圖造成卡頓；結果快取於記憶體。
-final class ThumbnailCache {
-    static let shared = ThumbnailCache()
-    private let cache = NSCache<NSString, UIImage>()
-    private init() { cache.countLimit = 500 }
-
-    func thumbnail(for url: URL, maxPixel: CGFloat) async -> UIImage? {
-        let key = "\(url.path)#\(Int(maxPixel))" as NSString
-        if let cached = cache.object(forKey: key) { return cached }
-        return await withCheckedContinuation { (cont: CheckedContinuation<UIImage?, Never>) in
-            DispatchQueue.global(qos: .userInitiated).async {
-                let img = Self.downsample(url: url, maxPixel: maxPixel)
-                if let img { self.cache.setObject(img, forKey: key) }  // NSCache 為 thread-safe
-                cont.resume(returning: img)
-            }
-        }
-    }
-
-    private static func downsample(url: URL, maxPixel: CGFloat) -> UIImage? {
-        let srcOpts = [kCGImageSourceShouldCache: false] as CFDictionary
-        guard let src = CGImageSourceCreateWithURL(url as CFURL, srcOpts) else { return nil }
-        let opts: [CFString: Any] = [
-            kCGImageSourceCreateThumbnailFromImageAlways: true,
-            kCGImageSourceCreateThumbnailWithTransform: true,
-            kCGImageSourceShouldCacheImmediately: true,
-            kCGImageSourceThumbnailMaxPixelSize: Int(max(1, maxPixel))
-        ]
-        guard let cg = CGImageSourceCreateThumbnailAtIndex(src, 0, opts as CFDictionary) else { return nil }
-        return UIImage(cgImage: cg)
-    }
-}
-
-/// 縮圖檢視：先顯示佔位，背景降採樣載入後淡入；切換 url 會重載。
-struct ThumbnailImageView: View {
-    let url: URL?
-    var maxPixel: CGFloat = 420
-    var placeholderIcon: String? = nil
-    @State private var image: UIImage?
-
-    var body: some View {
-        ZStack {
-            if let image {
-                Image(uiImage: image).resizable().scaledToFill()
-            } else {
-                RoundedRectangle(cornerRadius: 10).fill(Color(.tertiarySystemFill))
-                if let placeholderIcon {
-                    Image(systemName: placeholderIcon)
-                        .font(.title2)
-                        .foregroundStyle(.tertiary)
-                }
-            }
-        }
-        .task(id: url?.path) {
-            // 先清空再讀，讓「url 改變」單純由 .task(id:) 本身的重觸發機制控管，
-            // 避免更換照片後畫面短暫停留在舊縮圖，對齊 AsyncLocalImage 同型修復。
-            image = nil
-            guard let url else { return }
-            image = await ThumbnailCache.shared.thumbnail(for: url, maxPixel: maxPixel)
         }
     }
 }
