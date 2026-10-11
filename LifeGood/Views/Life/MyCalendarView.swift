@@ -2648,7 +2648,8 @@ struct CalendarEventCard: View {
             withAnimation(.spring(response: 0.32, dampingFraction: 0.85)) {
                 isEditingNote = true
             }
-            noteFocused = true
+            // 輸入框要先出現才接得住焦點，晚一拍再放游標（鍵盤才會自己跳出來）
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { noteFocused = true }
         } label: {
             Image(systemName: "pencil.circle.fill")
                 .font(.system(size: 21))
