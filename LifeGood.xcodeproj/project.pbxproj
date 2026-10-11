@@ -54,6 +54,7 @@
 		A01B00000100000E /* AppMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A00000100000E /* AppMode.swift */; };
 		A01B00000100000F /* FinanceModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A00000100000F /* FinanceModels.swift */; };
 		A01B000001000010 /* FinanceStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000010 /* FinanceStore.swift */; };
+		A01B000001001527 /* HouseFacts.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001527 /* HouseFacts.swift */; };
 		A01B000001000011 /* FinanceOverviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000011 /* FinanceOverviewView.swift */; };
 		A01B000001000012 /* SavingsInsuranceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000012 /* SavingsInsuranceView.swift */; };
 		A01B000001000013 /* StockView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000013 /* StockView.swift */; };
@@ -247,6 +248,7 @@
 		A01A00000100000E /* AppMode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppMode.swift; sourceTree = "<group>"; };
 		A01A00000100000F /* FinanceModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FinanceModels.swift; sourceTree = "<group>"; };
 		A01A000001000010 /* FinanceStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FinanceStore.swift; sourceTree = "<group>"; };
+		A01A000001001527 /* HouseFacts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HouseFacts.swift; sourceTree = "<group>"; };
 		A01A000001000011 /* FinanceOverviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FinanceOverviewView.swift; sourceTree = "<group>"; };
 		A01A000001000012 /* SavingsInsuranceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SavingsInsuranceView.swift; sourceTree = "<group>"; };
 		A01A000001000013 /* StockView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StockView.swift; sourceTree = "<group>"; };
@@ -435,6 +437,7 @@
 				A01A00000100000E /* AppMode.swift */,
 				A01A00000100000F /* FinanceModels.swift */,
 				A01A000001000010 /* FinanceStore.swift */,
+				A01A000001001527 /* HouseFacts.swift */,
 				A01A000001000020 /* LifeModels.swift */,
 				A01A000001000201 /* HealthModels.swift */,
 				A01A000001000204 /* ChildVaccineSchedule.swift */,
@@ -747,6 +750,7 @@
 				A01B00000100000E /* AppMode.swift in Sources */,
 				A01B00000100000F /* FinanceModels.swift in Sources */,
 				A01B000001000010 /* FinanceStore.swift in Sources */,
+				A01B000001001527 /* HouseFacts.swift in Sources */,
 				A01B000001000011 /* FinanceOverviewView.swift in Sources */,
 				A01B000001000012 /* SavingsInsuranceView.swift in Sources */,
 				A01B000001000013 /* StockView.swift in Sources */,

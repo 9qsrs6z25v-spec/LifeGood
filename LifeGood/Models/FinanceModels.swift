@@ -897,7 +897,8 @@ struct RealEstateVariableExpense: Identifiable, Codable {
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(UUID.self, forKey: .id)
-        category = try c.decode(RealEstateExpenseCategory.self, forKey: .category)
+        // [v25.532] 認不得的分類（之後新增的分類、從新版同步過來）當「其他」，不要整筆被丟掉
+        category = (try? c.decode(RealEstateExpenseCategory.self, forKey: .category)) ?? .other
         name = (try? c.decode(String.self, forKey: .name)) ?? ""
         amount = try c.decode(Double.self, forKey: .amount)
         date = try c.decode(Date.self, forKey: .date)
@@ -1127,7 +1128,7 @@ struct FloorInfo: Identifiable, Codable {
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(UUID.self, forKey: .id)
-        floorNumber = try c.decode(String.self, forKey: .floorNumber)
+        floorNumber = (try? c.decode(String.self, forKey: .floorNumber)) ?? ""   // [v25.532] 缺欄位不要整層被丟掉
         functions = lossyArray(c, forKey: .functions)
         area = (try? c.decode(Double.self, forKey: .area)) ?? 0
         items = lossyArray(c, forKey: .items)
@@ -1417,6 +1418,18 @@ struct RealEstatePropertyAsset: Identifiable, Codable {
         self.amount = amount
         self.linkedExpenseId = linkedExpenseId
     }
+
+    // [v25.532] 原本是合成的解碼，分類認不得（之後新增的分類）整筆就被丟掉；改成當「其他」
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        category = (try? c.decode(RealEstateExpenseCategory.self, forKey: .category)) ?? .other
+        name = (try? c.decode(String.self, forKey: .name)) ?? ""
+        brand = (try? c.decode(String.self, forKey: .brand)) ?? ""
+        floorLocation = (try? c.decode(String.self, forKey: .floorLocation)) ?? ""
+        amount = (try? c.decode(Double.self, forKey: .amount)) ?? 0
+        linkedExpenseId = try? c.decode(UUID.self, forKey: .linkedExpenseId)
+    }
 }
 
 // MARK: - 房地產
@@ -1431,6 +1444,12 @@ struct RealEstate: Identifiable, Codable {
     var purchasePrice: Double
     var currentValue: Double
     var monthlyRental: Double
+    /// [v25.532] 當初跟銀行借的本金（台幣，全部房貸加總）；nil＝沒填，用推算的（見 HouseFacts）
+    var loanPrincipal: Double? = nil
+    /// [v25.532] 成交價（台幣）；賣掉的房子賣出價差、售出損益用它，沒填才退回目前估值
+    var soldPrice: Double? = nil
+    /// [v25.532] 估值上次在編輯頁更新的日子
+    var valueUpdatedAt: Date? = nil
     var mortgageItems: [RealEstateMortgageItem]       // 貸款項目（多筆，各有期數）
     var paidItems: [RealEstatePaidItem]               // 已支出房屋金額（頭期款等）
     var variableExpenses: [RealEstateVariableExpense]  // 變動支出（裝修/維修/家具等）
@@ -1641,11 +1660,17 @@ struct RealEstate: Identifiable, Codable {
         renovationPhotos = lossyArray(c, forKey: .renovationPhotos)
         documents = lossyArray(c, forKey: .documents)
 
-        // 向下相容：舊版有 monthlyMortgage 欄位，轉為 mortgageItems
+        loanPrincipal = try? c.decodeIfPresent(Double.self, forKey: .loanPrincipal)
+        soldPrice = try? c.decodeIfPresent(Double.self, forKey: .soldPrice)
+        valueUpdatedAt = try? c.decodeIfPresent(Date.self, forKey: .valueUpdatedAt)
+
+        // 向下相容：舊版有 monthlyMortgage 欄位，轉為 mortgageItems。
+        // [v25.532] 以前每次載入都產生新的 id、起始日＝那次打開 App 的時間，已繳永遠是 0；
+        // 改成固定的 id（跟房子同一個）、起始日＝購入日，存一次檔之後就固定下來。
         if mortgageItems.isEmpty,
            let oldMortgage = try? c.decode(Double.self, forKey: .monthlyMortgage),
            oldMortgage > 0 {
-            mortgageItems = [RealEstateMortgageItem(title: "房貸", amount: oldMortgage)]
+            mortgageItems = [RealEstateMortgageItem(id: id, title: "房貸", amount: oldMortgage, startDate: purchaseDate)]
         }
     }
     private enum CodingKeys: String, CodingKey {
@@ -1658,6 +1683,7 @@ struct RealEstate: Identifiable, Codable {
         case waterMeterNumber, waterMeterOwner, electricityMeterNumber, electricityMeterOwner
         case gasMeterNumber, gasMeterOwner, gasUserNumber, insuranceItems, propertyAssets
         case utilityPayments, extraMeters, renovationPhotos, documents
+        case loanPrincipal, soldPrice, valueUpdatedAt
         case monthlyMortgage // 舊版欄位，僅用於解碼
     }
 
@@ -1678,6 +1704,9 @@ struct RealEstate: Identifiable, Codable {
         try c.encodeIfPresent(linkedExpenseId, forKey: .linkedExpenseId)
         try c.encodeIfPresent(saleLinkedExpenseId, forKey: .saleLinkedExpenseId)
         try c.encodeIfPresent(saleLinkedIncomeId, forKey: .saleLinkedIncomeId)
+        try c.encodeIfPresent(loanPrincipal, forKey: .loanPrincipal)
+        try c.encodeIfPresent(soldPrice, forKey: .soldPrice)
+        try c.encodeIfPresent(valueUpdatedAt, forKey: .valueUpdatedAt)
         try c.encode(note, forKey: .note)
         try c.encode(buildingType, forKey: .buildingType)
         try c.encode(hasElevator, forKey: .hasElevator)
