@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.531", build: 1284, date: "2026/08/19", notes: [
+            "【修正】v25.530 編譯失敗（AddRealEstateView.swift:337「The compiler is unable to type-check this expression in reasonable time」）：v25.530 在房地產編輯頁多加了「水電瓦斯」的繳費畫面和左滑刪除的確認框，整頁的畫面設定（表單、工具列、六個彈出畫面、類別選單、確認框）全部擠在同一個運算式裡，編譯器算不完。拆成「表單本體」和兩段「彈出畫面」三塊，畫面和功能完全不變；v25.530 的資料修正都在這一版裡。",
+        ]),
         ChangelogEntry(version: "25.530", build: 1283, date: "2026/08/19", notes: [
             "【修正】**房屋卡片改版第一步：先修資料**（你說：「好接著換房屋卡片，幫我重新完整規劃，並跟我講該怎麼改」，看過規劃與樣稿後：「照做」）。這一版畫面不變，只修會掉資料、會誤刪、數字算錯的地方；新的卡片分兩版接著做（下一版統一房貸算法，再下一版換成新卡片）。",
             "【修正】在房地產的「編輯」按一次儲存，「資產」分頁的樓層物品（衣櫃、第一格…）會整個被清空。現在儲存時會把每一層原本的物品帶回去，樓層的用途順序也不會再被打亂。",

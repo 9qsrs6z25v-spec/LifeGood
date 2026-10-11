@@ -260,132 +260,148 @@ struct AddRealEstateView: View {
 
     var body: some View {
         NavigationStack {
-            Form {
-                // ── 英雄預覽卡（物件名稱 / 購入價 / KPI）──
-                Section {
-                    estatePreviewCard
-                        .listRowInsets(EdgeInsets())
-                        .listRowBackground(Color.clear)
-                        .opacity(cardAppeared ? 1 : 0)
-                        .offset(y: cardAppeared ? 0 : 20)
-                }
+            withEditorPresentations(editorForm)
+        }
+    }
 
-                infoSection
+    // [v25.530] body 拆成「表單本體」和「彈出視窗」兩段：v25.530 多了一個 sheet 和刪除確認框之後，
+    // 整串十幾個修飾器擠在同一個運算式裡，Xcode Cloud 編譯時型別檢查逾時（AddRealEstateView.swift:337）。
+    private var editorForm: some View {
+        Form {
+            // ── 英雄預覽卡（物件名稱 / 購入價 / KPI）──
+            Section {
+                estatePreviewCard
+                    .listRowInsets(EdgeInsets())
+                    .listRowBackground(Color.clear)
+                    .opacity(cardAppeared ? 1 : 0)
+                    .offset(y: cardAppeared ? 0 : 20)
+            }
 
-                // ── 自訂 Tab 切換器（matchedGeometryEffect Capsule Pill）──
-                // 理財(紫) / 房屋資料(青藍)，Tab 切換 spring 平滑滑動
-                Section {
-                    HStack(spacing: 0) {
-                        ForEach(EditTab.allCases, id: \.self) { tab in
-                            Button {
-                                withAnimation(.spring(response: 0.30, dampingFraction: 0.72)) {
-                                    editTab = tab
-                                }
-                            } label: {
-                                let isActive = editTab == tab
-                                ZStack {
-                                    if isActive {
-                                        Capsule()
-                                            .fill(reTabGradient(tab))
-                                            .matchedGeometryEffect(id: "reTabIndicator", in: tabNamespace)
-                                    }
-                                    HStack(spacing: 5) {
-                                        Image(systemName: tab == .finance ? "chart.bar.fill" : "house.fill")
-                                            .font(.system(size: 11, weight: .semibold))
-                                        Text(tab.rawValue)
-                                            .font(.system(size: 13, weight: .semibold))
-                                    }
-                                    .foregroundStyle(isActive ? .white : Color.secondary)
-                                    .padding(.vertical, 8)
-                                    .frame(maxWidth: .infinity)
-                                }
+            infoSection
+
+            // ── 自訂 Tab 切換器（matchedGeometryEffect Capsule Pill）──
+            // 理財(紫) / 房屋資料(青藍)，Tab 切換 spring 平滑滑動
+            Section {
+                HStack(spacing: 0) {
+                    ForEach(EditTab.allCases, id: \.self) { tab in
+                        Button {
+                            withAnimation(.spring(response: 0.30, dampingFraction: 0.72)) {
+                                editTab = tab
                             }
-                            .buttonStyle(.plain)
+                        } label: {
+                            let isActive = editTab == tab
+                            ZStack {
+                                if isActive {
+                                    Capsule()
+                                        .fill(reTabGradient(tab))
+                                        .matchedGeometryEffect(id: "reTabIndicator", in: tabNamespace)
+                                }
+                                HStack(spacing: 5) {
+                                    Image(systemName: tab == .finance ? "chart.bar.fill" : "house.fill")
+                                        .font(.system(size: 11, weight: .semibold))
+                                    Text(tab.rawValue)
+                                        .font(.system(size: 13, weight: .semibold))
+                                }
+                                .foregroundStyle(isActive ? .white : Color.secondary)
+                                .padding(.vertical, 8)
+                                .frame(maxWidth: .infinity)
+                            }
                         }
+                        .buttonStyle(.plain)
                     }
-                    .padding(3)
-                    .background(Color(.secondarySystemGroupedBackground))
-                    .clipShape(Capsule())
-                    .overlay(Capsule().stroke(Color(.separator).opacity(0.20), lineWidth: 0.75))
+                }
+                .padding(3)
+                .background(Color(.secondarySystemGroupedBackground))
+                .clipShape(Capsule())
+                .overlay(Capsule().stroke(Color(.separator).opacity(0.20), lineWidth: 0.75))
+                .listRowInsets(EdgeInsets())
+                .listRowBackground(Color.clear)
+            }
+
+            if editTab == .finance {
+                valueSection
+                if showRental { rentalSection }
+                if showMortgage { mortgageSection }
+                if showPaid { paidSection }
+                if showVariable { variableExpenseSection }
+                calcSection
+
+                Section(header: reSectionHeader("備註", icon: "text.bubble.fill", color: Color.secondary)) {
+                    TextField("選填備註", text: $note, axis: .vertical).lineLimit(3)
+                }
+            } else {
+                propertyDetailSection
+                if hasElevator && buildingType == .townhouse { elevatorSection }
+                if showLandDetail { landDetailSection }
+                if showFloor { floorSection }
+                if showUtilities { utilitiesSection }
+                if showInsurance { insuranceSection }
+                if showAsset { propertyAssetSection }
+            }
+
+            if showError {
+                Section {
+                    HStack(alignment: .top, spacing: 10) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.orange)
+                        Text("請輸入物件名稱和購入價格")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.horizontal, 14).padding(.vertical, 10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color.orange.opacity(0.09))
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .stroke(Color.orange.opacity(0.25), lineWidth: 0.75)
+                    )
                     .listRowInsets(EdgeInsets())
                     .listRowBackground(Color.clear)
                 }
-
-                if editTab == .finance {
-                    valueSection
-                    if showRental { rentalSection }
-                    if showMortgage { mortgageSection }
-                    if showPaid { paidSection }
-                    if showVariable { variableExpenseSection }
-                    calcSection
-
-                    Section(header: reSectionHeader("備註", icon: "text.bubble.fill", color: Color.secondary)) {
-                        TextField("選填備註", text: $note, axis: .vertical).lineLimit(3)
+            }
+        }
+        .tint(.purple)
+        .navigationTitle((editing != nil || hasAutoSaved) ? "編輯房地產" : "新增房地產")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarLeading) { Button("取消") { cancelAndRollback() } }
+            ToolbarItem(placement: .topBarTrailing) {
+                HStack(spacing: 16) {
+                    Button { showFeaturePicker.toggle() } label: {
+                        Image(systemName: "checklist")
+                            .foregroundStyle(.blue)
                     }
-                } else {
-                    propertyDetailSection
-                    if hasElevator && buildingType == .townhouse { elevatorSection }
-                    if showLandDetail { landDetailSection }
-                    if showFloor { floorSection }
-                    if showUtilities { utilitiesSection }
-                    if showInsurance { insuranceSection }
-                    if showAsset { propertyAssetSection }
-                }
-
-                if showError {
-                    Section {
-                        HStack(alignment: .top, spacing: 10) {
-                            Image(systemName: "exclamationmark.triangle.fill")
-                                .font(.subheadline.weight(.semibold))
-                                .foregroundStyle(.orange)
-                            Text("請輸入物件名稱和購入價格")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                        .padding(.horizontal, 14).padding(.vertical, 10)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(Color.orange.opacity(0.09))
-                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                .stroke(Color.orange.opacity(0.25), lineWidth: 0.75)
-                        )
-                        .listRowInsets(EdgeInsets())
-                        .listRowBackground(Color.clear)
+                    .popover(isPresented: $showFeaturePicker, arrowEdge: .top) {
+                        featureToggleList
                     }
+                    // [美化] 存檔中顯示同色 ProgressView，對齊 AddIncomeView／AddExpenseView／
+                    // AddSavingsInsuranceView／AddVehicleView／AddStockView 儲存按鈕載入狀態規格
+                    if isSaving {
+                        ProgressView().scaleEffect(0.7).tint(.green)
+                    }
+                    Button((editing != nil || hasAutoSaved) ? "儲存" : "新增") { save() }
+                        .bold().foregroundStyle(.green)
+                        .disabled(isSaving)
                 }
             }
-            .tint(.purple)
-            .navigationTitle((editing != nil || hasAutoSaved) ? "編輯房地產" : "新增房地產")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) { Button("取消") { cancelAndRollback() } }
-                ToolbarItem(placement: .topBarTrailing) {
-                    HStack(spacing: 16) {
-                        Button { showFeaturePicker.toggle() } label: {
-                            Image(systemName: "checklist")
-                                .foregroundStyle(.blue)
-                        }
-                        .popover(isPresented: $showFeaturePicker, arrowEdge: .top) {
-                            featureToggleList
-                        }
-                        // [美化] 存檔中顯示同色 ProgressView，對齊 AddIncomeView／AddExpenseView／
-                        // AddSavingsInsuranceView／AddVehicleView／AddStockView 儲存按鈕載入狀態規格
-                        if isSaving {
-                            ProgressView().scaleEffect(0.7).tint(.green)
-                        }
-                        Button((editing != nil || hasAutoSaved) ? "儲存" : "新增") { save() }
-                            .bold().foregroundStyle(.green)
-                            .disabled(isSaving)
-                    }
-                }
+        }
+        .onAppear {
+            loadEditing()
+            withAnimation(.spring(response: 0.55, dampingFraction: 0.78)) {
+                cardAppeared = true
             }
-            .onAppear {
-                loadEditing()
-                withAnimation(.spring(response: 0.55, dampingFraction: 0.78)) {
-                    cardAppeared = true
-                }
-            }
+        }
+    }
+
+    // 再拆一次：每個 sheet 的 closure 都是單一運算式，會跟外面整串一起推型別，一串放太多一樣會逾時
+    private func withEditorPresentations<Content: View>(_ content: Content) -> some View {
+        withCategoryPresentations(withExpenseSheets(content))
+    }
+
+    private func withExpenseSheets<Content: View>(_ content: Content) -> some View {
+        content
             .sheet(item: $viewingPhotoURL) { url in
                 PhotoViewerSheet(url: url)
             }
@@ -416,6 +432,10 @@ struct AddRealEstateView: View {
                     )
                 )
             }
+    }
+
+    private func withCategoryPresentations<Content: View>(_ content: Content) -> some View {
+        content
             .sheet(item: $addingVariableCategory) { cat in
                 AddExpenseView(
                     expenseType: .variable,
@@ -445,7 +465,6 @@ struct AddRealEstateView: View {
             } message: { request in
                 Text(swipeDeletionMessage(request))
             }
-        }
     }
 
     private var swipeDeletionPresented: Binding<Bool> {
