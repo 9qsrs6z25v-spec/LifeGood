@@ -622,8 +622,9 @@ struct FixedExpenseCard: View {
             lines.append("")
             lines.append("🏠 貸款")
             if let rate = current.loanRate, rate > 0 { lines.append("・利率：\(String(format: "%.2f%%", rate))") }
+            if let principal = lp.principal { lines.append("・借款本金：NT$ \(fmtShort(principal))") }
             lines.append("・進度：\(lp.periodText)")
-            lines.append("・貸款總額：NT$ \(fmtShort(lp.totalAmount))｜剩餘：NT$ \(fmtShort(max(lp.totalAmount - lp.paid, 0)))")
+            lines.append("・全部要繳（含利息）：NT$ \(fmtShort(lp.scheduledAmount))｜還要繳：NT$ \(fmtShort(lp.leftAmount))")
             lines.append("・預計繳清：\(Self.dateFmt.string(from: lp.endDate))")
         }
         let history = actualPoints
@@ -1001,7 +1002,7 @@ struct FixedExpenseCard: View {
     }
 
     /// 貸款區塊（使用者指定：比照儲蓄險區塊式樣升級——甘特圖進度條＋明細欄）。
-    /// 總期數優先用貸款年期、否則用總額÷月付推估；資料不足不顯示。
+    /// [v25.532] 期數讀 Expense.loanPeriods（跟房屋卡片同一套）；沒填年限也沒結束日就不顯示。
     @ViewBuilder
     private var loanSection: some View {
         if let lp = loanCardInfo {
@@ -1013,23 +1014,7 @@ struct FixedExpenseCard: View {
                 // 甘特圖：起始日 → 預計繳清日，填色代表已繳進度
                 ganttBar(progress: lp.ratio, start: current.date, end: lp.endDate, accent: loanAccent)
 
-                VStack(spacing: 0) {
-                    if let rate = current.loanRate, rate > 0 {
-                        field("貸款利率", String(format: "%.2f%%", rate))
-                        Divider().padding(.leading, 14)
-                    }
-                    field("已繳 / 總期數", lp.periodText)
-                    Divider().padding(.leading, 14)
-                    field("已繳金額", "NT$ " + fmtShort(lp.paid))
-                    Divider().padding(.leading, 14)
-                    field("貸款總額", "NT$ " + fmtShort(lp.totalAmount))
-                    Divider().padding(.leading, 14)
-                    field("剩餘金額", "NT$ " + fmtShort(max(lp.totalAmount - lp.paid, 0)))
-                    Divider().padding(.leading, 14)
-                    field("起始日", Self.dateFmt.string(from: current.date))
-                    Divider().padding(.leading, 14)
-                    field("預計繳清", Self.dateFmt.string(from: lp.endDate))
-                }
+                loanRows(lp)
             }
             .padding(.bottom, 6)
             .background(Color(.secondarySystemGroupedBackground))
@@ -1037,27 +1022,65 @@ struct FixedExpenseCard: View {
         }
     }
 
-    /// 貸款進度試算（與 FixedExpenseRow.loanProgress 同規則）：
-    /// 起始日即繳第一期；總額沒填時以月付×總期數推估
-    private var loanCardInfo: (ratio: Double, periodText: String, paid: Double,
-                               totalAmount: Double, endDate: Date)? {
-        guard current.fixedCategory == .loan else { return nil }
-        let monthly = monthlyEquivalent
-        var totalMonths = 0
-        if let years = current.loanYears, years > 0 {
-            totalMonths = Int((years * 12).rounded())
-        } else if let total = current.loanTotalAmount, total > 0, monthly > 0 {
-            totalMonths = Int((total / monthly).rounded())
+    /// [v25.532] 貸款明細欄：金額都是每期 × 期數（含利息）；有填總貸款金額才多一行借款本金。
+    /// 拆成獨立的函式、金額先轉成字，避免 loanSection 一個 body 裡型別檢查太久。
+    private func loanRows(_ lp: LoanCardInfo) -> some View {
+        let paidText = "NT$ " + fmtShort(lp.paidAmount)
+        let scheduledText = "NT$ " + fmtShort(lp.scheduledAmount)
+        let leftText = "NT$ " + fmtShort(lp.leftAmount)
+        let principalText: String? = lp.principal.map { "NT$ " + fmtShort($0) }
+        return VStack(spacing: 0) {
+            if let rate = current.loanRate, rate > 0 {
+                field("貸款利率", String(format: "%.2f%%", rate))
+                Divider().padding(.leading, 14)
+            }
+            field("已繳 / 總期數", lp.periodText)
+            Divider().padding(.leading, 14)
+            field("已繳金額", paidText)
+            Divider().padding(.leading, 14)
+            if let principalText {
+                field("借款本金", principalText)
+                Divider().padding(.leading, 14)
+            }
+            field("全部要繳（含利息）", scheduledText)
+            Divider().padding(.leading, 14)
+            field("還要繳", leftText)
+            Divider().padding(.leading, 14)
+            field("起始日", Self.dateFmt.string(from: current.date))
+            Divider().padding(.leading, 14)
+            field("預計繳清", Self.dateFmt.string(from: lp.endDate))
         }
-        guard totalMonths > 0 else { return nil }
-        let cal = Calendar.current
-        let months = cal.dateComponents([.month], from: current.date, to: Date()).month ?? 0
-        let elapsed = max(0, min(months + 1, totalMonths))
-        let totalAmount = current.loanTotalAmount ?? monthly * Double(totalMonths)
-        let paid = min(monthly * Double(elapsed), totalAmount)
-        let endDate = cal.date(byAdding: .month, value: totalMonths, to: current.date) ?? current.date
-        let text = elapsed >= totalMonths ? "已繳清（共 \(totalMonths) 期）" : "\(elapsed) / \(totalMonths) 期"
-        return (Double(elapsed) / Double(totalMonths), text, paid, totalAmount, endDate)
+    }
+
+    /// [v25.532] 貸款區塊的數字。以前「起始那個月算第一期」、總期數用「總貸款金額 ÷ 月付」推，
+    /// 總貸款金額是本金、沒算利息，期數和「剩餘」都會少一截；現在期數照 Expense.loanPeriods，
+    /// 金額一律是每期 × 期數（含利息），借款本金另列一行。
+    private struct LoanCardInfo {
+        let paid: Int
+        let total: Int
+        let perPeriod: Double
+        /// 第 total 期的扣款日
+        let endDate: Date
+        /// 記帳填的總貸款金額（本金）；沒填是 nil
+        let principal: Double?
+
+        var isDone: Bool { paid >= total }
+        var ratio: Double { total > 0 ? min(1, Double(paid) / Double(total)) : 0 }
+        var paidAmount: Double { perPeriod * Double(paid) }
+        var scheduledAmount: Double { perPeriod * Double(total) }
+        var leftAmount: Double { perPeriod * Double(max(0, total - paid)) }
+        var periodText: String { isDone ? "已繳清（共 \(total) 期）" : "\(paid) / \(total) 期" }
+    }
+
+    private var loanCardInfo: LoanCardInfo? {
+        guard let rec = current.recurrence, let periods = current.loanPeriods() else { return nil }
+        let (component, step) = rec.componentValue
+        let endDate = HouseLoanMath.dueDate(periods.total, start: current.date, component: component,
+                                            step: step, calendar: Calendar.current)
+        var principal: Double? = nil
+        if let amount = current.loanTotalAmount, amount > 0 { principal = amount }
+        return LoanCardInfo(paid: periods.paid, total: periods.total, perPeriod: current.amount,
+                            endDate: endDate, principal: principal)
     }
 
     /// 帳單照片：可拍照 / 從相簿新增，直接寫回此筆固定支出並持久化（含 iCloud 同步）

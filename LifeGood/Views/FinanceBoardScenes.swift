@@ -707,6 +707,15 @@ extension MoneyBoardSky {
                 let floorLabel = to > from ? "\(from)–\(to)F" : "\(from)F"
                 finPill(&g, floorLabel, centerX: cx + bw / 2 + 16, y: yTop - 2, below: true, dark: dark,
                         color: finInk(th, dark: dark), bounds: w)
+                // [v25.532] 大樓也掛房貸牌子（以前只有透天有）：比照透天，掛在你那幾層斜線的頂端、
+                // 對著斜線那一截（斜線從左邊畫起）。中心不超過 cx − 6，才不會疊到右邊的樓層牌；
+                // 你那幾層離樓頂太近（高樓層）時往下壓，才不會疊到樓頂的名字牌
+                if hm.owedFraction > 0, let ol = hm.owedLabel {
+                    let hatchW = unit.width * CGFloat(min(1, hm.owedFraction))
+                    let pillX = min(unit.minX + hatchW / 2, cx - 6)
+                    let pillY = max(yTop - 3, ground - H + 16)
+                    finPill(&g, ol, centerX: pillX, y: pillY, dark: dark, color: finOwedInk(dark: dark), bounds: w)
+                }
                 topY = ground - H
                 leftX = cx - bw / 2
             } else {

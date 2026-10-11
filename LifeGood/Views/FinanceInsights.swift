@@ -113,8 +113,8 @@ struct FinanceSnapshot: Equatable {
 
 enum FinanceLoans {
     /// 一筆貸款類的週期性固定支出，在 date 那天還要繳多少（台幣）。
-    /// 有年期或總額 → 照期數算（Expense.moneyLoanSchedule）；只有結束日 → 數到結束日還有幾期；
-    /// 兩個都沒有 → nil（不知道還要繳多久，不猜）。
+    /// [v25.532] 記帳分類是貸款、有年限或結束日 → 照期數算（Expense.moneyLoanSchedule，跟房屋卡片同一套期數）；
+    /// 不是貸款分類（車子連結的定期支出）只有結束日 → 數到結束日還有幾期；都沒有 → nil（不知道還要繳多久，不猜）。
     static func remaining(_ e: Expense, at date: Date, store: ExpenseStore,
                           calendar cal: Calendar = .current) -> Double? {
         guard e.isRecurringFixed, let rec = e.recurrence else { return nil }
@@ -512,9 +512,11 @@ struct FinanceUpcoming: Identifiable, Equatable {
                 guard let next = seg.nextDue(onOrAfter: today, calendar: cal), next.date < horizon else { continue }
                 let d = next.date
                 let detail = "第 \(next.index)／\(seg.countedPeriods) 期"
-                out.append(FinanceUpcoming(id: "r-\(seg.id)", kind: .mortgage, title: re.name + " " + seg.displayTitle,
+                let title = re.name + " " + seg.displayTitle
+                let amount = seg.perPeriod.ntdWanString
+                out.append(FinanceUpcoming(id: "r-\(seg.id)", kind: .mortgage, title: title,
                                            detail: detail, date: d, daysAway: away(d),
-                                           amount: seg.perPeriod.ntdWanString, isIncome: false))
+                                           amount: amount, isIncome: false))
             }
         }
 

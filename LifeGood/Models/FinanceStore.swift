@@ -134,9 +134,7 @@ class FinanceStore: ObservableObject {
     var totalStockCost: Double { stocks.reduce(0) { $0 + $1.totalCost } }
     var totalStockProfitLoss: Double { stocks.reduce(0) { $0 + $1.profitLoss } }
 
-    var monthlyRentalIncome: Double { realEstates.filter { !$0.isSold }.reduce(0) { $0 + $1.monthlyRental } }
-    var monthlyMortgagePayment: Double { realEstates.filter { !$0.isSold }.reduce(0) { $0 + $1.monthlyMortgage } }
-    var monthlyCashFlow: Double { monthlyRentalIncome - monthlyMortgagePayment }
+    // [v25.532] 月租／月付房貸／月現金流已拿掉：房貸用的是另一套期數規則，現在一律讀 HouseFacts（FinanceCashFlow）
 
     // MARK: - 資產配置
 

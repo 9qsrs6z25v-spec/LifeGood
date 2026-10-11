@@ -28,10 +28,12 @@ enum HouseLoanMath {
 
     /// 合約期數：取整跟 Expense.suggestedEndDate 一樣，期數 × 週期才會剛好落在記帳補上的結束日
     static func contractPeriods(years: Double, recurrence r: Recurrence) -> Int {
+        // [v25.532] 年限最多算 100 年：輸入框打了一長串數字時 Int(...) 會直接閃退，期數迴圈也會跑不完
+        let y: Double = years.isFinite ? min(max(years, 0), 100) : 0
         switch r {
-        case .monthly:   return max(1, Int((years * 12).rounded()))
-        case .quarterly: return max(1, Int((years * 12).rounded() / 3))
-        case .yearly:    return max(1, Int(years.rounded()))
+        case .monthly:   return max(1, Int((y * 12).rounded()))
+        case .quarterly: return max(1, Int((y * 12).rounded() / 3))
+        case .yearly:    return max(1, Int(y.rounded()))
         }
     }
 
@@ -287,7 +289,10 @@ struct HouseFacts: Equatable {
         if let base = baseMonth, !monthBalances.isEmpty, monthlyRate != nil {
             var m = cal.dateComponents([.month], from: base, to: HouseFacts.monthStart(day, cal)).month ?? 0
             let last = monthBalances.count - 1
-            if m > last { return max(0, monthBalances[last]) }
+            if m > last {
+                let tail = monthBalances[last]
+                return tail < 1 ? 0 : tail
+            }
             if m < 0 { return 0 }
             if m >= 1, m < monthDueDates.count, let due = monthDueDates[m], cal.startOfDay(for: due) > day {
                 m -= 1   // 這個月那一期還沒扣
@@ -336,9 +341,13 @@ struct HouseFacts: Equatable {
             if let id = m.linkedExpenseId {
                 guard !usedExpenseIds.contains(id) else { continue }
                 usedExpenseIds.insert(id)
-                if let ex = byId[id], isLoan(ex) { itemLinks.append((m, ex)) } else { itemLinks.append((m, nil)) }
+                if let ex = byId[id], isLoan(ex) {
+                    itemLinks.append((item: m, expense: ex))
+                } else {
+                    itemLinks.append((item: m, expense: nil))
+                }
             } else {
-                itemLinks.append((m, nil))
+                itemLinks.append((item: m, expense: nil))
             }
         }
         // 記帳裡連到這間、但沒有房貸項目的房貸（舊版單筆連結、或只在記帳那邊建的）
@@ -371,12 +380,13 @@ struct HouseFacts: Equatable {
                     contract = HouseLoanMath.duesOnOrBefore(end, start: ex.date, component: component, step: step,
                                                             limit: 1200, calendar: cal)
                 } else {
-                    let months = item?.totalPeriods ?? 240
+                    let months = min(1200, item?.totalPeriods ?? 240)
                     contract = max(1, months / max(1, rec.periodMonths))
                     guess = true
                 }
                 var scheduled = contract
-                if let end = ex.endDate {
+                // 因為賣房停的（endReason＝資產已出售）不算提前還清：賣出那天還欠多少照算，截在下面的 counted
+                if let end = ex.endDate, ex.endReason != .assetSold {
                     scheduled = min(scheduled, HouseLoanMath.duesOnOrBefore(end, start: ex.date, component: component,
                                                                            step: step, limit: contract, calendar: cal))
                 }
@@ -395,7 +405,7 @@ struct HouseFacts: Equatable {
             }
             // 沒連到記帳的舊段：讀房貸項目自己的欄位，一律當月繳
             let start = item?.startDate ?? re.purchaseDate
-            let contract = max(0, item?.totalPeriods ?? 0)
+            let contract = min(1200, max(0, item?.totalPeriods ?? 0))   // 最多 1200 期：資料壞掉時下面逐期展開才不會跑不完
             var counted = contract
             if let sold = soldDay {
                 counted = min(counted, HouseLoanMath.duesOnOrBefore(sold, start: start, component: .month, step: 1,
@@ -448,12 +458,16 @@ struct HouseFacts: Equatable {
         }
 
         // ── 借款本金 P ──
-        let contractTotal = segs.reduce(0) { $0 + Double($1.contractPeriods) * $1.perPeriod }
+        let contractTotal: Double = segs.reduce(0.0) { $0 + Double($1.contractPeriods) * $1.perPeriod }
         if let entered = re.loanPrincipal, entered > 0 {
             f.principal = entered
             f.principalSource = .entered
         } else {
-            let ledger = segs.compactMap { s in s.linkedExpenseId.flatMap { byId[$0]?.loanTotalAmount } }.filter { $0 > 0 }
+            var ledger: [Double] = []
+            for s in segs {
+                guard let id = s.linkedExpenseId, let total = byId[id]?.loanTotalAmount, total > 0 else { continue }
+                ledger.append(total)
+            }
             if let lo = ledger.min(), let hi = ledger.max(), hi - lo < 1 {
                 f.principal = lo
                 f.principalSource = .ledger
@@ -487,8 +501,8 @@ struct HouseFacts: Equatable {
                 let d = s.due(k, calendar: cal)
                 let t = cal.dateComponents([.month], from: base, to: monthStart(d, cal)).month ?? 0
                 guard t >= 1 else { continue }
-                if flows.count < t { flows += Array(repeating: 0, count: t - flows.count) }
-                if dues.count <= t { dues += Array(repeating: nil, count: t + 1 - dues.count) }
+                if flows.count < t { flows += [Double](repeating: 0, count: t - flows.count) }
+                if dues.count <= t { dues += [Date?](repeating: nil, count: t + 1 - dues.count) }
                 flows[t - 1] += s.perPeriod
                 if let old = dues[t] { dues[t] = max(old, d) } else { dues[t] = d }
             }
@@ -522,9 +536,14 @@ struct HouseFacts: Equatable {
 
 enum RealEstateSale {
     /// 這間房子連到的房貸固定支出 id（房貸項目＋舊版單筆連結）
-    static func mortgageExpenseIds(of re: RealEstate) -> Set<UUID> {
+    static func mortgageExpenseIds(of re: RealEstate, expenses: [Expense]) -> Set<UUID> {
         var ids = Set(re.mortgageItems.compactMap(\.linkedExpenseId))
         if let legacy = re.linkedExpenseId { ids.insert(legacy) }
+        // 只在記帳那邊連到這間的房貸（HouseFacts 也把它們算成段），賣房時一樣要停
+        for ex in expenses where ex.linkedRealEstateId == re.id && ex.isRecurringFixed && ex.fixedCategory == .loan
+            && ex.loanSubCategory != .car && ex.loanSubCategory != .personal {
+            ids.insert(ex.id)
+        }
         return ids
     }
 
@@ -534,7 +553,7 @@ enum RealEstateSale {
     @discardableResult
     static func syncMortgageStops(of re: RealEstate, soldDate: Date?, in expenses: inout [Expense],
                                   now: Date = Date(), calendar cal: Calendar = .current) -> Bool {
-        let ids = mortgageExpenseIds(of: re)
+        let ids = mortgageExpenseIds(of: re, expenses: expenses)
         guard !ids.isEmpty else { return false }
         var changed = false
         for i in expenses.indices where ids.contains(expenses[i].id) && expenses[i].isRecurringFixed {
@@ -629,7 +648,8 @@ struct FloorLabel: Equatable {
                 for suffix in ["樓", "層", "F"] where a.hasSuffix(suffix) { a.removeLast(suffix.count) }
                 for suffix in ["樓", "層", "F"] where b.hasSuffix(suffix) { b.removeLast(suffix.count) }
                 if let x = number(a), let y = number(b), x > 0, y > 0 {
-                    return FloorLabel(kind: x == y ? .floor(x) : .range(min(x, y), max(x, y)), raw: raw)
+                    let kind: Kind = x == y ? .floor(x) : .range(min(x, y), max(x, y))
+                    return FloorLabel(kind: kind, raw: raw)
                 }
             }
         }
@@ -649,7 +669,7 @@ struct FloorLabel: Equatable {
             if i == 0 { tens = 1 } else if i == 1, let d = digits[chars[0]] { tens = d } else { return nil }
             let rest = chars[(i + 1)...]
             if rest.isEmpty { return tens * 10 }
-            guard rest.count == 1, let u = digits[rest.first!] else { return nil }
+            guard rest.count == 1, let c = rest.first, let u = digits[c] else { return nil }
             return tens * 10 + u
         }
         guard chars.count == 1, let d = digits[chars[0]] else { return nil }
@@ -696,7 +716,7 @@ struct FloorLabel: Equatable {
                 let ka = parse(a.element.floorNumber).sortKey, kb = parse(b.element.floorNumber).sortKey
                 return ka != kb ? ka < kb : a.offset < b.offset
             }
-            .map(\.element)
+            .map { $0.element }
     }
 
     /// 地上一般樓層的最低～最高（大樓「12F」「3–5F」用）；一層都看不懂回 nil
@@ -710,7 +730,8 @@ struct FloorLabel: Equatable {
     static func aboveGroundCount(_ floors: [FloorInfo]) -> Int {
         var levels = Set<Int>()
         for f in floors {
-            if let r = parse(f.floorNumber).aboveGround { for n in r { levels.insert(n) } }
+            // [v25.532] 打錯成「1-99999999F」也不會一層一層塞到卡住；街景最多也只畫 200 層
+            if let r = parse(f.floorNumber).aboveGround { levels.formUnion(r.clamped(to: 1...200)) }
         }
         return levels.isEmpty ? floors.count : levels.count
     }

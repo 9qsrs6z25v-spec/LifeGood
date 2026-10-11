@@ -89,6 +89,9 @@ struct RealEstateView: View {
     @State private var cardsAppeared = false
     @State private var emptyIconPulse = false
     @State private var emptyPulseTask: Task<Void, Never>?
+    /// [v25.532] 每間房子的數字（估值、還欠的本金、期數…）：掃記帳的房貸、反推利率，放在 .task 裡算一次，
+    /// 看板和每張卡都讀這一份（照 VehicleView）
+    @State private var facts: [UUID: HouseFacts] = [:]
     @State private var board = RealEstateBoardData()
 
     private var activeEstates: [RealEstate] {
@@ -202,8 +205,9 @@ struct RealEstateView: View {
                     }
                 }
             }
-            .task(id: store.modifyID) {
-                board = RealEstateBoardData.build(estates: store.realEstates)
+            // [v25.532] 房貸的期數、金額以記帳的固定支出為準，記帳那邊改了也要重算
+            .task(id: factsTaskKey) {
+                rebuild()
                 // 卡面的衛星空照：一筆一筆查地址的座標（查過的不會再查）
                 for re in store.realEstates {
                     guard !Task.isCancelled else { break }
@@ -241,10 +245,28 @@ struct RealEstateView: View {
         }
     }
 
+    /// [v25.532] .task(id:) 用：房子或記帳改了才重算。拆成獨立的 var，body 那一長串修飾器裡不放字串插值
+    private var factsTaskKey: String {
+        "\(store.modifyID)-\(expenseStore.modifyID)"
+    }
+
+    /// [v25.532] 看板與每間房子的數字：同一個 now，看板和卡片才不會差一天
+    private func rebuild() {
+        let now = Date()
+        let expenses = expenseStore.expenses
+        var map: [UUID: HouseFacts] = [:]
+        for re in store.realEstates {
+            map[re.id] = HouseFacts.build(re, expenses: expenses, now: now)
+        }
+        facts = map
+        board = RealEstateBoardData.build(estates: store.realEstates, facts: map, now: now)
+    }
+
     // MARK: - 房子卡片
 
     private func row(_ item: RealEstate, index: Int) -> some View {
-        MoneyItemCard(item: .realEstate(item, coordinate: geocoder.coordinate(for: RealEstateGeocoder.address(of: item))))
+        let coordinate = geocoder.coordinate(for: RealEstateGeocoder.address(of: item))
+        return MoneyItemCard(item: .realEstate(item, facts: facts[item.id], coordinate: coordinate))
             .offset(y: cardsAppeared ? 0 : 30)
             .opacity(cardsAppeared ? 1 : 0)
             .animation(.spring(response: 0.5, dampingFraction: 0.8).delay(Double(min(index, 10)) * 0.05),

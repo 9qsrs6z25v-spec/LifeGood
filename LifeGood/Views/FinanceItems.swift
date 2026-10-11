@@ -26,9 +26,14 @@ private let financeNumber4 = financeNumberFormatter(4)
 private let financeDate: DateFormatter = {
     let f = DateFormatter()
     f.locale = Locale(identifier: "zh_Hant_TW")
+    // [v25.532] 固定西曆：手機設民國曆時不能印 115 年
+    f.calendar = Calendar(identifier: .gregorian)
     f.dateFormat = "yyyy/M/d"
     return f
 }()
+
+/// [v25.532] 房貸開始、繳完那年用：一律西曆
+private let financeGregorian = Calendar(identifier: .gregorian)
 
 enum FinanceItemText {
     /// 「612」「61.25」「1,234.5」（小數最多兩位；股數這種要四位的傳 digits: 4）
@@ -850,22 +855,25 @@ final class RealEstateGeocoder: ObservableObject {
 }
 
 extension MoneyItem {
-    /// 一間房子。卡面：地址查得到座標就是衛星空照，不然是最新的一張裝潢照片，都沒有是插畫
-    static func realEstate(_ re: RealEstate, coordinate: CLLocationCoordinate2D?, now: Date = Date()) -> MoneyItem {
+    /// 一間房子。卡面：地址查得到座標就是衛星空照，不然是最新的一張裝潢照片，都沒有是插畫。
+    /// [v25.532] 估值、房貸的數字一律讀 HouseFacts（RealEstateView 建好一次傳進來），跟看板、理財總覽同一套。
+    static func realEstate(_ re: RealEstate, facts: HouseFacts?, coordinate: CLLocationCoordinate2D?,
+                           now: Date = Date()) -> MoneyItem {
+        let value = facts?.value ?? re.currentValue
         var item = MoneyItem(id: re.id, theme: .finHome, seed: seed(re.id),
                              title: re.name.isEmpty ? (re.city.isEmpty ? "房子" : re.city) : re.name,
-                             amount: re.currentValue.ntdWanString,
+                             amount: value.ntdWanString,
                              category: re.buildingType.rawValue)
         var detail: [String] = []
         if re.buildingType == .apartment {
-            let from = re.fromFloor
-            let to = max(re.fromFloor, re.toFloor)
-            if from > 0 {
-                item.badge = to > from ? "\(from)–\(to)F" : "\(from)F"
-                detail.append(to > from ? "\(from)–\(to) 樓" : "\(from) 樓")
+            if let span = realEstateFloorSpan(re) {
+                let one = span.lowerBound == span.upperBound
+                item.badge = one ? "\(span.lowerBound)F" : "\(span.lowerBound)–\(span.upperBound)F"
+                detail.append(one ? "\(span.lowerBound) 樓" : "\(span.lowerBound)–\(span.upperBound) 樓")
             }
         } else {
-            let floors = re.floors.isEmpty ? re.totalFloors : re.floors.count
+            // [v25.532] 樓層是自由輸入的字（1F、一樓、B1、RF…）：只數地上一般樓層
+            let floors = re.floors.isEmpty ? re.totalFloors : FloorLabel.aboveGroundCount(re.floors)
             if floors > 0 {
                 item.badge = "\(floors) 層"
                 detail.append("\(floors) 層")
@@ -893,7 +901,7 @@ extension MoneyItem {
                                             tone: .good))
         }
         if re.purchasePrice > 0 {
-            let r = re.currentValue / re.purchasePrice - 1
+            let r = value / re.purchasePrice - 1
             if abs(r) >= 0.005 {
                 item.chips.append(MoneyItemChip(icon: r > 0 ? "arrow.up.right" : "arrow.down.right",
                                                 text: (r > 0 ? "增值 " : "跌價 ") + FinanceText.signedPercent(r),
@@ -901,20 +909,52 @@ extension MoneyItem {
             }
         }
 
-        // 房貸：還在繳的那一段畫一條進度；全部繳完寫「貸款已繳清」
-        let left = re.moneyMortgageLeft(at: now)
-        if !re.isSold, !re.mortgageItems.isEmpty {
-            if left <= 0, re.mortgageItems.allSatisfy({ $0.startDate <= now }) {
+        // 房貸：繳完寫「貸款已繳清」；還沒開始扣（預售屋）寫哪個月開始；繳到一半畫一條進度
+        if !re.isSold, let f = facts, f.hasMortgage {
+            if f.isPaidOff {
                 item.chips.insert(MoneyItemChip(icon: "checkmark.seal.fill", text: "貸款已繳清", tone: .good), at: 0)
-            } else if let main = re.mortgageItems.filter({ $0.isPayingNow }).max(by: { $0.totalAmount < $1.totalAmount }) {
-                let paid = main.elapsedPeriods
-                var trailing = "還要 " + MoneyFormat.short(left)
-                if let y = re.moneyMortgageEndYear { trailing = "\(String(y)) 繳完・" + trailing }
-                item.progress = MoneyItemProgress(fraction: Double(paid) / Double(max(main.totalPeriods, 1)),
-                                                  leading: "房貸 已繳 \(paid)／\(main.totalPeriods) 期",
-                                                  trailing: trailing)
+            } else if !f.hasStarted {
+                if f.totalCount > 0, let start = f.firstStart {
+                    item.chips.append(MoneyItemChip(icon: "calendar", text: "房貸 " + realEstateYearMonth(start) + " 開始"))
+                }
+            } else {
+                item.progress = MoneyItemProgress(fraction: Double(f.paidCount) / Double(max(f.totalCount, 1)),
+                                                  leading: "房貸 已繳 \(f.paidCount)／\(f.totalCount) 期",
+                                                  trailing: realEstateMortgageTrailing(f))
             }
         }
         return item
+    }
+
+    /// [v25.532] 大樓是哪幾層：先看編輯頁的樓層（FloorLabel 解析），一層都看不懂才退回舊的「從幾樓到幾樓」
+    private static func realEstateFloorSpan(_ re: RealEstate) -> ClosedRange<Int>? {
+        if let span = FloorLabel.aboveGroundSpan(re.floors) { return span }
+        guard re.fromFloor > 0 else { return nil }
+        return re.fromFloor...max(re.fromFloor, re.toFloor)
+    }
+
+    /// [v25.532] 「2026/3」：照西曆寫（手機設民國曆時不能印 115 年）
+    private static func realEstateYearMonth(_ d: Date) -> String {
+        let y = financeGregorian.component(.year, from: d)
+        let m = financeGregorian.component(.month, from: d)
+        return String(y) + "/" + String(m)
+    }
+
+    /// [v25.532] 進度條右邊：「2066 繳完・還欠 1,942萬」。本金是推算的寫「還欠 約」；算不出本金時退回含利息的「還要繳」
+    private static func realEstateMortgageTrailing(_ f: HouseFacts) -> String {
+        let owed: Double = f.owed
+        let amount = MoneyFormat.short(owed)
+        var owedText: String
+        if f.owedIsScheduled {
+            owedText = "還要繳 " + amount
+        } else if f.owedIsEstimate {
+            owedText = "還欠 約 " + amount
+        } else {
+            owedText = "還欠 " + amount
+        }
+        if let payoff = f.payoffDate {
+            owedText = String(financeGregorian.component(.year, from: payoff)) + " 繳完・" + owedText
+        }
+        return owedText
     }
 }

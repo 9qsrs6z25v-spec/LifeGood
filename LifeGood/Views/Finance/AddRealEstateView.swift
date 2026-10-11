@@ -63,6 +63,7 @@ import PhotosUI
 //      純視覺層調整，save() 內部守衛判斷與房地產/貸款/已支出/變動支出/保險同步寫入
 //      邏輯完全未變動。
 //      （下次美化本檔案時，可轉往其他仍留有待辦的畫面）
+// [v25.532] 上面 5、7、11 的試算區和英雄預覽卡已拿掉：用的是另一套房貸算法，跟卡片、看板對不起來。
 
 struct AddRealEstateView: View {
     @EnvironmentObject var financeStore: FinanceStore
@@ -123,8 +124,10 @@ struct AddRealEstateView: View {
     @State private var note = ""
     @State private var showError = false
     @State private var isSaving = false
-    // v2 進場動畫旗標
-    @State private var cardAppeared = false
+    // [v25.532] 當初跟銀行借了多少（萬）；空的＝沒填，HouseFacts 用推算的。不預先填，填進去就變成「你填的」
+    @State private var loanPrincipalText = ""
+    // [v25.532] 成交價（萬）；空的＝沒填，售出損益和賣掉後的價值退回目前估值
+    @State private var soldPriceText = ""
     // matchedGeometryEffect：Tab 切換器平滑滑動（對齊 RealEstateDetailView.tabPicker 規格）
     @Namespace private var tabNamespace
 
@@ -268,15 +271,7 @@ struct AddRealEstateView: View {
     // 整串十幾個修飾器擠在同一個運算式裡，Xcode Cloud 編譯時型別檢查逾時（AddRealEstateView.swift:337）。
     private var editorForm: some View {
         Form {
-            // ── 英雄預覽卡（物件名稱 / 購入價 / KPI）──
-            Section {
-                estatePreviewCard
-                    .listRowInsets(EdgeInsets())
-                    .listRowBackground(Color.clear)
-                    .opacity(cardAppeared ? 1 : 0)
-                    .offset(y: cardAppeared ? 0 : 20)
-            }
-
+            // [v25.532] 拿掉頂端的英雄預覽卡和下面的試算區：它們用的是另一套房貸算法，跟卡片、看板對不起來
             infoSection
 
             // ── 自訂 Tab 切換器（matchedGeometryEffect Capsule Pill）──
@@ -324,7 +319,6 @@ struct AddRealEstateView: View {
                 if showMortgage { mortgageSection }
                 if showPaid { paidSection }
                 if showVariable { variableExpenseSection }
-                calcSection
 
                 Section(header: reSectionHeader("備註", icon: "text.bubble.fill", color: Color.secondary)) {
                     TextField("選填備註", text: $note, axis: .vertical).lineLimit(3)
@@ -389,9 +383,6 @@ struct AddRealEstateView: View {
         }
         .onAppear {
             loadEditing()
-            withAnimation(.spring(response: 0.55, dampingFraction: 0.78)) {
-                cardAppeared = true
-            }
         }
     }
 
@@ -541,11 +532,26 @@ struct AddRealEstateView: View {
                 .lineLimit(2...5)
 
             DatePicker("購入日期", selection: $purchaseDate, displayedComponents: .date)
+                .onChange(of: purchaseDate) { _, v in
+                    // [v25.532] 售出日期的 in: purchaseDate... 只擋新選的，不會修正已選好的舊值；
+                    // 購入日往後調晚過售出日，會存出「還沒買就賣掉」（同 AddVehicleView）
+                    if soldDate < v { soldDate = v }
+                }
 
             Toggle("已售出", isOn: $isSold)
             if isSold {
                 DatePicker("售出日期", selection: $soldDate, in: purchaseDate..., displayedComponents: .date)
+                soldPriceRow
             }
+        }
+    }
+
+    /// [v25.532] 成交價：售出損益、賣掉之後的房子價值都看它，沒填才用目前估值
+    private var soldPriceRow: some View {
+        HStack {
+            TextField("成交價（沒填用目前估值）", text: $soldPriceText)
+                .keyboardType(.decimalPad)
+            Text("萬元").foregroundStyle(.secondary)
         }
     }
 
@@ -586,7 +592,17 @@ struct AddRealEstateView: View {
         } header: {
             reSectionHeader("價值", icon: "tag.fill", color: .indigo)
         } footer: {
+            valueFooter
+        }
+    }
+
+    /// [v25.532] 估值多久沒更新一眼看得到（日期是進這頁之前那次存的）
+    private var valueFooter: some View {
+        VStack(alignment: .leading, spacing: 2) {
             Text("以萬元為單位輸入，例如輸入 1500 代表 NT$15,000,000。")
+            if let updated = editing?.valueUpdatedAt {
+                Text("估值更新於 \(fmtDate(updated))")
+            }
         }
     }
 
@@ -603,48 +619,20 @@ struct AddRealEstateView: View {
 
     // MARK: - 貸款項目
 
+    /// [v25.532] 期數、已繳、這個月房貸全讀 HouseFacts（跟卡片、看板同一套），這頁不再自己算
+    private var houseFacts: HouseFacts? {
+        currentEstate.map { HouseFacts.build($0, expense: expenseStore) }
+    }
+
     private var mortgageSection: some View {
-        Section {
+        let facts = houseFacts
+        return Section {
             ForEach(storeMortgageItems) { m in
-                Button {
-                    if let expId = m.linkedExpenseId,
-                       let exp = expenseStore.expenses.first(where: { $0.id == expId }) {
-                        editingExpense = exp
-                    }
-                } label: {
-                    HStack(spacing: 12) {
-                        reIconCircle(icon: "building.columns.fill", color: .blue)
-                        VStack(alignment: .leading, spacing: 3) {
-                            // [v25.520] 名稱放不下改跑馬燈（原本 lineLimit(1) 切成「…」）
-                            MarqueeText(m.title.isEmpty ? "房貸" : m.title)
-                                .font(.subheadline.weight(.medium))
-                                .foregroundStyle(.primary)
-                            HStack(spacing: 5) {
-                                if m.totalPeriods > 0 {
-                                    Text("\(m.elapsedPeriods)/\(m.totalPeriods) 期")
-                                        .font(.system(size: 10, weight: .semibold))
-                                        .foregroundStyle(.blue)
-                                        .padding(.horizontal, 6).padding(.vertical, 2)
-                                        .background(Color.blue.opacity(0.10))
-                                        .clipShape(Capsule())
-                                        .overlay(Capsule().stroke(Color.blue.opacity(0.22), lineWidth: 0.6))
-                                }
-                                Text("已繳 \(formatCurrency(m.paidAmount))")
-                                    .font(.caption2).foregroundStyle(.secondary)
-                            }
-                        }
-                        Spacer()
-                        Text(formatCurrency(m.amount))
-                            .font(.system(size: 14, weight: .bold, design: .rounded))
-                            .foregroundStyle(Color(red: 0.22, green: 0.53, blue: 0.98))
-                        Image(systemName: "chevron.right")
-                            .font(.caption2).foregroundStyle(.tertiary)
-                    }
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
+                mortgageRow(m, segment: facts?.segments.first(where: { $0.id == m.id }))
             }
             .onDelete(perform: deleteMortgageItems)
+
+            loanPrincipalRow(facts)
 
             Button {
                 guard ensureRealEstateSavedInStore() else { return }
@@ -655,13 +643,119 @@ struct AddRealEstateView: View {
         } header: {
             reSectionHeader("貸款項目", icon: "building.columns.fill", color: .blue)
         } footer: {
-            if !storeMortgageItems.isEmpty {
-                let monthlyTotal = storeMortgageItems.reduce(0.0) { $0 + $1.amount }
-                Text("每月房貸合計 \(formatCurrency(monthlyTotal))，與記帳模式的固定支出連動。")
-            } else {
-                Text("點擊「新增貸款項目」可建立多筆不同期數的貸款。")
-            }
+            Text(mortgageFooterText(facts))
         }
+    }
+
+    private func mortgageRow(_ m: RealEstateMortgageItem, segment seg: HouseFacts.Segment?) -> some View {
+        // 每期金額以連到的記帳那筆為準（seg.perPeriod），沒對到段才用房貸項目自己的
+        let perPeriod: Double = seg?.perPeriod ?? m.amount
+        return Button {
+            if let expId = m.linkedExpenseId,
+               let exp = expenseStore.expenses.first(where: { $0.id == expId }) {
+                editingExpense = exp
+            }
+        } label: {
+            HStack(spacing: 12) {
+                reIconCircle(icon: "building.columns.fill", color: .blue)
+                VStack(alignment: .leading, spacing: 3) {
+                    // [v25.520] 名稱放不下改跑馬燈（原本 lineLimit(1) 切成「…」）
+                    MarqueeText(m.title.isEmpty ? "房貸" : m.title)
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(.primary)
+                    if let seg = seg {
+                        mortgageProgress(seg)
+                    }
+                }
+                Spacer()
+                Text(formatCurrency(perPeriod))
+                    .font(.system(size: 14, weight: .bold, design: .rounded))
+                    .foregroundStyle(Color(red: 0.22, green: 0.53, blue: 0.98))
+                Image(systemName: "chevron.right")
+                    .font(.caption2).foregroundStyle(.tertiary)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// 「已繳 x／y 期」膠囊＋已繳金額（已繳期數 × 每期金額）
+    private func mortgageProgress(_ seg: HouseFacts.Segment) -> some View {
+        let periodText: String = "\(seg.paidPeriods)/\(seg.countedPeriods) 期"
+        let paidText: String = "已繳 " + formatCurrency(Double(seg.paidPeriods) * seg.perPeriod)
+        return HStack(spacing: 5) {
+            if seg.countedPeriods > 0 {
+                Text(periodText)
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.blue)
+                    .padding(.horizontal, 6).padding(.vertical, 2)
+                    .background(Color.blue.opacity(0.10))
+                    .clipShape(Capsule())
+                    .overlay(Capsule().stroke(Color.blue.opacity(0.22), lineWidth: 0.6))
+            }
+            Text(paidText)
+                .font(.caption2).foregroundStyle(.secondary)
+        }
+    }
+
+    /// [v25.532] 當初跟銀行借了多少：還欠多少本金從這個數算起
+    private func loanPrincipalRow(_ facts: HouseFacts?) -> some View {
+        let placeholder: String = loanPrincipalPlaceholder(facts)
+        return HStack {
+            Text("當初跟銀行借了多少")
+            TextField(placeholder, text: $loanPrincipalText)
+                .keyboardType(.decimalPad)
+                .multilineTextAlignment(.trailing)
+            Text("萬元").foregroundStyle(.secondary)
+        }
+    }
+
+    /// 沒填時 HouseFacts 會用哪個數，只寫在提示字裡（同一套順序：記帳的總貸款金額 → 購入價 − 自備款）。
+    /// 用「假裝沒填」的同一間房子算一次，提示的數字就是存檔後真的會用的那個。
+    /// 這頁每打一個字就重畫一次，build 不便宜：輸入框有字時看不到提示字就不算；
+    /// 存著的本來就是沒填、購入價也沒改時，上面那份 facts 就是同一個結果，直接用。
+    private func loanPrincipalPlaceholder(_ facts: HouseFacts?) -> String {
+        let example = "例如 1944"
+        guard loanPrincipalText.isEmpty, var re = currentEstate else { return example }
+        let typedPrice: Double = (Double(purchasePriceText) ?? 0) * 10000
+        let samePrice: Bool = typedPrice <= 0 || abs(typedPrice - re.purchasePrice) < 1
+        let f: HouseFacts
+        if let stored = facts, (re.loanPrincipal ?? 0) <= 0, samePrice {
+            f = stored
+        } else {
+            re.loanPrincipal = nil
+            if typedPrice > 0 { re.purchasePrice = typedPrice }
+            f = HouseFacts.build(re, expense: expenseStore)
+        }
+        guard let p = f.principal, p > 0 else { return example }
+        let wanText: String = Self.editableAmountText(p / 10000, decimals: 0)
+        switch f.principalSource {
+        case .ledger: return wanText + "（記帳的總貸款金額）"
+        case .estimated: return wanText + "（購入價 − 自備款）"
+        case .entered, .unknown: return example
+        }
+    }
+
+    private func mortgageFooterText(_ facts: HouseFacts?) -> String {
+        let principalNote = "沒填就用推算的；有填就照你填的算還欠多少本金。"
+        guard !storeMortgageItems.isEmpty else {
+            return "點擊「新增貸款項目」可建立多筆不同期數的貸款。" + principalNote
+        }
+        // 賣掉的房子 HouseFacts 停在賣出那天，monthlyMortgage 是賣出那個月的；不是這個月賣的，「這個月」就沒有房貸
+        let monthly: Double
+        if let f = facts, Calendar.current.isDate(f.asOf, equalTo: Date(), toGranularity: .month) {
+            monthly = f.monthlyMortgage
+        } else {
+            monthly = 0
+        }
+        let monthText: String
+        if monthly > 0 {
+            let monthlyText: String = formatCurrency(monthly)
+            monthText = "這個月房貸 \(monthlyText)，與記帳模式的固定支出連動。"
+        } else {
+            monthText = "這個月沒有要繳的房貸，與記帳模式的固定支出連動。"
+        }
+        return monthText + principalNote
     }
 
     // MARK: - 已支出房屋金額
@@ -1319,95 +1413,6 @@ struct AddRealEstateView: View {
         }
     }
 
-    // MARK: - 試算
-
-    @ViewBuilder
-    private var calcSection: some View {
-        let rental = Double(monthlyRentalText) ?? 0
-        let mortgageMonthly = storeMortgageItems.reduce(0.0) { $0 + $1.amount }
-        let mortgagePaidTotal = storeMortgageItems.reduce(0.0) { $0 + $1.paidAmount }
-        let paidTotal = storePaidItems.reduce(0.0) { $0 + $1.amount }
-        let varTotal = storeVariableItems.reduce(0.0) { $0 + $1.amount }
-        let mortgageTotal = storeMortgageItems.reduce(0.0) { $0 + $1.totalAmount }
-        let allPaid = paidTotal + mortgagePaidTotal + varTotal
-
-        if rental > 0 || mortgageMonthly > 0 || paidTotal > 0 || varTotal > 0 {
-            Section(header: reSectionHeader("試算", icon: "function", color: .teal)) {
-                if rental > 0 || mortgageMonthly > 0 {
-                    let netFlow = rental - mortgageMonthly
-                    let flowColor: Color = netFlow >= 0 ? .green : .red
-                    HStack {
-                        Text("每月淨現金流")
-                            .font(.subheadline)
-                        Spacer()
-                        Text(formatCurrency(netFlow))
-                            .font(.system(size: 13, weight: .bold, design: .rounded))
-                            .foregroundStyle(flowColor)
-                            .padding(.horizontal, 8).padding(.vertical, 3)
-                            .background(flowColor.opacity(0.10))
-                            .clipShape(Capsule())
-                    }
-                }
-                if mortgageTotal > 0 {
-                    HStack {
-                        Text("貸款總額").font(.subheadline)
-                        Spacer()
-                        Text(formatCurrency(mortgageTotal))
-                            .font(.system(size: 13, weight: .semibold, design: .rounded))
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                if mortgagePaidTotal > 0 {
-                    HStack {
-                        Text("已繳貸款金額").font(.subheadline)
-                        Spacer()
-                        Text(formatCurrency(mortgagePaidTotal))
-                            .font(.system(size: 13, weight: .bold, design: .rounded))
-                            .foregroundStyle(Color(red: 0.22, green: 0.53, blue: 0.98))
-                            .padding(.horizontal, 8).padding(.vertical, 3)
-                            .background(Color.blue.opacity(0.08))
-                            .clipShape(Capsule())
-                    }
-                }
-                if paidTotal > 0 {
-                    HStack {
-                        Text("已支出房屋金額").font(.subheadline)
-                        Spacer()
-                        Text(formatCurrency(paidTotal))
-                            .font(.system(size: 13, weight: .bold, design: .rounded))
-                            .foregroundStyle(.purple)
-                            .padding(.horizontal, 8).padding(.vertical, 3)
-                            .background(Color.purple.opacity(0.08))
-                            .clipShape(Capsule())
-                    }
-                }
-                if varTotal > 0 {
-                    HStack {
-                        Text("變動支出累計").font(.subheadline)
-                        Spacer()
-                        Text(formatCurrency(varTotal))
-                            .font(.system(size: 13, weight: .bold, design: .rounded))
-                            .foregroundStyle(.orange)
-                            .padding(.horizontal, 8).padding(.vertical, 3)
-                            .background(Color.orange.opacity(0.08))
-                            .clipShape(Capsule())
-                    }
-                }
-                HStack {
-                    Text("房屋總已支出")
-                        .font(.subheadline.weight(.semibold))
-                    Spacer()
-                    Text(formatCurrency(allPaid))
-                        .font(.system(size: 15, weight: .bold, design: .rounded))
-                        .foregroundStyle(Color(red: 0.90, green: 0.25, blue: 0.25))
-                        .padding(.horizontal, 9).padding(.vertical, 4)
-                        .background(Color.red.opacity(0.10))
-                        .clipShape(Capsule())
-                }
-            }
-        }
-    }
-
     // MARK: - 儲存
 
     private func save() {
@@ -1423,6 +1428,20 @@ struct AddRealEstateView: View {
         let trimmedName = name.trimmingCharacters(in: .whitespaces)
         let trimmedNote = note.trimmingCharacters(in: .whitespaces)
         let reId = stableEstateId
+        // [v25.532] 借款本金、成交價：空的或 ≤ 0 存 nil（＝沒填，用推算的／目前估值）
+        let enteredPrincipal: Double? = Self.positiveWan(loanPrincipalText)
+        let enteredSoldPrice: Double? = isSold ? Self.positiveWan(soldPriceText) : nil
+        // [v25.532] 估值有改才蓋今天。跟進這頁時的原始資料（editing）比，不跟 currentEstate 比：
+        // 新增流程按「新增貸款項目」會先自動存一次，跟它比就永遠是「沒改」。
+        // 原本就沒估值、輸入框也還是空的，存檔時退回購入價不算改。
+        let valueStamp: Date?
+        if let before = editing {
+            let stillBlank = before.currentValue <= 0 && Double(currentValueText) == nil
+            let valueChanged = !stillBlank && abs(currentVal - before.currentValue) >= 1
+            valueStamp = valueChanged ? Date() : currentEstate?.valueUpdatedAt
+        } else {
+            valueStamp = Double(currentValueText) != nil ? Date() : currentEstate?.valueUpdatedAt
+        }
 
         // [v25.530] 減號拿掉的、價格清空的保險／附屬資產，連到的記帳支出（含銀行扣款）到按儲存這裡才一起刪。
         // 還有項目連著的 id 不刪。
@@ -1527,6 +1546,14 @@ struct AddRealEstateView: View {
                 ))
             }
         }
+        // [v25.532] 標成已售出：連到的房貸固定支出停在成交日，記帳才不會賣掉之後還每月扣；
+        // 取消已售出：把「因為賣房停的」還原（只有原本是已售出、這次取消才還原，免得動到你在記帳自己停的）。
+        // 跟上面一起改在 batch 上，下面一次寫回。
+        let wasSold = editing?.soldDate != nil
+        if let estate = currentEstate, isSold || wasSold,
+           RealEstateSale.syncMortgageStops(of: estate, soldDate: isSold ? soldDate : nil, in: &batch.expenses) {
+            batch.changed = true
+        }
         if batch.changed { expenseStore.expenses = batch.expenses }
         syncBankWithdrawals(for: batch.bankSyncIds, in: batch.expenses)
 
@@ -1534,7 +1561,9 @@ struct AddRealEstateView: View {
         var saleExpId = editing?.saleLinkedExpenseId
         var saleIncId = editing?.saleLinkedIncomeId
         if isSold {
-            let pl = currentVal - price
+            // [v25.532] 有填成交價就用成交價算賺賠，沒填才用目前估值
+            let salePrice: Double = enteredSoldPrice ?? currentVal
+            let pl = salePrice - price
             if pl >= 0 {
                 saleIncId = syncSaleIncome(reId: reId, name: trimmedName, profit: pl, date: soldDate, existingId: saleIncId)
                 // 改用 expenseStore.delete(_:) 清除連結支出，確保附加照片一併移除，避免孤兒照片
@@ -1572,7 +1601,8 @@ struct AddRealEstateView: View {
         let storeFloors: [FloorInfo] = currentEstate?.floors ?? []
         let syncedFloors: [FloorInfo] = floorItems.map { item -> FloorInfo in
             var info = storeFloors.first(where: { $0.id == item.id }) ?? FloorInfo(id: item.id)
-            info.floorNumber = item.floorNumber
+            // [v25.532] 去掉前後空白：「 3F」排序、街景解析才認得
+            info.floorNumber = item.floorNumber.trimmingCharacters(in: .whitespacesAndNewlines)
             // 功能沒動就保留原本順序（Set 轉陣列順序不固定）
             if Set(info.functions) != item.functions {
                 info.functions = FloorFunction.allCases.filter { item.functions.contains($0) }
@@ -1644,6 +1674,10 @@ struct AddRealEstateView: View {
             re.fromFloor = old.fromFloor
             re.toFloor = old.toFloor
         }
+        // [v25.532] 這三個是這頁的欄位，照這頁的輸入寫，不從舊資料帶回（清空就是改回沒填）
+        re.loanPrincipal = enteredPrincipal
+        re.soldPrice = enteredSoldPrice
+        re.valueUpdatedAt = valueStamp
         if currentEstate != nil { financeStore.update(re) } else { financeStore.add(re) }
         dismiss()
     }
@@ -1884,6 +1918,17 @@ struct AddRealEstateView: View {
         purchasePriceText = e.purchasePrice > 0 ? Self.editableAmountText(e.purchasePrice / 10000, decimals: 4) : ""
         currentValueText = e.currentValue > 0 ? Self.editableAmountText(e.currentValue / 10000, decimals: 4) : ""
         monthlyRentalText = e.monthlyRental > 0 ? Self.editableAmountText(e.monthlyRental, decimals: 2) : ""
+        // [v25.532] 只帶回你填過的；推算的數字只當提示字，不放進輸入框
+        if let principal = e.loanPrincipal, principal > 0 {
+            loanPrincipalText = Self.editableAmountText(principal / 10000, decimals: 4)
+        } else {
+            loanPrincipalText = ""
+        }
+        if let sold = e.soldPrice, sold > 0 {
+            soldPriceText = Self.editableAmountText(sold / 10000, decimals: 4)
+        } else {
+            soldPriceText = ""
+        }
         note = e.note
 
         // mortgageItems / paidItems / variableExpenses 已從 store 直接讀取，無須載入到本地 state
@@ -1962,6 +2007,14 @@ struct AddRealEstateView: View {
             if text.hasSuffix(".") { text.removeLast() }
         }
         return text
+    }
+
+    /// [v25.532] 「萬」輸入框換成台幣；空的、看不懂的、≤ 0 都回 nil（＝沒填）。
+    /// 貼上「inf」「1e400」會變成無限大，存進去整份房地產 JSON 編碼失敗、默默存不了檔，也當沒填。
+    private static func positiveWan(_ text: String) -> Double? {
+        guard let wan = Double(text.trimmingCharacters(in: .whitespaces)), wan > 0 else { return nil }
+        let value = wan * 10000
+        return value.isFinite ? value : nil
     }
 
     /// [v25.530] 水號拆成「站所、編號、檢號」三格，一定回傳 3 個元素：
@@ -2078,172 +2131,6 @@ struct AddRealEstateView: View {
         case .house:
             return LinearGradient(colors: [.teal, Color(red: 0.12, green: 0.50, blue: 0.88)], startPoint: .leading, endPoint: .trailing)
         }
-    }
-
-    // MARK: - 美化輔助：英雄預覽卡（紫藍漸層 + 三顆散景圓 + 玻璃光澤）
-
-    private var estatePreviewCard: some View {
-        let purchaseWan = Double(purchasePriceText) ?? 0
-        let currentWan  = Double(currentValueText)  ?? 0
-        let apprecWan   = (purchaseWan > 0 && currentWan > 0) ? currentWan - purchaseWan : 0
-        let rentalAmt   = Double(monthlyRentalText) ?? 0
-        let isUp        = apprecWan >= 0
-        let accentTop   = Color(red: 0.52, green: 0.20, blue: 0.88)
-        let accentBot   = Color(red: 0.28, green: 0.10, blue: 0.68)
-
-        return ZStack(alignment: .topLeading) {
-            // 背景漸層
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .fill(LinearGradient(colors: [accentTop, accentBot],
-                                     startPoint: .topLeading, endPoint: .bottomTrailing))
-            // 散景裝飾圓 ①（右上大圓）
-            Circle()
-                .fill(Color.white.opacity(0.10))
-                .frame(width: 110, height: 110)
-                .offset(x: 240, y: -30)
-                .blur(radius: 12)
-            // 散景裝飾圓 ②（左下中圓）
-            Circle()
-                .fill(Color.white.opacity(0.07))
-                .frame(width: 70, height: 70)
-                .offset(x: 18, y: 100)
-                .blur(radius: 8)
-            // 散景裝飾圓 ③（中右小圓）
-            Circle()
-                .fill(Color.white.opacity(0.06))
-                .frame(width: 55, height: 55)
-                .offset(x: 175, y: 72)
-                .blur(radius: 8)
-            // 頂部玻璃光澤（white.opacity(0.18)→clear，top→center）
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .fill(LinearGradient(colors: [.white.opacity(0.18), .clear],
-                                     startPoint: .top, endPoint: .center))
-
-            VStack(alignment: .leading, spacing: 14) {
-                // ── 標題列 ──
-                HStack {
-                    VStack(alignment: .leading, spacing: 3) {
-                        // [v25.520] 物件名稱放不下改跑馬燈（原本縮小字級）
-                        MarqueeText(name.isEmpty ? "新增房地產" : name)
-                            .font(.title3.weight(.bold))
-                            .foregroundStyle(.white)
-                        if !city.isEmpty {
-                            HStack(spacing: 4) {
-                                Image(systemName: "mappin.circle.fill").font(.system(size: 10))
-                                Text(city).font(.caption)
-                            }
-                            .foregroundStyle(.white.opacity(0.80))
-                        }
-                    }
-                    Spacer()
-                    if isSold {
-                        HStack(spacing: 4) {
-                            Image(systemName: "checkmark.seal.fill").font(.system(size: 9))
-                            Text("已售出")
-                        }
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 8).padding(.vertical, 4)
-                        .background(.white.opacity(0.20))
-                        .clipShape(Capsule())
-                        .overlay(Capsule().stroke(.white.opacity(0.30), lineWidth: 0.6))
-                    }
-                }
-
-                // ── 購入價大字 ──
-                if purchaseWan > 0 {
-                    HStack(alignment: .lastTextBaseline, spacing: 4) {
-                        Text(purchaseWan >= 10000
-                             ? String(format: "%.1f億", purchaseWan / 10000)
-                             : String(format: "%.0f萬", purchaseWan))
-                            .font(.system(size: 32, weight: .bold, design: .rounded))
-                            .foregroundStyle(.white)
-                            .minimumScaleFactor(0.65)
-                            .contentTransition(.numericText())
-                        Text("NT$").font(.caption.weight(.medium)).foregroundStyle(.white.opacity(0.70))
-                    }
-                } else {
-                    Text("請輸入購入價格")
-                        .font(.subheadline.weight(.medium))
-                        .foregroundStyle(.white.opacity(0.55))
-                }
-
-                // ── KPI 橫列（估值 / 增值 / 月租）──
-                HStack(spacing: 0) {
-                    reHeroKpiCell(
-                        icon: "building.2.fill",
-                        label: "目前估值",
-                        value: currentWan > 0
-                            ? (currentWan >= 10000
-                               ? String(format: "%.1f億", currentWan / 10000)
-                               : String(format: "%.0f萬", currentWan))
-                            : "—"
-                    )
-                    Divider().frame(height: 32).opacity(0.35)
-                    reHeroKpiCell(
-                        icon: isUp ? "arrow.up.right" : "arrow.down.right",
-                        label: "增值",
-                        value: (purchaseWan > 0 && currentWan > 0)
-                            ? (isUp
-                               ? "+\(String(format: "%.0f", apprecWan))萬"
-                               : "\(String(format: "%.0f", apprecWan))萬")
-                            : "—",
-                        tint: (purchaseWan > 0 && currentWan > 0)
-                            ? (isUp ? Color.green.opacity(0.90) : Color.red.opacity(0.90))
-                            : Color.white.opacity(0.80)
-                    )
-                    Divider().frame(height: 32).opacity(0.35)
-                    reHeroKpiCell(
-                        icon: "dollarsign.circle.fill",
-                        label: "月租收入",
-                        // [2026-07 v3] 月租金額改用萬/億智慧量級，對齊同卡購入價/估值/增值三格已用的
-                        // wan 顯示規格；monthlyRentalText 本身以「原始台幣」輸入（非萬），需自行換算，
-                        // 不直接呼叫共用 ntdWanString（該函式會多帶「NT$」前綴，與同排其他三格純數字
-                        // + 量級字的簡潔風格不符）。
-                        value: rentalAmt > 0
-                            ? (rentalAmt >= 100_000_000
-                               ? String(format: "%.1f億", rentalAmt / 100_000_000)
-                               : rentalAmt >= 10_000
-                                 ? String(format: "%.1f萬", rentalAmt / 10_000)
-                                 : "NT$\(Int(rentalAmt).formatted())")
-                            : "—"
-                    )
-                }
-                .padding(.vertical, 8)
-                .background(.white.opacity(0.12))
-                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-            }
-            .padding(18)
-        }
-        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .stroke(.white.opacity(0.18), lineWidth: 0.75)
-        )
-        .shadow(color: accentTop.opacity(0.30), radius: 16, x: 0, y: 6)
-        .shadow(color: .black.opacity(0.10), radius: 4, x: 0, y: 2)
-    }
-
-    private func reHeroKpiCell(icon: String, label: String, value: String,
-                                tint: Color = .white) -> some View {
-        VStack(spacing: 5) {
-            ZStack {
-                Circle()
-                    .fill(LinearGradient(colors: [.white.opacity(0.18), .white.opacity(0.08)],
-                                         startPoint: .topLeading, endPoint: .bottomTrailing))
-                    .frame(width: 28, height: 28)
-                Image(systemName: icon).font(.system(size: 12, weight: .semibold)).foregroundStyle(.white)
-            }
-            Text(value)
-                .font(.system(size: 12, weight: .bold, design: .rounded))
-                .foregroundStyle(tint)
-                .lineLimit(1)
-                .minimumScaleFactor(0.70)
-            Text(label)
-                .font(.system(size: 9, weight: .medium))
-                .foregroundStyle(.white.opacity(0.70))
-        }
-        .frame(maxWidth: .infinity)
     }
 }
 

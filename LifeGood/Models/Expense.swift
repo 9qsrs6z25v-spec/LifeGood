@@ -600,7 +600,10 @@ struct Expense: Identifiable, Codable {
     /// 最後一期＝起始日 +（期數 × 週期）。沒有年期資料時回傳 nil。
     var suggestedEndDate: Date? {
         guard isRecurringFixed, let rec = recurrence, fixedCategory == .loan,
-              let years = loanYears, years > 0 else { return nil }
+              let rawYears = loanYears, rawYears > 0 else { return nil }
+        // [v25.532] 最多算 100 年（同 HouseLoanMath.contractPeriods）：年限打了一長串數字時 Int(...) 會閃退，
+        // 這裡在 App 啟動補結束日時就會跑到
+        let years = min(rawYears, 100)
         let cal = Calendar.current
         let months: Int
         switch rec {
@@ -638,16 +641,21 @@ struct Expense: Identifiable, Codable {
     }
 
     /// 從起始日到 until 為止，實際會發生幾期扣款（含結束日當期）。
+    ///
+    /// [v25.532] 每一期都從第一期一次加（第 k 期＝第一期＋(k−1) 個週期，跟 nextFixedDueDate、HouseLoanMath 同一套）。
+    /// 以前一期一期往上加，29–31 號起扣會越扣越早（1/31 → 2/28 → 3/28…），月底附近的期數就數錯。
     func fixedPeriodCount(until: Date = Date(), calendar: Calendar = .current) -> Int {
         guard isRecurringFixed, let rec = recurrence else { return 0 }
+        let (component, step) = rec.componentValue
         let limit = calendar.startOfDay(for: min(until, endDate ?? until))
-        var cur = fixedCategory == .loan
-            ? (calendar.date(byAdding: rec.componentValue.0, value: rec.componentValue.1, to: date) ?? date)
+        let first = fixedCategory == .loan
+            ? (calendar.date(byAdding: component, value: step, to: date) ?? date)
             : date
+        var cur = first
         var n = 0
         while calendar.startOfDay(for: cur) <= limit && n < 1200 {
             n += 1
-            cur = calendar.date(byAdding: rec.componentValue.0, value: rec.componentValue.1, to: cur) ?? cur
+            cur = calendar.date(byAdding: component, value: step * n, to: first) ?? cur
         }
         return n
     }

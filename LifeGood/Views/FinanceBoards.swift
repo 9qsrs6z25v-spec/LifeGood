@@ -66,14 +66,17 @@ struct FinanceOverviewData: Equatable {
         let rates = FinanceRates(e)
         var d = FinanceOverviewData()
         d.month = cal.component(.month, from: now)
-        d.snapshot = FinanceSnapshot.current(finance: f, expense: e, rates: rates, now: now)
+        // [v25.532] 每間房子的 HouseFacts 只建一次（反推利率要掃每一期），淨資產、上個月、現金流、
+        // 接下來 30 天都讀同一份，數字才會一致
+        let index = FinanceLoanIndex(finance: f, expense: e, now: now)
+        d.snapshot = FinanceSnapshot.current(finance: f, expense: e, rates: rates, now: now, index: index)
         FinanceHistory.record(d.snapshot, now: now)
         if d.snapshot.assets > 0 || d.snapshot.debt > 0 {
-            let two = FinanceHistory.series(months: 2, finance: f, expense: e, rates: rates, now: now)
+            let two = FinanceHistory.series(months: 2, finance: f, expense: e, rates: rates, now: now, index: index)
             if two.count == 2, two[0].assets > 0 { d.lastMonthNetWorth = two[0].netWorth }
         }
-        d.cashFlow = FinanceCashFlow.build(finance: f, rates: rates, now: now)
-        d.upcoming = FinanceUpcoming.build(finance: f, expense: e, now: now)
+        d.cashFlow = FinanceCashFlow.build(finance: f, rates: rates, houses: index.houses, now: now)
+        d.upcoming = FinanceUpcoming.build(finance: f, expense: e, houses: index.houses, now: now)
         let activeStocks = f.stocks.filter { !$0.isSold }
         let livePolicies = f.insurances.filter { now < $0.maturityDate }
         d.counts = [.realEstate: f.realEstates.filter { !$0.isSold }.count,
@@ -141,7 +144,10 @@ struct FinanceOverviewBoard: View {
         if s.debt <= 0 {
             return Text("\(assets)・沒有貸款")
         }
-        return Text("\(assets)・貸款還要繳 \(Text(MoneyFormat.short(s.debt)).fontWeight(.heavy).foregroundStyle(MoneyTone.bad.color(pal)))")
+        // [v25.532] 房貸改看還欠的本金；本金是推算的寫「約」
+        let word = s.mortgageEstimated ? "貸款還欠 約 " : "貸款還欠 "
+        let debt = Text(MoneyFormat.short(s.debt)).fontWeight(.heavy).foregroundStyle(MoneyTone.bad.color(pal))
+        return Text("\(assets)・\(word)\(debt)")
     }
 
     private var town: FinTownScene {
@@ -201,6 +207,13 @@ struct FinanceOverviewBoard: View {
         }
     }
 
+    /// [v25.532] 房地產明信片底下那幾個字：算不出本金的房子退回含利息的「還要繳」；本金是推算的寫「約」
+    private var mortgageWord: String {
+        let s = data.snapshot
+        if s.mortgageScheduled { return "房貸還要繳 " }
+        return s.mortgageEstimated ? "房貸還欠 約 " : "房貸還欠 "
+    }
+
     private func postcard(_ kind: FinanceAssetKind, pal: TripBoardPalette) -> some View {
         let d = data
         let s = d.snapshot
@@ -210,8 +223,10 @@ struct FinanceOverviewBoard: View {
         switch kind {
         case .realEstate:
             if s.mortgage > 0 {
-                footer = Text("房貸還要繳 \(Text(MoneyFormat.compact(s.mortgage)).foregroundStyle(MoneyTone.bad.color(pal)))")
-                footerA11y = "房貸還要繳 " + MoneyFormat.short(s.mortgage)
+                let word = mortgageWord
+                let owed = Text(MoneyFormat.compact(s.mortgage)).foregroundStyle(MoneyTone.bad.color(pal))
+                footer = Text("\(word)\(owed)")
+                footerA11y = word + MoneyFormat.short(s.mortgage)
             } else {
                 footer = Text("\(d.counts[kind] ?? 0) 筆・沒有房貸")
                 footerA11y = "\(d.counts[kind] ?? 0) 筆，沒有房貸"
@@ -958,26 +973,16 @@ struct VehicleBoard: View {
 
 // MARK: - 房地產：街景
 
-extension RealEstate {
-    /// 房貸在 date 那天還要繳多少（每個貸款項目：剩下的期數 × 每期金額）
-    func moneyMortgageLeft(at date: Date = Date()) -> Double {
-        mortgageItems.reduce(0) { $0 + Double(FinanceLoans.mortgagePeriodsLeft($1, at: date)) * $1.amount }
-    }
-
-    /// 房貸最後一期在哪一年；沒有房貸是 nil
-    var moneyMortgageEndYear: Int? {
-        let cal = Calendar.current
-        let ends = mortgageItems.compactMap { cal.date(byAdding: .month, value: max(0, $0.totalPeriods - 1), to: $0.startDate) }
-        return ends.max().map { cal.component(.year, from: $0) }
-    }
-}
-
 struct RealEstateBoardData: Equatable {
     var month = 1
     var activeCount = 0
     var soldCount = 0
     var value: Double = 0
     var owed: Double = 0
+    /// [v25.532] 有一間還欠的本金是推算的（畫面寫「約」）
+    var owedEstimated = false
+    /// [v25.532] 有一間算不出本金、退回含利息的還要繳
+    var owedScheduled = false
     var rentedCount = 0
     var monthlyRent: Double = 0
     var monthlyMortgage: Double = 0
@@ -990,37 +995,82 @@ struct RealEstateBoardData: Equatable {
     var equity: Double { value - owed }
     var appreciationRate: Double? { purchase > 0 ? pricedValue / purchase - 1 : nil }
 
-    static func build(estates: [RealEstate], now: Date = Date()) -> RealEstateBoardData {
+    /// [v25.532] 每間房子的數字一律讀 HouseFacts（呼叫端建好一次傳進來）：估值 V、還欠的本金、這個月房貸、
+    /// 繳完那年。以前這裡用房貸項目自己的月份差算「含利息還要繳」，跟卡片、理財總覽各說各話。
+    static func build(estates: [RealEstate], facts: [UUID: HouseFacts], now: Date = Date()) -> RealEstateBoardData {
         var d = RealEstateBoardData()
         d.month = Calendar.current.component(.month, from: now)
+        // 繳完那年照西曆寫（手機設民國曆時不能印 115 年）
+        let gregorian = Calendar(identifier: .gregorian)
         let active = estates.filter { !$0.isSold }
         d.activeCount = active.count
         d.soldCount = estates.count - active.count
-        d.value = active.reduce(0) { $0 + $1.currentValue }
-        d.owed = active.reduce(0) { $0 + $1.moneyMortgageLeft(at: now) }
-        d.rentedCount = active.filter { $0.monthlyRental > 0 }.count
-        d.monthlyRent = active.reduce(0) { $0 + $1.monthlyRental }
-        d.monthlyMortgage = active.reduce(0) { $0 + $1.monthlyMortgage }
-        let priced = active.filter { $0.purchasePrice > 0 }
-        d.purchase = priced.reduce(0) { $0 + $1.purchasePrice }
-        d.pricedValue = priced.reduce(0) { $0 + $1.currentValue }
-        d.mortgageEndYear = active.filter { $0.moneyMortgageLeft(at: now) > 0 }.compactMap(\.moneyMortgageEndYear).max()
+        var ranked: [(re: RealEstate, facts: HouseFacts)] = []
+        for re in active {
+            // 呼叫端都會傳；萬一漏了，退回不看記帳的版本（估值照算，沒連結的舊房貸項目也照算）
+            let f = facts[re.id] ?? HouseFacts.build(re, expenses: [], now: now)
+            ranked.append((re: re, facts: f))
+            let owed: Double = f.owed
+            d.value += f.value
+            d.owed += owed
+            if owed > 0, f.owedIsEstimate { d.owedEstimated = true }
+            if owed > 0, f.owedIsScheduled { d.owedScheduled = true }
+            d.monthlyMortgage += f.monthlyMortgage
+            if re.monthlyRental > 0 {
+                d.rentedCount += 1
+                d.monthlyRent += re.monthlyRental
+            }
+            if re.purchasePrice > 0 {
+                d.purchase += re.purchasePrice
+                d.pricedValue += f.value
+            }
+            // 用「還要繳」篩、不用還欠：預售屋還沒開始扣，還欠是 0，但它一樣有繳完的那一年
+            if f.left > 0, let payoff = f.payoffDate {
+                let y = gregorian.component(.year, from: payoff)
+                d.mortgageEndYear = max(d.mortgageEndYear ?? y, y)
+            }
+        }
 
         // 街景：最多 4 間，值最多的在前面
-        d.homes = active.sorted { $0.currentValue > $1.currentValue }.prefix(4).map { re in
-            let left = re.moneyMortgageLeft(at: now)
-            let fraction = re.currentValue > 0 ? min(1, left / re.currentValue) : 0
-            let tower = re.buildingType == .apartment
-            let floors = tower ? 0 : (re.floors.isEmpty ? max(1, re.totalFloors) : re.floors.count)
-            return FinStreetScene.Home(tower: tower, floors: floors,
-                                       fromFloor: tower ? max(1, re.fromFloor) : 0,
-                                       toFloor: tower ? max(1, re.fromFloor, re.toFloor) : 0,
-                                       owedFraction: fraction,
-                                       owedLabel: left > 0 ? "房貸 " + MoneyFormat.percent(fraction) : nil,
-                                       rented: re.monthlyRental > 0, sold: false,
-                                       label: MoneyBoardText.short(re.name.isEmpty ? re.city : re.name, max: 6))
-        }
+        ranked.sort { $0.facts.value > $1.facts.value }
+        d.homes = ranked.prefix(4).map { streetHome($0.re, facts: $0.facts) }
         return d
+    }
+
+    /// [v25.532] 街景的一間：斜線＝還欠÷估值；大樓、透天的樓層照編輯頁自由輸入的字解析（FloorLabel）
+    private static func streetHome(_ re: RealEstate, facts f: HouseFacts) -> FinStreetScene.Home {
+        let owed: Double = f.owed
+        let fraction: Double = f.value > 0 ? min(1, owed / f.value) : 0
+        var owedLabel: String? = nil
+        if owed > 0 {
+            // 算不出本金時是含利息的還要繳，牌子要說清楚
+            owedLabel = (f.owedIsScheduled ? "還要繳 " : "房貸 ") + MoneyFormat.percent(fraction)
+        }
+        let tower = re.buildingType == .apartment
+        var floors = 0
+        var fromFloor = 0
+        var toFloor = 0
+        if tower {
+            if let span = FloorLabel.aboveGroundSpan(re.floors) {
+                fromFloor = span.lowerBound
+                toFloor = span.upperBound
+            } else if re.fromFloor > 0 {
+                // 舊資料只有「從幾樓到幾樓」
+                fromFloor = re.fromFloor
+                toFloor = max(re.fromFloor, re.toFloor)
+            }
+            // [v25.532] 樓層是自由輸入的字，打成「2025F」「1-99999999樓」時街景會一層一層畫到卡住，
+            // 大到 Int 上限還會在 toFloor + 2 溢位閃退；台灣最高 101 層，畫到 200 層就夠
+            toFloor = min(toFloor, 200)
+            fromFloor = min(fromFloor, toFloor)
+        } else {
+            floors = re.floors.isEmpty ? max(1, re.totalFloors) : max(1, FloorLabel.aboveGroundCount(re.floors))
+        }
+        return FinStreetScene.Home(tower: tower, floors: floors,
+                                   fromFloor: fromFloor, toFloor: toFloor,
+                                   owedFraction: fraction, owedLabel: owedLabel,
+                                   rented: re.monthlyRental > 0, sold: false,
+                                   label: MoneyBoardText.short(re.name.isEmpty ? re.city : re.name, max: 6))
     }
 }
 
@@ -1056,10 +1106,24 @@ struct RealEstateBoard: View {
         guard d.activeCount > 0 else {
             return Text(d.soldCount > 0 ? "房子都賣掉了，賣掉的還留在下面" : "新增房子之後，這裡會蓋出一條街")
         }
-        guard d.owed > 0, d.value > 0 else { return Text("沒有房貸，全部都是你的") }
-        let mine = Text(MoneyFormat.short(d.equity)).fontWeight(.heavy)
-            .foregroundStyle((d.equity >= 0 ? MoneyTone.good : MoneyTone.bad).color(pal))
-        return Text("扣掉貸款，真正是你的 \(mine)（\(MoneyFormat.percent(max(0, d.equity) / d.value))）")
+        guard d.owed > 0 else { return Text("沒有房貸，全部都是你的") }
+        let tone: MoneyTone = d.equity >= 0 ? .good : .bad
+        let mine = Text(MoneyFormat.short(d.equity)).fontWeight(.heavy).foregroundStyle(tone.color(pal))
+        // [v25.532] 還欠看本金；算不出本金的房子退回含利息的還要繳，本金是推算的寫「約」
+        let lead: String
+        if d.owedScheduled {
+            lead = "扣掉還要繳的房貸（含利息），真正是你的 "
+        } else if d.owedEstimated {
+            lead = "扣掉房貸，真正是你的 約 "
+        } else {
+            lead = "扣掉房貸，真正是你的 "
+        }
+        var share = ""
+        if d.value > 0 {
+            let rate: Double = max(0, d.equity) / d.value
+            share = "（" + MoneyFormat.percent(rate) + "）"
+        }
+        return Text("\(lead)\(mine)\(share)")
     }
 
     private func chips(_ pal: TripBoardPalette) -> [MoneyBoardChip] {
@@ -1117,7 +1181,9 @@ struct FinanceChartBoardData: Equatable {
         let rates = FinanceRates(e)
         var d = FinanceChartBoardData()
         d.period = period
-        d.snapshot = FinanceSnapshot.current(finance: f, expense: e, rates: rates, now: now)
+        // [v25.532] 每間房子的 HouseFacts 建一次，現在與回推的每個月都查同一份
+        let index = FinanceLoanIndex(finance: f, expense: e, now: now)
+        d.snapshot = FinanceSnapshot.current(finance: f, expense: e, rates: rates, now: now, index: index)
         FinanceHistory.record(d.snapshot, now: now)
         var months = period.rawValue
         if period == .all {
@@ -1125,7 +1191,8 @@ struct FinanceChartBoardData: Equatable {
             months = (cal.dateComponents([.month], from: first, to: now).month ?? 0) + 1
         }
         months = min(120, max(2, months))
-        let points = FinanceHistory.series(months: months, finance: f, expense: e, rates: rates, now: now)
+        let points = FinanceHistory.series(months: months, finance: f, expense: e, rates: rates, now: now,
+                                           index: index)
         // 最前面那幾個月什麼都還沒有（資產、貸款都是 0）就不畫
         d.points = Array(points.drop { $0.assets <= 0 && $0.debt <= 0 })
         return d
@@ -1324,9 +1391,9 @@ struct FinanceNetWorthCard: View {
                     ChipFlowLayout(spacing: 12) {
                         MoneyLegendItem(mark: .swatch, color: netColor, text: "淨資產", pal: pal)
                         MoneyLegendItem(mark: .swatch, color: assetColor, text: "資產", pal: pal)
-                        MoneyLegendItem(mark: .dash, color: debtColor, text: "貸款還要繳", pal: pal)
+                        MoneyLegendItem(mark: .dash, color: debtColor, text: "貸款還欠", pal: pal)
                     }
-                    Text("圓點是那個月打開理財頁時存下來的；其他月份是回推的估算（房子、車子在買入價與現在的估值之間平均變化，股票沒有市值紀錄就用成本）。貸款算的是還要繳的期數 × 每期金額，含利息，所以淨資產會偏保守一點。")
+                    Text("圓點是那個月打開理財頁時存下來的；其他月份是回推的估算（房子、車子在買入價與現在的估值之間平均變化，股票沒有市值紀錄就用成本）。房貸算的是還欠銀行的本金；車貸和其他貸款算的是還要繳的期數 × 每期金額。")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)

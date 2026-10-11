@@ -902,7 +902,7 @@ extension MoneyItem {
             chips.append(MoneyItemChip(icon: "leaf.fill", text: "節稅", tone: .good))
         }
 
-        // 繳費進度：貸款（年期，或總額 ÷ 月付）、儲蓄險（連結保單的期數）
+        // 繳費進度：貸款（[v25.532] 期數讀 Expense.loanPeriods，跟房屋卡片同一套）、儲蓄險（連結保單的期數）
         var progress: MoneyItemProgress? = nil
         if e.fixedCategory == .loan {
             if let s = e.moneyLoanSchedule(now: now, calendar: cal) {
@@ -982,37 +982,26 @@ extension MoneyItem {
 // MARK: - 貸款的期數（v25.526 從 MoneyItem.fixed 抽出來：固定支出看板的「貸款還要繳」也要用）
 
 struct MoneyLoanSchedule: Equatable {
-    /// 已經繳了幾期（起始那個月算第一期）
+    /// 已經繳了幾期。[v25.532] 是真正的期數（季繳一季算一期），不是月數；
+    /// 第一期＝起始日＋1 個週期、扣款日 ≤ 今天才算繳了，跟房屋卡片同一套（Expense.loanPeriods）
     let elapsed: Int
     let total: Int
+    /// 每期金額（季繳就是一季的錢）
+    let perPeriod: Double
     /// 每月要繳多少（季繳 ÷ 3、年繳 ÷ 12）
     let monthly: Double
 
     var isDone: Bool { elapsed >= total }
-    /// 剩下的期數 × 月付
-    var left: Double { Double(max(0, total - elapsed)) * monthly }
+    /// 還要繳：剩下的期數 × 每期金額（含利息）
+    var left: Double { Double(max(0, total - elapsed)) * perPeriod }
 }
 
 extension Expense {
-    /// 貸款繳到第幾期：期數看年期，沒有年期就用總額 ÷ 月付。不是貸款、或兩個都沒填是 nil。
+    /// 貸款繳到第幾期。不是貸款、或沒填年限也沒結束日是 nil。
+    /// [v25.532] 改讀 loanPeriods：不再用「總貸款金額 ÷ 月付」推期數——那是本金、沒算利息，推出來會少一截。
     func moneyLoanSchedule(now: Date = Date(), calendar cal: Calendar = .current) -> MoneyLoanSchedule? {
-        guard fixedCategory == .loan else { return nil }
-        let monthly: Double
-        switch recurrence {
-        case .monthly: monthly = amount
-        case .quarterly: monthly = amount / 3
-        case .yearly: monthly = amount / 12
-        case .none: monthly = 0
-        }
-        var totalMonths = 0
-        if let years = loanYears, years > 0 {
-            totalMonths = Int((years * 12).rounded())
-        } else if let total = loanTotalAmount, total > 0, monthly > 0 {
-            totalMonths = Int((total / monthly).rounded())
-        }
-        guard totalMonths > 0 else { return nil }
-        let months = cal.dateComponents([.month], from: date, to: now).month ?? 0
-        let elapsed = max(0, min(months + 1, totalMonths))
-        return MoneyLoanSchedule(elapsed: elapsed, total: totalMonths, monthly: monthly)
+        guard let rec = recurrence, let p = loanPeriods(asOf: now, calendar: cal) else { return nil }
+        let months = Double(max(1, rec.periodMonths))
+        return MoneyLoanSchedule(elapsed: p.paid, total: p.total, perPeriod: amount, monthly: amount / months)
     }
 }

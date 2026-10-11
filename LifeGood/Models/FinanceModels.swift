@@ -794,26 +794,8 @@ struct RealEstateMortgageItem: Identifiable, Codable {
         case id, title, amount, totalPeriods, startDate, linkedExpenseId
     }
 
-    /// 貸款總額
-    var totalAmount: Double { amount * Double(totalPeriods) }
-
-    /// 已繳期數（從起始日算到今天，每月一期）
-    var elapsedPeriods: Int {
-        let months = Calendar.current.dateComponents([.month], from: startDate, to: Date()).month ?? 0
-        return min(max(0, months), totalPeriods)
-    }
-
-    /// 已繳貸款金額
-    var paidAmount: Double { amount * Double(elapsedPeriods) }
-
-    /// 本月是否仍需繳款：已開始（今天 ≥ 起始日）且尚未繳滿期數。
-    /// 尚未開始的未來貸款區段、已繳滿的貸款都不算入當期月付。
-    var isPayingNow: Bool {
-        let now = Date()
-        guard now >= startDate else { return false }   // 未開始
-        let months = Calendar.current.dateComponents([.month], from: startDate, to: now).month ?? 0
-        return months < totalPeriods                   // 未繳滿
-    }
+    // [v25.532] 貸款總額、已繳期數、已繳金額、本月是否在繳已拿掉：那是「起始那個月算第一期、一律當月繳」的另一套規則，
+    // 跟記帳對不起來。期數、金額一律讀 HouseFacts.Segment（連到的記帳固定支出為準）。
 }
 
 // MARK: - 房地產已支出金額項目
@@ -1757,16 +1739,11 @@ struct RealEstate: Identifiable, Codable {
     /// 是否已售出
     var isSold: Bool { soldDate != nil }
 
-    /// 每月房貸合計（只計入當期實際要繳的貸款，排除尚未開始或已繳滿的區段）
-    var monthlyMortgage: Double { mortgageItems.filter { $0.isPayingNow }.reduce(0) { $0 + $1.amount } }
-    /// 貸款總額
-    var totalMortgageAmount: Double { mortgageItems.reduce(0) { $0 + $1.totalAmount } }
-    /// 已繳貸款金額合計
-    var totalMortgagePaid: Double { mortgageItems.reduce(0) { $0 + $1.paidAmount } }
+    // [v25.532] 每月房貸、貸款總額、已繳貸款、房屋總已支出、每月淨現金流已拿掉：房貸的數字一律讀 HouseFacts
+    // （monthlyMortgage、scheduledTotal、paid），不然又會冒出第二套期數規則。
+
     /// 已支出房屋金額合計（頭期款等）
     var totalPaid: Double { paidItems.reduce(0) { $0 + $1.amount } }
-    /// 房屋總已支出（已支出 + 已繳貸款）
-    var totalAllPaid: Double { totalPaid + totalMortgagePaid }
     /// 房產增值
     var appreciation: Double { currentValue - purchasePrice }
     /// 增值率
@@ -1776,8 +1753,6 @@ struct RealEstate: Identifiable, Codable {
     }
     /// 變動支出合計
     var variableTotal: Double { variableExpenses.reduce(0) { $0 + $1.amount } }
-    /// 每月淨現金流（租金 - 房貸）
-    var monthlyCashFlow: Double { monthlyRental - monthlyMortgage }
     /// 年租金報酬率
     var rentalYield: Double {
         guard currentValue > 0 else { return 0 }

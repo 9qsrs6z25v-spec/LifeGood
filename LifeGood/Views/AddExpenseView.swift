@@ -778,10 +778,18 @@ struct AddExpenseView: View {
         return expenseType == .fixed || advancedMode
     }
 
+    /// [v25.532] 貸款年限輸入框的數字。貼上「inf」「1e30」或多打一串 0 時，Int(年限 × 12) 會閃退；
+    /// 存進去之後 HouseFacts 每次重畫都要逐期算上百萬期，算出的利率是無限大、JSON 也存不了檔。
+    /// 看不懂或不是有限數字的當沒填；超過 100 年的當 100 年（1200 期，跟期數的上限一樣）。
+    private var loanYearsValue: Double? {
+        guard let y = Double(loanYearsText), y.isFinite else { return nil }
+        return min(y, 100)
+    }
+
     private func computedLoanRate() -> Double? {
         let monthly = Double(amountText) ?? 0
         let total = Double(loanTotalAmountText) ?? 0
-        let years = Double(loanYearsText) ?? 0
+        let years = loanYearsValue ?? 0
         guard monthly > 0, total > 0, years > 0 else { return nil }
         let totalPaid = monthly * 12 * years
         let totalInterest = totalPaid - total
@@ -792,7 +800,7 @@ struct AddExpenseView: View {
     private var loanCalcRow: some View {
         let monthly = Double(amountText) ?? 0
         let total = Double(loanTotalAmountText) ?? 0
-        let years = Double(loanYearsText) ?? 0
+        let years = loanYearsValue ?? 0
         if monthly > 0 && total > 0 && years > 0 {
             let totalPaid = monthly * 12 * years
             let totalInterest = totalPaid - total
@@ -1905,7 +1913,7 @@ struct AddExpenseView: View {
         Expense(
             title: "", amount: 0, date: date, expenseType: .fixed,
             fixedCategory: selectedFixedCategory, recurrence: selectedRecurrence,
-            loanYears: Double(loanYearsText)
+            loanYears: loanYearsValue
         ).suggestedEndDate
     }
 
@@ -3151,7 +3159,7 @@ struct AddExpenseView: View {
             currencyCode: savedCurrencyCode,
             diningMember: (expenseType == .variable && Self.memberCategories.contains(selectedVariableCategory) && !selectedDiningMembers.isEmpty) ? diningMembersString : nil,
             loanTotalAmount: showLoanCalcFields ? Double(loanTotalAmountText) : nil,
-            loanYears: showLoanCalcFields ? Double(loanYearsText) : nil,
+            loanYears: showLoanCalcFields ? loanYearsValue : nil,
             loanRate: showLoanCalcFields ? computedLoanRate() : nil,
             insuranceRate: isSavingsInsurance ? insRate : nil,
             linkedBankMilestoneId: selectedBankMilestoneId,
@@ -3423,7 +3431,7 @@ struct AddExpenseView: View {
         let reId = existingRE?.id ?? UUID()
         let trimmedNote = note.trimmingCharacters(in: .whitespaces)
         let mortgageTitle = trimmedNote.isEmpty ? "房貸" : trimmedNote
-        let years = Double(loanYearsText) ?? 0
+        let years = loanYearsValue ?? 0
         let computedPeriods = years > 0 ? Int(years * 12) : 240
         let mortgageItem = RealEstateMortgageItem(
             title: mortgageTitle,
@@ -3451,12 +3459,13 @@ struct AddExpenseView: View {
             re.monthlyRental = Double(reMonthlyRentalText) ?? 0
             if let idx = re.mortgageItems.firstIndex(where: { $0.linkedExpenseId == expenseId }) {
                 let prev = re.mortgageItems[idx]
+                // [v25.532] 起始日一律跟著這筆的日期（以前沒填年限就留舊的，兩邊對不上）；期數有年限才改
                 re.mortgageItems[idx] = RealEstateMortgageItem(
                     id: prev.id,
                     title: mortgageTitle,
                     amount: mortgageAmount,
                     totalPeriods: years > 0 ? computedPeriods : prev.totalPeriods,
-                    startDate: years > 0 ? date : prev.startDate,
+                    startDate: date,
                     linkedExpenseId: expenseId
                 )
             } else {
@@ -3487,17 +3496,18 @@ struct AddExpenseView: View {
         guard var re = financeStore.realEstates.first(where: { $0.id == realEstateId }) else { return }
         let trimmedNote = note.trimmingCharacters(in: .whitespaces)
         let mortgageTitle = trimmedNote.isEmpty ? "房貸" : trimmedNote
-        let years = Double(loanYearsText) ?? 0
+        let years = loanYearsValue ?? 0
         let computedPeriods = years > 0 ? Int(years * 12) : 240
 
         if let idx = re.mortgageItems.firstIndex(where: { $0.linkedExpenseId == expenseId }) {
             let prev = re.mortgageItems[idx]
+            // [v25.532] 起始日一律跟著這筆的日期；期數有年限才改，沒有就沿用
             re.mortgageItems[idx] = RealEstateMortgageItem(
                 id: prev.id,
                 title: mortgageTitle,
                 amount: amount,
                 totalPeriods: years > 0 ? computedPeriods : prev.totalPeriods,
-                startDate: years > 0 ? date : prev.startDate,
+                startDate: date,
                 linkedExpenseId: expenseId
             )
         } else {
@@ -3667,13 +3677,9 @@ struct AddExpenseView: View {
                     if !mortgageTitle.isEmpty {
                         note = mortgageTitle
                     }
-                    // 還原貸款年限（從 totalPeriods 換算）
-                    if loanYearsText.isEmpty && item.totalPeriods > 0 {
-                        let years = Double(item.totalPeriods) / 12.0
-                        loanYearsText = String(format: "%g", years)
-                    }
-                    // 開始日期從 mortgageItem.startDate 同步
-                    date = item.startDate
+                    // [v25.532] 不再用房貸項目的 totalPeriods 反推年限、也不再用它的 startDate 蓋掉日期：
+                    // 沒填年限的段 totalPeriods 是預設的 240，反推會默默存成 20 年；
+                    // 起始日、年限都以記帳這筆為準（房子那邊的段是跟著這裡同步的）。
                 }
             }
             reName = linked.name

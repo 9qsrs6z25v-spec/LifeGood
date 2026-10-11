@@ -513,17 +513,25 @@ struct RealEstateDetailView: View {
 
     // MARK: - 詳細資訊
 
+    /// [v25.532] 房貸的數字一律讀 HouseFacts（跟看板、項目卡、理財總覽同一套期數規則）：
+    /// 每月房貸＝這個月房貸、貸款總額＝全部要繳（含利息）、已繳＝已繳期數 × 每期金額
+    private var houseFacts: HouseFacts {
+        HouseFacts.build(estate, expense: expenseStore)
+    }
+
     @ViewBuilder
-    private var calcSummary: some View {
+    private func calcSummary(_ facts: HouseFacts) -> some View {
         let rental = estate.monthlyRental
-        let mortgageMonthly = estate.monthlyMortgage
-        let mortgageTotal = estate.totalMortgageAmount
-        let mortgagePaidTotal = estate.totalMortgagePaid
+        let mortgageMonthly = facts.monthlyMortgage
+        let mortgageTotal = facts.scheduledTotal
+        let mortgagePaidTotal = facts.paid
         let paidTotal = estate.totalPaid
         let varTotal = estate.variableTotal
         let allPaid = paidTotal + mortgagePaidTotal + varTotal
+        // 預售屋還沒開始扣時這個月房貸是 0，有排定的房貸也要顯示
+        let hasMortgage = mortgageMonthly > 0 || mortgageTotal > 0
 
-        if rental > 0 || mortgageMonthly > 0 || paidTotal > 0 || varTotal > 0 {
+        if rental > 0 || hasMortgage || paidTotal > 0 || varTotal > 0 {
             collapsibleSection(
                 title: "試算",
                 summary: fmt(allPaid),
@@ -570,13 +578,38 @@ struct RealEstateDetailView: View {
         .padding(.horizontal).padding(.vertical, 6)
     }
 
+    /// [v25.532] 這一段繳到第幾期／一共幾期，讀 HouseFacts 的段（第一期＝起始日＋1 個週期、扣款日 ≤ 今天才算繳了，
+    /// 賣掉的停在賣出日）。每期金額或期數是 0 的段不算數、賣在第一期之前（算數的期數是 0），就不顯示期數。
+    private func mortgagePeriodsText(_ m: RealEstateMortgageItem, facts: HouseFacts) -> String? {
+        guard let seg = facts.segments.first(where: { $0.id == m.id }), seg.countedPeriods > 0 else { return nil }
+        let paid = seg.paidPeriods
+        let total = seg.countedPeriods
+        return "\(paid)/\(total) 期"
+    }
+
+    /// [v25.532] 每期金額以記帳那筆為準（房貸項目的金額可能是舊的）；季繳、年繳不再寫成「/月」
+    private func mortgageAmountText(_ m: RealEstateMortgageItem, facts: HouseFacts) -> String {
+        guard let seg = facts.segments.first(where: { $0.id == m.id }) else { return fmt(m.amount) + "/月" }
+        let unit: String
+        switch seg.periodMonths {
+        case 3: unit = "/季"
+        case 12: unit = "/年"
+        default: unit = "/月"
+        }
+        return fmt(seg.perPeriod) + unit
+    }
+
     private var infoSection: some View {
         VStack(spacing: 0) {
-            calcSummary
+            // [v25.532] 整個理財分頁只建一次（每段期數、已繳、這個月房貸都從這裡讀）
+            let facts = houseFacts
+            let mortgagePaidText: String = fmt(facts.paid)
+            let mortgageSummary: String? = estate.mortgageItems.isEmpty ? nil : "已繳 \(mortgagePaidText)"
+            calcSummary(facts)
 
             collapsibleSection(
                 title: "貸款明細 (\(estate.mortgageItems.count) 筆)",
-                summary: estate.mortgageItems.isEmpty ? nil : "已繳 " + fmt(estate.totalMortgagePaid),
+                summary: mortgageSummary,
                 summaryColor: .blue,
                 isExpanded: $mortgageSectionExpanded,
                 trailing: {
@@ -622,14 +655,16 @@ struct RealEstateDetailView: View {
                                             .background(Color.blue.opacity(0.10))
                                             .clipShape(Capsule())
                                             .overlay(Capsule().stroke(Color.blue.opacity(0.22), lineWidth: 0.6))
-                                        Text("\(m.elapsedPeriods)/\(m.totalPeriods) 期")
-                                            .font(.caption2)
-                                            .foregroundStyle(.secondary)
-                                            .padding(.horizontal, 6).padding(.vertical, 2)
-                                            .background(Color(.tertiarySystemFill))
-                                            .clipShape(Capsule())
+                                        if let periods = mortgagePeriodsText(m, facts: facts) {
+                                            Text(periods)
+                                                .font(.caption2)
+                                                .foregroundStyle(.secondary)
+                                                .padding(.horizontal, 6).padding(.vertical, 2)
+                                                .background(Color(.tertiarySystemFill))
+                                                .clipShape(Capsule())
+                                        }
                                     }
-                                    Text(fmt(m.amount) + "/月")
+                                    Text(mortgageAmountText(m, facts: facts))
                                         .font(.system(size: 15, weight: .bold, design: .rounded))
                                         .foregroundStyle(.primary)
                                         .contentTransition(.numericText())
@@ -644,7 +679,7 @@ struct RealEstateDetailView: View {
                     HStack {
                         Text("已繳貸款").font(.caption).foregroundStyle(.secondary)
                         Spacer()
-                        Text(fmt(estate.totalMortgagePaid))
+                        Text(mortgagePaidText)
                             .font(.system(size: 14, weight: .bold, design: .rounded))
                             .foregroundStyle(.blue)
                             .contentTransition(.numericText())
@@ -727,7 +762,7 @@ struct RealEstateDetailView: View {
             variableExpensesContent
 
             if estate.monthlyRental > 0 {
-                let flow = estate.monthlyCashFlow
+                let flow = estate.monthlyRental - facts.monthlyMortgage
                 collapsibleSection(
                     title: "收益",
                     summary: fmt(flow) + "/月",
@@ -1272,17 +1307,10 @@ struct RealEstateDetailView: View {
 
     private static let cyanColor = Color(red: 0, green: 0.85, blue: 1.0)
 
+    /// [v25.532] 樓層是自由輸入的字（一樓、地下1樓、RF、夾層…），以前只認得「數字＋F」，其餘全排在 0；
+    /// 改用 FloorLabel 統一解析，跟街景、項目卡同一套排序
     private var sortedFloors: [FloorInfo] {
-        estate.floors.sorted { floorOrder($0) < floorOrder($1) }
-    }
-
-    private func floorOrder(_ f: FloorInfo) -> Int {
-        let s = f.floorNumber.uppercased()
-            .replacingOccurrences(of: "F", with: "")
-            .replacingOccurrences(of: "樓", with: "")
-            .trimmingCharacters(in: .whitespaces)
-        if s.hasPrefix("B") { return -(Int(s.dropFirst()) ?? 0) }
-        return Int(s) ?? 0
+        FloorLabel.sorted(estate.floors)
     }
 
     // MARK: - 資產分頁（依樓層分組的物件樹）
