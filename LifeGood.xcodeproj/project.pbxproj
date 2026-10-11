@@ -55,6 +55,10 @@
 		A01B00000100000F /* FinanceModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A00000100000F /* FinanceModels.swift */; };
 		A01B000001000010 /* FinanceStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000010 /* FinanceStore.swift */; };
 		A01B000001001527 /* HouseFacts.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001527 /* HouseFacts.swift */; };
+		A01B000001001528 /* HouseCardData.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001528 /* HouseCardData.swift */; };
+		A01B000001001529 /* FinHouseScene.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001529 /* FinHouseScene.swift */; };
+		A01B000001001530 /* HouseCardViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001530 /* HouseCardViews.swift */; };
+		A01B000001001531 /* RealEstateEditors.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001531 /* RealEstateEditors.swift */; };
 		A01B000001000011 /* FinanceOverviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000011 /* FinanceOverviewView.swift */; };
 		A01B000001000012 /* SavingsInsuranceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000012 /* SavingsInsuranceView.swift */; };
 		A01B000001000013 /* StockView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000013 /* StockView.swift */; };
@@ -249,6 +253,10 @@
 		A01A00000100000F /* FinanceModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FinanceModels.swift; sourceTree = "<group>"; };
 		A01A000001000010 /* FinanceStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FinanceStore.swift; sourceTree = "<group>"; };
 		A01A000001001527 /* HouseFacts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HouseFacts.swift; sourceTree = "<group>"; };
+		A01A000001001528 /* HouseCardData.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HouseCardData.swift; sourceTree = "<group>"; };
+		A01A000001001529 /* FinHouseScene.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FinHouseScene.swift; sourceTree = "<group>"; };
+		A01A000001001530 /* HouseCardViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HouseCardViews.swift; sourceTree = "<group>"; };
+		A01A000001001531 /* RealEstateEditors.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RealEstateEditors.swift; sourceTree = "<group>"; };
 		A01A000001000011 /* FinanceOverviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FinanceOverviewView.swift; sourceTree = "<group>"; };
 		A01A000001000012 /* SavingsInsuranceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SavingsInsuranceView.swift; sourceTree = "<group>"; };
 		A01A000001000013 /* StockView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StockView.swift; sourceTree = "<group>"; };
@@ -438,6 +446,7 @@
 				A01A00000100000F /* FinanceModels.swift */,
 				A01A000001000010 /* FinanceStore.swift */,
 				A01A000001001527 /* HouseFacts.swift */,
+				A01A000001001528 /* HouseCardData.swift */,
 				A01A000001000020 /* LifeModels.swift */,
 				A01A000001000201 /* HealthModels.swift */,
 				A01A000001000204 /* ChildVaccineSchedule.swift */,
@@ -516,6 +525,7 @@
 				A01A000001001521 /* MoneyBoards.swift */,
 				A01A000001001522 /* FinanceInsights.swift */,
 				A01A000001001523 /* FinanceBoardScenes.swift */,
+				A01A000001001529 /* FinHouseScene.swift */,
 				A01A000001001524 /* FinanceBoards.swift */,
 				A01A000001001525 /* FinanceItems.swift */,
 				A01A000001001501 /* MapPlacePicker.swift */,
@@ -541,6 +551,8 @@
 				A01A000001000017 /* AddStockView.swift */,
 				A01A000001000047 /* StockDetailView.swift */,
 				A01A000001001526 /* StockCardViews.swift */,
+				A01A000001001531 /* RealEstateEditors.swift */,
+				A01A000001001530 /* HouseCardViews.swift */,
 				A01A000001000212 /* InstitutionalView.swift */,
 				A01A000001000019 /* VehicleView.swift */,
 				A01A00000100001A /* AddVehicleView.swift */,
@@ -751,6 +763,10 @@
 				A01B00000100000F /* FinanceModels.swift in Sources */,
 				A01B000001000010 /* FinanceStore.swift in Sources */,
 				A01B000001001527 /* HouseFacts.swift in Sources */,
+				A01B000001001528 /* HouseCardData.swift in Sources */,
+				A01B000001001529 /* FinHouseScene.swift in Sources */,
+				A01B000001001530 /* HouseCardViews.swift in Sources */,
+				A01B000001001531 /* RealEstateEditors.swift in Sources */,
 				A01B000001000011 /* FinanceOverviewView.swift in Sources */,
 				A01B000001000012 /* SavingsInsuranceView.swift in Sources */,
 				A01B000001000013 /* StockView.swift in Sources */,
