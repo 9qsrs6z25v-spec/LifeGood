@@ -98,9 +98,10 @@ final class ShareSceneDelegate: NSObject, UIWindowSceneDelegate {
 @main
 struct LifeGoodApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
-    @StateObject private var expenseStore = ExpenseStore()
-    @StateObject private var financeStore = FinanceStore()
-    @StateObject private var lifeStore = LifeStore()
+    // [v25.535] 三份資料改用 AppStores 那一份：sheet 的內容用 .appStores() 拿的是同一份
+    @StateObject private var expenseStore = AppStores.expense
+    @StateObject private var financeStore = AppStores.finance
+    @StateObject private var lifeStore = AppStores.life
     @StateObject private var cloudSync = CloudSyncManager.shared
     @StateObject private var subscription = SubscriptionManager.shared
     @StateObject private var einvoiceSync = EInvoiceSyncManager.shared

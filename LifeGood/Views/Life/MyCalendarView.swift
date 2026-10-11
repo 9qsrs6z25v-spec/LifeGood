@@ -189,40 +189,30 @@ struct MyCalendarView: View {
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) { addMenu }
             }
+            // [v25.535] 每個 sheet 都掛 .appStores()：Mac 上從右上角「＋」選「新增部屬任務」，
+            // 「選擇部屬」拿不到 LifeStore 直接閃退（見 AppStores.swift）
             .sheet(item: $addPersonalKind) { kind in
                 PersonalEventEditor(initialDate: selectedDate, editing: nil, initialKind: kind)
+                    .appStores()
             }
             .sheet(item: $subAddKind) { kind in
                 AddSubItemSheet(kind: kind)
+                    .appStores()
             }
             .sheet(item: $previewCalendarItem) { item in
                 CalendarEventCard(item: item)
+                    .appStores()
             }
-            .sheet(item: $searchSharePayload) { payload in ShareSheet(items: payload.items) }
+            .sheet(item: $searchSharePayload) { payload in ShareSheet(items: payload.items).appStores() }
             .lateCompletionConfirm($lateRequest)
             .sheet(item: $sessionEdit) { t in
                 MeetingSessionTimeSheet(subordinateId: t.subId, meetingId: t.meetingId,
                                         itemId: t.itemId)
-                    .environmentObject(lifeStore)
+                    .appStores()
             }
             .sheet(item: $openTarget) { target in
-                switch target {
-                // 部屬報告/任務/會議/請假：先顯示預覽卡片，右上角「編輯」才進入編輯
-                case .report(let subId, let report):
-                    SubordinateItemCard(ref: .report(subId: subId, report: report))
-                case .task(let subId, let task):
-                    SubordinateItemCard(ref: .task(subId: subId, task: task))
-                case .meeting(let subId, let meeting):
-                    SubordinateItemCard(ref: .meeting(subId: subId, meeting: meeting))
-                case .leave(let subId, let rec):
-                    SubordinateItemCard(ref: .leave(subId: subId, rec: rec))
-                case .milestone(let ms):
-                    CalendarEventCard(item: .milestone(ms))
-                case .event(let ev):
-                    CalendarEventCard(item: .personalEvent(ev))
-                case .sideRole(let rid, let resId):
-                    SideRoleWorkspaceView(roleId: rid, initialResolutionId: resId)
-                }
+                openTargetSheet(target)
+                    .appStores()
             }
             .task {
                 if appleCal.authorizationStatus == .notDetermined {
@@ -241,6 +231,28 @@ struct MyCalendarView: View {
                 try? await Task.sleep(nanoseconds: 300_000_000)
                 debouncedSearchText = searchText
             }
+        }
+    }
+
+    /// 點行事曆上的一筆打開的卡片（[v25.535] 從 sheet 閉包搬出來，外面才能統一掛 .appStores()）
+    @ViewBuilder
+    private func openTargetSheet(_ target: CalendarOpenTarget) -> some View {
+        switch target {
+        // 部屬報告/任務/會議/請假：先顯示預覽卡片，右上角「編輯」才進入編輯
+        case .report(let subId, let report):
+            SubordinateItemCard(ref: .report(subId: subId, report: report))
+        case .task(let subId, let task):
+            SubordinateItemCard(ref: .task(subId: subId, task: task))
+        case .meeting(let subId, let meeting):
+            SubordinateItemCard(ref: .meeting(subId: subId, meeting: meeting))
+        case .leave(let subId, let rec):
+            SubordinateItemCard(ref: .leave(subId: subId, rec: rec))
+        case .milestone(let ms):
+            CalendarEventCard(item: .milestone(ms))
+        case .event(let ev):
+            CalendarEventCard(item: .personalEvent(ev))
+        case .sideRole(let rid, let resId):
+            SideRoleWorkspaceView(roleId: rid, initialResolutionId: resId)
         }
     }
 
