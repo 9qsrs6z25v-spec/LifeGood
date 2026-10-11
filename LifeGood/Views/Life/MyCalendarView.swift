@@ -2364,10 +2364,50 @@ struct CalendarEventCard: View {
     }
 
     @Environment(\.dismiss) private var dismiss
-    let item: Item
+    @EnvironmentObject var lifeStore: LifeStore
+    /// 打開卡片時帶進來的那一筆（只用來認是哪一筆；畫面一律讀下面的 item）
+    private let initialItem: Item
     @State private var showEdit = false
     // [v2] titleBlock 英雄卡進場動畫旗標
     @State private var cardAppeared = false
+    /// [v25.536] 備註就地編輯（右邊小筆）
+    @State private var isEditingNote = false
+    @State private var noteDraft = ""
+    @FocusState private var noteFocused: Bool
+
+    init(item: Item) {
+        self.initialItem = item
+    }
+
+    /// [v25.536] 個人事件、里程碑一律讀 store 裡最新的那一份。
+    /// 以前卡片拿的是打開那一刻的副本：按「編輯」存檔、或改了備註，卡片還是舊的字（使用者回報）。
+    private var item: Item {
+        switch initialItem {
+        case .personalEvent(let e):
+            return lifeStore.personalEvents.first(where: { $0.id == e.id }).map { .personalEvent($0) } ?? initialItem
+        case .milestone(let m):
+            return lifeStore.milestones.first(where: { $0.id == m.id }).map { .milestone($0) } ?? initialItem
+        default:
+            return initialItem
+        }
+    }
+
+    /// 這一筆已經被刪掉了（在編輯頁按了刪除）：卡片沒東西可看，自己關掉
+    private var isRemoved: Bool {
+        switch initialItem {
+        case .personalEvent(let e): return !lifeStore.personalEvents.contains(where: { $0.id == e.id })
+        case .milestone(let m):     return !lifeStore.milestones.contains(where: { $0.id == m.id })
+        default:                    return false
+        }
+    }
+
+    /// 只有 App 自己的資料（個人事件、里程碑）能就地改備註；系統行事曆、生日紀念日是唯讀
+    private var canEditNote: Bool {
+        switch initialItem {
+        case .personalEvent, .milestone: return !isRemoved
+        default: return false
+        }
+    }
 
     private static let dtFmt: DateFormatter = {
         let f = DateFormatter(); f.locale = Locale(identifier: "zh_Hant_TW"); f.dateFormat = "yyyy/M/d (E) HH:mm"; return f
@@ -2382,7 +2422,7 @@ struct CalendarEventCard: View {
                 VStack(alignment: .leading, spacing: 16) {
                     titleBlock
                     if !fields.isEmpty { infoCard }
-                    if !noteText.isEmpty { noteBlock }
+                    if canEditNote || !noteText.isEmpty { noteBlock }
                     if case .appleEvent(_, _, _, let date) = item { openInCalendarButton(date) }
                 }
                 .padding()
@@ -2395,6 +2435,10 @@ struct CalendarEventCard: View {
                 ToolbarItem(placement: .topBarTrailing) { trailingButton }
             }
             .sheet(isPresented: $showEdit) { editor.appStores() }
+            .onChange(of: isRemoved) { _, gone in
+                // 晚一點關：編輯頁還在往下收，同時關卡片會被系統擋掉
+                if gone { DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { dismiss() } }
+            }
         }
     }
 
@@ -2583,13 +2627,116 @@ struct CalendarEventCard: View {
         }
     }
 
+    /// [v25.536] 備註：右邊一支小筆，點了原地變成輸入框＋取消／儲存，不用進整個編輯頁
+    ///（跟部屬任務卡片、項目卡的 InlineEditBlock 同一種用法，只是標頭留在卡片外面）
     private var noteBlock: some View {
         VStack(alignment: .leading, spacing: 8) {
-            cardSectionHeader("備註", icon: "note.text", tint: Color(.systemGray2))
-            Text(noteText).font(.subheadline).frame(maxWidth: .infinity, alignment: .leading)
+            HStack(spacing: 8) {
+                cardSectionHeader("備註", icon: "note.text", tint: Color(.systemGray2))
+                if canEditNote && !isEditingNote { notePencil }
+            }
+            noteBody
                 .padding()
                 .background(Color(.secondarySystemGroupedBackground))
                 .clipShape(RoundedRectangle(cornerRadius: 14))
+        }
+    }
+
+    private var notePencil: some View {
+        Button {
+            noteDraft = noteText
+            withAnimation(.spring(response: 0.32, dampingFraction: 0.85)) {
+                isEditingNote = true
+            }
+            noteFocused = true
+        } label: {
+            Image(systemName: "pencil.circle.fill")
+                .font(.system(size: 21))
+                .foregroundStyle(accent)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("修改備註")
+    }
+
+    @ViewBuilder
+    private var noteBody: some View {
+        if isEditingNote {
+            noteEditor
+        } else if noteText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            Text("還沒有備註，點右上的筆就能直接寫")
+                .font(.subheadline).italic()
+                .foregroundStyle(.tertiary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        } else {
+            Text(noteText)
+                .font(.subheadline)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .textSelection(.enabled)
+        }
+    }
+
+    private var noteEditor: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            TextField("備註", text: $noteDraft, axis: .vertical)
+                .lineLimit(3...14)
+                .font(.subheadline)
+                .focused($noteFocused)
+                .padding(8)
+                .background(Color(.tertiarySystemFill))
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+            HStack(spacing: 12) {
+                Spacer()
+                Button("取消") {
+                    withAnimation(.spring(response: 0.32, dampingFraction: 0.85)) {
+                        isEditingNote = false
+                    }
+                }
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .buttonStyle(.borderless)
+                Button {
+                    saveNote(noteDraft)
+                    withAnimation(.spring(response: 0.32, dampingFraction: 0.85)) {
+                        isEditingNote = false
+                    }
+                } label: {
+                    Text("儲存")
+                        .font(.subheadline.weight(.semibold))
+                        .padding(.horizontal, 16).padding(.vertical, 5)
+                        .background(accent, in: Capsule())
+                        .foregroundStyle(.white)
+                }
+                .buttonStyle(.borderless)
+            }
+        }
+    }
+
+    /// 寫回 store。個人事件跟編輯頁存檔走同一條路：有同步 Apple 行事曆的，那邊的備註一起改；
+    /// 提醒通知的內文會帶備註，所以提醒整批重排。
+    private func saveNote(_ raw: String) {
+        let new = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        switch initialItem {
+        case .personalEvent(let e):
+            guard let idx = lifeStore.personalEvents.firstIndex(where: { $0.id == e.id }),
+                  lifeStore.personalEvents[idx].note != new else { return }
+            var ev = lifeStore.personalEvents[idx]
+            ev.note = new
+            let bridge = AppleCalendarBridge.shared
+            if ev.syncToAppleCalendar, bridge.hasAccess,
+               let newId = bridge.writeOrUpdate(from: ev, calendarId: ev.appleCalendarId ?? bridge.defaultCalendarId) {
+                ev.ekEventIdentifier = newId
+            }
+            lifeStore.personalEvents[idx] = ev
+            let events = lifeStore.personalEvents
+            let subs = lifeStore.subordinates
+            let trips = lifeStore.tripPlans
+            Task { await ReminderCenter.rebuildAll(events: events, subordinates: subs, tripPlans: trips) }
+        case .milestone(let m):
+            guard let idx = lifeStore.milestones.firstIndex(where: { $0.id == m.id }),
+                  lifeStore.milestones[idx].note != new else { return }
+            lifeStore.milestones[idx].note = new
+        default:
+            break
         }
     }
 
