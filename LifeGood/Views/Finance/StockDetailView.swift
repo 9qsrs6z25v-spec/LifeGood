@@ -106,13 +106,11 @@ struct StockDetailView: View {
     /// [v25.304] 匯出前的「每頁項目數」對話框（共用 ExportPageSizeDialog）
     @State private var askExportPageSize = false
     @State private var showPremiumAlert = false
-    @State private var addingTransaction = false
-    /// [v25.528] 帳本「＋」選單選的是買進還是賣出
-    @State private var newTransactionKind: StockTransactionKind = .buy
+    /// [v25.532] 帳本「＋」選的是買進／賣出、配息／配股：跟「打開」綁在一起（sheet(item:)）。
+    /// 以前先改種類、再把 adding 設成 true，表單有時會帶到改之前的舊種類（按「賣出」卻出現買進）。
+    @State private var newTransaction: NewTransactionRequest?
     @State private var editingTransaction: StockTransaction?
-    @State private var addingDividend = false
-    /// [v25.528] 帳本「＋」選單選的是配息還是配股
-    @State private var newDividendKind: StockDividendKind = .cash
+    @State private var newDividend: NewDividendRequest?
     @State private var editingDividend: StockDividend?
     /// 一年份的日線（含開高低）：看板的股價山稜、價格位置、走勢的 K 線都用這一份
     @State private var dailyPoints: [StockDailyPoint] = []
@@ -273,14 +271,14 @@ struct StockDetailView: View {
                 AddStockView(editing: stock)
             }
             .sheet(item: $shareItem) { item in ShareSheet(items: item.items) }
-            .sheet(isPresented: $addingTransaction) {
-                StockTransactionEditor(stockId: stockId, editing: nil, initialKind: newTransactionKind)
+            .sheet(item: $newTransaction) { request in
+                StockTransactionEditor(stockId: stockId, editing: nil, initialKind: request.kind)
             }
             .sheet(item: $editingTransaction) { tx in
                 StockTransactionEditor(stockId: stockId, editing: tx)
             }
-            .sheet(isPresented: $addingDividend) {
-                StockDividendEditor(stockId: stockId, editing: nil, initialKind: newDividendKind)
+            .sheet(item: $newDividend) { request in
+                StockDividendEditor(stockId: stockId, editing: nil, initialKind: request.kind)
             }
             .sheet(item: $editingDividend) { div in
                 StockDividendEditor(stockId: stockId, editing: div)
@@ -327,12 +325,20 @@ struct StockDetailView: View {
         }
         switch kind {
         case .buy, .sell:
-            newTransactionKind = kind == .buy ? .buy : .sell
-            addingTransaction = true
+            newTransaction = NewTransactionRequest(kind: kind == .buy ? .buy : .sell)
         case .cash, .stock:
-            newDividendKind = kind == .cash ? .cash : .stock
-            addingDividend = true
+            newDividend = NewDividendRequest(kind: kind == .cash ? .cash : .stock)
         }
+    }
+
+    private struct NewTransactionRequest: Identifiable {
+        let id = UUID()
+        let kind: StockTransactionKind
+    }
+
+    private struct NewDividendRequest: Identifiable {
+        let id = UUID()
+        let kind: StockDividendKind
     }
 
     /// 點帳本的一筆：交易、股利開各自的編輯；沒有交易紀錄的舊資料開「編輯股票」

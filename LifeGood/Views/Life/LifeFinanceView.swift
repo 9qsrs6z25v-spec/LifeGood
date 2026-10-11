@@ -809,8 +809,9 @@ struct FinanceCardView: View {
     let milestoneId: UUID
     @State private var showEdit = false
     @State private var showDeleteConfirm = false
-    @State private var showAddDeposit = false
-    @State private var addDepositCurrency = "NT$"
+    /// [v25.532] 新增存款要帶哪個幣別：跟「打開」綁在一起（sheet(item:)）。以前是先改 addDepositCurrency、
+    /// 再把 showAddDeposit 設成 true，sheet 有時會用到改之前的舊幣別——選港幣卻跳出台幣，多按幾次才對。
+    @State private var addingDeposit: AddDepositRequest?
     @State private var editingDeposit: BankDeposit?
     @State private var viewingLinkedCard: LifeMilestone?
     @State private var depositsExpanded = false
@@ -921,8 +922,8 @@ struct FinanceCardView: View {
             .sheet(item: $viewingLinkedCard) { card in
                 FinanceCardView(milestoneId: card.id)
             }
-            .sheet(isPresented: $showAddDeposit) {
-                DepositEditorSheet(milestoneId: milestoneId, currency: addDepositCurrency, editing: nil)
+            .sheet(item: $addingDeposit) { request in
+                DepositEditorSheet(milestoneId: milestoneId, currency: request.currency, editing: nil)
             }
             .sheet(item: $editingDeposit) { dep in
                 DepositEditorSheet(milestoneId: milestoneId, currency: dep.currencyCode, editing: dep)
@@ -1636,11 +1637,11 @@ struct FinanceCardView: View {
                         .overlay(Capsule().stroke(Color.blue.opacity(0.22), lineWidth: 0.75))
                 }
                 Menu {
-                    Button { addDepositCurrency = "NT$"; showAddDeposit = true } label: {
+                    Button { addingDeposit = AddDepositRequest(currency: "NT$") } label: {
                         Label("台幣", systemImage: "dollarsign")
                     }
                     ForEach(expenseStore.currencyRates) { rate in
-                        Button { addDepositCurrency = rate.code; showAddDeposit = true } label: {
+                        Button { addingDeposit = AddDepositRequest(currency: rate.code) } label: {
                             Label(rate.code, systemImage: "coloncurrencysign")
                         }
                     }
@@ -2372,6 +2373,12 @@ struct FinanceCardView: View {
 }
 
 // MARK: - 存款編輯 Sheet
+
+/// 新增存款要用的幣別（每按一次就是新的一個，sheet(item:) 才會帶著這個幣別打開）
+struct AddDepositRequest: Identifiable {
+    let id = UUID()
+    let currency: String
+}
 
 struct DepositEditorSheet: View {
     @EnvironmentObject var lifeStore: LifeStore

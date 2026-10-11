@@ -200,8 +200,9 @@ private struct LaunchGate<Content: View>: View {
     // 記的是「已經看過哪一版的更新說明」，不是「上次開啟的版本」——使用者若在
     // 視窗還開著時把 App 殺掉，下次會再跳一次，不會有一版的內容就這樣錯過。
     @AppStorage("last_seen_changelog_version") private var lastSeenVersion = ""
-    @State private var whatsNew: [ChangelogEntry] = []
-    @State private var showWhatsNew = false
+    /// [v25.532] 要跳的更新說明跟「打開」綁在一起（sheet(item:)）：以前先填 whatsNew 再打開，
+    /// sheet 有時拿到改之前的空陣列，跳出一張空白的更新說明
+    @State private var whatsNewPayload: WhatsNewPayload?
 
     var body: some View {
         ZStack {
@@ -228,8 +229,8 @@ private struct LaunchGate<Content: View>: View {
                     }
             }
         }
-        .sheet(isPresented: $showWhatsNew) {
-            WhatsNewView(entries: whatsNew) { markWhatsNewSeen() }
+        .sheet(item: $whatsNewPayload) { payload in
+            WhatsNewView(entries: payload.entries) { markWhatsNewSeen() }
         }
     }
 
@@ -247,10 +248,10 @@ private struct LaunchGate<Content: View>: View {
                 lastSeenVersion = current
                 return
             }
-            whatsNew = Changelog.entries.filter {
+            let entries = Changelog.entries.filter {
                 Changelog.compareVersions($0.version, current) == .orderedSame
             }
-            if whatsNew.isEmpty { lastSeenVersion = current } else { showWhatsNew = true }
+            if entries.isEmpty { lastSeenVersion = current } else { whatsNewPayload = WhatsNewPayload(entries: entries) }
             return
         }
         let pending = Changelog.entries(after: lastSeenVersion, upTo: current)
@@ -260,8 +261,7 @@ private struct LaunchGate<Content: View>: View {
             lastSeenVersion = current
             return
         }
-        whatsNew = pending
-        showWhatsNew = true
+        whatsNewPayload = WhatsNewPayload(entries: pending)
     }
 
     /// 這台裝置上已經有資料＝是既有使用者，不是全新安裝。
@@ -278,8 +278,12 @@ private struct LaunchGate<Content: View>: View {
     /// 看完（按「開始使用」、「完成」或下拉關閉）就記下已讀。冪等。
     private func markWhatsNewSeen() {
         lastSeenVersion = Changelog.currentVersion
-        whatsNew = []
-        showWhatsNew = false
+        whatsNewPayload = nil
+    }
+
+    private struct WhatsNewPayload: Identifiable {
+        let id = UUID()
+        let entries: [ChangelogEntry]
     }
 }
 

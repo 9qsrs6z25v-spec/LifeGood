@@ -20,12 +20,18 @@ import Charts
 struct HealthView: View {
     @EnvironmentObject var lifeStore: LifeStore
 
+    private struct WorkoutEditorRequest: Identifiable {
+        let id = UUID()
+        let session: WorkoutSession?
+    }
+
     @StateObject private var health = HealthKitManager.shared
     @StateObject private var tracker = RunTracker.shared
 
-    @State private var showEditor = false
+    /// [v25.532] 要新增還是編輯哪一筆，跟「打開」綁在一起（sheet(item:)）：以前先改 editing 再打開，
+    /// 表單有時會帶到改之前的舊值——按某一筆的「編輯」卻打開空白的新增，或上一次編輯的那一筆。
+    @State private var editorRequest: WorkoutEditorRequest?
     @State private var showRun = false
-    @State private var editing: WorkoutSession?
     @State private var syncing = false
     @State private var syncMessage: String?
     /// [v25.388] 複製訓練後的短暫提示（複製出來的那一筆是「現在」，會直接跳到清單最上面，
@@ -204,11 +210,11 @@ struct HealthView: View {
                     }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button { editing = nil; showEditor = true } label: { Image(systemName: "plus") }
+                    Button { editorRequest = WorkoutEditorRequest(session: nil) } label: { Image(systemName: "plus") }
                 }
             }
-            .sheet(isPresented: $showEditor) {
-                WorkoutEditorView(session: editing) { saved in
+            .sheet(item: $editorRequest) { request in
+                WorkoutEditorView(session: request.session) { saved in
                     lifeStore.upsertWorkout(saved)
                     Task { await pushToHealthKit(saved) }
                 }
@@ -778,7 +784,7 @@ struct HealthView: View {
                         .foregroundStyle(accent)
                 }
                 Menu {
-                    Button("編輯") { editing = s; showEditor = true }
+                    Button("編輯") { editorRequest = WorkoutEditorRequest(session: s) }
                     Button("複製到現在") { duplicate(s) }
                     Divider()
                     Button("刪除", role: .destructive) { lifeStore.deleteWorkout(id: s.id) }

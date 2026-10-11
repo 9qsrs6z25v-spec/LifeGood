@@ -4,7 +4,7 @@ import SwiftUI
 //
 // 使用者：「接著我們來做理財介面，幫我仔細規劃完整」，看過規劃與樣稿：「就照你建議的吧，一次做完」。
 // 規劃裡要新算的數字都在這裡（看板在 FinanceBoards.swift，風景在 FinanceBoardScenes.swift）：
-// - 淨資產＝資產（全部換成台幣）− 貸款還要繳
+// - 淨資產＝資產（全部換成台幣）− 貸款還欠多少
 // - 每個月理財的現金流（進來：租金、股利；出去：房貸、保費、養車）
 // - 接下來 30 天要繳、要領的（保費、房貸、車貸與車子的稅費、保單滿期）
 // - 每個月的淨資產：從現在起每月記一筆；之前的月份回推，畫面上標「估算」
@@ -14,8 +14,11 @@ import SwiftUI
 //   編輯那天算的、之後不會更新，放兩年就停在兩年前。外幣保單一律換成台幣。
 //   已經滿期的保單不再算資產（錢已經領回去了）。
 // - 已經賣掉的車不算（FinanceStore.totalVehicleValue 連賣掉的也加進去）。
-// - 貸款「還要繳」＝剩下的期數 × 每期金額，含利息，所以淨資產會偏保守一點（畫面上有寫）。
-//   房地產的房貸期數、車子連結的車貸、記帳裡其他的貸款各算一次：連結到房子、車子的那幾筆
+// - [v25.532] 房貸算的是還欠銀行的本金（HouseFacts：用借款本金和每期金額反推，沒填借款本金時
+//   用購入價減自備款推算，畫面上寫「約」；連本金都推不出來才退回含利息的「還要繳」）。
+//   以前房貸也是含利息的還要繳，淨資產被利息多扣了一大截，跟房屋卡片上的數字也對不起來。
+// - 車貸、其他貸款仍是「還要繳」＝剩下的期數 × 每期金額，含利息，所以這部分會偏保守一點（畫面上有寫）。
+//   房子的房貸、車子連結的車貸、記帳裡其他的貸款各算一次：連結到房子、車子的那幾筆
 //   固定支出不會在「其他貸款」裡再算一次。
 
 // MARK: - 資產類別
@@ -83,12 +86,16 @@ struct FinanceSnapshot: Equatable {
     var savings: Double = 0
     var stock: Double = 0
     var vehicle: Double = 0
-    /// 房貸還要繳（房地產的貸款項目：剩下的期數 × 每期金額）
+    /// [v25.532] 房貸還欠多少（每間 HouseFacts.owed(at:)：本金；算不出本金的那間才是含利息的還要繳）
     var mortgage: Double = 0
     /// 車貸還要繳（車子連結的記帳固定支出）
     var carLoan: Double = 0
     /// 記帳裡其他的貸款（沒有連結到房子、車子的）
     var otherLoan: Double = 0
+    /// [v25.532] 有房子還欠的本金是推算的（購入價 − 自備款）：畫面寫「約」
+    var mortgageEstimated = false
+    /// [v25.532] 有房子算不出本金、退回含利息的還要繳：畫面寫「還要繳」
+    var mortgageScheduled = false
 
     var assets: Double { realEstate + savings + stock + vehicle }
     var debt: Double { mortgage + carLoan + otherLoan }
@@ -159,14 +166,6 @@ enum FinanceLoans {
         }
         return ids
     }
-
-    /// 房貸一個項目在 date 那天還剩幾期（還沒開始的那一段不算欠）
-    static func mortgagePeriodsLeft(_ m: RealEstateMortgageItem, at date: Date,
-                                    calendar cal: Calendar = .current) -> Int {
-        guard m.startDate <= date else { return 0 }
-        let months = cal.dateComponents([.month], from: m.startDate, to: date).month ?? 0
-        return max(0, m.totalPeriods - min(max(0, months), m.totalPeriods))
-    }
 }
 
 /// 掃一次記帳的支出，把貸款整理好：回推好幾年的每月淨資產時每個月都要用，不要每個月重掃
@@ -175,8 +174,16 @@ struct FinanceLoanIndex {
     let carLoans: [UUID: [Expense]]
     /// 沒有連結到房子、車子的貸款（「其他貸款」）
     let otherLoans: [Expense]
+    /// [v25.532] 房子 → 它的 HouseFacts（含已售出的）。每間只建一次，淨資產、現金流、接下來 30 天、
+    /// 每月回推都讀這一份，跟房屋卡片、看板同一套數字；回推每個月只查表（owed(at:)），不重算。
+    let houses: [UUID: HouseFacts]
 
-    init(finance f: FinanceStore, expense e: ExpenseStore) {
+    init(finance f: FinanceStore, expense e: ExpenseStore, now: Date = Date()) {
+        var h: [UUID: HouseFacts] = [:]
+        for re in f.realEstates {
+            h[re.id] = HouseFacts.build(re, expenses: e.expenses, now: now)
+        }
+        houses = h
         let byId = Dictionary(e.expenses.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
         let loans = e.expenses.filter { $0.isRecurringFixed && $0.fixedCategory == .loan }
         var car: [UUID: [Expense]] = [:]
@@ -184,7 +191,7 @@ struct FinanceLoanIndex {
             car[v.id] = FinanceLoans.carLoanIds(v, expenses: loans).compactMap { byId[$0] }
         }
         carLoans = car
-        // 連結到房子、車子的不算（房貸看房地產的貸款項目、車貸在 carLoans）
+        // 連結到房子、車子的不算（房貸在 houses、車貸在 carLoans）
         let linked = FinanceLoans.linkedExpenseIds(f)
         let realEstateIds = Set(f.realEstates.map(\.id))
         let vehicleIds = Set(f.vehicles.map(\.id))
@@ -213,16 +220,20 @@ extension FinanceSnapshot {
         let cal = Calendar.current
         let isNow = abs(date.timeIntervalSince(now)) < 60
         var s = FinanceSnapshot()
-        let loans = index ?? FinanceLoanIndex(finance: f, expense: e)
+        let loans = index ?? FinanceLoanIndex(finance: f, expense: e, now: now)
 
+        // [v25.532] 估值與還欠都讀 HouseFacts：估值沒填時用購入價（賣掉的用成交價），還欠看本金
         for re in f.realEstates {
             guard re.purchaseDate <= date else { continue }
             if let sold = re.soldDate, sold <= date { continue }
-            s.realEstate += isNow ? re.currentValue
-                : lerp(re.purchasePrice, re.currentValue, from: re.purchaseDate, to: re.soldDate ?? now, at: date)
-            for m in re.mortgageItems {
-                s.mortgage += Double(FinanceLoans.mortgagePeriodsLeft(m, at: date, calendar: cal)) * m.amount
-            }
+            let facts = loans.houses[re.id]
+            let value = facts?.value ?? re.currentValue
+            s.realEstate += isNow ? value
+                : lerp(re.purchasePrice, value, from: re.purchaseDate, to: re.soldDate ?? now, at: date)
+            let owed = facts?.owed(at: date, calendar: cal) ?? 0
+            s.mortgage += owed
+            if owed > 0, facts?.owedIsEstimate == true { s.mortgageEstimated = true }
+            if owed > 0, facts?.owedIsScheduled == true { s.mortgageScheduled = true }
         }
 
         for v in f.vehicles {
@@ -401,13 +412,17 @@ struct FinanceCashFlow: Equatable {
     var net: Double { inflow - outflow }
     var isEmpty: Bool { inflow <= 0 && outflow <= 0 }
 
-    static func build(finance f: FinanceStore, rates: FinanceRates, now: Date = Date()) -> FinanceCashFlow {
+    /// [v25.532] houses 是 FinanceLoanIndex.houses：房貸用 HouseFacts 的「這個月房貸」
+    /// （這個月有在繳的段，季繳年繳換算成每月），跟房屋卡片同一個數。以前把每期金額直接當月付，
+    /// 哪幾段在繳也是另一套期數規則。
+    static func build(finance f: FinanceStore, rates: FinanceRates, houses: [UUID: HouseFacts],
+                      now: Date = Date()) -> FinanceCashFlow {
         let cal = Calendar.current
         let yearAgo = cal.date(byAdding: .year, value: -1, to: now) ?? now
         var c = FinanceCashFlow()
         for re in f.realEstates where !re.isSold {
             c.rent += re.monthlyRental
-            c.mortgage += re.monthlyMortgage
+            c.mortgage += houses[re.id]?.monthlyMortgage ?? 0
         }
         for s in f.stocks {
             c.dividends += s.moneyCashDividends(from: yearAgo, to: now) / 12
@@ -458,8 +473,9 @@ struct FinanceUpcoming: Identifiable, Equatable {
         }
     }
 
-    static func build(finance f: FinanceStore, expense e: ExpenseStore, now: Date = Date(),
-                      days: Int = 30) -> [FinanceUpcoming] {
+    /// houses 是 FinanceLoanIndex.houses（房貸的扣款日、第幾期都讀它）
+    static func build(finance f: FinanceStore, expense e: ExpenseStore, houses: [UUID: HouseFacts],
+                      now: Date = Date(), days: Int = 30) -> [FinanceUpcoming] {
         let cal = Calendar.current
         let today = cal.startOfDay(for: now)
         guard let horizon = cal.date(byAdding: .day, value: days + 1, to: today) else { return [] }
@@ -488,27 +504,17 @@ struct FinanceUpcoming: Identifiable, Equatable {
             }
         }
 
-        // 房貸：有連結記帳固定支出就照那一筆的扣款日，沒有就從起始日每月一期
+        // [v25.532] 房貸：每一段的下一期讀 HouseFacts（跟房屋卡片、記帳固定支出同一套期數規則），
+        // 以前這裡自己用月份差展開，第幾期常跟卡片差一期
         for re in f.realEstates where !re.isSold {
-            for m in re.mortgageItems where m.isPayingNow || m.startDate >= today {
-                var due: Date?
-                if let id = m.linkedExpenseId, let ex = expenseById[id] {
-                    due = ex.nextFixedDueDate(onOrAfter: today, calendar: cal)
-                } else {
-                    let months = max(0, cal.dateComponents([.month], from: m.startDate, to: today).month ?? 0)
-                    for k in months...(months + 1) where k < m.totalPeriods {
-                        if let d = cal.date(byAdding: .month, value: k, to: m.startDate), d >= today {
-                            due = d
-                            break
-                        }
-                    }
-                }
-                guard let d = due, d < horizon else { continue }
-                let index = (cal.dateComponents([.month], from: m.startDate, to: d).month ?? 0) + 1
-                let name = m.title.trimmingCharacters(in: .whitespaces).isEmpty ? "房貸" : m.title
-                out.append(FinanceUpcoming(id: "r-\(m.id)", kind: .mortgage, title: re.name + " " + name,
-                                           detail: index <= m.totalPeriods ? "第 \(index)／\(m.totalPeriods) 期" : nil,
-                                           date: d, daysAway: away(d), amount: m.amount.ntdWanString, isIncome: false))
+            guard let facts = houses[re.id] else { continue }
+            for seg in facts.segments {
+                guard let next = seg.nextDue(onOrAfter: today, calendar: cal), next.date < horizon else { continue }
+                let d = next.date
+                let detail = "第 \(next.index)／\(seg.countedPeriods) 期"
+                out.append(FinanceUpcoming(id: "r-\(seg.id)", kind: .mortgage, title: re.name + " " + seg.displayTitle,
+                                           detail: detail, date: d, daysAway: away(d),
+                                           amount: seg.perPeriod.ntdWanString, isIncome: false))
             }
         }
 
@@ -544,10 +550,17 @@ enum FinanceHistory {
     /// 跟股票每週市值一樣放進 iCloud 同步（CloudSyncManager.syncKeys）：先拉後推，歷史只增不減
     static let key = "finance_month_records_v1"
 
+    /// [v25.532] 記下來的數字是哪一套口徑算的。v25.532 起房貸改算還欠的本金（之前是含利息的還要繳），
+    /// 舊紀錄的負債多了一大截利息；不分開的話，改版那個月淨資產會突然跳一階、「比上月」也會假漲。
+    /// 沒有這欄（舊紀錄，解碼是 nil）＝房貸含利息；2＝房貸算本金。
+    private static let currentBasis = 2
+
     private struct Record: Codable {
         let month: String
         let assets: Double
         let debt: Double
+        /// [v25.532] 口徑（見 currentBasis）；舊紀錄、舊版 App 同步過來的是 nil
+        let basis: Int?
     }
 
     private static let monthFmt: DateFormatter = {
@@ -569,8 +582,10 @@ enum FinanceHistory {
         guard s.assets > 0 || s.debt > 0 else { return }
         var map = load()
         let k = monthFmt.string(from: now)
-        if let old = map[k], abs(old.assets - s.assets) < 1, abs(old.debt - s.debt) < 1 { return }
-        map[k] = Record(month: k, assets: s.assets, debt: s.debt)
+        // [v25.532] 舊口徑的紀錄就算數字一樣也要重寫，才會換成新口徑
+        if let old = map[k], old.basis == currentBasis,
+           abs(old.assets - s.assets) < 1, abs(old.debt - s.debt) < 1 { return }
+        map[k] = Record(month: k, assets: s.assets, debt: s.debt, basis: currentBasis)
         var list = map.values.sorted { $0.month < $1.month }
         if list.count > 240 { list.removeFirst(list.count - 240) }
         if let data = try? JSONEncoder().encode(list) {
@@ -591,33 +606,42 @@ enum FinanceHistory {
     }
 
     /// 最近 months 個月，每月一點（最後一點是現在）。有存下來的用存下來的，沒有的回推。
+    /// [v25.532] index：呼叫端已經建好的就傳進來（HouseFacts 每間只建一次），沒傳才自己建。
     static func series(months: Int, finance f: FinanceStore, expense e: ExpenseStore, rates: FinanceRates,
-                       now: Date = Date()) -> [FinanceMonthPoint] {
+                       now: Date = Date(), index: FinanceLoanIndex? = nil) -> [FinanceMonthPoint] {
         let cal = Calendar.current
         guard months > 0, let thisMonth = cal.date(from: cal.dateComponents([.year, .month], from: now)) else {
             return []
         }
         let records = load()
         let weekly = StockValueHistory.load()
-        let index = FinanceLoanIndex(finance: f, expense: e)
+        let loans = index ?? FinanceLoanIndex(finance: f, expense: e, now: now)
         var out: [FinanceMonthPoint] = []
         for back in stride(from: months - 1, through: 0, by: -1) {
             guard let start = cal.date(byAdding: .month, value: -back, to: thisMonth) else { continue }
             if back == 0 {
-                let s = FinanceSnapshot.current(finance: f, expense: e, rates: rates, now: now, index: index)
+                let s = FinanceSnapshot.current(finance: f, expense: e, rates: rates, now: now, index: loans)
                 out.append(FinanceMonthPoint(month: start, assets: s.assets, debt: s.debt, recorded: true))
-                continue
-            }
-            if let r = records[monthFmt.string(from: start)] {
-                out.append(FinanceMonthPoint(month: start, assets: r.assets, debt: r.debt, recorded: true))
                 continue
             }
             guard let next = cal.date(byAdding: .month, value: 1, to: start) else { continue }
             let end = next.addingTimeInterval(-1)
+            if let r = records[monthFmt.string(from: start)] {
+                if r.basis == currentBasis {
+                    out.append(FinanceMonthPoint(month: start, assets: r.assets, debt: r.debt, recorded: true))
+                    continue
+                }
+                // [v25.532] 舊口徑（房貸含利息）：資產照存的，負債用現在這套重算那個月月底，
+                // 改版那個月才不會跳一階、「比上月」也不會因為少扣利息而假漲
+                let redo = FinanceSnapshot.compute(finance: f, expense: e, rates: rates, at: end, now: now,
+                                                   stockValue: nil, index: loans)
+                out.append(FinanceMonthPoint(month: start, assets: r.assets, debt: redo.debt, recorded: true))
+                continue
+            }
             // 股票：那個月底前 45 天內有每週市值紀錄就用，沒有就用持股成本
             let stockValue = weekly.last { $0.weekStart <= end && $0.weekStart > end.addingTimeInterval(-45 * 86_400) }?.value
             let s = FinanceSnapshot.compute(finance: f, expense: e, rates: rates, at: end, now: now,
-                                            stockValue: stockValue, index: index)
+                                            stockValue: stockValue, index: loans)
             out.append(FinanceMonthPoint(month: start, assets: s.assets, debt: s.debt, recorded: false))
         }
         return out
