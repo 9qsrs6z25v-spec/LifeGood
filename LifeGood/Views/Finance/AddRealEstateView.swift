@@ -80,7 +80,8 @@ struct AddRealEstateView: View {
     let editing: RealEstate?
     /// [v25.534] 打開後要捲到哪一欄（.none＝不捲）
     var focus: HouseEditFocus = .none
-    private let stableEstateId: UUID
+    /// [v25.538] 用 @State 存（同 AddVehicleView）：sheet 重新 init 時新增流程的 id 不能換掉
+    @State private var stableEstateId: UUID
     @State private var hasAutoSaved: Bool
     /// [v25.534] 捲到 focus 那一欄只做一次（從子頁回來 onAppear 會再跑）
     @State private var didApplyFocus = false
@@ -92,7 +93,7 @@ struct AddRealEstateView: View {
     init(editing: RealEstate? = nil, focus: HouseEditFocus = .none) {
         self.editing = editing
         self.focus = focus
-        self.stableEstateId = editing?.id ?? UUID()
+        _stableEstateId = State(initialValue: editing?.id ?? UUID())
         _hasAutoSaved = State(initialValue: editing != nil)
     }
 

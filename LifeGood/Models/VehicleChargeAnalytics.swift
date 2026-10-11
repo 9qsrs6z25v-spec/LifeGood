@@ -39,22 +39,31 @@ struct VehicleChargeAnalytics {
     let sessions: [Session]                 // 時間升冪
     let capacityKWh: Double?                // 原廠標稱
     let hasHomeKeyword: Bool                // 有沒有設定家充關鍵字
+    /// [v25.538] 一段區間「每度跑幾公里」的合理上限：超過就是中間漏記了充電（見 intervals）
+    let maxKmPerKwh: Double
 
     // MARK: 建構
 
     /// - Parameters:
     ///   - expenses: 已經篩到「這台車 × 電費 × 有度數」的支出
     ///   - homeKeyword: 家充地點關鍵字（nil／空＝沒設定，全部視為非家充）
-    init(expenses: [Expense], capacityKWh: Double?, homeKeyword: String?) {
+    ///   - powerType: [v25.538] 這台車的動力，用來挑每度里程的上限（電動機車 60、其他 12）。
+    ///     沒傳的舊呼叫端先用寬的 60：寧可少擋幾段，也不要把電動機車正常的區間全部擋掉
+    init(expenses: [Expense], capacityKWh: Double?, homeKeyword: String?,
+         powerType: VehiclePowerType? = nil) {
         let key = (homeKeyword ?? "").trimmingCharacters(in: .whitespaces).lowercased()
         self.hasHomeKeyword = !key.isEmpty
         self.capacityKWh = (capacityKWh ?? 0) > 0 ? capacityKWh : nil
+        self.maxKmPerKwh = (powerType == nil || powerType == .electricMotorcycle) ? 60 : 12
         self.sessions = expenses
             .sorted { $0.date < $1.date }
             .map { e in
                 let place = (e.placeName ?? e.placeAddress ?? "")
                     .trimmingCharacters(in: .whitespacesAndNewlines)
-                let home = !key.isEmpty && place.lowercased().contains(key)
+                // [v25.538] 只有一個字的關鍵字（例如「家」）用包含會把「全家」「家樂福」的充電站都當成家充，
+                // 家充佔比、家充電價、電池健康分組全被污染：一個字只認地點完全等於它，兩個字以上照舊用包含
+                let lowered = place.lowercased()
+                let home = !key.isEmpty && (key.count == 1 ? lowered == key : lowered.contains(key))
                 return Session(id: e.id, date: e.date, kwh: e.evKwh ?? 0, cost: e.amount,
                                fromPct: e.evFromPct, toPct: e.evToPct,
                                odometer: (e.evOdometer ?? 0) > 0 ? e.evOdometer : nil,
@@ -266,19 +275,29 @@ struct VehicleChargeAnalytics {
         var costPerKm: Double { km > 0 ? cost / km : 0 }
     }
 
-    /// 里程差 ≤0（誤填／換過錶）或 >2000km（中間漏記太多次）的區間剔除。
-    var intervals: [Interval] {
+    /// 相鄰兩筆里程錶讀數。里程差 ≤0（誤填／換過錶）或 >2000km（中間漏記太多次）的剔除。
+    private var odometerSteps: [(from: Session, to: Session, km: Double)] {
         let withOdo = sessions.filter { $0.odometer != nil }
         guard withOdo.count >= 2 else { return [] }
-        var out: [Interval] = []
+        var out: [(from: Session, to: Session, km: Double)] = []
         for i in 1..<withOdo.count {
             let prev = withOdo[i - 1], cur = withOdo[i]
             guard let a = prev.odometer, let b = cur.odometer else { continue }
             let km = b - a
-            guard km > 0, km <= 2000, cur.kwh > 0 else { continue }
-            out.append(Interval(id: cur.id, date: cur.date, km: km, kwh: cur.kwh, cost: cur.cost))
+            guard km > 0, km <= 2000 else { continue }
+            out.append((from: prev, to: cur, km: km))
         }
         return out
+    }
+
+    /// [v25.538] 再加一道合理性門檻：里程 ÷ 後一筆度數超過 maxKmPerKwh（汽車 12、電動機車 60）的區間不算。
+    /// 中間漏記一兩次充電時，一段 800 公里只算到後一筆的 25 度，會寫出「每度跑 32 公里」，續航推估跟著錯。
+    var intervals: [Interval] {
+        odometerSteps.compactMap { s -> Interval? in
+            let cur = s.to
+            guard cur.kwh > 0, s.km / cur.kwh <= maxKmPerKwh else { return nil }
+            return Interval(id: cur.id, date: cur.date, km: s.km, kwh: cur.kwh, cost: cur.cost)
+        }
     }
 
     var totalTrackedKm: Double { intervals.reduce(0) { $0 + $1.km } }
@@ -321,12 +340,17 @@ struct VehicleChargeAnalytics {
 
     /// 年化里程：用有紀錄的區間跨度推一年開多少。跨度不足 30 天就不推——
     /// 拿兩週的資料乘 26 倍是在編故事。
+    /// [v25.538] 以前分母從第一段的「結束日」算起，少算了第一段的天數，年里程被高估。
+    /// 改成每段都從前一筆里程錶讀數那天算到後一筆；每段都正常時就是「第一筆到最後一筆讀數的日期差」。
+    /// 里程用里程錶相鄰讀數（不套每度里程門檻）：漏記充電只會讓電耗算不準，那段路還是真的開了；
+    /// 被剔除的段（倒退、跳太多）連天數一起拿掉，分子分母才對得上。
     var annualizedKm: Double? {
-        guard let first = intervals.first?.date, let last = intervals.last?.date,
-              totalTrackedKm > 0 else { return nil }
-        let days = last.timeIntervalSince(first) / 86400
-        guard days >= 30 else { return nil }
-        return totalTrackedKm / days * 365
+        let steps = odometerSteps
+        let km: Double = steps.reduce(0) { $0 + $1.km }
+        let seconds: Double = steps.reduce(0) { $0 + $1.to.date.timeIntervalSince($1.from.date) }
+        let days = seconds / 86400
+        guard km > 0, days >= 30 else { return nil }
+        return km / days * 365
     }
 
     // MARK: - F. 續航推估（需要原廠標稱 + 電耗）

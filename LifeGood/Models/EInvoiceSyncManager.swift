@@ -230,6 +230,9 @@ final class EInvoiceSyncManager: ObservableObject {
             for name in expense.photoFileNames { Expense.deletePhoto(name) }
         }
         expenseStore.expenses.removeAll { idsToRemove.contains($0.id) }
+        // [v25.538] 匯入的支出後來改連到車子、再撤銷時，車子身上指到它的鏡像也要拿掉，
+        // 不然留成孤兒，車子照樣把這筆算進花費（直接改 expenses 不會經過 ExpenseStore.delete）
+        VehicleMirrors.removeMirrors(of: idsToRemove)
         importHistory.removeAll { $0.id == record.id }
         persistHistory()
     }

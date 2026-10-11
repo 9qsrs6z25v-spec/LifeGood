@@ -173,6 +173,9 @@ struct AddExpenseView: View {
     @State private var evFromText = ""
     @State private var evToText = ""
     @State private var evOdoText = ""
+    /// [v25.538] 上一次自動填進名稱欄的「車名-分類名」。名稱還是它（或空白）才跟著連結換；
+    /// 你自己打過的就不動（決定 19：名稱可以自己打，不再鎖住）
+    @State private var autoVehicleTitle: String?
 
     // 股票（新增投資）
     @State private var stockName = ""
@@ -253,7 +256,52 @@ struct AddExpenseView: View {
     private var isMortgage: Bool { isLoan && selectedLoanSubCategory == .mortgage }
     private var isCarLoan: Bool { isLoan && selectedLoanSubCategory == .car }
     private var showLoanCalcFields: Bool { isCarLoan || isMortgage }
-    private var showFixedAssetLink: Bool { expenseType == .fixed && !isInsurance && !isLoan }
+    /// [v25.538] 強制險、綜合險可以連到車（決定 8）：以前保險整個看不到關聯資產，車險永遠進不了車子的帳
+    private var isVehicleInsurance: Bool {
+        isInsurance && (selectedInsuranceSubCategory == .compulsory || selectedInsuranceSubCategory == .comprehensive)
+    }
+    private var showFixedAssetLink: Bool { expenseType == .fixed && !isLoan && (!isInsurance || isVehicleInsurance) }
+    /// [v25.538] 車險只能選「無」或「汽車」；其他固定支出照舊四種都能選
+    private var fixedAssetLinkOptions: [FixedAssetLinkType] {
+        isInsurance ? [.none, .vehicle] : FixedAssetLinkType.allCases
+    }
+    /// 實際算數的關聯資產：從別的分類切到車險時，原本選的房地產／儲蓄險不適用，當成「無」
+    private var effectiveFixedAssetLink: FixedAssetLinkType {
+        fixedAssetLinkOptions.contains(selectedFixedAssetLink) ? selectedFixedAssetLink : .none
+    }
+    private var fixedAssetLinkSelection: Binding<FixedAssetLinkType> {
+        Binding(get: { effectiveFixedAssetLink }, set: { selectedFixedAssetLink = $0 })
+    }
+
+    /// [v25.538] 變動支出算不算連到車：關聯資產是汽車，而且分類還是「汽車」。
+    /// 基本模式看不到關聯資產，選了車又把分類改成別的，就當不連（分類鈕會順手放掉車子，改回汽車再接上）。
+    private var variableVehicleLinked: Bool {
+        expenseType == .variable && selectedAssetLink == .vehicle && selectedVariableCategory == .vehicle
+    }
+
+    /// [v25.538] 照表單「現在」的狀態，這筆存完要連到哪台車（nil＝不連）。
+    /// 以前只有「選了車」才會改連結：關聯資產改成「無」或別的資產、車貸改成信貸／房貸時
+    /// 照樣連著舊車。存檔、預設名稱、名稱欄要不要出現都看這一個。
+    private var targetVehicleId: UUID? {
+        let id: UUID?
+        if expenseType == .variable {
+            id = variableVehicleLinked ? selectedVehicleId : nil
+        } else if isCarLoan {
+            id = selectedVehicleId
+        } else if showFixedAssetLink && effectiveFixedAssetLink == .vehicle {
+            id = fixedLinkVehicleId
+        } else {
+            id = nil
+        }
+        // 車子已經不在了就當沒連，不留一個指向不存在車子的連結
+        guard let vid = id, financeStore.vehicles.contains(where: { $0.id == vid }) else { return nil }
+        return vid
+    }
+
+    /// [v25.538] 從車子帶進來、要直接顯示車輛區（度數、電量、里程錶）的（AddExpensePreset.showVehicleSection）
+    private var presetShowsVehicleSection: Bool {
+        editingExpense == nil && preset?.showVehicleSection == true
+    }
     /// 是否為飲食類變動支出（決定要不要顯示餐廳自動完成）
     private var isFoodVariable: Bool {
         expenseType == .variable && selectedVariableCategory == .food
@@ -279,6 +327,7 @@ struct AddExpenseView: View {
     /// [v25.365] 汽車變動支出的「名稱」欄會被 linkedAssetTitle（項目 N：型號-類別）
     /// 佔用並轉為唯讀，店名沒地方放，因此改成獨立的一列「地點」，
     /// 文字存進 Expense.placeName 而不是 title。
+    /// [v25.538] 名稱改成可以自己打了，地點仍放這一列（舊資料的店名都在 placeName）。
     private var usesSeparatePlaceField: Bool {
         expenseType == .variable && selectedVariableCategory == .vehicle
     }
@@ -397,6 +446,10 @@ struct AddExpenseView: View {
                     if !suppressCategory {
                         categorySection
                     }
+                    // [v25.538] 基本模式看不到關聯資產，選了「汽車」以前沒地方選車，存成哪張車卡都看不到的支出
+                    if !advancedMode && selectedVariableCategory == .vehicle {
+                        basicVehicleArea
+                    }
                     // [v25.424] 旅遊期間的花費可以直接掛到那一趟行程上
                     if showTripLinkSection { tripLinkSection }
                     // 進階模式：分類區塊下方加照片廊
@@ -407,9 +460,9 @@ struct AddExpenseView: View {
                     // 固定支出：先選關聯資產（若適用），再選分類
                     if showFixedAssetLink {
                         fixedAssetLinkSection
-                        if selectedFixedAssetLink == .vehicle { fixedVehicleLinkSection }
-                        if selectedFixedAssetLink == .realEstate { fixedRealEstateLinkSection }
-                        if selectedFixedAssetLink == .insurance { fixedInsuranceLinkSection }
+                        if effectiveFixedAssetLink == .vehicle { fixedVehicleLinkSection }
+                        if effectiveFixedAssetLink == .realEstate { fixedRealEstateLinkSection }
+                        if effectiveFixedAssetLink == .insurance { fixedInsuranceLinkSection }
                     }
                     categorySection
                 }
@@ -502,8 +555,9 @@ struct AddExpenseView: View {
                 loadEditing()
                 applyPreset()
                 // 依進階開關決定初始 sheet 高度（須在 loadEditing 後再算，因為它可能會打開進階模式）
+                // [v25.538] 從車子帶進來要直接顯示車輛區的，也一開始就拉滿，不然度數那幾欄在半屏下面看不到
                 if expenseType == .variable {
-                    sheetDetent = advancedMode ? .large : .height(440)
+                    sheetDetent = (advancedMode || presetShowsVehicleSection) ? .large : .height(440)
                 }
             }
             // [v25.479] 換分類不該把已經選好的地點丟掉。
@@ -554,32 +608,21 @@ struct AddExpenseView: View {
             String(describing: selectedFixedAssetLink),
             String(describing: fixedLinkVehicleId),
             String(describing: selectedFixedCategory),
-            String(describing: selectedLoanSubCategory)
+            String(describing: selectedLoanSubCategory),
+            // [v25.538] 基本模式把分類從「汽車」改走就不連車了（variableVehicleLinked），預設名稱要跟著換
+            String(describing: selectedVariableCategory)
         ].joined(separator: "|")
     }
 
-    /// 若此筆支出連結到理財模式中的具體項目（車輛/房地產），回傳自動生成的名稱「項目 N：型號-類別」。
+    /// 若此筆支出連結到理財模式中的房地產，回傳自動生成的名稱「項目 N：型號-類別」（唯讀）。
+    /// [v25.538] 車子不再走這裡（決定 19）：名稱可以自己打，空白才用 vehicleDefaultTitle。
     private var linkedAssetTitle: String? {
-        // 變動支出 - 汽車
-        if expenseType == .variable, selectedAssetLink == .vehicle,
-           let id = selectedVehicleId,
-           let vehicle = financeStore.vehicles.first(where: { $0.id == id }) {
-            let n = itemNumber(in: vehicle.variableExpenses) { $0.linkedExpenseId }
-            return "項目 \(n)：\(vehicle.name)-\(selectedVehicleExpenseCategory.rawValue)"
-        }
         // 變動支出 - 房地產
         if expenseType == .variable, selectedAssetLink == .realEstate,
            let id = selectedRealEstateLinkId,
            let re = financeStore.realEstates.first(where: { $0.id == id }) {
             let n = itemNumber(in: re.variableExpenses) { $0.linkedExpenseId }
             return "項目 \(n)：\(re.name)-\(selectedRealEstateExpenseCategory.rawValue)"
-        }
-        // 固定支出 - 車貸
-        if isCarLoan,
-           let id = selectedVehicleId,
-           let vehicle = financeStore.vehicles.first(where: { $0.id == id }) {
-            let n = itemNumber(in: vehicle.fixedExpenses) { $0.linkedExpenseId }
-            return "項目 \(n)：\(vehicle.name)-車貸"
         }
         // 固定支出 - 房貸（連動既有物件）
         if isMortgage, mortgageLinkExisting,
@@ -599,14 +642,26 @@ struct AddExpenseView: View {
             }
             return "【\(re.name)】貸款\(n)-\(mortgageName)"
         }
-        // 固定支出 - 一般類別連結汽車
-        if expenseType == .fixed, showFixedAssetLink, selectedFixedAssetLink == .vehicle,
-           let id = fixedLinkVehicleId,
-           let vehicle = financeStore.vehicles.first(where: { $0.id == id }) {
-            let n = itemNumber(in: vehicle.fixedExpenses) { $0.linkedExpenseId }
-            return "項目 \(n)：\(vehicle.name)-\(selectedFixedCategory.rawValue)"
-        }
         return nil
+    }
+
+    /// [v25.538] 連到車子的記帳，名稱空白時用的「車名-分類名」（決定 19）。
+    /// 不再加「項目 N」：N 是鏡像的位置，刪掉中間一筆新舊就撞號，打開編輯還會重新編號蓋掉名稱。
+    /// 車險不套（決定 8），名稱照你打的。
+    private var vehicleDefaultTitle: String? {
+        guard !isInsurance, let id = targetVehicleId,
+              let vehicle = financeStore.vehicles.first(where: { $0.id == id }) else { return nil }
+        if expenseType == .variable { return "\(vehicle.name)-\(selectedVehicleExpenseCategory.rawValue)" }
+        if isCarLoan { return "\(vehicle.name)-車貸" }
+        return "\(vehicle.name)-\(selectedFixedCategory.rawValue)"
+    }
+
+    /// 舊版的自動名稱：「項目 N：車名-分類」（N 是數字），或房貸的「【房名】貸款N-…」
+    private static func isLegacyAutoTitle(_ t: String) -> Bool {
+        if t.hasPrefix("【") && t.contains("】貸款") { return true }
+        guard t.hasPrefix("項目 "), let colon = t.firstIndex(of: "：") else { return false }
+        let digits = t[t.index(t.startIndex, offsetBy: 3)..<colon]
+        return !digits.isEmpty && digits.allSatisfy { $0.isNumber }
     }
 
     private func itemNumber<T>(in items: [T], idExtractor: (T) -> UUID?) -> Int {
@@ -620,9 +675,24 @@ struct AddExpenseView: View {
     private func applyAutoTitleIfLinked() {
         // 先比對再寫入，避免 isMortgage 時每次 note 打字都重新賦值 @State title，
         // 造成金額/標題區塊不必要的 body 重新 diff
-        if let auto = linkedAssetTitle, auto != title {
-            title = auto
+        if let auto = linkedAssetTitle {
+            if auto != title { title = auto }
+            return
         }
+        // [v25.538] 車子（決定 19）：名稱是你的。只有空白、還是上次自動填的、
+        // 或（連著車時）舊版的「項目 N：…」，才換成現在的「車名-分類名」；不連車了就清回空白
+        let current = title.trimmingCharacters(in: .whitespaces)
+        let def = vehicleDefaultTitle
+        let isAuto = current.isEmpty || current == autoVehicleTitle || current == def
+            || (def != nil && Self.isLegacyAutoTitle(current))
+        guard isAuto else { return }
+        let next = def ?? ""
+        if title != next {
+            // 名稱欄同時是地點欄（飲食等）時，這是我們改的、不是你打的：別因此清掉選好的地點或去搜尋
+            if showsInlinePlacePicker { suppressNextCompleterUpdate = true }
+            title = next
+        }
+        if autoVehicleTitle != def { autoVehicleTitle = def }
     }
 
     // MARK: - 基本資訊
@@ -697,7 +767,7 @@ struct AddExpenseView: View {
                 } else if showsInlinePlacePicker {
                     placeNameAutocomplete
                 } else {
-                    TextField(expenseType == .variable ? "名稱（留空自動以分類為名）" : "名稱", text: $title)
+                    TextField(namePlaceholder, text: $title)
                 }
                 // 快速選取膠囊模板：同分類最近用過的品名（用餐/醫療/娛樂等全分類適用），
                 // 點一下帶入名稱欄；放在 if/else 之外讓地點選擇器分支（用餐/娛樂）也吃得到
@@ -769,8 +839,16 @@ struct AddExpenseView: View {
 
     /// 是否顯示名稱欄位：進階模式 / 固定支出 / 已連結資產 / 飲食類別（要選店家）都顯示。
     /// 汽車的地點是獨立一列（usesSeparatePlaceField），不因此多開一個名稱欄。
+    /// [v25.538] 連到車子時名稱欄可以自己打，也要在基本模式看得到（以前是唯讀的自動名稱）
     private var showNameField: Bool {
         expenseType == .fixed || advancedMode || linkedAssetTitle != nil || showsInlinePlacePicker
+            || targetVehicleId != nil
+    }
+
+    /// 名稱欄的提示字：連到車子時寫出留空會用的名稱（決定 19）
+    private var namePlaceholder: String {
+        if let def = vehicleDefaultTitle { return "名稱（留空自動用「\(def)」）" }
+        return expenseType == .variable ? "名稱（留空自動以分類為名）" : "名稱"
     }
 
     /// 是否顯示扣款目標選單
@@ -2087,6 +2165,14 @@ struct AddExpenseView: View {
                         withAnimation(.spring(response: 0.28, dampingFraction: 0.72)) {
                             selectedVariableCategory = cat
                         }
+                        // [v25.538] 基本模式選「汽車」：幫你選好車（剛選過的那台、或只有一台車時）。
+                        // 改選別的分類就連車子一起放掉：不然切到進階模式會看到「關聯汽車」、分類被藏起來，
+                        // 存下去卻是沒連車的另一個分類（targetVehicleId 要分類是汽車）。
+                        if cat == .vehicle {
+                            autoPickOnlyVehicle()
+                        } else if selectedAssetLink == .vehicle {
+                            selectedAssetLink = .none
+                        }
                     } label: {
                         HStack(spacing: 5) {
                             Image(systemName: cat.icon)
@@ -2588,8 +2674,72 @@ struct AddExpenseView: View {
             if selectedVehicleExpenseCategory == .electricity {
                 Text("充電度數、電量 % 與里程錶皆選填。填度數→每度電價；填電量 %→推估電池容量；連續兩筆都填里程錶→電耗（km/kWh）與每公里電費。車輛卡片會顯示 KPI 與趨勢圖。")
             } else {
-                Text("選擇後分類自動設為「汽車」並隱藏分類區塊，名稱自動生成為「項目 N：型號-支出類別」並轉為唯讀。支出類別會依照車輛動力類型自動篩選。")
+                Text("選擇後分類自動設為「汽車」；名稱留空時自動用「車名-支出類別」，也可以自己打。支出類別會依照車輛動力類型自動篩選。")
             }
+        }
+    }
+
+    /// [v25.538] 基本模式選了「汽車」：從車子帶進來要直接記度數的（showVehicleSection）給整個車輛區，
+    /// 其他情況給一列選車＋支出類別
+    @ViewBuilder
+    private var basicVehicleArea: some View {
+        if presetShowsVehicleSection && selectedAssetLink == .vehicle {
+            vehicleLinkSection
+        } else if !financeStore.vehicles.isEmpty {
+            basicVehiclePickerSection
+        }
+    }
+
+    private var basicVehiclePickerSection: some View {
+        Section {
+            Picker("選擇車輛", selection: basicVehicleSelection) {
+                Text("請選擇").tag(nil as UUID?)
+                ForEach(financeStore.vehicles) { v in
+                    Text("\(v.name)\(!v.brand.isEmpty ? " (\(v.brand))" : "")").tag(v.id as UUID?)
+                }
+            }
+            if let v = financeStore.vehicles.first(where: { $0.id == targetVehicleId }) {
+                Picker("支出類別", selection: $selectedVehicleExpenseCategory) {
+                    ForEach(VehicleVariableCategory.categories(for: v.powerType)) { cat in
+                        Label(cat.rawValue, systemImage: cat.icon).tag(cat)
+                    }
+                }
+            }
+        } header: {
+            sectionHeader(title: "汽車（連動理財模式）", accentColor: .teal)
+        } footer: {
+            Text("選了車，這筆才會算進那台車。")
+        }
+    }
+
+    /// 基本模式的選車：選了車就等於關聯資產選「汽車」（切到進階模式看到的是同一份），選「請選擇」就不連
+    private var basicVehicleSelection: Binding<UUID?> {
+        Binding(
+            get: { selectedAssetLink == .vehicle ? selectedVehicleId : nil },
+            set: { pickVehicle($0) }
+        )
+    }
+
+    private func pickVehicle(_ id: UUID?) {
+        selectedVehicleId = id
+        selectedAssetLink = id == nil ? .none : .vehicle
+        // 同 vehicleLinkSection 的 onChange：原本的支出類別不適用新車的動力類型（油錢 vs 電車）就改成第一個可用的
+        guard let vid = id, let v = financeStore.vehicles.first(where: { $0.id == vid }) else { return }
+        let cats = VehicleVariableCategory.categories(for: v.powerType)
+        if !cats.contains(selectedVehicleExpenseCategory), let first = cats.first {
+            selectedVehicleExpenseCategory = first
+        }
+    }
+
+    /// 基本模式選「汽車」時幫你選車（已經連著車就不動）：分類切走又切回來的，接回剛剛那台；
+    /// 不然只有一台車就直接選它
+    private func autoPickOnlyVehicle() {
+        guard !advancedMode, expenseType == .variable,
+              selectedAssetLink != .vehicle || selectedVehicleId == nil else { return }
+        if let vid = selectedVehicleId, financeStore.vehicles.contains(where: { $0.id == vid }) {
+            pickVehicle(vid)
+        } else if financeStore.vehicles.count == 1, let only = financeStore.vehicles.first {
+            pickVehicle(only.id)
         }
     }
 
@@ -3029,8 +3179,9 @@ struct AddExpenseView: View {
 
     private var fixedAssetLinkSection: some View {
         Section {
-            Picker("關聯資產", selection: $selectedFixedAssetLink) {
-                ForEach(FixedAssetLinkType.allCases) { type in
+            // [v25.538] 車險只列「無」「汽車」（fixedAssetLinkOptions）
+            Picker("關聯資產", selection: fixedAssetLinkSelection) {
+                ForEach(fixedAssetLinkOptions) { type in
                     Text(type.rawValue).tag(type)
                 }
             }
@@ -3101,6 +3252,12 @@ struct AddExpenseView: View {
     private func saveExpense() {
         guard !isSaving else { return }
         var trimmedTitle = title.trimmingCharacters(in: .whitespaces)
+
+        // [v25.538] 連到車子、名稱空白：用「車名-分類名」（決定 19；車險不套，見 vehicleDefaultTitle）
+        if trimmedTitle.isEmpty, let def = vehicleDefaultTitle {
+            trimmedTitle = def
+            title = def
+        }
 
         // 變動支出：名稱留空時以分類名稱當預設（讓基本模式更省事）
         if expenseType == .variable && trimmedTitle.isEmpty {
@@ -3197,37 +3354,44 @@ struct AddExpenseView: View {
                 }
             }
         }
-        if isCarLoan, let vehicleId = selectedVehicleId {
-            linkedVehId = vehicleId
-            syncCarLoanToVehicle(vehicleId: vehicleId, expenseId: expenseId, amount: amount)
-            // 編輯時把車貸改連到另一輛車：清掉舊車輛殘留的那筆 fixedExpenses，
-            // 避免舊車輛留下孤兒車貸紀錄、金額不再隨這筆支出更新。
-            if let oldVehicleId = editingExpense?.linkedVehicleId, oldVehicleId != vehicleId,
-               var oldVehicle = financeStore.vehicles.first(where: { $0.id == oldVehicleId }) {
-                oldVehicle.fixedExpenses.removeAll { $0.linkedExpenseId == expenseId }
-                financeStore.update(oldVehicle)
+        // [v25.538] 車子的連結一律照表單「現在」的狀態（targetVehicleId），不再沿用舊值：
+        // 以前關聯資產改成「無」或別的資產、車貸改成信貸／房貸時照樣連著舊車、鏡像也留著，
+        // 油錢改成交通後車子照算，信貸被 carLoanIds 當成車貸。
+        let targetVehId = targetVehicleId
+        // 車險只寫 linkedVehicleId、不寫鏡像（決定 8：舊畫面會把它標成「稅費」）
+        let writesVehicleMirror = targetVehId != nil && !isInsurance
+        // 先清再寫：不該有鏡像、或鏡像掛在別台車上，先把每台車身上指到這筆的拿掉，
+        // 再照原本流程同步到新車。順序反過來會把剛寫進新車的那份一起刪掉。
+        // 同一台車就不清，鏡像原地更新（列的位置、id 不變）。
+        func hasMirror(_ v: Vehicle) -> Bool {
+            v.fixedExpenses.contains { $0.linkedExpenseId == expenseId }
+                || v.variableExpenses.contains { $0.linkedExpenseId == expenseId }
+        }
+        let hasStrayMirror = financeStore.vehicles.contains { v in
+            hasMirror(v) && (!writesVehicleMirror || v.id != targetVehId)
+        }
+        if hasStrayMirror {
+            VehicleMirrors.removeMirrors(of: [expenseId], financeStore: financeStore)
+        }
+        linkedVehId = targetVehId
+        if writesVehicleMirror, let vehicleId = targetVehId {
+            if expenseType == .variable {
+                syncVehicleVariableExpense(vehicleId: vehicleId, expenseId: expenseId, amount: amount)
+            } else if isCarLoan {
+                syncCarLoanToVehicle(vehicleId: vehicleId, expenseId: expenseId, amount: amount)
+            } else {
+                syncFixedToVehicle(vehicleId: vehicleId, expenseId: expenseId, amount: amount)
             }
         }
 
-        // 固定支出一般類別關聯資產
+        // 固定支出一般類別關聯資產（汽車在上面統一處理）
         if showFixedAssetLink {
-            switch selectedFixedAssetLink {
-            case .vehicle:
-                if let vehicleId = fixedLinkVehicleId {
-                    linkedVehId = vehicleId
-                    syncFixedToVehicle(vehicleId: vehicleId, expenseId: expenseId, amount: amount)
-                    // 同上：改連到另一輛車時清掉舊車輛殘留的那筆 fixedExpenses。
-                    if let oldVehicleId = editingExpense?.linkedVehicleId, oldVehicleId != vehicleId,
-                       var oldVehicle = financeStore.vehicles.first(where: { $0.id == oldVehicleId }) {
-                        oldVehicle.fixedExpenses.removeAll { $0.linkedExpenseId == expenseId }
-                        financeStore.update(oldVehicle)
-                    }
-                }
+            switch effectiveFixedAssetLink {
             case .realEstate:
                 linkedREId = fixedLinkRealEstateId
             case .insurance:
                 linkedInsId = fixedLinkInsuranceId
-            case .none:
+            case .vehicle, .none:
                 break
             }
         }
@@ -3236,17 +3400,7 @@ struct AddExpenseView: View {
         if expenseType == .variable {
             switch selectedAssetLink {
             case .vehicle:
-                if let vehicleId = selectedVehicleId {
-                    linkedVehId = vehicleId
-                    syncVehicleVariableExpense(vehicleId: vehicleId, expenseId: expenseId, amount: amount)
-                    // 編輯時把變動支出改連到另一輛車：清掉舊車輛殘留的那筆 variableExpenses，
-                    // 避免舊車輛留下孤兒紀錄、金額不再隨這筆支出更新。
-                    if let oldVehicleId = editingExpense?.linkedVehicleId, oldVehicleId != vehicleId,
-                       var oldVehicle = financeStore.vehicles.first(where: { $0.id == oldVehicleId }) {
-                        oldVehicle.variableExpenses.removeAll { $0.linkedExpenseId == expenseId }
-                        financeStore.update(oldVehicle)
-                    }
-                }
+                break  // [v25.538] 上面統一處理（targetVehicleId）
             case .stock:
                 linkedStkId = syncStockInvestment(existingId: linkedStkId)
             case .insurance:
@@ -3301,7 +3455,8 @@ struct AddExpenseView: View {
             linkedStockId: linkedStkId,
             linkedRealEstateId: linkedREId,
             linkedVehicleId: linkedVehId,
-            vehicleExpenseCategory: (expenseType == .variable && selectedAssetLink == .vehicle) ? selectedVehicleExpenseCategory : nil,
+            // [v25.538] 有連到車才存子分類（不連車了要清掉，見 targetVehicleId）
+            vehicleExpenseCategory: (expenseType == .variable && targetVehId != nil) ? selectedVehicleExpenseCategory : nil,
             realEstateExpenseCategory: (expenseType == .variable && selectedAssetLink == .realEstate) ? selectedRealEstateExpenseCategory : nil,
             taxSavingSubCategory: (expenseType == .variable && selectedVariableCategory == .taxSaving) ? selectedTaxSavingSubCategory : nil,
             socialSubCategory: (expenseType == .variable && selectedVariableCategory == .social) ? selectedSocialSubCategory : nil,
@@ -3329,7 +3484,8 @@ struct AddExpenseView: View {
         // 金額歷史（不在 memberwise init）：編輯重建時帶回，不然存個檔走勢就被清空
         expense.amountHistory = editingExpense?.amountHistory ?? []
         // 充電資訊：只在「變動＋關聯汽車＋電費」時存（比照子分類條件化原則）
-        let isEVCharge = expenseType == .variable && selectedAssetLink == .vehicle
+        // [v25.538] 還要真的選了車：沒選車存進去，卡片（要 linkedVehicleId）永遠看不到
+        let isEVCharge = expenseType == .variable && targetVehId != nil
             && selectedVehicleExpenseCategory == .electricity
         expense.evKwh = isEVCharge ? Double(evKwhText).flatMap { $0 > 0 ? $0 : nil } : nil
         expense.evFromPct = isEVCharge ? Double(evFromText).flatMap { (0...100).contains($0) ? $0 : nil } : nil
@@ -3675,15 +3831,28 @@ struct AddExpenseView: View {
         financeStore.update(re)
     }
 
+    /// [v25.538] 車子身上的鏡像週期只有「月」「年」兩種（留給還沒更新的舊版 App 讀）。
+    /// 以前除了每年一律存成每月、金額不變：每季繳 3,000 變成每月 3,000，月固定、每月養車、
+    /// 現金流全部多算 3 倍。現在每年照存；其他週期換算成每月的金額（每季 ÷ 3）。
+    /// 不加新的 enum case：舊版認不得會把整筆丟掉。
+    private func vehicleMirrorPeriod(amount: Double) -> (period: VehicleExpensePeriod, amount: Double) {
+        switch selectedRecurrence {
+        case .monthly: return (.monthly, amount)
+        case .quarterly: return (.monthly, amount / 3)
+        case .yearly: return (.yearly, amount)
+        }
+    }
+
     /// 同步車貸到理財模式的汽車定期支出
     private func syncCarLoanToVehicle(vehicleId: UUID, expenseId: UUID, amount: Double) {
         guard var vehicle = financeStore.vehicles.first(where: { $0.id == vehicleId }) else { return }
+        let mirror = vehicleMirrorPeriod(amount: amount)
 
         let newEntry = VehicleFixedExpense(
             id: UUID(),
             category: .carLoan,
-            amount: amount,
-            period: selectedRecurrence == .yearly ? .yearly : .monthly,
+            amount: mirror.amount,
+            period: mirror.period,
             linkedExpenseId: expenseId
         )
 
@@ -3691,8 +3860,8 @@ struct AddExpenseView: View {
             vehicle.fixedExpenses[existingIdx] = VehicleFixedExpense(
                 id: vehicle.fixedExpenses[existingIdx].id,
                 category: .carLoan,
-                amount: amount,
-                period: selectedRecurrence == .yearly ? .yearly : .monthly,
+                amount: mirror.amount,
+                period: mirror.period,
                 linkedExpenseId: expenseId
             )
         } else {
@@ -3712,16 +3881,17 @@ struct AddExpenseView: View {
         default: category = .tax  // 房租/水電/管理費等歸為稅費雜支
         }
 
-        let period: VehicleExpensePeriod = selectedRecurrence == .yearly ? .yearly : .monthly
+        // [v25.538] 季繳換算成每月金額（見 vehicleMirrorPeriod）
+        let mirror = vehicleMirrorPeriod(amount: amount)
 
         if let idx = vehicle.fixedExpenses.firstIndex(where: { $0.linkedExpenseId == expenseId }) {
             vehicle.fixedExpenses[idx] = VehicleFixedExpense(
                 id: vehicle.fixedExpenses[idx].id,
-                category: category, amount: amount, period: period, linkedExpenseId: expenseId
+                category: category, amount: mirror.amount, period: mirror.period, linkedExpenseId: expenseId
             )
         } else {
             vehicle.fixedExpenses.append(VehicleFixedExpense(
-                id: UUID(), category: category, amount: amount, period: period, linkedExpenseId: expenseId
+                id: UUID(), category: category, amount: mirror.amount, period: mirror.period, linkedExpenseId: expenseId
             ))
         }
         financeStore.update(vehicle)
@@ -3919,9 +4089,15 @@ struct AddExpenseView: View {
                 selectedFixedAssetLink = .insurance
                 fixedLinkInsuranceId = expense.linkedInsuranceId
             }
+        } else if expense.expenseType == .fixed && expense.fixedCategory == .insurance,
+                  let vid = expense.linkedVehicleId {
+            // [v25.538] 車險（強制險、綜合險）只會連汽車
+            selectedFixedAssetLink = .vehicle
+            fixedLinkVehicleId = vid
         }
 
         // 編輯時若已連動理財項目，依目前清單重新計算「項目 N：型號-類別」
+        // [v25.538] 車子只把舊版的「項目 N：…」換成「車名-分類名」，你打的名稱不動
         applyAutoTitleIfLinked()
 
         // [v25.365] 分類與資產連結都還原完了，才把座標的歸屬分類蓋章起來
@@ -4059,6 +4235,10 @@ struct AddExpensePreset {
     var linkedTripPlanId: UUID?
     var linkedTripStopId: UUID?
     var date: Date?
+    /// [v25.538] 從車子帶進來時直接顯示車輛區（度數、電量、里程錶），不用整個打開進階模式。
+    /// 以前從車輛頁「新增項目→電費」打開，度數那幾欄只在進階模式看得到，從車子本身反而記不到。
+    /// 放最後：memberwise init 照宣告順序，既有呼叫端都沒帶它（預設 nil）
+    var showVehicleSection: Bool?
 }
 
 // MARK: - 水電瓦斯類型判斷

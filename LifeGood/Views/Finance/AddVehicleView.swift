@@ -47,6 +47,14 @@ import SwiftUI
 //      對齊 AddIncomeView／AddExpenseView／AddSavingsInsuranceView 儲存按鈕載入狀態規格。
 //      純視覺層補強，save() 內部守衛判斷與車輛寫入邏輯完全未變動。同型 isSaving 守衛仍
 //      存在於 AddStockView／AddRealEstateView，可作為下次美化比照補齊的清單。
+//
+// [v25.538] 先修資料（畫面不變）：
+//   - 新增流程按取消改走共用的 VehicleDeletion：連銀行扣款紀錄、只靠 linkedVehicleId 連過來的支出一起清。
+//   - 左滑刪單筆支出先確認；確認後連記帳那筆、收據照片、銀行扣款紀錄一起刪。
+//   - 編輯頁不再弄壞資料：估值 0 的車再存不會變成購入價；金額帶回不丟位數；編輯時自動存進去的
+//     表頭按取消會還原；有改過不能往下滑關掉、按取消先問；只載入一次；購入日、售出日不能選未來；
+//     錯誤橫幅放最上面。
+//   - 家充地點提示不再建議填「家」；估值欄下多一顆「照每年 15% 估（帶入）」，取代列表的折舊開關。
 
 struct AddVehicleView: View {
     @EnvironmentObject var financeStore: FinanceStore
@@ -55,11 +63,13 @@ struct AddVehicleView: View {
     @Environment(\.dismiss) private var dismiss
 
     let editing: Vehicle?
-    private let stableVehicleId: UUID
+    /// [v25.538] 用 @State 存：sheet 的內容會因為上一頁重畫而重新 init，
+    /// 用 let 的話新增流程每次 init 都會換一個新的 UUID，自動存檔和「取消」回滾就找不到那台車
+    @State private var stableVehicleId: UUID
 
     init(editing: Vehicle? = nil) {
         self.editing = editing
-        self.stableVehicleId = editing?.id ?? UUID()
+        _stableVehicleId = State(initialValue: editing?.id ?? UUID())
     }
 
     // MARK: - 基本欄位
@@ -88,6 +98,23 @@ struct AddVehicleView: View {
     // v3 進場動畫旗標：定期／變動支出列表交錯進場
     @State private var fixedExpensesAppeared = false
     @State private var variableExpensesAppeared = false
+    // [v25.538] loadEditing 只跑一次；initialFields 是載入完的欄位，拿來判斷有沒有改過
+    @State private var didLoad = false
+    @State private var initialFields: VehicleFormFields?
+    // [v25.538] 編輯既有車子時「新增項目」已經把表頭自動存進去了，取消要還原
+    @State private var headerAutoSaved = false
+    // [v25.538] 最後一次自動存進去的欄位：之後把欄位改回原樣，車子裡存的還是改過的，往下滑關掉也要擋
+    @State private var autoSavedFields: VehicleFormFields?
+    // [v25.538] 打開時的車子（取消時還原表頭用），第一次載入時存起來。不能直接用 editing：
+    // 卡片頁傳進來的是每次重畫都從 store 重抓的車子，自動存檔後卡片頁一重畫，editing 就變成存過的樣子
+    @State private var openedSnapshot: Vehicle?
+    // [v25.538] 有改過時按取消先問；說明文字在打開確認框的那一刻算好
+    @State private var showDiscardConfirm = false
+    @State private var discardMessage = ""
+    // [v25.538] 左滑刪支出：先記下來跳確認，確認後才刪
+    @State private var pendingExpenseDeletion: ExpenseSwipeDeletion?
+    // [v25.538] 驗證沒過時加一，表單捲到最上面的錯誤橫幅
+    @State private var errorScrollTick = 0
 
     // MARK: - 編輯/新增項目
 
@@ -112,57 +139,133 @@ struct AddVehicleView: View {
         currentVehicle?.variableExpenses ?? []
     }
 
+    /// [v25.538] 表單上「車子本身」的欄位，用來判斷有沒有改過（要不要問放棄、能不能往下滑關掉）。
+    /// 沒勾「已售出」時售出日只是預設值，不算。
+    struct VehicleFormFields: Equatable {
+        var name: String
+        var brand: String
+        var ownerName: String
+        var powerType: VehiclePowerType
+        var batteryCapacityText: String
+        var homeChargePlace: String
+        var purchaseDate: Date
+        var soldDate: Date?
+        var purchasePriceText: String
+        var currentValueText: String
+        var note: String
+    }
+
+    /// [v25.538] 左滑要刪的列（車子上的項目 id）和它們連到的記帳支出 id
+    struct ExpenseSwipeDeletion {
+        let itemIds: Set<UUID>
+        let expenseIds: Set<UUID>
+        /// 記帳裡真的還找得到的筆數（滑的當下算好）：記帳那筆早被刪掉的孤兒列，不能說「會一起刪除」
+        let foundExpenseCount: Int
+    }
+
+    /// [v25.538] 左滑的當下就把要刪的東西和確認框要講的筆數算好
+    private func makeSwipeDeletion(linkedExpenseIds: [UUID?], itemIds: [UUID]) -> ExpenseSwipeDeletion {
+        let expenseIds = Set(linkedExpenseIds.compactMap { $0 })
+        let found = expenseStore.expenses.filter { expenseIds.contains($0.id) }.count
+        return ExpenseSwipeDeletion(itemIds: Set(itemIds), expenseIds: expenseIds, foundExpenseCount: found)
+    }
+
+    private var currentFields: VehicleFormFields {
+        VehicleFormFields(
+            name: name, brand: brand, ownerName: ownerName, powerType: powerType,
+            batteryCapacityText: batteryCapacityText, homeChargePlace: homeChargePlace,
+            purchaseDate: purchaseDate, soldDate: isSold ? soldDate : nil,
+            purchasePriceText: purchasePriceText, currentValueText: currentValueText, note: note
+        )
+    }
+
+    /// [v25.538] 有沒有東西會被放棄：新增流程已經自動存過（車子和這次記的支出都在 store 裡）、
+    /// 編輯時自動存進車子的欄位跟打開時不一樣（欄位後來改回原樣也算，車子裡存的還是改過的），
+    /// 或欄位跟打開時不一樣
+    private var hasChanges: Bool {
+        if editing == nil && hasAutoSaved { return true }
+        guard let initial = initialFields else { return false }
+        if let saved = autoSavedFields, saved != initial { return true }
+        return currentFields != initial
+    }
+
+    /// [v25.538] 錯誤橫幅那一列的 id，驗證沒過時捲過去
+    private static let errorBannerId = "vehicleErrorBanner"
+
+    // [v25.538] body 拆成「表單本體」和三段「彈出視窗」（同 AddRealEstateView v25.530）：這版多了刪支出確認、
+    // 放棄修改確認和捲到錯誤橫幅，十幾個修飾器擠在同一個運算式裡容易型別檢查逾時
     var body: some View {
         NavigationStack {
-            Form {
-                // v2：翠綠英雄預覽卡（常態顯示，即時反映填入數值）
+            ScrollViewReader { proxy in
+                withConfirmations(withCategoryPickers(withExpenseSheets(editorForm)))
+                    .onAppear { loadEditingOnce() }
+                    .onChange(of: errorScrollTick) { _, _ in
+                        // 橫幅這一列剛加進表單，等它畫好再捲過去
+                        DispatchQueue.main.async {
+                            withAnimation { proxy.scrollTo(Self.errorBannerId, anchor: .top) }
+                        }
+                    }
+            }
+        }
+        // [v25.538] 有改過就不能往下滑關掉：滑掉不會經過「取消」，新增流程會留下自動存檔的半台車，
+        // 編輯時自動存進去的欄位也不會還原
+        .interactiveDismissDisabled(hasChanges)
+    }
+
+    private var editorForm: some View {
+        Form {
+            // [v25.538] 錯誤橫幅移到最上面：以前在最底下，支出列一多，按「新增」看起來像沒反應
+            if showError {
                 Section {
-                    vehiclePreviewCard
-                        .opacity(cardAppeared ? 1 : 0)
-                        .offset(y: cardAppeared ? 0 : 18)
+                    errorBanner
                         .listRowInsets(EdgeInsets())
                         .listRowBackground(Color.clear)
-                        .onAppear {
-                            withAnimation(.spring(response: 0.50, dampingFraction: 0.78)) {
-                                cardAppeared = true
-                            }
-                        }
+                        .id(Self.errorBannerId)
                 }
-                vehicleInfoSection
-                valueSection
-                fixedExpenseSection
-                variableExpenseSection
-                calcSection
-                noteSection
+            }
+            // v2：翠綠英雄預覽卡（常態顯示，即時反映填入數值）
+            Section {
+                vehiclePreviewCard
+                    .opacity(cardAppeared ? 1 : 0)
+                    .offset(y: cardAppeared ? 0 : 18)
+                    .listRowInsets(EdgeInsets())
+                    .listRowBackground(Color.clear)
+                    .onAppear {
+                        withAnimation(.spring(response: 0.50, dampingFraction: 0.78)) {
+                            cardAppeared = true
+                        }
+                    }
+            }
+            vehicleInfoSection
+            valueSection
+            fixedExpenseSection
+            variableExpenseSection
+            calcSection
+            noteSection
+        }
+        .tint(.teal) // v2: 青藍主題色
+        .navigationTitle(navTitle)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                Button("取消") { cancelTapped() }
+            }
+            ToolbarItem(placement: .topBarTrailing) {
+                HStack(spacing: 6) {
+                    // [美化] 存檔中顯示同色 ProgressView，對齊 AddIncomeView／AddExpenseView／
+                    // AddSavingsInsuranceView 儲存按鈕載入狀態規格
+                    if isSaving {
+                        ProgressView().scaleEffect(0.7).tint(.green)
+                    }
+                    Button(editing != nil || hasAutoSaved ? "儲存" : "新增") { save() }
+                        .bold().foregroundStyle(.green).disabled(isSaving)
+                }
+            }
+        }
+    }
 
-                if showError {
-                    Section {
-                        errorBanner
-                            .listRowInsets(EdgeInsets())
-                            .listRowBackground(Color.clear)
-                    }
-                }
-            }
-            .tint(.teal) // v2: 青藍主題色
-            .navigationTitle(navTitle)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button("取消") { cancelAndRollback() }
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    HStack(spacing: 6) {
-                        // [美化] 存檔中顯示同色 ProgressView，對齊 AddIncomeView／AddExpenseView／
-                        // AddSavingsInsuranceView 儲存按鈕載入狀態規格
-                        if isSaving {
-                            ProgressView().scaleEffect(0.7).tint(.green)
-                        }
-                        Button(editing != nil || hasAutoSaved ? "儲存" : "新增") { save() }
-                            .bold().foregroundStyle(.green).disabled(isSaving)
-                    }
-                }
-            }
-            .onAppear { loadEditing() }
+    private func withExpenseSheets<Content: View>(_ content: Content) -> some View {
+        content
             .sheet(item: $editingFixedExpense) { exp in
                 AddExpenseView(expenseType: .fixed, editingExpense: exp)
                     .appStores()
@@ -185,6 +288,10 @@ struct AddVehicleView: View {
                 )
                 .appStores()
             }
+    }
+
+    private func withCategoryPickers<Content: View>(_ content: Content) -> some View {
+        content
             .confirmationDialog("選擇定期支出類別", isPresented: $showFixedCategoryPicker, titleVisibility: .visible) {
                 ForEach(VehicleFixedCategory.allCases) { cat in
                     Button(cat.rawValue) {
@@ -203,7 +310,30 @@ struct AddVehicleView: View {
                 }
                 Button("取消", role: .cancel) {}
             }
-        }
+    }
+
+    // [v25.538] 左滑刪支出的確認、按取消時「要放棄這次的修改嗎？」
+    private func withConfirmations<Content: View>(_ content: Content) -> some View {
+        content
+            .alert("刪除這筆支出？", isPresented: expenseDeletionPresented, presenting: pendingExpenseDeletion) { request in
+                Button("刪除", role: .destructive) { confirmExpenseDeletion(request) }
+                Button("取消", role: .cancel) {}
+            } message: { request in
+                Text(expenseDeletionMessage(request))
+            }
+            .confirmationDialog("要放棄這次的修改嗎？", isPresented: $showDiscardConfirm, titleVisibility: .visible) {
+                Button("放棄修改", role: .destructive) { cancelAndRollback() }
+                Button("繼續編輯", role: .cancel) {}
+            } message: {
+                Text(discardMessage)
+            }
+    }
+
+    private var expenseDeletionPresented: Binding<Bool> {
+        Binding(
+            get: { pendingExpenseDeletion != nil },
+            set: { if !$0 { pendingExpenseDeletion = nil } }
+        )
     }
 
     private var navTitle: String {
@@ -258,10 +388,12 @@ struct AddVehicleView: View {
                         .frame(width: 90)
                     Text("kWh").font(.caption).foregroundStyle(.secondary)
                 }
-                TextField("家充地點關鍵字（如 家、自宅）", text: $homeChargePlace)
+                // [v25.538] 提示不再建議填「家」：地點「包含」關鍵字就算家充，「全家」「家樂福」的充電站都會被算進去
+                TextField("家充地點關鍵字（例：社區 B2 充電位）", text: $homeChargePlace)
             }
 
-            DatePicker("購入日期", selection: $purchaseDate, displayedComponents: .date)
+            // [v25.538] 購入日、售出日不能選未來：未來的售出日會讓車馬上蓋「售出」章，淨資產卻還算它
+            DatePicker("購入日期", selection: $purchaseDate, in: ...Date(), displayedComponents: .date)
                 .onChange(of: purchaseDate) { _, newValue in
                     // 售出日期 DatePicker 用 in: purchaseDate... 限制往後可選範圍，只擋新選取、
                     // 不會回頭修正已選定的舊值；購入日期後調若晚於既有售出日期，會存出售出早於
@@ -271,7 +403,8 @@ struct AddVehicleView: View {
 
             Toggle("已售出", isOn: $isSold)
             if isSold {
-                DatePicker("售出日期", selection: $soldDate, in: purchaseDate..., displayedComponents: .date)
+                // [v25.538] 舊資料的購入日可能在未來，上限取兩者較晚的，範圍才不會倒過來（倒過來會閃退）
+                DatePicker("售出日期", selection: $soldDate, in: purchaseDate...max(purchaseDate, Date()), displayedComponents: .date)
             }
         } header: {
             vehicleSectionHeader("車輛資訊", icon: "car.fill", color: .teal)
@@ -288,11 +421,39 @@ struct AddVehicleView: View {
                 TextField("目前估值", text: $currentValueText).keyboardType(.decimalPad)
                 Text("萬元").foregroundStyle(.secondary)
             }
+            // [v25.538] 取代列表底部的「折舊開關」（它一按就永久蓋掉所有車的估值）：
+            // 這裡只把估計值填進欄位，你按儲存才算數
+            if let estimate = fifteenPercentEstimate {
+                Button {
+                    currentValueText = Self.editableAmountText(estimate / 10000, decimals: 4)
+                } label: {
+                    Label(fifteenPercentLabel(estimate), systemImage: "wand.and.stars")
+                        .font(.caption)
+                }
+                .buttonStyle(.borderless)
+            }
         } header: {
             vehicleSectionHeader("價值", icon: "yensign.circle.fill", color: .green)
         } footer: {
             Text("以萬元為單位輸入，例如輸入 80 代表 NT$800,000。")
         }
+    }
+
+    /// [v25.538] 照每年 15% 估：購入價 × 0.85^(持有年數)，持有年數＝天數 ÷ 365.25（最少 0），算到售出日或今天。
+    /// 1 萬以上進位到千元（跟按鈕上「約 NT$X萬」寫的一樣），未滿 1 萬進位到元。購入價沒填或 ≤ 0 時沒有這顆。
+    private var fifteenPercentEstimate: Double? {
+        guard let priceWan = Double(purchasePriceText.trimmingCharacters(in: .whitespaces)), priceWan > 0 else { return nil }
+        let price = priceWan * 10000
+        guard price.isFinite else { return nil }
+        let end = isSold ? soldDate : Date()
+        let years = max(0, end.timeIntervalSince(purchaseDate) / 86400 / 365.25)
+        let raw = price * pow(0.85, years)
+        return raw >= 10000 ? (raw / 1000).rounded() * 1000 : raw.rounded()
+    }
+
+    /// [v25.538] 先組成 String 再給 Label：直接寫字面值會被當成 LocalizedStringKey，「15%」的 % 可能被當成格式符號
+    private func fifteenPercentLabel(_ estimate: Double) -> String {
+        "照每年 15% 估：約 " + estimate.ntdWanString + "（帶入）"
     }
 
     // MARK: - 定期支出
@@ -517,15 +678,19 @@ struct AddVehicleView: View {
         guard !trimmedName.isEmpty,
               let priceWan = Double(purchasePriceText), priceWan > 0 else {
             showError = true
+            errorScrollTick += 1
             return false
         }
         showError = false
 
         let price = priceWan * 10000
-        let currentVal = (Double(currentValueText) ?? priceWan) * 10000
+        let currentVal = currentValueToSave(priceWan: priceWan)
         let trimmedNote = note.trimmingCharacters(in: .whitespaces)
 
         if var vehicle = currentVehicle {
+            // [v25.538] 編輯既有車子時這裡就把表頭寫進去了，記下來，取消時才知道要還原
+            headerAutoSaved = true
+            autoSavedFields = currentFields
             vehicle.name = trimmedName
             vehicle.brand = brand.trimmingCharacters(in: .whitespaces)
             vehicle.ownerName = ownerName
@@ -561,25 +726,71 @@ struct AddVehicleView: View {
         return true
     }
 
-    /// 「取消」按鈕：新增流程中若已因新增子項目（定期/變動支出）觸發過
-    /// ensureVehicleSavedInStore() 自動建檔，「取消」原本只單純 dismiss，完全不檢查
-    /// hasAutoSaved，導致這筆使用者明確想放棄的車輛連同已建立的支出永久留在 store 並同步上 CloudKit。
-    /// 這裡補上回滾：僅在「新增流程」（editing == nil）且已自動存檔時才移除，
-    /// 編輯既有車輛時「取消」維持原樣不動任何資料。
-    private func cancelAndRollback() {
-        if editing == nil, hasAutoSaved, let vehicle = currentVehicle {
-            var linkedIds = Set<UUID>()
-            for fe in vehicle.fixedExpenses { if let id = fe.linkedExpenseId { linkedIds.insert(id) } }
-            for ve in vehicle.variableExpenses { if let id = ve.linkedExpenseId { linkedIds.insert(id) } }
-            if !linkedIds.isEmpty {
-                for exp in expenseStore.expenses where linkedIds.contains(exp.id) {
-                    for name in exp.photoFileNames { Expense.deletePhoto(name) }
-                }
-                expenseStore.expenses.removeAll { linkedIds.contains($0.id) }
-            }
-            financeStore.deleteVehicle(vehicle)
+    /// [v25.538] 工具列「取消」：有改過先問「要放棄這次的修改嗎？」，沒改過直接關
+    private func cancelTapped() {
+        guard hasChanges else { cancelAndRollback(); return }
+        discardMessage = discardConfirmMessage()
+        showDiscardConfirm = true
+    }
+
+    /// [v25.538] 放棄確認框的說明：講清楚按下去會刪什麼、留什麼
+    private func discardConfirmMessage() -> String {
+        if editing == nil {
+            guard hasAutoSaved, let v = currentVehicle else { return "剛剛填的資料不會存。" }
+            let s = VehicleDeletion.summary(of: v, expenseStore: expenseStore)
+            guard s.expenseCount > 0 else { return "剛剛填的資料不會存，這台車不會加進理財。" }
+            return "這台車和這次記的 \(s.expenseCount) 筆支出（連同收據照片和銀行扣款紀錄）都會刪除，不能復原。"
         }
+        if headerAutoSaved {
+            return "車子的資料會回到打開這頁之前的樣子；這次在記帳新增或修改的支出已經存好，會留著。"
+        }
+        return "剛剛改的資料不會存。"
+    }
+
+    /// 「取消」真正做的事（有改過時是確認框按「放棄修改」之後）。
+    /// 新增流程：「新增項目」會先把車子自動存進 store（ensureVehicleSavedInStore），取消時要整台拿掉，
+    /// 連這次記的支出一起刪。[v25.538] 改走共用的 VehicleDeletion（.withExpenses）：以前只刪鏡像連到的支出，
+    /// 銀行扣款紀錄和只靠 linkedVehicleId 連過來的支出都留下來。
+    /// 編輯既有車子：「新增項目」一樣先把表頭存進去，以前按取消不還原。[v25.538] 把車子本身的欄位還原成
+    /// 打開時的樣子；支出不動（那些在記帳裡是真的花費），照片紀錄也照 store 現在的。
+    /// 先關掉這頁、下一個 runloop 才寫 store：確認框、sheet 正在收的那個交易裡改 store 容易閃退。
+    private func cancelAndRollback() {
+        let finance = financeStore
+        let expenses = expenseStore
+        let life = lifeStore
+        let vehicleId = stableVehicleId
+        let original = openedSnapshot ?? editing
+        let rollbackNew = editing == nil && hasAutoSaved
+        let needsHeaderRestore = editing != nil && headerAutoSaved
         dismiss()
+        guard rollbackNew || needsHeaderRestore else { return }
+        DispatchQueue.main.async {
+            guard var v = finance.vehicles.first(where: { $0.id == vehicleId }) else { return }
+            // 刪整台只走新增流程（editing == nil）；編輯既有車子不管怎樣都只還原表頭
+            if needsHeaderRestore {
+                guard let original else { return }
+                Self.restoreHeader(&v, from: original)
+                finance.update(v)
+            } else if rollbackNew {
+                VehicleDeletion.delete(v, mode: .withExpenses, financeStore: finance,
+                                       expenseStore: expenses, lifeStore: life)
+            }
+        }
+    }
+
+    /// [v25.538] 車子本身的欄位還原成打開編輯頁時的快照；定期／變動支出鏡像、照片紀錄留著 store 現在的
+    private static func restoreHeader(_ v: inout Vehicle, from original: Vehicle) {
+        v.name = original.name
+        v.brand = original.brand
+        v.ownerName = original.ownerName
+        v.powerType = original.powerType
+        v.purchaseDate = original.purchaseDate
+        v.soldDate = original.soldDate
+        v.purchasePrice = original.purchasePrice
+        v.currentValue = original.currentValue
+        v.note = original.note
+        v.batteryCapacityKWh = original.batteryCapacityKWh
+        v.homeChargePlace = original.homeChargePlace
     }
 
     // MARK: - 預設值（給 AddExpenseView）
@@ -610,51 +821,68 @@ struct AddVehicleView: View {
         }
     }
 
+    /// [v25.538] 這幾種從車子打開記帳時，直接顯示車輛區（度數、電量、里程），不用再切進階模式
+    private static let vehicleSectionCategories: Set<VehicleVariableCategory> = [.electricity, .fuel, .maintenance, .repair]
+
     private func makeVariablePreset(for cat: VehicleVariableCategory) -> AddExpensePreset {
         AddExpensePreset(
             variableCategory: .vehicle,
             vehicleExpenseCategory: cat,
             linkedVehicleId: stableVehicleId,
-            assetLink: .vehicle
+            assetLink: .vehicle,
+            showVehicleSection: Self.vehicleSectionCategories.contains(cat)
         )
     }
 
     // MARK: - 刪除
 
+    // [v25.538] 左滑刪除不再直接刪：先記下要刪哪幾列、連到哪些記帳支出，跳確認框，
+    // 確認後才連記帳支出、收據照片、銀行扣款紀錄一起刪（confirmExpenseDeletion）。
+
     private func deleteFixedExpenses(at offsets: IndexSet) {
-        guard var vehicle = currentVehicle else { return }
-        // 先收集連結支出 ID，刪除前清除照片檔案，避免孤兒照片（對齊 VehicleView/VehicleDetailView.deleteVehicle 既有修復規格）
-        var linkedIds = Set<UUID>()
-        for index in offsets {
-            let item = fixedExpenses[index]
-            if let expId = item.linkedExpenseId { linkedIds.insert(expId) }
-            vehicle.fixedExpenses.removeAll { $0.id == item.id }
-        }
-        if !linkedIds.isEmpty {
-            for exp in expenseStore.expenses where linkedIds.contains(exp.id) {
-                for name in exp.photoFileNames { Expense.deletePhoto(name) }
-            }
-            expenseStore.expenses.removeAll { linkedIds.contains($0.id) }
-        }
-        financeStore.update(vehicle)
+        let items = fixedExpenses
+        let picked = offsets.filter { $0 < items.count }.map { items[$0] }
+        guard !picked.isEmpty else { return }
+        pendingExpenseDeletion = makeSwipeDeletion(
+            linkedExpenseIds: picked.map { $0.linkedExpenseId },
+            itemIds: picked.map { $0.id }
+        )
     }
 
     private func deleteVariableExpenses(at offsets: IndexSet) {
-        guard var vehicle = currentVehicle else { return }
-        // 先收集連結支出 ID，刪除前清除照片檔案，避免孤兒照片（對齊 VehicleView/VehicleDetailView.deleteVehicle 既有修復規格）
-        var linkedIds = Set<UUID>()
-        for index in offsets {
-            let item = variableExpenses[index]
-            if let expId = item.linkedExpenseId { linkedIds.insert(expId) }
-            vehicle.variableExpenses.removeAll { $0.id == item.id }
+        let items = variableExpenses
+        let picked = offsets.filter { $0 < items.count }.map { items[$0] }
+        guard !picked.isEmpty else { return }
+        pendingExpenseDeletion = makeSwipeDeletion(
+            linkedExpenseIds: picked.map { $0.linkedExpenseId },
+            itemIds: picked.map { $0.id }
+        )
+    }
+
+    /// [v25.538] 確認框的說明：沒連到記帳（或記帳那筆已經不在）的項目只會從車子拿掉
+    private func expenseDeletionMessage(_ request: ExpenseSwipeDeletion) -> String {
+        let count = request.foundExpenseCount
+        if count == 1 { return "記帳裡的這筆和銀行扣款紀錄會一起刪除，不能復原。" }
+        if count > 1 { return "記帳裡的這 \(count) 筆和銀行扣款紀錄會一起刪除，不能復原。" }
+        return "這個項目沒有連到記帳，只會從這台車拿掉，不能復原。"
+    }
+
+    /// [v25.538] 確認後才刪；延後一個 runloop，因為確認框正在收的那個交易裡改 store 容易閃退
+    private func confirmExpenseDeletion(_ request: ExpenseSwipeDeletion) {
+        let finance = financeStore
+        let expenses = expenseStore
+        let life = lifeStore
+        let vehicleId = stableVehicleId
+        DispatchQueue.main.async {
+            // 記帳支出（含收據照片）＋所有銀行帳戶裡對得上的扣款紀錄；每台車上指到它們的鏡像也一起清
+            RealEstateDeletion.removeExpenses(request.expenseIds, expenseStore: expenses, lifeStore: life)
+            // 沒連到記帳的舊項目（linkedExpenseId 是 nil）上面清不到，照列的 id 從這台車拿掉
+            guard var v = finance.vehicles.first(where: { $0.id == vehicleId }) else { return }
+            let before = v.fixedExpenses.count + v.variableExpenses.count
+            v.fixedExpenses.removeAll { request.itemIds.contains($0.id) }
+            v.variableExpenses.removeAll { request.itemIds.contains($0.id) }
+            if v.fixedExpenses.count + v.variableExpenses.count != before { finance.update(v) }
         }
-        if !linkedIds.isEmpty {
-            for exp in expenseStore.expenses where linkedIds.contains(exp.id) {
-                for name in exp.photoFileNames { Expense.deletePhoto(name) }
-            }
-            expenseStore.expenses.removeAll { linkedIds.contains($0.id) }
-        }
-        financeStore.update(vehicle)
     }
 
     // MARK: - 儲存
@@ -664,12 +892,12 @@ struct AddVehicleView: View {
         let trimmedName = name.trimmingCharacters(in: .whitespaces)
         guard !trimmedName.isEmpty,
               let priceWan = Double(purchasePriceText), priceWan > 0 else {
-            showError = true; return
+            showError = true; errorScrollTick += 1; return
         }
         isSaving = true
 
         let price = priceWan * 10000
-        let currentVal = (Double(currentValueText) ?? priceWan) * 10000
+        let currentVal = currentValueToSave(priceWan: priceWan)
         let trimmedNote = note.trimmingCharacters(in: .whitespaces)
 
         if var vehicle = currentVehicle {
@@ -724,7 +952,38 @@ struct AddVehicleView: View {
         return (hasBatteryType && !t.isEmpty) ? t : nil
     }
 
+    /// [v25.538] 估值欄換成台幣。看得懂的數字（含 0）照填的存；空白或看不懂＝沒改：
+    /// 編輯時維持原本的估值（原本 0 就還是 0，loadEditing 把 0 帶成空白），新增時才用購入價。
+    /// 以前空白一律變購入價，估值 0（報廢、全損）的車打開再按一次儲存，估值就被悄悄改成購入價。
+    private func currentValueToSave(priceWan: Double) -> Double {
+        let text = currentValueText.trimmingCharacters(in: .whitespaces)
+        if let wan = Double(text), wan >= 0, (wan * 10000).isFinite { return wan * 10000 }
+        if let e = openedSnapshot ?? editing { return e.currentValue }
+        return priceWan * 10000
+    }
+
+    /// [v25.538] 金額帶回輸入框：四捨五入到指定小數位後去掉多餘的 0（照抄 AddRealEstateView v25.530）。
+    /// 「萬」用 4 位＝1 元精度。只給可編輯的文字用，顯示用的格式不走這裡。
+    private static func editableAmountText(_ value: Double, decimals: Int) -> String {
+        var text = String(format: "%.\(decimals)f", value)
+        if text.contains(".") {
+            while text.hasSuffix("0") { text.removeLast() }
+            if text.hasSuffix(".") { text.removeLast() }
+        }
+        return text
+    }
+
     // MARK: - 載入編輯
+
+    /// [v25.538] 只在第一次出現時載入：onAppear 可能重跑（例如上面蓋的記帳 sheet 收起來），
+    /// 會拿開頁時的舊快照蓋掉正在改的欄位。載入完記下欄位的樣子，之後拿來比對有沒有改過。
+    private func loadEditingOnce() {
+        guard !didLoad else { return }
+        didLoad = true
+        openedSnapshot = editing
+        loadEditing()
+        initialFields = currentFields
+    }
 
     private func loadEditing() {
         guard let e = editing else { return }
@@ -740,8 +999,10 @@ struct AddVehicleView: View {
             isSold = false
             soldDate = Date()
         }
-        purchasePriceText = e.purchasePrice > 0 ? String(format: "%g", e.purchasePrice / 10000) : ""
-        currentValueText = e.currentValue > 0 ? String(format: "%g", e.currentValue / 10000) : ""
+        // [v25.538] 金額帶回輸入框不能丟位數：%g 只有 6 位有效數字，12,345,678 存一次就變 12,345,700。
+        // 估值 0 照舊帶成空白；存檔時空白＝維持原值（currentValueToSave），不會變成購入價
+        purchasePriceText = e.purchasePrice > 0 ? Self.editableAmountText(e.purchasePrice / 10000, decimals: 4) : ""
+        currentValueText = e.currentValue > 0 ? Self.editableAmountText(e.currentValue / 10000, decimals: 4) : ""
         note = e.note
     }
 

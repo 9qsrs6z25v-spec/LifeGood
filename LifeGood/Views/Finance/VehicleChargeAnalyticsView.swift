@@ -41,10 +41,13 @@ struct VehicleChargeAnalyticsView: View {
         }
     }
 
+    /// [v25.538] 帶上動力：每度里程的門檻照車種挑（汽車 12、電動機車 60），
+    /// 漏記充電的區間才不會寫出「每度跑 32 公里」、續航推估跟著錯
     private var analytics: VehicleChargeAnalytics {
         VehicleChargeAnalytics(expenses: chargeExpenses,
                                capacityKWh: vehicle?.batteryCapacityKWh,
-                               homeKeyword: vehicle?.homeChargePlace)
+                               homeKeyword: vehicle?.homeChargePlace,
+                               powerType: vehicle?.powerType)
     }
 
     var body: some View {

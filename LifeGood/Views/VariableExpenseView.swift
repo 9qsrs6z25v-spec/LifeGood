@@ -493,12 +493,6 @@ struct VariableExpenseView: View {
     private func deleteWithSync(offsets: IndexSet, from list: [Expense]) {
         for index in offsets {
             let expense = list[index]
-            // 同步刪除汽車變動支出
-            if let vehicleId = expense.linkedVehicleId,
-               var vehicle = financeStore.vehicles.first(where: { $0.id == vehicleId }) {
-                vehicle.variableExpenses.removeAll { $0.linkedExpenseId == expense.id }
-                financeStore.update(vehicle)
-            }
             // 同步刪除房地產底下連到這筆的項目。[v25.530] 以前只清變動支出和水電，
             // 刪掉「房屋價金」那筆時 paidItems 留下孤兒，還繼續算進已支出和總額；
             // 保險、附屬資產也一樣，比照 FixedExpenseView 五個陣列都清。
@@ -530,14 +524,19 @@ struct VariableExpenseView: View {
                 lifeStore.update(ms)
             }
         }
+        // [v25.538] 車子身上指到這些支出的鏡像由 store.delete 一起清（VehicleMirrors：每台車的定期、變動都看）。
+        // 以前在上面迴圈只清 linkedVehicleId 那台的變動清單，改連過別台車留下的鏡像會變孤兒、繼續算進那台車。
         store.delete(at: offsets, from: list)
     }
 
     /// 複製支出：全部欄位複製，日期改為現在
     private func duplicateExpense(_ expense: Expense) {
-        let copy = Expense(
+        // [v25.538] 「只刪車子，記帳留著」之後 linkedVehicleId 會清掉、子分類留著，那種也算汽車支出
+        let isVehicleExpense = expense.linkedVehicleId != nil || expense.vehicleExpenseCategory != nil
+        let title: String = isVehicleExpense ? Self.vehicleCopyTitle(expense.title) : expense.title
+        var copy = Expense(
             id: UUID(),
-            title: expense.title,
+            title: title,
             amount: expense.amount,
             date: Date(),
             expenseType: expense.expenseType,
@@ -567,7 +566,19 @@ struct VariableExpenseView: View {
             placeLatitude: expense.placeLatitude,
             placeLongitude: expense.placeLongitude
         )
+        // [v25.538] 汽車支出的複本：車子、分類照上面帶，度數也帶（複製多半是同一種充電，量不同再改）；
+        // 里程錶和起訖電量不帶（ev 欄位不在 init 裡，本來就是空的），不然兩筆同里程會算出 0 公里的區間。
+        // 不用補車子身上的鏡像：v25.539 起卡片讀記帳的 linkedVehicleId。
+        copy.evKwh = expense.evKwh
         store.add(copy)
+    }
+
+    /// [v25.538] 舊的自動標題「項目 3：Model 3-加油」複製時去掉「項目 N：」（刪掉中間一筆就會重號，新的記帳也不再加編號），
+    /// 剩「Model 3-加油」；你自己取的名字照抄。
+    private static func vehicleCopyTitle(_ title: String) -> String {
+        guard let r = title.range(of: "^項目\\s*[0-9]+\\s*[：:]\\s*", options: .regularExpression) else { return title }
+        let rest = String(title[r.upperBound...])
+        return rest.isEmpty ? title : rest
     }
 
     // MARK: - 依日期分組

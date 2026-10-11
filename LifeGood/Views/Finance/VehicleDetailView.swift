@@ -64,6 +64,7 @@ import Charts
 struct VehicleDetailView: View {
     @EnvironmentObject var store: FinanceStore
     @EnvironmentObject var expenseStore: ExpenseStore
+    @EnvironmentObject var lifeStore: LifeStore
     @EnvironmentObject var subscription: SubscriptionManager
     @Environment(\.dismiss) private var dismiss
 
@@ -75,6 +76,9 @@ struct VehicleDetailView: View {
     @State private var showEdit = false
     /// [v25.397] 充電與里程深入分析
     @State private var showChargeAnalytics = false
+    /// [v25.538] 刪車改走跟列表左滑同一個確認框（VehicleView.swift 的 vehicleDeleteDialog）：
+    /// 要刪的車和筆數在按「刪除」那一刻算好
+    @State private var deleteRequest: VehicleDeleteRequest?
     @State private var showDeleteConfirm = false
     @State private var showPremiumAlert = false
     // 照片紀錄（保養/稅費收據等，比照房地產裝潢照片）
@@ -127,8 +131,13 @@ struct VehicleDetailView: View {
                             Text("編輯").foregroundStyle(.green)
                         }
                         Button {
-                            if subscription.isPremium { showDeleteConfirm = true }
-                            else { showPremiumAlert = true }
+                            if subscription.isPremium {
+                                deleteRequest = VehicleDeleteRequest(
+                                    vehicle: vehicle,
+                                    summary: VehicleDeletion.summary(of: vehicle, expenseStore: expenseStore)
+                                )
+                                showDeleteConfirm = true
+                            } else { showPremiumAlert = true }
                         } label: {
                             Text("刪除").foregroundStyle(.red)
                         }
@@ -164,14 +173,8 @@ struct VehicleDetailView: View {
                     .appStores()
             }
             .premiumLockAlert(isPresented: $showPremiumAlert)
-            .alert("確定要刪除這輛車嗎？", isPresented: $showDeleteConfirm) {
-                Button("刪除", role: .destructive) {
-                    deleteVehicle()
-                    dismiss()
-                }
-                Button("取消", role: .cancel) {}
-            } message: {
-                Text("刪除後所有連結的記帳支出也會一併移除，此操作無法復原。")
+            .vehicleDeleteDialog(isPresented: $showDeleteConfirm, request: deleteRequest) { _, mode in
+                deleteVehicle(mode: mode)
             }
         }
     }
@@ -385,8 +388,10 @@ struct VehicleDetailView: View {
                                 }
                                 .buttonStyle(.plain)
                                 .contextMenu {
+                                    // [v25.538] 補付費檢查：新增照片（+）、編輯支出都有擋，這裡以前直接打開編輯頁
                                     Button {
-                                        editingPhotoRecord = rec
+                                        if subscription.isPremium { editingPhotoRecord = rec }
+                                        else { showPremiumAlert = true }
                                     } label: {
                                         Label("編輯資訊", systemImage: "pencil")
                                     }
@@ -494,7 +499,9 @@ struct VehicleDetailView: View {
 
     private func handlePhotoRecordTap(_ rec: VehiclePhotoRecord) {
         guard !rec.photoFileNames.isEmpty else {
-            editingPhotoRecord = rec
+            // 沒有照片可看就打開編輯頁；[v25.538] 編輯要付費（跟「編輯資訊」同一道檢查）
+            if subscription.isPremium { editingPhotoRecord = rec }
+            else { showPremiumAlert = true }
             return
         }
         let urls = rec.photoFileNames.map { VehiclePhotoRecord.photoURL(for: $0) }
@@ -994,8 +1001,11 @@ struct VehicleDetailView: View {
         }
     }
 
+    /// [v25.538] 固定西曆與台灣中文：手機設成民國曆或別的地區時，DateFormatter 預設會跟著系統走
     private static let rowDateFormatter: DateFormatter = {
         let f = DateFormatter()
+        f.calendar = Calendar(identifier: .gregorian)
+        f.locale = Locale(identifier: "zh_TW")
         f.dateFormat = "M/d"
         return f
     }()
@@ -1007,24 +1017,19 @@ struct VehicleDetailView: View {
         return Self.rowDateFormatter.string(from: date)
     }
 
-    private func deleteVehicle() {
-        // 先收集所有連結支出 ID，最後一次 removeAll 完成，
-        // 對齊 RealEstateView.deleteEstate v20.5 修復規格，
-        // 避免逐筆呼叫各自觸發 @Published didSet → save() + pushAll()
-        var linkedIds = Set<UUID>()
-        for fe in vehicle.fixedExpenses {
-            if let id = fe.linkedExpenseId { linkedIds.insert(id) }
+    /// [v25.538] 收成 VehicleDeletion（跟列表左滑同一份）：以前這裡自己 removeAll 支出，
+    /// 沒清銀行扣款紀錄，只靠 linkedVehicleId 連過來的支出也會留下指向不存在車子的連結。
+    /// 先關掉卡片、下一個 runloop 才刪：確認框和卡片正在收的那個交易裡改 store 容易閃退
+    private func deleteVehicle(mode: VehicleDeletion.Mode) {
+        let finance = store
+        let expenses = expenseStore
+        let life = lifeStore
+        let id = vehicleId
+        dismiss()
+        DispatchQueue.main.async {
+            guard let v = finance.vehicles.first(where: { $0.id == id }) else { return }
+            VehicleDeletion.delete(v, mode: mode, financeStore: finance, expenseStore: expenses, lifeStore: life)
         }
-        for ve in vehicle.variableExpenses {
-            if let id = ve.linkedExpenseId { linkedIds.insert(id) }
-        }
-        if !linkedIds.isEmpty {
-            for exp in expenseStore.expenses where linkedIds.contains(exp.id) {
-                for name in exp.photoFileNames { Expense.deletePhoto(name) }
-            }
-            expenseStore.expenses.removeAll { linkedIds.contains($0.id) }
-        }
-        store.deleteVehicle(vehicle)
     }
 
     private func fmt(_ v: Double) -> String {
@@ -1066,6 +1071,20 @@ struct VehiclePhotoEditor: View {
     // 防止「儲存」連點：save() 把寫回 store 延後到下個 runloop，連點兩下會讀到同一份
     // vehicle 快照、各自 append，後寫者蓋掉前者（同型防護見 RenovationPhotoEditor.isSaving）
     @State private var isSaving: Bool = false
+    /// [v25.538] setupInitial 只跑一次：相機、文件掃描是 fullScreenCover，關掉時會再觸發這頁的
+    /// onAppear，以前會把 photoFileNames 蓋回進來時的樣子，剛拍的照片從畫面消失、檔案卻已經上傳
+    @State private var didSetup: Bool = false
+
+    /// [v25.538] 有沒有還沒存的東西。照片在選的當下就已經寫檔（新加的）或刪檔（原本的），
+    /// 下滑關掉不會經過 cancel() 收拾，會留下孤兒檔或指向已刪檔案的紀錄，所以有變更時擋住下滑
+    private var hasUnsavedChanges: Bool {
+        guard didSetup else { return false }
+        if photoFileNames != (editing?.photoFileNames ?? []) { return true }
+        if let e = editing {
+            return date != e.date || category != e.category || title != e.title || note != e.note
+        }
+        return !title.isEmpty || !note.isEmpty
+    }
 
     var body: some View {
         NavigationStack {
@@ -1137,6 +1156,8 @@ struct VehiclePhotoEditor: View {
             }
             .onAppear { setupInitial() }
         }
+        // 有變更時只能按「取消」（清掉這次新加的照片檔、收斂已刪的檔名）或「儲存」
+        .interactiveDismissDisabled(hasUnsavedChanges)
     }
 
     /// 統一 Section header（4pt Capsule 漸層色條 + 彩色圖示 + .subheadline.bold）
@@ -1154,6 +1175,8 @@ struct VehiclePhotoEditor: View {
     }
 
     private func setupInitial() {
+        guard !didSetup else { return }
+        didSetup = true
         if let e = editing {
             date = e.date
             category = e.category
@@ -1367,8 +1390,13 @@ fileprivate struct VehicleItemDetailSheet: View {
         }
     }
 
+    /// [v25.538] 固定西曆與台灣中文：手機設成民國曆時「yyyy」會印成 115/10/11
     private static let dateFmt: DateFormatter = {
-        let f = DateFormatter(); f.dateFormat = "yyyy/M/d"; return f
+        let f = DateFormatter()
+        f.calendar = Calendar(identifier: .gregorian)
+        f.locale = Locale(identifier: "zh_TW")
+        f.dateFormat = "yyyy/M/d"
+        return f
     }()
 
     private func infoRow(_ label: String, _ value: String) -> some View {

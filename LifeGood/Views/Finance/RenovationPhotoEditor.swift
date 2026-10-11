@@ -272,6 +272,21 @@ struct RenovationPhotoEditor: View {
     // 快速連點兩下會讓兩次呼叫都讀到同一份 estate 快照、各自 append 自己的 RenovationPhoto，
     // 後寫入者會蓋掉前者剛存好的紀錄，其照片檔案則變成永久孤兒。
     @State private var isSaving: Bool = false
+    /// [v25.538] setupInitial 只跑一次：相機、文件掃描是 fullScreenCover，關掉時會再觸發這頁的
+    /// onAppear，以前會把 photoFileNames 蓋回進來時的樣子，剛拍的照片從畫面消失、檔案卻已經上傳
+    @State private var didSetup: Bool = false
+
+    /// [v25.538] 有沒有還沒存的東西。照片在選的當下就已經寫檔（新加的）或刪檔（原本的），
+    /// 下滑關掉不會經過 cancel() 收拾，會留下孤兒檔或指向已刪檔案的紀錄，所以有變更時擋住下滑。
+    /// 「原本就有」的基準跟 cancel() 一樣：編輯是進來時的檔名，新增是呼叫端帶進來的 preloadedFileNames
+    private var hasUnsavedChanges: Bool {
+        guard didSetup else { return false }
+        if photoFileNames != (editing?.photoFileNames ?? preloadedFileNames) { return true }
+        if let e = editing {
+            return date != e.date || title != e.title || note != e.note
+        }
+        return !title.isEmpty || !note.isEmpty
+    }
 
     init(estateId: UUID, editing: RenovationPhoto?, preloadedFileNames: [String] = []) {
         self.estateId = estateId
@@ -345,6 +360,8 @@ struct RenovationPhotoEditor: View {
             }
             .onAppear { setupInitial() }
         }
+        // 有變更時只能按「取消」（清掉這次新加的照片檔、收斂已刪的檔名）或「儲存」
+        .interactiveDismissDisabled(hasUnsavedChanges)
     }
 
     // MARK: - 輔助
@@ -367,6 +384,8 @@ struct RenovationPhotoEditor: View {
     // MARK: - 初始化
 
     private func setupInitial() {
+        guard !didSetup else { return }
+        didSetup = true
         if let e = editing {
             date = e.date
             title = e.title

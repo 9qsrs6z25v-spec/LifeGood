@@ -173,6 +173,12 @@ struct TaxOverviewView: View {
 
     private var realEstateCount: Int { financeStore.realEstates.filter { !$0.isSold }.count }
     private var vehicleCount: Int { financeStore.vehicles.filter { !$0.isSold }.count }
+    /// [v25.538] 汽機車燃料費只有會燒油的車要繳（油車、油電的混合動力、機車），電車、電動機車不用
+    private var hasFuelVehicle: Bool {
+        financeStore.vehicles.contains { v in
+            !v.isSold && (v.powerType == .gasoline || v.powerType == .hybrid || v.powerType == .motorcycle)
+        }
+    }
 
     private var estimatedAnnualIncome: Double {
         // 對齊 yearEquivalentAmount(_:year:) 的口徑：monthly／yearly 這種週期性收入也要以
@@ -629,14 +635,19 @@ struct TaxOverviewView: View {
     // MARK: - 年度稅務檢核（升級：彩色圖示圓 + 月份膠囊 + 列間 Divider）
 
     private var taxChecklistSection: some View {
-        let items: [(month: String, title: String, relevant: Bool, color: Color)] = [
+        // [v25.538] 使用牌照稅 4 月開徵、汽車燃料使用費 7 月開徵（以前兩個月份寫反）；
+        // 燃料費只有油車、油電、機車要繳，沒有這種車就不列（電車、電動機車不用繳）
+        var list: [(month: String, title: String, relevant: Bool, color: Color)] = [
             ("5月",  "綜合所得稅申報",     selectedYear < Calendar.current.component(.year, from: Date()), .indigo),
             ("5月",  "房屋稅繳納",         realEstateCount > 0,        .blue),
-            ("7月",  "汽機車使用牌照稅",    vehicleCount > 0,            .orange),
+            ("4月",  "汽機車使用牌照稅",    vehicleCount > 0,            .orange),
             ("11月", "地價稅繳納",         realEstateCount > 0,        .purple),
-            ("4月",  "汽機車燃料費",        vehicleCount > 0,            .teal),
             ("全年", "二代健保補充保費",    estimatedAnnualIncome > 0,  .green),
         ]
+        if hasFuelVehicle {
+            list.insert((month: "7月", title: "汽機車燃料費", relevant: true, color: .teal), at: 4)
+        }
+        let items = list
 
         let relevantCount = items.filter(\.relevant).count
         return VStack(alignment: .leading, spacing: 0) {

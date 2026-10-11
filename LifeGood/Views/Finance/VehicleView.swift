@@ -76,18 +76,26 @@ enum VehicleSortOption: String, CaseIterable, Identifiable {
 //   - 看板只算還持有的車（原本的總估值連賣掉的也加進去）。
 //   - 車輛卡換成跟收支同一張項目卡（MoneyItemCard）：卡面是最新的一張照片，沒有就是插畫；
 //     有車貸的多一條「車貸 已繳 28／60 期・還要 NT$38萬」。賣掉的另外一段、淡一點。
+//
+// [v25.538] 先修資料（畫面不變）：
+//   - 拿掉列表底部的「折舊開關」：它不擋付費、開關狀態不保存，一按「套用」就用每年 15% 永久蓋掉
+//     全部持有中車輛的估值（連手填的），關掉也不會還原。改成編輯頁估值欄下的「照每年 15% 估（帶入）」，
+//     只把數字填進欄位，按儲存才算數。
+//   - 拿掉永遠不會打開的 editingItem sheet（編輯只從卡片進）。
 
 struct VehicleView: View {
     @EnvironmentObject var store: FinanceStore
     @EnvironmentObject var expenseStore: ExpenseStore
+    @EnvironmentObject var lifeStore: LifeStore
     @EnvironmentObject var subscription: SubscriptionManager
     @State private var showAdd = false
-    @State private var editingItem: Vehicle?
     @State private var viewingItem: Vehicle?
     @State private var sortOption: VehicleSortOption = .purchasePrice
     @State private var sortAscending = false
-    @State private var depreciationEnabled = false
-    @State private var showDepreciationConfirm = false
+    /// [v25.538] 左滑刪整台車先問一次：以前按下去就連記帳支出、照片一起刪掉，沒有確認。
+    /// 要刪的車和筆數在打開確認框那一刻算好（不清掉，免得確認框收起來時標題閃成空的）
+    @State private var deleteRequest: VehicleDeleteRequest?
+    @State private var showDeleteConfirm = false
     @State private var showPremiumAlert = false
     @State private var headerAppeared = false
     @State private var cardsAppeared = false
@@ -100,17 +108,28 @@ struct VehicleView: View {
     private let heroAccent    = Color(red: 0.18, green: 0.68, blue: 0.68)
     private let heroAccentDark = Color(red: 0.08, green: 0.46, blue: 0.48)
 
+    /// [v25.538] 以前升冪直接回 !result：兩台一樣的時候兩個方向都成立，不是 sort 要的嚴格弱序，
+    /// 也沒有次要鍵（購入價都是 0 的車每次順序不同）。改成先比選的鍵，一樣再比車名、最後比 id
     private var sortedVehicles: [Vehicle] {
-        store.vehicles.sorted { a, b in
-            let result: Bool
-            switch sortOption {
-            case .purchasePrice: result = a.purchasePrice > b.purchasePrice
-            case .currentValue: result = a.currentValue > b.currentValue
-            case .depreciationRate: result = a.depreciationRate > b.depreciationRate
-            case .yearsOwned: result = a.yearsOwned > b.yearsOwned
-            case .monthlyExpense: result = a.monthlyExpense > b.monthlyExpense
-            }
-            return sortAscending ? !result : result
+        let option = sortOption
+        let ascending = sortAscending
+        return store.vehicles.sorted { a, b in
+            let ka = Self.sortKey(a, option)
+            let kb = Self.sortKey(b, option)
+            if ka != kb { return ascending ? ka < kb : ka > kb }
+            let byName = a.name.localizedStandardCompare(b.name)
+            if byName != .orderedSame { return byName == .orderedAscending }
+            return a.id.uuidString < b.id.uuidString
+        }
+    }
+
+    private static func sortKey(_ v: Vehicle, _ option: VehicleSortOption) -> Double {
+        switch option {
+        case .purchasePrice: return v.purchasePrice
+        case .currentValue: return v.currentValue
+        case .depreciationRate: return v.depreciationRate
+        case .yearsOwned: return v.yearsOwned
+        case .monthlyExpense: return v.monthlyExpense
         }
     }
 
@@ -215,35 +234,9 @@ struct VehicleView: View {
             .task(id: "\(store.modifyID)-\(expenseStore.modifyID)") { rebuild() }
             .sheet(isPresented: $showAdd) { AddVehicleView().appStores() }
             .sheet(item: $viewingItem) { item in VehicleDetailView(vehicleId: item.id).appStores() }
-            .sheet(item: $editingItem) { item in AddVehicleView(editing: item).appStores() }
             .premiumLockAlert(isPresented: $showPremiumAlert)
-            .toolbar {
-                ToolbarItem(placement: .bottomBar) {
-                    Button {
-                        if depreciationEnabled {
-                            depreciationEnabled = false
-                        } else {
-                            showDepreciationConfirm = true
-                        }
-                    } label: {
-                        HStack(spacing: 6) {
-                            Image(systemName: depreciationEnabled ? "arrow.down.right.circle.fill" : "arrow.down.right.circle")
-                                .foregroundStyle(depreciationEnabled ? .orange : .secondary)
-                            Text("折舊開關")
-                                .font(.subheadline.weight(.medium))
-                                .foregroundStyle(depreciationEnabled ? .orange : .secondary)
-                        }
-                    }
-                }
-            }
-            .alert("套用折舊估算？", isPresented: $showDepreciationConfirm) {
-                Button("套用", role: .destructive) {
-                    depreciationEnabled = true
-                    applyDepreciation()
-                }
-                Button("取消", role: .cancel) {}
-            } message: {
-                Text("將以每年 15% 折舊率計算後的金額覆蓋所有車輛目前的「目前估值」，覆蓋後無法復原，請先確認目前估值沒有其他來源的手動紀錄。")
+            .vehicleDeleteDialog(isPresented: $showDeleteConfirm, request: deleteRequest) { v, mode in
+                deleteVehicle(v, mode: mode)
             }
             .onAppear {
                 withAnimation(.spring(response: 0.50, dampingFraction: 0.82).delay(0.08)) {
@@ -283,29 +276,38 @@ struct VehicleView: View {
                        value: cardsAppeared)
             .onTapGesture { viewingItem = item }
             .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                Button(role: .destructive) {
+                // [v25.538] 不用 role: .destructive：那會讓 List 一按就把這列滑掉（沒付費、按取消時
+                // 卡片都已經不見了）；改用紅色 tint，先擋付費、再開確認框，按了才真的刪
+                Button {
                     guard subscription.isPremium else {
                         showPremiumAlert = true
                         return
                     }
-                    var linkedIds = Set<UUID>()
-                    for fe in item.fixedExpenses {
-                        if let id = fe.linkedExpenseId { linkedIds.insert(id) }
-                    }
-                    for ve in item.variableExpenses {
-                        if let id = ve.linkedExpenseId { linkedIds.insert(id) }
-                    }
-                    if !linkedIds.isEmpty {
-                        for exp in expenseStore.expenses where linkedIds.contains(exp.id) {
-                            for name in exp.photoFileNames { Expense.deletePhoto(name) }
-                        }
-                        expenseStore.expenses.removeAll { linkedIds.contains($0.id) }
-                    }
-                    store.deleteVehicle(item)
+                    deleteRequest = VehicleDeleteRequest(
+                        vehicle: item,
+                        summary: VehicleDeletion.summary(of: item, expenseStore: expenseStore)
+                    )
+                    showDeleteConfirm = true
                 } label: {
                     Label("刪除", systemImage: "trash")
                 }
+                .tint(.red)
             }
+    }
+
+    /// [v25.538] 收成 VehicleDeletion：以前這裡自己 removeAll 支出，沒清銀行扣款紀錄，
+    /// 只靠 linkedVehicleId 連過來的支出（例如車貸）也會留下指向不存在車子的連結。
+    /// 下一個 runloop 才改 store：確認框正在收的那個交易裡改 store 容易閃退
+    private func deleteVehicle(_ item: Vehicle, mode: VehicleDeletion.Mode) {
+        let finance = store
+        let expenses = expenseStore
+        let life = lifeStore
+        let id = item.id
+        DispatchQueue.main.async {
+            // 用 store 裡最新的那一份（確認框開著的時候可能被同步改過）
+            guard let v = finance.vehicles.first(where: { $0.id == id }) else { return }
+            VehicleDeletion.delete(v, mode: mode, financeStore: finance, expenseStore: expenses, lifeStore: life)
+        }
     }
 
     // MARK: - 空狀態
@@ -400,18 +402,34 @@ struct VehicleView: View {
         }
         .frame(maxWidth: .infinity)
     }
+}
 
-    // MARK: - 折舊計算
+// MARK: - [v25.538] 刪整台車的確認框（列表左滑、卡片工具列共用）
 
-    private func applyDepreciation() {
-        var updated = store.vehicles
-        for i in updated.indices {
-            let v = updated[i]
-            guard !v.isSold, v.purchasePrice > 0 else { continue }
-            let depreciated = v.purchasePrice * pow(1 - 0.15, v.yearsOwned)
-            updated[i].currentValue = max(0, (depreciated / 10000).rounded() * 10000)
+/// 要刪的車和筆數：在打開確認框那一刻算好存起來。message 閉包每次重畫都會跑，不要在裡面掃全部記帳
+struct VehicleDeleteRequest {
+    let vehicle: Vehicle
+    let summary: VehicleDeletion.Summary
+}
+
+extension View {
+    /// 「只刪車子，記帳留著」放前面：加油、充電是真的花掉的錢，一起刪會改寫過去每個月的支出統計；
+    /// 「連記帳一起刪」只有真的連到記帳時才出現（0 筆時只有一顆「刪除」）。
+    /// 照片紀錄兩顆都會刪，說明（VehicleDeletion.confirmMessage）先講這個
+    func vehicleDeleteDialog(isPresented: Binding<Bool>, request: VehicleDeleteRequest?,
+                             onDelete: @escaping (Vehicle, VehicleDeletion.Mode) -> Void) -> some View {
+        let title: String = "刪除「\(request?.vehicle.name ?? "")」？"
+        return confirmationDialog(title, isPresented: isPresented, titleVisibility: .visible,
+                                  presenting: request) { req in
+            if req.summary.expenseCount > 0 {
+                Button("只刪車子，記帳留著", role: .destructive) { onDelete(req.vehicle, .unlinkOnly) }
+                Button("連記帳一起刪", role: .destructive) { onDelete(req.vehicle, .withExpenses) }
+            } else {
+                Button("刪除", role: .destructive) { onDelete(req.vehicle, .unlinkOnly) }
+            }
+            Button("取消", role: .cancel) {}
+        } message: { req in
+            Text(VehicleDeletion.confirmMessage(req.summary))
         }
-        store.vehicles = updated
     }
-
 }

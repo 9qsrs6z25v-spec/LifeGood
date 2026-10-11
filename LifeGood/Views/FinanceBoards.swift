@@ -777,13 +777,17 @@ struct VehicleFacts: Equatable {
         }
         if v.hasBattery {
             let a = VehicleChargeAnalytics(expenses: chargeExpenses(v, expenses: e.expenses),
-                                           capacityKWh: v.batteryCapacityKWh, homeKeyword: v.homeChargePlace)
+                                           capacityKWh: v.batteryCapacityKWh, homeKeyword: v.homeChargePlace,
+                                           powerType: v.powerType)
             f.perKwh = a.avgPricePerKwh
             f.perKm = a.avgCostPerKm
         }
         let byId = Dictionary(e.expenses.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
-        for id in FinanceLoans.carLoanIds(v, expenses: e.expenses) {
-            guard let ex = byId[id] else { continue }
+        // [v25.538] carLoanIds 是 Set，走訪順序每次開 App 都可能不同：兩筆車貸時進度條會輪流顯示不同那筆。
+        // 先依起始日排序（同一天再比 id），進度條固定顯示最早開始、算得出期數的那筆
+        let linked: [Expense] = FinanceLoans.carLoanIds(v, expenses: e.expenses).compactMap { byId[$0] }
+        let loans = linked.sorted { $0.date != $1.date ? $0.date < $1.date : $0.id.uuidString < $1.id.uuidString }
+        for ex in loans {
             if f.loan == nil, let s = ex.moneyLoanSchedule(now: now, calendar: cal) { f.loan = s }
             if let left = FinanceLoans.remaining(ex, at: now, store: e, calendar: cal) { f.loanLeft += left }
         }
@@ -816,7 +820,8 @@ struct VehicleBoardData: Equatable {
 
     static func build(vehicles: [Vehicle], facts: [UUID: VehicleFacts], expense e: ExpenseStore,
                       now: Date = Date()) -> VehicleBoardData {
-        let cal = Calendar.current
+        // [v25.538] 固定西曆（同房屋看板）：手機設民國曆時日期列會寫「1 輛・115 年」；今年從哪天起算也跟著用同一份
+        let cal = Calendar(identifier: .gregorian)
         var d = VehicleBoardData()
         d.year = cal.component(.year, from: now)
         d.month = cal.component(.month, from: now)
@@ -860,7 +865,8 @@ struct VehicleBoardData: Equatable {
             }
             if v.hasBattery {
                 let a = VehicleChargeAnalytics(expenses: VehicleFacts.chargeExpenses(v, expenses: e.expenses),
-                                               capacityKWh: v.batteryCapacityKWh, homeKeyword: v.homeChargePlace)
+                                               capacityKWh: v.batteryCapacityKWh, homeKeyword: v.homeChargePlace,
+                                               powerType: v.powerType)
                 kwhCost += a.totalCost
                 kwh += a.totalKwh
                 for iv in a.intervals {

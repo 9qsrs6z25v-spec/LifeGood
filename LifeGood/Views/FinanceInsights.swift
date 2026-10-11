@@ -14,6 +14,7 @@ import SwiftUI
 //   編輯那天算的、之後不會更新，放兩年就停在兩年前。外幣保單一律換成台幣。
 //   已經滿期的保單不再算資產（錢已經領回去了）。
 // - 已經賣掉的車不算（FinanceStore.totalVehicleValue 連賣掉的也加進去）。
+//   [v25.538] 但它還在扣的車貸照算進負債，算到那筆貸款停扣那天（車子賣了，貸款不一定跟著停）。
 // - [v25.532] 房貸算的是還欠銀行的本金（HouseFacts：用借款本金和每期金額反推，沒填借款本金時
 //   用購入價減自備款推算，畫面上寫「約」；連本金都推不出來才退回含利息的「還要繳」）。
 //   以前房貸也是含利息的還要繳，淨資產被利息多扣了一大截，跟房屋卡片上的數字也對不起來。
@@ -145,15 +146,14 @@ enum FinanceLoans {
         return Double(max(0, index(atOrAfter: afterEnd) - index(atOrAfter: day))) * store.ntdValue(of: e)
     }
 
-    /// 已經算在房子、車子裡的貸款（它們連結的記帳固定支出），「其他貸款」不再算一次
+    /// 已經算在房子裡的貸款（房子連結的記帳固定支出），「其他貸款」不再算一次。
+    /// [v25.538] 車子的不在這裡排除，改在 FinanceLoanIndex 用「有沒有算進某台車的車貸」排除（同一份名單）：
+    /// 以前連到車子的一律排除、賣掉的車又整台跳過，還在扣的車貸就從負債消失
     static func linkedExpenseIds(_ f: FinanceStore) -> Set<UUID> {
         var ids = Set<UUID>()
         for re in f.realEstates {
             if let id = re.linkedExpenseId { ids.insert(id) }
             for m in re.mortgageItems { if let id = m.linkedExpenseId { ids.insert(id) } }
-        }
-        for v in f.vehicles {
-            for fe in v.fixedExpenses { if let id = fe.linkedExpenseId { ids.insert(id) } }
         }
         return ids
     }
@@ -187,18 +187,23 @@ struct FinanceLoanIndex {
         let byId = Dictionary(e.expenses.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
         let loans = e.expenses.filter { $0.isRecurringFixed && $0.fixedCategory == .loan }
         var car: [UUID: [Expense]] = [:]
+        // [v25.538] 含已售出的車：車子賣了，車貸不一定跟著停（FinanceSnapshot 照每筆的結束日算到停扣那天）。
+        // 同一筆只算給一台車（舊資料可能鏡像在 A、linkedVehicleId 卻指 B），負債不會扣兩次
+        var counted = Set<UUID>()
         for v in f.vehicles {
-            car[v.id] = FinanceLoans.carLoanIds(v, expenses: loans).compactMap { byId[$0] }
+            let ids = FinanceLoans.carLoanIds(v, expenses: loans).subtracting(counted)
+            counted.formUnion(ids)
+            car[v.id] = ids.compactMap { byId[$0] }
         }
         carLoans = car
-        // 連結到房子、車子的不算（房貸在 houses、車貸在 carLoans）
+        // [v25.538] 連結到房子的不算（房貸在 houses）；車貸只排除上面真的算進某台車的那幾筆，
+        // 兩邊用同一份名單，一筆貸款不會兩邊都算、也不會兩邊都沒算
         let linked = FinanceLoans.linkedExpenseIds(f)
         let realEstateIds = Set(f.realEstates.map(\.id))
-        let vehicleIds = Set(f.vehicles.map(\.id))
         otherLoans = loans.filter { ex in
+            if counted.contains(ex.id) { return false }
             if linked.contains(ex.id) { return false }
             if let id = ex.linkedRealEstateId, realEstateIds.contains(id) { return false }
-            if let id = ex.linkedVehicleId, vehicleIds.contains(id) { return false }
             return true
         }
     }
@@ -237,13 +242,15 @@ extension FinanceSnapshot {
         }
 
         for v in f.vehicles {
+            // [v25.538] 車貸先算、而且只看那筆貸款自己的起訖日（remaining 照 endDate 算到停扣那天）：
+            // 車子賣了貸款不一定跟著停，以前賣掉的車整台跳過，還在扣的車貸就從負債消失
+            for ex in loans.carLoans[v.id] ?? [] {
+                if let left = FinanceLoans.remaining(ex, at: date, store: e, calendar: cal) { s.carLoan += left }
+            }
             guard v.purchaseDate <= date else { continue }
             if let sold = v.soldDate, sold <= date { continue }
             s.vehicle += isNow ? v.currentValue
                 : lerp(v.purchasePrice, v.currentValue, from: v.purchaseDate, to: v.soldDate ?? now, at: date)
-            for ex in loans.carLoans[v.id] ?? [] {
-                if let left = FinanceLoans.remaining(ex, at: date, store: e, calendar: cal) { s.carLoan += left }
-            }
         }
 
         for ins in f.insurances where ins.startDate <= date && date < ins.maturityDate {

@@ -395,12 +395,6 @@ struct FixedExpenseView: View {
                 re.utilityPayments.removeAll { $0.linkedExpenseId == expense.id }   // [v25.530] 同 VariableExpenseView
                 financeStore.update(re)
             }
-            // 刪除連結的汽車定期支出項目
-            if let linkedId = expense.linkedVehicleId,
-               var vehicle = financeStore.vehicles.first(where: { $0.id == linkedId }) {
-                vehicle.fixedExpenses.removeAll { $0.linkedExpenseId == expense.id }
-                financeStore.update(vehicle)
-            }
             // 同步刪除銀行扣款記錄
             if let bankId = expense.linkedBankMilestoneId,
                var ms = lifeStore.milestones.first(where: { $0.id == bankId }) {
@@ -408,6 +402,8 @@ struct FixedExpenseView: View {
                 lifeStore.update(ms)
             }
         }
+        // [v25.538] 車子身上指到這些支出的鏡像由 store.delete 一起清（VehicleMirrors：每台車的定期、變動都看）。
+        // 以前在上面迴圈只清 linkedVehicleId 那台的定期清單，改連過別台車留下的鏡像會變孤兒、繼續算進月固定支出。
         store.delete(at: offsets, from: list)
     }
 
