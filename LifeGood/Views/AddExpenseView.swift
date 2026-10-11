@@ -75,6 +75,8 @@ struct AddExpenseView: View {
     /// 社交禮金收受人（家人 + 人際關係多選）
     @State private var selectedSocialRecipients: Set<String> = []
     @State private var showSocialRecipientPopover: Bool = false
+    /// [v25.537] 收受人名單的搜尋字
+    @State private var socialRecipientQuery = ""
     /// 固定支出：列入節稅追蹤；nil 採自動推斷
     @State private var taxDeductibleOverride: Bool? = nil
     @State private var selectedDiningMembers: Set<String> = []
@@ -1630,25 +1632,118 @@ struct AddExpenseView: View {
 
     // MARK: - 社交禮金收受人選單
 
-    /// 候選人來源：家人 + 人際關係（朋友 / 同事 / 客戶）
-    private var socialRecipientCandidates: [(group: String, names: [String])] {
-        var groups: [(String, [String])] = []
-        let famNames = lifeStore.familyMembers
-            .map { $0.chineseName }
-            .filter { !$0.isEmpty }
-        if !famNames.isEmpty { groups.append(("家人", famNames)) }
+    /// [v25.537] 收受人名單的一個人：名字（存檔就是存名字）＋一行小字（部門、職稱、公司）
+    private struct RecipientCandidate: Identifiable {
+        let name: String
+        let detail: String
+        var id: String { name }
+    }
+
+    private struct RecipientGroup: Identifiable {
+        let title: String
+        let people: [RecipientCandidate]
+        var id: String { title }
+    }
+
+    /// 候選人來源：家人、人際關係（朋友／同事／客戶…），
+    /// [v25.537] 再加上公司的人：部屬（依課別）、組織圖的同事（依部門）、名片
+    /// （使用者：「收受人我不能選擇公司的人，可以幫我加入名單，並且有搜尋功能嗎」）。
+    /// 同一個名字只出現一次（先出現的那一組贏），因為存檔存的是名字。
+    private var socialRecipientGroups: [RecipientGroup] {
+        var seen = Set<String>()
+        var groups: [RecipientGroup] = []
+        func add(_ title: String, _ people: [RecipientCandidate]) {
+            var unique: [RecipientCandidate] = []
+            for c in people where !c.name.isEmpty && !seen.contains(c.name) {
+                seen.insert(c.name)
+                unique.append(c)
+            }
+            if !unique.isEmpty { groups.append(RecipientGroup(title: title, people: unique)) }
+        }
+        add("家人", lifeStore.familyMembers.map { RecipientCandidate(name: $0.chineseName, detail: "") })
         let relGroups = Dictionary(grouping: lifeStore.relationships) { $0.group.rawValue }
         for key in ["朋友", "同事", "客戶", "家人", "其他"] {
-            let names = (relGroups[key] ?? [])
-                .map { $0.name }
-                .filter { !$0.isEmpty }
-            if !names.isEmpty { groups.append((key, names)) }
+            add(key, (relGroups[key] ?? []).map { RecipientCandidate(name: $0.name, detail: "") })
         }
-        // 去重（保留首次出現順序）
-        return groups.map { (g, list) in
-            var seen = Set<String>(); var unique: [String] = []
-            for n in list where !seen.contains(n) { seen.insert(n); unique.append(n) }
-            return (g, unique)
+        for g in subordinateRecipientGroups { add(g.title, g.people) }
+        for g in orgPersonRecipientGroups { add(g.title, g.people) }
+        add("名片", businessCardRecipients)
+        return groups
+    }
+
+    /// 部門顯示名：名稱優先，沒有才用代碼
+    private func recipientDepartmentName(_ id: UUID?) -> String? {
+        guard let id, let d = lifeStore.departments.first(where: { $0.id == id }) else { return nil }
+        let n = d.name.isEmpty ? d.code : d.name
+        return n.isEmpty ? nil : n
+    }
+
+    private static func recipientSorted(_ list: [RecipientCandidate]) -> [RecipientCandidate] {
+        list.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+    }
+
+    private static func joinedDetail(_ parts: [String]) -> String {
+        parts.map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+            .joined(separator: " · ")
+    }
+
+    /// 部屬，依課別分組（跟「選擇部屬」同一套課別名）
+    private var subordinateRecipientGroups: [RecipientGroup] {
+        var buckets: [String: [RecipientCandidate]] = [:]
+        for sub in lifeStore.subordinates {
+            let raw = sub.department.trimmingCharacters(in: .whitespaces)
+            let dept = recipientDepartmentName(sub.departmentId) ?? (raw.isEmpty ? "未分課別" : raw)
+            buckets[dept, default: []].append(
+                RecipientCandidate(name: sub.name, detail: Self.joinedDetail([sub.jobTitle, sub.plantArea])))
+        }
+        return buckets.keys
+            .sorted { a, b in
+                if (a == "未分課別") != (b == "未分課別") { return b == "未分課別" }
+                return a.localizedStandardCompare(b) == .orderedAscending
+            }
+            .map { RecipientGroup(title: "部屬・\($0)", people: Self.recipientSorted(buckets[$0] ?? [])) }
+    }
+
+    /// 組織圖裡的同事，依部門分組；已離職的放最後一組
+    private var orgPersonRecipientGroups: [RecipientGroup] {
+        var buckets: [String: [RecipientCandidate]] = [:]
+        var left: [RecipientCandidate] = []
+        for p in lifeStore.orgPeople {
+            let c = RecipientCandidate(name: p.name, detail: Self.joinedDetail([p.jobTitle]))
+            if p.isInactive { left.append(c); continue }
+            buckets[recipientDepartmentName(p.departmentId) ?? "未分部門", default: []].append(c)
+        }
+        var out = buckets.keys
+            .sorted { a, b in
+                if (a == "未分部門") != (b == "未分部門") { return b == "未分部門" }
+                return a.localizedStandardCompare(b) == .orderedAscending
+            }
+            .map { RecipientGroup(title: "公司・\($0)", people: Self.recipientSorted(buckets[$0] ?? [])) }
+        if !left.isEmpty { out.append(RecipientGroup(title: "公司・已離職", people: Self.recipientSorted(left))) }
+        return out
+    }
+
+    /// 名片：依公司再依姓名排，小字寫公司與職稱
+    private var businessCardRecipients: [RecipientCandidate] {
+        lifeStore.businessCards
+            .sorted { a, b in
+                if a.company != b.company { return a.company.localizedStandardCompare(b.company) == .orderedAscending }
+                return a.name.localizedStandardCompare(b.name) == .orderedAscending
+            }
+            .map { RecipientCandidate(name: $0.name, detail: Self.joinedDetail([$0.company, $0.jobTitle])) }
+    }
+
+    /// 搜尋：姓名、小字（部門、職稱、公司）、組名都能打
+    private var filteredRecipientGroups: [RecipientGroup] {
+        let q = socialRecipientQuery.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !q.isEmpty else { return socialRecipientGroups }
+        return socialRecipientGroups.compactMap { g in
+            let groupHit = g.title.lowercased().contains(q)
+            let people = groupHit ? g.people : g.people.filter {
+                $0.name.lowercased().contains(q) || $0.detail.lowercased().contains(q)
+            }
+            return people.isEmpty ? nil : RecipientGroup(title: g.title, people: people)
         }
     }
 
@@ -1662,69 +1757,109 @@ struct AddExpenseView: View {
         return selectedSocialRecipients.sorted().joined(separator: "、")
     }
 
-    private var socialRecipientSelectorList: some View {
-        NavigationStack {
-            List {
-                Section {
-                    Button {
-                        selectedSocialRecipients.removeAll()
-                    } label: {
-                        HStack {
-                            Image(systemName: selectedSocialRecipients.isEmpty
-                                  ? "checkmark.circle.fill" : "circle")
-                                .foregroundStyle(selectedSocialRecipients.isEmpty ? Color.green : Color.secondary)
-                            Text("不指定")
-                            Spacer()
-                        }
-                        .contentShape(Rectangle())
+    private func toggleSocialRecipient(_ name: String) {
+        if selectedSocialRecipients.contains(name) {
+            selectedSocialRecipients.remove(name)
+        } else {
+            selectedSocialRecipients.insert(name)
+        }
+    }
+
+    private func socialRecipientRow(name: String, detail: String) -> some View {
+        let picked = selectedSocialRecipients.contains(name)
+        return Button {
+            toggleSocialRecipient(name)
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: picked ? "checkmark.circle.fill" : "circle")
+                    .foregroundStyle(picked ? Color.green : Color.secondary)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(name)
+                    if !detail.isEmpty {
+                        Text(detail).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                     }
-                    .buttonStyle(.plain)
                 }
-                ForEach(socialRecipientCandidates, id: \.group) { group in
-                    Section(group.group) {
-                        ForEach(group.names, id: \.self) { name in
-                            Button {
-                                if selectedSocialRecipients.contains(name) {
-                                    selectedSocialRecipients.remove(name)
-                                } else {
-                                    selectedSocialRecipients.insert(name)
-                                }
-                            } label: {
-                                HStack {
-                                    Image(systemName: selectedSocialRecipients.contains(name)
-                                          ? "checkmark.circle.fill" : "circle")
-                                        .foregroundStyle(selectedSocialRecipients.contains(name) ? Color.green : Color.secondary)
-                                    Text(name)
-                                    Spacer()
-                                }
-                                .contentShape(Rectangle())
-                            }
-                            .buttonStyle(.plain)
+                Spacer()
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// 最上面：不指定，以及已經選的人（名單很長時不用捲下去找；舊紀錄裡、名單已經沒有的名字也能取消）
+    @ViewBuilder
+    private var socialRecipientTopSections: some View {
+        Section {
+            Button {
+                selectedSocialRecipients.removeAll()
+            } label: {
+                HStack {
+                    Image(systemName: selectedSocialRecipients.isEmpty
+                          ? "checkmark.circle.fill" : "circle")
+                        .foregroundStyle(selectedSocialRecipients.isEmpty ? Color.green : Color.secondary)
+                    Text("不指定")
+                    Spacer()
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+        }
+        if !selectedSocialRecipients.isEmpty {
+            Section("已選") {
+                ForEach(selectedSocialRecipients.sorted(), id: \.self) { name in
+                    socialRecipientRow(name: name, detail: "")
+                }
+            }
+        }
+    }
+
+    private var socialRecipientSelectorList: some View {
+        let groups = filteredRecipientGroups
+        let searching = !socialRecipientQuery.trimmingCharacters(in: .whitespaces).isEmpty
+        return NavigationStack {
+            List {
+                if !searching {
+                    socialRecipientTopSections
+                }
+                if searching && groups.isEmpty {
+                    Text("找不到符合「\(socialRecipientQuery)」的人")
+                        .font(.callout).foregroundStyle(.secondary)
+                }
+                ForEach(groups) { group in
+                    Section(group.title) {
+                        ForEach(group.people) { c in
+                            socialRecipientRow(name: c.name, detail: c.detail)
                         }
                     }
                 }
             }
+            .searchable(text: $socialRecipientQuery,
+                        placement: .navigationBarDrawer(displayMode: .always),
+                        prompt: "搜尋姓名、部門、公司、職稱")
             .navigationTitle("收受人")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                // v4：從 topBarTrailing 修正為 topBarLeading，對齊全 App 關閉鈕一律置左規則
-                ToolbarItem(placement: .topBarLeading) {
-                    Button("完成") { showSocialRecipientPopover = false }
-                        .bold().foregroundStyle(.green)
-                }
-                // v4：已選人數提示膠囊，取代 navigationTitle 靜態標題（僅在有選取時顯示）
-                if !selectedSocialRecipients.isEmpty {
-                    ToolbarItem(placement: .principal) {
-                        HStack(spacing: 6) {
-                            Text("收受人").font(.headline)
-                            Text("已選 \(selectedSocialRecipients.count)")
-                                .font(.caption2.weight(.semibold))
-                                .foregroundStyle(.pink)
-                                .padding(.horizontal, 7).padding(.vertical, 2.5)
-                                .background(Color.pink.opacity(0.12))
-                                .clipShape(Capsule())
-                        }
-                    }
+            .toolbar { socialRecipientToolbar }
+        }
+    }
+
+    @ToolbarContentBuilder
+    private var socialRecipientToolbar: some ToolbarContent {
+        // v4：從 topBarTrailing 修正為 topBarLeading，對齊全 App 關閉鈕一律置左規則
+        ToolbarItem(placement: .topBarLeading) {
+            Button("完成") { showSocialRecipientPopover = false }
+                .bold().foregroundStyle(.green)
+        }
+        // v4：已選人數提示膠囊，取代 navigationTitle 靜態標題（僅在有選取時顯示）
+        if !selectedSocialRecipients.isEmpty {
+            ToolbarItem(placement: .principal) {
+                HStack(spacing: 6) {
+                    Text("收受人").font(.headline)
+                    Text("已選 \(selectedSocialRecipients.count)")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.pink)
+                        .padding(.horizontal, 7).padding(.vertical, 2.5)
+                        .background(Color.pink.opacity(0.12))
+                        .clipShape(Capsule())
                 }
             }
         }
@@ -1797,9 +1932,10 @@ struct AddExpenseView: View {
                         }
                         .frame(maxWidth: .infinity)
 
-                        if !socialRecipientCandidates.isEmpty {
+                        if !socialRecipientGroups.isEmpty {
                             Divider()
                             Button {
+                                socialRecipientQuery = ""
                                 showSocialRecipientPopover = true
                             } label: {
                                 HStack(spacing: 2) {
@@ -1812,7 +1948,7 @@ struct AddExpenseView: View {
                             .buttonStyle(.plain)
                             .sheet(isPresented: $showSocialRecipientPopover) {
                                 socialRecipientSelectorList
-                                    .presentationDetents([.height(420), .medium])
+                                    .presentationDetents([.medium, .large])
                                     .presentationDragIndicator(.visible)
                                     .appStores()
                             }
