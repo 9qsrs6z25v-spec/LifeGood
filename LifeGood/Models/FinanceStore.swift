@@ -308,6 +308,7 @@ enum RealEstateDeletion {
             expenseStore.expenses.removeAll { ids.contains($0.id) }
         }
         removeBankRecords(linkedTo: ids, lifeStore: lifeStore)
+        VehicleMirrors.removeMirrors(of: ids)
     }
 
     /// 只清銀行扣款／入帳紀錄（linkedExpenseId 在 ids 裡的）；沒有對得上的帳戶就不動 milestones。
@@ -349,6 +350,104 @@ enum RealEstateDeletion {
             expenseStore.incomes.removeAll { $0.id == incomeId }
         }
         removeBankRecords(linkedTo: bankIds, lifeStore: lifeStore)
+        VehicleMirrors.removeMirrors(of: ids, financeStore: financeStore)
         financeStore.deleteRealEstate(estate)
+    }
+}
+
+// MARK: - 車子身上的記帳鏡像（v25.538）
+
+/// 車子的 fixedExpenses／variableExpenses 是記帳支出的「鏡像」（linkedExpenseId 指回去）。
+/// 以前只有變動／固定支出清單的左滑刪除會順手清它，記帳卡片刪除、電子發票撤銷匯入、
+/// 刪房子連帶刪的支出都不清，車子這邊留下指向不存在支出的項目，每月養車照算。
+/// 所有刪支出的路都呼叫這一個（ExpenseStore.delete 已經接上）。
+enum VehicleMirrors {
+    static func removeMirrors(of expenseIds: Set<UUID>, financeStore: FinanceStore = AppStores.finance) {
+        guard !expenseIds.isEmpty else { return }
+        func hit(_ id: UUID?) -> Bool { id.map { expenseIds.contains($0) } ?? false }
+        var vehicles = financeStore.vehicles
+        var changed = false
+        for i in vehicles.indices {
+            let before = vehicles[i].fixedExpenses.count + vehicles[i].variableExpenses.count
+            vehicles[i].fixedExpenses.removeAll { hit($0.linkedExpenseId) }
+            vehicles[i].variableExpenses.removeAll { hit($0.linkedExpenseId) }
+            if vehicles[i].fixedExpenses.count + vehicles[i].variableExpenses.count != before { changed = true }
+        }
+        // 一次寫回：vehicles 的 didSet 會存檔＋同步
+        if changed { financeStore.vehicles = vehicles }
+    }
+}
+
+// MARK: - 刪整台車（v25.538）
+
+/// 以前三個地方各寫一份刪車（列表左滑、卡片、編輯頁取消），都只刪鏡像連到的支出，
+/// 不清銀行扣款紀錄，只靠 linkedVehicleId 連過來的支出變成指向不存在車子的孤兒；
+/// 列表左滑還沒有確認框。現在收成一份，並讓你選要不要連記帳一起刪。
+enum VehicleDeletion {
+    enum Mode {
+        /// 只刪車子：連到它的記帳支出留著，只是不再算在這台車（分類、度數照留，記帳統計不變）
+        case unlinkOnly
+        /// 連記帳一起刪：支出、收據照片、銀行扣款紀錄都刪
+        case withExpenses
+    }
+
+    struct Summary {
+        /// 連到這台車、記帳裡真的找得到的支出筆數
+        let expenseCount: Int
+        /// 照片紀錄（行照、保單、保養單…）的張數：兩種刪法都會刪
+        let photoRecordCount: Int
+        /// 那些支出附的收據照片：跟著支出走（只刪車子時留著）
+        let receiptCount: Int
+    }
+
+    /// 這台車的支出：鏡像指到的，加上記帳裡 linkedVehicleId 指著它的
+    static func linkedExpenseIds(of vehicle: Vehicle, expenses: [Expense]) -> Set<UUID> {
+        var ids = Set<UUID>()
+        vehicle.fixedExpenses.forEach { if let id = $0.linkedExpenseId { ids.insert(id) } }
+        vehicle.variableExpenses.forEach { if let id = $0.linkedExpenseId { ids.insert(id) } }
+        for e in expenses where e.linkedVehicleId == vehicle.id { ids.insert(e.id) }
+        return ids
+    }
+
+    static func summary(of vehicle: Vehicle, expenseStore: ExpenseStore) -> Summary {
+        let ids = linkedExpenseIds(of: vehicle, expenses: expenseStore.expenses)
+        let linked = expenseStore.expenses.filter { ids.contains($0.id) }
+        let receipts = linked.reduce(0) { $0 + $1.photoFileNames.count }
+        let records = vehicle.photoRecords.reduce(0) { $0 + $1.photoFileNames.count }
+        return Summary(expenseCount: linked.count, photoRecordCount: records, receiptCount: receipts)
+    }
+
+    /// 確認框的說明：先講兩顆都會刪的照片紀錄，再講兩顆的差別
+    static func confirmMessage(_ s: Summary) -> String {
+        var lines: [String] = []
+        if s.photoRecordCount > 0 {
+            lines.append("這台車的 \(s.photoRecordCount) 張照片紀錄（行照、保單、保養單…）兩種刪法都會刪掉。")
+        }
+        if s.expenseCount > 0 {
+            let receipt = s.receiptCount > 0 ? "、\(s.receiptCount) 張收據" : ""
+            lines.append("連到這台車的 \(s.expenseCount) 筆記帳支出：選「只刪車子」會留在記帳裡，只是不再算在這台車；選「連記帳一起刪」會連同銀行扣款紀錄\(receipt)一起刪掉。")
+        }
+        lines.append("不能復原。")
+        return lines.joined(separator: "\n")
+    }
+
+    static func delete(_ vehicle: Vehicle, mode: Mode, financeStore: FinanceStore,
+                       expenseStore: ExpenseStore, lifeStore: LifeStore) {
+        let ids = linkedExpenseIds(of: vehicle, expenses: expenseStore.expenses)
+        switch mode {
+        case .withExpenses:
+            RealEstateDeletion.removeExpenses(ids, expenseStore: expenseStore, lifeStore: lifeStore)
+        case .unlinkOnly:
+            // 只解除連結：子分類、度數、里程都留著，記帳那邊的「汽車 - 電費」統計不變
+            var expenses = expenseStore.expenses
+            var changed = false
+            for i in expenses.indices where expenses[i].linkedVehicleId == vehicle.id {
+                expenses[i].linkedVehicleId = nil
+                changed = true
+            }
+            if changed { expenseStore.expenses = expenses }
+        }
+        // 車子本身（照片紀錄的檔案與 iCloud 備份一起刪）；鏡像跟著車子消失
+        financeStore.deleteVehicle(vehicle)
     }
 }

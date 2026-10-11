@@ -1772,6 +1772,12 @@ enum VehicleFixedCategory: String, Codable, CaseIterable, Identifiable {
     case subscription = "訂閱"
 
     var id: String { rawValue }
+
+    /// [v25.538] 認不得的值（以後新版加的分類）退回「稅費」，不要讓整筆被 lossyArray 默默丟掉
+    init(from decoder: Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = Self(rawValue: raw) ?? .tax
+    }
 }
 
 enum VehicleExpensePeriod: String, Codable, CaseIterable, Identifiable {
@@ -1779,6 +1785,12 @@ enum VehicleExpensePeriod: String, Codable, CaseIterable, Identifiable {
     case yearly = "年"
 
     var id: String { rawValue }
+
+    /// [v25.538] 認不得的值（以後新版加的分類）退回「月」，不要讓整筆被 lossyArray 默默丟掉
+    init(from decoder: Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = Self(rawValue: raw) ?? .monthly
+    }
 
     /// 換算為每月金額
     func toMonthly(_ amount: Double) -> Double {
@@ -1849,6 +1861,12 @@ enum VehicleVariableCategory: String, Codable, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
+    /// [v25.538] 認不得的值（以後新版加的分類）退回「其他」，不要讓整筆被 lossyArray 默默丟掉
+    init(from decoder: Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = Self(rawValue: raw) ?? .other
+    }
+
     var icon: String {
         switch self {
         case .fuel: return "fuelpump"
@@ -1914,6 +1932,12 @@ enum VehiclePhotoCategory: String, Codable, CaseIterable, Identifiable {
     case other = "其他"
 
     var id: String { rawValue }
+
+    /// [v25.538] 認不得的值（以後新版加的分類）退回「其他」，不要讓整筆被 lossyArray 默默丟掉
+    init(from decoder: Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = Self(rawValue: raw) ?? .other
+    }
 
     var icon: String {
         switch self {

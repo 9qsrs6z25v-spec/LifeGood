@@ -103,6 +103,8 @@ class ExpenseStore: ObservableObject {
     func delete(_ expense: Expense) {
         for name in expense.photoFileNames { Expense.deletePhoto(name) }
         expenses.removeAll { $0.id == expense.id }
+        // [v25.538] 車子身上指到這筆的鏡像一起清（見 VehicleMirrors）
+        VehicleMirrors.removeMirrors(of: [expense.id])
     }
 
     func delete(at offsets: IndexSet, from list: [Expense]) {
@@ -112,6 +114,7 @@ class ExpenseStore: ObservableObject {
             for name in exp.photoFileNames { Expense.deletePhoto(name) }
         }
         expenses.removeAll { idsToDelete.contains($0.id) }
+        VehicleMirrors.removeMirrors(of: idsToDelete)
     }
 
     // MARK: - 收入 CRUD

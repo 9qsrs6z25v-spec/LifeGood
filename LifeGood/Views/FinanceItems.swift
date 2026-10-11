@@ -20,6 +20,8 @@ private func financeNumberFormatter(_ digits: Int) -> NumberFormatter {
     return f
 }
 
+private let financeNumber0 = financeNumberFormatter(0)
+private let financeNumber1 = financeNumberFormatter(1)
 private let financeNumber2 = financeNumberFormatter(2)
 private let financeNumber4 = financeNumberFormatter(4)
 
@@ -38,7 +40,14 @@ private let financeGregorian = Calendar(identifier: .gregorian)
 enum FinanceItemText {
     /// 「612」「61.25」「1,234.5」（小數最多兩位；股數這種要四位的傳 digits: 4）
     static func number(_ v: Double, digits: Int = 2) -> String {
-        let f = digits > 2 ? financeNumber4 : financeNumber2
+        // [v25.538] 以前只分「兩位」「四位」：digits: 1 也印兩位，車卡寫成「持有 2.07 年」「每度 NT$7.94」
+        let f: NumberFormatter
+        switch digits {
+        case ...0: f = financeNumber0
+        case 1: f = financeNumber1
+        case 2: f = financeNumber2
+        default: f = financeNumber4
+        }
         return f.string(from: NSNumber(value: v)) ?? String(format: "%.0f", v)
     }
 
