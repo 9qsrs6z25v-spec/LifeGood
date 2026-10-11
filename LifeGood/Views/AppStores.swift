@@ -20,8 +20,12 @@ enum AppStores {
 extension View {
     /// 掛在每一個 sheet／fullScreenCover／popover 內容的最外層：
     /// 把 App 最外層注入的六個共用物件再放一次（都是同一份，不會多一份資料）。
-    func appStores() -> some View {
-        modifier(AppStoresModifier())
+    ///
+    /// 回傳 AnyView：sheet 內容的型別會變成主畫面型別的一部分，有些頁面（行程詳情）
+    /// 掛了二十幾個 sheet，型別太深在執行時 demangle 爆過棧。在這裡抹掉，
+    /// 每個 sheet 的內容型別反而比以前短。只在 sheet 最外層用一次，不影響效能。
+    func appStores() -> AnyView {
+        AnyView(modifier(AppStoresModifier()))
     }
 }
 
