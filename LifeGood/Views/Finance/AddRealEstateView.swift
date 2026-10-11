@@ -391,6 +391,7 @@ struct AddRealEstateView: View {
                     }
                     .popover(isPresented: $showFeaturePicker, arrowEdge: .top) {
                         featureToggleList
+                            .appStores()
                     }
                     // [美化] 存檔中顯示同色 ProgressView，對齊 AddIncomeView／AddExpenseView／
                     // AddSavingsInsuranceView／AddVehicleView／AddStockView 儲存按鈕載入狀態規格
@@ -417,9 +418,11 @@ struct AddRealEstateView: View {
         content
             .sheet(item: $viewingPhotoURL) { url in
                 PhotoViewerSheet(url: url)
+                    .appStores()
             }
             .sheet(item: $editingExpense) { exp in
                 AddExpenseView(expenseType: exp.expenseType, editingExpense: exp)
+                    .appStores()
             }
             .sheet(isPresented: $addingMortgage) {
                 AddExpenseView(
@@ -432,6 +435,7 @@ struct AddRealEstateView: View {
                         mortgageLinkExisting: true
                     )
                 )
+                .appStores()
             }
             .sheet(isPresented: $addingPaid) {
                 AddExpenseView(
@@ -444,6 +448,7 @@ struct AddRealEstateView: View {
                         realEstateLinkExisting: true
                     )
                 )
+                .appStores()
             }
     }
 
@@ -460,9 +465,11 @@ struct AddRealEstateView: View {
                         realEstateLinkExisting: true
                     )
                 )
+                .appStores()
             }
             .sheet(isPresented: $addingUtilityPayment) {
                 UtilityPaymentEditor(estateId: stableEstateId, editing: nil)
+                    .appStores()
             }
             .confirmationDialog("選擇變動支出類別", isPresented: $showVariableCategoryPicker, titleVisibility: .visible) {
                 ForEach(RealEstateExpenseCategory.allCases.filter { $0 != .housePayment }) { cat in

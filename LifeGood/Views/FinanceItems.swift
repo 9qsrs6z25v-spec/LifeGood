@@ -334,7 +334,7 @@ struct InsurancePolicyCard: View {
                     .bold()
                 }
             }
-            .sheet(isPresented: $showEdit) { AddSavingsInsuranceView(editing: ins) }
+            .sheet(isPresented: $showEdit) { AddSavingsInsuranceView(editing: ins).appStores() }
             .premiumLockAlert(isPresented: $showPremiumAlert)
         }
     }

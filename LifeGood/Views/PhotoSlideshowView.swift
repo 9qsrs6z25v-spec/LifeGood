@@ -479,6 +479,7 @@ struct PhotoSlideshowView: View {
                     resume()
                 })
                 .ignoresSafeArea()
+                .appStores()
         }
         .overlay { tapOverlay }
         .onChange(of: music.lastError) { _, new in

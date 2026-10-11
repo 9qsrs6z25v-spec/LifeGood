@@ -1103,6 +1103,7 @@ struct BusinessCardView: View {
                     companies: companyCounts,
                     hidden: hiddenCompanies,
                     onApply: { setHiddenCompanies($0) })
+                .appStores()
             }
             .confirmationDialog(
                 "將 \(selectedIds.count) 張名片加入「聯絡人」？",
@@ -1149,6 +1150,7 @@ struct BusinessCardView: View {
                     onCancel: { showCardScanner = false }
                 )
                 .ignoresSafeArea()
+                .appStores()
             }
             .sheet(item: $scannedDraft, onDismiss: {
                 // 多張連續編輯：上一張關閉後自動帶出下一張
@@ -1163,30 +1165,36 @@ struct BusinessCardView: View {
                     prefilled: draft.parsed,
                     prefilledPhotoData: draft.photoData
                 )
+                .appStores()
             }
             .sheet(isPresented: $showAdd) {
                 BusinessCardEditor(editing: nil)
+                    .appStores()
             }
             .sheet(item: Binding(
                 get: { viewingCardId.map { IdentifiableUUID(id: $0) } },
                 set: { viewingCardId = $0?.id }
             )) { wrapper in
                 BusinessCardDetailView(cardId: wrapper.id)
+                    .appStores()
             }
             .sheet(isPresented: $showContactPicker) {
                 ContactPickerView { contact in
                     importContact(contact)
                 }
                 .ignoresSafeArea()
+                .appStores()
             }
             // [v25.400] 重複檢查與多選合併
             .sheet(isPresented: $showDuplicateReview) {
                 BusinessCardDuplicateReview()
+                    .appStores()
             }
             .sheet(item: $mergePlan) { plan in
                 BusinessCardMergeSheet(cardIds: plan.ids) { report in
                     finishMerge(report)
                 }
+                .appStores()
             }
             .alert("合併名片", isPresented: Binding(
                 get: { mergeResultMessage != nil },
@@ -1616,6 +1624,7 @@ struct BusinessCardDetailView: View {
             }
             .sheet(isPresented: $showEdit) {
                 BusinessCardEditor(editing: card)
+                    .appStores()
             }
             .fullScreenCover(isPresented: $showRescanScanner) {
                 BusinessCardScannerView(
@@ -1636,6 +1645,7 @@ struct BusinessCardDetailView: View {
                     onCancel: { showRescanScanner = false }
                 )
                 .ignoresSafeArea()
+                .appStores()
             }
             .sheet(item: $rescanDraft) { draft in
                 // 帶 editing + prefilled → 編輯器以 prefilled 覆寫欄位但保留 id / 連結
@@ -1644,12 +1654,14 @@ struct BusinessCardDetailView: View {
                     prefilled: draft.parsed,
                     prefilledPhotoData: draft.photoData
                 )
+                .appStores()
             }
             .sheet(item: Binding(
                 get: { viewingLinkedOrgPersonId.map { IdentifiableUUID(id: $0) } },
                 set: { viewingLinkedOrgPersonId = $0?.id }
             )) { wrapper in
                 OrgPersonDetailView(personId: wrapper.id)
+                    .appStores()
             }
             .premiumLockAlert(isPresented: $showPremiumAlert)
             .alert("確定要刪除這張名片嗎？", isPresented: $showDeleteConfirm) {
@@ -1751,6 +1763,7 @@ struct BusinessCardDetailView: View {
                 }
             }
             .ignoresSafeArea()
+            .appStores()
         }
         .photosPicker(isPresented: $showPhotosPicker, selection: $pickerItem, matching: .images)
         .onChange(of: pickerItem) { _, item in
@@ -1769,6 +1782,7 @@ struct BusinessCardDetailView: View {
         }
         .sheet(isPresented: $showQRFullscreen) {
             qrFullscreenView
+                .appStores()
         }
         // [v25.400] 這張名片不在了就自動關掉。
         // 名片可能在這張詳情開著的時候消失（被合併掉、或 iCloud 從別台裝置同步了刪除），
@@ -1811,9 +1825,12 @@ struct BusinessCardDetailView: View {
             avatarContent
         }
         .fullScreenCover(isPresented: $showAvatarLightbox) {
-            if let url = card.photoURL {
-                PhotoLightbox(url: url)
+            Group {
+                if let url = card.photoURL {
+                    PhotoLightbox(url: url)
+                }
             }
+            .appStores()
         }
     }
 

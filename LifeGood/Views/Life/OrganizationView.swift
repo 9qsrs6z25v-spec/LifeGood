@@ -204,6 +204,7 @@ struct OrganizationView: View {
                 set: { searchViewingPersonId = $0?.id }
             )) { wrapper in
                 OrgPersonDetailView(personId: wrapper.id)
+                    .appStores()
             }
             .navigationTitle("公司組織")
             .navigationBarTitleDisplayMode(.inline)
@@ -214,16 +215,19 @@ struct OrganizationView: View {
             }
             .sheet(item: $pdfURL) { wrapper in
                 ShareSheet(items: [wrapper.url])
+                    .appStores()
             }
             .sheet(item: Binding(
                 get: { viewingDeptId.map { IdentifiableUUID(id: $0) } },
                 set: { viewingDeptId = $0?.id }
             )) { wrapper in
                 DepartmentDetailView(deptId: wrapper.id)
+                    .appStores()
             }
             // [v25.357] 從廠區據點展開的決議直接開決議卡片
             .sheet(item: $openingResolution) { jump in
                 SideRoleResolutionCard(roleId: jump.roleId, resolutionId: jump.resolutionId)
+                    .appStores()
             }
             .sheet(item: $editingSite) { target in
                 CompanySiteEditor(site: target.isNew ? nil : target.site,
@@ -232,6 +236,7 @@ struct OrganizationView: View {
                 } onDelete: { id in
                     lifeStore.deleteCompanySite(id: id)
                 }
+                .appStores()
             }
             // [v25.367] 出圖進度：繪製本身綁在主執行緒（ImageRenderer 是 @MainActor），
             // 但每個階段之間會 yield，這層才畫得出來；壓檔那段跑在背景執行緒。
@@ -815,29 +820,36 @@ struct DepartmentDetailView: View {
             }
             .sheet(isPresented: $showEditDept) {
                 DepartmentEditor(editingId: deptId)
+                    .appStores()
             }
             .sheet(isPresented: $showManagerPicker) {
                 NavigationStack {
                     DeptManagerPicker(deptId: deptId)
                 }
+                .appStores()
             }
             .sheet(isPresented: $addingPerson) {
                 OrgPersonEditor(editingId: nil, defaultDepartmentId: deptId)
+                    .appStores()
             }
             .sheet(isPresented: $addingEquipment) {
                 EquipmentEditorSheet(editing: nil, defaultDepartmentId: deptId)
+                    .appStores()
             }
             .sheet(isPresented: $showDuplicateReview) {
                 OrgPersonDuplicateReview(focusDepartmentId: deptId)
+                    .appStores()
             }
             .sheet(item: $viewingEquipment) { eq in
                 EquipmentDetailCard(equipmentId: eq.id)
+                    .appStores()
             }
             .sheet(item: Binding(
                 get: { viewingPersonId.map { IdentifiableUUID(id: $0) } },
                 set: { viewingPersonId = $0?.id }
             )) { wrapper in
                 OrgPersonDetailView(personId: wrapper.id)
+                    .appStores()
             }
         }
     }
@@ -1959,6 +1971,7 @@ struct OrgPersonEditor: View {
                     pendingImage = image
                 }
                 .ignoresSafeArea()
+                .appStores()
             }
             .photosPicker(isPresented: $isPresentingPhotoPicker, selection: $photoItem, matching: .images)
             .onChange(of: photoItem) { _, item in
@@ -2274,24 +2287,29 @@ struct OrgPersonDetailView: View {
             }
             .sheet(isPresented: $showEdit) {
                 OrgPersonEditor(editingId: personId, defaultDepartmentId: nil)
+                    .appStores()
             }
             .sheet(isPresented: $showBirthdayReminder) {
                 BirthdayReminderSheet(orgPersonId: personId)
+                    .appStores()
             }
             .sheet(isPresented: $showAddWork) {
                 OrgPersonWorkEditor(personId: personId)
+                    .appStores()
             }
             .sheet(item: Binding(
                 get: { viewingRelatedPersonId.map { IdentifiableUUID(id: $0) } },
                 set: { viewingRelatedPersonId = $0?.id }
             )) { wrapper in
                 OrgPersonDetailView(personId: wrapper.id)
+                    .appStores()
             }
             .sheet(item: Binding(
                 get: { viewingLinkedCardId.map { IdentifiableUUID(id: $0) } },
                 set: { viewingLinkedCardId = $0?.id }
             )) { wrapper in
                 BusinessCardDetailView(cardId: wrapper.id)
+                    .appStores()
             }
             .alert("確定要刪除這個人員嗎？", isPresented: $showDeleteConfirm) {
                 Button("刪除", role: .destructive) {

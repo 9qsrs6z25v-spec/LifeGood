@@ -174,9 +174,9 @@ struct IncomeView: View {
                     }
                 }
             }
-            .sheet(isPresented: $showAdd) { AddIncomeView() }
-            .sheet(item: $editingItem) { item in AddIncomeView(editing: item) }
-            .sheet(item: $viewingItem) { item in FinanceItemCard(target: .income(item.id)) }
+            .sheet(isPresented: $showAdd) { AddIncomeView().appStores() }
+            .sheet(item: $editingItem) { item in AddIncomeView(editing: item).appStores() }
+            .sheet(item: $viewingItem) { item in FinanceItemCard(target: .income(item.id)).appStores() }
             .searchable(
                 text: $searchText,
                 placement: .navigationBarDrawer(displayMode: .always),

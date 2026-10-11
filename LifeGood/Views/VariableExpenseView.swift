@@ -188,12 +188,15 @@ struct VariableExpenseView: View {
             .onChange(of: filterRequest) { _, _ in applyFilterRequest() }
             .sheet(isPresented: $showingAddSheet) {
                 AddExpenseView(expenseType: .variable)
+                    .appStores()
             }
             .sheet(item: $expenseToEdit) { expense in
                 AddExpenseView(expenseType: .variable, editingExpense: expense)
+                    .appStores()
             }
             .sheet(item: $previewExpense) { expense in
                 FinanceItemCard(target: .variableExpense(expense.id))
+                    .appStores()
             }
             .searchable(
                 text: $searchText,

@@ -118,29 +118,37 @@ struct TripStopCardView: View {
                 }
             }
             .sheet(isPresented: $showEdit) {
-                if let s = stop {
-                    TripStopEditorSheet(planId: planId, editing: s, insertAt: nil)
-                        .environmentObject(lifeStore)
+                Group {
+                    if let s = stop {
+                        TripStopEditorSheet(planId: planId, editing: s, insertAt: nil)
+                            .environmentObject(lifeStore)
+                    }
                 }
+                .appStores()
             }
             .sheet(isPresented: $showLegDetail) {
-                if let p = plan, let slot {
-                    TripLegDetailSheet(plan: p, index: slot.index)
-                        .environmentObject(lifeStore)
+                Group {
+                    if let p = plan, let slot {
+                        TripLegDetailSheet(plan: p, index: slot.index)
+                            .environmentObject(lifeStore)
+                    }
                 }
+                .appStores()
             }
-            .sheet(item: $sharing) { item in ShareSheet(items: [item.text]) }
+            .sheet(item: $sharing) { item in ShareSheet(items: [item.text]).appStores() }
             // [v25.515] 不明確注入環境：AddExpenseView 要 ExpenseStore／FinanceStore／
             // LifeStore 三個，而這張卡只拿得到其中兩個，注入兩個反而會漏掉第三個。
             // sheet 會繼承 App 根的環境——TripExpenseSheet 的編輯 sheet 就是這樣用的。
             .sheet(item: $editingExpense) { e in
                 AddExpenseView(expenseType: e.expenseType, editingExpense: e)
+                    .appStores()
             }
-            .sheet(item: $sharingImage) { item in ShareSheet(items: [item.url]) }
+            .sheet(item: $sharingImage) { item in ShareSheet(items: [item.url]).appStores() }
             // [v25.472] 這一站的照片整組帶進去，左右滑得動
             .sheet(item: $viewingPhoto) { wrapper in
                 PhotoLightbox(urls: (stop?.photoFileNames ?? []).map { TripStop.photoURL($0) },
                               current: wrapper.url)
+                    .appStores()
             }
             .confirmationDialog("清除打卡紀錄", isPresented: $confirmClearCheckIn,
                                 titleVisibility: .visible) {

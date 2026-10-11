@@ -208,6 +208,7 @@ struct MapAlbumSheet<Stats: View>: View {
             // 另外排一次的話，播出來的順序跟使用者剛剛捲過的不一樣。
             .fullScreenCover(isPresented: $showSlideshow) {
                 PhotoSlideshowView(items: sections.flatMap { $0.photos }, title: title)
+                    .appStores()
             }
             // [v25.472] 整本相簿一起帶進去：左右滑就能看其他張，底下有縮圖列。
             // 順序用 sections 攤平後的順序——與畫面上看到的排列一致，
@@ -215,6 +216,7 @@ struct MapAlbumSheet<Stats: View>: View {
             .sheet(item: $viewingPhotoURL) { wrapper in
                 PhotoLightbox(urls: sections.flatMap { $0.photos.map(\.url) },
                               current: wrapper.url)
+                    .appStores()
             }
             .onAppear {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {

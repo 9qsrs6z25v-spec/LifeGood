@@ -36,6 +36,7 @@ struct CalcFieldButton: View {
             AmountCalculatorSheet(initial: text, accent: accent) { result in
                 text = result
             }
+            .appStores()
         }
     }
 }

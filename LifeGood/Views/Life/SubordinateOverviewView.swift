@@ -300,11 +300,13 @@ struct SubordinateOverviewView: View {
             .sheet(item: $editTarget) { target in
                 // 點項目先顯示預覽卡片（右上角「編輯」才進入編輯）
                 SubordinateItemCard(ref: target.itemRef)
+                    .appStores()
             }
             .sheet(item: $sessionEdit) { t in
                 MeetingSessionTimeSheet(subordinateId: t.subId, meetingId: t.meetingId,
                                         itemId: t.itemId)
                     .environmentObject(lifeStore)
+                    .appStores()
             }
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
@@ -314,22 +316,26 @@ struct SubordinateOverviewView: View {
                     }
                 }
             }
-            .sheet(item: $sharePayload) { payload in ShareSheet(items: payload.items) }
+            .sheet(item: $sharePayload) { payload in ShareSheet(items: payload.items).appStores() }
             .exportPageSizeDialog(isPresented: $askExportPageSize,
                                   itemCount: exportRowCount(pendingExportSection)) { per in
                 exportImagePaged(pendingExportSection, perPage: per)
             }
             .sheet(item: $addPersonalKind) { kind in
                 PersonalEventEditor(initialDate: selectedDate, editing: nil, initialKind: kind)
+                    .appStores()
             }
             .sheet(item: $subAddKind) { kind in
                 AddSubItemSheet(kind: kind)
+                    .appStores()
             }
             .sheet(isPresented: $showBirthdaySheet) {
                 BirthdayOverviewSheet()
+                    .appStores()
             }
             .sheet(isPresented: $showPerformanceSheet) {
                 PerformanceBallotView(raterId: PerformanceBallot.selfRaterId)
+                    .appStores()
             }
         }
     }

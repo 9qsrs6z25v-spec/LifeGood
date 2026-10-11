@@ -80,6 +80,7 @@ struct PetResumeView: View {
             }
             .sheet(item: $viewingPet) { pet in
                 PetDetailView(petId: pet.id)
+                    .appStores()
             }
         }
     }

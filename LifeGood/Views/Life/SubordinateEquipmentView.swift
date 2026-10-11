@@ -156,13 +156,16 @@ struct SubordinateEquipmentSection: View {
             EquipmentEditorSheet(editing: nil,
                                  defaultDepartmentId: subordinate.departmentId,
                                  defaultOwnerId: subordinateId)
+                .appStores()
         }
         .sheet(item: $editingEquipment) { eq in
             // 點開一律先看機台詳情卡片（編輯在卡片右上），與部門所屬設備清單行為一致
             EquipmentDetailCard(equipmentId: eq.id)
+                .appStores()
         }
         .sheet(isPresented: $pickingExisting) {
             EquipmentClaimPicker(subordinateId: subordinateId)
+                .appStores()
         }
     }
 
@@ -805,9 +808,12 @@ struct EquipmentEditorSheet: View {
             }
             // [v25.385] 挑上下游機台
             .sheet(item: $linkPicking) { direction in
-                if let e = editing {
-                    EquipmentLinkPicker(equipmentId: e.id, direction: direction)
+                Group {
+                    if let e = editing {
+                        EquipmentLinkPicker(equipmentId: e.id, direction: direction)
+                    }
                 }
+                .appStores()
             }
         }
     }
@@ -1290,32 +1296,43 @@ struct EquipmentDetailCard: View {
                 }
             }
             .sheet(isPresented: $showEditor) {
-                if let eq = equipment {
-                    EquipmentEditorSheet(editing: eq)
+                Group {
+                    if let eq = equipment {
+                        EquipmentEditorSheet(editing: eq)
+                    }
                 }
+                .appStores()
             }
             // [v25.390] 複製：同一張表單、預填好所有欄位（含上下游），存檔時給新的 id。
             // PM 與警報不會跟過來——那是原本那台真的發生過的事。
             .sheet(isPresented: $showDuplicate) {
-                if let eq = equipment {
-                    EquipmentEditorSheet(editing: nil, duplicating: eq)
+                Group {
+                    if let eq = equipment {
+                        EquipmentEditorSheet(editing: nil, duplicating: eq)
+                    }
                 }
+                .appStores()
             }
             .sheet(item: $quickAddKind) { kind in
                 EquipmentTimelineQuickAddSheet(equipmentId: equipmentId, kind: kind)
+                    .appStores()
             }
             // [v25.384] 點上下游機台就開那一台的詳情。
             // 用 sheet 而不是 NavigationLink：這張卡本身常常已經是別人推出來的 sheet，
             // 再往同一個 stack 推會讓「關閉」的語意變得很奇怪。
             .sheet(item: $jumpTarget) { jump in
                 EquipmentDetailCard(equipmentId: jump.id)
+                    .appStores()
             }
             // [v25.386] 點關聯任務就開那位部屬的明細（任務章節在裡面）。
             // 機台被刪、人被刪的情況都可能發生，找不到人就不開。
             .sheet(item: $personTarget) { jump in
-                if let sub = lifeStore.subordinates.first(where: { $0.id == jump.id }) {
-                    SubordinateDetailView(subordinate: sub)
+                Group {
+                    if let sub = lifeStore.subordinates.first(where: { $0.id == jump.id }) {
+                        SubordinateDetailView(subordinate: sub)
+                    }
                 }
+                .appStores()
             }
         }
     }
@@ -2025,6 +2042,7 @@ struct EquipmentRelationCard: View {
         .padding(.horizontal)
         .sheet(item: $picking) { direction in
             EquipmentLinkPicker(equipmentId: equipmentId, direction: direction)
+                .appStores()
         }
         .confirmationDialog("解除關聯", isPresented: Binding(
             get: { removing != nil },
@@ -2261,6 +2279,7 @@ struct EquipmentLinkPicker: View {
                     editing: nil,
                     defaultDepartmentId: lifeStore.equipment(id: equipmentId)?.departmentId,
                     defaultOwnerId: lifeStore.equipment(id: equipmentId)?.ownerId)
+                    .appStores()
             }
         }
     }
@@ -2362,12 +2381,15 @@ struct EquipmentTaskCard: View {
         .shadow(color: .black.opacity(0.05), radius: 8, x: 0, y: 3)
         .padding(.horizontal)
         .sheet(item: $adding) { mode in
-            switch mode {
-            case .owner(let oid):
-                TaskEditorSheet(subordinateId: oid, editing: nil, defaultEquipmentId: equipmentId)
-            case .choose:
-                EquipmentTaskOwnerPicker(equipmentId: equipmentId)
+            Group {
+                switch mode {
+                case .owner(let oid):
+                    TaskEditorSheet(subordinateId: oid, editing: nil, defaultEquipmentId: equipmentId)
+                case .choose:
+                    EquipmentTaskOwnerPicker(equipmentId: equipmentId)
+                }
             }
+            .appStores()
         }
     }
 
@@ -2641,6 +2663,7 @@ struct EquipmentTaskOwnerPicker: View {
             .sheet(item: $picked, onDismiss: { dismiss() }) { pick in
                 TaskEditorSheet(subordinateId: pick.id, editing: nil,
                                 defaultEquipmentId: equipmentId)
+                    .appStores()
             }
         }
     }
@@ -2697,6 +2720,7 @@ struct EquipmentLinkField: View {
         }
         .sheet(isPresented: $picking) {
             EquipmentMultiPicker(selection: $selection, preferredOwnerId: preferredOwnerId)
+                .appStores()
         }
     }
 

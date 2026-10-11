@@ -134,11 +134,13 @@ struct EInvoiceSetupView: View {
         .sheet(isPresented: $showRulesEditor) {
             CategoryRulesEditorView()
                 .environmentObject(categorizer)
+                .appStores()
         }
         .sheet(isPresented: $showHistory) {
             EInvoiceHistoryView()
                 .environmentObject(sync)
                 .environmentObject(expenseStore)
+                .appStores()
         }
         .onAppear {
             if let c = sync.carrier {
@@ -749,6 +751,7 @@ struct CategoryRulesEditorView: View {
                         }
                     }
                 }
+                .appStores()
             }
         }
     }

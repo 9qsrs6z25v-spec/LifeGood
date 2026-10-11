@@ -232,6 +232,7 @@ private struct LaunchGate<Content: View>: View {
         }
         .sheet(item: $whatsNewPayload) { payload in
             WhatsNewView(entries: payload.entries) { markWhatsNewSeen() }
+                .appStores()
         }
     }
 

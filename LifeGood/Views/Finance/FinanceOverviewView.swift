@@ -91,10 +91,10 @@ struct FinanceOverviewView: View {
             .task(id: "\(store.modifyID)-\(expenseStore.modifyID)") {
                 board = FinanceOverviewData.build(finance: store, expense: expenseStore)
             }
-            .sheet(isPresented: $showAddVariable) { AddExpenseView(expenseType: .variable) }
-            .sheet(isPresented: $showAddFixed) { AddExpenseView(expenseType: .fixed) }
-            .sheet(isPresented: $showAddStock) { AddStockView() }
-            .sheet(isPresented: $showAddRealEstate) { AddRealEstateView() }
+            .sheet(isPresented: $showAddVariable) { AddExpenseView(expenseType: .variable).appStores() }
+            .sheet(isPresented: $showAddFixed) { AddExpenseView(expenseType: .fixed).appStores() }
+            .sheet(isPresented: $showAddStock) { AddStockView().appStores() }
+            .sheet(isPresented: $showAddRealEstate) { AddRealEstateView().appStores() }
             .premiumLockAlert(isPresented: $showPremiumAlert)
         }
     }

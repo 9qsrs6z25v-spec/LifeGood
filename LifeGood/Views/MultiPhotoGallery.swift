@@ -196,6 +196,7 @@ struct MultiPhotoGallery: View {
                 }
             }
             .ignoresSafeArea()
+            .appStores()
         }
         .photosPicker(isPresented: $showPhotosPicker,
                       selection: $pickerItems,
@@ -269,6 +270,7 @@ struct MultiPhotoGallery: View {
                 showDocScanner = false
             })
             .ignoresSafeArea()
+            .appStores()
         }
         // [v25.306] 選取 PDF：security-scoped 讀取原檔資料後交給呼叫端寫入
         .fileImporter(isPresented: $showPDFImporter,
@@ -285,15 +287,18 @@ struct MultiPhotoGallery: View {
             fileNames.append(contentsOf: added)
         }
         .sheet(item: $viewingURL) { wrapper in
-            // PDF 走 PDFKit 檢視器（可捲頁、雙指縮放）；圖片維持原本的燈箱
-            if wrapper.url.pathExtension.lowercased() == "pdf" {
-                PDFLightbox(url: wrapper.url)
-            } else {
-                // [v25.472] 同一組照片一起帶進去（PDF 排除——燈箱不收 PDF）
-                PhotoLightbox(urls: fileNames.map(urlFor)
-                                .filter { $0.pathExtension.lowercased() != "pdf" },
-                              current: wrapper.url)
+            Group {
+                // PDF 走 PDFKit 檢視器（可捲頁、雙指縮放）；圖片維持原本的燈箱
+                if wrapper.url.pathExtension.lowercased() == "pdf" {
+                    PDFLightbox(url: wrapper.url)
+                } else {
+                    // [v25.472] 同一組照片一起帶進去（PDF 排除——燈箱不收 PDF）
+                    PhotoLightbox(urls: fileNames.map(urlFor)
+                                    .filter { $0.pathExtension.lowercased() != "pdf" },
+                                  current: wrapper.url)
+                }
             }
+            .appStores()
         }
         .alert("移除這張照片？", isPresented: Binding(
             get: { pendingDeleteName != nil },
@@ -1265,6 +1270,7 @@ struct PhotoActionButtons: View {
         }
         .sheet(isPresented: $showShare) {
             ShareSheet(items: shareItems ?? [url])
+                .appStores()
         }
         .alert("存不進相簿", isPresented: Binding(
             get: { errorMessage != nil },

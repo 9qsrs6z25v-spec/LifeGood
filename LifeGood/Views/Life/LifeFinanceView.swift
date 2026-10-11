@@ -387,9 +387,11 @@ struct LifeFinanceView: View {
             }
             .sheet(isPresented: $showAdd) {
                 AddMilestoneView(initialCategory: .achievement)
+                    .appStores()
             }
             .sheet(item: $viewingItem) { item in
                 FinanceCardView(milestoneId: item.id)
+                    .appStores()
             }
             .premiumLockAlert(isPresented: $showPremiumAlert)
         }
@@ -917,25 +919,31 @@ struct FinanceCardView: View {
                     }
                 }
             }
-            .sheet(isPresented: $showEdit) { AddMilestoneView(editing: item) }
+            .sheet(isPresented: $showEdit) { AddMilestoneView(editing: item).appStores() }
             .premiumLockAlert(isPresented: $showPremiumAlert)
             .sheet(item: $viewingLinkedCard) { card in
                 FinanceCardView(milestoneId: card.id)
+                    .appStores()
             }
             .sheet(item: $addingDeposit) { request in
                 DepositEditorSheet(milestoneId: milestoneId, currency: request.currency, editing: nil)
+                    .appStores()
             }
             .sheet(item: $editingDeposit) { dep in
                 DepositEditorSheet(milestoneId: milestoneId, currency: dep.currencyCode, editing: dep)
+                    .appStores()
             }
             .sheet(item: $editingExpense) { exp in
                 AddExpenseView(expenseType: exp.expenseType, editingExpense: exp)
+                    .appStores()
             }
             .sheet(item: $editingIncome) { inc in
                 AddIncomeView(editing: inc)
+                    .appStores()
             }
             .sheet(item: $editingStock) { stk in
                 AddStockView(editing: stk)
+                    .appStores()
             }
             .alert("確定要刪除嗎？", isPresented: $showDeleteConfirm) {
                 Button("刪除", role: .destructive) { deleteMilestoneCleaningLinks(item); dismiss() }

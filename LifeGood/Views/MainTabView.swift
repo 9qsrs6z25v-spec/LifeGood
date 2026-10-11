@@ -596,11 +596,12 @@ struct MainTabView: View {
                 aiToastView(toast)
             }
         }
-        .sheet(isPresented: $showAddIncome) { AddIncomeView() }
-        .sheet(isPresented: $showAddExpense) { AddExpenseView(expenseType: .variable) }
+        .sheet(isPresented: $showAddIncome) { AddIncomeView().appStores() }
+        .sheet(isPresented: $showAddExpense) { AddExpenseView(expenseType: .variable).appStores() }
         .sheet(isPresented: $showPaywall) {
             PaywallView()
                 .environmentObject(subscription)
+                .appStores()
         }
         .onChange(of: scenePhase) { _, phase in
             // 切換 App 時，若正在錄音則立即終止；避免 audio session 被系統中斷

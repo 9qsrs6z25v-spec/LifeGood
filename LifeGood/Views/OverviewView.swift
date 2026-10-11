@@ -131,14 +131,14 @@ struct OverviewView: View {
                     quickAddMenu
                 }
             }
-            .sheet(isPresented: $showAddVariable) { AddExpenseView(expenseType: .variable) }
-            .sheet(isPresented: $showAddFixed) { AddExpenseView(expenseType: .fixed) }
-            .sheet(isPresented: $showAddStock) { AddStockView() }
-            .sheet(isPresented: $showAddRealEstate) { AddRealEstateView() }
-            .sheet(item: $editingFixed) { e in AddExpenseView(expenseType: .fixed, editingExpense: e) }
-            .sheet(item: $previewVariable) { e in FinanceItemCard(target: .variableExpense(e.id)) }
-            .sheet(item: $previewFixed) { e in FixedExpenseCard(expense: e) }
-            .sheet(item: $previewIncome) { i in FinanceItemCard(target: .income(i.id)) }
+            .sheet(isPresented: $showAddVariable) { AddExpenseView(expenseType: .variable).appStores() }
+            .sheet(isPresented: $showAddFixed) { AddExpenseView(expenseType: .fixed).appStores() }
+            .sheet(isPresented: $showAddStock) { AddStockView().appStores() }
+            .sheet(isPresented: $showAddRealEstate) { AddRealEstateView().appStores() }
+            .sheet(item: $editingFixed) { e in AddExpenseView(expenseType: .fixed, editingExpense: e).appStores() }
+            .sheet(item: $previewVariable) { e in FinanceItemCard(target: .variableExpense(e.id)).appStores() }
+            .sheet(item: $previewFixed) { e in FixedExpenseCard(expense: e).appStores() }
+            .sheet(item: $previewIncome) { i in FinanceItemCard(target: .income(i.id)).appStores() }
             .task(id: store.modifyID) {
                 cachedRecent = buildRecent()
                 categoryStats = Self.buildCategoryStats(store)

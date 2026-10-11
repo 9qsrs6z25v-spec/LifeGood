@@ -758,7 +758,7 @@ struct SubordinateDetailView: View {
                     }
                 }
             }
-            .sheet(item: $shareItem) { item in ShareSheet(items: item.items) }
+            .sheet(item: $shareItem) { item in ShareSheet(items: item.items).appStores() }
             // [v25.375] 這張圖會寫出這位同仁把每個人排第幾名，傳出去就收不回來了
             .alert("要匯出排名票嗎？", isPresented: $confirmBallotExport) {
                 Button("取消", role: .cancel) {}
@@ -775,51 +775,64 @@ struct SubordinateDetailView: View {
             } message: {
                 Text(ballotExportError ?? "")
             }
-            .sheet(isPresented: $showPromotion) { PromotionSheet(subordinateId: subordinateId) }
+            .sheet(isPresented: $showPromotion) { PromotionSheet(subordinateId: subordinateId).appStores() }
             .sheet(item: $viewingSideRole) { role in
                 // 不給跳回部屬明細：我們就是從那裡進來的，會無限疊 sheet
                 SideRoleWorkspaceView(roleId: role.id, allowSubordinateJump: false)
+                    .appStores()
             }
             .sheet(isPresented: $showJoinSideRole) {
                 NavigationStack {
                     SideRoleJoinPicker(personId: subordinateId, personName: subordinate.name)
                 }
+                .appStores()
             }
-            .sheet(isPresented: $showEdit) { AddSubordinateView(editing: subordinate) }
+            .sheet(isPresented: $showEdit) { AddSubordinateView(editing: subordinate).appStores() }
             .sheet(isPresented: $showBirthdayReminder) {
                 BirthdayReminderSheet(subordinateId: subordinateId)
+                    .appStores()
             }
             .sheet(isPresented: $showPerformance) {
                 PerformanceBallotView(raterId: subordinateId)
+                    .appStores()
             }
             .premiumLockAlert(isPresented: $showPremiumAlert)
             .lateCompletionConfirm($lateRequest)
             .sheet(item: $addingType) { type in
                 RecordEditorSheet(subordinateId: subordinateId, type: type, editing: nil)
+                    .appStores()
             }
             .sheet(item: $editingRecord) { rec in
                 RecordEditorSheet(subordinateId: subordinateId, type: rec.type, editing: rec)
+                    .appStores()
             }
             .sheet(isPresented: $addingMeeting) {
                 MeetingEditorSheet(subordinateId: subordinateId, editing: nil)
+                    .appStores()
             }
             .sheet(item: $editingMeeting) { m in
                 MeetingEditorSheet(subordinateId: subordinateId, editing: m)
+                    .appStores()
             }
             .sheet(isPresented: $addingReport) {
                 WeeklyReportEditorSheet(subordinateId: subordinateId, editing: nil)
+                    .appStores()
             }
             .sheet(item: $editingReport) { r in
                 WeeklyReportEditorSheet(subordinateId: subordinateId, editing: r)
+                    .appStores()
             }
             .sheet(isPresented: $addingTask) {
                 TaskEditorSheet(subordinateId: subordinateId, editing: nil)
+                    .appStores()
             }
             .sheet(item: $editingTask) { t in
                 TaskEditorSheet(subordinateId: subordinateId, editing: t)
+                    .appStores()
             }
             .sheet(item: $previewItem) { ref in
                 SubordinateItemCard(ref: ref)
+                    .appStores()
             }
         }
     }
@@ -2648,6 +2661,7 @@ struct RecordEditorSheet: View {
                     ownerId = picked
                 }
                 .environmentObject(lifeStore)
+                .appStores()
             }
         }
     }
@@ -3258,6 +3272,7 @@ struct MeetingEditorSheet: View {
                                         peopleIndex: peopleIndex,
                                         meetingReminderMinutes: reminder.rawValue,
                                         onSave: applyOccurrence)
+                    .appStores()
             }
             .sheet(item: $creatingAdHoc) { box in
                 MeetingOccurrenceEditor(scheduledDate: box.id,
@@ -3267,10 +3282,12 @@ struct MeetingEditorSheet: View {
                                         isAdHoc: true,
                                         meetingReminderMinutes: reminder.rawValue,
                                         onSave: applyOccurrence)
+                    .appStores()
             }
             .sheet(isPresented: $showBaseSessionEditor) {
                 MeetingBaseSessionEditor(date: $date, durationText: $durationText,
                                          items: $items, peopleIndex: peopleIndex)
+                    .appStores()
             }
             .sheet(item: $pickingAssigneeFor) { box in
                 NavigationStack {
@@ -3282,6 +3299,7 @@ struct MeetingEditorSheet: View {
                         }
                     )
                 }
+                .appStores()
             }
             // 切換週期時就把議程項目搬到該去的地方：不重複的會議項目住在 items，
             // 有週期的會議住在各場次。等到存檔才搬的話，切換後畫面會先變成空的、
@@ -3994,6 +4012,7 @@ struct MeetingOccurrenceEditor: View {
                         }
                     )
                 }
+                .appStores()
             }
             .onAppear {
                 guard !loaded else { return }
@@ -4106,6 +4125,7 @@ struct MeetingBaseSessionEditor: View {
                         }
                     )
                 }
+                .appStores()
             }
         }
     }
@@ -5877,15 +5897,17 @@ struct SubordinateItemCard: View {
                 }
             }
             .lateCompletionConfirm($lateRequest)
-            .sheet(isPresented: $showEdit) { editor }
-            .sheet(item: $openSub) { s in SubordinateDetailView(subordinate: s) }
-            .sheet(item: $openCard) { box in BusinessCardDetailView(cardId: box.id) }
-            .sheet(item: $shareItem) { item in ShareSheet(items: item.items) }
+            .sheet(isPresented: $showEdit) { editor.appStores() }
+            .sheet(item: $openSub) { s in SubordinateDetailView(subordinate: s).appStores() }
+            .sheet(item: $openCard) { box in BusinessCardDetailView(cardId: box.id).appStores() }
+            .sheet(item: $shareItem) { item in ShareSheet(items: item.items).appStores() }
             .sheet(item: $quickSessionTarget) { t in
                 MeetingQuickAddSessionSheet(subId: t.subId, meetingId: t.meetingId)
+                    .appStores()
             }
             .sheet(item: $quickItemTarget) { t in
                 MeetingQuickAddItemSheet(subId: t.subId, meetingId: t.meetingId, scheduledDate: t.scheduledDate)
+                    .appStores()
             }
             .environment(\.openURL, OpenURLAction { url in handleMention(url) })
             .onAppear {
@@ -6583,6 +6605,7 @@ struct MeetingQuickAddItemSheet: View {
                 NavigationStack {
                     MeetingAssigneePicker(initial: assigneeIds, onDone: { assigneeIds = $0 })
                 }
+                .appStores()
             }
         }
         .presentationDetents([.large])

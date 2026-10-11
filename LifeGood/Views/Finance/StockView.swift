@@ -189,11 +189,11 @@ struct StockView: View {
             }
             .navigationTitle("股票")
             .navigationBarTitleDisplayMode(.large)
-            .sheet(isPresented: $showAdd) { AddStockView() }
-            .sheet(isPresented: $showInstitutional) { InstitutionalBuyView() }
-            .sheet(isPresented: $showAIAnalysis) { StockAIAnalysisView() }
-            .sheet(item: $editingItem) { item in AddStockView(editing: item) }
-            .sheet(item: $viewingItem) { item in StockDetailView(stock: item) }
+            .sheet(isPresented: $showAdd) { AddStockView().appStores() }
+            .sheet(isPresented: $showInstitutional) { InstitutionalBuyView().appStores() }
+            .sheet(isPresented: $showAIAnalysis) { StockAIAnalysisView().appStores() }
+            .sheet(item: $editingItem) { item in AddStockView(editing: item).appStores() }
+            .sheet(item: $viewingItem) { item in StockDetailView(stock: item).appStores() }
             .overlay(alignment: .top) {
                 if let banner = updateBanner {
                     Text(banner)

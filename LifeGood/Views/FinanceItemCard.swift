@@ -158,8 +158,8 @@ struct FinanceItemCard: View {
                     }
                 }
             }
-            .sheet(isPresented: $showEdit) { editorSheet }
-            .sheet(item: $shareItem) { item in ShareSheet(items: item.items) }
+            .sheet(isPresented: $showEdit) { editorSheet.appStores() }
+            .sheet(item: $shareItem) { item in ShareSheet(items: item.items).appStores() }
         }
     }
 

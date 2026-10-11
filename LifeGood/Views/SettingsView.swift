@@ -381,20 +381,24 @@ struct SettingsView: View {
             .sheet(isPresented: $showPaywall) {
                 PaywallView()
                     .environmentObject(subscription)
+                    .appStores()
             }
             // 匯出分享
             .sheet(item: $activeShareItem) { item in
                 ShareSheet(items: [item.url])
+                    .appStores()
             }
             // 隱藏管理控制台
             .sheet(isPresented: $showAdminConsole) {
                 AdminConsoleView()
+                    .appStores()
             }
             // [v25.429] 匯出 JSON：先選範圍
             .sheet(isPresented: $showExportScope) {
                 ExportScopeSheet(expense: store, finance: financeStore, life: lifeStore) { scope in
                     exportJSON(scope: scope)
                 }
+                .appStores()
             }
             // 完整備份：照片時間範圍選擇
             .sheet(isPresented: $showBackupRange) {
@@ -402,6 +406,7 @@ struct SettingsView: View {
                     exportFullBackup(photoRange: range)
                 }
                 .presentationDetents([.height(360)])
+                .appStores()
             }
             // 匯出錯誤
             .alert("匯出失敗", isPresented: $showExportError) {
@@ -2484,6 +2489,7 @@ private struct FamilySharingRow: View {
         }
         .sheet(item: $sharePayload) { payload in
             CloudSharingSheet(share: payload.share, container: CloudKitManager.shared.ckContainer)
+                .appStores()
         }
         .alert("退出家人共享？", isPresented: $showLeaveConfirm) {
             Button("退出", role: .destructive) { leaveShare() }

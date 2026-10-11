@@ -2394,7 +2394,7 @@ struct CalendarEventCard: View {
                 ToolbarItem(placement: .topBarLeading) { Button("關閉") { dismiss() } }
                 ToolbarItem(placement: .topBarTrailing) { trailingButton }
             }
-            .sheet(isPresented: $showEdit) { editor }
+            .sheet(isPresented: $showEdit) { editor.appStores() }
         }
     }
 

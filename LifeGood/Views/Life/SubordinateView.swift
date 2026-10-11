@@ -403,11 +403,11 @@ struct SubordinateView: View {
                 let alive = selectedDeptIds.filter { ids.contains($0) }
                 if alive != selectedDeptIds { setSelectedDeptIds(alive) }
             }
-            .sheet(isPresented: $showAdd) { AddSubordinateView() }
-            .sheet(item: $editingItem) { item in AddSubordinateView(editing: item) }
-            .sheet(item: $viewingItem) { item in SubordinateDetailView(subordinate: item) }
-            .sheet(isPresented: $showRoster) { SubordinateRosterView() }
-            .sheet(isPresented: $showTalentMatrix) { TalentMatrixView() }
+            .sheet(isPresented: $showAdd) { AddSubordinateView().appStores() }
+            .sheet(item: $editingItem) { item in AddSubordinateView(editing: item).appStores() }
+            .sheet(item: $viewingItem) { item in SubordinateDetailView(subordinate: item).appStores() }
+            .sheet(isPresented: $showRoster) { SubordinateRosterView().appStores() }
+            .sheet(isPresented: $showTalentMatrix) { TalentMatrixView().appStores() }
             .premiumLockAlert(isPresented: $showPremiumAlert)
         }
     }

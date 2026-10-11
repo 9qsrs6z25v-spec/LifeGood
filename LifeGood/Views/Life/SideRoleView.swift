@@ -307,7 +307,7 @@ struct SideRoleHubView: View {
                 NavigationStack {
                     AddMilestoneView(initialCategory: .career, initialCareerSub: .sideRole)
                 }
-                    .appStores()
+                .appStores()
             }
             .sheet(item: $viewingRole) { role in
                 SideRoleWorkspaceView(roleId: role.id)
@@ -1821,13 +1821,13 @@ struct SideRoleTaskEditor: View {
                 SideRoleLinkPicker(roleId: roleId, taskId: task.id,
                                    assigneeIds: task.assigneeIds ?? [])
             }
-                .appStores()
+            .appStores()
         }
         .sheet(isPresented: $showExtraPicker) {
             NavigationStack {
                 SideRoleAttendeePicker(roleId: roleId, selected: $draftExtras)
             }
-                .appStores()
+            .appStores()
         }
         .onChange(of: draftExtras) { _, list in
             task.extraAssignees = list.isEmpty ? nil : list
@@ -2045,7 +2045,7 @@ struct SideRoleMemberEditor: View {
                     }
                 }
             }
-                .appStores()
+            .appStores()
         }
     }
 }
@@ -2299,7 +2299,7 @@ struct SideRoleMeetingEditor: View {
             NavigationStack {
                 SideRoleAttendeePicker(roleId: roleId, selected: $meeting.attendees)
             }
-                .appStores()
+            .appStores()
         }
         // 出席者改成「膠囊＋挑人」後，attendeeText 只承載「還沒挑過的手打內容」，
         // 不再預先塞入既有名單——否則儲存時會與膠囊列的內容重複合併一次。
@@ -2456,7 +2456,7 @@ struct SideRoleResolutionCard: View {
                         NavigationStack { SideRoleResolutionEditor(roleId: roleId, resolution: r) }
                     }
                 }
-                    .appStores()
+                .appStores()
             }
             .sheet(item: $shareItem) { item in ShareSheet(items: item.items).appStores() }
             .sheet(item: Binding(
@@ -3126,13 +3126,13 @@ struct SideRoleResolutionEditor: View {
             NavigationStack {
                 SideRoleInitiatorPicker(roleId: roleId, selection: $resolution.initiator)
             }
-                .appStores()
+            .appStores()
         }
         .sheet(isPresented: $showReferencePicker) {
             NavigationStack {
                 ResolutionReferencePicker(roleId: roleId, resolution: $resolution)
             }
-                .appStores()
+            .appStores()
         }
     }
 
@@ -3403,7 +3403,7 @@ struct SideRoleMemberDetailView: View {
                         NavigationStack { SideRoleMemberEditor(roleId: roleId, member: member) }
                     }
                 }
-                    .appStores()
+                .appStores()
             }
             .sheet(item: $editingTask) { t in
                 NavigationStack { SideRoleTaskEditor(roleId: roleId, task: t) }

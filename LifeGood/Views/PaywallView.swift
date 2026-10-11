@@ -729,6 +729,7 @@ struct PremiumLockAlertModifier: ViewModifier {
             .sheet(isPresented: $showPaywall) {
                 PaywallView()
                     .environmentObject(subscription)
+                    .appStores()
             }
     }
 }

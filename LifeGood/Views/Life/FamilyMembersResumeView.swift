@@ -202,6 +202,7 @@ struct FamilyMembersResumeView: View {
             .navigationTitle("家人履歷")
             .sheet(item: $viewingMember) { member in
                 FamilyMemberDetailView(memberId: member.id)
+                    .appStores()
             }
         }
     }
@@ -591,18 +592,23 @@ struct FamilyMemberDetailView: View {
             }
             .sheet(isPresented: $addingEvent) {
                 FamilyEventEditor(memberId: memberId, editing: nil)
+                    .appStores()
             }
             .sheet(item: $editingEvent) { ev in
                 FamilyEventEditor(memberId: memberId, editing: ev)
+                    .appStores()
             }
             .sheet(isPresented: $addingPhoto) {
                 FamilyAlbumPhotoEditor(memberId: memberId, editing: nil)
+                    .appStores()
             }
             .sheet(item: $editingPhoto) { ph in
                 FamilyAlbumPhotoEditor(memberId: memberId, editing: ph)
+                    .appStores()
             }
             .sheet(item: $viewingPhotoURL) { url in
                 PhotoViewerSheet(url: url)
+                    .appStores()
             }
         }
     }
@@ -1185,6 +1191,7 @@ struct FamilyAlbumPhotoEditor: View {
                     pendingImage = image
                 }
                 .ignoresSafeArea()
+                .appStores()
             }
             .photosPicker(isPresented: $isPresentingPhotoPicker, selection: $photoItem, matching: .images)
             .onChange(of: photoItem) { _, item in

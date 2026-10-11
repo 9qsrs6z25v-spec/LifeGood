@@ -1771,6 +1771,7 @@ struct AddExpenseView: View {
                         diningMemberSelectorList
                             .presentationDetents([.height(380), .medium])
                             .presentationDragIndicator(.visible)
+                            .appStores()
                     }
                 }
 
@@ -1813,6 +1814,7 @@ struct AddExpenseView: View {
                                 socialRecipientSelectorList
                                     .presentationDetents([.height(420), .medium])
                                     .presentationDragIndicator(.visible)
+                                    .appStores()
                             }
                         }
                     }

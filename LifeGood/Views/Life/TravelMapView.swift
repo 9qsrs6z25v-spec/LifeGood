@@ -176,12 +176,14 @@ struct TravelMapView: View {
             .sheet(item: $selectedSpot) { spot in
                 TravelSpotDetailSheet(spot: spot)
                     .environmentObject(expenseStore)
+                    .appStores()
             }
-            .sheet(isPresented: $showListSheet) { listSheet(spots) }
+            .sheet(isPresented: $showListSheet) { listSheet(spots).appStores() }
             .sheet(isPresented: $showPlanSheet) {
                 TripPlanListView()
                     .environmentObject(lifeStore)
                     .environmentObject(expenseStore)
+                    .appStores()
             }
             .sheet(isPresented: $showAlbumSheet) {
                 // [模板化] 改用共用 MapAlbumSheet（旅遊/美食/醫療三地圖共用），
@@ -193,6 +195,7 @@ struct TravelMapView: View {
                     emptyHint: "在「娛樂」變動支出記錄時附上照片，\n或在旅遊規劃的景點裡加照片，\n這裡就會集結成相簿。",
                     items: albumItems
                 )
+                .appStores()
             }
         }
     }
@@ -855,6 +858,7 @@ struct TravelSpotDetailSheet: View {
             .sheet(item: $viewingPhotoURL) { wrapper in
                 PhotoLightbox(urls: spot.photoNames.map { Expense.photoURL(for: $0) },
                               current: wrapper.url)
+                    .appStores()
             }
         }
     }

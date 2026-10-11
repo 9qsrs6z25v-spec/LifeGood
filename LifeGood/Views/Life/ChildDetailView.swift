@@ -232,24 +232,31 @@ struct ChildDetailView: View {
                     groupNoun: "類型",
                     items: childAlbumItems
                 )
+                .appStores()
             }
             .sheet(item: $addingType) { type in
                 ChildRecordEditorSheet(childId: childId, type: type, editing: nil)
+                    .appStores()
             }
             .sheet(item: $editingRecord) { rec in
                 ChildRecordEditorSheet(childId: childId, type: rec.type, editing: rec)
+                    .appStores()
             }
             .sheet(item: $addingDailyType) { type in
                 DailyRecordEditorSheet(childId: childId, type: type, editing: nil)
+                    .appStores()
             }
             .sheet(item: $editingDaily) { rec in
                 DailyRecordEditorSheet(childId: childId, type: rec.type, editing: rec)
+                    .appStores()
             }
             .sheet(item: $viewingRecord) { rec in
                 ChildRecordDetailSheet(childId: childId, record: rec)
+                    .appStores()
             }
             .sheet(item: $viewingDaily) { rec in
                 DailyRecordDetailSheet(childId: childId, record: rec)
+                    .appStores()
             }
             .premiumLockAlert(isPresented: $showPremiumAlert)
             .onAppear {
@@ -1538,6 +1545,7 @@ struct ChildRecordEditorSheet: View {
                     Task { await storePickedPhoto(data: data, generation: generation) }
                 }
                 .ignoresSafeArea()
+                .appStores()
             }
             // 避免 300ms 防抖期間關閉表單後，Task 仍在背景驅動診所搜尋（對齊 AddExpenseView 的修復）
             .onDisappear { clinicDebounceTask?.cancel() }
@@ -2387,9 +2395,11 @@ fileprivate struct ChildRecordDetailSheet: View {
             }
             .sheet(item: $editingRecord) { rec in
                 ChildRecordEditorSheet(childId: childId, type: rec.type, editing: rec)
+                    .appStores()
             }
             .sheet(item: $viewingPhotoURL) { wrapper in
                 PhotoLightbox(url: wrapper.url)
+                    .appStores()
             }
             .premiumLockAlert(isPresented: $showPremiumAlert)
             .onChange(of: isDeleted) { _, gone in
@@ -2506,6 +2516,7 @@ fileprivate struct DailyRecordDetailSheet: View {
             }
             .sheet(item: $editingDaily) { rec in
                 DailyRecordEditorSheet(childId: childId, type: rec.type, editing: rec)
+                    .appStores()
             }
             .premiumLockAlert(isPresented: $showPremiumAlert)
             .onChange(of: isDeleted) { _, gone in

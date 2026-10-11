@@ -216,9 +216,11 @@ struct FoodMapView: View {
             .sheet(item: $selectedAggregate) { agg in
                 RestaurantDetailSheet(aggregate: agg)
                     .environmentObject(expenseStore)
+                    .appStores()
             }
             .sheet(isPresented: $showListSheet) {
                 listSheet(aggs)
+                    .appStores()
             }
             .sheet(isPresented: $showAlbumSheet) {
                 // [模板化] 共用 MapAlbumSheet（與旅遊/醫療地圖同款）：彙整所有餐廳照片，
@@ -237,6 +239,7 @@ struct FoodMapView: View {
                         }
                     }
                 )
+                .appStores()
             }
         }
     }
@@ -1028,6 +1031,7 @@ struct RestaurantDetailSheet: View {
         .sheet(item: $viewingPhotoURL) { wrapper in
             PhotoLightbox(urls: aggregatePhotos.map { Expense.photoURL(for: $0) },
                           current: wrapper.url)
+                .appStores()
         }
     }
 

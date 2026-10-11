@@ -181,12 +181,15 @@ struct MedicalMapView: View {
                         }
                     }
                 )
+                .appStores()
             }
             .sheet(isPresented: $showEditProfile) {
                 HealthProfileEditView(profile: health).environmentObject(lifeStore)
+                    .appStores()
             }
             .sheet(item: $selectedPlace) { place in
                 MedicalPlaceDetailSheet(place: place)
+                    .appStores()
             }
         }
     }
@@ -771,6 +774,7 @@ struct MedicalPlaceDetailSheet: View {
             .sheet(item: $viewingPhotoURL) { w in
                 PhotoLightbox(urls: place.photoNames.map { Expense.photoURL(for: $0) },
                               current: w.url)
+                    .appStores()
             }
         }
     }

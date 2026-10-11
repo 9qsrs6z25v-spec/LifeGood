@@ -322,6 +322,7 @@ struct TripExpenseSheet: View {
             }
             .sheet(item: $editing) { e in
                 AddExpenseView(expenseType: e.expenseType, editingExpense: e)
+                    .appStores()
             }
         }
         // [v25.521] iPad／Mac：這一頁撐到接近視窗大小（電腦版「介面有點小」）

@@ -645,10 +645,12 @@ struct MapPickerPlaceGallery: View {
         .sheet(isPresented: $showLookAround) {
             LookAroundPreview(initialScene: scene)
                 .ignoresSafeArea()
+                .appStores()
         }
         // [v25.472] 這個地點的照片整組帶進去
         .sheet(item: $viewingPhoto) { wrapper in
             PhotoLightbox(urls: shots.map(\.url), current: wrapper.url)
+                .appStores()
         }
     }
 
@@ -848,6 +850,7 @@ struct MapPlacePickerButton: View {
             MapPlacePickerSheet(initialCoordinate: startCoordinate, accent: accent) { picked in
                 onPick(picked)
             }
+            .appStores()
         }
     }
 }

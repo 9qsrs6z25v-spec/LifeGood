@@ -474,8 +474,8 @@ struct ResumeView: View {
                     }
                 }
             }
-            .sheet(isPresented: $showAdd) { AddMilestoneView() }
-            .sheet(item: $editingItem) { item in AddMilestoneView(editing: item) }
+            .sheet(isPresented: $showAdd) { AddMilestoneView().appStores() }
+            .sheet(item: $editingItem) { item in AddMilestoneView(editing: item).appStores() }
             .premiumLockAlert(isPresented: $showPremiumAlert)
             .confirmationDialog("刪除這筆兼任職務？",
                                 isPresented: Binding(
@@ -1556,6 +1556,7 @@ struct AddMilestoneView: View {
             }
             .sheet(isPresented: $showAddRealEstate, onDismiss: { dismiss() }) {
                 AddRealEstateView()
+                    .appStores()
             }
             .navigationTitle(navTitle)
             .navigationBarTitleDisplayMode(.inline)

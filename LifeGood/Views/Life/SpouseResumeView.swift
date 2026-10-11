@@ -170,9 +170,12 @@ struct SpouseResumeView: View {
             .navigationBarTitleDisplayMode(.large)
             .premiumLockAlert(isPresented: $showPremiumAlert)
             .sheet(item: $editingAgreement) { ag in
-                if let sid = agreementSpouseId {
-                    NavigationStack { SpouseAgreementEditor(memberId: sid, agreement: ag) }
+                Group {
+                    if let sid = agreementSpouseId {
+                        NavigationStack { SpouseAgreementEditor(memberId: sid, agreement: ag) }
+                    }
                 }
+                .appStores()
             }
         }
     }

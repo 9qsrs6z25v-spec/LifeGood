@@ -156,10 +156,11 @@ struct LifeRealEstateView: View {
                 }
             }
             .navigationBarTitleDisplayMode(.large)
-            .sheet(isPresented: $showAdd) { AddRealEstateView() }
+            .sheet(isPresented: $showAdd) { AddRealEstateView().appStores() }
             // [v25.534] 從人生模式打開直接捲到「房屋資料」；換房列只放同一個縣市分組裡、同樣持有中／已售出的
             .sheet(item: $viewingItem) { item in
                 RealEstateDetailView(estate: item, order: siblingOrder(of: item), startAt: .info)
+                    .appStores()
             }
             .premiumLockAlert(isPresented: $showPremiumAlert)
         }

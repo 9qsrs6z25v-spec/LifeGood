@@ -279,9 +279,11 @@ struct SubordinateRosterView: View {
             }
             .sheet(item: $detail) { cell in
                 RosterCellDetailSheet(scheduleStore: scheduleStore, cell: cell)
+                    .appStores()
             }
             .sheet(isPresented: $showSettings) {
                 ShiftScheduleSettingsView(scheduleStore: scheduleStore)
+                    .appStores()
             }
             .onChange(of: lifeStore.departments.map(\.id)) { _, ids in
                 // 所選部門被刪除時，篩選回復為「全部部門」，避免殘留孤兒 UUID 讓名單假性清空
@@ -746,9 +748,13 @@ private struct RosterCellDetailSheet: View {
             .toolbar { ToolbarItem(placement: .topBarLeading) { Button("完成") { dismiss() } } }
             .sheet(isPresented: $showAddLeave) {
                 RecordEditorSheet(subordinateId: cell.subId, type: .leave, editing: nil, initialDate: selectedDate)
+                    .appStores()
             }
             .sheet(isPresented: $goDetail) {
-                if let sub = sub { SubordinateDetailView(subordinate: sub) }
+                Group {
+                    if let sub = sub { SubordinateDetailView(subordinate: sub) }
+                }
+                .appStores()
             }
         }
     }

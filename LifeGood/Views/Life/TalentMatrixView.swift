@@ -420,7 +420,7 @@ struct TalentMatrixView: View {
                     }
                 }
             }
-            .sheet(item: $shareItem) { item in ShareSheet(items: [item.url]) }
+            .sheet(item: $shareItem) { item in ShareSheet(items: [item.url]).appStores() }
             // 部門篩選變更後 members／ctx 會改用新篩選重新計算，若明細卡仍開著且
             // 選取的成員不在新篩選範圍內，卡片會顯示用 ?? 0 頂替的空分數、卻仍疊在畫面上，
             // 呈現自相矛盾的資料，因此篩選一變就先收起明細卡。
@@ -1130,7 +1130,7 @@ struct TalentStatsView: View {
                 }
             }
         }
-        .sheet(item: $shareItem) { item in ShareSheet(items: [item.url]) }
+        .sheet(item: $shareItem) { item in ShareSheet(items: [item.url]).appStores() }
         // [v25.327] 匯出前選「顯示名字」：全部顯示，或只顯示某個人（其他人匿名為 同仁1、同仁2…）
         .sheet(item: $pendingExport) { pending in
             NavigationStack {
@@ -1165,6 +1165,7 @@ struct TalentStatsView: View {
                 }
             }
             .presentationDetents([.medium, .large])
+            .appStores()
         }
     }
 

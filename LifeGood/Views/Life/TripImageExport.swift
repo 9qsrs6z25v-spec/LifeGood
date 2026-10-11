@@ -1240,6 +1240,7 @@ struct TripPlanImageExportSheet: View {
             .onDisappear { previewTask?.cancel() }
             .sheet(item: $shareURLs) { item in
                 ShareSheet(items: item.urls)
+                    .appStores()
             }
             .alert("出圖失敗", isPresented: $failed) {
                 Button("好", role: .cancel) {}

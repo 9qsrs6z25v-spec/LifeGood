@@ -275,7 +275,7 @@ struct RealEstateDetailView: View {
 
     private func withSheets<Content: View>(_ content: Content) -> some View {
         content
-            .sheet(item: $sheet) { s in sheetView(s) }
+            .sheet(item: $sheet) { s in sheetView(s).appStores() }
             // fileImporter 掛在穩定的 NavigationStack 上（不要掛在「＋」選單的 label：
             // 那是暫態 view，關閉檔案選單時回寫 binding 會閃退）
             .fileImporter(isPresented: $showDocumentPicker,

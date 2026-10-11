@@ -85,25 +85,34 @@ struct PetDetailView: View {
             }
             .premiumLockAlert(isPresented: $showPremiumAlert)
             .sheet(isPresented: $showEditProfile) {
-                if let p = pet { AddMilestoneView(editingFamily: p) }
+                Group {
+                    if let p = pet { AddMilestoneView(editingFamily: p) }
+                }
+                .appStores()
             }
             .sheet(item: $addingRecordType) { kind in
                 ChildRecordEditorSheet(childId: petId, type: kind.recordType)
+                    .appStores()
             }
             .sheet(item: $editingRecord) { rec in
                 ChildRecordEditorSheet(childId: petId, type: rec.type, editing: rec)
+                    .appStores()
             }
             .sheet(item: $addingDailyType) { kind in
                 DailyRecordEditorSheet(childId: petId, type: kind.dailyType)
+                    .appStores()
             }
             .sheet(item: $editingDaily) { rec in
                 DailyRecordEditorSheet(childId: petId, type: rec.type, editing: rec)
+                    .appStores()
             }
             .sheet(isPresented: $addingPhoto) {
                 FamilyAlbumPhotoEditor(memberId: petId, editing: nil)
+                    .appStores()
             }
             .sheet(item: $editingPhoto) { photo in
                 FamilyAlbumPhotoEditor(memberId: petId, editing: photo)
+                    .appStores()
             }
             .confirmationDialog("刪除", isPresented: Binding(
                 get: { removing != nil },

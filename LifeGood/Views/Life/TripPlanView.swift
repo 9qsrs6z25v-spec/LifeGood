@@ -95,9 +95,11 @@ struct TripPlanListView: View {
                 TripPlanDetailView(planId: box.id)
                     .environmentObject(lifeStore)
                     .environmentObject(expenseStore)
+                    .appStores()
             }
             .sheet(item: $sharing) { item in
                 ShareSheet(items: [item.text])
+                    .appStores()
             }
             .confirmationDialog("刪除行程", isPresented: Binding(
                 get: { removing != nil }, set: { if !$0 { removing = nil } }
@@ -414,60 +416,81 @@ struct TripPlanDetailView: View {
                 withAnimation(.easeOut(duration: 0.25)) { banner = nil }
             }
             .sheet(isPresented: $showSettings) {
-                if let p = plan {
-                    TripPlanSettingsSheet(plan: p).environmentObject(lifeStore)
+                Group {
+                    if let p = plan {
+                        TripPlanSettingsSheet(plan: p).environmentObject(lifeStore)
+                    }
                 }
+                .appStores()
             }
             .sheet(item: $insertion) { ins in
                 TripStopEditorSheet(planId: planId, editing: nil, insertAt: ins.at)
                     .environmentObject(lifeStore)
+                    .appStores()
             }
             .sheet(item: $editingStop) { stop in
                 TripStopEditorSheet(planId: planId, editing: stop, insertAt: nil)
                     .environmentObject(lifeStore)
+                    .appStores()
             }
             .sheet(isPresented: $showMap) {
-                if let p = plan {
-                    TripRouteMapSheet(plan: p).environmentObject(lifeStore)
+                Group {
+                    if let p = plan {
+                        TripRouteMapSheet(plan: p).environmentObject(lifeStore)
+                    }
                 }
+                .appStores()
             }
             .sheet(item: $legDetail) { box in
-                if let p = plan {
-                    TripLegDetailSheet(plan: p, index: box.index)
-                        .environmentObject(lifeStore)
+                Group {
+                    if let p = plan {
+                        TripLegDetailSheet(plan: p, index: box.index)
+                            .environmentObject(lifeStore)
+                    }
                 }
+                .appStores()
             }
             .sheet(item: $sharing) { item in
                 ShareSheet(items: [item.text])
+                    .appStores()
             }
             .sheet(item: $sharingStopImage) { item in
                 ShareSheet(items: [item.url])
+                    .appStores()
             }
             .sheet(isPresented: $showImageExport) {
-                if let p = plan { TripPlanImageExportSheet(plan: p) }
+                Group {
+                    if let p = plan { TripPlanImageExportSheet(plan: p) }
+                }
+                .appStores()
             }
             .sheet(isPresented: $showChecklist) {
                 TripChecklistSheet(planId: planId)
                     .environmentObject(lifeStore)
+                    .appStores()
             }
             .sheet(isPresented: $showAlbum) {
-                if let p = plan {
-                    // 共用地圖相簿模板（旅遊／美食／醫療地圖與兒女相簿都是它）
-                    MapAlbumSheet(
-                        title: p.displayTitle + " 的相本",
-                        accent: accent,
-                        emptyTitle: "這趟還沒有照片",
-                        emptyHint: "在景點編輯裡加照片，這裡就會依景點分組整理成相本；記帳時把變動支出關聯到這趟旅遊，那些照片也會一起進來。",
-                        groupNoun: "景點",
-                        items: albumItems(p),
-                        stats: { TripAlbumStatsPanel(plan: p, items: albumItems(p)) })
+                Group {
+                    if let p = plan {
+                        // 共用地圖相簿模板（旅遊／美食／醫療地圖與兒女相簿都是它）
+                        MapAlbumSheet(
+                            title: p.displayTitle + " 的相本",
+                            accent: accent,
+                            emptyTitle: "這趟還沒有照片",
+                            emptyHint: "在景點編輯裡加照片，這裡就會依景點分組整理成相本；記帳時把變動支出關聯到這趟旅遊，那些照片也會一起進來。",
+                            groupNoun: "景點",
+                            items: albumItems(p),
+                            stats: { TripAlbumStatsPanel(plan: p, items: albumItems(p)) })
+                    }
                 }
+                .appStores()
             }
             // [v25.480] 這趟的花費：統計 + 明細自成一頁
             .sheet(isPresented: $showExpenses) {
                 TripExpenseSheet(planId: planId)
                     .environmentObject(lifeStore)
                     .environmentObject(expenseStore)
+                    .appStores()
             }
             // [v25.475] 從某一站的「…」直接記一筆花費：行程、站別、日期都預填好
             .sheet(item: $addingExpense) { target in
@@ -476,11 +499,13 @@ struct TripPlanDetailView: View {
                     preset: AddExpensePreset(linkedTripPlanId: planId,
                                              linkedTripStopId: target.stopId,
                                              date: target.date))
+                    .appStores()
             }
             // [v25.472] 從時間軸點照片進來（v25.517 起是每張卡左邊的主圖）：
             // 整趟的照片一起帶，左右滑得動
             .sheet(item: $viewingPhoto) { wrapper in
                 PhotoLightbox(urls: allStopPhotoURLs, current: wrapper.url)
+                    .appStores()
             }
             .sheet(item: Binding(
                 get: { openingStopId.map { IDBox(id: $0) } },
@@ -489,6 +514,7 @@ struct TripPlanDetailView: View {
                 TripStopCardView(planId: planId, stopId: box.id)
                     .environmentObject(lifeStore)
                     .environmentObject(expenseStore)
+                    .appStores()
             }
             .confirmationDialog("刪除景點", isPresented: Binding(
                 get: { removingStop != nil }, set: { if !$0 { removingStop = nil } }
@@ -559,6 +585,7 @@ struct TripPlanDetailView: View {
             )) { box in
                 TripStopCoverSheet(planId: planId, stopId: box.id)
                     .environmentObject(lifeStore)
+                    .appStores()
             }
         }
     }
@@ -2018,6 +2045,7 @@ struct TripPlanDetailView: View {
                 get: { spendPopoverStopId == slot.stop.id },
                 set: { spendPopoverStopId = $0 ? slot.stop.id : nil })) {
                 stopSpendDetail(slot, color: c)
+                    .appStores()
             }
             // [v25.513 使用者指定「顯示在右下那個建築物上」] 新卡片右下就是線稿天際線
             .padding(.trailing, 10)
@@ -4117,9 +4145,11 @@ struct TripLegDetailSheet: View {
             }
             .sheet(item: $sharing) { item in
                 ShareSheet(items: [item.text])
+                    .appStores()
             }
             .sheet(item: $sharingImage) { item in
                 ShareSheet(items: [item.url])
+                    .appStores()
             }
             .task { await loadRoute() }
         }
@@ -4545,6 +4575,7 @@ struct TripChecklistSheet: View {
             .sheet(item: $editing) { item in
                 TripChecklistItemEditor(planId: planId, kind: kind, item: item)
                     .environmentObject(lifeStore)
+                    .appStores()
             }
             .onAppear {
                 guard !loaded else { return }

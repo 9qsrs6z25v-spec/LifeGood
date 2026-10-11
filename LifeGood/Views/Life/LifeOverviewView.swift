@@ -84,15 +84,16 @@ struct LifeOverviewView: View {
                     quickAddMenu
                 }
             }
-            .sheet(isPresented: $showEditProfile) { EditProfileView() }
-            .sheet(isPresented: $showAddVariable) { AddExpenseView(expenseType: .variable) }
-            .sheet(isPresented: $showAddFixed) { AddExpenseView(expenseType: .fixed) }
-            .sheet(isPresented: $showAddStock) { AddStockView() }
-            .sheet(isPresented: $showAddRealEstate) { AddRealEstateView() }
+            .sheet(isPresented: $showEditProfile) { EditProfileView().appStores() }
+            .sheet(isPresented: $showAddVariable) { AddExpenseView(expenseType: .variable).appStores() }
+            .sheet(isPresented: $showAddFixed) { AddExpenseView(expenseType: .fixed).appStores() }
+            .sheet(isPresented: $showAddStock) { AddStockView().appStores() }
+            .sheet(isPresented: $showAddRealEstate) { AddRealEstateView().appStores() }
             // .sheet(item:) 而不是 isPresented＋另一個 @State：後者在 content
             // closure 裡讀到的會是寫入前的舊分類
             .sheet(item: $addingMilestoneCategory) { cat in
                 AddMilestoneView(initialCategory: cat)
+                    .appStores()
             }
             .premiumLockAlert(isPresented: $showPremiumAlert)
         }

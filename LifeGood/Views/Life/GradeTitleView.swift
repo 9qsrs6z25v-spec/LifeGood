@@ -195,12 +195,14 @@ struct GradeTitleView: View {
             }
             .sheet(isPresented: $addingDepartment) {
                 DepartmentEditor(editingId: nil)
+                    .appStores()
             }
             .sheet(item: Binding(
                 get: { editingDepartmentId.map { IdentifiableUUID(id: $0) } },
                 set: { editingDepartmentId = $0?.id }
             )) { wrapper in
                 DepartmentEditor(editingId: wrapper.id)
+                    .appStores()
             }
         }
     }

@@ -269,19 +269,24 @@ struct StockDetailView: View {
             }
             .sheet(isPresented: $showEdit) {
                 AddStockView(editing: stock)
+                    .appStores()
             }
-            .sheet(item: $shareItem) { item in ShareSheet(items: item.items) }
+            .sheet(item: $shareItem) { item in ShareSheet(items: item.items).appStores() }
             .sheet(item: $newTransaction) { request in
                 StockTransactionEditor(stockId: stockId, editing: nil, initialKind: request.kind)
+                    .appStores()
             }
             .sheet(item: $editingTransaction) { tx in
                 StockTransactionEditor(stockId: stockId, editing: tx)
+                    .appStores()
             }
             .sheet(item: $newDividend) { request in
                 StockDividendEditor(stockId: stockId, editing: nil, initialKind: request.kind)
+                    .appStores()
             }
             .sheet(item: $editingDividend) { div in
                 StockDividendEditor(stockId: stockId, editing: div)
+                    .appStores()
             }
             .premiumLockAlert(isPresented: $showPremiumAlert)
             .exportPageSizeDialog(isPresented: $askExportPageSize,

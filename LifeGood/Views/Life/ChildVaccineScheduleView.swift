@@ -119,9 +119,11 @@ struct ChildVaccineScheduleView: View {
         .premiumLockAlert(isPresented: $showPremiumAlert)
         .sheet(item: $editingItem) { item in
             VaccineDoseEditorSheet(childId: childId, item: item)
+                .appStores()
         }
         .sheet(item: $editingLegacy) { rec in
             ChildRecordEditorSheet(childId: childId, type: .vaccination, editing: rec)
+                .appStores()
         }
         .onAppear {
             withAnimation(.spring(response: 0.45, dampingFraction: 0.85)) { headerAppeared = true }

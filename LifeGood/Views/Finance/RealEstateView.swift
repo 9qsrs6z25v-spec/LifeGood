@@ -220,11 +220,12 @@ struct RealEstateView: View {
                     }
                 }
             }
-            .sheet(isPresented: $showAdd) { AddRealEstateView() }
+            .sheet(isPresented: $showAdd) { AddRealEstateView().appStores() }
             // [v25.534] 卡片上的換房列照這份清單的排序（同一組：持有中／已售出）；
             // 排序選項沒有存起來，卡片自己拿不到，所以把排好的 id 傳進去
             .sheet(item: $viewingItem) { item in
                 RealEstateDetailView(estate: item, order: siblingOrder(of: item))
+                    .appStores()
             }
             .premiumLockAlert(isPresented: $showPremiumAlert)
             .alert("刪除這間房子？",

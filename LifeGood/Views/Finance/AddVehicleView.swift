@@ -165,21 +165,25 @@ struct AddVehicleView: View {
             .onAppear { loadEditing() }
             .sheet(item: $editingFixedExpense) { exp in
                 AddExpenseView(expenseType: .fixed, editingExpense: exp)
+                    .appStores()
             }
             .sheet(item: $editingVariableExpense) { exp in
                 AddExpenseView(expenseType: .variable, editingExpense: exp)
+                    .appStores()
             }
             .sheet(item: $addingFixedCategory) { cat in
                 AddExpenseView(
                     expenseType: .fixed,
                     preset: makeFixedPreset(for: cat)
                 )
+                .appStores()
             }
             .sheet(item: $addingVariableCategory) { cat in
                 AddExpenseView(
                     expenseType: .variable,
                     preset: makeVariablePreset(for: cat)
                 )
+                .appStores()
             }
             .confirmationDialog("選擇定期支出類別", isPresented: $showFixedCategoryPicker, titleVisibility: .visible) {
                 ForEach(VehicleFixedCategory.allCases) { cat in

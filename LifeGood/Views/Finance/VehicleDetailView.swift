@@ -137,24 +137,31 @@ struct VehicleDetailView: View {
             }
             .sheet(isPresented: $showChargeAnalytics) {
                 VehicleChargeAnalyticsView(vehicleId: vehicleId)
+                    .appStores()
             }
             .sheet(isPresented: $showEdit) {
                 AddVehicleView(editing: vehicle)
+                    .appStores()
             }
             .sheet(isPresented: $addingPhotoRecord) {
                 VehiclePhotoEditor(vehicleId: vehicleId, editing: nil)
+                    .appStores()
             }
             .sheet(item: $editingPhotoRecord) { rec in
                 VehiclePhotoEditor(vehicleId: vehicleId, editing: rec)
+                    .appStores()
             }
             .sheet(item: $cutePhotoDraft) { draft in
                 CutePhotoViewer(draft: draft)
+                    .appStores()
             }
             .sheet(item: $viewingItem) { ref in
                 VehicleItemDetailSheet(vehicleId: vehicleId, item: ref)
+                    .appStores()
             }
             .sheet(item: $editingLinkedExpense) { exp in
                 AddExpenseView(expenseType: exp.expenseType, editingExpense: exp)
+                    .appStores()
             }
             .premiumLockAlert(isPresented: $showPremiumAlert)
             .alert("確定要刪除這輛車嗎？", isPresented: $showDeleteConfirm) {
@@ -1350,9 +1357,11 @@ fileprivate struct VehicleItemDetailSheet: View {
             }
             .sheet(item: $editingExpense) { exp in
                 AddExpenseView(expenseType: exp.expenseType, editingExpense: exp)
+                    .appStores()
             }
             .sheet(item: $cuteDraft) { draft in
                 CutePhotoViewer(draft: draft)
+                    .appStores()
             }
             .premiumLockAlert(isPresented: $showPremiumAlert)
         }

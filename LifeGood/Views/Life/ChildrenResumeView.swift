@@ -139,6 +139,7 @@ struct ChildrenResumeView: View {
             .navigationBarTitleDisplayMode(.large)  // [v2] 對齊 IncomeView / StockView 大標題規格
             .sheet(item: $viewingChild) { child in
                 ChildDetailView(child: child)
+                    .appStores()
             }
         }
     }

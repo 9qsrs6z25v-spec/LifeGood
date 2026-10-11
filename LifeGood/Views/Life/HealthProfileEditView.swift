@@ -97,15 +97,19 @@ struct HealthProfileEditView: View {
             }
             .sheet(item: $editingAllergy) { item in
                 AllergyEditor(allergy: item) { upsert($0, into: &draft.allergies) }
+                    .appStores()
             }
             .sheet(item: $editingMedication) { item in
                 MedicationEditor(medication: item) { upsert($0, into: &draft.medications) }
+                    .appStores()
             }
             .sheet(item: $editingMeasurement) { item in
                 MeasurementEditor(measurement: item) { upsert($0, into: &draft.measurements) }
+                    .appStores()
             }
             .sheet(item: $editingCheckup) { item in
                 CheckupEditor(checkup: item) { upsert($0, into: &draft.checkups) }
+                    .appStores()
             }
         }
     }

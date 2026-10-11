@@ -151,10 +151,11 @@ struct SavingsInsuranceView: View {
             .task(id: "\(store.modifyID)-\(expenseStore.modifyID)") {
                 board = SavingsBoardData.build(insurances: store.insurances, rates: FinanceRates(expenseStore))
             }
-            .sheet(isPresented: $showAdd) { AddSavingsInsuranceView() }
+            .sheet(isPresented: $showAdd) { AddSavingsInsuranceView().appStores() }
             .sheet(item: $previewItem) { item in
                 // 點保單先看保單卡（右上角「編輯」才進入編輯）
                 InsurancePolicyCard(insurance: item)
+                    .appStores()
             }
             .premiumLockAlert(isPresented: $showPremiumAlert)
             .onAppear {

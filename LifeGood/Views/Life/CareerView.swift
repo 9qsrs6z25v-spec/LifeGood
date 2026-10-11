@@ -178,8 +178,8 @@ struct CareerView: View {
                     }
                 }
             }
-            .sheet(isPresented: $showAdd) { AddMilestoneView(initialCategory: .career) }
-            .sheet(item: $editingItem) { item in AddMilestoneView(editing: item) }
+            .sheet(isPresented: $showAdd) { AddMilestoneView(initialCategory: .career).appStores() }
+            .sheet(item: $editingItem) { item in AddMilestoneView(editing: item).appStores() }
             .premiumLockAlert(isPresented: $showPremiumAlert)
         }
     }

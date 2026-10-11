@@ -171,10 +171,12 @@ struct FixedExpenseView: View {
             }
             .sheet(isPresented: $showingAddSheet) {
                 AddExpenseView(expenseType: .fixed)
+                    .appStores()
             }
             .sheet(item: $previewExpense) { expense in
                 // 點項目先顯示預覽卡片（右上角「編輯」才進入編輯）
                 FixedExpenseCard(expense: expense)
+                    .appStores()
             }
         }
     }
@@ -520,11 +522,13 @@ struct FixedExpenseCard: View {
             }
             .sheet(isPresented: $showEdit) {
                 AddExpenseView(expenseType: .fixed, editingExpense: current)
+                    .appStores()
             }
-            .sheet(item: $shareItem) { item in ShareSheet(items: item.items) }
+            .sheet(item: $shareItem) { item in ShareSheet(items: item.items).appStores() }
             .sheet(isPresented: $showHistoryEditor) {
                 AmountHistoryEditor(expense: current, accent: accent)
                     .environmentObject(store)
+                    .appStores()
             }
             .alert("更新金額", isPresented: $showAmountUpdate) {
                 TextField("新一期金額（目前 \(Self.decimalFmt.string(from: NSNumber(value: current.amount)) ?? "")）",

@@ -153,17 +153,18 @@ struct FamilyView: View {
                     }
                 }
             }
-            .sheet(isPresented: $showAdd) { AddMilestoneView(initialCategory: .family) }
-            .sheet(item: $editingMember) { member in AddMilestoneView(editingFamily: member) }
+            .sheet(isPresented: $showAdd) { AddMilestoneView(initialCategory: .family).appStores() }
+            .sheet(item: $editingMember) { member in AddMilestoneView(editingFamily: member).appStores() }
             .sheet(item: $editingTask) { task in
                 FamilyTaskEditor(task: task)
+                    .appStores()
             }
             .alert("提醒事項權限被拒", isPresented: $showReminderDeniedAlert) {
                 Button("知道了", role: .cancel) {}
             } message: {
                 Text("請到 設定 > 隱私權與安全性 > 提醒事項 開啟 LifeGood 的存取權，才能同步待辦。")
             }
-            .sheet(item: $sharePayload) { payload in ShareSheet(items: payload.items) }
+            .sheet(item: $sharePayload) { payload in ShareSheet(items: payload.items).appStores() }
             .exportPageSizeDialog(isPresented: $askExportPageSize,
                                   itemCount: exportRowCount(pendingExportSection)) { per in
                 exportImage(pendingExportSection, perPage: per)

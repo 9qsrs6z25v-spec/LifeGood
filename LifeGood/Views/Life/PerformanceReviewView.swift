@@ -468,8 +468,9 @@ struct PerformanceSummaryView: View {
                 showExportPicker = false
                 exportImage(sections: secs)
             }
+            .appStores()
         }
-        .sheet(item: $sharePayload) { payload in ShareSheet(items: payload.items) }
+        .sheet(item: $sharePayload) { payload in ShareSheet(items: payload.items).appStores() }
         .alert("匯出圖片", isPresented: Binding(
             get: { exportError != nil },
             set: { if !$0 { exportError = nil } }

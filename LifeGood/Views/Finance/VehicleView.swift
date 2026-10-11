@@ -213,9 +213,9 @@ struct VehicleView: View {
                 }
             }
             .task(id: "\(store.modifyID)-\(expenseStore.modifyID)") { rebuild() }
-            .sheet(isPresented: $showAdd) { AddVehicleView() }
-            .sheet(item: $viewingItem) { item in VehicleDetailView(vehicleId: item.id) }
-            .sheet(item: $editingItem) { item in AddVehicleView(editing: item) }
+            .sheet(isPresented: $showAdd) { AddVehicleView().appStores() }
+            .sheet(item: $viewingItem) { item in VehicleDetailView(vehicleId: item.id).appStores() }
+            .sheet(item: $editingItem) { item in AddVehicleView(editing: item).appStores() }
             .premiumLockAlert(isPresented: $showPremiumAlert)
             .toolbar {
                 ToolbarItem(placement: .bottomBar) {

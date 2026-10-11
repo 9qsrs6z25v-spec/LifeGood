@@ -219,6 +219,7 @@ struct HealthView: View {
                     Task { await pushToHealthKit(saved) }
                 }
                 .environmentObject(lifeStore)
+                .appStores()
             }
             .sheet(isPresented: $showRun) {
                 RunTrackingView { session in
@@ -226,6 +227,7 @@ struct HealthView: View {
                     Task { await pushToHealthKit(session) }
                 }
                 .environmentObject(lifeStore)
+                .appStores()
             }
             // 離開頁面時把還在倒數的提示收掉，不要留一個醒著的 Task
             .onDisappear {
