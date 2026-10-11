@@ -172,7 +172,10 @@ struct AddExpenseView: View {
     @State private var evKwhText = ""
     @State private var evFromText = ""
     @State private var evToText = ""
+    /// [v25.539] 里程錶：電費、油錢、保養、維修都用這一欄（存在 Expense.evOdometer）
     @State private var evOdoText = ""
+    /// [v25.539] 加油的公升數（油錢才顯示；選填）
+    @State private var fuelLitersText = ""
     /// [v25.538] 上一次自動填進名稱欄的「車名-分類名」。名稱還是它（或空白）才跟著連結換；
     /// 你自己打過的就不動（決定 19：名稱可以自己打，不再鎖住）
     @State private var autoVehicleTitle: String?
@@ -2647,35 +2650,95 @@ struct AddExpenseView: View {
                             .frame(width: 52)
                         Text("%").foregroundStyle(.secondary)
                     }
+                }
+                // [v25.539] 油錢：公升數（選填，決定 7）。有了它才算得出每公升、油耗；
+                // 每公升就寫在欄名下面，邊打邊看得到跟加油站的價錢對不對得上
+                if selectedVehicleExpenseCategory == .fuel {
+                    fuelLitersRow
+                }
+                // [v25.539] 里程錶不再只給充電：油錢、保養、維修也記（決定 7），一年開多少、多久保養一次都靠它
+                if Self.odometerCategories.contains(selectedVehicleExpenseCategory) {
                     HStack {
                         Text("里程錶")
                         Spacer()
-                        TextField("充電當下讀數（選填）", text: $evOdoText)
+                        TextField("選填", text: $evOdoText)
                             .keyboardType(.decimalPad)
                             .multilineTextAlignment(.trailing)
                             .frame(width: 130)
-                        Text("km").foregroundStyle(.secondary)
+                        Text("公里").foregroundStyle(.secondary)
                     }
-                    if let kwh = Double(evKwhText), kwh > 0,
-                       let amt = Double(amountText), amt > 0 {
-                        HStack {
-                            Text("每度電價").foregroundStyle(.secondary)
-                            Spacer()
-                            Text(String(format: "NT$%.2f／kWh", amt * currencyMultiplier / kwh))
-                                .font(.subheadline.weight(.semibold))
-                                .foregroundStyle(.teal)
-                        }
+                }
+                if selectedVehicleExpenseCategory == .electricity, let perKwh = evPricePerKwhText {
+                    HStack {
+                        Text("每度電價").foregroundStyle(.secondary)
+                        Spacer()
+                        Text(perKwh)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.teal)
                     }
                 }
             }
         } header: {
             sectionHeader(title: "汽車資訊（連動理財模式）", accentColor: .teal)
         } footer: {
-            if selectedVehicleExpenseCategory == .electricity {
-                Text("充電度數、電量 % 與里程錶皆選填。填度數→每度電價；填電量 %→推估電池容量；連續兩筆都填里程錶→電耗（km/kWh）與每公里電費。車輛卡片會顯示 KPI 與趨勢圖。")
-            } else {
-                Text("選擇後分類自動設為「汽車」；名稱留空時自動用「車名-支出類別」，也可以自己打。支出類別會依照車輛動力類型自動篩選。")
+            Text(vehicleSectionFooter)
+        }
+    }
+
+    /// [v25.539] 里程錶可以記的支出類別（存在 evOdometer 這一欄，讀的時候用 Expense.odometer）
+    private static let odometerCategories: Set<VehicleVariableCategory> = [.fuel, .electricity, .maintenance, .repair]
+
+    /// [v25.539] 加油的公升數一列；每公升放在欄名下面（「旁邊即時顯示」），一列放得下、不用多佔一行
+    private var fuelLitersRow: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("公升數")
+                if let perLiter = fuelPricePerLiterText {
+                    Text(perLiter)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.teal)
+                }
             }
+            Spacer()
+            TextField("選填", text: $fuelLitersText)
+                .keyboardType(.decimalPad)
+                .multilineTextAlignment(.trailing)
+                .frame(width: 90)
+            Text("公升").foregroundStyle(.secondary)
+        }
+    }
+
+    /// [v25.539] 正在打的金額換成台幣（外幣照匯率）；還沒打或打的不是數字時 nil
+    private var typedAmountNTD: Double? {
+        guard let amt = Double(amountText), amt > 0 else { return nil }
+        return amt * currencyMultiplier
+    }
+
+    /// 「NT$7.9／kWh」：[v25.539] 決定 13，每度、每公升一律一位小數，跟卡片、看板同一個寫法
+    private var evPricePerKwhText: String? {
+        guard let kwh = Double(evKwhText), kwh > 0, let ntd = typedAmountNTD else { return nil }
+        return "NT$" + FinanceItemText.number(ntd / kwh, digits: 1) + "／kWh"
+    }
+
+    /// 「每公升 NT$29.1」：[v25.539] 金額 ÷ 公升，一位小數（跟列表膠囊同一個寫法）
+    private var fuelPricePerLiterText: String? {
+        guard let liters = Double(fuelLitersText), liters > 0, let ntd = typedAmountNTD else { return nil }
+        return "每公升 NT$" + FinanceItemText.number(ntd / liters, digits: 1)
+    }
+
+    /// 車輛區下面的說明：[v25.539] 依支出類別講那幾個選填欄能算出什麼
+    private var vehicleSectionFooter: String {
+        switch selectedVehicleExpenseCategory {
+        case .electricity:
+            return "充電度數、電量 % 與里程錶皆選填。填度數→每度電價；填電量 %→推估電池容量；連續兩筆都填里程錶→電耗（km/kWh）與每公里電費。車輛卡片會顯示 KPI 與趨勢圖。"
+        case .fuel:
+            return "公升數、里程錶皆選填。填公升數→每公升油價；連續兩次加油都填里程錶→每公里油錢，再加上公升數→油耗（公里／公升）。"
+        case .maintenance:
+            return "里程錶選填。記下保養當時的讀數，就算得出這台車一年開多少公里、大約每幾公里保養一次。"
+        case .repair:
+            return "里程錶選填。記下維修當時的讀數，就算得出這台車一年開多少公里。"
+        case .parking, .wash, .other:
+            return "選擇後分類自動設為「汽車」；名稱留空時自動用「車名-支出類別」，也可以自己打。支出類別會依照車輛動力類型自動篩選。"
         }
     }
 
@@ -3485,12 +3548,18 @@ struct AddExpenseView: View {
         expense.amountHistory = editingExpense?.amountHistory ?? []
         // 充電資訊：只在「變動＋關聯汽車＋電費」時存（比照子分類條件化原則）
         // [v25.538] 還要真的選了車：沒選車存進去，卡片（要 linkedVehicleId）永遠看不到
-        let isEVCharge = expenseType == .variable && targetVehId != nil
-            && selectedVehicleExpenseCategory == .electricity
+        let linksVehicleVariable = expenseType == .variable && targetVehId != nil
+        let isEVCharge = linksVehicleVariable && selectedVehicleExpenseCategory == .electricity
+        // [v25.539] 公升數只給加油；里程錶從「只有電費」放寬到油錢、電費、保養、維修（決定 7）。
+        // 條件不合一律存 nil：取消關聯汽車、改成別的分類時跟度數一起清掉。這裡是整筆重建，
+        // 不指派的話編輯一次就會把原本的公升數洗掉
+        let isFuelFill = linksVehicleVariable && selectedVehicleExpenseCategory == .fuel
+        let takesOdometer = linksVehicleVariable && Self.odometerCategories.contains(selectedVehicleExpenseCategory)
         expense.evKwh = isEVCharge ? Double(evKwhText).flatMap { $0 > 0 ? $0 : nil } : nil
         expense.evFromPct = isEVCharge ? Double(evFromText).flatMap { (0...100).contains($0) ? $0 : nil } : nil
         expense.evToPct = isEVCharge ? Double(evToText).flatMap { (0...100).contains($0) ? $0 : nil } : nil
-        expense.evOdometer = isEVCharge ? Double(evOdoText).flatMap { $0 > 0 ? $0 : nil } : nil
+        expense.evOdometer = takesOdometer ? Double(evOdoText).flatMap { $0 > 0 ? $0 : nil } : nil
+        expense.fuelLiters = isFuelFill ? Double(fuelLitersText).flatMap { $0 > 0 ? $0 : nil } : nil
         // [v25.424] 旅遊關聯：只有變動支出有意義（固定支出是每月扣款，跟某一趟旅行無關）
         if expenseType == .variable, let planId = linkedTripPlanId,
            lifeStore.tripPlan(id: planId) != nil {
@@ -4042,10 +4111,13 @@ struct AddExpenseView: View {
                 selectedVehicleId = expense.linkedVehicleId
                 if let veCat = expense.vehicleExpenseCategory {
                     selectedVehicleExpenseCategory = veCat
-                    if let kwh = expense.evKwh { evKwhText = String(format: "%g", kwh) }
-                    if let f = expense.evFromPct { evFromText = String(format: "%g", f) }
-                    if let t = expense.evToPct { evToText = String(format: "%g", t) }
-                    if let odo = expense.evOdometer { evOdoText = String(format: "%g", odo) }
+                    // [v25.539] 帶回欄位改用不丟位數的寫法：%g 只留 6 位有效數字，
+                    // 里程 123,456.7 會變 123457、1,234,567 會變 1.23457e+06，存一次就被改掉
+                    if let kwh = expense.evKwh { evKwhText = Self.editableNumber(kwh) }
+                    if let f = expense.evFromPct { evFromText = Self.editableNumber(f) }
+                    if let t = expense.evToPct { evToText = Self.editableNumber(t) }
+                    if let odo = expense.odometer { evOdoText = Self.editableNumber(odo) }
+                    if let liters = expense.fuelLiters { fuelLitersText = Self.editableNumber(liters) }
                 }
             } else if let linkedId = expense.linkedStockId,
                       let linked = financeStore.stocks.first(where: { $0.id == linkedId }) {
@@ -4163,6 +4235,14 @@ struct AddExpenseView: View {
             return String(format: "%.0f", value)
         }
         return String(format: "%g", value)
+    }
+
+    /// [v25.539] 帶回編輯欄的數字：整數不帶小數點，其他用最短又能原樣讀回的寫法（45.23 → "45.23"），不丟位數
+    private static func editableNumber(_ value: Double) -> String {
+        if value == value.rounded(), abs(value) < 1e15 {
+            return String(format: "%.0f", value)
+        }
+        return String(value)
     }
 
     private func formatWan(_ value: Double) -> String {

@@ -82,6 +82,9 @@ enum VehicleSortOption: String, CaseIterable, Identifiable {
 //     全部持有中車輛的估值（連手填的），關掉也不會還原。改成編輯頁估值欄下的「照每年 15% 估（帶入）」，
 //     只把數字填進欄位，按儲存才算數。
 //   - 拿掉永遠不會打開的 editingItem sheet（編輯只從卡片進）。
+//
+// [v25.539] 同一套數字：每台車（含已售出）在 .task 裡 build 一次 VehicleFacts，項目卡、看板、排序都讀它；
+//   排序「每月養車費」「折舊率」「估值」照卡片上寫的那個數排；持有中／已售出用 isSold(asOf:)（售出日到了才算賣掉）。
 
 struct VehicleView: View {
     @EnvironmentObject var store: FinanceStore
@@ -101,7 +104,7 @@ struct VehicleView: View {
     @State private var cardsAppeared = false
     @State private var emptyIconPulse = false
     @State private var emptyPulseTask: Task<Void, Never>?
-    /// 每台車的幾個數字（每度電、車貸…）與看板：掃記帳的支出算，放在 .task 裡
+    /// 每台車的幾個數字（每月養車、估值、車貸…）與看板：掃記帳的支出算，放在 .task 裡
     @State private var facts: [UUID: VehicleFacts] = [:]
     @State private var board = VehicleBoardData()
 
@@ -113,9 +116,10 @@ struct VehicleView: View {
     private var sortedVehicles: [Vehicle] {
         let option = sortOption
         let ascending = sortAscending
+        let map = facts
         return store.vehicles.sorted { a, b in
-            let ka = Self.sortKey(a, option)
-            let kb = Self.sortKey(b, option)
+            let ka = Self.sortKey(a, option, map[a.id])
+            let kb = Self.sortKey(b, option, map[b.id])
             if ka != kb { return ascending ? ka < kb : ka > kb }
             let byName = a.name.localizedStandardCompare(b.name)
             if byName != .orderedSame { return byName == .orderedAscending }
@@ -123,20 +127,28 @@ struct VehicleView: View {
         }
     }
 
-    private static func sortKey(_ v: Vehicle, _ option: VehicleSortOption) -> Double {
+    /// [v25.539] 估值、折舊率、每月養車費改照卡片上寫的那個數排（VehicleFacts）：以前「每月養車費」只比
+    /// 車子鏡像的定期月均（季繳當月繳、沒算記帳連過來的），「估值」比的是沒填時的 0，跟卡片寫的對不起來。
+    /// facts 還沒算好（剛打開那一下）時估值退回車子自己的欄位，其他兩個當 0
+    private static func sortKey(_ v: Vehicle, _ option: VehicleSortOption, _ f: VehicleFacts?) -> Double {
         switch option {
         case .purchasePrice: return v.purchasePrice
-        case .currentValue: return v.currentValue
-        case .depreciationRate: return v.depreciationRate
+        case .currentValue: return f?.value ?? v.currentValue
+        case .depreciationRate:
+            // 折得越多排越前面（降冪）：facts 的分數是「估值 ÷ 購入價 − 1」，折舊是負的，所以反過來比。
+            // 算不出來的（沒填購入價、估值還沒填）當持平
+            return -(f?.depreciationRate ?? 0)
         case .yearsOwned: return v.yearsOwned
-        case .monthlyExpense: return v.monthlyExpense
+        case .monthlyExpense: return f?.monthly ?? 0
         }
     }
 
     var body: some View {
         let sorted = sortedVehicles
-        let active = sorted.filter { !$0.isSold }
-        let sold = sorted.filter(\.isSold)
+        // [v25.539] 已售出＝售出日已經到了（售出日填在未來的照持有中算，跟看板、理財總覽同一個判斷）
+        let now = Date()
+        let active = sorted.filter { !$0.isSold(asOf: now) }
+        let sold = sorted.filter { $0.isSold(asOf: now) }
         return NavigationStack {
             List {
                 // 看板嵌入 List，與列表一起捲動
@@ -231,7 +243,7 @@ struct VehicleView: View {
                     }
                 }
             }
-            .task(id: "\(store.modifyID)-\(expenseStore.modifyID)") { rebuild() }
+            .task(id: factsTaskKey) { rebuild() }
             .sheet(isPresented: $showAdd) { AddVehicleView().appStores() }
             .sheet(item: $viewingItem) { item in VehicleDetailView(vehicleId: item.id).appStores() }
             .premiumLockAlert(isPresented: $showPremiumAlert)
@@ -251,7 +263,14 @@ struct VehicleView: View {
         }
     }
 
-    /// 看板與每台車的數字（每度電、車貸…）
+    /// [v25.539] .task(id:) 用：車子或記帳改了才重算（同 RealEstateView）。拆成獨立的 var，
+    /// body 那一長串修飾器裡不放字串插值
+    private var factsTaskKey: String {
+        "\(store.modifyID)-\(expenseStore.modifyID)"
+    }
+
+    /// 看板與每台車的數字（每月養車、估值、車貸…）。[v25.539] 每台（含已售出）只 build 一次，
+    /// 列表項目卡、看板、排序都讀這一份；同一個 now，看板和卡片才不會差一天
     private func rebuild() {
         let now = Date()
         var map: [UUID: VehicleFacts] = [:]

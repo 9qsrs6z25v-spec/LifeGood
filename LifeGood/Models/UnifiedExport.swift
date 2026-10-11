@@ -239,7 +239,8 @@ enum UnifiedExporter {
 
         // 記帳 - 支出
         csv += "## 支出 (Expenses)\n"
-        csv += "id,title,amount,date,type,category,recurrence,note\n"
+        // [v25.539] 加 fuelLiters（加油加了幾公升，選填；JSON 是 Expense 整筆編碼，自動帶上）
+        csv += "id,title,amount,date,type,category,recurrence,fuelLiters,note\n"
         for e in expense.expenses.sorted(by: { $0.date < $1.date }) {
             let fields: [String] = [
                 e.id.uuidString,
@@ -249,6 +250,7 @@ enum UnifiedExporter {
                 e.expenseType.rawValue,
                 e.categoryName,
                 e.recurrence?.rawValue ?? "",
+                e.fuelLiters.map { String(format: "%.2f", $0) } ?? "",
                 esc(e.note)
             ]
             csv += fields.joined(separator: ",") + "\n"
@@ -315,7 +317,8 @@ enum UnifiedExporter {
 
         // 理財 - 汽車
         csv += "## 汽車 (Vehicles)\n"
-        csv += "id,name,brand,powerType,purchaseDate,purchasePrice,currentValue,soldDate,note\n"
+        // [v25.539] 加成交價（soldPrice）、估值更新日（valueUpdatedAt）：沒填是空白
+        csv += "id,name,brand,powerType,purchaseDate,purchasePrice,currentValue,soldDate,soldPrice,valueUpdatedAt,note\n"
         for v in finance.vehicles {
             let fields: [String] = [
                 v.id.uuidString,
@@ -326,6 +329,8 @@ enum UnifiedExporter {
                 String(format: "%.2f", v.purchasePrice),
                 String(format: "%.2f", v.currentValue),
                 v.soldDate.map { iso.string(from: $0) } ?? "",
+                v.soldPrice.map { String(format: "%.2f", $0) } ?? "",
+                v.valueUpdatedAt.map { iso.string(from: $0) } ?? "",
                 esc(v.note)
             ]
             csv += fields.joined(separator: ",") + "\n"

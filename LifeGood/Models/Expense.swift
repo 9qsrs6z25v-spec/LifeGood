@@ -365,7 +365,11 @@ struct Expense: Identifiable, Codable {
     /// 充電結束電量（%）
     var evToPct: Double? = nil
     /// [v25.313] 充電當下的里程錶讀數（km）；連續兩筆都有里程時可算電耗（km/kWh）
+    /// [v25.539] 油錢、保養、維修也存在這一欄（沿用同一個 key，不改名、不遷移）；讀的時候用 odometer
     var evOdometer: Double? = nil
+    /// [v25.539] 加油加了幾公升（選填，只有關聯汽車＋油錢才有）。照 evKwh 不進 memberwise init，
+    /// 存檔端條件化指派；有了它才算得出每公升、油耗
+    var fuelLiters: Double? = nil
 
     /// [v25.424] 這筆變動支出屬於哪一趟旅遊規劃。
     ///
@@ -508,6 +512,7 @@ struct Expense: Identifiable, Codable {
         evFromPct = try? c.decodeIfPresent(Double.self, forKey: .evFromPct)
         evToPct = try? c.decodeIfPresent(Double.self, forKey: .evToPct)
         evOdometer = try? c.decodeIfPresent(Double.self, forKey: .evOdometer)
+        fuelLiters = try? c.decodeIfPresent(Double.self, forKey: .fuelLiters)
         linkedTripPlanId = try? c.decodeIfPresent(UUID.self, forKey: .linkedTripPlanId)
         linkedTripStopId = try? c.decodeIfPresent(UUID.self, forKey: .linkedTripStopId)
         endDate = try? c.decodeIfPresent(Date.self, forKey: .endDate)
@@ -522,10 +527,13 @@ struct Expense: Identifiable, Codable {
         case loanTotalAmount, loanYears, loanRate, insuranceRate
         case linkedBankMilestoneId, linkedBankCurrency, linkedCreditCardMilestoneId
         case placeName, placeAddress, placeLatitude, placeLongitude, photoFileNames, amountHistory
-        case evKwh, evFromPct, evToPct, evOdometer
+        case evKwh, evFromPct, evToPct, evOdometer, fuelLiters
         case linkedTripPlanId, linkedTripStopId
         case endDate, endReason
     }
+
+    /// [v25.539] 里程錶讀數（km）：電費、油錢、保養、維修都記在 evOdometer 這一欄，名字是當初只給充電用時取的
+    var odometer: Double? { evOdometer }
 
     // MARK: - 地點
 

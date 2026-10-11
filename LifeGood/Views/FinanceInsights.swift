@@ -6,19 +6,21 @@ import SwiftUI
 // 規劃裡要新算的數字都在這裡（看板在 FinanceBoards.swift，風景在 FinanceBoardScenes.swift）：
 // - 淨資產＝資產（全部換成台幣）− 貸款還欠多少
 // - 每個月理財的現金流（進來：租金、股利；出去：房貸、保費、養車）
-// - 接下來 30 天要繳、要領的（保費、房貸、車貸與車子的稅費、保單滿期）
+// - 接下來 30 天要繳、要領的（保費、房貸、保單滿期；車子的車貸、保險、稅費、月租、訂閱與保養估計）
 // - 每個月的淨資產：從現在起每月記一筆；之前的月份回推，畫面上標「估算」
 //
 // 跟 FinanceStore 原本的總計不一樣的地方（原本的照舊留著，人生頁還在用）：
 // - 儲蓄險用「今天」的價值（SavingsInsurance.value(at:)）。存檔裡的 currentValue 是最後一次
 //   編輯那天算的、之後不會更新，放兩年就停在兩年前。外幣保單一律換成台幣。
 //   已經滿期的保單不再算資產（錢已經領回去了）。
-// - 已經賣掉的車不算（FinanceStore.totalVehicleValue 連賣掉的也加進去）。
+// - 已經賣掉的車不算（以前 FinanceStore.totalVehicleValue 連賣掉的也加進去，v25.539 起也不算了）。
 //   [v25.538] 但它還在扣的車貸照算進負債，算到那筆貸款停扣那天（車子賣了，貸款不一定跟著停）。
 // - [v25.532] 房貸算的是還欠銀行的本金（HouseFacts：用借款本金和每期金額反推，沒填借款本金時
 //   用購入價減自備款推算，畫面上寫「約」；連本金都推不出來才退回含利息的「還要繳」）。
 //   以前房貸也是含利息的還要繳，淨資產被利息多扣了一大截，跟房屋卡片上的數字也對不起來。
-// - 車貸、其他貸款仍是「還要繳」＝剩下的期數 × 每期金額，含利息，所以這部分會偏保守一點（畫面上有寫）。
+// - [v25.539] 車貸也改算還欠的本金（VehicleFacts：用總貸款金額和每期金額反推，同房貸；算不出來的那筆
+//   才退回含利息的還要繳）。車子的估值、每月養車、接下來要繳的也都讀 VehicleFacts，跟車子卡片、列表同一個數。
+// - 其他貸款仍是「還要繳」＝剩下的期數 × 每期金額，含利息，所以這部分會偏保守一點（畫面上有寫）。
 //   房子的房貸、車子連結的車貸、記帳裡其他的貸款各算一次：連結到房子、車子的那幾筆
 //   固定支出不會在「其他貸款」裡再算一次。
 
@@ -89,7 +91,7 @@ struct FinanceSnapshot: Equatable {
     var vehicle: Double = 0
     /// [v25.532] 房貸還欠多少（每間 HouseFacts.owed(at:)：本金；算不出本金的那間才是含利息的還要繳）
     var mortgage: Double = 0
-    /// 車貸還要繳（車子連結的記帳固定支出）
+    /// [v25.539] 車貸還欠多少（每台 VehicleFacts 的每一筆車貸 owed(at:)：本金；算不出本金的那筆才是含利息的還要繳）
     var carLoan: Double = 0
     /// 記帳裡其他的貸款（沒有連結到房子、車子的）
     var otherLoan: Double = 0
@@ -97,6 +99,8 @@ struct FinanceSnapshot: Equatable {
     var mortgageEstimated = false
     /// [v25.532] 有房子算不出本金、退回含利息的還要繳：畫面寫「還要繳」
     var mortgageScheduled = false
+    /// [v25.539] 有車貸算不出本金（沒填總貸款金額等）、退回含利息的還要繳：畫面要寫車貸時寫「還要繳」
+    var carLoanScheduled = false
 
     var assets: Double { realEstate + savings + stock + vehicle }
     var debt: Double { mortgage + carLoan + otherLoan }
@@ -147,7 +151,7 @@ enum FinanceLoans {
     }
 
     /// 已經算在房子裡的貸款（房子連結的記帳固定支出），「其他貸款」不再算一次。
-    /// [v25.538] 車子的不在這裡排除，改在 FinanceLoanIndex 用「有沒有算進某台車的車貸」排除（同一份名單）：
+    /// [v25.538] 車子的不在這裡排除，改在 FinanceLoanIndex 用「有沒有算進某台車」排除（同一份名單）：
     /// 以前連到車子的一律排除、賣掉的車又整台跳過，還在扣的車貸就從負債消失
     static func linkedExpenseIds(_ f: FinanceStore) -> Set<UUID> {
         var ids = Set<UUID>()
@@ -158,7 +162,9 @@ enum FinanceLoans {
         return ids
     }
 
-    /// 一台車的車貸：車子定期支出裡連結的車貸，加上記帳裡連結到這台車的貸款（兩邊只算一次）
+    /// 一台車的車貸：車子定期支出裡連結的車貸，加上記帳裡連結到這台車的貸款（兩邊只算一次）。
+    /// [v25.539] 理財總覽不再用它：改讀 VehicleFacts.loans（同一筆只算給記帳 linkedVehicleId 那一台，
+    /// 鏡像指到別台車的不算），跟車子卡片同一份名單
     static func carLoanIds(_ v: Vehicle, expenses: [Expense]) -> Set<UUID> {
         var ids = Set(v.fixedExpenses.filter { $0.category == .carLoan }.compactMap(\.linkedExpenseId))
         for ex in expenses where ex.linkedVehicleId == v.id && ex.isRecurringFixed && ex.fixedCategory == .loan {
@@ -170,13 +176,17 @@ enum FinanceLoans {
 
 /// 掃一次記帳的支出，把貸款整理好：回推好幾年的每月淨資產時每個月都要用，不要每個月重掃
 struct FinanceLoanIndex {
-    /// 車子 → 它的車貸
-    let carLoans: [UUID: [Expense]]
+    /// [v25.539] 車子 → 算在它身上的車貸（VehicleLoan 的 id＝記帳支出 id）。同一筆只算給一台，負債不會扣兩次
+    let carLoanIds: [UUID: Set<UUID>]
     /// 沒有連結到房子、車子的貸款（「其他貸款」）
     let otherLoans: [Expense]
     /// [v25.532] 房子 → 它的 HouseFacts（含已售出的）。每間只建一次，淨資產、現金流、接下來 30 天、
     /// 每月回推都讀這一份，跟房屋卡片、看板同一套數字；回推每個月只查表（owed(at:)），不重算。
     let houses: [UUID: HouseFacts]
+    /// [v25.539] 車子 → 它的 VehicleFacts（含已售出的），照 houses：每台只建一次，淨資產（估值、車貸還欠）、
+    /// 現金流（每月養車）、接下來 30 天都讀這一份，跟車子卡片、列表、載具頁看板同一個數。
+    /// 車貸的利率在 build 時只解一次，回推每個月只查表（VehicleLoan.owed(at:)）。
+    let vehicles: [UUID: VehicleFacts]
 
     init(finance f: FinanceStore, expense e: ExpenseStore, now: Date = Date()) {
         var h: [UUID: HouseFacts] = [:]
@@ -184,28 +194,45 @@ struct FinanceLoanIndex {
             h[re.id] = HouseFacts.build(re, expenses: e.expenses, now: now)
         }
         houses = h
-        let byId = Dictionary(e.expenses.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
-        let loans = e.expenses.filter { $0.isRecurringFixed && $0.fixedCategory == .loan }
-        var car: [UUID: [Expense]] = [:]
+        let cars = FinanceLoanIndex.vehicleFacts(f, expense: e, now: now)
+        vehicles = cars
         // [v25.538] 含已售出的車：車子賣了，車貸不一定跟著停（FinanceSnapshot 照每筆的結束日算到停扣那天）。
-        // 同一筆只算給一台車（舊資料可能鏡像在 A、linkedVehicleId 卻指 B），負債不會扣兩次
+        // [v25.539] 名單改讀 VehicleFacts：記帳 linkedVehicleId＝這台 ∪ 鏡像找得到的，鏡像指到的那筆
+        // linkedVehicleId 是別台時只算那一台（舊的 carLoanIds 兩台都會撿）。兩台的鏡像都指著同一筆、
+        // 記帳又沒寫是哪台時，照車子的順序只算給第一台
         var counted = Set<UUID>()
+        var ownedByVehicle = Set<UUID>()
+        var car: [UUID: Set<UUID>] = [:]
         for v in f.vehicles {
-            let ids = FinanceLoans.carLoanIds(v, expenses: loans).subtracting(counted)
+            guard let facts = cars[v.id] else { continue }
+            let ids = Set(facts.loans.map(\.id)).subtracting(counted)
             counted.formUnion(ids)
-            car[v.id] = ids.compactMap { byId[$0] }
+            car[v.id] = ids
+            ownedByVehicle.formUnion(facts.ledgerExpenseIds)
         }
-        carLoans = car
-        // [v25.538] 連結到房子的不算（房貸在 houses）；車貸只排除上面真的算進某台車的那幾筆，
-        // 兩邊用同一份名單，一筆貸款不會兩邊都算、也不會兩邊都沒算
+        carLoanIds = car
+        // [v25.538] 連結到房子的不算（房貸在 houses）；算進某台車的也不算（同一份名單）：
+        // 一筆貸款不會兩邊都算、也不會兩邊都沒算。
+        // [v25.539] 用整台車的記帳名單排除，不只排除建得出車貸的那幾筆：每期 0 元、結束日比第一期還早
+        // 這種建不出車貸的，算車貸是 0，也不該跑去「其他貸款」
         let linked = FinanceLoans.linkedExpenseIds(f)
         let realEstateIds = Set(f.realEstates.map(\.id))
+        let loans = e.expenses.filter { $0.isRecurringFixed && $0.fixedCategory == .loan }
         otherLoans = loans.filter { ex in
-            if counted.contains(ex.id) { return false }
+            if ownedByVehicle.contains(ex.id) { return false }
             if linked.contains(ex.id) { return false }
             if let id = ex.linkedRealEstateId, realEstateIds.contains(id) { return false }
             return true
         }
+    }
+
+    /// [v25.539] 每台車（含已售出）的 VehicleFacts。現金流、接下來 30 天沒拿到 index 時也用這個自己建
+    static func vehicleFacts(_ f: FinanceStore, expense e: ExpenseStore, now: Date = Date()) -> [UUID: VehicleFacts] {
+        var map: [UUID: VehicleFacts] = [:]
+        for v in f.vehicles {
+            map[v.id] = VehicleFacts.build(v, expense: e, now: now)
+        }
+        return map
     }
 }
 
@@ -241,16 +268,29 @@ extension FinanceSnapshot {
             if owed > 0, facts?.owedIsScheduled == true { s.mortgageScheduled = true }
         }
 
+        // [v25.539] 估值與車貸都讀 VehicleFacts（同車子卡片）：估值 0 而且沒有更新日＝還沒填，用購入價；
+        // 賣掉的用成交價（沒填用估值）；車貸看本金。車貸的扣款日是西曆算的，查表也用西曆
+        let greg = Calendar(identifier: .gregorian)
         for v in f.vehicles {
-            // [v25.538] 車貸先算、而且只看那筆貸款自己的起訖日（remaining 照 endDate 算到停扣那天）：
-            // 車子賣了貸款不一定跟著停，以前賣掉的車整台跳過，還在扣的車貸就從負債消失
-            for ex in loans.carLoans[v.id] ?? [] {
-                if let left = FinanceLoans.remaining(ex, at: date, store: e, calendar: cal) { s.carLoan += left }
+            let facts = loans.vehicles[v.id]
+            // [v25.538] 車貸先算、而且只看那筆貸款自己的起訖日：車子賣了貸款不一定跟著停，
+            // 以前賣掉的車整台跳過，還在扣的車貸就從負債消失。賣車時停掉的（結束日＝賣出日）之後是 0
+            if let facts, let ids = loans.carLoanIds[v.id] {
+                for l in facts.loans where ids.contains(l.id) {
+                    let owed = l.owed(at: date, calendar: greg)
+                    s.carLoan += owed
+                    if owed > 0, !l.hasBalance { s.carLoanScheduled = true }
+                }
             }
             guard v.purchaseDate <= date else { continue }
-            if let sold = v.soldDate, sold <= date { continue }
-            s.vehicle += isNow ? v.currentValue
-                : lerp(v.purchasePrice, v.currentValue, from: v.purchaseDate, to: v.soldDate ?? now, at: date)
+            // 跟列表、看板同一個「已售出」：售出日當天起就算賣了
+            if v.isSold(asOf: date) { continue }
+            let value = facts?.value ?? v.currentValue
+            // 回推的終點是 asOf（已售出＝售出日、用成交價；還沒賣＝今天、用估值）：售出日填在未來的，
+            // 估值是今天的估值，不是那天的
+            let end = min(v.soldDate ?? now, now)
+            s.vehicle += isNow ? value
+                : lerp(v.purchasePrice, value, from: v.purchaseDate, to: end, at: date)
         }
 
         for ins in f.insurances where ins.startDate <= date && date < ins.maturityDate {
@@ -411,7 +451,8 @@ struct FinanceCashFlow: Equatable {
     var mortgage: Double = 0
     /// 還在繳的保單：年繳保費 ÷ 12（換成台幣）
     var premiums: Double = 0
-    /// 車子：定期支出的月均＋近 12 個月的變動支出 ÷ 12
+    /// [v25.539] 車子：持有中每台的每月養車（VehicleFacts.monthly，含車貸月付；跟車子卡片、列表、看板同一個數）
+    /// ＋已售出的車還在扣的定期支出（停車月租、訂閱這類賣車不會自動停的，扣到停掉為止）
     var vehicle: Double = 0
 
     var inflow: Double { rent + dividends }
@@ -422,8 +463,9 @@ struct FinanceCashFlow: Equatable {
     /// [v25.532] houses 是 FinanceLoanIndex.houses：房貸用 HouseFacts 的「這個月房貸」
     /// （這個月有在繳的段，季繳年繳換算成每月），跟房屋卡片同一個數。以前把每期金額直接當月付，
     /// 哪幾段在繳也是另一套期數規則。
+    /// [v25.539] vehicles 是 FinanceLoanIndex.vehicles（請傳進來，每台只建一次）；沒傳時用全 App 那份記帳自己建
     static func build(finance f: FinanceStore, rates: FinanceRates, houses: [UUID: HouseFacts],
-                      now: Date = Date()) -> FinanceCashFlow {
+                      vehicles: [UUID: VehicleFacts]? = nil, now: Date = Date()) -> FinanceCashFlow {
         let cal = Calendar.current
         let yearAgo = cal.date(byAdding: .year, value: -1, to: now) ?? now
         var c = FinanceCashFlow()
@@ -438,9 +480,12 @@ struct FinanceCashFlow: Equatable {
             && ins.elapsedPeriods < ins.totalPeriods {
             c.premiums += rates.ntd(ins.annualPremium / 12, code: ins.currencyCode)
         }
-        for v in f.vehicles where !v.isSold {
-            let recent = v.variableExpenses.filter { $0.date >= yearAgo && $0.date <= now }.reduce(0) { $0 + $1.amount }
-            c.vehicle += v.monthlyFixedTotal + recent / 12
+        // [v25.539] 以前這裡另寫一份：車子鏡像的定期月均＋近 12 個月變動 ÷ 12，季繳當月繳、繳完停掉的照算、
+        // 只靠記帳連過來的不算，跟列表卡不是同一個數；賣掉的車整台跳過，賣了還在扣的停車月租、訂閱就不見了
+        let cars = vehicles ?? FinanceLoanIndex.vehicleFacts(f, expense: AppStores.expense, now: now)
+        for v in f.vehicles {
+            guard let facts = cars[v.id] else { continue }
+            c.vehicle += facts.isSold ? facts.soldStillPayingMonthly : facts.monthly
         }
         return c
     }
@@ -480,13 +525,14 @@ struct FinanceUpcoming: Identifiable, Equatable {
         }
     }
 
-    /// houses 是 FinanceLoanIndex.houses（房貸的扣款日、第幾期都讀它）
+    /// houses 是 FinanceLoanIndex.houses（房貸的扣款日、第幾期都讀它）。
+    /// [v25.539] vehicles 是 FinanceLoanIndex.vehicles（車子的列都讀 VehicleFacts.upcoming）；沒傳時自己建
     static func build(finance f: FinanceStore, expense e: ExpenseStore, houses: [UUID: HouseFacts],
+                      vehicles: [UUID: VehicleFacts]? = nil,
                       now: Date = Date(), days: Int = 30) -> [FinanceUpcoming] {
         let cal = Calendar.current
         let today = cal.startOfDay(for: now)
         guard let horizon = cal.date(byAdding: .day, value: days + 1, to: today) else { return [] }
-        let expenseById = Dictionary(e.expenses.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
         var out: [FinanceUpcoming] = []
         func away(_ d: Date) -> Int {
             max(0, cal.dateComponents([.day], from: today, to: cal.startOfDay(for: d)).day ?? 0)
@@ -527,17 +573,43 @@ struct FinanceUpcoming: Identifiable, Equatable {
             }
         }
 
-        // 車子的定期支出（車貸、稅費、訂閱）：只有連結了記帳固定支出的才知道哪天扣
-        for v in f.vehicles where !v.isSold {
-            for fe in v.fixedExpenses {
-                guard let id = fe.linkedExpenseId, let ex = expenseById[id],
-                      let d = ex.nextFixedDueDate(onOrAfter: today, calendar: cal), d < horizon else { continue }
-                out.append(FinanceUpcoming(id: "v-\(fe.id)", kind: .vehicle, title: v.name + " " + fe.category.rawValue,
-                                           detail: nil, date: d, daysAway: away(d),
-                                           amount: e.ntdValue(of: ex).ntdWanString, isIncome: false))
+        // [v25.539] 車子：讀 VehicleFacts.upcoming（跟車子卡片的「接下來」同一份）。以前只看車子鏡像，
+        // 只靠記帳 linkedVehicleId 連過來的車貸、保險都不見，標籤又一律寫鏡像分類（停車月租也叫「稅費」）。
+        // 現在含保險、「第 26／60 期」，標籤是你取的名字，沒有才寫分類名（車位租金、保險、訂閱、稅費、其他固定）。
+        // 已售出的車也看：它的 upcoming 只剩賣了還在扣的（停車月租、訂閱、沒停的車貸），那些錢還是會扣
+        let cars = vehicles ?? FinanceLoanIndex.vehicleFacts(f, expense: e, now: now)
+        var seenVehicleItems = Set<String>()
+        for v in f.vehicles {
+            guard let facts = cars[v.id] else { continue }
+            // 保養超過預計日期的（日期在今天以前）不列，留給車子卡片提醒
+            for u in facts.upcoming where u.date >= today && u.date < horizon {
+                // 兩台車的鏡像都指著同一筆（記帳沒寫是哪台）時只列一次：id 是「fixed-支出id」這種，不會跨車撞
+                guard seenVehicleItems.insert(u.id).inserted else { continue }
+                out.append(vehicleItem(u, vehicleName: v.name, daysAway: away(u.date)))
             }
         }
         return out.sorted { $0.date == $1.date ? $0.title < $1.title : $0.date < $1.date }
+    }
+
+    /// [v25.539] 車子的一件：細字只留週期（「每月」）或期數（「第 26／60 期」），「上次 10/5」在 30 天清單裡用不到；
+    /// 保養是估計的，金額寫「約」
+    private static func vehicleItem(_ u: VehicleUpcoming, vehicleName: String, daysAway: Int) -> FinanceUpcoming {
+        let detail: String?
+        let amount: String
+        switch u.kind {
+        case .loan:
+            detail = u.detail
+            amount = u.amount.ntdWanString
+        case .fixed:
+            detail = u.detail.components(separatedBy: "・").first
+            amount = u.amount.ntdWanString
+        case .maintenance:
+            detail = u.detail.components(separatedBy: "・").first
+            amount = u.amount > 0 ? "約 " + u.amount.ntdWanString : "—"
+        }
+        return FinanceUpcoming(id: "v-" + u.id, kind: .vehicle, title: vehicleName + " " + u.title,
+                               detail: detail, date: u.date, daysAway: daysAway,
+                               amount: amount, isIncome: false)
     }
 }
 
@@ -562,7 +634,9 @@ enum FinanceHistory {
     /// [v25.532] 記下來的數字是哪一套口徑算的。v25.532 起房貸改算還欠的本金（之前是含利息的還要繳），
     /// 舊紀錄的負債多了一大截利息；不分開的話，改版那個月淨資產會突然跳一階、「比上月」也會假漲。
     /// 沒有這欄（舊紀錄，解碼是 nil）＝房貸含利息；2＝房貸算本金。
-    private static let currentBasis = 2
+    /// [v25.539] 3＝車貸也算本金（以前是含利息的還要繳）：同房貸那次，舊口徑的月份負債用現在這套重算，
+    /// 改版那個月淨資產不會突然跳一階、「比上月」也不會假漲
+    private static let currentBasis = 3
 
     private struct Record: Codable {
         let month: String
@@ -640,7 +714,7 @@ enum FinanceHistory {
                     out.append(FinanceMonthPoint(month: start, assets: r.assets, debt: r.debt, recorded: true))
                     continue
                 }
-                // [v25.532] 舊口徑（房貸含利息）：資產照存的，負債用現在這套重算那個月月底，
+                // [v25.532] 舊口徑（房貸含利息；v25.539 起車貸含利息也是舊口徑）：資產照存的，負債用現在這套重算那個月月底，
                 // 改版那個月才不會跳一階、「比上月」也不會因為少扣利息而假漲
                 let redo = FinanceSnapshot.compute(finance: f, expense: e, rates: rates, at: end, now: now,
                                                    stockValue: nil, index: loans)

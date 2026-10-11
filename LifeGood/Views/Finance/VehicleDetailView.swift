@@ -91,8 +91,19 @@ struct VehicleDetailView: View {
     // 美化：進場動畫旗標（對齊 StockDetailView / RealEstateDetailView 規格）
     @State private var kpiStripAppeared = false
     @State private var infoRowsAppeared = false
+    /// [v25.539] 這台車的數字（估值、折舊、持有、每月養車、充電統計）跟列表項目卡、載具頁看板、理財總覽同一套：
+    /// 只在 .task(id: factsTaskKey) 裡用 VehicleFacts.build 算一次，畫面只讀。以前這張卡自己讀鏡像算月固定
+    /// （季繳多算 3 倍、繳完的車貸照算）、自己重寫一份充電區間（沒擋漏記的段），跟列表寫的數字對不上
+    @State private var facts: VehicleFacts?
+    /// [v25.539] 每月養車那段期間（近 12 個月；買車不到一年就是實際月數）的變動支出合計，跟 facts 一起算
+    @State private var recentVariable: Double = 0
 
     private var rarity: CardRarity { CardRarity(price: vehicle.purchasePrice) }
+
+    /// 換車、車子改了、記帳改了都要重算
+    private var factsTaskKey: String {
+        "\(vehicleId.uuidString)-\(store.modifyID)-\(expenseStore.modifyID)"
+    }
 
     var body: some View {
         NavigationStack {
@@ -100,7 +111,7 @@ struct VehicleDetailView: View {
                 VStack(spacing: 24) {
                     // 進場動畫改由 FlashCardView 模板內建（進階設定可關閉）
                     flashCard
-                    // v2：KPI 摘要橫列（月固定 / 近12月變動 / 持有年限）
+                    // v2：KPI 摘要橫列（[v25.539] 每月養車 / 近 N 月變動 / 持有）
                     vehicleKpiStrip
                         .opacity(kpiStripAppeared ? 1 : 0)
                         .offset(y: kpiStripAppeared ? 0 : 14)
@@ -116,6 +127,7 @@ struct VehicleDetailView: View {
                 .padding(.vertical)
             }
             .background(Color(.systemGroupedBackground))
+            .task(id: factsTaskKey) { rebuildFacts() }
             .navigationTitle("車輛卡片")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -184,19 +196,20 @@ struct VehicleDetailView: View {
     private var flashCard: some View {
         // 改用 FlashCardView 標準模板：殼層與版面骨架由模板統一，本頁只填內容；
         // 樣式參數由「設定 > 進階設定 > 閃卡樣式」控制。
-        let estimate = splitWan(vehicle.currentValue)
+        // [v25.539] 大字讀 facts.value（跟列表項目卡同一個數）：估值是沒填的 0 時先用購入價（決定 10），
+        // 已售出寫成交價（沒填用估值）
+        let estimate = splitWan(facts?.value ?? vehicle.currentValue)
         return FlashCardView(
             rarity: rarity,
             categoryLabel: vehicle.powerType.rawValue,
             categoryIcon: vehicle.powerType.icon,
             title: vehicle.name,
             bigNumber: estimate.number,
-            bigCaption: "\(estimate.unit)元",
+            bigCaption: valueCaption(unit: estimate.unit),
             columns: [
                 FlashCardInfoColumn("購入", splitWanLabel(vehicle.purchasePrice)),
-                FlashCardInfoColumn("折舊", String(format: "%.1f%%", vehicle.depreciationRate),
-                                    valueColor: .red),
-                FlashCardInfoColumn("持有", String(format: "%.1f 年", vehicle.yearsOwned))
+                depreciationColumn,
+                FlashCardInfoColumn("持有", heldText)
             ],
             isSold: vehicle.isSold
         ) {
@@ -212,6 +225,77 @@ struct VehicleDetailView: View {
         }
         .padding(.horizontal, 24)
         .padding(.top, 16)
+    }
+
+    /// [v25.539] 大字下的小字：估值是借用購入價、或已售出寫的是成交價時講清楚，免得以為是自己填的估值
+    private func valueCaption(unit: String) -> String {
+        let base = "\(unit)元"
+        guard let f = facts else { return base }
+        if f.valueIsFallback { return base + "・估值還沒填，先用購入價" }
+        if f.isSold && !f.saleUsesEstimate { return base + "・成交價" }
+        return base
+    }
+
+    /// [v25.539] 決定 1：折舊是車子的常態，中性色＋▼（以前一律紅字「27.4%」，增值時還會變成紅色負數）；
+    /// 萬一增值才紅色 ▲。讀 facts.depreciationRate（跟列表項目卡的「折舊 ▼27%」同一個數、同一個寫法）；
+    /// 估值還沒填（借用購入價）或購入價沒填時是 nil，寫「—」
+    private var depreciationColumn: FlashCardInfoColumn {
+        guard let r = facts?.depreciationRate else { return FlashCardInfoColumn("折舊", "—") }
+        if abs(r) < 0.005 { return FlashCardInfoColumn("折舊", "持平") }
+        if r < 0 { return FlashCardInfoColumn("折舊", "▼" + FinanceText.percent1(-r)) }
+        return FlashCardInfoColumn("增值", "▲" + FinanceText.percent1(r), valueColor: .red)
+    }
+
+    /// [v25.539] 決定 12：「2.1 年」改「2 年 1 個月」（跟列表項目卡、房屋卡同一個寫法），算到 asOf（已售出算到售出日）。
+    /// 以前用 Calendar.current 數天數 ÷ 365，手機設民國曆也跟著系統走
+    private var heldText: String {
+        let end: Date
+        if let f = facts {
+            end = f.asOf
+        } else if vehicle.isSold, let sold = vehicle.soldDate {
+            end = min(Date(), sold)
+        } else {
+            end = Date()
+        }
+        guard end > vehicle.purchaseDate else { return "—" }
+        return HouseCardFormat.lived(from: vehicle.purchaseDate, to: end) ?? "不到 1 個月"
+    }
+
+    /// 只有這裡會算 VehicleFacts（.task(id: factsTaskKey)）
+    private func rebuildFacts() {
+        guard let v = store.vehicles.first(where: { $0.id == vehicleId }) else {
+            facts = nil
+            recentVariable = 0
+            return
+        }
+        let f = VehicleFacts.build(v, expense: expenseStore)
+        facts = f
+        recentVariable = recentVariableTotal(v, facts: f)
+    }
+
+    /// [v25.539] 「近 N 月變動」改讀記帳：跟每月養車同一個期間（facts.periodStart…asOf）、同一份支出
+    /// （記帳 linkedVehicleId＝這台 ∪ 鏡像找得到的，用 id 去重；金額走 ntdValue）。
+    /// 算法跟 VehicleFacts.build 的變動段一樣：變動支出＋不是週期、不是車貸的固定支出＋沒連到記帳的舊變動鏡像，
+    /// 所以這格 ÷ 月數＝每月養車裡油電、保養維修、停車洗車其他三段的合計（電動機車的換電月租是定期，不算在這格）。
+    /// 以前只讀鏡像、一律往前 12 個月，日期在未來的也算進去
+    private func recentVariableTotal(_ v: Vehicle, facts f: VehicleFacts) -> Double {
+        let cal = Calendar(identifier: .gregorian)
+        let from = cal.startOfDay(for: f.periodStart)
+        let to = cal.startOfDay(for: f.asOf)
+        var sum = 0.0
+        for ex in expenseStore.expenses where f.ledgerExpenseIds.contains(ex.id) {
+            let day = cal.startOfDay(for: ex.date)
+            guard day >= from, day <= to else { continue }
+            if ex.expenseType == .variable || (!ex.isRecurringFixed && ex.fixedCategory != .loan) {
+                sum += expenseStore.ntdValue(of: ex)
+            }
+        }
+        for m in v.variableExpenses where f.legacyMirrorIds.contains(m.id) {
+            let day = cal.startOfDay(for: m.date)
+            guard day >= from, day <= to else { continue }
+            sum += m.amount
+        }
+        return sum
     }
 
     // MARK: - 詳細資訊
@@ -576,174 +660,157 @@ struct VehicleDetailView: View {
     }
 
     // MARK: - 充電統計（v25.312：度數＋電量 % → KPI 與趨勢圖）
-
-    /// 這輛車有填度數的充電紀錄（時間升冪）
-    private var chargeSessions: [Expense] {
-        expenseStore.expenses
-            .filter { $0.linkedVehicleId == vehicleId
-                && $0.vehicleExpenseCategory == .electricity
-                && ($0.evKwh ?? 0) > 0 }
-            .sorted { $0.date < $1.date }
-    }
-
-    /// 推估電池容量樣本：kWh ÷ 充電區間 %。區間太小（<15%）誤差放大，不取；
-    /// 這條趨勢往下走＝電池老化的近似觀察
-    private var batteryEstimates: [(date: Date, kwh: Double)] {
-        chargeSessions.compactMap { e in
-            guard let kwh = e.evKwh, let f = e.evFromPct, let t = e.evToPct,
-                  t - f >= 15 else { return nil }
-            return (e.date, kwh / (t - f) * 100)
-        }
-    }
-
-    private static let chargeDateFmt: DateFormatter = {
-        let f = DateFormatter(); f.locale = Locale(identifier: "zh_Hant_TW"); f.dateFormat = "M/d"; return f
-    }()
-
-    /// [v25.313] 電耗區間：連續兩筆都有里程錶讀數時，
-    /// 行駛距離＝里程差、耗能≈後一筆充入度數（充電樁法）。
-    /// 里程差 ≤0（誤填）或 >2000km（跨太多次沒記）的區間剔除。
-    private var efficiencyIntervals: [(date: Date, kmPerKwh: Double, costPerKm: Double, km: Double)] {
-        let withOdo = chargeSessions.filter { ($0.evOdometer ?? 0) > 0 }
-        guard withOdo.count >= 2 else { return [] }
-        var out: [(Date, Double, Double, Double)] = []
-        for i in 1..<withOdo.count {
-            let prev = withOdo[i - 1], cur = withOdo[i]
-            let km = (cur.evOdometer ?? 0) - (prev.evOdometer ?? 0)
-            guard km > 0, km <= 2000, let kwh = cur.evKwh, kwh > 0 else { continue }
-            out.append((cur.date, km / kwh, cur.amount / km, km))
-        }
-        return out.map { (date: $0.0, kmPerKwh: $0.1, costPerKm: $0.2, km: $0.3) }
-    }
+    //
+    // [v25.539] 數字全部改讀 facts.charge（VehicleFacts 用 VehicleChargeAnalytics 算的，跟分析頁、列表項目卡同一份）。
+    // 以前這裡自己重寫一份 chargeSessions／batteryEstimates／efficiencyIntervals：沒擋「中間漏記充電」的段
+    // （一段 1,900 公里只記到 26 度，會算出每度跑 73 公里、每公里電費偏低），日期在未來的充電也算進去。
+    // 每度電、每公里、每度跑一律一位小數（決定 13）。版面照舊，下一版整區換新。
 
     @ViewBuilder
     private var chargingSection: some View {
-        let sessions = chargeSessions
-        if !sessions.isEmpty {
-            let totalKwh = sessions.reduce(0) { $0 + ($1.evKwh ?? 0) }
-            let totalCost = sessions.reduce(0) { $0 + $1.amount }
-            let avgPrice = totalKwh > 0 ? totalCost / totalKwh : 0
-            let avgKwh = totalKwh / Double(sessions.count)
-            let estimates = batteryEstimates
-            VStack(alignment: .leading, spacing: 10) {
-                sectionHeader("充電統計", color: .green, count: sessions.count)
-
-                // KPI 四格：平均每度電價／平均每次度數／累計度數／推估電池容量（最新）
-                HStack(spacing: 0) {
-                    chargeKpiCell("平均電價", String(format: "%.2f", avgPrice), unit: "元/度")
-                    Divider().frame(height: 30)
-                    chargeKpiCell("平均每次", String(format: "%.1f", avgKwh), unit: "kWh")
-                    Divider().frame(height: 30)
-                    chargeKpiCell("累計", totalKwh >= 1000
-                                  ? String(format: "%.0f", totalKwh) : String(format: "%.1f", totalKwh),
-                                  unit: "kWh")
-                    Divider().frame(height: 30)
-                    chargeKpiCell("推估容量", estimates.last.map { String(format: "%.1f", $0.kwh) } ?? "—",
-                                  unit: "kWh")
-                }
-                .padding(.vertical, 6)
-
-                // [v25.313] 電耗 KPI 列：連續兩筆有里程錶才有資料
-                let intervals = efficiencyIntervals
-                if !intervals.isEmpty {
-                    let totalKm = intervals.reduce(0) { $0 + $1.km }
-                    let intervalKwh = intervals.reduce(0) { $0 + $1.km / $1.kmPerKwh }
-                    let intervalCost = intervals.reduce(0) { $0 + $1.costPerKm * $1.km }
-                    HStack(spacing: 0) {
-                        chargeKpiCell("平均電耗",
-                                      intervalKwh > 0 ? String(format: "%.1f", totalKm / intervalKwh) : "—",
-                                      unit: "km/kWh")
-                        Divider().frame(height: 30)
-                        chargeKpiCell("每公里電費",
-                                      totalKm > 0 ? String(format: "%.2f", intervalCost / totalKm) : "—",
-                                      unit: "元/km")
-                        Divider().frame(height: 30)
-                        chargeKpiCell("統計里程", String(format: "%.0f", totalKm), unit: "km")
-                    }
-                    .padding(.vertical, 6)
-                }
-
-                // 每度電價走勢（每筆充電一點）
-                if sessions.count >= 2 {
-                    Text("每度電價走勢").font(.caption).foregroundStyle(.secondary)
-                    Chart(sessions) { e in
-                        LineMark(x: .value("日期", e.date),
-                                 y: .value("元/度", e.amount / (e.evKwh ?? 1)))
-                            .foregroundStyle(.teal)
-                            .interpolationMethod(.catmullRom)
-                        PointMark(x: .value("日期", e.date),
-                                  y: .value("元/度", e.amount / (e.evKwh ?? 1)))
-                            .foregroundStyle(.teal)
-                            .symbolSize(24)
-                    }
-                    .frame(height: 110)
-                }
-
-                // [v25.313] 電耗走勢（每個里程區間一點；高＝省電、低＝耗電）
-                if intervals.count >= 2 {
-                    Text("電耗走勢（km/kWh，越高越省）")
-                        .font(.caption).foregroundStyle(.secondary)
-                    Chart(Array(intervals.enumerated()), id: \.offset) { _, p in
-                        LineMark(x: .value("日期", p.date), y: .value("km/kWh", p.kmPerKwh))
-                            .foregroundStyle(.blue)
-                            .interpolationMethod(.catmullRom)
-                        PointMark(x: .value("日期", p.date), y: .value("km/kWh", p.kmPerKwh))
-                            .foregroundStyle(.blue)
-                            .symbolSize(24)
-                    }
-                    .chartYScale(domain: .automatic(includesZero: false))
-                    .frame(height: 110)
-                } else if intervals.count == 1 {
-                    Text("電耗：\(String(format: "%.1f", intervals[0].kmPerKwh)) km/kWh（再累積一個里程區間就會畫出走勢）")
-                        .font(.caption2).foregroundStyle(.tertiary)
-                }
-
-                // 推估電池容量走勢（充電區間 ≥15% 的樣本才收；下滑＝老化觀察）
-                if estimates.count >= 2 {
-                    Text("推估電池容量走勢（度數 ÷ 充電區間 %）")
-                        .font(.caption).foregroundStyle(.secondary)
-                    Chart(Array(estimates.enumerated()), id: \.offset) { _, p in
-                        LineMark(x: .value("日期", p.date), y: .value("kWh", p.kwh))
-                            .foregroundStyle(.green)
-                            .interpolationMethod(.catmullRom)
-                        PointMark(x: .value("日期", p.date), y: .value("kWh", p.kwh))
-                            .foregroundStyle(.green)
-                            .symbolSize(24)
-                    }
-                    .chartYScale(domain: .automatic(includesZero: false))
-                    .frame(height: 110)
-                } else if estimates.count == 1 {
-                    Text("推估電池容量：\(String(format: "%.1f", estimates[0].kwh)) kWh（充電區間 ≥15% 的紀錄累積 2 筆後畫出走勢）")
-                        .font(.caption2).foregroundStyle(.tertiary)
-                }
-
-                // [v25.397] 深入分析：續航、電池健康度、充電損耗、家充佔比、
-                // 地點排行、充電習慣、每月里程、停車熱點
-                Button {
-                    showChargeAnalytics = true
-                } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: "chart.line.uptrend.xyaxis")
-                            .font(.system(size: 12, weight: .semibold))
-                        Text("充電與里程分析")
-                            .font(.caption.weight(.semibold))
-                        Spacer()
-                        Image(systemName: "chevron.right")
-                            .font(.caption2.weight(.semibold)).foregroundStyle(.tertiary)
-                    }
-                    .foregroundStyle(.green)
-                    .padding(.horizontal, 10).padding(.vertical, 8)
-                    .background(Color.green.opacity(0.10))
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-            }
-            .padding(14)
-            .background(Color(.secondarySystemGroupedBackground))
-            .clipShape(RoundedRectangle(cornerRadius: 16))
-            .padding(.horizontal)
+        if let c = facts?.charge, c.count > 0 {
+            chargingCard(c)
         }
+    }
+
+    private func chargingCard(_ c: VehicleChargeSummary) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            sectionHeader("充電統計", color: .green, count: c.count)
+            chargeBasicRow(c)
+            if c.intervalCount > 0 {
+                chargeEfficiencyRow(c)
+            }
+            chargePriceTrend(c.prices)
+            chargeEfficiencyTrend(c.efficiency)
+            chargeCapacityTrend(c.capacity)
+            chargeAnalyticsButton
+        }
+        .padding(14)
+        .background(Color(.secondarySystemGroupedBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .padding(.horizontal)
+    }
+
+    /// 「7.9」：一位小數（7.94 → 7.9），跟列表項目卡的每度電同一個寫法；算不出來寫「—」
+    private func oneDecimal(_ v: Double?) -> String {
+        guard let v = v, v.isFinite else { return "—" }
+        return FinanceItemText.number(v, digits: 1)
+    }
+
+    /// KPI 四格：每度電價（Σ金額 ÷ Σ度數）／平均每次度數／累計度數／推估電池容量（最新一筆）
+    private func chargeBasicRow(_ c: VehicleChargeSummary) -> some View {
+        let total: String = c.totalKwh >= 1000
+            ? FinanceItemText.number(c.totalKwh, digits: 0)
+            : String(format: "%.1f", c.totalKwh)
+        let perSession: String = c.avgKwhPerSession.map { String(format: "%.1f", $0) } ?? "—"
+        let capacity: String = c.capacity.last.map { String(format: "%.1f", $0.value) } ?? "—"
+        return HStack(spacing: 0) {
+            chargeKpiCell("平均電價", oneDecimal(c.avgPricePerKwh), unit: "元/度")
+            Divider().frame(height: 30)
+            chargeKpiCell("平均每次", perSession, unit: "kWh")
+            Divider().frame(height: 30)
+            chargeKpiCell("累計", total, unit: "kWh")
+            Divider().frame(height: 30)
+            chargeKpiCell("推估容量", capacity, unit: "kWh")
+        }
+        .padding(.vertical, 6)
+    }
+
+    /// [v25.313] 電耗列：相鄰兩次都有里程錶的段才算；[v25.539] 中間漏記充電的段（每度跑超過汽車 12、機車 60 公里）不算
+    private func chargeEfficiencyRow(_ c: VehicleChargeSummary) -> some View {
+        HStack(spacing: 0) {
+            chargeKpiCell("平均電耗", oneDecimal(c.kmPerKwh), unit: "km/kWh")
+            Divider().frame(height: 30)
+            chargeKpiCell("每公里電費", oneDecimal(c.avgCostPerKm), unit: "元/km")
+            Divider().frame(height: 30)
+            chargeKpiCell("統計里程", FinanceItemText.number(c.trackedKm, digits: 0), unit: "km")
+        }
+        .padding(.vertical, 6)
+    }
+
+    /// 每度電價走勢（每次充電一點）
+    @ViewBuilder
+    private func chargePriceTrend(_ points: [VehicleChargeSummary.Point]) -> some View {
+        if points.count >= 2 {
+            Text("每度電價走勢").font(.caption).foregroundStyle(.secondary)
+            Chart(Array(points.enumerated()), id: \.offset) { _, p in
+                LineMark(x: .value("日期", p.date), y: .value("元/度", p.value))
+                    .foregroundStyle(.teal)
+                    .interpolationMethod(.catmullRom)
+                PointMark(x: .value("日期", p.date), y: .value("元/度", p.value))
+                    .foregroundStyle(.teal)
+                    .symbolSize(24)
+            }
+            .frame(height: 110)
+        }
+    }
+
+    /// [v25.313] 電耗走勢（每個里程區間一點；高＝省電、低＝耗電）
+    @ViewBuilder
+    private func chargeEfficiencyTrend(_ points: [VehicleChargeSummary.Point]) -> some View {
+        if points.count >= 2 {
+            Text("電耗走勢（km/kWh，越高越省）")
+                .font(.caption).foregroundStyle(.secondary)
+            Chart(Array(points.enumerated()), id: \.offset) { _, p in
+                LineMark(x: .value("日期", p.date), y: .value("km/kWh", p.value))
+                    .foregroundStyle(.blue)
+                    .interpolationMethod(.catmullRom)
+                PointMark(x: .value("日期", p.date), y: .value("km/kWh", p.value))
+                    .foregroundStyle(.blue)
+                    .symbolSize(24)
+            }
+            .chartYScale(domain: .automatic(includesZero: false))
+            .frame(height: 110)
+        } else if let only = points.first {
+            Text("電耗：\(oneDecimal(only.value)) km/kWh（再累積一個里程區間就會畫出走勢）")
+                .font(.caption2).foregroundStyle(.tertiary)
+        }
+    }
+
+    /// 推估電池容量走勢（充電區間 ≥15% 的樣本才收；下滑＝老化觀察）
+    @ViewBuilder
+    private func chargeCapacityTrend(_ points: [VehicleChargeSummary.Point]) -> some View {
+        if points.count >= 2 {
+            Text("推估電池容量走勢（度數 ÷ 充電區間 %）")
+                .font(.caption).foregroundStyle(.secondary)
+            Chart(Array(points.enumerated()), id: \.offset) { _, p in
+                LineMark(x: .value("日期", p.date), y: .value("kWh", p.value))
+                    .foregroundStyle(.green)
+                    .interpolationMethod(.catmullRom)
+                PointMark(x: .value("日期", p.date), y: .value("kWh", p.value))
+                    .foregroundStyle(.green)
+                    .symbolSize(24)
+            }
+            .chartYScale(domain: .automatic(includesZero: false))
+            .frame(height: 110)
+        } else if let only = points.first {
+            Text("推估電池容量：\(String(format: "%.1f", only.value)) kWh（充電區間 ≥15% 的紀錄累積 2 筆後畫出走勢）")
+                .font(.caption2).foregroundStyle(.tertiary)
+        }
+    }
+
+    /// [v25.397] 深入分析：續航、電池健康度、充電損耗、家充佔比、
+    /// 地點排行、充電習慣、每月里程、停車熱點
+    private var chargeAnalyticsButton: some View {
+        Button {
+            showChargeAnalytics = true
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "chart.line.uptrend.xyaxis")
+                    .font(.system(size: 12, weight: .semibold))
+                Text("充電與里程分析")
+                    .font(.caption.weight(.semibold))
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.caption2.weight(.semibold)).foregroundStyle(.tertiary)
+            }
+            .foregroundStyle(.green)
+            .padding(.horizontal, 10).padding(.vertical, 8)
+            .background(Color.green.opacity(0.10))
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     private func chargeKpiCell(_ label: String, _ value: String, unit: String) -> some View {
@@ -865,28 +932,41 @@ struct VehicleDetailView: View {
         .padding(.vertical, 12)
     }
 
-    // MARK: - v2：KPI 摘要橫列（月固定 / 近12月變動 / 持有年限）
+    // MARK: - v2：KPI 摘要橫列（[v25.539] 每月養車 / 近 N 月變動 / 持有）
+
+    /// [v25.539] 「月固定支出」改「每月養車」＝facts.monthly（定期照自己的週期換算、車貸月付、變動的月平均），
+    /// 跟列表項目卡、載具頁看板、理財現金流同一個數，四捨五入到百位寫「約 NT$5,200」。
+    /// 以前讀鏡像：季繳被當月繳多算 3 倍、繳完或停掉的照算、只有定期
+    private var monthlyKpiValue: String {
+        guard let f = facts else { return "—" }
+        return FinanceText.about100(f.monthly) ?? "—"
+    }
+
+    /// 已售出時算到售出日：寫「賣出前」，免得以為現在還在花
+    private var monthlyKpiLabel: String {
+        (facts?.isSold ?? false) ? "賣出前每月養車" : "每月養車"
+    }
+
+    /// 「近12月變動」；買車不到一年寫實際月數（「近7月變動」），跟每月養車除的月數一樣
+    private var variableKpiLabel: String {
+        guard let f = facts else { return "近12月變動" }
+        return (f.isSold ? "賣出前" : "近") + "\(f.periodMonths)月變動"
+    }
 
     private var vehicleKpiStrip: some View {
-        let monthlyFixed = vehicle.fixedExpenses.reduce(0.0) { $0 + $1.period.toMonthly($1.amount) }
-        let twelveMonthsAgo = Calendar.current.date(byAdding: .month, value: -12, to: Date()) ?? Date()
-        let recentVariable = vehicle.variableExpenses
-            .filter { $0.date >= twelveMonthsAgo }
-            .reduce(0.0) { $0 + $1.amount }
-
-        return HStack(spacing: 0) {
-            vehicleKpiCell(icon: "calendar.badge.clock", label: "月固定支出",
-                           value: fmt(monthlyFixed), color: .blue)
+        HStack(spacing: 0) {
+            vehicleKpiCell(icon: "car.fill", label: monthlyKpiLabel,
+                           value: monthlyKpiValue, color: .blue)
             Rectangle()
                 .fill(Color(.separator).opacity(0.3))
                 .frame(width: 0.5, height: 28)
-            vehicleKpiCell(icon: "cart.circle.fill", label: "近12月變動",
-                           value: fmt(recentVariable), color: .orange)
+            vehicleKpiCell(icon: "cart.circle.fill", label: variableKpiLabel,
+                           value: facts == nil ? "—" : fmt(recentVariable), color: .orange)
             Rectangle()
                 .fill(Color(.separator).opacity(0.3))
                 .frame(width: 0.5, height: 28)
             vehicleKpiCell(icon: "clock.fill", label: "持有",
-                           value: String(format: "%.1f 年", vehicle.yearsOwned), color: .green)
+                           value: heldText, color: .green)
         }
         .padding(.vertical, 12)
         .background(Color(.systemBackground))

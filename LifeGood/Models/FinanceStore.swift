@@ -127,7 +127,8 @@ class FinanceStore: ObservableObject {
 
     var totalInsuranceValue: Double { insurances.reduce(0) { $0 + $1.currentValue } }
     var totalStockValue: Double { stocks.filter { !$0.isSold }.reduce(0) { $0 + $1.marketValue } }
-    var totalVehicleValue: Double { vehicles.reduce(0) { $0 + $1.currentValue } }
+    /// [v25.539] 不算已售出的車（同理財總覽淨資產、載具頁看板）：以前賣掉的車也加進去，人生頁的總資產會多算
+    var totalVehicleValue: Double { vehicles.filter { !$0.isSold }.reduce(0) { $0 + $1.currentValue } }
     var totalRealEstateValue: Double { realEstates.filter { !$0.isSold }.reduce(0) { $0 + $1.currentValue } }
     var totalAssets: Double { totalInsuranceValue + totalStockValue + totalVehicleValue + totalRealEstateValue }
 

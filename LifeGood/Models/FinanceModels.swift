@@ -2055,6 +2055,12 @@ struct Vehicle: Identifiable, Codable {
     /// 充電紀錄的地點含這段文字就算家充。家充與外面快充的電價與充電效率差很多，
     /// 混在一起算出來的趨勢是假的，所以要有辦法分開。
     var homeChargePlace: String? = nil
+    /// [v25.539] 成交價（台幣）。賣出價差、帳本的「拿回」、理財總覽回推賣出前的價值都用它，沒填才退回目前估值。
+    /// 照房屋 RealEstate 的做法不進 init 參數：呼叫端用 var 改。
+    var soldPrice: Double? = nil
+    /// [v25.539] 估值上次在編輯頁改的日子（新增車子也寫）。拿來分辨估值 0 是「還沒填」（沒有日子，先用購入價）
+    /// 還是「真的是 0（報廢）」，車輛資料寫「2026/9 更新」、超過一年提醒更新也看它
+    var valueUpdatedAt: Date? = nil
 
     init(
         id: UUID = UUID(),
@@ -2108,6 +2114,8 @@ struct Vehicle: Identifiable, Codable {
         note = (try? c.decode(String.self, forKey: .note)) ?? ""
         batteryCapacityKWh = try? c.decodeIfPresent(Double.self, forKey: .batteryCapacityKWh)
         homeChargePlace = try? c.decodeIfPresent(String.self, forKey: .homeChargePlace)
+        soldPrice = try? c.decodeIfPresent(Double.self, forKey: .soldPrice)
+        valueUpdatedAt = try? c.decodeIfPresent(Date.self, forKey: .valueUpdatedAt)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -2129,12 +2137,16 @@ struct Vehicle: Identifiable, Codable {
         // 只會在殺掉 App 重開後靜默消失（同 FamilyMember.agreements 的教訓）
         try c.encodeIfPresent(batteryCapacityKWh, forKey: .batteryCapacityKWh)
         try c.encodeIfPresent(homeChargePlace, forKey: .homeChargePlace)
+        // [v25.539] 這兩行漏了不會編譯錯，只會重開 App 後成交價、估值更新日消失
+        try c.encodeIfPresent(soldPrice, forKey: .soldPrice)
+        try c.encodeIfPresent(valueUpdatedAt, forKey: .valueUpdatedAt)
     }
 
     private enum CodingKeys: String, CodingKey {
         case id, name, brand, ownerName, powerType, purchaseDate, soldDate, purchasePrice, currentValue
         case fixedExpenses, variableExpenses, photoRecords, note
         case batteryCapacityKWh, homeChargePlace
+        case soldPrice, valueUpdatedAt
     }
 
     /// 這台車有沒有電池（電車／混合動力／電動機車）
@@ -2142,8 +2154,15 @@ struct Vehicle: Identifiable, Codable {
         powerType == .electric || powerType == .hybrid || powerType == .electricMotorcycle
     }
 
-    /// 是否已售出
-    var isSold: Bool { soldDate != nil }
+    /// [v25.539] 是否已售出：售出日有值、而且已經到了（跟理財總覽淨資產同一個判斷）。
+    /// 以前只看有沒有售出日，售出日選在未來時列表和看板當它賣了、淨資產卻還算它，兩邊對不上
+    var isSold: Bool { isSold(asOf: Date()) }
+    /// [v25.539] 到 day 那天是不是已經賣掉了（固定西曆、以日為單位比：賣出當天就算賣了）
+    func isSold(asOf day: Date) -> Bool {
+        guard let sold = soldDate else { return false }
+        let cal = Calendar(identifier: .gregorian)
+        return cal.startOfDay(for: sold) <= cal.startOfDay(for: day)
+    }
     /// 每月定期支出合計
     var monthlyFixedTotal: Double {
         fixedExpenses.reduce(0) { $0 + $1.monthlyAmount }

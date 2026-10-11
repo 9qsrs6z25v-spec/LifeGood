@@ -75,8 +75,11 @@ struct FinanceOverviewData: Equatable {
             let two = FinanceHistory.series(months: 2, finance: f, expense: e, rates: rates, now: now, index: index)
             if two.count == 2, two[0].assets > 0 { d.lastMonthNetWorth = two[0].netWorth }
         }
-        d.cashFlow = FinanceCashFlow.build(finance: f, rates: rates, houses: index.houses, now: now)
-        d.upcoming = FinanceUpcoming.build(finance: f, expense: e, houses: index.houses, now: now)
+        // [v25.539] 每台車的 VehicleFacts 也只建一次（FinanceLoanIndex.vehicles），現金流的養車、接下來 30 天的車都讀它
+        d.cashFlow = FinanceCashFlow.build(finance: f, rates: rates, houses: index.houses,
+                                           vehicles: index.vehicles, now: now)
+        d.upcoming = FinanceUpcoming.build(finance: f, expense: e, houses: index.houses,
+                                           vehicles: index.vehicles, now: now)
         let activeStocks = f.stocks.filter { !$0.isSold }
         let livePolicies = f.insurances.filter { now < $0.maturityDate }
         d.counts = [.realEstate: f.realEstates.filter { !$0.isSold }.count,
@@ -245,8 +248,14 @@ struct FinanceOverviewBoard: View {
                 footerA11y = "\(d.counts[kind] ?? 0) 檔"
             }
         case .vehicle:
-            footer = Text("每月養車 " + MoneyFormat.compact(d.vehicleMonthly))
-            footerA11y = "每月養車 " + MoneyFormat.short(d.vehicleMonthly)
+            // [v25.539] 每月養車是平均出來的數：跟載具頁看板、每台車的項目卡同一個寫法（四捨五入到百位、寫「約」）
+            if let m = FinanceText.about100(d.vehicleMonthly, compact: true) {
+                footer = Text("每月養車 " + m)
+                footerA11y = "每月養車 " + (FinanceText.about100(d.vehicleMonthly) ?? m)
+            } else {
+                footer = Text("\(d.counts[kind] ?? 0) 輛")
+                footerA11y = "\(d.counts[kind] ?? 0) 輛"
+            }
         }
         return MoneyCategoryPostcard(theme: kind.theme, name: kind.name, amount: MoneyFormat.short(value),
                                      share: s.assets > 0 ? value / s.assets : 0, count: d.counts[kind] ?? 0,
@@ -582,6 +591,18 @@ enum FinanceText {
     static func money(_ v: Double, code: String) -> String {
         FinanceRates.isNTD(code) ? v.ntdWanString : v.wanString(symbolPrefix: code)
     }
+
+    /// [v25.539] 平均出來的每月金額（每月養車）：四捨五入到百位、前面寫「約」。
+    /// 5,195 →「約 NT$5,200」、40,195 →「約 NT$4萬」、49,990 →「約 NT$5萬」。
+    /// 列表項目卡、載具頁看板、理財總覽的明信片都用這一個，同一台車的同一個數不會一處寫 5,195、一處寫 5,200。
+    /// 不到 1 元回 nil（沒有紀錄）；四捨五入變成 0 的寫「不到 NT$100」，不寫「約 NT$0」。
+    /// compact：不寫 NT$（明信片、風景的小字）
+    static func about100(_ v: Double, compact: Bool = false) -> String? {
+        guard v >= 1, v.isFinite else { return nil }
+        let r = HouseRound.round(v, unit: 100)
+        guard r >= 100 else { return compact ? "不到 100" : "不到 NT$100" }
+        return "約 " + (compact ? MoneyFormat.compact(r) : MoneyFormat.short(r))
+    }
 }
 
 // MARK: - 儲蓄險：果園
@@ -746,78 +767,43 @@ struct SavingsBoard: View {
 
 // MARK: - 載具：今年這條路
 
-/// 一台車要寫在卡片與看板上的幾個數字（掃記帳的支出算，放在 .task 裡算一次）
-struct VehicleFacts: Equatable {
-    /// 充電：平均每度、每公里（電車有填度數、里程才有）
-    var perKwh: Double? = nil
-    var perKm: Double? = nil
-    /// 近 12 個月的平均每月油錢（油車）
-    var fuelPerMonth: Double? = nil
-    /// 每月養車：定期支出的月均＋近 12 個月的變動支出 ÷ 12
-    var monthly: Double = 0
-    /// 車貸繳到第幾期（連結的記帳固定支出有年期或總額才有）
-    var loan: MoneyLoanSchedule? = nil
-    /// 車貸還要繳（台幣）
-    var loanLeft: Double = 0
-
-    /// 充電紀錄（有度數的電費）
-    static func chargeExpenses(_ v: Vehicle, expenses: [Expense]) -> [Expense] {
-        expenses.filter { $0.linkedVehicleId == v.id && $0.vehicleExpenseCategory == .electricity && ($0.evKwh ?? 0) > 0 }
-    }
-
-    static func build(_ v: Vehicle, expense e: ExpenseStore, now: Date = Date()) -> VehicleFacts {
-        let cal = Calendar.current
-        let yearAgo = cal.date(byAdding: .year, value: -1, to: now) ?? now
-        var f = VehicleFacts()
-        let recent = v.variableExpenses.filter { $0.date >= yearAgo && $0.date <= now }
-        f.monthly = v.monthlyFixedTotal + recent.reduce(0) { $0 + $1.amount } / 12
-        if v.powerType == .gasoline || v.powerType == .motorcycle || v.powerType == .hybrid {
-            let fuel = recent.filter { $0.category == .fuel }.reduce(0) { $0 + $1.amount }
-            if fuel > 0 { f.fuelPerMonth = fuel / 12 }
-        }
-        if v.hasBattery {
-            let a = VehicleChargeAnalytics(expenses: chargeExpenses(v, expenses: e.expenses),
-                                           capacityKWh: v.batteryCapacityKWh, homeKeyword: v.homeChargePlace,
-                                           powerType: v.powerType)
-            f.perKwh = a.avgPricePerKwh
-            f.perKm = a.avgCostPerKm
-        }
-        let byId = Dictionary(e.expenses.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
-        // [v25.538] carLoanIds 是 Set，走訪順序每次開 App 都可能不同：兩筆車貸時進度條會輪流顯示不同那筆。
-        // 先依起始日排序（同一天再比 id），進度條固定顯示最早開始、算得出期數的那筆
-        let linked: [Expense] = FinanceLoans.carLoanIds(v, expenses: e.expenses).compactMap { byId[$0] }
-        let loans = linked.sorted { $0.date != $1.date ? $0.date < $1.date : $0.id.uuidString < $1.id.uuidString }
-        for ex in loans {
-            if f.loan == nil, let s = ex.moneyLoanSchedule(now: now, calendar: cal) { f.loan = s }
-            if let left = FinanceLoans.remaining(ex, at: now, store: e, calendar: cal) { f.loanLeft += left }
-        }
-        return f
-    }
-}
+// [v25.539] VehicleFacts 搬到 Models/VehicleFacts.swift 重寫（以記帳為準、車貸看本金），卡片、列表、看板、理財總覽都讀那一份
 
 struct VehicleBoardData: Equatable {
     var year = 2026
     var month = 1
     var activeCount = 0
     var soldCount = 0
+    /// [v25.539] Σ facts.value（決定 10：估值是沒填的 0 時先用購入價）
     var value: Double = 0
-    /// 有填買入價的那幾台：買入價合計、現在的估值合計（折舊只比這幾台）
+    /// 算得出折舊的那幾台（購入價 > 0、估值有填）：購入價合計、估值合計（折舊只比這幾台）
     var purchase: Double = 0
     var pricedValue: Double = 0
+    /// [v25.539] Σ facts.monthly（原值；畫面四捨五入到百位、寫「約」）
     var monthly: Double = 0
+    /// [v25.539] Σ facts.yearSpent：今年真的扣掉的錢（定期數今年扣了幾期、變動讀記帳），不再是月均 × 月數
     var yearSpent: Double = 0
     /// 全部同一種動力就寫那一種（「電車」）
     var powerLabel: String? = nil
     var powerIcon = "car.fill"
-    /// 只有一台車：持有幾年（折舊那顆膠囊寫）
-    var yearsOwned: Double? = nil
+    /// [v25.539] 只有一台車：持有多久（「2 年 1 個月」，決定 12；折舊那顆膠囊寫）
+    var heldText: String? = nil
     var perKwh: Double? = nil
+    var perLiter: Double? = nil
     var perKm: Double? = nil
-    var loanLeft: Double = 0
+    /// [v25.539] 車貸還欠（決定 2）：Σ facts.owed，算得出本金的用本金，算不出的用含利息的還要繳
+    var owed: Double = 0
+    /// 有一台算不出本金、退回含利息的還要繳（畫面寫「還要繳」）
+    var owedScheduled = false
+    /// 本金是用平均利率反推的（畫面寫「約」）
+    var owedEstimated = false
     var scene = FinRoadScene(today: 0, marks: [], signs: [])
 
     var depreciationRate: Double? { purchase > 0 ? pricedValue / purchase - 1 : nil }
 
+    /// [v25.539] 每台車的數字一律讀 VehicleFacts（VehicleView 建好一次傳進來），跟項目卡、卡片、理財總覽同一套。
+    /// 以前這裡自己用車子身上的鏡像算：今年已花＝定期月均 × 月數（季繳多算 3 倍、停掉的照算），
+    /// 車貸寫含利息的還要繳，路上的圓標讀鏡像（只靠 linkedVehicleId 連過來的加油、充電畫不出來）。
     static func build(vehicles: [Vehicle], facts: [UUID: VehicleFacts], expense e: ExpenseStore,
                       now: Date = Date()) -> VehicleBoardData {
         // [v25.538] 固定西曆（同房屋看板）：手機設民國曆時日期列會寫「1 輛・115 年」；今年從哪天起算也跟著用同一份
@@ -825,83 +811,145 @@ struct VehicleBoardData: Equatable {
         var d = VehicleBoardData()
         d.year = cal.component(.year, from: now)
         d.month = cal.component(.month, from: now)
-        let active = vehicles.filter { !$0.isSold }
+        // [v25.539] 已售出＝售出日已經到了；售出日選在未來的照持有中算（跟理財總覽淨資產同一個判斷）
+        let active = vehicles.filter { !$0.isSold(asOf: now) }
         d.activeCount = active.count
         d.soldCount = vehicles.count - active.count
-        d.value = active.reduce(0) { $0 + $1.currentValue }
-        let priced = active.filter { $0.purchasePrice > 0 }
-        d.purchase = priced.reduce(0) { $0 + $1.purchasePrice }
-        d.pricedValue = priced.reduce(0) { $0 + $1.currentValue }
         let types = Set(active.map(\.powerType))
         if types.count == 1, let t = types.first {
             d.powerLabel = t.rawValue
             d.powerIcon = t.icon
         }
-        if active.count == 1 { d.yearsOwned = active[0].yearsOwned }
+        // 呼叫端都會傳；萬一漏了就在這裡算一次（同 RealEstateBoardData）
+        let list: [(v: Vehicle, f: VehicleFacts)] = active.map { v in
+            (v: v, f: facts[v.id] ?? VehicleFacts.build(v, expense: e, now: now))
+        }
+        if list.count == 1 {
+            d.heldText = HouseCardFormat.lived(from: list[0].v.purchaseDate, to: list[0].f.asOf)
+        }
+
+        var kwhCost = 0.0
+        var kwh = 0.0
+        var literCost = 0.0
+        var liters = 0.0
+        var kmCost = 0.0
+        var km = 0.0
+        for item in list {
+            let v = item.v
+            let f = item.f
+            d.value += f.value
+            // 估值還沒填（借用購入價）的那台 depreciationRate 是 nil：不拿購入價跟購入價比出一個「持平」
+            if f.depreciationRate != nil {
+                d.purchase += f.purchase
+                d.pricedValue += f.value
+            }
+            d.monthly += f.monthly
+            d.yearSpent += f.yearSpent
+            if f.owed >= 1 {
+                d.owed += f.owed
+                if f.owedIsScheduled { d.owedScheduled = true }
+                if f.owedIsEstimate { d.owedEstimated = true }
+            }
+            // 每度電、每公升：全部的錢 ÷ 全部的度數／公升（只算有填的），好幾台合在一起算
+            if let c = f.charge, c.totalKwh > 0 {
+                kwhCost += c.totalCost
+                kwh += c.totalKwh
+            }
+            if let fuel = f.fuel, fuel.liters > 0 {
+                literCost += fuel.litersCost
+                liters += fuel.liters
+            }
+            // 每公里：每台照它自己的動力讀（電車讀充電、油車讀加油，油電是 nil），用各自追蹤到的公里數加權
+            if let p = f.perKm {
+                let tracked = (v.hasBattery ? f.charge?.trackedKm : f.fuel?.trackedKm) ?? 0
+                if tracked > 0 {
+                    kmCost += p * tracked
+                    km += tracked
+                }
+            }
+        }
+        if kwh > 0 { d.perKwh = kwhCost / kwh }
+        if liters > 0 { d.perLiter = literCost / liters }
+        if km > 0 { d.perKm = kmCost / km }
 
         guard let yearStart = cal.date(from: cal.dateComponents([.year], from: now)),
               let nextYear = cal.date(byAdding: .year, value: 1, to: yearStart) else { return d }
         let yearSpan = nextYear.timeIntervalSince(yearStart)
         func t(_ date: Date) -> Double { min(1, max(0, date.timeIntervalSince(yearStart) / yearSpan)) }
 
-        var kwhCost: Double = 0
-        var kwh: Double = 0
-        var kmCost: Double = 0
-        var km: Double = 0
+        // [v25.539] 路上的圓標改讀記帳（facts.ledgerExpenseIds），分類照記帳那筆的 vehicleExpenseCategory；
+        // 只有沒連到記帳的舊鏡像（facts.legacyMirrorIds）才讀它自己的欄位。
+        // 跟每月養車同一個範圍：變動支出、不是週期的固定支出（貸款除外）
         var monthTotals = [Double](repeating: 0, count: 12)
         var monthKinds = [[FinRoadScene.Kind: Double]](repeating: [:], count: 12)
-        for v in active {
-            d.monthly += facts[v.id]?.monthly ?? 0
-            d.loanLeft += facts[v.id]?.loanLeft ?? 0
-            // 今年已花：今年的變動支出＋定期支出的月均 × 今年持有的月數
-            let from = max(yearStart, v.purchaseDate)
-            let months = from > now ? 0 : (cal.dateComponents([.month], from: from, to: now).month ?? 0) + 1
-            d.yearSpent += v.monthlyFixedTotal * Double(min(12, months))
-            for ve in v.variableExpenses where ve.date >= yearStart && ve.date <= now {
-                d.yearSpent += ve.amount
+        for item in list {
+            let ids = item.f.ledgerExpenseIds
+            if !ids.isEmpty {
+                for ex in e.expenses where ids.contains(ex.id) {
+                    guard ex.expenseType == .variable || (!ex.isRecurringFixed && ex.fixedCategory != .loan) else { continue }
+                    guard ex.date >= yearStart, ex.date <= now else { continue }
+                    let amount = e.ntdValue(of: ex)
+                    let m = cal.component(.month, from: ex.date) - 1
+                    guard amount > 0, m >= 0, m < 12 else { continue }
+                    monthTotals[m] += amount
+                    monthKinds[m][FinRoadScene.Kind.of(ex.vehicleExpenseCategory ?? .other), default: 0] += amount
+                }
+            }
+            for ve in item.v.variableExpenses where item.f.legacyMirrorIds.contains(ve.id) {
+                guard ve.date >= yearStart, ve.date <= now, ve.amount > 0 else { continue }
                 let m = cal.component(.month, from: ve.date) - 1
+                guard m >= 0, m < 12 else { continue }
                 monthTotals[m] += ve.amount
                 monthKinds[m][FinRoadScene.Kind.of(ve.category), default: 0] += ve.amount
             }
-            if v.hasBattery {
-                let a = VehicleChargeAnalytics(expenses: VehicleFacts.chargeExpenses(v, expenses: e.expenses),
-                                               capacityKWh: v.batteryCapacityKWh, homeKeyword: v.homeChargePlace,
-                                               powerType: v.powerType)
-                kwhCost += a.totalCost
-                kwh += a.totalKwh
-                for iv in a.intervals {
-                    kmCost += iv.cost
-                    km += iv.km
-                }
-            }
         }
-        if kwh > 0 { d.perKwh = kwhCost / kwh }
-        if km > 0 { d.perKm = kmCost / km }
-
         var marks: [FinRoadScene.Mark] = []
         for m in 0..<12 where monthTotals[m] > 0 {
             let kind = monthKinds[m].max { $0.value < $1.value }?.key ?? .other
             marks.append(FinRoadScene.Mark(t: (Double(m) + 0.5) / 12, kind: kind, amount: monthTotals[m]))
         }
 
-        // 路牌：連結了記帳固定支出的車貸、稅費、訂閱，今年接下來的那一次
+        // [v25.539] 路牌改讀 facts.upcoming（記帳那筆的下一次扣款、車貸下一期、保養估計），標籤寫分類名
+        //（車位租金／保險／訂閱／車貸／稅費），不再一律寫鏡像的「稅費」；只靠 linkedVehicleId 連過來的保險也會出現
         let byId = Dictionary(e.expenses.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
         let today = cal.startOfDay(for: now)
-        let md = DateFormatter()
-        md.locale = Locale(identifier: "zh_Hant_TW")
-        md.dateFormat = "M/d"
         var upcoming: [(Date, String)] = []
-        for v in active {
-            for fe in v.fixedExpenses {
-                guard let id = fe.linkedExpenseId, let ex = byId[id],
-                      let due = ex.nextFixedDueDate(onOrAfter: today, calendar: cal), due < nextYear else { continue }
-                let label = md.string(from: due) + " " + fe.category.rawValue
-                if !upcoming.contains(where: { $0.1 == label }) { upcoming.append((due, label)) }
+        for item in list {
+            for u in item.f.upcoming {
+                guard cal.startOfDay(for: u.date) >= today, u.date < nextYear else { continue }
+                let label = signLabel(u, byId: byId)
+                if !upcoming.contains(where: { $0.1 == label }) { upcoming.append((u.date, label)) }
             }
         }
-        let signs = upcoming.sorted { $0.0 < $1.0 }.prefix(3).map { FinRoadScene.Sign(t: t($0.0), label: $0.1) }
+        let signs = upcoming.sorted { $0.0 != $1.0 ? $0.0 < $1.0 : $0.1 < $1.1 }
+            .prefix(3).map { FinRoadScene.Sign(t: t($0.0), label: $0.1) }
         d.scene = FinRoadScene(today: t(now), marks: marks, signs: Array(signs))
         return d
+    }
+
+    /// 路牌上的字：「11/5 車位租金」「12/5 車貸」「約 1/15 保養」
+    private static func signLabel(_ u: VehicleUpcoming, byId: [UUID: Expense]) -> String {
+        let day = HouseCardFormat.md(u.date)
+        switch u.kind {
+        case .fixed(let id):
+            if let ex = byId[id] { return day + " " + VehicleFacts.categoryLabel(ex) }
+            return day + " " + u.title
+        case .loan:
+            return day + " 車貸"
+        case .maintenance:
+            return "約 " + day + " 保養"
+        }
+    }
+}
+
+extension VehicleFacts {
+    /// [v25.539] 還欠的本金是用平均利率反推的（畫面寫「約」，決定 2）：有一筆還欠 > 0 的車貸是算出利率 > 0 的本金表。
+    /// 零利率的本金剛好是 P − 已繳，不寫「約」；算不出本金的看 owedIsScheduled（寫「還要繳」）
+    var owedIsEstimate: Bool {
+        let cal = Calendar(identifier: .gregorian)
+        return loans.contains { l in
+            l.hasBalance && (l.monthlyRate ?? 0) > 0 && l.owed(at: asOf, calendar: cal) >= 1
+        }
     }
 }
 
@@ -950,28 +998,41 @@ struct VehicleBoard: View {
             return Text(d.soldCount > 0 ? "車子都賣掉了，賣掉的還留在下面" : "新增車子之後，這裡會畫出你今年這條路")
         }
         var parts: [String] = []
-        if d.monthly > 0 { parts.append("每月養車 " + MoneyFormat.short(d.monthly)) }
-        if d.yearSpent > 0 { parts.append("今年已花 " + MoneyFormat.short(d.yearSpent)) }
+        // [v25.539] 每月養車是平均出來的數：四捨五入到百位、寫「約」，跟每台車的項目卡同一個寫法
+        if let m = FinanceText.about100(d.monthly) { parts.append("每月養車 " + m) }
+        if d.yearSpent >= 1 { parts.append("今年已花 " + MoneyFormat.short(d.yearSpent)) }
         return Text(parts.isEmpty ? "還沒有養車的紀錄" : parts.joined(separator: "・"))
     }
 
     private var chips: [MoneyBoardChip] {
         let d = data
         var out: [MoneyBoardChip] = []
+        // 決定 13：每度、每公升、每公里一律一位小數
         if let p = d.perKwh {
             out.append(MoneyBoardChip(icon: "bolt.fill", label: "每度電", value: "NT$" + FinanceItemText.number(p, digits: 1)))
+        }
+        if let p = d.perLiter {
+            out.append(MoneyBoardChip(icon: "fuelpump.fill", label: "每公升", value: "NT$" + FinanceItemText.number(p, digits: 1)))
         }
         if let p = d.perKm {
             out.append(MoneyBoardChip(icon: "road.lanes", label: "每公里", value: "NT$" + FinanceItemText.number(p, digits: 1)))
         }
+        // [v25.539] 決定 1：折舊是車子的常態，用中性色加 ▼（不再是「-27%」）；萬一增值才用紅色 ▲（同房屋的增值）
         if let r = d.depreciationRate, abs(r) >= 0.005 {
-            var v = (r < 0 ? "-" : "+") + FinanceText.percent1(abs(r))
-            if let y = d.yearsOwned, y >= 0.1 { v += "・" + FinanceItemText.number(y, digits: 1) + " 年" }
+            var v = (r < 0 ? "▼" : "▲") + FinanceText.percent1(abs(r))
+            if let held = d.heldText { v += "・" + held }
             out.append(MoneyBoardChip(icon: r < 0 ? "arrow.down.right" : "arrow.up.right",
-                                      label: r < 0 ? "折舊" : "增值", value: v))
+                                      label: r < 0 ? "折舊" : "增值", value: v, tone: r < 0 ? .neutral : .up))
         }
-        if d.loanLeft >= 1 {
-            out.append(MoneyBoardChip(icon: "banknote.fill", label: "車貸還要繳", value: MoneyFormat.short(d.loanLeft)))
+        // [v25.539] 決定 2：車貸寫「還欠」的本金（反推出來的寫「約」）；有一台算不出本金就退回含利息的「還要繳」
+        if d.owed >= 1 {
+            let amount = MoneyFormat.short(d.owed)
+            if d.owedScheduled {
+                out.append(MoneyBoardChip(icon: "banknote.fill", label: "車貸還要繳", value: amount))
+            } else {
+                out.append(MoneyBoardChip(icon: "banknote.fill", label: "車貸還欠",
+                                          value: (d.owedEstimated ? "約 " : "") + amount))
+            }
         }
         return out
     }

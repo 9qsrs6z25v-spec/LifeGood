@@ -733,61 +733,116 @@ enum VehicleScriptName {
 }
 
 extension MoneyItem {
-    /// 一台車。卡面是最新一張照片（車輛照片優先），沒有照片就是插畫
+    /// 一台車。卡面是最新一張照片（車輛照片優先），沒有照片就是插畫。
+    /// [v25.539] 數字一律讀 VehicleFacts（VehicleView 建好一次傳進來），跟載具頁看板、卡片、理財總覽同一套：
+    /// 估值 facts.value、每月養車 facts.monthly、車貸 facts.loan／facts.owed、折舊 facts.depreciationRate、持有到 facts.asOf
     static func vehicle(_ v: Vehicle, facts: VehicleFacts?, now: Date = Date()) -> MoneyItem {
+        // [v25.539] 已售出＝售出日已經到了（售出日選在未來的照持有中算，跟看板、理財總覽同一個判斷）
+        let sold = v.isSold(asOf: now)
+        // 決定 10：估值是沒填的 0 時先用購入價；已售出寫成交價（沒填用估值）
+        let value: Double = facts?.value ?? v.currentValue
         var item = MoneyItem(id: v.id, theme: VehicleScriptName.theme(v), seed: seed(v.id),
                              title: v.name.isEmpty ? "車" : v.name,
-                             amount: v.currentValue.ntdWanString,
+                             amount: value.ntdWanString,
                              category: v.powerType.rawValue)
         var detail: [String] = []
         let brand = v.brand.trimmingCharacters(in: .whitespaces)
         if !brand.isEmpty { detail.append(brand) }
-        let years = v.yearsOwned
-        if v.isSold {
+        if sold {
             if let d = v.soldDate { detail.append(FinanceItemText.date(d) + " 賣出") }
-        } else if years >= 0.1 {
-            detail.append("持有 " + FinanceItemText.number(years, digits: 1) + " 年")
+        } else if let held = HouseCardFormat.lived(from: v.purchaseDate, to: facts?.asOf ?? now) {
+            // [v25.539] 決定 12：「持有 2.07 年」改「持有 2 年 1 個月」（跟房屋、股票卡同一個寫法；不滿 1 個月不寫）
+            detail.append("持有 " + held)
         }
         item.detail = detail.isEmpty ? nil : detail.joined(separator: "・")
         let owner = v.ownerName.trimmingCharacters(in: .whitespaces)
-        item.badge = v.isSold ? "已售出" : (owner.isEmpty ? nil : MoneyBoardText.short(owner, max: 6))
+        item.badge = sold ? "已售出" : (owner.isEmpty ? nil : MoneyBoardText.short(owner, max: 6))
         item.scriptWord = VehicleScriptName.word(v)
         item.scriptCaps = VehicleScriptName.caps(v)
-        item.dimmed = v.isSold
+        item.dimmed = sold
         let photos = v.photoRecords.filter { !$0.photoFileNames.isEmpty }
         let cover = photos.filter { $0.category == .appearance }.max { $0.date < $1.date }
             ?? photos.max { $0.date < $1.date }
         item.photoURL = cover?.photoURL
 
-        if let f = facts, !v.isSold {
+        guard let f = facts else { return item }
+        if !sold {
+            // 決定 13：每度、每公升一律一位小數；油電兩種都有就兩顆都放
             if let p = f.perKwh {
                 item.chips.append(MoneyItemChip(icon: "bolt.fill", text: "每度 NT$" + FinanceItemText.number(p, digits: 1)))
-            } else if let fuel = f.fuelPerMonth {
-                item.chips.append(MoneyItemChip(icon: "fuelpump.fill", text: "油錢 " + MoneyFormat.short(fuel) + "/月"))
+            }
+            if let p = f.fuel?.perLiter {
+                item.chips.append(MoneyItemChip(icon: "fuelpump.fill", text: "每公升 NT$" + FinanceItemText.number(p, digits: 1)))
+            } else if let fuel = f.fuelPerMonth, let text = FinanceText.about100(fuel) {
+                // 沒記公升數：寫每月養車裡加油那一段（同一個數）
+                item.chips.append(MoneyItemChip(icon: "fuelpump.fill", text: "油錢每月 " + text))
             }
         }
-        if v.purchasePrice > 0, v.currentValue > 0 {
-            let r = v.currentValue / v.purchasePrice - 1
-            if abs(r) >= 0.005 {
-                item.chips.append(MoneyItemChip(icon: r < 0 ? "arrow.down.right" : "arrow.up.right",
-                                                text: (r < 0 ? "折舊 -" : "增值 +") + FinanceText.percent1(abs(r))))
-            }
+        // [v25.539] 決定 1：折舊是車子的常態，用中性色加 ▼（不再是「折舊 -27%」）；萬一增值才用紅色 ▲（同房屋的增值）。
+        // 估值還沒填（借用購入價）時 depreciationRate 是 nil，不出這顆
+        if let r = f.depreciationRate, abs(r) >= 0.005 {
+            item.chips.append(MoneyItemChip(icon: r < 0 ? "arrow.down.right" : "arrow.up.right",
+                                            text: (r < 0 ? "折舊 ▼" : "增值 ▲") + FinanceText.percent1(abs(r)),
+                                            tone: r < 0 ? .neutral : .up))
         }
-        if let f = facts, !v.isSold, f.monthly > 0 {
-            item.chips.append(MoneyItemChip(icon: "creditcard.fill", text: "每月 " + MoneyFormat.short(f.monthly)))
-        }
-        if let f = facts, !v.isSold, let s = f.loan {
-            if s.isDone {
-                item.chips.insert(MoneyItemChip(icon: "checkmark.seal.fill", text: "車貸繳清", tone: .good), at: 0)
-            } else {
-                item.progress = MoneyItemProgress(fraction: Double(s.elapsed) / Double(max(s.total, 1)),
-                                                  leading: "車貸 已繳 \(s.elapsed)／\(s.total) 期",
-                                                  trailing: "還要 " + MoneyFormat.short(f.loanLeft > 0 ? f.loanLeft : s.left))
+        if !sold {
+            // [v25.539] 每月養車（含車貸月付、季繳 ÷ 3、停掉的不算）：四捨五入到百位、寫「約」，跟載具頁看板同一個數
+            if let m = FinanceText.about100(f.monthly) {
+                item.chips.append(MoneyItemChip(icon: "creditcard.fill", text: "每月 " + m))
             }
-        } else if let f = facts, !v.isSold, f.loanLeft >= 1 {
-            item.chips.append(MoneyItemChip(icon: "banknote.fill", text: "車貸還要 " + MoneyFormat.short(f.loanLeft)))
+            vehicleLoan(&item, facts: f)
         }
         return item
+    }
+
+    /// [v25.539] 車貸（多筆合併、依起始日）：全部繳完寫「車貸繳清」；還沒開始扣寫哪個月開始；
+    /// 繳到一半畫一條進度，右邊「2029 繳完・還欠 約 NT$111.7萬」；只有沒填年限的車貸時寫每月多少
+    private static func vehicleLoan(_ item: inout MoneyItem, facts f: VehicleFacts) {
+        if let s = f.loan {
+            if s.isDone {
+                item.chips.insert(MoneyItemChip(icon: "checkmark.seal.fill", text: "車貸繳清", tone: .good), at: 0)
+                return
+            }
+            let known = f.loans.filter { !$0.termIsGuess && $0.countedPeriods > 0 }
+            if s.elapsed == 0, let first = known.map(\.firstDue).min() {
+                item.chips.append(MoneyItemChip(icon: "calendar", text: "車貸 " + HouseCardFormat.ym(first) + " 開始"))
+                return
+            }
+            let trailing = vehicleLoanTrailing(f, known: known)
+            item.progress = MoneyItemProgress(fraction: Double(s.elapsed) / Double(max(s.total, 1)),
+                                              leading: "車貸 已繳 \(s.elapsed)／\(s.total) 期",
+                                              trailing: trailing.isEmpty ? nil : trailing)
+            return
+        }
+        // 沒填年限也沒有結束日：算不出期數和還欠，只寫這個月在扣多少
+        let monthly = f.loans
+            .filter { $0.termIsGuess && $0.isPaying(inMonth: f.asOf, calendar: financeGregorian) }
+            .reduce(0.0) { $0 + $1.monthly }
+        if monthly >= 1 {
+            item.chips.append(MoneyItemChip(icon: "banknote.fill", text: "車貸每月 " + MoneyFormat.short(monthly) + "・沒填年限"))
+        }
+    }
+
+    /// 進度條右邊：「2029 繳完・還欠 約 NT$111.7萬」。決定 2：還欠看本金，用平均利率反推的寫「約」；
+    /// 有一筆算不出本金（沒填總貸款金額、每期加起來比借的少）時退回含利息的「還要繳」
+    private static func vehicleLoanTrailing(_ f: VehicleFacts, known: [VehicleLoan]) -> String {
+        let owed: Double = f.owed
+        var text = ""
+        if owed >= 1 {
+            let amount = MoneyFormat.short(owed)
+            if f.owedIsScheduled {
+                text = "還要繳 " + amount
+            } else if f.owedIsEstimate {
+                text = "還欠 約 " + amount
+            } else {
+                text = "還欠 " + amount
+            }
+        }
+        if let payoff = known.compactMap(\.payoffDate).max() {
+            let year = String(financeGregorian.component(.year, from: payoff)) + " 繳完"
+            text = text.isEmpty ? year : year + "・" + text
+        }
+        return text
     }
 }
 

@@ -41,6 +41,8 @@ struct VehicleChargeAnalytics {
     let hasHomeKeyword: Bool                // 有沒有設定家充關鍵字
     /// [v25.538] 一段區間「每度跑幾公里」的合理上限：超過就是中間漏記了充電（見 intervals）
     let maxKmPerKwh: Double
+    /// [v25.539] 里程錶讀數（年里程讀它，跟卡片「車輛資料」同一套：比前面最大值還小的不採用）
+    let odometer: VehicleOdometer
 
     // MARK: 建構
 
@@ -49,12 +51,15 @@ struct VehicleChargeAnalytics {
     ///   - homeKeyword: 家充地點關鍵字（nil／空＝沒設定，全部視為非家充）
     ///   - powerType: [v25.538] 這台車的動力，用來挑每度里程的上限（電動機車 60、其他 12）。
     ///     沒傳的舊呼叫端先用寬的 60：寧可少擋幾段，也不要把電動機車正常的區間全部擋掉
+    ///   - odometerExpenses: [v25.539] 算年里程用的支出（這台車所有記了里程錶的：電費、油錢、保養、維修）。
+    ///     沒傳就只用這幾筆充電的里程錶；VehicleFacts 會傳全部，卡片和分析頁的「一年約開」才是同一個數
     init(expenses: [Expense], capacityKWh: Double?, homeKeyword: String?,
-         powerType: VehiclePowerType? = nil) {
+         powerType: VehiclePowerType? = nil, odometerExpenses: [Expense]? = nil) {
         let key = (homeKeyword ?? "").trimmingCharacters(in: .whitespaces).lowercased()
         self.hasHomeKeyword = !key.isEmpty
         self.capacityKWh = (capacityKWh ?? 0) > 0 ? capacityKWh : nil
         self.maxKmPerKwh = (powerType == nil || powerType == .electricMotorcycle) ? 60 : 12
+        self.odometer = VehicleOdometer(expenses: odometerExpenses ?? expenses)
         self.sessions = expenses
             .sorted { $0.date < $1.date }
             .map { e in
@@ -300,6 +305,15 @@ struct VehicleChargeAnalytics {
         }
     }
 
+    /// [v25.539] 被每度里程門檻擋掉的區間（中間漏記了充電）：這幾段不算進每公里、每度跑，「要確認」列出來
+    var skippedIntervals: [VehicleEnergyGap] {
+        odometerSteps.compactMap { s -> VehicleEnergyGap? in
+            let cur = s.to
+            guard cur.kwh > 0, s.km / cur.kwh > maxKmPerKwh else { return nil }
+            return VehicleEnergyGap(id: cur.id, from: s.from.date, to: cur.date, km: s.km, amount: cur.kwh)
+        }
+    }
+
     var totalTrackedKm: Double { intervals.reduce(0) { $0 + $1.km } }
     var avgKmPerKwh: Double? {
         let k = intervals.reduce(0) { $0 + $1.kwh }
@@ -340,18 +354,9 @@ struct VehicleChargeAnalytics {
 
     /// 年化里程：用有紀錄的區間跨度推一年開多少。跨度不足 30 天就不推——
     /// 拿兩週的資料乘 26 倍是在編故事。
-    /// [v25.538] 以前分母從第一段的「結束日」算起，少算了第一段的天數，年里程被高估。
-    /// 改成每段都從前一筆里程錶讀數那天算到後一筆；每段都正常時就是「第一筆到最後一筆讀數的日期差」。
-    /// 里程用里程錶相鄰讀數（不套每度里程門檻）：漏記充電只會讓電耗算不準，那段路還是真的開了；
-    /// 被剔除的段（倒退、跳太多）連天數一起拿掉，分子分母才對得上。
-    var annualizedKm: Double? {
-        let steps = odometerSteps
-        let km: Double = steps.reduce(0) { $0 + $1.km }
-        let seconds: Double = steps.reduce(0) { $0 + $1.to.date.timeIntervalSince($1.from.date) }
-        let days = seconds / 86400
-        guard km > 0, days >= 30 else { return nil }
-        return km / days * 365
-    }
+    /// [v25.539] 改讀 VehicleOdometer：(最後一筆 − 最早一筆) ÷ 天數 × 365，跟卡片「車輛資料」的「一年約開」同一個數。
+    /// 以前用區間公里 ÷ 區間天數，兩頁算法不同；倒退的讀數由 VehicleOdometer 剔除（並進「要確認」）。
+    var annualizedKm: Double? { odometer.annualKm }
 
     // MARK: - F. 續航推估（需要原廠標稱 + 電耗）
 

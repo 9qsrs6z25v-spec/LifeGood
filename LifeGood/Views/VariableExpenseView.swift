@@ -570,6 +570,8 @@ struct VariableExpenseView: View {
         // 里程錶和起訖電量不帶（ev 欄位不在 init 裡，本來就是空的），不然兩筆同里程會算出 0 公里的區間。
         // 不用補車子身上的鏡像：v25.539 起卡片讀記帳的 linkedVehicleId。
         copy.evKwh = expense.evKwh
+        // [v25.539] 公升數跟度數一樣帶（同一家加油站加滿，量通常差不多，不同再改）；里程錶照舊不帶
+        copy.fuelLiters = expense.fuelLiters
         store.add(copy)
     }
 
