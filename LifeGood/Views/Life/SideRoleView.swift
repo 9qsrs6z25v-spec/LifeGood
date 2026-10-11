@@ -307,9 +307,11 @@ struct SideRoleHubView: View {
                 NavigationStack {
                     AddMilestoneView(initialCategory: .career, initialCareerSub: .sideRole)
                 }
+                    .appStores()
             }
             .sheet(item: $viewingRole) { role in
                 SideRoleWorkspaceView(roleId: role.id)
+                    .appStores()
             }
         }
     }
@@ -675,33 +677,41 @@ struct SideRoleWorkspaceView: View {
         }
         .sheet(isPresented: $showEditRole) {
             NavigationStack { AddMilestoneView(editing: role) }
+                .appStores()
         }
         .sheet(item: $editingTask) { t in
             NavigationStack { SideRoleTaskEditor(roleId: roleId, task: t) }
+                .appStores()
         }
         .sheet(item: $viewingMember) { m in
             SideRoleMemberDetailView(roleId: roleId, memberId: m.id,
                                      allowSubordinateJump: allowSubordinateJump)
+                .appStores()
         }
         .sheet(item: $editingMember) { m in
             NavigationStack { SideRoleMemberEditor(roleId: roleId, member: m) }
+                .appStores()
         }
         .sheet(item: $editingMeeting) { m in
             NavigationStack { SideRoleMeetingEditor(roleId: roleId, meeting: m) }
+                .appStores()
         }
         .sheet(item: $editingKeyDate) { k in
             NavigationStack { SideRoleKeyDateEditor(roleId: roleId, keyDate: k) }
+                .appStores()
         }
         .sheet(item: $editingResolution) { r in
             NavigationStack { SideRoleResolutionEditor(roleId: roleId, resolution: r) }
+                .appStores()
         }
         .sheet(item: $viewingResolution) { r in
             SideRoleResolutionCard(roleId: roleId, resolutionId: r.id)
+                .appStores()
         }
         .exportPageSizeDialog(isPresented: $askExportPageSize, itemCount: exportRowCount(role)) { per in
             exportImage(role, perPage: per)
         }
-        .sheet(item: $sharePayload) { payload in ShareSheet(items: payload.items) }
+        .sheet(item: $sharePayload) { payload in ShareSheet(items: payload.items).appStores() }
         .alert("已複製上屆名單", isPresented: Binding(
             get: { showCopyResult != nil },
             set: { if !$0 { showCopyResult = nil } })) {
@@ -1811,11 +1821,13 @@ struct SideRoleTaskEditor: View {
                 SideRoleLinkPicker(roleId: roleId, taskId: task.id,
                                    assigneeIds: task.assigneeIds ?? [])
             }
+                .appStores()
         }
         .sheet(isPresented: $showExtraPicker) {
             NavigationStack {
                 SideRoleAttendeePicker(roleId: roleId, selected: $draftExtras)
             }
+                .appStores()
         }
         .onChange(of: draftExtras) { _, list in
             task.extraAssignees = list.isEmpty ? nil : list
@@ -2033,6 +2045,7 @@ struct SideRoleMemberEditor: View {
                     }
                 }
             }
+                .appStores()
         }
     }
 }
@@ -2286,6 +2299,7 @@ struct SideRoleMeetingEditor: View {
             NavigationStack {
                 SideRoleAttendeePicker(roleId: roleId, selected: $meeting.attendees)
             }
+                .appStores()
         }
         // 出席者改成「膠囊＋挑人」後，attendeeText 只承載「還沒挑過的手打內容」，
         // 不再預先塞入既有名單——否則儲存時會與膠囊列的內容重複合併一次。
@@ -2437,16 +2451,20 @@ struct SideRoleResolutionCard: View {
                 }
             }
             .sheet(isPresented: $showEdit) {
-                if let r = resolution {
-                    NavigationStack { SideRoleResolutionEditor(roleId: roleId, resolution: r) }
+                Group {
+                    if let r = resolution {
+                        NavigationStack { SideRoleResolutionEditor(roleId: roleId, resolution: r) }
+                    }
                 }
+                    .appStores()
             }
-            .sheet(item: $shareItem) { item in ShareSheet(items: item.items) }
+            .sheet(item: $shareItem) { item in ShareSheet(items: item.items).appStores() }
             .sheet(item: Binding(
                 get: { viewingReferenceId.map { IdentifiableUUID(id: $0) } },
                 set: { viewingReferenceId = $0?.id }
             )) { wrapper in
                 SideRoleResolutionCard(roleId: roleId, resolutionId: wrapper.id)
+                    .appStores()
             }
             .onAppear {
                 withAnimation(.spring(response: 0.46, dampingFraction: 0.82)) { cardAppeared = true }
@@ -3108,11 +3126,13 @@ struct SideRoleResolutionEditor: View {
             NavigationStack {
                 SideRoleInitiatorPicker(roleId: roleId, selection: $resolution.initiator)
             }
+                .appStores()
         }
         .sheet(isPresented: $showReferencePicker) {
             NavigationStack {
                 ResolutionReferencePicker(roleId: roleId, resolution: $resolution)
             }
+                .appStores()
         }
     }
 
@@ -3378,15 +3398,20 @@ struct SideRoleMemberDetailView: View {
                 }
             }
             .sheet(isPresented: $showEdit) {
-                if let member {
-                    NavigationStack { SideRoleMemberEditor(roleId: roleId, member: member) }
+                Group {
+                    if let member {
+                        NavigationStack { SideRoleMemberEditor(roleId: roleId, member: member) }
+                    }
                 }
+                    .appStores()
             }
             .sheet(item: $editingTask) { t in
                 NavigationStack { SideRoleTaskEditor(roleId: roleId, task: t) }
+                    .appStores()
             }
             .sheet(item: $viewingSubordinate) { sub in
                 SubordinateDetailView(subordinate: sub)
+                    .appStores()
             }
         }
     }
