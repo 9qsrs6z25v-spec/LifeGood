@@ -10,7 +10,10 @@ import Combine
 // 約 500 點計算，一次跑步大概只佔 15KB，放進 life_workouts 的 blob 沒問題。
 //
 // 背景定位：allowsBackgroundLocationUpdates 需要 Info.plist 的 UIBackgroundModes
-// 含 location，否則會在執行期直接 crash——這個設定已寫進 pbxproj。
+// 含 location，否則 CoreLocation 會斷言、App 直接閃退。這個鍵要寫在
+// LifeGood/Info.plist（v25.533）；寫在 pbxproj 的 INFOPLIST_KEY_UIBackgroundModes
+// 不會進到打包出來的 Info.plist。beginUpdates 另外先檢查一次，設定再壞也只是
+// 鎖屏後不記錄，不會閃退。
 
 @MainActor
 final class RunTracker: NSObject, ObservableObject {
@@ -150,11 +153,20 @@ final class RunTracker: NSObject, ObservableObject {
 
     // MARK: - 內部
 
+    /// 打包出來的 Info.plist 真的有宣告 location 背景模式才為 true
+    private static let hasLocationBackgroundMode: Bool = {
+        let modes = Bundle.main.object(forInfoDictionaryKey: "UIBackgroundModes") as? [String] ?? []
+        return modes.contains("location")
+    }()
+
     private func beginUpdates() {
         let status = manager.authorizationStatus
-        // 只有拿到定位授權才打開背景更新，否則系統會直接丟例外
-        if status == .authorizedAlways || status == .authorizedWhenInUse {
+        // 只有拿到定位授權、而且 App 有宣告 location 背景模式才打開背景更新，
+        // 兩個少一個 CoreLocation 都會直接斷言閃退（v25.533 就是少了背景模式）
+        if (status == .authorizedAlways || status == .authorizedWhenInUse),
+           Self.hasLocationBackgroundMode {
             manager.allowsBackgroundLocationUpdates = true
+            manager.showsBackgroundLocationIndicator = true
         }
         manager.startUpdatingLocation()
     }
