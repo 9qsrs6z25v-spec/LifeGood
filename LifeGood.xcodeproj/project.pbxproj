@@ -57,6 +57,11 @@
 		A01B000001001527 /* HouseFacts.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001527 /* HouseFacts.swift */; };
 		A01B000001001528 /* HouseCardData.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001528 /* HouseCardData.swift */; };
 		A01B000001001533 /* VehicleFacts.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001533 /* VehicleFacts.swift */; };
+		A01B000001001538 /* VehicleEditors.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001538 /* VehicleEditors.swift */; };
+		A01B000001001537 /* VehicleCardViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001537 /* VehicleCardViews.swift */; };
+		A01B000001001536 /* FinanceCardKit.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001536 /* FinanceCardKit.swift */; };
+		A01B000001001535 /* FinDriveScene.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001535 /* FinDriveScene.swift */; };
+		A01B000001001534 /* VehicleCardData.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001534 /* VehicleCardData.swift */; };
 		A01B000001001529 /* FinHouseScene.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001529 /* FinHouseScene.swift */; };
 		A01B000001001532 /* AppStores.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001532 /* AppStores.swift */; };
 		A01B000001001530 /* HouseCardViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001530 /* HouseCardViews.swift */; };
@@ -257,6 +262,11 @@
 		A01A000001001527 /* HouseFacts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HouseFacts.swift; sourceTree = "<group>"; };
 		A01A000001001528 /* HouseCardData.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HouseCardData.swift; sourceTree = "<group>"; };
 		A01A000001001533 /* VehicleFacts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VehicleFacts.swift; sourceTree = "<group>"; };
+		A01A000001001538 /* VehicleEditors.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VehicleEditors.swift; sourceTree = "<group>"; };
+		A01A000001001537 /* VehicleCardViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VehicleCardViews.swift; sourceTree = "<group>"; };
+		A01A000001001536 /* FinanceCardKit.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FinanceCardKit.swift; sourceTree = "<group>"; };
+		A01A000001001535 /* FinDriveScene.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FinDriveScene.swift; sourceTree = "<group>"; };
+		A01A000001001534 /* VehicleCardData.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VehicleCardData.swift; sourceTree = "<group>"; };
 		A01A000001001529 /* FinHouseScene.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FinHouseScene.swift; sourceTree = "<group>"; };
 		A01A000001001532 /* AppStores.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppStores.swift; sourceTree = "<group>"; };
 		A01A000001001530 /* HouseCardViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HouseCardViews.swift; sourceTree = "<group>"; };
@@ -452,6 +462,7 @@
 				A01A000001001527 /* HouseFacts.swift */,
 				A01A000001001528 /* HouseCardData.swift */,
 				A01A000001001533 /* VehicleFacts.swift */,
+				A01A000001001534 /* VehicleCardData.swift */,
 				A01A000001000020 /* LifeModels.swift */,
 				A01A000001000201 /* HealthModels.swift */,
 				A01A000001000204 /* ChildVaccineSchedule.swift */,
@@ -531,6 +542,7 @@
 				A01A000001001522 /* FinanceInsights.swift */,
 				A01A000001001523 /* FinanceBoardScenes.swift */,
 				A01A000001001529 /* FinHouseScene.swift */,
+				A01A000001001535 /* FinDriveScene.swift */,
 				A01A000001001532 /* AppStores.swift */,
 				A01A000001001524 /* FinanceBoards.swift */,
 				A01A000001001525 /* FinanceItems.swift */,
@@ -559,6 +571,9 @@
 				A01A000001001526 /* StockCardViews.swift */,
 				A01A000001001531 /* RealEstateEditors.swift */,
 				A01A000001001530 /* HouseCardViews.swift */,
+				A01A000001001538 /* VehicleEditors.swift */,
+				A01A000001001537 /* VehicleCardViews.swift */,
+				A01A000001001536 /* FinanceCardKit.swift */,
 				A01A000001000212 /* InstitutionalView.swift */,
 				A01A000001000019 /* VehicleView.swift */,
 				A01A00000100001A /* AddVehicleView.swift */,
@@ -771,6 +786,11 @@
 				A01B000001001527 /* HouseFacts.swift in Sources */,
 				A01B000001001528 /* HouseCardData.swift in Sources */,
 				A01B000001001533 /* VehicleFacts.swift in Sources */,
+				A01B000001001538 /* VehicleEditors.swift in Sources */,
+				A01B000001001537 /* VehicleCardViews.swift in Sources */,
+				A01B000001001536 /* FinanceCardKit.swift in Sources */,
+				A01B000001001535 /* FinDriveScene.swift in Sources */,
+				A01B000001001534 /* VehicleCardData.swift in Sources */,
 				A01B000001001529 /* FinHouseScene.swift in Sources */,
 				A01B000001001532 /* AppStores.swift in Sources */,
 				A01B000001001530 /* HouseCardViews.swift in Sources */,
