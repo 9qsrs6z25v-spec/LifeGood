@@ -85,7 +85,7 @@ struct FinanceOverviewData: Equatable {
         d.counts = [.realEstate: f.realEstates.filter { !$0.isSold }.count,
                     .savings: livePolicies.count,
                     .stock: activeStocks.count,
-                    .vehicle: f.vehicles.filter { !$0.isSold }.count]
+                    .vehicle: f.vehicles.filter { !$0.isSold(asOf: now) }.count]
         d.savingsExpected = livePolicies.reduce(0) { $0 + rates.ntd($1.calculatedExpectedReturn, code: $1.currencyCode) }
         let cost = activeStocks.reduce(0) { $0 + $1.totalCost }
         if cost > 0 {
@@ -148,7 +148,8 @@ struct FinanceOverviewBoard: View {
             return Text("\(assets)・沒有貸款")
         }
         // [v25.532] 房貸改看還欠的本金；本金是推算的寫「約」
-        let word = s.mortgageEstimated ? "貸款還欠 約 " : "貸款還欠 "
+        // [v25.539] 車貸也改看本金（決定 2）：車貸的本金是反推的也寫「約」
+        let word = (s.mortgageEstimated || s.carLoanEstimated) ? "貸款還欠 約 " : "貸款還欠 "
         let debt = Text(MoneyFormat.short(s.debt)).fontWeight(.heavy).foregroundStyle(MoneyTone.bad.color(pal))
         return Text("\(assets)・\(word)\(debt)")
     }
@@ -1460,7 +1461,8 @@ struct FinanceNetWorthCard: View {
                         MoneyLegendItem(mark: .swatch, color: assetColor, text: "資產", pal: pal)
                         MoneyLegendItem(mark: .dash, color: debtColor, text: "貸款還欠", pal: pal)
                     }
-                    Text("圓點是那個月打開理財頁時存下來的；其他月份是回推的估算（房子、車子在買入價與現在的估值之間平均變化，股票沒有市值紀錄就用成本）。房貸算的是還欠銀行的本金；車貸和其他貸款算的是還要繳的期數 × 每期金額。")
+                    // [v25.539] 車貸改算本金之後，這句跟著改（FinanceSnapshot.carLoan 是本金，不再是含利息的還要繳）
+                    Text("圓點是那個月打開理財頁時存下來的；其他月份是回推的估算（房子、車子在買入價與現在的估值之間平均變化，股票沒有市值紀錄就用成本）。房貸、車貸算的是還欠銀行的本金（算不出本金的那筆才用還要繳的期數 × 每期金額）；其他貸款算的是還要繳的期數 × 每期金額。")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)

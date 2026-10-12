@@ -129,7 +129,7 @@ struct VehicleView: View {
 
     /// [v25.539] 估值、折舊率、每月養車費改照卡片上寫的那個數排（VehicleFacts）：以前「每月養車費」只比
     /// 車子鏡像的定期月均（季繳當月繳、沒算記帳連過來的），「估值」比的是沒填時的 0，跟卡片寫的對不起來。
-    /// facts 還沒算好（剛打開那一下）時估值退回車子自己的欄位，其他兩個當 0
+    /// facts 還沒算好（剛打開那一下）時估值、持有年數退回車子自己的欄位，折舊率、每月養車費當 0
     private static func sortKey(_ v: Vehicle, _ option: VehicleSortOption, _ f: VehicleFacts?) -> Double {
         switch option {
         case .purchasePrice: return v.purchasePrice
@@ -138,7 +138,12 @@ struct VehicleView: View {
             // 折得越多排越前面（降冪）：facts 的分數是「估值 ÷ 購入價 − 1」，折舊是負的，所以反過來比。
             // 算不出來的（沒填購入價、估值還沒填）當持平
             return -(f?.depreciationRate ?? 0)
-        case .yearsOwned: return v.yearsOwned
+        case .yearsOwned:
+            // 持有到 facts 的 asOf（已售出＝售出日；售出日填在未來的算到今天），跟卡片「持有 2 年 1 個月」同一個終點。
+            // 以前用 soldDate ?? 今天，售出日填在未來的會照未來那天排
+            guard let f else { return v.yearsOwned }
+            let days = Calendar(identifier: .gregorian).dateComponents([.day], from: v.purchaseDate, to: f.asOf).day ?? 0
+            return Double(max(0, days)) / 365.0
         case .monthlyExpense: return f?.monthly ?? 0
         }
     }

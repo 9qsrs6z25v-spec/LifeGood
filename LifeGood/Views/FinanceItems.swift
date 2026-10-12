@@ -796,30 +796,31 @@ extension MoneyItem {
     }
 
     /// [v25.539] 車貸（多筆合併、依起始日）：全部繳完寫「車貸繳清」；還沒開始扣寫哪個月開始；
-    /// 繳到一半畫一條進度，右邊「2029 繳完・還欠 約 NT$111.7萬」；只有沒填年限的車貸時寫每月多少
+    /// 繳到一半畫一條進度，右邊「2029 繳完・還欠 約 NT$111.7萬」；沒填年限的車貸另寫一顆每月多少
+    ///（跟有年限的同時在扣也寫，免得有年限的繳完了就寫「繳清」）
     private static func vehicleLoan(_ item: inout MoneyItem, facts f: VehicleFacts) {
-        if let s = f.loan {
-            if s.isDone {
-                item.chips.insert(MoneyItemChip(icon: "checkmark.seal.fill", text: "車貸繳清", tone: .good), at: 0)
-                return
-            }
-            let known = f.loans.filter { !$0.termIsGuess && $0.countedPeriods > 0 }
-            if s.elapsed == 0, let first = known.map(\.firstDue).min() {
-                item.chips.append(MoneyItemChip(icon: "calendar", text: "車貸 " + HouseCardFormat.ym(first) + " 開始"))
-                return
-            }
-            let trailing = vehicleLoanTrailing(f, known: known)
-            item.progress = MoneyItemProgress(fraction: Double(s.elapsed) / Double(max(s.total, 1)),
-                                              leading: "車貸 已繳 \(s.elapsed)／\(s.total) 期",
-                                              trailing: trailing.isEmpty ? nil : trailing)
-            return
-        }
-        // 沒填年限也沒有結束日：算不出期數和還欠，只寫這個月在扣多少
-        let monthly = f.loans
+        // 沒填年限也沒有結束日的車貸：算不出期數和還欠，只知道這個月在扣多少（f.loan 不含這種）
+        let guessMonthly = f.loans
             .filter { $0.termIsGuess && $0.isPaying(inMonth: f.asOf, calendar: financeGregorian) }
             .reduce(0.0) { $0 + $1.monthly }
-        if monthly >= 1 {
-            item.chips.append(MoneyItemChip(icon: "banknote.fill", text: "車貸每月 " + MoneyFormat.short(monthly) + "・沒填年限"))
+        if let s = f.loan {
+            let known = f.loans.filter { !$0.termIsGuess && $0.countedPeriods > 0 }
+            if s.isDone {
+                // 另一筆沒填年限的還在扣時不寫「繳清」，下面改寫那筆每月多少
+                if guessMonthly < 1 {
+                    item.chips.insert(MoneyItemChip(icon: "checkmark.seal.fill", text: "車貸繳清", tone: .good), at: 0)
+                }
+            } else if s.elapsed == 0, let first = known.map(\.firstDue).min() {
+                item.chips.append(MoneyItemChip(icon: "calendar", text: "車貸 " + HouseCardFormat.ym(first) + " 開始"))
+            } else {
+                let trailing = vehicleLoanTrailing(f, known: known)
+                item.progress = MoneyItemProgress(fraction: Double(s.elapsed) / Double(max(s.total, 1)),
+                                                  leading: "車貸 已繳 \(s.elapsed)／\(s.total) 期",
+                                                  trailing: trailing.isEmpty ? nil : trailing)
+            }
+        }
+        if guessMonthly >= 1 {
+            item.chips.append(MoneyItemChip(icon: "banknote.fill", text: "車貸每月 " + MoneyFormat.short(guessMonthly) + "・沒填年限"))
         }
     }
 

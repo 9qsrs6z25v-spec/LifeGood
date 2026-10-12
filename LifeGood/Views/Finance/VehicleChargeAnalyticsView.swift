@@ -43,11 +43,18 @@ struct VehicleChargeAnalyticsView: View {
 
     /// [v25.538] 帶上動力：每度里程的門檻照車種挑（汽車 12、電動機車 60），
     /// 漏記充電的區間才不會寫出「每度跑 32 公里」、續航推估跟著錯
+    /// [v25.539] 年化里程也看保養、維修、加油記的里程錶，跟卡片的 VehicleFacts.odometer 同一個來源
     private var analytics: VehicleChargeAnalytics {
         VehicleChargeAnalytics(expenses: chargeExpenses,
                                capacityKWh: vehicle?.batteryCapacityKWh,
                                homeKeyword: vehicle?.homeChargePlace,
-                               powerType: vehicle?.powerType)
+                               powerType: vehicle?.powerType,
+                               odometerExpenses: odometerExpenses)
+    }
+
+    /// 這台車所有記了里程錶的支出（充電以外的也算）
+    private var odometerExpenses: [Expense] {
+        expenseStore.expenses.filter { $0.linkedVehicleId == vehicleId && ($0.odometer ?? 0) > 0 }
     }
 
     var body: some View {

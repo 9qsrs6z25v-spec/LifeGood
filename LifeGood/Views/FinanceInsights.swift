@@ -101,6 +101,9 @@ struct FinanceSnapshot: Equatable {
     var mortgageScheduled = false
     /// [v25.539] 有車貸算不出本金（沒填總貸款金額等）、退回含利息的還要繳：畫面要寫車貸時寫「還要繳」
     var carLoanScheduled = false
+    /// [v25.539] 有車貸的本金是用平均利率反推的（利率 > 0；零利率的本金剛好是借款 − 已繳，不算推估）：
+    /// 畫面寫「約」，同 mortgageEstimated（決定 2）
+    var carLoanEstimated = false
 
     var assets: Double { realEstate + savings + stock + vehicle }
     var debt: Double { mortgage + carLoan + otherLoan }
@@ -280,6 +283,7 @@ extension FinanceSnapshot {
                     let owed = l.owed(at: date, calendar: greg)
                     s.carLoan += owed
                     if owed > 0, !l.hasBalance { s.carLoanScheduled = true }
+                    if owed > 0, l.hasBalance, (l.monthlyRate ?? 0) > 0 { s.carLoanEstimated = true }
                 }
             }
             guard v.purchaseDate <= date else { continue }
@@ -585,7 +589,7 @@ struct FinanceUpcoming: Identifiable, Equatable {
             for u in facts.upcoming where u.date >= today && u.date < horizon {
                 // 兩台車的鏡像都指著同一筆（記帳沒寫是哪台）時只列一次：id 是「fixed-支出id」這種，不會跨車撞
                 guard seenVehicleItems.insert(u.id).inserted else { continue }
-                out.append(vehicleItem(u, vehicleName: v.name, daysAway: away(u.date)))
+                out.append(vehicleItem(u, vehicleName: v.name, loans: facts.loans, daysAway: away(u.date)))
             }
         }
         return out.sorted { $0.date == $1.date ? $0.title < $1.title : $0.date < $1.date }
@@ -593,11 +597,18 @@ struct FinanceUpcoming: Identifiable, Equatable {
 
     /// [v25.539] 車子的一件：細字只留週期（「每月」）或期數（「第 26／60 期」），「上次 10/5」在 30 天清單裡用不到；
     /// 保養是估計的，金額寫「約」
-    private static func vehicleItem(_ u: VehicleUpcoming, vehicleName: String, daysAway: Int) -> FinanceUpcoming {
+    private static func vehicleItem(_ u: VehicleUpcoming, vehicleName: String, loans: [VehicleLoan],
+                                    daysAway: Int) -> FinanceUpcoming {
+        var title = u.title
         let detail: String?
         let amount: String
         switch u.kind {
-        case .loan:
+        case .loan(let loanId):
+            // 同一台兩筆都沒取名時，卡片在「車貸」區底下寫「第 1 筆」看得懂；這張清單沒有區塊標題，
+            // 只寫「Taycan 第 1 筆」看不出是什麼，前面補回分類名「車貸（第 1 筆）」
+            if let l = loans.first(where: { $0.id == loanId }), l.displayTitle != l.title {
+                title = l.title + "（" + l.displayTitle + "）"
+            }
             detail = u.detail
             amount = u.amount.ntdWanString
         case .fixed:
@@ -607,7 +618,7 @@ struct FinanceUpcoming: Identifiable, Equatable {
             detail = u.detail.components(separatedBy: "・").first
             amount = u.amount > 0 ? "約 " + u.amount.ntdWanString : "—"
         }
-        return FinanceUpcoming(id: "v-" + u.id, kind: .vehicle, title: vehicleName + " " + u.title,
+        return FinanceUpcoming(id: "v-" + u.id, kind: .vehicle, title: vehicleName + " " + title,
                                detail: detail, date: u.date, daysAway: daysAway,
                                amount: amount, isIncome: false)
     }

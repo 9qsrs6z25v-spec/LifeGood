@@ -100,7 +100,7 @@ struct VehicleDetailView: View {
 
     private var rarity: CardRarity { CardRarity(price: vehicle.purchasePrice) }
 
-    /// 換車、車子改了、記帳改了都要重算
+    /// [v25.539] 換車、車子改了、記帳改了都要重算（同 RealEstateDetailView 的 cardTaskKey）
     private var factsTaskKey: String {
         "\(vehicleId.uuidString)-\(store.modifyID)-\(expenseStore.modifyID)"
     }
@@ -261,11 +261,15 @@ struct VehicleDetailView: View {
         return HouseCardFormat.lived(from: vehicle.purchaseDate, to: end) ?? "不到 1 個月"
     }
 
-    /// 只有這裡會算 VehicleFacts（.task(id: factsTaskKey)）
+    /// [v25.539] 只有這裡會算 VehicleFacts（.task(id: factsTaskKey)）：body 裡算的話每次重畫都要掃全部記帳
     private func rebuildFacts() {
         guard let v = store.vehicles.first(where: { $0.id == vehicleId }) else {
             facts = nil
             recentVariable = 0
+            // [v25.539] 車子被刪掉了（編輯頁最下面新加的「刪除這台車」、或別台裝置同步過來的）：
+            // 卡片沒東西可看，照 RealEstateDetailView 晚一點自己關，不留一張空白卡。
+            // 晚一點才關：編輯頁可能還在往下收，一邊收一邊關卡片會被 UIKit 擋掉
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { dismiss() }
             return
         }
         let f = VehicleFacts.build(v, expense: expenseStore)
@@ -691,7 +695,7 @@ struct VehicleDetailView: View {
         .padding(.horizontal)
     }
 
-    /// 「7.9」：一位小數（7.94 → 7.9），跟列表項目卡的每度電同一個寫法；算不出來寫「—」
+    /// [v25.539] 決定 13「7.9」：一位小數（7.94 → 7.9），跟列表項目卡的每度電同一個寫法；算不出來寫「—」
     private func oneDecimal(_ v: Double?) -> String {
         guard let v = v, v.isFinite else { return "—" }
         return FinanceItemText.number(v, digits: 1)
@@ -942,12 +946,12 @@ struct VehicleDetailView: View {
         return FinanceText.about100(f.monthly) ?? "—"
     }
 
-    /// 已售出時算到售出日：寫「賣出前」，免得以為現在還在花
+    /// [v25.539] 已售出時算到售出日：寫「賣出前」，免得以為現在還在花
     private var monthlyKpiLabel: String {
         (facts?.isSold ?? false) ? "賣出前每月養車" : "每月養車"
     }
 
-    /// 「近12月變動」；買車不到一年寫實際月數（「近7月變動」），跟每月養車除的月數一樣
+    /// [v25.539] 「近12月變動」；買車不到一年寫實際月數（「近7月變動」），跟每月養車除的月數一樣
     private var variableKpiLabel: String {
         guard let f = facts else { return "近12月變動" }
         return (f.isSold ? "賣出前" : "近") + "\(f.periodMonths)月變動"

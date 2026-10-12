@@ -65,6 +65,8 @@ import SwiftUI
 //   - 標成已售出、取消已售出、改售出日時，連到這台車的車貸、保險、稅費停在售出日（或還原），記帳一次寫回。
 //   - 「新增項目」前的自動存檔和按「儲存」合成一份寫入（writeVehicle）。
 //   - 定期支出的種類加「保險」「車位月租」，做成 static，卡片之後的「＋ 記一筆」也用同一份。
+//     這頁的選單只加「車位月租」：車險不寫鏡像，這頁的清單看不到（見 FixedPresetKind.editorMenu）。
+//   - 定期支出列的名稱改照記帳那筆的分類寫（車位月租不再顯示成鏡像的「稅費」）。
 
 /// [v25.539] 從卡片打開編輯頁時要捲到哪一欄（同 HouseEditFocus）
 enum VehicleEditFocus: Hashable { case none, purchase, value, sold, soldPrice, battery, homeCharge, owner, brand, note }
@@ -313,7 +315,7 @@ struct AddVehicleView: View {
     private func withCategoryPickers<Content: View>(_ content: Content) -> some View {
         content
             .confirmationDialog("選擇定期支出類別", isPresented: $showFixedCategoryPicker, titleVisibility: .visible) {
-                ForEach(FixedPresetKind.allCases) { kind in
+                ForEach(FixedPresetKind.editorMenu) { kind in
                     Button(kind.rawValue) {
                         guard writeVehicle(finishing: false) else { return }
                         addingFixedPreset = kind
@@ -542,7 +544,7 @@ struct AddVehicleView: View {
                                 .foregroundStyle(Color.blue)
                         }
                         VStack(alignment: .leading, spacing: 3) {
-                            Text(fe.category.rawValue)
+                            Text(fixedRowTitle(fe))
                                 .font(.subheadline.weight(.semibold))
                                 .foregroundStyle(.primary)
                             Text(fe.period == .monthly ? "每月" : "每年")
@@ -594,6 +596,14 @@ struct AddVehicleView: View {
                 fixedExpensesAppeared = true
             }
         }
+    }
+
+    /// [v25.539] 列的名稱照記帳那筆的分類寫（跟卡片同一個 VehicleFacts.categoryLabel）：
+    /// 「車位月租」存進鏡像的分類是「稅費」，照鏡像寫會跟你剛選的對不上。記帳找不到那筆才用鏡像的分類
+    private func fixedRowTitle(_ fe: VehicleFixedExpense) -> String {
+        guard let expId = fe.linkedExpenseId,
+              let exp = expenseStore.expenses.first(where: { $0.id == expId }) else { return fe.category.rawValue }
+        return VehicleFacts.categoryLabel(exp)
     }
 
     // MARK: - 變動支出
@@ -946,6 +956,11 @@ struct AddVehicleView: View {
         case carLoan = "車貸"
 
         var id: String { rawValue }
+
+        /// 這頁「新增項目」選單列的種類。保險不放：車險不寫鏡像（決定 8），這頁的清單讀的是鏡像，
+        /// 從這裡記好了清單也看不到，會以為沒存到。這頁的清單 v25.540 拿掉（決定 9），
+        /// 保險改從新卡片的「＋ 記保險」進來（makeFixedPreset(.insurance) 已經帶強制險，可以直接用）
+        static let editorMenu: [FixedPresetKind] = [.tax, .parkingRent, .subscription, .carLoan]
     }
 
     /// [v25.539] 改成 static、車子 id 從外面傳：卡片的「＋ 記一筆」、每月養車的「＋ 記保險」不用打開這頁也能用
@@ -960,13 +975,13 @@ struct AddVehicleView: View {
             )
         case .insurance:
             // 決定 8：車險只寫 linkedVehicleId、不寫鏡像（AddExpenseView 存保險時不寫鏡像，免得舊畫面標成「稅費」）。
-            // 保險類別要是強制險或綜合險，記帳才會連到車；AddExpensePreset 還帶不了保險類別（AddExpenseView 預設儲蓄險），
-            // 那邊加上之後這裡要補 insuranceSubCategory: .compulsory
+            // 保險類別要是強制險或綜合險，記帳才會連到車，所以帶強制險（AddExpenseView 不帶的話預設是儲蓄險）
             return AddExpensePreset(
                 fixedCategory: .insurance,
                 recurrence: .yearly,
                 linkedVehicleId: vehicleId,
-                fixedAssetLink: .vehicle
+                fixedAssetLink: .vehicle,
+                insuranceSubCategory: .compulsory
             )
         case .parkingRent:
             // 車位月租：記帳那筆是「房租＋每月」，卡片從記帳讀分類寫「車位租金」，不再從「稅費」繞進去

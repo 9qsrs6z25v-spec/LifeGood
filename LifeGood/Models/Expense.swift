@@ -688,9 +688,15 @@ struct Expense: Identifiable, Codable {
     var autoTaxDeductible: Bool {
         guard expenseType == .fixed else { return false }
         switch fixedCategory {
-        case .insurance: return insuranceSubCategory != .savings
+        // [v25.539] 強制險、綜合險是車險（財產保險），不是人身保險，不能列舉扣除：預設不算。
+        // 跟儲蓄險一樣，使用者自己打開節稅照樣算
+        case .insurance:
+            guard let sub = insuranceSubCategory else { return true }
+            return sub != .savings && sub != .compulsory && sub != .comprehensive
         case .loan: return loanSubCategory == .mortgage
-        case .rent: return true
+        // [v25.539] 連到車子的租金是車位月租（車子頁新加的「車位月租」預設就是 .rent）：不是住的房子的租金，
+        // 不自動算進租金扣除額，免得稅務頁多算；真的要算的，記帳那筆自己打開節稅
+        case .rent: return linkedVehicleId == nil
         default: return false
         }
     }

@@ -2849,9 +2849,11 @@ struct AddExpenseView: View {
 
     /// 自動推斷預設值（與 Expense.autoTaxDeductible 同邏輯）
     private var autoTaxDeductibleDefault: Bool {
-        if selectedFixedCategory == .insurance { return selectedInsuranceSubCategory != .savings }
+        // [v25.539] 車險（強制險、綜合險）不是人身保險，預設不算（同 Expense.autoTaxDeductible）
+        if selectedFixedCategory == .insurance { return !isSavingsInsurance && !isVehicleInsurance }
         if selectedFixedCategory == .loan && selectedLoanSubCategory == .mortgage { return true }
-        if selectedFixedCategory == .rent { return true }
+        // [v25.539] 連到車子的租金是車位月租，不是住的房子的租金：預設不算（同 Expense.autoTaxDeductible）
+        if selectedFixedCategory == .rent { return targetVehicleId == nil }
         return false
     }
 
@@ -4264,6 +4266,7 @@ struct AddExpenseView: View {
         guard editingExpense == nil, let preset else { return }
         if let fc = preset.fixedCategory { selectedFixedCategory = fc }
         if let lsc = preset.loanSubCategory { selectedLoanSubCategory = lsc }
+        if let isc = preset.insuranceSubCategory { selectedInsuranceSubCategory = isc }
         if let vc = preset.variableCategory { selectedVariableCategory = vc }
         if let vec = preset.vehicleExpenseCategory { selectedVehicleExpenseCategory = vec }
         if let rec = preset.recurrence { selectedRecurrence = rec }
@@ -4319,6 +4322,9 @@ struct AddExpensePreset {
     /// 以前從車輛頁「新增項目→電費」打開，度數那幾欄只在進階模式看得到，從車子本身反而記不到。
     /// 放最後：memberwise init 照宣告順序，既有呼叫端都沒帶它（預設 nil）
     var showVehicleSection: Bool?
+    /// [v25.539] 從車子記保險時帶「強制險」：不帶的話記帳頁停在預設的儲蓄險，存了會多一張儲蓄險保單、也連不到車。
+    /// 一樣放最後，既有呼叫端不用改
+    var insuranceSubCategory: InsuranceSubCategory?
 }
 
 // MARK: - 水電瓦斯類型判斷

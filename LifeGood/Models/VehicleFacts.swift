@@ -1296,7 +1296,9 @@ struct VehicleFacts: Equatable {
             if ex.fixedCategory == .loan {
                 guard let l = loans.first(where: { $0.id == ex.id }),
                       let n = l.next(onOrAfter: today, calendar: cal), n.date <= horizon else { continue }
-                let detail = l.termIsGuess ? "第 \(n.index) 期" : "第 \(n.index)／\(l.scheduledPeriods) 期"
+                // [v25.539] 總期數用真的會扣的期數（countedPeriods＝Expense.loanPeriods 的 total），
+                // 跟列表項目卡的「已繳 25／60 期」同一個數；售出日填在未來、車貸停在那天的，不會寫成原本合約的期數
+                let detail = l.termIsGuess ? "第 \(n.index) 期" : "第 \(n.index)／\(l.countedPeriods) 期"
                 out.append(VehicleUpcoming(id: "loan-" + ex.id.uuidString, date: n.date, kind: .loan(ex.id),
                                            title: l.displayTitle, detail: detail, amount: l.perPeriod))
             } else {
@@ -1319,7 +1321,8 @@ struct VehicleFacts: Equatable {
             var every: [String] = []
             if let d = m.medianDays { every.append(intervalText(days: d)) }
             if let km = m.medianKm { every.append(kmText(km)) }
-            var detail = "平均每 " + every.joined(separator: "或 ") + " 一次・上次 " + HouseCardFormat.ymd(last)
+            // 「一次」前面不留空白（「平均每 6 個月一次」，不是「6 個月 一次」）
+            var detail = "平均每 " + every.joined(separator: "或 ") + "一次・上次 " + HouseCardFormat.ymd(last)
             if m.lastIsPhotoOnly { detail += "（照片紀錄）" }
             let title = m.photoOnly ? "保養維修（估計）" : "保養（估計）"
             out.append(VehicleUpcoming(id: "maintenance-" + v.id.uuidString, date: next, kind: .maintenance,
