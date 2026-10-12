@@ -640,6 +640,8 @@ extension VehicleDetailView {
         switch fix {
         case .stopAtSale(let ids, let soldDate):
             stopAtSale(ids, soldDate: soldDate)
+        case .convertToInsurance(let ids):
+            convertToInsurance(ids)
         case .openExpense(let id):
             openExpenseRecord(id)
         case .removeMirrors(let ids):
@@ -662,6 +664,15 @@ extension VehicleDetailView {
         if VehicleFixes.stopAtSale(ids, soldDate: soldDate, vehicle: v, in: &list, calendar: Self.gregorian) {
             expenseStore.expenses = list
         }
+    }
+
+    /// [v25.541] 記成「其他」的車險改成保險（強制險／綜合險）。車險只認 linkedVehicleId、不留鏡像（同記帳頁存車險）：
+    /// 先寫記帳（連同 linkedVehicleId）再拿鏡像。順序反過來，只靠鏡像連過來的那筆會先跟這台斷開、從卡片消失
+    fileprivate func convertToInsurance(_ ids: [UUID]) {
+        var list = expenseStore.expenses
+        guard VehicleFixes.convertToInsurance(ids, vehicleId: vehicleId, in: &list) else { return }
+        expenseStore.expenses = list
+        VehicleMirrors.removeMirrors(of: Set(ids), financeStore: store)
     }
 
     /// 都算這台：沒指定車的「汽車」支出連到這台（不寫鏡像）

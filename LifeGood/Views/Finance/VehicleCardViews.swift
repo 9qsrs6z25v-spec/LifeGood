@@ -224,7 +224,7 @@ struct VehicleChecksSection: View {
 
 /// 每個月養這台車到底要多少：分段長條＋可以點的圖例（車貸→車貸區；定期、保養、其他→帳本篩選；能源→能源區）、
 /// 三句話、注意色提示、「填上總貸款金額 →」。合計 < 1 或已售出時 data.monthly 是 nil，整區不出現。
-/// forExport：分享圖用，提示列不能點、不畫「＋ 記保險」和「填上總貸款金額 →」。
+/// forExport：分享圖用，提示列不能點、不畫「＋ 記保險」（或「去改」）和「填上總貸款金額 →」。
 struct VehicleMonthlySection: View {
     let data: VehicleCardData
     let actions: VehicleCardActions
@@ -340,11 +340,11 @@ struct VehicleMonthlySection: View {
         }
     }
 
-    /// 注意色提示：沒連到保險（旁邊「＋ 記保險 →」）、買車不到一年；晚開始記的提示用灰字
+    /// 注意色提示：沒連到保險（旁邊「＋ 記保險 →」，記成其他的車險「去改 →」）、買車不到一年；晚開始記的提示用灰字
     @ViewBuilder
     private func hints(_ m: VehicleMonthlyData, pal: TripBoardPalette) -> some View {
         if let hint = m.insuranceHint {
-            insuranceRow(hint, pal: pal)
+            insuranceRow(hint, m: m, pal: pal)
         }
         if let hint = m.firstYearHint {
             VCNoteRow(text: hint, warn: true, pal: pal)
@@ -354,19 +354,34 @@ struct VehicleMonthlySection: View {
         }
     }
 
+    /// 連結字、點了去哪都照 data（[v25.541] 記成其他的車險：「去改 →」捲到要確認）；分享圖不能點、不畫連結字
     @ViewBuilder
-    private func insuranceRow(_ hint: String, pal: TripBoardPalette) -> some View {
+    private func insuranceRow(_ hint: String, m: VehicleMonthlyData, pal: TripBoardPalette) -> some View {
         if forExport {
             VCNoteRow(text: hint, warn: true, pal: pal)
         } else {
             Button {
-                actions.addLedger(.insurance)
+                insuranceTapped(m.insuranceHintTap)
             } label: {
-                VCNoteRow(text: hint, warn: true, pal: pal, actionText: "＋ 記保險 →")
+                VCNoteRow(text: hint, warn: true, pal: pal, actionText: m.insuranceHintAction + " →")
             }
             .buttonStyle(MoneyPressStyle())
-            .accessibilityHint("點兩下記一筆保險")
+            .accessibilityHint(insuranceHintText(m.insuranceHintTap))
         }
+    }
+
+    /// nil＝記一筆保險（＋ 記保險）
+    private func insuranceTapped(_ tap: VehicleTap?) {
+        if let tap {
+            actions.handle(tap)
+        } else {
+            actions.addLedger(.insurance)
+        }
+    }
+
+    private func insuranceHintText(_ tap: VehicleTap?) -> String {
+        guard let tap else { return "點兩下記一筆保險" }
+        return VCText.hint(tap)
     }
 
     /// 「在車貸那筆填上總貸款金額，就能分出利息和本金 →」（字裡已經有箭頭）

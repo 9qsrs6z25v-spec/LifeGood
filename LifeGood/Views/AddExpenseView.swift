@@ -276,6 +276,34 @@ struct AddExpenseView: View {
         Binding(get: { effectiveFixedAssetLink }, set: { selectedFixedAssetLink = $0 })
     }
 
+    /// [v25.541] 表單上「關聯資產」選了汽車、而且那台車還在（不管現在這個分類看不看得到關聯資產區）。
+    /// 切到保險時要不要直接帶車險、保險類別選了不能連車的子分類時要不要提醒，都看這台
+    private var fixedFormLinkedVehicle: Vehicle? {
+        guard selectedFixedAssetLink == .vehicle, let vid = fixedLinkVehicleId else { return nil }
+        return financeStore.vehicles.first(where: { $0.id == vid })
+    }
+
+    /// [v25.541] 固定支出的類別選單。連著車的「其他」改成保險時，保險類別還停在預設的儲蓄險，
+    /// 選車的區塊整個消失、跳出儲蓄險表單，看起來像整張被重置，存下去還會變成一張儲蓄險保單。
+    /// 所以這種情況先把保險類別換成車險（名稱或備註有「強制」選強制險，其他選綜合險），再換類別，
+    /// 同一次改兩個值，畫面不會先閃一下儲蓄險。
+    /// 不用 onChange：打開舊資料（loadEditing）、從別處帶進來（applyPreset）也會改類別，那些照原本的子分類
+    private var fixedCategorySelection: Binding<FixedCategory> {
+        Binding(
+            get: { selectedFixedCategory },
+            set: { newValue in
+                if newValue == .insurance, selectedFixedCategory != .insurance,
+                   fixedFormLinkedVehicle != nil,
+                   selectedInsuranceSubCategory != .compulsory,
+                   selectedInsuranceSubCategory != .comprehensive {
+                    let saysCompulsory = title.contains("強制") || note.contains("強制")
+                    selectedInsuranceSubCategory = saysCompulsory ? .compulsory : .comprehensive
+                }
+                selectedFixedCategory = newValue
+            }
+        )
+    }
+
     /// [v25.538] 變動支出算不算連到車：關聯資產是汽車，而且分類還是「汽車」。
     /// 基本模式看不到關聯資產，選了車又把分類改成別的，就當不連（分類鈕會順手放掉車子，改回汽車再接上）。
     private var variableVehicleLinked: Bool {
@@ -2054,7 +2082,7 @@ struct AddExpenseView: View {
                     }
                 }
             } else {
-                Picker("類別", selection: $selectedFixedCategory) {
+                Picker("類別", selection: fixedCategorySelection) {
                     ForEach(FixedCategory.allCases) { cat in
                         Label(cat.rawValue, systemImage: cat.icon).tag(cat)
                     }
@@ -2821,7 +2849,19 @@ struct AddExpenseView: View {
             .pickerStyle(.menu)
         } header: {
             sectionHeader(title: "保險類別", accentColor: .green)
+        } footer: {
+            if let name = vehicleNameBlockedBySubCategory {
+                Text("儲蓄險、壽險、意外險不能連到車子；要算進「\(name)」的養車，請選強制險或綜合險。")
+                    .foregroundStyle(.orange)
+            }
         }
+    }
+
+    /// [v25.541] 表單連著車、保險類別卻選了儲蓄險／壽險／意外險時的車名（其他時候 nil）。
+    /// 這三種連不到車，選車的區塊會消失、存檔會拿掉車子的連結，要講清楚為什麼，不然看起來像被重置
+    private var vehicleNameBlockedBySubCategory: String? {
+        guard isInsurance, !isVehicleInsurance, let v = fixedFormLinkedVehicle else { return nil }
+        return v.name
     }
 
     // MARK: - 貸款子分類
@@ -2868,6 +2908,8 @@ struct AddExpenseView: View {
     }
 
     private var inferredTaxSavingLimitNote: String {
+        // [v25.541] 車險不是人身保險，「人身保險每人每年最高 2.4 萬」這句會讓人以為它能扣；改由 footer 另一行講清楚
+        if isVehicleInsurance { return "" }
         if selectedFixedCategory == .insurance { return TaxSavingSubCategory.insurance.limitNote }
         if selectedFixedCategory == .loan && selectedLoanSubCategory == .mortgage { return TaxSavingSubCategory.mortgage.limitNote }
         if selectedFixedCategory == .rent { return TaxSavingSubCategory.rent.limitNote }
@@ -2894,6 +2936,11 @@ struct AddExpenseView: View {
                 }
                 if isSavingsInsurance {
                     Text("注意：儲蓄險預設不列入扣除額；若你的方案含人身保險成分，可手動開啟。")
+                        .foregroundStyle(.orange)
+                }
+                // [v25.541] v25.539 起車險預設不列入（autoTaxDeductibleDefault），這裡跟著講為什麼
+                if isVehicleInsurance {
+                    Text("車險（強制險、綜合險）不是人身保險，不能列舉扣除，預設不列入；你自己打開照樣算。")
                         .foregroundStyle(.orange)
                 }
             }
@@ -3973,6 +4020,15 @@ struct AddExpenseView: View {
 
     // MARK: - 載入編輯資料
 
+    /// [v25.541] 只靠車子身上的鏡像連到這筆的車（linkedVehicleId 是空的舊資料用）
+    private func mirrorVehicle(fixedExpenseId id: UUID) -> Vehicle? {
+        financeStore.vehicles.first { v in v.fixedExpenses.contains { $0.linkedExpenseId == id } }
+    }
+
+    private func mirrorVehicle(variableExpenseId id: UUID) -> Vehicle? {
+        financeStore.vehicles.first { v in v.variableExpenses.contains { $0.linkedExpenseId == id } }
+    }
+
     private func loadEditing() {
         guard let expense = editingExpense else { return }
 
@@ -3980,6 +4036,7 @@ struct AddExpenseView: View {
         if expense.expenseType == .variable {
             let hasAdvancedFields = expense.linkedRealEstateId != nil
                 || expense.linkedVehicleId != nil
+                || mirrorVehicle(variableExpenseId: expense.id) != nil
                 || expense.linkedStockId != nil
                 || expense.linkedInsuranceId != nil
                 || expense.linkedBankMilestoneId != nil
@@ -4096,9 +4153,13 @@ struct AddExpenseView: View {
         }
 
         // 載入車貸連結的車輛
-        if expense.expenseType == .fixed && expense.fixedCategory == .loan
-           && expense.loanSubCategory == .car && expense.linkedVehicleId != nil {
-            selectedVehicleId = expense.linkedVehicleId
+        if expense.expenseType == .fixed && expense.fixedCategory == .loan && expense.loanSubCategory == .car {
+            if let vid = expense.linkedVehicleId {
+                selectedVehicleId = vid
+            } else if let mirrorCar = mirrorVehicle(fixedExpenseId: expense.id) {
+                // [v25.541] 舊車貸只靠車子身上的鏡像連過來：不帶出那台車的話，存一次就把鏡像拿掉、車貸從車子消失
+                selectedVehicleId = mirrorCar.id
+            }
         }
 
         // [v25.424] 載入旅遊關聯
@@ -4111,10 +4172,17 @@ struct AddExpenseView: View {
 
         // 載入變動支出的資產連結
         if expense.expenseType == .variable {
-            if expense.linkedVehicleId != nil {
+            // [v25.541] 舊資料只靠車子身上的鏡像連過來（linkedVehicleId 是空的、也沒連別的資產）：
+            // 照卡片的認定（VehicleLinks）帶出那台車和鏡像的分類，不然存一次就從車子消失
+            let mirrorCar: Vehicle? = expense.linkedVehicleId == nil && expense.linkedStockId == nil
+                && expense.linkedInsuranceId == nil && expense.linkedRealEstateId == nil
+                ? mirrorVehicle(variableExpenseId: expense.id) : nil
+            let mirrorCategory = mirrorCar?.variableExpenses
+                .first(where: { $0.linkedExpenseId == expense.id })?.category
+            if let carId = expense.linkedVehicleId ?? mirrorCar?.id {
                 selectedAssetLink = .vehicle
-                selectedVehicleId = expense.linkedVehicleId
-                if let veCat = expense.vehicleExpenseCategory {
+                selectedVehicleId = carId
+                if let veCat = expense.vehicleExpenseCategory ?? mirrorCategory {
                     selectedVehicleExpenseCategory = veCat
                     // [v25.539] 帶回欄位改用不丟位數的寫法：%g 只留 6 位有效數字，
                     // 里程 123,456.7 會變 123457、1,234,567 會變 1.23457e+06，存一次就被改掉
@@ -4165,6 +4233,12 @@ struct AddExpenseView: View {
             } else if expense.linkedInsuranceId != nil {
                 selectedFixedAssetLink = .insurance
                 fixedLinkInsuranceId = expense.linkedInsuranceId
+            } else if let mirrorCar = mirrorVehicle(fixedExpenseId: expense.id) {
+                // [v25.541] 舊資料只靠車子身上的鏡像連過來（linkedVehicleId 是空的）：卡片照樣算在那台車，
+                // 這裡卻顯示「無」。存檔照表單現在的狀態，會把鏡像拿掉、這筆從車子消失；
+                // 「其他」改成保險時也因為看不到車，停在儲蓄險。照卡片的認定（VehicleLinks）帶出那台車
+                selectedFixedAssetLink = .vehicle
+                fixedLinkVehicleId = mirrorCar.id
             }
         } else if expense.expenseType == .fixed && expense.fixedCategory == .insurance,
                   let vid = expense.linkedVehicleId {

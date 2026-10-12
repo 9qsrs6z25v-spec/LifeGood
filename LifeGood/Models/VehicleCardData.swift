@@ -124,12 +124,14 @@ struct VehicleProgressNote: Equatable {
 
 struct VehicleCheck: Identifiable, Equatable {
     enum Kind: String {
-        case soldStillCharging, termMissing, principalMissing, belowPrincipal, rateTooHigh,
+        // [v25.541] insuranceAsOther：記成「其他」的車險（排第二，緊接在賣了還在扣後面）
+        case soldStillCharging, insuranceAsOther, termMissing, principalMissing, belowPrincipal, rateTooHigh,
              orphans, legacyFixed, unassigned, downPayment, valueMissing, soldInFuture,
              odometerRegression, homeKeyword, foreign, energyGap
     }
     enum Fix: Equatable {
         case stopAtSale(expenseIds: [UUID], soldDate: Date)   // VehicleFixes.stopAtSale
+        case convertToInsurance(expenseIds: [UUID])           // [v25.541] VehicleFixes.convertToInsurance＋拿掉鏡像
         case openExpense(UUID)                                // 去填／去看；里程倒退、漏記開那一筆
         case removeMirrors([UUID])                            // 孤兒、連到別台：只從這台移掉這些鏡像 id
         case backfillFixed(mirrorId: UUID)                    // 補建（一次一筆：第一筆）
@@ -176,7 +178,11 @@ struct VehicleMonthlyData: Equatable {
     var realLine: FinanceLine? = nil        // ①「真正花掉的是 約 NT$1.1萬；NT$2.9萬 是在還車貸本金，減少欠銀行的錢。」
     var perKmLine: String? = nil            // ②
     var depreciationLine: FinanceLine? = nil// ③
-    var insuranceHint: String? = nil        // 「這台車還沒有連到任何保險，每月養車會偏低。」（旁邊「＋ 記保險 →」= addLedger(.insurance)）
+    var insuranceHint: String? = nil        // 「這台車還沒有連到任何保險，每月養車會偏低。」（旁邊「＋ 記保險 →」= addLedger(.insurance)）；記成其他的車險見下兩欄
+    /// [v25.541] 保險提示旁邊的連結字（畫面接「 →」）和點了去哪（nil＝addLedger(.insurance)）。
+    /// 有記成「其他」的車險時錢已經算在定期裡，再記一筆會重複：改成「去改」、捲到「要確認」
+    var insuranceHintAction = "＋ 記保險"
+    var insuranceHintTap: VehicleTap? = nil
     var firstYearHint: String? = nil
     var lateStartHint: String? = nil
     var splitHint: String? = nil            // 「在車貸那筆填上總貸款金額，就能分出利息和本金 →」
@@ -569,7 +575,7 @@ struct VehicleCardData {
     let facts: VehicleFacts
     let scene: FinDriveScene
     let ledger: VehicleLedger
-    let checks: [VehicleCheck]      // 已排好：賣了還在扣第一，其他照 J141–154 順序
+    let checks: [VehicleCheck]      // 已排好：賣了還在扣第一、記成其他的車險第二，其他照 J141–154 順序
 
     var seed = 0                    // MoneyItem.seed(v.id)
     var isSold = false
@@ -668,6 +674,8 @@ private struct VehicleCardContext {
     let shareName: String
     /// 沒連到記帳的舊車貸鏡像（含記帳找不到的孤兒）
     let legacyLoans: [VehicleFixedExpense]
+    /// [v25.541] 這台車記成「其他」的車險（要確認、每月養車的保險提示都讀這一份，依日期）
+    let insuranceAsOther: [Expense]
 
     var isSold: Bool { facts.isSold }
     var today: Date { cal.startOfDay(for: now) }
@@ -681,15 +689,29 @@ private struct VehicleCardContext {
         cal.startOfDay(for: d) <= cal.startOfDay(for: asOf)
     }
 
+    /// [v25.541] 每月養車的期間內（facts.periodStart～asOf）有扣到款，算法同 VehicleFacts 的 missingInsurance：
+    /// 記成「其他」的車險改成保險之後，期間內有扣款的才會讓「沒連到保險」消失
+    func debitedInPeriod(_ ex: Expense) -> Bool {
+        let start = cal.startOfDay(for: facts.periodStart)
+        if ex.isRecurringFixed {
+            let dayBefore = cal.date(byAdding: .day, value: -1, to: start) ?? start
+            return ex.fixedPeriodCount(until: asOf, calendar: cal) - ex.fixedPeriodCount(until: dayBefore, calendar: cal) > 0
+        }
+        let day = cal.startOfDay(for: ex.date)
+        return day >= start && day <= cal.startOfDay(for: asOf)
+    }
+
     static func make(_ v: Vehicle, vehicles: [Vehicle], facts: VehicleFacts, links: VehicleLinks, expenses: [Expense],
                      money: [UUID: Double], now: Date, calendar: Calendar) -> VehicleCardContext {
         let byId = Dictionary(expenses.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
         let trimmed = v.name.trimmingCharacters(in: .whitespacesAndNewlines)
         let legacyLoans = links.legacyFixed.filter { $0.category == .carLoan }
+        let asOther = links.expenses.filter { VehicleFixes.isInsuranceAsOther($0) }
         return VehicleCardContext(v: v, vehicles: vehicles, facts: facts, links: links, expenses: expenses, byId: byId,
                                   money: money, now: now, asOf: facts.asOf, cal: calendar,
                                   name: trimmed.isEmpty ? "未命名車輛" : trimmed,
-                                  shareName: VehicleScriptName.shareName(v), legacyLoans: legacyLoans)
+                                  shareName: VehicleScriptName.shareName(v), legacyLoans: legacyLoans,
+                                  insuranceAsOther: asOther)
     }
 }
 
@@ -1337,10 +1359,12 @@ extension VehicleCardData {
 // MARK: - 要確認
 
 extension VehicleCheck {
-    /// 把會讓數字算錯的資料問題攤出來（App 不在背景偷偷改）：賣了還在扣第一，其他照 J141–154 的順序
+    /// 把會讓數字算錯的資料問題攤出來（App 不在背景偷偷改）：賣了還在扣第一、記成其他的車險第二，其他照 J141–154 的順序
     fileprivate static func build(_ c: VehicleCardContext) -> [VehicleCheck] {
         var out: [VehicleCheck] = []
         if let x = checkSoldStillCharging(c) { out.append(x) }
+        // [v25.541] 排第二：每月養車那句「還沒有連到任何保險」就是它造成的，點「去改」捲上來第一眼要看到
+        if let x = checkInsuranceAsOther(c) { out.append(x) }
         out += checkLoans(c)
         if let x = checkOrphans(c) { out.append(x) }
         if let x = checkLegacyFixed(c) { out.append(x) }
@@ -1369,6 +1393,51 @@ extension VehicleCheck {
                             fix: .stopAtSale(expenseIds: f.soldStillPayingIds, soldDate: sold))
         return VehicleCheck(kind: .soldStillCharging, message: "\(c.name) \(date) 賣掉了，但\(names)還在記帳裡扣",
                             actions: [action])
+    }
+
+    /// [v25.541] 記成「其他」的車險：舊版車輛編輯頁只能從「稅費」記保險，記帳那邊就成了「其他・每年」，
+    /// 卡片照類別把它算成稅費，每月養車說「還沒有連到任何保險」、還叫你再記一筆（會重複算）。
+    /// 一鍵改成保險；只有一筆時多一顆「打開這筆」讓你自己挑類別
+    fileprivate static func checkInsuranceAsOther(_ c: VehicleCardContext) -> VehicleCheck? {
+        let list = c.insuranceAsOther
+        guard let first = list.first else { return nil }
+        let names = insuranceAsOtherNames(list, c: c)
+        let it = list.count > 1 ? "它們" : "它"
+        // 卡片現在把它算成什麼（帳本列的分類名）：其他・每年「稅費」、其他・每月「其他固定」
+        var counted: [String] = []
+        for ex in list {
+            let label = VehicleFacts.categoryLabel(ex)
+            if !counted.contains(label) { counted.append(label) }
+        }
+        // 「所以找不到保險」只在改完真的找得到時寫：期間內沒連到保險，而且這幾筆期間內有扣款。
+        // 另外有連到保險、或這幾筆早就停了（改完每月養車照樣說沒保險）時，只說沒算成保險
+        let findable = list.contains { c.debitedInPeriod($0) }
+        let tail = c.facts.missingInsurance && findable ? "所以找不到保險" : "沒算成保險"
+        let message = "\(names)記成「其他」，卡片把\(it)算成\(counted.joined(separator: "、"))，\(tail)。"
+        let confirm = "把\(names)改成保險（名稱有「強制」的改成強制險，其他改成綜合險），每月養車和帳本會把\(it)算成保險。類別不對的話，改完再打開那筆換。"
+        var actions = [Action(title: "改成保險", confirm: confirm, confirmTitle: "改成保險？",
+                              fix: .convertToInsurance(expenseIds: list.map { $0.id }))]
+        if list.count == 1 {
+            actions.append(Action(title: "打開這筆", confirm: nil, fix: .openExpense(first.id)))
+        }
+        return VehicleCheck(kind: .insuranceAsOther, message: message, actions: actions)
+    }
+
+    /// 「「Porsche Taycan 每年固定保險」」；多筆「「A」「B」等 3 筆」：名字跟帳本列標題同一套（VehicleFacts.label），
+    /// 最多列 2 個、同名只列一次（要確認、每月養車的提示共用）。
+    /// 名稱就只是「綜合險」這種分類字時，帳本列標題會退回「稅費」，訊息變成「「稅費」…算成稅費」看不懂：這時寫原本的名稱
+    fileprivate static func insuranceAsOtherNames(_ list: [Expense], c: VehicleCardContext) -> String {
+        var names: [String] = []
+        for ex in list {
+            let label = VehicleFacts.label(ex, vehicleName: c.v.name)
+            let typed = FinanceFormat.cleanTitle(ex.title, estateName: c.v.name)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let fellBack = label == VehicleFacts.categoryLabel(ex)
+            let name = fellBack && !typed.isEmpty ? typed : label
+            if !names.contains(name) { names.append(name) }
+        }
+        let head = names.prefix(2).map { "「\($0)」" }.joined()
+        return list.count > 1 ? "\(head)等 \(list.count) 筆" : head
     }
 
     /// 車貸：年限沒填、總額沒填、可能有尾款、利率對不起來（都是「去填／去看」打開那一筆）
@@ -1603,7 +1672,7 @@ extension VehicleCardData {
                 FinanceRun(text: "；這不是付出去的錢，賣車時才會算到。")
             ])
         }
-        if f.missingInsurance { m.insuranceHint = "這台車還沒有連到任何保險，每月養車會偏低。" }
+        if f.missingInsurance { fillInsuranceHint(&m, c: c) }
         if f.firstYearNoTax { m.firstYearHint = "買車還不到一年，稅費、保養可能還沒輪到，這裡會先偏低。" }
         if let late = f.energyStartedLate {
             let word = p.energyLabel
@@ -1639,6 +1708,25 @@ extension VehicleCardData {
         guard upkeep > 0 else { return nil }
         let perKm = upkeep * 12 / annual
         return "每月養車平均下來，每公里約 NT$\(VehicleCardText.n1(perKm))（一年約開 \(VehicleCardText.kmText(annual))；不含車貸和折舊）。"
+    }
+
+    /// 期間內沒有保險扣款：一般寫「還沒有連到任何保險」＋「＋ 記保險」。
+    /// [v25.541] 有記成「其他」的車險、而且這個月還算在「定期」裡時，錢其實已經算進來了，再記一筆會重複：
+    /// 改說它記成「其他」，連結字「去改」捲到「要確認」（那裡有「改成保險」）。早就停掉的那種不算（定期裡沒有它）
+    fileprivate static func fillInsuranceHint(_ m: inout VehicleMonthlyData, c: VehicleCardContext) {
+        let inFixed = c.insuranceAsOther.filter { ex in
+            guard ex.isRecurringFixed, c.onOrBeforeAsOf(ex.date) else { return false }
+            guard let end = ex.endDate else { return true }
+            return c.cal.startOfDay(for: end) >= c.thisMonth
+        }
+        guard !inFixed.isEmpty else {
+            m.insuranceHint = "這台車還沒有連到任何保險，每月養車會偏低。"
+            return
+        }
+        let names = VehicleCheck.insuranceAsOtherNames(inFixed, c: c)
+        m.insuranceHint = "\(names)記成「其他」，所以這裡看不到保險（錢已經算在定期裡）。"
+        m.insuranceHintAction = "去改"
+        m.insuranceHintTap = .scrollTo(.checks)
     }
 
     /// 車貸分不出利息和本金：缺總貸款金額時打開那一筆；舊車貸鏡像、利率對不起來捲到「要確認」
@@ -2798,6 +2886,35 @@ enum VehicleFixes {
         let isLoan = expenses[i].fixedCategory == .loan
         expenses[i].endReason = isLoan ? FixedEndReason.other : FixedEndReason.cancelled
         return true
+    }
+
+    /// [v25.541] 名稱或備註裡有這些字，就看得出是車險
+    static let insuranceWords = ["保險", "車險", "強制險", "綜合險", "乙式", "丙式", "甲式", "第三人責任", "竊盜險", "車體險"]
+
+    /// [v25.541] 記成「其他」的車險：週期固定支出、類別「其他」（或沒有類別）、名稱或備註看得出是車險。
+    /// 舊版車輛編輯頁只能從「稅費」記保險，記帳那邊就成了「其他・每年」
+    static func isInsuranceAsOther(_ ex: Expense) -> Bool {
+        guard ex.expenseType == .fixed, ex.isRecurringFixed else { return false }
+        guard ex.fixedCategory == .other || ex.fixedCategory == nil else { return false }
+        let text = ex.title + "\n" + ex.note
+        return insuranceWords.contains { text.contains($0) }
+    }
+
+    /// [v25.541] 改成保險：類別保險、子分類照名稱或備註（有「強制」→ 強制險，其他 → 綜合險）、linkedVehicleId＝這台
+    ///（只靠鏡像連過來的也接上：車險只認 linkedVehicleId，呼叫端接著拿掉鏡像）。
+    /// 名稱、金額、週期、起訖、節稅覆寫都不動，帳本和每月養車的錢不變，只是改算成保險
+    @discardableResult static func convertToInsurance(_ ids: [UUID], vehicleId: UUID, in expenses: inout [Expense]) -> Bool {
+        let wanted = Set(ids)
+        var changed = false
+        for i in expenses.indices where wanted.contains(expenses[i].id) && expenses[i].expenseType == .fixed {
+            let text = expenses[i].title + "\n" + expenses[i].note
+            let sub: InsuranceSubCategory = text.contains("強制") ? .compulsory : .comprehensive
+            expenses[i].fixedCategory = .insurance
+            expenses[i].insuranceSubCategory = sub
+            expenses[i].linkedVehicleId = vehicleId
+            changed = true
+        }
+        return changed
     }
 
     /// 都算這台：linkedVehicleId＝vehicleId（子分類留 nil、不寫鏡像；已經連到別台的不動）
