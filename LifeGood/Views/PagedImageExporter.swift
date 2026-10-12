@@ -82,11 +82,15 @@ enum PagedExportItem {
 }
 
 enum PagedImageExporter {
+    // [v25.540] 固定西曆：手機設成民國曆時，檔名和頁尾的年份以前會寫成 115（房屋、股票、車子的分頁分享都走這裡）
     private static let fileStampFmt: DateFormatter = {
-        let f = DateFormatter(); f.dateFormat = "yyyyMMdd_HHmm"; return f
+        let f = DateFormatter(); f.locale = Locale(identifier: "en_US_POSIX")
+        f.calendar = Calendar(identifier: .gregorian)
+        f.dateFormat = "yyyyMMdd_HHmm"; return f
     }()
     private static let displayStampFmt: DateFormatter = {
         let f = DateFormatter(); f.locale = Locale(identifier: "zh_Hant_TW")
+        f.calendar = Calendar(identifier: .gregorian)
         f.dateFormat = "yyyy/M/d HH:mm"; return f
     }()
 

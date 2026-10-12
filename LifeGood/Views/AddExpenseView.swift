@@ -302,8 +302,11 @@ struct AddExpenseView: View {
     }
 
     /// [v25.538] 從車子帶進來、要直接顯示車輛區（度數、電量、里程錶）的（AddExpensePreset.showVehicleSection）
+    /// [v25.540] 編輯時也看：卡片點帳本的油錢、電費、保養、維修，或「沒填度數 →」「多記公升數 →」打開那一筆，
+    /// 會帶 AddExpensePreset(showVehicleSection: true)，度數、公升、里程欄要直接看得到（定案 19）。
+    /// preset 其他欄位編輯時本來就不套用（applyPreset 開頭擋掉）；新增時跟以前一樣
     private var presetShowsVehicleSection: Bool {
-        editingExpense == nil && preset?.showVehicleSection == true
+        preset?.showVehicleSection == true
     }
     /// 是否為飲食類變動支出（決定要不要顯示餐廳自動完成）
     private var isFoodVariable: Bool {

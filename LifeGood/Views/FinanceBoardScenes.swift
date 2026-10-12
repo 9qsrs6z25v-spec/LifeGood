@@ -589,7 +589,7 @@ extension MoneyBoardSky {
             let (fill, glyph): (Color, String) = {
                 switch mk.kind {
                 case .fuel: return (Color(tb: 0xFF9F38), "油")
-                case .charge: return (Color(tb: 0x2FBF71), "電")
+                case .charge: return (Color(tb: 0x2FBF71), "充")
                 case .care: return (Color(tb: 0x5B7CFA), "修")
                 case .park: return (Color(tb: 0x9AA3B5), "停")
                 case .other: return (Color(tb: 0x9AA3B5), "其")

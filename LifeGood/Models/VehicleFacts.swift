@@ -512,6 +512,8 @@ struct VehicleChargeSummary: Equatable {
         let fromPct: Double?
         let toPct: Double?
         let isHome: Bool
+        /// [v25.540] 記帳那筆的 id（卡片點圖選到一點時寫說明、要確認的家充檢查用）；latest 不用它
+        var expenseId: UUID? = nil
     }
 
     var count = 0
@@ -546,6 +548,9 @@ struct VehicleChargeSummary: Equatable {
     var capacity: [Point] = []
     /// 漏記充電的段
     var gaps: [VehicleEnergyGap] = []
+    /// [v25.540] 每一次充電（時間升冪，跟 VehicleChargeAnalytics.sessions 同一份）：
+    /// 卡片的每度電價點圖選到一點時寫「10/3・地點・32 度・NT$9.5/度」、「要確認」查家充關鍵字都讀這個
+    var sessions: [Session] = []
 
     var avgKwhPerSession: Double? { count > 0 ? totalKwh / Double(count) : nil }
     var avgCostPerSession: Double? { count > 0 ? totalCost / Double(count) : nil }
@@ -588,6 +593,7 @@ struct VehicleChargeSummary: Equatable {
         efficiency = ivs.map { Point(date: $0.date, value: $0.kmPerKwh) }
         capacity = caps.map { Point(date: $0.date, value: $0.estimate, isHome: $0.isHome) }
         gaps = a.skippedIntervals
+        sessions = a.sessions.map { Session(date: $0.date, place: $0.place, kwh: $0.kwh, cost: $0.cost, fromPct: $0.fromPct, toPct: $0.toPct, isHome: $0.isHome, expenseId: $0.id) }
     }
 }
 
@@ -1361,7 +1367,13 @@ enum VehicleSale {
     @discardableResult
     static func syncStops(of v: Vehicle, soldDate: Date?, in expenses: inout [Expense],
                           now: Date = Date(), calendar cal: Calendar = Calendar(identifier: .gregorian)) -> Bool {
-        let ids = stoppableExpenseIds(of: v, expenses: expenses)
+        var ids = stoppableExpenseIds(of: v, expenses: expenses)
+        // [v25.540] 卡片「要確認」按「在賣出日停止」停掉的停車月租、訂閱也標成 .assetSold：
+        // 之後改售出日、取消已售出時要跟車貸、保險、稅費一起跟著改，不然取消已售出後它們還停在舊的賣出日
+        for ex in VehicleLinks.make(v, expenses: expenses).expenses
+        where ex.isRecurringFixed && ex.endReason == .assetSold {
+            ids.insert(ex.id)
+        }
         guard !ids.isEmpty else { return false }
         var changed = false
         for i in expenses.indices where ids.contains(expenses[i].id) {

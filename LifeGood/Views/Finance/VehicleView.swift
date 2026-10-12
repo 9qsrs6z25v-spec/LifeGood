@@ -93,6 +93,8 @@ struct VehicleView: View {
     @EnvironmentObject var subscription: SubscriptionManager
     @State private var showAdd = false
     @State private var viewingItem: Vehicle?
+    /// [v25.540] 新增頁存好的那台：等新增頁收完（onDismiss）才打開它的卡片（決定 9）
+    @State private var openAfterAdd: UUID?
     @State private var sortOption: VehicleSortOption = .purchasePrice
     @State private var sortAscending = false
     /// [v25.538] 左滑刪整台車先問一次：以前按下去就連記帳支出、照片一起刪掉，沒有確認。
@@ -183,16 +185,17 @@ struct VehicleView: View {
                     }
                 } else {
                     if !active.isEmpty {
-                        Section(header: MoneyGroupHeader(theme: .finDrive, title: "持有中", count: active.count,
-                                                         total: MoneyFormat.short(board.value), unit: "輛")) {
+                        Section(header: MoneyGroupHeader(theme: VehicleScriptName.groupTheme(active), title: "持有中",
+                                                         count: active.count, total: MoneyFormat.short(board.value),
+                                                         unit: "輛")) {
                             ForEach(Array(active.enumerated()), id: \.element.id) { idx, item in
                                 row(item, index: idx)
                             }
                         }
                     }
                     if !sold.isEmpty {
-                        Section(header: MoneyGroupHeader(theme: .finDrive, title: "已售出", count: sold.count,
-                                                         total: "", unit: "輛")) {
+                        Section(header: MoneyGroupHeader(theme: VehicleScriptName.groupTheme(sold), title: "已售出",
+                                                         count: sold.count, total: "", unit: "輛")) {
                             ForEach(Array(sold.enumerated()), id: \.element.id) { idx, item in
                                 row(item, index: active.count + idx)
                             }
@@ -249,8 +252,8 @@ struct VehicleView: View {
                 }
             }
             .task(id: factsTaskKey) { rebuild() }
-            .sheet(isPresented: $showAdd) { AddVehicleView().appStores() }
-            .sheet(item: $viewingItem) { item in VehicleDetailView(vehicleId: item.id).appStores() }
+            .sheet(isPresented: $showAdd, onDismiss: { openAddedVehicle() }) { addVehicleSheet }
+            .sheet(item: $viewingItem) { item in detailSheet(item) }
             .premiumLockAlert(isPresented: $showPremiumAlert)
             .vehicleDeleteDialog(isPresented: $showDeleteConfirm, request: deleteRequest) { v, mode in
                 deleteVehicle(v, mode: mode)
@@ -284,6 +287,32 @@ struct VehicleView: View {
         }
         facts = map
         board = VehicleBoardData.build(vehicles: store.vehicles, facts: map, expense: expenseStore, now: now)
+    }
+
+    /// [v25.540] 兩個 sheet 的內容拆出來：body 那一長串修飾器裡不再放 closure 套 closure
+    private var addVehicleSheet: AnyView {
+        AddVehicleView(onSaved: { openAfterAdd = $0 }).appStores()
+    }
+
+    private func detailSheet(_ item: Vehicle) -> AnyView {
+        VehicleDetailView(vehicleId: item.id, order: siblingOrder(of: item)).appStores()
+    }
+
+    /// [v25.540] 點開的那台所在的那一組（持有中／已售出），照畫面上的排序傳給卡片的換車列
+    ///（排序選項沒存檔，卡片拿不到，所以把排好的 id 傳進去）。分組跟列表同一個判斷 isSold(asOf:)
+    private func siblingOrder(of item: Vehicle) -> [UUID] {
+        let now = Date()
+        let sold = item.isSold(asOf: now)
+        return sortedVehicles.filter { $0.isSold(asOf: now) == sold }.map(\.id)
+    }
+
+    /// [v25.540] 新增的車存好後直接打開它的卡片：等新增頁收完才設（在 onSaved 裡直接設，
+    /// 同一頁上兩個 sheet 一個正在收、一個要開，會被吃掉）；按取消沒存就什麼都不做
+    private func openAddedVehicle() {
+        guard let id = openAfterAdd else { return }
+        openAfterAdd = nil
+        guard let v = store.vehicles.first(where: { $0.id == id }) else { return }
+        viewingItem = v
     }
 
     // MARK: - 車輛卡片

@@ -65,8 +65,15 @@ import SwiftUI
 //   - 標成已售出、取消已售出、改售出日時，連到這台車的車貸、保險、稅費停在售出日（或還原），記帳一次寫回。
 //   - 「新增項目」前的自動存檔和按「儲存」合成一份寫入（writeVehicle）。
 //   - 定期支出的種類加「保險」「車位月租」，做成 static，卡片之後的「＋ 記一筆」也用同一份。
-//     這頁的選單只加「車位月租」：車險不寫鏡像，這頁的清單看不到（見 FixedPresetKind.editorMenu）。
+//     這頁的選單只加「車位月租」：車險不寫鏡像，這頁的清單看不到（v25.540 選單跟清單一起拿掉了）。
 //   - 定期支出列的名稱改照記帳那筆的分類寫（車位月租不再顯示成鏡像的「稅費」）。
+//
+// [v25.540] 換新卡片（決定 9）：
+//   - 定期／變動清單和「新增項目」拿掉，錢一律在卡片「我的帳本」記（「＋ 記一筆」用這裡的 makeFixedPreset／
+//     makeVariablePreset）。清單一拿掉，「新增項目」前的自動存檔、取消時的回滾也都用不到了：
+//     現在只有按「儲存／新增」才寫進去，取消＝有改過先問、直接關。
+//   - 新增的車存好後把 id 交給呼叫端（onSaved），列表等這頁收完就打開它的卡片。
+//   - 「照每年 15% 估」改用 VehicleValuation.marketEstimate（跟卡片車輛資料的行情參考同一支，兩處數字一定一樣）。
 
 /// [v25.539] 從卡片打開編輯頁時要捲到哪一欄（同 HouseEditFocus）
 enum VehicleEditFocus: Hashable { case none, purchase, value, sold, soldPrice, battery, homeCharge, owner, brand, note }
@@ -81,10 +88,13 @@ struct AddVehicleView: View {
     let editing: Vehicle?
     /// [v25.539] 打開後要捲到哪一欄（.none＝不捲）
     let focus: VehicleEditFocus
+    /// [v25.540] 新增的車存好後（這頁關掉前）把它的 id 交出去：列表等這頁收完就打開它的卡片（決定 9）。
+    /// 編輯既有的車不呼叫
+    let onSaved: ((UUID) -> Void)?
     /// [v25.538] 用 @State 存：sheet 的內容會因為上一頁重畫而重新 init，
-    /// 用 let 的話新增流程每次 init 都會換一個新的 UUID，自動存檔和「取消」回滾就找不到那台車
+    /// 用 let 的話新增流程每次 init 都會換一個新的 UUID
     @State private var stableVehicleId: UUID
-    /// [v25.539] 捲到 focus 那一欄只做一次（記帳 sheet 收起來 onAppear 會再跑）
+    /// [v25.539] 捲到 focus 那一欄只做一次（onAppear 可能再跑）
     @State private var didApplyFocus = false
     @FocusState private var focusedField: VehicleEditFocus?
     /// [v25.539] 最下面「刪除這台車」：要刪的車和筆數在按的那一刻算好；付費提示
@@ -92,9 +102,10 @@ struct AddVehicleView: View {
     @State private var showDeleteVehicleConfirm = false
     @State private var showPremiumAlert = false
 
-    init(editing: Vehicle? = nil, focus: VehicleEditFocus = .none) {
+    init(editing: Vehicle? = nil, focus: VehicleEditFocus = .none, onSaved: ((UUID) -> Void)? = nil) {
         self.editing = editing
         self.focus = focus
+        self.onSaved = onSaved
         _stableVehicleId = State(initialValue: editing?.id ?? UUID())
     }
 
@@ -116,53 +127,24 @@ struct AddVehicleView: View {
     @State private var soldPriceText = ""
     @State private var note = ""
     @State private var showError = false
-    @State private var hasAutoSaved: Bool = false
     // 儲存為同步寫回 store 後立即 dismiss()，sheet 收合動畫期間按鈕仍可觸發，
     // 快速連點會建立兩筆重複車輛紀錄；補上忙碌守衛比照 AddRealEstateView 既有修法。
     @State private var isSaving = false
-    // v3 進場動畫旗標：定期／變動支出列表交錯進場
-    @State private var fixedExpensesAppeared = false
-    @State private var variableExpensesAppeared = false
     // [v25.538] loadEditing 只跑一次；initialFields 是載入完的欄位，拿來判斷有沒有改過
     @State private var didLoad = false
     @State private var initialFields: VehicleFormFields?
-    // [v25.538] 編輯既有車子時「新增項目」已經把表頭自動存進去了，取消要還原
-    @State private var headerAutoSaved = false
-    // [v25.538] 最後一次自動存進去的欄位：之後把欄位改回原樣，車子裡存的還是改過的，往下滑關掉也要擋
-    @State private var autoSavedFields: VehicleFormFields?
-    // [v25.538] 打開時的車子（取消時還原表頭用），第一次載入時存起來。不能直接用 editing：
-    // 卡片頁傳進來的是每次重畫都從 store 重抓的車子，自動存檔後卡片頁一重畫，editing 就變成存過的樣子
+    // [v25.538] 打開時的車子，第一次載入時存起來（估值有沒有改、售出日有沒有動都跟它比）。不能直接用 editing：
+    // 卡片頁傳進來的是每次重畫都從 store 重抓的車子，store 一改（例如別的裝置同步過來），editing 就跟著變
     @State private var openedSnapshot: Vehicle?
-    // [v25.538] 有改過時按取消先問；說明文字在打開確認框的那一刻算好
+    // [v25.538] 有改過時按取消先問
     @State private var showDiscardConfirm = false
-    @State private var discardMessage = ""
-    // [v25.538] 左滑刪支出：先記下來跳確認，確認後才刪
-    @State private var pendingExpenseDeletion: ExpenseSwipeDeletion?
     // [v25.538] 驗證沒過時加一，表單捲到最上面的錯誤橫幅
     @State private var errorScrollTick = 0
 
-    // MARK: - 編輯/新增項目
-
-    @State private var editingFixedExpense: Expense?
-    @State private var editingVariableExpense: Expense?
-    /// [v25.539] 改用 FixedPresetKind：多了保險、車位月租（VehicleFixedCategory 不能加 case）
-    @State private var addingFixedPreset: FixedPresetKind?
-    @State private var addingVariableCategory: VehicleVariableCategory?
-    @State private var showFixedCategoryPicker = false
-    @State private var showVariableCategoryPicker = false
-
-    // MARK: - 從 store 取得目前車輛 / 項目列表
+    // MARK: - 從 store 取得目前車輛
 
     private var currentVehicle: Vehicle? {
         financeStore.vehicles.first(where: { $0.id == stableVehicleId })
-    }
-
-    private var fixedExpenses: [VehicleFixedExpense] {
-        currentVehicle?.fixedExpenses ?? []
-    }
-
-    private var variableExpenses: [VehicleVariableExpense] {
-        currentVehicle?.variableExpenses ?? []
     }
 
     /// [v25.538] 表單上「車子本身」的欄位，用來判斷有沒有改過（要不要問放棄、能不能往下滑關掉）。
@@ -183,21 +165,6 @@ struct AddVehicleView: View {
         var note: String
     }
 
-    /// [v25.538] 左滑要刪的列（車子上的項目 id）和它們連到的記帳支出 id
-    struct ExpenseSwipeDeletion {
-        let itemIds: Set<UUID>
-        let expenseIds: Set<UUID>
-        /// 記帳裡真的還找得到的筆數（滑的當下算好）：記帳那筆早被刪掉的孤兒列，不能說「會一起刪除」
-        let foundExpenseCount: Int
-    }
-
-    /// [v25.538] 左滑的當下就把要刪的東西和確認框要講的筆數算好
-    private func makeSwipeDeletion(linkedExpenseIds: [UUID?], itemIds: [UUID]) -> ExpenseSwipeDeletion {
-        let expenseIds = Set(linkedExpenseIds.compactMap { $0 })
-        let found = expenseStore.expenses.filter { expenseIds.contains($0.id) }.count
-        return ExpenseSwipeDeletion(itemIds: Set(itemIds), expenseIds: expenseIds, foundExpenseCount: found)
-    }
-
     private var currentFields: VehicleFormFields {
         VehicleFormFields(
             name: name, brand: brand, ownerName: ownerName, powerType: powerType,
@@ -208,25 +175,21 @@ struct AddVehicleView: View {
         )
     }
 
-    /// [v25.538] 有沒有東西會被放棄：新增流程已經自動存過（車子和這次記的支出都在 store 裡）、
-    /// 編輯時自動存進車子的欄位跟打開時不一樣（欄位後來改回原樣也算，車子裡存的還是改過的），
-    /// 或欄位跟打開時不一樣
+    /// 有沒有東西會被放棄：欄位跟打開時不一樣。[v25.540] 自動存檔拿掉了，按「儲存」之前 store 一個字都沒動
     private var hasChanges: Bool {
-        if editing == nil && hasAutoSaved { return true }
         guard let initial = initialFields else { return false }
-        if let saved = autoSavedFields, saved != initial { return true }
         return currentFields != initial
     }
 
     /// [v25.538] 錯誤橫幅那一列的 id，驗證沒過時捲過去
     private static let errorBannerId = "vehicleErrorBanner"
 
-    // [v25.538] body 拆成「表單本體」和三段「彈出視窗」（同 AddRealEstateView v25.530）：這版多了刪支出確認、
-    // 放棄修改確認和捲到錯誤橫幅，十幾個修飾器擠在同一個運算式裡容易型別檢查逾時
+    // [v25.538] body 拆成「表單本體」和幾段「彈出視窗」（同 AddRealEstateView v25.530）：
+    // 放棄修改確認、刪車確認和捲到錯誤橫幅，十幾個修飾器擠在同一個運算式裡容易型別檢查逾時
     var body: some View {
         NavigationStack {
             ScrollViewReader { proxy in
-                withDeletePresentations(withConfirmations(withCategoryPickers(withExpenseSheets(editorForm))))
+                withDeletePresentations(withConfirmations(editorForm))
                     .onAppear {
                         loadEditingOnce()
                         applyFocus(proxy)
@@ -239,8 +202,7 @@ struct AddVehicleView: View {
                     }
             }
         }
-        // [v25.538] 有改過就不能往下滑關掉：滑掉不會經過「取消」，新增流程會留下自動存檔的半台車，
-        // 編輯時自動存進去的欄位也不會還原
+        // [v25.538] 有改過就不能往下滑關掉：滑掉不會經過「取消」的確認，改到一半的東西會無聲無息地丟掉
         .interactiveDismissDisabled(hasChanges)
     }
 
@@ -256,10 +218,9 @@ struct AddVehicleView: View {
                 }
             }
             // [v25.539] 頂端的英雄預覽卡、下面的試算區拿掉：大字是購入價、月固定只算鏡像，跟卡片對不起來
+            // [v25.540] 定期／變動清單拿掉（決定 9）：錢在卡片「我的帳本」記
             vehicleInfoSection
             valueSection
-            fixedExpenseSection
-            variableExpenseSection
             noteSection
             if editing != nil {
                 deleteVehicleSection
@@ -279,89 +240,28 @@ struct AddVehicleView: View {
                     if isSaving {
                         ProgressView().scaleEffect(0.7).tint(.green)
                     }
-                    Button(editing != nil || hasAutoSaved ? "儲存" : "新增") { save() }
+                    Button(editing != nil ? "儲存" : "新增") { save() }
                         .bold().foregroundStyle(.green).disabled(isSaving)
                 }
             }
         }
     }
 
-    private func withExpenseSheets<Content: View>(_ content: Content) -> some View {
-        content
-            .sheet(item: $editingFixedExpense) { exp in
-                AddExpenseView(expenseType: .fixed, editingExpense: exp)
-                    .appStores()
-            }
-            .sheet(item: $editingVariableExpense) { exp in
-                AddExpenseView(expenseType: .variable, editingExpense: exp)
-                    .appStores()
-            }
-            .sheet(item: $addingFixedPreset) { kind in
-                AddExpenseView(
-                    expenseType: .fixed,
-                    preset: Self.makeFixedPreset(for: kind, vehicleId: stableVehicleId)
-                )
-                .appStores()
-            }
-            .sheet(item: $addingVariableCategory) { cat in
-                AddExpenseView(
-                    expenseType: .variable,
-                    preset: Self.makeVariablePreset(for: cat, vehicleId: stableVehicleId)
-                )
-                .appStores()
-            }
-    }
-
-    private func withCategoryPickers<Content: View>(_ content: Content) -> some View {
-        content
-            .confirmationDialog("選擇定期支出類別", isPresented: $showFixedCategoryPicker, titleVisibility: .visible) {
-                ForEach(FixedPresetKind.editorMenu) { kind in
-                    Button(kind.rawValue) {
-                        guard writeVehicle(finishing: false) else { return }
-                        addingFixedPreset = kind
-                    }
-                }
-                Button("取消", role: .cancel) {}
-            }
-            .confirmationDialog("選擇變動支出類別", isPresented: $showVariableCategoryPicker, titleVisibility: .visible) {
-                ForEach(VehicleVariableCategory.categories(for: powerType)) { cat in
-                    Button(cat.rawValue) {
-                        guard writeVehicle(finishing: false) else { return }
-                        addingVariableCategory = cat
-                    }
-                }
-                Button("取消", role: .cancel) {}
-            }
-    }
-
-    // [v25.538] 左滑刪支出的確認、按取消時「要放棄這次的修改嗎？」
+    // [v25.538] 按取消時「要放棄這次的修改嗎？」（[v25.540] 左滑刪支出的確認跟著清單拿掉）
     private func withConfirmations<Content: View>(_ content: Content) -> some View {
         content
-            .alert("刪除這筆支出？", isPresented: expenseDeletionPresented, presenting: pendingExpenseDeletion) { request in
-                Button("刪除", role: .destructive) { confirmExpenseDeletion(request) }
-                Button("取消", role: .cancel) {}
-            } message: { request in
-                Text(expenseDeletionMessage(request))
-            }
             .confirmationDialog("要放棄這次的修改嗎？", isPresented: $showDiscardConfirm, titleVisibility: .visible) {
-                Button("放棄修改", role: .destructive) { cancelAndRollback() }
+                Button("放棄修改", role: .destructive) { dismiss() }
                 Button("繼續編輯", role: .cancel) {}
             } message: {
                 Text(discardMessage)
             }
     }
 
-    private var expenseDeletionPresented: Binding<Bool> {
-        Binding(
-            get: { pendingExpenseDeletion != nil },
-            set: { if !$0 { pendingExpenseDeletion = nil } }
-        )
-    }
-
     private var navTitle: String {
         let isMotorcycle = powerType == .motorcycle || powerType == .electricMotorcycle
         let typeLabel = isMotorcycle ? "🛵機車" : "🚗汽車"
-        let action = (editing != nil || hasAutoSaved) ? "編輯" : "新增"
+        let action = editing != nil ? "編輯" : "新增"
         return "\(action) \(typeLabel)"
     }
 
@@ -500,196 +400,20 @@ struct AddVehicleView: View {
         }
     }
 
-    /// [v25.538] 照每年 15% 估：購入價 × 0.85^(持有年數)，持有年數＝天數 ÷ 365.25（最少 0），算到售出日或今天。
-    /// 1 萬以上進位到千元（跟按鈕上「約 NT$X萬」寫的一樣），未滿 1 萬進位到元。購入價沒填或 ≤ 0 時沒有這顆。
+    /// [v25.538] 照每年 15% 估，算到售出日或今天；購入價沒填或 ≤ 0 時沒有這顆。
+    /// [v25.540] 改呼叫 VehicleValuation.marketEstimate（購入價 × 0.85^(持有天數 ÷ 365)，四捨五入到千元）：
+    /// 卡片「車輛資料」的「一般每年折 15% 估」也是這一支，兩處數字一定一樣（定案 14）
     private var fifteenPercentEstimate: Double? {
-        guard let priceWan = Double(purchasePriceText.trimmingCharacters(in: .whitespaces)), priceWan > 0 else { return nil }
-        let price = priceWan * 10000
-        guard price.isFinite else { return nil }
+        guard let price = Self.positiveWan(purchasePriceText) else { return nil }
         let end = isSold ? soldDate : Date()
-        let years = max(0, end.timeIntervalSince(purchaseDate) / 86400 / 365.25)
-        let raw = price * pow(0.85, years)
-        return raw >= 10000 ? (raw / 1000).rounded() * 1000 : raw.rounded()
+        guard let estimate = VehicleValuation.marketEstimate(purchase: price, from: purchaseDate, to: end),
+              estimate > 0 else { return nil }
+        return estimate
     }
 
     /// [v25.538] 先組成 String 再給 Label：直接寫字面值會被當成 LocalizedStringKey，「15%」的 % 可能被當成格式符號
     private func fifteenPercentLabel(_ estimate: Double) -> String {
         "照每年 15% 估：約 " + estimate.ntdWanString + "（帶入）"
-    }
-
-    // MARK: - 定期支出
-
-    private var fixedExpenseSection: some View {
-        Section {
-            ForEach(Array(fixedExpenses.enumerated()), id: \.element.id) { idx, fe in
-                Button {
-                    if let expId = fe.linkedExpenseId,
-                       let exp = expenseStore.expenses.first(where: { $0.id == expId }) {
-                        editingFixedExpense = exp
-                    }
-                } label: {
-                    HStack(spacing: 12) {
-                        ZStack {
-                            Circle()
-                                .fill(LinearGradient(
-                                    colors: [Color.blue.opacity(0.22), Color.blue.opacity(0.09)],
-                                    startPoint: .topLeading, endPoint: .bottomTrailing
-                                ))
-                                .frame(width: 36, height: 36)
-                            Circle()
-                                .stroke(Color.blue.opacity(0.18), lineWidth: 1)
-                                .frame(width: 36, height: 36)
-                            Image(systemName: "calendar.badge.checkmark")
-                                .font(.system(size: 14, weight: .semibold))
-                                .foregroundStyle(Color.blue)
-                        }
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(fixedRowTitle(fe))
-                                .font(.subheadline.weight(.semibold))
-                                .foregroundStyle(.primary)
-                            Text(fe.period == .monthly ? "每月" : "每年")
-                                .font(.system(size: 10, weight: .semibold))
-                                .foregroundStyle(.blue)
-                                .padding(.horizontal, 6).padding(.vertical, 2)
-                                .background(Color.blue.opacity(0.10))
-                                .clipShape(Capsule())
-                                .overlay(Capsule().stroke(Color.blue.opacity(0.18), lineWidth: 0.5))
-                        }
-                        Spacer()
-                        Text(fe.amount > 0 ? formatCurrency(fe.amount) : "未填")
-                            .font(.subheadline.bold())
-                            .foregroundStyle(fe.amount > 0 ? .primary : .secondary)
-                        Image(systemName: "chevron.right")
-                            .font(.caption2).foregroundStyle(.tertiary)
-                    }
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                // [v3] 交錯淡入 + 向上進場動畫，對齊 SpouseResumeView.expenseRow /
-                // ResumeGiftSection.giftRow 清單列規格
-                .opacity(fixedExpensesAppeared ? 1 : 0)
-                .offset(y: fixedExpensesAppeared ? 0 : 12)
-                .animation(
-                    .spring(response: 0.44, dampingFraction: 0.82)
-                        .delay(0.04 * Double(min(idx, 14))),
-                    value: fixedExpensesAppeared
-                )
-            }
-            .onDelete(perform: deleteFixedExpenses)
-
-            Button {
-                showFixedCategoryPicker = true
-            } label: {
-                Label("新增項目", systemImage: "plus.circle")
-                    .foregroundStyle(.green)
-            }
-        } header: {
-            vehicleSectionHeader("定期支出", icon: "calendar.badge.checkmark", color: .blue, count: fixedExpenses.count)
-        } footer: {
-            if !fixedExpenses.isEmpty {
-                let monthlyTotal = fixedExpenses.reduce(0.0) { $0 + $1.period.toMonthly($1.amount) }
-                Text("定期支出合計每月 \(formatCurrency(monthlyTotal))，與記帳模式的固定支出連動。")
-            }
-        }
-        .onAppear {
-            withAnimation(.spring(response: 0.5, dampingFraction: 0.82).delay(0.05)) {
-                fixedExpensesAppeared = true
-            }
-        }
-    }
-
-    /// [v25.539] 列的名稱照記帳那筆的分類寫（跟卡片同一個 VehicleFacts.categoryLabel）：
-    /// 「車位月租」存進鏡像的分類是「稅費」，照鏡像寫會跟你剛選的對不上。記帳找不到那筆才用鏡像的分類
-    private func fixedRowTitle(_ fe: VehicleFixedExpense) -> String {
-        guard let expId = fe.linkedExpenseId,
-              let exp = expenseStore.expenses.first(where: { $0.id == expId }) else { return fe.category.rawValue }
-        return VehicleFacts.categoryLabel(exp)
-    }
-
-    // MARK: - 變動支出
-
-    private var variableExpenseSection: some View {
-        Section {
-            ForEach(Array(variableExpenses.enumerated()), id: \.element.id) { idx, ve in
-                Button {
-                    if let expId = ve.linkedExpenseId,
-                       let exp = expenseStore.expenses.first(where: { $0.id == expId }) {
-                        editingVariableExpense = exp
-                    }
-                } label: {
-                    HStack(spacing: 12) {
-                        ZStack {
-                            Circle()
-                                .fill(LinearGradient(
-                                    colors: [Color.orange.opacity(0.22), Color.orange.opacity(0.09)],
-                                    startPoint: .topLeading, endPoint: .bottomTrailing
-                                ))
-                                .frame(width: 36, height: 36)
-                            Circle()
-                                .stroke(Color.orange.opacity(0.18), lineWidth: 1)
-                                .frame(width: 36, height: 36)
-                            Image(systemName: ve.category.icon)
-                                .font(.system(size: 14, weight: .semibold))
-                                .foregroundStyle(Color.orange)
-                        }
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(ve.category.rawValue)
-                                .font(.subheadline.weight(.semibold))
-                                .foregroundStyle(.primary)
-                            HStack(spacing: 3) {
-                                Image(systemName: "calendar")
-                                    .font(.system(size: 9, weight: .medium))
-                                Text(formatShortDate(ve.date))
-                                    .font(.caption2.weight(.medium))
-                            }
-                            .foregroundStyle(.secondary)
-                            .padding(.horizontal, 6).padding(.vertical, 2)
-                            .background(Color(.tertiarySystemFill))
-                            .clipShape(Capsule())
-                        }
-                        Spacer()
-                        Text(ve.amount > 0 ? formatCurrency(ve.amount) : "未填")
-                            .font(.subheadline.bold())
-                            .foregroundStyle(ve.amount > 0 ? .primary : .secondary)
-                        Image(systemName: "chevron.right")
-                            .font(.caption2).foregroundStyle(.tertiary)
-                    }
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                // [v3] 交錯淡入 + 向上進場動畫，對齊 SpouseResumeView.expenseRow /
-                // ResumeGiftSection.giftRow 清單列規格
-                .opacity(variableExpensesAppeared ? 1 : 0)
-                .offset(y: variableExpensesAppeared ? 0 : 12)
-                .animation(
-                    .spring(response: 0.44, dampingFraction: 0.82)
-                        .delay(0.04 * Double(min(idx, 14))),
-                    value: variableExpensesAppeared
-                )
-            }
-            .onDelete(perform: deleteVariableExpenses)
-
-            Button {
-                showVariableCategoryPicker = true
-            } label: {
-                Label("新增項目", systemImage: "plus.circle")
-                    .foregroundStyle(.green)
-            }
-        } header: {
-            vehicleSectionHeader("變動支出", icon: "arrow.triangle.2.circlepath", color: .orange, count: variableExpenses.count)
-        } footer: {
-            if !variableExpenses.isEmpty {
-                let total = variableExpenses.reduce(0.0) { $0 + $1.amount }
-                Text("變動支出合計 \(formatCurrency(total))，與記帳模式的變動支出連動。")
-            } else {
-                Text("油錢、停車、洗車、臨時維修等支出，每筆單獨記錄。")
-            }
-        }
-        .onAppear {
-            withAnimation(.spring(response: 0.5, dampingFraction: 0.82).delay(0.08)) {
-                variableExpensesAppeared = true
-            }
-        }
     }
 
     private var noteSection: some View {
@@ -769,7 +493,7 @@ struct AddVehicleView: View {
     }
 
     /// 先關掉這頁、下一個 runloop 才刪（卡片還開在下面，確認框、sheet 正在收的那個交易裡改 store 容易閃退）。
-    /// 用 store 裡最新的那一份（自動存過表頭、或確認框開著時被同步改過）
+    /// 用 store 裡最新的那一份（確認框開著時可能被同步改過）
     private func deleteWholeVehicle(mode: VehicleDeletion.Mode) {
         let finance = financeStore
         let expenses = expenseStore
@@ -782,14 +506,13 @@ struct AddVehicleView: View {
         }
     }
 
-    // MARK: - 寫進 store（[v25.539] 自動存檔和儲存合成一份）
+    // MARK: - 寫進 store
 
-    /// 表單寫進 store 只有這一份：「新增項目」前的自動存檔（finishing＝false）和按「儲存」（true）都走這裡。
-    /// 以前兩邊各寫一份，欄位一多就會漏一邊（這版多了成交價、估值更新日）。
-    /// 自動存檔只寫車子本身，取消時還原得回來；按「儲存」才同步賣車停扣、才關掉這頁。
+    /// 表單寫進 store 只有這一份（按「儲存／新增」）。[v25.540] 「新增項目」前的自動存檔跟著清單拿掉了，
+    /// 所以按下去才寫車子、同步賣車停扣、關掉這頁；新增的車在關掉前把 id 交給 onSaved（列表接著打開它的卡片）
     @discardableResult
-    private func writeVehicle(finishing: Bool) -> Bool {
-        if finishing && isSaving { return false }
+    private func writeVehicle() -> Bool {
+        if isSaving { return false }
         let trimmedName = name.trimmingCharacters(in: .whitespaces)
         guard !trimmedName.isEmpty, let price = Self.positiveWan(purchasePriceText) else {
             showError = true
@@ -797,18 +520,12 @@ struct AddVehicleView: View {
             return false
         }
         showError = false
-        if finishing { isSaving = true }
+        isSaving = true
 
-        // 打開這頁時的樣子（新增流程是 nil）：估值有沒有改、售出日有沒有動都跟它比，
-        // 不跟 store 比——自動存檔之後 store 裡已經是改過的
+        // 打開這頁時的樣子（新增流程是 nil）：估值有沒有改、售出日有沒有動都跟它比
         let original: Vehicle? = openedSnapshot ?? editing
         let currentVal = currentValueToSave(price: price)
         let existing = currentVehicle
-        if existing != nil && !finishing {
-            // [v25.538] 編輯既有車子時這裡就把表頭寫進去了，記下來，取消時才知道要還原
-            headerAutoSaved = true
-            autoSavedFields = currentFields
-        }
         // 既有的車從 store 那份改（定期／變動鏡像、照片紀錄照留）；新的才建一台空的
         var vehicle = existing ?? Vehicle(id: stableVehicleId, name: trimmedName)
         vehicle.name = trimmedName
@@ -830,19 +547,16 @@ struct AddVehicleView: View {
             financeStore.update(vehicle)
         } else {
             financeStore.add(vehicle)
-            if !finishing { hasAutoSaved = true }
         }
-        if finishing {
-            syncSaleStops(vehicle, original: original)
-            dismiss()
-        }
+        syncSaleStops(vehicle, original: original)
+        if editing == nil { onSaved?(vehicle.id) }
+        dismiss()
         return true
     }
 
     /// [v25.539] 標成已售出、取消已售出、改了售出日時：連到這台車的車貸、保險、稅費停在售出日（或還原），
     /// 在記帳的副本上改，有改到才一次寫回（決定 6）。售出日沒動就不碰記帳：
     /// 之後在記帳自己改過的結束日，不會因為按一次這頁的儲存就被蓋掉。
-    /// 自動存檔不做：取消時只還原車子本身，記帳的結束日還原不了
     private func syncSaleStops(_ vehicle: Vehicle, original: Vehicle?) {
         let cal = Calendar(identifier: .gregorian)
         let newSold: Date? = vehicle.soldDate
@@ -873,79 +587,21 @@ struct AddVehicleView: View {
         return changed ? Date() : original.valueUpdatedAt
     }
 
-    /// [v25.538] 工具列「取消」：有改過先問「要放棄這次的修改嗎？」，沒改過直接關
+    /// [v25.538] 工具列「取消」：有改過先問「要放棄這次的修改嗎？」，沒改過直接關。
+    /// [v25.540] 自動存檔拿掉後 store 在按「儲存」之前一個字都沒動，放棄就是直接關，不用回滾
     private func cancelTapped() {
-        guard hasChanges else { cancelAndRollback(); return }
-        discardMessage = discardConfirmMessage()
+        guard hasChanges else { dismiss(); return }
         showDiscardConfirm = true
     }
 
-    /// [v25.538] 放棄確認框的說明：講清楚按下去會刪什麼、留什麼
-    private func discardConfirmMessage() -> String {
-        if editing == nil {
-            guard hasAutoSaved, let v = currentVehicle else { return "剛剛填的資料不會存。" }
-            let s = VehicleDeletion.summary(of: v, expenseStore: expenseStore)
-            guard s.expenseCount > 0 else { return "剛剛填的資料不會存，這台車不會加進理財。" }
-            return "這台車和這次記的 \(s.expenseCount) 筆支出（連同收據照片和銀行扣款紀錄）都會刪除，不能復原。"
-        }
-        if headerAutoSaved {
-            return "車子的資料會回到打開這頁之前的樣子；這次在記帳新增或修改的支出已經存好，會留著。"
-        }
-        return "剛剛改的資料不會存。"
-    }
-
-    /// 「取消」真正做的事（有改過時是確認框按「放棄修改」之後）。
-    /// 新增流程：「新增項目」會先把車子自動存進 store（writeVehicle(finishing: false)），取消時要整台拿掉，
-    /// 連這次記的支出一起刪。[v25.538] 改走共用的 VehicleDeletion（.withExpenses）：以前只刪鏡像連到的支出，
-    /// 銀行扣款紀錄和只靠 linkedVehicleId 連過來的支出都留下來。
-    /// 編輯既有車子：「新增項目」一樣先把表頭存進去，以前按取消不還原。[v25.538] 把車子本身的欄位還原成
-    /// 打開時的樣子；支出不動（那些在記帳裡是真的花費），照片紀錄也照 store 現在的。
-    /// 先關掉這頁、下一個 runloop 才寫 store：確認框、sheet 正在收的那個交易裡改 store 容易閃退。
-    private func cancelAndRollback() {
-        let finance = financeStore
-        let expenses = expenseStore
-        let life = lifeStore
-        let vehicleId = stableVehicleId
-        let original = openedSnapshot ?? editing
-        let rollbackNew = editing == nil && hasAutoSaved
-        let needsHeaderRestore = editing != nil && headerAutoSaved
-        dismiss()
-        guard rollbackNew || needsHeaderRestore else { return }
-        DispatchQueue.main.async {
-            guard var v = finance.vehicles.first(where: { $0.id == vehicleId }) else { return }
-            // 刪整台只走新增流程（editing == nil）；編輯既有車子不管怎樣都只還原表頭
-            if needsHeaderRestore {
-                guard let original else { return }
-                Self.restoreHeader(&v, from: original)
-                finance.update(v)
-            } else if rollbackNew {
-                VehicleDeletion.delete(v, mode: .withExpenses, financeStore: finance,
-                                       expenseStore: expenses, lifeStore: life)
-            }
-        }
-    }
-
-    /// [v25.538] 車子本身的欄位還原成打開編輯頁時的快照；定期／變動支出鏡像、照片紀錄留著 store 現在的
-    private static func restoreHeader(_ v: inout Vehicle, from original: Vehicle) {
-        v.name = original.name
-        v.brand = original.brand
-        v.ownerName = original.ownerName
-        v.powerType = original.powerType
-        v.purchaseDate = original.purchaseDate
-        v.soldDate = original.soldDate
-        v.purchasePrice = original.purchasePrice
-        v.currentValue = original.currentValue
-        v.note = original.note
-        v.batteryCapacityKWh = original.batteryCapacityKWh
-        v.homeChargePlace = original.homeChargePlace
-        // [v25.539] 自動存檔也會寫這兩個，一起還原
-        v.soldPrice = original.soldPrice
-        v.valueUpdatedAt = original.valueUpdatedAt
+    /// [v25.538] 放棄確認框的說明
+    private var discardMessage: String {
+        editing == nil ? "剛剛填的資料不會存，這台車不會加進理財。" : "剛剛改的資料不會存。"
     }
 
     // MARK: - 預設值（給 AddExpenseView）
 
-    /// [v25.539] 從車子新增定期支出的種類（這頁的「新增項目」選單；之後卡片的「＋ 記一筆」也用同一份）。
+    /// [v25.539] 從車子新增定期支出的種類（[v25.540] 卡片的「＋ 記一筆」「＋ 記保險」「＋ 記稅費」「＋ 加一筆車貸」用）。
     /// 不用 VehicleFixedCategory：那是存進車子鏡像的分類，加新 case 舊版 App 讀不懂；
     /// 保險、車位月租只看記帳那筆的分類（卡片寫「保險」「車位租金」），不需要鏡像分類
     enum FixedPresetKind: String, CaseIterable, Identifiable {
@@ -956,11 +612,7 @@ struct AddVehicleView: View {
         case carLoan = "車貸"
 
         var id: String { rawValue }
-
-        /// 這頁「新增項目」選單列的種類。保險不放：車險不寫鏡像（決定 8），這頁的清單讀的是鏡像，
-        /// 從這裡記好了清單也看不到，會以為沒存到。這頁的清單 v25.540 拿掉（決定 9），
-        /// 保險改從新卡片的「＋ 記保險」進來（makeFixedPreset(.insurance) 已經帶強制險，可以直接用）
-        static let editorMenu: [FixedPresetKind] = [.tax, .parkingRent, .subscription, .carLoan]
+        // [v25.540] 這頁的「新增項目」選單（editorMenu）跟著清單拿掉；卡片「＋ 記一筆」用 VehicleLedgerAddKind.fixedKind
     }
 
     /// [v25.539] 改成 static、車子 id 從外面傳：卡片的「＋ 記一筆」、每月養車的「＋ 記保險」不用打開這頁也能用
@@ -1022,62 +674,11 @@ struct AddVehicleView: View {
         )
     }
 
-    // MARK: - 刪除
-
-    // [v25.538] 左滑刪除不再直接刪：先記下要刪哪幾列、連到哪些記帳支出，跳確認框，
-    // 確認後才連記帳支出、收據照片、銀行扣款紀錄一起刪（confirmExpenseDeletion）。
-
-    private func deleteFixedExpenses(at offsets: IndexSet) {
-        let items = fixedExpenses
-        let picked = offsets.filter { $0 < items.count }.map { items[$0] }
-        guard !picked.isEmpty else { return }
-        pendingExpenseDeletion = makeSwipeDeletion(
-            linkedExpenseIds: picked.map { $0.linkedExpenseId },
-            itemIds: picked.map { $0.id }
-        )
-    }
-
-    private func deleteVariableExpenses(at offsets: IndexSet) {
-        let items = variableExpenses
-        let picked = offsets.filter { $0 < items.count }.map { items[$0] }
-        guard !picked.isEmpty else { return }
-        pendingExpenseDeletion = makeSwipeDeletion(
-            linkedExpenseIds: picked.map { $0.linkedExpenseId },
-            itemIds: picked.map { $0.id }
-        )
-    }
-
-    /// [v25.538] 確認框的說明：沒連到記帳（或記帳那筆已經不在）的項目只會從車子拿掉
-    private func expenseDeletionMessage(_ request: ExpenseSwipeDeletion) -> String {
-        let count = request.foundExpenseCount
-        if count == 1 { return "記帳裡的這筆和銀行扣款紀錄會一起刪除，不能復原。" }
-        if count > 1 { return "記帳裡的這 \(count) 筆和銀行扣款紀錄會一起刪除，不能復原。" }
-        return "這個項目沒有連到記帳，只會從這台車拿掉，不能復原。"
-    }
-
-    /// [v25.538] 確認後才刪；延後一個 runloop，因為確認框正在收的那個交易裡改 store 容易閃退
-    private func confirmExpenseDeletion(_ request: ExpenseSwipeDeletion) {
-        let finance = financeStore
-        let expenses = expenseStore
-        let life = lifeStore
-        let vehicleId = stableVehicleId
-        DispatchQueue.main.async {
-            // 記帳支出（含收據照片）＋所有銀行帳戶裡對得上的扣款紀錄；每台車上指到它們的鏡像也一起清
-            RealEstateDeletion.removeExpenses(request.expenseIds, expenseStore: expenses, lifeStore: life)
-            // 沒連到記帳的舊項目（linkedExpenseId 是 nil）上面清不到，照列的 id 從這台車拿掉
-            guard var v = finance.vehicles.first(where: { $0.id == vehicleId }) else { return }
-            let before = v.fixedExpenses.count + v.variableExpenses.count
-            v.fixedExpenses.removeAll { request.itemIds.contains($0.id) }
-            v.variableExpenses.removeAll { request.itemIds.contains($0.id) }
-            if v.fixedExpenses.count + v.variableExpenses.count != before { finance.update(v) }
-        }
-    }
-
     // MARK: - 儲存
 
-    /// 工具列「儲存／新增」。[v25.539] 跟自動存檔走同一份 writeVehicle
+    /// 工具列「儲存／新增」
     private func save() {
-        writeVehicle(finishing: true)
+        writeVehicle()
     }
 
     /// 這個動力類型有沒有電池
@@ -1134,7 +735,7 @@ struct AddVehicleView: View {
 
     // MARK: - 載入編輯
 
-    /// [v25.538] 只在第一次出現時載入：onAppear 可能重跑（例如上面蓋的記帳 sheet 收起來），
+    /// [v25.538] 只在第一次出現時載入：onAppear 可能重跑（例如鍵盤、確認框、上面蓋過的頁面收起來），
     /// 會拿開頁時的舊快照蓋掉正在改的欄位。載入完記下欄位的樣子，之後拿來比對有沒有改過。
     private func loadEditingOnce() {
         guard !didLoad else { return }
@@ -1219,18 +820,5 @@ struct AddVehicleView: View {
             Spacer()
         }
         .textCase(nil)
-    }
-
-    private func formatCurrency(_ value: Double) -> String {
-        value.ntdWanString
-    }
-
-    // v2：靜態共用實例，避免每次 render 重新分配
-    private static let shortDateFormatter: DateFormatter = {
-        let f = DateFormatter(); f.dateFormat = "M/d"; return f
-    }()
-
-    private func formatShortDate(_ date: Date) -> String {
-        Self.shortDateFormatter.string(from: date)
     }
 }

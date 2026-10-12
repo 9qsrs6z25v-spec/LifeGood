@@ -1,65 +1,13 @@
 import SwiftUI
-import Charts
 
-// CardRarity 與 SoldStamp 已移至 FlashCardView.swift（閃卡標準模板）
-
-// MARK: - 美化紀錄（VehicleDetailView）
-// [2026-06 v1] 本次美化方向：
-//   1. flashCard：加入 cardAppeared spring 進場動畫（透明度 + Y 位移），
-//      對齊 StockDetailView flashCard 進場規格。
-//   2. sectionHeader：升級為 Capsule 色條 + subheadline.bold + 計數膠囊，
-//      對齊 VariableExpenseView / StockDetailView section 標題設計語言。
-//   3. fixedExpenses 列：加入 38pt 藍色漸層圖示圓 + 分類 / 週期標籤 + 月均輔助文字，
-//      對齊 FixedExpenseView FixedExpenseRow 視覺規格。
-//   4. variableExpenses 列：加入 38pt 橘色漸層圖示圓 + 分類標籤 + 日期膠囊，
-//      對齊 VariableExpenseView expenseRow 視覺規格。
-//   5. 兩個列表：加入行間 Divider + 交錯淡入進場動畫（infoRowsAppeared），
-//      對齊 StockDetailView transactionsSection 動畫規格。
-//   6. infoSection 卡片：補極細 overlay 邊框，提升精緻感與深色模式相容性。
-// [2026-06 v2] 本次美化方向：
-//   7. flashCard 玻璃光澤：非 legendary 卡片背景加入 .white.opacity(0.18)→.clear
-//      由上到中的 LinearGradient overlay，對齊全 App 英雄卡玻璃光澤規格
-//      （OverviewView / StockView / VariableExpenseView 等）。
-//   8. 圖示圓升圓形＋邊框：fixedExpenseRow / variableExpenseRow 圖示圓從
-//      RoundedRectangle(cornerRadius:10) 升級為 Circle +
-//      stroke(color.opacity(0.20), lineWidth: 0.75)，
-//      對齊全 App 標準圓形圖示圓規格（ExpenseRow / incomeRow 等）。
-//   9. vehicleKpiStrip：flashCard 正下方加入 KPI 橫列
-//      （月固定支出 / 近12月變動 / 持有年限），各含 30pt 漸層圓圖示，
-//      kpiStripAppeared spring 進場動畫；
-//      對齊 LifeOverviewView.statsStrip / FamilyView.statsStrip 設計規格。
-//  10. 金額色彩：支出列右側金額從 .primary 升為各自 accent 顏色（藍 / 橘），
-//      提升視覺層次，讓定期與變動的分類色貫穿整列。
-// [2026-07 v3] 補齊與 StockDetailView／RealEstateDetailView 兩個同型閃卡的視覺落差：
-//  11. flashCard 估值大字（52pt）：原本唯獨本檔案缺少 minimumScaleFactor + lineLimit(1) +
-//      contentTransition(.numericText())，車輛估值達六位數以上時大字有截斷風險，且切換車輛
-//      時數字為硬切換而非平滑過渡；補上對齊 StockDetailView.market value（0.55）規格。
-//  12. infoSection 空狀態：原本定期／變動支出兩張卡片各自以 isEmpty 整卡隱藏，若車輛兩者皆無
-//      記錄，此區塊會完全留白、無任何提示，與 StockDetailView（交易/股利空狀態卡）、
-//      RealEstateDetailView（emptySectionRow）等同型詳情頁不一致。新增 emptyExpensesCard，
-//      兩份清單皆空時顯示「尚無支出記錄」提示卡，對齊全 App 空狀態設計規格。
-// [2026-07 v4] 金額量級單位（萬／億）一致性：
-//  13. flashCard 估值大字、底部「購入」值原本各自呼叫私有 fmtWan(_:)（僅 `%g` 除以萬，
-//      無條件只顯示「萬」），車輛估值一旦達 1 億以上會顯示成 5～6 位數的「萬」大數字
-//      （例如 12345.7萬），未跟進全 App 共用 Double.ntdWanString 既有的萬→億量級進位規則，
-//      與同檔案 vehicleKpiStrip／fixedExpenseRow／variableExpenseRow（皆用 fmt = ntdWanString）
-//      不一致。新增 splitWan(_:) 從 ntdWanString 拆出「數字／單位」二段供大字沿用既有字級設計，
-//      兩處呼叫點改用 splitWan，並移除已無呼叫端的私有 fmtWan 死碼。純顯示層調整，估值／
-//      購入價等既有試算邏輯完全未變動。
-//      （StockDetailView 已於 v24.98、RealEstateDetailView 已於 v24.99 比照本次做法
-//      補齊，全 App 詳情頁閃卡估值大字量級單位規格至此已收斂一致）
-// [2026-08 v5] flashCard 車名補齊姊妹閃卡防截斷規格：
-//  14. Text(vehicle.name)（.title.bold()）原本沒有 multilineTextAlignment／lineLimit／
-//      minimumScaleFactor，也沒有橫向 padding，是 Vehicle／RealEstate／Stock 三款同型閃卡中
-//      唯一缺這組防護的車名大字——RealEstateDetailView.estate.name／StockDetailView.stock.name
-//      皆已有 .multilineTextAlignment(.center) + 外層 .padding(.horizontal, 24)，長車名在本頁
-//      沒有橫向留白、換行也會靠左而非置中，與姊妹頁面觀感不一致。補上
-//      .multilineTextAlignment(.center) + .lineLimit(2) + .minimumScaleFactor(0.7)，
-//      並在外層 VStack 加上 .padding(.horizontal, 24)，對齊兩個姊妹閃卡規格，
-//      讓超長車名（例如含年份/配備等級的完整車型名）自動縮字換行但不致無法辨識，
-//      也不會頂到卡片邊緣。純視覺層調整，vehicle.name／brand 等既有資料完全未變動。
-
-// MARK: - 汽車檢視卡片
+// [v25.540] 載具卡片（換新卡片）的外殼：跟房屋卡、股票卡同一個樣子（換車列、看板、一欄捲到底、分享）。
+// - 卡片上的字和數字全在 VehicleCardData.build 一次算好（只在 .task 裡算；換車時在 jump 裡同步算好新的那台）；
+//   各區畫面在 VehicleCardViews.swift，這裡只管排列順序、彈出頁、確認框、付費和分享。
+// - 看資料免費；新增、編輯、刪除、修正都先過 requirePremium，「＋」選單在打開前就擋。
+// - 彈出頁收成一個 VehicleSheet＋一個 .sheet(item:)，確認框一個 VehicleConfirm、選單一個 VehicleChoice。
+// - 「照片與單據」綁著照片紀錄的編輯、刪除，留在這個檔案畫；照片紀錄編輯器搬到 VehicleEditors.swift。
+// - 刪整台車不在卡片上（列表左滑、編輯頁最下面「刪除這台車」）。
+// - 分享不輸出車主、地點、家充、里程、照片、備註、車輛資料、自己取的名稱；車名像車牌改寫「品牌 動力」（決定 20）。
 
 struct VehicleDetailView: View {
     @EnvironmentObject var store: FinanceStore
@@ -67,1429 +15,1230 @@ struct VehicleDetailView: View {
     @EnvironmentObject var lifeStore: LifeStore
     @EnvironmentObject var subscription: SubscriptionManager
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.colorScheme) private var scheme
 
-    let vehicleId: UUID
-    /// 每次 body 重算時從 store 取最新值，確保編輯後立即反映
-    private var vehicle: Vehicle {
-        store.vehicles.first(where: { $0.id == vehicleId }) ?? Vehicle(name: "")
-    }
-    @State private var showEdit = false
-    /// [v25.397] 充電與里程深入分析
-    @State private var showChargeAnalytics = false
-    /// [v25.538] 刪車改走跟列表左滑同一個確認框（VehicleView.swift 的 vehicleDeleteDialog）：
-    /// 要刪的車和筆數在按「刪除」那一刻算好
-    @State private var deleteRequest: VehicleDeleteRequest?
-    @State private var showDeleteConfirm = false
+    /// @State 而不是 let：換車列點一下就換一台（同一張卡換內容，不重開 sheet）
+    @State private var vehicleId: UUID
+    /// 列表傳進來的順序（同一組：持有中／已售出）；空的時候用 store 的順序
+    private let order: [UUID]
+    /// 打開時要捲到哪一區；捲過一次就清掉
+    @State private var startAnchor: VehicleAnchor?
+    /// 換車的方向（+1 往右邊那台、-1 往左邊），決定滑入的方向
+    @State private var slideDirection: Int = 1
+
+    /// 卡片上全部的字與數字：只在 .task(id: cardTaskKey) 和換車時算
+    @State private var card: VehicleCardData?
+    /// 上一次算 card 用的 key：換車時已經同步算好，.task 看到同一個 key 就不再算一次
+    @State private var lastBuiltKey = ""
+    @State private var ledgerFilter: VehicleLedgerFilter = .all
+
+    @State private var sheet: VehicleSheet?
+    @State private var pendingConfirm: VehicleConfirm?
+    @State private var pendingChoice: VehicleChoice?
     @State private var showPremiumAlert = false
-    // 照片紀錄（保養/稅費收據等，比照房地產裝潢照片）
-    @State private var addingPhotoRecord = false
-    @State private var editingPhotoRecord: VehiclePhotoRecord?
-    @State private var cutePhotoDraft: CutePhotoDraft?
-    // 項目詳情（點定期/變動支出列開啟）＋從相簿廊直接編輯連結支出
-    @State private var viewingItem: VehicleItemRef?
-    @State private var editingLinkedExpense: Expense?
-    // 美化：進場動畫旗標（對齊 StockDetailView / RealEstateDetailView 規格）
-    @State private var kpiStripAppeared = false
-    @State private var infoRowsAppeared = false
-    /// [v25.539] 這台車的數字（估值、折舊、持有、每月養車、充電統計）跟列表項目卡、載具頁看板、理財總覽同一套：
-    /// 只在 .task(id: factsTaskKey) 裡用 VehicleFacts.build 算一次，畫面只讀。以前這張卡自己讀鏡像算月固定
-    /// （季繳多算 3 倍、繳完的車貸照算）、自己重寫一份充電區間（沒擋漏記的段），跟列表寫的數字對不上
-    @State private var facts: VehicleFacts?
-    /// [v25.539] 每月養車那段期間（近 12 個月；買車不到一年就是實際月數）的變動支出合計，跟 facts 一起算
-    @State private var recentVariable: Double = 0
+    @State private var askExportPageSize = false
+    /// 補建舊定期：打開記帳頁前記下來，記帳頁關掉時比對有沒有新存一筆（定案 18）
+    @State private var pendingBackfill: VehicleBackfill?
 
-    private var rarity: CardRarity { CardRarity(price: vehicle.purchasePrice) }
+    init(vehicleId: UUID, order: [UUID] = [], startAt: VehicleAnchor? = nil) {
+        _vehicleId = State(initialValue: vehicleId)
+        self.order = order
+        _startAnchor = State(initialValue: startAt)
+    }
 
-    /// [v25.539] 換車、車子改了、記帳改了都要重算（同 RealEstateDetailView 的 cardTaskKey）
-    private var factsTaskKey: String {
-        "\(vehicleId.uuidString)-\(store.modifyID)-\(expenseStore.modifyID)"
+    private static let placeholder = Vehicle(name: "")
+    fileprivate static let gregorian = Calendar(identifier: .gregorian)
+
+    /// 目前這台（store 裡最新的那一份；被刪掉時是空的佔位，.task 會把卡片關掉）
+    fileprivate var vehicle: Vehicle {
+        store.vehicles.first(where: { $0.id == vehicleId }) ?? Self.placeholder
+    }
+
+    /// 換車列：列表傳進來的順序，只留跟目前這台同一組的（isSold(asOf:)：售出日還沒到照持有中算，跟列表分組一樣）
+    private var siblings: [Vehicle] {
+        let current = vehicle
+        let all = store.vehicles
+        var list: [Vehicle]
+        if order.isEmpty {
+            list = all
+        } else {
+            let byId = Dictionary(all.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+            list = order.compactMap { byId[$0] }
+            if !list.contains(where: { $0.id == current.id }), byId[current.id] != nil {
+                list.append(current)
+            }
+        }
+        let now = Date()
+        let sold = current.isSold(asOf: now)
+        return list.filter { $0.isSold(asOf: now) == sold }
+    }
+
+    private var titleText: String {
+        if let card { return card.name }
+        let name = vehicle.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        return name.isEmpty ? "未命名車輛" : name
+    }
+
+    /// 換車、記帳改了、車子改了都要重算
+    private var cardTaskKey: String {
+        taskKey(for: vehicleId)
+    }
+
+    private func taskKey(for id: UUID) -> String {
+        "\(id.uuidString)-\(store.modifyID)-\(expenseStore.modifyID)"
     }
 
     var body: some View {
         NavigationStack {
+            withPresentations(scroller)
+        }
+    }
+
+    private var scroller: some View {
+        ScrollViewReader { proxy in
             ScrollView {
-                VStack(spacing: 24) {
-                    // 進場動畫改由 FlashCardView 模板內建（進階設定可關閉）
-                    flashCard
-                    // v2：KPI 摘要橫列（[v25.539] 每月養車 / 近 N 月變動 / 持有）
-                    vehicleKpiStrip
-                        .opacity(kpiStripAppeared ? 1 : 0)
-                        .offset(y: kpiStripAppeared ? 0 : 14)
-                        .onAppear {
-                            withAnimation(.spring(response: 0.50, dampingFraction: 0.80).delay(0.18)) {
-                                kpiStripAppeared = true
-                            }
-                        }
-                    chargingSection
-                    infoSection
-                    photoSection
-                }
-                .padding(.vertical)
+                cardContent(proxy)
             }
             .background(Color(.systemGroupedBackground))
-            .task(id: factsTaskKey) { rebuildFacts() }
-            .navigationTitle("車輛卡片")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button("關閉") { dismiss() }
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    HStack(spacing: 16) {
-                        Button {
-                            if subscription.isPremium { showEdit = true }
-                            else { showPremiumAlert = true }
-                        } label: {
-                            Text("編輯").foregroundStyle(.green)
-                        }
-                        Button {
-                            if subscription.isPremium {
-                                deleteRequest = VehicleDeleteRequest(
-                                    vehicle: vehicle,
-                                    summary: VehicleDeletion.summary(of: vehicle, expenseStore: expenseStore)
-                                )
-                                showDeleteConfirm = true
-                            } else { showPremiumAlert = true }
-                        } label: {
-                            Text("刪除").foregroundStyle(.red)
-                        }
-                    }
-                }
-            }
-            .sheet(isPresented: $showChargeAnalytics) {
-                VehicleChargeAnalyticsView(vehicleId: vehicleId)
-                    .appStores()
-            }
-            .sheet(isPresented: $showEdit) {
-                AddVehicleView(editing: vehicle)
-                    .appStores()
-            }
-            .sheet(isPresented: $addingPhotoRecord) {
-                VehiclePhotoEditor(vehicleId: vehicleId, editing: nil)
-                    .appStores()
-            }
-            .sheet(item: $editingPhotoRecord) { rec in
-                VehiclePhotoEditor(vehicleId: vehicleId, editing: rec)
-                    .appStores()
-            }
-            .sheet(item: $cutePhotoDraft) { draft in
-                CutePhotoViewer(draft: draft)
-                    .appStores()
-            }
-            .sheet(item: $viewingItem) { ref in
-                VehicleItemDetailSheet(vehicleId: vehicleId, item: ref)
-                    .appStores()
-            }
-            .sheet(item: $editingLinkedExpense) { exp in
-                AddExpenseView(expenseType: exp.expenseType, editingExpense: exp)
-                    .appStores()
-            }
-            .premiumLockAlert(isPresented: $showPremiumAlert)
-            .vehicleDeleteDialog(isPresented: $showDeleteConfirm, request: deleteRequest) { _, mode in
-                deleteVehicle(mode: mode)
-            }
+            .task(id: cardTaskKey) { rebuildCard(proxy) }
         }
+        // 換車列釘在導覽列下面：同一組不只一台才出現。不做整頁左右滑（會跟照片橫捲、長按、點圖打架）
+        .safeAreaInset(edge: .top, spacing: 0) { switcherBar }
+        .navigationTitle(titleText)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar { toolbarItems }
     }
 
-    // MARK: - 閃卡主體
+    // MARK: - 算卡片、換車
 
-    private var flashCard: some View {
-        // 改用 FlashCardView 標準模板：殼層與版面骨架由模板統一，本頁只填內容；
-        // 樣式參數由「設定 > 進階設定 > 閃卡樣式」控制。
-        // [v25.539] 大字讀 facts.value（跟列表項目卡同一個數）：估值是沒填的 0 時先用購入價（決定 10），
-        // 已售出寫成交價（沒填用估值）
-        let estimate = splitWan(facts?.value ?? vehicle.currentValue)
-        return FlashCardView(
-            rarity: rarity,
-            categoryLabel: vehicle.powerType.rawValue,
-            categoryIcon: vehicle.powerType.icon,
-            title: vehicle.name,
-            bigNumber: estimate.number,
-            bigCaption: valueCaption(unit: estimate.unit),
-            columns: [
-                FlashCardInfoColumn("購入", splitWanLabel(vehicle.purchasePrice)),
-                depreciationColumn,
-                FlashCardInfoColumn("持有", heldText)
-            ],
-            isSold: vehicle.isSold
-        ) {
-            if !vehicle.brand.isEmpty {
-                Text(vehicle.brand)
-                    .font(.subheadline)
-                    .foregroundStyle(rarity.secondaryTextColor)
-            }
-        } middleExtra: {
-            EmptyView()
-        } extraBackground: {
-            EmptyView()
-        }
-        .padding(.horizontal, 24)
-        .padding(.top, 16)
+    /// 在主執行緒算（MoneyFormat 共用一個 NumberFormatter）
+    private func buildCard(for id: UUID) -> VehicleCardData? {
+        guard let v = store.vehicles.first(where: { $0.id == id }) else { return nil }
+        return VehicleCardData.build(v, vehicles: store.vehicles, expense: expenseStore)
     }
 
-    /// [v25.539] 大字下的小字：估值是借用購入價、或已售出寫的是成交價時講清楚，免得以為是自己填的估值
-    private func valueCaption(unit: String) -> String {
-        let base = "\(unit)元"
-        guard let f = facts else { return base }
-        if f.valueIsFallback { return base + "・估值還沒填，先用購入價" }
-        if f.isSold && !f.saleUsesEstimate { return base + "・成交價" }
-        return base
-    }
-
-    /// [v25.539] 決定 1：折舊是車子的常態，中性色＋▼（以前一律紅字「27.4%」，增值時還會變成紅色負數）；
-    /// 萬一增值才紅色 ▲。讀 facts.depreciationRate（跟列表項目卡的「折舊 ▼27%」同一個數、同一個寫法）；
-    /// 估值還沒填（借用購入價）或購入價沒填時是 nil，寫「—」
-    private var depreciationColumn: FlashCardInfoColumn {
-        guard let r = facts?.depreciationRate else { return FlashCardInfoColumn("折舊", "—") }
-        if abs(r) < 0.005 { return FlashCardInfoColumn("折舊", "持平") }
-        if r < 0 { return FlashCardInfoColumn("折舊", "▼" + FinanceText.percent1(-r)) }
-        return FlashCardInfoColumn("增值", "▲" + FinanceText.percent1(r), valueColor: .red)
-    }
-
-    /// [v25.539] 決定 12：「2.1 年」改「2 年 1 個月」（跟列表項目卡、房屋卡同一個寫法），算到 asOf（已售出算到售出日）。
-    /// 以前用 Calendar.current 數天數 ÷ 365，手機設民國曆也跟著系統走
-    private var heldText: String {
-        let end: Date
-        if let f = facts {
-            end = f.asOf
-        } else if vehicle.isSold, let sold = vehicle.soldDate {
-            end = min(Date(), sold)
-        } else {
-            end = Date()
-        }
-        guard end > vehicle.purchaseDate else { return "—" }
-        return HouseCardFormat.lived(from: vehicle.purchaseDate, to: end) ?? "不到 1 個月"
-    }
-
-    /// [v25.539] 只有這裡會算 VehicleFacts（.task(id: factsTaskKey)）：body 裡算的話每次重畫都要掃全部記帳
-    private func rebuildFacts() {
-        guard let v = store.vehicles.first(where: { $0.id == vehicleId }) else {
-            facts = nil
-            recentVariable = 0
-            // [v25.539] 車子被刪掉了（編輯頁最下面新加的「刪除這台車」、或別台裝置同步過來的）：
-            // 卡片沒東西可看，照 RealEstateDetailView 晚一點自己關，不留一張空白卡。
+    private func rebuildCard(_ proxy: ScrollViewProxy) {
+        guard store.vehicles.contains(where: { $0.id == vehicleId }) else {
+            // 車子被刪掉了（編輯頁最下面刪的、或別台裝置同步過來的）：卡片沒有東西可看了。
             // 晚一點才關：編輯頁可能還在往下收，一邊收一邊關卡片會被 UIKit 擋掉
+            card = nil
+            lastBuiltKey = ""
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { dismiss() }
             return
         }
-        let f = VehicleFacts.build(v, expense: expenseStore)
-        facts = f
-        recentVariable = recentVariableTotal(v, facts: f)
+        let key = cardTaskKey
+        if card == nil || key != lastBuiltKey {
+            card = buildCard(for: vehicleId)
+            lastBuiltKey = key
+        }
+        scrollToStartIfNeeded(proxy)
     }
 
-    /// [v25.539] 「近 N 月變動」改讀記帳：跟每月養車同一個期間（facts.periodStart…asOf）、同一份支出
-    /// （記帳 linkedVehicleId＝這台 ∪ 鏡像找得到的，用 id 去重；金額走 ntdValue）。
-    /// 算法跟 VehicleFacts.build 的變動段一樣：變動支出＋不是週期、不是車貸的固定支出＋沒連到記帳的舊變動鏡像，
-    /// 所以這格 ÷ 月數＝每月養車裡油電、保養維修、停車洗車其他三段的合計（電動機車的換電月租是定期，不算在這格）。
-    /// 以前只讀鏡像、一律往前 12 個月，日期在未來的也算進去
-    private func recentVariableTotal(_ v: Vehicle, facts f: VehicleFacts) -> Double {
-        let cal = Calendar(identifier: .gregorian)
-        let from = cal.startOfDay(for: f.periodStart)
-        let to = cal.startOfDay(for: f.asOf)
-        var sum = 0.0
-        for ex in expenseStore.expenses where f.ledgerExpenseIds.contains(ex.id) {
-            let day = cal.startOfDay(for: ex.date)
-            guard day >= from, day <= to else { continue }
-            if ex.expenseType == .variable || (!ex.isRecurringFixed && ex.fixedCategory != .loan) {
-                sum += expenseStore.ntdValue(of: ex)
-            }
-        }
-        for m in v.variableExpenses where f.legacyMirrorIds.contains(m.id) {
-            let day = cal.startOfDay(for: m.date)
-            guard day >= from, day <= to else { continue }
-            sum += m.amount
-        }
-        return sum
-    }
-
-    // MARK: - 詳細資訊
-
-    private var infoSection: some View {
-        VStack(spacing: 16) {
-            // v3：兩份清單皆空時顯示提示卡，避免區塊完全留白
-            if vehicle.fixedExpenses.isEmpty && vehicle.variableExpenses.isEmpty {
-                emptyExpensesCard
-            }
-
-            // 定期支出卡片
-            if !vehicle.fixedExpenses.isEmpty {
-                VStack(spacing: 0) {
-                    sectionHeader("定期支出", color: .blue, count: vehicle.fixedExpenses.count)
-                    ForEach(Array(vehicle.fixedExpenses.enumerated()), id: \.element.id) { idx, fe in
-                        Button {
-                            viewingItem = .fixed(fe)
-                        } label: {
-                            fixedExpenseRow(fe, index: idx)
-                        }
-                        .buttonStyle(.plain)
-                            .opacity(infoRowsAppeared ? 1 : 0)
-                            .offset(y: infoRowsAppeared ? 0 : 12)
-                            .animation(
-                                .spring(response: 0.44, dampingFraction: 0.82)
-                                    .delay(0.04 * Double(idx)),
-                                value: infoRowsAppeared
-                            )
-                        if idx < vehicle.fixedExpenses.count - 1 {
-                            Divider().padding(.leading, 66)
-                        }
-                    }
-                }
-                .background(Color(.systemBackground))
-                .clipShape(RoundedRectangle(cornerRadius: 14))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 14)
-                        .stroke(Color(.separator).opacity(0.12), lineWidth: 0.75)
-                )
-                .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 3)
-            }
-
-            // 變動支出卡片
-            if !vehicle.variableExpenses.isEmpty {
-                let offset = vehicle.fixedExpenses.count
-                VStack(spacing: 0) {
-                    sectionHeader("變動支出", color: .orange, count: vehicle.variableExpenses.count)
-                    ForEach(Array(vehicle.variableExpenses.enumerated()), id: \.element.id) { idx, ve in
-                        Button {
-                            viewingItem = .variable(ve)
-                        } label: {
-                            variableExpenseRow(ve, index: idx + offset)
-                        }
-                        .buttonStyle(.plain)
-                            .opacity(infoRowsAppeared ? 1 : 0)
-                            .offset(y: infoRowsAppeared ? 0 : 12)
-                            .animation(
-                                .spring(response: 0.44, dampingFraction: 0.82)
-                                    .delay(0.04 * Double(idx + offset)),
-                                value: infoRowsAppeared
-                            )
-                        if idx < vehicle.variableExpenses.count - 1 {
-                            Divider().padding(.leading, 66)
-                        }
-                    }
-                }
-                .background(Color(.systemBackground))
-                .clipShape(RoundedRectangle(cornerRadius: 14))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 14)
-                        .stroke(Color(.separator).opacity(0.12), lineWidth: 0.75)
-                )
-                .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 3)
-            }
-        }
-        .padding(.horizontal)
-        .onAppear {
-            withAnimation(.spring(response: 0.50, dampingFraction: 0.82).delay(0.10)) {
-                infoRowsAppeared = true
-            }
+    /// 打開時要捲到的那一區：等各區真的畫出來再捲（排到下一個 main.async 可能比畫面更新還早）
+    private func scrollToStartIfNeeded(_ proxy: ScrollViewProxy) {
+        guard let anchor = startAnchor else { return }
+        startAnchor = nil
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+            proxy.scrollTo(anchor, anchor: .top)
         }
     }
 
-    // MARK: - 照片紀錄（保養/稅費收據/保險文件等，比照房地產裝潢照片章節）
-
-    /// 相簿廊聚合項目：照片紀錄＋連結記帳支出的附件照片（同型概念見 RealEstateDetailView.HousePhotoItem）
-    private enum VehicleGalleryItem: Identifiable {
-        case record(VehiclePhotoRecord)
-        case expense(Expense)
-        var id: String {
-            switch self {
-            case .record(let r): return "r-\(r.id.uuidString)"
-            case .expense(let e): return "e-\(e.id.uuidString)"
-            }
-        }
-        var date: Date {
-            switch self {
-            case .record(let r): return r.date
-            case .expense(let e): return e.date
-            }
-        }
+    private func select(_ id: UUID, in list: [Vehicle]) {
+        let from = list.firstIndex { $0.id == vehicleId } ?? 0
+        let to = list.firstIndex { $0.id == id } ?? 0
+        jump(to: id, direction: to >= from ? 1 : -1)
     }
 
-    /// 該車輛定期/變動支出連結的、有附照片的記帳支出
-    private var linkedExpensePhotos: [Expense] {
-        var ids = Set<UUID>()
-        for fe in vehicle.fixedExpenses { if let id = fe.linkedExpenseId { ids.insert(id) } }
-        for ve in vehicle.variableExpenses { if let id = ve.linkedExpenseId { ids.insert(id) } }
-        guard !ids.isEmpty else { return [] }
-        return expenseStore.expenses.filter { ids.contains($0.id) && !$0.photoFileNames.isEmpty }
+    /// 換到另一台（J39）：新的那台在這裡同步算好再換，不先清成 nil，滑進來的不會是一塊空白。
+    /// 帳本篩選、還沒按的確認框一起重設；各區自己的展開、「再看 N 筆」跟著 .id(vehicleId) 歸零
+    private func jump(to id: UUID, direction: Int) {
+        guard id != vehicleId else { return }
+        let next = buildCard(for: id)
+        slideDirection = direction
+        withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+            vehicleId = id
+            card = next
+            ledgerFilter = .all
+            pendingConfirm = nil
+            pendingChoice = nil
+        }
+        lastBuiltKey = next == nil ? "" : taskKey(for: id)
     }
 
     @ViewBuilder
-    private var photoSection: some View {
-        // 照片紀錄＋連結支出照片合流（依日期新→舊），支出項目的收據照片不用重傳一次就同步出現
-        let allItems: [VehicleGalleryItem] = (
-            vehicle.photoRecords.map { VehicleGalleryItem.record($0) }
-            + linkedExpensePhotos.map { VehicleGalleryItem.expense($0) }
-        ).sorted { $0.date > $1.date }
+    private var switcherBar: some View {
+        let list = siblings
+        if list.count > 1 {
+            FinanceSwitcherStrip(items: switcherItems(list), selected: vehicleId) { id in
+                select(id, in: list)
+            }
+            .padding(.vertical, 4)
+            .background(.bar)
+        }
+    }
 
-        VStack(spacing: 0) {
-            HStack(spacing: 10) {
-                sectionHeader("照片紀錄", color: .teal, count: allItems.count)
+    /// 一台一顆：車名（最多 6 字）＋估值（已售出「賣 110萬」），一律中性色（定案 9）
+    private func switcherItems(_ list: [Vehicle]) -> [FinanceSwitcherItem] {
+        list.map { v -> FinanceSwitcherItem in
+            let trailing = VehicleCardData.switcherTrailing(v)
+            let name = v.name.trimmingCharacters(in: .whitespacesAndNewlines)
+            let title = MoneyBoardText.short(name.isEmpty ? "未命名車輛" : name, max: 6)
+            return FinanceSwitcherItem(id: v.id, title: title,
+                                       trailing: trailing?.text ?? "", tone: trailing?.tone ?? .neutral)
+        }
+    }
+
+    // MARK: - 工具列
+
+    @ToolbarContentBuilder
+    private var toolbarItems: some ToolbarContent {
+        ToolbarItem(placement: .topBarLeading) {
+            Button("關閉") { dismiss() }
+        }
+        // 標題就是車名，太長跑馬燈（不再寫「車輛卡片」）
+        ToolbarItem(placement: .principal) {
+            MarqueeText(titleText)
+                .font(.headline)
+                .accessibilityAddTraits(.isHeader)
+        }
+        ToolbarItem(placement: .topBarTrailing) {
+            HStack(spacing: 16) {
                 Button {
-                    if subscription.isPremium { addingPhotoRecord = true }
-                    else { showPremiumAlert = true }
+                    shareTapped()
                 } label: {
-                    Image(systemName: "plus.circle.fill")
-                        .font(.subheadline).foregroundStyle(.green)
+                    Image(systemName: "square.and.arrow.up")
                 }
-                .buttonStyle(.plain)
-                .padding(.trailing, 16)
-                .padding(.top, 14)
-                .padding(.bottom, 6)
+                .accessibilityLabel("分享")
+                .disabled(card == nil)
+                Button {
+                    requirePremium { sheet = .edit(VehicleEditFocus.none) }
+                } label: {
+                    Text("編輯").foregroundStyle(.green)
+                }
+                // 刪除整台只在列表左滑、編輯頁最下面（都會先確認）
             }
+        }
+    }
 
-            if allItems.isEmpty {
-                VStack(spacing: 8) {
-                    ZStack {
-                        Circle()
-                            .fill(LinearGradient(
-                                colors: [Color.teal.opacity(0.15), Color.teal.opacity(0.06)],
-                                startPoint: .topLeading, endPoint: .bottomTrailing
-                            ))
-                            .frame(width: 40, height: 40)
-                        Circle()
-                            .stroke(Color.teal.opacity(0.18), lineWidth: 0.75)
-                            .frame(width: 40, height: 40)
-                        Image(systemName: "camera.on.rectangle")
-                            .font(.system(size: 16, weight: .medium))
-                            .foregroundStyle(Color.teal.opacity(0.65))
-                    }
-                    Text("尚無照片紀錄")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                    Text("點右上「+」新增保養、稅費收據等照片；支出項目附的照片也會顯示在這裡")
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                        .multilineTextAlignment(.center)
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 24)
+    // MARK: - 內容
+
+    private var slideTransition: AnyTransition {
+        .asymmetric(
+            insertion: .move(edge: slideDirection > 0 ? .trailing : .leading).combined(with: .opacity),
+            removal: .move(edge: slideDirection > 0 ? .leading : .trailing).combined(with: .opacity)
+        )
+    }
+
+    private func cardContent(_ proxy: ScrollViewProxy) -> some View {
+        VStack(spacing: 22) {
+            if let card {
+                let actions = makeActions(proxy)
+                upperSections(card, actions: actions, proxy: proxy)
+                lowerSections(card, actions: actions)
             } else {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    LazyHStack(spacing: 14) {
-                        ForEach(allItems) { item in
-                            switch item {
-                            case .record(let rec):
-                                Button {
-                                    handlePhotoRecordTap(rec)
-                                } label: {
-                                    vehiclePhotoCard(rec)
-                                }
-                                .buttonStyle(.plain)
-                                .contextMenu {
-                                    // [v25.538] 補付費檢查：新增照片（+）、編輯支出都有擋，這裡以前直接打開編輯頁
-                                    Button {
-                                        if subscription.isPremium { editingPhotoRecord = rec }
-                                        else { showPremiumAlert = true }
-                                    } label: {
-                                        Label("編輯資訊", systemImage: "pencil")
-                                    }
-                                }
-                            case .expense(let e):
-                                Button {
-                                    handleExpensePhotoTap(e)
-                                } label: {
-                                    expensePhotoCard(e)
-                                }
-                                .buttonStyle(.plain)
-                                .contextMenu {
-                                    Button {
-                                        if subscription.isPremium { editingLinkedExpense = e }
-                                        else { showPremiumAlert = true }
-                                    } label: {
-                                        Label("編輯支出", systemImage: "pencil")
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    .padding(.horizontal, 14)
-                    .padding(.bottom, 12)
-                }
+                Color.clear.frame(height: 360)
             }
-        }
-        .background(Color(.systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 14))
-        .overlay(
-            RoundedRectangle(cornerRadius: 14)
-                .stroke(Color(.separator).opacity(0.12), lineWidth: 0.75)
-        )
-        .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 3)
-        .padding(.horizontal)
-    }
-
-    private func handleExpensePhotoTap(_ e: Expense) {
-        guard !e.photoFileNames.isEmpty else { return }
-        let urls = e.photoFileNames.map { Expense.photoURL(for: $0) }
-        let trimmedNote = e.note.trimmingCharacters(in: .whitespaces)
-        let title = e.title.isEmpty ? (trimmedNote.isEmpty ? "支出照片" : trimmedNote) : e.title
-        cutePhotoDraft = CutePhotoDraft(
-            urls: urls,
-            title: title,
-            note: (trimmedNote.isEmpty || trimmedNote == title) ? "" : trimmedNote,
-            date: e.date,
-            kind: .expense
-        )
-    }
-
-    /// 連結支出照片卡：橙色「支出」徽章，其餘版型同 vehiclePhotoCard
-    private func expensePhotoCard(_ e: Expense) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            ZStack(alignment: .topTrailing) {
-                if e.photoFileNames.count >= 2 {
-                    ZStack {
-                        ForEach(Array(e.photoFileNames.prefix(3).enumerated()).reversed(), id: \.element) { idx, name in
-                            ThumbnailImageView(url: Expense.photoURL(for: name))
-                                .frame(width: 108, height: 108)
-                                .clipShape(RoundedRectangle(cornerRadius: 12))
-                                .rotationEffect(.degrees(Double(idx) * 3.5))
-                                .offset(x: CGFloat(idx) * 3, y: CGFloat(idx) * -3)
-                        }
-                    }
-                    .frame(width: 116, height: 116)
-                } else if let first = e.photoFileNames.first {
-                    ThumbnailImageView(url: Expense.photoURL(for: first))
-                        .frame(width: 116, height: 116)
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
-                }
-                if e.photoFileNames.count >= 2 {
-                    Text("\(e.photoFileNames.count)")
-                        .font(.system(size: 10, weight: .bold))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 6).padding(.vertical, 2)
-                        .background(.black.opacity(0.55))
-                        .clipShape(Capsule())
-                        .padding(5)
-                }
-            }
-
-            HStack(spacing: 4) {
-                Image(systemName: "tag.fill")
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(Color.orange)
-                Text("支出")
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(Color.orange)
-            }
-            .padding(.horizontal, 6).padding(.vertical, 2)
-            .background(Color.orange.opacity(0.10))
-            .clipShape(Capsule())
-
-            // [v25.520] 標題過長改跑馬燈（原本 lineLimit(1) 切成「…」）
-            MarqueeText(e.title.isEmpty ? "支出照片" : e.title)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.primary)
-            Text(formatRowDate(e.date))
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-        }
-        .frame(width: 120)
-    }
-
-    private func handlePhotoRecordTap(_ rec: VehiclePhotoRecord) {
-        guard !rec.photoFileNames.isEmpty else {
-            // 沒有照片可看就打開編輯頁；[v25.538] 編輯要付費（跟「編輯資訊」同一道檢查）
-            if subscription.isPremium { editingPhotoRecord = rec }
-            else { showPremiumAlert = true }
-            return
-        }
-        let urls = rec.photoFileNames.map { VehiclePhotoRecord.photoURL(for: $0) }
-        cutePhotoDraft = CutePhotoDraft(
-            urls: urls,
-            title: rec.title.isEmpty ? rec.category.rawValue : rec.title,
-            note: rec.note,
-            date: rec.date,
-            kind: .vehicle(rec.category)
-        )
-    }
-
-    /// 單筆照片紀錄卡：縮圖（單張或堆疊）＋類別徽章＋標題＋日期
-    private func vehiclePhotoCard(_ rec: VehiclePhotoRecord) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            ZStack(alignment: .topTrailing) {
-                if rec.photoFileNames.count >= 2 {
-                    // 多張：後兩張斜角堆疊在底、首張在上（簡化版堆疊視覺）
-                    ZStack {
-                        // id 用檔名（.element）而非陣列 offset：比照 MultiPhotoGallery 既有規格，
-                        // 避免新增/刪除照片時因 offset 相同、內容不同，被誤判為同一個 view slot
-                        // 重用舊縮圖造成堆疊縮圖短暫閃爍成錯誤照片後才刷新。
-                        ForEach(Array(rec.photoFileNames.prefix(3).enumerated()).reversed(), id: \.element) { idx, name in
-                            ThumbnailImageView(url: VehiclePhotoRecord.photoURL(for: name))
-                                .frame(width: 108, height: 108)
-                                .clipShape(RoundedRectangle(cornerRadius: 12))
-                                .rotationEffect(.degrees(Double(idx) * 3.5))
-                                .offset(x: CGFloat(idx) * 3, y: CGFloat(idx) * -3)
-                        }
-                    }
-                    .frame(width: 116, height: 116)
-                } else if let url = rec.photoURL {
-                    ThumbnailImageView(url: url)
-                        .frame(width: 116, height: 116)
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
-                }
-                // 張數膠囊（多張才顯示）
-                if rec.photoFileNames.count >= 2 {
-                    Text("\(rec.photoFileNames.count)")
-                        .font(.system(size: 10, weight: .bold))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 6).padding(.vertical, 2)
-                        .background(.black.opacity(0.55))
-                        .clipShape(Capsule())
-                        .padding(5)
-                }
-            }
-
-            HStack(spacing: 4) {
-                Image(systemName: rec.category.icon)
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(rec.category.color)
-                Text(rec.category.rawValue)
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(rec.category.color)
-            }
-            .padding(.horizontal, 6).padding(.vertical, 2)
-            .background(rec.category.color.opacity(0.10))
-            .clipShape(Capsule())
-
-            // [v25.520] 標題過長改跑馬燈（原本 lineLimit(1) 切成「…」）
-            MarqueeText(rec.title.isEmpty
-                 ? (rec.photoFileNames.count >= 2 ? "\(rec.photoFileNames.count) 張照片" : rec.category.rawValue)
-                 : rec.title)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.primary)
-            Text(formatRowDate(rec.date))
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-        }
-        .frame(width: 120)
-    }
-
-    // MARK: - 充電統計（v25.312：度數＋電量 % → KPI 與趨勢圖）
-    //
-    // [v25.539] 數字全部改讀 facts.charge（VehicleFacts 用 VehicleChargeAnalytics 算的，跟分析頁、列表項目卡同一份）。
-    // 以前這裡自己重寫一份 chargeSessions／batteryEstimates／efficiencyIntervals：沒擋「中間漏記充電」的段
-    // （一段 1,900 公里只記到 26 度，會算出每度跑 73 公里、每公里電費偏低），日期在未來的充電也算進去。
-    // 每度電、每公里、每度跑一律一位小數（決定 13）。版面照舊，下一版整區換新。
-
-    @ViewBuilder
-    private var chargingSection: some View {
-        if let c = facts?.charge, c.count > 0 {
-            chargingCard(c)
-        }
-    }
-
-    private func chargingCard(_ c: VehicleChargeSummary) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            sectionHeader("充電統計", color: .green, count: c.count)
-            chargeBasicRow(c)
-            if c.intervalCount > 0 {
-                chargeEfficiencyRow(c)
-            }
-            chargePriceTrend(c.prices)
-            chargeEfficiencyTrend(c.efficiency)
-            chargeCapacityTrend(c.capacity)
-            chargeAnalyticsButton
-        }
-        .padding(14)
-        .background(Color(.secondarySystemGroupedBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 16))
-        .padding(.horizontal)
-    }
-
-    /// [v25.539] 決定 13「7.9」：一位小數（7.94 → 7.9），跟列表項目卡的每度電同一個寫法；算不出來寫「—」
-    private func oneDecimal(_ v: Double?) -> String {
-        guard let v = v, v.isFinite else { return "—" }
-        return FinanceItemText.number(v, digits: 1)
-    }
-
-    /// KPI 四格：每度電價（Σ金額 ÷ Σ度數）／平均每次度數／累計度數／推估電池容量（最新一筆）
-    private func chargeBasicRow(_ c: VehicleChargeSummary) -> some View {
-        let total: String = c.totalKwh >= 1000
-            ? FinanceItemText.number(c.totalKwh, digits: 0)
-            : String(format: "%.1f", c.totalKwh)
-        let perSession: String = c.avgKwhPerSession.map { String(format: "%.1f", $0) } ?? "—"
-        let capacity: String = c.capacity.last.map { String(format: "%.1f", $0.value) } ?? "—"
-        return HStack(spacing: 0) {
-            chargeKpiCell("平均電價", oneDecimal(c.avgPricePerKwh), unit: "元/度")
-            Divider().frame(height: 30)
-            chargeKpiCell("平均每次", perSession, unit: "kWh")
-            Divider().frame(height: 30)
-            chargeKpiCell("累計", total, unit: "kWh")
-            Divider().frame(height: 30)
-            chargeKpiCell("推估容量", capacity, unit: "kWh")
-        }
-        .padding(.vertical, 6)
-    }
-
-    /// [v25.313] 電耗列：相鄰兩次都有里程錶的段才算；[v25.539] 中間漏記充電的段（每度跑超過汽車 12、機車 60 公里）不算
-    private func chargeEfficiencyRow(_ c: VehicleChargeSummary) -> some View {
-        HStack(spacing: 0) {
-            chargeKpiCell("平均電耗", oneDecimal(c.kmPerKwh), unit: "km/kWh")
-            Divider().frame(height: 30)
-            chargeKpiCell("每公里電費", oneDecimal(c.avgCostPerKm), unit: "元/km")
-            Divider().frame(height: 30)
-            chargeKpiCell("統計里程", FinanceItemText.number(c.trackedKm, digits: 0), unit: "km")
-        }
-        .padding(.vertical, 6)
-    }
-
-    /// 每度電價走勢（每次充電一點）
-    @ViewBuilder
-    private func chargePriceTrend(_ points: [VehicleChargeSummary.Point]) -> some View {
-        if points.count >= 2 {
-            Text("每度電價走勢").font(.caption).foregroundStyle(.secondary)
-            Chart(Array(points.enumerated()), id: \.offset) { _, p in
-                LineMark(x: .value("日期", p.date), y: .value("元/度", p.value))
-                    .foregroundStyle(.teal)
-                    .interpolationMethod(.catmullRom)
-                PointMark(x: .value("日期", p.date), y: .value("元/度", p.value))
-                    .foregroundStyle(.teal)
-                    .symbolSize(24)
-            }
-            .frame(height: 110)
-        }
-    }
-
-    /// [v25.313] 電耗走勢（每個里程區間一點；高＝省電、低＝耗電）
-    @ViewBuilder
-    private func chargeEfficiencyTrend(_ points: [VehicleChargeSummary.Point]) -> some View {
-        if points.count >= 2 {
-            Text("電耗走勢（km/kWh，越高越省）")
-                .font(.caption).foregroundStyle(.secondary)
-            Chart(Array(points.enumerated()), id: \.offset) { _, p in
-                LineMark(x: .value("日期", p.date), y: .value("km/kWh", p.value))
-                    .foregroundStyle(.blue)
-                    .interpolationMethod(.catmullRom)
-                PointMark(x: .value("日期", p.date), y: .value("km/kWh", p.value))
-                    .foregroundStyle(.blue)
-                    .symbolSize(24)
-            }
-            .chartYScale(domain: .automatic(includesZero: false))
-            .frame(height: 110)
-        } else if let only = points.first {
-            Text("電耗：\(oneDecimal(only.value)) km/kWh（再累積一個里程區間就會畫出走勢）")
-                .font(.caption2).foregroundStyle(.tertiary)
-        }
-    }
-
-    /// 推估電池容量走勢（充電區間 ≥15% 的樣本才收；下滑＝老化觀察）
-    @ViewBuilder
-    private func chargeCapacityTrend(_ points: [VehicleChargeSummary.Point]) -> some View {
-        if points.count >= 2 {
-            Text("推估電池容量走勢（度數 ÷ 充電區間 %）")
-                .font(.caption).foregroundStyle(.secondary)
-            Chart(Array(points.enumerated()), id: \.offset) { _, p in
-                LineMark(x: .value("日期", p.date), y: .value("kWh", p.value))
-                    .foregroundStyle(.green)
-                    .interpolationMethod(.catmullRom)
-                PointMark(x: .value("日期", p.date), y: .value("kWh", p.value))
-                    .foregroundStyle(.green)
-                    .symbolSize(24)
-            }
-            .chartYScale(domain: .automatic(includesZero: false))
-            .frame(height: 110)
-        } else if let only = points.first {
-            Text("推估電池容量：\(String(format: "%.1f", only.value)) kWh（充電區間 ≥15% 的紀錄累積 2 筆後畫出走勢）")
-                .font(.caption2).foregroundStyle(.tertiary)
-        }
-    }
-
-    /// [v25.397] 深入分析：續航、電池健康度、充電損耗、家充佔比、
-    /// 地點排行、充電習慣、每月里程、停車熱點
-    private var chargeAnalyticsButton: some View {
-        Button {
-            showChargeAnalytics = true
-        } label: {
-            HStack(spacing: 6) {
-                Image(systemName: "chart.line.uptrend.xyaxis")
-                    .font(.system(size: 12, weight: .semibold))
-                Text("充電與里程分析")
-                    .font(.caption.weight(.semibold))
-                Spacer()
-                Image(systemName: "chevron.right")
-                    .font(.caption2.weight(.semibold)).foregroundStyle(.tertiary)
-            }
-            .foregroundStyle(.green)
-            .padding(.horizontal, 10).padding(.vertical, 8)
-            .background(Color.green.opacity(0.10))
-            .clipShape(RoundedRectangle(cornerRadius: 10))
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-    }
-
-    private func chargeKpiCell(_ label: String, _ value: String, unit: String) -> some View {
-        VStack(spacing: 2) {
-            Text(value)
-                .font(.system(size: 15, weight: .bold, design: .rounded))
-                .foregroundStyle(.primary).monospacedDigit()
-                .lineLimit(1).minimumScaleFactor(0.7)
-            Text(unit).font(.system(size: 8)).foregroundStyle(.tertiary)
-            Text(label).font(.system(size: 9)).foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity)
-    }
-
-    // MARK: - 定期支出列（38pt 藍色漸層圖示圓 + 月均輔助）
-
-    private func fixedExpenseRow(_ fe: VehicleFixedExpense, index: Int) -> some View {
-        let color = Color.blue
-        let icon = fixedCategoryIcon(fe.category)
-        let periodLabel = fe.period == .monthly ? "每月" : "每年"
-        let monthlyEquiv = fe.period.toMonthly(fe.amount)
-
-        return HStack(spacing: 12) {
-            // v2：升圓形 + stroke 邊框（對齊全 App 標準圓形圖示圓規格）
-            ZStack {
-                Circle()
-                    .fill(
-                        LinearGradient(
-                            colors: [color.opacity(0.22), color.opacity(0.09)],
-                            startPoint: .topLeading, endPoint: .bottomTrailing
-                        )
-                    )
-                    .frame(width: 38, height: 38)
-                    .overlay(Circle().stroke(color.opacity(0.20), lineWidth: 0.75))
-                Image(systemName: icon)
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(color)
-            }
-
-            VStack(alignment: .leading, spacing: 3) {
-                Text(fe.category.rawValue)
-                    .font(.subheadline.weight(.medium))
-                    .lineLimit(1)
-                HStack(spacing: 4) {
-                    Text(periodLabel)
-                        .font(.system(size: 10, weight: .semibold))
-                        .padding(.horizontal, 6).padding(.vertical, 2)
-                        .background(color.opacity(0.10))
-                        .foregroundStyle(color)
-                        .clipShape(Capsule())
-                    if fe.period == .yearly {
-                        Text("月均 " + fmt(monthlyEquiv))
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-            }
-
-            Spacer(minLength: 4)
-
-            // v2：金額升為 accent 顏色，讓分類色貫穿整列
-            Text(fmt(fe.amount))
-                .font(.system(size: 15, weight: .bold, design: .rounded))
-                .foregroundStyle(color)
-                .contentTransition(.numericText())
-                .lineLimit(1)
-                .minimumScaleFactor(0.75)
         }
         .padding(.horizontal, 16)
-        .padding(.vertical, 12)
+        .padding(.top, 10)
+        .padding(.bottom, 28)
+        // 換車時整包內容依方向滑入（id 變了就觸發轉場）
+        .id(vehicleId)
+        .transition(slideTransition)
     }
 
-    // MARK: - 變動支出列（38pt 橘色漸層圖示圓 + 日期膠囊）
+    /// 看板、要確認、每月養車、接下來、車貸（各區自己決定整區要不要出現）
+    @ViewBuilder
+    private func upperSections(_ card: VehicleCardData, actions: VehicleCardActions,
+                               proxy: ScrollViewProxy) -> some View {
+        VehicleCardBoard(data: card, scrollTo: { anchor in scroll(proxy, to: anchor) })
+            .id(VehicleAnchor.top)
+        VehicleChecksSection(data: card, actions: actions)
+            .id(VehicleAnchor.checks)
+        VehicleMonthlySection(data: card, actions: actions)
+            .id(VehicleAnchor.monthly)
+        VehicleUpcomingSection(data: card, actions: actions)
+            .id(VehicleAnchor.upcoming)
+        VehicleLoanSection(data: card, actions: actions)
+            .id(VehicleAnchor.loan)
+    }
 
-    private func variableExpenseRow(_ ve: VehicleVariableExpense, index: Int) -> some View {
-        let color = Color.orange
+    /// 充電／加油／油電、我的帳本、車輛資料、照片與單據
+    @ViewBuilder
+    private func lowerSections(_ card: VehicleCardData, actions: VehicleCardActions) -> some View {
+        VehicleEnergySection(data: card, actions: actions)
+            .id(VehicleAnchor.energy)
+        VehicleLedgerSection(data: card, filter: $ledgerFilter, actions: actions)
+            .id(VehicleAnchor.ledger)
+        VehicleInfoSection(data: card, actions: actions)
+            .id(VehicleAnchor.info)
+        photosSection(card)
+            .id(VehicleAnchor.photos)
+    }
 
-        return HStack(spacing: 12) {
-            // v2：升圓形 + stroke 邊框（對齊全 App 標準圓形圖示圓規格）
-            ZStack {
-                Circle()
-                    .fill(
-                        LinearGradient(
-                            colors: [color.opacity(0.22), color.opacity(0.09)],
-                            startPoint: .topLeading, endPoint: .bottomTrailing
-                        )
-                    )
-                    .frame(width: 38, height: 38)
-                    .overlay(Circle().stroke(color.opacity(0.20), lineWidth: 0.75))
-                Image(systemName: ve.category.icon)
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(color)
+    fileprivate func scroll(_ proxy: ScrollViewProxy, to anchor: VehicleAnchor) {
+        withAnimation(.easeInOut(duration: 0.35)) {
+            proxy.scrollTo(anchor, anchor: .top)
+        }
+    }
+
+    // MARK: - 彈出頁、確認框
+
+    private func withPresentations<Content: View>(_ content: Content) -> some View {
+        withAlerts(withSheets(content))
+    }
+
+    private func withSheets<Content: View>(_ content: Content) -> some View {
+        content
+            .sheet(item: $sheet, onDismiss: { sheetDismissed() }) { s in sheetView(s).appStores() }
+            .exportPageSizeDialog(isPresented: $askExportPageSize,
+                                  itemCount: card?.ledger.events.count ?? 0) { per in
+                exportPaged(perPage: per)
             }
+    }
 
-            VStack(alignment: .leading, spacing: 3) {
-                Text(ve.category.rawValue)
-                    .font(.subheadline.weight(.medium))
-                    .lineLimit(1)
-                // 日期膠囊
-                Text(formatRowDate(ve.date))
-                    .font(.system(size: 10, weight: .semibold))
-                    .padding(.horizontal, 6).padding(.vertical, 2)
-                    .background(color.opacity(0.10))
-                    .foregroundStyle(color.opacity(0.85))
-                    .clipShape(Capsule())
+    private func withAlerts<Content: View>(_ content: Content) -> some View {
+        content
+            .alert(pendingConfirm?.title ?? "", isPresented: confirmPresented, presenting: pendingConfirm) { c in
+                confirmButtons(c)
+            } message: { c in
+                Text(c.message)
             }
-
-            Spacer(minLength: 4)
-
-            // v2：金額升為 accent 顏色，讓分類色貫穿整列
-            Text(fmt(ve.amount))
-                .font(.system(size: 15, weight: .bold, design: .rounded))
-                .foregroundStyle(color)
-                .contentTransition(.numericText())
-                .lineLimit(1)
-                .minimumScaleFactor(0.75)
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
-    }
-
-    // MARK: - v2：KPI 摘要橫列（[v25.539] 每月養車 / 近 N 月變動 / 持有）
-
-    /// [v25.539] 「月固定支出」改「每月養車」＝facts.monthly（定期照自己的週期換算、車貸月付、變動的月平均），
-    /// 跟列表項目卡、載具頁看板、理財現金流同一個數，四捨五入到百位寫「約 NT$5,200」。
-    /// 以前讀鏡像：季繳被當月繳多算 3 倍、繳完或停掉的照算、只有定期
-    private var monthlyKpiValue: String {
-        guard let f = facts else { return "—" }
-        return FinanceText.about100(f.monthly) ?? "—"
-    }
-
-    /// [v25.539] 已售出時算到售出日：寫「賣出前」，免得以為現在還在花
-    private var monthlyKpiLabel: String {
-        (facts?.isSold ?? false) ? "賣出前每月養車" : "每月養車"
-    }
-
-    /// [v25.539] 「近12月變動」；買車不到一年寫實際月數（「近7月變動」），跟每月養車除的月數一樣
-    private var variableKpiLabel: String {
-        guard let f = facts else { return "近12月變動" }
-        return (f.isSold ? "賣出前" : "近") + "\(f.periodMonths)月變動"
-    }
-
-    private var vehicleKpiStrip: some View {
-        HStack(spacing: 0) {
-            vehicleKpiCell(icon: "car.fill", label: monthlyKpiLabel,
-                           value: monthlyKpiValue, color: .blue)
-            Rectangle()
-                .fill(Color(.separator).opacity(0.3))
-                .frame(width: 0.5, height: 28)
-            vehicleKpiCell(icon: "cart.circle.fill", label: variableKpiLabel,
-                           value: facts == nil ? "—" : fmt(recentVariable), color: .orange)
-            Rectangle()
-                .fill(Color(.separator).opacity(0.3))
-                .frame(width: 0.5, height: 28)
-            vehicleKpiCell(icon: "clock.fill", label: "持有",
-                           value: heldText, color: .green)
-        }
-        .padding(.vertical, 12)
-        .background(Color(.systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 14))
-        .overlay(
-            RoundedRectangle(cornerRadius: 14)
-                .stroke(Color(.separator).opacity(0.12), lineWidth: 0.75)
-        )
-        .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 3)
-        .padding(.horizontal, 24)
-    }
-
-    private func vehicleKpiCell(icon: String, label: String, value: String, color: Color) -> some View {
-        VStack(spacing: 4) {
-            // 30pt 漸層圖示圓（對齊 statsStrip 規格）
-            ZStack {
-                Circle()
-                    .fill(LinearGradient(
-                        colors: [color.opacity(0.22), color.opacity(0.08)],
-                        startPoint: .topLeading, endPoint: .bottomTrailing
-                    ))
-                    .frame(width: 30, height: 30)
-                    .overlay(Circle().stroke(color.opacity(0.20), lineWidth: 0.75))
-                Image(systemName: icon)
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(color)
-            }
-            Text(value)
-                .font(.system(size: 13, weight: .bold, design: .rounded))
-                .foregroundStyle(.primary)
-                .lineLimit(1)
-                .minimumScaleFactor(0.7)
-            Text(label)
-                .font(.system(size: 9, weight: .semibold))
-                .foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity)
-    }
-
-    // MARK: - v3：空狀態（定期／變動支出皆無記錄時顯示）
-
-    /// 對齊 StockDetailView 交易/股利空狀態卡規格：漸層圖示圓 + 標題 + 說明文字
-    private var emptyExpensesCard: some View {
-        VStack(spacing: 8) {
-            ZStack {
-                Circle()
-                    .fill(LinearGradient(
-                        colors: [Color.blue.opacity(0.15), Color.blue.opacity(0.06)],
-                        startPoint: .topLeading, endPoint: .bottomTrailing
-                    ))
-                    .frame(width: 40, height: 40)
-                Circle()
-                    .stroke(Color.blue.opacity(0.18), lineWidth: 0.75)
-                    .frame(width: 40, height: 40)
-                Image(systemName: "fuelpump.circle")
-                    .font(.system(size: 16, weight: .medium))
-                    .foregroundStyle(Color.blue.opacity(0.65))
-            }
-            Text("尚無支出記錄")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
-            Text("點右上角「編輯」新增定期或變動支出")
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
-                .multilineTextAlignment(.center)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 28)
-        .background(Color(.systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 14))
-        .overlay(
-            RoundedRectangle(cornerRadius: 14)
-                .stroke(Color(.separator).opacity(0.12), lineWidth: 0.75)
-        )
-        .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 3)
-    }
-
-    // MARK: - 輔助
-
-    /// 美化升級：Capsule 色條 + subheadline.bold + 計數膠囊
-    private func sectionHeader(_ title: String, color: Color, count: Int) -> some View {
-        HStack(spacing: 10) {
-            Capsule()
-                .fill(
-                    LinearGradient(
-                        colors: [color, color.opacity(0.55)],
-                        startPoint: .top, endPoint: .bottom
-                    )
-                )
-                .frame(width: 4, height: 16)
-            Text(title)
-                .font(.subheadline.weight(.bold))
-            Spacer()
-            Text("\(count) 筆")
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(color)
-                .padding(.horizontal, 8).padding(.vertical, 3)
-                .background(color.opacity(0.10))
-                .clipShape(Capsule())
-                .overlay(Capsule().stroke(color.opacity(0.22), lineWidth: 0.6))
-        }
-        .padding(.horizontal, 16)
-        .padding(.top, 14)
-        .padding(.bottom, 6)
-    }
-
-    private func fixedCategoryIcon(_ cat: VehicleFixedCategory) -> String {
-        switch cat {
-        case .carLoan:     return "creditcard.fill"
-        case .tax:         return "doc.text.fill"
-        case .subscription: return "repeat.circle.fill"
-        }
-    }
-
-    /// [v25.538] 固定西曆與台灣中文：手機設成民國曆或別的地區時，DateFormatter 預設會跟著系統走
-    private static let rowDateFormatter: DateFormatter = {
-        let f = DateFormatter()
-        f.calendar = Calendar(identifier: .gregorian)
-        f.locale = Locale(identifier: "zh_TW")
-        f.dateFormat = "M/d"
-        return f
-    }()
-
-    private func formatRowDate(_ date: Date) -> String {
-        let cal = Calendar.current
-        if cal.isDateInToday(date) { return "今日" }
-        if cal.isDateInYesterday(date) { return "昨天" }
-        return Self.rowDateFormatter.string(from: date)
-    }
-
-    /// [v25.538] 收成 VehicleDeletion（跟列表左滑同一份）：以前這裡自己 removeAll 支出，
-    /// 沒清銀行扣款紀錄，只靠 linkedVehicleId 連過來的支出也會留下指向不存在車子的連結。
-    /// 先關掉卡片、下一個 runloop 才刪：確認框和卡片正在收的那個交易裡改 store 容易閃退
-    private func deleteVehicle(mode: VehicleDeletion.Mode) {
-        let finance = store
-        let expenses = expenseStore
-        let life = lifeStore
-        let id = vehicleId
-        dismiss()
-        DispatchQueue.main.async {
-            guard let v = finance.vehicles.first(where: { $0.id == id }) else { return }
-            VehicleDeletion.delete(v, mode: mode, financeStore: finance, expenseStore: expenses, lifeStore: life)
-        }
-    }
-
-    private func fmt(_ v: Double) -> String {
-        v.ntdWanString
-    }
-
-    /// v4：從共用 ntdWanString 拆出「數字」與「萬／億」量級單位，供大字估值沿用既有字級／
-    /// 動畫設計；跟進 ntdWanString 既有的萬→億進位邊界，取代僅換算到萬的舊版 fmtWan。
-    private func splitWan(_ v: Double) -> (number: String, unit: String) {
-        var s = v.ntdWanString
-        if s.hasPrefix("NT$") { s.removeFirst(3) }
-        if s.hasSuffix("億") { return (String(s.dropLast()), "億") }
-        if s.hasSuffix("萬") { return (String(s.dropLast()), "萬") }
-        return (s, "")
-    }
-
-    /// v4：「數字 單位」單行組字（無單位時省略空格），供底部資訊列等窄欄位使用。
-    private func splitWanLabel(_ v: Double) -> String {
-        let parts = splitWan(v)
-        return parts.unit.isEmpty ? parts.number : "\(parts.number) \(parts.unit)"
-    }
-}
-
-// MARK: - 車輛照片紀錄編輯器（支援多張照片，結構比照 RenovationPhotoEditor）
-
-struct VehiclePhotoEditor: View {
-    @EnvironmentObject var store: FinanceStore
-    @Environment(\.dismiss) private var dismiss
-
-    let vehicleId: UUID
-    let editing: VehiclePhotoRecord?
-
-    @State private var date: Date = Date()
-    @State private var category: VehiclePhotoCategory = .maintenance
-    @State private var title: String = ""
-    @State private var note: String = ""
-    @State private var photoFileNames: [String] = []
-    @State private var showDeleteConfirm: Bool = false
-    // 防止「儲存」連點：save() 把寫回 store 延後到下個 runloop，連點兩下會讀到同一份
-    // vehicle 快照、各自 append，後寫者蓋掉前者（同型防護見 RenovationPhotoEditor.isSaving）
-    @State private var isSaving: Bool = false
-    /// [v25.538] setupInitial 只跑一次：相機、文件掃描是 fullScreenCover，關掉時會再觸發這頁的
-    /// onAppear，以前會把 photoFileNames 蓋回進來時的樣子，剛拍的照片從畫面消失、檔案卻已經上傳
-    @State private var didSetup: Bool = false
-
-    /// [v25.538] 有沒有還沒存的東西。照片在選的當下就已經寫檔（新加的）或刪檔（原本的），
-    /// 下滑關掉不會經過 cancel() 收拾，會留下孤兒檔或指向已刪檔案的紀錄，所以有變更時擋住下滑
-    private var hasUnsavedChanges: Bool {
-        guard didSetup else { return false }
-        if photoFileNames != (editing?.photoFileNames ?? []) { return true }
-        if let e = editing {
-            return date != e.date || category != e.category || title != e.title || note != e.note
-        }
-        return !title.isEmpty || !note.isEmpty
-    }
-
-    var body: some View {
-        NavigationStack {
-            Form {
-                Section {
-                    DatePicker("日期", selection: $date, displayedComponents: .date)
-                    Picker("類別", selection: $category) {
-                        ForEach(VehiclePhotoCategory.allCases) { c in
-                            Label(c.rawValue, systemImage: c.icon).tag(c)
-                        }
-                    }
-                    TextField("標題（例：五萬公里保養、牌照稅）", text: $title)
-                } header: {
-                    vehSectionHeader("基本資訊", icon: "calendar.circle.fill",
-                                     gradient: [Color.teal, Color.teal.opacity(0.55)])
-                }
-
-                Section {
-                    MultiPhotoGallery(
-                        fileNames: $photoFileNames,
-                        urlFor: { VehiclePhotoRecord.photoURL(for: $0) },
-                        onSaveImage: { data in
-                            VehiclePhotoRecord.savePhoto(data, id: UUID())
-                        },
-                        onDeleteFile: { name in
-                            VehiclePhotoRecord.deletePhoto(name)
-                        },
-                        title: "照片"
-                    )
-                    .padding(.vertical, 4)
-                } header: {
-                    // 純文字標題：裝飾（標題／計數）由 MultiPhotoGallery 內建 header 負責，
-                    // 這裡疊加會重複顯示（同型取捨見 RenovationPhotoEditor 照片 Section 註解）
-                    Text("照片")
-                } footer: {
-                    Text("可拍照或從相簿一次選多張：保養單據、稅費收據、保險文件、事故照片等。")
-                }
-
-                Section {
-                    TextField("選填備註（例：保養廠、金額、里程數）", text: $note, axis: .vertical).lineLimit(3)
-                } header: {
-                    vehSectionHeader("備註", icon: "note.text",
-                                     gradient: [Color(.systemGray2), Color(.systemGray3)])
-                }
-
-                if editing != nil {
-                    Section {
-                        Button(role: .destructive) {
-                            showDeleteConfirm = true
-                        } label: {
-                            Label("刪除此筆", systemImage: "trash")
-                        }
-                    }
-                }
-            }
-            .navigationTitle(editing == nil ? "新增照片紀錄" : "編輯照片紀錄")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) { Button("取消") { cancel() } }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("儲存") { save() }
-                        .bold().foregroundStyle(.green)
-                        .disabled(photoFileNames.isEmpty || isSaving)
-                }
-            }
-            .alert("確定刪除？", isPresented: $showDeleteConfirm) {
-                Button("刪除", role: .destructive) { deleteRecord() }
-                Button("取消", role: .cancel) {}
-            }
-            .onAppear { setupInitial() }
-        }
-        // 有變更時只能按「取消」（清掉這次新加的照片檔、收斂已刪的檔名）或「儲存」
-        .interactiveDismissDisabled(hasUnsavedChanges)
-    }
-
-    /// 統一 Section header（4pt Capsule 漸層色條 + 彩色圖示 + .subheadline.bold）
-    private func vehSectionHeader(_ title: String, icon: String, gradient: [Color]) -> some View {
-        HStack(spacing: 8) {
-            Capsule()
-                .fill(LinearGradient(colors: gradient, startPoint: .top, endPoint: .bottom))
-                .frame(width: 4, height: 16)
-            Image(systemName: icon)
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(gradient.first ?? Color(.systemGray))
-            Text(title)
-                .font(.subheadline.weight(.bold))
-        }
-    }
-
-    private func setupInitial() {
-        guard !didSetup else { return }
-        didSetup = true
-        if let e = editing {
-            date = e.date
-            category = e.category
-            title = e.title
-            note = e.note
-            photoFileNames = e.photoFileNames
-        }
-    }
-
-    private func save() {
-        guard !isSaving else { return }
-        guard var vehicle = store.vehicles.first(where: { $0.id == vehicleId }) else { return }
-        isSaving = true
-        let recordId = editing?.id ?? UUID()
-
-        let record = VehiclePhotoRecord(
-            id: recordId,
-            date: date,
-            category: category,
-            title: title.trimmingCharacters(in: .whitespaces),
-            photoFileNames: photoFileNames,
-            note: note.trimmingCharacters(in: .whitespaces)
-        )
-        if let idx = vehicle.photoRecords.firstIndex(where: { $0.id == recordId }) {
-            vehicle.photoRecords[idx] = record
-        } else {
-            vehicle.photoRecords.append(record)
-        }
-        // 先關 sheet、下個 runloop 才改 @Published store：避免在關閉 sheet 的
-        // view-update 交易裡同步改 observed state 造成真機閃退（同型見 RenovationPhotoEditor.save）
-        let financeStore = store
-        dismiss()
-        DispatchQueue.main.async { financeStore.update(vehicle) }
-    }
-
-    /// 取消：清掉本次 session 新增、尚未存檔的照片檔；編輯模式下若刪了原有照片，
-    /// 回寫 store 收斂檔名，避免孤兒引用（完整理由見 RenovationPhotoEditor.cancel 註解）
-    private func cancel() {
-        let original = Set(editing?.photoFileNames ?? [])
-        for name in photoFileNames where !original.contains(name) {
-            VehiclePhotoRecord.deletePhoto(name)
-        }
-        let remaining = photoFileNames.filter { original.contains($0) }
-        if let e = editing, Set(remaining) != original,
-           var vehicle = store.vehicles.first(where: { $0.id == vehicleId }),
-           let idx = vehicle.photoRecords.firstIndex(where: { $0.id == e.id }) {
-            vehicle.photoRecords[idx].photoFileNames = remaining
-            let financeStore = store
-            dismiss()
-            DispatchQueue.main.async { financeStore.update(vehicle) }
-            return
-        }
-        dismiss()
-    }
-
-    private func deleteRecord() {
-        guard var vehicle = store.vehicles.first(where: { $0.id == vehicleId }),
-              let e = editing else { return }
-        // 刪畫面上即時的 photoFileNames 而非進場快照，避免漏刪編輯中新增的照片
-        //（同型理由見 RenovationPhotoEditor.deleteRecord 註解）
-        for name in photoFileNames {
-            VehiclePhotoRecord.deletePhoto(name)
-        }
-        vehicle.photoRecords.removeAll { $0.id == e.id }
-        let financeStore = store
-        dismiss()
-        DispatchQueue.main.async { financeStore.update(vehicle) }
-    }
-}
-
-// MARK: - 車輛項目參照（點開定期/變動支出列的詳情用）
-
-fileprivate enum VehicleItemRef: Identifiable {
-    case fixed(VehicleFixedExpense)
-    case variable(VehicleVariableExpense)
-
-    var id: UUID {
-        switch self {
-        case .fixed(let f): return f.id
-        case .variable(let v): return v.id
-        }
-    }
-}
-
-// MARK: - 車輛項目詳情（分類/金額/週期＋連結支出資訊，右上「編輯」開啟連結支出）
-
-fileprivate struct VehicleItemDetailSheet: View {
-    @EnvironmentObject var store: FinanceStore
-    @EnvironmentObject var expenseStore: ExpenseStore
-    @EnvironmentObject var subscription: SubscriptionManager
-    @Environment(\.dismiss) private var dismiss
-
-    let vehicleId: UUID
-    let item: VehicleItemRef
-
-    @State private var editingExpense: Expense?
-    @State private var showPremiumAlert = false
-    @State private var cuteDraft: CutePhotoDraft?
-
-    /// 每次 body 重算都從 store 取最新版本：右上「編輯」存檔回來後畫面立即反映
-    private var currentItem: VehicleItemRef {
-        guard let v = store.vehicles.first(where: { $0.id == vehicleId }) else { return item }
-        switch item {
-        case .fixed(let f):
-            return v.fixedExpenses.first(where: { $0.id == f.id }).map { .fixed($0) } ?? item
-        case .variable(let vr):
-            return v.variableExpenses.first(where: { $0.id == vr.id }).map { .variable($0) } ?? item
-        }
-    }
-
-    private var linkedExpense: Expense? {
-        let linkedId: UUID?
-        switch currentItem {
-        case .fixed(let f): linkedId = f.linkedExpenseId
-        case .variable(let v): linkedId = v.linkedExpenseId
-        }
-        guard let linkedId else { return nil }
-        return expenseStore.expenses.first(where: { $0.id == linkedId })
-    }
-
-    private var navTitle: String {
-        switch currentItem {
-        case .fixed(let f): return f.category.rawValue
-        case .variable(let v): return v.category.rawValue
-        }
-    }
-
-    var body: some View {
-        NavigationStack {
-            Form {
-                switch currentItem {
-                case .fixed(let fe):
-                    Section("項目資訊") {
-                        infoRow("分類", fe.category.rawValue)
-                        infoRow("金額", fe.amount.ntdWanString)
-                        infoRow("週期", fe.period == .monthly ? "每月" : "每年")
-                        if fe.period == .yearly {
-                            infoRow("月均", fe.period.toMonthly(fe.amount).ntdWanString)
-                        }
-                    }
-                case .variable(let ve):
-                    Section("項目資訊") {
-                        infoRow("分類", ve.category.rawValue)
-                        infoRow("金額", ve.amount.ntdWanString)
-                        infoRow("日期", Self.dateFmt.string(from: ve.date))
-                    }
-                }
-
-                if let exp = linkedExpense {
-                    Section("連結記帳支出") {
-                        infoRow("名稱", exp.title.isEmpty ? "—" : exp.title)
-                        if !exp.note.trimmingCharacters(in: .whitespaces).isEmpty {
-                            infoRow("備註", exp.note)
-                        }
-                        infoRow("日期", Self.dateFmt.string(from: exp.date))
-                        if !exp.photoFileNames.isEmpty {
-                            ScrollView(.horizontal, showsIndicators: false) {
-                                HStack(spacing: 10) {
-                                    ForEach(exp.photoFileNames, id: \.self) { name in
-                                        Button {
-                                            cuteDraft = CutePhotoDraft(
-                                                urls: exp.photoFileNames.map { Expense.photoURL(for: $0) },
-                                                title: exp.title.isEmpty ? "支出照片" : exp.title,
-                                                note: exp.note,
-                                                date: exp.date,
-                                                kind: .expense
-                                            )
-                                        } label: {
-                                            ThumbnailImageView(url: Expense.photoURL(for: name))
-                                                .frame(width: 72, height: 72)
-                                                .clipShape(RoundedRectangle(cornerRadius: 10))
-                                        }
-                                        .buttonStyle(.plain)
-                                    }
-                                }
-                            }
-                            .padding(.vertical, 2)
-                        }
-                    }
-                } else {
-                    Section {
-                        Text("此項目未連結記帳支出；金額與分類可在車輛卡片右上「編輯」畫面調整。")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-            }
-            .navigationTitle(navTitle)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) { Button("關閉") { dismiss() } }
-                if let exp = linkedExpense {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Button("編輯") {
-                            if subscription.isPremium { editingExpense = exp }
-                            else { showPremiumAlert = true }
-                        }
-                        .bold().foregroundStyle(.green)
-                    }
-                }
-            }
-            .sheet(item: $editingExpense) { exp in
-                AddExpenseView(expenseType: exp.expenseType, editingExpense: exp)
-                    .appStores()
-            }
-            .sheet(item: $cuteDraft) { draft in
-                CutePhotoViewer(draft: draft)
-                    .appStores()
+            .confirmationDialog(pendingChoice?.title ?? "", isPresented: choicePresented,
+                                titleVisibility: .visible, presenting: pendingChoice) { c in
+                choiceButtons(c)
+            } message: { c in
+                Text(c.message)
             }
             .premiumLockAlert(isPresented: $showPremiumAlert)
+    }
+
+    private var confirmPresented: Binding<Bool> {
+        Binding(get: { pendingConfirm != nil }, set: { if !$0 { pendingConfirm = nil } })
+    }
+
+    private var choicePresented: Binding<Bool> {
+        Binding(get: { pendingChoice != nil }, set: { if !$0 { pendingChoice = nil } })
+    }
+
+    @ViewBuilder
+    private func confirmButtons(_ c: VehicleConfirm) -> some View {
+        if let label = c.button {
+            Button(label, role: c.destructive ? .destructive : nil) { Self.runAfterClose(c.action) }
+            Button("取消", role: .cancel) {}
+        } else {
+            Button("好", role: .cancel) {}
         }
     }
 
-    /// [v25.538] 固定西曆與台灣中文：手機設成民國曆時「yyyy」會印成 115/10/11
-    private static let dateFmt: DateFormatter = {
+    /// 確認框按下去要寫 store 的（刪記帳、停止扣款、移除鏡像、刪照片…）排到下一個 runloop 才做：
+    /// 確認框正在收的那個交易裡同步改 @Published store 容易閃退（同 AddVehicleView、VehiclePhotoEditor 的寫法）
+    private static func runAfterClose(_ action: @escaping () -> Void) {
+        DispatchQueue.main.async { action() }
+    }
+
+    @ViewBuilder
+    private func choiceButtons(_ c: VehicleChoice) -> some View {
+        ForEach(c.options) { o in
+            Button(o.label, role: o.destructive ? .destructive : nil) { o.action() }
+        }
+        Button("取消", role: .cancel) {}
+    }
+
+    /// 兩個 switch 分開（記帳類／照片類）：一個 switch 放全部 case 容易型別檢查逾時
+    @ViewBuilder
+    private func sheetView(_ s: VehicleSheet) -> some View {
+        switch s {
+        case .edit, .editExpense, .newExpense, .share:
+            recordSheet(s)
+        default:
+            mediaSheet(s)
+        }
+    }
+
+    /// 編輯頁、記帳、分享
+    @ViewBuilder
+    private func recordSheet(_ s: VehicleSheet) -> some View {
+        switch s {
+        case .edit(let focus):
+            AddVehicleView(editing: vehicle, focus: focus)
+        case .editExpense(let ex, let showVehicleSection):
+            AddExpenseView(expenseType: ex.expenseType, editingExpense: ex,
+                           preset: Self.editPreset(showVehicleSection))
+        case .newExpense(let request):
+            AddExpenseView(expenseType: request.expenseType, preset: request.preset)
+        case .share(let payload):
+            ShareSheet(items: payload.items)
+        default:
+            EmptyView()
+        }
+    }
+
+    /// 照片紀錄編輯、看照片、充電與里程分析
+    @ViewBuilder
+    private func mediaSheet(_ s: VehicleSheet) -> some View {
+        switch s {
+        case .photoEditor(_, let record, let category):
+            VehiclePhotoEditor(vehicleId: vehicleId, editing: record, category: category)
+        case .photos(let draft):
+            CutePhotoViewer(draft: draft)
+        case .chargeAnalytics:
+            VehicleChargeAnalyticsView(vehicleId: vehicleId)
+        default:
+            EmptyView()
+        }
+    }
+
+    /// 定案 19：油錢、電費、保養、維修那幾筆打開時帶 showVehicleSection，度數、公升、里程欄直接看得到
+    private static func editPreset(_ showVehicleSection: Bool) -> AddExpensePreset? {
+        showVehicleSection ? AddExpensePreset(showVehicleSection: true) : nil
+    }
+}
+
+// MARK: - 動作（VehicleCardActions 的每一個 closure）
+
+extension VehicleDetailView {
+    /// 新增、編輯、刪除、修正的唯一一道門：看資料免費，改資料付費
+    fileprivate func requirePremium(_ action: () -> Void) {
+        if subscription.isPremium {
+            action()
+        } else {
+            showPremiumAlert = true
+        }
+    }
+
+    fileprivate func makeActions(_ proxy: ScrollViewProxy) -> VehicleCardActions {
+        var a = VehicleCardActions()
+        a.scrollTo = { anchor in scroll(proxy, to: anchor) }
+        // 篩選只改變顯示：跟篩選膠囊同一個動畫（easeOut 0.25）
+        a.setLedgerFilter = { filter in
+            withAnimation(.easeOut(duration: 0.25)) { ledgerFilter = filter }
+        }
+        a.edit = { focus in requirePremium { sheet = .edit(focus) } }
+        a.fixCheck = { check, action in fixCheck(check, action) }
+        a.openExpense = { id in requirePremium { openExpenseRecord(id) } }
+        a.stopExpense = { id in requirePremium { confirmStop(id) } }
+        a.deleteLoan = { row in requirePremium { confirmDeleteLoan(row) } }
+        a.addLedger = { kind in requirePremium { presentAdd(kind) } }
+        a.openLedger = { event in openLedger(event, proxy: proxy) }
+        a.deleteLedger = { event in deleteLedger(event) }
+        // 充電與里程分析、看照片都不用付費
+        a.openAnalytics = { sheet = .chargeAnalytics }
+        a.showPhotos = { draft in sheet = .photos(draft) }
+        // 「＋ 記一筆」選單在打開前就擋：沒付費時畫面換成普通按鈕，按了跳付費說明
+        a.canEdit = subscription.isPremium
+        a.askPremium = { showPremiumAlert = true }
+        return a
+    }
+
+    /// 只是告訴你一件事（只有「好」）
+    fileprivate func presentNotice(_ title: String, _ message: String) {
+        pendingConfirm = VehicleConfirm(title: title, message: message)
+    }
+
+    /// 從選單（confirmationDialog）選了之後再跳確認框：等選單收完再出來，不然確認框會被吃掉
+    fileprivate func presentConfirmLater(_ c: VehicleConfirm) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+            pendingConfirm = c
+        }
+    }
+
+    /// 確認框按下去之後要開彈出頁：一樣等確認框收完
+    fileprivate func presentSheetLater(_ s: VehicleSheet) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+            sheet = s
+        }
+    }
+
+    // MARK: 打開記帳那一筆
+
+    /// 打開記帳裡那一筆（帳本列、接下來、車貸列、要確認的「去填／去看」）
+    fileprivate func openExpenseRecord(_ id: UUID) {
+        guard let ex = expenseStore.expenses.first(where: { $0.id == id }) else {
+            presentNotice("找不到這筆記帳", "記帳裡已經沒有這一筆了（可能在記帳那邊刪掉了）。")
+            return
+        }
+        sheet = .editExpense(ex, showVehicleSection: Self.showsVehicleSection(ex))
+    }
+
+    /// 油錢、電費、保養、維修：記帳頁的車輛區（度數、電量、公升、里程錶）直接打開
+    fileprivate static func showsVehicleSection(_ ex: Expense) -> Bool {
+        guard ex.expenseType == .variable, let cat = ex.vehicleExpenseCategory else { return false }
+        switch cat {
+        case .fuel, .electricity, .maintenance, .repair: return true
+        default: return false
+        }
+    }
+
+    // MARK: 記一筆
+
+    /// 「＋ 記一筆」「＋ 記保險」「＋ 記稅費」「＋ 加一筆車貸」「＋ 記第一次充電」：分類先帶好、連到這台。
+    /// 已售出的車，變動支出的日期預設賣出日（照房屋）
+    fileprivate func presentAdd(_ kind: VehicleLedgerAddKind) {
+        if kind == .photo {
+            sheet = .photoEditor(UUID(), nil, .maintenance)
+            return
+        }
+        if let cat = kind.variableCategory {
+            var preset = AddVehicleView.makeVariablePreset(for: cat, vehicleId: vehicleId)
+            let v = vehicle
+            if v.isSold(asOf: Date()), let sold = v.soldDate { preset.date = sold }
+            sheet = .newExpense(VehicleExpenseRequest(expenseType: .variable, preset: preset))
+        } else if let fixed = kind.fixedKind {
+            let preset = AddVehicleView.makeFixedPreset(for: fixed, vehicleId: vehicleId)
+            sheet = .newExpense(VehicleExpenseRequest(expenseType: .fixed, preset: preset))
+        }
+    }
+
+    // MARK: 帳本列
+
+    /// 車貸年列捲到車貸區（不用付費）；其他都是去改資料（付費）
+    fileprivate func openLedger(_ e: VehicleLedgerEvent, proxy: ScrollViewProxy) {
+        switch e.source {
+        case .loanYear:
+            scroll(proxy, to: .loan)
+        case .expense(let id):
+            requirePremium { openExpenseRecord(id) }
+        case .purchase:
+            requirePremium { sheet = .edit(.purchase) }
+        case .fixedYear(let id, _):
+            requirePremium { openExpenseRecord(id) }
+        case .legacy(let mirrorId):
+            requirePremium { offerLegacyChoices(e, mirrorId: mirrorId) }
+        }
+    }
+
+    /// 長按刪除：只有真的記帳列能刪（買車列、年列、沒連到記帳的不能）
+    fileprivate func deleteLedger(_ e: VehicleLedgerEvent) {
+        guard e.canDelete, let id = e.expenseId else { return }
+        requirePremium { confirmDeleteLedger(e, expenseId: id) }
+    }
+
+    fileprivate func confirmDeleteLedger(_ e: VehicleLedgerEvent, expenseId id: UUID) {
+        guard expenseStore.expenses.contains(where: { $0.id == id }) else {
+            presentNotice("找不到這筆記帳", "記帳裡已經沒有這一筆了（可能在記帳那邊刪掉了）。")
+            return
+        }
+        let title = "刪除「\(e.title) \(e.amountText)」？"
+        let message: String
+        if let bank = bankName(forExpense: id) {
+            let account = bank.hasSuffix("帳戶") ? bank : "\(bank)帳戶"
+            message = "記帳裡這筆和\(account)的扣款紀錄會一起刪除，不能復原。"
+        } else {
+            message = "記帳裡這筆支出會一起刪除，不能復原。"
+        }
+        pendingConfirm = VehicleConfirm(title: title, message: message, button: "刪除",
+                                        action: { deleteExpenses([id]) })
+    }
+
+    /// 銀行帳戶裡真的有這筆扣款才提銀行名（信用卡、週期性固定支出不會有單筆扣款）。照抄 RealEstateDetailView
+    fileprivate func bankName(forExpense id: UUID) -> String? {
+        for ms in lifeStore.milestones {
+            let deposits = ms.bankDeposits ?? []
+            guard deposits.contains(where: { $0.linkedExpenseId == id }) else { continue }
+            let bank = (ms.bankName ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            return bank.isEmpty ? ms.title : bank
+        }
+        return nil
+    }
+
+    /// 刪記帳支出：收據照片、所有銀行帳戶裡的扣款紀錄、每台車身上指到它的鏡像一起清
+    fileprivate func deleteExpenses(_ ids: Set<UUID>) {
+        RealEstateDeletion.removeExpenses(ids, expenseStore: expenseStore, lifeStore: lifeStore)
+    }
+
+    /// 沒連到記帳的舊變動鏡像：補建一筆記帳支出（直接建，不開表單），或只從車子拿掉
+    fileprivate func offerLegacyChoices(_ e: VehicleLedgerEvent, mirrorId: UUID) {
+        let message = "這筆 \(e.amountText) 只記在車子這邊，記帳裡沒有：不會算進記帳的支出，也沒有地方改。補建一筆記帳支出之後，點這一列就能編輯。"
+        let day = FinanceFormat.ymd(e.date)
+        let backfill = VehicleChoice.Option(label: "補建記帳支出", action: {
+            presentConfirmLater(VehicleConfirm(
+                title: "補建記帳支出？",
+                message: "在記帳新增一筆 \(e.amountText)（\(day)），連到這台車。不會動銀行帳戶。",
+                button: "補建", destructive: false,
+                action: { backfillLegacy(mirrorId) }))
+        })
+        let remove = VehicleChoice.Option(label: "從車子移除", destructive: true, action: {
+            presentConfirmLater(VehicleConfirm(
+                title: "移除「\(e.title) \(e.amountText)」？",
+                message: "這一筆只記在車子這邊（沒連到記帳），會從車子拿掉，不能復原。",
+                button: "移除",
+                action: { removeMirrors([mirrorId]) }))
+        })
+        pendingChoice = VehicleChoice(title: "「\(e.title)」沒連到記帳", message: message, options: [backfill, remove])
+    }
+
+    /// 補建：照鏡像的分類、金額、日期建一筆汽車變動支出，鏡像改連過去（不寫銀行扣款）
+    fileprivate func backfillLegacy(_ mirrorId: UUID) {
+        guard var v = store.vehicles.first(where: { $0.id == vehicleId }) else { return }
+        guard let made = VehicleFixes.backfillVariable(mirrorId, of: &v) else { return }
+        expenseStore.add(made)
+        store.update(v)
+    }
+
+    /// 只從這台車移掉這些鏡像（記帳不動）
+    fileprivate func removeMirrors(_ ids: [UUID]) {
+        guard var v = store.vehicles.first(where: { $0.id == vehicleId }) else { return }
+        VehicleFixes.removeMirrors(Set(ids), from: &v)
+        store.update(v)
+    }
+
+    // MARK: 停止扣款、刪車貸
+
+    /// 停止扣款（接下來、車貸列長按）：最後扣款日設成今天（確認文字照 J253）
+    fileprivate func confirmStop(_ id: UUID) {
+        guard expenseStore.expenses.contains(where: { $0.id == id }) else {
+            presentNotice("找不到這筆記帳", "記帳裡已經沒有這一筆了（可能在記帳那邊刪掉了）。")
+            return
+        }
+        let today = FinanceFormat.ymd(Self.gregorian.startOfDay(for: Date()))
+        let message = "記帳那筆的最後扣款日設成今天（\(today)），之後不再扣，也不會再從銀行扣。"
+        pendingConfirm = VehicleConfirm(title: "停止扣款？", message: message, button: "停止扣款",
+                                        destructive: false, action: { stopExpense(id) })
+    }
+
+    fileprivate func stopExpense(_ id: UUID) {
+        var list = expenseStore.expenses
+        if VehicleFixes.stop(id, on: Date(), in: &list) {
+            expenseStore.expenses = list
+        }
+    }
+
+    /// 刪一筆車貸會改寫過去（已繳的期數也從帳本和淨資產走勢消失），確認文字由 VehicleCardData 寫好
+    fileprivate func confirmDeleteLoan(_ row: VehicleLoanSectionData.Row) {
+        let title = "刪除「\(row.title)」？"
+        switch row.source {
+        case .expense(let id):
+            let fallback = "會刪掉記帳裡這筆車貸和銀行的扣款紀錄，不能復原。"
+            let message = row.deleteMessage.isEmpty ? fallback : row.deleteMessage
+            pendingConfirm = VehicleConfirm(title: title, message: message, button: "刪除",
+                                            action: { deleteExpenses([id]) })
+        case .legacy(let mirrorId):
+            let message = "這筆車貸只記在車子這邊（沒連到記帳），會從車子拿掉，不能復原。"
+            pendingConfirm = VehicleConfirm(title: title, message: message, button: "刪除",
+                                            action: { removeMirrors([mirrorId]) })
+        }
+    }
+
+    // MARK: 要確認
+
+    /// 每顆修正鈕：先付費；有確認文字的先確認，「去填／去改／去看」直接打開
+    fileprivate func fixCheck(_ check: VehicleCheck, _ action: VehicleCheck.Action) {
+        requirePremium {
+            let fix = action.fix
+            guard let confirm = action.confirm else {
+                performFix(fix)
+                return
+            }
+            let title = action.confirmTitle.isEmpty ? "確定要修正嗎？" : action.confirmTitle
+            pendingConfirm = VehicleConfirm(title: title, message: confirm, button: action.title,
+                                            destructive: action.destructive, action: { performFix(fix) })
+        }
+    }
+
+    fileprivate func performFix(_ fix: VehicleCheck.Fix) {
+        switch fix {
+        case .stopAtSale(let ids, let soldDate):
+            stopAtSale(ids, soldDate: soldDate)
+        case .openExpense(let id):
+            openExpenseRecord(id)
+        case .removeMirrors(let ids):
+            removeMirrors(ids)
+        case .backfillFixed(let mirrorId):
+            startBackfill(mirrorId)
+        case .assign(let ids):
+            assignExpenses(ids)
+        case .markValueZero:
+            markValueZero()
+        case .edit(let focus):
+            sheet = .edit(focus)
+        }
+    }
+
+    /// 賣了還在扣：車貸、保險、稅費照賣車的規則停，月租、訂閱停在賣出日；記帳只寫一次
+    fileprivate func stopAtSale(_ ids: [UUID], soldDate: Date) {
+        guard let v = store.vehicles.first(where: { $0.id == vehicleId }) else { return }
+        var list = expenseStore.expenses
+        if VehicleFixes.stopAtSale(ids, soldDate: soldDate, vehicle: v, in: &list, calendar: Self.gregorian) {
+            expenseStore.expenses = list
+        }
+    }
+
+    /// 都算這台：沒指定車的「汽車」支出連到這台（不寫鏡像）
+    fileprivate func assignExpenses(_ ids: [UUID]) {
+        var list = expenseStore.expenses
+        if VehicleFixes.assign(ids, to: vehicleId, in: &list) {
+            expenseStore.expenses = list
+        }
+    }
+
+    /// 就是 0（報廢）：估值 0 並寫更新日，之後照 0 算（決定 10）
+    fileprivate func markValueZero() {
+        guard var v = store.vehicles.first(where: { $0.id == vehicleId }) else { return }
+        VehicleFixes.markValueZero(&v, today: Date())
+        store.update(v)
+    }
+
+    /// 補建舊定期（定案 18）：AddExpensePreset 沒有金額，打開記帳頁讓你照確認框寫的金額打；
+    /// 先記下打開前所有支出的 id，記帳頁關掉時（sheetDismissed）比對
+    fileprivate func startBackfill(_ mirrorId: UUID) {
+        guard let mirror = vehicle.fixedExpenses.first(where: { $0.id == mirrorId }) else {
+            presentConfirmLater(VehicleConfirm(title: "找不到這筆", message: "車子這邊已經沒有這筆舊的定期支出了。"))
+            return
+        }
+        let preset = VehicleFixes.backfillPreset(for: mirror, vehicleId: vehicleId)
+        pendingBackfill = VehicleBackfill(mirrorId: mirrorId, vehicleId: vehicleId,
+                                          existingIds: Set(expenseStore.expenses.map(\.id)))
+        presentSheetLater(.newExpense(VehicleExpenseRequest(expenseType: .fixed, preset: preset)))
+    }
+
+    /// 彈出頁關掉時：補建的那一次，記帳多了一筆連到這台的固定支出，就把舊鏡像從車子拿掉
+    ///（新鏡像記帳頁存檔時已經建好）；按取消沒存就什麼都不動，「要確認」那一件會留著
+    fileprivate func sheetDismissed() {
+        guard let pending = pendingBackfill else { return }
+        pendingBackfill = nil
+        // 記帳頁存檔是先寫 store 再關，所以這裡看得到新的那筆；拿掉舊鏡像一樣排到下一個 runloop、讀最新的車子
+        let finance = store
+        let expenses = expenseStore
+        DispatchQueue.main.async {
+            let added = expenses.expenses.contains { ex in
+                !pending.existingIds.contains(ex.id) && ex.expenseType == .fixed
+                    && ex.linkedVehicleId == pending.vehicleId
+            }
+            guard added, var v = finance.vehicles.first(where: { $0.id == pending.vehicleId }) else { return }
+            VehicleFixes.removeMirrors([pending.mirrorId], from: &v)
+            finance.update(v)
+        }
+    }
+}
+
+// MARK: - 照片與單據
+
+extension VehicleDetailView {
+    /// 照片紀錄＋帳本那批支出的收據（張數、封面、排序都在 VehicleCardData 算好）；沒有任何一項時縮成一行
+    fileprivate func photosSection(_ card: VehicleCardData) -> some View {
+        let media = card.media
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .center, spacing: 10) {
+                MoneySectionHeader(title: "照片與單據", trailing: media.trailing)
+                    .accessibilityAddTraits(.isHeader)
+                if !media.isEmpty {
+                    photoAddMenu
+                }
+            }
+            if media.isEmpty {
+                photosEmptyRow
+            } else {
+                photoStrip(media.items)
+            }
+        }
+    }
+
+    /// 區塊標題右邊的綠色小「＋」（跟房屋卡同一個樣子）
+    fileprivate var photoAddIcon: some View {
+        Image(systemName: "plus")
+            .font(.system(size: 12, weight: .heavy))
+            .foregroundStyle(Color.white)
+            .frame(width: 24, height: 24)
+            .background(Color(tb: 0x1F9D57), in: Circle())
+            .frame(width: 34, height: 30)
+            .contentShape(Rectangle())
+    }
+
+    /// 付費才打開的「＋」選單：沒付費時換成普通按鈕，按了跳付費說明（選單打開前就擋）
+    @ViewBuilder
+    fileprivate var photoAddMenu: some View {
+        if subscription.isPremium {
+            Menu {
+                photoAddItems
+            } label: {
+                photoAddIcon
+            }
+            .accessibilityLabel("加照片或單據")
+        } else {
+            Button {
+                showPremiumAlert = true
+            } label: {
+                photoAddIcon
+            }
+            .buttonStyle(MoneyPressStyle())
+            .accessibilityLabel("加照片或單據")
+        }
+    }
+
+    /// 四項（J475）：打開照片紀錄編輯器，類別先帶好
+    fileprivate var photoAddItems: some View {
+        ForEach(VehiclePhotoAddOption.all) { option in
+            Button {
+                requirePremium { sheet = .photoEditor(UUID(), nil, option.category) }
+            } label: {
+                Label(option.title, systemImage: option.category.icon)
+            }
+        }
+    }
+
+    /// 沒有任何照片：整區縮成一行「＋ 加照片（…）」（付費才打開選單）
+    fileprivate var photosEmptyRow: some View {
+        let label = HStack(spacing: 8) {
+            Text("＋ 加照片（車子的樣子、保養單、行照、保險卡）")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(TripBoardPalette(scheme).hint)
+                .multilineTextAlignment(.leading)
+            Spacer(minLength: 0)
+        }
+        .padding(14)
+        .contentShape(Rectangle())
+        return Group {
+            if subscription.isPremium {
+                Menu {
+                    photoAddItems
+                } label: {
+                    label
+                }
+            } else {
+                Button {
+                    showPremiumAlert = true
+                } label: {
+                    label
+                }
+                .buttonStyle(MoneyPressStyle())
+            }
+        }
+        .modifier(FinanceCardChrome())
+    }
+
+    fileprivate func photoStrip(_ items: [VehicleMediaData.Item]) -> some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            LazyHStack(spacing: 14) {
+                ForEach(items) { item in
+                    photoButton(item)
+                }
+            }
+            .padding(.horizontal, 6)
+            .padding(.vertical, 6)
+        }
+        .modifier(FinanceCardChrome())
+    }
+
+    fileprivate func photoButton(_ item: VehicleMediaData.Item) -> some View {
+        Button {
+            handlePhotoTap(item)
+        } label: {
+            VehiclePhotoCard(item: item)
+        }
+        .buttonStyle(.plain)
+        .contextMenu { photoMenu(item) }
+        .accessibilityLabel(Self.photoSpoken(item))
+    }
+
+    /// VoiceOver：「封面，車輛照片，新車交車，2024/9/5，3 張照片」
+    fileprivate static func photoSpoken(_ item: VehicleMediaData.Item) -> String {
+        let kind = item.category?.rawValue ?? "支出"
+        let cover = item.isCover ? "封面，" : ""
+        let count = item.fileNames.isEmpty ? "沒有照片" : "\(item.fileNames.count) 張照片"
+        return "\(cover)\(kind)，\(item.title)，\(item.dateText)，\(count)"
+    }
+
+    /// 長按：照片紀錄「編輯資訊」「刪除」；支出「打開那筆記帳」（都要付費；刪除先確認）
+    @ViewBuilder
+    fileprivate func photoMenu(_ item: VehicleMediaData.Item) -> some View {
+        switch item.source {
+        case .record(let id):
+            Button {
+                requirePremium { editPhotoRecord(id) }
+            } label: {
+                Label("編輯資訊", systemImage: "pencil")
+            }
+            Button(role: .destructive) {
+                requirePremium { confirmDeletePhotoRecord(id) }
+            } label: {
+                Label("刪除", systemImage: "trash")
+            }
+        case .expense(let id):
+            Button {
+                requirePremium { openExpenseRecord(id) }
+            } label: {
+                Label("打開那筆記帳", systemImage: "list.bullet.rectangle")
+            }
+        }
+    }
+
+    /// 點照片一律用 CutePhotoViewer 看全部（看不用付費）；沒照片的紀錄點了是去編輯（付費）
+    fileprivate func handlePhotoTap(_ item: VehicleMediaData.Item) {
+        switch item.source {
+        case .record(let id):
+            guard !item.fileNames.isEmpty else {
+                requirePremium { editPhotoRecord(id) }
+                return
+            }
+            let urls = item.fileNames.map { VehiclePhotoRecord.photoURL(for: $0) }
+            let kind = CutePhotoDraft.Kind.vehicle(item.category ?? .other)
+            sheet = .photos(CutePhotoDraft(urls: urls, title: item.title, note: item.note, date: item.date, kind: kind))
+        case .expense:
+            let urls = item.fileNames.map { Expense.photoURL(for: $0) }
+            guard !urls.isEmpty else { return }
+            let note = item.note.trimmingCharacters(in: .whitespacesAndNewlines)
+            let shown = note == item.title ? "" : note
+            sheet = .photos(CutePhotoDraft(urls: urls, title: item.title, note: shown, date: item.date, kind: .expense))
+        }
+    }
+
+    fileprivate func editPhotoRecord(_ id: UUID) {
+        guard let rec = vehicle.photoRecords.first(where: { $0.id == id }) else {
+            presentNotice("找不到這筆照片紀錄", "它可能已經被刪掉了。")
+            return
+        }
+        sheet = .photoEditor(UUID(), rec, rec.category)
+    }
+
+    /// 刪除照片紀錄（J473）：「刪除「五萬公里保養」和 3 張照片？」
+    fileprivate func confirmDeletePhotoRecord(_ id: UUID) {
+        guard let rec = vehicle.photoRecords.first(where: { $0.id == id }) else { return }
+        let trimmed = rec.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let name = trimmed.isEmpty ? rec.category.rawValue : trimmed
+        let n = rec.photoFileNames.count
+        let title = n > 0 ? "刪除「\(name)」和 \(n) 張照片？" : "刪除「\(name)」？"
+        let message = n > 0 ? "iCloud 上的備份也會一起刪掉。" : "這筆照片紀錄會刪掉，不能復原。"
+        pendingConfirm = VehicleConfirm(title: title, message: message, button: "刪除",
+                                        action: { deletePhotoRecord(id) })
+    }
+
+    /// 照片檔（連 iCloud 備份）和紀錄一起刪（同 VehiclePhotoEditor.deleteRecord）
+    fileprivate func deletePhotoRecord(_ id: UUID) {
+        guard var v = store.vehicles.first(where: { $0.id == vehicleId }),
+              let rec = v.photoRecords.first(where: { $0.id == id }) else { return }
+        for name in rec.photoFileNames {
+            VehiclePhotoRecord.deletePhoto(name)
+        }
+        v.photoRecords.removeAll { $0.id == id }
+        store.update(v)
+    }
+}
+
+// MARK: - 分享圖片
+
+extension VehicleDetailView {
+    fileprivate static let shareStampFmt: DateFormatter = {
         let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
         f.calendar = Calendar(identifier: .gregorian)
-        f.locale = Locale(identifier: "zh_TW")
-        f.dateFormat = "yyyy/M/d"
+        f.dateFormat = "yyyyMMdd_HHmm"
         return f
     }()
 
-    private func infoRow(_ label: String, _ value: String) -> some View {
-        HStack(alignment: .top) {
-            Text(label).foregroundStyle(.secondary)
-            Spacer()
-            Text(value)
-                .multilineTextAlignment(.trailing)
-                .foregroundStyle(.primary)
+    /// 帳本除了買車列沒有任何紀錄：直接出一張（看板＋每月養車）；有紀錄：先問每頁幾筆
+    fileprivate func shareTapped() {
+        guard let card else { return }
+        if card.ledger.isEmpty {
+            exportCardImage(card)
+        } else {
+            askExportPageSize = true
         }
     }
+
+    /// 算圖一律淺色；各區讀的環境物件用 .appStores() 補上（缺了 ImageRenderer 會當掉）
+    fileprivate static func exportDecorate(_ view: AnyView) -> AnyView {
+        AnyView(view.appStores().environment(\.colorScheme, .light))
+    }
+
+    /// 每頁頁首「🚗 載具｜Taycan」（車名像車牌時是「品牌 動力」）
+    fileprivate static func exportPageHeader(_ card: VehicleCardData) -> AnyView {
+        AnyView(
+            HStack {
+                Text(card.shareHeader)
+                    .font(.subheadline.weight(.semibold))
+                Spacer()
+            }
+            .padding(.horizontal, 20)
+        )
+    }
+
+    /// 分享用的那一份（J494）：車貸列的名稱可能是自己取的（地址、人名），改寫「車貸」「第 N 筆」。
+    /// 其他會外流的（車主、地點、家充、里程、照片、備註、車輛資料）所在的區根本不放進分享圖
+    fileprivate static func shareCard(_ card: VehicleCardData) -> VehicleCardData {
+        guard var loan = card.loan else { return card }
+        let many = loan.rows.count > 1
+        loan.rows = loan.rows.map { shareLoanRow($0, many: many) }
+        var copy = card
+        copy.loan = loan
+        return copy
+    }
+
+    fileprivate static func shareLoanRow(_ r: VehicleLoanSectionData.Row, many: Bool) -> VehicleLoanSectionData.Row {
+        let title = many ? "第 \(r.index) 筆" : "車貸"
+        return VehicleLoanSectionData.Row(id: r.id, source: r.source, index: r.index, status: r.status,
+                                          badge: r.badge, title: title, range: r.range, amount: r.amount,
+                                          statusText: r.statusText, progress: r.progress, nextText: r.nextText,
+                                          isUnlinked: r.isUnlinked, termMissing: r.termMissing, canStop: r.canStop,
+                                          deleteMessage: r.deleteMessage, accessibilityText: r.accessibilityText)
+    }
+
+    fileprivate static func exportSingleContent(_ card: VehicleCardData) -> some View {
+        VStack(spacing: 16) {
+            VehicleCardBoard(data: card, scrollTo: nil)
+            if card.monthly != nil {
+                VehicleMonthlySection(data: card, actions: VehicleCardActions(), forExport: true)
+            }
+        }
+        .padding(.horizontal, 16)
+        .frame(width: 430)
+        .padding(.vertical, 20)
+        .background(Color(.systemGroupedBackground))
+    }
+
+    /// 單張 JPG（寬 430、scale 照 ImageExportLimits、品質 0.95），檔名「車輛卡片_<名>_yyyyMMdd_HHmm.jpg」（西曆）
+    @MainActor
+    fileprivate func exportCardImage(_ card: VehicleCardData) {
+        let safe = Self.shareCard(card)
+        let content = Self.exportDecorate(AnyView(Self.exportSingleContent(safe)))
+        let renderer = ImageRenderer(content: content)
+        var measured = CGSize.zero
+        renderer.render { size, _ in measured = size }
+        renderer.scale = ImageExportLimits.safeScale(for: measured)
+        guard let ui = renderer.uiImage, !ImageExportLimits.isBlank(ui),
+              let data = ui.jpegData(compressionQuality: 0.95) else { return }
+        let base = PagedImageExporter.sanitizeFileName(safe.shareFileBase)
+        let name = "\(base)_\(Self.shareStampFmt.string(from: Date())).jpg"
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(name)
+        do {
+            try data.write(to: url)
+            sheet = .share(StockCardSharePayload(items: [url]))
+        } catch { }
+    }
+
+    /// 分頁：看板、每月養車、車貸、帳本總表當第一頁的開頭區塊，接著「紀錄 N 筆」和逐筆（分享版的標題、細字）
+    @MainActor
+    fileprivate func exportPaged(perPage: Int) {
+        guard let current = card else { return }
+        let safe = Self.shareCard(current)
+        let urls = PagedImageExporter.exportSections(
+            baseName: safe.shareFileBase,
+            itemsPerPage: perPage,
+            header: Self.exportPageHeader(safe),
+            items: Self.exportItems(safe),
+            decorate: { Self.exportDecorate($0) }
+        )
+        guard !urls.isEmpty else { return }
+        sheet = .share(StockCardSharePayload(items: urls))
+    }
+
+    /// 區塊標題左右留 20，往外推 4 跟逐筆的卡對齊（同房屋）
+    fileprivate static func exportItems(_ card: VehicleCardData) -> [PagedExportItem] {
+        let actions = VehicleCardActions()
+        var items: [PagedExportItem] = []
+        let board = VehicleCardBoard(data: card, scrollTo: nil)
+        items.append(.sectionHeader(AnyView(board.padding(.horizontal, -4))))
+        if card.monthly != nil {
+            let monthly = VehicleMonthlySection(data: card, actions: actions, forExport: true)
+            items.append(.sectionHeader(AnyView(monthly.padding(.horizontal, -4))))
+        }
+        if card.loan != nil {
+            let loan = VehicleLoanSection(data: card, actions: actions, forExport: true)
+            items.append(.sectionHeader(AnyView(loan.padding(.horizontal, -4))))
+        }
+        let summary = exportLedgerSummary(card, actions: actions)
+        items.append(.sectionHeader(AnyView(summary.padding(.horizontal, -4))))
+        let count = card.ledger.recordCount
+        let trailing: String? = count > 0 ? "\(count) 筆" : nil
+        items.append(.sectionHeader(AnyView(MoneySectionHeader(title: "紀錄", trailing: trailing))))
+        items += card.ledger.events.map { e -> PagedExportItem in
+            .row(AnyView(VehicleLedgerRowView(event: e, forShare: true)))
+        }
+        return items
+    }
+
+    fileprivate static func exportLedgerSummary(_ card: VehicleCardData, actions: VehicleCardActions) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            MoneySectionHeader(title: "我的帳本", trailing: card.ledger.headerTrailing)
+            VehicleLedgerSummaryCard(data: card, actions: actions, forExport: true)
+        }
+    }
+}
+
+// MARK: - 照片卡
+
+/// 照片與單據的一張卡（寬 120，沿用舊相簿卡的樣子）：縮圖（多張疊三層、右上張數）、封面小標、
+/// 類別徽章（支出寫「支出」）、標題跑馬燈、日期
+private struct VehiclePhotoCard: View {
+    let item: VehicleMediaData.Item
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            thumb
+            badge
+            MarqueeText(item.title)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.primary)
+            Text(item.dateText)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+        .frame(width: 120)
+    }
+
+    private var thumb: some View {
+        ZStack(alignment: .topTrailing) {
+            thumbImages
+            if item.fileNames.count >= 2 {
+                Text("\(item.fileNames.count)")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 6).padding(.vertical, 2)
+                    .background(.black.opacity(0.55))
+                    .clipShape(Capsule())
+                    .padding(5)
+            }
+        }
+        .overlay(alignment: .topLeading) { coverTag }
+    }
+
+    @ViewBuilder
+    private var thumbImages: some View {
+        if item.fileNames.count >= 2 {
+            // 多張：後兩張斜角堆疊在底、首張在上。id 用檔名（不用 offset），增刪照片時縮圖不會閃成別張
+            ZStack {
+                ForEach(Array(item.fileNames.prefix(3).enumerated()).reversed(), id: \.element) { idx, name in
+                    ThumbnailImageView(url: url(name))
+                        .frame(width: 108, height: 108)
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                        .rotationEffect(.degrees(Double(idx) * 3.5))
+                        .offset(x: CGFloat(idx) * 3, y: CGFloat(idx) * -3)
+                }
+            }
+            .frame(width: 116, height: 116)
+        } else if let first = item.fileNames.first {
+            ThumbnailImageView(url: url(first))
+                .frame(width: 116, height: 116)
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+        } else {
+            emptyThumb
+        }
+    }
+
+    /// 沒有照片的紀錄（點了去編輯）：淡色底＋類別圖示
+    private var emptyThumb: some View {
+        let tint = item.category?.color ?? Color.orange
+        let icon = item.category?.icon ?? "photo"
+        return RoundedRectangle(cornerRadius: 12)
+            .fill(tint.opacity(0.12))
+            .frame(width: 116, height: 116)
+            .overlay {
+                Image(systemName: icon)
+                    .font(.system(size: 26, weight: .medium))
+                    .foregroundStyle(tint.opacity(0.7))
+            }
+    }
+
+    @ViewBuilder
+    private var coverTag: some View {
+        if item.isCover {
+            Text("封面")
+                .font(.system(size: 9, weight: .bold))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 6).padding(.vertical, 2)
+                .background(Color(tb: 0x1F9D57), in: Capsule())
+                .padding(5)
+        }
+    }
+
+    private var badge: some View {
+        let color = item.category?.color ?? Color.orange
+        let icon = item.category?.icon ?? "tag.fill"
+        let text = item.category?.rawValue ?? "支出"
+        return HStack(spacing: 4) {
+            Image(systemName: icon)
+                .font(.system(size: 9, weight: .semibold))
+            Text(text)
+                .font(.system(size: 9, weight: .semibold))
+        }
+        .foregroundStyle(color)
+        .padding(.horizontal, 6).padding(.vertical, 2)
+        .background(color.opacity(0.10))
+        .clipShape(Capsule())
+    }
+
+    private func url(_ name: String) -> URL {
+        switch item.source {
+        case .record: return VehiclePhotoRecord.photoURL(for: name)
+        case .expense: return Expense.photoURL(for: name)
+        }
+    }
+}
+
+/// 「＋」選單的四項（J475）
+private struct VehiclePhotoAddOption: Identifiable {
+    let title: String
+    let category: VehiclePhotoCategory
+    var id: String { title }
+
+    static let all: [VehiclePhotoAddOption] = [
+        VehiclePhotoAddOption(title: "加車輛照片", category: .appearance),
+        VehiclePhotoAddOption(title: "加保養單", category: .maintenance),
+        VehiclePhotoAddOption(title: "加保險・稅費文件", category: .insurance),
+        VehiclePhotoAddOption(title: "加事故照片", category: .accident)
+    ]
+}
+
+// MARK: - 彈出頁與確認框的型別
+
+/// 卡片上所有彈出頁（一個 .sheet(item:)）。每次「新增」都帶一個新的 UUID：
+/// 跟「打開」綁在一起，不會帶到上一次的內容（v25.532 教訓：不要先設值再 set Bool）
+private enum VehicleSheet: Identifiable {
+    case edit(VehicleEditFocus)
+    case editExpense(Expense, showVehicleSection: Bool)
+    case newExpense(VehicleExpenseRequest)
+    case photoEditor(UUID, VehiclePhotoRecord?, VehiclePhotoCategory)
+    case photos(CutePhotoDraft)
+    case chargeAnalytics
+    case share(StockCardSharePayload)
+
+    var id: String {
+        switch self {
+        case .edit(let focus): return "edit-\(focus)"
+        case .editExpense(let ex, _): return "expense-" + ex.id.uuidString
+        case .newExpense(let request): return "newExpense-" + request.id.uuidString
+        case .photoEditor(let token, _, _): return "photoEditor-" + token.uuidString
+        case .photos(let draft): return "photos-" + draft.id.uuidString
+        case .chargeAnalytics: return "chargeAnalytics"
+        case .share(let payload): return "share-" + payload.id.uuidString
+        }
+    }
+}
+
+/// 新增一筆記帳：種類和預設值跟「打開」綁在一起（不叫 NewExpenseRequest：房屋那個是 private 同名）
+private struct VehicleExpenseRequest {
+    let id = UUID()
+    let expenseType: ExpenseType
+    let preset: AddExpensePreset
+}
+
+/// 一個確認框（button 是 nil 時只是告訴你一件事，只有「好」）
+private struct VehicleConfirm: Identifiable {
+    let id = UUID()
+    let title: String
+    let message: String
+    var button: String? = nil
+    var destructive = true
+    var action: () -> Void = {}
+}
+
+/// 一個選單（沒連到記帳的舊鏡像：補建或移除）
+private struct VehicleChoice: Identifiable {
+    struct Option: Identifiable {
+        let id = UUID()
+        let label: String
+        var destructive = false
+        let action: () -> Void
+    }
+    let id = UUID()
+    let title: String
+    let message: String
+    let options: [Option]
+}
+
+/// 補建舊定期：打開記帳頁那一刻的鏡像、車子和所有支出 id（關掉時比對有沒有多一筆）
+private struct VehicleBackfill {
+    let mirrorId: UUID
+    let vehicleId: UUID
+    let existingIds: Set<UUID>
 }

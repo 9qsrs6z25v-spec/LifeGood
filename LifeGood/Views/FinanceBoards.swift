@@ -929,7 +929,8 @@ struct VehicleBoardData: Equatable {
     }
 
     /// 路牌上的字：「11/5 車位租金」「12/5 車貸」「約 1/15 保養」
-    private static func signLabel(_ u: VehicleUpcoming, byId: [UUID: Expense]) -> String {
+    /// [v25.540] 拿掉 private：載具卡片的路牌（VehicleCardData 組 FinDriveScene）用同一套字
+    static func signLabel(_ u: VehicleUpcoming, byId: [UUID: Expense]) -> String {
         let day = HouseCardFormat.md(u.date)
         switch u.kind {
         case .fixed(let id):
@@ -959,9 +960,10 @@ extension FinRoadScene.Kind {
         switch c {
         case .fuel: return .fuel
         case .electricity: return .charge
-        case .maintenance, .repair, .wash: return .care
+        case .maintenance, .repair: return .care
         case .parking: return .park
-        case .other: return .other
+        // [v25.540] 洗車改算「其」：跟每月養車、帳本的「停車・洗車・其他」同一組（以前算「修」，帳本卻不在保養維修裡）
+        case .wash, .other: return .other
         }
     }
 }

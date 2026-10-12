@@ -14,10 +14,6 @@ import CoreLocation
 
 // MARK: - 共用介面（外殼照這裡的名字呼叫，不要改）
 
-/// 白卡外框、格子底色：股票卡片那一套本來就是通用的，換個名字給房子用（不動 StockCardViews.swift）
-typealias FinanceCardChrome = StockCardChrome      // 白卡外框（StockCardViews.swift，不改原檔）
-typealias FinanceCardTile = StockCardTile          // 格子底色等
-
 /// 卡片內可以捲到的位置（ScrollViewReader 的 id）
 enum HouseAnchor: String, Hashable { case top, checks, mortgage, living, rental, ledger, info, floors, photos, utilities, elevator }
 
@@ -56,84 +52,6 @@ fileprivate extension HouseCardActions {
             scrollTo(.ledger)
         case .edit(let focus):
             edit(focus)
-        }
-    }
-}
-
-// MARK: - 換房列
-
-/// 換房列的一顆膠囊
-struct FinanceSwitcherItem: Identifiable, Equatable {
-    let id: UUID
-    let title: String          // 已截短（MoneyBoardText.short(_, max: 6)）
-    let trailing: String       // 「▲30%」「賣 ▲18%」；可空字串
-    let tone: MoneyTone
-}
-
-/// 釘在最上面的一排：同一組（持有中／已售出）的每一間，點了就換。樣子照 StockSwitcherStrip，選中的自動捲到中間。
-struct FinanceSwitcherStrip: View {
-    let items: [FinanceSwitcherItem]
-    let selected: UUID
-    let onSelect: (UUID) -> Void
-
-    @Environment(\.colorScheme) private var scheme
-
-    var body: some View {
-        let pal = TripBoardPalette(scheme)
-        ScrollViewReader { proxy in
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    ForEach(items, id: \.id) { item in
-                        Button {
-                            onSelect(item.id)
-                        } label: {
-                            pill(item, on: item.id == selected, pal: pal)
-                        }
-                        .buttonStyle(MoneyPressStyle())
-                        .id(item.id)
-                        .accessibilityAddTraits(item.id == selected ? .isSelected : [])
-                    }
-                }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 4)
-            }
-            .onAppear { proxy.scrollTo(selected, anchor: .center) }
-            .onChange(of: selected) { _, id in
-                withAnimation(.easeOut(duration: 0.25)) { proxy.scrollTo(id, anchor: .center) }
-            }
-        }
-    }
-
-    private func pill(_ item: FinanceSwitcherItem, on: Bool, pal: TripBoardPalette) -> some View {
-        let fill = on ? HCColors.pick(0x1D2B55, 0x3B4F8F, pal) : pal.cellFill
-        let ink = on ? Color.white : pal.ink
-        return HStack(spacing: 6) {
-            Text(item.title)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(ink)
-            if !item.trailing.isEmpty {
-                Text(item.trailing)
-                    .font(.caption.weight(.heavy))
-                    .monospacedDigit()
-                    .foregroundStyle(trailingColor(item.tone, on: on, pal: pal))
-            }
-        }
-        .lineLimit(1)
-        .fixedSize()
-        .padding(.horizontal, 12)
-        .frame(minHeight: 32)
-        .background(fill, in: Capsule())
-        .overlay(Capsule().stroke(on ? Color.clear : pal.cellStroke, lineWidth: 0.75))
-        .shadow(color: on ? Color.clear : pal.cellShadow, radius: 3, x: 0, y: 1)
-    }
-
-    /// 選中的膠囊是深藍底：漲跌字改用調亮的 FF8A8A／6EE7A8，不然紅綠壓在深藍上看不清楚
-    private func trailingColor(_ tone: MoneyTone, on: Bool, pal: TripBoardPalette) -> Color {
-        guard on else { return tone.color(pal) }
-        switch tone {
-        case .up: return Color(tb: 0xFF8A8A)
-        case .down, .good: return Color(tb: 0x6EE7A8)
-        default: return Color.white.opacity(0.85)
         }
     }
 }
@@ -225,162 +143,7 @@ struct HouseCardBoard: View {
 
     /// 全部繳完：進度格換成一行
     private func paidOff(_ line: String, pal: TripBoardPalette) -> some View {
-        HStack(spacing: 8) {
-            Image(systemName: "checkmark.seal.fill")
-                .font(.subheadline.weight(.bold))
-                .foregroundStyle(MoneyTone.good.color(pal))
-            Text(line)
-                .font(.subheadline.weight(.bold))
-                .foregroundStyle(pal.ink)
-            Spacer(minLength: 0)
-        }
-        .padding(12)
-        .modifier(TripBoardCellChrome(pal: pal))
-        .accessibilityElement(children: .combine)
-    }
-}
-
-/// 房貸進度：左端第一期、右端繳完；過去的那段紫色、未來灰；段和段的交界細刻度；今天一顆圓點。
-/// 骨架照 StockPricePosition（12pt 留白＋TripBoardCellChrome、44pt 高的軌道、18pt 小牌子），牌子太近時推開。
-private struct HCProgressCell: View {
-    let p: HouseProgressData
-    let pal: TripBoardPalette
-    var tappable = false
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            titleRow
-            GeometryReader { geo in
-                track(width: geo.size.width)
-            }
-            .frame(height: 44)
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text(p.left)
-                Spacer(minLength: 4)
-                Text(p.right)
-                    .multilineTextAlignment(.trailing)
-            }
-            .font(.caption2.weight(.semibold))
-            .monospacedDigit()
-            .foregroundStyle(pal.label)
-            if !p.note.isEmpty {
-                Text(p.note)
-                    .font(.footnote.weight(.semibold))
-                    .foregroundStyle(pal.inkDate)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
-        .padding(12)
-        .modifier(TripBoardCellChrome(pal: pal))
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(p.title)
-        .accessibilityValue(p.accessibilityText)
-    }
-
-    private var titleRow: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 6) {
-            Text(p.title)
-                .font(.subheadline.weight(.bold))
-                .foregroundStyle(pal.ink)
-            Spacer(minLength: 8)
-            Text(p.range)
-                .font(.caption.weight(.semibold))
-                .monospacedDigit()
-                .foregroundStyle(pal.label)
-                .lineLimit(1)
-                .minimumScaleFactor(0.8)
-            if tappable {
-                Image(systemName: "chevron.right")
-                    .font(.caption2.weight(.bold))
-                    .foregroundStyle(pal.label)
-            }
-        }
-    }
-
-    private func track(width w: CGFloat) -> some View {
-        let inset: CGFloat = 9
-        let usable = max(1, w - inset * 2)
-        let f = CGFloat(min(1, max(0, p.fraction)))
-        let xDot = inset + usable * f
-        let xEnd = inset + usable
-        let trackY: CGFloat = 33
-        let deep = MoneyBoardSky.ridgeCost(dark: pal.dark)
-        let dotColor = p.notStarted ? pal.label : deep
-        let centers = pillCenters(width: w, dot: xDot, dotText: p.dotPill, end: xEnd, endText: p.endPill)
-        let fillStart = inset - 4
-        return ZStack {
-            Capsule()
-                .fill(pal.progressTrack)
-                .frame(width: usable + 8, height: 6)
-                .position(x: w / 2, y: trackY)
-            if f > 0 {
-                Capsule()
-                    .fill(LinearGradient(colors: [deep.opacity(0.4), deep], startPoint: .leading, endPoint: .trailing))
-                    .frame(width: max(6, xDot - fillStart), height: 6)
-                    .position(x: (fillStart + xDot) / 2, y: trackY)
-            }
-            ForEach(p.ticks, id: \.id) { t in
-                Capsule()
-                    .fill(HCColors.tick(pal))
-                    .frame(width: 1.5, height: 12)
-                    .position(x: inset + usable * CGFloat(t.fraction), y: trackY)
-            }
-            Circle()
-                .fill(dotColor)
-                .overlay(Circle().stroke(Color.white, lineWidth: 2.5))
-                .frame(width: 15, height: 15)
-                .shadow(color: dotColor.opacity(0.35), radius: 3, x: 0, y: 1)
-                .position(x: xDot, y: trackY)
-            pill(p.dotPill, fill: p.notStarted ? HCColors.pick(0x7A86A8, 0x5A6585, pal) : HCColors.pick(0x1D2B55, 0x3B4F8F, pal))
-                .position(x: centers.dot, y: 9)
-            pill(p.endPill, fill: HCColors.pick(0x177A44, 0x2E9E66, pal))
-                .position(x: centers.end, y: 9)
-        }
-    }
-
-    private func pill(_ s: String, fill: Color) -> some View {
-        Text(s)
-            .font(.system(size: 10, weight: .heavy))
-            .monospacedDigit()
-            .foregroundStyle(Color.white)
-            .lineLimit(1)
-            .fixedSize()
-            .padding(.horizontal, 7)
-            .frame(height: 18)
-            .background(fill, in: Capsule())
-    }
-
-    /// 牌子的寬度（估的：中文一個字約 10.5pt、數字約 6pt，加左右留白；同 StockPricePosition）
-    private func pillWidth(_ s: String) -> CGFloat {
-        s.unicodeScalars.reduce(CGFloat(14)) { $0 + ($1.isASCII ? 6.2 : 10.5) }
-    }
-
-    /// 「今天」和「繳完」各自先夾在格子裡（「繳完」掛在最右端，一定會被往左推）；
-    /// 兩塊靠太近才往兩邊推開，推出邊緣就整組挪回來。不能一開始就整組挪：兩塊離很遠時，
-    /// 「繳完」貼右邊被推回來，會連「今天」一起推出左邊。
-    private func pillCenters(width w: CGFloat, dot: CGFloat, dotText: String, end: CGFloat,
-                             endText: String) -> (dot: CGFloat, end: CGFloat) {
-        let wa = pillWidth(dotText)
-        let wb = pillWidth(endText)
-        var a = min(max(dot, wa / 2), w - wa / 2)
-        var b = min(max(end, wb / 2), w - wb / 2)
-        let need = (wa + wb) / 2 + 6
-        if b - a < need {
-            let mid = (a + b) / 2
-            a = mid - need / 2
-            b = mid + need / 2
-            if b + wb / 2 > w {
-                let shift = b + wb / 2 - w
-                a -= shift
-                b -= shift
-            }
-            if a - wa / 2 < 0 {
-                let shift = wa / 2 - a
-                a += shift
-                b += shift
-            }
-        }
-        return (dot: a, end: b)
+        FinanceDoneRow(icon: "checkmark.seal.fill", text: line, tone: .good, pal: pal)
     }
 }
 
@@ -415,34 +178,7 @@ struct HouseChecksSection: View {
     }
 
     private func row(_ c: HouseCheck, pal: TripBoardPalette) -> some View {
-        HStack(alignment: .center, spacing: 10) {
-            Image(systemName: c.icon)
-                .font(.body.weight(.semibold))
-                .foregroundStyle(MoneyTone.warn.color(pal))
-                .frame(width: 20)
-                .accessibilityHidden(true)
-            Text(c.message)
-                .font(.subheadline)
-                .foregroundStyle(Color.primary)
-                .fixedSize(horizontal: false, vertical: true)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            Button {
-                actions.fixCheck(c)
-            } label: {
-                Text(c.button)
-                    .font(.subheadline.weight(.heavy))
-                    .foregroundStyle(pal.hint)
-                    .lineLimit(1)
-                    .fixedSize()
-                    .padding(.horizontal, 11)
-                    .frame(minHeight: 30)
-                    .background(pal.hint.opacity(0.12), in: Capsule())
-            }
-            .buttonStyle(MoneyPressStyle())
-            .accessibilityLabel(c.accessibilityLabel)
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 11)
+        FinanceCheckRow(icon: c.icon, message: c.message, buttons: [FinanceCheckButton(title: c.button, action: { actions.fixCheck(c) })], accessibilityLabel: c.accessibilityLabel, pal: pal)
     }
 }
 
@@ -1004,29 +740,7 @@ struct HouseLivingSection: View {
     }
 
     private func legendButton(_ p: HouseLivingData.Part, pal: TripBoardPalette) -> some View {
-        Button {
-            actions.handle(p.tap)
-        } label: {
-            HStack(spacing: 5) {
-                RoundedRectangle(cornerRadius: 2, style: .continuous)
-                    .fill(HCColors.living(p.kind, pal: pal))
-                    .frame(width: 8, height: 8)
-                Text(p.label)
-                    .foregroundStyle(pal.label)
-                Text(p.valueText)
-                    .fontWeight(.heavy)
-                    .monospacedDigit()
-                    .foregroundStyle(pal.ink)
-            }
-            .font(.caption.weight(.semibold))
-            .lineLimit(1)
-            .fixedSize()
-            .padding(.vertical, 3)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(MoneyPressStyle())
-        .accessibilityLabel(p.legend)
-        .accessibilityHint(HCText.hint(p.tap))
+        FinanceLegendButton(color: HCColors.living(p.kind, pal: pal), label: p.label, valueText: p.valueText, accessibilityLabel: p.legend, hint: HCText.hint(p.tap), pal: pal, action: { actions.handle(p.tap) })
     }
 
     private func splitButton(_ text: String, pal: TripBoardPalette) -> some View {
@@ -1246,29 +960,15 @@ struct HouseLedgerSection: View {
     }
 
     /// [v25.534] 付費在選單打開前就擋：沒付費時不是選單，是一顆按了只跳付費說明的按鈕
-    @ViewBuilder
     private var addMenu: some View {
-        if actions.canEdit {
-            Menu {
-                ForEach(HouseLedgerAddKind.allCases, id: \.id) { kind in
-                    Button {
-                        actions.addLedger(kind)
-                    } label: {
-                        Label(kind.title, systemImage: kind.icon)
-                    }
+        FinanceAddMenuPill(title: "記一筆", canEdit: actions.canEdit, askPremium: actions.askPremium) {
+            ForEach(HouseLedgerAddKind.allCases, id: \.id) { kind in
+                Button {
+                    actions.addLedger(kind)
+                } label: {
+                    Label(kind.title, systemImage: kind.icon)
                 }
-            } label: {
-                HCGreenPill(title: "記一筆")
             }
-            .accessibilityLabel("記一筆")
-        } else {
-            Button {
-                actions.askPremium()
-            } label: {
-                HCGreenPill(title: "記一筆")
-            }
-            .buttonStyle(MoneyPressStyle())
-            .accessibilityLabel("記一筆")
         }
     }
 
@@ -1303,23 +1003,7 @@ struct HouseLedgerSection: View {
     }
 
     private func chipButton(_ chip: HouseLedgerFilterChip, pal: TripBoardPalette) -> some View {
-        let on = chip.filter == filter
-        let fill = on ? HCColors.pick(0x0B1B45, 0x3B4F8F, pal) : FinanceCardTile.fill(pal)
-        return Button {
-            withAnimation(.easeOut(duration: 0.25)) { filter = chip.filter }
-        } label: {
-            Text(chip.text)
-                .font(.caption.weight(.bold))
-                .monospacedDigit()
-                .lineLimit(1)
-                .fixedSize()
-                .foregroundStyle(on ? Color.white : pal.label)
-                .padding(.horizontal, 11)
-                .frame(minHeight: 28)
-                .background(fill, in: Capsule())
-        }
-        .buttonStyle(MoneyPressStyle())
-        .accessibilityAddTraits(on ? .isSelected : [])
+        FinanceFilterChip(text: chip.text, on: chip.filter == filter, pal: pal, action: { withAnimation(.easeOut(duration: 0.25)) { filter = chip.filter } })
     }
 
     // MARK: 年份時間軸
@@ -1365,32 +1049,7 @@ struct HouseLedgerSection: View {
 
     /// 組頭「2026 年・79 筆」＋右邊小計；點一下展開／收起
     private func yearHeader(_ y: HouseLedgerYear, expanded: Bool, pal: TripBoardPalette) -> some View {
-        let parts = Self.splitTitle(y.title)
-        let state: String = expanded ? "已展開" : "已收起"
-        let hint: String = expanded ? "點兩下收起" : "點兩下展開"
-        return Button {
-            withAnimation(.easeOut(duration: 0.25)) { toggleYear(y.year) }
-        } label: {
-            HStack(alignment: .firstTextBaseline, spacing: 6) {
-                Image(systemName: expanded ? "chevron.down" : "chevron.right")
-                    .font(.caption2.weight(.heavy))
-                    .frame(width: 12)
-                Text(parts.left)
-                Spacer(minLength: 8)
-                Text(parts.right)
-                    .monospacedDigit()
-            }
-            .font(.footnote.weight(.heavy))
-            .foregroundStyle(pal.label)
-            .padding(.horizontal, 14)
-            .padding(.top, 12)
-            .padding(.bottom, 6)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(y.title)
-        .accessibilityValue(state)
-        .accessibilityHint(hint)
+        FinanceYearHeader(title: y.title, expanded: expanded, pal: pal, action: { withAnimation(.easeOut(duration: 0.25)) { toggleYear(y.year) } })
     }
 
     private func toggleYear(_ year: Int) {
@@ -1401,29 +1060,8 @@ struct HouseLedgerSection: View {
         }
     }
 
-    /// 「2026 年・79 筆・NT$862.6萬」→ 左「2026 年・79 筆」、右「NT$862.6萬」（最後一個「・」後面是小計）
-    private static func splitTitle(_ t: String) -> (left: String, right: String) {
-        guard let r = t.range(of: "・", options: .backwards) else { return (left: t, right: "") }
-        return (left: String(t[..<r.lowerBound]), right: String(t[r.upperBound...]))
-    }
-
     private func moreButton(year: Int, hidden: Int, pal: TripBoardPalette) -> some View {
-        VStack(spacing: 0) {
-            Divider().padding(.leading, 14)
-            Button {
-                withAnimation(.easeOut(duration: 0.25)) {
-                    _ = moreYears.insert(year)
-                }
-            } label: {
-                Text("再看 \(hidden) 筆")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(pal.hint)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 12)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-        }
+        FinanceMoreButton(hidden: hidden, pal: pal, action: { withAnimation(.easeOut(duration: 0.25)) { _ = moreYears.insert(year) } })
     }
 
     /// 點一下＝打開（外殼依 source 決定開哪個編輯頁）；長按＝編輯／刪除。年列不能刪（canDelete）。
@@ -1488,122 +1126,13 @@ struct HouseLedgerRowView: View {
     var body: some View {
         let pal = TripBoardPalette(scheme)
         let e = event
-        HStack(alignment: .center, spacing: 10) {
-            dateBlock(e)
-            Text(e.mark.glyph)
-                .font(.system(size: 13, weight: .black))
-                .foregroundStyle(Color.white)
-                .frame(width: 32, height: 32)
-                .background(HCColors.mark(e.mark, pal: pal), in: Circle())
-                .accessibilityHidden(true)
-            texts(e)
-            Spacer(minLength: 6)
-            amount(e, pal: pal)
-        }
-        .foregroundStyle(Color.primary)
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-        .contentShape(Rectangle())
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(e.accessibilityText)
-    }
-
-    private func dateBlock(_ e: HouseLedgerEvent) -> some View {
-        VStack(spacing: 0) {
-            Text(e.dayText)
-                .font(.system(.title3, design: .rounded).weight(.heavy))
-                .monospacedDigit()
-            Text(e.monthText)
-                .font(.caption2.weight(.semibold))
-                .monospacedDigit()
-                .foregroundStyle(.secondary)
-        }
-        .frame(width: 52)
-    }
-
-    private func texts(_ e: HouseLedgerEvent) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(e.title)
-                .font(.subheadline.weight(.semibold))
-                .lineLimit(1)
-                .minimumScaleFactor(0.8)
-            if !e.detail.isEmpty {
-                Text(e.detail)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.85)
-            }
-        }
-    }
-
-    private func amount(_ e: HouseLedgerEvent, pal: TripBoardPalette) -> some View {
-        VStack(alignment: .trailing, spacing: 4) {
-            Text(e.amountText)
-                .font(.system(.subheadline, design: .rounded).weight(.heavy))
-                .monospacedDigit()
-                .lineLimit(1)
-            if e.isUnlinked {
-                HCMiniTag(text: "沒連到記帳", color: pal.label)
-            }
-        }
+        let tags: [FinanceRowTag] = e.isUnlinked ? [FinanceRowTag(text: "沒連到記帳", color: pal.label)] : []
+        FinanceLedgerRow(dayText: e.dayText, monthText: e.monthText, glyph: e.mark.glyph, markColor: HCColors.mark(e.mark, pal: pal),
+                         title: e.title, detail: e.detail, amountText: e.amountText, tags: tags, accessibilityText: e.accessibilityText)
     }
 }
 
 // MARK: - 房屋資料
-
-/// 資料卡的一列：左邊標籤（寬 84）、右邊值靠右（樣子照 StockInfoCard）；accessory 是右邊的小圖示（›、展開）
-struct FinanceInfoRow: View {
-    let label: String
-    let value: Text
-    var accessory: String? = nil
-    var labelWidth: CGFloat = 84
-
-    var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 12) {
-            Text(label)
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-                .frame(width: labelWidth, alignment: .leading)
-            value
-                .font(.subheadline.weight(.semibold))
-                .frame(maxWidth: .infinity, alignment: .trailing)
-                .multilineTextAlignment(.trailing)
-            if let accessory {
-                Image(systemName: accessory)
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(.tertiary)
-            }
-        }
-        .foregroundStyle(Color.primary)
-        .padding(.horizontal, 14)
-        .padding(.vertical, 11)
-        .contentShape(Rectangle())
-        .accessibilityElement(children: .combine)
-    }
-}
-
-/// 一串資料列，列和列之間細線（同 StockInfoCard）；外框由呼叫端決定。
-/// 每列自己決定能不能點（地址是選單、權狀可展開、保險可點），所以收的是已經包好的畫面。
-struct FinanceInfoRows: View {
-    struct Row: Identifiable {
-        let id: String
-        let content: AnyView
-    }
-
-    let rows: [Row]
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            ForEach(Array(rows.enumerated()), id: \.element.id) { i, row in
-                if i > 0 {
-                    Divider().padding(.leading, 14)
-                }
-                row.content
-            }
-        }
-    }
-}
 
 /// 房屋資料：衛星小圖、地址（選單：複製／在地圖打開）、類型、坪數、單價、購入、估值、屋齡、所有權人、
 /// 權狀（可展開）、保險（點了打開那筆記帳）、售出、備註。永遠顯示，沒有值的列 HouseCardData 已經不放。
@@ -2279,108 +1808,17 @@ struct HouseElevatorSection: View {
 
 // MARK: - 這個檔案裡共用的小零件
 
-/// 區塊標題（MoneySectionHeader）＋需要時右邊一顆綠色「＋」（MoneySectionHeader 本身沒有按鈕槽）
-private struct HCHeader: View {
-    let title: String
-    var trailing: String? = nil
-    var addLabel: String? = nil
-    var onAdd: (() -> Void)? = nil
-
-    var body: some View {
-        HStack(alignment: .center, spacing: 10) {
-            MoneySectionHeader(title: title, trailing: trailing)
-                .accessibilityAddTraits(.isHeader)
-            if let onAdd {
-                HCAddButton(label: addLabel ?? "新增", action: onAdd)
-            }
-        }
-    }
-}
-
-/// 區塊標題右邊的綠色小「＋」
-private struct HCAddButton: View {
-    let label: String
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            Image(systemName: "plus")
-                .font(.system(size: 12, weight: .heavy))
-                .foregroundStyle(Color.white)
-                .frame(width: 24, height: 24)
-                .background(Color(tb: 0x1F9D57), in: Circle())
-                .frame(width: 34, height: 30)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(MoneyPressStyle())
-        .accessibilityLabel(label)
-    }
-}
-
-/// 綠色膠囊「＋ 記一筆」「＋ 加一段」（同股票帳本的 177A44 膠囊）
-private struct HCGreenPill: View {
-    let title: String
-
-    var body: some View {
-        Label(title, systemImage: "plus")
-            .font(.caption.weight(.heavy))
-            .foregroundStyle(Color.white)
-            .lineLimit(1)
-            .fixedSize()
-            .padding(.horizontal, 12)
-            .frame(minHeight: 30)
-            .background(Color(tb: 0x177A44), in: Capsule())
-    }
-}
-
-/// 灰色／注意色小標（「沒連到記帳」「期數沒填」）
-private struct HCMiniTag: View {
-    let text: String
-    let color: Color
-
-    var body: some View {
-        Text(text)
-            .font(.caption2.weight(.heavy))
-            .foregroundStyle(color)
-            .lineLimit(1)
-            .fixedSize()
-            .padding(.horizontal, 7)
-            .padding(.vertical, 2)
-            .background(color.opacity(0.12), in: Capsule())
-    }
-}
-
-/// 列旁邊的照片小圖示＋張數（點了看全部照片）
-private struct HCPhotoBadge: View {
-    let count: Int
-    let pal: TripBoardPalette
-
-    var body: some View {
-        HStack(spacing: 3) {
-            Image(systemName: "photo.on.rectangle")
-            Text("\(count)")
-        }
-        .font(.caption.weight(.bold))
-        .monospacedDigit()
-        .foregroundStyle(pal.hint)
-        .padding(.horizontal, 8)
-        .frame(minHeight: 28)
-        .background(pal.hint.opacity(0.12), in: Capsule())
-    }
-}
-
-/// 白卡裡的一句話（HouseLine：金額粗體、上色）
-private struct HCSentence: View {
-    let line: HouseLine
-    let pal: TripBoardPalette
-
-    var body: some View {
-        HCText.line(line, pal: pal)
-            .font(.subheadline.weight(.semibold))
-            .foregroundStyle(Color.primary)
-            .fixedSize(horizontal: false, vertical: true)
-    }
-}
+// [v25.540] 這些零件搬到 FinanceCardKit.swift（車子也要用）；這裡用 private typealias 接回舊名，呼叫點一個字都不用改
+private typealias HCHeader = FinanceCardHeader
+private typealias HCAddButton = FinanceAddButton
+private typealias HCGreenPill = FinanceGreenPill
+private typealias HCMiniTag = FinanceMiniTag
+private typealias HCPhotoBadge = FinancePhotoBadge
+private typealias HCSentence = FinanceSentence
+private typealias HCBarPart = FinanceBarPart
+private typealias HCStackBar = FinanceStackBar
+private typealias HCThinBar = FinanceThinBar
+private typealias HCProgressCell = FinanceProgressCell
 
 /// 3×2 格（樣子照股票帳本的六格）；可以點的格子小字後面多一個 ›
 private struct HCTileGrid: View {
@@ -2388,137 +1826,19 @@ private struct HCTileGrid: View {
     let pal: TripBoardPalette
     var onTap: ((HouseTap) -> Void)? = nil
 
-    @Environment(\.dynamicTypeSize) private var typeSize
-
     var body: some View {
-        // 超大字時三欄擠不下「還有 39 年 5 個月」，改兩欄
-        let count = typeSize.isAccessibilitySize ? 2 : 3
-        let columns = Array(repeating: GridItem(.flexible(), spacing: 8), count: count)
-        LazyVGrid(columns: columns, spacing: 8) {
-            ForEach(tiles, id: \.id) { t in
-                cell(t)
-            }
-        }
+        FinanceTileGrid(tiles: tiles, pal: pal, onTap: tileTap)
     }
 
-    @ViewBuilder
-    private func cell(_ t: HouseTile) -> some View {
-        if let onTap, HCText.isTappable(t.tap) {
-            Button {
-                onTap(t.tap)
-            } label: {
-                HCTile(tile: t, pal: pal, tappable: true)
-            }
-            .buttonStyle(MoneyPressStyle())
-            .accessibilityHint(HCText.hint(t.tap))
-        } else {
-            HCTile(tile: t, pal: pal, tappable: false)
-        }
+    private var tileTap: ((HouseTile) -> Void)? {
+        guard let onTap else { return nil }
+        return { t in onTap(t.tap) }
     }
 }
 
-private struct HCTile: View {
-    let tile: HouseTile
-    let pal: TripBoardPalette
-    let tappable: Bool
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Text(tile.label)
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-            Text(tile.value)
-                .font(.system(.headline, design: .rounded).weight(.heavy))
-                .monospacedDigit()
-                .foregroundStyle(HCColors.ink(tile.valueTone, pal: pal, fallback: Color.primary))
-                .lineLimit(1)
-                .minimumScaleFactor(0.6)
-            subLine
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(10)
-        .background(FinanceCardTile.fill(pal), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .accessibilityElement(children: .combine)
-    }
-
-    private var subLine: some View {
-        HStack(spacing: 2) {
-            Text(tile.sub.isEmpty ? " " : tile.sub)
-                .font(.caption2)
-                .foregroundStyle(HCColors.ink(tile.subTone, pal: pal, fallback: Color.secondary))
-                .lineLimit(1)
-                .minimumScaleFactor(0.75)
-            if tappable {
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 8, weight: .bold))
-                    .foregroundStyle(.secondary)
-            }
-        }
-    }
-}
-
-/// 分段長條的一段
-private struct HCBarPart: Identifiable {
-    let id: String
-    let value: Double
-    let color: Color
-}
-
-/// 分段長條（同股票「含息總報酬」那條：2pt 間隔、每段最少 2pt、外面裁成膠囊）；數字靠圖例的字唸，條本身不給讀
-private struct HCStackBar: View {
-    let parts: [HCBarPart]
-    let height: CGFloat
-    let pal: TripBoardPalette
-
-    var body: some View {
-        let positive = parts.filter { $0.value > 0 }
-        let sum = positive.reduce(0.0) { $0 + $1.value }
-        return GeometryReader { geo in
-            bar(positive, sum: sum, width: geo.size.width)
-        }
-        .frame(height: height)
-        .accessibilityHidden(true)
-    }
-
-    private func bar(_ list: [HCBarPart], sum: Double, width: CGFloat) -> some View {
-        let gaps = CGFloat(max(0, list.count - 1)) * 2
-        let usable = max(0, width - gaps)
-        return ZStack(alignment: .leading) {
-            Capsule().fill(pal.progressTrack)
-            if sum > 0 {
-                HStack(spacing: 2) {
-                    ForEach(list, id: \.id) { p in
-                        Rectangle()
-                            .fill(p.color)
-                            .frame(width: max(2, usable * CGFloat(p.value / sum)))
-                    }
-                }
-                .clipShape(Capsule())
-            }
-        }
-    }
-}
-
-/// 段落列「第 7／60 期」旁邊的細進度條
-private struct HCThinBar: View {
-    let fraction: Double
-    let color: Color
-    let track: Color
-
-    var body: some View {
-        GeometryReader { geo in
-            ZStack(alignment: .leading) {
-                Capsule().fill(track)
-                Capsule()
-                    .fill(color)
-                    .frame(width: max(4, geo.size.width * CGFloat(min(1, max(0, fraction)))))
-            }
-        }
-        .frame(minWidth: 40, maxWidth: .infinity)
-        .frame(height: 5)
-        .accessibilityHidden(true)
-    }
+extension HouseTile: FinanceTileContent {
+    var isTappable: Bool { HCText.isTappable(tap) }
+    var tapHint: String { HCText.hint(tap) }
 }
 
 /// 金色進度條（同股利卡「拿回成本」）
@@ -2543,29 +1863,7 @@ private struct HCGoldBar: View {
 /// HouseLine 轉成 Text、HouseTap 的提示字
 private enum HCText {
     /// 一段一段接成一個 Text（粗體用 heavy、tone 上色）；用插值接，不串一長串 +
-    static func line(_ line: HouseLine, pal: TripBoardPalette) -> Text {
-        var out: Text? = nil
-        for run in line.runs {
-            let next = piece(run, pal: pal)
-            if let prev = out {
-                out = Text("\(prev)\(next)")
-            } else {
-                out = next
-            }
-        }
-        return out ?? Text(verbatim: "")
-    }
-
-    private static func piece(_ run: HouseRun, pal: TripBoardPalette) -> Text {
-        var t = Text(verbatim: run.text)
-        if run.bold {
-            t = t.fontWeight(.heavy)
-        }
-        if let tone = run.tone {
-            t = t.foregroundStyle(tone.color(pal))
-        }
-        return t
-    }
+    static func line(_ line: HouseLine, pal: TripBoardPalette) -> Text { FinanceLineText.text(line, pal: pal) }
 
     static func isTappable(_ tap: HouseTap) -> Bool {
         switch tap {
@@ -2587,9 +1885,7 @@ private enum HCText {
 
 /// 房屋卡片的顏色。淺色照樣稿；深色另訂（分類圓對卡片底至少 3:1、白字仍讀得到；長條、階梯對卡片底至少 3:1）。
 private enum HCColors {
-    static func pick(_ light: UInt32, _ dark: UInt32, _ pal: TripBoardPalette) -> Color {
-        Color(tb: pal.dark ? dark : light)
-    }
+    static func pick(_ light: UInt32, _ dark: UInt32, _ pal: TripBoardPalette) -> Color { FinanceCardColors.pick(light, dark, pal) }
 
     /// 帳本 32pt 圓：價 6B4BE0、費 8A5CF6、裝 14A3A3、家 2F9BD8、修 E07A2E、清 8E9BBE、電 A65300、稅 C9590F、
     /// 保 E0457A、其 9AA3B5、貸 2F7FE8、固 5B6CC9。深色只把對深色卡片底不到 4:1 的調亮（價、費、電、稅、固）。
@@ -2647,16 +1943,11 @@ private enum HCColors {
     static func stairLeft(_ pal: TripBoardPalette) -> Color { pick(0xD9CFFA, 0x6F64A8, pal) }
 
     /// 進度格的段交界細刻度
-    static func tick(_ pal: TripBoardPalette) -> Color {
-        pal.dark ? Color.white.opacity(0.32) : Color(tb: 0xA9B6D3)
-    }
+    static func tick(_ pal: TripBoardPalette) -> Color { FinanceCardColors.tick(pal) }
 
     /// 繳款中那一段的藍（白字在上面深淺色都讀得到）
-    static let payingBlue = Color(tb: 0x2F7FE8)
+    static let payingBlue = FinanceCardColors.payingBlue
 
     /// 格子大數字、小字的顏色：nil 或 neutral 用呼叫端給的一般字色
-    static func ink(_ tone: MoneyTone?, pal: TripBoardPalette, fallback: Color) -> Color {
-        guard let tone, tone != .neutral else { return fallback }
-        return tone.color(pal)
-    }
+    static func ink(_ tone: MoneyTone?, pal: TripBoardPalette, fallback: Color) -> Color { FinanceCardColors.ink(tone, pal: pal, fallback: fallback) }
 }

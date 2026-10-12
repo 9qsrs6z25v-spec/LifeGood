@@ -185,6 +185,11 @@ extension MoneyArtTheme {
     static let finMoto = MoneyArtTheme(id: 57, top: 0x8DB3D6, bottom: 0x3C5A86, tint: 0x4A6FA5,
                                        hero: "scooter", accent: "fuelpump.fill", pattern: .road,
                                        word: "Ride", caps: "MOTORCYCLE")
+    /// [v25.540] 決定 18：油車、油電改藍（列表項目卡、群組標頭、卡片風景的車）。不原地改 finDrive：
+    /// finDrive 也是理財總覽「載具」資產類別色（FinanceInsights、現金流「養車」），改藍會跟儲蓄險撞色。
+    static let finGas = MoneyArtTheme(id: 58, top: 0x8EC5FF, bottom: 0x2F6FE0, tint: 0x2F6FE0,
+                                      hero: "car.fill", accent: "fuelpump.fill", pattern: .road,
+                                      word: "Drive", caps: "ON THE ROAD")
 
     static func of(_ c: VariableCategory?) -> MoneyArtTheme {
         switch c {

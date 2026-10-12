@@ -710,9 +710,13 @@ enum VehicleScriptName {
     }
 
     /// 手寫字下面的小字：車名是英文就寫車名（MODEL Y），不然寫動力
+    /// [v25.540] 決定 20：車名像車牌（「ABC-1234」）就不印出來，改寫動力（跟分享、手寫問候同一個判斷）
     static func caps(_ v: Vehicle) -> String {
         let name = v.name.trimmingCharacters(in: .whitespaces)
-        if !name.isEmpty, name.count <= 18, name.unicodeScalars.allSatisfy(\.isASCII) { return name.uppercased() }
+        if !name.isEmpty, name.count <= 18, name.unicodeScalars.allSatisfy(\.isASCII),
+           !VehicleScriptName.looksLikePlate(name) {
+            return name.uppercased()
+        }
         switch v.powerType {
         case .gasoline: return "ON THE ROAD"
         case .electric: return "ELECTRIC"
@@ -722,13 +726,23 @@ enum VehicleScriptName {
         }
     }
 
+    /// [v25.540] 決定 18：油車、油電改藍（finGas）；電車維持綠。卡片風景的車身也讀這裡的 top／bottom
     static func theme(_ v: Vehicle) -> MoneyArtTheme {
         switch v.powerType {
-        case .gasoline, .hybrid: return .finDrive
+        case .gasoline, .hybrid: return .finGas
         case .electric: return .finElectric
         case .motorcycle: return .finMoto
         case .electricMotorcycle: return .finScooter
         }
+    }
+
+    /// [v25.540] 群組標頭（持有中／已售出）的小插畫：那一組全是同一個主題就用它（全是油車→藍、全是電車→綠）；
+    /// 空的或混著就維持 .finDrive（載具資產類別的青綠）
+    static func groupTheme(_ vehicles: [Vehicle]) -> MoneyArtTheme {
+        guard let first = vehicles.first else { return .finDrive }
+        let head = theme(first)
+        let same = vehicles.allSatisfy { theme($0) == head }
+        return same ? head : .finDrive
     }
 }
 

@@ -605,9 +605,6 @@ enum AppPreferenceSync {
         "hero_trend_end_opacity", "hero_trend_show_end_label",
         // 股票量柱
         "hero_volume_bar_opacity",
-        // 閃卡樣式
-        "flash_card_corner_radius", "flash_card_border_scale", "flash_card_value_size",
-        "flash_card_bokeh", "flash_card_shine", "flash_card_shadow", "flash_card_animation",
         // 英雄卡樣式
         "hero_card_corner_radius", "hero_card_bokeh", "hero_card_shine",
         "hero_card_shadow", "hero_card_kpi_value_size",
