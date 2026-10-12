@@ -4029,6 +4029,13 @@ struct AddExpenseView: View {
         financeStore.vehicles.first { v in v.variableExpenses.contains { $0.linkedExpenseId == id } }
     }
 
+    /// [v25.541] 舊版把「其他」改成車險時沒清車子身上的鏡像：只靠鏡像連著的強制險、綜合險也帶出那台車，
+    /// 不然存一次就跟車子斷開（儲蓄險、壽險、意外險本來就不能連車，不帶）
+    private func mirrorCarForInsurance(_ expense: Expense) -> UUID? {
+        guard expense.insuranceSubCategory == .compulsory || expense.insuranceSubCategory == .comprehensive else { return nil }
+        return mirrorVehicle(fixedExpenseId: expense.id)?.id
+    }
+
     private func loadEditing() {
         guard let expense = editingExpense else { return }
 
@@ -4241,7 +4248,7 @@ struct AddExpenseView: View {
                 fixedLinkVehicleId = mirrorCar.id
             }
         } else if expense.expenseType == .fixed && expense.fixedCategory == .insurance,
-                  let vid = expense.linkedVehicleId {
+                  let vid = expense.linkedVehicleId ?? mirrorCarForInsurance(expense) {
             // [v25.538] 車險（強制險、綜合險）只會連汽車
             selectedFixedAssetLink = .vehicle
             fixedLinkVehicleId = vid
