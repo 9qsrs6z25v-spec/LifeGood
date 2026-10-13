@@ -772,7 +772,7 @@ struct SettingsView: View {
         } header: {
             Text("幣別匯率")
         } footer: {
-            Text("輸入幣別與對 NT$ 的比值（例：美金 = 32 元）。新增後，記帳的金額輸入欄位左側即可選擇該幣別，輸入金額時將自動換算為 NT$。「自動更新」會辨識常見幣別（美金、日圓、歐元、人民幣…）並帶入即時匯率；認不得的幣別維持手動值不變。")
+            Text("輸入幣別與對 NT$ 的比值（例：美金 = 32 元）。新增後，記帳的金額輸入欄位左側即可選擇該幣別，輸入金額時將自動換算為 NT$。「自動更新」會辨識常見幣別（美金、日圓、歐元、人民幣…）並帶入即時匯率；認不得的幣別維持手動值不變。黃金填「黃金」或 XAU（每克）、「黃金(錢)」（每台錢 3.75 克）、「黃金(盎司)」；白銀填「白銀」或 XAG（每克）。金價用紐約黃金期貨換算成台幣，跟銀行牌價會差一點。")
         }
     }
 
@@ -789,7 +789,7 @@ struct SettingsView: View {
         if outcome.updated > 0 { rateRowsRefreshToken += 1 }
 
         guard outcome.recognizedAny || !outcome.unknown.isEmpty else {
-            rateUpdateResult = "沒有可辨識的幣別（支援：美金、日圓、歐元、人民幣、港幣…或直接填 USD、JPY 等代碼）"
+            rateUpdateResult = "沒有可辨識的幣別（支援：美金、日圓、歐元、人民幣、港幣、黃金、白銀…或直接填 USD、JPY 等代碼）"
             return
         }
         var parts: [String] = ["已更新 \(outcome.updated) 筆"]
@@ -2399,7 +2399,9 @@ private struct CurrencyRateRow: View {
                 .keyboardType(.decimalPad)
                 .multilineTextAlignment(.trailing)
                 .font(.system(.body, design: .default).monospacedDigit())
-                .frame(maxWidth: 80)
+                // [v25.542] 黃金每錢「16,321.61」、每盎司「135,375.68」放不進 80pt；
+                // 幣別欄是 maxWidth .infinity，會自己讓出空間
+                .frame(maxWidth: 120)
                 .onChange(of: rateValue) { _, _ in scheduleCommit() }
             Text("元")
                 .foregroundStyle(.secondary)
