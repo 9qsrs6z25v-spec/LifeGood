@@ -1412,6 +1412,9 @@ struct StockLedgerCard: View {
     let data: StockCardData
     let onAdd: (StockLedgerAdd) -> Void
     let onOpen: (StockLedgerEvent) -> Void
+    /// [v25.543] 股利有拍文件時，列右邊多一顆「照片＋張數」膠囊，點了直接看照片（不用先進編輯頁）。
+    /// 沒傳就不顯示膠囊，帳本照舊
+    var onPhotos: ((StockDividend) -> Void)? = nil
 
     @State private var showAll = false
     @Environment(\.colorScheme) private var scheme
@@ -1468,12 +1471,7 @@ struct StockLedgerCard: View {
                 if i > 0 {
                     Divider().padding(.leading, 76)
                 }
-                Button {
-                    onOpen(e)
-                } label: {
-                    StockLedgerRow(event: e, stock: data.stock, pal: pal)
-                }
-                .buttonStyle(MoneyPressStyle())
+                ledgerRow(e, pal: pal)
             }
             if hidden > 0 {
                 Divider().padding(.leading, 14)
@@ -1490,6 +1488,55 @@ struct StockLedgerCard: View {
             }
         }
         .modifier(StockCardChrome())
+    }
+
+    /// 帳本的一列。[v25.543] 有文件照片的股利：列和照片膠囊是並排的兩顆按鈕（照載具帳本的收據膠囊，
+    /// 不包在列按鈕裡，點膠囊才不會連帶開編輯頁）。沒有膠囊的列還是原本那一顆按鈕，外觀不變
+    @ViewBuilder
+    private func ledgerRow(_ e: StockLedgerEvent, pal: TripBoardPalette) -> some View {
+        if onPhotos != nil, let d = Self.dividendWithPhotos(e) {
+            // StockLedgerRow 自己右邊留了 14（分享圖也用它，不能改），這裡收回來，
+            // 金額和膠囊之間改成 8，跟載具帳本一樣。收回的那段會疊到膠囊底下，膠囊放上層，點膠囊還是開照片
+            HStack(spacing: 8) {
+                rowButton(e, pal: pal)
+                    .padding(.trailing, -14)
+                photoButton(d, pal: pal)
+                    .zIndex(1)
+            }
+        } else {
+            rowButton(e, pal: pal)
+        }
+    }
+
+    private func rowButton(_ e: StockLedgerEvent, pal: TripBoardPalette) -> some View {
+        Button {
+            onOpen(e)
+        } label: {
+            StockLedgerRow(event: e, stock: data.stock, pal: pal)
+        }
+        .buttonStyle(MoneyPressStyle())
+    }
+
+    /// [v25.543] 膠囊右邊補 14，跟其他列的金額一樣貼齊卡片邊。
+    /// 膠囊只有 28 高，點的範圍撐到 44（列本來就比 44 高，不會把列撐高），手指比較好按
+    private func photoButton(_ d: StockDividend, pal: TripBoardPalette) -> some View {
+        let count = d.photoFileNames.count
+        return Button {
+            onPhotos?(d)
+        } label: {
+            FinancePhotoBadge(count: count, pal: pal)
+                .frame(minHeight: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(MoneyPressStyle())
+        .accessibilityLabel("文件照片 \(count) 張")
+        .padding(.trailing, 14)
+    }
+
+    /// 股利而且有拍文件才回傳那一筆（買賣、舊資料、沒照片的股利都是 nil）
+    private static func dividendWithPhotos(_ e: StockLedgerEvent) -> StockDividend? {
+        guard case .dividend(let d) = e.source, !d.photoFileNames.isEmpty else { return nil }
+        return d
     }
 }
 

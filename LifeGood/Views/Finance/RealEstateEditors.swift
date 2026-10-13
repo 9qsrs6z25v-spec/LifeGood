@@ -521,6 +521,8 @@ struct CutePhotoDraft: Identifiable {
         case utility(UtilityType)
         case elevator
         case vehicle(VehiclePhotoCategory)   // 車輛照片紀錄（VehicleDetailView 共用本瀏覽器）
+        /// [v25.543] 股利發放通知書、扣繳憑單（股票帳本的照片膠囊開這個）
+        case dividend
 
         var label: String {
             switch self {
@@ -529,6 +531,7 @@ struct CutePhotoDraft: Identifiable {
             case .utility(let t): return "\(t.rawValue) 收據"
             case .elevator: return "電梯保養"
             case .vehicle(let c): return c.rawValue
+            case .dividend: return "股利文件"
             }
         }
         var icon: String {
@@ -538,6 +541,7 @@ struct CutePhotoDraft: Identifiable {
             case .utility(let t): return t.icon
             case .elevator: return "arrow.up.arrow.down.square.fill"
             case .vehicle(let c): return c.icon
+            case .dividend: return "doc.text.image"
             }
         }
         var accent: Color {
@@ -552,6 +556,7 @@ struct CutePhotoDraft: Identifiable {
                 }
             case .elevator: return Color(red: 0.45, green: 0.78, blue: 0.70)   // 薄荷綠
             case .vehicle(let c): return c.color
+            case .dividend: return Color(red: 0.95, green: 0.70, blue: 0.25)   // 暖金（和股利柱同一個色系）
             }
         }
     }

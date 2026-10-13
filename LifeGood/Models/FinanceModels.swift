@@ -549,6 +549,8 @@ struct StockDividend: Identifiable, Codable, Equatable {
     /// 配息聯動產生的 Income id（同步刪除用）
     var linkedIncomeId: UUID?
     var note: String
+    /// [v25.543] 股利發放通知書、扣繳憑單等文件的照片／PDF 檔名（存在 DividendPhotos 資料夾）
+    var photoFileNames: [String]
 
     init(
         id: UUID = UUID(),
@@ -558,7 +560,8 @@ struct StockDividend: Identifiable, Codable, Equatable {
         perShare: Double = 0,
         sharesAtEvent: Double = 0,
         linkedIncomeId: UUID? = nil,
-        note: String = ""
+        note: String = "",
+        photoFileNames: [String] = []
     ) {
         self.id = id
         self.date = date
@@ -568,6 +571,7 @@ struct StockDividend: Identifiable, Codable, Equatable {
         self.sharesAtEvent = sharesAtEvent
         self.linkedIncomeId = linkedIncomeId
         self.note = note
+        self.photoFileNames = photoFileNames
     }
 
     init(from decoder: Decoder) throws {
@@ -580,16 +584,61 @@ struct StockDividend: Identifiable, Codable, Equatable {
         sharesAtEvent = (try? c.decode(Double.self, forKey: .sharesAtEvent)) ?? 0
         linkedIncomeId = try c.decodeIfPresent(UUID.self, forKey: .linkedIncomeId)
         note = (try? c.decode(String.self, forKey: .note)) ?? ""
+        // [v25.543] 舊資料沒有這個欄位，讀不到就當沒有照片，不能讓整筆股利解不出來
+        photoFileNames = (try? c.decodeIfPresent([String].self, forKey: .photoFileNames)) ?? []
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, date, kind, lots, perShare, sharesAtEvent, linkedIncomeId, note
+        case id, date, kind, lots, perShare, sharesAtEvent, linkedIncomeId, note, photoFileNames
     }
 
     /// 配股換算成股數
     var sharesEarned: Double { lots * 1000 }
     /// 配息總額 = 每股配息 × 當時持股股數
     var cashTotal: Double { perShare * sharesAtEvent }
+}
+
+// MARK: - 股利文件照片（v25.543）
+
+/// [v25.543] 股利文件照片的存檔寫法照抄 Expense（同樣用「股利 id_照片 id」當檔名、PDF 原檔不壓縮），
+/// 資料夾獨立成 DividendPhotos，iCloud 同步／完整備份／一鍵壓縮才找得到（CloudKitManager.photoDirectories）。
+extension StockDividend {
+    static var photosDirectory: URL {
+        let dir = (FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
+            ?? FileManager.default.temporaryDirectory)
+            .appendingPathComponent("DividendPhotos", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
+    /// 將 jpeg 資料寫入並回傳檔名（同時推送 CloudKit）；寫入失敗回傳 nil，避免股利存進一個指向不存在檔案的檔名
+    static func savePhoto(_ data: Data, dividendId: UUID, photoId: UUID = UUID()) -> String? {
+        let data = ImageCompressor.compressForStorage(data)   // 存檔前統一壓縮：1080P 長邊 + JPEG 80%
+        let name = "\(dividendId.uuidString)_\(photoId.uuidString).jpg"
+        let url = photosDirectory.appendingPathComponent(name)
+        guard (try? data.write(to: url)) != nil else { return nil }
+        PhotoCloudSync.upload(directory: "DividendPhotos", fileName: name)
+        return name
+    }
+
+    /// PDF 原檔保留不壓縮；跟照片放同一個資料夾、同一套檔名，只差副檔名，刪除與雲端同步走同一條路
+    static func savePDF(_ data: Data, dividendId: UUID, fileId: UUID = UUID()) -> String? {
+        let name = "\(dividendId.uuidString)_\(fileId.uuidString).pdf"
+        let url = photosDirectory.appendingPathComponent(name)
+        guard (try? data.write(to: url)) != nil else { return nil }
+        PhotoCloudSync.upload(directory: "DividendPhotos", fileName: name)
+        return name
+    }
+
+    static func deletePhoto(_ fileName: String) {
+        let url = photosDirectory.appendingPathComponent(fileName)
+        try? FileManager.default.removeItem(at: url)
+        PhotoCloudSync.delete(directory: "DividendPhotos", fileName: fileName)
+    }
+
+    static func photoURL(for fileName: String) -> URL {
+        photosDirectory.appendingPathComponent(fileName)
+    }
 }
 
 struct Stock: Identifiable, Codable {

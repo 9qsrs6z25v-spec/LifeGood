@@ -112,6 +112,8 @@ struct StockDetailView: View {
     @State private var editingTransaction: StockTransaction?
     @State private var newDividend: NewDividendRequest?
     @State private var editingDividend: StockDividend?
+    /// [v25.543] 帳本上股利那顆「文件照片」膠囊打開的照片（看照片不用付費，跟車卡、房屋卡一樣）
+    @State private var viewingDividendPhotos: CutePhotoDraft?
     /// 一年份的日線（含開高低）：看板的股價山稜、價格位置、走勢的 K 線都用這一份
     @State private var dailyPoints: [StockDailyPoint] = []
     /// [v25.528] 籌碼（法人、融資融券）：換一檔就重讀
@@ -191,7 +193,8 @@ struct StockDetailView: View {
                     chipsSection
                     StockLedgerCard(data: card,
                                     onAdd: { kind in addLedgerEntry(kind) },
-                                    onOpen: { e in openLedgerEntry(e) })
+                                    onOpen: { e in openLedgerEntry(e) },
+                                    onPhotos: { d in showDividendPhotos(d) })
                     if !stock.dividends.isEmpty {
                         StockDividendCard(data: card)
                     }
@@ -288,6 +291,10 @@ struct StockDetailView: View {
                 StockDividendEditor(stockId: stockId, editing: div)
                     .appStores()
             }
+            .sheet(item: $viewingDividendPhotos) { draft in
+                CutePhotoViewer(draft: draft)
+                    .appStores()
+            }
             .premiumLockAlert(isPresented: $showPremiumAlert)
             .exportPageSizeDialog(isPresented: $askExportPageSize,
                                   itemCount: card.events.count) { per in
@@ -356,6 +363,26 @@ struct StockDetailView: View {
         case .legacy:
             if subscription.isPremium { showEdit = true } else { showPremiumAlert = true }
         }
+    }
+
+    /// [v25.543] 點帳本上股利的「文件照片」膠囊。看照片不用付費（跟點列去編輯一樣不擋）。
+    /// CutePhotoViewer 只認得圖片、PDF 會是一片空白，所以只拿圖片給它；
+    /// 這筆只有 PDF 的話改開它的編輯頁，在照片廊裡點 PDF 就能看
+    private func showDividendPhotos(_ d: StockDividend) {
+        let urls = d.photoFileNames
+            .map { StockDividend.photoURL(for: $0) }
+            .filter { $0.pathExtension.lowercased() != "pdf" }
+        guard !urls.isEmpty else {
+            if !d.photoFileNames.isEmpty { editingDividend = d }
+            return
+        }
+        let s = stock
+        let name = s.name.isEmpty ? (s.symbol.isEmpty ? "股票" : s.symbol) : s.name
+        viewingDividendPhotos = CutePhotoDraft(urls: urls,
+                                               title: name + (d.kind == .cash ? " 配息" : " 配股"),
+                                               note: d.note,
+                                               date: d.date,
+                                               kind: .dividend)
     }
 
     // MARK: - 分享圖片匯出
@@ -1046,8 +1073,24 @@ struct StockDividendEditor: View {
     @State private var showDeleteConfirm = false
     /// 存檔中鎖住儲存按鈕，避免 sheet 收合動畫播完前快速連點建立兩筆重複股利／收入／存款紀錄
     @State private var isSaving = false
+    /// [v25.543] 股利文件（發放通知書、扣繳憑單）的照片／PDF 檔名。拍下、選好的當下就寫檔了，
+    /// 按儲存才記進這筆股利
+    @State private var photoFileNames: [String] = []
+    /// [v25.543] 新增時先定好這筆股利的 id：照片檔名用它開頭，存檔時也用同一個，
+    /// 檔名才對得上是哪一筆（@State 才不會每次重畫換一個）
+    @State private var draftId = UUID()
+    /// [v25.543] loadInitial 只跑一次：拍照、掃描文件是全螢幕畫面，關掉時會再觸發這頁的 onAppear，
+    /// 再跑一次會把剛拍的照片和打到一半的欄位蓋回進來時的樣子（載具照片 v25.538 踩過）
+    @State private var didLoadInitial = false
 
     private var isEditing: Bool { editing != nil }
+    private var dividendId: UUID { editing?.id ?? draftId }
+    /// [v25.543] 照片有沒有還沒存的變動（新加的檔、或刪掉了原本的檔）。
+    /// 往下滑關掉不會經過「取消」收拾，會留下沒人認領的檔、或指向已刪檔案的紀錄，所以這時擋住下滑
+    private var hasUnsavedPhotoChanges: Bool {
+        guard didLoadInitial else { return false }
+        return photoFileNames != (editing?.photoFileNames ?? [])
+    }
     private var stock: Stock? { store.stocks.first(where: { $0.id == stockId }) }
     /// [v25.445] 美股論「股」不論「張」，配息也是美元
     private var unit: String { stock?.quantityUnit ?? "張" }
@@ -1133,6 +1176,8 @@ struct StockDividendEditor: View {
                     stockEditorSectionHeader("備註", icon: "note.text", color: .secondary)
                 }
 
+                documentPhotoSection
+
                 if let bankInfo = bankInfoText {
                     Section {
                         HStack(spacing: 8) {
@@ -1166,7 +1211,7 @@ struct StockDividendEditor: View {
             .navigationTitle(isEditing ? "編輯股利" : "新增股利")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) { Button("取消") { dismiss() } }
+                ToolbarItem(placement: .topBarLeading) { Button("取消") { cancel() } }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button(isEditing ? "儲存" : "新增") { save() }
                         .bold().foregroundStyle(.green)
@@ -1222,6 +1267,32 @@ struct StockDividendEditor: View {
                 // 離開總配息欄 → 校正成每股 × 股數的實際金額
                 if old == .total { syncTotalFromPerShare() }
             }
+        }
+        // [v25.543] 照片有變動時只能按「取消」（收拾這次的檔）或「儲存」。
+        // 不用 onDisappear 清檔：開相機、掃描文件的全螢幕畫面也會觸發它
+        .interactiveDismissDisabled(hasUnsavedPhotoChanges)
+    }
+
+    /// [v25.543] 股利文件：拍照、掃描文件（自動裁切）、相簿多選、PDF。
+    /// 不傳 onBackgroundCommit：這張表單要按儲存才落地，背景寫回去的檔名沒人認領
+    private var documentPhotoSection: some View {
+        // id 先取成常數：相機、相簿多選是在背景執行緒呼叫 onSaveImage，不要在那邊回頭讀 @State
+        let id = dividendId
+        return Section {
+            MultiPhotoGallery(
+                fileNames: $photoFileNames,
+                urlFor: { StockDividend.photoURL(for: $0) },
+                onSaveImage: { StockDividend.savePhoto($0, dividendId: id) },
+                onDeleteFile: { StockDividend.deletePhoto($0) },
+                onSavePDF: { StockDividend.savePDF($0, dividendId: id) },
+                title: "文件照片"
+            )
+            .padding(.vertical, 4)
+        } header: {
+            stockEditorSectionHeader("文件", icon: "doc.text.image", color: .orange)
+        } footer: {
+            Text("股利發放通知書、扣繳憑單都可以拍下來；選「掃描文件」會自動裁切成長方形，也可以選 PDF。")
+                .font(.caption2)
         }
     }
 
@@ -1296,6 +1367,8 @@ struct StockDividendEditor: View {
     }
 
     private func loadInitial() {
+        guard !didLoadInitial else { return }
+        didLoadInitial = true
         if let e = editing {
             date = e.date
             kind = e.kind
@@ -1307,6 +1380,7 @@ struct StockDividendEditor: View {
                 totalText = String(format: "%g", (e.perShare * e.sharesAtEvent).rounded())
             }
             note = e.note
+            photoFileNames = e.photoFileNames
         } else {
             kind = initialKind
             // 新增時，配息預設帶入當下持股股數
@@ -1318,6 +1392,33 @@ struct StockDividendEditor: View {
 
     // MARK: - Save / Delete
 
+    /// [v25.543] 取消：照片拍下的當下就寫檔、上傳了，只有按儲存才會記進這筆股利。
+    /// 這次新加、原本沒有的檔要刪掉，不然沒人認領、還會一直留在 iCloud（照 AddExpenseView.cancelAddExpense）。
+    /// 編輯時若在照片廊刪了原本的照片，檔案當下就沒了，這筆股利要跟著拿掉那些檔名，
+    /// 不然會留著指向不存在檔案的檔名（照 VehiclePhotoEditor／RenovationPhotoEditor 的 cancel）。
+    /// 記帳頁的 cancelAddExpense 沒做這一步、會留下破圖，所以這段不要照它簡化掉
+    private func cancel() {
+        let original = Set(editing?.photoFileNames ?? [])
+        for name in photoFileNames where !original.contains(name) {
+            StockDividend.deletePhoto(name)
+        }
+        let remaining = photoFileNames.filter { original.contains($0) }
+        var corrected: Stock?
+        if let e = editing, Set(remaining) != original,
+           var stock = store.stocks.first(where: { $0.id == stockId }),
+           let idx = stock.dividends.firstIndex(where: { $0.id == e.id }) {
+            stock.dividends[idx].photoFileNames = remaining
+            corrected = stock
+        }
+        dismiss()
+        // [v25.543] 先收起再寫回（下一個 runloop）：照 VehiclePhotoEditor／RenovationPhotoEditor，
+        // 上一層疊著好幾個 sheet 時，關閉動畫中改 store 在實機上閃退過
+        if let corrected {
+            let financeStore = store
+            DispatchQueue.main.async { financeStore.update(corrected) }
+        }
+    }
+
     private func save() {
         guard !isSaving else { return }
         guard var stock = store.stocks.first(where: { $0.id == stockId }) else { return }
@@ -1327,15 +1428,18 @@ struct StockDividendEditor: View {
         let perShare = Double(perShareText) ?? 0
         let sharesAtEvent = Double(sharesAtEventText) ?? 0
 
+        // [v25.543] id 用 dividendId（新增時就是照片檔名開頭那個 draftId）。
+        // 原本有、這次被刪掉的照片不用在這裡刪：照片廊的刪除鈕當下就刪檔了
         var dividend = StockDividend(
-            id: editing?.id ?? UUID(),
+            id: dividendId,
             date: date,
             kind: kind,
             lots: kind == .stock ? lots : 0,
             perShare: kind == .cash ? perShare : 0,
             sharesAtEvent: kind == .cash ? sharesAtEvent : 0,
             linkedIncomeId: editing?.linkedIncomeId,
-            note: note.trimmingCharacters(in: .whitespaces)
+            note: note.trimmingCharacters(in: .whitespaces),
+            photoFileNames: photoFileNames
         )
 
         // 配息：建立 / 更新 Income + BankDeposit
@@ -1382,6 +1486,11 @@ struct StockDividendEditor: View {
         guard let editing,
               var stock = store.stocks.first(where: { $0.id == stockId }) else { return }
         isSaving = true
+        // [v25.543] 刪畫面上現在的檔名（含這次新加、還沒存的）；
+        // 這次在照片廊刪掉的原有照片當下就刪檔了，也已經不在清單裡，不會重複刪
+        for name in photoFileNames {
+            StockDividend.deletePhoto(name)
+        }
         if let incomeId = editing.linkedIncomeId {
             removeCashDividendIncome(incomeId: incomeId)
         }

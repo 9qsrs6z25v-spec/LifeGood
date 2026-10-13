@@ -43,7 +43,8 @@ final class CloudKitManager {
         "OrgPersonPhotos",
         "RealEstateDocuments",
         "VehiclePhotos",
-        "TripStopPhotos"
+        "TripStopPhotos",
+        "DividendPhotos"   // [v25.543] 股利文件照片：不列在這裡，iCloud 補傳（剛開同步、上次沒傳成功）、完整備份、一鍵壓縮都會漏掉
     ]
 
     private let container: CKContainer

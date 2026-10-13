@@ -60,7 +60,18 @@ class FinanceStore: ObservableObject {
     func update(_ item: Stock) {
         if let i = stocks.firstIndex(where: { $0.id == item.id }) { stocks[i] = item }
     }
-    func deleteStock(_ item: Stock) { stocks.removeAll { $0.id == item.id } }
+    func deleteStock(_ item: Stock) {
+        // [v25.543] 連同每筆股利的文件照片一起刪（同 deleteVehicle），不然檔案會留在手機和 iCloud 變孤兒
+        Self.cleanupStockFiles(item)
+        stocks.removeAll { $0.id == item.id }
+    }
+
+    /// [v25.543] 刪股票、清除所有資料共用：股利文件照片／PDF 的實體檔與雲端紀錄
+    private static func cleanupStockFiles(_ item: Stock) {
+        for d in item.dividends {
+            for name in d.photoFileNames { StockDividend.deletePhoto(name) }
+        }
+    }
 
     /// 批次更新多筆股票現價：單次 @Published 觸發（一次重繪、一次 JSON 序列化、一次 CloudKit 推送），
     /// 避免逐筆 stocks[idx].currentPrice = price 造成 N 次串聯重繪。
@@ -234,6 +245,7 @@ class FinanceStore: ObservableObject {
     func clearAll() {
         isLoading = true
         for item in realEstates { Self.cleanupRealEstateFiles(item) }
+        for item in stocks { Self.cleanupStockFiles(item) }   // [v25.543] 股利文件照片也要清
         insurances.removeAll()
         stocks.removeAll()
         vehicles.removeAll()
