@@ -206,12 +206,10 @@ enum DayTimelineLink {
     // 也就無法在列舉改動時讓編譯器攔下來。搬到主 App 側才有這道保護。
 }
 
-// MARK: - 為什麼這裡沒有 App Group
+// MARK: - App Group
 //
-// v25.377 曾經加了一個 App Group，只為了把快照多存一份「給未來的鎖定畫面小工具用」。
-// 那個小工具還不存在，卻讓兩個 target 都背上 application-groups entitlement——
-// App Group 必須先在 Apple Developer 後台註冊、並掛到兩個 App ID 上，
-// 否則 App Store 的封裝簽章會直接失敗（v25.379 遇到的就是這件事）。
+// v25.377 曾經提前加了 App Group，但當時沒在 Apple Developer 後台註冊、也沒掛到兩個 App ID，
+// v25.379 上架封裝簽章失敗只好拿掉。v25.544 起使用者已先在後台註冊 group.com.lifegood.app
+// 並掛到 com.lifegood.app 與 com.lifegood.app.widgets，兩個 target 才重新加回（給桌面小工具讀快照）。
 //
-// Live Activity 的資料是透過 ActivityAttributes / ContentState 走 ActivityKit 傳遞的，
-// 本來就不需要 App Group。等真的要做小工具時再加，不要提前借債。
+// Live Activity 的資料照舊走 ActivityKit（ActivityAttributes / ContentState），不經過 App Group。

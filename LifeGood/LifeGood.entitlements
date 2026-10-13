@@ -20,5 +20,9 @@
 	<array/>
 	<key>com.apple.developer.weatherkit</key>
 	<true/>
+	<key>com.apple.security.application-groups</key>
+	<array>
+		<string>group.com.lifegood.app</string>
+	</array>
 </dict>
 </plist>

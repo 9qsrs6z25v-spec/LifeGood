@@ -13,6 +13,11 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.544", build: 1297, date: "2026/10/13", notes: [
+            "【技術】**小工具第一步：先試簽章**（你說：「App Group 好了」）。這一版只把你在 Apple Developer 註冊好的共用資料夾（App Group：group.com.lifegood.app）加到 App 和小工具兩邊，畫面和功能完全沒變。之後的桌面小工具要靠這個資料夾讀 App 算好的數字。",
+            "【說明】v25.379 那次上架封裝失敗，是因為先推了程式、後台還沒註冊；這次順序對了。如果 Xcode Cloud 封裝還是失敗、紀錄裡有「application-groups」，代表 com.lifegood.app 或 com.lifegood.app.widgets 其中一個的 App Groups 沒勾到或沒按 Save，回後台確認兩個都有勾，再重新建置。",
+            "【待確認】這一版請照平常 Archive、上 TestFlight；能裝、能開，靈動島今日行程照常，就代表簽章過了，我接著推第一批小工具（還能花、今天）。",
+        ]),
         ChangelogEntry(version: "25.543", build: 1296, date: "2026/10/13", notes: [
             "【新增】**股利可以附文件照片**（你說：「發放股利有文件，我想拍照上傳，可以幫我做出這個功能嗎」）。新增、編輯股利的「備註」下面多一個「文件」區，按「＋」可以拍照、掃描文件（自動偵測邊框、裁成長方形，可以連拍多頁）、從相簿多選，或選 PDF，用來留股利發放通知書、扣繳憑單。",
             "【新增】股票卡片「我的帳本」裡，有附文件的配息、配股，右邊多一顆「照片＋張數」小膠囊，點一下直接看照片（看照片不用付費）；那筆只有 PDF 的話，會打開那筆股利，在文件區點 PDF 看。點列的其他地方照舊是打開那筆來編輯。分享卡片圖片時不會放這些文件。",
