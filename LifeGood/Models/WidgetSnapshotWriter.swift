@@ -1,0 +1,336 @@
+import Foundation
+import SwiftUI
+import UIKit
+import Combine
+import WidgetKit
+
+// MARK: - 小工具快照的寫手（v25.545，只屬於主 App）
+//
+// 從 ExpenseStore／LifeStore 組出 WidgetMoneySnapshot／WidgetLifeSnapshot
+// （LifeGood/Shared/WidgetSnapshot.swift），防抖 3 秒、內容沒變就不寫，
+// 真的寫了才叫 WidgetCenter.shared.reloadTimelines(ofKind:)。
+//
+// 金額的字一律用 App 現有的 MoneyFormat／ntdWanString 組，小工具不再格式化。
+// 規格見 scratchpad/widgets/v1/brief.md 的 G1。
+//
+// 什麼時候寫：
+//   • 啟動（start）：掛好監聽後馬上寫一次全部
+//   • 記帳有變：ExpenseStore.objectWillChange 防抖 3 秒 → money
+//     （存檔的 didSet 與 iCloud 重讀 load() 都會改 @Published，兩條都接得到；所以不必改 ExpenseStore）
+//   • 人生／系統行事曆有變：LifeStore、AppleCalendarBridge 的 objectWillChange 防抖 3 秒 → life
+//   • 背景收到 iCloud 變更（iPad／Mac 記的帳）：包在背景工作裡馬上寫全部——背景的防抖計時器
+//     不一定等得到 3 秒（App 隨時會被暫停）
+//   • 時間大跳（過午夜、換時區、改系統時間）：寫全部；出國落地換時區後，快照的每一天要用新時區重切
+//   • 回前景、進背景：LifeGoodApp 呼叫 writeNow()
+//
+// 寫的規矩（judge.md §3.2）：
+//   • 只讀不寫：不改任何 store、不呼叫 FinanceOverviewData.build（它會寫每月淨資產紀錄）
+//   • 「今天花了」只用 OverviewBoardData.todayVariable，不用 ExpenseStore.todayTotal（那個含固定支出攤提）
+//   • WidgetSnapshotStore.write 回 false（內容沒變或寫失敗）就不叫重畫：App 在背景叫重畫會吃小工具每天的額度
+//
+// @MainActor：MoneyFormat 的 NumberFormatter、AppleCalendarBridge 都只在主執行緒用。
+
+@MainActor
+final class WidgetSnapshotWriter {
+
+    static let shared = WidgetSnapshotWriter()
+
+    /// 哪一份快照
+    enum Part: Hashable {
+        /// money_v1.json（還能花）
+        case money
+        /// life_v1.json（今天）
+        case life
+    }
+
+    /// 防抖秒數：連續改（一次存檔常常改好幾個 @Published）只寫一次
+    private static let debounceSeconds = 3
+
+    private var expenseStore: ExpenseStore?
+    private var lifeStore: LifeStore?
+    private var cancellables = Set<AnyCancellable>()
+    private var started = false
+    /// 背景收到 iCloud 變更時撐住 App 寫完快照
+    private var backgroundTask: UIBackgroundTaskIdentifier = .invalid
+
+    private init() {}
+
+    // MARK: - 對外
+
+    /// 啟動時呼叫一次（重複呼叫無害，第二次起什麼都不做）：掛監聽，然後馬上寫一次全部。
+    func start(expense: ExpenseStore, life: LifeStore) {
+        guard !started else { return }
+        started = true
+        expenseStore = expense
+        lifeStore = life
+
+        expense.objectWillChange
+            .debounce(for: .seconds(Self.debounceSeconds), scheduler: DispatchQueue.main)
+            .sink { [weak self] _ in self?.writeNow([.money]) }
+            .store(in: &cancellables)
+
+        // 系統行事曆變了（別的 App 改、授權剛打開）也要重寫「今天」：
+        // AppleCalendarBridge 收到 EKEventStoreChanged 會改 lastChange
+        life.objectWillChange
+            .merge(with: AppleCalendarBridge.shared.objectWillChange)
+            .debounce(for: .seconds(Self.debounceSeconds), scheduler: DispatchQueue.main)
+            .sink { [weak self] _ in self?.writeNow([.life]) }
+            .store(in: &cancellables)
+
+        NotificationCenter.default.publisher(for: .cloudSyncDidPullChanges)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.cloudDidPullChanges() }
+            .store(in: &cancellables)
+
+        NotificationCenter.default.publisher(for: UIApplication.significantTimeChangeNotification)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.writeNow() }
+            .store(in: &cancellables)
+
+        writeNow()
+    }
+
+    /// 立刻組＋寫（啟動、回前景、進背景、背景收到 iCloud 變更）。還沒 start 就什麼都不做
+    ///（start 會馬上寫一次）。
+    func writeNow(_ parts: Set<Part> = [.money, .life]) {
+        let now = Date()
+        if parts.contains(.money), let expense = expenseStore {
+            let snapshot = Self.moneySnapshot(expense: expense, now: now)
+            if WidgetSnapshotStore.write(snapshot) {
+                WidgetCenter.shared.reloadTimelines(ofKind: WidgetKind.moneyLeft)
+            }
+        }
+        if parts.contains(.life), let life = lifeStore {
+            let snapshot = Self.lifeSnapshot(life: life, now: now)
+            // write 回 false（內容沒變）時，前景且舊檔夠舊就只換時間戳記（restampLife）
+            if WidgetSnapshotStore.write(snapshot) || Self.restampLife(snapshot, now: now) {
+                WidgetCenter.shared.reloadTimelines(ofKind: WidgetKind.today)
+            }
+        }
+    }
+
+    // MARK: - 「10:02 更新」的時間戳記
+
+    /// [情境驗證補] 中型「今天」右下角的「10:02 更新」是提醒「LifeGood 沒打開，就不知道你在 Outlook／
+    /// 行事曆 App 改的會議」（judge §2.3）。可是內容沒變時 WidgetSnapshotStore.write 不寫，generatedAt
+    /// 停在上一次內容變的時候：早上 07:30 寫過、下午 14:00 打開 App 重看過行事曆、什麼都沒變，
+    /// 小工具到晚上還寫「07:30 更新」。
+    /// App 在前景時叫重畫不算小工具每天的額度，所以舊檔超過這麼久就照樣寫一次，只把時間換成現在。
+    private static let lifeRestampAfter: TimeInterval = 30 * 60
+
+    /// 只在前景做（背景叫重畫會吃額度：進背景、背景收到 iCloud 變更都不做）。寫了回 true。
+    private static func restampLife(_ snapshot: WidgetLifeSnapshot, now: Date) -> Bool {
+        guard UIApplication.shared.applicationState != .background,
+              let old = WidgetSnapshotStore.read(WidgetLifeSnapshot.self),
+              now.timeIntervalSince(old.generatedAt) >= lifeRestampAfter,
+              let url = WidgetSnapshotStore.fileURL(WidgetLifeSnapshot.file, create: true),
+              let data = try? WidgetSnapshotStore.makeEncoder().encode(snapshot) else { return false }
+        do {
+            // 跟 WidgetSnapshotStore.write 同一組寫法：整檔換掉、開機後第一次解鎖就能讀
+            try data.write(to: url, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    // MARK: - 背景的 iCloud 變更
+
+    /// 前景不用做事：各 store 重讀會發 objectWillChange，防抖那條會接。
+    /// 背景（雲端推播把 App 叫醒）時防抖計時器可能等不到，所以包在背景工作裡直接寫。
+    /// 已經 receive(on: main) 過一次（各 store 的 reloadFromCloud 是同步觀察者，發通知時就跑完了），
+    /// 再排一次主執行緒是保險：萬一哪個 store 之後改成非同步重讀。
+    private func cloudDidPullChanges() {
+        guard UIApplication.shared.applicationState == .background else { return }
+        beginBackgroundTask()
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            self.writeNow()
+            self.endBackgroundTask()
+        }
+    }
+
+    private func beginBackgroundTask() {
+        guard backgroundTask == .invalid else { return }
+        backgroundTask = UIApplication.shared.beginBackgroundTask(withName: "LifeGoodWidgetSnapshot") { [weak self] in
+            self?.endBackgroundTask()
+        }
+    }
+
+    private func endBackgroundTask() {
+        guard backgroundTask != .invalid else { return }
+        UIApplication.shared.endBackgroundTask(backgroundTask)
+        backgroundTask = .invalid
+    }
+
+    // MARK: - 還能花（money_v1.json）
+
+    /// 今天到月底每天一份。第 0 天就是收支總覽頭部那一份（同一個 OverviewBoardData.build 呼叫）；
+    /// 之後每一天是「今天花的歸零、剩餘天數減一、每天還能花重算」，本月支出、收入基準照今天的。
+    static func moneySnapshot(expense: ExpenseStore, now: Date,
+                              calendar cal: Calendar = .current) -> WidgetMoneySnapshot {
+        let today = OverviewBoardData.build(store: expense, now: now)
+        let todayStart = cal.startOfDay(for: now)
+        let lastOffset = max(0, today.daysInMonth - today.day)
+        var days: [WidgetMoneyDay] = []
+        for k in 0...lastOffset {
+            guard let dayStart = cal.date(byAdding: .day, value: k, to: todayStart),
+                  let dayEnd = cal.date(byAdding: .day, value: 1, to: dayStart) else { continue }
+            let board = k == 0 ? today : projected(today, daysAhead: k)
+            days.append(moneyDay(board, dayStart: dayStart, dayEnd: dayEnd))
+        }
+        return WidgetMoneySnapshot(generatedAt: now,
+                                   dataDay: WidgetDateText.dayKey(now),
+                                   month: today.month,
+                                   days: days)
+    }
+
+    /// 往後推 k 天：複製今天那一份、只改這三樣，其餘（remainingDays、left、allowancePerDay、
+    /// hasBase、spending）交給 OverviewBoardData 自己的推導屬性——跟 App 同一套算式。
+    private static func projected(_ today: OverviewBoardData, daysAhead k: Int) -> OverviewBoardData {
+        var d = today
+        d.day = today.day + k
+        d.todayVariable = 0
+        d.todayCount = 0
+        d.daily = today.daily + Array(repeating: 0.0, count: k)
+        return d
+    }
+
+    /// 一天的字。判斷與寫法照收支總覽：頭部（OverviewBoard.header／capsule）、
+    /// 「每天還能花」格（allowanceTile）、「今天花了」格（todayTile）。
+    /// 金額只用 MoneyFormat.short、MoneyFormat.percent。
+    private static func moneyDay(_ d: OverviewBoardData, dayStart: Date, dayEnd: Date) -> WidgetMoneyDay {
+        let ratio = d.hasBase ? d.spending / d.base : 0
+        let state: WidgetMoneyState
+        let title: String
+        let hero: String
+        let line: String
+        let footer: String
+        if !d.hasBase {
+            state = .noIncome
+            title = "本月支出"
+            hero = MoneyFormat.short(d.spending)
+            line = "記一筆收入，才算得出還能花"
+            footer = d.todayCount > 0
+                ? "今天 " + MoneyFormat.short(d.todayVariable) + "・\(d.todayCount) 筆"
+                : "今天 還沒花錢"
+        } else if d.left >= 0 {
+            state = .normal
+            title = "本月還能花"
+            hero = MoneyFormat.short(d.left)
+            line = "每天 " + MoneyFormat.short(d.allowancePerDay)
+            footer = progressText(ratio: ratio, remainingDays: d.remainingDays)
+        } else {
+            state = .over
+            title = "本月已超支"
+            hero = MoneyFormat.short(-d.left)
+            line = "每天 已超支"
+            footer = progressText(ratio: ratio, remainingDays: d.remainingDays)
+        }
+        return WidgetMoneyDay(dayKey: WidgetDateText.dayKey(dayStart),
+                              dayStart: dayStart,
+                              dayEnd: dayEnd,
+                              dateText: WidgetDateText.dayLabel(dayStart),
+                              state: state,
+                              title: title,
+                              hero: hero,
+                              line: line,
+                              footer: footer,
+                              spentRatio: finite(ratio),
+                              remainingDays: d.remainingDays,
+                              bar: moneyBar(d))
+    }
+
+    /// 「已花 62%・還有 19 天」。「已花 62%」跟總覽頭部膠囊同一個寫法（只在有收入基準時用）。
+    private static func progressText(ratio: Double, remainingDays: Int) -> String {
+        "已花 " + MoneyFormat.percent(finite(ratio)) + "・還有 \(remainingDays) 天"
+    }
+
+    /// 「這個月的錢」橫條縮短版：以 max(收入基準, 本月支出, 1) 為整條；固定＋變動不超過 1
+    private static func moneyBar(_ d: OverviewBoardData) -> WidgetMoneyBar {
+        let scale = max(d.base, d.spending, 1)
+        let fixed = clamp01(d.fixed / scale)
+        let variable = min(clamp01(d.variable / scale), 1 - fixed)
+        let income: Double? = d.hasBase ? clamp01(d.base / scale) : nil
+        return WidgetMoneyBar(fixed: fixed, variable: variable, income: income)
+    }
+
+    private static func clamp01(_ v: Double) -> Double {
+        guard v.isFinite else { return 0 }
+        return min(max(v, 0), 1)
+    }
+
+    /// 寫進快照的數字一律有限（MoneyFormat.percent 遇到 inf／nan 會在 Int(...) 當掉）
+    private static func finite(_ v: Double) -> Double {
+        v.isFinite ? v : 0
+    }
+
+    // MARK: - 今天（life_v1.json）
+
+    /// [0] 今天、[1] 明天；validUntil＝後天 00:00。
+    /// 行程跟靈動島同一段程式（TodayAgenda，不裁站數），全天的事照我的行事曆（CalendarDayItems）。
+    static func lifeSnapshot(life: LifeStore, now: Date,
+                             calendar cal: Calendar = .current) -> WidgetLifeSnapshot {
+        let start0 = cal.startOfDay(for: now)
+        let start1 = cal.date(byAdding: .day, value: 1, to: start0) ?? start0
+        let start2 = cal.date(byAdding: .day, value: 2, to: start0) ?? start1
+
+        let agenda0 = TodayAgenda.items(on: start0, store: life, calendar: cal)
+        let agenda1 = TodayAgenda.items(on: start1, store: life, calendar: cal)
+        // 後天只要第一場（明天那一份的「明天 08:30／早會」）
+        let firstOfDay2 = TodayAgenda.items(on: start2, store: life, calendar: cal).first
+
+        let day0 = lifeDay(start: start0, end: start1, agenda: agenda0,
+                           nextDayFirst: agenda1.first, life: life, calendar: cal)
+        let day1 = lifeDay(start: start1, end: start2, agenda: agenda1,
+                           nextDayFirst: firstOfDay2, life: life, calendar: cal)
+        return WidgetLifeSnapshot(generatedAt: now,
+                                  dataDay: WidgetDateText.dayKey(now),
+                                  validUntil: day1.dayEnd,
+                                  days: [day0, day1])
+    }
+
+    private static func lifeDay(start: Date, end: Date,
+                                agenda: [TodayAgenda.Item],
+                                nextDayFirst: TodayAgenda.Item?,
+                                life: LifeStore,
+                                calendar cal: Calendar) -> WidgetLifeDay {
+        WidgetLifeDay(dayKey: WidgetDateText.dayKey(start),
+                      dayStart: start,
+                      dayEnd: end,
+                      dateText: WidgetDateText.dayLabel(start),
+                      shortDateText: WidgetDateText.shortDate(start),
+                      stops: agenda.map { widgetStop($0) },
+                      allDay: CalendarDayItems.allDay(on: start, store: life, calendar: cal),
+                      greeting: greeting(on: start, life: life, calendar: cal),
+                      hidesMeetings: life.hidesMeetings(on: start),
+                      nextDayFirstStop: nextDayFirst.map { widgetStop($0) })
+    }
+
+    private static func widgetStop(_ item: TodayAgenda.Item) -> WidgetStop {
+        WidgetStop(stop: item.stop, location: item.location, lockTitle: item.lockTitle)
+    }
+
+    // MARK: 手寫問候（寫死、不靠 AI）
+
+    /// 星期用固定的英文陣列，不靠語系（Calendar 的 weekday：1＝星期日）
+    private static let weekdayNames = ["Sunday", "Monday", "Tuesday", "Wednesday",
+                                       "Thursday", "Friday", "Saturday"]
+
+    /// 中型右上角兩行：家人生日＞出發去旅行＞週末＞平常
+    static func greeting(on day: Date, life: LifeStore, calendar cal: Calendar = .current) -> [String] {
+        if let member = CalendarDayItems.birthdayMembers(on: day, store: life, calendar: cal).first {
+            let english = member.englishName.trimmingCharacters(in: .whitespacesAndNewlines)
+            return english.isEmpty ? ["Happy", "birthday!"] : ["Happy birthday,", english + "!"]
+        }
+        if life.tripPlans.contains(where: { cal.isDate($0.startDate, inSameDayAs: day) }) {
+            return ["Have a nice", "trip!"]
+        }
+        if cal.isDateInWeekend(day) {
+            return ["Enjoy your", "weekend!"]
+        }
+        let weekday = cal.component(.weekday, from: day)
+        let index = min(max(weekday - 1, 0), weekdayNames.count - 1)
+        return ["Have a nice", weekdayNames[index] + "!"]
+    }
+}

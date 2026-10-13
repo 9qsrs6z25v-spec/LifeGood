@@ -125,6 +125,9 @@ struct LifeGoodApp: App {
                 .environmentObject(subscription)
                 .environmentObject(einvoiceSync)
                 .task {
+                    // [v25.545] 桌面小工具的快照：掛好監聽、馬上寫一次（放在任何 await 之前，
+                    // 開場動畫期間就寫好；第二次呼叫什麼都不做）
+                    WidgetSnapshotWriter.shared.start(expense: expenseStore, life: lifeStore)
                     await subscription.refreshStatus()
                     await subscription.loadProducts()
                     await einvoiceSync.syncIfDue(expenseStore: expenseStore)
@@ -142,8 +145,10 @@ struct LifeGoodApp: App {
                     await DayTimelineController.shared.refresh(store: lifeStore)
                 }
                 // [v25.381] 從靈動島／鎖定畫面點進來：切到「我的行事曆」
+                // [v25.545] 改走總入口：lifegood://today… 照舊交給 DayTimelineLink.apply，
+                // 另外認得小工具的 lifegood://expense/overview（收支總覽）
                 .onOpenURL { url in
-                    _ = DayTimelineLink.apply(url, store: lifeStore)
+                    _ = WidgetLink.apply(url, store: lifeStore)
                 }
                 .onAppear {
                     BackupManager.shared.createSnapshotIfNeeded(
@@ -158,10 +163,14 @@ struct LifeGoodApp: App {
                         BackupManager.shared.createSnapshotIfNeeded(
                             expense: expenseStore, finance: financeStore, life: lifeStore
                         )
+                        // [v25.545] 保底：離開 App 那一刻小工具的快照一定是最新的
+                        WidgetSnapshotWriter.shared.writeNow()
                     } else if phase == .active {
                         // 節流：30 秒內已同步過會自動跳過，避免快速切換 App
                         // 造成的反覆 CloudKit pull 觸發畫面閃爍
                         cloudSync.syncNowIfDue()
+                        // [v25.545] 今天往前走了（過了午夜、過了一場）：重寫小工具快照，內容沒變就不寫
+                        WidgetSnapshotWriter.shared.writeNow()
                         Task {
                             await subscription.refreshStatus()
                             await einvoiceSync.syncIfDue(expenseStore: expenseStore)

@@ -17,6 +17,16 @@
 		A01B000002000012 /* DayTimelineIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000004 /* DayTimelineIntent.swift */; };
 		A01B000002000013 /* DayTimelineController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000005 /* DayTimelineController.swift */; };
 		A01B000002000014 /* PhotoImportAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000008 /* PhotoImportAttributes.swift */; };
+		A01B000002000051 /* WidgetSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000051 /* WidgetSnapshot.swift */; };
+		A01B000002000061 /* WidgetSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000051 /* WidgetSnapshot.swift */; };
+		A01B000002000052 /* WidgetLink.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000052 /* WidgetLink.swift */; };
+		A01B000002000062 /* WidgetLink.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000052 /* WidgetLink.swift */; };
+		A01B000002000053 /* WidgetPalette.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000053 /* WidgetPalette.swift */; };
+		A01B000002000054 /* MoneyLeftWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000054 /* MoneyLeftWidget.swift */; };
+		A01B000002000055 /* TodayWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000055 /* TodayWidget.swift */; };
+		A01B000001001539 /* WidgetSnapshotWriter.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001539 /* WidgetSnapshotWriter.swift */; };
+		A01B000001001540 /* TodayAgenda.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001540 /* TodayAgenda.swift */; };
+		A01B000001001541 /* CalendarDayItems.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001541 /* CalendarDayItems.swift */; };
 		A01B000001001506 /* PhotoImportCenter.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001506 /* PhotoImportCenter.swift */; };
 		A01B000001001507 /* PhotoSlideshowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001507 /* PhotoSlideshowView.swift */; };
 		A01B000001001508 /* BeatDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001508 /* BeatDetector.swift */; };
@@ -351,6 +361,14 @@
 		A01A000001000108 /* AIService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIService.swift; sourceTree = "<group>"; };
 		A01A000001000034 /* LifeGood.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = LifeGood.entitlements; sourceTree = "<group>"; };
 		A01A000002000050 /* LifeGoodWidgets.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = LifeGoodWidgets.entitlements; sourceTree = "<group>"; };
+		A01A000002000051 /* WidgetSnapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetSnapshot.swift; sourceTree = "<group>"; };
+		A01A000002000052 /* WidgetLink.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetLink.swift; sourceTree = "<group>"; };
+		A01A000002000053 /* WidgetPalette.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetPalette.swift; sourceTree = "<group>"; };
+		A01A000002000054 /* MoneyLeftWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MoneyLeftWidget.swift; sourceTree = "<group>"; };
+		A01A000002000055 /* TodayWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TodayWidget.swift; sourceTree = "<group>"; };
+		A01A000001001539 /* WidgetSnapshotWriter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetSnapshotWriter.swift; sourceTree = "<group>"; };
+		A01A000001001540 /* TodayAgenda.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TodayAgenda.swift; sourceTree = "<group>"; };
+		A01A000001001541 /* CalendarDayItems.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarDayItems.swift; sourceTree = "<group>"; };
 		A01A000001000035 /* GradeTitleView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GradeTitleView.swift; sourceTree = "<group>"; };
 		A01A000001000036 /* SpouseResumeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpouseResumeView.swift; sourceTree = "<group>"; };
 		A01A000001000037 /* ChildrenResumeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChildrenResumeView.swift; sourceTree = "<group>"; };
@@ -413,6 +431,9 @@
 				A01A000002000001 /* LifeGoodWidgetsBundle.swift */,
 				A01A000002000002 /* DayTimelineLiveActivity.swift */,
 				A01A000002000007 /* PhotoImportLiveActivity.swift */,
+				A01A000002000053 /* WidgetPalette.swift */,
+				A01A000002000054 /* MoneyLeftWidget.swift */,
+				A01A000002000055 /* TodayWidget.swift */,
 				A01A000002000006 /* Info.plist */,
 				A01A000002000050 /* LifeGoodWidgets.entitlements */,
 			);
@@ -425,6 +446,8 @@
 				A01A000002000003 /* DayTimelineAttributes.swift */,
 				A01A000002000004 /* DayTimelineIntent.swift */,
 				A01A000002000008 /* PhotoImportAttributes.swift */,
+				A01A000002000051 /* WidgetSnapshot.swift */,
+				A01A000002000052 /* WidgetLink.swift */,
 			);
 			path = Shared;
 			sourceTree = "<group>";
@@ -495,6 +518,9 @@
 				A01A000001001503 /* DeepLinkRouter.swift */,
 				A01A000001000228 /* TripShare.swift */,
 				A01A000002000005 /* DayTimelineController.swift */,
+				A01A000001001539 /* WidgetSnapshotWriter.swift */,
+				A01A000001001540 /* TodayAgenda.swift */,
+				A01A000001001541 /* CalendarDayItems.swift */,
 				A01A000001000040 /* EInvoiceClient.swift */,
 				A01A000001000041 /* InvoiceCategorizer.swift */,
 				A01A000001000042 /* EInvoiceSyncManager.swift */,
@@ -765,6 +791,11 @@
 				A01B000002000004 /* DayTimelineIntent.swift in Sources */,
 				A01B000002000005 /* PhotoImportAttributes.swift in Sources */,
 				A01B000002000006 /* PhotoImportLiveActivity.swift in Sources */,
+				A01B000002000051 /* WidgetSnapshot.swift in Sources */,
+				A01B000002000052 /* WidgetLink.swift in Sources */,
+				A01B000002000053 /* WidgetPalette.swift in Sources */,
+				A01B000002000054 /* MoneyLeftWidget.swift in Sources */,
+				A01B000002000055 /* TodayWidget.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -885,6 +916,11 @@
 				A01B000002000012 /* DayTimelineIntent.swift in Sources */,
 				A01B000002000013 /* DayTimelineController.swift in Sources */,
 				A01B000002000014 /* PhotoImportAttributes.swift in Sources */,
+				A01B000002000061 /* WidgetSnapshot.swift in Sources */,
+				A01B000002000062 /* WidgetLink.swift in Sources */,
+				A01B000001001539 /* WidgetSnapshotWriter.swift in Sources */,
+				A01B000001001540 /* TodayAgenda.swift in Sources */,
+				A01B000001001541 /* CalendarDayItems.swift in Sources */,
 				A01B000001001506 /* PhotoImportCenter.swift in Sources */,
 				A01B000001001507 /* PhotoSlideshowView.swift in Sources */,
 				A01B000001001509 /* SlideshowDecor.swift in Sources */,
@@ -947,10 +983,10 @@
 				CLANG_ENABLE_MODULES = YES;
 				CODE_SIGN_ENTITLEMENTS = LifeGoodWidgets/LifeGoodWidgets.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1297;
+				CURRENT_PROJECT_VERSION = 1298;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = LifeGoodWidgets/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = "美好人生";
+				INFOPLIST_KEY_CFBundleDisplayName = "LifeGood";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -958,7 +994,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 25.544;
+				MARKETING_VERSION = 25.545;
 				PRODUCT_BUNDLE_IDENTIFIER = com.lifegood.app.widgets;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
@@ -974,10 +1010,10 @@
 				CLANG_ENABLE_MODULES = YES;
 				CODE_SIGN_ENTITLEMENTS = LifeGoodWidgets/LifeGoodWidgets.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1297;
+				CURRENT_PROJECT_VERSION = 1298;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = LifeGoodWidgets/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = "美好人生";
+				INFOPLIST_KEY_CFBundleDisplayName = "LifeGood";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -985,7 +1021,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 25.544;
+				MARKETING_VERSION = 25.545;
 				PRODUCT_BUNDLE_IDENTIFIER = com.lifegood.app.widgets;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
@@ -1002,7 +1038,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = LifeGood/LifeGood.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1297;
+				CURRENT_PROJECT_VERSION = 1298;
 				DEVELOPMENT_ASSET_PATHS = "\"LifeGood/Preview Content\"";
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -1034,7 +1070,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 25.544;
+				MARKETING_VERSION = 25.545;
 				PRODUCT_BUNDLE_IDENTIFIER = com.lifegood.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -1050,7 +1086,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = LifeGood/LifeGood.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1297;
+				CURRENT_PROJECT_VERSION = 1298;
 				DEVELOPMENT_ASSET_PATHS = "\"LifeGood/Preview Content\"";
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -1082,7 +1118,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 25.544;
+				MARKETING_VERSION = 25.545;
 				PRODUCT_BUNDLE_IDENTIFIER = com.lifegood.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;

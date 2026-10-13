@@ -74,6 +74,14 @@ enum AppNavigation {
         d.set(AppMode.life.rawValue, forKey: "appMode")
         d.set(LifeFeature.travelMap.rawValue, forKey: "life_feature")
     }
+
+    /// [v25.545] 「還能花」小工具 → 收支「總覽」。鍵名照 MainTabView 的 @AppStorage
+    ///（"appMode"、"expense_feature"）；AppMode.expense 的 rawValue 是「記帳」。
+    static func goToExpenseOverview() {
+        let d = UserDefaults.standard
+        d.set(AppMode.expense.rawValue, forKey: "appMode")
+        d.set(ExpenseFeature.overview.rawValue, forKey: "expense_feature")
+    }
 }
 
 // MARK: - 靈動島：網址 → 要打開的卡片
@@ -117,7 +125,8 @@ extension DayTimelineLink {
     /// 給鬧鐘警示上的「打開 LifeGood」用：那裡只有會議 id，沒有場次時間。
     /// 時間那一段（epoch）在 resolve 時並沒有被用到——反查只看來源字母與 UUID 前
     /// 8 碼——所以補 0 就夠，不需要把開會時間一路傳下來。
-    /// 格式必須與 DayTimelineController.stopId 一致，長度也要過 resolve 的 > 9 檢查。
+    /// 格式必須與 TodayAgenda.stopId（v25.545 前在 DayTimelineController）一致，
+    /// 長度也要過 resolve 的 > 9 檢查。
     static func stopIdForMeeting(uuidString: String) -> String {
         "m" + String(uuidString.prefix(8)) + "0"
     }
@@ -125,7 +134,7 @@ extension DayTimelineLink {
     /// 把場次 id 還原成實際的那一筆。
     ///
     /// id 的長相是「來源字母 + UUID 前 8 碼 + 開始時間的 epoch」
-    ///（DayTimelineController.stopId；當初為了擠進 ContentState 的 4KB 上限
+    ///（TodayAgenda.stopId，v25.545 前在 DayTimelineController；當初為了擠進 ContentState 的 4KB 上限
     /// 才只放 8 碼，不是完整 UUID）。8 碼 hex 在個人資料量下碰撞機率可以忽略。
     ///
     /// 系統行事曆（'e'）的事件回 nil——它的 id 來自 EventKit，不在我們的資料裡，
@@ -149,6 +158,35 @@ extension DayTimelineLink {
             return nil
         default:
             return nil
+        }
+    }
+}
+
+// MARK: - 小工具／靈動島：網址的總入口（v25.545）
+
+extension WidgetLink {
+
+    /// 主 App 收到 lifegood:// 的唯一入口（LifeGoodApp.onOpenURL）。
+    ///
+    /// 解析在共用檔（WidgetLink.parse，小工具組網址用同一份）；「切到哪一頁」碰得到
+    /// AppMode／ExpenseFeature，只能寫在 App 側——v25.454 的教訓（共用檔寫 "life"，
+    /// rawValue 其實是「人生」，點靈動島永遠跳錯頁）。
+    ///
+    /// - lifegood://today…：原封不動交給 DayTimelineLink.apply（靈動島既有行為一個字都不改；
+    ///   旅遊景點開那一趟、其他開我的行事曆那一場的卡片）
+    /// - lifegood://expense/overview：收支「總覽」
+    /// - 認不得的網址回 false、什麼都不做（跟以前只認 today 時一樣）
+    ///
+    /// route.fromWidget v1 不用（v2 跳過開場動畫、本次更新視窗才用）。
+    @discardableResult
+    static func apply(_ url: URL, store: LifeStore) -> Bool {
+        guard let route = parse(url) else { return false }
+        switch route.destination {
+        case .today:
+            return DayTimelineLink.apply(url, store: store)
+        case .expenseOverview:
+            AppNavigation.goToExpenseOverview()
+            return true
         }
     }
 }
