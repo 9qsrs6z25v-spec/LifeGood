@@ -1106,6 +1106,495 @@ extension WidgetBillsSnapshot {
     }
 }
 
+// MARK: - [v4] 理財（finance_v1.json）
+
+/// 理財四個小工具（股票今天、金價匯率、我的車、淨資產）的快照。App 用跟理財頁同一套算好、組好字
+///（LifeGood/Models/WidgetFinanceBuilder.swift），小工具照著畫。
+/// 股票、金價匯率小工具會自己上網抓新價（quotes_v1.json），抓不到才用這裡 App 的價（並寫是幾點的價）。
+///
+/// ⚠️ App 寫這份**只讀不寫**：不呼叫 FinanceOverviewData.build（它會寫每月淨資產紀錄，FinanceBoards.swift:72）。
+struct WidgetFinanceSnapshot: Codable, Equatable, WidgetSnapshotPayload {
+    static let file = WidgetSnapshotFile.finance
+    static let schemaVersion = 1
+
+    var schema: Int = WidgetFinanceSnapshot.schemaVersion
+    var generatedAt: Date
+    /// 寫的當下是哪一天「2026-10-13」（WidgetDateText.dayKey）
+    var dataDay: String
+    var stocks: WidgetStocksBlock
+    var rates: WidgetRatesBlock
+    /// 每台車：沒賣掉的照 FinanceStore.vehicles 的順序在前；賣掉但 45 天內還有要扣的接在後面
+    var vehicles: [WidgetFinanceVehicle]
+    /// 沒有任何資產、也沒有貸款是 nil（小工具寫「新增房地產、股票、保單或車子之後，這裡會算出淨資產」）
+    var netWorth: WidgetNetWorth?
+}
+
+extension WidgetFinanceSnapshot {
+    /// 快照是不是今天寫的。不是今天的：我的車、淨資產右下角寫 WidgetDateText.figuresOf(generatedAt)（「10/11 的數字」，橘字）
+    func isFromToday(at now: Date) -> Bool {
+        dataDay == WidgetDateText.dayKey(now)
+    }
+
+    /// 長按設定選的那一檔；nil、找不到（賣掉、刪掉）→ 市值最大那一檔（items 第一個）；沒有持股 nil
+    func stock(id: String?) -> WidgetFinanceStock? {
+        let all: [WidgetFinanceStock] = self.stocks.items
+        if let id, let hit = all.first(where: { $0.id.uuidString == id }) { return hit }
+        return all.first
+    }
+
+    /// 中型三檔：設定選的（照第 1／2／3 檔的順序、跳過找不到的與重複的），不夠的用市值大到小補滿 3 檔
+    func threeStocks(ids: [String?]) -> [WidgetFinanceStock] {
+        let all: [WidgetFinanceStock] = self.stocks.items
+        var out: [WidgetFinanceStock] = []
+        var seen = Set<UUID>()
+        for raw in ids {
+            guard let raw, let hit = all.first(where: { $0.id.uuidString == raw }) else { continue }
+            if seen.insert(hit.id).inserted { out.append(hit) }
+        }
+        for s in all where out.count < WidgetStocksBlock.mediumCount {
+            if seen.insert(s.id).inserted { out.append(s) }
+        }
+        return Array(out.prefix(WidgetStocksBlock.mediumCount))
+    }
+
+    /// 長按設定選的那一台；nil、找不到 → 第一台沒賣掉的（沒有就第一台）；沒有車 nil
+    func vehicle(id: String?) -> WidgetFinanceVehicle? {
+        if let id, let hit = vehicles.first(where: { $0.id.uuidString == id }) { return hit }
+        return vehicles.first(where: { !$0.isSold }) ?? vehicles.first
+    }
+}
+
+// MARK: [v4] 股票
+
+/// 股票（持有中）
+struct WidgetStocksBlock: Codable, Equatable {
+    /// 持有中（沒賣掉、股數 > 0、有代號），依 App 的市值大到小，最多 maxItems 檔
+    var items: [WidgetFinanceStock]
+    /// 中型最下面一行：「今年股利 NT$3.9萬・最近 10/5 配息 NT$530」。
+    /// 今年＝全部股票今年領的現金股利（StockBoardData.dividendsThisYear 同一個數）；
+    /// 最近＝全部股票裡日期最晚的那一筆現金股利。只有一樣就只寫那一樣；兩樣都沒有 nil（不寫這行）。
+    /// **不寫下次配息日、不猜**（App 只記已經領到的）
+    var dividendLine: String?
+    /// 隱藏金額版：「今年股利 NT$ ••••・最近 10/5 配息 NT$ ••••」（日期照寫）
+    var dividendLineMasked: String?
+
+    /// 快照最多放幾檔（設定選單、小工具上網抓價都從這裡挑）
+    static let maxItems = 20
+    /// 中型列幾檔
+    static let mediumCount = 3
+}
+
+/// 一檔持有中的股票。價錢都是原幣別（美股＝美元），金額都是台幣。
+struct WidgetFinanceStock: Codable, Equatable, Identifiable {
+    var id: UUID
+    /// App 的代號「2330」「VOO」
+    var symbol: String
+    /// 「台積電」（沒填名字用代號）
+    var name: String
+    /// 手寫英文名「TSMC」（StockScriptName.word；沒有寫 MoneyArtTheme.finStock.word「Stocks」）
+    var script: String
+    /// 小工具上網抓價要試的 Yahoo 代號，照順序試、第一個抓到的就用。跟 App 抓日線同一套
+    ///（StockDailyHistory.suffixCandidates）：美股「VOO」；台股學過的「2330.TW」，沒學過的「6488.TW」「6488.TWO」兩個都放
+    var yahooSymbols: [String]
+    var isUS: Bool
+    /// 股數（台股 1 張＝1000 股；Stock.shares）
+    var shares: Double
+    /// 「2 張」「3.2 股」（StockCardText.quantity(s, shares: s.shares)）
+    var qtyText: String
+    /// 均價（原幣別，Stock.purchasePrice）；0＝沒填（不寫「比均價」）
+    var avgPrice: Double
+    /// 換成台幣的係數：台股 1、美股＝App 的美金匯率（Stock.currencyFactor）。小工具重算市值只准乘這個
+    var currencyFactor: Double
+    /// App 存的現價（Stock.currentPrice，原幣別）；0＝還沒有報價
+    var appPrice: Double
+    /// App 的前一個交易日收盤（Stock.moneyPreviousClose(now:)）；不知道 nil
+    var appPreviousClose: Double?
+    /// App 最後一次報價成功更新這一檔的時間（AppQuoteClock）；v4 以前沒記過是 nil（小工具寫「App 的價」）
+    var appQuoteAt: Date?
+    /// 今年領的現金股利「NT$3.9萬」（moneyCashDividends(今年 1/1 00:00…現在)）；今年沒有 nil
+    var dividendsThisYearText: String?
+    /// 最近一次現金股利「10/5 配息 NT$530」（這一檔 dividends 裡日期最晚的現金股利，cashTotal × currencyFactor）；從來沒有 nil
+    var lastDividendText: String?
+    /// 點了開那一檔（WidgetLink.financeStock(id) 的 absoluteString）
+    var link: String
+
+    var url: URL { URL(string: link) ?? WidgetLink.financeStock(id) }
+
+    /// 設定選單、中型列的名字：「2330 台積電」（名字就是代號時只寫一次）
+    var menuTitle: String {
+        name == symbol ? symbol : symbol + " " + name
+    }
+}
+
+// MARK: [v4] 金價匯率
+
+/// 設定「自訂幣別匯率」裡、App 認得的幣別（金價匯率小工具的選單與「抓不到時用 App 的價」）
+struct WidgetRatesBlock: Codable, Equatable {
+    /// FXRateService.isoCode(for:) 認得的、匯率 > 0 的，照設定頁的順序；同一個代碼只留第一個
+    var items: [WidgetFinanceRate]
+    /// App 最後一次自動更新匯率成功的時間（AppQuoteClock.ratesUpdatedAt）；沒記過 nil
+    var appUpdatedAt: Date?
+}
+
+struct WidgetFinanceRate: Codable, Equatable, Identifiable {
+    /// FXRateService 的代碼：「USD」「JPY」「XAU」「XAU(錢)」「XAU(盎司)」「XAG」
+    var code: String
+    /// 使用者在設定頁填的幣別字（去頭尾空白）：「美金」「日圓」「黃金(克)」
+    var label: String
+    /// 1 單位幾台幣（App 存的值）
+    var rate: Double
+
+    var id: String { code }
+}
+
+/// 金價匯率小工具可以選來顯示的一個（大字、下面那一行、鎖定畫面）。不存檔，WidgetRatesBlock.choices() 組
+struct WidgetRateChoice: Equatable, Identifiable {
+    /// FXRateService 的代碼（小工具上網抓價就把它丟給 FXRateService.fetchDayQuotes）
+    var code: String
+    /// 「黃金 每克」「黃金 每台錢」「美金」（使用者填的字）
+    var title: String
+    /// 鎖定畫面圓形上面的小字：「金/克」「金/錢」「美金」（其他幣別取前 3 個字）
+    var shortTitle: String
+    /// App 自訂幣別匯率裡的值；使用者沒填這個幣別是 nil
+    var appRate: Double?
+    /// 黃金、白銀（期貨換算）：大字前面有「NT$」、時間前面寫「期貨換算」
+    var isMetal: Bool
+
+    var id: String { code }
+}
+
+extension WidgetRatesBlock {
+    /// 黃金每克（FXRateService 的內部代碼，同 App「黃金」「黃金(克)」）
+    static let goldGramCode = "XAU"
+    /// 黃金每台錢（3.75 克）
+    static let goldQianCode = "XAU(錢)"
+    static let usdCode = "USD"
+
+    /// 沒有快照時也有的兩個：黃金每克、黃金每台錢（小工具自己抓得到，使用者沒在設定頁填也可以看）
+    static let goldChoices: [WidgetRateChoice] = [
+        WidgetRateChoice(code: goldGramCode, title: "黃金 每克", shortTitle: "金/克", appRate: nil, isMetal: true),
+        WidgetRateChoice(code: goldQianCode, title: "黃金 每台錢", shortTitle: "金/錢", appRate: nil, isMetal: true)
+    ]
+
+    /// 選單：黃金每克、黃金每台錢（App 有填就帶 App 的值），再接 items 裡其他的（照設定頁的順序）
+    func choices() -> [WidgetRateChoice] {
+        var out: [WidgetRateChoice] = []
+        for gold in Self.goldChoices {
+            var c = gold
+            c.appRate = items.first(where: { $0.code == gold.code })?.rate
+            out.append(c)
+        }
+        for item in items where item.code != Self.goldGramCode && item.code != Self.goldQianCode {
+            let label = item.label.isEmpty ? item.code : item.label
+            let metal = item.code.hasPrefix("XAU") || item.code.hasPrefix("XAG")
+            out.append(WidgetRateChoice(code: item.code, title: label, shortTitle: String(label.prefix(3)),
+                                        appRate: item.rate, isMetal: metal))
+        }
+        return out
+    }
+
+    func choice(code: String) -> WidgetRateChoice? {
+        choices().first { $0.code == code }
+    }
+
+    /// 大字的預設：黃金每克
+    var defaultMain: WidgetRateChoice {
+        choice(code: Self.goldGramCode) ?? Self.goldChoices[0]
+    }
+
+    /// 下面那一行的預設：美金（自訂幣別匯率裡有填才有，沒有 nil＝不寫）
+    var defaultSecond: WidgetRateChoice? {
+        choice(code: Self.usdCode)
+    }
+}
+
+// MARK: [v4] 我的車
+
+/// 車子的動力（決定插畫、主題色、中型的兩顆按鈕；App 從 VehiclePowerType 換過來）
+enum WidgetVehiclePower: String, Codable {
+    case electric
+    case gasoline
+    case hybrid
+    case motorcycle
+    case electricMotorcycle
+
+    /// 記能源的那一顆按鈕是電費（電車、電動機車）還是加油（油車、油電、機車）
+    var chargesElectric: Bool {
+        self == .electric || self == .electricMotorcycle
+    }
+}
+
+/// 一台車要顯示的字與數字。全部由 App 用 VehicleFacts 算好（跟車子卡片、載具頁看板同一個數）
+struct WidgetFinanceVehicle: Codable, Equatable, Identifiable {
+    var id: UUID
+    /// 小工具上的名字（VehicleScriptName.shareName：車名像車牌時改寫「保時捷 電車」；空的「未命名車輛」）
+    var name: String
+    var power: WidgetVehiclePower
+    /// 「電車」「油車」「油電」「機車」「電動機車」（VehiclePowerType.shortName）
+    var powerText: String
+    var isSold: Bool
+    /// 主題色（VehicleScriptName.theme(v)）：電車 finElectric 0x7FE3D0→0x1A9C8C（tint 0x138A7E）、
+    /// 油車油電 finGas 0x8EC5FF→0x2F6FE0（tint 0x2F6FE0）、機車 0x8DB3D6→0x3C5A86（tint 0x4A6FA5）
+    var top: UInt32
+    var bottom: UInt32
+    var tint: UInt32
+    /// 插畫的 SF Symbol（theme.hero：「car.fill」「scooter」）。**不用照片**（照片可能拍到車牌）
+    var symbol: String
+    /// 「約 NT$5,200」（FinanceText.about100(VehicleFacts.monthly)）；沒有紀錄 nil
+    var monthlyText: String?
+    /// 中型：「每度電 NT$7.9」「每公升 NT$30.5」；兩種都沒有 nil
+    var energyText: String?
+    /// 中型：「估值 NT$260萬」（已售出「成交 NT$200萬」）；估值沒填 nil
+    var valueText: String?
+    /// 車貸（有填年限的那幾筆合起來，同車子卡片的進度條）；沒有 nil
+    var loan: WidgetVehicleLoan?
+    /// 今天起 45 天內每一次要扣的（車貸、停車月租、保險、保養估計…），依日期、名稱排，最多 8 筆。
+    /// 跟「接下來要繳」同一套：VehicleFacts.upcoming 在今天、15 天後各算一次合併（id＋日子去重）
+    var upcoming: [WidgetVehicleDue]
+    /// 中型的兩顆按鈕：電車、電動機車［記電費、記停車］；油車、油電、機車［記加油、記停車］
+    var buttons: [WidgetVehicleButton]
+    /// 點了開那一台車的卡片（WidgetLink.financeVehicle(id) 的 absoluteString）
+    var link: String
+
+    var url: URL { URL(string: link) ?? WidgetLink.financeVehicle(id) }
+}
+
+/// 車貸（多筆合起來）。App 算的那一刻已繳 paid 期；之後的扣款日在 dues，過了 00:00 就自己加一期
+struct WidgetVehicleLoan: Codable, Equatable {
+    /// 已繳幾期（VehicleFacts.loan.elapsed，有填年限的各筆加總）
+    var paid: Int
+    /// 總期數（VehicleFacts.loan.total）
+    var total: Int
+    /// 接下來會扣的期（各筆車貸合在一起依日期排，最多 6 期；date 是那天 00:00）
+    var dues: [WidgetLoanDue]
+    /// 「2029/9 繳完」（最晚那一筆的 payoffDate）；沒有 nil
+    var payoffText: String?
+    /// 還沒開始扣：「2026/11 開始」（最早的 firstDue）；已經開始 nil
+    var startText: String?
+
+    /// now 那一刻已繳幾期：App 算的＋dues 裡日期 ≤ now 的（扣款日當天 00:00 起就算繳了，同 App 的已繳），不超過 total
+    func paid(at now: Date) -> Int {
+        let more = dues.filter { $0.date <= now }.count
+        return min(total, paid + more)
+    }
+
+    /// 繳清了沒
+    func isDone(at now: Date) -> Bool {
+        paid(at: now) >= total
+    }
+
+    /// 「車貸 已繳 25／60 期」；繳清「車貸繳清」；還沒開始「車貸 2026/11 開始」（同車子卡片的字）
+    func progressText(at now: Date) -> String {
+        if isDone(at: now) { return "車貸繳清" }
+        let n = paid(at: now)
+        if n == 0, let start = startText { return "車貸 " + start }
+        return "車貸 已繳 \(n)／\(total) 期"
+    }
+
+    /// 進度環、進度條 0…1
+    func fraction(at now: Date) -> Double {
+        guard total > 0 else { return 0 }
+        return min(1, max(0, Double(paid(at: now)) / Double(total)))
+    }
+}
+
+struct WidgetLoanDue: Codable, Equatable {
+    /// 扣款日那一天的 00:00
+    var date: Date
+    /// 第幾期
+    var index: Int
+}
+
+/// 一台車的一次扣款
+struct WidgetVehicleDue: Codable, Equatable, Identifiable {
+    /// 「<VehicleUpcoming.id>@<yyyy-MM-dd>」
+    var id: String
+    /// 扣款日那一天的 00:00
+    var date: Date
+    /// 「車貸」「停車月租」「保養（估計）」（VehicleUpcoming.title）
+    var title: String
+    /// 車貸「第 26 期」（WidgetLoanDue 那一期）；其他 nil
+    var periodText: String?
+    /// 「NT$3.2萬」「NT$4,999」；保養估計「約 NT$8,000」
+    var amountText: String
+}
+
+/// 中型的一顆按鈕：打開 App 的新增支出、車子與分類帶好（你按儲存才算）
+struct WidgetVehicleButton: Codable, Equatable, Identifiable {
+    /// VehicleVariableCategory.rawValue「電費」「油錢」「停車」：原樣帶回網址 vcat=
+    var categoryKey: String
+    /// 「記電費」「記加油」「記停車」
+    var title: String
+    /// 「bolt.fill」「fuelpump.fill」「parkingsign.circle」
+    var icon: String
+    /// WidgetLink.addExpense(vehicleId:vehicleCategoryKey:) 的 absoluteString
+    var link: String
+
+    var id: String { categoryKey }
+    var url: URL { URL(string: link) ?? WidgetLink.addExpense() }
+}
+
+extension WidgetFinanceVehicle {
+    /// 今天（含）以後還沒扣的，依日期
+    func remainingDues(at now: Date) -> [WidgetVehicleDue] {
+        let today = Calendar.current.startOfDay(for: now)
+        return upcoming.filter { $0.date >= today }
+    }
+
+    /// 「下一筆」那一行（不含「下一筆 」三個字）：第一個日子要扣的，同一天好幾筆合在一起——
+    /// 「11/5 車貸 第 26 期」「11/5 車貸 第 26 期、停車月租」。都扣完了（App 太久沒開）nil
+    func nextText(at now: Date) -> String? {
+        let list = remainingDues(at: now)
+        guard let first = list.first else { return nil }
+        // [v4 G3] 有期數的（車貸）排第一個：App 依（日子、名稱）排，「停車月租」的「停」排在「車貸」前面，
+        // 照原順序會變成「11/5 停車月租、車貸」、第幾期不見了
+        let sameDay: [WidgetVehicleDue] = list.filter { $0.date == first.date && $0.periodText != nil }
+            + list.filter { $0.date == first.date && $0.periodText == nil }
+        var names: [String] = []
+        for (i, d) in sameDay.enumerated() {
+            if i == 0, let p = d.periodText {
+                names.append(d.title + " " + p)
+            } else {
+                names.append(d.title)
+            }
+        }
+        return WidgetDateText.shortDate(first.date) + " " + names.joined(separator: "、")
+    }
+
+    /// 鎖定畫面圓形沒有車貸時，圓裡寫下一筆的日子「11/5」；沒有 nil
+    func nextShortDate(at now: Date) -> String? {
+        remainingDues(at: now).first.map { WidgetDateText.shortDate($0.date) }
+    }
+}
+
+// MARK: [v4] 淨資產
+
+/// 淨資產（理財總覽頭部同一套：FinanceSnapshot.current＋FinanceHistory.series(months: 2)）
+struct WidgetNetWorth: Codable, Equatable {
+    /// 這份數字是哪個月的「2026-10」（WidgetDateText.monthKey）。跨月了（App 還沒開）小工具不寫「比上月」
+    var monthKey: String
+    /// 「10 月」
+    var monthText: String
+    /// 大字「NT$1720萬」（MoneyFormat.short(FinanceSnapshot.netWorth)）
+    var netWorthText: String
+    /// 淨資產是負的（大字用紅色，同理財總覽 bigTone .bad；著色模式靠「-」）
+    var isNegative: Bool
+    /// 「比上月 ↑1.8%」「比上月 ↓0.6%」「比上月 持平」（理財總覽 changeCapsule 同一個算法與寫法）；上個月沒有數字 nil
+    var changeText: String?
+    /// 鎖定畫面圓形：「↑1.8%」「↓0.6%」「持平」；沒有 nil
+    var changeShort: String?
+    /// 1 上升、-1 下降、0 持平或沒有（只拿來上色；著色模式靠 ↑↓ 字）
+    var changeDirection: Int
+    /// 理財總覽頭部那一句：「總資產 NT$3795萬・貸款還欠 約 NT$2075萬」「總資產 NT$3795萬・沒有貸款」
+    var line: String
+    /// 隱藏金額版：「總資產 NT$ ••••・貸款還欠 NT$ ••••」「總資產 NT$ ••••・沒有貸款」
+    var lineMasked: String
+    /// 資產各類（房地產、股票、載具、儲蓄險；> 0 的，金額大到小）。App 的淨資產沒有「存款」這一類，不放
+    var assets: [WidgetNetWorthPart]
+    /// 貸款各類（房貸、車貸、其他貸款；> 0 的，金額大到小）
+    var debts: [WidgetNetWorthPart]
+    /// 中型兩條的長度（0…1）：資產、貸款比較大的那一條是 1
+    var assetsBar: Double
+    var debtsBar: Double
+    /// 鎖定畫面長方形第三行：「資產 4 類・10 月」（沒有資產「10 月」）
+    var summaryText: String
+    /// 淨資產裡股票用的是幾點的價（持有中股票的 AppQuoteClock 最新那一筆）；沒有股票或不知道 nil
+    var stockPriceAt: Date?
+
+    /// 快照的月份就是現在這個月（跨月了就不寫「比上月」，改寫 WidgetDateText.figuresOf(generatedAt)）
+    func isCurrentMonth(at now: Date) -> Bool {
+        monthKey == WidgetDateText.monthKey(now)
+    }
+}
+
+/// 淨資產的一類（資產或貸款）
+struct WidgetNetWorthPart: Codable, Equatable, Identifiable {
+    /// 「realEstate」「stock」「vehicle」「savings」「mortgage」「carLoan」「otherLoan」
+    var key: String
+    /// 「房地產」「股票」「載具」「儲蓄險」「房貸」「車貸」「其他貸款」
+    var title: String
+    /// SF Symbol：house.fill／chart.line.uptrend.xyaxis／car.fill／shield.lefthalf.filled；
+    /// 房貸 house、車貸 car、其他貸款 banknote
+    var icon: String
+    /// 「NT$3178萬」（MoneyFormat.short）。房貸、車貸照理財總覽：推算的寫「約 NT$…」、算不出本金的寫「還要繳 NT$…」
+    var amountText: String
+    /// 占資產（或占貸款）幾成「84%」（MoneyFormat.percent）。隱藏金額時小工具改寫這個
+    var shareText: String
+    /// 0…1：在自己那一條裡占多長
+    var share: Double
+    /// 顏色（資產照 FinanceAssetKind.theme：房紫 0xB79CFF→0x6B4BE0、股橘 0xFFB45E→0xF07A2A、
+    /// 車青綠 0x7FE3D0→0x1A9C8C、險藍 0x8EC5FF→0x3A6FE0；房貸同房、車貸同車、其他貸款灰 0xC5CCDA→0x7A869E）
+    var top: UInt32
+    var bottom: UInt32
+
+    var id: String { key }
+}
+
+// MARK: - [v4] 小工具自己抓的價（quotes_v1.json：只有小工具讀寫，App 不讀不寫）
+
+/// 股票、金價匯率小工具自己上網抓到的價。抓到就合併寫進來（LifeGoodWidgets/WidgetQuoteStore.swift），
+/// 下次畫的時候跟 finance 快照裡 App 的價比誰新。App 不讀這個檔、也不回寫股票資料（兩邊不打架）。
+struct WidgetQuoteCache: Codable, Equatable, WidgetSnapshotPayload {
+    static let file = WidgetSnapshotFile.quotes
+    static let schemaVersion = 1
+
+    var schema: Int = WidgetQuoteCache.schemaVersion
+    /// 最後一次寫的時間
+    var generatedAt: Date
+    /// App 的股票代號（WidgetFinanceStock.symbol「2330」）→ 抓到的價
+    var stocks: [String: WidgetQuote]
+    /// FXRateService 的代碼（「XAU」「USD」）→ 抓到的價
+    var rates: [String: WidgetRateQuote]
+
+    static func empty(at now: Date) -> WidgetQuoteCache {
+        WidgetQuoteCache(generatedAt: now, stocks: [:], rates: [:])
+    }
+}
+
+/// 一檔股票抓到的價（Yahoo v8 chart，range=1d&interval=1d 的 meta）
+struct WidgetQuote: Codable, Equatable {
+    /// 抓到的是哪個 Yahoo 代號（下次排第一個試）
+    var yahooSymbol: String
+    /// regularMarketPrice（原幣別）
+    var price: Double
+    /// 前一個交易日收盤（meta.previousClose，沒有就 chartPreviousClose——range=1d 時它就是昨收）；沒有 nil
+    var previousClose: Double?
+    /// 這個價是幾點成交的（regularMarketTime）；沒有 nil
+    var marketTime: Date?
+    /// 這一個交易時段（currentTradingPeriod.regular 的 start／end）；沒有 nil
+    var sessionStart: Date?
+    var sessionEnd: Date?
+    /// 小工具抓的時間（跟 App 的 appQuoteAt 比誰新）
+    var fetchedAt: Date
+
+    /// 這是收盤價嗎（寫「13:30 收盤」「10/13 收盤」）：成交時間在這個時段開始之前（開盤前看到的是上一個交易日）、
+    /// 或成交時間已經到收盤前 1 分鐘內、或**抓的時候**已經收盤 1 分鐘以上（成交少的股票最後一筆早於收盤）。
+    /// [v4 驗證] 以前最後一條看「現在」過了收盤：13:15 抓到 13:14 那筆、之後收盤後都抓不到（沒網路、被擋），
+    /// 盤中那筆會被寫成「13:14 收盤」，隔天變「10/14 收盤」、價錢卻不是收盤價。改看抓的時間：
+    /// 盤中抓的就照實寫「13:14」「10/14 13:14」（收盤後 1 小時內 WidgetQuoteStore.stockReloadAt 會每 15 分再抓）。
+    /// 多 1 分鐘：13:30 整點那一次常常還沒拿到收盤集合競價那一筆
+    func isClose(at now: Date) -> Bool {
+        guard let t = marketTime else { return false }
+        if let start = sessionStart, t < start { return true }
+        if let end = sessionEnd {
+            if t >= end.addingTimeInterval(-60) { return true }
+            if fetchedAt >= end.addingTimeInterval(60) { return true }
+        }
+        return false
+    }
+}
+
+/// 一個幣別（或黃金）抓到的價：1 單位幾台幣（FXRateService.fetchDayQuotes，算法同 App 的自動更新）
+struct WidgetRateQuote: Codable, Equatable {
+    var rate: Double
+    /// 前一日收盤換算的同一個單位；沒有 nil（不寫「比昨天」）
+    var previousRate: Double?
+    /// 這個價是幾點的（Yahoo regularMarketTime；黃金看期貨那一筆）
+    var asOf: Date?
+    /// 小工具抓的時間
+    var fetchedAt: Date
+}
+
 // MARK: - 日期與時間的字（兩邊共用，不含金額）
 
 enum WidgetDateText {
@@ -1206,6 +1695,32 @@ enum WidgetDateText {
         let time = DayTimelineFormat.time(generatedAt) + " 更新"
         if Calendar.current.isDate(generatedAt, inSameDayAs: now) { return time }
         return shortDate(generatedAt) + " " + time
+    }
+
+    /// [v4] 「2026-10」：這份數字是哪個月的（淨資產跨月就不寫「比上月」）。西曆、跟著手機目前的時區
+    static func monthKey(_ date: Date) -> String {
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = .autoupdatingCurrent
+        let c = cal.dateComponents([.year, .month], from: date)
+        return String(format: "%04d-%02d", c.year ?? 0, c.month ?? 0)
+    }
+
+    /// [v4] 「10/11 的數字」：理財快照不是今天寫的（我的車、淨資產右下角，橘字）
+    static func figuresOf(_ generatedAt: Date) -> String {
+        shortDate(generatedAt) + " 的數字"
+    }
+
+    /// [v4] now 之後的 count 個 00:00（Calendar.current；不含 now 本身）。我的車、淨資產每天換日用
+    static func midnights(after now: Date, count: Int) -> [Date] {
+        let cal = Calendar.current
+        var out: [Date] = []
+        var day = cal.startOfDay(for: now)
+        for _ in 0..<max(0, count) {
+            guard let next = cal.date(byAdding: .day, value: 1, to: day) else { break }
+            out.append(next)
+            day = next
+        }
+        return out
     }
 
     /// 「11 月開始了」（快照的月份過完了、App 還沒打開）

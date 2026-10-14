@@ -1712,6 +1712,8 @@ private struct FloatingActionButtonView: View {
 /// 冷啟動時網址可能比 MainTabView 先到（控制項的交接在 LifeGoodApp.init 就登記了），所以 initial: true。
 /// [v3] 再收兩件：pendingVoice（說一句 → AIQuickVoiceSession.shared.begin()，不關設定頁、不關 sheet）、
 ///      pendingAddIncome（記帳台「新增收入」→ 開 AddIncomeView）。
+/// [v4] pendingSettingsCurrency（金價匯率小工具 → 設定 › 自訂幣別匯率）：打開設定頁，**不取走**——
+///      留給設定頁（onDeepLinkSettingsCurrency）取走後展開那一塊。這個網址不換 routeToken，所以不會先被關掉
 private struct MainTabWidgetRoutes: ViewModifier {
     @Binding var isSettingsActive: Bool
     @Binding var showAddExpense: Bool
@@ -1735,6 +1737,8 @@ private struct MainTabWidgetRoutes: ViewModifier {
             // [v3] 說一句、新增收入（冷啟動時網址比這裡先到，所以 initial: true）
             .onChange(of: deepLink.pendingVoice, initial: true) { _, _ in takeVoice() }
             .onChange(of: deepLink.pendingAddIncome, initial: true) { _, _ in takeAddIncome() }
+            // [v4] 設定 › 自訂幣別匯率（冷啟動時網址比這裡先到，所以 initial: true）
+            .onChange(of: deepLink.pendingSettingsCurrency, initial: true) { _, v in openSettings(v) }
             .sheet(item: $request) { r in addSheet(r) }
     }
 
@@ -1784,6 +1788,12 @@ private struct MainTabWidgetRoutes: ViewModifier {
             try? await Task.sleep(nanoseconds: delay)
             showAddIncome = true
         }
+    }
+
+    /// [v4] 金價匯率小工具：打開設定頁（展開「自訂幣別匯率」由設定頁自己取走請求）
+    private func openSettings(_ pending: UUID?) {
+        guard pending != nil else { return }
+        isSettingsActive = true
     }
 
     /// 車子還在 → 跟從車子頁記一樣（已選汽車／那個車子分類、連到那台車、度數欄看得到）；

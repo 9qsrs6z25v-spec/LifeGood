@@ -490,6 +490,15 @@ struct SettingsView: View {
                 Text(restoreResultMessage)
             }
         }
+        // [小工具 v4] 金價匯率小工具點進來（MainTabView 已打開設定頁）：展開「自訂幣別匯率」。
+        // 掛在 NavigationStack 外面，List 那一長串修飾器不再加長
+        .onDeepLinkSettingsCurrency { openCurrencyFromWidget() }
+    }
+
+    /// [小工具 v4] 取走「展開自訂幣別匯率」的請求；沒有就什麼都不做
+    private func openCurrencyFromWidget() {
+        guard DeepLinkRouter.shared.takeSettingsCurrency() else { return }
+        currencyExpanded = true
     }
 
     // MARK: - 設定英雄卡片（訂閱狀態 + 三模式資料統計）

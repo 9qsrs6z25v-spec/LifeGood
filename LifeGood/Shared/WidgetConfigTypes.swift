@@ -5,6 +5,8 @@ import AppIntents
 //
 // 這個檔案同時屬於「主 App」與「LifeGoodWidgets」兩個 target（主控契約，三組都不准改）。
 // 規格：scratchpad/widgets/v3/brief.md §3；judge.md §3.5（J:493-494）。
+// [v4] 檔尾加股票（WidgetStockEntity）、車子（WidgetVehicleEntity）、金價匯率（WidgetRateEntity、WidgetRateLineEntity），
+//      選單從 finance_v1.json 讀（scratchpad/widgets/v4/brief.md §3.2）。
 //
 // • AppEnum（固定幾個選項，編譯時就知道）：
 //     WidgetAmountOption（金額：跟著總開關／這個小工具一律隱藏）
@@ -199,5 +201,184 @@ struct WidgetRecordTargetQuery: EntityQuery {
 
     func suggestedEntities() async throws -> [WidgetRecordTargetEntity] {
         WidgetRecordTargetEntity.all()
+    }
+}
+
+// MARK: - [v4] 股票今天、金價匯率、我的車（選單都從 finance_v1.json 讀）
+//
+// 設定 intent 本身只在小工具 target：股票、金價（G2）寫在 StockWidget.swift／RatesWidget.swift，
+// 我的車、淨資產（G3）寫在 VehicleWidget.swift／NetWorthWidget.swift。參數一律 optional：
+// nil＝預設（市值最大那一檔／市值前三／黃金每克／美金／第一台沒賣掉的車），選的東西賣掉、刪掉了（查不到）也當預設。
+
+/// 股票小工具選哪一檔（小＝一檔；中＝第 1／2／3 檔）。id＝股票 UUID 字串
+struct WidgetStockEntity: AppEntity {
+    static var typeDisplayRepresentation: TypeDisplayRepresentation = "股票"
+    static var defaultQuery = WidgetStockQuery()
+
+    var id: String
+    /// 「2330 台積電」（WidgetFinanceStock.menuTitle）
+    var name: String
+
+    var displayRepresentation: DisplayRepresentation {
+        DisplayRepresentation(title: "\(name)")
+    }
+
+    init(id: String, name: String) {
+        self.id = id
+        self.name = name
+    }
+
+    /// 持有中的股票（finance 快照，市值大到小）；沒快照是空陣列
+    static func all() -> [WidgetStockEntity] {
+        let items: [WidgetFinanceStock] = WidgetSnapshotStore.read(WidgetFinanceSnapshot.self)?.stocks.items ?? []
+        return items.map { WidgetStockEntity(id: $0.id.uuidString, name: $0.menuTitle) }
+    }
+}
+
+struct WidgetStockQuery: EntityQuery {
+    init() {}
+
+    /// 找不到的（賣掉、刪掉）不回，參數變 nil＝預設
+    func entities(for identifiers: [WidgetStockEntity.ID]) async throws -> [WidgetStockEntity] {
+        let all = WidgetStockEntity.all()
+        return identifiers.compactMap { id in all.first(where: { $0.id == id }) }
+    }
+
+    func suggestedEntities() async throws -> [WidgetStockEntity] {
+        WidgetStockEntity.all()
+    }
+}
+
+/// 我的車選哪一台。id＝車子 UUID 字串
+struct WidgetVehicleEntity: AppEntity {
+    static var typeDisplayRepresentation: TypeDisplayRepresentation = "車子"
+    static var defaultQuery = WidgetVehicleQuery()
+
+    var id: String
+    /// 「Taycan」；賣掉但還在扣的「Taycan（已售出）」
+    var name: String
+
+    var displayRepresentation: DisplayRepresentation {
+        DisplayRepresentation(title: "\(name)")
+    }
+
+    init(id: String, name: String) {
+        self.id = id
+        self.name = name
+    }
+
+    /// finance 快照裡的車（沒賣掉的在前）；沒快照是空陣列
+    static func all() -> [WidgetVehicleEntity] {
+        let cars: [WidgetFinanceVehicle] = WidgetSnapshotStore.read(WidgetFinanceSnapshot.self)?.vehicles ?? []
+        return cars.map { car in
+            WidgetVehicleEntity(id: car.id.uuidString, name: car.isSold ? car.name + "（已售出）" : car.name)
+        }
+    }
+}
+
+struct WidgetVehicleQuery: EntityQuery {
+    init() {}
+
+    func entities(for identifiers: [WidgetVehicleEntity.ID]) async throws -> [WidgetVehicleEntity] {
+        let all = WidgetVehicleEntity.all()
+        return identifiers.compactMap { id in all.first(where: { $0.id == id }) }
+    }
+
+    func suggestedEntities() async throws -> [WidgetVehicleEntity] {
+        WidgetVehicleEntity.all()
+    }
+}
+
+/// 金價匯率的大字顯示哪一個。id＝FXRateService 的代碼（「XAU」「XAU(錢)」「USD」…）
+struct WidgetRateEntity: AppEntity {
+    static var typeDisplayRepresentation: TypeDisplayRepresentation = "金價匯率"
+    static var defaultQuery = WidgetRateQuery()
+
+    var id: String
+    /// 「黃金 每克」「黃金 每台錢」「美金」
+    var name: String
+
+    var displayRepresentation: DisplayRepresentation {
+        DisplayRepresentation(title: "\(name)")
+    }
+
+    init(id: String, name: String) {
+        self.id = id
+        self.name = name
+    }
+
+    /// 黃金每克、黃金每台錢，再接設定「自訂幣別匯率」裡 App 認得的幣別（WidgetRatesBlock.choices()）。
+    /// 沒快照只有兩種黃金
+    static func all() -> [WidgetRateEntity] {
+        let choices: [WidgetRateChoice] = WidgetSnapshotStore.read(WidgetFinanceSnapshot.self)?.rates.choices()
+            ?? WidgetRatesBlock.goldChoices
+        return choices.map { WidgetRateEntity(id: $0.code, name: $0.title) }
+    }
+}
+
+struct WidgetRateQuery: EntityQuery {
+    init() {}
+
+    func entities(for identifiers: [WidgetRateEntity.ID]) async throws -> [WidgetRateEntity] {
+        let all = WidgetRateEntity.all()
+        return identifiers.compactMap { id in all.first(where: { $0.id == id }) }
+    }
+
+    func suggestedEntities() async throws -> [WidgetRateEntity] {
+        WidgetRateEntity.all()
+    }
+
+    /// 預設：黃金每克（系統不採用的話參數是 nil，小工具一樣當黃金每克）
+    func defaultResult() async -> WidgetRateEntity? {
+        WidgetRateEntity.all().first { $0.id == WidgetRatesBlock.goldGramCode }
+    }
+}
+
+/// 金價匯率下面那一行（小型「美金 32.15」、鎖定畫面長方形第二行）：不顯示，或一個幣別／黃金
+struct WidgetRateLineEntity: AppEntity {
+    static var typeDisplayRepresentation: TypeDisplayRepresentation = "下面那一行"
+    static var defaultQuery = WidgetRateLineQuery()
+
+    /// 「不顯示」的 id（不叫 none：跟 Optional.none 撞名）
+    static let offID = "off"
+    static let off = WidgetRateLineEntity(id: offID, name: "不顯示")
+
+    var id: String
+    var name: String
+
+    var displayRepresentation: DisplayRepresentation {
+        DisplayRepresentation(title: "\(name)")
+    }
+
+    init(id: String, name: String) {
+        self.id = id
+        self.name = name
+    }
+
+    /// 不顯示，再接 WidgetRateEntity.all() 同一份
+    static func all() -> [WidgetRateLineEntity] {
+        var out: [WidgetRateLineEntity] = [off]
+        for e in WidgetRateEntity.all() {
+            out.append(WidgetRateLineEntity(id: e.id, name: e.name))
+        }
+        return out
+    }
+}
+
+struct WidgetRateLineQuery: EntityQuery {
+    init() {}
+
+    func entities(for identifiers: [WidgetRateLineEntity.ID]) async throws -> [WidgetRateLineEntity] {
+        let all = WidgetRateLineEntity.all()
+        return identifiers.compactMap { id in all.first(where: { $0.id == id }) }
+    }
+
+    func suggestedEntities() async throws -> [WidgetRateLineEntity] {
+        WidgetRateLineEntity.all()
+    }
+
+    /// 預設：美金（自訂幣別匯率裡有才有）；沒有美金就不顯示。系統不採用的話參數是 nil，小工具照同一條規則
+    func defaultResult() async -> WidgetRateLineEntity? {
+        WidgetRateLineEntity.all().first { $0.id == WidgetRatesBlock.usdCode } ?? WidgetRateLineEntity.off
     }
 }

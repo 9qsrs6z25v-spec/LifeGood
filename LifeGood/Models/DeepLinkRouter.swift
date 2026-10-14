@@ -106,6 +106,13 @@ final class DeepLinkRouter: ObservableObject {
         return id
     }
 
+    /// [v4] 股票頁取走「打開這一檔」（股票今天小工具）
+    func takeStock() -> UUID? {
+        guard case .stock(let id)? = pendingItem else { return nil }
+        pendingItem = nil
+        return id
+    }
+
     func markWidgetLaunch() {
         if !widgetLaunch { widgetLaunch = true }
     }
@@ -143,6 +150,23 @@ final class DeepLinkRouter: ObservableObject {
         pendingAddIncome = nil
         return true
     }
+
+    // MARK: [v4] 小工具
+
+    /// [v4] 金價匯率小工具 → 設定、展開「自訂幣別匯率」。MainTabView 看到非 nil 就打開設定頁（不取走），
+    /// 設定頁取走後展開那一塊。存 UUID 不存 Bool：停在設定頁再點一次也會換值、onChange 收得到
+    @Published private(set) var pendingSettingsCurrency: UUID?
+
+    func requestSettingsCurrency() {
+        pendingSettingsCurrency = UUID()
+    }
+
+    /// 取走並清掉；沒有回 false（沒有的時候不動 @Published，不會多一次重畫）
+    func takeSettingsCurrency() -> Bool {
+        guard pendingSettingsCurrency != nil else { return false }
+        pendingSettingsCurrency = nil
+        return true
+    }
 }
 
 /// [v2] 小工具「新增支出」的請求（WidgetLink.apply 建、MainTabView 取走）。
@@ -161,6 +185,8 @@ enum DeepLinkItem: Equatable {
     case house(UUID)
     case vehicle(UUID)
     case insurance(UUID)
+    /// [v4] 股票今天小工具：打開那一檔的股票卡片（StockView → StockDetailView）
+    case stock(UUID)
 }
 
 /// [v2] 列表頁收「打開這一筆」的兩個時機：冷啟動時網址比這一頁先到（onAppear）、
@@ -184,8 +210,33 @@ private struct DeepLinkItemReceiver: ViewModifier {
 
 extension View {
     /// [v2] 固定支出、載具、房地產、儲蓄險頁：收到「打開這一筆」時呼叫 action（action 裡自己 take 自己那一種）
+    /// [v4] 股票頁也用（takeStock）
     func onDeepLinkItem(_ action: @escaping () -> Void) -> some View {
         modifier(DeepLinkItemReceiver(action: action))
+    }
+}
+
+/// [v4] 設定頁收「展開自訂幣別匯率」的兩個時機（同 DeepLinkItemReceiver）：MainTabView 剛把設定頁打開（onAppear）、
+/// 已經停在設定頁時再點一次（onChange）。包成一個修飾器，設定頁那一長串修飾器只多一個
+private struct DeepLinkSettingsReceiver: ViewModifier {
+    @ObservedObject private var deepLink = DeepLinkRouter.shared
+    let action: () -> Void
+
+    init(action: @escaping () -> Void) {
+        self.action = action
+    }
+
+    func body(content: Content) -> some View {
+        content
+            .onAppear { action() }
+            .onChange(of: deepLink.pendingSettingsCurrency) { _, _ in action() }
+    }
+}
+
+extension View {
+    /// [v4] 設定頁：收到「展開自訂幣別匯率」時呼叫 action（action 裡自己 takeSettingsCurrency）
+    func onDeepLinkSettingsCurrency(_ action: @escaping () -> Void) -> some View {
+        modifier(DeepLinkSettingsReceiver(action: action))
     }
 }
 
@@ -355,13 +406,20 @@ extension WidgetLink {
     ///      - lifegood://add/income…：切到收支「收入」、請 MainTabView 開新增收入
     ///      - lifegood://life/trip?id=…：切到人生「旅遊地圖」，那一份還在就打開它（跟旅遊推播點進來同一條：
     ///        TravelMapView 掀開旅遊規劃、TripPlanListView 打開那一份）；不帶 id、或那一份刪掉了就只停在旅遊地圖
+    ///
+    /// [v4] - lifegood://finance/stock?id=…：切到理財「股票」，帶 id 就請股票頁打開那一檔的卡片（StockDetailView）；
+    ///        不帶 id（沒有持股時）只切頁
+    ///      - lifegood://finance/overview…：切到理財「總覽」（淨資產小工具）
+    ///      - lifegood://settings/currency…：打開設定頁、展開「自訂幣別匯率」（金價匯率小工具）。
+    ///        **不換 routeToken**（換了 MainTabView 會先把設定頁關掉），由 MainTabView 打開設定頁、設定頁展開那一塊
     @discardableResult
     static func apply(_ url: URL, store: LifeStore) -> Bool {
         guard let route = parse(url) else { return false }
         let router = DeepLinkRouter.shared
         if route.fromWidget { router.markWidgetLaunch() }
         // [v3] 說一句不關設定頁（主控定案 5）：只有它不換 routeToken
-        if route.destination != .voiceRecord { router.markRoute() }
+        // [v4] 設定 › 自訂幣別匯率也不換：換了 MainTabView 會先把設定頁關掉
+        if route.destination != .voiceRecord && route.destination != .settingsCurrency { router.markRoute() }
         switch route.destination {
         case .today:
             return DayTimelineLink.apply(url, store: store)
@@ -401,6 +459,16 @@ extension WidgetLink {
         case .trip(let id):
             AppNavigation.goToTravelMap()
             if let id, store.tripPlan(id: id) != nil { router.requestTripPlan(id) }
+            return true
+        case .financeStock(let id):
+            AppNavigation.goToFinance(.stock)
+            if let id { router.requestItem(.stock(id)) }
+            return true
+        case .financeOverview:
+            AppNavigation.goToFinance(.overview)
+            return true
+        case .settingsCurrency:
+            router.requestSettingsCurrency()
             return true
         }
     }

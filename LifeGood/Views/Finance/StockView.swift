@@ -230,6 +230,15 @@ struct StockView: View {
                 emptyIconPulse = false
             }
         }
+        // [小工具 v4] 股票今天小工具點進來：打開那一檔的股票卡片（同載具頁 VehicleView 的寫法）
+        .onDeepLinkItem { openPendingItem() }
+    }
+
+    /// [小工具 v4] 收「打開這一檔」（DeepLinkRouter.takeStock）。找不到（刪掉了）就只停在這一頁
+    private func openPendingItem() {
+        guard let id = DeepLinkRouter.shared.takeStock(),
+              let s = store.stocks.first(where: { $0.id == id }) else { return }
+        viewingItem = s
     }
 
     // MARK: - 自動更新報價
@@ -274,6 +283,12 @@ struct StockView: View {
         // [v25.527] 順便記下前一個交易日的收盤（看板與卡片的「今日漲跌」用）
         StockPreviousClose.remember(quotes)
         store.batchUpdateStockPrices(priceUpdates)
+        // [小工具 v4] 記下這幾檔是幾點更新的（小工具抓不到價時寫「10/13 13:30 的價」）。
+        // 價錢跟原本一樣時 store 不會變、小工具快照的寫手接不到，所以自己叫一次
+        if !quotes.isEmpty {
+            AppQuoteClock.rememberStocks(Array(quotes.keys))
+            WidgetSnapshotWriter.shared.noteQuotesUpdated()
+        }
         // 報價跟原本一樣時 store 不會變（不會觸發 .task），所以這裡自己再算一次看板
         rebuildBoard()
 

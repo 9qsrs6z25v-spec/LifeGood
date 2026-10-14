@@ -873,6 +873,12 @@ class ExpenseStore: ObservableObject {
         }
         // 數值沒變就不寫回：didSet 會觸發存檔與 CloudKit 推送，沒必要白跑一趟
         if changed { currencyRates = newRates }
+        // [小工具 v4] 記下匯率是幾點更新的（金價匯率小工具抓不到價時寫「10/13 10:42 的價」）。
+        // 匯率剛好沒變時 currencyRates 不會變、小工具快照的寫手接不到，所以自己叫一次
+        if outcome.updated > 0 {
+            AppQuoteClock.rememberRates()
+            WidgetSnapshotWriter.shared.noteQuotesUpdated()
+        }
         return outcome
     }
 

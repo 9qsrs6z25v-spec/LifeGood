@@ -27,6 +27,9 @@ import Foundation
 //   [v3] lifegood://add/income?src=widget                             → 新增收入（記帳台的「新增收入」按鈕）
 //   [v3] lifegood://life/trip?id=<行程 UUID>&src=widget                → 旅遊地圖、打開那一份行程（旅行小工具）；
 //                                                                       不帶 id＝只切到旅遊地圖
+//   [v4] lifegood://finance/stock?id=<股票 UUID>&src=widget              → 理財「股票」、打開那一檔（股票今天小工具）
+//   [v4] lifegood://finance/overview?src=widget                         → 理財「總覽」（淨資產小工具）
+//   [v4] lifegood://settings/currency?src=widget                        → 設定、展開「自訂幣別匯率」（金價匯率小工具）
 //
 // 分類、車子分類的值是 App 寫進快照的 rawValue（VariableCategory／VehicleVariableCategory），
 // 小工具原樣帶回；URLComponents 會自己做百分比編碼，中文沒問題。
@@ -54,6 +57,12 @@ enum WidgetDestination: Equatable {
     case addIncome
     /// [v3] 人生「旅遊地圖」；帶 id 就打開那一份行程（旅行小工具）
     case trip(id: UUID?)
+    /// [v4] 理財「股票」；帶 id 就打開那一檔的股票卡片（StockDetailView）
+    case financeStock(id: UUID?)
+    /// [v4] 理財「總覽」
+    case financeOverview
+    /// [v4] 設定頁、展開「自訂幣別匯率」（不換 routeToken：不能先把設定頁關掉）
+    case settingsCurrency
 }
 
 /// 解析結果：去哪＋是不是從小工具點進來的
@@ -91,6 +100,10 @@ enum WidgetLink {
     private static let incomePath = "/income"
     private static let lifeHost = "life"
     private static let tripPath = "/trip"
+    // [v4]
+    private static let stockPath = "/stock"
+    private static let settingsHost = "settings"
+    private static let currencyPath = "/currency"
 
     /// 組不出網址時的退路（不會發生：全部是固定的 ASCII 字）
     private static let fallback = URL(string: "lifegood://today")!
@@ -151,6 +164,16 @@ enum WidgetLink {
             comps.host = lifeHost
             comps.path = tripPath
             appendId(id, to: &items)
+        case .financeStock(let id):
+            comps.host = financeHost
+            comps.path = stockPath
+            appendId(id, to: &items)
+        case .financeOverview:
+            comps.host = financeHost
+            comps.path = overviewPath
+        case .settingsCurrency:
+            comps.host = settingsHost
+            comps.path = currencyPath
         }
         if fromWidget {
             items.append(URLQueryItem(name: sourceKey, value: sourceWidget))
@@ -200,6 +223,21 @@ enum WidgetLink {
     /// [v3] 那一趟旅行：lifegood://life/trip?id=<UUID>&src=widget；nil＝只切到旅遊地圖
     static func trip(_ id: UUID?) -> URL { url(for: .trip(id: id)) }
 
+    /// [v4] 那一檔股票：lifegood://finance/stock?id=<UUID>&src=widget
+    static func financeStock(_ id: UUID) -> URL { url(for: .financeStock(id: id)) }
+
+    /// [v4] 理財「股票」頁（沒有持股時股票小工具點了去這裡）：lifegood://finance/stock?src=widget
+    static var financeStocks: URL { url(for: .financeStock(id: nil)) }
+
+    /// [v4] 理財總覽：lifegood://finance/overview?src=widget
+    static var financeOverview: URL { url(for: .financeOverview) }
+
+    /// [v4] 理財「載具」頁（沒有車時我的車小工具點了去這裡）：lifegood://finance/vehicle?src=widget
+    static var financeVehicles: URL { url(for: .financeVehicle(id: nil)) }
+
+    /// [v4] 設定 › 自訂幣別匯率：lifegood://settings/currency?src=widget
+    static var settingsCurrency: URL { url(for: .settingsCurrency) }
+
     // MARK: 解析
 
     /// 認得的網址回 WidgetRoute；別的（不是 lifegood://、不認得的頁）回 nil。
@@ -238,6 +276,11 @@ enum WidgetLink {
             if path == housePath { return .financeHouse(id: id) }
             if path == vehiclePath { return .financeVehicle(id: id) }
             if path == insurancePath { return .financeInsurance(id: id) }
+            if path == stockPath { return .financeStock(id: id) }
+            if path == overviewPath { return .financeOverview }
+            return nil
+        case settingsHost:
+            if path == currencyPath { return .settingsCurrency }
             return nil
         case lifeHost:
             if path == tripPath { return .trip(id: uuidValue(idKey, in: items)) }

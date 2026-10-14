@@ -17,6 +17,7 @@ import WidgetKit
 //                                      （著色模式顏色會被洗掉，四種靠形狀分辨）
 //   • [v2] deskAddFill／deskAddIcon／tileInk／tileOutline／rowFill／billBar(tint:tintDark:)
 //                                      記帳台與一按就記的卡、接下來要繳的格子與色條
+//   • [v4] up／down／change(_:)      股票、金價紅漲綠跌（主控先加好，G2、G3 都只讀；要再加成員回報主控）
 
 // MARK: - 16 進位轉色
 
@@ -86,6 +87,16 @@ struct WidgetPalette {
     var good: Color { isDark ? Color(widgetHex: 0x5BD99A) : Color(widgetHex: 0x177A44) }
     var warn: Color { isDark ? Color(widgetHex: 0xFFC14D) : Color(widgetHex: 0xA65300) }
     var bad: Color { isDark ? Color(widgetHex: 0xFF7A8A) : Color(widgetHex: 0xC4243C) }
+    /// [v4] 股票、金價紅漲綠跌（App MoneyTone.up／down 的色碼；著色模式顏色會被洗掉，一定配 ▲▼）
+    var up: Color { isDark ? Color(widgetHex: 0xFF6B6B) : Color(widgetHex: 0xD62F3A) }
+    var down: Color { isDark ? Color(widgetHex: 0x5BD99A) : Color(widgetHex: 0x1F8A50) }
+
+    /// [v4] 漲跌方向（WidgetStockFigures.direction／WidgetRateFigures.direction：1、-1、0）→ 顏色；平盤用 label
+    func change(_ direction: Int) -> Color {
+        if direction > 0 { return up }
+        if direction < 0 { return down }
+        return label
+    }
 
     // 這個月的錢（橫條）
 

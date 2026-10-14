@@ -47,6 +47,18 @@
 		A01B000002000079 /* TravelWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000079 /* TravelWidget.swift */; };
 		A01B000001001545 /* AIExpenseCommitter.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001545 /* AIExpenseCommitter.swift */; };
 		A01B000001001546 /* AIQuickVoice.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001546 /* AIQuickVoice.swift */; };
+		A01B000002000081 /* FXRateService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000081 /* FXRateService.swift */; };
+		A01B000002000091 /* FXRateService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000081 /* FXRateService.swift */; };
+		A01B000002000082 /* WidgetQuoteService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000082 /* WidgetQuoteService.swift */; };
+		A01B000002000092 /* WidgetQuoteService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000082 /* WidgetQuoteService.swift */; };
+		A01B000002000083 /* WidgetMoneyFormat.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000083 /* WidgetMoneyFormat.swift */; };
+		A01B000002000093 /* WidgetMoneyFormat.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000083 /* WidgetMoneyFormat.swift */; };
+		A01B000002000084 /* StockWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000084 /* StockWidget.swift */; };
+		A01B000002000085 /* RatesWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000085 /* RatesWidget.swift */; };
+		A01B000002000086 /* VehicleWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000086 /* VehicleWidget.swift */; };
+		A01B000002000087 /* NetWorthWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000087 /* NetWorthWidget.swift */; };
+		A01B000002000088 /* WidgetQuoteStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000088 /* WidgetQuoteStore.swift */; };
+		A01B000001001547 /* WidgetFinanceBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001547 /* WidgetFinanceBuilder.swift */; };
 		A01B000001001506 /* PhotoImportCenter.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001506 /* PhotoImportCenter.swift */; };
 		A01B000001001507 /* PhotoSlideshowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001507 /* PhotoSlideshowView.swift */; };
 		A01B000001001508 /* BeatDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001508 /* BeatDetector.swift */; };
@@ -406,6 +418,15 @@
 		A01A000002000079 /* TravelWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TravelWidget.swift; sourceTree = "<group>"; };
 		A01A000001001545 /* AIExpenseCommitter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIExpenseCommitter.swift; sourceTree = "<group>"; };
 		A01A000001001546 /* AIQuickVoice.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIQuickVoice.swift; sourceTree = "<group>"; };
+		A01A000002000081 /* FXRateService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FXRateService.swift; sourceTree = "<group>"; };
+		A01A000002000082 /* WidgetQuoteService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetQuoteService.swift; sourceTree = "<group>"; };
+		A01A000002000083 /* WidgetMoneyFormat.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetMoneyFormat.swift; sourceTree = "<group>"; };
+		A01A000002000084 /* StockWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StockWidget.swift; sourceTree = "<group>"; };
+		A01A000002000085 /* RatesWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RatesWidget.swift; sourceTree = "<group>"; };
+		A01A000002000086 /* VehicleWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VehicleWidget.swift; sourceTree = "<group>"; };
+		A01A000002000087 /* NetWorthWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetWorthWidget.swift; sourceTree = "<group>"; };
+		A01A000002000088 /* WidgetQuoteStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetQuoteStore.swift; sourceTree = "<group>"; };
+		A01A000001001547 /* WidgetFinanceBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetFinanceBuilder.swift; sourceTree = "<group>"; };
 		A01A000001000035 /* GradeTitleView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GradeTitleView.swift; sourceTree = "<group>"; };
 		A01A000001000036 /* SpouseResumeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpouseResumeView.swift; sourceTree = "<group>"; };
 		A01A000001000037 /* ChildrenResumeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChildrenResumeView.swift; sourceTree = "<group>"; };
@@ -480,6 +501,11 @@
 				A01A000002000077 /* WidgetMoneyPanel.swift */,
 				A01A000002000078 /* WidgetConfigs.swift */,
 				A01A000002000079 /* TravelWidget.swift */,
+				A01A000002000084 /* StockWidget.swift */,
+				A01A000002000085 /* RatesWidget.swift */,
+				A01A000002000086 /* VehicleWidget.swift */,
+				A01A000002000087 /* NetWorthWidget.swift */,
+				A01A000002000088 /* WidgetQuoteStore.swift */,
 				A01A000002000006 /* Info.plist */,
 				A01A000002000050 /* LifeGoodWidgets.entitlements */,
 			);
@@ -497,6 +523,9 @@
 				A01A000002000056 /* QuickRecordInbox.swift */,
 				A01A000002000057 /* WidgetActions.swift */,
 				A01A000002000058 /* WidgetConfigTypes.swift */,
+				A01A000002000081 /* FXRateService.swift */,
+				A01A000002000082 /* WidgetQuoteService.swift */,
+				A01A000002000083 /* WidgetMoneyFormat.swift */,
 			);
 			path = Shared;
 			sourceTree = "<group>";
@@ -574,6 +603,7 @@
 				A01A000001001543 /* WidgetBillsBuilder.swift */,
 				A01A000001001544 /* WidgetMoneyExtras.swift */,
 				A01A000001001545 /* AIExpenseCommitter.swift */,
+				A01A000001001547 /* WidgetFinanceBuilder.swift */,
 				A01A000001000040 /* EInvoiceClient.swift */,
 				A01A000001000041 /* InvoiceCategorizer.swift */,
 				A01A000001000042 /* EInvoiceSyncManager.swift */,
@@ -862,6 +892,14 @@
 				A01B000002000058 /* WidgetConfigTypes.swift in Sources */,
 				A01B000002000078 /* WidgetConfigs.swift in Sources */,
 				A01B000002000079 /* TravelWidget.swift in Sources */,
+				A01B000002000081 /* FXRateService.swift in Sources */,
+				A01B000002000082 /* WidgetQuoteService.swift in Sources */,
+				A01B000002000083 /* WidgetMoneyFormat.swift in Sources */,
+				A01B000002000084 /* StockWidget.swift in Sources */,
+				A01B000002000085 /* RatesWidget.swift in Sources */,
+				A01B000002000086 /* VehicleWidget.swift in Sources */,
+				A01B000002000087 /* NetWorthWidget.swift in Sources */,
+				A01B000002000088 /* WidgetQuoteStore.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -995,6 +1033,10 @@
 				A01B000002000068 /* WidgetConfigTypes.swift in Sources */,
 				A01B000001001545 /* AIExpenseCommitter.swift in Sources */,
 				A01B000001001546 /* AIQuickVoice.swift in Sources */,
+				A01B000002000091 /* FXRateService.swift in Sources */,
+				A01B000002000092 /* WidgetQuoteService.swift in Sources */,
+				A01B000002000093 /* WidgetMoneyFormat.swift in Sources */,
+				A01B000001001547 /* WidgetFinanceBuilder.swift in Sources */,
 				A01B000001001506 /* PhotoImportCenter.swift in Sources */,
 				A01B000001001507 /* PhotoSlideshowView.swift in Sources */,
 				A01B000001001509 /* SlideshowDecor.swift in Sources */,
@@ -1057,7 +1099,7 @@
 				CLANG_ENABLE_MODULES = YES;
 				CODE_SIGN_ENTITLEMENTS = LifeGoodWidgets/LifeGoodWidgets.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1301;
+				CURRENT_PROJECT_VERSION = 1302;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = LifeGoodWidgets/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "LifeGood";
@@ -1068,7 +1110,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 25.548;
+				MARKETING_VERSION = 25.549;
 				PRODUCT_BUNDLE_IDENTIFIER = com.lifegood.app.widgets;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
@@ -1084,7 +1126,7 @@
 				CLANG_ENABLE_MODULES = YES;
 				CODE_SIGN_ENTITLEMENTS = LifeGoodWidgets/LifeGoodWidgets.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1301;
+				CURRENT_PROJECT_VERSION = 1302;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = LifeGoodWidgets/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "LifeGood";
@@ -1095,7 +1137,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 25.548;
+				MARKETING_VERSION = 25.549;
 				PRODUCT_BUNDLE_IDENTIFIER = com.lifegood.app.widgets;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
@@ -1112,7 +1154,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = LifeGood/LifeGood.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1301;
+				CURRENT_PROJECT_VERSION = 1302;
 				DEVELOPMENT_ASSET_PATHS = "\"LifeGood/Preview Content\"";
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -1144,7 +1186,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 25.548;
+				MARKETING_VERSION = 25.549;
 				PRODUCT_BUNDLE_IDENTIFIER = com.lifegood.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -1160,7 +1202,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = LifeGood/LifeGood.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1301;
+				CURRENT_PROJECT_VERSION = 1302;
 				DEVELOPMENT_ASSET_PATHS = "\"LifeGood/Preview Content\"";
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -1192,7 +1234,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 25.548;
+				MARKETING_VERSION = 25.549;
 				PRODUCT_BUNDLE_IDENTIFIER = com.lifegood.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;

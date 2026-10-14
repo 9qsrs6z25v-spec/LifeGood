@@ -16,6 +16,10 @@ import WidgetKit
 // [v3] 加入：旅行（小、中、鎖定畫面長方形，TravelWidget）；控制項「說一句」「記到…」（放子 bundle，共 7 個）。
 // 還能花、今天、記帳台、接下來要繳、鎖定畫面「下一場」「下一筆要繳」改成長按可設定（kind 不變，各自的檔案）。
 // 這一層現在 9 個、子 bundle 7 個，都在 10 個以內。
+//
+// [v4] 加入理財四個（五個 kind）：股票今天（小＋鎖定畫面三型 StockWidget、中 StocksWidget）、金價匯率（RatesWidget）、
+// 我的車（VehicleWidget）、淨資產（NetWorthWidget），放子 bundle（LifeGoodFinanceBundle），這裡列它的 body。
+// 這一層現在 10 個、LifeGoodLockAndControlBundle 7 個、LifeGoodFinanceBundle 5 個，都在 10 個以內。
 
 @main
 struct LifeGoodWidgetsBundle: WidgetBundle {
@@ -34,6 +38,8 @@ struct LifeGoodWidgetsBundle: WidgetBundle {
         TravelWidget()
         // [v2] 鎖定畫面三個＋控制項（[v3] 四個）
         LifeGoodLockAndControlBundle().body
+        // [v4] 理財四個（五個 kind）
+        LifeGoodFinanceBundle().body
     }
 }
 
@@ -48,5 +54,16 @@ struct LifeGoodLockAndControlBundle: WidgetBundle {
         // [v3]
         VoiceRecordControl()
         RecordToControl()
+    }
+}
+
+/// [v4] 股票今天（小＋鎖定畫面、中）、金價匯率、我的車、淨資產（@WidgetBundleBuilder 一次最多 10 個，共 5 個）
+struct LifeGoodFinanceBundle: WidgetBundle {
+    var body: some Widget {
+        StockWidget()
+        StocksWidget()
+        RatesWidget()
+        VehicleWidget()
+        NetWorthWidget()
     }
 }

@@ -19,13 +19,19 @@ import WidgetKit
 // [v3] money 多寫車子選單（vehicleOptions：記帳台按鈕、控制項「記到…」），寫了也重畫「記到…」控制項；
 //      life 多寫隔天每一種的第一場（nextDayFirstStops：「今天」關掉某幾種時用）與旅行（trips：旅行小工具）。
 //      規格見 scratchpad/widgets/v3/brief.md 的 G1-6。
+// [v4] 新的 finance_v1.json：股票今天、金價匯率、我的車、淨資產（WidgetFinanceBuilder.swift）。
+//      記帳＋理財那條防抖多寫 finance；股價、匯率更新成功時（價錢剛好沒變、store 不會動）
+//      報價那兩支叫 noteQuotesUpdated()，防抖 3 秒後只寫 finance（快照多了「App 是幾點更新的」）。
+//      只重畫受影響的那幾種（financeKindsToReload）。規格見 scratchpad/widgets/v4/brief.md 的 G1-3。
 //
 // 什麼時候寫：
 //   • 啟動（start）：掛好監聽後馬上寫一次全部
 //   • 記帳有變：ExpenseStore.objectWillChange 防抖 3 秒 → money、bills
 //     （存檔的 didSet 與 iCloud 重讀 load() 都會改 @Published，兩條都接得到；所以不必改 ExpenseStore）
 //   • [v2] 理財有變：FinanceStore.objectWillChange 跟記帳併成同一個防抖 3 秒 → money（車子卡、範本的車）、
-//     bills（房貸、車貸、保費）
+//     bills（房貸、車貸、保費）；[v4] 再加 finance（股票、匯率、車子、淨資產）
+//   • [v4] 股價、匯率更新成功（StockView.refreshAllPrices、ExpenseStore.autoUpdateCurrencyRates）：
+//     noteQuotesUpdated() 防抖 3 秒 → finance
 //   • 人生／系統行事曆有變：LifeStore、AppleCalendarBridge 的 objectWillChange 防抖 3 秒 → life
 //   • 背景收到 iCloud 變更（iPad／Mac 記的帳）：包在背景工作裡馬上寫全部——背景的防抖計時器
 //     不一定等得到 3 秒（App 隨時會被暫停）
@@ -52,6 +58,8 @@ final class WidgetSnapshotWriter {
         case life
         /// [v2] bills_v1.json（接下來要繳、鎖定畫面「下一筆要繳」）
         case bills
+        /// [v4] finance_v1.json（股票今天、金價匯率、我的車、淨資產）
+        case finance
     }
 
     /// 防抖秒數：連續改（一次存檔常常改好幾個 @Published）只寫一次
@@ -65,6 +73,8 @@ final class WidgetSnapshotWriter {
     private var started = false
     /// 背景收到 iCloud 變更時撐住 App 寫完快照
     private var backgroundTask: UIBackgroundTaskIdentifier = .invalid
+    /// [v4] 股價、匯率剛更新成功（noteQuotesUpdated）：防抖之後只寫 finance
+    private let quotesNudge = PassthroughSubject<Void, Never>()
 
     private init() {}
 
@@ -82,10 +92,18 @@ final class WidgetSnapshotWriter {
         // [v2] 理財改了（車子、房貸、保單）也要重寫：車子卡、範本的車、接下來要繳的理財那幾件。
         // 跟記帳併成同一個防抖：記一筆連車的支出會同時改兩邊（帳本＋車子鏡像），只算一次
         //（bills 每次要建兩份 FinanceLoanIndex，不要連算兩遍）
+        // [v4] 再加 finance：匯率、外幣保單、車子的記帳、股票、房子都會動到理財那四個小工具
         expense.objectWillChange
             .merge(with: finance.objectWillChange)
             .debounce(for: .seconds(Self.debounceSeconds), scheduler: DispatchQueue.main)
-            .sink { [weak self] _ in self?.writeNow([.money, .bills]) }
+            .sink { [weak self] _ in self?.writeNow([.money, .bills, .finance]) }
+            .store(in: &cancellables)
+
+        // [v4] 股價、匯率剛更新成功：價錢跟原本一樣時 store 不會變（上面那條接不到），
+        // 可是快照裡「App 是幾點更新的」變了（小工具抓不到價時寫「13:30 的價」），只寫 finance
+        quotesNudge
+            .debounce(for: .seconds(Self.debounceSeconds), scheduler: DispatchQueue.main)
+            .sink { [weak self] _ in self?.writeNow([.finance]) }
             .store(in: &cancellables)
 
         // 系統行事曆變了（別的 App 改、授權剛打開）也要重寫「今天」：
@@ -109,9 +127,16 @@ final class WidgetSnapshotWriter {
         writeNow()
     }
 
+    /// [v4] 股價（StockView.refreshAllPrices）、匯率（ExpenseStore.autoUpdateCurrencyRates）更新成功時叫：
+    /// 防抖 3 秒後只寫 finance。還沒 start 就什麼都不做
+    func noteQuotesUpdated() {
+        quotesNudge.send(())
+    }
+
     /// 立刻組＋寫（啟動、回前景、進背景、背景收到 iCloud 變更）。還沒 start 就什麼都不做
     ///（start 會馬上寫一次）。[v2] 預設三份都寫；一按就記收完帳（QuickRecordImporter）只叫 [.money]。
-    func writeNow(_ parts: Set<Part> = [.money, .life, .bills]) {
+    /// [v4] 預設四份都寫（多 finance）
+    func writeNow(_ parts: Set<Part> = [.money, .life, .bills, .finance]) {
         let now = Date()
         if parts.contains(.money), let expense = expenseStore {
             let snapshot = Self.moneySnapshot(expense: expense, finance: financeStore, now: now)
@@ -134,6 +159,28 @@ final class WidgetSnapshotWriter {
                 WidgetRefresh.reload(WidgetKind.billsKinds)
             }
         }
+        // [v4] 理財四個小工具：只重畫內容真的變了的那幾種（App 在背景叫重畫會吃小工具每天的額度）
+        if parts.contains(.finance), let expense = expenseStore, let finance = financeStore {
+            let old = WidgetSnapshotStore.read(WidgetFinanceSnapshot.self)
+            let snapshot = WidgetFinanceBuilder.snapshot(expense: expense, finance: finance, now: now)
+            if WidgetSnapshotStore.write(snapshot) {
+                WidgetRefresh.reload(Self.financeKindsToReload(old: old, new: snapshot))
+            }
+        }
+    }
+
+    /// [v4] finance_v1.json 寫了之後要重畫哪幾種：沒有舊檔（第一次寫、schema 換了）＝全部；
+    /// 否則 stocks 變了→股票今天（小、中）、rates 變了→金價匯率、vehicles 或日子變了→我的車、
+    /// netWorth 或日子變了→淨資產（我的車、淨資產右下的「10/11 的數字」看 dataDay）
+    static func financeKindsToReload(old: WidgetFinanceSnapshot?, new: WidgetFinanceSnapshot) -> [String] {
+        guard let old else { return WidgetKind.financeKinds }
+        let dayChanged = old.dataDay != new.dataDay
+        var kinds: [String] = []
+        if old.stocks != new.stocks { kinds += WidgetKind.stockKinds }
+        if old.rates != new.rates { kinds += WidgetKind.ratesKinds }
+        if dayChanged || old.vehicles != new.vehicles { kinds += WidgetKind.vehicleKinds }
+        if dayChanged || old.netWorth != new.netWorth { kinds += WidgetKind.netWorthKinds }
+        return kinds
     }
 
     // MARK: - 「10:02 更新」的時間戳記
