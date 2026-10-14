@@ -529,11 +529,16 @@ struct SubordinateDetailView: View {
         return String(format: "%.1f", tenths / 10)
     }
 
-    /// [v25.546] 看板的姓名接上年資：「黃義超，3.2年資歷」（使用者指定的寫法）；沒有入職日就只寫姓名
-    private var headerNameText: String {
-        let name = subordinate.name
-        guard !name.isEmpty, let years = Self.seniorityYears(from: subordinate.joinDate) else { return name }
+    /// [v25.546] 姓名接上年資：「黃義超，3.2年資歷」（使用者指定的寫法）；沒有入職日就只寫姓名。
+    /// [v25.549] 部屬列表的名字也用這一支，兩邊寫法一定一樣
+    static func nameWithSeniority(_ name: String, joinDate: Date?, now: Date = Date()) -> String {
+        guard !name.isEmpty, let years = seniorityYears(from: joinDate, now: now) else { return name }
         return "\(name)，\(years)年資歷"
+    }
+
+    /// [v25.546] 看板的姓名接上年資
+    private var headerNameText: String {
+        Self.nameWithSeniority(subordinate.name, joinDate: subordinate.joinDate)
     }
     @State private var showCompleted = false
     @State private var previewItem: SubordinateItemRef?

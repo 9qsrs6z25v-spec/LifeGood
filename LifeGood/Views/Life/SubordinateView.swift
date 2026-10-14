@@ -779,7 +779,8 @@ struct SubordinateView: View {
 
             // 姓名 + 職等 + 到職年數
             VStack(alignment: .leading, spacing: 4) {
-                MarqueeText(sub.name)
+                // [v25.549] 名字後面接年資（同部屬卡片看板）：「黃義超，3.2年資歷」
+                MarqueeText(SubordinateDetailView.nameWithSeniority(sub.name, joinDate: sub.joinDate))
                     .font(.subheadline.weight(.semibold))
 
                 // 職等 + 部門膠囊橫列

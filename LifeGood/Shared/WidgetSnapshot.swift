@@ -15,6 +15,14 @@ import Foundation
 //      bills 的鎖定畫面類別字（lockTitle）與範圍（WidgetBillScope）。新欄位一律選填、schema 不升。
 //      小工具長按設定用的 AppEnum／AppEntity 在 WidgetConfigTypes.swift（兩個 target 都編）。
 //
+// [v4] 加了：股票今天（小＋鎖定畫面三型、中）、金價匯率、我的車、淨資產的 kind；
+//      finance_v1.json（WidgetFinanceSnapshot：stocks、rates、vehicles、netWorth，App 用跟理財頁同一套算好）；
+//      quotes_v1.json（WidgetQuoteCache：**小工具自己**上網抓的股價、金價匯率，App 不讀不寫）。
+//      「小工具不算錢」唯一的例外：股票用小工具自己抓的新價重算市值、比均價、漲跌，金價匯率用新價寫漲跌——
+//      算式與寫法全部在共用檔 WidgetQuoteService.swift（WidgetFinanceStock.figures／WidgetRateChoice.figures），
+//      金額字一律走 WidgetMoneyFormat.swift（逐字照抄 App 的 ntdWanString／MoneyFormat／FinanceText／StockCardText）。
+//      小工具的畫面檔不准自己乘、不准自己拼「NT$」。
+//
 // 分工跟靈動島一樣：App 把小工具要顯示的「字」與「數字」算好、格式化好，寫成 App Group 裡的
 // 小檔案；小工具只讀這些檔、照著畫。**小工具裡不做任何金額計算與格式化**——「NT$4.6萬」
 // 「每天 NT$2,402」「已花 62%」全部是 App 用自己那套函式（MoneyFormat／ntdWanString）組好的字。
@@ -78,6 +86,30 @@ enum WidgetKind {
     /// 控制項「記到…」（AppIntentControlConfiguration：選一個變動分類，或一台車＋車子分類）
     static let controlRecordTo = "com.lifegood.app.control.recordTo"
 
+    // MARK: [v4]
+
+    /// 股票今天：systemSmall（一檔）＋鎖定畫面 accessoryCircular／accessoryRectangular／accessoryInline（同一檔的價與漲跌）
+    static let stock = "LifeGoodStock"
+    /// 股票今天（三檔）：systemMedium
+    static let stocks = "LifeGoodStocks"
+    /// 金價匯率：systemSmall＋鎖定畫面 accessoryCircular／accessoryRectangular／accessoryInline
+    static let rates = "LifeGoodRates"
+    /// 我的車：systemSmall、systemMedium＋鎖定畫面 accessoryCircular／accessoryRectangular
+    static let vehicle = "LifeGoodVehicle"
+    /// 淨資產：systemSmall、systemMedium＋鎖定畫面 accessoryCircular／accessoryRectangular
+    static let netWorth = "LifeGoodNetWorth"
+
+    /// [v4] finance_v1.json 的 stocks 變了要重畫的（App 寫手只重畫受影響的那幾種）
+    static let stockKinds = [stock, stocks]
+    /// [v4] finance_v1.json 的 rates 變了
+    static let ratesKinds = [rates]
+    /// [v4] finance_v1.json 的 vehicles 變了
+    static let vehicleKinds = [vehicle]
+    /// [v4] finance_v1.json 的 netWorth 變了
+    static let netWorthKinds = [netWorth]
+    /// [v4] 理財四個小工具全部（finance_v1.json 第一次寫、整份換掉時）
+    static let financeKinds = [stock, stocks, rates, vehicle, netWorth]
+
     /// money_v1.json 變了要重畫的（App 的寫手、一按就記的按鈕都用這一組）
     static let moneyKinds = [moneyLeft, ledgerDesk, quickRecord, lockSpent]
     /// [v3] money_v1.json 變了要重畫的控制項（「記到…」的「Taycan 電費」從 money 快照讀）。
@@ -95,6 +127,10 @@ enum WidgetSnapshotFile: String {
     case life = "life_v1.json"
     /// [v2] 接下來要繳
     case bills = "bills_v1.json"
+    /// [v4] 理財四個小工具（App 寫）
+    case finance = "finance_v1.json"
+    /// [v4] 小工具自己抓的股價、金價匯率（**只有小工具讀寫**，App 不讀不寫）
+    case quotes = "quotes_v1.json"
 }
 
 // MARK: - [v2] 隱藏金額
