@@ -12,6 +12,10 @@ import WidgetKit
 // [v2] 加入：記帳台（中）、一按就記（小、中）、接下來要繳（中）；鎖定畫面「已花」「下一場」「下一筆要繳」；
 // 控制項「記一筆」「隱藏金額」。@WidgetBundleBuilder 一次最多列 10 個，鎖定畫面三個＋控制項兩個
 // 放在子 bundle（LifeGoodLockAndControlBundle），這裡列它的 body。
+//
+// [v3] 加入：旅行（小、中、鎖定畫面長方形，TravelWidget）；控制項「說一句」「記到…」（放子 bundle，共 7 個）。
+// 還能花、今天、記帳台、接下來要繳、鎖定畫面「下一場」「下一筆要繳」改成長按可設定（kind 不變，各自的檔案）。
+// 這一層現在 9 個、子 bundle 7 個，都在 10 個以內。
 
 @main
 struct LifeGoodWidgetsBundle: WidgetBundle {
@@ -26,12 +30,14 @@ struct LifeGoodWidgetsBundle: WidgetBundle {
         LedgerDeskWidget()
         QuickRecordWidget()
         BillsWidget()
-        // [v2] 鎖定畫面三個＋控制項兩個
+        // [v3] 旅行
+        TravelWidget()
+        // [v2] 鎖定畫面三個＋控制項（[v3] 四個）
         LifeGoodLockAndControlBundle().body
     }
 }
 
-/// [v2] @WidgetBundleBuilder 一次最多 10 個，鎖定畫面三個＋控制項兩個放這裡
+/// [v2] @WidgetBundleBuilder 一次最多 10 個，鎖定畫面三個＋控制項放這裡（[v3] 加說一句、記到…，共 7 個）
 struct LifeGoodLockAndControlBundle: WidgetBundle {
     var body: some Widget {
         LockSpentWidget()
@@ -39,5 +45,8 @@ struct LifeGoodLockAndControlBundle: WidgetBundle {
         LockNextBillWidget()
         AddExpenseControl()
         HideAmountsControl()
+        // [v3]
+        VoiceRecordControl()
+        RecordToControl()
     }
 }

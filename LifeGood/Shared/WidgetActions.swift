@@ -6,7 +6,8 @@ import WidgetKit
 //
 // 這個檔案同時屬於「主 App」與「LifeGoodWidgets」兩個 target。
 //
-// 1. LifeGoodOpenIntent：打開 App 到指定頁（控制項「記一筆」用；v3 的「說一句」「記到…」也走它）。
+// 1. LifeGoodOpenIntent：打開 App 到指定頁（控制項「記一筆」用；[v3] 控制項「說一句」「記到…」、
+//    還能花右上「⊕」的 Button(intent:) 也走它）。
 //    openAppWhenRun = true，而且兩個 target 都有這個型別——系統會把 App 叫到前景，在 App 的行程裡
 //    執行 perform（iOS 18 控制項打開 App 的標準寫法）。perform 碰不到 App 的型別（DeepLinkRouter、
 //    AppMode…），所以只把網址交給 WidgetOpenAppHandoff，由 App 啟動時登記的處理者走跟 onOpenURL
@@ -108,5 +109,13 @@ enum WidgetRefresh {
     static func afterHideAmountsChanged() {
         WidgetCenter.shared.reloadAllTimelines()
         ControlCenter.shared.reloadControls(ofKind: WidgetKind.controlHideAmounts)
+    }
+
+    /// [v3] 重畫這幾個控制項（WidgetKind.moneyControlKinds：「記到…」的「Taycan 電費」從 money 快照讀，
+    /// App 寫完 money 叫一次）
+    static func reloadControls(_ kinds: [String]) {
+        for kind in kinds {
+            ControlCenter.shared.reloadControls(ofKind: kind)
+        }
     }
 }

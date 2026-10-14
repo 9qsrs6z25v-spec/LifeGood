@@ -1,5 +1,6 @@
 import SwiftUI
 import WidgetKit
+import AppIntents
 
 // MARK: - 接下來要繳（systemMedium）（小工具 v2）
 //
@@ -14,6 +15,11 @@ import WidgetKit
 // 換日：timeline 從明天起每天 00:00 一筆，到 horizonEnd 為止；「2 天後 → 明天扣款 → 今天扣款 → 拿掉」
 // 由 entry.date 跟扣款日的日曆天差算（WidgetDateText.dueText／isDueSoon，日差不是金額），不用開 App。
 //
+// [v3] 長按可設定（AppIntentConfiguration＋BillsConfigIntent，WidgetConfigs.swift；kind 不變）：
+//   範圍 全部（預設）／只看記帳固定支出／只看理財；天數 30（預設）／7；金額 跟著總開關（預設）／一律隱藏。
+//   清單＝upcoming(at:days:scope:)、空的時候「下一筆」＝next(at:scope:)；標題「接下來 7 天」、空的「7 天內沒有要扣的」。
+//   預設值＝v2 一模一樣。標題列的連結照舊開固定支出頁（「只看理財」也一樣，v4 才有理財總覽網址）。
+//
 // 型別（internal 的都帶 Bills 前綴；畫面零件 private）：
 //   BillsWidget、BillsWidgetEntry、BillsWidgetProvider、BillsTimeline（鎖定畫面「下一筆要繳」共用）、
 //   BillsSample（同）、BillsWidgetEntryView
@@ -22,7 +28,9 @@ import WidgetKit
 
 struct BillsWidget: Widget {
     var body: some WidgetConfiguration {
-        StaticConfiguration(kind: WidgetKind.bills, provider: BillsWidgetProvider()) { entry in
+        // [v3] StaticConfiguration → AppIntentConfiguration（kind 不變：已經放好的升級後用預設值、外觀一樣）
+        AppIntentConfiguration(kind: WidgetKind.bills, intent: BillsConfigIntent.self,
+                               provider: BillsWidgetProvider()) { entry in
             BillsWidgetEntryView(entry: entry)
         }
         .configurationDisplayName("接下來要繳")
@@ -38,36 +46,45 @@ struct BillsWidgetEntry: TimelineEntry {
     let date: Date
     /// nil＝還沒打開過新版 App（或檔案讀不到）
     let snapshot: WidgetBillsSnapshot?
-    /// 「隱藏金額」開著（provider 讀一次）
+    /// 「隱藏金額」開著（provider 讀一次）。
+    /// [v3] ＝長按設定的「金額」.hides(master: 總開關)：一律隱藏、或總開關開著
     let hidesAmounts: Bool
+    /// [v3] 長按設定的範圍（預設全部＝v2）
+    var scope: WidgetBillScope = .all
+    /// [v3] 長按設定的天數（預設 30＝v2）
+    var days: Int = WidgetBillsSnapshot.listDays
 }
 
-struct BillsWidgetProvider: TimelineProvider {
+/// [v3] TimelineProvider → AppIntentTimelineProvider（多讀長按設定；排程照舊 BillsTimeline）
+struct BillsWidgetProvider: AppIntentTimelineProvider {
     func placeholder(in context: Context) -> BillsWidgetEntry {
         let now = Date()
         return BillsWidgetEntry(date: now, snapshot: BillsSample.snapshot(at: now), hidesAmounts: false)
     }
 
-    func getSnapshot(in context: Context, completion: @escaping (BillsWidgetEntry) -> Void) {
+    func snapshot(for configuration: BillsConfigIntent, in context: Context) async -> BillsWidgetEntry {
         let now = Date()
         if context.isPreview {
-            completion(BillsWidgetEntry(date: now, snapshot: BillsSample.snapshot(at: now), hidesAmounts: false))
-            return
+            return BillsWidgetEntry(date: now, snapshot: BillsSample.snapshot(at: now), hidesAmounts: false)
         }
         let snapshot = WidgetSnapshotStore.read(WidgetBillsSnapshot.self)
-        completion(BillsWidgetEntry(date: now, snapshot: snapshot, hidesAmounts: WidgetHideAmounts.isOn))
+        let hidden: Bool = configuration.amount.hides(master: WidgetHideAmounts.isOn)
+        return BillsWidgetEntry(date: now, snapshot: snapshot, hidesAmounts: hidden,
+                                scope: configuration.scope.scope, days: configuration.days.days)
     }
 
-    func getTimeline(in context: Context, completion: @escaping (Timeline<BillsWidgetEntry>) -> Void) {
+    func timeline(for configuration: BillsConfigIntent, in context: Context) async -> Timeline<BillsWidgetEntry> {
         let now = Date()
         let snapshot = WidgetSnapshotStore.read(WidgetBillsSnapshot.self)
-        let hidden = WidgetHideAmounts.isOn
+        let hidden: Bool = configuration.amount.hides(master: WidgetHideAmounts.isOn)
+        let scope: WidgetBillScope = configuration.scope.scope
+        let days: Int = configuration.days.days
         let dates = BillsTimeline.entryDates(snapshot: snapshot, now: now)
         let entries: [BillsWidgetEntry] = dates.map {
-            BillsWidgetEntry(date: $0, snapshot: snapshot, hidesAmounts: hidden)
+            BillsWidgetEntry(date: $0, snapshot: snapshot, hidesAmounts: hidden, scope: scope, days: days)
         }
         let policy = BillsTimeline.policy(snapshot: snapshot, dates: dates, now: now)
-        completion(Timeline(entries: entries, policy: policy))
+        return Timeline(entries: entries, policy: policy)
     }
 }
 
@@ -149,8 +166,11 @@ private struct BillsWidgetModel {
     /// 超過兩天沒更新：「上次更新 10/11」
     var staleText = ""
 
-    /// 只挑字、不算錢：日期字與日差由 WidgetDateText 組，金額字是 App 寫好的
-    static func make(snapshot: WidgetBillsSnapshot?, now: Date, hidden: Bool) -> BillsWidgetModel {
+    /// 只挑字、不算錢：日期字與日差由 WidgetDateText 組，金額字是 App 寫好的。
+    /// [v3] scope／days：長按設定的範圍、天數（預設全部／30＝v2）
+    static func make(snapshot: WidgetBillsSnapshot?, now: Date, hidden: Bool,
+                     scope: WidgetBillScope = .all,
+                     days: Int = WidgetBillsSnapshot.listDays) -> BillsWidgetModel {
         var model = BillsWidgetModel()
         guard let snap = snapshot else {
             model.message = "打開 LifeGood 一次，這裡就會出現接下來要扣的錢"
@@ -163,12 +183,12 @@ private struct BillsWidgetModel {
         if snap.isStale(at: now) {
             model.staleText = WidgetDateText.lastUpdated(snap.generatedAt)
         }
-        let list = snap.upcoming(at: now)
-        model.header = "接下來 \(WidgetBillsSnapshot.listDays) 天"
+        let list = snap.upcoming(at: now, days: days, scope: scope)
+        model.header = "接下來 \(days) 天"
         guard !list.isEmpty else {
             model.kind = .empty
-            model.emptyTitle = "\(WidgetBillsSnapshot.listDays) 天內沒有要扣的"
-            if let next = snap.next(at: now) {
+            model.emptyTitle = "\(days) 天內沒有要扣的"
+            if let next = snap.next(at: now, scope: scope) {
                 model.emptyNext = nextText(next, hidden: hidden)
             }
             return model
@@ -279,7 +299,8 @@ struct BillsWidgetEntryView: View {
     }
 
     private var model: BillsWidgetModel {
-        BillsWidgetModel.make(snapshot: entry.snapshot, now: entry.date, hidden: entry.hidesAmounts)
+        BillsWidgetModel.make(snapshot: entry.snapshot, now: entry.date, hidden: entry.hidesAmounts,
+                              scope: entry.scope, days: entry.days)
     }
 
     var body: some View {

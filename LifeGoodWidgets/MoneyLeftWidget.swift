@@ -1,5 +1,6 @@
 import SwiftUI
 import WidgetKit
+import AppIntents
 
 // MARK: - 還能花（v25.545，只屬於 LifeGoodWidgets）
 //
@@ -19,15 +20,24 @@ import WidgetKit
 //      字一律經過 WidgetMoneyDay.lines(hidden:) 拿（開著時「本月已花／62%／還有 19 天／今天 3 筆」）。
 //      MoneyLeftTimeline 給記帳台、一按就記、鎖定畫面「已花」共用；MoneyLeftBar 給 WidgetMoneyPanel 共用。
 //
+// [v3] 長按可設定（AppIntentConfiguration＋MoneyLeftConfigIntent，WidgetConfigs.swift；kind 不變）：
+//      金額「跟著總開關（預設）／這個小工具一律隱藏」→ provider 算 hidesAmounts＝config.amount.hides(master:)。
+//      右上加一顆「⊕」（MoneyLeftAddButton）：Button(intent: LifeGoodOpenIntent(新增支出網址))，
+//      打開 App 到新增支出、數字鍵盤跳出（跟控制項「記一筆」同一條路）。StandBy 不放（不能按）。
+//      ⊕ 以外的地方照舊整塊 → 收支總覽。月牙／雲從右上改到大字那一列旁（右上被 ⊕ 佔了，J:56）。
+//
 // 型別（全部 internal 的都帶 MoneyLeft 前綴；畫面零件 private）：
 //   MoneyLeftWidget、MoneyLeftEntry、MoneyLeftProvider、MoneyLeftTimeline、
 //   MoneyLeftModel、MoneyLeftSample、MoneyLeftEntryView、MoneyLeftBar
+//   [v3] 設定在 WidgetConfigs.swift 的 MoneyLeftConfigIntent；⊕ 是本檔 private 的 MoneyLeftAddButton
 
 // MARK: - Widget
 
 struct MoneyLeftWidget: Widget {
     var body: some WidgetConfiguration {
-        StaticConfiguration(kind: WidgetKind.moneyLeft, provider: MoneyLeftProvider()) { entry in
+        // [v3] StaticConfiguration → AppIntentConfiguration（kind 不變：已經放好的升級後用預設值、外觀一樣）
+        AppIntentConfiguration(kind: WidgetKind.moneyLeft, intent: MoneyLeftConfigIntent.self,
+                               provider: MoneyLeftProvider()) { entry in
             MoneyLeftEntryView(entry: entry)
         }
         .configurationDisplayName("還能花")
@@ -43,31 +53,33 @@ struct MoneyLeftEntry: TimelineEntry {
     let date: Date
     /// nil＝還沒打開過新版 App（或檔案讀不到）
     let snapshot: WidgetMoneySnapshot?
-    /// [v2] 「隱藏金額」開著（provider 讀一次；View 裡不讀 UserDefaults）
+    /// [v2] 「隱藏金額」開著（provider 讀一次；View 裡不讀 UserDefaults）。
+    /// [v3] ＝長按設定的「金額」.hides(master: 總開關)：一律隱藏、或總開關開著
     let hidesAmounts: Bool
 }
 
-struct MoneyLeftProvider: TimelineProvider {
+/// [v3] TimelineProvider → AppIntentTimelineProvider（多讀長按設定；排程照舊）
+struct MoneyLeftProvider: AppIntentTimelineProvider {
     func placeholder(in context: Context) -> MoneyLeftEntry {
         let now = Date()
         return MoneyLeftEntry(date: now, snapshot: MoneyLeftSample.snapshot(at: now), hidesAmounts: false)
     }
 
-    func getSnapshot(in context: Context, completion: @escaping (MoneyLeftEntry) -> Void) {
+    func snapshot(for configuration: MoneyLeftConfigIntent, in context: Context) async -> MoneyLeftEntry {
         let now = Date()
         if context.isPreview {
             // 小工具庫裡的預覽：寫死的展示字
-            completion(MoneyLeftEntry(date: now, snapshot: MoneyLeftSample.snapshot(at: now), hidesAmounts: false))
-            return
+            return MoneyLeftEntry(date: now, snapshot: MoneyLeftSample.snapshot(at: now), hidesAmounts: false)
         }
         let snapshot = WidgetSnapshotStore.read(WidgetMoneySnapshot.self)
-        completion(MoneyLeftEntry(date: now, snapshot: snapshot, hidesAmounts: WidgetHideAmounts.isOn))
+        let hidden: Bool = configuration.amount.hides(master: WidgetHideAmounts.isOn)
+        return MoneyLeftEntry(date: now, snapshot: snapshot, hidesAmounts: hidden)
     }
 
-    func getTimeline(in context: Context, completion: @escaping (Timeline<MoneyLeftEntry>) -> Void) {
+    func timeline(for configuration: MoneyLeftConfigIntent, in context: Context) async -> Timeline<MoneyLeftEntry> {
         let now = Date()
         let snapshot = WidgetSnapshotStore.read(WidgetMoneySnapshot.self)
-        let hidden = WidgetHideAmounts.isOn
+        let hidden: Bool = configuration.amount.hides(master: WidgetHideAmounts.isOn)
         let dates = MoneyLeftTimeline.entryDates(snapshot: snapshot, now: now)
         let entries: [MoneyLeftEntry] = dates.map {
             MoneyLeftEntry(date: $0, snapshot: snapshot, hidesAmounts: hidden)
@@ -75,7 +87,7 @@ struct MoneyLeftProvider: TimelineProvider {
         // 平常不用定時要：App 存檔／iCloud 同步後寫了新快照才叫重畫（WidgetSnapshotWriter）。
         // 只在排到的最後一個 00:00（跨月後 daysAfterEnd 天）過了以後再要一次，日期那一行才不會停住
         let policy = MoneyLeftTimeline.policy(snapshot: snapshot, dates: dates, now: now)
-        completion(Timeline(entries: entries, policy: policy))
+        return Timeline(entries: entries, policy: policy)
     }
 }
 
@@ -235,20 +247,62 @@ struct MoneyLeftEntryView: View {
 
     var body: some View {
         MoneyLeftContent(model: model, palette: palette, standBy: surface.isStandBy)
+            .overlay(alignment: .topTrailing) {
+                addButton
+            }
             .containerBackground(for: .widget) {
                 backgroundView
             }
             .widgetURL(WidgetLink.expenseOverview)
     }
 
-    /// 著色、StandBy 不畫天空（J:59、114）
+    /// [v3] 右上「⊕」：StandBy 不放（不能按）；主畫面全彩、著色都放
+    @ViewBuilder
+    private var addButton: some View {
+        if !surface.isStandBy {
+            MoneyLeftAddButton(palette: palette)
+        }
+    }
+
+    /// 著色、StandBy 不畫天空（J:59、114）。
+    /// [v3] 右上是「⊕」；放大字旁會壓到「NT$4.6萬」的最後一個字（大字會撐滿整寬），
+    /// 四個角又分別是日期、⊕、橫條與最下面那行——這格不放月牙／雲，只留漸層與星星
     @ViewBuilder
     private var backgroundView: some View {
         if surface.drawsSky {
-            WidgetSky(palette: palette, moon: .topTrailing)
+            WidgetSky(palette: palette, moon: .none)
         } else {
             Color.clear
         }
+    }
+}
+
+/// [v3] 右上「⊕」：打開 App 到新增支出、數字鍵盤跳出（J:106）。
+/// 小型只能整塊一個網址，所以用「打開 App 的按鈕動作」：共用檔的 LifeGoodOpenIntent（openAppWhenRun，
+/// 兩個 target 都有）把網址交給 App 的總入口（WidgetOpenAppHandoff → WidgetLink.apply），跟控制項「記一筆」同一條路。
+/// 全彩 App 藍（palette.deskAddIcon，深色 #5B9BFF）；著色模式白色＋重點色。
+private struct MoneyLeftAddButton: View {
+    let palette: WidgetPalette
+
+    var body: some View {
+        Button(intent: LifeGoodOpenIntent(url: WidgetLink.addExpense())) {
+            MoneyLeftAddIcon(palette: palette)
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+/// ⊕ 的圖示（約 22pt；外面多留一點點按得到的範圍，靠右上對齊不往內佔版面）
+private struct MoneyLeftAddIcon: View {
+    let palette: WidgetPalette
+
+    var body: some View {
+        Image(systemName: "plus.circle.fill")
+            .font(.system(size: 22, weight: .semibold))
+            .foregroundStyle(palette.deskAddIcon)
+            .widgetAccentable()
+            .frame(width: 30, height: 30, alignment: .topTrailing)
+            .contentShape(Rectangle())
     }
 }
 

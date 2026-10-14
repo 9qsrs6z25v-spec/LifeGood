@@ -1,5 +1,6 @@
 import SwiftUI
 import WidgetKit
+import AppIntents
 
 // MARK: - 記帳台（systemMedium）：左半還能花、右半四張卡（連結）（小工具 v2）
 //
@@ -16,15 +17,27 @@ import WidgetKit
 //
 // 換日、跨月：timeline 直接用 v1 的 MoneyLeftTimeline（每天 00:00、快照變舊那一刻）。
 //
+// [v3] 長按可設定（AppIntentConfiguration＋LedgerDeskConfigIntent，WidgetConfigs.swift；kind 不變）：
+//   • 按鈕 1／2／3：自動（預設，照 v2 的挑法）、🎤 說一句（紫）、新增收入（綠）、14 個變動分類、每台車的車子分類。
+//     卡由 WidgetMoneySnapshot.deskTiles(choiceIDs:) 挑（契約）；三格都自動＝跟 v2 一模一樣。第 4 格固定「＋ 記一筆」。
+//     說一句、新增收入的卡畫法同分類卡（漸層＋白字）；只有「＋ 記一筆」是淺底。
+//   • 金額：跟著總開關（預設）／一律隱藏（左半改 App 寫好的隱藏版「本月已花／62%／還有 19 天／今天 3 筆」）。
+//   • relevance（LedgerDeskRelevance）：中午 11:00–13:30、晚上 17:30–20:00 的 entry 掛 score 1，
+//     其他 score 0，讓智慧型堆疊吃飯時間比較常把記帳台轉上來（系統決定，不保證）。只用 iOS 14 就有的
+//     TimelineEntryRelevance(score:duration:)，不用 iOS 18 的 relevances()。
+//
 // 型別（internal 的都帶 LedgerDesk 前綴；畫面零件 private）：
 //   LedgerDeskWidget、LedgerDeskEntry、LedgerDeskProvider、LedgerDeskSample、LedgerDeskEntryView、
 //   LedgerDeskCardBackground（一按就記的按鈕也用這個底）
+//   [v3] private：LedgerDeskRelevance、LedgerDeskRelevanceWindow、LedgerDeskRelevanceSpan
 
 // MARK: - Widget
 
 struct LedgerDeskWidget: Widget {
     var body: some WidgetConfiguration {
-        StaticConfiguration(kind: WidgetKind.ledgerDesk, provider: LedgerDeskProvider()) { entry in
+        // [v3] StaticConfiguration → AppIntentConfiguration（kind 不變：已經放好的升級後用預設值、外觀一樣）
+        AppIntentConfiguration(kind: WidgetKind.ledgerDesk, intent: LedgerDeskConfigIntent.self,
+                               provider: LedgerDeskProvider()) { entry in
             LedgerDeskEntryView(entry: entry)
         }
         .configurationDisplayName("記帳台")
@@ -40,54 +53,145 @@ struct LedgerDeskEntry: TimelineEntry {
     let date: Date
     /// nil＝還沒打開過新版 App（或檔案讀不到）
     let snapshot: WidgetMoneySnapshot?
-    /// 「隱藏金額」開著（provider 讀一次）
+    /// 「隱藏金額」開著（provider 讀一次）。
+    /// [v3] ＝長按設定的「金額」.hides(master: 總開關)：一律隱藏、或總開關開著
     let hidesAmounts: Bool
+    /// [v3] 長按設定的按鈕 1／2／3（WidgetDeskButtonEntity.id；nil＝自動）。預覽、placeholder 全自動
+    var choiceIDs: [String?] = [nil, nil, nil]
+    /// [v3] 智慧型堆疊用：吃飯時段 score 1、其他 score 0（LedgerDeskRelevance）；預覽、placeholder 是 nil
+    var relevance: TimelineEntryRelevance? = nil
 }
 
-struct LedgerDeskProvider: TimelineProvider {
+/// [v3] TimelineProvider → AppIntentTimelineProvider（多讀長按設定；排程＝MoneyLeftTimeline ∪ 吃飯時段的頭尾）
+struct LedgerDeskProvider: AppIntentTimelineProvider {
     func placeholder(in context: Context) -> LedgerDeskEntry {
         let now = Date()
         return LedgerDeskEntry(date: now, snapshot: LedgerDeskSample.snapshot(at: now), hidesAmounts: false)
     }
 
-    func getSnapshot(in context: Context, completion: @escaping (LedgerDeskEntry) -> Void) {
+    func snapshot(for configuration: LedgerDeskConfigIntent, in context: Context) async -> LedgerDeskEntry {
         let now = Date()
         if context.isPreview {
-            // 小工具庫裡的預覽：寫死的展示字
-            completion(LedgerDeskEntry(date: now, snapshot: LedgerDeskSample.snapshot(at: now), hidesAmounts: false))
-            return
+            // 小工具庫裡的預覽：寫死的展示字（三格自動，跟 v2 一樣）
+            return LedgerDeskEntry(date: now, snapshot: LedgerDeskSample.snapshot(at: now), hidesAmounts: false)
         }
         let snapshot = WidgetSnapshotStore.read(WidgetMoneySnapshot.self)
-        completion(LedgerDeskEntry(date: now, snapshot: snapshot, hidesAmounts: WidgetHideAmounts.isOn))
+        let hidden: Bool = configuration.amount.hides(master: WidgetHideAmounts.isOn)
+        return LedgerDeskEntry(date: now, snapshot: snapshot, hidesAmounts: hidden,
+                               choiceIDs: configuration.choiceIDs)
     }
 
-    func getTimeline(in context: Context, completion: @escaping (Timeline<LedgerDeskEntry>) -> Void) {
+    func timeline(for configuration: LedgerDeskConfigIntent, in context: Context) async -> Timeline<LedgerDeskEntry> {
         let now = Date()
         let snapshot = WidgetSnapshotStore.read(WidgetMoneySnapshot.self)
-        let hidden = WidgetHideAmounts.isOn
-        let dates = MoneyLeftTimeline.entryDates(snapshot: snapshot, now: now)
+        let hidden: Bool = configuration.amount.hides(master: WidgetHideAmounts.isOn)
+        let choices: [String?] = configuration.choiceIDs
+        let spans: [LedgerDeskRelevanceSpan] = LedgerDeskRelevance.spans(now: now)
+        let dates: [Date] = LedgerDeskRelevance.entryDates(snapshot: snapshot, now: now, spans: spans)
         let entries: [LedgerDeskEntry] = dates.map {
-            LedgerDeskEntry(date: $0, snapshot: snapshot, hidesAmounts: hidden)
+            LedgerDeskEntry(date: $0, snapshot: snapshot, hidesAmounts: hidden, choiceIDs: choices,
+                            relevance: LedgerDeskRelevance.relevance(at: $0, spans: spans))
         }
         let policy = MoneyLeftTimeline.policy(snapshot: snapshot, dates: dates, now: now)
-        completion(Timeline(entries: entries, policy: policy))
+        return Timeline(entries: entries, policy: policy)
+    }
+}
+
+// MARK: - [v3] 智慧型堆疊：吃飯時段往前排（J:619）
+
+/// 一天裡的一個吃飯時段（本地時間，Calendar.current）
+private struct LedgerDeskRelevanceWindow {
+    let startHour: Int
+    let startMinute: Int
+    let endHour: Int
+    let endMinute: Int
+}
+
+/// 某一天的那一段（含開始、不含結束）
+private struct LedgerDeskRelevanceSpan {
+    let start: Date
+    let end: Date
+
+    func contains(_ date: Date) -> Bool {
+        start <= date && date < end
+    }
+}
+
+/// 只排時間、打分數，不碰金額。timeline 已經排到月底後一個多月，吃飯時段只排今天起 7 天
+///（每段頭尾各一筆，最多 28 筆；App 一週內總會再寫快照、叫重畫，再往後排）
+private enum LedgerDeskRelevance {
+    /// 中午 11:00–13:30、晚上 17:30–20:00
+    static let windows: [LedgerDeskRelevanceWindow] = [
+        LedgerDeskRelevanceWindow(startHour: 11, startMinute: 0, endHour: 13, endMinute: 30),
+        LedgerDeskRelevanceWindow(startHour: 17, startMinute: 30, endHour: 20, endMinute: 0)
+    ]
+    /// 今天起排幾天
+    static let dayCount = 7
+
+    /// 今天起 dayCount 天的每一段（依時間排好）
+    static func spans(now: Date) -> [LedgerDeskRelevanceSpan] {
+        let cal = Calendar.current
+        let today = cal.startOfDay(for: now)
+        var out: [LedgerDeskRelevanceSpan] = []
+        for offset in 0..<dayCount {
+            guard let day = cal.date(byAdding: .day, value: offset, to: today) else { continue }
+            for window in windows {
+                if let piece = makeSpan(window, on: day, calendar: cal) {
+                    out.append(piece)
+                }
+            }
+        }
+        return out
+    }
+
+    private static func makeSpan(_ window: LedgerDeskRelevanceWindow, on day: Date,
+                                 calendar cal: Calendar) -> LedgerDeskRelevanceSpan? {
+        guard let start = cal.date(bySettingHour: window.startHour, minute: window.startMinute, second: 0, of: day),
+              let end = cal.date(bySettingHour: window.endHour, minute: window.endMinute, second: 0, of: day),
+              end > start else { return nil }
+        return LedgerDeskRelevanceSpan(start: start, end: end)
+    }
+
+    /// MoneyLeftTimeline 的時間點 ∪ 每一段的開始、結束（比 now 晚才放）。沒快照只有 now（不加）
+    static func entryDates(snapshot: WidgetMoneySnapshot?, now: Date,
+                           spans: [LedgerDeskRelevanceSpan]) -> [Date] {
+        let base: [Date] = MoneyLeftTimeline.entryDates(snapshot: snapshot, now: now)
+        guard snapshot != nil else { return base }
+        var all = Set<Date>(base)
+        for span in spans {
+            if span.start > now { all.insert(span.start) }
+            if span.end > now { all.insert(span.end) }
+        }
+        return all.sorted()
+    }
+
+    /// 落在某一段裡：score 1、有效到那一段結束；其他：score 0（有效到下一筆 entry）
+    static func relevance(at date: Date, spans: [LedgerDeskRelevanceSpan]) -> TimelineEntryRelevance {
+        guard let hit = spans.first(where: { $0.contains(date) }) else {
+            return TimelineEntryRelevance(score: 0, duration: 0)
+        }
+        let left: TimeInterval = hit.end.timeIntervalSince(date)
+        return TimelineEntryRelevance(score: 1, duration: left)
     }
 }
 
 // MARK: - 挑卡（只挑、不算）
 
 private enum LedgerDeskModel {
-    /// 右半要畫的卡：有分類資料就是 deskTiles()（最多 4 張、id 不重複），否則只有「＋ 記一筆」
-    static func tiles(snapshot: WidgetMoneySnapshot?) -> [WidgetDeskTile] {
-        guard let snap = snapshot, snap.hasDeskData else { return [WidgetDeskTile.addExpense] }
+    /// 右半要畫的卡：照長按設定挑（WidgetMoneySnapshot.deskTiles(choiceIDs:)，id 已帶格子編號、不重複），
+    /// 沒快照只有「＋ 記一筆」。
+    /// [v3] 不再先看 hasDeskData：v1 舊檔（沒有分類）三格自動時 deskTiles(choiceIDs:) 本來就只回「＋ 記一筆」
+    ///（跟 v2 一樣），但指定了「說一句」「新增收入」的格子照樣畫得出來
+    static func tiles(snapshot: WidgetMoneySnapshot?, choiceIDs: [String?]) -> [WidgetDeskTile] {
+        guard let snap = snapshot else { return [WidgetDeskTile.addExpense] }
         var seen = Set<String>()
         var out: [WidgetDeskTile] = []
-        for tile in snap.deskTiles() where !seen.contains(tile.id) {
+        for tile in snap.deskTiles(choiceIDs: choiceIDs) where !seen.contains(tile.id) {
             seen.insert(tile.id)
             out.append(tile)
         }
         if out.count > 4 {
-            // deskTiles() 最多 4 張；保險起見留前三張＋最後的「記一筆」
+            // deskTiles(choiceIDs:) 最多 4 張；保險起見留前三張＋最後的「記一筆」
             let add = out[out.count - 1]
             out = Array(out.prefix(3)) + [add]
         }
@@ -145,7 +249,7 @@ struct LedgerDeskEntryView: View {
     }
 
     private var tiles: [WidgetDeskTile] {
-        LedgerDeskModel.tiles(snapshot: entry.snapshot)
+        LedgerDeskModel.tiles(snapshot: entry.snapshot, choiceIDs: entry.choiceIDs)
     }
 
     var body: some View {
@@ -201,7 +305,8 @@ private struct LedgerDeskGrid: View {
     }
 }
 
-/// 一張卡：左上白色圖示、左下白字（「＋ 記一筆」是淺底藍圖示）；著色模式外框＋重點色圖示
+/// 一張卡：左上白色圖示、左下白字（「＋ 記一筆」是淺底藍圖示）；著色模式外框＋重點色圖示。
+/// [v3] 🎤 說一句（紫）、新增收入（綠）跟分類卡同一個畫法（漸層＋白字）：只有 .add 是淺底，isAdd 判斷不變
 private struct LedgerDeskTileView: View {
     let tile: WidgetDeskTile
     let palette: WidgetPalette

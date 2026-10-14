@@ -22,6 +22,11 @@ import Foundation
 //   [v2] lifegood://finance/house?id=<房子 UUID>&src=widget            → 那一間房
 //   [v2] lifegood://finance/vehicle?id=<車 UUID>&src=widget            → 那一台車
 //   [v2] lifegood://finance/insurance?id=<保單 UUID>&src=widget        → 那一張保單
+//   [v3] lifegood://add/expense?voice=1&src=widget                    → 說一句：不切頁，在哪一頁都直接開始聽
+//                                                                       （voice=1 優先；同一個網址帶的 cat／vehicle 不看）
+//   [v3] lifegood://add/income?src=widget                             → 新增收入（記帳台的「新增收入」按鈕）
+//   [v3] lifegood://life/trip?id=<行程 UUID>&src=widget                → 旅遊地圖、打開那一份行程（旅行小工具）；
+//                                                                       不帶 id＝只切到旅遊地圖
 //
 // 分類、車子分類的值是 App 寫進快照的 rawValue（VariableCategory／VehicleVariableCategory），
 // 小工具原樣帶回；URLComponents 會自己做百分比編碼，中文沒問題。
@@ -43,6 +48,12 @@ enum WidgetDestination: Equatable {
     case financeVehicle(id: UUID?)
     /// [v2] 理財「儲蓄險」；帶 id 就打開那一張
     case financeInsurance(id: UUID?)
+    /// [v3] 說一句：不切頁，在目前這一頁直接開始聽（按一下開始、講完自動停），聽完 AI 解析、存檔、跳「已記一筆」
+    case voiceRecord
+    /// [v3] 新增收入（記帳台按鈕）
+    case addIncome
+    /// [v3] 人生「旅遊地圖」；帶 id 就打開那一份行程（旅行小工具）
+    case trip(id: UUID?)
 }
 
 /// 解析結果：去哪＋是不是從小工具點進來的
@@ -74,6 +85,12 @@ enum WidgetLink {
     private static let categoryKey = "cat"
     private static let vehicleKey = "vehicle"
     private static let vehicleCategoryKey = "vcat"
+    // [v3]
+    private static let voiceKey = "voice"
+    private static let voiceOn = "1"
+    private static let incomePath = "/income"
+    private static let lifeHost = "life"
+    private static let tripPath = "/trip"
 
     /// 組不出網址時的退路（不會發生：全部是固定的 ASCII 字）
     private static let fallback = URL(string: "lifegood://today")!
@@ -123,6 +140,17 @@ enum WidgetLink {
             comps.host = financeHost
             comps.path = insurancePath
             appendId(id, to: &items)
+        case .voiceRecord:
+            comps.host = addHost
+            comps.path = expensePath
+            items.append(URLQueryItem(name: voiceKey, value: voiceOn))
+        case .addIncome:
+            comps.host = addHost
+            comps.path = incomePath
+        case .trip(let id):
+            comps.host = lifeHost
+            comps.path = tripPath
+            appendId(id, to: &items)
         }
         if fromWidget {
             items.append(URLQueryItem(name: sourceKey, value: sourceWidget))
@@ -163,6 +191,15 @@ enum WidgetLink {
     static func financeVehicle(_ id: UUID) -> URL { url(for: .financeVehicle(id: id)) }
     static func financeInsurance(_ id: UUID) -> URL { url(for: .financeInsurance(id: id)) }
 
+    /// [v3] 說一句：lifegood://add/expense?voice=1&src=widget（控制項「說一句」、記帳台「🎤 說一句」）
+    static var voiceRecord: URL { url(for: .voiceRecord) }
+
+    /// [v3] 新增收入：lifegood://add/income?src=widget
+    static var addIncome: URL { url(for: .addIncome) }
+
+    /// [v3] 那一趟旅行：lifegood://life/trip?id=<UUID>&src=widget；nil＝只切到旅遊地圖
+    static func trip(_ id: UUID?) -> URL { url(for: .trip(id: id)) }
+
     // MARK: 解析
 
     /// 認得的網址回 WidgetRoute；別的（不是 lifegood://、不認得的頁）回 nil。
@@ -190,7 +227,9 @@ enum WidgetLink {
             if path == fixedPath { return .fixedExpense(id: uuidValue(idKey, in: items)) }
             return nil
         case addHost:
+            if path == incomePath { return .addIncome }
             guard path == expensePath else { return nil }
+            if textValue(voiceKey, in: items) == voiceOn { return .voiceRecord }
             return .addExpense(categoryKey: textValue(categoryKey, in: items),
                                vehicleId: uuidValue(vehicleKey, in: items),
                                vehicleCategoryKey: textValue(vehicleCategoryKey, in: items))
@@ -199,6 +238,9 @@ enum WidgetLink {
             if path == housePath { return .financeHouse(id: id) }
             if path == vehiclePath { return .financeVehicle(id: id) }
             if path == insurancePath { return .financeInsurance(id: id) }
+            return nil
+        case lifeHost:
+            if path == tripPath { return .trip(id: uuidValue(idKey, in: items)) }
             return nil
         default:
             return nil

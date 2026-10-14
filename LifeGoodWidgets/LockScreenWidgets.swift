@@ -1,5 +1,6 @@
 import SwiftUI
 import WidgetKit
+import AppIntents
 
 // MARK: - 鎖定畫面：已花（圓形＋一行字）、下一場（長方形＋一行字）、下一筆要繳（長方形）（小工具 v2）
 //
@@ -15,6 +16,13 @@ import WidgetKit
 //   行程標題用 WidgetStop.lockedSurfaceTitle、生日只寫 lockTitle（「家人生日」）。
 // • 「已花」三種字（WidgetMoneyLock）App 寫好、不含金額，隱藏金額開關不影響；
 //   「下一筆要繳」的金額跟著隱藏開關換成 mask。
+//
+// [v3] 長按可設定（AppIntentConfiguration，kind 不變；設定在 WidgetConfigs.swift）：
+// • 下一場（LockNextStopConfigIntent）「顯示主題」：開（預設＝v2，lockedSurfaceTitle）；關＝類別字
+//  （WidgetStop.lockTitle：「部屬會議」「會議」「系統行事曆」；旅遊景點兩種都是站名，景點算低隱私 J:298）。
+// • 下一筆要繳（LockNextBillConfigIntent）「顯示名稱」：開（預設＝v2，「10/15 Netflix」）；
+//   關＝類別字（WidgetBill.lockedTitle：「10/15 訂閱服務」）。金額照「隱藏金額」總開關，不另設。
+// • 已花沒有設定，照舊 StaticConfiguration。
 //
 // 型別（internal 的帶 LockSpent／LockNextStop／LockNextBill 前綴；畫面零件 private）：
 //   LockSpentWidget、LockSpentEntry、LockSpentProvider、LockSpentEntryView
@@ -230,7 +238,9 @@ private struct LockSpentRingLabel: View {
 
 struct LockNextStopWidget: Widget {
     var body: some WidgetConfiguration {
-        StaticConfiguration(kind: WidgetKind.lockNextStop, provider: LockNextStopProvider()) { entry in
+        // [v3] StaticConfiguration → AppIntentConfiguration（kind 不變：已經放好的升級後用預設值、外觀一樣）
+        AppIntentConfiguration(kind: WidgetKind.lockNextStop, intent: LockNextStopConfigIntent.self,
+                               provider: LockNextStopProvider()) { entry in
             LockNextStopEntryView(entry: entry)
         }
         .configurationDisplayName("下一場")
@@ -243,45 +253,50 @@ struct LockNextStopEntry: TimelineEntry {
     let date: Date
     /// nil＝還沒打開過新版 App
     let snapshot: WidgetLifeSnapshot?
+    /// [v3] 長按設定「顯示主題」（預設 true＝v2）；false 寫類別字。placeholder／預覽是 true
+    var showsTitle: Bool = true
 }
 
-struct LockNextStopProvider: TimelineProvider {
+/// [v3] TimelineProvider → AppIntentTimelineProvider（多讀長按設定；排程照舊）
+struct LockNextStopProvider: AppIntentTimelineProvider {
     func placeholder(in context: Context) -> LockNextStopEntry {
         let sample = TodayWidgetSample.entry(now: Date())
-        return LockNextStopEntry(date: sample.date, snapshot: sample.snapshot)
+        return LockNextStopEntry(date: sample.date, snapshot: sample.snapshot, showsTitle: true)
     }
 
-    func getSnapshot(in context: Context, completion: @escaping (LockNextStopEntry) -> Void) {
+    func snapshot(for configuration: LockNextStopConfigIntent, in context: Context) async -> LockNextStopEntry {
         if context.isPreview {
             let sample = TodayWidgetSample.entry(now: Date())
-            completion(LockNextStopEntry(date: sample.date, snapshot: sample.snapshot))
-            return
+            return LockNextStopEntry(date: sample.date, snapshot: sample.snapshot, showsTitle: true)
         }
         let snapshot = WidgetSnapshotStore.read(WidgetLifeSnapshot.self)
-        completion(LockNextStopEntry(date: Date(), snapshot: snapshot))
+        return LockNextStopEntry(date: Date(), snapshot: snapshot, showsTitle: configuration.showTitle)
     }
 
     /// 跟「今天」同一份排程（有倒數的那幾分鐘每分鐘一筆，TodayWidgetTimeline）
-    func getTimeline(in context: Context, completion: @escaping (Timeline<LockNextStopEntry>) -> Void) {
+    func timeline(for configuration: LockNextStopConfigIntent, in context: Context) async -> Timeline<LockNextStopEntry> {
         let now = Date()
+        let showsTitle: Bool = configuration.showTitle
         guard let snapshot = WidgetSnapshotStore.read(WidgetLifeSnapshot.self) else {
-            let only = LockNextStopEntry(date: now, snapshot: nil)
-            completion(Timeline(entries: [only], policy: .never))
-            return
+            let only = LockNextStopEntry(date: now, snapshot: nil, showsTitle: showsTitle)
+            return Timeline(entries: [only], policy: .never)
         }
         let plan = TodayWidgetTimeline.plan(snapshot: snapshot, now: now)
-        let entries: [LockNextStopEntry] = plan.dates.map { LockNextStopEntry(date: $0, snapshot: snapshot) }
+        let entries: [LockNextStopEntry] = plan.dates.map {
+            LockNextStopEntry(date: $0, snapshot: snapshot, showsTitle: showsTitle)
+        }
         let policy: TimelineReloadPolicy
         if let reloadAt = plan.reloadAt {
             policy = .after(reloadAt)
         } else {
             policy = .never
         }
-        completion(Timeline(entries: entries, policy: policy))
+        return Timeline(entries: entries, policy: policy)
     }
 }
 
-/// 長方形三行與一行字（只拼時間、標題、場數；標題一律 lockedSurfaceTitle，不寫人名）
+/// 長方形三行與一行字（只拼時間、標題、場數；標題一律 lockedSurfaceTitle，不寫人名）。
+/// [v3] showsTitle＝false（長按設定關掉「顯示主題」）：標題改寫類別字（WidgetStop.lockTitle）
 private struct LockNextStopModel {
     /// 第一行前面的圖示（會議 person.2.fill、我的行事曆 calendar、系統行事曆 calendar.badge.clock、旅遊 airplane）；
     /// 一句話時是空字串
@@ -299,7 +314,7 @@ private struct LockNextStopModel {
     var inlineText = ""
     var url: URL = WidgetLink.today(nil)
 
-    static func make(snapshot: WidgetLifeSnapshot?, now: Date) -> LockNextStopModel {
+    static func make(snapshot: WidgetLifeSnapshot?, now: Date, showsTitle: Bool = true) -> LockNextStopModel {
         var model = LockNextStopModel()
         guard let snap = snapshot, let day = snap.day(at: now) else {
             // 長方形一行約 160pt：整句 15pt 粗體放不下會被截成「…」，拆兩行
@@ -311,11 +326,11 @@ private struct LockNextStopModel {
         if day.stops.isEmpty {
             fillFree(&model, day: day)
         } else if let cur = day.currentStop(at: now) {
-            fillLive(&model, day: day, stop: cur, now: now)
+            fillLive(&model, day: day, stop: cur, now: now, showsTitle: showsTitle)
         } else if let next = day.nextStop(at: now) {
-            fillUpcoming(&model, day: day, stop: next, now: now)
+            fillUpcoming(&model, day: day, stop: next, now: now, showsTitle: showsTitle)
         } else {
-            fillFinished(&model, day: day)
+            fillFinished(&model, day: day, showsTitle: showsTitle)
         }
         return model
     }
@@ -329,15 +344,16 @@ private struct LockNextStopModel {
         }
     }
 
-    /// 鎖定畫面的標題：主題（旅遊站名／住宿），空的退回類別字（靈動島那一組）
-    static func title(_ item: WidgetStop) -> String {
-        let text = item.lockedSurfaceTitle
+    /// 鎖定畫面的標題：主題（旅遊站名／住宿），空的退回類別字（靈動島那一組）。
+    /// [v3] showsTitle 關掉：類別字（lockTitle：「部屬會議」「會議」「系統行事曆」；旅遊照樣站名／住宿），空的退回類別字
+    static func title(_ item: WidgetStop, showsTitle: Bool) -> String {
+        let text: String = showsTitle ? item.lockedSurfaceTitle : item.lockTitle
         return text.isEmpty ? item.stop.kind.label : text
     }
 
-    /// 「10:30 CDA 異常檢討」
-    static func timeAndTitle(_ item: WidgetStop) -> String {
-        DayTimelineFormat.time(item.stop.start) + " " + title(item)
+    /// 「10:30 CDA 異常檢討」（[v3] 關掉主題：「10:30 部屬會議」）
+    static func timeAndTitle(_ item: WidgetStop, showsTitle: Bool) -> String {
+        DayTimelineFormat.time(item.stop.start) + " " + title(item, showsTitle: showsTitle)
     }
 
     /// 「今天還有 3 場」（旅遊「站」）；前面有倒數就接成「25 分後・今天還有 3 場」
@@ -362,38 +378,42 @@ private struct LockNextStopModel {
     }
 
     /// 進行中：「👥 10:30 CDA 異常檢討・進行中」「40 分後結束・今天還有 3 場」
-    static func fillLive(_ model: inout LockNextStopModel, day: WidgetLifeDay, stop: WidgetStop, now: Date) {
+    static func fillLive(_ model: inout LockNextStopModel, day: WidgetLifeDay, stop: WidgetStop, now: Date,
+                         showsTitle: Bool) {
         let countdown = WidgetDateText.countdown(to: stop.stop.end, from: now)
         let lead: String? = countdown.map { $0 + "結束" }
+        let line: String = timeAndTitle(stop, showsTitle: showsTitle)
         model.icon = symbol(for: stop.stop.kind)
-        model.line1 = timeAndTitle(stop)
+        model.line1 = line
         model.line1Suffix = "・進行中"
         model.line2 = remainingLine(day, now: now, kind: stop.stop.kind, lead: lead)
         fillAllDay(&model, day: day)
         model.inlineIcon = model.icon
-        model.inlineText = timeAndTitle(stop) + "・進行中"
+        model.inlineText = line + "・進行中"
         model.url = WidgetLink.today(stop.stop)
     }
 
     /// 下一場：「👥 10:30 CDA 異常檢討」「25 分後・今天還有 3 場」；旅遊「✈ 16:20 天神地下街・下一站」
-    static func fillUpcoming(_ model: inout LockNextStopModel, day: WidgetLifeDay, stop: WidgetStop, now: Date) {
+    static func fillUpcoming(_ model: inout LockNextStopModel, day: WidgetLifeDay, stop: WidgetStop, now: Date,
+                             showsTitle: Bool) {
         let isTrip = stop.stop.kind == .trip
         let countdown: String? = isTrip ? nil : WidgetDateText.countdown(to: stop.stop.start, from: now)
+        let line: String = timeAndTitle(stop, showsTitle: showsTitle)
         model.icon = symbol(for: stop.stop.kind)
-        model.line1 = timeAndTitle(stop)
+        model.line1 = line
         model.line1Suffix = isTrip ? "・下一站" : ""
         model.line2 = remainingLine(day, now: now, kind: stop.stop.kind, lead: countdown)
         fillAllDay(&model, day: day)
         model.inlineIcon = model.icon
-        model.inlineText = timeAndTitle(stop)
+        model.inlineText = line
         model.url = WidgetLink.today(stop.stop)
     }
 
     /// 都跑完了：「今天的行程結束了」「明天 08:30 早會」
-    static func fillFinished(_ model: inout LockNextStopModel, day: WidgetLifeDay) {
+    static func fillFinished(_ model: inout LockNextStopModel, day: WidgetLifeDay, showsTitle: Bool) {
         model.line1 = "今天的行程結束了"
         if let next = day.nextDayFirstStop {
-            model.line2 = "明天 " + timeAndTitle(next)
+            model.line2 = "明天 " + timeAndTitle(next, showsTitle: showsTitle)
             model.inlineIcon = symbol(for: next.stop.kind)
             model.inlineText = model.line2
         } else {
@@ -425,7 +445,7 @@ struct LockNextStopEntryView: View {
     @Environment(\.widgetFamily) private var family
 
     private var model: LockNextStopModel {
-        LockNextStopModel.make(snapshot: entry.snapshot, now: entry.date)
+        LockNextStopModel.make(snapshot: entry.snapshot, now: entry.date, showsTitle: entry.showsTitle)
     }
 
     var body: some View {
@@ -521,7 +541,9 @@ private struct LockScreenWidgetLine: View {
 
 struct LockNextBillWidget: Widget {
     var body: some WidgetConfiguration {
-        StaticConfiguration(kind: WidgetKind.lockNextBill, provider: LockNextBillProvider()) { entry in
+        // [v3] StaticConfiguration → AppIntentConfiguration（kind 不變：已經放好的升級後用預設值、外觀一樣）
+        AppIntentConfiguration(kind: WidgetKind.lockNextBill, intent: LockNextBillConfigIntent.self,
+                               provider: LockNextBillProvider()) { entry in
             LockNextBillEntryView(entry: entry)
         }
         .configurationDisplayName("下一筆要繳")
@@ -536,35 +558,41 @@ struct LockNextBillEntry: TimelineEntry {
     let snapshot: WidgetBillsSnapshot?
     /// 「隱藏金額」開著（provider 讀一次）
     let hidesAmounts: Bool
+    /// [v3] 長按設定「顯示名稱」（預設 true＝v2）；false 寫類別字。placeholder／預覽是 true
+    var showsName: Bool = true
 }
 
-struct LockNextBillProvider: TimelineProvider {
+/// [v3] TimelineProvider → AppIntentTimelineProvider（多讀長按設定；排程照舊）
+struct LockNextBillProvider: AppIntentTimelineProvider {
     func placeholder(in context: Context) -> LockNextBillEntry {
         let now = Date()
-        return LockNextBillEntry(date: now, snapshot: BillsSample.snapshot(at: now), hidesAmounts: false)
+        return LockNextBillEntry(date: now, snapshot: BillsSample.snapshot(at: now), hidesAmounts: false,
+                                 showsName: true)
     }
 
-    func getSnapshot(in context: Context, completion: @escaping (LockNextBillEntry) -> Void) {
+    func snapshot(for configuration: LockNextBillConfigIntent, in context: Context) async -> LockNextBillEntry {
         let now = Date()
         if context.isPreview {
-            completion(LockNextBillEntry(date: now, snapshot: BillsSample.snapshot(at: now), hidesAmounts: false))
-            return
+            return LockNextBillEntry(date: now, snapshot: BillsSample.snapshot(at: now), hidesAmounts: false,
+                                     showsName: true)
         }
         let snapshot = WidgetSnapshotStore.read(WidgetBillsSnapshot.self)
-        completion(LockNextBillEntry(date: now, snapshot: snapshot, hidesAmounts: WidgetHideAmounts.isOn))
+        return LockNextBillEntry(date: now, snapshot: snapshot, hidesAmounts: WidgetHideAmounts.isOn,
+                                 showsName: configuration.showName)
     }
 
     /// 跟「接下來要繳」同一份排程（每天 00:00 自己把「2 天後」改成「明天扣款」）
-    func getTimeline(in context: Context, completion: @escaping (Timeline<LockNextBillEntry>) -> Void) {
+    func timeline(for configuration: LockNextBillConfigIntent, in context: Context) async -> Timeline<LockNextBillEntry> {
         let now = Date()
         let snapshot = WidgetSnapshotStore.read(WidgetBillsSnapshot.self)
         let hidden = WidgetHideAmounts.isOn
+        let showsName: Bool = configuration.showName
         let dates = BillsTimeline.entryDates(snapshot: snapshot, now: now)
         let entries: [LockNextBillEntry] = dates.map {
-            LockNextBillEntry(date: $0, snapshot: snapshot, hidesAmounts: hidden)
+            LockNextBillEntry(date: $0, snapshot: snapshot, hidesAmounts: hidden, showsName: showsName)
         }
         let policy = BillsTimeline.policy(snapshot: snapshot, dates: dates, now: now)
-        completion(Timeline(entries: entries, policy: policy))
+        return Timeline(entries: entries, policy: policy)
     }
 }
 
@@ -578,7 +606,9 @@ private struct LockNextBillModel {
     var foot = ""
     var url: URL = WidgetLink.fixedExpenses
 
-    static func make(snapshot: WidgetBillsSnapshot?, now: Date, hidden: Bool) -> LockNextBillModel {
+    /// [v3] showsName＝false（長按設定關掉「顯示名稱」）：「10/15 訂閱服務」（WidgetBill.lockedTitle）
+    static func make(snapshot: WidgetBillsSnapshot?, now: Date, hidden: Bool,
+                     showsName: Bool = true) -> LockNextBillModel {
         var model = LockNextBillModel()
         guard let snap = snapshot else {
             model.main = "打開 LifeGood 一次"
@@ -594,7 +624,8 @@ private struct LockNextBillModel {
         }
         let list = snap.upcoming(at: now)
         let due: String = WidgetDateText.dueText(bill.dueDate, from: now, isIncome: bill.isIncome) ?? ""
-        model.main = WidgetDateText.shortDate(bill.dueDate) + " " + bill.title
+        let name: String = showsName ? bill.title : bill.lockedTitle
+        model.main = WidgetDateText.shortDate(bill.dueDate) + " " + name
         model.amount = hidden ? WidgetHideAmounts.mask : bill.amountText
         // 30 天內還有別的才寫「之後還有 N 件」；30 天外才有下一筆時只寫幾天後
         if list.count > 1 {
@@ -611,7 +642,8 @@ struct LockNextBillEntryView: View {
     let entry: LockNextBillEntry
 
     private var model: LockNextBillModel {
-        LockNextBillModel.make(snapshot: entry.snapshot, now: entry.date, hidden: entry.hidesAmounts)
+        LockNextBillModel.make(snapshot: entry.snapshot, now: entry.date, hidden: entry.hidesAmounts,
+                               showsName: entry.showsName)
     }
 
     var body: some View {

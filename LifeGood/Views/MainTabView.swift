@@ -794,292 +794,14 @@ struct MainTabView: View {
             return
         }
         aiBusy = true
-        do {
-            // 把家庭成員姓名與本人名字一起送給 AI，讓它從固定清單選同行者
-            // 優先用中文姓名，沒填才用英文姓名
-            func memberName(_ chinese: String, _ english: String) -> String {
-                let c = chinese.trimmingCharacters(in: .whitespaces)
-                if !c.isEmpty { return c }
-                return english.trimmingCharacters(in: .whitespaces)
-            }
-            var familyNames: [String] = lifeStore.familyMembers
-                .map { memberName($0.chineseName, $0.englishName) }
-                .filter { !$0.isEmpty }
-            let myName = aiSpeakerName()
-            if !myName.isEmpty { familyNames.insert(myName, at: 0) }
-
-            // 蒐集信用卡 / 銀行帳戶 / 房地產顯示名稱，讓 AI 從清單挑選關聯
-            let cardDisplayNames = aiCreditCardDisplayNames()
-            let bankDisplayNames = aiBankDisplayNames()
-            let realEstateDisplayNames = aiRealEstateDisplayNames()
-
-            let parsed = try await AIExpenseParserService.shared.parse(
-                text,
-                availableMembers: familyNames,
-                availableCreditCards: cardDisplayNames.map(\.display),
-                availableBankAccounts: bankDisplayNames.map(\.display),
-                availableRealEstates: realEstateDisplayNames.map(\.display)
-            )
-            // aiBusy 要保護到 aiCommitExpense（含其內部的 Apple Maps 地點查詢與
-            // expenseStore/lifeStore/financeStore 寫入）完全結束為止，否則使用者能在
-            // 上一筆記帳仍在背景寫入時就按住麥克風開始下一筆，兩個 commit 交錯執行，
-            // toast 顯示順序錯亂，畫面卻顯示「未在忙碌」造成誤導。
-            try await aiCommitExpense(
-                parsed: parsed,
-                cardDisplayNames: cardDisplayNames,
-                bankDisplayNames: bankDisplayNames,
-                realEstateDisplayNames: realEstateDisplayNames
-            )
-            aiBusy = false
-        } catch {
-            aiBusy = false
-            aiShowToast("AI 解析失敗", detail: error.localizedDescription, isError: true)
-        }
-    }
-
-    private struct AIAccountOption {
-        let id: UUID
-        let display: String
-        /// 信用卡專用：底下連結的銀行帳戶 id
-        let linkedBankId: UUID?
-    }
-
-    /// 信用卡清單：排除停用卡，顯示名稱包含品牌名 + 末四碼
-    private func aiCreditCardDisplayNames() -> [AIAccountOption] {
-        lifeStore.milestones.compactMap { ms in
-            guard ms.category == .achievement,
-                  ms.financeSubCategory == .creditCard,
-                  ms.isDisabled != true else { return nil }
-            let name = (ms.cardName?.isEmpty == false ? ms.cardName ?? ms.title : ms.title)
-            var display = name
-            if let last4 = ms.cardLastFour, !last4.isEmpty {
-                display += " 末\(last4)"
-            }
-            return AIAccountOption(id: ms.id, display: display, linkedBankId: ms.linkedBankMilestoneId)
-        }
-    }
-
-    /// 銀行帳戶清單：顯示名稱使用 bankName 或 title
-    private func aiBankDisplayNames() -> [AIAccountOption] {
-        lifeStore.milestones.compactMap { ms in
-            guard ms.category == .achievement,
-                  ms.financeSubCategory == .bank else { return nil }
-            let name = (ms.bankName?.isEmpty == false ? ms.bankName ?? ms.title : ms.title)
-            return AIAccountOption(id: ms.id, display: name, linkedBankId: nil)
-        }
-    }
-
-    private struct AIRealEstateOption {
-        let id: UUID
-        let display: String
-    }
-
-    /// 房地產清單（排除已售出）：顯示名稱使用 RealEstate.name
-    private func aiRealEstateDisplayNames() -> [AIRealEstateOption] {
-        financeStore.realEstates.compactMap { re in
-            guard re.soldDate == nil else { return nil }
-            let name = re.name.trimmingCharacters(in: .whitespaces)
-            guard !name.isEmpty else { return nil }
-            return AIRealEstateOption(id: re.id, display: name)
-        }
-    }
-
-    @MainActor
-    private func aiCommitExpense(
-        parsed: ParsedAIExpense,
-        cardDisplayNames: [AIAccountOption] = [],
-        bankDisplayNames: [AIAccountOption] = [],
-        realEstateDisplayNames: [AIRealEstateOption] = []
-    ) async throws {
-        let amount = parsed.amount ?? 0
-        guard amount > 0 else {
-            aiShowToast("找不到金額", detail: parsed.originalText ?? "AI 沒辨識出金額", isError: true)
-            return
-        }
-        let category = AIVariableCategoryMapper.map(parsed.categoryRaw) ?? .other
-        let title: String = {
-            if let t = parsed.title, !t.isEmpty { return t }
-            return category.rawValue
-        }()
-        // 飲食 / 娛樂 / 購物 / 日用品 / 醫療類支出做 Apple Maps 查詢，
-        // 抓到座標後寫入 placeLatitude / Longitude / Address，讓美食地圖能標到
-        let placeCategories: Set<VariableCategory> = [
-            .food, .entertainment, .shopping, .dailyNecessities, .medical
-        ]
-        var placeAddress: String? = nil
-        var placeLat: Double? = nil
-        var placeLon: Double? = nil
-        if placeCategories.contains(category), !title.isEmpty {
-            if let mapItem = await aiLookupPlace(query: title) {
-                placeAddress = mapItem.formattedAddress
-                placeLat = mapItem.placemark.coordinate.latitude
-                placeLon = mapItem.placemark.coordinate.longitude
-            }
-        }
-        // AI 辨識到的扣款帳戶：對回 LifeMilestone（信用卡優先；無對應再找銀行）
-        var linkedBankId: UUID? = nil
-        var linkedCardId: UUID? = nil
-        var matchedAccountDisplay: String? = nil
-        if let acc = parsed.paymentAccount?.trimmingCharacters(in: .whitespaces),
-           !acc.isEmpty {
-            if let card = cardDisplayNames.first(where: { $0.display == acc }) {
-                linkedCardId = card.id
-                linkedBankId = card.linkedBankId
-                matchedAccountDisplay = card.display
-            } else if let bank = bankDisplayNames.first(where: { $0.display == acc }) {
-                linkedBankId = bank.id
-                matchedAccountDisplay = bank.display
-            }
-        }
-        // 把本人也加進同行者：AI 通常只抽出對方（「我跟老婆」會抽出老婆），
-        // 但用「我跟」「和」「陪」「帶」等措辭時，本人也在場
-        let resolvedDiningMember = aiAppendSpeakerIfNeeded(parsed.diningMember)
-        // 對回房地產 UUID 與子分類；若 AI 配到房地產，分類強制為 .realEstate
-        var linkedRealEstateId: UUID? = nil
-        var realEstateSubCat: RealEstateExpenseCategory? = nil
-        var matchedRealEstateDisplay: String? = nil
-        if let re = parsed.realEstate?.trimmingCharacters(in: .whitespaces),
-           !re.isEmpty,
-           let match = realEstateDisplayNames.first(where: { $0.display == re }) {
-            linkedRealEstateId = match.id
-            matchedRealEstateDisplay = match.display
-            realEstateSubCat = RealEstateExpenseCategory(rawValue:
-                parsed.realEstateSubCategory?.trimmingCharacters(in: .whitespaces) ?? ""
-            ) ?? .other
-        }
-        let finalCategory: VariableCategory = (linkedRealEstateId != nil) ? .realEstate : category
-        let exp = Expense(
-            id: UUID(),
-            title: title,
-            amount: amount,
-            date: Date(),
-            expenseType: .variable,
-            variableCategory: finalCategory,
-            linkedRealEstateId: linkedRealEstateId,
-            realEstateExpenseCategory: realEstateSubCat,
-            note: parsed.note ?? "",
-            diningMember: resolvedDiningMember,
-            linkedBankMilestoneId: linkedBankId,
-            linkedBankCurrency: linkedBankId.map { aiBankCurrency(for: $0) },
-            linkedCreditCardMilestoneId: linkedCardId,
-            placeAddress: placeAddress,
-            placeLatitude: placeLat,
-            placeLongitude: placeLon
-        )
-        expenseStore.add(exp)
-        // AI 語音記帳原本只寫入 Expense 就結束，沒有比照 AddExpenseView.save() 呼叫
-        // syncBankWithdrawal／syncRealEstateVariableExpense，導致銀行帳戶餘額、房地產支出
-        // 章節帳實不符（AI 標了扣款帳戶／房地產，但對應清單與總額完全看不到這筆錢）；
-        // 這裡補上對等的同步邏輯，供 AI 記帳流程使用。
-        aiSyncBankWithdrawal(for: exp)
-        aiSyncRealEstateExpense(for: exp)
-        // 成功 toast
-        // [美化] 金額改用全 App 共用的萬/億智慧量級（ntdWanString），對齊其餘頁面金額顯示規格，
-        // 取代原本高額時會顯示成長串裸整數（如 NT$ 1200000）的寫法；純顯示調整，未變動實際存入的 exp.amount。
-        var detailParts: [String] = ["\(finalCategory.rawValue)・\(amount.ntdWanString)"]
-        if let m = resolvedDiningMember, !m.isEmpty { detailParts.append(m) }
-        if let acc = matchedAccountDisplay { detailParts.append(acc) }
-        if let re = matchedRealEstateDisplay {
-            let subText = realEstateSubCat.map { "（\($0.rawValue)）" } ?? ""
-            detailParts.append("\(re)\(subText)")
-        }
-        if placeLat != nil { detailParts.append("已標 美食地圖") }
-        aiShowToast("已記一筆：\(title)", detail: detailParts.joined(separator: "・"), isError: false)
-    }
-
-    /// AI 記帳扣款帳戶預設幣別：沿用該銀行帳戶既有存款紀錄的幣別（比照 AddExpenseView.bankCurrencies(for:)），
-    /// 而非寫死 "NT$"，避免外幣帳戶被記到錯誤幣別的桶子。
-    private func aiBankCurrency(for bankId: UUID) -> String {
-        guard let ms = lifeStore.milestones.first(where: { $0.id == bankId }) else { return "NT$" }
-        let code = (ms.bankDeposits ?? []).first(where: { !$0.isWithdrawal })?.currencyCode
-        return code ?? "NT$"
-    }
-
-    /// AI 記帳同步：寫入銀行扣款紀錄，比照 AddExpenseView.syncBankWithdrawal(for:previous:)（新記錄、無需移除舊連結）。
-    @MainActor
-    private func aiSyncBankWithdrawal(for expense: Expense) {
-        guard expense.linkedCreditCardMilestoneId == nil,
-              let bankId = expense.linkedBankMilestoneId,
-              var ms = lifeStore.milestones.first(where: { $0.id == bankId }) else { return }
-        var list = ms.bankDeposits ?? []
-        list.append(BankDeposit(
-            id: UUID(), date: expense.date, amount: expense.amount,
-            currencyCode: expense.linkedBankCurrency ?? "NT$",
-            isWithdrawal: true, linkedExpenseId: expense.id
-        ))
-        ms.bankDeposits = list
-        lifeStore.update(ms)
-    }
-
-    /// AI 記帳同步：寫入房地產已支出／水電瓦斯／變動支出章節，比照 AddExpenseView.syncRealEstateVariableExpense(realEstateId:expenseId:amount:)。
-    @MainActor
-    private func aiSyncRealEstateExpense(for expense: Expense) {
-        guard let reId = expense.linkedRealEstateId,
-              var re = financeStore.realEstates.first(where: { $0.id == reId }) else { return }
-        let category = expense.realEstateExpenseCategory ?? .other
-        switch category {
-        case .housePayment:
-            re.paidItems.append(RealEstatePaidItem(
-                id: UUID(), title: expense.title, amount: expense.amount,
-                date: expense.date, linkedExpenseId: expense.id
-            ))
-        case .utility:
-            // [v25.530] 跟記帳頁共用同一套判斷（先拿掉房子名稱，「水岸花園 電費」才不會被當成水費）
-            let inferredType = guessUtilityType(title: expense.title, note: expense.note, estateName: re.name)
-            re.utilityPayments.append(UtilityPayment(
-                type: inferredType, date: expense.date, amount: expense.amount,
-                note: expense.note, linkedExpenseId: expense.id
-            ))
-        default:
-            re.variableExpenses.append(RealEstateVariableExpense(
-                id: UUID(), category: category, name: expense.note,
-                amount: expense.amount, date: expense.date, linkedExpenseId: expense.id
-            ))
-        }
-        financeStore.update(re)
-    }
-
-    /// 取得本人姓名（中文優先，否則英文；都空 → 回空字串）
-    private func aiSpeakerName() -> String {
-        let c = lifeStore.profile.chineseName.trimmingCharacters(in: .whitespaces)
-        if !c.isEmpty { return c }
-        return lifeStore.profile.englishName.trimmingCharacters(in: .whitespaces)
-    }
-
-    /// 若 AI 抽出的 diningMember 沒包含本人，幫忙補進去（最前面）
-    private func aiAppendSpeakerIfNeeded(_ raw: String?) -> String? {
-        let speaker = aiSpeakerName()
-        // guard 失敗時以 trimmed 後的值判斷：原始 raw 可能是純空白字串，
-        // 直接回傳未 trim 的值會讓 diningMember 存到無效空白內容。
-        let trimmedRaw = raw?.trimmingCharacters(in: .whitespaces)
-        guard !speaker.isEmpty,
-              let trimmedRaw = trimmedRaw,
-              !trimmedRaw.isEmpty
-        else { return trimmedRaw?.isEmpty == true ? nil : trimmedRaw }
-        let separators = CharacterSet(charactersIn: "、,，;； ")
-        let existing = trimmedRaw
-            .components(separatedBy: separators)
-            .map { $0.trimmingCharacters(in: .whitespaces) }
-            .filter { !$0.isEmpty }
-        if existing.contains(speaker) { return trimmedRaw }
-        return "\(speaker)、\(trimmedRaw)"
-    }
-
-    /// 用 MKLocalSearch 查 AI 給出的店家名稱，帶當前位置偏向
-    private func aiLookupPlace(query: String) async -> MKMapItem? {
-        let request = MKLocalSearch.Request()
-        request.naturalLanguageQuery = query
-        if let region = LocationProvider.shared.searchRegion {
-            request.region = region
-        }
-        request.resultTypes = .pointOfInterest
-        let search = MKLocalSearch(request: request)
-        return await withCheckedContinuation { cont in
-            search.start { [search] resp, _ in
-                _ = search  // 防止 ARC 在回調完成前提前釋放 search，導致 continuation 永不 resume
-                cont.resume(returning: resp?.mapItems.first)
-            }
-        }
+        // [小工具 v3] 解析＋存檔抽到 AIExpenseCommitter（說一句共用一份），行為不變。
+        // aiBusy 要保護到存檔（含其內部的 Apple Maps 地點查詢與 expenseStore/lifeStore/financeStore
+        // 寫入）完全結束為止，否則使用者能在上一筆記帳仍在背景寫入時就按住麥克風開始下一筆，
+        // 兩個 commit 交錯執行，toast 顯示順序錯亂，畫面卻顯示「未在忙碌」造成誤導。
+        let outcome = await AIExpenseCommitter.record(text: text, expense: expenseStore,
+                                                      life: lifeStore, finance: financeStore)
+        aiBusy = false
+        aiShowToast(outcome.title, detail: outcome.detail, isError: outcome.isError)
     }
 
     @MainActor
@@ -1103,41 +825,13 @@ struct MainTabView: View {
     // [美化] 圖示改為漸層圓徽章（對齊全 App icon 圓規格：LinearGradient 填色 + stroke 邊框），
     // 取代原本裸 SF Symbol；卡片補 accent 色 overlay 邊框（0.75pt）與雙層陰影，
     // 成功/失敗兩色主題更醒目，對齊 AdminConsoleView 錯誤橫幅、OverviewView 卡片邊框設計語言。
+    // [小工具 v3] 中間那張卡搬到 AIToastCard（AIQuickVoice.swift），說一句的結果卡用同一張；畫出來一模一樣
     private func aiToastView(_ toast: AIToastInfo) -> some View {
-        let accent: Color = toast.isError ? .orange : .green
-        return VStack {
-            HStack(alignment: .top, spacing: 10) {
-                ZStack {
-                    Circle()
-                        .fill(LinearGradient(
-                            colors: [accent.opacity(0.24), accent.opacity(0.10)],
-                            startPoint: .topLeading, endPoint: .bottomTrailing
-                        ))
-                        .frame(width: 32, height: 32)
-                    Circle()
-                        .stroke(accent.opacity(0.30), lineWidth: 1)
-                        .frame(width: 32, height: 32)
-                    Image(systemName: toast.isError ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
-                        .foregroundStyle(accent)
-                        .font(.system(size: 15, weight: .semibold))
-                }
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(toast.title).font(.subheadline.weight(.semibold))
-                    Text(toast.detail).font(.caption2).foregroundStyle(.secondary).lineLimit(3)
-                }
-                Spacer(minLength: 0)
-            }
-            .padding(.horizontal, 14).padding(.vertical, 10)
-            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
-            .overlay(
-                RoundedRectangle(cornerRadius: 14)
-                    .stroke(accent.opacity(0.22), lineWidth: 0.75)
-            )
-            .shadow(color: accent.opacity(0.18), radius: 10, y: 4)
-            .shadow(color: .black.opacity(0.10), radius: 4, y: 2)
-            .padding(.horizontal, 16)
-            .padding(.top, 12)
-            .transition(.move(edge: .top).combined(with: .opacity))
+        VStack {
+            AIToastCard(title: toast.title, detail: toast.detail, isError: toast.isError)
+                .padding(.horizontal, 16)
+                .padding(.top, 12)
+                .transition(.move(edge: .top).combined(with: .opacity))
             Spacer()
         }
         .allowsHitTesting(false)
@@ -2016,6 +1710,8 @@ private struct FloatingActionButtonView: View {
 ///     0.35 秒後開 AddExpenseView——分類或車子帶好（車子跟從車子頁記一樣，AddVehicleView.makeVariablePreset），
 ///     金額欄自動聚焦、數字鍵盤跳出（focusAmountOnAppear）。都是使用者按儲存才算，這裡不寫資料。
 /// 冷啟動時網址可能比 MainTabView 先到（控制項的交接在 LifeGoodApp.init 就登記了），所以 initial: true。
+/// [v3] 再收兩件：pendingVoice（說一句 → AIQuickVoiceSession.shared.begin()，不關設定頁、不關 sheet）、
+///      pendingAddIncome（記帳台「新增收入」→ 開 AddIncomeView）。
 private struct MainTabWidgetRoutes: ViewModifier {
     @Binding var isSettingsActive: Bool
     @Binding var showAddExpense: Bool
@@ -2036,6 +1732,9 @@ private struct MainTabWidgetRoutes: ViewModifier {
         content
             .onChange(of: deepLink.routeToken) { _, _ in isSettingsActive = false }
             .onChange(of: deepLink.pendingAddExpense, initial: true) { _, _ in takeAddRequest() }
+            // [v3] 說一句、新增收入（冷啟動時網址比這裡先到，所以 initial: true）
+            .onChange(of: deepLink.pendingVoice, initial: true) { _, _ in takeVoice() }
+            .onChange(of: deepLink.pendingAddIncome, initial: true) { _, _ in takeAddIncome() }
             .sheet(item: $request) { r in addSheet(r) }
     }
 
@@ -2057,6 +1756,33 @@ private struct MainTabWidgetRoutes: ViewModifier {
         Task { @MainActor in
             try? await Task.sleep(nanoseconds: delay)
             request = r
+        }
+    }
+
+    /// [v3] 說一句：在目前這一頁直接開始聽。**不關設定頁、不關 sheet**（使用者正在打的字不會丟；
+    /// 說一句的畫面在自己的視窗，蓋在所有頁面與 sheet 上面——AIQuickVoiceSession）。
+    /// 包一層 Task { @MainActor }：AIQuickVoiceSession 是 @MainActor，這裡不管編譯器把修飾器當不當
+    /// MainActor 都叫得到（晚一個 runloop，看不出來）
+    private func takeVoice() {
+        guard deepLink.takeVoice() else { return }
+        Task { @MainActor in
+            AIQuickVoiceSession.shared.begin()
+        }
+    }
+
+    /// [v3] 記帳台「新增收入」：已經切到收支「收入」頁（AppNavigation.goToIncome），這裡開 AddIncomeView。
+    /// 開著的新增收入／支出（FAB 的、小工具的）先收掉，延遲照 takeAddRequest（有開著 0.6 秒、沒有 0.15 秒）。
+    /// AddIncomeView 沒有自動聚焦的參數，這版不做（主控定案 10）
+    private func takeAddIncome() {
+        guard deepLink.takeAddIncome() else { return }
+        let wasShowing = showAddExpense || showAddIncome || request != nil
+        showAddExpense = false
+        showAddIncome = false
+        request = nil
+        let delay: UInt64 = wasShowing ? 600_000_000 : 150_000_000
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: delay)
+            showAddIncome = true
         }
     }
 

@@ -9,6 +9,12 @@ import Foundation
 //      bills_v1.json（接下來要繳）；隱藏金額開關（App Group 的 UserDefaults）。
 //      money 的新欄位一律是選填（舊檔解得開、schema 不升），App 一打開就補齊。
 //
+// [v3] 加了：旅行小工具、控制項「說一句」「記到…」的 kind；money 的車子選單（vehicleOptions）、
+//      「記到哪裡」的選項（recordTargets）、記帳台照設定挑卡（deskTiles(choiceIDs:)）；
+//      life 的旅行（trips、tripPhase）、隔天每一種的第一場（nextDayFirstStops）、照設定篩行程（filtered(kinds:)）；
+//      bills 的鎖定畫面類別字（lockTitle）與範圍（WidgetBillScope）。新欄位一律選填、schema 不升。
+//      小工具長按設定用的 AppEnum／AppEntity 在 WidgetConfigTypes.swift（兩個 target 都編）。
+//
 // 分工跟靈動島一樣：App 把小工具要顯示的「字」與「數字」算好、格式化好，寫成 App Group 裡的
 // 小檔案；小工具只讀這些檔、照著畫。**小工具裡不做任何金額計算與格式化**——「NT$4.6萬」
 // 「每天 NT$2,402」「已花 62%」全部是 App 用自己那套函式（MoneyFormat／ntdWanString）組好的字。
@@ -63,10 +69,22 @@ enum WidgetKind {
     /// 控制項「隱藏金額」（ControlWidgetToggle）
     static let controlHideAmounts = "com.lifegood.app.control.hideAmounts"
 
+    // MARK: [v3]
+
+    /// 旅行（systemSmall、systemMedium、accessoryRectangular）：出發倒數、旅途中第幾天＋下一站。讀 life_v1.json 的 trips
+    static let travel = "LifeGoodTravel"
+    /// 控制項「說一句」（ControlWidgetButton → LifeGoodOpenIntent(url: WidgetLink.voiceRecord)）
+    static let controlVoice = "com.lifegood.app.control.voice"
+    /// 控制項「記到…」（AppIntentControlConfiguration：選一個變動分類，或一台車＋車子分類）
+    static let controlRecordTo = "com.lifegood.app.control.recordTo"
+
     /// money_v1.json 變了要重畫的（App 的寫手、一按就記的按鈕都用這一組）
     static let moneyKinds = [moneyLeft, ledgerDesk, quickRecord, lockSpent]
-    /// life_v1.json 變了要重畫的
-    static let lifeKinds = [today, lockNextStop]
+    /// [v3] money_v1.json 變了要重畫的控制項（「記到…」的「Taycan 電費」從 money 快照讀）。
+    /// 用 WidgetRefresh.reloadControls(_:)
+    static let moneyControlKinds = [controlRecordTo]
+    /// life_v1.json 變了要重畫的（[v3] 加旅行）
+    static let lifeKinds = [today, lockNextStop, travel]
     /// bills_v1.json 變了要重畫的
     static let billsKinds = [bills, lockNextBill]
 }
@@ -290,6 +308,13 @@ struct WidgetMoneySnapshot: Codable, Equatable, WidgetSnapshotPayload {
     /// 一按就記的常記範本：近 60 天「同名稱＋同金額＋同分類（＋同車）」出現 ≥3 次，最多 4 個，
     /// 次數多到少。沒有符合的是空陣列（小工具寫說明）；nil＝v1 舊檔
     var templates: [WidgetQuickTemplate]? = nil
+
+    // MARK: [v3] 以下也是選填（v2 舊檔沒有）
+
+    /// 沒賣掉的車，依 FinanceStore.vehicles 的順序，各帶它可以記的車子分類
+    ///（VehicleVariableCategory.categories(for: powerType) 的順序）。記帳台按鈕、控制項「記到…」的選單。
+    /// 沒有車是空陣列；nil＝v2 以前的舊檔（選單只有分類）
+    var vehicleOptions: [WidgetVehicleOption]? = nil
 }
 
 extension WidgetMoneySnapshot {
@@ -337,6 +362,97 @@ extension WidgetMoneySnapshot {
         }
         tiles.append(WidgetDeskTile.addExpense)
         return tiles
+    }
+
+    // MARK: [v3] 記到哪裡、記帳台照設定挑卡
+
+    /// 「記到哪裡」的全部選項：14 個變動分類（照 categories 的順序），再接每台車的每個車子分類
+    ///（照 vehicleOptions 的順序）。v1／v2 舊檔沒有 vehicleOptions 時只有分類；沒有 categories 時只有車。
+    /// 記帳台按鈕（WidgetDeskButtonEntity）、控制項「記到…」（WidgetRecordTargetEntity）的選單都從這裡來。
+    func recordTargets() -> [WidgetRecordTarget] {
+        var out: [WidgetRecordTarget] = []
+        for c in categories ?? [] {
+            out.append(WidgetRecordTarget(id: WidgetDeskChoice.categoryID(c.key), title: c.title, icon: c.icon,
+                                          top: c.top, bottom: c.bottom, tint: c.tint,
+                                          categoryKey: c.key, vehicleId: nil, vehicleCategoryKey: nil))
+        }
+        for v in vehicleOptions ?? [] {
+            for cat in v.categories {
+                out.append(WidgetRecordTarget(id: WidgetDeskChoice.vehicleID(v.vehicleId, cat.key),
+                                              title: cat.title, icon: cat.icon,
+                                              top: v.top, bottom: v.bottom, tint: v.tint,
+                                              categoryKey: nil, vehicleId: v.vehicleId,
+                                              vehicleCategoryKey: cat.key))
+            }
+        }
+        return out
+    }
+
+    /// 用設定存的 id 找回那個選項；車子賣掉、刪掉（快照裡沒有了）回 nil
+    func recordTarget(id: String) -> WidgetRecordTarget? {
+        recordTargets().first { $0.id == id }
+    }
+
+    /// 記帳台右半的卡，照長按設定挑：choiceIDs[0…2] 是按鈕 1／2／3 存的 id
+    ///（WidgetDeskButtonEntity.id；nil、"auto"、快照裡找不到的 id 都當「自動」）。
+    ///
+    /// • 指定的：說一句（紫）、新增收入（綠）、某個變動分類、某台車的某個車子分類
+    /// • 自動的：照 deskTiles() 的挑法依序補（最常記的分類、車子卡……），已經被指定的同一個目的地跳過
+    /// • 第 4 張固定「＋ 記一筆」
+    /// 三格都自動時，結果（除了 id）跟 deskTiles() 一模一樣——升級後沒改設定的記帳台外觀不變。
+    /// 回傳的 id 前面加了格子編號（「s0-cat-飲食」），同一個分類放兩格 ForEach 也不會撞 id。
+    func deskTiles(choiceIDs: [String?]) -> [WidgetDeskTile] {
+        let targets = recordTargets()
+        var picked: [WidgetDeskTile?] = []
+        for slot in 0..<WidgetDeskChoice.slotCount {
+            let raw: String? = slot < choiceIDs.count ? choiceIDs[slot] : nil
+            picked.append(Self.explicitDeskTile(raw, targets: targets))
+        }
+        var taken = Set<String>()
+        for tile in picked {
+            if let tile { taken.insert(tile.url.absoluteString) }
+        }
+        var pool: [WidgetDeskTile] = autoDeskPool().filter { !taken.contains($0.url.absoluteString) }
+        var out: [WidgetDeskTile] = []
+        for (slot, choice) in picked.enumerated() {
+            var tile: WidgetDeskTile
+            if let choice {
+                tile = choice
+            } else if !pool.isEmpty {
+                tile = pool.removeFirst()
+            } else {
+                continue
+            }
+            tile.id = "s\(slot)-" + tile.id
+            out.append(tile)
+        }
+        out.append(WidgetDeskTile.addExpense)
+        return out
+    }
+
+    /// 自動格子的候選，照現在的挑法排：deskTiles() 的前三張（不含「記一筆」），
+    /// 再接 topCategoryKeys 裡還沒出現的分類（指定的格子拿走了幾張，自動的才補得滿）
+    private func autoDeskPool() -> [WidgetDeskTile] {
+        var out: [WidgetDeskTile] = deskTiles().filter { $0.style != .add }
+        var seen = Set<String>()
+        for tile in out { seen.insert(tile.url.absoluteString) }
+        for key in topCategoryKeys ?? [] {
+            guard let c = category(forKey: key) else { continue }
+            let tile = WidgetDeskTile.category(c)
+            if seen.insert(tile.url.absoluteString).inserted {
+                out.append(tile)
+            }
+        }
+        return out
+    }
+
+    /// 一格的指定值 → 卡；自動（nil／"auto"）或找不到 → nil
+    private static func explicitDeskTile(_ raw: String?, targets: [WidgetRecordTarget]) -> WidgetDeskTile? {
+        guard let id = raw, id != WidgetDeskChoice.autoID else { return nil }
+        if id == WidgetDeskChoice.voiceID { return WidgetDeskTile.voice }
+        if id == WidgetDeskChoice.incomeID { return WidgetDeskTile.addIncome }
+        guard let target = targets.first(where: { $0.id == id }) else { return nil }
+        return WidgetDeskTile.target(target)
     }
 }
 
@@ -420,6 +536,10 @@ struct WidgetDeskTile: Equatable, Identifiable {
         case vehicle
         /// 「＋ 記一筆」（白 78% 底、App 藍圖示；顏色由小工具的 palette 決定，不用 top／bottom）
         case add
+        /// [v3] 🎤 說一句（紫漸層，跟 App 的 AI 麥克風同色；畫法同分類卡）
+        case voice
+        /// [v3] 新增收入（綠漸層，跟 App「新增收入」按鈕同色；畫法同分類卡）
+        case income
     }
 
     var id: String
@@ -448,6 +568,104 @@ struct WidgetDeskTile: Equatable, Identifiable {
     static let addExpense = WidgetDeskTile(id: "add", style: .add, title: "記一筆", icon: "plus",
                                            top: 0xFFFFFF, bottom: 0xFFFFFF, tint: 0x2F6FE0,
                                            url: WidgetLink.addExpense())
+
+    // MARK: [v3]
+
+    /// 🎤 說一句：打開 App 直接開始聽（lifegood://add/expense?voice=1&src=widget）。
+    /// 顏色＝App 浮動麥克風的漸層（MainTabView aiMicButton：rgb(0.55,0.35,0.95) → rgb(0.40,0.20,0.85)）
+    static let voice = WidgetDeskTile(id: WidgetDeskChoice.voiceID, style: .voice, title: "說一句",
+                                      icon: "mic.fill", top: 0x8C59F2, bottom: 0x6633D9, tint: 0x6633D9,
+                                      url: WidgetLink.voiceRecord)
+
+    /// 新增收入（lifegood://add/income?src=widget）。
+    /// 顏色＝App FAB「新增收入」的漸層（rgb(0.16,0.74,0.50) → rgb(0.07,0.50,0.38)）
+    static let addIncome = WidgetDeskTile(id: WidgetDeskChoice.incomeID, style: .income, title: "新增收入",
+                                          icon: "banknote.fill", top: 0x29BD80, bottom: 0x128061, tint: 0x128061,
+                                          url: WidgetLink.addIncome)
+
+    /// 「記到哪裡」的一個選項 → 卡（分類卡或車子卡；網址 WidgetRecordTarget.url）
+    static func target(_ t: WidgetRecordTarget) -> WidgetDeskTile {
+        WidgetDeskTile(id: t.id, style: t.isVehicle ? .vehicle : .category, title: t.title, icon: t.icon,
+                       top: t.top, bottom: t.bottom, tint: t.tint, url: t.url)
+    }
+}
+
+// MARK: - [v3] 記到哪裡（記帳台按鈕、控制項「記到…」）
+
+/// 一台沒賣掉的車與它可以記的車子分類（App 寫進 money 快照）
+struct WidgetVehicleOption: Codable, Equatable, Identifiable {
+    var vehicleId: UUID
+    /// 「Taycan」（App 去頭尾空白；空的寫「車子」）
+    var name: String
+    /// VehicleVariableCategory.categories(for: 這台車的 powerType)，照那個順序
+    var categories: [WidgetVehicleCategoryOption]
+    /// 青綠漸層（跟 WidgetVehicleCard 同一組：0x7FE3D0 → 0x1A9C8C，分類色 0x138A7E）
+    var top: UInt32
+    var bottom: UInt32
+    var tint: UInt32
+
+    var id: UUID { vehicleId }
+}
+
+/// 一台車的一個車子分類
+struct WidgetVehicleCategoryOption: Codable, Equatable, Identifiable {
+    /// VehicleVariableCategory.rawValue（「電費」）：原樣帶回網址 vcat=
+    var key: String
+    /// 選單、卡、控制項上的字（App 組好：「Taycan 電費」）
+    var title: String
+    /// SF Symbol（VehicleVariableCategory.icon：電費 bolt.fill、停車 parkingsign.circle…）
+    var icon: String
+
+    var id: String { key }
+}
+
+/// 「記到哪裡」的一個選項：一個變動分類，或一台車＋一個車子分類。
+/// 不存檔，由 money 快照組（WidgetMoneySnapshot.recordTargets()）。點了開新增支出、分類或車子帶好、數字鍵盤跳出。
+struct WidgetRecordTarget: Equatable, Identifiable {
+    /// 設定存的 id：分類「cat:飲食」、車子「car:<車 UUID>:電費」（WidgetDeskChoice.categoryID／vehicleID）
+    var id: String
+    /// 「飲食」「Taycan 電費」
+    var title: String
+    var icon: String
+    var top: UInt32
+    var bottom: UInt32
+    var tint: UInt32
+    /// 變動分類 key（VariableCategory.rawValue）；車子的是 nil
+    var categoryKey: String?
+    /// 車子的才有
+    var vehicleId: UUID?
+    /// VehicleVariableCategory.rawValue；車子的才有
+    var vehicleCategoryKey: String?
+
+    var isVehicle: Bool { vehicleId != nil }
+
+    /// lifegood://add/expense?cat=…／?vehicle=…&vcat=…（&src=widget）——跟 v2 記帳台的卡同一種網址
+    var url: URL {
+        WidgetLink.addExpense(categoryKey: categoryKey, vehicleId: vehicleId,
+                              vehicleCategoryKey: vehicleCategoryKey)
+    }
+}
+
+/// 記帳台按鈕 1／2／3 的選擇。長按設定存的是 id 字串（WidgetDeskButtonEntity.id），這裡是 id 的規則。
+enum WidgetDeskChoice {
+    /// 可以換的格子數（第 4 格「＋ 記一筆」固定，J:208）
+    static let slotCount = 3
+    /// 自動：照現在的挑法（預設）
+    static let autoID = "auto"
+    /// 🎤 說一句
+    static let voiceID = "voice"
+    /// 新增收入
+    static let incomeID = "income"
+
+    /// 一個變動分類：「cat:飲食」
+    static func categoryID(_ key: String) -> String {
+        "cat:" + key
+    }
+
+    /// 一台車的一個車子分類：「car:<UUID>:電費」
+    static func vehicleID(_ vehicleId: UUID, _ categoryKey: String) -> String {
+        "car:" + vehicleId.uuidString + ":" + categoryKey
+    }
 }
 
 // MARK: - 今天（life_v1.json）
@@ -534,6 +752,10 @@ struct WidgetLifeDay: Codable, Equatable, Identifiable {
     var hidesMeetings: Bool
     /// 隔天的第一場（「今天的行程結束了／明天 08:30／早會」用）；隔天沒有行程是 nil
     var nextDayFirstStop: WidgetStop?
+    /// [v3] 隔天**每一種**行程的第一場（最多 4 個，依開始時間排好；隔天沒有行程是空陣列）。
+    /// 「今天」設定關掉某幾種時，「明天 08:30 …」要從留下的種類挑（WidgetLifeSnapshot.filtered(kinds:)）。
+    /// v2 以前的舊檔是 nil
+    var nextDayFirstStops: [WidgetStop]? = nil
 
     var id: String { dayKey }
 
@@ -553,6 +775,53 @@ struct WidgetLifeDay: Codable, Equatable, Identifiable {
     func remainingStops(at now: Date) -> [WidgetStop] {
         stops.filter { $0.stop.end > now }
     }
+
+    // MARK: [v3]
+
+    /// 旅途中的下一站：還沒開始的第一個旅遊景點（kind == .trip）；今天的景點都開始了是 nil
+    func nextTripStop(at now: Date) -> WidgetStop? {
+        stops.first { $0.stop.kind == .trip && $0.stop.start > now }
+    }
+
+    /// 今天還沒走完的旅遊景點（進行中＋還沒開始），依開始時間
+    func remainingTripStops(at now: Date) -> [WidgetStop] {
+        stops.filter { $0.stop.kind == .trip && $0.stop.end > now }
+    }
+
+    /// 只留 kinds 這幾種行程（「今天」小工具的設定）。
+    /// 全天的事：我的行事曆／系統行事曆的全日事件跟著那一種藏；生日、紀念日、兼任職務、里程碑照常（WidgetAllDayKind.stopKind）。
+    /// 隔天的第一場：從 nextDayFirstStops 挑留下的種類；舊檔沒有這欄時，原本那一場的種類有留才保留。
+    /// ⚠️ 快照裡「隔天那一份」也在的話，WidgetLifeSnapshot.filtered(kinds:) 會用它重挑（比較準），小工具請用那一支。
+    func filtered(kinds: Set<TimelineStopKind>) -> WidgetLifeDay {
+        var d = self
+        d.stops = stops.filter { kinds.contains($0.stop.kind) }
+        d.allDay = allDay.filter { item in
+            guard let k = item.kind.stopKind else { return true }
+            return kinds.contains(k)
+        }
+        if let firsts = nextDayFirstStops {
+            let kept: [WidgetStop] = firsts.filter { kinds.contains($0.stop.kind) }
+            d.nextDayFirstStops = kept
+            d.nextDayFirstStop = kept.first
+        } else if let first = nextDayFirstStop, !kinds.contains(first.stop.kind) {
+            d.nextDayFirstStop = nil
+        }
+        return d
+    }
+}
+
+extension WidgetAllDayKind {
+    /// [v3] 「今天」設定關掉某一種行程時，要跟著藏的全天的事屬於哪一種：
+    /// 我的行事曆的全日事件跟「我的行事曆」、系統行事曆的全日事件跟「系統行事曆」；
+    /// 生日、結婚紀念日、兼任職務、里程碑不屬於哪一種行程，是 nil（一律照常顯示）
+    var stopKind: TimelineStopKind? {
+        switch self {
+        case .personal:      return .personal
+        case .appleCalendar: return .appleCalendar
+        case .birthday, .anniversary, .sideRole, .milestone:
+            return nil
+        }
+    }
 }
 
 struct WidgetLifeSnapshot: Codable, Equatable, WidgetSnapshotPayload {
@@ -566,6 +835,51 @@ struct WidgetLifeSnapshot: Codable, Equatable, WidgetSnapshotPayload {
     var validUntil: Date
     /// [0]＝今天、[1]＝明天
     var days: [WidgetLifeDay]
+
+    // MARK: [v3] 以下選填（v2 以前的舊檔沒有）
+
+    /// 旅行小工具：還沒回來的旅行（進行中＋接下來的），依出發時間排好，最多 3 趟。
+    /// **不受 validUntil 管**：倒數、第幾天由小工具用日期算，App 好幾天沒開也照樣對。
+    /// 沒有任何旅行是空陣列；nil＝舊檔
+    var trips: [WidgetTrip]? = nil
+}
+
+// MARK: - [v3] 旅行
+
+/// 一趟旅行。App 從 LifeStore.tripPlans 算好（封面不做）；小工具只用日期算「還有幾天」「第幾天」。
+struct WidgetTrip: Codable, Equatable, Identifiable {
+    var id: UUID
+    /// 行程名（TripPlan.displayTitle 去頭尾空白；空的寫「旅行」）
+    var title: String
+    /// 出發時間（含時分，TripPlan.startDate）
+    var startDate: Date
+    /// 回程：最後一站離開的時間（TripPlan.endDate）
+    var endDate: Date
+    /// 出發那一天的 00:00（Calendar.current）
+    var firstDay: Date
+    /// 共幾天（TripPlan.dayCount，至少 1）
+    var dayCount: Int
+    /// 最後一天的隔天 00:00（＝firstDay＋dayCount 天）：過了這個時間就算回來了
+    var afterLastDay: Date
+    /// 行前準備「要帶去的東西」打勾幾條／共幾條（TripPlan.checklistProgress(.packing)）。
+    /// packingTotal 是 0 就不寫「行李 8/15」
+    var packingDone: Int
+    var packingTotal: Int
+    /// 點了開那一趟（WidgetLink.trip(id) 的 absoluteString）
+    var link: String
+
+    var url: URL { URL(string: link) ?? WidgetLink.trip(id) }
+}
+
+/// 旅行小工具這一刻要畫哪一種（WidgetLifeSnapshot.tripPhase(at:)）
+enum WidgetTripPhase: Equatable {
+    /// 沒有下一趟（舊檔、沒有旅行、都回來了）：「還沒有排下一趟旅行」。
+    /// 不叫 none：跟 Optional.none 撞名會被編譯器警告、用錯
+    case noTrip
+    /// 還沒出發。daysUntil＝今天到出發那天差幾天（至少 1；出發那天就算旅途中第 1 天）
+    case upcoming(WidgetTrip, daysUntil: Int)
+    /// 旅途中。day＝第幾天（1 起算，已夾在 1…dayCount）
+    case during(WidgetTrip, day: Int)
 }
 
 extension WidgetLifeSnapshot {
@@ -583,6 +897,45 @@ extension WidgetLifeSnapshot {
     func showsUpdatedAt(at date: Date) -> Bool {
         date.timeIntervalSince(generatedAt) > WidgetFreshness.lifeShowUpdatedAfter
     }
+
+    // MARK: [v3]
+
+    /// 四種行程全部（「今天」設定四個開關都開）
+    static let allStopKinds: Set<TimelineStopKind> = [.meeting, .personal, .appleCalendar, .trip]
+
+    /// 「今天」小工具的設定：只留 kinds 這幾種行程（每一天都篩，見 WidgetLifeDay.filtered(kinds:)）。
+    /// 四種都留＝原樣回傳（跟 v2 一模一樣）。快照裡有隔天那一份的，「明天的第一場」直接從隔天那一份
+    ///（篩過的）挑，最準；最後一天才靠 nextDayFirstStops。trips 不受影響。
+    /// provider 先篩再排 timeline（倒數、換場都照篩過的算）。
+    func filtered(kinds: Set<TimelineStopKind>) -> WidgetLifeSnapshot {
+        if kinds.isSuperset(of: Self.allStopKinds) { return self }
+        var out = self
+        var newDays: [WidgetLifeDay] = []
+        for (i, day) in days.enumerated() {
+            var d = day.filtered(kinds: kinds)
+            if i + 1 < days.count {
+                d.nextDayFirstStop = days[i + 1].stops.first { kinds.contains($0.stop.kind) }
+            }
+            newDays.append(d)
+        }
+        out.days = newDays
+        return out
+    }
+
+    /// 旅行小工具這一刻要畫哪一種。trips 已依出發時間排好；挑第一趟還沒回來的（afterLastDay > now）。
+    /// 出發那一天 00:00 起就算旅途中第 1 天（跟 App「旅遊期間」以天為單位的判斷一樣，LifeStore.tripPlan(covering:)）。
+    /// 日差是整數、不是金額，小工具可以算（主控定案）。
+    func tripPhase(at now: Date) -> WidgetTripPhase {
+        let list: [WidgetTrip] = trips ?? []
+        guard let trip = list.first(where: { $0.afterLastDay > now }) else { return .noTrip }
+        if now < trip.firstDay {
+            let n = WidgetDateText.daysFrom(now, to: trip.firstDay)
+            return .upcoming(trip, daysUntil: max(1, n))
+        }
+        let day = WidgetDateText.daysFrom(trip.firstDay, to: now) + 1
+        let total = max(trip.dayCount, 1)
+        return .during(trip, day: min(max(day, 1), total))
+    }
 }
 
 // MARK: - [v2] 接下來要繳（bills_v1.json）
@@ -599,6 +952,38 @@ enum WidgetBillKind: String, Codable {
     case premium
     /// 保單滿期（會領回來的錢）
     case maturity
+
+    /// [v3] 鎖定畫面「下一筆要繳」關掉「顯示名稱」時的類別字（App 沒寫 WidgetBill.lockTitle 的舊檔才用）
+    var label: String {
+        switch self {
+        case .fixed:    return "固定支出"
+        case .mortgage: return "房貸"
+        case .vehicle:  return "車子費用"
+        case .premium:  return "保費"
+        case .maturity: return "保單滿期"
+        }
+    }
+
+    /// [v3] 記帳的固定支出（其他四種是理財的）
+    var isLedger: Bool { self == .fixed }
+}
+
+/// [v3] 「接下來要繳」的範圍（長按設定 WidgetBillScopeOption → 這個）
+enum WidgetBillScope: String {
+    /// 記帳＋理財合一張（預設，跟 v2 一樣）
+    case all
+    /// 只看記帳的固定支出（Netflix、中華電信…）
+    case ledger
+    /// 只看理財（房貸、車子、保費、滿期）
+    case finance
+
+    func includes(_ kind: WidgetBillKind) -> Bool {
+        switch self {
+        case .all:     return true
+        case .ledger:  return kind.isLedger
+        case .finance: return !kind.isLedger
+        }
+    }
 }
 
 /// 某一天要扣的一筆。記帳的固定支出和理財的房貸、車貸、保費合成一份、已經去重。
@@ -628,9 +1013,18 @@ struct WidgetBill: Codable, Equatable, Identifiable {
     var tintDark: UInt32
     /// 點這一列開哪裡（WidgetLink 組好的網址字串）
     var link: String
+    /// [v3] 鎖定畫面關掉「顯示名稱」時寫的類別字（App 組好：固定支出寫分類「訂閱服務」「電信費」…，
+    /// 房貸「房貸」、車子「車貸／保養／車子費用」、保費「保費」、滿期「保單滿期」）。v2 舊檔是 nil
+    var lockTitle: String? = nil
 
     /// link 解不開時退回固定支出頁
     var url: URL { URL(string: link) ?? WidgetLink.fixedExpenses }
+
+    /// [v3] 鎖定畫面不顯示名稱時用的字：lockTitle，沒有（舊檔、空字串）就 kind.label
+    var lockedTitle: String {
+        let t = (lockTitle ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        return t.isEmpty ? kind.label : t
+    }
 }
 
 struct WidgetBillsSnapshot: Codable, Equatable, WidgetSnapshotPayload {
@@ -652,17 +1046,19 @@ extension WidgetBillsSnapshot {
     static let listDays = 30
 
     /// 從 now 那一天（含）起 days 天內的（今天扣的也算）。過了的自己掉出去，不用 App 重寫。
-    func upcoming(at now: Date, days: Int = WidgetBillsSnapshot.listDays) -> [WidgetBill] {
+    /// [v3] scope：長按設定的範圍（預設全部，跟 v2 一樣）
+    func upcoming(at now: Date, days: Int = WidgetBillsSnapshot.listDays,
+                  scope: WidgetBillScope = .all) -> [WidgetBill] {
         let cal = Calendar.current
         let today = cal.startOfDay(for: now)
         guard let end = cal.date(byAdding: .day, value: days, to: today) else { return [] }
-        return items.filter { $0.dueDate >= today && $0.dueDate < end }
+        return items.filter { $0.dueDate >= today && $0.dueDate < end && scope.includes($0.kind) }
     }
 
-    /// 下一筆（不限 30 天，「30 天內沒有要扣的／下一筆 11/15 …」用）
-    func next(at now: Date) -> WidgetBill? {
+    /// 下一筆（不限 30 天，「30 天內沒有要扣的／下一筆 11/15 …」用）。[v3] scope 同上
+    func next(at now: Date, scope: WidgetBillScope = .all) -> WidgetBill? {
         let today = Calendar.current.startOfDay(for: now)
-        return items.first(where: { $0.dueDate >= today })
+        return items.first(where: { $0.dueDate >= today && scope.includes($0.kind) })
     }
 
     /// 過了 horizonEnd：清單已經不完整，只能請使用者打開 App

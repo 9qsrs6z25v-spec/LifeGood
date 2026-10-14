@@ -11,6 +11,7 @@ import Foundation
 //   • templates：一按就記的常記範本（同名稱＋同金額＋同分類〔＋同車〕近 60 天 ≥3 次，最多 4 個）
 //   • nextMonthBoard：月底之後接的下個月 1–7 號，那一天打開 App 會算出來的 OverviewBoardData
 //   • decorate：每一天補上 todayText、todayCount、incomeText、masked（隱藏金額版）、lock（鎖定畫面版）
+//   • [v3] vehicleOptions：沒賣掉的車＋各自的車子分類（記帳台按鈕、控制項「記到…」的選單，v3 brief G1-5）
 //
 // 規矩跟寫手一樣：只讀不寫任何 store；金額字只用 MoneyFormat.short／percent、ExpenseStore.displayAmountText。
 // 輸出必須是「同樣的資料永遠排成同樣的順序」：快照內容沒變就不寫檔、不叫重畫（WidgetSnapshotStore.write），
@@ -84,6 +85,24 @@ enum WidgetMoneyExtras {
         return WidgetVehicleCard(vehicleId: pick.id, vehicleName: name, categoryKey: cat.rawValue,
                                  title: title, icon: cat.icon,
                                  top: carTop, bottom: carBottom, tint: carTint)
+    }
+
+    // MARK: - [v3] 車子選單（記帳台按鈕、控制項「記到…」）
+
+    /// [v3] 沒賣掉的車（finance.vehicles 順序）＋各自可以記的車子分類
+    ///（VehicleVariableCategory.categories(for: powerType) 的順序）。沒賣掉的判斷同 vehicleCard。
+    /// 名字去頭尾空白，空的寫「車子」；選單字「Taycan 電費」由這裡組好（小工具裡沒有任何車名、分類的字面字串）
+    static func vehicleOptions(finance: FinanceStore, now: Date) -> [WidgetVehicleOption] {
+        finance.vehicles.filter { !$0.isSold(asOf: now) }.map { (v: Vehicle) -> WidgetVehicleOption in
+            let trimmed = v.name.trimmingCharacters(in: .whitespacesAndNewlines)
+            let name = trimmed.isEmpty ? "車子" : trimmed
+            let cats = VehicleVariableCategory.categories(for: v.powerType).map {
+                (c: VehicleVariableCategory) -> WidgetVehicleCategoryOption in
+                WidgetVehicleCategoryOption(key: c.rawValue, title: name + " " + c.rawValue, icon: c.icon)
+            }
+            return WidgetVehicleOption(vehicleId: v.id, name: name, categories: cats,
+                                       top: carTop, bottom: carBottom, tint: carTint)
+        }
     }
 
     /// 那台車近 60 天最常記的車子分類（只數那台車可用的分類；同數取 categories(for:) 裡前面的）

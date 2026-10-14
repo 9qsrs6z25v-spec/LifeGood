@@ -1,5 +1,6 @@
 import SwiftUI
 import WidgetKit
+import AppIntents
 
 // MARK: - 今天（v25.545，只屬於 LifeGoodWidgets）
 //
@@ -26,16 +27,26 @@ import WidgetKit
 // 旅遊期間（使用者過幾天出國）：景點是 kind == .trip 的 stop（App 的 TodayAgenda 挑的，
 // 跟靈動島同一段），這裡照一般行程畫：小飛機記號、站名、點了開那一趟。
 //
+// [v3] 長按可設定（AppIntentConfiguration＋TodayConfigIntent，WidgetConfigs.swift；kind 不變）：
+//   • 顯示哪幾種：部屬會議／我的行事曆／系統行事曆／旅遊（預設全開＝v2）。provider 讀快照後**先篩再排 timeline**
+//    （WidgetLifeSnapshot.filtered(kinds:)：全天的事的我的行事曆／系統行事曆跟著藏，生日、紀念日照常；
+//     「明天 08:30 …」從留下的種類挑）。四種全關＝「今天沒有排行程」。
+//   • 鎖著時（StandBy）顯示主題：預設開（主控定案 1＝v2 的 lockedSurfaceTitle）；關掉回到 v1 的類別字
+//    （WidgetStop.lockTitle：「部屬會議」「會議」「系統行事曆」；旅遊照樣寫站名）。部屬姓名不管開關都不寫。
+//
 // 型別（internal 的都帶 TodayWidget 前綴；畫面零件 private）：
 //   TodayWidget、TodayWidgetEntry、TodayWidgetProvider、TodayWidgetTimeline、
 //   TodayWidgetModel、TodayWidgetRow、TodayWidgetChip、TodayWidgetAxis、TodayWidgetAxisDot、
 //   TodayWidgetSample、TodayWidgetEntryView
+//   [v3] 設定在 WidgetConfigs.swift 的 TodayConfigIntent
 
 // MARK: - Widget
 
 struct TodayWidget: Widget {
     var body: some WidgetConfiguration {
-        StaticConfiguration(kind: WidgetKind.today, provider: TodayWidgetProvider()) { entry in
+        // [v3] StaticConfiguration → AppIntentConfiguration（kind 不變：已經放好的升級後用預設值、外觀一樣）
+        AppIntentConfiguration(kind: WidgetKind.today, intent: TodayConfigIntent.self,
+                               provider: TodayWidgetProvider()) { entry in
             TodayWidgetEntryView(entry: entry)
         }
         .configurationDisplayName("今天")
@@ -49,42 +60,54 @@ struct TodayWidget: Widget {
 struct TodayWidgetEntry: TimelineEntry {
     /// 畫面一律拿這個當「現在」（不在 View 裡呼叫 Date()）
     let date: Date
-    /// nil＝還沒打開過新版 App（或檔案讀不到）
+    /// nil＝還沒打開過新版 App（或檔案讀不到）。
+    /// [v3] 已經照長按設定篩過種類（provider 篩，View 不再篩）
     let snapshot: WidgetLifeSnapshot?
+    /// [v3] StandBy 寫主題（true，預設＝v2）或類別字（false）。placeholder／預覽是 true
+    var showsSubjectWhenLocked: Bool = true
 }
 
-struct TodayWidgetProvider: TimelineProvider {
+/// [v3] TimelineProvider → AppIntentTimelineProvider（多讀長按設定；排程照舊，拿篩過的快照排）
+struct TodayWidgetProvider: AppIntentTimelineProvider {
     func placeholder(in context: Context) -> TodayWidgetEntry {
         TodayWidgetSample.entry(now: Date())
     }
 
-    func getSnapshot(in context: Context, completion: @escaping (TodayWidgetEntry) -> Void) {
+    func snapshot(for configuration: TodayConfigIntent, in context: Context) async -> TodayWidgetEntry {
         if context.isPreview {
             // 小工具庫裡的預覽：寫死的樣本（10:05、下一場 10:30）
-            completion(TodayWidgetSample.entry(now: Date()))
-            return
+            return TodayWidgetSample.entry(now: Date())
         }
-        let snapshot = WidgetSnapshotStore.read(WidgetLifeSnapshot.self)
-        completion(TodayWidgetEntry(date: Date(), snapshot: snapshot))
+        let snapshot = Self.readFiltered(configuration)
+        return TodayWidgetEntry(date: Date(), snapshot: snapshot,
+                                showsSubjectWhenLocked: configuration.standBySubject)
     }
 
-    func getTimeline(in context: Context, completion: @escaping (Timeline<TodayWidgetEntry>) -> Void) {
+    func timeline(for configuration: TodayConfigIntent, in context: Context) async -> Timeline<TodayWidgetEntry> {
         let now = Date()
-        guard let snapshot = WidgetSnapshotStore.read(WidgetLifeSnapshot.self) else {
+        let subject: Bool = configuration.standBySubject
+        guard let snapshot = Self.readFiltered(configuration) else {
             // App 第一次寫完快照會叫重畫，這裡不用定時
-            let only = TodayWidgetEntry(date: now, snapshot: nil)
-            completion(Timeline(entries: [only], policy: .never))
-            return
+            let only = TodayWidgetEntry(date: now, snapshot: nil, showsSubjectWhenLocked: subject)
+            return Timeline(entries: [only], policy: .never)
         }
         let plan = TodayWidgetTimeline.plan(snapshot: snapshot, now: now)
-        let entries: [TodayWidgetEntry] = plan.dates.map { TodayWidgetEntry(date: $0, snapshot: snapshot) }
+        let entries: [TodayWidgetEntry] = plan.dates.map {
+            TodayWidgetEntry(date: $0, snapshot: snapshot, showsSubjectWhenLocked: subject)
+        }
         let policy: TimelineReloadPolicy
         if let reloadAt = plan.reloadAt {
             policy = .after(reloadAt)
         } else {
             policy = .never
         }
-        completion(Timeline(entries: entries, policy: policy))
+        return Timeline(entries: entries, policy: policy)
+    }
+
+    /// [v3] 讀 life 快照、照設定只留開著的那幾種（四種都開＝原樣）
+    private static func readFiltered(_ configuration: TodayConfigIntent) -> WidgetLifeSnapshot? {
+        let kinds: Set<TimelineStopKind> = configuration.kinds
+        return WidgetSnapshotStore.read(WidgetLifeSnapshot.self)?.filtered(kinds: kinds)
     }
 }
 
@@ -280,8 +303,11 @@ struct TodayWidgetModel {
     var tapURL: URL = WidgetLink.today(nil)
 
     /// privacy＝StandBy（背景被拿掉）：標題換成 lockedSurfaceTitle（[v2] 主題，不含人名）、不寫 owner、
-    /// 全天的事用 lockTitle（J:177）
-    static func make(snapshot: WidgetLifeSnapshot?, now: Date, privacy: Bool) -> TodayWidgetModel {
+    /// 全天的事用 lockTitle（J:177）。
+    /// [v3] showsSubject＝長按設定「鎖著時顯示主題」：false 時 privacy 的標題回到 v1 的類別字（WidgetStop.lockTitle）。
+    /// 非 privacy（主畫面）不受影響
+    static func make(snapshot: WidgetLifeSnapshot?, now: Date, privacy: Bool,
+                     showsSubject: Bool = true) -> TodayWidgetModel {
         var model = TodayWidgetModel()
         guard let snap = snapshot else {
             model.message = "打開 LifeGood 一次，這裡就會出現今天的行程"
@@ -299,28 +325,44 @@ struct TodayWidgetModel {
         }
         TodayWidgetText.fillAllDay(&model, day: day, privacy: privacy)
         let rowLimit = model.updatedText.isEmpty ? 3 : 2
-        model.rows = TodayWidgetText.rows(day: day, now: now, privacy: privacy, limit: rowLimit)
+        let mode = TodayWidgetTitleMode(privacy: privacy, showsSubject: showsSubject)
+        model.rows = TodayWidgetText.rows(day: day, now: now, mode: mode, limit: rowLimit)
 
         if day.stops.isEmpty {
             TodayWidgetText.fillFree(&model, day: day, privacy: privacy)
         } else if let cur = day.currentStop(at: now) {
-            TodayWidgetText.fillLive(&model, day: day, stop: cur, now: now, privacy: privacy)
+            TodayWidgetText.fillLive(&model, day: day, stop: cur, now: now, mode: mode)
         } else if let next = day.nextStop(at: now) {
-            TodayWidgetText.fillUpcoming(&model, day: day, stop: next, now: now, privacy: privacy)
+            TodayWidgetText.fillUpcoming(&model, day: day, stop: next, now: now, mode: mode)
         } else {
-            TodayWidgetText.fillFinished(&model, day: day, privacy: privacy)
+            TodayWidgetText.fillFinished(&model, day: day, mode: mode)
         }
         return model
     }
 }
 
+/// [v3] 行程標題怎麼寫：privacy＝StandBy；showsSubject＝長按設定「鎖著時顯示主題」
+private struct TodayWidgetTitleMode {
+    let privacy: Bool
+    let showsSubject: Bool
+
+    /// StandBy 那一行（standByLine）一律用鎖著的寫法，主題開關照設定
+    var locked: TodayWidgetTitleMode {
+        TodayWidgetTitleMode(privacy: true, showsSubject: showsSubject)
+    }
+}
+
 /// 組字的小函式（只拼日期、時間、標題，不碰金額）
 private enum TodayWidgetText {
-    static func title(_ item: WidgetStop, privacy: Bool) -> String {
-        if privacy {
+    static func title(_ item: WidgetStop, mode: TodayWidgetTitleMode) -> String {
+        if mode.privacy && mode.showsSubject {
             // [v2] 決定 2：StandBy 寫會議主題（旅遊寫站名／住宿），部屬姓名不寫
             let locked = item.lockedSurfaceTitle
             return locked.isEmpty ? item.stop.kind.label : locked
+        }
+        if mode.privacy {
+            // [v3] 設定關掉「鎖著時顯示主題」：回到 v1 的類別字（旅遊的 lockTitle 本來就是站名／住宿）
+            return item.lockTitle.isEmpty ? item.stop.kind.label : item.lockTitle
         }
         return item.stop.title.isEmpty ? "未命名行程" : item.stop.title
     }
@@ -347,7 +389,7 @@ private enum TodayWidgetText {
 
     /// 進行中：「進行中・40 分後結束」「到 11:30」
     static func fillLive(_ model: inout TodayWidgetModel, day: WidgetLifeDay, stop: WidgetStop,
-                         now: Date, privacy: Bool) {
+                         now: Date, mode: TodayWidgetTitleMode) {
         let countdown = WidgetDateText.countdown(to: stop.stop.end, from: now)
         model.kind = .live
         model.countText = "\(day.stops.count) 場"
@@ -355,8 +397,8 @@ private enum TodayWidgetText {
         model.label = countdown.map { "進行中・" + $0 + "結束" } ?? "進行中"
         model.heroPrefix = "到"
         model.hero = DayTimelineFormat.time(stop.stop.end)
-        model.line = title(stop, privacy: privacy)
-        model.standByLine = title(stop, privacy: true)
+        model.line = title(stop, mode: mode)
+        model.standByLine = title(stop, mode: mode.locked)
         model.standBySub = countdown.map { $0 + "結束" } ?? "進行中"
         model.standBySubIsCountdown = countdown != nil
         model.tapURL = WidgetLink.today(stop.stop)
@@ -364,7 +406,7 @@ private enum TodayWidgetText {
 
     /// 下一場：「今天第一場・50 分後」「下一場・25 分後」「10:30」
     static func fillUpcoming(_ model: inout TodayWidgetModel, day: WidgetLifeDay, stop: WidgetStop,
-                             now: Date, privacy: Bool) {
+                             now: Date, mode: TodayWidgetTitleMode) {
         let countdown = WidgetDateText.countdown(to: stop.stop.start, from: now)
         let isFirst = stop.id == day.stops.first?.id
         let head = isFirst ? "今天第一場" : "下一場"
@@ -373,15 +415,15 @@ private enum TodayWidgetText {
         model.summary = countSummary(day, now: now)
         model.label = countdown.map { head + "・" + $0 } ?? head
         model.hero = DayTimelineFormat.time(stop.stop.start)
-        model.line = title(stop, privacy: privacy)
-        model.standByLine = title(stop, privacy: true)
+        model.line = title(stop, mode: mode)
+        model.standByLine = title(stop, mode: mode.locked)
         model.standBySub = countdown ?? head
         model.standBySubIsCountdown = countdown != nil
         model.tapURL = WidgetLink.today(stop.stop)
     }
 
     /// 都跑完了：「今天的行程結束了」「明天 08:30」「早會」
-    static func fillFinished(_ model: inout TodayWidgetModel, day: WidgetLifeDay, privacy: Bool) {
+    static func fillFinished(_ model: inout TodayWidgetModel, day: WidgetLifeDay, mode: TodayWidgetTitleMode) {
         model.kind = .finished
         model.countText = "\(day.stops.count) 場"
         model.summary = "今天 \(day.stops.count) 場・都結束了"
@@ -390,8 +432,8 @@ private enum TodayWidgetText {
         if let next = day.nextDayFirstStop {
             model.heroPrefix = "明天"
             model.hero = DayTimelineFormat.time(next.stop.start)
-            model.line = title(next, privacy: privacy)
-            model.standByLine = title(next, privacy: true)
+            model.line = title(next, mode: mode)
+            model.standByLine = title(next, mode: mode.locked)
         } else {
             // 大字已經是「明天」，下面不再重複「明天」兩個字（StandBy 也一樣）
             model.hero = "明天"
@@ -420,17 +462,17 @@ private enum TodayWidgetText {
     }
 
     /// 中型下面那幾列
-    static func rows(day: WidgetLifeDay, now: Date, privacy: Bool, limit: Int) -> [TodayWidgetRow] {
+    static func rows(day: WidgetLifeDay, now: Date, mode: TodayWidgetTitleMode, limit: Int) -> [TodayWidgetRow] {
         let remaining = day.remainingStops(at: now)
         if !remaining.isEmpty {
-            return remaining.prefix(limit).map { stopRow($0, now: now, privacy: privacy) }
+            return remaining.prefix(limit).map { stopRow($0, now: now, mode: mode) }
         }
         var out: [TodayWidgetRow] = []
         if !day.stops.isEmpty {
             out.append(messageRow(id: "lg-row-done", text: "今天的行程結束了"))
         }
         if let next = day.nextDayFirstStop {
-            out.append(tomorrowRow(next, privacy: privacy))
+            out.append(tomorrowRow(next, mode: mode))
         } else if day.stops.isEmpty {
             out.append(messageRow(id: "lg-row-free", text: "好好過一天"))
         } else {
@@ -439,7 +481,7 @@ private enum TodayWidgetText {
         return out
     }
 
-    static func stopRow(_ item: WidgetStop, now: Date, privacy: Bool) -> TodayWidgetRow {
+    static func stopRow(_ item: WidgetStop, now: Date, mode: TodayWidgetTitleMode) -> TodayWidgetRow {
         let trailing: String
         if item.stop.start <= now {
             trailing = "進行中"
@@ -449,18 +491,18 @@ private enum TodayWidgetText {
         return TodayWidgetRow(id: item.id,
                               kind: item.stop.kind,
                               time: DayTimelineFormat.time(item.stop.start),
-                              title: title(item, privacy: privacy),
-                              owner: privacy ? "" : item.stop.owner,
+                              title: title(item, mode: mode),
+                              owner: mode.privacy ? "" : item.stop.owner,
                               trailing: trailing,
                               url: WidgetLink.today(item.stop))
     }
 
-    static func tomorrowRow(_ item: WidgetStop, privacy: Bool) -> TodayWidgetRow {
+    static func tomorrowRow(_ item: WidgetStop, mode: TodayWidgetTitleMode) -> TodayWidgetRow {
         TodayWidgetRow(id: "lg-row-tomorrow-" + item.id,
                        kind: item.stop.kind,
                        time: "明天 " + DayTimelineFormat.time(item.stop.start),
-                       title: title(item, privacy: privacy),
-                       owner: privacy ? "" : item.stop.owner,
+                       title: title(item, mode: mode),
+                       owner: mode.privacy ? "" : item.stop.owner,
                        trailing: "",
                        url: WidgetLink.today(item.stop))
     }
@@ -510,7 +552,7 @@ enum TodayWidgetSample {
                                           dataDay: WidgetDateText.dayKey(dayStart),
                                           validUntil: validUntil,
                                           days: [day])
-        return TodayWidgetEntry(date: sampleNow, snapshot: snapshot)
+        return TodayWidgetEntry(date: sampleNow, snapshot: snapshot, showsSubjectWhenLocked: true)
     }
 
     private static func at(_ dayStart: Date, _ hour: Int, _ minute: Int) -> Date {
@@ -563,7 +605,8 @@ struct TodayWidgetEntryView: View {
     }
 
     private var model: TodayWidgetModel {
-        TodayWidgetModel.make(snapshot: entry.snapshot, now: entry.date, privacy: surface.isStandBy)
+        TodayWidgetModel.make(snapshot: entry.snapshot, now: entry.date, privacy: surface.isStandBy,
+                              showsSubject: entry.showsSubjectWhenLocked)
     }
 
     private var isMedium: Bool { family == .systemMedium }

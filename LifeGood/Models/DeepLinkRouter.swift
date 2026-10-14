@@ -113,6 +113,36 @@ final class DeepLinkRouter: ObservableObject {
     func markRoute() {
         routeToken = UUID()
     }
+
+    // MARK: [v3] 小工具
+
+    /// [v3] 說一句：MainTabView 取走後叫 AIQuickVoiceSession.shared.begin()。
+    /// 存 UUID 不存 Bool：連按兩次控制項，第二次也會換值、onChange 收得到
+    @Published private(set) var pendingVoice: UUID?
+    /// [v3] 記帳台「新增收入」：MainTabView 取走後開 AddIncomeView
+    @Published private(set) var pendingAddIncome: UUID?
+
+    func requestVoice() {
+        pendingVoice = UUID()
+    }
+
+    /// 取走並清掉；沒有回 false（沒有的時候不動 @Published，不會多一次重畫）
+    func takeVoice() -> Bool {
+        guard pendingVoice != nil else { return false }
+        pendingVoice = nil
+        return true
+    }
+
+    func requestAddIncome() {
+        pendingAddIncome = UUID()
+    }
+
+    /// 取走並清掉；沒有回 false
+    func takeAddIncome() -> Bool {
+        guard pendingAddIncome != nil else { return false }
+        pendingAddIncome = nil
+        return true
+    }
 }
 
 /// [v2] 小工具「新增支出」的請求（WidgetLink.apply 建、MainTabView 取走）。
@@ -202,6 +232,13 @@ enum AppNavigation {
         let d = UserDefaults.standard
         d.set(AppMode.expense.rawValue, forKey: "appMode")
         d.set(ExpenseFeature.variable.rawValue, forKey: "expense_feature")
+    }
+
+    /// [v3] 記帳台「新增收入」：表單開在收支「收入」頁上面（存完就看得到那一筆）
+    static func goToIncome() {
+        let d = UserDefaults.standard
+        d.set(AppMode.expense.rawValue, forKey: "appMode")
+        d.set(ExpenseFeature.income.rawValue, forKey: "expense_feature")
     }
 
     /// [v2] 「接下來要繳」→ 理財的房地產／載具／儲蓄險。鍵名照 MainTabView 的 @AppStorage
@@ -312,12 +349,19 @@ extension WidgetLink {
     /// [v2] 控制項「記一筆」（LifeGoodOpenIntent → WidgetOpenAppHandoff）也走這裡，跟 onOpenURL 同一個總入口。
     /// route.fromWidget（網址帶 src=widget）→ markWidgetLaunch：不播開場動畫、這次不跳本次更新（LaunchGate）；
     /// 每個認得的網址都換 routeToken：MainTabView 收到就關掉設定頁。
+    ///
+    /// [v3] - lifegood://add/expense?voice=1…：說一句——**不切頁、不換 routeToken**（不關設定頁、不關 sheet），
+    ///        請 MainTabView 叫 AIQuickVoiceSession 在目前這一頁開始聽
+    ///      - lifegood://add/income…：切到收支「收入」、請 MainTabView 開新增收入
+    ///      - lifegood://life/trip?id=…：切到人生「旅遊地圖」，那一份還在就打開它（跟旅遊推播點進來同一條：
+    ///        TravelMapView 掀開旅遊規劃、TripPlanListView 打開那一份）；不帶 id、或那一份刪掉了就只停在旅遊地圖
     @discardableResult
     static func apply(_ url: URL, store: LifeStore) -> Bool {
         guard let route = parse(url) else { return false }
         let router = DeepLinkRouter.shared
         if route.fromWidget { router.markWidgetLaunch() }
-        router.markRoute()
+        // [v3] 說一句不關設定頁（主控定案 5）：只有它不換 routeToken
+        if route.destination != .voiceRecord { router.markRoute() }
         switch route.destination {
         case .today:
             return DayTimelineLink.apply(url, store: store)
@@ -345,6 +389,18 @@ extension WidgetLink {
         case .financeInsurance(let id):
             AppNavigation.goToFinance(.insurance)
             if let id { router.requestItem(.insurance(id)) }
+            return true
+        case .voiceRecord:
+            // 不切頁：在哪一頁都直接聽（畫面在自己的視窗，蓋在所有頁面與 sheet 上面）
+            router.requestVoice()
+            return true
+        case .addIncome:
+            AppNavigation.goToIncome()
+            router.requestAddIncome()
+            return true
+        case .trip(let id):
+            AppNavigation.goToTravelMap()
+            if let id, store.tripPlan(id: id) != nil { router.requestTripPlan(id) }
             return true
         }
     }

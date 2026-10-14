@@ -16,6 +16,10 @@ import Foundation
 // 金額字：理財那幾件是 FinanceUpcoming.amount（App 已經組好），記帳那幾件用 MoneyFormat.short(ntdValue)。
 // 規矩：只讀不寫；**不呼叫 FinanceOverviewData.build**（它會寫每月淨資產紀錄）。
 //
+// [v3] 每一筆多寫 lockTitle：鎖定畫面「下一筆要繳」關掉「顯示名稱」時的類別字（v3 brief G1-7）——
+//      記帳固定支出寫分類（「訂閱服務」「電信費」…，沒分類或「其他」寫「固定支出」），
+//      理財寫「保費」「保單滿期」「房貸」，車子照 VehicleUpcoming.kind 寫「車貸」「保養」「車子費用」。
+//
 // @MainActor：MoneyFormat 的 NumberFormatter 只在主執行緒用（跟寫手一樣）。
 
 @MainActor
@@ -80,12 +84,15 @@ enum WidgetBillsBuilder {
             guard due >= today, due < horizonEnd else { continue }
             let key = u.id + "@" + WidgetDateText.dayKey(due)
             guard seen.insert(key).inserted else { continue }
-            out.append(financeBill(u, id: key, due: due, link: financeLink(u, finance: finance, indexes: indexes)))
+            out.append(financeBill(u, id: key, due: due,
+                                   link: financeLink(u, finance: finance, indexes: indexes),
+                                   lockTitle: financeLockTitle(u, finance: finance, indexes: indexes)))
         }
         return out
     }
 
-    private static func financeBill(_ u: FinanceUpcoming, id: String, due: Date, link: URL) -> WidgetBill {
+    private static func financeBill(_ u: FinanceUpcoming, id: String, due: Date, link: URL,
+                                    lockTitle: String) -> WidgetBill {
         let kind: WidgetBillKind
         let tint: (UInt32, UInt32)
         switch u.kind {
@@ -104,7 +111,33 @@ enum WidgetBillsBuilder {
         }
         return WidgetBill(id: id, kind: kind, title: u.title, detail: u.detail, dueDate: due,
                           amountText: u.amount, isIncome: u.isIncome, icon: u.icon,
-                          tint: tint.0, tintDark: tint.1, link: link.absoluteString)
+                          tint: tint.0, tintDark: tint.1, link: link.absoluteString,
+                          lockTitle: lockTitle)
+    }
+
+    /// [v3] 理財那幾件的類別字：保費／保單滿期／房貸；車子照 VehicleUpcoming.kind（找不到「車子費用」）
+    private static func financeLockTitle(_ u: FinanceUpcoming, finance: FinanceStore,
+                                         indexes: [FinanceLoanIndex]) -> String {
+        switch u.kind {
+        case .premium:
+            return "保費"
+        case .maturity:
+            return "保單滿期"
+        case .mortgage:
+            return "房貸"
+        case .vehicle:
+            guard let k = vehicleUpcomingKind(ofUpcomingItem: u.id, finance: finance, indexes: indexes) else {
+                return "車子費用"
+            }
+            switch k {
+            case .loan:
+                return "車貸"
+            case .maintenance:
+                return "保養"
+            case .fixed:
+                return "車子費用"
+            }
+        }
     }
 
     /// FinanceUpcoming 沒帶來源 id，照它的 id 格式自己查（FinanceInsights.swift FinanceUpcoming.build）：
@@ -149,6 +182,18 @@ enum WidgetBillsBuilder {
             for idx in indexes {
                 guard let facts = idx.vehicles[v.id] else { continue }
                 if facts.upcoming.contains(where: { "v-" + $0.id == itemId }) { return v.id }
+            }
+        }
+        return nil
+    }
+
+    /// [v3] 「v-<VehicleUpcoming.id>」是哪一種（車貸／保養／其他定期支出）。查法同 vehicleId(ofUpcomingItem:)
+    private static func vehicleUpcomingKind(ofUpcomingItem itemId: String, finance: FinanceStore,
+                                            indexes: [FinanceLoanIndex]) -> VehicleUpcoming.Kind? {
+        for v in finance.vehicles {
+            for idx in indexes {
+                guard let facts = idx.vehicles[v.id] else { continue }
+                if let up = facts.upcoming.first(where: { "v-" + $0.id == itemId }) { return up.kind }
             }
         }
         return nil
@@ -214,6 +259,14 @@ enum WidgetBillsBuilder {
                           icon: ex.categoryIcon,
                           tint: theme.tint,
                           tintDark: theme.top,
-                          link: WidgetLink.fixedExpense(ex.id).absoluteString)
+                          link: WidgetLink.fixedExpense(ex.id).absoluteString,
+                          lockTitle: ledgerLockTitle(ex.fixedCategory))
+    }
+
+    /// [v3] 記帳固定支出的類別字：分類名（「訂閱服務」「電信費」「貸款」「保險」「房租」「水電瓦斯」「管理費」）；
+    /// 沒分類或「其他」寫「固定支出」
+    private static func ledgerLockTitle(_ category: FixedCategory?) -> String {
+        guard let category, category != .other else { return "固定支出" }
+        return category.rawValue
     }
 }

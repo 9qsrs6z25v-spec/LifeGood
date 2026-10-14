@@ -16,6 +16,9 @@ import WidgetKit
 // [v2] money 多寫：每一天的 todayText／incomeText／隱藏版／鎖定畫面版的字、月底之後的下個月 1–7 號、
 //      分類、最常記的分類、車子卡、常記範本（WidgetMoneyExtras.swift）；
 //      新的 bills_v1.json：接下來要繳（WidgetBillsBuilder.swift）。
+// [v3] money 多寫車子選單（vehicleOptions：記帳台按鈕、控制項「記到…」），寫了也重畫「記到…」控制項；
+//      life 多寫隔天每一種的第一場（nextDayFirstStops：「今天」關掉某幾種時用）與旅行（trips：旅行小工具）。
+//      規格見 scratchpad/widgets/v3/brief.md 的 G1-6。
 //
 // 什麼時候寫：
 //   • 啟動（start）：掛好監聽後馬上寫一次全部
@@ -114,6 +117,8 @@ final class WidgetSnapshotWriter {
             let snapshot = Self.moneySnapshot(expense: expense, finance: financeStore, now: now)
             if WidgetSnapshotStore.write(snapshot) {
                 WidgetRefresh.reload(WidgetKind.moneyKinds)
+                // [v3] 「記到…」控制項的「Taycan 電費」從 money 快照讀（車改名、賣掉要跟著變）
+                WidgetRefresh.reloadControls(WidgetKind.moneyControlKinds)
             }
         }
         if parts.contains(.life), let life = lifeStore {
@@ -230,6 +235,8 @@ final class WidgetSnapshotWriter {
         snapshot.topCategoryKeys = WidgetMoneyExtras.topCategoryKeys(expense: expense, hasVehicleCard: car != nil,
                                                                      now: now, calendar: cal)
         snapshot.templates = templates
+        // [v3] 車子選單（記帳台按鈕、控制項「記到…」）；finance 還沒有（還沒 start）是空陣列
+        snapshot.vehicleOptions = finance.map { WidgetMoneyExtras.vehicleOptions(finance: $0, now: now) } ?? []
         return snapshot
     }
 
@@ -324,6 +331,7 @@ final class WidgetSnapshotWriter {
 
     /// [0] 今天、[1] 明天；validUntil＝後天 00:00。
     /// 行程跟靈動島同一段程式（TodayAgenda，不裁站數），全天的事照我的行事曆（CalendarDayItems）。
+    /// [v3] 每一天多寫隔天每一種的第一場（nextDayFirstStops）；整份多寫旅行（trips，不受 validUntil 管）。
     static func lifeSnapshot(life: LifeStore, now: Date,
                              calendar cal: Calendar = .current) -> WidgetLifeSnapshot {
         let start0 = cal.startOfDay(for: now)
@@ -332,22 +340,25 @@ final class WidgetSnapshotWriter {
 
         let agenda0 = TodayAgenda.items(on: start0, store: life, calendar: cal)
         let agenda1 = TodayAgenda.items(on: start1, store: life, calendar: cal)
-        // 後天只要第一場（明天那一份的「明天 08:30／早會」）
-        let firstOfDay2 = TodayAgenda.items(on: start2, store: life, calendar: cal).first
+        // 後天：明天那一份的「明天 08:30／早會」要第一場；[v3] 每一種的第一場要整天（原本只拿 .first）
+        let agenda2 = TodayAgenda.items(on: start2, store: life, calendar: cal)
 
         let day0 = lifeDay(start: start0, end: start1, agenda: agenda0,
-                           nextDayFirst: agenda1.first, life: life, calendar: cal)
+                           nextDayAgenda: agenda1, life: life, calendar: cal)
         let day1 = lifeDay(start: start1, end: start2, agenda: agenda1,
-                           nextDayFirst: firstOfDay2, life: life, calendar: cal)
+                           nextDayAgenda: agenda2, life: life, calendar: cal)
         return WidgetLifeSnapshot(generatedAt: now,
                                   dataDay: WidgetDateText.dayKey(now),
                                   validUntil: day1.dayEnd,
-                                  days: [day0, day1])
+                                  days: [day0, day1],
+                                  trips: trips(life: life, now: now, calendar: cal))
     }
 
+    /// [v3] nextDayFirst（隔天第一場）改從隔天整天的 agenda 拿 .first（跟原本傳進來的同一場），
+    /// 另外補隔天每一種的第一場（nextDayFirstStops）
     private static func lifeDay(start: Date, end: Date,
                                 agenda: [TodayAgenda.Item],
-                                nextDayFirst: TodayAgenda.Item?,
+                                nextDayAgenda: [TodayAgenda.Item],
                                 life: LifeStore,
                                 calendar cal: Calendar) -> WidgetLifeDay {
         WidgetLifeDay(dayKey: WidgetDateText.dayKey(start),
@@ -359,11 +370,67 @@ final class WidgetSnapshotWriter {
                       allDay: CalendarDayItems.allDay(on: start, store: life, calendar: cal),
                       greeting: greeting(on: start, life: life, calendar: cal),
                       hidesMeetings: life.hidesMeetings(on: start),
-                      nextDayFirstStop: nextDayFirst.map { widgetStop($0) })
+                      nextDayFirstStop: nextDayAgenda.first.map { widgetStop($0) },
+                      nextDayFirstStops: firstPerKind(nextDayAgenda))
     }
 
     private static func widgetStop(_ item: TodayAgenda.Item) -> WidgetStop {
         WidgetStop(stop: item.stop, location: item.location, lockTitle: item.lockTitle)
+    }
+
+    /// [v3] 每一種行程只留第一場（items 已依開始時間排好，照原順序），最多 4 個（四種）。
+    /// 「今天」小工具關掉某幾種時，「明天 08:30 …」從留下的種類挑（WidgetLifeDay.filtered(kinds:)）
+    private static let maxFirstStops = 4
+
+    private static func firstPerKind(_ items: [TodayAgenda.Item]) -> [WidgetStop] {
+        var seen = Set<TimelineStopKind>()
+        var out: [WidgetStop] = []
+        for item in items {
+            guard out.count < maxFirstStops else { break }
+            if seen.insert(item.stop.kind).inserted {
+                out.append(widgetStop(item))
+            }
+        }
+        return out
+    }
+
+    // MARK: - [v3] 旅行（life_v1.json 的 trips）
+
+    /// 旅行小工具最多看幾趟（還沒回來的、依出發時間）
+    private static let maxTrips = 3
+    /// 出發超過這麼多天前的行程先跳過（不用為了舊行程算 timeline）
+    private static let tripLookbackDays = 60
+
+    /// 還沒回來的旅行（進行中＋接下來的），依（出發時間、id）排好，最多 3 趟。
+    /// 「回來了」＝過了最後一天的隔天 00:00（firstDay＋dayCount 天，跟 App「旅遊期間」以天為單位一樣）。
+    /// TripPlan.endDate／dayCount 每次都要算時間軸，同一份各只叫一次。
+    static func trips(life: LifeStore, now: Date, calendar cal: Calendar = .current) -> [WidgetTrip] {
+        let today = cal.startOfDay(for: now)
+        let oldest = cal.date(byAdding: .day, value: -tripLookbackDays, to: today) ?? today
+        var out: [WidgetTrip] = []
+        for plan in life.tripPlans {
+            let firstDay = cal.startOfDay(for: plan.startDate)
+            guard firstDay >= oldest else { continue }
+            let count = max(plan.dayCount, 1)
+            guard let after = cal.date(byAdding: .day, value: count, to: firstDay), after > now else { continue }
+            let trimmed = plan.displayTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+            let packing = plan.checklistProgress(.packing)
+            out.append(WidgetTrip(id: plan.id,
+                                  title: trimmed.isEmpty ? "旅行" : trimmed,
+                                  startDate: plan.startDate,
+                                  endDate: plan.endDate,
+                                  firstDay: firstDay,
+                                  dayCount: count,
+                                  afterLastDay: after,
+                                  packingDone: packing.done,
+                                  packingTotal: packing.total,
+                                  link: WidgetLink.trip(plan.id).absoluteString))
+        }
+        out.sort { a, b in
+            if a.startDate != b.startDate { return a.startDate < b.startDate }
+            return a.id.uuidString < b.id.uuidString
+        }
+        return Array(out.prefix(maxTrips))
     }
 
     // MARK: 手寫問候（寫死、不靠 AI）
