@@ -627,6 +627,12 @@ struct MainTabView: View {
                 micEntered = false
             }
         }
+        // [v2 小工具] 從小工具／控制項點進來：關掉設定頁、開新增支出（預填分類／車子、數字鍵盤跳出）。
+        // 收在一個修飾器裡，這一串只多一個（v25.531 型別檢查逾時的教訓）
+        .modifier(MainTabWidgetRoutes(isSettingsActive: $isSettingsActive,
+                                      showAddExpense: $showAddExpense,
+                                      showAddIncome: $showAddIncome,
+                                      finance: financeStore))
     }
 
     // MARK: - 語音 AI 浮動麥克風
@@ -1999,5 +2005,71 @@ private struct FloatingActionButtonView: View {
 
     private func clamp(_ value: CGFloat, _ lower: CGFloat, _ upper: CGFloat) -> CGFloat {
         min(upper, max(lower, value))
+    }
+}
+
+// MARK: - [v2 小工具] 從小工具點進來
+
+/// 收 DeepLinkRouter 的兩件事（WidgetLink.apply 發的）：
+///   • routeToken 換了：停在設定頁也要能跳過去 → 關掉設定頁（judge §3.4-4）
+///   • pendingAddExpense：先關掉 FAB 開的新增收入／支出（同一個 View 上一次只能有一個 sheet），
+///     0.35 秒後開 AddExpenseView——分類或車子帶好（車子跟從車子頁記一樣，AddVehicleView.makeVariablePreset），
+///     金額欄自動聚焦、數字鍵盤跳出（focusAmountOnAppear）。都是使用者按儲存才算，這裡不寫資料。
+/// 冷啟動時網址可能比 MainTabView 先到（控制項的交接在 LifeGoodApp.init 就登記了），所以 initial: true。
+private struct MainTabWidgetRoutes: ViewModifier {
+    @Binding var isSettingsActive: Bool
+    @Binding var showAddExpense: Bool
+    @Binding var showAddIncome: Bool
+    let finance: FinanceStore
+    @ObservedObject private var deepLink = DeepLinkRouter.shared
+    @State private var request: WidgetAddExpenseRequest?
+
+    init(isSettingsActive: Binding<Bool>, showAddExpense: Binding<Bool>,
+         showAddIncome: Binding<Bool>, finance: FinanceStore) {
+        _isSettingsActive = isSettingsActive
+        _showAddExpense = showAddExpense
+        _showAddIncome = showAddIncome
+        self.finance = finance
+    }
+
+    func body(content: Content) -> some View {
+        content
+            .onChange(of: deepLink.routeToken) { _, _ in isSettingsActive = false }
+            .onChange(of: deepLink.pendingAddExpense, initial: true) { _, _ in takeAddRequest() }
+            .sheet(item: $request) { r in addSheet(r) }
+    }
+
+    private func addSheet(_ r: WidgetAddExpenseRequest) -> AnyView {
+        AddExpenseView(expenseType: .variable,
+                       preset: Self.preset(r, finance: finance),
+                       focusAmountOnAppear: true)
+            .appStores()
+    }
+
+    /// FAB 開著的新增收入／支出要先收掉（收的動畫約 0.35 秒，多等一點才開，不然新的 sheet 會被吃掉）；
+    /// 本來就沒開的只等一下下（冷啟動從按下到能打數字要在 1 秒內，judge §2.4）
+    private func takeAddRequest() {
+        guard let r = deepLink.takeAddExpense() else { return }
+        let wasShowing = showAddExpense || showAddIncome
+        showAddExpense = false
+        showAddIncome = false
+        let delay: UInt64 = wasShowing ? 600_000_000 : 150_000_000
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: delay)
+            request = r
+        }
+    }
+
+    /// 車子還在 → 跟從車子頁記一樣（已選汽車／那個車子分類、連到那台車、度數欄看得到）；
+    /// 分類解得開 → 分類帶好；都沒有（或車子刪掉了）→ 空白表單
+    private static func preset(_ r: WidgetAddExpenseRequest, finance: FinanceStore) -> AddExpensePreset {
+        if let vid = r.vehicleId, finance.vehicles.contains(where: { $0.id == vid }) {
+            let cat = VehicleVariableCategory(rawValue: r.vehicleCategoryKey ?? "") ?? .other
+            return AddVehicleView.makeVariablePreset(for: cat, vehicleId: vid)
+        }
+        if let key = r.categoryKey, let c = VariableCategory(rawValue: key) {
+            return AddExpensePreset(variableCategory: c)
+        }
+        return AddExpensePreset()
     }
 }

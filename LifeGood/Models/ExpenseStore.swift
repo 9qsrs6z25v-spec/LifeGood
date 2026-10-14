@@ -210,6 +210,46 @@ class ExpenseStore: ObservableObject {
         estimatedMonthlyIncome > currentMonthIncomeTotal
     }
 
+    /// [v2 小工具] 那一天打開 App 時的「本月收入」：currentMonthIncomeTotal 的指定日版本，
+    /// 規則逐字一樣，只是 now 換成 day（WidgetMoneyExtras.nextMonthBoard 算下個月 1–7 號用）。
+    /// 原本的 currentMonthIncomeTotal 不改。
+    func monthIncomeTotal(asOf day: Date) -> Double {
+        let calendar = Calendar.current
+
+        // 單次收入：只計那個月實際紀錄的
+        let onceTotal = incomes
+            .filter { $0.period == .once && calendar.isDate($0.date, equalTo: day, toGranularity: .month) }
+            .reduce(0) { $0 + $1.amount }
+
+        // 週期性收入：建立日期 <= 那一天、且那時還沒結束的，換算為月金額
+        let recurringTotal = incomes
+            .filter { $0.period != .once && calendar.startOfDay(for: $0.date) <= calendar.startOfDay(for: day) && $0.isActive(in: day, calendar: calendar) }
+            .reduce(0) { $0 + $1.monthlyAmount }
+
+        return onceTotal + recurringTotal
+    }
+
+    /// [v2 小工具] 那一天的「近 6 個月收入中位數」：estimatedMonthlyIncome 的指定日版本，
+    /// 規則逐字一樣，只是 now 換成 day。原本的 estimatedMonthlyIncome 不改。
+    func estimatedMonthlyIncome(asOf day: Date) -> Double {
+        let calendar = Calendar.current
+
+        var monthlyTotals: [Double] = []
+        for i in 1...6 {
+            guard let monthDate = calendar.date(byAdding: .month, value: -i, to: day) else { continue }
+            let total = incomeTotal(for: monthDate)
+            if total > 0 { monthlyTotals.append(total) }
+        }
+
+        guard !monthlyTotals.isEmpty else { return 0 }
+        let sorted = monthlyTotals.sorted()
+        let count = sorted.count
+        if count % 2 == 0 {
+            return (sorted[count / 2 - 1] + sorted[count / 2]) / 2
+        }
+        return sorted[count / 2]
+    }
+
     /// 指定月份的固定支出月等值（跟「本月固定支出」同一套規則：週期換算成月、只算當時有效的）
     func fixedMonthlyTotal(for date: Date) -> Double {
         projectedFixedTotal(for: date, period: .monthly, calendar: Calendar.current)

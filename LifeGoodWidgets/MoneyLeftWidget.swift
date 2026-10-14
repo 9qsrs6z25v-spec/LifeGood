@@ -15,9 +15,13 @@ import WidgetKit
 //
 // StandBy 照樣顯示金額（使用者第 2 題），所以這裡**不加** .privacySensitive()。
 //
+// [v2] 隱藏金額：provider 讀一次 WidgetHideAmounts.isOn 放進 entry（hidesAmounts），
+//      字一律經過 WidgetMoneyDay.lines(hidden:) 拿（開著時「本月已花／62%／還有 19 天／今天 3 筆」）。
+//      MoneyLeftTimeline 給記帳台、一按就記、鎖定畫面「已花」共用；MoneyLeftBar 給 WidgetMoneyPanel 共用。
+//
 // 型別（全部 internal 的都帶 MoneyLeft 前綴；畫面零件 private）：
 //   MoneyLeftWidget、MoneyLeftEntry、MoneyLeftProvider、MoneyLeftTimeline、
-//   MoneyLeftModel、MoneyLeftSample、MoneyLeftEntryView
+//   MoneyLeftModel、MoneyLeftSample、MoneyLeftEntryView、MoneyLeftBar
 
 // MARK: - Widget
 
@@ -39,30 +43,35 @@ struct MoneyLeftEntry: TimelineEntry {
     let date: Date
     /// nil＝還沒打開過新版 App（或檔案讀不到）
     let snapshot: WidgetMoneySnapshot?
+    /// [v2] 「隱藏金額」開著（provider 讀一次；View 裡不讀 UserDefaults）
+    let hidesAmounts: Bool
 }
 
 struct MoneyLeftProvider: TimelineProvider {
     func placeholder(in context: Context) -> MoneyLeftEntry {
         let now = Date()
-        return MoneyLeftEntry(date: now, snapshot: MoneyLeftSample.snapshot(at: now))
+        return MoneyLeftEntry(date: now, snapshot: MoneyLeftSample.snapshot(at: now), hidesAmounts: false)
     }
 
     func getSnapshot(in context: Context, completion: @escaping (MoneyLeftEntry) -> Void) {
         let now = Date()
         if context.isPreview {
             // 小工具庫裡的預覽：寫死的展示字
-            completion(MoneyLeftEntry(date: now, snapshot: MoneyLeftSample.snapshot(at: now)))
+            completion(MoneyLeftEntry(date: now, snapshot: MoneyLeftSample.snapshot(at: now), hidesAmounts: false))
             return
         }
         let snapshot = WidgetSnapshotStore.read(WidgetMoneySnapshot.self)
-        completion(MoneyLeftEntry(date: now, snapshot: snapshot))
+        completion(MoneyLeftEntry(date: now, snapshot: snapshot, hidesAmounts: WidgetHideAmounts.isOn))
     }
 
     func getTimeline(in context: Context, completion: @escaping (Timeline<MoneyLeftEntry>) -> Void) {
         let now = Date()
         let snapshot = WidgetSnapshotStore.read(WidgetMoneySnapshot.self)
+        let hidden = WidgetHideAmounts.isOn
         let dates = MoneyLeftTimeline.entryDates(snapshot: snapshot, now: now)
-        let entries: [MoneyLeftEntry] = dates.map { MoneyLeftEntry(date: $0, snapshot: snapshot) }
+        let entries: [MoneyLeftEntry] = dates.map {
+            MoneyLeftEntry(date: $0, snapshot: snapshot, hidesAmounts: hidden)
+        }
         // 平常不用定時要：App 存檔／iCloud 同步後寫了新快照才叫重畫（WidgetSnapshotWriter）。
         // 只在排到的最後一個 00:00（跨月後 daysAfterEnd 天）過了以後再要一次，日期那一行才不會停住
         let policy = MoneyLeftTimeline.policy(snapshot: snapshot, dates: dates, now: now)
@@ -146,8 +155,9 @@ struct MoneyLeftModel {
     var isOver = false
     var bar: WidgetMoneyBar? = nil
 
-    /// 只挑字、不算錢：每個字都是快照裡 App 組好的，或 WidgetDateText 的日期字
-    static func make(snapshot: WidgetMoneySnapshot?, now: Date) -> MoneyLeftModel {
+    /// 只挑字、不算錢：每個字都是快照裡 App 組好的，或 WidgetDateText 的日期字。
+    /// [v2] hidden＝隱藏金額開著：四行改用 App 寫好的隱藏版（WidgetMoneyDay.lines(hidden:)）
+    static func make(snapshot: WidgetMoneySnapshot?, now: Date, hidden: Bool) -> MoneyLeftModel {
         var model = MoneyLeftModel()
         guard let snap = snapshot else {
             // 不顯示 NT$0（會以為這個月一毛都沒花，J:62）
@@ -162,15 +172,16 @@ struct MoneyLeftModel {
             model.footer = WidgetDateText.lastUpdated(snap.generatedAt)
             return model
         }
+        let lines = day.lines(hidden: hidden)
         model.kind = .day
         model.dateText = day.dateText
-        model.title = day.title
-        model.hero = day.hero
-        model.line = day.line
+        model.title = lines.title
+        model.hero = lines.hero
+        model.line = lines.line
         model.isOver = day.isOver
         model.bar = day.bar
         // 超過兩天沒更新：最下面一行老實說是舊的（J:63）
-        model.footer = snap.isStale(at: now) ? WidgetDateText.lastUpdated(snap.generatedAt) : day.footer
+        model.footer = snap.isStale(at: now) ? WidgetDateText.lastUpdated(snap.generatedAt) : lines.footer
         return model
     }
 }
@@ -219,7 +230,7 @@ struct MoneyLeftEntryView: View {
     }
 
     private var model: MoneyLeftModel {
-        MoneyLeftModel.make(snapshot: entry.snapshot, now: entry.date)
+        MoneyLeftModel.make(snapshot: entry.snapshot, now: entry.date, hidden: entry.hidesAmounts)
     }
 
     var body: some View {
@@ -429,11 +440,19 @@ private struct MoneyLeftMessage: View {
 /// 跟總覽「這個月的錢」同一條縮短：紫＝固定（0 → fixed）、藍＝變動（接在後面）、
 /// 一道直線＝收入基準；超過收入的那一截疊紅。不畫斜線預估（J:99）。
 /// 比例 App 已經夾好（0…1），這裡只把比例換成寬度，不算錢。
-private struct MoneyLeftBar: View {
+/// [v2] internal：記帳台、一按就記（中）左半的 WidgetMoneyPanel 也畫這一條
+struct MoneyLeftBar: View {
     let bar: WidgetMoneyBar
     let palette: WidgetPalette
 
     private let trackHeight: CGFloat = 6
+
+    /// [v2] 明寫 internal init：別的檔（WidgetMoneyPanel）要建它，不靠合成的 memberwise init
+    ///（有 private 存儲屬性時，合成 init 的可見度不想去賭）
+    init(bar: WidgetMoneyBar, palette: WidgetPalette) {
+        self.bar = bar
+        self.palette = palette
+    }
 
     var body: some View {
         GeometryReader { geo in

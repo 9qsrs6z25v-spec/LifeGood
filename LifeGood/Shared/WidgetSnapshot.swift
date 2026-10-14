@@ -1,8 +1,13 @@
 import Foundation
 
-// MARK: - 桌面小工具的快照（v25.545）
+// MARK: - 桌面小工具的快照（v25.545；v2 擴充）
 //
 // 這個檔案同時屬於「主 App」與「LifeGoodWidgets」兩個 target。
+//
+// [v2] 加了：記帳台、一按就記、接下來要繳、鎖定畫面三型、控制項兩個的 kind；
+//      money 快照的分類、常記範本、車子卡、下個月 1–7 號、隱藏金額版與鎖定畫面版的字；
+//      bills_v1.json（接下來要繳）；隱藏金額開關（App Group 的 UserDefaults）。
+//      money 的新欄位一律是選填（舊檔解得開、schema 不升），App 一打開就補齊。
 //
 // 分工跟靈動島一樣：App 把小工具要顯示的「字」與「數字」算好、格式化好，寫成 App Group 裡的
 // 小檔案；小工具只讀這些檔、照著畫。**小工具裡不做任何金額計算與格式化**——「NT$4.6萬」
@@ -25,6 +30,10 @@ enum WidgetShared {
     static let appGroupID = "group.com.lifegood.app"
     /// App Group 裡放快照的資料夾
     static let folderName = "Widgets"
+
+    /// [v2] App Group 共用的 UserDefaults（隱藏金額開關、控制項交給 App 的網址）。
+    /// entitlements 沒生效時是 nil：讀一律當「沒設定」，寫什麼都不做。
+    static var defaults: UserDefaults? { UserDefaults(suiteName: appGroupID) }
 }
 
 /// WidgetKit 的 kind。小工具的 StaticConfiguration 與 App 的 reloadTimelines(ofKind:) 都用這裡的值，
@@ -34,12 +43,64 @@ enum WidgetKind {
     static let moneyLeft = "LifeGoodMoneyLeft"
     /// 今天（systemSmall、systemMedium）
     static let today = "LifeGoodToday"
+
+    // MARK: [v2]
+
+    /// 記帳台（systemMedium）：左半還能花、右半四張卡（連結）
+    static let ledgerDesk = "LifeGoodLedgerDesk"
+    /// 一按就記（systemSmall、systemMedium）：常記範本的互動按鈕，不開 App
+    static let quickRecord = "LifeGoodQuickRecord"
+    /// 接下來要繳（systemMedium）
+    static let bills = "LifeGoodBills"
+    /// 鎖定畫面「已花」（accessoryCircular）＋記帳一行字（accessoryInline）
+    static let lockSpent = "LifeGoodLockSpent"
+    /// 鎖定畫面「下一場」（accessoryRectangular）＋行程一行字（accessoryInline）
+    static let lockNextStop = "LifeGoodLockNextStop"
+    /// 鎖定畫面「下一筆要繳」（accessoryRectangular）
+    static let lockNextBill = "LifeGoodLockNextBill"
+    /// 控制項「記一筆」（ControlWidgetButton）。控制項的 kind 用反向網域名
+    static let controlAddExpense = "com.lifegood.app.control.addExpense"
+    /// 控制項「隱藏金額」（ControlWidgetToggle）
+    static let controlHideAmounts = "com.lifegood.app.control.hideAmounts"
+
+    /// money_v1.json 變了要重畫的（App 的寫手、一按就記的按鈕都用這一組）
+    static let moneyKinds = [moneyLeft, ledgerDesk, quickRecord, lockSpent]
+    /// life_v1.json 變了要重畫的
+    static let lifeKinds = [today, lockNextStop]
+    /// bills_v1.json 變了要重畫的
+    static let billsKinds = [bills, lockNextBill]
 }
 
 /// 快照檔名。分檔是為了只改了帳就只重寫 money、只重畫「還能花」。
 enum WidgetSnapshotFile: String {
     case money = "money_v1.json"
     case life = "life_v1.json"
+    /// [v2] 接下來要繳
+    case bills = "bills_v1.json"
+}
+
+// MARK: - [v2] 隱藏金額
+
+/// 控制中心「隱藏金額」開關與 App 設定頁的同一個開關。存在 App Group 的 UserDefaults，
+/// 不跟 iCloud 同步（iPhone、iPad 各自設）。
+///
+/// 開著時：所有小工具的金額改成 mask（「NT$ ••••」），百分比、日期、期數、筆數照常。
+/// 「每天 NT$2,402」這種金額夾在句子裡的，App 已經在快照裡另外寫好「隱藏版」的字
+///（WidgetMoneyDay.masked）；單純一個金額的欄位（WidgetBill.amountText、
+/// WidgetQuickTemplate.amountText、QuickRecordEntry.amountText）小工具直接整個換成 mask。
+///
+/// 小工具在 provider（getTimeline／getSnapshot）讀一次放進 entry，View 裡不要讀。
+/// 改了之後一律呼叫 WidgetRefresh.afterHideAmountsChanged()（WidgetActions.swift）重畫全部。
+enum WidgetHideAmounts {
+    static let key = "widget_hide_amounts"
+    /// 遮起來的金額長這樣（我們自己的寫法，不是系統鎖著時的灰色色塊）
+    static let mask = "NT$ ••••"
+
+    static var isOn: Bool { WidgetShared.defaults?.bool(forKey: key) ?? false }
+
+    static func set(_ on: Bool) {
+        WidgetShared.defaults?.set(on, forKey: key)
+    }
 }
 
 /// 時間門檻：兩邊用同一組數字
@@ -123,11 +184,78 @@ struct WidgetMoneyDay: Codable, Equatable, Identifiable {
     var remainingDays: Int
     var bar: WidgetMoneyBar
 
+    // MARK: [v2] 以下都是選填：v1 寫的舊檔沒有這些欄位，照樣解得開（App 一打開就補齊）
+
+    /// 記帳台左半「今天 NT$1,240・3 筆」；今天還沒記帳「今天 還沒花錢」（小工具畫綠色）
+    var todayText: String? = nil
+    /// 今天記了幾筆變動支出（「今天 還沒花錢」要不要畫綠、鎖定圓形沒收入時的「3 筆」由 App 寫在 lock 裡）
+    var todayCount: Int? = nil
+    /// 記帳台左半「收入 NT$12萬・預估」（薪水進來後沒有「・預估」）；沒有收入紀錄是 nil（不寫這行）
+    var incomeText: String? = nil
+    /// 隱藏金額時的四行字（見 WidgetMoneyMasked）
+    var masked: WidgetMoneyMasked? = nil
+    /// 鎖定畫面「已花」圓形與一行字（見 WidgetMoneyLock）
+    var lock: WidgetMoneyLock? = nil
+
     var id: String { dayKey }
     /// 超支旗標（大字、小標、第二行用紅色；著色模式靠「已超支」三個字）
     var isOver: Bool { state == .over }
 
     func contains(_ date: Date) -> Bool { dayStart <= date && date < dayEnd }
+
+    /// [v2] 依「隱藏金額」挑要顯示的字。小工具一律經過這裡拿字，不自己拼。
+    /// hidden 而快照是 v1 舊檔（沒有 masked）：大字寫 mask，其他行留空（不冒險露出夾在句子裡的金額）。
+    func lines(hidden: Bool) -> WidgetMoneyLines {
+        guard hidden else {
+            return WidgetMoneyLines(title: title, hero: hero, line: line, footer: footer,
+                                    todayText: todayText ?? footer, incomeText: incomeText)
+        }
+        guard let m = masked else {
+            return WidgetMoneyLines(title: title, hero: WidgetHideAmounts.mask, line: "", footer: "",
+                                    todayText: "", incomeText: nil)
+        }
+        return WidgetMoneyLines(title: m.title, hero: m.hero, line: m.line, footer: m.footer,
+                                todayText: m.footer, incomeText: nil)
+    }
+}
+
+/// [v2] 隱藏金額時「還能花」那四行。全部是 App 組好的字。
+///
+/// 正常／超支：title「本月已花」 hero「62%」（超支「103%」） line「還有 19 天」 footer「今天 3 筆」
+/// 沒有收入紀錄：title「本月支出」 hero「NT$ ••••」 line「記一筆收入，才算得出還能花」 footer「今天 3 筆」
+/// 今天還沒記帳時 footer 是「今天 還沒花錢」。
+struct WidgetMoneyMasked: Codable, Equatable {
+    var title: String
+    var hero: String
+    var line: String
+    var footer: String
+}
+
+/// [v2] 鎖定畫面「已花」。全部不含金額，所以隱藏金額開關不影響它。
+///
+/// 正常：ringValue 0.62、ringText「62%」、ringCaption「已花」、inlineText「今天 3 筆・已花 62%」
+/// 超支：ringValue 1、ringText「超支」、ringCaption「已花」、inlineText「今天 3 筆・已花 103%」
+/// 沒有收入紀錄：ringValue 0、ringText「3 筆」（小工具在上面畫購物車圖示）、ringCaption「今天」、
+///              inlineText「今天 3 筆・還沒有收入紀錄」
+/// 今天還沒記帳時「今天 3 筆」那一段是「今天 還沒花錢」、ringText 是「0 筆」。
+struct WidgetMoneyLock: Codable, Equatable {
+    /// 進度環 0…1（App 已經夾好）
+    var ringValue: Double
+    var ringText: String
+    var ringCaption: String
+    var inlineText: String
+}
+
+/// [v2] WidgetMoneyDay.lines(hidden:) 的結果：小工具畫面直接拿這幾個字。
+struct WidgetMoneyLines: Equatable {
+    var title: String
+    var hero: String
+    var line: String
+    var footer: String
+    /// 記帳台左半「今天」那一行（隱藏時＝footer「今天 3 筆」）
+    var todayText: String
+    /// 記帳台左半「收入」那一行；nil＝不寫（沒有收入紀錄、或隱藏金額）
+    var incomeText: String?
 }
 
 struct WidgetMoneySnapshot: Codable, Equatable, WidgetSnapshotPayload {
@@ -143,7 +271,25 @@ struct WidgetMoneySnapshot: Codable, Equatable, WidgetSnapshotPayload {
     /// 從今天到這個月最後一天，每天一份，依日期排序（至少今天一份）。
     /// 明天以後的那幾份是 App 用同一套規則推的：今天花的歸零、剩餘天數減一、每天還能花重算；
     /// 本月支出、收入基準照今天的（還沒記的帳 App 不知道，打開 App 就會重寫）。
+    ///
+    /// [v2] 月底之後**再接下個月 1–7 號**（App 側 WidgetMoneyExtras.nextMonthBoard，固定 7 天）：
+    /// 用下個月的收入基準（那天的本月收入與近 6 個月中位數取大）與那天有效的固定支出月等值算，
+    /// 本月支出＝固定支出＋已經記在下個月的變動支出（通常 0）。11/1 早上沒開 App 也是 11 月的數。
+    /// 過了這 7 天才退回 v1 的「X 月開始了」提示（hasEnded）。
     var days: [WidgetMoneyDay]
+
+    // MARK: [v2] 以下都是選填（v1 舊檔沒有）
+
+    /// 14 個變動分類，照 VariableCategory.allCases 的順序（記帳台的卡、之後 v3 的選單）
+    var categories: [WidgetCategory]? = nil
+    /// 近 60 天記最多次的分類 key（VariableCategory.rawValue），多到少，**至少 3 個**
+    ///（不夠用 飲食、購物、交通、日用品 依序補；有 vehicleCard 時不放「汽車」，免得跟第三張卡重複）
+    var topCategoryKeys: [String]? = nil
+    /// 記帳台第三張卡：有車（沒賣掉）就是「⚡ Taycan 電費」這種；沒車是 nil（第三張改放第三多的分類）
+    var vehicleCard: WidgetVehicleCard? = nil
+    /// 一按就記的常記範本：近 60 天「同名稱＋同金額＋同分類（＋同車）」出現 ≥3 次，最多 4 個，
+    /// 次數多到少。沒有符合的是空陣列（小工具寫說明）；nil＝v1 舊檔
+    var templates: [WidgetQuickTemplate]? = nil
 }
 
 extension WidgetMoneySnapshot {
@@ -165,6 +311,143 @@ extension WidgetMoneySnapshot {
     func isStale(at date: Date) -> Bool {
         date.timeIntervalSince(generatedAt) > WidgetFreshness.moneyStaleAfter
     }
+
+    // MARK: [v2] 記帳台
+
+    /// 記帳台右半要畫的卡有沒有資料（v1 舊檔沒有分類 → 右半寫「打開 LifeGood 一次」）
+    var hasDeskData: Bool { categories != nil && topCategoryKeys != nil }
+
+    func category(forKey key: String) -> WidgetCategory? {
+        categories?.first(where: { $0.key == key })
+    }
+
+    /// 記帳台右半 2×2 的四張卡，依序：最常記的分類、第二多的分類、車子卡（沒車＝第三多的分類）、
+    /// 「＋ 記一筆」（固定）。只挑、不算；網址一律 WidgetLink 組好。資料不夠時少於 4 張，
+    /// 但「記一筆」一定在最後。
+    func deskTiles() -> [WidgetDeskTile] {
+        let keys = (topCategoryKeys ?? []).filter { category(forKey: $0) != nil }
+        var tiles: [WidgetDeskTile] = []
+        for key in keys.prefix(2) {
+            if let c = category(forKey: key) { tiles.append(WidgetDeskTile.category(c)) }
+        }
+        if let car = vehicleCard {
+            tiles.append(WidgetDeskTile.vehicle(car))
+        } else if keys.count > 2, let c = category(forKey: keys[2]) {
+            tiles.append(WidgetDeskTile.category(c))
+        }
+        tiles.append(WidgetDeskTile.addExpense)
+        return tiles
+    }
+}
+
+// MARK: - [v2] 記帳台、一按就記用的資料
+
+/// 一個變動分類的樣子。key 原封不動帶回網址（lifegood://add/expense?cat=<key>），App 用
+/// VariableCategory(rawValue:) 還原——小工具裡不准寫任何分類的字面字串。
+struct WidgetCategory: Codable, Equatable, Identifiable {
+    /// VariableCategory.rawValue（「飲食」）
+    var key: String
+    /// 卡上的字（目前跟 key 一樣，「飲食」）
+    var title: String
+    /// SF Symbol（VariableCategory.icon，「fork.knife」）
+    var icon: String
+    /// App 分類卡的兩色漸層與分類色（MoneyArtTheme.of(_:) 的 top／bottom／tint，0xRRGGBB）
+    var top: UInt32
+    var bottom: UInt32
+    var tint: UInt32
+
+    var id: String { key }
+}
+
+/// 記帳台第三張卡「⚡ Taycan 電費」：點了開新增支出、已選汽車／電費、連到那台車、度數欄看得到
+///（跟從車子頁記電費一樣，App 用 AddVehicleView.makeVariablePreset）。
+struct WidgetVehicleCard: Codable, Equatable {
+    var vehicleId: UUID
+    /// 「Taycan」
+    var vehicleName: String
+    /// VehicleVariableCategory.rawValue（「電費」）
+    var categoryKey: String
+    /// 卡上的字「Taycan 電費」（App 組好）
+    var title: String
+    /// SF Symbol（VehicleVariableCategory.icon，「bolt.fill」）
+    var icon: String
+    /// 青綠漸層（樣稿：0x7FE3D0 → 0x1A9C8C，分類色 0x138A7E）
+    var top: UInt32
+    var bottom: UInt32
+    var tint: UInt32
+}
+
+/// 一按就記的常記範本（例「7-11 咖啡 NT$65」）。按鈕把它原樣變成一筆 QuickRecordEntry。
+struct WidgetQuickTemplate: Codable, Equatable, Identifiable {
+    /// 穩定的 id（makeId；同一組名稱＋金額＋分類＋車，每次寫快照都一樣）
+    var id: String
+    /// 「7-11 咖啡」（那幾筆支出的名稱，去頭尾空白）
+    var title: String
+    /// 65（台幣；小工具不拿來算，只原樣寫進收件匣）
+    var amount: Double
+    /// 「NT$65」（App 組好；隱藏金額時小工具換成 WidgetHideAmounts.mask）
+    var amountText: String
+    /// VariableCategory.rawValue
+    var categoryKey: String
+    /// 連到哪台車（汽車分類的範本）；沒有是 nil
+    var vehicleId: UUID? = nil
+    /// VehicleVariableCategory.rawValue（有車才有）
+    var vehicleCategoryKey: String? = nil
+    /// SF Symbol：有車用車子分類的圖示，否則用變動分類的圖示
+    var icon: String
+    var top: UInt32
+    var bottom: UInt32
+    var tint: UInt32
+    /// 近 60 天記了幾次（排序用，v3 選單會顯示）
+    var count: Int
+
+    /// 範本 id 的組法：分類｜車｜車子分類｜名稱｜金額（以分為單位的整數）。只有 App 會呼叫。
+    static func makeId(title: String, amount: Double, categoryKey: String,
+                       vehicleId: UUID?, vehicleCategoryKey: String?) -> String {
+        let cents = amount.isFinite ? Int((amount * 100).rounded()) : 0
+        let car = vehicleId?.uuidString ?? "-"
+        let carCat = vehicleCategoryKey ?? "-"
+        return [categoryKey, car, carCat, title, String(cents)].joined(separator: "|")
+    }
+}
+
+/// 記帳台右半一張卡（WidgetMoneySnapshot.deskTiles() 組，不存檔）
+struct WidgetDeskTile: Equatable, Identifiable {
+    enum Style: Equatable {
+        /// 分類卡（App 分類卡的漸層＋白色圖示）
+        case category
+        /// 車子卡（青綠漸層）
+        case vehicle
+        /// 「＋ 記一筆」（白 78% 底、App 藍圖示；顏色由小工具的 palette 決定，不用 top／bottom）
+        case add
+    }
+
+    var id: String
+    var style: Style
+    var title: String
+    var icon: String
+    var top: UInt32
+    var bottom: UInt32
+    var tint: UInt32
+    /// 點了開哪裡（新增支出，帶 src=widget）
+    var url: URL
+
+    static func category(_ c: WidgetCategory) -> WidgetDeskTile {
+        WidgetDeskTile(id: "cat-" + c.key, style: .category, title: c.title, icon: c.icon,
+                       top: c.top, bottom: c.bottom, tint: c.tint,
+                       url: WidgetLink.addExpense(categoryKey: c.key))
+    }
+
+    static func vehicle(_ v: WidgetVehicleCard) -> WidgetDeskTile {
+        WidgetDeskTile(id: "car-" + v.vehicleId.uuidString, style: .vehicle, title: v.title, icon: v.icon,
+                       top: v.top, bottom: v.bottom, tint: v.tint,
+                       url: WidgetLink.addExpense(vehicleId: v.vehicleId, vehicleCategoryKey: v.categoryKey))
+    }
+
+    /// 「＋ 記一筆」：空白的新增支出
+    static let addExpense = WidgetDeskTile(id: "add", style: .add, title: "記一筆", icon: "plus",
+                                           top: 0xFFFFFF, bottom: 0xFFFFFF, tint: 0x2F6FE0,
+                                           url: WidgetLink.addExpense())
 }
 
 // MARK: - 今天（life_v1.json）
@@ -180,6 +463,15 @@ struct WidgetStop: Codable, Equatable, Identifiable {
     var lockTitle: String
 
     var id: String { stop.id }
+
+    /// [v2] 鎖定畫面、StandBy 用的標題（使用者決定 2：項目名稱、會議主題可以放，人名不放）。
+    /// 會議、我的行事曆、系統行事曆寫主題（stop.title）；旅遊景點寫 lockTitle（過夜那站「住宿」）；
+    /// 主題是空的退回 lockTitle。**stop.owner（部屬姓名）在這些地方一律不寫。**
+    var lockedSurfaceTitle: String {
+        if stop.kind == .trip { return lockTitle }
+        let t = stop.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        return t.isEmpty ? lockTitle : t
+    }
 }
 
 /// 全天的事的種類。宣告順序就是優先序（生日最優先）。
@@ -293,6 +585,95 @@ extension WidgetLifeSnapshot {
     }
 }
 
+// MARK: - [v2] 接下來要繳（bills_v1.json）
+
+/// 一筆要繳（或要領回）的種類
+enum WidgetBillKind: String, Codable {
+    /// 記帳的固定支出（Netflix、中華電信）
+    case fixed
+    /// 房貸（每一段）
+    case mortgage
+    /// 車子的（車貸、停車月租、保險、保養…，VehicleFacts.upcoming）
+    case vehicle
+    /// 保費
+    case premium
+    /// 保單滿期（會領回來的錢）
+    case maturity
+}
+
+/// 某一天要扣的一筆。記帳的固定支出和理財的房貸、車貸、保費合成一份、已經去重。
+///
+/// 例：title「苗栗的家 房貸」 detail「第 8／480 期」 dueDate 10/20 00:00 amountText「NT$6.2萬」
+///     title「Netflix」 detail「每月」 amountText「NT$390」
+///     title「美元保單 滿期」 detail「可以領回」 amountText「+美金 3.6萬」 isIncome true
+struct WidgetBill: Codable, Equatable, Identifiable {
+    /// 每一次扣款一個：「<來源 id>@<yyyy-MM-dd>」（記帳「x-<支出 UUID>@…」、理財「<FinanceUpcoming.id>@…」）
+    var id: String
+    var kind: WidgetBillKind
+    /// App 怎麼叫就怎麼叫（「Netflix」「苗栗的家 房貸」「Taycan 車貸」）
+    var title: String
+    /// 「第 26／60 期」「每月」「可以領回」；沒有是 nil
+    var detail: String?
+    /// 扣款日那一天的 00:00（Calendar.current）
+    var dueDate: Date
+    /// App 組好的金額字：台幣「NT$390」「NT$6.2萬」、外幣「美金 3,000」、保養「約 NT$3,000」、
+    /// 滿期「+美金 3.6萬」。隱藏金額時小工具整個換成 WidgetHideAmounts.mask
+    var amountText: String
+    /// 會領回來的錢（保單滿期）：小工具畫綠字＋★
+    var isIncome: Bool
+    /// SF Symbol
+    var icon: String
+    /// 左邊色條：淺色、深色各一（0xRRGGBB）
+    var tint: UInt32
+    var tintDark: UInt32
+    /// 點這一列開哪裡（WidgetLink 組好的網址字串）
+    var link: String
+
+    /// link 解不開時退回固定支出頁
+    var url: URL { URL(string: link) ?? WidgetLink.fixedExpenses }
+}
+
+struct WidgetBillsSnapshot: Codable, Equatable, WidgetSnapshotPayload {
+    static let file = WidgetSnapshotFile.bills
+    static let schemaVersion = 1
+
+    var schema: Int = WidgetBillsSnapshot.schemaVersion
+    var generatedAt: Date
+    /// 寫的當下是哪一天「2026-10-13」
+    var dataDay: String
+    /// 清單涵蓋到哪一天的 00:00（今天＋45 天）：App 兩週沒開也還有 30 天可以列
+    var horizonEnd: Date
+    /// 今天（含）到 horizonEnd 之前每一次扣款，依 dueDate、再依 title 排好
+    var items: [WidgetBill]
+}
+
+extension WidgetBillsSnapshot {
+    /// 中型列「接下來 30 天」
+    static let listDays = 30
+
+    /// 從 now 那一天（含）起 days 天內的（今天扣的也算）。過了的自己掉出去，不用 App 重寫。
+    func upcoming(at now: Date, days: Int = WidgetBillsSnapshot.listDays) -> [WidgetBill] {
+        let cal = Calendar.current
+        let today = cal.startOfDay(for: now)
+        guard let end = cal.date(byAdding: .day, value: days, to: today) else { return [] }
+        return items.filter { $0.dueDate >= today && $0.dueDate < end }
+    }
+
+    /// 下一筆（不限 30 天，「30 天內沒有要扣的／下一筆 11/15 …」用）
+    func next(at now: Date) -> WidgetBill? {
+        let today = Calendar.current.startOfDay(for: now)
+        return items.first(where: { $0.dueDate >= today })
+    }
+
+    /// 過了 horizonEnd：清單已經不完整，只能請使用者打開 App
+    func hasEnded(at now: Date) -> Bool { now >= horizonEnd }
+
+    /// 超過兩天沒更新：最下面小字寫 WidgetDateText.lastUpdated(generatedAt)（跟還能花同一個門檻）
+    func isStale(at now: Date) -> Bool {
+        now.timeIntervalSince(generatedAt) > WidgetFreshness.moneyStaleAfter
+    }
+}
+
 // MARK: - 日期與時間的字（兩邊共用，不含金額）
 
 enum WidgetDateText {
@@ -329,8 +710,53 @@ enum WidgetDateText {
         return f
     }()
 
+    /// [v2] 「10/15 (週四)」（接下來要繳的日期）
+    private static let billDateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.calendar = Calendar(identifier: .gregorian)
+        f.timeZone = .autoupdatingCurrent
+        f.locale = Locale(identifier: "zh_Hant_TW")
+        f.dateFormat = "M/d (EEE)"
+        return f
+    }()
+
     /// 「10/13 週二」
     static func dayLabel(_ date: Date) -> String { dayLabelFormatter.string(from: date) }
+
+    /// [v2] 「10/15 (週四)」
+    static func billDate(_ date: Date) -> String { billDateFormatter.string(from: date) }
+
+    /// [v2] 記帳台左上「10 月・第 13 天」
+    static func monthDayLabel(_ date: Date) -> String {
+        let cal = Calendar.current
+        let month = cal.component(.month, from: date)
+        let day = cal.component(.day, from: date)
+        return "\(month) 月・第 \(day) 天"
+    }
+
+    /// [v2] now 那一天到 date 那一天差幾天（日曆天；同一天 0、明天 1、昨天 -1）。日差不是金額，小工具可以算
+    static func daysFrom(_ now: Date, to date: Date) -> Int {
+        let cal = Calendar.current
+        let a = cal.startOfDay(for: now)
+        let b = cal.startOfDay(for: date)
+        return cal.dateComponents([.day], from: a, to: b).day ?? 0
+    }
+
+    /// [v2] 扣款日倒數：「今天扣款」「明天扣款」「2 天後」；會領回的（isIncome）寫「今天到期」「明天到期」。
+    /// 已經過了回 nil（那一列不該再出現）
+    static func dueText(_ due: Date, from now: Date, isIncome: Bool = false) -> String? {
+        let n = daysFrom(now, to: due)
+        if n < 0 { return nil }
+        if n == 0 { return isIncome ? "今天到期" : "今天扣款" }
+        if n == 1 { return isIncome ? "明天到期" : "明天扣款" }
+        return "\(n) 天後"
+    }
+
+    /// [v2] 今天、明天要扣的（小工具畫橘字，跟收支總覽一樣）
+    static func isDueSoon(_ due: Date, from now: Date) -> Bool {
+        let n = daysFrom(now, to: due)
+        return n >= 0 && n <= 1
+    }
 
     /// 「10/13」
     static func shortDate(_ date: Date) -> String { shortDateFormatter.string(from: date) }

@@ -62,6 +62,9 @@ struct AddExpenseView: View {
     let expenseType: ExpenseType
     var editingExpense: Expense?
     var preset: AddExpensePreset?
+    /// [v2 小工具] 從小工具／控制項點進來（網址帶 src=widget）：表單出現後金額欄自動聚焦、數字鍵盤直接跳出。
+    /// 放在 preset 後面、有預設值：既有呼叫端都不用改
+    var focusAmountOnAppear: Bool = false
 
     // MARK: - 基本欄位
 
@@ -242,6 +245,10 @@ struct AddExpenseView: View {
     /// 每次選擇候選地點就遞增；resolve 完成回填時比對是否仍是最新一次選擇，避免快速連點造成舊請求覆寫新選擇的座標
     @State private var placeSelectionToken: Int = 0
     @FocusState private var titleFieldFocused: Bool
+    /// [v2 小工具] 金額欄（focusAmountOnAppear 時自動聚焦）
+    @FocusState private var amountFieldFocused: Bool
+    /// [v2 小工具] 自動聚焦只做一次：onAppear 再跑一次（從別的畫面回來）時不要又把鍵盤叫出來
+    @State private var didAutoFocusAmount = false
     @State private var suppressNextCompleterUpdate = false
     /// 是否展開所有候選地點（預設僅顯示 20 個）
     @State private var expandedSuggestions: Bool = false
@@ -588,6 +595,7 @@ struct AddExpenseView: View {
             .onAppear {
                 loadEditing()
                 applyPreset()
+                focusAmountIfRequested()
                 // 依進階開關決定初始 sheet 高度（須在 loadEditing 後再算，因為它可能會打開進階模式）
                 // [v25.538] 從車子帶進來要直接顯示車輛區的，也一開始就拉滿，不然度數那幾欄在半屏下面看不到
                 if expenseType == .variable {
@@ -769,6 +777,7 @@ struct AddExpenseView: View {
                 }
                 TextField(isMortgage ? "每月房貸金額" : (isCarLoan ? "每月車貸金額" : (isSavingsInsurance ? "保費金額" : "金額")), text: $amountText)
                     .keyboardType(.decimalPad)
+                    .focused($amountFieldFocused)
                 // 計算機：先算再填（例：多筆發票加總、帳單分攤），結果直接帶入金額
                 CalcFieldButton(text: $amountText, accent: expenseType == .variable ? .orange : .blue)
             }
@@ -3598,6 +3607,8 @@ struct AddExpenseView: View {
         )
         // 金額歷史（不在 memberwise init）：編輯重建時帶回，不然存個檔走勢就被清空
         expense.amountHistory = editingExpense?.amountHistory ?? []
+        // [v2 小工具] 「從小工具一按記的」標記（不在 memberwise init）：編輯那一筆不要把它洗掉（電子發票防重複看它）
+        expense.fromQuickRecord = editingExpense?.fromQuickRecord
         // 充電資訊：只在「變動＋關聯汽車＋電費」時存（比照子分類條件化原則）
         // [v25.538] 還要真的選了車：沒選車存進去，卡片（要 linkedVehicleId）永遠看不到
         let linksVehicleVariable = expenseType == .variable && targetVehId != nil
@@ -4344,6 +4355,17 @@ struct AddExpenseView: View {
             return rate.rate
         }
         return 1
+    }
+
+    /// [v2 小工具] 從小工具進來的新增：等 sheet 升起的動畫（約 0.45 秒）播完再把焦點給金額欄，
+    /// 數字鍵盤直接跳出（太早給焦點，sheet 還在動時鍵盤會被吃掉）。編輯舊資料不做
+    private func focusAmountIfRequested() {
+        guard focusAmountOnAppear, editingExpense == nil, !didAutoFocusAmount else { return }
+        didAutoFocusAmount = true
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 450_000_000)
+            amountFieldFocused = true
+        }
     }
 
     private func applyPreset() {

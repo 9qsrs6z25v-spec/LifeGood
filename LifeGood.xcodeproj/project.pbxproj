@@ -27,6 +27,20 @@
 		A01B000001001539 /* WidgetSnapshotWriter.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001539 /* WidgetSnapshotWriter.swift */; };
 		A01B000001001540 /* TodayAgenda.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001540 /* TodayAgenda.swift */; };
 		A01B000001001541 /* CalendarDayItems.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001541 /* CalendarDayItems.swift */; };
+		A01B000002000056 /* QuickRecordInbox.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000056 /* QuickRecordInbox.swift */; };
+		A01B000002000066 /* QuickRecordInbox.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000056 /* QuickRecordInbox.swift */; };
+		A01B000002000057 /* WidgetActions.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000057 /* WidgetActions.swift */; };
+		A01B000002000067 /* WidgetActions.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000057 /* WidgetActions.swift */; };
+		A01B000002000071 /* LedgerDeskWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000071 /* LedgerDeskWidget.swift */; };
+		A01B000002000072 /* QuickRecordWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000072 /* QuickRecordWidget.swift */; };
+		A01B000002000073 /* BillsWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000073 /* BillsWidget.swift */; };
+		A01B000002000074 /* LockScreenWidgets.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000074 /* LockScreenWidgets.swift */; };
+		A01B000002000075 /* LifeGoodControls.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000075 /* LifeGoodControls.swift */; };
+		A01B000002000076 /* WidgetIntents.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000076 /* WidgetIntents.swift */; };
+		A01B000002000077 /* WidgetMoneyPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000077 /* WidgetMoneyPanel.swift */; };
+		A01B000001001542 /* QuickRecordImporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001542 /* QuickRecordImporter.swift */; };
+		A01B000001001543 /* WidgetBillsBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001543 /* WidgetBillsBuilder.swift */; };
+		A01B000001001544 /* WidgetMoneyExtras.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001544 /* WidgetMoneyExtras.swift */; };
 		A01B000001001506 /* PhotoImportCenter.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001506 /* PhotoImportCenter.swift */; };
 		A01B000001001507 /* PhotoSlideshowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001507 /* PhotoSlideshowView.swift */; };
 		A01B000001001508 /* BeatDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001508 /* BeatDetector.swift */; };
@@ -369,6 +383,18 @@
 		A01A000001001539 /* WidgetSnapshotWriter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetSnapshotWriter.swift; sourceTree = "<group>"; };
 		A01A000001001540 /* TodayAgenda.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TodayAgenda.swift; sourceTree = "<group>"; };
 		A01A000001001541 /* CalendarDayItems.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarDayItems.swift; sourceTree = "<group>"; };
+		A01A000002000056 /* QuickRecordInbox.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickRecordInbox.swift; sourceTree = "<group>"; };
+		A01A000002000057 /* WidgetActions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetActions.swift; sourceTree = "<group>"; };
+		A01A000002000071 /* LedgerDeskWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LedgerDeskWidget.swift; sourceTree = "<group>"; };
+		A01A000002000072 /* QuickRecordWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickRecordWidget.swift; sourceTree = "<group>"; };
+		A01A000002000073 /* BillsWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BillsWidget.swift; sourceTree = "<group>"; };
+		A01A000002000074 /* LockScreenWidgets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LockScreenWidgets.swift; sourceTree = "<group>"; };
+		A01A000002000075 /* LifeGoodControls.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LifeGoodControls.swift; sourceTree = "<group>"; };
+		A01A000002000076 /* WidgetIntents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetIntents.swift; sourceTree = "<group>"; };
+		A01A000002000077 /* WidgetMoneyPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetMoneyPanel.swift; sourceTree = "<group>"; };
+		A01A000001001542 /* QuickRecordImporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickRecordImporter.swift; sourceTree = "<group>"; };
+		A01A000001001543 /* WidgetBillsBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetBillsBuilder.swift; sourceTree = "<group>"; };
+		A01A000001001544 /* WidgetMoneyExtras.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetMoneyExtras.swift; sourceTree = "<group>"; };
 		A01A000001000035 /* GradeTitleView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GradeTitleView.swift; sourceTree = "<group>"; };
 		A01A000001000036 /* SpouseResumeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpouseResumeView.swift; sourceTree = "<group>"; };
 		A01A000001000037 /* ChildrenResumeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChildrenResumeView.swift; sourceTree = "<group>"; };
@@ -434,6 +460,13 @@
 				A01A000002000053 /* WidgetPalette.swift */,
 				A01A000002000054 /* MoneyLeftWidget.swift */,
 				A01A000002000055 /* TodayWidget.swift */,
+				A01A000002000071 /* LedgerDeskWidget.swift */,
+				A01A000002000072 /* QuickRecordWidget.swift */,
+				A01A000002000073 /* BillsWidget.swift */,
+				A01A000002000074 /* LockScreenWidgets.swift */,
+				A01A000002000075 /* LifeGoodControls.swift */,
+				A01A000002000076 /* WidgetIntents.swift */,
+				A01A000002000077 /* WidgetMoneyPanel.swift */,
 				A01A000002000006 /* Info.plist */,
 				A01A000002000050 /* LifeGoodWidgets.entitlements */,
 			);
@@ -448,6 +481,8 @@
 				A01A000002000008 /* PhotoImportAttributes.swift */,
 				A01A000002000051 /* WidgetSnapshot.swift */,
 				A01A000002000052 /* WidgetLink.swift */,
+				A01A000002000056 /* QuickRecordInbox.swift */,
+				A01A000002000057 /* WidgetActions.swift */,
 			);
 			path = Shared;
 			sourceTree = "<group>";
@@ -521,6 +556,9 @@
 				A01A000001001539 /* WidgetSnapshotWriter.swift */,
 				A01A000001001540 /* TodayAgenda.swift */,
 				A01A000001001541 /* CalendarDayItems.swift */,
+				A01A000001001542 /* QuickRecordImporter.swift */,
+				A01A000001001543 /* WidgetBillsBuilder.swift */,
+				A01A000001001544 /* WidgetMoneyExtras.swift */,
 				A01A000001000040 /* EInvoiceClient.swift */,
 				A01A000001000041 /* InvoiceCategorizer.swift */,
 				A01A000001000042 /* EInvoiceSyncManager.swift */,
@@ -796,6 +834,15 @@
 				A01B000002000053 /* WidgetPalette.swift in Sources */,
 				A01B000002000054 /* MoneyLeftWidget.swift in Sources */,
 				A01B000002000055 /* TodayWidget.swift in Sources */,
+				A01B000002000056 /* QuickRecordInbox.swift in Sources */,
+				A01B000002000057 /* WidgetActions.swift in Sources */,
+				A01B000002000071 /* LedgerDeskWidget.swift in Sources */,
+				A01B000002000072 /* QuickRecordWidget.swift in Sources */,
+				A01B000002000073 /* BillsWidget.swift in Sources */,
+				A01B000002000074 /* LockScreenWidgets.swift in Sources */,
+				A01B000002000075 /* LifeGoodControls.swift in Sources */,
+				A01B000002000076 /* WidgetIntents.swift in Sources */,
+				A01B000002000077 /* WidgetMoneyPanel.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -921,6 +968,11 @@
 				A01B000001001539 /* WidgetSnapshotWriter.swift in Sources */,
 				A01B000001001540 /* TodayAgenda.swift in Sources */,
 				A01B000001001541 /* CalendarDayItems.swift in Sources */,
+				A01B000002000066 /* QuickRecordInbox.swift in Sources */,
+				A01B000002000067 /* WidgetActions.swift in Sources */,
+				A01B000001001542 /* QuickRecordImporter.swift in Sources */,
+				A01B000001001543 /* WidgetBillsBuilder.swift in Sources */,
+				A01B000001001544 /* WidgetMoneyExtras.swift in Sources */,
 				A01B000001001506 /* PhotoImportCenter.swift in Sources */,
 				A01B000001001507 /* PhotoSlideshowView.swift in Sources */,
 				A01B000001001509 /* SlideshowDecor.swift in Sources */,
@@ -983,7 +1035,7 @@
 				CLANG_ENABLE_MODULES = YES;
 				CODE_SIGN_ENTITLEMENTS = LifeGoodWidgets/LifeGoodWidgets.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1299;
+				CURRENT_PROJECT_VERSION = 1300;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = LifeGoodWidgets/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "LifeGood";
@@ -994,7 +1046,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 25.546;
+				MARKETING_VERSION = 25.547;
 				PRODUCT_BUNDLE_IDENTIFIER = com.lifegood.app.widgets;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
@@ -1010,7 +1062,7 @@
 				CLANG_ENABLE_MODULES = YES;
 				CODE_SIGN_ENTITLEMENTS = LifeGoodWidgets/LifeGoodWidgets.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1299;
+				CURRENT_PROJECT_VERSION = 1300;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = LifeGoodWidgets/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "LifeGood";
@@ -1021,7 +1073,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 25.546;
+				MARKETING_VERSION = 25.547;
 				PRODUCT_BUNDLE_IDENTIFIER = com.lifegood.app.widgets;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
@@ -1038,7 +1090,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = LifeGood/LifeGood.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1299;
+				CURRENT_PROJECT_VERSION = 1300;
 				DEVELOPMENT_ASSET_PATHS = "\"LifeGood/Preview Content\"";
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -1070,7 +1122,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 25.546;
+				MARKETING_VERSION = 25.547;
 				PRODUCT_BUNDLE_IDENTIFIER = com.lifegood.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -1086,7 +1138,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = LifeGood/LifeGood.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1299;
+				CURRENT_PROJECT_VERSION = 1300;
 				DEVELOPMENT_ASSET_PATHS = "\"LifeGood/Preview Content\"";
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -1118,7 +1170,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 25.546;
+				MARKETING_VERSION = 25.547;
 				PRODUCT_BUNDLE_IDENTIFIER = com.lifegood.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;

@@ -853,7 +853,8 @@ struct EInvoiceHistoryView: View {
                                     Button(role: .destructive) {
                                         sync.revert(record, expenseStore: expenseStore)
                                     } label: {
-                                        Label("撤銷", systemImage: "trash")
+                                        // [v2] 併入既有的只拿掉發票資訊、不刪支出，字不能寫「撤銷」配垃圾桶
+                                        Label(Self.revertTitle(record), systemImage: Self.revertIcon(record))
                                     }
                                 }
                         }
@@ -936,6 +937,8 @@ struct EInvoiceHistoryView: View {
                         .clipShape(Capsule())
 
                     Spacer()
+                    // [v2] 併入既有（認領了「一按就記」那一筆、沒有另建支出）
+                    mergedBadge(record)
                     // 分類膠囊
                     Text(record.assignedCategory.rawValue)
                         .font(.caption2.weight(.semibold))
@@ -947,6 +950,30 @@ struct EInvoiceHistoryView: View {
                 }
             }
         }
+    }
+
+    /// [v2] 「併入既有」小膠囊（灰藍，跟分類膠囊同一個寫法）：這張發票併到「一按就記」記的那一筆、
+    /// 沒有另建支出。一般匯入的不畫
+    @ViewBuilder
+    private func mergedBadge(_ record: EInvoiceImportRecord) -> some View {
+        if record.isMerged {
+            Text("併入既有")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(Color.indigo)
+                .padding(.horizontal, 7).padding(.vertical, 2)
+                .background(Color.indigo.opacity(0.12))
+                .clipShape(Capsule())
+        }
+    }
+
+    /// [v2] 左滑按鈕的字：併入既有的「拿掉發票」（只拿掉那筆備註裡的發票資訊，支出留著）；其他照舊「撤銷」
+    private static func revertTitle(_ record: EInvoiceImportRecord) -> String {
+        record.isMerged ? "拿掉發票" : "撤銷"
+    }
+
+    /// [v2] 左滑按鈕的圖示：併入既有的不用垃圾桶（不會刪支出）
+    private static func revertIcon(_ record: EInvoiceImportRecord) -> String {
+        record.isMerged ? "minus.circle" : "trash"
     }
 
     // 美化：雙層脈衝光環空狀態，對齊 IncomeView.emptyState 規格

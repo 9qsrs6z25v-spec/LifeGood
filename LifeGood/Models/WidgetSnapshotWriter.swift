@@ -4,19 +4,25 @@ import UIKit
 import Combine
 import WidgetKit
 
-// MARK: - 小工具快照的寫手（v25.545，只屬於主 App）
+// MARK: - 小工具快照的寫手（v25.545，只屬於主 App；v2 加 bills 與 money 的 v2 欄位）
 //
-// 從 ExpenseStore／LifeStore 組出 WidgetMoneySnapshot／WidgetLifeSnapshot
+// 從 ExpenseStore／FinanceStore／LifeStore 組出 WidgetMoneySnapshot／WidgetLifeSnapshot／WidgetBillsSnapshot
 // （LifeGood/Shared/WidgetSnapshot.swift），防抖 3 秒、內容沒變就不寫，
-// 真的寫了才叫 WidgetCenter.shared.reloadTimelines(ofKind:)。
+// 真的寫了才叫重畫（WidgetRefresh.reload，WidgetKind.moneyKinds／lifeKinds／billsKinds）。
 //
 // 金額的字一律用 App 現有的 MoneyFormat／ntdWanString 組，小工具不再格式化。
-// 規格見 scratchpad/widgets/v1/brief.md 的 G1。
+// 規格見 scratchpad/widgets/v1/brief.md 的 G1、scratchpad/widgets/v2/brief.md 的 G1-4。
+//
+// [v2] money 多寫：每一天的 todayText／incomeText／隱藏版／鎖定畫面版的字、月底之後的下個月 1–7 號、
+//      分類、最常記的分類、車子卡、常記範本（WidgetMoneyExtras.swift）；
+//      新的 bills_v1.json：接下來要繳（WidgetBillsBuilder.swift）。
 //
 // 什麼時候寫：
 //   • 啟動（start）：掛好監聽後馬上寫一次全部
-//   • 記帳有變：ExpenseStore.objectWillChange 防抖 3 秒 → money
+//   • 記帳有變：ExpenseStore.objectWillChange 防抖 3 秒 → money、bills
 //     （存檔的 didSet 與 iCloud 重讀 load() 都會改 @Published，兩條都接得到；所以不必改 ExpenseStore）
+//   • [v2] 理財有變：FinanceStore.objectWillChange 跟記帳併成同一個防抖 3 秒 → money（車子卡、範本的車）、
+//     bills（房貸、車貸、保費）
 //   • 人生／系統行事曆有變：LifeStore、AppleCalendarBridge 的 objectWillChange 防抖 3 秒 → life
 //   • 背景收到 iCloud 變更（iPad／Mac 記的帳）：包在背景工作裡馬上寫全部——背景的防抖計時器
 //     不一定等得到 3 秒（App 隨時會被暫停）
@@ -37,16 +43,20 @@ final class WidgetSnapshotWriter {
 
     /// 哪一份快照
     enum Part: Hashable {
-        /// money_v1.json（還能花）
+        /// money_v1.json（還能花、記帳台、一按就記、鎖定畫面「已花」）
         case money
-        /// life_v1.json（今天）
+        /// life_v1.json（今天、鎖定畫面「下一場」）
         case life
+        /// [v2] bills_v1.json（接下來要繳、鎖定畫面「下一筆要繳」）
+        case bills
     }
 
     /// 防抖秒數：連續改（一次存檔常常改好幾個 @Published）只寫一次
     private static let debounceSeconds = 3
 
     private var expenseStore: ExpenseStore?
+    /// [v2] 車子卡、常記範本的車、接下來要繳的理財那幾件
+    private var financeStore: FinanceStore?
     private var lifeStore: LifeStore?
     private var cancellables = Set<AnyCancellable>()
     private var started = false
@@ -58,15 +68,21 @@ final class WidgetSnapshotWriter {
     // MARK: - 對外
 
     /// 啟動時呼叫一次（重複呼叫無害，第二次起什麼都不做）：掛監聽，然後馬上寫一次全部。
-    func start(expense: ExpenseStore, life: LifeStore) {
+    /// [v2] 多收 finance（簽名改了，LifeGoodApp 一起改）。
+    func start(expense: ExpenseStore, finance: FinanceStore, life: LifeStore) {
         guard !started else { return }
         started = true
         expenseStore = expense
+        financeStore = finance
         lifeStore = life
 
+        // [v2] 理財改了（車子、房貸、保單）也要重寫：車子卡、範本的車、接下來要繳的理財那幾件。
+        // 跟記帳併成同一個防抖：記一筆連車的支出會同時改兩邊（帳本＋車子鏡像），只算一次
+        //（bills 每次要建兩份 FinanceLoanIndex，不要連算兩遍）
         expense.objectWillChange
+            .merge(with: finance.objectWillChange)
             .debounce(for: .seconds(Self.debounceSeconds), scheduler: DispatchQueue.main)
-            .sink { [weak self] _ in self?.writeNow([.money]) }
+            .sink { [weak self] _ in self?.writeNow([.money, .bills]) }
             .store(in: &cancellables)
 
         // 系統行事曆變了（別的 App 改、授權剛打開）也要重寫「今天」：
@@ -91,20 +107,26 @@ final class WidgetSnapshotWriter {
     }
 
     /// 立刻組＋寫（啟動、回前景、進背景、背景收到 iCloud 變更）。還沒 start 就什麼都不做
-    ///（start 會馬上寫一次）。
-    func writeNow(_ parts: Set<Part> = [.money, .life]) {
+    ///（start 會馬上寫一次）。[v2] 預設三份都寫；一按就記收完帳（QuickRecordImporter）只叫 [.money]。
+    func writeNow(_ parts: Set<Part> = [.money, .life, .bills]) {
         let now = Date()
         if parts.contains(.money), let expense = expenseStore {
-            let snapshot = Self.moneySnapshot(expense: expense, now: now)
+            let snapshot = Self.moneySnapshot(expense: expense, finance: financeStore, now: now)
             if WidgetSnapshotStore.write(snapshot) {
-                WidgetCenter.shared.reloadTimelines(ofKind: WidgetKind.moneyLeft)
+                WidgetRefresh.reload(WidgetKind.moneyKinds)
             }
         }
         if parts.contains(.life), let life = lifeStore {
             let snapshot = Self.lifeSnapshot(life: life, now: now)
             // write 回 false（內容沒變）時，前景且舊檔夠舊就只換時間戳記（restampLife）
             if WidgetSnapshotStore.write(snapshot) || Self.restampLife(snapshot, now: now) {
-                WidgetCenter.shared.reloadTimelines(ofKind: WidgetKind.today)
+                WidgetRefresh.reload(WidgetKind.lifeKinds)
+            }
+        }
+        if parts.contains(.bills), let expense = expenseStore, let finance = financeStore {
+            let snapshot = WidgetBillsBuilder.snapshot(expense: expense, finance: finance, now: now)
+            if WidgetSnapshotStore.write(snapshot) {
+                WidgetRefresh.reload(WidgetKind.billsKinds)
             }
         }
     }
@@ -167,7 +189,12 @@ final class WidgetSnapshotWriter {
 
     /// 今天到月底每天一份。第 0 天就是收支總覽頭部那一份（同一個 OverviewBoardData.build 呼叫）；
     /// 之後每一天是「今天花的歸零、剩餘天數減一、每天還能花重算」，本月支出、收入基準照今天的。
-    static func moneySnapshot(expense: ExpenseStore, now: Date,
+    ///
+    /// [v2] 每一天再補 todayText／incomeText／隱藏版／鎖定畫面版的字（WidgetMoneyExtras.decorate）；
+    /// 月底之後接下個月 1–7 號（WidgetMoneyExtras.nextMonthBoard：下個月的收入基準與固定支出，
+    /// 字跟今天那份同一套 moneyDay＋decorate），11/1 早上沒開 App 也是 11 月的數；
+    /// 快照補分類、最常記的分類、車子卡、常記範本。finance 是 nil（還沒 start）時沒有車子卡、範本是空的。
+    static func moneySnapshot(expense: ExpenseStore, finance: FinanceStore?, now: Date,
                               calendar cal: Calendar = .current) -> WidgetMoneySnapshot {
         let today = OverviewBoardData.build(store: expense, now: now)
         let todayStart = cal.startOfDay(for: now)
@@ -177,12 +204,40 @@ final class WidgetSnapshotWriter {
             guard let dayStart = cal.date(byAdding: .day, value: k, to: todayStart),
                   let dayEnd = cal.date(byAdding: .day, value: 1, to: dayStart) else { continue }
             let board = k == 0 ? today : projected(today, daysAhead: k)
-            days.append(moneyDay(board, dayStart: dayStart, dayEnd: dayEnd))
+            days.append(decoratedDay(board, dayStart: dayStart, dayEnd: dayEnd))
         }
-        return WidgetMoneySnapshot(generatedAt: now,
-                                   dataDay: WidgetDateText.dayKey(now),
-                                   month: today.month,
-                                   days: days)
+        // [v2] 下個月 1–7 號：接在這個月最後一天的隔天 00:00 後面
+        if let monthEnd = days.last?.dayEnd {
+            for k in 0..<WidgetMoneyExtras.nextMonthDays {
+                guard let dayStart = cal.date(byAdding: .day, value: k, to: monthEnd),
+                      let dayEnd = cal.date(byAdding: .day, value: 1, to: dayStart) else { continue }
+                let board = WidgetMoneyExtras.nextMonthBoard(expense: expense, day: dayStart, calendar: cal)
+                days.append(decoratedDay(board, dayStart: dayStart, dayEnd: dayEnd))
+            }
+        }
+        var snapshot = WidgetMoneySnapshot(generatedAt: now,
+                                           dataDay: WidgetDateText.dayKey(now),
+                                           month: today.month,
+                                           days: days)
+        snapshot.categories = WidgetMoneyExtras.categories()
+        var car: WidgetVehicleCard? = nil
+        var templates: [WidgetQuickTemplate] = []
+        if let finance {
+            car = WidgetMoneyExtras.vehicleCard(expense: expense, finance: finance, now: now, calendar: cal)
+            templates = WidgetMoneyExtras.templates(expense: expense, finance: finance, now: now, calendar: cal)
+        }
+        snapshot.vehicleCard = car
+        snapshot.topCategoryKeys = WidgetMoneyExtras.topCategoryKeys(expense: expense, hasVehicleCard: car != nil,
+                                                                     now: now, calendar: cal)
+        snapshot.templates = templates
+        return snapshot
+    }
+
+    /// [v2] 一天的 v1 字（moneyDay）再補 v2 的字（decorate）
+    private static func decoratedDay(_ board: OverviewBoardData, dayStart: Date, dayEnd: Date) -> WidgetMoneyDay {
+        var day = moneyDay(board, dayStart: dayStart, dayEnd: dayEnd)
+        WidgetMoneyExtras.decorate(&day, board: board)
+        return day
     }
 
     /// 往後推 k 天：複製今天那一份、只改這三樣，其餘（remainingDays、left、allowancePerDay、

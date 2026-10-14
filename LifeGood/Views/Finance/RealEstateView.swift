@@ -251,6 +251,15 @@ struct RealEstateView: View {
                 emptyIconPulse = false
             }
         }
+        // [v2 小工具] 「接下來要繳」點了房貸：打開那一間房的卡片
+        .onDeepLinkItem { openPendingItem() }
+    }
+
+    /// [v2 小工具] 收「打開這一間」（DeepLinkRouter.takeHouse）。找不到（刪掉了）就只停在這一頁
+    private func openPendingItem() {
+        guard let id = DeepLinkRouter.shared.takeHouse(),
+              let re = store.realEstates.first(where: { $0.id == id }) else { return }
+        viewingItem = re
     }
 
     /// [v25.532] .task(id:) 用：房子或記帳改了才重算。拆成獨立的 var，body 那一長串修飾器裡不放字串插值

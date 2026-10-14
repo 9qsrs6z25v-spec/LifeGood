@@ -273,6 +273,10 @@ struct SettingsView: View {
     @State private var aiExpanded = false
     /// [v25.377] 靈動島今日行程
     @State private var dayTimelineExpanded = false
+    /// [v2 小工具] 桌面小工具（隱藏金額）
+    @State private var widgetExpanded = false
+    /// [v2 小工具] 隱藏小工具的金額：App Group 的共用設定，跟控制中心的「隱藏金額」是同一個開關
+    @AppStorage(WidgetHideAmounts.key, store: WidgetShared.defaults) private var widgetHideAmounts = false
     @StateObject private var dayTimeline = DayTimelineController.shared
     /// [v25.383] 系統行事曆的授權狀態（時間軸的第三個來源）
     @StateObject private var appleCal = AppleCalendarBridge.shared
@@ -333,9 +337,16 @@ struct SettingsView: View {
                     meetingReminderSection
                 }
                 // [v25.377] 今日行程時間軸（靈動島 / 鎖定畫面）
-                disclosureBlock("靈動島今日行程", icon: "calendar.day.timeline.left",
-                                color: .orange, isExpanded: $dayTimelineExpanded) {
-                    dayTimelineSection
+                // [v2 小工具] 後面接「桌面小工具」（隱藏金額）。兩塊包成一組，List 這一層維持 10 個子項
+                Group {
+                    disclosureBlock("靈動島今日行程", icon: "calendar.day.timeline.left",
+                                    color: .orange, isExpanded: $dayTimelineExpanded) {
+                        dayTimelineSection
+                    }
+                    disclosureBlock("桌面小工具", icon: "square.grid.2x2.fill",
+                                    color: .blue, isExpanded: $widgetExpanded) {
+                        widgetSection
+                    }
                 }
                 disclosureBlock("資料統計", icon: "chart.bar.fill", color: .orange, isExpanded: $dataStatsExpanded) {
                     dataStatsSection
@@ -1351,6 +1362,32 @@ struct SettingsView: View {
         + "旅遊景點用的是行程推算出來的抵達時間（打過卡的用實際時間）；已經「玩完離開」的站不再占位置。"
         + "系統限制一次最多顯示 8 小時，超過會自動收起來，回到 App 就會重新掛上；"
         + "超過 8 筆時只顯示從現在起最近的 8 筆。今天沒有行程就不會占用靈動島。"
+
+    // MARK: - [v2] 桌面小工具
+
+    @ViewBuilder
+    private var widgetSection: some View {
+        Section {
+            Toggle(isOn: $widgetHideAmounts) {
+                settingsActionRow(icon: "eye.slash", color: .gray,
+                                  title: "隱藏小工具的金額",
+                                  subtitle: widgetHideAmounts ? "隱藏中" : "顯示中")
+            }
+            .tint(.blue)
+            .onChange(of: widgetHideAmounts) { _, _ in
+                // 全部小工具＋控制中心「隱藏金額」重畫（控制項改的也走這一支）
+                WidgetRefresh.afterHideAmountsChanged()
+            }
+        } footer: {
+            Text(Self.widgetFootnote)
+        }
+    }
+
+    /// 說明一次寫成單一字串常數，不要在 Text(...) 裡用 + 串接
+    private static let widgetFootnote =
+        "打開後，主畫面、鎖定畫面、StandBy 上所有 LifeGood 小工具的金額都會變成「NT$ ••••」，"
+        + "百分比、日期、筆數照常。控制中心的「隱藏金額」是同一個開關。"
+        + "只影響這台裝置，不會同步到 iPad。"
 
     // MARK: - 語音 AI 助手
 

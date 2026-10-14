@@ -107,6 +107,15 @@ struct LifeGoodApp: App {
     @StateObject private var einvoiceSync = EInvoiceSyncManager.shared
     @Environment(\.scenePhase) private var scenePhase
 
+    init() {
+        // [v2 小工具] 控制項「記一筆」（LifeGoodOpenIntent，openAppWhenRun）把網址交到這裡：
+        // 跟 onOpenURL 同一個總入口（WidgetLink.apply），快速通道、預填、自動聚焦全部共用。
+        // 登記完 register 會馬上撿 App Group 裡 20 秒內存著的網址（intent 萬一在小工具的行程裡跑）
+        WidgetOpenAppHandoff.register { url in
+            _ = WidgetLink.apply(url, store: AppStores.life)
+        }
+    }
+
     var body: some Scene {
         WindowGroup {
             // 開場謝幕動畫的狀態與 withAnimation **必須住在一個真正的 View 裡**
@@ -125,9 +134,12 @@ struct LifeGoodApp: App {
                 .environmentObject(subscription)
                 .environmentObject(einvoiceSync)
                 .task {
+                    // [v2 小工具] 一按就記的收件匣先收進帳本（第一份快照才含剛記的）；
+                    // 放在電子發票同步（einvoiceSync.syncIfDue）之前，防重複才找得到一按記的那筆
+                    QuickRecordImporter.shared.start(expense: expenseStore, finance: financeStore)
                     // [v25.545] 桌面小工具的快照：掛好監聽、馬上寫一次（放在任何 await 之前，
-                    // 開場動畫期間就寫好；第二次呼叫什麼都不做）
-                    WidgetSnapshotWriter.shared.start(expense: expenseStore, life: lifeStore)
+                    // 開場動畫期間就寫好；第二次呼叫什麼都不做）。[v2] 多收 finance（車子卡、接下來要繳）
+                    WidgetSnapshotWriter.shared.start(expense: expenseStore, finance: financeStore, life: lifeStore)
                     await subscription.refreshStatus()
                     await subscription.loadProducts()
                     await einvoiceSync.syncIfDue(expenseStore: expenseStore)
@@ -169,6 +181,10 @@ struct LifeGoodApp: App {
                         // 節流：30 秒內已同步過會自動跳過，避免快速切換 App
                         // 造成的反覆 CloudKit pull 觸發畫面閃爍
                         cloudSync.syncNowIfDue()
+                        // [v2 小工具] 先把一按就記的待入帳收進帳本，再接控制項存著的網址（萬一沒直接交到），
+                        // 最後才重寫快照（「今天 N 筆」含剛收進來的）
+                        _ = QuickRecordImporter.shared.importPending()
+                        WidgetOpenAppHandoff.consumeStored()
                         // [v25.545] 今天往前走了（過了午夜、過了一場）：重寫小工具快照，內容沒變就不寫
                         WidgetSnapshotWriter.shared.writeNow()
                         Task {
@@ -204,6 +220,10 @@ private struct LaunchGate<Content: View>: View {
 
     @State private var showSplash = true
     @State private var splashDismissed = false
+    /// [v2 小工具] 從小工具／控制項點進來（網址帶 src=widget）：不播開場、這次不跳「本次更新」
+    @ObservedObject private var deepLink = DeepLinkRouter.shared
+    /// [v2 小工具] 這次啟動不跳「本次更新」（不寫已讀，下次正常冷啟動再跳）
+    @State private var skipWhatsNewThisLaunch = false
 
     // MARK: [v25.392] 更新後的「本次更新」視窗
     //
@@ -231,9 +251,13 @@ private struct LaunchGate<Content: View>: View {
                         // 開場停留 1.4 秒後謝幕；只擋視覺不擋啟動流程
                         //（content 的 task/onAppear 同步照常執行）
                         try? await Task.sleep(nanoseconds: 1_400_000_000)
+                        // [v2 小工具] 從小工具進來時開場已經直接拿掉（這個 task 被取消、sleep 提早回來）：什麼都不做
+                        guard showSplash, !Task.isCancelled else { return }
                         splashDismissed = true
                         try? await Task.sleep(nanoseconds: 700_000_000)
                         showSplash = false
+                        // [v2 小工具] 謝幕途中從小工具點進來：這次不跳（下次正常冷啟動再跳）
+                        guard !skipWhatsNewThisLaunch else { return }
                         // 謝幕之後才跳，不要跟開場動畫疊在一起
                         presentWhatsNewIfNeeded()
                     }
@@ -242,6 +266,23 @@ private struct LaunchGate<Content: View>: View {
         .sheet(item: $whatsNewPayload) { payload in
             WhatsNewView(entries: payload.entries) { markWhatsNewSeen() }
                 .appStores()
+        }
+        .onChange(of: deepLink.widgetLaunch, initial: true) { _, fromWidget in
+            skipSplashForWidget(fromWidget)
+        }
+    }
+
+    /// [v2 小工具] 從小工具／控制項點進來（judge §2.4：冷啟動 1 秒內能打數字）：開場還在就直接拿掉
+    /// （不播謝幕動畫），這次不跳「本次更新」——不寫已讀，下次正常打開再跳。開場已經結束就什麼都不做
+    private func skipSplashForWidget(_ fromWidget: Bool) {
+        guard fromWidget, showSplash else { return }
+        skipWhatsNewThisLaunch = true
+        showSplash = false
+        // 全新安裝第一次就從小工具點進來：照 presentWhatsNewIfNeeded 的「全新安裝」那一支記下目前版本
+        //（那一支本來就不跳）。不記的話，這次記了帳、下次正常打開會被當成舊使用者，跳出整頁更新說明。
+        // 舊使用者（有資料）不動：下次正常冷啟動照樣跳
+        if lastSeenVersion.isEmpty, !hasExistingData, !Changelog.currentVersion.isEmpty {
+            lastSeenVersion = Changelog.currentVersion
         }
     }
 

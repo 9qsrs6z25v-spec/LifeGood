@@ -19,6 +19,10 @@ import WidgetKit
 // 換日：快照裡有今天、明天兩份；timeline 在 00:00 放一筆，day(at:) 自己換到明天那一份。
 // 過了 validUntil（後天 00:00）整份不能用，請使用者打開 App。
 //
+// [v2] StandBy（privacy）的行程標題改寫主題（WidgetStop.lockedSurfaceTitle，使用者決定 2）；
+//      部屬姓名（stop.owner）照舊不寫，全天的事照舊 lockTitle（生日只寫「家人生日」）。
+//      TodayWidgetTimeline 也給鎖定畫面「下一場」（LockScreenWidgets.swift）共用。
+//
 // 旅遊期間（使用者過幾天出國）：景點是 kind == .trip 的 stop（App 的 TodayAgenda 挑的，
 // 跟靈動島同一段），這裡照一般行程畫：小飛機記號、站名、點了開那一趟。
 //
@@ -275,7 +279,8 @@ struct TodayWidgetModel {
     /// 小型整塊點下去
     var tapURL: URL = WidgetLink.today(nil)
 
-    /// privacy＝StandBy（背景被拿掉）：標題換成 lockTitle、不寫 owner、全天的事用 lockTitle（J:177）
+    /// privacy＝StandBy（背景被拿掉）：標題換成 lockedSurfaceTitle（[v2] 主題，不含人名）、不寫 owner、
+    /// 全天的事用 lockTitle（J:177）
     static func make(snapshot: WidgetLifeSnapshot?, now: Date, privacy: Bool) -> TodayWidgetModel {
         var model = TodayWidgetModel()
         guard let snap = snapshot else {
@@ -313,7 +318,9 @@ struct TodayWidgetModel {
 private enum TodayWidgetText {
     static func title(_ item: WidgetStop, privacy: Bool) -> String {
         if privacy {
-            return item.lockTitle.isEmpty ? item.stop.kind.label : item.lockTitle
+            // [v2] 決定 2：StandBy 寫會議主題（旅遊寫站名／住宿），部屬姓名不寫
+            let locked = item.lockedSurfaceTitle
+            return locked.isEmpty ? item.stop.kind.label : locked
         }
         return item.stop.title.isEmpty ? "未命名行程" : item.stop.title
     }
@@ -717,7 +724,7 @@ private struct TodaySmallView: View {
     }
 }
 
-/// StandBy：大字時間、一行類別（lockTitle，不寫人名）、一行倒數（樣稿 today-standby）
+/// StandBy：大字時間、一行標題（[v2] lockedSurfaceTitle：主題，不寫人名）、一行倒數（樣稿 today-standby）
 private struct TodayStandByView: View {
     let model: TodayWidgetModel
     let palette: WidgetPalette

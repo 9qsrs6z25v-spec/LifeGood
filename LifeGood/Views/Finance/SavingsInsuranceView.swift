@@ -169,6 +169,15 @@ struct SavingsInsuranceView: View {
                 emptyIconPulse = false
             }
         }
+        // [v2 小工具] 「接下來要繳」點了保費／滿期：打開那一張保單卡
+        .onDeepLinkItem { openPendingItem() }
+    }
+
+    /// [v2 小工具] 收「打開這一張」（DeepLinkRouter.takeInsurance）。找不到（刪掉了）就只停在這一頁
+    private func openPendingItem() {
+        guard let id = DeepLinkRouter.shared.takeInsurance(),
+              let ins = store.insurances.first(where: { $0.id == id }) else { return }
+        previewItem = ins
     }
 
     // MARK: - 保單卡片

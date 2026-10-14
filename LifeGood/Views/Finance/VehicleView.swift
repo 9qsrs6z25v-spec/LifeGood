@@ -269,6 +269,15 @@ struct VehicleView: View {
                 emptyIconPulse = false
             }
         }
+        // [v2 小工具] 「接下來要繳」點了車子的那一筆：打開那一台車的卡片
+        .onDeepLinkItem { openPendingItem() }
+    }
+
+    /// [v2 小工具] 收「打開這一台」（DeepLinkRouter.takeVehicle）。找不到（刪掉了）就只停在這一頁
+    private func openPendingItem() {
+        guard let id = DeepLinkRouter.shared.takeVehicle(),
+              let v = store.vehicles.first(where: { $0.id == id }) else { return }
+        viewingItem = v
     }
 
     /// [v25.539] .task(id:) 用：車子或記帳改了才重算（同 RealEstateView）。拆成獨立的 var，

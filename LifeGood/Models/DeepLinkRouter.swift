@@ -50,6 +50,113 @@ final class DeepLinkRouter: ObservableObject {
         defer { pendingTripPlanId = nil }
         return pendingTripPlanId
     }
+
+    // MARK: [v2] 小工具
+
+    /// 小工具／控制項「新增支出」：MainTabView 取走後開 AddExpenseView（預填分類／車子、數字鍵盤跳出）
+    @Published private(set) var pendingAddExpense: WidgetAddExpenseRequest?
+    /// 小工具「接下來要繳」點某一列：固定支出、房子、車子、保單頁各取自己那一種，打開那一張
+    @Published private(set) var pendingItem: DeepLinkItem?
+    /// 這次啟動是從小工具點進來的（網址帶 src=widget）。設成 true 就不再改回：
+    /// LaunchGate 看到就不播開場動畫、這次不跳「本次更新」
+    @Published private(set) var widgetLaunch = false
+    /// 每收到一個認得的網址就換一個：MainTabView 收到就關掉設定頁（停在設定頁也要能跳過去）
+    @Published private(set) var routeToken = UUID()
+
+    func requestAddExpense(_ request: WidgetAddExpenseRequest) {
+        pendingAddExpense = request
+    }
+
+    /// 取走並清掉；沒有回 nil（沒有的時候不動 @Published，不會多一次重畫）
+    func takeAddExpense() -> WidgetAddExpenseRequest? {
+        guard let request = pendingAddExpense else { return nil }
+        pendingAddExpense = nil
+        return request
+    }
+
+    func requestItem(_ item: DeepLinkItem) {
+        pendingItem = item
+    }
+
+    /// 固定支出頁取走「打開這一筆」。不是固定支出的請求就不動（留給那一頁）
+    func takeFixedExpense() -> UUID? {
+        guard case .fixedExpense(let id)? = pendingItem else { return nil }
+        pendingItem = nil
+        return id
+    }
+
+    /// 房地產頁取走「打開這一間」
+    func takeHouse() -> UUID? {
+        guard case .house(let id)? = pendingItem else { return nil }
+        pendingItem = nil
+        return id
+    }
+
+    /// 載具頁取走「打開這一台」
+    func takeVehicle() -> UUID? {
+        guard case .vehicle(let id)? = pendingItem else { return nil }
+        pendingItem = nil
+        return id
+    }
+
+    /// 儲蓄險頁取走「打開這一張」
+    func takeInsurance() -> UUID? {
+        guard case .insurance(let id)? = pendingItem else { return nil }
+        pendingItem = nil
+        return id
+    }
+
+    func markWidgetLaunch() {
+        if !widgetLaunch { widgetLaunch = true }
+    }
+
+    func markRoute() {
+        routeToken = UUID()
+    }
+}
+
+/// [v2] 小工具「新增支出」的請求（WidgetLink.apply 建、MainTabView 取走）。
+/// 三個都 nil＝空白表單；categoryKey＝VariableCategory.rawValue；
+/// vehicleId＋vehicleCategoryKey（VehicleVariableCategory.rawValue）＝從車子記（Taycan 電費）
+struct WidgetAddExpenseRequest: Identifiable, Equatable {
+    let id = UUID()
+    let categoryKey: String?
+    let vehicleId: UUID?
+    let vehicleCategoryKey: String?
+}
+
+/// [v2] 「打開這一筆」：小工具「接下來要繳」點某一列
+enum DeepLinkItem: Equatable {
+    case fixedExpense(UUID)
+    case house(UUID)
+    case vehicle(UUID)
+    case insurance(UUID)
+}
+
+/// [v2] 列表頁收「打開這一筆」的兩個時機：冷啟動時網址比這一頁先到（onAppear）、
+/// 已經停在這一頁時再點一次（onChange）。照 MyCalendarView 收靈動島的寫法，
+/// 包成一個修飾器，列表頁那一長串修飾器只多一個。
+private struct DeepLinkItemReceiver: ViewModifier {
+    @ObservedObject private var deepLink = DeepLinkRouter.shared
+    /// 不叫 open：open 是存取層級的關鍵字（open(set)），放在敘述開頭呼叫容易被當成宣告修飾詞
+    let action: () -> Void
+
+    init(action: @escaping () -> Void) {
+        self.action = action
+    }
+
+    func body(content: Content) -> some View {
+        content
+            .onAppear { action() }
+            .onChange(of: deepLink.pendingItem) { _, _ in action() }
+    }
+}
+
+extension View {
+    /// [v2] 固定支出、載具、房地產、儲蓄險頁：收到「打開這一筆」時呼叫 action（action 裡自己 take 自己那一種）
+    func onDeepLinkItem(_ action: @escaping () -> Void) -> some View {
+        modifier(DeepLinkItemReceiver(action: action))
+    }
 }
 
 // MARK: - 分頁切換
@@ -81,6 +188,29 @@ enum AppNavigation {
         let d = UserDefaults.standard
         d.set(AppMode.expense.rawValue, forKey: "appMode")
         d.set(ExpenseFeature.overview.rawValue, forKey: "expense_feature")
+    }
+
+    /// [v2] 「接下來要繳」→ 收支「固定支出」
+    static func goToFixedExpenses() {
+        let d = UserDefaults.standard
+        d.set(AppMode.expense.rawValue, forKey: "appMode")
+        d.set(ExpenseFeature.fixed.rawValue, forKey: "expense_feature")
+    }
+
+    /// [v2] 小工具「新增支出」：新增支出的表單開在「變動支出」頁上面最自然（存完就看得到那一筆）
+    static func goToVariableExpenses() {
+        let d = UserDefaults.standard
+        d.set(AppMode.expense.rawValue, forKey: "appMode")
+        d.set(ExpenseFeature.variable.rawValue, forKey: "expense_feature")
+    }
+
+    /// [v2] 「接下來要繳」→ 理財的房地產／載具／儲蓄險。鍵名照 MainTabView 的 @AppStorage
+    ///（"appMode"、"finance_feature"）；AppMode.finance 的 rawValue 是「理財」。
+    /// 沒訂閱照樣切過去：付費頁本來就是「訂閱功能僅供閱覽」（決定 5 只擋會改資料的）
+    static func goToFinance(_ feature: FinanceFeature) {
+        let d = UserDefaults.standard
+        d.set(AppMode.finance.rawValue, forKey: "appMode")
+        d.set(feature.rawValue, forKey: "finance_feature")
     }
 }
 
@@ -175,17 +305,46 @@ extension WidgetLink {
     /// - lifegood://today…：原封不動交給 DayTimelineLink.apply（靈動島既有行為一個字都不改；
     ///   旅遊景點開那一趟、其他開我的行事曆那一場的卡片）
     /// - lifegood://expense/overview：收支「總覽」
+    /// - [v2] lifegood://add/expense…：切到變動支出、請 MainTabView 開新增支出（預填分類／車子、數字鍵盤跳出）
+    /// - [v2] lifegood://expense/fixed…、lifegood://finance/house|vehicle|insurance…：切頁，帶 id 就請那一頁打開那一張
     /// - 認不得的網址回 false、什麼都不做（跟以前只認 today 時一樣）
     ///
-    /// route.fromWidget v1 不用（v2 跳過開場動畫、本次更新視窗才用）。
+    /// [v2] 控制項「記一筆」（LifeGoodOpenIntent → WidgetOpenAppHandoff）也走這裡，跟 onOpenURL 同一個總入口。
+    /// route.fromWidget（網址帶 src=widget）→ markWidgetLaunch：不播開場動畫、這次不跳本次更新（LaunchGate）；
+    /// 每個認得的網址都換 routeToken：MainTabView 收到就關掉設定頁。
     @discardableResult
     static func apply(_ url: URL, store: LifeStore) -> Bool {
         guard let route = parse(url) else { return false }
+        let router = DeepLinkRouter.shared
+        if route.fromWidget { router.markWidgetLaunch() }
+        router.markRoute()
         switch route.destination {
         case .today:
             return DayTimelineLink.apply(url, store: store)
         case .expenseOverview:
             AppNavigation.goToExpenseOverview()
+            return true
+        case .addExpense(let categoryKey, let vehicleId, let vehicleCategoryKey):
+            AppNavigation.goToVariableExpenses()
+            router.requestAddExpense(WidgetAddExpenseRequest(categoryKey: categoryKey,
+                                                             vehicleId: vehicleId,
+                                                             vehicleCategoryKey: vehicleCategoryKey))
+            return true
+        case .fixedExpense(let id):
+            AppNavigation.goToFixedExpenses()
+            if let id { router.requestItem(.fixedExpense(id)) }
+            return true
+        case .financeHouse(let id):
+            AppNavigation.goToFinance(.realEstate)
+            if let id { router.requestItem(.house(id)) }
+            return true
+        case .financeVehicle(let id):
+            AppNavigation.goToFinance(.vehicle)
+            if let id { router.requestItem(.vehicle(id)) }
+            return true
+        case .financeInsurance(let id):
+            AppNavigation.goToFinance(.insurance)
+            if let id { router.requestItem(.insurance(id)) }
             return true
         }
     }

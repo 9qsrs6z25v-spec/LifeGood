@@ -179,6 +179,15 @@ struct FixedExpenseView: View {
                     .appStores()
             }
         }
+        // [v2 小工具] 「接下來要繳」點了記帳的那一筆：打開它的卡片
+        .onDeepLinkItem { openPendingItem() }
+    }
+
+    /// [v2 小工具] 收「打開這一筆」（DeepLinkRouter.takeFixedExpense）。找不到（刪掉了）就只停在這一頁
+    private func openPendingItem() {
+        guard let id = DeepLinkRouter.shared.takeFixedExpense(),
+              let e = store.expenses.first(where: { $0.id == id }) else { return }
+        previewExpense = e
     }
 
     // MARK: - 空狀態

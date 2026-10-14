@@ -380,6 +380,12 @@ struct Expense: Identifiable, Codable {
     var linkedTripPlanId: UUID? = nil
     /// 綁到那趟旅遊的哪一站（可不指定＝算在整趟上）。相本用它來分組。
     var linkedTripStopId: UUID? = nil
+    /// [v2] 從桌面小工具「一按就記」記的（QuickRecordImporter 寫 true）；nil＝不是。
+    /// 電子發票防重複只比對這種（EInvoiceSyncManager）。照 evKwh 不進 memberwise init，存檔端指派。
+    var fromQuickRecord: Bool? = nil
+
+    /// [v2] 是不是「一按就記」記的（fromQuickRecord == true）
+    var isQuickRecord: Bool { fromQuickRecord == true }
 
     /// [v25.347] 固定支出的結束日＝**最後一次扣款日**。nil＝持續中。
     ///
@@ -515,6 +521,7 @@ struct Expense: Identifiable, Codable {
         fuelLiters = try? c.decodeIfPresent(Double.self, forKey: .fuelLiters)
         linkedTripPlanId = try? c.decodeIfPresent(UUID.self, forKey: .linkedTripPlanId)
         linkedTripStopId = try? c.decodeIfPresent(UUID.self, forKey: .linkedTripStopId)
+        fromQuickRecord = try? c.decodeIfPresent(Bool.self, forKey: .fromQuickRecord)
         endDate = try? c.decodeIfPresent(Date.self, forKey: .endDate)
         endReason = try? c.decodeIfPresent(FixedEndReason.self, forKey: .endReason)
     }
@@ -529,6 +536,7 @@ struct Expense: Identifiable, Codable {
         case placeName, placeAddress, placeLatitude, placeLongitude, photoFileNames, amountHistory
         case evKwh, evFromPct, evToPct, evOdometer, fuelLiters
         case linkedTripPlanId, linkedTripStopId
+        case fromQuickRecord
         case endDate, endReason
     }
 

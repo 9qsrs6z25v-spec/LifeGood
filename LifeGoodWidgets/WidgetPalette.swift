@@ -15,6 +15,8 @@ import WidgetKit
 //   • WidgetSky / WidgetSkyMoon        天空底（淺色漸層＋雲；深色星空＋月牙）
 //   • WidgetStopMark                   行程點：會議實心圓、我的行事曆空心圓、系統行事曆小方塊、旅遊小飛機
 //                                      （著色模式顏色會被洗掉，四種靠形狀分辨）
+//   • [v2] deskAddFill／deskAddIcon／tileInk／tileOutline／rowFill／billBar(tint:tintDark:)
+//                                      記帳台與一按就記的卡、接下來要繳的格子與色條
 
 // MARK: - 16 進位轉色
 
@@ -116,6 +118,41 @@ struct WidgetPalette {
     /// 時間軸的線（淺 #4A5B8C 30%；深 白 20%）
     var axisTrack: Color {
         isDark ? Color(widgetHex: 0xFFFFFF, opacity: 0.20) : Color(widgetHex: 0x4A5B8C, opacity: 0.30)
+    }
+
+    // [v2] 記帳台、一按就記、接下來要繳（mock_spec ledger-desk-medium、bills-medium）
+
+    /// 「＋ 記一筆」卡的底：淺 白 78%；深 #1C2646 86%
+    var deskAddFill: Color {
+        if isMono { return Color.white.opacity(0.14) }
+        return isDark ? Color(widgetHex: 0x1C2646, opacity: 0.86) : Color(widgetHex: 0xFFFFFF, opacity: 0.78)
+    }
+
+    /// 「＋ 記一筆」卡的圖示：淺 #2F6FE0；深 #5B9BFF
+    var deskAddIcon: Color {
+        if isMono { return Color.white }
+        return isDark ? Color(widgetHex: 0x5B9BFF) : Color(widgetHex: 0x2F6FE0)
+    }
+
+    /// 分類卡上的白字白圖示（著色模式也是白字：系統只看透明度上色）
+    var tileInk: Color { Color.white }
+
+    /// 著色模式：卡片改畫外框
+    var tileOutline: Color {
+        if isMono { return Color.white.opacity(0.55) }
+        return isDark ? Color(widgetHex: 0xA3B2D9, opacity: 0.6) : Color(widgetHex: 0x4A5B8C, opacity: 0.5)
+    }
+
+    /// 接下來要繳每一列的格子：淺 白色半透明；深 #1C2646 86%
+    var rowFill: Color {
+        if isMono { return Color.white.opacity(0.10) }
+        return isDark ? Color(widgetHex: 0x1C2646, opacity: 0.86) : Color(widgetHex: 0xFFFFFF, opacity: 0.72)
+    }
+
+    /// 接下來要繳左邊色條：淺色用 tint、深色用 tintDark；著色模式同一色（靠「今天扣款」字分辨，J:281）
+    func billBar(tint: UInt32, tintDark: UInt32) -> Color {
+        if isMono { return Color.white.opacity(0.8) }
+        return isDark ? Color(widgetHex: tintDark) : Color(widgetHex: tint)
     }
 
     /// 行程四色（跟靈動島同一套色相：會議橘、我的行事曆青、系統行事曆綠、旅遊紫）
