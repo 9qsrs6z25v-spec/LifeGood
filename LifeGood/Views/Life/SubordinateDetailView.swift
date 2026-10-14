@@ -517,6 +517,24 @@ struct SubordinateDetailView: View {
     static let birthdayFmt: DateFormatter = {
         let f = DateFormatter(); f.locale = Locale(identifier: "zh_Hant_TW"); f.dateFormat = "M/d"; return f
     }()
+
+    /// [v25.546] 年資（入職日到今天，年、小數一位）：「3.2」。無條件捨去到 0.1 年，不會多報；
+    /// 沒填入職日、或入職日在未來（還沒報到）回 nil。用西曆算天數，手機設民國曆也一樣
+    static func seniorityYears(from join: Date?, now: Date = Date()) -> String? {
+        guard let join else { return nil }
+        let cal = Calendar(identifier: .gregorian)
+        let days = cal.dateComponents([.day], from: cal.startOfDay(for: join), to: cal.startOfDay(for: now)).day ?? 0
+        guard days >= 0 else { return nil }
+        let tenths = (Double(days) / 365.2425 * 10).rounded(.down)
+        return String(format: "%.1f", tenths / 10)
+    }
+
+    /// [v25.546] 看板的姓名接上年資：「黃義超，3.2年資歷」（使用者指定的寫法）；沒有入職日就只寫姓名
+    private var headerNameText: String {
+        let name = subordinate.name
+        guard !name.isEmpty, let years = Self.seniorityYears(from: subordinate.joinDate) else { return name }
+        return "\(name)，\(years)年資歷"
+    }
     @State private var showCompleted = false
     @State private var previewItem: SubordinateItemRef?
     @State private var addingType: SubordinateRecordType?
@@ -883,13 +901,13 @@ struct SubordinateDetailView: View {
                     // [v25.520] 姓名過長改跑馬燈（原本縮到 0.8 倍再切成「…」）。
                     // 匯出圖維持原本的縮字：靜態圖只畫一格，跑馬燈只會是一行「…」。
                     if forExport {
-                        Text(subordinate.name)
+                        Text(headerNameText)
                             .font(.title3.bold())
                             .foregroundStyle(.white)
                             .lineLimit(1)
                             .minimumScaleFactor(0.8)
                     } else {
-                        MarqueeText(subordinate.name)
+                        MarqueeText(headerNameText)
                             .font(.title3.bold())
                             .foregroundStyle(.white)
                     }
@@ -2193,7 +2211,11 @@ struct SubordinateDetailView: View {
         if !gradeTitleText.isEmpty { lines.append("💼 職稱：\(gradeTitleText)") }
         if !departmentText.isEmpty { lines.append("🏢 部門：\(departmentText)") }
         if !sub.plantArea.isEmpty { lines.append("🏭 廠區：\(sub.plantArea)") }
-        if let jd = sub.joinDate { lines.append("📅 入職：\(formatDate(jd))") }
+        if let jd = sub.joinDate {
+            // [v25.546] 跟看板一樣帶年資
+            let tenure = Self.seniorityYears(from: jd).map { "（\($0)年資歷）" } ?? ""
+            lines.append("📅 入職：\(formatDate(jd))\(tenure)")
+        }
         let srDone = sideRoleStat.done
         let itemDone = itemCredit
         lines.append("📊 主動性 \(sub.proactivityScore(mentionedCount: mentioned.count, sideRoleDone: srDone, itemDone: itemDone))｜潛力性 \(sub.potentialScore)｜綜合 \(sub.overallScore(mentionedCount: mentioned.count, sideRoleDone: srDone, itemDone: itemDone))")
