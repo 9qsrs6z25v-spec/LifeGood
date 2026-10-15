@@ -1,6 +1,7 @@
 import Foundation
 import ActivityKit
 import SwiftUI
+import UIKit
 import EventKit
 
 // MARK: - 今日行程時間軸 · 主 App 側控制器（v25.377）
@@ -12,6 +13,13 @@ import EventKit
 //   • 一個 Activity 最長活 8 小時，之後系統會自己結束它。
 //     從早到晚的行程超過 8 小時，所以到期前要重啟一次（見 scheduleRenewal）
 //   • 使用者可以在系統設定裡關閉即時動態，areActivitiesEnabled 會是 false
+//
+// [v5] 控制中心「今日行程」、中型「今天」的「上靈動島」（DayTimelineToggleIntent／StartDayTimelineIntent，
+//      LiveActivityIntent，在 App 的行程裡背景跑）經 DayTimelineToggleBridge 叫 setEnabled(_:store:)，
+//      設定頁的開關也是同一個 isEnabled。靈動島開始、續期、收掉、被使用者滑掉、系統 8 小時收掉時，
+//      把「跑到幾點」寫進 App Group（DayTimelineToggleState.setRunningUntil，沒在跑寫 nil），
+//      值真的變了才重畫控制項與「今天」（publishRunState）。控制項的開＝「跑到幾點」> 現在，不是 isEnabled。
+//      規格見 scratchpad/widgets/v5/brief.md 的 G1-7。
 
 @MainActor
 final class DayTimelineController: ObservableObject {
@@ -35,14 +43,31 @@ final class DayTimelineController: ObservableObject {
     private let maxPayloadBytes = 3_500
 
     private var renewalTask: Task<Void, Never>?
+    /// [v5] 看著目前那一個即時動態：使用者在鎖定畫面滑掉、系統 8 小時收掉時寫「沒在跑」
+    private var stateWatch: Task<Void, Never>?
 
     private init() {}
 
     // MARK: - 對外
 
+    /// [v5] 設定頁、控制中心「今日行程」、中型「上靈動島」共用：開＝打開並 refresh；關＝關掉並 stop。
+    /// 今天沒有行程時開也不會上島（refresh 照舊：沒有站就 stop），「跑到幾點」維持沒在跑
+    func setEnabled(_ on: Bool, store: LifeStore) async {
+        isEnabled = on
+        if on {
+            await refresh(store: store)
+        } else {
+            await stop()
+        }
+    }
+
     /// 依目前的資料重新整理。資料有變（新增會議、改時間）或 App 回到前景時呼叫。
     func refresh(store: LifeStore) async {
-        guard isEnabled else { return }
+        guard isEnabled else {
+            // [v5] 沒開：App 被殺掉時被滑掉、收掉的來不及寫，這裡補一次「沒在跑」（值沒變就什麼都不做）
+            if liveActivity() == nil { publishRunState(until: nil) }
+            return
+        }
         guard ActivityAuthorizationInfo().areActivitiesEnabled else {
             lastError = "系統的「即時動態」已關閉。請到「設定 → LifeGood → 即時動態」打開。"
             await stop()
@@ -61,11 +86,20 @@ final class DayTimelineController: ObservableObject {
             selectedIndex: defaultIndex(for: stops),
             generatedAt: Date())
 
-        if let activity = DayTimelineLiveActivity.running {
+        if let activity = liveActivity() {
             await activity.update(ActivityContent(state: state, staleDate: staleDate(stops)))
             isRunning = true
             lastError = nil
+            // [v5] App 重開後不知道是幾點開始的：沒記著「跑到幾點」就保守當現在開始
+            if !DayTimelineToggleState.isRunning(at: Date()) {
+                publishRunState(until: Date().addingTimeInterval(DayTimelineToggleState.maxRun))
+            }
+            if stateWatch == nil { watch(activity) }
         } else {
+            // [v5] 剩下的都是已經結束、還掛在鎖定畫面上的（系統 8 小時收掉的）：先拿掉，再開新的
+            for leftover in Activity<DayTimelineAttributes>.activities {
+                await leftover.end(nil, dismissalPolicy: .immediate)
+            }
             await start(state: state, stops: stops)
         }
         scheduleRenewal()
@@ -73,12 +107,17 @@ final class DayTimelineController: ObservableObject {
 
     /// 結束（關閉開關、今天沒行程、或使用者手動停止）
     func stop() async {
+        // [v5] 自己收掉的不用再看（收掉之後的 dismissed 不要再進 activityDidEnd）
+        stateWatch?.cancel()
+        stateWatch = nil
         renewalTask?.cancel()
         renewalTask = nil
         for activity in Activity<DayTimelineAttributes>.activities {
             await activity.end(nil, dismissalPolicy: .immediate)
         }
         isRunning = false
+        // [v5] 控制項回到「未顯示」、中型「今天」的「上靈動島」回來（續期的 stop 也會寫 nil，下一次 refresh 再寫回來）
+        publishRunState(until: nil)
     }
 
     // MARK: - 啟動
@@ -87,17 +126,63 @@ final class DayTimelineController: ObservableObject {
                        stops: [TimelineStop]) async {
         let attributes = DayTimelineAttributes(dayLabel: Self.dayLabel(Date()))
         do {
-            _ = try Activity.request(
+            let activity = try Activity.request(
                 attributes: attributes,
                 content: ActivityContent(state: state, staleDate: staleDate(stops)),
                 pushType: nil)
             isRunning = true
             lastError = nil
+            // [v5] 看著它（被滑掉、被系統收掉時寫「沒在跑」），寫「跑到幾點」（最長 8 小時）
+            watch(activity)
+            publishRunState(until: Date().addingTimeInterval(DayTimelineToggleState.maxRun))
         } catch {
             // 常見原因：使用者關掉了即時動態、或 ContentState 超過 4KB
             lastError = "無法開啟靈動島：\(error.localizedDescription)"
             isRunning = false
+            publishRunState(until: nil)
         }
+    }
+
+    // MARK: - [v5] 「跑到幾點」（控制中心「今日行程」、中型「上靈動島」看這個）
+
+    /// 現在還活著的那一個（進行中或內容過期但還在）；已經結束、被滑掉的不算
+    private func liveActivity() -> Activity<DayTimelineAttributes>? {
+        Activity<DayTimelineAttributes>.activities.first { a in
+            a.activityState != .ended && a.activityState != .dismissed
+        }
+    }
+
+    /// 「跑到幾點」變了才重畫控制項與「今天」（App 在背景叫重畫會吃小工具每天的額度）
+    private func publishRunState(until: Date?) {
+        if DayTimelineToggleState.setRunningUntil(until) {
+            WidgetRefresh.reloadControls(WidgetKind.dayTimelineControlKinds)
+            WidgetRefresh.reload([WidgetKind.today])
+        }
+    }
+
+    /// 使用者在鎖定畫面把它滑掉、系統 8 小時收掉：activityStateUpdates 會送 dismissed／ended
+    private func watch(_ activity: Activity<DayTimelineAttributes>) {
+        stateWatch?.cancel()
+        let id = activity.id
+        stateWatch = Task { [weak self] in
+            for await state in activity.activityStateUpdates {
+                if state == .dismissed || state == .ended {
+                    self?.activityDidEnd(id)
+                    return
+                }
+            }
+        }
+    }
+
+    /// 續期時舊的結束、新的已經在跑：不要清掉
+    private func activityDidEnd(_ id: String) {
+        let others = Activity<DayTimelineAttributes>.activities.contains { a in
+            a.id != id && a.activityState == .active
+        }
+        guard !others else { return }
+        stateWatch = nil
+        isRunning = false
+        publishRunState(until: nil)
     }
 
     /// 內容過期時間：最後一場結束後就不用再顯示了
@@ -114,8 +199,12 @@ final class DayTimelineController: ObservableObject {
             try? await Task.sleep(nanoseconds: UInt64(7 * 3600 + 50 * 60) * 1_000_000_000)
             guard !Task.isCancelled, let self else { return }
             await self.stop()
-            // 重新啟動由下一次 refresh 負責；App 在前景時會馬上接上
             self.isRunning = false
+            // [v5] App 在前景時馬上接上（以前要等下一次回前景，中間島會空著、控制項寫「未顯示」）；
+            // 不在前景時照舊交給下一次回前景的 refresh
+            if UIApplication.shared.applicationState == .active {
+                await self.refresh(store: AppStores.life)
+            }
         }
     }
 

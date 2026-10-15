@@ -34,11 +34,24 @@ import AppIntents
 //   • 鎖著時（StandBy）顯示主題：預設開（主控定案 1＝v2 的 lockedSurfaceTitle）；關掉回到 v1 的類別字
 //    （WidgetStop.lockTitle：「部屬會議」「會議」「系統行事曆」；旅遊照樣寫站名）。部屬姓名不管開關都不寫。
 //
+// [v5] 規格見 scratchpad/widgets/v5/brief.md 的 G3-1～G3-3（design_life.md L1「大的」:169-194、中型「上靈動島」:208-212）。
+//   • 大型（.systemLarge；kind、TodayConfigIntent 不變）：表頭同中型（日期、場數、手寫問候），下面只回答四件事——
+//     ① 幾點要去哪（還沒結束的最多 5 列；不滿時最上面補最近結束的一場，淡色「已結束」）、
+//     ② 今天誰特別（WidgetLifeSnapshot.todaySpecials／todayTeamLine）、③ 要處理（todayTodos）、
+//     ④ 接下來（upcomingLines：下一趟旅行＋最多 2 件倒數）。字全部是契約組好的，這裡只挑列數；整區空的不畫標題。
+//     小 iPhone 放不下時砍列數、字級不變（TodayLargeView 的 ViewThatFits，列數算在 TodayLargeLayout）。
+//     「今天」設定關掉「部屬會議」（showsTeam＝false）時 ②③ 的部屬那幾行也藏。「25 分後」沿用 v1 每分鐘一筆 entry。
+//   • 中型「上靈動島」：今天還沒結束的 ≥ 2 場、靈動島沒在跑才出現，Button(intent: StartDayTimelineIntent())
+//    （共用檔 DayTimelineToggleIntent.swift，LiveActivityIntent，在 App 的行程裡跑）；跑起來換成小字「靈動島顯示中」。
+//     「跑到幾點」provider 讀一次（DayTimelineToggleState.runningUntil，放進 entry.liveUntil），
+//     timeline 在那一刻多排一筆，靈動島過期時按鈕自己回來。View 不讀 UserDefaults。
+//
 // 型別（internal 的都帶 TodayWidget 前綴；畫面零件 private）：
 //   TodayWidget、TodayWidgetEntry、TodayWidgetProvider、TodayWidgetTimeline、
 //   TodayWidgetModel、TodayWidgetRow、TodayWidgetChip、TodayWidgetAxis、TodayWidgetAxisDot、
 //   TodayWidgetSample、TodayWidgetEntryView
 //   [v3] 設定在 WidgetConfigs.swift 的 TodayConfigIntent
+//   [v5] TodayLargeLayout、TodayLargeSegment；畫面零件 TodayLarge…、TodayWidgetLive…（private）
 
 // MARK: - Widget
 
@@ -50,8 +63,9 @@ struct TodayWidget: Widget {
             TodayWidgetEntryView(entry: entry)
         }
         .configurationDisplayName("今天")
-        .description("下一場幾點、今天幾場、今天誰生日")
-        .supportedFamilies([.systemSmall, .systemMedium])
+        .description("下一場幾點、今天幾場、今天誰生日；大的再加要處理的事與接下來")
+        // [v5] 加大型（kind 不變，已經放好的小、中不受影響）
+        .supportedFamilies([.systemSmall, .systemMedium, .systemLarge])
     }
 }
 
@@ -65,6 +79,11 @@ struct TodayWidgetEntry: TimelineEntry {
     let snapshot: WidgetLifeSnapshot?
     /// [v3] StandBy 寫主題（true，預設＝v2）或類別字（false）。placeholder／預覽是 true
     var showsSubjectWhenLocked: Bool = true
+    /// [v5] 大型 ②③ 要不要寫部屬那幾行（＝長按設定「部屬會議」；週末關掉公司的事，部屬也一起藏）
+    var showsTeam: Bool = true
+    /// [v5] 靈動島跑到幾點（provider 讀一次 DayTimelineToggleState.runningUntil）；沒在跑是 nil。
+    /// 中型「上靈動島」按鈕：> date 時換成「靈動島顯示中」
+    var liveUntil: Date? = nil
 }
 
 /// [v3] TimelineProvider → AppIntentTimelineProvider（多讀長按設定；排程照舊，拿篩過的快照排）
@@ -80,20 +99,29 @@ struct TodayWidgetProvider: AppIntentTimelineProvider {
         }
         let snapshot = Self.readFiltered(configuration)
         return TodayWidgetEntry(date: Date(), snapshot: snapshot,
-                                showsSubjectWhenLocked: configuration.standBySubject)
+                                showsSubjectWhenLocked: configuration.standBySubject,
+                                showsTeam: configuration.showMeetings,
+                                liveUntil: DayTimelineToggleState.runningUntil)
     }
 
     func timeline(for configuration: TodayConfigIntent, in context: Context) async -> Timeline<TodayWidgetEntry> {
         let now = Date()
         let subject: Bool = configuration.standBySubject
+        // [v5] 關掉「部屬會議」時大型的部屬那幾行也藏；靈動島「跑到幾點」讀一次
+        let showsTeam: Bool = configuration.showMeetings
+        let liveUntil: Date? = DayTimelineToggleState.runningUntil
         guard let snapshot = Self.readFiltered(configuration) else {
             // App 第一次寫完快照會叫重畫，這裡不用定時
-            let only = TodayWidgetEntry(date: now, snapshot: nil, showsSubjectWhenLocked: subject)
+            let only = TodayWidgetEntry(date: now, snapshot: nil, showsSubjectWhenLocked: subject,
+                                        showsTeam: showsTeam, liveUntil: liveUntil)
             return Timeline(entries: [only], policy: .never)
         }
         let plan = TodayWidgetTimeline.plan(snapshot: snapshot, now: now)
-        let entries: [TodayWidgetEntry] = plan.dates.map {
-            TodayWidgetEntry(date: $0, snapshot: snapshot, showsSubjectWhenLocked: subject)
+        let dates: [Date] = TodayWidgetTimeline.adding(liveUntil: liveUntil, to: plan.dates, now: now,
+                                                       validUntil: snapshot.validUntil)
+        let entries: [TodayWidgetEntry] = dates.map {
+            TodayWidgetEntry(date: $0, snapshot: snapshot, showsSubjectWhenLocked: subject,
+                             showsTeam: showsTeam, liveUntil: liveUntil)
         }
         let policy: TimelineReloadPolicy
         if let reloadAt = plan.reloadAt {
@@ -200,6 +228,15 @@ enum TodayWidgetTimeline {
         let seconds = (date.timeIntervalSinceReferenceDate / 60).rounded(.down) * 60
         return Date(timeIntervalSinceReferenceDate: seconds)
     }
+
+    /// [v5] 靈動島「跑到幾點」在 (now, validUntil] 之間就多排一筆：過了那一刻，中型的「上靈動島」自己回來。
+    /// plan(snapshot:now:) 的簽名不動（鎖定畫面「下一場」也在用），所以另外插
+    static func adding(liveUntil: Date?, to dates: [Date], now: Date, validUntil: Date) -> [Date] {
+        guard let until = liveUntil, until > now, until <= validUntil else { return dates }
+        var times = Set<Date>(dates)
+        times.insert(until)
+        return times.sorted()
+    }
 }
 
 // MARK: - 畫面要的字（全部在這裡組好，body 只讀）
@@ -214,9 +251,11 @@ struct TodayWidgetRow: Identifiable {
     let title: String
     /// 灰字（部屬姓名、地點…）；StandBy／隱私時是空字串
     let owner: String
-    /// 最右邊：「進行中」「25 分後」或空字串
+    /// 最右邊：「進行中」「25 分後」「已結束」或空字串
     let trailing: String
     let url: URL
+    /// [v5] 大型 ① 最上面補的「最近結束的一場」（淡色、「已結束」）。中型不會有
+    var isDone: Bool = false
 
     var isMessage: Bool { kind == nil }
 }
@@ -299,6 +338,26 @@ struct TodayWidgetModel {
     /// 「10:02 更新」（快照超過 3 小時才有）
     var updatedText = ""
 
+    // [v5] 中型「上靈動島」
+    /// 今天還沒結束的（篩過的）≥ 2 場、靈動島沒在跑
+    var showsLiveButton = false
+    /// 靈動島正在跑（liveUntil > now）：按鈕換成小字「靈動島顯示中」
+    var showsLiveRunning = false
+
+    // [v5] 大型（includesLarge 時才填）
+    /// ① 還沒結束的每一場（最多 TodayLargeLayout.maxStopRows），一場都不剩時是中型的訊息列
+    var largeRows: [TodayWidgetRow] = []
+    /// ① 最近結束的一場（淡色）；一場都不剩（largeRows 是訊息列）或還沒有結束的是 nil
+    var largeDone: TodayWidgetRow? = nil
+    /// ② 第一行：全天的事、今天／明天生日（todaySpecials；最多 3 段）
+    var specials: [WidgetLineItem] = []
+    /// ② 第二行：「部屬 請假 2・大夜 3・小夜 2」（todayTeamLine）
+    var teamLine: WidgetLineItem? = nil
+    /// ③ 要處理（todayTodos）
+    var todos: [WidgetLineItem] = []
+    /// ④ 接下來（upcomingLines：旅行＋最多 2 件倒數）；畫幾列由 TodayLargeLayout.upcoming 挑
+    var upcoming: [WidgetLineItem] = []
+
     /// 小型整塊點下去
     var tapURL: URL = WidgetLink.today(nil)
 
@@ -306,8 +365,11 @@ struct TodayWidgetModel {
     /// 全天的事用 lockTitle（J:177）。
     /// [v3] showsSubject＝長按設定「鎖著時顯示主題」：false 時 privacy 的標題回到 v1 的類別字（WidgetStop.lockTitle）。
     /// 非 privacy（主畫面）不受影響
+    /// [v5] showsTeam＝長按設定「部屬會議」（大型 ②③ 的部屬那幾行）；liveUntil＝靈動島跑到幾點（中型按鈕）；
+    /// includesLarge＝大型才組 ②③④（小、中不用）
     static func make(snapshot: WidgetLifeSnapshot?, now: Date, privacy: Bool,
-                     showsSubject: Bool = true) -> TodayWidgetModel {
+                     showsSubject: Bool = true, showsTeam: Bool = true,
+                     liveUntil: Date? = nil, includesLarge: Bool = false) -> TodayWidgetModel {
         var model = TodayWidgetModel()
         guard let snap = snapshot else {
             model.message = "打開 LifeGood 一次，這裡就會出現今天的行程"
@@ -327,6 +389,11 @@ struct TodayWidgetModel {
         let rowLimit = model.updatedText.isEmpty ? 3 : 2
         let mode = TodayWidgetTitleMode(privacy: privacy, showsSubject: showsSubject)
         model.rows = TodayWidgetText.rows(day: day, now: now, mode: mode, limit: rowLimit)
+        TodayWidgetText.fillIsland(&model, day: day, now: now, liveUntil: liveUntil)
+        if includesLarge {
+            TodayWidgetText.fillLarge(&model, snapshot: snap, day: day, now: now, mode: mode,
+                                      showsTeam: showsTeam)
+        }
 
         if day.stops.isEmpty {
             TodayWidgetText.fillFree(&model, day: day, privacy: privacy)
@@ -512,6 +579,48 @@ private enum TodayWidgetText {
                        url: WidgetLink.today(nil))
     }
 
+    // MARK: [v5]
+
+    /// 中型「上靈動島」：靈動島在跑（liveUntil > now）寫「靈動島顯示中」；沒在跑、還剩 2 場以上才出現按鈕
+    static func fillIsland(_ model: inout TodayWidgetModel, day: WidgetLifeDay, now: Date, liveUntil: Date?) {
+        let running: Bool = liveUntil.map { $0 > now } ?? false
+        let left: Int = day.remainingStops(at: now).count
+        model.showsLiveRunning = running
+        model.showsLiveButton = !running && left >= 2
+    }
+
+    /// 大型 ①～④。字全部是契約組好的（WidgetLifeSnapshot.todaySpecials／todayTeamLine／todayTodos／upcomingLines），
+    /// 這裡只放進 model。privacy（StandBy 沒有大型；萬一背景被拿掉被當成 StandBy）：不寫任何人名——
+    /// ② 生日那一行不畫、④ 只留旅行；部屬、待辦本來就只有數字
+    static func fillLarge(_ model: inout TodayWidgetModel, snapshot snap: WidgetLifeSnapshot, day: WidgetLifeDay,
+                          now: Date, mode: TodayWidgetTitleMode, showsTeam: Bool) {
+        model.largeRows = rows(day: day, now: now, mode: mode, limit: TodayLargeLayout.maxStopRows)
+        let hasRemaining: Bool = !day.remainingStops(at: now).isEmpty
+        model.largeDone = hasRemaining ? doneRow(day: day, now: now, mode: mode) : nil
+        model.specials = mode.privacy ? [] : snap.todaySpecials(at: now, includeTeam: showsTeam)
+        model.teamLine = snap.todayTeamLine(at: now, includeTeam: showsTeam)
+        model.todos = snap.todayTodos(at: now, includeTeam: showsTeam)
+        let countdownLimit: Int = mode.privacy ? 0 : TodayLargeLayout.maxCountdowns
+        model.upcoming = snap.upcomingLines(at: now, countdownLimit: countdownLimit)
+    }
+
+    /// 大型 ① 最近結束的一場：淡色、最右邊「已結束」，點了一樣開那一場。還沒有結束的是 nil
+    static func doneRow(day: WidgetLifeDay, now: Date, mode: TodayWidgetTitleMode) -> TodayWidgetRow? {
+        let ended: [WidgetStop] = day.stops.filter { $0.stop.end <= now }
+        let latest: WidgetStop? = ended.max(by: { (a: WidgetStop, b: WidgetStop) -> Bool in
+            a.stop.end < b.stop.end
+        })
+        guard let item = latest else { return nil }
+        return TodayWidgetRow(id: "lg-row-ended-" + item.id,
+                              kind: item.stop.kind,
+                              time: DayTimelineFormat.time(item.stop.start),
+                              title: title(item, mode: mode),
+                              owner: mode.privacy ? "" : item.stop.owner,
+                              trailing: "已結束",
+                              url: WidgetLink.today(item.stop),
+                              isDone: true)
+    }
+
     /// 軸：用靈動島 ContentState 的同一套位置算法（共用檔 DayTimelineAttributes.swift）
     static func axis(day: WidgetLifeDay, now: Date) -> TodayWidgetAxis? {
         guard !day.stops.isEmpty else { return nil }
@@ -526,6 +635,45 @@ private enum TodayWidgetText {
                                now: state.nowPosition(now),
                                startText: DayTimelineFormat.time(state.axisStart),
                                endText: DayTimelineFormat.time(state.axisEnd))
+    }
+}
+
+/// [v5] 大型 ② 第一行的一段（第二段起前面有「・」）
+struct TodayLargeSegment: Identifiable {
+    let id: String
+    let item: WidgetLineItem
+    let leadingDot: Bool
+}
+
+/// [v5] 大型的列數（純函式；View 只呼叫這些，不自己切陣列）。
+/// 小 iPhone（大型約 292×311，內容約 260×279）放不下時，TodayLargeView 由上往下試
+/// （① 幾場, ④ 幾列）＝(5,3)(4,3)(4,2)(3,2)(3,1)(2,1)，[審查補] 最後 (2,0)；字級不變
+enum TodayLargeLayout {
+    /// ① 最多幾列
+    static let maxStopRows = 5
+    /// ④ 旅行之外最多幾件倒數
+    static let maxCountdowns = 2
+
+    /// ① 前 limit 列；不滿 limit 列時最上面補最近結束的一場（一場都不剩時是訊息列，不補）
+    static func stopRows(model: TodayWidgetModel, limit: Int) -> [TodayWidgetRow] {
+        let base: [TodayWidgetRow] = Array(model.largeRows.prefix(max(0, limit)))
+        guard let done = model.largeDone, base.count < limit else { return base }
+        return [done] + base
+    }
+
+    /// ④ 前 limit 列（旅行在最前面）
+    static func upcoming(model: TodayWidgetModel, limit: Int) -> [WidgetLineItem] {
+        Array(model.upcoming.prefix(max(0, limit)))
+    }
+
+    /// ② 第一行前 count 段，第二段起前面加「・」
+    static func segments(_ items: [WidgetLineItem], count: Int) -> [TodayLargeSegment] {
+        let shown: [WidgetLineItem] = Array(items.prefix(max(0, count)))
+        var out: [TodayLargeSegment] = []
+        for (index, item) in shown.enumerated() {
+            out.append(TodayLargeSegment(id: item.id, item: item, leadingDot: index > 0))
+        }
+        return out
     }
 }
 
@@ -548,10 +696,18 @@ enum TodayWidgetSample {
                                 greeting: ["Have a nice", "Tuesday!"],
                                 hidesMeetings: false,
                                 nextDayFirstStop: nil)
-        let snapshot = WidgetLifeSnapshot(generatedAt: sampleNow,
+        var snapshot = WidgetLifeSnapshot(generatedAt: sampleNow,
                                           dataDay: WidgetDateText.dayKey(dayStart),
                                           validUntil: validUntil,
                                           days: [day])
+        // [v5] 大型預覽的 ②③④（契約的樣本：請假 2・大夜 3・小夜 2、明天 王小明生日、部屬任務逾期 2・今天到期 3、
+        // 家庭待辦今天到期 1、勇闖福岡親子行還有 38 天、結婚紀念日還有 23 天、女兒 3 歲生日還有 40 天）。
+        // 小、中、鎖定畫面不讀這幾欄，看不到差別
+        snapshot.trips = [WidgetLifeSample.trip(dayStart: dayStart)]
+        snapshot.hasTeam = true
+        snapshot.team = [WidgetLifeSample.teamDay(dayStart: dayStart)]
+        snapshot.familyTasks = [WidgetLifeSample.familyTasksDay(dayStart: dayStart)]
+        snapshot.countdowns = WidgetLifeSample.countdowns(dayStart: dayStart)
         return TodayWidgetEntry(date: sampleNow, snapshot: snapshot, showsSubjectWhenLocked: true)
     }
 
@@ -606,24 +762,31 @@ struct TodayWidgetEntryView: View {
 
     private var model: TodayWidgetModel {
         TodayWidgetModel.make(snapshot: entry.snapshot, now: entry.date, privacy: surface.isStandBy,
-                              showsSubject: entry.showsSubjectWhenLocked)
+                              showsSubject: entry.showsSubjectWhenLocked, showsTeam: entry.showsTeam,
+                              liveUntil: entry.liveUntil, includesLarge: isLarge)
     }
 
     private var isMedium: Bool { family == .systemMedium }
 
-    /// 小型整塊開那一場；中型每一列各自是 Link，其他地方開我的行事曆（J:167）
+    /// [v5]
+    private var isLarge: Bool { family == .systemLarge }
+
+    /// [v5] 中、大型：每一列各自是 Link、右上角有手寫問候
+    private var hasRowLinks: Bool { isMedium || isLarge }
+
+    /// 小型整塊開那一場；中、大型每一列各自是 Link，其他地方開我的行事曆（J:167）
     private var tapURL: URL {
-        isMedium ? WidgetLink.today(nil) : model.tapURL
+        hasRowLinks ? WidgetLink.today(nil) : model.tapURL
     }
 
-    /// 中型右上角有手寫問候，月牙／雲不放右上（J:56）；小型右上有「4 場」，放大字那一列旁
+    /// 中、大型右上角有手寫問候，月牙／雲不放右上（J:56）；小型右上有「4 場」，放大字那一列旁
     private var skyMoon: WidgetSkyMoon {
-        isMedium ? WidgetSkyMoon.topLeading : WidgetSkyMoon.middleTrailing
+        hasRowLinks ? WidgetSkyMoon.topLeading : WidgetSkyMoon.middleTrailing
     }
 
     var body: some View {
         TodayWidgetContent(model: model, palette: palette,
-                           standBy: surface.isStandBy, isMedium: isMedium)
+                           standBy: surface.isStandBy, isMedium: isMedium, isLarge: isLarge)
             .containerBackground(for: .widget) {
                 backgroundView
             }
@@ -646,10 +809,14 @@ private struct TodayWidgetContent: View {
     let palette: WidgetPalette
     let standBy: Bool
     let isMedium: Bool
+    /// [v5]
+    var isLarge: Bool = false
 
     var body: some View {
         if model.kind == .message {
             TodayMessageView(text: model.message, palette: palette)
+        } else if isLarge {
+            TodayLargeView(model: model, palette: palette)
         } else if isMedium {
             TodayMediumView(model: model, palette: palette)
         } else if standBy {
@@ -811,7 +978,7 @@ private struct TodayMediumView: View {
 
     private func column(rows: [TodayWidgetRow]) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            TodayMediumHeader(model: model, palette: palette)
+            TodayMediumHeader(model: model, palette: palette, showsLiveControl: true)
             middleRow
                 .padding(.top, 6)
             Spacer(minLength: 4)
@@ -831,10 +998,13 @@ private struct TodayMediumView: View {
     }
 }
 
-/// 左邊日期＋場數，右上手寫問候；放不下就不寫問候（J:164）
+/// 左邊日期＋場數，右上手寫問候；放不下就不寫問候（J:164）。
+/// [v5] 中型（showsLiveControl）：場數那一行右邊放「上靈動島」或「靈動島顯示中」——比手寫問候重要，
+/// 放不下時 ViewThatFits 先丟的是問候。大型也用這個表頭，但不放按鈕（false）
 private struct TodayMediumHeader: View {
     let model: TodayWidgetModel
     let palette: WidgetPalette
+    var showsLiveControl: Bool = false
 
     var body: some View {
         ViewThatFits(in: .horizontal) {
@@ -852,10 +1022,23 @@ private struct TodayMediumHeader: View {
             Text(model.dateText)
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(palette.inkDate)
-            Text(model.summary)
-                .font(.system(size: 13.5, weight: .bold))
-                .foregroundStyle(palette.ink)
-                .lineLimit(1)
+            HStack(spacing: 6) {
+                Text(model.summary)
+                    .font(.system(size: 13.5, weight: .bold))
+                    .foregroundStyle(palette.ink)
+                    .lineLimit(1)
+                liveControl
+            }
+        }
+    }
+
+    /// [v5] 還剩 2 場以上、靈動島沒在跑：按鈕；正在跑：小字。其他時候什麼都不放
+    @ViewBuilder
+    private var liveControl: some View {
+        if showsLiveControl && model.showsLiveButton {
+            TodayWidgetLiveButton(palette: palette)
+        } else if showsLiveControl && model.showsLiveRunning {
+            TodayWidgetLiveRunningText(palette: palette)
         }
     }
 
@@ -942,7 +1125,8 @@ private struct TodayRowsList: View {
     }
 }
 
-/// 一列：記號、時間、標題、owner（灰）、最右邊「進行中」或倒數
+/// 一列：記號、時間、標題、owner（灰）、最右邊「進行中」或倒數。
+/// [v5] 大型最上面補的「最近結束的一場」（isDone）：整列淡色（0.45）、「已結束」灰字
 private struct TodayRowView: View {
     let row: TodayWidgetRow
     let palette: WidgetPalette
@@ -958,10 +1142,19 @@ private struct TodayRowView: View {
             Spacer(minLength: 4)
             sideColumns
         }
+        .opacity(rowOpacity)
     }
 
     private var titleColor: Color {
         row.isMessage ? palette.label : palette.ink
+    }
+
+    private var trailingColor: Color {
+        row.isDone ? palette.label : palette.countdown
+    }
+
+    private var rowOpacity: Double {
+        row.isDone ? 0.45 : 1
     }
 
     @ViewBuilder
@@ -995,10 +1188,276 @@ private struct TodayRowView: View {
                 .frame(width: 52, alignment: .leading)
             Text(row.trailing)
                 .font(.system(size: 11.5, weight: .bold))
-                .foregroundStyle(palette.countdown)
+                .foregroundStyle(trailingColor)
                 .lineLimit(1)
                 .minimumScaleFactor(0.8)
                 .frame(width: 70, alignment: .trailing)
+        }
+    }
+}
+
+// MARK: 中型「上靈動島」（[v5]）
+
+/// 「上靈動島」：StartDayTimelineIntent（共用檔，LiveActivityIntent：在 App 的行程裡背景跑、不開 App 畫面；
+/// 沒交到 App 時存成待套用，App 下次回前景套用）。膠囊同全天的事（capsuleFill／capsuleText）
+private struct TodayWidgetLiveButton: View {
+    let palette: WidgetPalette
+
+    var body: some View {
+        Button(intent: StartDayTimelineIntent()) {
+            TodayWidgetLiveButtonLabel(palette: palette)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("把今天的行程放上靈動島")
+    }
+}
+
+private struct TodayWidgetLiveButtonLabel: View {
+    let palette: WidgetPalette
+
+    var body: some View {
+        HStack(spacing: 3) {
+            Image(systemName: "calendar.day.timeline.left")
+                .font(.system(size: 9.5, weight: .bold))
+            Text("上靈動島")
+                .font(.system(size: 10.5, weight: .semibold))
+                .lineLimit(1)
+        }
+        .foregroundStyle(palette.capsuleText)
+        .padding(.horizontal, 7)
+        // [審查] 上下 2（不是膠囊的 3）：10.5pt 中文行高約 14.8＋4 ≈ 18.8，不比旁邊 13.5pt 的場數（約 19）高，
+        // 中型表頭不會因為多了按鈕變高（矮的中型才不會因此從三列退成兩列）
+        .padding(.vertical, 2)
+        .background(palette.capsuleFill, in: Capsule())
+        .fixedSize()
+    }
+}
+
+/// 靈動島正在跑：小字「靈動島顯示中」（不是按鈕；要收掉去控制中心或設定頁）
+private struct TodayWidgetLiveRunningText: View {
+    let palette: WidgetPalette
+
+    var body: some View {
+        Text("靈動島顯示中")
+            .font(.system(size: 10, weight: .medium))
+            .foregroundStyle(palette.label)
+            .lineLimit(1)
+            .fixedSize()
+    }
+}
+
+// MARK: 大型（[v5]）
+
+/// 表頭（同中型：日期、場數、手寫問候；不放「上靈動島」）＋四區。
+/// 小 iPhone 放不下時砍列數、字級不變：ViewThatFits 由上往下挑第一個放得下的（① 幾場, ④ 幾列）。
+/// 估高（[審查] 中文字的行高約字級 ×1.4，比英文高；區塊全滿＝樣本那一天）：表頭 38、
+/// ① 標 23＋每場 18.2（列距 3）、② 60（兩行）、③ 59（兩行）、④ 標 23＋每列 17.5（列距 1）、「10:02 更新」13 →
+/// (5,3) 約 360、(4,3) 約 339（Pro Max 內容約 350）、(4,2) 約 320（6.1 吋內容約 322）、(3,2) 約 299、
+/// (3,1) 約 281（SE 內容約 292）、(2,1) 約 259（292×311 內容約 279，加「更新」那行約 272 也放得下）。
+/// [審查補] 最後再一個 (2,0)：④ 整區不畫（連標題），中文字行高比估的再高一點時也不會被截
+private struct TodayLargeView: View {
+    let model: TodayWidgetModel
+    let palette: WidgetPalette
+
+    var body: some View {
+        ViewThatFits(in: .vertical) {
+            column(stopLimit: 5, nextLimit: 3)
+            column(stopLimit: 4, nextLimit: 3)
+            column(stopLimit: 4, nextLimit: 2)
+            column(stopLimit: 3, nextLimit: 2)
+            column(stopLimit: 3, nextLimit: 1)
+            column(stopLimit: 2, nextLimit: 1)
+            column(stopLimit: 2, nextLimit: 0)
+        }
+    }
+
+    private func column(stopLimit: Int, nextLimit: Int) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            TodayMediumHeader(model: model, palette: palette)
+            TodayLargeStopsSection(rows: TodayLargeLayout.stopRows(model: model, limit: stopLimit),
+                                   palette: palette)
+            TodayLargeSpecialsSection(specials: model.specials, teamLine: model.teamLine, palette: palette)
+            TodayLargeLinesSection(heading: "要處理", items: model.todos, palette: palette)
+            TodayLargeLinesSection(heading: "接下來",
+                                   items: TodayLargeLayout.upcoming(model: model, limit: nextLimit),
+                                   palette: palette)
+            Spacer(minLength: 0)
+            TodayLargeUpdatedLine(text: model.updatedText, palette: palette)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+}
+
+/// 區標：「幾點要去哪」「今天誰特別」「要處理」「接下來」
+private struct TodayLargeSectionTitle: View {
+    let text: String
+    let palette: WidgetPalette
+
+    var body: some View {
+        Text(text)
+            .font(.system(size: 10.5, weight: .semibold))
+            .foregroundStyle(palette.label)
+            .lineLimit(1)
+    }
+}
+
+/// ① 幾點要去哪：一列一場（同中型的列，每列 Link 開那一場）；一場都不剩時是訊息列
+private struct TodayLargeStopsSection: View {
+    let rows: [TodayWidgetRow]
+    let palette: WidgetPalette
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            TodayLargeSectionTitle(text: "幾點要去哪", palette: palette)
+            TodayRowsList(rows: rows, updatedText: "", palette: palette)
+        }
+        .padding(.top, 6)
+    }
+}
+
+/// ②③④ 的一列：圖示 10pt＋字 12.5pt，一行
+private struct TodayLargeLineView: View {
+    let item: WidgetLineItem
+    let palette: WidgetPalette
+
+    var body: some View {
+        HStack(spacing: 5) {
+            Image(systemName: item.icon)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(palette.label)
+                .frame(width: 13)
+            Text(item.text)
+                .font(.system(size: 12.5, weight: .medium))
+                .foregroundStyle(palette.ink)
+                .lineLimit(1)
+                .minimumScaleFactor(0.9)
+        }
+    }
+}
+
+/// 一串列，每列一個 Link（點了去契約給的網址）
+private struct TodayLargeLinks: View {
+    let items: [WidgetLineItem]
+    let palette: WidgetPalette
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 1) {
+            ForEach(items, id: \.id) { item in
+                Link(destination: item.url) {
+                    TodayLargeLineView(item: item, palette: palette)
+                }
+            }
+        }
+    }
+}
+
+/// ③ 要處理、④ 接下來：沒有東西整區不畫（連標題）
+private struct TodayLargeLinesSection: View {
+    let heading: String
+    let items: [WidgetLineItem]
+    let palette: WidgetPalette
+
+    var body: some View {
+        if !items.isEmpty {
+            VStack(alignment: .leading, spacing: 2) {
+                TodayLargeSectionTitle(text: heading, palette: palette)
+                TodayLargeLinks(items: items, palette: palette)
+            }
+            .padding(.top, 6)
+        }
+    }
+}
+
+/// ② 今天誰特別：第一行全天的事與生日（每段一個 Link；放不下 3 段→2 段→1 段），第二行部屬人數
+private struct TodayLargeSpecialsSection: View {
+    let specials: [WidgetLineItem]
+    let teamLine: WidgetLineItem?
+    let palette: WidgetPalette
+
+    private var hasContent: Bool { !specials.isEmpty || teamLine != nil }
+
+    var body: some View {
+        if hasContent {
+            VStack(alignment: .leading, spacing: 2) {
+                TodayLargeSectionTitle(text: "今天誰特別", palette: palette)
+                specialsRow
+                teamRow
+            }
+            .padding(.top, 6)
+        }
+    }
+
+    @ViewBuilder
+    private var specialsRow: some View {
+        if !specials.isEmpty {
+            ViewThatFits(in: .horizontal) {
+                segmentsRow(3)
+                segmentsRow(2)
+                segmentsRow(1)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var teamRow: some View {
+        if let line = teamLine {
+            Link(destination: line.url) {
+                TodayLargeLineView(item: line, palette: palette)
+            }
+        }
+    }
+
+    private func segmentsRow(_ count: Int) -> some View {
+        TodayLargeSegmentsRow(segments: TodayLargeLayout.segments(specials, count: count), palette: palette)
+    }
+}
+
+private struct TodayLargeSegmentsRow: View {
+    let segments: [TodayLargeSegment]
+    let palette: WidgetPalette
+
+    var body: some View {
+        HStack(spacing: 4) {
+            ForEach(segments, id: \.id) { segment in
+                TodayLargeSegmentView(segment: segment, palette: palette)
+            }
+        }
+    }
+}
+
+/// 一段：「・」（第二段起）＋圖示＋字；點了去那一段的網址（我的行事曆／生日名單）
+private struct TodayLargeSegmentView: View {
+    let segment: TodayLargeSegment
+    let palette: WidgetPalette
+
+    var body: some View {
+        HStack(spacing: 4) {
+            if segment.leadingDot {
+                Text("・")
+                    .font(.system(size: 12.5, weight: .medium))
+                    .foregroundStyle(palette.label)
+            }
+            Link(destination: segment.item.url) {
+                TodayLargeLineView(item: segment.item, palette: palette)
+            }
+        }
+    }
+}
+
+/// 快照超過 3 小時：右下角小字「10:02 更新」（同中型）
+private struct TodayLargeUpdatedLine: View {
+    let text: String
+    let palette: WidgetPalette
+
+    var body: some View {
+        if !text.isEmpty {
+            HStack(spacing: 0) {
+                Spacer(minLength: 0)
+                Text(text)
+                    .font(.system(size: 9.5, weight: .medium))
+                    .foregroundStyle(palette.label)
+                    .lineLimit(1)
+            }
         }
     }
 }

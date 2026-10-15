@@ -30,8 +30,19 @@ import AppIntents
 //   沒選（或 EntityQuery 查不到、參數變 nil）是「記到…」＋鉛筆，按了開空白新增支出。
 //   主控定案 6：不用 .promptsForUserConfiguration()（沒把握）；跟 v2 一樣不設 tint、不加副標。
 //
+// [v5] 規格見 scratchpad/widgets/v5/brief.md 的 G3-4；design_life.md L7（:492-510）、主控定案 9。
+// • 今日行程（ControlWidgetToggle）：一按把今天的行程放上靈動島，再按一次收掉。等於設定頁「今日行程時間軸」那個開關
+//   （同一個 DayTimelineController.isEnabled）。action 是共用檔的 DayTimelineToggleIntent（SetValueIntent＋LiveActivityIntent，
+//   兩個 target 都有：系統在 App 的行程裡跑 perform，經 DayTimelineToggleBridge 交給 App 的 setEnabled(_:store:)）。
+//   開／關**不是 isEnabled**，是「靈動島現在有沒有在跑」：App 在開始、續期、收掉時寫 App Group 的「跑到幾點」
+//   （DayTimelineToggleState.runningUntil），> 現在就是開。關的時候：life 快照裡今天一場都沒有寫「今天沒有行程」，否則「未顯示」
+//   （isEnabled 開著但今天沒行程時不會卡在「顯示中」；App 收到按下後會 reloadControls）。
+//   valueLabel 用系統給的 on（按下去系統先畫新值），關的字用 provider 算的 offText。跟 v2、v3 一樣不設 tint、不加副標。
+//   控制項只畫狀態字，沒有任何行程內容、人名（鎖著也拉得下控制中心）。
+//
 // 型別：AddExpenseControl、HideAmountsControl、HideAmountsControlProvider；
 //      [v3] VoiceRecordControl、RecordToControl、RecordToControlConfigIntent、RecordToControlValue、RecordToControlProvider
+//      [v5] DayTimelineControl、DayTimelineControlValue、DayTimelineControlProvider
 
 struct AddExpenseControl: ControlWidget {
     var body: some ControlWidgetConfiguration {
@@ -140,5 +151,65 @@ struct RecordToControlProvider: AppIntentControlValueProvider {
     func currentValue(configuration: RecordToControlConfigIntent) async throws -> RecordToControlValue {
         let snapshot = WidgetSnapshotStore.read(WidgetMoneySnapshot.self)
         return RecordToControlValue.make(entity: configuration.target, snapshot: snapshot)
+    }
+}
+
+// MARK: - [v5] 今日行程（靈動島開關）
+
+struct DayTimelineControl: ControlWidget {
+    var body: some ControlWidgetConfiguration {
+        StaticControlConfiguration(kind: WidgetKind.controlDayTimeline,
+                                   provider: DayTimelineControlProvider()) { value in
+            ControlWidgetToggle("今日行程", isOn: value.isOn, action: DayTimelineToggleIntent()) { on in
+                Label(value.stateText(on), systemImage: DayTimelineControlValue.icon)
+            }
+        }
+        .displayName("今日行程")
+        .description("一按把今天的行程放上靈動島，再按一次收掉")
+    }
+}
+
+/// 控制項要畫的：開不開（靈動島現在有沒有在跑），與關的時候寫什麼
+struct DayTimelineControlValue: Sendable {
+    /// SF Symbol（設定頁「今日行程時間軸」同一個，SettingsView.swift）
+    static let icon = "calendar.day.timeline.left"
+    static let onText = "顯示中"
+    static let idleText = "未顯示"
+    static let noStopsText = "今天沒有行程"
+
+    /// 靈動島正在跑（DayTimelineToggleState.isRunning）
+    var isOn: Bool
+    /// 關的時候的字：「未顯示」「今天沒有行程」
+    var offText: String
+
+    /// on 是系統給的值（按下去先畫新值）：開「顯示中」、關 offText
+    func stateText(_ on: Bool) -> String {
+        on ? Self.onText : offText
+    }
+}
+
+/// 值：App Group 的「跑到幾點」> 現在＝開；關的字看 life 快照今天有沒有行程（不上網）
+struct DayTimelineControlProvider: ControlValueProvider {
+    /// 控制項庫、加入時的預覽：不讀檔
+    var previewValue: DayTimelineControlValue {
+        DayTimelineControlValue(isOn: false, offText: DayTimelineControlValue.idleText)
+    }
+
+    func currentValue() async throws -> DayTimelineControlValue {
+        let now = Date()
+        if DayTimelineToggleState.isRunning(at: now) {
+            return DayTimelineControlValue(isOn: true, offText: DayTimelineControlValue.idleText)
+        }
+        return DayTimelineControlValue(isOn: false, offText: Self.offText(at: now))
+    }
+
+    /// 關的時候：life 快照裡今天（day(at:)）一場都沒有寫「今天沒有行程」；
+    /// 有行程、沒快照、快照過期寫「未顯示」（不知道今天有沒有，不亂說）
+    static func offText(at now: Date) -> String {
+        guard let snapshot = WidgetSnapshotStore.read(WidgetLifeSnapshot.self),
+              let day = snapshot.day(at: now), day.stops.isEmpty else {
+            return DayTimelineControlValue.idleText
+        }
+        return DayTimelineControlValue.noStopsText
     }
 }

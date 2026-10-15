@@ -7,6 +7,8 @@ import AppIntents
 // 規格：scratchpad/widgets/v3/brief.md §3；judge.md §3.5（J:493-494）。
 // [v4] 檔尾加股票（WidgetStockEntity）、車子（WidgetVehicleEntity）、金價匯率（WidgetRateEntity、WidgetRateLineEntity），
 //      選單從 finance_v1.json 讀（scratchpad/widgets/v4/brief.md §3.2）。
+// [v5] 檔尾加部屬今天的廠區（WidgetPlantAreaEntity）：「全部」＋life_v1.json 的 plantAreas
+//      （scratchpad/widgets/v5/brief.md §3.4）。設定 intent（TeamConfigIntent）在 LifeGoodWidgets/TeamWidget.swift。
 //
 // • AppEnum（固定幾個選項，編譯時就知道）：
 //     WidgetAmountOption（金額：跟著總開關／這個小工具一律隱藏）
@@ -380,5 +382,66 @@ struct WidgetRateLineQuery: EntityQuery {
     /// 預設：美金（自訂幣別匯率裡有才有）；沒有美金就不顯示。系統不採用的話參數是 nil，小工具照同一條規則
     func defaultResult() async -> WidgetRateLineEntity? {
         WidgetRateLineEntity.all().first { $0.id == WidgetRatesBlock.usdCode } ?? WidgetRateLineEntity.off
+    }
+}
+
+// MARK: - [v5] 部屬今天的廠區（選單從 life_v1.json 的 plantAreas 讀）
+
+/// 部屬今天看哪個廠區。id＝廠區字（Subordinate.plantArea 去頭尾空白）；「全部廠區」的 id 是 allID。
+/// 設定 intent（TeamConfigIntent，TeamWidget.swift）的參數寫成 optional：nil、「全部廠區」、
+/// 快照裡找不到的廠區（改名、刪掉）一律當全部
+struct WidgetPlantAreaEntity: AppEntity {
+    static var typeDisplayRepresentation: TypeDisplayRepresentation = "廠區"
+    static var defaultQuery = WidgetPlantAreaQuery()
+
+    /// 「全部廠區」的 id（廠區是使用者自己打的字，不會剛好是這一串）
+    static let allID = "__all__"
+    static let allPlants = WidgetPlantAreaEntity(id: allID, name: "全部廠區")
+
+    var id: String
+    /// 選單上的字：「全部廠區」「A」「P1」
+    var name: String
+
+    var displayRepresentation: DisplayRepresentation {
+        DisplayRepresentation(title: "\(name)")
+    }
+
+    init(id: String, name: String) {
+        self.id = id
+        self.name = name
+    }
+
+    /// 給 WidgetLifeSnapshot.teamSummary(at:plantArea:)：全部廠區是 nil
+    var plantFilter: String? {
+        id == Self.allID ? nil : id
+    }
+
+    /// 全部廠區，再接快照的廠區清單；沒快照、舊檔、沒有任何廠區時只有「全部廠區」
+    static func choices() -> [WidgetPlantAreaEntity] {
+        var out: [WidgetPlantAreaEntity] = [allPlants]
+        let areas: [String] = WidgetSnapshotStore.read(WidgetLifeSnapshot.self)?.plantAreas ?? []
+        for area in areas {
+            out.append(WidgetPlantAreaEntity(id: area, name: area))
+        }
+        return out
+    }
+}
+
+struct WidgetPlantAreaQuery: EntityQuery {
+    init() {}
+
+    /// 找不到的（廠區改名、刪掉）不回，參數變 nil＝全部廠區
+    func entities(for identifiers: [WidgetPlantAreaEntity.ID]) async throws -> [WidgetPlantAreaEntity] {
+        let all = WidgetPlantAreaEntity.choices()
+        return identifiers.compactMap { id in all.first(where: { $0.id == id }) }
+    }
+
+    func suggestedEntities() async throws -> [WidgetPlantAreaEntity] {
+        WidgetPlantAreaEntity.choices()
+    }
+
+    /// 預設：全部廠區（系統不採用的話參數是 nil，小工具一樣當全部）
+    func defaultResult() async -> WidgetPlantAreaEntity? {
+        WidgetPlantAreaEntity.allPlants
     }
 }

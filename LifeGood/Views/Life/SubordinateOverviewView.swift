@@ -132,19 +132,9 @@ struct SubordinateOverviewView: View {
         return lifeStore.subordinates.filter { $0.id == pid }
     }
 
+    /// [v5] 判斷抽到 TeamDay.leaves（部屬今天小工具同一份），行為不變
     private var todayLeaves: [(sub: Subordinate, rec: SubordinateRecord)] {
-        visibleSubordinates.flatMap { sub in
-            sub.records
-                .filter { $0.type == .leave }
-                .filter { rec in
-                    let start = rec.date
-                    let end = rec.endDate ?? start
-                    return selectedDate >= calendar.startOfDay(for: start)
-                        && selectedDate < (calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: end)) ?? .distantFuture)
-                }
-                .map { (sub, $0) }
-        }
-        .sorted { $0.rec.date < $1.rec.date }
+        TeamDay.leaves(on: selectedDate, in: visibleSubordinates, calendar: calendar)
     }
 
     // MARK: - 當日會議
@@ -160,63 +150,27 @@ struct SubordinateOverviewView: View {
 
     // MARK: - 報告（本週全部 + 任何未完成 / 逾期）
 
-    /// 報告呈現狀態
-    enum ReportStatus { case overdue, thisWeek, pending, done }
-
-    /// 選取日所在的自然週區間 [週起, 下週起)
-    private var weekInterval: DateInterval {
-        calendar.dateInterval(of: .weekOfYear, for: selectedDate)
-            ?? DateInterval(start: calendar.startOfDay(for: selectedDate), duration: 86_400)
-    }
+    /// 報告呈現狀態（[v5] 搬到 TeamDay，部屬今天小工具的「週報逾期」同一個判斷）
+    typealias ReportStatus = TeamDay.ReportStatus
 
     /// 顯示規則：本週的報告（含已完成）+ 任何未完成的報告（含逾期、未來週）
     /// 排序：未完成優先（逾期最前 → 日期舊到新），其後已完成（日期新到舊）
+    /// [v5] 判斷抽到 TeamDay.reports（選取日所在的自然週＝TeamDay.weekInterval），行為不變
     private var displayedReports: [(sub: Subordinate, report: WeeklyReport, status: ReportStatus)] {
-        let wk = weekInterval
-        return visibleSubordinates.flatMap { sub in
-            sub.weeklyReports.compactMap { r -> (sub: Subordinate, report: WeeklyReport, status: ReportStatus)? in
-                let inWeek = wk.contains(r.date)
-                if r.isCompleted {
-                    return inWeek ? (sub, r, .done) : nil       // 已完成只顯示本週
-                }
-                if r.date < wk.start { return (sub, r, .overdue) }   // 逾期未完成
-                if inWeek            { return (sub, r, .thisWeek) }   // 本週未完成
-                return (sub, r, .pending)                            // 未來週、未完成
-            }
-        }
-        .sorted { a, b in
-            if a.report.isCompleted != b.report.isCompleted { return !a.report.isCompleted }
-            return a.report.isCompleted ? a.report.date > b.report.date
-                                        : a.report.date < b.report.date
-        }
+        TeamDay.reports(on: selectedDate, in: visibleSubordinates, calendar: calendar)
     }
 
     // MARK: - 當日任務（進行中或當日到期）
 
+    /// [v5] 判斷抽到 TeamDay.dayTasks（開始日或截止日是選取日、未完成），行為不變
     private var todayTasks: [(sub: Subordinate, task: SubordinateTask)] {
-        visibleSubordinates.flatMap { sub in
-            sub.tasks
-                .filter { t in
-                    !t.isCompleted && (
-                        isSameDay(t.date, selectedDate)
-                        || t.dueDate.map({ isSameDay($0, selectedDate) }) == true
-                    )
-                }
-                .map { (sub, $0) }
-        }
-        .sorted { $0.task.date < $1.task.date }
+        TeamDay.dayTasks(on: selectedDate, in: visibleSubordinates, calendar: calendar)
     }
 
     /// 所有部屬、所有日期的「未完成」任務總清單（逾期排最前，再依截止日 / 日期）
+    /// [v5] 抽到 TeamDay.incompleteTasks（部屬今天小工具的任務順序同這一份），行為不變
     private var incompleteTasks: [(sub: Subordinate, task: SubordinateTask)] {
-        visibleSubordinates.flatMap { sub in
-            sub.tasks.filter { !$0.isCompleted }.map { (sub, $0) }
-        }
-        .sorted { a, b in
-            let keyA = a.task.dueDate ?? a.task.date
-            let keyB = b.task.dueDate ?? b.task.date
-            return keyA < keyB
-        }
+        TeamDay.incompleteTasks(in: visibleSubordinates)
     }
 
     /// 所有部屬、所有會議的「未完成」議程項目（依會議日期新到舊）
@@ -297,6 +251,8 @@ struct SubordinateOverviewView: View {
             }
             .onDisappear { heroAppeared = false; sectionAppeared = false }
             .lateCompletionConfirm($lateRequest)
+            // [v5] 部屬今天小工具：點任務列開那件任務的卡片、點生日開生日名單
+            .onDeepLinkTeam(openTask: { openPendingTask() }, openBirthdays: { openPendingBirthdays() })
             .sheet(item: $editTarget) { target in
                 // 點項目先顯示預覽卡片（右上角「編輯」才進入編輯）
                 SubordinateItemCard(ref: target.itemRef)
@@ -338,6 +294,19 @@ struct SubordinateOverviewView: View {
                     .appStores()
             }
         }
+    }
+
+    /// [v5] 部屬今天點任務：開那件任務的預覽卡片（同總覽點一列；已刪掉找不到就停在總覽）
+    private func openPendingTask() {
+        guard let ref = DeepLinkRouter.shared.takeSubordinateTask(),
+              let sub = lifeStore.subordinates.first(where: { $0.id == ref.subId }),
+              let task = sub.tasks.first(where: { $0.id == ref.taskId }) else { return }
+        editTarget = .task(subId: sub.id, task: task)
+    }
+
+    /// [v5] 生日名單（看板蛋糕鈕同一個 sheet）
+    private func openPendingBirthdays() {
+        if DeepLinkRouter.shared.takeBirthdays() { showBirthdaySheet = true }
     }
 
     /// 今天或明天是否有人生日（部屬＋公司組織人員，看板蛋糕鈕亮燈判斷）
@@ -1204,7 +1173,7 @@ struct SubordinateOverviewView: View {
     /// [v25.355] 改用共用的 ItemRow 模板：左側漸層圓＝可點的完成勾選，
     /// 人員／時間／截止／設備／系統改走膠囊橫向捲軸（分類多也不會把標題擠掉）。
     private func taskRow(_ sub: Subordinate, _ task: SubordinateTask) -> some View {
-        let isOverdue = !task.isCompleted && (task.dueDate.map { $0 < Date() } ?? false)
+        let isOverdue = TeamDay.isOverdue(task, at: Date())   // [v5] 部屬今天小工具的「逾期」同一個判斷
         let accent: Color = task.isCompleted ? .green : (isOverdue ? .red : .cyan)
         let icon = task.isCompleted
             ? "checkmark.circle.fill"

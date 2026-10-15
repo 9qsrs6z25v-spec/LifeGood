@@ -30,6 +30,11 @@ import Foundation
 //   [v4] lifegood://finance/stock?id=<股票 UUID>&src=widget              → 理財「股票」、打開那一檔（股票今天小工具）
 //   [v4] lifegood://finance/overview?src=widget                         → 理財「總覽」（淨資產小工具）
 //   [v4] lifegood://settings/currency?src=widget                        → 設定、展開「自訂幣別匯率」（金價匯率小工具）
+//   [v5] lifegood://life/team?src=widget                                → 部屬總覽（部屬今天小工具、今天（大）的部屬那幾行）
+//   [v5] lifegood://life/team/task?sub=<部屬 UUID>&task=<任務 UUID>&src=widget → 部屬總覽、打開那件任務的預覽卡片
+//                                                                       （SubordinateItemCard；兩個 id 少一個就只開部屬總覽）
+//   [v5] lifegood://life/birthdays?src=widget                           → 部屬總覽、打開生日名單（BirthdayOverviewSheet）
+//   [v5] lifegood://life/family/tasks?src=widget                        → 人生「家庭」（家庭待辦在這一頁）
 //
 // 分類、車子分類的值是 App 寫進快照的 rawValue（VariableCategory／VehicleVariableCategory），
 // 小工具原樣帶回；URLComponents 會自己做百分比編碼，中文沒問題。
@@ -63,6 +68,14 @@ enum WidgetDestination: Equatable {
     case financeOverview
     /// [v4] 設定頁、展開「自訂幣別匯率」（不換 routeToken：不能先把設定頁關掉）
     case settingsCurrency
+    /// [v5] 人生 › 職涯 › 部屬總覽
+    case team
+    /// [v5] 部屬總覽、打開那件任務的預覽卡片（SubordinateItemCard）
+    case teamTask(subId: UUID, taskId: UUID)
+    /// [v5] 部屬總覽、打開生日名單（BirthdayOverviewSheet：部屬＋組織人員）
+    case birthdays
+    /// [v5] 人生「家庭」（FamilyView：家庭待辦在這一頁）
+    case familyTasks
 }
 
 /// 解析結果：去哪＋是不是從小工具點進來的
@@ -104,6 +117,13 @@ enum WidgetLink {
     private static let stockPath = "/stock"
     private static let settingsHost = "settings"
     private static let currencyPath = "/currency"
+    // [v5]
+    private static let teamPath = "/team"
+    private static let teamTaskPath = "/team/task"
+    private static let birthdaysPath = "/birthdays"
+    private static let familyTasksPath = "/family/tasks"
+    private static let subKey = "sub"
+    private static let taskKey = "task"
 
     /// 組不出網址時的退路（不會發生：全部是固定的 ASCII 字）
     private static let fallback = URL(string: "lifegood://today")!
@@ -174,6 +194,20 @@ enum WidgetLink {
         case .settingsCurrency:
             comps.host = settingsHost
             comps.path = currencyPath
+        case .team:
+            comps.host = lifeHost
+            comps.path = teamPath
+        case .teamTask(let subId, let taskId):
+            comps.host = lifeHost
+            comps.path = teamTaskPath
+            items.append(URLQueryItem(name: subKey, value: subId.uuidString))
+            items.append(URLQueryItem(name: taskKey, value: taskId.uuidString))
+        case .birthdays:
+            comps.host = lifeHost
+            comps.path = birthdaysPath
+        case .familyTasks:
+            comps.host = lifeHost
+            comps.path = familyTasksPath
         }
         if fromWidget {
             items.append(URLQueryItem(name: sourceKey, value: sourceWidget))
@@ -238,6 +272,20 @@ enum WidgetLink {
     /// [v4] 設定 › 自訂幣別匯率：lifegood://settings/currency?src=widget
     static var settingsCurrency: URL { url(for: .settingsCurrency) }
 
+    /// [v5] 部屬總覽：lifegood://life/team?src=widget
+    static var team: URL { url(for: .team) }
+
+    /// [v5] 部屬總覽、打開那件任務：lifegood://life/team/task?sub=<UUID>&task=<UUID>&src=widget
+    static func teamTask(subId: UUID, taskId: UUID) -> URL {
+        url(for: .teamTask(subId: subId, taskId: taskId))
+    }
+
+    /// [v5] 生日名單：lifegood://life/birthdays?src=widget
+    static var birthdays: URL { url(for: .birthdays) }
+
+    /// [v5] 家庭（家庭待辦）：lifegood://life/family/tasks?src=widget
+    static var familyTasks: URL { url(for: .familyTasks) }
+
     // MARK: 解析
 
     /// 認得的網址回 WidgetRoute；別的（不是 lifegood://、不認得的頁）回 nil。
@@ -284,6 +332,15 @@ enum WidgetLink {
             return nil
         case lifeHost:
             if path == tripPath { return .trip(id: uuidValue(idKey, in: items)) }
+            if path == teamPath { return .team }
+            if path == teamTaskPath {
+                // 兩個 id 少一個（網址被截斷、舊版）：只開部屬總覽
+                guard let sub = uuidValue(subKey, in: items),
+                      let task = uuidValue(taskKey, in: items) else { return .team }
+                return .teamTask(subId: sub, taskId: task)
+            }
+            if path == birthdaysPath { return .birthdays }
+            if path == familyTasksPath { return .familyTasks }
             return nil
         default:
             return nil

@@ -178,7 +178,8 @@ enum CalendarDayItems {
     }
 
     /// 我的行事曆寫 member.chineseName；空白的話退到角色（「媽媽」），不要出現「 62 歲生日」
-    private static func displayName(_ member: FamilyMember) -> String {
+    /// [v5] 拿掉 private：life 快照的倒數（WidgetLifeExtras.countdowns）用同一支
+    static func displayName(_ member: FamilyMember) -> String {
         let n = member.chineseName.trimmingCharacters(in: .whitespacesAndNewlines)
         return n.isEmpty ? member.role.rawValue : n
     }
@@ -186,7 +187,8 @@ enum CalendarDayItems {
     /// 將生日／紀念日的「年份」對齊到當年（照抄 MyCalendarView.annualOccurrence）。
     /// Calendar.date(from:) 對不存在的日期（如非閏年 2/29）不回傳 nil，而是溢位到下個月（3/1），
     /// 所以先把 day 截到該年該月實際天數：2/29 在平年對到 2/28。
-    private static func annualOccurrence(of date: Date, year: Int, calendar cal: Calendar) -> Date {
+    /// [v5] 拿掉 private：部屬今天的生日、倒數的下一次（WidgetLifeExtras）用同一支，規則只有一份
+    static func annualOccurrence(of date: Date, year: Int, calendar cal: Calendar) -> Date {
         var comp = cal.dateComponents([.month, .day], from: date)
         comp.year = year
         if let month = comp.month, let day = comp.day {

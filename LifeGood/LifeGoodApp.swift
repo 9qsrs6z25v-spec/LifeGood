@@ -114,6 +114,13 @@ struct LifeGoodApp: App {
         WidgetOpenAppHandoff.register { url in
             _ = WidgetLink.apply(url, store: AppStores.life)
         }
+        // [v5] 控制中心「今日行程」、中型「今天」的「上靈動島」（LiveActivityIntent，在 App 的行程裡背景跑）交到這裡：
+        // 跟設定頁的開關同一個 isEnabled（DayTimelineController.setEnabled）
+        DayTimelineToggleBridge.register { on in
+            await DayTimelineController.shared.setEnabled(on, store: AppStores.life)
+            // 今天沒有行程時不能卡在系統先畫的「開」：不管有沒有上島都叫控制項重讀一次
+            WidgetRefresh.reloadControls(WidgetKind.dayTimelineControlKinds)
+        }
     }
 
     var body: some Scene {
@@ -153,6 +160,10 @@ struct LifeGoodApp: App {
                     // 認不得的幣別維持手動值）。放最後、結果不看：開場動畫期間
                     // 網路慢也不擋任何啟動流程，失敗就沿用上次的值。
                     _ = await expenseStore.autoUpdateCurrencyRates()
+                    // [v5] 控制項在小工具的行程裡被按了、沒交到 App（保險）：照使用者按的開／關
+                    if let want = DayTimelineToggleState.takePending() {
+                        await DayTimelineController.shared.setEnabled(want, store: lifeStore)
+                    }
                     // [v25.377] 靈動島的今日行程：沒開啟就直接返回，不會做任何事
                     await DayTimelineController.shared.refresh(store: lifeStore)
                 }
@@ -190,8 +201,13 @@ struct LifeGoodApp: App {
                         Task {
                             await subscription.refreshStatus()
                             await einvoiceSync.syncIfDue(expenseStore: expenseStore)
+                            // [v5] 控制項在小工具的行程裡被按了、沒交到 App（保險）：照使用者按的開／關
+                            if let want = DayTimelineToggleState.takePending() {
+                                await DayTimelineController.shared.setEnabled(want, store: lifeStore)
+                            }
                             // [v25.377] 回到前景就重算時間軸：8 小時到期被系統收掉的
                             // Live Activity 也會在這裡重新掛上
+                            // [v5] 控制中心在背景開不了島（Activity.request 被擋）時：isEnabled 已經是開，這裡會開
                             await DayTimelineController.shared.refresh(store: lifeStore)
                             // [v25.455] 提醒也一併續上。鬧鐘一次只掛最近 8 個
                             //（AlarmKit 有數量上限），靠每次回到前景往後補。

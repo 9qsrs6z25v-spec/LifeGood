@@ -20,6 +20,14 @@ import WidgetKit
 // [v4] 加入理財四個（五個 kind）：股票今天（小＋鎖定畫面三型 StockWidget、中 StocksWidget）、金價匯率（RatesWidget）、
 // 我的車（VehicleWidget）、淨資產（NetWorthWidget），放子 bundle（LifeGoodFinanceBundle），這裡列它的 body。
 // 這一層現在 10 個、LifeGoodLockAndControlBundle 7 個、LifeGoodFinanceBundle 5 個，都在 10 個以內。
+//
+// [v5] 加入：部屬今天（小、中、鎖定畫面長方形與一行字，TeamWidget）、控制項「今日行程」（DayTimelineControl，
+// 靈動島開關）；「今天」多了大型（TodayWidget，kind 不變）。這一層已經 10 個，所以旅行搬進新的子 bundle
+// LifeGoodLifeBundle（跟部屬今天放一起；kind 不變，已經放好的旅行小工具不受影響），今日行程放進
+// LifeGoodLockAndControlBundle。這一層 10 個、LifeGoodLockAndControlBundle 8 個、LifeGoodFinanceBundle 5 個、
+// LifeGoodLifeBundle 2 個，都在 10 個以內。
+// 型別由 G2（TeamWidget，TeamWidget.swift）、G3（DayTimelineControl，LifeGoodControls.swift）實作，
+// 名字是 scratchpad/widgets/v5/brief.md 定死的。
 
 @main
 struct LifeGoodWidgetsBundle: WidgetBundle {
@@ -34,12 +42,12 @@ struct LifeGoodWidgetsBundle: WidgetBundle {
         LedgerDeskWidget()
         QuickRecordWidget()
         BillsWidget()
-        // [v3] 旅行
-        TravelWidget()
-        // [v2] 鎖定畫面三個＋控制項（[v3] 四個）
+        // [v2] 鎖定畫面三個＋控制項（[v3] 四個；[v5] 五個）
         LifeGoodLockAndControlBundle().body
         // [v4] 理財四個（五個 kind）
         LifeGoodFinanceBundle().body
+        // [v5] 旅行（[v3]，從這一層搬下去）＋部屬今天
+        LifeGoodLifeBundle().body
     }
 }
 
@@ -54,6 +62,8 @@ struct LifeGoodLockAndControlBundle: WidgetBundle {
         // [v3]
         VoiceRecordControl()
         RecordToControl()
+        // [v5] 靈動島今日行程開關
+        DayTimelineControl()
     }
 }
 
@@ -65,5 +75,13 @@ struct LifeGoodFinanceBundle: WidgetBundle {
         RatesWidget()
         VehicleWidget()
         NetWorthWidget()
+    }
+}
+
+/// [v5] 人生：旅行（[v3]）、部屬今天（@WidgetBundleBuilder 一次最多 10 個，共 2 個）
+struct LifeGoodLifeBundle: WidgetBundle {
+    var body: some Widget {
+        TravelWidget()
+        TeamWidget()
     }
 }

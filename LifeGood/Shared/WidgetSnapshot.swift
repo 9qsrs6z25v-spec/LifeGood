@@ -23,6 +23,15 @@ import Foundation
 //      金額字一律走 WidgetMoneyFormat.swift（逐字照抄 App 的 ntdWanString／MoneyFormat／FinanceText／StockCardText）。
 //      小工具的畫面檔不准自己乘、不准自己拼「NT$」。
 //
+// [v5] 加了：部屬今天（WidgetKind.team）、控制項「今日行程」（WidgetKind.controlDayTimeline）的 kind；
+//      life 的選填欄位 hasTeam／team（今天、明天各一份：請假、班別、逾期／今天到期的任務、各廠區件數、生日）、
+//      plantAreas（廠區清單）、familyTasks（家庭待辦今天到期、未完成，今天明天各一份）、
+//      countdowns（60 天內的結婚紀念日、家人生日、兼任職務重要日期，App 算好「下一次那一天」）。
+//      小工具只照日期挑那一份、照廠區篩、數人頭與排序（WidgetTeamDay.summary）；名字、假別、班別、
+//      「逾期 2 天」這些字全部是 App 寫的。「今天（大）」②③④ 的每一列在 WidgetLifeSnapshot 的
+//      todaySpecials／todayTeamLine／todayTodos／upcomingLines 組好（WidgetLineItem）。
+//      規格：scratchpad/widgets/v5/brief.md §3。
+//
 // 分工跟靈動島一樣：App 把小工具要顯示的「字」與「數字」算好、格式化好，寫成 App Group 裡的
 // 小檔案；小工具只讀這些檔、照著畫。**小工具裡不做任何金額計算與格式化**——「NT$4.6萬」
 // 「每天 NT$2,402」「已花 62%」全部是 App 用自己那套函式（MoneyFormat／ntdWanString）組好的字。
@@ -110,13 +119,26 @@ enum WidgetKind {
     /// [v4] 理財四個小工具全部（finance_v1.json 第一次寫、整份換掉時）
     static let financeKinds = [stock, stocks, rates, vehicle, netWorth]
 
+    // MARK: [v5]
+
+    /// 部屬今天：systemSmall、systemMedium＋鎖定畫面 accessoryRectangular／accessoryInline。讀 life_v1.json 的 team
+    static let team = "LifeGoodTeam"
+    /// 控制項「今日行程」（ControlWidgetToggle：靈動島開／關，DayTimelineToggleIntent）
+    static let controlDayTimeline = "com.lifegood.app.control.dayTimeline"
+    /// [v5] life_v1.json 的 team／plantAreas／hasTeam 變了要重畫的
+    static let teamKinds = [team]
+    /// [v5] 靈動島開、續期、收掉時要重畫的控制項（WidgetRefresh.reloadControls）。
+    /// 同時要重畫 WidgetKind.today（中型「上靈動島」按鈕看靈動島有沒有在跑）
+    static let dayTimelineControlKinds = [controlDayTimeline]
+
     /// money_v1.json 變了要重畫的（App 的寫手、一按就記的按鈕都用這一組）
     static let moneyKinds = [moneyLeft, ledgerDesk, quickRecord, lockSpent]
     /// [v3] money_v1.json 變了要重畫的控制項（「記到…」的「Taycan 電費」從 money 快照讀）。
     /// 用 WidgetRefresh.reloadControls(_:)
     static let moneyControlKinds = [controlRecordTo]
-    /// life_v1.json 變了要重畫的（[v3] 加旅行）
-    static let lifeKinds = [today, lockNextStop, travel]
+    /// life_v1.json 變了要重畫的全部（[v3] 加旅行；[v5] 加部屬今天）。
+    /// [v5] App 寫手只重畫受影響的那幾種（WidgetSnapshotWriter.lifeKindsToReload），這一組是「全部」
+    static let lifeKinds = [today, lockNextStop, travel, team]
     /// bills_v1.json 變了要重畫的
     static let billsKinds = [bills, lockNextBill]
 }
@@ -878,6 +900,20 @@ struct WidgetLifeSnapshot: Codable, Equatable, WidgetSnapshotPayload {
     /// **不受 validUntil 管**：倒數、第幾天由小工具用日期算，App 好幾天沒開也照樣對。
     /// 沒有任何旅行是空陣列；nil＝舊檔
     var trips: [WidgetTrip]? = nil
+
+    // MARK: [v5] 以下選填（v4 以前的舊檔沒有；App 一打開就補齊）
+
+    /// 有沒有任何部屬（LifeStore.subordinates 非空）。nil＝舊檔。不是 true 時部屬今天寫「還沒有部屬資料」
+    var hasTeam: Bool? = nil
+    /// 部屬今天：[0]＝今天、[1]＝明天（跟 days 同兩天；受 validUntil 管）。沒有部屬時兩份都是空的；nil＝舊檔
+    var team: [WidgetTeamDay]? = nil
+    /// 廠區清單（部屬今天設定的選單）：Subordinate.plantArea 去頭尾空白、非空、去重、排好。nil＝舊檔
+    var plantAreas: [String]? = nil
+    /// 家庭待辦：[0]＝今天、[1]＝明天（受 validUntil 管）。nil＝舊檔
+    var familyTasks: [WidgetFamilyTasksDay]? = nil
+    /// 接下來的倒數（結婚紀念日、家人生日、兼任職務重要日期），依日期排好。
+    /// **不受 validUntil 管**：存的是「那一天 00:00」，小工具只算差幾天。nil＝舊檔
+    var countdowns: [WidgetCountdown]? = nil
 }
 
 // MARK: - [v3] 旅行
@@ -971,6 +1007,552 @@ extension WidgetLifeSnapshot {
         let day = WidgetDateText.daysFrom(trip.firstDay, to: now) + 1
         let total = max(trip.dayCount, 1)
         return .during(trip, day: min(max(day, 1), total))
+    }
+}
+
+// MARK: - [v5] 部屬今天（life_v1.json 的 team）
+//
+// App 用 TeamDay（LifeGood/Models/TeamDay.swift：從部屬總覽抽出來的同一套判斷——當日請假、
+// 未完成任務、逾期紅字、報告逾期）算好今天、明天各一份；名字、假別時數、班別字、「逾期 2 天」全部是 App 寫的字。
+// 小工具只做三件事：照日期挑那一份（WidgetLifeSnapshot.teamDay(at:)）、照廠區篩、數人頭與排序
+// （WidgetTeamDay.summary(plantArea:)）。
+// 隱私（使用者決定）：鎖定畫面、StandBy、控制中心**不准畫任何名字**——只准用數字字
+// （WidgetTeamCell.text、WidgetTeamSummary.countsLine／shiftsLine／taskLine／overdueBadge）；
+// 名字（allNames／shortNames／leaveDetailText／birthdayText／WidgetTeamTask.name）只准畫在主畫面，
+// 而且主畫面的名字可以關（設定「顯示名字」）、假別預設不畫（「顯示假別」）。
+
+/// 一個人：請假名單、某一班的名單
+struct WidgetTeamPerson: Codable, Equatable, Identifiable {
+    /// 部屬 UUID
+    var subId: UUID
+    /// 「李大華」（App 去頭尾空白；空的寫「未命名」）
+    var name: String
+    /// 廠區（Subordinate.plantArea 去頭尾空白；空字串＝未分廠區）
+    var plantArea: String
+    /// 只有請假名單有：假別與時數「特休」「病假 4 小時」「4 小時」（同一人同一天兩筆用「、」接；
+    /// 都沒填寫「請假」）。班別名單是空字串
+    var detail: String
+
+    var id: UUID { subId }
+}
+
+/// 某一個班別那一天排了誰
+struct WidgetTeamShift: Codable, Equatable, Identifiable {
+    /// ShiftType.shortLabel：「大夜」「小夜」「假值」「日值」「時差」。App 寫，小工具不寫死班別的字。
+    /// 「休」（restDay）不寫進來；那一天沒有人的班別也不寫進來
+    var label: String
+    /// ShiftType.allCases 的位置（人數一樣時照這個排）
+    var order: Int
+    /// 那一天這一班的人（照部屬清單的順序）
+    var people: [WidgetTeamPerson]
+
+    var id: String { label }
+}
+
+/// 一件逾期、或這一天到期的部屬任務（中型下面那兩條；點了開那件任務的卡片）
+struct WidgetTeamTask: Codable, Equatable, Identifiable {
+    var subId: UUID
+    var taskId: UUID
+    /// 部屬名字（主畫面「顯示名字」開著才畫）
+    var name: String
+    /// 主題（空的寫「未命名任務」，同部屬總覽）
+    var topic: String
+    /// 到期那天 00:00（dueDate ?? date，同部屬總覽「未完成任務」的排序鍵）
+    var dueDay: Date
+    var plantArea: String
+    /// 逾期（跟部屬總覽的紅字同一個判斷 TeamDay.isOverdue：有截止時間、而且已經過了）
+    var isOverdue: Bool
+    /// 到期那天就是這一天、而且還沒逾期
+    var isDueToday: Bool
+    /// 逾期幾天（到期那天到這一天差幾個日曆天；沒逾期是 0）
+    var overdueDays: Int
+    /// 右邊的字（App 寫）：「逾期 2 天」；截止時間今天已經過了「已逾期」；今天到期「今天」
+    var dueText: String
+    /// lifegood://life/team/task?sub=<UUID>&task=<UUID>&src=widget（WidgetLink.teamTask 的 absoluteString）
+    var link: String
+
+    var id: UUID { taskId }
+    var url: URL { URL(string: link) ?? WidgetLink.teamTask(subId: subId, taskId: taskId) }
+}
+
+/// 部屬生日（只算部屬；組織人員沒有廠區、不放）
+struct WidgetTeamBirthday: Codable, Equatable, Identifiable {
+    var subId: UUID
+    var name: String
+    var plantArea: String
+    /// 0＝這一份的那一天、1＝隔天
+    var dayOffset: Int
+
+    var id: String { subId.uuidString + "-" + String(dayOffset) }
+
+    /// 「今天 王小明生日」「明天 王小明等 2 人生日」（list 要是同一天的）；空的回 nil。**只准畫在主畫面**
+    static func text(_ list: [WidgetTeamBirthday]) -> String? {
+        guard let first = list.first else { return nil }
+        let when = first.dayOffset == 0 ? "今天 " : "明天 "
+        if list.count == 1 { return when + first.name + "生日" }
+        return when + first.name + "等 " + String(list.count) + " 人生日"
+    }
+}
+
+/// 一個廠區的件數。用**全部**未完成任務算（tasks 只放前 20 件；畫面上的數字一律用這裡的）
+struct WidgetTeamCounts: Codable, Equatable, Identifiable {
+    /// 廠區；空字串＝未分廠區
+    var plantArea: String
+    /// 逾期的任務（WidgetTeamTask.isOverdue 同一個判斷）
+    var overdueTasks: Int
+    /// 這一天到期、還沒逾期
+    var dueTodayTasks: Int
+    /// 未完成（部屬總覽「未完成任務」的件數）
+    var openTasks: Int
+    /// 逾期的報告（部屬總覽「報告」區標「逾期」的：這一週以前、還沒完成）
+    var overdueReports: Int
+
+    var id: String { plantArea }
+}
+
+/// 部屬今天的一天（今天、明天各一份）
+struct WidgetTeamDay: Codable, Equatable, Identifiable {
+    /// 「2026-10-13」
+    var dayKey: String
+    var dayStart: Date
+    var dayEnd: Date
+    /// 「10/13 週二」
+    var dateText: String
+    /// 「10/13」
+    var shortDateText: String
+    /// 這一天請假的人（一人一筆，照請假開始時間；部屬總覽「當日請假」同一個判斷）
+    var leaves: [WidgetTeamPerson]
+    /// 這一天班表上有人的班別（不含「休」），照 ShiftType 順序；那一天請假的人不算（同班表格子只顯示假別）
+    var shifts: [WidgetTeamShift]
+    /// 逾期的在前（照部屬總覽「未完成任務」的順序：到期早的先）、再這一天到期的；
+    /// 全部的前 20 件，再補每個廠區的前 2 件（篩廠區時才不會空掉）
+    var tasks: [WidgetTeamTask]
+    /// 每個廠區一筆（含未分廠區的空字串）；沒有部屬是空陣列
+    var counts: [WidgetTeamCounts]
+    /// 這一天（dayOffset 0）與隔天（1）生日的部屬
+    var birthdays: [WidgetTeamBirthday]
+
+    var id: String { dayKey }
+
+    func contains(_ date: Date) -> Bool { dayStart <= date && date < dayEnd }
+}
+
+/// 三格裡的一格（「請假 2」＋名字）
+struct WidgetTeamCell: Equatable, Identifiable {
+    /// 「leave」或「shift-大夜」
+    var id: String
+    /// 「請假」「大夜」
+    var label: String
+    var people: [WidgetTeamPerson]
+    var isLeave: Bool
+    /// 排序用（請假 -1、班別照 ShiftType 順序）
+    var order: Int
+
+    var count: Int { people.count }
+    /// 「請假 2」「大夜 3」（只有數字：鎖定畫面、StandBy 可以用）
+    var text: String { label + " " + String(people.count) }
+    /// 名字全寫：「李大華・陳美玲」；沒有人是空字串。**只准畫在主畫面**
+    var allNames: String { people.map { $0.name }.joined(separator: "・") }
+    /// 放不下時：「張大明 等 3 人」；一個人就是名字；沒有人是空字串。**只准畫在主畫面**
+    var shortNames: String {
+        guard let first = people.first else { return "" }
+        if people.count == 1 { return first.name }
+        return first.name + " 等 " + String(people.count) + " 人"
+    }
+}
+
+/// 部屬今天這一刻要畫的東西（照廠區篩過）。數字字可以上鎖定畫面；名字只准主畫面
+struct WidgetTeamSummary: Equatable {
+    /// 最多幾格（請假＋兩個班別）
+    static let maxCells = 3
+    /// 中型下面最多幾條任務
+    static let taskRowLimit = 2
+
+    /// 「10/13 週二」（中型「部屬・10/13 週二」）
+    var dateText: String
+    /// 「10/13」（小型「部屬 10/13」）
+    var shortDateText: String
+    /// 最多三格：請假一定第一格（0 人也有），再來這一天有人的班別，人數多到少（同數照 ShiftType 順序）
+    var cells: [WidgetTeamCell]
+    /// 請假的人（＝cells[0].people）
+    var leaves: [WidgetTeamPerson]
+    var overdueTasks: Int
+    var dueTodayTasks: Int
+    var openTasks: Int
+    var overdueReports: Int
+    /// 中型下面的任務：逾期在前、再這一天到期，最多 2 條
+    var taskRows: [WidgetTeamTask]
+    /// 右上「今天 王小明生日」「明天 王小明生日」：今天的優先；都沒有是 nil。**只准畫在主畫面**
+    var birthdayText: String?
+
+    /// 「請假 2・大夜 3・小夜 2」（前 maxCells 格；鎖定畫面一行字用 2）
+    func countsLine(maxCells: Int = WidgetTeamSummary.maxCells) -> String {
+        cells.prefix(max(1, maxCells)).map { $0.text }.joined(separator: "・")
+    }
+
+    /// 小型第三行「大夜 3・小夜 2」；這一天沒有排班是空字串
+    var shiftsLine: String {
+        cells.filter { !$0.isLeave }.map { $0.text }.joined(separator: "・")
+    }
+
+    /// 「逾期 2・今天到期 3」（0 也寫）；includeReports 而且有逾期報告再接「・週報逾期 1」；
+    /// 什麼都沒有（沒有未完成任務、沒有逾期報告）寫「都完成了」。前面的「任務 」由畫面加
+    func taskLine(includeReports: Bool) -> String {
+        if overdueTasks == 0 && dueTodayTasks == 0 && openTasks == 0 && overdueReports == 0 {
+            return "都完成了"
+        }
+        var line = "逾期 " + String(overdueTasks) + "・今天到期 " + String(dueTodayTasks)
+        if includeReports && overdueReports > 0 {
+            line += "・週報逾期 " + String(overdueReports)
+        }
+        return line
+    }
+
+    /// 「今天（大）」③：只寫不是 0 的「逾期 2・今天到期 3」；都 0 回 nil（那半句不寫）
+    var nonZeroTaskText: String? {
+        var parts: [String] = []
+        if overdueTasks > 0 { parts.append("逾期 " + String(overdueTasks)) }
+        if dueTodayTasks > 0 { parts.append("今天到期 " + String(dueTodayTasks)) }
+        return parts.isEmpty ? nil : parts.joined(separator: "・")
+    }
+
+    /// 小型最下面「逾期任務 2」（紅字＋字）；沒有逾期回 nil
+    var overdueBadge: String? {
+        overdueTasks > 0 ? "逾期任務 " + String(overdueTasks) : nil
+    }
+
+    /// 「顯示假別」開著時：「李大華 特休・陳美玲 病假 4 小時」；沒有人請假是空字串。**只准畫在主畫面**
+    var leaveDetailText: String {
+        leaves.map { p in p.detail.isEmpty ? p.name : p.name + " " + p.detail }.joined(separator: "・")
+    }
+}
+
+extension WidgetTeamDay {
+    /// 廠區篩選：filter 是 nil 或空字串＝全部
+    static func inPlant(_ area: String, _ filter: String?) -> Bool {
+        guard let f = filter, !f.isEmpty else { return true }
+        return area == f
+    }
+
+    /// 照廠區篩、數人頭、排三格、挑兩條任務與生日（只數與排序，字都是 App 寫的）
+    func summary(plantArea filter: String?) -> WidgetTeamSummary {
+        let leavePeople: [WidgetTeamPerson] = leaves.filter { Self.inPlant($0.plantArea, filter) }
+        var shiftCells: [WidgetTeamCell] = []
+        for s in shifts {
+            let people: [WidgetTeamPerson] = s.people.filter { Self.inPlant($0.plantArea, filter) }
+            if !people.isEmpty {
+                shiftCells.append(WidgetTeamCell(id: "shift-" + s.label, label: s.label,
+                                                 people: people, isLeave: false, order: s.order))
+            }
+        }
+        shiftCells.sort { a, b in
+            if a.people.count != b.people.count { return a.people.count > b.people.count }
+            return a.order < b.order
+        }
+        var cells: [WidgetTeamCell] = [
+            WidgetTeamCell(id: "leave", label: "請假", people: leavePeople, isLeave: true, order: -1)
+        ]
+        cells.append(contentsOf: shiftCells.prefix(WidgetTeamSummary.maxCells - 1))
+
+        var overdueN = 0
+        var dueTodayN = 0
+        var openN = 0
+        var reportsN = 0
+        for c in counts where Self.inPlant(c.plantArea, filter) {
+            overdueN += c.overdueTasks
+            dueTodayN += c.dueTodayTasks
+            openN += c.openTasks
+            reportsN += c.overdueReports
+        }
+
+        let mine: [WidgetTeamTask] = tasks.filter { Self.inPlant($0.plantArea, filter) }
+        let ordered: [WidgetTeamTask] = mine.filter { $0.isOverdue } + mine.filter { $0.isDueToday }
+
+        let bdays: [WidgetTeamBirthday] = birthdays.filter { Self.inPlant($0.plantArea, filter) }
+        let todays: [WidgetTeamBirthday] = bdays.filter { $0.dayOffset == 0 }
+        let picked: [WidgetTeamBirthday] = todays.isEmpty ? bdays.filter { $0.dayOffset == 1 } : todays
+
+        return WidgetTeamSummary(dateText: dateText,
+                                 shortDateText: shortDateText,
+                                 cells: cells,
+                                 leaves: leavePeople,
+                                 overdueTasks: overdueN,
+                                 dueTodayTasks: dueTodayN,
+                                 openTasks: openN,
+                                 overdueReports: reportsN,
+                                 taskRows: Array(ordered.prefix(WidgetTeamSummary.taskRowLimit)),
+                                 birthdayText: WidgetTeamBirthday.text(picked))
+    }
+}
+
+// MARK: - [v5] 家庭待辦、倒數、「今天（大）」的列
+
+/// 家庭待辦的一天（今天、明天各一份）
+struct WidgetFamilyTasksDay: Codable, Equatable, Identifiable {
+    var dayKey: String
+    var dayStart: Date
+    var dayEnd: Date
+    /// 未完成、截止日（dueDate）在這一天
+    var dueTodayCount: Int
+    /// 未完成（全部）
+    var openCount: Int
+
+    var id: String { dayKey }
+
+    func contains(_ date: Date) -> Bool { dayStart <= date && date < dayEnd }
+
+    /// 「家庭待辦 今天到期 1」；今天沒有到期的寫「家庭待辦 未完成 4」；都 0 回 nil（不寫那半句）
+    var line: String? {
+        if dueTodayCount > 0 { return "家庭待辦 今天到期 " + String(dueTodayCount) }
+        if openCount > 0 { return "家庭待辦 未完成 " + String(openCount) }
+        return nil
+    }
+}
+
+/// 一件倒數（「今天（大）」④）：結婚紀念日、家人生日、兼任職務重要日期。
+/// App 算好「下一次是哪一天」（生日、紀念日 2/29 在平年算 2/28，同我的行事曆），小工具只算差幾天
+struct WidgetCountdown: Codable, Equatable, Identifiable {
+    /// ④ 只放這麼多天以內的（1…60 天；今天的在 ② 全天的事）
+    static let horizonDays = 60
+
+    /// 同我的行事曆的 id 前綴：「anniv-<UUID>」「bd-<UUID>」「srkd-<UUID>」
+    var id: String
+    /// .anniversary／.birthday／.sideRole
+    var kind: WidgetAllDayKind
+    /// 「結婚紀念日」「女兒 3 歲生日」「尾牙：場勘日」
+    var title: String
+    /// 下一次那天 00:00
+    var date: Date
+    /// SF Symbol：heart.fill／birthday.cake.fill／flag.fill
+    var icon: String
+    /// 點了去哪（v5：我的行事曆 WidgetLink.today(nil) 的 absoluteString）
+    var link: String
+
+    var url: URL { URL(string: link) ?? WidgetLink.today(nil) }
+}
+
+/// 「今天（大）」②③④ 的一列：圖示＋一句話＋點了去哪（字在 WidgetLifeSnapshot 的 today…／upcomingLines 組好）
+struct WidgetLineItem: Equatable, Identifiable {
+    var id: String
+    /// SF Symbol
+    var icon: String
+    var text: String
+    var url: URL
+}
+
+extension WidgetLifeSnapshot {
+    /// [v5] 這個時間點的部屬今天；過期、舊檔回 nil；比第一天早用第一天（同 day(at:)）
+    func teamDay(at date: Date) -> WidgetTeamDay? {
+        guard date < validUntil, let list = team else { return nil }
+        if let hit = list.first(where: { $0.contains(date) }) { return hit }
+        if let first = list.first, date < first.dayStart { return first }
+        return nil
+    }
+
+    /// [v5] 部屬今天這一刻要畫的（照廠區篩；plantArea nil＝全部）。
+    /// 沒有部屬（hasTeam 不是 true）、過期、舊檔回 nil——小工具先看 hasTeam、再看 isExpired 決定寫哪一句
+    func teamSummary(at date: Date, plantArea: String?) -> WidgetTeamSummary? {
+        guard hasTeam == true else { return nil }
+        return teamDay(at: date)?.summary(plantArea: plantArea)
+    }
+
+    /// [v5] 這個時間點的家庭待辦；過期、舊檔回 nil
+    func familyTasksDay(at date: Date) -> WidgetFamilyTasksDay? {
+        guard date < validUntil, let list = familyTasks else { return nil }
+        if let hit = list.first(where: { $0.contains(date) }) { return hit }
+        if let first = list.first, date < first.dayStart { return first }
+        return nil
+    }
+
+    /// [v5] now 之後 1…60 天內的倒數，前 limit 件（日期近到遠；countdowns 已排好）
+    func upcomingCountdowns(at now: Date, limit: Int) -> [WidgetCountdown] {
+        let list: [WidgetCountdown] = countdowns ?? []
+        let hits: [WidgetCountdown] = list.filter { (c: WidgetCountdown) -> Bool in
+            let n = WidgetDateText.daysFrom(now, to: c.date)
+            return n >= 1 && n <= WidgetCountdown.horizonDays
+        }
+        return Array(hits.prefix(max(0, limit)))
+    }
+
+    /// [v5] 「今天（大）」② 今天誰特別的第一行：今天全天的事最多 2 件（家人生日、紀念日、兼任重要日期…，
+    /// 點了開我的行事曆）；不滿 2 件時補今天生日的部屬；最後接明天生日的部屬一件。
+    /// 明天的家人生日、紀念日不寫在這裡：④ 的倒數會寫「明天 媽媽 62 歲生日」，兩區才不會重複。
+    /// includeTeam＝「今天」設定的「部屬會議」開著（關掉時部屬的生日也不寫）。過期回空陣列
+    func todaySpecials(at now: Date, includeTeam: Bool) -> [WidgetLineItem] {
+        guard let current = self.day(at: now) else { return [] }
+        var out: [WidgetLineItem] = []
+        for item in current.allDay.prefix(2) {
+            out.append(WidgetLineItem(id: "ad-" + item.id, icon: item.icon, text: item.title,
+                                      url: WidgetLink.today(nil)))
+        }
+        let teamToday: WidgetTeamDay? = (includeTeam && hasTeam == true) ? teamDay(at: now) : nil
+        if out.count < 2, let t = teamToday,
+           let text = WidgetTeamBirthday.text(t.birthdays.filter { $0.dayOffset == 0 }) {
+            out.append(WidgetLineItem(id: "team-bd-0", icon: "birthday.cake.fill", text: text,
+                                      url: WidgetLink.birthdays))
+        }
+        if let next = tomorrowBirthday(after: current, teamToday: teamToday) {
+            out.append(next)
+        }
+        return out
+    }
+
+    /// 明天生日的部屬一件（部屬今天那一份的 dayOffset 1）。家人的明天生日交給 ④ 的倒數（「明天 媽媽 62 歲生日」），
+    /// 不然同一個生日 ② ④ 各寫一次
+    private func tomorrowBirthday(after current: WidgetLifeDay, teamToday: WidgetTeamDay?) -> WidgetLineItem? {
+        guard let t = teamToday,
+              let text = WidgetTeamBirthday.text(t.birthdays.filter { $0.dayOffset == 1 }) else { return nil }
+        return WidgetLineItem(id: "team-bd-1", icon: "birthday.cake.fill", text: text,
+                              url: WidgetLink.birthdays)
+    }
+
+    /// [v5] 「今天（大）」② 第二行：「部屬 請假 2・大夜 3・小夜 2」（全部廠區、只寫數字；點了開部屬總覽）。
+    /// includeTeam false、沒有部屬、過期、舊檔回 nil
+    func todayTeamLine(at now: Date, includeTeam: Bool) -> WidgetLineItem? {
+        guard includeTeam, let s = teamSummary(at: now, plantArea: nil) else { return nil }
+        return WidgetLineItem(id: "team-counts", icon: "person.2.fill", text: "部屬 " + s.countsLine(),
+                              url: WidgetLink.team)
+    }
+
+    /// [v5] 「今天（大）」③ 要處理：「部屬任務 逾期 2・今天到期 3」（點了開部屬總覽）、
+    /// 「家庭待辦 今天到期 1」或「家庭待辦 未完成 4」（點了開家庭）；都 0 的那半句不寫
+    func todayTodos(at now: Date, includeTeam: Bool) -> [WidgetLineItem] {
+        var out: [WidgetLineItem] = []
+        if includeTeam, let s = teamSummary(at: now, plantArea: nil), let text = s.nonZeroTaskText {
+            out.append(WidgetLineItem(id: "team-tasks", icon: "checklist", text: "部屬任務 " + text,
+                                      url: WidgetLink.team))
+        }
+        if let f = familyTasksDay(at: now), let text = f.line {
+            out.append(WidgetLineItem(id: "family-tasks", icon: "house.fill", text: text,
+                                      url: WidgetLink.familyTasks))
+        }
+        return out
+    }
+
+    /// [v5] 「今天（大）」④ 接下來：下一趟旅行（「勇闖福岡親子行還有 38 天」；旅途中「… 第 2 天／共 7 天」；
+    /// 點了開那一趟）＋最多 countdownLimit 件 60 天內的倒數（「結婚紀念日還有 23 天」；點了開我的行事曆）。
+    /// 旅行、倒數不受 validUntil 管（日期不會錯）
+    func upcomingLines(at now: Date, countdownLimit: Int) -> [WidgetLineItem] {
+        var out: [WidgetLineItem] = []
+        switch tripPhase(at: now) {
+        case .noTrip:
+            break
+        case .upcoming(let trip, daysUntil: let n):
+            out.append(WidgetLineItem(id: "trip-" + trip.id.uuidString, icon: "airplane",
+                                      text: trip.title + "還有 " + String(n) + " 天", url: trip.url))
+        case .during(let trip, day: let d):
+            let total = max(trip.dayCount, 1)
+            out.append(WidgetLineItem(id: "trip-" + trip.id.uuidString, icon: "airplane",
+                                      text: trip.title + " 第 " + String(d) + " 天／共 " + String(total) + " 天",
+                                      url: trip.url))
+        }
+        for c in upcomingCountdowns(at: now, limit: countdownLimit) {
+            let n = WidgetDateText.daysFrom(now, to: c.date)
+            // 明天的寫「明天 媽媽 62 歲生日」（② 不再寫明天的家人生日，這裡是唯一一處）
+            let text: String = n == 1 ? "明天 " + c.title : c.title + "還有 " + String(n) + " 天"
+            out.append(WidgetLineItem(id: "cd-" + c.id, icon: c.icon, text: text, url: c.url))
+        }
+        return out
+    }
+}
+
+// MARK: - [v5] 小工具庫預覽用的樣本（寫死的展示字，人名都是假的；design_life.md §1 的範例日）
+
+enum WidgetLifeSample {
+    private static func uuid(_ text: String) -> UUID {
+        UUID(uuidString: text) ?? UUID()
+    }
+
+    private static func person(_ id: String, _ name: String, _ plant: String, _ detail: String) -> WidgetTeamPerson {
+        WidgetTeamPerson(subId: uuid(id), name: name, plantArea: plant, detail: detail)
+    }
+
+    /// 部屬今天：請假 2（李大華 特休、陳美玲 病假 4 小時）、大夜 3、小夜 2、任務逾期 2・今天到期 3、
+    /// 週報逾期 1、明天 王小明生日。dayStart 是那一天 00:00；日期字寫死「10/13 週二」
+    static func teamDay(dayStart: Date) -> WidgetTeamDay {
+        let cal = Calendar.current
+        let dayEnd = cal.date(byAdding: .day, value: 1, to: dayStart) ?? dayStart.addingTimeInterval(24 * 3600)
+        let twoDaysAgo = cal.date(byAdding: .day, value: -2, to: dayStart) ?? dayStart
+        let leaves: [WidgetTeamPerson] = [
+            person("5A1E0000-0000-4000-8000-000000000001", "李大華", "A", "特休"),
+            person("5A1E0000-0000-4000-8000-000000000002", "陳美玲", "A", "病假 4 小時")
+        ]
+        let night: [WidgetTeamPerson] = [
+            person("5A1E0000-0000-4000-8000-000000000003", "張大明", "A", ""),
+            person("5A1E0000-0000-4000-8000-000000000004", "林小華", "A", ""),
+            person("5A1E0000-0000-4000-8000-000000000005", "吳美君", "B", "")
+        ]
+        let evening: [WidgetTeamPerson] = [
+            person("5A1E0000-0000-4000-8000-000000000006", "林志明", "B", ""),
+            person("5A1E0000-0000-4000-8000-000000000007", "黃建國", "A", "")
+        ]
+        let wangId = uuid("5A1E0000-0000-4000-8000-000000000008")
+        let leeId = uuid("5A1E0000-0000-4000-8000-000000000001")
+        let task1Id = uuid("7A5C0000-0000-4000-8000-000000000001")
+        let task2Id = uuid("7A5C0000-0000-4000-8000-000000000002")
+        let tasks: [WidgetTeamTask] = [
+            WidgetTeamTask(subId: leeId, taskId: task1Id, name: "李大華", topic: "冰水機 PM 紀錄",
+                           dueDay: twoDaysAgo, plantArea: "A", isOverdue: true, isDueToday: false,
+                           overdueDays: 2, dueText: "逾期 2 天",
+                           link: WidgetLink.teamTask(subId: leeId, taskId: task1Id).absoluteString),
+            WidgetTeamTask(subId: wangId, taskId: task2Id, name: "王小明", topic: "CDA 改善報告",
+                           dueDay: dayStart, plantArea: "B", isOverdue: false, isDueToday: true,
+                           overdueDays: 0, dueText: "今天",
+                           link: WidgetLink.teamTask(subId: wangId, taskId: task2Id).absoluteString)
+        ]
+        let counts: [WidgetTeamCounts] = [
+            WidgetTeamCounts(plantArea: "A", overdueTasks: 1, dueTodayTasks: 2, openTasks: 5, overdueReports: 1),
+            WidgetTeamCounts(plantArea: "B", overdueTasks: 1, dueTodayTasks: 1, openTasks: 3, overdueReports: 0)
+        ]
+        let birthdays: [WidgetTeamBirthday] = [
+            WidgetTeamBirthday(subId: wangId, name: "王小明", plantArea: "B", dayOffset: 1)
+        ]
+        return WidgetTeamDay(dayKey: WidgetDateText.dayKey(dayStart),
+                             dayStart: dayStart,
+                             dayEnd: dayEnd,
+                             dateText: "10/13 週二",
+                             shortDateText: "10/13",
+                             leaves: leaves,
+                             shifts: [WidgetTeamShift(label: "大夜", order: 0, people: night),
+                                      WidgetTeamShift(label: "小夜", order: 1, people: evening)],
+                             tasks: tasks,
+                             counts: counts,
+                             birthdays: birthdays)
+    }
+
+    /// 家庭待辦：今天到期 1、未完成 4
+    static func familyTasksDay(dayStart: Date) -> WidgetFamilyTasksDay {
+        let dayEnd = Calendar.current.date(byAdding: .day, value: 1, to: dayStart)
+            ?? dayStart.addingTimeInterval(24 * 3600)
+        return WidgetFamilyTasksDay(dayKey: WidgetDateText.dayKey(dayStart), dayStart: dayStart,
+                                    dayEnd: dayEnd, dueTodayCount: 1, openCount: 4)
+    }
+
+    /// 倒數：結婚紀念日（23 天後）、女兒 3 歲生日（40 天後）
+    static func countdowns(dayStart: Date) -> [WidgetCountdown] {
+        let cal = Calendar.current
+        let anniv = cal.date(byAdding: .day, value: 23, to: dayStart) ?? dayStart
+        let bd = cal.date(byAdding: .day, value: 40, to: dayStart) ?? dayStart
+        let link = WidgetLink.today(nil).absoluteString
+        return [
+            WidgetCountdown(id: "anniv-sample", kind: .anniversary, title: "結婚紀念日", date: anniv,
+                            icon: "heart.fill", link: link),
+            WidgetCountdown(id: "bd-sample", kind: .birthday, title: "女兒 3 歲生日", date: bd,
+                            icon: "birthday.cake.fill", link: link)
+        ]
+    }
+
+    /// 下一趟旅行：勇闖福岡親子行（38 天後出發，7 天）
+    static func trip(dayStart: Date) -> WidgetTrip {
+        let cal = Calendar.current
+        let firstDay = cal.date(byAdding: .day, value: 38, to: dayStart) ?? dayStart
+        let start = firstDay.addingTimeInterval(8.5 * 3600)
+        let after = cal.date(byAdding: .day, value: 7, to: firstDay) ?? firstDay
+        let id = uuid("791F0000-0000-4000-8000-000000000001")
+        return WidgetTrip(id: id, title: "勇闖福岡親子行", startDate: start,
+                          endDate: after.addingTimeInterval(-6 * 3600), firstDay: firstDay, dayCount: 7,
+                          afterLastDay: after, packingDone: 8, packingTotal: 15,
+                          link: WidgetLink.trip(id).absoluteString)
     }
 }
 

@@ -23,6 +23,11 @@ import WidgetKit
 //      記帳＋理財那條防抖多寫 finance；股價、匯率更新成功時（價錢剛好沒變、store 不會動）
 //      報價那兩支叫 noteQuotesUpdated()，防抖 3 秒後只寫 finance（快照多了「App 是幾點更新的」）。
 //      只重畫受影響的那幾種（financeKindsToReload）。規格見 scratchpad/widgets/v4/brief.md 的 G1-3。
+// [v5] life 多寫部屬今天（hasTeam、team 今天明天各一份、plantAreas）、家庭待辦（familyTasks）、
+//      倒數（countdowns）——WidgetLifeExtras.swift，判斷走 TeamDay（部屬總覽同一套）。部屬（請假、班表、任務、
+//      報告、生日）、家庭待辦、家人、兼任職務都在 LifeStore 的 @Published 裡，現有的 life 防抖那條就接得到，
+//      不用加新的監聽。life 也改成只重畫受影響的那幾種（lifeKindsToReload）；今天有沒有行程變了另外重畫
+//      控制項「今日行程」（關的時候寫「今天沒有行程」／「未顯示」）。規格見 scratchpad/widgets/v5/brief.md 的 G1-5。
 //
 // 什麼時候寫：
 //   • 啟動（start）：掛好監聽後馬上寫一次全部
@@ -147,9 +152,16 @@ final class WidgetSnapshotWriter {
             }
         }
         if parts.contains(.life), let life = lifeStore {
+            // [v5] 只重畫內容真的變了的那幾種（同 finance）；先讀舊檔才比得出來
+            let old = WidgetSnapshotStore.read(WidgetLifeSnapshot.self)
             let snapshot = Self.lifeSnapshot(life: life, now: now)
-            // write 回 false（內容沒變）時，前景且舊檔夠舊就只換時間戳記（restampLife）
-            if WidgetSnapshotStore.write(snapshot) || Self.restampLife(snapshot, now: now) {
+            if WidgetSnapshotStore.write(snapshot) {
+                WidgetRefresh.reload(Self.lifeKindsToReload(old: old, new: snapshot))
+                if Self.dayTimelineControlNeedsReload(old: old, new: snapshot, now: now) {
+                    WidgetRefresh.reloadControls(WidgetKind.dayTimelineControlKinds)
+                }
+            } else if Self.restampLife(snapshot, now: now) {
+                // write 回 false（內容沒變）時，前景且舊檔夠舊就只換時間戳記（restampLife）
                 WidgetRefresh.reload(WidgetKind.lifeKinds)
             }
         }
@@ -181,6 +193,34 @@ final class WidgetSnapshotWriter {
         if dayChanged || old.vehicles != new.vehicles { kinds += WidgetKind.vehicleKinds }
         if dayChanged || old.netWorth != new.netWorth { kinds += WidgetKind.netWorthKinds }
         return kinds
+    }
+
+    /// [v5] life_v1.json 寫了之後要重畫哪幾種：沒有舊檔＝全部；換日（dataDay／validUntil 變了）＝全部；
+    /// 否則 今天：days、trips、team、familyTasks、countdowns、hasTeam 任一個變了（大型都用到）；
+    /// 下一場（鎖定畫面）：days；旅行：trips；部屬今天：team、plantAreas、hasTeam
+    static func lifeKindsToReload(old: WidgetLifeSnapshot?, new: WidgetLifeSnapshot) -> [String] {
+        guard let old else { return WidgetKind.lifeKinds }
+        if old.dataDay != new.dataDay || old.validUntil != new.validUntil { return WidgetKind.lifeKinds }
+        let daysChanged = old.days != new.days
+        let tripsChanged = old.trips != new.trips
+        let teamChanged = old.team != new.team || old.hasTeam != new.hasTeam
+        let todayExtrasChanged = old.familyTasks != new.familyTasks || old.countdowns != new.countdowns
+        var kinds: [String] = []
+        if daysChanged || tripsChanged || teamChanged || todayExtrasChanged { kinds.append(WidgetKind.today) }
+        if daysChanged { kinds.append(WidgetKind.lockNextStop) }
+        if tripsChanged { kinds.append(WidgetKind.travel) }
+        if teamChanged || old.plantAreas != new.plantAreas { kinds += WidgetKind.teamKinds }
+        return kinds
+    }
+
+    /// [v5] 控制項「今日行程」關著時寫「今天沒有行程」或「未顯示」（看 life 快照今天有沒有行程）：
+    /// 沒有舊檔、換日、今天「有沒有行程」變了才重畫（控制項只關心有沒有，不關心是哪幾場）
+    static func dayTimelineControlNeedsReload(old: WidgetLifeSnapshot?, new: WidgetLifeSnapshot, now: Date) -> Bool {
+        guard let old else { return true }
+        if old.dataDay != new.dataDay { return true }
+        let hadStops: Bool = !(old.day(at: now)?.stops.isEmpty ?? true)
+        let hasStops: Bool = !(new.day(at: now)?.stops.isEmpty ?? true)
+        return hadStops != hasStops
     }
 
     // MARK: - 「10:02 更新」的時間戳記
@@ -379,6 +419,7 @@ final class WidgetSnapshotWriter {
     /// [0] 今天、[1] 明天；validUntil＝後天 00:00。
     /// 行程跟靈動島同一段程式（TodayAgenda，不裁站數），全天的事照我的行事曆（CalendarDayItems）。
     /// [v3] 每一天多寫隔天每一種的第一場（nextDayFirstStops）；整份多寫旅行（trips，不受 validUntil 管）。
+    /// [v5] 多寫 hasTeam／team／plantAreas／familyTasks／countdowns（WidgetLifeExtras）。
     static func lifeSnapshot(life: LifeStore, now: Date,
                              calendar cal: Calendar = .current) -> WidgetLifeSnapshot {
         let start0 = cal.startOfDay(for: now)
@@ -394,11 +435,18 @@ final class WidgetSnapshotWriter {
                            nextDayAgenda: agenda1, life: life, calendar: cal)
         let day1 = lifeDay(start: start1, end: start2, agenda: agenda1,
                            nextDayAgenda: agenda2, life: life, calendar: cal)
-        return WidgetLifeSnapshot(generatedAt: now,
-                                  dataDay: WidgetDateText.dayKey(now),
-                                  validUntil: day1.dayEnd,
-                                  days: [day0, day1],
-                                  trips: trips(life: life, now: now, calendar: cal))
+        var snap = WidgetLifeSnapshot(generatedAt: now,
+                                      dataDay: WidgetDateText.dayKey(now),
+                                      validUntil: day1.dayEnd,
+                                      days: [day0, day1],
+                                      trips: trips(life: life, now: now, calendar: cal))
+        // [v5] 部屬今天、廠區、家庭待辦（今天、明天各一份，跟 days 同兩天）、倒數（WidgetLifeExtras）
+        snap.hasTeam = !life.subordinates.isEmpty
+        snap.team = WidgetLifeExtras.team(life: life, dayStarts: [start0, start1], now: now, calendar: cal)
+        snap.plantAreas = WidgetLifeExtras.plantAreas(life: life)
+        snap.familyTasks = WidgetLifeExtras.familyTasks(life: life, dayStarts: [start0, start1], calendar: cal)
+        snap.countdowns = WidgetLifeExtras.countdowns(life: life, now: now, calendar: cal)
+        return snap
     }
 
     /// [v3] nextDayFirst（隔天第一場）改從隔天整天的 agenda 拿 .first（跟原本傳進來的同一場），

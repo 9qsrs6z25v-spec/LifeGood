@@ -167,6 +167,30 @@ final class DeepLinkRouter: ObservableObject {
         pendingSettingsCurrency = nil
         return true
     }
+
+    // MARK: [v5] 小工具
+
+    /// [v5] 部屬今天、今天（大）點生日 → 部屬總覽打開生日名單（BirthdayOverviewSheet）。
+    /// 存 UUID 不存 Bool：停在部屬總覽再點一次也會換值、onChange 收得到
+    @Published private(set) var pendingBirthdays: UUID?
+
+    func requestBirthdays() {
+        pendingBirthdays = UUID()
+    }
+
+    /// 部屬總覽取走並清掉；沒有回 false（沒有的時候不動 @Published，不會多一次重畫）
+    func takeBirthdays() -> Bool {
+        guard pendingBirthdays != nil else { return false }
+        pendingBirthdays = nil
+        return true
+    }
+
+    /// [v5] 部屬總覽取走「打開這件任務」（部屬今天點任務列）。不是部屬任務的請求就不動（留給那一頁）
+    func takeSubordinateTask() -> (subId: UUID, taskId: UUID)? {
+        guard case .subordinateTask(let subId, let taskId)? = pendingItem else { return nil }
+        pendingItem = nil
+        return (subId, taskId)
+    }
 }
 
 /// [v2] 小工具「新增支出」的請求（WidgetLink.apply 建、MainTabView 取走）。
@@ -187,6 +211,8 @@ enum DeepLinkItem: Equatable {
     case insurance(UUID)
     /// [v4] 股票今天小工具：打開那一檔的股票卡片（StockView → StockDetailView）
     case stock(UUID)
+    /// [v5] 部屬今天點任務列：部屬總覽打開那件任務的預覽卡片（SubordinateItemCard）
+    case subordinateTask(subId: UUID, taskId: UUID)
 }
 
 /// [v2] 列表頁收「打開這一筆」的兩個時機：冷啟動時網址比這一頁先到（onAppear）、
@@ -237,6 +263,37 @@ extension View {
     /// [v4] 設定頁：收到「展開自訂幣別匯率」時呼叫 action（action 裡自己 takeSettingsCurrency）
     func onDeepLinkSettingsCurrency(_ action: @escaping () -> Void) -> some View {
         modifier(DeepLinkSettingsReceiver(action: action))
+    }
+}
+
+/// [v5] 部屬總覽收「打開這件任務」「打開生日名單」的時機（同 DeepLinkItemReceiver）：冷啟動時網址比這一頁先到
+///（onAppear 兩個都叫）、已經停在部屬總覽時再點一次（onChange）。包成一個修飾器，總覽那一長串修飾器只多一個
+private struct DeepLinkTeamReceiver: ViewModifier {
+    @ObservedObject private var deepLink = DeepLinkRouter.shared
+    let openTask: () -> Void
+    let openBirthdays: () -> Void
+
+    init(openTask: @escaping () -> Void, openBirthdays: @escaping () -> Void) {
+        self.openTask = openTask
+        self.openBirthdays = openBirthdays
+    }
+
+    func body(content: Content) -> some View {
+        content
+            .onAppear {
+                openTask()
+                openBirthdays()
+            }
+            .onChange(of: deepLink.pendingItem) { _, _ in openTask() }
+            .onChange(of: deepLink.pendingBirthdays) { _, _ in openBirthdays() }
+    }
+}
+
+extension View {
+    /// [v5] 部屬總覽：收到「打開這件任務」時呼叫 openTask（裡面自己 takeSubordinateTask）、
+    /// 收到「打開生日名單」時呼叫 openBirthdays（裡面自己 takeBirthdays）
+    func onDeepLinkTeam(openTask: @escaping () -> Void, openBirthdays: @escaping () -> Void) -> some View {
+        modifier(DeepLinkTeamReceiver(openTask: openTask, openBirthdays: openBirthdays))
     }
 }
 
@@ -299,6 +356,24 @@ enum AppNavigation {
         let d = UserDefaults.standard
         d.set(AppMode.finance.rawValue, forKey: "appMode")
         d.set(feature.rawValue, forKey: "finance_feature")
+    }
+
+    /// [v5] 部屬今天、今天（大）的部屬那幾行 → 人生 › 職涯 › 部屬總覽（鍵名照 goToMyCalendar）
+    static func goToSubordinateOverview() {
+        let d = UserDefaults.standard
+        d.set(AppMode.life.rawValue, forKey: "appMode")
+        d.set(LifeFeature.career.rawValue, forKey: "life_feature")
+        d.set(ManagementFeature.overview.rawValue, forKey: "management_feature")
+    }
+
+    /// [v5] 今天（大）「家庭待辦」→ 人生 › 家庭（FamilyView，家庭待辦在這一頁）。
+    /// family_mgmt_feature 清成 ""：停在配偶／兒女履歷時也回到 FamilyView。
+    /// 沒有任何家人時 MainTabView 會落在人生總覽（lifeContent 的 .family 分支）
+    static func goToFamily() {
+        let d = UserDefaults.standard
+        d.set(AppMode.life.rawValue, forKey: "appMode")
+        d.set(LifeFeature.family.rawValue, forKey: "life_feature")
+        d.set("", forKey: "family_mgmt_feature")
     }
 }
 
@@ -412,6 +487,13 @@ extension WidgetLink {
     ///      - lifegood://finance/overview…：切到理財「總覽」（淨資產小工具）
     ///      - lifegood://settings/currency…：打開設定頁、展開「自訂幣別匯率」（金價匯率小工具）。
     ///        **不換 routeToken**（換了 MainTabView 會先把設定頁關掉），由 MainTabView 打開設定頁、設定頁展開那一塊
+    ///
+    /// [v5] - lifegood://life/team…：切到人生 › 職涯 › 部屬總覽
+    ///      - lifegood://life/team/task?sub=…&task=…：切到部屬總覽，請它打開那件任務的預覽卡片
+    ///        （SubordinateItemCard；已刪掉找不到就停在總覽）；兩個 id 少一個時 parse 就當成 .team
+    ///      - lifegood://life/birthdays…：切到部屬總覽，請它打開生日名單（BirthdayOverviewSheet）
+    ///      - lifegood://life/family/tasks…：切到人生 › 家庭（FamilyView，家庭待辦在這一頁）
+    ///      四個都換 routeToken（停在設定頁也會先關掉）
     @discardableResult
     static func apply(_ url: URL, store: LifeStore) -> Bool {
         guard let route = parse(url) else { return false }
@@ -469,6 +551,20 @@ extension WidgetLink {
             return true
         case .settingsCurrency:
             router.requestSettingsCurrency()
+            return true
+        case .team:
+            AppNavigation.goToSubordinateOverview()
+            return true
+        case .teamTask(let subId, let taskId):
+            AppNavigation.goToSubordinateOverview()
+            router.requestItem(.subordinateTask(subId: subId, taskId: taskId))
+            return true
+        case .birthdays:
+            AppNavigation.goToSubordinateOverview()
+            router.requestBirthdays()
+            return true
+        case .familyTasks:
+            AppNavigation.goToFamily()
             return true
         }
     }

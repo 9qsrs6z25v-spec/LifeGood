@@ -1180,10 +1180,21 @@ struct SettingsView: View {
 
     // MARK: - [v25.377] 靈動島今日行程
 
+    /// [v5] 跟控制中心「今日行程」同一個 isEnabled：打開馬上 refresh（以前要等回前景）；
+    /// 關掉照舊（isEnabled 的 didSet 會 stop）。先同步設 isEnabled，Toggle 不會彈回去
+    private var dayTimelineEnabled: Binding<Bool> {
+        Binding(get: { dayTimeline.isEnabled },
+                set: { on in
+                    dayTimeline.isEnabled = on
+                    guard on else { return }
+                    Task { @MainActor in await dayTimeline.refresh(store: lifeStore) }
+                })
+    }
+
     @ViewBuilder
     private var dayTimelineSection: some View {
         Section {
-            Toggle(isOn: $dayTimeline.isEnabled) {
+            Toggle(isOn: dayTimelineEnabled) {
                 settingsActionRow(icon: "calendar.day.timeline.left", color: .orange,
                                   title: "在靈動島顯示今日行程",
                                   subtitle: dayTimeline.isRunning ? "顯示中" : "未顯示")
