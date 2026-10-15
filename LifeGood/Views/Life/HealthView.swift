@@ -330,10 +330,12 @@ struct HealthView: View {
         }
     }
 
+    /// 綠圓白「＋」（樣稿①：深色也是白色的＋；綠用開始鈕、標頭小「＋」同一個 1F9D57，不用系統綠）
     private var addIcon: some View {
         Image(systemName: "plus.circle.fill")
             .font(.title3)
-            .foregroundStyle(.green)
+            .symbolRenderingMode(.palette)
+            .foregroundStyle(Color.white, WorkoutPalette.go)
     }
 
     @ViewBuilder
@@ -381,11 +383,14 @@ struct HealthView: View {
         .accessibilityLabel("更多")
     }
 
-    /// 看板主角（存在 lifeStore.workoutPrefs，跟 iCloud 同步）
+    /// 看板主角（存在 lifeStore.workoutPrefs，跟 iCloud 同步）。
+    /// 選單收起來那一次畫面更新先過，下一輪主執行緒才寫 store（寫了整頁會重算，不跟收選單搶同一輪）
     private var heroBinding: Binding<WorkoutHeroChoice> {
         let store = lifeStore
         return Binding(get: { store.workoutPrefs.heroChoice },
-                       set: { store.setHeroChoice($0) })
+                       set: { choice in
+                           DispatchQueue.main.async { store.setHeroChoice(choice) }
+                       })
     }
 
     // MARK: 彈出頁
@@ -1377,6 +1382,10 @@ private struct HealthAppleHealthSheet: View {
     @State private var syncing = false
     @State private var syncMessage: String?
 
+    /// 同步還在跑（跨小頁）：以前同步狀態放在健康頁上一直都在；搬進小頁後，同步到一半按「完成」關掉、
+    /// 再打開又按一次，兩次會拿同一份「已匯入」清單比對，同一筆手錶紀錄會被帶進來兩筆。只在主執行緒讀寫
+    private static var syncInFlight = false
+
     init() {}
 
     var body: some View {
@@ -1460,9 +1469,17 @@ private struct HealthAppleHealthSheet: View {
     /// 從 Apple 健康抓體重、血壓與訓練回來（原本在健康頁，原封搬過來；v4 再改同步起點與自動同步）
     private func syncFromHealthKit() async {
         guard hkEnabled, health.isAvailable, !syncing else { return }
+        guard !Self.syncInFlight else {
+            syncMessage = "上一次同步還沒做完，等一下再按「立即同步」。"
+            return
+        }
+        Self.syncInFlight = true
         syncing = true
         syncMessage = nil
-        defer { syncing = false }
+        defer {
+            syncing = false
+            Self.syncInFlight = false
+        }
 
         let since = lastSyncEpoch > 0
             ? Date(timeIntervalSince1970: lastSyncEpoch)

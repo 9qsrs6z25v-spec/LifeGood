@@ -117,9 +117,10 @@ struct WorkoutCardData {
         var pauses: [Mark]
         var start: CLLocationCoordinate2D
         var end: CLLocationCoordinate2D
-        /// 鏡頭（RouteMath.bounds：中心、涵蓋範圍）
+        /// 鏡頭：中心照 RouteMath.bounds；範圍（度）照路線自己的南北、東西各放大 1.4 倍（見 cameraSpan）
         var center: CLLocationCoordinate2D
-        var spanMeters: Double
+        var latitudeDelta: Double
+        var longitudeDelta: Double
         /// 有快慢上色（圖例才出現）
         var paced: Bool
         /// 「（跟這趟平均 6'11" 比）」「（跟這趟平均時速 21.5 比）」
@@ -166,8 +167,8 @@ struct WorkoutCardData {
             let km: Double
             let meters: Double
         }
-        /// 「爬升 18 m・下降 17 m・最高比起點高 9 m」
-        var summary: String
+        /// 「爬升 **18 m**・下降 **17 m**・最高比起點高 **9 m**」（數字粗體、不上色；樣稿②-5）
+        var summary: FinanceLine
         var points: [Point]
         /// 圖的上下範圍（公尺，比起點高多少）
         var floor: Double
@@ -526,22 +527,30 @@ extension WorkoutCardData {
             let others = sessions.filter { $0.id != s.id }
             let before = WorkoutFacts.distanceKm(others, sport: sport, from: weekStart, to: s.date)
             let after = before + trip
-            let head = "這週" + sport.displayName + " " + WorkoutFormat.km(p.doneKm)
+            // 「這週跑步 14.6 公里」：數字粗體、不上色（樣稿②-5；同房屋、車子卡的一句話）
+            let head = [FinanceRun(text: "這週\(sport.displayName) "),
+                        FinanceRun(text: WorkoutFormat.kmNumber(p.doneKm), bold: true),
+                        FinanceRun(text: " 公里")]
             var line: FinanceLine? = nil
             if let g = p.goalKm {
                 if before < g - 0.05 && after >= g - 0.05 {
                     out.madeGoal = true
-                    let text = "這一趟讓這週達標（" + WorkoutFormat.kmNumber(after) + "／" + HealthPageData.goalKmText(g) + "）"
+                    let text = "這一趟讓這週達標（\(WorkoutFormat.kmNumber(after))／\(HealthPageData.goalKmText(g))）"
                     line = FinanceLine(runs: [FinanceRun(text: text, bold: true, tone: .good)])
                 } else if p.reached {
-                    line = FinanceLine(runs: [FinanceRun(text: head + "，"),
-                                              FinanceRun(text: "已達標", bold: true, tone: .good)])
+                    line = FinanceLine(runs: head + [FinanceRun(text: "，"),
+                                                     FinanceRun(text: "已達標", bold: true, tone: .good)])
                 } else if p.doneKm >= 0.05 {
-                    line = FinanceLine.text(head + "，目標 " + HealthPageData.goalKmText(g)
-                                            + "還差 " + HealthPageData.goalKmText(p.remainingKm))
+                    // 「，目標 20 公里還差 5.4 公里」（數字照目標格的寫法：整數不寫小數）
+                    let rest = [FinanceRun(text: "，目標 "),
+                                FinanceRun(text: goalNumber(g), bold: true),
+                                FinanceRun(text: " 公里還差 "),
+                                FinanceRun(text: goalNumber(p.remainingKm), bold: true),
+                                FinanceRun(text: " 公里")]
+                    line = FinanceLine(runs: head + rest)
                 }
             } else if p.doneKm >= 0.05 {
-                line = FinanceLine.text(head)
+                line = FinanceLine(runs: head)
             }
             if let line {
                 out.gains.append(Gain(id: "goal", icon: "target", sport: sport, line: line))
@@ -551,16 +560,25 @@ extension WorkoutCardData {
             let count = sessions.filter { $0.date >= n.start && $0.date < n.end && !$0.strengthExercises.isEmpty }.count
             if count > 0 {
                 out.gains.append(Gain(id: "goal", icon: "dumbbell.fill", sport: .strength,
-                                      line: FinanceLine.text("這週重訓 \(count) 次")))
+                                      line: FinanceLine(runs: [FinanceRun(text: "這週重訓 "),
+                                                               FinanceRun(text: "\(count)", bold: true),
+                                                               FinanceRun(text: " 次")])))
             }
         }
 
         let streak = WorkoutFacts.streakWeeks(sessions, now: now)
         if streak >= 2 {
             out.gains.append(Gain(id: "streak", icon: "flame.fill", sport: nil,
-                                  line: FinanceLine.text("連續 \(streak) 週有運動")))
+                                  line: FinanceLine(runs: [FinanceRun(text: "連續 "),
+                                                           FinanceRun(text: "\(streak)", bold: true),
+                                                           FinanceRun(text: " 週有運動")])))
         }
         return out
+    }
+
+    /// 目標格同一套寫法的數字：HealthPageData.goalKmText 去掉「 公里」（整數「20」、其他「5.4」）
+    private static func goalNumber(_ km: Double) -> String {
+        HealthPageData.goalKmText(km).replacingOccurrences(of: " 公里", with: "")
     }
 
     // MARK: ③ 要確認
@@ -752,10 +770,27 @@ extension WorkoutCardData {
             ? "路線依快慢上色：藍色比較快、灰色差不多、琥珀色比較慢" + note
             : "這一趟的路線"
 
+        let span = cameraSpan(r, centerLatitude: b.center.latitude)
         return RouteMap(sport: sport, pieces: pieces, marks: marks, pauses: pauseMarks,
                         start: coordinate(first), end: coordinate(last),
-                        center: b.center, spanMeters: b.spanMeters,
+                        center: b.center, latitudeDelta: span.lat, longitudeDelta: span.lon,
                         paced: paced, legendNote: note, accessibilityText: spoken)
+    }
+
+    /// 鏡頭範圍（度）：路線自己的南北、東西各放大 1.4 倍（起點圈、終點旗、小牌不貼邊），兩邊至少 300 公尺。
+    /// 卡片裡的地圖是 200pt 高的長條：照 RouteMapView 用對角線畫一個正方形範圍，沿河 2.5 公里寬、0.5 公里高的 U 形
+    /// 只佔畫面寬度不到一半；分開算南北、東西，地圖會把整條路放滿長條（MapKit 會再照畫面長寬比放寬到全部看得到）。
+    /// 夾在合法範圍內（範圍不合法地圖會閃退）
+    private static func cameraSpan(_ r: [RoutePoint], centerLatitude: Double) -> (lat: Double, lon: Double) {
+        let lats = r.map(\.lat)
+        let lons = r.map(\.lon)
+        let latExtent = (lats.max() ?? 0) - (lats.min() ?? 0)
+        let lonExtent = (lons.max() ?? 0) - (lons.min() ?? 0)
+        let minLat = 300.0 / 111_320.0
+        let minLon = minLat / max(0.2, cos(centerLatitude * Double.pi / 180))
+        let lat = min(170, max(latExtent.isFinite ? latExtent * 1.4 : 0, minLat))
+        let lon = min(350, max(lonExtent.isFinite ? lonExtent * 1.4 : 0, minLon))
+        return (lat, lon)
     }
 
     // MARK: ⑤ 每公里
@@ -913,20 +948,24 @@ extension WorkoutCardData {
         let ms = points.map(\.meters)
         let lo = ms.min() ?? 0
         let hi = ms.max() ?? 0
+        // 圖的上下範圍要是有限的數（ClosedRange 下界大於上界、或碰到 NaN 會閃退）
+        guard lo.isFinite, hi.isFinite, ms.allSatisfy({ $0.isFinite }) else { return nil }
         let pad = max(2, (hi - lo) * 0.15)
         let total = points.last?.km ?? 0
-        guard total > 0 else { return nil }
+        guard total.isFinite, total > 0 else { return nil }
         // 最高點的小字跟上面那一行、六格「最高比起點高 9 m」同一個數字（maxAboveStartM）；
         // 取樣點的最高值是內插出來的，可能比它少一點，四捨五入後會差 1 公尺
         let peak = (hi >= 1 && el.maxAboveStartM >= 1) ? points.first(where: { $0.meters == hi }) : nil
-        let summary = "爬升 " + WorkoutFormat.climb(gain)
-            + "・下降 " + meters(el.lossM) + " m"
-            + "・最高比起點高 " + meters(el.maxAboveStartM) + " m"
-        let spoken = "高度：爬升 " + meters(gain) + " 公尺，下降 " + meters(el.lossM)
-            + " 公尺，最高比起點高 " + meters(el.maxAboveStartM) + " 公尺"
+        let up = WorkoutFormat.climb(gain)
+        let down = meters(el.lossM)
+        let top = meters(el.maxAboveStartM)
+        let summary = FinanceLine(runs: [FinanceRun(text: "爬升 "), FinanceRun(text: up, bold: true),
+                                         FinanceRun(text: "・下降 "), FinanceRun(text: "\(down) m", bold: true),
+                                         FinanceRun(text: "・最高比起點高 "), FinanceRun(text: "\(top) m", bold: true)])
+        let spoken = "高度：爬升 \(meters(gain)) 公尺，下降 \(down) 公尺，最高比起點高 \(top) 公尺"
         return Elevation(summary: summary, points: points,
                          floor: min(lo, 0) - pad * 0.5, ceiling: hi + pad,
-                         totalKm: total, peak: peak, peakLabel: "+" + meters(el.maxAboveStartM) + " m",
+                         totalKm: total, peak: peak, peakLabel: "+\(top) m",
                          accessibilityText: spoken)
     }
 
@@ -984,7 +1023,10 @@ extension WorkoutCardData {
             out.append(InfoItem(id: "place", label: "地點", value: place))
         }
         if let src = WorkoutFacts.source(of: s) {
-            out.append(InfoItem(id: "source", label: "記錄方式", value: src.label))
+            // 舊版只存到起點的那幾趟（judge §2.5 v3）：距離照記，但當時 GPS 飄的也算進去了
+            // （模擬：跑步約多 2%、健走約多 15%），值下面一行灰字講清楚
+            let legacyNote: String? = s.isLegacyRouteMissing ? "舊版記錄，距離可能多算一點" : nil
+            out.append(InfoItem(id: "source", label: "記錄方式", value: src.label, note: legacyNote))
         }
         if let k = WorkoutFacts.kcal(s, bodyWeightKg: bodyWeightKg) {
             var note: String? = nil

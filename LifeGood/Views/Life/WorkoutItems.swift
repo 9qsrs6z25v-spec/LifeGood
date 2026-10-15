@@ -191,13 +191,15 @@ private struct WorkoutItemText {
         if h12 == 0 && hour == 12 { h12 = 12 }
         let minuteText = minute == 0 ? "" : String(format: " %02d 分", minute)
         let date = "\(c.month ?? 1) 月 \(c.day ?? 1) 日"
-        return date + partWord(WorkoutFacts.dayPart(d)) + " \(h12) 點" + minuteText
+        return date + partWord(WorkoutFacts.dayPart(d), hour: hour) + " \(h12) 點" + minuteText
     }
 
-    private static func partWord(_ p: WorkoutFacts.DayPart) -> String {
+    /// 時段的字照 dayPart；「中午」那一段（10:00–13:59）唸起來要分開：10、11 點「上午」、12 點「中午」、13 點「下午」
+    /// （「中午 10 點」「中午 1 點」不是平常的說法）
+    private static func partWord(_ p: WorkoutFacts.DayPart, hour: Int) -> String {
         switch p {
         case .morning: return "早上"
-        case .noon: return "中午"
+        case .noon: return hour < 12 ? "上午" : (hour == 12 ? "中午" : "下午")
         case .afternoon: return "下午"
         case .evening: return "晚上"
         case .night: return "凌晨"

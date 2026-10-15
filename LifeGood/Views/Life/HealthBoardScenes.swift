@@ -202,6 +202,7 @@ private struct HealthRiverLayout {
 
 /// 插在步道上的一面旗（先排好，樹要讓開它）
 private struct HealthFlagSpot {
+    let day: Int             // 第幾段（0＝週一）
     let x: CGFloat           // 旗竿
     let height: CGFloat      // 旗竿高（10～34；重訓 14）
     let cloth: CGFloat       // 旗面寬（同一天兩面時窄一點，不碰到第二面的竿）
@@ -295,7 +296,7 @@ extension MoneyBoardSky {
         // 先排好旗子、跑者的位置：樹、路燈照它讓開（坑 #27）
         let flags = riverFlagSpots(s, g: g, dark: dark)
         let runner = riverRunnerImage(ctx, s, ink: ink)
-        let runnerBox = riverRunnerBox(runner.size, s, g: g)
+        let runnerBox = riverRunnerBox(runner.size, s, g: g, flags: flags)
         var avoid: [ClosedRange<CGFloat>] = flags.map { ($0.x - 2)...($0.x + $0.cloth + 2) }
         avoid.append((runnerBox.minX - 2)...(runnerBox.maxX + 2))
         for (i, d) in s.days.enumerated() where d.extraDots > 0 {
@@ -311,8 +312,10 @@ extension MoneyBoardSky {
                     ink: ink, seed: seed)
         riverPath(&ctx, g: g, ink: ink)
         if dark {
-            // 夜裡每段交界一盞路燈（6 盞；旗在段內 30%／48%、跑者 66%～86%，交界 ±4pt 碰不到）
-            for i in 1..<7 {
+            // 夜裡每段交界一盞路燈（6 盞；旗在段內 13%～67%、小點 17%，交界 ±4pt 碰不到）。
+            // 跑者（騎車的圖示比較寬）跨過交界站到明天那段時，那一盞不畫（燈竿會從人身上穿過去）；
+            // 燈的橫桿與光暈在燈竿頂（步道上 25～30pt），比跑者（13pt）高，不用讓
+            for i in 1..<7 where !riverLampHidden(g.left(i), by: runnerBox) {
                 finLamp(&ctx, x: g.left(i), ground: g.pathTop, dark: true)
             }
         }
@@ -340,18 +343,28 @@ extension MoneyBoardSky {
 
     // MARK: 河堤：排版
 
-    /// 旗子：段內 30%（第二面 48%）；旗竿 max(10, 34 × height)，重訓固定 14
+    /// 兩面旗的竿距（整數；第二支竿＝第一支＋這個距離，兩支竿不各自四捨五入，距離不會被吃掉 1pt）
+    private static func riverPairGap(_ g: HealthRiverLayout) -> CGFloat {
+        max(7, (g.seg * 0.20).rounded())
+    }
+
+    /// 旗子：段內 30%（第二面再往右 20% 段寬，約 50%）；旗竿 max(10, 34 × height)，重訓固定 14。
+    /// 兩面時旗面寬＝竿距 − 2.6：旗尖（含 0.6 白邊）離第二支竿頭的小圓還有 0.7pt。
+    /// 第一面是公里多的、通常比較高，但「跑步 3 公里＋重訓」那天第一面只有 10pt、重訓 14pt，
+    /// 第一面的旗尖正好落在第二支竿的高度上，所以一定要留這個空（原本 0.30／0.48 各自取整會碰到 0.3～1.3pt）
     private static func riverFlagSpots(_ s: HealthWeekScene, g: HealthRiverLayout, dark: Bool) -> [HealthFlagSpot] {
-        let pairCloth = max(5, min(9, g.seg * 0.18 - 0.8))
+        let gap = riverPairGap(g)
+        let pairCloth = max(5, min(9, gap - 2.6))
         let soloCloth = max(5, min(10, g.seg * 0.3))
         var out: [HealthFlagSpot] = []
         for (i, d) in s.days.enumerated() {
             let pair = Array(d.flags.prefix(2))
+            let first = g.at(i, 0.30).rounded()
             for (j, f) in pair.enumerated() {
-                let x = g.at(i, j == 0 ? 0.30 : 0.48).rounded()
+                let x = j == 0 ? first : first + gap
                 let v = f.height.isFinite ? min(1, max(0, f.height)) : 0
                 let h: CGFloat = f.sport == .strength ? 14 : max(10, 34 * CGFloat(v))
-                out.append(HealthFlagSpot(x: x, height: h, cloth: pair.count > 1 ? pairCloth : soloCloth,
+                out.append(HealthFlagSpot(day: i, x: x, height: h, cloth: pair.count > 1 ? pairCloth : soloCloth,
                                           color: WorkoutPalette.sport(f.sport, dark: dark)))
             }
         }
@@ -365,29 +378,46 @@ extension MoneyBoardSky {
         return img
     }
 
-    /// 小跑者站在今天那段 75%（13pt 高、照圖示原本的寬高比）；左邊讓開那天的旗面、右邊不壓到下一段的交界（夜裡的路燈）。
-    /// 騎車的圖示比較寬，放不下就整個等比例縮小（最小 10pt 高，不壓扁）
-    private static func riverRunnerBox(_ size: CGSize, _ s: HealthWeekScene, g: HealthRiverLayout) -> CGRect {
+    /// 小跑者站在今天那段 75%（13pt 高、照圖示原本的寬高比）；左邊讓開今天那幾面旗的旗面（照排好的 flags 量，不另外估）。
+    /// 右邊：可以往明天那段多站最多 14% 段寬，但不碰明天的小點（17%）、旗竿（30%）；明天以後通常是空的虛線（isFuture）。
+    /// 跨過交界時，夜裡那一盞路燈不畫（riverLampHidden）。週日站到步道尾端再多 5pt。
+    /// 還是放不下（騎車的圖示最寬）就整個等比例縮小（最小 8pt 高，不壓扁）
+    private static func riverRunnerBox(_ size: CGSize, _ s: HealthWeekScene, g: HealthRiverLayout,
+                                       flags: [HealthFlagSpot]) -> CGRect {
         let aspect = size.height > 0.5 ? min(1.6, max(0.5, size.width / size.height)) : 0.85
-        let day = s.days[g.today]
-        let pairCloth = max(5, min(9, g.seg * 0.18 - 0.8))
-        let soloCloth = max(5, min(10, g.seg * 0.3))
         var lo = g.left(g.today) + 2
-        if day.flags.count >= 2 {
-            lo = g.at(g.today, 0.48) + pairCloth + 1.5
-        } else if day.flags.count == 1 {
-            lo = g.at(g.today, 0.30) + soloCloth + 1.5
+        for f in flags where f.day == g.today {
+            // 旗面右端（竿右 0.5＋旗面＋白邊一半 0.3）再空 1.2pt
+            let clothEnd = f.x + f.cloth + 0.8
+            lo = max(lo, clothEnd + 1.2)
         }
-        let hi = g.left(g.today + 1) - 1.5
+        var hi = g.x1 + 5
+        if g.today < 6 {
+            let next = g.today + 1
+            hi = g.left(next) + g.seg * 0.14
+            if s.days[next].extraDots > 0 {
+                let dotLeft = g.at(next, riverDotSpot) - 1.5
+                hi = min(hi, dotLeft - 1.2)
+            }
+            for f in flags where f.day == next {
+                let capLeft = f.x - 1.1          // 竿頭小圓的左緣
+                hi = min(hi, capLeft - 1.2)
+            }
+        }
         var h: CGFloat = 13
         var w = h * aspect
         let room = max(6, hi - lo)
         if w > room {
-            h = max(10, room / aspect)
+            h = max(8, room / aspect)
             w = h * aspect
         }
         let cx = min(max(g.at(g.today, 0.75), lo + w / 2), hi - w / 2)
         return CGRect(x: cx - w / 2, y: g.pathTop + 0.5 - h, width: w, height: h)
+    }
+
+    /// 這盞路燈的竿（寬 1.4）會不會從跑者身上穿過去
+    private static func riverLampHidden(_ x: CGFloat, by runner: CGRect) -> Bool {
+        runner.maxX > x - 1.2 && runner.minX < x + 1.2
     }
 
     // MARK: 河堤：畫
@@ -464,7 +494,7 @@ extension MoneyBoardSky {
     }
 
     /// 第三種運動起的小點放在段內哪裡：17%（第一面旗的左邊）。
-    /// brief 寫 60%，但兩面旗時第二面的旗面從 48% 伸到約 64%（343pt 寬一段 43pt、旗面 7pt），點會疊在旗面上；
+    /// brief 寫 60%，但兩面旗時第二面的旗面從約 50% 伸到約 67%（343pt 寬一段 43pt、旗面 6.4pt），點會疊在旗面上；
     /// 17% 左邊是交界（夜裡的路燈竿 ±0.7pt）、右邊是第一面旗竿（30%），都碰不到
     private static let riverDotSpot: CGFloat = 0.17
 
@@ -661,6 +691,10 @@ extension MoneyBoardSky {
             plan.posts.append(HealthTrailPlan.Post(x: xs[i], ground: g.groundY(s.marks[i]) - 2,
                                                    tall: labeled.contains(i)))
             plan.reserved.append((xs[i] - 4)...(xs[i] + 4))
+        }
+        // 小牌比柱子寬（「40」約 17pt）、而且被推開的那塊不在柱子正上方：樹冠（步道上 6～23pt）也要讓開它
+        for sg in plan.signs {
+            plan.reserved.append((sg.box.minX - 2)...(sg.box.maxX + 2))
         }
         return plan
     }

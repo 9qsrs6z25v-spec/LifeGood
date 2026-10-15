@@ -124,7 +124,9 @@ struct WorkoutListView: View {
             .onTapGesture { sheet = .detail(UUID(), id) }
             .contextMenu { menuItems(row.session) }
             .accessibilityAddTraits(.isButton)
-            .accessibilityHint("點兩下打開這一趟")
+            // VoiceOver 點兩下＝點卡片（明寫，不靠 onTapGesture 自動帶出來）；提示字跟健康頁最近運動同一句
+            .accessibilityAction { sheet = .detail(UUID(), id) }
+            .accessibilityHint("點兩下看這一趟的成果；長按可以編輯或刪除")
             .listRowInsets(EdgeInsets(top: gap, leading: 16, bottom: gap, trailing: 16))
             .listRowBackground(Color.clear)
             .listRowSeparator(.hidden)
@@ -145,6 +147,8 @@ struct WorkoutListView: View {
                 Label("複製到現在", systemImage: "plus.square.on.square")
             }
         }
+        // 跟健康頁最近運動的長按選單同一個樣子（刪除隔一條線）
+        Divider()
         Button(role: .destructive) {
             askDelete(s)
         } label: {

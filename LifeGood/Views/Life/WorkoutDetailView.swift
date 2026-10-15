@@ -612,11 +612,10 @@ private struct WorkoutDetailMap: View {
         .mapStyle(.standard(emphasis: .muted, pointsOfInterest: .excludingAll))   // 淡色、不顯示店家，線最清楚
     }
 
-    /// 鏡頭照 RouteMath.bounds（同 RouteMapView）
+    /// 鏡頭：中心照 RouteMath.bounds，範圍照路線自己的南北、東西（WorkoutCardData.cameraSpan；長條的路放滿長條的地圖）
     private var camera: MapCameraPosition {
-        .region(MKCoordinateRegion(center: route.center,
-                                   latitudinalMeters: route.spanMeters,
-                                   longitudinalMeters: route.spanMeters))
+        let span = MKCoordinateSpan(latitudeDelta: route.latitudeDelta, longitudeDelta: route.longitudeDelta)
+        return .region(MKCoordinateRegion(center: route.center, span: span))
     }
 
     /// 卡片裡那張不能動；全螢幕可拖可縮（不給轉、不給傾斜：北方朝上）
@@ -900,10 +899,8 @@ private struct WorkoutDetailElevationSection: View {
         VStack(alignment: .leading, spacing: 10) {
             FinanceCardHeader(title: "高度")
             VStack(alignment: .leading, spacing: 10) {
-                Text(d.summary)
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(Color.primary)
-                    .fixedSize(horizontal: false, vertical: true)
+                // 「爬升 18 m・下降 17 m・最高比起點高 9 m」：數字粗體（同這趟的收穫那一句）
+                FinanceSentence(line: d.summary, pal: TripBoardPalette(scheme))
                 WorkoutDetailElevationChart(data: d, color: lineColor)
             }
             .padding(14)
