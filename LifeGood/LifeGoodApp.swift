@@ -147,6 +147,9 @@ struct LifeGoodApp: App {
                     // [v25.545] 桌面小工具的快照：掛好監聽、馬上寫一次（放在任何 await 之前，
                     // 開場動畫期間就寫好；第二次呼叫什麼都不做）。[v2] 多收 finance（車子卡、接下來要繳）
                     WidgetSnapshotWriter.shared.start(expense: expenseStore, finance: financeStore, life: lifeStore)
+                    // [v25.552] 找上次跑到一半被關掉、還沒存的那幾趟（讀檔在背景，很快）。
+                    // 放在其他 await 前面：開場謝幕（約 2 秒）之前就找好，LaunchGate 謝幕後問一次
+                    await RunRecoveryCenter.shared.scan()
                     await subscription.refreshStatus()
                     await subscription.loadProducts()
                     await einvoiceSync.syncIfDue(expenseStore: expenseStore)
@@ -250,6 +253,19 @@ private struct LaunchGate<Content: View>: View {
     /// sheet 有時拿到改之前的空陣列，跳出一張空白的更新說明
     @State private var whatsNewPayload: WhatsNewPayload?
 
+    // MARK: [v25.552] 上次跑到一半被關掉、還沒存的那一趟
+    //
+    // 開場謝幕、「本次更新」都過了才問一次（提示框不跟它們疊在一起）；從小工具點進來那次不問。
+    // 按「稍後再說」、或不只一趟的，健康頁最上面有一張卡（HealthView 讀同一個 RunRecoveryCenter）。
+
+    /// [v25.552] 上次跑到一半被關掉、還沒存的那幾趟（.task 一打開就 scan）
+    @ObservedObject private var recovery = RunRecoveryCenter.shared
+    /// [v25.552] 開場謝幕、「本次更新」都過了（這之後才問，不跟它們疊在一起）
+    @State private var launchSettled = false
+    /// [v25.552] 這次啟動問過了（只問一次；按「稍後再說」或還有第二趟的，健康頁最上面有卡）
+    @State private var recoveryAsked = false
+    @State private var recoveryPrompt: RunCheckpoint?
+
     var body: some View {
         ZStack {
             content
@@ -276,16 +292,51 @@ private struct LaunchGate<Content: View>: View {
                         guard !skipWhatsNewThisLaunch else { return }
                         // 謝幕之後才跳，不要跟開場動畫疊在一起
                         presentWhatsNewIfNeeded()
+                        // [v25.552] 沒有更新說明要看：開場到這裡就結束了，可以問沒存完的那一趟；
+                        // 有更新說明就等它關掉（sheet 的 onDismiss）再問
+                        if whatsNewPayload == nil { settleLaunch() }
                     }
             }
         }
-        .sheet(item: $whatsNewPayload) { payload in
+        .sheet(item: $whatsNewPayload, onDismiss: { settleLaunch() }) { payload in
             WhatsNewView(entries: payload.entries) { markWhatsNewSeen() }
                 .appStores()
         }
         .onChange(of: deepLink.widgetLaunch, initial: true) { _, fromWidget in
             skipSplashForWidget(fromWidget)
         }
+        // [v25.552] 找沒存完的那一趟比謝幕還慢做完時：做完再看要不要問
+        .onChange(of: recovery.scanned) { _, _ in
+            askRecoveryIfNeeded()
+        }
+        .alert("有一趟運動還沒存", isPresented: recoveryShown, presenting: recoveryPrompt) { cp in
+            Button("存下來") { RunRecoveryCenter.shared.save(cp, store: AppStores.life) }
+            Button("丟掉", role: .destructive) { RunRecoveryCenter.shared.discard(cp) }
+            Button("稍後再說", role: .cancel) { }
+        } message: { cp in
+            Text(cp.prompt())
+        }
+    }
+
+    // MARK: [v25.552] 問沒存完的那一趟
+
+    private var recoveryShown: Binding<Bool> {
+        Binding(get: { recoveryPrompt != nil }, set: { if !$0 { recoveryPrompt = nil } })
+    }
+
+    /// 開場謝幕（沒有更新說明時）或更新說明關掉之後呼叫：開場結束了，可以問
+    private func settleLaunch() {
+        launchSettled = true
+        askRecoveryIfNeeded()
+    }
+
+    /// 謝幕、更新說明都過了、從小工具點進來那次不問、這次還沒問過，才問最新那一趟。
+    /// 〔存下來〕〔丟掉〕交給 RunRecoveryCenter（它在下一輪主執行緒才寫 store、刪檔）；〔稍後再說〕什麼都不動，健康頁有卡
+    private func askRecoveryIfNeeded() {
+        guard launchSettled, !recoveryAsked, !skipWhatsNewThisLaunch, whatsNewPayload == nil,
+              let first = recovery.pending.first else { return }
+        recoveryAsked = true
+        recoveryPrompt = first
     }
 
     /// [v2 小工具] 從小工具／控制項點進來（judge §2.4：冷啟動 1 秒內能打數字）：開場還在就直接拿掉

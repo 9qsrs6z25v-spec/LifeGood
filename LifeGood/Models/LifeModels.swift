@@ -3583,6 +3583,119 @@ struct RoutePoint: Codable, Equatable {
     private enum CodingKeys: String, CodingKey { case lat, lon, t, alt, seg }
 }
 
+// MARK: - 運動種類、分段、暫停、來源（v25.552，健康 v2：一套數字 WorkoutFacts 的根）
+
+/// [v25.552] 運動種類。存在 WorkoutExercise.sport（英文代號：之後畫面上的字怎麼改都不影響舊資料）。
+/// 沒存的（v25.551 以前、還沒更新的 iPad 存的）看名字猜，見 infer(name:kind:)；手錶的「走路」併進健走、「健行」併進登山。
+/// 新版多一種、舊版讀不懂時 decodeIfPresent 失敗＝nil，一樣退回看名字。
+enum WorkoutSport: String, Codable, CaseIterable, Identifiable {
+    case run
+    case walk
+    case bike
+    case hike
+    case strength
+    case other
+
+    var id: String { rawValue }
+
+    /// 畫面上的字（judge §3.13）
+    var displayName: String {
+        switch self {
+        case .run: return "跑步"
+        case .walk: return "健走"
+        case .bike: return "騎車"
+        case .hike: return "登山"
+        case .strength: return "重訓"
+        case .other: return "其他有氧"
+        }
+    }
+
+    /// 表單選擇器上的短字（「其他有氧」寫「其他」）
+    var pickerName: String { self == .other ? "其他" : displayName }
+
+    var isCardio: Bool { self != .strength }
+
+    /// SF Symbols（iOS 16 起都有）
+    var icon: String {
+        switch self {
+        case .run: return "figure.run"
+        case .walk: return "figure.walk"
+        case .bike: return "figure.outdoor.cycle"
+        case .hike: return "figure.hiking"
+        case .strength: return "dumbbell.fill"
+        case .other: return "figure.mixed.cardio"
+        }
+    }
+
+    /// 開始運動畫面那四種（會記路線的）；重訓、其他沒有
+    var runSport: RunSport? {
+        switch self {
+        case .run: return .run
+        case .walk: return .walk
+        case .bike: return .bike
+        case .hike: return .hike
+        case .strength, .other: return nil
+        }
+    }
+
+    init(_ runSport: RunSport) {
+        switch runSport {
+        case .run: self = .run
+        case .walk: self = .walk
+        case .bike: self = .bike
+        case .hike: self = .hike
+        }
+    }
+
+    /// 看名字猜（舊資料沒有 sport 時）：重量訓練型態一律重訓；有氧照 judge §3.13 的順序：
+    /// 含「跑」→跑步；「走、散步」→健走；「騎、單車、自行車、腳踏車」→騎車；「登山、健行、爬山」→登山；其他→其他有氧
+    static func infer(name: String, kind: WorkoutKind) -> WorkoutSport {
+        if kind == .strength { return .strength }
+        if name.contains("跑") { return .run }
+        if name.contains("走") || name.contains("散步") { return .walk }
+        if ["騎", "單車", "自行車", "腳踏車"].contains(where: { name.contains($0) }) { return .bike }
+        if ["登山", "健行", "爬山"].contains(where: { name.contains($0) }) { return .hike }
+        return .other
+    }
+}
+
+/// [v25.552] 一段分段（每公里一段；最後不滿一公里的那段是剩下的距離）。
+/// 在簡化路線**之前**用完整的點算好存起來（WorkoutFacts.makeSession），之後打開不重算。
+struct WorkoutSplit: Codable, Equatable {
+    /// 這一段的距離（公尺）：整公里是 1000
+    var meters: Double
+    /// 這一段的移動時間（秒，暫停不算）
+    var seconds: Double
+    /// 這一段的爬升（公尺）；不知道是 nil
+    var climbM: Double?
+}
+
+/// [v25.552] 一次暫停（按暫停到按繼續）。按「完成」前的最後那次暫停不算（那時已經結束了，見 RunResult.endedAt）
+struct WorkoutPause: Codable, Equatable {
+    var start: Date
+    var end: Date
+
+    var seconds: Double { max(0, end.timeIntervalSince(start)) }
+}
+
+/// [v25.552] 這一趟怎麼記的
+enum WorkoutSource: String, Codable {
+    /// App 的「開始運動」記的（含救回的中途存檔）
+    case app
+    /// 健康頁「＋」補記的
+    case manual
+    /// 從 Apple 健康帶進來的（多半是 Apple Watch）
+    case watch
+
+    var label: String {
+        switch self {
+        case .app: return "LifeGood（iPhone）"
+        case .manual: return "手動補記"
+        case .watch: return "Apple Watch"
+        }
+    }
+}
+
 /// 一次訓練裡的一個動作
 struct WorkoutExercise: Identifiable, Codable {
     let id: UUID
@@ -3601,18 +3714,23 @@ struct WorkoutExercise: Identifiable, Codable {
     /// 累計爬升（公尺）
     var elevationGainM: Double
     var note: String
+    /// [v25.552] 運動種類；nil＝舊資料或重訓，看 resolvedSport（照名字猜）
+    var sport: WorkoutSport?
+    /// [v25.552] 每公里分段（App 記的才有；簡化路線之前算好）
+    var splits: [WorkoutSplit]?
 
     init(id: UUID = UUID(), name: String = "", kind: WorkoutKind = .strength,
          reps: Int = 10, sets: Int = 3, loadType: WorkoutLoadType = .bodyweight,
          loadKg: Double = 0, distanceKm: Double = 0, durationMinutes: Double = 0,
          route: [RoutePoint] = [], elevationGainM: Double = 0,
-         note: String = "") {
+         note: String = "", sport: WorkoutSport? = nil, splits: [WorkoutSplit]? = nil) {
         self.id = id; self.name = name; self.kind = kind
         self.reps = reps; self.sets = sets
         self.loadType = loadType; self.loadKg = loadKg
         self.distanceKm = distanceKm; self.durationMinutes = durationMinutes
         self.route = route; self.elevationGainM = elevationGainM
         self.note = note
+        self.sport = sport; self.splits = splits
     }
 
     init(from decoder: Decoder) throws {
@@ -3629,14 +3747,23 @@ struct WorkoutExercise: Identifiable, Codable {
         route = (try? c.decodeIfPresent([RoutePoint].self, forKey: .route)) ?? []
         elevationGainM = (try? c.decode(Double.self, forKey: .elevationGainM)) ?? 0
         note = (try? c.decode(String.self, forKey: .note)) ?? ""
+        sport = try? c.decodeIfPresent(WorkoutSport.self, forKey: .sport)
+        splits = try? c.decodeIfPresent([WorkoutSplit].self, forKey: .splits)
     }
     private enum CodingKeys: String, CodingKey {
         case id, name, kind, reps, sets, loadType, loadKg, distanceKm, durationMinutes
-        case route, elevationGainM, note
+        case route, elevationGainM, note, sport, splits
     }
 
     /// 有沒有可以畫在地圖上的路徑
     var hasRoute: Bool { route.count >= 2 }
+
+    /// [v25.552] 這個動作算哪一種運動：重量訓練型態一律重訓；有存 sport 用它；舊資料看名字猜
+    var resolvedSport: WorkoutSport {
+        if kind == .strength { return .strength }
+        if let s = sport, s != .strength { return s }
+        return WorkoutSport.infer(name: name, kind: kind)
+    }
 
     /// 總次數＝每組次數 × 組數
     var totalReps: Int { max(0, reps) * max(0, sets) }
@@ -3677,11 +3804,19 @@ struct WorkoutExercise: Identifiable, Codable {
             }
             return parts.joined(separator: "・")
         case .cardio:
+            // [v25.552] 一套寫法（WorkoutFormat）：「5.2 公里・32:10・配速 6'11"」，騎車寫「時速 21.5」。
+            // 以前寫「5.20 公里・32 分鐘・配速 6.2 分/公里」，同一列的膠囊卻是 6'11"
             var parts: [String] = []
-            if distanceKm > 0 { parts.append(String(format: "%.2f 公里", distanceKm)) }
-            if durationMinutes > 0 { parts.append(WorkoutExercise.minuteText(durationMinutes)) }
-            if let p = paceMinPerKm { parts.append(String(format: "配速 %.1f 分/公里", p)) }
-            return parts.isEmpty ? "有氧" : parts.joined(separator: "・")
+            if distanceKm > 0 { parts.append(WorkoutFormat.km(distanceKm)) }
+            if durationMinutes > 0 { parts.append(WorkoutFormat.clock(minutes: durationMinutes)) }
+            if resolvedSport == .bike {
+                if let v = WorkoutFormat.speedKmh(km: distanceKm, minutes: durationMinutes) {
+                    parts.append("時速 " + WorkoutFormat.speedNumber(v))
+                }
+            } else if let p = paceMinPerKm {
+                parts.append("配速 " + WorkoutFormat.pace(p))
+            }
+            return parts.isEmpty ? resolvedSport.displayName : parts.joined(separator: "・")
         }
     }
 
@@ -3714,17 +3849,25 @@ struct WorkoutSession: Identifiable, Codable {
     /// `date` 是按「開始」那一刻，兩者之間含暫停；`durationMinutes` 是扣掉暫停的移動時間。
     /// 舊資料、手動補記、Apple 健康匯入都是 nil，結束時間就用「開始＋時間」（見 workoutEnd）。
     var endedAt: Date?
+    /// [v25.552] 這一趟怎麼記的（App 記／手動補記／Apple 健康帶進來）；nil＝舊資料，見 WorkoutFacts.source(of:)
+    var source: WorkoutSource?
+    /// [v25.552] 每一次暫停（App 記的才有）。v4 寫進 Apple 健康的暫停／繼續事件；成果頁「暫停 1 次・2:30」
+    var pauses: [WorkoutPause]?
+    /// [v25.552] activeEnergyKcal 是估的（沒有手錶量的，用 MET 表估好存回來；畫面前面加「約」）
+    var kcalEstimated: Bool?
 
     init(id: UUID = UUID(), date: Date = Date(), title: String = "",
          exercises: [WorkoutExercise] = [], durationMinutes: Double = 0,
          place: String = "", note: String = "",
          healthKitUUID: String? = nil, activeEnergyKcal: Double = 0,
-         endedAt: Date? = nil) {
+         endedAt: Date? = nil, source: WorkoutSource? = nil,
+         pauses: [WorkoutPause]? = nil, kcalEstimated: Bool? = nil) {
         self.id = id; self.date = date; self.title = title
         self.exercises = exercises; self.durationMinutes = durationMinutes
         self.place = place; self.note = note
         self.healthKitUUID = healthKitUUID; self.activeEnergyKcal = activeEnergyKcal
         self.endedAt = endedAt
+        self.source = source; self.pauses = pauses; self.kcalEstimated = kcalEstimated
     }
 
     init(from decoder: Decoder) throws {
@@ -3739,10 +3882,14 @@ struct WorkoutSession: Identifiable, Codable {
         healthKitUUID = try? c.decodeIfPresent(String.self, forKey: .healthKitUUID)
         activeEnergyKcal = (try? c.decode(Double.self, forKey: .activeEnergyKcal)) ?? 0
         endedAt = try? c.decodeIfPresent(Date.self, forKey: .endedAt)
+        source = try? c.decodeIfPresent(WorkoutSource.self, forKey: .source)
+        pauses = try? c.decodeIfPresent([WorkoutPause].self, forKey: .pauses)
+        kcalEstimated = try? c.decodeIfPresent(Bool.self, forKey: .kcalEstimated)
     }
     private enum CodingKeys: String, CodingKey {
         case id, date, title, exercises, durationMinutes, place, note
         case healthKitUUID, activeEnergyKcal, endedAt
+        case source, pauses, kcalEstimated
     }
 
     /// [v25.551] 寫進 Apple 健康用的結束時間。movingMinutes 是呼叫端算好的移動時間（分鐘）。

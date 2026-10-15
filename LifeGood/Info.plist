@@ -36,5 +36,14 @@
 	</array>
 	<key>NSAlarmKitUsageDescription</key>
 	<string>會議提醒選擇「鬧鐘」時，LifeGood 會替你排一個真正會響的鬧鐘，開會前叫你。</string>
+	<!-- [v25.552] 使用者把 LifeGood 的「精確位置」關掉時，開始運動畫面請系統「這一次給精確位置」
+	     （CLLocationManager.requestTemporaryFullAccuracyAuthorization(withPurposeKey: "RunRoute")）。
+	     這是字典型的鍵：跟 UIBackgroundModes 一樣要寫在這個檔案裡，寫在 pbxproj 的 INFOPLIST_KEY_ 不會進到打包出來的 Info.plist。
+	     RunTracker.hasPreciseLocationPurpose 會先檢查打包出來的 Info.plist 真的有這句，沒有就改帶去設定，不會呼叫系統。 -->
+	<key>NSLocationTemporaryUsageDescriptionDictionary</key>
+	<dict>
+		<key>RunRoute</key>
+		<string>要畫出你跑過的路需要精確位置；只給大約位置會差一兩公里，線畫不出來。</string>
+	</dict>
 </dict>
 </plist>

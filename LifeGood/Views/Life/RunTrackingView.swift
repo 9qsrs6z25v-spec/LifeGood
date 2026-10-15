@@ -22,8 +22,20 @@ import CoreLocation
 // • 配速秒數四捨五入（6'09.9" 寫 6'10"，跟手錶一樣）。
 // • 線依暫停切段（暫停那段不畫成直線），外圈白邊、淡色底圖；線頭由 RunTracker.segments 接到藍點。
 // • GPS 燈分四級：沒有位置權限（灰，附「去設定打開」）／定位中（黃）／普通（淺綠）／良好（綠）。
+//   （[v25.552] 多一級「精確位置關著」，見下面）
 // • 開始前選的運動用 @AppStorage 記住；開始後標題、存檔一律讀 tracker.sport（按「隱藏」再回來也對）。
 // • 存檔：date＝按開始那一刻、endedAt＝最後一次按暫停那一刻；先關畫面，下一個 runloop 才交出去寫 store。
+//
+// [v25.552] 記錄完整＋同一套數字（健康 v2）：
+// • 存檔只走 WorkoutFacts.makeSession（跟救回中途存檔同一支）：先用完整的點算每公里分段，再簡化路線
+//   （5 公里 889 → 約 228 點；地圖、Apple 健康的路線照樣畫得出來），運動種類、來源、暫停、估的大卡一起填。
+// • 太短（10 公尺內而且 30 秒內）不再默默關掉：按「完成」先問「這一趟只有 12 秒、0.00 公里，要存嗎？」
+//   〔不存〕＝放棄這一趟、〔還是存〕＝照常存。問的時候記錄器還停在暫停，什麼都沒丟。
+// • GPS 燈多一級「精確位置關著，畫不出路線」（橘）＋「打開精確位置」：Info.plist 有說明字就跳系統框
+//   「這一次給精確位置」，沒有（或這個畫面已經跳過一次系統框——含按開始時記錄器自己請的那次——還是關著）
+//   就帶去設定；跑步中橘字也改說精確位置。
+// • 格式全部轉呼叫 WorkoutFormat（一套寫法）：時間不到一小時寫「8:42」不再「08:42」；配速 6'11"。
+// • 騎車那格改寫時速（「21.5」），距離 10 公里以上一位小數（「12.6」）。
 
 struct RunTrackingView: View {
     @EnvironmentObject var lifeStore: LifeStore
@@ -52,6 +64,11 @@ struct RunTrackingView: View {
     @State private var placed = false
     /// 量到的面板高度：地圖下緣讓出這麼多，藍點才會在面板上方那塊地圖的中間
     @State private var panelHeight: CGFloat = 240
+    /// [v25.552] 太短的一趟按「完成」時問的那句；nil＝沒在問
+    @State private var shortPrompt: String?
+    /// [v25.552] 這個畫面已經跳過一次「這一次給精確位置」的系統框（按鈕、或按開始時記錄器自己請的）；
+    /// 還是關著再按就帶去設定（按了沒反應比帶去設定糟）。拿到精確位置就歸零
+    @State private var preciseAsked = false
 
     private let accent = Color(red: 0.20, green: 0.78, blue: 0.45)
 
@@ -164,9 +181,9 @@ struct RunTrackingView: View {
         return CLLocationCoordinate2D(latitude: p.lat, longitude: p.lon)
     }
 
-    /// 還沒收到任何定位（權限被拒時由 GPS 燈說明，這裡不重複）
+    /// 還沒收到任何定位（權限被拒、精確位置關著時由 GPS 燈說明，這裡不重複）
     private var showFindingHint: Bool {
-        tracker.lastCoordinate == nil && !gpsDenied
+        tracker.lastCoordinate == nil && !gpsDenied && !tracker.reducedAccuracy
     }
 
     private var findingHint: some View {
@@ -237,7 +254,17 @@ struct RunTrackingView: View {
         .shadow(color: .black.opacity(0.10), radius: 6, y: 2)
     }
 
+    /// 面板＋「太短要存嗎？」提示框。
+    /// [v25.552] 這個提示框掛在面板上，「放棄這一趟？」掛在 NavigationStack 的內容上：同一個 view 不疊兩個 .alert
     private var controlPanel: some View {
+        panelCard
+            .alert(shortPrompt ?? "", isPresented: showShortBinding) {
+                Button("不存", role: .destructive) { discardShort() }
+                Button("還是存") { finish() }
+            }
+    }
+
+    private var panelCard: some View {
         VStack(spacing: 14) {
             if !tracker.isActive {
                 sportPicker
@@ -248,8 +275,8 @@ struct RunTrackingView: View {
                 gpsRow
             }
 
-            if tracker.waitingForFix && tracker.phase == .running {
-                Label("訊號還沒好，可以先出發；好了才開始畫線", systemImage: "location.magnifyingglass")
+            if let t = waitingHint {
+                Label(t, systemImage: "location.magnifyingglass")
                     .font(.caption).foregroundStyle(.orange)
                     .multilineTextAlignment(.center)
             }
@@ -265,6 +292,20 @@ struct RunTrackingView: View {
         .padding(.bottom, 10)
     }
 
+    /// 跑步中、還畫不出線時的橘字。[v25.552] 精確位置關著：每一筆定位誤差 1～3 公里都被丟掉，
+    /// 只記得到時間，直接說原因（不然一直寫「訊號還沒好」，使用者以為等一下就好）
+    private var waitingHint: String? {
+        guard tracker.phase == .running else { return nil }
+        if tracker.reducedAccuracy { return "精確位置關著：打開才畫得出路線（現在只記時間）" }
+        if tracker.waitingForFix { return "訊號還沒好，可以先出發；好了才開始畫線" }
+        return nil
+    }
+
+    /// 「太短要存嗎？」提示框開著沒有（關掉時清掉那句）
+    private var showShortBinding: Binding<Bool> {
+        Binding(get: { shortPrompt != nil }, set: { if !$0 { shortPrompt = nil } })
+    }
+
     private var sportPicker: some View {
         Picker("運動", selection: $pickedSport) {
             ForEach(RunSport.allCases) { s in
@@ -277,14 +318,36 @@ struct RunTrackingView: View {
 
     private var statsRow: some View {
         HStack(spacing: 0) {
-            statCell(Self.distanceText(tracker.distanceMeters), "公里")
+            statCell(distanceCellText, "公里")
             divider
             statCell(Self.clockText(tracker.elapsed), "時間")
             divider
-            statCell(Self.paceText(tracker.paceMinPerKm), "配速")
+            paceCell
             divider
             statCell(String(format: "%.0f", tracker.elevationGainM), "爬升 m")
         }
+    }
+
+    /// [v25.552] 距離格：兩位小數（「3.42」）；騎車 10 公里以上一位（「12.6」）
+    private var distanceCellText: String {
+        WorkoutFormat.preciseKmNumber(tracker.distanceMeters / 1000, sport: WorkoutSport(currentSport))
+    }
+
+    /// [v25.552] 第三格：騎車寫時速（騎車不看配速），其他照舊寫配速
+    @ViewBuilder
+    private var paceCell: some View {
+        if currentSport == .bike {
+            statCell(bikeSpeedText, "時速")
+        } else {
+            statCell(Self.paceText(tracker.paceMinPerKm), "配速")
+        }
+    }
+
+    /// 平均時速（公里）＝距離 ÷ 移動時間；跟配速一樣 50 公尺內不算（一開騎 GPS 一跳就是 80 公里/時）
+    private var bikeSpeedText: String {
+        guard tracker.distanceMeters > 50 else { return "—" }
+        let v = WorkoutFormat.speedKmh(km: tracker.distanceMeters / 1000, minutes: tracker.elapsed / 60)
+        return v.map { WorkoutFormat.speedNumber($0) } ?? "—"
     }
 
     private var divider: some View {
@@ -308,6 +371,9 @@ struct RunTrackingView: View {
         TimelineView(.periodic(from: .now, by: 2)) { _ in
             gpsRowContent
         }
+        .onChange(of: tracker.reducedAccuracy) { _, reduced in
+            if !reduced { preciseAsked = false }      // [v25.552] 給了：之後系統收回「這一次」的授權時，又可以跳系統框
+        }
     }
 
     private var gpsRowContent: some View {
@@ -320,17 +386,35 @@ struct RunTrackingView: View {
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
                 .minimumScaleFactor(0.8)
-            if gpsDenied {
-                Button("去設定打開") { openSettings() }
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(Color.blue)
-                    .buttonStyle(.plain)
-            }
+            gpsFixButton
             Spacer(minLength: 0)
         }
     }
 
-    private enum GPSLevel { case denied, searching, fair, good }
+    /// 燈旁邊的藍字：沒有位置權限「去設定打開」；[v25.552] 精確位置關著「打開精確位置」
+    @ViewBuilder
+    private var gpsFixButton: some View {
+        switch gpsLevel {
+        case .denied:
+            gpsLink("去設定打開") { openSettings() }
+        case .imprecise:
+            gpsLink("打開精確位置") { openPrecise() }
+        case .searching, .fair, .good:
+            EmptyView()
+        }
+    }
+
+    private func gpsLink(_ title: String, action: @escaping () -> Void) -> some View {
+        Button(title, action: action)
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(Color.blue)
+            .buttonStyle(.plain)
+            .lineLimit(1)
+            .fixedSize()
+    }
+
+    /// [v25.552] imprecise：有位置權限、但「精確位置」關著（誤差 1～3 公里，每一筆都被丟掉，畫不出線）
+    private enum GPSLevel { case denied, imprecise, searching, fair, good }
 
     private var gpsDenied: Bool {
         tracker.authorization == .denied || tracker.authorization == .restricted
@@ -345,6 +429,7 @@ struct RunTrackingView: View {
 
     private var gpsLevel: GPSLevel {
         if gpsDenied { return .denied }
+        if tracker.reducedAccuracy { return .imprecise }
         guard let acc = tracker.gpsAccuracy, gpsFresh else { return .searching }
         if acc <= 10 { return .good }
         if acc <= 20 { return .fair }
@@ -355,6 +440,7 @@ struct RunTrackingView: View {
         let meters = tracker.gpsAccuracy.map { Int($0.rounded()) } ?? 0
         switch gpsLevel {
         case .denied: return "沒有位置權限"
+        case .imprecise: return "精確位置關著，畫不出路線"
         case .good: return "GPS 良好・誤差 \(meters) 公尺"
         case .fair: return "GPS 普通・誤差 \(meters) 公尺"
         case .searching:
@@ -366,6 +452,7 @@ struct RunTrackingView: View {
     private var gpsColor: Color {
         switch gpsLevel {
         case .denied: return .gray
+        case .imprecise: return .orange
         case .searching: return .yellow
         case .fair: return Color(red: 0.55, green: 0.85, blue: 0.45)
         case .good: return accent
@@ -375,6 +462,18 @@ struct RunTrackingView: View {
     private func openSettings() {
         guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
         UIApplication.shared.open(url)
+    }
+
+    /// [v25.552] 精確位置關著：打包出來的 Info.plist 有說明字（RunTracker.canAskPreciseLocation）就請系統
+    /// 「這一次給精確位置」；沒有說明字（呼叫系統會沒反應）、或這個畫面已經跳過一次系統框還是關著，就帶去設定
+    /// （設定 → LifeGood → 位置 → 精確位置）。答案由記錄器的授權回呼收，燈跟著 reducedAccuracy 自己變
+    private func openPrecise() {
+        if tracker.canAskPreciseLocation, !preciseAsked {
+            preciseAsked = true
+            tracker.requestPreciseLocation()
+        } else {
+            openSettings()
+        }
     }
 
     // MARK: 按鈕
@@ -411,7 +510,7 @@ struct RunTrackingView: View {
                 }
                 .background(Color(.tertiarySystemFill), in: Capsule())
                 Button {
-                    finish()
+                    finishTapped()
                 } label: {
                     Label("完成", systemImage: "checkmark")
                         .font(.headline).frame(maxWidth: .infinity).padding(.vertical, 12)
@@ -424,6 +523,9 @@ struct RunTrackingView: View {
 
     /// 開始：運動已經由 @AppStorage 記住；不擋開始（沒權限也能按，只記時間）
     private func startRun() {
+        // [v25.552] 精確位置關著時，記錄器按開始會自己跳一次系統框（RunTracker.start）：算這個畫面問過了，
+        // 使用者在那個框按「不允許」之後，燈旁的「打開精確位置」直接帶去設定（系統未必再跳框，不會按了沒反應）
+        if tracker.canAskPreciseLocation { preciseAsked = true }
         tracker.start(sport: pickedSport)
         autoReturn?.cancel()
         autoReturn = nil
@@ -582,19 +684,32 @@ struct RunTrackingView: View {
 
     // MARK: 完成
 
+    /// [v25.552]「完成」：10 公尺內而且 30 秒內＝太短，先問（judge §4.1 第 13 列；跟救回中途存檔的
+    /// RunCheckpoint.isTooShort 同一條線）。問的時候記錄器還停在暫停，什麼都沒丟
+    private func finishTapped() {
+        guard tracker.distanceMeters <= 10, tracker.elapsed <= 30 else { finish(); return }
+        shortPrompt = shortPromptText
+    }
+
+    /// 「這一趟只有 12 秒、0.00 公里，要存嗎？」（秒數跟面板上的時間一樣往下取整）
+    private var shortPromptText: String {
+        let seconds = WorkoutFormat.wholeSeconds(tracker.elapsed.rounded(.down))
+        let km = WorkoutFormat.preciseKmNumber(tracker.distanceMeters / 1000)
+        return "這一趟只有 \(seconds) 秒、\(km) 公里，要存嗎？"
+    }
+
+    /// 太短〔不存〕：跟「放棄這一趟」一樣（記錄器 cancel 會連中途存檔一起刪）
+    private func discardShort() {
+        tracker.cancel()
+        dismiss()
+    }
+
     private func finish() {
         let r = tracker.finish()
-        guard r.distanceKm > 0.01 || r.movingMinutes > 0.5 else { dismiss(); return }   // 太短照舊（v2 改成先問）
-        let exercise = WorkoutExercise(
-            name: r.sport.rawValue, kind: .cardio, reps: 0, sets: 0, loadType: .none,
-            loadKg: 0, distanceKm: r.distanceKm, durationMinutes: r.movingMinutes,
-            route: r.route, elevationGainM: r.elevation)
-        let session = WorkoutSession(
-            date: r.startedAt,                          // 按開始那一刻（原本「現在減運動時間」，暫停過就錯）
-            title: r.sport.rawValue,
-            exercises: [exercise],
-            durationMinutes: r.movingMinutes,
-            endedAt: r.endedAt)                         // 最後一次按暫停那一刻
+        // [v25.552] 存檔組裝只有一支（救回中途存檔也走它）：先用完整的點算每公里分段，再簡化路線
+        // （5 公里 889 → 約 228 點），運動種類、來源 .app、暫停、真正結束時間、估的大卡一起填。
+        // date＝按開始那一刻、endedAt＝最後一次按暫停那一刻（v25.551）照舊，在 makeSession 裡
+        let session = WorkoutFacts.makeSession(from: r, bodyWeightKg: lifeStore.latestBodyWeightKg)
         // 先關畫面、下一個 runloop 才交出去寫 store（同 VehicleEditors 的寫法）：
         // 在關 sheet 的那次畫面更新裡同步改 @Published store，真機會閃退
         let handOff = onFinish
@@ -604,20 +719,19 @@ struct RunTrackingView: View {
 
     // MARK: 格式
 
+    // [v25.552] 三支都轉呼叫 WorkoutFormat（一套寫法），簽章不變
+
+    /// 「3.42」（兩位小數）
     static func distanceText(_ meters: Double) -> String {
-        String(format: "%.2f", meters / 1000)
+        WorkoutFormat.preciseKmNumber(meters / 1000)
     }
+    /// 「8:42」「1:05:12」：跑步中往下取整（碼錶），不到一小時不再補前面的 0（以前「08:42」）
     static func clockText(_ t: TimeInterval) -> String {
-        let s = Int(t)
-        return s >= 3600
-            ? String(format: "%d:%02d:%02d", s / 3600, (s % 3600) / 60, s % 60)
-            : String(format: "%02d:%02d", s / 60, s % 60)
+        WorkoutFormat.clock(seconds: t.rounded(.down))
     }
+    /// 「6'11"」：秒數四捨五入（[v25.551]：6'09.9" 寫 6'10"）；算不出來「—」
     static func paceText(_ minPerKm: Double?) -> String {
-        guard let p = minPerKm, p.isFinite, p > 0, p < 60 else { return "—" }
-        // [v25.551] 秒數四捨五入（原本無條件捨去：6'09.9" 寫成 6'09"；6'59.6" 進位成 7'00"）
-        let total = Int((p * 60).rounded())
-        return String(format: "%d'%02d\"", total / 60, total % 60)
+        WorkoutFormat.pace(minPerKm)
     }
 }
 

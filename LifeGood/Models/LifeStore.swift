@@ -3217,11 +3217,13 @@ class LifeStore: ObservableObject {
 
     /// 對齊 clearAll() 涵蓋範圍的「本 Store 是否完全沒有資料」判斷，供 SettingsView 危險操作區
     /// 的「清除所有資料」按鈕啟用/停用依據；沿用同一份欄位清單，避免兩處各自列舉而漏算新分類。
+    /// [v25.552] 運動紀錄也算（clearAll 本來就會清）：只記運動的人「清除所有資料」以前是灰的、按不下去（U1 C14）
     var isEmpty: Bool {
         profile.isEmpty && familyMembers.isEmpty && milestones.isEmpty && relationships.isEmpty &&
         pets.isEmpty && schedules.isEmpty && subordinates.isEmpty &&
         departments.isEmpty && gradeTitles.isEmpty && businessCards.isEmpty &&
-        personalEvents.isEmpty && orgPeople.isEmpty && healthProfile.isEmpty
+        personalEvents.isEmpty && orgPeople.isEmpty && healthProfile.isEmpty &&
+        workouts.isEmpty
     }
 
     func clearAll() {

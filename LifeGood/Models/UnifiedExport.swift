@@ -122,6 +122,9 @@ struct UnifiedExport: Codable {
         /// [v25.399] 旅遊規劃。舊備份沒有這個欄位，所以是 Optional——
         /// 少了它整份 LifeBundle 都會解不出來。
         var tripPlans: [TripPlan]?
+        /// [v25.552] 運動紀錄（含路線、分段）。舊備份沒有這個欄位，所以是 Optional——少了它整份 LifeBundle 會解不出來。
+        /// 以前完整備份、匯出、自動快照都沒帶：換手機還原後運動和路線全部不見（U1 C1）
+        var workouts: [WorkoutSession]?
     }
 
     static func build(expense: ExpenseStore, finance: FinanceStore, life: LifeStore,
@@ -181,7 +184,9 @@ struct UnifiedExport: Codable {
                 orgPeople: scope.carriesCareer ? life.orgPeople : nil,
                 familyTasks: scope.carriesPersonal ? life.familyTasks : nil,
                 equipmentPool: scope.carriesCareer ? life.equipmentPool : nil,
-                tripPlans: scope.carriesTrips ? plans : nil
+                tripPlans: scope.carriesTrips ? plans : nil,
+                // [v25.552] 運動紀錄算「個人」那一塊：完整備份、自動快照（都是 .all）才帶
+                workouts: scope.carriesPersonal ? life.workouts : nil
             ),
             scope: scope.rawValue
         )
@@ -199,6 +204,7 @@ struct UnifiedExport: Codable {
         add("房地產", finance.realEstates.count)
         add("里程碑", life.milestones.count)
         add("行程規劃", life.tripPlans?.count ?? 0)
+        add("運動", life.workouts?.count ?? 0)
         add("部屬", life.subordinates?.count ?? 0)
         add("部門", life.departments?.count ?? 0)
         add("組織人員", life.orgPeople?.count ?? 0)
@@ -640,7 +646,45 @@ enum UnifiedExporter {
             }
         }
 
+        // 人生 - 運動紀錄（[v25.552]）
+        // JSON 匯出／備份走 LifeBundle.workouts 整筆 Codable（路線、分段都在）；CSV 一趟一列，路線只寫點數
+        let workoutRows = (life.workouts ?? []).sorted { $0.date < $1.date }
+        if !workoutRows.isEmpty {
+            csv += "\n## 運動 (Workouts)\n"
+            csv += "id,date,endedAt,title,sport,distanceKm,movingMinutes,climbM,kcal,kcalEstimated,source,routePoints,place,healthKitUUID,note\n"
+            for w in workoutRows {
+                csv += workoutCSVRow(w, iso: iso) + "\n"
+            }
+        }
+
         return csv
+    }
+
+    /// [v25.552] 運動紀錄的一列（數字跟健康頁同一套：主運動、移動時間、爬升只寫知道的）
+    private static func workoutCSVRow(_ w: WorkoutSession, iso: ISO8601DateFormatter) -> String {
+        let climb: Double? = w.cardioExercises.first.flatMap { WorkoutFacts.climb($0, in: w) }
+        let climbText = climb.map { String(format: "%.0f", $0) } ?? ""
+        let kcalText = w.activeEnergyKcal > 0 ? String(format: "%.0f", w.activeEnergyKcal) : ""
+        let routeCount = w.firstRouteExercise?.route.count ?? 0
+        let endedText = w.endedAt.map { iso.string(from: $0) } ?? ""
+        let sourceText = WorkoutFacts.source(of: w)?.rawValue ?? ""
+        var fields: [String] = []
+        fields.append(w.id.uuidString)
+        fields.append(iso.string(from: w.date))
+        fields.append(endedText)
+        fields.append(esc(w.displayTitle))
+        fields.append(w.primarySport.displayName)
+        fields.append(String(format: "%.2f", w.totalDistanceKm))
+        fields.append(String(format: "%.2f", WorkoutFacts.movingMinutes(w)))
+        fields.append(climbText)
+        fields.append(kcalText)
+        fields.append(w.kcalEstimated == true ? "1" : "0")
+        fields.append(sourceText)
+        fields.append(String(routeCount))
+        fields.append(esc(w.place))
+        fields.append(w.healthKitUUID ?? "")
+        fields.append(esc(w.note))
+        return fields.joined(separator: ",")
     }
 
     /// 把樓層物件樹攤平成「父 / 子 / 孫」路徑字串（給 CSV 用）
@@ -685,6 +729,8 @@ enum UnifiedImporter {
         var businessCards: Int = 0
         var personalEvents: Int = 0
         var orgPeople: Int = 0
+        /// [v25.552] 運動紀錄
+        var workouts: Int = 0
 
         var summary: String {
             var parts: [String] = []
@@ -702,6 +748,7 @@ enum UnifiedImporter {
             if businessCards > 0 { parts.append("名片 \(businessCards)") }
             if personalEvents > 0 { parts.append("個人行程 \(personalEvents)") }
             if orgPeople > 0 { parts.append("組織人脈 \(orgPeople)") }
+            if workouts > 0 { parts.append("運動 \(workouts)") }
             return parts.isEmpty ? "沒有資料" : parts.joined(separator: "、")
         }
     }
@@ -855,6 +902,8 @@ enum UnifiedImporter {
                     if let hp = payload.life.healthProfile { life.healthProfile = hp }
                     if let events = payload.life.personalEvents { life.personalEvents = events }
                     if let ft = payload.life.familyTasks { life.familyTasks = ft }
+                    // [v25.552] 運動紀錄：舊備份沒有這個欄位（nil）就不動本機的，免得還原舊備份把運動清光
+                    if let w = payload.life.workouts { life.workouts = w }
                 }
                 if scope.carriesCareer {
                     if let subs = payload.life.subordinates { life.subordinates = subs }
@@ -885,6 +934,7 @@ enum UnifiedImporter {
             result.businessCards = payload.life.businessCards?.count ?? 0
             result.personalEvents = payload.life.personalEvents?.count ?? 0
             result.orgPeople = payload.life.orgPeople?.count ?? 0
+            result.workouts = scope.carriesPersonal ? (payload.life.workouts?.count ?? 0) : 0
 
         case .merge:
             // expense／life 的多筆屬性合併原本各自散落多處、各自觸發一次 save()（ExpenseStore
@@ -1039,6 +1089,13 @@ enum UnifiedImporter {
                 if let plans = payload.life.tripPlans {
                     let newPlans = mergeItems(existing: life.tripPlans, incoming: plans)
                     life.tripPlans.append(contentsOf: newPlans)
+                }
+
+                // [v25.552] 運動紀錄：同一筆（同 id）留本機的（本機可能編輯過、寫過 Apple 健康編號），沒有的整筆加進來
+                if let w = payload.life.workouts {
+                    let newW = mergeItems(existing: life.workouts, incoming: w)
+                    life.workouts.append(contentsOf: newW)
+                    result.workouts = newW.count
                 }
                 // 舊格式備份的機台上面 appendNewByID 進了部屬的 equipments——搬進機台池
                 life.migrateLegacyEquipmentsToPool()
