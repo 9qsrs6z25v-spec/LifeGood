@@ -3555,7 +3555,8 @@ enum WorkoutLoadType: String, Codable, CaseIterable, Identifiable {
 }
 
 /// 路徑上的一個點。座標＋距開始的秒數；為了控制同步體積，記錄時就已經抽稀過
-/// （見 RunTracker：至少移動 8 公尺或間隔 5 秒才收一點，單次上限 3000 點）。
+/// （[v25.551] 見 RunTracker：依運動種類離「上一個存下來的點」4～10 公尺才收一點，
+/// 存滿 3000 點時隔一個丟一個、門檻加倍，長途騎車整條路線都留得住）。
 struct RoutePoint: Codable, Equatable {
     var lat: Double
     var lon: Double
@@ -3563,9 +3564,12 @@ struct RoutePoint: Codable, Equatable {
     var t: Double
     /// 海拔（公尺），沒有就 0
     var alt: Double
+    /// [v25.551] 第幾段（暫停再繼續就換下一段，畫線時段與段之間不相連）。
+    /// nil＝第 0 段：舊資料、Apple 健康匯入、沒暫停過的都是 nil，也省得每一點多寫一個鍵。
+    var seg: Int?
 
-    init(lat: Double, lon: Double, t: Double, alt: Double = 0) {
-        self.lat = lat; self.lon = lon; self.t = t; self.alt = alt
+    init(lat: Double, lon: Double, t: Double, alt: Double = 0, seg: Int? = nil) {
+        self.lat = lat; self.lon = lon; self.t = t; self.alt = alt; self.seg = seg
     }
 
     init(from decoder: Decoder) throws {
@@ -3574,8 +3578,9 @@ struct RoutePoint: Codable, Equatable {
         lon = (try? c.decode(Double.self, forKey: .lon)) ?? 0
         t = (try? c.decode(Double.self, forKey: .t)) ?? 0
         alt = (try? c.decode(Double.self, forKey: .alt)) ?? 0
+        seg = try? c.decodeIfPresent(Int.self, forKey: .seg)
     }
-    private enum CodingKeys: String, CodingKey { case lat, lon, t, alt }
+    private enum CodingKeys: String, CodingKey { case lat, lon, t, alt, seg }
 }
 
 /// 一次訓練裡的一個動作
@@ -3705,15 +3710,21 @@ struct WorkoutSession: Identifiable, Codable {
     var healthKitUUID: String?
     /// 消耗熱量（大卡）；App 內即時紀錄或從 Apple 健康帶回來
     var activeEnergyKcal: Double
+    /// [v25.551] 真正結束的時間（App 內即時紀錄才有：最後一次按暫停那一刻）。
+    /// `date` 是按「開始」那一刻，兩者之間含暫停；`durationMinutes` 是扣掉暫停的移動時間。
+    /// 舊資料、手動補記、Apple 健康匯入都是 nil，結束時間就用「開始＋時間」（見 workoutEnd）。
+    var endedAt: Date?
 
     init(id: UUID = UUID(), date: Date = Date(), title: String = "",
          exercises: [WorkoutExercise] = [], durationMinutes: Double = 0,
          place: String = "", note: String = "",
-         healthKitUUID: String? = nil, activeEnergyKcal: Double = 0) {
+         healthKitUUID: String? = nil, activeEnergyKcal: Double = 0,
+         endedAt: Date? = nil) {
         self.id = id; self.date = date; self.title = title
         self.exercises = exercises; self.durationMinutes = durationMinutes
         self.place = place; self.note = note
         self.healthKitUUID = healthKitUUID; self.activeEnergyKcal = activeEnergyKcal
+        self.endedAt = endedAt
     }
 
     init(from decoder: Decoder) throws {
@@ -3727,10 +3738,30 @@ struct WorkoutSession: Identifiable, Codable {
         note = (try? c.decode(String.self, forKey: .note)) ?? ""
         healthKitUUID = try? c.decodeIfPresent(String.self, forKey: .healthKitUUID)
         activeEnergyKcal = (try? c.decode(Double.self, forKey: .activeEnergyKcal)) ?? 0
+        endedAt = try? c.decodeIfPresent(Date.self, forKey: .endedAt)
     }
     private enum CodingKeys: String, CodingKey {
         case id, date, title, exercises, durationMinutes, place, note
-        case healthKitUUID, activeEnergyKcal
+        case healthKitUUID, activeEnergyKcal, endedAt
+    }
+
+    /// [v25.551] 寫進 Apple 健康用的結束時間。movingMinutes 是呼叫端算好的移動時間（分鐘）。
+    /// 有 endedAt 而且對得上（不早於「開始＋移動時間」、也不超過它 12 小時）才用；
+    /// 編輯時改過開始時間或長度而對不上，就退回「開始＋移動時間」，不會寫出一筆跨好幾天的運動。
+    func workoutEnd(movingMinutes: Double) -> Date {
+        let fallback = date.addingTimeInterval(movingMinutes * 60)
+        guard let e = endedAt else { return fallback }
+        let span = e.timeIntervalSince(date)
+        let moving = movingMinutes * 60
+        guard span >= moving - 1, span <= moving + 12 * 3600 else { return fallback }
+        return e
+    }
+
+    /// [v25.551] v25.352～v25.550 在 App 裡記的跑步：路線只存到起點 1 點（之後的點從沒存下來），
+    /// 補不回來。清單上多一行灰字說明；距離超過 0.3 公里才算，太短的本來就沒什麼路線。
+    var isLegacyRouteMissing: Bool {
+        guard firstRouteExercise == nil, let ex = cardioExercises.first else { return false }
+        return ex.route.count == 1 && ex.distanceKm >= 0.3
     }
 
     var displayTitle: String {

@@ -4,6 +4,9 @@ import SwiftUI
 //
 // 一次訓練底下可以掛多個動作；動作分「重量訓練」與「有氧」兩種欄位型態。
 // 動作名稱可以從過去用過的名字直接挑，不用每次重打。
+//
+// [v25.551] 存檔改成先關畫面、下一個 runloop 才交給呼叫端寫 store；
+// 改了開始時間（差 60 秒以上）或長度（差 1 分鐘以上）就清掉記錄器的真正結束時間 endedAt。
 
 struct WorkoutEditorView: View {
     @EnvironmentObject var lifeStore: LifeStore
@@ -221,6 +224,12 @@ struct WorkoutEditorView: View {
         s.title = title.trimmingCharacters(in: .whitespaces)
         s.place = place.trimmingCharacters(in: .whitespaces)
         s.durationMinutes = Double(durationText) ?? 0
+        // [v25.551] 改了開始時間或長度，記錄器的「真正結束時間」就對不上了，清掉（寫 Apple 健康時改用開始＋時間）。
+        // durationText 是整數分鐘（32.17 分會變 32），差不到 1 分鐘不算改過。
+        if let old = session, old.endedAt != nil,
+           abs(old.date.timeIntervalSince(date)) >= 60 || abs(old.durationMinutes - s.durationMinutes) >= 1 {
+            s.endedAt = nil
+        }
         s.note = note
         s.exercises = cleaned.map { e in
             var x = e
@@ -228,7 +237,11 @@ struct WorkoutEditorView: View {
             return x
         }
         guard !s.exercises.isEmpty else { dismiss(); return }
-        onSave(s)
+        // [v25.551] 先關 sheet、下一個 runloop 才寫 store（呼叫端在 onSave 裡改 @Published 的 lifeStore）：
+        // 避免在關閉 sheet 的畫面更新裡同步改被觀察的狀態（同型見 VehicleEditors 的 save）
+        let handOff = onSave
+        let saved = s
         dismiss()
+        DispatchQueue.main.async { handOff(saved) }
     }
 }

@@ -11,6 +11,9 @@ import CoreLocation
 // 只會是一段時間與消耗熱量，Apple 健康與其他 App 看不到「20 下 3 組」；
 // 反過來從 Apple Watch 匯入的重訓也只有時間與熱量，動作明細要自己補。
 // 這一點在健康頁與設定頁都有明講，不要讓使用者以為明細會同步。
+//
+// [v25.551] 寫訓練：結束時間改用記錄器的真正結束時間（WorkoutSession.workoutEnd，有驗證）；
+// 路線另外包一層 do/catch、每一點的時間夾在開始～結束之間，路線寫不進去也不連累整筆（照樣回傳編號）。
 
 @MainActor
 final class HealthKitManager: ObservableObject {
@@ -216,7 +219,9 @@ final class HealthKitManager: ObservableObject {
         let minutes = session.durationMinutes > 0
             ? session.durationMinutes
             : max(1, session.totalCardioMinutes)
-        let end = start.addingTimeInterval(minutes * 60)
+        // [v25.551] 結束時間：App 內即時紀錄用記錄器的真正結束時間（endedAt，對不上就退回「開始＋時間」，見 workoutEnd）。
+        // v1 還沒寫暫停事件，所以「健身」App 顯示的時間會含暫停（v4 補 HKWorkoutEvent）。
+        let end = session.workoutEnd(movingMinutes: minutes)
         let cardio = session.cardioExercises.first
         let activity: HKWorkoutActivityType = cardio == nil
             ? .traditionalStrengthTraining
@@ -261,17 +266,13 @@ final class HealthKitManager: ObservableObject {
             _ = try await builder.endCollection(at: end)
             guard let workout = try await builder.finishWorkout() else { return nil }
 
-            // 有路徑就一併寫成 HKWorkoutRoute
+            // [v25.551] 路線自己 do/catch：運動已經寫進 Apple 健康了，路線失敗也一定要回傳編號，
+            // 不然 App 沒記下編號，之後編輯再存（HealthView.pushToHealthKit 只看編號）會重複寫一筆
             if let ex = session.firstRouteExercise, ex.hasRoute {
-                let locations = ex.route.map { p in
-                    CLLocation(coordinate: CLLocationCoordinate2D(latitude: p.lat, longitude: p.lon),
-                               altitude: p.alt, horizontalAccuracy: 5, verticalAccuracy: 5,
-                               timestamp: start.addingTimeInterval(p.t))
-                }
-                if locations.count >= 2 {
-                    let routeBuilder = HKWorkoutRouteBuilder(healthStore: store, device: .local())
-                    _ = try await routeBuilder.insertRouteData(locations)
-                    _ = try await routeBuilder.finishRoute(with: workout, metadata: nil)
+                do {
+                    try await saveRoute(ex.route, start: start, end: end, for: workout)
+                } catch {
+                    lastError = "路線沒寫進 Apple 健康：" + error.localizedDescription
                 }
             }
             return workout.uuid.uuidString
@@ -279,6 +280,25 @@ final class HealthKitManager: ObservableObject {
             lastError = error.localizedDescription
             return nil
         }
+    }
+
+    /// [v25.551] 把 App 記的路線寫成 HKWorkoutRoute。每一點的時間夾在運動的開始～結束之間
+    /// （超出運動時間的路線點 Apple 健康不收）。v25.352～v25.550 這段從沒真的跑過：App 記的路線永遠不到 2 點。
+    private func saveRoute(_ route: [RoutePoint], start: Date, end: Date, for workout: HKWorkout) async throws {
+        var locations: [CLLocation] = []
+        locations.reserveCapacity(route.count)
+        let last = max(start, end)
+        for p in route {
+            let t = min(max(start.addingTimeInterval(p.t), start), last)
+            let coordinate = CLLocationCoordinate2D(latitude: p.lat, longitude: p.lon)
+            locations.append(CLLocation(coordinate: coordinate,
+                                        altitude: p.alt, horizontalAccuracy: 5, verticalAccuracy: 5,
+                                        timestamp: t))
+        }
+        guard locations.count >= 2 else { return }
+        let routeBuilder = HKWorkoutRouteBuilder(healthStore: store, device: .local())
+        _ = try await routeBuilder.insertRouteData(locations)
+        _ = try await routeBuilder.finishRoute(with: workout, metadata: nil)
     }
 
     // MARK: - 共用查詢

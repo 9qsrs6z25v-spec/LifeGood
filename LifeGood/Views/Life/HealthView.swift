@@ -16,6 +16,9 @@ import Charts
 //
 // HealthKit 沒有組數／次數／負荷的欄位，所以重訓明細只留在本 App，寫回去的只有
 // 時間、距離與熱量——畫面上有明講，不要讓使用者以為明細會同步。
+//
+// [v25.551] 即時紀錄橫幅寫運動名（「騎車・記錄中」）；訓練紀錄的爬升 10 公尺以上才顯示；
+// 舊版記錄、路線只存到起點的那幾筆，下面多一行灰字說明。
 
 struct HealthView: View {
     @EnvironmentObject var lifeStore: LifeStore
@@ -309,7 +312,7 @@ struct HealthView: View {
                 Image(systemName: "location.fill")
                     .font(.system(size: 14, weight: .bold)).foregroundStyle(.white)
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(tracker.phase == .paused ? "已暫停" : "記錄中")
+                    Text(liveTitle)
                         .font(.caption.weight(.bold)).foregroundStyle(.white)
                     Text(liveText)
                         .font(.system(size: 12, weight: .semibold).monospacedDigit())
@@ -325,6 +328,11 @@ struct HealthView: View {
             .clipShape(RoundedRectangle(cornerRadius: 14))
         }
         .buttonStyle(.plain)
+    }
+
+    /// [v25.551] 橫幅標題：「騎車・記錄中」／「騎車・已暫停」（運動種類在記錄器裡，按隱藏再回來也對）
+    private var liveTitle: String {
+        tracker.sport.rawValue + "・" + (tracker.phase == .paused ? "已暫停" : "記錄中")
     }
 
     /// 橫幅上的即時數字：字串先組好再進 Text
@@ -822,7 +830,7 @@ struct HealthView: View {
                     if let p = ex.paceMinPerKm {
                         routeChip("配速 " + RunTrackingView.paceText(p), "speedometer")
                     }
-                    if ex.elevationGainM >= 5 {
+                    if ex.elevationGainM >= 10 {   // [v25.551] 平路 GPS／氣壓飄移不到 10 公尺，不顯示
                         routeChip(String(format: "爬升 %.0f m", ex.elevationGainM), "mountain.2.fill")
                     }
                     if s.activeEnergyKcal > 0 {
@@ -831,6 +839,10 @@ struct HealthView: View {
                     Spacer()
                 }
                 .padding(.leading, 46)
+            } else if s.isLegacyRouteMissing {
+                Text("這一趟是舊版記錄的，路線沒有存到；距離和時間大致是對的。")
+                    .font(.caption2).foregroundStyle(.secondary)
+                    .padding(.leading, 46)
             }
             if s.healthKitUUID != nil {
                 HStack(spacing: 4) {
