@@ -3655,6 +3655,13 @@ struct HeroCardOverrideView: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
+                    // [v25.553] 健康頁換成看板（這週的河堤）；點一趟運動打開的成果頁也是同一張看板（這一趟的路）
+                    if card == .health {
+                        Label("健康頁最上面的看板是固定的天空插畫，下面那幅風景用你這週的運動畫（河堤分週一到週日七段，有運動那天插一面旗）；點一趟運動打開的成果頁，看板畫的是這一趟的路。看板跟著淺色／深色模式，只有「圓角」會跟著這裡，漸層、KPI 與大字的設定不會作用在它上面。",
+                              systemImage: "info.circle.fill")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
                 Section("顏色") {
                     ForEach(HeroTint.allCases) { t in

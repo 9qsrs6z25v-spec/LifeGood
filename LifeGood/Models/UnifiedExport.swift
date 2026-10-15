@@ -125,6 +125,8 @@ struct UnifiedExport: Codable {
         /// [v25.552] 運動紀錄（含路線、分段）。舊備份沒有這個欄位，所以是 Optional——少了它整份 LifeBundle 會解不出來。
         /// 以前完整備份、匯出、自動快照都沒帶：換手機還原後運動和路線全部不見（U1 C1）
         var workouts: [WorkoutSession]?
+        /// [v25.553] 健康頁的設定（看板主角、每週目標）。舊備份沒有，所以是 Optional
+        var workoutPrefs: WorkoutPrefs?
     }
 
     static func build(expense: ExpenseStore, finance: FinanceStore, life: LifeStore,
@@ -186,7 +188,9 @@ struct UnifiedExport: Codable {
                 equipmentPool: scope.carriesCareer ? life.equipmentPool : nil,
                 tripPlans: scope.carriesTrips ? plans : nil,
                 // [v25.552] 運動紀錄算「個人」那一塊：完整備份、自動快照（都是 .all）才帶
-                workouts: scope.carriesPersonal ? life.workouts : nil
+                workouts: scope.carriesPersonal ? life.workouts : nil,
+                // [v25.553] 健康頁的設定跟運動紀錄一起走（個人那一塊）
+                workoutPrefs: scope.carriesPersonal ? life.workoutPrefs : nil
             ),
             scope: scope.rawValue
         )
@@ -904,6 +908,8 @@ enum UnifiedImporter {
                     if let ft = payload.life.familyTasks { life.familyTasks = ft }
                     // [v25.552] 運動紀錄：舊備份沒有這個欄位（nil）就不動本機的，免得還原舊備份把運動清光
                     if let w = payload.life.workouts { life.workouts = w }
+                    // [v25.553] 健康頁的設定：舊備份沒有（nil）就不動本機的
+                    if let wp = payload.life.workoutPrefs { life.workoutPrefs = wp }
                 }
                 if scope.carriesCareer {
                     if let subs = payload.life.subordinates { life.subordinates = subs }
@@ -1097,6 +1103,8 @@ enum UnifiedImporter {
                     life.workouts.append(contentsOf: newW)
                     result.workouts = newW.count
                 }
+                // [v25.553] 健康頁的設定是單一物件：合併只在本機什麼都沒設過時帶進來（同健康檔案的寫法）
+                if let wp = payload.life.workoutPrefs, life.workoutPrefs.isEmpty { life.workoutPrefs = wp }
                 // 舊格式備份的機台上面 appendNewByID 進了部屬的 equipments——搬進機台池
                 life.migrateLegacyEquipmentsToPool()
             }

@@ -105,6 +105,9 @@ enum MoneyBoardScene: Equatable {
     case house(FinHouseScene)
     // [v25.540] 載具卡片：這台車的路（FinDriveScene.swift）
     case drive(FinDriveScene)
+    // [v25.553] 健康頁：這週的河堤；一趟運動的成果頁：這一趟的路（從側面看）。資料與畫法在 Life/HealthBoardScenes.swift
+    case riverside(HealthWeekScene)
+    case runTrail(WorkoutTrailScene)
 }
 
 // MARK: - 頭部的字
@@ -329,6 +332,8 @@ extension MoneyBoardSky {
         case .ridge(let s): paintRidge(&ctx, rect: bandRect, scene: s, dark: a.dark, seed: a.seed)
         case .house(let s): paintHouse(&ctx, rect: bandRect, scene: s, dark: a.dark, seed: a.seed)
         case .drive(let s): paintDrive(&ctx, rect: bandRect, scene: s, dark: a.dark, seed: a.seed)
+        case .riverside(let s): paintRiverside(&ctx, rect: bandRect, scene: s, dark: a.dark, seed: a.seed)
+        case .runTrail(let s): paintRunTrail(&ctx, rect: bandRect, scene: s, dark: a.dark, seed: a.seed)
         }
 
         if let greeting {

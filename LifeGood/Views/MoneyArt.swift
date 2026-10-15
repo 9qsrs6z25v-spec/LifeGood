@@ -191,6 +191,44 @@ extension MoneyArtTheme {
                                       hero: "car.fill", accent: "fuelpump.fill", pattern: .road,
                                       word: "Drive", caps: "ON THE ROAD")
 
+    // ── 運動（v25.553，健康 v3；health/judge.md §3.14）──
+    // id 從 61 起。不能用 id 11 .health：那是醫療支出的紅十字。tint＝運動色（淺色），跟 WorkoutPalette.sport 同一組。
+    // 健走綠、登山黃在白底對比不到 3:1：卡片上一定配圖示和字（分類列、膠囊），不只靠顏色。
+    static let workoutRun = MoneyArtTheme(id: 61, top: 0xFFB37A, bottom: 0xEB6834, tint: 0xEB6834,
+                                          hero: "figure.run", accent: "stopwatch.fill", pattern: .road,
+                                          word: "Run", caps: "RUNNING")
+    static let workoutWalk = MoneyArtTheme(id: 62, top: 0x7FDCB7, bottom: 0x1BAF7A, tint: 0x1BAF7A,
+                                           hero: "figure.walk", accent: "leaf.fill", pattern: .leaves,
+                                           word: "Walk", caps: "WALKING")
+    static let workoutBike = MoneyArtTheme(id: 63, top: 0x86B6EF, bottom: 0x2A78D6, tint: 0x2A78D6,
+                                           hero: "figure.outdoor.cycle", accent: "speedometer", pattern: .stripes,
+                                           word: "Ride", caps: "CYCLING")
+    static let workoutHike = MoneyArtTheme(id: 64, top: 0xF5C96B, bottom: 0xEDA100, tint: 0xEDA100,
+                                           hero: "figure.hiking", accent: "mountain.2.fill", pattern: .waves,
+                                           word: "Hike", caps: "HIKING")
+    static let workoutStrength = MoneyArtTheme(id: 65, top: 0xB3A8F0, bottom: 0x6250D6, tint: 0x6250D6,
+                                               hero: "dumbbell.fill", accent: "flame.fill", pattern: .grid,
+                                               word: "Lift", caps: "STRENGTH")
+    static let workoutOther = MoneyArtTheme(id: 66, top: 0x9AA3B5, bottom: 0x5B6478, tint: 0x5B6478,
+                                            hero: "figure.mixed.cardio", accent: "heart.fill", pattern: .pulse,
+                                            word: "Move", caps: "CARDIO")
+    /// 健康頁「每週公里」圖表卡的橫幅（顏色同「其他」，手寫 Trends）
+    static let workoutTrends = MoneyArtTheme(id: 67, top: 0x9AA3B5, bottom: 0x5B6478, tint: 0x5B6478,
+                                             hero: "chart.bar.fill", accent: "calendar", pattern: .grid,
+                                             word: "Trends", caps: "WEEKLY")
+
+    /// [v25.553] 一種運動的卡面主題（跑步 61、健走 62、騎車 63、登山 64、重訓 65、其他有氧 66）
+    static func of(_ sport: WorkoutSport) -> MoneyArtTheme {
+        switch sport {
+        case .run: return .workoutRun
+        case .walk: return .workoutWalk
+        case .bike: return .workoutBike
+        case .hike: return .workoutHike
+        case .strength: return .workoutStrength
+        case .other: return .workoutOther
+        }
+    }
+
     static func of(_ c: VariableCategory?) -> MoneyArtTheme {
         switch c {
         case .food: return .food
@@ -598,6 +636,10 @@ struct MoneyArtScript: View {
     let caps: String
     let maxWidth: CGFloat
     var size: CGFloat = 21
+    /// [v25.553] 字色（預設白；運動卡的米色紙卡面淺色時寫運動色：白字放米色底看不清）
+    var color: Color = .white
+    /// [v25.553] true＝照舊的黑色陰影；false＝淡淡一圈白光（深色字寫在淺色紙上）
+    var shadow: Bool = true
 
     var body: some View {
         VStack(alignment: .leading, spacing: -2) {
@@ -614,8 +656,9 @@ struct MoneyArtScript: View {
                 .minimumScaleFactor(0.6)
                 .padding(.leading, 5)
         }
-        .foregroundStyle(.white)
-        .shadow(color: Color.black.opacity(0.45), radius: 2, x: 0, y: 1)
+        .foregroundStyle(color)
+        .shadow(color: shadow ? Color.black.opacity(0.45) : Color.white.opacity(0.6),
+                radius: shadow ? 2 : 1.5, x: 0, y: shadow ? 1 : 0)
         .frame(maxWidth: maxWidth, alignment: .leading)
         .allowsHitTesting(false)
         .accessibilityHidden(true)
@@ -637,12 +680,16 @@ struct MoneyPanel: View {
     let place: TripPlaceName.Place?
     /// [v25.527] 股票：卡面畫近期的 K 線（取代分類插畫）
     var candles: [MoneyCandle]? = nil
+    /// [v25.553] 運動：卡面畫這一趟路線的形狀（WorkoutRoutePanel，取代運動插畫；不打地圖請求）
+    var route: WorkoutRouteShape? = nil
     /// [v25.527] 左下手寫字（沒給就用分類的英文字）
     var scriptWord: String? = nil
     var scriptCaps: String? = nil
     let width: CGFloat
 
     @Environment(\.displayScale) private var displayScale
+    /// [v25.553] 運動卡面的紙要分深淺（WorkoutRoutePanel 是 Equatable，深淺從這裡傳進去）
+    @Environment(\.colorScheme) private var scheme
     @ObservedObject private var names = TripPlaceNameStore.shared
     @State private var image: UIImage?
     @State private var isSatellite = false
@@ -659,6 +706,12 @@ struct MoneyPanel: View {
         return CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
     }
 
+    /// [v25.553] 有可以畫的路線（兩點以上）
+    private var hasRoute: Bool { (route?.points.count ?? 0) >= 2 }
+
+    /// [v25.553] 手寫字寫在淺色米紙上（運動卡、淺色、沒有照片）：字改運動色、陰影改淡白光
+    private var scriptOnPaper: Bool { hasRoute && scheme != .dark && image == nil }
+
     private var taskKey: String {
         let source = photoURL?.lastPathComponent
             ?? coordinate.map { String(format: "%.4f,%.4f", $0.latitude, $0.longitude) }
@@ -671,7 +724,10 @@ struct MoneyPanel: View {
         Color.clear
             .overlay {
                 ZStack {
-                    if let candles, candles.count >= 2 {
+                    if let route, route.points.count >= 2 {
+                        WorkoutRoutePanel(shape: route, theme: theme, dark: scheme == .dark)
+                            .equatable()
+                    } else if let candles, candles.count >= 2 {
                         MoneyCandlePanel(candles: candles)
                             .equatable()
                     } else {
@@ -708,7 +764,8 @@ struct MoneyPanel: View {
                 // 城市名查得到就寫城市（衛星圖、或使用者的照片拍在有地址的地方），不然寫分類
                 let word = city?.romaji ?? scriptWord ?? theme.word
                 let caps = city?.country ?? scriptCaps ?? theme.caps
-                MoneyArtScript(word: word, caps: caps, maxWidth: width * 0.84 - 8)
+                MoneyArtScript(word: word, caps: caps, maxWidth: width * 0.84 - 8,
+                               color: scriptOnPaper ? theme.ink(scheme) : .white, shadow: !scriptOnPaper)
                     .padding(.leading, 8)
                     // 衛星圖左下角讓出 Apple 地圖的標誌（TripHeroStore.mapAttributionInset）
                     .padding(.bottom, image != nil && isSatellite ? TripHeroStore.mapAttributionInset + 2 : 7)
@@ -853,14 +910,22 @@ struct MoneyThumb: View {
     let theme: MoneyArtTheme
     let seed: Int
     let photoURL: URL?
+    /// [v25.553] 運動：小方塊畫這一趟路線的形狀（只畫線）；nil＝照舊
+    var route: WorkoutRouteShape? = nil
 
+    @Environment(\.colorScheme) private var scheme
     @State private var image: UIImage?
     @State private var isVisible = false
 
     var body: some View {
         ZStack {
-            MoneyArtwork(theme: theme, seed: seed, layout: .thumb)
-                .equatable()
+            if let route, route.points.count >= 2 {
+                WorkoutRoutePanel(shape: route, theme: theme, dark: scheme == .dark, compact: true)
+                    .equatable()
+            } else {
+                MoneyArtwork(theme: theme, seed: seed, layout: .thumb)
+                    .equatable()
+            }
             if let image {
                 Color.clear
                     .overlay {

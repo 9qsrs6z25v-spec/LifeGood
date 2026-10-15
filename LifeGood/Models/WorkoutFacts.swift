@@ -1,5 +1,7 @@
 import Foundation
 import CoreLocation
+// [v25.553] WorkoutPalette 用 Color；WorkoutRouteShape 用 CGPoint
+import SwiftUI
 
 // MARK: - 健康的一套數字（v25.552，健康 v2；health/judge.md §3.13）
 //
@@ -19,6 +21,14 @@ import CoreLocation
 // • 存檔：App 記的一趟（按完成、救回中途存檔）一律走 makeSession(from:bodyWeightKg:)：
 //   先用完整的點算每公里分段，再把路線簡化（誤差 1.5 公尺內、至少每 10 秒留一點；5 公里 889 → 約 228 點）。
 // 模擬與驗算：health/build/v2/sim_v2.py（簡化、分段、大卡、週、連續週數、格式的數字例子都在裡面）。
+//
+// [v25.553] 健康 v3（新健康頁、項目卡、成果頁）加的，全部在檔尾「v3」那幾段：
+// • 名字：title(_:)——名字只是運動名（「跑步」、手錶的「走路」、空白）就照時段取名（晨跑、晚走、晨騎、登山）；
+//   scriptCaps(_:)——卡面手寫小字 MORNING／NOON／AFTERNOON／EVENING／NIGHT，週六日騎車 WEEKEND。
+// • 看板主角 heroSport（自動＝近 28 天次數最多的有氧）、上週同期、每週目標進度 weekProgress、建議目標 suggestedGoal。
+// • 每公里分段能不能用 validSplits（編輯過距離或時間就對不上，成果頁不顯示）、高度 elevation（GPS 平滑的形狀×存下來的爬升）、
+//   配速五級 WorkoutPaceLevel、成果看板的「這一趟的路」trailScene、卡面路線形狀 routeShape、顏色 WorkoutPalette。
+// 驗算：health/build/v3/sim_v3.py（judge §8.0 假資料：14.6 公里、3 次、多 3.6、連續 6 週、73%、剩 4 天、建議 20…）。
 
 enum WorkoutFacts {
 
@@ -543,5 +553,583 @@ extension RouteMath {
             out.append(WorkoutSplit(meters: meters, seconds: seconds, climbM: nil))
         }
         return out
+    }
+}
+
+// MARK: - v3：名字（時段取名、卡面手寫小字）
+
+extension WorkoutFacts {
+
+    /// 一天的時段：05:00–09:59 早上、10:00–13:59 中午、14:00–17:59 下午、18:00–23:59 晚上、00:00–04:59 深夜
+    enum DayPart {
+        case morning, noon, afternoon, evening, night
+    }
+
+    static func dayPart(_ date: Date) -> DayPart {
+        let h = calendar.component(.hour, from: date)
+        if h >= 5 && h < 10 { return .morning }
+        if h >= 10 && h < 14 { return .noon }
+        if h >= 14 && h < 18 { return .afternoon }
+        if h >= 18 { return .evening }
+        return .night
+    }
+
+    /// 照時段取的名字（judge §4.3）：跑步 晨跑／午跑／午後跑步／夜跑／深夜跑步；健走 晨走／午間健走／午後健走／晚走／深夜健走；
+    /// 騎車 晨騎／午騎／午後騎車／夜騎／深夜騎車；登山一律「登山」；重訓、其他有氧就是運動名
+    static func timeOfDayName(_ sport: WorkoutSport, start: Date) -> String {
+        let p = dayPart(start)
+        switch sport {
+        case .run:
+            switch p {
+            case .morning: return "晨跑"
+            case .noon: return "午跑"
+            case .afternoon: return "午後跑步"
+            case .evening: return "夜跑"
+            case .night: return "深夜跑步"
+            }
+        case .walk:
+            switch p {
+            case .morning: return "晨走"
+            case .noon: return "午間健走"
+            case .afternoon: return "午後健走"
+            case .evening: return "晚走"
+            case .night: return "深夜健走"
+            }
+        case .bike:
+            switch p {
+            case .morning: return "晨騎"
+            case .noon: return "午騎"
+            case .afternoon: return "午後騎車"
+            case .evening: return "夜騎"
+            case .night: return "深夜騎車"
+            }
+        case .hike:
+            return "登山"
+        case .strength, .other:
+            return sport.displayName
+        }
+    }
+
+    /// 只是運動名、不是自己取的名字（App 記的存「跑步」、手錶帶進來的「跑步」「走路」「健行」、補記沒填的運動名）
+    static let genericTitles: Set<String> = ["", "跑步", "健走", "騎車", "登山", "走路", "健行", "散步", "單車", "自行車"]
+
+    /// [v25.553] 畫面上一趟的名字（項目卡、成果頁、刪除確認、清單、記錄中條都用這一支）：
+    /// 自己取的名字照用（「河濱晨跑」「胸推日」）；名字只是跑、走、騎、登山的運動名（或空白）就照時段取名（「晨跑」「晚走」）；
+    /// 其他照 displayTitle（重訓沒名字寫第一個動作「臥推 等 3 項」）。資料不改，只改畫面上的字。
+    static func title(_ s: WorkoutSession) -> String {
+        let t = s.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let sport = s.primarySport
+        let named = [WorkoutSport.run, .walk, .bike, .hike].contains(sport)
+        if named, genericTitles.contains(t) {
+            return timeOfDayName(sport, start: s.date)
+        }
+        if t.isEmpty { return s.displayTitle }
+        return t
+    }
+
+    /// [v25.553] 卡面左下手寫字下面那行小字：MORNING／NOON／AFTERNOON／EVENING／NIGHT；週六、週日騎車寫 WEEKEND
+    static func scriptCaps(_ s: WorkoutSession) -> String {
+        if s.primarySport == .bike {
+            let wd = calendar.component(.weekday, from: s.date)      // 週日 1、週六 7
+            if wd == 1 || wd == 7 { return "WEEKEND" }
+        }
+        switch dayPart(s.date) {
+        case .morning: return "MORNING"
+        case .noon: return "NOON"
+        case .afternoon: return "AFTERNOON"
+        case .evening: return "EVENING"
+        case .night: return "NIGHT"
+        }
+    }
+
+    /// 看板、目標、開始列的動詞：跑步「跑」、健走「走」、騎車「騎」、登山「爬」、重訓「練」、其他「動」
+    /// （「這週跑了」「再騎 5.4 公里」「達標！多走了 0.6 公里」）
+    static func verb(_ sport: WorkoutSport) -> String {
+        switch sport {
+        case .run: return "跑"
+        case .walk: return "走"
+        case .bike: return "騎"
+        case .hike: return "爬"
+        case .strength: return "練"
+        case .other: return "動"
+        }
+    }
+}
+
+// MARK: - v3：看板主角、上週同期、每週目標
+
+/// [v25.553] 這一週某種運動的進度（看板下的目標格、開始列那一句、成果頁「這趟的收穫」共用）
+struct WorkoutWeekProgress: Equatable {
+    var sport: WorkoutSport
+    /// 這週到現在的公里
+    var doneKm: Double
+    /// 每週目標；nil＝沒設
+    var goalKm: Double?
+    /// 這週還剩幾天（含今天）：週四是 4、週日是 1
+    var daysLeft: Int
+
+    /// 還差幾公里（沒設目標是 0）
+    var remainingKm: Double { max(0, (goalKm ?? 0) - doneKm) }
+    /// 達標（差不到 0.05 公里也算：畫面一位小數已經寫成一樣了）
+    var reached: Bool {
+        guard let g = goalKm else { return false }
+        return doneKm >= g - 0.05
+    }
+    /// 進度（可以超過 1）；沒設目標是 0
+    var fraction: Double {
+        guard let g = goalKm, g > 0 else { return 0 }
+        return doneKm / g
+    }
+}
+
+extension WorkoutFacts {
+
+    /// 某段時間［from, to）裡、某種運動的公里（一趟裡只加那種運動的動作）
+    static func distanceKm(_ sessions: [WorkoutSession], sport: WorkoutSport, from: Date, to: Date) -> Double {
+        var km = 0.0
+        for s in sessions where s.date >= from && s.date < to {
+            for e in s.exercises where e.kind == .cardio && e.resolvedSport == sport {
+                km += max(0, e.distanceKm)
+            }
+        }
+        return km
+    }
+
+    /// 看板主角：設定的那一種；自動＝近 28 天次數最多的有氧（跑、走、騎、登山），平手照跑步、健走、騎車、登山的順序；
+    /// 近 28 天都沒有有氧＝跑步
+    static func heroSport(_ prefs: WorkoutPrefs, sessions: [WorkoutSession], now: Date = Date()) -> WorkoutSport {
+        if let fixed = prefs.heroChoice.sport { return fixed }
+        let from = now.addingTimeInterval(-28 * 86_400)
+        var counts: [WorkoutSport: Int] = [:]
+        for s in sessions where s.date >= from && s.date <= now {
+            let kinds = Set(s.cardioExercises.map(\.resolvedSport))
+            for k in kinds where k != .other {
+                counts[k, default: 0] += 1
+            }
+        }
+        var best = WorkoutSport.run
+        var bestN = 0
+        for k in [WorkoutSport.run, .walk, .bike, .hike] {
+            let n = counts[k] ?? 0
+            if n > bestN {
+                best = k
+                bestN = n
+            }
+        }
+        return best
+    }
+
+    /// 這週星期幾的索引：週一 0 … 週日 6
+    static func weekdayIndex(_ date: Date) -> Int {
+        let wd = calendar.component(.weekday, from: date)     // 週日 1、週一 2 … 週六 7
+        return (wd + 5) % 7
+    }
+
+    /// 上週同期：上週一 00:00 到「現在減 7 天」（不含）。例：10/15 07:12 → 10/5 00:00～10/8 07:12
+    static func lastWeekSamePeriodKm(_ sessions: [WorkoutSession], sport: WorkoutSport, now: Date = Date()) -> Double {
+        let thisStart = weekStart(of: now)
+        guard let lastStart = calendar.date(byAdding: .day, value: -7, to: thisStart),
+              let cut = calendar.date(byAdding: .day, value: -7, to: now) else { return 0 }
+        return distanceKm(sessions, sport: sport, from: lastStart, to: cut)
+    }
+
+    /// 上週整週（週一到週日）的公里
+    static func lastWeekKm(_ sessions: [WorkoutSession], sport: WorkoutSport, now: Date = Date()) -> Double {
+        let thisStart = weekStart(of: now)
+        guard let lastStart = calendar.date(byAdding: .day, value: -7, to: thisStart) else { return 0 }
+        return distanceKm(sessions, sport: sport, from: lastStart, to: thisStart)
+    }
+
+    /// 這週某種運動的目標進度（目標讀 prefs）
+    static func weekProgress(_ sessions: [WorkoutSession], prefs: WorkoutPrefs, sport: WorkoutSport,
+                             now: Date = Date()) -> WorkoutWeekProgress {
+        WorkoutWeekProgress(sport: sport,
+                            doneKm: weekDistanceKm(sessions, sport: sport, weekOf: now),
+                            goalKm: prefs.goalKm(for: sport),
+                            daysLeft: 7 - weekdayIndex(now))
+    }
+
+    /// 每週目標的建議：近 4 個完整週（不含這週）平均 × 1.1，往上取到 5 的倍數，夾在 5～100；
+    /// 近 4 週都沒有就用預設（騎車 30、其他 10）。例：15.2、16.8、14.0、13.3 → 平均 14.8 × 1.1＝16.3 → 20
+    static func suggestedGoal(_ sessions: [WorkoutSession], sport: WorkoutSport,
+                              now: Date = Date()) -> (km: Double, average: Double) {
+        let thisStart = weekStart(of: now)
+        guard let from = calendar.date(byAdding: .day, value: -28, to: thisStart) else {
+            return (sport == .bike ? 30 : 10, 0)
+        }
+        let avg = distanceKm(sessions, sport: sport, from: from, to: thisStart) / 4
+        guard avg >= 0.05 else { return (sport == .bike ? 30 : 10, 0) }
+        let up = (avg * 1.1 / 5).rounded(.up) * 5
+        return (min(max(up, 5), 100), avg)
+    }
+}
+
+// MARK: - v3：每公里分段能不能用、高度
+
+/// [v25.553] 一趟的高度（成果頁「高度」、成果看板的地面）。
+/// 形狀用 GPS 高度（RoutePoint.alt）沿距離平滑（前後 50 公尺平均）。App 記的那一趟「爬升」用存下來的（氣壓計／GPS 去雜訊）：
+/// • 下降：GPS 照 4 公尺門檻累加，再乘「存下來的爬升 ÷ GPS 算的爬升」（累加的東西 GPS 雜訊會灌水，一起縮）；
+/// • 高低差、最高比起點高、高度圖：GPS 的高低差超過存下來的爬升就整條等比例壓到爬升那麼高（高低差不可能比總爬升大；
+///   平路氣壓計 0 m → 整條壓平），不然照 GPS（平滑後的高低差不太灌水）。
+/// 模擬（build/v3/sim_v3.py）：河濱 5.2 公里（真的最高比起點高 9 m、氣壓計 18 m）30/30 次畫平的河濱；25 m 的坡 30/30 次畫山稜
+struct WorkoutElevation: Equatable {
+    struct Sample: Equatable {
+        /// 從起點走了幾公里（暫停的空隙不算）
+        var km: Double
+        /// 比起點高幾公尺（可以是負的）
+        var meters: Double
+    }
+    /// 爬升（公尺）；不知道（手錶帶進來、舊版、手動）是 nil——成果頁不出現「高度」那一區
+    var gainM: Double?
+    /// 下降（公尺）
+    var lossM: Double
+    /// 最高比起點高幾公尺（不會是負的）
+    var maxAboveStartM: Double
+    /// 高度對距離，最多 120 點
+    var samples: [Sample]
+    /// 最高減最低 20 公尺以上：成果看板把路畫在山稜上；不然畫平的河濱（河濱 5.2 公里爬升 18 m 也算平的：上下河堤、過橋）
+    var hilly: Bool
+}
+
+extension WorkoutFacts {
+
+    /// 每公里分段還能不能用：分段加起來要跟這個動作現在的距離（差 60 公尺或 3% 內）、移動時間（差 60 秒或 5% 內）對得上。
+    /// 編輯過距離或時間（例：5.20 改成 5.0）就對不上 → nil：成果頁不顯示每公里、最快一公里，側面的路也不畫快慢。
+    /// （分段是記錄當時用 GPS 點算的，改了距離不重算：沒辦法知道改掉的那 200 公尺在哪一段）
+    static func validSplits(_ e: WorkoutExercise) -> [WorkoutSplit]? {
+        guard let sp = e.splits, !sp.isEmpty else { return nil }
+        let meters = sp.reduce(0) { $0 + $1.meters }
+        let seconds = sp.reduce(0) { $0 + $1.seconds }
+        let wantM = e.distanceKm * 1000
+        let wantS = e.durationMinutes * 60
+        guard meters.isFinite, seconds.isFinite, wantM > 0, wantS > 0 else { return nil }
+        guard abs(meters - wantM) <= max(60, wantM * 0.03) else { return nil }
+        guard abs(seconds - wantS) <= max(60, wantS * 0.05) else { return nil }
+        return sp
+    }
+
+    /// 一個動作的高度；路線不到 2 點、或整條都沒有高度（全是 0）回 nil
+    static func elevation(_ e: WorkoutExercise, in s: WorkoutSession) -> WorkoutElevation? {
+        let r = e.route
+        guard r.count >= 2, r.contains(where: { $0.alt != 0 }) else { return nil }
+        // 1. 沿路的距離（暫停的空隙不算）
+        var cum = [Double](repeating: 0, count: r.count)
+        for i in 1..<r.count {
+            let p = r[i - 1]
+            let q = r[i]
+            var d = 0.0
+            if (p.seg ?? 0) == (q.seg ?? 0) {
+                d = CLLocation(latitude: p.lat, longitude: p.lon)
+                    .distance(from: CLLocation(latitude: q.lat, longitude: q.lon))
+                if !d.isFinite { d = 0 }
+            }
+            cum[i] = cum[i - 1] + d
+        }
+        // 2. 前後 50 公尺平均（兩個指標往前走，O(n)）
+        var smooth = [Double](repeating: 0, count: r.count)
+        var lo = 0
+        var hi = 0
+        var sum = 0.0
+        for i in 0..<r.count {
+            while hi < r.count && cum[hi] <= cum[i] + 50 {
+                sum += r[hi].alt
+                hi += 1
+            }
+            while lo < i && cum[lo] < cum[i] - 50 {
+                sum -= r[lo].alt
+                lo += 1
+            }
+            smooth[i] = sum / Double(max(1, hi - lo))
+        }
+        // 3. 4 公尺門檻算 GPS 的爬升、下降
+        var gpsGain = 0.0
+        var gpsLoss = 0.0
+        var anchor = smooth[0]
+        for v in smooth {
+            if v - anchor >= 4 {
+                gpsGain += v - anchor
+                anchor = v
+            } else if anchor - v >= 4 {
+                gpsLoss += anchor - v
+                anchor = v
+            }
+        }
+        // 4. App 記的：存下來的爬升比較準。下降照「爬升的比例」縮（GPS 爬升不到 1 公尺就不縮）；
+        //    高低差超過存下來的爬升就整條壓到爬升那麼高（c）
+        let known = climb(e, in: s)
+        var k = 1.0
+        if let known, gpsGain >= 1 { k = max(0, known) / gpsGain }
+        let start = smooth[0]
+        let top = smooth.max() ?? start
+        let bottom = smooth.min() ?? start
+        let range = top - bottom
+        var c = 1.0
+        if let known, range > 0 { c = min(1, max(0, known) / range) }
+        // 5. 最多 120 點（照距離等分取樣、線性內插）
+        let total = cum[r.count - 1]
+        var samples: [WorkoutElevation.Sample] = []
+        if total > 0 {
+            let n = 120
+            var j = 0
+            for step in 0..<n {
+                let x = total * Double(step) / Double(n - 1)
+                while j + 1 < r.count - 1 && cum[j + 1] < x { j += 1 }
+                let x0 = cum[j]
+                let x1 = cum[min(j + 1, r.count - 1)]
+                let y0 = smooth[j]
+                let y1 = smooth[min(j + 1, r.count - 1)]
+                let t = x1 > x0 ? (x - x0) / (x1 - x0) : 0
+                let y = y0 + (y1 - y0) * min(1, max(0, t))
+                samples.append(WorkoutElevation.Sample(km: x / 1000, meters: (y - start) * c))
+            }
+        }
+        return WorkoutElevation(gainM: known,
+                                lossM: gpsLoss * k,
+                                maxAboveStartM: max(0, (top - start) * c),
+                                samples: samples,
+                                hilly: range * c >= 20)
+    }
+}
+
+// MARK: - v3：配速五級（成果頁地圖、每公里、側面的路）
+
+/// [v25.553] 一段跟這一趟自己的平均比（不跟別趟比）：藍快、琥珀慢、灰差不多（不用紅綠：股票紅漲綠跌，綠和紅只給對你好、不好的事）
+enum WorkoutPaceLevel: Int, CaseIterable {
+    case muchFaster = 0
+    case faster
+    case even
+    case slower
+    case muchSlower
+
+    /// 圖例上的字
+    var label: String {
+        switch self {
+        case .muchFaster: return "快很多"
+        case .faster: return "快"
+        case .even: return "差不多"
+        case .slower: return "慢"
+        case .muchSlower: return "慢很多"
+        }
+    }
+
+    /// 跑、走、登山：配速（秒/公里）跟平均差多少。快 20 秒以上＝快很多、快 7～20 秒＝快、前後 7 秒內＝差不多、
+    /// 慢 7～20 秒＝慢、慢 20 秒以上＝慢很多。例：平均 6'11"，第 1 公里 6'02"（快 9 秒）＝快、第 4 公里 6'20"＝慢
+    static func forPace(seconds s: Double, average a: Double) -> WorkoutPaceLevel {
+        let d = s - a
+        if d <= -20 { return .muchFaster }
+        if d <= -7 { return .faster }
+        if d < 7 { return .even }
+        if d < 20 { return .slower }
+        return .muchSlower
+    }
+
+    /// 騎車：時速（公里/時）跟平均差多少；前後 1.5、4 公里/時當級距
+    static func forSpeed(kmh v: Double, average a: Double) -> WorkoutPaceLevel {
+        let d = v - a
+        if d >= 4 { return .muchFaster }
+        if d >= 1.5 { return .faster }
+        if d > -1.5 { return .even }
+        if d > -4 { return .slower }
+        return .muchSlower
+    }
+}
+
+// MARK: - v3：顏色（judge §3.14，跟 MoneyArtTheme 61–66 同一組）
+
+enum WorkoutPalette {
+    /// 運動色：旗子、卡面的線、圖表的直條、圓點
+    static func sport(_ s: WorkoutSport, dark: Bool) -> Color {
+        switch s {
+        case .run: return Color(tb: dark ? 0xD95926 : 0xEB6834)
+        case .walk: return Color(tb: dark ? 0x199E70 : 0x1BAF7A)
+        case .bike: return Color(tb: dark ? 0x3987E5 : 0x2A78D6)
+        case .hike: return Color(tb: dark ? 0xC98500 : 0xEDA100)
+        case .strength: return Color(tb: dark ? 0x9085E9 : 0x6250D6)
+        case .other: return Color(tb: dark ? 0x9AA3B5 : 0x5B6478)
+        }
+    }
+
+    /// 配速五級（淺色地圖／深色地圖）：快很多 1C5CAB／9EC5F4、快 6DA7EC／3987E5、差不多 A8A7A1／6B6A65、
+    /// 慢 E39B1E／C98500、慢很多 9A6100／F5C56B
+    static func pace(_ l: WorkoutPaceLevel, dark: Bool) -> Color {
+        switch l {
+        case .muchFaster: return Color(tb: dark ? 0x9EC5F4 : 0x1C5CAB)
+        case .faster: return Color(tb: dark ? 0x3987E5 : 0x6DA7EC)
+        case .even: return Color(tb: dark ? 0x6B6A65 : 0xA8A7A1)
+        case .slower: return Color(tb: dark ? 0xC98500 : 0xE39B1E)
+        case .muchSlower: return Color(tb: dark ? 0xF5C56B : 0x9A6100)
+        }
+    }
+
+    /// 線外面那一圈邊（灰色那段才看得到）：淺色白、深色地圖深藍
+    static func casing(dark: Bool) -> Color {
+        dark ? Color(tb: 0x0B1B45) : Color.white
+    }
+
+    /// 開始鈕的綠（跟 FinanceAddButton、要確認的綠同一個 1F9D57；不再手寫 Color(0.20, 0.78, 0.45)）
+    static let go = Color(tb: 0x1F9D57)
+}
+
+// MARK: - v3：卡面的路線形狀（不打任何地圖請求）
+
+/// [v25.553] 一趟路線換成 0…1 的形狀（項目卡的卡面、緊湊模式的小方塊畫它）。
+/// 投影：等距圓柱（經度 × cos 緯度），兩邊至少 200 公尺（操場一圈 400 公尺才看得出是橢圓、不縮成一團；
+/// 旅行的 TripBoardCellInk.route 是 2 公里），長寬比夾在 1:4～4:1（太長的那一邊不動、短的那一邊放寬置中）
+struct WorkoutRouteShape: Equatable {
+    /// 0…1；x 往東、y 往南（畫面往下）
+    var points: [CGPoint]
+    /// 新的一段從第幾點開始（不含 0）：暫停斷開的地方不連線
+    var breaks: [Int]
+    /// 寬 ÷ 高（公尺），0.25～4：畫的時候照這個比例放進卡面
+    var aspect: Double
+}
+
+extension WorkoutFacts {
+
+    /// 一趟路線的形狀；不到 2 點（或座標壞掉）回 nil。最多約 maxPoints 點（每段第一點一定留，暫停多的話會多幾點）
+    static func routeShape(_ route: [RoutePoint], maxPoints: Int = 120, minSpanMeters: Double = 200) -> WorkoutRouteShape? {
+        let pts = route.filter { $0.lat.isFinite && $0.lon.isFinite && abs($0.lat) <= 90 && abs($0.lon) <= 180 }
+        guard pts.count >= 2,
+              let minLat = pts.map(\.lat).min(), let maxLat = pts.map(\.lat).max(),
+              let minLon = pts.map(\.lon).min(), let maxLon = pts.map(\.lon).max() else { return nil }
+        let mPerDeg = 111_320.0
+        let kx = max(0.2, cos((minLat + maxLat) / 2 * Double.pi / 180))
+        let spanX = (maxLon - minLon) * kx * mPerDeg
+        let spanY = (maxLat - minLat) * mPerDeg
+        var sx = max(spanX, minSpanMeters)
+        var sy = max(spanY, minSpanMeters)
+        if sx > sy * 4 { sy = sx / 4 }
+        if sy > sx * 4 { sx = sy / 4 }
+        let padX = (sx - spanX) / 2
+        let padY = (sy - spanY) / 2
+        // 1. 換成 0…1；同一段裡離上一個留下的點不到 1% 的不留（GPS 原地抖動）
+        var kept: [(p: CGPoint, seg: Int)] = []
+        kept.reserveCapacity(pts.count)
+        for q in pts {
+            let x = ((q.lon - minLon) * kx * mPerDeg + padX) / sx
+            let y = ((maxLat - q.lat) * mPerDeg + padY) / sy
+            let p = CGPoint(x: min(1, max(0, x)), y: min(1, max(0, y)))
+            let seg = q.seg ?? 0
+            if let l = kept.last, l.seg == seg, abs(l.p.x - p.x) < 0.01, abs(l.p.y - p.y) < 0.01 { continue }
+            kept.append((p: p, seg: seg))
+        }
+        // 終點一定留（實心點畫在真的終點）
+        if let last = pts.last {
+            let x = ((last.lon - minLon) * kx * mPerDeg + padX) / sx
+            let y = ((maxLat - last.lat) * mPerDeg + padY) / sy
+            let p = CGPoint(x: min(1, max(0, x)), y: min(1, max(0, y)))
+            if let l = kept.last, l.p != p { kept.append((p: p, seg: last.seg ?? 0)) }
+        }
+        guard kept.count >= 2 else { return nil }
+        // 2. 太多點就等距抽樣（頭尾、每段第一點和前一段最後一點一定留）
+        var chosen = Set<Int>()
+        if kept.count > maxPoints {
+            let step = Double(kept.count - 1) / Double(max(1, maxPoints - 1))
+            for k in 0..<maxPoints {
+                chosen.insert(min(kept.count - 1, Int((Double(k) * step).rounded())))
+            }
+            for i in 1..<kept.count where kept[i].seg != kept[i - 1].seg {
+                chosen.insert(i)
+                chosen.insert(i - 1)
+            }
+        } else {
+            for i in 0..<kept.count { chosen.insert(i) }
+        }
+        var out: [CGPoint] = []
+        var breaks: [Int] = []
+        var prevSeg: Int? = nil
+        for i in chosen.sorted() {
+            let k = kept[i]
+            if let ps = prevSeg, ps != k.seg { breaks.append(out.count) }
+            out.append(k.p)
+            prevSeg = k.seg
+        }
+        return WorkoutRouteShape(points: out, breaks: breaks, aspect: sx / sy)
+    }
+}
+
+// MARK: - v3：成果看板「這一趟的路」（從側面看；畫法在 Life/HealthBoardScenes.swift）
+
+extension WorkoutFacts {
+
+    /// 一趟的側面風景資料：
+    /// • 有路線：每整公里一根柱子（騎車每 5 公里），最快那一公里（騎車最快那 5 公里）的柱子頂上一顆星；
+    ///   路面照每公里分段的快慢五級上色（跟這一趟的平均比）；地面是高度（hilly 才畫山稜）。
+    ///   分段對不上（編輯過距離或時間）：沒有柱子、路面全灰。
+    /// • 重訓：一個動作一片槓片（大小跟訓練量成正比，沒有負荷的用總下數；最多 8 片）。
+    /// • 沒有路線（舊紀錄、手動補記、手錶沒路線）：平的河堤＋小牌「這趟沒有路線」。
+    static func trailScene(_ s: WorkoutSession, bodyWeightKg: Double?) -> WorkoutTrailScene {
+        var scene = WorkoutTrailScene()
+        scene.sport = s.primarySport
+        if s.primarySport == .strength {
+            scene.kind = .strength
+            let sizes = s.strengthExercises.prefix(8).map { e -> Double in
+                if let v = e.volume(bodyWeightKg: bodyWeightKg), v > 0 { return v }
+                return Double(e.totalReps)
+            }
+            let top = sizes.max() ?? 0
+            scene.plates = sizes.map { top > 0 ? 0.35 + 0.65 * ($0 / top) : 0.6 }
+            return scene
+        }
+        guard let e = s.firstRouteExercise else {
+            scene.kind = .noRoute
+            scene.note = "這趟沒有路線"
+            return scene
+        }
+        scene.kind = .route
+        scene.sport = e.resolvedSport
+        if let el = elevation(e, in: s) {
+            scene.hilly = el.hilly
+            let ms = el.samples.map(\.meters)
+            if let lo = ms.min(), let hi = ms.max(), hi - lo >= 1 {
+                scene.profile = ms.map { ($0 - lo) / (hi - lo) }
+            }
+        }
+        guard let splits = validSplits(e) else { return scene }
+        let totalM = splits.reduce(0) { $0 + $1.meters }
+        let totalS = splits.reduce(0) { $0 + $1.seconds }
+        guard totalM > 0, totalS > 0 else { return scene }
+        let isBike = e.resolvedSport == .bike
+        // 路面：每一段一塊顏色
+        let avgPace = totalS / (totalM / 1000)                 // 秒/公里
+        let avgSpeed = (totalM / 1000) / (totalS / 3600)       // 公里/時
+        var acc = 0.0
+        for sp in splits {
+            let from = acc / totalM
+            acc += sp.meters
+            let to = acc / totalM
+            var level = WorkoutPaceLevel.even
+            if sp.meters >= 200, sp.seconds > 0 {
+                if isBike {
+                    level = WorkoutPaceLevel.forSpeed(kmh: (sp.meters / 1000) / (sp.seconds / 3600), average: avgSpeed)
+                } else {
+                    level = WorkoutPaceLevel.forPace(seconds: sp.seconds / (sp.meters / 1000), average: avgPace)
+                }
+            }
+            scene.bands.append(WorkoutTrailScene.Band(from: from, to: to, level: level))
+        }
+        // 柱子：跑走登山每公里、騎車每 5 公里（只算整的）
+        let every = isBike ? 5 : 1
+        var meters = 0.0
+        var chunkSeconds = 0.0
+        var chunkCount = 0
+        var best: (index: Int, seconds: Double)? = nil
+        for sp in splits where sp.meters >= 999 {
+            meters += sp.meters
+            chunkSeconds += sp.seconds
+            chunkCount += 1
+            if chunkCount == every {
+                scene.marks.append(meters / totalM)
+                scene.markLabels.append("\(scene.marks.count * every)")
+                let faster = best.map { chunkSeconds < $0.seconds } ?? true
+                if faster {
+                    best = (index: scene.marks.count - 1, seconds: chunkSeconds)
+                }
+                chunkSeconds = 0
+                chunkCount = 0
+            }
+        }
+        if scene.marks.count >= 2 { scene.star = best?.index }
+        return scene
     }
 }

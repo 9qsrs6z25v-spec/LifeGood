@@ -74,7 +74,7 @@ enum LifeFeature: String, CaseIterable, Identifiable {
         case .overview: return "house.fill"
         case .resume: return "trophy.fill"
         case .finance: return "banknote.fill"
-        case .health: return "figure.strengthtraining.traditional"
+        case .health: return "figure.run"          // [v25.553] 跑者（以前是重訓的人，跑步、健走的人認不出來）
         case .career: return "briefcase.fill"
         case .family: return "person.3.fill"
         case .realEstate: return "building.2.fill"
@@ -93,7 +93,7 @@ enum LifeFeature: String, CaseIterable, Identifiable {
 ///    ——那比沒有這個提示還糟。
 ///
 /// 設計取捨：人生分頁刻意不是十一個功能一次全開。新使用者第一天只會看到
-/// 總覽與履歷，其餘跟著資料長出來。代價是「功能發現不了」，所以才需要
+/// 總覽與履歷（[v25.553] 加上健康：開始跑步在健康頁裡），其餘跟著資料長出來。代價是「功能發現不了」，所以才需要
 /// 那個「還沒解鎖」的清單——藏起來可以，但要留一條看得到的路。
 enum LifeFeatureGate {
 
@@ -106,8 +106,9 @@ enum LifeFeatureGate {
         case .finance:
             return life.milestones.contains { $0.category == .achievement }
         case .health:
-            if life.milestones.contains(where: { $0.category == .health }) { return true }
-            return !life.workouts.isEmpty
+            // [v25.553] 健康頁一開始就出現（待決定 7）：以前要先有健康里程碑或訓練紀錄才出現，
+            // 新手找不到開始跑步的地方，「還沒解鎖」的提示又叫他去健康頁新增——那時健康頁根本還沒出現
+            return true
         case .career:
             return life.milestones.contains { $0.category == .career }
         case .family:
@@ -146,12 +147,10 @@ enum LifeFeatureGate {
     /// 怎麼讓它出現。寫給使用者看的，所以講的是「做什麼」而不是「什麼欄位不為空」。
     static func unlockHint(_ feature: LifeFeature) -> String {
         switch feature {
-        case .overview, .resume:
+        case .overview, .resume, .health:   // [v25.553] 健康一開始就出現，不用提示
             return ""
         case .finance:
             return "記一筆「財富」類的里程碑（開戶、信用卡、一筆投資…）"
-        case .health:
-            return "記一筆「健康」類的里程碑，或在健康頁新增一次健身紀錄"
         case .career:
             return "記一筆「職涯」類的里程碑（到職、升遷、調動…）"
         case .family:
@@ -172,9 +171,8 @@ enum LifeFeatureGate {
     /// 點一下要幫他開什麼。nil＝這件事得自己去那個頁面做。
     static func unlockAction(_ feature: LifeFeature) -> UnlockAction? {
         switch feature {
-        case .overview, .resume: return nil
+        case .overview, .resume, .health: return nil   // [v25.553] 健康一開始就出現
         case .finance:    return .addMilestone(.achievement)
-        case .health:     return .addMilestone(.health)
         case .career:     return .addMilestone(.career)
         case .family:     return .addMilestone(.family)
         case .realEstate: return .addRealEstate

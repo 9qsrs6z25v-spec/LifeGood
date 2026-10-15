@@ -1,446 +1,488 @@
 import SwiftUI
 import Charts
+import Combine
 
 // MARK: - 健康（v25.351 建立，v25.352 加入 Apple 健康聯動與跑步路徑）
-//
-// 入口在人生分頁「財富」的右邊，有健康里程碑或健身紀錄才出現。
-// 內容：
-//   1. 即時紀錄橫幅（跑步進行中時）
-//   2. 看板：本月訓練次數、本月訓練量、連續週數、累計次數
-//   3. Apple 健康聯動開關與同步
-//   4. 綜效曲線：兩筆以上才畫，可切總訓練量／總次數／單一動作與期間
-//   5. 動作統計、訓練紀錄（含路徑地圖）、健康里程碑
 //
 // 訓練量＝總次數（每組次數 × 組數）× 等效負荷。負荷是「自身體重」時帶入健康檔案
 // 最近一次的體重；沒有體重紀錄就不灌進總量（見 WorkoutExercise.volume）。
 //
 // HealthKit 沒有組數／次數／負荷的欄位，所以重訓明細只留在本 App，寫回去的只有
-// 時間、距離與熱量——畫面上有明講，不要讓使用者以為明細會同步。
+// 時間、距離與熱量——Apple 健康設定小頁有明講，不要讓使用者以為明細會同步。
 //
-// [v25.551] 即時紀錄橫幅寫運動名（「騎車・記錄中」）；訓練紀錄的爬升 10 公尺以上才顯示；
-// 舊版記錄、路線只存到起點的那幾筆，下面多一行灰字說明。
+// [v25.551] 即時紀錄橫幅寫運動名；訓練紀錄的爬升 10 公尺以上才顯示；舊版記錄的那幾筆多一行灰字說明。
+// [v25.552] 健康 v2：數字和字全部讀一套（WorkoutFacts／WorkoutFormat）；刪除先問；「＋」先選運動；
+// 上次跑到一半被關掉的那一趟有救回卡（RunRecoveryCenter）；寫進 Apple 健康走共用的 WorkoutHealthWriter。
 //
-// [v25.552] 健康 v2：數字和字全部讀一套（WorkoutFacts／WorkoutFormat）——週一開始、西曆，連續週數照週一算；
-// 配速一律 6'11"、騎車寫時速；清單距離一位小數「5.2 公里」；大卡沒量到的用 MET 表估、寫「約 340 大卡」；
-// 手錶的「走路」併進健走、「健行」併進登山（動作統計同一列）。刪除先問；右上「＋」改成選運動的選單
-// （補記一趟跑步／健走／騎車／登山、記一次重訓）；上次跑到一半被關掉、還沒存的那一趟，最上面有一張救回卡
-// （RunRecoveryCenter）；寫進 Apple 健康改用共用的 WorkoutHealthWriter（救回的那一趟也走同一支）。
+// [v25.553] 健康 v3：新骨架，跟記帳、理財、車子同一套零件（health/judge.md §3、build/v3/brief.md §G4）。
+//   • 捲動頁（同收支總覽）：由上到下 ⓪ 記錄中條（釘在最上面）→ ① 看板（天空、河堤、這週跑了 14.6 公里）→
+//     ② 開始列 → ③ 要確認（救回）→ ④ 最近運動（一趟一張 MoneyItemCard，卡面是路線形狀、不開地圖）→
+//     ⑤ 每週公里 → ⑥ 重訓（綜效曲線＋動作統計）→ ⑦ Apple 健康一列（點了打開設定小頁）→ ⑧ 健康里程碑。
+//   • 整頁的字和數字在 .task(id:) 裡用 HealthPageData.build 算一次存成 @State（id＝workoutsRevision＋今天＋上次用的運動）；
+//     body 只畫。
+//   • 頁面不盯記錄器：以前 @StateObject tracker 讓跑步時整頁每秒重算（U1 D1、v2 留下的）。現在只有 ⓪ 記錄中條
+//     （HealthLiveStrip）自己看 RunTracker；這頁只用 .onReceive(RunTracker.shared.$phase) 記一個 runActive
+//     （phase 只在開始、暫停、繼續、結束時才變）。body 裡不讀 RunTracker 任何會每秒變的值。
+//   • 彈出頁只有一個 enum HealthSheet＋一個 .sheet(item:)，內容最外層 .appStores()（Mac 上 sheet 拿不到環境物件會閃退）。
+//     開始運動 v3 仍是 RunTrackingView（v5 換全螢幕）。提示框分掛在不同的子 view：刪除掛在最近運動、丟掉掛在要確認。
+//   • 訂閱（待決定 8）：看得到全部；開始新的一趟、「＋」、編輯、複製到現在、刪除、新增／改健康里程碑要訂閱；
+//     不擋：記錄中條「回到跑步」、救回〔存下來〕〔丟掉〕、每週目標、看板主角、Apple 健康開關與同步、點卡片看成果頁。
+//   • 右上：綠色「＋」（補記四種有氧、記一次重訓）、「⋯」（每週目標、看板主角、Apple 健康）。跑者小圖示拿掉，
+//     開始跑步改由頁面裡的大綠鈕負責。
+//   • 人生分頁一開始就有「健康」（MainTabView 的 LifeFeatureGate，待決定 7）。
+
+// MARK: - 彈出頁
+
+/// 健康頁的彈出頁：一個 enum、一個 .sheet(item:)。每次打開帶新的 UUID（坑 #8：先改值再打開會帶到舊值）
+private enum HealthSheet: Identifiable {
+    /// 開始運動／回到跑步（RunTrackingView）
+    case run(UUID)
+    /// 補記（session nil、sport 是「＋」選的那一種）或編輯（session 有值）
+    case editor(UUID, WorkoutSession?, WorkoutSport?)
+    /// 成果頁：第二個 UUID 是那一趟的 id
+    case detail(UUID, UUID)
+    /// 每週目標小表單
+    case goal(UUID)
+    /// Apple 健康設定小頁
+    case appleHealth(UUID)
+    /// 健康里程碑：nil＝新增
+    case milestone(UUID, LifeMilestone?)
+
+    var id: UUID {
+        switch self {
+        case .run(let id): return id
+        case .editor(let id, _, _): return id
+        case .detail(let id, _): return id
+        case .goal(let id): return id
+        case .appleHealth(let id): return id
+        case .milestone(let id, _): return id
+        }
+    }
+}
+
+/// 最近運動的一列：一趟＋它的卡（page.recent[i] 對 page.recentItems[i]，item.id == session.id）
+private struct HealthRecentRow: Identifiable {
+    let session: WorkoutSession
+    let item: MoneyItem
+    var id: UUID { item.id }
+}
+
+/// 要確認的一列（救回）：第一列上面不畫分隔線
+private struct HealthCheckEntry: Identifiable {
+    let checkpoint: RunCheckpoint
+    let first: Bool
+    var id: UUID { checkpoint.id }
+}
+
+// MARK: - 健康頁
 
 struct HealthView: View {
     @EnvironmentObject var lifeStore: LifeStore
+    @EnvironmentObject var subscription: SubscriptionManager
+    @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.colorScheme) private var scheme
 
-    private struct WorkoutEditorRequest: Identifiable {
-        let id = UUID()
-        let session: WorkoutSession?
-        /// [v25.552] 「＋」選單選的運動（表單一打開就選好）；編輯是 nil
-        var sport: WorkoutSport? = nil
-    }
-
-    /// [v25.552] 清單一列的膠囊（字先在 routeChips 組好，body 只畫）
-    private struct ChipItem: Identifiable {
-        let text: String
-        let icon: String
-        var id: String { icon + text }
-    }
-
-    /// [v25.552] 「＋」選單裡補記的四種有氧（重訓另外一顆）
-    private static let logSports: [WorkoutSport] = [.run, .walk, .bike, .hike]
-
-    @StateObject private var health = HealthKitManager.shared
-    @StateObject private var tracker = RunTracker.shared
-    /// [v25.552] 上次跑到一半被關掉、還沒存的那幾趟（App 一打開就 scan；這頁最上面一張卡）
+    /// [v25.552] 上次跑到一半被關掉、還沒存的那幾趟（App 一打開就 scan；③ 要確認）
     @ObservedObject private var recovery = RunRecoveryCenter.shared
+    /// 上次用的運動（開始列的大鈕寫「開始」＋這一種；RunTrackingView 讀同一個鍵）
+    @AppStorage(RunSport.lastSportKey) private var lastSport: RunSport = .run
+    /// Apple 健康一列的字（設定小頁讀寫同兩個鍵）
+    @AppStorage("health_hk_enabled") private var hkEnabled = false
+    @AppStorage("health_hk_last_sync") private var lastSyncEpoch: Double = 0
 
-    /// [v25.532] 要新增還是編輯哪一筆，跟「打開」綁在一起（sheet(item:)）：以前先改 editing 再打開，
-    /// 表單有時會帶到改之前的舊值——按某一筆的「編輯」卻打開空白的新增，或上一次編輯的那一筆。
-    @State private var editorRequest: WorkoutEditorRequest?
-    @State private var showRun = false
-    @State private var syncing = false
-    @State private var syncMessage: String?
-    /// [v25.388] 複製訓練後的短暫提示（複製出來的那一筆是「現在」，會直接跳到清單最上面，
-    /// 使用者若是在下面幾筆按的複製，新的那一列可能根本不在畫面上，不講一聲會以為沒反應）
+    /// 整頁的字和數字（.task(id:) 算一次；nil＝還沒算好）
+    @State private var page: HealthPageData?
+    /// 記錄中（含暫停）：只在開始、暫停、繼續、結束時變（不盯每秒的數字）
+    @State private var runActive = false
+    /// 今天（過了午夜回到前景，看板換新的一天）
+    @State private var dayKey = WorkoutFormat.date(Date())
+    @State private var sheet: HealthSheet?
+    /// 按了「刪除」、等確認的那一趟
+    @State private var deleteTarget: WorkoutSession?
+    /// 要確認區按了「丟掉」、等確認的那一趟
+    @State private var discardTarget: RunCheckpoint?
+    @State private var showPremiumAlert = false
+    /// [v25.388] 複製到現在之後的短暫提示（新的一筆排到最上面，不講一聲會以為沒反應）
     @State private var copiedNote: String?
     @State private var copiedNoteTask: Task<Void, Never>?
-    /// [v25.552] 按了「刪除」、等確認的那一筆（以前一按就刪、沒有復原）
-    @State private var deleteTarget: WorkoutSession?
-    /// [v25.552] 救回卡按了「丟掉」、等確認的那一趟
-    @State private var discardTarget: RunCheckpoint?
-    /// 上次同步時間，決定要往回抓多久（第一次抓 90 天）
-    @AppStorage("health_hk_last_sync") private var lastSyncEpoch: Double = 0
-    @AppStorage("health_hk_enabled") private var hkEnabled = false
-    @State private var curveMode: CurveMode = .volume
-    @State private var selectedExercise: String = ""
-    @State private var range: HealthRange = .halfYear
-    @State private var rawSelectedDate: Date?
 
-    private let accent = Color(red: 0.20, green: 0.78, blue: 0.45)
+    /// 「＋」選單裡補記的四種有氧（重訓另外一顆）
+    private static let logSports: [WorkoutSport] = HealthPageData.cardioSports
+    /// 健康里程碑的醫療紅（跟 MilestoneCategory.health 的 cross.fill 同一組，U1 E4）
+    private static let medicalRed = Color(tb: 0xD93545)
 
-    enum CurveMode: String, CaseIterable, Identifiable {
-        case volume = "總訓練量"
-        case reps = "總次數"
-        case exercise = "單一動作"
-        var id: String { rawValue }
-    }
+    private var pal: TripBoardPalette { TripBoardPalette(scheme) }
 
-    enum HealthRange: String, CaseIterable, Identifiable {
-        case quarter = "近 3 月"
-        case halfYear = "近半年"
-        case year = "近一年"
-        case all = "全部"
-        var id: String { rawValue }
-
-        var from: Date? {
-            let cal = Calendar.current, now = Date()
-            switch self {
-            case .quarter: return cal.date(byAdding: .month, value: -3, to: now)
-            case .halfYear: return cal.date(byAdding: .month, value: -6, to: now)
-            case .year: return cal.date(byAdding: .year, value: -1, to: now)
-            case .all: return nil
-            }
-        }
-    }
-
-    // MARK: 資料
-
-    private var bodyWeight: Double? { lifeStore.latestBodyWeightKg }
-    private var sessions: [WorkoutSession] { lifeStore.workoutsByDateDesc }
-
-    private var inRange: [WorkoutSession] {
-        guard let from = range.from else { return sessions }
-        return sessions.filter { $0.date >= from }
-    }
-
-    private var healthMilestones: [LifeMilestone] {
-        lifeStore.milestones.filter { $0.category == .health }.sorted { $0.date > $1.date }
-    }
-
-    /// [v25.552] 本月：西曆（WorkoutFacts.calendar），手機設民國曆也一樣
-    private var thisMonth: [WorkoutSession] {
-        let cal = WorkoutFacts.calendar
-        let now = Date()
-        return sessions.filter { cal.isDate($0.date, equalTo: now, toGranularity: .month) }
-    }
-
-    private var monthVolume: Double {
-        thisMonth.compactMap { $0.totalVolume(bodyWeightKg: bodyWeight) }.reduce(0, +)
-    }
-
-    /// [v25.552] 從本週往回數，連續有運動的週數：一套數字（週一開始；1 分鐘以上或有重訓動作才算；
-    /// 這週還沒動從上週數）。以前用手機地區設定的週，週六騎車、週日跑步可能被拆成兩週
-    private var streakWeeks: Int { WorkoutFacts.streakWeeks(sessions) }
-
-    /// [v25.552] 動作統計、單一動作曲線用的名字：有氧用運動種類（手錶的「走路」和 App 的「健走」同一列），
-    /// 重訓用動作名稱。「其他有氧」（游泳、橢圓機、划船機、跳繩…）照名字分開，不全部併成一列「其他有氧」
-    /// （不然游泳和划船機的「最長 X 公里」會混在一起）
-    private func statName(_ e: WorkoutExercise) -> String {
-        let n = e.name.trimmingCharacters(in: .whitespaces)
-        guard e.kind == .cardio else { return n }
-        let sport = e.resolvedSport
-        if sport == .other, !n.isEmpty { return n }
-        return sport.displayName
-    }
-
-    /// [v25.552] 清單上動作的名字：有氧沒填名字、或是手錶的舊名（「走路」「健行」）寫運動種類（「健走」「登山」）
-    private func exerciseLabel(_ e: WorkoutExercise) -> String {
-        let n = e.name.trimmingCharacters(in: .whitespaces)
-        if e.kind == .cardio, n.isEmpty || n == "走路" || n == "健行" { return e.resolvedSport.displayName }
-        return n.isEmpty ? e.kind.rawValue : n
-    }
-
-    /// [v25.552] 清單上一趟的名字：手錶舊名「走路」「健行」寫成「健走」「登山」，其他照 displayTitle
-    private func sessionTitle(_ s: WorkoutSession) -> String {
-        let t = s.displayTitle
-        if t == "走路" || t == "健行", s.primarySport.isCardio { return s.primarySport.displayName }
-        return t
-    }
-
-    /// 曲線資料點
-    private struct CurvePoint: Identifiable {
-        let date: Date
-        let value: Double
-        let label: String
-        var id: Date { date }
-    }
-
-    private var curvePoints: [CurvePoint] {
-        let asc = inRange.sorted { $0.date < $1.date }
-        switch curveMode {
-        case .volume:
-            return asc.compactMap { s in
-                guard let v = s.totalVolume(bodyWeightKg: bodyWeight), v > 0 else { return nil }
-                return CurvePoint(date: s.date, value: v, label: s.displayTitle)
-            }
-        case .reps:
-            return asc.compactMap { s in
-                let r = s.totalReps
-                guard r > 0 else { return nil }
-                return CurvePoint(date: s.date, value: Double(r), label: s.displayTitle)
-            }
-        case .exercise:
-            guard !selectedExercise.isEmpty else { return [] }
-            return asc.flatMap { s in
-                s.exercises.filter { statName($0) == selectedExercise }.compactMap { e -> CurvePoint? in
-                    if let v = e.volume(bodyWeightKg: bodyWeight), v > 0 {
-                        return CurvePoint(date: s.date, value: v, label: e.summary(bodyWeightKg: bodyWeight))
-                    }
-                    if e.kind == .cardio, e.distanceKm > 0 {
-                        return CurvePoint(date: s.date, value: e.distanceKm, label: e.summary(bodyWeightKg: bodyWeight))
-                    }
-                    if e.kind == .strength, e.totalReps > 0 {   // [v25.552] 舊資料有氧留著的次數不畫（單位是公里）
-                        return CurvePoint(date: s.date, value: Double(e.totalReps), label: e.summary(bodyWeightKg: bodyWeight))
-                    }
-                    return nil
-                }
-            }
-        }
-    }
-
-    private var curveUnit: String {
-        switch curveMode {
-        case .volume: return "公斤"
-        case .reps: return "下"
-        case .exercise:
-            guard let first = latestExercise(named: selectedExercise) else { return "" }
-            if first.kind == .cardio { return "公里" }
-            return first.loadType == .none ? "下" : "公斤"
-        }
-    }
-
-    /// [v25.552] 最近一次叫這個名字（statName）的動作（sessions 是新到舊）
-    private func latestExercise(named name: String) -> WorkoutExercise? {
-        guard !name.isEmpty else { return nil }
-        for s in sessions {
-            if let e = s.exercises.first(where: { statName($0) == name }) { return e }
-        }
-        return nil
-    }
-
-    /// [v25.552] 單一動作的選項：用 statName 數次數，多到少、同次數照字（以前讀 LifeStore 的原始名字，「走路」「健走」分兩個）
-    private var exerciseNames: [String] {
-        var counts: [String: Int] = [:]
-        for s in sessions {
-            for e in s.exercises {
-                let n = statName(e)
-                if !n.isEmpty { counts[n, default: 0] += 1 }
-            }
-        }
-        let sorted = counts.sorted { a, b in
-            if a.value != b.value { return a.value > b.value }
-            return a.key < b.key
-        }
-        return sorted.map { $0.key }
-    }
-
-    private var selectedPoint: CurvePoint? {
-        guard let raw = rawSelectedDate else { return nil }
-        return curvePoints.min { a, b in
-            abs(a.date.timeIntervalSince(raw)) < abs(b.date.timeIntervalSince(raw))
-        }
+    /// 運動、健康頁設定、體重一改 workoutsRevision 就加一；跨過午夜、換了上次用的運動也重算
+    private var taskKey: String {
+        "\(lifeStore.workoutsRevision)-\(dayKey)-\(lastSport.rawValue)"
     }
 
     // MARK: 主體
 
+    // 修飾器鏈拆兩段（捲動頁一段、彈出頁與生命週期一段），閉包裡只呼叫具名函式：body 一個運算式不要太大（坑 #7）
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    if tracker.isActive { liveBanner }
-                    if let cp = recovery.pending.first { recoveryCard(cp) }
-                    summaryCard
-                    healthKitCard
-                    if sessions.count >= 2 {
-                        curveSection
-                    } else if !sessions.isEmpty {
-                        hintCard("再記一次訓練就會出現綜效曲線",
-                                 detail: "兩筆以上才看得出變化，目前只有 \(sessions.count) 筆。")
-                    }
-                    if !sessions.isEmpty { exerciseRanking }
-                    sessionSection
-                    if !healthMilestones.isEmpty { milestoneSection }
-                }
-                .padding(.horizontal)
-                .padding(.bottom, 28)
+            ScrollViewReader { proxy in
+                scrollPage(proxy)
             }
-            .background(Color(.systemGroupedBackground))
-            .navigationTitle("健康")
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button { showRun = true } label: {
-                        Image(systemName: tracker.isActive ? "location.fill" : "figure.run")
-                            .foregroundStyle(tracker.isActive ? accent : Color.accentColor)
-                    }
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    addMenu
-                }
+            .sheet(item: $sheet) { s in
+                sheetView(s).appStores()
             }
-            .sheet(item: $editorRequest) { request in
-                WorkoutEditorView(session: request.session, initialSport: request.sport) { saved in
-                    lifeStore.upsertWorkout(saved)
-                    let store = lifeStore
-                    Task { await WorkoutHealthWriter.push(saved, store: store) }
-                }
-                .environmentObject(lifeStore)
-                .appStores()
-            }
-            .sheet(isPresented: $showRun) {
-                RunTrackingView { session in
-                    lifeStore.upsertWorkout(session)
-                    let store = lifeStore
-                    Task { await WorkoutHealthWriter.push(session, store: store) }
-                }
-                .environmentObject(lifeStore)
-                .appStores()
-            }
+            .premiumLockAlert(isPresented: $showPremiumAlert)
+            .task(id: taskKey) { rebuild() }
             // [v25.552] 保險：App 一打開已經 scan 過（LifeGoodApp），這裡重複呼叫什麼都不做
             .task { await RunRecoveryCenter.shared.scan() }
+            // Published 一訂閱就送目前的值；之後只在開始、暫停、繼續、結束時送
+            .onReceive(RunTracker.shared.$phase) { p in phaseChanged(p) }
+            .onAppear { refreshDay() }
+            .onChange(of: scenePhase) { _, phase in sceneChanged(phase) }
             // 離開頁面時把還在倒數的提示收掉，不要留一個醒著的 Task
-            .onDisappear {
-                copiedNoteTask?.cancel()
-                copiedNoteTask = nil
-                copiedNote = nil
-            }
+            .onDisappear { clearCopiedNote() }
         }
     }
 
-    // MARK: 看板
-
-    private var summaryCard: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text("\(thisMonth.count)")
-                    .font(.system(size: 40, weight: .black, design: .rounded))
-                    .foregroundStyle(.white)
-                    .lineLimit(1).minimumScaleFactor(0.6)
-                Text("次／本月").font(.subheadline.weight(.bold)).foregroundStyle(.white.opacity(0.85))
-                Spacer()
-                if let last = sessions.first {
-                    Text("最近 " + WorkoutFormat.date(last.date))
-                        .font(.system(size: 11, weight: .bold))
-                        .padding(.horizontal, 8).padding(.vertical, 3)
-                        .background(Color.white.opacity(0.18), in: Capsule())
-                        .overlay(Capsule().stroke(Color.white.opacity(0.3), lineWidth: 0.75))
-                        .foregroundStyle(.white)
-                }
-            }
-            HStack(spacing: 10) {
-                kpiCell(title: "本月訓練量", value: monthVolume > 0 ? volumeText(monthVolume) : "—", icon: "scalemass.fill")
-                kpiCell(title: "連續週數", value: streakWeeks > 0 ? "\(streakWeeks) 週" : "—", icon: "flame.fill")
-                kpiCell(title: "累計訓練", value: "\(sessions.count) 次", icon: "figure.strengthtraining.traditional")
-            }
+    /// 捲動頁本身：大標「健康」、底色、⓪ 記錄中條、右上兩顆
+    private func scrollPage(_ proxy: ScrollViewProxy) -> some View {
+        ScrollView {
+            pageContent(proxy)
+                .padding(.top, 8)
+                .padding(.bottom, 28)
         }
-        .padding(16)
-        .background(
-            ZStack {
-                LinearGradient(colors: [accent, accent.opacity(0.62)],
-                               startPoint: .topLeading, endPoint: .bottomTrailing)
-                Circle().fill(Color.white.opacity(0.12)).frame(width: 130).offset(x: 120, y: -54)
-                Circle().fill(Color.white.opacity(0.08)).frame(width: 78).offset(x: -110, y: 44)
-                Circle().fill(Color.white.opacity(0.07)).frame(width: 55).offset(x: 66, y: 40)
-                LinearGradient(colors: [.white.opacity(0.18), .clear], startPoint: .top, endPoint: .center)
-            }
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 20))
-        .shadow(color: accent.opacity(0.45), radius: 14, y: 7)
-        .shadow(color: .black.opacity(0.08), radius: 8, y: 4)
-    }
-
-    private func kpiCell(title: String, value: String, icon: String) -> some View {
-        VStack(spacing: 4) {
-            ZStack {
-                Circle()
-                    .fill(LinearGradient(colors: [.white.opacity(0.26), .white.opacity(0.10)],
-                                         startPoint: .topLeading, endPoint: .bottomTrailing))
-                    .frame(width: 30, height: 30)
-                    .overlay(Circle().stroke(Color.white.opacity(0.25), lineWidth: 0.75))
-                Image(systemName: icon).font(.system(size: 12, weight: .bold)).foregroundStyle(.white)
-            }
-            Text(value)
-                .font(.system(size: 14, weight: .bold, design: .rounded))
-                .foregroundStyle(.white)
-                .lineLimit(1).minimumScaleFactor(0.7)
-            Text(title).font(.system(size: 9, weight: .semibold)).foregroundStyle(.white.opacity(0.85))
+        .background(Color(.systemGroupedBackground))
+        // ⓪ 記錄中條：沒在記錄時什麼都不畫（高度 0）；回到跑步不擋訂閱、不改上次用的運動
+        .safeAreaInset(edge: .top, spacing: 0) {
+            HealthLiveStrip { openRun() }
         }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 9)
-        .background(Color.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
+        .navigationTitle("健康")
+        .navigationBarTitleDisplayMode(.large)
+        .toolbar { toolbarContent }
     }
 
-    // MARK: 即時紀錄橫幅
+    /// 整頁一次算好（HealthPageData.build 在主執行緒：MoneyItem.workout 用到共用的 formatter）
+    private func rebuild() {
+        page = HealthPageData.build(workouts: lifeStore.workouts,
+                                    prefs: lifeStore.workoutPrefs,
+                                    bodyWeightKg: lifeStore.latestBodyWeightKg,
+                                    lastSport: lastSport)
+    }
 
-    private var liveBanner: some View {
-        Button { showRun = true } label: {
-            HStack(spacing: 10) {
-                Image(systemName: "location.fill")
-                    .font(.system(size: 14, weight: .bold)).foregroundStyle(.white)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(liveTitle)
-                        .font(.caption.weight(.bold)).foregroundStyle(.white)
-                    Text(liveText)
-                        .font(.system(size: 12, weight: .semibold).monospacedDigit())
-                        .foregroundStyle(.white.opacity(0.9))
-                }
-                Spacer()
-                Text("回到畫面").font(.caption2.weight(.bold)).foregroundStyle(.white.opacity(0.85))
-                Image(systemName: "chevron.right").font(.caption2.bold()).foregroundStyle(.white.opacity(0.85))
-            }
-            .padding(.horizontal, 14).padding(.vertical, 11)
-            .background(LinearGradient(colors: [.orange, .orange.opacity(0.75)],
-                                       startPoint: .leading, endPoint: .trailing))
-            .clipShape(RoundedRectangle(cornerRadius: 14))
+    /// 記錄器開始、暫停、繼續、結束：只記「在不在記錄」（一樣就不寫，免得多重畫一次）
+    private func phaseChanged(_ p: RunTracker.Phase) {
+        let active = p != .idle
+        if active != runActive { runActive = active }
+    }
+
+    private func sceneChanged(_ phase: ScenePhase) {
+        if phase == .active { refreshDay() }
+    }
+
+    /// 回到前景、切回這頁：日期變了才改（改了 taskKey 就變，看板重算）
+    private func refreshDay() {
+        let k = WorkoutFormat.date(Date())
+        if k != dayKey { dayKey = k }
+    }
+
+    private func clearCopiedNote() {
+        copiedNoteTask?.cancel()
+        copiedNoteTask = nil
+        copiedNote = nil
+    }
+
+    @ViewBuilder
+    private func pageContent(_ proxy: ScrollViewProxy) -> some View {
+        if let p = page {
+            sections(p, proxy: proxy)
+        } else {
+            Color.clear.frame(height: 420)
         }
-        .buttonStyle(.plain)
     }
 
-    /// [v25.551] 橫幅標題：「騎車・記錄中」／「騎車・已暫停」（運動種類在記錄器裡，按隱藏再回來也對）
-    private var liveTitle: String {
-        tracker.sport.rawValue + "・" + (tracker.phase == .paused ? "已暫停" : "記錄中")
-    }
-
-    /// 橫幅上的即時數字：字串先組好再進 Text。[v25.552] 一套寫法：「3.42 公里・21:05」（騎車 10 公里以上一位小數；
-    /// 時間往下取整，跟跑步畫面的碼錶一樣）
-    private var liveText: String {
-        let km = WorkoutFormat.preciseKmNumber(tracker.distanceMeters / 1000, sport: WorkoutSport(tracker.sport))
-        let clock = WorkoutFormat.clock(seconds: tracker.elapsed.rounded(.down))
-        return km + " 公里・" + clock
-    }
-
-    // MARK: 救回卡（[v25.552] 上次跑到一半被關掉、還沒存的那一趟）
-
-    /// 白卡：問句＋〔存下來〕〔丟掉〕。存下來跟按完成同一條路（RunRecoveryCenter.save → WorkoutFacts.makeSession）；
-    /// 丟掉先問一次。提示框掛在這張卡上（跟刪除的提示框不在同一個 view）
-    private func recoveryCard(_ cp: RunCheckpoint) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .top, spacing: 10) {
-                Image(systemName: "exclamationmark.arrow.circlepath")
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(.orange)
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(cp.prompt())
-                        .font(.subheadline.weight(.semibold))
-                        .fixedSize(horizontal: false, vertical: true)
-                    if let more = recoveryMoreText {
-                        Text(more).font(.caption).foregroundStyle(.secondary)
+    /// 由上到下 ①～⑧（⓪ 在 safeAreaInset）
+    private func sections(_ p: HealthPageData, proxy: ScrollViewProxy) -> some View {
+        VStack(spacing: 20) {
+            HealthBoard(data: p, onGoalTap: { openGoal() })
+                .padding(.horizontal, 16)
+            if !runActive {
+                HealthStartRow(data: p.start) { s in start(s) }
+                    .padding(.horizontal, 16)
+            }
+            if !recovery.pending.isEmpty {
+                recoverySection
+            }
+            recentSection(p)
+            weeklySection(p)
+            if p.hasStrength {
+                HealthStrengthSection(scrollToCurve: {
+                    withAnimation(.easeInOut(duration: 0.35)) {
+                        proxy.scrollTo(HealthStrengthSection.curveAnchor, anchor: .top)
                     }
-                }
-                Spacer(minLength: 0)
+                })
             }
-            HStack(spacing: 10) {
-                Button { RunRecoveryCenter.shared.save(cp, store: lifeStore) } label: {
-                    recoveryButtonLabel("存下來", filled: true)
-                }
-                .buttonStyle(.plain)
-                Button { discardTarget = cp } label: {
-                    recoveryButtonLabel("丟掉", filled: false)
-                }
-                .buttonStyle(.plain)
+            appleHealthRow
+            milestoneSection
+        }
+    }
+
+    // MARK: 動作（訂閱照待決定 8）
+
+    /// 開始列：大鈕或小膠囊。運動先寫進上次用的那一種（RunTrackingView 一打開就讀這個鍵）；記錄中不改
+    private func start(_ s: WorkoutSport) {
+        guard subscription.isPremium else { showPremiumAlert = true; return }
+        if !RunTracker.shared.isActive, let rs = s.runSport, rs != lastSport {
+            lastSport = rs
+        }
+        sheet = .run(UUID())
+    }
+
+    /// 記錄中條「回到跑步」：不擋訂閱（在跑的那一趟一定讓你存完）
+    private func openRun() {
+        sheet = .run(UUID())
+    }
+
+    /// 目標格、「⋯ › 每週目標」：不擋訂閱。page 還沒算好（剛打開那一瞬間）就不開，免得彈出一張空白表單
+    private func openGoal() {
+        guard page != nil else { return }
+        sheet = .goal(UUID())
+    }
+
+    private func openAppleHealth() {
+        sheet = .appleHealth(UUID())
+    }
+
+    /// 「＋」選單：補記一趟／記一次重訓（選單本身沒訂閱時就換成跳付費說明的按鈕）
+    private func openEditor(sport: WorkoutSport) {
+        guard subscription.isPremium else { showPremiumAlert = true; return }
+        sheet = .editor(UUID(), nil, sport)
+    }
+
+    /// 長按「編輯」：拿 store 裡最新的那一筆（page 是上一次算的）
+    private func edit(_ s: WorkoutSession) {
+        guard subscription.isPremium else { showPremiumAlert = true; return }
+        let latest = lifeStore.workouts.first(where: { $0.id == s.id }) ?? s
+        sheet = .editor(UUID(), latest, nil)
+    }
+
+    /// 長按「複製到現在」（只有重訓、手動補記才有）：store 下一輪才寫，這裡先講一聲
+    private func duplicate(_ s: WorkoutSession) {
+        guard subscription.isPremium else { showPremiumAlert = true; return }
+        let saved = WorkoutActions.duplicate(s, store: lifeStore)
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        showCopiedNote("已複製「" + WorkoutFacts.title(saved) + "」到現在，新的一筆排在最上面。")
+    }
+
+    /// 長按「刪除」：先問（確認框在最近運動區）
+    private func askDelete(_ s: WorkoutSession) {
+        guard subscription.isPremium else { showPremiumAlert = true; return }
+        deleteTarget = s
+    }
+
+    /// 健康里程碑：新增、改都要訂閱
+    private func addMilestone() {
+        guard subscription.isPremium else { showPremiumAlert = true; return }
+        sheet = .milestone(UUID(), nil)
+    }
+
+    private func editMilestone(_ m: LifeMilestone) {
+        guard subscription.isPremium else { showPremiumAlert = true; return }
+        sheet = .milestone(UUID(), m)
+    }
+
+    private func showCopiedNote(_ text: String) {
+        copiedNoteTask?.cancel()
+        withAnimation(.easeOut(duration: 0.2)) { copiedNote = text }
+        copiedNoteTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeOut(duration: 0.25)) { copiedNote = nil }
+        }
+    }
+
+    // MARK: 右上（綠色「＋」、「⋯」）
+
+    @ToolbarContentBuilder
+    private var toolbarContent: some ToolbarContent {
+        ToolbarItem(placement: .topBarTrailing) {
+            HStack(spacing: 12) {
+                addButton
+                moreMenu
             }
         }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(.secondarySystemGroupedBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 16))
-        .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color(.separator).opacity(0.12), lineWidth: 0.75))
+    }
+
+    /// 綠色「＋」：有訂閱是選單；沒訂閱是一顆只跳付費說明的按鈕（照 FinanceAddMenuPill，付費在選單打開前就擋）
+    @ViewBuilder
+    private var addButton: some View {
+        if subscription.isPremium {
+            Menu {
+                addMenuItems
+            } label: {
+                addIcon
+            }
+            .accessibilityLabel("補記一趟運動")
+        } else {
+            Button {
+                showPremiumAlert = true
+            } label: {
+                addIcon
+            }
+            .accessibilityLabel("補記一趟運動")
+        }
+    }
+
+    private var addIcon: some View {
+        Image(systemName: "plus.circle.fill")
+            .font(.title3)
+            .foregroundStyle(.green)
+    }
+
+    @ViewBuilder
+    private var addMenuItems: some View {
+        ForEach(Self.logSports) { s in
+            Button {
+                openEditor(sport: s)
+            } label: {
+                Label("補記一趟" + s.displayName, systemImage: s.icon)
+            }
+        }
+        Divider()
+        Button {
+            openEditor(sport: .strength)
+        } label: {
+            Label("記一次重訓", systemImage: "dumbbell.fill")
+        }
+    }
+
+    /// 「⋯」：每週目標、看板主角、Apple 健康（都不擋訂閱）
+    private var moreMenu: some View {
+        Menu {
+            Button {
+                openGoal()
+            } label: {
+                Label("每週目標", systemImage: "target")
+            }
+            Picker(selection: heroBinding) {
+                ForEach(WorkoutHeroChoice.allCases) { c in
+                    Text(c.title).tag(c)
+                }
+            } label: {
+                Label("看板主角", systemImage: "star.circle")
+            }
+            .pickerStyle(.menu)
+            Button {
+                openAppleHealth()
+            } label: {
+                Label("Apple 健康", systemImage: "heart.text.square")
+            }
+        } label: {
+            Image(systemName: "ellipsis.circle")
+                .font(.title3)
+        }
+        .accessibilityLabel("更多")
+    }
+
+    /// 看板主角（存在 lifeStore.workoutPrefs，跟 iCloud 同步）
+    private var heroBinding: Binding<WorkoutHeroChoice> {
+        let store = lifeStore
+        return Binding(get: { store.workoutPrefs.heroChoice },
+                       set: { store.setHeroChoice($0) })
+    }
+
+    // MARK: 彈出頁
+
+    @ViewBuilder
+    private func sheetView(_ s: HealthSheet) -> some View {
+        switch s {
+        case .run:
+            runSheet
+        case .editor(_, let session, let sport):
+            editorSheet(session, sport: sport)
+        case .detail(_, let sessionId):
+            WorkoutDetailView(sessionId: sessionId)
+        case .goal:
+            goalSheet
+        case .appleHealth:
+            HealthAppleHealthSheet()
+        case .milestone(_, let m):
+            milestoneSheet(m)
+        }
+    }
+
+    /// 開始運動（v3 仍是舊面板）：RunTrackingView 已經關畫面後下一輪才交出那一趟
+    private var runSheet: some View {
+        let store = lifeStore
+        return RunTrackingView { session in
+            WorkoutActions.save(session, store: store)
+        }
+    }
+
+    /// 補記／編輯：WorkoutEditorView 的 onSave 已經在關掉之後下一輪才呼叫
+    private func editorSheet(_ session: WorkoutSession?, sport: WorkoutSport?) -> some View {
+        let store = lifeStore
+        return WorkoutEditorView(session: session, initialSport: sport) { saved in
+            WorkoutActions.save(saved, store: store)
+        }
+    }
+
+    /// 每週目標：運動跟著看板主角；表單自己先關掉、下一輪才交出公里
+    @ViewBuilder
+    private var goalSheet: some View {
+        if let p = page {
+            let store = lifeStore
+            let suggestion = p.suggestion
+            HealthGoalSheet(suggestion: suggestion) { km in
+                store.setWeeklyGoal(km, for: suggestion.sport)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func milestoneSheet(_ m: LifeMilestone?) -> some View {
+        if let m {
+            AddMilestoneView(editing: m)
+        } else {
+            AddMilestoneView(initialCategory: .health)
+        }
+    }
+
+    // MARK: ③ 要確認（救回；0 件整區不出現）
+
+    private var checkEntries: [HealthCheckEntry] {
+        let shown = recovery.pending.prefix(3)
+        var out: [HealthCheckEntry] = []
+        for cp in shown {
+            out.append(HealthCheckEntry(checkpoint: cp, first: out.isEmpty))
+        }
+        return out
+    }
+
+    /// 多出 3 件以外的：「還有 2 件」
+    private var checkMoreText: String? {
+        let more = recovery.pending.count - 3
+        return more > 0 ? "還有 \(more) 件" : nil
+    }
+
+    /// 〔存下來〕〔丟掉〕都不擋訂閱；丟掉先問（提示框掛在這一區）
+    private var recoverySection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            FinanceCardHeader(title: "要確認")
+            VStack(spacing: 0) {
+                ForEach(checkEntries) { entry in
+                    recoveryRow(entry)
+                }
+                if let more = checkMoreText {
+                    Divider().padding(.leading, 14)
+                    Text(more)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 10)
+                }
+            }
+            .modifier(FinanceCardChrome())
+        }
+        .padding(.horizontal, 16)
         .alert("丟掉這一趟？", isPresented: discardBinding, presenting: discardTarget) { c in
             Button("丟掉", role: .destructive) { RunRecoveryCenter.shared.discard(c) }
             Button("取消", role: .cancel) { }
@@ -449,102 +491,973 @@ struct HealthView: View {
         }
     }
 
-    /// 還有第二趟以上沒存時的灰字
-    private var recoveryMoreText: String? {
-        let n = recovery.pending.count
-        return n > 1 ? "還有 \(n - 1) 趟沒存" : nil
+    private func recoveryRow(_ entry: HealthCheckEntry) -> some View {
+        let cp = entry.checkpoint
+        let message = cp.prompt()
+        let store = lifeStore
+        let buttons: [FinanceCheckButton] = [
+            FinanceCheckButton(title: "存下來") { RunRecoveryCenter.shared.save(cp, store: store) },
+            FinanceCheckButton(title: "丟掉") { discardTarget = cp }
+        ]
+        return VStack(spacing: 0) {
+            if !entry.first {
+                Divider().padding(.leading, 44)
+            }
+            FinanceCheckRow(icon: "exclamationmark.arrow.circlepath",
+                            message: message,
+                            buttons: buttons,
+                            accessibilityLabel: "存下來：" + message,
+                            pal: pal)
+        }
     }
 
     private var discardBinding: Binding<Bool> {
         Binding(get: { discardTarget != nil }, set: { if !$0 { discardTarget = nil } })
     }
 
-    /// 救回卡的按鈕字：存下來＝綠底白字、丟掉＝灰底
-    private func recoveryButtonLabel(_ title: String, filled: Bool) -> some View {
-        Text(title)
-            .font(.subheadline.weight(.bold))
-            .foregroundStyle(filled ? Color.white : Color.primary)
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 9)
-            .background(filled ? accent : Color(.tertiarySystemFill), in: RoundedRectangle(cornerRadius: 10))
-            .contentShape(Rectangle())
+    // MARK: ④ 最近運動
+
+    private func recentRows(_ p: HealthPageData) -> [HealthRecentRow] {
+        let n = min(p.recent.count, p.recentItems.count)
+        var out: [HealthRecentRow] = []
+        for i in 0..<n {
+            out.append(HealthRecentRow(session: p.recent[i], item: p.recentItems[i]))
+        }
+        return out
     }
 
-    // MARK: 「＋」選單（[v25.552] 先選運動，表單一打開就是那一種）
+    private func recentTrailing(_ p: HealthPageData) -> String? {
+        p.isEmpty ? nil : "這週 \(p.weekTripCount) 趟"
+    }
 
-    private var addMenu: some View {
-        Menu {
-            ForEach(Self.logSports) { s in
-                Button { editorRequest = WorkoutEditorRequest(session: nil, sport: s) } label: {
-                    Label("補記一趟" + s.displayName, systemImage: s.icon)
+    /// 刪除確認框掛在這一區（不跟丟掉的提示框掛在同一個 view）
+    private func recentSection(_ p: HealthPageData) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            MoneySectionHeader(title: "最近運動", trailing: recentTrailing(p))
+            if let note = copiedNote {
+                copiedBanner(note)
+            }
+            if p.isEmpty {
+                emptyCard(p)
+            } else {
+                VStack(spacing: 10) {
+                    ForEach(recentRows(p)) { row in
+                        recentCard(row)
+                    }
+                }
+                if p.totalCount > 0 {
+                    allRecordsLink(p.totalCount)
                 }
             }
-            Divider()
-            Button { editorRequest = WorkoutEditorRequest(session: nil, sport: .strength) } label: {
-                Label("記一次重訓", systemImage: "dumbbell.fill")
-            }
-        } label: {
-            Image(systemName: "plus")
+        }
+        .padding(.horizontal, 16)
+        .alert(deleteTitle, isPresented: deleteBinding, presenting: deleteTarget) { s in
+            Button("刪除", role: .destructive) { deleteNow(s) }
+            Button("取消", role: .cancel) { }
+        } message: { s in
+            Text(WorkoutActions.deleteMessage(s))
         }
     }
 
-    // MARK: Apple 健康
+    /// 一趟一張卡：點了打開成果頁（不擋訂閱）；長按編輯／複製到現在／刪除
+    private func recentCard(_ row: HealthRecentRow) -> some View {
+        let s = row.session
+        return Button {
+            sheet = .detail(UUID(), s.id)
+        } label: {
+            MoneyItemCard(item: row.item)
+        }
+        .buttonStyle(MoneyPressStyle())
+        // 長按浮起來的預覽照卡片的圓角（MoneyItemCard 一般版 18），不要露出方角（同全部紀錄頁）
+        .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .accessibilityHint("點兩下看這一趟的成果；長按可以編輯或刪除")
+        .contextMenu {
+            recentMenu(s)
+        }
+    }
 
-    private var healthKitCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 8) {
-                Image(systemName: "heart.text.square.fill")
-                    .font(.system(size: 15)).foregroundStyle(.pink)
-                Text("Apple 健康").font(.subheadline.weight(.bold))
-                Spacer()
-                if health.isAvailable {
-                    Toggle("", isOn: Binding(
-                        get: { hkEnabled },
-                        set: { on in
-                            hkEnabled = on
-                            if on { Task { await health.requestAuthorization(); await syncFromHealthKit() } }
-                        }))
-                        .labelsHidden()
-                        .tint(accent)
-                }
+    @ViewBuilder
+    private func recentMenu(_ s: WorkoutSession) -> some View {
+        Button {
+            edit(s)
+        } label: {
+            Label("編輯", systemImage: "pencil")
+        }
+        if WorkoutActions.canDuplicate(s) {
+            Button {
+                duplicate(s)
+            } label: {
+                Label("複製到現在", systemImage: "plus.square.on.square")
             }
-            if !health.isAvailable {
-                Text("這台裝置不支援「健康」App。").font(.caption).foregroundStyle(.secondary)
-            } else if hkEnabled {
-                Text("體重、血壓、心率與訓練會與 Apple 健康互通。HealthKit 沒有「組數／次數／負荷」的欄位，所以重訓明細只留在這個 App，寫回去的只有時間、距離與熱量。")
-                    .font(.caption2).foregroundStyle(.secondary)
-                HStack(spacing: 10) {
-                    Button {
-                        Task { await syncFromHealthKit() }
-                    } label: {
-                        Label(syncing ? "同步中…" : "立即同步", systemImage: "arrow.triangle.2.circlepath")
-                            .font(.caption.weight(.bold))
-                    }
-                    .disabled(syncing)
-                    if lastSyncEpoch > 0 {
-                        Text("上次 " + Self.shortDate.string(from: Date(timeIntervalSince1970: lastSyncEpoch)))
-                            .font(.caption2).foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                }
-                if let msg = syncMessage {
-                    Text(msg).font(.caption2).foregroundStyle(accent)
-                }
-                if let err = health.lastError {
-                    Text(err).font(.caption2).foregroundStyle(.red)
-                }
-            } else {
-                Text("打開後可以把 Apple 健康的體重、血壓與 Apple Watch 的訓練帶進來，這裡記的訓練也會寫回去計入體能訓練圓環。")
-                    .font(.caption2).foregroundStyle(.secondary)
+        }
+        Divider()
+        Button(role: .destructive) {
+            askDelete(s)
+        } label: {
+            Label("刪除", systemImage: "trash")
+        }
+    }
+
+    /// 「看全部紀錄（148 趟）›」：推進全部紀錄頁（依週分組、篩選、緊湊）
+    private func allRecordsLink(_ total: Int) -> some View {
+        NavigationLink {
+            WorkoutListView()
+        } label: {
+            Text("看全部紀錄（\(total) 趟）›")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(pal.hint)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 13)
+                .modifier(FinanceCardChrome())
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(MoneyPressStyle())
+    }
+
+    private func copiedBanner(_ note: String) -> some View {
+        let green = MoneyTone.good.color(pal)
+        return HStack(spacing: 6) {
+            Image(systemName: "checkmark.circle.fill")
+                .font(.footnote)
+                .foregroundStyle(green)
+            Text(note)
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(green)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(green.opacity(0.10), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .transition(.opacity)
+    }
+
+    /// 空狀態（一筆都沒有；judge §3.5）
+    private func emptyCard(_ p: HealthPageData) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: "figure.run")
+                .font(.title2.weight(.semibold))
+                .foregroundStyle(WorkoutPalette.sport(.run, dark: pal.dark))
+                .frame(width: 30)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("還沒有運動紀錄")
+                    .font(.subheadline.weight(.bold))
+                Text(emptyText(p))
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
         .padding(14)
-        .background(Color(.secondarySystemGroupedBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 16))
-        .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color(.separator).opacity(0.12), lineWidth: 0.75))
+        .modifier(FinanceCardChrome())
+        .accessibilityElement(children: .combine)
     }
 
-    /// 從 Apple 健康抓體重、血壓與訓練回來
+    private func emptyText(_ p: HealthPageData) -> String {
+        let startWord: String = "「開始" + p.start.sport.displayName + "」"
+        var text: String
+        if ProcessInfo.processInfo.isiOSAppOnMac {
+            text = "在 iPhone 上按" + startWord + "記錄"
+        } else {
+            text = "按上面" + startWord
+        }
+        text += "；之前跑過的可以按右上「＋」補記，例如河濱 5.2 公里・32 分；"
+        text += "有戴 Apple Watch 的話，打開下面的「Apple 健康」，手錶記的會自己出現。"
+        return text
+    }
+
+    /// 「刪除 10/15 晨跑 5.2 公里？」
+    private var deleteTitle: String {
+        guard let s = deleteTarget else { return "" }
+        return WorkoutActions.deleteTitle(s)
+    }
+
+    private var deleteBinding: Binding<Bool> {
+        Binding(get: { deleteTarget != nil }, set: { if !$0 { deleteTarget = nil } })
+    }
+
+    /// 提示框關掉那一次畫面更新先過，下一輪主執行緒才寫 store（WorkoutActions.delete 已經排到下一輪）
+    private func deleteNow(_ s: WorkoutSession) {
+        WorkoutActions.delete(s.id, store: lifeStore)
+    }
+
+    // MARK: ⑤ 每週公里
+
+    /// 有氧不到 2 週：一行「再記一週，就會出現每週公里」；完全沒有有氧整區不出現
+    @ViewBuilder
+    private func weeklySection(_ p: HealthPageData) -> some View {
+        if let w = p.weekly {
+            // MoneyChartCard 自帶 .padding(.horizontal)，外面不要再加
+            WorkoutWeeklyCard(series: w)
+        } else if let t = p.weeklyPrompt {
+            weeklyPromptCard(t)
+        }
+    }
+
+    private func weeklyPromptCard(_ text: String) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: "chart.bar.fill")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .accessibilityHidden(true)
+            Text(text)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .modifier(FinanceCardChrome())
+        .padding(.horizontal, 16)
+    }
+
+    // MARK: ⑦ Apple 健康（一列）
+
+    /// 「已連線・今天 06:40 同步」「已連線」「沒有打開」「這台裝置不支援」
+    private var appleHealthStatus: String {
+        guard HealthKitManager.shared.isAvailable else { return "這台裝置不支援" }
+        guard hkEnabled else { return "沒有打開" }
+        guard lastSyncEpoch > 0 else { return "已連線" }
+        let when = HealthPageData.whenText(Date(timeIntervalSince1970: lastSyncEpoch), now: Date())
+        return "已連線・" + when + " 同步"
+    }
+
+    /// 白卡一列；點了打開設定小頁（不擋訂閱）
+    private var appleHealthRow: some View {
+        let status = appleHealthStatus
+        return Button {
+            openAppleHealth()
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: "heart.text.square.fill")
+                    .font(.title3)
+                    .foregroundStyle(.pink)
+                Text("Apple 健康")
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(Color.primary)
+                    .lineLimit(1)
+                    .layoutPriority(1)
+                Spacer(minLength: 8)
+                Text(status)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                Image(systemName: "chevron.right")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(.horizontal, 14)
+            .frame(minHeight: 52)
+            .modifier(FinanceCardChrome())
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(MoneyPressStyle())
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Apple 健康，" + status)
+        .accessibilityHint("點兩下打開 Apple 健康設定")
+        .accessibilityAddTraits(.isButton)
+        .padding(.horizontal, 16)
+    }
+
+    // MARK: ⑧ 健康里程碑
+
+    private var healthMilestones: [LifeMilestone] {
+        lifeStore.milestones.filter { $0.category == .health }.sorted { $0.date > $1.date }
+    }
+
+    /// 標頭右邊綠色「＋」＋白卡：每列「[cross.fill] 年度健檢　2026/3/2・抽血正常 ›」，最下面一列「＋ 記一筆健康里程碑」
+    private var milestoneSection: some View {
+        let list = healthMilestones
+        let firstId = list.first?.id
+        return VStack(alignment: .leading, spacing: 10) {
+            FinanceCardHeader(title: "健康里程碑", addLabel: "記一筆健康里程碑", onAdd: { addMilestone() })
+            VStack(spacing: 0) {
+                ForEach(list) { m in
+                    milestoneRow(m, divider: m.id != firstId)
+                }
+                if !list.isEmpty {
+                    Divider().padding(.leading, 14)
+                }
+                addMilestoneRow
+            }
+            .modifier(FinanceCardChrome())
+        }
+        .padding(.horizontal, 16)
+    }
+
+    private func milestoneRow(_ m: LifeMilestone, divider: Bool) -> some View {
+        let title = m.title.isEmpty ? "未命名" : m.title
+        let meta = milestoneMeta(m)
+        return VStack(spacing: 0) {
+            if divider {
+                Divider().padding(.leading, 52)
+            }
+            Button {
+                editMilestone(m)
+            } label: {
+                HStack(spacing: 12) {
+                    milestoneIcon
+                    Text(title)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(Color.primary)
+                        .lineLimit(1)
+                        .layoutPriority(1)
+                    Spacer(minLength: 8)
+                    Text(meta)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                    Image(systemName: "chevron.right")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(.tertiary)
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 11)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(MoneyPressStyle())
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(title + "，" + meta)
+            .accessibilityHint("點兩下修改")
+            .accessibilityAddTraits(.isButton)
+        }
+    }
+
+    /// 醫療紅的圓＋白色十字（跟 MilestoneCategory.health 同一個圖示）
+    private var milestoneIcon: some View {
+        Image(systemName: "cross.fill")
+            .font(.system(size: 12, weight: .bold))
+            .foregroundStyle(Color.white)
+            .frame(width: 26, height: 26)
+            .background(Self.medicalRed, in: Circle())
+            .accessibilityHidden(true)
+    }
+
+    private var addMilestoneRow: some View {
+        Button {
+            addMilestone()
+        } label: {
+            Label("記一筆健康里程碑", systemImage: "plus")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(MoneyTone.good.color(pal))
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 12)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(MoneyPressStyle())
+    }
+
+    /// 「2026/3/2・抽血正常」
+    private func milestoneMeta(_ m: LifeMilestone) -> String {
+        var parts: [String] = [WorkoutFormat.date(m.date)]
+        let note = m.note.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !note.isEmpty { parts.append(note) }
+        return parts.joined(separator: "・")
+    }
+}
+
+// MARK: - ⑥ 重訓（綜效曲線＋動作統計；有重訓紀錄才出現）
+
+/// 綜效曲線的模式（照舊三段）
+private enum HealthCurveMode: String, CaseIterable, Identifiable {
+    case volume = "總訓練量"
+    case reps = "總次數"
+    case exercise = "單一動作"
+    var id: String { rawValue }
+}
+
+/// 綜效曲線的期間（照舊）
+private enum HealthCurveRange: String, CaseIterable, Identifiable {
+    case quarter = "近 3 月"
+    case halfYear = "近半年"
+    case year = "近一年"
+    case all = "全部"
+    var id: String { rawValue }
+
+    var from: Date? {
+        let cal = Calendar.current, now = Date()
+        switch self {
+        case .quarter: return cal.date(byAdding: .month, value: -3, to: now)
+        case .halfYear: return cal.date(byAdding: .month, value: -6, to: now)
+        case .year: return cal.date(byAdding: .year, value: -1, to: now)
+        case .all: return nil
+        }
+    }
+}
+
+/// 曲線上的一點（id 用序號：同一天兩個動作也不會撞）
+private struct HealthCurvePoint: Identifiable {
+    let id: Int
+    let date: Date
+    let value: Double
+    let label: String
+}
+
+/// 動作統計的一列
+private struct HealthExerciseStat: Identifiable {
+    let name: String
+    let times: Int
+    let sets: Int
+    let reps: Int
+    let volume: Double
+    let best: String
+    var id: String { name }
+}
+
+/// ⑥ 重訓：段落標頭「重訓」＋綜效曲線（MoneyChartCard 主題 65）＋白卡「動作統計」前 5 名。
+/// 原本健康頁的曲線、動作統計搬過來（自己的 @State）；綠色換重訓紫。動作統計按一列：曲線換到那個動作、畫面捲到曲線（U1 B10）。
+/// [v25.553] 只算重量訓練的動作：有氧（跑、走、騎、登山）在 ⑤ 每週公里，不再混進「重訓」這一區。
+/// 統計在 .task(id: workoutsRevision) 算一次存起來（按住曲線拖動時不重算整份統計）。
+private struct HealthStrengthSection: View {
+    @EnvironmentObject var lifeStore: LifeStore
+    @Environment(\.colorScheme) private var scheme
+
+    /// 動作統計按一列：曲線換好之後捲到曲線（健康頁的 ScrollViewReader）
+    let scrollToCurve: () -> Void
+
+    /// 有重訓動作的那幾趟（新到舊）
+    @State private var sessions: [WorkoutSession] = []
+    @State private var stats: [HealthExerciseStat] = []
+    @State private var bodyWeight: Double?
+    @State private var loaded = false
+    @State private var curveMode: HealthCurveMode = .volume
+    @State private var selectedExercise = ""
+    @State private var range: HealthCurveRange = .halfYear
+    @State private var rawSelectedDate: Date?
+    @State private var showAllStats = false
+
+    /// 曲線那張卡的 id（scrollTo 用）
+    static let curveAnchor = "health.strength.curve"
+
+    init(scrollToCurve: @escaping () -> Void) {
+        self.scrollToCurve = scrollToCurve
+    }
+
+    private var pal: TripBoardPalette { TripBoardPalette(scheme) }
+    /// 重訓紫（取代原本手寫的綠 Color(0.20, 0.78, 0.45)）
+    private var liftColor: Color { WorkoutPalette.sport(.strength, dark: scheme == .dark) }
+
+    var body: some View {
+        let points = curvePoints
+        return VStack(alignment: .leading, spacing: 10) {
+            MoneySectionHeader(title: "重訓")
+                .padding(.horizontal, 16)
+            // MoneyChartCard 自帶 .padding(.horizontal)
+            MoneyChartCard(theme: .workoutStrength, title: "綜效曲線",
+                           trailing: loaded ? "\(points.count) 筆" : nil,
+                           content: AnyView(curveContent(points)))
+                .id(Self.curveAnchor)
+            if !stats.isEmpty {
+                statsCard
+                    .padding(.horizontal, 16)
+            }
+        }
+        .task(id: lifeStore.workoutsRevision) { rebuild() }
+    }
+
+    // MARK: 資料
+
+    private func rebuild() {
+        let bw = lifeStore.latestBodyWeightKg
+        let all = lifeStore.workoutsByDateDesc.filter { !$0.strengthExercises.isEmpty }
+        let made = Self.makeStats(all, bodyWeight: bw)
+        sessions = all
+        bodyWeight = bw
+        stats = made
+        // 單一動作：沒選過、或選的那個動作已經沒有了 → 次數最多的那一個
+        if selectedExercise.isEmpty || !made.contains(where: { $0.name == selectedExercise }) {
+            selectedExercise = made.first?.name ?? ""
+        }
+        loaded = true
+    }
+
+    /// 動作統計、單一動作用的名字：只算重量訓練、照動作名稱；沒名字的不列
+    private static func statName(_ e: WorkoutExercise) -> String? {
+        guard e.kind == .strength else { return nil }
+        let n = e.name.trimmingCharacters(in: .whitespaces)
+        return n.isEmpty ? nil : n
+    }
+
+    private static func makeStats(_ sessions: [WorkoutSession], bodyWeight: Double?) -> [HealthExerciseStat] {
+        var grouped: [String: [WorkoutExercise]] = [:]
+        for s in sessions {
+            for e in s.exercises {
+                if let n = statName(e) { grouped[n, default: []].append(e) }
+            }
+        }
+        var list: [HealthExerciseStat] = []
+        for (name, items) in grouped {
+            let vol = items.compactMap { $0.volume(bodyWeightKg: bodyWeight) }.reduce(0, +)
+            let bestLoad = items.compactMap { $0.loadType == .weight ? $0.loadKg : nil }.max()
+            let bestReps = items.map { $0.reps }.max() ?? 0
+            var best = ""
+            if let bl = bestLoad, bl > 0 {
+                best = "最重 " + WorkoutExercise.kgText(bl)
+            } else if bestReps > 0 {
+                best = "單組最多 \(bestReps) 下"
+            }
+            let sets = items.reduce(0) { $0 + max(0, $1.sets) }
+            let reps = items.reduce(0) { $0 + $1.totalReps }
+            list.append(HealthExerciseStat(name: name, times: items.count, sets: sets, reps: reps,
+                                           volume: vol, best: best))
+        }
+        return list.sorted { a, b in
+            if a.times != b.times { return a.times > b.times }
+            return a.name < b.name
+        }
+    }
+
+    private var inRange: [WorkoutSession] {
+        guard let from = range.from else { return sessions }
+        return sessions.filter { $0.date >= from }
+    }
+
+    private var curvePoints: [HealthCurvePoint] {
+        let asc = inRange.sorted { $0.date < $1.date }
+        let bw = bodyWeight
+        var out: [HealthCurvePoint] = []
+        switch curveMode {
+        case .volume:
+            for s in asc {
+                if let v = s.totalVolume(bodyWeightKg: bw), v > 0 {
+                    out.append(HealthCurvePoint(id: out.count, date: s.date, value: v, label: WorkoutFacts.title(s)))
+                }
+            }
+        case .reps:
+            for s in asc where s.totalReps > 0 {
+                out.append(HealthCurvePoint(id: out.count, date: s.date, value: Double(s.totalReps),
+                                            label: WorkoutFacts.title(s)))
+            }
+        case .exercise:
+            guard !selectedExercise.isEmpty else { return [] }
+            for s in asc {
+                for e in s.exercises where Self.statName(e) == selectedExercise {
+                    if let v = e.volume(bodyWeightKg: bw), v > 0 {
+                        out.append(HealthCurvePoint(id: out.count, date: s.date, value: v,
+                                                    label: e.summary(bodyWeightKg: bw)))
+                    } else if e.totalReps > 0 {
+                        out.append(HealthCurvePoint(id: out.count, date: s.date, value: Double(e.totalReps),
+                                                    label: e.summary(bodyWeightKg: bw)))
+                    }
+                }
+            }
+        }
+        return out
+    }
+
+    /// 最近一次叫這個名字的動作（sessions 是新到舊）
+    private func latestExercise(named name: String) -> WorkoutExercise? {
+        guard !name.isEmpty else { return nil }
+        for s in sessions {
+            if let e = s.exercises.first(where: { Self.statName($0) == name }) { return e }
+        }
+        return nil
+    }
+
+    private var curveUnit: String {
+        switch curveMode {
+        case .volume: return "公斤"
+        case .reps: return "下"
+        case .exercise:
+            guard let e = latestExercise(named: selectedExercise) else { return "" }
+            return e.volume(bodyWeightKg: bodyWeight) != nil ? "公斤" : "下"
+        }
+    }
+
+    private func selectedPoint(_ points: [HealthCurvePoint]) -> HealthCurvePoint? {
+        guard let raw = rawSelectedDate else { return nil }
+        return points.min { a, b in
+            abs(a.date.timeIntervalSince(raw)) < abs(b.date.timeIntervalSince(raw))
+        }
+    }
+
+    // MARK: 綜效曲線
+
+    private func curveContent(_ points: [HealthCurvePoint]) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Picker("模式", selection: $curveMode) {
+                ForEach(HealthCurveMode.allCases) { m in
+                    Text(m.rawValue).tag(m)
+                }
+            }
+            .pickerStyle(.segmented)
+            if curveMode == .exercise {
+                exerciseChips
+            }
+            rangeChips
+            curveArea(points)
+        }
+        .padding(.horizontal, 16)
+    }
+
+    private var exerciseChips: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                ForEach(stats) { st in
+                    FinanceFilterChip(text: st.name, on: selectedExercise == st.name, pal: pal) {
+                        animate { selectedExercise = st.name }
+                    }
+                }
+            }
+            .padding(.vertical, 1)
+        }
+    }
+
+    private var rangeChips: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                ForEach(HealthCurveRange.allCases) { r in
+                    FinanceFilterChip(text: r.rawValue, on: range == r, pal: pal) {
+                        animate { range = r }
+                    }
+                }
+            }
+            .padding(.vertical, 1)
+        }
+    }
+
+    private func animate(_ change: () -> Void) {
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) { change() }
+    }
+
+    @ViewBuilder
+    private func curveArea(_ points: [HealthCurvePoint]) -> some View {
+        if !loaded {
+            Color.clear.frame(height: 210)
+        } else if points.count >= 2 {
+            chartBody(points)
+                .frame(height: 210)
+            Text(curveNote)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        } else {
+            Text(emptyCurveText)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .center)
+                .padding(.vertical, 30)
+        }
+    }
+
+    private var emptyCurveText: String {
+        if curveMode == .exercise && selectedExercise.isEmpty { return "選一個動作看它的進步曲線" }
+        return "這個條件下不足兩筆，換個期間或模式試試"
+    }
+
+    private var curveNote: String {
+        switch curveMode {
+        case .volume:
+            if bodyWeight == nil {
+                return "訓練量＝總次數 × 負荷。目前健康檔案還沒有體重紀錄，「自身體重」的動作不計入總量——到醫療地圖補一筆體重就會納入。"
+            }
+            return "訓練量＝總次數 × 負荷；自身體重的動作以健康檔案最近體重 \(WorkoutExercise.kgText(bodyWeight ?? 0)) 計算。"
+        case .reps:
+            return "只算重量訓練的總次數（每組次數 × 組數），不受負荷影響。"
+        case .exercise:
+            return "同一個動作的每次表現：有負荷算訓練量、其餘算總次數。"
+        }
+    }
+
+    private func chartBody(_ points: [HealthCurvePoint]) -> some View {
+        let color = liftColor
+        let unit = curveUnit
+        let sel = selectedPoint(points)
+        return Chart {
+            ForEach(points) { p in
+                AreaMark(x: .value("日期", p.date, unit: .day), y: .value(unit, p.value))
+                    .foregroundStyle(LinearGradient(colors: [color.opacity(0.20), color.opacity(0.02)],
+                                                    startPoint: .top, endPoint: .bottom))
+                    .interpolationMethod(.catmullRom)
+                LineMark(x: .value("日期", p.date, unit: .day), y: .value(unit, p.value))
+                    .foregroundStyle(color)
+                    .interpolationMethod(.catmullRom)
+                    .lineStyle(StrokeStyle(lineWidth: 2.2, lineCap: .round))
+                PointMark(x: .value("日期", p.date, unit: .day), y: .value(unit, p.value))
+                    .foregroundStyle(color)
+                    .symbolSize(26)
+            }
+            if let s = sel {
+                RuleMark(x: .value("選取", s.date, unit: .day))
+                    .foregroundStyle(color.opacity(0.35))
+                    .lineStyle(StrokeStyle(lineWidth: 1, dash: [3, 3]))
+                    .annotation(position: .top,
+                                overflowResolution: .init(x: .fit(to: .chart), y: .disabled)) {
+                        selectionCard(s)
+                    }
+                PointMark(x: .value("選取", s.date, unit: .day), y: .value(unit, s.value))
+                    .foregroundStyle(color)
+                    .symbolSize(80)
+            }
+        }
+        .chartXSelection(value: $rawSelectedDate)
+        .chartYAxis {
+            AxisMarks { value in
+                AxisGridLine()
+                AxisValueLabel {
+                    if let v = value.as(Double.self) { Text(axisText(v)) }
+                }
+            }
+        }
+    }
+
+    private func selectionCard(_ p: HealthCurvePoint) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(WorkoutFormat.date(p.date))
+                .font(.caption2.weight(.bold))
+            Text(axisText(p.value) + " " + curveUnit)
+                .font(.caption.weight(.bold))
+                .foregroundStyle(liftColor)
+            Text(p.label)
+                .font(.system(size: 10))
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+        }
+        .padding(.horizontal, 9)
+        .padding(.vertical, 6)
+        .background(Color(.systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(liftColor.opacity(0.25), lineWidth: 0.75))
+        .shadow(color: .black.opacity(0.10), radius: 5, y: 2)
+        .frame(maxWidth: 180)
+    }
+
+    // MARK: 動作統計
+
+    /// 白卡：小標「動作統計」、前 5 名（多的「看全部 12 個動作 ›」展開）
+    private var statsCard: some View {
+        let shown = showAllStats ? stats : Array(stats.prefix(5))
+        return VStack(spacing: 0) {
+            statsTitle
+            ForEach(shown) { st in
+                Divider().padding(.leading, 14)
+                statRow(st)
+            }
+            if stats.count > 5 {
+                Divider().padding(.leading, 14)
+                moreStatsButton
+            }
+        }
+        .modifier(FinanceCardChrome())
+    }
+
+    private var statsTitle: some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text("動作統計")
+                .font(.subheadline.weight(.bold))
+                .foregroundStyle(Color.primary)
+            Spacer(minLength: 8)
+            Text("\(stats.count) 個動作")
+                .font(.system(.caption, design: .rounded).weight(.bold))
+                .monospacedDigit()
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 11)
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isHeader)
+    }
+
+    private func statRow(_ st: HealthExerciseStat) -> some View {
+        let meta = statMeta(st)
+        return Button {
+            pick(st.name)
+        } label: {
+            HStack(spacing: 12) {
+                timesBadge(st.times)
+                VStack(alignment: .leading, spacing: 2) {
+                    MarqueeText(st.name)
+                        .font(.subheadline.weight(.bold))
+                    if !meta.isEmpty {
+                        Text(meta)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                }
+                Spacer(minLength: 8)
+                if st.volume > 0 {
+                    Text(Self.volumeText(st.volume))
+                        .font(.system(.subheadline, design: .rounded).weight(.bold))
+                        .monospacedDigit()
+                        .foregroundStyle(liftColor)
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(MoneyPressStyle())
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(statSpoken(st, meta: meta))
+        .accessibilityHint("點兩下看這個動作的曲線")
+        .accessibilityAddTraits(.isButton)
+    }
+
+    private func timesBadge(_ times: Int) -> some View {
+        Text("\(times)")
+            .font(.system(size: 13, weight: .black, design: .rounded))
+            .monospacedDigit()
+            .foregroundStyle(liftColor)
+            .frame(width: 34, height: 34)
+            .background(liftColor.opacity(0.14), in: Circle())
+            .accessibilityHidden(true)
+    }
+
+    private var moreStatsText: String {
+        showAllStats ? "收起" : "看全部 \(stats.count) 個動作 ›"
+    }
+
+    private var moreStatsButton: some View {
+        Button {
+            animate { showAllStats.toggle() }
+        } label: {
+            Text(moreStatsText)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(pal.hint)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 12)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// 按一列：曲線換到那個動作，再把畫面捲到曲線
+    private func pick(_ name: String) {
+        animate {
+            curveMode = .exercise
+            selectedExercise = name
+        }
+        scrollToCurve()
+    }
+
+    // 副標都先在一般函式裡組好字串再交給 Text（ViewBuilder 內串字串容易讓型別檢查逾時，v25.350）
+    private func statMeta(_ st: HealthExerciseStat) -> String {
+        var parts: [String] = []
+        if st.sets > 0 { parts.append("\(st.sets) 組") }
+        if st.reps > 0 { parts.append("\(st.reps) 下") }
+        if !st.best.isEmpty { parts.append(st.best) }
+        return parts.joined(separator: "・")
+    }
+
+    private func statSpoken(_ st: HealthExerciseStat, meta: String) -> String {
+        var parts: [String] = [st.name, "\(st.times) 次"]
+        if !meta.isEmpty { parts.append(meta.replacingOccurrences(of: "・", with: "，")) }
+        if st.volume > 0 { parts.append("訓練量 " + Self.volumeText(st.volume)) }
+        return parts.joined(separator: "，")
+    }
+
+    private static func volumeText(_ v: Double) -> String {
+        if v >= 10000 { return String(format: "%.1f 噸", v / 1000) }
+        return String(format: "%.0f kg", v)
+    }
+
+    private func axisText(_ v: Double) -> String {
+        if curveUnit == "公斤" && v >= 10000 { return String(format: "%.1f 噸", v / 1000) }
+        return v == v.rounded() ? String(format: "%.0f", v) : String(format: "%.1f", v)
+    }
+}
+
+// MARK: - ⑦ Apple 健康設定小頁
+
+/// 健康頁「Apple 健康」那一列打開的小頁：原本健康頁上那張卡的內容（開關、說明、立即同步）＋同步原封搬過來。
+/// 開關、同步都不擋訂閱。
+private struct HealthAppleHealthSheet: View {
+    @EnvironmentObject var lifeStore: LifeStore
+    @Environment(\.dismiss) private var dismiss
+    @ObservedObject private var health = HealthKitManager.shared
+    /// 上次同步時間，決定要往回抓多久（第一次抓 90 天）
+    @AppStorage("health_hk_last_sync") private var lastSyncEpoch: Double = 0
+    @AppStorage("health_hk_enabled") private var hkEnabled = false
+    @State private var syncing = false
+    @State private var syncMessage: String?
+
+    init() {}
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                switchSection
+                if health.isAvailable && hkEnabled {
+                    syncSection
+                }
+            }
+            .navigationTitle("Apple 健康")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("完成") { dismiss() }
+                }
+            }
+        }
+    }
+
+    private var hkBinding: Binding<Bool> {
+        Binding(get: { hkEnabled },
+                set: { on in
+                    hkEnabled = on
+                    if on { Task { await health.requestAuthorization(); await syncFromHealthKit() } }
+                })
+    }
+
+    private var footerText: String {
+        if !health.isAvailable { return "這台裝置不支援「健康」App。" }
+        if hkEnabled {
+            return "體重、血壓、心率與訓練會與 Apple 健康互通。HealthKit 沒有「組數／次數／負荷」的欄位，所以重訓明細只留在這個 App，寫回去的只有時間、距離與熱量。"
+        }
+        return "打開後可以把 Apple 健康的體重、血壓與 Apple Watch 的訓練帶進來，這裡記的訓練也會寫回去計入體能訓練圓環。"
+    }
+
+    private var switchSection: some View {
+        Section {
+            if health.isAvailable {
+                Toggle(isOn: hkBinding) {
+                    Label("與 Apple 健康互通", systemImage: "heart.text.square.fill")
+                }
+                .tint(WorkoutPalette.go)
+            } else {
+                Label("這台裝置不支援", systemImage: "heart.slash")
+                    .foregroundStyle(.secondary)
+            }
+        } footer: {
+            Text(footerText)
+        }
+    }
+
+    private var lastSyncText: String {
+        HealthPageData.whenText(Date(timeIntervalSince1970: lastSyncEpoch), now: Date())
+    }
+
+    private var syncSection: some View {
+        Section {
+            Button {
+                Task { await syncFromHealthKit() }
+            } label: {
+                Label(syncing ? "同步中…" : "立即同步", systemImage: "arrow.triangle.2.circlepath")
+            }
+            .disabled(syncing)
+            if lastSyncEpoch > 0 {
+                LabeledContent("上次同步", value: lastSyncText)
+            }
+            if let msg = syncMessage {
+                Text(msg)
+                    .font(.footnote)
+                    .foregroundStyle(WorkoutPalette.go)
+            }
+            if let err = health.lastError {
+                Text(err)
+                    .font(.footnote)
+                    .foregroundStyle(.red)
+            }
+        }
+    }
+
+    /// 從 Apple 健康抓體重、血壓與訓練回來（原本在健康頁，原封搬過來；v4 再改同步起點與自動同步）
     private func syncFromHealthKit() async {
         guard hkEnabled, health.isAvailable, !syncing else { return }
         syncing = true
@@ -627,608 +1540,4 @@ struct HealthView: View {
         if workouts > 0 { parts.append("訓練 \(workouts) 筆") }
         return parts.isEmpty ? "已是最新，沒有新資料" : "已帶入 " + parts.joined(separator: "、")
     }
-
-    // [v25.552] 寫回 Apple 健康搬到共用的 WorkoutHealthWriter.push（RunRecovery.swift）：
-    // 救回中途存檔也要寫；寫好的編號存回「最新的那一筆」（等待中被編輯過不會蓋回舊的）。
-
-    // MARK: 複製訓練
-
-    /// [v25.388] 把一筆訓練原封不動複製一份到現在，省得同一套菜單每次重打。
-    ///
-    /// 帶過去的是「訓練內容」：標題、每個動作（名稱／類型／次數／組數／負荷／距離／時間／
-    /// 備註）、整場時間、場地、備註。
-    ///
-    /// ⚠️ 刻意**不**帶的是「那一次實際量到的東西」——把它們複製過來等於憑空捏造一筆
-    ///    根本沒發生過的數據：
-    ///    • healthKitUUID：那是 Apple 健康的去重鍵。複製過去等於宣稱這兩筆是同一場訓練，
-    ///      下次同步的 known 集合會把新的這筆誤判成已匯入，而且寫回去也會打架。
-    ///    • route / elevationGainM：GPS 路徑是那天真的跑過的那條路，套到今天是假的。
-    ///    • activeEnergyKcal：量出來的熱量，不是你打算做的事。
-    ///    這幾個欄位都留給 WorkoutSession／WorkoutExercise 的預設值（nil／空陣列／0）。
-    ///
-    /// 每個動作也都會拿到新的 id——沿用舊 id 的話同一個 id 會同時存在於兩筆紀錄裡，
-    /// ForEach 與各種以 id 比對的地方都會開始出怪事。
-    ///
-    /// [v25.552] 運動種類（sport）是「內容」，一起帶；每公里分段、路線、爬升、量到的大卡、暫停仍不帶。
-    /// 複製出來的算手動補記（source = .manual），大卡照新的距離時間用 MET 表估好存回（約 xx 大卡）。
-    private func duplicate(_ s: WorkoutSession) {
-        var copy = WorkoutSession(
-            date: Date(),
-            title: s.title,
-            exercises: s.exercises.map { e in
-                WorkoutExercise(name: e.name, kind: e.kind,
-                                reps: e.reps, sets: e.sets,
-                                loadType: e.loadType, loadKg: e.loadKg,
-                                distanceKm: e.distanceKm,
-                                durationMinutes: e.durationMinutes,
-                                note: e.note,
-                                sport: e.sport)
-            },
-            durationMinutes: s.durationMinutes,
-            place: s.place,
-            note: s.note
-        )
-        copy.source = .manual
-        WorkoutFacts.applyKcalEstimate(&copy, bodyWeightKg: bodyWeight)
-        let saved = copy
-        let store = lifeStore
-        store.upsertWorkout(saved)
-        UIImpactFeedbackGenerator(style: .light).impactOccurred()
-        // 與編輯畫面存檔同一條路：使用者若開著 Apple 健康同步，新的一筆一樣寫回去
-        Task { await WorkoutHealthWriter.push(saved, store: store) }
-
-        copiedNoteTask?.cancel()
-        let label = sessionTitle(saved)
-        withAnimation(.easeOut(duration: 0.2)) {
-            copiedNote = "已複製「\(label)」到現在，新的一筆排在清單最上面。"
-        }
-        copiedNoteTask = Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 3_000_000_000)
-            guard !Task.isCancelled else { return }
-            withAnimation(.easeOut(duration: 0.25)) { copiedNote = nil }
-        }
-    }
-
-    // MARK: 綜效曲線
-
-    private var curveSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            sectionHeader("綜效曲線", count: curvePoints.count)
-            Picker("模式", selection: $curveMode) {
-                ForEach(CurveMode.allCases) { m in Text(m.rawValue).tag(m) }
-            }
-            .pickerStyle(.segmented)
-
-            if curveMode == .exercise {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 6) {
-                        ForEach(exerciseNames, id: \.self) { n in
-                            chip(n, isSelected: selectedExercise == n) { selectedExercise = n }
-                        }
-                    }
-                    .padding(.vertical, 1)
-                }
-            }
-
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 6) {
-                    ForEach(HealthRange.allCases) { r in
-                        chip(r.rawValue, isSelected: range == r) { range = r }
-                    }
-                }
-                .padding(.vertical, 1)
-            }
-
-            if curvePoints.count >= 2 {
-                chartBody
-                    .frame(height: 210)
-                Text(curveNote)
-                    .font(.caption2).foregroundStyle(.secondary)
-            } else {
-                Text(curveMode == .exercise && selectedExercise.isEmpty
-                     ? "選一個動作看它的進步曲線"
-                     : "這個條件下不足兩筆，換個期間或模式試試")
-                    .font(.caption).foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .center)
-                    .padding(.vertical, 30)
-            }
-        }
-        .padding(14)
-        .background(Color(.secondarySystemGroupedBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 16))
-        .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color(.separator).opacity(0.12), lineWidth: 0.75))
-        .onAppear { if selectedExercise.isEmpty { selectedExercise = exerciseNames.first ?? "" } }
-    }
-
-    private var curveNote: String {
-        switch curveMode {
-        case .volume:
-            if bodyWeight == nil {
-                return "訓練量＝總次數 × 負荷。目前健康檔案還沒有體重紀錄，「自身體重」的動作不計入總量——到醫療地圖補一筆體重就會納入。"
-            }
-            return "訓練量＝總次數 × 負荷；自身體重的動作以健康檔案最近體重 \(WorkoutExercise.kgText(bodyWeight ?? 0)) 計算。"
-        case .reps:
-            return "只算重量訓練的總次數（每組次數 × 組數），不受負荷影響。"
-        case .exercise:
-            return "同一個動作的每次表現：有負荷算訓練量、有氧算距離、其餘算總次數。"
-        }
-    }
-
-    private var chartBody: some View {
-        Chart {
-            ForEach(curvePoints) { p in
-                AreaMark(x: .value("日期", p.date, unit: .day), y: .value(curveUnit, p.value))
-                    .foregroundStyle(LinearGradient(colors: [accent.opacity(0.20), accent.opacity(0.02)],
-                                                    startPoint: .top, endPoint: .bottom))
-                    .interpolationMethod(.catmullRom)
-                LineMark(x: .value("日期", p.date, unit: .day), y: .value(curveUnit, p.value))
-                    .foregroundStyle(accent)
-                    .interpolationMethod(.catmullRom)
-                    .lineStyle(StrokeStyle(lineWidth: 2.2, lineCap: .round))
-                PointMark(x: .value("日期", p.date, unit: .day), y: .value(curveUnit, p.value))
-                    .foregroundStyle(accent)
-                    .symbolSize(26)
-            }
-            if let sel = selectedPoint {
-                RuleMark(x: .value("選取", sel.date, unit: .day))
-                    .foregroundStyle(accent.opacity(0.35))
-                    .lineStyle(StrokeStyle(lineWidth: 1, dash: [3, 3]))
-                    .annotation(position: .top,
-                                overflowResolution: .init(x: .fit(to: .chart), y: .disabled)) {
-                        selectionCard(sel)
-                    }
-                PointMark(x: .value("選取", sel.date, unit: .day), y: .value(curveUnit, sel.value))
-                    .foregroundStyle(accent)
-                    .symbolSize(80)
-            }
-        }
-        .chartXSelection(value: $rawSelectedDate)
-        .chartYAxis {
-            AxisMarks { value in
-                AxisGridLine()
-                AxisValueLabel {
-                    if let v = value.as(Double.self) { Text(axisText(v)) }
-                }
-            }
-        }
-    }
-
-    private func selectionCard(_ p: CurvePoint) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(Self.shortDate.string(from: p.date)).font(.caption2.weight(.bold))
-            Text(axisText(p.value) + " " + curveUnit)
-                .font(.caption.weight(.bold)).foregroundStyle(accent)
-            Text(p.label).font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(2)
-        }
-        .padding(.horizontal, 9).padding(.vertical, 6)
-        .background(Color(.systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 10))
-        .overlay(RoundedRectangle(cornerRadius: 10).stroke(accent.opacity(0.25), lineWidth: 0.75))
-        .shadow(color: .black.opacity(0.10), radius: 5, y: 2)
-        .frame(maxWidth: 180)
-    }
-
-    // MARK: 動作排行
-
-    private struct ExerciseStat: Identifiable {
-        let name: String
-        let times: Int
-        let sets: Int
-        let reps: Int
-        let volume: Double
-        let best: String
-        var id: String { name }
-    }
-
-    /// [v25.552] 用 statName 分組：有氧照運動種類（手錶的「走路」和 App 的「健走」同一列），重訓照動作名稱。
-    /// 組數、次數只算重量訓練型態的（舊資料裡從重訓切成有氧、留著次數組數的不再被算進來）
-    private var exerciseStats: [ExerciseStat] {
-        var grouped: [String: [WorkoutExercise]] = [:]
-        for s in sessions {
-            for e in s.exercises {
-                let n = statName(e)
-                if !n.isEmpty { grouped[n, default: []].append(e) }
-            }
-        }
-        return grouped.map { name, items in
-            let strength = items.filter { $0.kind == .strength }
-            let vol = items.compactMap { $0.volume(bodyWeightKg: bodyWeight) }.reduce(0, +)
-            let bestLoad = strength.compactMap { $0.loadType == .weight ? $0.loadKg : nil }.max()
-            let bestReps = strength.map(\.reps).max() ?? 0
-            let bestDist = items.map(\.distanceKm).max() ?? 0
-            var best = ""
-            if let bl = bestLoad, bl > 0 { best = "最重 " + WorkoutExercise.kgText(bl) }
-            else if bestDist > 0 { best = "最長 " + WorkoutFormat.km(bestDist) }
-            else if bestReps > 0 { best = "單組最多 \(bestReps) 下" }
-            return ExerciseStat(name: name, times: items.count,
-                                sets: strength.reduce(0) { $0 + max(0, $1.sets) },
-                                reps: strength.reduce(0) { $0 + $1.totalReps },
-                                volume: vol, best: best)
-        }
-        .sorted { a, b in
-            if a.times != b.times { return a.times > b.times }
-            return a.name < b.name
-        }
-    }
-
-    private var exerciseRanking: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            sectionHeader("動作統計", count: exerciseStats.count)
-            ForEach(exerciseStats) { st in
-                Button {
-                    curveMode = .exercise
-                    selectedExercise = st.name
-                } label: {
-                    HStack(spacing: 10) {
-                        ZStack {
-                            Circle()
-                                .fill(LinearGradient(colors: [accent.opacity(0.22), accent.opacity(0.08)],
-                                                     startPoint: .topLeading, endPoint: .bottomTrailing))
-                                .frame(width: 34, height: 34)
-                                .overlay(Circle().stroke(accent.opacity(0.20), lineWidth: 0.75))
-                            Text("\(st.times)")
-                                .font(.system(size: 13, weight: .black, design: .rounded))
-                                .foregroundStyle(accent)
-                        }
-                        VStack(alignment: .leading, spacing: 2) {
-                            // [v25.520] 動作名稱過長改一行跑馬燈（原本會折成多行）
-                            MarqueeText(st.name).font(.subheadline.weight(.bold))
-                            Text(statMeta(st))
-                                .font(.caption2).foregroundStyle(.secondary)
-                        }
-                        Spacer()
-                        if st.volume > 0 {
-                            Text(volumeText(st.volume))
-                                .font(.system(size: 13, weight: .bold, design: .rounded))
-                                .foregroundStyle(accent)
-                        }
-                    }
-                    .contentShape(Rectangle())
-                    .padding(.vertical, 5)
-                }
-                .buttonStyle(.plain)
-            }
-        }
-        .padding(14)
-        .background(Color(.secondarySystemGroupedBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 16))
-        .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color(.separator).opacity(0.12), lineWidth: 0.75))
-    }
-
-    // MARK: 訓練紀錄
-
-    private var sessionSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            sectionHeader("訓練紀錄", count: sessions.count)
-            if let note = copiedNote {
-                HStack(spacing: 6) {
-                    Image(systemName: "checkmark.circle.fill")
-                        .font(.system(size: 12)).foregroundStyle(accent)
-                    Text(note)
-                        .font(.caption2.weight(.medium)).foregroundStyle(accent)
-                        .fixedSize(horizontal: false, vertical: true)
-                    Spacer(minLength: 0)
-                }
-                .padding(.horizontal, 9).padding(.vertical, 6)
-                .background(accent.opacity(0.10))
-                .clipShape(RoundedRectangle(cornerRadius: 9))
-                .transition(.opacity)
-            }
-            if sessions.isEmpty {
-                emptyState
-            } else {
-                ForEach(sessions) { s in
-                    sessionRow(s)
-                }
-            }
-        }
-        .padding(14)
-        .background(Color(.secondarySystemGroupedBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 16))
-        .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color(.separator).opacity(0.12), lineWidth: 0.75))
-        // [v25.552] 刪除先問（以前一按就刪、沒有復原）。v2 只刪 LifeGood 這一筆；連 Apple 健康一起刪是 v4
-        .alert(deleteTitle, isPresented: deleteBinding, presenting: deleteTarget) { s in
-            Button("刪除", role: .destructive) { deleteNow(s) }
-            Button("取消", role: .cancel) { }
-        } message: { s in
-            Text(deleteMessage(s))
-        }
-    }
-
-    // MARK: 刪除確認（[v25.552]）
-
-    /// 「刪除 10/15 跑步 5.2 公里？」
-    private var deleteTitle: String {
-        guard let s = deleteTarget else { return "" }
-        return "刪除 " + WorkoutFormat.monthDay(s.date) + " " + sessionTitle(s) + distancePart(s) + "？"
-    }
-
-    /// 「 5.2 公里」；沒有距離是空的
-    private func distancePart(_ s: WorkoutSession) -> String {
-        let km = s.totalDistanceKm
-        return km > 0 ? " " + WorkoutFormat.km(km) : ""
-    }
-
-    private func deleteMessage(_ s: WorkoutSession) -> String {
-        s.healthKitUUID != nil
-            ? "只刪 LifeGood 這一筆；Apple 健康裡的那一筆不會刪。"
-            : "刪掉就找不回來了。"
-    }
-
-    private var deleteBinding: Binding<Bool> {
-        Binding(get: { deleteTarget != nil }, set: { if !$0 { deleteTarget = nil } })
-    }
-
-    /// 提示框關掉那一次畫面更新先過，下一輪主執行緒才寫 store
-    private func deleteNow(_ s: WorkoutSession) {
-        let store = lifeStore
-        let id = s.id
-        DispatchQueue.main.async { store.deleteWorkout(id: id) }
-    }
-
-    private func sessionRow(_ s: WorkoutSession) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 10) {
-                VStack(spacing: 1) {
-                    Text(Self.dayOnly.string(from: s.date))
-                        .font(.system(size: 15, weight: .black, design: .rounded))
-                    Text(Self.monthOnly.string(from: s.date))
-                        .font(.system(size: 9, weight: .bold)).foregroundStyle(.secondary)
-                }
-                .frame(width: 38)
-                VStack(alignment: .leading, spacing: 2) {
-                    // [v25.520] 訓練名稱過長改一行跑馬燈（原本會折成多行）
-                    MarqueeText(sessionTitle(s)).font(.subheadline.weight(.bold))
-                    let meta = sessionMeta(s)
-                    if !meta.isEmpty {
-                        Text(meta)
-                            .font(.caption2).foregroundStyle(.secondary)
-                    }
-                }
-                Spacer()
-                if let v = s.totalVolume(bodyWeightKg: bodyWeight), v > 0 {
-                    Text(volumeText(v))
-                        .font(.system(size: 13, weight: .bold, design: .rounded))
-                        .foregroundStyle(accent)
-                }
-                Menu {
-                    Button("編輯") { editorRequest = WorkoutEditorRequest(session: s) }
-                    Button("複製到現在") { duplicate(s) }
-                    Divider()
-                    Button("刪除", role: .destructive) { deleteTarget = s }   // [v25.552] 先問
-                } label: {
-                    Image(systemName: "ellipsis.circle")
-                        .font(.system(size: 15)).foregroundStyle(.secondary)
-                }
-            }
-            ForEach(s.exercises) { e in
-                HStack(spacing: 7) {
-                    // [v25.552] 圖示照運動種類（健走是走路的人、騎車是單車、登山是登山的人）
-                    Image(systemName: e.resolvedSport.icon)
-                        .font(.system(size: 10, weight: .bold))
-                        .foregroundStyle(e.kind == .strength ? accent : Color.blue)
-                        .frame(width: 15)
-                    // [v25.520] 動作名稱過長改一行跑馬燈（原本會折成多行）
-                    MarqueeText(exerciseLabel(e))
-                        .font(.caption.weight(.semibold))
-                    Text(e.summary(bodyWeightKg: bodyWeight))
-                        .font(.caption2).foregroundStyle(.secondary)
-                        .lineLimit(1).minimumScaleFactor(0.75)
-                    Spacer()
-                }
-                .padding(.leading, 46)
-            }
-            if !s.note.isEmpty {
-                Text(s.note).font(.caption2).foregroundStyle(.secondary).padding(.leading, 46)
-            }
-            if let ex = s.firstRouteExercise {
-                RouteMapView(route: ex.route, accent: accent)
-                    .padding(.leading, 46)
-                HStack(spacing: 8) {
-                    ForEach(routeChips(s, ex)) { c in
-                        routeChip(c.text, c.icon)
-                    }
-                    Spacer()
-                }
-                .padding(.leading, 46)
-            } else if s.isLegacyRouteMissing {
-                Text("這一趟是舊版記錄的，路線沒有存到；距離和時間大致是對的。")
-                    .font(.caption2).foregroundStyle(.secondary)
-                    .padding(.leading, 46)
-            }
-            if s.healthKitUUID != nil {
-                HStack(spacing: 4) {
-                    Image(systemName: "heart.text.square.fill").font(.system(size: 9))
-                    Text("已與 Apple 健康同步").font(.system(size: 10, weight: .semibold))
-                }
-                .foregroundStyle(.pink.opacity(0.85))
-                .padding(.leading, 46)
-            }
-            Divider()
-        }
-    }
-
-    // MARK: 健康里程碑
-
-    private var milestoneSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            sectionHeader("健康里程碑", count: healthMilestones.count)
-            ForEach(healthMilestones) { m in
-                HStack(spacing: 10) {
-                    ZStack {
-                        Circle().fill(Color.pink.opacity(0.14)).frame(width: 30, height: 30)
-                        Image(systemName: "heart.fill").font(.system(size: 12)).foregroundStyle(.pink)
-                    }
-                    VStack(alignment: .leading, spacing: 2) {
-                        // [v25.520] 里程碑標題過長改一行跑馬燈（原本會折成多行）
-                        MarqueeText(m.title.isEmpty ? "未命名" : m.title).font(.subheadline.weight(.semibold))
-                        Text(milestoneMeta(m))
-                            .font(.caption2).foregroundStyle(.secondary).lineLimit(2)
-                    }
-                    Spacer()
-                }
-                .padding(.vertical, 3)
-            }
-        }
-        .padding(14)
-        .background(Color(.secondarySystemGroupedBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 16))
-        .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color(.separator).opacity(0.12), lineWidth: 0.75))
-    }
-
-    // MARK: 小元件
-
-    /// [v25.552] 有路線那一趟的膠囊（一套寫法）：「5.2 公里」、「配速 6'11"」（騎車「時速 21.5」）、
-    /// 「爬升 18 m」（只有 App 記、有路線的才知道；不到 10 公尺不顯示）、「402 大卡」／「約 340 大卡」
-    private func routeChips(_ s: WorkoutSession, _ ex: WorkoutExercise) -> [ChipItem] {
-        let sport = ex.resolvedSport
-        var out: [ChipItem] = [ChipItem(text: WorkoutFormat.km(ex.distanceKm), icon: sport.icon)]
-        if sport == .bike {
-            if let v = WorkoutFormat.speedKmh(km: ex.distanceKm, minutes: ex.durationMinutes) {
-                out.append(ChipItem(text: "時速 " + WorkoutFormat.speedNumber(v), icon: "speedometer"))
-            }
-        } else if let p = ex.paceMinPerKm {
-            out.append(ChipItem(text: "配速 " + WorkoutFormat.pace(p), icon: "speedometer"))
-        }
-        if let c = WorkoutFacts.climb(ex, in: s), c >= 10 {
-            out.append(ChipItem(text: "爬升 " + WorkoutFormat.climb(c), icon: "mountain.2.fill"))
-        }
-        if let k = WorkoutFacts.kcal(s, bodyWeightKg: bodyWeight) {
-            out.append(ChipItem(text: WorkoutFormat.kcal(k.kcal, estimated: k.estimated), icon: "flame.fill"))
-        }
-        return out
-    }
-
-    private func routeChip(_ text: String, _ icon: String) -> some View {
-        HStack(spacing: 3) {
-            Image(systemName: icon).font(.system(size: 9, weight: .bold))
-            Text(text).font(.system(size: 10, weight: .bold))
-        }
-        .padding(.horizontal, 7).padding(.vertical, 3)
-        .background(accent.opacity(0.12), in: Capsule())
-        .overlay(Capsule().stroke(accent.opacity(0.2), lineWidth: 0.6))
-        .foregroundStyle(accent)
-    }
-
-    private func sectionHeader(_ title: String, count: Int) -> some View {
-        HStack(spacing: 8) {
-            Capsule()
-                .fill(LinearGradient(colors: [accent, accent.opacity(0.4)],
-                                     startPoint: .top, endPoint: .bottom))
-                .frame(width: 4, height: 15)
-            Text(title).font(.subheadline.weight(.bold))
-            Text("\(count)")
-                .font(.system(size: 10, weight: .bold))
-                .padding(.horizontal, 6).padding(.vertical, 2)
-                .background(accent.opacity(0.13), in: Capsule())
-                .overlay(Capsule().stroke(accent.opacity(0.22), lineWidth: 0.6))
-                .foregroundStyle(accent)
-            Spacer()
-        }
-    }
-
-    private func chip(_ text: String, isSelected: Bool, action: @escaping () -> Void) -> some View {
-        Button {
-            withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) { action() }
-        } label: {
-            Text(text)
-                .font(.system(size: 12, weight: .semibold))
-                .padding(.horizontal, 11).padding(.vertical, 5)
-                .background(isSelected ? accent.opacity(0.16) : Color(.tertiarySystemFill), in: Capsule())
-                .foregroundStyle(isSelected ? accent : Color.secondary)
-                .overlay(Capsule().stroke(isSelected ? accent.opacity(0.3) : .clear, lineWidth: 0.75))
-        }
-        .buttonStyle(.plain)
-    }
-
-    private func hintCard(_ title: String, detail: String) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(title).font(.subheadline.weight(.bold))
-            Text(detail).font(.caption).foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(14)
-        .background(Color(.secondarySystemGroupedBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 16))
-    }
-
-    private var emptyState: some View {
-        VStack(spacing: 10) {
-            Image(systemName: "figure.strengthtraining.traditional")
-                .font(.system(size: 32)).foregroundStyle(.tertiary)
-            Text("還沒有訓練紀錄").font(.subheadline.weight(.semibold))
-            Text("右上角「＋」補記一趟跑步、健走、騎車、登山或一次重訓；跑者圖示可以開始記錄，跑完路線會畫在這裡。")
-                .font(.caption).foregroundStyle(.secondary)
-                .multilineTextAlignment(.center).padding(.horizontal, 16)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 30)
-    }
-
-    // 下面三個副標都先在一般函式裡組好字串再交給 Text：
-    // 在 ViewBuilder 內用 ?: 與 + 串接字串陣列很容易讓型別檢查逾時（見 v25.350）。
-    private func statMeta(_ st: ExerciseStat) -> String {
-        var parts: [String] = []
-        if st.sets > 0 { parts.append("\(st.sets) 組") }
-        if st.reps > 0 { parts.append("\(st.reps) 下") }
-        if !st.best.isEmpty { parts.append(st.best) }
-        return parts.joined(separator: "・")
-    }
-
-    /// [v25.552] 一套寫法：「河濱・32:10」、「38:40・約 120 大卡」、「健身房・45 分鐘・3 個動作・約 220 大卡」。
-    /// 有氧寫移動時間「32:10」（以前「32 分鐘」砍掉秒）；重訓寫合計「45 分鐘」；兩個動作以上才寫「N 個動作」；
-    /// 有路線的大卡在膠囊上，這裡不重複
-    private func sessionMeta(_ s: WorkoutSession) -> String {
-        var parts: [String] = []
-        if !s.place.isEmpty { parts.append(s.place) }
-        if s.primarySport == .strength {
-            if s.durationMinutes > 0 { parts.append(WorkoutFormat.total(minutes: s.durationMinutes)) }
-        } else {
-            let m = WorkoutFacts.movingMinutes(s)
-            if m > 0 { parts.append(WorkoutFormat.clock(minutes: m)) }
-        }
-        if s.exercises.count > 1 { parts.append("\(s.exercises.count) 個動作") }
-        if s.firstRouteExercise == nil, let k = WorkoutFacts.kcal(s, bodyWeightKg: bodyWeight) {
-            parts.append(WorkoutFormat.kcal(k.kcal, estimated: k.estimated))
-        }
-        return parts.joined(separator: "・")
-    }
-
-    private func milestoneMeta(_ m: LifeMilestone) -> String {
-        var parts: [String] = [Self.shortDate.string(from: m.date)]
-        if !m.note.isEmpty { parts.append(m.note) }
-        return parts.joined(separator: "・")
-    }
-
-    private func volumeText(_ v: Double) -> String {
-        if v >= 10000 { return String(format: "%.1f 噸", v / 1000) }
-        return String(format: "%.0f kg", v)
-    }
-    private func axisText(_ v: Double) -> String {
-        if curveUnit == "公斤" && v >= 10000 { return String(format: "%.1f 噸", v / 1000) }
-        return v == v.rounded() ? String(format: "%.0f", v) : String(format: "%.1f", v)
-    }
-
-    // [v25.552] 日期固定西曆＋zh_TW：手機設民國曆不會變「115/10/12」
-    static let shortDate: DateFormatter = {
-        let f = DateFormatter()
-        f.calendar = Calendar(identifier: .gregorian)
-        f.locale = Locale(identifier: "zh_TW")
-        f.dateFormat = "yyyy/M/d"
-        return f
-    }()
-    static let dayOnly: DateFormatter = {
-        let f = DateFormatter()
-        f.calendar = Calendar(identifier: .gregorian)
-        f.locale = Locale(identifier: "zh_TW")
-        f.dateFormat = "d"
-        return f
-    }()
-    static let monthOnly: DateFormatter = {
-        let f = DateFormatter()
-        f.calendar = Calendar(identifier: .gregorian)
-        f.locale = Locale(identifier: "zh_TW")
-        f.dateFormat = "M月"
-        return f
-    }()
 }

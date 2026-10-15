@@ -200,6 +200,8 @@ enum HeroCard: String, CaseIterable, Identifiable {
     case resume, familyMembersResume, childrenResume, childDetail
     case subordinateDetail, taxOverview, medicalMap, calendarEvent
     case sideRoleHub, sideRoleWorkspace
+    // [v25.553] 健康頁的看板（列表看板與一趟的成果看板共用；只吃圓角）。rawValue「health」上線後不能改
+    case health
     // 系統
     case settings, eInvoice
 
@@ -271,6 +273,7 @@ enum HeroCard: String, CaseIterable, Identifiable {
         case .calendarEvent:       return "行事曆事件"
         case .sideRoleHub:         return "兼任職務 › 中樞"
         case .sideRoleWorkspace:   return "兼任職務 › 管理頁"
+        case .health:              return "健康"
         case .settings:            return "設定"
         case .eInvoice:            return "電子發票"
         }
@@ -396,6 +399,11 @@ enum HeroCard: String, CaseIterable, Identifiable {
         case .eInvoice:
             return [Color(red: 0.38, green: 0.42, blue: 0.92),
                     Color(red: 0.22, green: 0.24, blue: 0.72)]
+        case .health:
+            // [v25.553] 跑步的橘（FFB37A → EB6834，MoneyArtTheme.workoutRun）；健康頁的看板是天空插畫、不吃漸層，
+            // 這組只給設定頁的小色票與預覽用
+            return [Color(red: 1.00, green: 0.70, blue: 0.48),
+                    Color(red: 0.92, green: 0.41, blue: 0.20)]
         }
     }
 }

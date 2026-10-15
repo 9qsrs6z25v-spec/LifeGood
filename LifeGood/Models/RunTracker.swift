@@ -209,6 +209,9 @@ final class RunTracker: NSObject, ObservableObject {
     private(set) var runId = UUID()
     /// [v25.552] 正在記錄（含暫停）的那一趟的編號；沒在記錄是 nil。App 一打開找沒存的那幾趟時，跳過這一趟
     var activeRunId: UUID? { isActive ? runId : nil }
+    /// [v25.553] 正在記錄（含暫停）的那一趟按「開始」的時間；沒在記錄是 nil。
+    /// 健康頁的記錄中條照它取名（06:05 開始＝「晨跑」，WorkoutFacts.timeOfDayName）；只讀，不改記錄
+    var activeStartedAt: Date? { isActive ? startedAt : nil }
 
     /// [v25.551] 精度在這個以內（公尺）才起點、才算距離、線頭才接到藍點
     private let goodAccuracy: CLLocationAccuracy = 20

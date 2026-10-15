@@ -83,6 +83,12 @@ struct MoneyItem: Identifiable, Equatable {
     var scriptCaps: String? = nil
     /// [v25.527] 金額的字色（股票的損益：紅漲綠跌）；nil＝收入綠、其他一般字色
     var amountTone: MoneyTone? = nil
+    /// [v25.553] 運動：卡面換成這一趟路線的形狀（已換成 0…1、最多 120 點；WorkoutFacts.routeShape）。
+    /// 照股票 candles 的先例：有值就畫 WorkoutRoutePanel，不打任何地圖請求；nil＝運動主題插畫
+    var route: WorkoutRouteShape? = nil
+    /// [v25.553] VoiceOver 唸的一整句（運動卡：「10 月 15 日早上 6 點 05 分，河濱晨跑，跑步 5.2 公里，32 分 10 秒…」）；
+    /// nil＝照舊把名稱、分類、金額、膠囊串起來唸
+    var accessibilityText: String? = nil
 
     /// UUID 的雜湊每次開 App 都不一樣；紋理要每次都長一樣，所以用位元組算
     static func seed(_ id: UUID) -> Int {
@@ -121,6 +127,8 @@ struct MoneyItemCard: View {
     private var pal: TripBoardPalette { TripBoardPalette(scheme) }
 
     private var a11y: String {
+        // [v25.553] 工廠函式給了一整句（運動卡）就唸它
+        if let t = item.accessibilityText, !t.isEmpty { return t }
         var parts = [item.title, item.category, item.amount + (item.unit ?? "")]
         if let d = item.detail, !d.isEmpty { parts.append(d) }
         if let b = item.badge { parts.append(b) }
@@ -170,7 +178,7 @@ struct MoneyItemCard: View {
         .background(alignment: .leading) {
             MoneyPanel(theme: item.theme, seed: item.seed, monogram: item.monogram, badge: item.badge,
                        photoURL: item.photoURL, latitude: item.latitude, longitude: item.longitude,
-                       place: item.place, candles: item.candles, scriptWord: item.scriptWord,
+                       place: item.place, candles: item.candles, route: item.route, scriptWord: item.scriptWord,
                        scriptCaps: item.scriptCaps, width: w)
                 .frame(width: w)
                 .clipShape(MoneyPanelShape())
@@ -291,7 +299,7 @@ struct MoneyItemCard: View {
 
     private var compactBody: some View {
         HStack(spacing: 10) {
-            MoneyThumb(theme: item.theme, seed: item.seed, photoURL: item.photoURL)
+            MoneyThumb(theme: item.theme, seed: item.seed, photoURL: item.photoURL, route: item.route)
                 .frame(width: 46, height: 46)
             VStack(alignment: .leading, spacing: 3) {
                 MarqueeText(item.title)

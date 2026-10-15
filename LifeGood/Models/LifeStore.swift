@@ -12,7 +12,10 @@ class LifeStore: ObservableObject {
     /// [v25.348] 績效互評票（年度同儕排名）
     @Published var performanceBallots: [PerformanceBallot] = [] { didSet { if !isLoading { save() } } }
     /// [v25.351] 健身紀錄：一筆＝一次訓練，底下掛多個動作
-    @Published var workouts: [WorkoutSession] = [] { didSet { if !isLoading { save() } } }
+    /// [v25.553] 每次改（含 iCloud 拉下來、匯入）workoutsRevision 加一：健康頁的 .task(id:) 靠它決定要不要重算
+    @Published var workouts: [WorkoutSession] = [] { didSet { workoutsRevision &+= 1; if !isLoading { save() } } }
+    /// [v25.553] 健康頁的設定（看板主角、每週目標）；跟 iCloud 同步、進完整備份
+    @Published var workoutPrefs: WorkoutPrefs = WorkoutPrefs() { didSet { workoutsRevision &+= 1; if !isLoading { save() } } }
     /// [v25.357] 公司廠區據點：與重大決議的「廠區」欄位對應，長成每個廠的歷史年線
     @Published var companySites: [CompanySite] = [] { didSet { if !isLoading { save() } } }
     /// [v25.399] 旅遊規劃（要去的行程；與旅遊地圖「去過的地點」是兩回事）
@@ -21,11 +24,16 @@ class LifeStore: ObservableObject {
     @Published var businessCards: [BusinessCard] = [] { didSet { if !isLoading { save() } } }
     @Published var personalEvents: [PersonalEvent] = [] { didSet { if !isLoading { save() } } }
     @Published var orgPeople: [OrgPerson] = [] { didSet { if !isLoading { save() } } }
-    @Published var healthProfile: HealthProfile = HealthProfile() { didSet { if !isLoading { save() } } }
+    /// [v25.553] 體重變了，估的大卡跟著變：健康頁也要重算（workoutsRevision）
+    @Published var healthProfile: HealthProfile = HealthProfile() { didSet { workoutsRevision &+= 1; if !isLoading { save() } } }
     @Published var familyTasks: [FamilyTask] = [] { didSet { if !isLoading { save() } } }
     /// 機台池：全公司的設備（機台）共用清單。機台屬於部門（departmentId）、
     /// 由部屬擔任負責人（ownerId）；PM／警報等生老病死記錄跟著機台，換負責人不搬記錄。
     @Published var equipmentPool: [ManagedEquipment] = [] { didSet { if !isLoading { save() } } }
+
+    /// [v25.553] 只放記憶體的遞增數字：workouts、workoutPrefs、healthProfile 一改就加一（不存檔、不發通知；
+    /// 那三個本身是 @Published，畫面會重畫，重畫時讀到新的數字，.task(id:) 才重算一次）
+    private(set) var workoutsRevision = 0
 
     private var isLoading = false
     private let saveQueue = DispatchQueue(label: "com.lifegood.lifestore.save", qos: .utility)
@@ -42,7 +50,7 @@ class LifeStore: ObservableObject {
         "life_grade_titles", "life_business_cards", "life_personal_events",
         "life_org_people", "life_health_profile", "life_family_tasks",
         "life_equipment_pool", "life_performance_ballots", "life_workouts",
-        "life_company_sites", "life_trip_plans"
+        "life_company_sites", "life_trip_plans", "life_workout_prefs"
     ]
 
     init() {
@@ -1042,6 +1050,21 @@ class LifeStore: ObservableObject {
 
     func deleteWorkout(id: UUID) {
         workouts.removeAll { $0.id == id }
+    }
+
+    /// [v25.553] 每週目標（公里）：nil＝不設目標。只動這一種運動的，其他種的目標留著
+    func setWeeklyGoal(_ km: Double?, for sport: WorkoutSport) {
+        var p = workoutPrefs
+        p.setGoal(km, for: sport)
+        if p != workoutPrefs { workoutPrefs = p }
+    }
+
+    /// [v25.553] 看板主角（跑步／健走／騎車／登山／自動）
+    func setHeroChoice(_ choice: WorkoutHeroChoice) {
+        guard workoutPrefs.heroChoice != choice || workoutPrefs.heroSport == nil else { return }
+        var p = workoutPrefs
+        p.heroSport = choice.rawValue
+        workoutPrefs = p
     }
 
     /// 出現過的動作名稱（依使用次數多寡），給新增時快速挑選
@@ -3121,7 +3144,7 @@ class LifeStore: ObservableObject {
             businessCards: businessCards, personalEvents: personalEvents, orgPeople: orgPeople,
             healthProfile: healthProfile, familyTasks: familyTasks, equipmentPool: equipmentPool,
             performanceBallots: performanceBallots, workouts: workouts,
-            companySites: companySites, tripPlans: tripPlans
+            companySites: companySites, tripPlans: tripPlans, workoutPrefs: workoutPrefs
         )
         saveQueue.async {
             let encoder = JSONEncoder()
@@ -3145,6 +3168,7 @@ class LifeStore: ObservableObject {
             if let d = try? encoder.encode(snap.workouts)       { ud.set(d, forKey: "life_workouts") }
             if let d = try? encoder.encode(snap.companySites)   { ud.set(d, forKey: "life_company_sites") }
             if let d = try? encoder.encode(snap.tripPlans)      { ud.set(d, forKey: "life_trip_plans") }
+            if let d = try? encoder.encode(snap.workoutPrefs)   { ud.set(d, forKey: "life_workout_prefs") }
             CloudSyncManager.shared.pushAll()
         }
     }
@@ -3179,6 +3203,11 @@ class LifeStore: ObservableObject {
         if let data = rawDataIfChanged("life_health_profile"),
            let h = try? decoder.decode(HealthProfile.self, from: data) {
             healthProfile = h
+        }
+        // [v25.553] 健康頁的設定（看板主角、每週目標）
+        if let data = rawDataIfChanged("life_workout_prefs"),
+           let wp = try? decoder.decode(WorkoutPrefs.self, from: data) {
+            workoutPrefs = wp
         }
     }
 
@@ -3253,6 +3282,7 @@ class LifeStore: ObservableObject {
         orgPeople.removeAll()
         healthProfile = HealthProfile()
         workouts.removeAll()
+        workoutPrefs = WorkoutPrefs()
         companySites.removeAll()
         // 行程的照片檔也要一起清，不然會留下沒人指向的孤兒檔被雲端一直重傳
         for plan in tripPlans {

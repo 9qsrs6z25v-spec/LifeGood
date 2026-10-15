@@ -66,6 +66,13 @@
 		A01B000001001549 /* WidgetLifeExtras.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001549 /* WidgetLifeExtras.swift */; };
 		A01B000001001550 /* WorkoutFacts.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001550 /* WorkoutFacts.swift */; };
 		A01B000001001551 /* RunRecovery.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001551 /* RunRecovery.swift */; };
+		A01B000001001552 /* HealthPageData.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001552 /* HealthPageData.swift */; };
+		A01B000001001553 /* WorkoutCardData.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001553 /* WorkoutCardData.swift */; };
+		A01B000001001554 /* HealthBoard.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001554 /* HealthBoard.swift */; };
+		A01B000001001555 /* HealthBoardScenes.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001555 /* HealthBoardScenes.swift */; };
+		A01B000001001556 /* WorkoutItems.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001556 /* WorkoutItems.swift */; };
+		A01B000001001557 /* WorkoutListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001557 /* WorkoutListView.swift */; };
+		A01B000001001558 /* WorkoutDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001558 /* WorkoutDetailView.swift */; };
 		A01B000001001506 /* PhotoImportCenter.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001506 /* PhotoImportCenter.swift */; };
 		A01B000001001507 /* PhotoSlideshowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001507 /* PhotoSlideshowView.swift */; };
 		A01B000001001508 /* BeatDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001508 /* BeatDetector.swift */; };
@@ -440,6 +447,13 @@
 		A01A000001001549 /* WidgetLifeExtras.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetLifeExtras.swift; sourceTree = "<group>"; };
 		A01A000001001550 /* WorkoutFacts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkoutFacts.swift; sourceTree = "<group>"; };
 		A01A000001001551 /* RunRecovery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunRecovery.swift; sourceTree = "<group>"; };
+		A01A000001001552 /* HealthPageData.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthPageData.swift; sourceTree = "<group>"; };
+		A01A000001001553 /* WorkoutCardData.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkoutCardData.swift; sourceTree = "<group>"; };
+		A01A000001001554 /* HealthBoard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthBoard.swift; sourceTree = "<group>"; };
+		A01A000001001555 /* HealthBoardScenes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthBoardScenes.swift; sourceTree = "<group>"; };
+		A01A000001001556 /* WorkoutItems.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkoutItems.swift; sourceTree = "<group>"; };
+		A01A000001001557 /* WorkoutListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkoutListView.swift; sourceTree = "<group>"; };
+		A01A000001001558 /* WorkoutDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkoutDetailView.swift; sourceTree = "<group>"; };
 		A01A000001000035 /* GradeTitleView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GradeTitleView.swift; sourceTree = "<group>"; };
 		A01A000001000036 /* SpouseResumeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpouseResumeView.swift; sourceTree = "<group>"; };
 		A01A000001000037 /* ChildrenResumeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChildrenResumeView.swift; sourceTree = "<group>"; };
@@ -623,6 +637,8 @@
 				A01A000001001549 /* WidgetLifeExtras.swift */,
 				A01A000001001550 /* WorkoutFacts.swift */,
 				A01A000001001551 /* RunRecovery.swift */,
+				A01A000001001552 /* HealthPageData.swift */,
+				A01A000001001553 /* WorkoutCardData.swift */,
 				A01A000001000040 /* EInvoiceClient.swift */,
 				A01A000001000041 /* InvoiceCategorizer.swift */,
 				A01A000001000042 /* EInvoiceSyncManager.swift */,
@@ -750,6 +766,11 @@
 				A01A000001001400 /* RunTrackingView.swift */,
 				A01A000001001100 /* WorkoutEditorView.swift */,
 				A01A000001001000 /* HealthView.swift */,
+				A01A000001001554 /* HealthBoard.swift */,
+				A01A000001001555 /* HealthBoardScenes.swift */,
+				A01A000001001556 /* WorkoutItems.swift */,
+				A01A000001001557 /* WorkoutListView.swift */,
+				A01A000001001558 /* WorkoutDetailView.swift */,
 				A01A000001000102 /* FoodMapView.swift */,
 				A01A000001000200 /* TravelMapView.swift */,
 				A01A000001000226 /* TripPlanView.swift */,
@@ -1063,6 +1084,13 @@
 				A01B000001001549 /* WidgetLifeExtras.swift in Sources */,
 				A01B000001001550 /* WorkoutFacts.swift in Sources */,
 				A01B000001001551 /* RunRecovery.swift in Sources */,
+				A01B000001001552 /* HealthPageData.swift in Sources */,
+				A01B000001001553 /* WorkoutCardData.swift in Sources */,
+				A01B000001001554 /* HealthBoard.swift in Sources */,
+				A01B000001001555 /* HealthBoardScenes.swift in Sources */,
+				A01B000001001556 /* WorkoutItems.swift in Sources */,
+				A01B000001001557 /* WorkoutListView.swift in Sources */,
+				A01B000001001558 /* WorkoutDetailView.swift in Sources */,
 				A01B000001001506 /* PhotoImportCenter.swift in Sources */,
 				A01B000001001507 /* PhotoSlideshowView.swift in Sources */,
 				A01B000001001509 /* SlideshowDecor.swift in Sources */,

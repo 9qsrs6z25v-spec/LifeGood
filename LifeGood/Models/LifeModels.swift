@@ -3935,6 +3935,89 @@ struct WorkoutSession: Identifiable, Codable {
     var firstRouteExercise: WorkoutExercise? { exercises.first { $0.hasRoute } }
 }
 
+// MARK: - 健康頁的設定（v25.553，健康 v3）
+
+/// [v25.553] 看板主角：看板大字「這週跑了／走了／騎了／爬了 X 公里」看哪一種。
+/// 存的是 rawValue（WorkoutPrefs.heroSport），上線後不能改名。
+enum WorkoutHeroChoice: String, CaseIterable, Identifiable {
+    case run
+    case walk
+    case bike
+    case hike
+    /// 自動：近 28 天次數最多的有氧（跑、走、騎、登山），平手選跑步（WorkoutFacts.heroSport）
+    case auto
+
+    var id: String { rawValue }
+
+    /// 「⋯」選單上的字
+    var title: String {
+        switch self {
+        case .run: return "跑步"
+        case .walk: return "健走"
+        case .bike: return "騎車"
+        case .hike: return "登山"
+        case .auto: return "自動（最常做的）"
+        }
+    }
+
+    /// 固定的那一種；自動是 nil
+    var sport: WorkoutSport? {
+        switch self {
+        case .run: return .run
+        case .walk: return .walk
+        case .bike: return .bike
+        case .hike: return .hike
+        case .auto: return nil
+        }
+    }
+}
+
+/// [v25.553] 健康頁的設定：看板主角、每週目標。存在 LifeStore（life_workout_prefs），跟 iCloud 同步、進完整備份。
+/// 新欄位一律 Optional＋decodeIfPresent：舊資料、還沒更新的 iPad 都讀得進來（舊版讀不懂這個鍵就整個略過，不壞資料）。
+struct WorkoutPrefs: Codable, Equatable {
+    /// 看板主角（WorkoutHeroChoice.rawValue）；nil＝跑步
+    var heroSport: String?
+    /// 每週目標（公里），key＝WorkoutSport.rawValue（run／walk／bike／hike）；沒有那個 key＝那一種沒設目標
+    var weeklyGoalKm: [String: Double]?
+
+    init(heroSport: String? = nil, weeklyGoalKm: [String: Double]? = nil) {
+        self.heroSport = heroSport
+        self.weeklyGoalKm = weeklyGoalKm
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        heroSport = try? c.decodeIfPresent(String.self, forKey: .heroSport)
+        weeklyGoalKm = try? c.decodeIfPresent([String: Double].self, forKey: .weeklyGoalKm)
+    }
+    private enum CodingKeys: String, CodingKey { case heroSport, weeklyGoalKm }
+
+    /// 看板主角；沒設、或存了新版才有的值（舊版讀不懂）都當跑步
+    var heroChoice: WorkoutHeroChoice {
+        WorkoutHeroChoice(rawValue: heroSport ?? "") ?? .run
+    }
+
+    /// 這一種運動的每週目標（公里）；沒設、或不是正數回 nil
+    func goalKm(for sport: WorkoutSport) -> Double? {
+        guard let v = weeklyGoalKm?[sport.rawValue], v.isFinite, v > 0 else { return nil }
+        return v
+    }
+
+    /// 設或清掉（nil、0 以下）這一種運動的每週目標；夾在 1～1,000 公里
+    mutating func setGoal(_ km: Double?, for sport: WorkoutSport) {
+        var all = weeklyGoalKm ?? [:]
+        if let km, km.isFinite, km > 0 {
+            all[sport.rawValue] = min(max(km, 1), 1_000)
+        } else {
+            all.removeValue(forKey: sport.rawValue)
+        }
+        weeklyGoalKm = all.isEmpty ? nil : all
+    }
+
+    /// 什麼都沒設過（合併匯入時只在本機沒設過才帶進來）
+    var isEmpty: Bool { heroSport == nil && (weeklyGoalKm ?? [:]).isEmpty }
+}
+
 // MARK: - 績效互評（年度同儕排名）
 
 /// [v25.348] 一位評分者、一個年度的一張票。
