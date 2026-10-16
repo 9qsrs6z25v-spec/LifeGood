@@ -20,11 +20,17 @@ import EventKit
 //      把「跑到幾點」寫進 App Group（DayTimelineToggleState.setRunningUntil，沒在跑寫 nil），
 //      值真的變了才重畫控制項與「今天」（publishRunState）。控制項的開＝「跑到幾點」> 現在，不是 isEnabled。
 //      規格見 scratchpad/widgets/v5/brief.md 的 G1-7。
+//
+// [健康 v6] 即時動態的優先序 relevanceScore 50（開始、更新都帶）：跑步（RunActivityCenter）是 100，跑步時靈動島放跑步，
+//      跑完那一刻跑步的結束、從靈動島拿掉，今日行程自己回來。點軸上的點（SelectTimelineStopIntent）也保留這個分數。
 
 @MainActor
 final class DayTimelineController: ObservableObject {
 
     static let shared = DayTimelineController()
+
+    /// [健康 v6] 即時動態的優先序：跑步 100（RunActivityCenter.relevanceScore）比較高，跑步時靈動島放跑步、跑完今日行程自己回來
+    static let relevanceScore: Double = 50
 
     /// 使用者是否開啟這個功能（設定頁的開關）
     @AppStorage("day_timeline_enabled") var isEnabled = false {
@@ -87,7 +93,8 @@ final class DayTimelineController: ObservableObject {
             generatedAt: Date())
 
         if let activity = liveActivity() {
-            await activity.update(ActivityContent(state: state, staleDate: staleDate(stops)))
+            await activity.update(ActivityContent(state: state, staleDate: staleDate(stops),
+                                                  relevanceScore: Self.relevanceScore))
             isRunning = true
             lastError = nil
             // [v5] App 重開後不知道是幾點開始的：沒記著「跑到幾點」就保守當現在開始
@@ -128,7 +135,8 @@ final class DayTimelineController: ObservableObject {
         do {
             let activity = try Activity.request(
                 attributes: attributes,
-                content: ActivityContent(state: state, staleDate: staleDate(stops)),
+                content: ActivityContent(state: state, staleDate: staleDate(stops),
+                                         relevanceScore: Self.relevanceScore),
                 pushType: nil)
             isRunning = true
             lastError = nil

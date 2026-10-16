@@ -121,6 +121,11 @@ struct LifeGoodApp: App {
             // 今天沒有行程時不能卡在系統先畫的「開」：不管有沒有上島都叫控制項重讀一次
             WidgetRefresh.reloadControls(WidgetKind.dayTimelineControlKinds)
         }
+        // [健康 v6] 鎖定畫面／靈動島的暫停鈕（RunPauseIntent，LiveActivityIntent，在 App 的行程裡背景跑）交到這裡：
+        // 是正在記錄的那一趟就暫停／繼續，不是（App 被關掉後留下的）就收掉
+        RunPauseBridge.register { pause, runId in
+            await RunActivityCenter.shared.handlePauseButton(pause: pause, runId: runId)
+        }
     }
 
     var body: some Scene {
@@ -150,6 +155,9 @@ struct LifeGoodApp: App {
                     // [v25.552] 找上次跑到一半被關掉、還沒存的那幾趟（讀檔在背景，很快）。
                     // 放在其他 await 前面：開場謝幕（約 2 秒）之前就找好，LaunchGate 謝幕後問一次
                     await RunRecoveryCenter.shared.scan()
+                    // [健康 v6] 上次 App 被關掉時留在鎖定畫面的跑步即時動態（時間還在走、按了沒用）：收掉；
+                    // 正在記錄的那一趟、已經結束的「完成」那張不動。沒在記錄時一起取消暫停 30 分鐘提醒
+                    await RunActivityCenter.shared.endLeftovers(keeping: RunTracker.shared.activeRunId)
                     await subscription.refreshStatus()
                     await subscription.loadProducts()
                     await einvoiceSync.syncIfDue(expenseStore: expenseStore)
@@ -192,6 +200,8 @@ struct LifeGoodApp: App {
                         // [v25.545] 保底：離開 App 那一刻小工具的快照一定是最新的
                         WidgetSnapshotWriter.shared.writeNow()
                     } else if phase == .active {
+                        // [健康 v6] 正在記錄、跑步的即時動態不見了（系統 8 小時收掉、一開始系統關著）就重開；快 8 小時了收舊開新
+                        RunActivityCenter.shared.appBecameActive()
                         // 節流：30 秒內已同步過會自動跳過，避免快速切換 App
                         // 造成的反覆 CloudKit pull 觸發畫面閃爍
                         cloudSync.syncNowIfDue()

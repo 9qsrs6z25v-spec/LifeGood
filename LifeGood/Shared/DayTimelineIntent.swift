@@ -48,7 +48,9 @@ enum DayTimelineLiveActivity {
         var state = activity.content.state
         guard !state.stops.isEmpty else { return }
         state.selectedIndex = min(max(index, 0), state.stops.count - 1)
+        // [健康 v6] 換站時保留原本的優先序（今日行程 50，DayTimelineController.relevanceScore）：不帶的話點一下就掉回預設的 0
         await activity.update(ActivityContent(state: state,
-                                              staleDate: activity.content.staleDate))
+                                              staleDate: activity.content.staleDate,
+                                              relevanceScore: activity.content.relevanceScore))
     }
 }

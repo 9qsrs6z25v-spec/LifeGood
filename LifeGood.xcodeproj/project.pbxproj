@@ -77,6 +77,12 @@
 		A01B000001001560 /* WorkoutPlaceLookup.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001560 /* WorkoutPlaceLookup.swift */; };
 		A01B000001001561 /* RunScreenParts.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001561 /* RunScreenParts.swift */; };
 		A01B000001001562 /* WorkoutShare.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001562 /* WorkoutShare.swift */; };
+		A01B000002000094 /* RunActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000094 /* RunActivityAttributes.swift */; };
+		A01B000002000097 /* RunActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000094 /* RunActivityAttributes.swift */; };
+		A01B000002000095 /* RunPauseIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000095 /* RunPauseIntent.swift */; };
+		A01B000002000098 /* RunPauseIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000095 /* RunPauseIntent.swift */; };
+		A01B000002000096 /* RunLiveActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000096 /* RunLiveActivity.swift */; };
+		A01B000001001563 /* RunActivityCenter.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001563 /* RunActivityCenter.swift */; };
 		A01B000001001506 /* PhotoImportCenter.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001506 /* PhotoImportCenter.swift */; };
 		A01B000001001507 /* PhotoSlideshowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001507 /* PhotoSlideshowView.swift */; };
 		A01B000001001508 /* BeatDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001508 /* BeatDetector.swift */; };
@@ -462,6 +468,10 @@
 		A01A000001001560 /* WorkoutPlaceLookup.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkoutPlaceLookup.swift; sourceTree = "<group>"; };
 		A01A000001001561 /* RunScreenParts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunScreenParts.swift; sourceTree = "<group>"; };
 		A01A000001001562 /* WorkoutShare.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkoutShare.swift; sourceTree = "<group>"; };
+		A01A000002000094 /* RunActivityAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunActivityAttributes.swift; sourceTree = "<group>"; };
+		A01A000002000095 /* RunPauseIntent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunPauseIntent.swift; sourceTree = "<group>"; };
+		A01A000002000096 /* RunLiveActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunLiveActivity.swift; sourceTree = "<group>"; };
+		A01A000001001563 /* RunActivityCenter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunActivityCenter.swift; sourceTree = "<group>"; };
 		A01A000001000035 /* GradeTitleView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GradeTitleView.swift; sourceTree = "<group>"; };
 		A01A000001000036 /* SpouseResumeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpouseResumeView.swift; sourceTree = "<group>"; };
 		A01A000001000037 /* ChildrenResumeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChildrenResumeView.swift; sourceTree = "<group>"; };
@@ -542,6 +552,7 @@
 				A01A000002000087 /* NetWorthWidget.swift */,
 				A01A000002000088 /* WidgetQuoteStore.swift */,
 				A01A000002000090 /* TeamWidget.swift */,
+				A01A000002000096 /* RunLiveActivity.swift */,
 				A01A000002000006 /* Info.plist */,
 				A01A000002000050 /* LifeGoodWidgets.entitlements */,
 			);
@@ -563,6 +574,8 @@
 				A01A000002000082 /* WidgetQuoteService.swift */,
 				A01A000002000083 /* WidgetMoneyFormat.swift */,
 				A01A000002000089 /* DayTimelineToggleIntent.swift */,
+				A01A000002000094 /* RunActivityAttributes.swift */,
+				A01A000002000095 /* RunPauseIntent.swift */,
 			);
 			path = Shared;
 			sourceTree = "<group>";
@@ -649,6 +662,7 @@
 				A01A000001001553 /* WorkoutCardData.swift */,
 				A01A000001001559 /* HealthSync.swift */,
 				A01A000001001560 /* WorkoutPlaceLookup.swift */,
+				A01A000001001563 /* RunActivityCenter.swift */,
 				A01A000001000040 /* EInvoiceClient.swift */,
 				A01A000001000041 /* InvoiceCategorizer.swift */,
 				A01A000001000042 /* EInvoiceSyncManager.swift */,
@@ -954,6 +968,9 @@
 				A01B000002000088 /* WidgetQuoteStore.swift in Sources */,
 				A01B000002000089 /* DayTimelineToggleIntent.swift in Sources */,
 				A01B000002000090 /* TeamWidget.swift in Sources */,
+				A01B000002000094 /* RunActivityAttributes.swift in Sources */,
+				A01B000002000095 /* RunPauseIntent.swift in Sources */,
+				A01B000002000096 /* RunLiveActivity.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -1107,6 +1124,9 @@
 				A01B000001001560 /* WorkoutPlaceLookup.swift in Sources */,
 				A01B000001001561 /* RunScreenParts.swift in Sources */,
 				A01B000001001562 /* WorkoutShare.swift in Sources */,
+				A01B000002000097 /* RunActivityAttributes.swift in Sources */,
+				A01B000002000098 /* RunPauseIntent.swift in Sources */,
+				A01B000001001563 /* RunActivityCenter.swift in Sources */,
 				A01B000001001506 /* PhotoImportCenter.swift in Sources */,
 				A01B000001001507 /* PhotoSlideshowView.swift in Sources */,
 				A01B000001001509 /* SlideshowDecor.swift in Sources */,
@@ -1169,7 +1189,7 @@
 				CLANG_ENABLE_MODULES = YES;
 				CODE_SIGN_ENTITLEMENTS = LifeGoodWidgets/LifeGoodWidgets.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1308;
+				CURRENT_PROJECT_VERSION = 1309;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = LifeGoodWidgets/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "LifeGood";
@@ -1180,7 +1200,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 25.555;
+				MARKETING_VERSION = 25.556;
 				PRODUCT_BUNDLE_IDENTIFIER = com.lifegood.app.widgets;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
@@ -1196,7 +1216,7 @@
 				CLANG_ENABLE_MODULES = YES;
 				CODE_SIGN_ENTITLEMENTS = LifeGoodWidgets/LifeGoodWidgets.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1308;
+				CURRENT_PROJECT_VERSION = 1309;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = LifeGoodWidgets/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "LifeGood";
@@ -1207,7 +1227,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 25.555;
+				MARKETING_VERSION = 25.556;
 				PRODUCT_BUNDLE_IDENTIFIER = com.lifegood.app.widgets;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
@@ -1224,7 +1244,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = LifeGood/LifeGood.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1308;
+				CURRENT_PROJECT_VERSION = 1309;
 				DEVELOPMENT_ASSET_PATHS = "\"LifeGood/Preview Content\"";
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -1257,7 +1277,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 25.555;
+				MARKETING_VERSION = 25.556;
 				PRODUCT_BUNDLE_IDENTIFIER = com.lifegood.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -1273,7 +1293,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = LifeGood/LifeGood.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1308;
+				CURRENT_PROJECT_VERSION = 1309;
 				DEVELOPMENT_ASSET_PATHS = "\"LifeGood/Preview Content\"";
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -1306,7 +1326,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 25.555;
+				MARKETING_VERSION = 25.556;
 				PRODUCT_BUNDLE_IDENTIFIER = com.lifegood.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;

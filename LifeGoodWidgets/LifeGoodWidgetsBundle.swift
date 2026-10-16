@@ -28,6 +28,9 @@ import WidgetKit
 // LifeGoodLifeBundle 2 個，都在 10 個以內。
 // 型別由 G2（TeamWidget，TeamWidget.swift）、G3（DayTimelineControl，LifeGoodControls.swift）實作，
 // 名字是 scratchpad/widgets/v5/brief.md 定死的。
+//
+// [健康 v6，v25.556] 加入跑步的即時動態（RunLiveActivityWidget，RunLiveActivity.swift：鎖定畫面、靈動島、手錶智慧型堆疊），
+// 放 LifeGoodLifeBundle（這一層已經 10 個）。LifeGoodLifeBundle 現在 3 個，都在 10 個以內。
 
 @main
 struct LifeGoodWidgetsBundle: WidgetBundle {
@@ -78,10 +81,12 @@ struct LifeGoodFinanceBundle: WidgetBundle {
     }
 }
 
-/// [v5] 人生：旅行（[v3]）、部屬今天（@WidgetBundleBuilder 一次最多 10 個，共 2 個）
+/// [v5] 人生：旅行（[v3]）、部屬今天；[健康 v6] 跑步的即時動態（@WidgetBundleBuilder 一次最多 10 個，共 3 個）
 struct LifeGoodLifeBundle: WidgetBundle {
     var body: some Widget {
         TravelWidget()
         TeamWidget()
+        // [健康 v6] 跑步：鎖定畫面「晨跑・跑步中　3.42 公里｜21:05｜6'20"」＋暫停鈕、靈動島「跑者 3.42 ── 21:05」
+        RunLiveActivityWidget()
     }
 }

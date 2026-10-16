@@ -51,12 +51,25 @@ import UIKit
 // • 每公里時間與小牌：store() 走滿一整公里那一刻，記那一刻的移動時間（kmTimes，「這一公里」小步道）、
 //   存下來的那一點（kmMarkers，地圖上的白底小牌）；start、cancel 清空，finish 不清（畫面已經換成成果頁）。
 // • GPS 弱（gpsWeak）：跑步中（暫停不算），誤差超過 20 公尺連續 10 秒（weakSince 用定位的時間）、或 10 秒收不到定位
-//   （lastFixArrival 用收到的時間；50 公尺以外、太舊的定位不算收到）；開始、繼續那一刻重新起算。
+//   （[v25.556] lastFixStamp 用定位上的時間（v25.555 用的是收到的時間）；50 公尺以外、太舊的定位不算收到）；
+//   開始、繼續那一刻重新起算。
 //   整趟每秒數一次（tickGPS：記了幾秒、弱幾秒、收得到時誤差的平均）→ RunResult.gps／RunCheckpoint.gps → WorkoutSession.gps，
 //   成果頁「要確認」大部分時間都弱才提醒（WorkoutFacts.gpsWeakPrompt）。
 // • 先說明再問：prepare(asking: false) 不跳任何系統框（位置不 requestWhenInUseAuthorization；氣壓計只在「動作與健身」
 //   已經問過時才開），畫面先出我們的說明卡，按〔好〕才 prepare(asking: true)。
 // • 地圖上已畫的路段每 500 點切一塊（RouteMath.liveChunks；id 固定，新點只動最後一塊，拉很長的路也不卡）。
+//
+// [v25.556] 鎖定畫面＋靈動島（模擬：health/build/v6/sim_v6.py 的 TrackerV6，逐行對照；存點規則照樣一行都沒動）：
+// • 暫停時定位不關，改低精度（kCLLocationAccuracyHundredMeters，Wi‑Fi／基地台為主，省電）：鎖定畫面、靈動島的〔繼續〕
+//   在背景執行（RunPauseIntent），When In Use 權限在背景不能重新開始定位，所以暫停時不能關；背景更新照開，
+//   按〔繼續〕時改回 kCLLocationAccuracyBest 就好。開始、繼續、完成、放棄都設回最準。
+// • 暫停中收到的定位只動藍點和鏡頭（lastCoordinate、fixSerial 照加）；GPS 燈的誤差（gpsAccuracy）停在按暫停前那一筆
+//   （低精度 40 公尺上下，不然燈會變黃燈「定位中…」）；不存點、不算距離、不算弱（phase 守門照舊）。
+// • 「10 秒收不到」改看定位上的時間（lastFixStamp，只往後不往前）：鎖屏時系統攢一批才送，晚送的不算收不到。
+//   再加上 acceptBatch：tickGPS 把「只因為 10 秒收不到才算弱」的那一秒記下來（gpsNoFixTicks），一批定位送來之後
+//   用定位上的時間重新判斷，其實收得到（那一秒之前最近的一筆離它不到 10 秒、在 20 公尺內）就扣回去
+//   （sim_v6 §1 每秒送跟 v5 每一秒都一樣；§3 每 15／20／25 秒送一批，v5 誤報 33／50／60% 弱 → v6 0%）。
+// • 開始、每秒、暫停、繼續、完成、放棄各叫一次 RunActivityCenter（鎖定畫面、靈動島；節流、開關都在那裡）。
 
 // MARK: - 運動種類（v25.551）
 
@@ -334,10 +347,12 @@ final class RunTracker: NSObject, ObservableObject {
     private var backgroundSink: AnyCancellable?
 
     // [v25.555] GPS 弱（sim_v5.py TrackerV5 的 weak_since、last_fix_arrival、tracked、weak_n、acc_sum、acc_n）
+    // [v25.556] sim_v6.py TrackerV6 多了 no_fix_ticks（gpsNoFixTicks）；last_fix_arrival 在 Swift 改名 lastFixStamp
     /// 誤差開始超過 20 公尺的那一筆定位的時間；好定位一來就清掉（開始、繼續時也清）
     private var weakSince: Date?
-    /// 最近一次收到（過了 50 公尺、30 秒那兩道關的）定位的時間；開始、繼續那一刻先當成剛收到（10 秒內不算弱）
-    private var lastFixArrival: Date?
+    /// [v25.556] 最近一筆收到（過了 50 公尺、30 秒、亂序那三道關的）定位**上的時間**（不是收到的時間：鎖屏時系統攢一批才送，
+    /// 晚送的不算收不到）；只往後不往前（成批送來的舊定位不會把它拉回去）；開始、繼續那一刻先當成剛收到（10 秒內不算弱）
+    private var lastFixStamp: Date?
     /// 跑步中數了幾秒（tickGPS，暫停不算）
     private var gpsTracked: Double = 0
     /// 其中 GPS 弱的秒數
@@ -345,6 +360,9 @@ final class RunTracker: NSObject, ObservableObject {
     /// 收得到定位的那幾秒，誤差加總與筆數（平均誤差）
     private var gpsAccSum: Double = 0
     private var gpsAccCount = 0
+    /// [v25.556] 只因為「10 秒收不到」才算弱的那幾秒（tickGPS 記下那一秒的時間）；下一批定位送來時用定位上的時間重新判斷（acceptBatch）。
+    /// 40 秒前的不留（30 秒以上的舊定位本來就不收，補不上了）。開始、繼續、完成、放棄時清空
+    private var gpsNoFixTicks: [Date] = []
 
     private override init() {
         super.init()
@@ -410,17 +428,35 @@ final class RunTracker: NSObject, ObservableObject {
         phase == .paused ? pauseStartedAt : nil
     }
 
+    /// [v25.556] 計時起點＝按開始那一刻＋已經暫停過的總秒數（這一次還沒按繼續的暫停不算）；沒在記錄是 nil。
+    /// 鎖定畫面、靈動島的時間從這裡往上數（RunActivityAttributes.ContentState.clockStart，Text(timerInterval:)；暫停時停在 pausedAt）：
+    /// 記錄中 now − movingClockStart ＝ elapsed；暫停中 pausedAt − movingClockStart ＝ 按暫停那一刻的 elapsed（build/v6/sim_v6.py §7）。
+    /// 主控契約（RunActivityCenter 讀），G1 不改
+    var movingClockStart: Date? {
+        guard isActive, let s = startedAt else { return nil }
+        return s.addingTimeInterval(pausedAccumulated)
+    }
+
     /// [v25.555] GPS 弱：跑步中（暫停不算），誤差超過 20 公尺連續 10 秒、或 10 秒收不到定位（隧道、橋下、還沒定到位）。
     /// 畫面上那條「GPS 訊號弱，距離可能少算」（還在等第一個好定位 waitingForFix、精確位置關著時畫面改寫自己的那一句、不畫這條）、
     /// GPS 燈「GPS 弱・誤差 35 公尺」、存檔的 WorkoutGPSQuality（弱的秒數）都讀這個。
     /// 用 Date() 算：畫面每秒（elapsed 一變）重畫時重新判斷，收不到定位也會變。build/v5/sim_v5.py 的 TrackerV5.gps_weak。
-    /// weakSince、lastFixArrival 在 accept() 記；開始、繼續時重設（暫停時定位是關的，繼續那一刻重新起算 10 秒）
+    /// weakSince、lastFixStamp 在 accept() 記；開始、繼續時重設（[v25.556] 暫停時是低精度定位（40 公尺上下），暫停中不算弱；
+    /// weakSince 會被暫停中那幾筆設上，繼續那一刻清掉、重新起算 10 秒，不然一繼續就被當成誤差太大已經很久）。
+    /// [v25.556] 「10 秒收不到」看定位上的時間（lastFixStamp），成批送來時 acceptBatch 再把其實收得到的秒數扣回去（sim_v6 §1～§3）
     var gpsWeak: Bool {
         guard phase == .running else { return false }
         let now = Date()
         if let w = weakSince, now.timeIntervalSince(w) >= WorkoutFacts.gpsWeakSeconds { return true }
-        guard let a = lastFixArrival else { return true }
+        guard let a = lastFixStamp else { return true }
         return now.timeIntervalSince(a) >= WorkoutFacts.gpsWeakSeconds
+    }
+
+    /// [v25.556] 誤差超過 20 公尺已經連續 10 秒（gpsWeak 的前一半）：這種弱不是「收不到」，成批送來也不扣。
+    /// sim_v6.py TrackerV6.weak_by_accuracy
+    private var gpsWeakByAccuracy: Bool {
+        guard let w = weakSince else { return false }
+        return Date().timeIntervalSince(w) >= WorkoutFacts.gpsWeakSeconds
     }
 
     /// [v25.551] 手機記得的上一個位置：還沒收到新定位前，地圖開場先放在這裡（不會拉到整個台灣）
@@ -518,6 +554,7 @@ final class RunTracker: NSObject, ObservableObject {
     /// [v25.552] 換新的 runId（中途存檔的檔名）；lastBaroAt 不清：暖機時氣壓計已經在送就照用，
     /// 還沒送過的話 30 秒後自動走 GPS 備案，送了就換回來。精確位置關著就請系統暫時給；最後先寫一次中途存檔
     /// [v25.555] 每公里時間、小牌清空；GPS 弱從這一刻重新起算（開始那一刻當成剛收到定位），整趟統計歸零
+    /// [v25.556] 定位設回最準（上一趟暫停中被收掉時還是低精度）；最後開鎖定畫面、靈動島（RunActivityCenter.began）
     func start(sport: RunSport) {
         guard phase == .idle else { return }
         requestAuthorization()
@@ -528,11 +565,12 @@ final class RunTracker: NSObject, ObservableObject {
         kmTimes = []
         kmMarkers = []
         weakSince = nil
-        lastFixArrival = Date()
+        lastFixStamp = Date()
         gpsTracked = 0
         gpsWeakCount = 0
         gpsAccSum = 0
         gpsAccCount = 0
+        gpsNoFixTicks = []                                 // [v25.556]
         newPointsSinceCheckpoint = 0
         baroFallback = false
         minStep = sport.minStep
@@ -552,26 +590,32 @@ final class RunTracker: NSObject, ObservableObject {
         startedAt = Date()
         waitingForFix = true
         phase = .running
+        manager.desiredAccuracy = kCLLocationAccuracyBest   // [v25.556] 保險：上一趟暫停中（低精度）被收掉也回到最準
         beginUpdates()
         startTicker()
         startAltimeter()                                   // 暖機時已經開了就略過
         if reducedAccuracy { requestPreciseLocation() }    // [v25.552] 精確位置關著：按開始這一刻請系統「這一次給精確位置」
         checkpointNow()                                    // [v25.552] 一開始就寫一次：檔一直都在，剛出門就被關掉也救得回來
+        RunActivityCenter.shared.began(self)               // [v25.556] 鎖定畫面、靈動島（先收殘留再開；系統關著就默默略過）
     }
 
-    /// 暫停：關定位省電（鎖定畫面的「繼續」v6 再改）。氣壓計不關，onBarometer 在暫停時不算
+    /// 暫停：氣壓計不關，onBarometer 在暫停時不算。
+    /// [v25.556] 定位不關、改低精度（kCLLocationAccuracyHundredMeters，省電）：鎖定畫面、靈動島的〔繼續〕在背景執行，
+    /// When In Use 權限在背景不能重新開始定位，所以不能關；背景更新照開。暫停中定位只動藍點（accept() 的 phase 守門照舊）
     /// [v25.552] 存檔的移動時間算到按暫停那一刻，馬上寫一次中途存檔（暫停中被關掉，救回來的結束時間＝按暫停那一刻）
     func pause() {
         guard phase == .running else { return }
         updateElapsed()                                    // 存檔的移動時間算到按暫停那一刻
         phase = .paused
         pauseStartedAt = Date()
-        manager.stopUpdatingLocation()
+        manager.desiredAccuracy = kCLLocationAccuracyHundredMeters   // [v25.556] 定位不關（鎖定畫面才按得了〔繼續〕），改低精度省電
         checkpointNow()
+        RunActivityCenter.shared.paused(self)              // [v25.556] 馬上推「已暫停」、排 30 分鐘提醒
     }
 
     /// [v25.552] 這次暫停記進暫停清單（按暫停到按繼續），最後馬上寫一次中途存檔
-    /// [v25.555] GPS 弱從繼續那一刻重新起算（暫停時定位是關的，不然一繼續就被當成 10 秒以上收不到）
+    /// [v25.555] GPS 弱從繼續那一刻重新起算（[v25.556] 暫停時是低精度定位：weakSince 會被暫停中那幾筆設上，一繼續就被當成弱）
+    /// [v25.556] 定位改回最準（鎖定畫面按〔繼續〕時 App 在背景：定位沒關過，改精度就好）
     func resume() {
         guard phase == .paused else { return }
         let now = Date()
@@ -581,7 +625,8 @@ final class RunTracker: NSObject, ObservableObject {
         }
         pauseStartedAt = nil
         weakSince = nil
-        lastFixArrival = now
+        gpsNoFixTicks = []                                 // [v25.556]
+        lastFixStamp = now
         // 暫停期間移動過（走去便利商店、坐電梯）：那一段不連線、不算距離、不算爬升，另起一段
         lastStored = nil
         window = []
@@ -592,8 +637,10 @@ final class RunTracker: NSObject, ObservableObject {
         // 被當成爬了 30 公尺（build/v1/g1/elevator_check.py：留著 31～37 m、清掉 6～13 m＝跟平路一樣）
         gpsAltSmooth = nil
         phase = .running
+        manager.desiredAccuracy = kCLLocationAccuracyBest   // [v25.556] 暫停時是低精度：改回最準（定位沒關過，背景也改得了）
         beginUpdates()
         checkpointNow()
+        RunActivityCenter.shared.resumed(self)             // [v25.556] 馬上推「跑步中」、取消 30 分鐘提醒
     }
 
     /// 結束並回傳這一趟的成果；phase 回到 idle。
@@ -601,6 +648,7 @@ final class RunTracker: NSObject, ObservableObject {
     /// [v25.552] 暫停清單、每公里爬升記號一起交出去（最後那次暫停不進 pauses：它在 pauseStartedAt，是結束時間）；
     /// 中途存檔刪掉（背景佇列，排在最後一次寫之後）
     /// [v25.555] 這一趟 GPS 好不好（gpsQuality）一起交出去；每公里時間、小牌不清（畫面已經換成成果頁，下次 start 才清）
+    /// [v25.556] 定位設回最準（暫停中按完成時是低精度）；成果算好之後鎖定畫面換成「完成」那張（RunActivityCenter.finished，15 分鐘後自己收）
     @discardableResult
     func finish() -> RunResult {
         let now = Date()
@@ -611,6 +659,7 @@ final class RunTracker: NSObject, ObservableObject {
         }
         updateElapsed()
         manager.stopUpdatingLocation()
+        manager.desiredAccuracy = kCLLocationAccuracyBest   // [v25.556] 暫停中按完成：下次暖機、開始從最準開始
         manager.allowsBackgroundLocationUpdates = false
         ticker?.cancel(); ticker = nil
         stopAltimeter()
@@ -628,17 +677,21 @@ final class RunTracker: NSObject, ObservableObject {
         RunCheckpointStore.delete(runId)
         pauses = []
         kmClimb = []
+        gpsNoFixTicks = []                                 // [v25.556]
         phase = .idle
         startedAt = nil
         waitingForFix = false
         lastStored = nil
         window = []
+        RunActivityCenter.shared.finished(result)          // [v25.556] 鎖定畫面換成「完成」那張（result.gps 已經填好）
         return result
     }
 
     /// 丟棄這一趟（[v25.552] 中途存檔一起刪；[v25.555] 每公里時間、小牌一起清）
+    /// [v25.556] 定位設回最準；鎖定畫面、靈動島馬上收掉（RunActivityCenter.cancelled）
     func cancel() {
         manager.stopUpdatingLocation()
+        manager.desiredAccuracy = kCLLocationAccuracyBest   // [v25.556] 暫停中放棄：下次暖機、開始從最準開始
         manager.allowsBackgroundLocationUpdates = false
         ticker?.cancel(); ticker = nil
         stopAltimeter()
@@ -660,6 +713,8 @@ final class RunTracker: NSObject, ObservableObject {
         lastStored = nil
         window = []
         seg = 0
+        gpsNoFixTicks = []                                 // [v25.556]
+        RunActivityCenter.shared.cancelled()               // [v25.556] 鎖定畫面、靈動島馬上收掉、取消 30 分鐘提醒
     }
 
     // MARK: - 內部
@@ -692,6 +747,7 @@ final class RunTracker: NSObject, ObservableObject {
                     self.updateElapsed()
                     self.checkpointIfDue()                 // [v25.552] 沒有新點（站著、隧道）也每 30 秒寫一次
                     self.tickGPS()                         // [v25.555] 每秒數一次 GPS 好不好
+                    RunActivityCenter.shared.tick(self)    // [v25.556] 鎖定畫面、靈動島：到時間、走夠遠、過整公里才真的推（節流在 RunActivityCenter）
                 }
             }
     }
@@ -703,11 +759,19 @@ final class RunTracker: NSObject, ObservableObject {
 
     // MARK: GPS 弱的整趟統計（[v25.555] 跟 sim_v5.py 的 TrackerV5.tick／gps_quality 一樣）
 
-    /// 跑步中每秒一次（ticker）：記了幾秒、其中弱幾秒；10 秒內收過定位的那幾秒，把最新那筆的誤差加進平均
+    /// 跑步中每秒一次（ticker）：記了幾秒、其中弱幾秒；10 秒內收過定位的那幾秒，把最新那筆的誤差加進平均。
+    /// [v25.556] 只因為「10 秒收不到」才弱的那一秒記進 gpsNoFixTicks（成批送來時 acceptBatch 重新判斷）；sim_v6.py TrackerV6.tick
     private func tickGPS() {
         gpsTracked += 1
-        if gpsWeak { gpsWeakCount += 1 }
-        if let acc = gpsAccuracy, let a = lastFixArrival,
+        if gpsWeak {
+            gpsWeakCount += 1
+            if !gpsWeakByAccuracy { gpsNoFixTicks.append(Date()) }        // [v25.556] 只因為 10 秒收不到才弱的這一秒：記下來，成批送來時重新判斷
+        }
+        if let first = gpsNoFixTicks.first,
+           Date().timeIntervalSince(first) > freshSeconds + WorkoutFacts.gpsWeakSeconds {
+            gpsNoFixTicks.removeFirst()                                      // [v25.556] 40 秒前的不留（一秒加一個、丟一個，最多四十幾個）
+        }
+        if let acc = gpsAccuracy, let a = lastFixStamp,
            Date().timeIntervalSince(a) <= WorkoutFacts.gpsWeakSeconds {
             gpsAccSum += acc
             gpsAccCount += 1
@@ -756,17 +820,44 @@ final class RunTracker: NSObject, ObservableObject {
 
     // MARK: 存點（[v25.551] 跟 sim_v1.py 的 Tracker.accept／store／thin_out 一模一樣）
 
+    /// [v25.556] 系統一次送來的那一批（locationManager(_:didUpdateLocations:)）：一筆一筆照舊 accept()，
+    /// 再把「只因為 10 秒收不到才算弱」的那幾秒重新判斷——那一秒之前（含）最近收到的一筆離它不到 10 秒、而且在 20 公尺內，
+    /// 就是其實收得到、只是系統攢成一批晚送（鎖屏時），扣回去。build/v6/sim_v6.py TrackerV6.accept_batch
+    private func acceptBatch(_ locations: [CLLocation]) {
+        var got: [(t: Date, good: Bool)] = []
+        for raw in locations {
+            let before = fixSerial
+            accept(raw)
+            if fixSerial != before {                                      // 50 公尺、30 秒、亂序那三道關沒過＝沒收到
+                got.append((t: raw.timestamp, good: raw.horizontalAccuracy <= goodAccuracy))
+            }
+        }
+        guard !got.isEmpty else { return }
+        var back: Double = 0
+        for tick in gpsNoFixTicks {
+            let latest = got.last(where: { $0.t <= tick })                // 那一秒之前（含）最近的一筆（got 照時間排好）
+            if let f = latest, f.good, tick.timeIntervalSince(f.t) < WorkoutFacts.gpsWeakSeconds {
+                back += 1
+            }
+        }
+        gpsWeakCount = max(0, gpsWeakCount - back)
+        gpsNoFixTicks = []
+    }
+
     /// 每一筆定位都進來：暖機、暫停時只更新藍點和燈；跑步中才平均、比對、存點
+    /// [v25.556] 暫停中（低精度定位）燈的誤差不改；lastFixStamp 記定位上的時間。其他一行都沒動
     private func accept(_ raw: CLLocation) {
         guard raw.horizontalAccuracy > 0, raw.horizontalAccuracy <= worstAccuracy else { return }
         guard abs(raw.timestamp.timeIntervalSinceNow) < freshSeconds else { return }   // 原本 10 秒；鎖屏時系統會攢一批才送
         if let t = lastFixTime, raw.timestamp <= t { return }                          // 亂序、重複
         lastFixTime = raw.timestamp
         lastCoordinate = raw.coordinate                                                // 鏡頭與線的尾巴
-        gpsAccuracy = raw.horizontalAccuracy
+        // [v25.556] 暫停中定位是低精度（40 公尺上下）：燈的誤差停在按暫停前那一筆，不會變黃燈「定位中…」；
+        // 藍點、鏡頭照樣跟（fixSerial 照加）
+        if phase != .paused { gpsAccuracy = raw.horizontalAccuracy }
         currentSpeedMS = max(0, raw.speed)
         fixSerial &+= 1
-        lastFixArrival = Date()                                                        // [v25.555] GPS 弱：10 秒收不到
+        lastFixStamp = max(lastFixStamp ?? raw.timestamp, raw.timestamp)              // [v25.556] GPS 弱：10 秒收不到（看定位上的時間，只往後不往前）
         if raw.horizontalAccuracy > goodAccuracy {                                     // [v25.555] GPS 弱：誤差 >20 m 從哪一筆開始
             if weakSince == nil { weakSince = raw.timestamp }
         } else {
@@ -945,7 +1036,7 @@ extension RunTracker: CLLocationManagerDelegate {
                                      didUpdateLocations locations: [CLLocation]) {
         let received = locations
         Task { @MainActor in
-            for loc in received { self.accept(loc) }
+            self.acceptBatch(received)                          // [v25.556] 一筆一筆照舊 accept()，成批送來時 GPS 弱扣回去
         }
     }
 

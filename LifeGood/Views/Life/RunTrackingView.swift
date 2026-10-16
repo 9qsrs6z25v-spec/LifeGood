@@ -167,6 +167,7 @@ struct RunTrackingView: View {
         .onChange(of: tracker.reducedAccuracy) { _, reduced in
             if !reduced { preciseAsked = false }      // [v25.552] 給了：之後系統收回「這一次」的授權時，又可以跳系統框
         }
+        .onChange(of: tracker.phase) { old, new in phaseChanged(old, new) }   // [v25.556] 鎖定畫面按〔繼續〕也會到
     }
 
     /// 現在算哪一種運動：開始後讀記錄器，開始前讀選擇器
@@ -816,7 +817,7 @@ struct RunTrackingView: View {
     }
 
     /// 10 秒內收過定位（隧道、橋下太久沒收到就回到黃燈）。
-    /// 暫停中記錄器把定位關了（省電），燈停在按暫停時的樣子，不要變成「定位中…」嚇人
+    /// 暫停中定位是低精度、記錄器不改燈的誤差（v25.556），燈停在按暫停時的樣子，不要變成「定位中…」嚇人
     private var gpsFresh: Bool {
         if tracker.phase == .paused { return true }
         return (tracker.secondsSinceFix ?? .infinity) <= 10
@@ -963,10 +964,17 @@ struct RunTrackingView: View {
         recenter(animated: false)
     }
 
-    /// 繼續：暫停前把地圖拖走了，繼續之後一樣 10 秒沒再碰就自己回來
+    /// 繼續（畫面上的〔繼續〕）。[v25.556] 暫停前把地圖拖走時的「10 秒自己回來」改由 phaseChanged 排
+    /// （鎖定畫面、靈動島的〔繼續〕也要排；這裡再排一次會排兩次）
     private func resumeRun() {
         tracker.resume()
-        if !following, !wholeRoute { scheduleAutoReturn() }
+    }
+
+    /// [v25.556] 從暫停回到跑步（畫面上的〔繼續〕、鎖定畫面／靈動島的〔繼續〕都會到這裡）：
+    /// 暫停前把地圖拖走了，一樣 10 秒沒再碰就自己回來
+    private func phaseChanged(_ old: RunTracker.Phase, _ new: RunTracker.Phase) {
+        guard old == .paused, new == .running, !following, !wholeRoute else { return }
+        scheduleAutoReturn()
     }
 
     /// 說明卡〔好〕：這時才跳系統的位置框（之後還有「動作與健身」框）
