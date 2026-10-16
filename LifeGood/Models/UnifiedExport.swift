@@ -127,6 +127,9 @@ struct UnifiedExport: Codable {
         var workouts: [WorkoutSession]?
         /// [v25.553] 健康頁的設定（看板主角、每週目標）。舊備份沒有，所以是 Optional
         var workoutPrefs: WorkoutPrefs?
+        /// [v25.554] Apple 健康的帳（不再帶進來的編號、兩筆都留、先不要接回）。舊備份沒有，所以是 Optional——
+        /// 少了它，還原後刪掉的手錶紀錄下次同步會再被帶進來
+        var workoutHealthLedger: WorkoutHealthLedger?
     }
 
     static func build(expense: ExpenseStore, finance: FinanceStore, life: LifeStore,
@@ -190,7 +193,9 @@ struct UnifiedExport: Codable {
                 // [v25.552] 運動紀錄算「個人」那一塊：完整備份、自動快照（都是 .all）才帶
                 workouts: scope.carriesPersonal ? life.workouts : nil,
                 // [v25.553] 健康頁的設定跟運動紀錄一起走（個人那一塊）
-                workoutPrefs: scope.carriesPersonal ? life.workoutPrefs : nil
+                workoutPrefs: scope.carriesPersonal ? life.workoutPrefs : nil,
+                // [v25.554] Apple 健康的帳也跟運動紀錄一起走
+                workoutHealthLedger: scope.carriesPersonal ? life.workoutHealthLedger : nil
             ),
             scope: scope.rawValue
         )
@@ -910,6 +915,8 @@ enum UnifiedImporter {
                     if let w = payload.life.workouts { life.workouts = w }
                     // [v25.553] 健康頁的設定：舊備份沒有（nil）就不動本機的
                     if let wp = payload.life.workoutPrefs { life.workoutPrefs = wp }
+                    // [v25.554] Apple 健康的帳：舊備份沒有（nil）就不動本機的
+                    if let hl = payload.life.workoutHealthLedger { life.workoutHealthLedger = hl }
                 }
                 if scope.carriesCareer {
                     if let subs = payload.life.subordinates { life.subordinates = subs }
@@ -1105,6 +1112,11 @@ enum UnifiedImporter {
                 }
                 // [v25.553] 健康頁的設定是單一物件：合併只在本機什麼都沒設過時帶進來（同健康檔案的寫法）
                 if let wp = payload.life.workoutPrefs, life.workoutPrefs.isEmpty { life.workoutPrefs = wp }
+                // [v25.554] Apple 健康的帳：兩邊的清單取聯集（不再帶進來的編號不會因為合併而少掉）
+                if let hl = payload.life.workoutHealthLedger {
+                    let merged = life.workoutHealthLedger.merged(with: hl)
+                    if merged != life.workoutHealthLedger { life.workoutHealthLedger = merged }
+                }
                 // 舊格式備份的機台上面 appendNewByID 進了部屬的 equipments——搬進機台池
                 life.migrateLegacyEquipmentsToPool()
             }

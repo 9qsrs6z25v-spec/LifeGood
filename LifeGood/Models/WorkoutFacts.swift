@@ -80,14 +80,23 @@ enum WorkoutFacts {
     static func source(of s: WorkoutSession) -> WorkoutSource? {
         if let x = s.source { return x }
         if s.endedAt != nil || s.isLegacyRouteMissing { return .app }
+        // [v25.554] v25.552 以前從 Apple 健康帶進來的（那時沒記來源）：有編號、有路線、沒有真正結束時間——
+        // App 記、有路線的一定有 endedAt（v25.551 起），所以這種只可能是手錶的（舊紀錄找回路線、合成要認得它）
+        if s.healthKitUUID != nil, s.firstRouteExercise != nil { return .watch }
         return nil
     }
 
     /// 這個動作的爬升（公尺）；不知道回 nil（畫面不顯示、不加總、不進紀錄）。
     /// 知道的只有 App 記、有路線的（v25.551 起氣壓計／GPS 去雜訊）；舊版只存到起點的是灌水的，
-    /// 手動補記沒填、Apple 健康帶進來的目前寫 0（v4 才讀手錶的爬升），都當不知道
+    /// 手動補記沒填，都當不知道。
+    /// [v25.554] 先看 health.climbKnown：手錶帶進來的（Apple 健康的 HKMetadataKeyElevationAscended，0＝平路）、
+    /// 跟手錶合成過的舊紀錄（灌水的爬升換成手錶的；手錶沒量就 false＝不知道）照它；nil 才照上面的舊規則
     static func climb(_ e: WorkoutExercise, in s: WorkoutSession) -> Double? {
-        guard e.kind == .cardio, e.hasRoute else { return nil }
+        guard e.kind == .cardio else { return nil }
+        if let known = s.health?.climbKnown {
+            return known ? max(0, e.elevationGainM) : nil
+        }
+        guard e.hasRoute else { return nil }
         guard source(of: s) == .app else { return nil }
         return max(0, e.elevationGainM)
     }
@@ -248,6 +257,8 @@ enum WorkoutFacts {
             source: .app,
             pauses: r.pauses.isEmpty ? nil : r.pauses)
         applyKcalEstimate(&session, bodyWeightKg: bodyWeightKg)
+        // [v25.554] 寫進 Apple 健康用簡化前的點（judge §6 v4）：完整的點只放記憶體一下，寫的時候拿走（WorkoutRouteStash）
+        WorkoutRouteStash.keep(r.route, for: session.id)
         return session
     }
 
@@ -1132,4 +1143,419 @@ extension WorkoutFacts {
         if scene.marks.count >= 2 { scene.star = best?.index }
         return scene
     }
+}
+
+// MARK: - v4：Apple 健康（同一趟、合成、接回路線、改過要更新、寫進去的數字）
+//
+// [v25.554] 健康 v4（health/judge.md §6 v4、§2.5 舊紀錄、§3.4 要確認、§5.3 刪除、待決定 10；build/v4/brief.md）。
+// 全部純函式（照 VehicleFacts）：Apple 健康的讀寫在 HealthKitManager，流程在 HealthSyncCenter（HealthSync.swift），
+// 這裡只放「怎麼判斷、怎麼合、字怎麼寫」，好在 Python 逐行驗算（build/v4/sim_v4.py）。
+// • 同一趟（sameOuting）：時間重疊至少較短那趟的一半，或開始、結束都差 5 分鐘內；運動一樣（健走、登山算同一類）。
+// • 合成（merged）：大卡用手錶量的；路線用比較密的那條（手錶那條先對齊到 App 這一趟的時間、切掉暫停中的點，
+//   而且要至少有 App 那條九成長）；名字、分段、暫停、距離、時間照 App 的。舊版記的那一趟（路線沒存到）整趟改用手錶的
+//   時間、距離、路線、爬升（那時的開始時間是推回去的、距離含 GPS 飄移、爬升灌水），名字照 App 的。
+// • 改過要更新（healthStale）：寫進去那一刻的距離（差 0.05 公里）、移動時間（差 30 秒）、開始（差 1 分鐘）、運動跟現在不一樣。
+
+/// [v25.554] 手錶和 App 同時記到同一趟（健康頁、成果頁「要確認」：〔合成一筆〕〔兩筆都留〕；舊紀錄〔接回來〕）
+struct WorkoutDuplicate: Identifiable, Equatable {
+    /// WorkoutHealthLedger.pairKey（按「兩筆都留」記這個）
+    var id: String
+    /// App 記的那一趟
+    var appId: UUID
+    /// 手錶帶進來的那一趟（LifeGood 裡的 id）
+    var watchId: UUID
+    /// 手錶那一筆的 Apple 健康編號
+    var watchUUID: String
+    /// App 那一趟的運動
+    var sport: WorkoutSport
+    var appStart: Date
+    var appEnd: Date
+    var watchStart: Date
+    var watchEnd: Date
+    /// 手錶那一趟的距離（公里）
+    var watchKm: Double
+    /// App 那一趟是舊版記的、路線沒存到（問句改成「接回來」；手錶那一趟一定有路線）
+    var legacy: Bool
+}
+
+/// [v25.554] 寫進 Apple 健康以後又改過（〔更新〕＝刪掉 Apple 健康裡舊的那筆、照現在的寫一筆新的）
+struct WorkoutHealthStale: Identifiable, Equatable {
+    /// 那一趟的 id
+    var id: UUID
+    var date: Date
+    /// 畫面上的名字（WorkoutFacts.title）
+    var title: String
+    /// 寫進去那時的距離；距離沒改（改的是時間、開始、運動）是 nil
+    var writtenKm: Double?
+}
+
+/// [v25.554] 寫進 Apple 健康的距離種類（HealthKitManager 對到 HKQuantityTypeIdentifier）
+enum WorkoutHealthDistance: Equatable {
+    /// 跑步、健走、登山：步行＋跑步距離
+    case walkingRunning
+    /// 騎車：騎車距離（v25.553 以前一律寫成步行＋跑步，健身 App 的步行距離被灌了騎的公里）
+    case cycling
+    /// 重訓、其他有氧（橢圓機、划船、游泳…）：不寫距離（寫成步行＋跑步是錯的）
+    case none
+}
+
+extension WorkoutFacts {
+
+    /// 打開健康頁時，離上次同步超過這麼久就自動同步（judge §6 v4）
+    static let healthAutoSyncInterval: TimeInterval = 15 * 60
+    /// 手錶的路線比那筆運動晚到：結束後這麼久以內，每次同步都再找一次（judge §6 v4、u4 §4.3）
+    static let healthLateRouteWindow: TimeInterval = 24 * 3_600
+    /// 同一趟的「前後容許」
+    static let healthOverlapSlack: TimeInterval = 5 * 60
+
+    // MARK: 寫進去
+
+    /// 一趟的結束時間：App 記的用真正結束（endedAt，對得上才用），其他「開始＋移動時間」（WorkoutSession.workoutEnd）
+    static func endDate(_ s: WorkoutSession) -> Date {
+        s.workoutEnd(movingMinutes: movingMinutes(s))
+    }
+
+    /// 寫進 Apple 健康的距離種類：跑步、健走、登山＝步行＋跑步；騎車＝騎車；重訓、其他有氧不寫距離
+    static func healthDistance(for sport: WorkoutSport) -> WorkoutHealthDistance {
+        switch sport {
+        case .run, .walk, .hike:
+            return .walkingRunning
+        case .bike:
+            return .cycling
+        case .strength, .other:
+            return .none
+        }
+    }
+
+    /// 寫進 Apple 健康的暫停（一次暫停＝一個「暫停」事件＋一個「繼續」事件）：照開始排好、夾在［start, end］裡、
+    /// 不到 1 秒的不要、重疊或相接的併成一段。例：06:00 開始、06:20–06:30 暫停、06:52 結束 → 健身 App 移動時間 42 分鐘
+    static func healthPauses(_ s: WorkoutSession, start: Date, end: Date) -> [WorkoutPause] {
+        guard end > start else { return [] }
+        let sorted = (s.pauses ?? []).sorted { $0.start < $1.start }
+        var out: [WorkoutPause] = []
+        for p in sorted {
+            let a = max(p.start, start)
+            let b = min(p.end, end)
+            guard b.timeIntervalSince(a) >= 1 else { continue }
+            if let last = out.last, a <= last.end {
+                if b > last.end { out[out.count - 1].end = b }
+            } else {
+                out.append(WorkoutPause(start: a, end: b))
+            }
+        }
+        return out
+    }
+
+    /// 寫進去成功時記下來的數字（成果頁「已存進 Apple 健康・06:40」、之後比對要不要〔更新〕）；
+    /// 帶進來、合成、爬升的欄位照原本的留著
+    static func healthStamp(_ s: WorkoutSession, at date: Date) -> WorkoutHealthLink {
+        var h = s.health ?? WorkoutHealthLink()
+        h.written = true
+        h.writtenAt = date
+        h.writtenKm = s.totalDistanceKm
+        h.writtenMinutes = movingMinutes(s)
+        h.writtenStart = s.date
+        h.writtenSport = s.primarySport.rawValue
+        return h
+    }
+
+    // MARK: 改過要更新
+
+    /// LifeGood 寫進 Apple 健康以後又改過：距離差 0.05 公里以上、移動時間差 30 秒以上、開始差 1 分鐘以上、或運動換了。
+    /// 只看 LifeGood 寫的（health.written == true、有編號、沒跟手錶合成過）；寫進去那時沒記的數字（nil）不比
+    static func healthStale(_ s: WorkoutSession) -> WorkoutHealthStale? {
+        guard s.healthKitUUID != nil, let h = s.health, h.written == true, h.mergedWatchUUID == nil else { return nil }
+        var kmChanged = false
+        if let w = h.writtenKm, abs(s.totalDistanceKm - w) >= 0.05 { kmChanged = true }
+        var changed = kmChanged
+        if let w = h.writtenMinutes, abs(movingMinutes(s) - w) >= 0.5 { changed = true }
+        if let w = h.writtenStart, abs(s.date.timeIntervalSince(w)) >= 60 { changed = true }
+        if let w = h.writtenSport, w != s.primarySport.rawValue { changed = true }
+        guard changed else { return nil }
+        return WorkoutHealthStale(id: s.id, date: s.date, title: title(s), writtenKm: kmChanged ? h.writtenKm : nil)
+    }
+
+    /// 全部改過、Apple 健康裡還是舊的那幾趟（新到舊）
+    static func staleWrites(_ sessions: [WorkoutSession]) -> [WorkoutHealthStale] {
+        sessions.compactMap { healthStale($0) }.sorted { $0.date > $1.date }
+    }
+
+    // MARK: 同步
+
+    /// 這次同步從什麼時候抓起：上次同步往回 1 天（手錶跑完到 App 打開中間的那一趟、晚到的不會漏）；
+    /// 第一次（或上次同步時間在未來：手機時間被改過）抓 90 天
+    static func healthSyncStart(lastSync: Date?, now: Date) -> Date {
+        if let l = lastSync, l <= now { return l.addingTimeInterval(-86_400) }
+        return calendar.date(byAdding: .day, value: -90, to: now) ?? now.addingTimeInterval(-90 * 86_400)
+    }
+
+    /// 打開健康頁要不要自動同步：沒同步過、離上次 15 分鐘以上、或上次同步時間在未來
+    static func healthSyncDue(lastSync: Date?, now: Date) -> Bool {
+        guard let l = lastSync else { return true }
+        let gap = now.timeIntervalSince(l)
+        return gap >= healthAutoSyncInterval || gap < 0
+    }
+
+    /// 這一趟要不要再讀一次 Apple 健康那一筆：
+    /// • 手錶帶進來的：v4 以前帶進來、還沒讀過（補爬升、騎車距離、路線）；或跑走騎登山、還沒有路線、結束 24 小時內（路線晚到）。
+    /// • 其他有編號的（LifeGood 寫的、舊資料看不出來的）：還不知道是不是 LifeGood 寫的（health.written 是 nil）、也還沒讀過——
+    ///   讀一次補上寫進去的數字（之後才知道要不要〔更新〕、刪除時能不能一起刪）。合成過的不讀
+    static func needsHealthRefresh(_ s: WorkoutSession, now: Date) -> Bool {
+        guard let uuid = s.healthKitUUID, UUID(uuidString: uuid) != nil else { return false }
+        if source(of: s) == .watch {
+            if s.health?.refreshedAt == nil { return true }
+            guard [WorkoutSport.run, .walk, .bike, .hike].contains(s.primarySport),
+                  s.firstRouteExercise == nil else { return false }
+            let since = now.timeIntervalSince(endDate(s))
+            return since >= 0 && since <= healthLateRouteWindow
+        }
+        if s.health?.mergedWatchUUID != nil { return false }
+        return s.health?.written == nil && s.health?.refreshedAt == nil
+    }
+
+    // MARK: 同一趟
+
+    /// 同一種運動才算同一趟；健走和登山算同一類（手錶選「戶外步行」、App 選登山）
+    static func sportsMatch(_ a: WorkoutSport, _ b: WorkoutSport) -> Bool {
+        if a == b { return true }
+        let pair: Set<WorkoutSport> = [a, b]
+        return pair == [.walk, .hike]
+    }
+
+    /// 兩段時間重疊的秒數（不重疊是 0）
+    static func overlapSeconds(aStart: Date, aEnd: Date, bStart: Date, bEnd: Date) -> Double {
+        let a1 = max(aEnd, aStart)
+        let b1 = max(bEnd, bStart)
+        return max(0, min(a1, b1).timeIntervalSince(max(aStart, bStart)))
+    }
+
+    /// 是不是同一趟出門：開始、結束都差 5 分鐘內；或重疊的時間至少是較短那一趟的一半（最短當 1 分鐘算）
+    static func sameOuting(aStart: Date, aEnd: Date, bStart: Date, bEnd: Date) -> Bool {
+        let a1 = max(aEnd, aStart)
+        let b1 = max(bEnd, bStart)
+        if abs(aStart.timeIntervalSince(bStart)) <= healthOverlapSlack
+            && abs(a1.timeIntervalSince(b1)) <= healthOverlapSlack {
+            return true
+        }
+        let overlap = overlapSeconds(aStart: aStart, aEnd: a1, bStart: bStart, bEnd: b1)
+        guard overlap > 0 else { return false }
+        let shorter = max(60, min(a1.timeIntervalSince(aStart), b1.timeIntervalSince(bStart)))
+        return overlap >= shorter * 0.5
+    }
+
+    /// 這一趟跟 Apple 健康裡某一筆（開始、結束、運動）是不是同一趟（舊紀錄找回路線用）
+    static func matchesOuting(_ s: WorkoutSession, start: Date, end: Date, sport: WorkoutSport?) -> Bool {
+        guard let sport, sportsMatch(s.primarySport, sport) else { return false }
+        return sameOuting(aStart: s.date, aEnd: endDate(s), bStart: start, bEnd: end)
+    }
+
+    /// 手錶和 App 同時記到的同一趟（新到舊）。App 那一趟＝App 記的有氧、還沒合成過；手錶那一趟＝帶進來的有氧、有編號。
+    /// 一趟 App 只配重疊最多的那一筆手錶、一筆手錶只配一趟；按過「兩筆都留」的那一對不再出現。
+    /// 舊版記的（路線沒存到）只在手錶那一筆有路線時才配（問句是「接回來」）
+    static func duplicates(_ sessions: [WorkoutSession], ledger: WorkoutHealthLedger) -> [WorkoutDuplicate] {
+        let watches = sessions.filter { w in
+            source(of: w) == .watch && w.healthKitUUID != nil && w.primarySport.isCardio
+        }
+        guard !watches.isEmpty else { return [] }
+        let apps = sessions
+            .filter { a in
+                source(of: a) == .app && a.primarySport.isCardio && a.health?.mergedWatchUUID == nil
+            }
+            .sorted { $0.date > $1.date }
+        var used = Set<UUID>()
+        var out: [WorkoutDuplicate] = []
+        for a in apps {
+            let aEnd = endDate(a)
+            let legacy = a.isLegacyRouteMissing
+            var best: WorkoutSession?
+            var bestOverlap = -1.0
+            for w in watches where !used.contains(w.id) {
+                guard let hk = w.healthKitUUID, !ledger.keeps(appId: a.id, watchUUID: hk) else { continue }
+                guard abs(w.date.timeIntervalSince(a.date)) <= 86_400 else { continue }
+                guard sportsMatch(a.primarySport, w.primarySport) else { continue }
+                if legacy && w.firstRouteExercise == nil { continue }
+                let wEnd = endDate(w)
+                guard sameOuting(aStart: a.date, aEnd: aEnd, bStart: w.date, bEnd: wEnd) else { continue }
+                let ov = overlapSeconds(aStart: a.date, aEnd: aEnd, bStart: w.date, bEnd: wEnd)
+                if ov > bestOverlap {
+                    best = w
+                    bestOverlap = ov
+                }
+            }
+            guard let w = best, let hk = w.healthKitUUID else { continue }
+            used.insert(w.id)
+            out.append(WorkoutDuplicate(
+                id: WorkoutHealthLedger.pairKey(appId: a.id, watchUUID: hk),
+                appId: a.id, watchId: w.id, watchUUID: hk, sport: a.primarySport,
+                appStart: a.date, appEnd: aEnd, watchStart: w.date, watchEnd: endDate(w),
+                watchKm: w.totalDistanceKm, legacy: legacy))
+        }
+        return out
+    }
+
+    /// 舊版記的、路線沒存到、還要去 Apple 健康找路線的那幾趟（新到舊）：按過「先不要」的不找；
+    /// 手錶那筆已經帶進 LifeGood 的（duplicates 裡有 legacy 的那一對）走合成，不用再找
+    static func legacyNeedingRoute(_ sessions: [WorkoutSession], ledger: WorkoutHealthLedger,
+                                   duplicates: [WorkoutDuplicate]) -> [WorkoutSession] {
+        let paired = Set(duplicates.filter { $0.legacy }.map { $0.appId })
+        return sessions
+            .filter { $0.isLegacyRouteMissing && !ledger.skipped($0.id) && !paired.contains($0.id) }
+            .sorted { $0.date > $1.date }
+    }
+
+    // MARK: 合成
+
+    /// 路線長度（公尺；同一段 seg 裡相加，暫停的空隙不算）
+    static func routeLengthMeters(_ route: [RoutePoint]) -> Double {
+        guard route.count >= 2 else { return 0 }
+        var total = 0.0
+        for i in 1..<route.count {
+            let p = route[i - 1]
+            let q = route[i]
+            guard (p.seg ?? 0) == (q.seg ?? 0) else { continue }
+            let d = CLLocation(latitude: p.lat, longitude: p.lon)
+                .distance(from: CLLocation(latitude: q.lat, longitude: q.lon))
+            if d.isFinite { total += d }
+        }
+        return total
+    }
+
+    /// 手錶的路線對齊到 App 這一趟：每一點的時間改成「距 App 開始幾秒」；App 開始前、結束後（前後容許 1 秒）、
+    /// App 暫停中的點不要；第幾次暫停之後就是第幾段（seg，0 寫 nil）
+    static func routeRebased(_ route: [RoutePoint], routeStart: Date, start: Date, end: Date,
+                             pauses: [WorkoutPause]?) -> [RoutePoint] {
+        let ps = (pauses ?? []).filter { $0.end > $0.start }.sorted { $0.start < $1.start }
+        let lo = start.addingTimeInterval(-1)
+        let hi = end.addingTimeInterval(1)
+        var out: [RoutePoint] = []
+        out.reserveCapacity(route.count)
+        for p in route {
+            let at = routeStart.addingTimeInterval(p.t)
+            guard at >= lo, at <= hi else { continue }
+            var seg = 0
+            var inPause = false
+            for q in ps {
+                if at > q.start && at < q.end {
+                    inPause = true
+                    break
+                }
+                if at >= q.end { seg += 1 }
+            }
+            if inPause { continue }
+            out.append(RoutePoint(lat: p.lat, lon: p.lon, t: max(0, at.timeIntervalSince(start)),
+                                  alt: p.alt, seg: seg == 0 ? nil : seg))
+        }
+        return out
+    }
+
+    /// 合成時要不要換成手錶那條路線：App 那條不到 2 點就換；不然手錶那條要至少有 App 那條九成長（手錶晚按、早停的不換），
+    /// 而且每公里的點比較多（比較密）
+    static func prefersWatchRoute(mine: [RoutePoint], watch: [RoutePoint]) -> Bool {
+        guard watch.count >= 2 else { return false }
+        guard mine.count >= 2 else { return true }
+        let lw = routeLengthMeters(watch)
+        let lm = routeLengthMeters(mine)
+        guard lm > 0, lw >= lm * 0.9 else { return false }
+        let dw = Double(watch.count) / max(lw / 1000, 0.1)
+        let dm = Double(mine.count) / max(lm / 1000, 0.1)
+        return dw > dm
+    }
+
+    /// 一趟裡要換路線、換數字的那個動作：有路線的那個；沒有就第一個有氧
+    static func mainCardioIndex(_ s: WorkoutSession) -> Int? {
+        s.exercises.firstIndex { $0.hasRoute } ?? s.exercises.firstIndex { $0.kind == .cardio }
+    }
+
+    /// 手錶和 App 同一趟合成一筆（待決定 10：大卡、心率用手錶的，路線用比較密的那條，名稱用 App 的）。
+    /// 回傳的是 App 那一趟（同一個 id）；healthKitUUID 不動（要不要改指向手錶那筆，看 LifeGood 自己寫的那筆刪掉了沒，
+    /// HealthSyncCenter 決定）；health.mergedWatchUUID 記手錶那筆。大卡手錶沒量時，呼叫端再 applyKcalEstimate 一次
+    static func merged(app a: WorkoutSession, watch w: WorkoutSession) -> WorkoutSession {
+        var out = a
+        if out.source == nil { out.source = source(of: a) ?? .app }
+        var link = a.health ?? WorkoutHealthLink()
+        link.mergedWatchUUID = w.healthKitUUID
+        if w.activeEnergyKcal > 0 && w.kcalEstimated != true {
+            out.activeEnergyKcal = w.activeEnergyKcal
+            out.kcalEstimated = nil
+        }
+        guard let i = mainCardioIndex(a) else {
+            out.health = link
+            return out
+        }
+        if a.isLegacyRouteMissing {
+            // 舊版記的：開始時間是「按完成減掉時間」推回去的、距離含 GPS 飄移、爬升灌水——整趟改用手錶的
+            if let we = w.firstRouteExercise ?? w.cardioExercises.first {
+                out.date = w.date
+                out.endedAt = endDate(w)
+                let moving = movingMinutes(w)
+                if moving > 0 {
+                    out.durationMinutes = moving
+                    out.exercises[i].durationMinutes = moving
+                }
+                if we.distanceKm > 0 { out.exercises[i].distanceKm = we.distanceKm }
+                out.exercises[i].route = we.route
+                out.exercises[i].splits = nil
+                let wc = climb(we, in: w)
+                out.exercises[i].elevationGainM = wc ?? 0
+                link.climbKnown = wc != nil
+                out.pauses = nil
+            }
+        } else if let we = w.firstRouteExercise {
+            let rebased = routeRebased(we.route, routeStart: w.date, start: a.date, end: endDate(a), pauses: a.pauses)
+            if prefersWatchRoute(mine: out.exercises[i].route, watch: rebased) {
+                out.exercises[i].route = rebased
+            }
+        }
+        out.health = link
+        return out
+    }
+
+    // MARK: 字（健康頁、成果頁「要確認」）
+
+    /// 健康頁：「Apple Watch 也記了 10/8 06:04–06:41 這一趟（6.0 公里），要合成一筆嗎？」；
+    /// 舊紀錄「9/20 的跑步是舊版記的，路線沒存到；Apple Watch 同一時間有路線。」
+    static func duplicatePrompt(_ d: WorkoutDuplicate) -> String {
+        if d.legacy { return legacyRoutePrompt(date: d.appStart, sport: d.sport) }
+        var s = "Apple Watch 也記了 " + WorkoutFormat.monthDay(d.watchStart) + " "
+            + WorkoutFormat.time(d.watchStart) + "–" + WorkoutFormat.time(d.watchEnd) + " 這一趟"
+        if d.watchKm >= 0.05 { s += "（" + WorkoutFormat.km(d.watchKm) + "）" }
+        return s + "，要合成一筆嗎？"
+    }
+
+    /// 健康頁：舊紀錄（手錶那筆還沒帶進來、或已經帶進來）「9/20 的跑步是舊版記的，路線沒存到；Apple Watch 同一時間有路線。」
+    static func legacyRoutePrompt(date: Date, sport: WorkoutSport) -> String {
+        WorkoutFormat.monthDay(date) + " 的" + sport.displayName + "是舊版記的，路線沒存到；Apple Watch 同一時間有路線。"
+    }
+
+    /// 成果頁（看的是 App 那一趟）：「Apple Watch 也記了這一趟（06:04–06:39），要合成一筆嗎？」；
+    /// 看的是手錶那一趟：「LifeGood 也記了這一趟（06:05–06:39），要合成一筆嗎？」；舊紀錄改成「接回來」的說法
+    static func duplicateDetailPrompt(_ d: WorkoutDuplicate, viewingWatch: Bool) -> String {
+        if d.legacy {
+            return viewingWatch
+                ? "LifeGood 舊版也記了這一趟，路線當時沒存到；可以把這一筆的路線接回去、合成一筆。"
+                : "這一趟是舊版記錄的，路線當時沒存到；Apple Watch 同一時間有路線，可以接回來。"
+        }
+        if viewingWatch {
+            return "LifeGood 也記了這一趟（" + WorkoutFormat.time(d.appStart) + "–" + WorkoutFormat.time(d.appEnd)
+                + "），要合成一筆嗎？"
+        }
+        return "Apple Watch 也記了這一趟（" + WorkoutFormat.time(d.watchStart) + "–" + WorkoutFormat.time(d.watchEnd)
+            + "），要合成一筆嗎？"
+    }
+
+    /// 健康頁：「10/12 晨跑改過了，Apple 健康裡還是 4.0 公里。」；距離沒改「…Apple 健康裡還是改之前的樣子。」
+    static func stalePrompt(_ st: WorkoutHealthStale) -> String {
+        let head = WorkoutFormat.monthDay(st.date) + " " + st.title + "改過了，Apple 健康裡還是"
+        if let km = st.writtenKm { return head + " " + WorkoutFormat.km(km) + "。" }
+        return head + "改之前的樣子。"
+    }
+
+    /// 成果頁 Apple 健康那一列：「Apple 健康裡還是改之前的 5.0 公里」；距離沒改「Apple 健康裡還是改之前的樣子」
+    static func staleDetail(_ st: WorkoutHealthStale) -> String {
+        if let km = st.writtenKm { return "Apple 健康裡還是改之前的 " + WorkoutFormat.km(km) }
+        return "Apple 健康裡還是改之前的樣子"
+    }
+
+    /// 健康頁：v4 多要一項讀寫權限（騎車距離），還沒同意過
+    static let moreAccessPrompt = "Apple 健康多了一項要你同意：騎車距離。"
 }

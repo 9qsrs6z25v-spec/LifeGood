@@ -3855,19 +3855,24 @@ struct WorkoutSession: Identifiable, Codable {
     var pauses: [WorkoutPause]?
     /// [v25.552] activeEnergyKcal 是估的（沒有手錶量的，用 MET 表估好存回來；畫面前面加「約」）
     var kcalEstimated: Bool?
+    /// [v25.554] 這一趟跟 Apple 健康的關係（LifeGood 寫進去的時間與數字、帶進來的時間、手錶爬升讀過沒、跟手錶那筆合成過）。
+    /// nil＝v25.553 以前的資料、或沒碰過 Apple 健康。見 WorkoutHealthLink
+    var health: WorkoutHealthLink?
 
     init(id: UUID = UUID(), date: Date = Date(), title: String = "",
          exercises: [WorkoutExercise] = [], durationMinutes: Double = 0,
          place: String = "", note: String = "",
          healthKitUUID: String? = nil, activeEnergyKcal: Double = 0,
          endedAt: Date? = nil, source: WorkoutSource? = nil,
-         pauses: [WorkoutPause]? = nil, kcalEstimated: Bool? = nil) {
+         pauses: [WorkoutPause]? = nil, kcalEstimated: Bool? = nil,
+         health: WorkoutHealthLink? = nil) {
         self.id = id; self.date = date; self.title = title
         self.exercises = exercises; self.durationMinutes = durationMinutes
         self.place = place; self.note = note
         self.healthKitUUID = healthKitUUID; self.activeEnergyKcal = activeEnergyKcal
         self.endedAt = endedAt
         self.source = source; self.pauses = pauses; self.kcalEstimated = kcalEstimated
+        self.health = health
     }
 
     init(from decoder: Decoder) throws {
@@ -3885,11 +3890,13 @@ struct WorkoutSession: Identifiable, Codable {
         source = try? c.decodeIfPresent(WorkoutSource.self, forKey: .source)
         pauses = try? c.decodeIfPresent([WorkoutPause].self, forKey: .pauses)
         kcalEstimated = try? c.decodeIfPresent(Bool.self, forKey: .kcalEstimated)
+        health = try? c.decodeIfPresent(WorkoutHealthLink.self, forKey: .health)
     }
     private enum CodingKeys: String, CodingKey {
         case id, date, title, exercises, durationMinutes, place, note
         case healthKitUUID, activeEnergyKcal, endedAt
         case source, pauses, kcalEstimated
+        case health
     }
 
     /// [v25.551] 寫進 Apple 健康用的結束時間。movingMinutes 是呼叫端算好的移動時間（分鐘）。
@@ -4016,6 +4023,162 @@ struct WorkoutPrefs: Codable, Equatable {
 
     /// 什麼都沒設過（合併匯入時只在本機沒設過才帶進來）
     var isEmpty: Bool { heroSport == nil && (weeklyGoalKm ?? [:]).isEmpty }
+}
+
+// MARK: - 跟 Apple 健康的關係（v25.554，健康 v4；health/judge.md §6 v4、build/v4/brief.md）
+
+/// [v25.554] 一趟運動跟 Apple 健康的關係（存在 WorkoutSession.health）。
+/// 欄位全部 Optional＋decodeIfPresent：舊資料、還沒更新的 iPad 都讀得進來（舊版讀不懂就略過這個鍵）。
+/// • LifeGood 寫進去的：written＝true，寫進去那一刻的距離、移動時間、開始、運動記在 written*——之後編輯改了，
+///   跟這幾個一比就知道 Apple 健康裡那筆是舊的（成果頁、健康頁要確認〔更新〕；WorkoutFacts.healthStale）。
+/// • 從 Apple 健康帶進來的（手錶記的）：importedAt；v4 起重新讀過（爬升、騎車距離、晚到的路線）記 refreshedAt。
+/// • 跟手錶那筆合成過：mergedWatchUUID（healthKitUUID 改指向手錶那筆；LifeGood 自己寫的那筆已經從 Apple 健康刪掉）。
+struct WorkoutHealthLink: Codable, Equatable {
+    /// true＝healthKitUUID 那一筆是 LifeGood 寫進 Apple 健康的（可以〔更新〕、刪除時可以一起刪）；
+    /// false＝Apple 健康裡那筆不是 LifeGood 寫的；nil＝還不知道（v25.553 以前寫的，v4 同步時讀一次 Apple 健康補上）
+    var written: Bool?
+    /// LifeGood 寫進去的時間（成果頁「已存進 Apple 健康・10/15 06:40」）；v25.553 以前寫的不知道（nil）
+    var writtenAt: Date?
+    /// 寫進去那一刻的距離（公里）
+    var writtenKm: Double?
+    /// 寫進去那一刻的移動時間（分鐘）；v25.553 以前寫的不知道（nil，不拿來比）
+    var writtenMinutes: Double?
+    /// 寫進去那一刻的開始時間
+    var writtenStart: Date?
+    /// 寫進去那一刻的運動（WorkoutSport.rawValue）；v25.553 以前寫的不知道（nil，不拿來比）
+    var writtenSport: String?
+    /// 從 Apple 健康帶進來的時間（成果頁「來自 Apple Watch・10/8 匯入」）
+    var importedAt: Date?
+    /// v4 起重新讀過 Apple 健康那一筆的時間；nil＝還沒讀過（手錶記的要補爬升、騎車距離；LifeGood 寫的要補 written*）
+    var refreshedAt: Date?
+    /// 爬升知不知道：true＝elevationGainM 是手錶量的（0＝平路）或合成時從手錶來的；false＝不知道；
+    /// nil＝照舊規則（App 記、有路線才知道，見 WorkoutFacts.climb）
+    var climbKnown: Bool?
+    /// 跟手錶那一筆合成過：手錶那筆的 Apple 健康編號
+    var mergedWatchUUID: String?
+
+    init(written: Bool? = nil, writtenAt: Date? = nil, writtenKm: Double? = nil,
+         writtenMinutes: Double? = nil, writtenStart: Date? = nil, writtenSport: String? = nil,
+         importedAt: Date? = nil, refreshedAt: Date? = nil, climbKnown: Bool? = nil,
+         mergedWatchUUID: String? = nil) {
+        self.written = written
+        self.writtenAt = writtenAt
+        self.writtenKm = writtenKm
+        self.writtenMinutes = writtenMinutes
+        self.writtenStart = writtenStart
+        self.writtenSport = writtenSport
+        self.importedAt = importedAt
+        self.refreshedAt = refreshedAt
+        self.climbKnown = climbKnown
+        self.mergedWatchUUID = mergedWatchUUID
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        written = try? c.decodeIfPresent(Bool.self, forKey: .written)
+        writtenAt = try? c.decodeIfPresent(Date.self, forKey: .writtenAt)
+        writtenKm = try? c.decodeIfPresent(Double.self, forKey: .writtenKm)
+        writtenMinutes = try? c.decodeIfPresent(Double.self, forKey: .writtenMinutes)
+        writtenStart = try? c.decodeIfPresent(Date.self, forKey: .writtenStart)
+        writtenSport = try? c.decodeIfPresent(String.self, forKey: .writtenSport)
+        importedAt = try? c.decodeIfPresent(Date.self, forKey: .importedAt)
+        refreshedAt = try? c.decodeIfPresent(Date.self, forKey: .refreshedAt)
+        climbKnown = try? c.decodeIfPresent(Bool.self, forKey: .climbKnown)
+        mergedWatchUUID = try? c.decodeIfPresent(String.self, forKey: .mergedWatchUUID)
+    }
+    private enum CodingKeys: String, CodingKey {
+        case written, writtenAt, writtenKm, writtenMinutes, writtenStart, writtenSport
+        case importedAt, refreshedAt, climbKnown, mergedWatchUUID
+    }
+
+    /// 寫進去的數字全部清掉（〔更新〕刪掉舊的那筆之後、合成時 LifeGood 那筆刪掉之後）；帶進來、合成、爬升的欄位留著
+    mutating func clearWritten() {
+        written = nil
+        writtenAt = nil
+        writtenKm = nil
+        writtenMinutes = nil
+        writtenStart = nil
+        writtenSport = nil
+    }
+}
+
+/// [v25.554] LifeGood 對 Apple 健康的帳（LifeStore.workoutHealthLedger，鍵 life_workout_health，跟 iCloud 同步、進完整備份）。
+/// 單獨一個鍵、不放進 WorkoutPrefs：還沒更新的 iPad 存任何資料都會整包重寫已知的鍵（舊版不認得的欄位會被丟掉），
+/// 單獨一個它不認得的鍵就不會被它蓋掉。欄位全部 Optional＋decodeIfPresent。
+struct WorkoutHealthLedger: Codable, Equatable {
+    /// 不再帶進來的 Apple 健康編號：在 LifeGood 刪掉的手錶那筆、合成或接回路線用掉的手錶那筆、只刪 LifeGood 那筆時留在 Apple 健康的
+    var ignored: [String]?
+    /// 「兩筆都留」：App 那一趟的 id＋手錶那筆的編號（pairKey）
+    var keptPairs: [String]?
+    /// 舊紀錄找回路線按了「先不要」的那幾趟（App 那一趟的 id.uuidString）
+    var skippedRecoveries: [String]?
+
+    /// 每一張清單最多留幾個（最舊的先丟）
+    static let maxEntries = 2_000
+
+    init(ignored: [String]? = nil, keptPairs: [String]? = nil, skippedRecoveries: [String]? = nil) {
+        self.ignored = ignored
+        self.keptPairs = keptPairs
+        self.skippedRecoveries = skippedRecoveries
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        ignored = try? c.decodeIfPresent([String].self, forKey: .ignored)
+        keptPairs = try? c.decodeIfPresent([String].self, forKey: .keptPairs)
+        skippedRecoveries = try? c.decodeIfPresent([String].self, forKey: .skippedRecoveries)
+    }
+    private enum CodingKeys: String, CodingKey { case ignored, keptPairs, skippedRecoveries }
+
+    /// 「兩筆都留」的鍵：「<App 那趟 id>|<手錶編號>」
+    static func pairKey(appId: UUID, watchUUID: String) -> String {
+        appId.uuidString + "|" + watchUUID
+    }
+
+    /// 同步時排除用（加上已經在 LifeGood 的編號）
+    var ignoredSet: Set<String> { Set(ignored ?? []) }
+
+    func isIgnored(_ uuid: String) -> Bool { (ignored ?? []).contains(uuid) }
+
+    func keeps(appId: UUID, watchUUID: String) -> Bool {
+        (keptPairs ?? []).contains(Self.pairKey(appId: appId, watchUUID: watchUUID))
+    }
+
+    func skipped(_ sessionId: UUID) -> Bool { (skippedRecoveries ?? []).contains(sessionId.uuidString) }
+
+    var isEmpty: Bool {
+        (ignored ?? []).isEmpty && (keptPairs ?? []).isEmpty && (skippedRecoveries ?? []).isEmpty
+    }
+
+    mutating func ignore(_ uuid: String) {
+        ignored = Self.appending(uuid, to: ignored)
+    }
+
+    mutating func keepPair(appId: UUID, watchUUID: String) {
+        keptPairs = Self.appending(Self.pairKey(appId: appId, watchUUID: watchUUID), to: keptPairs)
+    }
+
+    mutating func skipRecovery(_ sessionId: UUID) {
+        skippedRecoveries = Self.appending(sessionId.uuidString, to: skippedRecoveries)
+    }
+
+    /// 合併匯入：兩邊的清單取聯集（本機的在前）
+    func merged(with other: WorkoutHealthLedger) -> WorkoutHealthLedger {
+        var out = self
+        for x in other.ignored ?? [] { out.ignored = Self.appending(x, to: out.ignored) }
+        for x in other.keptPairs ?? [] { out.keptPairs = Self.appending(x, to: out.keptPairs) }
+        for x in other.skippedRecoveries ?? [] { out.skippedRecoveries = Self.appending(x, to: out.skippedRecoveries) }
+        return out
+    }
+
+    /// 加在最後；已經有就不加；超過 maxEntries 從最舊的丟
+    private static func appending(_ value: String, to list: [String]?) -> [String] {
+        var all = list ?? []
+        guard !value.isEmpty, !all.contains(value) else { return all }
+        all.append(value)
+        if all.count > maxEntries { all.removeFirst(all.count - maxEntries) }
+        return all
+    }
 }
 
 // MARK: - 績效互評（年度同儕排名）

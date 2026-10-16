@@ -151,6 +151,10 @@ struct HealthPageData {
     var hasStrength: Bool
     /// 一筆都沒有（新手）
     var isEmpty: Bool
+    /// [v25.554] 手錶和 App 同時記到的同一趟（要確認〔合成一筆〕〔兩筆都留〕；舊紀錄〔接回來〕）。新到舊
+    var duplicates: [WorkoutDuplicate] = []
+    /// [v25.554] 寫進 Apple 健康以後又改過的（要確認〔更新〕）。新到舊
+    var staleWrites: [WorkoutHealthStale] = []
 }
 
 extension HealthPageData {
@@ -158,10 +162,12 @@ extension HealthPageData {
     /// 跑、走、騎、登山（看板、膠囊、每週公里、開始列的順序）
     static let cardioSports: [WorkoutSport] = [.run, .walk, .bike, .hike]
 
-    /// 整頁一次算好。在 .task(id:) 裡、主執行緒呼叫（MoneyItem.workout 用到共用的 formatter）
+    /// 整頁一次算好。在 .task(id:) 裡、主執行緒呼叫（MoneyItem.workout 用到共用的 formatter）。
+    /// [v25.554] ledger：Apple 健康的帳（「兩筆都留」過的那一對不再出現在 duplicates）
     @MainActor
     static func build(workouts: [WorkoutSession], prefs: WorkoutPrefs, bodyWeightKg: Double?,
-                      lastSport: RunSport, now: Date = Date()) -> HealthPageData {
+                      lastSport: RunSport, ledger: WorkoutHealthLedger = WorkoutHealthLedger(),
+                      now: Date = Date()) -> HealthPageData {
         let sessions = workouts.sorted { $0.date > $1.date }
         let week = WorkoutFacts.week(of: now)
         let thisWeek = sessions.filter { $0.date >= week.start && $0.date < week.end }
@@ -200,6 +206,9 @@ extension HealthPageData {
         let weekly = makeWeeklySeries(sessions, prefs: prefs, hero: hero, now: now)
         page.weekly = weekly
         if weekly == nil, hasCardio { page.weeklyPrompt = "再記一週，就會出現每週公里" }
+        // [v25.554] 要確認：同一趟（WorkoutFacts.duplicates）、改過要更新（WorkoutFacts.staleWrites）
+        page.duplicates = WorkoutFacts.duplicates(sessions, ledger: ledger)
+        page.staleWrites = WorkoutFacts.staleWrites(sessions)
         return page
     }
 
@@ -614,15 +623,63 @@ enum WorkoutActions {
             + (km >= 0.05 ? " " + WorkoutFormat.km(km) : "") + "？"
     }
 
-    /// 刪除確認框的內文（連 Apple 健康一起刪是 v4）
+    /// 刪除確認框的內文（[v25.554] 照 deleteKind：三種說法）
     static func deleteMessage(_ s: WorkoutSession) -> String {
-        s.healthKitUUID != nil
-            ? "只刪 LifeGood 這一筆；Apple 健康裡的那一筆不會刪。"
-            : "刪掉就找不回來了。"
+        switch deleteKind(s) {
+        case .plain:
+            return "刪掉就找不回來了。"
+        case .withHealth:
+            return "這一趟也存在 Apple 健康裡，要一起刪掉嗎？"
+        case .watch:
+            return "Apple 健康裡手錶那一筆不會刪，下次同步也不會再帶進來。"
+        }
     }
 
-    /// 確認之後刪：提示框關掉那一次畫面更新先過，下一輪主執行緒才寫 store
-    static func delete(_ id: UUID, store: LifeStore) {
-        DispatchQueue.main.async { store.deleteWorkout(id: id) }
+    /// [v25.554] 刪除要問什麼（judge §5.3、待決定 10）：
+    /// • 有 Apple 健康編號、不是手錶記的、沒跟手錶合成過（LifeGood 寫的，或舊資料看不出來的）→ 三顆鈕；
+    ///   真的刪的時候 HealthSyncCenter 再確認一次是不是 LifeGood 寫的（不是就只從 LifeGood 刪、記進「不再帶進來」）。
+    /// • 手錶記的、跟手錶合成過的 → 〔刪除〕〔取消〕，內文說手錶那筆不會刪、以後不再帶進來。
+    /// • 其他（沒碰過 Apple 健康）→ 〔刪除〕〔取消〕
+    static func deleteKind(_ s: WorkoutSession) -> WorkoutDeleteKind {
+        guard s.healthKitUUID != nil else { return .plain }
+        if WorkoutFacts.source(of: s) == .watch || s.health?.mergedWatchUUID != nil || s.health?.written == false {
+            return .watch
+        }
+        return .withHealth
     }
+
+    /// [v25.554] 刪除確認框要的字一次算好（提示框的 closure 裡不叫 @MainActor 的東西）
+    static func deleteAsk(_ s: WorkoutSession) -> WorkoutDeleteAsk {
+        WorkoutDeleteAsk(id: s.id, title: deleteTitle(s), message: deleteMessage(s), kind: deleteKind(s))
+    }
+
+    /// 確認之後刪：提示框關掉那一次畫面更新先過，下一輪主執行緒才寫 store。
+    /// [v25.554] alsoFromHealth：〔連 Apple 健康那筆一起刪〕；手錶記的、只刪 LifeGood 的，編號記進「不再帶進來」（HealthSyncCenter）
+    static func delete(_ id: UUID, alsoFromHealth: Bool = false, store: LifeStore) {
+        // Task @MainActor：排到下一輪主執行緒（同 RunRecoveryCenter.save；HealthSyncCenter 是 @MainActor）
+        Task { @MainActor in
+            HealthSyncCenter.shared.deleteSession(id, alsoFromHealth: alsoFromHealth, store: store)
+        }
+    }
+}
+
+/// [v25.554] 刪除確認框的三種（WorkoutActions.deleteKind）
+enum WorkoutDeleteKind: Equatable {
+    /// 沒碰過 Apple 健康：〔刪除〕〔取消〕
+    case plain
+    /// LifeGood 寫進 Apple 健康的：〔連 Apple 健康那筆一起刪〕〔只刪 LifeGood 這筆〕〔取消〕
+    case withHealth
+    /// 手錶記的、跟手錶合成過的：〔刪除〕〔取消〕（手錶那筆不會刪，以後不再帶進來）
+    case watch
+}
+
+/// [v25.554] 刪除確認框要的字（健康頁、全部紀錄、成果頁三處共用）：
+/// .alert(ask.title, isPresented:, presenting: ask) { a in … }，kind 決定按鈕
+struct WorkoutDeleteAsk: Identifiable, Equatable {
+    /// 那一趟的 id
+    let id: UUID
+    /// 「刪除 10/15 晨跑 5.2 公里？」
+    let title: String
+    let message: String
+    let kind: WorkoutDeleteKind
 }

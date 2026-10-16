@@ -30,6 +30,14 @@ import Combine
 //   • 右上：綠色「＋」（補記四種有氧、記一次重訓）、「⋯」（每週目標、看板主角、Apple 健康）。跑者小圖示拿掉，
 //     開始跑步改由頁面裡的大綠鈕負責。
 //   • 人生分頁一開始就有「健康」（MainTabView 的 LifeFeatureGate，待決定 7）。
+//
+// [v25.554] 健康 v4（build/v4/brief.md §G3）：
+//   • 打開健康頁、回到前景時自動同步 Apple 健康（HealthSyncCenter.syncIfDue：離上次 15 分鐘以上才同步、不跳權限框）。
+//   • .task(id:) 記住上次算的 key（lastBuiltKey，同 WorkoutDetailView）：從全部紀錄返回、切分頁回來不再整頁重算。
+//   • ③ 要確認多四種：同一趟〔合成一筆〕〔兩筆都留〕、舊紀錄〔接回來〕（手錶那筆已在 LifeGood 走合成；還沒帶進來的〔先不要〕）、
+//     Apple 健康多一項〔去同意〕、寫進去以後又改過〔更新〕。順序：救回→同一趟→接回路線→去同意→更新，最多 3 列。都不擋訂閱。
+//   • 刪除確認框照 WorkoutActions.deleteAsk 三種：LifeGood 寫進 Apple 健康的〔連 Apple 健康那筆一起刪〕〔只刪 LifeGood 這筆〕〔取消〕。
+//   • ⑦ Apple 健康一列同步中寫「同步中…」；設定小頁的同步搬進 HealthSyncCenter，字改成「會帶進來／會存回去」。
 
 // MARK: - 彈出頁
 
@@ -67,11 +75,43 @@ private struct HealthRecentRow: Identifiable {
     var id: UUID { item.id }
 }
 
-/// 要確認的一列（救回）：第一列上面不畫分隔線
+/// [v25.554] 要確認的五種（build/v4/brief.md §G3-5）
+private enum HealthCheckKind {
+    /// 上次跑到一半被關掉、還沒存的那一趟：〔存下來〕〔丟掉〕
+    case recovery(RunCheckpoint)
+    /// 手錶和 App 同一趟〔合成一筆〕〔兩筆都留〕；legacy（舊版記的、手錶那筆已在 LifeGood）〔接回來〕〔兩筆都留〕
+    case duplicate(WorkoutDuplicate)
+    /// 舊版記的、手錶那筆還沒帶進 LifeGood：〔接回來〕〔先不要〕
+    case routeFind(WorkoutRouteFind)
+    /// Apple 健康多一項要同意（騎車距離）：〔去同意〕
+    case moreAccess
+    /// 寫進 Apple 健康以後又改過：〔更新〕
+    case stale(WorkoutHealthStale)
+
+    /// ForEach 用（五種各自加前綴，不會撞）
+    var key: String {
+        switch self {
+        case .recovery(let cp): return "recovery-" + cp.id.uuidString
+        case .duplicate(let d): return "duplicate-" + d.id
+        case .routeFind(let f): return "route-" + f.sessionId.uuidString
+        case .moreAccess: return "access"
+        case .stale(let st): return "stale-" + st.id.uuidString
+        }
+    }
+}
+
+/// 要確認的一列：第一列上面不畫分隔線
 private struct HealthCheckEntry: Identifiable {
-    let checkpoint: RunCheckpoint
+    let kind: HealthCheckKind
     let first: Bool
-    var id: UUID { checkpoint.id }
+    var id: String { kind.key }
+}
+
+/// 要確認一列要畫的東西（圖示、一句話、按鈕）：在函式裡組好，body 只畫
+private struct HealthCheckSpec {
+    let icon: String
+    let message: String
+    let buttons: [FinanceCheckButton]
 }
 
 // MARK: - 健康頁
@@ -84,6 +124,9 @@ struct HealthView: View {
 
     /// [v25.552] 上次跑到一半被關掉、還沒存的那幾趟（App 一打開就 scan；③ 要確認）
     @ObservedObject private var recovery = RunRecoveryCenter.shared
+    /// [v25.554] Apple 健康同步（要確認的接回路線、去同意；Apple 健康一列「同步中…」）。
+    /// body 只讀它的屬性（不每秒變），不在 body 裡叫它的動作
+    @ObservedObject private var sync = HealthSyncCenter.shared
     /// 上次用的運動（開始列的大鈕寫「開始」＋這一種；RunTrackingView 讀同一個鍵）
     @AppStorage(RunSport.lastSportKey) private var lastSport: RunSport = .run
     /// Apple 健康一列的字（設定小頁讀寫同兩個鍵）
@@ -92,13 +135,17 @@ struct HealthView: View {
 
     /// 整頁的字和數字（.task(id:) 算一次；nil＝還沒算好）
     @State private var page: HealthPageData?
+    /// [v25.554] 上次算 page 用的 taskKey：畫面重新出現（全部紀錄返回、切分頁回來）.task(id:) 會再跑一次，key 一樣就不重算
+    @State private var lastBuiltKey = ""
+    /// [v25.554] 這頁在畫面上（回到前景時只有在畫面上才自動同步；推進全部紀錄、切到別的分頁時是 false）
+    @State private var onScreen = false
     /// 記錄中（含暫停）：只在開始、暫停、繼續、結束時變（不盯每秒的數字）
     @State private var runActive = false
     /// 今天（過了午夜回到前景，看板換新的一天）
     @State private var dayKey = WorkoutFormat.date(Date())
     @State private var sheet: HealthSheet?
-    /// 按了「刪除」、等確認的那一趟
-    @State private var deleteTarget: WorkoutSession?
+    /// [v25.554] 按了「刪除」、等確認的那一趟（字和三種按鈕先算好：WorkoutActions.deleteAsk）
+    @State private var deleteAsk: WorkoutDeleteAsk?
     /// 要確認區按了「丟掉」、等確認的那一趟
     @State private var discardTarget: RunCheckpoint?
     @State private var showPremiumAlert = false
@@ -131,14 +178,14 @@ struct HealthView: View {
             }
             .premiumLockAlert(isPresented: $showPremiumAlert)
             .task(id: taskKey) { rebuild() }
-            // [v25.552] 保險：App 一打開已經 scan 過（LifeGoodApp），這裡重複呼叫什麼都不做
-            .task { await RunRecoveryCenter.shared.scan() }
+            // 打開頁面（每次出現）：救回 scan＋Apple 健康 15 分鐘沒同步就同步
+            .task { await pageOpened() }
             // Published 一訂閱就送目前的值；之後只在開始、暫停、繼續、結束時送
             .onReceive(RunTracker.shared.$phase) { p in phaseChanged(p) }
-            .onAppear { refreshDay() }
+            .onAppear { pageAppeared() }
             .onChange(of: scenePhase) { _, phase in sceneChanged(phase) }
             // 離開頁面時把還在倒數的提示收掉，不要留一個醒著的 Task
-            .onDisappear { clearCopiedNote() }
+            .onDisappear { pageDisappeared() }
         }
     }
 
@@ -159,12 +206,34 @@ struct HealthView: View {
         .toolbar { toolbarContent }
     }
 
-    /// 整頁一次算好（HealthPageData.build 在主執行緒：MoneyItem.workout 用到共用的 formatter）
+    /// 整頁一次算好（HealthPageData.build 在主執行緒：MoneyItem.workout 用到共用的 formatter）。
+    /// [v25.554] key 跟上次算的一樣（畫面重新出現）就不重算；ledger 一改 workoutsRevision 就加一，key 跟著變
     private func rebuild() {
+        let key = taskKey
+        guard page == nil || key != lastBuiltKey else { return }
         page = HealthPageData.build(workouts: lifeStore.workouts,
                                     prefs: lifeStore.workoutPrefs,
                                     bodyWeightKg: lifeStore.latestBodyWeightKg,
-                                    lastSport: lastSport)
+                                    lastSport: lastSport,
+                                    ledger: lifeStore.workoutHealthLedger)
+        lastBuiltKey = key
+    }
+
+    /// [v25.552] 救回：App 一打開已經 scan 過（LifeGoodApp），這裡重複呼叫什麼都不做。
+    /// [v25.554] 接著 Apple 健康：開著、離上次同步 15 分鐘以上才同步（syncIfDue 自己判斷；不跳權限框）
+    private func pageOpened() async {
+        await RunRecoveryCenter.shared.scan()
+        await HealthSyncCenter.shared.syncIfDue(store: lifeStore)
+    }
+
+    private func pageAppeared() {
+        onScreen = true
+        refreshDay()
+    }
+
+    private func pageDisappeared() {
+        onScreen = false
+        clearCopiedNote()
     }
 
     /// 記錄器開始、暫停、繼續、結束：只記「在不在記錄」（一樣就不寫，免得多重畫一次）
@@ -173,8 +242,13 @@ struct HealthView: View {
         if active != runActive { runActive = active }
     }
 
+    /// 回到前景：日期變了換新的一天；[v25.554] 這頁在畫面上就看要不要同步 Apple 健康（15 分鐘一次）
     private func sceneChanged(_ phase: ScenePhase) {
-        if phase == .active { refreshDay() }
+        guard phase == .active else { return }
+        refreshDay()
+        guard onScreen else { return }
+        let store = lifeStore
+        Task { await HealthSyncCenter.shared.syncIfDue(store: store) }
     }
 
     /// 回到前景、切回這頁：日期變了才改（改了 taskKey 就變，看板重算）
@@ -200,15 +274,16 @@ struct HealthView: View {
 
     /// 由上到下 ①～⑧（⓪ 在 safeAreaInset）
     private func sections(_ p: HealthPageData, proxy: ScrollViewProxy) -> some View {
-        VStack(spacing: 20) {
+        let checks = checkKinds(p)
+        return VStack(spacing: 20) {
             HealthBoard(data: p, onGoalTap: { openGoal() })
                 .padding(.horizontal, 16)
             if !runActive {
                 HealthStartRow(data: p.start) { s in start(s) }
                     .padding(.horizontal, 16)
             }
-            if !recovery.pending.isEmpty {
-                recoverySection
+            if !checks.isEmpty {
+                checkSection(checks)
             }
             recentSection(p)
             weeklySection(p)
@@ -271,10 +346,11 @@ struct HealthView: View {
         showCopiedNote("已複製「" + WorkoutFacts.title(saved) + "」到現在，新的一筆排在最上面。")
     }
 
-    /// 長按「刪除」：先問（確認框在最近運動區）
+    /// 長按「刪除」：先問（確認框在最近運動區）。[v25.554] 拿 store 裡最新的那一筆算要問哪一種（page 是上一次算的）
     private func askDelete(_ s: WorkoutSession) {
         guard subscription.isPremium else { showPremiumAlert = true; return }
-        deleteTarget = s
+        let latest = lifeStore.workouts.first(where: { $0.id == s.id }) ?? s
+        deleteAsk = WorkoutActions.deleteAsk(latest)
     }
 
     /// 健康里程碑：新增、改都要訂閱
@@ -450,39 +526,69 @@ struct HealthView: View {
         }
     }
 
-    // MARK: ③ 要確認（救回；0 件整區不出現）
+    // MARK: ③ 要確認（0 件整區不出現；最多 3 列，多的「還有 N 件」）
 
-    private var checkEntries: [HealthCheckEntry] {
-        let shown = recovery.pending.prefix(3)
+    /// Apple 健康開著、裝置支援（〔去同意〕〔更新〕只在這時候出現：關著按了也寫不進 Apple 健康）
+    private var healthLinked: Bool {
+        hkEnabled && HealthKitManager.shared.isAvailable
+    }
+
+    /// 全部要確認的（還沒截 3 列）。順序：救回 → 同一趟 → 接回路線 → 去同意 → 更新（build/v4/brief.md §G3-5）。
+    /// 接回路線：同一趟裡 legacy 的（手錶那筆已在 LifeGood，走合成）在前，再來 sync.routeFinds（手錶那筆還沒帶進來）；
+    /// 同一趟已經有那一趟的就不再列 routeFind
+    private func checkKinds(_ p: HealthPageData) -> [HealthCheckKind] {
+        var out: [HealthCheckKind] = []
+        for cp in recovery.pending {
+            out.append(.recovery(cp))
+        }
+        for d in p.duplicates where !d.legacy {
+            out.append(.duplicate(d))
+        }
+        for d in p.duplicates where d.legacy {
+            out.append(.duplicate(d))
+        }
+        let pairedApps = Set(p.duplicates.map { $0.appId })
+        for f in sync.routeFinds where !pairedApps.contains(f.sessionId) {
+            out.append(.routeFind(f))
+        }
+        if healthLinked && sync.needsMoreAccess {
+            out.append(.moreAccess)
+        }
+        if healthLinked {
+            for st in p.staleWrites {
+                out.append(.stale(st))
+            }
+        }
+        return out
+    }
+
+    /// 前 3 件（第一列上面不畫線）
+    private func checkEntries(_ kinds: [HealthCheckKind]) -> [HealthCheckEntry] {
         var out: [HealthCheckEntry] = []
-        for cp in shown {
-            out.append(HealthCheckEntry(checkpoint: cp, first: out.isEmpty))
+        for k in kinds.prefix(3) {
+            out.append(HealthCheckEntry(kind: k, first: out.isEmpty))
         }
         return out
     }
 
     /// 多出 3 件以外的：「還有 2 件」
-    private var checkMoreText: String? {
-        let more = recovery.pending.count - 3
+    private func checkMoreText(_ count: Int) -> String? {
+        let more = count - 3
         return more > 0 ? "還有 \(more) 件" : nil
     }
 
-    /// 〔存下來〕〔丟掉〕都不擋訂閱；丟掉先問（提示框掛在這一區）
-    private var recoverySection: some View {
-        VStack(alignment: .leading, spacing: 10) {
+    /// 都不擋訂閱（把資料弄對，不是新增內容）；丟掉先問（提示框掛在這一區，這一區只有這一個提示框）
+    private func checkSection(_ kinds: [HealthCheckKind]) -> some View {
+        let entries = checkEntries(kinds)
+        let moreText = checkMoreText(kinds.count)
+        return VStack(alignment: .leading, spacing: 10) {
             FinanceCardHeader(title: "要確認")
             VStack(spacing: 0) {
-                ForEach(checkEntries) { entry in
-                    recoveryRow(entry)
+                ForEach(entries) { entry in
+                    checkRow(entry)
                 }
-                if let more = checkMoreText {
-                    Divider().padding(.leading, 14)
-                    Text(more)
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 10)
+                if let more = moreText {
+                    checkMoreRow(more)
                 }
             }
             .modifier(FinanceCardChrome())
@@ -496,24 +602,101 @@ struct HealthView: View {
         }
     }
 
-    private func recoveryRow(_ entry: HealthCheckEntry) -> some View {
-        let cp = entry.checkpoint
-        let message = cp.prompt()
+    @ViewBuilder
+    private func checkMoreRow(_ text: String) -> some View {
+        Divider().padding(.leading, 14)
+        Text(text)
+            .font(.footnote)
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+    }
+
+    /// 一列：VoiceOver 照舊「第一顆按鈕字：句子」
+    private func checkRow(_ entry: HealthCheckEntry) -> some View {
+        let spec = checkSpec(entry.kind)
+        let spoken = (spec.buttons.first?.title ?? "") + "：" + spec.message
+        return VStack(spacing: 0) {
+            if !entry.first {
+                Divider().padding(.leading, 44)
+            }
+            FinanceCheckRow(icon: spec.icon,
+                            message: spec.message,
+                            buttons: spec.buttons,
+                            accessibilityLabel: spoken,
+                            pal: pal)
+        }
+    }
+
+    private func checkSpec(_ kind: HealthCheckKind) -> HealthCheckSpec {
+        switch kind {
+        case .recovery(let cp): return recoverySpec(cp)
+        case .duplicate(let d): return duplicateSpec(d)
+        case .routeFind(let f): return routeFindSpec(f)
+        case .moreAccess: return moreAccessSpec()
+        case .stale(let st): return staleSpec(st)
+        }
+    }
+
+    /// 救回：「上次的跑步 3.4 公里・21:05 還沒存。」〔存下來〕〔丟掉〕（照舊；丟掉先問）
+    private func recoverySpec(_ cp: RunCheckpoint) -> HealthCheckSpec {
         let store = lifeStore
         let buttons: [FinanceCheckButton] = [
             FinanceCheckButton(title: "存下來") { RunRecoveryCenter.shared.save(cp, store: store) },
             FinanceCheckButton(title: "丟掉") { discardTarget = cp }
         ]
-        return VStack(spacing: 0) {
-            if !entry.first {
-                Divider().padding(.leading, 44)
-            }
-            FinanceCheckRow(icon: "exclamationmark.arrow.circlepath",
-                            message: message,
-                            buttons: buttons,
-                            accessibilityLabel: "存下來：" + message,
-                            pal: pal)
-        }
+        return HealthCheckSpec(icon: "exclamationmark.arrow.circlepath", message: cp.prompt(), buttons: buttons)
+    }
+
+    /// 同一趟：「Apple Watch 也記了 10/8 06:04–06:41 這一趟（6.0 公里），要合成一筆嗎？」〔合成一筆〕〔兩筆都留〕；
+    /// 舊紀錄（手錶那筆已在 LifeGood）：「9/20 的跑步是舊版記的，路線沒存到；Apple Watch 同一時間有路線。」〔接回來〕〔兩筆都留〕
+    private func duplicateSpec(_ d: WorkoutDuplicate) -> HealthCheckSpec {
+        let store = lifeStore
+        let center = sync
+        let buttons: [FinanceCheckButton] = [
+            FinanceCheckButton(title: d.legacy ? "接回來" : "合成一筆") {
+                Task { await center.merge(d, store: store) }
+            },
+            FinanceCheckButton(title: "兩筆都留") { center.keepBoth(d, store: store) }
+        ]
+        return HealthCheckSpec(icon: d.legacy ? "map" : "applewatch",
+                               message: WorkoutFacts.duplicatePrompt(d),
+                               buttons: buttons)
+    }
+
+    /// 舊紀錄（手錶那筆還沒帶進 LifeGood）：〔接回來〕〔先不要〕
+    private func routeFindSpec(_ f: WorkoutRouteFind) -> HealthCheckSpec {
+        let store = lifeStore
+        let center = sync
+        let buttons: [FinanceCheckButton] = [
+            FinanceCheckButton(title: "接回來") { Task { await center.attachRoute(f, store: store) } },
+            FinanceCheckButton(title: "先不要") { center.skipRoute(f, store: store) }
+        ]
+        return HealthCheckSpec(icon: "map", message: f.prompt, buttons: buttons)
+    }
+
+    /// 「Apple 健康多了一項要你同意：騎車距離。」〔去同意〕（跳系統的同意畫面）
+    private func moreAccessSpec() -> HealthCheckSpec {
+        let store = lifeStore
+        let center = sync
+        let buttons: [FinanceCheckButton] = [
+            FinanceCheckButton(title: "去同意") { Task { await center.requestAccess(store: store) } }
+        ]
+        return HealthCheckSpec(icon: "heart.text.square", message: WorkoutFacts.moreAccessPrompt, buttons: buttons)
+    }
+
+    /// 「10/12 晨跑改過了，Apple 健康裡還是 5.0 公里。」〔更新〕（刪掉 Apple 健康裡舊的那筆、照現在的寫一筆新的）
+    private func staleSpec(_ st: WorkoutHealthStale) -> HealthCheckSpec {
+        let store = lifeStore
+        let center = sync
+        let id = st.id
+        let buttons: [FinanceCheckButton] = [
+            FinanceCheckButton(title: "更新") { Task { await center.update(id, store: store) } }
+        ]
+        return HealthCheckSpec(icon: "arrow.triangle.2.circlepath",
+                               message: WorkoutFacts.stalePrompt(st),
+                               buttons: buttons)
     }
 
     private var discardBinding: Binding<Bool> {
@@ -556,12 +739,23 @@ struct HealthView: View {
             }
         }
         .padding(.horizontal, 16)
-        .alert(deleteTitle, isPresented: deleteBinding, presenting: deleteTarget) { s in
-            Button("刪除", role: .destructive) { deleteNow(s) }
-            Button("取消", role: .cancel) { }
-        } message: { s in
-            Text(WorkoutActions.deleteMessage(s))
+        .alert(deleteTitle, isPresented: deleteBinding, presenting: deleteAsk) { a in
+            deleteButtons(a)
+        } message: { a in
+            Text(a.message)
         }
+    }
+
+    /// [v25.554] 刪除確認框的按鈕（WorkoutActions.deleteKind）：LifeGood 寫進 Apple 健康的三顆；手錶的、沒碰過的〔刪除〕〔取消〕
+    @ViewBuilder
+    private func deleteButtons(_ a: WorkoutDeleteAsk) -> some View {
+        if a.kind == .withHealth {
+            Button("連 Apple 健康那筆一起刪", role: .destructive) { deleteNow(a, alsoFromHealth: true) }
+            Button("只刪 LifeGood 這筆", role: .destructive) { deleteNow(a, alsoFromHealth: false) }
+        } else {
+            Button("刪除", role: .destructive) { deleteNow(a, alsoFromHealth: false) }
+        }
+        Button("取消", role: .cancel) { }
     }
 
     /// 一趟一張卡：點了打開成果頁（不擋訂閱）；長按編輯／複製到現在／刪除
@@ -674,17 +868,17 @@ struct HealthView: View {
 
     /// 「刪除 10/15 晨跑 5.2 公里？」
     private var deleteTitle: String {
-        guard let s = deleteTarget else { return "" }
-        return WorkoutActions.deleteTitle(s)
+        deleteAsk?.title ?? ""
     }
 
     private var deleteBinding: Binding<Bool> {
-        Binding(get: { deleteTarget != nil }, set: { if !$0 { deleteTarget = nil } })
+        Binding(get: { deleteAsk != nil }, set: { if !$0 { deleteAsk = nil } })
     }
 
-    /// 提示框關掉那一次畫面更新先過，下一輪主執行緒才寫 store（WorkoutActions.delete 已經排到下一輪）
-    private func deleteNow(_ s: WorkoutSession) {
-        WorkoutActions.delete(s.id, store: lifeStore)
+    /// 提示框關掉那一次畫面更新先過，下一輪主執行緒才寫 store（WorkoutActions.delete 已經排到下一輪）；
+    /// [v25.554] alsoFromHealth：〔連 Apple 健康那筆一起刪〕。Apple 健康那筆留著的，HealthSyncCenter 記進「不再帶進來」
+    private func deleteNow(_ a: WorkoutDeleteAsk, alsoFromHealth: Bool) {
+        WorkoutActions.delete(a.id, alsoFromHealth: alsoFromHealth, store: lifeStore)
     }
 
     // MARK: ⑤ 每週公里
@@ -720,10 +914,11 @@ struct HealthView: View {
 
     // MARK: ⑦ Apple 健康（一列）
 
-    /// 「已連線・今天 06:40 同步」「已連線」「沒有打開」「這台裝置不支援」
+    /// 「已連線・今天 06:40 同步」「已連線」「沒有打開」「這台裝置不支援」；[v25.554] 同步中「同步中…」
     private var appleHealthStatus: String {
         guard HealthKitManager.shared.isAvailable else { return "這台裝置不支援" }
         guard hkEnabled else { return "沒有打開" }
+        if sync.syncing { return "同步中…" }
         guard lastSyncEpoch > 0 else { return "已連線" }
         let when = HealthPageData.whenText(Date(timeIntervalSince1970: lastSyncEpoch), now: Date())
         return "已連線・" + when + " 同步"
@@ -1370,21 +1565,20 @@ private struct HealthStrengthSection: View {
 
 // MARK: - ⑦ Apple 健康設定小頁
 
-/// 健康頁「Apple 健康」那一列打開的小頁：原本健康頁上那張卡的內容（開關、說明、立即同步）＋同步原封搬過來。
-/// 開關、同步都不擋訂閱。
-private struct HealthAppleHealthSheet: View {
+/// 健康頁「Apple 健康」那一列打開的小頁：開關、會帶進來／會存回去、立即同步。開關、同步都不擋訂閱。
+/// [v25.554] 不再 private：成果頁 Apple 健康那一列〔打開〕也開這一頁（WorkoutDetailView，.sheet(item:)＋.appStores()）。
+/// 同步搬進 HealthSyncCenter（健康頁自動同步、成果頁〔存進去〕〔更新〕共用同一套）：這頁只畫它的狀態、按了叫它。
+/// 同步到一半關掉小頁再打開、又按一次：HealthSyncCenter.syncing 還是 true（單例，跨小頁），按鈕是「同步中…」不能按。
+/// 字照 judge §3.8「會帶進來／會存回去」：以前寫「體重…與 Apple 健康互通」，其實體重從來沒寫回去（U1 C7）。
+struct HealthAppleHealthSheet: View {
     @EnvironmentObject var lifeStore: LifeStore
     @Environment(\.dismiss) private var dismiss
     @ObservedObject private var health = HealthKitManager.shared
-    /// 上次同步時間，決定要往回抓多久（第一次抓 90 天）
+    /// [v25.554] 同步、去同意、上一次的結果（同步中、已帶入幾筆、沒成功的一句話）
+    @ObservedObject private var center = HealthSyncCenter.shared
+    /// 上次同步時間（HealthSyncCenter 寫同一個鍵；這裡只讀來顯示）
     @AppStorage("health_hk_last_sync") private var lastSyncEpoch: Double = 0
     @AppStorage("health_hk_enabled") private var hkEnabled = false
-    @State private var syncing = false
-    @State private var syncMessage: String?
-
-    /// 同步還在跑（跨小頁）：以前同步狀態放在健康頁上一直都在；搬進小頁後，同步到一半按「完成」關掉、
-    /// 再打開又按一次，兩次會拿同一份「已匯入」清單比對，同一筆手錶紀錄會被帶進來兩筆。只在主執行緒讀寫
-    private static var syncInFlight = false
 
     init() {}
 
@@ -1393,6 +1587,8 @@ private struct HealthAppleHealthSheet: View {
             Form {
                 switchSection
                 if health.isAvailable && hkEnabled {
+                    bringInSection
+                    sendBackSection
                     syncSection
                 }
             }
@@ -1406,18 +1602,37 @@ private struct HealthAppleHealthSheet: View {
         }
     }
 
+    // MARK: 動作
+
+    /// 打開：跳系統的同意畫面（只問還沒問過的種類），問完同步一次（HealthSyncCenter.requestAccess）。
+    /// @AppStorage 先寫進 UserDefaults，HealthSyncCenter.isEnabled 讀得到「開著」
     private var hkBinding: Binding<Bool> {
         Binding(get: { hkEnabled },
                 set: { on in
                     hkEnabled = on
-                    if on { Task { await health.requestAuthorization(); await syncFromHealthKit() } }
+                    if on { requestAccess() }
                 })
     }
 
+    private func requestAccess() {
+        let store = lifeStore
+        let sync = center
+        Task { await sync.requestAccess(store: store) }
+    }
+
+    private func syncNow() {
+        let store = lifeStore
+        let sync = center
+        Task { await sync.sync(store: store) }
+    }
+
+    // MARK: 開關
+
+    /// 關著時只留開關和這段說明；開著時下面多三段（會帶進來、會存回去、同步）
     private var footerText: String {
         if !health.isAvailable { return "這台裝置不支援「健康」App。" }
         if hkEnabled {
-            return "體重、血壓、心率與訓練會與 Apple 健康互通。HealthKit 沒有「組數／次數／負荷」的欄位，所以重訓明細只留在這個 App，寫回去的只有時間、距離與熱量。"
+            return "開著時，Apple Watch 記的運動會自己出現在健康頁，在 LifeGood 記的運動也會存進 Apple 健康。"
         }
         return "打開後可以把 Apple 健康的體重、血壓與 Apple Watch 的訓練帶進來，這裡記的訓練也會寫回去計入體能訓練圓環。"
     }
@@ -1438,123 +1653,83 @@ private struct HealthAppleHealthSheet: View {
         }
     }
 
+    // MARK: 會帶進來／會存回去
+
+    private var bringInSection: some View {
+        Section {
+            infoLine("Apple Watch 記的運動（路線、距離、爬升、大卡）", icon: "applewatch")
+            infoLine("體重、身高、血壓", icon: "heart.text.square")
+        } header: {
+            Text("會帶進來")
+        }
+    }
+
+    private var sendBackSection: some View {
+        Section {
+            infoLine("在 LifeGood 記的運動：時間、距離（騎車寫騎車距離）、路線、暫停、大卡", icon: "figure.run")
+            infoLine("重訓只有時間和大卡（Apple 健康沒有組數、次數的欄位）", icon: "dumbbell.fill")
+            infoLine("體重不會寫回去", icon: "scalemass")
+        } header: {
+            Text("會存回去")
+        } footer: {
+            Text("打開健康頁時，離上次同步超過 15 分鐘會自己同步。在 LifeGood 刪掉手錶記的那一趟，以後不會再帶進來。")
+        }
+    }
+
+    /// 一列一行字（不能按）
+    private func infoLine(_ text: String, icon: String) -> some View {
+        Label(text, systemImage: icon)
+            .font(.subheadline)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    // MARK: 同步
+
     private var lastSyncText: String {
         HealthPageData.whenText(Date(timeIntervalSince1970: lastSyncEpoch), now: Date())
+    }
+
+    private var syncTitle: String {
+        center.syncing ? "同步中…" : "立即同步"
+    }
+
+    /// 沒成功的一句話：HealthSyncCenter 的（沒刪成功、沒更新成功…）＋HealthKitManager 的（同一句不寫兩次）
+    private var problemText: String? {
+        var parts: [String] = []
+        if let p = center.lastProblem, !p.isEmpty { parts.append(p) }
+        if let e = health.lastError, !e.isEmpty, !parts.contains(e) { parts.append(e) }
+        return parts.isEmpty ? nil : parts.joined(separator: "\n")
     }
 
     private var syncSection: some View {
         Section {
             Button {
-                Task { await syncFromHealthKit() }
+                syncNow()
             } label: {
-                Label(syncing ? "同步中…" : "立即同步", systemImage: "arrow.triangle.2.circlepath")
+                Label(syncTitle, systemImage: "arrow.triangle.2.circlepath")
             }
-            .disabled(syncing)
+            .disabled(center.syncing)
+            if center.needsMoreAccess {
+                Button {
+                    requestAccess()
+                } label: {
+                    Label("同意 Apple 健康新的一項（騎車距離）", systemImage: "checkmark.shield")
+                }
+                .disabled(center.syncing)
+            }
             if lastSyncEpoch > 0 {
                 LabeledContent("上次同步", value: lastSyncText)
             }
-            if let msg = syncMessage {
+            if let msg = center.lastMessage {
                 Text(msg)
                     .font(.footnote)
                     .foregroundStyle(WorkoutPalette.go)
             }
-            if let err = health.lastError {
-                Text(err)
+            if let problem = problemText {
+                Text(problem)
                     .font(.footnote)
                     .foregroundStyle(.red)
             }
         }
-    }
-
-    /// 從 Apple 健康抓體重、血壓與訓練回來（原本在健康頁，原封搬過來；v4 再改同步起點與自動同步）
-    private func syncFromHealthKit() async {
-        guard hkEnabled, health.isAvailable, !syncing else { return }
-        guard !Self.syncInFlight else {
-            syncMessage = "上一次同步還沒做完，等一下再按「立即同步」。"
-            return
-        }
-        Self.syncInFlight = true
-        syncing = true
-        syncMessage = nil
-        defer {
-            syncing = false
-            Self.syncInFlight = false
-        }
-
-        let since = lastSyncEpoch > 0
-            ? Date(timeIntervalSince1970: lastSyncEpoch)
-            : Calendar.current.date(byAdding: .day, value: -90, to: Date()) ?? Date.distantPast
-
-        var addedWeights = 0
-        var addedVitals = 0
-        var addedWorkouts = 0
-
-        var profile = lifeStore.healthProfile
-        let cal = Calendar.current
-
-        // 體重：同一天已經有體重紀錄就不重複加
-        let weights = await health.fetchBodyMass(since: since)
-        for w in weights {
-            let hasSameDay = profile.measurements.contains {
-                $0.weightKg != nil && cal.isDate($0.date, inSameDayAs: w.date)
-            }
-            guard !hasSameDay else { continue }
-            profile.measurements.append(HealthMeasurement(date: w.date, weightKg: w.kg,
-                                                          note: "來自 Apple 健康"))
-            addedWeights += 1
-        }
-        // 血壓／心率：同一分鐘已經有就跳過
-        let vitals = await health.fetchVitals(since: since)
-        for v in vitals {
-            let exists = profile.measurements.contains {
-                abs($0.date.timeIntervalSince(v.date)) < 60 && $0.hasBloodPressure
-            }
-            guard !exists else { continue }
-            profile.measurements.append(HealthMeasurement(date: v.date, weightKg: nil,
-                                                          systolic: v.systolic, diastolic: v.diastolic,
-                                                          heartRate: v.heartRate, note: "來自 Apple 健康"))
-            addedVitals += 1
-        }
-        if profile.heightCm == 0, let h = await health.fetchLatestHeightCm(), h > 0 {
-            profile.heightCm = h
-        }
-        if addedWeights > 0 || addedVitals > 0 || profile.heightCm != lifeStore.healthProfile.heightCm {
-            profile.measurements.sort { $0.date > $1.date }
-            lifeStore.updateHealthProfile(profile)
-        }
-
-        // 訓練：已經匯入過的 UUID 不再重複
-        let known = Set(lifeStore.workouts.compactMap(\.healthKitUUID))
-        let imported = await health.fetchWorkouts(since: since, excluding: known)
-        for w in imported {
-            let minutes = w.end.timeIntervalSince(w.start) / 60
-            guard minutes >= 1 else { continue }
-            let ex = WorkoutExercise(
-                name: w.activityName,
-                kind: w.isCardio ? .cardio : .strength,
-                reps: 0, sets: 0, loadType: .none, loadKg: 0,
-                distanceKm: w.distanceKm, durationMinutes: minutes,
-                route: w.route, elevationGainM: 0,
-                note: w.isCardio ? "" : "來自 Apple 健康，組數次數請自行補上",
-                sport: w.sport)                       // [v25.552] 手錶的運動種類（走路＝健走、健行＝登山）
-            let session = WorkoutSession(
-                date: w.start, title: w.activityName, exercises: [ex],
-                durationMinutes: minutes, place: "", note: "",
-                healthKitUUID: w.uuid, activeEnergyKcal: w.energyKcal,
-                source: .watch)                       // [v25.552] 從 Apple 健康帶進來的
-            lifeStore.upsertWorkout(session)
-            addedWorkouts += 1
-        }
-
-        lastSyncEpoch = Date().timeIntervalSince1970
-        syncMessage = syncSummary(weights: addedWeights, vitals: addedVitals, workouts: addedWorkouts)
-    }
-
-    private func syncSummary(weights: Int, vitals: Int, workouts: Int) -> String {
-        var parts: [String] = []
-        if weights > 0 { parts.append("體重 \(weights) 筆") }
-        if vitals > 0 { parts.append("血壓 \(vitals) 筆") }
-        if workouts > 0 { parts.append("訓練 \(workouts) 筆") }
-        return parts.isEmpty ? "已是最新，沒有新資料" : "已帶入 " + parts.joined(separator: "、")
     }
 }

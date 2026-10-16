@@ -206,19 +206,15 @@ final class RunRecoveryCenter: ObservableObject {
 /// [v25.552] 把一趟寫進 Apple 健康：健康頁的聯動開關打開、裝置支援、而且還沒寫過的才寫；寫好把編號存回那一筆。
 /// 以前只在 HealthView.pushToHealthKit；救回中途存檔也要用，搬到這裡（HealthView 改呼叫這支）。
 /// 編號存回「最新的那一筆」（等待中被編輯過也不會蓋回舊的；找不到＝已經刪了，就不寫回）
+/// [v25.554] 內容搬進 HealthSyncCenter.push（HealthSync.swift）：同一套流程多了簡化前的點（WorkoutRouteStash）、
+/// 寫進去的時間與數字（WorkoutFacts.healthStamp，成果頁「已存進 Apple 健康・06:40」、改過才知道要〔更新〕）、
+/// 寫入中（成果頁「存進 Apple 健康中…」）、失敗的一句話。這裡只轉呼叫，既有呼叫端（存檔、複製、救回）不用改
 @MainActor
 enum WorkoutHealthWriter {
     /// 健康頁 Apple 健康開關（HealthView 的 @AppStorage("health_hk_enabled") 同一個鍵）
     static let enabledKey = "health_hk_enabled"
 
     static func push(_ session: WorkoutSession, store: LifeStore) async {
-        guard UserDefaults.standard.bool(forKey: enabledKey) else { return }
-        let health = HealthKitManager.shared
-        guard health.isAvailable, session.healthKitUUID == nil else { return }
-        guard let uuid = await health.saveWorkout(session, bodyWeightKg: store.latestBodyWeightKg) else { return }
-        guard var latest = store.workouts.first(where: { $0.id == session.id }) else { return }
-        guard latest.healthKitUUID == nil else { return }
-        latest.healthKitUUID = uuid
-        store.upsertWorkout(latest)
+        await HealthSyncCenter.shared.push(session, store: store)
     }
 }

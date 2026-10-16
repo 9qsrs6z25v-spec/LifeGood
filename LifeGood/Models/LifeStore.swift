@@ -16,6 +16,9 @@ class LifeStore: ObservableObject {
     @Published var workouts: [WorkoutSession] = [] { didSet { workoutsRevision &+= 1; if !isLoading { save() } } }
     /// [v25.553] 健康頁的設定（看板主角、每週目標）；跟 iCloud 同步、進完整備份
     @Published var workoutPrefs: WorkoutPrefs = WorkoutPrefs() { didSet { workoutsRevision &+= 1; if !isLoading { save() } } }
+    /// [v25.554] LifeGood 對 Apple 健康的帳（不再帶進來的編號、兩筆都留、舊紀錄先不要接回）；跟 iCloud 同步、進完整備份。
+    /// 一改 workoutsRevision 也加一（健康頁「要確認」跟著重算）
+    @Published var workoutHealthLedger: WorkoutHealthLedger = WorkoutHealthLedger() { didSet { workoutsRevision &+= 1; if !isLoading { save() } } }
     /// [v25.357] 公司廠區據點：與重大決議的「廠區」欄位對應，長成每個廠的歷史年線
     @Published var companySites: [CompanySite] = [] { didSet { if !isLoading { save() } } }
     /// [v25.399] 旅遊規劃（要去的行程；與旅遊地圖「去過的地點」是兩回事）
@@ -50,7 +53,7 @@ class LifeStore: ObservableObject {
         "life_grade_titles", "life_business_cards", "life_personal_events",
         "life_org_people", "life_health_profile", "life_family_tasks",
         "life_equipment_pool", "life_performance_ballots", "life_workouts",
-        "life_company_sites", "life_trip_plans", "life_workout_prefs"
+        "life_company_sites", "life_trip_plans", "life_workout_prefs", "life_workout_health"
     ]
 
     init() {
@@ -1065,6 +1068,27 @@ class LifeStore: ObservableObject {
         var p = workoutPrefs
         p.heroSport = choice.rawValue
         workoutPrefs = p
+    }
+
+    /// [v25.554] 這個 Apple 健康編號以後不再帶進來（刪掉手錶那筆、合成、接回路線、只刪 LifeGood 那筆時）
+    func ignoreHealthWorkout(_ uuid: String) {
+        var l = workoutHealthLedger
+        l.ignore(uuid)
+        if l != workoutHealthLedger { workoutHealthLedger = l }
+    }
+
+    /// [v25.554] 手錶和 App 同一趟：「兩筆都留」（以後不再問這一對）
+    func keepWorkoutPair(appId: UUID, watchUUID: String) {
+        var l = workoutHealthLedger
+        l.keepPair(appId: appId, watchUUID: watchUUID)
+        if l != workoutHealthLedger { workoutHealthLedger = l }
+    }
+
+    /// [v25.554] 舊紀錄找回路線：「先不要」（以後不再問這一趟）
+    func skipRouteRecovery(_ sessionId: UUID) {
+        var l = workoutHealthLedger
+        l.skipRecovery(sessionId)
+        if l != workoutHealthLedger { workoutHealthLedger = l }
     }
 
     /// 出現過的動作名稱（依使用次數多寡），給新增時快速挑選
@@ -3144,7 +3168,8 @@ class LifeStore: ObservableObject {
             businessCards: businessCards, personalEvents: personalEvents, orgPeople: orgPeople,
             healthProfile: healthProfile, familyTasks: familyTasks, equipmentPool: equipmentPool,
             performanceBallots: performanceBallots, workouts: workouts,
-            companySites: companySites, tripPlans: tripPlans, workoutPrefs: workoutPrefs
+            companySites: companySites, tripPlans: tripPlans, workoutPrefs: workoutPrefs,
+            workoutHealthLedger: workoutHealthLedger
         )
         saveQueue.async {
             let encoder = JSONEncoder()
@@ -3169,6 +3194,7 @@ class LifeStore: ObservableObject {
             if let d = try? encoder.encode(snap.companySites)   { ud.set(d, forKey: "life_company_sites") }
             if let d = try? encoder.encode(snap.tripPlans)      { ud.set(d, forKey: "life_trip_plans") }
             if let d = try? encoder.encode(snap.workoutPrefs)   { ud.set(d, forKey: "life_workout_prefs") }
+            if let d = try? encoder.encode(snap.workoutHealthLedger) { ud.set(d, forKey: "life_workout_health") }
             CloudSyncManager.shared.pushAll()
         }
     }
@@ -3208,6 +3234,11 @@ class LifeStore: ObservableObject {
         if let data = rawDataIfChanged("life_workout_prefs"),
            let wp = try? decoder.decode(WorkoutPrefs.self, from: data) {
             workoutPrefs = wp
+        }
+        // [v25.554] Apple 健康的帳（不再帶進來的編號、兩筆都留、先不要接回）
+        if let data = rawDataIfChanged("life_workout_health"),
+           let hl = try? decoder.decode(WorkoutHealthLedger.self, from: data) {
+            workoutHealthLedger = hl
         }
     }
 
@@ -3283,6 +3314,7 @@ class LifeStore: ObservableObject {
         healthProfile = HealthProfile()
         workouts.removeAll()
         workoutPrefs = WorkoutPrefs()
+        workoutHealthLedger = WorkoutHealthLedger()
         companySites.removeAll()
         // 行程的照片檔也要一起清，不然會留下沒人指向的孤兒檔被雲端一直重傳
         for plan in tripPlans {
