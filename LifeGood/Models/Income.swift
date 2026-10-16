@@ -42,6 +42,33 @@ enum IncomePeriod: String, Codable, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
+// MARK: - 固定薪水結束原因
+
+/// 固定薪水（每月自動計入）設有結束日時，可標註結束原因；純標示用途，不影響計算。
+enum SalaryEndReason: String, Codable, CaseIterable, Identifiable {
+    case resigned = "離職"
+    case jobChange = "換工作"
+    case maternity = "產假"
+    case parentalLeave = "育嬰留停"
+    case retired = "退休"
+    case layoff = "資遣"
+    case other = "其他"
+
+    var id: String { rawValue }
+
+    var icon: String {
+        switch self {
+        case .resigned: return "figure.walk"
+        case .jobChange: return "arrow.left.arrow.right"
+        case .maternity: return "figure.and.child.holdinghands"
+        case .parentalLeave: return "stroller"
+        case .retired: return "sunset.fill"
+        case .layoff: return "person.fill.xmark"
+        case .other: return "ellipsis.circle"
+        }
+    }
+}
+
 // MARK: - 收入資料模型
 
 struct Income: Identifiable, Codable {
@@ -56,6 +83,10 @@ struct Income: Identifiable, Codable {
     var linkedStockId: UUID?
     var linkedBankMilestoneId: UUID?
     var linkedBankCurrency: String?
+    /// 固定薪水結束日（換工作/離職/產假等）。nil = 持續計入。
+    var endDate: Date?
+    /// 固定薪水結束原因（僅標示用途）。
+    var endReason: SalaryEndReason?
 
     init(
         id: UUID = UUID(),
@@ -68,7 +99,9 @@ struct Income: Identifiable, Codable {
         note: String = "",
         linkedStockId: UUID? = nil,
         linkedBankMilestoneId: UUID? = nil,
-        linkedBankCurrency: String? = nil
+        linkedBankCurrency: String? = nil,
+        endDate: Date? = nil,
+        endReason: SalaryEndReason? = nil
     ) {
         self.id = id
         self.title = title
@@ -81,6 +114,8 @@ struct Income: Identifiable, Codable {
         self.linkedStockId = linkedStockId
         self.linkedBankMilestoneId = linkedBankMilestoneId
         self.linkedBankCurrency = linkedBankCurrency
+        self.endDate = endDate
+        self.endReason = endReason
     }
 
     init(from decoder: Decoder) throws {
@@ -96,9 +131,11 @@ struct Income: Identifiable, Codable {
         linkedStockId = try? c.decodeIfPresent(UUID.self, forKey: .linkedStockId)
         linkedBankMilestoneId = try? c.decodeIfPresent(UUID.self, forKey: .linkedBankMilestoneId)
         linkedBankCurrency = try? c.decodeIfPresent(String.self, forKey: .linkedBankCurrency)
+        endDate = try? c.decodeIfPresent(Date.self, forKey: .endDate)
+        endReason = try? c.decodeIfPresent(SalaryEndReason.self, forKey: .endReason)
     }
     private enum CodingKeys: String, CodingKey {
-        case id, title, amount, date, category, period, isFixedSalary, note, linkedStockId, linkedBankMilestoneId, linkedBankCurrency
+        case id, title, amount, date, category, period, isFixedSalary, note, linkedStockId, linkedBankMilestoneId, linkedBankCurrency, endDate, endReason
     }
 
     /// 換算月收入
@@ -111,6 +148,16 @@ struct Income: Identifiable, Codable {
         case .monthly: return amount
         case .yearly: return amount / 12
         }
+    }
+
+    /// 週期性收入（固定薪水）在指定月份是否仍計入。
+    /// 未設結束日 → 一律計入；設了結束日 → 結束日所在月份（含）之前計入，之後不計入
+    /// （多數情況離職當月仍領到最後一份薪水，故結束月採「含」）。
+    func isActive(in month: Date, calendar: Calendar = .current) -> Bool {
+        guard let endDate else { return true }
+        let target = calendar.date(from: calendar.dateComponents([.year, .month], from: month)) ?? month
+        let end = calendar.date(from: calendar.dateComponents([.year, .month], from: endDate)) ?? endDate
+        return target <= end
     }
 
     /// 薪水月份代碼（如 2026年4月 → M604）

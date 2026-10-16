@@ -8,18 +8,31 @@ import CoreLocation
 // MARK: - Keychain 儲存 API Key
 
 /// 用 iOS Keychain 儲存第三方 AI 服務的 API Key（比 UserDefaults 安全）。
+/// v25.203 起改存「可同步」項目（kSecAttrSynchronizable）：走 iCloud 鑰匙圈
+/// 端對端加密同步到同一 Apple ID 的其他裝置——使用者回報 API Key 沒同步到另一支手機。
+/// 不走 App 的 CloudKit KV（那會把金鑰放進資料庫、家人共享時還會流到對方裝置）。
+/// 讀取用 kSecAttrSynchronizableAny 同時涵蓋舊的「僅本機」項目（向下相容）；
+/// 重新儲存時先刪掉新舊兩種再寫入可同步版本（自動遷移）。
 enum AIKeychainStore {
     @discardableResult
     static func set(_ value: String?, for key: String) -> Bool {
-        let baseQuery: [String: Any] = [
+        // 刪除既有項目：kSecAttrSynchronizableAny 涵蓋舊「僅本機」與新「可同步」兩種
+        let deleteQuery: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
-            kSecAttrAccount as String: key
+            kSecAttrAccount as String: key,
+            kSecAttrSynchronizable as String: kSecAttrSynchronizableAny
         ]
-        SecItemDelete(baseQuery as CFDictionary)
+        SecItemDelete(deleteQuery as CFDictionary)
         guard let value, !value.isEmpty,
               let data = value.data(using: .utf8) else { return true }
-        var add = baseQuery
-        add[kSecValueData as String] = data
+        let add: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrAccount as String: key,
+            kSecValueData as String: data,
+            kSecAttrSynchronizable as String: true,
+            // 可同步項目不能用 ThisDeviceOnly 保護等級；AfterFirstUnlock 讓背景同步也讀得到
+            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlock
+        ]
         return SecItemAdd(add as CFDictionary, nil) == errSecSuccess
     }
 
@@ -27,6 +40,7 @@ enum AIKeychainStore {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrAccount as String: key,
+            kSecAttrSynchronizable as String: kSecAttrSynchronizableAny,
             kSecReturnData as String: true,
             kSecMatchLimit as String: kSecMatchLimitOne
         ]
@@ -136,7 +150,7 @@ struct ParsedAIExpense {
     var paymentAccount: String?
     /// AI 從房地產清單挑出的物件顯示名稱（呼叫端對回 RealEstate UUID）
     var realEstate: String?
-    /// 房地產變動支出子分類（房屋價金 / 裝修 / 維修 / 家具 / 清潔 / 水電瓦斯 / 稅費 / 保險 / 其他）
+    /// 房地產變動支出子分類（房屋價金 / 買房費用 / 裝修 / 維修 / 家具 / 清潔 / 水電瓦斯 / 稅費 / 保險 / 其他）
     var realEstateSubCategory: String?
     /// 原始辨識到的語音文字（保底放到備註用）
     var originalText: String?
@@ -194,15 +208,17 @@ final class AIExpenseParserService {
 - 句子提到房子的別名、地址關鍵字（信義店、新店、老家、出租屋…），或「我家／我的房子／房屋／物件／租屋處／管理費／房貸／房屋稅／地價稅／房屋保險」等與不動產有關的詞 → 從清單挑出最相近的整段字串原樣回填到 realEstate
 - 沒有清單或完全沒提到房子就不要填 realEstate
 - 一旦判斷有房地產關聯，請把 categoryRaw 設為「房地產」
-- realEstateSubCategory 必須從這個清單擇一：房屋價金、裝修、維修、家具、清潔、水電瓦斯、稅費、保險、其他
+- realEstateSubCategory 必須從這個清單擇一：房屋價金、買房費用、裝修、維修、家具、清潔、水電瓦斯、稅費、保險、其他
   · 「裝潢／重新粉刷／木工／系統櫃」→ 裝修
   · 「修水管／換馬桶／抓漏」→ 維修
   · 「沙發／床／桌椅／冰箱／冷氣」→ 家具
   · 「打掃／清潔費／除蟲」→ 清潔
-  · 「水費／電費／瓦斯／管理費」→ 水電瓦斯
+  · 「水費／電費／瓦斯」→ 水電瓦斯
+  · 「管理費」→ 其他（管理費每月都要繳，應該記成固定支出；這裡只是單筆補記）
   · 「房屋稅／地價稅／土增稅」→ 稅費
   · 「火險／地震險／房屋保險」→ 保險
   · 「頭期款／自備款／房屋價金」→ 房屋價金
+  · 「仲介費／代書費／契稅／登記規費／印花稅」→ 買房費用（買房時付的手續費和稅，不是稅費）
   · 其他不確定的 → 其他
 
 **必填欄位**（請務必每次回傳）：
@@ -215,7 +231,7 @@ final class AIExpenseParserService {
 - note (string)：備註細節
 - paymentAccount (string)：扣款帳戶。**必須**從 [可選信用卡] 或 [可選銀行帳戶] 清單中原樣挑一個，沒有對應就不要填
 - realEstate (string)：房地產物件。**必須**從 [可選房地產] 清單中原樣挑一個，沒提到房子就不要填
-- realEstateSubCategory (string)：房地產支出子分類（房屋價金 / 裝修 / 維修 / 家具 / 清潔 / 水電瓦斯 / 稅費 / 保險 / 其他）；有設 realEstate 就要一併設這個
+- realEstateSubCategory (string)：房地產支出子分類（房屋價金 / 買房費用 / 裝修 / 維修 / 家具 / 清潔 / 水電瓦斯 / 稅費 / 保險 / 其他）；有設 realEstate 就要一併設這個
 - diningMember (string)：同行者姓名 / 稱謂。判斷規則：
   · 句子裡只要出現「跟」「和」「同」「與」「陪」「帶」後接一個指人的詞，就要抽出
   · 常見指人詞：太太、老婆、先生、老公、女友、男友、女朋友、男朋友、家人、爸媽、爸爸、媽媽、孩子、兒子、女兒、小孩、朋友、同事、同學、客戶、廠商、長官、老闆、家裡人、家人們
@@ -251,7 +267,7 @@ final class AIExpenseParserService {
 **範例輸出 6**：{"amount":1500,"categoryRaw":"其他","title":"管理費","paymentAccount":"國泰世華銀行"}
 
 **範例輸入 7**：[可選房地產：信義小套房、新店透天] 幫信義那間房子繳了 3500 管理費
-**範例輸出 7**：{"amount":3500,"categoryRaw":"房地產","title":"管理費","realEstate":"信義小套房","realEstateSubCategory":"水電瓦斯"}
+**範例輸出 7**：{"amount":3500,"categoryRaw":"房地產","title":"管理費","realEstate":"信義小套房","realEstateSubCategory":"其他"}
 
 **範例輸入 8**：[可選房地產：信義小套房] 房屋稅繳了 12000
 **範例輸出 8**：{"amount":12000,"categoryRaw":"房地產","title":"房屋稅","realEstate":"信義小套房","realEstateSubCategory":"稅費"}
@@ -264,10 +280,15 @@ final class AIExpenseParserService {
         availableBankAccounts: [String] = [],
         availableRealEstates: [String] = []
     ) async throws -> ParsedAIExpense {
-        let settings = await AISettingsStore.shared
-        guard let provider = await settings.activeProvider else { throw AIParseError.noProvider }
-        let key = await settings.key(for: provider)
-        guard !key.isEmpty else { throw AIParseError.noKey }
+        // 在同一個 MainActor 切換中讀取 provider + key，避免兩次分開的 await
+        // 之間使用者切換供應商導致 provider 與 key 來自不同供應商
+        let (provider, key) = try await MainActor.run {
+            let settings = AISettingsStore.shared
+            guard let p = settings.activeProvider else { throw AIParseError.noProvider }
+            let k = settings.key(for: p)
+            guard !k.isEmpty else { throw AIParseError.noKey }
+            return (p, k)
+        }
 
         // 取得使用者目前位置（reverse geocode 結果，5 分鐘 cache），讓 AI 判斷分店
         let locationContext = await LocationContextProvider.shared.currentContext()
@@ -306,10 +327,106 @@ final class AIExpenseParserService {
         return result
     }
 
+    // MARK: 通用文字生成（股票 AI 持股健診等非記帳解析用途）
+
+    /// 帶自訂 system prompt 的通用補全：回傳純文字（不強制 JSON 格式）、輸出上限較高。
+    /// 供應商與 API Key 沿用語音 AI 助手的設定。
+    func completeText(system: String, prompt: String, maxTokens: Int = 1600) async throws -> String {
+        let (provider, key) = try await MainActor.run { () -> (AIProvider, String) in
+            let settings = AISettingsStore.shared
+            guard let p = settings.activeProvider else { throw AIParseError.noProvider }
+            let k = settings.key(for: p)
+            guard !k.isEmpty else { throw AIParseError.noKey }
+            return (p, k)
+        }
+        switch provider {
+        case .anthropic:
+            guard let url = URL(string: "https://api.anthropic.com/v1/messages") else {
+                throw AIParseError.invalidResponse("internal: malformed Anthropic URL")
+            }
+            var req = URLRequest(url: url)
+            req.httpMethod = "POST"
+            req.setValue(key, forHTTPHeaderField: "x-api-key")
+            req.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
+            req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            let body: [String: Any] = [
+                "model": "claude-sonnet-4-6",
+                "max_tokens": maxTokens,
+                "system": system,
+                "messages": [["role": "user", "content": prompt]]
+            ]
+            req.httpBody = try JSONSerialization.data(withJSONObject: body)
+            let (data, resp) = try await sendRequest(req)
+            try ensureOK(data: data, resp: resp)
+            guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let content = json["content"] as? [[String: Any]],
+                  let block = content.first(where: { ($0["type"] as? String) == "text" }),
+                  let textOut = block["text"] as? String else {
+                throw AIParseError.invalidResponse(String(data: data, encoding: .utf8) ?? "")
+            }
+            return textOut
+        case .openai:
+            guard let url = URL(string: "https://api.openai.com/v1/chat/completions") else {
+                throw AIParseError.invalidResponse("internal: malformed OpenAI URL")
+            }
+            var req = URLRequest(url: url)
+            req.httpMethod = "POST"
+            req.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
+            req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            let body: [String: Any] = [
+                "model": "gpt-4o-mini",
+                "messages": [
+                    ["role": "system", "content": system],
+                    ["role": "user", "content": prompt]
+                ],
+                "max_tokens": maxTokens
+            ]
+            req.httpBody = try JSONSerialization.data(withJSONObject: body)
+            let (data, resp) = try await sendRequest(req)
+            try ensureOK(data: data, resp: resp)
+            guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let choices = json["choices"] as? [[String: Any]],
+                  let message = choices.first?["message"] as? [String: Any],
+                  let content = message["content"] as? String else {
+                throw AIParseError.invalidResponse(String(data: data, encoding: .utf8) ?? "")
+            }
+            return content
+        case .gemini:
+            guard var components = URLComponents(string: "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent") else {
+                throw AIParseError.network("malformed Gemini base URL")
+            }
+            components.queryItems = [URLQueryItem(name: "key", value: key)]
+            guard let url = components.url else {
+                throw AIParseError.network("Invalid Gemini API key")
+            }
+            var req = URLRequest(url: url)
+            req.httpMethod = "POST"
+            req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            let body: [String: Any] = [
+                "systemInstruction": ["parts": [["text": system]]],
+                "contents": [["role": "user", "parts": [["text": prompt]]]],
+                "generationConfig": ["maxOutputTokens": maxTokens]
+            ]
+            req.httpBody = try JSONSerialization.data(withJSONObject: body)
+            let (data, resp) = try await sendRequest(req)
+            try ensureOK(data: data, resp: resp)
+            guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let candidates = json["candidates"] as? [[String: Any]],
+                  let content = candidates.first?["content"] as? [String: Any],
+                  let parts = content["parts"] as? [[String: Any]],
+                  let textOut = parts.first?["text"] as? String else {
+                throw AIParseError.invalidResponse(String(data: data, encoding: .utf8) ?? "")
+            }
+            return textOut
+        }
+    }
+
     // MARK: Anthropic
 
     private func callAnthropic(prompt: String, apiKey: String) async throws -> String {
-        let url = URL(string: "https://api.anthropic.com/v1/messages")!
+        guard let url = URL(string: "https://api.anthropic.com/v1/messages") else {
+            throw AIParseError.invalidResponse("internal: malformed Anthropic URL")
+        }
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
         req.setValue(apiKey, forHTTPHeaderField: "x-api-key")
@@ -336,7 +453,9 @@ final class AIExpenseParserService {
     // MARK: OpenAI
 
     private func callOpenAI(prompt: String, apiKey: String) async throws -> String {
-        let url = URL(string: "https://api.openai.com/v1/chat/completions")!
+        guard let url = URL(string: "https://api.openai.com/v1/chat/completions") else {
+            throw AIParseError.invalidResponse("internal: malformed OpenAI URL")
+        }
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
         req.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
@@ -365,7 +484,9 @@ final class AIExpenseParserService {
     // MARK: Gemini
 
     private func callGemini(prompt: String, apiKey: String) async throws -> String {
-        var components = URLComponents(string: "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent")!
+        guard var components = URLComponents(string: "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent") else {
+            throw AIParseError.network("malformed Gemini base URL")
+        }
         components.queryItems = [URLQueryItem(name: "key", value: apiKey)]
         guard let url = components.url else {
             throw AIParseError.network("Invalid Gemini API key")
@@ -419,12 +540,15 @@ final class AIExpenseParserService {
         var cleaned = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         if cleaned.hasPrefix("```") {
             let lines = cleaned.split(separator: "\n", omittingEmptySubsequences: false)
-            cleaned = lines.dropFirst().dropLast().joined(separator: "\n")
+            let inner = lines.dropFirst()
+            cleaned = (inner.last?.hasPrefix("```") == true ? inner.dropLast() : inner)
+                .joined(separator: "\n")
         }
         cleaned = cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
-        // 嘗試找 { ... } 區塊
+        // 嘗試找 { ... } 區塊；firstBrace 必須 <= lastBrace，否則逆向 range 會 crash
         if let firstBrace = cleaned.firstIndex(of: "{"),
-           let lastBrace = cleaned.lastIndex(of: "}") {
+           let lastBrace = cleaned.lastIndex(of: "}"),
+           firstBrace <= lastBrace {
             cleaned = String(cleaned[firstBrace...lastBrace])
         }
         guard let data = cleaned.data(using: .utf8),
@@ -519,6 +643,12 @@ final class SpeechRecognizer: NSObject, ObservableObject {
     func startRecording() throws {
         // 已在錄音中 → 直接略過，避免重複呼叫把 transcript 清空、重裝 audio tap
         if isRecording { return }
+        // recognizer 為 nil 表示此裝置不支援 zh-TW 語音辨識；提前中止，
+        // 避免音訊 session 啟動後麥克風佔用（及狀態列圖示）卻沒有實際轉錄。
+        guard recognizer != nil else {
+            errorMessage = "此裝置不支援中文語音辨識"
+            return
+        }
         transcript = ""
         errorMessage = nil
 
@@ -528,27 +658,30 @@ final class SpeechRecognizer: NSObject, ObservableObject {
 
         let req = SFSpeechAudioBufferRecognitionRequest()
         req.shouldReportPartialResults = true
-        if #available(iOS 16.0, *) {
-            req.addsPunctuation = false
-        }
+        req.addsPunctuation = false
         request = req
 
         let input = audioEngine.inputNode
         let format = input.outputFormat(forBus: 0)
         input.removeTap(onBus: 0)
-        input.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in
-            self?.request?.append(buffer)
+        input.installTap(onBus: 0, bufferSize: 1024, format: format) { [req] buffer, _ in
+            // 直接捕捉 req 物件，避免從音訊執行緒存取 @MainActor 隔離的 self.request 屬性
+            req.append(buffer)
         }
         audioEngine.prepare()
         try audioEngine.start()
 
         task = recognizer?.recognitionTask(with: req) { [weak self] result, error in
-            guard let self else { return }
-            if let result {
-                Task { @MainActor [weak self] in self?.transcript = result.bestTranscription.formattedString }
-            }
-            if let error {
-                Task { @MainActor [weak self] in self?.errorMessage = error.localizedDescription }
+            // 先在背景執行緒提取值型別，避免對 @MainActor 隔離的 self 建立強引用
+            let text = result?.bestTranscription.formattedString
+            let errMsg = error?.localizedDescription
+            // 發生錯誤時需自動停止，否則 isRecording 卡在 true、麥克風指示器永遠亮著
+            let shouldStop = error != nil
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                if let text { self.transcript = text }
+                if let errMsg { self.errorMessage = errMsg }
+                if shouldStop { self.stopRecording() }
             }
         }
         isRecording = true
@@ -685,8 +818,13 @@ enum AIVariableCategoryMapper {
         if let lc = table[lower] { return lc }
 
         // 4) 部分包含（AI 可能回傳「飲食/餐飲」這樣的複合字）
-        for (key, value) in table {
-            if normalized.contains(key) || lower.contains(key) { return value }
+        // Dictionary 的疊代順序是每次啟動隨機的（雜湊種子隨行程重啟變動），若直接對 table
+        // 做 for-in，遇到同時包含多個 key 的複合字（例如「交通/稅費」同時含「交通」與「稅」）
+        // 會依當次隨機順序回傳不同分類，同一段 AI 回應在不同次啟動可能分到不同類別。
+        // 改為依關鍵字長度由長到短排序後比對，確保結果穩定且優先命中較具體的關鍵字。
+        let orderedKeys = table.keys.sorted { $0.count > $1.count }
+        for key in orderedKeys {
+            if normalized.contains(key) || lower.contains(key) { return table[key] }
         }
         return nil
     }

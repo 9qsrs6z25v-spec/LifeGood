@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>CFBundleURLName</key>
+			<string>com.lifegood.app</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>lifegood</string>
+			</array>
+		</dict>
+	</array>
+	<key>NSSupportsLiveActivities</key>
+	<true/>
+	<key>CKSharingSupported</key>
+	<true/>
+	<!-- [v25.455] AlarmKit（會議提醒的「鬧鐘」模式）必備。Apple 文件：
+	     「If the NSAlarmKitUsageDescription key is missing or its value is an
+	     empty string, apps can't schedule alarms with AlarmKit.」
+	     這段字會出現在系統要求鬧鐘權限的對話框上。 -->
+	<!-- [v25.533] 背景模式一定要寫在這裡。之前寫在專案建置設定的
+	     INFOPLIST_KEY_UIBackgroundModes，但 Xcode 自動產生 Info.plist 時不認這個鍵，
+	     打包出來的 App 根本沒有背景模式：跑步按「開始」時 RunTracker 打開
+	     allowsBackgroundLocationUpdates，CoreLocation 直接斷言閃退。
+	     location：跑步／騎車鎖屏後繼續記錄路徑。
+	     remote-notification：iCloud 靜默推播在背景也能喚醒 App。 -->
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>location</string>
+		<string>remote-notification</string>
+	</array>
+	<key>NSAlarmKitUsageDescription</key>
+	<string>會議提醒選擇「鬧鐘」時，LifeGood 會替你排一個真正會響的鬧鐘，開會前叫你。</string>
+	<!-- [v25.552] 使用者把 LifeGood 的「精確位置」關掉時，開始運動畫面請系統「這一次給精確位置」
+	     （CLLocationManager.requestTemporaryFullAccuracyAuthorization(withPurposeKey: "RunRoute")）。
+	     這是字典型的鍵：跟 UIBackgroundModes 一樣要寫在這個檔案裡，寫在 pbxproj 的 INFOPLIST_KEY_ 不會進到打包出來的 Info.plist。
+	     RunTracker.hasPreciseLocationPurpose 會先檢查打包出來的 Info.plist 真的有這句，沒有就改帶去設定，不會呼叫系統。 -->
+	<key>NSLocationTemporaryUsageDescriptionDictionary</key>
+	<dict>
+		<key>RunRoute</key>
+		<string>要畫出你跑過的路需要精確位置；只給大約位置會差一兩公里，線畫不出來。</string>
+	</dict>
+</dict>
+</plist>
