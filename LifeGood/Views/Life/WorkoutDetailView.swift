@@ -694,14 +694,15 @@ private struct WorkoutSavedStrip: View {
         editingPlace = true
     }
 
-    /// 〔儲存〕名稱：空白不改；下一個 runloop 拿 store 最新那一筆改（提示框先收）
+    /// 〔儲存〕名稱：空白不改；沒改（跟存的、畫面上的名字一樣）不寫；下一個 runloop 拿 store 最新那一筆改（提示框先收）
     private func saveName() {
         let text = nameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
         let id = sessionId
         let store = lifeStore
         DispatchQueue.main.async {
-            guard var latest = store.workouts.first(where: { $0.id == id }), latest.title != text else { return }
+            guard var latest = store.workouts.first(where: { $0.id == id }),
+                  latest.title != text, WorkoutFacts.title(latest) != text else { return }
             latest.title = text
             store.upsertWorkout(latest)
         }

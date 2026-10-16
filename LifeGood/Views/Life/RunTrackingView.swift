@@ -264,14 +264,15 @@ struct RunTrackingView: View {
         return CLLocationCoordinate2D(latitude: p.lat, longitude: p.lon)
     }
 
-    /// 還沒收到任何定位（權限被拒、精確位置關著時由 GPS 燈說明，這裡不重複）
+    /// 還沒收到任何定位（權限被拒、精確位置關著時由 GPS 燈說明，這裡不重複）。
+    /// 說明卡還沒按〔好〕時也不畫：那時還沒問位置、根本沒在找（prepare(asking: false) 不開定位），面板正寫著「需要你的位置」
     private var showFindingHint: Bool {
-        tracker.lastCoordinate == nil && !gpsDenied && !tracker.reducedAccuracy
+        tracker.lastCoordinate == nil && !gpsDenied && !tracker.reducedAccuracy && !showPermissionCard
     }
 
-    /// 指北針、比例尺：還在找位置、沒有位置權限時不畫（樣稿③-B1／B2）
+    /// 指北針、比例尺：還在找位置、沒有位置權限、說明卡還沒按〔好〕時不畫（樣稿③-B1／B2）
     private var showMapControls: Bool {
-        !showFindingHint && !gpsDenied
+        !showFindingHint && !gpsDenied && !showPermissionCard
     }
 
     // MARK: 上面那排膠囊
@@ -1152,6 +1153,8 @@ struct RunTrackingView: View {
 
     /// 按住滿 1 秒、VoiceOver 確認框〔結束〕。太短（10 公尺內而且 30 秒內，同 RunCheckpoint.isTooShort）：先停住時間再問
     private func holdFinished() {
+        // VoiceOver 確認框是 0.35 秒後才走到這裡：那之間已經結束、放棄了就不再問「太短要存嗎？」
+        guard tracker.isActive, finishedId == nil, !ending else { return }
         UINotificationFeedbackGenerator().notificationOccurred(.success)
         guard tracker.distanceMeters <= 10, tracker.elapsed <= 30 else { finishNow(); return }
         tracker.pause()

@@ -175,10 +175,13 @@ struct RunSkyPanel<Content: View>: View {
         scheme == .dark ? Color.black.opacity(0.4) : Color(tb: 0x1E3A6E, 0.16)
     }
 
-    /// 天空＋外框＋往上的淡陰影；延伸到底部安全區外（Home 指示條那一塊也是天空）
+    /// 天空＋外框＋往上的淡陰影；延伸到底部安全區外（Home 指示條那一塊也是天空）。
+    /// 天空墊一層實心的同形狀（.background）：天空是 Canvas、不接手指（allowsHitTesting(false)），
+    /// 沒有這層的話，在面板空白的地方（開始鈕兩旁、格子之間）拖、捏會穿過去動到後面的地圖（v4 的面板是 .regularMaterial，擋得住）
     private var sky: some View {
         RunSkyArt(dark: scheme == .dark, paused: paused, clouds: clouds)
             .equatable()
+            .background { shape.fill(TripBoardPalette(scheme).boardBottom) }
             .clipShape(shape)
             .overlay { shape.stroke(TripBoardPalette(scheme).cardStroke, lineWidth: 0.75) }
             .shadow(color: shadowColor, radius: 14, x: 0, y: -4)
@@ -1060,7 +1063,7 @@ struct RunCountdownOverlay: View {
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(spoken)
-        .accessibilityAddTraits(.isButton)
+        .accessibilityAddTraits([.isButton, .isModal])     // 倒數時 VoiceOver 不會跑到後面的運動膠囊、開始鈕
         .accessibilityAction { onSkip() }
         .accessibilityAction(.escape) { onCancel() }
     }

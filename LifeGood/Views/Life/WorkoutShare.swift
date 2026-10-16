@@ -43,8 +43,9 @@ struct WorkoutShareSheet: View {
     @State private var photoGen = 0
     @State private var photoLoading = false
     @State private var payload: StockCardSharePayload?
-    /// 「圖沒做出來，再試一次」
+    /// 提示框：算圖失敗「圖沒做出來，再試一次」；照片讀不到「這張照片讀不到，換一張試試」（一個 .alert，字跟著換）
     @State private var failed = false
+    @State private var failTitle = WorkoutShareSheet.renderFailedTitle
     /// 圖上要的字與數字（.task 裡算一次）
     @State private var content: WorkoutShareContent?
     /// 這一趟已經刪掉了
@@ -64,7 +65,7 @@ struct WorkoutShareSheet: View {
         .onChange(of: withRoute) { _, _ in renderPreview() }
         .onChange(of: photoItem) { _, item in loadPhoto(item) }
         .sheet(item: $payload) { p in ShareSheet(items: p.items).appStores() }
-        .alert("圖沒做出來，再試一次", isPresented: $failed) {
+        .alert(failTitle, isPresented: $failed) {
             Button("好", role: .cancel) {}
         }
     }
@@ -246,14 +247,13 @@ struct WorkoutShareSheet: View {
         }
         photoLoading = true
         Task { @MainActor in
-            let data = try? await item.loadTransferable(type: Data.self)
-            let small = await WorkoutSharePhoto.shrink(data)
+            let small = await WorkoutSharePhoto.load(item)
             guard gen == photoGen else { return }
             photoLoading = false
             guard let small, let image = UIImage(data: small) else {
                 // 選取清掉：同一張再選一次 onChange 才會再跑（原本的照片、預覽不動）
                 photoItem = nil
-                failed = true
+                fail(Self.photoFailedTitle)
                 return
             }
             photo = image
@@ -305,7 +305,7 @@ struct WorkoutShareSheet: View {
         guard let c = content,
               let ui = renderImage(c),
               let data = ui.jpegData(compressionQuality: 0.95) else {
-            failed = true
+            fail(Self.renderFailedTitle)
             return
         }
         let base = PagedImageExporter.sanitizeFileName("LifeGood_運動_" + WorkoutShareFileName.day(c.day))
@@ -314,8 +314,16 @@ struct WorkoutShareSheet: View {
             try data.write(to: url, options: .atomic)
             payload = StockCardSharePayload(items: [url])
         } catch {
-            failed = true
+            fail(Self.renderFailedTitle)
         }
+    }
+
+    static let renderFailedTitle = "圖沒做出來，再試一次"
+    static let photoFailedTitle = "這張照片讀不到，換一張試試"
+
+    private func fail(_ title: String) {
+        failTitle = title
+        failed = true
     }
 }
 
@@ -382,12 +390,15 @@ private enum WorkoutShareFileName {
 private enum WorkoutSharePhoto {
     static let maxPixels = 1600
 
-    /// 背景做（不卡畫面）；讀不到、不是圖回 nil。
+    /// 讀照片＋縮圖都在背景做（不卡畫面：loadTransferable 會把 iCloud 的原圖整張拉回來，同 PhotoImportCenter 的教訓）；
+    /// 讀不到、不是圖回 nil。
     /// 寫法照 PhotoImportCenter（先宣告型別再 await .value：新 SDK 的 detached 多載才不會模稜兩可，v25.201 那次）
-    static func shrink(_ data: Data?) async -> Data? {
-        guard let data else { return nil }
+    static func load(_ item: PhotosPickerItem) async -> Data? {
         let out: Data? = await Task.detached(priority: .userInitiated) {
-            WorkoutSharePhoto.downscaled(data)
+            guard let data = try? await item.loadTransferable(type: Data.self) else {
+                return nil
+            }
+            return WorkoutSharePhoto.downscaled(data)
         }.value
         return out
     }
