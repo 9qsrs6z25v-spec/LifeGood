@@ -28,6 +28,7 @@ import CoreLocation
 //   「結束−開始−移動時間」對不上（編輯改過時間）的不寫，免得健身 App 的時間比 LifeGood 短。
 //   距離照每個有氧動作的運動分種類寫（WorkoutFacts.healthDistance）：跑步、健走、登山＝步行＋跑步，騎車＝騎車距離，
 //   重訓、其他有氧不寫（以前一律寫成步行＋跑步，騎車的公里灌進「健康」的步行距離）。
+//   距離、大卡每一種先看有沒有給寫入（canShare）：沒給的那一種不寫、運動照存（騎車距離還沒〔去同意〕時騎車那趟不會整筆失敗）。
 //   爬升知道才寫（WorkoutFacts.climb，0＝平路也寫）：運動的附註 HKMetadataKeyElevationAscended。
 //   路線用簡化前的點（fullRoute，WorkoutRouteStash 拿來的），先用這筆運動 builder 的 seriesBuilder(for:)
 //   （Apple「Creating a workout route」的寫法），拿不到或寫失敗再用獨立的 HKWorkoutRouteBuilder 試一次；路線失敗照樣回傳編號。
@@ -286,9 +287,11 @@ final class HealthKitManager: ObservableObject {
 
             // [v25.554] 路線 builder 跟著這筆運動拿（Apple「Creating a workout route」：seriesBuilder(for:) 轉 HKWorkoutRouteBuilder，
             // 運動進行中插點、存好運動之後 finishRoute）。點在這裡就插好（自己 do/catch，不連累整筆）；
-            // 轉型失敗（nil）或插不進去，存好運動之後改用獨立的 HKWorkoutRouteBuilder（saveRoute）
+            // 轉型失敗（nil）或插不進去，存好運動之後改用獨立的 HKWorkoutRouteBuilder（saveRoute）。
+            // 路線沒給寫入（canShare）就不碰運動 builder 的 series builder：插不進去的 series builder 留在這筆運動裡，
+            // 文件沒寫 finishWorkout 會不會因此失敗——不冒這個險；交給 saveRoute 用獨立的試（沒權限會寫一句為什麼）
             var seriesRoute: HKWorkoutRouteBuilder?
-            if routeLocations.count >= 2,
+            if routeLocations.count >= 2, canShare(HKSeriesType.workoutRoute()),
                let routeBuilder = builder.seriesBuilder(for: HKSeriesType.workoutRoute()) as? HKWorkoutRouteBuilder {
                 do {
                     _ = try await routeBuilder.insertRouteData(routeLocations)
@@ -299,15 +302,18 @@ final class HealthKitManager: ObservableObject {
             }
 
             var samples: [HKSample] = []
-            // [v25.554] 距離分種類：跑走登山＝步行＋跑步、騎車＝騎車距離、重訓與其他有氧不寫（distanceToWrite）
+            // [v25.554] 距離分種類：跑走登山＝步行＋跑步、騎車＝騎車距離、重訓與其他有氧不寫（distanceToWrite）。
+            // 每一種樣本先看有沒有給寫入（canShare）：addSamples 只要有一種沒寫入權限，整筆運動都存不進去——
+            // 騎車距離是 v4 新要的，還沒按〔去同意〕或在「健康」App 關掉了，騎車那一趟就整筆寫不進 Apple 健康。
+            // 沒給的那一種先不寫（運動、路線、其他樣本照寫）
             let km = Self.distanceToWrite(session)
-            if km.walkingRunning > 0, let distanceType {
+            if km.walkingRunning > 0, let distanceType, canShare(distanceType) {
                 samples.append(HKQuantitySample(
                     type: distanceType,
                     quantity: HKQuantity(unit: .meterUnit(with: .kilo), doubleValue: km.walkingRunning),
                     start: start, end: end))
             }
-            if km.cycling > 0, let cyclingType {
+            if km.cycling > 0, let cyclingType, canShare(cyclingType) {
                 samples.append(HKQuantitySample(
                     type: cyclingType,
                     quantity: HKQuantity(unit: .meterUnit(with: .kilo), doubleValue: km.cycling),
@@ -317,7 +323,7 @@ final class HealthKitManager: ObservableObject {
             let kcal = session.activeEnergyKcal > 0
                 ? session.activeEnergyKcal
                 : (WorkoutFacts.estimatedKcal(session, bodyWeightKg: bodyWeightKg) ?? 0)
-            if kcal > 0, let energyType {
+            if kcal > 0, let energyType, canShare(energyType) {
                 samples.append(HKQuantitySample(
                     type: energyType,
                     quantity: HKQuantity(unit: .kilocalorie(), doubleValue: kcal),
@@ -584,6 +590,12 @@ final class HealthKitManager: ObservableObject {
     }
 
     // MARK: - 工具
+
+    /// [v25.554] 這一種樣本有沒有給 LifeGood 寫入（寫入權限查得到；讀取權限 Apple 刻意查不到）。
+    /// saveWorkout 只放有給的那幾種進 addSamples（一種沒給整筆都存不進去）
+    private func canShare(_ type: HKSampleType) -> Bool {
+        store.authorizationStatus(for: type) == .sharingAuthorized
+    }
 
     private static func minuteKey(_ d: Date) -> Date {
         let cal = Calendar.current

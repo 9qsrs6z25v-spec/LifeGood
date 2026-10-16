@@ -610,10 +610,20 @@ enum WorkoutActions {
         return saved
     }
 
-    /// 存一筆（編輯表單存檔、補記）：寫 store＋Apple 健康。WorkoutEditorView 的 onSave 已經在關掉 sheet 之後的下一輪才呼叫
+    /// 存一筆（編輯表單存檔、補記）：寫 store＋Apple 健康。WorkoutEditorView 的 onSave 已經在關掉 sheet 之後的下一輪才呼叫。
+    /// [v25.554] 編輯表單不碰 Apple 健康的連結（編號、寫進去的數字、合成過）：表單開著的時候那一趟的編號換過了
+    /// （剛跑完還在寫進去、〔更新〕刪舊寫新、合成改指向手錶那筆），存檔照 store 裡最新的連結，不拿打開時那一份蓋回去——
+    /// 不然 LifeGood 指著 Apple 健康裡已經刪掉的那筆，剛寫的那筆沒人認，再〔更新〕一次「健身」App 就多一筆
     static func save(_ s: WorkoutSession, store: LifeStore) {
-        store.upsertWorkout(s)
-        Task { await WorkoutHealthWriter.push(s, store: store) }
+        var edited = s
+        if let latest = store.workouts.first(where: { $0.id == s.id }),
+           latest.healthKitUUID != edited.healthKitUUID {
+            edited.healthKitUUID = latest.healthKitUUID
+            edited.health = latest.health
+        }
+        let saved = edited
+        store.upsertWorkout(saved)
+        Task { await WorkoutHealthWriter.push(saved, store: store) }
     }
 
     /// 刪除確認框的標題：「刪除 10/15 晨跑 5.2 公里？」
