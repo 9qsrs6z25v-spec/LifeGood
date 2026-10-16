@@ -13,8 +13,14 @@ import Combine
 //
 // 取捨（health/build/v2/brief.md §1）：judge 寫「12 小時內有就問」，改成 7 天內都問（不是今天的，問句寫日期）、
 // 超過 7 天才默默刪掉：跑完隔天晚上才打開 App 也救得回來。太短的（10 公尺內而且 30 秒內，跟按完成時「太短要不要存」同一條線）不問、直接刪。
+//
+// [v25.555] 健康 v5（build/v5/brief.md §G1-5）：
+// • 存檔多帶 GPS 情形（RunCheckpoint.gps，選填：v25.554 以前寫的檔沒有這個鍵照樣讀得進來）→ 救回那一趟的成果頁也會提醒「GPS 訊號很弱」。
+// • 〔存下來〕跟按住結束同一套取名：起點 150 公尺內、同一種運動、你改過名字的那幾趟沿用那個名字，不然照時段（晨跑、夜跑…）
+//   （WorkoutFacts.makeSession(…sessions: store.workouts)）；存好之後用起點反查一次地點（WorkoutPlaceLookup.fill，查不到就不寫）。
 
-/// 跑到一半的存檔（一個檔＝一趟）。欄位都是必填：同一版 App 自己寫自己讀；讀不出來的檔直接刪掉
+/// 跑到一半的存檔（一個檔＝一趟）。欄位都是必填：同一版 App 自己寫自己讀；讀不出來的檔直接刪掉。
+/// [v25.555] 只有最後的 gps 是選填（var＋預設 nil：舊檔沒有這個鍵照樣讀得進來，逐一列欄位的 init 也照舊）
 struct RunCheckpoint: Codable, Identifiable {
     /// RunTracker.runId（也是檔名）
     let id: UUID
@@ -36,24 +42,28 @@ struct RunCheckpoint: Codable, Identifiable {
     let pauses: [WorkoutPause]
     /// 每走滿一整公里那一刻的累計爬升（RunResult.kmClimb）
     let kmClimb: [Double]
+    /// [v25.555] 到寫檔為止 GPS 好不好（RunTracker 每秒數的；RunResult.gps）。v25.554 以前寫的檔沒有，是 nil
+    var gps: WorkoutGPSQuality? = nil
 
     var runSport: RunSport { RunSport(rawValue: sport) ?? .run }
 
     /// 太短（10 公尺內而且 30 秒內）：跟按完成時「這一趟只有 12 秒，要存嗎？」同一條線；救回時不問、直接刪
     var isTooShort: Bool { distanceMeters <= 10 && movingSeconds <= 30 }
 
-    /// 救回來當成這一趟的成果：結束時間＝寫檔時在暫停就是按暫停那一刻，不然是最後一次寫檔
+    /// 救回來當成這一趟的成果：結束時間＝寫檔時在暫停就是按暫停那一刻，不然是最後一次寫檔。[v25.555] GPS 情形一起帶
     var result: RunResult {
         let end = max(pausedAt ?? savedAt, startedAt)
-        return RunResult(sport: runSport,
-                         distanceKm: distanceMeters / 1000,
-                         movingMinutes: movingSeconds / 60,
-                         route: points,
-                         elevation: elevationGainM,
-                         startedAt: startedAt,
-                         endedAt: end,
-                         pauses: pauses,
-                         kmClimb: kmClimb)
+        var r = RunResult(sport: runSport,
+                          distanceKm: distanceMeters / 1000,
+                          movingMinutes: movingSeconds / 60,
+                          route: points,
+                          elevation: elevationGainM,
+                          startedAt: startedAt,
+                          endedAt: end,
+                          pauses: pauses,
+                          kmClimb: kmClimb)
+        r.gps = gps
+        return r
     }
 
     /// 問句：「上次的跑步 3.4 公里・21:05 還沒存，要存下來還是丟掉？」；不是今天的寫日期：
@@ -179,13 +189,17 @@ final class RunRecoveryCenter: ObservableObject {
 
     /// 〔存下來〕：跟按完成同一條路（WorkoutFacts.makeSession）存進訓練紀錄；Apple 健康聯動打開的話也寫進去。
     /// 提示框、卡片按下去的那一次畫面更新先過，下一輪主執行緒才寫 store（Task @MainActor，同 RunTracker 回呼的寫法）
+    /// [v25.555] 取名跟按住結束一樣看以前的紀錄（同一個起點沿用改過的名字、不然照時段）；寫好 store 之後反查地點
+    ///（WorkoutPlaceLookup.fill：await 之後拿 store 最新那一筆、只寫空的；查不到不寫）
     func save(_ checkpoint: RunCheckpoint, store: LifeStore) {
         let id = checkpoint.id
         Task { @MainActor in
             guard self.pending.contains(where: { $0.id == id }) else { return }   // 連按兩下：只存一次
             self.pending.removeAll { $0.id == id }
-            let session = WorkoutFacts.makeSession(from: checkpoint.result, bodyWeightKg: store.latestBodyWeightKg)
+            let session = WorkoutFacts.makeSession(from: checkpoint.result, bodyWeightKg: store.latestBodyWeightKg,
+                                                   sessions: store.workouts)
             store.upsertWorkout(session)
+            WorkoutPlaceLookup.shared.fill(session, store: store)
             RunCheckpointStore.delete(id)
             Task { await WorkoutHealthWriter.push(session, store: store) }
         }

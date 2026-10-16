@@ -45,6 +45,18 @@ import UIKit
 //   從那一點重新起算、不補算停之前那段；氣壓計資料回來時先把錨點設成那一筆、不加（停掉那段 GPS 已經算過），之後換回氣壓計。
 // • 精確位置：按開始時「精確位置」關著（只給大約位置，誤差 1～3 公里，每一筆都被丟掉、畫不出線），
 //   就請系統「這一次給精確位置」（requestPreciseLocation：打包出來的 Info.plist 有說明字才呼叫，沒有就不碰，不會閃退）。
+//
+// [v25.555] 新跑步畫面要的值（模擬：health/build/v5/sim_v5.py 的 TrackerV5，常數、順序一個都不能跟模擬不一樣；
+// 存點規則（accept 的過濾、平均、跳點、站著、間距）一行都沒動，只在 lastFixTime 更新之後多記 GPS 弱）：
+// • 每公里時間與小牌：store() 走滿一整公里那一刻，記那一刻的移動時間（kmTimes，「這一公里」小步道）、
+//   存下來的那一點（kmMarkers，地圖上的白底小牌）；start、cancel 清空，finish 不清（畫面已經換成成果頁）。
+// • GPS 弱（gpsWeak）：跑步中（暫停不算），誤差超過 20 公尺連續 10 秒（weakSince 用定位的時間）、或 10 秒收不到定位
+//   （lastFixArrival 用收到的時間；50 公尺以外、太舊的定位不算收到）；開始、繼續那一刻重新起算。
+//   整趟每秒數一次（tickGPS：記了幾秒、弱幾秒、收得到時誤差的平均）→ RunResult.gps／RunCheckpoint.gps → WorkoutSession.gps，
+//   成果頁「要確認」大部分時間都弱才提醒（WorkoutFacts.gpsWeakPrompt）。
+// • 先說明再問：prepare(asking: false) 不跳任何系統框（位置不 requestWhenInUseAuthorization；氣壓計只在「動作與健身」
+//   已經問過時才開），畫面先出我們的說明卡，按〔好〕才 prepare(asking: true)。
+// • 地圖上已畫的路段每 500 點切一塊（RouteMath.liveChunks；id 固定，新點只動最後一塊，拉很長的路也不卡）。
 
 // MARK: - 運動種類（v25.551）
 
@@ -256,11 +268,11 @@ final class RunTracker: NSObject, ObservableObject {
     /// [v25.552] 使用者把「精確位置」關掉了（有給位置權限、但只給大約位置）：誤差 1～3 公里，
     /// 每一筆都超過 50 公尺被丟掉，一直「定位中…」、畫不出線。GPS 燈改寫「精確位置關著」＋「打開精確位置」
     @Published private(set) var reducedAccuracy = false
-    /// [v25.555] 地圖上每整公里一塊小牌（store() 走滿一整公里時加；start 清空）。// G1：在 store() 的 kmClimb 迴圈裡一起加
+    /// [v25.555] 地圖上每整公里一塊小牌（store() 的 kmClimb 迴圈裡跟每公里爬升一起加；start、cancel 清空）
     @Published private(set) var kmMarkers: [RunKmMarker] = []
 
     /// [v25.555] 每走滿一整公里那一刻的移動時間（秒）：kmTimes[0]＝第 1 公里走完時。「這一公里」小步道用（WorkoutFacts.legProgress）。
-    /// 不發布（elapsed 每秒都在變，畫面本來就每秒重畫）。// G1：在 store() 的 kmClimb 迴圈裡一起加、start 清空
+    /// 不發布（elapsed 每秒都在變，畫面本來就每秒重畫）。store() 的 kmClimb 迴圈裡一起加；start、cancel 清空
     private(set) var kmTimes: [Double] = []
 
     /// [v25.552] 這一趟的編號：中途存檔的檔名（RunCheckpointStore），start(sport:) 換新的
@@ -320,6 +332,19 @@ final class RunTracker: NSObject, ObservableObject {
     private var baroFallback = false
     /// [v25.552] App 退到背景時馬上寫一次中途存檔
     private var backgroundSink: AnyCancellable?
+
+    // [v25.555] GPS 弱（sim_v5.py TrackerV5 的 weak_since、last_fix_arrival、tracked、weak_n、acc_sum、acc_n）
+    /// 誤差開始超過 20 公尺的那一筆定位的時間；好定位一來就清掉（開始、繼續時也清）
+    private var weakSince: Date?
+    /// 最近一次收到（過了 50 公尺、30 秒那兩道關的）定位的時間；開始、繼續那一刻先當成剛收到（10 秒內不算弱）
+    private var lastFixArrival: Date?
+    /// 跑步中數了幾秒（tickGPS，暫停不算）
+    private var gpsTracked: Double = 0
+    /// 其中 GPS 弱的秒數
+    private var gpsWeakCount: Double = 0
+    /// 收得到定位的那幾秒，誤差加總與筆數（平均誤差）
+    private var gpsAccSum: Double = 0
+    private var gpsAccCount = 0
 
     private override init() {
         super.init()
@@ -389,9 +414,13 @@ final class RunTracker: NSObject, ObservableObject {
     /// 畫面上那條「GPS 訊號弱，距離可能少算」（還在等第一個好定位 waitingForFix、精確位置關著時畫面改寫自己的那一句、不畫這條）、
     /// GPS 燈「GPS 弱・誤差 35 公尺」、存檔的 WorkoutGPSQuality（弱的秒數）都讀這個。
     /// 用 Date() 算：畫面每秒（elapsed 一變）重畫時重新判斷，收不到定位也會變。build/v5/sim_v5.py 的 TrackerV5.gps_weak。
-    /// // G1：照 build/v5/brief.md §G1-3 填（weakSince、lastFixArrival；開始、繼續時重設）
+    /// weakSince、lastFixArrival 在 accept() 記；開始、繼續時重設（暫停時定位是關的，繼續那一刻重新起算 10 秒）
     var gpsWeak: Bool {
-        false
+        guard phase == .running else { return false }
+        let now = Date()
+        if let w = weakSince, now.timeIntervalSince(w) >= WorkoutFacts.gpsWeakSeconds { return true }
+        guard let a = lastFixArrival else { return true }
+        return now.timeIntervalSince(a) >= WorkoutFacts.gpsWeakSeconds
     }
 
     /// [v25.551] 手機記得的上一個位置：還沒收到新定位前，地圖開場先放在這裡（不會拉到整個台灣）
@@ -408,13 +437,15 @@ final class RunTracker: NSObject, ObservableObject {
     /// [v25.551] 地圖上要畫的線：依 seg 切段（暫停那段不連線）；記錄中、精度夠好時，
     /// 最後一段再接到藍點，線頭每秒跟著人走，不會落後 5 筆平均的那 2 秒。
     /// 畫面只讀這個，不在 body 裡切段。
+    /// [v25.555] 每一段再切成每塊最多 500 點（RouteMath.liveChunks；id＝第幾段 × 10,000＋第幾塊，固定不變）：
+    /// 新點只動最後一塊，前面的塊 id 和內容都一樣，拉很長的路地圖也不用整條重畫
     var segments: [RouteSegment] {
         var runs = RouteMath.segmentRuns(points)
         if phase == .running, let tail = lastCoordinate, let last = points.last,
            (last.seg ?? 0) == seg, let acc = gpsAccuracy, acc <= goodAccuracy, !runs.isEmpty {
             runs[runs.count - 1].append(tail)
         }
-        return RouteMath.drawableSegments(runs)
+        return RouteMath.liveChunks(runs, size: 500)
     }
 
     // MARK: - 控制
@@ -459,15 +490,19 @@ final class RunTracker: NSObject, ObservableObject {
     /// [v25.551] 開始運動畫面一打開就呼叫：先定位（藍點、GPS 燈，起點不會歪），也先問「動作與健身」。
     /// 只在 App 開著時定位、不開背景更新；畫面關掉要呼叫 stopPreparing()。
     /// [v25.555] asking：false＝不跳任何系統權限框（第一次打開、位置還沒問過：畫面先出我們的說明卡，按〔好〕才 prepare(asking: true)）。
-    /// // G1：照 build/v5/brief.md §G1-1 改內容（現在 asking 還沒用到）
+    /// 不問的時候：位置不 requestWhenInUseAuthorization（已經允許就照樣先定位）；氣壓計只在「動作與健身」已經問過
+    /// （允許或拒絕都算）時才開——還沒問過的話一開氣壓計系統就跳框，會疊在說明卡上
     func prepare(asking: Bool = true) {
         preparing = true
-        requestAuthorization()
+        if asking { requestAuthorization() }
         let status = manager.authorizationStatus
         if phase == .idle, status == .authorizedWhenInUse || status == .authorizedAlways {
             manager.startUpdatingLocation()
         }
-        startAltimeter()
+        // 先看 hasMotionUsage 再碰 CMAltimeter（打包出來的 Info.plist 沒有說明字時一個 CMAltimeter 呼叫都不做）
+        if asking || (Self.hasMotionUsage && CMAltimeter.authorizationStatus() != .notDetermined) {
+            startAltimeter()
+        }
     }
 
     /// [v25.551] 開始運動畫面關掉時呼叫；正在記錄（含暫停）就什麼都不關
@@ -482,6 +517,7 @@ final class RunTracker: NSObject, ObservableObject {
     /// 暖機時收到的 lastFixTime、lastCoordinate、gpsAccuracy 不清：線頭和燈馬上就有。
     /// [v25.552] 換新的 runId（中途存檔的檔名）；lastBaroAt 不清：暖機時氣壓計已經在送就照用，
     /// 還沒送過的話 30 秒後自動走 GPS 備案，送了就換回來。精確位置關著就請系統暫時給；最後先寫一次中途存檔
+    /// [v25.555] 每公里時間、小牌清空；GPS 弱從這一刻重新起算（開始那一刻當成剛收到定位），整趟統計歸零
     func start(sport: RunSport) {
         guard phase == .idle else { return }
         requestAuthorization()
@@ -489,6 +525,14 @@ final class RunTracker: NSObject, ObservableObject {
         runId = UUID()
         pauses = []
         kmClimb = []
+        kmTimes = []
+        kmMarkers = []
+        weakSince = nil
+        lastFixArrival = Date()
+        gpsTracked = 0
+        gpsWeakCount = 0
+        gpsAccSum = 0
+        gpsAccCount = 0
         newPointsSinceCheckpoint = 0
         baroFallback = false
         minStep = sport.minStep
@@ -527,6 +571,7 @@ final class RunTracker: NSObject, ObservableObject {
     }
 
     /// [v25.552] 這次暫停記進暫停清單（按暫停到按繼續），最後馬上寫一次中途存檔
+    /// [v25.555] GPS 弱從繼續那一刻重新起算（暫停時定位是關的，不然一繼續就被當成 10 秒以上收不到）
     func resume() {
         guard phase == .paused else { return }
         let now = Date()
@@ -535,6 +580,8 @@ final class RunTracker: NSObject, ObservableObject {
             pauses.append(WorkoutPause(start: p, end: now))
         }
         pauseStartedAt = nil
+        weakSince = nil
+        lastFixArrival = now
         // 暫停期間移動過（走去便利商店、坐電梯）：那一段不連線、不算距離、不算爬升，另起一段
         lastStored = nil
         window = []
@@ -553,6 +600,7 @@ final class RunTracker: NSObject, ObservableObject {
     /// endedAt＝最後一次按暫停那一刻（「完成」只在暫停時出現，暫停到按完成之間不是運動）
     /// [v25.552] 暫停清單、每公里爬升記號一起交出去（最後那次暫停不進 pauses：它在 pauseStartedAt，是結束時間）；
     /// 中途存檔刪掉（背景佇列，排在最後一次寫之後）
+    /// [v25.555] 這一趟 GPS 好不好（gpsQuality）一起交出去；每公里時間、小牌不清（畫面已經換成成果頁，下次 start 才清）
     @discardableResult
     func finish() -> RunResult {
         let now = Date()
@@ -567,7 +615,7 @@ final class RunTracker: NSObject, ObservableObject {
         ticker?.cancel(); ticker = nil
         stopAltimeter()
         let begin = startedAt ?? end.addingTimeInterval(-elapsed)
-        let result = RunResult(sport: sport,
+        var result = RunResult(sport: sport,
                                distanceKm: distanceMeters / 1000,
                                movingMinutes: elapsed / 60,
                                route: points,
@@ -576,6 +624,7 @@ final class RunTracker: NSObject, ObservableObject {
                                endedAt: max(end, begin),
                                pauses: pauses,
                                kmClimb: kmClimb)
+        result.gps = gpsQuality
         RunCheckpointStore.delete(runId)
         pauses = []
         kmClimb = []
@@ -587,7 +636,7 @@ final class RunTracker: NSObject, ObservableObject {
         return result
     }
 
-    /// 丟棄這一趟（[v25.552] 中途存檔一起刪）
+    /// 丟棄這一趟（[v25.552] 中途存檔一起刪；[v25.555] 每公里時間、小牌一起清）
     func cancel() {
         manager.stopUpdatingLocation()
         manager.allowsBackgroundLocationUpdates = false
@@ -596,6 +645,8 @@ final class RunTracker: NSObject, ObservableObject {
         RunCheckpointStore.delete(runId)
         pauses = []
         kmClimb = []
+        kmTimes = []
+        kmMarkers = []
         newPointsSinceCheckpoint = 0
         phase = .idle
         startedAt = nil
@@ -640,6 +691,7 @@ final class RunTracker: NSObject, ObservableObject {
                 if self.phase == .running {
                     self.updateElapsed()
                     self.checkpointIfDue()                 // [v25.552] 沒有新點（站著、隧道）也每 30 秒寫一次
+                    self.tickGPS()                         // [v25.555] 每秒數一次 GPS 好不好
                 }
             }
     }
@@ -647,6 +699,26 @@ final class RunTracker: NSObject, ObservableObject {
     private func updateElapsed() {
         guard let s = startedAt else { return }
         elapsed = max(0, Date().timeIntervalSince(s) - pausedAccumulated)
+    }
+
+    // MARK: GPS 弱的整趟統計（[v25.555] 跟 sim_v5.py 的 TrackerV5.tick／gps_quality 一樣）
+
+    /// 跑步中每秒一次（ticker）：記了幾秒、其中弱幾秒；10 秒內收過定位的那幾秒，把最新那筆的誤差加進平均
+    private func tickGPS() {
+        gpsTracked += 1
+        if gpsWeak { gpsWeakCount += 1 }
+        if let acc = gpsAccuracy, let a = lastFixArrival,
+           Date().timeIntervalSince(a) <= WorkoutFacts.gpsWeakSeconds {
+            gpsAccSum += acc
+            gpsAccCount += 1
+        }
+    }
+
+    /// 這一趟到現在的 GPS 情形（RunResult.gps、中途存檔 RunCheckpoint.gps）；一秒都沒收到定位時平均誤差是 nil
+    private var gpsQuality: WorkoutGPSQuality {
+        WorkoutGPSQuality(trackedSeconds: gpsTracked,
+                          weakSeconds: gpsWeakCount,
+                          averageAccuracyM: gpsAccCount > 0 ? gpsAccSum / Double(gpsAccCount) : nil)
     }
 
     // MARK: 中途存檔（[v25.552] 跟 sim_v2.py 的 Tracker.checkpoint_if_due／checkpoint_now 一樣）
@@ -675,7 +747,8 @@ final class RunTracker: NSObject, ObservableObject {
                                elevationGainM: elevationGainM,
                                points: points,
                                pauses: pauses,
-                               kmClimb: kmClimb)
+                               kmClimb: kmClimb,
+                               gps: gpsQuality)              // [v25.555] 救回來的那一趟也帶 GPS 情形
         RunCheckpointStore.save(cp)
         lastCheckpointAt = Date()
         newPointsSinceCheckpoint = 0
@@ -693,6 +766,12 @@ final class RunTracker: NSObject, ObservableObject {
         gpsAccuracy = raw.horizontalAccuracy
         currentSpeedMS = max(0, raw.speed)
         fixSerial &+= 1
+        lastFixArrival = Date()                                                        // [v25.555] GPS 弱：10 秒收不到
+        if raw.horizontalAccuracy > goodAccuracy {                                     // [v25.555] GPS 弱：誤差 >20 m 從哪一筆開始
+            if weakSince == nil { weakSince = raw.timestamp }
+        } else {
+            weakSince = nil
+        }
         guard phase == .running else { return }                                        // 暖機、暫停：只更新藍點和燈
         guard raw.horizontalAccuracy <= goodAccuracy else { return }                   // 還沒收斂：不起點、不算距離
         waitingForFix = false
@@ -743,8 +822,13 @@ final class RunTracker: NSObject, ObservableObject {
         }
         gpsElevation(loc)
         // [v25.552] 每走滿一整公里記一次累計爬升（每公里分段的爬升用相鄰兩個相減）
+        // [v25.555] 同一刻記移動時間（「這一公里」小步道）和這一點（地圖上的小牌）；sim_v5.py TrackerV5.store
         while distanceMeters >= Double(kmClimb.count + 1) * 1000 {
             kmClimb.append(elevationGainM)
+            if let s = startedAt {
+                kmTimes.append(max(0, loc.timestamp.timeIntervalSince(s) - pausedAccumulated))
+            }
+            kmMarkers.append(RunKmMarker(km: kmClimb.count, lat: loc.coordinate.latitude, lon: loc.coordinate.longitude))
         }
         newPointsSinceCheckpoint += 1
         checkpointIfDue()
@@ -940,6 +1024,25 @@ enum RouteMath {
     /// [v25.551] 已存路線的線段（RouteMapView 用）
     static func segments(_ route: [RoutePoint]) -> [RouteSegment] {
         drawableSegments(segmentRuns(route))
+    }
+
+    /// [v25.555] 記錄中地圖上的線（RunTracker.segments 用；judge §4.2 工程）：每一段（兩點以上才畫）切成每塊最多 size 點，
+    /// 相鄰兩塊共用交界那一點（線不會斷）。id＝段的序號 × 10,000＋塊的序號；段序號是 runs 的索引（不是畫出來的第幾段），
+    /// 前面有一段只有一點被略過時，後面的 id 也不會變。新點只會加在最後一塊，前面每一塊的 id 和點都不變。size 小於 2 當 2
+    static func liveChunks(_ runs: [[CLLocationCoordinate2D]], size: Int) -> [RouteSegment] {
+        let n = max(size, 2)
+        var out: [RouteSegment] = []
+        for (r, run) in runs.enumerated() where run.count >= 2 {
+            var start = 0
+            var chunk = 0
+            while start < run.count - 1 {
+                let end = min(start + n, run.count)                 // 這一塊是 run[start..<end]
+                out.append(RouteSegment(id: r * 10_000 + chunk, coordinates: Array(run[start..<end])))
+                chunk += 1
+                start = end - 1                                     // 下一塊從這一塊的最後一點接著畫
+            }
+        }
+        return out
     }
 
     /// 每公里分段配速（分鐘／公里）。

@@ -14,7 +14,8 @@ import CoreLocation
 //    一句「**32:10**・配速 **6'11"**」（騎車「平均時速」；重訓「3 個動作・共 9 組」）、手寫 Nice / run!（這一趟讓這週達標 Goal / reached!）；
 //    六格：距離｜時間（總共 34:40）｜平均配速｜最快一公里 6'02"（第 1 公里 ›）｜爬升 18 m（最高比起點高 9 m ›）｜大卡 約 340（估的）。
 // ② 這趟的收穫：只在這一趟在「這週」時（打開三週前那趟說「這週跑步 14.6 公里」會誤會）。
-// ③ 要確認：舊版沒路線；編輯過距離或時間、每公里分段對不上（WorkoutFacts.validSplits 是 nil）。
+// ③ 要確認：舊版沒路線；編輯過距離或時間、每公里分段對不上（WorkoutFacts.validSplits 是 nil）；
+//    [v25.555] 這趟大部分時間 GPS 訊號很弱（WorkoutFacts.gpsWeakPrompt：記錄 2 分鐘以上、一半以上的時間弱；只提醒）。
 // ④ 路線：沿路線每 100 公尺一小段（同一段 seg 裡；路線超過 12 公里時放寬到 總長÷120，地圖上最多約 120 條線），
 //    配速＝那一小段的時間÷距離，跟**這條路線自己的平均**（路線總移動時間÷路線總距離）比——編輯過距離也照樣上色；
 //    一小段的快慢連前後各一小段一起算（約 300 公尺；單看 100 公尺會被 GPS 幾公尺的誤差弄花，見 build/v3/g3/sim_g3.py）；
@@ -33,6 +34,9 @@ import CoreLocation
 //    沒開〔打開〕→ 沒寫入權限〔怎麼打開〕→「還沒存進 Apple 健康」〔存進去〕；存入中的字由畫面看 HealthSyncCenter.writing。
 // ⑨ 合成過的「記錄方式 LifeGood（iPhone）＋Apple Watch」、大卡「Apple Watch 量的」（六格大卡同一句）。
 // build 多兩個參數：ledger（「兩筆都留」的那一對不再問）、hkCanWrite（HealthKitManager.canWriteWorkout）。
+//
+// [v25.555] 健康 v5（build/v5/brief.md §6 G3）：③ 要確認最後多一句 GPS 很弱（只提醒）。分享圖（WorkoutShare.swift）也用 build
+// 算看板與每公里（hkEnabled／hkAvailable／hkCanWrite 傳 false：圖上不放 Apple 健康、要確認）；build 的參數不變。
 
 /// 成果頁全部的字與數字。型別都收在裡面（不佔全域名字：v3 四組同時開工）
 struct WorkoutCardData {
@@ -666,6 +670,10 @@ extension WorkoutCardData {
         if let e = main, let sp = e.splits, !sp.isEmpty, !splitsValid {
             out.append(Check(id: "splits", icon: "pencil.circle",
                              message: "這一趟的距離或時間改過，每公里分段對不上了，先不顯示。"))
+        }
+        // [v25.555] 記錄 2 分鐘以上、一半以上的時間 GPS 弱（WorkoutFacts.gpsWeakPrompt）：只提醒、沒有按鈕
+        if let g = WorkoutFacts.gpsWeakPrompt(s) {
+            out.append(Check(id: "gps", icon: "location.slash", message: g))
         }
         return out
     }

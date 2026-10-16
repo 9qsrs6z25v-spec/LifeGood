@@ -24,7 +24,7 @@ import Combine
 //     （HealthLiveStrip）自己看 RunTracker；這頁只用 .onReceive(RunTracker.shared.$phase) 記一個 runActive
 //     （phase 只在開始、暫停、繼續、結束時才變）。body 裡不讀 RunTracker 任何會每秒變的值。
 //   • 彈出頁只有一個 enum HealthSheet＋一個 .sheet(item:)，內容最外層 .appStores()（Mac 上 sheet 拿不到環境物件會閃退）。
-//     開始運動 v3 仍是 RunTrackingView（v5 換全螢幕）。提示框分掛在不同的子 view：刪除掛在最近運動、丟掉掛在要確認。
+//     開始運動（RunTrackingView）[v25.555] 起改全螢幕（.fullScreenCover(item:)，見下面 v5 那段）。提示框分掛在不同的子 view：刪除掛在最近運動、丟掉掛在要確認。
 //   • 訂閱（待決定 8）：看得到全部；開始新的一趟、「＋」、編輯、複製到現在、刪除、新增／改健康里程碑要訂閱；
 //     不擋：記錄中條「回到跑步」、救回〔存下來〕〔丟掉〕、每週目標、看板主角、Apple 健康開關與同步、點卡片看成果頁。
 //   • 右上：綠色「＋」（補記四種有氧、記一次重訓）、「⋯」（每週目標、看板主角、Apple 健康）。跑者小圖示拿掉，
@@ -39,13 +39,19 @@ import Combine
 //     Apple 健康多一項〔去同意〕、寫進去以後又改過〔更新〕。順序：救回→同一趟→接回路線→去同意→更新，最多 3 列。都不擋訂閱。
 //   • 刪除確認框照 WorkoutActions.deleteAsk 三種：LifeGood 寫進 Apple 健康的〔連 Apple 健康那筆一起刪〕〔只刪 LifeGood 這筆〕〔取消〕。
 //   • ⑦ Apple 健康一列同步中寫「同步中…」；設定小頁的同步搬進 HealthSyncCenter，字改成「會帶進來／會存回去」。
+//
+// [v25.555] 健康 v5（build/v5/brief.md §G1-6）：
+//   • 「開始跑步」「回到跑步」改全螢幕：.fullScreenCover(item: $runCover)（HealthRunCover，每次新的 UUID），往下滑不會收掉；
+//     HealthSheet 沒有 .run 了（全檔一個 .sheet(item:)＋一個 .fullScreenCover(item:)，內容最外層都 .appStores()）。
+//   • RunTrackingView(onFinish:) 的意思改了：按住結束後它在下一個 runloop 才交出那一趟，這裡同步寫好 store＋排 Apple 健康
+//     （WorkoutActions.save），它自己把同一個全螢幕換成成果頁（剛跑完）、不關全螢幕；左上「完成」才關。
+//   • 全螢幕關掉時，剛跑完那一趟在「最近運動」那張卡亮 1.6 秒（綠色外框淡出）；看板、卡片在全螢幕開著時 store 一改就會重算。
+//   • 全螢幕開著時回到前景不同步 Apple 健康（跑步中解鎖手機不在背後讀寫），關掉時再看一次（同關掉彈出頁）。
 
 // MARK: - 彈出頁
 
 /// 健康頁的彈出頁：一個 enum、一個 .sheet(item:)。每次打開帶新的 UUID（坑 #8：先改值再打開會帶到舊值）
 private enum HealthSheet: Identifiable {
-    /// 開始運動／回到跑步（RunTrackingView）
-    case run(UUID)
     /// 補記（session nil、sport 是「＋」選的那一種）或編輯（session 有值）
     case editor(UUID, WorkoutSession?, WorkoutSport?)
     /// 成果頁：第二個 UUID 是那一趟的 id
@@ -59,7 +65,6 @@ private enum HealthSheet: Identifiable {
 
     var id: UUID {
         switch self {
-        case .run(let id): return id
         case .editor(let id, _, _): return id
         case .detail(let id, _): return id
         case .goal(let id): return id
@@ -67,6 +72,11 @@ private enum HealthSheet: Identifiable {
         case .milestone(let id, _): return id
         }
     }
+}
+
+/// [v25.555] 跑步畫面（全螢幕）：每次打開都是新的 id（.fullScreenCover(item:)，同 HealthSheet 每次帶新的 UUID）
+private struct HealthRunCover: Identifiable {
+    let id = UUID()
 }
 
 /// 最近運動的一列：一趟＋它的卡（page.recent[i] 對 page.recentItems[i]，item.id == session.id）
@@ -145,6 +155,13 @@ struct HealthView: View {
     /// 今天（過了午夜回到前景，看板換新的一天）
     @State private var dayKey = WorkoutFormat.date(Date())
     @State private var sheet: HealthSheet?
+    /// [v25.555] 跑步畫面（全螢幕；開始跑步、回到跑步）
+    @State private var runCover: HealthRunCover?
+    /// [v25.555] 全螢幕開著時跑完存好的那一趟（關掉全螢幕時那張卡亮一下）
+    @State private var finishedRunId: UUID?
+    /// [v25.555] 正在亮的那張卡（最近運動；1.6 秒後淡掉）
+    @State private var flashId: UUID?
+    @State private var flashTask: Task<Void, Never>?
     /// [v25.554] 按了「刪除」、等確認的那一趟（字和三種按鈕先算好：WorkoutActions.deleteAsk）
     @State private var deleteAsk: WorkoutDeleteAsk?
     /// 要確認區按了「丟掉」、等確認的那一趟
@@ -177,6 +194,10 @@ struct HealthView: View {
             // [v25.554] 彈出頁關掉、回到這頁：Apple 健康 15 分鐘沒同步就同步（開著彈出頁時回到前景不同步，見 sceneChanged）
             .sheet(item: $sheet, onDismiss: { sheetDismissed() }) { s in
                 sheetView(s).appStores()
+            }
+            // [v25.555] 跑步畫面全螢幕（往下滑不會收掉）；關掉時剛跑完那張卡亮一下、看要不要同步 Apple 健康
+            .fullScreenCover(item: $runCover, onDismiss: { runCoverDismissed() }) { _ in
+                runScreen.appStores()
             }
             .premiumLockAlert(isPresented: $showPremiumAlert)
             .task(id: taskKey) { rebuild() }
@@ -236,6 +257,7 @@ struct HealthView: View {
     private func pageDisappeared() {
         onScreen = false
         clearCopiedNote()
+        clearFlash()
     }
 
     /// 記錄器開始、暫停、繼續、結束：只記「在不在記錄」（一樣就不寫，免得多重畫一次）
@@ -246,11 +268,11 @@ struct HealthView: View {
 
     /// 回到前景：日期變了換新的一天；[v25.554] 這頁在畫面上就看要不要同步 Apple 健康（15 分鐘一次）。
     /// 上面蓋著彈出頁時不同步（跑步中解鎖手機不在背後讀寫 Apple 健康、不重算整頁；設定小頁正在跳權限框也不搶），
-    /// 關掉彈出頁時再看一次（sheetDismissed）
+    /// 關掉彈出頁時再看一次（sheetDismissed）。[v25.555] 跑步全螢幕開著時也一樣不同步（關掉時 runCoverDismissed 再看）
     private func sceneChanged(_ phase: ScenePhase) {
         guard phase == .active else { return }
         refreshDay()
-        guard onScreen, sheet == nil else { return }
+        guard onScreen, sheet == nil, runCover == nil else { return }
         autoSync()
     }
 
@@ -258,6 +280,42 @@ struct HealthView: View {
     private func sheetDismissed() {
         guard onScreen else { return }
         autoSync()
+    }
+
+    /// [v25.555] 跑步全螢幕關掉（收起、關閉、成果頁「完成」）：剛跑完那一趟的卡亮一下，再照關掉彈出頁看要不要同步
+    private func runCoverDismissed() {
+        if let id = finishedRunId {
+            finishedRunId = nil
+            flash(id)
+        }
+        sheetDismissed()
+    }
+
+    /// [v25.555] 全螢幕裡跑完、store 已經寫好那一趟（RunTrackingView 已經在下一個 runloop 才叫 onFinish）：只記 id，關掉全螢幕時亮。
+    /// 萬一全螢幕已經關了（runCover 是 nil）才交出來，就直接亮，不留一個舊 id 等到下一次關全螢幕才亮錯
+    private func justFinished(_ id: UUID) {
+        if runCover == nil {
+            flash(id)
+        } else {
+            finishedRunId = id
+        }
+    }
+
+    /// [v25.555] 最近運動那張卡亮 1.6 秒（綠色外框）再淡掉；看板、卡片已經重算好（workoutsRevision 變了 .task(id:) 照樣跑）
+    private func flash(_ id: UUID) {
+        flashTask?.cancel()
+        withAnimation(.easeOut(duration: 0.2)) { flashId = id }
+        flashTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 1_600_000_000)
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeOut(duration: 0.6)) { flashId = nil }
+        }
+    }
+
+    private func clearFlash() {
+        flashTask?.cancel()
+        flashTask = nil
+        flashId = nil
     }
 
     /// 排到下一輪主執行緒才同步（不跟關彈出頁、回到前景那一次畫面更新搶同一輪；syncIfDue 的 store 寫入都在 await 之後）
@@ -322,12 +380,12 @@ struct HealthView: View {
         if !RunTracker.shared.isActive, let rs = s.runSport, rs != lastSport {
             lastSport = rs
         }
-        sheet = .run(UUID())
+        runCover = HealthRunCover()
     }
 
-    /// 記錄中條「回到跑步」：不擋訂閱（在跑的那一趟一定讓你存完）
+    /// 記錄中條「回到跑步」：不擋訂閱（在跑的那一趟一定讓你存完）。[v25.555] 全螢幕
     private func openRun() {
-        sheet = .run(UUID())
+        runCover = HealthRunCover()
     }
 
     /// 目標格、「⋯ › 每週目標」：不擋訂閱。page 還沒算好（剛打開那一瞬間）就不開，免得彈出一張空白表單
@@ -489,8 +547,6 @@ struct HealthView: View {
     @ViewBuilder
     private func sheetView(_ s: HealthSheet) -> some View {
         switch s {
-        case .run:
-            runSheet
         case .editor(_, let session, let sport):
             editorSheet(session, sport: sport)
         case .detail(_, let sessionId):
@@ -504,11 +560,13 @@ struct HealthView: View {
         }
     }
 
-    /// 開始運動（v3 仍是舊面板）：RunTrackingView 已經關畫面後下一輪才交出那一趟
-    private var runSheet: some View {
+    /// [v25.555] 跑步畫面（全螢幕的內容）：按住結束後 RunTrackingView 在下一個 runloop 才交出那一趟，
+    /// 這裡同步寫好 store＋排 Apple 健康（WorkoutActions.save）；它接著把同一個全螢幕換成成果頁（剛跑完），不關全螢幕
+    private var runScreen: some View {
         let store = lifeStore
         return RunTrackingView { session in
             WorkoutActions.save(session, store: store)
+            justFinished(session.id)
         }
     }
 
@@ -780,6 +838,7 @@ struct HealthView: View {
             sheet = .detail(UUID(), s.id)
         } label: {
             MoneyItemCard(item: row.item)
+                .overlay { flashRing(row.id) }                 // [v25.555] 剛跑完回來亮一下
         }
         .buttonStyle(MoneyPressStyle())
         // 長按浮起來的預覽照卡片的圓角（MoneyItemCard 一般版 18），不要露出方角（同全部紀錄頁）
@@ -787,6 +846,19 @@ struct HealthView: View {
         .accessibilityHint("點兩下看這一趟的成果；長按可以編輯或刪除")
         .contextMenu {
             recentMenu(s)
+        }
+    }
+
+    /// [v25.555] 剛跑完那一趟的綠色外框（跟卡片同一個圓角 18）；不擋點按、VoiceOver 不讀
+    @ViewBuilder
+    private func flashRing(_ id: UUID) -> some View {
+        if flashId == id {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(WorkoutPalette.go, lineWidth: 2.5)
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+        } else {
+            EmptyView()
         }
     }
 

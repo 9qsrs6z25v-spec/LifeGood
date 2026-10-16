@@ -31,12 +31,23 @@ import HealthKit
 // • 刪除照 WorkoutActions.deleteAsk 三種：LifeGood 寫進 Apple 健康的〔連 Apple 健康那筆一起刪〕〔只刪 LifeGood 這筆〕〔取消〕；
 //   手錶記的、合成過的、沒碰過 Apple 健康的〔刪除〕〔取消〕。
 // • ⑨ 合成過的「記錄方式 LifeGood（iPhone）＋Apple Watch」、大卡「Apple Watch 量的」（字在 WorkoutCardData）。
+//
+// [v25.555] 健康 v5（build/v5/brief.md §6 G3；judge §4.3、§5.3、樣稿②-5）：
+// • 剛跑完（justFinished）：跑步畫面按住結束、存好之後，同一個全螢幕直接換成這一頁（不 dismiss 再開）。
+//   左上「完成」（dismiss＝關掉整個全螢幕回健康頁）、右上只有「⋯」（分享、刪除這一趟）、沒有綠字「編輯」、
+//   導覽列下面「✓ 已存好・名稱 河濱晨跑 ✎・地點 大佳河濱公園 ✎」那一條（WorkoutSavedStrip）取代換一趟列。
+//   名稱、地點各一個有輸入框的提示框（名稱掛在那一條自己身上、地點掛在它背景的另一個子 view：同一個 view 不疊兩個 alert），
+//   〔儲存〕後下一個 runloop 拿 store 最新那一筆改；改名、改地點不擋訂閱（待決定 8「在跑的那一趟一定讓你存完」），
+//   不叫 Apple 健康（名字、地點不在 Apple 健康的比對欄位裡）。地點還在反查（WorkoutPlaceLookup.looking）寫「查詢中…」，
+//   沒有寫藍字「＋新增」。
+// • 「⋯」最上面多「分享」（兩種模式都有、不擋訂閱）→ 同一個 .sheet(item:) 開 WorkoutShareSheet（WorkoutShare.swift）。
+// • 要確認多一句 GPS 很弱（字在 WorkoutCardData.makeChecks，只提醒）。
 
 struct WorkoutDetailView: View {
     /// 打開哪一趟；換一趟（同一週的換一趟列）在頁面裡面換，不重開 sheet
     let sessionId: UUID
     /// [v25.555] 剛跑完：跑步畫面按住結束、存好之後，同一個全螢幕直接換成這一頁（judge §4.3「先存再看」）。
-    /// 左上「完成」（關掉整個全螢幕回健康頁）、導覽列下面「已存好・名稱 ✎・地點 ✎」那一條、沒有換一趟列。// G3：照 build/v5/brief.md §G3 實作
+    /// 左上「完成」（關掉整個全螢幕回健康頁）、導覽列下面「已存好・名稱 ✎・地點 ✎」那一條、沒有換一趟列、右上只有「⋯」
     let justFinished: Bool
 
     @EnvironmentObject var lifeStore: LifeStore
@@ -96,8 +107,8 @@ struct WorkoutDetailView: View {
         .onChange(of: scenePhase) { _, phase in
             if phase == .active { refreshWriteAccess() }
         }
-        // 換一趟列釘在導覽列下面：同一週不只一趟才出現
-        .safeAreaInset(edge: .top, spacing: 0) { switcherBar }
+        // 換一趟列釘在導覽列下面：同一週不只一趟才出現；[v25.555] 剛跑完換成「已存好」那一條
+        .safeAreaInset(edge: .top, spacing: 0) { topBar }
         .navigationTitle(titleText)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar { toolbarItems }
@@ -185,6 +196,16 @@ struct WorkoutDetailView: View {
         lastBuiltKey = taskKey(for: id)
     }
 
+    /// [v25.555] 導覽列下面那一條：剛跑完「已存好・名稱 ✎・地點 ✎」；一般模式換一趟列（照舊）
+    @ViewBuilder
+    private var topBar: some View {
+        if justFinished {
+            WorkoutSavedStrip(sessionId: currentId)
+        } else {
+            switcherBar
+        }
+    }
+
     @ViewBuilder
     private var switcherBar: some View {
         if let items = card?.switcher, items.count > 1 {
@@ -200,8 +221,9 @@ struct WorkoutDetailView: View {
 
     @ToolbarContentBuilder
     private var toolbarItems: some ToolbarContent {
+        // [v25.555] 剛跑完「完成」（關掉整個全螢幕回健康頁）；一般「關閉」。都是 dismiss()
         ToolbarItem(placement: .topBarLeading) {
-            Button("關閉") { dismiss() }
+            Button(closeTitle) { dismiss() }
         }
         // 標題是這一趟的名字（「河濱晨跑」「晨跑」），太長跑馬燈
         ToolbarItem(placement: .principal) {
@@ -210,6 +232,20 @@ struct WorkoutDetailView: View {
                 .accessibilityAddTraits(.isHeader)
         }
         ToolbarItem(placement: .topBarTrailing) {
+            trailingButtons
+        }
+    }
+
+    private var closeTitle: String {
+        justFinished ? "完成" : "關閉"
+    }
+
+    /// [v25.555] 剛跑完只有「⋯」（名稱、地點在「已存好」那一條直接改）；一般模式「⋯」＋綠字「編輯」照舊
+    @ViewBuilder
+    private var trailingButtons: some View {
+        if justFinished {
+            moreMenu
+        } else {
             HStack(spacing: 16) {
                 moreMenu
                 Button {
@@ -222,9 +258,15 @@ struct WorkoutDetailView: View {
         }
     }
 
-    /// 「⋯」：刪除這一趟（v5 在同一個選單加「分享」）
+    /// 「⋯」：[v25.555] 分享（不擋訂閱）、刪除這一趟（擋訂閱）
     private var moreMenu: some View {
         Menu {
+            Button {
+                share()
+            } label: {
+                Label("分享", systemImage: "square.and.arrow.up")
+            }
+            Divider()
             Button(role: .destructive) {
                 askDelete()
             } label: {
@@ -325,6 +367,12 @@ struct WorkoutDetailView: View {
         sheet = .appleHealth(UUID())
     }
 
+    /// [v25.555] 「⋯ › 分享」：分享前那張小表單（剛跑完、一般模式都有；不擋訂閱：分享不是編輯）
+    private func share() {
+        guard currentSession != nil else { return }
+        sheet = .share(UUID())
+    }
+
     /// [v25.554] 看手錶那一趟時按了〔合成一筆〕：手錶那一趟被拿掉了，換到合成好的那一趟（不然 0.6 秒後整頁關掉）。
     /// 已經在關（這一趟沒了、刪除中）就照關
     private func showMerged(_ id: UUID) {
@@ -380,6 +428,8 @@ struct WorkoutDetailView: View {
             fullMap
         case .appleHealth:
             HealthAppleHealthSheet()
+        case .share:
+            WorkoutShareSheet(sessionId: currentId)
         }
     }
 
@@ -413,12 +463,15 @@ private enum WorkoutDetailSheet: Identifiable {
     case map(UUID)
     /// [v25.554] Apple 健康那一列〔打開〕：Apple 健康設定小頁（HealthView.swift 的 HealthAppleHealthSheet）
     case appleHealth(UUID)
+    /// [v25.555] 「⋯ › 分享」：分享前那張小表單（WorkoutShare.swift 的 WorkoutShareSheet）
+    case share(UUID)
 
     var id: UUID {
         switch self {
         case .edit(let id, _): return id
         case .map(let id): return id
         case .appleHealth(let id): return id
+        case .share(let id): return id
         }
     }
 }
@@ -451,6 +504,246 @@ private enum WorkoutDetailAnchor: Hashable {
 private enum WorkoutDetailMapStroke {
     static let casing = StrokeStyle(lineWidth: 7, lineCap: .round, lineJoin: .round)
     static let line = StrokeStyle(lineWidth: 4, lineCap: .round, lineJoin: .round)
+}
+
+// MARK: - 剛跑完：已存好・名稱 ✎・地點 ✎（[v25.555]）
+
+/// 導覽列下面那一條（樣稿②-5）：淡綠圓角條，綠色勾＋綠字「已存好・名稱 」＋**河濱晨跑** ✎＋「・地點 」＋**大佳河濱公園** ✎。
+/// 一行放不下（字放大、名字很長）換成兩行（名稱一行、地點一行）。
+/// 名稱、地點各一顆按鈕，點了跳有輸入框的提示框；名稱的提示框掛在這個 view，地點的掛在背景的 WorkoutSavedPlaceAlert
+/// （同一個 view 不疊兩個 .alert）。寫入都在下一個 runloop、拿 store 最新那一筆（中間可能剛寫進 Apple 健康、剛查到地點）。
+/// 不擋訂閱、不叫 Apple 健康
+private struct WorkoutSavedStrip: View {
+    let sessionId: UUID
+
+    @EnvironmentObject var lifeStore: LifeStore
+    /// 地點還在反查（looking）寫「查詢中…」
+    @ObservedObject private var places = WorkoutPlaceLookup.shared
+    @Environment(\.colorScheme) private var scheme
+    @State private var editingName = false
+    @State private var nameDraft = ""
+    @State private var editingPlace = false
+    @State private var placeDraft = ""
+
+    /// 改名提示框的說明（改過的名字之後會沿用：WorkoutFacts.autoTitle）
+    static let nameMessage = "之後從同一個地方（150 公尺內）出發的同一種運動，會自動用這個名字。"
+
+    var body: some View {
+        strip
+            .background {
+                WorkoutSavedPlaceAlert(sessionId: sessionId, isPresented: $editingPlace, draft: $placeDraft)
+            }
+            .alert("名稱", isPresented: $editingName) {
+                TextField("例：河濱晨跑", text: $nameDraft)
+                Button("儲存") { saveName() }
+                Button("取消", role: .cancel) {}
+            } message: {
+                Text(Self.nameMessage)
+            }
+    }
+
+    // MARK: 資料
+
+    private var pal: TripBoardPalette { TripBoardPalette(scheme) }
+
+    /// store 裡最新的這一趟
+    private var session: WorkoutSession? {
+        lifeStore.workouts.first { $0.id == sessionId }
+    }
+
+    /// 名稱（WorkoutFacts.title：運動名換成時段名，同成果頁標題）
+    private var nameText: String {
+        session.map { WorkoutFacts.title($0) } ?? ""
+    }
+
+    private var placeValue: String {
+        (session?.place ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var lookingUp: Bool {
+        places.looking.contains(sessionId)
+    }
+
+    /// 地點：有就寫；空的時候還在反查「查詢中…」、不然「＋新增」
+    private var placeText: String {
+        if !placeValue.isEmpty { return placeValue }
+        return lookingUp ? "查詢中…" : "＋新增"
+    }
+
+    /// 有地點一般字色；「＋新增」藍字；「查詢中…」灰字
+    private var placeColor: Color {
+        if !placeValue.isEmpty { return pal.ink }
+        return lookingUp ? pal.label : pal.hint
+    }
+
+    private var placeSpoken: String {
+        if !placeValue.isEmpty { return placeValue }
+        return lookingUp ? "查詢中" : "還沒填"
+    }
+
+    private var savedTint: Color { MoneyTone.good.color(pal) }
+
+    private var stripFill: Color { WorkoutPalette.go.opacity(pal.dark ? 0.18 : 0.10) }
+
+    // MARK: 畫
+
+    private var strip: some View {
+        ViewThatFits(in: .horizontal) {
+            oneLine
+            twoLines
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 9)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(stripFill, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+        // 不透明的底：內容捲到這一條下面時字不會透出來
+        .background(Color(.systemGroupedBackground))
+    }
+
+    private var oneLine: some View {
+        HStack(spacing: 5) {
+            checkIcon
+            savedText("已存好・名稱", spoken: "已存好")
+            nameButton
+            savedText("・地點", spoken: nil)
+            placeButton
+        }
+        .lineLimit(1)
+    }
+
+    private var twoLines: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 5) {
+                checkIcon
+                savedText("已存好・名稱", spoken: "已存好")
+                nameButton
+            }
+            HStack(spacing: 5) {
+                checkIcon
+                    .hidden()
+                savedText("地點", spoken: nil)
+                placeButton
+            }
+        }
+    }
+
+    private var checkIcon: some View {
+        Image(systemName: "checkmark.circle.fill")
+            .font(.subheadline.weight(.bold))
+            .foregroundStyle(WorkoutPalette.go)
+            .accessibilityHidden(true)
+    }
+
+    /// 綠字；spoken 是 nil 的不唸（「・地點」由地點那顆按鈕自己唸）
+    private func savedText(_ text: String, spoken: String?) -> some View {
+        Text(text)
+            .font(.subheadline.weight(.bold))
+            .foregroundStyle(savedTint)
+            .accessibilityLabel(spoken ?? "")
+            .accessibilityHidden(spoken == nil)
+    }
+
+    private var nameButton: some View {
+        Button {
+            openName()
+        } label: {
+            valueLabel(nameText, color: pal.ink)
+        }
+        .buttonStyle(MoneyPressStyle())
+        .accessibilityLabel("名稱 " + nameText)
+        .accessibilityHint("點兩下修改")
+    }
+
+    private var placeButton: some View {
+        Button {
+            openPlace()
+        } label: {
+            valueLabel(placeText, color: placeColor)
+        }
+        .buttonStyle(MoneyPressStyle())
+        .accessibilityLabel("地點 " + placeSpoken)
+        .accessibilityHint("點兩下修改")
+    }
+
+    /// 粗體的值＋藍色鉛筆
+    private func valueLabel(_ text: String, color: Color) -> some View {
+        HStack(spacing: 3) {
+            Text(text)
+                .font(.subheadline.weight(.heavy))
+                .foregroundStyle(color)
+            Image(systemName: "pencil")
+                .font(.caption.weight(.bold))
+                .foregroundStyle(pal.hint)
+        }
+        .contentShape(Rectangle())
+    }
+
+    // MARK: 動作
+
+    private func openName() {
+        guard session != nil else { return }
+        nameDraft = nameText
+        editingName = true
+    }
+
+    private func openPlace() {
+        guard session != nil else { return }
+        placeDraft = placeValue
+        editingPlace = true
+    }
+
+    /// 〔儲存〕名稱：空白不改；下一個 runloop 拿 store 最新那一筆改（提示框先收）
+    private func saveName() {
+        let text = nameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        let id = sessionId
+        let store = lifeStore
+        DispatchQueue.main.async {
+            guard var latest = store.workouts.first(where: { $0.id == id }), latest.title != text else { return }
+            latest.title = text
+            store.upsertWorkout(latest)
+        }
+    }
+}
+
+/// [v25.555] 改地點的提示框（掛在「已存好」那一條的背景：同一個 view 不疊兩個 .alert）。
+/// 地點可以清空；改了先叫 WorkoutPlaceLookup.forget（不再寫「查詢中…」「＋新增」）
+private struct WorkoutSavedPlaceAlert: View {
+    let sessionId: UUID
+    @Binding var isPresented: Bool
+    @Binding var draft: String
+
+    @EnvironmentObject var lifeStore: LifeStore
+
+    var body: some View {
+        Color.clear
+            .accessibilityHidden(true)
+            .alert("地點", isPresented: $isPresented) {
+                TextField("例：大佳河濱公園", text: $draft)
+                Button("儲存") { save() }
+                Button("取消", role: .cancel) {}
+            } message: {
+                Text("只記在這一趟；分享圖不會放地點。")
+            }
+    }
+
+    /// 〔儲存〕地點：下一個 runloop 拿 store 最新那一筆改（空白＝清掉）。
+    /// 真的改了才 forget：還在反查時打開、沒填就按〔儲存〕（空的→空的）不算改，「查詢中…」照舊、查到照樣寫進來；
+    /// 自己填了字，反查回來看到已經有地點就不蓋掉（WorkoutPlaceLookup.fill 只寫空的）
+    private func save() {
+        let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        let id = sessionId
+        let store = lifeStore
+        DispatchQueue.main.async {
+            guard var latest = store.workouts.first(where: { $0.id == id }),
+                  latest.place.trimmingCharacters(in: .whitespacesAndNewlines) != text else { return }
+            WorkoutPlaceLookup.shared.forget(id)
+            latest.place = text
+            store.upsertWorkout(latest)
+        }
+    }
 }
 
 // MARK: - ① 成果看板
