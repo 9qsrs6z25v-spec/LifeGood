@@ -32,7 +32,8 @@ import Combine
 //   • 人生分頁一開始就有「健康」（MainTabView 的 LifeFeatureGate，待決定 7）。
 //
 // [v25.554] 健康 v4（build/v4/brief.md §G3）：
-//   • 打開健康頁、回到前景時自動同步 Apple 健康（HealthSyncCenter.syncIfDue：離上次 15 分鐘以上才同步、不跳權限框）。
+//   • 打開健康頁、回到前景、關掉彈出頁時自動同步 Apple 健康（HealthSyncCenter.syncIfDue：離上次 15 分鐘以上才同步、不跳權限框）；
+//     上面蓋著彈出頁（跑步中、成果頁、設定小頁）時回到前景不同步，關掉彈出頁再看。
 //   • .task(id:) 記住上次算的 key（lastBuiltKey，同 WorkoutDetailView）：從全部紀錄返回、切分頁回來不再整頁重算。
 //   • ③ 要確認多四種：同一趟〔合成一筆〕〔兩筆都留〕、舊紀錄〔接回來〕（手錶那筆已在 LifeGood 走合成；還沒帶進來的〔先不要〕）、
 //     Apple 健康多一項〔去同意〕、寫進去以後又改過〔更新〕。順序：救回→同一趟→接回路線→去同意→更新，最多 3 列。都不擋訂閱。
@@ -173,7 +174,8 @@ struct HealthView: View {
             ScrollViewReader { proxy in
                 scrollPage(proxy)
             }
-            .sheet(item: $sheet) { s in
+            // [v25.554] 彈出頁關掉、回到這頁：Apple 健康 15 分鐘沒同步就同步（開著彈出頁時回到前景不同步，見 sceneChanged）
+            .sheet(item: $sheet, onDismiss: { sheetDismissed() }) { s in
                 sheetView(s).appStores()
             }
             .premiumLockAlert(isPresented: $showPremiumAlert)
@@ -242,11 +244,24 @@ struct HealthView: View {
         if active != runActive { runActive = active }
     }
 
-    /// 回到前景：日期變了換新的一天；[v25.554] 這頁在畫面上就看要不要同步 Apple 健康（15 分鐘一次）
+    /// 回到前景：日期變了換新的一天；[v25.554] 這頁在畫面上就看要不要同步 Apple 健康（15 分鐘一次）。
+    /// 上面蓋著彈出頁時不同步（跑步中解鎖手機不在背後讀寫 Apple 健康、不重算整頁；設定小頁正在跳權限框也不搶），
+    /// 關掉彈出頁時再看一次（sheetDismissed）
     private func sceneChanged(_ phase: ScenePhase) {
         guard phase == .active else { return }
         refreshDay()
+        guard onScreen, sheet == nil else { return }
+        autoSync()
+    }
+
+    /// [v25.554] 彈出頁關掉（成果頁、設定小頁、跑完…）：這頁還在畫面上就看要不要同步（syncIfDue 自己判斷 15 分鐘、正在同步就不動）
+    private func sheetDismissed() {
         guard onScreen else { return }
+        autoSync()
+    }
+
+    /// 排到下一輪主執行緒才同步（不跟關彈出頁、回到前景那一次畫面更新搶同一輪；syncIfDue 的 store 寫入都在 await 之後）
+    private func autoSync() {
         let store = lifeStore
         Task { await HealthSyncCenter.shared.syncIfDue(store: store) }
     }

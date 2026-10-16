@@ -20,6 +20,17 @@ import HealthKit
 // • 刪除：確認後等提示框收完（0.35 秒）先關成果頁，再 WorkoutActions.delete（它自己再排到下一輪才寫 store）。
 //   這一趟被別的地方刪掉（別台裝置同步過來）：0.6 秒後自己關掉。
 // • 編輯過距離或時間（validSplits 是 nil）：每公里整區不出現、最快一公里「—」、要確認多一行說明；地圖照樣快慢上色。
+//
+// [v25.554] 健康 v4（build/v4/brief.md §6 G4；judge §5.2 ③⑧、§5.3）：
+// • ③ 要確認有按鈕（全部交給 HealthSyncCenter，都不擋訂閱）：同一趟〔合成一筆〕（舊版記的〔接回來〕）〔兩筆都留〕；
+//   舊版沒路線〔去 Apple 健康找〕→ 找的時候「正在 Apple 健康找…」、找到換〔接回來〕〔先不要〕、找不到寫一句。
+//   看的是手錶那一趟時按〔合成一筆〕：手錶那一趟被拿掉了，直接換到合成好的那一趟（不關頁面）。
+// • ⑧ Apple 健康一列：幾點存進去的、存入中（HealthSyncCenter.writing，子 view 自己看）、改過〔更新〕、手錶「10/8 匯入」、
+//   合成過、沒開〔打開〕（同一個 .sheet(item:) 開 Apple 健康設定小頁）、沒寫入權限〔怎麼打開〕（說明框掛在這一列自己的 view）、
+//   沒存〔存進去〕。寫入權限（canWriteWorkout）不會通知畫面：打開時、回到前景、彈出頁收起時重讀，變了才重算。
+// • 刪除照 WorkoutActions.deleteAsk 三種：LifeGood 寫進 Apple 健康的〔連 Apple 健康那筆一起刪〕〔只刪 LifeGood 這筆〕〔取消〕；
+//   手錶記的、合成過的、沒碰過 Apple 健康的〔刪除〕〔取消〕。
+// • ⑨ 合成過的「記錄方式 LifeGood（iPhone）＋Apple Watch」、大卡「Apple Watch 量的」（字在 WorkoutCardData）。
 
 struct WorkoutDetailView: View {
     /// 打開哪一趟；換一趟（同一週的換一趟列）在頁面裡面換，不重開 sheet
@@ -28,8 +39,12 @@ struct WorkoutDetailView: View {
     @EnvironmentObject var lifeStore: LifeStore
     @EnvironmentObject var subscription: SubscriptionManager
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.scenePhase) private var scenePhase
     /// 健康頁 Apple 健康開關（同 HealthView、WorkoutHealthWriter.enabledKey）
     @AppStorage("health_hk_enabled") private var hkEnabled = false
+    /// [v25.554] Apple 健康有沒有給寫入（HealthKitManager.canWriteWorkout 不會通知畫面）：只拿來當重算的 key，
+    /// 打開時、回到前景、彈出頁收起時重讀（去「健康」App 打開權限回來，〔怎麼打開〕換成〔存進去〕）
+    @State private var hkCanWrite = false
 
     /// 現在看的是哪一趟（換一趟列點了就換）
     @State private var currentId: UUID
@@ -40,7 +55,8 @@ struct WorkoutDetailView: View {
     /// 換一趟的方向（+1 往右邊那趟、-1 往左邊），決定滑入的方向
     @State private var slideDirection = 1
     @State private var sheet: WorkoutDetailSheet?
-    @State private var deleteAsk: WorkoutDetailDelete?
+    /// [v25.554] 刪除確認框：字和三種按鈕先算好（WorkoutActions.deleteAsk）
+    @State private var deleteAsk: WorkoutDeleteAsk?
     @State private var showPremiumAlert = false
     /// 正在關（刪掉了）：資料沒了也不再清空畫面、不再排第二次關
     @State private var closing = false
@@ -54,13 +70,13 @@ struct WorkoutDetailView: View {
         NavigationStack {
             scroller
                 .alert(deleteAsk?.title ?? "", isPresented: deletePresented, presenting: deleteAsk) { a in
-                    Button("刪除", role: .destructive) { confirmDelete(a) }
-                    Button("取消", role: .cancel) {}
+                    deleteButtons(a)
                 } message: { a in
                     Text(a.message)
                 }
         }
-        .sheet(item: $sheet) { s in sheetView(s).appStores() }
+        // 收起時重讀寫入權限（Apple 健康設定小頁打開開關、同意之後回來）
+        .sheet(item: $sheet, onDismiss: { refreshWriteAccess() }) { s in sheetView(s).appStores() }
         .premiumLockAlert(isPresented: $showPremiumAlert)
     }
 
@@ -71,6 +87,10 @@ struct WorkoutDetailView: View {
             }
             .background(Color(.systemGroupedBackground))
             .task(id: cardTaskKey) { rebuild() }
+        }
+        // 從「健康」App 改完權限回來
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { refreshWriteAccess() }
         }
         // 換一趟列釘在導覽列下面：同一週不只一趟才出現
         .safeAreaInset(edge: .top, spacing: 0) { switcherBar }
@@ -92,23 +112,35 @@ struct WorkoutDetailView: View {
         return "運動"
     }
 
-    /// 換一趟、運動改了（workoutsRevision：運動、每週目標、體重）、Apple 健康開關改了都重算
+    /// 換一趟、運動改了（workoutsRevision：運動、每週目標、體重、[v25.554] Apple 健康的帳）、Apple 健康開關改了、
+    /// [v25.554] 寫入權限改了都重算
     private var cardTaskKey: String {
         taskKey(for: currentId)
     }
 
     private func taskKey(for id: UUID) -> String {
-        "\(id.uuidString)-\(lifeStore.workoutsRevision)-\(hkEnabled)"
+        "\(id.uuidString)-\(lifeStore.workoutsRevision)-\(hkEnabled)-\(hkCanWrite)"
     }
 
-    /// 在主執行緒算（WorkoutFormat 的 DateFormatter 共用）
+    /// 在主執行緒算（WorkoutFormat 的 DateFormatter 共用）。
+    /// [v25.554] 能不能用「健康」看 HealthKitManager.isAvailable（打包出來的 Info.plist 少了健康說明字也是 false：
+    /// 那時按鈕按了也不會動，整列不出現）；寫入權限每次現讀
     private func buildCard(_ s: WorkoutSession) -> WorkoutCardData {
-        WorkoutCardData.build(session: s, sessions: lifeStore.workouts, prefs: lifeStore.workoutPrefs,
-                              bodyWeightKg: lifeStore.latestBodyWeightKg, hkEnabled: hkEnabled,
-                              hkAvailable: HKHealthStore.isHealthDataAvailable())
+        let hk = HealthKitManager.shared
+        return WorkoutCardData.build(session: s, sessions: lifeStore.workouts, prefs: lifeStore.workoutPrefs,
+                                     bodyWeightKg: lifeStore.latestBodyWeightKg, hkEnabled: hkEnabled,
+                                     hkAvailable: hk.isAvailable, hkCanWrite: hk.canWriteWorkout,
+                                     ledger: lifeStore.workoutHealthLedger)
+    }
+
+    /// [v25.554] 重讀寫入權限；變了才寫（key 跟著變 → .task(id:) 重算一次）
+    private func refreshWriteAccess() {
+        let can = HealthKitManager.shared.canWriteWorkout
+        if can != hkCanWrite { hkCanWrite = can }
     }
 
     private func rebuild() {
+        refreshWriteAccess()
         guard let s = currentSession else {
             // 這一趟沒了（別台裝置刪的、同步過來）：沒有東西可看了。晚一點才關：
             // 編輯頁、提示框可能還在收，一邊收一邊關會被 UIKit 擋掉（同 VehicleDetailView）
@@ -233,7 +265,7 @@ struct WorkoutDetailView: View {
         WorkoutDetailBoard(data: c, onTap: { tap in scroll(proxy, to: tap) })
             .id(WorkoutDetailAnchor.top)
         WorkoutDetailGains(gains: c.gains)
-        WorkoutDetailChecks(checks: c.checks)
+        WorkoutDetailChecks(checks: c.checks, sessionId: c.sessionId, onMerged: { id in showMerged(id) })
         WorkoutDetailRoute(route: c.route, note: c.routeNote, onOpen: { openMap() })
         WorkoutDetailSplits(data: c.splits)
             .id(WorkoutDetailAnchor.splits)
@@ -245,7 +277,7 @@ struct WorkoutDetailView: View {
         WorkoutDetailElevationSection(data: c.elevation, sport: c.sport)
             .id(WorkoutDetailAnchor.elevation)
         WorkoutDetailMoves(moves: c.moves)
-        WorkoutDetailAppleHealth(line: c.health)
+        WorkoutDetailAppleHealth(line: c.health, sessionId: c.sessionId, onOpen: { openAppleHealth() })
         WorkoutDetailInfo(items: c.info)
     }
 
@@ -284,12 +316,22 @@ struct WorkoutDetailView: View {
         sheet = .map(UUID())
     }
 
+    /// [v25.554] Apple 健康那一列〔打開〕：開 Apple 健康設定小頁（不擋訂閱：同 v3 開關與同步不擋）
+    private func openAppleHealth() {
+        sheet = .appleHealth(UUID())
+    }
+
+    /// [v25.554] 看手錶那一趟時按了〔合成一筆〕：手錶那一趟被拿掉了，換到合成好的那一趟（不然 0.6 秒後整頁關掉）。
+    /// 已經在關（這一趟沒了、刪除中）就照關
+    private func showMerged(_ id: UUID) {
+        guard !closing else { return }
+        jump(to: id)
+    }
+
     private func askDelete() {
         guard let s = currentSession else { return }
         requirePremium {
-            deleteAsk = WorkoutDetailDelete(id: s.id,
-                                            title: WorkoutActions.deleteTitle(s),
-                                            message: WorkoutActions.deleteMessage(s))
+            deleteAsk = WorkoutActions.deleteAsk(s)
         }
     }
 
@@ -297,8 +339,21 @@ struct WorkoutDetailView: View {
         Binding(get: { deleteAsk != nil }, set: { if !$0 { deleteAsk = nil } })
     }
 
-    /// 〔刪除〕：等提示框收完先關成果頁，再刪（WorkoutActions.delete 自己再排到下一輪才寫 store）
-    private func confirmDelete(_ a: WorkoutDetailDelete) {
+    /// [v25.554] 刪除確認框的按鈕（WorkoutActions.deleteKind）：LifeGood 寫進 Apple 健康的三顆；手錶的、合成過的、沒碰過的〔刪除〕〔取消〕
+    @ViewBuilder
+    private func deleteButtons(_ a: WorkoutDeleteAsk) -> some View {
+        if a.kind == .withHealth {
+            Button("連 Apple 健康那筆一起刪", role: .destructive) { confirmDelete(a, alsoFromHealth: true) }
+            Button("只刪 LifeGood 這筆", role: .destructive) { confirmDelete(a, alsoFromHealth: false) }
+        } else {
+            Button("刪除", role: .destructive) { confirmDelete(a, alsoFromHealth: false) }
+        }
+        Button("取消", role: .cancel) {}
+    }
+
+    /// 〔刪除〕：等提示框收完先關成果頁，再刪（WorkoutActions.delete 自己再排到下一輪才寫 store）。
+    /// [v25.554] alsoFromHealth：〔連 Apple 健康那筆一起刪〕；Apple 健康那筆留著的，HealthSyncCenter 記進「不再帶進來」
+    private func confirmDelete(_ a: WorkoutDeleteAsk, alsoFromHealth: Bool) {
         closing = true
         let id = a.id
         let store = lifeStore
@@ -306,7 +361,7 @@ struct WorkoutDetailView: View {
         Task { @MainActor in
             try? await Task.sleep(nanoseconds: 350_000_000)
             close()
-            WorkoutActions.delete(id, store: store)
+            WorkoutActions.delete(id, alsoFromHealth: alsoFromHealth, store: store)
         }
     }
 
@@ -319,6 +374,8 @@ struct WorkoutDetailView: View {
             editor(session)
         case .map:
             fullMap
+        case .appleHealth:
+            HealthAppleHealthSheet()
         }
     }
 
@@ -350,20 +407,35 @@ struct WorkoutDetailView: View {
 private enum WorkoutDetailSheet: Identifiable {
     case edit(UUID, WorkoutSession)
     case map(UUID)
+    /// [v25.554] Apple 健康那一列〔打開〕：Apple 健康設定小頁（HealthView.swift 的 HealthAppleHealthSheet）
+    case appleHealth(UUID)
 
     var id: UUID {
         switch self {
         case .edit(let id, _): return id
         case .map(let id): return id
+        case .appleHealth(let id): return id
         }
     }
 }
 
-/// 刪除確認框要的字（先算好：提示框的 closure 裡不叫 @MainActor 的東西）
-private struct WorkoutDetailDelete: Identifiable {
-    let id: UUID
-    let title: String
+/// [v25.554] 〔去 Apple 健康找〕舊版沒存到的路線：還沒按／找的時候／找不到（找到了看 HealthSyncCenter.routeFinds）
+private enum WorkoutDetailFindState: Equatable {
+    case idle, searching, notFound
+}
+
+/// [v25.554] 要確認一列畫面要的東西（字和按鈕先組好，body 只畫）
+private struct WorkoutDetailCheckRow: Identifiable {
+    let id: String
+    let icon: String
     let message: String
+    let buttons: [FinanceCheckButton]
+
+    /// 第一顆按鈕的 VoiceOver：「按鈕字：句子」（同健康頁）；沒有按鈕唸句子
+    var spoken: String {
+        guard let first = buttons.first else { return message }
+        return first.title + "：" + message
+    }
 }
 
 /// 六格捲過去的位置
@@ -481,12 +553,21 @@ private struct WorkoutDetailGains: View {
     }
 }
 
-// MARK: - ③ 要確認（只提醒，沒有按鈕；v4 才有〔去 Apple 健康找〕〔合成一筆〕）
+// MARK: - ③ 要確認（[v25.554] 有按鈕：〔合成一筆〕〔接回來〕〔兩筆都留〕〔去 Apple 健康找〕〔先不要〕；都不擋訂閱）
 
+/// 按鈕全部交給 HealthSyncCenter（它自己在 await 之後才寫 store、重新拿最新的那一筆）。
+/// 換一趟時整包內容 .id(currentId) 重建，找路線的狀態跟著回到還沒按
 private struct WorkoutDetailChecks: View {
     let checks: [WorkoutCardData.Check]
+    /// 這一趟（找路線、接回來用）
+    let sessionId: UUID
+    /// 看手錶那一趟時合成好了：換到合成好的那一趟（App 那一趟的 id）
+    let onMerged: (UUID) -> Void
 
+    @EnvironmentObject var lifeStore: LifeStore
+    @ObservedObject private var sync = HealthSyncCenter.shared
     @Environment(\.colorScheme) private var scheme
+    @State private var findState: WorkoutDetailFindState = .idle
 
     var body: some View {
         if !checks.isEmpty {
@@ -498,15 +579,93 @@ private struct WorkoutDetailChecks: View {
         VStack(alignment: .leading, spacing: 10) {
             FinanceCardHeader(title: "要確認")
             VStack(alignment: .leading, spacing: 0) {
-                ForEach(Array(checks.enumerated()), id: \.element.id) { i, c in
+                ForEach(Array(rows.enumerated()), id: \.element.id) { i, r in
                     if i > 0 {
                         Divider().padding(.leading, 44)
                     }
-                    FinanceCheckRow(icon: c.icon, message: c.message, buttons: [],
-                                    accessibilityLabel: c.message, pal: pal)
+                    FinanceCheckRow(icon: r.icon, message: r.message, buttons: r.buttons,
+                                    accessibilityLabel: r.spoken, pal: pal)
                 }
             }
             .modifier(FinanceCardChrome())
+        }
+    }
+
+    // MARK: 字與按鈕
+
+    private var rows: [WorkoutDetailCheckRow] {
+        checks.map { row(for: $0) }
+    }
+
+    /// 這一趟在 Apple 健康找到的手錶路線（健康頁自動同步找到的、這頁〔去 Apple 健康找〕找到的）
+    private var find: WorkoutRouteFind? {
+        sync.routeFinds.first { $0.sessionId == sessionId }
+    }
+
+    private func row(for c: WorkoutCardData.Check) -> WorkoutDetailCheckRow {
+        // 舊版沒路線那一列：找到了換〔接回來〕〔先不要〕；找的時候、找不到換一句（沒按鈕）
+        if c.actions.contains(.findRoute) {
+            if let f = find {
+                return WorkoutDetailCheckRow(id: c.id, icon: c.icon, message: WorkoutCardData.routeFoundMessage,
+                                             buttons: findButtons(f))
+            }
+            switch findState {
+            case .searching:
+                return WorkoutDetailCheckRow(id: c.id, icon: c.icon,
+                                             message: WorkoutCardData.routeSearchingMessage, buttons: [])
+            case .notFound:
+                return WorkoutDetailCheckRow(id: c.id, icon: c.icon,
+                                             message: WorkoutCardData.routeNotFoundMessage, buttons: [])
+            case .idle:
+                break
+            }
+        }
+        let buttons: [FinanceCheckButton] = c.actions.map { a in
+            FinanceCheckButton(title: a.title, action: { perform(a) })
+        }
+        return WorkoutDetailCheckRow(id: c.id, icon: c.icon, message: c.message, buttons: buttons)
+    }
+
+    private func findButtons(_ f: WorkoutRouteFind) -> [FinanceCheckButton] {
+        let store = lifeStore
+        let center = sync
+        return [
+            FinanceCheckButton(title: "接回來") {
+                Task { @MainActor in await center.attachRoute(f, store: store) }
+            },
+            FinanceCheckButton(title: "先不要") {
+                Task { @MainActor in center.skipRoute(f, store: store) }
+            }
+        ]
+    }
+
+    // MARK: 動作
+
+    private func perform(_ a: WorkoutCardData.CheckAction) {
+        let store = lifeStore
+        let center = sync
+        switch a {
+        case .merge(let d):
+            let viewingWatch = d.watchId == sessionId
+            let done = onMerged
+            Task { @MainActor in
+                await center.merge(d, store: store)
+                // 看的是手錶那一趟：合成好了它就被拿掉了，換到合成好的那一趟
+                let ids = Set(store.workouts.map(\.id))
+                if viewingWatch, ids.contains(d.appId), !ids.contains(d.watchId) {
+                    done(d.appId)
+                }
+            }
+        case .keepBoth(let d):
+            // 寫帳排到下一輪（按鈕按下去那一次畫面更新先過；這一列會跟著消失）
+            Task { @MainActor in center.keepBoth(d, store: store) }
+        case .findRoute:
+            findState = .searching
+            let id = sessionId
+            Task { @MainActor in
+                let f = await center.findRoute(for: id, store: store)
+                findState = f == nil ? .notFound : .idle
+            }
         }
     }
 }
@@ -1007,15 +1166,35 @@ private struct WorkoutDetailMoves: View {
 
 // MARK: - ⑧ Apple 健康（一列；裝置不支援不出現）
 
+/// [v25.554] 字與按鈕在 WorkoutCardData.makeHealth 算好；這裡只多看 HealthSyncCenter.writing（存入中即時換字，
+/// 不放進 .task(id:) 算的 card）。〔怎麼打開〕的說明框掛在這個 view（成果頁的刪除框掛在外層，同一個 view 不掛兩個 alert）
 private struct WorkoutDetailAppleHealth: View {
     let line: WorkoutCardData.HealthLine?
+    let sessionId: UUID
+    /// 〔打開〕：開 Apple 健康設定小頁（成果頁的 .sheet(item:)）
+    let onOpen: () -> Void
 
+    @EnvironmentObject var lifeStore: LifeStore
+    @ObservedObject private var sync = HealthSyncCenter.shared
     @Environment(\.colorScheme) private var scheme
+    @State private var showHowTo = false
+    /// 這一列按了〔存進去〕〔更新〕沒成功的那一句（HealthSyncCenter.lastProblem）；再按一次清掉
+    @State private var problem: String? = nil
 
     var body: some View {
         if let line {
             row(line, pal: TripBoardPalette(scheme))
+                .alert(WorkoutCardData.howToTitle, isPresented: $showHowTo) {
+                    Button("好", role: .cancel) {}
+                } message: {
+                    Text(WorkoutCardData.howToMessage)
+                }
         }
+    }
+
+    /// 正在寫進 Apple 健康（新的一趟剛存、〔存進去〕、〔更新〕）
+    private var isWriting: Bool {
+        sync.writing.contains(sessionId)
     }
 
     private func row(_ l: WorkoutCardData.HealthLine, pal: TripBoardPalette) -> some View {
@@ -1026,16 +1205,98 @@ private struct WorkoutDetailAppleHealth: View {
                 .frame(width: 30, height: 30)
                 .background(heartFill, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
                 .accessibilityHidden(true)
-            Text(l.text)
-                .font(.subheadline.weight(.bold))
-                .foregroundStyle(l.good ? MoneyTone.good.color(pal) : Color.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-            Spacer(minLength: 0)
+            texts(l, pal: pal)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .accessibilityElement(children: .combine)
+            trailingButton(l, pal: pal)
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
         .modifier(FinanceCardChrome())
-        .accessibilityElement(children: .combine)
+    }
+
+    /// 一行粗體（已存進、合成過綠字；其他一般灰字，不染紅）＋小字；存入中整列換「存進 Apple 健康中…」
+    @ViewBuilder
+    private func texts(_ l: WorkoutCardData.HealthLine, pal: TripBoardPalette) -> some View {
+        if isWriting {
+            HStack(spacing: 8) {
+                ProgressView()
+                    .controlSize(.small)
+                Text(WorkoutCardData.healthWritingText)
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(Color.secondary)
+            }
+        } else {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(l.text)
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(l.good ? MoneyTone.good.color(pal) : Color.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                if let sub = subText(l) {
+                    Text(sub)
+                        .font(.caption)
+                        .foregroundStyle(Color.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+    }
+
+    /// 小字：剛剛按了沒成功的那一句優先（還有按鈕可以再按時才寫），不然 card 算好的那一句
+    private func subText(_ l: WorkoutCardData.HealthLine) -> String? {
+        if l.button != .none, let p = problem, !p.isEmpty { return p }
+        return l.note
+    }
+
+    /// 右邊的膠囊按鈕（樣子同 FinanceCheckRow）；存入中不出現
+    @ViewBuilder
+    private func trailingButton(_ l: WorkoutCardData.HealthLine, pal: TripBoardPalette) -> some View {
+        if !isWriting, l.button != .none {
+            Button {
+                tap(l.button)
+            } label: {
+                Text(l.button.title)
+                    .font(.subheadline.weight(.heavy))
+                    .foregroundStyle(pal.hint)
+                    .lineLimit(1)
+                    .fixedSize()
+                    .padding(.horizontal, 11)
+                    .frame(minHeight: 30)
+                    .background(pal.hint.opacity(0.12), in: Capsule())
+            }
+            .buttonStyle(MoneyPressStyle())
+            .accessibilityLabel(l.button.title + "：" + l.text)
+        }
+    }
+
+    /// 〔更新〕〔存進去〕交給 HealthSyncCenter（它自己在 await 之後拿 store 最新的那一筆）；〔打開〕回呼開設定小頁；
+    /// 〔怎麼打開〕自己的說明框。都不擋訂閱
+    private func tap(_ b: WorkoutCardData.HealthButton) {
+        problem = nil
+        let id = sessionId
+        let store = lifeStore
+        let center = sync
+        switch b {
+        case .none:
+            return
+        case .open:
+            onOpen()
+        case .howTo:
+            showHowTo = true
+        case .update:
+            Task { @MainActor in
+                await center.update(id, store: store)
+                problem = center.lastProblem
+            }
+        case .push:
+            guard let s = store.workouts.first(where: { $0.id == id }) else { return }
+            Task { @MainActor in
+                await center.push(s, store: store)
+                // 還是沒有編號＝沒寫進去：寫一句為什麼（有編號＝成功，這一列會換成「已存進」）
+                let saved = store.workouts.first(where: { $0.id == id })?.healthKitUUID != nil
+                problem = saved ? nil : (center.lastProblem ?? "沒存進 Apple 健康")
+            }
+        }
     }
 
     private var heartFill: LinearGradient {

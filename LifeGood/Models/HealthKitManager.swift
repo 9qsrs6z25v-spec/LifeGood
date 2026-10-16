@@ -256,6 +256,8 @@ final class HealthKitManager: ObservableObject {
             lastError = "Apple 健康現在不能用（這台裝置不支援，或這個版本少了「健康」的說明字）。"
             return nil
         }
+        // 上一次寫的問題（暫停、路線沒寫進去）不要一直掛在設定小頁：這一次有問題下面會再記
+        lastError = nil
         let start = session.date
         let minutes = session.durationMinutes > 0
             ? session.durationMinutes

@@ -94,6 +94,17 @@ final class HealthSyncCenter: ObservableObject {
     private var searchedLegacy: Set<UUID> = []
     /// 成果頁〔去 Apple 健康找〕找到的（使用者自己按的：按過「先不要」的也留著給他看）
     private var askedFinds: Set<UUID> = []
+    /// 這次 App 開著寫進 Apple 健康的那幾趟（那一趟 id → 編號＋寫進去的數字）。剛跑完、還在寫的時候打開編輯器，
+    /// 存檔會用打開時那一份（沒有編號）蓋回去，接著的 push 又寫一筆＝「健身」App 兩筆；push 看到這裡有，
+    /// 就把編號和寫進去的數字接回去、不再寫（改過的地方跟寫進去的數字一比，成果頁出現〔更新〕）。
+    /// 〔更新〕刪掉舊的、合成或接回改指向手錶那筆、刪掉那一趟時拿掉
+    private var pushedThisRun: [UUID: HealthPushedRecord] = [:]
+
+    /// pushedThisRun 的一筆
+    private struct HealthPushedRecord {
+        let uuid: String
+        let stamp: WorkoutHealthLink
+    }
 
     /// v4 以前的紀錄補讀一次：一次最多讀幾趟（新到舊）
     private static let maxRefresh = 300
@@ -315,6 +326,9 @@ final class HealthSyncCenter: ObservableObject {
             let lateRoute = routes[s.id]
             if let info = byUUID[wanted.uppercased()] {
                 if isWatch(s, info: info) {
+                    // 讀過的手錶紀錄這次只為了晚到的路線（跑步機那種永遠沒有）：沒找到就不動，
+                    // 不為了改 refreshedAt 每 15 分鐘整包存檔、推 iCloud、健康頁重算一次
+                    if s.health?.refreshedAt != nil && lateRoute == nil { continue }
                     if applyWatchRefresh(&s, info: info, route: lateRoute, now: now) { routesAdded += 1 }
                 } else {
                     applyOwnRefresh(&s, info: info, now: now)
@@ -365,7 +379,10 @@ final class HealthSyncCenter: ObservableObject {
         if firstTime, info.movingMinutes > 0,
            abs(info.movingMinutes - WorkoutFacts.movingMinutes(s)) >= 0.5 {
             s.durationMinutes = info.movingMinutes
-            if let i = WorkoutFacts.mainCardioIndex(s) ?? (s.exercises.count == 1 ? 0 : nil) {
+            // 那個動作：有氧主動作；沒有有氧、只有一個動作（手錶的重訓）就是它
+            var target = WorkoutFacts.mainCardioIndex(s)
+            if target == nil && s.exercises.count == 1 { target = 0 }
+            if let i = target {
                 s.exercises[i].durationMinutes = info.movingMinutes
             }
             s.endedAt = info.end
@@ -413,8 +430,9 @@ final class HealthSyncCenter: ObservableObject {
         }
         // 這次找到的＋之前找到、還沒處理、還對得上的（await 之後的 routeFinds、store）
         let merged = validFinds(found + routeFinds, store: store)
-        if merged.map({ $0.sessionId }) != routeFinds.map({ $0.sessionId })
-            || merged.map({ $0.watchUUID }) != routeFinds.map({ $0.watchUUID }) {
+        let sameSessions = merged.map { $0.sessionId } == routeFinds.map { $0.sessionId }
+        let sameWatches = merged.map { $0.watchUUID } == routeFinds.map { $0.watchUUID }
+        if !(sameSessions && sameWatches) {
             routeFinds = merged
         }
     }
@@ -477,8 +495,14 @@ final class HealthSyncCenter: ObservableObject {
     /// 寫進 Apple 健康（新的一趟、救回、補記、複製、成果頁〔存進去〕）：開著、支援、還沒有編號才寫；
     /// 寫好把編號和寫進去的數字（WorkoutFacts.healthStamp）存回 store 裡最新的那一筆
     func push(_ session: WorkoutSession, store: LifeStore) async {
-        guard isEnabled, hk.isAvailable, session.healthKitUUID == nil,
+        guard session.healthKitUUID == nil,
               !writing.contains(session.id), !busy.contains(session.id) else { return }
+        // 這次 App 開著已經寫過這一趟（編號被編輯器的舊那一份蓋掉了）：接回編號，不寫第二筆
+        if let prior = pushedThisRun[session.id] {
+            relinkPushed(session.id, prior: prior, store: store)
+            return
+        }
+        guard isEnabled, hk.isAvailable else { return }
         writing.insert(session.id)
         defer { writing.remove(session.id) }
 
@@ -504,7 +528,22 @@ final class HealthSyncCenter: ObservableObject {
         latest.healthKitUUID = uuid
         latest.health = stamp
         store.upsertWorkout(latest)
+        pushedThisRun[session.id] = HealthPushedRecord(uuid: uuid, stamp: stamp)
         lastProblem = nil
+    }
+
+    /// 編號被蓋掉的那一趟接回這次寫進去的編號與數字（帶進來、補讀、爬升、合成的欄位照最新那一筆的）
+    private func relinkPushed(_ id: UUID, prior: HealthPushedRecord, store: LifeStore) {
+        guard var latest = store.workouts.first(where: { $0.id == id }),
+              latest.healthKitUUID == nil else { return }
+        var stamp = prior.stamp
+        stamp.importedAt = latest.health?.importedAt
+        stamp.refreshedAt = latest.health?.refreshedAt
+        stamp.climbKnown = latest.health?.climbKnown
+        stamp.mergedWatchUUID = latest.health?.mergedWatchUUID
+        latest.healthKitUUID = prior.uuid
+        latest.health = stamp
+        store.upsertWorkout(latest)
     }
 
     /// 〔更新〕：刪掉 Apple 健康裡舊的那筆（LifeGood 寫的），照現在的寫一筆新的
@@ -526,6 +565,8 @@ final class HealthSyncCenter: ObservableObject {
         switch result {
         case .deleted, .notFound:
             // 舊的不在了（找不到也算刪掉了）：清掉編號和寫進去的數字，照最新的寫一筆新的
+            // （push 不能再把刪掉的那個編號接回來）
+            pushedThisRun[sessionId] = nil
             guard var latest = store.workouts.first(where: { $0.id == sessionId }),
                   latest.healthKitUUID == uuid else { return }
             latest.healthKitUUID = nil
@@ -534,6 +575,7 @@ final class HealthSyncCenter: ObservableObject {
             lastProblem = nil
             await push(latest, store: store)
         case .notOurs:
+            pushedThisRun[sessionId] = nil
             if var latest = store.workouts.first(where: { $0.id == sessionId }), latest.healthKitUUID == uuid {
                 var h = latest.health ?? WorkoutHealthLink()
                 h.clearWritten()
@@ -554,6 +596,7 @@ final class HealthSyncCenter: ObservableObject {
         let kind = WorkoutActions.deleteKind(s)
         store.deleteWorkout(id: sessionId)
         dropFind(sessionId)
+        pushedThisRun[sessionId] = nil
         // 合成過的：手錶那筆的編號本來就在帳上；再記一次（舊版 iPad 同步過來的帳可能沒有）
         if let merged = s.health?.mergedWatchUUID { store.ignoreHealthWorkout(merged) }
         guard let uuid = s.healthKitUUID else { return }
@@ -615,11 +658,12 @@ final class HealthSyncCenter: ObservableObject {
         }
     }
 
-    /// 合成好的那一趟套上新的編號
+    /// 合成好的那一趟套上新的編號（改指向手錶那筆：這次寫進去的那個編號不能再被 push 接回來）
     private func applyPlan(_ plan: HealthRelinkPlan, to m: inout WorkoutSession) {
         guard let uuid = plan.uuid else { return }
         m.healthKitUUID = uuid
         if plan.clearWritten { m.health?.clearWritten() }
+        pushedThisRun[m.id] = nil
     }
 
     /// 〔合成一筆〕〔接回來〕（手錶那筆已經在 LifeGood）：WorkoutFacts.merged，手錶那一趟從 LifeGood 拿掉、編號記進「不再帶進來」；

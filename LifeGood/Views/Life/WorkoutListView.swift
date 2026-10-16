@@ -14,6 +14,10 @@ import SwiftUI
 // • 點卡片 → 成果頁（自己的 .sheet(item:)＋.appStores()）；長按：編輯／複製到現在（只有重訓、手動補記）／刪除（先確認）。
 //   編輯、複製、刪除要訂閱（待決定 8；沒訂閱跳付費說明）；看成果頁不擋。
 // • 資料在 .task(id: lifeStore.workoutsRevision) 算一次（每一趟的卡先做好放著），換篩選只重新分組；body 只畫。
+//
+// [v25.554] 健康 v4（build/v4/brief.md §G3-9）：刪除確認框照 WorkoutActions.deleteAsk 三種（同健康頁、成果頁）——
+//   LifeGood 寫進 Apple 健康的〔連 Apple 健康那筆一起刪〕〔只刪 LifeGood 這筆〕〔取消〕；手錶記的、合成過的〔刪除〕〔取消〕
+//  （手錶那一筆不會刪、以後不再帶進來）；沒碰過 Apple 健康的〔刪除〕〔取消〕。
 
 struct WorkoutListView: View {
     @EnvironmentObject var lifeStore: LifeStore
@@ -35,7 +39,8 @@ struct WorkoutListView: View {
     @State private var loaded = false
     @State private var appeared = false
     @State private var sheet: WorkoutListSheet?
-    @State private var deleteTarget: WorkoutSession?
+    /// [v25.554] 按了「刪除」、等確認的那一趟（字和三種按鈕先算好：WorkoutActions.deleteAsk）
+    @State private var deleteAsk: WorkoutDeleteAsk?
     @State private var showPremiumAlert = false
     /// 複製之後那一行綠字（3 秒）
     @State private var notice: String?
@@ -95,12 +100,23 @@ struct WorkoutListView: View {
             noticeTask = nil
         }
         // 刪除確認掛在 List（付費說明掛在外層，同一個 view 不掛兩個 alert）
-        .alert(deleteTitle, isPresented: deleteBinding, presenting: deleteTarget) { s in
-            Button("刪除", role: .destructive) { WorkoutActions.delete(s.id, store: lifeStore) }
-            Button("取消", role: .cancel) { }
-        } message: { s in
-            Text(WorkoutActions.deleteMessage(s))
+        .alert(deleteTitle, isPresented: deleteBinding, presenting: deleteAsk) { a in
+            deleteButtons(a)
+        } message: { a in
+            Text(a.message)
         }
+    }
+
+    /// [v25.554] 刪除確認框的按鈕（WorkoutActions.deleteKind）：LifeGood 寫進 Apple 健康的三顆；手錶的、沒碰過的〔刪除〕〔取消〕
+    @ViewBuilder
+    private func deleteButtons(_ a: WorkoutDeleteAsk) -> some View {
+        if a.kind == .withHealth {
+            Button("連 Apple 健康那筆一起刪", role: .destructive) { deleteNow(a, alsoFromHealth: true) }
+            Button("只刪 LifeGood 這筆", role: .destructive) { deleteNow(a, alsoFromHealth: false) }
+        } else {
+            Button("刪除", role: .destructive) { deleteNow(a, alsoFromHealth: false) }
+        }
+        Button("取消", role: .cancel) { }
     }
 
     private func weekSection(_ w: WorkoutListWeek) -> some View {
@@ -276,21 +292,29 @@ struct WorkoutListView: View {
         showNotice("已複製一份「" + WorkoutFacts.title(copy) + "」到現在")
     }
 
+    /// 長按「刪除」：先問。[v25.554] 拿 store 裡最新的那一筆算要問哪一種（列上的那一份是上一次算的）
     private func askDelete(_ s: WorkoutSession) {
         guard subscription.isPremium else {
             showPremiumAlert = true
             return
         }
-        deleteTarget = s
+        let latest = lifeStore.workouts.first(where: { $0.id == s.id }) ?? s
+        deleteAsk = WorkoutActions.deleteAsk(latest)
     }
 
+    /// 「刪除 10/15 晨跑 5.2 公里？」
     private var deleteTitle: String {
-        guard let s = deleteTarget else { return "" }
-        return WorkoutActions.deleteTitle(s)
+        deleteAsk?.title ?? ""
     }
 
     private var deleteBinding: Binding<Bool> {
-        Binding(get: { deleteTarget != nil }, set: { if !$0 { deleteTarget = nil } })
+        Binding(get: { deleteAsk != nil }, set: { if !$0 { deleteAsk = nil } })
+    }
+
+    /// 提示框關掉那一次畫面更新先過，下一輪主執行緒才寫 store（WorkoutActions.delete 已經排到下一輪）；
+    /// alsoFromHealth：〔連 Apple 健康那筆一起刪〕。Apple 健康那筆留著的，HealthSyncCenter 記進「不再帶進來」
+    private func deleteNow(_ a: WorkoutDeleteAsk, alsoFromHealth: Bool) {
+        WorkoutActions.delete(a.id, alsoFromHealth: alsoFromHealth, store: lifeStore)
     }
 
     /// 綠字 3 秒（同舊健康頁複製提示的寫法）

@@ -24,6 +24,15 @@ import CoreLocation
 // ⑥ 高度：WorkoutFacts.elevation 的 gainM ≥ 10。
 // ⑧ Apple 健康：裝置不支援「健康」不出現。⑨ 資料：永遠出現。
 // 另外：重訓、或一趟裡不只一個動作時多一區「動作」（每個動作一行，WorkoutExercise.summary）。
+//
+// [v25.554] 健康 v4（build/v4/brief.md §6 G4；judge §5.2 ③⑧、§5.3）：
+// ③ 要確認有按鈕（CheckAction，畫面照它接 HealthSyncCenter）：手錶和 App 同一趟（WorkoutFacts.duplicates，跟健康頁同一套配對）
+//    〔合成一筆〕（舊版記的寫〔接回來〕）〔兩筆都留〕；舊版沒路線、沒有那一對 →〔去 Apple 健康找〕（Apple 健康開著才有）。
+// ⑧ Apple 健康一列由上往下第一個符合的：手錶「來自 Apple Watch・10/8 匯入」→ 合成過「已跟 Apple Watch 那筆合成」→
+//    改過「Apple 健康裡還是改之前的 5.0 公里」〔更新〕→「已存進 Apple 健康・06:40」→「Apple 健康裡也有這一筆」→
+//    沒開〔打開〕→ 沒寫入權限〔怎麼打開〕→「還沒存進 Apple 健康」〔存進去〕；存入中的字由畫面看 HealthSyncCenter.writing。
+// ⑨ 合成過的「記錄方式 LifeGood（iPhone）＋Apple Watch」、大卡「Apple Watch 量的」（六格大卡同一句）。
+// build 多兩個參數：ledger（「兩筆都留」的那一對不再問）、hkCanWrite（HealthKitManager.canWriteWorkout）。
 
 /// 成果頁全部的字與數字。型別都收在裡面（不佔全域名字：v3 四組同時開工）
 struct WorkoutCardData {
@@ -89,11 +98,31 @@ struct WorkoutCardData {
         var accessibilityText: String { line.plain }
     }
 
-    /// 要確認一列（只提醒，沒有按鈕）
+    /// [v25.554] 要確認一列的按鈕（畫面照它叫 HealthSyncCenter；都不擋訂閱）
+    enum CheckAction: Equatable {
+        /// 〔合成一筆〕；舊版記的那一對寫〔接回來〕（HealthSyncCenter.merge）
+        case merge(WorkoutDuplicate)
+        /// 〔兩筆都留〕（HealthSyncCenter.keepBoth）
+        case keepBoth(WorkoutDuplicate)
+        /// 〔去 Apple 健康找〕舊版沒存到的路線（HealthSyncCenter.findRoute；找到換〔接回來〕〔先不要〕）
+        case findRoute
+
+        var title: String {
+            switch self {
+            case .merge(let d): return d.legacy ? "接回來" : "合成一筆"
+            case .keepBoth: return "兩筆都留"
+            case .findRoute: return "去 Apple 健康找"
+            }
+        }
+    }
+
+    /// 要確認一列；actions 空的＝只提醒
     struct Check: Identifiable {
         let id: String
         let icon: String
         let message: String
+        /// [v25.554] 右邊的按鈕（照順序）
+        var actions: [CheckAction] = []
     }
 
     /// 路線地圖（整頁唯一一張真地圖；全螢幕那張用同一份）
@@ -180,11 +209,38 @@ struct WorkoutCardData {
         var accessibilityText: String
     }
 
+    /// [v25.554] Apple 健康那一列右邊的按鈕（都不擋訂閱）
+    enum HealthButton: Equatable {
+        case none
+        /// 〔更新〕：寫進去以後又改過（HealthSyncCenter.update）
+        case update
+        /// 〔存進去〕：還沒存進 Apple 健康（HealthSyncCenter.push）
+        case push
+        /// 〔打開〕：健康頁的 Apple 健康沒打開（開 Apple 健康設定小頁）
+        case open
+        /// 〔怎麼打開〕：Apple 健康沒給寫入權限（說明怎麼去「健康」App 打開）
+        case howTo
+
+        var title: String {
+            switch self {
+            case .none: return ""
+            case .update: return "更新"
+            case .push: return "存進去"
+            case .open: return "打開"
+            case .howTo: return "怎麼打開"
+            }
+        }
+    }
+
     /// Apple 健康那一列
     struct HealthLine {
         let text: String
-        /// 已存進：綠字
+        /// 已存進、合成過：綠字（改過、沒存成功用一般字色，不染紅）
         let good: Bool
+        /// [v25.554] 下面一行灰色小字（「健康頁的 Apple 健康沒打開」「Apple 健康裡留手錶記的那一筆」）
+        var note: String? = nil
+        /// [v25.554] 右邊的按鈕
+        var button: HealthButton = .none
     }
 
     /// 資料一列；note 是值下面的灰字（大卡「估的，依體重 72.4 kg」）
@@ -234,11 +290,14 @@ struct WorkoutCardData {
 extension WorkoutCardData {
 
     /// 一次算完。在 .task(id:) 裡、主執行緒呼叫（WorkoutFormat 的 DateFormatter、MoneyBoardText 共用）。
-    /// sessions：全部運動（收穫、換一趟列用）；hkEnabled：健康頁的 Apple 健康開關；hkAvailable：這台裝置有沒有「健康」
+    /// sessions：全部運動（收穫、換一趟列、同一趟配對用）；hkEnabled：健康頁的 Apple 健康開關；
+    /// hkAvailable：這台裝置能不能用「健康」（HealthKitManager.isAvailable）；
+    /// [v25.554] hkCanWrite：Apple 健康有沒有給寫入（HealthKitManager.canWriteWorkout）；
+    /// ledger：LifeStore.workoutHealthLedger（按過「兩筆都留」的那一對不再問）
     @MainActor
     static func build(session s: WorkoutSession, sessions: [WorkoutSession], prefs: WorkoutPrefs,
-                      bodyWeightKg: Double?, hkEnabled: Bool, hkAvailable: Bool,
-                      now: Date = Date()) -> WorkoutCardData {
+                      bodyWeightKg: Double?, hkEnabled: Bool, hkAvailable: Bool, hkCanWrite: Bool,
+                      ledger: WorkoutHealthLedger, now: Date = Date()) -> WorkoutCardData {
         let sport = s.primarySport
         let title = WorkoutFacts.title(s)
         // 每公里、高度、路線看「有路線的那個動作」；沒有路線看第一個有氧動作（手動補記也可能有分段？沒有，但不怕）
@@ -255,7 +314,7 @@ extension WorkoutCardData {
             tiles: [], gains: [], checks: [],
             route: nil, routeNote: nil, splits: nil, elevation: elevationShown,
             moves: makeMoves(s, bodyWeightKg: bodyWeightKg),
-            health: makeHealth(s, hkEnabled: hkEnabled, hkAvailable: hkAvailable),
+            health: makeHealth(s, hkEnabled: hkEnabled, hkAvailable: hkAvailable, hkCanWrite: hkCanWrite),
             info: makeInfo(s, bodyWeightKg: bodyWeightKg),
             switcher: makeSwitcher(s, sessions: sessions))
 
@@ -267,7 +326,8 @@ extension WorkoutCardData {
                                      elevationShown: elevationShown != nil, bodyWeightKg: bodyWeightKg)
         }
         card.gains = goal.gains
-        card.checks = makeChecks(s, main: main, splitsValid: validSplits != nil)
+        card.checks = makeChecks(s, sessions: sessions, ledger: ledger, main: main, splitsValid: validSplits != nil,
+                                 canSearchHealth: hkAvailable && hkEnabled)
         if let e = s.firstRouteExercise {
             card.route = makeRoute(e, sport: e.resolvedSport, pauses: s.pauses,
                                    storedAverage: validSplits != nil ? storedAverage(e) : nil)
@@ -478,12 +538,17 @@ extension WorkoutCardData {
         let sub: String
         if k.estimated {
             sub = "估的"
-        } else if WorkoutFacts.source(of: s) == .watch {
+        } else if kcalFromWatch(s) {
             sub = "Apple Watch 量的"
         } else {
             sub = ""
         }
         return Tile(id: "kcal", label: "大卡", value: kcalNumber(k.kcal, estimated: k.estimated), sub: sub)
+    }
+
+    /// [v25.554] 大卡是手錶量的：手錶記的、或跟手錶那筆合成過（合成時大卡用手錶的；手錶沒量、估出來的另外寫「估的」）
+    private static func kcalFromWatch(_ s: WorkoutSession) -> Bool {
+        WorkoutFacts.source(of: s) == .watch || s.health?.mergedWatchUUID != nil
     }
 
     /// 重訓：訓練量、動作數、總組數、總下數、時間、大卡
@@ -583,11 +648,20 @@ extension WorkoutCardData {
 
     // MARK: ③ 要確認
 
-    private static func makeChecks(_ s: WorkoutSession, main: WorkoutExercise?, splitsValid: Bool) -> [Check] {
+    /// [v25.554] 手錶和 App 同一趟（看的是哪一筆都有）→〔合成一筆〕（舊版記的〔接回來〕）〔兩筆都留〕，有這列就不放舊版那列；
+    /// 舊版沒路線 →原本那句＋〔去 Apple 健康找〕（Apple 健康開著才有；找到之後畫面換〔接回來〕〔先不要〕）；分段對不上只提醒
+    private static func makeChecks(_ s: WorkoutSession, sessions: [WorkoutSession], ledger: WorkoutHealthLedger,
+                                   main: WorkoutExercise?, splitsValid: Bool, canSearchHealth: Bool) -> [Check] {
         var out: [Check] = []
-        if s.isLegacyRouteMissing {
+        if let d = duplicate(of: s, sessions: sessions, ledger: ledger) {
+            let message = WorkoutFacts.duplicateDetailPrompt(d, viewingWatch: d.watchId == s.id)
+            out.append(Check(id: "duplicate", icon: d.legacy ? "map" : "applewatch", message: message,
+                             actions: [.merge(d), .keepBoth(d)]))
+        } else if s.isLegacyRouteMissing {
+            let actions: [CheckAction] = canSearchHealth ? [.findRoute] : []
             out.append(Check(id: "legacy", icon: "map",
-                             message: "這一趟是舊版記錄的，路線當時沒存到；距離和時間大致是對的。"))
+                             message: "這一趟是舊版記錄的，路線當時沒存到；距離和時間大致是對的。",
+                             actions: actions))
         }
         if let e = main, let sp = e.splits, !sp.isEmpty, !splitsValid {
             out.append(Check(id: "splits", icon: "pencil.circle",
@@ -595,6 +669,29 @@ extension WorkoutCardData {
         }
         return out
     }
+
+    /// [v25.554] 這一趟在不在「同一趟」那幾對裡（App 那一趟或手錶那一趟都算）。配對照 WorkoutFacts.duplicates 全部一起配
+    /// （一筆手錶只配一趟，跟健康頁要確認同一對）；不是 App 記的、不是手錶的、不是有氧的不用算
+    private static func duplicate(of s: WorkoutSession, sessions: [WorkoutSession],
+                                  ledger: WorkoutHealthLedger) -> WorkoutDuplicate? {
+        let src = WorkoutFacts.source(of: s)
+        guard src == .app || src == .watch, s.primarySport.isCardio else { return nil }
+        return WorkoutFacts.duplicates(sessions, ledger: ledger).first { $0.appId == s.id || $0.watchId == s.id }
+    }
+
+    // MARK: ③⑧ 按了之後的字（[v25.554]；畫面只畫，字放這裡）
+
+    /// 〔去 Apple 健康找〕找到了：換成〔接回來〕〔先不要〕
+    static let routeFoundMessage = "這一趟是舊版記錄的，路線當時沒存到；Apple Watch 同一時間有路線，可以接回來。"
+    /// 〔去 Apple 健康找〕找的時候
+    static let routeSearchingMessage = "正在 Apple 健康找同一時間的手錶紀錄…"
+    /// 〔去 Apple 健康找〕找不到
+    static let routeNotFoundMessage = "Apple 健康裡同一時間沒有手錶記的路線。"
+    /// Apple 健康那一列：正在寫進去（HealthSyncCenter.writing）
+    static let healthWritingText = "存進 Apple 健康中…"
+    /// 〔怎麼打開〕的說明框
+    static let howToTitle = "怎麼打開寫入權限"
+    static let howToMessage = "打開「健康」App → 右上角的頭像 → App → LifeGood，把要寫入的項目都打開，回來按〔存進去〕。"
 
     // MARK: ④ 路線
 
@@ -983,18 +1080,53 @@ extension WorkoutCardData {
 
     // MARK: ⑧ Apple 健康
 
-    private static func makeHealth(_ s: WorkoutSession, hkEnabled: Bool, hkAvailable: Bool) -> HealthLine? {
+    /// [v25.554] 由上往下第一個符合的（brief §6 G4-3）。存入中（HealthSyncCenter.writing）由畫面自己換字，不在這裡算
+    private static func makeHealth(_ s: WorkoutSession, hkEnabled: Bool, hkAvailable: Bool,
+                                   hkCanWrite: Bool) -> HealthLine? {
         guard hkAvailable else { return nil }
         let src = WorkoutFacts.source(of: s)
-        if src == .watch { return HealthLine(text: "來自 Apple Watch", good: false) }
-        if s.healthKitUUID != nil {
-            // 舊資料看不出是 App 寫進去的還是從 Apple 健康帶進來的
-            return src == nil
-                ? HealthLine(text: "Apple 健康裡也有這一筆", good: false)
-                : HealthLine(text: "已存進 Apple 健康", good: true)
+        let link = s.health
+        // 手錶記的：「來自 Apple Watch・10/8 匯入」（v25.553 以前帶進來的沒記匯入時間，只寫前半句）
+        if src == .watch {
+            var text = "來自 Apple Watch"
+            if let at = link?.importedAt { text += "・" + WorkoutFormat.monthDay(at) + " 匯入" }
+            return HealthLine(text: text, good: false)
         }
-        if !hkEnabled { return HealthLine(text: "沒有存進 Apple 健康（健康頁的 Apple 健康沒打開）", good: false) }
-        return HealthLine(text: "沒有存進 Apple 健康（可能沒給寫入權限）", good: false)
+        if link?.mergedWatchUUID != nil {
+            return HealthLine(text: "已跟 Apple Watch 那筆合成", good: true, note: "Apple 健康裡留手錶記的那一筆")
+        }
+        if s.healthKitUUID != nil {
+            if let st = WorkoutFacts.healthStale(s) {
+                return HealthLine(text: WorkoutFacts.staleDetail(st), good: false, button: .update)
+            }
+            switch link?.written {
+            case .some(true):
+                return HealthLine(text: savedText(link?.writtenAt, workoutDate: s.date), good: true)
+            case .some(false):
+                return HealthLine(text: "Apple 健康裡也有這一筆", good: false)
+            case .none:
+                // v4 還沒補讀（v25.553 以前寫的）：App 記的、手動補記的是 LifeGood 寫進去的；舊資料看不出來的照 v3 原樣
+                return src == nil
+                    ? HealthLine(text: "Apple 健康裡也有這一筆", good: false)
+                    : HealthLine(text: "已存進 Apple 健康", good: true)
+            }
+        }
+        if !hkEnabled {
+            return HealthLine(text: "沒有存進 Apple 健康", good: false, note: "健康頁的 Apple 健康沒打開", button: .open)
+        }
+        if !hkCanWrite {
+            return HealthLine(text: "沒存成功：Apple 健康沒給寫入權限", good: false, button: .howTo)
+        }
+        return HealthLine(text: "還沒存進 Apple 健康", good: false, button: .push)
+    }
+
+    /// 「已存進 Apple 健康・06:40」：存進去那天跟這一趟同一天只寫幾點（樣稿②-5），不同天「・10/16 07:12」；
+    /// 不知道幾點存的（v25.553 以前寫的、補讀過的）只寫「已存進 Apple 健康」
+    private static func savedText(_ at: Date?, workoutDate: Date) -> String {
+        guard let at else { return "已存進 Apple 健康" }
+        let sameDay = WorkoutFacts.calendar.isDate(at, inSameDayAs: workoutDate)
+        let when = sameDay ? WorkoutFormat.time(at) : WorkoutFormat.monthDay(at) + " " + WorkoutFormat.time(at)
+        return "已存進 Apple 健康・" + when
     }
 
     // MARK: ⑨ 資料
@@ -1026,7 +1158,10 @@ extension WorkoutCardData {
             // 舊版只存到起點的那幾趟（judge §2.5 v3）：距離照記，但當時 GPS 飄的也算進去了
             // （模擬：跑步約多 2%、健走約多 15%），值下面一行灰字講清楚
             let legacyNote: String? = s.isLegacyRouteMissing ? "舊版記錄，距離可能多算一點" : nil
-            out.append(InfoItem(id: "source", label: "記錄方式", value: src.label, note: legacyNote))
+            // [v25.554] 跟手錶那筆合成過：「LifeGood（iPhone）＋Apple Watch」
+            let merged = s.health?.mergedWatchUUID != nil && src != .watch
+            let value = merged ? src.label + "＋" + WorkoutSource.watch.label : src.label
+            out.append(InfoItem(id: "source", label: "記錄方式", value: value, note: legacyNote))
         }
         if let k = WorkoutFacts.kcal(s, bodyWeightKg: bodyWeightKg) {
             var note: String? = nil
@@ -1036,7 +1171,7 @@ extension WorkoutCardData {
                 } else {
                     note = "估的"
                 }
-            } else if WorkoutFacts.source(of: s) == .watch {
+            } else if kcalFromWatch(s) {
                 note = "Apple Watch 量的"
             }
             out.append(InfoItem(id: "kcal", label: "大卡", value: kcalNumber(k.kcal, estimated: k.estimated),
