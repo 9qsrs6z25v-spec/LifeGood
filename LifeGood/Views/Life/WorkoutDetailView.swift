@@ -1286,11 +1286,16 @@ private struct WorkoutDetailAppleHealth: View {
         case .update:
             Task { @MainActor in
                 await center.update(id, store: store)
-                problem = center.lastProblem
+                // 有編號而且不再是「改過」＝更新好了（不拿別的動作留下的 lastProblem 來寫）；
+                // 還是改過、或舊的刪了新的沒寫進去，才寫為什麼
+                let latest = store.workouts.first(where: { $0.id == id })
+                let done = latest.map { $0.healthKitUUID != nil && WorkoutFacts.healthStale($0) == nil } ?? true
+                problem = done ? nil : (center.lastProblem ?? "沒更新成功")
             }
         case .push:
-            guard let s = store.workouts.first(where: { $0.id == id }) else { return }
             Task { @MainActor in
+                // 下一輪才拿 store 裡最新的那一筆（按下去到這裡之間可能被編輯、刪掉）
+                guard let s = store.workouts.first(where: { $0.id == id }) else { return }
                 await center.push(s, store: store)
                 // 還是沒有編號＝沒寫進去：寫一句為什麼（有編號＝成功，這一列會換成「已存進」）
                 let saved = store.workouts.first(where: { $0.id == id })?.healthKitUUID != nil

@@ -273,7 +273,9 @@ final class HealthSyncCenter: ObservableObject {
             note: i.isCardio ? "" : "來自 Apple 健康，組數次數請自行補上",
             sport: i.sport)
         let climbKnown: Bool? = i.isCardio ? (i.climbM != nil) : nil
-        let link = WorkoutHealthLink(importedAt: now, refreshedAt: now, climbKnown: climbKnown)
+        // 騎車距離還沒同意時讀到 0 公里的騎車：先不記讀過，按〔去同意〕之後的同步補讀一次（補上公里）
+        let waits = needsMoreAccess && i.sport == .bike && i.distanceKm <= 0
+        let link = WorkoutHealthLink(importedAt: now, refreshedAt: waits ? nil : now, climbKnown: climbKnown)
         return WorkoutSession(
             date: i.start, title: i.activityName, exercises: [ex],
             durationMinutes: i.movingMinutes,
@@ -292,7 +294,8 @@ final class HealthSyncCenter: ObservableObject {
     private func refreshOld(now: Date, skip: Set<String>, store: LifeStore) async -> Int {
         let candidates = store.workouts.filter { s in
             guard let id = s.healthKitUUID, !skip.contains(id) else { return false }
-            return WorkoutFacts.needsHealthRefresh(s, now: now)
+            guard WorkoutFacts.needsHealthRefresh(s, now: now) else { return false }
+            return !waitsForCyclingAccess(s)
         }
         let targets = Array(candidates.sorted { $0.date > $1.date }.prefix(Self.maxRefresh))
         guard !targets.isEmpty else { return 0 }
@@ -333,7 +336,8 @@ final class HealthSyncCenter: ObservableObject {
                 } else {
                     applyOwnRefresh(&s, info: info, now: now)
                 }
-            } else if anyRead {
+            } else if anyRead && s.health?.refreshedAt == nil {
+                // 讀過的（手錶的、只為了晚到的路線）不用再記一次：不為了改 refreshedAt 整包存檔、推 iCloud
                 var h = s.health ?? WorkoutHealthLink()
                 h.refreshedAt = now
                 s.health = h
@@ -345,6 +349,16 @@ final class HealthSyncCenter: ObservableObject {
         }
         if changed { store.workouts = all }
         return routesAdded
+    }
+
+    /// 手錶的騎車還是 0 公里、Apple 健康的騎車距離（v4 新加的讀取權限）還沒問過：先不補讀。
+    /// 更新後第一次打開健康頁就會自動同步，那時還沒按〔去同意〕，讀到的騎車距離多半還是 0（U1 C9）——記了 refreshedAt 以後就不再讀，
+    /// 「騎車 0.0 公里」永遠補不回來；等按了〔去同意〕（needsMoreAccess 變 false）的那次同步再補讀
+    private func waitsForCyclingAccess(_ s: WorkoutSession) -> Bool {
+        guard needsMoreAccess, s.health?.refreshedAt == nil,
+              s.primarySport == .bike, s.totalDistanceKm <= 0 else { return false }
+        let src = WorkoutFacts.source(of: s)
+        return src == .watch || src == nil
     }
 
     /// 這一趟是不是手錶那一筆：看得出來的照 WorkoutFacts.source(of:)；看不出來的（v25.552 以前、沒有路線）照 Apple 健康：
@@ -627,13 +641,13 @@ final class HealthSyncCenter: ObservableObject {
     /// 合成、接回之前：App 那一趟原本的 Apple 健康編號怎麼處理
     private struct HealthRelinkPlan {
         /// 合成後的編號（nil＝LifeGood 寫的那筆刪不掉，留原本的編號）
-        var uuid: String?
+        var uuid: String? = nil
         /// 清掉寫進去的數字（LifeGood 寫的那筆已經不在 Apple 健康了）
         var clearWritten = false
         /// 原本那個編號記進「不再帶進來」（留在 Apple 健康、不是 LifeGood 寫的）
-        var ignoreOld: String?
+        var ignoreOld: String? = nil
         /// 給使用者看的一句（刪不掉的時候）
-        var problem: String?
+        var problem: String? = nil
     }
 
     /// LifeGood 自己寫進 Apple 健康的那筆先刪掉（不然 LifeGood 是一筆、健身 App 還是兩筆）：
