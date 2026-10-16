@@ -74,6 +74,9 @@
 		A01B000001001556 /* WorkoutItems.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001556 /* WorkoutItems.swift */; };
 		A01B000001001557 /* WorkoutListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001557 /* WorkoutListView.swift */; };
 		A01B000001001558 /* WorkoutDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001558 /* WorkoutDetailView.swift */; };
+		A01B000001001560 /* WorkoutPlaceLookup.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001560 /* WorkoutPlaceLookup.swift */; };
+		A01B000001001561 /* RunScreenParts.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001561 /* RunScreenParts.swift */; };
+		A01B000001001562 /* WorkoutShare.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001562 /* WorkoutShare.swift */; };
 		A01B000001001506 /* PhotoImportCenter.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001506 /* PhotoImportCenter.swift */; };
 		A01B000001001507 /* PhotoSlideshowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001507 /* PhotoSlideshowView.swift */; };
 		A01B000001001508 /* BeatDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001508 /* BeatDetector.swift */; };
@@ -456,6 +459,9 @@
 		A01A000001001556 /* WorkoutItems.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkoutItems.swift; sourceTree = "<group>"; };
 		A01A000001001557 /* WorkoutListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkoutListView.swift; sourceTree = "<group>"; };
 		A01A000001001558 /* WorkoutDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkoutDetailView.swift; sourceTree = "<group>"; };
+		A01A000001001560 /* WorkoutPlaceLookup.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkoutPlaceLookup.swift; sourceTree = "<group>"; };
+		A01A000001001561 /* RunScreenParts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunScreenParts.swift; sourceTree = "<group>"; };
+		A01A000001001562 /* WorkoutShare.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkoutShare.swift; sourceTree = "<group>"; };
 		A01A000001000035 /* GradeTitleView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GradeTitleView.swift; sourceTree = "<group>"; };
 		A01A000001000036 /* SpouseResumeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpouseResumeView.swift; sourceTree = "<group>"; };
 		A01A000001000037 /* ChildrenResumeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChildrenResumeView.swift; sourceTree = "<group>"; };
@@ -642,6 +648,7 @@
 				A01A000001001552 /* HealthPageData.swift */,
 				A01A000001001553 /* WorkoutCardData.swift */,
 				A01A000001001559 /* HealthSync.swift */,
+				A01A000001001560 /* WorkoutPlaceLookup.swift */,
 				A01A000001000040 /* EInvoiceClient.swift */,
 				A01A000001000041 /* InvoiceCategorizer.swift */,
 				A01A000001000042 /* EInvoiceSyncManager.swift */,
@@ -774,6 +781,8 @@
 				A01A000001001556 /* WorkoutItems.swift */,
 				A01A000001001557 /* WorkoutListView.swift */,
 				A01A000001001558 /* WorkoutDetailView.swift */,
+				A01A000001001561 /* RunScreenParts.swift */,
+				A01A000001001562 /* WorkoutShare.swift */,
 				A01A000001000102 /* FoodMapView.swift */,
 				A01A000001000200 /* TravelMapView.swift */,
 				A01A000001000226 /* TripPlanView.swift */,
@@ -1095,6 +1104,9 @@
 				A01B000001001556 /* WorkoutItems.swift in Sources */,
 				A01B000001001557 /* WorkoutListView.swift in Sources */,
 				A01B000001001558 /* WorkoutDetailView.swift in Sources */,
+				A01B000001001560 /* WorkoutPlaceLookup.swift in Sources */,
+				A01B000001001561 /* RunScreenParts.swift in Sources */,
+				A01B000001001562 /* WorkoutShare.swift in Sources */,
 				A01B000001001506 /* PhotoImportCenter.swift in Sources */,
 				A01B000001001507 /* PhotoSlideshowView.swift in Sources */,
 				A01B000001001509 /* SlideshowDecor.swift in Sources */,

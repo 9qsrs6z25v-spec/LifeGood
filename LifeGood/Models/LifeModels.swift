@@ -3858,6 +3858,9 @@ struct WorkoutSession: Identifiable, Codable {
     /// [v25.554] 這一趟跟 Apple 健康的關係（LifeGood 寫進去的時間與數字、帶進來的時間、手錶爬升讀過沒、跟手錶那筆合成過）。
     /// nil＝v25.553 以前的資料、或沒碰過 Apple 健康。見 WorkoutHealthLink
     var health: WorkoutHealthLink?
+    /// [v25.555] 這一趟記錄時 GPS 好不好（App 記的才有；成果頁「要確認」：大部分時間訊號很弱就提醒一句）。
+    /// nil＝v25.554 以前記的、手動補記、Apple 健康帶進來的。見 WorkoutGPSQuality、WorkoutFacts.gpsWeakPrompt
+    var gps: WorkoutGPSQuality?
 
     init(id: UUID = UUID(), date: Date = Date(), title: String = "",
          exercises: [WorkoutExercise] = [], durationMinutes: Double = 0,
@@ -3865,7 +3868,7 @@ struct WorkoutSession: Identifiable, Codable {
          healthKitUUID: String? = nil, activeEnergyKcal: Double = 0,
          endedAt: Date? = nil, source: WorkoutSource? = nil,
          pauses: [WorkoutPause]? = nil, kcalEstimated: Bool? = nil,
-         health: WorkoutHealthLink? = nil) {
+         health: WorkoutHealthLink? = nil, gps: WorkoutGPSQuality? = nil) {
         self.id = id; self.date = date; self.title = title
         self.exercises = exercises; self.durationMinutes = durationMinutes
         self.place = place; self.note = note
@@ -3873,6 +3876,7 @@ struct WorkoutSession: Identifiable, Codable {
         self.endedAt = endedAt
         self.source = source; self.pauses = pauses; self.kcalEstimated = kcalEstimated
         self.health = health
+        self.gps = gps
     }
 
     init(from decoder: Decoder) throws {
@@ -3891,12 +3895,14 @@ struct WorkoutSession: Identifiable, Codable {
         pauses = try? c.decodeIfPresent([WorkoutPause].self, forKey: .pauses)
         kcalEstimated = try? c.decodeIfPresent(Bool.self, forKey: .kcalEstimated)
         health = try? c.decodeIfPresent(WorkoutHealthLink.self, forKey: .health)
+        gps = try? c.decodeIfPresent(WorkoutGPSQuality.self, forKey: .gps)
     }
     private enum CodingKeys: String, CodingKey {
         case id, date, title, exercises, durationMinutes, place, note
         case healthKitUUID, activeEnergyKcal, endedAt
         case source, pauses, kcalEstimated
         case health
+        case gps
     }
 
     /// [v25.551] 寫進 Apple 健康用的結束時間。movingMinutes 是呼叫端算好的移動時間（分鐘）。
@@ -4023,6 +4029,36 @@ struct WorkoutPrefs: Codable, Equatable {
 
     /// 什麼都沒設過（合併匯入時只在本機沒設過才帶進來）
     var isEmpty: Bool { heroSport == nil && (weeklyGoalKm ?? [:]).isEmpty }
+}
+
+// MARK: - 記錄時 GPS 好不好（v25.555，健康 v5；health/judge.md §5.2 ③、build/v5/brief.md）
+
+/// [v25.555] 一趟 App 記的運動，記錄時 GPS 的情形（存在 WorkoutSession.gps）。
+/// 記錄器（RunTracker）跑步中每秒數一次（暫停不算）：GPS 弱＝畫面上那條「GPS 訊號弱，距離可能少算」出現的那幾秒
+/// （誤差超過 20 公尺連續 10 秒、或 10 秒收不到定位）。成果頁「要確認」：記錄 2 分鐘以上、一半以上的時間 GPS 弱，
+/// 就提醒「這趟大部分時間 GPS 訊號很弱（平均誤差 35 公尺），距離可能少算。」（WorkoutFacts.gpsWeakPrompt）。
+/// 欄位全部 Optional＋decodeIfPresent：舊資料、還沒更新的 iPad 都讀得進來。
+struct WorkoutGPSQuality: Codable, Equatable {
+    /// 記錄中（跑步中、不含暫停）數了幾秒
+    var trackedSeconds: Double?
+    /// 其中 GPS 弱的秒數
+    var weakSeconds: Double?
+    /// 收得到定位的那幾秒，水平誤差的平均（公尺）；一秒都沒收到是 nil
+    var averageAccuracyM: Double?
+
+    init(trackedSeconds: Double? = nil, weakSeconds: Double? = nil, averageAccuracyM: Double? = nil) {
+        self.trackedSeconds = trackedSeconds
+        self.weakSeconds = weakSeconds
+        self.averageAccuracyM = averageAccuracyM
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        trackedSeconds = try? c.decodeIfPresent(Double.self, forKey: .trackedSeconds)
+        weakSeconds = try? c.decodeIfPresent(Double.self, forKey: .weakSeconds)
+        averageAccuracyM = try? c.decodeIfPresent(Double.self, forKey: .averageAccuracyM)
+    }
+    private enum CodingKeys: String, CodingKey { case trackedSeconds, weakSeconds, averageAccuracyM }
 }
 
 // MARK: - 跟 Apple 健康的關係（v25.554，健康 v4；health/judge.md §6 v4、build/v4/brief.md）

@@ -240,9 +240,14 @@ enum WorkoutFacts {
     /// 1. 先用完整的點算每公里分段（RouteMath.kmSplits：跳過暫停空隙、用移動時間），每公里爬升用記錄器記的 kmClimb；
     /// 2. 再把路線簡化（RouteMath.simplified：誤差 1.5 公尺內、至少每 10 秒留一點）；
     /// 3. 運動種類、來源 .app、暫停、真正結束時間、估的大卡一起填好。
-    /// 名稱 v2 還是運動名（「跑步」）；時段取名（晨跑、夜跑）是 v5。
-    static func makeSession(from r: RunResult, bodyWeightKg: Double?) -> WorkoutSession {
+    /// [v25.555] 名稱存檔時就取好（autoTitle：起點 150 公尺內有你改過名字的同一種運動就沿用那個名字，不然照時段「晨跑」「夜跑」）；
+    /// sessions 傳 store 裡全部的運動（沒傳＝只照時段）。動作的名稱還是運動名（「跑步」：舊版 iPad 看名字猜運動種類）。
+    /// 記錄時 GPS 好不好（RunResult.gps）一起存（成果頁「要確認」那一句）。
+    static func makeSession(from r: RunResult, bodyWeightKg: Double?,
+                            sessions: [WorkoutSession] = []) -> WorkoutSession {
         let splits = splitsWithClimb(RouteMath.kmSplits(r.route), kmClimb: r.kmClimb, totalClimb: r.elevation)
+        let sport = WorkoutSport(r.sport)
+        let title = autoTitle(sport: sport, start: r.startedAt, startPoint: r.route.first, sessions: sessions)
         let exercise = WorkoutExercise(
             name: r.sport.rawValue, kind: .cardio, reps: 0, sets: 0, loadType: .none,
             loadKg: 0, distanceKm: r.distanceKm, durationMinutes: r.movingMinutes,
@@ -250,12 +255,13 @@ enum WorkoutFacts {
             sport: WorkoutSport(r.sport), splits: splits.isEmpty ? nil : splits)
         var session = WorkoutSession(
             date: r.startedAt,                 // 按開始那一刻
-            title: r.sport.rawValue,
+            title: title,                      // [v25.555] 「晨跑」「河濱晨跑」（以前存「跑步」，畫面上才換成時段名）
             exercises: [exercise],
             durationMinutes: r.movingMinutes,  // 扣掉暫停的移動時間
             endedAt: r.endedAt,                // 最後一次按暫停那一刻
             source: .app,
-            pauses: r.pauses.isEmpty ? nil : r.pauses)
+            pauses: r.pauses.isEmpty ? nil : r.pauses,
+            gps: r.gps)
         applyKcalEstimate(&session, bodyWeightKg: bodyWeightKg)
         // [v25.554] 寫進 Apple 健康用簡化前的點（judge §6 v4）：完整的點只放記憶體一下，寫的時候拿走（WorkoutRouteStash）
         WorkoutRouteStash.keep(r.route, for: session.id)
@@ -1558,4 +1564,335 @@ extension WorkoutFacts {
 
     /// 健康頁：v4 多要一項讀寫權限（騎車距離），還沒同意過
     static let moreAccessPrompt = "Apple 健康多了一項要你同意：騎車距離。"
+}
+
+// MARK: - v5：跑步畫面的數字、存檔時取名、GPS 弱、分享（v25.555，健康 v5；health/judge.md §4、§5.3、build/v5/brief.md §2）
+//
+// 全部是純函式（同 v2～v4），build/v5/sim_v5.py 逐行照寫、驗算（這一公里、時速、這一段、取名、剪頭尾 200 公尺、GPS 弱那一句）。
+// • 跑步中「這一公里」那一格＝最近 30 秒存下來的點走了多遠、花多久（不到 50 公尺寫「—」）；騎車「時速」＝最近 10 秒。
+//   只算同一段（暫停之後重新算）；最近 30 秒都沒有新點（站著、隧道）就是「—」。
+// • 「這一公里」小步道：跑走登山每 1 公里一段、騎車每 5 公里一段；用了多久＝現在的移動時間減掉走滿上一段那一刻的移動時間
+//   （RunTracker.kmTimes）。
+// • 存檔時取名：起點 150 公尺內有「你改過名字」的同一種運動（最近那一趟）就沿用那個名字；不然照時段（timeOfDayName）。
+//   「改過名字」＝不是運動名、也不是時段名（自動取的「晨跑」不算，不然晚上從同一個地方出發也叫晨跑）。
+// • 分享圖的路線形狀：頭尾各剪掉 200 公尺（家門口不會出現在圖上）；剪完不到 200 公尺就不給放。
+
+/// [v25.555] 跑步中「這一公里」小步道（騎車「這 5 公里」）
+struct RunLegProgress: Equatable {
+    /// 一段多長（公尺）：跑步、健走、登山 1,000；騎車 5,000
+    var legMeters: Double
+    /// 第幾段（1 起）：跑步走到 3.42 公里是第 4 段（畫面「第 4 公里」）；騎車 12.6 公里是第 3 段
+    var index: Int
+    /// 這一段走了幾公尺（0…legMeters）
+    var doneMeters: Double
+    /// 這一段用了幾秒（移動時間，暫停不算）；記錄器沒記到上一段的時間是 nil
+    var seconds: Double?
+
+    /// 小步道填多滿（0…1）
+    var fraction: Double { legMeters > 0 ? min(1, max(0, doneMeters / legMeters)) : 0 }
+}
+
+/// [v25.555] 開始前面板下面那兩行（樣稿②-2）
+struct RunIntro: Equatable {
+    /// 「這週跑了 9.4 公里・目標 20」「這週還沒騎・目標 50」「這週走了 3.1 公里」
+    var week: String
+    /// 「上一趟：昨天 06:10・晨跑 5.1 公里」（這種運動的上一趟）；沒有是 nil
+    var last: String?
+}
+
+extension WorkoutFacts {
+
+    // MARK: 存檔時取名
+
+    /// 起點離你改過名字的那一趟起點多近（公尺）就沿用那個名字
+    static let sameStartMeters: Double = 150
+
+    /// 時段取的名字全部（timeOfDayName 的四種運動 × 五個時段；登山一律「登山」）：用來分辨「自動取的」和「你改過的」
+    static let autoTitles: Set<String> = {
+        var out: Set<String> = []
+        for sport in [WorkoutSport.run, .walk, .bike, .hike] {
+            for hour in [7, 12, 15, 20, 2] {
+                var c = DateComponents()
+                c.year = 2026
+                c.month = 1
+                c.day = 5
+                c.hour = hour
+                if let d = WorkoutFacts.calendar.date(from: c) {
+                    out.insert(WorkoutFacts.timeOfDayName(sport, start: d))
+                }
+            }
+        }
+        return out
+    }()
+
+    /// 名字是你自己取的：不是空白、不是運動名（「跑步」「走路」…）、也不是時段名（「晨跑」「夜騎」…）
+    static func isCustomTitle(_ title: String) -> Bool {
+        let t = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        return !t.isEmpty && !genericTitles.contains(t) && !autoTitles.contains(t)
+    }
+
+    /// 一趟的起點（第一個有路線的動作的第一點）；沒有路線（舊版只存到起點的也算沒有）是 nil
+    static func startPoint(_ s: WorkoutSession) -> RoutePoint? {
+        s.firstRouteExercise?.route.first
+    }
+
+    /// 起點 150 公尺內、同一種運動、你改過名字的那幾趟裡最近的那一趟的名字；沒有是 nil
+    static func inheritedTitle(sport: WorkoutSport, startPoint: RoutePoint?,
+                               sessions: [WorkoutSession]) -> String? {
+        guard let p = startPoint, p.lat.isFinite, p.lon.isFinite else { return nil }
+        let here = CLLocation(latitude: p.lat, longitude: p.lon)
+        var best: (date: Date, title: String)? = nil
+        for s in sessions where s.primarySport == sport && isCustomTitle(s.title) {
+            // 參數也叫 startPoint：這裡一律寫 WorkoutFacts.startPoint(_:)
+            guard let q = WorkoutFacts.startPoint(s), q.lat.isFinite, q.lon.isFinite else { continue }
+            let d = here.distance(from: CLLocation(latitude: q.lat, longitude: q.lon))
+            guard d <= sameStartMeters else { continue }
+            if let b = best, b.date >= s.date { continue }
+            best = (date: s.date, title: s.title.trimmingCharacters(in: .whitespacesAndNewlines))
+        }
+        return best?.title
+    }
+
+    /// 存檔時的名字：沿用改過的名字（inheritedTitle），不然照時段（「晨跑」）
+    static func autoTitle(sport: WorkoutSport, start: Date, startPoint: RoutePoint?,
+                          sessions: [WorkoutSession]) -> String {
+        inheritedTitle(sport: sport, startPoint: startPoint, sessions: sessions)
+            ?? timeOfDayName(sport, start: start)
+    }
+
+    // MARK: 跑步中（RunTracker 每秒讀；畫面只讀記錄器算好的值）
+
+    /// 「這一公里」那一格看最近幾秒
+    static let recentPaceSeconds: Double = 30
+    /// 最近 30 秒不到這麼多公尺寫「—」（剛起跑、站著）
+    static let recentPaceMinMeters: Double = 50
+    /// 騎車「時速」看最近幾秒
+    static let recentSpeedSeconds: Double = 10
+    /// 最近 10 秒裡存下來的點至少要跨這麼多秒才算時速
+    static let recentSpeedMinSeconds: Double = 3
+
+    /// 最近 seconds 秒（nowT 往回）存下來的點：同一段（暫停之後重算）、相鄰兩點距離加總、第一點到最後一點的時間差。
+    /// nowT＝現在離按開始幾秒（RoutePoint.t 的同一把尺，含暫停）。最後一點也太舊（站著、隧道）、不到兩點回 nil
+    static func recentWindow(_ points: [RoutePoint], nowT: Double, seconds: Double) -> (meters: Double, seconds: Double)? {
+        guard let last = points.last, nowT.isFinite, last.t >= nowT - seconds else { return nil }
+        let seg = last.seg ?? 0
+        var meters = 0.0
+        var firstT = last.t
+        var i = points.count - 1
+        while i > 0 {
+            let p = points[i - 1]
+            let q = points[i]
+            guard (p.seg ?? 0) == seg, (q.seg ?? 0) == seg, p.t >= nowT - seconds else { break }
+            meters += CLLocation(latitude: p.lat, longitude: p.lon)
+                .distance(from: CLLocation(latitude: q.lat, longitude: q.lon))
+            firstT = p.t
+            i -= 1
+        }
+        let dt = last.t - firstT
+        guard dt > 0, meters.isFinite else { return nil }
+        return (meters: meters, seconds: dt)
+    }
+
+    /// 「這一公里」那一格（分鐘／公里）：最近 30 秒走不到 50 公尺回 nil（畫面寫「—」）
+    static func recentPace(_ points: [RoutePoint], nowT: Double) -> Double? {
+        guard let w = recentWindow(points, nowT: nowT, seconds: recentPaceSeconds),
+              w.meters >= recentPaceMinMeters else { return nil }
+        return (w.seconds / 60) / (w.meters / 1000)
+    }
+
+    /// 騎車「時速」（公里／時）：最近 10 秒；點跨不到 3 秒回 nil（畫面寫「—」）
+    static func recentSpeedKmh(_ points: [RoutePoint], nowT: Double) -> Double? {
+        guard let w = recentWindow(points, nowT: nowT, seconds: recentSpeedSeconds),
+              w.seconds >= recentSpeedMinSeconds else { return nil }
+        return (w.meters / 1000) / (w.seconds / 3600)
+    }
+
+    /// 「這一公里」小步道。kmTimes[i]＝走滿第 i+1 公里那一刻的移動時間（秒；RunTracker 記的）。
+    /// 例：3,420 公尺、移動 1,265 秒、kmTimes [365, 735, 1105] → 第 4 公里、420 公尺、160 秒（2'40"）；
+    ///     騎車 12,600 公尺 → 第 3 段（10～15 公里）、2,600 公尺
+    static func legProgress(distanceMeters: Double, elapsed: Double, kmTimes: [Double],
+                            sport: WorkoutSport) -> RunLegProgress {
+        let legKm = sport == .bike ? 5 : 1
+        let legMeters = Double(legKm) * 1000
+        let d = distanceMeters.isFinite ? max(0, distanceMeters) : 0
+        let done = Int(min(d / legMeters, 100_000).rounded(.down))      // 走滿幾段
+        let doneMeters = d - Double(done) * legMeters
+        var seconds: Double? = nil
+        if done == 0 {
+            seconds = max(0, elapsed)
+        } else {
+            let k = done * legKm - 1                                       // 走滿上一段那一刻＝第 done×legKm 公里
+            if k >= 0, k < kmTimes.count {
+                seconds = max(0, elapsed - kmTimes[k])
+            }
+        }
+        return RunLegProgress(legMeters: legMeters, index: done + 1, doneMeters: doneMeters, seconds: seconds)
+    }
+
+    /// 小步道右邊的字：跑走登山「420／1000 m・2'40"」（時間不知道「420／1000 m」）；騎車「這 5 公里 2.6／5 公里」
+    static func legText(_ p: RunLegProgress, sport: WorkoutSport) -> String {
+        if sport == .bike {
+            return "這 5 公里 " + String(format: "%.1f", max(0, p.doneMeters) / 1000) + "／5 公里"
+        }
+        let m = WorkoutFormat.wholeSeconds(p.doneMeters.rounded(.down))
+        var text = "\(min(m, 999))／1000 m"
+        if let sec = p.seconds { text += "・" + legClock(sec) }
+        return text
+    }
+
+    /// 「2'40"」（這一段用了多久，秒數四捨五入：159.6 秒寫 2'40"，跟「21:05 − 18:25」心算對得上）；一小時以上「1:02'05"」
+    static func legClock(_ seconds: Double) -> String {
+        let s = WorkoutFormat.wholeSeconds(seconds)
+        if s >= 3600 {
+            return String(format: "%d:%02d'%02d\"", s / 3600, (s % 3600) / 60, s % 60)
+        }
+        return String(format: "%d'%02d\"", s / 60, s % 60)
+    }
+
+    /// 面板右上：跑走登山「第 4 公里」；騎車寫時速（畫面自己組），這裡只給跑走登山的字
+    static func legTitle(_ p: RunLegProgress) -> String {
+        "第 \(p.index) 公里"
+    }
+
+    /// 跑步中「約 220 大卡」那一格（點中間那格換到大卡）：（MET − 1）× 體重 × 小時，MET 照這一趟到現在的平均速度；
+    /// 沒有體重、不到 1 分鐘回 nil（畫面寫「—」）
+    static func liveKcal(sport: WorkoutSport, km: Double, movingSeconds: Double, bodyWeightKg: Double?) -> Double? {
+        guard let w = bodyWeightKg, w > 0, movingSeconds >= 60, movingSeconds.isFinite else { return nil }
+        let minutes = movingSeconds / 60
+        let speed = WorkoutFormat.speedKmh(km: km, minutes: minutes)
+        let k = (met(sport: sport, speedKmh: speed) - 1) * w * (minutes / 60)
+        guard k.isFinite, k > 0 else { return nil }
+        return k
+    }
+
+    /// 開始前面板下面兩行（樣稿②-2）：「這週跑了 9.4 公里・目標 20」＋「上一趟：昨天 06:10・晨跑 5.1 公里」
+    static func runIntro(_ sessions: [WorkoutSession], prefs: WorkoutPrefs, sport: WorkoutSport,
+                         now: Date = Date()) -> RunIntro {
+        let p = weekProgress(sessions, prefs: prefs, sport: sport, now: now)
+        let v = verb(sport)
+        var week = p.doneKm >= 0.05 ? "這週\(v)了 " + WorkoutFormat.km(p.doneKm) : "這週還沒\(v)"
+        if let g = p.goalKm {
+            week += "・目標 " + HealthPageData.goalKmText(g).replacingOccurrences(of: " 公里", with: "")
+        }
+        var lastSession: WorkoutSession? = nil
+        for s in sessions where s.date <= now && s.primarySport == sport {
+            if let l = lastSession, l.date >= s.date { continue }
+            lastSession = s
+        }
+        var last: String? = nil
+        if let s = lastSession {
+            let km = s.totalDistanceKm
+            last = "上一趟：" + HealthPageData.whenText(s.date, now: now) + "・" + title(s)
+                + (km >= 0.05 ? " " + WorkoutFormat.km(km) : "")
+        }
+        return RunIntro(week: week, last: last)
+    }
+
+    // MARK: GPS 弱（judge §4.1 第 9 列、§5.2 ③）
+
+    /// 誤差超過這個（公尺）算弱（同 RunTracker.goodAccuracy：超過就不起點、不算距離）
+    static let gpsWeakAccuracy: Double = 20
+    /// 弱（或收不到）連續這麼多秒才出現「GPS 訊號弱，距離可能少算」
+    static let gpsWeakSeconds: Double = 10
+
+    /// 成果頁「要確認」（只提醒）：記錄 2 分鐘以上、一半以上的時間 GPS 弱。
+    /// 「這趟大部分時間 GPS 訊號很弱（平均誤差 35 公尺），距離可能少算。」；沒有平均誤差就不寫括號
+    static func gpsWeakPrompt(_ s: WorkoutSession) -> String? {
+        guard let g = s.gps, let tracked = g.trackedSeconds, tracked >= 120,
+              let weak = g.weakSeconds, weak >= tracked * 0.5 else { return nil }
+        if let a = g.averageAccuracyM, a.isFinite, a > 0 {
+            return "這趟大部分時間 GPS 訊號很弱（平均誤差 \(WorkoutFormat.wholeSeconds(a)) 公尺），距離可能少算。"
+        }
+        return "這趟大部分時間 GPS 訊號很弱，距離可能少算。"
+    }
+
+    // MARK: 分享（judge §5.3、待決定 9：預設不放路線形狀；要放時頭尾 200 公尺剪掉、不放地圖底；只寫日期不寫幾點）
+
+    /// 分享圖的路線頭尾各剪掉幾公尺
+    static let shareTrimMeters: Double = 200
+
+    /// 路線頭尾各剪掉 meters 公尺（沿著路線量；暫停的空隙不算距離），剪的地方內插一點。
+    /// 剪完不到 200 公尺（整條不到 600 公尺）回 nil：不給放路線形狀
+    static func trimmedRoute(_ route: [RoutePoint], meters: Double = 200) -> [RoutePoint]? {
+        guard route.count >= 2, meters >= 0 else { return nil }
+        // 每一點離起點沿路線幾公尺（同一段裡相鄰兩點才加）
+        var cum = [Double](repeating: 0, count: route.count)
+        for i in 1..<route.count {
+            let p = route[i - 1]
+            let q = route[i]
+            var d = 0.0
+            if (p.seg ?? 0) == (q.seg ?? 0) {
+                d = CLLocation(latitude: p.lat, longitude: p.lon)
+                    .distance(from: CLLocation(latitude: q.lat, longitude: q.lon))
+                if !d.isFinite { d = 0 }
+            }
+            cum[i] = cum[i - 1] + d
+        }
+        let total = cum[route.count - 1]
+        let from = meters
+        let to = total - meters
+        guard to - from >= 200 else { return nil }
+        var out: [RoutePoint] = []
+        for i in 1..<route.count {
+            let a = cum[i - 1]
+            let b = cum[i]
+            let p = route[i - 1]
+            let q = route[i]
+            // 剪的那一刀落在這一步裡：內插一點（只會落在同一段裡：跨段那一步距離是 0）
+            if a < from, b >= from, b > a {
+                out.append(interpolated(p, q, k: (from - a) / (b - a)))
+            }
+            if a >= from, a <= to, out.last.map({ $0.t != p.t || $0.lat != p.lat || $0.lon != p.lon }) ?? true {
+                out.append(p)
+            }
+            if a < to, b >= to, b > a {
+                out.append(interpolated(p, q, k: (to - a) / (b - a)))
+                break
+            }
+        }
+        return out.count >= 2 ? out : nil
+    }
+
+    /// p 到 q 之間 k（0…1）的那一點（座標、時間、高度線性內插；段號用 q 的）
+    private static func interpolated(_ p: RoutePoint, _ q: RoutePoint, k: Double) -> RoutePoint {
+        let t = min(1, max(0, k))
+        return RoutePoint(lat: p.lat + (q.lat - p.lat) * t,
+                          lon: p.lon + (q.lon - p.lon) * t,
+                          t: p.t + (q.t - p.t) * t,
+                          alt: p.alt + (q.alt - p.alt) * t,
+                          seg: q.seg)
+    }
+
+    /// 分享圖要放的路線形狀（頭尾剪掉 200 公尺再換成 0…1；不打地圖請求、沒有街名）；沒有路線或太短回 nil
+    static func shareRouteShape(_ s: WorkoutSession) -> WorkoutRouteShape? {
+        guard let e = s.firstRouteExercise, let t = trimmedRoute(e.route, meters: shareTrimMeters) else { return nil }
+        return routeShape(t, maxPoints: 160, minSpanMeters: 200)
+    }
+
+    /// 分享圖的日期：只寫「10/15」，不寫幾點、不寫星期
+    static func shareDate(_ s: WorkoutSession) -> String {
+        WorkoutFormat.monthDay(s.date)
+    }
+
+    /// 分享圖中間那一行：「河濱晨跑　5.2 公里・32:10・配速 6'11"」；騎車「…・時速 21.5」；沒距離「胸推日　45 分鐘」
+    static func shareHeadline(_ s: WorkoutSession) -> String {
+        let name = title(s)
+        let km = s.totalDistanceKm
+        let moving = movingMinutes(s)
+        guard km >= 0.05 else {
+            return moving > 0 ? name + "　" + WorkoutFormat.total(minutes: moving) : name
+        }
+        var parts = [WorkoutFormat.km(km)]
+        if moving > 0 {
+            parts.append(WorkoutFormat.clock(minutes: moving))
+            if s.primarySport == .bike {
+                if let v = WorkoutFormat.speedKmh(km: km, minutes: moving) {
+                    parts.append("時速 " + WorkoutFormat.speedNumber(v))
+                }
+            } else {
+                parts.append("配速 " + WorkoutFormat.pace(km: km, minutes: moving))
+            }
+        }
+        return name + "　" + parts.joined(separator: "・")
+    }
 }

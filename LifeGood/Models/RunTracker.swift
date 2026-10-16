@@ -125,6 +125,45 @@ enum RunSport: String, CaseIterable, Identifiable {
         guard meters.isFinite, meters > 0 else { return }
         UserDefaults.standard.set(min(max(meters, 150), 5_000), forKey: followDistanceKey)
     }
+
+    // MARK: [v25.555] 跑步畫面的開關（build/v5/brief.md §2；主控寫好，G2 照用）
+
+    /// 螢幕保持亮著（每種運動各記一個）的鍵，例：run_keep_awake_騎車
+    var keepAwakeKey: String { "run_keep_awake_" + rawValue }
+
+    /// 螢幕保持亮著：騎車預設開（手機架在龍頭），跑步、健走、登山預設關（在臂套裡，看鎖定畫面）。judge §4.0
+    var keepAwake: Bool {
+        (UserDefaults.standard.object(forKey: keepAwakeKey) as? Bool) ?? (self == .bike)
+    }
+
+    func setKeepAwake(_ on: Bool) {
+        UserDefaults.standard.set(on, forKey: keepAwakeKey)
+    }
+
+    /// 按開始先倒數 3、2、1（全部運動共用一個開關；預設開）的鍵
+    static let countdownKey = "run_countdown"
+
+    /// 倒數開關；沒設過＝開
+    static var countdownOn: Bool {
+        (UserDefaults.standard.object(forKey: countdownKey) as? Bool) ?? true
+    }
+
+    static func setCountdown(_ on: Bool) {
+        UserDefaults.standard.set(on, forKey: countdownKey)
+    }
+
+    /// 跑步中「結束」要按住幾秒（外圈填滿才算；只點一下不會結束）
+    static let holdToFinishSeconds: Double = 1.0
+
+    /// 面板上可以點來換的小格（slot 0＝左邊那格、1＝中間那格），這種運動記住的選擇（0、1、2 輪流）；沒選過是 0
+    func cellChoice(_ slot: Int) -> Int {
+        let v = UserDefaults.standard.integer(forKey: "run_cell_\(slot)_" + rawValue)
+        return min(max(v, 0), 2)
+    }
+
+    func setCellChoice(_ slot: Int, _ value: Int) {
+        UserDefaults.standard.set(min(max(value, 0), 2), forKey: "run_cell_\(slot)_" + rawValue)
+    }
 }
 
 /// 結束一趟的成果（RunTracker.finish() 回傳，呼叫端是 RunTrackingView.finish()；
@@ -146,6 +185,19 @@ struct RunResult {
     var pauses: [WorkoutPause] = []
     /// [v25.552] 每走滿一整公里那一刻的累計爬升（kmClimb[0]＝第 1 公里走完時）；每公里爬升用相鄰兩個相減
     var kmClimb: [Double] = []
+    /// [v25.555] 記錄時 GPS 好不好（跑步中每秒數：GPS 弱的秒數、平均誤差）；WorkoutFacts.makeSession 存進 WorkoutSession.gps
+    var gps: WorkoutGPSQuality? = nil
+}
+
+/// [v25.555] 跑步中地圖上每整公里一塊白底小牌（記錄器走滿一整公里那一刻存下來的那一點；騎車畫面只畫 5 的倍數）
+struct RunKmMarker: Identifiable, Equatable {
+    /// 第幾公里（1 起）
+    let km: Int
+    let lat: Double
+    let lon: Double
+
+    var id: Int { km }
+    var coordinate: CLLocationCoordinate2D { CLLocationCoordinate2D(latitude: lat, longitude: lon) }
 }
 
 /// 地圖上的一段線（暫停再繼續就是新的一段），給 Map 裡的 ForEach 用
@@ -204,6 +256,12 @@ final class RunTracker: NSObject, ObservableObject {
     /// [v25.552] 使用者把「精確位置」關掉了（有給位置權限、但只給大約位置）：誤差 1～3 公里，
     /// 每一筆都超過 50 公尺被丟掉，一直「定位中…」、畫不出線。GPS 燈改寫「精確位置關著」＋「打開精確位置」
     @Published private(set) var reducedAccuracy = false
+    /// [v25.555] 地圖上每整公里一塊小牌（store() 走滿一整公里時加；start 清空）。// G1：在 store() 的 kmClimb 迴圈裡一起加
+    @Published private(set) var kmMarkers: [RunKmMarker] = []
+
+    /// [v25.555] 每走滿一整公里那一刻的移動時間（秒）：kmTimes[0]＝第 1 公里走完時。「這一公里」小步道用（WorkoutFacts.legProgress）。
+    /// 不發布（elapsed 每秒都在變，畫面本來就每秒重畫）。// G1：在 store() 的 kmClimb 迴圈裡一起加、start 清空
+    private(set) var kmTimes: [Double] = []
 
     /// [v25.552] 這一趟的編號：中途存檔的檔名（RunCheckpointStore），start(sport:) 換新的
     private(set) var runId = UUID()
@@ -296,6 +354,46 @@ final class RunTracker: NSObject, ObservableObject {
         return (1000 / currentSpeedMS) / 60
     }
 
+    // MARK: [v25.555] 跑步畫面的數字（judge §4.2；算法在 WorkoutFacts，build/v5/sim_v5.py 驗算過）
+
+    /// 現在離按開始幾秒（含暫停，跟 RoutePoint.t 同一把尺）；沒在記錄是 nil
+    private var nowSinceStart: Double? {
+        guard isActive, let s = startedAt else { return nil }
+        return Date().timeIntervalSince(s)
+    }
+
+    /// 「這一公里」那一格（分鐘／公里）：最近 30 秒存下來的點；不到 50 公尺、暫停中是 nil（畫面寫「—」）
+    var recentPaceMinPerKm: Double? {
+        guard phase == .running, let t = nowSinceStart else { return nil }
+        return WorkoutFacts.recentPace(points, nowT: t)
+    }
+
+    /// 騎車「時速」（公里／時）：最近 10 秒；暫停中、站著是 nil（畫面寫「—」）
+    var recentSpeedKmh: Double? {
+        guard phase == .running, let t = nowSinceStart else { return nil }
+        return WorkoutFacts.recentSpeedKmh(points, nowT: t)
+    }
+
+    /// 「這一公里」小步道（騎車「這 5 公里」）
+    var legProgress: RunLegProgress {
+        WorkoutFacts.legProgress(distanceMeters: distanceMeters, elapsed: elapsed,
+                                 kmTimes: kmTimes, sport: WorkoutSport(sport))
+    }
+
+    /// 正在暫停：按暫停那一刻（「已暫停・1:12」從這裡算）；沒在暫停是 nil
+    var pausedAt: Date? {
+        phase == .paused ? pauseStartedAt : nil
+    }
+
+    /// [v25.555] GPS 弱：跑步中（暫停不算），誤差超過 20 公尺連續 10 秒、或 10 秒收不到定位（隧道、橋下、還沒定到位）。
+    /// 畫面上那條「GPS 訊號弱，距離可能少算」（還在等第一個好定位 waitingForFix、精確位置關著時畫面改寫自己的那一句、不畫這條）、
+    /// GPS 燈「GPS 弱・誤差 35 公尺」、存檔的 WorkoutGPSQuality（弱的秒數）都讀這個。
+    /// 用 Date() 算：畫面每秒（elapsed 一變）重畫時重新判斷，收不到定位也會變。build/v5/sim_v5.py 的 TrackerV5.gps_weak。
+    /// // G1：照 build/v5/brief.md §G1-3 填（weakSince、lastFixArrival；開始、繼續時重設）
+    var gpsWeak: Bool {
+        false
+    }
+
     /// [v25.551] 手機記得的上一個位置：還沒收到新定位前，地圖開場先放在這裡（不會拉到整個台灣）
     var lastKnownCoordinate: CLLocationCoordinate2D? {
         lastCoordinate ?? manager.location?.coordinate
@@ -360,7 +458,9 @@ final class RunTracker: NSObject, ObservableObject {
 
     /// [v25.551] 開始運動畫面一打開就呼叫：先定位（藍點、GPS 燈，起點不會歪），也先問「動作與健身」。
     /// 只在 App 開著時定位、不開背景更新；畫面關掉要呼叫 stopPreparing()。
-    func prepare() {
+    /// [v25.555] asking：false＝不跳任何系統權限框（第一次打開、位置還沒問過：畫面先出我們的說明卡，按〔好〕才 prepare(asking: true)）。
+    /// // G1：照 build/v5/brief.md §G1-1 改內容（現在 asking 還沒用到）
+    func prepare(asking: Bool = true) {
         preparing = true
         requestAuthorization()
         let status = manager.authorizationStatus

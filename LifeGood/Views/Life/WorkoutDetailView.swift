@@ -35,6 +35,9 @@ import HealthKit
 struct WorkoutDetailView: View {
     /// 打開哪一趟；換一趟（同一週的換一趟列）在頁面裡面換，不重開 sheet
     let sessionId: UUID
+    /// [v25.555] 剛跑完：跑步畫面按住結束、存好之後，同一個全螢幕直接換成這一頁（judge §4.3「先存再看」）。
+    /// 左上「完成」（關掉整個全螢幕回健康頁）、導覽列下面「已存好・名稱 ✎・地點 ✎」那一條、沒有換一趟列。// G3：照 build/v5/brief.md §G3 實作
+    let justFinished: Bool
 
     @EnvironmentObject var lifeStore: LifeStore
     @EnvironmentObject var subscription: SubscriptionManager
@@ -61,8 +64,9 @@ struct WorkoutDetailView: View {
     /// 正在關（刪掉了）：資料沒了也不再清空畫面、不再排第二次關
     @State private var closing = false
 
-    init(sessionId: UUID) {
+    init(sessionId: UUID, justFinished: Bool = false) {
         self.sessionId = sessionId
+        self.justFinished = justFinished
         _currentId = State(initialValue: sessionId)
     }
 
