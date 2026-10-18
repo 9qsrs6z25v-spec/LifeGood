@@ -36,6 +36,17 @@ import UIKit
 //    .minimumScaleFactor(0.6)，對齊卡片內「未來 30 天」KPI 膠囊已有的同型防護。純視覺層
 //    調整，day／month／weekdayStr 等日期計算與行事曆資料邏輯完全未變動。
 //    （下次美化本檔案時：英雄卡大字防截斷已補齊，可轉往其他仍留有待辦的畫面）
+//
+// [v25.558] 健康 v7b（build/v7b/brief.md §6 G2）：我的行事曆顯示運動，跟生日、紀念日、里程碑同一套
+//   CalendarEvent／eventsOn／eventRow，不另寫一套列：
+// • eventsOn 多收那一天的運動（WorkoutFacts.sessions(on:in:calendar:)，開始時間在那一天；App 記的、手錶帶進來的、
+//   手動補記的都算）：「[figure.run] 晨跑 5.2 公里　〔運動〕　🕐 06:05 · 跑步・32:10」。字只用
+//   WorkoutFacts.calendarTitle／calendarDetail（一套數字），排序照既有（有時間的照時間）。
+// • CalendarEvent 多 workoutId（哪一趟）、iconName（那一種運動的圖示，騎車是單車）；EventType 多 .workout（運動橘 EB6834、「運動」），
+//   「接下來 7 天」的彩點靠 type.color 自己多一顆橘點。
+// • 點了（tapEvent）：運動 → openTarget = .workout(id) → 同一個 .sheet(item: $openTarget) { … .appStores() }
+//   開 WorkoutDetailView(sessionId:)（看不擋訂閱，編輯、刪除成果頁自己擋）；其他照舊開預覽卡片。
+// • 搜尋（searchHits）這版不加運動；CalendarDayItems（「今天」小工具的全天的事）也不收（運動有開始時間）。
 
 /// 我的行事曆：彙整當日家庭紀念日、工作會議與任務、本週快覽、未來里程碑、Apple 行事曆事件。
 struct MyCalendarView: View {
@@ -80,6 +91,8 @@ struct MyCalendarView: View {
         case event(PersonalEvent)
         /// 兼任職務工作區；resolutionId 有值時直接打開那則重大決議
         case sideRole(roleId: UUID, resolutionId: UUID?)
+        /// [健康 v7b] 運動：打開那一趟的成果頁
+        case workout(UUID)
         var id: String {
             switch self {
             case .report(_, let r):  return "r_\(r.id.uuidString)"
@@ -89,6 +102,7 @@ struct MyCalendarView: View {
             case .milestone(let ms): return "ms_\(ms.id.uuidString)"
             case .event(let e):      return "e_\(e.id.uuidString)"
             case .sideRole(let rid, let res): return "srw_\(rid.uuidString)_\(res?.uuidString ?? "")"
+            case .workout(let wid):  return "wk_\(wid.uuidString)"
             }
         }
     }
@@ -253,6 +267,9 @@ struct MyCalendarView: View {
             CalendarEventCard(item: .personalEvent(ev))
         case .sideRole(let rid, let resId):
             SideRoleWorkspaceView(roleId: rid, initialResolutionId: resId)
+        case .workout(let wid):
+            // [健康 v7b] 我的行事曆點運動那一列：那一趟的成果頁（看不擋訂閱；編輯、刪除成果頁自己擋）
+            WorkoutDetailView(sessionId: wid)
         }
     }
 
@@ -384,9 +401,15 @@ struct MyCalendarView: View {
         // 改用獨立布林旗標交由 eventRow 畫成與 clock／sun.max 同規格的 SF Symbol 徽章。
         var isRecurring: Bool = false
         var hasReminder: Bool = false
+        /// [健康 v7b] 運動那一列：哪一趟（點了開成果頁）
+        var workoutId: UUID? = nil
+        /// [健康 v7b] 圖示換成那一種運動（figure.walk…）；nil 用 type.icon
+        var iconName: String? = nil
 
         enum EventType {
             case birthday, anniversary, meeting, task, milestone, appleCalendar
+            /// [健康 v7b] 運動（跑步、健走、騎車、登山、重訓）
+            case workout
             var icon: String {
                 switch self {
                 case .birthday:      return "gift.fill"
@@ -395,6 +418,7 @@ struct MyCalendarView: View {
                 case .task:          return "checklist"
                 case .milestone:     return "flag.fill"
                 case .appleCalendar: return "calendar"
+                case .workout:       return "figure.run"
                 }
             }
             var color: Color {
@@ -405,6 +429,8 @@ struct MyCalendarView: View {
                 case .task:          return Color(red: 0.66, green: 0.86, blue: 0.74)
                 case .milestone:     return Color(red: 0.99, green: 0.80, blue: 0.65)
                 case .appleCalendar: return Color(red: 0.45, green: 0.65, blue: 0.95)
+                // 運動橘 EB6834（judge §3.14）
+                case .workout:       return Color(red: 0.92, green: 0.41, blue: 0.20)
                 }
             }
             var name: String {
@@ -415,6 +441,7 @@ struct MyCalendarView: View {
                 case .task: return "任務"
                 case .milestone: return "里程碑"
                 case .appleCalendar: return "系統行事曆"
+                case .workout: return "運動"
                 }
             }
         }
@@ -546,6 +573,19 @@ struct MyCalendarView: View {
             ))
         }
 
+        // [健康 v7b] 運動（跑步、健走、騎車、登山、重訓；App 記的、手錶帶進來的、手動補記的都算）：開始時間在這一天
+        for s in WorkoutFacts.sessions(on: day, in: lifeStore.workouts, calendar: calendar) {
+            events.append(CalendarEvent(
+                id: "wk-\(s.id.uuidString)",
+                type: .workout,
+                title: WorkoutFacts.calendarTitle(s),
+                time: s.date,
+                detail: WorkoutFacts.calendarDetail(s),
+                workoutId: s.id,
+                iconName: s.primarySport.icon
+            ))
+        }
+
         return events.sorted { (a, b) in
             switch (a.time, b.time) {
             case let (la?, lb?): return la < lb
@@ -581,8 +621,18 @@ struct MyCalendarView: View {
             return .family(title: ev.title, detail: ev.detail, isBirthday: true)
         case .anniversary:
             return .family(title: ev.title, detail: ev.detail, isBirthday: false)
-        case .appleCalendar, .meeting, .task:
+        case .appleCalendar, .meeting, .task, .workout:
+            // .workout 不會走到（運動那一列點了走 tapEvent → 成果頁）；放這裡只是讓 switch 窮舉
             return .appleEvent(title: ev.title, time: ev.time, detail: ev.detail, date: fallbackDate)
+        }
+    }
+
+    /// [健康 v7b] 點當日事件一列：運動開那一趟的成果頁（同一個 sheet(item: $openTarget)），其他照舊開預覽卡片
+    private func tapEvent(_ ev: CalendarEvent) {
+        if let wid = ev.workoutId {
+            openTarget = .workout(wid)
+        } else {
+            previewCalendarItem = cardItem(for: ev)
         }
     }
 
@@ -601,7 +651,7 @@ struct MyCalendarView: View {
                 )
             } else {
                 ForEach(Array(events.enumerated()), id: \.element.id) { idx, ev in
-                    Button { previewCalendarItem = cardItem(for: ev) } label: { eventRow(ev) }
+                    Button { tapEvent(ev) } label: { eventRow(ev) }
                         .buttonStyle(.plain)
                     if idx < events.count - 1 {
                         Divider().padding(.leading, 60)
@@ -633,7 +683,7 @@ struct MyCalendarView: View {
                 Circle()
                     .stroke(ev.type.color.opacity(0.28), lineWidth: 0.75)
                     .frame(width: 36, height: 36)
-                Image(systemName: ev.type.icon)
+                Image(systemName: ev.iconName ?? ev.type.icon)
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(ev.type.color)
             }

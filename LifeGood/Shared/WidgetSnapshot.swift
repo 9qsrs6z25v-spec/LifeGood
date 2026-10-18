@@ -131,6 +131,12 @@ enum WidgetKind {
     /// 同時要重畫 WidgetKind.today（中型「上靈動島」按鈕看靈動島有沒有在跑）
     static let dayTimelineControlKinds = [controlDayTimeline]
 
+    // MARK: [健康 v7b]
+
+    /// 控制項「開始跑步」（ControlWidgetButton → LifeGoodOpenIntent(url: WidgetLink.healthRun)；控制中心、鎖定畫面、動作按鈕）。
+    /// 不讀快照、沒有值，不用重畫
+    static let controlStartRun = "com.lifegood.app.control.startRun"
+
     /// money_v1.json 變了要重畫的（App 的寫手、一按就記的按鈕都用這一組）
     static let moneyKinds = [moneyLeft, ledgerDesk, quickRecord, lockSpent]
     /// [v3] money_v1.json 變了要重畫的控制項（「記到…」的「Taycan 電費」從 money 快照讀）。
@@ -914,6 +920,13 @@ struct WidgetLifeSnapshot: Codable, Equatable, WidgetSnapshotPayload {
     /// 接下來的倒數（結婚紀念日、家人生日、兼任職務重要日期），依日期排好。
     /// **不受 validUntil 管**：存的是「那一天 00:00」，小工具只算差幾天。nil＝舊檔
     var countdowns: [WidgetCountdown]? = nil
+
+    // MARK: [健康 v7b] 以下選填（v25.557 以前的舊檔沒有；App 一打開就補齊）
+
+    /// 「今天（大）」最下面那一行運動：[0]＝今天、[1]＝明天（跟 days 同兩天；受 validUntil 管）。
+    /// 字由 App 組好（WorkoutFacts.widgetWorkoutDays）；那一天沒什麼好寫的 text 是空字串。nil＝舊檔。
+    /// 不受「今天」長按設定（顯示哪幾種行程）影響：filtered(kinds:) 只篩 days
+    var workout: [WidgetWorkoutDay]? = nil
 }
 
 // MARK: - [v3] 旅行
@@ -1340,6 +1353,52 @@ struct WidgetLineItem: Equatable, Identifiable {
     var url: URL
 }
 
+/// [健康 v7b] 「今天（大）」最下面那一行運動（一天一份，今天、明天各一份）。App 組好字（WorkoutFacts.widgetWorkoutDays），小工具只畫：
+///   • 那一天有運動：最近那一趟「今天 晨跑 5.2 公里」「今天 胸推日・45 分鐘」，點了開那一趟的成果頁
+///   • 沒有：這週的進度「這週跑了 14.6 公里・目標 20」「這週跑了 20.6 公里・達標」「新的一週・上週跑了 14.6 公里」
+///     「這週請假・上週跑了 13.3 公里」，點了開健康頁
+///   • 什麼都沒有（沒有任何運動紀錄、這週沒動也沒設目標、上週也沒有）：text 是空字串，那一天不畫
+struct WidgetWorkoutDay: Codable, Equatable, Identifiable {
+    var dayKey: String
+    var dayStart: Date
+    var dayEnd: Date
+    /// SF Symbol：figure.run／figure.walk／figure.outdoor.cycle／figure.hiking／dumbbell.fill／figure.mixed.cardio
+    var icon: String
+    /// 主畫面的字；空字串＝這一天不畫
+    var text: String
+    /// 不寫這一趟名字的版本（名字可能是地點：「河濱晨跑」）：「今天 跑步 5.2 公里」或這週的進度。
+    /// 背景被拿掉（當成 StandBy）時用；空字串＝不畫
+    var privateText: String
+    /// 點了去哪（WidgetLink.health(id) 的 absoluteString：有那一趟帶 id、這週的進度不帶）
+    var link: String
+
+    var id: String { dayKey }
+
+    var url: URL { URL(string: link) ?? WidgetLink.health(nil) }
+
+    func contains(_ date: Date) -> Bool { dayStart <= date && date < dayEnd }
+}
+
+extension WidgetLifeSnapshot {
+    /// [健康 v7b] 這個時間點那一天的運動那一行；過期、舊檔回 nil；比第一天早用第一天（同 teamDay(at:)）
+    func workoutDay(at date: Date) -> WidgetWorkoutDay? {
+        guard date < validUntil, let list = workout else { return nil }
+        if let hit = list.first(where: { $0.contains(date) }) { return hit }
+        if let first = list.first, date < first.dayStart { return first }
+        return nil
+    }
+
+    /// [健康 v7b] 「今天（大）」最下面那一行（圖示＋字＋網址）。privacy＝不寫這一趟的名字（privateText、點了只開健康頁）。
+    /// 過期、舊檔、那一天沒字回 nil
+    func workoutLine(at date: Date, privacy: Bool) -> WidgetLineItem? {
+        guard let d = workoutDay(at: date) else { return nil }
+        let text: String = privacy ? d.privateText : d.text
+        guard !text.isEmpty else { return nil }
+        let url: URL = privacy ? WidgetLink.health(nil) : d.url
+        return WidgetLineItem(id: "workout-" + d.dayKey, icon: d.icon, text: text, url: url)
+    }
+}
+
 extension WidgetLifeSnapshot {
     /// [v5] 這個時間點的部屬今天；過期、舊檔回 nil；比第一天早用第一天（同 day(at:)）
     func teamDay(at date: Date) -> WidgetTeamDay? {
@@ -1540,6 +1599,16 @@ enum WidgetLifeSample {
             WidgetCountdown(id: "bd-sample", kind: .birthday, title: "女兒 3 歲生日", date: bd,
                             icon: "birthday.cake.fill", link: link)
         ]
+    }
+
+    /// [健康 v7b] 「今天（大）」最下面那一行運動：這週跑了 14.6 公里・目標 20（health/judge.md §8.0 的假資料）
+    static func workoutDay(dayStart: Date) -> WidgetWorkoutDay {
+        let dayEnd = Calendar.current.date(byAdding: .day, value: 1, to: dayStart)
+            ?? dayStart.addingTimeInterval(24 * 3600)
+        return WidgetWorkoutDay(dayKey: WidgetDateText.dayKey(dayStart), dayStart: dayStart, dayEnd: dayEnd,
+                                icon: "figure.run", text: "這週跑了 14.6 公里・目標 20",
+                                privateText: "這週跑了 14.6 公里・目標 20",
+                                link: WidgetLink.health(nil).absoluteString)
     }
 
     /// 下一趟旅行：勇闖福岡親子行（38 天後出發，7 天）

@@ -46,6 +46,19 @@ import HealthKit
 // [v25.557] 健康 v7（build/v7/brief.md §6 G4）：字全在 WorkoutCardData（存檔時算好的 highlights，只讀不算），這裡只多兩處：
 // • buildCard 傳 leave: lifeStore.workoutLeave（收穫的連續週數照請假算；改請假時 workoutsRevision 會加一，cardTaskKey 跟著變）。
 // • 看板右上膠囊的字色：破紀錄「[star.fill] 最快 1 公里」綠（board.capsuleTone → MoneyBoardHeader 的 capsuleTint），其他照一般膠囊色。
+//
+// [v25.558] 健康 v7b（build/v7b/brief.md §6 G4；judge §5.2 ⑦、§1.3 記成人生里程碑、§3.12 換風景）：骨架、刪除、編輯、分享、
+// 剛跑完那一條一行沒動，只多三處：
+// • ⑦ 心率（⑥ 高度下面）：這個 view 自己的 .task(id: heartTaskKey)（換一趟、Apple 健康開關改了才重讀）讀
+//   HealthKitManager.fetchHeartRates（開始～結束，WorkoutFacts.heartWindow）→ WorkoutFacts.heartSummary；
+//   健康頁的 Apple 健康開關開著＋HealthKitManager.isAvailable（打包出來的 Info.plist 有健康說明字）才讀，不跳新的權限框
+//   （readTypes 本來就有 heartRate）。讀到才畫 WorkoutDetailHeartSection（「平均 152・最高 171」＋小折線）；
+//   沒戴錶、讀取沒給（讀起來是空的）、不到 5 筆：整區不出現、也不多一格空白。讀在這裡不在子 view：子 view 沒東西時不畫，.task 不一定跑。
+//   樣本只放記憶體（不進 WorkoutSession、iCloud、備份、分享圖；項目卡、清單、小工具都不放心率）；記著是哪一趟的，換一趟不會閃一下上一趟的。
+// • ② 這趟的收穫下面「達成里程碑」卡（WorkoutMilestoneCard，WorkoutDetailExtras.swift）：剛跑完問一次〔記成人生里程碑〕〔不用〕，
+//   一般模式只有一顆〔記成人生里程碑〕或「已記在人生里程碑」；要訂閱（沒訂閱跳這頁的付費說明 showPremiumAlert）。
+//   提示框掛在那張卡自己身上（這個 view 的刪除框照舊一個）。
+// • 收穫多一條換風景（字在 WorkoutCardData.sceneryGains）。
 
 struct WorkoutDetailView: View {
     /// 打開哪一趟；換一趟（同一週的換一趟列）在頁面裡面換，不重開 sheet
@@ -78,6 +91,10 @@ struct WorkoutDetailView: View {
     @State private var showPremiumAlert = false
     /// 正在關（刪掉了）：資料沒了也不再清空畫面、不再排第二次關
     @State private var closing = false
+    /// [v25.558] ⑦ 心率（loadHeart 讀的；nil＝沒有、整區不出現）。只放記憶體
+    @State private var heart: WorkoutHeartSummary?
+    /// [v25.558] heart 是哪一趟的：跟畫面上那一趟一樣才畫（換一趟時新的還沒讀好，不先畫上一趟的）
+    @State private var heartSessionId: UUID?
 
     init(sessionId: UUID, justFinished: Bool = false) {
         self.sessionId = sessionId
@@ -106,6 +123,8 @@ struct WorkoutDetailView: View {
             }
             .background(Color(.systemGroupedBackground))
             .task(id: cardTaskKey) { rebuild() }
+            // [v25.558] ⑦ 心率：換一趟、Apple 健康開關改了才重讀
+            .task(id: heartTaskKey) { await loadHeart() }
         }
         // 從「健康」App 改完權限回來
         .onChange(of: scenePhase) { _, phase in
@@ -175,6 +194,34 @@ struct WorkoutDetailView: View {
             card = buildCard(s)
             lastBuiltKey = key
         }
+    }
+
+    // MARK: - [v25.558] ⑦ 心率
+
+    /// 換一趟、Apple 健康開關改了重讀（改名、改地點不重讀：心率只看開始～結束）
+    private var heartTaskKey: String {
+        "\(currentId.uuidString)-\(hkEnabled)"
+    }
+
+    /// 畫面上那一趟的心率（heart 是別趟的回 nil）
+    private func heartSummary(for id: UUID) -> WorkoutHeartSummary? {
+        heartSessionId == id ? heart : nil
+    }
+
+    /// 讀這一趟的心率（Apple 健康讀回來的：手錶、心率帶記的；iPhone 自己量不到）。
+    /// 健康頁的 Apple 健康開關開著、這台裝置能用「健康」（isAvailable：裝置支援＋打包出來的 Info.plist 有兩句健康說明字）才讀；
+    /// 讀取沒給時 Apple 不說、讀起來是空的 → heartSummary 回 nil（整區不出現）。換一趟（id 變了）讀到的就丟掉
+    private func loadHeart() async {
+        if heart != nil { heart = nil }
+        if heartSessionId != nil { heartSessionId = nil }
+        guard hkEnabled, HealthKitManager.shared.isAvailable,
+              let s = currentSession, let w = WorkoutFacts.heartWindow(s) else { return }
+        let id = currentId
+        let samples = await HealthKitManager.shared.fetchHeartRates(from: w.start, to: w.end)
+        guard !Task.isCancelled, id == currentId else { return }
+        let summary = WorkoutFacts.heartSummary(samples, window: w)
+        heartSessionId = summary == nil ? nil : id
+        heart = summary
     }
 
     private func closeLater(seconds: Double) {
@@ -315,17 +362,24 @@ struct WorkoutDetailView: View {
         WorkoutDetailBoard(data: c, onTap: { tap in scroll(proxy, to: tap) })
             .id(WorkoutDetailAnchor.top)
         WorkoutDetailGains(gains: c.gains)
+        // [v25.558] 這一趟達成的運動里程碑＋要記成人生里程碑嗎？（沒有整區不畫）
+        WorkoutMilestoneCard(milestones: c.milestones, justFinished: justFinished,
+                             onNeedPremium: { showPremiumAlert = true })
         WorkoutDetailChecks(checks: c.checks, sessionId: c.sessionId, onMerged: { id in showMerged(id) })
         WorkoutDetailRoute(route: c.route, note: c.routeNote, onOpen: { openMap() })
         WorkoutDetailSplits(data: c.splits)
             .id(WorkoutDetailAnchor.splits)
     }
 
-    /// 高度、動作、Apple 健康、資料
+    /// 高度、[v25.558] 心率、動作、Apple 健康、資料
     @ViewBuilder
     private func lowerSections(_ c: WorkoutCardData) -> some View {
         WorkoutDetailElevationSection(data: c.elevation, sport: c.sport)
             .id(WorkoutDetailAnchor.elevation)
+        // [v25.558] ⑦ 心率：讀到才有（沒有整區不畫、不多一格空白）
+        if let h = heartSummary(for: c.sessionId) {
+            WorkoutDetailHeartSection(summary: h)
+        }
         WorkoutDetailMoves(moves: c.moves)
         WorkoutDetailAppleHealth(line: c.health, sessionId: c.sessionId, onOpen: { openAppleHealth() })
         WorkoutDetailInfo(items: c.info)

@@ -46,6 +46,17 @@ import AppIntents
 //     「跑到幾點」provider 讀一次（DayTimelineToggleState.runningUntil，放進 entry.liveUntil），
 //     timeline 在那一刻多排一筆，靈動島過期時按鈕自己回來。View 不讀 UserDefaults。
 //
+// [v25.558] 健康 v7b（build/v7b/brief.md §6 G1-3、G1-4；design_life.md L1 大的、widgets/v5/brief.md）：
+//   • 大型最下面、跟「10:02 更新」同一列（左邊運動、右邊更新，TodayLargeFooter）多一行運動：
+//     今天有運動「今天 河濱晨跑 5.2 公里」（點了開那一趟的成果頁）；沒有就是這週的進度「這週跑了 14.6 公里・目標 20」
+//    （點了開健康頁）；什麼都沒有（新手、很久沒動又沒目標）那一行不畫。字、圖示、網址都是 App 組好放在 life 快照
+//     （WidgetLifeSnapshot.workout，WorkoutFacts.widgetWorkoutDays），這裡只呼叫 workoutLine(at:privacy:) 畫字。
+//   • 為什麼放頁腳：L1 定「一個區塊一件事、只回答四件事」，運動不另開第五區、不加區標；頁腳只多一列約 17.5pt
+//     （沒有運動也沒有「更新」時整列不畫，跟 v5 一樣 0pt）。小 iPhone 放不下時 ViewThatFits 先砍列數（v5 的候選照舊、
+//     都帶運動那一行），最後一個候選 (2,0) 才拿掉運動那一行。
+//   • 隱私：背景被拿掉、當成 StandBy（mode.privacy）時用 privateText「今天 跑步 5.2 公里」（名字可能是地點），點了只開健康頁。
+//   • 長按設定（顯示哪幾種行程）不影響這一行：filtered(kinds:) 只篩 days，workout 原樣帶過來。小、中型、StandBy、鎖定畫面不讀。
+//
 // 型別（internal 的都帶 TodayWidget 前綴；畫面零件 private）：
 //   TodayWidget、TodayWidgetEntry、TodayWidgetProvider、TodayWidgetTimeline、
 //   TodayWidgetModel、TodayWidgetRow、TodayWidgetChip、TodayWidgetAxis、TodayWidgetAxisDot、
@@ -357,6 +368,8 @@ struct TodayWidgetModel {
     var todos: [WidgetLineItem] = []
     /// ④ 接下來（upcomingLines：旅行＋最多 2 件倒數）；畫幾列由 TodayLargeLayout.upcoming 挑
     var upcoming: [WidgetLineItem] = []
+    /// [健康 v7b] 最下面那一行運動（WidgetLifeSnapshot.workoutLine）；nil＝不畫
+    var workoutLine: WidgetLineItem? = nil
 
     /// 小型整塊點下去
     var tapURL: URL = WidgetLink.today(nil)
@@ -591,7 +604,8 @@ private enum TodayWidgetText {
 
     /// 大型 ①～④。字全部是契約組好的（WidgetLifeSnapshot.todaySpecials／todayTeamLine／todayTodos／upcomingLines），
     /// 這裡只放進 model。privacy（StandBy 沒有大型；萬一背景被拿掉被當成 StandBy）：不寫任何人名——
-    /// ② 生日那一行不畫、④ 只留旅行；部屬、待辦本來就只有數字
+    /// ② 生日那一行不畫、④ 只留旅行；部屬、待辦本來就只有數字。
+    /// [健康 v7b] 多放最下面那一行運動（privacy 時是不寫名字的 privateText）
     static func fillLarge(_ model: inout TodayWidgetModel, snapshot snap: WidgetLifeSnapshot, day: WidgetLifeDay,
                           now: Date, mode: TodayWidgetTitleMode, showsTeam: Bool) {
         model.largeRows = rows(day: day, now: now, mode: mode, limit: TodayLargeLayout.maxStopRows)
@@ -602,6 +616,8 @@ private enum TodayWidgetText {
         model.todos = snap.todayTodos(at: now, includeTeam: showsTeam)
         let countdownLimit: Int = mode.privacy ? 0 : TodayLargeLayout.maxCountdowns
         model.upcoming = snap.upcomingLines(at: now, countdownLimit: countdownLimit)
+        // [健康 v7b] 最下面那一行運動。privacy＝背景被拿掉：不寫這一趟的名字、點了只開健康頁
+        model.workoutLine = snap.workoutLine(at: now, privacy: mode.privacy)
     }
 
     /// 大型 ① 最近結束的一場：淡色、最右邊「已結束」，點了一樣開那一場。還沒有結束的是 nil
@@ -708,6 +724,8 @@ enum TodayWidgetSample {
         snapshot.team = [WidgetLifeSample.teamDay(dayStart: dayStart)]
         snapshot.familyTasks = [WidgetLifeSample.familyTasksDay(dayStart: dayStart)]
         snapshot.countdowns = WidgetLifeSample.countdowns(dayStart: dayStart)
+        // [健康 v7b] 大型最下面那一行運動：這週跑了 14.6 公里・目標 20（契約的樣本；小、中、鎖定畫面不讀）
+        snapshot.workout = [WidgetLifeSample.workoutDay(dayStart: dayStart)]
         return TodayWidgetEntry(date: sampleNow, snapshot: snapshot, showsSubjectWhenLocked: true)
     }
 
@@ -1255,23 +1273,27 @@ private struct TodayWidgetLiveRunningText: View {
 /// (5,3) 約 360、(4,3) 約 339（Pro Max 內容約 350）、(4,2) 約 320（6.1 吋內容約 322）、(3,2) 約 299、
 /// (3,1) 約 281（SE 內容約 292）、(2,1) 約 259（292×311 內容約 279，加「更新」那行約 272 也放得下）。
 /// [審查補] 最後再一個 (2,0)：④ 整區不畫（連標題），中文字行高比估的再高一點時也不會被截
+/// [健康 v7b] 頁腳（TodayLargeFooter）有運動那一行時約 17.5＋上距 4（原本只有「更新」13、沒有上距）：
+/// 上面七個候選都帶運動那一行（放不下先砍列數），最後再一個 (2,0) 不帶運動那一行
 private struct TodayLargeView: View {
     let model: TodayWidgetModel
     let palette: WidgetPalette
 
     var body: some View {
         ViewThatFits(in: .vertical) {
-            column(stopLimit: 5, nextLimit: 3)
-            column(stopLimit: 4, nextLimit: 3)
-            column(stopLimit: 4, nextLimit: 2)
-            column(stopLimit: 3, nextLimit: 2)
-            column(stopLimit: 3, nextLimit: 1)
-            column(stopLimit: 2, nextLimit: 1)
-            column(stopLimit: 2, nextLimit: 0)
+            column(stopLimit: 5, nextLimit: 3, showsWorkout: true)
+            column(stopLimit: 4, nextLimit: 3, showsWorkout: true)
+            column(stopLimit: 4, nextLimit: 2, showsWorkout: true)
+            column(stopLimit: 3, nextLimit: 2, showsWorkout: true)
+            column(stopLimit: 3, nextLimit: 1, showsWorkout: true)
+            column(stopLimit: 2, nextLimit: 1, showsWorkout: true)
+            column(stopLimit: 2, nextLimit: 0, showsWorkout: true)
+            column(stopLimit: 2, nextLimit: 0, showsWorkout: false)
         }
     }
 
-    private func column(stopLimit: Int, nextLimit: Int) -> some View {
+    /// [健康 v7b] showsWorkout＝頁腳要不要畫運動那一行（false 時只剩「10:02 更新」，同 v5）
+    private func column(stopLimit: Int, nextLimit: Int, showsWorkout: Bool) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             TodayMediumHeader(model: model, palette: palette)
             TodayLargeStopsSection(rows: TodayLargeLayout.stopRows(model: model, limit: stopLimit),
@@ -1282,9 +1304,17 @@ private struct TodayLargeView: View {
                                    items: TodayLargeLayout.upcoming(model: model, limit: nextLimit),
                                    palette: palette)
             Spacer(minLength: 0)
-            TodayLargeUpdatedLine(text: model.updatedText, palette: palette)
+            TodayLargeFooter(workout: footerWorkout(showsWorkout),
+                             updatedText: model.updatedText,
+                             palette: palette)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    /// [健康 v7b] 頁腳的運動那一行：候選不帶（showsWorkout＝false）或快照沒有就是 nil
+    private func footerWorkout(_ showsWorkout: Bool) -> WidgetLineItem? {
+        guard showsWorkout else { return nil }
+        return model.workoutLine
     }
 }
 
@@ -1444,20 +1474,48 @@ private struct TodayLargeSegmentView: View {
     }
 }
 
-/// 快照超過 3 小時：右下角小字「10:02 更新」（同中型）
-private struct TodayLargeUpdatedLine: View {
-    let text: String
+/// [健康 v7b] 最下面那一列（取代 v5 的 TodayLargeUpdatedLine）：左邊運動那一行（Link，點了開那一趟／健康頁；
+/// 圖示、字級照 TodayLargeLineView，不加區標）、右邊快照超過 3 小時的小字「10:02 更新」（同中型）。
+/// 兩個都沒有：整列不畫（0pt）；只有「更新」：跟 v5 一模一樣（靠右、沒有上距）
+private struct TodayLargeFooter: View {
+    let workout: WidgetLineItem?
+    let updatedText: String
     let palette: WidgetPalette
 
+    private var hasContent: Bool { workout != nil || !updatedText.isEmpty }
+
+    /// 有運動那一行才跟上面隔 4pt
+    private var topGap: CGFloat { workout == nil ? 0 : 4 }
+
     var body: some View {
-        if !text.isEmpty {
-            HStack(spacing: 0) {
-                Spacer(minLength: 0)
-                Text(text)
-                    .font(.system(size: 9.5, weight: .medium))
-                    .foregroundStyle(palette.label)
-                    .lineLimit(1)
+        if hasContent {
+            HStack(spacing: 6) {
+                workoutLink
+                Spacer(minLength: 4)
+                updatedLabel
             }
+            .padding(.top, topGap)
+        }
+    }
+
+    @ViewBuilder
+    private var workoutLink: some View {
+        if let line = workout {
+            Link(destination: line.url) {
+                TodayLargeLineView(item: line, palette: palette)
+            }
+        }
+    }
+
+    /// 「10:02 更新」不讓運動那一行擠掉（固定自己的寬度，字長的是運動那一行縮）
+    @ViewBuilder
+    private var updatedLabel: some View {
+        if !updatedText.isEmpty {
+            Text(updatedText)
+                .font(.system(size: 9.5, weight: .medium))
+                .foregroundStyle(palette.label)
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
         }
     }
 }

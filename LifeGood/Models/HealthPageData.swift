@@ -21,6 +21,14 @@ import SwiftUI
 //     （上週沒有：「這週請假，連續週數幫你留著」）、手寫 Rest / well!（順序：達標 → 5／10／25／52 週 → 請假中 → 新手 → 只有重訓 → 這週還沒動 → 平常）。
 //   • 新欄位 records（個人紀錄：WorkoutFacts.personalRecords，舊紀錄沒存 efforts 的用簡化過的路線現算——在 .task 裡、不在 body）、
 //     thisWeekLeave／nextWeekLeave（健康頁「⋯」的「這週請假／取消這週請假」「下週請假／取消下週請假」）。
+//
+// [v25.558] 健康 v7b（build/v7b/brief.md §6 G3-1）：
+//   • 換風景：scene.stage＝看板主角那一種「今年」（1/1 起）累積公里是哪一景（WorkoutFacts.sceneryStage／yearDistanceKm；
+//     50 黃昏河濱、250 山路、1,000 海岸，騎車 ×4；只有重訓不換，停在清晨河堤）。
+//   • 膠囊多一顆「[stage.icon] 今年 357.9 公里」（WorkoutFacts.yearChip）：其他運動最多 2 顆（有今年那顆時；沒有照舊 3 顆）→ 時間 → 今年 →
+//     重訓（還有空才放）→ 最多 4 顆。VoiceOver 那句多「今年跑了 357.9 公里」（WorkoutFacts.yearSpoken，放在目標前面）。
+//   • 新欄位 milestones：近 90 天達成的運動里程碑（WorkoutFacts.recentMilestones，新到舊、最多 5 個；請假週同看板）。
+//     記過沒在畫面上用 WorkoutFacts.isRecorded 篩（健康頁 ⑧ 上面最多列 3 個「還沒記」的）：人生里程碑一改畫面就跟著變，不用等這裡重算。
 
 /// 看板頭部（照 VehicleCardBoardData 的資料合約）
 struct HealthBoardData: Equatable {
@@ -168,6 +176,8 @@ struct HealthPageData {
     var thisWeekLeave = false
     /// [v25.557] 下週標了請假（「⋯」寫「取消下週請假」）
     var nextWeekLeave = false
+    /// [健康 v7b] 近 90 天達成的運動里程碑（新到舊、最多 5 個；記過沒在畫面上用 WorkoutFacts.isRecorded 篩）
+    var milestones: [WorkoutMilestone] = []
 }
 
 extension HealthPageData {
@@ -207,14 +217,20 @@ extension HealthPageData {
         page.board = makeBoard(sessions, thisWeek: thisWeek, hero: hero, strengthOnly: strengthOnly,
                            progress: progress, startSport: startSport, leave: leave, now: now)
         page.scene = makeWeekScene(sessions, hero: hero, now: now)
+        // [健康 v7b] 今年累積公里換風景（看板主角那一種；只有重訓不換，停在清晨河堤）＋目標格
         if !strengthOnly {
+            let yearKm = WorkoutFacts.yearDistanceKm(sessions, sport: hero, now: now)
+            page.scene.stage = WorkoutFacts.sceneryStage(km: yearKm, sport: hero).rawValue
             if progress.goalKm != nil {
                 page.goal = makeGoal(progress)
             } else {
                 page.goalPrompt = makeGoalPrompt(sessions, sport: hero, now: now)
             }
         }
-        page.chips = makeChips(sessions, thisWeek: thisWeek, hero: hero, strengthOnly: strengthOnly, now: now)
+        // [健康 v7b] 膠囊多「今年 357.9 公里」（只有重訓沒有這顆）
+        let yearChip: MoneyBoardChip? = strengthOnly ? nil : WorkoutFacts.yearChip(sessions, sport: hero, now: now)
+        page.chips = makeChips(sessions, thisWeek: thisWeek, hero: hero, strengthOnly: strengthOnly,
+                               yearChip: yearChip, now: now)
         page.start = makeStart(sessions, hero: hero, strengthOnly: strengthOnly, progress: progress,
                            startSport: startSport, now: now)
         page.recentItems = page.recent.map { MoneyItem.workout($0, bodyWeightKg: bodyWeightKg) }
@@ -226,6 +242,8 @@ extension HealthPageData {
         page.staleWrites = WorkoutFacts.staleWrites(sessions)
         // [v25.557] 個人紀錄、請假（「⋯」的兩顆）
         page.records = WorkoutFacts.personalRecords(sessions)
+        // [健康 v7b] 近 90 天達成的運動里程碑（⑧ 健康里程碑上面列「還沒記」的）
+        page.milestones = WorkoutFacts.recentMilestones(sessions, leave: WorkoutFacts.leaveWeeks(leave), now: now)
         page.thisWeekLeave = WorkoutFacts.isLeave(leave, weekOf: now)
         page.nextWeekLeave = WorkoutFacts.isLeave(leave, weekOf: nextWeekDay(now))
         return page
@@ -353,7 +371,7 @@ extension HealthPageData {
             b.greeting = ["Keep", keepWord(hero)]
         }
 
-        // VoiceOver：「這週跑了 14.6 公里，3 次，比上週同期多 3.6 公里，連續 6 週，目標 20 公里還差 5.4 公里。」
+        // VoiceOver：「這週跑了 14.6 公里，3 次，比上週同期多 3.6 公里，連續 6 週，[v7b] 今年跑了 357.9 公里，目標 20 公里還差 5.4 公里。」
         var parts: [String] = [b.label + " " + b.big]
         let plain = b.line.plain.replacingOccurrences(of: "・", with: "，")
         if !plain.isEmpty { parts.append(plain) }
@@ -362,6 +380,10 @@ extension HealthPageData {
             if streak >= 2 { parts.append("連續 \(streak) 週") }
         } else if let c = b.capsule {
             parts.append(c)
+        }
+        // [健康 v7b] 「今年跑了 357.9 公里」（膠囊那顆；今年還沒有就不唸）
+        if !strengthOnly, let y = WorkoutFacts.yearSpoken(sessions, sport: hero, now: now) {
+            parts.append(y)
         }
         if !strengthOnly, let g = progress.goalKm {
             if progress.reached {
@@ -522,8 +544,10 @@ extension HealthPageData {
 
     // MARK: 膠囊
 
+    /// 膠囊（最多 4 顆）：其他有氧（這週的公里；有今年那顆時最多 2 顆，沒有最多 3 顆）→ 時間 →
+    /// [健康 v7b] 今年那顆（yearChip：「[mountain.2.fill] 今年 357.9 公里」）→ 重訓（還有空才放）
     private static func makeChips(_ sessions: [WorkoutSession], thisWeek: [WorkoutSession], hero: WorkoutSport,
-                              strengthOnly: Bool, now: Date) -> [MoneyBoardChip] {
+                              strengthOnly: Bool, yearChip: MoneyBoardChip?, now: Date) -> [MoneyBoardChip] {
         var out: [MoneyBoardChip] = []
         if !strengthOnly {
             for sp in cardioSports where sp != hero {
@@ -532,11 +556,15 @@ extension HealthPageData {
                     out.append(MoneyBoardChip(icon: sp.icon, label: sp.displayName, value: WorkoutFormat.km(km)))
                 }
             }
-            out = Array(out.prefix(3))
+            let otherLimit = yearChip == nil ? 3 : 2
+            out = Array(out.prefix(otherLimit))
         }
         let minutes = thisWeek.reduce(0) { $0 + WorkoutFacts.movingMinutes($1) }
         if minutes >= 0.5 {
             out.append(MoneyBoardChip(icon: "stopwatch", label: "", value: WorkoutFormat.total(minutes: minutes)))
+        }
+        if let y = yearChip {
+            out.append(y)
         }
         let lifts = thisWeek.filter { !$0.strengthExercises.isEmpty }.count
         if lifts > 0, !strengthOnly, out.count < 4 {

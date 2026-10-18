@@ -31,6 +31,11 @@ import WidgetKit
 //
 // [健康 v6，v25.556] 加入跑步的即時動態（RunLiveActivityWidget，RunLiveActivity.swift：鎖定畫面、靈動島、手錶智慧型堆疊），
 // 放 LifeGoodLifeBundle（這一層已經 10 個）。LifeGoodLifeBundle 現在 3 個，都在 10 個以內。
+//
+// [健康 v7b，v25.558] 加入控制項「開始跑步」（StartRunControl，LifeGoodControls.swift：figure.run →
+// LifeGoodOpenIntent(url: WidgetLink.healthRun)），放 LifeGoodLockAndControlBundle（8 → 9）。
+// 這一層 10 個、LifeGoodLockAndControlBundle 9 個、LifeGoodFinanceBundle 5 個、LifeGoodLifeBundle 3 個，都在 10 個以內。
+// 名字是 build/v7b/brief.md §5 定死的。
 
 @main
 struct LifeGoodWidgetsBundle: WidgetBundle {
@@ -45,7 +50,7 @@ struct LifeGoodWidgetsBundle: WidgetBundle {
         LedgerDeskWidget()
         QuickRecordWidget()
         BillsWidget()
-        // [v2] 鎖定畫面三個＋控制項（[v3] 四個；[v5] 五個）
+        // [v2] 鎖定畫面三個＋控制項（[v3] 四個；[v5] 五個；[健康 v7b] 六個）
         LifeGoodLockAndControlBundle().body
         // [v4] 理財四個（五個 kind）
         LifeGoodFinanceBundle().body
@@ -54,7 +59,8 @@ struct LifeGoodWidgetsBundle: WidgetBundle {
     }
 }
 
-/// [v2] @WidgetBundleBuilder 一次最多 10 個，鎖定畫面三個＋控制項放這裡（[v3] 加說一句、記到…，共 7 個）
+/// [v2] @WidgetBundleBuilder 一次最多 10 個，鎖定畫面三個＋控制項放這裡（[v3] 加說一句、記到…，共 7 個；
+/// [v5] 加今日行程，共 8 個；[健康 v7b] 加開始跑步，共 9 個）
 struct LifeGoodLockAndControlBundle: WidgetBundle {
     var body: some Widget {
         LockSpentWidget()
@@ -67,6 +73,8 @@ struct LifeGoodLockAndControlBundle: WidgetBundle {
         RecordToControl()
         // [v5] 靈動島今日行程開關
         DayTimelineControl()
+        // [健康 v7b] 控制中心「開始跑步」
+        StartRunControl()
     }
 }
 

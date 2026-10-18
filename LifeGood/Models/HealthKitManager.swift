@@ -487,6 +487,24 @@ final class HealthKitManager: ObservableObject {
         return await fetchRoute(for: w)
     }
 
+    /// [健康 v7b] 某段時間裡的心率（成果頁 ⑦：手錶、心率帶記的；iPhone 自己量不到），開始時間舊到新、最多 5,000 筆。
+    /// 讀取權限是 v25.352 起就要的（readTypes 有 heartRate，健康說明字有「心率」），這裡不跳權限框。
+    /// 不能用「健康」、沒給讀取（Apple 不說有沒有給，讀起來就是空的）、出錯都回空的（整區不出現）。結果只放記憶體
+    func fetchHeartRates(from start: Date, to end: Date) async -> [WorkoutHeartSample] {
+        guard isAvailable, let type = heartRateType, end > start else { return [] }
+        let predicate = HKQuery.predicateForSamples(withStart: start, end: end, options: [])
+        let sort = NSSortDescriptor(key: HKSampleSortIdentifierStartDate, ascending: true)
+        let found: [HKQuantitySample] = await withCheckedContinuation { cont in
+            let q = HKSampleQuery(sampleType: type, predicate: predicate,
+                                  limit: 5_000, sortDescriptors: [sort]) { _, samples, _ in
+                cont.resume(returning: (samples as? [HKQuantitySample]) ?? [])
+            }
+            store.execute(q)
+        }
+        let bpm = HKUnit.count().unitDivided(by: .minute())
+        return found.map { WorkoutHeartSample(date: $0.startDate, bpm: $0.quantity.doubleValue(for: bpm)) }
+    }
+
     /// 刪一筆運動（只有 LifeGood 寫的刪得掉；連它的距離、大卡、路線一起刪）。
     /// 文件沒寫刪運動會不會順便刪掉關聯的樣本，自己找出來一起刪（「健康」的步行距離、活動圓圈才不會留著那一趟的數字）。
     /// 先整包一起刪（Apple：多筆只要一筆不行就全部不刪＝不會只刪一半）；整包不行再只刪運動那一筆，樣本一筆一筆試

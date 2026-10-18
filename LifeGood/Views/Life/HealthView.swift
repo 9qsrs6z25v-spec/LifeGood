@@ -56,6 +56,17 @@ import Combine
 //   • 鎖定畫面／靈動島的跑步卡點進來（lifegood://life/health/run → DeepLinkRouter.requestHealthRun）：.onDeepLinkHealthRun 收，
 //     在跑 → 跑步全螢幕（回到那一趟；彈出頁開著先收掉，0.45 秒後再開）；剛跑完 20 分鐘內 → 那一趟的成果頁；
 //     都不是 → 照「開始」（要訂閱）。在跑、剛跑完都不擋訂閱（待決定 8）。
+//
+// [v25.558] 健康 v7b（build/v7b/brief.md §6 G3-3～G3-5）：
+//   • 看板：膠囊多「[mountain.2.fill] 今年 357.9 公里」、河堤遠景照今年累積公里換（黃昏河濱＋橋、山路＋遠山、海岸＋燈塔）——
+//     資料在 HealthPageData.build、畫法在 HealthBoardScenes（這個檔不用改看板）。
+//   • ⑧ 健康里程碑：白卡最上面多「還沒記」的運動里程碑最多 3 列（page.milestones 近 90 天、新到舊，畫面上用 WorkoutFacts.isRecorded
+//     對 lifeStore.milestones 篩：在成果頁記了，回來這一列馬上不見、出現在下面的健康里程碑）。
+//     一列「[flag.checkered 運動色圓] 第一次跑完 10 公里　8/23・還沒記 ›」，點了打開那一趟的成果頁（不擋訂閱；〔記成人生里程碑〕在成果頁、那裡擋）；
+//     列跟健康里程碑之間一條分隔線；沒有就跟 v7 一模一樣。
+//   • 收 lifegood://life/health?id=<UUID>（「今天（大）」小工具運動那一行；DeepLinkRouter.requestHealthSession）：.onDeepLinkHealthSession，
+//     跑步全螢幕開著不動、那一趟已經刪掉停在健康頁、已經在看那一趟不動；彈出頁開著先收掉，0.45 秒後（同 presentRunCover）再開成果頁。
+//     不擋訂閱（看成果頁免費）。還是一個 .sheet(item:)＋一個 .fullScreenCover(item:)。
 
 // MARK: - 彈出頁
 
@@ -216,6 +227,8 @@ struct HealthView: View {
             .onReceive(RunTracker.shared.$phase) { p in phaseChanged(p) }
             // [v25.557] 鎖定畫面／靈動島的跑步卡點進來（冷啟動 onAppear、已經在這頁 onChange 都收）
             .onDeepLinkHealthRun { openRunFromLink() }
+            // [健康 v7b] 「今天（大）」小工具運動那一行點進來（lifegood://life/health?id=…）：打開那一趟的成果頁
+            .onDeepLinkHealthSession { openSessionFromLink() }
             .onAppear { pageAppeared() }
             .onChange(of: scenePhase) { _, phase in sceneChanged(phase) }
             // 離開頁面時把還在倒數的提示收掉，不要留一個醒著的 Task
@@ -387,7 +400,7 @@ struct HealthView: View {
                 })
             }
             appleHealthRow
-            milestoneSection
+            milestoneSection(p)
         }
     }
 
@@ -464,7 +477,33 @@ struct HealthView: View {
     }
 
     /// [v25.557] 月曆點一天、個人紀錄點一列：打開那一趟的成果頁（不擋訂閱，同點卡片）
+    /// [健康 v7b] ⑧ 上面「還沒記」的運動里程碑點一列也走這裡
     private func openDetail(_ id: UUID) {
+        sheet = .detail(UUID(), id)
+    }
+
+    /// [健康 v7b] 「今天（大）」小工具運動那一行點進來（lifegood://life/health?id=…；DeepLinkRouter 已經切到人生 › 健康）：
+    /// 打開那一趟的成果頁（不擋訂閱）。跑步全螢幕開著 → 不動（在跑、剛跑完的成果頁都在全螢幕裡，不蓋掉）；
+    /// 那一趟已經刪掉（或還沒同步到這台）→ 停在健康頁；已經在看那一趟 → 不動；
+    /// 彈出頁開著別的（成果頁、設定小頁…）→ 先收掉，0.45 秒後（收的動畫跑完，同 presentRunCover）再開
+    private func openSessionFromLink() {
+        guard let id = DeepLinkRouter.shared.takeHealthSession() else { return }
+        guard runCover == nil else { return }
+        guard lifeStore.workouts.contains(where: { $0.id == id }) else { return }
+        if case .detail(_, let shown)? = sheet, shown == id { return }
+        guard sheet != nil else {
+            sheet = .detail(UUID(), id)
+            return
+        }
+        sheet = nil
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) {
+            reopenDetailAfterSheet(id)
+        }
+    }
+
+    /// [健康 v7b] 彈出頁收掉之後才開那一趟的成果頁：那 0.45 秒裡又開了別的（或跑步全螢幕開了）就不動
+    private func reopenDetailAfterSheet(_ id: UUID) {
+        guard sheet == nil, runCover == nil else { return }
         sheet = .detail(UUID(), id)
     }
 
@@ -1184,13 +1223,22 @@ struct HealthView: View {
         lifeStore.milestones.filter { $0.category == .health }.sorted { $0.date > $1.date }
     }
 
-    /// 標頭右邊綠色「＋」＋白卡：每列「[cross.fill] 年度健檢　2026/3/2・抽血正常 ›」，最下面一列「＋ 記一筆健康里程碑」
-    private var milestoneSection: some View {
+    /// 標頭右邊綠色「＋」＋白卡：每列「[cross.fill] 年度健檢　2026/3/2・抽血正常 ›」，最下面一列「＋ 記一筆健康里程碑」。
+    /// [健康 v7b] 白卡最上面先列「還沒記」的運動里程碑（最多 3 列，pendingSportMilestones），再一條分隔線接健康里程碑
+    private func milestoneSection(_ p: HealthPageData) -> some View {
         let list = healthMilestones
         let firstId = list.first?.id
+        let pending = pendingSportMilestones(p)
+        let firstPending = pending.first?.key
         return VStack(alignment: .leading, spacing: 10) {
             FinanceCardHeader(title: "健康里程碑", addLabel: "記一筆健康里程碑", onAdd: { addMilestone() })
             VStack(spacing: 0) {
+                ForEach(pending, id: \.key) { m in
+                    sportMilestoneRow(m, divider: m.key != firstPending)
+                }
+                if !pending.isEmpty {
+                    Divider().padding(.leading, 14)
+                }
                 ForEach(list) { m in
                     milestoneRow(m, divider: m.id != firstId)
                 }
@@ -1274,6 +1322,81 @@ struct HealthView: View {
         let note = m.note.trimmingCharacters(in: .whitespacesAndNewlines)
         if !note.isEmpty { parts.append(note) }
         return parts.joined(separator: "・")
+    }
+
+    // MARK: ⑧ 上面：還沒記的運動里程碑（[健康 v7b]）
+
+    /// 近 90 天達成、還沒記成人生里程碑的（page.milestones 已經新到舊），最多 3 個。
+    /// 記過沒每次畫都對 lifeStore.milestones 看一次（最多 5 × 人生里程碑筆數，很輕）：在成果頁記了，這裡馬上不見
+    private func pendingSportMilestones(_ p: HealthPageData) -> [WorkoutMilestone] {
+        let life = lifeStore.milestones
+        let open = p.milestones.filter { !WorkoutFacts.isRecorded($0, in: life) }
+        return Array(open.prefix(3))
+    }
+
+    /// 一列「[flag.checkered 運動色圓] 第一次跑完 10 公里　8/23・還沒記 ›」；點了打開那一趟的成果頁（不擋訂閱：記的按鈕在成果頁、那裡擋）
+    private func sportMilestoneRow(_ m: WorkoutMilestone, divider: Bool) -> some View {
+        let meta = WorkoutFormat.monthDay(m.date) + "・還沒記"
+        let spoken = m.title + "，" + Self.spokenMonthDay(m.date) + "，還沒記成人生里程碑"
+        return VStack(spacing: 0) {
+            if divider {
+                Divider().padding(.leading, 52)
+            }
+            Button {
+                openDetail(m.sessionId)
+            } label: {
+                sportMilestoneLabel(m, meta: meta)
+            }
+            .buttonStyle(MoneyPressStyle())
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(spoken)
+            .accessibilityHint("點兩下打開那一趟")
+            .accessibilityAddTraits(.isButton)
+        }
+    }
+
+    private func sportMilestoneLabel(_ m: WorkoutMilestone, meta: String) -> some View {
+        HStack(spacing: 12) {
+            sportMilestoneIcon(m)
+            Text(m.title)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(Color.primary)
+                .lineLimit(1)
+                .layoutPriority(1)
+            Spacer(minLength: 8)
+            Text(meta)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+            Image(systemName: "chevron.right")
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(.tertiary)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 11)
+        .contentShape(Rectangle())
+    }
+
+    /// 運動色的圓＋白色終點方格旗（連續週數、次數這種不分運動的用綠）
+    private func sportMilestoneIcon(_ m: WorkoutMilestone) -> some View {
+        let fill = sportMilestoneColor(m)
+        return Image(systemName: m.icon)
+            .font(.system(size: 12, weight: .bold))
+            .foregroundStyle(Color.white)
+            .frame(width: 26, height: 26)
+            .background(fill, in: Circle())
+            .accessibilityHidden(true)
+    }
+
+    private func sportMilestoneColor(_ m: WorkoutMilestone) -> Color {
+        guard let sport = m.sport else { return MoneyTone.good.color(pal) }
+        return WorkoutPalette.sport(sport, dark: pal.dark)
+    }
+
+    /// VoiceOver 的日期字「8 月 23 日」（西曆、手機時區，同 WorkoutFacts.calendar）
+    private static func spokenMonthDay(_ date: Date) -> String {
+        let c = WorkoutFacts.calendar.dateComponents([.month, .day], from: date)
+        return "\(c.month ?? 0) 月 \(c.day ?? 0) 日"
     }
 }
 

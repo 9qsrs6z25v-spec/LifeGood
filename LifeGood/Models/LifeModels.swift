@@ -1580,6 +1580,12 @@ struct LifeMilestone: Identifiable, Codable {
     /// 信用卡綁定的 Happy Go 會員卡號
     var happyGoNumber: String?
 
+    /// [健康 v7b] 這一筆是從哪一個運動里程碑記成的（WorkoutMilestone.key，例「run.first.10k」「run.total.500」）。
+    /// 成果頁、健康頁拿它判斷「已記在人生里程碑」；自己記的里程碑是 nil。
+    /// 比照 bankDeposits 不進 memberwise init（呼叫端指派，見 WorkoutFacts.lifeMilestone）；
+    /// 還沒更新的 iPad 存一次會把它丟掉（它不認得這個鍵），所以判斷另外看「健康、同一天、同名或同備註」（WorkoutFacts.isRecorded）
+    var sourceKey: String?
+
     init(id: UUID = UUID(), title: String, date: Date = Date(),
          category: MilestoneCategory = .other, note: String = "",
          careerSubCategory: CareerSubCategory? = nil,
@@ -1665,6 +1671,8 @@ struct LifeMilestone: Identifiable, Codable {
         easyCardNumber = try? c.decodeIfPresent(String.self, forKey: .easyCardNumber)
         iPassNumber = try? c.decodeIfPresent(String.self, forKey: .iPassNumber)
         happyGoNumber = try? c.decodeIfPresent(String.self, forKey: .happyGoNumber)
+        // [健康 v7b] 運動里程碑記成的（舊資料沒有＝nil）
+        sourceKey = try? c.decodeIfPresent(String.self, forKey: .sourceKey)
         // 兼任職務
         sideRoleName = try? c.decodeIfPresent(String.self, forKey: .sideRoleName)
         sideRoleOrg = try? c.decodeIfPresent(String.self, forKey: .sideRoleOrg)
@@ -1691,6 +1699,8 @@ struct LifeMilestone: Identifiable, Codable {
         case securitiesAccountType, insuranceCompany, policyNumber, insuranceType, premiumAmount, beneficiary, bankDeposits, linkedBankMilestoneId
         case isDisabled
         case easyCardNumber, iPassNumber, happyGoNumber
+        // [健康 v7b] 跟上面 init(from:) 的 sourceKey 那一行成對（編碼走合成版、只認 CodingKeys）
+        case sourceKey
         // ⚠️ 這五行與上面 init(from:) 的十行必須成對存在。
         //    本型別有自訂 init(from:) 與顯式 CodingKeys 但沒有自訂 encode(to:)，
         //    所以編碼走合成版、只認 CodingKeys；漏在這裡加＝新欄位永遠寫不進

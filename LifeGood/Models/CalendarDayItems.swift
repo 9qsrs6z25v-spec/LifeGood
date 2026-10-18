@@ -11,6 +11,8 @@ import EventKit
 //    改一邊要改另一邊。這一版刻意不動 MyCalendarView（2,700 多行、型別檢查敏感），
 //    所以兩份是「同資料來源、同判斷」的平行寫法，不是同一支函式。
 //    差別只有：這裡只收「全天的」（有時間的個人事件、系統行事曆事件在 TodayAgenda 的時間軸上）。
+//    [健康 v7b] 我的行事曆多列那一天的運動（eventsOn 的 .workout，有開始時間、不是全天的事），這裡照規則不收；
+//    「今天（大）」的運動另外一行（life 快照的 workout，WorkoutFacts.widgetWorkoutDays）。
 //
 // 規格見 scratchpad/widgets/v1/brief.md 的 G1。
 

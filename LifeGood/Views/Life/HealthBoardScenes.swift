@@ -22,6 +22,21 @@ import SwiftUI
 // （FinDriveScene／FinHouseScene 的切法）；淺深各一組顏色（DriveInk 的寫法）。資料端已經把位置換成 0…1，這裡不碰日期。
 //
 // 分工：資料（這兩個 struct）主控寫好、HealthPageData.build／WorkoutFacts.trailScene 產生；畫法 G1 實作。
+//
+// C. [v25.558] 健康 v7b（build/v7b/brief.md §6 G3-2；judge §3.12 最後一句「河堤 → 黃昏河濱 → 山路 → 海岸」）：
+//    河堤的遠景照「今年」累積公里換（HealthWeekScene.stage＝HealthSceneryStage.rawValue，HealthPageData.build 用 WorkoutFacts.sceneryStage 算好）：
+//      0 清晨河堤（0–49 公里）：照 v3，遠方一排樓。
+//      1 黃昏河濱（50–249）：樓＋右邊（寬 58%～90%）遠方一座拱橋剪影（橋面在草地上緣往上約 9pt、拱頂約 22pt、3～4 根橋墩、幾根吊索）；
+//        淺色地平線一層暖色（草地上緣往上 34pt：上透明 → 下 FFB37A 0.28）；深色不畫暖色，橋面 4～6 顆暖黃小燈。
+//      2 山路（250–999）：先畫一排遠山（兩層起伏，山頂約在草地上緣往上 26～40pt），再畫樓、暖色、橋（累加）。
+//      3 海岸（1,000 以上）：不畫樓、不畫橋；整條遠方是海（草地上緣往上 12pt，兩三道白色細浪），左邊 0～40% 遠山（右端慢慢降到海），
+//        右邊小岬角上一座燈塔（步道右端再往右 11pt＝寬約 97%：旗子、小跑者、路燈、小點都到不了的地方；白底兩道紅、塔頂一小格燈；
+//        深色一圈暖黃光暈）；行道樹讓開燈塔。
+//      跑、走、登山同一組門檻，騎車 ×4（200／1,000／4,000）。
+//    為什麼是「今年」：每年 1/1 從清晨河堤重新走一次（年度的旅程）；終身累積的話常跑的人一年多就停在海岸，之後再也不會變。
+//    四景都畫在草地上緣以上、草地之前（草地蓋住下緣）；旗子、跑者、行道樹、路燈、小牌照舊在後面畫（都在遠景前面）。
+//    形狀用 seed 定（同一週長一樣）；每一景都不畫字、數字（坑 #4）；顏色收成 HealthSceneryInk（淺深各一組）；
+//    高度都從草地上緣往上量，band 比較矮時整個壓扁（sceneryLift），一律畫在 band 裡（y ≥ minY＋2）。
 
 /// [v25.553] 健康頁看板：這週的河堤（週一到週日七段）
 struct HealthWeekScene: Equatable {
@@ -47,6 +62,9 @@ struct HealthWeekScene: Equatable {
     var todayIndex: Int = 0
     /// 小跑者的樣子：最近一趟有氧的運動；沒有就是看板主角
     var runnerSport: WorkoutSport = .run
+    /// [健康 v7b] 今年累積公里換的風景（HealthSceneryStage.rawValue：0 清晨河堤、1 黃昏河濱＋一座橋、2 山路＋遠山、3 海岸＋燈塔）。
+    /// HealthPageData.build 用 WorkoutFacts.sceneryStage 算好；範圍外的值當 0
+    var stage: Int = 0
 }
 
 /// [v25.553] 成果頁看板：這一趟的路（從側面看）。位置都是 0…1（距離的比例）
@@ -156,6 +174,47 @@ private struct HealthRiverInk {
         bar = dark ? Color(tb: 0xA3B2D9) : Color(tb: 0x8A93A6)
         mat = dark ? Color(tb: 0x1E2848) : Color(tb: 0xDCE3EF)
         shadow = dark ? Color.black.opacity(0.35) : Color(tb: 0x2A3A66, 0.16)
+    }
+}
+
+/// [健康 v7b] 換風景（黃昏河濱、山路、海岸）的顏色，淺／深各一組（HealthRiverInk 的寫法）
+private struct HealthSceneryInk {
+    let dark: Bool
+    let bridge: Color        // 拱橋剪影（比遠樓深一點）
+    let bridgeLight: Color   // 深色：橋面的暖黃小燈
+    let warmClear: Color     // 淺色：地平線暖色（直條漸層上端，透明）
+    let warm: Color          // 淺色：地平線暖色（下端）
+    let hillBack: Color      // 遠山後排
+    let hillFront: Color     // 遠山前排
+    let seaTop: Color        // 海（上→下）
+    let seaBottom: Color
+    let foam: Color          // 白色細浪、海平線
+    let cape: Color          // 燈塔站的小岬角
+    let towerBody: Color     // 燈塔白底
+    let towerStripe: Color   // 兩道紅、燈室下的欄杆
+    let towerEdge: Color     // 塔身細邊（淺色天空上才分得出白塔）
+    let towerLamp: Color     // 塔頂一小格燈
+    let towerRoof: Color     // 塔頂小屋頂
+    let glow: Color          // 深色：塔頂一圈暖黃光暈
+
+    init(dark: Bool) {
+        self.dark = dark
+        bridge = dark ? Color(tb: 0x34426B) : Color(tb: 0x9FB3C8)
+        bridgeLight = Color(tb: 0xFFD27A)
+        warmClear = Color(tb: 0xFFB37A, 0)
+        warm = Color(tb: 0xFFB37A, 0.28)
+        hillBack = dark ? Color(tb: 0x22305A) : Color(tb: 0xBFD0E2)
+        hillFront = dark ? Color(tb: 0x2A3A68) : Color(tb: 0xA9BFD6)
+        seaTop = dark ? Color(tb: 0x1B2C5A) : Color(tb: 0xA8D8F0)
+        seaBottom = dark ? Color(tb: 0x15244A) : Color(tb: 0xCDEBF8)
+        foam = dark ? Color.white.opacity(0.28) : Color.white.opacity(0.85)
+        cape = dark ? Color(tb: 0x2A3A68) : Color(tb: 0xA9BFD6)
+        towerBody = dark ? Color(tb: 0xDCE3F2) : Color.white
+        towerStripe = Color(tb: 0xD94A3D)
+        towerEdge = dark ? Color.black.opacity(0.25) : Color(tb: 0x8A9BB4, 0.7)
+        towerLamp = dark ? Color(tb: 0xFFD27A) : Color(tb: 0xFFE7A3)
+        towerRoof = dark ? Color(tb: 0xB8423A) : Color(tb: 0xD94A3D)
+        glow = Color(tb: 0xFFD27A, 0.45)
     }
 }
 
@@ -293,6 +352,8 @@ extension MoneyBoardSky {
         guard r.width > 120, r.height > 60, s.days.count == 7 else { return }
         let g = HealthRiverLayout(rect: r, today: s.todayIndex)
         let ink = HealthRiverInk(dark: dark)
+        // [健康 v7b] 今年累積公里換的遠景（範圍外的值當 0 清晨河堤）
+        let stage = s.stage >= 0 && s.stage <= 3 ? s.stage : 0
         // 先排好旗子、跑者的位置：樹、路燈照它讓開（坑 #27）
         let flags = riverFlagSpots(s, g: g, dark: dark)
         let runner = riverRunnerImage(ctx, s, ink: ink)
@@ -305,8 +366,13 @@ extension MoneyBoardSky {
         if dark {
             for i in 1..<7 { avoid.append((g.left(i) - 6)...(g.left(i) + 6)) }
         }
+        if stage == 3 {
+            // [健康 v7b] 海岸：行道樹讓開燈塔（燈塔是這一景的主角，不要被樹冠擋住）
+            let lx = riverLighthouseX(g)
+            avoid.append((lx - 6)...(lx + 6))
+        }
 
-        riverBackdrop(&ctx, g: g, ink: ink, seed: seed)
+        riverBackdrop(&ctx, g: g, ink: ink, stage: stage, seed: seed)
         riverTrees(&ctx, g: g, dark: dark, seed: seed, avoid: avoid)
         healthWater(&ctx, rect: CGRect(x: r.minX, y: g.waterTop, width: r.width, height: r.maxY - g.waterTop),
                     ink: ink, seed: seed)
@@ -422,15 +488,252 @@ extension MoneyBoardSky {
 
     // MARK: 河堤：畫
 
-    /// 遠方一排淡淡的樓＋河堤草地
-    private static func riverBackdrop(_ ctx: inout GraphicsContext, g: HealthRiverLayout, ink: HealthRiverInk, seed: Int) {
+    /// 遠景＋河堤草地。[健康 v7b] stage（今年累積公里）：0 清晨河堤＝遠方一排淡淡的樓（照 v3）；
+    /// 1 黃昏河濱＝樓＋（淺色）地平線暖色＋右邊一座拱橋；2 山路＝先一排遠山，再樓、暖色、橋；
+    /// 3 海岸＝不畫樓、不畫橋：整條遠方是海、左邊 0～40% 遠山、右邊岬角上一座燈塔。
+    /// 都畫在草地上緣以上、草地之前（草地蓋住下緣）
+    private static func riverBackdrop(_ ctx: inout GraphicsContext, g: HealthRiverLayout, ink: HealthRiverInk,
+                                      stage: Int, seed: Int) {
         let r = g.rect
-        TripBoardSkyArt.paintFarRow(&ctx, width: r.width, ground: g.grassTop + 1, band: 40,
-                                    ink: farInk(dark: ink.dark), seed: seed)
+        let sk = HealthSceneryInk(dark: ink.dark)
+        let lift = sceneryLift(g)
+        if stage == 3 {
+            riverSea(&ctx, g: g, sk: sk, lift: lift, seed: seed)
+            riverHills(&ctx, g: g, sk: sk, lift: lift, to: r.minX + r.width * 0.40, seed: seed)
+            riverLighthouse(&ctx, g: g, sk: sk, lift: lift)
+        } else {
+            if stage == 2 {
+                riverHills(&ctx, g: g, sk: sk, lift: lift, to: r.maxX, seed: seed)
+            }
+            TripBoardSkyArt.paintFarRow(&ctx, width: r.width, ground: g.grassTop + 1, band: 40,
+                                        ink: farInk(dark: ink.dark), seed: seed)
+            if stage >= 1 {
+                if !ink.dark {
+                    riverDuskGlow(&ctx, g: g, sk: sk, lift: lift)
+                }
+                riverBridge(&ctx, g: g, sk: sk, lift: lift, seed: seed)
+            }
+        }
         let grass = CGRect(x: r.minX, y: g.grassTop, width: r.width, height: max(0, g.waterTop - g.grassTop))
         ctx.fill(Path(grass), with: .linearGradient(Gradient(colors: [ink.grassTop, ink.grassBottom]),
                                                     startPoint: CGPoint(x: 0, y: grass.minY),
                                                     endPoint: CGPoint(x: 0, y: grass.maxY)))
+    }
+
+    // MARK: 河堤：換風景（[健康 v7b]）
+
+    /// 燈塔站在哪裡（行道樹照它讓開）：步道右端再往右 11pt（band 寬約 97%，岬角伸出右緣）。
+    /// brief 寫 86%，但那裡是週日兩面旗的竿（段內 30%、50%），週日有運動時旗竿從燈塔中間穿過去；
+    /// 週六那段 79% 又正好是週六小跑者站的地方（段內 75%～83%，跑者頭頂＝塔底的高度），燈塔像長在跑者頭上。
+    /// 步道右端外面：旗子（最遠到週日段內約 71%）、小跑者（最遠到步道右端＋5pt）、路燈（只在段的交界）、小點（段內 17%）都到不了；
+    /// band 很窄時一律留在 band 裡（右緣往內 5pt）
+    private static func riverLighthouseX(_ g: HealthRiverLayout) -> CGFloat {
+        min(g.x1 + 11, g.rect.maxX - 5)
+    }
+
+    /// 遠景的高度比例：band 118 時是 1（草地上緣離 band 頂 58pt，最高的遠山 40pt）；
+    /// band 比較矮、草地上緣離 band 頂不到 46pt 就整個壓扁，一律畫在 band 裡（y ≥ minY＋2）
+    private static func sceneryLift(_ g: HealthRiverLayout) -> CGFloat {
+        let room = g.grassTop - (g.rect.minY + 2)
+        return min(1, max(0, room / 44))
+    }
+
+    /// 一排遠山：兩層起伏（後排淡、山頂在草地上緣往上約 22～40pt；前排深一點、約 13～28pt），從 band 左緣畫到 end。
+    /// end 不到右緣（海岸只畫到 40%）時右端 30% 慢慢降到草地上緣，接到海。起伏的相位用 seed 定（同一週長一樣）
+    private static func riverHills(_ ctx: inout GraphicsContext, g: HealthRiverLayout, sk: HealthSceneryInk,
+                                   lift: CGFloat, to end: CGFloat, seed: Int) {
+        let r = g.rect
+        let x0 = r.minX
+        let x1 = min(r.maxX, max(x0 + 4, end))
+        let taper: CGFloat = x1 < r.maxX - 0.5 ? max(12, (x1 - x0) * 0.3) : 0
+        let phase = Double(seed % 628) / 100
+        let ground = g.grassTop + 1
+        let back = sceneryRidge(x0: x0, x1: x1, ground: ground, lift: lift, taper: taper,
+                                wave: (base: 31, a1: 6, w1: 43, a2: 3, w2: 17), phase: phase)
+        ctx.fill(back, with: .color(sk.hillBack))
+        let front = sceneryRidge(x0: x0, x1: x1, ground: ground, lift: lift, taper: taper,
+                                 wave: (base: 21, a1: 5, w1: 29, a2: 2.5, w2: 11), phase: phase + 2.1)
+        ctx.fill(front, with: .color(sk.hillFront))
+    }
+
+    /// 一層山稜：x0…x1 每 3pt 一點，往上量的高度＝base＋a1·sin(x/w1＋φ)＋a2·sin(x/w2＋2φ)（乘 lift）；
+    /// taper > 0：右端 taper 寬裡慢慢降到 0（平滑的 smoothstep）
+    private static func sceneryRidge(x0: CGFloat, x1: CGFloat, ground: CGFloat, lift: CGFloat, taper: CGFloat,
+                                     wave: (base: Double, a1: Double, w1: Double, a2: Double, w2: Double),
+                                     phase: Double) -> Path {
+        func height(_ x: CGFloat) -> CGFloat {
+            let t = Double(x)
+            let s1: Double = wave.a1 * sin(t / wave.w1 + phase)
+            let s2: Double = wave.a2 * sin(t / wave.w2 + phase * 2)
+            let raw: Double = wave.base + s1 + s2
+            var v = CGFloat(max(0, raw)) * lift
+            if taper > 0 {
+                let f = min(1, max(0, (x1 - x) / taper))
+                v *= f * f * (3 - 2 * f)
+            }
+            return v
+        }
+        var p = Path()
+        p.move(to: CGPoint(x: x0, y: ground))
+        var x = x0
+        while x < x1 {
+            p.addLine(to: CGPoint(x: x, y: ground - height(x)))
+            x += 3
+        }
+        p.addLine(to: CGPoint(x: x1, y: ground - height(x1)))
+        p.addLine(to: CGPoint(x: x1, y: ground))
+        p.closeSubpath()
+        return p
+    }
+
+    /// 黃昏河濱（淺色）：地平線一層暖色，草地上緣往上 34pt，上透明 → 下 FFB37A 0.28（遠樓也染一點夕陽）
+    private static func riverDuskGlow(_ ctx: inout GraphicsContext, g: HealthRiverLayout, sk: HealthSceneryInk,
+                                      lift: CGFloat) {
+        let r = g.rect
+        let top = g.grassTop - 34 * lift
+        let band = CGRect(x: r.minX, y: top, width: r.width, height: max(0, g.grassTop + 1 - top))
+        guard band.height > 1 else { return }
+        ctx.fill(Path(band), with: .linearGradient(Gradient(colors: [sk.warmClear, sk.warm]),
+                                                   startPoint: CGPoint(x: 0, y: band.minY),
+                                                   endPoint: CGPoint(x: 0, y: band.maxY)))
+    }
+
+    /// 黃昏河濱、山路：右邊（寬 58%～90%）遠方一座拱橋剪影。橋面在草地上緣往上約 9pt、拱頂約 22pt；
+    /// 橋面下 3～4 根橋墩（下緣被草地蓋住）、拱和橋面之間 5 或 7 根吊索（根數用 seed 定）；深色橋面上 4～6 顆暖黃小燈
+    private static func riverBridge(_ ctx: inout GraphicsContext, g: HealthRiverLayout, sk: HealthSceneryInk,
+                                    lift: CGFloat, seed: Int) {
+        let r = g.rect
+        let left = r.minX + r.width * 0.58
+        let right = r.minX + r.width * 0.90
+        guard right - left > 24 else { return }
+        let deckY = g.grassTop - 9 * lift
+        let crown = g.grassTop - 22 * lift
+        var rnd = InkRandom(seed &* 19 &+ 5)
+        // 橋墩
+        let piers = rnd.next() > 0.5 ? 4 : 3
+        let pierW: CGFloat = 2.4
+        for i in 0..<piers {
+            let f = CGFloat(i) / CGFloat(piers - 1)
+            let x = left + 3 + (right - left - 6 - pierW) * f
+            let pier = CGRect(x: x, y: deckY, width: pierW, height: max(0, g.grassTop + 1 - deckY))
+            ctx.fill(Path(pier), with: .color(sk.bridge))
+        }
+        // 拱：橋面中間那一段往上拱到 crown（二次曲線頂點＝(起點＋2×控制點＋終點)/4，控制點 y＝2×crown − 橋面）
+        let a0 = left + (right - left) * 0.16
+        let a1 = right - (right - left) * 0.16
+        let ctrlY = 2 * crown - deckY
+        var arch = Path()
+        arch.move(to: CGPoint(x: a0, y: deckY))
+        arch.addQuadCurve(to: CGPoint(x: a1, y: deckY), control: CGPoint(x: (a0 + a1) / 2, y: ctrlY))
+        ctx.stroke(arch, with: .color(sk.bridge), style: StrokeStyle(lineWidth: 1.8, lineCap: .round))
+        // 吊索（控制點在正中間，x 跟 t 成正比）
+        let hangers = rnd.next() > 0.5 ? 7 : 5
+        for i in 1...hangers {
+            let t = CGFloat(i) / CGFloat(hangers + 1)
+            let x = a0 + (a1 - a0) * t
+            let u: CGFloat = 1 - t
+            let ends: CGFloat = (u * u + t * t) * deckY
+            let mid: CGFloat = 2 * u * t * ctrlY
+            let y = ends + mid
+            var line = Path()
+            line.move(to: CGPoint(x: x, y: y))
+            line.addLine(to: CGPoint(x: x, y: deckY))
+            ctx.stroke(line, with: .color(sk.bridge), lineWidth: 0.7)
+        }
+        // 橋面
+        let deck = CGRect(x: left, y: deckY - 1.3, width: right - left, height: 2.6)
+        ctx.fill(Path(roundedRect: deck, cornerRadius: 1.3), with: .color(sk.bridge))
+        guard sk.dark else { return }
+        let lights = 4 + min(2, Int(rnd.next() * 3))
+        for i in 0..<lights {
+            let f = (CGFloat(i) + 0.5) / CGFloat(lights)
+            let x = left + (right - left) * f
+            ctx.fill(Path(ellipseIn: CGRect(x: x - 0.9, y: deckY - 3, width: 1.8, height: 1.8)),
+                     with: .color(sk.bridgeLight))
+        }
+    }
+
+    /// 海岸：整條遠方是海（草地上緣往上 12pt 到草地上緣下 1pt；左邊的山、右邊的岬角蓋在上面），海平線一道亮線、兩三道白色細浪
+    private static func riverSea(_ ctx: inout GraphicsContext, g: HealthRiverLayout, sk: HealthSceneryInk,
+                                 lift: CGFloat, seed: Int) {
+        let r = g.rect
+        let top = g.grassTop - 12 * lift
+        let sea = CGRect(x: r.minX, y: top, width: r.width, height: max(0, g.grassTop + 1 - top))
+        guard sea.height > 3 else { return }
+        ctx.fill(Path(sea), with: .linearGradient(Gradient(colors: [sk.seaTop, sk.seaBottom]),
+                                                  startPoint: CGPoint(x: 0, y: sea.minY),
+                                                  endPoint: CGPoint(x: 0, y: sea.maxY)))
+        ctx.fill(Path(CGRect(x: sea.minX, y: sea.minY, width: sea.width, height: 0.8)), with: .color(sk.foam))
+        var rnd = InkRandom(seed &* 23 &+ 11)
+        let count = rnd.next() > 0.5 ? 3 : 2
+        let step = max(1, (sea.height - 5) / CGFloat(count))
+        for i in 0..<count {
+            let l = 7 + CGFloat(rnd.next()) * 9
+            let raw = r.minX + r.width * (0.42 + 0.48 * CGFloat(rnd.next()))
+            let x = min(raw, r.maxX - l - 3)
+            let y = sea.minY + 3 + CGFloat(i) * step
+            var p = Path()
+            p.move(to: CGPoint(x: x, y: y))
+            p.addQuadCurve(to: CGPoint(x: x + l, y: y), control: CGPoint(x: x + l / 2, y: y - 1.2))
+            ctx.stroke(p, with: .color(sk.foam), style: StrokeStyle(lineWidth: 0.9, lineCap: .round))
+        }
+    }
+
+    /// 海岸：右邊（riverLighthouseX，寬約 97%、步道右端外面）一個小岬角（伸進海裡），上面一座燈塔：塔身約 5×20pt（下寬上窄）、白底兩道紅、
+    /// 塔頂一圈紅欄杆＋一小格燈＋小屋頂；深色塔頂一圈暖黃光暈
+    private static func riverLighthouse(_ ctx: inout GraphicsContext, g: HealthRiverLayout, sk: HealthSceneryInk,
+                                        lift: CGFloat) {
+        let cx = riverLighthouseX(g)
+        let ground = g.grassTop + 1
+        let capeTop = g.grassTop - 6 * lift
+        var cape = Path()
+        cape.move(to: CGPoint(x: cx - 18, y: ground))
+        cape.addQuadCurve(to: CGPoint(x: cx - 5, y: capeTop), control: CGPoint(x: cx - 12, y: capeTop))
+        cape.addLine(to: CGPoint(x: cx + 5, y: capeTop))
+        cape.addQuadCurve(to: CGPoint(x: cx + 14, y: ground), control: CGPoint(x: cx + 11, y: capeTop))
+        cape.closeSubpath()
+        ctx.fill(cape, with: .color(sk.cape))
+        let h = 20 * lift
+        guard h > 4 else { return }
+        let baseY = capeTop + 0.5
+        let topY = baseY - h
+        let tower = riverTowerSlice(cx: cx, baseY: baseY, height: h, from: 0, to: 1)
+        ctx.fill(tower, with: .color(sk.towerBody))
+        ctx.fill(riverTowerSlice(cx: cx, baseY: baseY, height: h, from: 0.22, to: 0.38), with: .color(sk.towerStripe))
+        ctx.fill(riverTowerSlice(cx: cx, baseY: baseY, height: h, from: 0.58, to: 0.74), with: .color(sk.towerStripe))
+        ctx.stroke(tower, with: .color(sk.towerEdge), lineWidth: 0.6)
+        // 燈室（一小格燈）、欄杆、屋頂
+        let lamp = CGRect(x: cx - 2.4, y: topY - 3, width: 4.8, height: 3)
+        if sk.dark {
+            let glowBox = CGRect(x: cx - 9, y: lamp.midY - 7, width: 18, height: 14)
+            ctx.drawLayer { layer in
+                layer.addFilter(.blur(radius: 4))
+                layer.fill(Path(ellipseIn: glowBox), with: .color(sk.glow))
+            }
+        }
+        ctx.fill(Path(lamp), with: .color(sk.towerLamp))
+        ctx.fill(Path(CGRect(x: cx - 3.4, y: topY - 0.6, width: 6.8, height: 1.2)), with: .color(sk.towerStripe))
+        var roof = Path()
+        roof.move(to: CGPoint(x: cx - 3, y: lamp.minY + 0.2))
+        roof.addLine(to: CGPoint(x: cx, y: lamp.minY - 3))
+        roof.addLine(to: CGPoint(x: cx + 3, y: lamp.minY + 0.2))
+        roof.closeSubpath()
+        ctx.fill(roof, with: .color(sk.towerRoof))
+    }
+
+    /// 燈塔塔身的一段（f0…f1：從塔底往上量的比例；塔底寬 5.6、塔頂寬 4.2）
+    private static func riverTowerSlice(cx: CGFloat, baseY: CGFloat, height h: CGFloat, from f0: CGFloat,
+                                        to f1: CGFloat) -> Path {
+        func half(_ f: CGFloat) -> CGFloat { (5.6 + (4.2 - 5.6) * f) / 2 }
+        let y0 = baseY - h * f0
+        let y1 = baseY - h * f1
+        var p = Path()
+        p.move(to: CGPoint(x: cx - half(f0), y: y0))
+        p.addLine(to: CGPoint(x: cx - half(f1), y: y1))
+        p.addLine(to: CGPoint(x: cx + half(f1), y: y1))
+        p.addLine(to: CGPoint(x: cx + half(f0), y: y0))
+        p.closeSubpath()
+        return p
     }
 
     /// 行道樹 3～5 棵：站在草地上緣（步道後面），讓開旗子、跑者、路燈，彼此至少隔 18pt

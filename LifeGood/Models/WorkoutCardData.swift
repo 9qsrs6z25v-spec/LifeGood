@@ -46,6 +46,13 @@ import CoreLocation
 //    多兩種、不限這週（舊的那趟打開也看得到）：每個破紀錄一條「新紀錄：最快 5 公里 **29:40**（快 18 秒）」、
 //    同一條路一條「河濱老路線・**第 12 次**・比上次快 42 秒」（慢也是中性字色）。順序：目標 → 連續週數 → 紀錄 → 同一條路。
 // ⑨ 資料的暫停那列：有自動暫停「4 次・3:40（自動 3 次）」、全是自動「3 次・2:10（都是自動）」（只有一次「（自動）」）。
+//
+// [v25.558] 健康 v7b（build/v7b/brief.md §6 G4）：字全是主控 WorkoutLifeLinks.swift 的，這裡只接上：
+// ② 這趟的收穫最後多一條換風景「今年跑了 **250.3** 公里，看板換成山路了」（sceneryGains：看板主角 WorkoutFacts.heroSport、
+//    WorkoutFacts.sceneryGain；不限這週、舊的那趟打開也看得到）。順序：目標 → 連續週數 → 紀錄 → 同一條路 → 換風景。
+// 新欄位 milestones：這一趟達成的運動里程碑（WorkoutFacts.milestones(reachedBy:)，連續週數照請假算；自動算、不存）。
+//    成果頁「達成里程碑」卡（WorkoutDetailExtras.swift 的 WorkoutMilestoneCard）用；分享圖、項目卡、清單都不放。
+// 心率不在這裡（WorkoutDetailView 自己 .task 讀、只放記憶體，不進 card：分享圖也用 build）。
 
 /// 成果頁全部的字與數字。型別都收在裡面（不佔全域名字：v3 四組同時開工）
 struct WorkoutCardData {
@@ -300,6 +307,8 @@ struct WorkoutCardData {
     var info: [InfoItem]
     /// 換一趟列（同一週，舊到新）；不到兩顆不出現
     var switcher: [FinanceSwitcherItem]
+    /// [健康 v7b] 這一趟達成的運動里程碑（WorkoutFacts.milestones(reachedBy:)；沒有是空的，卡片整區不出現）
+    var milestones: [WorkoutMilestone] = []
 }
 
 // MARK: - 算
@@ -345,7 +354,10 @@ extension WorkoutCardData {
                                      elevationShown: elevationShown != nil, bodyWeightKg: bodyWeightKg)
         }
         // [v25.557] 目標、連續週數（只在這週）之後接存檔時算好的亮點（破紀錄、同一條路；不限這週）
-        card.gains = goal.gains + highlightGains(s)
+        // [v25.558] 最後接換風景（這一趟讓看板換景；不限這週）
+        card.gains = goal.gains + highlightGains(s) + sceneryGains(s, sessions: sessions, prefs: prefs, now: now)
+        // [v25.558] 這一趟達成的運動里程碑（自動算、不存；連續週數照請假算，同看板）
+        card.milestones = WorkoutFacts.milestones(reachedBy: s.id, in: sessions, leave: WorkoutFacts.leaveWeeks(leave))
         card.checks = makeChecks(s, sessions: sessions, ledger: ledger, main: main, splitsValid: validSplits != nil,
                                  canSearchHealth: hkAvailable && hkEnabled)
         if let e = s.firstRouteExercise {
@@ -737,6 +749,31 @@ extension WorkoutCardData {
         let name = String(cap.dropLast(mark.count))
         let rest = String(text.dropFirst(cap.count))
         return FinanceLine(runs: [FinanceRun(text: name), FinanceRun(text: mark, bold: true), FinanceRun(text: rest)])
+    }
+
+    /// [v25.558] 這一趟讓健康頁看板換了風景（build/v7b/brief.md §1-8、G4-1）：「今年跑了 **250.3** 公里，看板換成山路了」。
+    /// 看的是看板主角那一種（WorkoutFacts.heroSport，同健康頁看板）；字是 WorkoutFacts.sceneryGain 的（主控），這裡不另算。
+    /// 不限這週（舊的那趟打開也看得到）；圖示是換到的那一景（stage.icon），圖示圓是看板主角的主題色
+    private static func sceneryGains(_ s: WorkoutSession, sessions: [WorkoutSession], prefs: WorkoutPrefs,
+                                     now: Date) -> [Gain] {
+        let hero = WorkoutFacts.heroSport(prefs, sessions: sessions, now: now)
+        guard let g = WorkoutFacts.sceneryGain(for: s, among: sessions, sport: hero) else { return [] }
+        return [Gain(id: "scenery", icon: g.stage.icon, sport: hero, line: sceneryGainLine(g.text))]
+    }
+
+    /// [v25.558] 「今年跑了 250.3 公里，看板換成山路了」的數字粗體（不上色，同其他收穫）。
+    /// 字是 WorkoutFacts.sceneryGain 的，這裡只切成三段（「今年跑了 」｜「250.3」｜「 公里，看板換成山路了」）；
+    /// 對不上（主控改了寫法）整句照原樣、不粗體
+    private static func sceneryGainLine(_ text: String) -> FinanceLine {
+        guard let verbEnd = text.range(of: "了 "),
+              let unit = text.range(of: " 公里，", range: verbEnd.upperBound..<text.endIndex) else {
+            return FinanceLine.text(text)
+        }
+        let head = String(text[..<verbEnd.upperBound])
+        let number = String(text[verbEnd.upperBound..<unit.lowerBound])
+        let rest = String(text[unit.lowerBound...])
+        guard !number.isEmpty else { return FinanceLine.text(text) }
+        return FinanceLine(runs: [FinanceRun(text: head), FinanceRun(text: number, bold: true), FinanceRun(text: rest)])
     }
 
     /// 目標格同一套寫法的數字：HealthPageData.goalKmText 去掉「 公里」（整數「20」、其他「5.4」）

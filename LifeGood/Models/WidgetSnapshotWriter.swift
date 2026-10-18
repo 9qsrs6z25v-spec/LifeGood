@@ -28,6 +28,10 @@ import WidgetKit
 //      報告、生日）、家庭待辦、家人、兼任職務都在 LifeStore 的 @Published 裡，現有的 life 防抖那條就接得到，
 //      不用加新的監聽。life 也改成只重畫受影響的那幾種（lifeKindsToReload）；今天有沒有行程變了另外重畫
 //      控制項「今日行程」（關的時候寫「今天沒有行程」／「未顯示」）。規格見 scratchpad/widgets/v5/brief.md 的 G1-5。
+// [v25.558] 健康 v7b（build/v7b/brief.md §6 G1）：life 多寫「今天（大）」最下面那一行運動（workout，今天、明天各一份；
+//      字在 WorkoutFacts.widgetWorkoutDays，WorkoutLifeLinks.swift）。運動、目標（workoutPrefs）、請假（workoutLeave）都在
+//      LifeStore 的 @Published 裡，現有的 life 防抖 3 秒那條就接得到，不用加監聽；lifeKindsToReload 多看 workout
+//      （只有那一行真的變了才多重畫「今天」，鎖定畫面「下一場」、旅行、部屬今天不受影響）。
 //
 // 什麼時候寫：
 //   • 啟動（start）：掛好監聽後馬上寫一次全部
@@ -198,6 +202,7 @@ final class WidgetSnapshotWriter {
     /// [v5] life_v1.json 寫了之後要重畫哪幾種：沒有舊檔＝全部；換日（dataDay／validUntil 變了）＝全部；
     /// 否則 今天：days、trips、team、familyTasks、countdowns、hasTeam 任一個變了（大型都用到）；
     /// 下一場（鎖定畫面）：days；旅行：trips；部屬今天：team、plantAreas、hasTeam
+    /// [健康 v7b] 今天多看 workout（大型最下面那一行運動；跑完一趟、改目標、請假才會變），其他三種不受影響
     static func lifeKindsToReload(old: WidgetLifeSnapshot?, new: WidgetLifeSnapshot) -> [String] {
         guard let old else { return WidgetKind.lifeKinds }
         if old.dataDay != new.dataDay || old.validUntil != new.validUntil { return WidgetKind.lifeKinds }
@@ -205,8 +210,11 @@ final class WidgetSnapshotWriter {
         let tripsChanged = old.trips != new.trips
         let teamChanged = old.team != new.team || old.hasTeam != new.hasTeam
         let todayExtrasChanged = old.familyTasks != new.familyTasks || old.countdowns != new.countdowns
+        let workoutChanged = old.workout != new.workout
         var kinds: [String] = []
-        if daysChanged || tripsChanged || teamChanged || todayExtrasChanged { kinds.append(WidgetKind.today) }
+        if daysChanged || tripsChanged || teamChanged || todayExtrasChanged || workoutChanged {
+            kinds.append(WidgetKind.today)
+        }
         if daysChanged { kinds.append(WidgetKind.lockNextStop) }
         if tripsChanged { kinds.append(WidgetKind.travel) }
         if teamChanged || old.plantAreas != new.plantAreas { kinds += WidgetKind.teamKinds }
@@ -420,6 +428,7 @@ final class WidgetSnapshotWriter {
     /// 行程跟靈動島同一段程式（TodayAgenda，不裁站數），全天的事照我的行事曆（CalendarDayItems）。
     /// [v3] 每一天多寫隔天每一種的第一場（nextDayFirstStops）；整份多寫旅行（trips，不受 validUntil 管）。
     /// [v5] 多寫 hasTeam／team／plantAreas／familyTasks／countdowns（WidgetLifeExtras）。
+    /// [健康 v7b] 多寫 workout（「今天（大）」最下面那一行運動，今天、明天各一份；WorkoutFacts.widgetWorkoutDays）。
     static func lifeSnapshot(life: LifeStore, now: Date,
                              calendar cal: Calendar = .current) -> WidgetLifeSnapshot {
         let start0 = cal.startOfDay(for: now)
@@ -446,6 +455,9 @@ final class WidgetSnapshotWriter {
         snap.plantAreas = WidgetLifeExtras.plantAreas(life: life)
         snap.familyTasks = WidgetLifeExtras.familyTasks(life: life, dayStarts: [start0, start1], calendar: cal)
         snap.countdowns = WidgetLifeExtras.countdowns(life: life, now: now, calendar: cal)
+        // [健康 v7b] 「今天（大）」最下面那一行運動（今天、明天各一份；字在 WorkoutFacts.widgetWorkoutDays）
+        snap.workout = WorkoutFacts.widgetWorkoutDays(life.workouts, prefs: life.workoutPrefs, leave: life.workoutLeave,
+                                                      dayStarts: [start0, start1], now: now, calendar: cal)
         return snap
     }
 

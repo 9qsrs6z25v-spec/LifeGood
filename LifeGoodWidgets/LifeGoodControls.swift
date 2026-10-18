@@ -40,9 +40,18 @@ import AppIntents
 //   valueLabel 用系統給的 on（按下去系統先畫新值），關的字用 provider 算的 offText。跟 v2、v3 一樣不設 tint、不加副標。
 //   控制項只畫狀態字，沒有任何行程內容、人名（鎖著也拉得下控制中心）。
 //
+// [v25.558] 健康 v7b（build/v7b/brief.md §6 G1-5、§1-4；design_life.md L7 :498「開始跑步」）。
+// • 開始跑步：ControlWidgetButton → 共用檔的 LifeGoodOpenIntent(url: WidgetLink.healthRun)
+//   （lifegood://life/health/run，跟 v7 鎖定畫面跑步卡同一個網址同一條路：DeepLinkRouter → 健康頁 openRunFromLink）。
+//   App 那邊：在跑 → 回到那一趟；剛跑完 20 分鐘內 → 那一趟的成果頁；有一趟沒存 → 留在健康頁；
+//   都不是 → 開始畫面（GPS 暖機、停在大大的「開始」，**不自動倒數開始**，誤觸不會白跑一趟）；開始新的一趟要訂閱
+//   （沒訂閱跳付費說明；在跑、剛跑完不擋）。控制中心、鎖定畫面左下右下、動作按鈕（iPhone 15 Pro 以上）都能放，
+//   iOS 18 起系統自己給，不用另外寫。跟 v2「記一筆」一樣不設 tint、不加副標；沒有值、不讀快照，不用重畫。
+//
 // 型別：AddExpenseControl、HideAmountsControl、HideAmountsControlProvider；
 //      [v3] VoiceRecordControl、RecordToControl、RecordToControlConfigIntent、RecordToControlValue、RecordToControlProvider
 //      [v5] DayTimelineControl、DayTimelineControlValue、DayTimelineControlProvider
+//      [健康 v7b] StartRunControl
 
 struct AddExpenseControl: ControlWidget {
     var body: some ControlWidgetConfiguration {
@@ -211,5 +220,19 @@ struct DayTimelineControlProvider: ControlValueProvider {
             return DayTimelineControlValue.idleText
         }
         return DayTimelineControlValue.noStopsText
+    }
+}
+
+// MARK: - [健康 v7b] 開始跑步
+
+struct StartRunControl: ControlWidget {
+    var body: some ControlWidgetConfiguration {
+        StaticControlConfiguration(kind: WidgetKind.controlStartRun) {
+            ControlWidgetButton(action: LifeGoodOpenIntent(url: WidgetLink.healthRun)) {
+                Label("開始跑步", systemImage: "figure.run")
+            }
+        }
+        .displayName("開始跑步")
+        .description("打開 LifeGood 的跑步畫面；正在跑就回到那一趟")
     }
 }

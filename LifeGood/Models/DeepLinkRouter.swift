@@ -208,6 +208,29 @@ final class DeepLinkRouter: ObservableObject {
         pendingHealthRun = nil
         return true
     }
+
+    // MARK: [健康 v7b] 今天（大）運動那一行
+
+    /// [健康 v7b] 「今天（大）」最下面那一行寫今天那一趟時點進來（lifegood://life/health?id=<UUID>）：健康頁取走後打開那一趟的成果頁。
+    /// 每次換一個 token：停在健康頁再點同一趟也會換值、onChange 收得到
+    @Published private(set) var pendingHealthSession: DeepLinkHealthSession?
+
+    func requestHealthSession(_ id: UUID) {
+        pendingHealthSession = DeepLinkHealthSession(token: UUID(), sessionId: id)
+    }
+
+    /// 健康頁取走並清掉；沒有回 nil（沒有的時候不動 @Published）
+    func takeHealthSession() -> UUID? {
+        guard let p = pendingHealthSession else { return nil }
+        pendingHealthSession = nil
+        return p.sessionId
+    }
+}
+
+/// [健康 v7b] 「打開這一趟的成果頁」的請求（token 每次新的：同一趟再點一次也是新的值）
+struct DeepLinkHealthSession: Equatable {
+    let token: UUID
+    let sessionId: UUID
 }
 
 /// [v2] 小工具「新增支出」的請求（WidgetLink.apply 建、MainTabView 取走）。
@@ -335,6 +358,30 @@ extension View {
     /// [健康 v7] 健康頁：收到「打開跑步畫面」時呼叫 action（action 裡自己 takeHealthRun）
     func onDeepLinkHealthRun(_ action: @escaping () -> Void) -> some View {
         modifier(DeepLinkHealthRunReceiver(action: action))
+    }
+}
+
+/// [健康 v7b] 健康頁收「打開這一趟的成果頁」的兩個時機（同 DeepLinkHealthRunReceiver）：冷啟動時網址比這一頁先到（onAppear）、
+/// 已經停在健康頁時再點一次（onChange）
+private struct DeepLinkHealthSessionReceiver: ViewModifier {
+    @ObservedObject private var deepLink = DeepLinkRouter.shared
+    let action: () -> Void
+
+    init(action: @escaping () -> Void) {
+        self.action = action
+    }
+
+    func body(content: Content) -> some View {
+        content
+            .onAppear { action() }
+            .onChange(of: deepLink.pendingHealthSession) { _, _ in action() }
+    }
+}
+
+extension View {
+    /// [健康 v7b] 健康頁：收到「打開這一趟的成果頁」時呼叫 action（action 裡自己 takeHealthSession）
+    func onDeepLinkHealthSession(_ action: @escaping () -> Void) -> some View {
+        modifier(DeepLinkHealthSessionReceiver(action: action))
     }
 }
 
@@ -544,6 +591,8 @@ extension WidgetLink {
     ///      四個都換 routeToken（停在設定頁也會先關掉）
     ///
     /// [健康 v7] - lifegood://life/health/run…：切到人生 › 健康，請健康頁打開跑步畫面（換 routeToken：停在設定頁也會先關掉）
+    ///           （[健康 v7b] 控制項「開始跑步」也是這個網址）
+    /// [健康 v7b] - lifegood://life/health?id=…：切到人生 › 健康；帶 id 就請健康頁打開那一趟的成果頁（找不到就停在健康頁）
     @discardableResult
     static func apply(_ url: URL, store: LifeStore) -> Bool {
         guard let route = parse(url) else { return false }
@@ -619,6 +668,10 @@ extension WidgetLink {
         case .healthRun:
             AppNavigation.goToHealth()
             router.requestHealthRun()
+            return true
+        case .health(let id):
+            AppNavigation.goToHealth()
+            if let id { router.requestHealthSession(id) }
             return true
         }
     }

@@ -2732,12 +2732,14 @@ struct AddMilestoneView: View {
             item.isDisabled = editing?.isDisabled
             if editing != nil { store.update(item) } else { store.add(item) }
         } else {
-            let item = LifeMilestone(
+            var item = LifeMilestone(
                 id: editing?.id ?? UUID(),
                 title: title.trimmingCharacters(in: .whitespaces),
                 date: date, category: category,
                 note: note.trimmingCharacters(in: .whitespaces)
             )
+            // [健康 v7b] 從運動里程碑記成的那一筆：改字、改日期後還認得是哪一個（成果頁照樣寫「已記在人生里程碑」）
+            item.sourceKey = editing?.sourceKey
             if editing != nil { store.update(item) } else { store.add(item) }
         }
         dismiss()
