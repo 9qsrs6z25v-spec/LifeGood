@@ -35,6 +35,8 @@ import Foundation
 //                                                                       （SubordinateItemCard；兩個 id 少一個就只開部屬總覽）
 //   [v5] lifegood://life/birthdays?src=widget                           → 部屬總覽、打開生日名單（BirthdayOverviewSheet）
 //   [v5] lifegood://life/family/tasks?src=widget                        → 人生「家庭」（家庭待辦在這一頁）
+//   [健康 v7] lifegood://life/health/run?src=widget                     → 人生「健康」、打開跑步畫面（鎖定畫面／靈動島的跑步卡）：
+//                                                                       正在跑就回到那一趟；剛跑完回到那一趟的成果頁；沒在跑開開始畫面
 //
 // 分類、車子分類的值是 App 寫進快照的 rawValue（VariableCategory／VehicleVariableCategory），
 // 小工具原樣帶回；URLComponents 會自己做百分比編碼，中文沒問題。
@@ -76,6 +78,8 @@ enum WidgetDestination: Equatable {
     case birthdays
     /// [v5] 人生「家庭」（FamilyView：家庭待辦在這一頁）
     case familyTasks
+    /// [健康 v7] 人生「健康」、打開跑步畫面（跑步即時動態點進來；v7b 的控制中心「開始跑步」也走這裡）
+    case healthRun
 }
 
 /// 解析結果：去哪＋是不是從小工具點進來的
@@ -124,6 +128,8 @@ enum WidgetLink {
     private static let familyTasksPath = "/family/tasks"
     private static let subKey = "sub"
     private static let taskKey = "task"
+    // [健康 v7]
+    private static let healthRunPath = "/health/run"
 
     /// 組不出網址時的退路（不會發生：全部是固定的 ASCII 字）
     private static let fallback = URL(string: "lifegood://today")!
@@ -208,6 +214,9 @@ enum WidgetLink {
         case .familyTasks:
             comps.host = lifeHost
             comps.path = familyTasksPath
+        case .healthRun:
+            comps.host = lifeHost
+            comps.path = healthRunPath
         }
         if fromWidget {
             items.append(URLQueryItem(name: sourceKey, value: sourceWidget))
@@ -286,6 +295,9 @@ enum WidgetLink {
     /// [v5] 家庭（家庭待辦）：lifegood://life/family/tasks?src=widget
     static var familyTasks: URL { url(for: .familyTasks) }
 
+    /// [健康 v7] 跑步畫面：lifegood://life/health/run?src=widget（跑步即時動態的 widgetURL）
+    static var healthRun: URL { url(for: .healthRun) }
+
     // MARK: 解析
 
     /// 認得的網址回 WidgetRoute；別的（不是 lifegood://、不認得的頁）回 nil。
@@ -341,6 +353,7 @@ enum WidgetLink {
             }
             if path == birthdaysPath { return .birthdays }
             if path == familyTasksPath { return .familyTasks }
+            if path == healthRunPath { return .healthRun }
             return nil
         default:
             return nil

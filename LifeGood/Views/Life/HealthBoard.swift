@@ -7,7 +7,8 @@ import SwiftUI
 //
 // • HealthBoard：MoneyBoardHeader（band 118、風景 .riverside）＋看板下的目標格（或一行「設一個每週目標 ›」）與膠囊。
 //   外框照 VehicleCardBoard 自己組（MoneyBoardChrome＋圓角讀 HeroCard.health）：頭部要蓋成一個 VoiceOver 元素唸資料端組好的那一句。
-// • HealthLiveStrip：⓪ 記錄中條。自己看 RunTracker（只有這一條每秒重畫，整頁不重算）；沒在記錄就什麼都不畫。
+// • HealthLiveStrip：⓪ 記錄中條。自己看 RunTracker（整頁不重算）；沒在記錄就什麼都不畫。
+//   [v25.557] 不再每秒重畫：時間是系統計時字（一秒一秒走）、距離每 5 秒（TimelineView），開始／暫停／自動暫停／繼續／結束馬上重畫。
 // • HealthStartRow：② 開始列（大綠鈕＋三顆小膠囊＋一句灰字；Mac 上換一行字）。
 // • HealthGoalSheet：每週目標小表單（5～100 公里、5 公里一格的轉盤＋「不設目標」）。
 //
@@ -212,22 +213,53 @@ private struct HealthGoalPromptRow: View {
 // MARK: - ⓪ 記錄中條
 
 /// ⓪ 記錄中條（釘在頁面最上面，safeAreaInset(edge: .top)）
+///
+/// [v25.557] 不再 @ObservedObject RunTracker（記錄器每秒發布 elapsed、每筆定位發布 fixSerial，以前整條每秒重畫；build/v7/brief.md §1-11、§G3-5）：
+/// • 只用 .onReceive 記 phase、autoPaused 兩個值（開始、暫停、自動暫停、繼續、結束才變；一樣就不寫）→ 這幾個時刻馬上重畫。
+/// • 時間用系統計時字 Text(timerInterval:pauseTime:countsDown:showsHours:)（iOS 16；同鎖定畫面）：系統自己一秒一秒走，不重畫 view；
+///   從 movingClockStart 往上數，暫停中停在 pausedAt（pausedAt − movingClockStart ＝ 按暫停那一刻的 elapsed）。
+/// • 距離、VoiceOver 那句包在 TimelineView(.periodic(from: .now, by: 5))：每 5 秒讀一次記錄器（不訂閱）。
+/// • 自動暫停：標題「晨跑・自動暫停」「登山・自動暫停」（同共用檔 RunActivityAttributes.headline）；樣子照暫停（時間停住、灰）。
 struct HealthLiveStrip: View {
     /// 點了：回到跑步畫面
     let onOpen: () -> Void
 
-    /// 整頁只有這個 view 看記錄器（距離、時間每秒變，只有這一條重畫）；不要把 tracker 傳出去、不在這裡寫任何 store
-    @ObservedObject private var tracker = RunTracker.shared
+    /// [v25.557] 記錄器的狀態（.onReceive 寫；只在開始、暫停、繼續、結束時變）。body 裡不讀記錄器任何會每秒變的值，
+    /// 每秒變的距離只在 TimelineView 那 5 秒一次的閉包裡讀
+    @State private var phase: RunTracker.Phase = .idle
+    @State private var autoPaused = false
     @Environment(\.colorScheme) private var scheme
 
     init(onOpen: @escaping () -> Void) {
         self.onOpen = onOpen
     }
 
+    // Published 一訂閱就送目前的值；沒在記錄時畫一條高度 0 的透明（.onReceive 要掛在一個一直都在的 view 上）
     var body: some View {
-        if tracker.isActive {
-            strip(TripBoardPalette(scheme))
+        content
+            .onReceive(RunTracker.shared.$phase) { p in phaseChanged(p) }
+            .onReceive(RunTracker.shared.$autoPaused) { a in autoPausedChanged(a) }
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        if phase != .idle {
+            TimelineView(.periodic(from: .now, by: 5)) { _ in
+                strip(TripBoardPalette(scheme))
+            }
+        } else {
+            Color.clear
+                .frame(height: 0)
+                .accessibilityHidden(true)
         }
+    }
+
+    private func phaseChanged(_ p: RunTracker.Phase) {
+        if p != phase { phase = p }
+    }
+
+    private func autoPausedChanged(_ a: Bool) {
+        if a != autoPaused { autoPaused = a }
     }
 
     private func strip(_ pal: TripBoardPalette) -> some View {
@@ -252,11 +284,7 @@ struct HealthLiveStrip: View {
                     .font(.subheadline.weight(.bold))
                     .foregroundStyle(titleColor(pal))
                     .lineLimit(1)
-                Text(detailText)
-                    .font(.footnote.weight(.semibold))
-                    .monospacedDigit()
-                    .foregroundStyle(detailColor(pal))
-                    .lineLimit(1)
+                detailRow(pal)
             }
             Spacer(minLength: 8)
             Text("回到跑步 ›")
@@ -272,39 +300,61 @@ struct HealthLiveStrip: View {
         .contentShape(Rectangle())
     }
 
+    /// 「3.42 公里・」（每 5 秒）＋系統計時字「21:05」（一秒一秒走）
+    private func detailRow(_ pal: TripBoardPalette) -> some View {
+        HStack(spacing: 0) {
+            Text(kmText + " 公里・")
+                .lineLimit(1)
+            clockText
+                .lineLimit(1)
+                .fixedSize()
+        }
+        .font(.footnote.weight(.semibold))
+        .monospacedDigit()
+        .foregroundStyle(detailColor(pal))
+    }
+
+    /// 系統計時字：從 movingClockStart 往上數 24 小時，暫停中停在 pausedAt（App 不每秒重畫）
+    private var clockText: Text {
+        let tracker = RunTracker.shared
+        let start = tracker.movingClockStart ?? Date()
+        return Text(timerInterval: start...start.addingTimeInterval(86_400),
+                    pauseTime: tracker.pausedAt,
+                    countsDown: false,
+                    showsHours: true)
+    }
+
     // MARK: 字（先在這裡組好，body 不寫長運算式）
 
-    private var sport: WorkoutSport { WorkoutSport(tracker.sport) }
+    private var sport: WorkoutSport { WorkoutSport(RunTracker.shared.sport) }
 
-    private var isPaused: Bool { tracker.phase == .paused }
+    private var isPaused: Bool { phase == .paused }
 
-    /// 「晨跑・跑步中」「晚走・健走中」「晨騎・騎車中」；登山名字本身就是「登山」：「登山中」；暫停「晨跑・已暫停」「登山・已暫停」
+    /// 「晨跑・跑步中」「晚走・健走中」「晨騎・騎車中」；登山名字本身就是「登山」：「登山中」；暫停「晨跑・已暫停」「登山・已暫停」；
+    /// [v25.557] 自動暫停「晨跑・自動暫停」「登山・自動暫停」
     private var titleText: String {
         let s = sport
+        let pausedWord = autoPaused ? "・自動暫停" : "・已暫停"
         if s == .hike {
-            return isPaused ? "登山・已暫停" : "登山中"
+            return isPaused ? "登山" + pausedWord : "登山中"
         }
-        let name = WorkoutFacts.timeOfDayName(s, start: tracker.activeStartedAt ?? Date())
-        if isPaused { return name + "・已暫停" }
+        let name = WorkoutFacts.timeOfDayName(s, start: RunTracker.shared.activeStartedAt ?? Date())
+        if isPaused { return name + pausedWord }
         return name + "・" + s.displayName + "中"
     }
 
+    /// 每 5 秒讀一次（TimelineView 的閉包裡）
     private var kmText: String {
-        WorkoutFormat.preciseKmNumber(tracker.distanceMeters / 1000, sport: sport)
+        WorkoutFormat.preciseKmNumber(RunTracker.shared.distanceMeters / 1000, sport: sport)
     }
 
-    /// 「3.42 公里・21:05」
-    private var detailText: String {
-        kmText + " 公里・" + WorkoutFormat.clock(seconds: tracker.elapsed.rounded(.down))
-    }
-
-    /// VoiceOver：「晨跑・跑步中，3.42 公里，21 分 05 秒」
+    /// VoiceOver：「晨跑・跑步中，3.42 公里，21 分 05 秒」（每 5 秒更新一次）
     private var spoken: String {
         titleText + "，" + kmText + " 公里，" + spokenTime
     }
 
     private var spokenTime: String {
-        let total = WorkoutFormat.wholeSeconds(tracker.elapsed.rounded(.down))
+        let total = WorkoutFormat.wholeSeconds(RunTracker.shared.elapsed.rounded(.down))
         let h = total / 3600
         let m = (total % 3600) / 60
         let sec = String(format: "%02d", total % 60)
@@ -312,7 +362,7 @@ struct HealthLiveStrip: View {
         return "\(m) 分 \(sec) 秒"
     }
 
-    /// 運動色的圓；暫停變灰
+    /// 運動色的圓；暫停（含自動暫停）變灰
     private var badgeColors: [Color] {
         if isPaused { return [Color(tb: 0xC2C6D2), Color(tb: 0x8A92A6)] }
         let theme = MoneyArtTheme.of(sport)

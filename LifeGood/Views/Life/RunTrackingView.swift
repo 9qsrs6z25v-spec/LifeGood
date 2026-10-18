@@ -59,6 +59,22 @@ import CoreLocation
 //   地圖上下讓出的安全區量真正的位置（上面那排膠囊的下緣、面板上緣到螢幕底），藍點放在中間那塊地圖的正中。
 // • 螢幕保持亮著（「⋯」，每種運動各記，騎車預設開）：只在這個畫面開著、正在記錄（含暫停）、還沒換成果頁時關掉自動鎖定；
 //   收起、跑完、放棄、太短不存都設回來。
+//
+// [v25.557] 健康 v7 自動暫停的樣子、「⋯」兩個開關（build/v7/brief.md §G2；judge §4.0「⋯」、§4.1 第 11 列）：
+// • 自動暫停中（tracker.autoPaused；phase 照樣是 .paused，記錄器停住時間、不畫線、不算距離）：面板**不整片變灰**
+//   （你沒按任何東西，天空照常）、面板上方淡黃條「自動暫停中・動了就繼續」（同 GPS 弱那一條，自動暫停優先）、
+//   大字下「自動暫停・0:42」；按鈕〔繼續〕（綠）＋〔按住結束〕（白：跟跑步中同一顆、按住 1 秒才算，不是點一下就結束——
+//   手機在臂套、龍頭上，紅燈時誤觸不能一點就結束；開著 VoiceOver 照樣先問「結束這一趟？」）。
+//   跑步中、自動暫停中是同一排按鈕（按住結束那顆不換掉，按著的時候剛好自動暫停／繼續也不會被拆掉重建）。
+//   手動暫停（整片灰藍、「已暫停・1:12」、〔繼續〕〔結束〕點一下）完全照 v6。
+// • 自動暫停／自動繼續那一刻（這個畫面開著、App 在前景）震兩下（notification 的 warning／success）＋VoiceOver 唸
+//   「自動暫停」「繼續記錄」；鎖著螢幕、收起時由耳機語音負責（RunVoice）。結束、放棄時 autoPaused 也會變 false：不震。
+// • 「⋯」多兩個開關，開始前、記錄中都有：「每公里語音」（全部運動共用，RunSport.voiceOn；打包出來的 Info.plist 沒有 audio
+//   背景模式時寫「每公里語音（鎖著螢幕時不講）」）、「自動暫停」（開始前改選的那一種運動 RunSport.setAutoPause；
+//   記錄中改這一趟 tracker.setAutoPauseEnabled：關掉時正在自動暫停就馬上繼續，也記成這種運動的設定）。
+//   兩個都是 UserDefaults（不發布）：optionTick 加一讓選單的勾重算（同 keepAwakeTick）。
+// • GPS 燈、gpsFresh 不動（暫停中回 true；自動暫停時記錄器照常更新誤差，燈照常）；
+//   存檔那幾支（finishNow、holdFinished、confirmEnd、finishTapped、abandon、startRun）、地圖與跟隨一行沒動。
 
 struct RunTrackingView: View {
     @EnvironmentObject var lifeStore: LifeStore
@@ -120,6 +136,8 @@ struct RunTrackingView: View {
     @State private var cellTick = 0
     /// [v25.555] 開著 VoiceOver 時點「結束」：先問
     @State private var endConfirm = false
+    /// [v25.557] 切「每公里語音」「自動暫停」時加一：讓選單的勾重算（兩個都記在 UserDefaults，不發布）
+    @State private var optionTick = 0
 
     /// [v25.551] 開場鏡頭在這裡就算好：手機記得的上一個位置＋這種運動記住的遠近；
     /// 手機不記得就先放台北車站 3 公里（onAppear 再試上一趟紀錄的起點）
@@ -168,6 +186,7 @@ struct RunTrackingView: View {
             if !reduced { preciseAsked = false }      // [v25.552] 給了：之後系統收回「這一次」的授權時，又可以跳系統框
         }
         .onChange(of: tracker.phase) { old, new in phaseChanged(old, new) }   // [v25.556] 鎖定畫面按〔繼續〕也會到
+        .onChange(of: tracker.autoPaused) { _, on in autoPauseChanged(on) }    // [v25.557] 震兩下＋VoiceOver
     }
 
     /// 現在算哪一種運動：開始後讀記錄器，開始前讀選擇器
@@ -355,10 +374,13 @@ struct RunTrackingView: View {
         .accessibilityLabel("更多")
     }
 
-    /// 開始前：倒數開關、螢幕保持亮著；記錄中：螢幕保持亮著、放棄這一趟（紅字，要確認）
+    /// 開始前：倒數開關、螢幕保持亮著、[v25.557] 每公里語音、自動暫停（選的那一種運動）；
+    /// 記錄中：[v25.557] 每公里語音、自動暫停（這一趟）、螢幕保持亮著、放棄這一趟（紅字，要確認）
     @ViewBuilder
     private var moreMenuItems: some View {
         if tracker.isActive {
+            Toggle(voiceLabel, isOn: voiceBinding)
+            Toggle("自動暫停", isOn: autoPauseBinding)
             Toggle("螢幕保持亮著", isOn: keepAwakeBinding)
             Divider()
             Button(role: .destructive) {
@@ -369,6 +391,8 @@ struct RunTrackingView: View {
         } else {
             Toggle("倒數 3、2、1", isOn: countdownBinding)
             Toggle("螢幕保持亮著", isOn: keepAwakeBinding)
+            Toggle(voiceLabel, isOn: voiceBinding)
+            Toggle("自動暫停", isOn: autoPauseBinding)
         }
     }
 
@@ -385,6 +409,41 @@ struct RunTrackingView: View {
             currentSport.setKeepAwake(on)
             keepAwakeTick += 1
         })
+    }
+
+    /// [v25.557] 「每公里語音」：打包出來的 Info.plist 沒有 audio 背景模式（RunVoice.hasAudioBackgroundMode）時，
+    /// 鎖著螢幕不講（RunVoice 自己擋），選單上先說清楚
+    private var voiceLabel: String {
+        RunVoice.hasAudioBackgroundMode ? "每公里語音" : "每公里語音（鎖著螢幕時不講）"
+    }
+
+    /// [v25.557] 每公里語音（全部運動共用一個開關；預設開）。講的時候才讀，跑到一半關掉下一公里就不講。
+    /// optionTick 在這裡（body 組選單時）讀一次：切了之後整個畫面重算，選單的勾跟著變
+    private var voiceBinding: Binding<Bool> {
+        let tick = optionTick
+        return Binding(get: { tick >= 0 && RunSport.voiceOn }, set: { on in
+            RunSport.setVoice(on)
+            optionTick += 1
+        })
+    }
+
+    /// [v25.557] 自動暫停：記錄中是這一趟（tracker.setAutoPauseEnabled：記成這種運動的設定、這一趟馬上照新的；
+    /// 關掉時正在自動暫停就馬上繼續）；開始前是選的那一種運動（跑走騎預設開、登山預設關）
+    private var autoPauseBinding: Binding<Bool> {
+        let tick = optionTick
+        return Binding(get: { tick >= 0 && autoPauseShownOn }, set: { on in
+            if tracker.isActive {
+                tracker.setAutoPauseEnabled(on)
+            } else {
+                pickedSport.setAutoPause(on)
+            }
+            optionTick += 1
+        })
+    }
+
+    /// [v25.557] 選單上自動暫停的勾：記錄中讀這一趟，開始前讀選的那一種運動
+    private var autoPauseShownOn: Bool {
+        tracker.isActive ? tracker.autoPauseActive : pickedSport.autoPauseOn
     }
 
     /// 指北針、比例尺（一直顯示）
@@ -461,7 +520,7 @@ struct RunTrackingView: View {
     /// 天空面板＋「太短要存嗎？」提示框。
     /// 面板內容的位置量下來（減掉面板上方的留白）＝面板上緣：地圖下面讓出到這裡（GPS 弱提示條不算，條出現時地圖不跳）
     private var panel: some View {
-        RunSkyPanel(paused: tracker.phase == .paused, clouds: tracker.isActive ? 1 : 2, strip: weakStripText) {
+        RunSkyPanel(paused: isManualPaused, clouds: tracker.isActive ? 1 : 2, strip: stripText) {
             panelContent
                 .onGeometryChange(for: CGFloat.self) { proxy in
                     proxy.frame(in: .global).minY
@@ -488,11 +547,24 @@ struct RunTrackingView: View {
         Binding(get: { shortPrompt != nil }, set: { if !$0 { shortPrompt = nil } })
     }
 
+    /// 面板上方的淡黃條。[v25.557] 自動暫停中「自動暫停中・動了就繼續」（judge §4.1 第 11 列；比 GPS 弱優先，
+    /// 自動暫停時記錄器本來就不算弱）。
     /// GPS 弱提示條（樣稿③-B6）：跑步中、記錄器說弱；還在等第一個好定位（橘字）、精確位置關著、沒有權限時燈自己說，不畫
-    private var weakStripText: String? {
+    private var stripText: String? {
+        if isAutoPaused { return "自動暫停中・動了就繼續" }
         guard tracker.phase == .running, tracker.gpsWeak, !tracker.waitingForFix,
               !tracker.reducedAccuracy, !gpsDenied else { return nil }
         return "GPS 訊號弱，距離可能少算"
+    }
+
+    /// [v25.557] 自動暫停中（停下來約 8 秒記錄器自己停的；phase 照樣是 .paused）
+    private var isAutoPaused: Bool {
+        tracker.phase == .paused && tracker.autoPaused
+    }
+
+    /// [v25.557] 手動暫停中（畫面〔暫停〕、鎖定畫面的暫停鈕）：面板整片灰藍、〔結束〕點一下就結束（照 v6）
+    private var isManualPaused: Bool {
+        tracker.phase == .paused && !tracker.autoPaused
     }
 
     // MARK: 開始前面板（樣稿②-2、③-B1／B2）
@@ -579,7 +651,7 @@ struct RunTrackingView: View {
         WorkoutFormat.preciseKmNumber(tracker.distanceMeters / 1000, sport: WorkoutSport(tracker.sport))
     }
 
-    /// 「已暫停・1:12」：暫停中記錄器不發布，自己每秒重畫
+    /// 「已暫停・1:12」（[v25.557] 自動暫停「自動暫停・0:42」）：暫停中記錄器不發布，自己每秒重畫
     private var pausedLine: some View {
         TimelineView(.periodic(from: .now, by: 1)) { ctx in
             RunNumberText.text(pausedText(at: ctx.date), numberColor: pal.ink)
@@ -589,10 +661,11 @@ struct RunTrackingView: View {
         .padding(.top, 2)
     }
 
-    /// 暫停多久（往下取整，跟碼錶一樣）
+    /// 暫停多久（往下取整，跟碼錶一樣）。[v25.557] 自動暫停從記錄器自己停的那一刻算（pausedAt＝觸發那一筆定位的時間）
     private func pausedText(at now: Date) -> String {
         let since = tracker.pausedAt.map { max(0, now.timeIntervalSince($0)) } ?? 0
-        return "已暫停・" + WorkoutFormat.clock(seconds: since.rounded(.down))
+        let head = tracker.autoPaused ? "自動暫停・" : "已暫停・"
+        return head + WorkoutFormat.clock(seconds: since.rounded(.down))
     }
 
     /// 跑步中、還畫不出線時的橘字。[v25.552] 精確位置關著：每一筆定位誤差 1～3 公里都被丟掉，
@@ -634,25 +707,42 @@ struct RunTrackingView: View {
         return s
     }
 
-    /// 跑步中〔暫停〕〔按住結束〕；暫停中〔繼續〕〔結束〕（點一下就結束）。
-    /// 「結束這一趟？」（VoiceOver）掛在跑步中這一排（面板掛「太短要存嗎？」，同一個 view 不疊兩個 .alert）
+    /// 跑步中〔暫停〕〔按住結束〕；手動暫停中〔繼續〕〔結束〕（點一下就結束）；
+    /// [v25.557] 自動暫停中〔繼續〕〔按住結束〕（白；手機在臂套、龍頭上，紅燈時誤觸不能一點就結束）。
+    /// 跑步中、自動暫停中是同一排（按住結束那顆在同一個位置，不會因為剛好自動暫停／繼續被拆掉重建）。
+    /// 「結束這一趟？」（VoiceOver）掛在這一排（面板掛「太短要存嗎？」，同一個 view 不疊兩個 .alert）
     @ViewBuilder
     private var liveButtons: some View {
-        if tracker.phase == .paused {
+        if isManualPaused {
             HStack(spacing: 12) {
                 RunPanelButton(title: "繼續", icon: "play.fill", style: .green) { resumeRun() }
                 RunPanelButton(title: "結束", icon: "stop.fill", style: .white) { finishTapped() }
             }
         } else {
             HStack(spacing: 12) {
-                RunPanelButton(title: "暫停", icon: "pause.fill", style: .white) { tracker.pause() }
-                RunHoldToFinishButton(onFinish: { holdFinished() }, onAsk: { endConfirm = true })
+                holdRowLeading
+                RunHoldToFinishButton(onFinish: { holdFinished() }, onAsk: { endConfirm = true }, style: holdStyle)
             }
             .alert("結束這一趟？", isPresented: $endConfirm) {
                 Button("結束") { confirmEnd() }
                 Button("繼續記錄", role: .cancel) { }
             }
         }
+    }
+
+    /// 按住結束那一排的左邊：跑步中〔暫停〕（白）；[v25.557] 自動暫停中〔繼續〕（綠，照自動繼續接著畫：tracker.resume 自己轉）
+    @ViewBuilder
+    private var holdRowLeading: some View {
+        if isAutoPaused {
+            RunPanelButton(title: "繼續", icon: "play.fill", style: .green) { resumeRun() }
+        } else {
+            RunPanelButton(title: "暫停", icon: "pause.fill", style: .white) { tracker.pause() }
+        }
+    }
+
+    /// [v25.557] 按住結束：跑步中綠（主要的鈕）；自動暫停中白（主要的鈕是〔繼續〕，同手動暫停的〔結束〕）
+    private var holdStyle: RunPanelButtonStyle {
+        isAutoPaused ? .white : .green
     }
 
     // MARK: 三格（judge §4.2；點左格、中格換內容，依運動記住）
@@ -975,6 +1065,17 @@ struct RunTrackingView: View {
     private func phaseChanged(_ old: RunTracker.Phase, _ new: RunTracker.Phase) {
         guard old == .paused, new == .running, !following, !wholeRoute else { return }
         scheduleAutoReturn()
+    }
+
+    /// [v25.557] 自動暫停／自動繼續那一刻（自動暫停中按〔繼續〕、從「⋯」關掉自動暫停也算繼續）：
+    /// 震兩下（notification 的 warning／success 本身就是兩下）＋VoiceOver 唸。
+    /// 只在這個畫面開著、App 在前景時（鎖著螢幕、收起時耳機語音負責：RunVoice）；
+    /// 結束、放棄時 autoPaused 也會變 false：記錄器已經不在記錄、或正在換成果頁，不震
+    private func autoPauseChanged(_ on: Bool) {
+        guard tracker.isActive, finishedId == nil, !ending,
+              UIApplication.shared.applicationState == .active else { return }
+        UINotificationFeedbackGenerator().notificationOccurred(on ? .warning : .success)
+        UIAccessibility.post(notification: .announcement, argument: on ? "自動暫停" : "繼續記錄")
     }
 
     /// 說明卡〔好〕：這時才跳系統的位置框（之後還有「動作與健身」框）

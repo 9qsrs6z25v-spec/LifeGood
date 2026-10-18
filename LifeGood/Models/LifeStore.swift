@@ -19,6 +19,8 @@ class LifeStore: ObservableObject {
     /// [v25.554] LifeGood 對 Apple 健康的帳（不再帶進來的編號、兩筆都留、舊紀錄先不要接回）；跟 iCloud 同步、進完整備份。
     /// 一改 workoutsRevision 也加一（健康頁「要確認」跟著重算）
     @Published var workoutHealthLedger: WorkoutHealthLedger = WorkoutHealthLedger() { didSet { workoutsRevision &+= 1; if !isLoading { save() } } }
+    /// [v25.557] 請假週（出差、生病的那一週不讓連續週數斷掉）；跟 iCloud 同步、進完整備份。一改 workoutsRevision 也加一（看板、月曆重算）
+    @Published var workoutLeave: WorkoutLeaveBook = WorkoutLeaveBook() { didSet { workoutsRevision &+= 1; if !isLoading { save() } } }
     /// [v25.357] 公司廠區據點：與重大決議的「廠區」欄位對應，長成每個廠的歷史年線
     @Published var companySites: [CompanySite] = [] { didSet { if !isLoading { save() } } }
     /// [v25.399] 旅遊規劃（要去的行程；與旅遊地圖「去過的地點」是兩回事）
@@ -53,7 +55,8 @@ class LifeStore: ObservableObject {
         "life_grade_titles", "life_business_cards", "life_personal_events",
         "life_org_people", "life_health_profile", "life_family_tasks",
         "life_equipment_pool", "life_performance_ballots", "life_workouts",
-        "life_company_sites", "life_trip_plans", "life_workout_prefs", "life_workout_health"
+        "life_company_sites", "life_trip_plans", "life_workout_prefs", "life_workout_health",
+        "life_workout_leave"
     ]
 
     init() {
@@ -1089,6 +1092,13 @@ class LifeStore: ObservableObject {
         var l = workoutHealthLedger
         l.skipRecovery(sessionId)
         if l != workoutHealthLedger { workoutHealthLedger = l }
+    }
+
+    /// [v25.557] 這一天所在的那一週請假（on）或取消請假（off）。呼叫端在選單收起來之後的下一輪主執行緒才叫（不跟收選單搶同一輪）
+    func setLeave(_ on: Bool, weekOf date: Date) {
+        var b = workoutLeave
+        b.set(on, key: WorkoutFacts.leaveKey(weekOf: date))
+        if b != workoutLeave { workoutLeave = b }
     }
 
     /// 出現過的動作名稱（依使用次數多寡），給新增時快速挑選
@@ -3169,7 +3179,7 @@ class LifeStore: ObservableObject {
             healthProfile: healthProfile, familyTasks: familyTasks, equipmentPool: equipmentPool,
             performanceBallots: performanceBallots, workouts: workouts,
             companySites: companySites, tripPlans: tripPlans, workoutPrefs: workoutPrefs,
-            workoutHealthLedger: workoutHealthLedger
+            workoutHealthLedger: workoutHealthLedger, workoutLeave: workoutLeave
         )
         saveQueue.async {
             let encoder = JSONEncoder()
@@ -3195,6 +3205,7 @@ class LifeStore: ObservableObject {
             if let d = try? encoder.encode(snap.tripPlans)      { ud.set(d, forKey: "life_trip_plans") }
             if let d = try? encoder.encode(snap.workoutPrefs)   { ud.set(d, forKey: "life_workout_prefs") }
             if let d = try? encoder.encode(snap.workoutHealthLedger) { ud.set(d, forKey: "life_workout_health") }
+            if let d = try? encoder.encode(snap.workoutLeave)   { ud.set(d, forKey: "life_workout_leave") }
             CloudSyncManager.shared.pushAll()
         }
     }
@@ -3239,6 +3250,11 @@ class LifeStore: ObservableObject {
         if let data = rawDataIfChanged("life_workout_health"),
            let hl = try? decoder.decode(WorkoutHealthLedger.self, from: data) {
             workoutHealthLedger = hl
+        }
+        // [v25.557] 請假週
+        if let data = rawDataIfChanged("life_workout_leave"),
+           let lb = try? decoder.decode(WorkoutLeaveBook.self, from: data) {
+            workoutLeave = lb
         }
     }
 
@@ -3315,6 +3331,7 @@ class LifeStore: ObservableObject {
         workouts.removeAll()
         workoutPrefs = WorkoutPrefs()
         workoutHealthLedger = WorkoutHealthLedger()
+        workoutLeave = WorkoutLeaveBook()
         companySites.removeAll()
         // 行程的照片檔也要一起清，不然會留下沒人指向的孤兒檔被雲端一直重傳
         for plan in tripPlans {

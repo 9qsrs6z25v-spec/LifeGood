@@ -23,6 +23,9 @@ import AppIntents
 // • 時間：Text(timerInterval: clockStart…+24h, pauseTime: pausedAt, countsDown: false) 系統自己走，App 不每秒推。
 //   小工具裡計時字會撐滿寬度（Apple 文件），一定配 frame＋multilineTextAlignment。
 // • 不畫路線形狀、不畫地點（ContentState 根本沒有；judge 待決定 9）。只有一顆鈕（暫停／繼續），結束要打開 App。
+// • [v25.557] 點卡片本身（鎖定畫面、靈動島）：widgetURL＝WidgetLink.healthRun（lifegood://life/health/run?src=widget，共用檔）
+//   → App 的 DeepLinkRouter 切到人生 › 健康、健康頁打開跑步畫面（在跑）／成果頁（剛跑完）。暫停鈕是 Button(intent:)，不走這條。
+//   自動暫停：共用檔 headline 自己寫「晨跑・自動暫停」，這裡不用改字。
 // • 只讀共用檔的字（headline、staleNote、buttonIcon…）與 context.state 的字，這裡不算任何數字。
 // • 新型別一律 RunLA 開頭（小工具 target 裡已經有 internal 的 LockScreenView、TimelineStrip、StopDetail；
 //   private 也會撞名，v25.485 的教訓）。不准引用 App 的型別（WorkoutPalette、WorkoutFormat 都不在這個 target）。
@@ -33,6 +36,8 @@ struct RunLiveActivityWidget: Widget {
             RunLALockView(attributes: context.attributes, state: context.state, isStale: context.isStale)
                 .activityBackgroundTint(RunLAColors.lockTint)
                 .activitySystemActionForegroundColor(RunLAColors.lockInk)
+                // [v25.557] 點卡片（不是暫停鈕）：打開 App 直接到跑步畫面（在跑回到那一趟、剛跑完到成果頁；HealthView.openRunFromLink）
+                .widgetURL(WidgetLink.healthRun)
         } dynamicIsland: { context in
             DynamicIsland {
                 // 四個角是圓的，貼邊的內容會被切掉：每一區都往內縮 6（同今日行程 v25.382、照片匯入）
@@ -53,6 +58,8 @@ struct RunLiveActivityWidget: Widget {
                 RunLAMinimal(attributes: context.attributes, state: context.state)
             }
             .keylineTint(RunLAColors.sport(context.attributes.sport, dark: true))
+            // [v25.557] 靈動島（縮起、只剩一點、展開）點了一樣到跑步畫面；暫停鈕是按鈕，不會觸發這個（DynamicIsland.widgetURL，iOS 16.1）
+            .widgetURL(WidgetLink.healthRun)
         }
         // iOS 18：手錶智慧型堆疊（有戴 Apple Watch 時系統自己放上去）；版面看 activityFamily（RunLALockView）
         .supplementalActivityFamilies([.small])

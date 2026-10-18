@@ -22,6 +22,10 @@ import ImageIO
 //   照片裡的 GPS 等 EXIF 不會跟著出去。
 // • 預覽用算好的圖（ImageRenderer 出的 UIImage）縮小放：預覽跟分享出去的一模一樣；開關、換照片時重算（排到下一輪，
 //   開關那一下先畫完；世代守門，連按只留最後一次）。〔分享〕時再算一次（不拿可能還沒更新的預覽）。
+//
+// [v25.557] 健康 v7（build/v7/brief.md §6 G4-6）：看板手寫跟著成果頁（破紀錄 New / record!）；右上膠囊破紀錄那一趟寫
+// 「[star.fill] 最快 1 公里」（綠，同成果頁），**同一條路那顆不放、換回運動名**（路線名可能取自以前那幾趟的地點：分享圖不放地點）。
+// build 傳 leave: store.workoutLeave（跟成果頁同一份；圖上沒有「這趟的收穫」，請假不影響圖）。路線形狀、地點的規則不變。
 
 /// 分享前那張小表單（成果頁「⋯ › 分享」用 .sheet(item:) 打開、最外層 .appStores()）
 struct WorkoutShareSheet: View {
@@ -357,7 +361,7 @@ private struct WorkoutShareContent {
         let card = WorkoutCardData.build(session: s, sessions: store.workouts, prefs: store.workoutPrefs,
                                          bodyWeightKg: store.latestBodyWeightKg, hkEnabled: false,
                                          hkAvailable: false, hkCanWrite: false,
-                                         ledger: store.workoutHealthLedger)
+                                         ledger: store.workoutHealthLedger, leave: store.workoutLeave)
         let rows = (card.splits?.rows ?? []).filter { $0.note == nil }
         return WorkoutShareContent(sport: card.sport,
                                    board: card.board,
@@ -509,14 +513,31 @@ private struct WorkoutShareBoard: View {
         return l.runs.isEmpty ? nil : FinanceLineText.text(l, pal: pal)
     }
 
+    /// [v25.557] 右上膠囊用成果頁那一顆（破紀錄「最快 1 公里」、或運動名）；同一條路那顆換回運動名（路線名可能是地點）
+    private var usesBoardCapsule: Bool {
+        !content.board.capsuleIsRoute && content.board.capsule != nil
+    }
+
+    private var capsuleText: String {
+        usesBoardCapsule ? (content.board.capsule ?? content.sport.displayName) : content.sport.displayName
+    }
+
+    private var capsuleIcon: String {
+        usesBoardCapsule ? (content.board.capsuleIcon ?? content.sport.icon) : content.sport.icon
+    }
+
+    private var capsuleTint: Color? {
+        usesBoardCapsule ? content.board.capsuleTone?.color(pal) : nil
+    }
+
     private var header: some View {
         let b = content.board
         return MoneyBoardHeader(
             date: content.date,
             dateIcon: content.sport.icon,
-            capsule: content.sport.displayName,
-            capsuleIcon: content.sport.icon,
-            capsuleTint: nil,
+            capsule: capsuleText,
+            capsuleIcon: capsuleIcon,
+            capsuleTint: capsuleTint,
             label: b.label,
             big: b.big,
             bigTone: nil,

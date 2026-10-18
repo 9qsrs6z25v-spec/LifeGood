@@ -42,6 +42,10 @@ import HealthKit
 //   沒有寫藍字「＋新增」。
 // • 「⋯」最上面多「分享」（兩種模式都有、不擋訂閱）→ 同一個 .sheet(item:) 開 WorkoutShareSheet（WorkoutShare.swift）。
 // • 要確認多一句 GPS 很弱（字在 WorkoutCardData.makeChecks，只提醒）。
+//
+// [v25.557] 健康 v7（build/v7/brief.md §6 G4）：字全在 WorkoutCardData（存檔時算好的 highlights，只讀不算），這裡只多兩處：
+// • buildCard 傳 leave: lifeStore.workoutLeave（收穫的連續週數照請假算；改請假時 workoutsRevision 會加一，cardTaskKey 跟著變）。
+// • 看板右上膠囊的字色：破紀錄「[star.fill] 最快 1 公里」綠（board.capsuleTone → MoneyBoardHeader 的 capsuleTint），其他照一般膠囊色。
 
 struct WorkoutDetailView: View {
     /// 打開哪一趟；換一趟（同一週的換一趟列）在頁面裡面換，不重開 sheet
@@ -145,7 +149,7 @@ struct WorkoutDetailView: View {
         return WorkoutCardData.build(session: s, sessions: lifeStore.workouts, prefs: lifeStore.workoutPrefs,
                                      bodyWeightKg: lifeStore.latestBodyWeightKg, hkEnabled: hkEnabled,
                                      hkAvailable: hk.isAvailable, hkCanWrite: hk.canWriteWorkout,
-                                     ledger: lifeStore.workoutHealthLedger)
+                                     ledger: lifeStore.workoutHealthLedger, leave: lifeStore.workoutLeave)
     }
 
     /// [v25.554] 重讀寫入權限；變了才寫（key 跟著變 → .task(id:) 重算一次）
@@ -776,12 +780,14 @@ private struct WorkoutDetailBoard: View {
     private func header(_ pal: TripBoardPalette) -> some View {
         let b = data.board
         let line: Text? = b.line.runs.isEmpty ? nil : FinanceLineText.text(b.line, pal: pal)
+        // [v25.557] 破紀錄那顆膠囊綠字（capsuleTone）；nil＝一般膠囊字色
+        let tint: Color? = b.capsuleTone?.color(pal)
         return MoneyBoardHeader(
             date: b.date,
             dateIcon: b.dateIcon,
             capsule: b.capsule,
             capsuleIcon: b.capsuleIcon,
-            capsuleTint: nil,
+            capsuleTint: tint,
             label: b.label,
             big: b.big,
             bigTone: nil,

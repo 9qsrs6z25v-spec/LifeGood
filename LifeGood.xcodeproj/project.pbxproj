@@ -83,6 +83,9 @@
 		A01B000002000098 /* RunPauseIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000095 /* RunPauseIntent.swift */; };
 		A01B000002000096 /* RunLiveActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000096 /* RunLiveActivity.swift */; };
 		A01B000001001563 /* RunActivityCenter.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001563 /* RunActivityCenter.swift */; };
+		A01B000001001564 /* WorkoutProgress.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001564 /* WorkoutProgress.swift */; };
+		A01B000001001565 /* RunVoice.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001565 /* RunVoice.swift */; };
+		A01B000001001566 /* HealthProgressCards.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001566 /* HealthProgressCards.swift */; };
 		A01B000001001506 /* PhotoImportCenter.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001506 /* PhotoImportCenter.swift */; };
 		A01B000001001507 /* PhotoSlideshowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001507 /* PhotoSlideshowView.swift */; };
 		A01B000001001508 /* BeatDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001508 /* BeatDetector.swift */; };
@@ -472,6 +475,9 @@
 		A01A000002000095 /* RunPauseIntent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunPauseIntent.swift; sourceTree = "<group>"; };
 		A01A000002000096 /* RunLiveActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunLiveActivity.swift; sourceTree = "<group>"; };
 		A01A000001001563 /* RunActivityCenter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunActivityCenter.swift; sourceTree = "<group>"; };
+		A01A000001001564 /* WorkoutProgress.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkoutProgress.swift; sourceTree = "<group>"; };
+		A01A000001001565 /* RunVoice.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunVoice.swift; sourceTree = "<group>"; };
+		A01A000001001566 /* HealthProgressCards.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthProgressCards.swift; sourceTree = "<group>"; };
 		A01A000001000035 /* GradeTitleView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GradeTitleView.swift; sourceTree = "<group>"; };
 		A01A000001000036 /* SpouseResumeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpouseResumeView.swift; sourceTree = "<group>"; };
 		A01A000001000037 /* ChildrenResumeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChildrenResumeView.swift; sourceTree = "<group>"; };
@@ -663,6 +669,8 @@
 				A01A000001001559 /* HealthSync.swift */,
 				A01A000001001560 /* WorkoutPlaceLookup.swift */,
 				A01A000001001563 /* RunActivityCenter.swift */,
+				A01A000001001564 /* WorkoutProgress.swift */,
+				A01A000001001565 /* RunVoice.swift */,
 				A01A000001000040 /* EInvoiceClient.swift */,
 				A01A000001000041 /* InvoiceCategorizer.swift */,
 				A01A000001000042 /* EInvoiceSyncManager.swift */,
@@ -797,6 +805,7 @@
 				A01A000001001558 /* WorkoutDetailView.swift */,
 				A01A000001001561 /* RunScreenParts.swift */,
 				A01A000001001562 /* WorkoutShare.swift */,
+				A01A000001001566 /* HealthProgressCards.swift */,
 				A01A000001000102 /* FoodMapView.swift */,
 				A01A000001000200 /* TravelMapView.swift */,
 				A01A000001000226 /* TripPlanView.swift */,
@@ -1127,6 +1136,9 @@
 				A01B000002000097 /* RunActivityAttributes.swift in Sources */,
 				A01B000002000098 /* RunPauseIntent.swift in Sources */,
 				A01B000001001563 /* RunActivityCenter.swift in Sources */,
+				A01B000001001564 /* WorkoutProgress.swift in Sources */,
+				A01B000001001565 /* RunVoice.swift in Sources */,
+				A01B000001001566 /* HealthProgressCards.swift in Sources */,
 				A01B000001001506 /* PhotoImportCenter.swift in Sources */,
 				A01B000001001507 /* PhotoSlideshowView.swift in Sources */,
 				A01B000001001509 /* SlideshowDecor.swift in Sources */,
@@ -1189,7 +1201,7 @@
 				CLANG_ENABLE_MODULES = YES;
 				CODE_SIGN_ENTITLEMENTS = LifeGoodWidgets/LifeGoodWidgets.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1309;
+				CURRENT_PROJECT_VERSION = 1310;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = LifeGoodWidgets/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "LifeGood";
@@ -1200,7 +1212,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 25.556;
+				MARKETING_VERSION = 25.557;
 				PRODUCT_BUNDLE_IDENTIFIER = com.lifegood.app.widgets;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
@@ -1216,7 +1228,7 @@
 				CLANG_ENABLE_MODULES = YES;
 				CODE_SIGN_ENTITLEMENTS = LifeGoodWidgets/LifeGoodWidgets.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1309;
+				CURRENT_PROJECT_VERSION = 1310;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = LifeGoodWidgets/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "LifeGood";
@@ -1227,7 +1239,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 25.556;
+				MARKETING_VERSION = 25.557;
 				PRODUCT_BUNDLE_IDENTIFIER = com.lifegood.app.widgets;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
@@ -1244,7 +1256,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = LifeGood/LifeGood.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1309;
+				CURRENT_PROJECT_VERSION = 1310;
 				DEVELOPMENT_ASSET_PATHS = "\"LifeGood/Preview Content\"";
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -1259,7 +1271,7 @@
 				INFOPLIST_KEY_NSRemindersUsageDescription = "LifeGood 需要存取提醒事項，把家庭待辦與部屬任務同步到 Apple 提醒事項。";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "LifeGood 用你的位置在你跑步、騎車、健走時畫出路線；也用來推薦附近的餐廳、在美食地圖標出你去過的店。";
 				INFOPLIST_KEY_NSLocationAlwaysAndWhenInUseUsageDescription = "LifeGood 在您開始跑步或騎車後持續記錄路徑，鎖屏或切到其他 App 時也需要位置權限才能繼續記錄。";
-				INFOPLIST_KEY_NSMotionUsageDescription = "LifeGood 用手機的氣壓計算你跑步、騎車、登山時爬了多高。";
+				INFOPLIST_KEY_NSMotionUsageDescription = "LifeGood 用手機的氣壓計算你跑步、騎車、登山時爬了多高；也用來判斷你停下來，等紅燈時自動暫停。";
 				INFOPLIST_KEY_NSHealthShareUsageDescription = "LifeGood 讀取「健康」裡的體重、身高、血壓、心率與運動紀錄（含 Apple Watch 記的路線、距離與爬升），帶進健康頁的健康檔案與運動清單，讓您不用兩邊各記一次。";
 				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "LifeGood 把您在 App 內記錄的運動（時間、距離、路線、暫停與大卡）寫進「健康」，讓運動計入體能訓練圓環、在「健身」App 看得到路線。";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "LifeGood 需要麥克風來錄製語音記帳輸入。";
@@ -1277,7 +1289,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 25.556;
+				MARKETING_VERSION = 25.557;
 				PRODUCT_BUNDLE_IDENTIFIER = com.lifegood.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -1293,7 +1305,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = LifeGood/LifeGood.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1309;
+				CURRENT_PROJECT_VERSION = 1310;
 				DEVELOPMENT_ASSET_PATHS = "\"LifeGood/Preview Content\"";
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -1308,7 +1320,7 @@
 				INFOPLIST_KEY_NSRemindersUsageDescription = "LifeGood 需要存取提醒事項，把家庭待辦與部屬任務同步到 Apple 提醒事項。";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "LifeGood 用你的位置在你跑步、騎車、健走時畫出路線；也用來推薦附近的餐廳、在美食地圖標出你去過的店。";
 				INFOPLIST_KEY_NSLocationAlwaysAndWhenInUseUsageDescription = "LifeGood 在您開始跑步或騎車後持續記錄路徑，鎖屏或切到其他 App 時也需要位置權限才能繼續記錄。";
-				INFOPLIST_KEY_NSMotionUsageDescription = "LifeGood 用手機的氣壓計算你跑步、騎車、登山時爬了多高。";
+				INFOPLIST_KEY_NSMotionUsageDescription = "LifeGood 用手機的氣壓計算你跑步、騎車、登山時爬了多高；也用來判斷你停下來，等紅燈時自動暫停。";
 				INFOPLIST_KEY_NSHealthShareUsageDescription = "LifeGood 讀取「健康」裡的體重、身高、血壓、心率與運動紀錄（含 Apple Watch 記的路線、距離與爬升），帶進健康頁的健康檔案與運動清單，讓您不用兩邊各記一次。";
 				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "LifeGood 把您在 App 內記錄的運動（時間、距離、路線、暫停與大卡）寫進「健康」，讓運動計入體能訓練圓環、在「健身」App 看得到路線。";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "LifeGood 需要麥克風來錄製語音記帳輸入。";
@@ -1326,7 +1338,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 25.556;
+				MARKETING_VERSION = 25.557;
 				PRODUCT_BUNDLE_IDENTIFIER = com.lifegood.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;

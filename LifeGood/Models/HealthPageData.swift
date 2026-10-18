@@ -14,6 +14,13 @@ import SwiftUI
 //   目標格「這週目標 20 公里」「73%」「還差 5.4 公里・剩 4 天」；膠囊「健走 3.1 公里」「2 小時 10 分」
 //   開始列「開始跑步」「再跑 5.4 公里這週就達標」；最近運動「這週 4 趟」；每週公里 12 週合計 154.9。
 // 驗算：health/build/v3/sim_v3.py。
+//
+// [v25.557] 健康 v7（build/v7/brief.md §G3-1）：
+//   • build 多收 leave（LifeStore.workoutLeave，請假週）：看板連續週數照請假算（WorkoutFacts.streak：請假那週沒動不加、不斷）。
+//   • 這週請假、這週還沒動：膠囊「[leaf.fill] 連續 6 週・請假中」（連續 0、1 週寫「這週請假」）、一句「這週請假・上週跑了 13.3 公里」
+//     （上週沒有：「這週請假，連續週數幫你留著」）、手寫 Rest / well!（順序：達標 → 5／10／25／52 週 → 請假中 → 新手 → 只有重訓 → 這週還沒動 → 平常）。
+//   • 新欄位 records（個人紀錄：WorkoutFacts.personalRecords，舊紀錄沒存 efforts 的用簡化過的路線現算——在 .task 裡、不在 body）、
+//     thisWeekLeave／nextWeekLeave（健康頁「⋯」的「這週請假／取消這週請假」「下週請假／取消下週請假」）。
 
 /// 看板頭部（照 VehicleCardBoardData 的資料合約）
 struct HealthBoardData: Equatable {
@@ -155,6 +162,12 @@ struct HealthPageData {
     var duplicates: [WorkoutDuplicate] = []
     /// [v25.554] 寫進 Apple 健康以後又改過的（要確認〔更新〕）。新到舊
     var staleWrites: [WorkoutHealthStale] = []
+    /// [v25.557] 個人紀錄（照 WorkoutRecordKind 的順序；沒跑過的那一種不在裡面；空的整區不出現）
+    var records: [WorkoutRecord] = []
+    /// [v25.557] 這週標了請假（「⋯」寫「取消這週請假」）
+    var thisWeekLeave = false
+    /// [v25.557] 下週標了請假（「⋯」寫「取消下週請假」）
+    var nextWeekLeave = false
 }
 
 extension HealthPageData {
@@ -164,9 +177,11 @@ extension HealthPageData {
 
     /// 整頁一次算好。在 .task(id:) 裡、主執行緒呼叫（MoneyItem.workout 用到共用的 formatter）。
     /// [v25.554] ledger：Apple 健康的帳（「兩筆都留」過的那一對不再出現在 duplicates）
+    /// [v25.557] leave：請假週（LifeStore.workoutLeave）；看板連續週數、「⋯」的請假兩顆讀它
     @MainActor
     static func build(workouts: [WorkoutSession], prefs: WorkoutPrefs, bodyWeightKg: Double?,
                       lastSport: RunSport, ledger: WorkoutHealthLedger = WorkoutHealthLedger(),
+                      leave: WorkoutLeaveBook = WorkoutLeaveBook(),
                       now: Date = Date()) -> HealthPageData {
         let sessions = workouts.sorted { $0.date > $1.date }
         let week = WorkoutFacts.week(of: now)
@@ -190,7 +205,7 @@ extension HealthPageData {
             hasStrength: hasStrength, isEmpty: sessions.isEmpty)
 
         page.board = makeBoard(sessions, thisWeek: thisWeek, hero: hero, strengthOnly: strengthOnly,
-                           progress: progress, startSport: startSport, now: now)
+                           progress: progress, startSport: startSport, leave: leave, now: now)
         page.scene = makeWeekScene(sessions, hero: hero, now: now)
         if !strengthOnly {
             if progress.goalKm != nil {
@@ -209,7 +224,16 @@ extension HealthPageData {
         // [v25.554] 要確認：同一趟（WorkoutFacts.duplicates）、改過要更新（WorkoutFacts.staleWrites）
         page.duplicates = WorkoutFacts.duplicates(sessions, ledger: ledger)
         page.staleWrites = WorkoutFacts.staleWrites(sessions)
+        // [v25.557] 個人紀錄、請假（「⋯」的兩顆）
+        page.records = WorkoutFacts.personalRecords(sessions)
+        page.thisWeekLeave = WorkoutFacts.isLeave(leave, weekOf: now)
+        page.nextWeekLeave = WorkoutFacts.isLeave(leave, weekOf: nextWeekDay(now))
         return page
+    }
+
+    /// [v25.557] 下週的同一天（「下週請假」標的那一週）
+    static func nextWeekDay(_ now: Date) -> Date {
+        WorkoutFacts.calendar.date(byAdding: .day, value: 7, to: now) ?? now.addingTimeInterval(7 * 86_400)
     }
 
     // MARK: 字
@@ -261,7 +285,7 @@ extension HealthPageData {
 
     private static func makeBoard(_ sessions: [WorkoutSession], thisWeek: [WorkoutSession], hero: WorkoutSport,
                               strengthOnly: Bool, progress: WorkoutWeekProgress, startSport: WorkoutSport,
-                              now: Date) -> HealthBoardData {
+                              leave: WorkoutLeaveBook, now: Date) -> HealthBoardData {
         var b = HealthBoardData()
         let idx = WorkoutFacts.weekdayIndex(now)
         let week = WorkoutFacts.week(of: now)
@@ -269,9 +293,17 @@ extension HealthPageData {
         b.dateIcon = strengthOnly ? "dumbbell.fill" : hero.icon
         b.seed = Int((week.start.timeIntervalSince1970 / 86_400).rounded()) % 9_973
 
-        let streak = WorkoutFacts.streakWeeks(sessions, now: now)
+        // [v25.557] 連續週數照請假算（請假那週沒動：不加、不斷；這週請假還沒動從上週數，sim_v7 §10）
+        let st = WorkoutFacts.streak(sessions, leave: WorkoutFacts.leaveWeeks(leave), now: now)
+        let streak = st.weeks
         let weekAll = thisWeek.filter { WorkoutFacts.counts($0) }.count
-        if streak >= 2 {
+        // [v25.557] 這週請假、這週還沒動（有動就照平常：那週照樣 +1）
+        let resting = weekAll == 0 && WorkoutFacts.isLeave(leave, weekOf: now)
+        if resting {
+            b.capsule = streak >= 2 ? "連續 \(streak) 週・請假中" : "這週請假"
+            b.capsuleIcon = "leaf.fill"
+            b.capsuleTone = streak >= 2 ? .good : .neutral
+        } else if streak >= 2 {
             b.capsule = "連續 \(streak) 週"
             b.capsuleIcon = "flame.fill"
             b.capsuleTone = .good
@@ -299,13 +331,18 @@ extension HealthPageData {
             b.line = boardLine(sessions, hero: hero, heroCount: heroCount, progress: progress,
                                startSport: startSport, weekStart: week.start, now: now)
         }
+        if resting {
+            b.line = restLine(sessions, hero: hero, strengthOnly: strengthOnly, now: now)
+        }
 
-        // 手寫：達標 → 連續 5／10／25／52 週那週 → 新手 → 只有重訓 → 這週還沒動 → 平常
+        // 手寫：達標 → 連續 5／10／25／52 週那週 → [v25.557] 請假中 → 新手 → 只有重訓 → 這週還沒動 → 平常
         let countedThisWeek = weekAll > 0
         if progress.reached && !strengthOnly {
             b.greeting = ["Goal", "reached!"]
         } else if countedThisWeek, [5, 10, 25, 52].contains(streak) {
             b.greeting = ["\(streak) weeks", "strong!"]
+        } else if resting {
+            b.greeting = ["Rest", "well!"]
         } else if sessions.isEmpty {
             b.greeting = ["Let's", letsWord(startSport)]
         } else if strengthOnly {
@@ -320,7 +357,12 @@ extension HealthPageData {
         var parts: [String] = [b.label + " " + b.big]
         let plain = b.line.plain.replacingOccurrences(of: "・", with: "，")
         if !plain.isEmpty { parts.append(plain) }
-        if let c = b.capsule { parts.append(c) }
+        if resting {
+            // [v25.557] 那一句已經唸了「這週請假」：膠囊只唸連續週數（「連續 6 週」），不重複
+            if streak >= 2 { parts.append("連續 \(streak) 週") }
+        } else if let c = b.capsule {
+            parts.append(c)
+        }
         if !strengthOnly, let g = progress.goalKm {
             if progress.reached {
                 parts.append("目標 " + goalKmText(g) + "已達標")
@@ -330,6 +372,18 @@ extension HealthPageData {
         }
         b.accessibilityText = parts.joined(separator: "，") + "。"
         return b
+    }
+
+    /// [v25.557] 這週請假、還沒動時看板那一句：「這週請假・上週跑了 13.3 公里」；上週沒有（或只有重訓）：「這週請假，連續週數幫你留著」
+    private static func restLine(_ sessions: [WorkoutSession], hero: WorkoutSport, strengthOnly: Bool,
+                                 now: Date) -> FinanceLine {
+        if !strengthOnly {
+            let last = WorkoutFacts.lastWeekKm(sessions, sport: hero, now: now)
+            if last >= 0.05 {
+                return FinanceLine.text("這週請假・上週\(WorkoutFacts.verb(hero))了 " + WorkoutFormat.km(last))
+            }
+        }
+        return FinanceLine.text("這週請假，連續週數幫你留著")
     }
 
     /// 看板那一句（主角是有氧時）

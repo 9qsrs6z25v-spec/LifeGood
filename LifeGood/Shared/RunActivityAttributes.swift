@@ -94,9 +94,12 @@ struct RunActivityAttributes: ActivityAttributes {
         var thirdLabel: String
         /// 完成那一行：「5.20 公里・32:10・6'11"」（騎車「23.4 公里・1:05:12・時速 21.5」）；沒完成是 nil
         var finishedLine: String?
+        /// [v25.557] 暫停中是自動暫停（停下來約 10 秒自己停的；RunTracker.autoPaused）：標題寫「晨跑・自動暫停」。
+        /// 其他時候 nil（Optional：舊的 App 推來的、還沒這個鍵的都讀得進來）
+        var autoPaused: Bool?
 
         init(phase: RunActivityPhase, distanceText: String, clockStart: Date, pausedAt: Date? = nil,
-             thirdText: String, thirdLabel: String, finishedLine: String? = nil) {
+             thirdText: String, thirdLabel: String, finishedLine: String? = nil, autoPaused: Bool? = nil) {
             self.phase = phase
             self.distanceText = distanceText
             self.clockStart = clockStart
@@ -104,6 +107,7 @@ struct RunActivityAttributes: ActivityAttributes {
             self.thirdText = thirdText
             self.thirdLabel = thirdLabel
             self.finishedLine = finishedLine
+            self.autoPaused = autoPaused
         }
     }
 
@@ -136,12 +140,13 @@ extension RunActivityAttributes {
 
     /// 標題：「晨跑・跑步中」「晚走・健走中」「晨騎・騎車中」「登山中」；暫停「晨跑・已暫停」「登山・已暫停」；完成「完成」
     /// （跟健康頁記錄中條 HealthLiveStrip.titleText 一樣）
+    /// [v25.557] 自動暫停「晨跑・自動暫停」「登山・自動暫停」（build/v7/sim_v7.py headline7）
     func headline(_ s: ContentState) -> String {
         switch s.phase {
         case .finished:
             return "完成"
         case .paused:
-            return title + "・已暫停"
+            return title + (s.autoPaused == true ? "・自動暫停" : "・已暫停")
         case .running:
             if sport == .hike { return "登山中" }
             return title + "・" + sport.name + "中"

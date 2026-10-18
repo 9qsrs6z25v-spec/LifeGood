@@ -3674,8 +3674,27 @@ struct WorkoutSplit: Codable, Equatable {
 struct WorkoutPause: Codable, Equatable {
     var start: Date
     var end: Date
+    /// [v25.557] 自動暫停（停下來約 10 秒自己停、動了自己繼續；RunTracker.autoPaused）；nil／false＝你按的暫停。
+    /// 成果頁「暫停 4 次・3:40（自動 3 次）」；寫進 Apple 健康照樣是一組暫停／繼續
+    var auto: Bool?
+
+    init(start: Date, end: Date, auto: Bool? = nil) {
+        self.start = start
+        self.end = end
+        self.auto = auto
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        start = (try? c.decode(Date.self, forKey: .start)) ?? Date()
+        end = (try? c.decode(Date.self, forKey: .end)) ?? start
+        auto = try? c.decodeIfPresent(Bool.self, forKey: .auto)
+    }
+    private enum CodingKeys: String, CodingKey { case start, end, auto }
 
     var seconds: Double { max(0, end.timeIntervalSince(start)) }
+    /// [v25.557] 是自動暫停
+    var isAuto: Bool { auto == true }
 }
 
 /// [v25.552] 這一趟怎麼記的
@@ -3718,12 +3737,16 @@ struct WorkoutExercise: Identifiable, Codable {
     var sport: WorkoutSport?
     /// [v25.552] 每公里分段（App 記的才有；簡化路線之前算好）
     var splits: [WorkoutSplit]?
+    /// [v25.557] 最快的 1／5／10 公里、半馬（跑步、App 記的才有；簡化路線之前用完整的點算好，WorkoutFacts.bestEfforts）。
+    /// nil＝v25.556 以前存的、手錶帶進來的：個人紀錄要用時從存下來的路線現算（WorkoutFacts.efforts）
+    var efforts: [WorkoutEffort]?
 
     init(id: UUID = UUID(), name: String = "", kind: WorkoutKind = .strength,
          reps: Int = 10, sets: Int = 3, loadType: WorkoutLoadType = .bodyweight,
          loadKg: Double = 0, distanceKm: Double = 0, durationMinutes: Double = 0,
          route: [RoutePoint] = [], elevationGainM: Double = 0,
-         note: String = "", sport: WorkoutSport? = nil, splits: [WorkoutSplit]? = nil) {
+         note: String = "", sport: WorkoutSport? = nil, splits: [WorkoutSplit]? = nil,
+         efforts: [WorkoutEffort]? = nil) {
         self.id = id; self.name = name; self.kind = kind
         self.reps = reps; self.sets = sets
         self.loadType = loadType; self.loadKg = loadKg
@@ -3731,6 +3754,7 @@ struct WorkoutExercise: Identifiable, Codable {
         self.route = route; self.elevationGainM = elevationGainM
         self.note = note
         self.sport = sport; self.splits = splits
+        self.efforts = efforts
     }
 
     init(from decoder: Decoder) throws {
@@ -3749,10 +3773,12 @@ struct WorkoutExercise: Identifiable, Codable {
         note = (try? c.decode(String.self, forKey: .note)) ?? ""
         sport = try? c.decodeIfPresent(WorkoutSport.self, forKey: .sport)
         splits = try? c.decodeIfPresent([WorkoutSplit].self, forKey: .splits)
+        efforts = try? c.decodeIfPresent([WorkoutEffort].self, forKey: .efforts)
     }
     private enum CodingKeys: String, CodingKey {
         case id, name, kind, reps, sets, loadType, loadKg, distanceKm, durationMinutes
         case route, elevationGainM, note, sport, splits
+        case efforts
     }
 
     /// 有沒有可以畫在地圖上的路徑
@@ -3861,6 +3887,9 @@ struct WorkoutSession: Identifiable, Codable {
     /// [v25.555] 這一趟記錄時 GPS 好不好（App 記的才有；成果頁「要確認」：大部分時間訊號很弱就提醒一句）。
     /// nil＝v25.554 以前記的、手動補記、Apple 健康帶進來的。見 WorkoutGPSQuality、WorkoutFacts.gpsWeakPrompt
     var gps: WorkoutGPSQuality?
+    /// [v25.557] 存檔時算好的「這一趟的亮點」：破了哪幾個個人紀錄、同一條路第幾次、比上次快多少（WorkoutFacts.highlights）。
+    /// 之後打開不重算（再跑一次也不會把這一趟的「第 12 次」改掉）。nil＝v25.556 以前記的、沒破紀錄也沒跑過同一條路、手動補記、手錶帶進來的
+    var highlights: WorkoutHighlights?
 
     init(id: UUID = UUID(), date: Date = Date(), title: String = "",
          exercises: [WorkoutExercise] = [], durationMinutes: Double = 0,
@@ -3868,7 +3897,8 @@ struct WorkoutSession: Identifiable, Codable {
          healthKitUUID: String? = nil, activeEnergyKcal: Double = 0,
          endedAt: Date? = nil, source: WorkoutSource? = nil,
          pauses: [WorkoutPause]? = nil, kcalEstimated: Bool? = nil,
-         health: WorkoutHealthLink? = nil, gps: WorkoutGPSQuality? = nil) {
+         health: WorkoutHealthLink? = nil, gps: WorkoutGPSQuality? = nil,
+         highlights: WorkoutHighlights? = nil) {
         self.id = id; self.date = date; self.title = title
         self.exercises = exercises; self.durationMinutes = durationMinutes
         self.place = place; self.note = note
@@ -3877,6 +3907,7 @@ struct WorkoutSession: Identifiable, Codable {
         self.source = source; self.pauses = pauses; self.kcalEstimated = kcalEstimated
         self.health = health
         self.gps = gps
+        self.highlights = highlights
     }
 
     init(from decoder: Decoder) throws {
@@ -3896,6 +3927,7 @@ struct WorkoutSession: Identifiable, Codable {
         kcalEstimated = try? c.decodeIfPresent(Bool.self, forKey: .kcalEstimated)
         health = try? c.decodeIfPresent(WorkoutHealthLink.self, forKey: .health)
         gps = try? c.decodeIfPresent(WorkoutGPSQuality.self, forKey: .gps)
+        highlights = try? c.decodeIfPresent(WorkoutHighlights.self, forKey: .highlights)
     }
     private enum CodingKeys: String, CodingKey {
         case id, date, title, exercises, durationMinutes, place, note
@@ -3903,6 +3935,7 @@ struct WorkoutSession: Identifiable, Codable {
         case source, pauses, kcalEstimated
         case health
         case gps
+        case highlights
     }
 
     /// [v25.551] 寫進 Apple 健康用的結束時間。movingMinutes 是呼叫端算好的移動時間（分鐘）。
@@ -4029,6 +4062,145 @@ struct WorkoutPrefs: Codable, Equatable {
 
     /// 什麼都沒設過（合併匯入時只在本機沒設過才帶進來）
     var isEmpty: Bool { heroSport == nil && (weeklyGoalKm ?? [:]).isEmpty }
+}
+
+// MARK: - 教練與進步（v25.557，健康 v7；health/judge.md §3.10、§4.3、§6 v7、build/v7/brief.md §2）
+// 欄位全部 Optional＋decodeIfPresent：舊資料、還沒更新的 iPad 都讀得進來（舊版讀不懂這幾個鍵就略過）。
+// 算法在 WorkoutProgress.swift（WorkoutFacts.bestEfforts／recordMarks／routeMatch／highlights）。
+
+/// [v25.557] 一段最快（WorkoutExercise.efforts）：走完 meters 公尺最少花了幾秒（移動時間，暫停不算）
+struct WorkoutEffort: Codable, Equatable {
+    /// 1000、5000、10000、21097.5
+    var meters: Double
+    var seconds: Double
+
+    init(meters: Double, seconds: Double) {
+        self.meters = meters
+        self.seconds = seconds
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        meters = (try? c.decodeIfPresent(Double.self, forKey: .meters)) ?? 0
+        seconds = (try? c.decodeIfPresent(Double.self, forKey: .seconds)) ?? 0
+    }
+    private enum CodingKeys: String, CodingKey { case meters, seconds }
+}
+
+/// [v25.557] 這一趟破的一個紀錄（存檔時跟以前每一趟比過；WorkoutFacts.recordMarks）
+struct WorkoutRecordMark: Codable, Equatable {
+    /// WorkoutRecordKind.rawValue（「fastest5k」…；新版多一種、舊版讀不懂時畫面略過）
+    var kind: String
+    /// 這一趟的值：最快幾公里是秒、最長是公里
+    var value: Double
+    /// 破之前的紀錄（同一個單位）
+    var previous: Double
+
+    init(kind: String, value: Double, previous: Double) {
+        self.kind = kind
+        self.value = value
+        self.previous = previous
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        kind = (try? c.decodeIfPresent(String.self, forKey: .kind)) ?? ""
+        value = (try? c.decodeIfPresent(Double.self, forKey: .value)) ?? 0
+        previous = (try? c.decodeIfPresent(Double.self, forKey: .previous)) ?? 0
+    }
+    private enum CodingKeys: String, CodingKey { case kind, value, previous }
+}
+
+/// [v25.557] 同一條路（存檔時跟以前每一趟比過；WorkoutFacts.routeMatch）：「河濱老路線・第 12 次・比上次快 42 秒」
+struct WorkoutRouteMatch: Codable, Equatable {
+    /// 「河濱老路線」（WorkoutFacts.routeName；畫面上這一趟名字是你自己取的就照現在的名字算，WorkoutFacts.routeDisplayName）
+    var name: String?
+    /// 第幾次（這一趟算進去；2 起）
+    var count: Int?
+    /// 比上次快幾秒（正＝快、負＝慢；照這一趟的距離換算）
+    var deltaSeconds: Double?
+    /// 上一次是哪一趟
+    var previousId: UUID?
+
+    init(name: String? = nil, count: Int? = nil, deltaSeconds: Double? = nil, previousId: UUID? = nil) {
+        self.name = name
+        self.count = count
+        self.deltaSeconds = deltaSeconds
+        self.previousId = previousId
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        name = try? c.decodeIfPresent(String.self, forKey: .name)
+        count = try? c.decodeIfPresent(Int.self, forKey: .count)
+        deltaSeconds = try? c.decodeIfPresent(Double.self, forKey: .deltaSeconds)
+        previousId = try? c.decodeIfPresent(UUID.self, forKey: .previousId)
+    }
+    private enum CodingKeys: String, CodingKey { case name, count, deltaSeconds, previousId }
+}
+
+/// [v25.557] 這一趟的亮點（WorkoutSession.highlights）：破紀錄、同一條路
+struct WorkoutHighlights: Codable, Equatable {
+    var records: [WorkoutRecordMark]?
+    var route: WorkoutRouteMatch?
+
+    init(records: [WorkoutRecordMark]? = nil, route: WorkoutRouteMatch? = nil) {
+        self.records = records
+        self.route = route
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        records = try? c.decodeIfPresent([WorkoutRecordMark].self, forKey: .records)
+        route = try? c.decodeIfPresent(WorkoutRouteMatch.self, forKey: .route)
+    }
+    private enum CodingKeys: String, CodingKey { case records, route }
+}
+
+/// [v25.557] 請假週（LifeStore.workoutLeave，鍵 life_workout_leave，跟 iCloud 同步、進完整備份）：出差、生病的那一週標成請假，
+/// 那週沒運動也不會讓「連續幾週」斷掉（不加、不斷；WorkoutFacts.streak）。單獨一個鍵、不放進 WorkoutPrefs：
+/// 還沒更新的 iPad 存資料時會整包重寫它認得的 WorkoutPrefs（不認得的欄位被丟掉），單獨一個它不認得的鍵就不會被蓋掉（同 v25.554 的帳）
+struct WorkoutLeaveBook: Codable, Equatable {
+    /// 請假的那幾週：週一的日期「2026-08-31」（WorkoutFacts.leaveKey）
+    var weeks: [String]?
+
+    /// 最多留幾週（十年；最舊的先丟）
+    static let maxEntries = 520
+
+    init(weeks: [String]? = nil) {
+        self.weeks = weeks
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        weeks = try? c.decodeIfPresent([String].self, forKey: .weeks)
+    }
+    private enum CodingKeys: String, CodingKey { case weeks }
+
+    var isEmpty: Bool { (weeks ?? []).isEmpty }
+
+    func contains(_ key: String) -> Bool { (weeks ?? []).contains(key) }
+
+    /// 請假（on）或取消（off）；key＝WorkoutFacts.leaveKey(weekOf:)
+    mutating func set(_ on: Bool, key: String) {
+        var all = weeks ?? []
+        if on {
+            guard !key.isEmpty, !all.contains(key) else { return }
+            all.append(key)
+            all.sort()
+            if all.count > Self.maxEntries { all.removeFirst(all.count - Self.maxEntries) }
+        } else {
+            all.removeAll { $0 == key }
+        }
+        weeks = all.isEmpty ? nil : all
+    }
+
+    /// 合併匯入：兩邊取聯集
+    func merged(with other: WorkoutLeaveBook) -> WorkoutLeaveBook {
+        var out = self
+        for k in other.weeks ?? [] { out.set(true, key: k) }
+        return out
+    }
 }
 
 // MARK: - 記錄時 GPS 好不好（v25.555，健康 v5；health/judge.md §5.2 ③、build/v5/brief.md）

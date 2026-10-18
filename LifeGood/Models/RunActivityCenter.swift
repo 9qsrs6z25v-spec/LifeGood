@@ -361,7 +361,8 @@ final class RunActivityCenter {
 
     // MARK: - 內部：字（sim_v6.py make_state、finished_line）
 
-    /// 鎖定畫面、靈動島的內容（brief §G3-3）：記錄中第三格是「這一公里」（騎車「時速」），暫停中改成平均
+    /// 鎖定畫面、靈動島的內容（brief §G3-3）：記錄中第三格是「這一公里」（騎車「時速」），暫停中改成平均。
+    /// [v25.557] 自動暫停中多帶 autoPaused（標題「晨跑・自動暫停」；第三格照暫停寫平均）
     private func makeState(_ tracker: RunTracker) -> RunActivityAttributes.ContentState {
         let sport = WorkoutSport(tracker.sport)
         let meters = tracker.distanceMeters
@@ -383,7 +384,8 @@ final class RunActivityCenter {
                                                       clockStart: clockStart,
                                                       pausedAt: tracker.pausedAt,
                                                       thirdText: third,
-                                                      thirdLabel: label)
+                                                      thirdLabel: label,
+                                                      autoPaused: tracker.autoPaused ? true : nil)
         }
         let third: String
         let label: String

@@ -47,6 +47,15 @@ import Combine
 //     （WorkoutActions.save），它自己把同一個全螢幕換成成果頁（剛跑完）、不關全螢幕；左上「完成」才關。
 //   • 全螢幕關掉時，剛跑完那一趟在「最近運動」那張卡亮 1.6 秒（綠色外框淡出）；看板、卡片在全螢幕開著時 store 一改就會重算。
 //   • 全螢幕開著時回到前景不同步 Apple 健康（跑步中解鎖手機不在背後讀寫），關掉時再看一次（同關掉彈出頁）。
+//
+// [v25.557] 健康 v7（build/v7/brief.md §G3-2～G3-4）：
+//   • ⑤ 每週公里下面多「月曆」（HealthCalendarCard：熱圖、打勾／葉子、長按一週請假），再下面「個人紀錄」
+//     （HealthRecordsCard，插在每週公里和重訓中間；judge §3.10），點一天／點一列打開那一趟的成果頁（不擋訂閱）。
+//   • 「⋯」多兩顆：「這週請假／取消這週請假」「下週請假／取消下週請假」（不擋訂閱；選單收起來那一輪先過，下一輪才寫 store）。
+//     看板連續週數照請假算（HealthPageData.build 收 leave）。
+//   • 鎖定畫面／靈動島的跑步卡點進來（lifegood://life/health/run → DeepLinkRouter.requestHealthRun）：.onDeepLinkHealthRun 收，
+//     在跑 → 跑步全螢幕（回到那一趟；彈出頁開著先收掉，0.45 秒後再開）；剛跑完 20 分鐘內 → 那一趟的成果頁；
+//     都不是 → 照「開始」（要訂閱）。在跑、剛跑完都不擋訂閱（待決定 8）。
 
 // MARK: - 彈出頁
 
@@ -205,6 +214,8 @@ struct HealthView: View {
             .task { await pageOpened() }
             // Published 一訂閱就送目前的值；之後只在開始、暫停、繼續、結束時送
             .onReceive(RunTracker.shared.$phase) { p in phaseChanged(p) }
+            // [v25.557] 鎖定畫面／靈動島的跑步卡點進來（冷啟動 onAppear、已經在這頁 onChange 都收）
+            .onDeepLinkHealthRun { openRunFromLink() }
             .onAppear { pageAppeared() }
             .onChange(of: scenePhase) { _, phase in sceneChanged(phase) }
             // 離開頁面時把還在倒數的提示收掉，不要留一個醒著的 Task
@@ -238,7 +249,8 @@ struct HealthView: View {
                                     prefs: lifeStore.workoutPrefs,
                                     bodyWeightKg: lifeStore.latestBodyWeightKg,
                                     lastSport: lastSport,
-                                    ledger: lifeStore.workoutHealthLedger)
+                                    ledger: lifeStore.workoutHealthLedger,
+                                    leave: lifeStore.workoutLeave)      // [v25.557] 請假：改了 workoutsRevision 會加一
         lastBuiltKey = key
     }
 
@@ -360,6 +372,13 @@ struct HealthView: View {
             }
             recentSection(p)
             weeklySection(p)
+            // [v25.557] 月曆（每週公里下面）、個人紀錄（插在每週公里和重訓中間）
+            if !p.isEmpty {
+                calendarSection
+            }
+            if !p.records.isEmpty {
+                recordsSection(p)
+            }
             if p.hasStrength {
                 HealthStrengthSection(scrollToCurve: {
                     withAnimation(.easeInOut(duration: 0.35)) {
@@ -386,6 +405,67 @@ struct HealthView: View {
     /// 記錄中條「回到跑步」：不擋訂閱（在跑的那一趟一定讓你存完）。[v25.555] 全螢幕
     private func openRun() {
         runCover = HealthRunCover()
+    }
+
+    /// [v25.557] 鎖定畫面／靈動島的跑步卡點進來（lifegood://life/health/run；DeepLinkRouter 已經切到人生 › 健康）。
+    /// 在跑 → 跑步全螢幕（回到那一趟；已經開著就不動）；沒在跑、全螢幕開著（剛跑完的成果頁）→ 不動；
+    /// 剛跑完 20 分鐘內（鎖定畫面「完成」那張留 15 分鐘）→ 那一趟的成果頁；有一趟沒存（App 跑到一半被關掉）→ 留在健康頁（③ 要確認）；
+    /// 都不是 → 照「開始」（要訂閱，同開始列）。在跑、剛跑完都不擋訂閱（待決定 8）
+    private func openRunFromLink() {
+        guard DeepLinkRouter.shared.takeHealthRun() else { return }
+        guard runCover == nil else { return }
+        if RunTracker.shared.isActive {
+            presentRunCover()
+            return
+        }
+        if let id = recentAppRunId(now: Date()) {
+            if case .detail(_, let shown)? = sheet, shown == id { return }   // 已經在看那一趟
+            sheet = .detail(UUID(), id)
+            return
+        }
+        // 跑到一半 App 被關掉、點了還留著的那張卡：有一趟還沒存（③ 要確認「存下來／丟掉」）就留在健康頁，
+        // 不蓋一個開始畫面在它上面（在跑的那一趟一定讓你存完；救回 scan 還沒跑完時照下面開開始畫面）
+        if !recovery.pending.isEmpty { return }
+        guard subscription.isPremium else { showPremiumAlert = true; return }
+        presentRunCover()
+    }
+
+    /// [v25.557] 打開跑步全螢幕；上面開著彈出頁（成果頁、設定小頁…）先收掉，0.45 秒後（收的動畫跑完）再開
+    /// （同一個 view 上 sheet 還在時開 fullScreenCover 會開不起來）
+    private func presentRunCover() {
+        guard sheet != nil else {
+            runCover = HealthRunCover()
+            return
+        }
+        sheet = nil
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) {
+            reopenRunCoverAfterSheet()
+        }
+    }
+
+    /// [v25.557] 彈出頁收掉之後：那 0.45 秒裡又開了別的（或全螢幕已經開了）就不動
+    private func reopenRunCoverAfterSheet() {
+        guard runCover == nil, sheet == nil else { return }
+        runCover = HealthRunCover()
+    }
+
+    /// [v25.557] 剛跑完（App 記的、endedAt 在 20 分鐘內）的那一趟；有好幾趟拿最晚結束的
+    private func recentAppRunId(now: Date) -> UUID? {
+        let window: TimeInterval = 20 * 60
+        var best: (id: UUID, end: Date)?
+        for s in lifeStore.workouts {
+            guard let end = s.endedAt, WorkoutFacts.source(of: s) == .app else { continue }
+            let ago = now.timeIntervalSince(end)
+            guard ago >= -60, ago <= window else { continue }
+            if let b = best, b.end >= end { continue }
+            best = (id: s.id, end: end)
+        }
+        return best?.id
+    }
+
+    /// [v25.557] 月曆點一天、個人紀錄點一列：打開那一趟的成果頁（不擋訂閱，同點卡片）
+    private func openDetail(_ id: UUID) {
+        sheet = .detail(UUID(), id)
     }
 
     /// 目標格、「⋯ › 每週目標」：不擋訂閱。page 還沒算好（剛打開那一瞬間）就不開，免得彈出一張空白表單
@@ -525,11 +605,38 @@ struct HealthView: View {
             } label: {
                 Label("Apple 健康", systemImage: "heart.text.square")
             }
+            leaveMenuItems
         } label: {
             Image(systemName: "ellipsis.circle")
                 .font(.title3)
         }
         .accessibilityLabel("更多")
+    }
+
+    /// [v25.557] 「⋯」的請假兩顆（page 還沒算好不出現）：這週請假／取消這週請假、下週請假／取消下週請假
+    @ViewBuilder
+    private var leaveMenuItems: some View {
+        if let p = page {
+            Divider()
+            Button {
+                setLeave(!p.thisWeekLeave, nextWeek: false)
+            } label: {
+                Label(p.thisWeekLeave ? "取消這週請假" : "這週請假", systemImage: "leaf")
+            }
+            Button {
+                setLeave(!p.nextWeekLeave, nextWeek: true)
+            } label: {
+                Label(p.nextWeekLeave ? "取消下週請假" : "下週請假", systemImage: "leaf")
+            }
+        }
+    }
+
+    /// [v25.557] 「⋯」請假：不擋訂閱（把資料弄對，不是新增內容）。選單收起來那一次畫面更新先過，下一輪主執行緒才寫 store
+    private func setLeave(_ on: Bool, nextWeek: Bool) {
+        let store = lifeStore
+        let now = Date()
+        let day = nextWeek ? HealthPageData.nextWeekDay(now) : now
+        DispatchQueue.main.async { store.setLeave(on, weekOf: day) }
     }
 
     /// 看板主角（存在 lifeStore.workoutPrefs，跟 iCloud 同步）。
@@ -997,6 +1104,28 @@ struct HealthView: View {
         .padding(.vertical, 12)
         .modifier(FinanceCardChrome())
         .padding(.horizontal, 16)
+    }
+
+    // MARK: ⑤-1 月曆、⑤-2 個人紀錄（v25.557）
+
+    /// 月曆：資料在卡片自己的 .task(id:) 算（refreshKey＝workoutsRevision＋今天；請假一改 workoutsRevision 就加一）。
+    /// 長按一週請假：長按選單收起來那一輪先過，下一輪主執行緒才寫 store
+    private var calendarSection: some View {
+        let store = lifeStore
+        return HealthCalendarCard(sessions: lifeStore.workouts,
+                                  leave: lifeStore.workoutLeave,
+                                  refreshKey: "\(lifeStore.workoutsRevision)-\(dayKey)",
+                                  onOpen: { id in openDetail(id) },
+                                  onLeave: { on, start in
+                                      DispatchQueue.main.async { store.setLeave(on, weekOf: start) }
+                                  })
+            .padding(.horizontal, 16)
+    }
+
+    /// 個人紀錄（page.records 在 .task 裡算好）；點一列打開那一趟
+    private func recordsSection(_ p: HealthPageData) -> some View {
+        HealthRecordsCard(records: p.records) { id in openDetail(id) }
+            .padding(.horizontal, 16)
     }
 
     // MARK: ⑦ Apple 健康（一列）

@@ -70,6 +70,20 @@ import UIKit
 //   用定位上的時間重新判斷，其實收得到（那一秒之前最近的一筆離它不到 10 秒、在 20 公尺內）就扣回去
 //   （sim_v6 §1 每秒送跟 v5 每一秒都一樣；§3 每 15／20／25 秒送一批，v5 誤報 33／50／60% 弱 → v6 0%）。
 // • 開始、每秒、暫停、繼續、完成、放棄各叫一次 RunActivityCenter（鎖定畫面、靈動島；節流、開關都在那裡）。
+//
+// [v25.557] 教練（模擬：health/build/v7/sim_v7.py 的 TrackerV7，逐行對照；存點規則（accept 的過濾、平均、跳點、站著、間距）照樣一行都沒動）：
+// • 自動暫停：判斷全在 WorkoutProgress.swift 的 RunAutoPause（這裡不另寫一份）；accept() 每一筆（跑步中、自動暫停中；手動暫停中不看）
+//   交給它 observe 一次，它說停就 autoPauseNow(at:)、說動就 autoResumeNow(from:)。跑、走、騎預設開，登山關（RunSport.autoPauseOn，
+//   開始那一刻讀一次；跑步中「⋯」改用 setAutoPauseEnabled）。
+// • 自動暫停用跟手動暫停同一套 phase = .paused（時間停住、不存點、不算距離、鎖定畫面時間停住、30 分鐘提醒照舊），多一個 autoPaused = true；
+//   Phase 不加 case。跟手動暫停不同：定位精度不改（要看你什麼時候動起來）、GPS 燈照常更新。
+//   暫停時間從觸發那一筆定位算（成批送來時是那一筆的時間），不早於上次開始／繼續（lastGoAt）、不晚於現在。
+// • 自動繼續：時間從開始動的那一筆算（那 2～3 秒算移動時間）；新的一段（seg + 1）第一點＝停下來那一點（時間改成開始動那一刻）：
+//   線接著畫（紅燈不會斷一截）、距離從停下來那一點接著算、紅燈站著 GPS 飄出去的不算。爬升錨點不動（站著沒爬）。
+//   暫停清單記成 WorkoutPause(auto: true)。自動暫停中按〔繼續〕（畫面、鎖定畫面）照自動繼續接著畫；手動暫停中走來走去不會自己繼續。
+// • 動作偵測（CMMotionActivityManager，只輔助自動暫停）：打包出來的 Info.plist 有「動作與健身」說明字、而且已經允許才開，
+//   不在跑步中跳權限框（權限是開始運動畫面的氣壓計那一次問的）；沒有就只看 GPS（sim_v7 §4：照樣停得下來）。
+// • 每公里語音：store() 走滿整公里那一刻叫 RunVoice.kmDone（騎車只有 5 的倍數有字）；自動暫停／繼續各講一句；完成、放棄 stopAll。
 
 // MARK: - 運動種類（v25.551）
 
@@ -189,6 +203,44 @@ enum RunSport: String, CaseIterable, Identifiable {
     func setCellChoice(_ slot: Int, _ value: Int) {
         UserDefaults.standard.set(min(max(value, 0), 2), forKey: "run_cell_\(slot)_" + rawValue)
     }
+
+    // MARK: [v25.557] 自動暫停、語音（build/v7/brief.md §2；主控寫好，G1、G2 照用）
+
+    /// 停下來的門檻（公尺／秒）：GPS 速度低於這個連續約 8 秒就自動暫停（judge §4.1 第 11 列：跑 0.5、走 0.4、騎 1.5；登山同健走）。
+    /// RunAutoPause(stopSpeed:onFoot:) 用；動起來的門檻是兩倍
+    var autoPauseSpeed: Double {
+        switch self {
+        case .run: return 0.5
+        case .walk: return 0.4
+        case .hike: return 0.4
+        case .bike: return 1.5
+        }
+    }
+
+    /// 自動暫停（每種運動各記一個）的鍵，例：run_auto_pause_跑步
+    var autoPauseKey: String { "run_auto_pause_" + rawValue }
+
+    /// 自動暫停：跑步、健走、騎車預設開，登山預設關（爬坡慢、常停下來喘氣拍照；judge §6 v7、使用者「全照建議」）。
+    /// 跑步畫面「⋯」裡可以關；開始那一刻讀一次（跑到一半改了，下一趟才算）
+    var autoPauseOn: Bool {
+        (UserDefaults.standard.object(forKey: autoPauseKey) as? Bool) ?? (self != .hike)
+    }
+
+    func setAutoPause(_ on: Bool) {
+        UserDefaults.standard.set(on, forKey: autoPauseKey)
+    }
+
+    /// 每公里語音（全部運動共用一個開關；預設開）的鍵
+    static let voiceKey = "run_voice"
+
+    /// 每公里語音；沒設過＝開（judge §6 v7、使用者「全照建議」）。講的時候才讀（跑到一半關掉，下一公里就不講）
+    static var voiceOn: Bool {
+        (UserDefaults.standard.object(forKey: voiceKey) as? Bool) ?? true
+    }
+
+    static func setVoice(_ on: Bool) {
+        UserDefaults.standard.set(on, forKey: voiceKey)
+    }
 }
 
 /// 結束一趟的成果（RunTracker.finish() 回傳，呼叫端是 RunTrackingView.finish()；
@@ -283,6 +335,32 @@ final class RunTracker: NSObject, ObservableObject {
     @Published private(set) var reducedAccuracy = false
     /// [v25.555] 地圖上每整公里一塊小牌（store() 的 kmClimb 迴圈裡跟每公里爬升一起加；start、cancel 清空）
     @Published private(set) var kmMarkers: [RunKmMarker] = []
+    /// [v25.557] 現在的暫停是自動暫停（停下來約 10 秒自己停的；phase 是 .paused）。手動暫停、跑步中、沒在記錄都是 false。
+    /// 跑步畫面（淡黃條「自動暫停中・動了就繼續」、不整片變灰）、健康頁記錄中條、鎖定畫面（RunActivityCenter.makeState）讀這個。
+    /// 主控契約（G1 在 autoPauseNow／autoResumeNow／start／pause／resume／finish／cancel 改它），其他組只讀
+    @Published private(set) var autoPaused = false
+    /// [v25.557] 這一趟開著自動暫停（start 那一刻讀 sport.autoPauseOn；跑步中從「⋯」改用 setAutoPauseEnabled）。G1 在 start 設、accept 讀
+    private var autoPauseOn = false
+
+    /// [v25.557] 這一趟（記錄中）的自動暫停開著沒：跑步畫面「⋯」的開關讀這個（沒在記錄時畫面讀選的那一種 RunSport.autoPauseOn）。主控契約
+    var autoPauseActive: Bool { autoPauseOn }
+
+    /// [v25.557] 記錄中從跑步畫面「⋯」打開／關掉自動暫停：記住這種運動的設定，這一趟馬上照新的
+    /// （關掉時正在自動暫停就馬上繼續；打開時從現在起算）。沒在記錄時只記設定（畫面在開始前改的是選的那一種：RunSport.setAutoPause）。
+    /// 主控契約（簽章不准改；G1 補完 body，sim_v7.py TrackerV7.set_auto）
+    func setAutoPauseEnabled(_ on: Bool) {
+        sport.setAutoPause(on)
+        guard isActive else { return }
+        autoPauseOn = on
+        if on {
+            autoPause.reset()                              // 從現在起算
+            startMotion()                                  // 已經允許才開（不跳框）
+        } else {
+            if autoPaused { autoResumeNow(from: Date()) }  // 正在自動暫停：馬上繼續（線接著畫）
+            autoPause.reset()
+            stopMotion()
+        }
+    }
 
     /// [v25.555] 每走滿一整公里那一刻的移動時間（秒）：kmTimes[0]＝第 1 公里走完時。「這一公里」小步道用（WorkoutFacts.legProgress）。
     /// 不發布（elapsed 每秒都在變，畫面本來就每秒重畫）。store() 的 kmClimb 迴圈裡一起加；start、cancel 清空
@@ -363,6 +441,18 @@ final class RunTracker: NSObject, ObservableObject {
     /// [v25.556] 只因為「10 秒收不到」才算弱的那幾秒（tickGPS 記下那一秒的時間）；下一批定位送來時用定位上的時間重新判斷（acceptBatch）。
     /// 40 秒前的不留（30 秒以上的舊定位本來就不收，補不上了）。開始、繼續、完成、放棄時清空
     private var gpsNoFixTicks: [Date] = []
+
+    // [v25.557] 自動暫停（build/v7/sim_v7.py TrackerV7；判斷在 WorkoutProgress.swift 的 RunAutoPause）
+    /// 自動暫停的判斷（start 換新的；手動暫停、手動繼續、完成、放棄 reset）
+    private var autoPause = RunAutoPause(stopSpeed: RunSport.run.autoPauseSpeed, onFoot: true)
+    /// 上一次開始／繼續的時間：自動暫停的時間不早於它
+    private var lastGoAt: Date?
+    /// 動作偵測（輔助自動暫停）。lazy：第一次用到是在 startMotion 過了 hasMotionUsage、已經允許之後（同 altimeter）
+    private lazy var motionManager = CMMotionActivityManager()
+    /// 動作偵測開著
+    private var motionOn = false
+    /// 動作偵測最近說的（RunAutoPause.observe 的 motion）
+    private var motion: RunMotion = .unknown
 
     private override init() {
         super.init()
@@ -555,6 +645,7 @@ final class RunTracker: NSObject, ObservableObject {
     /// 還沒送過的話 30 秒後自動走 GPS 備案，送了就換回來。精確位置關著就請系統暫時給；最後先寫一次中途存檔
     /// [v25.555] 每公里時間、小牌清空；GPS 弱從這一刻重新起算（開始那一刻當成剛收到定位），整趟統計歸零
     /// [v25.556] 定位設回最準（上一趟暫停中被收掉時還是低精度）；最後開鎖定畫面、靈動島（RunActivityCenter.began）
+    /// [v25.557] 自動暫停：這一趟開著沒（sport.autoPauseOn）讀一次、判斷換新的、lastGoAt＝開始那一刻；開著就開動作偵測（已經允許才開）
     func start(sport: RunSport) {
         guard phase == .idle else { return }
         requestAuthorization()
@@ -571,6 +662,10 @@ final class RunTracker: NSObject, ObservableObject {
         gpsAccSum = 0
         gpsAccCount = 0
         gpsNoFixTicks = []                                 // [v25.556]
+        autoPaused = false                                 // [v25.557]
+        autoPauseOn = sport.autoPauseOn                    // [v25.557] 這一趟開始時讀一次
+        autoPause = RunAutoPause(stopSpeed: sport.autoPauseSpeed, onFoot: sport != .bike)
+        motion = .unknown
         newPointsSinceCheckpoint = 0
         baroFallback = false
         minStep = sport.minStep
@@ -588,12 +683,14 @@ final class RunTracker: NSObject, ObservableObject {
         pausedAccumulated = 0
         pauseStartedAt = nil
         startedAt = Date()
+        lastGoAt = startedAt                               // [v25.557] 自動暫停的時間不早於它
         waitingForFix = true
         phase = .running
         manager.desiredAccuracy = kCLLocationAccuracyBest   // [v25.556] 保險：上一趟暫停中（低精度）被收掉也回到最準
         beginUpdates()
         startTicker()
         startAltimeter()                                   // 暖機時已經開了就略過
+        if autoPauseOn { startMotion() }                   // [v25.557] 動作偵測輔助自動暫停（已經允許才開，不跳框）
         if reducedAccuracy { requestPreciseLocation() }    // [v25.552] 精確位置關著：按開始這一刻請系統「這一次給精確位置」
         checkpointNow()                                    // [v25.552] 一開始就寫一次：檔一直都在，剛出門就被關掉也救得回來
         RunActivityCenter.shared.began(self)               // [v25.556] 鎖定畫面、靈動島（先收殘留再開；系統關著就默默略過）
@@ -603,8 +700,10 @@ final class RunTracker: NSObject, ObservableObject {
     /// [v25.556] 定位不關、改低精度（kCLLocationAccuracyHundredMeters，省電）：鎖定畫面、靈動島的〔繼續〕在背景執行，
     /// When In Use 權限在背景不能重新開始定位，所以不能關；背景更新照開。暫停中定位只動藍點（accept() 的 phase 守門照舊）
     /// [v25.552] 存檔的移動時間算到按暫停那一刻，馬上寫一次中途存檔（暫停中被關掉，救回來的結束時間＝按暫停那一刻）
+    /// [v25.557] 手動暫停：自動暫停的判斷清掉（手動暫停中走來走去不會自己繼續；autoPaused 本來就是 false）。自動暫停中按不到這裡（phase 已經是 .paused）
     func pause() {
         guard phase == .running else { return }
+        autoPause.reset()                                  // [v25.557] 手動暫停中不判斷自動繼續
         updateElapsed()                                    // 存檔的移動時間算到按暫停那一刻
         phase = .paused
         pauseStartedAt = Date()
@@ -616,13 +715,20 @@ final class RunTracker: NSObject, ObservableObject {
     /// [v25.552] 這次暫停記進暫停清單（按暫停到按繼續），最後馬上寫一次中途存檔
     /// [v25.555] GPS 弱從繼續那一刻重新起算（[v25.556] 暫停時是低精度定位：weakSince 會被暫停中那幾筆設上，一繼續就被當成弱）
     /// [v25.556] 定位改回最準（鎖定畫面按〔繼續〕時 App 在背景：定位沒關過，改精度就好）
+    /// [v25.557] 自動暫停中按〔繼續〕（畫面、鎖定畫面）：轉給 autoResumeNow(from: 現在)，線接著畫；手動繼續照舊另起一段、清自動暫停的判斷
     func resume() {
         guard phase == .paused else { return }
+        if autoPaused {                                    // [v25.557] 自動暫停中按〔繼續〕（畫面、鎖定畫面）：照自動繼續接著畫，從現在算
+            autoResumeNow(from: Date())
+            return
+        }
+        autoPause.reset()                                  // [v25.557]
         let now = Date()
         if let p = pauseStartedAt {
             pausedAccumulated += now.timeIntervalSince(p)
             pauses.append(WorkoutPause(start: p, end: now))
         }
+        lastGoAt = now                                     // [v25.557] 自動暫停的時間不早於它
         pauseStartedAt = nil
         weakSince = nil
         gpsNoFixTicks = []                                 // [v25.556]
@@ -649,6 +755,7 @@ final class RunTracker: NSObject, ObservableObject {
     /// 中途存檔刪掉（背景佇列，排在最後一次寫之後）
     /// [v25.555] 這一趟 GPS 好不好（gpsQuality）一起交出去；每公里時間、小牌不清（畫面已經換成成果頁，下次 start 才清）
     /// [v25.556] 定位設回最準（暫停中按完成時是低精度）；成果算好之後鎖定畫面換成「完成」那張（RunActivityCenter.finished，15 分鐘後自己收）
+    /// [v25.557] 動作偵測關掉、自動暫停清掉、語音停掉（音樂音量還原）。自動暫停中按完成：結束時間＝自動暫停那一刻，那次暫停照舊不進 pauses
     @discardableResult
     func finish() -> RunResult {
         let now = Date()
@@ -663,6 +770,7 @@ final class RunTracker: NSObject, ObservableObject {
         manager.allowsBackgroundLocationUpdates = false
         ticker?.cancel(); ticker = nil
         stopAltimeter()
+        stopMotion()                                       // [v25.557]
         let begin = startedAt ?? end.addingTimeInterval(-elapsed)
         var result = RunResult(sport: sport,
                                distanceKm: distanceMeters / 1000,
@@ -678,23 +786,28 @@ final class RunTracker: NSObject, ObservableObject {
         pauses = []
         kmClimb = []
         gpsNoFixTicks = []                                 // [v25.556]
+        autoPaused = false                                 // [v25.557] 自動暫停中按完成：結束時間＝自動暫停那一刻（end 照舊）
+        autoPause.reset()                                  // [v25.557]
         phase = .idle
         startedAt = nil
         waitingForFix = false
         lastStored = nil
         window = []
+        RunVoice.shared.stopAll()                          // [v25.557] 還在講的停掉、音樂音量還原
         RunActivityCenter.shared.finished(result)          // [v25.556] 鎖定畫面換成「完成」那張（result.gps 已經填好）
         return result
     }
 
     /// 丟棄這一趟（[v25.552] 中途存檔一起刪；[v25.555] 每公里時間、小牌一起清）
     /// [v25.556] 定位設回最準；鎖定畫面、靈動島馬上收掉（RunActivityCenter.cancelled）
+    /// [v25.557] 動作偵測關掉、自動暫停清掉、語音停掉（音樂音量還原）
     func cancel() {
         manager.stopUpdatingLocation()
         manager.desiredAccuracy = kCLLocationAccuracyBest   // [v25.556] 暫停中放棄：下次暖機、開始從最準開始
         manager.allowsBackgroundLocationUpdates = false
         ticker?.cancel(); ticker = nil
         stopAltimeter()
+        stopMotion()                                       // [v25.557]
         RunCheckpointStore.delete(runId)
         pauses = []
         kmClimb = []
@@ -714,6 +827,9 @@ final class RunTracker: NSObject, ObservableObject {
         window = []
         seg = 0
         gpsNoFixTicks = []                                 // [v25.556]
+        autoPaused = false                                 // [v25.557]
+        autoPause.reset()                                  // [v25.557]
+        RunVoice.shared.stopAll()                          // [v25.557] 還在講的停掉、音樂音量還原
         RunActivityCenter.shared.cancelled()               // [v25.556] 鎖定畫面、靈動島馬上收掉、取消 30 分鐘提醒
     }
 
@@ -818,6 +934,53 @@ final class RunTracker: NSObject, ObservableObject {
         newPointsSinceCheckpoint = 0
     }
 
+    // MARK: 自動暫停（[v25.557] 跟 sim_v7.py 的 TrackerV7.auto_pause_now／auto_resume_now 逐行一樣）
+
+    /// [v25.557] 自動暫停（RunAutoPause 說停下來了）：從觸發那一筆定位的時間起暫停（不早於上次開始／繼續、不晚於現在）。
+    /// 跟手動暫停不同：定位精度不改（要看你什麼時候動起來）、GPS 燈照常；鎖定畫面「晨跑・自動暫停」、語音「自動暫停。」
+    private func autoPauseNow(at t: Date) {
+        guard phase == .running, let s = startedAt else { return }
+        let now = Date()
+        let at = min(max(t, lastGoAt ?? s), now)
+        elapsed = max(0, at.timeIntervalSince(s) - pausedAccumulated)
+        phase = .paused
+        pauseStartedAt = at
+        autoPaused = true
+        checkpointNow()
+        RunActivityCenter.shared.paused(self)              // 馬上推「晨跑・自動暫停」、排 30 分鐘提醒
+        RunVoice.shared.autoPaused(sport: sport)
+    }
+
+    /// [v25.557] 自動繼續（RunAutoPause 說動起來了、或自動暫停中按〔繼續〕）：從開始動的那一筆起算（那幾秒算移動時間）；
+    /// 新的一段（seg + 1）第一點＝停下來那一點（時間改成開始動那一刻）：線接著畫、距離從那裡接著算、紅燈站著飄的不算。
+    /// 爬升錨點不動（站著沒爬）
+    private func autoResumeNow(from t: Date) {
+        guard phase == .paused, autoPaused, let p = pauseStartedAt else { return }
+        let now = Date()
+        let from = min(max(t, p), now)
+        pausedAccumulated += from.timeIntervalSince(p)
+        pauses.append(WorkoutPause(start: p, end: from, auto: true))
+        pauseStartedAt = nil
+        autoPaused = false
+        weakSince = nil
+        gpsNoFixTicks = []
+        lastFixStamp = now
+        window = []
+        seg += 1
+        if let anchor = lastStored {
+            store(CLLocation(coordinate: anchor.coordinate, altitude: anchor.altitude,
+                             horizontalAccuracy: anchor.horizontalAccuracy,
+                             verticalAccuracy: anchor.verticalAccuracy,
+                             course: anchor.course, speed: 0, timestamp: from))
+        }
+        phase = .running
+        lastGoAt = from
+        autoPause.reset()
+        checkpointNow()
+        RunActivityCenter.shared.resumed(self)             // 馬上推「跑步中」、取消 30 分鐘提醒
+        RunVoice.shared.autoResumed(sport: sport)
+    }
+
     // MARK: 存點（[v25.551] 跟 sim_v1.py 的 Tracker.accept／store／thin_out 一模一樣）
 
     /// [v25.556] 系統一次送來的那一批（locationManager(_:didUpdateLocations:)）：一筆一筆照舊 accept()，
@@ -846,6 +1009,8 @@ final class RunTracker: NSObject, ObservableObject {
 
     /// 每一筆定位都進來：暖機、暫停時只更新藍點和燈；跑步中才平均、比對、存點
     /// [v25.556] 暫停中（低精度定位）燈的誤差不改；lastFixStamp 記定位上的時間。其他一行都沒動
+    /// [v25.557] 只多兩處：燈的誤差只在手動暫停時停住；跑步中／自動暫停中每一筆交給 RunAutoPause（暫停了：下一行 phase 守門就 return，
+    /// 這一筆不存；繼續了：這一筆照常往下走，從停下來那一點接著算）。sim_v7.py TrackerV7.accept
     private func accept(_ raw: CLLocation) {
         guard raw.horizontalAccuracy > 0, raw.horizontalAccuracy <= worstAccuracy else { return }
         guard abs(raw.timestamp.timeIntervalSinceNow) < freshSeconds else { return }   // 原本 10 秒；鎖屏時系統會攢一批才送
@@ -854,7 +1019,8 @@ final class RunTracker: NSObject, ObservableObject {
         lastCoordinate = raw.coordinate                                                // 鏡頭與線的尾巴
         // [v25.556] 暫停中定位是低精度（40 公尺上下）：燈的誤差停在按暫停前那一筆，不會變黃燈「定位中…」；
         // 藍點、鏡頭照樣跟（fixSerial 照加）
-        if phase != .paused { gpsAccuracy = raw.horizontalAccuracy }
+        // [v25.557] 自動暫停中定位照樣是最準的：燈照常（只有手動暫停的低精度才停住）
+        if phase != .paused || autoPaused { gpsAccuracy = raw.horizontalAccuracy }
         currentSpeedMS = max(0, raw.speed)
         fixSerial &+= 1
         lastFixStamp = max(lastFixStamp ?? raw.timestamp, raw.timestamp)              // [v25.556] GPS 弱：10 秒收不到（看定位上的時間，只往後不往前）
@@ -862,6 +1028,21 @@ final class RunTracker: NSObject, ObservableObject {
             if weakSince == nil { weakSince = raw.timestamp }
         } else {
             weakSince = nil
+        }
+        // [v25.557] 自動暫停：跑步中、或自動暫停中，每一筆都給 RunAutoPause 看（手動暫停中不看）。sim_v7.py TrackerV7.accept
+        if autoPauseOn, phase == .running || autoPaused {
+            let event = autoPause.observe(t: raw.timestamp,
+                                          speed: raw.speed >= 0 ? raw.speed : nil,
+                                          accuracy: raw.horizontalAccuracy,
+                                          lat: raw.coordinate.latitude,
+                                          lon: raw.coordinate.longitude,
+                                          eligible: phase == .running && distanceMeters >= RunAutoPause.minDistanceMeters,
+                                          motion: motion)
+            switch event {
+            case .pause(let at): autoPauseNow(at: at)
+            case .resume(let from): autoResumeNow(from: from)
+            case .none: break
+            }
         }
         guard phase == .running else { return }                                        // 暖機、暫停：只更新藍點和燈
         guard raw.horizontalAccuracy <= goodAccuracy else { return }                   // 還沒收斂：不起點、不算距離
@@ -914,12 +1095,16 @@ final class RunTracker: NSObject, ObservableObject {
         gpsElevation(loc)
         // [v25.552] 每走滿一整公里記一次累計爬升（每公里分段的爬升用相鄰兩個相減）
         // [v25.555] 同一刻記移動時間（「這一公里」小步道）和這一點（地圖上的小牌）；sim_v5.py TrackerV5.store
+        let kmBefore = kmTimes.count                                       // [v25.557] 走滿整公里叫語音（sim_v7.py TrackerV7.store）
         while distanceMeters >= Double(kmClimb.count + 1) * 1000 {
             kmClimb.append(elevationGainM)
             if let s = startedAt {
                 kmTimes.append(max(0, loc.timestamp.timeIntervalSince(s) - pausedAccumulated))
             }
             kmMarkers.append(RunKmMarker(km: kmClimb.count, lat: loc.coordinate.latitude, lon: loc.coordinate.longitude))
+        }
+        if kmTimes.count > kmBefore {
+            RunVoice.shared.kmDone(sport: sport, kmTimes: kmTimes)   // [v25.557] 每公里語音（騎車只有 5 的倍數有字：WorkoutFacts.voiceKm）
         }
         newPointsSinceCheckpoint += 1
         checkpointIfDue()
@@ -965,6 +1150,38 @@ final class RunTracker: NSObject, ObservableObject {
             guard let tracker = self else { return }
             Task { @MainActor in tracker.onBarometer(h, failed: failed) }  // 照 locationManager(_:didUpdateLocations:) 的寫法
         }
+    }
+
+    /// [v25.557] 動作偵測（輔助自動暫停）：打包出來的 Info.plist 有「動作與健身」說明字、裝置有、而且已經允許才開
+    /// （不在跑步中跳權限框；權限是開始運動畫面的氣壓計那一次問的）。沒有就只看 GPS（sim_v7 §4：照樣停得下來）。
+    /// 每個 CMMotionActivityManager 呼叫前都先過 hasMotionUsage（motionManager 是 lazy：說明字沒有就整個 App 都不建立它）
+    private func startMotion() {
+        guard Self.hasMotionUsage, !motionOn, CMMotionActivityManager.isActivityAvailable(),
+              CMMotionActivityManager.authorizationStatus() == .authorized else { return }
+        motionOn = true
+        motionManager.startActivityUpdates(to: OperationQueue.main) { [weak self] activity in
+            let m = RunTracker.motionKind(activity)                  // 先把結果取出來
+            guard let tracker = self else { return }
+            Task { @MainActor in tracker.motion = m }               // 照 startAltimeter 的寫法
+        }
+    }
+
+    /// [v25.557] 關動作偵測（沒開過什麼都不碰：motionOn 只在 startMotion 過了全部檢查才設 true）
+    private func stopMotion() {
+        guard motionOn else { return }
+        motionManager.stopActivityUpdates()
+        motionOn = false
+        motion = .unknown
+    }
+
+    /// [v25.557] CMMotionActivity → RunMotion：信心低、在車上、看不出來＝unknown；靜止＝still；走、跑＝onFoot；騎車＝cycling
+    nonisolated static func motionKind(_ a: CMMotionActivity?) -> RunMotion {
+        guard let a, a.confidence != .low else { return .unknown }
+        if a.automotive { return .unknown }
+        if a.stationary { return .still }
+        if a.running || a.walking { return .onFoot }
+        if a.cycling { return .cycling }
+        return .unknown
     }
 
     /// 關氣壓計（沒開過也可以呼叫：沒開過就什麼都不碰）；之後 store() 改用 GPS 高度。

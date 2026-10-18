@@ -191,6 +191,23 @@ final class DeepLinkRouter: ObservableObject {
         pendingItem = nil
         return (subId, taskId)
     }
+
+    // MARK: [健康 v7] 跑步即時動態
+
+    /// [健康 v7] 鎖定畫面／靈動島的跑步卡點進來（lifegood://life/health/run）：健康頁取走後打開跑步畫面
+    ///（正在跑就回到那一趟；剛跑完回到成果頁；沒在跑開開始畫面）。存 UUID 不存 Bool：停在健康頁再點一次也會換值、onChange 收得到
+    @Published private(set) var pendingHealthRun: UUID?
+
+    func requestHealthRun() {
+        pendingHealthRun = UUID()
+    }
+
+    /// 健康頁取走並清掉；沒有回 false（沒有的時候不動 @Published，不會多一次重畫）
+    func takeHealthRun() -> Bool {
+        guard pendingHealthRun != nil else { return false }
+        pendingHealthRun = nil
+        return true
+    }
 }
 
 /// [v2] 小工具「新增支出」的請求（WidgetLink.apply 建、MainTabView 取走）。
@@ -297,6 +314,30 @@ extension View {
     }
 }
 
+/// [健康 v7] 健康頁收「打開跑步畫面」的兩個時機（同 DeepLinkItemReceiver）：冷啟動時網址比這一頁先到（onAppear）、
+/// 已經停在健康頁時再點一次（onChange）。包成一個修飾器，健康頁那一長串修飾器只多一個
+private struct DeepLinkHealthRunReceiver: ViewModifier {
+    @ObservedObject private var deepLink = DeepLinkRouter.shared
+    let action: () -> Void
+
+    init(action: @escaping () -> Void) {
+        self.action = action
+    }
+
+    func body(content: Content) -> some View {
+        content
+            .onAppear { action() }
+            .onChange(of: deepLink.pendingHealthRun) { _, _ in action() }
+    }
+}
+
+extension View {
+    /// [健康 v7] 健康頁：收到「打開跑步畫面」時呼叫 action（action 裡自己 takeHealthRun）
+    func onDeepLinkHealthRun(_ action: @escaping () -> Void) -> some View {
+        modifier(DeepLinkHealthRunReceiver(action: action))
+    }
+}
+
 // MARK: - 分頁切換
 
 /// 寫 MainTabView 的導覽 @AppStorage。
@@ -364,6 +405,13 @@ enum AppNavigation {
         d.set(AppMode.life.rawValue, forKey: "appMode")
         d.set(LifeFeature.career.rawValue, forKey: "life_feature")
         d.set(ManagementFeature.overview.rawValue, forKey: "management_feature")
+    }
+
+    /// [健康 v7] 跑步即時動態 → 人生 › 健康（鍵名照 goToTravelMap）
+    static func goToHealth() {
+        let d = UserDefaults.standard
+        d.set(AppMode.life.rawValue, forKey: "appMode")
+        d.set(LifeFeature.health.rawValue, forKey: "life_feature")
     }
 
     /// [v5] 今天（大）「家庭待辦」→ 人生 › 家庭（FamilyView，家庭待辦在這一頁）。
@@ -494,6 +542,8 @@ extension WidgetLink {
     ///      - lifegood://life/birthdays…：切到部屬總覽，請它打開生日名單（BirthdayOverviewSheet）
     ///      - lifegood://life/family/tasks…：切到人生 › 家庭（FamilyView，家庭待辦在這一頁）
     ///      四個都換 routeToken（停在設定頁也會先關掉）
+    ///
+    /// [健康 v7] - lifegood://life/health/run…：切到人生 › 健康，請健康頁打開跑步畫面（換 routeToken：停在設定頁也會先關掉）
     @discardableResult
     static func apply(_ url: URL, store: LifeStore) -> Bool {
         guard let route = parse(url) else { return false }
@@ -565,6 +615,10 @@ extension WidgetLink {
             return true
         case .familyTasks:
             AppNavigation.goToFamily()
+            return true
+        case .healthRun:
+            AppNavigation.goToHealth()
+            router.requestHealthRun()
             return true
         }
     }

@@ -123,24 +123,43 @@ enum WorkoutFacts {
         }.count
     }
 
-    /// 連續幾週有運動：從這週往回數；這週還沒動就從上週數（待決定 3）
-    static func streakWeeks(_ sessions: [WorkoutSession], now: Date = Date()) -> Int {
+    /// 連續幾週有運動：從這週往回數；這週還沒動就從上週數（待決定 3）。
+    /// [v25.557] leave：請假的那幾週（週一 00:00；WorkoutFacts.leaveWeeks(LifeStore.workoutLeave)）：沒運動但請假的週不加、不斷（streak）
+    static func streakWeeks(_ sessions: [WorkoutSession], leave: Set<Date> = [], now: Date = Date()) -> Int {
+        streak(sessions, leave: leave, now: now).weeks
+    }
+
+    /// [v25.557] 連續週數的細節（看板膠囊、這趟的收穫、月曆下面那一行）。build/v7/sim_v7.py streak：
+    /// 從這週往回數；那週有任何一趟運動 +1；沒運動但請假：跳過（不加、不斷）；都沒有：停。
+    /// 這週還沒動、也沒請假就從上週數（待決定 3）。since＝數到的最早那一週有運動的週一；leaveWeeks＝中間跳過幾個請假週
+    static func streak(_ sessions: [WorkoutSession], leave: Set<Date> = [], now: Date = Date()) -> WorkoutStreak {
         var weeks = Set<Date>()
         for s in sessions where counts(s) {
             weeks.insert(weekStart(of: s.date))
         }
         var cursor = weekStart(of: now)
-        if !weeks.contains(cursor) {
-            guard let prev = calendar.date(byAdding: .day, value: -7, to: cursor) else { return 0 }
+        if !weeks.contains(cursor) && !leave.contains(cursor) {
+            guard let prev = calendar.date(byAdding: .day, value: -7, to: cursor) else { return WorkoutStreak() }
             cursor = prev
         }
-        var n = 0
-        while weeks.contains(cursor) {
-            n += 1
+        var out = WorkoutStreak()
+        var pending = 0
+        for _ in 0..<600 {
+            if weeks.contains(cursor) {
+                // [v25.557 裁定] 只算「中間」的請假週：最近那一頭的（這週請假還沒動）不算，不然月曆下面會寫「中間請假 1 週」
+                if out.weeks > 0 { out.leaveWeeks += pending }
+                out.weeks += 1
+                out.since = cursor
+                pending = 0
+            } else if leave.contains(cursor) {
+                pending += 1
+            } else {
+                break
+            }
             guard let prev = calendar.date(byAdding: .day, value: -7, to: cursor) else { break }
             cursor = prev
         }
-        return n
+        return out
     }
 
     // MARK: 大卡（judge §3.13 的 MET 表）
@@ -248,11 +267,14 @@ enum WorkoutFacts {
         let splits = splitsWithClimb(RouteMath.kmSplits(r.route), kmClimb: r.kmClimb, totalClimb: r.elevation)
         let sport = WorkoutSport(r.sport)
         let title = autoTitle(sport: sport, start: r.startedAt, startPoint: r.route.first, sessions: sessions)
+        // [v25.557] 最快 1／5／10 公里、半馬：跟分段一樣在簡化之前用完整的點算（只有跑步；沒有夠長的那幾段就不存）
+        let efforts = sport == .run ? bestEfforts(r.route) : []
         let exercise = WorkoutExercise(
             name: r.sport.rawValue, kind: .cardio, reps: 0, sets: 0, loadType: .none,
             loadKg: 0, distanceKm: r.distanceKm, durationMinutes: r.movingMinutes,
             route: RouteMath.simplified(r.route), elevationGainM: r.elevation,
-            sport: WorkoutSport(r.sport), splits: splits.isEmpty ? nil : splits)
+            sport: WorkoutSport(r.sport), splits: splits.isEmpty ? nil : splits,
+            efforts: efforts.isEmpty ? nil : efforts)
         var session = WorkoutSession(
             date: r.startedAt,                 // 按開始那一刻
             title: title,                      // [v25.555] 「晨跑」「河濱晨跑」（以前存「跑步」，畫面上才換成時段名）
@@ -263,6 +285,8 @@ enum WorkoutFacts {
             pauses: r.pauses.isEmpty ? nil : r.pauses,
             gps: r.gps)
         applyKcalEstimate(&session, bodyWeightKg: bodyWeightKg)
+        // [v25.557] 這一趟的亮點（破了哪幾個個人紀錄、同一條路第幾次、比上次快多少）：跟 store 裡比它早的每一趟比一次存起來，之後打開不重算
+        session.highlights = highlights(for: session, among: sessions)
         // [v25.554] 寫進 Apple 健康用簡化前的點（judge §6 v4）：完整的點只放記憶體一下，寫的時候拿走（WorkoutRouteStash）
         WorkoutRouteStash.keep(r.route, for: session.id)
         return session
@@ -675,6 +699,16 @@ extension WorkoutFacts {
 
 // MARK: - v3：看板主角、上週同期、每週目標
 
+/// [v25.557] 連續週數（WorkoutFacts.streak）
+struct WorkoutStreak: Equatable {
+    /// 連續幾週（請假週不算進去）
+    var weeks = 0
+    /// 數到的最早那一週有運動的週一（「9/7 那週起」）；0 週是 nil
+    var since: Date? = nil
+    /// 中間跳過幾個請假週（「中間請假 1 週」）
+    var leaveWeeks = 0
+}
+
 /// [v25.553] 這一週某種運動的進度（看板下的目標格、開始列那一句、成果頁「這趟的收穫」共用）
 struct WorkoutWeekProgress: Equatable {
     var sport: WorkoutSport
@@ -985,6 +1019,23 @@ enum WorkoutPalette {
 
     /// 開始鈕的綠（跟 FinanceAddButton、要確認的綠同一個 1F9D57；不再手寫 Color(0.20, 0.78, 0.45)）
     static let go = Color(tb: 0x1F9D57)
+
+    /// [v25.557] 月曆格子的深淺（WorkoutFacts.heatLevel 0…4；一個藍色由淺到深＝動得越久，跟配速的「快」同一族藍、不用紅綠）
+    static func heat(_ level: Int, dark: Bool) -> Color {
+        switch level {
+        case 1: return Color(tb: dark ? 0x1D3557 : 0xDCEBFB)
+        case 2: return Color(tb: dark ? 0x24508A : 0xA9CDF5)
+        case 3: return Color(tb: dark ? 0x2F6BBF : 0x6DA7EC)
+        case 4: return Color(tb: dark ? 0x3987E5 : 0x2A78D6)
+        default: return Color(tb: dark ? 0x1C2230 : 0xEEF1F6)
+        }
+    }
+
+    /// [v25.557] 月曆格子上日期數字的顏色：第 4 階（最深）白字，其他照一般字色（深色模式一律淺色字）
+    static func heatInk(_ level: Int, dark: Bool) -> Color {
+        if dark { return Color(tb: 0xE8EEF8) }
+        return level >= 4 ? Color.white : Color(tb: 0x1F2A3D)
+    }
 }
 
 // MARK: - v3：卡面的路線形狀（不打任何地圖請求）

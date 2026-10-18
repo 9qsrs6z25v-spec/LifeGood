@@ -37,6 +37,15 @@ import CoreLocation
 //
 // [v25.555] 健康 v5（build/v5/brief.md §6 G3）：③ 要確認最後多一句 GPS 很弱（只提醒）。分享圖（WorkoutShare.swift）也用 build
 // 算看板與每公里（hkEnabled／hkAvailable／hkCanWrite 傳 false：圖上不放 Apple 健康、要確認）；build 的參數不變。
+//
+// [v25.557] 健康 v7（build/v7/brief.md §6 G4；judge §4.3、§5.1、§5.2 ①）：亮點是存檔時算好的（WorkoutSession.highlights，
+// WorkoutFacts.makeSession），這裡**只讀不算**；字一律用主控的 WorkoutFacts.firstRecordTitle／recordGainText／routeCapsule／routeLine。
+// ① 看板右上膠囊：破紀錄「[star.fill] 最快 1 公里」（綠，capsuleTone）→ 同一條路「[arrow.triangle.2.circlepath] 河濱老路線・第 12 次」
+//    （中性，capsuleIsRoute：分享圖換回運動名；膠囊不會自己縮，名字超過 10 個字剪成 9 個字＋「…」）→ 運動名；手寫破紀錄 New / record!（比 Goal / reached! 優先）；VoiceOver 多「破紀錄：…」「河濱老路線第 12 次」。
+// ② 這趟的收穫：連續週數照請假算（build 多 leave：LifeStore.workoutLeave；中間有請假多寫「・中間請假 1 週」，同月曆下面那一行）；
+//    多兩種、不限這週（舊的那趟打開也看得到）：每個破紀錄一條「新紀錄：最快 5 公里 **29:40**（快 18 秒）」、
+//    同一條路一條「河濱老路線・**第 12 次**・比上次快 42 秒」（慢也是中性字色）。順序：目標 → 連續週數 → 紀錄 → 同一條路。
+// ⑨ 資料的暫停那列：有自動暫停「4 次・3:40（自動 3 次）」、全是自動「3 次・2:10（都是自動）」（只有一次「（自動）」）。
 
 /// 成果頁全部的字與數字。型別都收在裡面（不佔全域名字：v3 四組同時開工）
 struct WorkoutCardData {
@@ -77,9 +86,13 @@ struct WorkoutCardData {
         /// 「10/15 週四 06:05–06:39」
         var date = ""
         var dateIcon = "figure.run"
-        /// 右上膠囊：運動名「跑步」（中性）
+        /// 右上膠囊：運動名「跑步」（中性）；[v25.557] 破紀錄「最快 1 公里」、同一條路「河濱老路線・第 12 次」
         var capsule: String? = nil
         var capsuleIcon: String? = nil
+        /// [v25.557] 右上膠囊的字色：破紀錄 good（綠）；nil＝一般的膠囊字色（畫面傳給 MoneyBoardHeader 的 capsuleTint）
+        var capsuleTone: MoneyTone? = nil
+        /// [v25.557] 右上膠囊是同一條路那顆：分享圖換回運動名（路線名可能取自以前那幾趟的地點，分享圖不放地點）
+        var capsuleIsRoute = false
         /// 小字：這一趟的名字「河濱晨跑」
         var label = ""
         /// 大字：「5.20 公里」；重訓「2,160 kg」或「45 分鐘」
@@ -297,11 +310,13 @@ extension WorkoutCardData {
     /// sessions：全部運動（收穫、換一趟列、同一趟配對用）；hkEnabled：健康頁的 Apple 健康開關；
     /// hkAvailable：這台裝置能不能用「健康」（HealthKitManager.isAvailable）；
     /// [v25.554] hkCanWrite：Apple 健康有沒有給寫入（HealthKitManager.canWriteWorkout）；
-    /// ledger：LifeStore.workoutHealthLedger（按過「兩筆都留」的那一對不再問）
+    /// ledger：LifeStore.workoutHealthLedger（按過「兩筆都留」的那一對不再問）；
+    /// [v25.557] leave：LifeStore.workoutLeave（請假週：收穫的連續週數照它算；預設沒有請假）
     @MainActor
     static func build(session s: WorkoutSession, sessions: [WorkoutSession], prefs: WorkoutPrefs,
                       bodyWeightKg: Double?, hkEnabled: Bool, hkAvailable: Bool, hkCanWrite: Bool,
-                      ledger: WorkoutHealthLedger, now: Date = Date()) -> WorkoutCardData {
+                      ledger: WorkoutHealthLedger, leave: WorkoutLeaveBook = WorkoutLeaveBook(),
+                      now: Date = Date()) -> WorkoutCardData {
         let sport = s.primarySport
         let title = WorkoutFacts.title(s)
         // 每公里、高度、路線看「有路線的那個動作」；沒有路線看第一個有氧動作（手動補記也可能有分段？沒有，但不怕）
@@ -310,7 +325,7 @@ extension WorkoutCardData {
         let plan = validSplits.flatMap { splitPlan($0, sport: main?.resolvedSport ?? sport) }
         let elevation = s.firstRouteExercise.flatMap { WorkoutFacts.elevation($0, in: s) }
         let elevationShown = elevation.flatMap { makeElevation($0) }
-        let goal = goalFacts(s, sessions: sessions, prefs: prefs, sport: sport, now: now)
+        let goal = goalFacts(s, sessions: sessions, prefs: prefs, sport: sport, leave: leave, now: now)
 
         var card = WorkoutCardData(
             sessionId: s.id, sport: sport, title: title,
@@ -329,7 +344,8 @@ extension WorkoutCardData {
             card.tiles = cardioTiles(s, main: main, sport: sport, plan: plan, elevation: elevation,
                                      elevationShown: elevationShown != nil, bodyWeightKg: bodyWeightKg)
         }
-        card.gains = goal.gains
+        // [v25.557] 目標、連續週數（只在這週）之後接存檔時算好的亮點（破紀錄、同一條路；不限這週）
+        card.gains = goal.gains + highlightGains(s)
         card.checks = makeChecks(s, sessions: sessions, ledger: ledger, main: main, splitsValid: validSplits != nil,
                                  canSearchHealth: hkAvailable && hkEnabled)
         if let e = s.firstRouteExercise {
@@ -384,8 +400,21 @@ extension WorkoutCardData {
         }
         b.date = date
         b.dateIcon = sport.icon
-        b.capsule = sport.displayName
-        b.capsuleIcon = sport.icon
+        // [v25.557] 右上膠囊（judge §5.2 ①）：破紀錄 → 同一條路（第 2 次起）→ 運動名。存檔時算好的 s.highlights，不重算
+        let record = WorkoutFacts.firstRecordTitle(s)
+        let route = WorkoutFacts.routeCapsule(s)
+        if let record {
+            b.capsule = record
+            b.capsuleIcon = "star.fill"
+            b.capsuleTone = .good
+        } else if let route {
+            b.capsule = boardRouteCapsule(route)
+            b.capsuleIcon = "arrow.triangle.2.circlepath"
+            b.capsuleIsRoute = true
+        } else {
+            b.capsule = sport.displayName
+            b.capsuleIcon = sport.icon
+        }
         b.label = title
         b.seed = MoneyItem.seed(s.id)
 
@@ -405,14 +434,31 @@ extension WorkoutCardData {
         } else {
             b.big = sport.displayName
         }
-        b.greeting = madeGoal ? ["Goal", "reached!"] : greeting(sport)
+        // 手寫（judge §4.3）：[v25.557] 破紀錄 New / record!（比 Goal / reached! 優先）→ 這一趟讓這週達標 → 照運動
+        if record != nil {
+            b.greeting = ["New", "record!"]
+        } else {
+            b.greeting = madeGoal ? ["Goal", "reached!"] : greeting(sport)
+        }
 
         var parts: [String] = [b.date, title, sport.displayName + " " + b.big]
         let plain = b.line.plain.replacingOccurrences(of: "・", with: "，")
         if !plain.isEmpty { parts.append(plain) }
+        if let record { parts.append("破紀錄：" + record) }
+        if let route { parts.append(route.replacingOccurrences(of: "・", with: "")) }
         if madeGoal { parts.append("這一趟讓這週達標") }
         b.accessibilityText = parts.joined(separator: "，") + "。"
         return b
+    }
+
+    /// [v25.557] 右上膠囊的同一條路（字是 WorkoutFacts.routeCapsule 的）：MoneyBoardHeader 的膠囊 fixedSize、不會自己縮，
+    /// 看板又 clipShape，名字很長（自己取的長名字、或用了地點）會被看板邊切掉。名字超過 10 個字剪成 9 個字＋「…」，
+    /// 「・第 12 次」一定留著；VoiceOver、這趟的收穫照用整句
+    private static func boardRouteCapsule(_ route: String) -> String {
+        guard let r = route.range(of: "・第 ", options: .backwards) else { return route }
+        let name = route[..<r.lowerBound]
+        guard name.count > 10 else { return route }
+        return String(name.prefix(9)) + "…" + String(route[r.lowerBound...])
     }
 
     /// 「**32:10**・配速 **6'11"**」；騎車「**1:05:12**・平均時速 **21.5**」（粗體不上色）
@@ -581,9 +627,10 @@ extension WorkoutCardData {
         var madeGoal = false
     }
 
-    /// 只在這一趟在「這週」時；運動是這一趟的運動（騎車那趟講騎車）
+    /// 只在這一趟在「這週」時；運動是這一趟的運動（騎車那趟講騎車）。
+    /// [v25.557] leave：請假週（連續週數照 WorkoutFacts.streak 算：沒運動但請假的週不加、不斷）
     private static func goalFacts(_ s: WorkoutSession, sessions: [WorkoutSession], prefs: WorkoutPrefs,
-                                  sport: WorkoutSport, now: Date) -> GoalFacts {
+                                  sport: WorkoutSport, leave: WorkoutLeaveBook, now: Date) -> GoalFacts {
         var out = GoalFacts()
         guard WorkoutFacts.isInWeek(s.date, of: now) else { return out }
 
@@ -635,14 +682,61 @@ extension WorkoutCardData {
             }
         }
 
-        let streak = WorkoutFacts.streakWeeks(sessions, now: now)
-        if streak >= 2 {
-            out.gains.append(Gain(id: "streak", icon: "flame.fill", sport: nil,
-                                  line: FinanceLine(runs: [FinanceRun(text: "連續 "),
-                                                           FinanceRun(text: "\(streak)", bold: true),
-                                                           FinanceRun(text: " 週有運動")])))
+        // [v25.557] 連續週數照請假算（同健康頁看板、月曆下面那一行：WorkoutFacts.streak）；中間跳過請假週多寫「・中間請假 1 週」
+        let streak = WorkoutFacts.streak(sessions, leave: WorkoutFacts.leaveWeeks(leave), now: now)
+        if streak.weeks >= 2 {
+            var runs = [FinanceRun(text: "連續 "),
+                        FinanceRun(text: "\(streak.weeks)", bold: true),
+                        FinanceRun(text: " 週有運動")]
+            if streak.leaveWeeks > 0 {
+                runs.append(FinanceRun(text: "・中間請假 \(streak.leaveWeeks) 週"))
+            }
+            out.gains.append(Gain(id: "streak", icon: "flame.fill", sport: nil, line: FinanceLine(runs: runs)))
         }
         return out
+    }
+
+    /// [v25.557] 存檔時算好的亮點（s.highlights，WorkoutFacts.makeSession 算的；這裡只讀不算）。不限這週（舊的那趟打開也看得到）：
+    /// 每個破紀錄一條「新紀錄：最快 5 公里 **29:40**（快 18 秒）」；同一條路（第 2 次起）一條「河濱老路線・**第 12 次**・比上次快 42 秒」
+    /// （「比上次慢」也是一般字色，不染紅）。圖示圓是這一趟運動的主題色
+    private static func highlightGains(_ s: WorkoutSession) -> [Gain] {
+        var out: [Gain] = []
+        let sport = s.primarySport
+        // 同一種紀錄只放一條（合併匯入過的資料萬一重複，ForEach 的 id 不撞）；新版才有的 kind 舊版讀不懂：recordGainText 回 nil 略過
+        var seen = Set<String>()
+        for m in s.highlights?.records ?? [] {
+            guard !seen.contains(m.kind), let text = WorkoutFacts.recordGainText(m) else { continue }
+            seen.insert(m.kind)
+            out.append(Gain(id: "record-" + m.kind, icon: "star.fill", sport: sport, line: recordGainLine(m, text: text)))
+        }
+        if let text = WorkoutFacts.routeLine(s) {
+            out.append(Gain(id: "route", icon: "arrow.triangle.2.circlepath", sport: sport,
+                            line: routeGainLine(s, text: text)))
+        }
+        return out
+    }
+
+    /// 「新紀錄：最快 5 公里 29:40（快 18 秒）」的值粗體（不上色）。字是 WorkoutFacts.recordGainText 的，
+    /// 這裡只把它切成三段；對不上（主控改了寫法）整句照原樣、不粗體
+    private static func recordGainLine(_ m: WorkoutRecordMark, text: String) -> FinanceLine {
+        guard let kind = WorkoutRecordKind(rawValue: m.kind) else { return FinanceLine.text(text) }
+        let head = "新紀錄：" + kind.title + " "
+        let value = WorkoutFacts.recordValueText(kind, value: m.value)
+        let lead = head + value
+        guard !value.isEmpty, text.hasPrefix(lead) else { return FinanceLine.text(text) }
+        let rest = String(text.dropFirst(lead.count))
+        return FinanceLine(runs: [FinanceRun(text: head), FinanceRun(text: value, bold: true), FinanceRun(text: rest)])
+    }
+
+    /// 「河濱老路線・第 12 次・比上次快 42 秒」的「第 12 次」粗體（不上色）。字是 WorkoutFacts.routeLine／routeCapsule 的，
+    /// 這裡只把它切成三段；對不上整句照原樣
+    private static func routeGainLine(_ s: WorkoutSession, text: String) -> FinanceLine {
+        guard let n = s.highlights?.route?.count, let cap = WorkoutFacts.routeCapsule(s) else { return FinanceLine.text(text) }
+        let mark = "第 \(n) 次"
+        guard cap.hasSuffix(mark), text.hasPrefix(cap) else { return FinanceLine.text(text) }
+        let name = String(cap.dropLast(mark.count))
+        let rest = String(text.dropFirst(cap.count))
+        return FinanceLine(runs: [FinanceRun(text: name), FinanceRun(text: mark, bold: true), FinanceRun(text: rest)])
     }
 
     /// 目標格同一套寫法的數字：HealthPageData.goalKmText 去掉「 公里」（整數「20」、其他「5.4」）
@@ -1156,7 +1250,7 @@ extension WorkoutCardData {
         if let ps = s.pauses, !ps.isEmpty {
             let total = ps.reduce(0) { $0 + $1.seconds }
             out.append(InfoItem(id: "pauses", label: "暫停",
-                                value: "\(ps.count) 次・" + WorkoutFormat.clock(seconds: total)))
+                                value: "\(ps.count) 次・" + WorkoutFormat.clock(seconds: total) + autoPauseNote(ps)))
         }
         let place = s.place.trimmingCharacters(in: .whitespacesAndNewlines)
         if !place.isEmpty {
@@ -1190,6 +1284,15 @@ extension WorkoutCardData {
             out.append(InfoItem(id: "note", label: "備註", value: memo))
         }
         return out
+    }
+
+    /// [v25.557] 暫停那列後面的括號（WorkoutPause.isAuto）：沒有自動暫停空字串；有「（自動 3 次）」；
+    /// 全是自動「（都是自動）」，只有一次「（自動）」
+    private static func autoPauseNote(_ ps: [WorkoutPause]) -> String {
+        let autoCount = ps.filter { $0.isAuto }.count
+        guard autoCount > 0 else { return "" }
+        if autoCount == ps.count { return ps.count == 1 ? "（自動）" : "（都是自動）" }
+        return "（自動 \(autoCount) 次）"
     }
 
     // MARK: ⓪ 換一趟

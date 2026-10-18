@@ -132,7 +132,8 @@ struct RunSkyArt: View, Equatable {
 }
 
 /// 面板外殼：全寬、上面兩角圓（圓角讀英雄卡設定的「圓角」，同健康看板）、底延伸到安全區外（到螢幕最下面）。
-/// strip：GPS 弱提示條（放在面板最上面、跟面板同一個圓角）；nil 不畫
+/// strip：淡黃提示條（GPS 弱、[v25.557] 自動暫停中；放在面板最上面、跟面板同一個圓角）；nil 不畫。
+/// paused：整片灰藍（只有手動暫停；[v25.557] 自動暫停不變灰，呼叫端傳 false）
 struct RunSkyPanel<Content: View>: View {
     let paused: Bool
     let clouds: Int
@@ -189,7 +190,8 @@ struct RunSkyPanel<Content: View>: View {
     }
 }
 
-/// 面板正上方那一條「GPS 訊號弱，距離可能少算」（樣稿③-B6；淡黃底＝看板「晚了」那一種提示）
+/// 面板正上方那一條「GPS 訊號弱，距離可能少算」（樣稿③-B6；淡黃底＝看板「晚了」那一種提示）；
+/// [v25.557] 自動暫停中也用這一條「自動暫停中・動了就繼續」（judge §4.1 第 11 列）
 struct RunWeakStrip: View {
     let text: String
     let corner: CGFloat
@@ -880,7 +882,7 @@ private struct RunLegTrack: View {
 
 // MARK: - 按鈕
 
-/// white＝白膠囊深藍字（暫停、暫停中的結束）；green＝綠膠囊白字＋外圈淡綠光環（繼續、按住結束）
+/// white＝白膠囊深藍字（暫停、暫停中的結束、[v25.557] 自動暫停中的按住結束）；green＝綠膠囊白字＋外圈淡綠光環（繼續、按住結束）
 enum RunPanelButtonStyle {
     case white, green
 }
@@ -962,18 +964,21 @@ struct RunPanelButton: View {
 }
 
 /// 跑步中「■ 按住結束」：按住 1 秒（RunSport.holdToFinishSeconds）外圈線性填滿才結束，放開就退回；只點一下不會結束。
-/// 開著 VoiceOver 改成一般按鈕，點了呼叫 onAsk（呼叫端跳「結束這一趟？」）
+/// 開著 VoiceOver 改成一般按鈕，點了呼叫 onAsk（呼叫端跳「結束這一趟？」）。
+/// [v25.557] style：跑步中綠（預設，主要的鈕）；自動暫停中白（主要的鈕換成旁邊的〔繼續〕）。外圈一律綠
 struct RunHoldToFinishButton: View {
     let onFinish: () -> Void
     let onAsk: () -> Void
+    let style: RunPanelButtonStyle
 
     @Environment(\.accessibilityVoiceOverEnabled) private var voiceOver
     /// 外圈填多滿（0…1）
     @State private var progress: CGFloat = 0
 
-    init(onFinish: @escaping () -> Void, onAsk: @escaping () -> Void) {
+    init(onFinish: @escaping () -> Void, onAsk: @escaping () -> Void, style: RunPanelButtonStyle = .green) {
         self.onFinish = onFinish
         self.onAsk = onAsk
+        self.style = style
     }
 
     var body: some View {
@@ -985,7 +990,7 @@ struct RunHoldToFinishButton: View {
     }
 
     private var face: some View {
-        RunPanelButtonFace(title: "按住結束", icon: "stop.fill", style: .green)
+        RunPanelButtonFace(title: "按住結束", icon: "stop.fill", style: style)
     }
 
     private var askButton: some View {

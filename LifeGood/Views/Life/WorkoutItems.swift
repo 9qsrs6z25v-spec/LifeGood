@@ -18,6 +18,9 @@ import Charts
 // • WorkoutWeeklyCard：⑤ 每週公里（MoneyChartCard，主題 workoutTrends「Trends／WEEKLY」）：膠囊選運動（＋全部）、
 //   一週一根（全部時依運動疊起來，由下往上跑、走、騎、登山）、這週那根淡一點、單一運動有目標畫「目標 20」虛線、
 //   按住一根看那週「10/5–10/11・跑 13.3 公里（3 趟）」（沒按時寫這週）、圖例 12 週合計＋近 4 週平均。
+// • [v25.557] 健康 v7（build/v7/brief.md §6 G4-5；judge §5.1）：有氧卡的膠囊在「路線沒存到」（舊版，沒有亮點、不會同時有）之後、
+//   配速之前插一顆存檔時算好的亮點（s.highlights，只讀不算）：破紀錄「[star.fill] 最快 1 公里」（綠）；沒破紀錄、同一條路
+//   （第 2 次起）「[arrow.triangle.2.circlepath] 第 12 次・快 42 秒」（中性）。VoiceOver 那句跟著加「破紀錄：最快 1 公里」「同一條路第 12 次，快 42 秒」。
 
 // MARK: - 項目卡
 
@@ -87,6 +90,14 @@ private struct WorkoutItemText {
         if s.isLegacyRouteMissing {
             t.chips.append(MoneyItemChip(icon: "map", text: "路線沒存到"))
             said.append("路線沒存到")
+        }
+        // [v25.557] 膠囊 1b：存檔時算好的亮點（judge §5.1「v7 破紀錄的第一顆」）：破紀錄（綠）→ 同一條路（中性）
+        if let record = WorkoutFacts.firstRecordTitle(s) {
+            t.chips.append(MoneyItemChip(icon: "star.fill", text: record, tone: .good))
+            said.append("破紀錄：" + record)
+        } else if let chip = WorkoutFacts.routeChip(s) {
+            t.chips.append(MoneyItemChip(icon: "arrow.triangle.2.circlepath", text: chip))
+            said.append("同一條路" + chip.replacingOccurrences(of: "・", with: "，"))
         }
         // 膠囊 2：配速（跑、走、登山）／時速（騎車）；其他有氧不寫
         if hasKm, hasTime {
