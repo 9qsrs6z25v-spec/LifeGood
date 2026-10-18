@@ -1586,6 +1586,11 @@ struct LifeMilestone: Identifiable, Codable {
     /// 還沒更新的 iPad 存一次會把它丟掉（它不認得這個鍵），所以判斷另外看「健康、同一天、同名或同備註」（WorkoutFacts.isRecorded）
     var sourceKey: String?
 
+    /// [v25.559] 信用卡說明的照片／PDF 檔名（權益說明、優惠 DM、帳單說明…），存在 MilestonePhotos 資料夾。
+    /// 比照 sourceKey 不進 memberwise init（編輯表單指派）；舊資料沒有＝nil。
+    /// 還沒更新的 iPad 存一次會把它丟掉（它不認得這個鍵），檔案本身還在、iCloud 也還在
+    var photoFileNames: [String]?
+
     init(id: UUID = UUID(), title: String, date: Date = Date(),
          category: MilestoneCategory = .other, note: String = "",
          careerSubCategory: CareerSubCategory? = nil,
@@ -1673,6 +1678,8 @@ struct LifeMilestone: Identifiable, Codable {
         happyGoNumber = try? c.decodeIfPresent(String.self, forKey: .happyGoNumber)
         // [健康 v7b] 運動里程碑記成的（舊資料沒有＝nil）
         sourceKey = try? c.decodeIfPresent(String.self, forKey: .sourceKey)
+        // [v25.559] 信用卡說明照片（舊資料沒有＝nil）
+        photoFileNames = try? c.decodeIfPresent([String].self, forKey: .photoFileNames)
         // 兼任職務
         sideRoleName = try? c.decodeIfPresent(String.self, forKey: .sideRoleName)
         sideRoleOrg = try? c.decodeIfPresent(String.self, forKey: .sideRoleOrg)
@@ -1701,6 +1708,8 @@ struct LifeMilestone: Identifiable, Codable {
         case easyCardNumber, iPassNumber, happyGoNumber
         // [健康 v7b] 跟上面 init(from:) 的 sourceKey 那一行成對（編碼走合成版、只認 CodingKeys）
         case sourceKey
+        // [v25.559] 跟上面 init(from:) 的 photoFileNames 那一行成對
+        case photoFileNames
         // ⚠️ 這五行與上面 init(from:) 的十行必須成對存在。
         //    本型別有自訂 init(from:) 與顯式 CodingKeys 但沒有自訂 encode(to:)，
         //    所以編碼走合成版、只認 CodingKeys；漏在這裡加＝新欄位永遠寫不進

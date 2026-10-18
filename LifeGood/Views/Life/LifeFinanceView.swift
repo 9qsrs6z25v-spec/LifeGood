@@ -898,6 +898,10 @@ struct FinanceCardView: View {
                     if sub == .bank { linkedCreditCardSection }
                     if sub == .creditCard { creditCardChartSection }
                     if !item.note.isEmpty { noteCard }
+                    // [v25.559] 信用卡說明照片（在「編輯」裡加）
+                    if sub == .creditCard, let photos = item.photoFileNames, !photos.isEmpty {
+                        cardPhotoCard(photos)
+                    }
                 }
                 .padding(.vertical)
             }
@@ -1478,6 +1482,25 @@ struct FinanceCardView: View {
         VStack(alignment: .leading, spacing: 8) {
             Text("備註").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
             Text(item.note).font(.subheadline)
+        }
+        .padding()
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(.systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .padding(.horizontal)
+    }
+
+    /// [v25.559] 信用卡說明照片：只看不改（點縮圖看大圖、PDF 用 PDF 檢視器；加、刪在「編輯」裡）
+    private func cardPhotoCard(_ photos: [String]) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            MultiPhotoGallery(
+                fileNames: .constant(photos),
+                urlFor: { LifeMilestone.photoURL(for: $0) },
+                onSaveImage: { _ in nil },
+                onDeleteFile: { _ in },
+                title: "信用卡說明",
+                allowAdding: false
+            )
         }
         .padding()
         .frame(maxWidth: .infinity, alignment: .leading)

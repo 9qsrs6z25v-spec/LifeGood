@@ -44,6 +44,7 @@ final class CloudKitManager {
         "RealEstateDocuments",
         "VehiclePhotos",
         "TripStopPhotos",
+        "MilestonePhotos", // [v25.559] 信用卡說明照片（LifeMilestone.photoFileNames）
         "DividendPhotos"   // [v25.543] 股利文件照片：不列在這裡，iCloud 補傳（剛開同步、上次沒傳成功）、完整備份、一鍵壓縮都會漏掉
     ]
 

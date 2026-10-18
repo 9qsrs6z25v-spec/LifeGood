@@ -307,7 +307,12 @@ class LifeStore: ObservableObject {
     func update(_ item: LifeMilestone) {
         if let i = milestones.firstIndex(where: { $0.id == item.id }) { milestones[i] = item }
     }
-    func deleteMilestone(_ item: LifeMilestone) { milestones.removeAll { $0.id == item.id } }
+    func deleteMilestone(_ item: LifeMilestone) {
+        // [v25.559] 信用卡說明照片跟著刪（照片檔不在 JSON 裡，不刪會留在手機和 iCloud）
+        let photos = milestones.first(where: { $0.id == item.id })?.photoFileNames ?? item.photoFileNames ?? []
+        milestones.removeAll { $0.id == item.id }
+        for name in photos { LifeMilestone.deletePhoto(name) }
+    }
 
     // MARK: - 配偶協定
 

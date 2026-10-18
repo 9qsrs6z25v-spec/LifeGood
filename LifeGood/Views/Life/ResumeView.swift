@@ -1370,6 +1370,11 @@ struct AddMilestoneView: View {
     @State private var title = ""
     @State private var date = Date()
     @State private var note = ""
+    /// [v25.559] 信用卡說明照片／PDF 檔名。拍下、選好的當下就寫檔了（檔名用 photoOwnerId），按儲存才寫進信用卡；
+    /// 按取消時新加的檔刪掉（cancel()）
+    @State private var photoFileNames: [String] = []
+    /// [v25.559] 新增時先決定好 id：照片檔名要帶它，存檔時信用卡也用同一個 id
+    @State private var draftMilestoneId = UUID()
 
     @State private var familyRole: FamilyMemberRole = .spouse
     @State private var familyChineseName = ""
@@ -1560,8 +1565,10 @@ struct AddMilestoneView: View {
             }
             .navigationTitle(navTitle)
             .navigationBarTitleDisplayMode(.inline)
+            // [v25.559] 加了或刪了說明照片還沒存：不讓往下滑關掉（要按取消或儲存，照片才不會變成沒人認領的檔）
+            .interactiveDismissDisabled(hasUnsavedPhotoChanges)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) { Button("取消") { dismiss() } }
+                ToolbarItem(placement: .topBarLeading) { Button("取消") { cancel() } }
                 ToolbarItem(placement: .topBarTrailing) {
                     // v25.102 美化：isSaving 忙碌守衛補齊載入視覺，對齊 LifeFinanceView
                     // v25.101／MyCalendarView v25.100 等全 App 儲存按鈕載入狀態規格。
@@ -2213,6 +2220,7 @@ struct AddMilestoneView: View {
             } header: {
                 milestoneSectionHeader("備註", icon: "note.text", color: .secondary)
             }
+            creditCardPhotoSection
         case .securities:
             Section {
                 TextField("券商名稱", text: $bankName)
@@ -2261,6 +2269,64 @@ struct AddMilestoneView: View {
     // MARK: - [v25.368] 卡號與安全資訊
 
     /// 說明文字在 ViewBuilder 外組好（本檔案有型別檢查逾時的前科）
+    /// [v25.559] 信用卡說明照片：權益說明、優惠 DM、帳單說明…拍照、掃描文件（自動裁切）、相簿多選、PDF。
+    /// 不傳 onBackgroundCommit：這張表單要按儲存才落地（照 StockDividendEditor 的文件照片）
+    private var creditCardPhotoSection: some View {
+        // id 先取成常數：相機、相簿多選是在背景執行緒呼叫 onSaveImage，不要在那邊回頭讀 @State
+        let id = photoOwnerId
+        return Section {
+            MultiPhotoGallery(
+                fileNames: $photoFileNames,
+                urlFor: { LifeMilestone.photoURL(for: $0) },
+                onSaveImage: { LifeMilestone.savePhoto($0, milestoneId: id) },
+                onDeleteFile: { LifeMilestone.deletePhoto($0) },
+                onSavePDF: { LifeMilestone.savePDF($0, milestoneId: id) },
+                title: "說明照片"
+            )
+            .padding(.vertical, 4)
+        } header: {
+            milestoneSectionHeader("信用卡說明", icon: "doc.text.image", color: .orange)
+        } footer: {
+            Text(Self.cardPhotoFootnote)
+                .font(.caption2)
+        }
+    }
+
+    static let cardPhotoFootnote =
+        "權益說明、優惠 DM、帳單說明都可以拍下來；選「掃描文件」會自動裁切，也可以選 PDF。"
+        + "請不要拍卡片正面或背面——卡號和安全碼請填在上面的「卡號與安全資訊」，那裡會加密。"
+
+    /// [v25.559] 說明照片檔名用的 id：編輯沿用原本的，新增用表單一打開就決定好的 draftMilestoneId
+    private var photoOwnerId: UUID { editing?.id ?? draftMilestoneId }
+
+    private var hasUnsavedPhotoChanges: Bool {
+        photoFileNames != (editing?.photoFileNames ?? [])
+    }
+
+    /// [v25.559] 取消：這次新加的說明照片刪掉；這次在照片廊刪掉的舊照片檔已經沒了，
+    /// 所以把原本那一筆的檔名清單改成「還在的那些」，不然會留著指向不存在檔案的檔名
+    ///（照 StockDividendEditor／VehiclePhotoEditor 的 cancel）
+    private func cancel() {
+        let original: [String] = editing?.photoFileNames ?? []
+        let originalSet = Set(original)
+        for name in photoFileNames where !originalSet.contains(name) {
+            LifeMilestone.deletePhoto(name)
+        }
+        let kept = Set(photoFileNames)
+        let remaining: [String] = original.filter { kept.contains($0) }
+        let editId: UUID? = editing?.id
+        let changed = remaining.count != original.count
+        let lifeStore = store
+        dismiss()
+        guard changed, let editId else { return }
+        // 先收起再寫回（下一個 runloop）
+        DispatchQueue.main.async {
+            guard var latest = lifeStore.milestones.first(where: { $0.id == editId }) else { return }
+            latest.photoFileNames = remaining.isEmpty ? nil : remaining
+            lifeStore.update(latest)
+        }
+    }
+
     static let cardVaultFootnote =
         "完整卡號與檢核碼會加密後才存起來，金鑰放在系統鑰匙圈、不會跟著資料同步進 iCloud 的紀錄裡，"
         + "備份檔與桌面網頁版也讀不到明碼。要看或修改一定要先通過 Face ID 或裝置密碼。"
@@ -2653,6 +2719,7 @@ struct AddMilestoneView: View {
             // 設定還在；條件化的話切一次就把使用者設好的欄位清掉了。
             item.sideRoleResolutionSchema =
                 resolutionSchema.isDefault ? nil : resolutionSchema
+            item.photoFileNames = editing?.photoFileNames
             if editing != nil { store.update(item) } else { store.add(item) }
         } else if isFinance {
             let autoTitle = generateFinanceTitle()
@@ -2674,7 +2741,7 @@ struct AddMilestoneView: View {
                 return derived.isEmpty ? cardLastFour : derived
             }()
             var item = LifeMilestone(
-                id: editing?.id ?? UUID(),
+                id: editing?.id ?? draftMilestoneId,
                 title: autoTitle, date: date, category: .achievement,
                 note: t,
                 financeSubCategory: financeSub,
@@ -2730,6 +2797,15 @@ struct AddMilestoneView: View {
             }
             // 保留現有停用狀態
             item.isDisabled = editing?.isDisabled
+            // [v25.559] 信用卡說明照片；切到別的子分類時原封帶回（檔還在，切回信用卡就看得到）
+            if financeSub == .creditCard {
+                item.photoFileNames = photoFileNames.isEmpty ? nil : photoFileNames
+            } else {
+                item.photoFileNames = editing?.photoFileNames
+                // 在信用卡那頁加了照片又切到別的子分類才存：新加的檔沒人認領，刪掉
+                let keep = Set(editing?.photoFileNames ?? [])
+                for name in photoFileNames where !keep.contains(name) { LifeMilestone.deletePhoto(name) }
+            }
             if editing != nil { store.update(item) } else { store.add(item) }
         } else {
             var item = LifeMilestone(
@@ -2740,6 +2816,7 @@ struct AddMilestoneView: View {
             )
             // [健康 v7b] 從運動里程碑記成的那一筆：改字、改日期後還認得是哪一個（成果頁照樣寫「已記在人生里程碑」）
             item.sourceKey = editing?.sourceKey
+            item.photoFileNames = editing?.photoFileNames
             if editing != nil { store.update(item) } else { store.add(item) }
         }
         dismiss()
@@ -2841,6 +2918,7 @@ struct AddMilestoneView: View {
                 ? CardVault.grouped(rawIPass, limit: CardVault.iPassDigits)
                 : rawIPass
             happyGoNumber = e.happyGoNumber ?? ""
+            photoFileNames = e.photoFileNames ?? []
             if let cl = e.creditLimit, cl > 0 {
                 // 信用卡額度以「萬元」顯示；其他子分類保留原始值
                 if e.financeSubCategory == .creditCard {

@@ -462,6 +462,53 @@ extension StockDividend {
     }
 }
 
+// MARK: - 信用卡說明照片（v25.559）
+
+/// [v25.559] 理財卡片的信用卡「說明照片」（權益說明、優惠 DM、帳單說明），寫法照抄上面的股利文件：
+/// 「信用卡 id_照片 id」當檔名、PDF 原檔不壓縮，資料夾 MilestonePhotos 列在 CloudKitManager.photoDirectories，
+/// iCloud 同步／完整備份／一鍵壓縮才找得到。
+/// ⚠️ 卡號與安全碼一律只走 cardNumberCipher／cardSecurityCipher（加密），照片不要拍卡片正反面——表單上有寫。
+extension LifeMilestone {
+    static let photoFolder = "MilestonePhotos"
+
+    static var photosDirectory: URL {
+        let dir = (FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
+            ?? FileManager.default.temporaryDirectory)
+            .appendingPathComponent(photoFolder, isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
+    /// 將 jpeg 資料寫入並回傳檔名（同時推送 CloudKit）；寫入失敗回傳 nil
+    static func savePhoto(_ data: Data, milestoneId: UUID, photoId: UUID = UUID()) -> String? {
+        let data = ImageCompressor.compressForStorage(data)   // 存檔前統一壓縮：1080P 長邊 + JPEG 80%
+        let name = "\(milestoneId.uuidString)_\(photoId.uuidString).jpg"
+        let url = photosDirectory.appendingPathComponent(name)
+        guard (try? data.write(to: url)) != nil else { return nil }
+        PhotoCloudSync.upload(directory: photoFolder, fileName: name)
+        return name
+    }
+
+    /// PDF 原檔保留不壓縮（銀行給的權益說明常常是 PDF）
+    static func savePDF(_ data: Data, milestoneId: UUID, fileId: UUID = UUID()) -> String? {
+        let name = "\(milestoneId.uuidString)_\(fileId.uuidString).pdf"
+        let url = photosDirectory.appendingPathComponent(name)
+        guard (try? data.write(to: url)) != nil else { return nil }
+        PhotoCloudSync.upload(directory: photoFolder, fileName: name)
+        return name
+    }
+
+    static func deletePhoto(_ fileName: String) {
+        let url = photosDirectory.appendingPathComponent(fileName)
+        try? FileManager.default.removeItem(at: url)
+        PhotoCloudSync.delete(directory: photoFolder, fileName: fileName)
+    }
+
+    static func photoURL(for fileName: String) -> URL {
+        photosDirectory.appendingPathComponent(fileName)
+    }
+}
+
 struct Stock: Identifiable, Codable {
     let id: UUID
     var name: String
