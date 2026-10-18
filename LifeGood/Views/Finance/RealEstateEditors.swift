@@ -151,6 +151,8 @@ struct UtilityPaymentEditor: View {
     @State private var date = Date()
     @State private var amountText = ""
     @State private var note = ""
+    /// [v25.560] 這一期是哪一個表（同一種有兩個以上的表才問）；nil＝不指定，算在那一種的第一個表
+    @State private var meterId: String?
     // 收據照片（多張）：改用 MultiPhotoGallery（可拍照連拍 / 相簿多選 / 燈箱檢視 / 刪除）
     @State private var photoFileNames: [String] = []
     @State private var showDeleteConfirm = false
@@ -167,6 +169,13 @@ struct UtilityPaymentEditor: View {
         lifeStore.milestones.filter {
             $0.category == .achievement && $0.financeSubCategory == .bank
         }
+    }
+
+    /// [v25.560] 這間房子這一種的每一個表（跟卡片上的列同一份：RealEstate.utilityMeterSlots）
+    private var meterChoices: [UtilityMeterSlot] {
+        guard let estate = store.realEstates.first(where: { $0.id == estateId }) else { return [] }
+        let t = type
+        return estate.utilityMeterSlots().filter { $0.type == t }
     }
 
     private var creditCardMilestones: [LifeMilestone] {
@@ -201,6 +210,32 @@ struct UtilityPaymentEditor: View {
         return unique.isEmpty ? ["NT$"] : unique
     }
 
+    /// [v25.560] 「哪一個表」：不指定＝算在這一種的第一個表
+    private var meterPicker: some View {
+        Picker("哪一個表", selection: $meterId) {
+            Text("不指定").tag(String?.none)
+            ForEach(meterChoices) { slot in
+                Text(slot.menuTitle).tag(Optional(slot.id))
+            }
+        }
+    }
+
+    private var meterFooter: String {
+        let label: String
+        switch type {
+        case .water: label = "水號"
+        case .electricity: label = "電號"
+        case .gas: label = "瓦斯表"
+        }
+        return "這間有好幾個\(label)，選好是哪一個，卡片上每一個表就會顯示它自己的最近一期。"
+    }
+
+    /// 換了水電類型：原本選的表不是這一種的就清掉（讀進來的那一筆本來就對得上，不會被清）
+    private func typeChanged() {
+        guard let id = meterId else { return }
+        if !meterChoices.contains(where: { $0.id == id }) { meterId = nil }
+    }
+
     @ViewBuilder
     private func bankSubMenu(for ms: LifeMilestone) -> some View {
         let name = ms.bankName ?? ms.title
@@ -233,6 +268,9 @@ struct UtilityPaymentEditor: View {
                             Label(t.rawValue, systemImage: t.icon).tag(t)
                         }
                     }
+                    if meterChoices.count >= 2 {
+                        meterPicker
+                    }
                     DatePicker("繳費日期", selection: $date, displayedComponents: .date)
                     HStack {
                         Text("NT$").foregroundStyle(.secondary)
@@ -240,6 +278,10 @@ struct UtilityPaymentEditor: View {
                     }
                 } header: {
                     realEstateEditorSectionHeader("基本資訊", icon: "list.bullet.rectangle.fill", color: .indigo)
+                } footer: {
+                    if meterChoices.count >= 2 {
+                        Text(meterFooter)
+                    }
                 }
 
                 if hasPaymentTargets {
@@ -334,6 +376,7 @@ struct UtilityPaymentEditor: View {
                     Button("儲存") { save() }.bold().foregroundStyle(.green).disabled(isSaving)
                 }
             }
+            .onChange(of: type) { _, _ in typeChanged() }
             .onAppear {
                 if let e = editing {
                     type = e.type
@@ -341,6 +384,7 @@ struct UtilityPaymentEditor: View {
                     // [v25.530] 不用 %.0f：有小數的金額讀回來會被四捨五入，再存一次就改掉了
                     amountText = e.amount > 0 ? Self.editableAmountText(e.amount) : ""
                     note = e.note
+                    meterId = e.meterId
                     photoFileNames = e.photoFileNames
                     // 載入既有的扣款目標（從連結的 Expense 讀回）
                     if let expId = e.linkedExpenseId,
@@ -422,13 +466,16 @@ struct UtilityPaymentEditor: View {
         if let oldId = editing?.linkedExpenseId { clearIds.insert(oldId) }
         syncBankWithdrawal(for: expense, clearing: clearIds)
 
-        let record = UtilityPayment(
+        var record = UtilityPayment(
             id: recordId, type: type, date: date, amount: amount,
             photoFileName: photoFileNames.first,
             photoFileNames: photoFileNames,
             note: trimmedNote,
             linkedExpenseId: expense.id
         )
+        // [v25.560] 只存這一種真的有的表（換了類型、表被刪掉就不指定）
+        let chosenMeter = meterId
+        record.meterId = estate.utilityMeterSlots().contains { $0.type == type && $0.id == chosenMeter } ? chosenMeter : nil
         if let idx = estate.utilityPayments.firstIndex(where: { $0.id == recordId }) {
             estate.utilityPayments[idx] = record
         } else {

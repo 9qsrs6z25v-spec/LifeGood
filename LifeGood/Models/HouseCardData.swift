@@ -997,10 +997,13 @@ struct HouseUtilitiesData {
         let userNumber: String
         /// 最近一期（同一種表只掛在第一列）；點列→actions.openUtility(latest)
         let latest: UtilityPayment?
-        /// 右邊「9/18・NT$1,850」；沒有繳費 nil
+        /// 右邊「9/18・NT$1,850」；沒有繳費 nil（VoiceOver、舊呼叫端用）
         let latestText: String?
         /// 最近一期的收據張數（點收據圖示看全部）
         let latestPhotoCount: Int
+        /// [v25.560] 右邊分兩行：上「10/17」、下「NT$1,850」（以前擠成一行，金額會被切成「NT$...」）
+        var latestDate: String? = nil
+        var latestAmount: String? = nil
     }
 
     /// 全部繳費中的一筆（「看全部」展開後）
@@ -2208,13 +2211,6 @@ extension HouseCardData {
             return p.amount
         }
 
-        // 最近一期：每種類型日期最大的那一筆，同一天取陣列裡後面那筆（只有這一份實作）
-        var latest: [UtilityType: UtilityPayment] = [:]
-        for p in re.utilityPayments {
-            if let cur = latest[p.type], cur.date > p.date { continue }
-            latest[p.type] = p
-        }
-
         func numberLabel(_ t: UtilityType) -> String {
             switch t {
             case .water: return "水號"
@@ -2225,47 +2221,58 @@ extension HouseCardData {
         func meterTitle(_ t: UtilityType, number: String) -> String {
             number.isEmpty ? "\(t.rawValue)（沒填\(numberLabel(t))）" : numberLabel(t)
         }
-        func latestText(_ p: UtilityPayment?) -> String? {
-            guard let p = p else { return nil }
-            return "\(HouseCardFormat.shortDate(p.date, now: c.now))・\(MoneyFormat.short(paymentAmount(p)))"
+
+        // [v25.560] 每個表一格（一格電號填了兩個號碼的，拆成兩個表）；繳費有指定表（meterId）的掛在那個表，
+        // 沒指定的（舊資料、只有一個表）掛在那一種的第一個表。
+        let slots = re.utilityMeterSlots()
+        let slotIds = Set(slots.map(\.id))
+        var order: [UUID: Int] = [:]
+        for (i, p) in re.utilityPayments.enumerated() { order[p.id] = i }
+        /// 比較新：日期大的；同一天取陣列裡後面那筆（只有這一份實作）
+        func newer(_ a: UtilityPayment, than b: UtilityPayment) -> Bool {
+            if a.date != b.date { return a.date > b.date }
+            return (order[a.id] ?? 0) > (order[b.id] ?? 0)
+        }
+        var latestByMeter: [String: UtilityPayment] = [:]
+        var latestUnassigned: [UtilityType: UtilityPayment] = [:]
+        var anyPayment = Set<UtilityType>()
+        for p in re.utilityPayments {
+            anyPayment.insert(p.type)
+            if let mid = p.meterId, slotIds.contains(mid) {
+                if let cur = latestByMeter[mid], !newer(p, than: cur) { continue }
+                latestByMeter[mid] = p
+            } else {
+                if let cur = latestUnassigned[p.type], !newer(p, than: cur) { continue }
+                latestUnassigned[p.type] = p
+            }
         }
 
-        let mains: [(type: UtilityType, number: String, owner: String, user: String)] = [
-            (type: .water, number: re.waterMeterNumber, owner: re.waterMeterOwner, user: ""),
-            (type: .electricity, number: re.electricityMeterNumber, owner: re.electricityMeterOwner, user: ""),
-            (type: .gas, number: re.gasMeterNumber, owner: re.gasMeterOwner, user: re.gasUserNumber)
-        ]
-        let extras = re.extraMeters
         var claimed = Set<UtilityType>()
         var meters: [HouseUtilitiesData.Meter] = []
-        for m in mains {
-            let number = m.number.trimmingCharacters(in: .whitespacesAndNewlines)
-            let hasExtra = extras.contains { $0.type == m.type }
-            let pay = latest[m.type]
-            // 沒填表號：有繳費、又沒有額外的同種表時，還是列一列「電費（沒填電號）」
-            guard !number.isEmpty || (pay != nil && !hasExtra) else { continue }
-            let user = m.user.trimmingCharacters(in: .whitespacesAndNewlines)
-            let title = meterTitle(m.type, number: number)
-            let mine: UtilityPayment? = claimed.contains(m.type) ? nil : pay
-            if pay != nil { claimed.insert(m.type) }
+        for slot in slots {
+            // 沒填表號的主表：有繳費、又沒有別的同種表時，還是列一列「電費（沒填電號）」
+            if slot.number.isEmpty && slot.isMain {
+                let hasOther = slots.contains { $0.type == slot.type && $0.id != slot.id }
+                guard anyPayment.contains(slot.type) && !hasOther else { continue }
+            }
+            var mine: UtilityPayment? = latestByMeter[slot.id]
+            if !claimed.contains(slot.type) {
+                claimed.insert(slot.type)
+                if let un = latestUnassigned[slot.type] {
+                    if let m = mine { if newer(un, than: m) { mine = un } } else { mine = un }
+                }
+            }
+            let user = slot.userNumber
             meters.append(HouseUtilitiesData.Meter(
-                id: "main-\(m.type)", type: m.type, name: "", title: title, number: number,
-                owner: m.owner.trimmingCharacters(in: .whitespacesAndNewlines),
+                id: slot.id, type: slot.type, name: slot.name,
+                title: meterTitle(slot.type, number: slot.number), number: slot.number,
+                owner: slot.owner,
                 userNumber: user.isEmpty ? "" : "用戶編號 " + user,
-                latest: mine, latestText: latestText(mine), latestPhotoCount: mine?.photoFileNames.count ?? 0))
-        }
-        for x in extras {
-            let pay = latest[x.type]
-            let mine: UtilityPayment? = claimed.contains(x.type) ? nil : pay
-            if pay != nil { claimed.insert(x.type) }
-            let number = x.meterNumber.trimmingCharacters(in: .whitespacesAndNewlines)
-            let user = x.userNumber.trimmingCharacters(in: .whitespacesAndNewlines)
-            meters.append(HouseUtilitiesData.Meter(
-                id: x.id.uuidString, type: x.type, name: x.label.trimmingCharacters(in: .whitespacesAndNewlines),
-                title: meterTitle(x.type, number: number),
-                number: number, owner: x.owner.trimmingCharacters(in: .whitespacesAndNewlines),
-                userNumber: user.isEmpty ? "" : "用戶編號 " + user,
-                latest: mine, latestText: latestText(mine), latestPhotoCount: mine?.photoFileNames.count ?? 0))
+                latest: mine,
+                latestText: mine.map { "\(HouseCardFormat.shortDate($0.date, now: c.now))・\(MoneyFormat.short(paymentAmount($0)))" },
+                latestPhotoCount: mine?.photoFileNames.count ?? 0,
+                latestDate: mine.map { HouseCardFormat.shortDate($0.date, now: c.now) },
+                latestAmount: mine.map { MoneyFormat.short(paymentAmount($0)) }))
         }
         u.meters = meters
 
@@ -2979,6 +2986,88 @@ extension HouseCheck {
     fileprivate static func uniquePlaces(_ list: [HouseItemLink.Place]) -> [HouseItemLink.Place] {
         var out: [HouseItemLink.Place] = []
         for p in list where !out.contains(p) { out.append(p) }
+        return out
+    }
+}
+
+// MARK: - [v25.560] 一間房子的每一個水／電／瓦斯表（卡片列、繳費表單的「哪一個表」共用同一份）
+
+/// 一個表。id 跟 UtilityPayment.meterId、HouseUtilitiesData.Meter.id 是同一套：
+/// 主表「main-electricity」；主表那一格填了兩個以上號碼時「main-electricity#21-40-0218-50」；額外的表是 UtilityMeter.id
+struct UtilityMeterSlot: Identifiable, Equatable {
+    let id: String
+    let type: UtilityType
+    /// 額外的表自己取的名字「客廳」；主表是空字串
+    let name: String
+    /// 號碼；沒填是空字串
+    let number: String
+    let owner: String
+    let userNumber: String
+    let isMain: Bool
+
+    /// 選單上的字：「電號 21-40-0218-50（客廳）」
+    var menuTitle: String {
+        let label: String
+        switch type {
+        case .water: label = "水號"
+        case .electricity: label = "電號"
+        case .gas: label = "瓦斯表號"
+        }
+        var t = number.isEmpty ? "\(label)（沒填）" : "\(label) \(number)"
+        if !name.isEmpty { t += "（\(name)）" }
+        return t
+    }
+}
+
+extension RealEstate {
+    /// 一格裡填了兩個以上號碼（「21-40-0218-50、21-40-0218-61」「…／…」「…, …」或換行）就拆開；
+    /// 用空白隔開的，只有每一段都有 6 個以上數字才拆（號碼裡本來就可能有空白）
+    static func splitMeterNumbers(_ raw: String) -> [String] {
+        let seps = CharacterSet(charactersIn: "、,，/／;；\n")
+        var parts: [String] = raw.components(separatedBy: seps)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        var out: [String] = []
+        for p in parts {
+            let tokens = p.split(whereSeparator: { $0 == " " || $0 == "\u{3000}" }).map(String.init)
+            let digitCounts = tokens.map { t in t.filter { $0.isNumber }.count }
+            if tokens.count >= 2, digitCounts.allSatisfy({ $0 >= 6 }) {
+                out.append(contentsOf: tokens)
+            } else {
+                out.append(p)
+            }
+        }
+        parts = out
+        return parts
+    }
+
+    /// 主表（水、電、瓦斯）在前、額外的表接在後面；主表一格填了兩個號碼的拆成兩個
+    func utilityMeterSlots() -> [UtilityMeterSlot] {
+        func clean(_ s: String) -> String { s.trimmingCharacters(in: .whitespacesAndNewlines) }
+        let mains: [(type: UtilityType, number: String, owner: String, user: String)] = [
+            (type: .water, number: waterMeterNumber, owner: waterMeterOwner, user: ""),
+            (type: .electricity, number: electricityMeterNumber, owner: electricityMeterOwner, user: ""),
+            (type: .gas, number: gasMeterNumber, owner: gasMeterOwner, user: gasUserNumber)
+        ]
+        var out: [UtilityMeterSlot] = []
+        for m in mains {
+            let numbers = Self.splitMeterNumbers(m.number)
+            let baseId = "main-\(m.type)"
+            if numbers.count <= 1 {
+                out.append(UtilityMeterSlot(id: baseId, type: m.type, name: "", number: numbers.first ?? "",
+                                            owner: clean(m.owner), userNumber: clean(m.user), isMain: true))
+            } else {
+                for n in numbers {
+                    out.append(UtilityMeterSlot(id: baseId + "#" + n, type: m.type, name: "", number: n,
+                                                owner: clean(m.owner), userNumber: clean(m.user), isMain: true))
+                }
+            }
+        }
+        for x in extraMeters {
+            out.append(UtilityMeterSlot(id: x.id.uuidString, type: x.type, name: clean(x.label),
+                                        number: clean(x.meterNumber), owner: clean(x.owner),
+                                        userNumber: clean(x.userNumber), isMain: false))
+        }
         return out
     }
 }

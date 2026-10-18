@@ -3748,13 +3748,17 @@ struct AddExpenseView: View {
             // > 從名稱／備註判斷（guessUtilityType，跟 AI 記帳共用）。
             if let idx = re.utilityPayments.firstIndex(where: { $0.linkedExpenseId == expenseId }) {
                 let old = re.utilityPayments[idx]
-                re.utilityPayments[idx] = UtilityPayment(
-                    id: old.id, type: selectedUtilityType ?? old.type, date: date, amount: amount,
+                let newType: UtilityType = selectedUtilityType ?? old.type
+                var rebuilt = UtilityPayment(
+                    id: old.id, type: newType, date: date, amount: amount,
                     photoFileName: old.photoFileName,
                     photoFileNames: old.photoFileNames,
                     note: note.trimmingCharacters(in: .whitespaces),
                     linkedExpenseId: expenseId
                 )
+                // [v25.560] 「哪一個表」在房子那邊選的，記帳這裡改金額不要把它洗掉（換了水電類型才清）
+                rebuilt.meterId = newType == old.type ? old.meterId : nil
+                re.utilityPayments[idx] = rebuilt
             } else {
                 // 編輯時換了房子：舊房子那筆還在（存完才清），沿用它的類型
                 let previousType = financeStore.realEstates

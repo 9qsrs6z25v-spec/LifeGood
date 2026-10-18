@@ -1010,6 +1010,10 @@ struct UtilityPayment: Identifiable, Codable {
     var note: String
     /// 連結到記帳模式變動支出的 ID（雙向同步用）
     var linkedExpenseId: UUID?
+    /// [v25.560] 這一期是哪一個表的（同一間房子有兩個電號時用）：HouseUtilitiesData.Meter.id
+    ///（主表「main-電費」、一格填了兩個號碼的「main-電費#<號碼>」、額外的表是 UtilityMeter.id）。
+    /// nil＝沒指定（舊資料、只有一個表），算在那一種的第一個表。不進 memberwise init（編輯表單指派）
+    var meterId: String?
 
     init(id: UUID = UUID(), type: UtilityType = .water, date: Date = Date(),
          amount: Double = 0, photoFileName: String? = nil, photoFileNames: [String] = [],
@@ -1037,9 +1041,12 @@ struct UtilityPayment: Identifiable, Codable {
         photoFileNames = names
         note = (try? c.decode(String.self, forKey: .note)) ?? ""
         linkedExpenseId = try? c.decodeIfPresent(UUID.self, forKey: .linkedExpenseId)
+        meterId = try? c.decodeIfPresent(String.self, forKey: .meterId)
     }
     private enum CodingKeys: String, CodingKey {
         case id, type, date, amount, photoFileName, photoFileNames, note, linkedExpenseId
+        // [v25.560]
+        case meterId
     }
 
     var photoURL: URL? {

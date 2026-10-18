@@ -1505,33 +1505,54 @@ struct HouseUtilitiesSection: View {
         .contentShape(Rectangle())
     }
 
-    /// 「電號 01-2345-67-8」：號碼用等寬字
+    /// 「電號」一行、號碼自己一行（等寬字）。
+    /// [v25.560] 以前「電號 21-40-0218-50-1」擠在同一行、右邊又有日期金額，號碼被切成「21-40-0218-5…」；
+    /// 現在號碼獨佔一行，放不下才縮小字（最小 0.6），還放不下才換行
     private func meterTitle(_ m: HouseUtilitiesData.Meter) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 6) {
+        VStack(alignment: .leading, spacing: 1) {
             Text(m.title)
                 .font(.subheadline.weight(.semibold))
                 .lineLimit(1)
             if !m.number.isEmpty {
                 Text(m.number)
                     .font(.system(.subheadline, design: .monospaced).weight(.semibold))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.7)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.6)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
     }
 
+    /// [v25.560] 日期、金額分兩行，整塊不縮（fixedSize）——以前「10/17・NT$...」擠一行，金額被切掉
     @ViewBuilder
     private func latestView(_ m: HouseUtilitiesData.Meter, pal: TripBoardPalette) -> some View {
-        if let t = m.latestText {
+        if let amount = m.latestAmount {
             HStack(spacing: 3) {
-                Text(t)
-                    .font(.subheadline.weight(.heavy))
-                    .monospacedDigit()
-                    .lineLimit(1)
+                VStack(alignment: .trailing, spacing: 1) {
+                    if let d = m.latestDate {
+                        Text(d)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .monospacedDigit()
+                    }
+                    Text(amount)
+                        .font(.subheadline.weight(.heavy))
+                        .monospacedDigit()
+                }
+                .lineLimit(1)
+                .fixedSize()
                 Image(systemName: "chevron.right")
                     .font(.caption2.weight(.bold))
                     .foregroundStyle(.tertiary)
             }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(m.latestText ?? amount)
+        } else if let t = m.latestText {
+            Text(t)
+                .font(.subheadline.weight(.heavy))
+                .monospacedDigit()
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
         } else {
             Text("記一筆")
                 .font(.caption.weight(.bold))
