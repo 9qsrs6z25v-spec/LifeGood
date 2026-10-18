@@ -263,7 +263,7 @@ struct VehicleDetailView: View {
             .id(VehicleAnchor.loan)
     }
 
-    /// 充電／加油／油電、我的帳本、車輛資料、照片與單據
+    /// 充電／加油／油電、我的帳本、車輛資料、賣車估價（持有中才有）、照片與單據
     @ViewBuilder
     private func lowerSections(_ card: VehicleCardData, actions: VehicleCardActions) -> some View {
         VehicleEnergySection(data: card, actions: actions)
@@ -272,6 +272,7 @@ struct VehicleDetailView: View {
             .id(VehicleAnchor.ledger)
         VehicleInfoSection(data: card, actions: actions)
             .id(VehicleAnchor.info)
+        resaleEntry
         photosSection(card)
             .id(VehicleAnchor.photos)
     }
@@ -384,6 +385,8 @@ struct VehicleDetailView: View {
             CutePhotoViewer(draft: draft)
         case .chargeAnalytics:
             VehicleChargeAnalyticsView(vehicleId: vehicleId)
+        case .resale:
+            VehicleResaleView(vehicleId: vehicleId)
         default:
             EmptyView()
         }
@@ -719,6 +722,22 @@ extension VehicleDetailView {
             guard added, var v = finance.vehicles.first(where: { $0.id == pending.vehicleId }) else { return }
             VehicleFixes.removeMirrors([pending.mirrorId], from: &v)
             finance.update(v)
+        }
+    }
+}
+
+// MARK: - 賣車估價
+
+extension VehicleDetailView {
+    /// [賣車估價] 車輛資料下面一張白卡（持有中的車才有；isSold(asOf:) 同換車列）。
+    /// 說明那一行（建議標價、比了幾台）由 VehicleResaleReport 算；打開估價頁要付費（裡面全是新增、編輯）
+    @ViewBuilder
+    fileprivate var resaleEntry: some View {
+        let v = vehicle
+        if !v.isSold(asOf: Date()) {
+            VehicleResaleEntryCard(subtitle: VehicleResaleReport.entrySubtitle(v, today: Date())) {
+                requirePremium { sheet = .resale }
+            }
         }
     }
 }
@@ -1201,6 +1220,7 @@ private enum VehicleSheet: Identifiable {
     case photoEditor(UUID, VehiclePhotoRecord?, VehiclePhotoCategory)
     case photos(CutePhotoDraft)
     case chargeAnalytics
+    case resale
     case share(StockCardSharePayload)
 
     var id: String {
@@ -1211,6 +1231,7 @@ private enum VehicleSheet: Identifiable {
         case .photoEditor(let token, _, _): return "photoEditor-" + token.uuidString
         case .photos(let draft): return "photos-" + draft.id.uuidString
         case .chargeAnalytics: return "chargeAnalytics"
+        case .resale: return "resale"
         case .share(let payload): return "share-" + payload.id.uuidString
         }
     }

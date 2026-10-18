@@ -2082,6 +2082,9 @@ struct Vehicle: Identifiable, Codable {
     /// [v25.539] 估值上次在編輯頁改的日子（新增車子也寫）。拿來分辨估值 0 是「還沒填」（沒有日子，先用購入價）
     /// 還是「真的是 0（報廢）」，車輛資料寫「2026/9 更新」、超過一年提醒更新也看它
     var valueUpdatedAt: Date? = nil
+    /// [賣車估價] 車輛卡「賣車估價」那一頁的資料（我的車、共用選配清單、市場上看到的車）；沒打開過是 nil。
+    /// 型別在 VehicleResale.swift；不進 init 參數（同 soldPrice）
+    var resale: VehicleResaleWorkspace? = nil
 
     init(
         id: UUID = UUID(),
@@ -2137,6 +2140,7 @@ struct Vehicle: Identifiable, Codable {
         homeChargePlace = try? c.decodeIfPresent(String.self, forKey: .homeChargePlace)
         soldPrice = try? c.decodeIfPresent(Double.self, forKey: .soldPrice)
         valueUpdatedAt = try? c.decodeIfPresent(Date.self, forKey: .valueUpdatedAt)
+        resale = try? c.decodeIfPresent(VehicleResaleWorkspace.self, forKey: .resale)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -2161,6 +2165,8 @@ struct Vehicle: Identifiable, Codable {
         // [v25.539] 這兩行漏了不會編譯錯，只會重開 App 後成交價、估值更新日消失
         try c.encodeIfPresent(soldPrice, forKey: .soldPrice)
         try c.encodeIfPresent(valueUpdatedAt, forKey: .valueUpdatedAt)
+        // [賣車估價] 漏了這行不會編譯錯，只會重開 App 後估價頁整個變空
+        try c.encodeIfPresent(resale, forKey: .resale)
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -2168,6 +2174,7 @@ struct Vehicle: Identifiable, Codable {
         case fixedExpenses, variableExpenses, photoRecords, note
         case batteryCapacityKWh, homeChargePlace
         case soldPrice, valueUpdatedAt
+        case resale
     }
 
     /// 這台車有沒有電池（電車／混合動力／電動機車）
