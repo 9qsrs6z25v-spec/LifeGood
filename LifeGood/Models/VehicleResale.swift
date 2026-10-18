@@ -10,7 +10,7 @@
 //  - 存在 Vehicle.resale（選填）。這裡每個欄位都是選填或有預設值，自訂解碼一律 try?／decodeIfPresent：
 //    舊資料、還沒更新的 iPad 傳來的資料都解得開，壞掉的一筆不會害整台車解不開。
 //  - 品牌選配範本（只有名稱、不帶價格）在 VehicleOptionTemplates；要加品牌就在 VehicleOptionBrand 加一個 case、
-//    brand(_:) 加一段、keywords(_:) 加關鍵字。
+//    brand(_:) 加一段、brandKeywords(_:)／modelKeywords(_:) 加關鍵字。
 //
 
 import Foundation
@@ -173,22 +173,62 @@ enum VehicleOptionTemplates {
         }
     }
 
-    /// 從車輛資料的品牌、車名猜品牌；猜不出來回 nil（讓使用者自己選）
+    /// 從車輛資料的品牌、車名猜品牌；猜不出來回 nil（讓使用者自己選）。
+    /// - 品牌欄有填：只看品牌欄（填了 Tesla 就不會因為車名裡有 911 猜成保時捷）。
+    /// - 品牌欄空白：才看車名，先找品牌名、再找車型；英數字要是一個完整的字
+    ///  （車名常常是車牌：「ABC-9118」裡的 911、「XAMG-123」裡的 AMG 都不算）。
     static func guess(name: String, brand: String) -> VehicleOptionBrand? {
-        let text = (brand + " " + name).lowercased()
-        for b in VehicleOptionBrand.allCases {
-            if keywords(b).contains(where: { text.contains($0) }) { return b }
+        let b = brand.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if !b.isEmpty {
+            return first(in: b, brandKeywords, whole: false) ?? first(in: b, modelKeywords, whole: true)
         }
-        return nil
+        let n = name.lowercased()
+        return first(in: n, brandKeywords, whole: true) ?? first(in: n, modelKeywords, whole: true)
     }
 
-    /// 比對用的關鍵字（一律小寫）
-    private static func keywords(_ b: VehicleOptionBrand) -> [String] {
+    private static func first(in text: String, _ keywords: (VehicleOptionBrand) -> [String],
+                              whole: Bool) -> VehicleOptionBrand? {
+        VehicleOptionBrand.allCases.first { b in
+            keywords(b).contains { whole ? hasWord(text, $0) : text.contains($0) }
+        }
+    }
+
+    /// 品牌名（一律小寫）
+    private static func brandKeywords(_ b: VehicleOptionBrand) -> [String] {
         switch b {
-        case .porsche: return ["保時捷", "porsche", "taycan", "macan", "cayenne", "911", "panamera"]
-        case .benz: return ["賓士", "benz", "mercedes", "amg"]
+        case .porsche: return ["保時捷", "porsche"]
+        case .benz: return ["賓士", "benz", "mercedes", "梅賽德斯"]
         case .bmw: return ["bmw", "寶馬"]
         }
+    }
+
+    /// 車型（一律小寫）：只在品牌欄空白、或品牌欄本身就寫車型時用
+    private static func modelKeywords(_ b: VehicleOptionBrand) -> [String] {
+        switch b {
+        case .porsche: return ["taycan", "macan", "cayenne", "panamera", "cayman", "boxster", "911"]
+        case .benz: return ["amg"]
+        case .bmw: return []
+        }
+    }
+
+    /// text 裡有沒有 word 這個「完整的字」：中文直接比；英數字前後不能黏著同一類的字
+    /// （英文接英文；數字接數字或「-」）。「Taycan4S」「911S」「保時捷911」算，「ABC-9118」不算
+    private static func hasWord(_ text: String, _ word: String) -> Bool {
+        guard let head = word.first, let tail = word.last, head.isASCII else { return text.contains(word) }
+        var from = text.startIndex
+        while from < text.endIndex, let r = text.range(of: word, range: from..<text.endIndex) {
+            let before: Character? = r.lowerBound > text.startIndex ? text[text.index(before: r.lowerBound)] : nil
+            let after: Character? = r.upperBound < text.endIndex ? text[r.upperBound] : nil
+            if !glued(before, to: head) && !glued(after, to: tail) { return true }
+            from = text.index(after: r.lowerBound)
+        }
+        return false
+    }
+
+    private static func glued(_ c: Character?, to edge: Character) -> Bool {
+        guard let c, c.isASCII else { return false }
+        if edge.isNumber { return c.isNumber || c == "-" }
+        return c.isLetter
     }
 
     private static let porsche: [String] = [
@@ -206,14 +246,15 @@ enum VehicleOptionTemplates {
         "360 度環景攝影",
         "主動式定速巡航（ACC）",
         "車道維持輔助",
-        "14 向／18 向電動跑車座椅",
+        "14 向電動舒適座椅",
+        "18 向電動調整跑車座椅（Adaptive Sports Seats Plus）",
         "座椅通風",
         "方向盤加熱",
         "軟關門",
         "副駕駛顯示螢幕",
         "四區恆溫空調",
         "碳纖維內裝套件",
-        "Sport Design 外觀套件",
+        "SportDesign 外觀套件",
         "跑車排氣系統（燃油車）",
         "22 kW 車載充電器（Taycan）",
         "熱泵（Taycan）",
@@ -257,7 +298,7 @@ enum VehicleOptionTemplates {
         "M 跑車煞車",
         "M 跑車座椅",
         "雷射頭燈",
-        "全景天窗（Sky Lounge）",
+        "全景天窗",
         "Harman Kardon 音響",
         "Bowers & Wilkins 鑽石音響",
         "抬頭顯示器",
@@ -331,7 +372,7 @@ enum VehicleResaleMath {
         let ageAdjust: Double
         /// max(0, rate + kmAdjust + ageAdjust)
         let adjustedRate: Double
-        /// 換算成我的車＝我的新車總值 × adjustedRate；我的新車總值 ≤ 0 時 nil
+        /// 換算成我的車＝我的新車總值 × adjustedRate；我的車沒填新車原價時 nil（只有選配錢不算）
         let converted: Double?
     }
 
@@ -434,7 +475,9 @@ enum VehicleResaleMath {
             ageAdjust = Double(theirs - myAge) / 12 * agePointsPerYear
         }
         let adjusted = max(0, rate + kmAdjust + ageAdjust)
-        let converted: Double? = mine.newTotal > 0 ? mine.newTotal * adjusted : nil
+        // 看新車原價、不看新車總值：原價沒填只勾了選配時，總值只剩選配錢（Taycan 會換算成 NT$24萬），
+        // 跟市場上的車沒填原價就不算是同一個規則
+        let converted: Double? = mine.newPrice > 0 ? mine.newTotal * adjusted : nil
         return Comparison(newTotal: total, asking: asking, rate: rate, ageMonths: age, km: km,
                           kmDiff: kmDiff, ageDiffMonths: ageDiff, kmAdjust: kmAdjust, ageAdjust: ageAdjust,
                           adjustedRate: adjusted, converted: converted)
@@ -632,7 +675,7 @@ struct VehicleResaleReport: Equatable {
     struct Summary: Equatable {
         let suggested: Double
         let suggestedText: String
-        /// 「NT$2,755,000・中位數 NT$262.4萬 × 1.05，四捨五入到千元」
+        /// 「NT$2,755,000・中位數 NT$262.4萬 再加 5%（留給買家殺價）」
         let suggestedDetail: String
         /// 估值區間、中位數、心理底價
         let rows: [Row]
@@ -667,7 +710,7 @@ struct VehicleResaleReport: Equatable {
     let listings: [Listing]
     let listingsTrailing: String?
     let valueRow: Row
-    /// 有建議標價、而且跟目前估值不一樣才給按
+    /// 有建議標價（> 0）、而且跟目前估值不一樣才給按
     let canApply: Bool
     let applyMessage: String
     let footnotes: [String]
@@ -686,13 +729,15 @@ struct VehicleResaleReport: Equatable {
         var values: [Double] = []
         for (i, l) in ws.listings.enumerated() {
             let comp = VehicleResaleMath.compare(l, mine: mine, catalog: ws.options, today: today, calendar: calendar)
-            if let c = comp?.converted { values.append(c) }
+            // 只收有限的數：summary 會丟掉 inf，這裡也要丟，「用 N 台算・M 台資料不夠」加起來才等於總台數
+            if let c = comp?.converted, c.isFinite { values.append(c) }
             listings.append(makeListing(l, index: i, comp: comp, mine: mine, ws: ws, today: today, calendar: calendar))
         }
         let math = VehicleResaleMath.summary(values)
         let skipped = ws.listings.count - values.count
         let summary: Summary? = math.map { makeSummary($0, skipped: skipped) }
-        let canApply = math.map { abs($0.suggested - v.currentValue) >= 1 } ?? false
+        // 建議標價 NT$0（換算被扣到下限 0）不給按：按了會把車輛估值、淨資產寫成 0
+        let canApply = math.map { $0.suggested > 0 && abs($0.suggested - v.currentValue) >= 1 } ?? false
         return VehicleResaleReport(
             myCar: makeMyCar(v, ws: ws, mine: mine, isSaved: isSaved),
             summary: summary,
@@ -718,7 +763,10 @@ struct VehicleResaleReport: Equatable {
         if let s = VehicleResaleMath.summary(values) {
             return "建議標價 \(money(s.suggested))・比了 \(s.count) 台"
         }
-        return ws.listings.isEmpty ? "已填我的車，再加幾台市場上看到的車" : "市場上的車還缺標價或原價，補上就算得出來"
+        if ws.listings.isEmpty { return "已填我的車，再加幾台市場上看到的車" }
+        // 同 makeEmptyText：我的車沒填新車原價時每台都換算不出來，不是市場上的車缺資料
+        if mine.newPrice <= 0 { return "先填我的車的新車原價，才算得出來" }
+        return "市場上的車還缺標價或原價，補上就算得出來"
     }
 
     // MARK: 我的車
@@ -736,7 +784,7 @@ struct VehicleResaleReport: Equatable {
         let optionValue = checked.isEmpty ? "沒勾" : "\(checked.count) 項・\(money(mine.optionsTotal))"
         let optionDetail: String? = unpriced > 0 ? "\(unpriced) 項沒填價格，先算 0" : nil
         rows.append(Row(id: "options", label: "選配", value: optionValue, detail: optionDetail))
-        rows.append(Row(id: "total", label: "新車總值", value: mine.newTotal > 0 ? money(mine.newTotal) : "還沒填",
+        rows.append(Row(id: "total", label: "新車總值", value: mine.newPrice > 0 ? money(mine.newTotal) : "還沒填",
                         detail: "新車原價＋選配", strong: true))
         let kmValue = mine.km.map { VehicleResaleText.km($0) } ?? "還沒填（不調里程）"
         rows.append(Row(id: "km", label: "目前里程", value: kmValue))
@@ -787,7 +835,7 @@ struct VehicleResaleReport: Equatable {
         let rangeDetail: String? = s.count == 1 ? "只有 1 台" : nil
         let bottomDetail = s.bottomUsesMin
             ? "不到 \(VehicleResaleMath.percentileMinCount) 台，先用最低的那台"
-            : "最低的四分之一（第 25 百分位）"
+            : "大約四分之一的車換算起來比這個低"
         let rows: [Row] = [
             Row(id: "range", label: "估值區間", value: range, detail: rangeDetail),
             Row(id: "median", label: "中位數", value: money(s.median)),
@@ -796,8 +844,8 @@ struct VehicleResaleReport: Equatable {
         var count = "用 \(s.count) 台算"
         if skipped > 0 { count += "・\(skipped) 台資料不夠" }
         let hint: String? = s.count <= 2 ? "再多加幾台會更準" : nil
-        let markup = String(format: "%.2f", VehicleResaleMath.askMarkup)
-        let detail = "\(VehicleResaleText.full(s.suggested))・中位數 \(money(s.median)) × \(markup)，四捨五入到千元"
+        let markup = VehicleResaleText.plain((VehicleResaleMath.askMarkup - 1) * 100)
+        let detail = "\(VehicleResaleText.full(s.suggested))・中位數 \(money(s.median)) 再加 \(markup)%（留給買家殺價）"
         return Summary(suggested: s.suggested, suggestedText: money(s.suggested), suggestedDetail: detail,
                        rows: rows, countText: count, hint: hint)
     }
@@ -806,7 +854,7 @@ struct VehicleResaleReport: Equatable {
         if ws.listings.isEmpty {
             return "加一台市場上看到的車（8891、臉書社團、車商網站都可以），就算得出建議標價。"
         }
-        if mine.newTotal <= 0 { return "先在「我的車」填新車原價，才換算得出來。" }
+        if mine.newPrice <= 0 { return "先在「我的車」填新車原價，才換算得出來。" }
         return "市場上的車還缺二手標價或新車原價，補上就算得出來。"
     }
 
@@ -865,8 +913,11 @@ struct VehicleResaleReport: Equatable {
         let optTotal = VehicleResaleMath.optionsTotal(l.optionIds, catalog: catalog)
         let unpriced = checked.filter { VehicleResaleMath.positive($0.price) == nil }.count
         if let price = VehicleResaleMath.positive(l.newPrice) {
-            let value = checked.isEmpty ? money(price) : "\(money(price)) ＋ \(money(optTotal)) ＝ \(money(price + optTotal))"
-            var detail = checked.isEmpty ? "沒勾選配" : "勾了 \(checked.count) 項選配"
+            // 值只放合計（值那欄只有約 200pt，三個金額擠一行會從金額中間折行），怎麼加的放下面灰字
+            let value = money(price + optTotal)
+            var detail = checked.isEmpty
+                ? "新車原價，沒勾選配"
+                : "新車原價 \(money(price))＋選配 \(money(optTotal))（\(checked.count) 項）"
             if unpriced > 0 { detail += "・\(unpriced) 項沒填價格，算 0" }
             rows.append(Row(id: "total", label: "原價＋選配", value: value, detail: detail))
         }
@@ -896,7 +947,7 @@ struct VehicleResaleReport: Equatable {
         let verb = d > 0 ? "多跑" : "少跑"
         let head = "里程：它比你\(verb) \(VehicleResaleText.km(abs(d)))"
         guard let pts = VehicleResaleText.points(c.kmAdjust) else { return head + "，殘值率幾乎不變" }
-        return head + "，殘值率 " + pts
+        return head + "，換成你的車殘值率 " + pts
     }
 
     private static func ageStep(_ c: VehicleResaleMath.Comparison, listing l: VehicleResaleListing,
@@ -909,7 +960,7 @@ struct VehicleResaleReport: Equatable {
         let verb = d > 0 ? "老" : "新"
         let head = "車齡：它比你\(verb) \(VehicleResaleText.span(months: abs(d)))"
         guard let pts = VehicleResaleText.points(c.ageAdjust) else { return head + "，殘值率幾乎不變" + guess }
-        return head + "，殘值率 " + pts + guess
+        return head + "，換成你的車殘值率 " + pts + guess
     }
 
     private static func optionLines(mine: [UUID], theirs: [UUID], catalog: [VehicleResaleOption]) -> [OptionLine] {
@@ -947,7 +998,7 @@ struct VehicleResaleReport: Equatable {
     static var footnoteLines: [String] {
         let km = VehicleResaleText.plain(VehicleResaleMath.mileagePointsPer10kKm * 100)
         let age = VehicleResaleText.plain(VehicleResaleMath.agePointsPerYear * 100)
-        let markup = String(format: "%.2f", VehicleResaleMath.askMarkup)
+        let markup = VehicleResaleText.plain((VehicleResaleMath.askMarkup - 1) * 100)
         let minCount = VehicleResaleMath.percentileMinCount
         let month = VehicleResaleMath.unknownMonth
         return [
@@ -955,7 +1006,7 @@ struct VehicleResaleReport: Equatable {
             "里程：它每比你多跑 1 萬公里，殘值率加 \(km) 個百分點；少跑就減。",
             "車齡：它每比你老 1 年，殘值率加 \(age) 個百分點；比較新就減（只填年份的當 \(month) 月出廠）。",
             "換算成你的車＝你的新車總值 × 調整後殘值率。",
-            "建議標價＝換算結果的中位數 × \(markup)（留一點讓買家殺價），四捨五入到千元；心理底價＝最低的四分之一，不到 \(minCount) 台先用最低的那台。",
+            "建議標價＝換算結果的中位數再加 \(markup)%（留一點讓買家殺價），四捨五入到千元；心理底價＝大約四分之一的車換算起來比它低的那個價格，不到 \(minCount) 台先用最低的那台。",
             "網路上的是賣家開價，成交通常再低一些；這裡算的是「開價」，只是參考。"
         ]
     }

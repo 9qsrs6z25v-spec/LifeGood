@@ -399,7 +399,7 @@ private struct VehicleResaleSummarySection: View {
             hintRow(s.hint, pal: pal)
             Divider().padding(.leading, 14)
             VehicleResaleRowView(row: report.valueRow)
-            applyRow(pal)
+            applyRow(s, pal: pal)
         }
         .modifier(FinanceCardChrome())
     }
@@ -443,11 +443,11 @@ private struct VehicleResaleSummarySection: View {
         }
     }
 
-    /// 「把建議標價設為車輛估值」；已經一樣時寫一行綠勾
+    /// 「把建議標價設為車輛估值」；已經一樣時寫一行綠勾；建議標價 NT$0（換算被扣到 0）兩個都不放
     @ViewBuilder
-    private func applyRow(_ pal: TripBoardPalette) -> some View {
-        Divider().padding(.leading, 14)
+    private func applyRow(_ s: VehicleResaleReport.Summary, pal: TripBoardPalette) -> some View {
         if report.canApply {
+            Divider().padding(.leading, 14)
             Button(action: onApply) {
                 HStack(spacing: 6) {
                     Image(systemName: "square.and.arrow.down")
@@ -461,7 +461,8 @@ private struct VehicleResaleSummarySection: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(MoneyPressStyle())
-        } else {
+        } else if s.suggested > 0 {
+            Divider().padding(.leading, 14)
             HStack(spacing: 6) {
                 Image(systemName: "checkmark.circle.fill")
                 Text("車輛估值已經是建議標價")
@@ -608,15 +609,26 @@ private struct VehicleResaleCatalogSection: View {
         }
     }
 
+    /// 兩顆膠囊是 fixedSize：大字級、小螢幕放不下一排時改成上下兩排（不然會超出白卡）
     private func actions(_ pal: TripBoardPalette) -> some View {
-        HStack(spacing: 8) {
-            VehicleResalePillButton(title: "帶入常見選配", icon: "list.bullet.rectangle", pal: pal,
-                                    action: onTemplates)
-            VehicleResalePillButton(title: "編輯清單", icon: "pencil", pal: pal, action: onEdit)
-            Spacer(minLength: 0)
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 8) {
+                pills(pal)
+                Spacer(minLength: 0)
+            }
+            VStack(alignment: .leading, spacing: 8) {
+                pills(pal)
+            }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
+    }
+
+    @ViewBuilder
+    private func pills(_ pal: TripBoardPalette) -> some View {
+        VehicleResalePillButton(title: "帶入常見選配", icon: "list.bullet.rectangle", pal: pal,
+                                action: onTemplates)
+        VehicleResalePillButton(title: "編輯清單", icon: "pencil", pal: pal, action: onEdit)
     }
 }
 
@@ -651,10 +663,14 @@ private struct VehicleResaleOptionRowView: View {
         if row.priceMissing {
             FinanceMiniTag(text: row.priceText, color: MoneyTone.warn.color(pal))
         } else {
+            // 金額不折行：大字級時先縮字、名稱那欄去折行
             Text(row.priceText)
                 .font(.subheadline.weight(.semibold))
                 .monospacedDigit()
                 .foregroundStyle(Color.primary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+                .layoutPriority(1)
         }
     }
 }
@@ -756,7 +772,7 @@ private struct VehicleResaleListingCard: View {
                 Text(item.title)
                     .font(.subheadline.weight(.heavy))
                     .foregroundStyle(Color.primary)
-                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
                 Text(item.subtitle)
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -1019,13 +1035,15 @@ private enum VehicleResaleInput {
         return list
     }
 
-    /// 清單編輯頁的列 → 選配（名稱和原價都空白的列丟掉；只有原價的叫「未命名選配」）
-    static func options(_ drafts: [VehicleResaleOptionDraft]) -> [VehicleResaleOption] {
+    /// 清單編輯頁的列 → 選配（名稱和原價都空白的列丟掉；只有原價的叫「未命名選配」）。
+    /// keep：有車勾著的選配，就算名稱和原價都被清空也留著（叫「未命名選配」）：
+    /// 要刪有車勾的選配一律走左滑＋確認框，不能清空欄位就默默刪掉、連勾選一起不見
+    static func options(_ drafts: [VehicleResaleOptionDraft], keep: Set<UUID>) -> [VehicleResaleOption] {
         var out: [VehicleResaleOption] = []
         for d in drafts {
             let name = d.name.trimmingCharacters(in: .whitespacesAndNewlines)
             let price = wan(d.priceText)
-            if name.isEmpty && price == nil { continue }
+            if name.isEmpty && price == nil && !keep.contains(d.id) { continue }
             out.append(VehicleResaleOption(id: d.id, name: name.isEmpty ? "未命名選配" : name, price: price))
         }
         return out
@@ -1152,6 +1170,9 @@ private struct VehicleResaleCheckRow: View {
             .font(.subheadline)
             .monospacedDigit()
             .foregroundStyle(missing ? Color.orange : Color.secondary)
+            .lineLimit(1)
+            .minimumScaleFactor(0.7)
+            .layoutPriority(1)
     }
 }
 
@@ -1408,7 +1429,9 @@ private struct VehicleResaleListingForm: Equatable {
         kmText = VehicleResaleInput.kmText(l?.mileageKm)
         newPriceText = VehicleResaleInput.wanText(l?.newPrice)
         askingText = VehicleResaleInput.wanText(l?.askingPrice)
-        seenDate = l?.seenDate ?? Date()
+        // 新的一台用今天 0 點：父頁重畫時 init 會再跑一次、initial 跟著重算，用 Date() 會差幾毫秒，
+        // form != initial 變 true，什麼都沒改也滑不掉
+        seenDate = l?.seenDate ?? VehicleResaleText.calendar.startOfDay(for: Date())
         note = l?.note ?? ""
         picker = VehicleResaleOptionPicker(catalog: catalog, checked: l?.optionIds ?? [])
     }
@@ -1687,7 +1710,8 @@ private struct VehicleResaleCatalogEditor: View {
     private func save() {
         guard !isSaving else { return }
         isSaving = true
-        let list = VehicleResaleInput.options(drafts)
+        let used = Set(usage.compactMap { $0.value.total > 0 ? $0.key : nil })
+        let list = VehicleResaleInput.options(drafts, keep: used)
         let done = onSave
         dismiss()
         DispatchQueue.main.async { done(list) }
@@ -1743,6 +1767,8 @@ private struct VehicleResaleTemplateSheet: View {
             .toolbar { toolbarItems }
             .onChange(of: brand) { _, _ in picked = [] }
         }
+        // 勾了還沒按「加入」時只能按「取消」或「加入」，免得一滑就丟掉剛勾的
+        .interactiveDismissDisabled(!picked.isEmpty)
     }
 
     private var brandSection: some View {
