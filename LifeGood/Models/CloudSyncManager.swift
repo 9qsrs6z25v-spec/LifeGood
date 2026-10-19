@@ -50,6 +50,8 @@ final class CloudSyncManager: ObservableObject {
         "life_workout_leave",
         // [v25.563] 財富帳本（同上，單獨一個鍵：扣款帳戶的歷史、說明過的事…；WealthBook.swift）
         "life_wealth_book_v1",
+        // [v25.566] 財富帳本・定存那一包（單獨一個鍵：v25.563–565 的 iPad 存帳本會洗掉它不認得的欄位，這個鍵它不碰）
+        "life_wealth_deposits_v1",
         // 股票每週市值快照（英雄卡背景折線）：同步安全性依賴「先拉後推」順序——
         // 少用的裝置會先拉到主力機的完整歷史，記錄本週快照時是在完整清單上加點再推回，
         // 歷史只增不減；不需自訂合併邏輯

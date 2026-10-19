@@ -618,3 +618,405 @@ enum WealthPolicyCycle: String, CaseIterable, Identifiable {
         }
     }
 }
+
+// MARK: - [v25.566] 財富帳本・定存那一包（財富 v5；wealth/judge.md §3.14、§4.2 ⑥、§5.5；build/v5/brief.md §2）
+//
+// 定存不放在 WealthBook 裡：v25.563–565 的 iPad 認得 life_wealth_book_v1，存一次帳本（按「知道了」、標成已繳…）會用它自己的
+// CodingKeys 重寫整包，不認得的欄位（定存）會被洗掉。所以另開一個同步鍵 life_wealth_deposits_v1（同 v25.557 請假週、
+// v25.563 財富帳本那一招）：還沒更新的版本不認得這個鍵，不會碰它。
+// • 一筆 WealthTimeDeposit＝一期定存：屬於哪個銀行帳戶（bankId）、本金、幣別、年利率、起存日、期別（或自己選的到期日）、
+//   到期怎麼處理、起存那天有沒有從活存轉出、到期轉進哪個帳戶、存單號碼末 4 碼、到期前 7 天提醒、提前解約。
+// • 到期「本息續存」「本金續存」：下一期由 WealthDepositChain 算出來（id＝WealthTimeDeposit.successorId(of:)，SHA256 固定雜湊，
+//   每台裝置算出來都一樣）；財富頁打開時 LifeStore.rollOverTimeDeposits 把算出來的那幾期寫進這一包（同一個 id，寫過的不再寫：
+//   不重複）。還沒寫進來之前，一套數字（WealthFacts）照樣把它算進去，數字不會等你打開財富頁才變。
+// • 全部欄位 Optional＋decodeIfPresent；一筆壞掉只丟那一筆（deposits 逐筆解）。新欄位一定要在 CodingKeys 加。
+// • 安全：只存存單號碼末 4 碼（不存完整號碼）；帳號、卡號不在這裡。
+
+struct WealthDepositBook: Codable, Equatable {
+    /// 每一期定存（自動續存寫進來的也在這裡，previousId 指著上一期）
+    var deposits: [WealthTimeDeposit]?
+    /// 要確認 #14 存款保險〔知道了〕：銀行 key（WealthFacts.bankKey）→ 那天以前不再提（按的那天＋365 天）
+    var insuranceQuietUntil: [String: Date]?
+
+    init(deposits: [WealthTimeDeposit]? = nil, insuranceQuietUntil: [String: Date]? = nil) {
+        self.deposits = deposits
+        self.insuranceQuietUntil = insuranceQuietUntil
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        // 逐筆解：一筆壞掉不會讓整包定存消失（存一次就全丟）
+        var list: [WealthTimeDeposit] = []
+        var found = false
+        if var arr = try? c.nestedUnkeyedContainer(forKey: .deposits) {
+            found = true
+            while !arr.isAtEnd {
+                if let d = try? arr.decode(WealthTimeDeposit.self) {
+                    list.append(d)
+                } else if (try? arr.decode(WealthDepositSkip.self)) == nil {
+                    break
+                }
+            }
+        }
+        deposits = found ? list : nil
+        insuranceQuietUntil = try? c.decodeIfPresent([String: Date].self, forKey: .insuranceQuietUntil)
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case deposits, insuranceQuietUntil
+    }
+
+    var isEmpty: Bool { (deposits ?? []).isEmpty && (insuranceQuietUntil ?? [:]).isEmpty }
+
+    /// 全部（沒有＝空）
+    var all: [WealthTimeDeposit] { deposits ?? [] }
+
+    func deposit(_ id: UUID) -> WealthTimeDeposit? { all.first { $0.id == id } }
+
+    /// 新增或整筆換掉（同一個 id）
+    mutating func upsert(_ d: WealthTimeDeposit) {
+        var list = all
+        if let i = list.firstIndex(where: { $0.id == d.id }) { list[i] = d } else { list.append(d) }
+        deposits = list
+    }
+
+    /// 刪一整串（含以前自動續存的、之後接的）：只刪一期的話，上一期會再自動續存出同一期來
+    mutating func removeChain(containing id: UUID) {
+        let ids = WealthDepositChain.chainIds(containing: id, in: all)
+        deposits = all.filter { !ids.contains($0.id) }
+    }
+
+    /// 刪銀行帳戶時：這個帳戶的定存一起刪；別的定存到期轉進它的，還沒到期的改回轉進自己的帳戶
+    /// （已經到期轉過去的留著：那筆錢跟著刪掉的帳戶走，不會突然跑回原本的帳戶）
+    mutating func removeBank(_ bankId: UUID, today: Date) {
+        var list = all.filter { $0.bankId != bankId }
+        let t = WealthCal.day(today)
+        for i in list.indices where list[i].payoutId == bankId {
+            let ended: Bool = {
+                if let c = list[i].closedDate, WealthCal.day(c) <= t { return true }
+                if let m = list[i].maturityDate, m <= t { return true }
+                return false
+            }()
+            if !ended { list[i].payoutId = nil }
+        }
+        deposits = list
+    }
+
+    /// 存款保險〔知道了〕還在「一年內不再提」裡
+    func isInsuranceQuiet(_ bankKey: String, today: Date) -> Bool {
+        guard let until = insuranceQuietUntil?[bankKey] else { return false }
+        return WealthCal.day(today) < WealthCal.day(until)
+    }
+
+    mutating func quietInsurance(_ bankKey: String, until: Date) {
+        var all = insuranceQuietUntil ?? [:]
+        all[bankKey] = WealthCal.day(until)
+        insuranceQuietUntil = all
+    }
+
+    /// 自動續存算出來、還沒寫進來的那幾期寫進來（同一個 id；寫過的不再寫）。沒有要寫的＝nil
+    func rolledOver(through day: Date) -> WealthDepositBook? {
+        let virtuals = WealthDepositChain.terms(all, through: day).filter { $0.isVirtual }
+        guard !virtuals.isEmpty else { return nil }
+        var out = self
+        for v in virtuals where out.deposit(v.deposit.id) == nil {
+            out.upsert(v.deposit)
+        }
+        return out == self ? nil : out
+    }
+
+    /// 合併匯入：同一個 id 留本機的、本機沒有的帶進來；存款保險取比較晚的那天
+    func merged(with other: WealthDepositBook) -> WealthDepositBook {
+        var out = self
+        for d in other.all where out.deposit(d.id) == nil { out.upsert(d) }
+        var q = out.insuranceQuietUntil ?? [:]
+        for (k, v) in other.insuranceQuietUntil ?? [:] {
+            if let mine = q[k], mine >= v { continue }
+            q[k] = v
+        }
+        out.insuranceQuietUntil = q.isEmpty ? nil : q
+        return out
+    }
+}
+
+/// 解不出來的那一筆跳過用（任何 JSON 物件都解得出來，只是什麼都不留）
+private struct WealthDepositSkip: Decodable {}
+
+/// [v25.566] 到期怎麼處理（judge §5.5；帳本存 rawValue 字串，讀不懂或沒填＝本息續存）
+enum WealthMaturityMode: String, CaseIterable, Identifiable {
+    case renewAll, renewPrincipal, toLive, decide
+
+    var id: String { rawValue }
+
+    static func of(_ raw: String?) -> WealthMaturityMode {
+        guard let raw, let m = WealthMaturityMode(rawValue: raw) else { return .renewAll }
+        return m
+    }
+
+    /// 表單的四個選項
+    var title: String {
+        switch self {
+        case .renewAll: return "本息續存"
+        case .renewPrincipal: return "本金續存（利息轉活存）"
+        case .toLive: return "轉活存"
+        case .decide: return "到期再決定"
+        }
+    }
+
+    /// 項目卡、看板、行事曆的短字
+    var shortTitle: String {
+        switch self {
+        case .renewAll: return "本息續存"
+        case .renewPrincipal: return "本金續存"
+        case .toLive: return "到期轉活存"
+        case .decide: return "到期再決定"
+        }
+    }
+
+    /// 到期自動接下一期（本息續存、本金續存）
+    var renews: Bool { self == .renewAll || self == .renewPrincipal }
+}
+
+/// [v25.566] 一期定存（judge §3.14 WealthBook.timeDeposits、§5.5）
+struct WealthTimeDeposit: Codable, Equatable, Identifiable {
+    let id: UUID
+    /// 屬於哪個銀行帳戶（財富頁銀行帳戶那筆 LifeMilestone 的 id）
+    var bankId: UUID
+    /// 本金（原幣）
+    var principal: Double
+    /// 幣別（nil／"NT$"＝台幣；外幣照設定裡的代碼「美金」）
+    var currency: String?
+    /// 年利率（%：1.7）；沒填＝不估利息
+    var rate: Double?
+    /// 起存日
+    var start: Date
+    /// 期別（月：1／3／6／9／12／24／36）；nil 或 0＝看 maturity（自己選的到期日）
+    var months: Int?
+    /// 自己選的到期日（months 沒填時用）
+    var maturity: Date?
+    /// 到期怎麼處理（WealthMaturityMode.rawValue；nil＝本息續存）
+    var onMaturity: String?
+    /// 起存那天從這個帳戶的活存轉出（帳戶明細多一列「轉定存」，WealthFacts 算的、不寫成 BankDeposit）
+    var fromLive: Bool?
+    /// 到期轉活存、本金續存的利息、提前解約轉進哪個帳戶（nil＝bankId 那個帳戶）
+    var payoutId: UUID?
+    /// 存單號碼末 4 碼（只存末 4 碼）
+    var certificateLast4: String?
+    /// 到期前 7 天提醒（nil／true＝提醒）
+    var remind: Bool?
+    /// 提前解約那天（之後不再是定存；本金＋實拿利息轉進 payoutId）
+    var closedDate: Date?
+    /// 提前解約實拿的利息（原幣；nil＝0）
+    var closedInterest: Double?
+    /// 自動續存：上一期是哪一筆
+    var previousId: UUID?
+    var note: String?
+
+    init(id: UUID = UUID(), bankId: UUID, principal: Double, currency: String? = nil, rate: Double? = nil,
+         start: Date, months: Int? = 12, maturity: Date? = nil, onMaturity: String? = nil, fromLive: Bool? = nil,
+         payoutId: UUID? = nil, certificateLast4: String? = nil, remind: Bool? = nil, closedDate: Date? = nil,
+         closedInterest: Double? = nil, previousId: UUID? = nil, note: String? = nil) {
+        self.id = id
+        self.bankId = bankId
+        self.principal = principal
+        self.currency = currency
+        self.rate = rate
+        self.start = start
+        self.months = months
+        self.maturity = maturity
+        self.onMaturity = onMaturity
+        self.fromLive = fromLive
+        self.payoutId = payoutId
+        self.certificateLast4 = certificateLast4
+        self.remind = remind
+        self.closedDate = closedDate
+        self.closedInterest = closedInterest
+        self.previousId = previousId
+        self.note = note
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        // 身分、帳戶、起存日一定要有（沒有就整筆跳過）；其他壞了當沒填
+        id = try c.decode(UUID.self, forKey: .id)
+        bankId = try c.decode(UUID.self, forKey: .bankId)
+        start = try c.decode(Date.self, forKey: .start)
+        principal = (try? c.decodeIfPresent(Double.self, forKey: .principal)) ?? 0
+        currency = try? c.decodeIfPresent(String.self, forKey: .currency)
+        rate = try? c.decodeIfPresent(Double.self, forKey: .rate)
+        months = try? c.decodeIfPresent(Int.self, forKey: .months)
+        maturity = try? c.decodeIfPresent(Date.self, forKey: .maturity)
+        onMaturity = try? c.decodeIfPresent(String.self, forKey: .onMaturity)
+        fromLive = try? c.decodeIfPresent(Bool.self, forKey: .fromLive)
+        payoutId = try? c.decodeIfPresent(UUID.self, forKey: .payoutId)
+        certificateLast4 = try? c.decodeIfPresent(String.self, forKey: .certificateLast4)
+        remind = try? c.decodeIfPresent(Bool.self, forKey: .remind)
+        closedDate = try? c.decodeIfPresent(Date.self, forKey: .closedDate)
+        closedInterest = try? c.decodeIfPresent(Double.self, forKey: .closedInterest)
+        previousId = try? c.decodeIfPresent(UUID.self, forKey: .previousId)
+        note = try? c.decodeIfPresent(String.self, forKey: .note)
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, bankId, principal, currency, rate, start, months, maturity, onMaturity, fromLive
+        case payoutId, certificateLast4, remind, closedDate, closedInterest, previousId, note
+    }
+
+    /// 自動續存的下一期 id（固定雜湊：每台裝置、每次算都一樣，寫進帳本也是這個 id，不會重複）
+    static func successorId(of id: UUID) -> UUID {
+        WealthIDs.stable("td-next-" + id.uuidString)
+    }
+
+    var mode: WealthMaturityMode { WealthMaturityMode.of(onMaturity) }
+
+    /// 幣別（台幣一律 "NT$"）
+    var code: String { WealthFacts.norm(currency ?? "NT$") }
+
+    /// 到期日 00:00：期別＝起存日＋幾個月（月底取月底）；自己選的到期日；都沒有＝nil（沒有到期日）
+    var maturityDate: Date? {
+        if let m = months, m > 0 { return WealthCal.addMonths(m, to: WealthCal.day(start)) }
+        return maturity.map { WealthCal.day($0) }
+    }
+
+    /// 預估利息（整期，原幣；WealthDepositMath.interest）
+    var estimatedInterest: Double {
+        guard let m = maturityDate else { return 0 }
+        return WealthDepositMath.interest(principal: principal, rate: rate, months: months, start: start, end: m, code: code)
+    }
+}
+
+/// [v25.566] 定存的利息（單利、未扣稅；跟銀行的算法一樣：以月計＝本金×年利率×月數÷12，以日計＝本金×年利率×天數÷365）
+enum WealthDepositMath {
+    /// 台幣四捨五入到元、外幣到 0.01；沒填利率、利率 ≤ 0、本金 ≤ 0＝0
+    static func interest(principal: Double, rate: Double?, months: Int?, start: Date, end: Date, code: String) -> Double {
+        guard let r = rate, r > 0, principal > 0 else { return 0 }
+        let raw: Double
+        if let m = months, m > 0 {
+            raw = principal * r / 100 * Double(m) / 12
+        } else {
+            let days = Swift.max(0, WealthCal.days(from: start, to: end))
+            raw = principal * r / 100 * Double(days) / 365
+        }
+        if FinanceRates.isNTD(code) { return raw.rounded() }
+        return (raw * 100).rounded() / 100
+    }
+
+    /// 「1.7%」「1.665%」（去尾 0，最多三位小數）
+    static func rateText(_ r: Double?) -> String? {
+        guard let r, r > 0 else { return nil }
+        var s = String(format: "%.3f", r)
+        while s.hasSuffix("0") { s.removeLast() }
+        if s.hasSuffix(".") { s.removeLast() }
+        return s + "%"
+    }
+
+    /// 期別的字：「一年定存」「兩年定存」「6 個月定存」「定存」（自己選到期日）
+    static func termLabel(months: Int?) -> String {
+        guard let m = months, m > 0 else { return "定存" }
+        switch m {
+        case 12: return "一年定存"
+        case 24: return "兩年定存"
+        case 36: return "三年定存"
+        default:
+            if m % 12 == 0 { return "\(m / 12) 年定存" }
+            return "\(m) 個月定存"
+        }
+    }
+}
+
+/// [v25.566] 續存鏈：帳本裡的每一期＋自動續存算出來、還沒寫進帳本的那幾期（sim_v5.py terms 照這裡寫）
+enum WealthDepositChain {
+    struct Term {
+        let deposit: WealthTimeDeposit
+        /// 帳本裡還沒有（自動續存算出來的）
+        let isVirtual: Bool
+        /// 第幾期（0＝最早那一期）
+        let index: Int
+    }
+
+    /// 最多往後接幾期（一個月定存 10 年也才 120 期）
+    static let maxRenewals = 240
+
+    /// through：到那天為止已經到期（到期日 ≤ 那天）、到期本息續存／本金續存、沒提前解約、帳本裡還沒有下一期的，接下一期。
+    /// 下一期：起存日＝上一期的到期日；期別、利率、到期處理、轉進哪個帳戶、提醒、幣別照上一期；
+    /// 本金＝本息續存 本金＋利息、本金續存 本金；自己選到期日的照上一期的天數往後；不再從活存轉出
+    static func terms(_ list: [WealthTimeDeposit], through day: Date) -> [Term] {
+        let d0 = WealthCal.day(day)
+        var byId: [UUID: WealthTimeDeposit] = [:]
+        for d in list { byId[d.id] = d }
+        var hasNext = Set<UUID>()
+        for d in list { if let p = d.previousId { hasNext.insert(p) } }
+        var out: [Term] = []
+        for d in list {
+            out.append(Term(deposit: d, isVirtual: false, index: index(of: d, byId: byId)))
+        }
+        for d in list {
+            var cur = d
+            var k = index(of: d, byId: byId)
+            var n = 0
+            while n < maxRenewals, cur.closedDate == nil, cur.mode.renews, !hasNext.contains(cur.id),
+                  let m = cur.maturityDate, m <= d0 {
+                let next = successor(of: cur)
+                hasNext.insert(cur.id)
+                if byId[next.id] != nil { break }
+                k += 1
+                out.append(Term(deposit: next, isVirtual: true, index: k))
+                byId[next.id] = next
+                cur = next
+                n += 1
+            }
+        }
+        return out
+    }
+
+    /// 自動續存的下一期（本金照到期處理；id 固定雜湊）
+    static func successor(of d: WealthTimeDeposit) -> WealthTimeDeposit {
+        let m: Date = d.maturityDate ?? WealthCal.day(d.start)
+        let interest = d.estimatedInterest
+        let p: Double = d.mode == .renewAll ? d.principal + interest : d.principal
+        var next = WealthTimeDeposit(id: WealthTimeDeposit.successorId(of: d.id), bankId: d.bankId, principal: p,
+                                     currency: d.currency, rate: d.rate, start: m, months: d.months, maturity: nil,
+                                     onMaturity: d.onMaturity, fromLive: nil, payoutId: d.payoutId,
+                                     certificateLast4: d.certificateLast4, remind: d.remind, previousId: d.id)
+        if (d.months ?? 0) <= 0, let end = d.maturity {
+            let days = Swift.max(1, WealthCal.days(from: d.start, to: end))
+            next.months = nil
+            next.maturity = WealthCal.addDays(days, to: m)
+        }
+        return next
+    }
+
+    /// 這一期往前數有幾期（沿 previousId；最多 maxRenewals）
+    static func index(of d: WealthTimeDeposit, byId: [UUID: WealthTimeDeposit]) -> Int {
+        var n = 0
+        var cur = d
+        while n < maxRenewals, let p = cur.previousId, let prev = byId[p] {
+            n += 1
+            cur = prev
+        }
+        return n
+    }
+
+    /// 同一串的每一筆 id（往前沿 previousId、往後找 previousId 指著它的）
+    static func chainIds(containing id: UUID, in list: [WealthTimeDeposit]) -> Set<UUID> {
+        var byId: [UUID: WealthTimeDeposit] = [:]
+        for d in list { byId[d.id] = d }
+        var root = id
+        var n = 0
+        while n < maxRenewals, let d = byId[root], let p = d.previousId, byId[p] != nil {
+            root = p
+            n += 1
+        }
+        var ids: Set<UUID> = [root, id]
+        var frontier: [UUID] = [root]
+        var guardCount = 0
+        while let cur = frontier.popLast(), guardCount < 10_000 {
+            guardCount += 1
+            for d in list where d.previousId == cur && !ids.contains(d.id) {
+                ids.insert(d.id)
+                frontier.append(d.id)
+            }
+        }
+        return ids
+    }
+}

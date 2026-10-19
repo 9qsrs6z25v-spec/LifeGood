@@ -217,6 +217,11 @@ fileprivate struct WealthNoticeAlertModifier: ViewModifier {
 // • 深連結／財富提醒通知（DeepLinkRouter.takeWealthAccount，lifegood://life/wealth?id=）：直接打開那張卡／那個帳戶的卡片頁；
 //   別的彈出頁開著先收掉、0.45 秒後（收的動畫跑完，同健康頁）才開；已經在看那一張不動。帳戶已經不在就不開。
 // • ② 要確認 #12〔看綁了哪些〕：開那張卡的卡片頁、捲到「綁在這張卡的定期扣款」（同一個 .sheet(item:)）。
+//
+// [v25.566] 財富 v5 定存與外幣（build/v5/brief.md §G1 9–11；judge §5.5）：
+// • 右上＋選單多一顆「定存」（有沒收起來的銀行帳戶才出現）→ WealthSheet.timeDeposit(nil, nil)：定存表單第一欄選帳戶（要訂閱）。
+// • 自動續存寫進帳本：財富頁打開、回到前景時，下一個 runloop 叫 lifeStore.rollOverTimeDeposits()（本息續存／本金續存
+//   到期那天算出來的下一期，同一個固定 id，寫過的不再寫；沒有要寫的什麼都不做）。數字不等它：WealthFacts 照樣先算進去。
 
 struct LifeFinanceView: View {
     @EnvironmentObject var lifeStore: LifeStore
@@ -416,12 +421,23 @@ struct LifeFinanceView: View {
         if !appeared {
             withAnimation(.easeOut(duration: 0.3)) { appeared = true }
         }
+        rollOver()
     }
 
     /// 回到前景：日期變了換新的一天（改了 dayKey，pageKey 就變，整頁重算）
     private func sceneChanged(_ phase: ScenePhase) {
         guard phase == .active else { return }
         refreshDay()
+        rollOver()
+    }
+
+    /// [v25.566] 自動續存的那幾期寫進財富帳本（定存那一包）：store 先抓進區域常數、下一個 runloop 才寫
+    ///（不在畫面更新當中寫 store）；沒有到期續存的什麼都不做，不會白存一次
+    private func rollOver() {
+        let life = lifeStore
+        DispatchQueue.main.async {
+            life.rollOverTimeDeposits()
+        }
     }
 
     private func refreshDay() {
@@ -585,6 +601,7 @@ struct LifeFinanceView: View {
                         Label(k.title, systemImage: k.icon)
                     }
                 }
+                depositMenuItem
             } label: {
                 addIcon
             }
@@ -597,6 +614,24 @@ struct LifeFinanceView: View {
             }
             .accessibilityLabel("新增財富帳戶")
         }
+    }
+
+    /// [v25.566] ＋選單的「定存」：有沒收起來的銀行帳戶才出現；表單第一欄選帳戶
+    @ViewBuilder
+    private var depositMenuItem: some View {
+        if canAddDeposit {
+            Button {
+                open(.timeDeposit(nil, nil))
+            } label: {
+                Label("定存", systemImage: "lock.fill")
+            }
+        }
+    }
+
+    /// [v25.566] 有沒收起來的銀行帳戶（page.banks 已經去掉收起來的）
+    private var canAddDeposit: Bool {
+        guard let p = page else { return false }
+        return !p.banks.isEmpty
     }
 
     /// 綠圓白「＋」（同健康頁：綠用 1F9D57，深色也是白色的＋）
@@ -658,6 +693,9 @@ struct LifeFinanceView: View {
             return AnyView(WealthPageInfoSheet(topic: topic))
         case .upcomingAll:
             return AnyView(WealthPageUpcomingSheet(items: page?.upcoming?.all ?? []))
+        case .timeDeposit(let account, let term):
+            // [v25.566] 定存表單（G3；自己掛布幕、detents）
+            return AnyView(WealthTimeDepositSheet(accountId: account, editing: term))
         }
     }
 

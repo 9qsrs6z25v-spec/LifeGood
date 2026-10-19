@@ -24,6 +24,16 @@ import SwiftUI
 // • ①' 橋 WealthPageBridge：「這些已算進理財淨資產 NT$1381.1萬 ›」。數字＝FinanceSnapshot.current(...).netWorth
 //  （跟理財總覽、人生總覽名片同一個數；財富頁 rebuild() 算好傳進 build(…, netWorth:)，這裡不自己算）。
 //   新手、沒傳 netWorth 不出現；遮住寫「NT$ ••••」、VoiceOver 念「金額已遮住」。
+//
+// [v25.566] 財富 v5 定存與外幣（build/v5/brief.md §G1 1–5；judge §3.2 定存塔、§3.8）：
+// • 水塔接上真的定存：塔的數字＝towerValue（定存帳戶 showsAsDeposit＝存摺上＋定存 totalNTD，其他照存摺上 ntdTotal；
+//   水位、併塔合計、最大那座都用它）。showsAsDeposit（舊的「定存」種類，或有定存、存摺上都是 0）→ 金水＋鎖頭、
+//   小牌＝最近到期那一期「3/15」（沒有 nil）、lockOpen＝有到期再決定已經到期的，或最近那一期 0…7 天內到期（鎖頭打開一半）。
+// • 接下來一列：定存那幾列（轉定存、定存到期、解約）短名「定存」、日期塊字「定」；定存利息「定存利息」。
+// • 頁尾：有定存才加一句「定存的利息是預估…」；「這頁的數字怎麼算」加定存、存款保險兩句（都是 static let）。
+// • 外幣第二行要匯率日期：build 把 ratesUpdatedAt 傳給 MoneyItem.wealthBank（⑤ 與 ⑧ 收起來的都傳）。
+// • 四格「30 天內最低」不看定存帳戶（存摺上常是 0；全部都是定存帳戶才照算），免得記了定存就變「約 NT$0」。
+// • 數字一律讀 WealthFacts（TimeDeposit 的到期日、狀態、天數），這裡不自己算定存利息、到期日。
 
 // MARK: - 捲到哪一區
 
@@ -299,7 +309,9 @@ struct WealthPageData {
         // ⑤ 銀行帳戶
         var bankRows: [WealthPageBankRow] = []
         for a in banks {
-            let item = MoneyItem.wealthBank(a, facts: facts, rates: rates, masked: masked, now: now)
+            // [v25.566] 外幣第二行「約 NT$102,400（10/19 匯率 32.0）」要匯率更新那天
+            let item = MoneyItem.wealthBank(a, facts: facts, rates: rates, masked: masked, now: now,
+                                            rateDate: ratesUpdatedAt)
             bankRows.append(WealthPageBankRow(id: a.id, item: item, name: a.name, codes: WealthPageText.codes(a)))
         }
         let banksHeader: WealthPageGroupHeader? = banks.isEmpty ? nil
@@ -320,7 +332,8 @@ struct WealthPageData {
 
         let policies = WealthPageText.policies(milestones: milestones, book: book, facts: facts,
                                                insurances: insurances, today: today, masked: masked)
-        let hidden = WealthPageText.hidden(facts: facts, rates: rates, masked: masked, now: now, dark: dark)
+        let hidden = WealthPageText.hidden(facts: facts, rates: rates, masked: masked, now: now, dark: dark,
+                                           ratesUpdatedAt: ratesUpdatedAt)
         let footer: FinanceLine? = mode == .newbie
             ? nil
             : WealthPageText.footer(banks: banks, rates: rates, ratesUpdatedAt: ratesUpdatedAt, today: today)
@@ -450,6 +463,12 @@ enum WealthPageText {
         case .cardBill:
             if let c = facts.card(row.cardId) { return cardShort(c.name) }
             return cardShort(fromBillTitle: row.title)
+        case .timeDeposit:
+            // [v25.566] 轉定存、定存到期、定存解約（標題前 6 字會變「台灣銀行 定」）
+            return "定存"
+        case .interest where row.timeDepositId != nil:
+            // [v25.566] 定存利息（本金續存的利息、舊的定存種類帳戶到期的利息）
+            return "定存利息"
         default:
             return String(row.title.prefix(6))
         }
@@ -460,6 +479,8 @@ enum WealthPageText {
         switch s.kind {
         case .stockBuy, .stockSell: return "交割"
         case .cardBill: return cardShort(fromBillTitle: s.title)
+        // [v25.566] 起存那天從活存轉出（「轉定存（一年定存）」）
+        case .timeDeposit: return "轉定存"
         default: return String(s.title.prefix(6))
         }
     }
@@ -861,18 +882,19 @@ extension WealthPageText {
         let limit = (needsEmpty && banks.count > 5) ? 4 : 5
         let shown = Array(banks.prefix(limit))
         let rest = Array(banks.dropFirst(limit))
-        var totals: [Double] = shown.map(\.ntdTotal)
-        if !rest.isEmpty { totals.append(rest.reduce(0) { $0 + $1.ntdTotal }) }
+        // [v25.566] 塔的數字：定存帳戶含存著的定存（towerValue），其他照存摺上
+        var totals: [Double] = shown.map { towerValue($0) }
+        if !rest.isEmpty { totals.append(rest.reduce(0) { $0 + towerValue($1) }) }
         let top = totals.map { Swift.max(0, $0) }.max() ?? 0
 
         var towers: [WealthTowerScene.Tower] = []
         var towerOf: [UUID: Int] = [:]
         for (i, a) in shown.enumerated() {
-            towers.append(towerFor(a, top: top))
+            towers.append(towerFor(a, top: top, today: today))
             towerOf[a.id] = i
         }
         if !rest.isEmpty {
-            let total = rest.reduce(0) { $0 + $1.ntdTotal }
+            let total = rest.reduce(0) { $0 + towerValue($1) }
             let owed = rest.reduce(0) { $0 + $1.notYetDebited }
             let warn = rest.contains { $0.shortage != nil || $0.ntdTotal < -0.5 }
             towers.append(WealthTowerScene.Tower(level: level(total, top: top), hatch: hatch(owed, of: total),
@@ -903,11 +925,16 @@ extension WealthPageText {
         return WealthTowerScene(towers: towers, cards: sceneCards)
     }
 
-    private static func towerFor(_ a: WealthFacts.Account, top: Double) -> WealthTowerScene.Tower {
+    /// [v25.566] today：定存小牌「3/15」、到期前 7 天鎖頭打開一半（sim_v5 tower_deposit）
+    private static func towerFor(_ a: WealthFacts.Account, top: Double, today: Date) -> WealthTowerScene.Tower {
         let kind: WealthTowerScene.Tower.Kind
         var badge: String? = nil
-        if a.isFixedDeposit {
+        var lockIsOpen = false
+        if a.showsAsDeposit {
+            // [v25.566] 舊的「定存」種類、或有定存而存摺上都是 0：金水＋鎖頭，小牌＝最近到期那一期
             kind = .deposit
+            badge = a.nextMaturing?.maturityText(today)
+            lockIsOpen = lockOpen(a, today: today)
         } else if let code = foreignCode(a) {
             kind = .foreign
             badge = FinanceRates.isUSD(code) ? "US$" : String(code.prefix(3))
@@ -916,8 +943,21 @@ extension WealthPageText {
         }
         let label = a.nickname ?? String(bankShort(a.bankName).prefix(4))
         let warn = a.shortage != nil || a.ntdTotal < -0.5
-        return WealthTowerScene.Tower(level: level(a.ntdTotal, top: top), hatch: hatch(a.notYetDebited, of: a.ntdTotal),
-                                      kind: kind, label: label, badge: badge, warn: warn)
+        let value = towerValue(a)
+        return WealthTowerScene.Tower(level: level(value, top: top), hatch: hatch(a.notYetDebited, of: value),
+                                      kind: kind, label: label, badge: badge, warn: warn, lockOpen: lockIsOpen)
+    }
+
+    /// [v25.566] 塔裡的水：定存帳戶＝存摺上＋存著的定存（totalNTD），其他＝存摺上（ntdTotal）
+    private static func towerValue(_ a: WealthFacts.Account) -> Double {
+        a.showsAsDeposit ? a.totalNTD : a.ntdTotal
+    }
+
+    /// [v25.566] 鎖頭打開一半：有到期再決定、已經到期還沒決定的；或最近到期那一期 0…7 天內到期
+    private static func lockOpen(_ a: WealthFacts.Account, today: Date) -> Bool {
+        if a.timeDeposits.contains(where: { $0.status == .waiting }) { return true }
+        guard let left = a.nextMaturing?.daysLeft(today) else { return false }
+        return left >= 0 && left <= 7
     }
 
     /// 外幣帳戶（種類是外幣、或只有一個不是台幣的幣別）的那個幣別；不是外幣帳戶 nil
@@ -1079,7 +1119,8 @@ extension WealthPageText {
             detail = "\(a.name)・\(md(s.date)) \(shortName(s))前"
             if masked { value = "差 " + WealthFormat.masked }
         } else {
-            let lows = banks.compactMap { a -> (WealthFacts.Account, Double)? in
+            let pool = lowestPool(banks)
+            let lows = pool.compactMap { a -> (WealthFacts.Account, Double)? in
                 guard let l = a.lowestNTD else { return nil }
                 return (a, l)
             }
@@ -1090,7 +1131,7 @@ extension WealthPageText {
                 if low < -0.5 { tone = .bad }
                 detail = lowestDetail(a, facts: facts, today: today)
             } else {
-                let now = banks.map(\.ntdTotal).min() ?? 0
+                let now = pool.map(\.ntdTotal).min() ?? 0
                 value = now.ntdWanString
                 if now < -0.5 { tone = .bad }
                 detail = "30 天內沒有扣款"
@@ -1101,6 +1142,13 @@ extension WealthPageText {
         let target: WealthPageAnchor = banks.contains(where: { !$0.next30.isEmpty }) ? .upcoming : .banks
         return WealthPageTile(kind: .lowest, icon: "drop.fill", tint: .blue, label: "30 天內最低", value: value,
                               valueTone: tone, detail: detail, accent: nil, accentTone: .neutral, target: target)
+    }
+
+    /// [v25.566] 「30 天內最低」看哪些帳戶：定存帳戶（showsAsDeposit：錢在定存裡、存摺上常是 0）不算，
+    /// 不然記了一筆從活存轉出的定存，這格就變「約 NT$0・台灣銀行」；全部都是定存帳戶才照算
+    private static func lowestPool(_ banks: [WealthFacts.Account]) -> [WealthFacts.Account] {
+        let live = banks.filter { !$0.showsAsDeposit }
+        return live.isEmpty ? banks : live
     }
 
     /// 「房貸扣款・11/5 房貸後」（最低那天最後一筆的短名＋「後」）；最低就是今天「房貸扣款・今天」
@@ -1202,13 +1250,17 @@ extension WealthPageText {
         case .cardBill:
             mark = .card
             glyph = "卡"
+        case .timeDeposit:
+            // [v25.566] 轉定存（出去）、定存到期／解約（進帳）
+            mark = row.isOutflow ? .other : .income
+            glyph = "定"
         default:
             if row.isOutflow {
                 mark = .other
                 glyph = row.kind == .transferOut ? "轉" : "扣"
             } else {
                 mark = .income
-                glyph = row.kind == .transferIn ? "轉" : "入"
+                glyph = upcomingInGlyph(row)
             }
         }
         let after = WealthFormat.plain(row.balanceAfter, code: row.code)
@@ -1221,6 +1273,13 @@ extension WealthPageText {
         return WealthPageUpcomingItem(id: a.id.uuidString + "|" + row.id, day: "\(c.day ?? 0)",
                                       month: "\(c.month ?? 0)月", glyph: glyph, mark: mark, title: row.title,
                                       detail: detail, amount: amount, negative: negative, accessibilityText: said)
+    }
+
+    /// 進帳那一列日期塊的字：轉入「轉」、[v25.566] 定存利息「定」、其他「入」
+    private static func upcomingInGlyph(_ row: WealthLedgerRow) -> String {
+        if row.kind == .transferIn { return "轉" }
+        if row.timeDepositId != nil { return "定" }
+        return "入"
     }
 }
 
@@ -1325,8 +1384,9 @@ extension WealthPageText {
     }
 
     /// ⑧ 收起來的：停用的卡、收起來的銀行、收起來的證券戶（緊湊、淡一點）
+    /// [v25.566] ratesUpdatedAt：外幣第二行的匯率日期（同 ⑤）
     static func hidden(facts: WealthFacts, rates: FinanceRates, masked: Bool, now: Date,
-                       dark: Bool) -> WealthPageHidden? {
+                       dark: Bool, ratesUpdatedAt: Date? = nil) -> WealthPageHidden? {
         var rows: [WealthPageHiddenRow] = []
         var names: [String] = []
         for c in facts.cards where c.isDisabled {
@@ -1340,7 +1400,8 @@ extension WealthPageText {
             if a.isSecurities, let b = facts.broker(a.id) {
                 item = MoneyItem.wealthBroker(b, facts: facts, masked: masked)
             } else {
-                item = MoneyItem.wealthBank(a, facts: facts, rates: rates, masked: masked, now: now)
+                item = MoneyItem.wealthBank(a, facts: facts, rates: rates, masked: masked, now: now,
+                                            rateDate: ratesUpdatedAt)
             }
             item.dimmed = true
             rows.append(WealthPageHiddenRow(id: a.id, item: item, isCard: false))
@@ -1364,6 +1425,10 @@ extension WealthPageText {
     static func footer(banks: [WealthFacts.Account], rates: FinanceRates, ratesUpdatedAt: Date?,
                        today: Date) -> FinanceLine {
         var runs: [FinanceRun] = [FinanceRun(text: footerBase)]
+        // [v25.566] 有定存才說利息是預估、本息續存自動接下一期
+        if banks.contains(where: { !$0.timeDeposits.isEmpty }) {
+            runs.append(FinanceRun(text: depositNote))
+        }
         var foreign: [String] = []
         for a in banks {
             for code in a.currencies where !FinanceRates.isNTD(code) && !foreign.contains(code) {
@@ -1394,11 +1459,22 @@ extension WealthPageText {
     static let footerBase = "存摺上的數字：卡費在繳款截止日、股票交割在第 2 個營業日才扣，跟銀行 App 對得上。"
         + "記帳、股票、房子的扣款選單用的都是這個數。對不上時到帳戶裡按〔對存摺〕。"
 
+    /// [v25.566] 頁尾：有定存才加的一句
+    static let depositNote = "定存的利息是預估（單利、未扣稅），到期本息續存會自動接下一期。"
+
+    /// [v25.566] 「這頁的數字怎麼算」：定存算在哪裡
+    static let depositHow = "定存算進存款合計的「定存」那一格；到期轉活存的那天自動入帳。"
+
+    /// [v25.566] 「這頁的數字怎麼算」：存款保險
+    static let insuranceHow = "同一家銀行存摺上加定存超過 300 萬，要確認會提醒一次存款保險（同一家最多保 300 萬，一年內不再提）。"
+
     /// ⋯「這頁的數字怎麼算」
     static let howItWorks: [String] = [
         footerBase,
         "扣完能用＝存摺上 − 還沒扣（卡費要繳＋還沒出帳＋還沒交割的股票款）。存款合計不含證券戶的持股，持股市值在理財 › 股票。",
         "自己繳的卡過了截止日沒標成已繳，App 當作從「通常從」的帳戶繳了全額，隔天會在「要確認」問你一次；選「每次問我」的卡不會當作已繳。",
+        depositHow,
+        insuranceHow,
         "外幣照設定裡的匯率換台幣；查不到匯率的那一格不算進合計，大字前面會加「約」。",
         "繳款截止日、交割日遇到假日，銀行可能順延；App 不會自己順延。",
         "右上的眼睛可以把金額遮住（記在這台裝置）；關掉遮住要 Face ID。"

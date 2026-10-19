@@ -28,14 +28,22 @@ import UniformTypeIdentifiers
 //
 // [v25.565] 財富 v4（build/v4/brief.md §G4-8）：卡片頁自己的要確認 #12〔看綁了哪些〕直接捲到「綁在這張卡的定期扣款」
 //（WealthChecksSection(onOpenCard:)，不再疊一張卡片頁）。從財富頁、理財、行事曆、小工具、通知打開都是 WealthCardPage(accountId:)。
+//
+// [v25.566] 財富 v5 G2（build/v5/brief.md §6 G2；judge §4.2 ⑤⑥⑧）：
+// • ⑤ 外幣（WealthCardForeignSection）：標題「外幣」、一個幣別一格、格子下一行說明、〔＋ 換匯〕（WealthTransferSheet exchange，要訂閱）。
+// • ⑥ 定存（WealthCardDepositsSection，.id(.deposits)）：一期一格 FinanceProgressCell（點了開那一期的定存表單）、
+//   舊的定存種類帳戶〔補上利率和到期日 ›〕、最下〔＋ 定存〕；新增、看、改都是 WealthTimeDepositSheet(accountId:editing:)（要訂閱）。
+// • 明細、接下來 30 天點「轉定存」「定存到期」「定存利息」＝WealthCardOpen.timeDeposit：開定存表單，帳戶帶那一期自己的帳戶
+//   （轉進薪轉的那一列在薪轉頁點，表單還是台灣銀行那一期）。
+// • 記一筆選單（右上〔＋〕、存摺明細〔＋ 記一筆〕）多「定存」、有外幣時多「換匯」。
 
 /// 打開卡片頁時捲到哪一區（財富頁 ③ 點一列＝.upcoming；要確認、四格點了也用）
 enum WealthCardAnchor: String, Hashable {
     case top, checks
     // 信用卡
     case statement, unbilled, recurring, history, fee, cardInfo, photos
-    // 銀行
-    case upcoming, linked, foreign, ledger, accountInfo, note
+    // 銀行（[v25.566] deposits＝⑥ 定存）
+    case upcoming, linked, foreign, deposits, ledger, accountInfo, note
     // 證券戶、保單
     case holdings, payment
 }
@@ -66,6 +74,10 @@ struct WealthCardSheet: Identifiable {
         case stock(Stock)
         /// 另一張卡片頁（卡費那一列、交割的證券戶）
         case card(UUID, WealthCardAnchor?)
+        /// [v25.566] 定存表單（帳戶、哪一期；nil＝新增）
+        case timeDeposit(UUID, UUID?)
+        /// [v25.566] 換匯（這個帳戶兩個幣別互轉；只有一個外幣＝從別的台幣帳戶轉進來）
+        case exchange(UUID)
     }
     let id = UUID()
     let kind: Kind
@@ -416,7 +428,8 @@ struct WealthCardPage: View {
     private var bankAddMenu: some View {
         if subscription.isPremium {
             Menu {
-                WealthBankAddItems(accountId: currentId, codes: data?.codes ?? ["NT$"], actions: actions)
+                WealthBankAddItems(accountId: currentId, codes: data?.codes ?? ["NT$"], actions: actions,
+                                   accountHidden: data?.bank?.hidden ?? false)
             } label: {
                 addIcon
             }
@@ -509,6 +522,10 @@ struct WealthCardPage: View {
             present(.anchor(currentId, WealthFacts.norm(dep.currencyCode), dep), premium: true)
         case .transfer(let depId):
             requirePremium { confirm = .deleteTransfer(depId) }
+        case .timeDeposit(let termId):
+            // [v25.566] 帳戶帶那一期自己的（定存到期轉進薪轉的那一列在薪轉頁點，表單還是台灣銀行那一期）
+            let owner = lifeStore.timeDepositRecord(termId)?.bankId ?? currentId
+            present(.timeDeposit(owner, termId), premium: true)
         }
     }
 
@@ -783,6 +800,11 @@ struct WealthCardPage: View {
                 .modifier(WealthPrivacyCurtain(armed: true)))
         case .card(let id, let anchor):
             return AnyView(WealthCardPage(accountId: id, scrollTo: anchor))
+        // [v25.566] 定存表單、換匯（兩張表單自己掛 WealthPrivacyCurtain）
+        case .timeDeposit(let account, let term):
+            return AnyView(WealthTimeDepositSheet(accountId: account, editing: term))
+        case .exchange(let id):
+            return AnyView(WealthTransferSheet(fromId: id, toId: id, exchange: true))
         }
     }
 }
@@ -792,6 +814,13 @@ struct WealthBankAddItems: View {
     let accountId: UUID
     let codes: [String]
     let actions: WealthCardActions
+    /// [v25.566] 收起來（銷戶）的帳戶：不列「定存」「換匯」（同 ⑥ 沒有〔＋ 定存〕）
+    var accountHidden = false
+
+    /// [v25.566] 這個帳戶有外幣（「換匯」才出現）
+    private var hasForeign: Bool {
+        !accountHidden && codes.contains { !FinanceRates.isNTD($0) }
+    }
 
     var body: some View {
         ForEach(WealthRecordKind.allCases) { k in
@@ -801,6 +830,17 @@ struct WealthBankAddItems: View {
         }
         Button("轉帳") {
             actions.present(.transfer(accountId), true)
+        }
+        // [v25.566] 定存（記在這個帳戶）、換匯（有外幣才有）
+        if !accountHidden {
+            Button("定存") {
+                actions.present(.timeDeposit(accountId, nil), true)
+            }
+        }
+        if hasForeign {
+            Button("換匯") {
+                actions.present(.exchange(accountId), true)
+            }
         }
         if codes.count > 1 {
             Menu("對存摺") {
@@ -1930,8 +1970,14 @@ struct WealthBankSections: View {
                     .id(WealthCardAnchor.linked)
             }
             if !bank.foreign.isEmpty {
-                WealthCardForeignSection(tiles: bank.foreign)
+                WealthCardForeignSection(tiles: bank.foreign, note: bank.foreignNote, canExchange: bank.canExchange,
+                                         actions: actions, accountId: accountId)
                     .id(WealthCardAnchor.foreign)
+            }
+            // [v25.566] ⑥ 定存（有格子、舊定存帳戶要補資料、或可以新增時出現）
+            if showsDeposits {
+                WealthCardDepositsSection(accountId: accountId, bank: bank, actions: actions)
+                    .id(WealthCardAnchor.deposits)
             }
             WealthCardLedgerSection(accountId: accountId, bank: bank, codes: codes, isPremium: isPremium,
                                     masked: masked, actions: actions)
@@ -1945,6 +1991,11 @@ struct WealthBankSections: View {
                                     actions: actions)
                 .id(WealthCardAnchor.note)
         }
+    }
+
+    /// [v25.566] ⑥ 定存要不要出現
+    private var showsDeposits: Bool {
+        !bank.deposits.isEmpty || bank.legacyDepositPrompt || bank.canAddDeposit
     }
 
     /// 最下紅字「收起來（銷戶）」：存摺上還有錢先問要轉到哪；收起來的顯示「重新打開」
@@ -2069,20 +2120,164 @@ struct WealthCardLinkedSection: View {
     }
 }
 
-/// ⑤ 外幣（兩種以上幣別才有）：一格一個幣別
+/// ⑤ 外幣（[v25.566] 有外幣就有）：一格一個幣別「美金　US$3,200.00　約 NT$102,400（10/19 匯率 32.0）」；
+/// 格子下一行說明、〔＋ 換匯〕（要訂閱：WealthCardPage.present 擋）
 struct WealthCardForeignSection: View {
     let tiles: [WealthCardFTile]
+    var note: String? = nil
+    var canExchange = false
+    let actions: WealthCardActions
+    let accountId: UUID
 
     @Environment(\.colorScheme) private var scheme
 
     var body: some View {
         let pal = TripBoardPalette(scheme)
         VStack(alignment: .leading, spacing: 10) {
-            FinanceCardHeader(title: "各幣別")
-            FinanceTileGrid(tiles: tiles, pal: pal)
-                .padding(12)
-                .modifier(FinanceCardChrome())
+            FinanceCardHeader(title: "外幣")
+            VStack(alignment: .leading, spacing: 10) {
+                FinanceTileGrid(tiles: tiles, pal: pal)
+                if let note {
+                    Text(note)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                if canExchange {
+                    exchangeButton(pal)
+                }
+            }
+            .padding(12)
+            .modifier(FinanceCardChrome())
         }
+    }
+
+    private func exchangeButton(_ pal: TripBoardPalette) -> some View {
+        let a = actions
+        let id = accountId
+        return Button {
+            a.present(.exchange(id), true)
+        } label: {
+            Label("換匯", systemImage: "plus")
+                .font(.subheadline.weight(.bold))
+                .foregroundStyle(MoneyTone.good.color(pal))
+                .frame(maxWidth: .infinity, minHeight: 40)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(MoneyPressStyle())
+        .accessibilityLabel("換匯")
+    }
+}
+
+/// ⑥ [v25.566] 定存（judge §4.2 ⑥）：一期一格（FinanceProgressCell：過去那段、今天一顆點、右端「3/15 到期」），點了開那一期的
+/// 定存表單；舊的「定存」種類帳戶還沒補任何一期＝一列〔補上利率和到期日 ›〕；最下〔＋ 定存〕。新增、看、改都要訂閱（present 擋）
+struct WealthCardDepositsSection: View {
+    let accountId: UUID
+    let bank: WealthCardBank
+    let actions: WealthCardActions
+
+    @Environment(\.colorScheme) private var scheme
+
+    var body: some View {
+        let pal = TripBoardPalette(scheme)
+        VStack(alignment: .leading, spacing: 10) {
+            FinanceCardHeader(title: "定存", trailing: bank.depositsTrailing)
+            if bank.legacyDepositPrompt {
+                legacyRow(pal)
+            }
+            ForEach(bank.deposits) { cell in
+                depositButton(cell, pal: pal)
+            }
+            // 舊定存帳戶已經有〔補上利率和到期日 ›〕（開同一張表單）：不再多一顆〔＋ 定存〕
+            if bank.canAddDeposit && !bank.legacyDepositPrompt {
+                addRow(pal)
+            }
+            if !bank.deposits.isEmpty {
+                Text(Self.footnote)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    static let footnote = "利息是預估（單利、未扣稅），以銀行入帳為準；到期本息續存會自動接下一期。"
+    static let legacyTitle = "這個帳戶是以前記的定存：補上利率和到期日"
+    static let legacyDetail = "補了就能算利息、到期前 7 天提醒你；存款合計不會多算。"
+
+    /// 一格（整格一顆按鈕；VoiceOver 念 FinanceProgressCell 的標題＋資料端組好的一句）
+    private func depositButton(_ cell: WealthCardDepositCell, pal: TripBoardPalette) -> some View {
+        let a = actions
+        let id = cell.id
+        let hint = cell.waiting ? "到期了，點兩下決定轉活存還是續存" : "點兩下打開這筆定存"
+        return Button {
+            a.open(.timeDeposit(id))
+        } label: {
+            FinanceProgressCell(p: cell.progress, pal: pal, tappable: true)
+        }
+        .buttonStyle(MoneyPressStyle())
+        .accessibilityHint(hint)
+    }
+
+    /// 〔補上利率和到期日 ›〕（舊的「定存」種類帳戶）
+    private func legacyRow(_ pal: TripBoardPalette) -> some View {
+        let a = actions
+        let id = accountId
+        return Button {
+            a.present(.timeDeposit(id, nil), true)
+        } label: {
+            legacyLabel(pal)
+        }
+        .buttonStyle(MoneyPressStyle())
+        .modifier(FinanceCardChrome())
+    }
+
+    private func legacyLabel(_ pal: TripBoardPalette) -> some View {
+        HStack(alignment: .center, spacing: 10) {
+            Image(systemName: "lock.fill")
+                .font(.system(size: 13, weight: .bold))
+                .foregroundStyle(Color.white)
+                .frame(width: 28, height: 28)
+                .background(Color(tb: 0xA86A00), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(Self.legacyTitle)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Color.primary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text(Self.legacyDetail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 6)
+            Image(systemName: "chevron.right")
+                .font(.caption2.weight(.bold))
+                .foregroundStyle(.tertiary)
+        }
+        .multilineTextAlignment(.leading)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
+    }
+
+    /// 最下〔＋ 定存〕
+    private func addRow(_ pal: TripBoardPalette) -> some View {
+        let a = actions
+        let id = accountId
+        return Button {
+            a.present(.timeDeposit(id, nil), true)
+        } label: {
+            Label("定存", systemImage: "plus")
+                .font(.subheadline.weight(.bold))
+                .foregroundStyle(MoneyTone.good.color(pal))
+                .frame(maxWidth: .infinity, minHeight: 46)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(MoneyPressStyle())
+        .modifier(FinanceCardChrome())
+        .accessibilityLabel("新增定存")
     }
 }
 
@@ -2173,7 +2368,7 @@ struct WealthCardLedgerSection: View {
                 .font(.headline)
             Spacer(minLength: 8)
             FinanceAddMenuPill(canEdit: isPremium, askPremium: { actions.askPremium() }) {
-                WealthBankAddItems(accountId: accountId, codes: codes, actions: actions)
+                WealthBankAddItems(accountId: accountId, codes: codes, actions: actions, accountHidden: bank.hidden)
             }
         }
     }

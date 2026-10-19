@@ -620,10 +620,14 @@ struct FinanceUpcoming: Identifiable, Equatable {
     let amount: String
     /// 會領回來的錢（保單滿期）：金額前面加 +、綠色
     let isIncome: Bool
-    /// [v25.565] 財富的那一張：卡費＝那張卡、交割＝交割銀行帳戶。點了彈出財富卡片頁（不切分頁，judge §6.8）；其他種類 nil
+    /// [v25.565] 財富的那一張：卡費＝那張卡、交割＝交割銀行帳戶。點了彈出財富卡片頁（不切分頁，judge §6.8）；其他種類 nil。
+    /// [v25.566] 定存到期（kind .maturity）＝那個銀行帳戶：有 wealthId 的一律彈出財富卡片頁
     var wealthId: UUID? = nil
+    /// [v25.566] 換一個圖示（定存到期「lock.open.fill」）；nil＝照種類
+    var symbol: String? = nil
 
     var icon: String {
+        if let s = symbol { return s }
         switch kind {
         case .premium: return "shield.lefthalf.filled"
         case .maturity: return "star.fill"
@@ -649,9 +653,11 @@ struct FinanceUpcoming: Identifiable, Equatable {
     /// [v25.539] vehicles 是 FinanceLoanIndex.vehicles（車子的列都讀 VehicleFacts.upcoming）；沒傳時自己建
     /// [v25.565] wealth 是 FinanceLoanIndex.wealth（卡費、交割；沒傳時讀 AppStores.life 那一份快取）。財富一律是今天的：
     /// now 往後推（小工具第二次叫）時，卡費、交割照今天算好的日子落在這個窗裡的才列
+    /// [v25.566] includeDeposits：定存到期也列（理財總覽「接下來 30 天」傳 true；小工具「接下來要繳」不列：那不是要繳的錢）
     static func build(finance f: FinanceStore, expense e: ExpenseStore, houses: [UUID: HouseFacts],
                       vehicles: [UUID: VehicleFacts]? = nil,
-                      now: Date = Date(), days: Int = 30, wealth: WealthFacts? = nil) -> [FinanceUpcoming] {
+                      now: Date = Date(), days: Int = 30, wealth: WealthFacts? = nil,
+                      includeDeposits: Bool = false) -> [FinanceUpcoming] {
         let cal = Calendar.current
         let today = cal.startOfDay(for: now)
         guard let horizon = cal.date(byAdding: .day, value: days + 1, to: today) else { return [] }
@@ -755,6 +761,27 @@ struct FinanceUpcoming: Identifiable, Equatable {
                                        detail: st.directionText, date: day, daysAway: away(day),
                                        amount: (st.isOutflow ? "" : "+") + st.amountText,
                                        isIncome: !st.isOutflow, wealthId: st.accountId))
+        }
+        // [v25.566] 定存到期（judge §6.4「定存到期（v5）」）：「台灣銀行 定存到期」「本息續存」「約 NT$508,500」；
+        // 轉活存的寫「轉進薪轉」、金額「約 +NT$508,500」（錢會進活存）。點了彈出那個帳戶的卡片頁
+        if includeDeposits {
+            for t in w.timeDeposits where t.status == .active || t.status == .notStarted {
+                guard let m = t.maturity else { continue }
+                let day = cal.startOfDay(for: m)
+                guard day >= today, day < horizon else { continue }
+                let detail: String
+                switch t.mode {
+                case .renewAll: detail = "本息續存"
+                case .renewPrincipal: detail = "本金續存・利息轉進" + (t.payoutName ?? t.accountName)
+                case .toLive: detail = "轉進" + (t.payoutName ?? t.accountName)
+                case .decide: detail = "到期再決定"
+                }
+                let incoming = t.mode == .toLive
+                let amount = "約 " + (incoming ? "+" : "") + WealthFormat.money(t.maturityAmount, code: t.code)
+                out.append(FinanceUpcoming(id: "d-" + t.id.uuidString, kind: .maturity, title: t.accountName + " 定存到期",
+                                           detail: detail, date: day, daysAway: away(day), amount: amount,
+                                           isIncome: incoming, wealthId: t.accountId, symbol: "lock.open.fill"))
+            }
         }
         return out.sorted { $0.date == $1.date ? $0.title < $1.title : $0.date < $1.date }
     }

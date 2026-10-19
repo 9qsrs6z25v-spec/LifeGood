@@ -8,6 +8,7 @@ import SwiftUI
 //    同資產小鎮「斜線＝還欠」finHatch，卡費橘）；hatch ≥ 1 或 warn：斜線畫到塔底、塔框 warn 色。
 //    kind：.live 藍水、.foreign 青水＋塔身小旗（badge「US$」）、.deposit 金水＋塔身鎖頭＋小牌（badge「3/15」）、
 //    .empty 灰色空塔（只有卡沒有銀行：「還沒選從哪扣」）。dashed：新手三座虛線空塔。
+//    [v25.566] 到期前 7 天鎖頭打開一半（lockOpen：鎖身不動，鎖環右腳往上提 2.5pt、整個往左上斜一點；不寫字）。
 //    塔下白底小牌（finPill）寫 label（「薪轉」）；不寫帳號、不寫金額。
 //    cards：每張沒停用的卡一張小卡片（卡面色 WealthCardPalette），站在 tower 那座塔腳下，短管直直接上去（不交叉）；
 //    dashed（自己繳）管子是虛線；旁邊小牌 label（下次動錢的日子「11/10」）。
@@ -60,6 +61,8 @@ struct WealthTowerScene: Equatable {
         var warn: Bool
         /// 新手三座虛線空塔
         var dashed: Bool = false
+        /// [v25.566] 定存 7 天內到期（含到期再決定、已經到期還沒決定）：鎖頭打開一半（judge §3.2；G1 畫）
+        var lockOpen: Bool = false
     }
     struct Card: Equatable {
         /// 站在第幾座塔下（扣它卡費的那座；沒設＝那座 .empty 塔）
@@ -729,7 +732,7 @@ extension MoneyBoardSky {
                 wealthTowerFlag(&ctx, g, text: b, rect: r, ink: ink)
             }
         case .deposit:
-            wealthTowerLock(&ctx, g, badge: t.badge, ink: ink)
+            wealthTowerLock(&ctx, g, badge: t.badge, open: t.lockOpen, ink: ink)
         case .live:
             if let b = t.badge, !b.isEmpty {
                 wealthTowerBadge(&ctx, g, text: b, rect: r, ink: ink)
@@ -874,8 +877,10 @@ extension MoneyBoardSky {
         ctx.draw(t, at: CGPoint(x: textX.rounded(), y: py + fh / 2), anchor: .center)
     }
 
-    /// 定存：塔身一個鎖頭（白圓底）＋到期小牌（「3/15」，有才畫）
-    private static func wealthTowerLock(_ ctx: inout GraphicsContext, _ g: WealthTowerGeo, badge: String?,
+    /// 定存：塔身一個鎖頭（白圓底）＋到期小牌（「3/15」，有才畫）。
+    /// [v25.566] open：到期前 7 天（含到期再決定已經到期）鎖頭打開一半——鎖身照畫，鎖環右腳離開鎖身往上提 2.5pt、
+    /// 整個鎖環往左上斜一點（最高點仍在白圓裡）
+    private static func wealthTowerLock(_ ctx: inout GraphicsContext, _ g: WealthTowerGeo, badge: String?, open: Bool,
                                         ink: WealthSceneInk) {
         let cy = (g.top + g.bh * 0.32).rounded()
         ctx.fill(Path(ellipseIn: CGRect(x: g.cx - 7.5, y: cy - 7.5, width: 15, height: 15)),
@@ -883,11 +888,7 @@ extension MoneyBoardSky {
         let lockInk = ink.dark ? WealthSceneInk.lockInkDark : WealthSceneInk.lockInkLight
         ctx.fill(Path(roundedRect: CGRect(x: g.cx - 3.4, y: cy - 0.8, width: 6.8, height: 5.2), cornerRadius: 1.2),
                  with: .color(lockInk))
-        var shackle = Path()
-        shackle.move(to: CGPoint(x: g.cx - 2.3, y: cy - 0.6))
-        shackle.addLine(to: CGPoint(x: g.cx - 2.3, y: cy - 2.2))
-        shackle.addQuadCurve(to: CGPoint(x: g.cx + 2.3, y: cy - 2.2), control: CGPoint(x: g.cx, y: cy - 6.4))
-        shackle.addLine(to: CGPoint(x: g.cx + 2.3, y: cy - 0.6))
+        let shackle = open ? wealthLockShackleOpen(cx: g.cx, cy: cy) : wealthLockShackleClosed(cx: g.cx, cy: cy)
         ctx.stroke(shackle, with: .color(lockInk), style: StrokeStyle(lineWidth: 1.4, lineCap: .round))
         guard let badge, !badge.isEmpty else { return }
         let area = g.bodyRect.insetBy(dx: -8, dy: 0)
@@ -896,6 +897,27 @@ extension MoneyBoardSky {
         wealthDrawPill(&ctx, WealthScenePill(text: badge, box: box, fill: Color.white.opacity(0.94),
                                              ink: WealthSceneInk.lockInkDark, size: 7.5, weight: .black,
                                              rounded: true))
+    }
+
+    /// 鎖環（關著）：兩隻腳都插進鎖身（鎖身上緣 cy − 0.8）
+    private static func wealthLockShackleClosed(cx: CGFloat, cy: CGFloat) -> Path {
+        var p = Path()
+        p.move(to: CGPoint(x: cx - 2.3, y: cy - 0.6))
+        p.addLine(to: CGPoint(x: cx - 2.3, y: cy - 2.2))
+        p.addQuadCurve(to: CGPoint(x: cx + 2.3, y: cy - 2.2), control: CGPoint(x: cx, y: cy - 6.4))
+        p.addLine(to: CGPoint(x: cx + 2.3, y: cy - 0.6))
+        return p
+    }
+
+    /// [v25.566] 鎖環（打開一半）：左腳照樣插在鎖身裡、往外斜一點；右腳離開鎖身往上提 2.5pt（腳尖 cy − 3.1，
+    /// 圓頭到 cy − 2.4，跟鎖身上緣隔 1.6pt）；最高點約 cy − 5.5（加線寬一半 0.7 仍在白圓 7.5 裡）
+    private static func wealthLockShackleOpen(cx: CGFloat, cy: CGFloat) -> Path {
+        var p = Path()
+        p.move(to: CGPoint(x: cx - 2.3, y: cy - 0.6))
+        p.addLine(to: CGPoint(x: cx - 2.6, y: cy - 2.8))
+        p.addQuadCurve(to: CGPoint(x: cx + 2.0, y: cy - 3.9), control: CGPoint(x: cx - 0.6, y: cy - 7.6))
+        p.addLine(to: CGPoint(x: cx + 2.0, y: cy - 3.1))
+        return p
     }
 
     /// 併塔：塔身上一塊小牌「＋3」

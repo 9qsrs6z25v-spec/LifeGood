@@ -1375,8 +1375,9 @@ struct SettingsView: View {
     }
 
     /// [財富 v4] 說明一次寫成單一字串常數，不要在 Text(...) 裡用 + 串接
+    // [v25.566 財富 v5] 多了定存到期前 7 天（通知只寫「定存 3/15 到期（7 天後）」，不寫銀行、金額）
     private static let wealthReminderHint =
-        "卡費截止、可能不夠扣的扣款與交割、卡片快到期；通知不寫卡名和金額"
+        "卡費截止、可能不夠扣的扣款與交割、卡片快到期、定存到期前 7 天；通知不寫卡名、銀行和金額"
 
     /// 說明一次寫成單一字串常數，不要在 Text(...) 裡用 + 串接
     private static let meetingAlertFootnote =

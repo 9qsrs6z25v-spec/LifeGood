@@ -20,6 +20,19 @@ import SwiftUI
 // [v25.565] 財富 v4（build/v4/brief.md §G4-9，v3 留下的已知限制）：信用卡項目卡第二行拆成 category（短：「10/27 截止」
 // 「11/10 扣款」「11/12 結帳」「已停用」）＋detail（「8 天・自己繳」「從薪轉扣最低・5 天」）。MoneyItemCard 的 category 是
 // fixedSize、detail 是 lineLimit(1)：SE 寬度＋自動扣最低＋長暱稱時 detail 變「…」，不再被卡片右緣切掉。VoiceOver 兩段都念。
+//
+// [v25.566] 財富 v5 定存與外幣（build/v5/brief.md §G1 6–7；judge §3.8）：
+// • 定存帳戶（WealthFacts.Account.showsAsDeposit：舊的「定存」種類，或有定存、存摺上都是 0）：主題 74 金；
+//   金額＝一筆寫本金「NT$500,000」、好幾筆「約 NT$100萬」、舊的定存種類照存摺上；第二行「定存・1.7%・本息續存」
+//  （好幾筆「定存 3 筆・最近 3/15 到期」；舊的定存種類沒補資料照 v3「定存・台灣銀行」）；膠囊「預估利息 8,500」；
+//   進度條「3/15 起存」……「3/15 到期・還有 147 天」（到期再決定已經到期「到期了・等你決定」、還沒開始 0）；
+//   卡面左上「3/15 到期」、左下沒填用途寫「TIME」。第二行一樣拆 category（短）＋detail（放不下變「…」）。
+// • 活存帳戶裡有定存：多一顆膠囊「定存 50萬・3/15 到期」（遮住「定存 ••••・3/15 到期」），放在接下來那兩顆前面（一列放不下少放後面的）。
+// • 外幣帳戶：第二行「外幣・玉山」＋「約 NT$102,400（10/19 匯率 32.0）」（WealthFormat.fxNote；遮住只留「外幣・玉山」）；
+//   原本的「匯率 32.0」膠囊拿掉（字已經在第二行），「沒有匯率」那顆留著。
+// • 收起來的帳戶（⑧）不出 v5 的新東西：沒有進度條、定存那幾顆膠囊，卡面左上照舊「定存」（金額、金色卡照算）。
+// • WealthSheet 加 .timeDeposit(帳戶, 那一期)（定存表單 WealthTimeDepositSheet，要訂閱）。
+// • 定存的數字（本金、利息、到期日、天數、進度、狀態）一律讀 WealthFacts.TimeDeposit，這裡不自己算。
 
 // MARK: - 財富頁的彈出頁（一個 enum、一個 .sheet(item:)）
 
@@ -45,6 +58,8 @@ enum WealthSheet: Identifiable {
     case info(WealthPageInfoTopic)
     /// 接下來 30 天全部
     case upcomingAll
+    /// [v25.566] 定存表單（帳戶：nil＝第一欄選；那一期：nil＝新增）
+    case timeDeposit(UUID?, UUID?)
 
     var id: String {
         switch self {
@@ -58,14 +73,16 @@ enum WealthSheet: Identifiable {
         case .order: return "order"
         case .info(let topic): return "info-\(topic.rawValue)"
         case .upcomingAll: return "upcoming"
+        case .timeDeposit(let account, let term):
+            return "deposit-\(account?.uuidString ?? "new")-\(term?.uuidString ?? "new")"
         }
     }
 
-    /// 要訂閱（待決定 10）：新增、編輯、記一筆、轉帳、對存摺、刷這張卡記一筆。
+    /// 要訂閱（待決定 10）：新增、編輯、記一筆、轉帳、對存摺、刷這張卡記一筆、[v25.566] 定存表單。
     /// 不擋：看卡片頁、標成已繳、排序與收起來、說明、接下來全部
     var needsPremium: Bool {
         switch self {
-        case .editor, .record, .transfer, .anchor, .addExpense: return true
+        case .editor, .record, .transfer, .anchor, .addExpense, .timeDeposit: return true
         case .card, .paid, .order, .info, .upcomingAll: return false
         }
     }
@@ -273,44 +290,123 @@ extension MoneyItem {
         return letters.isEmpty ? "CARD" : String(letters.prefix(10))
     }
 
-    /// ⑤ 一個銀行帳戶（judge §3.8）
+    /// ⑤ 一個銀行帳戶（judge §3.8）。[v25.566] rateDate：匯率更新那天（AppQuoteClock.ratesUpdatedAt；
+    /// 外幣第二行「約 NT$102,400（10/19 匯率 32.0）」，nil＝不寫日期）；定存帳戶換金色卡、本金、進度條
     static func wealthBank(_ a: WealthFacts.Account, facts: WealthFacts, rates: FinanceRates, masked: Bool,
-                           now: Date) -> MoneyItem {
+                           now: Date, rateDate: Date? = nil) -> MoneyItem {
+        let today = WealthCal.day(now)
         let foreign = WealthPageText.foreignCode(a)
-        let theme: MoneyArtTheme = a.isFixedDeposit ? .wealthDeposit : (foreign != nil ? .wealthForeign : .wealthLive)
+        let deposit = a.showsAsDeposit
+        let theme: MoneyArtTheme = deposit ? .wealthDeposit : (foreign != nil ? .wealthForeign : .wealthLive)
         let bank = WealthPageText.bankShort(a.bankName)
-        var category: String
-        if a.isFixedDeposit {
-            category = "定存・" + bank
-        } else if foreign != nil {
-            category = "外幣・" + bank
-            if a.hasUnknownRate {
-                category += "・沒有匯率"
-            } else if !masked {
-                category += "・約 " + WealthFormat.ntd(a.ntdTotal)
-            }
-        } else {
-            category = "活存・" + bank + (a.last4.map { " ••" + $0 } ?? "")
-        }
+        var line = wealthBankLine(a, foreign: foreign, bank: bank, rates: rates, masked: masked, today: today,
+                                  rateDate: rateDate)
         if a.hidden {
             let since: String = a.closedDate.map { "・\(WealthPageText.md($0))" } ?? ""
-            category = "收起來\(since)・\(bank)"
+            let multi: String? = (a.singleCode == nil && !masked) ? wealthMultiText(a) : nil
+            line = WealthBankLine(category: "收起來\(since)・\(bank)", detail: multi)
         }
         var item = MoneyItem(id: a.id, theme: theme, seed: seed(a.id), title: a.name,
-                             amount: masked ? WealthFormat.masked : a.balanceText, category: category)
+                             amount: masked ? WealthFormat.masked : wealthBankAmount(a), category: line.category)
         if a.ntdTotal < -0.5 { item.amountTone = .bad }
-        // 好幾個幣別：第二行「NT$13.2萬＋美金 3,200.00」
-        if a.singleCode == nil, !masked {
-            item.detail = wealthMultiText(a)
+        item.detail = line.detail
+        item.chips = wealthBankChips(a, foreign: foreign, facts: facts, rates: rates, masked: masked, today: today)
+        // 收起來的帳戶（⑧）不加進度條（v5 的新東西只給沒收起來的）
+        if deposit, !a.hidden, let t = wealthFocusDeposit(a) {
+            item.progress = wealthDepositProgress(t, today: today)
         }
-        item.chips = wealthBankChips(a, foreign: foreign, facts: facts, rates: rates, masked: masked)
-        item.badge = wealthBankBadge(a)
+        item.badge = wealthBankBadge(a, today: today)
         item.monogram = String(a.name.prefix(2))
-        item.scriptCaps = wealthPurposeCaps(a.purpose)
+        item.scriptCaps = wealthPurposeCaps(a.purpose) ?? (deposit ? "TIME" : nil)
         item.dimmed = a.hidden
-        item.accessibilityText = wealthSpoken(title: a.name, amount: item.amount, unit: nil, category: category,
-                                              chips: item.chips, progress: nil, masked: masked)
+        // VoiceOver 念第二行整句（category＋detail）、膠囊、定存的進度
+        item.accessibilityText = wealthSpoken(title: a.name, amount: item.amount, unit: nil, category: line.spoken,
+                                              chips: item.chips, progress: item.progress, masked: masked,
+                                              progressSpoken: item.progress.map { wealthDepositProgressSpoken($0) })
         return item
+    }
+
+    /// [v25.566] 銀行項目卡的第二行：category（短的那段，fixedSize）＋detail（放不下變「…」，MoneyItemCard 在前面補「・」）
+    private struct WealthBankLine {
+        let category: String
+        let detail: String?
+
+        /// VoiceOver 念的整句
+        var spoken: String { detail.map { category + "，" + $0 } ?? category }
+    }
+
+    /// [v25.566] 第二行：定存「定存」＋「1.7%・本息續存」；外幣「外幣・玉山」＋「約 NT$102,400（10/19 匯率 32.0）」；
+    /// 活存「活存・台新 ••7890」（好幾個幣別＋「NT$13.2萬＋US$3,200.00」）
+    private static func wealthBankLine(_ a: WealthFacts.Account, foreign: String?, bank: String, rates: FinanceRates,
+                                       masked: Bool, today: Date, rateDate: Date?) -> WealthBankLine {
+        if a.showsAsDeposit {
+            return wealthDepositLine(a, bank: bank, today: today)
+        }
+        let multi: String? = (a.singleCode == nil && !masked) ? wealthMultiText(a) : nil
+        if foreign != nil {
+            // 只有一個外幣：「約 NT$102,400（10/19 匯率 32.0）」；查不到匯率「沒有匯率」；遮住只留「外幣・玉山」
+            if let code = a.singleCode, !FinanceRates.isNTD(code), !masked {
+                let note = WealthFormat.fxNote(a.balance(code), rate: rates.known(code), rateDate: rateDate)
+                return WealthBankLine(category: "外幣・" + bank, detail: note)
+            }
+            return WealthBankLine(category: "外幣・" + bank, detail: multi)
+        }
+        let live = "活存・" + bank + (a.last4.map { " ••" + $0 } ?? "")
+        return WealthBankLine(category: live, detail: multi)
+    }
+
+    /// [v25.566] 定存帳戶的第二行：一筆「定存」＋「1.7%・本息續存」；好幾筆「定存 3 筆」＋「最近 3/15 到期」；
+    /// 舊的定存種類沒補資料（沒有任何一期）照 v3「定存」＋「台灣銀行」
+    private static func wealthDepositLine(_ a: WealthFacts.Account, bank: String, today: Date) -> WealthBankLine {
+        let list = a.timeDeposits
+        if list.isEmpty {
+            return WealthBankLine(category: "定存", detail: bank)
+        }
+        if list.count == 1, let t = list.first {
+            return WealthBankLine(category: "定存", detail: t.termLine)
+        }
+        let next: String? = a.nextMaturing?.maturityText(today).map { "最近 " + $0 + " 到期" }
+        return WealthBankLine(category: "定存 \(list.count) 筆", detail: next)
+    }
+
+    /// [v25.566] 金額：定存帳戶（新的）一筆寫本金「NT$500,000」、好幾筆「約 NT$100萬」；舊的定存種類、其他照存摺上
+    private static func wealthBankAmount(_ a: WealthFacts.Account) -> String {
+        guard a.showsAsDeposit, !a.isFixedDeposit, !a.timeDeposits.isEmpty else { return a.balanceText }
+        if a.timeDeposits.count == 1, let t = a.timeDeposits.first {
+            return WealthFormat.money(t.principal, code: t.code)
+        }
+        return "約 " + a.depositNTD.ntdWanString
+    }
+
+    /// [v25.566] 定存帳戶看哪一期：最近到期、還存著的那一期；沒有（還沒開始、到期待決定）第一期
+    private static func wealthFocusDeposit(_ a: WealthFacts.Account) -> WealthFacts.TimeDeposit? {
+        a.nextMaturing ?? a.timeDeposits.first
+    }
+
+    /// [v25.566] 進度條（judge §3.8）：左「3/15 起存」右「3/15 到期・還有 147 天」；
+    /// 到期再決定已經到期：右「到期了・等你決定」、滿的；還沒開始：右「3/15 到期」、0；沒有到期日 nil
+    private static func wealthDepositProgress(_ t: WealthFacts.TimeDeposit, today: Date) -> MoneyItemProgress? {
+        guard let due = t.maturityText(today) else { return nil }
+        let leading = WealthPageText.md(t.start) + " 起存"
+        switch t.status {
+        case .waiting:
+            return MoneyItemProgress(fraction: 1, leading: leading, trailing: "到期了・等你決定")
+        case .notStarted:
+            return MoneyItemProgress(fraction: 0, leading: leading, trailing: due + " 到期")
+        case .active, .ended:
+            let left = t.daysLeft(today) ?? 0
+            let tail: String = left > 0 ? "・還有 \(left) 天" : "・今天到期"
+            return MoneyItemProgress(fraction: t.progress(today) ?? 0, leading: leading, trailing: due + " 到期" + tail)
+        }
+    }
+
+    /// [v25.566] VoiceOver 念進度：「定存走了 59.7%，3/15 起存，3/15 到期，還有 147 天」
+    private static func wealthDepositProgressSpoken(_ p: MoneyItemProgress) -> String {
+        var s = "定存走了 " + WealthFormat.percent(p.fraction) + "，" + p.leading
+        if let t = p.trailing {
+            s += "，" + t.replacingOccurrences(of: "・", with: "，")
+        }
+        return s
     }
 
     /// 「NT$13.2萬＋美金 3,200.00」（有數字的幣別，台幣在前）
@@ -324,26 +420,88 @@ extension MoneyItem {
         return parts.joined(separator: "＋")
     }
 
-    /// 膠囊：負的「可能漏記了」、外幣「匯率 32.0」、接下來兩件（出去的在前；一列放不下少放）
+    /// 膠囊：負的「可能漏記了」、外幣查不到匯率「沒有匯率」、接下來兩件（出去的在前；一列放不下少放）。
+    /// [v25.566] 外幣「匯率 32.0」拿掉（第二行已經寫「10/19 匯率 32.0」）；定存帳戶「預估利息 8,500」；
+    /// 活存帳戶裡有定存多一顆「定存 50萬・3/15 到期」（放在接下來那兩顆前面）
     private static func wealthBankChips(_ a: WealthFacts.Account, foreign: String?, facts: WealthFacts,
-                                        rates: FinanceRates, masked: Bool) -> [MoneyItemChip] {
+                                        rates: FinanceRates, masked: Bool, today: Date) -> [MoneyItemChip] {
         var chips: [MoneyItemChip] = []
         if a.ntdTotal < -0.5 {
             chips.append(MoneyItemChip(icon: "exclamationmark.triangle.fill", text: "可能漏記了", tone: .bad))
         }
-        if let code = foreign, !FinanceRates.isNTD(code) {
-            if let r = rates.known(code) {
-                chips.append(MoneyItemChip(icon: "dollarsign.arrow.circlepath", text: "匯率 " + WealthFormat.rate(r)))
-            } else {
+        // 定存那幾顆只給沒收起來的帳戶（⑧ 收起來的照 v4）
+        if a.showsAsDeposit {
+            if !a.hidden {
+                chips += wealthDepositChips(a, masked: masked, today: today)
+            }
+        } else {
+            if let code = foreign, !FinanceRates.isNTD(code), rates.known(code) == nil {
                 chips.append(MoneyItemChip(icon: "exclamationmark.circle", text: "沒有匯率", tone: .warn))
             }
+            if !a.hidden, let d = wealthLiveDepositChip(a, masked: masked, today: today) {
+                chips.append(d)
+            }
         }
-        let outs = a.next30.filter { $0.isOutflow }
-        let ins = a.next30.filter { !$0.isOutflow }
+        // 接下來兩件；定存帳戶的到期、利息已經在進度條和上面那顆，不再列一次
+        let rows: [WealthLedgerRow] = a.showsAsDeposit ? a.next30.filter { $0.timeDepositId == nil } : a.next30
+        let outs = rows.filter { $0.isOutflow }
+        let ins = rows.filter { !$0.isOutflow }
         for row in Array((outs + ins).prefix(2)) {
             chips.append(MoneyItemChip(icon: "calendar", text: wealthUpcomingChip(row, facts: facts, masked: masked)))
         }
         return chips
+    }
+
+    /// [v25.566] 定存帳戶的膠囊：一筆「預估利息 8,500」（沒填利率沒有；遮住「預估利息 ••••」）；
+    /// 好幾筆最近兩期「3/15 到期 50萬」「10/25 起存 30萬」「3/15 到期了 50萬」（到期待決定 warn）
+    private static func wealthDepositChips(_ a: WealthFacts.Account, masked: Bool, today: Date) -> [MoneyItemChip] {
+        let list = a.timeDeposits
+        if list.count == 1, let t = list.first {
+            guard let text = t.interestText(masked: masked) else { return [] }
+            return [MoneyItemChip(icon: "percent", text: text)]
+        }
+        return list.prefix(2).map { wealthDepositTermChip($0, masked: masked, today: today) }
+    }
+
+    /// [v25.566] 好幾期定存的一顆：「3/15 到期 50萬」（外幣「US$3,000.00」）
+    private static func wealthDepositTermChip(_ t: WealthFacts.TimeDeposit, masked: Bool,
+                                              today: Date) -> MoneyItemChip {
+        let when: String
+        switch t.status {
+        case .notStarted:
+            when = WealthPageText.md(t.start) + " 起存"
+        case .waiting:
+            when = (t.maturityText(today) ?? "") + " 到期了"
+        case .active, .ended:
+            when = t.maturityText(today).map { $0 + " 到期" } ?? "沒填到期日"
+        }
+        let amount: String = masked ? WealthPageText.dots : wealthDepositAmountText(t.principal, code: t.code)
+        let tone: MoneyTone = t.status == .waiting ? .warn : .neutral
+        return MoneyItemChip(icon: "lock.fill", text: when + " " + amount, tone: tone)
+    }
+
+    /// [v25.566] 膠囊裡的定存金額：台幣「50萬」「9,800」；外幣「US$3,000.00」
+    private static func wealthDepositAmountText(_ v: Double, code: String) -> String {
+        FinanceRates.isNTD(code) ? WealthPageText.wan(v) : WealthFormat.plain(v, code: code)
+    }
+
+    /// [v25.566] 活存帳戶裡有定存：「定存 50萬・3/15 到期」（遮住「定存 ••••・3/15 到期」）；
+    /// 沒有存著的：到期待決定「定存・3/15 到期了」（warn）、還沒開始「定存・10/25 起存」
+    private static func wealthLiveDepositChip(_ a: WealthFacts.Account, masked: Bool, today: Date) -> MoneyItemChip? {
+        guard !a.timeDeposits.isEmpty else { return nil }
+        var text = "定存"
+        if a.depositNTD > 0.5 {
+            text += " " + (masked ? WealthPageText.dots : WealthPageText.wan(a.depositNTD))
+        }
+        let waiting = a.timeDeposits.first(where: { $0.status == .waiting })
+        if let due = a.nextMaturing?.maturityText(today) {
+            text += "・" + due + " 到期"
+        } else if let w = waiting, let due = w.maturityText(today) {
+            text += "・" + due + " 到期了"
+        } else if let s = a.timeDeposits.first(where: { $0.status == .notStarted }) {
+            text += "・" + WealthPageText.md(s.start) + " 起存"
+        }
+        return MoneyItemChip(icon: "lock.fill", text: text, tone: waiting == nil ? .neutral : .warn)
     }
 
     /// 「10/21 交割 52,340」「11/10 扣 @GoGo 約 2.3萬」（自動扣的卡費）「10/27 CUBE 18,600」「11/5 月薪 +80,000」
@@ -365,9 +523,13 @@ extension MoneyItem {
         return WealthPageText.shortName(row, facts: facts)
     }
 
-    /// 卡面左上：「NT$」「US$」「美金」前 3 字；定存「定存」；好幾個幣別「多幣別」
-    private static func wealthBankBadge(_ a: WealthFacts.Account) -> String {
-        if a.isFixedDeposit { return "定存" }
+    /// 卡面左上：「NT$」「US$」「美金」前 3 字；好幾個幣別「多幣別」；
+    /// [v25.566] 定存帳戶「3/15 到期」（最近到期那一期；沒有到期日「定存」）
+    private static func wealthBankBadge(_ a: WealthFacts.Account, today: Date) -> String {
+        if a.showsAsDeposit {
+            if a.hidden { return "定存" }
+            return wealthFocusDeposit(a)?.maturityText(today).map { $0 + " 到期" } ?? "定存"
+        }
         guard let code = a.singleCode else { return "多幣別" }
         if FinanceRates.isNTD(code) { return "NT$" }
         if FinanceRates.isUSD(code) { return "US$" }
@@ -431,9 +593,11 @@ extension MoneyItem {
         return "交割 " + (b.settlementName ?? "")
     }
 
-    /// VoiceOver 一整句（遮住時金額念「金額已遮住」，不念一串點）
+    /// VoiceOver 一整句（遮住時金額念「金額已遮住」，不念一串點）。
+    /// [v25.566] progressSpoken：進度那段換一句（定存「定存走了 59.7%，…」）；nil＝信用卡的「額度用了 …」
     private static func wealthSpoken(title: String, amount: String, unit: String?, category: String,
-                                     chips: [MoneyItemChip], progress: MoneyItemProgress?, masked: Bool) -> String {
+                                     chips: [MoneyItemChip], progress: MoneyItemProgress?, masked: Bool,
+                                     progressSpoken: String? = nil) -> String {
         var parts: [String] = [title]
         if masked {
             parts.append("金額已遮住")
@@ -447,7 +611,7 @@ extension MoneyItem {
             parts.append(c.text.replacingOccurrences(of: WealthPageText.dots, with: "金額已遮住"))
         }
         if let p = progress {
-            parts.append("額度用了 " + p.leading)
+            parts.append(progressSpoken ?? ("額度用了 " + p.leading))
         }
         return parts.joined(separator: "，")
     }

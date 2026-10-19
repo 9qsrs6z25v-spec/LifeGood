@@ -12,6 +12,9 @@ import Charts
 //   FinanceSnapshot，這裡只寫字）。看板一句「總資產 …・貸款還欠 …・卡費與交割 …」（貸款看 s.loans、卡費與交割看
 //   s.wealthOwed，0 不寫）；錢放在哪裡多一張「存款」明信片（點了切到人生 › 財富，全理財唯一切出去的地方）；
 //   資產小鎮多一座頂樓水塔（FinanceBoardScenes）；接下來 30 天的卡費、交割列點了彈出財富卡片頁（openWealth，不切分頁）。
+// [v25.566] 財富 v5（build/v5/brief.md §G1 12–13；judge §6.4）：接下來 30 天多「台灣銀行 定存到期」
+//   （FinanceUpcoming.build(…, includeDeposits: true)：kind .maturity＋wealthId＋圖示 lock.open.fill）；有 wealthId 的列
+//   （卡費、交割、定存到期）一律彈出財富卡片頁、不切分頁。小工具「接下來要繳」不列定存（預設 includeDeposits false）。
 
 extension MoneyFormat {
     /// 風景裡的小牌子：不寫 NT$（「1880萬」）
@@ -83,8 +86,10 @@ struct FinanceOverviewData: Equatable {
         d.cashFlow = FinanceCashFlow.build(finance: f, rates: rates, houses: index.houses,
                                            vehicles: index.vehicles, now: now)
         // [v25.565] 財富 v4：接下來 30 天多卡費、交割（index.wealth＝財富頁同一份一套數字；刷卡的保費、車子那幾件併進卡費）
+        // [v25.566] 財富 v5：定存到期也列（理財總覽才列；小工具「接下來要繳」不列）
         d.upcoming = FinanceUpcoming.build(finance: f, expense: e, houses: index.houses,
-                                           vehicles: index.vehicles, now: now, wealth: index.wealth)
+                                           vehicles: index.vehicles, now: now, wealth: index.wealth,
+                                           includeDeposits: true)
         let activeStocks = f.stocks.filter { !$0.isSold }
         let livePolicies = f.insurances.filter { now < $0.maturityDate }
         // [v25.565] 存款：算進存款合計、沒收起來的銀行帳戶幾個（跟 WealthFacts.cash 同一個條件）
@@ -411,8 +416,13 @@ struct FinanceOverviewBoard: View {
         }
     }
 
-    /// 點了切到那一頁；[v25.565] 卡費、交割：彈出財富卡片頁（那張卡／交割銀行），看完關掉還在理財（judge §6.8）
+    /// 點了切到那一頁；[v25.565] 卡費、交割：彈出財富卡片頁（那張卡／交割銀行），看完關掉還在理財（judge §6.8）。
+    /// [v25.566] 有 wealthId 的一律先彈出財富卡片頁（定存到期是 .maturity＋那個銀行帳戶，不能切到儲蓄險）
     private func openUpcoming(_ ev: FinanceUpcoming) {
+        if let id = ev.wealthId {
+            openWealth(id)
+            return
+        }
         switch ev.kind {
         case .premium, .maturity: open(.insurance)
         case .mortgage: open(.realEstate)

@@ -29,6 +29,14 @@ import UserNotifications
 //
 // 什麼時候重排（WealthReminderCenter）：start 之後，記帳／理財／人生一改（防抖 3 秒）、回到前景、設定開關一動；
 // 這次要排的跟上次一模一樣就不動系統（不打擾、不耗電）。
+//
+// [v25.566] 財富 v5（build/v5/brief.md §2；sim_v5.py 照這裡寫過、跑過）：
+// • 行事曆、今天小工具多「定存到期」（WealthFacts.timeDeposits：存著、還沒開始的那幾期的到期日；自動續存的下一期到期日
+//   等這一期到期才出現）。我的行事曆「台灣銀行 定存到期」「本息續存・約 NT$508,500」；今天小工具主畫面「台灣銀行 定存到期」
+//   （不寫金額）；鎖定畫面／StandBy「定存到期」。**不送 Apple 行事曆**（同 v4）。
+// • 通知多「定存到期前 7 天 09:00」：「定存 3/15 到期（7 天後）」＋一句到期怎麼處理；**不寫銀行名、金額、帳號、存單號碼**。
+//   每一期的「到期前 7 天提醒」關掉（WealthTimeDeposit.remind == false）就不排；設定的「財富提醒」關掉全部不排。
+//   跟卡費、交割、卡片效期一起排序（近的先排、最多 10 則，照舊）。點了開那個帳戶（userInfo＝帳戶 id）。
 
 // MARK: - 1. 財富的日子
 
@@ -36,6 +44,8 @@ import UserNotifications
 struct WealthDateItem: Identifiable, Equatable {
     enum Kind: String {
         case cardDue, settlement, cardExpiry
+        /// [v25.566] 定存到期
+        case depositMaturity
     }
 
     /// 「wd-due-<卡>-<2026-10>」「wd-settle-<帳戶>-<2026-10-21>-NT$」「wd-expiry-<卡>-<2027-03>」
@@ -99,6 +109,15 @@ enum WealthDates {
                                       kind: .cardExpiry, title: c.name + " 卡片到期", detail: "換新卡後記得改綁定的扣款",
                                       widgetTitle: c.name + " 卡片到期", lockTitle: "卡片到期",
                                       icon: "calendar.badge.exclamationmark", accountId: c.id, isManual: false))
+        }
+        // [v25.566] 定存到期（存著、還沒開始的那幾期；今天以後）
+        for t in facts.timeDeposits where t.status == .active || t.status == .notStarted {
+            guard let m = t.maturity, m >= today else { continue }
+            let detail = t.mode.shortTitle + "・約 " + WealthFormat.money(t.maturityAmount, code: t.code)
+            out.append(WealthDateItem(id: "wd-td-\(t.id.uuidString)", day: m, kind: .depositMaturity,
+                                      title: t.accountName + " 定存到期", detail: detail,
+                                      widgetTitle: t.accountName + " 定存到期", lockTitle: "定存到期",
+                                      icon: "lock.open.fill", accountId: t.accountId, isManual: false))
         }
         // 照日子；同一天照標題（sort 不保證穩定，帶著原本的位置比）
         return out.enumerated().sorted { x, y in
@@ -210,6 +229,23 @@ enum WealthReminders {
                                              body: "\(WealthCal.month(em)) 月到期，換新卡後記得改綁定的扣款與卡片資料。",
                                              fireDate: f, accountId: c.id))
             }
+        }
+
+        // [v25.566] 定存：到期前 7 天 09:00（不寫銀行名、金額、帳號、存單號碼）
+        for t in facts.timeDeposits where t.remind && (t.status == .active || t.status == .notStarted) {
+            guard let m = t.maturity else { continue }
+            let f = at(WealthCal.addDays(-7, to: m), hour: 9)
+            guard f > now else { continue }
+            let body: String
+            switch t.mode {
+            case .renewAll: body = "到期會本息續存；要改成轉活存，打開看看。"
+            case .renewPrincipal: body = "到期本金續存、利息轉活存；要改，打開看看。"
+            case .toLive: body = "到期會轉進活存。"
+            case .decide: body = "還沒決定到期怎麼處理，打開看看。"
+            }
+            out.append(WealthReminderJob(key: prefix + "td.\(t.id.uuidString).\(WealthCal.dayKey(m))",
+                                         title: "定存 \(WealthFormat.monthDay(m)) 到期（7 天後）", body: body,
+                                         fireDate: f, accountId: t.accountId))
         }
 
         // 近的先排（同一個時間照產生的先後；sort 不保證穩定，帶著位置比）

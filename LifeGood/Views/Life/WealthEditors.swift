@@ -19,6 +19,16 @@ import SwiftUI
 // • 要確認 #12〔看綁了哪些〕（WealthCheck.Fix.openCard）：WealthChecksSection(onOpenCard:) 交給呼叫端（財富頁開卡片頁、卡片頁捲到
 //   定期扣款）；沒給就自己開 WealthFormSheet.card（WealthCardPage 捲到 .recurring）。看卡片頁不擋訂閱。
 // • 信用卡表單「提醒我繳卡費」：WealthCardPrefs.remind（v2 留好的欄位；開＝存 nil、關＝存 false）。通知不寫卡名、金額、號碼。
+//
+// [v25.566] 財富 v5（build/v5/brief.md §G3；定存表單本身在 WealthDepositForms.swift）：
+// • 要確認三個新按鈕（WealthChecksSection.tap）：#13〔改成轉活存〕〔改成本息續存〕〔轉活存〕〔本息續存〕＝Fix.setMaturity
+//   （下一個 runloop 叫 LifeStore.setTimeDepositOnMaturity；不擋訂閱，跟標成已繳一樣是處理到期的事）；舊的定存帳戶〔補資料〕＝
+//   Fix.editTimeDeposit（開 WealthTimeDepositSheet，要訂閱）；#14 存款保險〔知道了〕＝Fix.quietInsurance（這家銀行一年內不再提）。
+// • WealthFormSheet.timeDeposit(accountId:editing:)：要確認、表單裡開定存表單。
+// • 轉帳表單換匯模式 WealthTransferSheet(…, exchange: true)：同一個帳戶兩個幣別互轉也是轉帳（兩筆同一個 transferPairId，
+//   LifeStore.addTransfer 放寬成「不同帳戶，或同一個帳戶不同幣別」）。帳戶有兩個以上幣別＝自己換（台幣 → 第一個外幣）；
+//   只有一個外幣＝從存摺上台幣最多的另一個活存換進來（v2 就能換匯）。同一個帳戶時兩邊幣別一定不一樣。
+// • 銀行帳戶表單「種類與幣別」footer 多一句：定存不是帳戶種類，存好帳戶後到帳戶頁〔＋ 定存〕記。
 
 /// 表單的類型（開了就鎖住）
 enum WealthAccountKind: String, CaseIterable, Identifiable {
@@ -807,8 +817,19 @@ struct WealthAccountEditor: View {
         } header: {
             WealthFormHeader(title: "種類與幣別", icon: "dollarsign.circle.fill", color: .teal)
         } footer: {
-            Text(foreignCodes.isEmpty ? "要記外幣，先到設定 › 匯率加幣別。" : "勾這個帳戶有的外幣；存提款、對存摺都分幣別記。")
+            Text(bankTypeFootnote)
         }
+    }
+
+    /// [v25.566] 定存不是帳戶種類（judge §5.1、§5.5）：記在帳戶裡
+    private static let depositTypeHint = "定存不是帳戶種類：存好帳戶後，到帳戶頁按〔＋ 定存〕記本金、利率、到期日。"
+
+    /// 「種類與幣別」footer：外幣一句＋[v25.566] 定存一句
+    private var bankTypeFootnote: String {
+        let currencies: String = foreignCodes.isEmpty
+            ? "要記外幣，先到設定 › 匯率加幣別。"
+            : "勾這個帳戶有的外幣；存提款、對存摺都分幣別記。"
+        return currencies + "\n" + Self.depositTypeHint
     }
 
     private func currencyBinding(_ code: String) -> Binding<Bool> {
@@ -1946,6 +1967,8 @@ enum WealthFormSheet: Identifiable {
     case expense(token: UUID, preset: AddExpensePreset)
     /// [v25.565] 要確認 #12〔看綁了哪些〕：那張卡的卡片頁、捲到綁在這張卡的定期扣款
     case card(UUID)
+    /// [v25.566] 定存表單（要確認〔補資料〕：舊的定存帳戶、editing nil）
+    case timeDeposit(accountId: UUID?, editing: UUID?)
 
     var id: String {
         switch self {
@@ -1965,6 +1988,8 @@ enum WealthFormSheet: Identifiable {
             return "expense-" + token.uuidString
         case .card(let c):
             return "card-" + c.uuidString
+        case .timeDeposit(let a, let e):
+            return "deposit-" + (a?.uuidString ?? "new") + "-" + (e?.uuidString ?? "new")
         }
     }
 
@@ -1990,6 +2015,9 @@ enum WealthFormSheet: Identifiable {
         case .card(let c):
             // 卡片頁自己掛布幕（WealthCardPage.body）
             return AnyView(WealthCardPage(accountId: c, scrollTo: .recurring))
+        case .timeDeposit(let a, let e):
+            // [v25.566] 定存表單自己掛布幕（WealthTimeDepositSheet.body）
+            return AnyView(WealthTimeDepositSheet(accountId: a, editing: e))
         }
     }
 }
@@ -2220,11 +2248,15 @@ struct WealthRecordSheet: View {
 
 // MARK: - 轉帳（含換匯；judge §4.5）
 
-/// 轉帳（含換匯）；要確認〔轉帳過去〕帶 to、from、amount
+/// 轉帳（含換匯）；要確認〔轉帳過去〕帶 to、from、amount。
+/// [v25.566] exchange：帳戶頁〔換匯〕（fromId＝toId＝那個帳戶）——同一個帳戶兩個幣別互轉也是轉帳（兩筆同一個 transferPairId）；
+/// 只有一個外幣的帳戶＝從存摺上台幣最多的另一個活存換進來
 struct WealthTransferSheet: View {
     var fromId: UUID? = nil
     var toId: UUID? = nil
     var amount: Double? = nil
+    /// [v25.566] 換匯模式（標題「換匯」、「到」也列自己、同一個帳戶時兩邊幣別不一樣）
+    var exchange: Bool = false
 
     @EnvironmentObject var lifeStore: LifeStore
     @EnvironmentObject var expenseStore: ExpenseStore
@@ -2250,8 +2282,16 @@ struct WealthTransferSheet: View {
     }
 
     private var toChoices: [WealthFormAccountChoice] {
-        choices.filter { $0.id != from }
+        // [v25.566] 換匯：同一個帳戶兩個幣別互轉，「到」也列自己
+        if exchange { return choices }
+        return choices.filter { $0.id != from }
     }
+
+    /// [v25.566] 同一個帳戶自己換（換匯）
+    private var sameAccount: Bool { from != nil && from == to }
+
+    /// [v25.566] 兩邊可以存：不同帳戶，或同一個帳戶不同幣別（LifeStore.addTransfer 同一條規則）
+    private var pairOK: Bool { from != to || fromCode != toCode }
 
     /// 兩邊幣別不同、有一邊是台幣：可以改匯率（還沒選對方＝不出現）
     private var showsRateField: Bool {
@@ -2286,17 +2326,35 @@ struct WealthTransferSheet: View {
         WealthFacts.transferAmount(v, from: fromCode, to: toCode, rate: usedRate, rates: rates)
     }
 
-    /// 「對方收到 美金 1,560.06」；查不到匯率＝紅字；還沒選對方或沒打金額＝nil
+    /// 「對方收到 美金 1,560.06」（[v25.566] 同一個帳戶「換到 US$1,000.00」）；查不到匯率＝紅字；還沒選對方或沒打金額＝nil
     private var preview: (text: String, ok: Bool)? {
-        guard to != nil, let v = WealthFormText.number(amountText), v > 0 else { return nil }
+        guard to != nil else { return nil }
+        if !pairOK { return ("同一個帳戶要選兩個不同的幣別", false) }
+        guard let v = WealthFormText.number(amountText), v > 0 else { return nil }
         guard let r = received(v) else { return ("設定裡找不到匯率，先到設定加這個幣別的匯率", false) }
-        return ("對方收到 " + WealthFormat.money(r, code: toCode), true)
+        let lead: String = sameAccount ? "換到 " : "對方收到 "
+        return (lead + WealthFormat.money(r, code: toCode), true)
     }
 
     private var saveDisabled: Bool {
-        guard from != nil, to != nil, from != to, !rateInvalid,
+        guard from != nil, to != nil, pairOK, !rateInvalid,
               let v = WealthFormText.number(amountText), v > 0, let r = received(v) else { return true }
         return r <= 0
+    }
+
+    // [v25.566] 換匯模式的字（標題、段落、footer）
+    private var navTitle: String { exchange ? "換匯" : "轉帳" }
+    private var fromHeader: String { exchange ? "換出" : "從哪個帳戶" }
+    private var toHeader: String { exchange ? "換入" : "轉到" }
+    private var fromCodeLabel: String { exchange ? "換出幣別" : "轉出幣別" }
+    private var toCodeLabel: String { exchange ? "換入幣別" : "對方幣別" }
+    private var amountHeader: String { exchange ? "換多少" : "轉多少" }
+    private var amountPlaceholder: String { exchange ? "換出金額" : "轉出金額" }
+    private var amountFooter: String {
+        if exchange {
+            return "台幣、外幣兩格各記一筆、綁在一起；刪一邊會問要不要兩邊一起刪。手續費記在換出的那一格。"
+        }
+        return "兩邊各記一筆、綁在一起；刪一邊時會問要不要兩邊一起刪。手續費記在轉出的帳戶。"
     }
 
     var body: some View {
@@ -2306,7 +2364,7 @@ struct WealthTransferSheet: View {
                 toSection
                 amountSection
             }
-            .navigationTitle("轉帳")
+            .navigationTitle(navTitle)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 WealthSaveToolbar(title: "存", isSaving: isSaving, disabled: saveDisabled,
@@ -2315,7 +2373,7 @@ struct WealthTransferSheet: View {
             .onAppear { load() }
             .onChange(of: from) { _, _ in fromChanged() }
             .onChange(of: to) { _, _ in toChanged() }
-            .onChange(of: fromCode) { _, _ in resetRate() }
+            .onChange(of: fromCode) { _, _ in fromCodeChanged() }
             .onChange(of: toCode) { _, _ in resetRate() }
         }
         .presentationDetents([.medium, .large])
@@ -2330,14 +2388,14 @@ struct WealthTransferSheet: View {
                 }
             }
             if codes(of: from).count > 1 {
-                Picker("轉出幣別", selection: $fromCode) {
+                Picker(fromCodeLabel, selection: $fromCode) {
                     ForEach(codes(of: from), id: \.self) { c in
                         Text(c).tag(c)
                     }
                 }
             }
         } header: {
-            WealthFormHeader(title: "從哪個帳戶", icon: "arrow.up.right", color: .blue)
+            WealthFormHeader(title: fromHeader, icon: "arrow.up.right", color: .blue)
         }
     }
 
@@ -2350,14 +2408,14 @@ struct WealthTransferSheet: View {
                 }
             }
             if to != nil, codes(of: to).count > 1 {
-                Picker("對方幣別", selection: $toCode) {
+                Picker(toCodeLabel, selection: $toCode) {
                     ForEach(codes(of: to), id: \.self) { c in
                         Text(c).tag(c)
                     }
                 }
             }
         } header: {
-            WealthFormHeader(title: "轉到", icon: "arrow.down.left", color: .blue)
+            WealthFormHeader(title: toHeader, icon: "arrow.down.left", color: .blue)
         }
     }
 
@@ -2366,7 +2424,7 @@ struct WealthTransferSheet: View {
         return Section {
             HStack {
                 Text(fromCode).foregroundStyle(.secondary)
-                TextField("轉出金額", text: $amountText)
+                TextField(amountPlaceholder, text: $amountText)
                     .keyboardType(.decimalPad)
             }
             if showsRateField {
@@ -2397,9 +2455,9 @@ struct WealthTransferSheet: View {
             DatePicker("日期", selection: $date, displayedComponents: .date)
             TextField("備註（選填）", text: $note)
         } header: {
-            WealthFormHeader(title: "轉多少", icon: "arrow.left.arrow.right", color: .blue)
+            WealthFormHeader(title: amountHeader, icon: "arrow.left.arrow.right", color: .blue)
         } footer: {
-            Text("兩邊各記一筆、綁在一起；刪一邊時會問要不要兩邊一起刪。手續費記在轉出的帳戶。")
+            Text(amountFooter)
         }
     }
 
@@ -2410,7 +2468,13 @@ struct WealthTransferSheet: View {
         loaded = true
         rates = FinanceRates(expenseStore)
         let facts = lifeStore.wealthFacts(expense: expenseStore, finance: financeStore)
-        choices = WealthFormAccountChoice.banks(facts, including: fromId, includeFixed: true)
+        choices = WealthFormAccountChoice.banks(facts, including: exchange ? (toId ?? fromId) : fromId, includeFixed: true)
+        // [v25.566] 換匯：照那個帳戶的幣別決定兩邊（同一個帳戶自己換，或從別的台幣活存換進來）
+        if exchange, let t = toId, loadExchange(t, facts: facts) {
+            if let a = amount, a > 0 { amountText = WealthFormText.editable(a) }
+            resetRate()
+            return
+        }
         // 沒指定從哪轉：先挑活存（不是定存）的另一個帳戶
         let liveFirst: UUID? = facts.pickerBanks.first(where: { $0.id != toId })?.id
         let start: UUID? = fromId ?? liveFirst ?? choices.first(where: { $0.id != toId })?.id
@@ -2425,19 +2489,68 @@ struct WealthTransferSheet: View {
         resetRate()
     }
 
+    /// [v25.566] 換匯打開時：帳戶有兩個以上幣別 → 同一個帳戶自己換（台幣 → 第一個外幣；沒有台幣就第一個 → 第二個）；
+    /// 只有一個外幣 → 從存摺上台幣最多的另一個活存（facts.pickerBanks）換進來。帳戶不在選單裡、只有台幣＝false（照一般轉帳帶）
+    private func loadExchange(_ t: UUID, facts: WealthFacts) -> Bool {
+        guard choices.contains(where: { $0.id == t }) else { return false }
+        let list = codes(of: t)
+        if list.count >= 2 {
+            let fc: String = list.contains("NT$") ? "NT$" : list[0]
+            from = t
+            to = t
+            fromCode = fc
+            toCode = list.first(where: { $0 != fc }) ?? fc
+            return true
+        }
+        guard let only = list.first, only != "NT$" else { return false }
+        let others: [WealthFacts.Account] = facts.pickerBanks.filter { a in
+            a.id != t && choices.contains(where: { $0.id == a.id })
+        }
+        let richest: WealthFacts.Account? = others.max(by: { $0.balance("NT$") < $1.balance("NT$") })
+        let source: UUID? = richest?.id ?? choices.first(where: { $0.id != t })?.id
+        from = source
+        let fromList = codes(of: source)
+        fromCode = fromList.contains("NT$") ? "NT$" : (fromList.first ?? "NT$")
+        to = t
+        toCode = only
+        return true
+    }
+
     private func fromChanged() {
         let list = codes(of: from)
         if !list.contains(fromCode) { fromCode = list.first ?? "NT$" }
-        if to == from { to = nil }
+        if exchange {
+            // [v25.566] 換匯不清掉「到」；換回同一個帳戶時兩邊幣別要不一樣
+            keepCodesApart()
+        } else if to == from {
+            to = nil
+        }
         resetRate()
     }
 
-    /// 換對方帳戶：對方有這邊的幣別就收同一個幣別，不然收對方第一個幣別
+    /// 換對方帳戶：對方有這邊的幣別就收同一個幣別，不然收對方第一個幣別。
+    /// [v25.566] 換匯：收跟這邊不一樣的幣別（對方只有這個幣別才收同一個）
     private func toChanged() {
         guard to != nil else { return }
         let list = codes(of: to)
-        toCode = list.contains(fromCode) ? fromCode : (list.first ?? "NT$")
+        if exchange {
+            toCode = list.first(where: { $0 != fromCode }) ?? (list.first ?? "NT$")
+        } else {
+            toCode = list.contains(fromCode) ? fromCode : (list.first ?? "NT$")
+        }
         resetRate()
+    }
+
+    /// [v25.566] 換匯、同一個帳戶：換出幣別改成跟換入一樣時，換入改成另一個
+    private func fromCodeChanged() {
+        if exchange { keepCodesApart() }
+        resetRate()
+    }
+
+    /// [v25.566] 同一個帳戶時兩邊幣別一律不一樣（帳戶只有一個幣別就不動，存檔鈕會擋）
+    private func keepCodesApart() {
+        guard sameAccount, fromCode == toCode else { return }
+        if let other = codes(of: to).first(where: { $0 != fromCode }) { toCode = other }
     }
 
     private func resetRate() {
@@ -2449,7 +2562,8 @@ struct WealthTransferSheet: View {
     }
 
     private func save() {
-        guard !isSaving, let f = from, let t = to, f != t,
+        // [v25.566] 不同帳戶，或同一個帳戶不同幣別（換匯）
+        guard !isSaving, let f = from, let t = to, f != t || fromCode != toCode,
               let v = WealthFormText.number(amountText), v > 0,
               let got = received(v), got > 0 else { return }
         isSaving = true
@@ -3735,6 +3849,20 @@ struct WealthChecksSection: View {
         case .openCard(let cardId):
             // [v25.565] #12〔看綁了哪些〕：看卡片頁不擋訂閱（改綁定要到記帳改，那邊自己擋）
             openCard(cardId)
+        case .setMaturity(let depositId, let raw):
+            // [v25.566] #13 改到期處理（改成轉活存／本息續存）：不擋訂閱（跟標成已繳一樣是處理到期的事）；
+            // 下一個 runloop 才寫（自動續存還沒寫進帳本的那一期，LifeStore 先寫進去再改）
+            let mode = WealthMaturityMode.of(raw)
+            DispatchQueue.main.async {
+                life.setTimeDepositOnMaturity(depositId, mode: mode)
+            }
+        case .editTimeDeposit(let accountId, let depositId):
+            // [v25.566] 舊的定存帳戶〔補資料〕：開定存表單（要訂閱）
+            guard subscription.isPremium else { showPremium = true; return }
+            sheet = .timeDeposit(accountId: accountId, editing: depositId)
+        case .quietInsurance(let key):
+            // [v25.566] #14 存款保險〔知道了〕：這家銀行一年內不再提（不擋訂閱）
+            life.quietDepositInsurance(key)
         }
     }
 

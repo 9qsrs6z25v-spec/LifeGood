@@ -26,6 +26,10 @@ class LifeStore: ObservableObject {
     /// 扣款帳戶的歷史、說明過的事…（v3 起暱稱、排序、收起來、標成已繳）。單獨一個鍵：還沒更新的 iPad 不會把它蓋掉。
     /// 一改 wealthRevision 也加一
     @Published var wealthBook: WealthBook = WealthBook() { didSet { wealthRevision &+= 1; if !isLoading { save() } } }
+    /// [v25.566] 財富帳本・定存那一包（WealthBook.swift WealthDepositBook；鍵 life_wealth_deposits_v1，跟 iCloud 同步、
+    /// 進完整備份與「理財」匯出）。不放進 wealthBook：v25.563–565 的 iPad 存一次帳本會把它不認得的欄位洗掉，另一個鍵它不碰。
+    /// 一改 wealthRevision 也加一
+    @Published var wealthDeposits: WealthDepositBook = WealthDepositBook() { didSet { wealthRevision &+= 1; if !isLoading { save() } } }
     /// [v25.357] 公司廠區據點：與重大決議的「廠區」欄位對應，長成每個廠的歷史年線
     @Published var companySites: [CompanySite] = [] { didSet { if !isLoading { save() } } }
     /// [v25.399] 旅遊規劃（要去的行程；與旅遊地圖「去過的地點」是兩回事）
@@ -66,7 +70,7 @@ class LifeStore: ObservableObject {
         "life_org_people", "life_health_profile", "life_family_tasks",
         "life_equipment_pool", "life_performance_ballots", "life_workouts",
         "life_company_sites", "life_trip_plans", "life_workout_prefs", "life_workout_health",
-        "life_workout_leave", "life_wealth_book_v1"
+        "life_workout_leave", "life_wealth_book_v1", "life_wealth_deposits_v1"
     ]
 
     init() {
@@ -332,8 +336,8 @@ class LifeStore: ObservableObject {
     func wealthFacts(expense: ExpenseStore, finance: FinanceStore, now: Date = Date()) -> WealthFacts {
         let key = WealthFacts.cacheKey(revision: wealthRevision, expense: expense, finance: finance, now: now)
         if let c = wealthFactsCache, c.key == key { return c.facts }
-        let f = WealthFacts.build(milestones: milestones, book: wealthBook, expenses: expense.expenses,
-                                  incomes: expense.incomes, stocks: finance.stocks,
+        let f = WealthFacts.build(milestones: milestones, book: wealthBook, deposits: wealthDeposits,
+                                  expenses: expense.expenses, incomes: expense.incomes, stocks: finance.stocks,
                                   rates: FinanceRates(expense), now: now)
         wealthFactsCache = (key: key, facts: f)
         return f
@@ -344,8 +348,9 @@ class LifeStore: ObservableObject {
     func passbookBalance(accountId: UUID, code: String, endOf day: Date, excluding: UUID?,
                          expense: ExpenseStore, finance: FinanceStore) -> Double {
         WealthFacts.passbookBalance(accountId: accountId, code: code, endOf: day, excluding: excluding,
-                                    milestones: milestones, book: wealthBook, expenses: expense.expenses,
-                                    incomes: expense.incomes, stocks: finance.stocks, rates: FinanceRates(expense))
+                                    milestones: milestones, book: wealthBook, deposits: wealthDeposits,
+                                    expenses: expense.expenses, incomes: expense.incomes, stocks: finance.stocks,
+                                    rates: FinanceRates(expense))
     }
 
     /// [v25.563] 改財富帳本（改完跟原本一樣就不寫，不白跑一次存檔與 iCloud）
@@ -386,9 +391,12 @@ class LifeStore: ObservableObject {
 
     /// [v25.563] 轉帳：兩邊各寫一筆、同一個 transferPairId（刪一邊時問要不要兩筆一起刪）；
     /// 兩邊幣別不同時記 fxRate（1 外幣＝幾台幣）。toAmount 由呼叫端用 WealthFacts.transferAmount 算好。milestones 只指派一次
+    /// [v25.566] 換匯：同一個帳戶、兩個幣別互轉也走這支（fromId＝toId、幣別不同；兩筆記在同一個帳戶）
     func addTransfer(from fromId: UUID, fromCode: String, amount: Double, to toId: UUID, toCode: String,
                      toAmount: Double, fxRate: Double?, date: Date, note: String?) {
-        guard fromId != toId, amount > 0, toAmount > 0 else { return }
+        let sameAccount = fromId == toId
+        guard !sameAccount || WealthFacts.norm(fromCode) != WealthFacts.norm(toCode),
+              amount > 0, toAmount > 0 else { return }
         var list = milestones
         guard let fi = list.firstIndex(where: { $0.id == fromId }),
               let ti = list.firstIndex(where: { $0.id == toId }) else { return }
@@ -664,6 +672,125 @@ class LifeStore: ObservableObject {
         }
     }
 
+    // MARK: - [v25.566] 財富 v5：定存（WealthDepositBook；build/v5/brief.md §2）
+
+    /// 改定存那一包（改完跟原本一樣就不寫，不白跑一次存檔與 iCloud）
+    func updateWealthDeposits(_ body: (inout WealthDepositBook) -> Void) {
+        var b = wealthDeposits
+        body(&b)
+        if b != wealthDeposits { wealthDeposits = b }
+    }
+
+    /// 到期本息續存／本金續存、自動接的下一期寫進帳本（同一個 id：WealthTimeDeposit.successorId；寫過的不再寫，不重複）。
+    /// 財富頁打開、回到前景時叫（在下一個 runloop：不在畫面更新當中寫 store）；沒有要寫的什麼都不做。
+    /// 還沒寫進去以前，WealthFacts 照樣把下一期算進去（數字不等這一支）
+    func rollOverTimeDeposits(now: Date = Date()) {
+        if let b = wealthDeposits.rolledOver(through: WealthCal.day(now)) {
+            wealthDeposits = b
+        }
+    }
+
+    /// 新增／改一期定存（WealthTimeDepositSheet 存檔）：先把自動續存算出來的那幾期寫進來，再整筆換掉
+    /// （改的是自動續存的那一期也一樣：同一個 id）
+    func saveTimeDeposit(_ d: WealthTimeDeposit, now: Date = Date()) {
+        updateWealthDeposits { book in
+            if let rolled = book.rolledOver(through: WealthCal.day(now)) { book = rolled }
+            book.upsert(d)
+        }
+    }
+
+    /// 改到期怎麼處理（要確認 #13〔改成轉活存〕〔改成本息續存〕、到期再決定〔轉活存〕〔本息續存〕）。
+    /// 先寫進自動續存的那幾期（改的可能是還沒寫進帳本的那一期）；改成不續存時，這一期以後自動接的拿掉
+    func setTimeDepositOnMaturity(_ id: UUID, mode: WealthMaturityMode, now: Date = Date()) {
+        updateWealthDeposits { book in
+            if let rolled = book.rolledOver(through: WealthCal.day(now)) { book = rolled }
+            guard var d = book.deposit(id) else { return }
+            d.onMaturity = mode == .renewAll ? nil : mode.rawValue
+            book.upsert(d)
+            if !mode.renews { Self.dropSuccessors(of: id, in: &book) }
+        }
+    }
+
+    /// 提前解約（那天、實拿的利息；本金＋利息轉進到期轉進的帳戶）：這一期以後自動接的拿掉
+    func closeTimeDeposit(_ id: UUID, on day: Date, interest: Double?, now: Date = Date()) {
+        updateWealthDeposits { book in
+            if let rolled = book.rolledOver(through: WealthCal.day(now)) { book = rolled }
+            guard var d = book.deposit(id) else { return }
+            d.closedDate = WealthCal.day(day)
+            d.closedInterest = interest.flatMap { $0 > 0 ? $0 : nil }
+            book.upsert(d)
+            Self.dropSuccessors(of: id, in: &book)
+        }
+    }
+
+    /// 取消提前解約（解約記錯了）
+    func reopenTimeDeposit(_ id: UUID) {
+        updateWealthDeposits { book in
+            guard var d = book.deposit(id) else { return }
+            d.closedDate = nil
+            d.closedInterest = nil
+            book.upsert(d)
+        }
+    }
+
+    /// 刪一筆定存（judge §5.6：先問）：整串一起刪（只刪一期的話上一期會再自動續存出同一期）。
+    /// keepTransfer：起存時「從活存轉出」的那一筆要留著（錢不回到活存）→ 在那個帳戶記一筆真的提款（起存日、本金）
+    func deleteTimeDeposit(_ id: UUID, keepTransfer: Bool, now: Date = Date()) {
+        // 先寫進自動續存算出來的那幾期（刪的可能是還沒寫進帳本的那一期：不先寫進來就找不到它的上一期）
+        var book = wealthDeposits
+        if let rolled = book.rolledOver(through: WealthCal.day(now)) { book = rolled }
+        let ids = WealthDepositChain.chainIds(containing: id, in: book.all)
+        let chain = book.all.filter { ids.contains($0.id) }
+        if keepTransfer {
+            let isLegacy: (UUID) -> Bool = { bid in
+                self.milestones.first(where: { $0.id == bid })?.bankAccountType == .fixed
+            }
+            var list = milestones
+            var changed = false
+            for d in chain where d.fromLive == true && !isLegacy(d.bankId) {
+                guard let ai = list.firstIndex(where: { $0.id == d.bankId }) else { continue }
+                var deps = list[ai].bankDeposits ?? []
+                deps.append(BankDeposit(date: WealthCal.day(d.start), amount: d.principal, currencyCode: d.code,
+                                        isWithdrawal: true, note: "轉定存（定存紀錄已刪）",
+                                        kind: BankDeposit.kindWithdrawal))
+                list[ai].bankDeposits = deps
+                changed = true
+            }
+            if changed { milestones = list }
+        }
+        book.removeChain(containing: id)
+        if book != wealthDeposits { wealthDeposits = book }
+    }
+
+    /// 定存表單要的那一筆（帳本裡的；自動續存還沒寫進帳本的那一期照算出來的給，previousId 都在）。只讀，不寫任何東西：
+    /// 表單改一份副本，存檔叫 saveTimeDeposit（會先把自動續存的那幾期寫進來，再整筆換掉）
+    func timeDepositRecord(_ id: UUID, now: Date = Date()) -> WealthTimeDeposit? {
+        if let d = wealthDeposits.deposit(id) { return d }
+        let terms = WealthDepositChain.terms(wealthDeposits.all, through: WealthCal.day(now))
+        return terms.first(where: { $0.deposit.id == id })?.deposit
+    }
+
+    /// 要確認 #14 存款保險〔知道了〕：這家銀行一年內不再提
+    func quietDepositInsurance(_ bankKey: String, now: Date = Date()) {
+        updateWealthDeposits { $0.quietInsurance(bankKey, until: WealthCal.addDays(365, to: WealthCal.day(now))) }
+    }
+
+    /// 這一期以後自動接的（previousId 一路指回它的）全部拿掉
+    private static func dropSuccessors(of id: UUID, in book: inout WealthDepositBook) {
+        var drop = Set<UUID>()
+        var frontier: [UUID] = [id]
+        var n = 0
+        while let cur = frontier.popLast(), n < 10_000 {
+            n += 1
+            for d in book.all where d.previousId == cur && !drop.contains(d.id) {
+                drop.insert(d.id)
+                frontier.append(d.id)
+            }
+        }
+        guard !drop.isEmpty else { return }
+        book.deposits = book.all.filter { !drop.contains($0.id) }
+    }
+
     // MARK: - [v25.562] 刪財富帳戶（財富卡片、履歷的刪除都呼叫這一支；以前兩份各寫一次，都漏了卡）
 
     /// 刪一筆里程碑，並清掉其他資料指到它的連結。任何分類都走這支；財富的銀行、信用卡多做幾件事：
@@ -729,6 +856,8 @@ class LifeStore: ObservableObject {
         for name in photos { LifeMilestone.deletePhoto(name) }
         // [v25.563] 財富帳本裡它的設定（扣款帳戶的歷史、暱稱…）
         updateWealthBook { $0.remove(id) }
+        // [v25.566] 這個帳戶的定存一起刪；別的定存還沒到期、說好轉進它的，改回轉進自己的帳戶
+        updateWealthDeposits { $0.removeBank(id, today: now) }
 
         var stocks = finance.stocks
         var stocksChanged = false
@@ -787,6 +916,8 @@ class LifeStore: ObservableObject {
         let stockCount = finance.stocks.filter {
             $0.linkedBankMilestoneId == id || $0.linkedSecuritiesMilestoneId == id
         }.count
+        // [v25.566] 這個帳戶的定存（每一串算一筆：自動續存的不重複數）
+        let depositCount = isBank ? wealthDeposits.all.filter { $0.bankId == id && $0.previousId == nil }.count : 0
 
         var bankName: String?
         var paidTotal: Double = 0
@@ -832,7 +963,7 @@ class LifeStore: ObservableObject {
             linkedCardCount: linkedCards, directExpenseCount: directExpenses, incomeCount: incomeCount,
             stockCount: stockCount, debitBankName: bankName, cardTotal: paidTotal,
             unpaidCardTotal: unpaidTotal,
-            cardExpenseCount: cardCount, recurringTexts: recurring)
+            cardExpenseCount: cardCount, recurringTexts: recurring, timeDepositCount: depositCount)
     }
 
     // MARK: - 配偶協定
@@ -3706,7 +3837,7 @@ class LifeStore: ObservableObject {
             performanceBallots: performanceBallots, workouts: workouts,
             companySites: companySites, tripPlans: tripPlans, workoutPrefs: workoutPrefs,
             workoutHealthLedger: workoutHealthLedger, workoutLeave: workoutLeave,
-            wealthBook: wealthBook
+            wealthBook: wealthBook, wealthDeposits: wealthDeposits
         )
         saveQueue.async {
             let encoder = JSONEncoder()
@@ -3734,6 +3865,7 @@ class LifeStore: ObservableObject {
             if let d = try? encoder.encode(snap.workoutHealthLedger) { ud.set(d, forKey: "life_workout_health") }
             if let d = try? encoder.encode(snap.workoutLeave)   { ud.set(d, forKey: "life_workout_leave") }
             if let d = try? encoder.encode(snap.wealthBook)     { ud.set(d, forKey: "life_wealth_book_v1") }
+            if let d = try? encoder.encode(snap.wealthDeposits) { ud.set(d, forKey: "life_wealth_deposits_v1") }
             CloudSyncManager.shared.pushAll()
         }
     }
@@ -3788,6 +3920,11 @@ class LifeStore: ObservableObject {
         if let data = rawDataIfChanged("life_wealth_book_v1"),
            let wb = try? decoder.decode(WealthBook.self, from: data) {
             wealthBook = wb
+        }
+        // [v25.566] 財富帳本・定存那一包
+        if let data = rawDataIfChanged("life_wealth_deposits_v1"),
+           let wd = try? decoder.decode(WealthDepositBook.self, from: data) {
+            wealthDeposits = wd
         }
     }
 
@@ -3866,6 +4003,7 @@ class LifeStore: ObservableObject {
         workoutHealthLedger = WorkoutHealthLedger()
         workoutLeave = WorkoutLeaveBook()
         wealthBook = WealthBook()
+        wealthDeposits = WealthDepositBook()
         companySites.removeAll()
         // 行程的照片檔也要一起清，不然會留下沒人指向的孤兒檔被雲端一直重傳
         for plan in tripPlans {
@@ -3909,6 +4047,8 @@ struct FinanceDeletionImpact {
     let cardExpenseCount: Int
     /// 刪卡：還在扣的定期扣款（「Disney+ NT$270／月」）
     let recurringTexts: [String]
+    /// [v25.566] 刪銀行：這個帳戶的定存（一串算一筆）會一起刪
+    var timeDepositCount: Int = 0
 
     var title: String { "刪掉「\(displayName)」？" }
     /// 還在用的卡先建議改成停用
@@ -3949,6 +4089,7 @@ struct FinanceDeletionImpact {
         if incomeCount > 0 { kept.append("收入裡入這個帳戶的 \(incomeCount) 筆") }
         if !kept.isEmpty { parts.append(kept.joined(separator: "、") + "會留著，但不再算任何帳戶") }
         if stockCount > 0 { parts.append("\(stockCount) 檔股票的交割帳戶會清掉") }
+        if timeDepositCount > 0 { parts.append("這個帳戶的 \(timeDepositCount) 筆定存會一起刪掉") }
         parts.append(isBank ? "這個帳戶自己的存提款紀錄會一起刪掉，無法復原" : "刪掉後無法復原")
         return parts.joined(separator: "；") + "。"
     }

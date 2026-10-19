@@ -52,6 +52,24 @@ import CryptoKit
 //   Settle 留正負號，正的＝待交割、負的＝待入帳。
 // • 要確認 #12：卡片效期前 30 天到那個月底（有效期限只取年月；「CUBE 3 月到期，換新卡後記得改 Netflix、Spotify…」）。
 //
+// [v25.566] v5 定存與外幣（build/v5/brief.md §2；sim_v5.py 照這裡寫過、跑過）：
+// • 定存在財富帳本的定存那一包（WealthDepositBook，同步鍵 life_wealth_deposits_v1；WealthBook.swift）。一期一筆；
+//   到期本息續存／本金續存的下一期由 WealthDepositChain 算（帳本還沒寫進去也照算，id 固定雜湊，寫進去以後同一個 id）。
+// • 每一期的狀態：起存日還沒到＝notStarted（不算）；存著＝active（本金算進存款合計的「定存」）；到期了選「到期再決定」還沒決定
+//   ＝waiting（本息算在定存）；到期轉活存、自動續存了、提前解約＝ended。
+// • 動到帳戶的那幾筆（明細一列，WealthFacts 算的、不寫成 BankDeposit；舊 iPad 看不到，它的活存照舊含這筆錢，合計不變）：
+//   起存那天「從活存轉出」＝這個帳戶 −本金（.timeDeposit）；到期轉活存＝轉進的帳戶 ＋本息（.timeDeposit）；本金續存＝轉進的帳戶
+//   ＋利息（.interest）；提前解約＝轉進的帳戶 ＋本金＋實拿利息；本息續存不動任何帳戶。還沒到的在 upcoming（接下來 30 天、最低）。
+// • 舊的「定存」種類帳戶（bankAccountType .fixed）：存摺上就是定存的錢（v3 起算進「定存」那一格）。補了利率、到期日以後
+//   不另外加本金、不記轉出；到期的利息記進這個帳戶（本息續存）或轉進的帳戶；轉活存＝這個帳戶轉出本息、轉進的帳戶收。
+//   沒補的照 v3 算，要確認問一次（可以略過）。
+// • 存款合計＝每個帳戶的存摺上＋存著的定存（算進合計的帳戶才算；查不到匯率的不算）。「定存」那一格＝舊定存帳戶＋存著的定存。
+// • 利息只是預估：單利、未扣稅；以月計＝本金×年利率×月數÷12，以日計＝×天數÷365；台幣到元、外幣到 0.01（WealthDepositMath）。
+// • 要確認 #13：定存 7 天內到期（照到期處理寫一句）、到期再決定已經到期；#14：同一家銀行（名字去空白、臺→台）存摺上＋定存
+//   合計超過 300 萬（人民幣不保不算）〔知道了〕一年內不再提；舊的定存帳戶補利率和到期日（問一次，可以略過）。
+// • 外幣金額一律寫符號（US$3,200.00；認得的幣別才有，其他照舊「泰銖 1,000.00」）；換匯＝同一個帳戶的兩個幣別互轉（v2 轉帳綁定）。
+// • 理財每月回推（history）：存著的定存照起存日到到期日（或解約日）一段一段加回去。
+//
 // （工程）build 很重（展開每一期），全 App 只透過 LifeStore.wealthFacts(expense:finance:) 拿快取的那一份
 // （key＝里程碑／財富帳本的 revision＋記帳、理財的 modifyID＋匯率＋日期），打字時不重算（U1 P1、P5）。
 // 不標 @MainActor（AI 記帳、LifeStore 都會叫）；但字串用到 ntdWanString（NumberFormatter），請在主執行緒叫。
@@ -189,11 +207,60 @@ enum WealthFormat {
         return r < 0 ? "-" + body : body
     }
 
-    /// 台幣「NT$128,400」；外幣「美金 3,200.00」（外幣照實寫兩位小數）
+    /// 台幣「NT$128,400」；外幣「US$3,200.00」（外幣照實寫兩位小數；[v25.566] 認得的幣別寫符號，其他「泰銖 1,000.00」）
     static func money(_ v: Double, code: String) -> String {
         if FinanceRates.isNTD(code) { return ntd(v) }
-        let body = "\(code) " + grouped(Swift.abs(v), decimals: 2)
+        let body = foreignPrefix(code) + grouped(Swift.abs(v), decimals: 2)
         return v < 0 && (Swift.abs(v) * 100).rounded() != 0 ? "-" + body : body
+    }
+
+    /// [v25.566] 外幣的符號（設定裡的代碼「美金」「USD」都認得；judge §3.8「US$3,200.00」）；認不得＝nil
+    static func currencySymbol(_ code: String) -> String? {
+        guard let iso = FXRateService.isoCode(for: code) else { return nil }
+        switch iso {
+        case "USD": return "US$"
+        case "EUR": return "€"
+        case "JPY": return "JP¥"
+        case "GBP": return "£"
+        case "CNY": return "CN¥"
+        case "HKD": return "HK$"
+        case "AUD": return "A$"
+        case "CAD": return "C$"
+        case "SGD": return "S$"
+        case "NZD": return "NZ$"
+        case "KRW": return "₩"
+        default: return nil
+        }
+    }
+
+    /// [v25.566] 外幣金額前面那一段：認得的「US$」（直接接數字）；認不得「泰銖 」（代碼＋空白，跟以前一樣）
+    static func foreignPrefix(_ code: String) -> String {
+        currencySymbol(code) ?? (code + " ")
+    }
+
+    /// [v25.566] 「2026/3/15」（進度條兩端、隔年的到期日）
+    static func ymd(_ d: Date) -> String {
+        let c = WealthCal.calendar.dateComponents([.year, .month, .day], from: d)
+        return "\(c.year ?? 0)/\(c.month ?? 0)/\(c.day ?? 0)"
+    }
+
+    /// [v25.566] 匯率那一段：「10/19 匯率 32.0」；沒有更新時間「匯率 32.0」（rateDate＝AppQuoteClock.ratesUpdatedAt）
+    static func rateNote(_ r: Double, rateDate: Date?) -> String {
+        if let d = rateDate { return monthDay(d) + " 匯率 " + rate(r) }
+        return "匯率 " + rate(r)
+    }
+
+    /// [v25.566] 外幣一格（judge §8 v5 做好 3）：「US$3,200.00・約 NT$102,400（10/19 匯率 32.0）」；
+    /// 查不到匯率「US$3,200.00・沒有匯率」。rate：設定裡的匯率（FinanceRates.known）
+    static func fxLine(_ v: Double, code: String, rate r: Double?, rateDate: Date?) -> String {
+        money(v, code: code) + "・" + fxNote(v, rate: r, rateDate: rateDate)
+    }
+
+    /// [v25.566] 外幣一格的後半（卡片頁 ⑤ 那一格的小字、外幣帳戶看板那一句、項目卡第二行）：
+    /// 「約 NT$102,400（10/19 匯率 32.0）」；查不到匯率「沒有匯率」
+    static func fxNote(_ v: Double, rate r: Double?, rateDate: Date?) -> String {
+        guard let r else { return "沒有匯率" }
+        return "約 " + ntd(v * r) + "（" + rateNote(r, rateDate: rateDate) + "）"
     }
 
     /// 「10/27」
@@ -210,10 +277,10 @@ enum WealthFormat {
     /// [v25.564] 遮住（財富頁右上眼睛）時金額一律寫這個；%、日期、件數照常
     static let masked = "NT$ ••••"
 
-    /// [v25.564] 句子裡的金額（台幣不寫 NT$）：「128,400」「-3,200」；外幣「美金 3,200.00」
+    /// [v25.564] 句子裡的金額（台幣不寫 NT$）：「128,400」「-3,200」；外幣「US$3,200.00」（[v25.566] 符號同 money）
     static func plain(_ v: Double, code: String) -> String {
         if FinanceRates.isNTD(code) { return grouped(v.rounded(), decimals: 0) }
-        return "\(code) " + grouped(v, decimals: 2)
+        return foreignPrefix(code) + grouped(v, decimals: 2)
     }
 
     /// [v25.564] 匯率「32.0」「32.05」（至少一位小數、最多四位、去尾 0）
@@ -470,6 +537,8 @@ struct WealthLedgerRow: Identifiable {
         case cardBill
         /// 股票交割、股利（股票自己寫的）
         case stockBuy, stockSell, dividend
+        /// [v25.566] 定存：起存那天從活存轉出、到期轉活存、提前解約轉回（WealthFacts 算的，timeDepositId＝那一期）
+        case timeDeposit
 
         /// 徽章（D16：證券寫「買入」「賣出」，不再寫「賣出獲利」）
         var badge: String {
@@ -490,6 +559,7 @@ struct WealthLedgerRow: Identifiable {
             case .stockBuy: return "買入"
             case .stockSell: return "賣出"
             case .dividend: return "股利"
+            case .timeDeposit: return "定存"
             }
         }
     }
@@ -519,14 +589,16 @@ struct WealthLedgerRow: Identifiable {
     let cardId: UUID?
     let statementKey: String?
     let transferPairId: UUID?
-    /// 還沒結帳的那一期卡費（接下來 35 天裡、金額會再變）
+    /// 還沒結帳的那一期卡費（接下來 35 天裡、金額會再變）；[v25.566] 還沒到的定存利息（預估）
     let isEstimate: Bool
+    /// [v25.566] 定存那幾列（轉定存、定存到期、定存利息、解約）：那一期定存的 id（點了開定存表單）
+    let timeDepositId: UUID?
 
     init(id: String, date: Date, code: String, amount: Double, isOutflow: Bool, kind: Kind,
          title: String, note: String? = nil, balanceAfter: Double = 0, anchorDiff: Double? = nil,
          depositId: UUID? = nil, expenseId: UUID? = nil, incomeId: UUID? = nil, stockId: UUID? = nil,
          cardId: UUID? = nil, statementKey: String? = nil, transferPairId: UUID? = nil,
-         isEstimate: Bool = false) {
+         isEstimate: Bool = false, timeDepositId: UUID? = nil) {
         self.id = id
         self.date = date
         self.code = code
@@ -545,6 +617,7 @@ struct WealthLedgerRow: Identifiable {
         self.statementKey = statementKey
         self.transferPairId = transferPairId
         self.isEstimate = isEstimate
+        self.timeDepositId = timeDepositId
     }
 
     /// 「+NT$80,000」「-美金 10.00」；對存摺「NT$74,199」
@@ -568,6 +641,10 @@ struct WealthCheck: Identifiable {
         case assumedPaid, cardFeeExpense, disabledRecurring, noPayer, legacyFX, unknownRate
         // [v25.565] warn：卡片效期前 30 天（#12）
         case cardExpiring
+        // [v25.566] warn：定存 7 天內到期、到期再決定已經到期（#13）
+        case depositMaturing
+        // [v25.566] info：舊的定存帳戶補利率和到期日、同一家銀行超過 300 萬（#14）
+        case depositInfoMissing, depositInsurance
         // info
         case cardDaysMissing, staleAnchor
 
@@ -604,6 +681,13 @@ struct WealthCheck: Identifiable {
         case anchor(accountId: UUID, code: String)
         /// [v25.565] 打開那張卡的卡片頁、捲到「綁在這張卡的定期扣款」（#12〔看綁了哪些〕）
         case openCard(UUID)
+        /// [v25.566] 定存到期怎麼處理（#13〔改成轉活存〕〔改成本息續存〕、到期再決定〔轉活存〕〔本息續存〕）：
+        /// LifeStore.setTimeDepositOnMaturity（mode＝WealthMaturityMode.rawValue；自動續存還沒寫進帳本的那一期先寫進去再改）
+        case setMaturity(depositId: UUID, mode: String)
+        /// [v25.566] 打開定存表單（舊的定存帳戶〔補資料〕：depositId nil、帶這個帳戶與存摺上的數字）
+        case editTimeDeposit(accountId: UUID, depositId: UUID?)
+        /// [v25.566] #14 存款保險〔知道了〕：這家銀行一年內不再提（LifeStore.quietDepositInsurance；銀行 key）
+        case quietInsurance(String)
     }
     struct Action: Identifiable, Equatable {
         let title: String
@@ -635,6 +719,9 @@ struct WealthCheck: Identifiable {
         case .legacyFX: return "arrow.triangle.2.circlepath"
         case .unknownRate: return "dollarsign.circle.fill"
         case .cardExpiring: return "calendar.badge.exclamationmark"
+        case .depositMaturing: return "lock.open.fill"
+        case .depositInfoMissing: return "lock.fill"
+        case .depositInsurance: return "shield.lefthalf.filled"
         case .cardDaysMissing: return "calendar"
         case .staleAnchor: return "checkmark.seal.fill"
         }
@@ -759,6 +846,17 @@ struct WealthHistory {
         /// 從這天起照紀錄；以前平推 startValue（有對過存摺＝第一次對存摺那天，沒有＝第一筆那天）
         let startDay: Date
         let startValue: Double
+        /// [v25.566 驗證修正] startDay 那天以前（含）App 算的定存那幾列（轉定存、到期轉活存、定存利息、解約；timeDepositId 有值）。
+        /// 平推 startValue 時，d 之後的這幾筆要退回去：錢在定存那一段（Span）裡、日子是確定的，跟著平推會跟 Span 重複算或漏算
+        ///（例：薪轉 10/1 才第一次對存摺、3/15 從薪轉轉出 50 萬存定存 → 3/15 以前薪轉少平推 50 萬，回推在 3/15 假漲 50 萬；
+        /// 美金定存到期轉進只有台幣的帳戶 → 那條美金線第一筆就是到期那一列，到期以前平推成已經有那筆錢）
+        let depositSteps: [DepositStep]
+    }
+
+    /// [v25.566 驗證修正] 一筆 App 算的定存列：那天、金額（正＝進帳、負＝出去）
+    fileprivate struct DepositStep {
+        let day: Date
+        let delta: Double
     }
 
     /// 一筆交割（那天、台幣；同一天同一幣別買賣相抵後的淨額）。
@@ -768,16 +866,46 @@ struct WealthHistory {
         let ntd: Double
     }
 
+    /// [v25.566] 一段存著的定存（從起存日那天結束時起、到到期日／解約日那天以前；until nil＝一直到現在）
+    fileprivate struct Span {
+        let from: Date
+        let until: Date?
+        let ntd: Double
+    }
+
     fileprivate let lines: [Line]
     fileprivate let cards: [WealthFacts.Card]
     fileprivate let settles: [Settle]
+    fileprivate let spans: [Span]
 
-    static let empty = WealthHistory(lines: [], cards: [], settles: [])
+    static let empty = WealthHistory(lines: [], cards: [], settles: [], spans: [])
 
-    /// 算進存款合計、沒收起來的銀行帳戶（同 WealthFacts.cash）；卡＝全部的卡（同 owedCards）
-    static func make(accounts: [WealthFacts.Account], cards: [WealthFacts.Card], rates: FinanceRates) -> WealthHistory {
+    /// 算進存款合計、沒收起來的銀行帳戶（同 WealthFacts.cash）；卡＝全部的卡（同 owedCards）。
+    /// [v25.566] deposits：每一期定存（含已經結束的；續存鏈算出來的也在）——舊的定存種類帳戶的不算（它的錢在存摺上那條線裡）
+    static func make(accounts: [WealthFacts.Account], cards: [WealthFacts.Card], deposits: [WealthFacts.TimeDeposit],
+                     rates: FinanceRates) -> WealthHistory {
         var lines: [Line] = []
         var settles: [Settle] = []
+        var spans: [Span] = []
+        var counted = Set<UUID>()
+        for a in accounts where !a.isSecurities && !a.hidden && a.countsInCash { counted.insert(a.id) }
+        for t in deposits where t.countsSeparately && counted.contains(t.accountId) {
+            guard let r = rates.known(t.code) else { continue }
+            let from = WealthCal.day(t.start)
+            if let c = t.closedDate {
+                spans.append(Span(from: from, until: WealthCal.day(c), ntd: t.principal * r))
+            } else if let m = t.maturity {
+                if t.mode == .decide {
+                    // 到期再決定：到期以前算本金，到期以後（還沒決定）照本息
+                    spans.append(Span(from: from, until: m, ntd: t.principal * r))
+                    spans.append(Span(from: m, until: nil, ntd: t.maturityAmount * r))
+                } else {
+                    spans.append(Span(from: from, until: m, ntd: t.principal * r))
+                }
+            } else {
+                spans.append(Span(from: from, until: nil, ntd: t.principal * r))
+            }
+        }
         for a in accounts where !a.isSecurities && !a.hidden && a.countsInCash {
             let rows: [WealthLedgerRow] = Array(a.ledger.reversed())   // 舊到新
             for code in a.currencies {
@@ -798,7 +926,15 @@ struct WealthHistory {
                 guard let first = days.first else { continue }
                 let start: Date = firstAnchor ?? first
                 let startValue: Double = days.firstIndex(of: start).map { values[$0] } ?? 0
-                lines.append(Line(rate: r, days: days, values: values, startDay: start, startValue: startValue))
+                // [v25.566 驗證修正] startDay 以前（含）App 算的定存那幾列：平推時 d 之後的退回去（見 Line.depositSteps）
+                var steps: [DepositStep] = []
+                for row in rows where row.code == code && row.timeDepositId != nil && row.kind != .anchor {
+                    let d = WealthCal.day(row.date)
+                    guard d <= start else { continue }
+                    steps.append(DepositStep(day: d, delta: row.isOutflow ? -row.amount : row.amount))
+                }
+                lines.append(Line(rate: r, days: days, values: values, startDay: start, startValue: startValue,
+                                  depositSteps: steps))
             }
             // 股票款：同一天同一個幣別買賣相抵（[v25.565 裁定] 要扣的、要入帳的都留，正負號分開算）
             var keys: [String] = []
@@ -823,7 +959,7 @@ struct WealthHistory {
                 settles.append(Settle(day: d, ntd: v * r))
             }
         }
-        return WealthHistory(lines: lines, cards: cards, settles: settles)
+        return WealthHistory(lines: lines, cards: cards, settles: settles, spans: spans)
     }
 
     /// day 那天結束時的存款合計、卡費還沒扣、待交割（[v25.565 裁定] ＋賣股票還沒入帳）
@@ -832,7 +968,10 @@ struct WealthHistory {
         var p = WealthMonthEnd()
         for l in lines {
             if d < l.startDay {
-                p.cash += l.startValue * l.rate
+                // [v25.566 驗證修正] 平推，但 d 之後才發生的定存那幾列（轉定存、到期轉活存…）退回去
+                var v: Double = l.startValue
+                for s in l.depositSteps where s.day > d { v -= s.delta }
+                p.cash += v * l.rate
                 p.estimated = true
                 continue
             }
@@ -850,6 +989,12 @@ struct WealthHistory {
                 }
             }
             if found >= 0 { p.cash += l.values[found] * l.rate }
+        }
+        // [v25.566] 那天存著的定存（起存日 ≤ 那天 < 到期日／解約日）
+        for s in spans {
+            guard s.from <= d else { continue }
+            if let u = s.until, d >= u { continue }
+            p.cash += s.ntd
         }
         for c in cards { p.cardOwed += WealthHistory.owed(c, endOf: d) }
         // 那天成交、還沒交割：交割日在 (那天, 那天＋2 個營業日]；要扣的算待交割、要入帳的算賣股票還沒入帳
@@ -932,6 +1077,24 @@ struct WealthFacts {
     let settlements: [WealthSettlementDue]
     /// [v25.565] 理財每月淨資產回推用（口徑 4）：history.point(endOf:)
     let history: WealthHistory
+    /// [v25.566] 每一期定存（沒開始、存著、到期待決定；照到期日，沒有到期日的排最後）：卡片頁 ⑥、行事曆、提醒、理財 30 天
+    let timeDeposits: [TimeDeposit]
+    /// [v25.566] 同一家銀行存摺上＋定存合計超過 300 萬的（存款保險一行、要確認 #14）
+    let depositInsurance: [InsuranceGroup]
+
+    /// [v25.566] 存款保險：同一家銀行（每一存款人）本金＋利息最多保 300 萬（中央存款保險；境內外幣也保，人民幣不保）
+    static let insuranceLimit: Double = 3_000_000
+
+    /// [v25.566] 這一期定存（自動續存還沒寫進帳本的那一期也找得到）
+    func timeDeposit(_ id: UUID?) -> TimeDeposit? {
+        guard let id else { return nil }
+        return timeDeposits.first { $0.id == id }
+    }
+
+    /// [v25.566] 這個帳戶所在的銀行超過 300 萬的那一組（帳戶頁 ⑧ 存款保險那一列）；沒有＝nil
+    func insurance(for accountId: UUID) -> InsuranceGroup? {
+        depositInsurance.first { $0.accountIds.contains(accountId) }
+    }
 
     /// [v25.565] 理財淨資產的負債「卡費」：卡費還沒扣＋已經排定、還沒到的提款（刪卡寫回的帳單、預約繳款、未來日期的提款）。
     /// 跟財富頁「還沒扣」同一套（還沒扣＝這個＋待交割），預約繳款、刪卡都不會讓淨資產變多
@@ -1110,6 +1273,39 @@ struct WealthFacts {
         let next30: [WealthLedgerRow]
         /// 最近 90 天的進出筆數（對存摺不算；財富頁沒排過的照它多到少）
         let recentCount: Int
+        // [v25.566] v5 加的（build 建好帳戶之後才填；memberwise init 不用傳）
+        /// 這個帳戶的定存（沒開始、存著、到期待決定；照到期日）
+        var timeDeposits: [TimeDeposit] = []
+        /// 定存算進存款合計的台幣（存著＝本金、到期待決定＝本息；舊的定存種類帳戶＝0：它的錢已經在存摺上）
+        var depositNTD: Double = 0
+        /// 定存查不到匯率的幣別（存款合計前面加「約」）
+        var depositUnknownCodes: [String] = []
+
+        /// [v25.566] 存摺上＋定存（台幣；水塔、帳戶頁看板用）
+        var totalNTD: Double { ntdTotal + depositNTD }
+        /// [v25.566] 看起來是一個定存帳戶：舊的「定存」種類，或有定存、存摺上每個幣別都是 0（水塔金水加鎖頭、卡面金色點點）
+        var showsAsDeposit: Bool {
+            if isFixedDeposit { return true }
+            guard !timeDeposits.isEmpty else { return false }
+            return !balances.values.contains(where: { Swift.abs($0) > 0.004 })
+        }
+        /// [v25.566] 最近要到期、還存著的那一期（沒有＝nil）
+        var nextMaturing: TimeDeposit? {
+            timeDeposits.first { $0.status == .active && $0.maturity != nil }
+        }
+        /// [v25.566] 這個幣別存著的定存本金（不含舊的定存種類帳戶：它的錢在存摺上）
+        func depositAmount(_ code: String) -> Double {
+            let c = WealthFacts.norm(code)
+            var total: Double = 0
+            for t in timeDeposits where t.countsSeparately && t.code == c {
+                switch t.status {
+                case .active: total += t.principal
+                case .waiting: total += t.maturityAmount
+                case .notStarted, .ended: break
+                }
+            }
+            return total
+        }
 
         /// 還沒扣＝卡費＋待交割＋已經排定的提款
         var notYetDebited: Double { cardOwed + pendingSettlement + scheduledOut }
@@ -1293,6 +1489,183 @@ struct WealthFacts {
         var unrealized: Double { marketValue - cost }
         /// 未實現 %（成本 0＝nil）
         var unrealizedRatio: Double? { cost > 0 ? (marketValue - cost) / cost : nil }
+    }
+
+    // MARK: [v25.566] 一期定存（judge §4.2 ⑥、§5.5；sim_v5.py make_deposit）
+
+    struct TimeDeposit: Identifiable {
+        enum Status: Equatable {
+            /// 起存日還沒到（還不算進存款合計；從活存轉出的那一筆在起存日）
+            case notStarted
+            /// 存著（本金算進存款合計的「定存」）
+            case active
+            /// 到期了、選了「到期再決定」還沒決定（照本息算在定存裡）
+            case waiting
+            /// 到期轉活存了、自動續存了（下一期接手）、提前解約了
+            case ended
+        }
+
+        /// 這一期（帳本的那一筆；自動續存還沒寫進帳本的＝WealthTimeDeposit.successorId）
+        let id: UUID
+        let accountId: UUID
+        /// 帳戶名（暱稱 → 銀行名）：「台灣銀行」
+        let accountName: String
+        /// 幣別（台幣 "NT$"）
+        let code: String
+        let principal: Double
+        let rate: Double?
+        let months: Int?
+        let start: Date
+        /// 到期日（00:00；沒有＝nil）
+        let maturity: Date?
+        let mode: WealthMaturityMode
+        /// 到期、解約的錢轉進哪個帳戶（轉進的帳戶已經刪了＝nil：那筆錢跟著刪掉的帳戶走）
+        let payoutId: UUID?
+        let payoutName: String?
+        /// 起存那天從這個帳戶的活存轉出（舊的定存種類帳戶一律 false）
+        let fromLive: Bool
+        /// 舊的「定存」種類帳戶（存摺上就是這筆定存的錢：不另外加本金、不記轉出）
+        let isLegacyAccount: Bool
+        /// 帳本裡還沒有（自動續存算出來的；改它之前 LifeStore 會先寫進帳本）
+        let isVirtual: Bool
+        /// 第幾期（0＝最早；自動續存一次 +1）
+        let termIndex: Int
+        /// 整期預估利息（原幣；單利、未扣稅）
+        let interest: Double
+        let status: Status
+        let closedDate: Date?
+        /// 提前解約實拿的利息（原幣）
+        let closedInterest: Double
+        /// 到期前 7 天提醒
+        let remind: Bool
+        let certificateLast4: String?
+        /// 現在算進存款合計的台幣（存著＝本金、到期待決定＝本息；沒開始、結束了＝0；查不到匯率＝nil）。
+        /// 舊的定存種類帳戶的也照算（畫面用），但不加進合計（countsSeparately）
+        let ntd: Double?
+
+        /// 另外加進存款合計（舊的定存種類帳戶＝false：它的錢已經在帳戶的存摺上）
+        var countsSeparately: Bool { !isLegacyAccount }
+        /// 到期本息（原幣）
+        var maturityAmount: Double { principal + interest }
+        /// 「一年定存」「6 個月定存」「定存」
+        var label: String { WealthDepositMath.termLabel(months: months) }
+        /// 「1.7%」；沒填 nil
+        var rateText: String? { WealthDepositMath.rateText(rate) }
+        /// 句子裡的名字：「台灣銀行定存」（帳戶名已經寫「定存」就不重複）
+        var displayTitle: String { accountName.hasSuffix("定存") ? accountName : accountName + "定存" }
+
+        /// 還有幾天到期（沒有到期日＝nil；過了是負的）
+        func daysLeft(_ today: Date) -> Int? {
+            maturity.map { WealthCal.days(from: today, to: $0) }
+        }
+
+        /// 走了幾成（0…1；沒有到期日或起存日＝到期日＝nil）
+        func progress(_ today: Date) -> Double? {
+            guard let m = maturity else { return nil }
+            let total = WealthCal.days(from: start, to: m)
+            guard total > 0 else { return nil }
+            let done = WealthCal.days(from: start, to: today)
+            return Swift.min(1, Swift.max(0, Double(done) / Double(total)))
+        }
+
+        /// 「3/15」；超過 300 天才到期（下一期的隔年）寫「2028/3/15」，免得看成今年
+        func maturityText(_ today: Date) -> String? {
+            guard let m = maturity else { return nil }
+            if WealthCal.days(from: today, to: m) > 300 { return WealthFormat.ymd(m) }
+            return WealthFormat.monthDay(m)
+        }
+
+        /// 「預估利息 8,500」（外幣「預估利息 US$48.00」）；沒填利率 nil。遮住「預估利息 ••••」
+        func interestText(masked: Bool) -> String? {
+            guard (rate ?? 0) > 0 else { return nil }
+            return "預估利息 " + (masked ? "••••" : WealthFormat.plain(interest, code: code))
+        }
+
+        /// 一句（judge §8 v5 做好 1）：「3/15 到期・還有 147 天・預估利息 8,500」；
+        /// 到期再決定已經到期「3/15 到期了・還沒決定怎麼處理」；沒開始「10/25 起存」；沒有到期日「沒填到期日」
+        func maturityLine(today: Date, masked: Bool) -> String {
+            switch status {
+            case .notStarted:
+                return WealthFormat.monthDay(start) + " 起存"
+            case .waiting:
+                return (maturityText(today) ?? "") + " 到期了・還沒決定怎麼處理"
+            case .ended:
+                return "已經結束"
+            case .active:
+                break
+            }
+            guard let mt = maturityText(today), let left = daysLeft(today) else {
+                var s = "沒填到期日"
+                if let i = interestText(masked: masked) { s += "・" + i }
+                return s
+            }
+            var parts: [String] = [mt + " 到期", left <= 0 ? "今天到期" : "還有 \(left) 天"]
+            if let i = interestText(masked: masked) { parts.append(i) }
+            return parts.joined(separator: "・")
+        }
+
+        /// 項目卡第二行：「1.7%・本息續存」（沒填利率「本息續存」）
+        var termLine: String {
+            var parts: [String] = []
+            if let r = rateText { parts.append(r) }
+            parts.append(mode.shortTitle)
+            return parts.joined(separator: "・")
+        }
+
+        /// 進度條兩端：左「2026/3/15」右「2027/3/15（還有 147 天）」；沒有到期日 nil
+        func progressEnds(today: Date) -> (left: String, right: String)? {
+            guard let m = maturity, let left = daysLeft(today) else { return nil }
+            let tail = left > 0 ? "（還有 \(left) 天）" : ""
+            return (WealthFormat.ymd(start), WealthFormat.ymd(m) + tail)
+        }
+
+        /// 到期處理那一句：「到期本息續存成 508,500」「到期本金續存、利息 8,500 轉進薪轉」「到期本息 508,500 轉進台灣銀行」
+        /// 「到期再決定」。遮住時金額換「••••」
+        func modeSentence(masked: Bool) -> String {
+            let total = masked ? "••••" : WealthFormat.plain(maturityAmount, code: code)
+            let int = masked ? "••••" : WealthFormat.plain(interest, code: code)
+            let to = payoutName ?? accountName
+            switch mode {
+            case .renewAll: return "到期本息續存成 " + total
+            case .renewPrincipal: return "到期本金續存、利息 " + int + " 轉進" + to
+            case .toLive: return "到期本息 " + total + " 轉進" + to
+            case .decide: return "到期再決定"
+            }
+        }
+    }
+
+    /// [v25.566] 同一家銀行的存款合計（存款保險；judge §3.5 #14、§4.2 ⑧）
+    struct InsuranceGroup: Identifiable {
+        /// 銀行 key（WealthFacts.bankKey）
+        let id: String
+        let bankName: String
+        /// 這家合計（台幣：存摺上每個幣別＋存著的定存；人民幣不保、黃金存摺不是存款，都不算）
+        let total: Double
+        let accountIds: [UUID]
+
+        /// 「台灣銀行合計 NT$326萬，存款保險同一家最多保 NT$300萬」（ntdWanString：主執行緒）
+        var text: String {
+            bankName + "合計 " + total.ntdWanString + "，存款保險同一家最多保 " + WealthFacts.insuranceLimit.ntdWanString
+        }
+    }
+
+    /// [v25.566] 同一家銀行的 key：去空白、「臺」→「台」（「台灣銀行」「臺灣 銀行」是同一家）
+    static func bankKey(_ name: String) -> String {
+        let t = name.replacingOccurrences(of: "臺", with: "台")
+        return String(t.filter { !$0.isWhitespace })
+    }
+
+    /// [v25.566] 人民幣（存款保險不保）
+    static func isRMB(_ code: String) -> Bool {
+        FXRateService.isoCode(for: code) == "CNY"
+    }
+
+    /// [v25.566 驗證修正] 存款保險算不算這個幣別：人民幣不保；黃金、白銀（黃金存摺：FXRateService 的 XAU、XAU(錢)、
+    /// XAU(盎司)、XAG）不是存款，也不算——不然台灣銀行的黃金存摺會把「同一家合計」墊過 300 萬，多一條假的提醒
+    static func isInsured(_ code: String) -> Bool {
+        if isRMB(code) { return false }
+        guard let iso = FXRateService.isoCode(for: code) else { return true }
+        return !(iso.hasPrefix("XAU") || iso.hasPrefix("XAG"))
     }
 
     // MARK: - 工具
@@ -1575,8 +1948,10 @@ struct WealthFacts {
 
     // MARK: - build
 
-    /// 一次建好全部（很重：展開每一期）。全 App 請用 LifeStore.wealthFacts(expense:finance:) 拿快取的
-    static func build(milestones: [LifeMilestone], book: WealthBook, expenses: [Expense], incomes: [Income],
+    /// 一次建好全部（很重：展開每一期）。全 App 請用 LifeStore.wealthFacts(expense:finance:) 拿快取的。
+    /// [v25.566] deposits：財富帳本的定存那一包（LifeStore.wealthDeposits）
+    static func build(milestones: [LifeMilestone], book: WealthBook, deposits: WealthDepositBook = WealthDepositBook(),
+                      expenses: [Expense], incomes: [Income],
                       stocks: [Stock], rates: FinanceRates, now: Date) -> WealthFacts {
         let today = WealthCal.day(now)
         let horizon = WealthCal.addDays(upcomingDays, to: today)
@@ -1660,14 +2035,45 @@ struct WealthFacts {
             cards[i].expiryMonth = cm.expiryDate.map { WealthCal.startOfMonth($0) }
             cards[i].dues = dues
         }
+        // [v25.566] 定存：續存鏈（自動續存算出來、帳本還沒寫進去的那幾期也在）→ 每一期的狀態、動到哪個帳戶的哪一天
+        let legacyIds = Set(bankMs.filter { $0.bankAccountType == .fixed }.map(\.id))
+        var allTerms: [TimeDeposit] = []
+        var depositRefs: [UUID: [DepositRef]] = [:]
+        for term in WealthDepositChain.terms(deposits.all, through: today) {
+            guard bankIds.contains(term.deposit.bankId) else { continue }
+            let made = makeDeposit(term, legacy: legacyIds.contains(term.deposit.bankId), bankIds: bankIds, ctx: ctx)
+            allTerms.append(made.term)
+            for r in made.refs { depositRefs[r.accountId, default: []].append(r) }
+        }
+
         var accounts: [Account] = []
         for m in bankMs {
             accounts.append(makeAccount(m, isSecurities: false, ctx: ctx,
                                         fixed: fixedByBank[m.id] ?? [], incomes: incomesByBank[m.id] ?? [],
-                                        bills: billsByAccount[m.id] ?? [], cardOwed: owedByAccount[m.id] ?? 0))
+                                        bills: billsByAccount[m.id] ?? [], cardOwed: owedByAccount[m.id] ?? 0,
+                                        depositRows: depositRefs[m.id] ?? []))
         }
         for m in securityMs {
-            accounts.append(makeAccount(m, isSecurities: true, ctx: ctx, fixed: [], incomes: [], bills: [], cardOwed: 0))
+            accounts.append(makeAccount(m, isSecurities: true, ctx: ctx, fixed: [], incomes: [], bills: [], cardOwed: 0,
+                                        depositRows: []))
+        }
+        // [v25.566] 每個帳戶的定存（沒開始、存著、到期待決定；照到期日，沒有到期日的最後）
+        let currentTerms: [TimeDeposit] = orderTerms(allTerms.filter { $0.status != .ended })
+        for i in accounts.indices where !accounts[i].isSecurities {
+            let id = accounts[i].id
+            let mine = currentTerms.filter { $0.accountId == id }
+            accounts[i].timeDeposits = mine
+            var ntd: Double = 0
+            var unknownDeposit: [String] = []
+            for t in mine where t.countsSeparately {
+                if let v = t.ntd {
+                    ntd += v
+                } else if (t.status == .active || t.status == .waiting) && !unknownDeposit.contains(t.code) {
+                    unknownDeposit.append(t.code)
+                }
+            }
+            accounts[i].depositNTD = ntd
+            accounts[i].depositUnknownCodes = unknownDeposit
         }
 
         // 整頁
@@ -1686,19 +2092,191 @@ struct WealthFacts {
             for c in a.unknownCodes where !unknown.contains(c) { unknown.append(c) }
             pending += a.pendingSettlement
             scheduled += a.scheduledOut
+            // [v25.566] 存著的定存（舊的定存種類帳戶的錢已經在上面那幾格裡，depositNTD 是 0）
+            cash += a.depositNTD
+            fixedDeposit += a.depositNTD
+            for c in a.depositUnknownCodes where !unknown.contains(c) { unknown.append(c) }
         }
         let owed = cards.reduce(0.0) { $0 + $1.owed }
         let brokers = securityMs.map { makeBroker($0, ctx: ctx, bankMs: bankMs) }
+        let insurance = insuranceGroups(accounts: accounts, rates: rates)
         let checks = makeChecks(cards: cards, accounts: accounts, bankMs: bankMs, unknown: unknown,
-                                ctx: ctx, bankIds: bankIds)
+                                ctx: ctx, bankIds: bankIds, terms: currentTerms, insurance: insurance,
+                                deposits: deposits)
         let settlements = makeSettlements(accounts: accounts, ctx: ctx)
-        let history = WealthHistory.make(accounts: accounts, cards: cards, rates: rates)
+        let history = WealthHistory.make(accounts: accounts, cards: cards, deposits: allTerms, rates: rates)
 
         return WealthFacts(now: now, today: today, accounts: accounts, cards: cards,
                            cash: cash, cashIsApprox: !unknown.isEmpty, live: live, fixedDeposit: fixedDeposit,
                            foreign: foreign, owedCards: owed, pendingSettlement: pending,
                            unknownCodes: unknown, scheduledOut: scheduled, brokers: brokers, checks: checks,
-                           settlements: settlements, history: history)
+                           settlements: settlements, history: history, timeDeposits: currentTerms,
+                           depositInsurance: insurance)
+    }
+
+    // MARK: - [v25.566] 定存的零件
+
+    /// 一期定存動到帳戶的一筆（轉定存、定存到期、定存利息、解約；sim_v5.py deposit_refs 照這裡寫）
+    private struct DepositRef {
+        let id: String
+        let accountId: UUID
+        let day: Date
+        let code: String
+        /// 正的＝進帳、負的＝出去
+        let delta: Double
+        let kind: WealthLedgerRow.Kind
+        let title: String
+        let termId: UUID
+        /// 還沒到、利息是估的（寫「約」）
+        let estimate: Bool
+    }
+
+    /// 一期定存：狀態、算進存款合計多少、動到哪些帳戶（規則見檔頭 [v25.566]）
+    private static func makeDeposit(_ term: WealthDepositChain.Term, legacy: Bool, bankIds: Set<UUID>,
+                                    ctx: BuildContext) -> (term: TimeDeposit, refs: [DepositRef]) {
+        let d = term.deposit
+        let today = ctx.today
+        let code = d.code
+        let start = WealthCal.day(d.start)
+        let maturity: Date? = d.maturityDate
+        let closed: Date? = d.closedDate.map { WealthCal.day($0) }
+        let mode = d.mode
+        let interest = d.estimatedInterest
+        let closedInterest: Double = Swift.max(0, d.closedInterest ?? 0)
+        // 轉進哪個帳戶：沒填＝自己這個帳戶；填了但那個帳戶刪了＝nil（錢跟著刪掉的帳戶走，不跑回來）
+        let payout: UUID?
+        if let p = d.payoutId {
+            payout = bankIds.contains(p) ? p : nil
+        } else {
+            payout = d.bankId
+        }
+        var status: TimeDeposit.Status = .active
+        if start > today {
+            status = .notStarted
+        } else if let c = closed, c <= today {
+            status = .ended
+        } else if let m = maturity, m <= today {
+            status = mode == .decide ? .waiting : .ended
+        }
+        let accountName = ctx.nameById[d.bankId] ?? "銀行"
+        let payoutName: String? = payout.flatMap { ctx.nameById[$0] }
+        var ntd: Double? = nil
+        if let r = ctx.rates.known(code) {
+            switch status {
+            case .active: ntd = d.principal * r
+            case .waiting: ntd = (d.principal + interest) * r
+            case .notStarted, .ended: ntd = 0
+            }
+        }
+        let fromLive = !legacy && d.fromLive == true && !term.isVirtual
+        let t = TimeDeposit(id: d.id, accountId: d.bankId, accountName: accountName, code: code, principal: d.principal,
+                            rate: d.rate, months: (d.months ?? 0) > 0 ? d.months : nil, start: start,
+                            maturity: maturity, mode: mode, payoutId: payout, payoutName: payoutName,
+                            fromLive: fromLive, isLegacyAccount: legacy, isVirtual: term.isVirtual,
+                            termIndex: term.index, interest: interest, status: status, closedDate: closed,
+                            closedInterest: closedInterest, remind: d.remind != false,
+                            certificateLast4: d.certificateLast4, ntd: ntd)
+
+        var refs: [DepositRef] = []
+        let label = WealthDepositMath.termLabel(months: t.months)
+        let key = d.id.uuidString
+        func add(_ suffix: String, _ account: UUID, _ day: Date, _ delta: Double, _ kind: WealthLedgerRow.Kind,
+                 _ title: String, estimate: Bool) {
+            guard Swift.abs(delta) > 0.004 else { return }
+            refs.append(DepositRef(id: "td-\(suffix)-\(key)", accountId: account, day: day, code: code, delta: delta,
+                                   kind: kind, title: title, termId: d.id, estimate: estimate))
+        }
+        /// 到期轉活存、提前解約：錢（本金＋利息）轉進 payout
+        func pay(_ day: Date, interest got: Double, word: String) {
+            let total = d.principal + got
+            let future = day > today
+            let named = payout == d.bankId ? word : accountName + " " + word
+            if legacy {
+                // 舊的定存種類帳戶：利息先記進這個帳戶，再整筆轉出（轉進自己＝留在這個帳戶）
+                add("int", d.bankId, day, got, .interest, "定存利息", estimate: future)
+                if let p = payout, p != d.bankId {
+                    add("end-out", d.bankId, day, -total, .timeDeposit, word + "・轉出", estimate: future)
+                    add("end-in", p, day, total, .timeDeposit, named, estimate: future)
+                }
+            } else if let p = payout {
+                add("end-in", p, day, total, .timeDeposit, named, estimate: future && got > 0)
+            }
+        }
+        // 起存那天從活存轉出（續存的下一期不轉）
+        if fromLive {
+            add("out", d.bankId, start, -d.principal, .timeDeposit, "轉定存（" + label + "）", estimate: false)
+        }
+        if let c = closed {
+            pay(c, interest: closedInterest, word: "定存解約")
+        } else if let m = maturity {
+            let future = m > today
+            switch mode {
+            case .renewAll:
+                // 本息續存：舊的定存種類帳戶要把利息記進存摺（下一期的本金＝本息）；新的不動任何帳戶
+                if legacy { add("int", d.bankId, m, interest, .interest, "定存利息（本息續存）", estimate: future) }
+            case .renewPrincipal:
+                if let p = payout {
+                    let named = p == d.bankId ? "定存利息" : accountName + " 定存利息"
+                    add("int", p, m, interest, .interest, named, estimate: future)
+                }
+            case .toLive:
+                pay(m, interest: interest, word: "定存到期")
+            case .decide:
+                break
+            }
+        }
+        return (term: t, refs: refs)
+    }
+
+    /// 照到期日（同一天照起存日；沒有到期日的最後；sort 不保證穩定，帶著位置比）
+    private static func orderTerms(_ list: [TimeDeposit]) -> [TimeDeposit] {
+        list.enumerated().sorted { x, y in
+            let a = x.element, b = y.element
+            switch (a.maturity, b.maturity) {
+            case let (ma?, mb?):
+                if ma != mb { return ma < mb }
+            case (.some, .none):
+                return true
+            case (.none, .some):
+                return false
+            case (.none, .none):
+                break
+            }
+            if a.start != b.start { return a.start < b.start }
+            return x.offset < y.offset
+        }.map { $0.element }
+    }
+
+    /// 同一家銀行存摺上＋定存超過 300 萬的（存款保險；收起來的、不算進合計的帳戶不算，人民幣不保、黃金存摺不算：isInsured）
+    private static func insuranceGroups(accounts: [Account], rates: FinanceRates) -> [InsuranceGroup] {
+        var order: [String] = []
+        var totals: [String: Double] = [:]
+        var names: [String: String] = [:]
+        var ids: [String: [UUID]] = [:]
+        for a in accounts where !a.isSecurities && !a.hidden && a.countsInCash {
+            let key = bankKey(a.bankName)
+            if totals[key] == nil {
+                order.append(key)
+                totals[key] = 0
+                names[key] = a.bankName
+                ids[key] = []
+            }
+            var v: Double = 0
+            for (code, value) in a.balances where isInsured(code) {
+                if let r = rates.known(code) { v += value * r }
+            }
+            for t in a.timeDeposits where t.countsSeparately && isInsured(t.code) {
+                v += t.ntd ?? 0
+            }
+            totals[key, default: 0] += v
+            ids[key, default: []].append(a.id)
+        }
+        var out: [InsuranceGroup] = []
+        for k in order {
+            guard let total = totals[k], total > insuranceLimit else { continue }
+            out.append(InsuranceGroup(id: k, bankName: names[k] ?? k, total: total, accountIds: ids[k] ?? []))
+        }
+        return out
     }
 
     // MARK: - build 的零件
@@ -2013,10 +2591,16 @@ struct WealthFacts {
         return "\(c.name) 沒填繳款截止日，先當\(payWhen) \(c.paymentDay) 日繳"
     }
 
-    /// 真的紀錄是哪一種、標題寫什麼
-    private static func classify(_ dep: BankDeposit, ctx: BuildContext) -> (kind: WealthLedgerRow.Kind, title: String) {
+    /// 真的紀錄是哪一種、標題寫什麼。[v25.566] accountId：這筆記在哪個帳戶（換匯＝同一個帳戶兩個幣別互轉）
+    private static func classify(_ dep: BankDeposit, accountId: UUID,
+                                 ctx: BuildContext) -> (kind: WealthLedgerRow.Kind, title: String) {
         if dep.isAnchor { return (.anchor, "對存摺") }
         if dep.isAdjust { return (.legacyAdjust, "沖正") }
+        if dep.isTransfer, dep.counterpartyId == accountId {
+            // [v25.566] 換匯：同一個帳戶的台幣、外幣兩格互轉（v2 的轉帳綁定，兩筆同一個 transferPairId）
+            if dep.isWithdrawal { return (.transferOut, "換匯（換出）") }
+            return (.transferIn, "換匯（換入）")
+        }
         if dep.isTransfer {
             let other = dep.counterpartyId.flatMap { ctx.nameById[$0] } ?? "別的帳戶"
             if dep.isWithdrawal { return (.transferOut, "轉給 \(other)") }
@@ -2040,7 +2624,7 @@ struct WealthFacts {
 
     private static func makeAccount(_ m: LifeMilestone, isSecurities: Bool, ctx: BuildContext,
                                     fixed: [FixedRef], incomes: [IncomeRef], bills: [BillRef],
-                                    cardOwed: Double) -> Account {
+                                    cardOwed: Double, depositRows: [DepositRef]) -> Account {
         let rates = ctx.rates
         let prefs = ctx.book.account(m.id)
         var events: [Event] = []
@@ -2066,7 +2650,7 @@ struct WealthFacts {
                 scheduledByCode[code, default: 0] += dep.amount
             }
             guard day <= ctx.horizon else { continue }
-            let c = classify(dep, ctx: ctx)
+            let c = classify(dep, accountId: m.id, ctx: ctx)
             let anchorValue: Double? = dep.isAnchor ? dep.anchorAmount : nil
             let row = WealthLedgerRow(
                 id: dep.id.uuidString, date: dep.date, code: code,
@@ -2125,6 +2709,19 @@ struct WealthFacts {
                 isOutflow: true, kind: .cardBill, title: title,
                 cardId: bill.cardId, statementKey: s.key, isEstimate: bill.isEstimate)
             events.append(Event(day: bill.day, code: "NT$", delta: -bill.amount, anchor: nil, seq: seq, row: row))
+            seq += 1
+        }
+
+        // ⑤ [v25.566] 定存：起存那天從活存轉出、到期轉活存、本金續存的利息、提前解約（WealthFacts 算的，不是 BankDeposit）
+        var depositCodes: [String] = []
+        for r in depositRows {
+            let code = norm(r.code)
+            if !depositCodes.contains(code) { depositCodes.append(code) }
+            guard r.day <= ctx.horizon else { continue }
+            let row = WealthLedgerRow(
+                id: r.id, date: r.day, code: code, amount: Swift.abs(r.delta), isOutflow: r.delta < 0,
+                kind: r.kind, title: r.title, isEstimate: r.estimate, timeDepositId: r.termId)
+            events.append(Event(day: r.day, code: code, delta: r.delta, anchor: nil, seq: seq, row: row))
             seq += 1
         }
 
@@ -2215,8 +2812,9 @@ struct WealthFacts {
         let recentCount = past.filter { $0.kind != .anchor && WealthCal.day($0.date) >= recentFrom }.count
         let next30 = future.filter { WealthCal.day($0.date) <= windowEnd }
 
+        // [v25.566] 定存動到這個帳戶的幣別也列進來（美金定存到期轉進台幣帳戶：那個帳戶就有美金那一格）
         let codes = WealthFacts.currencies(forAccount: m, expenses: ctx.expenses, incomes: ctx.incomes,
-                                           stocks: ctx.stocks, extra: prefs.currencies)
+                                           stocks: ctx.stocks, extra: (prefs.currencies ?? []) + depositCodes)
         var balances = todayBalances
         for c in codes where balances[c] == nil { balances[c] = 0 }
 
@@ -2289,7 +2887,8 @@ struct WealthFacts {
     // MARK: - [v25.564] 要確認（judge §3.5；#11 存了安全碼不做——使用者第 6 題「我要存」）
 
     private static func makeChecks(cards: [Card], accounts: [Account], bankMs: [LifeMilestone], unknown: [String],
-                                   ctx: BuildContext, bankIds: Set<UUID>) -> [WealthCheck] {
+                                   ctx: BuildContext, bankIds: Set<UUID>, terms: [TimeDeposit],
+                                   insurance: [InsuranceGroup], deposits: WealthDepositBook) -> [WealthCheck] {
         let today = ctx.today
         let book = ctx.book
         var out: [WealthCheck] = []
@@ -2448,11 +3047,15 @@ struct WealthFacts {
             }
         }
 
-        // #9 查不到匯率
+        // #9 查不到匯率（[v25.566] 定存的也算：金額＝存摺上＋存著的定存）
         for code in unknown {
-            let owners = accounts.filter { !$0.isSecurities && $0.unknownCodes.contains(code) }
+            let owners = accounts.filter {
+                !$0.isSecurities && ($0.unknownCodes.contains(code) || $0.depositUnknownCodes.contains(code))
+            }
             let names = owners.map(\.name).joined(separator: "、")
-            let amounts = owners.map { WealthFormat.money($0.balance(code), code: code) }.joined(separator: "、")
+            let amounts = owners.map { (a: Account) -> String in
+                WealthFormat.money(a.balance(code) + a.depositAmount(code), code: code)
+            }.joined(separator: "、")
             add(WealthCheck(id: "rate-\(code)", kind: .unknownRate, tone: .warn,
                             text: "設定裡找不到「\(code)」的匯率，\(names)的 \(amounts) 先不算進合計",
                             actions: [WealthCheck.Action(title: "去設定", fix: .openRates)],
@@ -2493,6 +3096,74 @@ struct WealthFacts {
             actions.append(WealthCheck.Action(title: "知道了", fix: .dismiss))
             add(WealthCheck(id: "expiry-\(c.id.uuidString)-\(WealthCal.monthKey(em))", kind: .cardExpiring, tone: .warn,
                             text: text, actions: actions, accountIds: [c.id]))
+        }
+
+        // [v25.566] #13 定存 7 天內到期（照到期處理寫一句）；到期再決定、已經到期還沒決定（不能按知道了：要你選）
+        for t in terms {
+            guard let m = t.maturity, let mt = t.maturityText(today) else { continue }
+            let id = t.id
+            if t.status == .waiting {
+                add(WealthCheck(id: "tdwait-\(id.uuidString)", kind: .depositMaturing, tone: .warn,
+                                text: "\(t.displayTitle) \(mt) 到期了，錢還在定存裡：要轉活存還是續存？",
+                                actions: [WealthCheck.Action(title: "轉活存",
+                                                             fix: .setMaturity(depositId: id, mode: WealthMaturityMode.toLive.rawValue)),
+                                          WealthCheck.Action(title: "本息續存",
+                                                             fix: .setMaturity(depositId: id, mode: WealthMaturityMode.renewAll.rawValue))],
+                                accountIds: [t.accountId]))
+                continue
+            }
+            guard t.status == .active else { continue }
+            let left = WealthCal.days(from: today, to: m)
+            guard left >= 1 && left <= 7 else { continue }
+            let total = WealthFormat.plain(t.maturityAmount, code: t.code)
+            let to = t.payoutName ?? t.accountName
+            let text: String
+            var actions: [WealthCheck.Action] = []
+            switch t.mode {
+            case .renewAll:
+                text = "\(t.displayTitle) \(mt) 到期，會本息續存成 \(total)"
+                actions.append(WealthCheck.Action(title: "改成轉活存",
+                                                  fix: .setMaturity(depositId: id, mode: WealthMaturityMode.toLive.rawValue)))
+            case .renewPrincipal:
+                let p = WealthFormat.plain(t.principal, code: t.code)
+                let i = WealthFormat.plain(t.interest, code: t.code)
+                text = "\(t.displayTitle) \(mt) 到期，本金 \(p) 續存、利息 \(i) 轉進\(to)"
+                actions.append(WealthCheck.Action(title: "改成轉活存",
+                                                  fix: .setMaturity(depositId: id, mode: WealthMaturityMode.toLive.rawValue)))
+            case .toLive:
+                text = "\(t.displayTitle) \(mt) 到期，本息 \(total) 會轉進\(to)"
+                actions.append(WealthCheck.Action(title: "改成本息續存",
+                                                  fix: .setMaturity(depositId: id, mode: WealthMaturityMode.renewAll.rawValue)))
+            case .decide:
+                text = "\(t.displayTitle) \(mt) 到期，還沒決定到期怎麼處理"
+                actions.append(WealthCheck.Action(title: "轉活存",
+                                                  fix: .setMaturity(depositId: id, mode: WealthMaturityMode.toLive.rawValue)))
+                actions.append(WealthCheck.Action(title: "本息續存",
+                                                  fix: .setMaturity(depositId: id, mode: WealthMaturityMode.renewAll.rawValue)))
+            }
+            if t.mode != .decide {
+                actions.append(WealthCheck.Action(title: "照舊", fix: .dismiss))
+            }
+            add(WealthCheck(id: "tdsoon-\(id.uuidString)", kind: .depositMaturing, tone: .warn, text: text,
+                            actions: actions, accountIds: [t.accountId]))
+        }
+
+        // [v25.566] 舊的「定存」種類帳戶：補利率和到期日（問一次，可以略過；有過任何一筆定存紀錄就不問）
+        let recorded = Set(deposits.all.map(\.bankId))
+        for a in visibleBanks where a.isFixedDeposit && !recorded.contains(a.id) {
+            guard a.balances.values.contains(where: { $0 > 0.5 }) else { continue }
+            add(WealthCheck(id: "tdlegacy-\(a.id.uuidString)", kind: .depositInfoMissing, tone: .info,
+                            text: "\(a.name)是以前記的定存帳戶：補上利率和到期日，就能算利息、到期前 7 天提醒你",
+                            actions: [WealthCheck.Action(title: "補資料", fix: .editTimeDeposit(accountId: a.id, depositId: nil)),
+                                      WealthCheck.Action(title: "略過", fix: .dismiss)],
+                            accountIds: [a.id]))
+        }
+
+        // [v25.566] #14 同一家銀行合計超過 300 萬（〔知道了〕一年內不再提）
+        for g in insurance where !deposits.isInsuranceQuiet(g.id, today: today) {
+            add(WealthCheck(id: "dic-\(g.id)", kind: .depositInsurance, tone: .info, text: g.text,
+                            actions: [WealthCheck.Action(title: "知道了", fix: .quietInsurance(g.id))],
+                            accountIds: g.accountIds))
         }
 
         // #6 卡沒填結帳日或繳款截止日（v2 偵測）
@@ -2554,15 +3225,17 @@ struct WealthFacts {
 extension WealthFacts {
     /// 這個帳戶這個幣別在 day 那天結束時，App 算的存摺上；excluding：不算那一筆（編輯以前的對存摺時，不算它自己）。
     /// 用同一套算法、把「今天」當成 day 重算一次（只在選日期、打開表單時算，打字時不算）
+    /// [v25.566] deposits：定存那一包（起存那天的轉定存、到期轉活存也算進「App 算的」）
     static func passbookBalance(accountId: UUID, code: String, endOf day: Date, excluding: UUID?,
-                                milestones: [LifeMilestone], book: WealthBook, expenses: [Expense],
+                                milestones: [LifeMilestone], book: WealthBook,
+                                deposits: WealthDepositBook = WealthDepositBook(), expenses: [Expense],
                                 incomes: [Income], stocks: [Stock], rates: FinanceRates) -> Double {
         var list = milestones
         if let ex = excluding, let i = list.firstIndex(where: { $0.id == accountId }) {
             list[i].bankDeposits = (list[i].bankDeposits ?? []).filter { $0.id != ex }
         }
-        let f = build(milestones: list, book: book, expenses: expenses, incomes: incomes, stocks: stocks,
-                      rates: rates, now: day)
+        let f = build(milestones: list, book: book, deposits: deposits, expenses: expenses, incomes: incomes,
+                      stocks: stocks, rates: rates, now: day)
         return f.account(accountId)?.balance(code) ?? 0
     }
 }

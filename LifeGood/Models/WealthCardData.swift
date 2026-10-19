@@ -22,6 +22,21 @@ import SwiftUI
 // • 號碼（卡號、有效期限、安全碼、票證、帳號、保單號碼）這裡只放遮好的字（•••• 5678）；完整的由卡片頁按〔顯示〕過 Face ID 後
 //   才讀（WealthCardPage.reveal，只放在 @State，30 秒收回）。安全碼只有存了（cardSecurityCipher 不是 nil）才有那一列（使用者第 6 題）。
 // • 遮住（財富頁右上的眼睛）：金額一律 WealthFormat.masked／「••••」；%、日期、件數照常。
+//
+// [v25.566] 財富 v5 G2（build/v5/brief.md §6 G2；judge §4.2 ⑤⑥⑧、§5.5）：
+// • ⑤ 外幣：有外幣就出現（只有台幣才不出現；judge §11 ③-B4 玉山只有美金也有一格）；一個幣別一格「美金　US$3,200.00
+//   約 NT$102,400（10/19 匯率 32.0）」（WealthFormat.fxNote，日期＝AppQuoteClock.ratesUpdatedAt，build 時抓一次放 ctx）；
+//   台幣沒有數字就不放台幣那格；格子下一行說明、〔＋ 換匯〕（WealthTransferSheet exchange，v2 的轉帳綁定）。
+// • ⑥ 定存：帳戶的每一期（WealthFacts.Account.timeDeposits：沒開始、存著、到期待決定）一格 FinanceProgressData，字全讀
+//   WealthFacts.TimeDeposit（label、rateText、progress、progressEnds、maturityText、interestText），不自己再算利息、到期日；
+//   舊的「定存」種類帳戶還沒補過（同要確認那一條：沒收起來、存摺上有錢、帳本裡從沒有過）＝一列〔補上利率和到期日 ›〕；
+//   沒收起來的帳戶最下〔＋ 定存〕（有補資料那一列時不重複）；收起來的帳戶沒有〔＋ 定存〕〔換匯〕。
+// • 看起來是定存帳戶（Account.showsAsDeposit）：看板「定存」「NT$500,000」「3/15 到期・還有 147 天・預估利息 8,500」、
+//   膠囊「3/15 到期・147 天」（7 天內、到期待決定 warn）、手寫 Grow / slowly!；四格本金／預估利息／到期／上次對存摺；
+//   換帳戶列同看板大字。舊的定存種類照舊寫存摺上（它的錢就在存摺上）。
+// • 明細新種類 .timeDeposit（轉定存、定存到期、定存解約）：篩選「定存」（定存利息那幾列也歸這裡）、圓裡「定」、金色；
+//   點了開定存表單（WealthCardOpen.timeDeposit）。定存利息（.interest＋timeDepositId）點了也開定存表單。
+// • ⑧ 存款保險：這家銀行合計超過 300 萬才多一列（facts.insurance(for:)；遮住時不寫金額）；種類舊定存寫「定存（以前記的）」。
 
 // MARK: - 型別
 
@@ -58,11 +73,13 @@ enum WealthCardOpen: Equatable {
     case anchorEdit(UUID)
     /// 轉帳那一列：問要不要刪（要訂閱）
     case transfer(UUID)
+    /// [v25.566] 一期定存（WealthFacts.TimeDeposit.id；轉定存、定存到期、定存利息、⑥ 一格）：開定存表單（要訂閱）
+    case timeDeposit(UUID)
 }
 
 /// 存摺明細的篩選（只列有的）
 enum WealthLedgerFilter: String, CaseIterable, Identifiable {
-    case all, inflow, outflow, cardBill, transfer, stock, anchor
+    case all, inflow, outflow, cardBill, transfer, stock, deposit, anchor
 
     var id: String { rawValue }
 
@@ -74,6 +91,8 @@ enum WealthLedgerFilter: String, CaseIterable, Identifiable {
         case .cardBill: return "卡費"
         case .transfer: return "轉帳"
         case .stock: return "交割"
+        // [v25.566] 轉定存、定存到期、定存解約、定存利息
+        case .deposit: return "定存"
         case .anchor: return "對存摺"
         }
     }
@@ -288,6 +307,18 @@ struct WealthCardBank {
     var linkedIn: [WealthCardLinkRow] = []
     var linkedTrailing: String? = nil
     var foreign: [WealthCardFTile] = []
+    /// [v25.566] ⑤ 格子下一行（換匯怎麼記）；沒有外幣＝nil
+    var foreignNote: String? = nil
+    /// [v25.566] ⑤〔＋ 換匯〕（有外幣就有；按鈕本身擋訂閱）
+    var canExchange = false
+    /// [v25.566] ⑥ 定存：一期一格（照到期日）
+    var deposits: [WealthCardDepositCell] = []
+    /// [v25.566] ⑥ 標題右邊「1 筆・合計 NT$50萬」（遮住「1 筆」）
+    var depositsTrailing: String? = nil
+    /// [v25.566] 舊的「定存」種類帳戶、還沒補任何一期：一列〔補上利率和到期日 ›〕
+    var legacyDepositPrompt = false
+    /// [v25.566] ⑥ 最下〔＋ 定存〕（收起來的帳戶沒有）
+    var canAddDeposit = false
     var yearTiles: [WealthCardFTile] = []
     var recordsTitle = ""
     /// 新到舊（只有今天以前）
@@ -301,6 +332,17 @@ struct WealthCardBank {
     var hidden = false
     /// 收起來前問「還有 3,200，要轉到哪？」；存摺上是 0＝nil
     var leftover: String? = nil
+}
+
+/// [v25.566] ⑥ 定存的一格（FinanceProgressCell 畫；點了開那一期的定存表單）
+struct WealthCardDepositCell: Identifiable {
+    /// 那一期（WealthFacts.TimeDeposit.id；自動續存還沒寫進帳本的那一期也是固定 id）
+    let id: UUID
+    let progress: FinanceProgressData
+    /// 整格 VoiceOver 念的一句（按鈕的 label）
+    let accessibilityText: String
+    /// 到期了、還沒決定怎麼處理（格子下一行 warn）
+    var waiting = false
 }
 
 /// 證券戶頁
@@ -362,7 +404,8 @@ struct WealthCardData {
         let x = WealthCardCtx(facts: facts, item: m, milestones: life.milestones, book: life.wealthBook,
                               expenses: expenses, expensesById: byId, incomes: expense.incomes,
                               stocks: finance.stocks, rates: FinanceRates(expense), today: WealthCal.day(now),
-                              masked: masked)
+                              masked: masked, rateDate: AppQuoteClock.ratesUpdatedAt,
+                              depositBankIds: Set(life.wealthDeposits.all.map { $0.bankId }))
         switch m.financeSubCategory ?? .bank {
         case .creditCard:
             guard let c = facts.card(id) else { return nil }
@@ -392,6 +435,10 @@ private struct WealthCardCtx {
     let rates: FinanceRates
     let today: Date
     let masked: Bool
+    /// [v25.566] 匯率是哪天更新的（AppQuoteClock.ratesUpdatedAt；外幣格子「10/19 匯率 32.0」；沒記過 nil）
+    let rateDate: Date?
+    /// [v25.566] 定存帳本裡有過任何一期的帳戶（含已經結束的）：舊定存帳戶的〔補上利率和到期日〕跟要確認同一條規則
+    let depositBankIds: Set<UUID>
 }
 
 // MARK: - 字
@@ -1148,23 +1195,10 @@ extension WealthCardData {
         }
         // ④ 連到這個帳戶的
         fillLinks(&bk, a: a, x: x)
-        // ⑤ 外幣（兩種以上幣別）
-        if d.codes.count >= 2 {
-            bk.foreign = d.codes.map { code -> WealthCardFTile in
-                let v = a.balance(code)
-                var sub = ""
-                if !FinanceRates.isNTD(code) {
-                    if let r = x.rates.known(code) {
-                        sub = "約 " + WealthCardText.ntd(v * r, masked: x.masked) + "・匯率 " + WealthFormat.rate(r)
-                    } else {
-                        sub = "沒有匯率"
-                    }
-                }
-                return WealthCardFTile(id: code, label: WealthCardText.codeName(code),
-                                       value: WealthCardText.money(v, code: code, masked: x.masked),
-                                       valueTone: v < -0.004 ? .bad : nil, sub: sub)
-            }
-        }
+        // ⑤ 外幣（[v25.566] 有外幣就出現；只有台幣才不出現）
+        fillForeign(&bk, a: a, codes: d.codes, x: x)
+        // ⑥ [v25.566] 定存
+        fillDeposits(&bk, a: a, x: x)
         // ⑦ 存摺明細
         fillLedger(&bk, a: a, x: x)
         // ⑧ 帳戶資料、⑨ 備註與照片
@@ -1179,9 +1213,145 @@ extension WealthCardData {
         return d
     }
 
+    // MARK: ⑤ 外幣
+
+    /// [v25.566] 一個幣別一格：「美金　US$3,200.00　約 NT$102,400（10/19 匯率 32.0）」；台幣沒有數字不放台幣那格
+    fileprivate static func fillForeign(_ bk: inout WealthCardBank, a: WealthFacts.Account, codes: [String],
+                                        x: WealthCardCtx) {
+        let mk = x.masked
+        guard codes.contains(where: { !FinanceRates.isNTD($0) }) else { return }
+        let shown = codes.filter { code in
+            !FinanceRates.isNTD(code) || Swift.abs(a.balance(code)) > 0.004
+        }
+        bk.foreign = shown.map { code -> WealthCardFTile in
+            let v = a.balance(code)
+            var sub = ""
+            var subTone: MoneyTone? = nil
+            if !FinanceRates.isNTD(code) {
+                if let r = x.rates.known(code) {
+                    sub = mk ? "約 " + WealthCardText.dots : WealthFormat.fxNote(v, rate: r, rateDate: x.rateDate)
+                } else {
+                    sub = "沒有匯率"
+                    subTone = .warn
+                }
+            }
+            return WealthCardFTile(id: code, label: WealthCardText.codeName(code),
+                                   value: WealthCardText.money(v, code: code, masked: mk),
+                                   valueTone: v < -0.004 ? .bad : nil, sub: sub, subTone: subTone)
+        }
+        // 收起來（銷戶）的帳戶不給換匯（同 ⑥〔＋ 定存〕；表單的帳戶選單也不列收起來的）
+        bk.canExchange = !a.hidden
+        bk.foreignNote = a.hidden ? nil : "換匯會在兩邊各記一筆、綁在一起；匯率可以改。"
+    }
+
+    // MARK: ⑥ 定存
+
+    /// [v25.566] 每一期一格；標題右邊「1 筆・合計 NT$50萬」；舊的定存種類沒補任何一期＝〔補上利率和到期日〕
+    fileprivate static func fillDeposits(_ bk: inout WealthCardBank, a: WealthFacts.Account, x: WealthCardCtx) {
+        let terms = a.timeDeposits
+        bk.deposits = terms.map { depositCell($0, x: x) }
+        if !terms.isEmpty {
+            let count = "\(terms.count) 筆"
+            // 舊的定存種類：錢就在存摺上（depositNTD 是 0）
+            let total: Double = a.isFixedDeposit ? a.ntdTotal : a.depositNTD
+            let approx = !a.depositUnknownCodes.isEmpty || (a.isFixedDeposit && a.hasUnknownRate)
+            if x.masked || total < 0.5 {
+                bk.depositsTrailing = count
+            } else {
+                bk.depositsTrailing = count + "・合計 " + (approx ? "約 " : "") + total.ntdWanString
+            }
+        }
+        bk.canAddDeposit = !a.hidden
+        // 同要確認「補資料」那一條（WealthFacts depositInfoMissing）：沒收起來、存摺上有錢、帳本裡從來沒有這個帳戶的定存
+        //（補過、後來到期轉活存或解約的不再催）
+        let hasMoney = a.balances.values.contains(where: { $0 > 0.5 })
+        bk.legacyDepositPrompt = a.isFixedDeposit && terms.isEmpty && !a.hidden && hasMoney
+            && !x.depositBankIds.contains(a.id)
+    }
+
+    /// ⑥ 一格：「一年定存　NT$500,000・1.7%」／「2026/3/15 ━━●── 2027/3/15（還有 147 天）」／「到期本息續存・預估利息 8,500」
+    fileprivate static func depositCell(_ t: WealthFacts.TimeDeposit, x: WealthCardCtx) -> WealthCardDepositCell {
+        let mk = x.masked
+        let today = x.today
+        var p = FinanceProgressData()
+        p.title = t.label
+        var range = WealthCardText.money(t.principal, code: t.code, masked: mk)
+        if let r = t.rateText { range += "・" + r }
+        if t.isLegacyAccount { range += "・存摺上的錢" }
+        p.range = range
+        p.fraction = t.progress(today) ?? 0
+        p.dotPill = "今天"
+        p.endPill = t.maturityText(today).map { $0 + " 到期" } ?? "沒填到期日"
+        if let ends = t.progressEnds(today: today) {
+            p.left = ends.left
+            p.right = ends.right
+        } else {
+            p.left = WealthFormat.ymd(t.start)
+            p.right = "沒填到期日"
+        }
+        var waiting = false
+        switch t.status {
+        case .notStarted:
+            p.fraction = 0
+            p.notStarted = true
+            p.dotPill = "還沒開始"
+            p.left = WealthFormat.monthDay(t.start) + " 起存"
+            p.note = depositNote(t, masked: mk)
+        case .waiting:
+            waiting = true
+            p.note = "到期了，還沒決定怎麼處理（要確認裡選）"
+        case .active, .ended:
+            p.note = depositNote(t, masked: mk)
+        }
+        let line = t.maturityLine(today: today, masked: mk).replacingOccurrences(of: "・", with: "，")
+        let said = mk ? "金額已遮住" : (FinanceRates.isNTD(t.code) ? WealthPageText.spoken(t.principal)
+                                                                  : WealthFormat.money(t.principal, code: t.code))
+        // FinanceProgressCell 念「標題（一年定存）＋accessibilityText」：這裡不再寫一次標題
+        var spoken = "本金 " + said
+        if let r = t.rateText { spoken += "，年利率 " + r }
+        spoken += "。" + line
+        // 到期處理那一句（maturityLine 已經念過預估利息，這裡不再念；沒開始的 maturityLine 只有「起存」，利息在這裡念）
+        let modeText = waiting ? p.note : depositNote(t, masked: mk, withInterest: t.status == .notStarted)
+        if !modeText.isEmpty { spoken += "。" + modeText.replacingOccurrences(of: "・", with: "，") }
+        p.accessibilityText = spoken
+        return WealthCardDepositCell(id: t.id, progress: p, accessibilityText: t.label + "，" + spoken, waiting: waiting)
+    }
+
+    /// ⑥ 一格最下一句：到期處理＋預估利息「到期本息續存・預估利息 8,500」「到期本金續存、利息轉進薪轉」「到期轉進薪轉」「到期再決定」
+    fileprivate static func depositNote(_ t: WealthFacts.TimeDeposit, masked: Bool, withInterest: Bool = true) -> String {
+        let selfPayout = t.payoutId == nil || t.payoutId == t.accountId
+        let to = t.payoutName ?? t.accountName
+        var s: String
+        switch t.mode {
+        case .renewAll: s = "到期本息續存"
+        case .renewPrincipal: s = "到期本金續存、利息" + (selfPayout ? "轉活存" : "轉進" + to)
+        case .toLive: s = selfPayout ? "到期轉活存" : "到期轉進" + to
+        case .decide: s = "到期再決定"
+        }
+        if withInterest, let i = t.interestText(masked: masked) { s += "・" + i }
+        return s
+    }
+
+    /// [v25.566] 看起來是定存帳戶時看板大字、四格「本金」、換帳戶列的數字：一筆＝那一筆的本金（原幣）；
+    /// 好幾筆＝定存換台幣（約）。舊的定存種類帳戶、沒有任何一期＝nil（照原本寫存摺上：它的錢就在存摺上）
+    fileprivate static func depositHeadline(_ a: WealthFacts.Account) -> (amount: Double, code: String, many: Bool)? {
+        guard !a.isFixedDeposit, let first = a.timeDeposits.first else { return nil }
+        if a.timeDeposits.count == 1 { return (amount: first.principal, code: first.code, many: false) }
+        return (amount: a.depositNTD, code: "NT$", many: true)
+    }
+
+    /// [v25.566] 看板、四格「到期」那一期：最近要到期、還存著的 → 到期待決定的 → 第一期（沒開始、沒填到期日）
+    fileprivate static func headlineTerm(_ a: WealthFacts.Account) -> WealthFacts.TimeDeposit? {
+        if let n = a.nextMaturing { return n }
+        if let w = a.timeDeposits.first(where: { $0.status == .waiting }) { return w }
+        return a.timeDeposits.first
+    }
+
     // MARK: 看板
 
     fileprivate static func bankBoard(_ x: WealthCardCtx, _ a: WealthFacts.Account) -> WealthCardBoard {
+        // [v25.566] 看起來是定存帳戶（收起來的照舊）
+        if !a.hidden && a.showsAsDeposit { return depositBoard(x, a) }
         var b = WealthCardBoard()
         let t = x.today
         let mk = x.masked
@@ -1258,7 +1428,10 @@ extension WealthCardData {
             b.greeting = ["Save", "steady!"]
         } else if !FinanceRates.isNTD(code) {
             if let r = x.rates.known(code) {
-                b.line = FinanceLine.text("約 " + WealthCardText.ntd(balance * r, masked: mk) + "（匯率 " + WealthFormat.rate(r) + "）")
+                // [v25.566] 「約 NT$102,400（10/19 匯率 32.0）」（judge §11 ③-B4；遮住只遮金額）
+                let note = mk ? "約 " + WealthFormat.masked + "（" + WealthFormat.rateNote(r, rateDate: x.rateDate) + "）"
+                              : WealthFormat.fxNote(balance, rate: r, rateDate: x.rateDate)
+                b.line = FinanceLine.text(note)
             } else {
                 b.line = FinanceLine(runs: [FinanceRun(text: "設定裡找不到這個幣別的匯率", tone: .warn)])
             }
@@ -1297,10 +1470,93 @@ extension WealthCardData {
         return b
     }
 
+    /// [v25.566] 定存帳戶的看板（judge §4.2 ⑥、build/v5/brief.md §6 G2-4）：「定存」「NT$500,000」
+    /// 「3/15 到期・還有 147 天・預估利息 8,500」、膠囊「3/15 到期・147 天」、手寫 Grow / slowly!。
+    /// 舊的「定存」種類帳戶小字「存摺上」、大字照原本（存摺上就是定存的錢）
+    fileprivate static func depositBoard(_ x: WealthCardCtx, _ a: WealthFacts.Account) -> WealthCardBoard {
+        var b = WealthCardBoard()
+        let t = x.today
+        let mk = x.masked
+        let multi = a.singleCode == nil
+        let code = WealthFacts.norm(a.singleCode ?? "NT$")
+        let balance = a.balance(code)
+        let head = depositHeadline(a)
+        let term = headlineTerm(a)
+        b.date = WealthPageText.boardDate(t)
+            + (a.lastAnchorDate.map { "・對過存摺 " + WealthCardText.md($0) } ?? "・還沒對過存摺")
+        b.dateIcon = "checkmark.seal"
+
+        // 膠囊：不夠扣 → 到期待決定 → 「3/15 到期・147 天」（7 天內 warn）→ 「10/25 起存」
+        if let s = a.shortage {
+            b.capsule = WealthCardText.md(s.date) + " 會差 " + WealthCardText.plain(s.short, code: s.code, masked: mk)
+            b.capsuleIcon = "exclamationmark.triangle.fill"
+            b.capsuleTone = .warn
+        } else if a.timeDeposits.contains(where: { $0.status == .waiting }) {
+            b.capsule = "到期了・等你決定"
+            b.capsuleIcon = "lock.open.fill"
+            b.capsuleTone = .warn
+        } else if let n = a.nextMaturing, let mt = n.maturityText(t), let left = n.daysLeft(t) {
+            b.capsule = mt + " 到期・\(left) 天"
+            b.capsuleIcon = "lock.fill"
+            if left <= 7 { b.capsuleTone = .warn }
+        } else if let first = a.timeDeposits.first, first.status == .notStarted {
+            b.capsule = WealthCardText.md(first.start) + " 起存"
+            b.capsuleIcon = "calendar"
+        }
+
+        // 小字、大字
+        if let h = head {
+            b.label = "定存"
+            b.big = h.many ? WealthCardText.ntdWan(h.amount, masked: mk) : WealthCardText.money(h.amount, code: h.code, masked: mk)
+        } else {
+            b.label = "存摺上"
+            b.big = multi ? WealthCardText.ntdWan(a.ntdTotal, masked: mk) : WealthCardText.money(balance, code: code, masked: mk)
+            let negative = multi ? a.ntdTotal < -0.5 : balance < -0.004
+            if negative { b.bigTone = .bad }
+        }
+
+        // 一句、手寫
+        if let term {
+            b.line = FinanceLine.text(term.maturityLine(today: t, masked: mk))
+        } else {
+            b.line = FinanceLine.text("補上利率和到期日，就能算利息")
+        }
+        b.greeting = ["Grow", "slowly!"]
+
+        // VoiceOver
+        let nick: String = a.nickname ?? ""
+        var a11y = a.bankName + nick + "，" + b.label + " "
+        if mk {
+            a11y += "金額已遮住"
+        } else if let h = head {
+            if h.many {
+                a11y += "約 " + WealthPageText.spoken(h.amount)
+            } else if FinanceRates.isNTD(h.code) {
+                a11y += WealthPageText.spoken(h.amount)
+            } else {
+                a11y += WealthFormat.money(h.amount, code: h.code)
+            }
+        } else if multi {
+            a11y += "約 " + WealthPageText.spoken(a.ntdTotal)
+        } else if FinanceRates.isNTD(code) {
+            a11y += WealthPageText.spoken(balance)
+        } else {
+            a11y += WealthFormat.money(balance, code: code)
+        }
+        if let cap = b.capsule { a11y += "，" + cap.replacingOccurrences(of: "・", with: "，") }
+        let plainLine = b.line.plain
+        if !plainLine.isEmpty { a11y += "。" + plainLine.replacingOccurrences(of: "・", with: "，") }
+        if let last = a.lastAnchorDate { a11y += "。上次對存摺 " + WealthPageText.spokenDate(last) + "。" }
+        b.accessibilityText = a11y
+        return b
+    }
+
     fileprivate static func upcomingIcon(_ k: WealthLedgerRow.Kind) -> String {
         switch k {
         case .stockBuy, .stockSell, .dividend: return "arrow.left.arrow.right"
         case .cardBill: return "creditcard"
+        // [v25.566] 轉定存、定存到期
+        case .timeDeposit: return "lock.fill"
         default: return "calendar"
         }
     }
@@ -1406,12 +1662,16 @@ extension WealthCardData {
         case .fee: return "費"
         case .legacyAdjust: return "調"
         case .anchor: return ""
+        // [v25.566] 轉定存、定存到期、定存解約
+        case .timeDeposit: return "定存"
         }
     }
 
     // MARK: 四格
 
     fileprivate static func bankTiles(_ x: WealthCardCtx, _ a: WealthFacts.Account) -> [WealthCardTile] {
+        // [v25.566] 定存帳戶（同看板：收起來的照舊）：本金／預估利息／到期／上次對存摺
+        if !a.hidden && a.showsAsDeposit { return depositTiles(x, a) }
         let mk = x.masked
         let t = x.today
         let multi = a.singleCode == nil
@@ -1460,16 +1720,90 @@ extension WealthCardData {
             tiles.append(WealthCardTile(id: "low", icon: "drop.fill", tint: .azure, label: "30 天內最低",
                                         value: "—", detail: "30 天內沒有要扣的"))
         }
+        tiles.append(anchorTile(a, today: t))
+        return tiles
+    }
+
+    /// 「上次對存摺」那格（一般帳戶、定存帳戶共用）
+    fileprivate static func anchorTile(_ a: WealthFacts.Account, today t: Date) -> WealthCardTile {
         let anchorCode = a.singleCode.map { WealthFacts.norm($0) } ?? "NT$"
         if let last = a.lastAnchorDate {
             let n = WealthCal.days(from: last, to: t)
-            tiles.append(WealthCardTile(id: "anchor", icon: "checkmark.seal.fill", tint: .violet, label: "上次對存摺",
-                                        value: WealthCardText.md(last), valueTone: n > 90 ? .warn : nil,
-                                        detail: n == 0 ? "今天" : "\(n) 天前", tap: .anchor(anchorCode)))
-        } else {
-            tiles.append(WealthCardTile(id: "anchor", icon: "checkmark.seal.fill", tint: .violet, label: "上次對存摺",
-                                        value: "還沒對過", detail: "對一下 ›", tap: .anchor(anchorCode)))
+            return WealthCardTile(id: "anchor", icon: "checkmark.seal.fill", tint: .violet, label: "上次對存摺",
+                                  value: WealthCardText.md(last), valueTone: n > 90 ? .warn : nil,
+                                  detail: n == 0 ? "今天" : "\(n) 天前", tap: .anchor(anchorCode))
         }
+        return WealthCardTile(id: "anchor", icon: "checkmark.seal.fill", tint: .violet, label: "上次對存摺",
+                              value: "還沒對過", detail: "對一下 ›", tap: .anchor(anchorCode))
+    }
+
+    /// [v25.566] 定存帳戶的四格：本金（一筆原幣／好幾筆換台幣）、預估利息、到期、上次對存摺；前三格點了捲到 ⑥ 定存
+    fileprivate static func depositTiles(_ x: WealthCardCtx, _ a: WealthFacts.Account) -> [WealthCardTile] {
+        let mk = x.masked
+        let t = x.today
+        let terms = a.timeDeposits
+        var tiles: [WealthCardTile] = []
+
+        // 本金
+        let principalValue: String
+        let principalDetail: String
+        if let h = depositHeadline(a) {
+            principalValue = h.many ? WealthCardText.ntdWan(h.amount, masked: mk) : WealthCardText.money(h.amount, code: h.code, masked: mk)
+            principalDetail = h.many ? "\(terms.count) 筆・換成台幣" : (terms.first?.label ?? "定存")
+        } else if let first = terms.first {
+            // 舊的定存種類：補了的那一期（存摺上的錢）
+            principalValue = WealthCardText.money(first.principal, code: first.code, masked: mk)
+            principalDetail = terms.count > 1 ? "\(terms.count) 筆" : first.label
+        } else {
+            let code = WealthFacts.norm(a.singleCode ?? "NT$")
+            principalValue = a.singleCode == nil ? WealthCardText.ntdWan(a.ntdTotal, masked: mk)
+                                                 : WealthCardText.money(a.balance(code), code: code, masked: mk)
+            principalDetail = "存摺上"
+        }
+        tiles.append(WealthCardTile(id: "principal", icon: "lock.fill", tint: .orange, label: "本金",
+                                    value: principalValue, detail: principalDetail, tap: .scroll(.deposits)))
+
+        // 預估利息（一筆原幣；好幾筆換台幣加總，查不到匯率的不算）
+        let rated = terms.filter { ($0.rate ?? 0) > 0 }
+        let interestValue: String
+        let interestDetail: String
+        if rated.isEmpty {
+            interestValue = "—"
+            interestDetail = terms.isEmpty ? "補上利率就能算" : "沒填利率"
+        } else if rated.count == 1, let one = rated.first {
+            interestValue = WealthCardText.plain(one.interest, code: one.code, masked: mk)
+            interestDetail = "年利率 " + (one.rateText ?? "")
+        } else {
+            let sum = rated.reduce(0.0) { $0 + $1.interest * (x.rates.known($1.code) ?? 0) }
+            interestValue = WealthCardText.plain(sum, masked: mk)
+            interestDetail = "\(rated.count) 筆・單利未扣稅"
+        }
+        tiles.append(WealthCardTile(id: "interest", icon: "percent", tint: .green, label: "預估利息",
+                                    value: interestValue, detail: interestDetail, tap: .scroll(.deposits)))
+
+        // 到期
+        var dueValue = "—"
+        var dueDetail = terms.isEmpty ? "補上到期日 ›" : "沒填到期日"
+        var dueTone: MoneyTone? = nil
+        if let term = headlineTerm(a) {
+            if let mt = term.maturityText(t) { dueValue = mt }
+            switch term.status {
+            case .waiting:
+                dueDetail = "到期了・等你決定"
+                dueTone = .warn
+            case .notStarted:
+                dueDetail = WealthCardText.md(term.start) + " 起存"
+            case .active, .ended:
+                if let left = term.daysLeft(t) {
+                    dueDetail = left <= 0 ? "今天到期" : "還有 \(left) 天"
+                    if left <= 7 { dueTone = .warn }
+                }
+            }
+        }
+        tiles.append(WealthCardTile(id: "maturity", icon: "hourglass", tint: .azure, label: "到期",
+                                    value: dueValue, valueTone: dueTone, detail: dueDetail, tap: .scroll(.deposits)))
+
+        tiles.append(anchorTile(a, today: t))
         return tiles
     }
 
@@ -1503,8 +1837,20 @@ extension WealthCardData {
         case .transferIn, .transferOut:
             glyph = "轉"
             mark = 0x2F7FE8
+        case .timeDeposit:
+            // [v25.566] 轉定存、定存到期（還沒到的利息是估的：金額前面「約」照 isEstimate）
+            glyph = "定"
+            mark = 0xA86A00
+            detail = "定存"
         default:
             detail = r.kind.badge
+            // [v25.566] 定存利息（本金續存的利息轉進來、舊定存帳戶記進存摺的利息）
+            // （標題已經是「定存利息」「台灣銀行 定存利息」：細字只寫「定存」，不重複）
+            if r.timeDepositId != nil {
+                glyph = "息"
+                mark = 0xA86A00
+                detail = "定存"
+            }
         }
         let amount = mk ? WealthCardText.dots : WealthPageText.signed(r)
         var row = WealthCardRow(id: r.id, date: r.date, dayText: WealthCardText.dayNum(r.date),
@@ -1536,6 +1882,8 @@ extension WealthCardData {
             if let d = r.depositId { return .anchorEdit(d) }
             return .none
         case .deposit, .withdrawal, .interest, .fee:
+            // [v25.566] 定存利息（WealthFacts 算的，不是 BankDeposit）：開那一期的定存表單
+            if r.kind == .interest, let t = r.timeDepositId { return .timeDeposit(t) }
             guard let d = r.depositId else { return .none }
             return .record(d, recordKind(r.kind))
         case .expense, .fixedExpense:
@@ -1546,6 +1894,10 @@ extension WealthCardData {
             if let i = r.incomeId { return .income(i) }
             return .none
         case .legacyAdjust:
+            return .none
+        // [v25.566] 轉定存、定存到期、定存解約：開那一期的定存表單
+        case .timeDeposit:
+            if let t = r.timeDepositId { return .timeDeposit(t) }
             return .none
         }
     }
@@ -1654,9 +2006,9 @@ extension WealthCardData {
 
     fileprivate static func ledgerRow(_ r: WealthLedgerRow, x: WealthCardCtx) -> WealthCardRow {
         let mk = x.masked
-        let filter: WealthLedgerFilter
+        var filter: WealthLedgerFilter
         var glyph: String
-        let mark: UInt32
+        var mark: UInt32
         switch r.kind {
         case .anchor:
             filter = .anchor; glyph = "對"; mark = 0x7A5AF8
@@ -1666,6 +2018,9 @@ extension WealthCardData {
             filter = .transfer; glyph = "轉"; mark = 0x2F7FE8
         case .stockBuy, .stockSell, .dividend:
             filter = .stock; glyph = r.kind == .dividend ? "息" : "交"; mark = 0x6B44E0
+        case .timeDeposit:
+            // [v25.566] 轉定存、定存到期、定存解約（金色）
+            filter = .deposit; glyph = "定"; mark = 0xA86A00
         default:
             filter = r.isOutflow ? .outflow : .inflow
             glyph = String(r.title.prefix(1))
@@ -1679,6 +2034,11 @@ extension WealthCardData {
         case .recurringIncome: glyph = r.title.contains("薪") ? "薪" : "入"
         default: break
         }
+        // [v25.566] 定存利息（WealthFacts 算的，帶 timeDepositId）也歸「定存」篩選、金色
+        if r.kind == .interest && r.timeDepositId != nil {
+            filter = .deposit
+            mark = 0xA86A00
+        }
         let title: String = r.kind == .anchor ? "對存摺" : r.title
         var detail: String
         let amount: String
@@ -1691,7 +2051,9 @@ extension WealthCardData {
                 amount = "差 " + WealthCardText.signed(diff, out: diff < 0, code: r.code, masked: mk)
             }
         } else {
-            detail = r.kind.badge + "・" + source(r)
+            // [v25.566] 徽章跟來源同一個字（定存）只寫一次
+            let src = source(r)
+            detail = src == r.kind.badge ? src : r.kind.badge + "・" + src
             amount = WealthCardText.signed(r.amount, out: r.isOutflow, code: r.code, masked: mk)
         }
         if let n = r.note?.trimmingCharacters(in: .whitespacesAndNewlines), !n.isEmpty, r.kind != .anchor {
@@ -1718,7 +2080,8 @@ extension WealthCardData {
     /// 明細細字裡「從哪來」：財富頁、記帳、收入、股票、轉帳
     fileprivate static func source(_ r: WealthLedgerRow) -> String {
         switch r.kind {
-        case .deposit, .withdrawal, .interest, .fee: return "財富頁"
+        // [v25.566] 定存利息是 App 照那一期定存算的（不是財富頁記的那一筆）
+        case .deposit, .withdrawal, .interest, .fee: return r.timeDepositId != nil ? "定存" : "財富頁"
         case .expense, .fixedExpense: return "記帳"
         case .income, .recurringIncome: return "收入"
         case .stockBuy, .stockSell, .dividend: return "股票"
@@ -1726,6 +2089,8 @@ extension WealthCardData {
         case .cardBill: return r.isEstimate ? "估的" : "信用卡"
         case .legacyAdjust: return "以前的沖正"
         case .anchor: return "對存摺"
+        // [v25.566] 轉定存、定存到期、定存解約（App 照定存算的那幾列）
+        case .timeDeposit: return "定存"
         }
     }
 
@@ -1741,7 +2106,9 @@ extension WealthCardData {
             rows.append(WealthCardInfo(id: "branch", label: "分行", value: br))
         }
         if let acc = accountRow(a, prefs: prefs, m: m) { rows.append(acc) }
-        rows.append(WealthCardInfo(id: "type", label: "種類", value: m.bankAccountType?.rawValue ?? "活存"))
+        // [v25.566] 舊的「定存」種類：定存不再是帳戶種類（定存記在帳戶裡，⑥）
+        let typeText = a.isFixedDeposit ? "定存（以前記的）" : (m.bankAccountType?.rawValue ?? "活存")
+        rows.append(WealthCardInfo(id: "type", label: "種類", value: typeText))
         let codes = WealthPageText.codes(a).map { WealthCardText.codeName(WealthFacts.norm($0)) }
         rows.append(WealthCardInfo(id: "codes", label: "幣別", value: codes.joined(separator: "、")))
         if let p = a.purpose?.trimmingCharacters(in: .whitespaces), !p.isEmpty {
@@ -1752,6 +2119,11 @@ extension WealthCardData {
         if a.hidden {
             let when = a.closedDate.map { "（" + WealthCardText.md($0) + "）" } ?? ""
             rows.append(WealthCardInfo(id: "hidden", label: "狀態", value: "已收起來" + when))
+        }
+        // [v25.566] 存款保險：這家銀行（存摺上＋定存）合計超過 300 萬才有這一列（judge §4.2 ⑧；遮住不寫金額）
+        if let g = x.facts.insurance(for: a.id) {
+            rows.append(WealthCardInfo(id: "insurance", label: "存款保險",
+                                       value: x.masked ? "這家合計超過 300 萬" : g.text, tone: .warn))
         }
         return rows
     }
@@ -1776,7 +2148,11 @@ extension WealthCardData {
         return list.map { k -> FinanceSwitcherItem in
             var trailing = ""
             if !x.masked {
-                if let c = k.singleCode {
+                // [v25.566] 定存帳戶寫定存的數字（同看板大字）
+                let head: (amount: Double, code: String, many: Bool)? = (!k.hidden && k.showsAsDeposit) ? depositHeadline(k) : nil
+                if let h = head {
+                    trailing = h.many ? "約 " + WealthPageText.wan(h.amount) : WealthFormat.plain(h.amount, code: h.code)
+                } else if let c = k.singleCode {
                     trailing = WealthFormat.plain(k.balance(c), code: WealthFacts.norm(c))
                 } else {
                     trailing = "約 " + WealthPageText.wan(k.ntdTotal)
