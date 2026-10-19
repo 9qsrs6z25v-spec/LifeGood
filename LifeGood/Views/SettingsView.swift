@@ -3662,6 +3662,13 @@ struct HeroCardOverrideView: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
+                    // [v25.564] 財富頁換成看板（頂樓水塔）；銀行帳戶頁是水位、信用卡頁是帳單週期
+                    if card == .lifeFinance {
+                        Label("財富頁最上面的看板是固定的天空插畫，下面那幅風景用你的帳戶畫（一個銀行帳戶一座頂樓水塔，水位是存摺上的數字，斜線是還沒扣的卡費與交割；信用卡站在扣它卡費的那座塔下）；點進銀行帳戶是前後 30 天的水位，點進信用卡是帳單週期。看板跟著淺色／深色模式，只有「圓角」會跟著這裡，漸層、KPI 與大字的設定不會作用在它上面。",
+                              systemImage: "info.circle.fill")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
                 Section("顏色") {
                     ForEach(HeroTint.allCases) { t in

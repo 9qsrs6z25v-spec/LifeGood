@@ -86,6 +86,8 @@ struct MoneyItem: Identifiable, Equatable {
     /// [v25.553] 運動：卡面換成這一趟路線的形狀（已換成 0…1、最多 120 點；WorkoutFacts.routeShape）。
     /// 照股票 candles 的先例：有值就畫 WorkoutRoutePanel，不打任何地圖請求；nil＝運動主題插畫
     var route: WorkoutRouteShape? = nil
+    /// [v25.564] 信用卡：卡面換成一張小卡片（WealthCardFacePanel；只有末四碼，遮住時「••••」）。nil＝照舊
+    var cardFace: WealthCardFace? = nil
     /// [v25.553] VoiceOver 唸的一整句（運動卡：「10 月 15 日早上 6 點 05 分，河濱晨跑，跑步 5.2 公里，32 分 10 秒…」）；
     /// nil＝照舊把名稱、分類、金額、膠囊串起來唸
     var accessibilityText: String? = nil
@@ -178,7 +180,8 @@ struct MoneyItemCard: View {
         .background(alignment: .leading) {
             MoneyPanel(theme: item.theme, seed: item.seed, monogram: item.monogram, badge: item.badge,
                        photoURL: item.photoURL, latitude: item.latitude, longitude: item.longitude,
-                       place: item.place, candles: item.candles, route: item.route, scriptWord: item.scriptWord,
+                       place: item.place, candles: item.candles, route: item.route, cardFace: item.cardFace,
+                       scriptWord: item.scriptWord,
                        scriptCaps: item.scriptCaps, width: w)
                 .frame(width: w)
                 .clipShape(MoneyPanelShape())
@@ -299,7 +302,8 @@ struct MoneyItemCard: View {
 
     private var compactBody: some View {
         HStack(spacing: 10) {
-            MoneyThumb(theme: item.theme, seed: item.seed, photoURL: item.photoURL, route: item.route)
+            MoneyThumb(theme: item.theme, seed: item.seed, photoURL: item.photoURL, route: item.route,
+                       cardFace: item.cardFace)
                 .frame(width: 46, height: 46)
             VStack(alignment: .leading, spacing: 3) {
                 MarqueeText(item.title)

@@ -217,6 +217,30 @@ extension MoneyArtTheme {
                                              hero: "chart.bar.fill", accent: "calendar", pattern: .grid,
                                              word: "Trends", caps: "WEEKLY")
 
+    // ── 財富（v25.564，財富 v3；wealth/judge.md §3.16，judge_work/colors.py 驗過白圖示對底）──
+    // id 71–76（沒人用；id 也是衛星針快取 key，財富卡面不拍衛星）。卡面不放銀行商標、不放帳號。
+    // 項目卡左下手寫：活存 Passbook、外幣 Dollars、定存 Deposit、證券 Stocks、保單 Covered；
+    // 大寫小字照用途給（PAYROLL、MORTGAGE…，MoneyItem.scriptCaps），沒有就用這裡的 caps
+    static let wealthLive = MoneyArtTheme(id: 71, top: 0x7FB2FF, bottom: 0x2F6FD6, tint: 0x2F6FD6,
+                                          hero: "building.columns.fill", accent: "banknote.fill", pattern: .ruled,
+                                          word: "Passbook", caps: "SAVINGS")
+    /// 信用卡圖表卡的橫幅（每期帳單，手寫 Trends）
+    static let wealthCardTrends = MoneyArtTheme(id: 72, top: 0xFFB86B, bottom: 0xD9601F, tint: 0xD9601F,
+                                                hero: "creditcard.fill", accent: "chart.bar.fill", pattern: .stripes,
+                                                word: "Trends", caps: "STATEMENTS")
+    static let wealthForeign = MoneyArtTheme(id: 73, top: 0x7FE0D8, bottom: 0x147F80, tint: 0x147F80,
+                                             hero: "globe", accent: "dollarsign.circle.fill", pattern: .waves,
+                                             word: "Dollars", caps: "FOREIGN")
+    static let wealthDeposit = MoneyArtTheme(id: 74, top: 0xF2C14E, bottom: 0xA86A00, tint: 0xA86A00,
+                                             hero: "lock.fill", accent: "calendar", pattern: .dots,
+                                             word: "Deposit", caps: "TIME")
+    static let wealthBroker = MoneyArtTheme(id: 75, top: 0xB79CFF, bottom: 0x6B44E0, tint: 0x6B44E0,
+                                            hero: "chart.line.uptrend.xyaxis", accent: "chart.bar.fill", pattern: .grid,
+                                            word: "Stocks", caps: "BROKER")
+    static let wealthPolicy = MoneyArtTheme(id: 76, top: 0x8FE0B0, bottom: 0x23885A, tint: 0x23885A,
+                                            hero: "cross.case.fill", accent: "shield.fill", pattern: .pulse,
+                                            word: "Covered", caps: "POLICY")
+
     /// [v25.553] 一種運動的卡面主題（跑步 61、健走 62、騎車 63、登山 64、重訓 65、其他有氧 66）
     static func of(_ sport: WorkoutSport) -> MoneyArtTheme {
         switch sport {
@@ -682,6 +706,8 @@ struct MoneyPanel: View {
     var candles: [MoneyCandle]? = nil
     /// [v25.553] 運動：卡面畫這一趟路線的形狀（WorkoutRoutePanel，取代運動插畫；不打地圖請求）
     var route: WorkoutRouteShape? = nil
+    /// [v25.564] 信用卡：卡面畫一張小卡片（WealthCardFacePanel：你選的卡面色、晶片、感應圖示、只有末四碼）
+    var cardFace: WealthCardFace? = nil
     /// [v25.527] 左下手寫字（沒給就用分類的英文字）
     var scriptWord: String? = nil
     var scriptCaps: String? = nil
@@ -726,6 +752,9 @@ struct MoneyPanel: View {
                 ZStack {
                     if let route, route.points.count >= 2 {
                         WorkoutRoutePanel(shape: route, theme: theme, dark: scheme == .dark)
+                            .equatable()
+                    } else if let cardFace {
+                        WealthCardFacePanel(face: cardFace, dark: scheme == .dark)
                             .equatable()
                     } else if let candles, candles.count >= 2 {
                         MoneyCandlePanel(candles: candles)
@@ -912,6 +941,8 @@ struct MoneyThumb: View {
     let photoURL: URL?
     /// [v25.553] 運動：小方塊畫這一趟路線的形狀（只畫線）；nil＝照舊
     var route: WorkoutRouteShape? = nil
+    /// [v25.564] 信用卡：小方塊畫小卡片（收起來的那幾張用緊湊模式）
+    var cardFace: WealthCardFace? = nil
 
     @Environment(\.colorScheme) private var scheme
     @State private var image: UIImage?
@@ -921,6 +952,9 @@ struct MoneyThumb: View {
         ZStack {
             if let route, route.points.count >= 2 {
                 WorkoutRoutePanel(shape: route, theme: theme, dark: scheme == .dark, compact: true)
+                    .equatable()
+            } else if let cardFace {
+                WealthCardFacePanel(face: cardFace, dark: scheme == .dark, compact: true)
                     .equatable()
             } else {
                 MoneyArtwork(theme: theme, seed: seed, layout: .thumb)

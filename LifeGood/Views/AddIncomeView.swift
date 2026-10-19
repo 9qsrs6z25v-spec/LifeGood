@@ -205,11 +205,13 @@ struct AddIncomeView: View {
 
     /// 存檔時的金額歷史：新增 → nil；沒問（金額沒改、單次收入）→ 照舊帶回（不要洗掉）；全部都改 → nil（每一期都是新金額）；
     /// 從這個月起 → 這個月以前每一期照原本算出來的金額不變、這個月 1 號起是新金額
+    /// [v25.564] 原本的歷史以財富帳本為準（還沒更新的 iPad 記一筆帳會把 Income.amountHistory 洗掉，帳本那份還在）
     private func savedAmountHistory(newAmount: Double) -> [AmountSnapshot]? {
         guard let prev = editing else { return nil }
-        guard let all = amountChangeAll else { return prev.amountHistory }
+        let prevHistory: [AmountSnapshot]? = lifeStore.wealthBook.incomeAmountHistory(prev.id) ?? prev.amountHistory
+        guard let all = amountChangeAll else { return prevHistory }
         if all { return nil }
-        return AmountHistoryChange.from(WealthCal.startOfMonth(Date()), history: prev.amountHistory ?? [],
+        return AmountHistoryChange.from(WealthCal.startOfMonth(Date()), history: prevHistory ?? [],
                                         current: prev.amount, firstDate: prev.date, newAmount: newAmount)
     }
 
@@ -744,6 +746,8 @@ struct AddIncomeView: View {
         )
         if isEditing { store.update(income) } else { store.add(income) }
         syncBankDeposit(for: income, previous: editing)
+        // [v25.564] 金額歷史也寫進財富帳本（另一個同步鍵：還沒更新的 iPad 存記帳不會把它洗掉；WealthFacts 以帳本為準）
+        lifeStore.setIncomeAmountHistory(income.id, income.amountHistory)
         dismiss()
     }
 

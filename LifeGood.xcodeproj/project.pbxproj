@@ -136,6 +136,13 @@
 		A01B000001001576 /* VehicleResale.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001576 /* VehicleResale.swift */; };
 		A01B000001001578 /* WealthFacts.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001578 /* WealthFacts.swift */; };
 		A01B000001001579 /* WealthBook.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001579 /* WealthBook.swift */; };
+		A01B000001001580 /* WealthPageData.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001580 /* WealthPageData.swift */; };
+		A01B000001001581 /* WealthCardData.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001581 /* WealthCardData.swift */; };
+		A01B000001001582 /* WealthBoard.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001582 /* WealthBoard.swift */; };
+		A01B000001001583 /* WealthBoardScenes.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001583 /* WealthBoardScenes.swift */; };
+		A01B000001001584 /* WealthItems.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001584 /* WealthItems.swift */; };
+		A01B000001001585 /* WealthCardViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001585 /* WealthCardViews.swift */; };
+		A01B000001001586 /* WealthEditors.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001586 /* WealthEditors.swift */; };
 		A01B000001001529 /* FinHouseScene.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001529 /* FinHouseScene.swift */; };
 		A01B000001001532 /* AppStores.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001532 /* AppStores.swift */; };
 		A01B000001001530 /* HouseCardViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001530 /* HouseCardViews.swift */; };
@@ -345,6 +352,13 @@
 		A01A000001001576 /* VehicleResale.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VehicleResale.swift; sourceTree = "<group>"; };
 		A01A000001001578 /* WealthFacts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WealthFacts.swift; sourceTree = "<group>"; };
 		A01A000001001579 /* WealthBook.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WealthBook.swift; sourceTree = "<group>"; };
+		A01A000001001580 /* WealthPageData.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WealthPageData.swift; sourceTree = "<group>"; };
+		A01A000001001581 /* WealthCardData.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WealthCardData.swift; sourceTree = "<group>"; };
+		A01A000001001582 /* WealthBoard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WealthBoard.swift; sourceTree = "<group>"; };
+		A01A000001001583 /* WealthBoardScenes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WealthBoardScenes.swift; sourceTree = "<group>"; };
+		A01A000001001584 /* WealthItems.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WealthItems.swift; sourceTree = "<group>"; };
+		A01A000001001585 /* WealthCardViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WealthCardViews.swift; sourceTree = "<group>"; };
+		A01A000001001586 /* WealthEditors.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WealthEditors.swift; sourceTree = "<group>"; };
 		A01A000001001529 /* FinHouseScene.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FinHouseScene.swift; sourceTree = "<group>"; };
 		A01A000001001532 /* AppStores.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppStores.swift; sourceTree = "<group>"; };
 		A01A000001001530 /* HouseCardViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HouseCardViews.swift; sourceTree = "<group>"; };
@@ -637,6 +651,8 @@
 				A01A000001001576 /* VehicleResale.swift */,
 				A01A000001001578 /* WealthFacts.swift */,
 				A01A000001001579 /* WealthBook.swift */,
+				A01A000001001580 /* WealthPageData.swift */,
+				A01A000001001581 /* WealthCardData.swift */,
 				A01A000001000020 /* LifeModels.swift */,
 				A01A000001000201 /* HealthModels.swift */,
 				A01A000001000204 /* ChildVaccineSchedule.swift */,
@@ -824,6 +840,11 @@
 				A01A000001001562 /* WorkoutShare.swift */,
 				A01A000001001566 /* HealthProgressCards.swift */,
 				A01A000001001568 /* WorkoutDetailExtras.swift */,
+				A01A000001001582 /* WealthBoard.swift */,
+				A01A000001001583 /* WealthBoardScenes.swift */,
+				A01A000001001584 /* WealthItems.swift */,
+				A01A000001001585 /* WealthCardViews.swift */,
+				A01A000001001586 /* WealthEditors.swift */,
 				A01A000001000102 /* FoodMapView.swift */,
 				A01A000001000200 /* TravelMapView.swift */,
 				A01A000001000226 /* TripPlanView.swift */,
@@ -1029,6 +1050,13 @@
 				A01B000001001576 /* VehicleResale.swift in Sources */,
 				A01B000001001578 /* WealthFacts.swift in Sources */,
 				A01B000001001579 /* WealthBook.swift in Sources */,
+				A01B000001001580 /* WealthPageData.swift in Sources */,
+				A01B000001001581 /* WealthCardData.swift in Sources */,
+				A01B000001001582 /* WealthBoard.swift in Sources */,
+				A01B000001001583 /* WealthBoardScenes.swift in Sources */,
+				A01B000001001584 /* WealthItems.swift in Sources */,
+				A01B000001001585 /* WealthCardViews.swift in Sources */,
+				A01B000001001586 /* WealthEditors.swift in Sources */,
 				A01B000001001529 /* FinHouseScene.swift in Sources */,
 				A01B000001001532 /* AppStores.swift in Sources */,
 				A01B000001001530 /* HouseCardViews.swift in Sources */,

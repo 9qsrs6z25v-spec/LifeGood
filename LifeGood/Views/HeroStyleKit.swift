@@ -245,7 +245,7 @@ enum HeroCard: String, CaseIterable, Identifiable {
         case .realEstate:          return "房地產"
         case .financeOverview:     return "理財總覽"
         case .financeChart:        return "理財圖表"
-        case .lifeFinance:         return "人生財務"
+        case .lifeFinance:         return "財富"   // [v25.564] 財富頁換成看板；rawValue 照舊（坑 #20）
         case .lifeRealEstate:      return "人生房地產"
         case .subordinateOverview: return "部屬總覽"
         case .subordinateList:     return "部屬列表"

@@ -104,7 +104,9 @@ enum LifeFeatureGate {
         case .overview, .resume:
             return true
         case .finance:
-            return life.milestones.contains { $0.category == .achievement }
+            // [v25.564] 財富頁一開始就出現（財富待決定 8）：以前要先記一筆「財富」里程碑，新手找不到在哪加帳戶，
+            // 記帳的扣款選單又要先有帳戶；最後一筆刪掉頁面還會直接跳走。沒有帳戶時是財富頁自己的空狀態
+            return true
         case .health:
             // [v25.553] 健康頁一開始就出現（待決定 7）：以前要先有健康里程碑或訓練紀錄才出現，
             // 新手找不到開始跑步的地方，「還沒解鎖」的提示又叫他去健康頁新增——那時健康頁根本還沒出現
@@ -147,10 +149,8 @@ enum LifeFeatureGate {
     /// 怎麼讓它出現。寫給使用者看的，所以講的是「做什麼」而不是「什麼欄位不為空」。
     static func unlockHint(_ feature: LifeFeature) -> String {
         switch feature {
-        case .overview, .resume, .health:   // [v25.553] 健康一開始就出現，不用提示
+        case .overview, .resume, .health, .finance:   // [v25.553] 健康、[v25.564] 財富一開始就出現，不用提示
             return ""
-        case .finance:
-            return "記一筆「財富」類的里程碑（開戶、信用卡、一筆投資…）"
         case .career:
             return "記一筆「職涯」類的里程碑（到職、升遷、調動…）"
         case .family:
@@ -171,8 +171,7 @@ enum LifeFeatureGate {
     /// 點一下要幫他開什麼。nil＝這件事得自己去那個頁面做。
     static func unlockAction(_ feature: LifeFeature) -> UnlockAction? {
         switch feature {
-        case .overview, .resume, .health: return nil   // [v25.553] 健康一開始就出現
-        case .finance:    return .addMilestone(.achievement)
+        case .overview, .resume, .health, .finance: return nil   // [v25.553] 健康、[v25.564] 財富一開始就出現
         case .career:     return .addMilestone(.career)
         case .family:     return .addMilestone(.family)
         case .realEstate: return .addRealEstate
@@ -1444,11 +1443,8 @@ struct MainTabView: View {
         case .overview: LifeOverviewView()
         case .resume: ResumeView()
         case .finance:
-            if hasFinanceMilestones {
-                LifeFinanceView()
-            } else {
-                LifeOverviewView()
-            }
+            // [v25.564] 一開始就出現：沒有帳戶時是財富頁自己的空狀態（不再退回人生總覽）
+            LifeFinanceView()
         case .career:
             // 有選子功能 → 顯示對應的管理 view；否則回到 CareerView
             if let m = managementFeature {
@@ -1503,16 +1499,12 @@ struct MainTabView: View {
         }
     }
 
-    /// 這兩個在 lifeContent 的分支裡還會用到，所以留著；判斷本身跟 LifeFeatureGate 一致
+    /// 這個在 lifeContent 的分支裡還會用到，所以留著；判斷本身跟 LifeFeatureGate 一致（[v25.564] 財富一開始就出現，hasFinanceMilestones 拿掉）
     private var hasCareerMilestones: Bool {
         LifeFeatureGate.isUnlocked(.career, life: lifeStore,
                                    finance: financeStore, expense: expenseStore)
     }
 
-    private var hasFinanceMilestones: Bool {
-        LifeFeatureGate.isUnlocked(.finance, life: lifeStore,
-                                   finance: financeStore, expense: expenseStore)
-    }
 
 
     /// 順序就是 LifeFeature 的宣告順序（總覽、履歷、財富、健康、職涯、家庭、
