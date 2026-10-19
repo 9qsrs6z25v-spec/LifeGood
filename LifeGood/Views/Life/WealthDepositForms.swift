@@ -30,6 +30,8 @@ import SwiftUI
 //   （下一期的本金、起存日是照它算的；saveTimeDeposit 只換掉這一筆、不會拿掉下一期，改成轉活存錢會算兩次），要改請打開下一期。
 //   [審查] 到期轉活存結束的那一期沒有下一期，照樣可以改（記錯本金、利率改得回來）。
 // • 欄位連動用自訂 Binding（換帳戶、起存日、期別），不用 onChange：打開時帶值不會觸發連動、蓋掉帶進來的到期日。
+// • [v25.566 裁定] 整串都已經結束（到期轉回活存、解約）的定存，刪除只有一顆〔刪除〕、不給〔留著那一筆轉出〕：
+//   錢早就回到活存了，留著轉出＝只剩一筆提款、到期入帳那一列卻跟著拿掉，存摺上平白少本息（例 −508,500）。
 
 /// 定存表單（新增：editing nil；看／改：editing＝WealthFacts.TimeDeposit.id，自動續存還沒寫進帳本的那一期也可以）
 struct WealthTimeDepositSheet: View {
@@ -86,6 +88,7 @@ struct WealthTimeDepositSheet: View {
     private static let rateHint = "沒填利率就不估利息"
     private static let estimateHint = "利息只是預估（單利、未扣稅），以銀行入帳為準。"
     private static let reopenHint = "解約記錯了才按：這筆定存回到存著的樣子，解約那天的入帳拿掉。"
+    private static let endedDeleteHint = "這筆定存已經結束（到期轉回活存或解約）：刪掉的話，明細裡它算出來的那幾列（轉定存、到期入帳、利息）都一起拿掉，存摺上的數字跟著變。"
 
     // 打開時抓一次
     @State private var loaded = false
@@ -100,6 +103,9 @@ struct WealthTimeDepositSheet: View {
     @State private var chainCount = 1
     /// 起存時從活存轉出的本金（「500,000」；沒有＝nil：刪除只有一顆〔刪除〕）
     @State private var movedText: String?
+    /// [v25.566 裁定] 整串都結束了（到期轉回活存、解約；一套數字裡沒有任何一期還存著）：錢已經回到活存，
+    /// 刪除不給〔留著那一筆轉出〕（留著＝只剩一筆提款、到期入帳那一列卻拿掉了，存摺上平白少本息）
+    @State private var chainEnded = false
     /// 新增那一筆的 id（草稿每次重組都用同一個）
     @State private var newId = UUID()
     /// 編輯的那一期期別不在選單裡（例：18 個月）
@@ -427,10 +433,12 @@ struct WealthTimeDepositSheet: View {
         var parts: [String] = []
         if chainCount > 1 {
             parts.append("自動續存的那幾期也一起刪（共 \(chainCount) 期）。")
-        } else {
+        } else if !chainEnded {
             parts.append("刪掉後不再算進存款合計。")
         }
-        if let m = movedText {
+        if chainEnded {
+            parts.append(Self.endedDeleteHint)
+        } else if let m = movedText {
             let name: String = accountName
             parts.append("起存時從活存轉出的 \(m)：一起拿掉，錢回到\(name)；留著，記成一筆提款，存摺上的錢不回來。")
         }
@@ -884,7 +892,8 @@ struct WealthTimeDepositSheet: View {
         if let r = rec {
             fill(from: r)
             let legacy: Bool = list.first(where: { $0.id == r.bankId })?.legacy ?? false
-            countChain(r, through: day, legacy: legacy)
+            let holding: Set<UUID> = Set(facts.timeDeposits.map { $0.id })
+            countChain(r, through: day, legacy: legacy, holding: holding)
         } else {
             startNew(day)
         }
@@ -977,13 +986,17 @@ struct WealthTimeDepositSheet: View {
         prefillLegacy(id)
     }
 
-    /// 同一串有幾期、起存時從活存轉出多少（刪除時問；舊的定存種類帳戶不轉出）
-    private func countChain(_ r: WealthTimeDeposit, through day: Date, legacy: Bool) {
+    /// 同一串有幾期、起存時從活存轉出多少（刪除時問；舊的定存種類帳戶不轉出）。
+    /// holding：一套數字裡還在的那幾期（沒開始、存著、到期待決定；WealthFacts.timeDeposits 的 id）
+    private func countChain(_ r: WealthTimeDeposit, through day: Date, legacy: Bool, holding: Set<UUID>) {
         let all: [WealthTimeDeposit] = WealthDepositChain.terms(lifeStore.wealthDeposits.all, through: day).map { $0.deposit }
         let ids = WealthDepositChain.chainIds(containing: r.id, in: all)
         let chain: [WealthTimeDeposit] = all.filter { ids.contains($0.id) }
         chainCount = Swift.max(1, chain.count)
-        guard !legacy else {
+        // [v25.566 裁定] 整串都結束了：錢已經回到活存，刪除只有一顆〔刪除〕（見 chainEnded）
+        let ended: Bool = !chain.contains(where: { holding.contains($0.id) })
+        chainEnded = ended
+        guard !legacy, !ended else {
             movedText = nil
             return
         }

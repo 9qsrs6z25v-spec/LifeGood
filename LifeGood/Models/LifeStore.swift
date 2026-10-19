@@ -857,7 +857,12 @@ class LifeStore: ObservableObject {
         // [v25.563] 財富帳本裡它的設定（扣款帳戶的歷史、暱稱…）
         updateWealthBook { $0.remove(id) }
         // [v25.566] 這個帳戶的定存一起刪；別的定存還沒到期、說好轉進它的，改回轉進自己的帳戶
-        updateWealthDeposits { $0.removeBank(id, today: now) }
+        // [v25.566 驗證修正] 先寫進自動續存算出來的那幾期（同 save／setMaturity／close／delete）：上一期已經到期、
+        // 下一期還沒寫進帳本時，下一期照上一期的 payoutId 算，不先寫進來就改不到，到期的錢會轉進刪掉的帳戶、從合計消失
+        updateWealthDeposits { book in
+            if let rolled = book.rolledOver(through: WealthCal.day(now)) { book = rolled }
+            book.removeBank(id, today: now)
+        }
 
         var stocks = finance.stocks
         var stocksChanged = false

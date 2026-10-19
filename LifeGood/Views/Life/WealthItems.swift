@@ -30,7 +30,8 @@ import SwiftUI
 // • 活存帳戶裡有定存：多一顆膠囊「定存 50萬・3/15 到期」（遮住「定存 ••••・3/15 到期」），放在接下來那兩顆前面（一列放不下少放後面的）。
 // • 外幣帳戶：第二行「外幣・玉山」＋「約 NT$102,400（10/19 匯率 32.0）」（WealthFormat.fxNote；遮住只留「外幣・玉山」）；
 //   原本的「匯率 32.0」膠囊拿掉（字已經在第二行），「沒有匯率」那顆留著。
-// • 收起來的帳戶（⑧）不出 v5 的新東西：沒有進度條、定存那幾顆膠囊，卡面左上照舊「定存」（金額、金色卡照算）。
+// • 收起來的帳戶（⑧）不出 v5 的新東西：沒有進度條、定存那幾顆膠囊，卡面左上照舊「定存」（金色卡照算）。
+//   [v25.566 裁定] 金額也照 v4 寫存摺上：跟帳戶頁看板、四格、換帳戶列（WealthCardData：收起來的照舊）同一個數。
 // • WealthSheet 加 .timeDeposit(帳戶, 那一期)（定存表單 WealthTimeDepositSheet，要訂閱）。
 // • 定存的數字（本金、利息、到期日、天數、進度、狀態）一律讀 WealthFacts.TimeDeposit，這裡不自己算。
 
@@ -369,9 +370,10 @@ extension MoneyItem {
         return WealthBankLine(category: "定存 \(list.count) 筆", detail: next)
     }
 
-    /// [v25.566] 金額：定存帳戶（新的）一筆寫本金「NT$500,000」、好幾筆「約 NT$100萬」；舊的定存種類、其他照存摺上
+    /// [v25.566] 金額：定存帳戶（新的）一筆寫本金「NT$500,000」、好幾筆「約 NT$100萬」；舊的定存種類、其他照存摺上。
+    /// [v25.566 裁定] 收起來的（⑧）照存摺上：帳戶頁看板、換帳戶列收起來的也寫存摺上，同一個帳戶不要兩個數
     private static func wealthBankAmount(_ a: WealthFacts.Account) -> String {
-        guard a.showsAsDeposit, !a.isFixedDeposit, !a.timeDeposits.isEmpty else { return a.balanceText }
+        guard a.showsAsDeposit, !a.hidden, !a.isFixedDeposit, !a.timeDeposits.isEmpty else { return a.balanceText }
         if a.timeDeposits.count == 1, let t = a.timeDeposits.first {
             return WealthFormat.money(t.principal, code: t.code)
         }
