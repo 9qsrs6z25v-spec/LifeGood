@@ -208,13 +208,11 @@ struct UtilityPaymentEditor: View {
         return "未選擇"
     }
 
-    private func bankCurrencies(for ms: LifeMilestone) -> [String] {
-        let codes = (ms.bankDeposits ?? [])
-            .filter { !$0.isWithdrawal }
-            .map(\.currencyCode)
-        var unique: [String] = []
-        for c in codes where !unique.contains(c) { unique.append(c) }
-        return unique.isEmpty ? ["NT$"] : unique
+    /// [v25.563] 付款選單的銀行讀財富頁同一套（LifeStore.wealthFacts，快取；打字不重算）：
+    /// 「台新銀行（存摺 NT$12.8萬）」跟記帳、股票、財富頁同一個數；幣別含月薪入帳、記帳扣款用過的（D20）。
+    /// 注意這裡 store 是 FinanceStore
+    private var facts: WealthFacts {
+        lifeStore.wealthFacts(expense: expenseStore, finance: store)
     }
 
     /// [v25.560] 「哪一個表」：不指定＝算在這一種的第一個表
@@ -243,25 +241,39 @@ struct UtilityPaymentEditor: View {
         if !meterChoices.contains(where: { $0.id == id }) { meterId = nil }
     }
 
+    private func selectBank(_ id: UUID, code: String) {
+        selectedBankMilestoneId = id
+        selectedBankCurrency = code
+        selectedCreditCardMilestoneId = nil
+    }
+
+    /// 銀行一列：好幾個幣別 → 子選單「美金（存摺 美金 3,200）」；一個 → 直接選
     @ViewBuilder
-    private func bankSubMenu(for ms: LifeMilestone) -> some View {
-        let name = ms.bankName ?? ms.title
-        let currencies = bankCurrencies(for: ms)
-        if currencies.count > 1 {
-            Menu(name) {
-                ForEach(currencies, id: \.self) { code in
-                    Button(code) {
-                        selectedBankMilestoneId = ms.id
-                        selectedBankCurrency = code
-                        selectedCreditCardMilestoneId = nil
+    private func bankSubMenu(for acc: WealthFacts.Account) -> some View {
+        if acc.currencies.count > 1 {
+            Menu(acc.pickerLabel) {
+                ForEach(acc.currencies, id: \.self) { code in
+                    Button(acc.pickerLabel(code: code)) {
+                        selectBank(acc.id, code: code)
                     }
                 }
             }
         } else {
-            Button(name) {
-                selectedBankMilestoneId = ms.id
-                selectedBankCurrency = currencies.first ?? "NT$"
-                selectedCreditCardMilestoneId = nil
+            Button(acc.pickerLabel) {
+                selectBank(acc.id, code: acc.currencies.first ?? "NT$")
+            }
+        }
+    }
+
+    /// 付款選單的「銀行」那一段（沒收起來、不是定存的銀行：facts.pickerBanks）
+    @ViewBuilder
+    private var bankMenuSection: some View {
+        let banks = facts.pickerBanks
+        if !banks.isEmpty {
+            Section("銀行") {
+                ForEach(banks) { acc in
+                    bankSubMenu(for: acc)
+                }
             }
         }
     }
@@ -302,13 +314,7 @@ struct UtilityPaymentEditor: View {
                                     selectedBankCurrency = "NT$"
                                     selectedCreditCardMilestoneId = nil
                                 }
-                                if !bankMilestones.isEmpty {
-                                    Section("銀行") {
-                                        ForEach(bankMilestones) { ms in
-                                            bankSubMenu(for: ms)
-                                        }
-                                    }
-                                }
+                                bankMenuSection
                                 if !creditCardMilestones.isEmpty {
                                     Section("信用卡") {
                                         ForEach(creditCardMilestones) { card in

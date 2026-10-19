@@ -87,6 +87,10 @@ struct Income: Identifiable, Codable {
     var endDate: Date?
     /// 固定薪水結束原因（僅標示用途）。
     var endReason: SalaryEndReason?
+    /// [v25.563] 金額歷史（照 Expense.amountHistory：一筆＝「從 date 那天起是 amount」）。
+    /// 改月薪時問「從這個月起，還是全部都改？」，從這個月起就補一筆；財富頁的入帳每一期照當時的金額（D9）。
+    /// nil 或空＝每一期都是現在的 amount（舊資料，跟以前一樣）
+    var amountHistory: [AmountSnapshot]?
 
     init(
         id: UUID = UUID(),
@@ -101,7 +105,8 @@ struct Income: Identifiable, Codable {
         linkedBankMilestoneId: UUID? = nil,
         linkedBankCurrency: String? = nil,
         endDate: Date? = nil,
-        endReason: SalaryEndReason? = nil
+        endReason: SalaryEndReason? = nil,
+        amountHistory: [AmountSnapshot]? = nil
     ) {
         self.id = id
         self.title = title
@@ -116,6 +121,7 @@ struct Income: Identifiable, Codable {
         self.linkedBankCurrency = linkedBankCurrency
         self.endDate = endDate
         self.endReason = endReason
+        self.amountHistory = amountHistory
     }
 
     init(from decoder: Decoder) throws {
@@ -133,9 +139,12 @@ struct Income: Identifiable, Codable {
         linkedBankCurrency = try? c.decodeIfPresent(String.self, forKey: .linkedBankCurrency)
         endDate = try? c.decodeIfPresent(Date.self, forKey: .endDate)
         endReason = try? c.decodeIfPresent(SalaryEndReason.self, forKey: .endReason)
+        amountHistory = try? c.decodeIfPresent([AmountSnapshot].self, forKey: .amountHistory)
     }
+    // ⚠️ 沒有自訂 encode(to:)：編碼走合成版、只認這裡的 CodingKeys（amountHistory 漏在這裡就存不進去）
     private enum CodingKeys: String, CodingKey {
         case id, title, amount, date, category, period, isFixedSalary, note, linkedStockId, linkedBankMilestoneId, linkedBankCurrency, endDate, endReason
+        case amountHistory
     }
 
     /// 換算月收入

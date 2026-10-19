@@ -102,10 +102,14 @@ struct AddExpenseView: View {
     /// 存檔中鎖住儲存按鈕，避免 sheet 收合動畫播完前快速連點建立兩筆重複紀錄
     /// （同型修復見 AddIncomeView／AddVehicleView／AddStockView 等 isSaving 既有寫法）
     @State private var isSaving = false
-    /// 扣款帳戶選單的銀行餘額快取：allBankBalances() 內部雖已改為批次建表，
-    /// 但 bankPicker 是 Form body 的一部分，每次按鍵都會重新求值、重建整批表——
-    /// 改為只在 store.expenses／lifeStore.milestones 實際變動時（.task(id:)）才重算一次快取。
-    @State private var cachedBankBalances: [UUID: Double] = [:]
+    // [v25.563] 扣款帳戶選單的餘額改讀 lifeStore.wealthFacts（全 App 一份、LifeStore 快取，打字不重算），
+    // 以前那份自己算的銀行餘額快取（另一套簡化餘額，D18）拿掉了。
+    /// [v25.563] 改了週期性固定支出的金額：以前扣過的那幾期要不要跟著改（D9）。nil＝還沒問；false＝從今天起；true＝全部都改
+    @State private var amountChangeAll: Bool?
+    /// [v25.563] 正在問「從今天起／全部都改」（AmountFromDialog）
+    @State private var amountAsk: AmountFromAsk?
+    /// [v25.563] 打開編輯時的金額欄、幣別（沒動過金額就不問：舊資料帶回時 %.0f、外幣除匯率會跟原本差一點）
+    @State private var loadedAmountKey = ""
     // 即時金額預覽卡進場動畫旗標
     @State private var amountCardAppeared = false
 
@@ -629,6 +633,8 @@ struct AddExpenseView: View {
             // 改為合併成單一「連結欄位簽章」字串，任一欄位變動即觸發自動命名。
             .onChange(of: autoTitleSignature) { _, _ in applyAutoTitleIfLinked() }
             .onDisappear { completerDebounceTask?.cancel() }
+            // [v25.563] 改固定支出金額時問「從今天起／全部都改」（D9）；選了才真的存
+            .modifier(AmountFromDialog(ask: $amountAsk, onPick: pickAmountFrom))
         }
     }
 
@@ -826,7 +832,8 @@ struct AddExpenseView: View {
             }
 
             // 扣款目標（進階模式或固定支出才顯示）
-            if showBankPicker && !isSavingsInsurance {
+            // [v25.563] 儲蓄險也可以選從哪扣（以前選不到）；外幣保單只列同幣別的子帳戶和信用卡（bankChoices）
+            if showBankPicker {
                 bankPicker
             }
 
@@ -1508,57 +1515,73 @@ struct AddExpenseView: View {
         allCreditCardMilestones.filter { $0.isDisabled != true }
     }
 
-    private func bankCurrencies(for ms: LifeMilestone) -> [String] {
-        let codes = (ms.bankDeposits ?? [])
-            .filter { !$0.isWithdrawal }
-            .map(\.currencyCode)
-        var unique: [String] = []
-        for c in codes where !unique.contains(c) { unique.append(c) }
-        return unique.isEmpty ? ["NT$"] : unique
+    // [v25.563] 這個帳戶有哪些幣別、選單括號裡的數字都改讀 lifeStore.wealthFacts（同一套數字，D18、D20、C1、C2）：
+    // 以前這裡自己一份「帳戶有哪些幣別」（只看存款紀錄的幣別，美金月薪入帳的玉山選不到美金）
+    // 和一份簡化餘額（不展開固定支出、月薪、不換匯、卡費照刷卡日扣：台新寫成 5.1 萬）。
+
+    /// 儲蓄險而且保單是外幣：扣款只能扣同幣別的子帳戶（例：美元保單只列「玉山 · 美金」），回那個幣別；其他 nil
+    private var savingsForeignCode: String? {
+        guard isSavingsInsurance, !FinanceRates.isNTD(insCurrencyCode) else { return nil }
+        return WealthFacts.norm(insCurrencyCode)
     }
 
-    /// 計算全部銀行的目前總額（含信用卡彙總扣款），一次算好整批供 bankPicker 查表。
-    /// 原本 bankBalance(for:) 每次呼叫都對 store.expenses 做 first(where:)/filter 全量掃描，
-    /// 而 bankPicker 是 Form body 的一部分，金額欄位每次按鍵都會觸發整個 body 重新求值——
-    /// 銀行/信用卡選單因此在打字時對 expenses 反覆全量掃描（O(deposits × expenses) 每次按鍵）。
-    /// 改為批次建表：expensesById／expensesByCardMilestone 各建一次，銀行逐筆查表 O(1)。
-    private func allBankBalances() -> [UUID: Double] {
-        let now = Date()
-        let expensesById = Dictionary(store.expenses.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-        let expensesByCardMilestone = Dictionary(grouping: store.expenses.filter {
-            $0.linkedCreditCardMilestoneId != nil && $0.date <= now
-        }, by: { $0.linkedCreditCardMilestoneId! })
-        var result: [UUID: Double] = [:]
-        for ms in bankMilestones {
-            var total: Double = 0
-            for dep in ms.bankDeposits ?? [] {
-                guard dep.date <= now else { continue }
-                if let expId = dep.linkedExpenseId,
-                   let exp = expensesById[expId],
-                   exp.linkedCreditCardMilestoneId != nil {
-                    continue
+    /// 扣款選單「銀行」那一段：沒收起來、不是定存的銀行（facts.pickerBanks）；外幣儲蓄險只留有那個幣別的
+    private func bankChoices(_ facts: WealthFacts) -> [WealthFacts.Account] {
+        guard let code = savingsForeignCode else { return facts.pickerBanks }
+        return facts.pickerBanks.filter { $0.currencies.contains(code) }
+    }
+
+    /// 這個帳戶可以選的幣別：外幣儲蓄險只有保單那個幣別；其他照帳戶有的幣別（台幣在前）
+    private func bankChoiceCodes(_ acc: WealthFacts.Account) -> [String] {
+        if let code = savingsForeignCode { return [code] }
+        return acc.currencies
+    }
+
+    /// 選了某個銀行的某個幣別（清掉信用卡）
+    private func pickBank(_ id: UUID, code: String) {
+        selectedBankMilestoneId = id
+        selectedBankCurrency = code
+        selectedCreditCardMilestoneId = nil
+    }
+
+    /// 銀行一列：好幾個幣別是子選單「美金（存摺 美金 3,200）」；一個幣別直接一顆「台新銀行（存摺 NT$12.8萬）」
+    @ViewBuilder
+    private func bankChoiceRow(_ acc: WealthFacts.Account) -> some View {
+        let codes = bankChoiceCodes(acc)
+        if codes.count > 1 {
+            Menu(acc.pickerLabel) {
+                ForEach(codes, id: \.self) { code in
+                    Button(acc.pickerLabel(code: code)) { pickBank(acc.id, code: code) }
                 }
-                total += dep.isWithdrawal ? -dep.amount : dep.amount
             }
-            let cards = lifeStore.milestones.filter {
-                $0.financeSubCategory == .creditCard && $0.linkedBankMilestoneId == ms.id
-            }
-            for card in cards {
-                for exp in expensesByCardMilestone[card.id] ?? [] { total -= exp.amount }
-            }
-            result[ms.id] = total
+        } else {
+            Button(singleChoiceLabel(acc, code: codes.first ?? "NT$")) { pickBank(acc.id, code: codes.first ?? "NT$") }
         }
-        return result
     }
 
-    // 【美化方向】扣款帳戶選單餘額格式：先前這裡自製 NumberFormatter + 手刻「NT$ X萬」
-    // （NT$ 後多一個空白、萬以下無小數），與 App 其餘 28 處畫面（FinanceOverviewView／
-    // RealEstateView／StockView／SavingsInsuranceView 等）共用的 Double.ntdWanString
-    // （"NT$1.2萬" 無空白、億以上自動進位、非整數保留一位小數）風格不一致，
-    // 也會把 45,000 這類金額捨去小數顯示成「NT$ 5萬」。改呼叫共用 ntdWanString，
-    // 與全 App 金額量級顯示規則對齊。純視覺調整，未變動帳戶餘額計算邏輯。
-    private func formatBankBalance(_ value: Double) -> String {
-        value.ntdWanString
+    /// 一個幣別那一列的字：帳戶本來就只有一個幣別 →「台新銀行（存摺 NT$12.8萬）」；
+    /// 外幣儲蓄險從好幾個幣別裡只留保單那一個 →「玉山銀行 · 美金（存摺 美金 3,200）」（括號是那個幣別的數字，不是整個帳戶的）
+    private func singleChoiceLabel(_ acc: WealthFacts.Account, code: String) -> String {
+        guard acc.currencies.count > 1 else { return acc.pickerLabel }
+        return "\(acc.name) · \(acc.pickerLabel(code: code))"
+    }
+
+    /// 信用卡一列：「CUBE → 國泰世華（存摺 NT$8.6萬）」；卡沒連銀行（或銀行不在了）只寫卡名
+    private func cardChoiceLabel(_ card: LifeMilestone, facts: WealthFacts) -> String {
+        let cardName = card.cardName ?? card.title
+        guard let bank = facts.account(card.linkedBankMilestoneId) else { return cardName }
+        return "\(cardName) → \(bank.pickerLabel)"
+    }
+
+    /// [v25.563] 改了外幣儲蓄險的幣別：已選的銀行幣別跟新的保單幣別不一樣就清掉銀行（選的是信用卡不動）。
+    /// 寫在幣別選單的按鈕裡、不用 onChange：onChange 在打開編輯（loadEditing 帶回幣別）時也會跑，舊資料會被默默清掉
+    private func setInsCurrency(_ code: String) {
+        insCurrencyCode = code
+        guard selectedCreditCardMilestoneId == nil, selectedBankMilestoneId != nil,
+              !FinanceRates.isNTD(code),
+              WealthFacts.norm(selectedBankCurrency) != WealthFacts.norm(code) else { return }
+        selectedBankMilestoneId = nil
+        selectedBankCurrency = "NT$"
     }
 
     private var bankPickerLabel: String {
@@ -1579,8 +1602,12 @@ struct AddExpenseView: View {
         return "未選擇"
     }
 
+    /// [v25.563] 扣款目標選單：數字讀 lifeStore.wealthFacts（快取，打字不重算；跟財富頁、股票、房屋水電選單同一個數）
     private var bankPicker: some View {
-        HStack {
+        let facts = lifeStore.wealthFacts(expense: store, finance: financeStore)
+        let banks = bankChoices(facts)
+        let cards = creditCardMilestones
+        return HStack {
             Text("扣款目標").foregroundStyle(.secondary)
             Spacer()
             Menu {
@@ -1589,43 +1616,17 @@ struct AddExpenseView: View {
                     selectedBankCurrency = "NT$"
                     selectedCreditCardMilestoneId = nil
                 }
-                if !bankMilestones.isEmpty {
+                if !banks.isEmpty {
                     Section("銀行") {
-                        ForEach(bankMilestones) { ms in
-                            let currencies = bankCurrencies(for: ms)
-                            let name = ms.bankName ?? ms.title
-                            let balanceLabel = "\(name)（\(formatBankBalance(cachedBankBalances[ms.id] ?? 0))）"
-                            if currencies.count > 1 {
-                                Menu(balanceLabel) {
-                                    ForEach(currencies, id: \.self) { code in
-                                        Button(code) {
-                                            selectedBankMilestoneId = ms.id
-                                            selectedBankCurrency = code
-                                            selectedCreditCardMilestoneId = nil
-                                        }
-                                    }
-                                }
-                            } else {
-                                Button(balanceLabel) {
-                                    selectedBankMilestoneId = ms.id
-                                    selectedBankCurrency = currencies.first ?? "NT$"
-                                    selectedCreditCardMilestoneId = nil
-                                }
-                            }
+                        ForEach(banks) { acc in
+                            bankChoiceRow(acc)
                         }
                     }
                 }
-                if !creditCardMilestones.isEmpty {
+                if !cards.isEmpty {
                     Section("信用卡") {
-                        ForEach(creditCardMilestones) { card in
-                            let cardName = card.cardName ?? card.title
-                            let bankInfo: String? = {
-                                guard let bankId = card.linkedBankMilestoneId,
-                                      let bank = bankMilestones.first(where: { $0.id == bankId }) else { return nil }
-                                let bankName = bank.bankName ?? bank.title
-                                return "\(bankName)（\(formatBankBalance(cachedBankBalances[bank.id] ?? 0))）"
-                            }()
-                            Button(bankInfo.map { "\(cardName) → \($0)" } ?? cardName) {
+                        ForEach(cards) { card in
+                            Button(cardChoiceLabel(card, facts: facts)) {
                                 selectedCreditCardMilestoneId = card.id
                                 selectedBankMilestoneId = card.linkedBankMilestoneId
                                 selectedBankCurrency = "NT$"
@@ -1640,11 +1641,6 @@ struct AddExpenseView: View {
                     Image(systemName: "chevron.down").font(.caption2).foregroundStyle(.secondary)
                 }
             }
-        }
-        // 只在 store.expenses／lifeStore.milestones 實際變動時重算快取，而非每次按鍵都觸發的
-        // body 重新求值都重建批次表（見 cachedBankBalances 宣告處說明）。
-        .task(id: "\(store.modifyID)-\(lifeStore.milestones.count)") {
-            cachedBankBalances = allBankBalances()
         }
     }
 
@@ -3047,8 +3043,9 @@ struct AddExpenseView: View {
                     Text("幣別")
                     Spacer()
                     Menu {
+                        // [v25.563] setInsCurrency：保單改成外幣時，扣款選的銀行幣別不一樣就清掉
                         Button {
-                            insCurrencyCode = "NT$"
+                            setInsCurrency("NT$")
                         } label: {
                             if insCurrencyCode == "NT$" {
                                 Label("NT$", systemImage: "checkmark")
@@ -3058,7 +3055,7 @@ struct AddExpenseView: View {
                         }
                         ForEach(store.currencyRates) { rate in
                             Button {
-                                insCurrencyCode = rate.code
+                                setInsCurrency(rate.code)
                             } label: {
                                 if insCurrencyCode == rate.code {
                                     Label("\(rate.code)（1=\(rateDisplay(rate.rate)) 元）", systemImage: "checkmark")
@@ -3371,6 +3368,52 @@ struct AddExpenseView: View {
         }
     }
 
+    // MARK: - [v25.563] 改固定支出金額問「從今天起／全部都改」（D9）
+
+    /// 金額欄、幣別的樣子（loadEditing 最後記一份到 loadedAmountKey；沒動過金額就不問）
+    private var amountKey: String { "\(amountText)|\(selectedCurrencyCode)|\(insCurrencyCode)" }
+
+    /// 要不要問：編輯中的週期性固定支出、表單還是固定支出、金額欄動過而且金額真的變了、第一期在今天以前、還沒選過。
+    /// 要問回確認框的字；不用問回 nil。name：存檔用的名稱
+    private func amountChangeAsk(candidate: Double, title name: String) -> AmountFromAsk? {
+        guard amountChangeAll == nil,
+              let e = editingExpense,
+              e.expenseType == .fixed, e.recurrence != nil,
+              expenseType == .fixed,
+              amountKey != loadedAmountKey,
+              Swift.abs(candidate - e.amount) > 0.004,
+              WealthCal.day(e.date) < WealthCal.day(Date()) else { return nil }
+        // 外幣儲蓄險的金額是原幣（e.originalCurrencyAmount）；其他都是台幣
+        let oldCode = e.originalCurrencyAmount?.code ?? "NT$"
+        let newCode = isSavingsInsurance ? WealthFacts.norm(insCurrencyCode) : "NT$"
+        let oldText = WealthFormat.money(e.amount, code: oldCode)
+        let newText = WealthFormat.money(candidate, code: newCode)
+        let linked = selectedBankMilestoneId != nil || selectedCreditCardMilestoneId != nil
+        let why = linked ? "財富頁銀行的數字照這個算。" : "固定支出頁的金額走勢照這個記。"
+        return AmountFromAsk(
+            title: "\(name)從 \(oldText) 改成 \(newText)",
+            message: "以前扣過的那幾期要不要跟著改？" + why,
+            fromLabel: "從今天起（以前的照舊）",
+            allLabel: "全部都改（以前的也算 \(newText)）"
+        )
+    }
+
+    /// 確認框選了（all：全部都改）：記下來、再存一次（這次不會再問）
+    private func pickAmountFrom(_ all: Bool) {
+        amountChangeAll = all
+        saveExpense()
+    }
+
+    /// 存檔時的金額歷史：沒問（新增、金額沒改、不是週期性）→ 照舊帶回；全部都改 → 清空（每一期都是新金額）；
+    /// 從今天起 → 今天以前每一期照原本算出來的金額不變、今天起是新金額（同固定支出頁「更新金額」記今天）
+    private func savedAmountHistory(newAmount: Double) -> [AmountSnapshot] {
+        guard let prev = editingExpense else { return [] }
+        guard let all = amountChangeAll else { return prev.amountHistory }
+        if all { return [] }
+        return AmountHistoryChange.from(Date(), history: prev.amountHistory, current: prev.amount,
+                                        firstDate: prev.date, newAmount: newAmount)
+    }
+
     // MARK: - 儲存
 
     private func saveExpense() {
@@ -3438,6 +3481,14 @@ struct AddExpenseView: View {
             withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
                 showValidationError = true
             }
+            return
+        }
+
+        // [v25.563] 改了週期性固定支出的金額：先問以前扣過的那幾期要不要跟著改（D9）；選了 pickAmountFrom 再叫一次這裡。
+        // 金額算法跟下面存檔同一條（儲蓄險是原幣，其他換台幣）
+        let candidateAmount = isSavingsInsurance ? rawAmount : rawAmount * currencyMultiplier
+        if let ask = amountChangeAsk(candidate: candidateAmount, title: trimmedTitle) {
+            amountAsk = ask
             return
         }
 
@@ -3612,7 +3663,8 @@ struct AddExpenseView: View {
             endReason: (expenseType == .fixed && hasEndDate) ? endReason : nil
         )
         // 金額歷史（不在 memberwise init）：編輯重建時帶回，不然存個檔走勢就被清空
-        expense.amountHistory = editingExpense?.amountHistory ?? []
+        // [v25.563] 改了金額而且選了「從今天起／全部都改」照選的寫（D9；savedAmountHistory）
+        expense.amountHistory = savedAmountHistory(newAmount: amount)
         // [v2 小工具] 「從小工具一按記的」標記（不在 memberwise init）：編輯那一筆不要把它洗掉（電子發票防重複看它）
         expense.fromQuickRecord = editingExpense?.fromQuickRecord
         // 充電資訊：只在「變動＋關聯汽車＋電費」時存（比照子分類條件化原則）
@@ -3666,7 +3718,7 @@ struct AddExpenseView: View {
             return
         }
         // [v25.562] 連到的股票自己有交割帳戶（股票頁選了銀行或證券戶）：銀行的錢只看股票自己寫的交割紀錄，
-        // 這筆記帳不再寫扣款（不然同一筆買進扣兩次）；跟財富頁算餘額的 bankDepositIsReplaced 同一條。
+        // 這筆記帳不再寫扣款（不然同一筆買進扣兩次）；跟財富頁算餘額的 WealthFacts.isReplaced 同一條。
         // 只清掉目前這個帳戶裡以前寫的那筆。記帳「買 0050（台新）」建出來、還沒選交割帳戶的股票照扣。
         if let sid = expense.linkedStockId,
            financeStore.stocks.first(where: { $0.id == sid })?.hasOwnSettlementAccount == true {
@@ -4370,6 +4422,9 @@ struct AddExpenseView: View {
         if expense.placeLatitude != nil || expense.placeLongitude != nil {
             placeScopeStamp = placeScopeKey
         }
+
+        // [v25.563] 記下帶回來的金額欄、幣別：存檔時沒動過就不問「從今天起／全部都改」（amountChangeAsk）
+        loadedAmountKey = amountKey
     }
 
     /// 同步汽車變動支出到理財模式的汽車
@@ -4560,6 +4615,65 @@ func guessUtilityType(title: String, note: String = "", estateName: String) -> U
     }
     cleanedNote = cleanedNote.replacingOccurrences(of: RealEstateExpenseCategory.utility.rawValue, with: " ")
     return match(cleaned) ?? match(cleanedNote) ?? .electricity
+}
+
+// MARK: - [v25.563] 改金額問「從哪時候起」（D9；記帳表單的固定支出、收入表單共用）
+
+/// 確認框的字（每次問都是新的 id）
+struct AmountFromAsk: Identifiable {
+    let id = UUID()
+    /// 「中華電信從 NT$1,399 改成 NT$1,500」
+    let title: String
+    let message: String
+    /// 「從今天起（以前的照舊）」「從這個月起（10 月）」
+    let fromLabel: String
+    /// 「全部都改（以前的也算 NT$1,500）」
+    let allLabel: String
+}
+
+/// 〔從今天起／從這個月起〕〔全部都改〕〔取消〕；選了叫 onPick（true＝全部都改），取消什麼都不做（不存）
+struct AmountFromDialog: ViewModifier {
+    @Binding var ask: AmountFromAsk?
+    let onPick: (Bool) -> Void
+
+    func body(content: Content) -> some View {
+        content.confirmationDialog(ask?.title ?? "", isPresented: shown, titleVisibility: .visible,
+                                   presenting: ask) { a in
+            Button(a.fromLabel) { onPick(false) }
+            Button(a.allLabel) { onPick(true) }
+            Button("取消", role: .cancel) {}
+        } message: { a in
+            Text(a.message)
+        }
+    }
+
+    private var shown: Binding<Bool> {
+        Binding(get: { ask != nil }, set: { if !$0 { ask = nil } })
+    }
+}
+
+/// 改金額「從某天起」的金額歷史（一筆＝「從 date 那天起是 amount」；WealthSchedule.amount 照這個取每一期的金額）
+enum AmountHistoryChange {
+    /// cutoff 那天（含）起是 newAmount；cutoff 以前每一期照原本算出來的金額不變。
+    /// history／current／firstDate：原本的金額歷史、原本的金額、原本的第一期日子。
+    /// 原本最後一筆是「跟著現在的金額」的（表單直接改過、沒補紀錄）：把那一筆釘成原本的金額，以前的才不會跟著變
+    static func from(_ cutoff: Date, history: [AmountSnapshot], current: Double, firstDate: Date,
+                     newAmount: Double) -> [AmountSnapshot] {
+        let start = WealthCal.day(cutoff)
+        let sorted = history.sorted { $0.date < $1.date }
+        // cutoff 前一天那一期原本算的金額（跟 WealthSchedule.amount 同一條）
+        let before = WealthSchedule.amount(at: WealthCal.addDays(-1, to: start), current: current, sortedHistory: sorted)
+        var kept = sorted.filter { WealthCal.day($0.date) < start }
+        if let last = kept.last {
+            if Swift.abs(last.amount - before) > 0.004 {
+                kept[kept.count - 1] = AmountSnapshot(id: last.id, date: last.date, amount: before)
+            }
+        } else {
+            kept = [AmountSnapshot(date: firstDate, amount: before)]
+        }
+        kept.append(AmountSnapshot(date: cutoff, amount: newAmount))
+        return kept
+    }
 }
 
 // MARK: - 地點候選資料型別

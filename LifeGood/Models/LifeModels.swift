@@ -826,11 +826,24 @@ struct BankDeposit: Identifiable, Codable {
     var isAdjust: Bool
     /// 備註（沖正調整原因等）
     var note: String?
+    /// [v25.563] 這一筆是什麼（BankDeposit.kindAnchor 等字串；nil＝舊資料，照 isWithdrawal／isAdjust／連結判斷）。
+    /// 存字串不存列舉：之後多一種，舊版讀不懂也只是 nil，整筆照樣讀得進來
+    var kind: String?
+    /// [v25.563] 對存摺：存摺上的數字（那天結束時）。amount／isWithdrawal 照寫「差額」，還沒更新的 iPad 照舊當加減
+    var anchorAmount: Double?
+    /// [v25.563] 轉帳：兩邊同一個 id（刪一邊時問要不要兩筆一起刪）
+    var transferPairId: UUID?
+    /// [v25.563] 轉帳：對方是哪個帳戶（「轉給 國泰世華」）
+    var counterpartyId: UUID?
+    /// [v25.563] 轉帳換匯用的匯率（1 外幣＝幾台幣；兩邊同幣別是 nil）
+    var fxRate: Double?
 
     init(id: UUID = UUID(), date: Date = Date(), amount: Double = 0,
          currencyCode: String = "NT$", isWithdrawal: Bool = false,
          linkedExpenseId: UUID? = nil, linkedStockId: UUID? = nil,
-         isAdjust: Bool = false, note: String? = nil) {
+         isAdjust: Bool = false, note: String? = nil,
+         kind: String? = nil, anchorAmount: Double? = nil,
+         transferPairId: UUID? = nil, counterpartyId: UUID? = nil, fxRate: Double? = nil) {
         self.id = id; self.date = date; self.amount = amount
         self.currencyCode = currencyCode
         self.isWithdrawal = isWithdrawal
@@ -838,6 +851,11 @@ struct BankDeposit: Identifiable, Codable {
         self.linkedStockId = linkedStockId
         self.isAdjust = isAdjust
         self.note = note
+        self.kind = kind
+        self.anchorAmount = anchorAmount
+        self.transferPairId = transferPairId
+        self.counterpartyId = counterpartyId
+        self.fxRate = fxRate
     }
 
     init(from decoder: Decoder) throws {
@@ -851,11 +869,38 @@ struct BankDeposit: Identifiable, Codable {
         linkedStockId = try? c.decodeIfPresent(UUID.self, forKey: .linkedStockId)
         isAdjust = (try? c.decode(Bool.self, forKey: .isAdjust)) ?? false
         note = try? c.decodeIfPresent(String.self, forKey: .note)
+        // [v25.563] 下面五個舊資料沒有＝nil（跟 CodingKeys 的第二行成對）
+        kind = try? c.decodeIfPresent(String.self, forKey: .kind)
+        anchorAmount = try? c.decodeIfPresent(Double.self, forKey: .anchorAmount)
+        transferPairId = try? c.decodeIfPresent(UUID.self, forKey: .transferPairId)
+        counterpartyId = try? c.decodeIfPresent(UUID.self, forKey: .counterpartyId)
+        fxRate = try? c.decodeIfPresent(Double.self, forKey: .fxRate)
     }
 
+    // ⚠️ 沒有自訂 encode(to:)：編碼走合成版、只認這裡的 CodingKeys，新欄位漏在這裡就存不進去
     private enum CodingKeys: String, CodingKey {
         case id, date, amount, currencyCode, isWithdrawal, linkedExpenseId, linkedStockId, isAdjust, note
+        case kind, anchorAmount, transferPairId, counterpartyId, fxRate
     }
+}
+
+// MARK: - [v25.563] BankDeposit.kind 的值（財富 v2：對存摺、轉帳；judge §3.14）
+
+extension BankDeposit {
+    static let kindDeposit = "deposit"
+    static let kindWithdrawal = "withdrawal"
+    static let kindInterest = "interest"
+    static let kindFee = "fee"
+    static let kindTransfer = "transfer"
+    /// 對存摺：anchorAmount＝存摺上的數字，以後從這裡往後算（WealthFacts）
+    static let kindAnchor = "anchor"
+    static let kindOpening = "opening"
+    static let kindMaturity = "maturity"
+
+    /// 對存摺那一筆（有存摺上的數字才算；舊 iPad 存過一次會變回普通的沖正差額，照加減算也對得上）
+    var isAnchor: Bool { kind == Self.kindAnchor && anchorAmount != nil }
+    /// 轉帳的一邊
+    var isTransfer: Bool { transferPairId != nil || kind == Self.kindTransfer }
 }
 
 // MARK: - 理財子分類

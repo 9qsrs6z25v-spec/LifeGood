@@ -76,6 +76,10 @@ struct AddIncomeView: View {
     // 儲存為同步寫回 store 後立即 dismiss()，sheet 收合動畫期間按鈕仍可觸發，
     // 快速連點會建立兩筆重複收入紀錄；補上忙碌守衛比照 AddRealEstateView 既有修法。
     @State private var isSaving = false
+    /// [v25.563] 改了月薪（週期性收入）的金額：以前的月份要不要跟著改（D9）。nil＝還沒問；false＝從這個月起；true＝全部都改
+    @State private var amountChangeAll: Bool?
+    /// [v25.563] 正在問「從這個月起／全部都改」（AmountFromDialog，定義在 AddExpenseView.swift）
+    @State private var amountAsk: AmountFromAsk?
 
     private var isEditing: Bool { editing != nil }
     private var isSalary: Bool { category == .salary }
@@ -92,14 +96,8 @@ struct AddIncomeView: View {
         }
     }
 
-    private func bankCurrencies(for ms: LifeMilestone) -> [String] {
-        let codes = (ms.bankDeposits ?? [])
-            .filter { !$0.isWithdrawal }
-            .map(\.currencyCode)
-        var unique: [String] = []
-        for c in codes where !unique.contains(c) { unique.append(c) }
-        return unique.isEmpty ? ["NT$"] : unique
-    }
+    // [v25.563] 這個帳戶有哪些幣別、選單括號裡的數字改讀 lifeStore.wealthFacts（同一套數字，D18、D20、C2）：
+    // 以前這裡自己一份「帳戶有哪些幣別」只看存款紀錄，美金月薪入帳（展開、不寫紀錄）的玉山選不到美金
 
     private var bankPickerLabel: String {
         if let id = selectedBankMilestoneId,
@@ -133,9 +131,11 @@ struct AddIncomeView: View {
 
     // MARK: - bankPicker
 
-    @ViewBuilder
+    /// [v25.563] 入帳銀行選單：「台新銀行（存摺 NT$12.8萬）」，數字讀 lifeStore.wealthFacts（快取，打字不重算；
+    /// 跟財富頁、記帳、股票、房屋水電選單同一個數）；收起來的、定存不列（facts.pickerBanks）
     private var bankPicker: some View {
-        HStack {
+        let banks = lifeStore.wealthFacts(expense: store, finance: financeStore).pickerBanks
+        return HStack {
             Text("入帳銀行").foregroundStyle(.secondary)
             Spacer()
             Menu {
@@ -143,24 +143,8 @@ struct AddIncomeView: View {
                     selectedBankMilestoneId = nil
                     selectedBankCurrency = "NT$"
                 }
-                ForEach(bankMilestones) { ms in
-                    let currencies = bankCurrencies(for: ms)
-                    let name = ms.bankName ?? ms.title
-                    if currencies.count > 1 {
-                        Menu(name) {
-                            ForEach(currencies, id: \.self) { code in
-                                Button(code) {
-                                    selectedBankMilestoneId = ms.id
-                                    selectedBankCurrency = code
-                                }
-                            }
-                        }
-                    } else {
-                        Button(name) {
-                            selectedBankMilestoneId = ms.id
-                            selectedBankCurrency = currencies.first ?? "NT$"
-                        }
-                    }
+                ForEach(banks) { acc in
+                    bankChoiceRow(acc)
                 }
             } label: {
                 HStack(spacing: 4) {
@@ -170,6 +154,63 @@ struct AddIncomeView: View {
                 }
             }
         }
+    }
+
+    /// 銀行一列：好幾個幣別是子選單「美金（存摺 美金 3,200）」；一個幣別直接一顆「台新銀行（存摺 NT$12.8萬）」
+    @ViewBuilder
+    private func bankChoiceRow(_ acc: WealthFacts.Account) -> some View {
+        let codes = acc.currencies
+        if codes.count > 1 {
+            Menu(acc.pickerLabel) {
+                ForEach(codes, id: \.self) { code in
+                    Button(acc.pickerLabel(code: code)) { pickBank(acc.id, code: code) }
+                }
+            }
+        } else {
+            Button(acc.pickerLabel) { pickBank(acc.id, code: codes.first ?? "NT$") }
+        }
+    }
+
+    private func pickBank(_ id: UUID, code: String) {
+        selectedBankMilestoneId = id
+        selectedBankCurrency = code
+    }
+
+    // MARK: - [v25.563] 改月薪問「從這個月起／全部都改」（D9）
+
+    /// 要不要問：編輯中的週期性收入、存檔也還是週期性、金額改了、第一期在這個月以前、還沒選過。
+    /// 要問回確認框的字；不用問回 nil。name：存檔用的名稱（finalTitle）
+    private func amountChangeAsk(amount: Double, finalPeriod: IncomePeriod, title name: String) -> AmountFromAsk? {
+        guard amountChangeAll == nil,
+              let e = editing,
+              e.period != .once, finalPeriod != .once,
+              Swift.abs(amount - e.amount) > 0.004 else { return nil }
+        let now = Date()
+        guard WealthCal.startOfMonth(e.date) < WealthCal.startOfMonth(now) else { return nil }
+        let oldText = WealthFormat.ntd(e.amount)
+        let newText = WealthFormat.ntd(amount)
+        return AmountFromAsk(
+            title: "\(name)從 \(oldText) 改成 \(newText)",
+            message: "要從哪個月起？財富頁的入帳照這個算。",
+            fromLabel: "從這個月起（\(WealthCal.month(now)) 月）",
+            allLabel: "全部都改（以前的月份也算 \(newText)）"
+        )
+    }
+
+    /// 確認框選了（all：全部都改）：記下來、再存一次（這次不會再問）
+    private func pickAmountFrom(_ all: Bool) {
+        amountChangeAll = all
+        save()
+    }
+
+    /// 存檔時的金額歷史：新增 → nil；沒問（金額沒改、單次收入）→ 照舊帶回（不要洗掉）；全部都改 → nil（每一期都是新金額）；
+    /// 從這個月起 → 這個月以前每一期照原本算出來的金額不變、這個月 1 號起是新金額
+    private func savedAmountHistory(newAmount: Double) -> [AmountSnapshot]? {
+        guard let prev = editing else { return nil }
+        guard let all = amountChangeAll else { return prev.amountHistory }
+        if all { return nil }
+        return AmountHistoryChange.from(WealthCal.startOfMonth(Date()), history: prev.amountHistory ?? [],
+                                        current: prev.amount, firstDate: prev.date, newAmount: newAmount)
     }
 
     // MARK: - Body
@@ -403,6 +444,8 @@ struct AddIncomeView: View {
                     cardAppeared = true
                 }
             }
+            // [v25.563] 改月薪金額時問「從這個月起／全部都改」（D9）；選了才真的存
+            .modifier(AmountFromDialog(ask: $amountAsk, onPick: pickAmountFrom))
         }
     }
 
@@ -667,7 +710,6 @@ struct AddIncomeView: View {
             }
             finalTitle = title.trimmingCharacters(in: .whitespaces)
         }
-        isSaving = true
 
         let finalPeriod: IncomePeriod
         if isSalary {
@@ -675,6 +717,13 @@ struct AddIncomeView: View {
         } else {
             finalPeriod = period
         }
+
+        // [v25.563] 改了月薪（週期性收入）的金額：先問從哪個月起（D9）；選了 pickAmountFrom 再叫一次這裡
+        if let ask = amountChangeAsk(amount: amount, finalPeriod: finalPeriod, title: finalTitle) {
+            amountAsk = ask
+            return
+        }
+        isSaving = true
 
         let income = Income(
             id: editing?.id ?? UUID(),
@@ -689,7 +738,9 @@ struct AddIncomeView: View {
             linkedBankMilestoneId: selectedBankMilestoneId,
             linkedBankCurrency: selectedBankMilestoneId != nil ? selectedBankCurrency : nil,
             endDate: (isSalary && isFixedSalary && hasEndDate) ? endDate : nil,
-            endReason: (isSalary && isFixedSalary && hasEndDate) ? endReason : nil
+            endReason: (isSalary && isFixedSalary && hasEndDate) ? endReason : nil,
+            // [v25.563] 金額歷史：改了金額而且選了「從這個月起／全部都改」照選的寫；沒改照舊帶回（不要洗掉）
+            amountHistory: savedAmountHistory(newAmount: amount)
         )
         if isEditing { store.update(income) } else { store.add(income) }
         syncBankDeposit(for: income, previous: editing)
@@ -711,7 +762,7 @@ struct AddIncomeView: View {
             return
         }
         // [v25.562] 連到的股票自己有交割帳戶（股利、賣出獲利那筆收入）：銀行的錢只看股票自己寫的股利、交割紀錄，
-        // 這筆收入不再寫入帳（以前在收入頁改一次備註就多入帳一次）；跟財富頁算餘額的 bankDepositIsReplaced 同一條。
+        // 這筆收入不再寫入帳（以前在收入頁改一次備註就多入帳一次）；跟財富頁算餘額的 WealthFacts.isReplaced 同一條。
         // 只清掉目前這個帳戶裡以前寫的那筆。
         if let sid = income.linkedStockId,
            financeStore.stocks.first(where: { $0.id == sid })?.hasOwnSettlementAccount == true {
@@ -740,7 +791,8 @@ struct AddIncomeView: View {
 
     private func loadEditing() {
         guard let e = editing else { return }
-        amountText = String(format: "%.0f", e.amount)
+        // [v25.563] 帶回不丟位數（以前 %.0f：60,000.5 帶成「60000」，存一次就被改掉，也會被當成改了金額而跳「從哪個月起」）
+        amountText = Self.editableNumber(e.amount)
         date = e.date
         category = e.category
         period = e.period
@@ -768,5 +820,13 @@ struct AddIncomeView: View {
     // 萬/億 量級顯示：改呼叫全 App 共用的 Double.ntdWanString（見 v4 美化紀錄）
     private func smartCurrency(_ value: Double) -> String {
         value.ntdWanString
+    }
+
+    /// [v25.563] 帶回編輯欄的數字：整數不帶小數點，其他用最短又能原樣讀回的寫法（同 AddExpenseView.editableNumber）
+    private static func editableNumber(_ value: Double) -> String {
+        if value == value.rounded(), Swift.abs(value) < 1e15 {
+            return String(format: "%.0f", value)
+        }
+        return String(value)
     }
 }

@@ -201,7 +201,10 @@ enum AIExpenseCommitter {
             note: parsed.note ?? "",
             diningMember: resolvedDiningMember,
             linkedBankMilestoneId: linkedBankId,
-            linkedBankCurrency: linkedBankId.map { bankCurrency(for: $0, life: life) },
+            // [v25.563] 預設幣別跟記帳選單同一支（WealthFacts.currencies，D20／C2）；刷卡的照記帳表單寫台幣
+            linkedBankCurrency: linkedBankId.map { id in
+                linkedCardId != nil ? "NT$" : bankCurrency(for: id, life: life, expense: expense, finance: finance)
+            },
             linkedCreditCardMilestoneId: linkedCardId,
             placeAddress: placeAddress,
             placeLatitude: placeLat,
@@ -229,12 +232,16 @@ enum AIExpenseCommitter {
         return AIExpenseOutcome(title: "已記一筆：\(title)", detail: detailParts.joined(separator: "・"), isError: false)
     }
 
-    /// AI 記帳扣款帳戶預設幣別：沿用該銀行帳戶既有存款紀錄的幣別（比照 AddExpenseView.bankCurrencies(for:)），
-    /// 而非寫死 "NT$"，避免外幣帳戶被記到錯誤幣別的桶子。
-    private static func bankCurrency(for bankId: UUID, life: LifeStore) -> String {
+    /// AI 記帳扣款帳戶預設幣別：而非寫死 "NT$"，避免外幣帳戶被記到錯誤幣別的桶子。
+    /// [v25.563] 跟記帳、收入、股票、房屋水電選單同一支 WealthFacts.currencies（台幣在前；存提款紀錄兩個方向、
+    /// 入這裡的收入、扣這裡的記帳、交割在這裡的股票都算，D20）；以前只看第一筆存款紀錄。
+    /// 玉山只有美金 → 「玉山 · 美金」（扣款金額照 v1 換匯）；有台幣 → 台幣。expense 是 ExpenseStore（不是這筆支出）
+    private static func bankCurrency(for bankId: UUID, life: LifeStore, expense: ExpenseStore,
+                                     finance: FinanceStore) -> String {
         guard let ms = life.milestones.first(where: { $0.id == bankId }) else { return "NT$" }
-        let code = (ms.bankDeposits ?? []).first(where: { !$0.isWithdrawal })?.currencyCode
-        return code ?? "NT$"
+        let codes = WealthFacts.currencies(forAccount: ms, expenses: expense.expenses, incomes: expense.incomes,
+                                           stocks: finance.stocks)
+        return codes.first ?? "NT$"
     }
 
     /// AI 記帳同步：寫入銀行扣款紀錄，比照 AddExpenseView.syncBankWithdrawal(for:previous:)（新記錄、無需移除舊連結）。

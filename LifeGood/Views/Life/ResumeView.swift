@@ -1336,6 +1336,29 @@ struct ResumeView: View {
 //   Section 內容、欄位綁定、canSave／save() 等既有商業邏輯完全未變動。
 // ─────────────────────────────────────────────
 
+/// [v25.563] 履歷卡片表單：信用卡改扣款帳戶時問「從哪一期起」（D10）。
+/// 拆成 modifier：AddMilestoneView 的修飾器鏈已經很長，不再往 body 裡塞閉包
+private struct CardDebitChangeDialog: ViewModifier {
+    @Binding var isPresented: Bool
+    let title: String
+    /// 「11 月帳單」
+    let nextLabel: String
+    let onNext: () -> Void
+    let onAll: () -> Void
+
+    private var nextButtonTitle: String { "從下一期（\(nextLabel)）起" }
+
+    func body(content: Content) -> some View {
+        content.confirmationDialog(title, isPresented: $isPresented, titleVisibility: .visible) {
+            Button(nextButtonTitle) { onNext() }
+            Button("以前的帳單也改") { onAll() }
+            Button("取消", role: .cancel) { }
+        } message: {
+            Text("選下一期：以前的帳單照舊算在原本的帳戶，財富頁銀行的數字不會突然變。")
+        }
+    }
+}
+
 private func milestoneSectionHeader(_ title: String, icon: String, color: Color) -> some View {
     HStack(spacing: 7) {
         Capsule()
@@ -1475,6 +1498,8 @@ struct AddMilestoneView: View {
     @State private var premiumText = ""
     @State private var beneficiary = ""
     @State private var isSaving = false
+    /// [v25.563] 信用卡改了扣款帳戶，按儲存時先問「從哪一期起」（D10）
+    @State private var showDebitChange = false
 
     private var isFamily: Bool { category == .family }
     private var isRealEstate: Bool { category == .realEstate }
@@ -1574,7 +1599,7 @@ struct AddMilestoneView: View {
                         if isSaving {
                             ProgressView().scaleEffect(0.7).tint(.green)
                         }
-                        Button(editing != nil || editingFamily != nil ? "儲存" : "新增") { save() }
+                        Button(editing != nil || editingFamily != nil ? "儲存" : "新增") { requestSave() }
                             .bold().foregroundStyle(.green)
                             .disabled(!canSave || isSaving)
                     }
@@ -1608,6 +1633,14 @@ struct AddMilestoneView: View {
             } message: {
                 Text(cardVaultMessage ?? "")
             }
+            // [v25.563] 改扣款帳戶從哪一期起（D10）
+            .modifier(CardDebitChangeDialog(
+                isPresented: $showDebitChange,
+                title: debitChangeTitle,
+                nextLabel: nextDebitStatement.label,
+                onNext: { save(payFromAll: false) },
+                onAll: { save(payFromAll: true) }
+            ))
         }
         // [v25.562] 表單裡有號碼時切到背景，App 切換器的縮圖是霧＋鎖頭；打到一半的號碼不收回，只蓋
         // （這張表單是 sheet，掛在 App 最外層蓋不到，所以自己掛）
@@ -2199,11 +2232,14 @@ struct AddMilestoneView: View {
                 TextField("卡別名稱（如：御璽卡）", text: $cardName)
                 creditLimitRow
                 currencyField("年費", text: $annualFeeText)
-                dayFieldRow("帳單日", text: $billingDayText)
-                dayFieldRow("繳款日", text: $paymentDayText)
+                // [v25.563] 名詞（judge §3.15）：帳單日 → 結帳日、繳款日 → 繳款截止日
+                dayFieldRow("結帳日", text: $billingDayText)
+                dayFieldRow("繳款截止日", text: $paymentDayText)
                 DatePicker("核卡日期", selection: $date, displayedComponents: .date)
             } header: {
                 milestoneSectionHeader("信用卡資訊", icon: FinanceSubCategory.creditCard.icon, color: .orange)
+            } footer: {
+                Text(Self.cardDebitFootnote)
             }
             // [v25.368] 卡號／到期日／檢核碼獨立成一段，鎖在 Face ID 後面
             Section {
@@ -2613,6 +2649,49 @@ struct AddMilestoneView: View {
         }
     }
 
+    // MARK: - [v25.563] 改扣款帳戶從哪一期起（D10）
+
+    /// 「信用卡資訊」那一段的 footer
+    private static let cardDebitFootnote =
+        "選了銀行帳戶，卡費每一期在繳款截止日從那個帳戶扣（財富頁「存摺上」照這個算）。"
+
+    /// 編輯中的信用卡、扣款帳戶（發卡銀行選的那個帳戶）跟原本不一樣 → 存檔前要問
+    private var debitChangeNeedsAsking: Bool {
+        guard isFinance, financeSub == .creditCard,
+              let old = editing, old.financeSubCategory == .creditCard else { return false }
+        return old.linkedBankMilestoneId != selectedLinkedBankId
+    }
+
+    /// 「下一期」＝明天起刷的那一期（10/19 改 → 11 月帳單；結帳日當天改，今天這期照舊）。
+    /// 結帳日用這次要存的（表單上的；沒填＝財富頁一樣先當 25 日），跟存完之後財富頁分期用同一個日子
+    private var nextDebitStatement: (key: String, label: String) {
+        WealthCardCycle.nextStatement(billingDay: dayValue(billingDayText), now: Date())
+    }
+
+    /// 確認框標題：「卡費改從「台新銀行」扣，從哪一期開始？」；改成不設：「這張卡不再設扣款帳戶，從哪一期開始？」
+    private var debitChangeTitle: String {
+        guard let id = selectedLinkedBankId else {
+            return "這張卡不再設扣款帳戶，從哪一期開始？"
+        }
+        let name: String
+        if let ms = store.milestones.first(where: { $0.id == id }) {
+            name = WealthFacts.displayName(of: ms, book: store.wealthBook)
+        } else {
+            name = bankName.trimmingCharacters(in: .whitespaces)
+        }
+        return "卡費改從「\(name)」扣，從哪一期開始？"
+    }
+
+    /// 儲存鈕：信用卡改了扣款帳戶先問從哪一期起，不然直接存
+    private func requestSave() {
+        guard !isSaving else { return }
+        if debitChangeNeedsAsking {
+            showDebitChange = true
+        } else {
+            save()
+        }
+    }
+
     private func generateFinanceTitle() -> String {
         switch financeSub {
         case .bank:
@@ -2651,7 +2730,8 @@ struct AddMilestoneView: View {
         return t.isEmpty ? nil : t
     }
 
-    private func save() {
+    /// payFromAll：信用卡改了扣款帳戶時確認框選的（true＝以前的帳單也改；false／nil＝從下一期起）
+    private func save(payFromAll: Bool? = nil) {
         guard !isSaving else { return }
         isSaving = true
         if isFamily {
@@ -2896,6 +2976,18 @@ struct AddMilestoneView: View {
                 for name in photoFileNames where !keep.contains(name) { LifeMilestone.deletePhoto(name) }
             }
             if editing != nil { store.update(item) } else { store.add(item) }
+            // [v25.563] 信用卡改了扣款帳戶：帳本記從哪一期起（D10）。卡的 linkedBankMilestoneId 上面照舊寫成新的
+            //（舊 iPad、網頁版照讀）；選「從下一期起」以前的帳單照舊算在原本的帳戶，「以前的帳單也改」整張卡都算新的。
+            // 跟上面 store.update 同一個 runloop：財富頁只重算一次，不會先閃一下「以前的也改」的數字
+            if let old = editing, financeSub == .creditCard, old.financeSubCategory == .creditCard,
+               old.linkedBankMilestoneId != selectedLinkedBankId {
+                store.recordCardPayFromChange(
+                    cardId: item.id,
+                    oldAccount: old.linkedBankMilestoneId,
+                    newAccount: selectedLinkedBankId,
+                    fromKey: payFromAll == true ? nil : nextDebitStatement.key
+                )
+            }
         } else {
             var item = LifeMilestone(
                 id: editing?.id ?? UUID(),

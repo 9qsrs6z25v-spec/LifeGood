@@ -114,12 +114,6 @@ struct AddStockView: View {
     @State private var selectedBankCurrency: String = "NT$"
     @State private var selectedSecuritiesMilestoneId: UUID?
 
-    /// 扣款帳戶選單的餘額快取：allAccountBalances() 雖已改為批次建表，但 accountPicker
-    /// 是 Form body 的一部分，任何欄位每次按鍵都會重新求值、重建整批表——改為只在
-    /// expenseStore.expenses／lifeStore.milestones 實際變動時（.task(id:)）才重算一次快取，
-    /// 對齊 AddExpenseView.cachedBankBalances 既有修復規格。
-    @State private var cachedAccountBalances: [UUID: Double] = [:]
-
     @State private var isFetching = false
     @State private var fetchError = ""
     @State private var quote: StockQuote?
@@ -484,60 +478,40 @@ struct AddStockView: View {
         }
     }
 
-    private func bankCurrencies(for ms: LifeMilestone) -> [String] {
-        let codes = (ms.bankDeposits ?? [])
-            .filter { !$0.isWithdrawal }
-            .map(\.currencyCode)
-        var unique: [String] = []
-        for c in codes where !unique.contains(c) { unique.append(c) }
-        return unique.isEmpty ? ["NT$"] : unique
+    /// [v25.563] 選單的數字讀財富頁同一套（LifeStore.wealthFacts，快取；打字不重算）：
+    /// 銀行列「台新銀行（存摺 NT$12.8萬）」，跟記帳、房屋水電、財富頁同一個數。
+    /// 以前這裡自己掃一遍算（刷卡當天就扣），跟財富頁不一樣（judge §6.3）
+    private var facts: WealthFacts {
+        lifeStore.wealthFacts(expense: expenseStore, finance: financeStore)
     }
 
-    /// 計算全部銀行 / 證券帳戶的目前餘額，一次算好整批供 accountPicker 查表。
-    /// 原本 accountBalance(for:) 每次呼叫都對 expenseStore.expenses 做 first(where:)/filter
-    /// 全量掃描，而 accountPicker 是 Form body 的一部分，任何欄位每次按鍵都會觸發整個 body
-    /// 重新求值——帳戶選單因此在打字時對 expenses 反覆全量掃描（O(帳戶數 × expenses) 每次按鍵）。
-    /// 改為批次建表：expensesById／expensesByCardMilestone 各建一次，逐帳戶查表 O(1)，
-    /// 對齊 AddExpenseView.allBankBalances() 既有修復規格。
-    private func allAccountBalances() -> [UUID: Double] {
-        let now = Date()
-        let expensesById = Dictionary(expenseStore.expenses.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-        let expensesByCardMilestone = Dictionary(grouping: expenseStore.expenses.filter {
-            $0.linkedCreditCardMilestoneId != nil && $0.date <= now
-        }, by: { $0.linkedCreditCardMilestoneId! })
-        var result: [UUID: Double] = [:]
-        for ms in bankMilestones + securitiesMilestones {
-            var total: Double = 0
-            for dep in ms.bankDeposits ?? [] {
-                guard dep.date <= now else { continue }
-                if let expId = dep.linkedExpenseId,
-                   let exp = expensesById[expId],
-                   exp.linkedCreditCardMilestoneId != nil {
-                    continue
-                }
-                total += dep.isWithdrawal ? -dep.amount : dep.amount
-            }
-            if ms.financeSubCategory == .bank {
-                let cards = lifeStore.milestones.filter {
-                    $0.financeSubCategory == .creditCard && $0.linkedBankMilestoneId == ms.id
-                }
-                for card in cards {
-                    for exp in expensesByCardMilestone[card.id] ?? [] { total -= exp.amount }
+    private func selectBank(_ id: UUID, code: String) {
+        selectedBankMilestoneId = id
+        selectedBankCurrency = code
+        selectedSecuritiesMilestoneId = nil
+    }
+
+    /// 銀行一列：好幾個幣別 → 子選單「美金（存摺 美金 3,200）」；一個 → 直接選
+    @ViewBuilder
+    private func bankMenuItem(_ acc: WealthFacts.Account) -> some View {
+        if acc.currencies.count > 1 {
+            Menu(acc.pickerLabel) {
+                ForEach(acc.currencies, id: \.self) { code in
+                    Button(acc.pickerLabel(code: code)) {
+                        selectBank(acc.id, code: code)
+                    }
                 }
             }
-            result[ms.id] = total
+        } else {
+            Button(acc.pickerLabel) {
+                selectBank(acc.id, code: acc.currencies.first ?? "NT$")
+            }
         }
-        return result
     }
 
-    // 【美化方向】扣款帳戶選單餘額格式：先前自製 NumberFormatter 手刻「NT$ X萬」
-    // （NT$ 後多一個空白、無條件捨去小數、未處理億級單位），與同一系列已修復的
-    // AddExpenseView.formatBankBalance／LifeFinanceView.fmtBal（皆已改呼叫共用
-    // Double.ntdWanString："NT$1.2萬" 無空白、億以上自動換算、非整數保留一位小數）
-    // 風格不一致，餘額達千萬以上時也會顯示成不合理的鉅額「萬」數字。改呼叫共用
-    // ntdWanString，與全 App 金額量級顯示規則對齊。純視覺調整，未變動帳戶餘額計算邏輯。
-    private func fmtBalance(_ value: Double) -> String {
-        value.ntdWanString
+    /// 證券戶一列：不寫數字（證券戶自己身上的紀錄不算進任何合計，D16）
+    private func securitiesMenuTitle(_ ms: LifeMilestone) -> String {
+        "\(ms.title)（證券戶）"
     }
 
     private var accountPickerLabel: String {
@@ -554,7 +528,8 @@ struct AddStockView: View {
     }
 
     private var accountPicker: some View {
-        HStack {
+        let banks = facts.pickerBanks
+        return HStack {
             Text("扣款帳戶").foregroundStyle(.secondary)
             Spacer()
             Menu {
@@ -563,37 +538,17 @@ struct AddStockView: View {
                     selectedSecuritiesMilestoneId = nil
                     selectedBankCurrency = "NT$"
                 }
-                if !bankMilestones.isEmpty {
+                if !banks.isEmpty {
                     Section("銀行") {
-                        ForEach(bankMilestones) { ms in
-                            let currencies = bankCurrencies(for: ms)
-                            let name = ms.bankName ?? ms.title
-                            let label = "\(name)（\(fmtBalance(cachedAccountBalances[ms.id] ?? 0))）"
-                            if currencies.count > 1 {
-                                Menu(label) {
-                                    ForEach(currencies, id: \.self) { code in
-                                        Button(code) {
-                                            selectedBankMilestoneId = ms.id
-                                            selectedBankCurrency = code
-                                            selectedSecuritiesMilestoneId = nil
-                                        }
-                                    }
-                                }
-                            } else {
-                                Button(label) {
-                                    selectedBankMilestoneId = ms.id
-                                    selectedBankCurrency = currencies.first ?? "NT$"
-                                    selectedSecuritiesMilestoneId = nil
-                                }
-                            }
+                        ForEach(banks) { acc in
+                            bankMenuItem(acc)
                         }
                     }
                 }
                 if !securitiesMilestones.isEmpty {
                     Section("證券") {
                         ForEach(securitiesMilestones) { ms in
-                            let label = "\(ms.title)（\(fmtBalance(cachedAccountBalances[ms.id] ?? 0))）"
-                            Button(label) {
+                            Button(securitiesMenuTitle(ms)) {
                                 selectedSecuritiesMilestoneId = ms.id
                                 selectedBankMilestoneId = nil
                                 selectedBankCurrency = "NT$"
@@ -608,11 +563,6 @@ struct AddStockView: View {
                     Image(systemName: "chevron.down").font(.caption2).foregroundStyle(.secondary)
                 }
             }
-        }
-        // 只在 expenses／milestones 實際變動時才重算批次表，避免表單任何欄位每次按鍵
-        // 都重跑一次 O(帳戶數 × expenses) 全量掃描（見 cachedAccountBalances 宣告處說明）。
-        .task(id: "\(expenseStore.modifyID)-\(lifeStore.milestones.count)") {
-            cachedAccountBalances = allAccountBalances()
         }
     }
 
@@ -1115,23 +1065,32 @@ struct AddStockView: View {
     }
 
     /// 同步股票買賣到所選銀行/證券帳戶的存款記錄
+    /// [v25.563] 股利入帳（同樣掛 linkedStockId，id＝WealthIDs.dividendDeposit）不清：以前 removeAll
+    /// { linkedStockId == 股票 } 連股利一起清掉，存一次股票股利就不見了。換交割帳戶時以前的股利留在原帳戶
+    ///（錢當時是進那裡的；之後改或刪那次配息，股票卡會從所有帳戶清那個 id 再寫）。milestones 一次指派
     private func syncAccountTransactions(for stock: Stock, previous: Stock?) {
-        // 移除舊帳戶中本股票的記錄
+        let keep = WealthIDs.dividendDepositIds(of: stock)
+        var all = lifeStore.milestones
+        var changed = false
+        // 移除舊帳戶中本股票的交割記錄（股利留著）
         let prevAccountIds = [previous?.linkedBankMilestoneId, previous?.linkedSecuritiesMilestoneId].compactMap { $0 }
         for prevId in prevAccountIds {
-            if var oldMs = lifeStore.milestones.first(where: { $0.id == prevId }) {
-                oldMs.bankDeposits?.removeAll { $0.linkedStockId == stock.id }
-                lifeStore.update(oldMs)
+            if let i = all.firstIndex(where: { $0.id == prevId }) {
+                all[i].bankDeposits?.removeAll { $0.linkedStockId == stock.id && !keep.contains($0.id) }
+                changed = true
             }
         }
 
         // 取得目標帳戶
         let targetId = stock.linkedBankMilestoneId ?? stock.linkedSecuritiesMilestoneId
         guard let accId = targetId,
-              var ms = lifeStore.milestones.first(where: { $0.id == accId }) else { return }
+              let idx = all.firstIndex(where: { $0.id == accId }) else {
+            if changed { lifeStore.milestones = all }
+            return
+        }
 
-        var list = ms.bankDeposits ?? []
-        list.removeAll { $0.linkedStockId == stock.id }
+        var list = all[idx].bankDeposits ?? []
+        list.removeAll { $0.linkedStockId == stock.id && !keep.contains($0.id) }
 
         let currency = stock.linkedBankCurrency ?? "NT$"
         // [v25.562] 寫多少、寫哪一格跟股票卡同一條規則（stockAmountForAccount）：美股進台幣帳戶 × 匯率、
@@ -1181,8 +1140,8 @@ struct AddStockView: View {
             }
         }
 
-        ms.bankDeposits = list
-        lifeStore.update(ms)
+        all[idx].bankDeposits = list
+        lifeStore.milestones = all
     }
 
     private var soldAccountId: UUID? {
