@@ -25,6 +25,9 @@ import UniformTypeIdentifiers
 // • 號碼（第 6、7 題）：〔顯示〕一顆 Face ID 全部解開（卡號、有效期限、安全碼〔有存才有那一列〕、票證、帳號、保單號碼），
 //   只放在 @State（WealthCardReveal），30 秒、切到背景、離開這頁就收回；帳號〔複製〕剪貼簿只在這台、60 秒過期。
 // • 寫 store：store 先抓進區域常數，下一個 runloop 才寫（長按選單、確認框正在收起來）。
+//
+// [v25.565] 財富 v4（build/v4/brief.md §G4-8）：卡片頁自己的要確認 #12〔看綁了哪些〕直接捲到「綁在這張卡的定期扣款」
+//（WealthChecksSection(onOpenCard:)，不再疊一張卡片頁）。從財富頁、理財、行事曆、小工具、通知打開都是 WealthCardPage(accountId:)。
 
 /// 打開卡片頁時捲到哪一區（財富頁 ③ 點一列＝.upcoming；要確認、四格點了也用）
 enum WealthCardAnchor: String, Hashable {
@@ -224,7 +227,8 @@ struct WealthCardPage: View {
                 WealthCardBoardView(data: d, actions: actions)
                     .id(WealthCardAnchor.top)
                 if !checks.isEmpty {
-                    WealthChecksSection(checks: checks, limit: nil)
+                    // [v25.565] #12〔看綁了哪些〕：就是這張卡，直接捲到綁在這張卡的定期扣款（不再疊一張卡片頁）
+                    WealthChecksSection(checks: checks, limit: nil, onOpenCard: { _ in showRecurring() })
                         .id(WealthCardAnchor.checks)
                 }
                 kindSections(d)
@@ -299,6 +303,11 @@ struct WealthCardPage: View {
         checks = built.checks
         lastBuiltKey = k
         scrollToStartIfNeeded()
+    }
+
+    /// [v25.565] 要確認 #12〔看綁了哪些〕：捲到「綁在這張卡的定期扣款」（ScrollViewReader 的 onChange(of: pendingScroll) 接）
+    private func showRecurring() {
+        pendingScroll = .recurring
     }
 
     /// 打開時要捲到的那一區：等各區真的畫出來再捲

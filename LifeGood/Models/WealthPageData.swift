@@ -19,6 +19,11 @@ import SwiftUI
 //   斜線 還沒扣÷存摺上；卡站在扣它卡費的那座塔下（沒設、帳戶收起來了：最後補一座灰色空塔「還沒選」）。
 // • 排序：有 sortIndex 的照它（小的在前、沒有的排後面）；都沒排過：卡＝有要繳的在前、截止日近的在前；銀行＝最近 90 天進出筆數多到少。
 // • 這裡不叫 LifeStore、不寫任何東西；NumberFormatter（ntdWanString）只在主執行緒用，所以 build 要在主執行緒叫。
+//
+// [v25.565] 財富 v4（build/v4/brief.md §G4-1；judge §3.4）：
+// • ①' 橋 WealthPageBridge：「這些已算進理財淨資產 NT$1381.1萬 ›」。數字＝FinanceSnapshot.current(...).netWorth
+//  （跟理財總覽、人生總覽名片同一個數；財富頁 rebuild() 算好傳進 build(…, netWorth:)，這裡不自己算）。
+//   新手、沒傳 netWorth 不出現；遮住寫「NT$ ••••」、VoiceOver 念「金額已遮住」。
 
 // MARK: - 捲到哪一區
 
@@ -208,6 +213,18 @@ struct WealthPageHidden {
     let names: String
 }
 
+// MARK: - ①' 橋（v25.565）
+
+/// ①' 看板下的橋：「↗ 這些已算進理財淨資產 NT$1381.1萬 ›」（點了切到理財 › 總覽）
+struct WealthPageBridge {
+    /// 「這些已算進理財淨資產」
+    let text: String
+    /// 「NT$1381.1萬」；遮住「NT$ ••••」
+    let amount: String
+    /// 「這些已算進理財淨資產 1381 萬 560 元」；遮住「這些已算進理財淨資產，金額已遮住」
+    let accessibilityText: String
+}
+
 // MARK: - 整頁
 
 struct WealthPageData {
@@ -240,12 +257,15 @@ struct WealthPageData {
     let hidden: WealthPageHidden?
     /// ⑨ 頁尾（新手不出現）
     let footer: FinanceLine?
+    /// [v25.565] ①' 橋（新手、沒傳淨資產不出現）
+    let bridge: WealthPageBridge?
     let masked: Bool
 
-    /// 整頁一次組好（主執行緒：ntdWanString 用共用的 NumberFormatter）
+    /// 整頁一次組好（主執行緒：ntdWanString 用共用的 NumberFormatter）。
+    /// [v25.565] netWorth：理財淨資產（FinanceSnapshot.current(...).netWorth，財富頁算好傳進來）；nil＝橋不出現
     static func build(facts: WealthFacts, milestones: [LifeMilestone], book: WealthBook, expenses: [Expense],
                       insurances: [SavingsInsurance], rates: FinanceRates, ratesUpdatedAt: Date?,
-                      now: Date, masked: Bool, dark: Bool) -> WealthPageData {
+                      now: Date, masked: Bool, dark: Bool, netWorth: Double? = nil) -> WealthPageData {
         let today = WealthCal.day(now)
         let banks = WealthPageText.orderBanks(facts.banks.filter { !$0.hidden })
         let allCards = facts.cards
@@ -304,6 +324,9 @@ struct WealthPageData {
         let footer: FinanceLine? = mode == .newbie
             ? nil
             : WealthPageText.footer(banks: banks, rates: rates, ratesUpdatedAt: ratesUpdatedAt, today: today)
+        let bridge: WealthPageBridge? = mode == .newbie
+            ? nil
+            : WealthPageText.bridge(netWorth: netWorth, masked: masked)
 
         return WealthPageData(mode: mode, board: board, tower: tower, ribbon: ribbon, tiles: tiles,
                               checks: facts.pageChecks, upcoming: upcoming,
@@ -311,7 +334,7 @@ struct WealthPageData {
                               showBankPrompt: mode == .cardsOnly,
                               banksHeader: banksHeader, banks: bankRows,
                               brokersHeader: brokersHeader, brokers: brokerRows,
-                              policies: policies, hidden: hidden, footer: footer, masked: masked)
+                              policies: policies, hidden: hidden, footer: footer, bridge: bridge, masked: masked)
     }
 }
 
@@ -1325,6 +1348,16 @@ extension WealthPageText {
         }
         guard !rows.isEmpty else { return nil }
         return WealthPageHidden(rows: rows, names: names.joined(separator: "・"))
+    }
+
+    /// [v25.565] ①' 橋：「這些已算進理財淨資產」＋「NT$1381.1萬」（ntdWanString：整數不帶 .0、萬前不加千分位）；
+    /// 沒有淨資產（呼叫端沒傳）nil。遮住：金額「NT$ ••••」、VoiceOver「金額已遮住」
+    static func bridge(netWorth: Double?, masked: Bool) -> WealthPageBridge? {
+        guard let v = netWorth, v.isFinite else { return nil }
+        let text = "這些已算進理財淨資產"
+        let amount: String = masked ? WealthFormat.masked : v.ntdWanString
+        let said: String = masked ? text + "，金額已遮住" : text + " " + spoken(v)
+        return WealthPageBridge(text: text, amount: amount, accessibilityText: said)
     }
 
     /// ⑨ 頁尾：存摺上怎麼算＋外幣用哪個匯率（超過 3 天沒更新，最後那句琥珀色「匯率是 10/15 的」）

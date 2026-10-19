@@ -138,6 +138,7 @@
 		A01B000001001579 /* WealthBook.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001579 /* WealthBook.swift */; };
 		A01B000001001580 /* WealthPageData.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001580 /* WealthPageData.swift */; };
 		A01B000001001581 /* WealthCardData.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001581 /* WealthCardData.swift */; };
+		A01B000001001587 /* WealthReminders.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001587 /* WealthReminders.swift */; };
 		A01B000001001582 /* WealthBoard.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001582 /* WealthBoard.swift */; };
 		A01B000001001583 /* WealthBoardScenes.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001583 /* WealthBoardScenes.swift */; };
 		A01B000001001584 /* WealthItems.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001584 /* WealthItems.swift */; };
@@ -354,6 +355,7 @@
 		A01A000001001579 /* WealthBook.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WealthBook.swift; sourceTree = "<group>"; };
 		A01A000001001580 /* WealthPageData.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WealthPageData.swift; sourceTree = "<group>"; };
 		A01A000001001581 /* WealthCardData.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WealthCardData.swift; sourceTree = "<group>"; };
+		A01A000001001587 /* WealthReminders.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WealthReminders.swift; sourceTree = "<group>"; };
 		A01A000001001582 /* WealthBoard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WealthBoard.swift; sourceTree = "<group>"; };
 		A01A000001001583 /* WealthBoardScenes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WealthBoardScenes.swift; sourceTree = "<group>"; };
 		A01A000001001584 /* WealthItems.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WealthItems.swift; sourceTree = "<group>"; };
@@ -653,6 +655,7 @@
 				A01A000001001579 /* WealthBook.swift */,
 				A01A000001001580 /* WealthPageData.swift */,
 				A01A000001001581 /* WealthCardData.swift */,
+				A01A000001001587 /* WealthReminders.swift */,
 				A01A000001000020 /* LifeModels.swift */,
 				A01A000001000201 /* HealthModels.swift */,
 				A01A000001000204 /* ChildVaccineSchedule.swift */,
@@ -1052,6 +1055,7 @@
 				A01B000001001579 /* WealthBook.swift in Sources */,
 				A01B000001001580 /* WealthPageData.swift in Sources */,
 				A01B000001001581 /* WealthCardData.swift in Sources */,
+				A01B000001001587 /* WealthReminders.swift in Sources */,
 				A01B000001001582 /* WealthBoard.swift in Sources */,
 				A01B000001001583 /* WealthBoardScenes.swift in Sources */,
 				A01B000001001584 /* WealthItems.swift in Sources */,

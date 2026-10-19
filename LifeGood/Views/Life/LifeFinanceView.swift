@@ -210,6 +210,13 @@ fileprivate struct WealthNoticeAlertModifier: ViewModifier {
 // • 列表頁本身不掛布幕（judge §7.2-2：只有金額，可以用遮住）；卡片頁、表單自己掛。
 // • 付費（待決定 10）：看得到全部；＋、編輯、記一筆、轉帳、對存摺要訂閱；標成已繳、停用卡、收起來、排序、遮住、看卡片頁不擋。
 // • 以前的 FinanceCardView、DepositEditorSheet 拿掉：卡片頁換成 WealthCardPage（G2），小表單換成 WealthEditors（G3）。
+//
+// [v25.565] 財富 v4（build/v4/brief.md §G4-3～5、§1-11；judge §3.4、§6.8）：
+// • ①' 橋：看板下一顆膠囊「這些已算進理財淨資產 NT$1381.1萬 ›」，點了切到理財 › 總覽（AppNavigation.goToFinance(.overview)）。
+//   全頁唯一會切分頁的地方。數字＝FinanceSnapshot.current(...).netWorth（理財總覽、人生總覽名片同一個數），rebuild() 一起算。
+// • 深連結／財富提醒通知（DeepLinkRouter.takeWealthAccount，lifegood://life/wealth?id=）：直接打開那張卡／那個帳戶的卡片頁；
+//   別的彈出頁開著先關掉、下一輪才開。帳戶已經不在就不開。
+// • ② 要確認 #12〔看綁了哪些〕：開那張卡的卡片頁、捲到「綁在這張卡的定期扣款」（同一個 .sheet(item:)）。
 
 struct LifeFinanceView: View {
     @EnvironmentObject var lifeStore: LifeStore
@@ -264,6 +271,8 @@ struct LifeFinanceView: View {
             .task(id: pageKey) { rebuild() }
             .onAppear { pageAppeared() }
             .onChange(of: scenePhase) { _, phase in sceneChanged(phase) }
+            // [v25.565] 小工具卡費／交割列、財富提醒通知：打開那張卡／那個帳戶
+            .onDeepLinkItem { openDeepLinkedAccount() }
         }
         // [v25.563] 第一次打開：用你自己的數字說明為什麼銀行的數字變了（說一次，跟 iCloud 同步）
         .modifier(WealthNoticeAlertModifier(notice: $notice, onDone: { markPassbookNoticeSeen() }))
@@ -294,11 +303,12 @@ struct LifeFinanceView: View {
         }
     }
 
-    /// 由上到下 ①～⑨
+    /// 由上到下 ①、①' 橋～⑨（VStack 剛好 10 個；再加要先包一層）
     private func sections(_ p: WealthPageData, proxy: ScrollViewProxy) -> some View {
         let actions = pageActions
         return VStack(spacing: 20) {
             WealthBoard(data: p, onTile: { a in scroll(to: a, proxy) }, onStarter: { k in addAccount(k) })
+            bridgeBlock(p)
             checksBlock(p)
             upcomingBlock(p)
             cardsBlock(p, actions: actions)
@@ -310,11 +320,20 @@ struct LifeFinanceView: View {
         }
     }
 
-    /// ② 要確認（G3 的 WealthChecksSection；0 件整區不出現）
+    /// [v25.565] ①' 橋（新手、還沒算出淨資產不出現）：點了切到理財 › 總覽
+    @ViewBuilder
+    private func bridgeBlock(_ p: WealthPageData) -> some View {
+        if let b = p.bridge {
+            WealthPageBridgeView(bridge: b, onTap: { goToFinanceOverview() })
+        }
+    }
+
+    /// ② 要確認（G3 的 WealthChecksSection；0 件整區不出現）。
+    /// [v25.565] #12〔看綁了哪些〕交回這頁開卡片頁（同一個 .sheet(item:)，不在要確認裡再疊一張）
     @ViewBuilder
     private func checksBlock(_ p: WealthPageData) -> some View {
         if !p.checks.isEmpty {
-            WealthChecksSection(checks: p.checks)
+            WealthChecksSection(checks: p.checks, onOpenCard: { id in openCardRecurring(id) })
         }
     }
 
@@ -381,10 +400,13 @@ struct LifeFinanceView: View {
         let key = pageKey
         guard page == nil || key != lastBuiltKey else { return }
         let facts = lifeStore.wealthFacts(expense: expenseStore, finance: financeStore)
+        let rates = FinanceRates(expenseStore)
+        // [v25.565] 橋的數字：理財淨資產（跟理財總覽同一個 FinanceSnapshot；財富的部分讀同一份 wealthFacts 快取）
+        let snap = FinanceSnapshot.current(finance: financeStore, expense: expenseStore, rates: rates)
         page = WealthPageData.build(facts: facts, milestones: lifeStore.milestones, book: lifeStore.wealthBook,
                                     expenses: expenseStore.expenses, insurances: financeStore.insurances,
-                                    rates: FinanceRates(expenseStore), ratesUpdatedAt: AppQuoteClock.ratesUpdatedAt,
-                                    now: Date(), masked: masked, dark: scheme == .dark)
+                                    rates: rates, ratesUpdatedAt: AppQuoteClock.ratesUpdatedAt,
+                                    now: Date(), masked: masked, dark: scheme == .dark, netWorth: snap.netWorth)
         lastBuiltKey = key
     }
 
@@ -461,6 +483,33 @@ struct LifeFinanceView: View {
             }
         case .hideAccount(let id, _):
             DispatchQueue.main.async { life.setWealthHidden(id, hidden: true) }
+        }
+    }
+
+    /// [v25.565] ①' 橋：切到理財 › 總覽（寫 @AppStorage 的鍵就切過去；judge §6.8 只有這裡和理財「存款」明信片會切分頁）
+    private func goToFinanceOverview() {
+        AppNavigation.goToFinance(.overview)
+    }
+
+    /// [v25.565] #12〔看綁了哪些〕：開那張卡的卡片頁、捲到綁在這張卡的定期扣款（看卡片頁不擋訂閱：直接設 sheet）
+    private func openCardRecurring(_ id: UUID) {
+        sheet = .card(id, .recurring)
+    }
+
+    /// [v25.565] 小工具「接下來要繳」的卡費／交割列、財富提醒通知點進來：打開那張卡／那個帳戶的卡片頁。
+    /// 不是財富的請求 takeWealthAccount 回 nil（留給別頁）；帳戶已經刪了就不開。
+    /// 別的彈出頁開著：先關掉，下一輪主執行緒才開（同一個 .sheet(item:) 直接換內容有時候不重新出現）
+    private func openDeepLinkedAccount() {
+        guard let id = DeepLinkRouter.shared.takeWealthAccount() else { return }
+        guard lifeStore.milestones.contains(where: { $0.id == id }) else { return }
+        let target = WealthSheet.card(id, nil)
+        guard sheet != nil else {
+            sheet = target
+            return
+        }
+        sheet = nil
+        DispatchQueue.main.async {
+            sheet = target
         }
     }
 

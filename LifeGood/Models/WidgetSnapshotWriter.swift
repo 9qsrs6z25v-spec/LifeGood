@@ -32,6 +32,13 @@ import WidgetKit
 //      字在 WorkoutFacts.widgetWorkoutDays，WorkoutLifeLinks.swift）。運動、目標（workoutPrefs）、請假（workoutLeave）都在
 //      LifeStore 的 @Published 裡，現有的 life 防抖 3 秒那條就接得到，不用加監聽；lifeKindsToReload 多看 workout
 //      （只有那一行真的變了才多重畫「今天」，鎖定畫面「下一場」、旅行、部屬今天不受影響）。
+// [財富 v4] v25.565（wealth/build/v4/brief.md §6 G2-10、11）：財富（銀行帳戶、信用卡＝人生的里程碑＋財富帳本）
+//      跟記帳、理財互相牽動——
+//      • 接下來要繳（卡費、交割）、淨資產（存款、卡費與交割）讀財富的一套數字（LifeStore.wealthFacts）：
+//        人生那條防抖如果財富變了（LifeStore.wealthRevision 跟上次寫 bills／finance 時不一樣），也重寫 bills、finance；
+//        只改了家人、行程（revision 沒變）照舊只寫 life，不多算兩份 FinanceLoanIndex。
+//      • 今天小工具的財富日子（卡費截止、交割，CalendarDayItems）會跟著記帳（刷卡）、股票（買賣）變：
+//        記帳＋理財那條防抖多寫 life（內容沒變 write 回 false，不重畫）。
 //
 // 什麼時候寫：
 //   • 啟動（start）：掛好監聽後馬上寫一次全部
@@ -42,6 +49,8 @@ import WidgetKit
 //   • [v4] 股價、匯率更新成功（StockView.refreshAllPrices、ExpenseStore.autoUpdateCurrencyRates）：
 //     noteQuotesUpdated() 防抖 3 秒 → finance
 //   • 人生／系統行事曆有變：LifeStore、AppleCalendarBridge 的 objectWillChange 防抖 3 秒 → life
+//     （[財富 v4] 財富變了（wealthRevision）再加 bills、finance：lifeChanged()）
+//   • [財富 v4] 記帳、理財有變也寫 life（今天小工具的卡費截止、交割）
 //   • 背景收到 iCloud 變更（iPad／Mac 記的帳）：包在背景工作裡馬上寫全部——背景的防抖計時器
 //     不一定等得到 3 秒（App 隨時會被暫停）
 //   • 時間大跳（過午夜、換時區、改系統時間）：寫全部；出國落地換時區後，快照的每一天要用新時區重切
@@ -84,6 +93,9 @@ final class WidgetSnapshotWriter {
     private var backgroundTask: UIBackgroundTaskIdentifier = .invalid
     /// [v4] 股價、匯率剛更新成功（noteQuotesUpdated）：防抖之後只寫 finance
     private let quotesNudge = PassthroughSubject<Void, Never>()
+    /// [財富 v4] 上次寫 bills＋finance 時 LifeStore.wealthRevision 是多少（-1＝還沒寫過）：
+    /// 人生那條防抖看它決定要不要連 bills、finance 一起重寫（財富沒變就不用多算）
+    private var lastWealthRevision = -1
 
     private init() {}
 
@@ -102,10 +114,11 @@ final class WidgetSnapshotWriter {
         // 跟記帳併成同一個防抖：記一筆連車的支出會同時改兩邊（帳本＋車子鏡像），只算一次
         //（bills 每次要建兩份 FinanceLoanIndex，不要連算兩遍）
         // [v4] 再加 finance：匯率、外幣保單、車子的記帳、股票、房子都會動到理財那四個小工具
+        // [財富 v4] 再加 life：今天小工具的卡費截止、交割跟著刷卡、買賣股票變（內容沒變 write 回 false，不重畫）
         expense.objectWillChange
             .merge(with: finance.objectWillChange)
             .debounce(for: .seconds(Self.debounceSeconds), scheduler: DispatchQueue.main)
-            .sink { [weak self] _ in self?.writeNow([.money, .bills, .finance]) }
+            .sink { [weak self] _ in self?.writeNow([.money, .bills, .finance, .life]) }
             .store(in: &cancellables)
 
         // [v4] 股價、匯率剛更新成功：價錢跟原本一樣時 store 不會變（上面那條接不到），
@@ -117,10 +130,11 @@ final class WidgetSnapshotWriter {
 
         // 系統行事曆變了（別的 App 改、授權剛打開）也要重寫「今天」：
         // AppleCalendarBridge 收到 EKEventStoreChanged 會改 lastChange
+        // [財富 v4] 財富（帳戶、卡、財富帳本）變了再加 bills、finance（lifeChanged）
         life.objectWillChange
             .merge(with: AppleCalendarBridge.shared.objectWillChange)
             .debounce(for: .seconds(Self.debounceSeconds), scheduler: DispatchQueue.main)
-            .sink { [weak self] _ in self?.writeNow([.life]) }
+            .sink { [weak self] _ in self?.lifeChanged() }
             .store(in: &cancellables)
 
         NotificationCenter.default.publisher(for: .cloudSyncDidPullChanges)
@@ -134,6 +148,17 @@ final class WidgetSnapshotWriter {
             .store(in: &cancellables)
 
         writeNow()
+    }
+
+    /// [財富 v4] 人生那條防抖到了：一律寫 life；財富的 revision 跟上次寫 bills＋finance 時不一樣（加了卡、改了扣款帳戶、
+    /// 標成已繳、對存摺…）再加 bills、finance（接下來要繳的卡費、交割，淨資產的存款、卡費與交割）
+    private func lifeChanged() {
+        var parts: Set<Part> = [.life]
+        if let life = lifeStore, life.wealthRevision != lastWealthRevision {
+            parts.insert(.bills)
+            parts.insert(.finance)
+        }
+        writeNow(parts)
     }
 
     /// [v4] 股價（StockView.refreshAllPrices）、匯率（ExpenseStore.autoUpdateCurrencyRates）更新成功時叫：
@@ -182,6 +207,11 @@ final class WidgetSnapshotWriter {
             if WidgetSnapshotStore.write(snapshot) {
                 WidgetRefresh.reload(Self.financeKindsToReload(old: old, new: snapshot))
             }
+        }
+        // [財富 v4] bills、finance 兩份都用這一版的財富重寫過了：記下 revision（人生那條防抖財富沒變就不再多寫）。
+        // 只寫其中一份（股價匯率那條只寫 finance）不記，免得 bills 漏了財富的變動
+        if parts.contains(.bills), parts.contains(.finance), expenseStore != nil, financeStore != nil {
+            lastWealthRevision = lifeStore?.wealthRevision ?? -1
         }
     }
 

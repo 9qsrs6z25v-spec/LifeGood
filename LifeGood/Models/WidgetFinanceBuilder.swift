@@ -10,6 +10,9 @@ import Foundation
 //     淨資產、上個月、每台車都讀它，數字才會跟理財總覽、車子卡片一模一樣
 //   • 淨資產＝FinanceSnapshot.current；「比上月」＝FinanceHistory.series(months: 2) 的第一點
 //     （理財總覽 FinanceBoards.swift:74-76 同一段），寫法照 changeCapsule（:134-138）
+//     [v25.565] 財富 v4 起淨資產含存款（資產多「存款」一類）、扣卡費與交割（負債多「卡費與交割」一列）：
+//     數字是 FinanceSnapshot 讀財富的一套數字（WealthFacts）算好的，這裡不另外算；以前的月份照口徑 4 回推，「比上月」不假漲。
+//     那一句改三段「總資產 …・貸款還欠 …・卡費與交割 …」（同理財總覽頭部；貸款只看房貸＋車貸＋其他貸款 s.loans）
 //   • 每台車讀 VehicleFacts；「接下來」跟「接下來要繳」同一套：今天、15 天後各算一次合併（WidgetBillsBuilder）
 //   • 股票：持有中依市值大到小；今年股利、最近一次配息同股票頁看板（StockBoardData.build）
 //   • 金價匯率：設定「自訂幣別匯率」裡 FXRateService 認得的幣別
@@ -438,25 +441,38 @@ enum WidgetFinanceBuilder {
 
     /// 理財總覽頭部那一句（FinanceOverviewBoard.line，FinanceBoards.swift:141-153）：
     /// 「總資產 NT$3795萬・貸款還欠 約 NT$2075萬」「總資產 NT$3795萬・沒有貸款」；masked 金額換 NT$ ••••
+    /// [v25.565] 三段（同理財總覽頭部）：貸款只看房貸＋車貸＋其他貸款（s.loans），卡費與交割（s.wealthOwed）另一段、0 不寫：
+    /// 「總資產 NT$2291.1萬・貸款還欠 NT$900萬・卡費與交割 NT$10萬」「總資產 NT$2291.1萬・沒有貸款・卡費與交割 NT$10萬」
     private static func overviewLine(_ s: FinanceSnapshot, masked: Bool) -> String {
         let assets = "總資產 " + (masked ? WidgetHideAmounts.mask : MoneyFormat.short(finite(s.assets)))
-        if s.debt <= 0 { return assets + "・沒有貸款" }
-        let word = (s.mortgageEstimated || s.carLoanEstimated) ? "貸款還欠 約 " : "貸款還欠 "
-        let debt = masked ? WidgetHideAmounts.mask : MoneyFormat.short(finite(s.debt))
-        return assets + "・" + word + debt
+        let loans: String
+        if s.loans > 0 {
+            let word = (s.mortgageEstimated || s.carLoanEstimated) ? "貸款還欠 約 " : "貸款還欠 "
+            loans = word + (masked ? WidgetHideAmounts.mask : MoneyFormat.short(finite(s.loans)))
+        } else {
+            loans = "沒有貸款"
+        }
+        var line = assets + "・" + loans
+        if s.wealthOwed > 0.5 {
+            line += "・卡費與交割 " + (masked ? WidgetHideAmounts.mask : MoneyFormat.short(finite(s.wealthOwed)))
+        }
+        return line
     }
 
-    /// 資產各類（> 0 的，金額大到小：同理財總覽「錢放在哪裡」FinanceBoards.swift:183-185 同一個排序）
+    /// 資產各類（> 0 的，金額大到小：同理財總覽「錢放在哪裡」FinanceBoards.swift:183-185 同一個排序）。
+    /// [v25.565] FinanceAssetKind.allCases 含「存款」（.cash：財富頁的存款合計，key "cash"、icon building.columns.fill＝
+    /// MoneyArtTheme.wealthLive）；有幣別查不到匯率（s.cashApprox）時前面寫「約 」，同理財總覽的存款明信片
     private static func assetParts(_ s: FinanceSnapshot) -> [WidgetNetWorthPart] {
         let kinds = FinanceAssetKind.allCases.filter { s.value($0) > 0 }.sorted { s.value($0) > s.value($1) }
         return kinds.map { kind -> WidgetNetWorthPart in
             let v = finite(s.value(kind))
             let theme = kind.theme
             let share = clamp01(s.assets > 0 ? v / s.assets : 0)
+            let word: String = (kind == .cash && s.cashApprox) ? "約 " : ""
             return WidgetNetWorthPart(key: kind.rawValue,
                                       title: kind.name,
                                       icon: theme.hero,
-                                      amountText: MoneyFormat.short(v),
+                                      amountText: word + MoneyFormat.short(v),
                                       shareText: MoneyFormat.percent(share),
                                       share: share,
                                       top: theme.top,
@@ -465,7 +481,8 @@ enum WidgetFinanceBuilder {
     }
 
     /// 貸款各類（> 0 的，金額大到小）：房貸、車貸照理財總覽的字——算不出本金、退回含利息的寫「還要繳」，
-    /// 本金是推算的寫「約」（mortgageWord，FinanceBoards.swift:215-219）；其他貸款本來就是含利息的還要繳
+    /// 本金是推算的寫「約」（mortgageWord，FinanceBoards.swift:215-219）；其他貸款本來就是含利息的還要繳。
+    /// [v25.565] 多「卡費與交割」（key "wealthOwed"、icon creditcard；> 0.5 才列）
     private static func debtParts(_ s: FinanceSnapshot) -> [WidgetNetWorthPart] {
         var list: [(part: WidgetNetWorthPart, value: Double)] = []
         if s.mortgage > 0 {
@@ -483,6 +500,12 @@ enum WidgetFinanceBuilder {
         if s.otherLoan > 0 {
             list.append(debtPart(key: "otherLoan", title: "其他貸款", icon: "banknote", word: "還要繳 ",
                                  value: s.otherLoan, total: s.debt, top: otherLoanTop, bottom: otherLoanBottom))
+        }
+        // [v25.565] 卡費與交割（財富：卡費還沒扣＋已經排定的提款＋待交割；s.debt 已含）。卡費橘（wealthCardTrends）
+        if s.wealthOwed > 0.5 {
+            let theme = MoneyArtTheme.wealthCardTrends
+            list.append(debtPart(key: "wealthOwed", title: "卡費與交割", icon: "creditcard", word: "",
+                                 value: s.wealthOwed, total: s.debt, top: theme.top, bottom: theme.bottom))
         }
         return list.sorted { $0.value > $1.value }.map { $0.part }
     }

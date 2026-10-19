@@ -16,6 +16,10 @@ import SwiftUI
 // • MoneyItem.wealthBroker(_:facts:masked:)：市值讀股票頁；「證券戶・交割 薪轉（台新）」；膠囊交割、未實現（紅漲綠跌）。
 // • 分區（④ 信用卡、⑤ 銀行帳戶、⑥ 證券戶、⑦ 保單、⑧ 收起來的）：點＝卡片頁；長按 contextMenu、VoiceOver accessibilityActions 同一組；
 //   不做左滑。要開表單、要問的都交回財富頁（WealthPageActions），這裡不寫 store。
+//
+// [v25.565] 財富 v4（build/v4/brief.md §G4-9，v3 留下的已知限制）：信用卡項目卡第二行拆成 category（短：「10/27 截止」
+// 「11/10 扣款」「11/12 結帳」「已停用」）＋detail（「8 天・自己繳」「從薪轉扣最低・5 天」）。MoneyItemCard 的 category 是
+// fixedSize、detail 是 lineLimit(1)：SE 寬度＋自動扣最低＋長暱稱時 detail 變「…」，不再被卡片右緣切掉。VoiceOver 兩段都念。
 
 // MARK: - 財富頁的彈出頁（一個 enum、一個 .sheet(item:)）
 
@@ -156,7 +160,9 @@ extension MoneyItem {
         let meta = wealthCardMeta(c, today: today)
         let tier = c.usage.map { WealthPageText.tier($0) } ?? 0
         var item = MoneyItem(id: c.id, theme: wealthCardTheme(face: c.faceColor, tier: tier, warn: meta.warn, dark: dark),
-                             seed: seed(c.id), title: c.fullName, amount: "", category: meta.text)
+                             seed: seed(c.id), title: c.fullName, amount: "", category: meta.category)
+        // [v25.565] 第二行：category 只放短的那段（MoneyItemCard 的 category 是 fixedSize），其他放 detail（會變「…」不被切）
+        item.detail = meta.detail
         // 金額：有要繳寫要繳；沒有寫還沒出帳；都 0 寫 NT$0＋膠囊「這期還沒刷」
         var chips: [MoneyItemChip] = []
         if c.due > 0.5 {
@@ -194,39 +200,47 @@ extension MoneyItem {
         item.badge = meta.badge
         item.scriptWord = "Credit"
         item.scriptCaps = wealthCardCaps(c.name)
+        // VoiceOver 念第二行整句（category＋detail）
+        let spokenMeta: String = meta.detail.map { meta.category + "，" + $0 } ?? meta.category
         item.accessibilityText = wealthSpoken(title: c.fullName, amount: item.amount, unit: item.unit,
-                                              category: meta.text, chips: item.chips, progress: item.progress,
+                                              category: spokenMeta, chips: item.chips, progress: item.progress,
                                               masked: masked)
         return item
     }
 
-    /// 卡的第二行、左上小膠囊、要不要 warn
-    private static func wealthCardMeta(_ c: WealthFacts.Card, today: Date) -> (text: String, badge: String?, warn: Bool) {
+    /// 卡的第二行（category＝短的那段、detail＝其他）、左上小膠囊、要不要 warn。
+    /// [v25.565] 第二行拆兩段（v3 留下：SE 寬度「自動扣最低＋長暱稱」整句塞在 fixedSize 的 category 被卡片右緣切掉）：
+    /// 「10/27 截止」＋「8 天・自己繳」、「11/10 扣款」＋「從薪轉扣最低・5 天」、「11/12 結帳」＋「11/27 從薪轉扣」、「已停用」。
+    /// 畫出來照樣是「10/27 截止・8 天・自己繳」（MoneyItemCard 在 detail 前面補「・」）；放不下只有 detail 變「…」
+    private static func wealthCardMeta(_ c: WealthFacts.Card, today: Date)
+        -> (category: String, detail: String?, badge: String?, warn: Bool) {
         let md = WealthPageText.md
         if c.isDisabled {
             let since = c.closedDate.map { md($0) + " 停用" } ?? "已停用"
-            return (text: since, badge: nil, warn: false)
+            return (category: since, detail: nil, badge: nil, warn: false)
         }
         let mode = c.payMode == .askEachTime ? "每次問我" : "自己繳"
         let verb = c.payMode == .autoMin ? "扣最低" : "扣"
         if let s = c.dueStatement {
+            let due = md(s.due)
             if s.status == .overdue {
-                return (text: md(s.due) + " 截止・還沒確認", badge: md(s.due) + " 截止", warn: true)
+                return (category: due + " 截止", detail: "還沒確認", badge: due + " 截止", warn: true)
             }
             let n = WealthCal.days(from: today, to: s.due)
             if c.payMode.isAuto {
                 let from = c.payerName.map { "從\($0)\(verb)" } ?? "還沒選從哪扣"
-                if n <= 0 { return (text: "今天" + from, badge: "今天扣款", warn: true) }
-                return (text: "\(md(s.due)) \(from)・\(n) 天", badge: "\(md(s.due)) 扣款", warn: n <= 3)
+                if n <= 0 { return (category: "今天扣款", detail: from, badge: "今天扣款", warn: true) }
+                return (category: due + " 扣款", detail: "\(from)・\(n) 天", badge: due + " 扣款", warn: n <= 3)
             }
-            if n <= 0 { return (text: "今天截止・" + mode, badge: "今天截止", warn: true) }
-            return (text: "\(md(s.due)) 截止・\(n) 天・\(mode)", badge: "\(md(s.due)) 截止", warn: n <= 3)
+            if n <= 0 { return (category: "今天截止", detail: mode, badge: "今天截止", warn: true) }
+            return (category: due + " 截止", detail: "\(n) 天・\(mode)", badge: due + " 截止", warn: n <= 3)
         }
+        let close = md(c.nextClose) + " 結帳"
         if c.payMode.isAuto {
             let from = c.payerName.map { md(c.nextDue) + " 從\($0)\(verb)" } ?? "還沒選從哪扣"
-            return (text: "\(md(c.nextClose)) 結帳・\(from)", badge: "\(md(c.nextClose)) 結帳", warn: false)
+            return (category: close, detail: from, badge: close, warn: false)
         }
-        return (text: "\(md(c.nextClose)) 結帳・\(mode)", badge: "\(md(c.nextClose)) 結帳", warn: false)
+        return (category: close, detail: mode, badge: close, warn: false)
     }
 
     /// 「9 月帳單已扣 ✓」（自動扣）／「已繳 ✓」（自己繳）／「當作已繳」：最近一期 35 天內

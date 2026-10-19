@@ -57,10 +57,20 @@ import SwiftUI
 //     「錢放在哪裡」（四張明信片，點了切到那一頁）、「每個月的現金流」（租金、股利、房貸、保費、養車）、
 //     「接下來 30 天」。
 //   - 儲蓄險改用今天的價值、外幣換成台幣；賣掉的車不再算（算法說明在 FinanceInsights.swift）。
+// [v25.565] 財富 v4（build/v4/brief.md G1-9、10）：淨資產含存款、扣卡費與待交割，財富的數字讀人生的 LifeStore
+//   （FinanceLoanIndex.wealth），所以看板的 .task 也看 wealthRevision 與今天的日期（卡費截止、交割跟著日子變）。
+//   接下來 30 天的卡費、交割列點了彈出那張卡／交割銀行的財富卡片頁（.sheet(item:)，看完關掉還在理財）。
+
+/// [v25.565] 理財總覽彈出財富卡片頁的那一張（.sheet(item:) 要 Identifiable）
+struct FinanceWealthCardTarget: Identifiable {
+    let id: UUID
+}
 
 struct FinanceOverviewView: View {
     @EnvironmentObject var store: FinanceStore
     @EnvironmentObject var expenseStore: ExpenseStore
+    /// [v25.565] 財富的一套數字在人生（存款、卡費、交割）；改了要重算看板
+    @EnvironmentObject var lifeStore: LifeStore
     @EnvironmentObject var subscription: SubscriptionManager
     @AppStorage("finance_feature") private var financeFeatureRaw: String = FinanceFeature.overview.rawValue
     @State private var showAddVariable = false
@@ -70,13 +80,16 @@ struct FinanceOverviewView: View {
     @State private var showPremiumAlert = false
     /// 看板的數字（會掃全部的支出找貸款，放在 .task 裡算，不在 body 裡算）
     @State private var board = FinanceOverviewData()
+    /// [v25.565] 從「接下來 30 天」的卡費、交割列彈出的財富卡片頁
+    @State private var wealthCard: FinanceWealthCardTarget?
 
     var body: some View {
         NavigationStack {
             ScrollView {
-                FinanceOverviewBoard(data: board) { feature in
-                    financeFeatureRaw = feature.rawValue
-                }
+                // [v25.565] 兩個 closure 都寫標籤（不靠 trailing closure 去配）
+                FinanceOverviewBoard(data: board,
+                                     open: { feature in financeFeatureRaw = feature.rawValue },
+                                     openWealth: { id in wealthCard = FinanceWealthCardTarget(id: id) })
                 .padding(.horizontal, 16)
                 .padding(.top, 10)
                 .padding(.bottom, 24)
@@ -88,15 +101,23 @@ struct FinanceOverviewView: View {
                     quickAddMenu
                 }
             }
-            .task(id: "\(store.modifyID)-\(expenseStore.modifyID)") {
+            .task(id: boardKey) {
                 board = FinanceOverviewData.build(finance: store, expense: expenseStore)
             }
             .sheet(isPresented: $showAddVariable) { AddExpenseView(expenseType: .variable).appStores() }
             .sheet(isPresented: $showAddFixed) { AddExpenseView(expenseType: .fixed).appStores() }
             .sheet(isPresented: $showAddStock) { AddStockView().appStores() }
             .sheet(isPresented: $showAddRealEstate) { AddRealEstateView().appStores() }
+            .sheet(item: $wealthCard) { t in
+                WealthCardPage(accountId: t.id).appStores()
+            }
             .premiumLockAlert(isPresented: $showPremiumAlert)
         }
+    }
+
+    /// 看板重算的 key：理財、記帳、[v25.565] 財富帳本（wealthRevision）、今天（卡費截止、交割跟著日子變）
+    private var boardKey: String {
+        "\(store.modifyID)-\(expenseStore.modifyID)-\(lifeStore.wealthRevision)-\(WealthCal.dayKey(Date()))"
     }
 
     private func gated(_ action: () -> Void) {

@@ -47,6 +47,21 @@ import UIKit
 // • 點了（tapEvent）：運動 → openTarget = .workout(id) → 同一個 .sheet(item: $openTarget) { … .appStores() }
 //   開 WorkoutDetailView(sessionId:)（看不擋訂閱，編輯、刪除成果頁自己擋）；其他照舊開預覽卡片。
 // • 搜尋（searchHits）這版不加運動；CalendarDayItems（「今天」小工具的全天的事）也不收（運動有開始時間）。
+//
+// [v25.565] 財富 v4（wealth/build/v4/brief.md §6 G3；judge §6.6、§7.1）：我的行事曆顯示財富的日子，跟運動一樣走同一套
+//   CalendarEvent／eventsOn／eventRow，不另寫一套列：
+// • eventsOn 多收那一天的財富日子（WealthDates.items(on:facts:)，Models/WealthReminders.swift；數字只讀
+//   lifeStore.wealthFacts 那一份）：繳款截止日（每張卡接下來 2 期；自己繳的橘、自動扣的灰）、交割日、卡片到期（那個月 1 號）。
+//   「[creditcard.fill] CUBE 卡費　〔財富〕　☀ 全日 · 自己繳・NT$18,600」。結帳日不放。
+//   記帳用 AppStores.expense（不加 @EnvironmentObject expenseStore：#Preview 沒注入會當掉）。
+// • 財富帳戶的里程碑（銀行、信用卡、證券、保險的開戶日／核卡日；WealthDates.isWealthAccount）照舊列（第 9 題：帳戶都留著），
+//   但類型改 .wealth、分類寫「財富」（不寫「成就」、不當里程碑）、不帶時間。
+// • CalendarEvent 多 wealthAccountId（點了開哪一張卡／哪一個帳戶）、tint（自動扣的卡費灰；nil 用 type.color）；
+//   EventType 多 .wealth（橘 F07A29、「財富」、banknote.fill）。eventRow 與「接下來 7 天」的彩點一律用 ev.tint ?? ev.type.color。
+// • 點了（tapEvent）：財富 → openTarget = .wealth(id) → 同一個 .sheet(item: $openTarget) { … .appStores() }
+//   開 WealthCardPage(accountId:)（看不擋訂閱，卡片頁自己擋編輯）。
+// • **不送 Apple 行事曆**（AppleCalendarBridge 只寫個人行事曆事件與部屬生日提醒）；搜尋（searchHits）這版不加財富。
+// • 規則同 CalendarDayItems（「今天」小工具的全天的事），改一邊改另一邊；小工具主畫面不寫金額、鎖定畫面只寫類別字。
 
 /// 我的行事曆：彙整當日家庭紀念日、工作會議與任務、本週快覽、未來里程碑、Apple 行事曆事件。
 struct MyCalendarView: View {
@@ -93,6 +108,8 @@ struct MyCalendarView: View {
         case sideRole(roleId: UUID, resolutionId: UUID?)
         /// [健康 v7b] 運動：打開那一趟的成果頁
         case workout(UUID)
+        /// [財富 v4] 財富的日子（卡費截止、交割、卡片到期）與財富帳戶的開戶日：打開那張卡／那個帳戶的卡片頁
+        case wealth(UUID)
         var id: String {
             switch self {
             case .report(_, let r):  return "r_\(r.id.uuidString)"
@@ -103,6 +120,7 @@ struct MyCalendarView: View {
             case .event(let e):      return "e_\(e.id.uuidString)"
             case .sideRole(let rid, let res): return "srw_\(rid.uuidString)_\(res?.uuidString ?? "")"
             case .workout(let wid):  return "wk_\(wid.uuidString)"
+            case .wealth(let aid):   return "wl_\(aid.uuidString)"
             }
         }
     }
@@ -270,6 +288,9 @@ struct MyCalendarView: View {
         case .workout(let wid):
             // [健康 v7b] 我的行事曆點運動那一列：那一趟的成果頁（看不擋訂閱；編輯、刪除成果頁自己擋）
             WorkoutDetailView(sessionId: wid)
+        case .wealth(let aid):
+            // [財富 v4] 我的行事曆點財富那一列：那張卡／那個帳戶的卡片頁（看不擋訂閱；編輯在卡片頁裡自己擋）
+            WealthCardPage(accountId: aid)
         }
     }
 
@@ -405,11 +426,17 @@ struct MyCalendarView: View {
         var workoutId: UUID? = nil
         /// [健康 v7b] 圖示換成那一種運動（figure.walk…）；nil 用 type.icon
         var iconName: String? = nil
+        /// [財富 v4] 財富那一列：點了開哪一張卡／哪一個帳戶（WealthCardPage）
+        var wealthAccountId: UUID? = nil
+        /// [財富 v4] 這一列自己的顏色（自動扣的卡費灰）；nil 用 type.color
+        var tint: Color? = nil
 
         enum EventType {
             case birthday, anniversary, meeting, task, milestone, appleCalendar
             /// [健康 v7b] 運動（跑步、健走、騎車、登山、重訓）
             case workout
+            /// [財富 v4] 財富：卡費截止／扣款、交割、卡片到期、財富帳戶的開戶日
+            case wealth
             var icon: String {
                 switch self {
                 case .birthday:      return "gift.fill"
@@ -419,6 +446,7 @@ struct MyCalendarView: View {
                 case .milestone:     return "flag.fill"
                 case .appleCalendar: return "calendar"
                 case .workout:       return "figure.run"
+                case .wealth:        return "banknote.fill"
                 }
             }
             var color: Color {
@@ -431,6 +459,8 @@ struct MyCalendarView: View {
                 case .appleCalendar: return Color(red: 0.45, green: 0.65, blue: 0.95)
                 // 運動橘 EB6834（judge §3.14）
                 case .workout:       return Color(red: 0.92, green: 0.41, blue: 0.20)
+                // 財富橘 F07A29（自己繳的卡費、交割、卡片到期、開戶日；自動扣的卡費用 tint 灰）
+                case .wealth:        return Color(red: 0.94, green: 0.48, blue: 0.16)
                 }
             }
             var name: String {
@@ -442,9 +472,24 @@ struct MyCalendarView: View {
                 case .milestone: return "里程碑"
                 case .appleCalendar: return "系統行事曆"
                 case .workout: return "運動"
+                case .wealth: return "財富"
                 }
             }
         }
+    }
+
+    /// [財富 v4] 自動扣的卡費（繳款截止那天會自己扣）畫灰色；自己繳的卡費、交割、卡片到期用財富橘（tint nil）
+    private static let wealthAutoPayGray = Color(red: 0.56, green: 0.60, blue: 0.66)
+
+    /// [財富 v4] 財富日子那一列的顏色：只有自動扣的卡費是灰的
+    private static func wealthTint(_ item: WealthDateItem) -> Color? {
+        if item.kind == .cardDue && !item.isManual { return wealthAutoPayGray }
+        return nil
+    }
+
+    /// [財富 v4] 「接下來 7 天」的彩點與 eventRow 的顏色：這一列自己的顏色優先
+    private func eventColor(_ ev: CalendarEvent) -> Color {
+        ev.tint ?? ev.type.color
     }
 
     /// 將生日 / 紀念日的「年份」對齊到當年（用於跨年比對）
@@ -500,12 +545,40 @@ struct MyCalendarView: View {
 
         // 人生里程碑（精準日期）
         for ms in lifeStore.milestones where calendar.isDate(ms.date, inSameDayAs: day) {
+            if WealthDates.isWealthAccount(ms) {
+                // [財富 v4] 財富帳戶的開戶日／核卡日：照舊列（第 9 題），分類寫「財富」、點了開卡片頁
+                events.append(CalendarEvent(
+                    id: "ms-\(ms.id.uuidString)",
+                    type: .wealth,
+                    title: ms.title,
+                    time: nil,
+                    detail: "財富",
+                    wealthAccountId: ms.id
+                ))
+                continue
+            }
             events.append(CalendarEvent(
                 id: "ms-\(ms.id.uuidString)",
                 type: .milestone,
                 title: ms.title,
                 time: ms.date,
                 detail: ms.category.rawValue
+            ))
+        }
+
+        // [財富 v4] 財富的日子：繳款截止（每張卡 2 期）、交割、卡片到期（WealthDates，只讀 wealthFacts 那一份）。
+        // 記帳用 AppStores.expense（同一份；不加 @EnvironmentObject：#Preview 沒注入會當掉）
+        let wFacts = lifeStore.wealthFacts(expense: AppStores.expense, finance: financeStore)
+        for item in WealthDates.items(on: day, facts: wFacts) {
+            events.append(CalendarEvent(
+                id: item.id,
+                type: .wealth,
+                title: item.title,
+                time: nil,
+                detail: item.detail,
+                iconName: item.icon,
+                wealthAccountId: item.accountId,
+                tint: Self.wealthTint(item)
             ))
         }
 
@@ -621,15 +694,18 @@ struct MyCalendarView: View {
             return .family(title: ev.title, detail: ev.detail, isBirthday: true)
         case .anniversary:
             return .family(title: ev.title, detail: ev.detail, isBirthday: false)
-        case .appleCalendar, .meeting, .task, .workout:
-            // .workout 不會走到（運動那一列點了走 tapEvent → 成果頁）；放這裡只是讓 switch 窮舉
+        case .appleCalendar, .meeting, .task, .workout, .wealth:
+            // .workout、.wealth 不會走到（運動那一列點了走 tapEvent → 成果頁；財富 → 卡片頁）；放這裡只是讓 switch 窮舉
             return .appleEvent(title: ev.title, time: ev.time, detail: ev.detail, date: fallbackDate)
         }
     }
 
     /// [健康 v7b] 點當日事件一列：運動開那一趟的成果頁（同一個 sheet(item: $openTarget)），其他照舊開預覽卡片
+    /// [財富 v4] 財富那一列（卡費、交割、卡片到期、開戶日）：開那張卡／那個帳戶的卡片頁（同一個 sheet）
     private func tapEvent(_ ev: CalendarEvent) {
-        if let wid = ev.workoutId {
+        if let aid = ev.wealthAccountId {
+            openTarget = .wealth(aid)
+        } else if let wid = ev.workoutId {
             openTarget = .workout(wid)
         } else {
             previewCalendarItem = cardItem(for: ev)
@@ -667,25 +743,27 @@ struct MyCalendarView: View {
     }
 
     private func eventRow(_ ev: CalendarEvent) -> some View {
-        HStack(alignment: .top, spacing: 12) {
+        // [財富 v4] 這一列自己的顏色優先（自動扣的卡費灰），其他照 type.color
+        let color: Color = eventColor(ev)
+        return HStack(alignment: .top, spacing: 12) {
             // 圖示圓：36pt LinearGradient + shadow，與 IncomeView / VariableExpenseView 均值
             ZStack {
                 Circle()
                     .fill(
                         LinearGradient(
-                            colors: [ev.type.color.opacity(0.22), ev.type.color.opacity(0.09)],
+                            colors: [color.opacity(0.22), color.opacity(0.09)],
                             startPoint: .topLeading,
                             endPoint: .bottomTrailing
                         )
                     )
                     .frame(width: 36, height: 36)
-                    .shadow(color: ev.type.color.opacity(0.18), radius: 5, x: 0, y: 2)
+                    .shadow(color: color.opacity(0.18), radius: 5, x: 0, y: 2)
                 Circle()
-                    .stroke(ev.type.color.opacity(0.28), lineWidth: 0.75)
+                    .stroke(color.opacity(0.28), lineWidth: 0.75)
                     .frame(width: 36, height: 36)
                 Image(systemName: ev.iconName ?? ev.type.icon)
                     .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(ev.type.color)
+                    .foregroundStyle(color)
             }
             VStack(alignment: .leading, spacing: 4) {
                 // 標題 + 類型膠囊
@@ -696,10 +774,10 @@ struct MyCalendarView: View {
                     Text(ev.type.name)
                         .font(.system(size: 10, weight: .semibold))
                         .padding(.horizontal, 6).padding(.vertical, 2)
-                        .background(ev.type.color.opacity(0.15))
-                        .foregroundStyle(ev.type.color)
+                        .background(color.opacity(0.15))
+                        .foregroundStyle(color)
                         .clipShape(Capsule())
-                        .overlay(Capsule().stroke(ev.type.color.opacity(0.22), lineWidth: 0.6))
+                        .overlay(Capsule().stroke(color.opacity(0.22), lineWidth: 0.6))
                 }
                 // 時間 + 詳情
                 HStack(spacing: 6) {
@@ -817,10 +895,10 @@ struct MyCalendarView: View {
                     HStack(spacing: 2) {
                         ForEach(0..<min(events.count, 3), id: \.self) { i in
                             Circle()
-                                .fill(isSelected ? .white.opacity(0.90) : events[i].type.color)
+                                .fill(isSelected ? .white.opacity(0.90) : eventColor(events[i]))
                                 .frame(width: 5, height: 5)
                                 .shadow(
-                                    color: isSelected ? .clear : events[i].type.color.opacity(0.45),
+                                    color: isSelected ? .clear : eventColor(events[i]).opacity(0.45),
                                     radius: 1.5
                                 )
                         }
@@ -929,7 +1007,8 @@ struct MyCalendarView: View {
                                 .background(Color(.tertiarySystemFill))
                                 .clipShape(Capsule())
                                 // 類別標籤：圓角膠囊 badge，與 IncomeView / VariableExpenseView 均值
-                                Text(ms.category.rawValue)
+                                // [財富 v4] 財富帳戶的開戶日寫「財富」（不寫「成就」）
+                                Text(milestoneCategoryText(ms))
                                     .font(.system(size: 10, weight: .semibold))
                                     .padding(.horizontal, 6).padding(.vertical, 2)
                                     .background(msColor.opacity(0.14))
@@ -1687,6 +1766,11 @@ struct MyCalendarView: View {
         if days == 0 { return "今天" }
         if days == 1 { return "明天" }
         return "\(days) 天後"
+    }
+
+    /// [財富 v4] 未來 30 天里程碑的類別字：財富帳戶（銀行、信用卡、證券、保險）寫「財富」，其他照分類
+    private func milestoneCategoryText(_ ms: LifeMilestone) -> String {
+        WealthDates.isWealthAccount(ms) ? "財富" : ms.category.rawValue
     }
 
     // 里程碑類別色彩：與 LifeOverviewView.milestoneColor() 保持完全一致的色彩語言

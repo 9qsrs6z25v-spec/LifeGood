@@ -3,6 +3,13 @@ import EventKit
 import Combine
 import UIKit
 
+// [v25.565] 財富 v4（wealth/judge.md §6.6、§7.1；build/v4/brief.md §1-12、§6 G3-7）：
+// 財富的日子（卡費截止／扣款、交割、卡片到期、財富帳戶的開戶日）只在「我的行事曆」與「今天」小工具，
+// **不送系統行事曆**——寫進 iOS 行事曆會跟著 Apple ID 到處出現（Mac、iPad、手錶、共用行事曆、別的行事曆 App）。
+// 這裡只寫兩種東西：個人行事曆事件（writeOrUpdate(from: PersonalEvent, …)）與部屬生日提醒（writeBirthdayReminder）；
+// 下面的提醒事項橋接只寫家庭待辦與部屬任務。財富的日子不是 PersonalEvent（WealthDates 每次從 WealthFacts 算出來），
+// 本來就寫不過去，所以這版不加任何程式。以後要加別的寫入（同步、匯出 .ics…），記得財富的不准送。
+
 /// 把 iOS 系統行事曆（EventKit）橋接到 LifeGood，供 MyCalendarView 顯示用。
 /// 只讀取，不修改使用者的行事曆。
 @MainActor

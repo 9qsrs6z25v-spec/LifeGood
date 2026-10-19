@@ -24,6 +24,11 @@ import AppIntents
 // • 顏色：比上月照理財圖表「紅漲綠跌」（palette.change，著色模式靠 ↑↓）；淨資產是負的大字紅（同理財總覽 bigTone .bad）。
 // • 時間軸：now＋之後 7 個 00:00（跨月那天 00:00 一定在裡面），.atEnd；App 寫快照時會叫重畫。
 // • 點了：整塊 → 理財總覽（lifegood://finance/overview）。
+// • [v25.565] 財富 v4 起淨資產含存款、扣卡費與交割（App 的 FinanceSnapshot 算好，這裡照畫）：資產多「存款」一類
+//   （key "cash"、icon building.columns.fill）、貸款欄多「卡費與交割」（key "wealthOwed"、icon creditcard）；
+//   那一句變「總資產 …・貸款還欠 …・卡費與交割 …」。大字、比上月的邏輯不動（以前的月份 App 照口徑 4 回推，不假漲）。
+//   中型左欄照舊最多 4 類（5 類時最小的那一類只在上面那條裡）。
+//   第二條的名字：有「卡費與交割」寫「負債」、只有貸款照舊「貸款」（沒有貸款只有卡費時不寫「貸款」）。
 //
 // 型別（internal 的都帶 NetWorthWidget 前綴或是 brief 指定的名字；畫面零件 private，也帶 NetWorthWidget 前綴）：
 //   NetWorthWidget、NetWorthConfigIntent、NetWorthWidgetEntry、NetWorthWidgetProvider、NetWorthWidgetRow、
@@ -163,6 +168,9 @@ struct NetWorthWidgetModel {
     var debtParts: [WidgetNetWorthPart] = []
     var assetsBar: Double = 0
     var debtsBar: Double = 0
+    /// [v25.565] 第二條的名字：只有貸款寫「貸款」；含「卡費與交割」（key "wealthOwed"）寫「負債」
+    /// （沒有貸款、只有卡費時不能寫「貸款」，同理財總覽那一句「沒有貸款・卡費與交割 …」）
+    var debtsLabel = "貸款"
     /// 中型兩欄
     var assetRows: [NetWorthWidgetRow] = []
     var debtRows: [NetWorthWidgetRow] = []
@@ -196,6 +204,7 @@ struct NetWorthWidgetModel {
         m.debtParts = w.debts
         m.assetsBar = w.assetsBar
         m.debtsBar = w.debtsBar
+        m.debtsLabel = w.debts.contains(where: { $0.key == "wealthOwed" }) ? "負債" : "貸款"
         m.assetRows = w.assets.prefix(maxAssets).map { row($0, hidden: hidden) }
         m.debtRows = w.debts.prefix(maxDebts).map { row($0, hidden: hidden) }
         if let at = w.stockPriceAt {
@@ -238,6 +247,8 @@ struct NetWorthWidgetModel {
 }
 
 /// 小工具庫預覽與 placeholder 的樣本。**寫死的展示字**（D:97-122 的例子；% 照 App 的寫法是整數）
+/// [v25.565] 資產加「存款 NT$81.7萬」、貸款加「卡費與交割 NT$10萬」（儲蓄險改 NT$65萬，存款排第 4、中型看得到）；
+/// 大字、那一句、占比照新的合計重算：總資產 3846.7萬、貸款 2075萬＋卡費與交割 10萬、淨資產 1761.7萬
 enum NetWorthWidgetSample {
     static func entry(at now: Date) -> NetWorthWidgetEntry {
         NetWorthWidgetEntry(date: now, hasSnapshot: true, netWorth: netWorth(at: now), hidesAmounts: false,
@@ -248,37 +259,43 @@ enum NetWorthWidgetSample {
         let month: Int = Calendar.current.component(.month, from: now)
         return WidgetNetWorth(monthKey: WidgetDateText.monthKey(now),
                               monthText: "\(month) 月",
-                              netWorthText: "NT$1720萬",
+                              netWorthText: "NT$1761.7萬",
                               isNegative: false,
                               changeText: "比上月 ↑2%",
                               changeShort: "↑2%",
                               changeDirection: 1,
-                              line: "總資產 NT$3795萬・貸款還欠 約 NT$2075萬",
-                              lineMasked: "總資產 NT$ ••••・貸款還欠 約 NT$ ••••",
+                              line: "總資產 NT$3846.7萬・貸款還欠 約 NT$2075萬・卡費與交割 NT$10萬",
+                              lineMasked: "總資產 NT$ ••••・貸款還欠 約 NT$ ••••・卡費與交割 NT$ ••••",
                               assets: assets,
                               debts: debts,
                               assetsBar: 1,
-                              debtsBar: 0.547,
-                              summaryText: "資產 4 類・\(month) 月",
+                              debtsBar: 0.542,
+                              summaryText: "資產 5 類・\(month) 月",
                               stockPriceAt: nil)
     }
 
     private static let assets: [WidgetNetWorthPart] = [
         WidgetNetWorthPart(key: "realEstate", title: "房地產", icon: "house.fill", amountText: "NT$3178萬",
-                           shareText: "84%", share: 0.837, top: 0xB79CFF, bottom: 0x6B4BE0),
+                           shareText: "83%", share: 0.826, top: 0xB79CFF, bottom: 0x6B4BE0),
         WidgetNetWorthPart(key: "stock", title: "股票", icon: "chart.line.uptrend.xyaxis", amountText: "NT$262萬",
-                           shareText: "7%", share: 0.069, top: 0xFFB45E, bottom: 0xF07A2A),
+                           shareText: "7%", share: 0.068, top: 0xFFB45E, bottom: 0xF07A2A),
         WidgetNetWorthPart(key: "vehicle", title: "載具", icon: "car.fill", amountText: "NT$260萬",
-                           shareText: "7%", share: 0.069, top: 0x7FE3D0, bottom: 0x1A9C8C),
-        WidgetNetWorthPart(key: "savings", title: "儲蓄險", icon: "shield.lefthalf.filled", amountText: "NT$95萬",
-                           shareText: "3%", share: 0.025, top: 0x8EC5FF, bottom: 0x3A6FE0)
+                           shareText: "7%", share: 0.068, top: 0x7FE3D0, bottom: 0x1A9C8C),
+        // [v25.565] 存款（MoneyArtTheme.wealthLive 活存藍）
+        WidgetNetWorthPart(key: "cash", title: "存款", icon: "building.columns.fill", amountText: "NT$81.7萬",
+                           shareText: "2%", share: 0.021, top: 0x7FB2FF, bottom: 0x2F6FD6),
+        WidgetNetWorthPart(key: "savings", title: "儲蓄險", icon: "shield.lefthalf.filled", amountText: "NT$65萬",
+                           shareText: "2%", share: 0.017, top: 0x8EC5FF, bottom: 0x3A6FE0)
     ]
 
     private static let debts: [WidgetNetWorthPart] = [
         WidgetNetWorthPart(key: "mortgage", title: "房貸", icon: "house", amountText: "約 NT$1800萬",
-                           shareText: "87%", share: 0.867, top: 0xB79CFF, bottom: 0x6B4BE0),
+                           shareText: "86%", share: 0.863, top: 0xB79CFF, bottom: 0x6B4BE0),
         WidgetNetWorthPart(key: "carLoan", title: "車貸", icon: "car", amountText: "約 NT$275萬",
-                           shareText: "13%", share: 0.133, top: 0x7FE3D0, bottom: 0x1A9C8C)
+                           shareText: "13%", share: 0.132, top: 0x7FE3D0, bottom: 0x1A9C8C),
+        // [v25.565] 卡費與交割（MoneyArtTheme.wealthCardTrends 卡費橘）
+        WidgetNetWorthPart(key: "wealthOwed", title: "卡費與交割", icon: "creditcard", amountText: "NT$10萬",
+                           shareText: "0%", share: 0.005, top: 0xFFB86B, bottom: 0xD9601F)
     ]
 }
 
@@ -652,7 +669,7 @@ private struct NetWorthWidgetBars: View {
     @ViewBuilder
     private var debtRow: some View {
         if !model.debtParts.isEmpty {
-            NetWorthWidgetBarRow(label: "貸款", parts: model.debtParts, fraction: model.debtsBar,
+            NetWorthWidgetBarRow(label: model.debtsLabel, parts: model.debtParts, fraction: model.debtsBar,
                                  palette: palette, labelWidth: labelWidth, height: height)
         }
     }

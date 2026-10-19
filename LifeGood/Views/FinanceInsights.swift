@@ -23,11 +23,18 @@ import SwiftUI
 // - 其他貸款仍是「還要繳」＝剩下的期數 × 每期金額，含利息，所以這部分會偏保守一點（畫面上有寫）。
 //   房子的房貸、車子連結的車貸、記帳裡其他的貸款各算一次：連結到房子、車子的那幾筆
 //   固定支出不會在「其他貸款」裡再算一次。
+// - [v25.565] 財富 v4（wealth/judge.md §6.4；build/v4/brief.md §2）：資產多「存款」（財富頁的存款合計，存摺上）；
+//   負債多「卡費」（卡費還沒扣＋已經排定的提款）與「待交割」（成交了、還沒交割的股票款）。數字一律讀財富的一套數字
+//   （AppStores.life.wealthFacts，跟財富頁同一份快取）：買股票那天股票多了市值、待交割多了股款，交割那天存款少了、待交割歸零，
+//   兩天淨資產都只差手續費。以前的月份照財富帳戶的紀錄回推（WealthFacts.history，口徑 4）。
+//   接下來 30 天多「卡費」「交割」：刷卡的定期扣款（保費、車子的訂閱…）併進那一期卡費，自己不再另外一列（待決定 4）。
+//   現金流不加卡費（卡費是記帳支出的另一面，加了算兩次）。
 
 // MARK: - 資產類別
 
 enum FinanceAssetKind: String, CaseIterable, Identifiable {
-    case realEstate, savings, stock, vehicle
+    /// [v25.565] cash＝存款（財富頁的存款合計）。這個列舉不存檔、不同步（rawValue 只當小工具的 key），可以加
+    case realEstate, savings, stock, vehicle, cash
 
     var id: String { rawValue }
 
@@ -37,16 +44,18 @@ enum FinanceAssetKind: String, CaseIterable, Identifiable {
         case .savings: return "儲蓄險"
         case .stock: return "股票"
         case .vehicle: return "載具"
+        case .cash: return "存款"
         }
     }
 
-    /// 點明信片要切到的理財分頁
-    var feature: FinanceFeature {
+    /// 點明信片要切到的理財分頁。[v25.565] 存款不在理財：nil＝切到人生 › 財富（AppNavigation.goToWealth()）
+    var feature: FinanceFeature? {
         switch self {
         case .realEstate: return .realEstate
         case .savings: return .insurance
         case .stock: return .stock
         case .vehicle: return .vehicle
+        case .cash: return nil
         }
     }
 
@@ -56,6 +65,7 @@ enum FinanceAssetKind: String, CaseIterable, Identifiable {
         case .savings: return .finSavings
         case .stock: return .finStock
         case .vehicle: return .finDrive
+        case .cash: return .wealthLive
         }
     }
 }
@@ -161,10 +171,26 @@ struct FinanceSnapshot: Equatable {
     /// [v25.539] 有車貸的本金是用平均利率反推的（利率 > 0；零利率的本金剛好是借款 − 已繳，不算推估）：
     /// 畫面寫「約」，同 mortgageEstimated（決定 2）
     var carLoanEstimated = false
+    /// [v25.565] 存款（財富頁的存款合計，存摺上；算進存款合計、沒收起來的銀行帳戶，換台幣）
+    var cash: Double = 0
+    /// [v25.565] 有幣別查不到匯率（存款前面寫「約」）
+    var cashApprox = false
+    /// [v25.565] 卡費：卡費還沒扣（要繳＋還沒出帳）＋已經排定、還沒到的提款（WealthFacts.netWorthCardOwed）
+    var cardOwed: Double = 0
+    /// [v25.565] 待交割：成交了、還沒交割的股票款
+    var pendingSettlement: Double = 0
+    /// [v25.565] 以前的月份：有財富帳戶那天還沒開始記（存款是往前平推的）
+    var wealthEstimated = false
 
-    var assets: Double { realEstate + savings + stock + vehicle }
-    var debt: Double { mortgage + carLoan + otherLoan }
+    /// [v25.565] 資產含存款
+    var assets: Double { realEstate + savings + stock + vehicle + cash }
+    /// [v25.565] 負債含卡費、待交割
+    var debt: Double { mortgage + carLoan + otherLoan + cardOwed + pendingSettlement }
     var netWorth: Double { assets - debt }
+    /// [v25.565] 只有貸款（房貸＋車貸＋其他貸款）：「貸款還欠 900萬」、「沒有貸款」看這個
+    var loans: Double { mortgage + carLoan + otherLoan }
+    /// [v25.565] 卡費與交割（「卡費與交割 10萬」；0 不寫）
+    var wealthOwed: Double { cardOwed + pendingSettlement }
 
     func value(_ k: FinanceAssetKind) -> Double {
         switch k {
@@ -172,6 +198,7 @@ struct FinanceSnapshot: Equatable {
         case .savings: return savings
         case .stock: return stock
         case .vehicle: return vehicle
+        case .cash: return cash
         }
     }
 }
@@ -247,8 +274,13 @@ struct FinanceLoanIndex {
     /// 現金流（每月養車）、接下來 30 天都讀這一份，跟車子卡片、列表、載具頁看板同一個數。
     /// 車貸的利率在 build 時只解一次，回推每個月只查表（VehicleLoan.owed(at:)）。
     let vehicles: [UUID: VehicleFacts]
+    /// [v25.565] 財富的一套數字（AppStores.life.wealthFacts：跟財富頁同一份快取）。**一律是今天的**（不看 now）：
+    /// 小工具「接下來要繳」往後推 15 天建第二份 index 時，財富還是今天這一份（卡費、交割照今天算好的日子列）
+    let wealth: WealthFacts
 
+    /// 呼叫端簽章不變；財富讀 AppStores.life（主執行緒：理財頁的 .task、小工具快照的寫手都在主執行緒）
     init(finance f: FinanceStore, expense e: ExpenseStore, now: Date = Date()) {
+        wealth = AppStores.life.wealthFacts(expense: e, finance: f)
         var h: [UUID: HouseFacts] = [:]
         for re in f.realEstates {
             h[re.id] = HouseFacts.build(re, expenses: e.expenses, now: now)
@@ -368,6 +400,21 @@ extension FinanceSnapshot {
 
         for ex in loans.otherLoans {
             if let left = FinanceLoans.remaining(ex, at: date, store: e, calendar: cal) { s.otherLoan += left }
+        }
+
+        // [v25.565] 存款、卡費、待交割：現在讀財富的一套數字；以前的月份查 WealthFacts.history（口徑 4）
+        let w = loans.wealth
+        if isNow {
+            s.cash = w.cash
+            s.cashApprox = w.cashIsApprox
+            s.cardOwed = w.netWorthCardOwed
+            s.pendingSettlement = w.pendingSettlement
+        } else {
+            let p = w.history.point(endOf: date)
+            s.cash = p.cash
+            s.cardOwed = p.cardOwed
+            s.pendingSettlement = p.pending
+            s.wealthEstimated = p.estimated
         }
         return s
     }
@@ -555,7 +602,8 @@ struct FinanceCashFlow: Equatable {
 // MARK: - 接下來 30 天
 
 struct FinanceUpcoming: Identifiable, Equatable {
-    enum Kind: Equatable { case premium, maturity, mortgage, vehicle }
+    /// [v25.565] cardBill＝信用卡卡費（含刷這張卡的定期扣款）、settlement＝股票交割（財富 v4）
+    enum Kind: Equatable { case premium, maturity, mortgage, vehicle, cardBill, settlement }
 
     let id: String
     let kind: Kind
@@ -567,6 +615,8 @@ struct FinanceUpcoming: Identifiable, Equatable {
     let amount: String
     /// 會領回來的錢（保單滿期）：金額前面加 +、綠色
     let isIncome: Bool
+    /// [v25.565] 財富的那一張：卡費＝那張卡、交割＝交割銀行帳戶。點了彈出財富卡片頁（不切分頁，judge §6.8）；其他種類 nil
+    var wealthId: UUID? = nil
 
     var icon: String {
         switch kind {
@@ -574,6 +624,8 @@ struct FinanceUpcoming: Identifiable, Equatable {
         case .maturity: return "star.fill"
         case .mortgage: return "house.fill"
         case .vehicle: return "car.fill"
+        case .cardBill: return "creditcard.fill"
+        case .settlement: return "arrow.left.arrow.right"
         }
     }
 
@@ -583,14 +635,18 @@ struct FinanceUpcoming: Identifiable, Equatable {
         case .maturity: return .orange
         case .mortgage: return .purple
         case .vehicle: return .mint
+        case .cardBill: return .orange
+        case .settlement: return .violet
         }
     }
 
     /// houses 是 FinanceLoanIndex.houses（房貸的扣款日、第幾期都讀它）。
     /// [v25.539] vehicles 是 FinanceLoanIndex.vehicles（車子的列都讀 VehicleFacts.upcoming）；沒傳時自己建
+    /// [v25.565] wealth 是 FinanceLoanIndex.wealth（卡費、交割；沒傳時讀 AppStores.life 那一份快取）。財富一律是今天的：
+    /// now 往後推（小工具第二次叫）時，卡費、交割照今天算好的日子落在這個窗裡的才列
     static func build(finance f: FinanceStore, expense e: ExpenseStore, houses: [UUID: HouseFacts],
                       vehicles: [UUID: VehicleFacts]? = nil,
-                      now: Date = Date(), days: Int = 30) -> [FinanceUpcoming] {
+                      now: Date = Date(), days: Int = 30, wealth: WealthFacts? = nil) -> [FinanceUpcoming] {
         let cal = Calendar.current
         let today = cal.startOfDay(for: now)
         guard let horizon = cal.date(byAdding: .day, value: days + 1, to: today) else { return [] }
@@ -598,10 +654,28 @@ struct FinanceUpcoming: Identifiable, Equatable {
         func away(_ d: Date) -> Int {
             max(0, cal.dateComponents([.day], from: today, to: cal.startOfDay(for: d)).day ?? 0)
         }
+        // [v25.565] 刷卡的定期扣款（保費、車子的訂閱…）那一期併進卡費那一列，這裡不另外列（待決定 4）
+        let w: WealthFacts = wealth ?? AppStores.life.wealthFacts(expense: e, finance: f)
+        let book = AppStores.life.wealthBook
+        let cardIds = Set(w.cards.map(\.id))
+        let expensesById = Dictionary(e.expenses.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        func onCard(_ expenseId: UUID?, _ date: Date) -> Bool {
+            guard !cardIds.isEmpty, let id = expenseId, let ex = expensesById[id] else { return false }
+            guard let t = WealthFacts.recurringTarget(ex, at: date, history: book.links(ex.id)) else { return false }
+            return cardIds.contains(t)
+        }
+        // 保單 → 它的保費那筆記帳（保單上記的、或記帳那邊連到這張保單的）
+        var premiumExpense: [UUID: UUID] = [:]
+        for ins in f.insurances {
+            if let id = ins.linkedExpenseId { premiumExpense[ins.id] = id }
+        }
+        for ex in e.expenses {
+            if let insId = ex.linkedInsuranceId, premiumExpense[insId] == nil { premiumExpense[insId] = ex.id }
+        }
 
         // 保費：起始日當天扣第一期，之後每期一次（跟 SavingsInsurance.elapsedPeriods 同一套）
         for ins in f.insurances {
-            if let due = ins.moneyNextDue(now: now), due >= today, due < horizon {
+            if let due = ins.moneyNextDue(now: now), due >= today, due < horizon, !onCard(premiumExpense[ins.id], due) {
                 out.append(FinanceUpcoming(id: "p-\(ins.id)", kind: .premium, title: ins.name,
                                            detail: "第 \(ins.elapsedPeriods(at: now) + 1)／\(ins.totalPeriods) 期",
                                            date: due, daysAway: away(due),
@@ -624,6 +698,8 @@ struct FinanceUpcoming: Identifiable, Equatable {
             guard let facts = houses[re.id] else { continue }
             for seg in facts.segments {
                 guard let next = seg.nextDue(onOrAfter: today, calendar: cal), next.date < horizon else { continue }
+                // [v25.565] 房貸刷卡（很少見）：併進卡費
+                if onCard(seg.linkedExpenseId, next.date) { continue }
                 let d = next.date
                 let detail = "第 \(next.index)／\(seg.countedPeriods) 期"
                 let title = re.name + " " + seg.displayTitle
@@ -644,12 +720,47 @@ struct FinanceUpcoming: Identifiable, Equatable {
             guard let facts = cars[v.id] else { continue }
             // 保養超過預計日期的（日期在今天以前）不列，留給車子卡片提醒
             for u in facts.upcoming where u.date >= today && u.date < horizon {
+                // [v25.565] 刷卡的（車險、停車月租、訂閱刷卡）：併進卡費
+                if onCard(vehicleExpenseId(u), u.date) { continue }
                 // 兩台車的鏡像都指著同一筆（記帳沒寫是哪台）時只列一次：id 是「fixed-支出id」這種，不會跨車撞
                 guard seenVehicleItems.insert(u.id).inserted else { continue }
                 out.append(vehicleItem(u, vehicleName: v.name, loans: facts.loans, daysAway: away(u.date)))
             }
         }
+
+        // [v25.565] 卡費：每張卡接下來要繳的幾期（刷卡的定期扣款已經併在裡面，小字「含 Netflix、Spotify」）。
+        // 過了截止日還沒繳的放在財富的今天（不跟著 now 往後推：小工具第二次叫不會多一列）
+        for c in w.cards {
+            for d in c.dues {
+                let day: Date = d.status == .overdue ? w.today : cal.startOfDay(for: d.due)
+                guard day >= today, day < horizon else { continue }
+                var parts: [String] = [d.modeText]
+                if let r = d.recurringText { parts.append(r) }
+                out.append(FinanceUpcoming(id: "c-\(c.id.uuidString)-\(d.key)", kind: .cardBill,
+                                           title: c.name + " 卡費", detail: parts.joined(separator: "・"),
+                                           date: day, daysAway: away(day), amount: d.amountText,
+                                           isIncome: false, wealthId: c.id))
+            }
+        }
+        // [v25.565] 交割：買＝從交割銀行扣、賣＝入帳（同一天相抵）
+        for st in w.settlements {
+            let day = cal.startOfDay(for: st.day)
+            guard day >= today, day < horizon else { continue }
+            out.append(FinanceUpcoming(id: "s-" + st.id, kind: .settlement, title: st.title,
+                                       detail: st.directionText, date: day, daysAway: away(day),
+                                       amount: (st.isOutflow ? "" : "+") + st.amountText,
+                                       isIncome: !st.isOutflow, wealthId: st.accountId))
+        }
         return out.sorted { $0.date == $1.date ? $0.title < $1.title : $0.date < $1.date }
+    }
+
+    /// [v25.565] 車子的一件連的是哪一筆記帳（定期支出、車貸；保養沒有）
+    private static func vehicleExpenseId(_ u: VehicleUpcoming) -> UUID? {
+        switch u.kind {
+        case .fixed(let id): return id
+        case .loan(let id): return id
+        case .maintenance: return nil
+        }
     }
 
     /// [v25.539] 車子的一件：細字只留週期（「每月」）或期數（「第 26／60 期」），「上次 10/5」在 30 天清單裡用不到；
@@ -704,7 +815,10 @@ enum FinanceHistory {
     /// 沒有這欄（舊紀錄，解碼是 nil）＝房貸含利息；2＝房貸算本金。
     /// [v25.539] 3＝車貸也算本金（以前是含利息的還要繳）：同房貸那次，舊口徑的月份負債用現在這套重算，
     /// 改版那個月淨資產不會突然跳一階、「比上月」也不會假漲
-    private static let currentBasis = 3
+    /// [v25.565] 4＝資產含存款、負債含卡費與待交割（財富 v4）：舊口徑的月份照財富帳戶的紀錄回推那個月底的
+    /// 存款、卡費、待交割加回去（WealthFacts.history），改版那個月不跳一階、「比上月」不假漲。
+    /// 還沒更新的 iPad 寫的口徑 3 紀錄，新版一律重新加回（不採用它的數字）
+    private static let currentBasis = 4
 
     private struct Record: Codable {
         let month: String
@@ -784,9 +898,18 @@ enum FinanceHistory {
                 }
                 // [v25.532] 舊口徑（房貸含利息；v25.539 起車貸含利息也是舊口徑）：資產照存的，負債用現在這套重算那個月月底，
                 // 改版那個月才不會跳一階、「比上月」也不會因為少扣利息而假漲
+                // [v25.565] redo 已含那個月底的存款、卡費、待交割（WealthFacts.history）
                 let redo = FinanceSnapshot.compute(finance: f, expense: e, rates: rates, at: end, now: now,
                                                    stockValue: nil, index: loans)
-                out.append(FinanceMonthPoint(month: start, assets: r.assets, debt: redo.debt, recorded: true))
+                if r.basis == 3 {
+                    // 口徑 3（房貸、車貸已是本金）：照存的，加回那個月底的存款、卡費、待交割
+                    out.append(FinanceMonthPoint(month: start, assets: r.assets + redo.cash,
+                                                 debt: r.debt + redo.cardOwed + redo.pendingSettlement, recorded: true))
+                } else {
+                    // 口徑 2 以前：資產照存的再加存款；負債整個用現在這套（含卡費、待交割）
+                    out.append(FinanceMonthPoint(month: start, assets: r.assets + redo.cash, debt: redo.debt,
+                                                 recorded: true))
+                }
                 continue
             }
             // 股票：那個月底前 45 天內有每週市值紀錄就用，沒有就用持股成本

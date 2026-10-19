@@ -6,6 +6,8 @@ import SwiftUI
 // 最下面那一條換成理財自己的資料：
 //   總覽     資產小鎮：房子＝房地產、銀行＝儲蓄險、玻璃大樓＝股票、車＝載具，越高值越多；
 //            斜線那一截是還欠銀行的（房貸、車貸），實心的才是你的
+//            [v25.565] 多一座頂樓水塔＝存款（財富頁的存款合計）：塔裡的水位＝存款、水面那一截斜線＝卡費與交割
+//            還沒扣，跟財富看板的水塔同一個圖案同一個意思（judge §1.4-7、§6.4；不另蓋銀行）
 //   股票     熱氣球：一檔一顆，越大市值越大、飛越高賺越多；虛線是成本線，掉到線下就是賠（紅漲綠跌）
 //   儲蓄險   果園：一張保單一棵樹，繳越多樹越大，快滿期的結果子，牌子寫滿期年
 //   載具     今年這條路：1 月到 12 月，車停在今天；路邊一個月一個圓標（大小＝那個月花多少），
@@ -23,7 +25,7 @@ struct FinTownScene: Equatable {
     struct Building: Equatable {
         let kind: FinanceAssetKind
         let value: Double
-        /// 還欠的（房貸、車貸）；沒有是 0
+        /// 還欠的（房貸、車貸；[v25.565] 存款的水塔＝卡費與交割還沒扣）；沒有是 0
         var owed: Double = 0
         var count: Int = 1
         /// 建築上方的牌子（「1,880萬」）
@@ -382,10 +384,139 @@ extension MoneyBoardSky {
                              with: .color(Color(tb: 0xC9D3E6)))
                 }
                 labelY = cy - ch - 5
+            case .cash:
+                // [v25.565] 頂樓水塔＝存款（畫在 finTownTower，paintTown 不再加長）
+                labelY = finTownTower(&ctx, b, centerX: cx, slot: slot, height: h, maxHeight: maxH,
+                                      ground: ground, owedInk: owedInk, dark: dark)
             }
             finPill(&ctx, b.kind.name + " " + b.label, centerX: cx, y: labelY, dark: dark,
                     color: finInk(th, dark: dark), bounds: w)
         }
+    }
+
+    // MARK: 資產小鎮的頂樓水塔（v25.565，財富 v4）
+
+    /// 不鏽鋼水塔的塔身漸層（左亮右暗；同財富看板 WealthSceneInk.metal 的值）
+    private static func finTowerMetal(dark: Bool) -> Gradient {
+        if dark {
+            return Gradient(stops: [.init(color: Color(tb: 0x46516E), location: 0),
+                                    .init(color: Color(tb: 0x5C6678), location: 0.3),
+                                    .init(color: Color(tb: 0x3A4256), location: 0.75),
+                                    .init(color: Color(tb: 0x2B3247), location: 1)])
+        }
+        return Gradient(stops: [.init(color: Color(tb: 0xE3E9F1), location: 0),
+                                .init(color: Color(tb: 0xFFFFFF), location: 0.3),
+                                .init(color: Color(tb: 0xC9D3DF), location: 0.72),
+                                .init(color: Color(tb: 0x9AA6B5), location: 1)])
+    }
+
+    /// 存款＝一座頂樓水塔（跟財富看板同一個圖案同一個意思，judge §1.4-7、§6.4）：
+    /// 塔身高＝h×0.62（h 照其他建築的算法）；塔裡的水填到 h／最高那棟（滿塔＝存款是最大那棟）；
+    /// 水面那一截斜線＝卡費與交割還沒扣（高＝還沒扣／存款 × 水高，同房子的斜線＝還欠）。
+    /// 回傳小牌（共用的 finPill「存款 81.7萬」）的 y；塔身、水、斜線都不寫字（坑 #4）。
+    /// 「還沒扣 10萬」（owedLabel）不畫成第二塊小牌：塔窄、水面就在小牌下面，會疊在一起（坑 #27），讀數字看明信片
+    static func finTownTower(_ ctx: inout GraphicsContext, _ b: FinTownScene.Building, centerX cx: CGFloat,
+                             slot: CGFloat, height h: CGFloat, maxHeight maxH: CGFloat, ground: CGFloat,
+                             owedInk: Color, dark: Bool) -> CGFloat {
+        let tw = Swift.max(12, Swift.min(slot * 0.5, 46))
+        let bodyH = (h * 0.62).rounded()
+        let domeH = Swift.min(8, (tw * 0.26).rounded())
+        let legH = Swift.max(4, h - bodyH - domeH)
+        let bodyBot = ground - legH
+        let body = CGRect(x: (cx - tw / 2).rounded(), y: bodyBot - bodyH, width: tw.rounded(), height: bodyH)
+        let legInk = dark ? Color(tb: 0x7F8DB6) : Color(tb: 0x6E7F99)
+        let lineInk = dark ? Color(tb: 0x8C9AC4, 0.9) : Color(tb: 0x8A9BB4, 0.95)
+
+        // 四隻細腳（後面兩隻淡一點）＋交叉斜撐，站在地面上
+        var back = Path()
+        for k: CGFloat in [-0.17, 0.17] {
+            back.move(to: CGPoint(x: cx + tw * k, y: bodyBot))
+            back.addLine(to: CGPoint(x: cx + tw * k * 1.1, y: ground - 1))
+        }
+        ctx.stroke(back, with: .color(legInk.opacity(0.45)), lineWidth: 1.1)
+        var legs = Path()
+        for k: CGFloat in [-0.4, 0.4] {
+            legs.move(to: CGPoint(x: cx + tw * k, y: bodyBot))
+            legs.addLine(to: CGPoint(x: cx + tw * k * 1.08, y: ground))
+        }
+        ctx.stroke(legs, with: .color(legInk), lineWidth: 1.5)
+        if legH >= 8 {
+            var brace = Path()
+            brace.move(to: CGPoint(x: cx - tw * 0.4, y: bodyBot + 2))
+            brace.addLine(to: CGPoint(x: cx + tw * 0.42, y: ground - 2))
+            brace.move(to: CGPoint(x: cx + tw * 0.4, y: bodyBot + 2))
+            brace.addLine(to: CGPoint(x: cx - tw * 0.42, y: ground - 2))
+            ctx.stroke(brace, with: .color(legInk), lineWidth: 0.7)
+        }
+
+        // 不鏽鋼塔身＋半橢圓的蓋子
+        let metal = GraphicsContext.Shading.linearGradient(finTowerMetal(dark: dark),
+                                                           startPoint: CGPoint(x: body.minX, y: 0),
+                                                           endPoint: CGPoint(x: body.maxX, y: 0))
+        let shell = Path(roundedRect: body, cornerRadius: 3)
+        var dome = Path()
+        dome.move(to: CGPoint(x: body.minX + 1, y: body.minY + 1))
+        dome.addQuadCurve(to: CGPoint(x: body.maxX - 1, y: body.minY + 1),
+                          control: CGPoint(x: cx, y: body.minY - domeH * 2))
+        dome.closeSubpath()
+        ctx.fill(shell, with: metal)
+        ctx.fill(dome, with: metal)
+
+        // 塔裡的水（活存藍漸層）＋水面那一截卡費斜線＋水面亮線
+        finTownTowerWater(&ctx, b, body: body, fill: CGFloat(Swift.min(1, h / Swift.max(maxH, 1))),
+                          owedInk: owedInk, dark: dark)
+
+        // 兩道箍＋左邊一道光
+        var hoops = Path()
+        for k: CGFloat in [0.34, 0.68] {
+            hoops.addRect(CGRect(x: body.minX + 0.5, y: (body.minY + bodyH * k).rounded(), width: body.width - 1, height: 1))
+        }
+        ctx.fill(hoops, with: .color(dark ? Color.white.opacity(0.12) : Color(tb: 0x8A9BB4, 0.35)))
+        let shine = CGRect(x: body.minX + body.width * 0.16, y: body.minY + 3, width: 2, height: Swift.max(0, bodyH - 6))
+        ctx.fill(Path(shine), with: .color(Color.white.opacity(dark ? 0.1 : 0.55)))
+        ctx.stroke(shell, with: .color(lineInk), lineWidth: 0.8)
+        ctx.stroke(dome, with: .color(lineInk), lineWidth: 0.8)
+
+        // 蓋子上的小蓋頭；夜裡塔頂一盞小燈
+        let capTop = body.minY - domeH - 2.5
+        let cap = CGRect(x: cx - 3, y: capTop, width: 6, height: 2.5)
+        ctx.fill(Path(roundedRect: cap, cornerRadius: 1), with: .color(dark ? Color(tb: 0x6B78A3) : Color(tb: 0x9AA8BD)))
+        if dark {
+            let lx = cx + tw * 0.3
+            let ly = body.minY - domeH * 0.6 - 3
+            ctx.drawLayer { layer in
+                layer.addFilter(.blur(radius: 3))
+                layer.fill(Path(ellipseIn: CGRect(x: lx - 5, y: ly - 4, width: 10, height: 8)),
+                           with: .color(Color(tb: 0xFFC56B, 0.5)))
+            }
+            ctx.fill(Path(ellipseIn: CGRect(x: lx - 1.7, y: ly - 1.7, width: 3.4, height: 3.4)),
+                     with: .color(Color(tb: 0xFFD27A)))
+        }
+        return capTop - 5
+    }
+
+    /// 水塔裡的水：水位＝fill（0…1）；水面那一截斜線＝還沒扣（owed／value，最少 2pt 看得到）
+    private static func finTownTowerWater(_ ctx: inout GraphicsContext, _ b: FinTownScene.Building, body: CGRect,
+                                          fill: CGFloat, owedInk: Color, dark: Bool) {
+        let window = body.insetBy(dx: 2.5, dy: 2.5)
+        guard window.width > 2, window.height > 2, b.value > 0 else { return }
+        let wh = (window.height * Swift.max(0, Swift.min(1, fill))).rounded()
+        guard wh >= 1 else { return }
+        let th = b.kind.theme
+        let water = CGRect(x: window.minX, y: window.maxY - wh, width: window.width, height: wh)
+        var inner = ctx
+        inner.clip(to: Path(roundedRect: window, cornerRadius: 2))
+        let grad = Gradient(colors: [th.topColor, th.bottomColor])
+        inner.fill(Path(water), with: .linearGradient(grad, startPoint: CGPoint(x: 0, y: water.minY),
+                                                      endPoint: CGPoint(x: 0, y: water.maxY)))
+        if b.owed > 0 {
+            let f = CGFloat(Swift.min(1, b.owed / b.value))
+            let oh = Swift.min(wh, Swift.max(2, (wh * f).rounded()))
+            finHatch(&inner, CGRect(x: water.minX, y: water.minY, width: water.width, height: oh),
+                     color: owedInk, gap: 3)
+        }
+        let edge = CGRect(x: water.minX, y: water.minY, width: water.width, height: 1.2)
+        inner.fill(Path(edge), with: .color(Color.white.opacity(dark ? 0.75 : 0.85)))
     }
 
     // MARK: 股票：熱氣球

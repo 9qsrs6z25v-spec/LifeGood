@@ -54,6 +54,9 @@ struct LifeOverviewView: View {
     /// 這一區是「想知道的時候才看」，不該每次打開總覽都先讀一遍還沒有的東西。
     @AppStorage("life_locked_features_expanded") private var lockedExpanded = false
     @State private var addingMilestoneCategory: MilestoneCategory?
+    /// [v25.565] 名片的淨資產：跟理財總覽同一個數（FinanceSnapshot.current(...).netWorth，含存款、扣貸款與卡費、交割）。
+    /// 在 .task 裡算（會掃支出找貸款）；還沒算好是 nil，名片寫「—」（不先閃一個舊的總資產）
+    @State private var netWorth: Double?
 
     var body: some View {
         // 計算一次，避免 statsCard / milestoneTimeline / categoryBreakdown 各自重算（共 5 次）
@@ -63,7 +66,7 @@ struct LifeOverviewView: View {
                 VStack(spacing: 20) {
                     ProfileFlashCard(
                         profile: store.profile,
-                        totalAssets: financeStore.totalAssets,
+                        totalAssets: netWorth,
                         spouse: store.spouse,
                         onEdit: {
                             if subscription.isPremium { showEditProfile = true }
@@ -78,6 +81,10 @@ struct LifeOverviewView: View {
                 .padding(.vertical)
             }
             .background(Color(.systemGroupedBackground))
+            .task(id: netWorthKey) {
+                netWorth = FinanceSnapshot.current(finance: financeStore, expense: expenseStore,
+                                                   rates: FinanceRates(expenseStore)).netWorth
+            }
             .navigationTitle("人生總覽")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
@@ -97,6 +104,11 @@ struct LifeOverviewView: View {
             }
             .premiumLockAlert(isPresented: $showPremiumAlert)
         }
+    }
+
+    /// [v25.565] 名片淨資產重算的 key：理財、記帳、財富帳本（wealthRevision）、今天（同理財總覽看板）
+    private var netWorthKey: String {
+        "\(financeStore.modifyID)-\(expenseStore.modifyID)-\(store.wealthRevision)-\(WealthCal.dayKey(Date()))"
     }
 
     private var quickAddMenu: some View {

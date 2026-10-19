@@ -12,7 +12,7 @@
 // 常數
 // ---------------------------------------------------------------------------
 /** 網頁版自己的版本（與 App 版本無關；改網頁不再動 App 版號） */
-const WEB_VERSION = '1.11';
+const WEB_VERSION = '1.12';
 const CONTAINER_ID = 'iCloud.com.lifegood.app';
 const ZONE_NAME = 'LifeGoodZone';
 const TOKEN_KEY = 'lifegood_ck_token';
@@ -1785,7 +1785,8 @@ function renderWealth(main) {
       } else if (m.financeSubCategory === '保險') { val = m.premiumAmount ? fmtMoney(m.premiumAmount) + '／期' : ''; detail = [m.insuranceCompany, m.insuranceType, m.policyNumber ? '保單 ' + maskTail(m.policyNumber) : '', m.beneficiary ? '受益人 ' + m.beneficiary : ''].filter(Boolean).join('・'); }
       else { const linked = Store.stocks.filter((s) => s.linkedSecuritiesMilestoneId === m.id && !s.isSold); val = fmtMoney(linked.reduce((a, s) => a + stockView(s).mv, 0)); detail = [m.securitiesAccountType, `持股 ${linked.length} 檔`].filter(Boolean).join('・'); extra = linked.length ? `<div class="chips" style="margin-top:6px">${linked.map((s) => `<a class="chip green" href="#/finance/stock/${s.id}">${esc(s.symbol)}</a>`).join('')}</div>` : ''; }
       return `<div class="card" style="${m.isDisabled ? 'opacity:.55' : ''}"><div class="row" style="align-items:flex-start"><div class="avatar sm" style="background:${m.financeSubCategory === '銀行' ? 'linear-gradient(135deg,#007aff,#5ac8fa)' : m.financeSubCategory === '信用卡' ? 'linear-gradient(135deg,#ff9500,#ffcc00)' : m.financeSubCategory === '證券' ? 'linear-gradient(135deg,#34c759,#30b0c7)' : 'linear-gradient(135deg,#af52de,#5856d6)'}">${esc(initial(m.bankName || m.insuranceCompany || m.title))}</div><div style="flex:1;min-width:0"><div style="font-weight:900;font-size:15px">${esc(m.title)} <span class="chip ${subColor[m.financeSubCategory] || ''}">${esc(m.financeSubCategory)}</span>${m.isDisabled ? ' <span class="chip">停用</span>' : ''}</div><div class="muted small">${esc([m.bankName, m.branchName, m.bankAccountType, m.cardName, m.cardLastFour ? '末' + m.cardLastFour : ''].filter(Boolean).join('・'))}</div></div><div class="score s80" style="font-size:18px">${val}</div></div><div class="muted small" style="margin-top:8px">${esc(detail)}</div>${extra}${m.note ? `<div class="muted small" style="margin-top:6px">${esc(m.note)}</div>` : ''}</div>`;
-    }).join('') || '<div class="empty">尚無財富卡片</div>'}</div>`;
+    }).join('') || '<div class="empty">尚無財富卡片</div>'}</div>
+    <div class="muted small" style="margin-top:12px">這裡的數字是舊算法（刷卡當天就扣、沒算卡費截止日與交割），以 App 為準。</div>`;
 }
 
 // ---- 績效評分加總 -----------------------------------------------------------

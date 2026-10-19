@@ -767,14 +767,18 @@ enum WidgetAllDayKind: String, Codable {
     case personal
     /// 系統行事曆的全日事件
     case appleCalendar
+    /// [v25.565] 財富：卡費截止／扣款、交割、卡片到期、開戶日（財富 v4，judge §6.5）。
+    /// 主畫面寫卡名不寫金額；鎖定畫面只寫類別字（lockTitle「卡費」「交割」「卡片到期」「財富」）
+    case wealth
 
-    /// 越小越優先：生日＞結婚紀念日＞兼任職務＞里程碑＞其他全日事件
+    /// 越小越優先：生日＞結婚紀念日＞兼任職務＞里程碑＝財富＞其他全日事件
     var priority: Int {
         switch self {
         case .birthday:      return 0
         case .anniversary:   return 1
         case .sideRole:      return 2
         case .milestone:     return 3
+        case .wealth:        return 3
         case .personal:      return 4
         case .appleCalendar: return 5
         }
@@ -882,7 +886,7 @@ extension WidgetAllDayKind {
         switch self {
         case .personal:      return .personal
         case .appleCalendar: return .appleCalendar
-        case .birthday, .anniversary, .sideRole, .milestone:
+        case .birthday, .anniversary, .sideRole, .milestone, .wealth:
             return nil
         }
     }
@@ -1639,6 +1643,10 @@ enum WidgetBillKind: String, Codable {
     case premium
     /// 保單滿期（會領回來的錢）
     case maturity
+    /// [v25.565] 信用卡卡費（一張卡一期一筆；刷這張卡的定期扣款併在裡面，記帳那幾筆不再另外列）
+    case cardBill
+    /// [v25.565] 股票交割（從交割銀行扣、或入帳）
+    case settlement
 
     /// [v3] 鎖定畫面「下一筆要繳」關掉「顯示名稱」時的類別字（App 沒寫 WidgetBill.lockTitle 的舊檔才用）
     var label: String {
@@ -1648,11 +1656,16 @@ enum WidgetBillKind: String, Codable {
         case .vehicle:  return "車子費用"
         case .premium:  return "保費"
         case .maturity: return "保單滿期"
+        case .cardBill: return "卡費"
+        case .settlement: return "交割"
         }
     }
 
     /// [v3] 記帳的固定支出（其他四種是理財的）
     var isLedger: Bool { self == .fixed }
+
+    /// [v25.565] 財富的（卡費、交割）：鎖定畫面一律只寫類別字、不寫金額（judge §7.1；不管「顯示名稱」開不開）
+    var isWealth: Bool { self == .cardBill || self == .settlement }
 }
 
 /// [v3] 「接下來要繳」的範圍（長按設定 WidgetBillScopeOption → 這個）
@@ -1664,10 +1677,11 @@ enum WidgetBillScope: String {
     /// 只看理財（房貸、車子、保費、滿期）
     case finance
 
+    /// [v25.565] 卡費兩邊都算（記帳的定期扣款併在卡費裡；也是理財的負債）；交割算理財
     func includes(_ kind: WidgetBillKind) -> Bool {
         switch self {
         case .all:     return true
-        case .ledger:  return kind.isLedger
+        case .ledger:  return kind.isLedger || kind == .cardBill
         case .finance: return !kind.isLedger
         }
     }
@@ -2140,9 +2154,9 @@ struct WidgetNetWorth: Codable, Equatable {
     var line: String
     /// 隱藏金額版：「總資產 NT$ ••••・貸款還欠 NT$ ••••」「總資產 NT$ ••••・沒有貸款」
     var lineMasked: String
-    /// 資產各類（房地產、股票、載具、儲蓄險；> 0 的，金額大到小）。App 的淨資產沒有「存款」這一類，不放
+    /// 資產各類（房地產、股票、載具、儲蓄險；[v25.565] 存款；> 0 的，金額大到小）
     var assets: [WidgetNetWorthPart]
-    /// 貸款各類（房貸、車貸、其他貸款；> 0 的，金額大到小）
+    /// 貸款各類（房貸、車貸、其他貸款；[v25.565] 卡費與交割；> 0 的，金額大到小）
     var debts: [WidgetNetWorthPart]
     /// 中型兩條的長度（0…1）：資產、貸款比較大的那一條是 1
     var assetsBar: Double

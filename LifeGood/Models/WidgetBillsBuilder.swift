@@ -20,6 +20,19 @@ import Foundation
 //      記帳固定支出寫分類（「訂閱服務」「電信費」…，沒分類或「其他」寫「固定支出」），
 //      理財寫「保費」「保單滿期」「房貸」，車子照 VehicleUpcoming.kind 寫「車貸」「保養」「車子費用」。
 //
+// [財富 v4] v25.565（wealth/build/v4/brief.md §6 G2；judge §6.5、§7.1）：
+//   • 理財那幾件多兩種：卡費（.cardBill，一張卡一期一列：「CUBE 卡費」「自己繳・含 Spotify、Netflix」「NT$18,600」／
+//     還沒結帳「約 NT$6,739」）、交割（.settlement，「元大證券 交割」「從薪轉扣」「NT$52,340」，賣出是 + 的入帳）。
+//     字、金額、日子都是 FinanceUpcoming.build(…, wealth:) 組好的（財富的一套數字 WealthFacts，跟財富頁同一份快取）；
+//     兩次 build 都傳「今天」那一份 index.wealth（財富一律是今天的：往後推 15 天那次，卡費、交割照今天算好的日子落在窗裡的才列）。
+//     點了開那張卡／那個交割帳戶（WidgetLink.wealth(id)：lifegood://life/wealth?id=…）。
+//   • 去重：刷卡的定期扣款（Netflix、Spotify 刷 CUBE）那一期已經併進那張卡的卡費（小字「含 …」），記帳那幾件不再另外列；
+//     看的是那一期那天刷哪張卡（WealthFacts.recurringTarget＋財富帳本的改卡歷史），改成從銀行扣的那幾期照列。
+//     理財那幾件（保費、房貸、車子）刷卡的，FinanceUpcoming.build 自己就不列了。
+//   • 鎖定畫面「下一筆要繳」碰到卡費、交割：不管「顯示名稱」開不開，只寫 lockTitle「卡費」「交割」、不寫金額
+//     （LockScreenWidgets.swift LockNextBillModel，看 WidgetBillKind.isWealth）。主畫面「接下來要繳」寫卡名＋金額（照「隱藏金額」）。
+//   • snapshot(expense:finance:now:) 簽章不變：財富讀 AppStores.life（FinanceLoanIndex.wealth 也是），主執行緒。
+//
 // @MainActor：MoneyFormat 的 NumberFormatter 只在主執行緒用（跟寫手一樣）。
 
 @MainActor
@@ -39,6 +52,9 @@ enum WidgetBillsBuilder {
     private static let premiumTint: (UInt32, UInt32) = (0x2F5BD8, 0x8DB7FF)
     private static let maturityTint: (UInt32, UInt32) = (0x177A44, 0x5BD99A)
     private static let vehicleTint: (UInt32, UInt32) = (0x138A7E, 0x7FE3D0)
+    /// [財富 v4] 卡費橘（MoneyArtTheme.wealthCardTrends）、交割紫（wealthBroker）
+    private static let cardBillTint: (UInt32, UInt32) = (0xD9601F, 0xFFB86B)
+    private static let settlementTint: (UInt32, UInt32) = (0x6B44E0, 0xB79CFF)
 
     static func snapshot(expense: ExpenseStore, finance: FinanceStore, now: Date,
                          calendar cal: Calendar = .current) -> WidgetBillsSnapshot {
@@ -49,8 +65,11 @@ enum WidgetBillsBuilder {
         var items = financeBills(expense: expense, finance: finance, index: index,
                                  now: now, today: today, horizonEnd: horizonEnd, calendar: cal)
         let excluded = excludedExpenseIds(expense: expense, finance: finance, index: index)
-        items += ledgerBills(expense: expense, excluded: excluded, today: today,
-                             horizonEnd: horizonEnd, calendar: cal)
+        // [財富 v4] 刷卡的定期扣款併進卡費：哪幾張是卡、改卡的歷史（財富帳本）先抓一次往下傳
+        let cardIds: Set<UUID> = Set(index.wealth.cards.map(\.id))
+        let book: WealthBook = AppStores.life.wealthBook
+        items += ledgerBills(expense: expense, excluded: excluded, cardIds: cardIds, book: book,
+                             today: today, horizonEnd: horizonEnd, calendar: cal)
         items.sort { a, b in
             if a.dueDate != b.dueDate { return a.dueDate < b.dueDate }
             if a.title != b.title { return a.title < b.title }
@@ -67,14 +86,16 @@ enum WidgetBillsBuilder {
     private static func financeBills(expense: ExpenseStore, finance: FinanceStore, index: FinanceLoanIndex,
                                      now: Date, today: Date, horizonEnd: Date,
                                      calendar cal: Calendar) -> [WidgetBill] {
+        // [財富 v4] 兩次都傳今天這一份財富（index.wealth）：卡費、交割的日子照今天算好的，
+        // 第二次只多出落在 15 天後那個窗裡的（11/27 那期），過了截止日還沒繳的那期放在今天、不會多一列
         let first = FinanceUpcoming.build(finance: finance, expense: expense,
                                           houses: index.houses, vehicles: index.vehicles,
-                                          now: now, days: financeWindowDays)
+                                          now: now, days: financeWindowDays, wealth: index.wealth)
         let shifted = cal.date(byAdding: .day, value: financeShiftDays, to: today) ?? today
         let index2 = FinanceLoanIndex(finance: finance, expense: expense, now: shifted)
         let second = FinanceUpcoming.build(finance: finance, expense: expense,
                                            houses: index2.houses, vehicles: index2.vehicles,
-                                           now: shifted, days: financeWindowDays)
+                                           now: shifted, days: financeWindowDays, wealth: index.wealth)
         let indexes = [index, index2]
 
         var seen = Set<String>()
@@ -108,6 +129,14 @@ enum WidgetBillsBuilder {
         case .vehicle:
             kind = .vehicle
             tint = vehicleTint
+        case .cardBill:
+            // [財富 v4] 卡費（刷這張卡的定期扣款併在裡面）
+            kind = .cardBill
+            tint = cardBillTint
+        case .settlement:
+            // [財富 v4] 股票交割（賣出是入帳：isIncome、金額前面 +）
+            kind = .settlement
+            tint = settlementTint
         }
         return WidgetBill(id: id, kind: kind, title: u.title, detail: u.detail, dueDate: due,
                           amountText: u.amount, isIncome: u.isIncome, icon: u.icon,
@@ -115,7 +144,8 @@ enum WidgetBillsBuilder {
                           lockTitle: lockTitle)
     }
 
-    /// [v3] 理財那幾件的類別字：保費／保單滿期／房貸；車子照 VehicleUpcoming.kind（找不到「車子費用」）
+    /// [v3] 理財那幾件的類別字：保費／保單滿期／房貸；車子照 VehicleUpcoming.kind（找不到「車子費用」）。
+    /// [財富 v4] 卡費「卡費」、交割「交割」（鎖定畫面碰到這兩種一律只寫這個字、不寫金額）
     private static func financeLockTitle(_ u: FinanceUpcoming, finance: FinanceStore,
                                          indexes: [FinanceLoanIndex]) -> String {
         switch u.kind {
@@ -125,6 +155,10 @@ enum WidgetBillsBuilder {
             return "保單滿期"
         case .mortgage:
             return "房貸"
+        case .cardBill:
+            return "卡費"
+        case .settlement:
+            return "交割"
         case .vehicle:
             guard let k = vehicleUpcomingKind(ofUpcomingItem: u.id, finance: finance, indexes: indexes) else {
                 return "車子費用"
@@ -143,6 +177,8 @@ enum WidgetBillsBuilder {
     /// FinanceUpcoming 沒帶來源 id，照它的 id 格式自己查（FinanceInsights.swift FinanceUpcoming.build）：
     /// 保費「p-<保單 UUID>」、滿期「m-<保單 UUID>」→ 那張保單；房貸「r-<段 id>」→ 有那一段的房子；
     /// 車子「v-<VehicleUpcoming.id>」→ upcoming 裡有它的那台車。找不到退回固定支出頁。
+    /// [財富 v4] 卡費、交割：FinanceUpcoming.wealthId（卡費＝那張卡、交割＝交割銀行帳戶）→ 財富頁打開那張卡片頁
+    ///（lifegood://life/wealth?id=…；沒有 id 就停在財富頁）
     private static func financeLink(_ u: FinanceUpcoming, finance: FinanceStore,
                                     indexes: [FinanceLoanIndex]) -> URL {
         switch u.kind {
@@ -158,6 +194,8 @@ enum WidgetBillsBuilder {
             if let carId = vehicleId(ofUpcomingItem: u.id, finance: finance, indexes: indexes) {
                 return WidgetLink.financeVehicle(carId)
             }
+        case .cardBill, .settlement:
+            return WidgetLink.wealth(u.wealthId)
         }
         return WidgetLink.fixedExpenses
     }
@@ -229,22 +267,37 @@ enum WidgetBillsBuilder {
         return ids
     }
 
-    private static func ledgerBills(expense: ExpenseStore, excluded: Set<UUID>, today: Date,
+    /// [財富 v4] cardIds：財富的每一張卡（WealthFacts.cards）；book：財富帳本（定期扣款改卡改帳戶的歷史）。
+    /// 那一期刷卡的（WealthFacts.recurringTarget 是一張卡）不列：已經併進那張卡那一期的卡費（「含 Netflix」）
+    private static func ledgerBills(expense: ExpenseStore, excluded: Set<UUID>, cardIds: Set<UUID>,
+                                    book: WealthBook, today: Date,
                                     horizonEnd: Date, calendar cal: Calendar) -> [WidgetBill] {
         var out: [WidgetBill] = []
         for ex in expense.expenses where ex.isRecurringFixed && !excluded.contains(ex.id) {
+            let history: [WealthPayFrom]? = cardIds.isEmpty ? nil : book.links(ex.id)
             var next = ex.nextFixedDueDate(onOrAfter: today, calendar: cal)
             var n = 0
             while let due = next, n < maxOccurrences {
                 let dueDay = cal.startOfDay(for: due)
                 guard dueDay < horizonEnd else { break }
-                out.append(ledgerBill(ex, due: dueDay, expense: expense))
+                if !isCardCharged(ex, on: dueDay, cardIds: cardIds, history: history) {
+                    out.append(ledgerBill(ex, due: dueDay, expense: expense))
+                }
                 n += 1
                 guard let after = cal.date(byAdding: .day, value: 1, to: dueDay) else { break }
                 next = ex.nextFixedDueDate(onOrAfter: after, calendar: cal)
             }
         }
         return out
+    }
+
+    /// [財富 v4] 這一期（day 那天）是刷卡的：記到哪張卡照那一期那天找（有改卡歷史照歷史，沒有＝記帳那筆現在的卡）。
+    /// 跟 FinanceUpcoming.build 的 onCard 同一個判斷（FinanceInsights.swift）
+    private static func isCardCharged(_ ex: Expense, on day: Date, cardIds: Set<UUID>,
+                                      history: [WealthPayFrom]?) -> Bool {
+        guard !cardIds.isEmpty else { return false }
+        guard let target = WealthFacts.recurringTarget(ex, at: day, history: history) else { return false }
+        return cardIds.contains(target)
     }
 
     private static func ledgerBill(_ ex: Expense, due: Date, expense: ExpenseStore) -> WidgetBill {

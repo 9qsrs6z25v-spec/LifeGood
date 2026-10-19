@@ -20,6 +20,13 @@ import AppIntents
 //   清單＝upcoming(at:days:scope:)、空的時候「下一筆」＝next(at:scope:)；標題「接下來 7 天」、空的「7 天內沒有要扣的」。
 //   預設值＝v2 一模一樣。標題列的連結照舊開固定支出頁（「只看理財」也一樣，v4 才有理財總覽網址）。
 //
+// [財富 v4] v25.565（build/v4/brief.md G2-13；judge §6.5、§7.1）：清單多兩種，App 寫好的（WidgetBillsBuilder）——
+//   卡費（.cardBill：「CUBE 卡費」「自己繳・含 Netflix」「NT$18,600」；刷卡的定期扣款併在裡面，Netflix 不再另外一列）、
+//   交割（.settlement：「元大證券 交割」「從薪轉扣」）。點那一列開那張卡／那個帳戶（WidgetLink.wealth）。
+//   這裡的邏輯不用改：主畫面寫卡名＋金額（照「隱藏金額」，judge §7.1 允許）；只有 systemMedium，不會上 StandBy。
+//   範圍「只看記帳」也列卡費（WidgetBillScope.ledger：記帳的定期扣款併在卡費裡）。
+//   鎖定畫面「下一筆要繳」碰到這兩種只寫「卡費」「交割」、不寫金額（LockScreenWidgets.swift）。
+//
 // 型別（internal 的都帶 Bills 前綴；畫面零件 private）：
 //   BillsWidget、BillsWidgetEntry、BillsWidgetProvider、BillsTimeline（鎖定畫面「下一筆要繳」共用）、
 //   BillsSample（同）、BillsWidgetEntryView
@@ -243,21 +250,24 @@ private struct BillsWidgetModel {
 
 /// 小工具庫預覽與 placeholder 的樣本。**寫死的展示字**（J:240-247 的那 6 件，今天起算的日子）。
 /// 網址一律只開固定支出頁（展示用的不連到任何一筆）。
+/// [財富 v4] Netflix 那一列換成「CUBE 卡費」（.cardBill，「自己繳・含 Netflix」：刷卡的 Netflix 併進卡費，不再另外一列），
+/// 排在第 3 列（8 天後）：中型預覽看得到新的一種；鎖定畫面預覽的第一筆仍是有金額的中華電信
 enum BillsSample {
     static func snapshot(at now: Date) -> WidgetBillsSnapshot {
         let cal = Calendar.current
         let today = cal.startOfDay(for: now)
         let link = WidgetLink.fixedExpenses.absoluteString
         let items: [WidgetBill] = [
-            WidgetBill(id: "sample-1", kind: .fixed, title: "Netflix", detail: "每月",
-                       dueDate: day(2, from: today), amountText: "NT$390", isIncome: false,
-                       icon: "play.tv.fill", tint: 0x6B44E0, tintDark: 0xA88BFF, link: link),
             WidgetBill(id: "sample-2", kind: .fixed, title: "中華電信", detail: "每月",
                        dueDate: day(5, from: today), amountText: "NT$999", isIncome: false,
                        icon: "phone.fill", tint: 0x1A86A6, tintDark: 0x7FE3F0, link: link),
             WidgetBill(id: "sample-3", kind: .mortgage, title: "苗栗的家 房貸", detail: "第 8／480 期",
                        dueDate: day(7, from: today), amountText: "NT$6.2萬", isIncome: false,
                        icon: "house.fill", tint: 0x6B4BE0, tintDark: 0xB79CFF, link: link),
+            WidgetBill(id: "sample-1", kind: .cardBill, title: "CUBE 卡費", detail: "自己繳・含 Netflix",
+                       dueDate: day(8, from: today), amountText: "NT$18,600", isIncome: false,
+                       icon: "creditcard.fill", tint: 0xD9601F, tintDark: 0xFFB86B, link: link,
+                       lockTitle: "卡費"),
             WidgetBill(id: "sample-4", kind: .premium, title: "美元保單", detail: "第 4／6 期",
                        dueDate: day(15, from: today), amountText: "美金 3,000", isIncome: false,
                        icon: "umbrella.fill", tint: 0x2F5BD8, tintDark: 0x8DB7FF, link: link),

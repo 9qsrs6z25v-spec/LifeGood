@@ -38,6 +38,16 @@ import CryptoKit
 // • 接下來 30 天最低、第一次不夠扣（shortage）：從今天的數字開始，30 天內（含）每一筆。
 // • 要確認（checks）全部在這裡產生，字和按鈕組好；按過「知道了」的 key 記在帳本 dismissed（key 帶事件，下個月同樣的事會再出現）。
 //
+// [v25.565] v4（build/v4/brief.md §2；sim_v4.py 照這裡寫過、跑過）：
+// • 每張卡接下來要繳的幾期（Card.dues）：已結帳還沒繳的（帳單金額；自動扣最低＝最低應繳）、這一期（到今天刷的＋結帳日前還會扣的
+//   定期扣款，約）、下一期（只有定期扣款，約；0 不列）。理財「接下來 30 天」、小工具「接下來要繳」、我的行事曆、通知都讀這一份；
+//   刷卡的定期扣款（Netflix 刷 CUBE）併進那一期卡費（recurringNames），不再另外一列（待決定 4）。
+// • 接下來的交割（settlements）：每個帳戶每天每幣別買賣相抵；買＝從帳戶扣、賣＝入帳。
+// • 理財每月淨資產回推（history，口徑 4）：某一天結束時的存款合計（照帳戶紀錄；有對過存摺的帳戶，第一次對存摺以前平推那個數，
+//   沒對過的帳戶第一筆以前平推第一天的數，都標估算）、卡費還沒扣（那天已結帳沒繳的帳單＋這一期刷到那天的）、待交割（那天成交、
+//   還沒交割的股票款）；匯率一律用今天的。
+// • 要確認 #12：卡片效期前 30 天到那個月底（有效期限只取年月；「CUBE 3 月到期，換新卡後記得改 Netflix、Spotify…」）。
+//
 // （工程）build 很重（展開每一期），全 App 只透過 LifeStore.wealthFacts(expense:finance:) 拿快取的那一份
 // （key＝里程碑／財富帳本的 revision＋記帳、理財的 modifyID＋匯率＋日期），打字時不重算（U1 P1、P5）。
 // 不標 @MainActor（AI 記帳、LifeStore 都會叫）；但字串用到 ntdWanString（NumberFormatter），請在主執行緒叫。
@@ -552,6 +562,8 @@ struct WealthCheck: Identifiable {
         case shortage, cardOverdue, askPaid, negative
         // warn
         case assumedPaid, cardFeeExpense, disabledRecurring, noPayer, legacyFX, unknownRate
+        // [v25.565] warn：卡片效期前 30 天（#12）
+        case cardExpiring
         // info
         case cardDaysMissing, staleAnchor
 
@@ -586,6 +598,8 @@ struct WealthCheck: Identifiable {
         case openRates
         /// 〔對存摺〕：開對存摺小表單（那個幣別）
         case anchor(accountId: UUID, code: String)
+        /// [v25.565] 打開那張卡的卡片頁、捲到「綁在這張卡的定期扣款」（#12〔看綁了哪些〕）
+        case openCard(UUID)
     }
     struct Action: Identifiable, Equatable {
         let title: String
@@ -616,6 +630,7 @@ struct WealthCheck: Identifiable {
         case .noPayer: return "building.columns.fill"
         case .legacyFX: return "arrow.triangle.2.circlepath"
         case .unknownRate: return "dollarsign.circle.fill"
+        case .cardExpiring: return "calendar.badge.exclamationmark"
         case .cardDaysMissing: return "calendar"
         case .staleAnchor: return "checkmark.seal.fill"
         }
@@ -638,6 +653,221 @@ struct WealthShortage: Equatable {
     let amount: Double
     let before: Double
     let short: Double
+}
+
+// MARK: - [v25.565] v4：接下來要繳的卡費、交割、理財每月回推（judge §6.4–6.6；sim_v4.py）
+
+/// 一張卡接下來要繳的一期（理財「接下來 30 天」、小工具「接下來要繳」、我的行事曆、今天小工具、通知都讀這一份）
+struct WealthCardDue: Identifiable {
+    let cardId: UUID
+    /// 卡的名字（暱稱 → 卡名）：「CUBE」
+    let cardName: String
+    /// 帳單 key「2026-10」（結帳日那個月）
+    let key: String
+    let close: Date
+    /// 繳款截止日（自動扣＝扣款那天）
+    let due: Date
+    /// 這一期會從銀行扣多少（台幣）：已結帳＝帳單（自動扣最低＝最低應繳）；還沒結帳＝到今天刷的＋結帳日前還會扣的定期扣款
+    let amount: Double
+    /// 還沒結帳（金額會再變，寫「約」）
+    let isEstimate: Bool
+    /// .due／.overdue（已結帳）或 .unbilled
+    let status: WealthStatementStatus
+    let payMode: WealthPayMode
+    /// 這一期從哪個帳戶扣（沒設 nil）
+    let payerId: UUID?
+    let payerName: String?
+    /// 這一期裡刷這張卡的定期扣款（照日期、不重複）：「Spotify」「Netflix」
+    let recurringNames: [String]
+    let recurringIds: [UUID]
+
+    var id: String { cardId.uuidString + "-" + key }
+    /// 自己繳／每次問我（行事曆畫橘色、截止前 3 天與當天提醒）
+    var isManual: Bool { !payMode.isAuto }
+
+    /// 「自己繳」「薪轉自動扣」「薪轉自動扣最低」「過了截止日」
+    var modeText: String {
+        if status == .overdue { return "過了截止日" }
+        switch payMode {
+        case .autoFull: return payerName.map { $0 + "自動扣" } ?? "自動扣"
+        case .autoMin: return payerName.map { $0 + "自動扣最低" } ?? "自動扣最低"
+        case .manual, .askEachTime: return "自己繳"
+        }
+    }
+
+    /// 「含 Netflix」「含 Spotify、Netflix」「含 Spotify、Netflix 等 3 筆」；沒有 nil
+    var recurringText: String? {
+        let n = recurringNames
+        if n.isEmpty { return nil }
+        if n.count == 1 { return "含 " + n[0] }
+        if n.count == 2 { return "含 " + n[0] + "、" + n[1] }
+        return "含 " + n[0] + "、" + n[1] + " 等 \(n.count) 筆"
+    }
+
+    /// 「NT$18,600」；還沒結帳「約 NT$6,739」
+    var amountText: String { (isEstimate ? "約 " : "") + WealthFormat.ntd(amount) }
+}
+
+/// 接下來的一筆交割（同一個帳戶、同一天、同一個幣別的買賣相抵）
+struct WealthSettlementDue: Identifiable {
+    /// 交割銀行帳戶
+    let accountId: UUID
+    let accountName: String
+    /// 證券戶名（第一檔股票選的證券戶）：「元大證券」；沒選 nil
+    let brokerName: String?
+    let day: Date
+    let code: String
+    /// 原幣、正的
+    let amount: Double
+    /// 台幣（查不到匯率 nil）
+    let ntd: Double?
+    /// 買＝從帳戶扣；賣＝入帳
+    let isOutflow: Bool
+    let stockIds: [UUID]
+
+    var id: String { accountId.uuidString + "-" + WealthCal.dayKey(day) + "-" + code }
+    /// 「元大證券 交割」（沒選證券戶「股票 交割」）
+    var title: String { (brokerName ?? "股票") + " 交割" }
+    /// 「從薪轉扣」「入薪轉」
+    var directionText: String { isOutflow ? "從" + accountName + "扣" : "入" + accountName }
+    /// 「NT$52,340」「美金 1,200.00」
+    var amountText: String { FinanceRates.isNTD(code) ? WealthFormat.ntd(amount) : WealthFormat.money(amount, code: code) }
+}
+
+/// 理財每月淨資產回推（口徑 4）：某一天結束時的數字（台幣；用今天的匯率）
+struct WealthMonthEnd: Equatable {
+    var cash: Double = 0
+    var cardOwed: Double = 0
+    var pending: Double = 0
+    /// 有帳戶那天還沒開始記（往前平推的）
+    var estimated: Bool = false
+}
+
+/// 理財每月淨資產回推用的表（WealthFacts.build 建一次；回推每個月只查表；sim_v4.py make_history／history_point）
+struct WealthHistory {
+    /// 一個帳戶的一個幣別：照日子排好的「那天結束時」存摺上
+    fileprivate struct Line {
+        let rate: Double
+        let days: [Date]
+        let values: [Double]
+        /// 從這天起照紀錄；以前平推 startValue（有對過存摺＝第一次對存摺那天，沒有＝第一筆那天）
+        let startDay: Date
+        let startValue: Double
+    }
+
+    /// 一筆交割（那天、台幣；買賣相抵後是要扣的）
+    fileprivate struct Settle {
+        let day: Date
+        let ntd: Double
+    }
+
+    fileprivate let lines: [Line]
+    fileprivate let cards: [WealthFacts.Card]
+    fileprivate let settles: [Settle]
+
+    static let empty = WealthHistory(lines: [], cards: [], settles: [])
+
+    /// 算進存款合計、沒收起來的銀行帳戶（同 WealthFacts.cash）；卡＝全部的卡（同 owedCards）
+    static func make(accounts: [WealthFacts.Account], cards: [WealthFacts.Card], rates: FinanceRates) -> WealthHistory {
+        var lines: [Line] = []
+        var settles: [Settle] = []
+        for a in accounts where !a.isSecurities && !a.hidden && a.countsInCash {
+            let rows: [WealthLedgerRow] = Array(a.ledger.reversed())   // 舊到新
+            for code in a.currencies {
+                guard let r = rates.known(code) else { continue }
+                var days: [Date] = []
+                var values: [Double] = []
+                var firstAnchor: Date? = nil
+                for row in rows where row.code == code {
+                    let d = WealthCal.day(row.date)
+                    if row.kind == .anchor && firstAnchor == nil { firstAnchor = d }
+                    if let last = days.last, last == d {
+                        values[values.count - 1] = row.balanceAfter
+                    } else {
+                        days.append(d)
+                        values.append(row.balanceAfter)
+                    }
+                }
+                guard let first = days.first else { continue }
+                let start: Date = firstAnchor ?? first
+                let startValue: Double = days.firstIndex(of: start).map { values[$0] } ?? 0
+                lines.append(Line(rate: r, days: days, values: values, startDay: start, startValue: startValue))
+            }
+            // 股票款：同一天同一個幣別買賣相抵，要扣的才算
+            var keys: [String] = []
+            var net: [String: Double] = [:]
+            var dayOf: [String: Date] = [:]
+            var codeOf: [String: String] = [:]
+            for row in rows + a.upcoming where row.kind == .stockBuy || row.kind == .stockSell {
+                let d = WealthCal.day(row.date)
+                let k = WealthCal.dayKey(d) + "|" + row.code
+                if net[k] == nil {
+                    keys.append(k)
+                    net[k] = 0
+                    dayOf[k] = d
+                    codeOf[k] = row.code
+                }
+                let signed: Double = row.kind == .stockBuy ? row.amount : -row.amount
+                net[k, default: 0] += signed
+            }
+            for k in keys {
+                guard let v = net[k], v > 0, let d = dayOf[k], let code = codeOf[k], let r = rates.known(code) else { continue }
+                settles.append(Settle(day: d, ntd: v * r))
+            }
+        }
+        return WealthHistory(lines: lines, cards: cards, settles: settles)
+    }
+
+    /// day 那天結束時的存款合計、卡費還沒扣、待交割
+    func point(endOf day: Date) -> WealthMonthEnd {
+        let d = WealthCal.day(day)
+        var p = WealthMonthEnd()
+        for l in lines {
+            if d < l.startDay {
+                p.cash += l.startValue * l.rate
+                p.estimated = true
+                continue
+            }
+            // 最後一個 <= d 的那天（二分）
+            var lo = 0
+            var hi = l.days.count - 1
+            var found = -1
+            while lo <= hi {
+                let mid = (lo + hi) / 2
+                if l.days[mid] <= d {
+                    found = mid
+                    lo = mid + 1
+                } else {
+                    hi = mid - 1
+                }
+            }
+            if found >= 0 { p.cash += l.values[found] * l.rate }
+        }
+        for c in cards { p.cardOwed += WealthHistory.owed(c, endOf: d) }
+        // 那天成交、還沒交割：交割日在 (那天, 那天＋2 個營業日]
+        let limit = WealthCal.day(StockTransaction.taiwanSettlementDate(from: d))
+        for s in settles where s.day > d && s.day <= limit { p.pending += s.ntd }
+        return p
+    }
+
+    /// 一張卡在 d 那天結束時還沒扣的卡費：那天已結帳、還沒繳的帳單＋這一期刷到那天的
+    fileprivate static func owed(_ c: WealthFacts.Card, endOf d: Date) -> Double {
+        var total: Double = 0
+        for s in c.statements {
+            let start = WealthCal.day(s.start)
+            if start > d { continue }
+            if s.isPaid, WealthCal.day(s.paidOn ?? s.due) <= d { continue }
+            if WealthCal.day(s.close) <= d {
+                total += s.amount
+            } else {
+                for e in c.entries {
+                    let ed = WealthCal.day(e.date)
+                    if ed >= start && ed <= d { total += e.amount }
+                }
+            }
+        }
+        return total
+    }
 }
 
 // MARK: - 一套數字
@@ -676,6 +906,19 @@ struct WealthFacts {
     let brokers: [Broker]
     /// [v25.564] 要確認（照 bad → warn → info、種類先後排好；按過「知道了」的不在裡面）
     let checks: [WealthCheck]
+    /// [v25.565] 接下來的交割（35 天內；每個帳戶每天每幣別買賣相抵，照日期排）
+    let settlements: [WealthSettlementDue]
+    /// [v25.565] 理財每月淨資產回推用（口徑 4）：history.point(endOf:)
+    let history: WealthHistory
+
+    /// [v25.565] 理財淨資產的負債「卡費」：卡費還沒扣＋已經排定、還沒到的提款（刪卡寫回的帳單、預約繳款、未來日期的提款）。
+    /// 跟財富頁「還沒扣」同一套（還沒扣＝這個＋待交割），預約繳款、刪卡都不會讓淨資產變多
+    var netWorthCardOwed: Double { owedCards + scheduledOut }
+
+    /// [v25.565] 所有卡接下來要繳的幾期（照截止日）
+    var allDues: [WealthCardDue] {
+        cards.flatMap { $0.dues }.sorted { a, b in a.due != b.due ? a.due < b.due : a.id < b.id }
+    }
 
     /// 還沒扣＝卡費＋待交割（＋[v25.564] 已經排定、還沒到的提款）
     var notYetDebited: Double { owedCards + pendingSettlement + scheduledOut }
@@ -942,6 +1185,11 @@ struct WealthFacts {
         let closedDate: Date?
         /// 里程碑上原本的扣款帳戶（帳戶刪了還指著它時，要確認 #7 寫「原本的帳戶已經不在了」）
         let linkedRaw: UUID?
+        // [v25.565] v4 加的（build 建好卡之後才填；memberwise init 不用傳）
+        /// 卡片有效期限那個月的 1 號（里程碑 expiryDate 只取年月；沒填 nil）。只給行事曆「卡片到期」、要確認 #12、通知用
+        var expiryMonth: Date? = nil
+        /// 接下來要繳的幾期（已結帳還沒繳的、這一期、下一期；照截止日；金額 0 的不列）
+        var dues: [WealthCardDue] = []
 
         /// 卡費還沒扣＝要繳＋還沒出帳
         var owed: Double { due + unbilled }
@@ -1368,6 +1616,15 @@ struct WealthFacts {
                                expensesById: expensesById, incomesById: incomesById, stocksById: stocksById,
                                dividendIds: dividendIds, nameById: nameById,
                                expenses: expenses, incomes: incomes, stocks: stocks, excluded: excluded)
+
+        // [v25.565] 卡的效期、接下來要繳的幾期（要確認 #12、理財 30 天、小工具、行事曆、通知）
+        let cardMsById = Dictionary(cardMs.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        for i in cards.indices {
+            guard let cm = cardMsById[cards[i].id] else { continue }
+            let dues = makeDues(cards[i], milestone: cm, ctx: ctx, bankIds: bankIds)
+            cards[i].expiryMonth = cm.expiryDate.map { WealthCal.startOfMonth($0) }
+            cards[i].dues = dues
+        }
         var accounts: [Account] = []
         for m in bankMs {
             accounts.append(makeAccount(m, isSecurities: false, ctx: ctx,
@@ -1399,14 +1656,179 @@ struct WealthFacts {
         let brokers = securityMs.map { makeBroker($0, ctx: ctx, bankMs: bankMs) }
         let checks = makeChecks(cards: cards, accounts: accounts, bankMs: bankMs, unknown: unknown,
                                 ctx: ctx, bankIds: bankIds)
+        let settlements = makeSettlements(accounts: accounts, ctx: ctx)
+        let history = WealthHistory.make(accounts: accounts, cards: cards, rates: rates)
 
         return WealthFacts(now: now, today: today, accounts: accounts, cards: cards,
                            cash: cash, cashIsApprox: !unknown.isEmpty, live: live, fixedDeposit: fixedDeposit,
                            foreign: foreign, owedCards: owed, pendingSettlement: pending,
-                           unknownCodes: unknown, scheduledOut: scheduled, brokers: brokers, checks: checks)
+                           unknownCodes: unknown, scheduledOut: scheduled, brokers: brokers, checks: checks,
+                           settlements: settlements, history: history)
     }
 
     // MARK: - build 的零件
+
+    /// [v25.565] 「含 Netflix、Spotify」那幾個名字：哪一天、哪一筆記帳、叫什麼
+    private struct DueName {
+        let date: Date
+        let id: UUID
+        let title: String
+    }
+
+    /// [v25.565] 一張卡接下來要繳的幾期（sim_v4.py make_dues 照這裡寫）：
+    /// ① 已經結帳、還沒繳的（要繳／逾期）：帳單金額（自動扣最低＝最低應繳）
+    /// ② 這一期（還沒結帳）：到今天刷的＋結帳日前還會扣的定期扣款（約）
+    /// ③ 下一期：這一期結帳日以後、下一個結帳日以前還會扣的定期扣款（約；0 不列）
+    /// 定期扣款＝記帳週期性固定支出、那一期那天刷這張卡（linkFrom 有歷史照歷史）。照截止日排
+    private static func makeDues(_ card: Card, milestone c: LifeMilestone, ctx: BuildContext,
+                                 bankIds: Set<UUID>) -> [WealthCardDue] {
+        let b = card.billingDay
+        let p = card.paymentDay
+        let close1 = WealthCal.day(card.nextClose)
+        let close2 = WealthCardCycle.nextClose(after: close1, billingDay: b)
+        let due2 = WealthCardCycle.dueDate(close: close2, billingDay: b, paymentDay: p)
+        let prefs = ctx.book.card(c.id)
+
+        // 今天以後、下一個結帳日以前還會刷這張卡的定期扣款
+        var projected1: Double = 0
+        var projected2: Double = 0
+        var extra1: [DueName] = []
+        var extra2: [DueName] = []
+        for e in ctx.expenses where e.expenseType == .fixed && e.recurrence != nil {
+            let hist = ctx.book.links(e.id)
+            let mentioned = e.linkedCreditCardMilestoneId == card.id
+                || (hist ?? []).contains(where: { (seg: WealthPayFrom) -> Bool in seg.accountId == card.id })
+            guard mentioned else { continue }
+            let amounts = e.amountHistory.sorted { $0.date < $1.date }
+            for per in WealthSchedule.fixedPeriods(e, through: close2) {
+                let d = WealthCal.day(per.date)
+                guard d > ctx.today, recurringTarget(e, at: per.date, history: hist) == card.id else { continue }
+                let raw = WealthSchedule.amount(at: per.date, current: e.amount, sortedHistory: amounts)
+                let v = WealthSchedule.ntd(of: e, raw: raw, rates: ctx.rates)
+                let n = DueName(date: d, id: e.id, title: e.title)
+                if d <= close1 {
+                    projected1 += v
+                    extra1.append(n)
+                } else {
+                    projected2 += v
+                    extra2.append(n)
+                }
+            }
+        }
+
+        func payerFor(_ key: String) -> UUID? {
+            let raw = WealthCardCycle.payer(statementKey: key, linked: c.linkedBankMilestoneId, history: prefs.payFrom)
+            return raw.flatMap { bankIds.contains($0) ? $0 : nil }
+        }
+
+        var out: [WealthCardDue] = []
+        // ① 已經結帳、還沒繳的
+        for s in card.statements where s.status == .due || s.status == .overdue {
+            let amount = card.payMode == .autoMin ? Swift.min(s.minimumDue, s.amount) : s.amount
+            guard amount > 0.5 else { continue }
+            let n = dueNames(card, from: WealthCal.day(s.start), to: WealthCal.day(s.close), extra: [], ctx: ctx)
+            out.append(WealthCardDue(cardId: card.id, cardName: card.name, key: s.key, close: s.close, due: s.due,
+                                     amount: amount, isEstimate: false, status: s.status, payMode: card.payMode,
+                                     payerId: s.payerId, payerName: s.payerId.flatMap { ctx.nameById[$0] },
+                                     recurringNames: n.names, recurringIds: n.ids))
+        }
+        // ② 這一期
+        let s1 = card.statements.first { WealthCal.day($0.close) == close1 && $0.status == .unbilled }
+        let total1 = (s1?.amount ?? 0) + projected1
+        let amount1 = card.payMode == .autoMin ? Swift.min((total1 * 0.1).rounded(), total1) : total1
+        if amount1 > 0.5 {
+            let key1 = WealthCal.monthKey(close1)
+            let start1 = WealthCal.addDays(1, to: WealthCardCycle.previousClose(close1, billingDay: b))
+            let n = dueNames(card, from: start1, to: close1, extra: extra1, ctx: ctx)
+            let payer1 = payerFor(key1)
+            out.append(WealthCardDue(cardId: card.id, cardName: card.name, key: key1, close: close1, due: card.nextDue,
+                                     amount: amount1, isEstimate: true, status: .unbilled, payMode: card.payMode,
+                                     payerId: payer1, payerName: payer1.flatMap { ctx.nameById[$0] },
+                                     recurringNames: n.names, recurringIds: n.ids))
+        }
+        // ③ 下一期（〔算到下一期〕、前期未繳長出來的那一期也算進來）
+        let s2 = card.statements.first { WealthCal.day($0.close) == close2 }
+        let total2 = (s2?.amount ?? 0) + projected2
+        let amount2 = card.payMode == .autoMin ? Swift.min((total2 * 0.1).rounded(), total2) : total2
+        if amount2 > 0.5 {
+            let key2 = WealthCal.monthKey(close2)
+            let n = dueNames(card, from: WealthCal.addDays(1, to: close1), to: close2, extra: extra2, ctx: ctx)
+            let payer2 = payerFor(key2)
+            out.append(WealthCardDue(cardId: card.id, cardName: card.name, key: key2, close: close2, due: due2,
+                                     amount: amount2, isEstimate: true, status: .unbilled, payMode: card.payMode,
+                                     payerId: payer2, payerName: payer2.flatMap { ctx.nameById[$0] },
+                                     recurringNames: n.names, recurringIds: n.ids))
+        }
+        return out.sorted { x, y in x.due != y.due ? x.due < y.due : x.key < y.key }
+    }
+
+    /// [v25.565] 這一期裡刷這張卡的定期扣款叫什麼（照日期、同一筆只算一次；extra＝今天以後還會扣的）
+    private static func dueNames(_ card: Card, from start: Date, to end: Date, extra: [DueName],
+                                 ctx: BuildContext) -> (names: [String], ids: [UUID]) {
+        var list: [DueName] = []
+        for en in card.entries {
+            let d = WealthCal.day(en.date)
+            guard d >= start, d <= end, let e = ctx.expensesById[en.expenseId],
+                  e.expenseType == .fixed, e.recurrence != nil else { continue }
+            list.append(DueName(date: d, id: e.id, title: e.title))
+        }
+        list += extra
+        // 照日期；同一天照原本的先後（sort 不保證穩定，帶著位置比）
+        let ordered = list.enumerated().sorted { x, y in
+            if x.element.date != y.element.date { return x.element.date < y.element.date }
+            return x.offset < y.offset
+        }.map { $0.element }
+        var names: [String] = []
+        var ids: [UUID] = []
+        for n in ordered where !ids.contains(n.id) {
+            ids.append(n.id)
+            names.append(n.title)
+        }
+        return (names: names, ids: ids)
+    }
+
+    /// [v25.565] 接下來的交割（sim_v4.py make_settlements）：沒收起來的銀行帳戶，35 天內每天每幣別的股票款買賣相抵；
+    /// 證券戶名＝第一檔股票選的證券戶
+    private static func makeSettlements(accounts: [Account], ctx: BuildContext) -> [WealthSettlementDue] {
+        var out: [WealthSettlementDue] = []
+        for a in accounts where !a.isSecurities && !a.hidden {
+            var keys: [String] = []
+            var net: [String: Double] = [:]
+            var dayOf: [String: Date] = [:]
+            var codeOf: [String: String] = [:]
+            var stockIdsOf: [String: [UUID]] = [:]
+            for row in a.upcoming where row.kind == .stockBuy || row.kind == .stockSell {
+                let d = WealthCal.day(row.date)
+                let k = WealthCal.dayKey(d) + "|" + row.code
+                if net[k] == nil {
+                    keys.append(k)
+                    net[k] = 0
+                    dayOf[k] = d
+                    codeOf[k] = row.code
+                    stockIdsOf[k] = []
+                }
+                let signed: Double = row.kind == .stockBuy ? row.amount : -row.amount
+                net[k, default: 0] += signed
+                if let sid = row.stockId, !(stockIdsOf[k] ?? []).contains(sid) {
+                    stockIdsOf[k, default: []].append(sid)
+                }
+            }
+            for k in keys {
+                guard let v = net[k], Swift.abs(v) > 0.004, let d = dayOf[k], let code = codeOf[k] else { continue }
+                let ids: [UUID] = stockIdsOf[k] ?? []
+                let brokerId: UUID? = ids.first.flatMap { sid -> UUID? in ctx.stocksById[sid]?.linkedSecuritiesMilestoneId }
+                let broker: String? = brokerId.flatMap { ctx.nameById[$0] }
+                let ntd: Double? = ctx.rates.known(code).map { r -> Double in Swift.abs(v) * r }
+                out.append(WealthSettlementDue(accountId: a.id, accountName: a.name, brokerName: broker, day: d,
+                                               code: code, amount: Swift.abs(v), ntd: ntd, isOutflow: v > 0,
+                                               stockIds: ids))
+            }
+        }
+        return out.enumerated().sorted { x, y in
+            if x.element.day != y.element.day { return x.element.day < y.element.day }
+            return x.offset < y.offset
+        }.map { $0.element }
+    }
 
     /// 一期帳單動到哪個帳戶的哪一天、多少（已繳：那天從那個帳戶；還沒繳：截止日從扣款帳戶；逾期：明天）
     private struct BillRef {
@@ -2000,6 +2422,42 @@ struct WealthFacts {
                             text: "設定裡找不到「\(code)」的匯率，\(names)的 \(amounts) 先不算進合計",
                             actions: [WealthCheck.Action(title: "去設定", fix: .openRates)],
                             accountIds: owners.map(\.id)))
+        }
+
+        // #12 卡片效期前 30 天（v4）：效期那個月的 1 號往前 30 天起、到那個月底；換新卡後記得改綁在這張卡的定期扣款
+        for c in cards where !c.isDisabled {
+            guard let em = c.expiryMonth else { continue }
+            let from = WealthCal.addDays(-30, to: em)
+            let until = WealthCal.addMonths(1, to: em)
+            guard today >= from, today < until else { continue }
+            let horizonDay = WealthCal.addDays(400, to: today)
+            var bound: [(next: Date, title: String)] = []
+            for e in ctx.expenses where e.linkedCreditCardMilestoneId == c.id && e.expenseType == .fixed && e.recurrence != nil {
+                if let end = e.endDate, WealthCal.day(end) < today { continue }
+                let first = WealthSchedule.fixedPeriods(e, through: horizonDay)
+                    .first(where: { (per: (index: Int, date: Date)) -> Bool in WealthCal.day(per.date) >= today })
+                let next: Date = first.map { WealthCal.day($0.date) } ?? Date.distantFuture
+                bound.append((next: next, title: e.title))
+            }
+            let ordered: [String] = bound.enumerated().sorted { x, y in
+                if x.element.next != y.element.next { return x.element.next < y.element.next }
+                return x.offset < y.offset
+            }.map { $0.element.title }
+            let year = WealthCal.calendar.component(.year, from: em)
+            let thisYear = WealthCal.calendar.component(.year, from: today)
+            let when: String = year == thisYear ? "\(WealthCal.month(em)) 月到期" : "\(year) 年 \(WealthCal.month(em)) 月到期"
+            var actions: [WealthCheck.Action] = []
+            let text: String
+            if ordered.isEmpty {
+                text = "\(c.name) \(when)：收到新卡記得改卡片資料的有效期限"
+            } else {
+                let more: String = ordered.count > 3 ? " 等 \(ordered.count) 筆" : ""
+                text = "\(c.name) \(when)，換新卡後記得改 " + ordered.prefix(3).joined(separator: "、") + more
+                actions.append(WealthCheck.Action(title: "看綁了哪些", fix: .openCard(c.id)))
+            }
+            actions.append(WealthCheck.Action(title: "知道了", fix: .dismiss))
+            add(WealthCheck(id: "expiry-\(c.id.uuidString)-\(WealthCal.monthKey(em))", kind: .cardExpiring, tone: .warn,
+                            text: text, actions: actions, accountIds: [c.id]))
         }
 
         // #6 卡沒填結帳日或繳款截止日（v2 偵測）

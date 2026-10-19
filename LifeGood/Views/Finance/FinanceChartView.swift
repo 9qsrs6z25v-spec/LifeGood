@@ -93,9 +93,15 @@ import Charts
 //     賣掉的車不算。
 //   - 股票損益、房地產增值照「紅漲綠跌」。
 
+// [v25.565] 財富 v4：淨資產含存款、扣卡費與待交割（FinanceLoanIndex.wealth 讀人生的 LifeStore），
+//   所以 .task 也看 wealthRevision；資產配置分布照舊只有理財的四類（AssetType 沒有存款），
+//   甜甜圈中間改寫「理財資產」，不跟理財總覽含存款的「總資產」撞名。
+
 struct FinanceChartView: View {
     @EnvironmentObject var store: FinanceStore
     @EnvironmentObject var expenseStore: ExpenseStore
+    /// [v25.565] 財富的一套數字在人生（存款、卡費、交割）；改了要重算極光看板與淨資產走勢
+    @EnvironmentObject var lifeStore: LifeStore
     @Environment(\.colorScheme) private var colorScheme
     @State private var period: FinanceChartPeriod = .year
     /// 極光看板與淨資產走勢（回推每個月的淨資產，放在 .task 裡算）
@@ -153,7 +159,7 @@ struct FinanceChartView: View {
             }
             .background(Color(.systemGroupedBackground))
             .navigationTitle("理財圖表")
-            .task(id: "\(store.modifyID)-\(expenseStore.modifyID)-\(period.rawValue)") {
+            .task(id: chartKey) {
                 chartBoard = FinanceChartBoardData.build(finance: store, expense: expenseStore, period: period)
             }
             .onAppear {
@@ -186,6 +192,11 @@ struct FinanceChartView: View {
                 entranceAnimationTask = nil
             }
         }
+    }
+
+    /// 極光看板重算的 key：理財、記帳、期間、[v25.565] 財富帳本（wealthRevision）與今天（卡費、交割跟著日子變）
+    private var chartKey: String {
+        "\(store.modifyID)-\(expenseStore.modifyID)-\(period.rawValue)-\(lifeStore.wealthRevision)-\(WealthCal.dayKey(Date()))"
     }
 
     // MARK: - 資產配置的數字
@@ -239,9 +250,9 @@ struct FinanceChartView: View {
                     .frame(height: 200)
                     .padding(.horizontal)
 
-                    // 甜甜圈中心：總資產
+                    // 甜甜圈中心：理財的四類加起來（[v25.565] 不含存款，改寫「理財資產」，跟總覽的「總資產」分開）
                     VStack(spacing: 2) {
-                        Text("總資產")
+                        Text("理財資產")
                             .font(.system(size: 10, weight: .medium))
                             .foregroundStyle(.secondary)
                         Text(fmtShort(grandTotal))

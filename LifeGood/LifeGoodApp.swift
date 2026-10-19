@@ -74,6 +74,13 @@ extension AppDelegate: UNUserNotificationCenterDelegate {
                 DeepLinkRouter.shared.requestTimelineStop(
                     DayTimelineLink.stopIdForMeeting(uuidString: raw))
             }
+        } else if let raw = info[DeepLinkRouter.wealthNotificationKey] as? String,
+                  let id = UUID(uuidString: raw) {
+            // [財富 v4] 財富提醒（WealthReminders）→ 切到人生 › 財富並打開那張卡／那個帳戶。
+            // 跟小工具卡費列同一個總入口（WidgetLink.apply 的 .wealth：goToWealth＋requestItem）；不是從小工具來的，不帶 src=widget
+            Task { @MainActor in
+                _ = WidgetLink.apply(WidgetLink.url(for: .wealth(id: id), fromWidget: false), store: AppStores.life)
+            }
         }
         completionHandler()
     }
@@ -152,6 +159,10 @@ struct LifeGoodApp: App {
                     // [v25.545] 桌面小工具的快照：掛好監聽、馬上寫一次（放在任何 await 之前，
                     // 開場動畫期間就寫好；第二次呼叫什麼都不做）。[v2] 多收 finance（車子卡、接下來要繳）
                     WidgetSnapshotWriter.shared.start(expense: expenseStore, finance: financeStore, life: lifeStore)
+                    // [財富 v4] 財富提醒（卡費截止、可能不夠扣的扣款與交割、卡片快到期；通知不寫卡名、金額、號碼）：
+                    // 掛好監聽（記帳／理財／人生一改，防抖 3 秒重排）、馬上排一次；第二次呼叫什麼都不做。
+                    // 同步呼叫、不 await：授權照 MeetingReminders 的慣例，有要排的才問（WealthReminderCenter 裡）
+                    WealthReminderCenter.shared.start(expense: expenseStore, finance: financeStore, life: lifeStore)
                     // [v25.552] 找上次跑到一半被關掉、還沒存的那幾趟（讀檔在背景，很快）。
                     // 放在其他 await 前面：開場謝幕（約 2 秒）之前就找好，LaunchGate 謝幕後問一次
                     await RunRecoveryCenter.shared.scan()
@@ -211,6 +222,8 @@ struct LifeGoodApp: App {
                         WidgetOpenAppHandoff.consumeStored()
                         // [v25.545] 今天往前走了（過了午夜、過了一場）：重寫小工具快照，內容沒變就不寫
                         WidgetSnapshotWriter.shared.writeNow()
+                        // [財富 v4] 財富提醒跟著今天往前走（過了截止日、標成已繳、換了月）重排；要排的跟上次一樣就不動通知中心
+                        WealthReminderCenter.shared.rebuildSoon()
                         Task {
                             await subscription.refreshStatus()
                             await einvoiceSync.syncIfDue(expenseStore: expenseStore)

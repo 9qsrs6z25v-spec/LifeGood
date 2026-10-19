@@ -41,6 +41,9 @@ import Foundation
 //   [健康 v7b] lifegood://life/health?id=<運動 UUID>&src=widget           → 人生「健康」、打開那一趟的成果頁（那一行寫今天那一趟時）；
 //                                                                       找不到那一趟（刪掉了）就停在健康頁
 //   （控制項「開始跑步」用上面的 lifegood://life/health/run，跟鎖定畫面的跑步卡同一條路）
+//   [財富 v4] lifegood://life/wealth?src=widget                        → 人生「財富」
+//   [財富 v4] lifegood://life/wealth?id=<帳戶或卡 UUID>&src=widget      → 人生「財富」、打開那張卡／那個帳戶的卡片頁
+//                                                                       （小工具「接下來要繳」的卡費、交割列；找不到就停在財富頁）
 //
 // 分類、車子分類的值是 App 寫進快照的 rawValue（VariableCategory／VehicleVariableCategory），
 // 小工具原樣帶回；URLComponents 會自己做百分比編碼，中文沒問題。
@@ -86,6 +89,8 @@ enum WidgetDestination: Equatable {
     case healthRun
     /// [健康 v7b] 人生「健康」；帶 id 就打開那一趟的成果頁（今天（大）最下面運動那一行）
     case health(sessionId: UUID?)
+    /// [財富 v4] 人生「財富」；帶 id 就打開那張卡／那個帳戶的卡片頁（WealthCardPage）
+    case wealth(id: UUID?)
 }
 
 /// 解析結果：去哪＋是不是從小工具點進來的
@@ -138,6 +143,8 @@ enum WidgetLink {
     private static let healthRunPath = "/health/run"
     // [健康 v7b]
     private static let healthPath = "/health"
+    // [財富 v4]
+    private static let wealthPath = "/wealth"
 
     /// 組不出網址時的退路（不會發生：全部是固定的 ASCII 字）
     private static let fallback = URL(string: "lifegood://today")!
@@ -229,6 +236,10 @@ enum WidgetLink {
             comps.host = lifeHost
             comps.path = healthPath
             appendId(id, to: &items)
+        case .wealth(let id):
+            comps.host = lifeHost
+            comps.path = wealthPath
+            appendId(id, to: &items)
         }
         if fromWidget {
             items.append(URLQueryItem(name: sourceKey, value: sourceWidget))
@@ -313,6 +324,9 @@ enum WidgetLink {
     /// [健康 v7b] 健康頁：lifegood://life/health?src=widget；帶 id＝打開那一趟的成果頁（…?id=<UUID>&src=widget）
     static func health(_ sessionId: UUID?) -> URL { url(for: .health(sessionId: sessionId)) }
 
+    /// [財富 v4] 財富頁：lifegood://life/wealth?src=widget；帶 id＝打開那張卡／那個帳戶（…?id=<UUID>&src=widget）
+    static func wealth(_ id: UUID?) -> URL { url(for: .wealth(id: id)) }
+
     // MARK: 解析
 
     /// 認得的網址回 WidgetRoute；別的（不是 lifegood://、不認得的頁）回 nil。
@@ -370,6 +384,7 @@ enum WidgetLink {
             if path == familyTasksPath { return .familyTasks }
             if path == healthRunPath { return .healthRun }
             if path == healthPath { return .health(sessionId: uuidValue(idKey, in: items)) }
+            if path == wealthPath { return .wealth(id: uuidValue(idKey, in: items)) }
             return nil
         default:
             return nil

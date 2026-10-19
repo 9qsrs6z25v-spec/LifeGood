@@ -8,6 +8,10 @@ import Charts
 // 這個檔案是每一頁「要寫什麼字、畫什麼景」：
 //   總覽：資產小鎮＋錢放在哪裡（四張明信片）＋每個月的現金流＋接下來 30 天
 //   股票、儲蓄險、載具、房地產、圖表：在下面各自的段落
+// [v25.565] 財富 v4（wealth/judge.md §6.4、§6.8；build/v4/brief.md G1）：淨資產含存款、扣卡費與待交割（數字都在
+//   FinanceSnapshot，這裡只寫字）。看板一句「總資產 …・貸款還欠 …・卡費與交割 …」（貸款看 s.loans、卡費與交割看
+//   s.wealthOwed，0 不寫）；錢放在哪裡多一張「存款」明信片（點了切到人生 › 財富，全理財唯一切出去的地方）；
+//   資產小鎮多一座頂樓水塔（FinanceBoardScenes）；接下來 30 天的卡費、交割列點了彈出財富卡片頁（openWealth，不切分頁）。
 
 extension MoneyFormat {
     /// 風景裡的小牌子：不寫 NT$（「1880萬」）
@@ -78,14 +82,18 @@ struct FinanceOverviewData: Equatable {
         // [v25.539] 每台車的 VehicleFacts 也只建一次（FinanceLoanIndex.vehicles），現金流的養車、接下來 30 天的車都讀它
         d.cashFlow = FinanceCashFlow.build(finance: f, rates: rates, houses: index.houses,
                                            vehicles: index.vehicles, now: now)
+        // [v25.565] 財富 v4：接下來 30 天多卡費、交割（index.wealth＝財富頁同一份一套數字；刷卡的保費、車子那幾件併進卡費）
         d.upcoming = FinanceUpcoming.build(finance: f, expense: e, houses: index.houses,
-                                           vehicles: index.vehicles, now: now)
+                                           vehicles: index.vehicles, now: now, wealth: index.wealth)
         let activeStocks = f.stocks.filter { !$0.isSold }
         let livePolicies = f.insurances.filter { now < $0.maturityDate }
+        // [v25.565] 存款：算進存款合計、沒收起來的銀行帳戶幾個（跟 WealthFacts.cash 同一個條件）
+        let cashAccounts = index.wealth.banks.filter { !$0.hidden && $0.countsInCash }.count
         d.counts = [.realEstate: f.realEstates.filter { !$0.isSold }.count,
                     .savings: livePolicies.count,
                     .stock: activeStocks.count,
-                    .vehicle: f.vehicles.filter { !$0.isSold(asOf: now) }.count]
+                    .vehicle: f.vehicles.filter { !$0.isSold(asOf: now) }.count,
+                    .cash: cashAccounts]
         d.savingsExpected = livePolicies.reduce(0) { $0 + rates.ntd($1.calculatedExpectedReturn, code: $1.currencyCode) }
         let cost = activeStocks.reduce(0) { $0 + $1.totalCost }
         if cost > 0 {
@@ -99,6 +107,8 @@ struct FinanceOverviewData: Equatable {
 struct FinanceOverviewBoard: View {
     let data: FinanceOverviewData
     let open: (FinanceFeature) -> Void
+    /// [v25.565] 接下來 30 天的卡費、交割列：彈出那張卡／交割銀行的財富卡片頁（不切分頁，judge §6.8）
+    let openWealth: (UUID) -> Void
 
     @Environment(\.colorScheme) private var scheme
 
@@ -143,15 +153,26 @@ struct FinanceOverviewBoard: View {
         if s.assets <= 0 && s.debt <= 0 {
             return Text("新增房地產、股票、保單或車子之後，這裡會蓋出你的資產小鎮")
         }
+        // [v25.565] 財富 v4：總資產含存款；「貸款還欠」只看貸款（s.loans），卡費與交割另外一段（0 不寫）
         let assets = "總資產 " + MoneyFormat.short(s.assets)
-        if s.debt <= 0 {
-            return Text("\(assets)・沒有貸款")
+        let tail = wealthOwedTail()
+        if s.loans <= 0 {
+            return Text("\(assets)・沒有貸款\(tail)")
         }
         // [v25.532] 房貸改看還欠的本金；本金是推算的寫「約」
         // [v25.539] 車貸也改看本金（決定 2）：車貸的本金是反推的也寫「約」
         let word = (s.mortgageEstimated || s.carLoanEstimated) ? "貸款還欠 約 " : "貸款還欠 "
-        let debt = Text(MoneyFormat.short(s.debt)).fontWeight(.heavy).foregroundStyle(MoneyTone.bad.color(pal))
-        return Text("\(assets)・\(word)\(debt)")
+        let debt = Text(MoneyFormat.short(s.loans)).fontWeight(.heavy).foregroundStyle(MoneyTone.bad.color(pal))
+        return Text("\(assets)・\(word)\(debt)\(tail)")
+    }
+
+    /// [v25.565] 「・卡費與交割 NT$10萬」：卡費是正常的事，數字粗體但不染紅（中性色，跟這一句同色）；
+    /// 卡費＋待交割＝0 是空的（不寫「卡費與交割 NT$0」）
+    private func wealthOwedTail() -> Text {
+        let s = data.snapshot
+        guard s.wealthOwed > 0.5 else { return Text(verbatim: "") }
+        let owed = Text(MoneyFormat.short(s.wealthOwed)).fontWeight(.heavy)
+        return Text("・卡費與交割 \(owed)")
     }
 
     private var town: FinTownScene {
@@ -171,9 +192,20 @@ struct FinanceOverviewBoard: View {
                 b.append(.init(kind: kind, value: s.savings, label: MoneyFormat.compact(s.savings)))
             case .vehicle:
                 b.append(.init(kind: kind, value: s.vehicle, owed: s.carLoan, label: MoneyFormat.compact(s.vehicle)))
+            case .cash:
+                // [v25.565] 頂樓水塔：水位＝存款、水面那一截斜線＝卡費與交割還沒扣（跟財富看板同一個圖案同一個意思）
+                b.append(.init(kind: kind, value: s.cash, owed: s.wealthOwed, label: MoneyFormat.compact(s.cash),
+                               owedLabel: cashOwedLabel))
             }
         }
         return FinTownScene(buildings: b.sorted { $0.value > $1.value })
+    }
+
+    /// [v25.565] 水塔的「還沒扣 10萬」（卡費＋待交割；0 是 nil）
+    private var cashOwedLabel: String? {
+        let s = data.snapshot
+        guard s.wealthOwed > 0.5 else { return nil }
+        return "還沒扣 " + MoneyFormat.compact(s.wealthOwed)
     }
 
     // MARK: 錢放在哪裡
@@ -199,16 +231,29 @@ struct FinanceOverviewBoard: View {
                 LazyVGrid(columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)], spacing: 8) {
                     ForEach(kinds) { kind in
                         Button {
-                            open(kind.feature)
+                            openKind(kind)
                         } label: {
                             postcard(kind, pal: pal)
                         }
                         .buttonStyle(MoneyPressStyle())
-                        .accessibilityHint("切到" + kind.name + "頁")
+                        .accessibilityHint(openHint(kind))
                     }
                 }
             }
         }
+    }
+
+    /// [v25.565] 存款不在理財（feature＝nil）：切到人生 › 財富。judge §6.8 只有兩個地方切分頁，這是其中一個
+    private func openKind(_ kind: FinanceAssetKind) {
+        if let f = kind.feature {
+            open(f)
+        } else {
+            AppNavigation.goToWealth()
+        }
+    }
+
+    private func openHint(_ kind: FinanceAssetKind) -> String {
+        kind.feature == nil ? "切到人生的財富頁" : "切到" + kind.name + "頁"
     }
 
     /// [v25.532] 房地產明信片底下那幾個字：算不出本金的房子退回含利息的「還要繳」；本金是推算的寫「約」
@@ -257,11 +302,28 @@ struct FinanceOverviewBoard: View {
                 footer = Text("\(d.counts[kind] ?? 0) 輛")
                 footerA11y = "\(d.counts[kind] ?? 0) 輛"
             }
+        case .cash:
+            // [v25.565] 存款（財富頁的存款合計，存摺上）：底下寫卡費與交割還沒扣多少（warn）；都扣完了寫幾個帳戶
+            if s.wealthOwed > 0.5 {
+                let owed = Text(MoneyFormat.compact(s.wealthOwed)).foregroundStyle(MoneyTone.warn.color(pal))
+                footer = Text("卡費與交割還沒扣 \(owed)")
+                footerA11y = "卡費與交割還沒扣 " + MoneyFormat.short(s.wealthOwed)
+            } else {
+                footer = Text("\(d.counts[kind] ?? 0) 個帳戶")
+                footerA11y = "\(d.counts[kind] ?? 0) 個帳戶"
+            }
         }
-        return MoneyCategoryPostcard(theme: kind.theme, name: kind.name, amount: MoneyFormat.short(value),
+        return MoneyCategoryPostcard(theme: kind.theme, name: kind.name, amount: postcardAmount(kind),
                                      share: s.assets > 0 ? value / s.assets : 0, count: d.counts[kind] ?? 0,
                                      change: nil, changeTone: .neutral,
                                      customFooter: footer, customFooterA11y: footerA11y)
+    }
+
+    /// [v25.565] 明信片的金額：存款有幣別查不到匯率時前面加「約 」（同財富頁的存款合計）
+    private func postcardAmount(_ kind: FinanceAssetKind) -> String {
+        let s = data.snapshot
+        let amount = MoneyFormat.short(s.value(kind))
+        return (kind == .cash && s.cashApprox) ? "約 " + amount : amount
     }
 
     // MARK: 每個月的現金流
@@ -330,11 +392,7 @@ struct FinanceOverviewBoard: View {
                             .padding(.leading, 38)
                     }
                     Button {
-                        switch ev.kind {
-                        case .premium, .maturity: open(.insurance)
-                        case .mortgage: open(.realEstate)
-                        case .vehicle: open(.vehicle)
-                        }
+                        openUpcoming(ev)
                     } label: {
                         upcomingRow(ev, pal: pal)
                     }
@@ -343,6 +401,17 @@ struct FinanceOverviewBoard: View {
             }
             .padding(.horizontal, 12)
             .modifier(TripBoardCellChrome(pal: pal))
+        }
+    }
+
+    /// 點了切到那一頁；[v25.565] 卡費、交割：彈出財富卡片頁（那張卡／交割銀行），看完關掉還在理財（judge §6.8）
+    private func openUpcoming(_ ev: FinanceUpcoming) {
+        switch ev.kind {
+        case .premium, .maturity: open(.insurance)
+        case .mortgage: open(.realEstate)
+        case .vehicle: open(.vehicle)
+        case .cardBill, .settlement:
+            if let id = ev.wealthId { openWealth(id) }
         }
     }
 
@@ -1382,10 +1451,17 @@ private struct FinanceChartBoardBody: View {
 }
 
 /// 淨資產走勢：資產（紫）、貸款（紅）、淨資產（綠，下面一片），圓點是當月存下來的紀錄
+/// [v25.565] 資產含存款、紅色那條含卡費與待交割（財富 v4，口徑 4）
 struct FinanceNetWorthCard: View {
     let points: [FinanceMonthPoint]
 
     @Environment(\.colorScheme) private var scheme
+
+    /// 圖下面的說明：回推怎麼算、貸款算本金（v25.539）
+    private static let noteLoans = "圓點是那個月打開理財頁時存下來的；其他月份是回推的估算（房子、車子在買入價與現在的估值之間平均變化，股票沒有市值紀錄就用成本）。房貸、車貸算的是還欠銀行的本金（算不出本金的那筆才用還要繳的期數 × 每期金額）；其他貸款算的是還要繳的期數 × 每期金額。"
+    /// [v25.565] 財富 v4：淨資產含存款、扣卡費與待交割；以前的月份照財富帳戶的紀錄回推（WealthFacts.history）
+    private static let noteWealth = "淨資產含銀行存款、扣掉卡費與還沒交割的股票款（v25.565 起）；以前的月份照財富頁的帳戶紀錄回推，帳戶還沒開始記以前，用第一次對存摺（沒對過就用第一天）的數字往前平推。"
+    private static let note = noteLoans + noteWealth
 
     private static let ym: DateFormatter = {
         let f = DateFormatter()
@@ -1421,7 +1497,7 @@ struct FinanceNetWorthCard: View {
                                 .lineStyle(StrokeStyle(lineWidth: 1.5))
                                 .interpolationMethod(.monotone)
                             LineMark(x: .value("月份", pt.month), y: .value("金額", pt.debt),
-                                     series: .value("項目", "貸款"))
+                                     series: .value("項目", "貸款與卡費"))
                                 .foregroundStyle(debtColor.opacity(0.75))
                                 .lineStyle(StrokeStyle(lineWidth: 1.5, dash: [4, 3]))
                                 .interpolationMethod(.monotone)
@@ -1461,10 +1537,12 @@ struct FinanceNetWorthCard: View {
                     ChipFlowLayout(spacing: 12) {
                         MoneyLegendItem(mark: .swatch, color: netColor, text: "淨資產", pal: pal)
                         MoneyLegendItem(mark: .swatch, color: assetColor, text: "資產", pal: pal)
-                        MoneyLegendItem(mark: .dash, color: debtColor, text: "貸款還欠", pal: pal)
+                        // [v25.565] 這條線含卡費與待交割（FinanceSnapshot.debt），不再只有貸款
+                        MoneyLegendItem(mark: .dash, color: debtColor, text: "貸款與卡費", pal: pal)
                     }
                     // [v25.539] 車貸改算本金之後，這句跟著改（FinanceSnapshot.carLoan 是本金，不再是含利息的還要繳）
-                    Text("圓點是那個月打開理財頁時存下來的；其他月份是回推的估算（房子、車子在買入價與現在的估值之間平均變化，股票沒有市值紀錄就用成本）。房貸、車貸算的是還欠銀行的本金（算不出本金的那筆才用還要繳的期數 × 每期金額）；其他貸款算的是還要繳的期數 × 每期金額。")
+                    // [v25.565] 加一句存款、卡費、交割（字串拆成常數，body 不串長字串）
+                    Text(Self.note)
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)

@@ -288,6 +288,8 @@ struct SettingsView: View {
     @AppStorage(MeetingAlertPreference.globalKey) private var meetingAlertRaw =
         MeetingAlertStyle.notification.rawValue
     @StateObject private var alarmScheduler = MeetingAlarmScheduler.shared
+    /// [財富 v4] 財富提醒（卡費截止、可能不夠扣的扣款與交割、卡片快到期）全部開關；沒設定過＝開（WealthReminders.isEnabled 同一個鍵）
+    @AppStorage(WealthReminders.enabledKey) private var wealthRemindersOn = true
     @State private var reminderExpanded = false
     @State private var dataManagementExpanded = false
     @State private var dataStatsExpanded = false
@@ -1340,6 +1342,9 @@ struct SettingsView: View {
                         Text(err).font(.caption).foregroundStyle(.secondary)
                     }
                 }
+
+                // [財富 v4] 財富提醒（全部）；每張卡另外有「提醒我繳卡費」（卡片表單）
+                wealthReminderToggle
             }
         } header: {
             Text("會議提醒")
@@ -1347,6 +1352,31 @@ struct SettingsView: View {
             Text(Self.meetingAlertFootnote)
         }
     }
+
+    /// [財富 v4] 財富提醒的開關（拆出來：SettingsView 很大、型別檢查敏感，body 裡只放一個名字）。
+    /// 一動就重排（關掉＝清掉全部 wealth. 開頭的待發通知；打開＝照現在的卡費、交割、效期重排）
+    private var wealthReminderToggle: some View {
+        Toggle(isOn: $wealthRemindersOn) {
+            Label {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("財富提醒")
+                    Text(Self.wealthReminderHint)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            } icon: {
+                Image(systemName: "bell.badge.fill")
+                    .foregroundStyle(.orange)
+            }
+        }
+        .onChange(of: wealthRemindersOn) { _, _ in
+            WealthReminderCenter.shared.rebuildSoon()
+        }
+    }
+
+    /// [財富 v4] 說明一次寫成單一字串常數，不要在 Text(...) 裡用 + 串接
+    private static let wealthReminderHint =
+        "卡費截止、可能不夠扣的扣款與交割、卡片快到期；通知不寫卡名和金額"
 
     /// 說明一次寫成單一字串常數，不要在 Text(...) 裡用 + 串接
     private static let meetingAlertFootnote =

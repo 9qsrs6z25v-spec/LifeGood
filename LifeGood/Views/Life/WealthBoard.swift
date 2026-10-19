@@ -16,6 +16,10 @@ import SwiftUI
 // • WealthPageUpcomingSection：③ 接下來 30 天・各帳戶夠不夠扣（白卡；一個帳戶一列，點了開銀行頁捲到「接下來」；「看 6 件 ›」）。
 // • WealthPageUpcomingSheet：「看 6 件」那張表單（FinanceLedgerRow：日期塊＋一句＋金額＋扣完剩多少；變負的整列 warn）。
 // • WealthPageInfoSheet：⋯ 的兩張說明。WealthPageFooterView：⑨ 頁尾灰字（匯率太舊那句琥珀色）。
+//
+// [v25.565] 財富 v4（build/v4/brief.md §G4-2；judge §3.4）：
+// • WealthPageBridgeView：①' 看板下的橋，一顆白色膠囊列「↗ 這些已算進理財淨資產 NT$1381.1萬 ›」，點了切到理財 › 總覽
+//  （財富頁給 onTap；全頁唯一會切分頁的地方）。字放不下一列就疊兩行（ViewThatFits），整列一個 VoiceOver 元素。
 
 // MARK: - ① 看板
 
@@ -203,6 +207,107 @@ private struct WealthPageStarters: View {
         }
         .buttonStyle(MoneyPressStyle())
         .accessibilityLabel("新增" + title)
+    }
+}
+
+// MARK: - ①' 橋（v25.565）
+
+/// ①' 看板下的橋：「↗ 這些已算進理財淨資產 NT$1381.1萬 ›」（左右 16 由財富頁的 VStack 給）。
+/// 白色膠囊（同白卡的底色、細框、淡陰影）；一列放不下（SE、字放大）就把金額疊到第二行
+struct WealthPageBridgeView: View {
+    let bridge: WealthPageBridge
+    let onTap: () -> Void
+
+    @Environment(\.colorScheme) private var scheme
+
+    // 字色一律寫死成系統的 label 色：自訂 ButtonStyle 的 label 預設會被染成 tint（.secondary 會變淡藍）
+    var body: some View {
+        Button(action: onTap) {
+            chrome
+        }
+        .buttonStyle(MoneyPressStyle())
+        .accessibilityLabel(bridge.accessibilityText)
+        .accessibilityHint("點兩下到理財總覽")
+    }
+
+    private var chrome: some View {
+        let shape = RoundedRectangle(cornerRadius: 20, style: .continuous)
+        return content
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+            .frame(maxWidth: .infinity, minHeight: 40, alignment: .leading)
+            .background(Color(.secondarySystemGroupedBackground), in: shape)
+            .overlay { shape.stroke(strokeColor, lineWidth: 0.75) }
+            .shadow(color: shadowColor, radius: 6, x: 0, y: 2)
+            .contentShape(shape)
+    }
+
+    private var content: some View {
+        HStack(alignment: .center, spacing: 8) {
+            arrowIcon
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .firstTextBaseline, spacing: 4) {
+                    textLabel
+                    amountLabel
+                }
+                stackedLabels
+            }
+            Spacer(minLength: 4)
+            chevronIcon
+        }
+    }
+
+    /// 一列放不下：字一行（再放不下就換行）、金額第二行（太長縮小，不切字）
+    private var stackedLabels: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(bridge.text)
+                .font(.subheadline)
+                .foregroundStyle(Color(.secondaryLabel))
+                .fixedSize(horizontal: false, vertical: true)
+            Text(bridge.amount)
+                .font(.subheadline.weight(.bold))
+                .monospacedDigit()
+                .foregroundStyle(Color.primary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+        }
+    }
+
+    private var arrowIcon: some View {
+        Image(systemName: "arrow.up.right")
+            .font(.footnote.weight(.bold))
+            .foregroundStyle(TripBoardPalette(scheme).hint)
+    }
+
+    private var chevronIcon: some View {
+        Image(systemName: "chevron.right")
+            .font(.footnote.weight(.semibold))
+            .foregroundStyle(Color(.tertiaryLabel))
+    }
+
+    private var textLabel: some View {
+        Text(bridge.text)
+            .font(.subheadline)
+            .foregroundStyle(Color(.secondaryLabel))
+            .lineLimit(1)
+            .fixedSize()
+    }
+
+    private var amountLabel: some View {
+        Text(bridge.amount)
+            .font(.subheadline.weight(.bold))
+            .monospacedDigit()
+            .foregroundStyle(Color.primary)
+            .lineLimit(1)
+            .fixedSize()
+    }
+
+    private var strokeColor: Color {
+        scheme == .dark ? Color.white.opacity(0.07) : Color.black.opacity(0.04)
+    }
+
+    private var shadowColor: Color {
+        scheme == .dark ? Color.black.opacity(0.3) : Color(tb: 0x1E3A6E, 0.07)
     }
 }
 

@@ -24,6 +24,10 @@ import AppIntents
 //   關＝類別字（WidgetBill.lockedTitle：「10/15 訂閱服務」）。金額照「隱藏金額」總開關，不另設。
 // • 已花沒有設定，照舊 StaticConfiguration。
 //
+// [財富 v4] v25.565（wealth/judge.md §7.1；build/v4/brief.md G2-12）：「下一筆要繳」碰到卡費、交割
+// （WidgetBillKind.isWealth）——不管「顯示名稱」開不開，一律只寫類別字（WidgetBill.lockedTitle「卡費」「交割」）、
+// 不寫金額（連 mask 也不放）：「10/27 卡費」／「8 天後・之後還有 4 件」。卡名、金額、號碼都不上鎖定畫面。
+//
 // 型別（internal 的帶 LockSpent／LockNextStop／LockNextBill 前綴；畫面零件 private）：
 //   LockSpentWidget、LockSpentEntry、LockSpentProvider、LockSpentEntryView
 //   LockNextStopWidget、LockNextStopEntry、LockNextStopProvider、LockNextStopEntryView
@@ -597,11 +601,12 @@ struct LockNextBillProvider: AppIntentTimelineProvider {
 }
 
 /// 「下一筆要繳」／「10/15 Netflix NT$390」／「2 天後・之後還有 5 件」
+/// [財富 v4] 卡費、交割：「10/27 卡費」（不寫卡名、金額）／「8 天後・之後還有 4 件」
 private struct LockNextBillModel {
     var header = "下一筆要繳"
     /// 「10/15 Netflix」（太長時縮這一段）
     var main = ""
-    /// 「NT$390」；隱藏金額時 mask；沒有下一筆是空字串
+    /// 「NT$390」；隱藏金額時 mask；沒有下一筆是空字串。[財富 v4] 卡費、交割也是空字串（不畫）
     var amount = ""
     var foot = ""
     var url: URL = WidgetLink.fixedExpenses
@@ -624,9 +629,11 @@ private struct LockNextBillModel {
         }
         let list = snap.upcoming(at: now)
         let due: String = WidgetDateText.dueText(bill.dueDate, from: now, isIncome: bill.isIncome) ?? ""
-        let name: String = showsName ? bill.title : bill.lockedTitle
+        // [財富 v4] 卡費、交割：只寫類別字、不寫金額（不管「顯示名稱」、「隱藏金額」開不開）
+        let wealth: Bool = bill.kind.isWealth
+        let name: String = (showsName && !wealth) ? bill.title : bill.lockedTitle
         model.main = WidgetDateText.shortDate(bill.dueDate) + " " + name
-        model.amount = hidden ? WidgetHideAmounts.mask : bill.amountText
+        model.amount = wealth ? "" : (hidden ? WidgetHideAmounts.mask : bill.amountText)
         // 30 天內還有別的才寫「之後還有 N 件」；30 天外才有下一筆時只寫幾天後
         if list.count > 1 {
             model.foot = due + "・之後還有 \(list.count - 1) 件"

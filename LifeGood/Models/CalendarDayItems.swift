@@ -13,6 +13,11 @@ import EventKit
 //    差別只有：這裡只收「全天的」（有時間的個人事件、系統行事曆事件在 TodayAgenda 的時間軸上）。
 //    [健康 v7b] 我的行事曆多列那一天的運動（eventsOn 的 .workout，有開始時間、不是全天的事），這裡照規則不收；
 //    「今天（大）」的運動另外一行（life 快照的 workout，WorkoutFacts.widgetWorkoutDays）。
+//    [v25.565 財富 v4] 跟我的行事曆一起多收財富的日子（WealthDates.items(on:facts:)，Models/WealthReminders.swift）：
+//    卡費截止／扣款（每張卡接下來 2 期）、交割、卡片到期，kind .wealth（priority 同里程碑）。
+//    **主畫面不寫金額**（widgetTitle「CUBE 卡費截止」「元大證券 交割」），鎖定畫面／StandBy 只寫類別字（lockTitle「卡費」「交割」
+//    「卡片到期」；judge §7.1）；財富帳戶的開戶日也改 kind .wealth、lockTitle「財富」（不當里程碑）。不送 Apple 行事曆。
+//    規則同 MyCalendarView.eventsOn 的財富那兩段，改一邊改另一邊。
 //
 // 規格見 scratchpad/widgets/v1/brief.md 的 G1。
 
@@ -21,7 +26,7 @@ import EventKit
 enum CalendarDayItems {
 
     /// 那一天的全天的事，已依 WidgetAllDayKind.priority 排好（同優先序保持原本順序）。
-    /// 原本順序＝eventsOn 收集的順序：家人（生日、結婚紀念日）→ 里程碑 → 兼任職務 → 系統行事曆 → 個人事件。
+    /// 原本順序＝eventsOn 收集的順序：家人（生日、結婚紀念日）→ 里程碑 → [財富 v4] 財富的日子 → 兼任職務 → 系統行事曆 → 個人事件。
     static func allDay(on day: Date, store: LifeStore, calendar cal: Calendar = .current) -> [WidgetAllDayItem] {
         var items: [WidgetAllDayItem] = []
         let year = cal.component(.year, from: day)
@@ -39,6 +44,17 @@ enum CalendarDayItems {
         // 人生里程碑（精準日期）
         for ms in store.milestones where cal.isDate(ms.date, inSameDayAs: day) {
             let raw = ms.title.trimmingCharacters(in: .whitespacesAndNewlines)
+            if WealthDates.isWealthAccount(ms) {
+                // [財富 v4] 財富帳戶的開戶日／核卡日：照舊列（第 9 題），但當「財富」不當里程碑；鎖定畫面只寫「財富」
+                let wealthTitle = raw.isEmpty ? "財富" : ms.title
+                items.append(WidgetAllDayItem(id: "ms-\(ms.id.uuidString)",
+                                              kind: .wealth,
+                                              title: wealthTitle,
+                                              shortTitle: wealthTitle,
+                                              lockTitle: "財富",
+                                              icon: "banknote.fill"))
+                continue
+            }
             // 我的行事曆照樣寫 ms.title；這裡多一層：標題空白時退到分類，膠囊才不會是空的
             let title = raw.isEmpty ? ms.category.rawValue : ms.title
             items.append(WidgetAllDayItem(id: "ms-\(ms.id.uuidString)",
@@ -48,6 +64,10 @@ enum CalendarDayItems {
                                           lockTitle: "里程碑",
                                           icon: "flag.fill"))
         }
+
+        // [財富 v4] 財富的日子：卡費截止／扣款（每張卡 2 期）、交割、卡片到期（WealthDates，只讀 wealthFacts 那一份）。
+        // 主畫面寫 widgetTitle（卡名＋類別，**不寫金額**）；鎖定畫面／StandBy 寫 lockTitle（類別字）
+        items.append(contentsOf: wealthItems(on: day, store: store))
 
         // 兼任職務的「重要日期」（尾牙的場勘日、彩排日等）與卸任日
         items.append(contentsOf: sideRoleItems(on: day, store: store, calendar: cal))
@@ -138,6 +158,21 @@ enum CalendarDayItems {
                                             lockTitle: "兼任職務",
                                             icon: "flag.fill"))
             }
+        }
+        return out
+    }
+
+    /// [財富 v4] 那一天的財富日子（同 MyCalendarView.eventsOn 的財富那段；記帳、理財用 AppStores 那一份）
+    private static func wealthItems(on day: Date, store: LifeStore) -> [WidgetAllDayItem] {
+        let facts = store.wealthFacts(expense: AppStores.expense, finance: AppStores.finance)
+        var out: [WidgetAllDayItem] = []
+        for w in WealthDates.items(on: day, facts: facts) {
+            out.append(WidgetAllDayItem(id: w.id,
+                                        kind: .wealth,
+                                        title: w.widgetTitle,
+                                        shortTitle: w.widgetTitle,
+                                        lockTitle: w.lockTitle,
+                                        icon: w.icon))
         }
         return out
     }

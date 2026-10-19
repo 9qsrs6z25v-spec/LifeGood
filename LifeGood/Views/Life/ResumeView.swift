@@ -93,10 +93,14 @@ struct HolographicWatermark: View {
 //      對齊 OverviewView.summaryCard 的內嵌資訊排版語言。
 //   4. 散景裝飾圓：在卡片右上 + 左下加入兩顆白色高亮 blur 圓，增加卡片立體層次，
 //      對齊 FinanceOverviewView.totalAssetsCard / OverviewView.monthlyBalanceCard 設計規格。
+// [v25.565] 財富 v4（judge §6.4；build/v4/brief.md G1-13）：「總資產」改「淨資產」，數字跟理財總覽同一個
+//   （人生總覽在 .task 裡算 FinanceSnapshot.current(...).netWorth 傳進來：含存款、扣貸款與卡費、交割）。
+//   以前讀 FinanceStore.totalAssets（另一套：不扣貸款、儲蓄險用存檔那天的舊值）。還沒算好是 nil，寫「—」。
 
 struct ProfileFlashCard: View {
     let profile: UserProfile
-    let totalAssets: Double
+    /// [v25.565] 淨資產（名字沿用 totalAssets 少動呼叫端）；nil＝還在算，寫「—」
+    let totalAssets: Double?
     let spouse: FamilyMember?
     let onEdit: () -> Void
 
@@ -152,7 +156,7 @@ struct ProfileFlashCard: View {
                         .minimumScaleFactor(0.52)
                         .lineLimit(1)
                         .contentTransition(.numericText())
-                    Text("總資產")
+                    Text("淨資產")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.white.opacity(0.58))
                         .padding(.horizontal, 10).padding(.vertical, 3)
@@ -233,7 +237,9 @@ struct ProfileFlashCard: View {
     }
 
     // 億量級格式：≥1億 → "X.X 億"，≥1萬 → "X.X 萬"，其餘 → "NT$X"
-    private func fmtAssets(_ v: Double) -> String {
+    // [v25.565] 收 Double?：nil（淨資產還在算）寫「—」；負的照樣帶負號
+    private func fmtAssets(_ value: Double?) -> String {
+        guard let v = value else { return "—" }
         let absV = abs(v)
         if absV >= 100_000_000 {
             return String(format: "%.1f 億", v / 100_000_000)

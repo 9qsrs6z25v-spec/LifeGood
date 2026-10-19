@@ -14,6 +14,11 @@ import SwiftUI
 // 數字一律讀 lifeStore.wealthFacts（打開表單時抓一次存進 @State，打字不重算，judge §4.5）。
 //
 // 分工：G3 實作（這個檔＋ResumeView、MyCalendarView、AddExpenseView）。主控放的入口簽章不改（G1、G2 在叫）。
+//
+// [v25.565] 財富 v4（build/v4/brief.md §G4-6、§G4-7）：
+// • 要確認 #12〔看綁了哪些〕（WealthCheck.Fix.openCard）：WealthChecksSection(onOpenCard:) 交給呼叫端（財富頁開卡片頁、卡片頁捲到
+//   定期扣款）；沒給就自己開 WealthFormSheet.card（WealthCardPage 捲到 .recurring）。看卡片頁不擋訂閱。
+// • 信用卡表單「提醒我繳卡費」：WealthCardPrefs.remind（v2 留好的欄位；開＝存 nil、關＝存 false）。通知不寫卡名、金額、號碼。
 
 /// 表單的類型（開了就鎖住）
 enum WealthAccountKind: String, CaseIterable, Identifiable {
@@ -127,6 +132,8 @@ struct WealthAccountForm {
     // 信用卡
     var cardName = ""
     var faceColor = 0
+    /// [v25.565] 提醒我繳卡費（帳本 WealthCardPrefs.remind：nil／true＝提醒、false＝這張不提醒；沒設過＝開）
+    var remind = true
     /// 1–31；0＝沒填
     var billingDay = 0
     var paymentDay = 0
@@ -261,6 +268,7 @@ extension WealthAccountForm {
         name = m.bankName ?? ""
         cardName = m.cardName ?? ""
         faceColor = cp.faceColor ?? WealthFacts.defaultFaceColor(m.id)
+        remind = cp.remind != false
         if let b = m.billingDay { billingDay = Swift.min(Swift.max(b, 1), 31) }
         if let p = m.paymentDay { paymentDay = Swift.min(Swift.max(p, 1), 31) }
         if let l = m.creditLimit, l > 0 { limitText = WealthFormat.grouped(l, decimals: 0) }
@@ -388,6 +396,8 @@ extension WealthAccountForm {
         var c = base
         if c.mode != payMode { c.setMode(payMode, now: now) }
         c.faceColor = faceColor
+        // [v25.565] 開＝存 nil（跟沒設過一樣）、關＝存 false（WealthReminders 只看 != false）
+        c.remind = remind ? nil : false
         c.perksNote = Self.trimmed(perks)
         c.feeWaiveAmount = WealthFormText.number(waiveAmountText).flatMap { $0 > 0 ? $0 : nil }
         let count: Int? = Int(waiveCountText.trimmingCharacters(in: .whitespaces))
@@ -874,6 +884,7 @@ struct WealthAccountEditor: View {
         }
         cardBillSection
         payModeSection
+        remindSection
         cardVaultSection
         cardFeeSection
         Section {
@@ -988,6 +999,21 @@ struct WealthAccountEditor: View {
             return "過了截止日不當作已繳，在要確認問你繳了沒；還沒繳就算逾期。"
         }
     }
+
+    /// [v25.565] 提醒我繳卡費（WealthCardPrefs.remind；通知由 WealthReminders 排，不寫卡名、金額、號碼）
+    private var remindSection: some View {
+        Section {
+            Toggle("提醒我繳卡費", isOn: $f.remind)
+        } header: {
+            WealthFormHeader(title: "提醒", icon: "bell.badge.fill", color: .orange)
+        } footer: {
+            Text(Self.remindFootnote)
+        }
+    }
+
+    static let remindFootnote =
+        "截止前 3 天、當天早上 9 點；自動扣的卡只在可能不夠扣時提醒。通知不寫卡名和金額。"
+        + "設定裡的「財富提醒」關掉就全部不提醒。"
 
     private var payFromPicker: some View {
         Picker(f.payMode.isAuto ? "扣款帳戶" : "通常從", selection: $f.payFrom) {
@@ -1918,6 +1944,8 @@ enum WealthFormSheet: Identifiable {
     case anchor(accountId: UUID, code: String)
     case rates
     case expense(token: UUID, preset: AddExpensePreset)
+    /// [v25.565] 要確認 #12〔看綁了哪些〕：那張卡的卡片頁、捲到綁在這張卡的定期扣款
+    case card(UUID)
 
     var id: String {
         switch self {
@@ -1935,6 +1963,8 @@ enum WealthFormSheet: Identifiable {
             return "rates"
         case .expense(let token, _):
             return "expense-" + token.uuidString
+        case .card(let c):
+            return "card-" + c.uuidString
         }
     }
 
@@ -1957,6 +1987,9 @@ enum WealthFormSheet: Identifiable {
             // 記帳表單外面包布幕（切到背景蓋住；它疊在財富表單上）
             return AnyView(AddExpenseView(expenseType: .variable, preset: p)
                 .modifier(WealthPrivacyCurtain(armed: true)))
+        case .card(let c):
+            // 卡片頁自己掛布幕（WealthCardPage.body）
+            return AnyView(WealthCardPage(accountId: c, scrollTo: .recurring))
         }
     }
 }
@@ -3585,6 +3618,9 @@ struct WealthCheckAskDialog: ViewModifier {
 struct WealthChecksSection: View {
     let checks: [WealthCheck]
     var limit: Int? = 3
+    /// [v25.565] #12〔看綁了哪些〕（WealthCheck.Fix.openCard）交給呼叫端：財富頁開那張卡的卡片頁、卡片頁自己捲到定期扣款。
+    /// nil＝這裡自己開一張卡片頁（WealthFormSheet.card，捲到定期扣款）
+    var onOpenCard: ((UUID) -> Void)? = nil
 
     @EnvironmentObject var lifeStore: LifeStore
     @EnvironmentObject var expenseStore: ExpenseStore
@@ -3696,6 +3732,18 @@ struct WealthChecksSection: View {
         case .anchor(let accountId, let code):
             guard subscription.isPremium else { showPremium = true; return }
             sheet = .anchor(accountId: accountId, code: code)
+        case .openCard(let cardId):
+            // [v25.565] #12〔看綁了哪些〕：看卡片頁不擋訂閱（改綁定要到記帳改，那邊自己擋）
+            openCard(cardId)
+        }
+    }
+
+    /// [v25.565] 打開那張卡、捲到綁在這張卡的定期扣款：呼叫端有給就交給它，不然這裡自己開一張
+    private func openCard(_ id: UUID) {
+        if let handler = onOpenCard {
+            handler(id)
+        } else {
+            sheet = .card(id)
         }
     }
 

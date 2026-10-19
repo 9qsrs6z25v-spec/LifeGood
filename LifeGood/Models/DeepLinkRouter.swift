@@ -26,6 +26,8 @@ final class DeepLinkRouter: ObservableObject {
 
     /// [v25.455] 部屬會議提醒通知的 userInfo 鍵。點通知要知道是哪一場會議。
     static let meetingNotificationKey = "meeting_id"
+    /// [財富 v4] 財富提醒通知（WealthReminders）的 userInfo 鍵：點了開哪一張卡／哪一個帳戶（UUID 字串）
+    static let wealthNotificationKey = "wealth_account_id"
 
     /// 靈動島點進來要打開哪一筆行程的卡片（場次 id，格式見 DayTimelineLink）
     @Published private(set) var pendingTimelineStopId: String?
@@ -109,6 +111,13 @@ final class DeepLinkRouter: ObservableObject {
     /// [v4] 股票頁取走「打開這一檔」（股票今天小工具）
     func takeStock() -> UUID? {
         guard case .stock(let id)? = pendingItem else { return nil }
+        pendingItem = nil
+        return id
+    }
+
+    /// [財富 v4] 財富頁取走「打開這張卡／這個帳戶」（小工具卡費、交割列；財富提醒通知）
+    func takeWealthAccount() -> UUID? {
+        guard case .wealthAccount(let id)? = pendingItem else { return nil }
         pendingItem = nil
         return id
     }
@@ -253,6 +262,8 @@ enum DeepLinkItem: Equatable {
     case stock(UUID)
     /// [v5] 部屬今天點任務列：部屬總覽打開那件任務的預覽卡片（SubordinateItemCard）
     case subordinateTask(subId: UUID, taskId: UUID)
+    /// [財富 v4] 財富頁打開那張卡／那個帳戶的卡片頁（WealthCardPage）：小工具「接下來要繳」的卡費、交割列、財富提醒通知
+    case wealthAccount(UUID)
 }
 
 /// [v2] 列表頁收「打開這一筆」的兩個時機：冷啟動時網址比這一頁先到（onAppear）、
@@ -454,6 +465,13 @@ enum AppNavigation {
         d.set(ManagementFeature.overview.rawValue, forKey: "management_feature")
     }
 
+    /// [財富 v4] 理財「存款」明信片、小工具卡費／交割列、財富提醒通知 → 人生 › 財富（鍵名照 goToHealth）
+    static func goToWealth() {
+        let d = UserDefaults.standard
+        d.set(AppMode.life.rawValue, forKey: "appMode")
+        d.set(LifeFeature.finance.rawValue, forKey: "life_feature")
+    }
+
     /// [健康 v7] 跑步即時動態 → 人生 › 健康（鍵名照 goToTravelMap）
     static func goToHealth() {
         let d = UserDefaults.standard
@@ -593,6 +611,7 @@ extension WidgetLink {
     /// [健康 v7] - lifegood://life/health/run…：切到人生 › 健康，請健康頁打開跑步畫面（換 routeToken：停在設定頁也會先關掉）
     ///           （[健康 v7b] 控制項「開始跑步」也是這個網址）
     /// [健康 v7b] - lifegood://life/health?id=…：切到人生 › 健康；帶 id 就請健康頁打開那一趟的成果頁（找不到就停在健康頁）
+    /// [財富 v4] - lifegood://life/wealth?id=…：切到人生 › 財富；帶 id 就請財富頁打開那張卡／那個帳戶（找不到就停在財富頁）
     @discardableResult
     static func apply(_ url: URL, store: LifeStore) -> Bool {
         guard let route = parse(url) else { return false }
@@ -672,6 +691,10 @@ extension WidgetLink {
         case .health(let id):
             AppNavigation.goToHealth()
             if let id { router.requestHealthSession(id) }
+            return true
+        case .wealth(let id):
+            AppNavigation.goToWealth()
+            if let id { router.requestItem(.wealthAccount(id)) }
             return true
         }
     }
