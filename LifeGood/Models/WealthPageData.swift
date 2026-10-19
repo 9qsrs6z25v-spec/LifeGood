@@ -517,9 +517,10 @@ private struct WealthLineBuilder {
         self.masked = masked
     }
 
+    /// 念的時候「・」換成「，」（VoiceOver 照 judge §3.1 那句：「…還沒扣，扣完活存能用…」）
     mutating func text(_ s: String) {
         runs.append(FinanceRun(text: s))
-        spoken += s
+        spoken += s.replacingOccurrences(of: "・", with: "，")
     }
 
     /// 金額：shown 是畫面上的字（「4.8萬」「18,600」）；遮住時「••••」、念「金額已遮住」
@@ -530,6 +531,17 @@ private struct WealthLineBuilder {
         } else {
             runs.append(FinanceRun(text: shown, bold: true, tone: tone))
             spoken += WealthPageText.spoken(v)
+        }
+    }
+
+    /// 不換台幣念的金額（外幣入帳「美金 3,200.00」）：遮住時一樣「••••」
+    mutating func raw(_ shown: String, spoken said: String) {
+        if masked {
+            runs.append(FinanceRun(text: WealthPageText.dots, bold: true))
+            spoken += "金額已遮住"
+        } else {
+            runs.append(FinanceRun(text: shown, bold: true))
+            spoken += said
         }
     }
 
@@ -574,7 +586,8 @@ extension WealthPageText {
             label = "存款合計（存摺上）"
             big = masked ? WealthFormat.masked : facts.cashText
             if facts.cash < -0.5 { bigTone = .bad }
-            bigSpoken = "存款合計 " + (masked ? "金額已遮住" : (facts.cashIsApprox ? "約 " : "") + spoken(facts.cash))
+            let approx: String = facts.cashIsApprox ? "約 " : ""
+            bigSpoken = masked ? "存款合計 金額已遮住" : "存款合計 \(approx)\(spoken(facts.cash))"
             greeting = normalLine(&b, facts: facts, banks: banks, cards: cards, today: today)
         }
 
@@ -618,7 +631,7 @@ extension WealthPageText {
         // 有逾期：「10/27 的 CUBE 帳單 18,600 還沒繳」
         if let c = cards.first(where: { $0.overdue > 0.5 }) {
             let due = c.dueStatement?.due ?? today
-            b.text(md(due) + " 的 " + c.name + " 帳單 ")
+            b.text("\(md(due)) 的 \(c.name) 帳單 ")
             b.money(c.overdue, shown: WealthFormat.grouped(c.overdue.rounded(), decimals: 0))
             b.text(" 還沒繳")
             return ["Pay", "today!"]
@@ -630,9 +643,8 @@ extension WealthPageText {
                 b.money(pay.row.amount, shown: "+" + WealthFormat.plain(pay.row.amount, code: pay.row.code))
             } else {
                 // 外幣入帳：念的時候照原幣寫（不換台幣）
-                b.runs.append(FinanceRun(text: b.masked ? dots : "+" + WealthFormat.plain(pay.row.amount, code: pay.row.code),
-                                         bold: true))
-                b.spoken += b.masked ? "金額已遮住" : WealthFormat.plain(pay.row.amount, code: pay.row.code)
+                let plain = WealthFormat.plain(pay.row.amount, code: pay.row.code)
+                b.raw("+" + plain, spoken: plain)
             }
             b.text(" 進" + pay.name + "了")
             if facts.owedCards > 0.5 {
@@ -646,8 +658,8 @@ extension WealthPageText {
             b.text(facts.unknownCodes.joined(separator: "、") + "沒有匯率，先不算進合計")
             return ["Cash", "flows!"]
         }
-        // 要繳都 0（有卡）
-        if !cards.isEmpty, cards.allSatisfy({ $0.due < 0.5 }) {
+        // 要繳都 0（有沒停用的卡；只剩停用的卡不算「都繳了」）
+        if cards.contains(where: { !$0.isDisabled }), cards.allSatisfy({ $0.due < 0.5 }) {
             allPaidLine(&b, facts: facts)
             return ["All", "covered!"]
         }
@@ -728,9 +740,10 @@ extension WealthPageText {
         if let first = shorts.first {
             let a = first.0
             let s = first.1
-            let text = masked ? "\(md(s.date)) \(a.name)不夠扣"
-                              : "\(md(s.date)) \(a.name)差 \(WealthFormat.plain(s.short, code: s.code))"
-            let say = "\(spokenDate(s.date)) \(a.name)不夠扣" + (masked ? "" : "，差 " + spokenShort(s))
+            let head = "\(md(s.date)) \(a.name)"
+            let text: String = masked ? "\(head)不夠扣" : "\(head)差 \(WealthFormat.plain(s.short, code: s.code))"
+            var say = "\(spokenDate(s.date)) \(a.name)不夠扣"
+            if !masked { say += "，差 \(spokenShort(s))" }
             return WealthCapsulePick(text: text, icon: "exclamationmark.triangle", tone: .warn, spoken: say)
         }
         // ② 逾期
@@ -800,9 +813,16 @@ extension WealthPageText {
                                                dashed: true)
             return WealthTowerScene(towers: [empty, empty, empty], cards: [])
         }
-        // 塔：前 5 座照頁面順序，第 6 個起併成一座
-        let shown = Array(banks.prefix(5))
-        let rest = Array(banks.dropFirst(5))
+        // 塔：前 5 座照頁面順序，第 6 個起併成一座。有卡沒設從哪扣（或扣款帳戶收起來了）要多補一座灰色空塔：
+        // 那時只放 4 座＋併塔，整排最多 6 座（G4 照 6 座排塔寬）
+        let bankIds = Set(banks.map(\.id))
+        let needsEmpty = cards.contains { c in
+            guard let p = c.payerId else { return true }
+            return !bankIds.contains(p)
+        }
+        let limit = (needsEmpty && banks.count > 5) ? 4 : 5
+        let shown = Array(banks.prefix(limit))
+        let rest = Array(banks.dropFirst(limit))
         var totals: [Double] = shown.map(\.ntdTotal)
         if !rest.isEmpty { totals.append(rest.reduce(0) { $0 + $1.ntdTotal }) }
         let top = totals.map { Swift.max(0, $0) }.max() ?? 0
@@ -901,10 +921,13 @@ extension WealthPageText {
         var legend: [WealthPageLegend] = []
         var said: [String] = []
         for p in parts {
-            let amount = masked ? dots : (p.approx ? "約" : "") + wan(p.value)
-            legend.append(WealthPageLegend(id: p.id, theme: p.theme, text: p.name + " " + amount))
-            let pct = total > 0 ? Int((p.value / total * 100).rounded()) : 0
-            said.append(p.name + " \(pct)%" + (masked ? "" : "，" + (p.approx ? "約 " : "") + spoken(p.value)))
+            let approx: String = p.approx ? "約" : ""
+            let amount: String = masked ? dots : "\(approx)\(wan(p.value))"
+            legend.append(WealthPageLegend(id: p.id, theme: p.theme, text: "\(p.name) \(amount)"))
+            let pct: Int = total > 0 ? Int((p.value / total * 100).rounded()) : 0
+            var one = "\(p.name) \(pct)%"
+            if !masked { one += "，\(approx)\(spoken(p.value))" }
+            said.append(one)
         }
         return WealthPageRibbon(segments: segments, legend: legend,
                                 accessibilityText: "存款組成：" + said.joined(separator: "；"))
@@ -1009,13 +1032,13 @@ extension WealthPageText {
         }.sorted { $0.1.date < $1.1.date }
         var value: String
         var tone: MoneyTone? = nil
-        var detail: String
+        let detail: String
         if let first = shorts.first {
             let a = first.0
             let s = first.1
             value = "差 " + WealthFormat.money(s.short, code: s.code)
             tone = .warn
-            detail = a.name + "・" + md(s.date) + " " + shortName(s) + "前"
+            detail = "\(a.name)・\(md(s.date)) \(shortName(s))前"
             if masked { value = "差 " + WealthFormat.masked }
         } else {
             let lows = banks.compactMap { a -> (WealthFacts.Account, Double)? in
@@ -1036,8 +1059,10 @@ extension WealthPageText {
             }
             if masked { value = WealthFormat.masked }
         }
+        // ③ 不出現（30 天內都沒有進出）就捲到 ⑤
+        let target: WealthPageAnchor = banks.contains(where: { !$0.next30.isEmpty }) ? .upcoming : .banks
         return WealthPageTile(kind: .lowest, icon: "drop.fill", tint: .blue, label: "30 天內最低", value: value,
-                              valueTone: tone, detail: detail, accent: nil, accentTone: .neutral, target: .upcoming)
+                              valueTone: tone, detail: detail, accent: nil, accentTone: .neutral, target: target)
     }
 
     /// 「房貸扣款・11/5 房貸後」（最低那天最後一筆的短名＋「後」）；最低就是今天「房貸扣款・今天」
@@ -1045,7 +1070,7 @@ extension WealthPageText {
         guard let d = a.lowestDate, WealthCal.day(d) > today else { return a.name + "・今天" }
         let day = WealthCal.day(d)
         if let last = a.next30.last(where: { WealthCal.day($0.date) == day }) {
-            return a.name + "・" + md(d) + " " + shortName(last, facts: facts) + "後"
+            return "\(a.name)・\(md(d)) \(shortName(last, facts: facts))後"
         }
         return a.name + "・" + md(d)
     }
@@ -1080,7 +1105,7 @@ extension WealthPageText {
                                     masked: Bool) -> WealthPageUpcomingRow {
         let bank: String? = a.nickname == nil ? nil : "（" + bankShort(a.bankName) + "）"
         let low = a.lowestNTD ?? a.ntdTotal
-        let lowest = "最低 " + (masked ? dots : "約 " + wan(low))
+        let lowest: String = masked ? "最低 \(dots)" : "最低 約 \(wan(low))"
         let badge: String
         let tone: MoneyTone
         var said: String
@@ -1089,9 +1114,10 @@ extension WealthPageText {
             tone = .bad
             said = "現在是負的"
         } else if let s = a.shortage {
-            badge = masked ? "不夠扣" : "差 " + WealthFormat.plain(s.short, code: s.code)
+            badge = masked ? "不夠扣" : "差 \(WealthFormat.plain(s.short, code: s.code))"
             tone = .warn
-            said = "\(spokenDate(s.date))不夠扣" + (masked ? "" : "，差 " + spokenShort(s))
+            said = "\(spokenDate(s.date))不夠扣"
+            if !masked { said += "，差 \(spokenShort(s))" }
         } else {
             badge = "✓ 夠扣"
             tone = .good
@@ -1104,9 +1130,10 @@ extension WealthPageText {
             return masked ? head : head + " " + signed(row)
         }
         let detail = pieces.joined(separator: "・")
-        let lowSaid = masked ? "金額已遮住" : "約 " + spoken(low)
-        said = a.name + (bank.map { "，" + bankShort(a.bankName) } ?? "") + "，30 天內最低 " + lowSaid + "，" + said
-            + "。" + detail
+        let lowSaid: String = masked ? "金額已遮住" : "約 \(spoken(low))"
+        var who: String = a.name
+        if bank != nil { who += "，\(bankShort(a.bankName))" }
+        said = "\(who)，30 天內最低 \(lowSaid)，\(said)。\(detail)"
         return WealthPageUpcomingRow(id: a.id, name: a.name, bank: bank, lowest: lowest, badge: badge, badgeTone: tone,
                                      detail: detail, accessibilityText: said)
     }
@@ -1150,8 +1177,9 @@ extension WealthPageText {
         let detail = a.name + "・扣完剩 " + (masked ? dots : after)
         let amount = masked ? dots : signed(row)
         let negative = row.balanceAfter < -0.5
-        let said = spokenDate(row.date) + "，" + row.title + "，" + a.name + "，"
-            + (masked ? "金額已遮住" : signed(row) + "，扣完剩 " + after) + (negative ? "，會不夠扣" : "")
+        var said = "\(spokenDate(row.date))，\(row.title)，\(a.name)，"
+        said += masked ? "金額已遮住" : "\(signed(row))，扣完剩 \(after)"
+        if negative { said += "，會不夠扣" }
         return WealthPageUpcomingItem(id: a.id.uuidString + "|" + row.id, day: "\(c.day ?? 0)",
                                       month: "\(c.month ?? 0)月", glyph: glyph, mark: mark, title: row.title,
                                       detail: detail, amount: amount, negative: negative, accessibilityText: said)
@@ -1233,7 +1261,9 @@ extension WealthPageText {
                 }
             }
             let detail: String? = parts.isEmpty ? nil : parts.joined(separator: "・")
-            let said = title + (amountSaid.isEmpty ? "" : "，" + amountSaid) + (detail.map { "，" + $0 } ?? "")
+            var said: String = title
+            if !amountSaid.isEmpty { said += "，\(amountSaid)" }
+            if let d = detail { said += "，\(d)" }
             rows.append(WealthPagePolicyRow(id: m.id, icon: policyIcon(kind), title: title, amount: amount, unit: unit,
                                             detail: detail, accessibilityText: said))
         }
@@ -1304,7 +1334,7 @@ extension WealthPageText {
                 runs.append(FinanceRun(text: "外幣用設定裡的匯率（" + list + "），"))
                 runs.append(FinanceRun(text: "匯率是 " + md(at) + " 的。", bold: true, tone: .warn))
             } else {
-                runs.append(FinanceRun(text: "外幣用設定裡的匯率（" + list + "，" + md(at) + "）。"))
+                runs.append(FinanceRun(text: "外幣用設定裡的匯率（\(list)，\(md(at))）。"))
             }
         } else {
             runs.append(FinanceRun(text: "外幣用設定裡的匯率（" + list + "）。"))

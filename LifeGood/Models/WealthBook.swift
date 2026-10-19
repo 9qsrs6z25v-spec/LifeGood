@@ -370,11 +370,13 @@ struct WealthCardPrefs: Codable, Equatable {
     /// [v25.564] 卡費怎麼繳（沒設＝自動扣全額，跟 v2 一樣）
     var mode: WealthPayMode { WealthPayMode.of(payMode) }
 
-    /// [v25.564] 改卡費怎麼繳：改成「自己繳」或「每次問我」時，從今天起才追（改版前、改之前的帳單一律當作繳了，
-    /// judge §3.13 C-4；不會一打開跳出幾十張「繳了嗎」）。trackFrom 已經有就不動
+    /// [v25.564] 改卡費怎麼繳：改成「自動扣最低」「自己繳」或「每次問我」時，從今天起才追（改版前、改之前的帳單一律當作繳了，
+    /// judge §3.13 C-4；不會一打開跳出幾十張「繳了嗎」）。trackFrom 已經有就不動。
+    /// 自動扣最低也要設：不然改的那天以前每一期都會重算成「只扣 10%、剩下的滾到下一期」，存摺上、還沒出帳整個變掉
+    ///（驗證 build/v3/verify/data_edges.py G）
     mutating func setMode(_ m: WealthPayMode, now: Date) {
         payMode = m == .autoFull ? nil : m.rawValue
-        if (m == .manual || m == .askEachTime) && trackFrom == nil {
+        if m != .autoFull && trackFrom == nil {
             trackFrom = WealthCal.day(now)
         }
     }

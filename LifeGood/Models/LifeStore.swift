@@ -699,10 +699,15 @@ class LifeStore: ObservableObject {
             let statements = WealthFacts.cardStatements(for: target, milestones: milestones, book: wealthBook,
                                                         expenses: expense.expenses, rates: FinanceRates(expense),
                                                         now: now)
-            // [v25.564] 已繳的照「那天從哪個帳戶扣多少」（你標的、自動扣最低只扣一部分）；還沒繳的照截止日從扣款帳戶扣全額
+            // [v25.564] 已繳的照「那天從哪個帳戶扣多少」（你標的、自動扣最低只扣一部分）；還沒繳的照截止日從扣款帳戶扣全額。
+            // 逾期的、自己繳截止日當天還沒標的：錢還沒離開帳戶（WealthFacts.billRef 算明天），寫成截止日會讓今天的存摺上先少一筆
+            //（驗證 build/v3/verify/data_edges.py A、B），所以寫明天
+            let today = WealthCal.day(now)
+            let tomorrow = WealthCal.addDays(1, to: today)
             for s in statements where s.amount > 0.004 {
                 let account: UUID? = s.isPaid ? s.paidFrom : s.payerId
-                let day: Date = s.isPaid ? (s.paidOn ?? s.due) : s.due
+                let unpaidDay: Date = WealthCal.day(s.due) > today ? s.due : tomorrow
+                let day: Date = s.isPaid ? (s.paidOn ?? s.due) : unpaidDay
                 let amount: Double = s.isPaid ? s.paidAmount : s.amount
                 guard amount > 0.004, let payer = account,
                       let bi = list.firstIndex(where: { $0.id == payer }) else { continue }

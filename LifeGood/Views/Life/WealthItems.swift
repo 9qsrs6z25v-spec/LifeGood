@@ -2,7 +2,7 @@ import SwiftUI
 
 // MARK: - 財富頁的項目卡（v25.564，財富 v3；wealth/judge.md §3.7–3.11）
 //
-// 照 MoneyItem.vehicle（FinanceItems.swift）：extension MoneyItem { static func wealthCard／wealthBank／wealthBroker／wealthPolicy }，
+// 照 MoneyItem.vehicle（FinanceItems.swift）：extension MoneyItem { static func wealthCard／wealthBank／wealthBroker }（保單 v3 是白卡一列，不是項目卡），
 // 一筆要寫什麼字全在工廠函式；信用卡的卡面走 MoneyItem.cardFace（WealthCardFacePanel，G4 畫），銀行、證券戶走 MoneyArtTheme 71–76。
 //
 // 分工：G1 實作。主控只開檔。
@@ -163,8 +163,9 @@ extension MoneyItem {
             item.amount = WealthFormat.ntd(c.due)
             item.unit = "要繳"
             if c.unbilled > 0.5 {
-                chips.append(MoneyItemChip(icon: "hourglass",
-                                           text: "還沒出帳 " + (masked ? WealthPageText.dots : WealthFormat.grouped(c.unbilled.rounded(), decimals: 0))))
+                let unbilledText: String = masked ? WealthPageText.dots
+                                                  : WealthFormat.grouped(c.unbilled.rounded(), decimals: 0)
+                chips.append(MoneyItemChip(icon: "hourglass", text: "還沒出帳 \(unbilledText)"))
             }
         } else if c.unbilled > 0.5 {
             item.amount = WealthFormat.ntd(c.unbilled)
@@ -175,8 +176,8 @@ extension MoneyItem {
             chips.append(MoneyItemChip(icon: "moon.zzz.fill", text: "這期還沒刷"))
         }
         if let a = c.available {
-            chips.append(MoneyItemChip(icon: "gauge.with.dots.needle.33percent",
-                                       text: "還能刷 " + (masked ? WealthPageText.dots : WealthPageText.wan(a))))
+            let availableText: String = masked ? WealthPageText.dots : WealthPageText.wan(a)
+            chips.append(MoneyItemChip(icon: "gauge.with.dots.needle.33percent", text: "還能刷 \(availableText)"))
         }
         item.chips = Array(chips.prefix(2))
         if masked { item.amount = WealthFormat.masked }
@@ -216,16 +217,16 @@ extension MoneyItem {
             if c.payMode.isAuto {
                 let from = c.payerName.map { "從\($0)\(verb)" } ?? "還沒選從哪扣"
                 if n <= 0 { return (text: "今天" + from, badge: "今天扣款", warn: true) }
-                return (text: md(s.due) + " " + from + "・\(n) 天", badge: md(s.due) + " 扣款", warn: n <= 3)
+                return (text: "\(md(s.due)) \(from)・\(n) 天", badge: "\(md(s.due)) 扣款", warn: n <= 3)
             }
             if n <= 0 { return (text: "今天截止・" + mode, badge: "今天截止", warn: true) }
-            return (text: md(s.due) + " 截止・\(n) 天・" + mode, badge: md(s.due) + " 截止", warn: n <= 3)
+            return (text: "\(md(s.due)) 截止・\(n) 天・\(mode)", badge: "\(md(s.due)) 截止", warn: n <= 3)
         }
         if c.payMode.isAuto {
             let from = c.payerName.map { md(c.nextDue) + " 從\($0)\(verb)" } ?? "還沒選從哪扣"
-            return (text: md(c.nextClose) + " 結帳・" + from, badge: md(c.nextClose) + " 結帳", warn: false)
+            return (text: "\(md(c.nextClose)) 結帳・\(from)", badge: "\(md(c.nextClose)) 結帳", warn: false)
         }
-        return (text: md(c.nextClose) + " 結帳・" + mode, badge: md(c.nextClose) + " 結帳", warn: false)
+        return (text: "\(md(c.nextClose)) 結帳・\(mode)", badge: "\(md(c.nextClose)) 結帳", warn: false)
     }
 
     /// 「9 月帳單已扣 ✓」（自動扣）／「已繳 ✓」（自己繳）／「當作已繳」：最近一期 35 天內
@@ -278,7 +279,8 @@ extension MoneyItem {
             category = "活存・" + bank + (a.last4.map { " ••" + $0 } ?? "")
         }
         if a.hidden {
-            category = "收起來" + (a.closedDate.map { "・" + WealthPageText.md($0) } ?? "") + "・" + bank
+            let since: String = a.closedDate.map { "・\(WealthPageText.md($0))" } ?? ""
+            category = "收起來\(since)・\(bank)"
         }
         var item = MoneyItem(id: a.id, theme: theme, seed: seed(a.id), title: a.name,
                              amount: masked ? WealthFormat.masked : a.balanceText, category: category)
@@ -330,15 +332,23 @@ extension MoneyItem {
         return chips
     }
 
-    /// 「10/21 交割 52,340」「11/10 GoGo 約2.3萬」「11/5 月薪 +80,000」
+    /// 「10/21 交割 52,340」「11/10 扣 @GoGo 約 2.3萬」（自動扣的卡費）「10/27 CUBE 18,600」「11/5 月薪 +80,000」
     private static func wealthUpcomingChip(_ row: WealthLedgerRow, facts: WealthFacts, masked: Bool) -> String {
-        let head = WealthPageText.md(row.date) + " " + WealthPageText.shortName(row, facts: facts)
+        let head = WealthPageText.md(row.date) + " " + wealthUpcomingChipName(row, facts: facts)
         if masked { return head + " " + WealthPageText.dots }
         let sign = row.isOutflow ? "" : "+"
         if row.isEstimate, FinanceRates.isNTD(row.code) {
-            return head + " 約" + WealthPageText.wan(row.amount)
+            return "\(head) 約 \(WealthPageText.wan(row.amount))"
         }
-        return head + " " + sign + WealthFormat.plain(row.amount, code: row.code)
+        return "\(head) \(sign)\(WealthFormat.plain(row.amount, code: row.code))"
+    }
+
+    /// 膠囊裡的短名：自動扣的卡費寫「扣 @GoGo」（卡名照寫，judge §3.8 那張表）；其他照 shortName（交割、CUBE、月薪）
+    private static func wealthUpcomingChipName(_ row: WealthLedgerRow, facts: WealthFacts) -> String {
+        if row.kind == .cardBill, let c = facts.card(row.cardId), c.payMode.isAuto {
+            return "扣 \(c.name)"
+        }
+        return WealthPageText.shortName(row, facts: facts)
     }
 
     /// 卡面左上：「NT$」「US$」「美金」前 3 字；定存「定存」；好幾個幣別「多幣別」
@@ -401,7 +411,7 @@ extension MoneyItem {
     private static func wealthSettlementText(_ b: WealthFacts.Broker, facts: WealthFacts) -> String {
         guard b.settlementBankId != nil || b.settlementName != nil else { return "還沒選交割銀行" }
         if let acc = facts.account(b.settlementBankId) {
-            if acc.nickname != nil { return "交割 " + acc.name + "（" + WealthPageText.bankShort(acc.bankName) + "）" }
+            if acc.nickname != nil { return "交割 \(acc.name)（\(WealthPageText.bankShort(acc.bankName))）" }
             return "交割 " + acc.name
         }
         return "交割 " + (b.settlementName ?? "")
@@ -411,7 +421,13 @@ extension MoneyItem {
     private static func wealthSpoken(title: String, amount: String, unit: String?, category: String,
                                      chips: [MoneyItemChip], progress: MoneyItemProgress?, masked: Bool) -> String {
         var parts: [String] = [title]
-        parts.append(masked ? "金額已遮住" : amount + (unit.map { " " + $0 } ?? ""))
+        if masked {
+            parts.append("金額已遮住")
+        } else if let u = unit {
+            parts.append("\(amount) \(u)")
+        } else {
+            parts.append(amount)
+        }
         parts.append(category)
         for c in chips {
             parts.append(c.text.replacingOccurrences(of: WealthPageText.dots, with: "金額已遮住"))
@@ -730,10 +746,8 @@ struct WealthPagePoliciesSection: View {
             WealthPagePolicyLine(row: r, pal: pal)
         }
         .buttonStyle(.plain)
-        .accessibilityElement(children: .ignore)
         .accessibilityLabel(r.accessibilityText)
         .accessibilityHint("點兩下打開這張保單")
-        .accessibilityAddTraits(.isButton)
         .contextMenu {
             Button {
                 actions.edit(r.id, .policy)

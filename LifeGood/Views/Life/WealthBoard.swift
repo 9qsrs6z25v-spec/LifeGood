@@ -108,10 +108,8 @@ private struct WealthPageRibbonView: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(MoneyPressStyle())
-        .accessibilityElement(children: .ignore)
         .accessibilityLabel(ribbon.accessibilityText)
         .accessibilityHint("點兩下捲到銀行帳戶")
-        .accessibilityAddTraits(.isButton)
     }
 
     private var content: some View {
@@ -249,10 +247,8 @@ struct WealthPageUpcomingSection: View {
             WealthPageUpcomingLine(row: r, pal: pal)
         }
         .buttonStyle(.plain)
-        .accessibilityElement(children: .ignore)
         .accessibilityLabel(r.accessibilityText)
         .accessibilityHint("點兩下打開這個帳戶的接下來")
-        .accessibilityAddTraits(.isButton)
     }
 
     private func allButton(_ pal: TripBoardPalette) -> some View {

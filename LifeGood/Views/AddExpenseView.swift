@@ -4540,6 +4540,19 @@ struct AddExpenseView: View {
         if let fal = preset.fixedAssetLink { selectedFixedAssetLink = fal }
         if let rle = preset.realEstateLinkExisting { realEstateLinkExisting = rle }
         if let mle = preset.mortgageLinkExisting { mortgageLinkExisting = mle }
+        // [v25.564] 財富頁、信用卡頁「刷這張卡記一筆」「補記差額」：先選好付款方式、金額、標題
+        if let cid = preset.paymentCardId,
+           let card = allCreditCardMilestones.first(where: { $0.id == cid }) {
+            selectedCreditCardMilestoneId = card.id
+            selectedBankMilestoneId = card.linkedBankMilestoneId
+            selectedBankCurrency = "NT$"
+        } else if let bid = preset.paymentBankId {
+            selectedBankMilestoneId = bid
+            selectedBankCurrency = "NT$"
+            selectedCreditCardMilestoneId = nil
+        }
+        if let a = preset.amount, a > 0 { amountText = String(format: "%.0f", a) }
+        if let t = preset.title, !t.isEmpty { title = t }
         // [v25.475] 從旅遊行程頁的某一站進來：行程、站別、日期都已經知道了。
         if let d = preset.date { date = d }
         if let tripId = preset.linkedTripPlanId {
@@ -4581,6 +4594,13 @@ struct AddExpensePreset {
     /// [v25.539] 從車子記保險時帶「強制險」：不帶的話記帳頁停在預設的儲蓄險，存了會多一張儲蓄險保單、也連不到車。
     /// 一樣放最後，既有呼叫端不用改
     var insuranceSubCategory: InsuranceSubCategory?
+    /// [v25.564] 財富：「刷這張卡記一筆」先選好這張卡（扣款帳戶跟著卡）；放最後，既有呼叫端不用改
+    var paymentCardId: UUID?
+    /// [v25.564] 財富：從這個銀行帳戶記一筆（台幣）
+    var paymentBankId: UUID?
+    /// [v25.564] 財富：〔補記差額〕先填好金額、標題
+    var amount: Double?
+    var title: String?
 }
 
 // MARK: - 水電瓦斯類型判斷

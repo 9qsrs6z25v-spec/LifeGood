@@ -34,7 +34,7 @@ import CryptoKit
 // • 定期扣款、月薪改卡改帳戶有歷史（帳本 linkFrom，跟 payFrom 同一招）：每一期照那一期那天的卡或帳戶；以前的不動。
 // • 月薪的金額歷史以帳本 incomeHistory 為準（Income.amountHistory 是給還沒更新的版本的）。
 // • 要確認 #4「這筆不算」（帳本 excludedExpenses）：那筆記帳不扣任何帳戶。
-// • 還沒扣＝卡費（要繳＋還沒出帳）＋待交割＋已經排定、還沒到的提款（刪卡寫回的那幾期、你記的未來提款，scheduledOut）。
+// • 還沒扣＝卡費（要繳＋還沒出帳）＋待交割＋已經排定、還沒到的提款（刪卡寫回的那幾期、你記的未來提款、標成已繳但日子還沒到的卡費，scheduledOut）。
 // • 接下來 30 天最低、第一次不夠扣（shortage）：從今天的數字開始，30 天內（含）每一筆。
 // • 要確認（checks）全部在這裡產生，字和按鈕組好；按過「知道了」的 key 記在帳本 dismissed（key 帶事件，下個月同樣的事會再出現）。
 //
@@ -670,7 +670,7 @@ struct WealthFacts {
     let pendingSettlement: Double
     /// 查不到匯率的幣別
     let unknownCodes: [String]
-    /// [v25.564] 已經排定、還沒到的提款（刪卡寫回的那幾期帳單、你記的未來日期提款；台幣）
+    /// [v25.564] 已經排定、還沒到的提款（刪卡寫回的那幾期帳單、你記的未來日期提款、標成已繳但日子還沒到的卡費；台幣）
     let scheduledOut: Double
     /// [v25.564] 證券戶（券商名片：持股市值讀股票頁、交割銀行、下一筆交割）
     let brokers: [Broker]
@@ -824,7 +824,7 @@ struct WealthFacts {
         let isForeignType: Bool
         /// 開戶日（里程碑的日期）
         let openedDate: Date
-        /// 已經排定、還沒到的提款（台幣；刪卡寫回的那幾期帳單、你記的未來日期提款）
+        /// 已經排定、還沒到的提款（台幣；刪卡寫回的那幾期帳單、你記的未來日期提款、標成已繳但日子還沒到的卡費）
         let scheduledOut: Double
         /// 接下來 30 天第一次不夠扣（某個幣別從 ≥0 變成 <0 的那一筆）；沒有＝nil
         let shortage: WealthShortage?
@@ -1656,6 +1656,11 @@ struct WealthFacts {
         // ④ 信用卡帳單（v3：已繳的照那天、那個帳戶、繳的數字；還沒繳的在截止日；逾期的明天）
         for bill in bills {
             let s = bill.statement
+            // [v25.564] 標成已繳、日子還沒到（預約繳款）：那天才離開帳戶，先算進已經排定的提款（不然這幾天扣完能用多出這一筆，
+            // 到那天又掉回去；驗證 build/v3/verify/data_edges.py C）
+            if s.isPaid, !isSecurities, bill.day > ctx.today {
+                scheduledByCode["NT$", default: 0] += bill.amount
+            }
             guard bill.day <= ctx.horizon else { continue }
             let title = "\(bill.cardName) \(s.label)" + (bill.overdue ? "（還沒繳）" : "")
             let row = WealthLedgerRow(
