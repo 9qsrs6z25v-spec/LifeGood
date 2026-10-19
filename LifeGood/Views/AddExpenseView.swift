@@ -125,6 +125,17 @@ struct AddExpenseView: View {
     @State private var selectedBankMilestoneId: UUID?
     @State private var selectedBankCurrency: String = "NT$"
     @State private var selectedCreditCardMilestoneId: UUID?
+    /// [v25.564] 上次存檔時選的付款方式（「card:<id>」「bank:<id>:<幣別>」；空白＝不指定）。
+    /// 只記在這台裝置、只給新增的變動支出當預設（簡易模式的付款膠囊；judge §6.2 v3 列）
+    @AppStorage("addExpense_last_payment") private var lastPaymentRaw: String = ""
+    /// 「上次用的」只在表單第一次出現時帶一次（onAppear 會再跑；你改成「不指定」之後不要又被帶回來）
+    @State private var lastPaymentApplied = false
+    /// [v25.564] 卡費提醒〔改成標已繳〕、對存摺提示〔再對一次〕打開的財富小表單
+    @State private var wealthSheet: AddExpenseWealthSheet?
+    /// 打開〔改成標已繳〕時的財富 revision：關掉時變了＝標成已繳存了，這張記帳也關、不存
+    @State private var wealthRevisionAtOpen = 0
+    @State private var closeAfterWealthSheet = false
+    @State private var showWealthPremium = false
 
     // MARK: - 儲蓄險欄位
 
@@ -599,6 +610,7 @@ struct AddExpenseView: View {
             .onAppear {
                 loadEditing()
                 applyPreset()
+                applyLastPayment()
                 focusAmountIfRequested()
                 // 依進階開關決定初始 sheet 高度（須在 loadEditing 後再算，因為它可能會打開進階模式）
                 // [v25.538] 從車子帶進來要直接顯示車輛區的，也一開始就拉滿，不然度數那幾欄在半屏下面看不到
@@ -635,6 +647,9 @@ struct AddExpenseView: View {
             .onDisappear { completerDebounceTask?.cancel() }
             // [v25.563] 改固定支出金額時問「從今天起／全部都改」（D9）；選了才真的存
             .modifier(AmountFromDialog(ask: $amountAsk, onPick: pickAmountFrom))
+            // [v25.564] 卡費提醒〔改成標已繳〕、對存摺提示〔再對一次〕
+            .modifier(AddExpenseWealthSheetModifier(sheet: $wealthSheet, showPremium: $showWealthPremium,
+                                                    onClosed: { wealthSheetClosed() }))
         }
     }
 
@@ -835,6 +850,10 @@ struct AddExpenseView: View {
             // [v25.563] 儲蓄險也可以選從哪扣（以前選不到）；外幣保單只列同幣別的子帳戶和信用卡（bankChoices）
             if showBankPicker {
                 bankPicker
+                paymentHints
+            } else if showPaymentCapsule {
+                paymentCapsule
+                paymentHints
             }
 
             if showLoanCalcFields {
@@ -1566,11 +1585,12 @@ struct AddExpenseView: View {
         return "\(acc.name) · \(acc.pickerLabel(code: code))"
     }
 
-    /// 信用卡一列：「CUBE → 國泰世華（存摺 NT$8.6萬）」；卡沒連銀行（或銀行不在了）只寫卡名
+    /// [v25.564] 信用卡一列：「CUBE（還能刷 27.5萬）」；沒填額度只寫卡名。
+    /// 卡費從哪個帳戶扣由卡那一期的扣款帳戶決定（judge §6.2），選單不再寫銀行
     private func cardChoiceLabel(_ card: LifeMilestone, facts: WealthFacts) -> String {
-        let cardName = card.cardName ?? card.title
-        guard let bank = facts.account(card.linkedBankMilestoneId) else { return cardName }
-        return "\(cardName) → \(bank.pickerLabel)"
+        let name = WealthFacts.displayName(of: card, book: lifeStore.wealthBook)
+        guard let left = facts.card(card.id)?.available else { return name }
+        return name + "（還能刷 " + WealthFormChoiceText.wan(left) + "）"
     }
 
     /// [v25.563] 改了外幣儲蓄險的幣別：已選的銀行幣別跟新的保單幣別不一樣就清掉銀行（選的是信用卡不動）。
@@ -1602,38 +1622,218 @@ struct AddExpenseView: View {
         return "未選擇"
     }
 
+    // MARK: - [v25.564] 付款膠囊、卡選單字、卡費提醒、對存摺以前的提示（judge §6.2 v3 列、§4.5 最後一條）
+
+    /// 扣款目標選單的內容（扣款目標那一列、簡易模式的付款膠囊共用）：不指定／銀行／信用卡
+    @ViewBuilder
+    private func paymentMenuItems(_ facts: WealthFacts) -> some View {
+        let banks = bankChoices(facts)
+        let cards = creditCardMilestones
+        Button("不指定") {
+            selectedBankMilestoneId = nil
+            selectedBankCurrency = "NT$"
+            selectedCreditCardMilestoneId = nil
+        }
+        if !banks.isEmpty {
+            Section("銀行") {
+                ForEach(banks) { acc in
+                    bankChoiceRow(acc)
+                }
+            }
+        }
+        if !cards.isEmpty {
+            Section("信用卡") {
+                ForEach(cards) { card in
+                    Button(cardChoiceLabel(card, facts: facts)) {
+                        selectedCreditCardMilestoneId = card.id
+                        selectedBankMilestoneId = card.linkedBankMilestoneId
+                        selectedBankCurrency = "NT$"
+                    }
+                }
+            }
+        }
+    }
+
+    /// 簡易模式（變動支出、沒開進階）也看得到刷哪張卡：一顆「付款」膠囊（有銀行帳戶或卡才出現）
+    private var showPaymentCapsule: Bool {
+        guard expenseType == .variable, !advancedMode else { return false }
+        return !bankMilestones.isEmpty || !creditCardMilestones.isEmpty
+    }
+
+    /// 「付款：CUBE」「付款：薪轉」「付款：不指定」
+    private var paymentCapsuleText: String {
+        if let id = selectedCreditCardMilestoneId,
+           let card = allCreditCardMilestones.first(where: { $0.id == id }) {
+            return "付款：" + WealthFacts.displayName(of: card, book: lifeStore.wealthBook)
+        }
+        if let id = selectedBankMilestoneId,
+           let ms = bankMilestones.first(where: { $0.id == id }) {
+            return "付款：" + WealthFacts.displayName(of: ms, book: lifeStore.wealthBook)
+        }
+        return "付款：不指定"
+    }
+
+    private var paymentCapsuleIcon: String {
+        if selectedCreditCardMilestoneId != nil { return "creditcard.fill" }
+        if selectedBankMilestoneId != nil { return "building.columns.fill" }
+        return "wallet.pass"
+    }
+
+    private var paymentCapsule: some View {
+        let facts = lifeStore.wealthFacts(expense: store, finance: financeStore)
+        return HStack {
+            Menu {
+                paymentMenuItems(facts)
+            } label: {
+                PaymentCapsuleLabel(icon: paymentCapsuleIcon, text: paymentCapsuleText)
+            }
+            Spacer(minLength: 0)
+        }
+    }
+
+    /// 付款選單下面的灰字：選了卡「算在 11/12 結帳那期，11/27 繳」；卡費提醒；對存摺以前的提示
+    @ViewBuilder
+    private var paymentHints: some View {
+        if let line = cardPeriodLine {
+            Text(line)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        if showsCardFeeReminder {
+            cardFeeReminderRow
+        }
+        if let line = anchorHintLine {
+            anchorHintRow(line)
+        }
+    }
+
+    /// 選了卡：這筆算在哪一期（用表單上的日期；結帳日、截止日讀一套數字）
+    private var cardPeriodLine: String? {
+        guard let id = selectedCreditCardMilestoneId else { return nil }
+        let facts = lifeStore.wealthFacts(expense: store, finance: financeStore)
+        guard let c = facts.card(id) else { return nil }
+        let close = WealthCardCycle.statementClose(for: date, billingDay: c.billingDay)
+        let due = WealthCardCycle.dueDate(close: close, billingDay: c.billingDay, paymentDay: c.paymentDay)
+        return "算在 " + WealthFormat.monthDay(close) + " 結帳那期，" + WealthFormat.monthDay(due) + " 繳"
+    }
+
+    /// 標題像「繳卡費」而且扣的是銀行（不是卡）：卡費 App 已經自己算了，記了會扣兩次
+    private var showsCardFeeReminder: Bool {
+        guard selectedCreditCardMilestoneId == nil, selectedBankMilestoneId != nil else { return false }
+        return title.contains("卡費") || title.contains("繳卡")
+    }
+
+    /// 從這個帳戶扣卡費的卡只有一張：〔改成標已繳〕標那張卡
+    private var cardFeeTargetCardId: UUID? {
+        guard let bank = selectedBankMilestoneId else { return nil }
+        let cards = creditCardMilestones.filter { $0.linkedBankMilestoneId == bank }
+        return cards.count == 1 ? cards.first?.id : nil
+    }
+
+    private var cardFeeReminderRow: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Label("卡費會在截止日自己從帳戶扣，不用記成支出", systemImage: "info.circle")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            if let cardId = cardFeeTargetCardId {
+                Button("改成標已繳") { openPaidSheet(cardId) }
+                    .font(.caption.weight(.semibold))
+                    .buttonStyle(.borderless)
+            }
+        }
+    }
+
+    /// 選了銀行、日期在那個帳戶最近一次對存摺那天（含）以前：「薪轉 10/1 已經對過存摺，這筆不會改變現在的數字」
+    /// （只看變動支出：固定支出以後每一期還是會扣）
+    private var anchorHintLine: String? {
+        guard expenseType == .variable, selectedCreditCardMilestoneId == nil,
+              let bank = selectedBankMilestoneId else { return nil }
+        let facts = lifeStore.wealthFacts(expense: store, finance: financeStore)
+        guard let acc = facts.account(bank), let last = acc.lastAnchorDate,
+              WealthCal.day(date) <= WealthCal.day(last) else { return nil }
+        return acc.name + " " + WealthFormat.monthDay(last) + " 已經對過存摺，這筆不會改變現在的數字"
+    }
+
+    private func anchorHintRow(_ line: String) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Label(line, systemImage: "checkmark.seal")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Button("再對一次") { openAnchorSheet() }
+                .font(.caption.weight(.semibold))
+                .buttonStyle(.borderless)
+        }
+    }
+
+    /// 〔改成標已繳〕不擋付費（第 10 題）；標好了這張記帳也關、不存
+    private func openPaidSheet(_ cardId: UUID) {
+        wealthRevisionAtOpen = lifeStore.wealthRevision
+        closeAfterWealthSheet = true
+        wealthSheet = .paid(cardId)
+    }
+
+    /// 〔再對一次〕要訂閱（對存摺）
+    private func openAnchorSheet() {
+        guard let bank = selectedBankMilestoneId else { return }
+        guard SubscriptionManager.shared.isPremium else {
+            showWealthPremium = true
+            return
+        }
+        closeAfterWealthSheet = false
+        wealthSheet = .anchor(bank, selectedBankCurrency)
+    }
+
+    /// 財富小表單關掉：〔改成標已繳〕而且真的存了（財富的資料變了）→ 這張記帳也關、不存（卡費不用記成支出）
+    private func wealthSheetClosed() {
+        guard closeAfterWealthSheet else { return }
+        closeAfterWealthSheet = false
+        if lifeStore.wealthRevision != wealthRevisionAtOpen {
+            cancelAddExpense()
+        }
+    }
+
+    /// 新增變動支出：付款方式先帶上次用的（那張卡停用、帳戶收起來或不在了就不帶；從財富頁帶了卡或帳戶的不蓋）
+    private func applyLastPayment() {
+        guard !lastPaymentApplied else { return }
+        lastPaymentApplied = true
+        guard expenseType == .variable, editingExpense == nil,
+              selectedBankMilestoneId == nil, selectedCreditCardMilestoneId == nil else { return }
+        if preset?.paymentCardId != nil || preset?.paymentBankId != nil { return }
+        let parts: [String] = lastPaymentRaw.split(separator: ":").map { String($0) }
+        guard parts.count >= 2, let id = UUID(uuidString: parts[1]) else { return }
+        if parts[0] == "card" {
+            guard let card = creditCardMilestones.first(where: { $0.id == id }) else { return }
+            selectedCreditCardMilestoneId = card.id
+            selectedBankMilestoneId = card.linkedBankMilestoneId
+            selectedBankCurrency = "NT$"
+        } else if parts[0] == "bank" {
+            let facts = lifeStore.wealthFacts(expense: store, finance: financeStore)
+            guard let acc = bankChoices(facts).first(where: { $0.id == id }) else { return }
+            let want: String = parts.count >= 3 ? parts[2] : "NT$"
+            let codes = bankChoiceCodes(acc)
+            pickBank(acc.id, code: codes.contains(want) ? want : (codes.first ?? "NT$"))
+        }
+    }
+
+    /// 存檔時記住這次的付款方式（新增的變動支出才記）
+    private func rememberPayment() {
+        if let c = selectedCreditCardMilestoneId {
+            lastPaymentRaw = "card:" + c.uuidString
+        } else if let b = selectedBankMilestoneId {
+            lastPaymentRaw = "bank:" + b.uuidString + ":" + selectedBankCurrency
+        } else {
+            lastPaymentRaw = ""
+        }
+    }
+
     /// [v25.563] 扣款目標選單：數字讀 lifeStore.wealthFacts（快取，打字不重算；跟財富頁、股票、房屋水電選單同一個數）
     private var bankPicker: some View {
         let facts = lifeStore.wealthFacts(expense: store, finance: financeStore)
-        let banks = bankChoices(facts)
-        let cards = creditCardMilestones
         return HStack {
             Text("扣款目標").foregroundStyle(.secondary)
             Spacer()
             Menu {
-                Button("不指定") {
-                    selectedBankMilestoneId = nil
-                    selectedBankCurrency = "NT$"
-                    selectedCreditCardMilestoneId = nil
-                }
-                if !banks.isEmpty {
-                    Section("銀行") {
-                        ForEach(banks) { acc in
-                            bankChoiceRow(acc)
-                        }
-                    }
-                }
-                if !cards.isEmpty {
-                    Section("信用卡") {
-                        ForEach(cards) { card in
-                            Button(cardChoiceLabel(card, facts: facts)) {
-                                selectedCreditCardMilestoneId = card.id
-                                selectedBankMilestoneId = card.linkedBankMilestoneId
-                                selectedBankCurrency = "NT$"
-                            }
-                        }
-                    }
-                }
+                paymentMenuItems(facts)
             } label: {
                 HStack(spacing: 4) {
                     Text(bankPickerLabel)
@@ -3693,6 +3893,8 @@ struct AddExpenseView: View {
             expense.linkedTripStopId = nil
         }
 
+        // [v25.564] 新增的變動支出：記住這次的付款方式（下次新增帶入）
+        if expenseType == .variable && !isEditing { rememberPayment() }
         if isEditing { store.update(expense) } else { store.add(expense) }
         syncBankWithdrawal(for: expense, previous: editingExpense)
         dismiss()
@@ -4564,6 +4766,68 @@ struct AddExpenseView: View {
             // 地點帶入走既有那條（它自己會判斷這個分類有沒有地點欄、
             // 以及使用者是不是已經挑過地點了）
             fillPlaceFromStop(linkedTripStopId)
+        }
+    }
+}
+
+// MARK: - [v25.564] 簡易模式的付款膠囊、記帳裡打開的財富小表單
+
+/// 「付款：CUBE ▾」膠囊（拆成小 View：記帳表單的 body 很長，坑 #7）
+struct PaymentCapsuleLabel: View {
+    let icon: String
+    let text: String
+
+    var body: some View {
+        HStack(spacing: 5) {
+            Image(systemName: icon)
+                .font(.caption.weight(.semibold))
+            Text(text)
+                .font(.subheadline.weight(.semibold))
+                .lineLimit(1)
+            Image(systemName: "chevron.down")
+                .font(.caption2.weight(.semibold))
+        }
+        .foregroundStyle(Color.orange)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .background(Color.orange.opacity(0.12), in: Capsule())
+        .accessibilityLabel(text)
+    }
+}
+
+/// 卡費提醒〔改成標已繳〕、對存摺提示〔再對一次〕
+enum AddExpenseWealthSheet: Identifiable {
+    case paid(UUID)
+    case anchor(UUID, String)
+
+    var id: String {
+        switch self {
+        case .paid(let c): return "paid-" + c.uuidString
+        case .anchor(let a, let code): return "anchor-" + a.uuidString + "-" + code
+        }
+    }
+}
+
+/// 一個 .sheet(item:)＋付費說明（拆成 modifier：記帳表單 body 已經掛很多，坑 #7）
+struct AddExpenseWealthSheetModifier: ViewModifier {
+    @Binding var sheet: AddExpenseWealthSheet?
+    @Binding var showPremium: Bool
+    let onClosed: () -> Void
+
+    func body(content: Content) -> some View {
+        content
+            .sheet(item: $sheet, onDismiss: onClosed) { s in
+                sheetView(s).appStores()
+            }
+            .premiumLockAlert(isPresented: $showPremium)
+    }
+
+    private func sheetView(_ s: AddExpenseWealthSheet) -> AnyView {
+        switch s {
+        case .paid(let id):
+            return AnyView(WealthPaidSheet(cardId: id))
+        case .anchor(let id, let code):
+            return AnyView(WealthAnchorSheet(accountId: id, code: code))
         }
     }
 }

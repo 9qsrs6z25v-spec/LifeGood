@@ -287,7 +287,8 @@ struct WealthPageData {
                                     total: "存摺合計 " + (masked ? WealthFormat.masked : facts.cashText))
 
         // ⑥ 證券戶（收起來的放 ⑧）
-        let visibleBrokers = facts.brokers.filter { facts.account($0.id)?.hidden != true }
+        let visibleBrokers = WealthPageText.orderBrokers(facts.brokers.filter { facts.account($0.id)?.hidden != true },
+                                                         facts: facts)
         var brokerRows: [WealthPageBrokerRow] = []
         for b in visibleBrokers {
             brokerRows.append(WealthPageBrokerRow(id: b.id, item: MoneyItem.wealthBroker(b, facts: facts, masked: masked)))
@@ -471,6 +472,20 @@ enum WealthPageText {
             }
             if a.recentCount != b.recentCount { return a.recentCount > b.recentCount }
             return l.offset < r.offset
+        }.map(\.element)
+    }
+
+    /// 證券戶：有 sortIndex 的照它（排序表單拖的，小的在前）、沒有的排後面照原本先後
+    static func orderBrokers(_ list: [WealthFacts.Broker], facts: WealthFacts) -> [WealthFacts.Broker] {
+        list.enumerated().sorted { l, r in
+            let x: Int? = facts.account(l.element.id)?.sortIndex
+            let y: Int? = facts.account(r.element.id)?.sortIndex
+            switch (x, y) {
+            case let (p?, q?) where p != q: return p < q
+            case (.some, nil): return true
+            case (nil, .some): return false
+            default: return l.offset < r.offset
+            }
         }.map(\.element)
     }
 
@@ -782,8 +797,8 @@ extension WealthPageText {
             let say = n == 0 ? "\(c.fullName) 卡今天\(from)" : "\(c.fullName) 卡 \(spokenDate(due))\(from)，還有 \(n) 天"
             return WealthCapsulePick(text: text, icon: "creditcard", tone: n <= 3 ? .warn : .neutral, spoken: say)
         }
-        // ⑤ 卡的要繳都 0、最近 30 天有已繳
-        if !cards.isEmpty, cards.allSatisfy({ $0.due < 0.5 }) {
+        // ⑤ 卡的要繳都 0、最近 30 天有已繳（同那一句「要繳都 0」：要有沒停用的卡，只剩停用的卡不算）
+        if cards.contains(where: { !$0.isDisabled }), cards.allSatisfy({ $0.due < 0.5 }) {
             let recent = cards.contains { c in
                 guard let p = c.lastPaid else { return false }
                 let d = WealthCal.days(from: p.paidOn ?? p.due, to: today)

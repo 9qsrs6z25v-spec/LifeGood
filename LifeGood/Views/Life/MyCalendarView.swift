@@ -2495,16 +2495,31 @@ struct CalendarEventCard: View {
     @ViewBuilder private var trailingButton: some View {
         switch item {
         case .personalEvent, .milestone:
-            Button("編輯") { showEdit = true }.bold()
+            Button(editButtonTitle) { showEdit = true }.bold()
         default:
             EmptyView()
         }
     }
 
+    /// [v25.564] 財富帳戶（銀行、信用卡、證券戶、保單）開的是財富的卡片頁（看得到餘額、帳單；編輯在卡片頁裡）
+    private var editButtonTitle: String {
+        if case .milestone(let m) = item, Self.isWealthAccount(m) { return "打開" }
+        return "編輯"
+    }
+
+    private static func isWealthAccount(_ m: LifeMilestone) -> Bool {
+        m.category == .achievement && m.financeSubCategory != nil
+    }
+
     @ViewBuilder private var editor: some View {
         switch item {
         case .personalEvent(let e): PersonalEventEditor(initialDate: e.date, editing: e)
-        case .milestone(let m):     AddMilestoneView(editing: m)
+        case .milestone(let m):
+            if Self.isWealthAccount(m) {
+                WealthCardPage(accountId: m.id)
+            } else {
+                AddMilestoneView(editing: m)
+            }
         default: EmptyView()
         }
     }

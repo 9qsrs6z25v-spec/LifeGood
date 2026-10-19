@@ -404,6 +404,8 @@ struct ResumeView: View {
     @EnvironmentObject var subscription: SubscriptionManager
     @State private var showAdd = false
     @State private var editingItem: LifeMilestone?
+    /// [v25.564] 點財富帳戶那一列：開財富的卡片頁（看不擋付費，第 10 題）
+    @State private var wealthCardItem: ResumeWealthCardTarget?
     @State private var selectedCategory: MilestoneCategory?
     @State private var showPremiumAlert = false
     /// 待確認刪除的兼任職務（底下已累積管理頁內容時才會被設定）
@@ -479,6 +481,7 @@ struct ResumeView: View {
             }
             .sheet(isPresented: $showAdd) { AddMilestoneView().appStores() }
             .sheet(item: $editingItem) { item in AddMilestoneView(editing: item).appStores() }
+            .sheet(item: $wealthCardItem) { t in WealthCardPage(accountId: t.id).appStores() }
             .premiumLockAlert(isPresented: $showPremiumAlert)
             .confirmationDialog("刪除這筆兼任職務？",
                                 isPresented: Binding(
@@ -503,6 +506,18 @@ struct ResumeView: View {
         }
     }
 
+    /// [v25.564] 點一列：財富帳戶（銀行、信用卡、證券戶、保單）開財富的卡片頁（看不擋付費；編輯在卡片頁裡）；
+    /// 其他照舊開里程碑表單（要訂閱）
+    private func tapRow(_ item: LifeMilestone) {
+        guard realMilestoneIDs.contains(item.id) else { return }
+        if item.category == .achievement && item.financeSubCategory != nil {
+            wealthCardItem = ResumeWealthCardTarget(id: item.id)
+            return
+        }
+        guard subscription.isPremium else { showPremiumAlert = true; return }
+        editingItem = item
+    }
+
     /// 刪除里程碑並清除其他 Store 對此 id 的懸空引用。LifeStore.deleteMilestone 本身無法觸及
     /// FinanceStore／ExpenseStore（不同 store，無互相持有），比照 deleteFamilyMember／deleteSubordinate
     /// 解除交叉引用的既有寫法，改在同時持有三個 store 的這一層補上清除。
@@ -525,9 +540,9 @@ struct ResumeView: View {
     /// [v25.562] 確認框按〔改成停用〕：記帳的選單不再出現這張卡，以前的紀錄和數字都不動。
     /// 拿 store 裡最新的那一筆來改（確認框開著的時候 iCloud 可能剛同步進新資料）
     private func disableFinanceItem(_ item: LifeMilestone) {
-        guard var updated = store.milestones.first(where: { $0.id == item.id }) else { return }
-        updated.isDisabled = true
-        store.update(updated)
+        guard store.milestones.contains(where: { $0.id == item.id }) else { return }
+        // [v25.564] 跟財富頁同一支：里程碑 isDisabled＋帳本記停用日（要確認「6/30 停用了」、〔已經退訂〕照這天）
+        store.setCardDisabled(item.id, disabled: true)
     }
 
     private var pendingDeleteMessage: String {
@@ -603,10 +618,7 @@ struct ResumeView: View {
                     ForEach(Array(section.items.enumerated()), id: \.element.id) { rowIdx, item in
                         milestoneRow(item)
                             .contentShape(Rectangle())
-                            .onTapGesture {
-                                guard subscription.isPremium else { showPremiumAlert = true; return }
-                                if realMilestoneIDs.contains(item.id) { editingItem = item }
-                            }
+                            .onTapGesture { tapRow(item) }
                             // 交錯進場動畫：群組序 × 4 + 列序，對齊 FixedExpenseView 規格
                             .opacity(rowsAppeared ? 1 : 0)
                             .offset(y: rowsAppeared ? 0 : 14)
@@ -667,10 +679,7 @@ struct ResumeView: View {
                     ForEach(Array(items.enumerated()), id: \.element.id) { rowIdx, item in
                         milestoneRow(item)
                             .contentShape(Rectangle())
-                            .onTapGesture {
-                                guard subscription.isPremium else { showPremiumAlert = true; return }
-                                if realMilestoneIDs.contains(item.id) { editingItem = item }
-                            }
+                            .onTapGesture { tapRow(item) }
                             // 交錯進場動畫，對齊 groupedList 規格
                             .opacity(rowsAppeared ? 1 : 0)
                             .offset(y: rowsAppeared ? 0 : 14)
@@ -1336,27 +1345,9 @@ struct ResumeView: View {
 //   Section 內容、欄位綁定、canSave／save() 等既有商業邏輯完全未變動。
 // ─────────────────────────────────────────────
 
-/// [v25.563] 履歷卡片表單：信用卡改扣款帳戶時問「從哪一期起」（D10）。
-/// 拆成 modifier：AddMilestoneView 的修飾器鏈已經很長，不再往 body 裡塞閉包
-private struct CardDebitChangeDialog: ViewModifier {
-    @Binding var isPresented: Bool
-    let title: String
-    /// 「11 月帳單」
-    let nextLabel: String
-    let onNext: () -> Void
-    let onAll: () -> Void
-
-    private var nextButtonTitle: String { "從下一期（\(nextLabel)）起" }
-
-    func body(content: Content) -> some View {
-        content.confirmationDialog(title, isPresented: $isPresented, titleVisibility: .visible) {
-            Button(nextButtonTitle) { onNext() }
-            Button("以前的帳單也改") { onAll() }
-            Button("取消", role: .cancel) { }
-        } message: {
-            Text("選下一期：以前的帳單照舊算在原本的帳戶，財富頁銀行的數字不會突然變。")
-        }
-    }
+/// [v25.564] 履歷點財富帳戶那一列要開的卡片頁（.sheet(item:) 用；CardDebitChangeDialog 搬去 WealthEditors.swift）
+struct ResumeWealthCardTarget: Identifiable {
+    let id: UUID
 }
 
 private func milestoneSectionHeader(_ title: String, icon: String, color: Color) -> some View {
@@ -1376,6 +1367,7 @@ private func milestoneSectionHeader(_ title: String, icon: String, color: Color)
 struct AddMilestoneView: View {
     @EnvironmentObject var store: LifeStore
     @EnvironmentObject var financeStore: FinanceStore
+    @EnvironmentObject var subscription: SubscriptionManager
     @Environment(\.dismiss) private var dismiss
 
     var editing: LifeMilestone?
@@ -1459,47 +1451,14 @@ struct AddMilestoneView: View {
     /// [v25.462] loadEditing() 只能跑一次，見下方 onAppear 的註解
     @State private var didLoadEditing = false
 
-    // 理財專屬
-    @State private var financeSub: FinanceSubCategory = .bank
-    @State private var bankName = ""
-    @State private var selectedLinkedBankId: UUID?
-    @State private var branchName = ""
-    @State private var accountNumber = ""
-    @State private var bankAccType: BankAccountType = .savings
-    @State private var cardName = ""
-    @State private var cardLastFour = ""
-    // [v25.368] 完整卡號／檢核碼：畫面上編輯明碼，存檔時才交給 CardVault 加密
-    /// 顯示用的卡號字串（含自動插入的「-」）
-    @State private var cardNumberInput = ""
-    /// 既有紀錄的卡號密文；沒解鎖前不會被改寫
-    @State private var cardNumberCipher: Data?
-    /// 是否已經通過 Face ID／密碼，可以看見並編輯明碼。
-    /// 預設 true＝新增卡片時直接可以填；讀取既有卡片時才會依內容改成 false。
-    @State private var cardUnlocked = true
-    /// 使用者自由決定要不要記檢核碼
-    @State private var wantsSecurityCode = false
-    @State private var cardSecurityInput = ""
-    @State private var cardSecurityCipher: Data?
-    @State private var cardVaultMessage: String?
-    @State private var cardUnlocking = false
-    @State private var creditLimitText = ""
-    @State private var annualFeeText = ""
-    @State private var billingDayText = ""
-    @State private var paymentDayText = ""
-    @State private var hasExpiryDate = false
-    @State private var expiryDate = Date()
-    @State private var easyCardNumber = ""
-    @State private var iPassNumber = ""
-    @State private var happyGoNumber = ""
-    @State private var secAccType: SecuritiesAccountType = .regular
-    @State private var insuranceCompany = ""
-    @State private var policyNumber = ""
-    @State private var insType: InsuranceType = .life
-    @State private var premiumText = ""
-    @State private var beneficiary = ""
+    // [v25.564] 財富帳戶（銀行、信用卡、證券戶、保單）的欄位搬去 WealthEditors.swift 的 WealthAccountEditor；
+    // 這裡的「財富」只記財富大事（第一桶金、還清房貸），新增時上面多一段「要記一個帳戶？」四顆按鈕
+    /// 按了哪一種帳戶（開 WealthAccountEditor）
+    @State private var wealthKind: WealthAccountKind?
+    /// 那張表單存好了（關掉時這張也關）
+    @State private var wealthAccountSaved = false
+    @State private var showWealthPremium = false
     @State private var isSaving = false
-    /// [v25.563] 信用卡改了扣款帳戶，按儲存時先問「從哪一期起」（D10）
-    @State private var showDebitChange = false
 
     private var isFamily: Bool { category == .family }
     private var isRealEstate: Bool { category == .realEstate }
@@ -1524,21 +1483,20 @@ struct AddMilestoneView: View {
             case .sideRole: return !sideRoleName.trimmingCharacters(in: .whitespaces).isEmpty
             }
         }
-        if isFinance {
-            switch financeSub {
-            case .bank: return !bankName.trimmingCharacters(in: .whitespaces).isEmpty
-            case .creditCard:
-                // [v25.562] 帳單日、繳款日有填就要 1–31（以前打 45 也存得進去）
-                return !bankName.trimmingCharacters(in: .whitespaces).isEmpty
-                    && dayFieldValid(billingDayText) && dayFieldValid(paymentDayText)
-            case .securities: return !bankName.trimmingCharacters(in: .whitespaces).isEmpty
-            case .insurance: return !insuranceCompany.trimmingCharacters(in: .whitespaces).isEmpty
-            }
-        }
         return !title.trimmingCharacters(in: .whitespaces).isEmpty
     }
 
+    /// [v25.564] 財富帳戶（有子分類的：銀行、信用卡、證券戶、保單）改用財富的表單（WealthEditors.swift）。
+    /// 履歷、行事曆點財富帳戶已經改開卡片頁；這裡是從別的入口直接編輯時的保底（拆兩個 body：型別檢查才不會爆）
     var body: some View {
+        if let m = editing, m.category == .achievement, let kind = WealthAccountKind(sub: m.financeSubCategory) {
+            WealthAccountEditor(kind: kind, editing: m)
+        } else {
+            milestoneBody
+        }
+    }
+
+    private var milestoneBody: some View {
         NavigationStack {
             Form {
                 Section {
@@ -1559,9 +1517,7 @@ struct AddMilestoneView: View {
                         realEstateFields
                     } else if isCareer {
                         careerFields
-                    } else if isFinance {
-                        financeSubPicker
-                    } else {
+                    } else if !isFinance {
                         TextField("標題", text: $title)
                         DatePicker("日期", selection: $date, displayedComponents: .date)
                     }
@@ -1569,12 +1525,12 @@ struct AddMilestoneView: View {
                     milestoneSectionHeader("基本資訊", icon: "person.text.rectangle.fill", color: .indigo)
                 }
                 if isFinance {
-                    financeDetailSection
+                    financeEventSections
                 }
                 if isCareer {
                     careerExtraSection
                 }
-                if !isFamily && !isRealEstate && !isCareer && !isFinance {
+                if !isFamily && !isRealEstate && !isCareer {
                     Section {
                         TextField("選填備註", text: $note, axis: .vertical).lineLimit(3)
                     } header: {
@@ -1624,44 +1580,13 @@ struct AddMilestoneView: View {
                     realEstateMode = .new
                 }
             }
-            // [v25.368] 卡號保管室的說明／錯誤
-            .alert("卡號與安全資訊", isPresented: Binding(
-                get: { cardVaultMessage != nil },
-                set: { if !$0 { cardVaultMessage = nil } }
-            )) {
-                Button("好") { cardVaultMessage = nil }
-            } message: {
-                Text(cardVaultMessage ?? "")
-            }
-            // [v25.563] 改扣款帳戶從哪一期起（D10）
-            .modifier(CardDebitChangeDialog(
-                isPresented: $showDebitChange,
-                title: debitChangeTitle,
-                nextLabel: nextDebitStatement.label,
-                onNext: { save(payFromAll: false) },
-                onAll: { save(payFromAll: true) }
-            ))
         }
-        // [v25.562] 表單裡有號碼時切到背景，App 切換器的縮圖是霧＋鎖頭；打到一半的號碼不收回，只蓋
-        // （這張表單是 sheet，掛在 App 最外層蓋不到，所以自己掛）
-        .modifier(WealthPrivacyCurtain(armed: wealthCurtainArmed))
-    }
-
-    /// [v25.562] 表單上有沒有要藏的號碼：信用卡（解鎖後的卡號、檢核碼、到期日；悠遊卡、一卡通、Happy Go 卡號）、
-    /// 銀行與證券的帳號、保單號碼。沒解鎖的卡只看得到末四碼，不算。
-    private var wealthCurtainArmed: Bool {
-        guard isFinance else { return false }
-        switch financeSub {
-        case .creditCard:
-            let vault = cardUnlocked
-                && (!cardNumberInput.isEmpty || !cardSecurityInput.isEmpty || hasExpiryDate)
-            let passes = !easyCardNumber.isEmpty || !iPassNumber.isEmpty || !happyGoNumber.isEmpty
-            return vault || passes
-        case .bank, .securities:
-            return !accountNumber.trimmingCharacters(in: .whitespaces).isEmpty
-        case .insurance:
-            return !policyNumber.trimmingCharacters(in: .whitespaces).isEmpty
+        // [v25.564] 帳戶在財富的表單記（要訂閱）；存好了這張也關
+        .sheet(item: $wealthKind, onDismiss: { wealthEditorClosed() }) { k in
+            WealthAccountEditor(kind: k, onSaved: { wealthAccountSaved = true })
+                .appStores()
         }
+        .premiumLockAlert(isPresented: $showWealthPremium)
     }
 
     // MARK: - 家庭欄位
@@ -2195,232 +2120,58 @@ struct AddMilestoneView: View {
 
     // MARK: - 導航標題
 
-    // MARK: - 理財欄位
+    // MARK: - [v25.564] 財富：記一個帳戶（開財富的表單）或一件財富大事
 
+    /// 新增時：「要記一個帳戶？」四顆；下面一段財富大事（標題、日期；備註在最下面）
     @ViewBuilder
-    private var financeSubPicker: some View {
-        Picker("子分類", selection: $financeSub) {
-            ForEach(FinanceSubCategory.allCases) { sub in
-                Label(sub.rawValue, systemImage: sub.icon).tag(sub)
-            }
+    private var financeEventSections: some View {
+        if editing == nil {
+            wealthAccountChooser
+        }
+        Section {
+            TextField("標題（例：第一桶金、還清房貸）", text: $title)
+            DatePicker("日期", selection: $date, displayedComponents: .date)
+        } header: {
+            milestoneSectionHeader("財富大事", icon: "star.fill", color: .orange)
         }
     }
 
-    @ViewBuilder
-    private var financeDetailSection: some View {
-        switch financeSub {
-        case .bank:
-            Section {
-                TextField("銀行名稱", text: $bankName)
-                TextField("分行（選填）", text: $branchName)
-                TextField("帳號（選填）", text: $accountNumber).keyboardType(.numberPad)
-                Picker("帳戶類型", selection: $bankAccType) {
-                    ForEach(BankAccountType.allCases) { t in Text(t.rawValue).tag(t) }
+    private var wealthAccountChooser: some View {
+        Section {
+            LazyVGrid(columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)], spacing: 8) {
+                ForEach(WealthAccountKind.allCases) { k in
+                    wealthKindButton(k)
                 }
-                DatePicker("開戶日期", selection: $date, displayedComponents: .date)
-            } header: {
-                milestoneSectionHeader("銀行資訊", icon: FinanceSubCategory.bank.icon, color: .blue)
             }
-            Section {
-                TextField("選填備註", text: $note, axis: .vertical).lineLimit(3)
-            } header: {
-                milestoneSectionHeader("備註", icon: "note.text", color: .secondary)
-            }
-        case .creditCard:
-            Section {
-                bankNamePicker
-                TextField("卡別名稱（如：御璽卡）", text: $cardName)
-                creditLimitRow
-                currencyField("年費", text: $annualFeeText)
-                // [v25.563] 名詞（judge §3.15）：帳單日 → 結帳日、繳款日 → 繳款截止日
-                dayFieldRow("結帳日", text: $billingDayText)
-                dayFieldRow("繳款截止日", text: $paymentDayText)
-                DatePicker("核卡日期", selection: $date, displayedComponents: .date)
-            } header: {
-                milestoneSectionHeader("信用卡資訊", icon: FinanceSubCategory.creditCard.icon, color: .orange)
-            } footer: {
-                Text(Self.cardDebitFootnote)
-            }
-            // [v25.368] 卡號／到期日／檢核碼獨立成一段，鎖在 Face ID 後面
-            Section {
-                cardNumberRows
-                cardExpiryRows
-                cardSecurityRows
-            } header: {
-                milestoneSectionHeader("卡號與安全資訊", icon: "lock.shield.fill", color: .red)
-            } footer: {
-                Text(Self.cardVaultFootnote)
-            }
-            Section {
-                TextField("悠遊卡卡號（選填）", text: $easyCardNumber).keyboardType(.numbersAndPunctuation)
-                // [v25.369] 一卡通固定 16 碼，比照信用卡邊打邊每四碼補「-」
-                TextField("一卡通卡號（選填，16 碼）", text: $iPassNumber)
-                    .keyboardType(.numberPad)
-                    .font(.body.monospaced())
-                    .onChange(of: iPassNumber) { _, newValue in
-                        let formatted = CardVault.grouped(newValue, limit: CardVault.iPassDigits)
-                        if formatted != newValue { iPassNumber = formatted }
-                    }
-            } header: {
-                milestoneSectionHeader("綁定電子票證", icon: "wallet.pass.fill", color: .teal)
-            }
-            Section {
-                TextField("Happy Go 卡號（選填）", text: $happyGoNumber).keyboardType(.numbersAndPunctuation)
-            } header: {
-                milestoneSectionHeader("綁定會員", icon: "star.circle.fill", color: .pink)
-            }
-            Section {
-                TextField("選填備註", text: $note, axis: .vertical).lineLimit(3)
-            } header: {
-                milestoneSectionHeader("備註", icon: "note.text", color: .secondary)
-            }
-            creditCardPhotoSection
-        case .securities:
-            Section {
-                TextField("券商名稱", text: $bankName)
-                TextField("帳號（選填）", text: $accountNumber).keyboardType(.numberPad)
-                Picker("帳戶類型", selection: $secAccType) {
-                    ForEach(SecuritiesAccountType.allCases) { t in Text(t.rawValue).tag(t) }
-                }
-                DatePicker("開戶日期", selection: $date, displayedComponents: .date)
-            } header: {
-                milestoneSectionHeader("證券資訊", icon: FinanceSubCategory.securities.icon, color: .green)
-            }
-            Section {
-                TextField("選填備註", text: $note, axis: .vertical).lineLimit(3)
-            } header: {
-                milestoneSectionHeader("備註", icon: "note.text", color: .secondary)
-            }
-        case .insurance:
-            Section {
-                TextField("保險公司", text: $insuranceCompany)
-                TextField("保單號碼（選填）", text: $policyNumber)
-                Picker("險種", selection: $insType) {
-                    ForEach(InsuranceType.allCases) { t in Text(t.rawValue).tag(t) }
-                }
-                currencyField("保費", text: $premiumText)
-                DatePicker("生效日", selection: $date, displayedComponents: .date)
-                Toggle("填入到期日", isOn: $hasExpiryDate)
-                if hasExpiryDate {
-                    DatePicker("到期日", selection: $expiryDate, displayedComponents: .date)
-                }
-                TextField("受益人（選填）", text: $beneficiary)
-            } header: {
-                milestoneSectionHeader("保險資訊", icon: FinanceSubCategory.insurance.icon, color: .purple)
-            }
-            Section {
-                TextField("選填備註", text: $note, axis: .vertical).lineLimit(3)
-            } header: {
-                milestoneSectionHeader("備註", icon: "note.text", color: .secondary)
-            }
-        }
-    }
-
-    private var bankMilestonesList: [LifeMilestone] {
-        store.milestones.filter { $0.category == .achievement && $0.financeSubCategory == .bank }
-    }
-
-    // MARK: - [v25.562] 額度、帳單日、繳款日
-
-    /// 額度（萬元）可以打小數：6.8 萬。decimalPad 可以連打兩個點、有些地區的小數點是「,」，
-    /// 邊打邊只留數字和一個「.」——不然 Double() 讀不出來，存檔時額度會變成沒填
-    private var creditLimitRow: some View {
-        HStack {
-            TextField("額度", text: $creditLimitText)
-                .keyboardType(.decimalPad)
-                .onChange(of: creditLimitText) { _, newValue in
-                    let cleaned = Self.decimalDigitsOnly(newValue)
-                    if cleaned != newValue { creditLimitText = cleaned }
-                }
-            Text("萬元").foregroundStyle(.secondary)
-        }
-    }
-
-    /// 帳單日／繳款日一列；有填但不在 1–31 就在下面多一行紅字（儲存鈕也會灰掉，見 canSave）
-    @ViewBuilder
-    private func dayFieldRow(_ label: String, text: Binding<String>) -> some View {
-        HStack {
-            TextField(label, text: text).keyboardType(.numberPad)
-            Text("日").foregroundStyle(.secondary)
-        }
-        if !dayFieldValid(text.wrappedValue) {
-            Text("要 1 到 31")
-                .font(.caption)
-                .foregroundStyle(.red)
-        }
-    }
-
-    /// 空白可以（不填）；有填就要是 1–31 的整數
-    private func dayFieldValid(_ text: String) -> Bool {
-        let t = text.trimmingCharacters(in: .whitespaces)
-        if t.isEmpty { return true }
-        return dayValue(t) != nil
-    }
-
-    /// 存檔用：1–31 才存，其他（空白、45、0、打錯字）一律不存
-    private func dayValue(_ text: String) -> Int? {
-        guard let d = Int(text.trimmingCharacters(in: .whitespaces)), (1...31).contains(d) else { return nil }
-        return d
-    }
-
-    /// 只留 0–9 和一個「.」（「,」當成「.」）：「6..8」→「6.8」、「6,8」→「6.8」
-    private static func decimalDigitsOnly(_ raw: String) -> String {
-        var out = ""
-        var hasDot = false
-        for ch in raw {
-            if ch.isASCII && ch.isNumber {
-                out.append(ch)
-            } else if (ch == "." || ch == ",") && !hasDot {
-                out.append(".")
-                hasDot = true
-            }
-        }
-        return out
-    }
-
-    /// 數字帶回輸入框：最多 4 位小數再去掉多餘的 0（6.8 → "6.8"、6 → "6"、6.835 → "6.835"）。
-    /// 額度以萬元顯示，4 位小數＝準到 1 元，打開再存不會把額度改掉（同 RealEstateEditors.editableAmountText 的寫法，
-    /// 那支留 2 位是因為單位是元；這裡單位是萬元，只留 2 位的話打 6.835 萬再打開存一次會變 68,400）
-    private static func editableNumber(_ v: Double) -> String {
-        let rounded: Double = (v * 10000).rounded() / 10000
-        var s = String(format: "%.4f", rounded)
-        while s.hasSuffix("0") { s.removeLast() }
-        if s.hasSuffix(".") { s.removeLast() }
-        return s
-    }
-
-    // MARK: - [v25.368] 卡號與安全資訊
-
-    /// 說明文字在 ViewBuilder 外組好（本檔案有型別檢查逾時的前科）
-    /// [v25.559] 信用卡說明照片：權益說明、優惠 DM、帳單說明…拍照、掃描文件（自動裁切）、相簿多選、PDF。
-    /// 不傳 onBackgroundCommit：這張表單要按儲存才落地（照 StockDividendEditor 的文件照片）
-    private var creditCardPhotoSection: some View {
-        // id 先取成常數：相機、相簿多選是在背景執行緒呼叫 onSaveImage，不要在那邊回頭讀 @State
-        let id = photoOwnerId
-        return Section {
-            MultiPhotoGallery(
-                fileNames: $photoFileNames,
-                urlFor: { LifeMilestone.photoURL(for: $0) },
-                onSaveImage: { LifeMilestone.savePhoto($0, milestoneId: id) },
-                onDeleteFile: { LifeMilestone.deletePhoto($0) },
-                onSavePDF: { LifeMilestone.savePDF($0, milestoneId: id) },
-                title: "說明照片"
-            )
             .padding(.vertical, 4)
         } header: {
-            milestoneSectionHeader("信用卡說明", icon: "doc.text.image", color: .orange)
+            milestoneSectionHeader("要記一個帳戶（銀行、信用卡、證券戶、保單）？", icon: "building.columns.fill", color: .blue)
         } footer: {
-            Text(Self.cardPhotoFootnote)
-                .font(.caption2)
+            Text("帳戶記在財富頁，有自己的表單。或在下面記一件財富大事（第一桶金、還清房貸），存在履歷裡。")
         }
     }
 
-    static let cardPhotoFootnote =
-        "權益說明、優惠 DM、帳單說明都可以拍下來；選「掃描文件」會自動裁切，也可以選 PDF。"
-        + "請不要拍卡片正面或背面——卡號和安全碼請填在上面的「卡號與安全資訊」，那裡會加密。"
+    private func wealthKindButton(_ k: WealthAccountKind) -> some View {
+        Button {
+            if subscription.isPremium {
+                wealthKind = k
+            } else {
+                showWealthPremium = true
+            }
+        } label: {
+            Label(k.title, systemImage: k.icon)
+                .font(.subheadline.weight(.semibold))
+                .lineLimit(1)
+                .frame(maxWidth: .infinity, minHeight: 40)
+                .background(Color.blue.opacity(0.12), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        }
+        .buttonStyle(.borderless)
+    }
 
-    /// [v25.559] 說明照片檔名用的 id：編輯沿用原本的，新增用表單一打開就決定好的 draftMilestoneId
-    private var photoOwnerId: UUID { editing?.id ?? draftMilestoneId }
+    /// 帳戶表單關掉：存好了這張也關（存了一個帳戶就不是在記財富大事）
+    private func wealthEditorClosed() {
+        if wealthAccountSaved { dismiss() }
+    }
 
     private var hasUnsavedPhotoChanges: Bool {
         photoFileNames != (editing?.photoFileNames ?? [])
@@ -2450,264 +2201,10 @@ struct AddMilestoneView: View {
         }
     }
 
-    static let cardVaultFootnote =
-        "完整卡號與檢核碼會加密後才存起來，金鑰放在系統鑰匙圈、不會跟著資料同步進 iCloud 的紀錄裡，"
-        + "備份檔與桌面網頁版也讀不到明碼。要看或修改一定要先通過 Face ID 或裝置密碼。"
-        + "檢核碼是網路刷卡唯一還缺的那一塊，能不記就不記——所以預設不記，由你自己決定。"
-
-    /// 已輸入卡號的末四碼（存檔時會覆蓋 cardLastFour）
-    private var cardNumberLastFour: String { CardVault.lastFour(cardNumberInput) }
-
-    private var expiryMaskText: String { hasExpiryDate ? "••/••" : "未填" }
-
-    /// 卡號列：解鎖（或全新的卡）才看得到明碼，否則只顯示末四碼
-    @ViewBuilder
-    private var cardNumberRows: some View {
-        if cardUnlocked {
-            HStack {
-                Text("卡號")
-                Spacer()
-                TextField("1234-5678-9012-3456", text: $cardNumberInput)
-                    .keyboardType(.numberPad)
-                    .multilineTextAlignment(.trailing)
-                    .font(.body.monospaced())
-                    .onChange(of: cardNumberInput) { _, newValue in
-                        // 邊打邊補「-」。游標會留在最後面，正好符合從左往右輸入卡號的情境。
-                        let formatted = CardVault.grouped(newValue)
-                        if formatted != newValue { cardNumberInput = formatted }
-                    }
-            }
-            if !cardNumberLastFour.isEmpty {
-                HStack {
-                    Text("辨識用末四碼")
-                    Spacer()
-                    Text(cardNumberLastFour).font(.footnote.monospaced())
-                }
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-            }
-        } else {
-            Button {
-                unlockCardFields()
-            } label: {
-                HStack {
-                    Text("卡號").foregroundStyle(.primary)
-                    Spacer()
-                    Text(CardVault.masked(lastFour: cardLastFour))
-                        .font(.body.monospaced())
-                        .foregroundStyle(.secondary)
-                    Image(systemName: cardUnlocking ? "hourglass" : "lock.fill")
-                        .font(.caption)
-                        .foregroundStyle(.orange)
-                }
-                .contentShape(Rectangle())
-            }
-            .disabled(cardUnlocking)
-        }
-    }
-
-    /// 到期日：與卡號用同一把鎖
-    @ViewBuilder
-    private var cardExpiryRows: some View {
-        if cardUnlocked {
-            Toggle("填入到期日", isOn: $hasExpiryDate)
-            if hasExpiryDate {
-                expiryMonthYearPicker
-            }
-        } else {
-            HStack {
-                Text("到期日")
-                Spacer()
-                Text(expiryMaskText)
-                    .font(.body.monospaced())
-                    .foregroundStyle(.secondary)
-                Image(systemName: "lock.fill")
-                    .font(.caption)
-                    .foregroundStyle(.orange)
-            }
-        }
-    }
-
-    /// 檢核碼：完全由使用者決定要不要記
-    @ViewBuilder
-    private var cardSecurityRows: some View {
-        if cardUnlocked {
-            Toggle("記錄檢核碼（CVV／CVC）", isOn: $wantsSecurityCode.animation())
-            if wantsSecurityCode {
-                HStack {
-                    Text("檢核碼")
-                    Spacer()
-                    SecureField("3 碼", text: $cardSecurityInput)
-                        .keyboardType(.numberPad)
-                        .multilineTextAlignment(.trailing)
-                        .frame(width: 90)
-                        .onChange(of: cardSecurityInput) { _, newValue in
-                            // 運通是 4 碼，所以留到 4
-                            let cleaned = String(newValue.filter(\.isNumber).prefix(4))
-                            if cleaned != newValue { cardSecurityInput = cleaned }
-                        }
-                }
-            }
-        } else if cardSecurityCipher != nil {
-            HStack {
-                Text("檢核碼")
-                Spacer()
-                Text(CardVault.maskedCode())
-                    .font(.body.monospaced())
-                    .foregroundStyle(.secondary)
-                Image(systemName: "lock.fill")
-                    .font(.caption)
-                    .foregroundStyle(.orange)
-            }
-        }
-    }
-
-    private func unlockCardFields() {
-        guard !cardUnlocking else { return }
-        cardUnlocking = true
-        Task { @MainActor in
-            defer { cardUnlocking = false }
-            switch await CardVault.unlock(reason: "檢視或修改完整卡號") {
-            case .ok:
-                let number = CardVault.open(cardNumberCipher) ?? ""
-                let code = CardVault.open(cardSecurityCipher) ?? ""
-                cardNumberInput = CardVault.grouped(number)
-                cardSecurityInput = code
-                wantsSecurityCode = !code.isEmpty
-                // 密文在、卻解不出來＝金鑰不在這台裝置（沒開 iCloud 鑰匙圈、或換機沒帶過來）
-                if cardNumberCipher != nil, number.isEmpty {
-                    cardVaultMessage =
-                        "這台裝置沒有解密金鑰，看不到原本存的卡號。"
-                        + "金鑰是透過 iCloud 鑰匙圈同步的，請確認「設定 → Apple ID → iCloud → 密碼與鑰匙圈」已開啟；"
-                        + "若金鑰已經遺失，只能重新輸入一次完整卡號。"
-                }
-                cardUnlocked = true
-            case .denied:
-                break
-            case .unavailable(let message):
-                cardVaultMessage = message
-            }
-        }
-    }
-
-    @ViewBuilder
-    /// 年 + 月雙 Picker（信用卡 / 保險到期日只記到月）
-    private var expiryMonthYearPicker: some View {
-        let cal = Calendar.current
-        let nowYear = cal.component(.year, from: Date())
-        let years = Array(nowYear...(nowYear + 20))
-        let months = Array(1...12)
-        let yearBinding = Binding<Int>(
-            get: { cal.component(.year, from: expiryDate) },
-            set: { newY in
-                var c = cal.dateComponents([.year, .month], from: expiryDate)
-                c.year = newY; c.day = 1
-                if let d = cal.date(from: c) { expiryDate = d }
-            }
-        )
-        let monthBinding = Binding<Int>(
-            get: { cal.component(.month, from: expiryDate) },
-            set: { newM in
-                var c = cal.dateComponents([.year, .month], from: expiryDate)
-                c.month = newM; c.day = 1
-                if let d = cal.date(from: c) { expiryDate = d }
-            }
-        )
-        HStack {
-            Text("到期").foregroundStyle(.secondary)
-            Spacer()
-            Picker("年", selection: yearBinding) {
-                ForEach(years, id: \.self) { y in Text("\(String(format: "%d", y)) 年").tag(y) }
-            }
-            .pickerStyle(.menu)
-            Picker("月", selection: monthBinding) {
-                ForEach(months, id: \.self) { m in Text("\(m) 月").tag(m) }
-            }
-            .pickerStyle(.menu)
-        }
-    }
-
-    @ViewBuilder
-    private var bankNamePicker: some View {
-        if bankMilestonesList.isEmpty {
-            TextField("發卡銀行", text: $bankName)
-        } else {
-            Picker("發卡銀行", selection: $selectedLinkedBankId) {
-                Text("手動輸入").tag(UUID?.none)
-                ForEach(bankMilestonesList) { ms in
-                    Text(ms.bankName ?? ms.title).tag(UUID?.some(ms.id))
-                }
-            }
-            .onChange(of: selectedLinkedBankId) { _, newId in
-                if let id = newId, let ms = bankMilestonesList.first(where: { $0.id == id }) {
-                    bankName = ms.bankName ?? ms.title
-                }
-            }
-            if selectedLinkedBankId == nil {
-                TextField("手動輸入發卡銀行", text: $bankName)
-            }
-        }
-    }
-
-    // MARK: - [v25.563] 改扣款帳戶從哪一期起（D10）
-
-    /// 「信用卡資訊」那一段的 footer
-    private static let cardDebitFootnote =
-        "選了銀行帳戶，卡費每一期在繳款截止日從那個帳戶扣（財富頁「存摺上」照這個算）。"
-
-    /// 編輯中的信用卡、扣款帳戶（發卡銀行選的那個帳戶）跟原本不一樣 → 存檔前要問
-    private var debitChangeNeedsAsking: Bool {
-        guard isFinance, financeSub == .creditCard,
-              let old = editing, old.financeSubCategory == .creditCard else { return false }
-        return old.linkedBankMilestoneId != selectedLinkedBankId
-    }
-
-    /// 「下一期」＝明天起刷的那一期（10/19 改 → 11 月帳單；結帳日當天改，今天這期照舊）。
-    /// 結帳日用這次要存的（表單上的；沒填＝財富頁一樣先當 25 日），跟存完之後財富頁分期用同一個日子
-    private var nextDebitStatement: (key: String, label: String) {
-        WealthCardCycle.nextStatement(billingDay: dayValue(billingDayText), now: Date())
-    }
-
-    /// 確認框標題：「卡費改從「台新銀行」扣，從哪一期開始？」；改成不設：「這張卡不再設扣款帳戶，從哪一期開始？」
-    private var debitChangeTitle: String {
-        guard let id = selectedLinkedBankId else {
-            return "這張卡不再設扣款帳戶，從哪一期開始？"
-        }
-        let name: String
-        if let ms = store.milestones.first(where: { $0.id == id }) {
-            name = WealthFacts.displayName(of: ms, book: store.wealthBook)
-        } else {
-            name = bankName.trimmingCharacters(in: .whitespaces)
-        }
-        return "卡費改從「\(name)」扣，從哪一期開始？"
-    }
-
-    /// 儲存鈕：信用卡改了扣款帳戶先問從哪一期起，不然直接存
+    /// 儲存鈕（忙碌守衛）
     private func requestSave() {
         guard !isSaving else { return }
-        if debitChangeNeedsAsking {
-            showDebitChange = true
-        } else {
-            save()
-        }
-    }
-
-    private func generateFinanceTitle() -> String {
-        switch financeSub {
-        case .bank:
-            let name = bankName.trimmingCharacters(in: .whitespaces)
-            let branch = branchName.trimmingCharacters(in: .whitespaces)
-            return branch.isEmpty ? "開戶 \(name)" : "開戶 \(name) \(branch)"
-        case .creditCard:
-            let bank = bankName.trimmingCharacters(in: .whitespaces)
-            let card = cardName.trimmingCharacters(in: .whitespaces)
-            return card.isEmpty ? "\(bank) 信用卡" : "\(bank) \(card)"
-        case .securities:
-            return "開戶 \(bankName.trimmingCharacters(in: .whitespaces))"
-        case .insurance:
-            let co = insuranceCompany.trimmingCharacters(in: .whitespaces)
-            return "\(co) \(insType.rawValue)"
-        }
+        save()
     }
 
     private var navTitle: String {
@@ -2730,8 +2227,8 @@ struct AddMilestoneView: View {
         return t.isEmpty ? nil : t
     }
 
-    /// payFromAll：信用卡改了扣款帳戶時確認框選的（true＝以前的帳單也改；false／nil＝從下一期起）
-    private func save(payFromAll: Bool? = nil) {
+    /// [v25.564] 財富帳戶改在 WealthAccountEditor 存；「財富」在這裡只存財富大事（沒有子分類，走一般里程碑）
+    private func save() {
         guard !isSaving else { return }
         isSaving = true
         if isFamily {
@@ -2888,106 +2385,6 @@ struct AddMilestoneView: View {
                 resolutionSchema.isDefault ? nil : resolutionSchema
             item.photoFileNames = editing?.photoFileNames
             if editing != nil { store.update(item) } else { store.add(item) }
-        } else if isFinance {
-            let autoTitle = generateFinanceTitle()
-            let t = note.trimmingCharacters(in: .whitespaces)
-            // [v25.368] 加密失敗（鑰匙圈寫不進金鑰）就中止存檔，
-            // 不要一聲不響地把使用者剛打的卡號丟掉
-            if financeSub == .creditCard, cardUnlocked {
-                let typed = CardVault.digits(cardNumberInput)
-                if !typed.isEmpty, CardVault.seal(typed) == nil {
-                    cardVaultMessage = "卡號加密失敗：系統鑰匙圈寫不進金鑰，這次沒有儲存。"
-                        + "請把 App 完全關掉再打開試一次；若持續失敗，請確認裝置已設定密碼。"
-                    return
-                }
-            }
-            // [v25.368] 卡號末四碼：解鎖過就以剛輸入的完整卡號為準，沒解鎖就沿用原本的
-            let savedCardLastFour: String = {
-                guard cardUnlocked else { return cardLastFour }
-                let derived = CardVault.lastFour(cardNumberInput)
-                return derived.isEmpty ? cardLastFour : derived
-            }()
-            var item = LifeMilestone(
-                id: editing?.id ?? draftMilestoneId,
-                title: autoTitle, date: date, category: .achievement,
-                note: t,
-                financeSubCategory: financeSub,
-                // 對齊 financeDetailSection 表單實際顯示這些欄位的子分類，避免切換子分類時把
-                // 前一個子分類殘留的文字誤存進新子分類的紀錄（例如先在「信用卡」填了卡號末四碼，
-                // 切到「保險」送出，保單紀錄會被存進不相關的舊卡號）。
-                bankName: trimmedOrNil(bankName, when: financeSub != .insurance),
-                branchName: trimmedOrNil(branchName, when: financeSub == .bank),
-                accountNumber: trimmedOrNil(accountNumber, when: financeSub == .bank || financeSub == .securities),
-                bankAccountType: financeSub == .bank ? bankAccType : nil,
-                cardName: trimmedOrNil(cardName, when: financeSub == .creditCard),
-                cardLastFour: trimmedOrNil(savedCardLastFour, when: financeSub == .creditCard),
-                // 信用卡額度輸入值單位為「萬元」，存進 LifeMilestone 時換算回元
-                // [v25.562] 可以打小數（6.8 萬），換回元時四捨五入到整數（6.8 × 10000 不會剛好是 68000）
-                creditLimit: financeSub == .creditCard
-                    ? (Double(creditLimitText).map { ($0 * 10000).rounded() })
-                    : nil,
-                annualFee: financeSub == .creditCard ? Double(annualFeeText) : nil,
-                // [v25.562] 只存 1–31（canSave 已擋，這裡再守一次）
-                billingDay: financeSub == .creditCard ? dayValue(billingDayText) : nil,
-                paymentDay: financeSub == .creditCard ? dayValue(paymentDayText) : nil,
-                expiryDate: (financeSub == .creditCard || financeSub == .insurance) && hasExpiryDate ? expiryDate : nil,
-                securitiesAccountType: financeSub == .securities ? secAccType : nil,
-                insuranceCompany: trimmedOrNil(insuranceCompany, when: financeSub == .insurance),
-                policyNumber: trimmedOrNil(policyNumber, when: financeSub == .insurance),
-                insuranceType: financeSub == .insurance ? insType : nil,
-                premiumAmount: financeSub == .insurance ? Double(premiumText) : nil,
-                beneficiary: trimmedOrNil(beneficiary, when: financeSub == .insurance),
-                linkedBankMilestoneId: financeSub == .creditCard ? selectedLinkedBankId : nil
-            )
-            // 編輯既有財富卡時保留銀行存取紀錄（init 沒提供 bankDeposits 參數，需手動帶回）
-            item.bankDeposits = editing?.bankDeposits
-            // [v25.368] 卡號／檢核碼密文（init 沒提供參數）。
-            // 沒解鎖過就原封帶回既有密文——看不到內容的情況下絕不能把它洗掉。
-            if financeSub == .creditCard {
-                if cardUnlocked {
-                    let digits = CardVault.digits(cardNumberInput)
-                    item.cardNumberCipher = digits.isEmpty ? nil : CardVault.seal(digits)
-                    let code = cardSecurityInput.trimmingCharacters(in: .whitespaces)
-                    item.cardSecurityCipher = (wantsSecurityCode && !code.isEmpty)
-                        ? CardVault.seal(code) : nil
-                } else {
-                    item.cardNumberCipher = cardNumberCipher
-                    item.cardSecurityCipher = cardSecurityCipher
-                }
-            }
-            // 信用卡綁定的電子票證與會員卡號（init 沒提供參數）
-            if financeSub == .creditCard {
-                let ec = easyCardNumber.trimmingCharacters(in: .whitespaces)
-                let ip = iPassNumber.trimmingCharacters(in: .whitespaces)
-                let hg = happyGoNumber.trimmingCharacters(in: .whitespaces)
-                item.easyCardNumber = ec.isEmpty ? nil : ec
-                item.iPassNumber = ip.isEmpty ? nil : ip
-                item.happyGoNumber = hg.isEmpty ? nil : hg
-            }
-            // 保留現有停用狀態
-            item.isDisabled = editing?.isDisabled
-            // [v25.559] 信用卡說明照片；切到別的子分類時原封帶回（檔還在，切回信用卡就看得到）
-            if financeSub == .creditCard {
-                item.photoFileNames = photoFileNames.isEmpty ? nil : photoFileNames
-            } else {
-                item.photoFileNames = editing?.photoFileNames
-                // 在信用卡那頁加了照片又切到別的子分類才存：新加的檔沒人認領，刪掉
-                let keep = Set(editing?.photoFileNames ?? [])
-                for name in photoFileNames where !keep.contains(name) { LifeMilestone.deletePhoto(name) }
-            }
-            if editing != nil { store.update(item) } else { store.add(item) }
-            // [v25.563] 信用卡改了扣款帳戶：帳本記從哪一期起（D10）。卡的 linkedBankMilestoneId 上面照舊寫成新的
-            //（舊 iPad、網頁版照讀）；選「從下一期起」以前的帳單照舊算在原本的帳戶，「以前的帳單也改」整張卡都算新的。
-            // 跟上面 store.update 同一個 runloop：財富頁只重算一次，不會先閃一下「以前的也改」的數字
-            if let old = editing, financeSub == .creditCard, old.financeSubCategory == .creditCard,
-               old.linkedBankMilestoneId != selectedLinkedBankId {
-                store.recordCardPayFromChange(
-                    cardId: item.id,
-                    oldAccount: old.linkedBankMilestoneId,
-                    newAccount: selectedLinkedBankId,
-                    fromKey: payFromAll == true ? nil : nextDebitStatement.key
-                )
-            }
         } else {
             var item = LifeMilestone(
                 id: editing?.id ?? UUID(),
@@ -3080,49 +2477,7 @@ struct AddMilestoneView: View {
             sideRoleIsLead = e.sideRoleIsLead ?? false
             sideRoleWorkspaceEnabled = e.sideRoleWorkspaceEnabled ?? false
             resolutionSchema = e.sideRoleResolutionSchema ?? SideRoleResolutionSchema()
-            // 理財欄位
-            if let fs = e.financeSubCategory { financeSub = fs }
-            bankName = e.bankName ?? ""
-            branchName = e.branchName ?? ""
-            accountNumber = e.accountNumber ?? ""
-            if let bat = e.bankAccountType { bankAccType = bat }
-            cardName = e.cardName ?? ""
-            cardLastFour = e.cardLastFour ?? ""
-            // [v25.368] 密文原封帶進畫面，沒通過 Face ID 之前不解、也不會被存檔改寫
-            cardNumberCipher = e.cardNumberCipher
-            cardSecurityCipher = e.cardSecurityCipher
-            easyCardNumber = e.easyCardNumber ?? ""
-            // [v25.369] 既有的一卡通卡號在讀進來時就順手分好組；
-            // 只有「純數字／分隔線／空白」才動它，含其他字元的原樣保留
-            let rawIPass = e.iPassNumber ?? ""
-            iPassNumber = CardVault.isSafeToRegroup(rawIPass)
-                ? CardVault.grouped(rawIPass, limit: CardVault.iPassDigits)
-                : rawIPass
-            happyGoNumber = e.happyGoNumber ?? ""
             photoFileNames = e.photoFileNames ?? []
-            if let cl = e.creditLimit, cl > 0 {
-                // 信用卡額度以「萬元」顯示；其他子分類保留原始值
-                if e.financeSubCategory == .creditCard {
-                    // [v25.562] 帶小數（6.8 萬以前會被讀成 7，存一次就變 7 萬）
-                    creditLimitText = Self.editableNumber(cl / 10000)
-                } else {
-                    creditLimitText = String(format: "%.0f", cl)
-                }
-            }
-            if let af = e.annualFee, af > 0 { annualFeeText = String(format: "%.0f", af) }
-            if let bd = e.billingDay { billingDayText = "\(bd)" }
-            if let pd = e.paymentDay { paymentDayText = "\(pd)" }
-            if let ed = e.expiryDate { hasExpiryDate = true; expiryDate = ed }
-            if let sat = e.securitiesAccountType { secAccType = sat }
-            insuranceCompany = e.insuranceCompany ?? ""
-            policyNumber = e.policyNumber ?? ""
-            if let it = e.insuranceType { insType = it }
-            if let pa = e.premiumAmount, pa > 0 { premiumText = String(format: "%.0f", pa) }
-            beneficiary = e.beneficiary ?? ""
-            selectedLinkedBankId = e.linkedBankMilestoneId
-            // [v25.368] 這張卡有任何要保護的東西（卡號／檢核碼／到期日）就先鎖起來；
-            // 什麼都沒有的舊卡直接放行，不然使用者連填第一次都要先驗證。
-            cardUnlocked = (e.cardNumberCipher == nil && e.cardSecurityCipher == nil && e.expiryDate == nil)
             return
         }
         if let f = editingFamily {

@@ -489,24 +489,30 @@ struct LifeFinanceView: View {
 
     // MARK: 右上（眼睛、綠色＋、⋯）
 
+    /// 同健康頁：一個 ToolbarItem 裡 HStack(spacing: 12)（三顆的間距自己給，不交給系統把它們包成一組）
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
-        ToolbarItemGroup(placement: .topBarTrailing) {
-            eyeButton
-            addButton
-            moreMenu
+        ToolbarItem(placement: .topBarTrailing) {
+            HStack(spacing: 12) {
+                eyeButton
+                addButton
+                moreMenu
+            }
         }
     }
 
+    /// 遮住中＝實心 eye.slash.fill；沒遮＝eye（brief G1-0、G1-5）
     private var eyeButton: some View {
         Button {
             toggleMask()
         } label: {
-            Image(systemName: masked ? "eye.slash" : "eye")
+            Image(systemName: eyeIcon)
                 .font(.body.weight(.semibold))
         }
         .accessibilityLabel(eyeLabel)
     }
+
+    private var eyeIcon: String { masked ? "eye.slash.fill" : "eye" }
 
     private var eyeLabel: String { masked ? "顯示金額（要 Face ID）" : "遮住金額" }
 

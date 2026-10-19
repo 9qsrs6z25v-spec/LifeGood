@@ -528,7 +528,7 @@ struct WealthPageBanksSection: View {
             }
         } else if showPrompt {
             VStack(alignment: .leading, spacing: 10) {
-                MoneySectionHeader(title: "銀行帳戶")
+                FinanceCardHeader(title: "銀行帳戶")
                 prompt
             }
         }
