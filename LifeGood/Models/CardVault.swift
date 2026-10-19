@@ -142,6 +142,16 @@ enum CardVault {
         return "•••• •••• •••• " + tail
     }
 
+    /// [v25.562] 帳號、保單號碼、票證號碼畫面上只露後 4 碼：「•••• 5678」。
+    /// 有數字就取最後 4 個數字（「2061-1234-5678-90」→「•••• 7890」）；一個數字都沒有就取最後 4 個字。
+    /// 只遮畫面，存法不動（完整的仍是明碼存，v7 才改密文）。
+    static func maskedTail(_ raw: String) -> String {
+        let trimmed = raw.trimmingCharacters(in: .whitespaces)
+        let digitsOnly = trimmed.filter(\.isNumber)
+        let tail = digitsOnly.isEmpty ? String(trimmed.suffix(4)) : String(digitsOnly.suffix(4))
+        return "•••• " + tail
+    }
+
     /// 檢核碼遮罩（3 碼；美國運通是 4 碼，一樣照長度出點）
     static func maskedCode(length: Int = 3) -> String {
         String(repeating: "•", count: max(3, length))
@@ -166,7 +176,7 @@ enum CardVault {
         guard ctx.canEvaluatePolicy(.deviceOwnerAuthentication, error: &error) else {
             return .unavailable(
                 "這台裝置沒有設定密碼或 Face ID，沒辦法驗證身分。"
-                + "請到「設定 → Face ID 與密碼」設定後再試——沒有鎖的裝置，卡號存在哪裡都不安全。"
+                + "請到「設定 → Face ID 與密碼」設定後再試——沒有鎖的裝置，卡號、帳號存在哪裡都不安全。"
             )
         }
         let granted: Bool = await withCheckedContinuation { cont in

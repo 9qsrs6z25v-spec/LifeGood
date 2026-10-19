@@ -6,8 +6,8 @@ import ImageIO
 // [v25.534] 房屋卡片用到的編輯頁與共用照片元件，從 RealEstateDetailView.swift 原封搬過來
 // （卡片本身改成「資料＋各區 View＋外殼」之後，這些跟畫面無關的編輯頁獨立一個檔）。
 // 搬家時只把 fileprivate 改成 internal：realEstateEditorSectionHeader、FloorItemEditTarget、FloorItemEditor。
-// CutePhotoViewer、ThumbnailImageView、CutePhotoDraft 也給 VehicleDetailView 用；UtilityPaymentEditor、
-// realEstateBankWithdrawalValue 也給 AddRealEstateView 用。
+// CutePhotoViewer、ThumbnailImageView、CutePhotoDraft 也給 VehicleDetailView 用；UtilityPaymentEditor
+// 也給 AddRealEstateView 用（[v25.562] AddRealEstateView 的記帳扣款改走 FinanceRates.bankAmount）。
 
 // MARK: - 編輯 sheet 共用 Section header
 // 【美化 v9】ElevatorMaintenanceEditor／UtilityPaymentEditor 共用，4pt 漸層 Capsule 側條
@@ -178,19 +178,26 @@ struct UtilityPaymentEditor: View {
         return estate.utilityMeterSlots().filter { $0.type == t }
     }
 
-    private var creditCardMilestones: [LifeMilestone] {
+    /// 所有信用卡（含停用）：以前用停用卡繳的那筆，標籤還要寫得出卡名
+    private var allCreditCardMilestones: [LifeMilestone] {
         lifeStore.milestones.filter {
             $0.category == .achievement && $0.financeSubCategory == .creditCard
         }
     }
 
+    /// [v25.562] 付款選單只列還在用的卡（停用的卡不再出現，跟記帳的選單一樣）
+    private var creditCardMilestones: [LifeMilestone] {
+        allCreditCardMilestones.filter { $0.isDisabled != true }
+    }
+
+    /// 已經選了卡（可能是停用卡）也要顯示這一區，不然舊紀錄看不到、也改不掉扣款目標
     private var hasPaymentTargets: Bool {
-        !bankMilestones.isEmpty || !creditCardMilestones.isEmpty
+        !bankMilestones.isEmpty || !creditCardMilestones.isEmpty || selectedCreditCardMilestoneId != nil
     }
 
     private var bankPickerLabel: String {
         if let id = selectedCreditCardMilestoneId,
-           let card = creditCardMilestones.first(where: { $0.id == id }) {
+           let card = allCreditCardMilestones.first(where: { $0.id == id }) {
             return card.cardName ?? card.title
         }
         if let id = selectedBankMilestoneId,
@@ -546,17 +553,12 @@ struct UtilityPaymentEditor: View {
 }
 
 /// [v25.530] 扣款帳戶是外幣子帳戶時，台幣金額用設定裡的匯率換成那個幣別再記
-/// （銀行頁也是用同一個匯率把外幣換回台幣，兩邊對得上）。AddExpenseView 目前是直接把台幣數字
-/// 標成外幣，沒有可照抄的換算，所以改用 currencyRates；設定裡找不到這個幣別的匯率時，
-/// 就記成 NT$ 原額，至少不會把台幣數字標成外幣。水電瓦斯編輯器、卡片頁複製支出、編輯頁保險／附屬資產共用這一個。
+/// （銀行頁也是用同一個匯率把外幣換回台幣，兩邊對得上）；設定裡找不到這個幣別的匯率時，
+/// 就記成 NT$ 原額，至少不會把台幣數字標成外幣。水電瓦斯編輯器用這一個。
+/// [v25.562] 起跟記帳、收入、股票交割同一支（FinanceRates.accountAmount），規則只寫在那裡；
+/// 結果跟以前一模一樣（台幣照寫、有匯率 ÷ 匯率四捨五入到 0.01、查不到寫台幣那一格）。
 func realEstateBankWithdrawalValue(ntd: Double, currency: String?, rates: [CurrencyRate]) -> (amount: Double, code: String) {
-    guard let code = currency, !code.isEmpty else { return (ntd, "NT$") }
-    if code == "NT$" || code == "TWD" { return (ntd, code) }
-    if let rate = rates.first(where: { $0.code == code }), rate.rate > 0 {
-        let converted: Double = (ntd / rate.rate * 100).rounded() / 100
-        return (converted, code)
-    }
-    return (ntd, "NT$")
+    FinanceRates(rates: rates).accountAmount(ntd: ntd, into: currency ?? "NT$")
 }
 
 // MARK: - 房屋資料集錦：可愛風照片瀏覽器

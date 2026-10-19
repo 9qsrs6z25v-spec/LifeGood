@@ -3390,8 +3390,9 @@ struct AddExpenseView: View {
         }
 
         // 股票連動時自動計算金額
+        // [v25.562] 股票頁「賣出虧損」自動建的那筆不算：它的金額是虧損，以前在記帳改個備註就被換成股數 × 買價
         var finalAmountText = amountText
-        if expenseType == .variable && selectedAssetLink == .stock {
+        if expenseType == .variable && selectedAssetLink == .stock && !isStockSaleLossExpense {
             if let shares = Double(stockSharesText), let price = Double(stockPriceText), shares > 0, price > 0 {
                 finalAmountText = String(format: "%.0f", shares * price)
             }
@@ -3425,8 +3426,13 @@ struct AddExpenseView: View {
         // 同上：變動支出「關聯資產＝股票」且尚未連結既有股票時會經 syncStockInvestment()
         // 建立全新 Stock，股數／價格留空會被 (Double(...) ?? 0) 靜默存成 0，變成一筆與本支出
         // 金額完全脫鉤、股數 0 的空殼持股卻沒有任何提示；比照上面不動產守衛補上必填檢查。
+        // [v25.562] 連著的股票已經被刪掉（syncStockInvestment 會新建一筆）也算新建，一樣要檢查
+        var linkedStockStillExists = false
+        if let sid = editingExpense?.linkedStockId {
+            linkedStockStillExists = financeStore.stocks.contains(where: { $0.id == sid })
+        }
         let willCreateNewStock =
-            expenseType == .variable && selectedAssetLink == .stock && editingExpense?.linkedStockId == nil
+            expenseType == .variable && selectedAssetLink == .stock && !linkedStockStillExists
         if willCreateNewStock, !((Double(stockSharesText) ?? 0) > 0 && (Double(stockPriceText) ?? 0) > 0) {
             validationErrorMessage = "新增股票投資時，請輸入有效的股數與價格（大於 0）。"
             withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
@@ -3659,40 +3665,124 @@ struct AddExpenseView: View {
             }
             return
         }
+        // [v25.562] 連到的股票自己有交割帳戶（股票頁選了銀行或證券戶）：銀行的錢只看股票自己寫的交割紀錄，
+        // 這筆記帳不再寫扣款（不然同一筆買進扣兩次）；跟財富頁算餘額的 bankDepositIsReplaced 同一條。
+        // 只清掉目前這個帳戶裡以前寫的那筆。記帳「買 0050（台新）」建出來、還沒選交割帳戶的股票照扣。
+        if let sid = expense.linkedStockId,
+           financeStore.stocks.first(where: { $0.id == sid })?.hasOwnSettlementAccount == true {
+            if let bankId = expense.linkedBankMilestoneId,
+               var ms = lifeStore.milestones.first(where: { $0.id == bankId }) {
+                ms.bankDeposits?.removeAll { $0.linkedExpenseId == expense.id }
+                lifeStore.update(ms)
+            }
+            return
+        }
         // 寫入新的連結記錄（直接扣款的銀行）
         guard let bankId = expense.linkedBankMilestoneId,
               var ms = lifeStore.milestones.first(where: { $0.id == bankId }) else { return }
         var list = ms.bankDeposits ?? []
         list.removeAll { $0.linkedExpenseId == expense.id }
+        // [v25.562] 扣外幣子帳戶要換匯：記帳金額存的是台幣，以前直接寫成「美金 320」。
+        // 全 App 同一支 FinanceRates.bankAmount（台幣格照寫、外幣儲蓄險原幣照寫、有匯率就換、查不到寫台幣格）
+        let withdrawal = FinanceRates(store).bankAmount(of: expense, ntd: store.ntdValue(of: expense))
         list.append(BankDeposit(
-            id: UUID(), date: expense.date, amount: expense.amount,
-            currencyCode: expense.linkedBankCurrency ?? "NT$",
+            id: UUID(), date: expense.date, amount: withdrawal.amount,
+            currencyCode: withdrawal.code,
             isWithdrawal: true, linkedExpenseId: expense.id
         ))
         ms.bankDeposits = list
         lifeStore.update(ms)
     }
 
+    /// [v25.562] 正在編輯的這筆是股票頁賣出虧損時自動建的記帳（AddStockView.syncSoldExpense；
+    /// 股票的 linkedExpenseId 指回它，刪支出時 VariableExpenseView 也用同一條認）。金額是虧損，不是投入金額。
+    private var isStockSaleLossExpense: Bool {
+        guard let e = editingExpense, let sid = e.linkedStockId else { return false }
+        return financeStore.stocks.first(where: { $0.id == sid })?.linkedExpenseId == e.id
+    }
+
     /// 同步建立股票投資紀錄
+    /// [v25.562] 編輯時不再用 Stock(...) 整筆重建：以前存一次記帳，股票的交割帳戶、交易紀錄、股利、
+    /// 已賣出全被洗掉（W8 靠「股票自己有交割帳戶」判斷，股票被洗掉後重複扣款又會回來）。
+    /// 既有股票只改名稱、代號、備註；沒有交易紀錄、沒賣出的舊版單筆股票才改股數、買價、日期；
+    /// 目前價格有填才改。找不到那檔股票（在股票頁刪掉了）才新建一筆。
     private func syncStockInvestment(existingId: UUID?) -> UUID {
-        let stockId = existingId ?? UUID()
         let shares = Double(stockSharesText) ?? 0
         let price = Double(stockPriceText) ?? 0
-        let currentPrice = Double(stockCurrentPriceText) ?? price
+        let trimmedStockName = stockName.trimmingCharacters(in: .whitespaces)
+        let finalName = trimmedStockName.isEmpty ? title.trimmingCharacters(in: .whitespaces) : trimmedStockName
+        let finalSymbol = stockSymbol.trimmingCharacters(in: .whitespaces).uppercased()
+        let finalNote = note.trimmingCharacters(in: .whitespaces)
 
+        if let sid = existingId, var s = financeStore.stocks.first(where: { $0.id == sid }) {
+            s.name = finalName
+            s.symbol = finalSymbol
+            // 備註：股票的備註還是空的、或還是當初從這筆記帳抄過去的才跟著改；在股票頁自己寫過的留著
+            let previousNote = editingExpense?.note.trimmingCharacters(in: .whitespaces) ?? ""
+            if s.note.isEmpty || s.note == previousNote { s.note = finalNote }
+            var legacyCostChanged = false
+            if s.transactions.isEmpty && !s.isSold {
+                let oldDate = s.purchaseDate
+                let oldShares = s.shares
+                let oldPrice = s.purchasePrice
+                s.purchaseDate = date
+                // 欄位清空不把股數、買價洗成 0
+                if shares > 0 { s.shares = shares }
+                if price > 0 { s.purchasePrice = price }
+                legacyCostChanged = s.purchaseDate != oldDate || s.shares != oldShares || s.purchasePrice != oldPrice
+            }
+            if let typedCurrent = Double(stockCurrentPriceText), typedCurrent > 0 {
+                s.currentPrice = typedCurrent
+            }
+            financeStore.update(s)
+            if legacyCostChanged && s.hasOwnSettlementAccount {
+                resyncLegacyStockPurchase(s)
+            }
+            return sid
+        }
+
+        let stockId = existingId ?? UUID()
+        let currentPrice = Double(stockCurrentPriceText) ?? price
         let stock = Stock(
             id: stockId,
-            name: stockName.trimmingCharacters(in: .whitespaces).isEmpty ? title.trimmingCharacters(in: .whitespaces) : stockName.trimmingCharacters(in: .whitespaces),
-            symbol: stockSymbol.trimmingCharacters(in: .whitespaces).uppercased(),
+            name: finalName,
+            symbol: finalSymbol,
             purchaseDate: date,
             shares: shares,
             purchasePrice: price,
             currentPrice: currentPrice,
-            note: note.trimmingCharacters(in: .whitespaces)
+            note: finalNote
         )
-
-        if existingId != nil { financeStore.update(stock) } else { financeStore.add(stock) }
+        financeStore.add(stock)
         return stockId
+    }
+
+    /// [v25.562 驗證補] 舊版單筆股票（沒有交易紀錄、沒賣出）自己有交割帳戶時，記帳改了股數、買價、日期，
+    /// 交割帳戶裡那筆買進扣款跟著重寫——W8 之後銀行只看股票自己的交割紀錄、這筆記帳不扣，
+    /// 不重寫的話台新還是扣舊的金額（記帳改成 20 萬，台新還是 −19 萬）。
+    /// 寫法同 AddStockView.syncAccountTransactions 的舊版聚合模式（成本＝股數 × 買價、T+2 交割、
+    /// stockAmountForAccount 一條規則）；只換買進那筆扣款，股票卡寫的股利入帳不動。
+    private func resyncLegacyStockPurchase(_ stock: Stock) {
+        guard let accId = stock.linkedBankMilestoneId ?? stock.linkedSecuritiesMilestoneId,
+              var ms = lifeStore.milestones.first(where: { $0.id == accId }) else { return }
+        var list = ms.bankDeposits ?? []
+        list.removeAll { $0.linkedStockId == stock.id && $0.isWithdrawal }
+        let cost = stock.shares * stock.purchasePrice
+        if cost > 0 {
+            let w = stockAmountForAccount(cost, stock: stock, accountCurrency: stock.linkedBankCurrency ?? "NT$",
+                                          rates: FinanceRates(store))
+            list.append(BankDeposit(
+                id: UUID(),
+                date: StockTransaction.taiwanSettlementDate(from: stock.purchaseDate),
+                amount: w.amount,
+                currencyCode: w.code,
+                isWithdrawal: true,
+                linkedExpenseId: nil,
+                linkedStockId: stock.id
+            ))
+        }
+        ms.bankDeposits = list
+        lifeStore.update(ms)
     }
 
     /// 同步房地產支出（房屋價金→已支出章節，其餘→變動支出章節）
@@ -4219,9 +4309,10 @@ struct AddExpenseView: View {
                 selectedAssetLink = .stock
                 stockName = linked.name
                 stockSymbol = linked.symbol
-                stockSharesText = String(format: "%.0f", linked.shares)
-                stockPriceText = String(format: "%.2f", linked.purchasePrice)
-                stockCurrentPriceText = linked.currentPrice > 0 ? String(format: "%.2f", linked.currentPrice) : ""
+                // [v25.562] 帶回不丟位數（以前 %.0f：1.5 股帶成「2」，存一次股票就被改成 2 股）
+                stockSharesText = Self.editableNumber(linked.shares)
+                stockPriceText = Self.editableNumber(linked.purchasePrice)
+                stockCurrentPriceText = linked.currentPrice > 0 ? Self.editableNumber(linked.currentPrice) : ""
             } else if expense.linkedInsuranceId != nil {
                 selectedAssetLink = .insurance
                 selectedInsuranceLinkId = expense.linkedInsuranceId

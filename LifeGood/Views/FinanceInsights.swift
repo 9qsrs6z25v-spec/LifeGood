@@ -80,6 +80,63 @@ struct FinanceRates {
     func ntd(_ amount: Double, code: String) -> Double { amount * rate(code) }
 
     static func isNTD(_ code: String) -> Bool { code == "NT$" || code == "TWD" || code.isEmpty }
+
+    /// [v25.562] 不經 ExpenseStore、直接拿一份匯率表建（房屋水電編輯器手上只有 [CurrencyRate]）。
+    /// 規則跟 init(_:) 一模一樣：rate > 0 的才收，同名的後面蓋前面。
+    init(rates: [CurrencyRate]) {
+        var m: [String: Double] = ["NT$": 1, "TWD": 1, "": 1]
+        for r in rates where r.rate > 0 { m[r.code] = r.rate }
+        map = m
+    }
+
+    /// [v25.562] 這個幣別是不是美元（使用者自己取的名字：「美金」「美元」「USD」「US$」都算）
+    static func isUSD(_ code: String) -> Bool {
+        if FXRateService.isoCode(for: code) == "USD" { return true }
+        let up = code.uppercased()
+        return up.contains("USD") || up.contains("US$")
+    }
+
+    /// [v25.562] 一筆台幣金額要寫進帳戶的哪一格、寫多少（全 App 只有這一支：記帳、AI 記帳、收入、
+    /// 複製收入／支出、固定支出與月薪展開、股票交割、房屋水電都走這裡）。規則一行一條：
+    /// 1. 帳戶這格是台幣 → 台幣金額照寫
+    /// 2. 原本就是這個幣別（外幣儲蓄險的原幣保費）→ 原幣金額照寫
+    /// 3. 設定裡有這個幣別的匯率 → 台幣 ÷ 匯率，四捨五入到 0.01
+    /// 4. 查不到匯率 → 寫進這個帳戶的台幣那一格（錢至少對），不再把台幣數字標成外幣
+    func accountAmount(ntd: Double, original: (amount: Double, code: String)? = nil,
+                       into code: String) -> (amount: Double, code: String) {
+        if Self.isNTD(code) { return (ntd, code.isEmpty ? "NT$" : code) }
+        if let o = original, o.code == code { return (o.amount, code) }
+        if let r = known(code), r > 0 {
+            let converted: Double = (ntd / r * 100).rounded() / 100
+            return (converted, code)
+        }
+        return (ntd, "NT$")
+    }
+
+    /// [v25.562] 一筆支出直接扣銀行時寫多少、寫哪一格（帳戶幣別＝exp.linkedBankCurrency，沒存當台幣）。
+    /// ntd 由呼叫端用 ExpenseStore.ntdValue(of:) 算好傳進來（換台幣只有那一支）。
+    func bankAmount(of exp: Expense, ntd: Double) -> (amount: Double, code: String) {
+        accountAmount(ntd: ntd, original: exp.originalCurrencyAmount, into: exp.linkedBankCurrency ?? "NT$")
+    }
+}
+
+extension Stock {
+    /// [v25.562] 這檔股票自己有交割帳戶（銀行或證券戶）：跟它有關的收入、支出（配息、賣出獲利／虧損、
+    /// 從記帳買的那筆）不再碰銀行，銀行的錢只看股票自己寫的交割、股利紀錄（不然在收入頁改一次就多入帳一次）。
+    /// 記帳「買 0050（台新）」建出來的股票沒有交割帳戶 → 那筆記帳照樣扣台新。
+    var hasOwnSettlementAccount: Bool {
+        (linkedBankMilestoneId ?? linkedSecuritiesMilestoneId) != nil
+    }
+}
+
+extension Expense {
+    /// [v25.562] 金額是不是用原幣存的：只有外幣儲蓄險（amount 沒乘匯率，見 ExpenseStore.ntdValue(of:)）。
+    /// 其他支出存檔時就換成台幣了，currencyCode 只是當初輸入的幣別。
+    var originalCurrencyAmount: (amount: Double, code: String)? {
+        guard fixedCategory == .insurance, insuranceSubCategory == .savings,
+              !FinanceRates.isNTD(currencyCode) else { return nil }
+        return (amount, currencyCode)
+    }
 }
 
 // MARK: - 某一天的資產與貸款

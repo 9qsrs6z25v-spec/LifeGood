@@ -12,7 +12,7 @@
 // 常數
 // ---------------------------------------------------------------------------
 /** 網頁版自己的版本（與 App 版本無關；改網頁不再動 App 版號） */
-const WEB_VERSION = '1.10';
+const WEB_VERSION = '1.11';
 const CONTAINER_ID = 'iCloud.com.lifegood.app';
 const ZONE_NAME = 'LifeGoodZone';
 const TOKEN_KEY = 'lifegood_ck_token';
@@ -1755,6 +1755,14 @@ function renderStockDetail(main, id) {
 }
 
 // ---- 人生・財富（財富卡片） -------------------------------------------------
+/** 號碼只露後 4 碼（v1.11；規則同 App 的 CardVault.maskedTail）：有數字取最後 4 個數字、一個數字都沒有取最後 4 個字。
+ *  信用卡到期日不顯示：它跟卡號一樣是 App 裡要 Face ID 才看得到的資料。 */
+function maskTail(raw) {
+  const s = String(raw ?? '').trim();
+  if (!s) return '';
+  const digits = s.match(/[0-9０-９]/g);
+  return '••' + (digits ? digits.slice(-4).join('') : [...s].slice(-4).join(''));
+}
 function renderWealth(main) {
   const S = financeSummary(); const now = S.now;
   const subColor = { '銀行': 'blue', '信用卡': 'orange', '證券': 'green', '保險': 'purple' };
@@ -1771,10 +1779,10 @@ function renderWealth(main) {
         const deps = [...(m.bankDeposits || [])].sort((a, b) => b.date - a.date).slice(0, 8);
         extra = deps.length ? `<details class="agenda"><summary>最近存提 ${deps.length} 筆</summary><div class="sub-items">${deps.map((d) => `<div class="t-meta" style="padding:3px 0;display:flex;justify-content:space-between"><span>${fmtDate(d.date).split(' ')[0]}${d.isAdjust ? ' <span class="chip indigo">沖正</span>' : ''}${d.note ? '・' + esc(d.note) : ''}</span><b style="color:${d.isWithdrawal ? 'var(--red)' : 'var(--green)'}">${d.isWithdrawal ? '−' : '+'}${fmtAmt(d.amount, d.currencyCode)}</b></div>`).join('')}</div></details>` : '';
       } else if (m.financeSubCategory === '信用卡') {
-        const used = S.cardMonth(m); val = fmtMoney(used) + '／本月'; detail = [m.creditLimit ? `額度 ${fmtMoney(m.creditLimit)}・${Math.round(used / m.creditLimit * 100)}%` : '', m.annualFee ? '年費 ' + fmtMoney(m.annualFee) : '', m.billingDay ? '結帳 ' + m.billingDay + ' 日' : '', m.paymentDay ? '繳款 ' + m.paymentDay + ' 日' : '', m.expiryDate ? '到期 ' + fmtDate(m.expiryDate).split(' ')[0] : '', m.linkedBankMilestoneId ? '扣款 ' + bankNameOf(m.linkedBankMilestoneId) : ''].filter(Boolean).join('・');
+        const used = S.cardMonth(m); val = fmtMoney(used) + '／本月'; detail = [m.creditLimit ? `額度 ${fmtMoney(m.creditLimit)}・${Math.round(used / m.creditLimit * 100)}%` : '', m.annualFee ? '年費 ' + fmtMoney(m.annualFee) : '', m.billingDay ? '結帳 ' + m.billingDay + ' 日' : '', m.paymentDay ? '繳款 ' + m.paymentDay + ' 日' : '', m.linkedBankMilestoneId ? '扣款 ' + bankNameOf(m.linkedBankMilestoneId) : ''].filter(Boolean).join('・');
         const ents = creditCardEntries(m.id, now).sort((a, b) => b.date - a.date).slice(0, 8);
         extra = ents.length ? `<details class="agenda"><summary>最近消費 ${ents.length} 筆</summary><div class="sub-items">${ents.map((e) => `<div class="t-meta" style="padding:3px 0;display:flex;justify-content:space-between"><span>${fmtDate(e.date).split(' ')[0]}・${esc(e.expense.title)}</span><b>${fmtFull(e.amount)}</b></div>`).join('')}</div></details>` : '';
-      } else if (m.financeSubCategory === '保險') { val = m.premiumAmount ? fmtMoney(m.premiumAmount) + '／期' : ''; detail = [m.insuranceCompany, m.insuranceType, m.policyNumber, m.beneficiary ? '受益人 ' + m.beneficiary : ''].filter(Boolean).join('・'); }
+      } else if (m.financeSubCategory === '保險') { val = m.premiumAmount ? fmtMoney(m.premiumAmount) + '／期' : ''; detail = [m.insuranceCompany, m.insuranceType, m.policyNumber ? '保單 ' + maskTail(m.policyNumber) : '', m.beneficiary ? '受益人 ' + m.beneficiary : ''].filter(Boolean).join('・'); }
       else { const linked = Store.stocks.filter((s) => s.linkedSecuritiesMilestoneId === m.id && !s.isSold); val = fmtMoney(linked.reduce((a, s) => a + stockView(s).mv, 0)); detail = [m.securitiesAccountType, `持股 ${linked.length} 檔`].filter(Boolean).join('・'); extra = linked.length ? `<div class="chips" style="margin-top:6px">${linked.map((s) => `<a class="chip green" href="#/finance/stock/${s.id}">${esc(s.symbol)}</a>`).join('')}</div>` : ''; }
       return `<div class="card" style="${m.isDisabled ? 'opacity:.55' : ''}"><div class="row" style="align-items:flex-start"><div class="avatar sm" style="background:${m.financeSubCategory === '銀行' ? 'linear-gradient(135deg,#007aff,#5ac8fa)' : m.financeSubCategory === '信用卡' ? 'linear-gradient(135deg,#ff9500,#ffcc00)' : m.financeSubCategory === '證券' ? 'linear-gradient(135deg,#34c759,#30b0c7)' : 'linear-gradient(135deg,#af52de,#5856d6)'}">${esc(initial(m.bankName || m.insuranceCompany || m.title))}</div><div style="flex:1;min-width:0"><div style="font-weight:900;font-size:15px">${esc(m.title)} <span class="chip ${subColor[m.financeSubCategory] || ''}">${esc(m.financeSubCategory)}</span>${m.isDisabled ? ' <span class="chip">停用</span>' : ''}</div><div class="muted small">${esc([m.bankName, m.branchName, m.bankAccountType, m.cardName, m.cardLastFour ? '末' + m.cardLastFour : ''].filter(Boolean).join('・'))}</div></div><div class="score s80" style="font-size:18px">${val}</div></div><div class="muted small" style="margin-top:8px">${esc(detail)}</div>${extra}${m.note ? `<div class="muted small" style="margin-top:6px">${esc(m.note)}</div>` : ''}</div>`;
     }).join('') || '<div class="empty">尚無財富卡片</div>'}</div>`;

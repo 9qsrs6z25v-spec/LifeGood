@@ -101,12 +101,18 @@ import SwiftUI
 
 /// 把連結到指定銀行 milestone 的「直接扣款 + 週期性」固定支出，
 /// 從建立日依 recurrence 一路展開成每期一筆 BankDeposit（虛擬條目，
-/// 用於顯示與餘額計算）。已截至「今天」為止。
+/// 用於顯示與餘額計算）。展開到 now 為止。
+/// [v25.562] now 由呼叫端給（沖正要算到「選的那天結束」，不再寫死今天）。
+/// 金額走 FinanceRates.bankAmount：台幣金額扣外幣子帳戶要換匯、外幣儲蓄險的原幣保費照寫或換成台幣；
+/// 舊資料沒存 linkedBankCurrency 一律當台幣（以前退回 exp.currencyCode——那只是輸入時的幣別，
+/// 金額早就換成台幣了，台幣數字會被丟進「日圓」那一格）。
 fileprivate func expandedFixedExpenseWithdrawals(
     for bankMilestoneId: UUID,
-    expenses: [Expense]
+    expenses: [Expense],
+    now: Date,
+    rates: FinanceRates,
+    ntd: (Expense) -> Double
 ) -> [BankDeposit] {
-    let now = Date()
     let cal = Calendar.current
     let candidates = expenses.filter { exp in
         exp.expenseType == .fixed
@@ -120,6 +126,8 @@ fileprivate func expandedFixedExpenseWithdrawals(
         // [v25.347] 停止後不再扣款：上界取 min(現在, 結束日)，
         // 「排定扣款日 <= 結束日」的那幾期才算數
         let limit = exp.fixedExpansionLimit(now: now)
+        // 每期寫多少、寫哪一格：同一筆支出每期一樣，算一次
+        let w = rates.bankAmount(of: exp, ntd: ntd(exp))
         // 貸款類（房貸 / 車貸）的「日期」代表撥款日 / 起始日；
         // 第一次實際扣款是一個週期之後（撥款日 3/5 → 第一期 4/5）。
         // 其他類型（房租、訂閱、保費⋯）的日期就是第一次扣款日。
@@ -133,8 +141,8 @@ fileprivate func expandedFixedExpenseWithdrawals(
             result.append(BankDeposit(
                 id: stableId,
                 date: current,
-                amount: exp.amount,
-                currencyCode: exp.linkedBankCurrency ?? exp.currencyCode,
+                amount: w.amount,
+                currencyCode: w.code,
                 isWithdrawal: true,
                 linkedExpenseId: exp.id
             ))
@@ -160,7 +168,8 @@ private func nextRecurrenceDate(from date: Date, recurrence: Recurrence, calenda
 // MARK: - 信用卡支出展開（共用）
 
 /// 信用卡虛擬條目：每期一筆的金額與發生日（包含週期性固定支出自動展開後的每期）
-fileprivate struct CreditCardEntry {
+/// [v25.562] 不是 fileprivate：刪卡（LifeStore.deleteFinanceMilestone）要算這張卡刷了多少。amount 一律台幣。
+struct CreditCardEntry {
     let date: Date
     let amount: Double
     /// 真實的 Expense id（多期同 id 沒關係，僅供 deposit linkage 比對使用）
@@ -169,16 +178,21 @@ fileprivate struct CreditCardEntry {
 
 /// 把連結到指定信用卡的支出展開：
 /// - 一次性支出：直接帶入（date <= now 才算）
-/// - 週期性固定支出：從 exp.date 依 recurrence 展開到今天，每期一筆虛擬條目
+/// - 週期性固定支出：從 exp.date 依 recurrence 展開到 now，每期一筆虛擬條目
 ///   貸款類起始日視為撥款日，第一期從下一個週期開始（與 expandedFixedExpenseWithdrawals 一致）
-fileprivate func expandedCreditCardEntries(
+/// [v25.562] now 由呼叫端給；金額用 ntd(exp)（呼叫端傳 ExpenseStore.ntdValue(of:)）：
+/// 外幣儲蓄險的保費是原幣存的，以前 US$5,000 刷卡只算 NT$5,000。
+/// 不是 fileprivate：刪卡（LifeStore.deleteFinanceMilestone）要用同一支算「這張卡到今天刷了多少」。
+func expandedCreditCardEntries(
     forCard cardId: UUID,
-    expenses: [Expense]
+    expenses: [Expense],
+    now: Date,
+    ntd: (Expense) -> Double
 ) -> [CreditCardEntry] {
-    let now = Date()
     let cal = Calendar.current
     var output: [CreditCardEntry] = []
     for exp in expenses where exp.linkedCreditCardMilestoneId == cardId {
+        let amount = ntd(exp)
         if exp.expenseType == .fixed, let recurrence = exp.recurrence {
             let limit = exp.fixedExpansionLimit(now: now)   // [v25.347] 停止後不再刷卡
             var current = exp.date
@@ -187,12 +201,12 @@ fileprivate func expandedCreditCardEntries(
             }
             var idx = 0
             while current <= limit && idx < 1200 {
-                output.append(CreditCardEntry(date: current, amount: exp.amount, expenseId: exp.id))
+                output.append(CreditCardEntry(date: current, amount: amount, expenseId: exp.id))
                 idx += 1
                 current = nextRecurrenceDate(from: current, recurrence: recurrence, calendar: cal)
             }
         } else if exp.date <= now {
-            output.append(CreditCardEntry(date: exp.date, amount: exp.amount, expenseId: exp.id))
+            output.append(CreditCardEntry(date: exp.date, amount: amount, expenseId: exp.id))
         }
     }
     return output
@@ -200,12 +214,15 @@ fileprivate func expandedCreditCardEntries(
 
 /// 把連結到指定銀行 milestone 的「週期性」收入（月薪 / 年薪），
 /// 從建立日依 period 一路展開成每期一筆 BankDeposit（虛擬條目，
-/// 用於顯示與餘額計算）。已截至「今天」為止。
+/// 用於顯示與餘額計算）。展開到 now 為止。
+/// [v25.562] now 由呼叫端給；收入的金額是台幣，入外幣子帳戶走 FinanceRates.accountAmount 換匯
+/// （美金月薪 80,000 入玉山・美金，設定 32.0 → US$2,500.00；以前寫成「美金 80,000」）。
 fileprivate func expandedIncomeDeposits(
     for bankMilestoneId: UUID,
-    incomes: [Income]
+    incomes: [Income],
+    now: Date,
+    rates: FinanceRates
 ) -> [BankDeposit] {
-    let now = Date()
     let cal = Calendar.current
     let candidates = incomes.filter {
         $0.period != .once
@@ -213,6 +230,7 @@ fileprivate func expandedIncomeDeposits(
     }
     var result: [BankDeposit] = []
     for inc in candidates {
+        let w = rates.accountAmount(ntd: inc.amount, into: inc.linkedBankCurrency ?? "NT$")
         var current = inc.date
         var idx = 0
         while current <= now && idx < 1200 {
@@ -223,8 +241,8 @@ fileprivate func expandedIncomeDeposits(
             result.append(BankDeposit(
                 id: stableId,
                 date: current,
-                amount: inc.amount,
-                currencyCode: inc.linkedBankCurrency ?? "NT$",
+                amount: w.amount,
+                currencyCode: w.code,
                 isWithdrawal: false,
                 linkedExpenseId: inc.id
             ))
@@ -268,44 +286,67 @@ fileprivate func stableDepositUUID(seed: String) -> UUID {
     ))
 }
 
+/// [v25.562] 銀行裡這筆真的存提款紀錄，算餘額、列明細時要不要跳過（被別的算法取代）。
+/// 列表、英雄卡、卡片頁明細與「目前總額」、轉帳選單、沖正都用這一條（以前列表一份、明細一份）：
+/// - 連到刷卡的支出 → 用卡費彙總取代
+/// - 連到週期性固定支出、週期性收入 → 用逐期展開取代
+/// - 連到跟股票有關的收入／支出，而那檔股票自己有交割帳戶 → 銀行的錢只看股票自己寫的交割、股利紀錄。
+///   股利、賣出獲利那筆收入在收入頁改過一次，以前會再入帳一次；算的時候跳過，以前重複的那次自動回正
+///   （紀錄本身留著）。記帳「買 0050（台新）」建出來的股票沒有交割帳戶，那筆扣款照算。
+fileprivate func bankDepositIsReplaced(
+    _ dep: BankDeposit,
+    expensesById: [UUID: Expense],
+    incomesById: [UUID: Income],
+    stocksById: [UUID: Stock]
+) -> Bool {
+    guard let linkedId = dep.linkedExpenseId else { return false }
+    if let exp = expensesById[linkedId] {
+        if exp.linkedCreditCardMilestoneId != nil { return true }
+        if exp.expenseType == .fixed, exp.recurrence != nil { return true }
+        if let sid = exp.linkedStockId, stocksById[sid]?.hasOwnSettlementAccount == true { return true }
+        return false
+    }
+    if let inc = incomesById[linkedId] {
+        if inc.period != .once { return true }
+        if let sid = inc.linkedStockId, stocksById[sid]?.hasOwnSettlementAccount == true { return true }
+    }
+    return false
+}
+
 /// 依幣別計算銀行帳戶的目前餘額（含信用卡彙總扣款 NT$ + 固定支出／週期性收入展開）。
 /// 獨立成檔案層級的共用函式（而非 LifeFinanceView 的 private 方法），讓 DepositEditorSheet
 /// 的轉帳／沖正也能算出與列表頁一致的完整餘額，不必各自維護一份簡化、容易脫節的版本。
+/// [v25.562] now 往下傳給三支展開（沖正算到「選的那天結束」）；跳過規則統一走 bankDepositIsReplaced
+/// （多了「股票自己有交割帳戶」那條，所以要 stocksById）；刷卡金額用台幣值（外幣儲蓄險）。
 fileprivate func bankBalances(
     for ms: LifeMilestone, now: Date,
-    expensesById: [UUID: Expense], incomesById: [UUID: Income],
+    expensesById: [UUID: Expense], incomesById: [UUID: Income], stocksById: [UUID: Stock],
     lifeStore: LifeStore, expenseStore: ExpenseStore
 ) -> [String: Double] {
+    let rates = FinanceRates(expenseStore)
+    let ntd: (Expense) -> Double = { expenseStore.ntdValue(of: $0) }
     var totals: [String: Double] = [:]
     for dep in ms.bankDeposits ?? [] where dep.date <= now {
-        // 跳過已連結到信用卡支出的存款（用信用卡彙總取代）
-        if let expId = dep.linkedExpenseId,
-           let exp = expensesById[expId],
-           exp.linkedCreditCardMilestoneId != nil { continue }
-        // 跳過已連結到固定支出（含週期）的存款 — 改用展開的虛擬條目取代，避免漏算或重算
-        if let expId = dep.linkedExpenseId,
-           let exp = expensesById[expId],
-           exp.expenseType == .fixed, exp.recurrence != nil { continue }
-        // 跳過已連結到週期性收入的存款 — 改用展開的虛擬條目取代
-        if let incId = dep.linkedExpenseId,
-           let inc = incomesById[incId],
-           inc.period != .once { continue }
+        if bankDepositIsReplaced(dep, expensesById: expensesById, incomesById: incomesById,
+                                 stocksById: stocksById) { continue }
         totals[dep.currencyCode, default: 0] += dep.isWithdrawal ? -dep.amount : dep.amount
     }
     // 固定支出（直接扣銀行）依週期展開為每期扣款
-    for dep in expandedFixedExpenseWithdrawals(for: ms.id, expenses: expenseStore.expenses) {
+    for dep in expandedFixedExpenseWithdrawals(for: ms.id, expenses: expenseStore.expenses,
+                                               now: now, rates: rates, ntd: ntd) {
         totals[dep.currencyCode, default: 0] -= dep.amount
     }
     // 週期性收入依 period 展開為每期入帳
-    for dep in expandedIncomeDeposits(for: ms.id, incomes: expenseStore.incomes) {
+    for dep in expandedIncomeDeposits(for: ms.id, incomes: expenseStore.incomes, now: now, rates: rates) {
         totals[dep.currencyCode, default: 0] += dep.amount
     }
-    // 信用卡彙總扣款一律以 NT$ 計（週期性固定支出依 recurrence 展開到今天）
+    // 信用卡彙總扣款一律以 NT$ 計（週期性固定支出依 recurrence 展開到 now）
     let cards = lifeStore.milestones.filter {
         $0.financeSubCategory == .creditCard && $0.linkedBankMilestoneId == ms.id
     }
     for card in cards {
-        let entries = expandedCreditCardEntries(forCard: card.id, expenses: expenseStore.expenses)
+        let entries = expandedCreditCardEntries(forCard: card.id, expenses: expenseStore.expenses,
+                                                now: now, ntd: ntd)
         for entry in entries { totals["NT$", default: 0] -= entry.amount }
     }
     // 過濾掉淨額為 0 的幣別（避免單一幣別帳戶被誤判為混幣）
@@ -328,9 +369,166 @@ fileprivate func balanceInTWD(_ balances: [String: Double], expenseStore: Expens
     return total
 }
 
+// MARK: - [v25.562] 信用卡的期別（全 App 只有這一份；v2 搬進 WealthFacts）
+
+/// 一期＝(上次結帳日, 這次結帳日]，以「日」為單位：結帳日當天刷的算這一期
+/// （跟 LifeMilestone.creditCardWithdrawalDate「消費日 > 結帳日才算下一期」同一條規則；
+/// 以前本期從結帳日 00:00 起算，結帳日下午刷的兩期都算到）。
+/// 沒填結帳日當 25 日（跟 creditCardWithdrawalDate 的預設一樣；以前本期用每月 1 號）。
+/// 結帳日比那個月的天數大（31 日遇到二月）就用月底；舊資料打錯的（0、45）夾到 1–31。
+enum CreditCardCycle {
+    static let defaultBillingDay = 25
+
+    /// 實際拿來算的結帳日（沒填 25；夾在 1–31）
+    static func effectiveBillingDay(_ raw: Int?) -> Int {
+        guard let d = raw else { return defaultBillingDay }
+        return min(max(d, 1), 31)
+    }
+
+    /// ref 那個月的結帳日（那天 00:00）
+    static func closeDate(inMonthOf ref: Date, billingDay raw: Int?, calendar cal: Calendar) -> Date {
+        var comps = cal.dateComponents([.year, .month], from: ref)
+        comps.day = 1
+        let first = cal.date(from: comps) ?? cal.startOfDay(for: ref)
+        let maxDay = cal.range(of: .day, in: .month, for: first)?.count ?? 28
+        comps.day = min(effectiveBillingDay(raw), maxDay)
+        return cal.date(from: comps) ?? first
+    }
+
+    /// 今天（含）以前最近一次結帳日（00:00）
+    static func lastClose(billingDay raw: Int?, now: Date, calendar cal: Calendar) -> Date {
+        let today = cal.startOfDay(for: now)
+        let thisMonth = closeDate(inMonthOf: today, billingDay: raw, calendar: cal)
+        if thisMonth <= today { return thisMonth }
+        let prev = cal.date(byAdding: .month, value: -1, to: today) ?? today
+        return closeDate(inMonthOf: prev, billingDay: raw, calendar: cal)
+    }
+
+    /// close 的前一次結帳日
+    static func previousClose(before close: Date, billingDay raw: Int?, calendar cal: Calendar) -> Date {
+        let prev = cal.date(byAdding: .month, value: -1, to: close) ?? close
+        return closeDate(inMonthOf: prev, billingDay: raw, calendar: cal)
+    }
+
+    /// 那天結束＝隔天 00:00（一期的右邊界，不含）
+    static func dayAfter(_ d: Date, calendar cal: Calendar) -> Date {
+        cal.date(byAdding: .day, value: 1, to: cal.startOfDay(for: d)) ?? d
+    }
+
+    struct Status {
+        /// 本期起點：上次結帳日隔天 00:00
+        let cycleStart: Date
+        /// 本期已刷（cycleStart ～ now）
+        let currentSpent: Double
+        /// 上期帳單（上上次結帳日隔天 ～ 上次結帳日那天結束）
+        let lastBill: Double
+        /// 上期帳單的扣款日（creditCardWithdrawalDate）
+        let lastBillDue: Date
+        /// 上期帳單還沒扣（扣款日還沒到）的金額；扣款日到了是 0
+        let lastBillUnpaid: Double
+
+        /// 佔用額度＝上期還沒扣＋本期已刷（以前只算本期，過結帳日額度就回滿）
+        var used: Double { lastBillUnpaid + currentSpent }
+        func available(limit: Double) -> Double { max(0, limit - used) }
+        func ratio(limit: Double) -> Double { limit > 0 ? min(1, used / limit) : 0 }
+    }
+
+    /// entries 用 expandedCreditCardEntries 算好的（台幣）；now 之後的不算
+    static func status(entries: [CreditCardEntry], billingDay: Int?, paymentDay: Int?,
+                       now: Date, calendar cal: Calendar = .current) -> Status {
+        let lc = lastClose(billingDay: billingDay, now: now, calendar: cal)
+        let start = dayAfter(lc, calendar: cal)
+        let pc = previousClose(before: lc, billingDay: billingDay, calendar: cal)
+        let lastStart = dayAfter(pc, calendar: cal)
+        var current: Double = 0
+        var last: Double = 0
+        for e in entries where e.date <= now {
+            if e.date >= start {
+                current += e.amount
+            } else if e.date >= lastStart {
+                last += e.amount
+            }
+        }
+        let due = LifeMilestone.creditCardWithdrawalDate(
+            for: lc, billingDay: effectiveBillingDay(billingDay), paymentDay: paymentDay)
+        return Status(cycleStart: start, currentSpent: current, lastBill: last,
+                      lastBillDue: due, lastBillUnpaid: due > now ? last : 0)
+    }
+}
+
+// MARK: - [v25.562] 切到背景就蓋住
+
+/// armed 的畫面一切到背景，App 切換器的縮圖看到的是一層霧＋鎖頭，不是卡號、帳號、金額。
+/// 只看 scenePhase：叫出 App 切換器、下拉控制中心、來電那一刻是 .inactive 就蓋，回到 .active 才拿掉。
+/// armed 是 false 就什麼都不做（沒有號碼的表單不被打擾）。財富卡片一律 armed（judge §7.1、§9-14），
+/// 編輯表單有號碼才 armed。
+/// ⚠️ 每個敏感的 sheet 自己掛（財富卡片、編輯表單）：sheet 蓋在 App 最外層畫面的上面，
+///    掛在 LifeGoodApp 最外層蓋不到 sheet。號碼要不要收回由各畫面自己決定
+///    （財富卡片收回；編輯表單裡打到一半的卡號不收，只蓋）。
+struct WealthPrivacyCurtain: ViewModifier {
+    let armed: Bool
+    @Environment(\.scenePhase) private var scenePhase
+
+    func body(content: Content) -> some View {
+        content.overlay {
+            if armed && scenePhase != .active {
+                WealthPrivacyCurtainCover()
+            }
+        }
+    }
+}
+
+// MARK: - [v25.562] 刪財富帳戶的確認框（財富卡片、履歷共用；字由 LifeStore.financeDeletionImpact 數好）
+
+/// 還在用的卡：〔改成停用〕〔仍要刪除〕〔取消〕；銀行和其他：〔刪除〕〔取消〕。
+/// 拆成 ViewModifier：卡片頁的 body 已經掛了一長串 sheet／alert，再塞會讓型別檢查逾時（坑 #7）。
+/// onDelete 由呼叫端決定怎麼刪（卡片頁先關畫面、下一個 runloop 才寫 store；履歷直接刪）。
+struct FinanceDeleteAlert: ViewModifier {
+    @Binding var pending: FinanceDeletionImpact?
+    let onDisable: (LifeMilestone) -> Void
+    let onDelete: (LifeMilestone) -> Void
+
+    func body(content: Content) -> some View {
+        content.alert(
+            pending?.title ?? "確定要刪除嗎？",
+            isPresented: Binding(get: { pending != nil }, set: { if !$0 { pending = nil } }),
+            presenting: pending
+        ) { impact in
+            if impact.offersDisable {
+                Button("改成停用") { onDisable(impact.item) }
+            }
+            Button(impact.deleteButtonTitle, role: .destructive) { onDelete(impact.item) }
+            Button("取消", role: .cancel) {}
+        } message: { impact in
+            Text(impact.message)
+        }
+    }
+}
+
+/// 布幕本身：厚霧（ultraThin 的霧太薄，大字卡號還認得出來）＋鎖頭＋「美好人生」
+private struct WealthPrivacyCurtainCover: View {
+    var body: some View {
+        ZStack {
+            Rectangle().fill(.thickMaterial)
+            VStack(spacing: 10) {
+                Image(systemName: "lock.shield.fill")
+                    .font(.system(size: 44, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                Text("美好人生")
+                    .font(.headline)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .ignoresSafeArea()
+        .accessibilityHidden(true)
+    }
+}
+
 struct LifeFinanceView: View {
     @EnvironmentObject var lifeStore: LifeStore
     @EnvironmentObject var expenseStore: ExpenseStore
+    /// [v25.562] 算餘額要知道哪些股票自己有交割帳戶（bankDepositIsReplaced）
+    @EnvironmentObject var financeStore: FinanceStore
     @EnvironmentObject var subscription: SubscriptionManager
     @State private var selectedSub: FinanceSubCategory?
     @State private var viewingItem: LifeMilestone?
@@ -340,9 +538,18 @@ struct LifeFinanceView: View {
     @State private var headerAppeared = false
     @State private var rowsAppeared = false
 
+    /// 列表最外層的列：沒掛在銀行底下的。
+    /// [v25.562] 指到的銀行已經不在（舊資料：以前刪銀行沒清卡的連結）也當獨立一列——
+    /// 以前只認 linkedBankMilestoneId == nil，刪掉郵局，掛在郵局底下的卡整張不見。
     private var financeMilestones: [LifeMilestone] {
-        lifeStore.milestones
-            .filter { $0.category == .achievement && $0.linkedBankMilestoneId == nil }
+        let bankIds = Set(lifeStore.milestones.filter {
+            $0.category == .achievement && $0.financeSubCategory == .bank
+        }.map(\.id))
+        return lifeStore.milestones
+            .filter { m in
+                m.category == .achievement
+                    && (m.linkedBankMilestoneId.map { !bankIds.contains($0) } ?? true)
+            }
             .sorted { $0.date > $1.date }
     }
 
@@ -351,11 +558,27 @@ struct LifeFinanceView: View {
         lifeStore.milestones.filter { $0.category == .achievement }
     }
 
+    /// [v25.562] 全部的信用卡（含掛在銀行底下的），新到舊。「信用卡」篩選與膠囊計數用，跟英雄卡的張數一樣。
+    private var allCreditCards: [LifeMilestone] {
+        lifeStore.milestones
+            .filter { $0.category == .achievement && $0.financeSubCategory == .creditCard }
+            .sorted { $0.date > $1.date }
+    }
+
     private var filteredMilestones: [LifeMilestone] {
-        if let sub = selectedSub {
-            return financeMilestones.filter { $0.financeSubCategory == sub }
+        guard let sub = selectedSub else { return financeMilestones }
+        // [v25.562] 「信用卡」從全部的卡篩：以前只看最外層，掛在銀行底下的卡點了篩選反而看不到
+        if sub == .creditCard { return allCreditCards }
+        return financeMilestones.filter { $0.financeSubCategory == sub }
+    }
+
+    /// 篩選膠囊的計數：信用卡那格數全部的卡，其他照舊數最外層的列（點下去看到幾張就寫幾張）
+    private var filterChipCounts: [FinanceSubCategory: Int] {
+        var counts: [FinanceSubCategory: Int] = financeMilestones.reduce(into: [:]) { dict, m in
+            if let sub = m.financeSubCategory { dict[sub, default: 0] += 1 }
         }
-        return financeMilestones
+        counts[.creditCard] = allCreditCards.count
+        return counts
     }
 
     var body: some View {
@@ -508,10 +731,8 @@ struct LifeFinanceView: View {
     // MARK: - 篩選
 
     private var filterChips: some View {
-        // 一次 reduce 建立計數表，避免 ForEach 內對每個分類各做一次 O(n) filter
-        let countBySub: [FinanceSubCategory: Int] = financeMilestones.reduce(into: [:]) { dict, m in
-            if let sub = m.financeSubCategory { dict[sub, default: 0] += 1 }
-        }
+        // 一次建立計數表，避免 ForEach 內對每個分類各做一次 O(n) filter
+        let countBySub: [FinanceSubCategory: Int] = filterChipCounts
         return ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
                 chipButton(label: "全部", icon: "tray.full.fill",
@@ -744,12 +965,14 @@ struct LifeFinanceView: View {
         let now = Date()
         let expensesById = Dictionary(expenseStore.expenses.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         let incomesById = Dictionary(expenseStore.incomes.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let stocksById = Dictionary(financeStore.stocks.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         let banks = lifeStore.milestones.filter {
             $0.category == .achievement && $0.financeSubCategory == .bank
         }
         var result: [UUID: [String: Double]] = [:]
         for ms in banks {
-            result[ms.id] = bankBalances(for: ms, now: now, expensesById: expensesById, incomesById: incomesById, lifeStore: lifeStore, expenseStore: expenseStore)
+            result[ms.id] = bankBalances(for: ms, now: now, expensesById: expensesById, incomesById: incomesById,
+                                         stocksById: stocksById, lifeStore: lifeStore, expenseStore: expenseStore)
         }
         return result
     }
@@ -776,11 +999,19 @@ struct LifeFinanceView: View {
         case .securities:
             if let accType = item.securitiesAccountType { Text(accType.rawValue).font(.caption).foregroundStyle(.secondary) }
         case .insurance:
-            let parts = [item.insuranceType?.rawValue, item.policyNumber].compactMap { $0 }.filter { !$0.isEmpty }
+            // [v25.562] 保單號碼只露後 4 碼（列表沒有 Face ID，看完整的到卡片頁按眼睛）
+            let parts = [item.insuranceType?.rawValue, maskedPolicyNumber(item)].compactMap { $0 }.filter { !$0.isEmpty }
             if !parts.isEmpty { Text(parts.joined(separator: " · ")).font(.caption).foregroundStyle(.secondary).lineLimit(1) }
         case .none:
             if !item.note.isEmpty { Text(item.note).font(.caption).foregroundStyle(.secondary).lineLimit(1) }
         }
+    }
+
+    /// 「•••• 1234」；沒填（或只有空白）＝nil，不出一個孤零零的「•••• 」
+    private func maskedPolicyNumber(_ item: LifeMilestone) -> String? {
+        guard let pn = item.policyNumber,
+              !pn.trimmingCharacters(in: .whitespaces).isEmpty else { return nil }
+        return CardVault.maskedTail(pn)
     }
 
     private func colorFor(_ sub: FinanceSubCategory) -> Color {
@@ -809,8 +1040,11 @@ struct FinanceCardView: View {
     @EnvironmentObject var financeStore: FinanceStore
     @EnvironmentObject var subscription: SubscriptionManager
     let milestoneId: UUID
+    /// [v25.562] 切到背景：號碼收回＋布幕（WealthPrivacyCurtain）
+    @Environment(\.scenePhase) private var scenePhase
     @State private var showEdit = false
-    @State private var showDeleteConfirm = false
+    /// [v25.562] 刪除確認框要講的話（LifeStore.financeDeletionImpact 數好的）；nil＝沒在問
+    @State private var pendingDelete: FinanceDeletionImpact?
     /// [v25.532] 新增存款要帶哪個幣別：跟「打開」綁在一起（sheet(item:)）。以前是先改 addDepositCurrency、
     /// 再把 showAddDeposit 設成 true，sheet 有時會用到改之前的舊幣別——選港幣卻跳出台幣，多按幾次才對。
     @State private var addingDeposit: AddDepositRequest?
@@ -845,47 +1079,39 @@ struct FinanceCardView: View {
         }
     }
 
-    /// 刪除里程碑並清除其他 Store 對此 id 的懸空引用（比照 ResumeView.deleteMilestoneCleaningLinks
-    /// 同型修復，LifeStore.deleteMilestone 本身無法觸及 FinanceStore／ExpenseStore）。
-    private func deleteMilestoneCleaningLinks(_ item: LifeMilestone) {
-        lifeStore.deleteMilestone(item)
+    /// [v25.562] 按了工具列的「刪除」：付費才問（沒付費照舊跳付費提示）。字由 LifeStore 數好（會動到幾張卡、幾筆、多少錢）
+    private func requestDelete() {
+        guard subscription.isPremium else { showPremiumAlert = true; return }
+        pendingDelete = lifeStore.financeDeletionImpact(item, finance: financeStore, expense: expenseStore)
+    }
 
-        var stocks = financeStore.stocks
-        var stocksChanged = false
-        for i in stocks.indices {
-            if stocks[i].linkedBankMilestoneId == item.id {
-                stocks[i].linkedBankMilestoneId = nil
-                stocks[i].linkedBankCurrency = nil
-                stocksChanged = true
-            }
-            if stocks[i].linkedSecuritiesMilestoneId == item.id {
-                stocks[i].linkedSecuritiesMilestoneId = nil
-                stocksChanged = true
-            }
+    /// [v25.562] 刪除改呼叫共用那支（LifeStore.deleteFinanceMilestone；履歷也是同一支）：
+    /// 刪銀行，底下的卡變成沒有扣款帳戶（不再整張不見）；刪卡，刷過的錢合成一筆留在扣款帳戶（數字不變）。
+    /// 先關畫面、下一個 runloop 才寫 store（畫面還開著就刪，body 會拿空白的 item 重畫一次）；
+    /// 三個 store 先抓進區域常數，async 閉包裡不碰 @EnvironmentObject。
+    private func performDelete(_ target: LifeMilestone) {
+        let life = lifeStore
+        let fin = financeStore
+        let exp = expenseStore
+        dismiss()
+        DispatchQueue.main.async {
+            life.deleteFinanceMilestone(target, finance: fin, expense: exp)
         }
-        if stocksChanged { financeStore.stocks = stocks }
+    }
 
-        var expenses = expenseStore.expenses
-        var expensesChanged = false
-        for i in expenses.indices {
-            if expenses[i].linkedBankMilestoneId == item.id {
-                expenses[i].linkedBankMilestoneId = nil
-                expensesChanged = true
-            }
-            if expenses[i].linkedCreditCardMilestoneId == item.id {
-                expenses[i].linkedCreditCardMilestoneId = nil
-                expensesChanged = true
-            }
-        }
-        if expensesChanged { expenseStore.expenses = expenses }
+    /// [v25.562] 不是 .active（叫出 App 切換器、回主畫面、下拉控制中心、來電）就把號碼收回。
+    /// 布幕在這一頁一律掛著（judge §7.1：卡片頁的銀行名、卡名、金額在 App 切換器也要蓋住；§9-14：在財富卡片頁就蓋），
+    /// 不只解開號碼的時候——所以 lockCard() 把 cardRevealed 收成 false 也不會讓布幕跟著消失。
+    /// ⚠️ Face ID 視窗出來那一刻也是 .inactive：那時還沒解開（cardRevealed 是 false），lockCard() 只是再收一次；
+    ///    toggleCardReveal() 的 Task 驗證通過才設 cardRevealed = true，不受影響（這裡不取消那個 Task）。
+    ///    Face ID 視窗後面會短暫看到布幕，回到 .active 就拿掉。
+    private func handleScenePhase(_ phase: ScenePhase) {
+        if phase != .active { lockCard() }
+    }
 
-        var incomes = expenseStore.incomes
-        var incomesChanged = false
-        for i in incomes.indices where incomes[i].linkedBankMilestoneId == item.id {
-            incomes[i].linkedBankMilestoneId = nil
-            incomesChanged = true
-        }
-        if incomesChanged { expenseStore.incomes = incomes }
+    /// [v25.562] Face ID 解不開時說明框的標題：銀行、證券、保險頁也走同一顆鈕，標題別寫「卡號」
+    private var cardRevealAlertTitle: String {
+        sub == .creditCard ? "卡號與安全資訊" : "號碼與安全資訊"
     }
 
     var body: some View {
@@ -917,8 +1143,7 @@ struct FinanceCardView: View {
                             else { showPremiumAlert = true }
                         } label: { Text("編輯").foregroundStyle(.green) }
                         Button {
-                            if subscription.isPremium { showDeleteConfirm = true }
-                            else { showPremiumAlert = true }
+                            requestDelete()
                         } label: { Text("刪除").foregroundStyle(.red) }
                     }
                 }
@@ -949,12 +1174,14 @@ struct FinanceCardView: View {
                 AddStockView(editing: stk)
                     .appStores()
             }
-            .alert("確定要刪除嗎？", isPresented: $showDeleteConfirm) {
-                Button("刪除", role: .destructive) { deleteMilestoneCleaningLinks(item); dismiss() }
-                Button("取消", role: .cancel) {}
-            }
-            // [v25.368] 卡號解鎖的說明／錯誤
-            .alert("卡號與安全資訊", isPresented: Binding(
+            // [v25.562] 刪除確認框（跟履歷同一個）：還在用的卡〔改成停用〕〔仍要刪除〕〔取消〕；其他〔刪除〕〔取消〕
+            .modifier(FinanceDeleteAlert(
+                pending: $pendingDelete,
+                onDisable: { _ in toggleCardDisabled(true) },
+                onDelete: { target in performDelete(target) }
+            ))
+            // [v25.368] 卡號解鎖的說明／錯誤（[v25.562] 標題依頁面：卡「卡號與安全資訊」、其他「號碼與安全資訊」）
+            .alert(cardRevealAlertTitle, isPresented: Binding(
                 get: { cardRevealMessage != nil },
                 set: { if !$0 { cardRevealMessage = nil } }
             )) {
@@ -965,6 +1192,10 @@ struct FinanceCardView: View {
             // 離開這一頁就上鎖：解鎖狀態不該留到下次進來
             .onDisappear { lockCard() }
         }
+        // [v25.562] 切到背景：號碼收回＋布幕（sheet 要自己蓋，掛在 App 最外層蓋不到這裡）。
+        // 卡片頁一律蓋（judge §7.1、§9-14），不只解開號碼的時候
+        .onChange(of: scenePhase) { _, phase in handleScenePhase(phase) }
+        .modifier(WealthPrivacyCurtain(armed: true))
     }
 
     @ViewBuilder
@@ -1051,19 +1282,70 @@ struct FinanceCardView: View {
         return CardVault.grouped(raw, limit: CardVault.iPassDigits)
     }
 
+    /// [v25.562] 一卡通：沒解開只露後 4 碼；解開照舊分組顯示
+    private func iPassDisplay(_ raw: String) -> String {
+        cardRevealed ? displayIPass(raw) : CardVault.maskedTail(raw)
+    }
+
     /// 這張卡有沒有需要鎖起來的東西。只有到期日的舊卡也算——
     /// 不然它的到期日會被遮起來卻沒有任何地方可以解鎖。
+    /// [v25.562] 悠遊卡、一卡通、Happy Go 號碼也只露後 4 碼，有填就要有這顆眼睛
     private var cardHasProtectedFields: Bool {
-        item.cardNumberCipher != nil || item.cardSecurityCipher != nil || item.expiryDate != nil
+        let hasLocked = item.cardNumberCipher != nil || item.cardSecurityCipher != nil || item.expiryDate != nil
+        let tickets: [String?] = [item.easyCardNumber, item.iPassNumber, item.happyGoNumber]
+        let hasTicket = tickets.contains { !($0 ?? "").isEmpty }
+        return hasLocked || hasTicket
+    }
+
+    /// [v25.562] Face ID 視窗上的說明字：銀行、證券、保險也用同一顆鈕解開（一頁只有一種）
+    private var cardRevealReason: String {
+        switch sub {
+        case .creditCard: return "檢視完整卡號與到期日"
+        case .bank, .securities: return "檢視完整帳號"
+        case .insurance: return "檢視完整保單號碼"
+        }
+    }
+
+    /// [v25.562] 帳號、保單號碼、票證號碼：沒解開只露後 4 碼（「•••• 7890」），解開才整串
+    private func revealedOrMasked(_ raw: String) -> String {
+        cardRevealed ? raw : CardVault.maskedTail(raw)
+    }
+
+    /// [v25.562] 號碼列尾的眼睛（存摺頭、帳號、保單號碼）：跟卡號同一顆 Face ID、30 秒或切背景收回
+    private func revealEyeButton(tint: Color) -> some View {
+        Button {
+            toggleCardReveal()
+        } label: {
+            Image(systemName: cardRevealIcon)
+                .font(.caption)
+                .foregroundStyle(tint)
+                .frame(minWidth: 28, minHeight: 28)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(cardRevealBusy)
+        .accessibilityLabel(cardRevealed ? "隱藏完整號碼" : "顯示完整號碼")
+    }
+
+    /// [v25.562] 資訊卡上要遮的一列（帳號、保單號碼）：值只露後 4 碼＋列尾眼睛
+    private func revealInfoRow(_ label: String, raw: String) -> some View {
+        HStack {
+            Text(label).font(.subheadline).foregroundStyle(.secondary)
+            Spacer()
+            Text(revealedOrMasked(raw)).font(.subheadline)
+            revealEyeButton(tint: color)
+        }
+        .padding(.horizontal).padding(.vertical, 10)
     }
 
     private func toggleCardReveal() {
         if cardRevealed { lockCard(); return }
         guard !cardRevealBusy else { return }
         cardRevealBusy = true
+        let reason = cardRevealReason
         Task { @MainActor in
             defer { cardRevealBusy = false }
-            switch await CardVault.unlock(reason: "檢視完整卡號與到期日") {
+            switch await CardVault.unlock(reason: reason) {
             case .ok:
                 let number = CardVault.open(item.cardNumberCipher) ?? ""
                 // 有密文卻解不出來＝金鑰不在這台裝置；沒有密文（只鎖到期日）則本來就沒東西可解
@@ -1108,11 +1390,8 @@ struct FinanceCardView: View {
         let disabled = item.isDisabled == true
         let cardName = item.cardName.flatMap { $0.isEmpty ? nil : $0 } ?? item.title
         let last4 = item.cardLastFour ?? "----"
-        let bankName: String? = {
-            guard let bid = item.linkedBankMilestoneId,
-                  let b = lifeStore.milestones.first(where: { $0.id == bid }) else { return nil }
-            return b.bankName ?? b.title
-        }()
+        // [v25.562] 跟「上期帳單」那一列同一支（bankName 空白時用銀行的 title，以前卡面會整個不寫銀行名）
+        let bankName: String? = linkedBankName
         let gradient: [Color] = disabled
             ? [Color(white: 0.55), Color(white: 0.30)]
             : [Color(red: 0.95, green: 0.55, blue: 0.20),
@@ -1257,7 +1536,7 @@ struct FinanceCardView: View {
                     passbookRow(label: "分行", value: branch)
                 }
                 if !acc.isEmpty {
-                    passbookRow(label: "帳號", value: acc)
+                    passbookRevealRow(acc)
                 }
                 if !accType.isEmpty {
                     passbookRow(label: "類型", value: accType)
@@ -1281,6 +1560,23 @@ struct FinanceCardView: View {
             Text(label).font(.caption).foregroundStyle(.secondary)
             Spacer()
             Text(value).font(.subheadline.weight(.medium).monospaced())
+        }
+        .padding(.vertical, 2)
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(Color.secondary.opacity(0.15))
+                .frame(height: 0.5)
+                .offset(y: 4)
+        }
+    }
+
+    /// [v25.562] 存摺頭的帳號：只露後 4 碼（「•••• 7890」），列尾眼睛按了要 Face ID
+    private func passbookRevealRow(_ raw: String) -> some View {
+        HStack {
+            Text("帳號").font(.caption).foregroundStyle(.secondary)
+            Spacer()
+            Text(revealedOrMasked(raw)).font(.subheadline.weight(.medium).monospaced())
+            revealEyeButton(tint: .blue)
         }
         .padding(.vertical, 2)
         .overlay(alignment: .bottom) {
@@ -1323,20 +1619,25 @@ struct FinanceCardView: View {
     @ViewBuilder
     private var bankDetail: some View {
         if let b = item.branchName, !b.isEmpty { infoRow("分行", b) }
-        if let a = item.accountNumber, !a.isEmpty { infoRow("帳號", a) }
+        if let a = item.accountNumber, !a.isEmpty { revealInfoRow("帳號", raw: a) }
         if let t = item.bankAccountType { infoRow("帳戶類型", t.rawValue) }
         infoRow("開戶日期", fmtDate(item.date))
     }
 
-    /// 信用卡本期已用 / 可用額度 / 使用率（依帳單日計算本期，過帳單日自動重置）
+    /// 信用卡上期帳單（還沒扣才出現）／本期已用／可用額度／使用率
+    /// [v25.562] 期別改用 CreditCardCycle（全 App 一份）：結帳日當天刷的算這一期、本期從結帳日隔天起算、
+    /// 沒填結帳日當 25 日（跟扣款日同一個預設）；可用額度＝額度−上期還沒扣−本期已用
+    /// （以前只扣本期，一過結帳日額度就回滿，上期那一大筆明明還沒扣）。
     @ViewBuilder
     private func creditUsageBlock(limit: Double) -> some View {
-        let spent = currentCycleSpent(item)
-        let available = max(0, limit - spent)
-        let ratio = limit > 0 ? min(1, spent / limit) : 0
+        let st = cardCycleStatus
+        let ratio = st.ratio(limit: limit)
         let barColor: Color = ratio > 0.8 ? .red : (ratio > 0.5 ? .orange : .green)
-        infoRow("本期已用", spent.ntdWanString)
-        infoRow("可用額度", available.ntdWanString)
+        if st.lastBillUnpaid > 0 {
+            infoRow("上期帳單", lastBillText(st))
+        }
+        infoRow("本期已用", st.currentSpent.ntdWanString)
+        infoRow("可用額度", st.available(limit: limit).ntdWanString)
         VStack(alignment: .leading, spacing: 5) {
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
@@ -1345,39 +1646,45 @@ struct FinanceCardView: View {
                 }
             }
             .frame(height: 8)
-            Text("使用率 \(Int((ratio * 100).rounded()))%　·　依帳單日計算本期，過帳單日重置")
+            Text(creditUsageCaption(st, ratio: ratio))
                 .font(.caption2).foregroundStyle(.secondary)
         }
         .padding(.vertical, 6)
     }
 
-    /// 本期（自最近一個帳單日之後）刷這張卡的消費總額；週期性固定支出會依 recurrence 展開
-    private func currentCycleSpent(_ card: LifeMilestone) -> Double {
-        let cal = Calendar.current
+    /// [v25.562] 這張卡今天的期別（本期、上期、上期還沒扣）。刷卡金額一律台幣（外幣儲蓄險換過）。
+    private var cardCycleStatus: CreditCardCycle.Status {
         let now = Date()
-        let cycleStart = Self.creditCardCycleStart(billingDay: card.billingDay, now: now, calendar: cal)
-        return expandedCreditCardEntries(forCard: card.id, expenses: expenseStore.expenses)
-            .filter { $0.date > cycleStart && $0.date <= now }
-            .reduce(0) { $0 + $1.amount }
+        let entries = expandedCreditCardEntries(forCard: milestoneId, expenses: expenseStore.expenses,
+                                                now: now, ntd: { expenseStore.ntdValue(of: $0) })
+        return CreditCardCycle.status(entries: entries, billingDay: item.billingDay,
+                                      paymentDay: item.paymentDay, now: now)
     }
 
-    /// 本期起點＝今天(含)以前最近的一個帳單日；無帳單日則以當月 1 號為界
-    static func creditCardCycleStart(billingDay: Int?, now: Date, calendar cal: Calendar) -> Date {
-        let startOfToday = cal.startOfDay(for: now)
-        guard let bd = billingDay, bd >= 1 else {
-            return cal.date(from: cal.dateComponents([.year, .month], from: now)) ?? startOfToday
+    /// [v25.562] 扣卡費的銀行名（沒設、或那個銀行已經刪掉＝nil）
+    private var linkedBankName: String? {
+        guard let bid = item.linkedBankMilestoneId,
+              let b = lifeStore.milestones.first(where: { $0.id == bid }) else { return nil }
+        return b.bankName.flatMap { $0.isEmpty ? nil : $0 } ?? b.title
+    }
+
+    /// 「NT$1.9萬（10/10 從台新扣）」；沒有扣款帳戶「NT$1.9萬（10/10 繳款）」
+    private func lastBillText(_ st: CreditCardCycle.Status) -> String {
+        let amount = st.lastBillUnpaid.ntdWanString
+        let due = shortDate(st.lastBillDue)
+        if let bank = linkedBankName {
+            return "\(amount)（\(due) 從\(bank)扣）"
         }
-        func billingDate(inMonthOf ref: Date) -> Date {
-            var comps = cal.dateComponents([.year, .month], from: ref)
-            let maxDay = cal.range(of: .day, in: .month, for: ref)?.count ?? 28
-            comps.day = min(bd, maxDay)   // 帳單日超過該月天數時取月底
-            return cal.date(from: comps) ?? cal.startOfDay(for: ref)
+        return "\(amount)（\(due) 繳款）"
+    }
+
+    /// 長條下面那行小字：有上期還沒扣的帳單時講清楚使用率含它
+    private func creditUsageCaption(_ st: CreditCardCycle.Status, ratio: Double) -> String {
+        let pct = Int((ratio * 100).rounded())
+        if st.lastBillUnpaid > 0 {
+            return "使用率 \(pct)%（含上期還沒扣的帳單）"
         }
-        let thisMonth = billingDate(inMonthOf: now)
-        if thisMonth <= startOfToday { return thisMonth }
-        // 本月帳單日還沒到 → 上一期結帳在上個月的帳單日
-        let prev = cal.date(byAdding: .month, value: -1, to: now) ?? now
-        return billingDate(inMonthOf: prev)
+        return "使用率 \(pct)%　·　結帳日隔天起算本期"
     }
 
     @ViewBuilder
@@ -1417,10 +1724,11 @@ struct FinanceCardView: View {
         infoRow("核卡日期", fmtDate(item.date))
         // [v25.368] 到期日與卡號同一把鎖，沒解鎖只顯示遮罩
         if item.expiryDate != nil { infoRow("到期日", cardDetailExpiry) }
-        if let ec = item.easyCardNumber, !ec.isEmpty { infoRow("悠遊卡", ec) }
+        // [v25.562] 悠遊卡、一卡通、Happy Go 只露後 4 碼，跟卡號同一顆 Face ID（卡面那顆眼睛）
+        if let ec = item.easyCardNumber, !ec.isEmpty { infoRow("悠遊卡", revealedOrMasked(ec)) }
         // [v25.369] 舊資料沒有分隔線；顯示時就分好組，不用等使用者重存一次
-        if let ip = item.iPassNumber, !ip.isEmpty { infoRow("一卡通", displayIPass(ip)) }
-        if let hg = item.happyGoNumber, !hg.isEmpty { infoRow("Happy Go", hg) }
+        if let ip = item.iPassNumber, !ip.isEmpty { infoRow("一卡通", iPassDisplay(ip)) }
+        if let hg = item.happyGoNumber, !hg.isEmpty { infoRow("Happy Go", revealedOrMasked(hg)) }
         infoRow("使用狀態", item.isDisabled == true ? "已停用" : "使用中")
         creditCardDisableButton
     }
@@ -1462,7 +1770,7 @@ struct FinanceCardView: View {
 
     @ViewBuilder
     private var securitiesDetail: some View {
-        if let a = item.accountNumber, !a.isEmpty { infoRow("帳號", a) }
+        if let a = item.accountNumber, !a.isEmpty { revealInfoRow("帳號", raw: a) }
         if let t = item.securitiesAccountType { infoRow("帳戶類型", t.rawValue) }
         infoRow("開戶日期", fmtDate(item.date))
     }
@@ -1470,7 +1778,7 @@ struct FinanceCardView: View {
     @ViewBuilder
     private var insuranceDetail: some View {
         if let co = item.insuranceCompany, !co.isEmpty { infoRow("保險公司", co) }
-        if let pn = item.policyNumber, !pn.isEmpty { infoRow("保單號碼", pn) }
+        if let pn = item.policyNumber, !pn.isEmpty { revealInfoRow("保單號碼", raw: pn) }
         if let it = item.insuranceType { infoRow("險種", it.rawValue) }
         if let pa = item.premiumAmount, pa > 0 { infoRow("保費", pa.ntdWanString) }
         infoRow("生效日", fmtDate(item.date))
@@ -1524,6 +1832,14 @@ struct FinanceCardView: View {
     private static let fmtNumFormatter: NumberFormatter = {
         let f = NumberFormatter(); f.numberStyle = .decimal; f.maximumFractionDigits = 0; return f
     }()
+    /// [v25.562] 外幣固定 2 位小數（美金 123.45 以前被四捨五入成 123）
+    private static let fmtNum2Formatter: NumberFormatter = {
+        let f = NumberFormatter()
+        f.numberStyle = .decimal
+        f.minimumFractionDigits = 2
+        f.maximumFractionDigits = 2
+        return f
+    }()
     private static let shortDateFormatter: DateFormatter = {
         let f = DateFormatter(); f.dateFormat = "M/d"; return f
     }()
@@ -1532,8 +1848,10 @@ struct FinanceCardView: View {
         Self.fmtDateFormatter.string(from: date)
     }
 
-    private func fmtNum(_ v: Double) -> String {
-        Self.fmtNumFormatter.string(from: NSNumber(value: v)) ?? "0"
+    /// [v25.562] 台幣 0 位小數、其他幣別 2 位（只在主執行緒用）
+    private func fmtNum(_ v: Double, code: String) -> String {
+        let f = FinanceRates.isNTD(code) ? Self.fmtNumFormatter : Self.fmtNum2Formatter
+        return f.string(from: NSNumber(value: v)) ?? "0"
     }
 
     // MARK: - 銀行存款章節
@@ -1546,31 +1864,27 @@ struct FinanceCardView: View {
         // 對齊 allBankBalances() 的批次建表作法。
         let expensesById = Dictionary(expenseStore.expenses.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         let incomesById = Dictionary(expenseStore.incomes.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let stocksById = Dictionary(financeStore.stocks.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        // [v25.562] 跳過規則跟列表的 bankBalances 同一支（信用卡、週期、股票自己有交割帳戶），明細與目前總額才對得上列表
         let real = (item.bankDeposits ?? []).filter { dep in
             guard dep.date <= now else { return false }
-            guard let linkedId = dep.linkedExpenseId else { return true }
-            // 連結到 Expense
-            if let exp = expensesById[linkedId] {
-                // 信用卡支出：用每月彙總取代
-                if exp.linkedCreditCardMilestoneId != nil { return false }
-                // 固定支出（週期）：用展開虛擬條目取代
-                if exp.expenseType == .fixed && exp.recurrence != nil { return false }
-                return true
-            }
-            // 連結到 Income（週期性 → 用展開取代）
-            if let inc = incomesById[linkedId] {
-                if inc.period != .once { return false }
-            }
-            return true
+            return !bankDepositIsReplaced(dep, expensesById: expensesById, incomesById: incomesById,
+                                          stocksById: stocksById)
         }
-        let aggregated = aggregatedCreditCardWithdrawals()
+        let rates = FinanceRates(expenseStore)
+        let aggregated = aggregatedCreditCardWithdrawals(now: now)
         let fixedExpanded = expandedFixedExpenseWithdrawals(
             for: milestoneId,
-            expenses: expenseStore.expenses
+            expenses: expenseStore.expenses,
+            now: now,
+            rates: rates,
+            ntd: { expenseStore.ntdValue(of: $0) }
         )
         let incomeExpanded = expandedIncomeDeposits(
             for: milestoneId,
-            incomes: expenseStore.incomes
+            incomes: expenseStore.incomes,
+            now: now,
+            rates: rates
         )
         return (real + aggregated + fixedExpanded + incomeExpanded).sorted { $0.date < $1.date }
     }
@@ -1578,13 +1892,14 @@ struct FinanceCardView: View {
     /// 將連結到本銀行的信用卡支出依月份彙總成虛擬 BankDeposit。
     /// 週期性固定支出（每月 / 每季 / 每年）會依 recurrence 自動展開到今天，
     /// 例如「4/6 開始的月繳訂閱」會自動產生 4/6、5/6、6/6 …的扣款條目。
-    private func aggregatedCreditCardWithdrawals() -> [BankDeposit] {
+    private func aggregatedCreditCardWithdrawals(now: Date) -> [BankDeposit] {
         let cards = lifeStore.milestones.filter {
             $0.financeSubCategory == .creditCard && $0.linkedBankMilestoneId == milestoneId
         }
         var result: [BankDeposit] = []
         for card in cards {
-            let entries = expandedCreditCardEntries(forCard: card.id, expenses: expenseStore.expenses)
+            let entries = expandedCreditCardEntries(forCard: card.id, expenses: expenseStore.expenses,
+                                                    now: now, ntd: { expenseStore.ntdValue(of: $0) })
             let groups = Dictionary(grouping: entries) { entry -> String in
                 let withdrawalDate = LifeMilestone.creditCardWithdrawalDate(
                     for: entry.date,
@@ -1797,7 +2112,8 @@ struct FinanceCardView: View {
     private var creditCardExpenseRows: [CreditCardExpenseRow] {
         let byId = Dictionary(expenseStore.expenses.map { ($0.id, $0) },
                               uniquingKeysWith: { first, _ in first })
-        let entries = expandedCreditCardEntries(forCard: milestoneId, expenses: expenseStore.expenses)
+        let entries = expandedCreditCardEntries(forCard: milestoneId, expenses: expenseStore.expenses,
+                                                now: Date(), ntd: { expenseStore.ntdValue(of: $0) })
         return entries.compactMap { e -> CreditCardExpenseRow? in
             guard let exp = byId[e.expenseId] else { return nil }
             let projected = exp.expenseType == .fixed && exp.recurrence != nil
@@ -1812,7 +2128,8 @@ struct FinanceCardView: View {
     private var creditCardChartSection: some View {
         // 預先求值一次 entries／dailyTotals，往下傳給 creditCardChart／creditCardMonthlyTotals，
         // 避免三處各自重新呼叫 expandedCreditCardEntries 展開週期性支出。
-        let entries = expandedCreditCardEntries(forCard: milestoneId, expenses: expenseStore.expenses)
+        let entries = expandedCreditCardEntries(forCard: milestoneId, expenses: expenseStore.expenses,
+                                                now: Date(), ntd: { expenseStore.ntdValue(of: $0) })
         let dailyTotals = creditCardDailyTotals(entries)
         return VStack(alignment: .leading, spacing: 0) {
             // 標題列：Capsule 側條（橙色）+ 筆數膠囊，對齊 depositSection 標題規格
@@ -2136,7 +2453,8 @@ struct FinanceCardView: View {
 
     /// 根據聚合條目 id 比對產生它的信用卡（含週期性固定支出展開後的虛擬條目）
     private func matchingAggregatedCard(card: LifeMilestone, depositId: UUID) -> LifeMilestone? {
-        let entries = expandedCreditCardEntries(forCard: card.id, expenses: expenseStore.expenses)
+        let entries = expandedCreditCardEntries(forCard: card.id, expenses: expenseStore.expenses,
+                                                now: Date(), ntd: { expenseStore.ntdValue(of: $0) })
         let groups = Dictionary(grouping: entries) { entry -> String in
             let date = LifeMilestone.creditCardWithdrawalDate(
                 for: entry.date, billingDay: card.billingDay, paymentDay: card.paymentDay
@@ -2285,7 +2603,7 @@ struct FinanceCardView: View {
 
                 // 金額 + chevron
                 VStack(alignment: .trailing, spacing: 3) {
-                    Text("\(dep.isWithdrawal ? "-" : "+")\(dep.currencyCode) \(fmtNum(dep.amount))")
+                    Text(depositAmountText(dep))
                         .font(.system(size: 15, weight: .bold, design: .rounded))
                         .foregroundStyle(amountColor)
                         .contentTransition(.numericText())
@@ -2300,6 +2618,12 @@ struct FinanceCardView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+    }
+
+    /// 明細一列的金額：「+美金 123.45」「-NT$ 1,280」（外幣 2 位小數）
+    private func depositAmountText(_ dep: BankDeposit) -> String {
+        let sign = dep.isWithdrawal ? "-" : "+"
+        return "\(sign)\(dep.currencyCode) \(fmtNum(dep.amount, code: dep.currencyCode))"
     }
 
     /// 把單筆金額換算成台幣（NT$ 直接回傳；找不到匯率時不換算以免丟資料）
@@ -2352,7 +2676,7 @@ struct FinanceCardView: View {
                         Text("（含外幣換算）").font(.caption2).foregroundStyle(.tertiary)
                     }
                     Spacer()
-                    Text("\(displayCurrency) \(fmtNum(last.balance))").font(.caption.bold())
+                    Text("\(displayCurrency) \(fmtNum(last.balance, code: displayCurrency))").font(.caption.bold())
                         .foregroundStyle(last.balance >= 0 ? Color.blue : Color.red)
                 }
                 .padding(.horizontal, 4)
@@ -2414,6 +2738,8 @@ struct AddDepositRequest: Identifiable {
 struct DepositEditorSheet: View {
     @EnvironmentObject var lifeStore: LifeStore
     @EnvironmentObject var expenseStore: ExpenseStore
+    /// [v25.562] 算餘額要知道哪些股票自己有交割帳戶（bankDepositIsReplaced）
+    @EnvironmentObject var financeStore: FinanceStore
     @Environment(\.dismiss) private var dismiss
 
     let milestoneId: UUID
@@ -2446,24 +2772,80 @@ struct DepositEditorSheet: View {
     /// 取代原本只加總 bankDeposits 原始條目的簡化版本——簡化版漏算信用卡彙總扣款、
     /// 且週期性固定支出／收入只算到第一筆種子條目，會讓「轉入帳戶」下拉與「沖正」的
     /// 「目前總額」明顯低估負債、高估餘額，導致沖正調整值算錯。
-    private func bankBalance(for ms: LifeMilestone, expensesById: [UUID: Expense], incomesById: [UUID: Income]) -> Double {
+    private func bankBalance(for ms: LifeMilestone, expensesById: [UUID: Expense], incomesById: [UUID: Income],
+                             stocksById: [UUID: Stock]) -> Double {
         balanceInTWD(
-            bankBalances(for: ms, now: Date(), expensesById: expensesById, incomesById: incomesById, lifeStore: lifeStore, expenseStore: expenseStore),
+            bankBalances(for: ms, now: Date(), expensesById: expensesById, incomesById: incomesById,
+                         stocksById: stocksById, lifeStore: lifeStore, expenseStore: expenseStore),
             expenseStore: expenseStore
         )
     }
 
-    private func currentBalance(expensesById: [UUID: Expense], incomesById: [UUID: Income]) -> Double {
+    /// [v25.562] 沖正用：這個帳戶「這個幣別」在 day 那天結束時的數字（原幣，不換台幣）。
+    /// 以前拿整個帳戶換成台幣、而且是今天的數字，去跟你打的美金數字相減：
+    /// 玉山美金 US$1,000 沖成 1,000 會寫一筆 −US$31,000；選過去的日期也拿今天比。
+    /// 台幣那一格把 "NT$"／"TWD"／空白都算進來（FinanceRates.isNTD 同一條）。
+    private func currentBalance(in code: String, at day: Date, expensesById: [UUID: Expense],
+                                incomesById: [UUID: Income], stocksById: [UUID: Stock]) -> Double {
         guard let ms = lifeStore.milestones.first(where: { $0.id == milestoneId }) else { return 0 }
-        return bankBalance(for: ms, expensesById: expensesById, incomesById: incomesById)
+        let cal = Calendar.current
+        let end = cal.date(byAdding: .day, value: 1, to: cal.startOfDay(for: day))?.addingTimeInterval(-1) ?? day
+        let balances = bankBalances(for: ms, now: end, expensesById: expensesById, incomesById: incomesById,
+                                    stocksById: stocksById, lifeStore: lifeStore, expenseStore: expenseStore)
+        guard FinanceRates.isNTD(code) else { return balances[code] ?? 0 }
+        return balances.filter { FinanceRates.isNTD($0.key) }.values.reduce(0, +)
+    }
+
+    /// [v25.562] 沖正的差額：四捨五入到 0.01（外幣換算加總會有 999.9999999 這種尾巴，
+    /// 不然打 1,000 會多存一筆 0.0000001 的沖正）。畫面上的差額和存檔用同一支。
+    private func adjustDiff(target: Double, balance: Double) -> Double {
+        ((target - balance) * 100).rounded() / 100
+    }
+
+    /// 「這個帳戶的美金 10/19 結束時是 1,000.00」；台幣寫「台幣」
+    private func adjustBalanceText(_ balance: Double) -> String {
+        let name = FinanceRates.isNTD(currency) ? "台幣" : currency
+        let day = Self.mdFormatter.string(from: date)
+        return "這個帳戶的\(name) \(day) 結束時是 \(fmtNum(balance, code: currency))"
+    }
+
+    /// 差額「+500」「-31,000.00」（-0.0 當 0，不寫成「+-0」）
+    private func adjustDiffText(_ diff: Double) -> String {
+        let d: Double = diff == 0 ? 0 : diff
+        let sign = d >= 0 ? "+" : ""
+        return sign + fmtNum(d, code: currency)
     }
 
     private static let numFormatter: NumberFormatter = {
         let f = NumberFormatter(); f.numberStyle = .decimal; f.maximumFractionDigits = 0; return f
     }()
+    /// [v25.562] 外幣固定 2 位小數
+    private static let num2Formatter: NumberFormatter = {
+        let f = NumberFormatter()
+        f.numberStyle = .decimal
+        f.minimumFractionDigits = 2
+        f.maximumFractionDigits = 2
+        return f
+    }()
+    /// 沖正那一行的日期（只在主執行緒用）
+    private static let mdFormatter: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "M/d"; return f
+    }()
 
-    private func fmtNum(_ v: Double) -> String {
-        Self.numFormatter.string(from: NSNumber(value: v)) ?? "0"
+    /// [v25.562] 台幣 0 位小數、其他幣別 2 位
+    private func fmtNum(_ v: Double, code: String) -> String {
+        let f = FinanceRates.isNTD(code) ? Self.numFormatter : Self.num2Formatter
+        return f.string(from: NSNumber(value: v)) ?? "0"
+    }
+
+    /// [v25.562] 編輯時金額帶回輸入框：四捨五入到 2 位小數再去尾 0、去尾「.」（123.45 → "123.45"、1200 → "1200"）。
+    /// 以前用 "%.0f"，美金 123.45 打開直接存就變成 123。寫法同 RealEstateEditors.editableAmountText。
+    private static func editableAmount(_ v: Double) -> String {
+        let rounded: Double = (v * 100).rounded() / 100
+        var s = String(format: "%.2f", rounded)
+        while s.hasSuffix("0") { s.removeLast() }
+        if s.hasSuffix(".") { s.removeLast() }
+        return s
     }
 
     // 【美化方向】轉帳/沖正帳戶餘額格式：先前自製 NumberFormatter 手刻「NT$ X萬」
@@ -2500,6 +2882,7 @@ struct DepositEditorSheet: View {
     var body: some View {
         let expensesById = Dictionary(expenseStore.expenses.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         let incomesById = Dictionary(expenseStore.incomes.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let stocksById = Dictionary(financeStore.stocks.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         NavigationStack {
             Form {
                 Section {
@@ -2524,7 +2907,7 @@ struct DepositEditorSheet: View {
                             Text("請選擇").tag(nil as UUID?)
                             ForEach(bankMilestones) { ms in
                                 let name = ms.bankName ?? ms.title
-                                Text("\(name)（\(fmtBal(bankBalance(for: ms, expensesById: expensesById, incomesById: incomesById)))）")
+                                Text("\(name)（\(fmtBal(bankBalance(for: ms, expensesById: expensesById, incomesById: incomesById, stocksById: stocksById)))）")
                                     .tag(ms.id as UUID?)
                             }
                         }
@@ -2539,24 +2922,23 @@ struct DepositEditorSheet: View {
                 } else if txType == .adjust {
                     // currentBalance() 內部呼叫 bankBalances() 全量展開，「目前總額」與下方「差額」
                     // 原本各自呼叫一次，同一次 body 求值中重跑兩次；改為只算一次共用。
-                    let currentBal = currentBalance(expensesById: expensesById, incomesById: incomesById)
+                    // [v25.562] 只算這個幣別、算到選的那天結束（原幣，不換台幣）
+                    let currentBal = currentBalance(in: currency, at: date, expensesById: expensesById,
+                                                    incomesById: incomesById, stocksById: stocksById)
                     Section {
-                        HStack {
-                            Text("目前總額").foregroundStyle(.secondary)
-                            Spacer()
-                            Text(fmtBal(currentBal)).foregroundStyle(.blue)
-                        }
+                        Text(adjustBalanceText(currentBal))
+                            .foregroundStyle(.secondary)
                         DatePicker("日期", selection: $date, displayedComponents: .date)
                         HStack {
                             Text(currency).foregroundStyle(.secondary)
                             TextField("調整後金額", text: $amountText).keyboardType(.decimalPad)
                         }
                         if let target = Double(amountText) {
-                            let diff = target - currentBal
+                            let diff = adjustDiff(target: target, balance: currentBal)
                             HStack {
                                 Text("差額").foregroundStyle(.secondary)
                                 Spacer()
-                                Text("\(diff >= 0 ? "+" : "")\(fmtNum(diff))")
+                                Text(adjustDiffText(diff))
                                     .foregroundStyle(diff >= 0 ? Color.green : Color.red)
                                     .bold()
                             }
@@ -2620,7 +3002,8 @@ struct DepositEditorSheet: View {
                 if let e = editing {
                     txType = e.isWithdrawal ? .withdrawal : .deposit
                     date = e.date
-                    amountText = String(format: "%.0f", e.amount)
+                    // [v25.562] 外幣 123.45 不再被 "%.0f" 吃成 123
+                    amountText = Self.editableAmount(e.amount)
                     // 編輯沖正紀錄：把既有備註回填到欄位（過去漏了這步，備註欄位永遠空白，
                     // 使用者輸入的備註也因 save() 沿用舊值而「存不起來」）
                     if e.isAdjust { adjustNote = e.note ?? "" }
@@ -2695,7 +3078,11 @@ struct DepositEditorSheet: View {
               var ms = lifeStore.milestones.first(where: { $0.id == milestoneId }) else { dismiss(); return }
         let expensesById = Dictionary(expenseStore.expenses.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         let incomesById = Dictionary(expenseStore.incomes.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-        let diff = targetAmount - currentBalance(expensesById: expensesById, incomesById: incomesById)
+        let stocksById = Dictionary(financeStore.stocks.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        // [v25.562] 只比這個幣別、算到選的那天結束（跟畫面上的差額同一支）
+        let balance = currentBalance(in: currency, at: date, expensesById: expensesById,
+                                     incomesById: incomesById, stocksById: stocksById)
+        let diff = adjustDiff(target: targetAmount, balance: balance)
         guard diff != 0 else { dismiss(); return }
         isSaving = true
         var list = ms.bankDeposits ?? []
@@ -2707,7 +3094,11 @@ struct DepositEditorSheet: View {
             note: trimmedNote.isEmpty ? nil : trimmedNote
         ))
         ms.bankDeposits = list
-        lifeStore.update(ms); dismiss()
+        // [v25.562] 先關畫面、下一個 runloop 才寫 store（store 先抓進區域常數）
+        let life = lifeStore
+        let updated = ms
+        dismiss()
+        DispatchQueue.main.async { life.update(updated) }
     }
 
     private func delete() {

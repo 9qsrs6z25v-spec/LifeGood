@@ -1134,15 +1134,20 @@ struct AddStockView: View {
         list.removeAll { $0.linkedStockId == stock.id }
 
         let currency = stock.linkedBankCurrency ?? "NT$"
+        // [v25.562] 寫多少、寫哪一格跟股票卡同一條規則（stockAmountForAccount）：美股進台幣帳戶 × 匯率、
+        // 進美元帳戶照原數、進其他外幣有匯率就換、查不到寫台幣那一格。以前這裡直接寫原數（AAPL 2,000 美元
+        // 寫成「NT$ 2,000」），從股票卡加交易又寫成 NT$64,000，同一筆換個畫面存就不一樣。
+        let rates = FinanceRates(expenseStore)
 
         if !stock.transactions.isEmpty {
             // 已使用交易紀錄模式：每筆交易寫一筆 BankDeposit（依 T+2 交割日）
             for tx in stock.transactions {
+                let w = stockAmountForAccount(tx.amount, stock: stock, accountCurrency: currency, rates: rates)
                 list.append(BankDeposit(
                     id: UUID(),
                     date: tx.settlementDate,
-                    amount: tx.amount,
-                    currencyCode: currency,
+                    amount: w.amount,
+                    currencyCode: w.code,
                     isWithdrawal: tx.kind == .buy,
                     linkedExpenseId: nil,
                     linkedStockId: stock.id
@@ -1152,22 +1157,24 @@ struct AddStockView: View {
             // 舊版聚合模式：一筆買入 + 一筆賣出（若有），皆依 T+2 交割
             let cost = stock.shares * stock.purchasePrice
             if cost > 0 {
+                let w = stockAmountForAccount(cost, stock: stock, accountCurrency: currency, rates: rates)
                 list.append(BankDeposit(
                     id: UUID(),
                     date: StockTransaction.taiwanSettlementDate(from: stock.purchaseDate),
-                    amount: cost,
-                    currencyCode: currency, isWithdrawal: true,
+                    amount: w.amount,
+                    currencyCode: w.code, isWithdrawal: true,
                     linkedExpenseId: nil, linkedStockId: stock.id
                 ))
             }
             if stock.isSold, stock.soldPrice > 0, let sd = stock.soldDate {
                 let saleAmount = stock.shares * stock.soldPrice
                 if saleAmount > 0 {
+                    let w = stockAmountForAccount(saleAmount, stock: stock, accountCurrency: currency, rates: rates)
                     list.append(BankDeposit(
                         id: UUID(),
                         date: StockTransaction.taiwanSettlementDate(from: sd),
-                        amount: saleAmount,
-                        currencyCode: currency, isWithdrawal: false,
+                        amount: w.amount,
+                        currencyCode: w.code, isWithdrawal: false,
                         linkedExpenseId: nil, linkedStockId: stock.id
                     ))
                 }

@@ -2010,6 +2010,7 @@ struct AddRealEstateView: View {
         guard !ids.isEmpty else { return }
         var milestones = lifeStore.milestones
         var changed = false
+        let rates = FinanceRates(expenseStore)
         for exp in expenses where ids.contains(exp.id) {
             guard exp.linkedCreditCardMilestoneId == nil else { continue }
             if exp.expenseType == .fixed && exp.recurrence != nil { continue }
@@ -2017,11 +2018,9 @@ struct AddRealEstateView: View {
                   let mi = milestones.firstIndex(where: { $0.id == bankId }) else { continue }
             var list = milestones[mi].bankDeposits ?? []
             list.removeAll { $0.linkedExpenseId == exp.id }
-            // 台幣支出扣外幣子帳戶時照匯率換算（同水電瓦斯編輯器）；支出本身就是那個幣別才原樣記
-            let isNTD = exp.currencyCode == "NT$" || exp.currencyCode == "TWD"
-            let value: (amount: Double, code: String) = isNTD
-                ? realEstateBankWithdrawalValue(ntd: exp.amount, currency: exp.linkedBankCurrency, rates: expenseStore.currencyRates)
-                : (amount: exp.amount, code: exp.linkedBankCurrency ?? exp.currencyCode)
+            // [v25.562] 跟記帳同一支（FinanceRates.bankAmount）：寫進帳戶自己的幣別那一格，台幣金額有匯率就換。
+            // 以前支出輸入時選了日圓（金額其實已經換成台幣）就把台幣數字原樣標成扣款帳戶的幣別（沒存帳戶幣別就標成日圓）。
+            let value = rates.bankAmount(of: exp, ntd: expenseStore.ntdValue(of: exp))
             list.append(BankDeposit(
                 id: UUID(), date: exp.date, amount: value.amount,
                 currencyCode: value.code,

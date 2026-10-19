@@ -408,6 +408,9 @@ struct ResumeView: View {
     @State private var showPremiumAlert = false
     /// 待確認刪除的兼任職務（底下已累積管理頁內容時才會被設定）
     @State private var pendingSideRoleDelete: LifeMilestone?
+    /// [v25.562] 待確認刪除的財富帳戶（銀行、信用卡、證券、保險）。字由 LifeStore.financeDeletionImpact 數好，
+    /// 跟財富卡片的刪除同一個確認框（FinanceDeleteAlert）
+    @State private var pendingFinanceDelete: FinanceDeletionImpact?
     @State private var emptyStatePulse = false
     @State private var emptyStatePulseTask: Task<Void, Never>?
     @State private var rowsAppeared = false
@@ -490,6 +493,13 @@ struct ResumeView: View {
             } message: {
                 Text(pendingDeleteMessage)
             }
+            // [v25.562] 刪財富帳戶：跟財富卡片同一個確認框（卡先問〔改成停用〕）。
+            // 列表不是 sheet，按了直接刪，不用等下一個 runloop
+            .modifier(FinanceDeleteAlert(
+                pending: $pendingFinanceDelete,
+                onDisable: { m in disableFinanceItem(m) },
+                onDelete: { m in deleteMilestoneCleaningLinks(m) }
+            ))
         }
     }
 
@@ -500,12 +510,24 @@ struct ResumeView: View {
     /// 會議紀錄與重要日期——這些不會出現在履歷列上，滑一下就全部消失、
     /// 而且 milestones 沒有復原機制、didSet 立刻存檔並推 CloudKit。
     /// 有內容就先問；其餘子分類維持原本的直接刪除，零行為變更。
+    /// [v25.562] 財富帳戶（有子分類的）也先問：刪銀行會讓卡變成沒有扣款帳戶、刪卡會把刷過的錢合成一筆，
+    /// 確認框把會動到什麼講清楚；還在用的卡先建議〔改成停用〕。
     private func requestDelete(_ item: LifeMilestone) {
         if item.isSideRole && item.hasAnySideRoleContent {
             pendingSideRoleDelete = item
+        } else if item.category == .achievement && item.financeSubCategory != nil {
+            pendingFinanceDelete = store.financeDeletionImpact(item, finance: financeStore, expense: expenseStore)
         } else {
             deleteMilestoneCleaningLinks(item)
         }
+    }
+
+    /// [v25.562] 確認框按〔改成停用〕：記帳的選單不再出現這張卡，以前的紀錄和數字都不動。
+    /// 拿 store 裡最新的那一筆來改（確認框開著的時候 iCloud 可能剛同步進新資料）
+    private func disableFinanceItem(_ item: LifeMilestone) {
+        guard var updated = store.milestones.first(where: { $0.id == item.id }) else { return }
+        updated.isDisabled = true
+        store.update(updated)
     }
 
     private var pendingDeleteMessage: String {
@@ -520,45 +542,12 @@ struct ResumeView: View {
         return "這個職務的 " + parts.joined(separator: "、") + " 也會一併刪除，且無法復原。"
     }
 
+    /// [v25.562] 改呼叫 LifeStore.deleteFinanceMilestone（財富卡片、履歷同一支；以前兩份各寫一次，都漏了卡）：
+    /// 刪銀行時掛在它底下的卡改成沒有扣款帳戶（不會從財富頁消失）；刪卡時刷過的錢合成一筆留在扣款帳戶、
+    /// 記帳的卡＋銀行連結一起清；股票、記帳、收入指到它的連結照舊清、照片照舊刪。
+    /// 任何分類都可以用（兼任職務的刪除也走這裡，跟以前一樣只清連結）。
     private func deleteMilestoneCleaningLinks(_ item: LifeMilestone) {
-        store.deleteMilestone(item)
-
-        var stocks = financeStore.stocks
-        var stocksChanged = false
-        for i in stocks.indices {
-            if stocks[i].linkedBankMilestoneId == item.id {
-                stocks[i].linkedBankMilestoneId = nil
-                stocks[i].linkedBankCurrency = nil
-                stocksChanged = true
-            }
-            if stocks[i].linkedSecuritiesMilestoneId == item.id {
-                stocks[i].linkedSecuritiesMilestoneId = nil
-                stocksChanged = true
-            }
-        }
-        if stocksChanged { financeStore.stocks = stocks }
-
-        var expenses = expenseStore.expenses
-        var expensesChanged = false
-        for i in expenses.indices {
-            if expenses[i].linkedBankMilestoneId == item.id {
-                expenses[i].linkedBankMilestoneId = nil
-                expensesChanged = true
-            }
-            if expenses[i].linkedCreditCardMilestoneId == item.id {
-                expenses[i].linkedCreditCardMilestoneId = nil
-                expensesChanged = true
-            }
-        }
-        if expensesChanged { expenseStore.expenses = expenses }
-
-        var incomes = expenseStore.incomes
-        var incomesChanged = false
-        for i in incomes.indices where incomes[i].linkedBankMilestoneId == item.id {
-            incomes[i].linkedBankMilestoneId = nil
-            incomesChanged = true
-        }
-        if incomesChanged { expenseStore.incomes = incomes }
+        store.deleteFinanceMilestone(item, finance: financeStore, expense: expenseStore)
     }
 
     // MARK: - 列表
@@ -630,12 +619,15 @@ struct ResumeView: View {
                             // 避免整列滑到底直接刪除（與邊緣切頁手勢衝突，同型修正見 v25.154）
                             .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                                 if realMilestoneIDs.contains(item.id) {
-                                    Button(role: .destructive) {
+                                    // [v25.562] 不用 role: .destructive：有確認框（兼任職務、財富帳戶）時，
+                                    // 帶 destructive 的列一按就先被滑掉，按取消也回不來（坑 #12）；改紅色 tint
+                                    Button {
                                         guard subscription.isPremium else { showPremiumAlert = true; return }
                                         requestDelete(item)
                                     } label: {
                                         Label("刪除", systemImage: "trash")
                                     }
+                                    .tint(.red)
                                 }
                             }
                     }
@@ -690,12 +682,15 @@ struct ResumeView: View {
                             // 改用 allowsFullSwipe: false 的滑出按鈕取代 .onDelete（同 groupedList）
                             .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                                 if realMilestoneIDs.contains(item.id) {
-                                    Button(role: .destructive) {
+                                    // [v25.562] 不用 role: .destructive：有確認框（兼任職務、財富帳戶）時，
+                                    // 帶 destructive 的列一按就先被滑掉，按取消也回不來（坑 #12）；改紅色 tint
+                                    Button {
                                         guard subscription.isPremium else { showPremiumAlert = true; return }
                                         requestDelete(item)
                                     } label: {
                                         Label("刪除", systemImage: "trash")
                                     }
+                                    .tint(.red)
                                 }
                             }
                     }
@@ -1507,7 +1502,10 @@ struct AddMilestoneView: View {
         if isFinance {
             switch financeSub {
             case .bank: return !bankName.trimmingCharacters(in: .whitespaces).isEmpty
-            case .creditCard: return !bankName.trimmingCharacters(in: .whitespaces).isEmpty
+            case .creditCard:
+                // [v25.562] 帳單日、繳款日有填就要 1–31（以前打 45 也存得進去）
+                return !bankName.trimmingCharacters(in: .whitespaces).isEmpty
+                    && dayFieldValid(billingDayText) && dayFieldValid(paymentDayText)
             case .securities: return !bankName.trimmingCharacters(in: .whitespaces).isEmpty
             case .insurance: return !insuranceCompany.trimmingCharacters(in: .whitespaces).isEmpty
             }
@@ -1610,6 +1608,26 @@ struct AddMilestoneView: View {
             } message: {
                 Text(cardVaultMessage ?? "")
             }
+        }
+        // [v25.562] 表單裡有號碼時切到背景，App 切換器的縮圖是霧＋鎖頭；打到一半的號碼不收回，只蓋
+        // （這張表單是 sheet，掛在 App 最外層蓋不到，所以自己掛）
+        .modifier(WealthPrivacyCurtain(armed: wealthCurtainArmed))
+    }
+
+    /// [v25.562] 表單上有沒有要藏的號碼：信用卡（解鎖後的卡號、檢核碼、到期日；悠遊卡、一卡通、Happy Go 卡號）、
+    /// 銀行與證券的帳號、保單號碼。沒解鎖的卡只看得到末四碼，不算。
+    private var wealthCurtainArmed: Bool {
+        guard isFinance else { return false }
+        switch financeSub {
+        case .creditCard:
+            let vault = cardUnlocked
+                && (!cardNumberInput.isEmpty || !cardSecurityInput.isEmpty || hasExpiryDate)
+            let passes = !easyCardNumber.isEmpty || !iPassNumber.isEmpty || !happyGoNumber.isEmpty
+            return vault || passes
+        case .bank, .securities:
+            return !accountNumber.trimmingCharacters(in: .whitespaces).isEmpty
+        case .insurance:
+            return !policyNumber.trimmingCharacters(in: .whitespaces).isEmpty
         }
     }
 
@@ -2179,10 +2197,10 @@ struct AddMilestoneView: View {
             Section {
                 bankNamePicker
                 TextField("卡別名稱（如：御璽卡）", text: $cardName)
-                HStack { TextField("額度", text: $creditLimitText).keyboardType(.numberPad); Text("萬元").foregroundStyle(.secondary) }
+                creditLimitRow
                 currencyField("年費", text: $annualFeeText)
-                HStack { TextField("帳單日", text: $billingDayText).keyboardType(.numberPad); Text("日").foregroundStyle(.secondary) }
-                HStack { TextField("繳款日", text: $paymentDayText).keyboardType(.numberPad); Text("日").foregroundStyle(.secondary) }
+                dayFieldRow("帳單日", text: $billingDayText)
+                dayFieldRow("繳款日", text: $paymentDayText)
                 DatePicker("核卡日期", selection: $date, displayedComponents: .date)
             } header: {
                 milestoneSectionHeader("信用卡資訊", icon: FinanceSubCategory.creditCard.icon, color: .orange)
@@ -2264,6 +2282,75 @@ struct AddMilestoneView: View {
 
     private var bankMilestonesList: [LifeMilestone] {
         store.milestones.filter { $0.category == .achievement && $0.financeSubCategory == .bank }
+    }
+
+    // MARK: - [v25.562] 額度、帳單日、繳款日
+
+    /// 額度（萬元）可以打小數：6.8 萬。decimalPad 可以連打兩個點、有些地區的小數點是「,」，
+    /// 邊打邊只留數字和一個「.」——不然 Double() 讀不出來，存檔時額度會變成沒填
+    private var creditLimitRow: some View {
+        HStack {
+            TextField("額度", text: $creditLimitText)
+                .keyboardType(.decimalPad)
+                .onChange(of: creditLimitText) { _, newValue in
+                    let cleaned = Self.decimalDigitsOnly(newValue)
+                    if cleaned != newValue { creditLimitText = cleaned }
+                }
+            Text("萬元").foregroundStyle(.secondary)
+        }
+    }
+
+    /// 帳單日／繳款日一列；有填但不在 1–31 就在下面多一行紅字（儲存鈕也會灰掉，見 canSave）
+    @ViewBuilder
+    private func dayFieldRow(_ label: String, text: Binding<String>) -> some View {
+        HStack {
+            TextField(label, text: text).keyboardType(.numberPad)
+            Text("日").foregroundStyle(.secondary)
+        }
+        if !dayFieldValid(text.wrappedValue) {
+            Text("要 1 到 31")
+                .font(.caption)
+                .foregroundStyle(.red)
+        }
+    }
+
+    /// 空白可以（不填）；有填就要是 1–31 的整數
+    private func dayFieldValid(_ text: String) -> Bool {
+        let t = text.trimmingCharacters(in: .whitespaces)
+        if t.isEmpty { return true }
+        return dayValue(t) != nil
+    }
+
+    /// 存檔用：1–31 才存，其他（空白、45、0、打錯字）一律不存
+    private func dayValue(_ text: String) -> Int? {
+        guard let d = Int(text.trimmingCharacters(in: .whitespaces)), (1...31).contains(d) else { return nil }
+        return d
+    }
+
+    /// 只留 0–9 和一個「.」（「,」當成「.」）：「6..8」→「6.8」、「6,8」→「6.8」
+    private static func decimalDigitsOnly(_ raw: String) -> String {
+        var out = ""
+        var hasDot = false
+        for ch in raw {
+            if ch.isASCII && ch.isNumber {
+                out.append(ch)
+            } else if (ch == "." || ch == ",") && !hasDot {
+                out.append(".")
+                hasDot = true
+            }
+        }
+        return out
+    }
+
+    /// 數字帶回輸入框：最多 4 位小數再去掉多餘的 0（6.8 → "6.8"、6 → "6"、6.835 → "6.835"）。
+    /// 額度以萬元顯示，4 位小數＝準到 1 元，打開再存不會把額度改掉（同 RealEstateEditors.editableAmountText 的寫法，
+    /// 那支留 2 位是因為單位是元；這裡單位是萬元，只留 2 位的話打 6.835 萬再打開存一次會變 68,400）
+    private static func editableNumber(_ v: Double) -> String {
+        let rounded: Double = (v * 10000).rounded() / 10000
+        var s = String(format: "%.4f", rounded)
+        while s.hasSuffix("0") { s.removeLast() }
+        if s.hasSuffix(".") { s.removeLast() }
+        return s
     }
 
     // MARK: - [v25.368] 卡號與安全資訊
@@ -2755,12 +2842,14 @@ struct AddMilestoneView: View {
                 cardName: trimmedOrNil(cardName, when: financeSub == .creditCard),
                 cardLastFour: trimmedOrNil(savedCardLastFour, when: financeSub == .creditCard),
                 // 信用卡額度輸入值單位為「萬元」，存進 LifeMilestone 時換算回元
+                // [v25.562] 可以打小數（6.8 萬），換回元時四捨五入到整數（6.8 × 10000 不會剛好是 68000）
                 creditLimit: financeSub == .creditCard
-                    ? (Double(creditLimitText).map { $0 * 10000 })
+                    ? (Double(creditLimitText).map { ($0 * 10000).rounded() })
                     : nil,
                 annualFee: financeSub == .creditCard ? Double(annualFeeText) : nil,
-                billingDay: financeSub == .creditCard ? Int(billingDayText) : nil,
-                paymentDay: financeSub == .creditCard ? Int(paymentDayText) : nil,
+                // [v25.562] 只存 1–31（canSave 已擋，這裡再守一次）
+                billingDay: financeSub == .creditCard ? dayValue(billingDayText) : nil,
+                paymentDay: financeSub == .creditCard ? dayValue(paymentDayText) : nil,
                 expiryDate: (financeSub == .creditCard || financeSub == .insurance) && hasExpiryDate ? expiryDate : nil,
                 securitiesAccountType: financeSub == .securities ? secAccType : nil,
                 insuranceCompany: trimmedOrNil(insuranceCompany, when: financeSub == .insurance),
@@ -2922,7 +3011,8 @@ struct AddMilestoneView: View {
             if let cl = e.creditLimit, cl > 0 {
                 // 信用卡額度以「萬元」顯示；其他子分類保留原始值
                 if e.financeSubCategory == .creditCard {
-                    creditLimitText = String(format: "%.0f", cl / 10000)
+                    // [v25.562] 帶小數（6.8 萬以前會被讀成 7，存一次就變 7 萬）
+                    creditLimitText = Self.editableNumber(cl / 10000)
                 } else {
                     creditLimitText = String(format: "%.0f", cl)
                 }

@@ -212,7 +212,8 @@ enum AIExpenseCommitter {
         // syncBankWithdrawal／syncRealEstateVariableExpense，導致銀行帳戶餘額、房地產支出
         // 章節帳實不符（AI 標了扣款帳戶／房地產，但對應清單與總額完全看不到這筆錢）；
         // 這裡補上對等的同步邏輯，供 AI 記帳流程使用。
-        syncBankWithdrawal(for: exp, life: life)
+        // [v25.562] 扣外幣子帳戶要換匯（跟記帳頁同一支 FinanceRates.bankAmount）；expense 是 ExpenseStore、exp 是這筆支出
+        syncBankWithdrawal(for: exp, life: life, rates: FinanceRates(expense), ntd: expense.ntdValue(of: exp))
         syncRealEstateExpense(for: exp, finance: finance)
         // 成功 toast
         // [美化] 金額改用全 App 共用的萬/億智慧量級（ntdWanString），對齊其餘頁面金額顯示規格，
@@ -237,14 +238,17 @@ enum AIExpenseCommitter {
     }
 
     /// AI 記帳同步：寫入銀行扣款紀錄，比照 AddExpenseView.syncBankWithdrawal(for:previous:)（新記錄、無需移除舊連結）。
-    private static func syncBankWithdrawal(for expense: Expense, life: LifeStore) {
+    /// [v25.562] 金額、幣別走 FinanceRates.bankAmount：記帳金額是台幣，扣「玉山・美金」以前直接寫成「美金 320」，
+    /// 現在換成美金 10.00；查不到匯率寫進這個帳戶的台幣那一格。ntd 由呼叫端用 ExpenseStore.ntdValue(of:) 算好。
+    private static func syncBankWithdrawal(for expense: Expense, life: LifeStore, rates: FinanceRates, ntd: Double) {
         guard expense.linkedCreditCardMilestoneId == nil,
               let bankId = expense.linkedBankMilestoneId,
               var ms = life.milestones.first(where: { $0.id == bankId }) else { return }
+        let withdrawal = rates.bankAmount(of: expense, ntd: ntd)
         var list = ms.bankDeposits ?? []
         list.append(BankDeposit(
-            id: UUID(), date: expense.date, amount: expense.amount,
-            currencyCode: expense.linkedBankCurrency ?? "NT$",
+            id: UUID(), date: expense.date, amount: withdrawal.amount,
+            currencyCode: withdrawal.code,
             isWithdrawal: true, linkedExpenseId: expense.id
         ))
         ms.bankDeposits = list

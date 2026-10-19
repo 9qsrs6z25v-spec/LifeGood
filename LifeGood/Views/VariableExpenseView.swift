@@ -573,6 +573,28 @@ struct VariableExpenseView: View {
         // [v25.539] 公升數跟度數一樣帶（同一家加油站加滿，量通常差不多，不同再改）；里程錶照舊不帶
         copy.fuelLiters = expense.fuelLiters
         store.add(copy)
+        writeDuplicateWithdrawal(for: copy)
+    }
+
+    /// [v25.562] 複製出來的支出也要從銀行扣（以前只寫記帳，銀行少扣一次）。比照複製收入（IncomeView.duplicateIncome）：
+    /// 刷卡（用卡費彙總）、週期固定支出（逐期展開）、連到自己有交割帳戶的股票（銀行只看股票的交割紀錄）都不寫單筆；
+    /// 其他有連銀行的寫一筆扣款，金額走 FinanceRates.bankAmount（扣外幣子帳戶要換匯，跟記帳頁同一支）。
+    private func writeDuplicateWithdrawal(for copy: Expense) {
+        guard copy.linkedCreditCardMilestoneId == nil else { return }
+        if copy.expenseType == .fixed, copy.recurrence != nil { return }
+        if let sid = copy.linkedStockId,
+           financeStore.stocks.first(where: { $0.id == sid })?.hasOwnSettlementAccount == true { return }
+        guard let bankId = copy.linkedBankMilestoneId,
+              var ms = lifeStore.milestones.first(where: { $0.id == bankId }) else { return }
+        let withdrawal = FinanceRates(store).bankAmount(of: copy, ntd: store.ntdValue(of: copy))
+        var list = ms.bankDeposits ?? []
+        list.append(BankDeposit(
+            id: UUID(), date: copy.date, amount: withdrawal.amount,
+            currencyCode: withdrawal.code,
+            isWithdrawal: true, linkedExpenseId: copy.id
+        ))
+        ms.bankDeposits = list
+        lifeStore.update(ms)
     }
 
     /// [v25.538] 舊的自動標題「項目 3：Model 3-加油」複製時去掉「項目 N：」（刪掉中間一筆就會重號，新的記帳也不再加編號），

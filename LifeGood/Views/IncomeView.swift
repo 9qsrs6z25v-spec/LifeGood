@@ -500,9 +500,12 @@ struct IncomeView: View {
            let bankId = copy.linkedBankMilestoneId,
            var ms = lifeStore.milestones.first(where: { $0.id == bankId }) {
             var list = ms.bankDeposits ?? []
+            // [v25.562] 入外幣子帳戶要換匯（跟收入頁同一支 FinanceRates.accountAmount；收入金額是台幣）。
+            // 複本不帶股票連結，不會遇到「股票自己有交割帳戶」那條
+            let deposit = FinanceRates(store).accountAmount(ntd: copy.amount, into: copy.linkedBankCurrency ?? "NT$")
             list.append(BankDeposit(
-                id: UUID(), date: copy.date, amount: copy.amount,
-                currencyCode: copy.linkedBankCurrency ?? "NT$",
+                id: UUID(), date: copy.date, amount: deposit.amount,
+                currencyCode: deposit.code,
                 isWithdrawal: false, linkedExpenseId: copy.id
             ))
             ms.bankDeposits = list

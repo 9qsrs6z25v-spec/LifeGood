@@ -50,6 +50,9 @@ import SwiftUI
 struct AddIncomeView: View {
     @EnvironmentObject var store: ExpenseStore
     @EnvironmentObject var lifeStore: LifeStore
+    // [v25.562] 配息、賣出獲利那筆收入：連到的股票自己有交割帳戶就不寫入帳（syncBankDeposit 要查股票）。
+    // 開這個畫面的地方都有 .appStores()（MainTabView、IncomeView、財富卡片、FinanceItemCard）
+    @EnvironmentObject var financeStore: FinanceStore
     @Environment(\.dismiss) private var dismiss
 
     var editing: Income?
@@ -707,13 +710,28 @@ struct AddIncomeView: View {
             }
             return
         }
+        // [v25.562] 連到的股票自己有交割帳戶（股利、賣出獲利那筆收入）：銀行的錢只看股票自己寫的股利、交割紀錄，
+        // 這筆收入不再寫入帳（以前在收入頁改一次備註就多入帳一次）；跟財富頁算餘額的 bankDepositIsReplaced 同一條。
+        // 只清掉目前這個帳戶裡以前寫的那筆。
+        if let sid = income.linkedStockId,
+           financeStore.stocks.first(where: { $0.id == sid })?.hasOwnSettlementAccount == true {
+            if let bankId = income.linkedBankMilestoneId,
+               var ms = lifeStore.milestones.first(where: { $0.id == bankId }) {
+                ms.bankDeposits?.removeAll { $0.linkedExpenseId == income.id }
+                lifeStore.update(ms)
+            }
+            return
+        }
         guard let bankId = income.linkedBankMilestoneId,
               var ms = lifeStore.milestones.first(where: { $0.id == bankId }) else { return }
         var list = ms.bankDeposits ?? []
         list.removeAll { $0.linkedExpenseId == income.id }
+        // [v25.562] 入外幣子帳戶要換匯：收入金額是台幣，以前直接寫成「美金 80,000」。
+        // 全 App 同一支 FinanceRates.accountAmount（台幣格照寫、有匯率就換、查不到寫這個帳戶的台幣格）
+        let deposit = FinanceRates(store).accountAmount(ntd: income.amount, into: income.linkedBankCurrency ?? "NT$")
         list.append(BankDeposit(
-            id: UUID(), date: income.date, amount: income.amount,
-            currencyCode: income.linkedBankCurrency ?? "NT$",
+            id: UUID(), date: income.date, amount: deposit.amount,
+            currencyCode: deposit.code,
             isWithdrawal: false, linkedExpenseId: income.id
         ))
         ms.bankDeposits = list

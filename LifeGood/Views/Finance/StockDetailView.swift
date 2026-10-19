@@ -1014,15 +1014,17 @@ struct StockTransactionEditor: View {
         guard let accId = target,
               var ms = lifeStore.milestones.first(where: { $0.id == accId }) else { return }
         let currency = stock.linkedBankCurrency ?? "NT$"
+        let rates = FinanceRates(expenseStore)
         var list = ms.bankDeposits ?? []
         list.removeAll { $0.linkedStockId == stock.id }
         for tx in stock.transactions {
+            // 美股＝USD 金額，台幣帳戶按匯率換算（v25.316）；[v25.562] 一條規則，見 stockAmountForAccount
+            let w = stockAmountForAccount(tx.amount, stock: stock, accountCurrency: currency, rates: rates)
             list.append(BankDeposit(
                 id: UUID(),
                 date: tx.settlementDate,
-                // 美股＝USD 金額，台幣帳戶按匯率換算（v25.316）
-                amount: stockAmountForAccount(tx.amount, stock: stock, accountCurrency: currency),
-                currencyCode: currency,
+                amount: w.amount,
+                currencyCode: w.code,
                 isWithdrawal: tx.kind == .buy,
                 linkedExpenseId: nil,
                 linkedStockId: stock.id
@@ -1556,6 +1558,9 @@ struct StockDividendEditor: View {
         guard let bankId = stock.linkedBankMilestoneId ?? stock.linkedSecuritiesMilestoneId,
               var ms = lifeStore.milestones.first(where: { $0.id == bankId }) else { return }
         let currency = stock.linkedBankCurrency ?? "NT$"
+        // 美股＝USD 金額，台幣帳戶按匯率換算（v25.316）；[v25.562] 一條規則，見 stockAmountForAccount
+        let w = stockAmountForAccount(amount, stock: stock, accountCurrency: currency,
+                                      rates: FinanceRates(expenseStore))
         var list = ms.bankDeposits ?? []
         // 用 dividendId 衍生穩定 deposit id，方便更新 / 刪除
         let depositId = stableDepositId(seed: "dividend-\(dividendId.uuidString)")
@@ -1563,9 +1568,8 @@ struct StockDividendEditor: View {
         list.append(BankDeposit(
             id: depositId,
             date: date,
-            // 美股＝USD 金額，台幣帳戶按匯率換算（v25.316）
-            amount: stockAmountForAccount(amount, stock: stock, accountCurrency: currency),
-            currencyCode: currency,
+            amount: w.amount,
+            currencyCode: w.code,
             isWithdrawal: false,
             linkedExpenseId: nil,
             linkedStockId: stock.id
@@ -1605,11 +1609,19 @@ struct StockDividendEditor: View {
 /// 扣款/入帳帳戶是台幣（或未指定幣別）→ 乘 USD→TWD 匯率換算成 NT$，
 /// 外幣（USD）帳戶則保留原幣金額。先前直接把 USD 數字當台幣寫入，
 /// 財富卡片的扣款金額整個少一個匯率倍數。
-func stockAmountForAccount(_ raw: Double, stock: Stock, accountCurrency: String?) -> Double {
-    guard stock.isUSStock else { return raw }
-    let code = (accountCurrency ?? "NT$").uppercased()
-    let isUSD = code.contains("USD") || code.contains("US$")
-    return isUSD ? raw : raw * Stock.usdTwdRate
+///
+/// [v25.562] 一條規則（新增股票頁、股票卡交易、配息都呼叫這一支，回傳「寫多少、寫哪一格」）：
+/// - 美股、帳戶是美元（「美金」「美元」「USD」「US$」都算，FinanceRates.isUSD）→ 美元原數照寫
+/// - 其餘一律先換成台幣（美股 × Stock.usdTwdRate；台股本來就是台幣），再走 FinanceRates.accountAmount：
+///   台幣帳戶照寫、其他外幣有匯率就 ÷ 匯率、查不到匯率就寫進台幣那一格（不再把台幣數字標成外幣）
+/// 以前「美金」帳戶被當成台幣帳戶再乘匯率（AAPL 2,000 美元寫成「美金 64,000」）；
+/// 新增股票頁根本不換（寫成「NT$ 2,000」）。
+func stockAmountForAccount(_ raw: Double, stock: Stock, accountCurrency: String?,
+                           rates: FinanceRates) -> (amount: Double, code: String) {
+    let code = accountCurrency ?? "NT$"
+    if stock.isUSStock, FinanceRates.isUSD(code) { return (raw, code) }
+    let ntd = stock.isUSStock ? raw * Stock.usdTwdRate : raw
+    return rates.accountAmount(ntd: ntd, into: code)
 }
 
 /// 分享面板項目的 Identifiable 包裝（供 .sheet(item:) 使用）

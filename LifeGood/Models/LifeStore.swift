@@ -314,6 +314,155 @@ class LifeStore: ObservableObject {
         for name in photos { LifeMilestone.deletePhoto(name) }
     }
 
+    // MARK: - [v25.562] 刪財富帳戶（財富卡片、履歷的刪除都呼叫這一支；以前兩份各寫一次，都漏了卡）
+
+    /// 刪一筆里程碑，並清掉其他資料指到它的連結。任何分類都走這支；財富的銀行、信用卡多做幾件事：
+    /// - 刪銀行：掛在它底下的卡改成「沒有扣款帳戶」——以前卡還指著已刪的銀行，財富頁整張卡不見
+    /// - 刪卡：這張卡到今天刷的合計（台幣，含定期扣款每一期，跟銀行餘額扣的同一支 expandedCreditCardEntries）
+    ///   合成一筆提款留在扣款帳戶，扣款帳戶的數字跟刪之前一樣；記帳裡刷這張卡的，卡和銀行兩個連結一起清
+    ///   （銀行連結是選卡時一起設的；以前只清卡，一次性的錢跑回銀行、定期扣款變成「直接扣銀行」每月照扣）
+    /// - 股票、記帳、收入指到它的連結照舊清掉
+    /// 刪卡之前先問「改成停用」（financeDeletionImpact 的字）。milestones 只指派一次（一次存檔、一次推 iCloud）。
+    func deleteFinanceMilestone(_ item: LifeMilestone, finance: FinanceStore, expense: ExpenseStore,
+                                now: Date = Date()) {
+        let id = item.id
+        let target = milestones.first(where: { $0.id == id }) ?? item
+        let isCard = target.category == .achievement && target.financeSubCategory == .creditCard
+        var list = milestones
+
+        if isCard {
+            let cardExpenseIds = Set(expense.expenses.filter { $0.linkedCreditCardMilestoneId == id }.map(\.id))
+            // 連到刷卡支出的舊扣款紀錄（正常不會有；有的話以前被「刷卡」規則跳過，清掉卡的連結後會突然算進去）
+            if !cardExpenseIds.isEmpty {
+                for i in list.indices {
+                    guard let deps = list[i].bankDeposits else { continue }
+                    let kept = deps.filter { dep in
+                        guard let eid = dep.linkedExpenseId else { return true }
+                        return !cardExpenseIds.contains(eid)
+                    }
+                    if kept.count != deps.count { list[i].bankDeposits = kept }
+                }
+            }
+            // 刷過的錢合成一筆留在扣款帳戶（先算再清連結）
+            if let bankId = target.linkedBankMilestoneId,
+               let bi = list.firstIndex(where: { $0.id == bankId }) {
+                let total = expandedCreditCardEntries(forCard: id, expenses: expense.expenses, now: now,
+                                                      ntd: { expense.ntdValue(of: $0) })
+                    .reduce(0.0) { $0 + $1.amount }
+                if total > 0 {
+                    let name = target.cardName.flatMap { $0.isEmpty ? nil : $0 } ?? target.title
+                    var deps = list[bi].bankDeposits ?? []
+                    deps.append(BankDeposit(date: now, amount: total, currencyCode: "NT$", isWithdrawal: true,
+                                            note: "「\(name)」刪除前的卡費（合併成一筆）"))
+                    list[bi].bankDeposits = deps
+                }
+            }
+        }
+
+        // 掛在它底下的卡（刪的是銀行時）改成沒有扣款帳戶
+        for i in list.indices where list[i].linkedBankMilestoneId == id {
+            list[i].linkedBankMilestoneId = nil
+        }
+        // 照片檔不在 JSON 裡，跟著刪（同 deleteMilestone）
+        let photos = target.photoFileNames ?? []
+        list.removeAll { $0.id == id }
+        milestones = list
+        for name in photos { LifeMilestone.deletePhoto(name) }
+
+        var stocks = finance.stocks
+        var stocksChanged = false
+        for i in stocks.indices {
+            if stocks[i].linkedBankMilestoneId == id {
+                stocks[i].linkedBankMilestoneId = nil
+                stocks[i].linkedBankCurrency = nil
+                stocksChanged = true
+            }
+            if stocks[i].linkedSecuritiesMilestoneId == id {
+                stocks[i].linkedSecuritiesMilestoneId = nil
+                stocksChanged = true
+            }
+        }
+        if stocksChanged { finance.stocks = stocks }
+
+        var expenses = expense.expenses
+        var expensesChanged = false
+        for i in expenses.indices {
+            if expenses[i].linkedCreditCardMilestoneId == id {
+                // 刪卡：卡和銀行一起清（不然定期扣款會變成直接扣銀行）
+                expenses[i].linkedCreditCardMilestoneId = nil
+                expenses[i].linkedBankMilestoneId = nil
+                expensesChanged = true
+            }
+            if expenses[i].linkedBankMilestoneId == id {
+                expenses[i].linkedBankMilestoneId = nil
+                expensesChanged = true
+            }
+        }
+        if expensesChanged { expense.expenses = expenses }
+
+        var incomes = expense.incomes
+        var incomesChanged = false
+        for i in incomes.indices where incomes[i].linkedBankMilestoneId == id {
+            incomes[i].linkedBankMilestoneId = nil
+            incomesChanged = true
+        }
+        if incomesChanged { expense.incomes = incomes }
+    }
+
+    /// [v25.562] 刪之前確認框要講的話：會動到什麼，全部是數出來的。財富卡片、履歷兩邊共用。
+    func financeDeletionImpact(_ item: LifeMilestone, finance: FinanceStore, expense: ExpenseStore,
+                               now: Date = Date()) -> FinanceDeletionImpact {
+        let id = item.id
+        let target = milestones.first(where: { $0.id == id }) ?? item
+        let isFinance = target.category == .achievement
+        let isBank = isFinance && target.financeSubCategory == .bank
+        let isCard = isFinance && target.financeSubCategory == .creditCard
+        let linkedCards = milestones.filter { $0.linkedBankMilestoneId == id }.count
+        let directExpenses = expense.expenses.filter {
+            $0.linkedBankMilestoneId == id && $0.linkedCreditCardMilestoneId == nil
+        }.count
+        let incomeCount = expense.incomes.filter { $0.linkedBankMilestoneId == id }.count
+        let stockCount = finance.stocks.filter {
+            $0.linkedBankMilestoneId == id || $0.linkedSecuritiesMilestoneId == id
+        }.count
+
+        var bankName: String?
+        var cardTotal: Double = 0
+        var cardCount = 0
+        var recurring: [String] = []
+        if isCard {
+            if let bid = target.linkedBankMilestoneId, let b = milestones.first(where: { $0.id == bid }) {
+                bankName = b.bankName.flatMap { $0.isEmpty ? nil : $0 } ?? b.title
+            }
+            let cardExpenses = expense.expenses.filter { $0.linkedCreditCardMilestoneId == id }
+            cardCount = cardExpenses.count
+            cardTotal = expandedCreditCardEntries(forCard: id, expenses: expense.expenses, now: now,
+                                                  ntd: { expense.ntdValue(of: $0) })
+                .reduce(0.0) { $0 + $1.amount }
+            for exp in cardExpenses where exp.expenseType == .fixed {
+                guard let r = exp.recurrence else { continue }
+                if let end = exp.endDate, end <= now { continue }
+                let unit: String
+                switch r {
+                case .monthly: unit = "月"
+                case .quarterly: unit = "季"
+                case .yearly: unit = "年"
+                }
+                recurring.append("\(exp.title) \(expense.ntdValue(of: exp).ntdWanString)／\(unit)")
+            }
+        }
+        let name: String = {
+            if isBank { return target.bankName.flatMap { $0.isEmpty ? nil : $0 } ?? target.title }
+            if isCard { return target.cardName.flatMap { $0.isEmpty ? nil : $0 } ?? target.title }
+            return target.title
+        }()
+        return FinanceDeletionImpact(
+            item: target, displayName: name, isBank: isBank, isCard: isCard,
+            linkedCardCount: linkedCards, directExpenseCount: directExpenses, incomeCount: incomeCount,
+            stockCount: stockCount, debitBankName: bankName, cardTotal: cardTotal,
+            cardExpenseCount: cardCount, recurringTexts: recurring)
+    }
+
     // MARK: - 配偶協定
 
     /// 對某位家庭成員就地改一次，保證只觸發一次 familyMembers 的 didSet
@@ -3346,5 +3495,76 @@ class LifeStore: ObservableObject {
         }
         tripPlans.removeAll()
         save()
+    }
+}
+
+// MARK: - [v25.562] 刪財富帳戶的確認字
+
+/// 刪一筆財富帳戶前，確認框要講的話。LifeStore.financeDeletionImpact 數好，財富卡片、履歷兩邊共用同一段字。
+/// 例：刪銀行「有 2 張卡從這裡扣卡費，刪掉後會變成沒有扣款帳戶（卡還在財富頁）；記帳裡從這裡扣的 37 筆會留著，
+/// 但不再算任何帳戶；這個帳戶自己的存提款紀錄會一起刪掉，無法復原。」
+/// 刪卡「建議改成停用…仍要刪除的話：以前從玉山扣的卡費 NT$12萬 會合成一筆留在玉山，玉山的數字不變；
+/// 記帳裡刷這張卡的 127 筆會留著，但不再連到任何卡；Disney+ NT$270／月不會再從任何帳戶扣。」
+struct FinanceDeletionImpact {
+    /// 要刪的那一筆（按「仍要刪除」時拿它去刪）
+    let item: LifeMilestone
+    let displayName: String
+    let isBank: Bool
+    let isCard: Bool
+    /// 從這個帳戶扣卡費的卡（刪銀行）
+    let linkedCardCount: Int
+    /// 記帳裡直接從這裡扣的（不含刷卡）
+    let directExpenseCount: Int
+    /// 收入裡入這個帳戶的
+    let incomeCount: Int
+    /// 用它當交割帳戶或證券戶的股票
+    let stockCount: Int
+    /// 刪卡：扣款帳戶的名字（沒設＝nil）
+    let debitBankName: String?
+    /// 刪卡：到今天刷的合計（台幣，含定期扣款每一期）＝要合成一筆留在扣款帳戶的金額
+    let cardTotal: Double
+    /// 刪卡：記帳裡刷這張卡的筆數
+    let cardExpenseCount: Int
+    /// 刪卡：還在扣的定期扣款（「Disney+ NT$270／月」）
+    let recurringTexts: [String]
+
+    var title: String { "刪掉「\(displayName)」？" }
+    /// 還在用的卡先建議改成停用
+    var offersDisable: Bool { isCard && item.isDisabled != true }
+    var deleteButtonTitle: String { offersDisable ? "仍要刪除" : "刪除" }
+
+    var message: String {
+        var parts: [String] = []
+        if isCard {
+            if let bank = debitBankName {
+                if cardTotal > 0 {
+                    parts.append("以前從\(bank)扣的卡費 \(cardTotal.ntdWanString) 會合成一筆留在\(bank)，\(bank)的數字不變")
+                } else {
+                    parts.append("\(bank)的數字不變")
+                }
+            }
+            if cardExpenseCount > 0 {
+                parts.append("記帳裡刷這張卡的 \(cardExpenseCount) 筆會留著，但不再連到任何卡")
+            }
+            if !recurringTexts.isEmpty {
+                let shown = recurringTexts.prefix(3).joined(separator: "、")
+                let more = recurringTexts.count > 3 ? " 等 \(recurringTexts.count) 筆" : ""
+                parts.append(shown + more + "不會再從任何帳戶扣")
+            }
+            if parts.isEmpty { parts.append("刪掉後無法復原") }
+            let body = parts.joined(separator: "；") + "。"
+            guard offersDisable else { return body }
+            return "建議改成停用：記帳的選單不會再出現這張卡，以前的紀錄和數字都不動。\n\n仍要刪除的話：" + body
+        }
+        if isBank, linkedCardCount > 0 {
+            parts.append("有 \(linkedCardCount) 張卡從這裡扣卡費，刪掉後會變成沒有扣款帳戶（卡還在財富頁）")
+        }
+        var kept: [String] = []
+        if directExpenseCount > 0 { kept.append("記帳裡從這裡扣的 \(directExpenseCount) 筆") }
+        if incomeCount > 0 { kept.append("收入裡入這個帳戶的 \(incomeCount) 筆") }
+        if !kept.isEmpty { parts.append(kept.joined(separator: "、") + "會留著，但不再算任何帳戶") }
+        if stockCount > 0 { parts.append("\(stockCount) 檔股票的交割帳戶會清掉") }
+        parts.append(isBank ? "這個帳戶自己的存提款紀錄會一起刪掉，無法復原" : "刪掉後無法復原")
+        return parts.joined(separator: "；") + "。"
     }
 }
