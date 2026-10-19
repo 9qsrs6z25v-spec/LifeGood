@@ -55,7 +55,8 @@ import UIKit
 //   「[creditcard.fill] CUBE 卡費　〔財富〕　☀ 全日 · 自己繳・NT$18,600」。結帳日不放。
 //   記帳用 AppStores.expense（不加 @EnvironmentObject expenseStore：#Preview 沒注入會當掉）。
 // • 財富帳戶的里程碑（銀行、信用卡、證券、保險的開戶日／核卡日；WealthDates.isWealthAccount）照舊列（第 9 題：帳戶都留著），
-//   但類型改 .wealth、分類寫「財富」（不寫「成就」、不當里程碑）、不帶時間。
+//   但類型改 .wealth、分類寫「財富」（不寫「成就」、不當里程碑）、不帶時間；灰字寫子分類＋哪一天（「信用卡・核卡日」，
+//   wealthAccountDetail，不再跟膠囊重複寫「財富」）、圖示照子分類（FinanceSubCategory.icon）。
 // • CalendarEvent 多 wealthAccountId（點了開哪一張卡／哪一個帳戶）、tint（自動扣的卡費灰；nil 用 type.color）；
 //   EventType 多 .wealth（橘 F07A29、「財富」、banknote.fill）。eventRow 與「接下來 7 天」的彩點一律用 ev.tint ?? ev.type.color。
 // • 點了（tapEvent）：財富 → openTarget = .wealth(id) → 同一個 .sheet(item: $openTarget) { … .appStores() }
@@ -492,6 +493,18 @@ struct MyCalendarView: View {
         ev.tint ?? ev.type.color
     }
 
+    /// [財富 v4] 財富帳戶開戶日那一列的灰字：類型膠囊已經寫「財富」，這裡不再重複，
+    /// 寫子分類＋那天是什麼日子（跟財富表單日期欄同一組字：銀行、證券「開戶日」，信用卡「核卡日」，保單「生效日」）
+    private static func wealthAccountDetail(_ ms: LifeMilestone) -> String {
+        guard let sub = ms.financeSubCategory else { return "財富" }
+        switch sub {
+        case .bank:       return "銀行・開戶日"
+        case .creditCard: return "信用卡・核卡日"
+        case .securities: return "證券・開戶日"
+        case .insurance:  return "保險・生效日"
+        }
+    }
+
     /// 將生日 / 紀念日的「年份」對齊到當年（用於跨年比對）
     private func annualOccurrence(of date: Date, year: Int) -> Date {
         var comp = calendar.dateComponents([.month, .day], from: date)
@@ -546,13 +559,15 @@ struct MyCalendarView: View {
         // 人生里程碑（精準日期）
         for ms in lifeStore.milestones where calendar.isDate(ms.date, inSameDayAs: day) {
             if WealthDates.isWealthAccount(ms) {
-                // [財富 v4] 財富帳戶的開戶日／核卡日：照舊列（第 9 題），分類寫「財富」、點了開卡片頁
+                // [財富 v4] 財富帳戶的開戶日／核卡日：照舊列（第 9 題），分類寫「財富」、點了開卡片頁。
+                // 類型膠囊已經寫「財富」，灰字改寫子分類＋哪一天（「信用卡・核卡日」），圖示照子分類
                 events.append(CalendarEvent(
                     id: "ms-\(ms.id.uuidString)",
                     type: .wealth,
                     title: ms.title,
                     time: nil,
-                    detail: "財富",
+                    detail: Self.wealthAccountDetail(ms),
+                    iconName: ms.financeSubCategory?.icon,
                     wealthAccountId: ms.id
                 ))
                 continue

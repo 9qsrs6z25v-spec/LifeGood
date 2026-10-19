@@ -57,6 +57,7 @@ enum WidgetAmountOption: String, AppEnum {
 // MARK: - 接下來要繳
 
 /// 「範圍」：全部（預設）／只看記帳的固定支出／只看理財
+/// [v25.565 裁定] 「只看記帳」也列卡費（WidgetBillScope.ledger：刷卡的定期扣款併在卡費裡），字跟著補「與卡費」（只改顯示的字，存的 rawValue 不變）
 enum WidgetBillScopeOption: String, AppEnum {
     case all
     case ledger
@@ -65,7 +66,7 @@ enum WidgetBillScopeOption: String, AppEnum {
     static var typeDisplayRepresentation: TypeDisplayRepresentation = "範圍"
     static var caseDisplayRepresentations: [WidgetBillScopeOption: DisplayRepresentation] = [
         .all: "全部",
-        .ledger: "只看記帳的固定支出",
+        .ledger: "只看記帳的固定支出與卡費",
         .finance: "只看理財"
     ]
 

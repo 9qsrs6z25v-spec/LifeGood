@@ -26,6 +26,9 @@ import AppIntents
 //   這裡的邏輯不用改：主畫面寫卡名＋金額（照「隱藏金額」，judge §7.1 允許）；只有 systemMedium，不會上 StandBy。
 //   範圍「只看記帳」也列卡費（WidgetBillScope.ledger：記帳的定期扣款併在卡費裡）。
 //   鎖定畫面「下一筆要繳」碰到這兩種只寫「卡費」「交割」、不寫金額（LockScreenWidgets.swift）。
+//   [財富 v4 審查] 保險：放在 iPad 鎖定畫面（vibrant；Mac 桌面沒聚焦時也是 vibrant）時，卡費、交割那幾列照鎖定畫面的規矩
+//   ——名稱換類別字（lockedTitle「卡費」「交割」）、不寫小字（扣款帳戶暱稱）、不寫金額（judge §7.1：鎖定畫面不放卡名、金額）。
+//   全彩（主畫面、今天視圖）照舊。記帳、理財那幾件不受影響（跟 v3 一樣）。
 //
 // 型別（internal 的都帶 Bills 前綴；畫面零件 private）：
 //   BillsWidget、BillsWidgetEntry、BillsWidgetProvider、BillsTimeline（鎖定畫面「下一筆要繳」共用）、
@@ -175,9 +178,11 @@ private struct BillsWidgetModel {
 
     /// 只挑字、不算錢：日期字與日差由 WidgetDateText 組，金額字是 App 寫好的。
     /// [v3] scope／days：長按設定的範圍、天數（預設全部／30＝v2）
+    /// [財富 v4 審查] lockScreen：放在鎖定畫面（vibrant）——卡費、交割只寫類別字、不寫小字與金額
     static func make(snapshot: WidgetBillsSnapshot?, now: Date, hidden: Bool,
                      scope: WidgetBillScope = .all,
-                     days: Int = WidgetBillsSnapshot.listDays) -> BillsWidgetModel {
+                     days: Int = WidgetBillsSnapshot.listDays,
+                     lockScreen: Bool = false) -> BillsWidgetModel {
         var model = BillsWidgetModel()
         guard let snap = snapshot else {
             model.message = "打開 LifeGood 一次，這裡就會出現接下來要扣的錢"
@@ -196,23 +201,37 @@ private struct BillsWidgetModel {
             model.kind = .empty
             model.emptyTitle = "\(days) 天內沒有要扣的"
             if let next = snap.next(at: now, scope: scope) {
-                model.emptyNext = nextText(next, hidden: hidden)
+                model.emptyNext = nextText(next, hidden: hidden, lockScreen: lockScreen)
             }
             return model
         }
         model.kind = .list
         model.countText = "\(list.count) 件"
-        model.rows = list.prefix(3).map { row($0, now: now, hidden: hidden) }
-        model.moreAfterThree = moreText(Array(list.dropFirst(3)))
-        model.moreAfterTwo = moreText(Array(list.dropFirst(2)))
+        model.rows = list.prefix(3).map { row($0, now: now, hidden: hidden, lockScreen: lockScreen) }
+        model.moreAfterThree = moreText(Array(list.dropFirst(3)), lockScreen: lockScreen)
+        model.moreAfterTwo = moreText(Array(list.dropFirst(2)), lockScreen: lockScreen)
         return model
     }
 
-    /// 「下一筆 11/15 (週日) Netflix NT$390」
-    private static func nextText(_ bill: WidgetBill, hidden: Bool) -> String {
+    /// [財富 v4 審查] 這一筆在鎖定畫面上要不要收起來：卡費、交割（WidgetBillKind.isWealth）放在鎖定畫面時
+    private static func isLocked(_ bill: WidgetBill, lockScreen: Bool) -> Bool {
+        lockScreen && bill.kind.isWealth
+    }
+
+    /// [財富 v4 審查] 名稱：收起來的寫類別字（「卡費」「交割」），其他照 App 寫的
+    private static func shownTitle(_ bill: WidgetBill, lockScreen: Bool) -> String {
+        isLocked(bill, lockScreen: lockScreen) ? bill.lockedTitle : bill.title
+    }
+
+    /// 「下一筆 11/15 (週日) Netflix NT$390」。[財富 v4 審查] 鎖定畫面的卡費、交割：「下一筆 10/27 (週二) 卡費」
+    private static func nextText(_ bill: WidgetBill, hidden: Bool, lockScreen: Bool) -> String {
         let date: String = WidgetDateText.billDate(bill.dueDate)
+        let name: String = shownTitle(bill, lockScreen: lockScreen)
+        if isLocked(bill, lockScreen: lockScreen) {
+            return "下一筆 \(date) \(name)"
+        }
         let amount: String = amountText(bill, hidden: hidden)
-        return "下一筆 \(date) \(bill.title) \(amount)"
+        return "下一筆 \(date) \(name) \(amount)"
     }
 
     private static func amountText(_ bill: WidgetBill, hidden: Bool) -> String {
@@ -220,9 +239,11 @@ private struct BillsWidgetModel {
         return bill.isIncome ? "★ " + text : text
     }
 
-    private static func row(_ bill: WidgetBill, now: Date, hidden: Bool) -> BillsWidgetRow {
+    /// [財富 v4 審查] lockScreen：卡費、交割那一列名稱換類別字、不寫小字（「自己繳・含 Netflix」「從薪轉扣」）與金額
+    private static func row(_ bill: WidgetBill, now: Date, hidden: Bool, lockScreen: Bool) -> BillsWidgetRow {
+        let locked: Bool = isLocked(bill, lockScreen: lockScreen)
         let due: String = WidgetDateText.dueText(bill.dueDate, from: now, isIncome: bill.isIncome) ?? ""
-        let detailText: String = bill.detail ?? ""
+        let detailText: String = locked ? "" : (bill.detail ?? "")
         let detail: String = detailText.isEmpty ? "" : "・" + detailText
         let lead: String
         let rest: String
@@ -233,15 +254,19 @@ private struct BillsWidgetModel {
             lead = ""
             rest = WidgetDateText.billDate(bill.dueDate) + "・" + due + detail
         }
-        return BillsWidgetRow(id: bill.id, title: bill.title, lead: lead, rest: rest,
-                              amount: amountText(bill, hidden: hidden), isIncome: bill.isIncome,
+        let amount: String = locked ? "" : amountText(bill, hidden: hidden)
+        return BillsWidgetRow(id: bill.id, title: shownTitle(bill, lockScreen: lockScreen), lead: lead, rest: rest,
+                              amount: amount, isIncome: bill.isIncome,
                               tint: bill.tint, tintDark: bill.tintDark, url: bill.url)
     }
 
-    /// 「再來 10/28 美元保單、11/5 Taycan 車貸 等 3 件」：只列剩下的前兩個名字；剩 1 件就只寫那一件
-    private static func moreText(_ rest: [WidgetBill]) -> String {
+    /// 「再來 10/28 美元保單、11/5 Taycan 車貸 等 3 件」：只列剩下的前兩個名字；剩 1 件就只寫那一件。
+    /// [財富 v4 審查] 鎖定畫面的卡費、交割寫類別字（「11/27 卡費」）
+    private static func moreText(_ rest: [WidgetBill], lockScreen: Bool) -> String {
         guard !rest.isEmpty else { return "" }
-        let names: [String] = rest.prefix(2).map { WidgetDateText.shortDate($0.dueDate) + " " + $0.title }
+        let names: [String] = rest.prefix(2).map { (bill: WidgetBill) -> String in
+            WidgetDateText.shortDate(bill.dueDate) + " " + shownTitle(bill, lockScreen: lockScreen)
+        }
         let joined = names.joined(separator: "、")
         if rest.count == 1 { return "再來 " + joined }
         return "再來 " + joined + " 等 \(rest.count) 件"
@@ -308,9 +333,12 @@ struct BillsWidgetEntryView: View {
         WidgetPalette(colorScheme, mono: surface.isMono)
     }
 
+    /// [財富 v4 審查] 鎖定畫面（iPad 鎖定畫面是 vibrant；Mac 桌面沒聚焦時也是）：卡費、交割照鎖定畫面的規矩收起來
+    private var onLockScreen: Bool { renderingMode == .vibrant }
+
     private var model: BillsWidgetModel {
         BillsWidgetModel.make(snapshot: entry.snapshot, now: entry.date, hidden: entry.hidesAmounts,
-                              scope: entry.scope, days: entry.days)
+                              scope: entry.scope, days: entry.days, lockScreen: onLockScreen)
     }
 
     var body: some View {
@@ -441,13 +469,17 @@ private struct BillsWidgetRowView: View {
             .layoutPriority(1)
     }
 
+    /// [財富 v4 審查] 空字串（鎖定畫面的卡費、交割）不畫，右邊不留空
+    @ViewBuilder
     private var amountText: some View {
-        Text(row.amount)
-            .font(.system(size: 12.5, weight: .bold))
-            .monospacedDigit()
-            .foregroundStyle(amountColor)
-            .lineLimit(1)
-            .fixedSize()
+        if !row.amount.isEmpty {
+            Text(row.amount)
+                .font(.system(size: 12.5, weight: .bold))
+                .monospacedDigit()
+                .foregroundStyle(amountColor)
+                .lineLimit(1)
+                .fixedSize()
+        }
     }
 }
 

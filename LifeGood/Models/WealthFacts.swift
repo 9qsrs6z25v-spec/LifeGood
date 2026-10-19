@@ -46,6 +46,10 @@ import CryptoKit
 // • 理財每月淨資產回推（history，口徑 4）：某一天結束時的存款合計（照帳戶紀錄；有對過存摺的帳戶，第一次對存摺以前平推那個數，
 //   沒對過的帳戶第一筆以前平推第一天的數，都標估算）、卡費還沒扣（那天已結帳沒繳的帳單＋這一期刷到那天的）、待交割（那天成交、
 //   還沒交割的股票款）；匯率一律用今天的。
+// • [v25.565 裁定] 賣股票還沒入帳（pendingIncoming）：同一天買賣相抵後要「入」帳、交割日還沒到的股票款（只算算進存款合計的帳戶）。
+//   理財淨資產把它算進存款那一類（FinanceSnapshot.pendingIncoming）：成交當天股票市值就少了、錢 T+2 才進存摺，不加會假跌兩天
+//  （買的那一邊是待交割擋掉）。財富頁的「存摺上」「還沒扣」「扣完能用」不算它（錢還沒到，不拿來扣）。回推（history）同一套：
+//   Settle 留正負號，正的＝待交割、負的＝待入帳。
 // • 要確認 #12：卡片效期前 30 天到那個月底（有效期限只取年月；「CUBE 3 月到期，換新卡後記得改 Netflix、Spotify…」）。
 //
 // （工程）build 很重（展開每一期），全 App 只透過 LifeStore.wealthFacts(expense:finance:) 拿快取的那一份
@@ -739,6 +743,8 @@ struct WealthMonthEnd: Equatable {
     var cash: Double = 0
     var cardOwed: Double = 0
     var pending: Double = 0
+    /// [v25.565 裁定] 賣股票還沒入帳（那天成交、還沒交割、同一天買賣相抵後是入帳的；台幣）
+    var incoming: Double = 0
     /// 有帳戶那天還沒開始記（往前平推的）
     var estimated: Bool = false
 }
@@ -755,7 +761,8 @@ struct WealthHistory {
         let startValue: Double
     }
 
-    /// 一筆交割（那天、台幣；買賣相抵後是要扣的）
+    /// 一筆交割（那天、台幣；同一天同一幣別買賣相抵後的淨額）。
+    /// [v25.565 裁定] 留正負號：正的＝要扣（待交割）、負的＝要入帳（賣股票還沒入帳）
     fileprivate struct Settle {
         let day: Date
         let ntd: Double
@@ -793,7 +800,7 @@ struct WealthHistory {
                 let startValue: Double = days.firstIndex(of: start).map { values[$0] } ?? 0
                 lines.append(Line(rate: r, days: days, values: values, startDay: start, startValue: startValue))
             }
-            // 股票款：同一天同一個幣別買賣相抵，要扣的才算
+            // 股票款：同一天同一個幣別買賣相抵（[v25.565 裁定] 要扣的、要入帳的都留，正負號分開算）
             var keys: [String] = []
             var net: [String: Double] = [:]
             var dayOf: [String: Date] = [:]
@@ -811,14 +818,15 @@ struct WealthHistory {
                 net[k, default: 0] += signed
             }
             for k in keys {
-                guard let v = net[k], v > 0, let d = dayOf[k], let code = codeOf[k], let r = rates.known(code) else { continue }
+                guard let v = net[k], Swift.abs(v) > 0.004, let d = dayOf[k], let code = codeOf[k],
+                      let r = rates.known(code) else { continue }
                 settles.append(Settle(day: d, ntd: v * r))
             }
         }
         return WealthHistory(lines: lines, cards: cards, settles: settles)
     }
 
-    /// day 那天結束時的存款合計、卡費還沒扣、待交割
+    /// day 那天結束時的存款合計、卡費還沒扣、待交割（[v25.565 裁定] ＋賣股票還沒入帳）
     func point(endOf day: Date) -> WealthMonthEnd {
         let d = WealthCal.day(day)
         var p = WealthMonthEnd()
@@ -844,16 +852,26 @@ struct WealthHistory {
             if found >= 0 { p.cash += l.values[found] * l.rate }
         }
         for c in cards { p.cardOwed += WealthHistory.owed(c, endOf: d) }
-        // 那天成交、還沒交割：交割日在 (那天, 那天＋2 個營業日]
+        // 那天成交、還沒交割：交割日在 (那天, 那天＋2 個營業日]；要扣的算待交割、要入帳的算賣股票還沒入帳
         let limit = WealthCal.day(StockTransaction.taiwanSettlementDate(from: d))
-        for s in settles where s.day > d && s.day <= limit { p.pending += s.ntd }
+        for s in settles where s.day > d && s.day <= limit {
+            if s.ntd > 0 {
+                p.pending += s.ntd
+            } else {
+                p.incoming += -s.ntd
+            }
+        }
         return p
     }
 
     /// 一張卡在 d 那天結束時還沒扣的卡費：那天已結帳、還沒繳的帳單＋這一期刷到那天的
+    /// ＋（[v25.565 驗證修正] 同 WealthFacts.statements 的 carry）前一期在 d 以前只繳了一部分（自動扣最低、少繳）轉進這一期的那筆——
+    /// 「現在」的還沒出帳（Card.unbilled＝這一期 amount）本來就含它，回推不加會讓那幾天的卡費少算、「比上月」假跌
     fileprivate static func owed(_ c: WealthFacts.Card, endOf d: Date) -> Double {
         var total: Double = 0
+        var previous: WealthStatement? = nil
         for s in c.statements {
+            defer { previous = s }
             let start = WealthCal.day(s.start)
             if start > d { continue }
             if s.isPaid, WealthCal.day(s.paidOn ?? s.due) <= d { continue }
@@ -863,6 +881,10 @@ struct WealthHistory {
                 for e in c.entries {
                     let ed = WealthCal.day(e.date)
                     if ed >= start && ed <= d { total += e.amount }
+                }
+                // 前期沒繳完轉過來的：前一期 d 那天已經扣過（只扣了一部分）才算在這一期；前一期還沒扣時它整筆已經算在上面
+                if s.carriedIn > 0.5, let p = previous, p.isPaid, WealthCal.day(p.paidOn ?? p.due) <= d {
+                    total += s.carriedIn
                 }
             }
         }
@@ -918,6 +940,19 @@ struct WealthFacts {
     /// [v25.565] 所有卡接下來要繳的幾期（照截止日）
     var allDues: [WealthCardDue] {
         cards.flatMap { $0.dues }.sorted { a, b in a.due != b.due ? a.due < b.due : a.id < b.id }
+    }
+
+    /// [v25.565 裁定] 賣股票還沒入帳（台幣）：接下來的交割裡，同一天同一幣別買賣相抵後是「入帳」、日子還沒到的那幾筆；
+    /// 只算沒收起來、算進存款合計的銀行帳戶（同 cash、pendingSettlement）。查不到匯率的不算（同 cash）。
+    /// 理財淨資產算進存款那一類（FinanceSnapshot.pendingIncoming），財富頁的還沒扣、扣完能用不算它
+    var pendingIncoming: Double {
+        var counted = Set<UUID>()
+        for a in accounts where !a.isSecurities && !a.hidden && a.countsInCash { counted.insert(a.id) }
+        var total: Double = 0
+        for s in settlements where !s.isOutflow && s.day > today && counted.contains(s.accountId) {
+            total += s.ntd ?? 0
+        }
+        return total
     }
 
     /// 還沒扣＝卡費＋待交割（＋[v25.564] 已經排定、還沒到的提款）

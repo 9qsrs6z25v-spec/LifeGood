@@ -45,14 +45,16 @@ enum CalendarDayItems {
         for ms in store.milestones where cal.isDate(ms.date, inSameDayAs: day) {
             let raw = ms.title.trimmingCharacters(in: .whitespacesAndNewlines)
             if WealthDates.isWealthAccount(ms) {
-                // [財富 v4] 財富帳戶的開戶日／核卡日：照舊列（第 9 題），但當「財富」不當里程碑；鎖定畫面只寫「財富」
+                // [財富 v4] 財富帳戶的開戶日／核卡日：照舊列（第 9 題），但當「財富」不當里程碑；鎖定畫面只寫「財富」。
+                // 圖示照子分類（跟我的行事曆那一列同一個：creditcard.fill、building.columns.fill…）
                 let wealthTitle = raw.isEmpty ? "財富" : ms.title
+                let wealthIcon: String = ms.financeSubCategory?.icon ?? "banknote.fill"
                 items.append(WidgetAllDayItem(id: "ms-\(ms.id.uuidString)",
                                               kind: .wealth,
                                               title: wealthTitle,
                                               shortTitle: wealthTitle,
                                               lockTitle: "財富",
-                                              icon: "banknote.fill"))
+                                              icon: wealthIcon))
                 continue
             }
             // 我的行事曆照樣寫 ms.title；這裡多一層：標題空白時退到分類，膠囊才不會是空的

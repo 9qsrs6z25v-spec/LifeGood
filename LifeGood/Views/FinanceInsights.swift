@@ -179,11 +179,14 @@ struct FinanceSnapshot: Equatable {
     var cardOwed: Double = 0
     /// [v25.565] 待交割：成交了、還沒交割的股票款
     var pendingSettlement: Double = 0
+    /// [v25.565 裁定] 賣股票還沒入帳（WealthFacts.pendingIncoming；以前的月份查 history）：算進「存款」那一類（value(.cash)）。
+    /// 成交當天股票市值就少了、賣出款 T+2 才進存摺，不加淨資產會假跌兩天（買的那一邊是 pendingSettlement 擋掉）
+    var pendingIncoming: Double = 0
     /// [v25.565] 以前的月份：有財富帳戶那天還沒開始記（存款是往前平推的）
     var wealthEstimated = false
 
-    /// [v25.565] 資產含存款
-    var assets: Double { realEstate + savings + stock + vehicle + cash }
+    /// [v25.565] 資產含存款（[v25.565 裁定] ＋賣股票還沒入帳，算在存款那一類）
+    var assets: Double { realEstate + savings + stock + vehicle + cash + pendingIncoming }
     /// [v25.565] 負債含卡費、待交割
     var debt: Double { mortgage + carLoan + otherLoan + cardOwed + pendingSettlement }
     var netWorth: Double { assets - debt }
@@ -198,7 +201,7 @@ struct FinanceSnapshot: Equatable {
         case .savings: return savings
         case .stock: return stock
         case .vehicle: return vehicle
-        case .cash: return cash
+        case .cash: return cash + pendingIncoming
         }
     }
 }
@@ -409,11 +412,13 @@ extension FinanceSnapshot {
             s.cashApprox = w.cashIsApprox
             s.cardOwed = w.netWorthCardOwed
             s.pendingSettlement = w.pendingSettlement
+            s.pendingIncoming = w.pendingIncoming
         } else {
             let p = w.history.point(endOf: date)
             s.cash = p.cash
             s.cardOwed = p.cardOwed
             s.pendingSettlement = p.pending
+            s.pendingIncoming = p.incoming
             s.wealthEstimated = p.estimated
         }
         return s
@@ -903,11 +908,12 @@ enum FinanceHistory {
                                                    stockValue: nil, index: loans)
                 if r.basis == 3 {
                     // 口徑 3（房貸、車貸已是本金）：照存的，加回那個月底的存款、卡費、待交割
-                    out.append(FinanceMonthPoint(month: start, assets: r.assets + redo.cash,
+                    // [v25.565 裁定] 存款含賣股票還沒入帳（redo.value(.cash)）
+                    out.append(FinanceMonthPoint(month: start, assets: r.assets + redo.value(.cash),
                                                  debt: r.debt + redo.cardOwed + redo.pendingSettlement, recorded: true))
                 } else {
                     // 口徑 2 以前：資產照存的再加存款；負債整個用現在這套（含卡費、待交割）
-                    out.append(FinanceMonthPoint(month: start, assets: r.assets + redo.cash, debt: redo.debt,
+                    out.append(FinanceMonthPoint(month: start, assets: r.assets + redo.value(.cash), debt: redo.debt,
                                                  recorded: true))
                 }
                 continue

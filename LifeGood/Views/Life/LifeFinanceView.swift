@@ -215,7 +215,7 @@ fileprivate struct WealthNoticeAlertModifier: ViewModifier {
 // • ①' 橋：看板下一顆膠囊「這些已算進理財淨資產 NT$1381.1萬 ›」，點了切到理財 › 總覽（AppNavigation.goToFinance(.overview)）。
 //   全頁唯一會切分頁的地方。數字＝FinanceSnapshot.current(...).netWorth（理財總覽、人生總覽名片同一個數），rebuild() 一起算。
 // • 深連結／財富提醒通知（DeepLinkRouter.takeWealthAccount，lifegood://life/wealth?id=）：直接打開那張卡／那個帳戶的卡片頁；
-//   別的彈出頁開著先關掉、下一輪才開。帳戶已經不在就不開。
+//   別的彈出頁開著先收掉、0.45 秒後（收的動畫跑完，同健康頁）才開；已經在看那一張不動。帳戶已經不在就不開。
 // • ② 要確認 #12〔看綁了哪些〕：開那張卡的卡片頁、捲到「綁在這張卡的定期扣款」（同一個 .sheet(item:)）。
 
 struct LifeFinanceView: View {
@@ -497,20 +497,28 @@ struct LifeFinanceView: View {
     }
 
     /// [v25.565] 小工具「接下來要繳」的卡費／交割列、財富提醒通知點進來：打開那張卡／那個帳戶的卡片頁。
-    /// 不是財富的請求 takeWealthAccount 回 nil（留給別頁）；帳戶已經刪了就不開。
-    /// 別的彈出頁開著：先關掉，下一輪主執行緒才開（同一個 .sheet(item:) 直接換內容有時候不重新出現）
+    /// 不是財富的請求 takeWealthAccount 回 nil（留給別頁）；帳戶已經刪了就不開；已經在看那一張就不動。
+    /// 別的彈出頁開著：先收掉，0.45 秒後（收的動畫跑完）才開——照健康頁 openSessionFromLink 的寫法
+    ///（只隔一輪主執行緒，收的動畫還在跑，新的那張可能開不起來）。這裡只開彈出頁，不寫 store
     private func openDeepLinkedAccount() {
         guard let id = DeepLinkRouter.shared.takeWealthAccount() else { return }
         guard lifeStore.milestones.contains(where: { $0.id == id }) else { return }
+        if case .card(let shown, _)? = sheet, shown == id { return }
         let target = WealthSheet.card(id, nil)
         guard sheet != nil else {
             sheet = target
             return
         }
         sheet = nil
-        DispatchQueue.main.async {
-            sheet = target
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) {
+            reopenAfterSheet(target)
         }
+    }
+
+    /// [v25.565] 彈出頁收掉之後才開那張卡：那 0.45 秒裡又開了別的就不動
+    private func reopenAfterSheet(_ target: WealthSheet) {
+        guard sheet == nil else { return }
+        sheet = target
     }
 
     /// 看板的格子、圖例：捲到那一區（那一區不在就不動）

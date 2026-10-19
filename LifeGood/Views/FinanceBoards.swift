@@ -194,7 +194,9 @@ struct FinanceOverviewBoard: View {
                 b.append(.init(kind: kind, value: s.vehicle, owed: s.carLoan, label: MoneyFormat.compact(s.vehicle)))
             case .cash:
                 // [v25.565] 頂樓水塔：水位＝存款、水面那一截斜線＝卡費與交割還沒扣（跟財富看板同一個圖案同一個意思）
-                b.append(.init(kind: kind, value: s.cash, owed: s.wealthOwed, label: MoneyFormat.compact(s.cash),
+                // [v25.565 裁定] 存款含賣股票還沒入帳（s.value(.cash)，跟「錢放在哪裡」的存款明信片同一個數）
+                let cashValue = s.value(.cash)
+                b.append(.init(kind: kind, value: cashValue, owed: s.wealthOwed, label: MoneyFormat.compact(cashValue),
                                owedLabel: cashOwedLabel))
             }
         }
@@ -304,7 +306,12 @@ struct FinanceOverviewBoard: View {
             }
         case .cash:
             // [v25.565] 存款（財富頁的存款合計，存摺上）：底下寫卡費與交割還沒扣多少（warn）；都扣完了寫幾個帳戶
-            if s.wealthOwed > 0.5 {
+            // [v25.565 裁定] 賣了股票、錢還沒入帳那兩天：這張的金額含它（財富頁的存款合計要交割那天才加），底下先寫這一句
+            if s.pendingIncoming > 0.5 {
+                let incoming = Text(MoneyFormat.compact(s.pendingIncoming)).foregroundStyle(MoneyTone.good.color(pal))
+                footer = Text("含賣股票還沒入帳 \(incoming)")
+                footerA11y = "含賣股票還沒入帳 " + MoneyFormat.short(s.pendingIncoming)
+            } else if s.wealthOwed > 0.5 {
                 let owed = Text(MoneyFormat.compact(s.wealthOwed)).foregroundStyle(MoneyTone.warn.color(pal))
                 footer = Text("卡費與交割還沒扣 \(owed)")
                 footerA11y = "卡費與交割還沒扣 " + MoneyFormat.short(s.wealthOwed)
@@ -1460,7 +1467,7 @@ struct FinanceNetWorthCard: View {
     /// 圖下面的說明：回推怎麼算、貸款算本金（v25.539）
     private static let noteLoans = "圓點是那個月打開理財頁時存下來的；其他月份是回推的估算（房子、車子在買入價與現在的估值之間平均變化，股票沒有市值紀錄就用成本）。房貸、車貸算的是還欠銀行的本金（算不出本金的那筆才用還要繳的期數 × 每期金額）；其他貸款算的是還要繳的期數 × 每期金額。"
     /// [v25.565] 財富 v4：淨資產含存款、扣卡費與待交割；以前的月份照財富帳戶的紀錄回推（WealthFacts.history）
-    private static let noteWealth = "淨資產含銀行存款、扣掉卡費與還沒交割的股票款（v25.565 起）；以前的月份照財富頁的帳戶紀錄回推，帳戶還沒開始記以前，用第一次對存摺（沒對過就用第一天）的數字往前平推。"
+    private static let noteWealth = "淨資產含銀行存款、扣掉卡費與還沒交割的股票款（v25.565 起；賣股票的錢還沒入帳那兩天先算在存款裡）；以前的月份照財富頁的帳戶紀錄回推，帳戶還沒開始記以前，用第一次對存摺（沒對過就用第一天）的數字往前平推。"
     private static let note = noteLoans + noteWealth
 
     private static let ym: DateFormatter = {
@@ -1497,7 +1504,7 @@ struct FinanceNetWorthCard: View {
                                 .lineStyle(StrokeStyle(lineWidth: 1.5))
                                 .interpolationMethod(.monotone)
                             LineMark(x: .value("月份", pt.month), y: .value("金額", pt.debt),
-                                     series: .value("項目", "貸款與卡費"))
+                                     series: .value("項目", "貸款、卡費與交割"))
                                 .foregroundStyle(debtColor.opacity(0.75))
                                 .lineStyle(StrokeStyle(lineWidth: 1.5, dash: [4, 3]))
                                 .interpolationMethod(.monotone)
@@ -1537,8 +1544,8 @@ struct FinanceNetWorthCard: View {
                     ChipFlowLayout(spacing: 12) {
                         MoneyLegendItem(mark: .swatch, color: netColor, text: "淨資產", pal: pal)
                         MoneyLegendItem(mark: .swatch, color: assetColor, text: "資產", pal: pal)
-                        // [v25.565] 這條線含卡費與待交割（FinanceSnapshot.debt），不再只有貸款
-                        MoneyLegendItem(mark: .dash, color: debtColor, text: "貸款與卡費", pal: pal)
+                        // [v25.565] 這條線含卡費與待交割（FinanceSnapshot.debt），不再只有貸款；字跟看板一句「卡費與交割」同一組
+                        MoneyLegendItem(mark: .dash, color: debtColor, text: "貸款、卡費與交割", pal: pal)
                     }
                     // [v25.539] 車貸改算本金之後，這句跟著改（FinanceSnapshot.carLoan 是本金，不再是含利息的還要繳）
                     // [v25.565] 加一句存款、卡費、交割（字串拆成常數，body 不串長字串）
