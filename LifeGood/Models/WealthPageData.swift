@@ -34,6 +34,16 @@ import SwiftUI
 // • 外幣第二行要匯率日期：build 把 ratesUpdatedAt 傳給 MoneyItem.wealthBank（⑤ 與 ⑧ 收起來的都傳）。
 // • 四格「30 天內最低」不看定存帳戶（存摺上常是 0；全部都是定存帳戶才照算），免得記了定存就變「約 NT$0」。
 // • 數字一律讀 WealthFacts（TimeDeposit 的到期日、狀態、天數），這裡不自己算定存利息、到期日。
+//
+// [v25.567] 財富 v6 保單總表（build/v6/brief.md §6 G1 1–4；judge §3.10、樣稿①⑦）：
+// • ⑦ 保單整區改讀 facts.policies（WealthPolicyFacts：財富的保障型保單、儲蓄險、車險、房屋險四個來源，一筆記帳保費只算一次）；
+//   這裡不再自己算保費、繳法、下次、從哪扣。列＝WealthPolicyFacts.Row 一列一列搬（id 改成 Row.id 字串、多 source／tag）；
+//   右上「一年約 NT$16萬」、最下灰字「保障型一年 6.4萬（不含儲蓄險）・外幣照今天匯率」、灰字「記帳裡還有 1 筆保費沒有保單資料：…」〔補保單〕、
+//   保障六格（cells，不含金額）。v3 的「儲蓄險 N 張記在理財」那一列拿掉（儲蓄險已經是一列）。
+// • 遮住：列的金額「••••」、VoiceOver「金額已遮住」；右上「一年約 NT$ ••••」；保障型那段「保障型一年 ••••（不含儲蓄險）」；
+//   灰字的金額段「••••」。六格不含金額，照常。
+// • 一列都沒有、灰字也沒有（沒有保單，或財富的保單都收起來了、也沒有儲蓄險／車險／房屋險）＝nil，整區不出現（同 v3）。
+// • 「這頁的數字怎麼算」多兩句：保單一年合計怎麼算、證券戶不自己記錢。
 
 // MARK: - 捲到哪一區
 
@@ -186,27 +196,59 @@ struct WealthPageBrokerRow: Identifiable {
     let item: MoneyItem
 }
 
-/// ⑦ 保單一列（v3 基本版）
+/// ⑦ 保單總表一列（[v25.567] 照 WealthPolicyFacts.Row 搬：四個來源，點了開哪裡看 source）
 struct WealthPagePolicyRow: Identifiable {
-    let id: UUID
+    /// WealthPolicyFacts.Row.id（「p-…」「s-…」「v-…」「h-…-…」）
+    let id: String
+    /// 點了開哪裡：保單頁／儲蓄險保單卡／車子卡／房屋卡
+    let source: WealthPolicySource
     let icon: String
-    /// 「國泰人壽 醫療險」
+    /// 「國泰人壽 醫療險」「Taycan 車險」
     let title: String
-    /// 「24,000」
+    /// 「24,000」「US$3,000」「—」；遮住「••••」
     let amount: String
-    /// 「/年」「躉繳」
+    /// 「/年」「躉繳」「繳完了」
     let unit: String?
+    /// 右邊小字（點了開別的頁）：「儲蓄險」「車子卡」「房屋卡」；保障型保單 nil
+    let tag: String?
     /// 「下次 2027/8/15・刷 CUBE」
     let detail: String?
     let accessibilityText: String
 }
 
+/// [v25.567] 保障六格的一格（不含金額；遮住照常）
+struct WealthPageCoverCell: Identifiable {
+    /// 「medical」「accident」「cancer」「disability」「life」「other」
+    let id: String
+    /// 「醫療」「癌症／重大疾病」
+    let title: String
+    let icon: String
+    /// 有這一種保單
+    let on: Bool
+    /// 「國泰人壽」；沒有「還沒記」
+    let detail: String
+
+    /// VoiceOver：「醫療，國泰人壽」「意外，還沒記」
+    var accessibilityText: String { title + "，" + detail }
+}
+
+/// [v25.567] ⑦ 保單總表（facts.policies）
 struct WealthPagePolicies {
     let rows: [WealthPagePolicyRow]
-    /// 「一年約 NT$2.4萬」；算不出來 nil
+    /// 標頭的數字（＝rows 數）
+    let count: Int
+    /// 「一年約 NT$16萬」；遮住「一年約 NT$ ••••」；算不出來 nil
     let trailing: String?
-    /// 「儲蓄險 1 張記在理財 › 儲蓄險」；0 張 nil
-    let savingsNote: String?
+    /// 最下灰字「保障型一年 6.4萬（不含儲蓄險）・外幣照今天匯率」；不用寫 nil
+    let footer: String?
+    /// 灰字「記帳裡還有 1 筆保費沒有保單資料：中國人壽意外險 1,200/年」；沒有 nil
+    let unclaimedText: String?
+    /// 〔補保單〕預填的那一筆記帳保費（unclaimed 的第一筆）
+    let unclaimedExpenseId: UUID?
+    /// VoiceOver 念灰字那一句（遮住時金額念「金額已遮住」）
+    let unclaimedSpoken: String?
+    /// 保障六格
+    let cells: [WealthPageCoverCell]
 }
 
 /// ⑧ 收起來的一列（緊湊項目卡、淡一點）
@@ -330,8 +372,8 @@ struct WealthPageData {
             : WealthPageGroupHeader(count: visibleBrokers.count,
                                     total: "持股市值 " + (masked ? WealthFormat.masked : marketValue.ntdWanString))
 
-        let policies = WealthPageText.policies(milestones: milestones, book: book, facts: facts,
-                                               insurances: insurances, today: today, masked: masked)
+        // [v25.567] ⑦ 保單總表讀 facts.policies（insurances、milestones 不再用來數保單：四個來源 WealthFacts.build 已經合好）
+        let policies = WealthPageText.policies(facts: facts, masked: masked)
         let hidden = WealthPageText.hidden(facts: facts, rates: rates, masked: masked, now: now, dark: dark,
                                            ratesUpdatedAt: ratesUpdatedAt)
         let footer: FinanceLine? = mode == .newbie
@@ -1286,101 +1328,66 @@ extension WealthPageText {
 // MARK: - ⑦ 保單、⑧ 收起來的、⑨ 頁尾
 
 extension WealthPageText {
-    /// ⑦ 保單（v3 基本版：保障型一張一列；儲蓄險在理財）
-    static func policies(milestones: [LifeMilestone], book: WealthBook, facts: WealthFacts,
-                         insurances: [SavingsInsurance], today: Date, masked: Bool) -> WealthPagePolicies? {
-        let list = milestones.filter { m in
-            m.category == .achievement && m.financeSubCategory == .insurance && book.account(m.id).hidden != true
-        }
-        guard !list.isEmpty else { return nil }
-        let ordered = list.enumerated().sorted { l, r in
-            let a = book.account(l.element.id).sortIndex
-            let b = book.account(r.element.id).sortIndex
-            switch (a, b) {
-            case let (x?, y?) where x != y: return x < y
-            case (.some, nil): return true
-            case (nil, .some): return false
-            default: break
-            }
-            if l.element.date != r.element.date { return l.element.date < r.element.date }
-            return l.offset < r.offset
-        }.map(\.element)
-
+    /// ⑦ 保單總表（[v25.567] 財富 v6；judge §3.10、樣稿①⑦）：整區讀 facts.policies（WealthPolicyFacts，四個來源、一筆記帳保費只算一次），
+    /// 這裡只搬字、遮金額。一列都沒有、灰字也沒有＝nil（整區不出現；財富的保單都收起來了、也沒有別的來源也是 nil，同 v3）。
+    /// trailingText、footerText 用 ntdWanString：主執行緒（build 本來就在主執行緒叫）
+    static func policies(facts: WealthFacts, masked: Bool) -> WealthPagePolicies? {
+        let pf = facts.policies
+        guard !pf.rows.isEmpty || !pf.unclaimed.isEmpty else { return nil }
         var rows: [WealthPagePolicyRow] = []
-        var yearly: Double = 0
-        var hasYearly = false
-        for m in ordered {
-            let prefs = book.policy(m.id)
-            let kind = prefs.kind ?? WealthPolicyKind.from(legacy: m.insuranceType)
-            let company = (m.insuranceCompany ?? "").trimmingCharacters(in: .whitespaces)
-            let title: String
-            if let n = book.account(m.id).trimmedNickname {
-                title = n
-            } else if company.isEmpty {
-                title = m.title
-            } else {
-                title = company + " " + kind.shortTitle
-            }
-            let premium = m.premiumAmount ?? 0
-            var amount = "—"
-            var unit: String? = nil
-            var amountSaid = ""
-            if premium > 0.5 {
-                if let cycle = prefs.cycle {
-                    if cycle.timesPerYear > 0 {
-                        let y = premium * Double(cycle.timesPerYear)
-                        yearly += y
-                        hasYearly = true
-                        amount = WealthFormat.grouped(y.rounded(), decimals: 0)
-                        unit = "/年"
-                        amountSaid = "一年 " + spoken(y)
-                    } else {
-                        amount = WealthFormat.grouped(premium.rounded(), decimals: 0)
-                        unit = "躉繳"
-                        amountSaid = "躉繳 " + spoken(premium)
-                    }
-                } else {
-                    amount = WealthFormat.grouped(premium.rounded(), decimals: 0)
-                    amountSaid = "保費 " + spoken(premium)
-                }
-                if masked {
-                    amount = dots
-                    amountSaid = "金額已遮住"
-                }
-            }
-            var parts: [String] = []
-            if let next = prefs.nextDue { parts.append("下次 " + ymd(next)) }
-            if let pay = prefs.payFromId {
-                if let c = facts.card(pay) {
-                    parts.append("刷 " + c.name)
-                } else if let acc = facts.account(pay) {
-                    parts.append("從" + acc.name + "扣")
-                }
-            }
-            let detail: String? = parts.isEmpty ? nil : parts.joined(separator: "・")
-            var said: String = title
-            if !amountSaid.isEmpty { said += "，\(amountSaid)" }
-            if let d = detail { said += "，\(d)" }
-            rows.append(WealthPagePolicyRow(id: m.id, icon: policyIcon(kind), title: title, amount: amount, unit: unit,
-                                            detail: detail, accessibilityText: said))
+        for r in pf.rows {
+            rows.append(policyRow(r, masked: masked))
         }
         var trailing: String? = nil
-        if hasYearly { trailing = "一年約 " + (masked ? WealthFormat.masked : yearly.ntdWanString) }
-        let savings = insurances.filter { WealthCal.day($0.maturityDate) >= today }.count
-        let note: String? = savings > 0 ? "儲蓄險 \(savings) 張記在理財 › 儲蓄險" : nil
-        return WealthPagePolicies(rows: rows, trailing: trailing, savingsNote: note)
+        if let t = pf.trailingText {
+            trailing = masked ? "一年約 " + WealthFormat.masked : t
+        }
+        let footer: String? = masked ? maskedPolicyFooter(pf) : pf.footerText
+        var unclaimedText: String? = nil
+        var unclaimedSpoken: String? = nil
+        if let first = pf.unclaimed.first {
+            let text: String = masked ? maskedUnclaimedText(pf, first: first) : (pf.unclaimedText ?? first.text)
+            unclaimedText = text
+            unclaimedSpoken = text.replacingOccurrences(of: dots, with: "金額已遮住")
+        }
+        var cells: [WealthPageCoverCell] = []
+        for c in pf.cells {
+            cells.append(WealthPageCoverCell(id: c.id, title: c.title, icon: c.icon, on: c.on, detail: c.detail))
+        }
+        return WealthPagePolicies(rows: rows, count: rows.count, trailing: trailing, footer: footer,
+                                  unclaimedText: unclaimedText, unclaimedExpenseId: pf.unclaimed.first?.expenseId,
+                                  unclaimedSpoken: unclaimedSpoken, cells: cells)
     }
 
-    private static func policyIcon(_ k: WealthPolicyKind) -> String {
-        switch k {
-        case .medical: return "cross.case.fill"
-        case .accident: return "bandage.fill"
-        case .cancer: return "heart.text.square.fill"
-        case .disability: return "figure.roll"
-        case .life: return "heart.fill"
-        case .travel: return "airplane"
-        case .other: return "shield.fill"
+    /// 保單總表一列：照 Row 搬；遮住時金額「••••」、VoiceOver「國泰人壽 醫療險，金額已遮住，下次 2027/8/15・刷 CUBE」
+    /// （沒有金額「—」的列照 Row 原本那句：本來就沒念金額）
+    private static func policyRow(_ r: WealthPolicyFacts.Row, masked: Bool) -> WealthPagePolicyRow {
+        let hasAmount = r.amountText != "—"
+        let amount: String = (masked && hasAmount) ? dots : r.amountText
+        var said: String = r.accessibilityText
+        if masked && hasAmount {
+            said = r.title + "，金額已遮住"
+            if let d = r.detail { said += "，" + d }
         }
+        return WealthPagePolicyRow(id: r.id, source: r.source, icon: r.icon, title: r.title, amount: amount,
+                                   unit: r.unitText, tag: r.tag, detail: r.detail, accessibilityText: said)
+    }
+
+    /// 遮住時的最下灰字：條件同 WealthPolicyFacts.footerText，保障型那段金額換「••••」
+    private static func maskedPolicyFooter(_ pf: WealthPolicyFacts) -> String? {
+        var parts: [String] = []
+        if pf.hasSavings && pf.protectionNTD > 0.5 {
+            parts.append("保障型一年 " + dots + "（不含儲蓄險）")
+        }
+        if pf.hasForeign { parts.append("外幣照今天匯率") }
+        return parts.isEmpty ? nil : parts.joined(separator: "・")
+    }
+
+    /// 遮住時的灰字：同 WealthPolicyFacts.unclaimedText，金額段換「••••」
+    private static func maskedUnclaimedText(_ pf: WealthPolicyFacts, first: WealthPolicyFacts.Unclaimed) -> String {
+        var s = "記帳裡還有 \(pf.unclaimed.count) 筆保費沒有保單資料：" + first.title + " " + dots
+        if pf.unclaimed.count > 1 { s += " 等" }
+        return s
     }
 
     /// ⑧ 收起來的：停用的卡、收起來的銀行、收起來的證券戶（緊湊、淡一點）
@@ -1468,6 +1475,12 @@ extension WealthPageText {
     /// [v25.566] 「這頁的數字怎麼算」：存款保險
     static let insuranceHow = "同一家銀行存摺上加定存超過 300 萬，要確認會提醒一次存款保險（同一家最多保 300 萬，一年內不再提）。"
 
+    /// [v25.567] 「這頁的數字怎麼算」：保單一年合計（四個來源、一筆記帳保費只算一次；不進存款、不進淨資產）
+    static let policyHow = "保單一年合計：財富的保單、儲蓄險、車險、房屋險合在一起，一筆記帳保費只算一次；保費不算進存款合計，也不算進淨資產。"
+
+    /// [v25.567] 「這頁的數字怎麼算」：證券戶自己不記錢
+    static let brokerHow = "證券戶的持股、買賣、股利讀理財 › 股票；交割記在交割銀行，證券戶自己不記錢。"
+
     /// ⋯「這頁的數字怎麼算」
     static let howItWorks: [String] = [
         footerBase,
@@ -1475,6 +1488,8 @@ extension WealthPageText {
         "自己繳的卡過了截止日沒標成已繳，App 當作從「通常從」的帳戶繳了全額，隔天會在「要確認」問你一次；選「每次問我」的卡不會當作已繳。",
         depositHow,
         insuranceHow,
+        brokerHow,
+        policyHow,
         "外幣照設定裡的匯率換台幣；查不到匯率的那一格不算進合計，大字前面會加「約」。",
         "繳款截止日、交割日遇到假日，銀行可能順延；App 不會自己順延。",
         "右上的眼睛可以把金額遮住（記在這台裝置）；關掉遮住要 Face ID。"

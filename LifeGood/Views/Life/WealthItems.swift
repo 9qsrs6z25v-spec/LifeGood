@@ -34,6 +34,18 @@ import SwiftUI
 //   [v25.566 裁定] 金額也照 v4 寫存摺上：跟帳戶頁看板、四格、換帳戶列（WealthCardData：收起來的照舊）同一個數。
 // • WealthSheet 加 .timeDeposit(帳戶, 那一期)（定存表單 WealthTimeDepositSheet，要訂閱）。
 // • 定存的數字（本金、利息、到期日、天數、進度、狀態）一律讀 WealthFacts.TimeDeposit，這裡不自己算。
+//
+// [v25.567] 財富 v6 證券名片與保單總表（build/v6/brief.md §6 G1 5–9；judge §3.9、§3.10、§6.8；樣稿①⑦）：
+// • WealthSheet 加 .savings(儲蓄險)／.vehicle(車)／.house(房子)／.newPolicy(記帳保費)：保單總表點了「彈出那張卡」不切分頁
+//  （judge §6.8：InsurancePolicyCard、VehicleDetailView、RealEstateDetailView，看完關掉還在財富頁）；看別頁的卡不擋訂閱，
+//   〔補保單〕（新增保單、預填那一筆記帳保費）要訂閱。
+// • ⑦ 保單總表：標頭同 ⑥（MoneyGroupHeader「保單 4」右「一年約 NT$16萬」）；白卡一列一列（右邊小字 tag「儲蓄險 ›」「車子卡 ›」「房屋卡 ›」）、
+//   最下灰字（保障型一年…）、灰字「記帳裡還有 1 筆保費沒有保單資料：…」＋綠字〔補保單〕。點一列照 source 開：保單頁／儲蓄險保單卡／
+//   車子卡／房屋卡；長按「編輯」只給財富的保單（別的在自己那一頁改）。
+// • 白卡下面「保障」六格（WealthPageCoverGrid：兩欄三列；有的亮保單綠、寫保險公司，沒有灰「還沒記」；整格不能點；不算應該保多少）。
+// • 證券戶項目卡的交割膠囊改讀 Broker.dues（接下來 30 天、每天買賣相抵、夠不夠看交割銀行那天扣之前）：「10/21 交割 52,340」；
+//   不夠扣「10/21 交割 差 23,940」（warn）；以前記在證券戶身上的交割多一顆「舊交割 18 筆」（一列放不下先少放這顆）。
+//   沒有 dues（舊資料、超過 30 天）照 v3 讀 nextSettlementDate。
 
 // MARK: - 財富頁的彈出頁（一個 enum、一個 .sheet(item:)）
 
@@ -61,6 +73,14 @@ enum WealthSheet: Identifiable {
     case upcomingAll
     /// [v25.566] 定存表單（帳戶：nil＝第一欄選；那一期：nil＝新增）
     case timeDeposit(UUID?, UUID?)
+    /// [v25.567] 保單總表的儲蓄險（SavingsInsurance.id）→ 彈出 InsurancePolicyCard
+    case savings(UUID)
+    /// [v25.567] 保單總表的車險（車子 id）→ 彈出 VehicleDetailView
+    case vehicle(UUID)
+    /// [v25.567] 保單總表的房屋險（房子 id）→ 彈出 RealEstateDetailView（捲到房屋資料）
+    case house(UUID)
+    /// [v25.567] 〔補保單〕：新增保單、預填這一筆記帳保費（記帳的 id），存檔連它
+    case newPolicy(UUID)
 
     var id: String {
         switch self {
@@ -76,15 +96,19 @@ enum WealthSheet: Identifiable {
         case .upcomingAll: return "upcoming"
         case .timeDeposit(let account, let term):
             return "deposit-\(account?.uuidString ?? "new")-\(term?.uuidString ?? "new")"
+        case .savings(let id): return "savings-\(id.uuidString)"
+        case .vehicle(let id): return "vehicle-\(id.uuidString)"
+        case .house(let id): return "house-\(id.uuidString)"
+        case .newPolicy(let id): return "newpolicy-\(id.uuidString)"
         }
     }
 
-    /// 要訂閱（待決定 10）：新增、編輯、記一筆、轉帳、對存摺、刷這張卡記一筆、[v25.566] 定存表單。
-    /// 不擋：看卡片頁、標成已繳、排序與收起來、說明、接下來全部
+    /// 要訂閱（待決定 10）：新增、編輯、記一筆、轉帳、對存摺、刷這張卡記一筆、[v25.566] 定存表單、[v25.567] 〔補保單〕。
+    /// 不擋：看卡片頁、標成已繳、排序與收起來、說明、接下來全部、[v25.567] 看儲蓄險／車子卡／房屋卡（同看卡片頁）
     var needsPremium: Bool {
         switch self {
-        case .editor, .record, .transfer, .anchor, .addExpense, .timeDeposit: return true
-        case .card, .paid, .order, .info, .upcomingAll: return false
+        case .editor, .record, .transfer, .anchor, .addExpense, .timeDeposit, .newPolicy: return true
+        case .card, .paid, .order, .info, .upcomingAll, .savings, .vehicle, .house: return false
         }
     }
 }
@@ -557,32 +581,59 @@ extension MoneyItem {
         item.monogram = String(b.name.prefix(2))
         let hidden = facts.account(b.id)?.hidden == true
         item.dimmed = hidden
+        // [v25.567] 交割膠囊讀 Broker.dues（沒有照 v3 的 nextSettlementDate）；舊交割那顆放最後（一列放不下先少放它）
+        let settle: MoneyItemChip? = wealthBrokerSettleChip(b, masked: masked)
+        let legacy: MoneyItemChip? = b.legacyCount > 0
+            ? MoneyItemChip(icon: "tray.full", text: "舊交割 \(b.legacyCount) 筆")
+            : nil
         if held == 0 {
             item.category = "證券戶・還沒有持股"
-            item.chips = [MoneyItemChip(icon: "info.circle", text: "股票表單選這個證券戶，持股就會出現在這裡")]
+            // 全部賣掉、入帳還沒到／還有舊交割：那兩顆放前面（說明那顆一列放不下就少放）
+            var chips: [MoneyItemChip] = []
+            if let s = settle { chips.append(s) }
+            if let l = legacy { chips.append(l) }
+            chips.append(MoneyItemChip(icon: "info.circle", text: "股票表單選這個證券戶，持股就會出現在這裡"))
+            item.chips = chips
         } else {
             item.amount = masked ? WealthFormat.masked : b.marketValue.ntdWanString
             item.unit = "市值"
             item.badge = "\(held) 檔"
             item.category = "證券戶・" + wealthSettlementText(b, facts: facts)
             var chips: [MoneyItemChip] = []
-            if let d = b.nextSettlementDate, Swift.abs(b.nextSettlementAmount) > 0.5 {
-                let word = b.nextSettlementAmount > 0 ? " 交割 " : " 入帳 "
-                let amount = masked ? WealthPageText.dots
-                                    : WealthFormat.grouped(Swift.abs(b.nextSettlementAmount).rounded(), decimals: 0)
-                chips.append(MoneyItemChip(icon: "calendar", text: WealthPageText.md(d) + word + amount))
-            }
+            if let s = settle { chips.append(s) }
             if let r = b.unrealizedRatio {
                 let sign = r >= 0 ? "+" : "-"
                 chips.append(MoneyItemChip(icon: r >= 0 ? "arrow.up.right" : "arrow.down.right",
                                            text: "未實現 " + sign + String(format: "%.1f%%", Swift.abs(r) * 100),
                                            tone: MoneyTone.change(r)))
             }
+            if let l = legacy { chips.append(l) }
             item.chips = chips
         }
         item.accessibilityText = wealthSpoken(title: b.name, amount: item.amount, unit: item.unit,
                                               category: item.category, chips: item.chips, progress: nil, masked: masked)
         return item
+    }
+
+    /// [v25.567] 交割膠囊：讀 Broker.dues 第一筆（接下來 30 天、每天買賣相抵）——「10/21 交割 52,340」「10/22 入帳 30,000」；
+    /// 交割銀行那天扣之前不夠：「10/21 交割 差 23,940」（warn）。遮住：金額「••••」（日期照常）。
+    /// 沒有 dues（舊資料、超過 30 天）照 v3 讀 nextSettlementDate／nextSettlementAmount；都沒有 nil
+    private static func wealthBrokerSettleChip(_ b: WealthFacts.Broker, masked: Bool) -> MoneyItemChip? {
+        if let due = b.dues.first {
+            let day = WealthPageText.md(due.day)
+            if due.isShort {
+                let gap: String = masked ? WealthPageText.dots : WealthFormat.plain(due.short, code: due.code)
+                return MoneyItemChip(icon: "exclamationmark.circle", text: day + " 交割 差 " + gap, tone: .warn)
+            }
+            let word: String = due.isOutflow ? " 交割 " : " 入帳 "
+            let amount: String = masked ? WealthPageText.dots : WealthFormat.plain(due.amount, code: due.code)
+            return MoneyItemChip(icon: "calendar", text: day + word + amount)
+        }
+        guard let d = b.nextSettlementDate, Swift.abs(b.nextSettlementAmount) > 0.5 else { return nil }
+        let word: String = b.nextSettlementAmount > 0 ? " 交割 " : " 入帳 "
+        let amount: String = masked ? WealthPageText.dots
+                                    : WealthFormat.grouped(Swift.abs(b.nextSettlementAmount).rounded(), decimals: 0)
+        return MoneyItemChip(icon: "calendar", text: WealthPageText.md(d) + word + amount)
     }
 
     /// 「交割 薪轉（台新）」；沒有交割銀行「還沒選交割銀行」
@@ -881,9 +932,12 @@ struct WealthPageBrokersSection: View {
     }
 }
 
-// MARK: - ⑦ 保單（v3 基本版）
+// MARK: - ⑦ 保單總表（[v25.567] 財富 v6；judge §3.10、樣稿①⑦）
 
-/// ⑦ 保單：「保單」右「一年約 NT$2.4萬」＋白卡一張一列；最下一列灰字「儲蓄險 1 張記在理財 › 儲蓄險」
+/// ⑦ 保單總表：標頭同 ⑥（「保單 4」右「一年約 NT$16萬」）＋白卡一列一列（財富的保單、儲蓄險、車險、房屋險，一張只出現一次；
+/// 別頁的右邊小字「儲蓄險 ›」「車子卡 ›」「房屋卡 ›」）、最下灰字「保障型一年 6.4萬（不含儲蓄險）・外幣照今天匯率」、
+/// 灰字「記帳裡還有 1 筆保費沒有保單資料：…」＋綠字〔補保單〕；白卡下面保障六格。
+/// 點一列照 source 開（保單頁／儲蓄險保單卡／車子卡／房屋卡，都是彈出、不切分頁）；長按「編輯」只給財富的保單
 struct WealthPagePoliciesSection: View {
     let data: WealthPagePolicies
     let actions: WealthPageActions
@@ -892,9 +946,11 @@ struct WealthPagePoliciesSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            FinanceCardHeader(title: "保單", trailing: data.trailing)
+            MoneyGroupHeader(theme: .wealthPolicy, title: "保單", count: data.count, total: data.trailing ?? "",
+                             unit: "張")
             list
                 .modifier(FinanceCardChrome())
+            coverBlock
         }
     }
 
@@ -907,43 +963,117 @@ struct WealthPagePoliciesSection: View {
                 }
                 row(r, pal: pal)
             }
-            if let note = data.savingsNote {
-                Divider().padding(.leading, 14)
-                Text(note)
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 11)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
+            footerLine
+            unclaimedLine(pal)
         }
     }
 
+    /// 最下灰字「保障型一年 6.4萬（不含儲蓄險）・外幣照今天匯率」（沒有就不畫）
+    @ViewBuilder
+    private var footerLine: some View {
+        if let f = data.footer {
+            if !data.rows.isEmpty {
+                Divider().padding(.leading, 14)
+            }
+            Text(f)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 11)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    /// 灰字「記帳裡還有 1 筆保費沒有保單資料：中國人壽意外險 1,200/年」＋綠字〔補保單〕（要訂閱：財富頁擋）
+    @ViewBuilder
+    private func unclaimedLine(_ pal: TripBoardPalette) -> some View {
+        if let text = data.unclaimedText {
+            if !data.rows.isEmpty || data.footer != nil {
+                Divider().padding(.leading, 14)
+            }
+            WealthPageUnclaimedLine(text: text, spoken: data.unclaimedSpoken ?? text, pal: pal,
+                                    onAdd: { addPolicy() })
+        }
+    }
+
+    /// 白卡下面的保障六格（沒有格子不畫）
+    @ViewBuilder
+    private var coverBlock: some View {
+        if !data.cells.isEmpty {
+            WealthPageCoverGrid(cells: data.cells)
+        }
+    }
+
+    /// 長按「編輯」只給財富的保單（儲蓄險、車險、房屋險在自己那一頁改，不掛選單）
+    @ViewBuilder
     private func row(_ r: WealthPagePolicyRow, pal: TripBoardPalette) -> some View {
+        if let id = Self.policyId(r.source) {
+            rowButton(r, pal: pal)
+                .contextMenu {
+                    Button {
+                        actions.edit(id, .policy)
+                    } label: {
+                        Label("編輯", systemImage: "pencil")
+                    }
+                }
+                .accessibilityActions {
+                    Button("編輯") {
+                        actions.edit(id, .policy)
+                    }
+                }
+        } else {
+            rowButton(r, pal: pal)
+        }
+    }
+
+    private func rowButton(_ r: WealthPagePolicyRow, pal: TripBoardPalette) -> some View {
         Button {
-            actions.open(.card(r.id, nil))
+            openSource(r.source)
         } label: {
             WealthPagePolicyLine(row: r, pal: pal)
         }
         .buttonStyle(.plain)
         .accessibilityLabel(r.accessibilityText)
-        .accessibilityHint("點兩下打開這張保單")
-        .contextMenu {
-            Button {
-                actions.edit(r.id, .policy)
-            } label: {
-                Label("編輯", systemImage: "pencil")
-            }
+        .accessibilityHint(Self.hint(r.source))
+    }
+
+    /// 點一列：財富的保單→保單頁；儲蓄險→儲蓄險的保單卡；車險→車子卡；房屋險→房屋卡（都不擋訂閱、不切分頁）
+    private func openSource(_ s: WealthPolicySource) {
+        switch s {
+        case .policy(let id): actions.open(.card(id, nil))
+        case .savings(let id): actions.open(.savings(id))
+        case .vehicle(let id): actions.open(.vehicle(id))
+        case .house(let id): actions.open(.house(id))
         }
-        .accessibilityActions {
-            Button("編輯") {
-                actions.edit(r.id, .policy)
-            }
+    }
+
+    /// 〔補保單〕：新增保單、預填那一筆記帳保費（要訂閱：財富頁的 open 擋）
+    private func addPolicy() {
+        guard let eid = data.unclaimedExpenseId else { return }
+        actions.open(.newPolicy(eid))
+    }
+
+    /// 財富的保單（長按可以編輯）；別頁的 nil
+    private static func policyId(_ s: WealthPolicySource) -> UUID? {
+        switch s {
+        case .policy(let id): return id
+        case .savings, .vehicle, .house: return nil
+        }
+    }
+
+    private static func hint(_ s: WealthPolicySource) -> String {
+        switch s {
+        case .policy: return "點兩下打開這張保單；長按有更多動作"
+        case .savings: return "點兩下打開儲蓄險的保單卡"
+        case .vehicle: return "點兩下打開車子卡"
+        case .house: return "點兩下打開房屋卡"
         }
     }
 }
 
-/// 保單一列：險種圖示、「國泰人壽 醫療險」、右「24,000/年」、第二行「下次 2027/8/15・刷 CUBE」
+/// 保單一列：險種圖示、「國泰人壽 醫療險」、右「24,000/年」（別頁的再一個小字「儲蓄險 ›」）、第二行「下次 2027/8/15・刷 CUBE」。
+/// 圖示的顏色照來源：保單綠（76）、儲蓄險藍（理財 › 儲蓄險）、車險青（車子卡）、房屋險紫（房屋卡）
 private struct WealthPagePolicyLine: View {
     let row: WealthPagePolicyRow
     let pal: TripBoardPalette
@@ -953,15 +1083,24 @@ private struct WealthPagePolicyLine: View {
             TripBoardIconBadge(icon: row.icon, colors: colors, diameter: 30, dark: pal.dark)
             texts
             Spacer(minLength: 6)
-            amount
+            trailing
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 11)
         .contentShape(Rectangle())
     }
 
+    private var theme: MoneyArtTheme {
+        switch row.source {
+        case .policy: return .wealthPolicy
+        case .savings: return .finSavings
+        case .vehicle: return .finDrive
+        case .house: return .finHome
+        }
+    }
+
     private var colors: [Color] {
-        [MoneyArtTheme.wealthPolicy.topColor, MoneyArtTheme.wealthPolicy.bottomColor]
+        [theme.topColor, theme.bottomColor]
     }
 
     private var texts: some View {
@@ -981,6 +1120,16 @@ private struct WealthPagePolicyLine: View {
         }
     }
 
+    /// 右邊：金額＋單位（＋別頁的小字 tag ›）
+    private var trailing: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            amount
+            tagView
+        }
+        .lineLimit(1)
+        .fixedSize()
+    }
+
     private var amount: some View {
         HStack(alignment: .firstTextBaseline, spacing: 1) {
             Text(row.amount)
@@ -993,8 +1142,150 @@ private struct WealthPagePolicyLine: View {
                     .foregroundStyle(.secondary)
             }
         }
-        .lineLimit(1)
-        .fixedSize()
+    }
+
+    /// 「儲蓄險 ›」「車子卡 ›」「房屋卡 ›」（保障型保單沒有）
+    @ViewBuilder
+    private var tagView: some View {
+        if let t = row.tag {
+            HStack(alignment: .firstTextBaseline, spacing: 1) {
+                Text(t)
+                    .font(.caption2.weight(.bold))
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 9, weight: .bold))
+            }
+            .foregroundStyle(pal.hint)
+        }
+    }
+}
+
+/// 灰字一行＋綠字〔補保單〕
+private struct WealthPageUnclaimedLine: View {
+    let text: String
+    let spoken: String
+    let pal: TripBoardPalette
+    let onAdd: () -> Void
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 10) {
+            Text(text)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .accessibilityLabel(spoken)
+            Button(action: onAdd) {
+                Text("補保單")
+                    .font(.footnote.weight(.bold))
+                    .foregroundStyle(MoneyTone.good.color(pal))
+                    .padding(.vertical, 6)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .fixedSize()
+            .accessibilityHint("新增一張保單，保費帶入記帳那一筆")
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+    }
+}
+
+/// [v25.567] 保障六格（judge §3.10）：「保障」＋兩欄三列；有這一種保單的亮（保單綠、寫保險公司），沒有灰「還沒記」；
+/// 整格不能點；最下灰字「不算應該保多少，只看你記了哪幾種」
+struct WealthPageCoverGrid: View {
+    let cells: [WealthPageCoverCell]
+
+    static let note = "不算應該保多少，只看你記了哪幾種"
+
+    /// 兩欄（computed：不放 stored property，memberwise init 照樣是 internal）
+    private var columns: [GridItem] {
+        [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)]
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("保障")
+                .font(.subheadline.weight(.bold))
+                .foregroundStyle(Color.primary)
+                .accessibilityAddTraits(.isHeader)
+            LazyVGrid(columns: columns, alignment: .leading, spacing: 8) {
+                ForEach(cells) { c in
+                    WealthPageCoverCellView(cell: c)
+                }
+            }
+            Text(Self.note)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .modifier(FinanceCardChrome())
+    }
+}
+
+/// 六格的一格：圖示＋「醫療」＋「國泰人壽」／「還沒記」（VoiceOver「醫療，國泰人壽」）
+private struct WealthPageCoverCellView: View {
+    let cell: WealthPageCoverCell
+
+    @Environment(\.colorScheme) private var scheme
+
+    var body: some View {
+        HStack(spacing: 8) {
+            TripBoardIconBadge(icon: cell.icon, colors: badgeColors, diameter: 26, dark: dark)
+            texts
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 9)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(fill, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(cell.accessibilityText)
+    }
+
+    private var dark: Bool { scheme == .dark }
+
+    private var texts: some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text(cell.title)
+                .font(.footnote.weight(.bold))
+                .foregroundStyle(titleColor)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+            Text(cell.detail)
+                .font(.caption2)
+                .foregroundStyle(detailColor)
+                .lineLimit(1)
+                .minimumScaleFactor(0.85)
+        }
+    }
+
+    /// 有：保單綠；沒有：灰
+    private var badgeColors: [Color] {
+        if cell.on {
+            return [MoneyArtTheme.wealthPolicy.topColor, MoneyArtTheme.wealthPolicy.bottomColor]
+        }
+        if dark {
+            return [Color(tb: 0x4A5163), Color(tb: 0x363C4B)]
+        }
+        return [Color(tb: 0xC9CED8), Color(tb: 0x9AA1AE)]
+    }
+
+    private var titleColor: Color {
+        cell.on ? Color.primary : Color.secondary
+    }
+
+    private var detailColor: Color {
+        if !cell.on { return Color.secondary }
+        return dark ? Color(tb: 0x7FD8A6) : Color(tb: 0x1E7A4E)
+    }
+
+    private var fill: Color {
+        if cell.on {
+            return MoneyArtTheme.wealthPolicy.topColor.opacity(dark ? 0.16 : 0.22)
+        }
+        return Color.primary.opacity(dark ? 0.06 : 0.04)
     }
 }
 

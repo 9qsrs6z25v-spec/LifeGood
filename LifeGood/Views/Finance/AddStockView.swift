@@ -49,6 +49,14 @@ import SwiftUI
 //      等既有商業邏輯完全未變動。
 //      （下次美化本檔案時：儲存按鈕載入狀態、英雄卡大字防截斷皆已補齊，可轉往其他仍留有
 //      待辦的畫面）
+// [v25.567] 財富 v6（judge §5.3、§6.3；build/v6/brief.md G4 1～5）：
+//  16. 帳戶選擇拆兩列：先選「證券戶」（只列證券戶、收起來的不列），「交割銀行」自動帶那個證券戶的交割銀行
+//      （帳本填的 → 這個證券戶的股票最常用的；WealthFacts.Broker.settlementBankId）；交割銀行選單不再列證券戶。
+//      兩個欄位都存（以前選了銀行就清掉證券戶）。
+//  17. 新增股票：只有一個證券戶就先選它；好幾個先選最近一檔股票用的（只做一次，兩個都還沒選時）。
+//  18. 舊資料只選了證券戶：交割銀行「還沒選」＋一句「以前的交割記在元大證券身上；選了交割銀行存檔，這檔的交割紀錄會搬過去」。
+//  19. 存檔寫交割紀錄改叫 LifeStore.rewriteStockSettlements（三處同一支）：交割銀行換了＝整檔都改（清掉帳本的改交割銀行歷史，
+//      同以前）；沒換＝照歷史放（證券戶「一起改」時以前的交割留在原本的銀行）。
 
 // MARK: - 台股報價資料
 
@@ -113,6 +121,8 @@ struct AddStockView: View {
     @State private var selectedBankMilestoneId: UUID?
     @State private var selectedBankCurrency: String = "NT$"
     @State private var selectedSecuritiesMilestoneId: UUID?
+    /// [v25.567] 新增股票時預設證券戶只帶一次（之後你自己改的不再蓋掉）
+    @State private var defaultsApplied = false
 
     @State private var isFetching = false
     @State private var fetchError = ""
@@ -157,9 +167,8 @@ struct AddStockView: View {
                             .listRowBackground(Color.clear)
                             .listRowSeparator(.hidden)
                     }
-                    if !bankMilestones.isEmpty || !securitiesMilestones.isEmpty {
-                        accountPicker
-                    }
+                    // [v25.567] 先選證券戶、再看交割銀行（兩列＋舊資料一句；computed var，不塞 body）
+                    accountRows
                     DatePicker("買入日期", selection: $purchaseDate, displayedComponents: .date)
 
                     HStack {
@@ -259,7 +268,10 @@ struct AddStockView: View {
                     }
                 }
             }
-            .onAppear { loadEditing() }
+            .onAppear {
+                loadEditing()
+                applyDefaultBroker()
+            }
         }
     }
 
@@ -464,7 +476,7 @@ struct AddStockView: View {
         .padding(.vertical, 10)
     }
 
-    // MARK: - 帳戶選擇器（銀行 / 證券）
+    // MARK: - 帳戶選擇器（證券戶 → 交割銀行）
 
     private var bankMilestones: [LifeMilestone] {
         lifeStore.milestones.filter {
@@ -485,10 +497,45 @@ struct AddStockView: View {
         lifeStore.wealthFacts(expense: expenseStore, finance: financeStore)
     }
 
+    /// [v25.567] 證券戶選單：沒收起來的證券戶（財富的暱稱）
+    private var brokerOptions: [WealthFacts.Account] {
+        facts.securities.filter { !$0.hidden }
+    }
+
+    /// [v25.567] 選交割銀行不再清掉證券戶（兩個都存：證券戶＝持股算在哪，交割銀行＝錢從哪扣）
     private func selectBank(_ id: UUID, code: String) {
         selectedBankMilestoneId = id
         selectedBankCurrency = code
-        selectedSecuritiesMilestoneId = nil
+    }
+
+    /// [v25.567] 選證券戶：交割銀行跟著帶它的（帳本填的 → 這個證券戶的股票最常用的；都沒有就不動）。
+    /// 美股而且那個帳戶有美元子帳戶 → 帶美元；其他帶台幣（選單裡還可以自己改）
+    private func selectBroker(_ id: UUID) {
+        selectedSecuritiesMilestoneId = id
+        guard let bank = facts.broker(id)?.settlementBankId else { return }
+        selectedBankMilestoneId = bank
+        let codes: [String] = facts.account(bank)?.currencies ?? []
+        selectedBankCurrency = (isUSSymbol && codes.contains("US$")) ? "US$" : "NT$"
+    }
+
+    /// [v25.567] 新增股票的預設證券戶（只做一次、兩個都還沒選時）：只有一個證券戶就選它；
+    /// 好幾個選股票裡最後一檔有證券戶、而且那個證券戶還在、沒收起來的
+    private func applyDefaultBroker() {
+        guard editing == nil, !defaultsApplied else { return }
+        defaultsApplied = true
+        guard selectedSecuritiesMilestoneId == nil, selectedBankMilestoneId == nil else { return }
+        let options = brokerOptions
+        guard !options.isEmpty else { return }
+        if options.count == 1, let only = options.first {
+            selectBroker(only.id)
+            return
+        }
+        let ids = Set(options.map(\.id))
+        let recent: Stock? = financeStore.stocks.last(where: { s in
+            guard let b = s.linkedSecuritiesMilestoneId else { return false }
+            return ids.contains(b)
+        })
+        if let b = recent?.linkedSecuritiesMilestoneId { selectBroker(b) }
     }
 
     /// 銀行一列：好幾個幣別 → 子選單「美金（存摺 美金 3,200）」；一個 → 直接選
@@ -509,33 +556,88 @@ struct AddStockView: View {
         }
     }
 
-    /// 證券戶一列：不寫數字（證券戶自己身上的紀錄不算進任何合計，D16）
-    private func securitiesMenuTitle(_ ms: LifeMilestone) -> String {
-        "\(ms.title)（證券戶）"
-    }
-
-    private var accountPickerLabel: String {
-        if let id = selectedSecuritiesMilestoneId,
-           let ms = securitiesMilestones.first(where: { $0.id == id }) {
-            return ms.title
-        }
-        if let id = selectedBankMilestoneId,
-           let ms = bankMilestones.first(where: { $0.id == id }) {
-            let name = ms.bankName ?? ms.title
-            return "\(name) · \(selectedBankCurrency)"
-        }
+    /// 證券戶那列的字：財富的暱稱 → 銀行名 → 標題；沒選「未選擇」
+    private var brokerPickerLabel: String {
+        guard let id = selectedSecuritiesMilestoneId else { return "未選擇" }
+        if let a = facts.account(id) { return a.name }
+        if let ms = securitiesMilestones.first(where: { $0.id == id }) { return ms.title }
         return "未選擇"
     }
 
-    private var accountPicker: some View {
+    /// 交割銀行那列的字：「台新銀行 · NT$」；沒選：舊資料只選了證券戶「還沒選」，其他「未選擇」
+    private var bankPickerLabel: String {
+        if let id = selectedBankMilestoneId {
+            if let a = facts.account(id) { return "\(a.name) · \(selectedBankCurrency)" }
+            if let ms = bankMilestones.first(where: { $0.id == id }) {
+                let name = ms.bankName ?? ms.title
+                return "\(name) · \(selectedBankCurrency)"
+            }
+        }
+        return selectedSecuritiesMilestoneId != nil ? "還沒選" : "未選擇"
+    }
+
+    /// [v25.567] 舊資料（編輯時證券戶有、交割銀行沒有）：交割紀錄以前記在證券戶身上，選了交割銀行存檔會搬過去
+    private var legacySettlementHint: String? {
+        guard let e = editing, e.linkedBankMilestoneId == nil, let bid = e.linkedSecuritiesMilestoneId else { return nil }
+        let name: String
+        if let a = facts.account(bid) {
+            name = a.name
+        } else if let ms = securitiesMilestones.first(where: { $0.id == bid }) {
+            name = ms.title
+        } else {
+            return nil
+        }
+        return "以前的交割記在" + name + "身上；選了交割銀行存檔，這檔的交割紀錄會搬過去"
+    }
+
+    private var showsBrokerRow: Bool { !brokerOptions.isEmpty || selectedSecuritiesMilestoneId != nil }
+    private var showsBankRow: Bool { !facts.pickerBanks.isEmpty || selectedBankMilestoneId != nil }
+
+    /// [v25.567] Form 裡的兩列（＋舊資料一句）：證券戶、交割銀行
+    @ViewBuilder
+    private var accountRows: some View {
+        if showsBrokerRow {
+            brokerPicker
+        }
+        if showsBankRow {
+            bankPicker
+        }
+        if let hint = legacySettlementHint {
+            Text(hint)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var brokerPicker: some View {
+        let list = brokerOptions
+        return HStack {
+            Text("證券戶").foregroundStyle(.secondary)
+            Spacer()
+            Menu {
+                Button("不指定") {
+                    selectedSecuritiesMilestoneId = nil
+                }
+                ForEach(list) { acc in
+                    Button(acc.name) {
+                        selectBroker(acc.id)
+                    }
+                }
+            } label: {
+                accountMenuLabel(brokerPickerLabel, empty: selectedSecuritiesMilestoneId == nil)
+            }
+        }
+    }
+
+    private var bankPicker: some View {
         let banks = facts.pickerBanks
         return HStack {
-            Text("扣款帳戶").foregroundStyle(.secondary)
+            Text("交割銀行").foregroundStyle(.secondary)
             Spacer()
             Menu {
                 Button("不指定") {
                     selectedBankMilestoneId = nil
-                    selectedSecuritiesMilestoneId = nil
                     selectedBankCurrency = "NT$"
                 }
                 if !banks.isEmpty {
@@ -545,24 +647,18 @@ struct AddStockView: View {
                         }
                     }
                 }
-                if !securitiesMilestones.isEmpty {
-                    Section("證券") {
-                        ForEach(securitiesMilestones) { ms in
-                            Button(securitiesMenuTitle(ms)) {
-                                selectedSecuritiesMilestoneId = ms.id
-                                selectedBankMilestoneId = nil
-                                selectedBankCurrency = "NT$"
-                            }
-                        }
-                    }
-                }
             } label: {
-                HStack(spacing: 4) {
-                    Text(accountPickerLabel)
-                        .foregroundStyle((selectedBankMilestoneId == nil && selectedSecuritiesMilestoneId == nil) ? .secondary : .primary)
-                    Image(systemName: "chevron.down").font(.caption2).foregroundStyle(.secondary)
-                }
+                accountMenuLabel(bankPickerLabel, empty: selectedBankMilestoneId == nil)
             }
+        }
+    }
+
+    private func accountMenuLabel(_ text: String, empty: Bool) -> some View {
+        HStack(spacing: 4) {
+            Text(text)
+                .foregroundStyle(empty ? Color.secondary : Color.primary)
+                .lineLimit(1)
+            Image(systemName: "chevron.down").font(.caption2).foregroundStyle(.secondary)
         }
     }
 
@@ -1064,84 +1160,16 @@ struct AddStockView: View {
         dismiss()
     }
 
-    /// 同步股票買賣到所選銀行/證券帳戶的存款記錄
-    /// [v25.563] 股利入帳（同樣掛 linkedStockId，id＝WealthIDs.dividendDeposit）不清：以前 removeAll
-    /// { linkedStockId == 股票 } 連股利一起清掉，存一次股票股利就不見了。換交割帳戶時以前的股利留在原帳戶
-    ///（錢當時是進那裡的；之後改或刪那次配息，股票卡會從所有帳戶清那個 id 再寫）。milestones 一次指派
+    /// 同步股票買賣到交割帳戶的存款記錄
+    /// [v25.563] 股利入帳（同樣掛 linkedStockId，id＝WealthIDs.dividendDeposit）不清。
+    /// [v25.567] 改叫 LifeStore.rewriteStockSettlements（股票表單、股票卡加交易、記帳改舊版單筆股票同一支）：
+    /// 先從所有帳戶清掉這檔的交割，再照「那一天該記在哪」寫（WealthStockSettle：帳本改交割銀行的歷史 → 現在的交割銀行 → 證券戶）。
+    /// 在這裡換交割銀行＝整檔都改（清掉帳本的歷史，同 v5 以前）；沒換照歷史放
     private func syncAccountTransactions(for stock: Stock, previous: Stock?) {
-        let keep = WealthIDs.dividendDepositIds(of: stock)
-        var all = lifeStore.milestones
-        var changed = false
-        // 移除舊帳戶中本股票的交割記錄（股利留著）
-        let prevAccountIds = [previous?.linkedBankMilestoneId, previous?.linkedSecuritiesMilestoneId].compactMap { $0 }
-        for prevId in prevAccountIds {
-            if let i = all.firstIndex(where: { $0.id == prevId }) {
-                all[i].bankDeposits?.removeAll { $0.linkedStockId == stock.id && !keep.contains($0.id) }
-                changed = true
-            }
+        if previous?.linkedBankMilestoneId != stock.linkedBankMilestoneId {
+            lifeStore.updateWealthBook { $0.setLinks(nil, for: stock.id) }
         }
-
-        // 取得目標帳戶
-        let targetId = stock.linkedBankMilestoneId ?? stock.linkedSecuritiesMilestoneId
-        guard let accId = targetId,
-              let idx = all.firstIndex(where: { $0.id == accId }) else {
-            if changed { lifeStore.milestones = all }
-            return
-        }
-
-        var list = all[idx].bankDeposits ?? []
-        list.removeAll { $0.linkedStockId == stock.id && !keep.contains($0.id) }
-
-        let currency = stock.linkedBankCurrency ?? "NT$"
-        // [v25.562] 寫多少、寫哪一格跟股票卡同一條規則（stockAmountForAccount）：美股進台幣帳戶 × 匯率、
-        // 進美元帳戶照原數、進其他外幣有匯率就換、查不到寫台幣那一格。以前這裡直接寫原數（AAPL 2,000 美元
-        // 寫成「NT$ 2,000」），從股票卡加交易又寫成 NT$64,000，同一筆換個畫面存就不一樣。
-        let rates = FinanceRates(expenseStore)
-
-        if !stock.transactions.isEmpty {
-            // 已使用交易紀錄模式：每筆交易寫一筆 BankDeposit（依 T+2 交割日）
-            for tx in stock.transactions {
-                let w = stockAmountForAccount(tx.amount, stock: stock, accountCurrency: currency, rates: rates)
-                list.append(BankDeposit(
-                    id: UUID(),
-                    date: tx.settlementDate,
-                    amount: w.amount,
-                    currencyCode: w.code,
-                    isWithdrawal: tx.kind == .buy,
-                    linkedExpenseId: nil,
-                    linkedStockId: stock.id
-                ))
-            }
-        } else {
-            // 舊版聚合模式：一筆買入 + 一筆賣出（若有），皆依 T+2 交割
-            let cost = stock.shares * stock.purchasePrice
-            if cost > 0 {
-                let w = stockAmountForAccount(cost, stock: stock, accountCurrency: currency, rates: rates)
-                list.append(BankDeposit(
-                    id: UUID(),
-                    date: StockTransaction.taiwanSettlementDate(from: stock.purchaseDate),
-                    amount: w.amount,
-                    currencyCode: w.code, isWithdrawal: true,
-                    linkedExpenseId: nil, linkedStockId: stock.id
-                ))
-            }
-            if stock.isSold, stock.soldPrice > 0, let sd = stock.soldDate {
-                let saleAmount = stock.shares * stock.soldPrice
-                if saleAmount > 0 {
-                    let w = stockAmountForAccount(saleAmount, stock: stock, accountCurrency: currency, rates: rates)
-                    list.append(BankDeposit(
-                        id: UUID(),
-                        date: StockTransaction.taiwanSettlementDate(from: sd),
-                        amount: w.amount,
-                        currencyCode: w.code, isWithdrawal: false,
-                        linkedExpenseId: nil, linkedStockId: stock.id
-                    ))
-                }
-            }
-        }
-
-        all[idx].bankDeposits = list
-        lifeStore.milestones = all
+        lifeStore.rewriteStockSettlements(stock, rates: FinanceRates(expenseStore))
     }
 
     private var soldAccountId: UUID? {

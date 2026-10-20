@@ -52,6 +52,11 @@ import MapKit
 //      主題色 tint 全 App 慣例）。純視覺層補強，saveExpense() 內部守衛判斷與支出寫入邏輯
 //      完全未變動。同型 isSaving 守衛仍存在於 AddIncomeView / AddStockView / AddVehicleView /
 //      AddRealEstateView，可作為下次美化比照本檔案補齊的清單。
+// [v25.567] 財富 v6（build/v6/brief.md G4 11～13；judge §6.7）：
+//   - 改一筆保費（固定支出・保險）存檔後，連著它的財富保單照寫一份舊欄位（LifeStore.policyExpenseChanged，下一個 runloop；
+//     保單頁、保單總表本來就讀記帳這一筆，稅務頁照算、不重複）。
+//   - 保險類別那段 footer：這筆被財富的保單連著時多一行「這筆保費連著財富的保單「國泰人壽 醫療險」：改金額、扣款，保單跟著。」
+//   - 舊版單筆股票改股數、買價、日期：交割紀錄改叫 LifeStore.rewriteStockSettlements（股票表單、股票卡同一支）。
 
 struct AddExpenseView: View {
     @EnvironmentObject var store: ExpenseStore
@@ -3055,11 +3060,37 @@ struct AddExpenseView: View {
         } header: {
             sectionHeader(title: "保險類別", accentColor: .green)
         } footer: {
-            if let name = vehicleNameBlockedBySubCategory {
-                Text("儲蓄險、壽險、意外險不能連到車子；要算進「\(name)」的養車，請選強制險或綜合險。")
-                    .foregroundStyle(.orange)
+            insuranceSubCategoryFooter
+        }
+    }
+
+    /// [v25.567] 保險類別那段 footer：連不到車的提醒＋這筆連著財富保單的一句（兩句都可能有）
+    private var insuranceSubCategoryFooter: some View {
+        insuranceFooterLines(blockedVehicle: vehicleNameBlockedBySubCategory, policyNote: linkedPolicyNote)
+    }
+
+    @ViewBuilder
+    private func insuranceFooterLines(blockedVehicle: String?, policyNote: String?) -> some View {
+        if blockedVehicle != nil || policyNote != nil {
+            VStack(alignment: .leading, spacing: 4) {
+                if let name = blockedVehicle {
+                    Text("儲蓄險、壽險、意外險不能連到車子；要算進「\(name)」的養車，請選強制險或綜合險。")
+                        .foregroundStyle(.orange)
+                }
+                if let n = policyNote {
+                    Text(n)
+                }
             }
         }
+    }
+
+    /// [v25.567] 編輯中的這一筆被財富的某張保單連著：「這筆保費連著財富的保單「國泰人壽 醫療險」：改金額、扣款，保單跟著。」；
+    /// 沒連（或新增）nil。保單名字讀一套數字的保單總表（快取，打字不重算）
+    private var linkedPolicyNote: String? {
+        guard let id = editingExpense?.id else { return nil }
+        let facts = lifeStore.wealthFacts(expense: store, finance: financeStore)
+        guard let p = facts.policies.policy(linkedTo: id) else { return nil }
+        return "這筆保費連著財富的保單「" + p.title + "」：改金額、扣款，保單跟著。"
     }
 
     /// [v25.541] 表單連著車、保險類別卻選了儲蓄險／壽險／意外險時的車名（其他時候 nil）。
@@ -3897,6 +3928,13 @@ struct AddExpenseView: View {
         if expenseType == .variable && !isEditing { rememberPayment() }
         if isEditing { store.update(expense) } else { store.add(expense) }
         syncBankWithdrawal(for: expense, previous: editingExpense)
+        // [v25.567] 改了一筆保費：連著它的財富保單照寫一份舊欄位（里程碑保費、帳本繳法／從哪扣／下次；給醫療地圖、舊 iPad、網頁版）。
+        // 先 dismiss，下一個 runloop 才寫（store 先抓進區域常數）；沒連保單的 policyExpenseChanged 自己什麼都不做
+        if isEditing && (isInsurance || editingExpense?.fixedCategory == .insurance) {
+            let life = lifeStore
+            let saved = expense
+            DispatchQueue.main.async { life.policyExpenseChanged(saved) }
+        }
         dismiss()
     }
 
@@ -4014,29 +4052,10 @@ struct AddExpenseView: View {
     /// [v25.562 驗證補] 舊版單筆股票（沒有交易紀錄、沒賣出）自己有交割帳戶時，記帳改了股數、買價、日期，
     /// 交割帳戶裡那筆買進扣款跟著重寫——W8 之後銀行只看股票自己的交割紀錄、這筆記帳不扣，
     /// 不重寫的話台新還是扣舊的金額（記帳改成 20 萬，台新還是 −19 萬）。
-    /// 寫法同 AddStockView.syncAccountTransactions 的舊版聚合模式（成本＝股數 × 買價、T+2 交割、
-    /// stockAmountForAccount 一條規則）；只換買進那筆扣款，股票卡寫的股利入帳不動。
+    /// [v25.567] 改叫 LifeStore.rewriteStockSettlements（股票表單、股票卡加交易同一支）：從所有帳戶清掉這檔的交割、
+    /// 照「那一天該記在哪」重寫（成本＝股數 × 買價、T+2 交割、stockAmountForAccount 一條規則）；股利入帳不動
     private func resyncLegacyStockPurchase(_ stock: Stock) {
-        guard let accId = stock.linkedBankMilestoneId ?? stock.linkedSecuritiesMilestoneId,
-              var ms = lifeStore.milestones.first(where: { $0.id == accId }) else { return }
-        var list = ms.bankDeposits ?? []
-        list.removeAll { $0.linkedStockId == stock.id && $0.isWithdrawal }
-        let cost = stock.shares * stock.purchasePrice
-        if cost > 0 {
-            let w = stockAmountForAccount(cost, stock: stock, accountCurrency: stock.linkedBankCurrency ?? "NT$",
-                                          rates: FinanceRates(store))
-            list.append(BankDeposit(
-                id: UUID(),
-                date: StockTransaction.taiwanSettlementDate(from: stock.purchaseDate),
-                amount: w.amount,
-                currencyCode: w.code,
-                isWithdrawal: true,
-                linkedExpenseId: nil,
-                linkedStockId: stock.id
-            ))
-        }
-        ms.bankDeposits = list
-        lifeStore.update(ms)
+        lifeStore.rewriteStockSettlements(stock, rates: FinanceRates(store))
     }
 
     /// 同步房地產支出（房屋價金→已支出章節，其餘→變動支出章節）

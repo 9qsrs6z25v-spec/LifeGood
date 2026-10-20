@@ -222,6 +222,12 @@ fileprivate struct WealthNoticeAlertModifier: ViewModifier {
 // • 右上＋選單多一顆「定存」（有沒收起來的銀行帳戶才出現）→ WealthSheet.timeDeposit(nil, nil)：定存表單第一欄選帳戶（要訂閱）。
 // • 自動續存寫進帳本：財富頁打開、回到前景時，下一個 runloop 叫 lifeStore.rollOverTimeDeposits()（本息續存／本金續存
 //   到期那天算出來的下一期，同一個固定 id，寫過的不再寫；沒有要寫的什麼都不做）。數字不等它：WealthFacts 照樣先算進去。
+//
+// [v25.567] 財富 v6 保單總表（build/v6/brief.md §6 G1 10–11；judge §3.10、§6.8）：
+// • 同一個 .sheet(item:)（外面照舊 .appStores()）多四種彈出：保單總表點儲蓄險→InsurancePolicyCard（儲蓄險頁同一張）、
+//   車險→VehicleDetailView、房屋險→RealEstateDetailView（捲到房屋資料，同人生 › 房地產）；看完關掉還在財富頁，不切分頁。
+//   儲蓄險、房子在 store 裡找不到（剛被刪了）只寫一行字。〔補保單〕→ WealthAccountEditor(kind: .policy, fromExpense:)（要訂閱，open 擋）。
+// • ⑦ 的資料（保單總表、六格）由 WealthPageData.build 讀 facts.policies 組好，這頁不另外算。
 
 struct LifeFinanceView: View {
     @EnvironmentObject var lifeStore: LifeStore
@@ -696,7 +702,35 @@ struct LifeFinanceView: View {
         case .timeDeposit(let account, let term):
             // [v25.566] 定存表單（G3；自己掛布幕、detents）
             return AnyView(WealthTimeDepositSheet(accountId: account, editing: term))
+        case .savings(let id):
+            // [v25.567] 保單總表的儲蓄險：彈出儲蓄險頁同一張保單卡（不切分頁）
+            return savingsSheet(id)
+        case .vehicle(let id):
+            // [v25.567] 保單總表的車險：彈出車子卡（車子已經刪了，卡片自己會關掉）
+            return AnyView(VehicleDetailView(vehicleId: id))
+        case .house(let id):
+            // [v25.567] 保單總表的房屋險：彈出房屋卡、捲到房屋資料（保險那幾列在那裡；同人生 › 房地產）
+            return houseSheet(id)
+        case .newPolicy(let eid):
+            // [v25.567] 〔補保單〕：新增保單、預填這一筆記帳保費，存檔連它（G3 的 fromExpense）
+            return AnyView(WealthAccountEditor(kind: .policy, fromExpense: eid))
         }
+    }
+
+    /// [v25.567] 儲蓄險的保單卡（store 裡找不到＝剛被刪了：一行字）
+    private func savingsSheet(_ id: UUID) -> AnyView {
+        guard let ins = financeStore.insurances.first(where: { $0.id == id }) else {
+            return AnyView(Text("這張儲蓄險已經刪了").padding())
+        }
+        return AnyView(InsurancePolicyCard(insurance: ins))
+    }
+
+    /// [v25.567] 房屋卡（store 裡找不到＝剛被刪了：一行字）
+    private func houseSheet(_ id: UUID) -> AnyView {
+        guard let re = financeStore.realEstates.first(where: { $0.id == id }) else {
+            return AnyView(Text("這間房子已經刪了").padding())
+        }
+        return AnyView(RealEstateDetailView(estate: re, startAt: .info))
     }
 
     // MARK: - [v25.563] 「為什麼數字變了」

@@ -78,6 +78,16 @@ import UIKit
 //  lineWidth: 0.6))，白色描邊對齊英雄卡本身白字白底半透明的配色（不同於其餘膠囊用各自
 //  主題色描邊，此處底卡是彩色漸層而非中性背景，故沿用 summaryCard 既有的 white
 //  opacity 系列數值）。純視覺層調整，health.bmiCategory 等既有健康資料計算完全未變動。
+//
+// [v25.567] 財富 v6（judge §6.7；build/v6/brief.md G4 18）：醫療保障照舊讀里程碑 insuranceType（篩選規則不改，
+//  財富的保單表單照寫最接近的舊值，癌症、失能→醫療），小膠囊換成帳本的細險種（「癌症險」，沒有照舊「醫療」）；
+//  財富的保單（financeSubCategory == .insurance）點一列開保單頁（WealthCardPage，.sheet(item:)＋.appStores()）；
+//  收起來的保單名字後面灰字「（收起來了）」。
+
+/// [v25.567] 醫療保障點一列要開的保單頁（.sheet(item:) 用）
+fileprivate struct MedicalPolicyOpen: Identifiable {
+    let id: UUID
+}
 
 // MARK: - 就醫地點聚合
 
@@ -126,6 +136,8 @@ struct MedicalMapView: View {
 
     // [2026-07 v5] 健康狀況總結英雄卡進場動畫旗標，對齊 TravelMapView.statsCardAppeared 規格
     @State private var summaryCardAppeared = false
+    /// [v25.567] 點了醫療保障一列要開的保單頁
+    @State private var openPolicy: MedicalPolicyOpen?
 
     private var health: HealthProfile { lifeStore.healthProfile }
 
@@ -189,6 +201,10 @@ struct MedicalMapView: View {
             }
             .sheet(item: $selectedPlace) { place in
                 MedicalPlaceDetailSheet(place: place)
+                    .appStores()
+            }
+            .sheet(item: $openPolicy) { p in
+                WealthCardPage(accountId: p.id)
                     .appStores()
             }
         }
@@ -561,24 +577,7 @@ struct MedicalMapView: View {
                 VStack(spacing: 0) {
                     ForEach(Array(items.enumerated()), id: \.element.id) { idx, ms in
                         staggeredRow(
-                            HStack(spacing: 12) {
-                                rowIcon("checkmark.shield.fill", color: accent)
-                                VStack(alignment: .leading, spacing: 2) {
-                                    // [v25.520] 名稱過長改一行跑馬燈（原本會折成好幾行）
-                                    MarqueeText(insuranceTitle(ms)).font(.subheadline.weight(.medium))
-                                    if let company = ms.insuranceCompany, !company.isEmpty {
-                                        Text(company).font(.caption).foregroundStyle(.secondary)
-                                    }
-                                }
-                                Spacer()
-                                if let t = ms.insuranceType {
-                                    Text(t.rawValue).font(.caption2).foregroundStyle(accent)
-                                        .padding(.horizontal, 8).padding(.vertical, 3)
-                                        .background(accent.opacity(0.12)).clipShape(Capsule())
-                                        .overlay(Capsule().stroke(accent.opacity(0.22), lineWidth: 0.6))
-                                }
-                            }
-                            .padding(.horizontal, 14).padding(.vertical, 9),
+                            insuranceRow(ms),
                             appeared: insuranceRowsAppeared, index: idx
                         )
                         if idx < items.count - 1 { Divider().padding(.leading, 62) }
@@ -590,6 +589,81 @@ struct MedicalMapView: View {
         .padding(.vertical, 8)
         .background(Color(.systemBackground)).clipShape(RoundedRectangle(cornerRadius: 16))
         .padding(.horizontal)
+    }
+
+    /// [v25.567] 醫療保障一列：財富的保單包一顆按鈕（點了開保單頁）；其他照舊只看
+    @ViewBuilder
+    private func insuranceRow(_ ms: LifeMilestone) -> some View {
+        if isWealthPolicy(ms) {
+            Button {
+                openPolicy = MedicalPolicyOpen(id: ms.id)
+            } label: {
+                insuranceRowContent(ms, tappable: true)
+            }
+            .buttonStyle(.plain)
+            .accessibilityHint("打開保單頁")
+        } else {
+            insuranceRowContent(ms, tappable: false)
+        }
+    }
+
+    private func insuranceRowContent(_ ms: LifeMilestone, tappable: Bool) -> some View {
+        HStack(spacing: 12) {
+            rowIcon("checkmark.shield.fill", color: accent)
+            VStack(alignment: .leading, spacing: 2) {
+                insuranceTitleLine(ms)
+                if let company = ms.insuranceCompany, !company.isEmpty {
+                    Text(company).font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            Spacer()
+            if let kind = insuranceKindText(ms) {
+                insuranceKindCapsule(kind)
+            }
+            if tappable {
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+            }
+        }
+        .padding(.horizontal, 14).padding(.vertical, 9)
+        .contentShape(Rectangle())
+    }
+
+    /// 名字（[v25.520] 過長一行跑馬燈）＋收起來的保單後面灰字「（收起來了）」
+    private func insuranceTitleLine(_ ms: LifeMilestone) -> some View {
+        HStack(spacing: 4) {
+            MarqueeText(insuranceTitle(ms)).font(.subheadline.weight(.medium))
+            if isHiddenPolicy(ms) {
+                Text("（收起來了）")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize()
+            }
+        }
+    }
+
+    private func insuranceKindCapsule(_ text: String) -> some View {
+        Text(text).font(.caption2).foregroundStyle(accent)
+            .padding(.horizontal, 8).padding(.vertical, 3)
+            .background(accent.opacity(0.12)).clipShape(Capsule())
+            .overlay(Capsule().stroke(accent.opacity(0.22), lineWidth: 0.6))
+    }
+
+    /// [v25.567] 膠囊的險種：帳本有細險種寫「癌症險」「醫療險」，沒有照舊里程碑的「醫療」「意外」
+    private func insuranceKindText(_ ms: LifeMilestone) -> String? {
+        if let k = lifeStore.wealthBook.policy(ms.id).kind { return k.shortTitle }
+        return ms.insuranceType?.rawValue
+    }
+
+    /// 財富的保單（財富帳戶里程碑、保險子分類）才有保單頁
+    private func isWealthPolicy(_ ms: LifeMilestone) -> Bool {
+        ms.category == .achievement && ms.financeSubCategory == .insurance
+    }
+
+    /// 財富頁收起來的保單（帳本 hidden）
+    private func isHiddenPolicy(_ ms: LifeMilestone) -> Bool {
+        isWealthPolicy(ms) && lifeStore.wealthBook.account(ms.id).hidden == true
     }
 
     // MARK: - 共用小元件

@@ -112,6 +112,8 @@ enum MoneyBoardScene: Equatable {
     case towers(WealthTowerScene)
     case tide(WealthTideScene)
     case cardCycle(WealthCycleScene)
+    // [v25.567] 保單頁：踏腳石（一年一塊石頭；資料與畫法在 Life/WealthBoardScenes.swift）
+    case stones(WealthStonesScene)
 }
 
 // MARK: - 頭部的字
@@ -341,6 +343,7 @@ extension MoneyBoardSky {
         case .towers(let s): paintTowers(&ctx, rect: bandRect, scene: s, dark: a.dark, seed: a.seed)
         case .tide(let s): paintTide(&ctx, rect: bandRect, scene: s, dark: a.dark, seed: a.seed)
         case .cardCycle(let s): paintCardCycle(&ctx, rect: bandRect, scene: s, dark: a.dark, seed: a.seed)
+        case .stones(let s): paintStones(&ctx, rect: bandRect, scene: s, dark: a.dark, seed: a.seed)
         }
 
         if let greeting {

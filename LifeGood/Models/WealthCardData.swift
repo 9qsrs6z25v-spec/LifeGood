@@ -37,6 +37,20 @@ import SwiftUI
 // • 明細新種類 .timeDeposit（轉定存、定存到期、定存解約）：篩選「定存」（定存利息那幾列也歸這裡）、圓裡「定」、金色；
 //   點了開定存表單（WealthCardOpen.timeDeposit）。定存利息（.interest＋timeDepositId）點了也開定存表單。
 // • ⑧ 存款保險：這家銀行合計超過 300 萬才多一列（facts.insurance(for:)；遮住時不寫金額）；種類舊定存寫「定存（以前記的）」。
+//
+// [v25.567] 財富 v6 G2（build/v6/brief.md §6 G2；judge §4.3、§4.4；樣稿③-B5）：
+// • 證券戶 ② 要交割：一天一列，字全讀 WealthFacts.Broker.dues（WealthBrokerDue.line／statusLine(today:)：
+//   「10/21（三）早上從薪轉扣 52,340・買 00878 2,000 股」「薪轉現在 128,400，夠」）；不夠的那天〔轉帳過去〕帶好到哪、差多少
+//  （short 無條件進位到元）。遮住：金額換「••••」、夠不夠只寫「薪轉夠扣」「薪轉不夠扣，明天 10 點前要轉進去」。
+//   看板膠囊改讀 dues 第一筆（「10/21 交割・2 天」；不夠「10/21 交割 差 23,940」warn）；沒有 dues 照 v3 的 nextSettlementDate。
+// • 證券戶 ⑤ 以前記在這裡的交割紀錄：Broker.legacyIds 那幾筆（明細＋接下來的列，照存摺明細那一列的字，**不寫餘額**、點了不開），
+//   唯讀；有交割銀行才有〔搬到薪轉〕（WealthSettlementMoveSheet，先給你看會動到哪些）。⑥ 交割銀行是照股票猜的：「薪轉（照股票最常用的）」。
+// • 保單頁整頁改讀 facts.policies.policy(id)（WealthPolicyFacts.Policy；連著記帳時金額、繳法、下次、從哪扣都是記帳那一筆）：
+//   看板「10/19 週一・第 6／20 年」「一年保費 NT$24,000」「已繳 6 年・還剩 14 年・刷 CUBE」、一年一約 60 天內膠囊「12/1 到期・記得續保」，
+//   band 112、風景踏腳石（WealthStonesScene：count＝繳費年期〔沒填＝到今天的年數〕最多 40、paid、standing＝第幾年−1、終身畫 ∞、沒填年期 open）；
+//   ④ 繳費：連著＝「年繳 24,000・每年 8/15・刷 CUBE・第 6／20 期」整塊點了開記帳那一筆；沒連＝你填的保費＋〔連到記帳的保費〕〔新建一筆〕
+//  （新建的字與 WealthPolicyPremiumDraft 在這裡組好：第一期 WealthPolicyLink.firstDue，以前的不補記）；⑤ 誰的保單（要保人・被保險人・受益人）；
+//   ⑦ 資料多「繳費年期」，被保險人／要保人／受益人搬到 ⑤；保單號碼照 v3（只露後 4 碼、〔顯示〕過 Face ID）。找不到那張（不該發生）照 v3 的寫法退回。
 
 // MARK: - 型別
 
@@ -351,6 +365,38 @@ struct WealthCardBroker {
     var info: [WealthCardInfo] = []
     var note = ""
     var photos: [String] = []
+    /// [v25.567] ② 要交割（接下來 30 天，照日子；WealthFacts.Broker.dues）
+    var dues: [WealthCardBrokerDue] = []
+    /// [v25.567] ⑤ 以前記在這裡的交割紀錄（唯讀、新到舊、不寫餘額）
+    var legacyRows: [WealthCardRow] = []
+    /// [v25.567] ⑤ 收起來那一列「以前記在這裡的交割紀錄 18 筆」；沒有舊交割 nil（整區不出現）
+    var legacyTitle: String? = nil
+    /// [v25.567] ⑤〔搬到薪轉〕：有交割銀行才有
+    var canMoveLegacy = false
+    /// [v25.567] ⑤ 那顆按鈕的字「搬到薪轉」（交割銀行的名字；沒有名字「搬到交割銀行」）
+    var legacyMoveTitle = "搬到交割銀行"
+    /// [v25.567] ⑤ 白卡下的灰字
+    var legacyNote: String? = nil
+}
+
+/// [v25.567] 證券戶 ② 要交割的一天（字全讀 WealthBrokerDue）
+struct WealthCardBrokerDue: Identifiable {
+    /// WealthBrokerDue.id（帳戶＋日子＋幣別）
+    let id: String
+    /// 「10/21（三）早上從薪轉扣 52,340・買 00878 2,000 股」
+    let line: String
+    /// 「薪轉現在 128,400，夠」「薪轉只剩 128,400，差 23,940，明天 10 點前要轉進去」
+    let status: String
+    let isShort: Bool
+    /// 點一列打開哪一檔（那天交割的第一檔；不知道 nil）
+    let stockId: UUID?
+    /// 〔轉帳過去〕轉到哪個帳戶（不夠才有）
+    let transferTo: UUID?
+    /// 〔轉帳過去〕先填好的金額（差多少，無條件進位到元）
+    let transferAmount: Double
+    /// 從帳戶扣（false＝那天入帳）
+    var isOutflow = true
+    var accessibilityText = ""
 }
 
 /// 保單頁
@@ -361,6 +407,21 @@ struct WealthCardPolicy {
     var info: [WealthCardInfo] = []
     var note = ""
     var photos: [String] = []
+    /// [v25.567] ⑤ 誰的保單「要保人 本人・被保險人 本人・受益人 配偶」；都沒寫 nil
+    var people: String? = nil
+    /// [v25.567] ⑤ 一列一個人（WealthCardInfoSection 畫）
+    var peopleRows: [WealthCardInfo] = []
+    /// [v25.567] ④ 保費連著記帳那一筆（整塊點了開那一筆）
+    var linked = false
+    var paymentExpenseId: UUID? = nil
+    /// [v25.567] ④〔新建一筆〕：有保費、繳法是年／季／月、沒連、還沒繳完
+    var canCreateExpense = false
+    /// [v25.567] ④ 白卡下的灰字（連著：在這裡改＝改記帳那一筆；沒連：連起來以後…；半年繳、躉繳：請在記帳記好再連）
+    var paymentNote: String? = nil
+    /// [v25.567]〔新建一筆〕確認框的字（「照保單的保費 24,000、年繳、刷 CUBE，在記帳建一筆從 2027/8/15 起每年扣的…」）
+    var createMessage: String? = nil
+    /// [v25.567]〔新建一筆〕按了確定要存的那一筆（LifeStore.savePolicyPremium）
+    var createDraft: WealthPolicyPremiumDraft? = nil
 }
 
 // MARK: - 整頁
@@ -2183,7 +2244,10 @@ extension WealthCardData {
         var b = WealthCardBoard()
         b.date = WealthPageText.boardDate(t) + (br?.settlementName.map { "・交割 " + $0 } ?? "")
         b.dateIcon = "chart.line.uptrend.xyaxis"
-        if let nd = br?.nextSettlementDate {
+        // [v25.567] 膠囊讀 ② 要交割的第一筆（不夠：「10/21 交割 差 23,940」warn）；沒有 dues（舊資料、超過 30 天）照 v3
+        if let due = br?.dues.first {
+            fillDueCapsule(&b, due: due, x: x)
+        } else if let nd = br?.nextSettlementDate {
             let n = WealthCal.days(from: t, to: nd)
             if n >= 0 && n <= 14 {
                 b.capsule = WealthCardText.md(nd) + " 交割・" + (n == 0 ? "今天" : "\(n) 天")
@@ -2227,15 +2291,114 @@ extension WealthCardData {
         if let acc = accountRow(a, prefs: x.book.account(a.id), m: m) { info.append(acc) }
         info.append(WealthCardInfo(id: "type", label: "類型", value: m.securitiesAccountType?.rawValue ?? "一般"))
         info.append(WealthCardInfo(id: "opened", label: "開戶日", value: WealthPageText.ymd(m.date)))
-        info.append(WealthCardInfo(id: "settle", label: "交割銀行", value: br?.settlementName ?? "還沒設",
+        info.append(WealthCardInfo(id: "settle", label: "交割銀行", value: settlementValue(br),
                                    tone: br?.settlementName == nil ? .warn : nil,
                                    tap: .edit(.settlement), tapTitle: "改"))
         bk.info = info
         bk.note = m.note.trimmingCharacters(in: .whitespacesAndNewlines)
         bk.photos = m.photoFileNames ?? []
+        // [v25.567] ② 要交割、⑤ 以前記在這裡的交割紀錄
+        bk.dues = (br?.dues ?? []).map { dueRow($0, x: x) }
+        if let k = br {
+            fillLegacy(&bk, broker: k, account: a, x: x)
+        }
         d.broker = bk
         d.switcher = brokerSwitcher(x, current: a)
         return d
+    }
+
+    /// [v25.567] ⑥ 交割銀行：你在證券戶填的照寫；照股票最常用的猜的「薪轉（照股票最常用的）」；都沒有「還沒設」
+    fileprivate static func settlementValue(_ br: WealthFacts.Broker?) -> String {
+        guard let k = br, let name = k.settlementName else { return "還沒設" }
+        return k.settlementFromBook ? name : name + "（照股票最常用的）"
+    }
+
+    /// [v25.567] 看板膠囊：「10/21 交割・2 天」「10/22 入帳・3 天」；不夠「10/21 交割 差 23,940」（warn）
+    fileprivate static func fillDueCapsule(_ b: inout WealthCardBoard, due: WealthBrokerDue, x: WealthCardCtx) {
+        let n = WealthCal.days(from: x.today, to: due.day)
+        let dayWord: String = n <= 0 ? "今天" : "\(n) 天"
+        let md = WealthCardText.md(due.day)
+        if due.isShort {
+            b.capsule = md + " 交割 差 " + WealthCardText.plain(due.short, code: due.code, masked: x.masked)
+            b.capsuleIcon = "exclamationmark.triangle.fill"
+            b.capsuleTone = .warn
+        } else {
+            let verb: String = due.isOutflow ? " 交割・" : " 入帳・"
+            b.capsule = md + verb + dayWord
+            b.capsuleIcon = "arrow.left.arrow.right"
+        }
+    }
+
+    /// [v25.567] ② 要交割一列：字讀 WealthBrokerDue.line／statusLine(today:)；遮住時金額換「••••」、夠不夠只說夠不夠扣
+    fileprivate static func dueRow(_ u: WealthBrokerDue, x: WealthCardCtx) -> WealthCardBrokerDue {
+        let line: String = x.masked ? maskedDueLine(u) : u.line
+        let status: String = x.masked ? maskedDueStatus(u, today: x.today) : u.statusLine(today: x.today)
+        let to: UUID? = u.isShort ? u.accountId : nil
+        // 轉帳表單的金額是「從」那邊的幣別：外幣的交割差額不先填（表單只帶到哪個帳戶）
+        let amount: Double = (u.isShort && FinanceRates.isNTD(u.code)) ? u.short.rounded(.up) : 0
+        var row = WealthCardBrokerDue(id: u.id, line: line, status: status, isShort: u.isShort,
+                                      stockId: u.stockIds.first, transferTo: to, transferAmount: amount)
+        row.isOutflow = u.isOutflow
+        row.accessibilityText = line + "。" + status
+        return row
+    }
+
+    /// 「10/21（三）早上從薪轉扣 ••••・買 00878 2,000 股」（股數照常、金額遮住）
+    fileprivate static func maskedDueLine(_ u: WealthBrokerDue) -> String {
+        let head: String = WealthFormat.monthDayWeek(u.day)
+        var body: String
+        if u.isOutflow {
+            body = head + "早上從" + u.accountName + "扣 " + WealthCardText.dots
+        } else {
+            body = head + "入" + u.accountName + " " + WealthCardText.dots
+        }
+        if let w = u.what { body += "・" + w }
+        return body
+    }
+
+    /// 「薪轉夠扣」「薪轉不夠扣，明天 10 點前要轉進去」「錢在那天早上進薪轉」（同 statusLine 的「今天／明天／10/21（三）」）
+    fileprivate static func maskedDueStatus(_ u: WealthBrokerDue, today: Date) -> String {
+        guard u.isOutflow else { return "錢在那天早上進" + u.accountName }
+        guard u.isShort else { return u.accountName + "夠扣" }
+        let left = WealthCal.days(from: today, to: u.day)
+        let when: String
+        switch left {
+        case ...0: when = "今天 "
+        case 1: when = "明天 "
+        default: when = WealthFormat.monthDayWeek(u.day)
+        }
+        return u.accountName + "不夠扣，" + when + "10 點前要轉進去"
+    }
+
+    /// [v25.567] ⑤ 以前記在這裡的交割紀錄（Broker.legacyIds：股票表單以前可以選證券戶當交割帳戶；#16）。
+    /// 照存摺明細那一列的字（徽章「買入」「賣出」「股利」），不寫餘額、點了不開；明細（今天以前）＋還沒到的那幾筆，新到舊
+    fileprivate static func fillLegacy(_ bk: inout WealthCardBroker, broker k: WealthFacts.Broker,
+                                       account a: WealthFacts.Account, x: WealthCardCtx) {
+        guard k.legacyCount > 0 else { return }
+        let ids = Set(k.legacyIds)
+        let all: [WealthLedgerRow] = Array(a.upcoming.reversed()) + a.ledger
+        let mine: [WealthLedgerRow] = all.filter { r in r.depositId.map { ids.contains($0) } ?? false }
+        bk.legacyRows = mine.map { legacyRow($0, x: x) }
+        bk.legacyTitle = "以前記在這裡的交割紀錄 \(k.legacyCount) 筆"
+        let bankName: String? = k.settlementBankId == nil ? nil : k.settlementName
+        bk.canMoveLegacy = k.settlementBankId != nil
+        bk.legacyMoveTitle = "搬到" + (bankName ?? "交割銀行")
+        if let n = bankName {
+            bk.legacyNote = "不算進任何合計。交割其實是從" + n + "扣的：按〔搬到" + n + "〕會先列出會動到哪些，你按確定才搬。"
+        } else {
+            bk.legacyNote = "不算進任何合計。先在下面「資料」選交割銀行，才能把這些紀錄搬過去。"
+        }
+    }
+
+    /// ⑤ 一列：同存摺明細（ledgerRow）的字，拿掉餘額、不開表單（唯讀）
+    fileprivate static func legacyRow(_ r: WealthLedgerRow, x: WealthCardCtx) -> WealthCardRow {
+        var row = ledgerRow(r, x: x)
+        row.sub = nil
+        row.open = .none
+        row.tag = nil
+        let said: String = x.masked ? "金額已遮住" : row.amountText
+        row.accessibilityText = WealthPageText.spokenDate(r.date) + "，" + row.title + "，" + row.detail + "，" + said
+        return row
     }
 
     fileprivate static func brokerSwitcher(_ x: WealthCardCtx, current a: WealthFacts.Account) -> [FinanceSwitcherItem] {
@@ -2261,7 +2424,266 @@ extension WealthCardData {
         return company.isEmpty ? m.title : company + " " + kind.shortTitle
     }
 
+    /// [v25.567] 保單頁：讀保單總表那一張（WealthPolicyFacts.Policy：連著記帳時保費、繳法、下次、從哪扣都是記帳那一筆）；
+    /// 找不到（不該發生：保單總表收了所有保單里程碑）照 v3 的寫法退回
     fileprivate static func buildPolicy(_ x: WealthCardCtx) -> WealthCardData {
+        guard let p = x.facts.policies.policy(x.item.id) else { return buildPolicyV3(x) }
+        let m = x.item
+        let prefs = x.book.policy(m.id)
+        var d = WealthCardData(id: m.id, kind: .policy, title: p.title, editKind: .policy)
+        d.seed = MoneyItem.seed(m.id)
+        d.band = 112
+        d.scene = .stones(stonesScene(p, prefs: prefs))
+        d.board = policyBoard(p, x: x)
+        d.progress = policyProgress(p, today: x.today)
+        d.policy = policyBlock(p, prefs: prefs, x: x)
+        d.switcher = policySwitcher(x)
+        return d
+    }
+
+    /// 踏腳石（judge §4.4 風景；sim_v6 stones：國泰人壽醫療險 20 塊、實心 6、小人站第 6 塊〔standing 5〕）
+    fileprivate static func stonesScene(_ p: WealthPolicyFacts.Policy, prefs: WealthPolicyPrefs) -> WealthStonesScene {
+        let count: Int = Swift.min(40, p.payYears ?? Swift.max(1, p.yearIndex))
+        let paid: Int = Swift.min(count, Swift.max(0, p.paidYears ?? p.yearIndex))
+        let lifelong: Bool = (prefs.coverageUntil ?? "").contains("終身")
+        return WealthStonesScene(count: count, paid: paid, standing: p.yearIndex - 1, lifelong: lifelong,
+                                 open: p.payYears == nil)
+    }
+
+    /// 「・第 6／20 年」；沒填繳費年期「・第 6 年」；一年一約「・一年一約」（每年續，不寫「第 1／1 年」）；還沒生效不寫
+    fileprivate static func policyYearText(_ p: WealthPolicyFacts.Policy) -> String {
+        guard p.yearIndex > 0 else { return "" }
+        if p.isOneYear { return "・一年一約" }
+        if let py = p.payYears { return "・第 \(Swift.min(p.yearIndex, py))／\(py) 年" }
+        return "・第 \(p.yearIndex) 年"
+    }
+
+    /// 保單的金額：台幣「NT$24,000」、外幣「US$3,000.00」
+    fileprivate static func policyMoney(_ v: Double, code: String, masked: Bool) -> String {
+        FinanceRates.isNTD(code) ? WealthCardText.ntd(v, masked: masked) : WealthCardText.money(v, code: code, masked: masked)
+    }
+
+    /// 看板大字的數：有繳法＝一年（每期 × 一年幾次；繳完了也照這樣寫）；躉繳、不知道繳法＝每期；沒填保費 nil
+    fileprivate static func policyBigValue(_ p: WealthPolicyFacts.Policy) -> Double? {
+        guard p.perPeriod > 0.5 else { return nil }
+        if let c = p.cycle, c.timesPerYear > 0 { return p.perPeriod * Double(c.timesPerYear) }
+        return p.perPeriod
+    }
+
+    /// 看板一句：「已繳 6 年・還剩 14 年・刷 CUBE」「已繳 20 年・繳完了」「2027/1/1 生效」；一年一約「一年一約・從薪轉扣」
+    ///（每年續，不寫「已繳 1 年・繳完了」：跟膠囊「記得續保」打架）；什麼都沒有＝險種
+    fileprivate static func policyLineParts(_ p: WealthPolicyFacts.Policy) -> [String] {
+        var parts: [String] = []
+        if p.yearIndex == 0 {
+            parts.append(WealthPageText.ymd(p.start) + " 生效")
+        } else if p.isOneYear {
+            parts.append("一年一約")
+        } else if let py = p.payYears, let paid = p.paidYears {
+            if paid >= py {
+                parts.append("已繳 \(py) 年・繳完了")
+            } else if p.finished {
+                // 繳費年期還沒滿、記帳那一筆已經停了
+                parts.append("已繳 \(paid) 年・記帳那一筆停了")
+            } else {
+                parts.append("已繳 \(paid) 年・還剩 \(py - paid) 年")
+            }
+        } else if p.finished {
+            parts.append("繳完了")
+        }
+        if !p.finished || p.isOneYear, let pay = p.payerText { parts.append(pay) }
+        return parts
+    }
+
+    fileprivate static func policyBoard(_ p: WealthPolicyFacts.Policy, x: WealthCardCtx) -> WealthCardBoard {
+        let mk = x.masked
+        let t = x.today
+        var b = WealthCardBoard()
+        b.date = WealthPageText.boardDate(t) + policyYearText(p)
+        b.dateIcon = WealthPolicyFacts.icon(p.kind)
+        // 膠囊：一年一約 60 天內到期（記得續保）→ 下次扣款日 → 一年一約下次到期（第 2 年起 facts 當繳完了、沒有下次）→ 繳完了
+        let renewLeft: Int? = p.renewal.map { WealthCal.days(from: t, to: $0) }
+        if let r = p.renewal, let n = renewLeft, n >= 0, n <= 60 {
+            let when: String = n == 0 ? "今天到期" : WealthCardText.md(r) + " 到期"
+            b.capsule = when + "・記得續保"
+            b.capsuleIcon = "arrow.triangle.2.circlepath"
+            b.capsuleTone = .warn
+        } else if let next = p.nextDue {
+            b.capsule = "下次 " + WealthPageText.ymd(next)
+            b.capsuleIcon = "calendar"
+        } else if p.isOneYear, let r = p.renewal {
+            b.capsule = WealthPageText.ymd(r) + " 到期"
+            b.capsuleIcon = "arrow.triangle.2.circlepath"
+        } else if p.finished {
+            b.capsule = "繳完了 ✓"
+            b.capsuleIcon = "checkmark.circle.fill"
+            b.capsuleTone = .good
+        }
+        switch p.cycle {
+        case .single?: b.label = "躉繳保費"
+        case nil: b.label = "保費"
+        default: b.label = "一年保費"
+        }
+        let big: Double? = policyBigValue(p)
+        b.big = big.map { policyMoney($0, code: p.code, masked: mk) } ?? "—"
+        let parts = policyLineParts(p)
+        b.line = FinanceLine.text(parts.isEmpty ? p.kind.shortTitle : parts.joined(separator: "・"))
+        b.greeting = ["Stay", "covered!"]
+        let said: String
+        if mk {
+            said = "金額已遮住"
+        } else if let v = big {
+            said = FinanceRates.isNTD(p.code) ? WealthPageText.spoken(v) : WealthFormat.money(v, code: p.code)
+        } else {
+            said = "沒填"
+        }
+        var a11y = p.title + "，" + b.label + " " + said
+        if let c = b.capsule { a11y += "，" + c }
+        if !parts.isEmpty { a11y += "。" + parts.joined(separator: "，") }
+        b.accessibilityText = a11y
+        return b
+    }
+
+    /// 看板下：繳費進度（2021/8 → 2041/8；有繳費年期才有；一年一約每年續，不畫「繳完」的進度條）
+    fileprivate static func policyProgress(_ p: WealthPolicyFacts.Policy, today t: Date) -> FinanceProgressData? {
+        guard let py = p.payYears, !p.isOneYear else { return nil }
+        let start = p.start
+        let endDate = WealthCal.calendar.date(byAdding: .year, value: py, to: start) ?? start
+        let total = Double(Swift.max(1, WealthCal.days(from: start, to: endDate)))
+        let gone = Double(Swift.max(0, WealthCal.days(from: start, to: t)))
+        let paid: Int = p.paidYears ?? Swift.min(p.yearIndex, py)
+        var g = FinanceProgressData()
+        g.title = "繳費進度"
+        g.range = WealthCardText.ym(start) + " → " + WealthCardText.ym(endDate)
+        g.fraction = Swift.min(1, gone / total)
+        g.dotPill = "今天"
+        g.endPill = WealthCardText.ym(endDate) + " 繳完"
+        g.left = "已繳 \(paid) 年"
+        g.right = paid >= py ? "繳完了" : "還有 \(py - paid) 年"
+        g.accessibilityText = "已繳 \(paid) 年，共 \(py) 年"
+        return g
+    }
+
+    fileprivate static func policyBlock(_ p: WealthPolicyFacts.Policy, prefs: WealthPolicyPrefs,
+                                        x: WealthCardCtx) -> WealthCardPolicy {
+        let m = x.item
+        var pol = WealthCardPolicy()
+        pol.coverage = (prefs.coverageItems ?? []).map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        fillPolicyPayment(&pol, p: p, x: x)
+        fillPolicyPeople(&pol, prefs: prefs, m: m)
+        if p.kind.legacyType == .health || p.kind.legacyType == .accident {
+            pol.medicalNote = "這張保單會出現在醫療地圖的「醫療保障」"
+        }
+        pol.info = policyInfo(m, prefs: prefs, kind: p.kind, payYears: p.payYears, oneYear: p.isOneYear)
+        pol.note = m.note.trimmingCharacters(in: .whitespacesAndNewlines)
+        pol.photos = m.photoFileNames ?? []
+        return pol
+    }
+
+    static let policyLinkedNote = "在這裡改＝改記帳那一筆（只有一份）；稅務頁也讀它。"
+    static let policyUnlinkedNote = "保費還沒連到記帳：連起來以後，記帳改金額保單跟著"
+    static let policyNoCycleNote = "半年繳、躉繳記帳沒有對應的週期，請在記帳記好再連"
+    static let policyCreateTail = "扣的固定支出（保險）；以前的不補記。記帳、稅務頁都看得到，在記帳改金額保單跟著。"
+
+    /// ④ 繳費：連著＝記帳那一筆「年繳 24,000・每年 8/15・刷 CUBE・第 6／20 期」（「第幾期」只有年繳、有繳費年期才寫，照生效日算，
+    /// 不讀 paidPeriods：自動建的記帳保費以前的期數不補記）；沒連＝你填的保費（同 v3）＋〔連到記帳的保費〕〔新建一筆〕
+    fileprivate static func fillPolicyPayment(_ pol: inout WealthCardPolicy, p: WealthPolicyFacts.Policy, x: WealthCardCtx) {
+        let mk = x.masked
+        let head: String = (p.cycle?.title ?? "保費") + " " + WealthCardText.plain(p.perPeriod, code: p.code, masked: mk)
+        let period: String? = (p.cycle == .year && !p.isOneYear && p.payYears != nil && p.paidYears != nil)
+            ? "第 \(p.paidYears ?? 0)／\(p.payYears ?? 0) 期" : nil
+        if let eid = p.expenseId, let e = x.expensesById[eid] {
+            var pay: [String] = [head, WealthPolicyLink.scheduleText(e)]
+            if let payer = p.payerText { pay.append(payer) }
+            if let s = period { pay.append(s) }
+            pol.payment = pay.joined(separator: "・")
+            pol.linked = true
+            pol.paymentExpenseId = eid
+            pol.paymentNote = policyLinkedNote
+            return
+        }
+        guard p.perPeriod > 0.5 else { return }
+        var pay: [String] = [head]
+        if let next = p.nextDue {
+            pay.append(p.cycle == .year ? "每年 " + WealthCardText.md(next) : "下次 " + WealthPageText.ymd(next))
+        }
+        if let payer = p.payerText { pay.append(payer) }
+        if let s = period { pay.append(s) }
+        pol.payment = pay.joined(separator: "・")
+        let noCycle: Bool = p.cycle == .half || p.cycle == .single
+        pol.paymentNote = noCycle ? policyNoCycleNote : policyUnlinkedNote
+        guard let c = p.cycle, WealthPolicyLink.recurrence(of: c) != nil, !p.finished else { return }
+        pol.canCreateExpense = true
+        let first: Date = WealthPolicyLink.firstDue(start: p.start, nextDue: p.nextDue, cycle: c, today: x.today)
+        let isCard: Bool = p.payerId.map { x.facts.card($0) != nil } ?? false
+        pol.createDraft = WealthPolicyPremiumDraft(title: p.title, amount: p.perPeriod, cycle: c, kind: p.kind,
+                                                   firstDue: first, bankId: isCard ? nil : p.payerId,
+                                                   bankCode: "NT$", cardId: isCard ? p.payerId : nil)
+        pol.createMessage = createMessage(p, cycle: c, first: first, masked: mk)
+    }
+
+    /// 「照保單的保費 24,000、年繳、刷 CUBE，在記帳建一筆從 2027/8/15 起每年扣的固定支出（保險）；以前的不補記。…」
+    fileprivate static func createMessage(_ p: WealthPolicyFacts.Policy, cycle c: WealthPolicyCycle, first: Date,
+                                          masked: Bool) -> String {
+        let every: String
+        switch c {
+        case .year: every = "每年"
+        case .quarter: every = "每季"
+        case .month: every = "每月"
+        case .half, .single: every = ""
+        }
+        var head = "照保單的保費 " + WealthCardText.plain(p.perPeriod, masked: masked) + "、" + c.title
+        if let payer = p.payerText { head += "、" + payer }
+        return head + "，在記帳建一筆從 " + WealthPageText.ymd(first) + " 起" + every + policyCreateTail
+    }
+
+    /// ⑤ 誰的保單：要保人・被保險人・受益人（都沒寫 nil）
+    fileprivate static func fillPolicyPeople(_ pol: inout WealthCardPolicy, prefs: WealthPolicyPrefs, m: LifeMilestone) {
+        func clean(_ s: String?) -> String? {
+            guard let t = s?.trimmingCharacters(in: .whitespaces), !t.isEmpty else { return nil }
+            return t
+        }
+        var parts: [String] = []
+        var rows: [WealthCardInfo] = []
+        if let s = clean(prefs.policyholder) {
+            parts.append("要保人 " + s)
+            rows.append(WealthCardInfo(id: "holder", label: "要保人", value: s))
+        }
+        if let s = clean(prefs.insured) {
+            parts.append("被保險人 " + s)
+            rows.append(WealthCardInfo(id: "insured", label: "被保險人", value: s))
+        }
+        if let s = clean(m.beneficiary) {
+            parts.append("受益人 " + s)
+            rows.append(WealthCardInfo(id: "beneficiary", label: "受益人", value: s))
+        }
+        pol.people = parts.isEmpty ? nil : parts.joined(separator: "・")
+        pol.peopleRows = rows
+    }
+
+    /// ⑦ 資料：保險公司、保單名稱、險種、保單號碼（只露後 4 碼，〔顯示〕過 Face ID；同 v3）、生效日、保障到、繳費年期
+    fileprivate static func policyInfo(_ m: LifeMilestone, prefs: WealthPolicyPrefs, kind: WealthPolicyKind,
+                                       payYears: Int?, oneYear: Bool) -> [WealthCardInfo] {
+        var info: [WealthCardInfo] = []
+        let company = (m.insuranceCompany ?? "").trimmingCharacters(in: .whitespaces)
+        info.append(WealthCardInfo(id: "company", label: "保險公司", value: company.isEmpty ? "—" : company))
+        info.append(WealthCardInfo(id: "title", label: "保單名稱", value: m.title))
+        info.append(WealthCardInfo(id: "kind", label: "險種", value: kind.title))
+        if let no = m.policyNumber?.trimmingCharacters(in: .whitespaces), !no.isEmpty {
+            info.append(WealthCardInfo(id: "policy", label: "保單號碼", value: CardVault.maskedTail(no), secret: .policy))
+        }
+        info.append(WealthCardInfo(id: "since", label: "生效日", value: WealthPageText.ymd(m.date)))
+        if let until = prefs.coverageUntil?.trimmingCharacters(in: .whitespaces), !until.isEmpty {
+            info.append(WealthCardInfo(id: "until", label: "保障到", value: until))
+        }
+        if let py = payYears {
+            info.append(WealthCardInfo(id: "payYears", label: "繳費年期", value: oneYear ? "1 年（一年一約）" : "\(py) 年"))
+        }
+        return info
+    }
+
+    /// v3 的保單頁（保單總表找不到這一張時退回用；不該發生）
+    fileprivate static func buildPolicyV3(_ x: WealthCardCtx) -> WealthCardData {
         let m = x.item
         let mk = x.masked
         let t = x.today

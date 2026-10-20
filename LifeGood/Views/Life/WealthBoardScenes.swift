@@ -34,6 +34,14 @@ import SwiftUI
 //
 // 分工：資料（下面四個 struct＋WealthCardPalette 的淺色值）主控寫好、G1（WealthPageData）／G2（WealthCardData）產生，
 // 不要改欄位；畫法（三個 paint、WealthCardFacePanel 的 body）G4 實作。
+//
+// [v25.567] E.「踏腳石」.stones(WealthStonesScene)：保單頁看板（band 112；judge §4.4 風景）。一條小路，一年一塊石頭（count 塊），
+//    繳過的（paid 塊）實心、還沒繳的空心；今天站著一個小人（standing：第幾塊，-1＝還沒生效站在路口）；路的盡頭一把傘
+//   （保障到某年）或 ∞（lifelong：終身保障，畫在最右邊）；open＝沒填繳費年期：只畫到今天那一塊，盡頭不畫傘。
+//    不寫任何字、不寫金額；淺深各一組顏色（保單主題 76：8FE0B0→23885A）；石頭多（> 20）時縮小、間距照 rect 寬平均。
+//    資料主控寫好（WealthStonesScene）、G2（WealthCardData.buildPolicy）產生；畫法 paintStones G2 實作。
+//    [G2] 畫好了：草坡上一條左低右高的沙色小路、扁橢圓石頭（> 20 塊縮小、最小 5pt）、圓頭兩筆身體的小人、綠傘（終身：路通到右邊＋線畫的 ∞；
+//    open：最後一塊後面只剩虛線）。
 
 /// 財富頁看板：頂樓水塔（一個銀行帳戶一座塔）
 struct WealthTowerScene: Equatable {
@@ -140,6 +148,20 @@ struct WealthCycleScene: Equatable {
     var closingFrom: Int?
     /// 結帳日前 3 天那段的最後一天（結帳日）
     var closingTo: Int?
+}
+
+/// [v25.567] 保單頁看板：踏腳石（一年一塊石頭；judge §4.4）
+struct WealthStonesScene: Equatable {
+    /// 石頭幾塊（繳費年期；沒填＝到今天為止的年數＋1；最多 40）
+    var count: Int
+    /// 繳過幾塊（實心；≤ count）
+    var paid: Int
+    /// 小人站在第幾塊（0 起；-1＝還沒生效，站在路口）
+    var standing: Int
+    /// 終身保障：路的盡頭畫 ∞（不畫傘）
+    var lifelong: Bool
+    /// 沒填繳費年期：只畫到今天那一塊，盡頭不畫傘、不畫 ∞
+    var open: Bool
 }
 
 /// 信用卡卡面（項目卡左邊；judge §3.7「一張小卡片」）
@@ -1220,6 +1242,241 @@ extension MoneyBoardSky {
             layer.addFilter(.shadow(color: Color(tb: 0x0B1B45, 0.45), radius: 1, x: 0, y: 0.5))
             layer.draw(t, at: at, anchor: .bottomTrailing)
         }
+    }
+
+    // MARK: E. [v25.567] 踏腳石（保單頁看板；G2 實作畫法，主控先放空的：什麼都不畫也編得過）
+
+    static func paintStones(_ ctx: inout GraphicsContext, rect r: CGRect, scene s: WealthStonesScene,
+                            dark: Bool, seed: Int) {
+        guard r.width > 120, r.height > 60, s.count > 0 else { return }
+        let n = Swift.min(s.count, 60)
+        let paid = Swift.min(Swift.max(0, s.paid), n)
+        // 顏色（保單主題 76：8FE0B0→23885A；深色是夜裡的草坡，另一組，不是調暗）
+        let hillTop = dark ? Color(tb: 0x1B4A40) : Color(tb: 0xD3EEDB)
+        let hillBottom = dark ? Color(tb: 0x0F2A26) : Color(tb: 0xA9DCB9)
+        let road = dark ? Color(tb: 0x34466E) : Color(tb: 0xF3E9D2)
+        let roadEdge = dark ? Color(tb: 0x4A5E8F) : Color(tb: 0xD9C7A0)
+        let stoneTop = dark ? Color(tb: 0x9BEBC0) : Color(tb: 0x8FE0B0)
+        let stoneBottom = dark ? Color(tb: 0x2FA36B) : Color(tb: 0x23885A)
+        let stoneLine = dark ? Color(tb: 0x7FD9A6, 0.9) : Color(tb: 0x23885A, 0.8)
+        let hollowFill = dark ? Color(tb: 0x0E1530, 0.55) : Color.white.opacity(0.78)
+        let tuftInk = dark ? Color(tb: 0x2E6B57) : Color(tb: 0x6DBE86)
+        let personInk = dark ? Color(tb: 0xE6ECFF) : Color(tb: 0x0B1B45)
+        let markInk = dark ? stoneTop : stoneBottom
+        let shadow = Color.black.opacity(dark ? 0.3 : 0.13)
+
+        // 只畫在 band 裡（剪在副本上；呼叫端之後還要用 ctx 畫手寫問候）
+        var band = ctx
+        band.clip(to: Path(r))
+
+        // 小路：左低右高一條緩坡，帶一點起伏（每塊石頭、小人、傘的高度都讀這一支）
+        let yLeft = r.maxY - 20
+        let yRight = r.maxY - Swift.min(40, r.height * 0.36)
+        let phase = Double(Swift.abs(seed % 7)) * 0.45
+        func roadY(_ x: CGFloat) -> CGFloat {
+            let t = Double(Swift.min(1, Swift.max(0, (x - r.minX) / r.width)))
+            let ease = t * t * (3 - 2 * t)
+            let wave = sin(t * Double.pi * 1.6 + phase) * 2.2
+            return yLeft + (yRight - yLeft) * CGFloat(ease) + CGFloat(wave)
+        }
+
+        // 石頭排在 rect 寬 8%～88%（一塊的時候在中間）；> 20 塊縮小，最小 5pt
+        let x0 = r.minX + r.width * 0.08
+        let x1 = r.minX + r.width * 0.88
+        let gap: CGFloat = n > 1 ? (x1 - x0) / CGFloat(n - 1) : (x1 - x0)
+        let shrink: CGFloat = n > 20 ? 0.62 : 0.72
+        let stoneW = Swift.min(20, Swift.max(5, gap * shrink))
+        let stoneH = Swift.max(3, stoneW * 0.5)
+        let roadW = Swift.min(14, Swift.max(9, stoneH * 2.2))
+        func stoneX(_ i: Int) -> CGFloat {
+            n > 1 ? x0 + gap * CGFloat(i) : (x0 + x1) / 2
+        }
+        let firstX = stoneX(0)
+        let lastX = stoneX(n - 1)
+        // 一塊的時候不用整段寬當間距（傘、路口、小人往前站都照一步 36pt）
+        let step: CGFloat = n > 1 ? gap : 36
+        // 盡頭：傘在最後一塊後面一點；終身的 ∞ 靠最右邊（路一直通過去）
+        let umbrellaX = Swift.min(r.maxX - 16, lastX + Swift.max(16, step * 0.8))
+        let infinityX = Swift.min(r.maxX - 12, Swift.max(r.maxX - 20, lastX + 14))
+        let markX: CGFloat = s.lifelong ? infinityX : umbrellaX
+        let roadEnd: CGFloat
+        if s.open {
+            roadEnd = lastX + Swift.max(10, step * 0.5)
+        } else if s.lifelong {
+            roadEnd = r.maxX + 6
+        } else {
+            roadEnd = umbrellaX + 4
+        }
+
+        // 草坡（跟著路起伏，再自己慢慢彎一點）
+        var hill = Path()
+        hill.move(to: CGPoint(x: r.minX, y: r.maxY))
+        var hx = r.minX
+        while hx < r.maxX + 6 {
+            let wobble = CGFloat(sin(Double(hx) / 41 + phase * 2)) * 3
+            hill.addLine(to: CGPoint(x: hx, y: roadY(hx) - roadW / 2 - 8 + wobble))
+            hx += 6
+        }
+        hill.addLine(to: CGPoint(x: r.maxX + 6, y: r.maxY))
+        hill.closeSubpath()
+        let hillGradient = Gradient(colors: [hillTop, hillBottom])
+        band.fill(hill, with: .linearGradient(hillGradient, startPoint: CGPoint(x: r.midX, y: yRight - roadW - 14),
+                                              endPoint: CGPoint(x: r.midX, y: r.maxY)))
+
+        // 路下面幾叢小草（seed 固定位置）
+        var rnd = InkRandom(seed &* 5 &+ 11)
+        var tufts = Path()
+        for _ in 0..<9 {
+            let tx = r.minX + 6 + (r.width - 12) * CGFloat(rnd.next())
+            let ty = roadY(tx) + roadW / 2 + 4 + CGFloat(rnd.next()) * 8
+            guard ty < r.maxY - 2 else { continue }
+            tufts.move(to: CGPoint(x: tx - 2, y: ty))
+            tufts.addLine(to: CGPoint(x: tx - 2.8, y: ty - 3))
+            tufts.move(to: CGPoint(x: tx, y: ty))
+            tufts.addLine(to: CGPoint(x: tx, y: ty - 4))
+            tufts.move(to: CGPoint(x: tx + 2, y: ty))
+            tufts.addLine(to: CGPoint(x: tx + 2.8, y: ty - 3))
+        }
+        band.stroke(tufts, with: .color(tuftInk), style: StrokeStyle(lineWidth: 1, lineCap: .round))
+
+        // 小路（沙色、兩側一道邊）；open：最後一塊後面只剩虛線（還不知道要繳幾年）
+        var roadPath = Path()
+        var rx = r.minX - 4
+        roadPath.move(to: CGPoint(x: rx, y: roadY(rx)))
+        while rx < roadEnd {
+            rx = Swift.min(roadEnd, rx + 4)
+            roadPath.addLine(to: CGPoint(x: rx, y: roadY(rx)))
+        }
+        band.stroke(roadPath, with: .color(roadEdge),
+                    style: StrokeStyle(lineWidth: roadW + 2, lineCap: .round, lineJoin: .round))
+        band.stroke(roadPath, with: .color(road), style: StrokeStyle(lineWidth: roadW, lineCap: .round, lineJoin: .round))
+        if s.open && roadEnd < r.maxX - 10 {
+            var dots = Path()
+            var dx = roadEnd + 6
+            dots.move(to: CGPoint(x: dx, y: roadY(dx)))
+            while dx < r.maxX - 6 {
+                dx = Swift.min(r.maxX - 6, dx + 4)
+                dots.addLine(to: CGPoint(x: dx, y: roadY(dx)))
+            }
+            band.stroke(dots, with: .color(roadEdge.opacity(0.8)),
+                        style: StrokeStyle(lineWidth: 2, lineCap: .round, dash: [1.5, 4.5]))
+        }
+
+        // 石頭：繳過的實心（保單綠漸層＋一點反光），還沒繳的白底描邊
+        let stoneGradient = Gradient(colors: [stoneTop, stoneBottom])
+        for i in 0..<n {
+            let cx = stoneX(i)
+            let cy = roadY(cx)
+            let box = CGRect(x: cx - stoneW / 2, y: cy - stoneH / 2, width: stoneW, height: stoneH)
+            let shape = Path(ellipseIn: box)
+            if i < paid {
+                band.fill(Path(ellipseIn: box.offsetBy(dx: 0, dy: 1.2)), with: .color(shadow))
+                band.fill(shape, with: .linearGradient(stoneGradient, startPoint: CGPoint(x: cx, y: box.minY),
+                                                       endPoint: CGPoint(x: cx, y: box.maxY)))
+                band.stroke(shape, with: .color(stoneBottom.opacity(0.6)), lineWidth: 0.6)
+                if stoneW >= 8 {
+                    let glint = CGRect(x: box.minX + stoneW * 0.2, y: box.minY + stoneH * 0.18,
+                                       width: stoneW * 0.32, height: stoneH * 0.28)
+                    band.fill(Path(ellipseIn: glint), with: .color(Color.white.opacity(dark ? 0.35 : 0.55)))
+                }
+            } else {
+                band.fill(shape, with: .color(hollowFill))
+                band.stroke(shape, with: .color(stoneLine), lineWidth: stoneW >= 8 ? 1.1 : 0.8)
+            }
+        }
+
+        // 盡頭：傘（保障到某年）或 ∞（終身）；open（沒填繳費年期）不畫
+        if !s.open {
+            let baseY = roadY(markX)
+            if s.lifelong {
+                // ∞：雙紐線（線畫的，不是字）
+                let a: CGFloat = 9
+                let c = CGPoint(x: markX, y: baseY - 15)
+                var loop = Path()
+                let steps = 48
+                for k in 0...steps {
+                    let t = Double(k) / Double(steps) * 2 * Double.pi
+                    let sn = sin(t)
+                    let d = 1 + sn * sn
+                    let p = CGPoint(x: c.x + a * CGFloat(cos(t) / d), y: c.y + a * CGFloat(sn * cos(t) / d))
+                    if k == 0 {
+                        loop.move(to: p)
+                    } else {
+                        loop.addLine(to: p)
+                    }
+                }
+                loop.closeSubpath()
+                band.stroke(loop, with: .color(markInk), style: StrokeStyle(lineWidth: 2.4, lineCap: .round, lineJoin: .round))
+            } else {
+                let R: CGFloat = 11
+                let cy = baseY - 22
+                // 傘柄（底下彎一個鉤）＋傘尖
+                var handle = Path()
+                handle.move(to: CGPoint(x: markX, y: cy - R - 2.5))
+                handle.addLine(to: CGPoint(x: markX, y: baseY - 4))
+                handle.addQuadCurve(to: CGPoint(x: markX - 4, y: baseY - 4), control: CGPoint(x: markX - 2, y: baseY))
+                band.stroke(handle, with: .color(personInk),
+                            style: StrokeStyle(lineWidth: 1.4, lineCap: .round, lineJoin: .round))
+                // 傘面：上半圓（兩段三次曲線）＋下緣三個往上凹的小弧
+                let k: CGFloat = 0.5523 * R
+                var canopy = Path()
+                canopy.move(to: CGPoint(x: markX - R, y: cy))
+                canopy.addCurve(to: CGPoint(x: markX, y: cy - R), control1: CGPoint(x: markX - R, y: cy - k),
+                                control2: CGPoint(x: markX - k, y: cy - R))
+                canopy.addCurve(to: CGPoint(x: markX + R, y: cy), control1: CGPoint(x: markX + k, y: cy - R),
+                                control2: CGPoint(x: markX + R, y: cy - k))
+                let seg = 2 * R / 3
+                for j in 0..<3 {
+                    let xr = markX + R - seg * CGFloat(j)
+                    canopy.addQuadCurve(to: CGPoint(x: xr - seg, y: cy), control: CGPoint(x: xr - seg / 2, y: cy - R * 0.24))
+                }
+                canopy.closeSubpath()
+                band.fill(canopy, with: .linearGradient(stoneGradient, startPoint: CGPoint(x: markX, y: cy - R),
+                                                        endPoint: CGPoint(x: markX, y: cy)))
+                band.stroke(canopy, with: .color(stoneBottom.opacity(0.7)), lineWidth: 0.6)
+                // 傘骨兩條
+                var ribs = Path()
+                ribs.move(to: CGPoint(x: markX, y: cy - R))
+                ribs.addQuadCurve(to: CGPoint(x: markX - R / 3, y: cy - R * 0.2),
+                                  control: CGPoint(x: markX - R * 0.42, y: cy - R * 0.72))
+                ribs.move(to: CGPoint(x: markX, y: cy - R))
+                ribs.addQuadCurve(to: CGPoint(x: markX + R / 3, y: cy - R * 0.2),
+                                  control: CGPoint(x: markX + R * 0.42, y: cy - R * 0.72))
+                band.stroke(ribs, with: .color(Color.white.opacity(dark ? 0.45 : 0.7)), lineWidth: 0.8)
+            }
+        }
+
+        // 小人：站在第 standing 塊上（-1 還沒生效站在路口；繳完了站在最後一塊後面、傘前面）
+        let px: CGFloat
+        let feetY: CGFloat
+        if s.standing < 0 {
+            px = Swift.max(r.minX + 8, firstX - Swift.max(10, step * 0.6))
+            feetY = roadY(px)
+        } else if s.standing >= n {
+            let ahead = lastX + Swift.max(9, step * 0.5)
+            let limit: CGFloat = s.open ? r.maxX - 8 : markX - 12
+            px = Swift.max(lastX + 4, Swift.min(ahead, limit))
+            feetY = roadY(px)
+        } else {
+            px = stoneX(s.standing)
+            feetY = roadY(px) - stoneH / 2 + 0.5
+        }
+        band.fill(Path(ellipseIn: CGRect(x: px - 4, y: feetY - 1, width: 8, height: 2.2)), with: .color(shadow))
+        let hip = CGPoint(x: px, y: feetY - 6)
+        let neck = CGPoint(x: px, y: feetY - 11.5)
+        var legs = Path()
+        legs.move(to: CGPoint(x: px - 2.6, y: feetY))
+        legs.addLine(to: hip)
+        legs.addLine(to: CGPoint(x: px + 2.6, y: feetY))
+        var torso = Path()
+        torso.move(to: hip)
+        torso.addLine(to: neck)
+        let limb = StrokeStyle(lineWidth: 1.8, lineCap: .round, lineJoin: .round)
+        band.stroke(legs, with: .color(personInk), style: limb)
+        band.stroke(torso, with: .color(personInk), style: limb)
+        let headR: CGFloat = 2.9
+        band.fill(Path(ellipseIn: CGRect(x: px - headR, y: neck.y - 1 - headR * 2, width: headR * 2, height: headR * 2)),
+                  with: .color(personInk))
     }
 
     // MARK: C. 帳單週期（信用卡頁看板）

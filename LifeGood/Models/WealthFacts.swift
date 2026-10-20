@@ -70,6 +70,19 @@ import CryptoKit
 // • 外幣金額一律寫符號（US$3,200.00；認得的幣別才有，其他照舊「泰銖 1,000.00」）；換匯＝同一個帳戶的兩個幣別互轉（v2 轉帳綁定）。
 // • 理財每月回推（history）：存著的定存照起存日到到期日（或解約日）一段一段加回去。
 //
+// [v25.567] v6 證券名片與保單總表（build/v6/brief.md §2；sim_v6.py 照這裡寫過、跑過）：
+// • 保單總表（WealthPolicyFacts，Models/WealthPolicyFacts.swift）在 build 裡建一次放進 policies：財富頁的保障型保單、儲蓄險、
+//   車險、房屋險四個來源合成一張，一筆記帳保費只被一張認領；保障型保單連著記帳那一筆時，金額、繳法、下次、從哪扣都讀記帳那筆
+//  （記帳改了保單跟著；稅務頁本來就只讀記帳，照算）。build 多三個參數 insurances／vehicles／realEstates（預設空的）。
+//   保單總表不碰任何帳戶的數字，也不進淨資產（儲蓄險的價值照舊在理財）。
+// • 要確認 #15 保單跟記帳的保費像同一張（〔是同一張，連起來〕Fix.linkPolicy〔不是〕知道了）、舊資料沒寫繳法（保單頁）、
+//   一年一約 60 天內到期；#12 卡片效期的 accountIds 多「保費刷這張卡的保單」（保單頁也看得到）。
+// • 證券戶（Broker）：要交割（dues：這個證券戶的股票在交割銀行接下來 30 天的每一天每幣別，扣之前、差多少、一句話）；
+//   舊交割紀錄（證券戶自己身上 linkedStockId 的 BankDeposit：legacyCount／legacyTotal／legacyIds；照舊不算進任何合計）。
+// • 要確認 #16 證券戶身上有舊交割紀錄：〔搬到薪轉〕（Fix.moveSettlements，先給你看會動到哪些）〔留著當紀錄〕（只問一次）。
+// • 股票的交割記在哪個帳戶（WealthStockSettle）：帳本 linkFrom[股票]（證券戶改交割銀行選「這幾檔也一起改」時記的，從哪天起）
+//   照交割那天找；沒有歷史＝股票現在的交割銀行，再沒有＝證券戶。股票卡、股票表單、記帳改舊股票都經 LifeStore.rewriteStockSettlements 寫。
+//
 // （工程）build 很重（展開每一期），全 App 只透過 LifeStore.wealthFacts(expense:finance:) 拿快取的那一份
 // （key＝里程碑／財富帳本的 revision＋記帳、理財的 modifyID＋匯率＋日期），打字時不重算（U1 P1、P5）。
 // 不標 @MainActor（AI 記帳、LifeStore 都會叫）；但字串用到 ntdWanString（NumberFormatter），請在主執行緒叫。
@@ -261,6 +274,14 @@ enum WealthFormat {
     static func fxNote(_ v: Double, rate r: Double?, rateDate: Date?) -> String {
         guard let r else { return "沒有匯率" }
         return "約 " + ntd(v * r) + "（" + rateNote(r, rateDate: rateDate) + "）"
+    }
+
+    /// [v25.567] 「10/21（三）」（證券戶要交割那一句）
+    static func monthDayWeek(_ d: Date) -> String {
+        let names = ["日", "一", "二", "三", "四", "五", "六"]
+        let w = WealthCal.calendar.component(.weekday, from: d)
+        let name = (w >= 1 && w <= 7) ? names[w - 1] : ""
+        return monthDay(d) + "（" + name + "）"
     }
 
     /// 「10/27」
@@ -641,10 +662,14 @@ struct WealthCheck: Identifiable {
         case assumedPaid, cardFeeExpense, disabledRecurring, noPayer, legacyFX, unknownRate
         // [v25.565] warn：卡片效期前 30 天（#12）
         case cardExpiring
+        // [v25.567] warn：證券戶身上有舊交割紀錄（#16）、一年一約保單 60 天內到期
+        case legacySettlement, policyRenewal
         // [v25.566] warn：定存 7 天內到期、到期再決定已經到期（#13）
         case depositMaturing
         // [v25.566] info：舊的定存帳戶補利率和到期日、同一家銀行超過 300 萬（#14）
         case depositInfoMissing, depositInsurance
+        // [v25.567] info：保單跟記帳的保費像同一張（#15）、舊資料的保單沒寫繳法（保單頁）
+        case policyMatch, policyCycle
         // info
         case cardDaysMissing, staleAnchor
 
@@ -688,6 +713,12 @@ struct WealthCheck: Identifiable {
         case editTimeDeposit(accountId: UUID, depositId: UUID?)
         /// [v25.566] #14 存款保險〔知道了〕：這家銀行一年內不再提（LifeStore.quietDepositInsurance；銀行 key）
         case quietInsurance(String)
+        /// [v25.567] #15〔是同一張，連起來〕：保單連到記帳的這一筆保費（LifeStore.linkPolicy；不擋訂閱，跟〔對〕一樣是確認）
+        case linkPolicy(policyId: UUID, expenseId: UUID)
+        /// [v25.567] 保單頁〔年繳〕：舊資料沒寫繳法（LifeStore.setPolicyCycle；cycle＝WealthPolicyCycle.rawValue）
+        case setPolicyCycle(policyId: UUID, cycle: String)
+        /// [v25.567] #16〔搬到薪轉〕：先開「會動到哪些」（WealthSettlementMoveSheet），你按確定才搬（不擋訂閱：修資料，同〔改過來〕）
+        case moveSettlements(brokerId: UUID)
     }
     struct Action: Identifiable, Equatable {
         let title: String
@@ -722,6 +753,10 @@ struct WealthCheck: Identifiable {
         case .depositMaturing: return "lock.open.fill"
         case .depositInfoMissing: return "lock.fill"
         case .depositInsurance: return "shield.lefthalf.filled"
+        case .legacySettlement: return "arrow.left.arrow.right.circle.fill"
+        case .policyRenewal: return "calendar.badge.clock"
+        case .policyMatch: return "link.circle.fill"
+        case .policyCycle: return "questionmark.circle.fill"
         case .cardDaysMissing: return "calendar"
         case .staleAnchor: return "checkmark.seal.fill"
         }
@@ -823,6 +858,86 @@ struct WealthSettlementDue: Identifiable {
     var directionText: String { isOutflow ? "從" + accountName + "扣" : "入" + accountName }
     /// 「NT$52,340」「美金 1,200.00」
     var amountText: String { FinanceRates.isNTD(code) ? WealthFormat.ntd(amount) : WealthFormat.money(amount, code: code) }
+}
+
+/// [v25.567] 證券戶頁 ② 要交割的一天（judge §4.3 ②；樣稿③-B5）：這個證券戶的股票在交割銀行那一天的買賣相抵
+struct WealthBrokerDue: Identifiable {
+    /// 交割那天 00:00
+    let day: Date
+    /// 交割的銀行帳戶
+    let accountId: UUID
+    let accountName: String
+    /// 幣別（台幣 "NT$"）
+    let code: String
+    /// 金額（正的；買賣相抵後）
+    let amount: Double
+    /// 從帳戶扣（買的多）；false＝入帳
+    let isOutflow: Bool
+    /// 「買 00878 2,000 股」「賣 0050 1,000 股」「買 00878、賣 0050」；不知道 nil
+    let what: String?
+    /// 那天扣之前的存摺上（這個幣別）
+    let before: Double
+    /// 今天的存摺上（這個幣別）
+    let now: Double
+    /// 差多少（夠＝0）
+    let short: Double
+    let stockIds: [UUID]
+
+    var id: String { accountId.uuidString + "-" + WealthCal.dayKey(day) + "-" + code }
+    var isShort: Bool { short > 0.5 }
+
+    /// 「10/21（三）早上從薪轉扣 52,340・買 00878 2,000 股」；入帳「10/22（四）入薪轉 30,000・賣 0050 1,000 股」
+    var line: String {
+        let head: String = WealthFormat.monthDayWeek(day)
+        let money: String = WealthFormat.plain(amount, code: code)
+        var body: String
+        if isOutflow {
+            body = head + "早上從" + accountName + "扣 " + money
+        } else {
+            body = head + "入" + accountName + " " + money
+        }
+        if let w = what { body += "・" + w }
+        return body
+    }
+
+    /// 夠：「薪轉現在 128,400，夠」（那天以前還有別的進出：「扣之前薪轉約 128,400，夠」）；
+    /// 不夠：「薪轉只剩 40,000，差 12,340，明天 10 點前要轉進去」（兩天以後「10/21（三）10 點前」）；入帳：「錢在那天早上進薪轉」
+    func statusLine(today: Date) -> String {
+        guard isOutflow else { return "錢在那天早上進" + accountName }
+        if isShort {
+            let left = WealthCal.days(from: today, to: day)
+            // 「今天 10 點前」「明天 10 點前」「10/21（三）10 點前」
+            let when: String
+            switch left {
+            case ...0: when = "今天 "
+            case 1: when = "明天 "
+            default: when = WealthFormat.monthDayWeek(day)
+            }
+            let left0: String = WealthFormat.plain(before, code: code)
+            let gap: String = WealthFormat.plain(short, code: code)
+            return accountName + "只剩 " + left0 + "，差 " + gap + "，" + when + "10 點前要轉進去"
+        }
+        if Swift.abs(before - now) < 0.5 {
+            return accountName + "現在 " + WealthFormat.plain(now, code: code) + "，夠"
+        }
+        return "扣之前" + accountName + "約 " + WealthFormat.plain(before, code: code) + "，夠"
+    }
+}
+
+/// [v25.567] 股票的交割記在哪個帳戶（judge §4.3 ⑥「這 3 檔的交割銀行也一起改嗎？以前的交割不動」）
+enum WealthStockSettle {
+    /// 這檔股票 day 那天的交割記在哪個帳戶：帳本 linkFrom[股票]（證券戶改交割銀行時「這幾檔也一起改」記的，從哪天起）照那天找；
+    /// 沒有歷史＝股票現在的交割銀行，再沒有＝證券戶（舊資料：交割記在證券戶身上）。最後一段一律跟著股票現在的交割銀行
+    static func account(for stock: Stock, on day: Date, book: WealthBook) -> UUID? {
+        let current: UUID? = stock.linkedBankMilestoneId ?? stock.linkedSecuritiesMilestoneId
+        return WealthCardCycle.payer(statementKey: WealthCal.dayKey(day), linked: current, history: book.links(stock.id))
+    }
+
+    /// 寫進那個帳戶用哪個幣別：股票現在的交割銀行＝它的 linkedBankCurrency；以前的銀行、證券戶＝台幣
+    static func currency(for stock: Stock, account: UUID?) -> String {
+        if let a = account, a == stock.linkedBankMilestoneId { return stock.linkedBankCurrency ?? "NT$" }
+        return "NT$"
+    }
 }
 
 /// 理財每月淨資產回推（口徑 4）：某一天結束時的數字（台幣；用今天的匯率）
@@ -1081,6 +1196,8 @@ struct WealthFacts {
     let timeDeposits: [TimeDeposit]
     /// [v25.566] 同一家銀行存摺上＋定存合計超過 300 萬的（存款保險一行、要確認 #14）
     let depositInsurance: [InsuranceGroup]
+    /// [v25.567] 保單總表（財富頁的保障型保單、儲蓄險、車險、房屋險合成一張；一筆記帳保費只算一次）
+    let policies: WealthPolicyFacts
 
     /// [v25.566] 存款保險：同一家銀行（每一存款人）本金＋利息最多保 300 萬（中央存款保險；境內外幣也保，人民幣不保）
     static let insuranceLimit: Double = 3_000_000
@@ -1485,6 +1602,15 @@ struct WealthFacts {
         /// 下一筆待交割：那天、金額（台幣；正的＝要從交割銀行扣，負的＝會入帳）
         let nextSettlementDate: Date?
         let nextSettlementAmount: Double
+        // [v25.567] v6 加的（build 建好之後才填；memberwise init 不用傳）
+        /// 交割銀行是你在證券戶填的（false＝照股票最常用的猜的、或沒有）
+        var settlementFromBook: Bool = false
+        /// 接下來 30 天要交割的（照日子；交割銀行裡這個證券戶的股票）
+        var dues: [WealthBrokerDue] = []
+        /// 以前記在證券戶身上的交割紀錄（linkedStockId 的 BankDeposit，含股利）：幾筆、合計（台幣，有正負）、哪幾筆
+        var legacyCount: Int = 0
+        var legacyTotal: Double = 0
+        var legacyIds: [UUID] = []
 
         var unrealized: Double { marketValue - cost }
         /// 未實現 %（成本 0＝nil）
@@ -1952,7 +2078,9 @@ struct WealthFacts {
     /// [v25.566] deposits：財富帳本的定存那一包（LifeStore.wealthDeposits）
     static func build(milestones: [LifeMilestone], book: WealthBook, deposits: WealthDepositBook = WealthDepositBook(),
                       expenses: [Expense], incomes: [Income],
-                      stocks: [Stock], rates: FinanceRates, now: Date) -> WealthFacts {
+                      stocks: [Stock], rates: FinanceRates, now: Date,
+                      insurances: [SavingsInsurance] = [], vehicles: [Vehicle] = [],
+                      realEstates: [RealEstate] = []) -> WealthFacts {
         let today = WealthCal.day(now)
         let horizon = WealthCal.addDays(upcomingDays, to: today)
         let finance = milestones.filter { $0.category == .achievement && $0.financeSubCategory != nil }
@@ -2098,11 +2226,20 @@ struct WealthFacts {
             for c in a.depositUnknownCodes where !unknown.contains(c) { unknown.append(c) }
         }
         let owed = cards.reduce(0.0) { $0 + $1.owed }
-        let brokers = securityMs.map { makeBroker($0, ctx: ctx, bankMs: bankMs) }
+        var brokers = securityMs.map { makeBroker($0, ctx: ctx, bankMs: bankMs) }
+        // [v25.567] 證券戶的要交割（交割銀行接下來 30 天）、舊交割紀錄
+        for i in brokers.indices {
+            brokers[i].dues = brokerDues(brokers[i].id, accounts: accounts, ctx: ctx)
+        }
         let insurance = insuranceGroups(accounts: accounts, rates: rates)
+        // [v25.567] 保單總表（四個來源去重；不碰帳戶的數字）
+        let policyFacts = WealthPolicyFacts.build(milestones: milestones, book: book, expenses: expenses,
+                                                  insurances: insurances, vehicles: vehicles,
+                                                  realEstates: realEstates, names: nameById,
+                                                  cardIds: Set(cardMs.map(\.id)), rates: rates, today: today)
         let checks = makeChecks(cards: cards, accounts: accounts, bankMs: bankMs, unknown: unknown,
                                 ctx: ctx, bankIds: bankIds, terms: currentTerms, insurance: insurance,
-                                deposits: deposits)
+                                deposits: deposits, brokers: brokers, policies: policyFacts)
         let settlements = makeSettlements(accounts: accounts, ctx: ctx)
         let history = WealthHistory.make(accounts: accounts, cards: cards, deposits: allTerms, rates: rates)
 
@@ -2111,7 +2248,7 @@ struct WealthFacts {
                            foreign: foreign, owedCards: owed, pendingSettlement: pending,
                            unknownCodes: unknown, scheduledOut: scheduled, brokers: brokers, checks: checks,
                            settlements: settlements, history: history, timeDeposits: currentTerms,
-                           depositInsurance: insurance)
+                           depositInsurance: insurance, policies: policyFacts)
     }
 
     // MARK: - [v25.566] 定存的零件
@@ -2849,6 +2986,7 @@ struct WealthFacts {
         let bankIds = Set(bankMs.map(\.id))
         // 交割銀行：帳本填的 → 這個證券戶的股票最常用的交割帳戶（同樣多挑 id 字串小的，每次一樣）
         var settlement: UUID? = ctx.book.account(m.id).settlementBankId
+        let fromBook = settlement.map { bankIds.contains($0) } ?? false
         if settlement == nil {
             var counts: [UUID: Int] = [:]
             for s in mine { if let b = s.linkedBankMilestoneId { counts[b, default: 0] += 1 } }
@@ -2875,20 +3013,136 @@ struct WealthFacts {
             }
         }
         let nextDay: Date? = byDay.keys.sorted().first
-        return Broker(id: m.id, name: ctx.nameById[m.id] ?? bankName(of: m), settlementBankId: settlement,
-                      settlementName: settlement.flatMap { ctx.nameById[$0] },
-                      holdingIds: held.map(\.id),
-                      marketValue: held.reduce(0.0) { $0 + $1.marketValue },
-                      cost: held.reduce(0.0) { $0 + $1.totalCost },
-                      nextSettlementDate: nextDay,
-                      nextSettlementAmount: nextDay.flatMap { byDay[$0] } ?? 0)
+        var b = Broker(id: m.id, name: ctx.nameById[m.id] ?? bankName(of: m), settlementBankId: settlement,
+                       settlementName: settlement.flatMap { ctx.nameById[$0] },
+                       holdingIds: held.map(\.id),
+                       marketValue: held.reduce(0.0) { $0 + $1.marketValue },
+                       cost: held.reduce(0.0) { $0 + $1.totalCost },
+                       nextSettlementDate: nextDay,
+                       nextSettlementAmount: nextDay.flatMap { byDay[$0] } ?? 0)
+        b.settlementFromBook = fromBook
+        // [v25.567] 以前記在證券戶身上的交割紀錄（股票表單以前可以選證券戶當交割帳戶；#16、證券戶頁 ④⑤）：
+        // linkedStockId 的那幾筆（含股利），不管股票還在不在；合計換台幣（查不到匯率當 1，只拿來寫一句話）
+        var legacyIds: [UUID] = []
+        var legacyTotal: Double = 0
+        for dep in m.bankDeposits ?? [] where dep.linkedStockId != nil && !dep.isTransfer && !dep.isAnchor {
+            legacyIds.append(dep.id)
+            let r = ctx.rates.known(norm(dep.currencyCode)) ?? 1
+            legacyTotal += (dep.isWithdrawal ? -dep.amount : dep.amount) * r
+        }
+        b.legacyIds = legacyIds
+        b.legacyCount = legacyIds.count
+        b.legacyTotal = legacyTotal
+        return b
+    }
+
+    /// [v25.567] 證券戶頁 ② 要交割（sim_v6.py broker_dues）：沒收起來的銀行帳戶裡，這個證券戶的股票接下來 30 天（含第 30 天）
+    /// 的交割，每天每幣別買賣相抵；扣之前＝那天第一筆交割那一列之前的存摺上；夠不夠只看交割這幾筆（同一天別的進出不算）
+    private static func brokerDues(_ brokerId: UUID, accounts: [Account], ctx: BuildContext) -> [WealthBrokerDue] {
+        let mine = ctx.stocks.filter { $0.linkedSecuritiesMilestoneId == brokerId }
+        let ids = Set(mine.map(\.id))
+        guard !ids.isEmpty else { return [] }
+        let windowEnd = WealthCal.addDays(lowWindowDays, to: ctx.today)
+        var out: [WealthBrokerDue] = []
+        for a in accounts where !a.isSecurities && !a.hidden {
+            var keys: [String] = []
+            var net: [String: Double] = [:]
+            var before: [String: Double] = [:]
+            var dayOf: [String: Date] = [:]
+            var codeOf: [String: String] = [:]
+            var buys: [String: [UUID]] = [:]
+            var sells: [String: [UUID]] = [:]
+            for row in a.upcoming where row.kind == .stockBuy || row.kind == .stockSell {
+                guard let sid = row.stockId, ids.contains(sid) else { continue }
+                let d = WealthCal.day(row.date)
+                guard d <= windowEnd else { continue }
+                let k = WealthCal.dayKey(d) + "|" + row.code
+                if net[k] == nil {
+                    keys.append(k)
+                    net[k] = 0
+                    dayOf[k] = d
+                    codeOf[k] = row.code
+                    // 這一列之前的存摺上＝這一列之後的 − 這一列（扣的加回來、入的扣掉）
+                    before[k] = row.balanceAfter + (row.isOutflow ? row.amount : -row.amount)
+                }
+                if row.kind == .stockBuy {
+                    net[k, default: 0] += row.amount
+                    if !(buys[k] ?? []).contains(sid) { buys[k, default: []].append(sid) }
+                } else {
+                    net[k, default: 0] -= row.amount
+                    if !(sells[k] ?? []).contains(sid) { sells[k, default: []].append(sid) }
+                }
+            }
+            for k in keys {
+                guard let v = net[k], Swift.abs(v) > 0.004, let d = dayOf[k], let code = codeOf[k] else { continue }
+                let b0 = before[k] ?? 0
+                let isOut = v > 0
+                let short: Double = isOut ? Swift.max(0, v - b0) : 0
+                let what = dueWhat(buys: buys[k] ?? [], sells: sells[k] ?? [], day: d, ctx: ctx)
+                let bought: [UUID] = buys[k] ?? []
+                let sold: [UUID] = (sells[k] ?? []).filter { !bought.contains($0) }
+                let ids2: [UUID] = bought + sold
+                out.append(WealthBrokerDue(day: d, accountId: a.id, accountName: a.name, code: code,
+                                           amount: Swift.abs(v), isOutflow: isOut, what: what, before: b0,
+                                           now: a.balance(code), short: short, stockIds: ids2))
+            }
+        }
+        return out.enumerated().sorted { x, y in
+            if x.element.day != y.element.day { return x.element.day < y.element.day }
+            return x.offset < y.offset
+        }.map { $0.element }
+    }
+
+    /// 「買 00878 2,000 股」「賣 0050 1,000 股」「買 00878 等 2 檔」「買 00878、賣 0050」（股數＝那天交割的交易；舊版單筆＝持股）
+    private static func dueWhat(buys: [UUID], sells: [UUID], day: Date, ctx: BuildContext) -> String? {
+        func name(_ id: UUID) -> String? {
+            guard let s = ctx.stocksById[id] else { return nil }
+            let n = s.name.trimmingCharacters(in: .whitespaces)
+            return n.isEmpty ? (s.symbol.isEmpty ? nil : s.symbol) : n
+        }
+        func shares(_ id: UUID, buy: Bool) -> Double {
+            guard let s = ctx.stocksById[id] else { return 0 }
+            if !s.transactions.isEmpty {
+                var total: Double = 0
+                for tx in s.transactions where WealthCal.day(tx.settlementDate) == day && (tx.kind == .buy) == buy {
+                    total += tx.shares
+                }
+                return total
+            }
+            if buy, WealthCal.day(StockTransaction.taiwanSettlementDate(from: s.purchaseDate)) == day { return s.shares }
+            if !buy, let sd = s.soldDate, WealthCal.day(StockTransaction.taiwanSettlementDate(from: sd)) == day {
+                return s.shares
+            }
+            return 0
+        }
+        func one(_ id: UUID, buy: Bool) -> String? {
+            guard let n = name(id) else { return nil }
+            let verb = buy ? "買 " : "賣 "
+            let sh = shares(id, buy: buy)
+            guard sh > 0 else { return verb + n }
+            let decimals = Swift.abs(sh - sh.rounded()) < 0.0001 ? 0 : 2
+            return verb + n + " " + WealthFormat.grouped(sh, decimals: decimals) + " 股"
+        }
+        if !buys.isEmpty && !sells.isEmpty {
+            let b = buys.compactMap { name($0) }.first
+            let s = sells.compactMap { name($0) }.first
+            guard let bn = b, let sn = s else { return nil }
+            return "買 " + bn + "、賣 " + sn
+        }
+        let list = buys.isEmpty ? sells : buys
+        let buy = !buys.isEmpty
+        guard let first = list.first else { return nil }
+        if list.count == 1 { return one(first, buy: buy) }
+        guard let n = name(first) else { return nil }
+        return (buy ? "買 " : "賣 ") + n + " 等 \(list.count) 檔"
     }
 
     // MARK: - [v25.564] 要確認（judge §3.5；#11 存了安全碼不做——使用者第 6 題「我要存」）
 
     private static func makeChecks(cards: [Card], accounts: [Account], bankMs: [LifeMilestone], unknown: [String],
                                    ctx: BuildContext, bankIds: Set<UUID>, terms: [TimeDeposit],
-                                   insurance: [InsuranceGroup], deposits: WealthDepositBook) -> [WealthCheck] {
+                                   insurance: [InsuranceGroup], deposits: WealthDepositBook,
+                                   brokers: [Broker] = [], policies: WealthPolicyFacts = WealthPolicyFacts()) -> [WealthCheck] {
         let today = ctx.today
         let book = ctx.book
         var out: [WealthCheck] = []
@@ -3094,8 +3348,9 @@ struct WealthFacts {
                 actions.append(WealthCheck.Action(title: "看綁了哪些", fix: .openCard(c.id)))
             }
             actions.append(WealthCheck.Action(title: "知道了", fix: .dismiss))
+            // [v25.567] 保費刷這張卡的保單：保單頁的要確認也看得到（「刷的 CUBE 2027/03 到期」）
             add(WealthCheck(id: "expiry-\(c.id.uuidString)-\(WealthCal.monthKey(em))", kind: .cardExpiring, tone: .warn,
-                            text: text, actions: actions, accountIds: [c.id]))
+                            text: text, actions: actions, accountIds: [c.id] + policies.policyIds(paidBy: c.id)))
         }
 
         // [v25.566] #13 定存 7 天內到期（照到期處理寫一句）；到期再決定、已經到期還沒決定（不能按知道了：要你選）
@@ -3165,6 +3420,31 @@ struct WealthFacts {
                             actions: [WealthCheck.Action(title: "知道了", fix: .quietInsurance(g.id))],
                             accountIds: g.accountIds))
         }
+
+        // [v25.567] #16 證券戶身上有舊交割紀錄（只問一次：key 不帶事件；搬完就沒有紀錄、這條自己不見）
+        for b in brokers where b.legacyCount > 0 {
+            guard let acc = accounts.first(where: { $0.id == b.id }), !acc.hidden else { continue }
+            let sign = b.legacyTotal < 0 ? "−" : "+"
+            let total = sign + WealthFormat.grouped(Swift.abs(b.legacyTotal).rounded(), decimals: 0)
+            let head = "\(b.name)身上記了 \(b.legacyCount) 筆交割、合計 \(total)"
+            var ids: [UUID] = [b.id]
+            let text: String
+            var actions: [WealthCheck.Action] = []
+            if let bank = b.settlementBankId, let bankLabel = b.settlementName {
+                ids.append(bank)
+                text = head + "；交割其實是從\(bankLabel)扣的"
+                actions.append(WealthCheck.Action(title: "搬到\(bankLabel)", fix: .moveSettlements(brokerId: b.id)))
+            } else {
+                text = head + "；選了交割銀行，就能把它們搬過去"
+                actions.append(WealthCheck.Action(title: "選交割銀行", fix: .editAccount(b.id)))
+            }
+            actions.append(WealthCheck.Action(title: "留著當紀錄", fix: .dismiss))
+            add(WealthCheck(id: "legacysettle-\(b.id.uuidString)", kind: .legacySettlement, tone: .warn, text: text,
+                            actions: actions, accountIds: ids))
+        }
+
+        // [v25.567] #15 保單跟記帳的保費像同一張、舊資料沒寫繳法（保單頁）、一年一約 60 天內到期
+        for c in policies.checks(today: today) { add(c) }
 
         // #6 卡沒填結帳日或繳款截止日（v2 偵測）
         for c in cards where !c.isDisabled && (c.billingDayMissing || c.paymentDayMissing) {

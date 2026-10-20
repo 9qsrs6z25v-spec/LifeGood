@@ -9,6 +9,7 @@ import UniformTypeIdentifiers
 // - 「樓層與物品」「照片與文件」綁著物品樹和照片匯入，留在這個檔案畫（物品樹攤平＋單一 ForEach、
 //   寫回 store 延後一個 runloop，兩個都是真機閃退的修正，不能拿掉）。
 // - 編輯頁、照片檢視器、縮圖都搬到 RealEstateEditors.swift。
+// - [v25.567] 房貸下面一段「從哪扣」（WealthLoanPayFromSection；改的是記帳那一筆固定支出、從下一期起；judge §6.3）。分享不放。
 
 struct RealEstateDetailView: View {
     @EnvironmentObject var store: FinanceStore
@@ -233,12 +234,22 @@ struct RealEstateDetailView: View {
             .id(HouseAnchor.checks)
         HouseMortgageSection(data: card, actions: actions)
             .id(HouseAnchor.mortgage)
+        WealthLoanPayFromSection(expenseIds: loanPayIds)
         HouseLivingSection(data: card, actions: actions)
             .id(HouseAnchor.living)
         HouseRentalSection(data: card)
             .id(HouseAnchor.rental)
         HouseLedgerSection(data: card, filter: $ledgerFilter, actions: actions)
             .id(HouseAnchor.ledger)
+    }
+
+    /// [v25.567] 這間房的貸款固定支出（房貸「從哪扣」那一段）：記帳連到這間房、或房子的貸款項目連著的；還在扣的、有週期的
+    private var loanPayIds: [UUID] {
+        let itemIds = Set(estate.mortgageItems.compactMap { $0.linkedExpenseId })
+        return expenseStore.expenses.filter { e in
+            guard e.expenseType == .fixed, e.fixedCategory == .loan, e.recurrence != nil, !e.isFixedEnded else { return false }
+            return e.linkedRealEstateId == estateId || itemIds.contains(e.id)
+        }.map(\.id)
     }
 
     /// 房屋資料、樓層與物品、照片與文件、水電瓦斯、電梯保養

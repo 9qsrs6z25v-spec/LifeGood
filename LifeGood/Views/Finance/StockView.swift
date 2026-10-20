@@ -77,6 +77,9 @@ import Charts
 //   - 漲跌一律「紅漲綠跌」（使用者選的台股習慣），已賣出的合計改用已實現損益
 //     （賣光的股數是 0，原本的 profitLoss 會算成 0）。
 //   - 報價刷新時記下前一個交易日的收盤（StockPreviousClose），「今日漲跌」用。
+// [v25.567] 財富 v6（build/v6/brief.md G4 7、8）：
+//   - 刪股票從**所有**財富帳戶清掉這檔的紀錄（以前只清股票現在的交割銀行、證券戶，換過交割銀行的舊紀錄會留著）。
+//   - 股票卡最後一顆膠囊「元大・薪轉交割」（證券戶短名・交割銀行名；名字照財富的暱稱；賣掉的不畫）。
 
 struct StockView: View {
     @EnvironmentObject var store: FinanceStore
@@ -481,12 +484,16 @@ struct StockView: View {
         if !dividendIncomeIds.isEmpty {
             expenseStore.incomes.removeAll { dividendIncomeIds.contains($0.id) }
         }
-        for accId in [item.linkedBankMilestoneId, item.linkedSecuritiesMilestoneId].compactMap({ $0 }) {
-            if var ms = lifeStore.milestones.first(where: { $0.id == accId }) {
-                ms.bankDeposits?.removeAll { $0.linkedStockId == item.id }
-                lifeStore.update(ms)
-            }
+        // [v25.567] 從所有帳戶清掉這檔的紀錄（交割、股利；證券戶改過交割銀行時以前的交割留在原本的銀行，
+        // 只清現在那兩個會留下孤兒）。milestones 只指派一次
+        var all = lifeStore.milestones
+        var changed = false
+        for i in all.indices {
+            guard let deps = all[i].bankDeposits, deps.contains(where: { $0.linkedStockId == item.id }) else { continue }
+            all[i].bankDeposits = deps.filter { $0.linkedStockId != item.id }
+            changed = true
         }
+        if changed { lifeStore.milestones = all }
         store.deleteStock(item)
     }
 
@@ -590,7 +597,25 @@ struct StockView: View {
         MoneyItemCard(item: .stock(item,
                                    candles: item.symbol.isEmpty ? nil : candles[item.symbol],
                                    dayRate: board.dayRates[item.id],
-                                   quoteFailed: fetchStatus[item.id] == false))
+                                   quoteFailed: fetchStatus[item.id] == false,
+                                   settle: settleLabel(item)))
+    }
+
+    /// [v25.567] 交割膠囊的字：「元大・薪轉交割」；只有交割銀行「薪轉交割」；只有證券戶「元大」；都沒有 nil。
+    /// 名字照財富的暱稱（WealthFacts.displayName：暱稱 → 銀行名 → 標題；證券戶再去掉「證券」）
+    private func settleLabel(_ s: Stock) -> String? {
+        let book = lifeStore.wealthBook
+        var broker: String? = nil
+        if let bid = s.linkedSecuritiesMilestoneId, let m = lifeStore.milestones.first(where: { $0.id == bid }) {
+            broker = WealthCardText.brokerShort(WealthFacts.displayName(of: m, book: book))
+        }
+        var bank: String? = nil
+        if let kid = s.linkedBankMilestoneId, let m = lifeStore.milestones.first(where: { $0.id == kid }) {
+            bank = WealthFacts.displayName(of: m, book: book)
+        }
+        if let b = broker, let k = bank { return b + "・" + k + "交割" }
+        if let k = bank { return k + "交割" }
+        return broker
     }
 }
 

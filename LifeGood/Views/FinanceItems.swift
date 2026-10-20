@@ -11,6 +11,8 @@ import CoreLocation
 //   載具   卡面是最新一張照片或插畫，膠囊是每度電／每公升、折舊，進度是車貸
 //   房地產 卡面是照片或地址查出來的衛星空照，膠囊是出租、增值，進度是房貸
 // 點儲蓄險先看保單卡（InsurancePolicyCard），右上角「編輯」才進入編輯（跟固定支出的預覽卡一樣）。
+// [v25.567] 財富 v6（build/v6/brief.md G4 9、10）：股票卡最後多一顆交割膠囊「元大・薪轉交割」（StockView 組好字傳 settle；
+// 賣掉的不加）；保單卡「記帳」那一列寫保費從哪扣「已連結固定支出・從美金扣」（名字讀財富的一套數字，同保單總表）。
 
 private func financeNumberFormatter(_ digits: Int) -> NumberFormatter {
     let f = NumberFormatter()
@@ -112,8 +114,9 @@ extension MoneyItem {
     }
 
     /// 一檔股票。candles：日線快取的最後幾根（沒有就畫插畫）；dayRate：今天漲跌幾成（StockBoardData 算好的）；
-    /// quoteFailed：這次刷新報價沒拿到
-    static func stock(_ s: Stock, candles: [MoneyCandle]?, dayRate: Double?, quoteFailed: Bool = false) -> MoneyItem {
+    /// quoteFailed：這次刷新報價沒拿到；settle：[v25.567] 交割膠囊的字「元大・薪轉交割」（沒有 nil；賣掉的不畫）
+    static func stock(_ s: Stock, candles: [MoneyCandle]?, dayRate: Double?, quoteFailed: Bool = false,
+                      settle: String? = nil) -> MoneyItem {
         let cur = s.priceCurrencySymbol
         var item = MoneyItem(id: s.id, theme: .finStock, seed: seed(s.id),
                              title: s.name.isEmpty ? (s.symbol.isEmpty ? "股票" : s.symbol) : s.name,
@@ -170,6 +173,10 @@ extension MoneyItem {
         if abs(realized) >= 1 {
             item.chips.append(MoneyItemChip(icon: "checkmark.seal.fill", text: "已實現 " + FinanceText.signed(realized),
                                             tone: MoneyTone.change(realized, base: max(s.totalCost, 1))))
+        }
+        // [v25.567] 交割膠囊放最後（一列放不下先少這顆，報酬留著）
+        if let t = settle, !t.isEmpty {
+            item.chips.append(MoneyItemChip(icon: "building.columns", text: t))
         }
         return item
     }
@@ -312,6 +319,8 @@ struct InsurancePolicyCard: View {
     @EnvironmentObject var store: FinanceStore
     @EnvironmentObject var expenseStore: ExpenseStore
     @EnvironmentObject var subscription: SubscriptionManager
+    /// [v25.567] 保費從哪扣的名字讀財富的一套數字（呼叫端都有 .appStores()）
+    @EnvironmentObject var lifeStore: LifeStore
     @Environment(\.dismiss) private var dismiss
     let insurance: SavingsInsurance
     @State private var showEdit = false
@@ -327,7 +336,7 @@ struct InsurancePolicyCard: View {
             ScrollView {
                 VStack(spacing: 14) {
                     InsurancePolicyHero(ins: ins, rates: rates)
-                    InsurancePolicyDetails(ins: ins, rates: rates)
+                    InsurancePolicyDetails(ins: ins, rates: rates, payer: payerText(ins))
                 }
                 .padding(16)
             }
@@ -346,6 +355,25 @@ struct InsurancePolicyCard: View {
             .sheet(isPresented: $showEdit) { AddSavingsInsuranceView(editing: ins).appStores() }
             .premiumLockAlert(isPresented: $showPremiumAlert)
         }
+    }
+
+    /// [v25.567] 連著的記帳那一筆從哪扣：「刷 CUBE」「從美金扣」（卡優先；名字照財富的暱稱，同保單總表）；沒連、沒選 nil
+    private func payerText(_ ins: SavingsInsurance) -> String? {
+        let all = expenseStore.expenses
+        var linked: Expense? = nil
+        if let eid = ins.linkedExpenseId {
+            linked = all.first { $0.id == eid }
+        }
+        if linked == nil {
+            linked = all.first { $0.linkedInsuranceId == ins.id && $0.expenseType == .fixed }
+        }
+        guard let e = linked else { return nil }
+        let facts = lifeStore.wealthFacts(expense: expenseStore, finance: store)
+        var names: [UUID: String] = [:]
+        for a in facts.accounts { names[a.id] = a.name }
+        for c in facts.cards { names[c.id] = c.name }
+        return WealthPolicyFacts.payerText(cardId: e.linkedCreditCardMilestoneId, bankId: e.linkedBankMilestoneId,
+                                           names: names)
     }
 }
 
@@ -610,6 +638,8 @@ struct InsurancePolicyDetails: View {
     let ins: SavingsInsurance
     let rates: FinanceRates
     var now: Date = Date()
+    /// [v25.567] 保費從哪扣「從美金扣」「刷 CUBE」（InsurancePolicyCard 組好；沒有 nil）
+    var payer: String? = nil
 
     @Environment(\.colorScheme) private var scheme
 
@@ -647,7 +677,12 @@ struct InsurancePolicyDetails: View {
             }
         }
         if ins.linkedExpenseId != nil {
-            rows.append(("記帳", Text("已連結固定支出（保費會記在固定支出）")))
+            // [v25.567] 有從哪扣就寫出來「已連結固定支出・從美金扣」
+            if let p = payer, !p.isEmpty {
+                rows.append(("記帳", Text("已連結固定支出・" + p)))
+            } else {
+                rows.append(("記帳", Text("已連結固定支出（保費會記在固定支出）")))
+            }
         }
         let note = ins.note.trimmingCharacters(in: .whitespacesAndNewlines)
         return VStack(alignment: .leading, spacing: 0) {

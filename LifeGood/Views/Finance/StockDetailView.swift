@@ -89,6 +89,8 @@ import Charts
 //   我的帳本（交易與股利合成一條時間軸）→ 股利 → 資料。看板與各張卡在 StockCardViews.swift。
 //   上面 1～25 條寫的閃卡、交易資訊、兩本紀錄、帳戶卡、備註卡都已經不在了；
 //   兩個編輯 sheet（StockTransactionEditor／StockDividendEditor）照舊，只多了「一開始選哪一種」。
+// [v25.567] 財富 v6：加交易、刪交易寫交割紀錄改叫 LifeStore.rewriteStockSettlements（三處同一支；以前只清目標帳戶，
+//   換過交割帳戶會留重複）。股利入帳那幾支不動。
 
 struct StockDetailView: View {
     @EnvironmentObject var store: FinanceStore
@@ -1008,33 +1010,12 @@ struct StockTransactionEditor: View {
     }
 
     /// 把目前 transactions 寫回對應銀行 / 證券帳戶的 BankDeposit（買入＝扣款、賣出＝入帳）。
-    /// 清掉舊有以 linkedStockId 連結到此股票的 deposit 後重新寫入。
-    /// [v25.563] 股利入帳（同樣掛 linkedStockId，id＝WealthIDs.dividendDeposit）留著不清：
-    /// 以前 removeAll { linkedStockId == 股票 } 連股利一起清掉，加一筆交易股利就不見了
+    /// [v25.563] 股利入帳（同樣掛 linkedStockId，id＝WealthIDs.dividendDeposit）留著不清。
+    /// [v25.567] 改叫 LifeStore.rewriteStockSettlements（股票表單、記帳改舊版單筆股票同一支）：以前只清「現在的交割帳戶」，
+    /// 換過交割帳戶的舊紀錄留在原本那裡、同一筆算兩次；現在先從所有帳戶清掉這檔的交割，再照「那一天該記在哪」寫
+    /// （證券戶改交割銀行選「一起改」時，以前的交割照舊留在原本的銀行）
     private func syncBankDepositsForTransactions(_ stock: Stock) {
-        let target = stock.linkedBankMilestoneId ?? stock.linkedSecuritiesMilestoneId
-        guard let accId = target,
-              var ms = lifeStore.milestones.first(where: { $0.id == accId }) else { return }
-        let currency = stock.linkedBankCurrency ?? "NT$"
-        let rates = FinanceRates(expenseStore)
-        let keep = WealthIDs.dividendDepositIds(of: stock)
-        var list = ms.bankDeposits ?? []
-        list.removeAll { $0.linkedStockId == stock.id && !keep.contains($0.id) }
-        for tx in stock.transactions {
-            // 美股＝USD 金額，台幣帳戶按匯率換算（v25.316）；[v25.562] 一條規則，見 stockAmountForAccount
-            let w = stockAmountForAccount(tx.amount, stock: stock, accountCurrency: currency, rates: rates)
-            list.append(BankDeposit(
-                id: UUID(),
-                date: tx.settlementDate,
-                amount: w.amount,
-                currencyCode: w.code,
-                isWithdrawal: tx.kind == .buy,
-                linkedExpenseId: nil,
-                linkedStockId: stock.id
-            ))
-        }
-        ms.bankDeposits = list
-        lifeStore.update(ms)
+        lifeStore.rewriteStockSettlements(stock, rates: FinanceRates(expenseStore))
     }
 
     // MARK: - Helpers

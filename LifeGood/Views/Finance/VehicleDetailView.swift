@@ -8,6 +8,7 @@ import SwiftUI
 // - 「照片與單據」綁著照片紀錄的編輯、刪除，留在這個檔案畫；照片紀錄編輯器搬到 VehicleEditors.swift。
 // - 刪整台車不在卡片上（列表左滑、編輯頁最下面「刪除這台車」）。
 // - 分享不輸出車主、地點、家充、里程、照片、備註、車輛資料、自己取的名稱；車名像車牌改寫「品牌 動力」（決定 20）。
+// - [v25.567] 車貸下面一段「從哪扣」（WealthLoanPayFromSection；改的是記帳那一筆固定支出、從下一期起；judge §6.3）。分享不放。
 
 struct VehicleDetailView: View {
     @EnvironmentObject var store: FinanceStore
@@ -261,6 +262,15 @@ struct VehicleDetailView: View {
             .id(VehicleAnchor.upcoming)
         VehicleLoanSection(data: card, actions: actions)
             .id(VehicleAnchor.loan)
+        WealthLoanPayFromSection(expenseIds: loanPayIds)
+    }
+
+    /// [v25.567] 這台車的貸款固定支出（車貸「從哪扣」那一段）：記帳連到這台車、還在扣的、有週期的
+    private var loanPayIds: [UUID] {
+        expenseStore.expenses.filter { e in
+            e.expenseType == .fixed && e.fixedCategory == .loan && e.linkedVehicleId == vehicleId
+                && e.recurrence != nil && !e.isFixedEnded
+        }.map(\.id)
     }
 
     /// 充電／加油／油電、我的帳本、車輛資料、賣車估價（持有中才有）、照片與單據

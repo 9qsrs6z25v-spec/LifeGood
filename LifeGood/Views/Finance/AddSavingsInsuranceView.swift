@@ -37,10 +37,18 @@ import SwiftUI
 //      守衛判斷、儲蓄險與固定支出同步寫入邏輯完全未變動。同型 isSaving 守衛也存在於
 //      AddExpenseView / AddIncomeView / AddStockView / AddVehicleView / AddRealEstateView，
 //      皆缺少載入視覺提示，可作為下次美化時比照本檔案補齊的清單，逐步達成全 App 均值性。
+// [v25.567] 財富 v6（judge §6.3；build/v6/brief.md G4 14、15）：
+//  13. 保費那段後面一段「從哪扣」（WealthPayFromMenu，同記帳的扣款選單；外幣保單只列同幣別的子帳戶和信用卡）。
+//      編輯時從連著的那筆記帳帶；改幣別而且選的銀行幣別對不上 → 清掉銀行（卡不動）。
+//  14. syncFixedExpense：既有那筆**改那一筆**（以前整筆重建，存一次就洗掉扣款帳戶、金額歷史、停止日、節稅覆寫…）；
+//      金額改了從今天起（AmountHistoryChange）；從哪扣改了 → 先 dismiss、下一個 runloop LifeStore.setExpensePayer
+//      （從今天起，以前扣的照舊記在原本的卡／帳戶）。新的照原本建、直接寫從哪扣。
 
 struct AddSavingsInsuranceView: View {
     @EnvironmentObject var financeStore: FinanceStore
     @EnvironmentObject var expenseStore: ExpenseStore
+    /// [v25.567] 從哪扣的選單、改扣款（WealthPayFromMenu、setExpensePayer；呼叫端都有 .appStores()）
+    @EnvironmentObject var lifeStore: LifeStore
     @Environment(\.dismiss) private var dismiss
 
     var editing: SavingsInsurance?
@@ -59,6 +67,8 @@ struct AddSavingsInsuranceView: View {
     // 儲存為同步寫回 store 後立即 dismiss()，sheet 收合動畫期間按鈕仍可觸發，
     // 快速連點會建立兩筆重複儲蓄險紀錄；補上忙碌守衛比照 AddRealEstateView 既有修法。
     @State private var isSaving = false
+    /// [v25.567] 保費從哪扣（銀行＋幣別或信用卡）
+    @State private var payChoice = WealthPayFromChoice()
 
     // MARK: - 自動計算
 
@@ -134,7 +144,7 @@ struct AddSavingsInsuranceView: View {
                         Spacer()
                         Menu {
                             Button {
-                                currencyCode = "NT$"
+                                pickCurrency("NT$")
                             } label: {
                                 if currencyCode == "NT$" {
                                     Label("NT$", systemImage: "checkmark")
@@ -144,7 +154,7 @@ struct AddSavingsInsuranceView: View {
                             }
                             ForEach(expenseStore.currencyRates) { rate in
                                 Button {
-                                    currencyCode = rate.code
+                                    pickCurrency(rate.code)
                                 } label: {
                                     if currencyCode == rate.code {
                                         Label("\(rate.code)（1=\(rateDisplay(rate.rate)) 元）", systemImage: "checkmark")
@@ -194,6 +204,9 @@ struct AddSavingsInsuranceView: View {
                                   gradient: [Color(red: 0.22, green: 0.42, blue: 0.88),
                                              Color(red: 0.32, green: 0.62, blue: 1.00)])
                 }
+
+                // [v25.567] 從哪扣（computed var，不塞 body）
+                payFromSection
 
                 Section {
                     // v2：繳費資訊列升級為圖示圓 + Capsule 值徽章
@@ -309,12 +322,46 @@ struct AddSavingsInsuranceView: View {
                     startDate = e.startDate
                     maturityDate = e.maturityDate
                     note = e.note
+                    // [v25.567] 從哪扣：讀連著的那筆記帳
+                    if let x = linkedExpense(of: e) {
+                        payChoice = WealthPayFromChoice.of(x)
+                    }
                 }
                 withAnimation(.spring(response: 0.55, dampingFraction: 0.78).delay(0.12)) {
                     cardAppeared = true
                 }
             }
         }
+    }
+
+    // MARK: - [v25.567] 從哪扣
+
+    private static let payFromFooter = "外幣保單只列同幣別的帳戶和信用卡；改了從下一期起，以前扣的照舊。"
+
+    private var payFromSection: some View {
+        Section {
+            WealthPayFromMenu(choice: $payChoice, onlyCode: currencyCode)
+        } header: {
+            sectionHeader("從哪扣", icon: "building.columns.fill",
+                          gradient: [Color(red: 0.10, green: 0.60, blue: 0.42),
+                                     Color(red: 0.18, green: 0.80, blue: 0.52)])
+        } footer: {
+            Text(Self.payFromFooter)
+        }
+    }
+
+    /// 改幣別：選的銀行幣別對不上就清掉銀行（卡不動；不用 onChange）
+    private func pickCurrency(_ code: String) {
+        currencyCode = code
+        if payChoice.bankId != nil, WealthFacts.norm(payChoice.bankCode) != WealthFacts.norm(code) {
+            payChoice = WealthPayFromChoice()
+        }
+    }
+
+    /// 這張儲蓄險連著的記帳固定支出（linkedExpenseId；跟 syncFixedExpense 改的是同一筆，找不到 nil＝存檔時新建）
+    private func linkedExpense(of ins: SavingsInsurance) -> Expense? {
+        guard let eid = ins.linkedExpenseId else { return nil }
+        return expenseStore.expenses.first(where: { $0.id == eid })
     }
 
     // MARK: - 子視圖
@@ -547,6 +594,10 @@ struct AddSavingsInsuranceView: View {
 
         let insuranceId = editing?.id ?? UUID()
         let existingExpenseId = editing?.linkedExpenseId
+        // [v25.567] 既有那筆原本從哪扣（存完比對，變了下一個 runloop 才改）
+        let existing: Expense? = existingExpenseId.flatMap { id in expenseStore.expenses.first(where: { $0.id == id }) }
+        let before: WealthPayFromChoice? = existing.map { WealthPayFromChoice.of($0) }
+        let choice = payChoice
 
         // 同步建立或更新固定支出紀錄
         let expenseId = syncFixedExpense(
@@ -574,16 +625,45 @@ struct AddSavingsInsuranceView: View {
         )
         if editing != nil { financeStore.update(item) } else { financeStore.add(item) }
         dismiss()
+        // [v25.567] 既有那筆改了從哪扣：從今天起（以前扣的照舊記在原本的卡／帳戶，帳本 linkFrom）；先 dismiss、下一個 runloop 才寫
+        if let old = before, old != choice, existing?.id == expenseId {
+            let life = lifeStore
+            let es = expenseStore
+            DispatchQueue.main.async {
+                life.setExpensePayer(expenseId, bankId: choice.bankId,
+                                     bankCode: choice.bankId != nil ? choice.bankCode : nil,
+                                     cardId: choice.cardId, from: Date(), expense: es)
+            }
+        }
     }
 
     /// 同步建立或更新記帳模式的固定支出紀錄
+    /// [v25.567] 既有那筆改那一筆（以前整筆重建：存一次就洗掉扣款帳戶、金額歷史、停止日、節稅覆寫、小工具標記…）：
+    /// 只改名稱、金額（改了從今天起，以前的期數照原本的金額）、起始日、週期、保險子分類、連結、備註、幣別；
+    /// 從哪扣由 save() 比對後叫 setExpensePayer。找不到那筆（在記帳刪掉了）才新建一筆，新的直接寫從哪扣
     private func syncFixedExpense(insuranceId: UUID, existingExpenseId: UUID?, name: String, note: String) -> UUID {
-        let expenseId = existingExpenseId ?? UUID()
+        if let eid = existingExpenseId, var e = expenseStore.expenses.first(where: { $0.id == eid }) {
+            e.title = name
+            if Swift.abs(e.amount - premium) > 0.004 {
+                e.amountHistory = AmountHistoryChange.from(Date(), history: e.amountHistory, current: e.amount,
+                                                           firstDate: e.date, newAmount: premium)
+                e.amount = premium
+            }
+            e.date = startDate
+            e.expenseType = .fixed
+            e.fixedCategory = .insurance
+            e.recurrence = paymentPeriod
+            e.insuranceSubCategory = .savings
+            e.linkedInsuranceId = insuranceId
+            e.note = note
+            e.currencyCode = currencyCode
+            expenseStore.update(e)
+            return eid
+        }
 
-        // 帶回既有 photoFileNames：使用者可能在 AddExpenseView 為這筆連結支出另外附加照片，
-        // 本函式每次存檔都整筆重建 Expense，不帶回會把照片默默清空、原始檔案變孤兒
-        // （同一 bug class 見 AddRealEstateView.syncInsuranceExpense 上方註解）。
-        let existingPhotos = existingExpenseId.flatMap { id in expenseStore.expenses.first(where: { $0.id == id })?.photoFileNames } ?? []
+        let expenseId = UUID()
+        let c = payChoice
+        let cardBank: UUID? = c.cardId.flatMap { cid in lifeStore.milestones.first(where: { $0.id == cid })?.linkedBankMilestoneId }
         let expense = Expense(
             id: expenseId,
             title: name,
@@ -596,15 +676,11 @@ struct AddSavingsInsuranceView: View {
             linkedInsuranceId: insuranceId,
             note: note,
             currencyCode: currencyCode,
-            photoFileNames: existingPhotos
+            linkedBankMilestoneId: c.cardId != nil ? cardBank : c.bankId,
+            linkedBankCurrency: (c.cardId == nil && c.bankId != nil) ? c.bankCode : nil,
+            linkedCreditCardMilestoneId: c.cardId
         )
-
-        if existingExpenseId != nil {
-            expenseStore.update(expense)
-        } else {
-            expenseStore.add(expense)
-        }
-
+        expenseStore.add(expense)
         return expenseId
     }
 

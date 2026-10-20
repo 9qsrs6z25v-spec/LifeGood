@@ -336,9 +336,11 @@ class LifeStore: ObservableObject {
     func wealthFacts(expense: ExpenseStore, finance: FinanceStore, now: Date = Date()) -> WealthFacts {
         let key = WealthFacts.cacheKey(revision: wealthRevision, expense: expense, finance: finance, now: now)
         if let c = wealthFactsCache, c.key == key { return c.facts }
+        // [v25.567] 保單總表要儲蓄險、車子、房子（四個來源去重）；cacheKey 已經含理財的 modifyID
         let f = WealthFacts.build(milestones: milestones, book: wealthBook, deposits: wealthDeposits,
                                   expenses: expense.expenses, incomes: expense.incomes, stocks: finance.stocks,
-                                  rates: FinanceRates(expense), now: now)
+                                  rates: FinanceRates(expense), now: now, insurances: finance.insurances,
+                                  vehicles: finance.vehicles, realEstates: finance.realEstates)
         wealthFactsCache = (key: key, facts: f)
         return f
     }
@@ -789,6 +791,327 @@ class LifeStore: ObservableObject {
         }
         guard !drop.isEmpty else { return }
         book.deposits = book.all.filter { !drop.contains($0.id) }
+    }
+
+    // MARK: - [v25.567] 財富 v6：證券戶交割、保單連記帳、從哪扣（build/v6/brief.md §2；都只寫一次 milestones／帳本／記帳／理財）
+
+    /// 股票的交割紀錄重寫一次（股票表單、股票卡加交易、記帳改舊版單筆股票都叫這一支；以前三份各寫各的）：
+    /// 這檔股票的交割紀錄（linkedStockId、不是股利）先從**所有**帳戶清掉，再一筆一筆寫進「那一天」該記的帳戶
+    /// （WealthStockSettle：帳本 linkFrom 改交割銀行的歷史 → 股票現在的交割銀行 → 證券戶）；股利入帳不動。
+    /// 每一筆一個新 id（同以前）；金額、幣別照 stockAmountForAccount 一條規則。milestones 只指派一次
+    func rewriteStockSettlements(_ stock: Stock, rates: FinanceRates) {
+        let keep = WealthIDs.dividendDepositIds(of: stock)
+        let book = wealthBook
+        var all = milestones
+        var changed = false
+        for i in all.indices {
+            guard let deps = all[i].bankDeposits else { continue }
+            let kept = deps.filter { !($0.linkedStockId == stock.id && !keep.contains($0.id)) }
+            if kept.count != deps.count {
+                all[i].bankDeposits = kept
+                changed = true
+            }
+        }
+        func add(_ raw: Double, on day: Date, out: Bool) {
+            guard raw > 0, let acc = WealthStockSettle.account(for: stock, on: day, book: book),
+                  let idx = all.firstIndex(where: { $0.id == acc }) else { return }
+            let code = WealthStockSettle.currency(for: stock, account: acc)
+            let w = stockAmountForAccount(raw, stock: stock, accountCurrency: code, rates: rates)
+            var list = all[idx].bankDeposits ?? []
+            list.append(BankDeposit(id: UUID(), date: day, amount: w.amount, currencyCode: w.code,
+                                    isWithdrawal: out, linkedExpenseId: nil, linkedStockId: stock.id))
+            all[idx].bankDeposits = list
+            changed = true
+        }
+        if !stock.transactions.isEmpty {
+            for tx in stock.transactions {
+                add(tx.amount, on: tx.settlementDate, out: tx.kind == .buy)
+            }
+        } else {
+            add(stock.shares * stock.purchasePrice, on: StockTransaction.taiwanSettlementDate(from: stock.purchaseDate),
+                out: true)
+            if stock.isSold, stock.soldPrice > 0, let sd = stock.soldDate {
+                add(stock.shares * stock.soldPrice, on: StockTransaction.taiwanSettlementDate(from: sd), out: false)
+            }
+        }
+        if changed { milestones = all }
+    }
+
+    /// 證券戶改交割銀行時選「這幾檔也一起改」（judge §4.3 ⑥：以前的交割不動）：這個證券戶還沒賣掉的股票交割銀行改成 bankId，
+    /// 帳本 linkFrom[股票] 記「今天起 → 新的」（以前的照舊記在原本的帳戶）；今天以後（含今天）還沒交割的那幾筆搬到新的銀行。
+    /// 證券戶自己的 settlementBankId 由表單照舊寫（saveWealthAccount）。帳本、milestones、股票各只指派一次
+    func moveBrokerStocks(_ brokerId: UUID, to bankId: UUID, finance: FinanceStore, now: Date = Date()) {
+        let today = WealthCal.day(now)
+        let fromKey = WealthCal.dayKey(today)
+        var stocks = finance.stocks
+        var book = wealthBook
+        var all = milestones
+        var moved = Set<UUID>()
+        var stocksChanged = false
+        for i in stocks.indices where stocks[i].linkedSecuritiesMilestoneId == brokerId && !stocks[i].isSold {
+            let s = stocks[i]
+            guard s.linkedBankMilestoneId != bankId else { continue }
+            let old: UUID? = s.linkedBankMilestoneId ?? s.linkedSecuritiesMilestoneId
+            book.setLinks(Self.linkHistory(book.links(s.id), old: old, new: bankId, fromKey: fromKey), for: s.id)
+            stocks[i].linkedBankMilestoneId = bankId
+            stocks[i].linkedBankCurrency = nil
+            moved.insert(s.id)
+            stocksChanged = true
+        }
+        guard stocksChanged else { return }
+        // 今天以後的交割（還沒發生）搬到新的銀行；股利不動
+        var dividendIds = Set<UUID>()
+        for s in stocks where moved.contains(s.id) { dividendIds.formUnion(WealthIDs.dividendDepositIds(of: s)) }
+        var carry: [BankDeposit] = []
+        for i in all.indices where all[i].id != bankId {
+            guard let deps = all[i].bankDeposits else { continue }
+            var kept: [BankDeposit] = []
+            for d in deps {
+                if let sid = d.linkedStockId, moved.contains(sid), !dividendIds.contains(d.id),
+                   WealthCal.day(d.date) >= today {
+                    carry.append(d)
+                } else {
+                    kept.append(d)
+                }
+            }
+            if kept.count != deps.count { all[i].bankDeposits = kept }
+        }
+        if !carry.isEmpty, let bi = all.firstIndex(where: { $0.id == bankId }) {
+            var list = all[bi].bankDeposits ?? []
+            list.append(contentsOf: carry)
+            all[bi].bankDeposits = list
+        }
+        if book != wealthBook { wealthBook = book }
+        if !carry.isEmpty { milestones = all }
+        finance.stocks = stocks
+    }
+
+    /// #16〔搬到薪轉〕、證券戶頁 ④：先算「會動到哪些」（你看過、按確定才 moveLegacySettlements）。沒有可搬的、沒有交割銀行＝nil。
+    /// 算「搬完的樣子」要重算一次一套數字（只在打開那張確認表單時叫一次，打字不會叫）
+    func settlementMovePlan(brokerId: UUID, expense: ExpenseStore, finance: FinanceStore,
+                            now: Date = Date()) -> WealthSettlementMovePlan? {
+        let facts = wealthFacts(expense: expense, finance: finance, now: now)
+        guard let b = facts.broker(brokerId), let bankId = b.settlementBankId,
+              let km = milestones.first(where: { $0.id == brokerId }) else { return nil }
+        let stocksById = Dictionary(finance.stocks.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let rates = FinanceRates(expense)
+        var dividendIds = Set<UUID>()
+        for s in finance.stocks { dividendIds.formUnion(WealthIDs.dividendDepositIds(of: s)) }
+        var moves: [WealthSettlementMovePlan.Move] = []
+        var skipIds: [UUID] = []
+        var keepIds: [UUID] = []
+        var buys = 0, sells = 0, dividends = 0
+        var total: Double = 0
+        for dep in km.bankDeposits ?? [] where dep.linkedStockId != nil && !dep.isTransfer && !dep.isAnchor {
+            guard let sid = dep.linkedStockId, let s = stocksById[sid] else {
+                keepIds.append(dep.id)
+                continue
+            }
+            // 每一筆搬到那檔股票自己的交割銀行（沒有＝證券戶的交割銀行）
+            let target: UUID = s.linkedBankMilestoneId ?? bankId
+            let targetDeps: [BankDeposit] = milestones.first(where: { $0.id == target })?.bankDeposits ?? []
+            let day = WealthCal.day(dep.date)
+            let dup = targetDeps.contains { d in
+                d.linkedStockId == sid && d.isWithdrawal == dep.isWithdrawal && WealthCal.day(d.date) == day
+                    && Swift.abs(d.amount - dep.amount) < 0.5
+            }
+            if dup {
+                skipIds.append(dep.id)
+                continue
+            }
+            moves.append(WealthSettlementMovePlan.Move(depositId: dep.id, targetId: target))
+            if dividendIds.contains(dep.id) { dividends += 1 } else if dep.isWithdrawal { buys += 1 } else { sells += 1 }
+            let r = rates.known(WealthFacts.norm(dep.currencyCode)) ?? 1
+            total += (dep.isWithdrawal ? -dep.amount : dep.amount) * r
+        }
+        guard !moves.isEmpty || !skipIds.isEmpty else { return nil }
+        let stockIds: [UUID] = finance.stocks.filter {
+            $0.linkedSecuritiesMilestoneId == brokerId && $0.linkedBankMilestoneId == nil
+        }.map(\.id)
+        var plan = WealthSettlementMovePlan(
+            brokerId: brokerId, brokerName: b.name, bankId: bankId, bankName: b.settlementName ?? "交割銀行",
+            moves: moves, skipIds: skipIds, keepIds: keepIds, buys: buys, sells: sells, dividends: dividends,
+            total: total, stockIds: stockIds, bankBefore: facts.account(bankId)?.ntdTotal ?? 0, bankAfter: 0,
+            cashBefore: facts.cash, cashAfter: 0, lastAnchor: facts.account(bankId)?.lastAnchorDate)
+        let applied = WealthSettlementMovePlan.applied(plan, milestones: milestones, stocks: finance.stocks)
+        let after = WealthFacts.build(milestones: applied.milestones, book: wealthBook, deposits: wealthDeposits,
+                                      expenses: expense.expenses, incomes: expense.incomes, stocks: applied.stocks,
+                                      rates: rates, now: now)
+        plan.bankAfter = after.account(bankId)?.ntdTotal ?? 0
+        plan.cashAfter = after.cash
+        return plan
+    }
+
+    /// 你按了確定：照計畫搬（證券戶拿掉要搬的、已經有同一筆的；交割銀行加上搬過去的，id 不變；這個證券戶還沒有交割銀行的股票
+    /// 改成交割銀行＝它）。milestones、股票各只指派一次。搬完證券戶不再有那幾筆，#16 自己不見
+    func moveLegacySettlements(_ plan: WealthSettlementMovePlan, finance: FinanceStore) {
+        let applied = WealthSettlementMovePlan.applied(plan, milestones: milestones, stocks: finance.stocks)
+        milestones = applied.milestones
+        if applied.stocksChanged { finance.stocks = applied.stocks }
+    }
+
+    /// 保單連到記帳的這一筆保費（#15〔是同一張，連起來〕、保單頁〔連到記帳的保費〕）：帳本 policies[id].linkedExpenseId；
+    /// 這一筆原本連著別張保單的那張解開（一筆只連一張）。舊欄位照記帳那一筆寫一份（里程碑 premiumAmount、帳本繳法、從哪扣、
+    /// 下次扣款日：給還沒更新的 iPad、網頁版；畫面一律讀記帳那一筆）
+    func linkPolicy(_ policyId: UUID, expenseId: UUID, expense: ExpenseStore, now: Date = Date()) {
+        guard let e = expense.expenses.first(where: { $0.id == expenseId }) else { return }
+        var book = wealthBook
+        var all = book.policies ?? [:]
+        for key in Array(all.keys) where key != policyId.uuidString {
+            if all[key]?.linkedExpenseId == expenseId { all[key]?.linkedExpenseId = nil }
+        }
+        book.policies = all.isEmpty ? nil : all
+        var prefs = book.policy(policyId)
+        prefs.linkedExpenseId = expenseId
+        Self.mirrorPolicy(&prefs, expense: e, now: now)
+        book.setPolicy(prefs, for: policyId)
+        if book != wealthBook { wealthBook = book }
+        mirrorPolicyPremium(policyId, expense: e)
+    }
+
+    /// 解開保單跟記帳保費的連結（保單頁、刪保單「只解開連結」）：記帳那一筆不動
+    func unlinkPolicy(_ policyId: UUID) {
+        updateWealthBook { book in
+            var prefs = book.policy(policyId)
+            prefs.linkedExpenseId = nil
+            book.setPolicy(prefs, for: policyId)
+        }
+    }
+
+    /// 保單頁〔年繳〕：舊資料沒寫繳法（raw＝WealthPolicyCycle.rawValue）
+    func setPolicyCycle(_ policyId: UUID, cycle raw: String) {
+        guard WealthPolicyCycle(rawValue: raw) != nil else { return }
+        updateWealthBook { book in
+            var prefs = book.policy(policyId)
+            prefs.payCycle = raw
+            book.setPolicy(prefs, for: policyId)
+        }
+    }
+
+    /// 保單表單存檔後的保費（judge §5.4-3，保費＝記帳那一筆）。呼叫端先 saveWealthAccount 存好保單本身，再叫這支（下一個 runloop）：
+    /// • 連著記帳那一筆（或 useExpenseId：你選「用那一筆」）→ 改那一筆：金額改了從今天起（以前的期數照原本的金額，同記帳表單
+    ///   「從今天起」AmountHistoryChange）、週期（記帳有對應的才改）、從哪扣改了從今天起（以前的期數照舊記在原本的卡／帳戶，帳本 linkFrom）
+    /// • 沒連、create＝true → 新建一筆記帳固定支出（保險、人身保險子分類、第一期＝draft.firstDue）並連起來；
+    ///   半年繳、躉繳記帳沒有對應的週期，不建（回 nil，表單 footer 講）
+    /// 回傳連著的記帳 id。帳本、記帳、里程碑各只指派一次
+    @discardableResult
+    func savePolicyPremium(policyId: UUID, draft: WealthPolicyPremiumDraft, useExpenseId: UUID?, create: Bool,
+                           expense: ExpenseStore, now: Date = Date()) -> UUID? {
+        let today = WealthCal.day(now)
+        var expenses = expense.expenses
+        var book = wealthBook
+        var linkedId: UUID? = useExpenseId ?? book.policy(policyId).linkedExpenseId
+        if let lid = linkedId, !expenses.contains(where: { $0.id == lid }) { linkedId = nil }
+        let cardPayer: UUID? = draft.cardId.flatMap { cid in milestones.first(where: { $0.id == cid })?.linkedBankMilestoneId }
+        var expensesChanged = false
+        if let lid = linkedId, let i = expenses.firstIndex(where: { $0.id == lid }) {
+            var e = expenses[i]
+            if draft.amount > 0, Swift.abs(e.amount - draft.amount) > 0.004 {
+                e.amountHistory = AmountHistoryChange.from(now, history: e.amountHistory, current: e.amount,
+                                                           firstDate: e.date, newAmount: draft.amount)
+                e.amount = draft.amount
+            }
+            if let r = WealthPolicyLink.recurrence(of: draft.cycle), e.recurrence != r { e.recurrence = r }
+            let old: UUID? = e.linkedCreditCardMilestoneId ?? e.linkedBankMilestoneId
+            let new: UUID? = draft.cardId ?? draft.bankId
+            if old != new {
+                book.setLinks(Self.linkHistory(book.links(e.id), old: old, new: new, fromKey: WealthCal.dayKey(today)),
+                              for: e.id)
+                e.linkedCreditCardMilestoneId = draft.cardId
+                e.linkedBankMilestoneId = draft.cardId != nil ? cardPayer : draft.bankId
+                e.linkedBankCurrency = draft.cardId != nil ? nil : draft.bankCode
+            } else if draft.cardId == nil, draft.bankId != nil, e.linkedBankCurrency != draft.bankCode {
+                e.linkedBankCurrency = draft.bankCode
+            }
+            if !Self.sameExpense(e, expenses[i]) {
+                expenses[i] = e
+                expensesChanged = true
+            }
+            linkedId = e.id
+        } else if create, let r = WealthPolicyLink.recurrence(of: draft.cycle), draft.amount > 0 {
+            let title = draft.title.trimmingCharacters(in: .whitespacesAndNewlines)
+            let e = Expense(title: title.isEmpty ? "保費" : title, amount: draft.amount, date: WealthCal.day(draft.firstDue),
+                            expenseType: .fixed, fixedCategory: .insurance, recurrence: r,
+                            insuranceSubCategory: WealthPolicyLink.insuranceSub(draft.kind),
+                            note: "", currencyCode: "NT$",
+                            linkedBankMilestoneId: draft.cardId != nil ? cardPayer : draft.bankId,
+                            linkedBankCurrency: draft.cardId != nil ? nil : draft.bankCode,
+                            linkedCreditCardMilestoneId: draft.cardId)
+            expenses.append(e)
+            expensesChanged = true
+            linkedId = e.id
+        }
+        var prefs = book.policy(policyId)
+        prefs.linkedExpenseId = linkedId
+        let linkedExpense: Expense? = linkedId.flatMap { lid in expenses.first(where: { $0.id == lid }) }
+        if let e = linkedExpense { Self.mirrorPolicy(&prefs, expense: e, now: now) }
+        book.setPolicy(prefs, for: policyId)
+        if book != wealthBook { wealthBook = book }
+        if expensesChanged { expense.expenses = expenses }
+        if let e = linkedExpense { mirrorPolicyPremium(policyId, expense: e) }
+        return linkedId
+    }
+
+    /// 記帳改了一筆保費（AddExpenseView 存檔後叫，下一個 runloop）：連著它的保單，舊欄位照寫一份（畫面本來就讀記帳那一筆）
+    func policyExpenseChanged(_ e: Expense, now: Date = Date()) {
+        guard let entry = (wealthBook.policies ?? [:]).first(where: { $0.value.linkedExpenseId == e.id }),
+              let pid = UUID(uuidString: entry.key) else { return }
+        updateWealthBook { book in
+            var prefs = book.policy(pid)
+            Self.mirrorPolicy(&prefs, expense: e, now: now)
+            book.setPolicy(prefs, for: pid)
+        }
+        mirrorPolicyPremium(pid, expense: e)
+    }
+
+    /// 改一筆記帳固定支出從哪扣（儲蓄險表單「從哪扣」、房屋卡／車子卡貸款列「從哪扣」）：卡優先（卡＝刷卡、銀行跟著那張卡的扣款帳戶）；
+    /// from：從哪天起（nil＝以前的也改）。以前的期數照舊記在原本的卡或帳戶（帳本 linkFrom，同 moveWealthLinks）；
+    /// 幣別照選的（外幣子帳戶，例：美元儲蓄險從玉山美金扣）。帳本、記帳各只指派一次；什麼都沒變就不寫
+    func setExpensePayer(_ expenseId: UUID, bankId: UUID?, bankCode: String?, cardId: UUID?, from day: Date?,
+                         expense: ExpenseStore) {
+        var expenses = expense.expenses
+        guard let i = expenses.firstIndex(where: { $0.id == expenseId }) else { return }
+        var e = expenses[i]
+        let old: UUID? = e.linkedCreditCardMilestoneId ?? e.linkedBankMilestoneId
+        let new: UUID? = cardId ?? bankId
+        let cardPayer: UUID? = cardId.flatMap { cid in milestones.first(where: { $0.id == cid })?.linkedBankMilestoneId }
+        var book = wealthBook
+        if old != new {
+            book.setLinks(Self.linkHistory(book.links(e.id), old: old, new: new, fromKey: day.map { WealthCal.dayKey($0) }),
+                          for: e.id)
+        }
+        e.linkedCreditCardMilestoneId = cardId
+        e.linkedBankMilestoneId = cardId != nil ? cardPayer : bankId
+        e.linkedBankCurrency = cardId != nil ? nil : (bankId != nil ? bankCode : nil)
+        guard !Self.sameExpense(e, expenses[i]) || book != wealthBook else { return }
+        expenses[i] = e
+        if book != wealthBook { wealthBook = book }
+        expense.expenses = expenses
+    }
+
+    /// 保單的舊欄位照記帳那一筆寫（繳法、從哪扣、下次扣款日的快照）
+    private static func mirrorPolicy(_ prefs: inout WealthPolicyPrefs, expense e: Expense, now: Date) {
+        if let c = WealthPolicyLink.cycle(of: e.recurrence) { prefs.payCycle = c.rawValue }
+        prefs.payFromId = e.linkedCreditCardMilestoneId ?? e.linkedBankMilestoneId
+        prefs.nextDue = e.nextFixedDueDate(onOrAfter: WealthCal.day(now), calendar: WealthCal.calendar)
+    }
+
+    /// 里程碑的保費照記帳那一筆寫一份（醫療地圖、舊 iPad、網頁版讀這一欄）
+    private func mirrorPolicyPremium(_ policyId: UUID, expense e: Expense) {
+        guard let i = milestones.firstIndex(where: { $0.id == policyId }) else { return }
+        let amount: Double? = e.amount > 0 ? e.amount : nil
+        guard milestones[i].premiumAmount != amount else { return }
+        var m = milestones[i]
+        m.premiumAmount = amount
+        milestones[i] = m
+    }
+
+    /// 這幾個欄位一樣就不寫（Expense 不是 Equatable）
+    private static func sameExpense(_ a: Expense, _ b: Expense) -> Bool {
+        a.amount == b.amount && a.recurrence == b.recurrence && a.linkedBankMilestoneId == b.linkedBankMilestoneId
+            && a.linkedBankCurrency == b.linkedBankCurrency
+            && a.linkedCreditCardMilestoneId == b.linkedCreditCardMilestoneId
+            && a.amountHistory == b.amountHistory
     }
 
     // MARK: - [v25.562] 刪財富帳戶（財富卡片、履歷的刪除都呼叫這一支；以前兩份各寫一次，都漏了卡）
@@ -4098,4 +4421,142 @@ struct FinanceDeletionImpact {
         parts.append(isBank ? "這個帳戶自己的存提款紀錄會一起刪掉，無法復原" : "刪掉後無法復原")
         return parts.joined(separator: "；") + "。"
     }
+}
+
+// MARK: - [v25.567] 證券戶舊交割搬家的計畫（#16〔搬到薪轉〕；judge §4.3 ④：搬之前先給你看會動到哪些）
+
+/// LifeStore.settlementMovePlan 算好、WealthSettlementMoveSheet 照著寫字，你按確定才 LifeStore.moveLegacySettlements
+struct WealthSettlementMovePlan: Identifiable {
+    /// 一筆要搬的：哪一筆、搬到哪個帳戶（那檔股票自己的交割銀行，沒有＝證券戶的交割銀行）
+    struct Move: Equatable {
+        let depositId: UUID
+        let targetId: UUID
+    }
+
+    let brokerId: UUID
+    let brokerName: String
+    let bankId: UUID
+    let bankName: String
+    let moves: [Move]
+    /// 交割銀行已經有同一筆（同日、同額、同一檔、同方向）：從證券戶拿掉、不再寫一份
+    let skipIds: [UUID]
+    /// 股票已經刪了的：留在證券戶當紀錄
+    let keepIds: [UUID]
+    let buys: Int
+    let sells: Int
+    let dividends: Int
+    /// 搬的那幾筆合計（台幣，有正負：買入是負的）
+    let total: Double
+    /// 這個證券戶還沒有交割銀行的股票（搬完交割銀行＝它，之後的交割都從它扣）
+    let stockIds: [UUID]
+    /// 交割銀行今天的存摺上（台幣）：搬之前、搬之後
+    let bankBefore: Double
+    var bankAfter: Double
+    /// 存款合計：搬之前、搬之後
+    let cashBefore: Double
+    var cashAfter: Double
+    /// 交割銀行最近一次對存摺（那天以前的交割不會改變現在的數字）
+    let lastAnchor: Date?
+
+    var id: UUID { brokerId }
+
+    /// 「會動到 18 筆（買入 12・賣出 4・股利 2），合計 −1,250,000」
+    var summary: String {
+        var kinds: [String] = []
+        if buys > 0 { kinds.append("買入 \(buys)") }
+        if sells > 0 { kinds.append("賣出 \(sells)") }
+        if dividends > 0 { kinds.append("股利 \(dividends)") }
+        let sign = total < 0 ? "−" : "+"
+        var s = "會動到 \(moves.count) 筆"
+        if !kinds.isEmpty { s += "（" + kinds.joined(separator: "・") + "）" }
+        return s + "，合計 " + sign + WealthFormat.grouped(Swift.abs(total).rounded(), decimals: 0)
+    }
+
+    /// 「薪轉的存摺上：128,400 → 128,400（不變）」
+    var bankLine: String {
+        let before = WealthFormat.grouped(bankBefore.rounded(), decimals: 0)
+        let after = WealthFormat.grouped(bankAfter.rounded(), decimals: 0)
+        let same = Swift.abs(bankAfter - bankBefore) < 0.5
+        return bankName + "的存摺上：" + before + " → " + after + (same ? "（不變）" : "")
+    }
+
+    /// 「薪轉 10/1 對過存摺：那天以前的交割不會改變現在的數字」；沒對過 nil
+    var anchorLine: String? {
+        guard let d = lastAnchor else { return nil }
+        return bankName + " " + WealthFormat.monthDay(d) + " 對過存摺：那天以前的交割不會改變現在的數字"
+    }
+
+    /// 「3 筆薪轉已經有同一筆（同日、同額、同一檔），會跳過」；沒有 nil
+    var skipLine: String? {
+        guard !skipIds.isEmpty else { return nil }
+        return "\(skipIds.count) 筆\(bankName)已經有同一筆（同日、同額、同一檔），會跳過"
+    }
+
+    /// 「2 筆的股票已經刪了，留在證券戶當紀錄」；沒有 nil
+    var keepLine: String? {
+        guard !keepIds.isEmpty else { return nil }
+        return "\(keepIds.count) 筆的股票已經刪了，留在\(brokerName)當紀錄"
+    }
+
+    /// 「這 3 檔股票之後的交割都從薪轉扣」；沒有 nil
+    var stocksLine: String? {
+        guard !stockIds.isEmpty else { return nil }
+        return "這 \(stockIds.count) 檔股票之後的交割都從\(bankName)扣"
+    }
+
+    /// 「存款合計：NT$81.7萬 → NT$76.5萬」（ntdWanString：主執行緒）
+    var cashLine: String {
+        "存款合計：" + cashBefore.ntdWanString + " → " + cashAfter.ntdWanString
+    }
+
+    /// 照計畫搬完的樣子（純函式：settlementMovePlan 算「搬之後」、moveLegacySettlements 真的寫，都用這一支）
+    static func applied(_ plan: WealthSettlementMovePlan, milestones: [LifeMilestone],
+                        stocks: [Stock]) -> (milestones: [LifeMilestone], stocks: [Stock], stocksChanged: Bool) {
+        var all = milestones
+        var moving: [UUID: UUID] = [:]
+        for m in plan.moves { moving[m.depositId] = m.targetId }
+        let drop = Set(plan.skipIds)
+        var carry: [UUID: [BankDeposit]] = [:]
+        if let ki = all.firstIndex(where: { $0.id == plan.brokerId }) {
+            var kept: [BankDeposit] = []
+            for d in all[ki].bankDeposits ?? [] {
+                if let t = moving[d.id] {
+                    carry[t, default: []].append(d)
+                } else if !drop.contains(d.id) {
+                    kept.append(d)
+                }
+            }
+            all[ki].bankDeposits = kept
+        }
+        for (target, list) in carry {
+            guard let ti = all.firstIndex(where: { $0.id == target }) else { continue }
+            var deps = all[ti].bankDeposits ?? []
+            deps.append(contentsOf: list)
+            all[ti].bankDeposits = deps
+        }
+        var out = stocks
+        var changed = false
+        let relink = Set(plan.stockIds)
+        for i in out.indices where relink.contains(out[i].id) && out[i].linkedBankMilestoneId == nil {
+            out[i].linkedBankMilestoneId = plan.bankId
+            changed = true
+        }
+        return (milestones: all, stocks: out, stocksChanged: changed)
+    }
+}
+
+/// [v25.567] 保單表單存檔時的保費（LifeStore.savePolicyPremium；judge §5.4-3）
+struct WealthPolicyPremiumDraft {
+    /// 新建記帳那一筆的名字「國泰人壽 醫療險」
+    var title: String
+    /// 每期（台幣）
+    var amount: Double
+    var cycle: WealthPolicyCycle
+    var kind: WealthPolicyKind
+    /// 新建時的第一期（下次扣款日；沒填用生效日）
+    var firstDue: Date
+    /// 從哪扣：銀行（＋幣別）或卡（卡優先）
+    var bankId: UUID?
+    var bankCode: String?
+    var cardId: UUID?
 }

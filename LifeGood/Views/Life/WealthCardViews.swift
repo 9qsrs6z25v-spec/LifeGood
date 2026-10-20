@@ -36,6 +36,14 @@ import UniformTypeIdentifiers
 // • 明細、接下來 30 天點「轉定存」「定存到期」「定存利息」＝WealthCardOpen.timeDeposit：開定存表單，帳戶帶那一期自己的帳戶
 //   （轉進薪轉的那一列在薪轉頁點，表單還是台灣銀行那一期）。
 // • 記一筆選單（右上〔＋〕、存摺明細〔＋ 記一筆〕）多「定存」、有外幣時多「換匯」。
+//
+// [v25.567] 財富 v6 G2（build/v6/brief.md §6 G2；judge §4.3、§4.4）：
+// • 證券戶：持股前面 ② 要交割（WealthCardBrokerDuesSection，.id(.dues)：一天一列，點了打開那檔股票；不夠的那天綠字〔轉帳過去〕
+//   ＝WealthTransferSheet(toId:amount:) 帶好到哪、差多少，要訂閱）；持股後面 ⑤ 以前記在這裡的交割紀錄（WealthCardLegacySection，
+//   .id(.legacy)：收成一列，點了展開唯讀明細；有交割銀行時右上綠字〔搬到薪轉〕＝WealthSettlementMoveSheet，不擋訂閱）。
+// • 保單：④ 繳費連著記帳＝整塊點了開記帳那一筆（不擋）；沒連＝〔連到記帳的保費〕（WealthPolicyLinkSheet，要訂閱）
+//  〔新建一筆〕（要訂閱 → 確認框「在記帳建一筆保費？」→ 下一個 runloop LifeStore.savePolicyPremium）；沒填保費＝「填保費 ›」；
+//   ⑤ 誰的保單（WealthCardInfoSection；都沒寫一列「寫下要保人、被保險人、受益人 ›」）。看板風景是踏腳石（.stones）。
 
 /// 打開卡片頁時捲到哪一區（財富頁 ③ 點一列＝.upcoming；要確認、四格點了也用）
 enum WealthCardAnchor: String, Hashable {
@@ -44,8 +52,8 @@ enum WealthCardAnchor: String, Hashable {
     case statement, unbilled, recurring, history, fee, cardInfo, photos
     // 銀行（[v25.566] deposits＝⑥ 定存）
     case upcoming, linked, foreign, deposits, ledger, accountInfo, note
-    // 證券戶、保單
-    case holdings, payment
+    // 證券戶、保單（[v25.567] dues＝② 要交割、legacy＝⑤ 以前記在這裡的交割紀錄）
+    case holdings, payment, dues, legacy
 }
 
 // MARK: - 彈出頁、確認框、動作
@@ -78,6 +86,12 @@ struct WealthCardSheet: Identifiable {
         case timeDeposit(UUID, UUID?)
         /// [v25.566] 換匯（這個帳戶兩個幣別互轉；只有一個外幣＝從別的台幣帳戶轉進來）
         case exchange(UUID)
+        /// [v25.567] 證券戶舊交割搬家（證券戶 id；先給你看會動到哪些；不擋訂閱）
+        case settlementMove(UUID)
+        /// [v25.567] 保單〔連到記帳的保費〕（保單 id；要訂閱）
+        case policyLink(UUID)
+        /// [v25.567] 要交割不夠〔轉帳過去〕（轉到哪個帳戶、先填好的金額；要訂閱）
+        case transferTo(UUID, Double)
     }
     let id = UUID()
     let kind: Kind
@@ -91,12 +105,15 @@ enum WealthCardConfirm: Identifiable {
     case hideAccount(UUID, String?)
     /// 刪一筆轉帳（BankDeposit 的 id）
     case deleteTransfer(UUID)
+    /// [v25.567] 保單〔新建一筆〕：照保單的保費在記帳建一筆固定支出（保單 id；確認框的字讀 WealthCardPolicy.createMessage）
+    case createPolicyExpense(UUID)
 
     var id: String {
         switch self {
         case .disableCard(let id, _): return "disable-" + id.uuidString
         case .hideAccount(let id, _): return "hide-" + id.uuidString
         case .deleteTransfer(let id): return "transfer-" + id.uuidString
+        case .createPolicyExpense(let id): return "policyexpense-" + id.uuidString
         }
     }
 
@@ -105,9 +122,11 @@ enum WealthCardConfirm: Identifiable {
         case .disableCard: return "停用這張卡？"
         case .hideAccount: return "收起來（銷戶）？"
         case .deleteTransfer: return "刪除這筆轉帳？"
+        case .createPolicyExpense: return "在記帳建一筆保費？"
         }
     }
 
+    /// 確認框的字（〔新建一筆〕的那一句在 WealthCardData 組好，卡片頁的 confirmMessage 換上；這裡是找不到時的一般說法）
     var message: String {
         switch self {
         case .disableCard(_, let n):
@@ -119,6 +138,8 @@ enum WealthCardConfirm: Identifiable {
             return base
         case .deleteTransfer:
             return "轉帳兩邊各記了一筆：可以兩邊一起刪，或只刪這個帳戶這一筆。"
+        case .createPolicyExpense:
+            return "照保單的保費在記帳建一筆固定支出（保險）；以前的不補記。記帳、稅務頁都看得到，在記帳改金額保單跟著。"
         }
     }
 }
@@ -269,10 +290,11 @@ struct WealthCardPage: View {
                                               isPremium: subscription.isPremium, masked: masked, actions: a))
         case .broker:
             guard let b = d.broker else { return AnyView(EmptyView()) }
-            return AnyView(WealthBrokerSections(broker: b, reveal: reveal, actions: a))
+            return AnyView(WealthBrokerSections(brokerId: d.id, broker: b, reveal: reveal, actions: a))
         case .policy:
             guard let p = d.policy else { return AnyView(EmptyView()) }
-            return AnyView(WealthPolicySections(policy: p, reveal: reveal, actions: a))
+            return AnyView(WealthPolicySections(policyId: d.id, policy: p, isPremium: subscription.isPremium,
+                                                reveal: reveal, actions: a))
         }
     }
 
@@ -575,6 +597,27 @@ struct WealthCardPage: View {
         }
     }
 
+    /// [v25.567] 保單〔新建一筆〕確定：照 WealthCardData 組好的那一筆（第一期 WealthPolicyLink.firstDue、以前的不補記）在記帳建
+    /// 一筆固定支出（保險）並連起來（確認框正在收起來：下一個 runloop 才寫）
+    private func createPolicyExpense(_ policyId: UUID) {
+        guard data?.id == policyId, let draft = data?.policy?.createDraft else { return }
+        let life = lifeStore
+        let es = expenseStore
+        DispatchQueue.main.async {
+            _ = life.savePolicyPremium(policyId: policyId, draft: draft, useExpenseId: nil, create: true, expense: es)
+        }
+    }
+
+    /// 確認框的字：〔新建一筆〕讀資料端組好的那一句（保費、繳法、從哪扣、第一期）
+    private func confirmMessage(_ c: WealthCardConfirm) -> String {
+        switch c {
+        case .createPolicyExpense:
+            return data?.policy?.createMessage ?? c.message
+        case .disableCard, .hideAccount, .deleteTransfer:
+            return c.message
+        }
+    }
+
     /// 確認框按了要開表單：等確認框收起來再開（同一個畫面一次只能彈一個）
     private func presentLater(_ kind: WealthCardSheet.Kind) {
         if !subscription.isPremium {
@@ -719,7 +762,7 @@ struct WealthCardPage: View {
                                 presenting: confirm) { c in
                 confirmButtons(c)
             } message: { c in
-                Text(c.message)
+                Text(confirmMessage(c))
             }
             .alert(revealAlertTitle, isPresented: revealMessagePresented) {
                 Button("好") { revealMessage = nil }
@@ -763,6 +806,9 @@ struct WealthCardPage: View {
             Button("兩邊一起刪", role: .destructive) { deleteTransfer(depId, pair: true) }
             Button("只刪這一筆", role: .destructive) { deleteTransfer(depId, pair: false) }
             Button("取消", role: .cancel) {}
+        case .createPolicyExpense(let pid):
+            Button("建一筆") { createPolicyExpense(pid) }
+            Button("取消", role: .cancel) {}
         }
     }
 
@@ -805,6 +851,13 @@ struct WealthCardPage: View {
             return AnyView(WealthTimeDepositSheet(accountId: account, editing: term))
         case .exchange(let id):
             return AnyView(WealthTransferSheet(fromId: id, toId: id, exchange: true))
+        // [v25.567] 搬交割、連記帳保費（G3 的兩張表單自己掛布幕）、要交割不夠轉帳過去（從哪轉表單裡選）
+        case .settlementMove(let id):
+            return AnyView(WealthSettlementMoveSheet(brokerId: id))
+        case .policyLink(let id):
+            return AnyView(WealthPolicyLinkSheet(policyId: id))
+        case .transferTo(let id, let amount):
+            return AnyView(WealthTransferSheet(toId: id, amount: amount))
         }
     }
 }
@@ -2444,19 +2497,29 @@ struct WealthCardLedgerSection: View {
     }
 }
 
-// MARK: - 證券戶頁（§4.3 v3）
+// MARK: - 證券戶頁（§4.3；[v25.567] ② 要交割、⑤ 以前記在這裡的交割紀錄）
 
-/// 證券戶：③ 持股（緊湊項目卡，點了彈那檔的 StockDetailView）、⑥ 資料。沒有記一筆、轉帳、對存摺（v2 留下的④）
+/// 證券戶：② 要交割、③ 持股（緊湊項目卡，點了彈那檔的 StockDetailView）、⑤ 以前記在這裡的交割紀錄、⑥ 資料。
+/// 沒有記一筆、轉帳、對存摺（④ 要確認 #16 在外殼的要確認區）
 struct WealthBrokerSections: View {
+    let brokerId: UUID
     let broker: WealthCardBroker
     let reveal: WealthCardReveal
     let actions: WealthCardActions
 
     var body: some View {
         VStack(spacing: 22) {
+            if !broker.dues.isEmpty {
+                WealthCardBrokerDuesSection(dues: broker.dues, actions: actions)
+                    .id(WealthCardAnchor.dues)
+            }
             if !broker.holdings.isEmpty {
                 holdings
                     .id(WealthCardAnchor.holdings)
+            }
+            if broker.legacyTitle != nil {
+                WealthCardLegacySection(brokerId: brokerId, broker: broker, actions: actions)
+                    .id(WealthCardAnchor.legacy)
             }
             WealthCardInfoSection(title: "資料", rows: broker.info, reveal: reveal, actions: actions)
                 .id(WealthCardAnchor.accountInfo)
@@ -2486,11 +2549,279 @@ struct WealthBrokerSections: View {
     }
 }
 
-// MARK: - 保單頁（§4.4 v3）
+/// ② [v25.567] 要交割（judge §4.3 ②；樣稿③-B5）：一天一列「10/21（三）早上從薪轉扣 52,340・買 00878 2,000 股」＋
+/// 「薪轉現在 128,400，夠」；點一列打開那檔股票（看的，不擋）；不夠的那天多一顆綠字〔轉帳過去〕（要訂閱：present 擋）
+struct WealthCardBrokerDuesSection: View {
+    let dues: [WealthCardBrokerDue]
+    let actions: WealthCardActions
 
-/// 保單：③ 保障內容、④ 繳費、⑥ 醫療地圖一行、⑦ 資料、⑧ 照片
+    @Environment(\.colorScheme) private var scheme
+
+    static let footnote = "讀交割銀行接下來 30 天的存摺；同一天的買賣先相抵，交割日早上 10 點前帳戶裡要有錢。"
+
+    var body: some View {
+        let pal = TripBoardPalette(scheme)
+        VStack(alignment: .leading, spacing: 10) {
+            FinanceCardHeader(title: "要交割", trailing: "\(dues.count) 筆")
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(Array(dues.enumerated()), id: \.element.id) { i, d in
+                    if i > 0 {
+                        Divider().padding(.leading, 52)
+                    }
+                    WealthCardBrokerDueLine(due: d, actions: actions, pal: pal)
+                }
+            }
+            .modifier(FinanceCardChrome())
+            Text(Self.footnote)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+}
+
+/// 要交割的一列：一顆按鈕打開那檔股票；不夠的那天下面另一顆〔轉帳過去〕（兩顆分開，不疊在一起）
+struct WealthCardBrokerDueLine: View {
+    let due: WealthCardBrokerDue
+    let actions: WealthCardActions
+    let pal: TripBoardPalette
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            rowButton
+            if due.isShort && due.transferTo != nil {
+                transferButton
+            }
+        }
+        .background(rowFill)
+    }
+
+    private var rowFill: Color {
+        due.isShort ? MoneyTone.warn.color(pal).opacity(0.08) : Color.clear
+    }
+
+    private var statusColor: Color {
+        due.isShort ? MoneyTone.warn.color(pal) : Color.secondary
+    }
+
+    private var iconName: String {
+        due.isOutflow ? "arrow.up.right.circle.fill" : "arrow.down.left.circle.fill"
+    }
+
+    /// 不夠 warn；扣款紫（同明細的交割）；入帳綠
+    private var iconColor: Color {
+        if due.isShort { return MoneyTone.warn.color(pal) }
+        return due.isOutflow ? Color(tb: 0x6B44E0) : MoneyTone.good.color(pal)
+    }
+
+    private var rowHint: String {
+        due.stockId == nil ? "" : "點兩下打開那檔股票"
+    }
+
+    private var rowButton: some View {
+        let a = actions
+        let sid = due.stockId
+        return Button {
+            if let sid { a.open(.stock(sid)) }
+        } label: {
+            rowLabel
+        }
+        .buttonStyle(.plain)
+        .disabled(sid == nil)
+        .accessibilityLabel(due.accessibilityText)
+        .accessibilityHint(rowHint)
+    }
+
+    private var rowLabel: some View {
+        HStack(alignment: .center, spacing: 10) {
+            Image(systemName: iconName)
+                .font(.system(size: 20, weight: .semibold))
+                .foregroundStyle(iconColor)
+                .frame(width: 28)
+                .accessibilityHidden(true)
+            texts
+            Spacer(minLength: 6)
+            chevron
+        }
+        .foregroundStyle(Color.primary)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 11)
+        .contentShape(Rectangle())
+    }
+
+    private var texts: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(due.line)
+                .font(.subheadline.weight(.bold))
+                .monospacedDigit()
+                .fixedSize(horizontal: false, vertical: true)
+            Text(due.status)
+                .font(.caption.weight(.semibold))
+                .monospacedDigit()
+                .foregroundStyle(statusColor)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .multilineTextAlignment(.leading)
+    }
+
+    @ViewBuilder
+    private var chevron: some View {
+        if due.stockId != nil {
+            Image(systemName: "chevron.right")
+                .font(.caption2.weight(.bold))
+                .foregroundStyle(.tertiary)
+        }
+    }
+
+    /// 〔轉帳過去〕：到交割銀行、差多少先填好（從哪轉在表單裡選；要訂閱）
+    private var transferButton: some View {
+        let a = actions
+        let to = due.transferTo
+        let amount = due.transferAmount
+        return Button {
+            if let to { a.present(.transferTo(to, amount), true) }
+        } label: {
+            Label("轉帳過去", systemImage: "arrow.right.circle.fill")
+                .font(.subheadline.weight(.bold))
+                .foregroundStyle(MoneyTone.good.color(pal))
+                .frame(maxWidth: .infinity, minHeight: 34, alignment: .leading)
+                .padding(.leading, 52)
+                .padding(.trailing, 14)
+                .padding(.bottom, 8)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(MoneyPressStyle())
+        .accessibilityHint(transferHint)
+    }
+
+    /// 台幣的差額先填好；外幣的不填（轉帳表單的金額是轉出那邊的幣別）
+    private var transferHint: String {
+        due.transferAmount > 0 ? "點兩下打開轉帳，差多少已經填好" : "點兩下打開轉帳，交割銀行已經選好"
+    }
+}
+
+/// ⑤ [v25.567] 以前記在這裡的交割紀錄（judge §4.3 ⑤）：收成一列「以前記在這裡的交割紀錄 18 筆 ›」，點了展開唯讀明細
+///（徽章買入／賣出／股利，不寫餘額、點了不開）；有交割銀行時標題右邊綠字〔搬到薪轉〕（WealthSettlementMoveSheet：先給你看
+/// 會動到哪些，你按確定才搬；不擋訂閱，修資料同〔改過來〕）；灰字「不算進任何合計」
+struct WealthCardLegacySection: View {
+    let brokerId: UUID
+    let broker: WealthCardBroker
+    let actions: WealthCardActions
+
+    @Environment(\.colorScheme) private var scheme
+    @State private var expanded = false
+
+    var body: some View {
+        let pal = TripBoardPalette(scheme)
+        VStack(alignment: .leading, spacing: 10) {
+            header(pal)
+            VStack(alignment: .leading, spacing: 0) {
+                toggleRow
+                if expanded {
+                    expandedList(pal)
+                }
+            }
+            .modifier(FinanceCardChrome())
+            if let note = broker.legacyNote {
+                Text(note)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    private func header(_ pal: TripBoardPalette) -> some View {
+        HStack(alignment: .center, spacing: 10) {
+            FinanceCardHeader(title: "舊交割紀錄")
+            if broker.canMoveLegacy {
+                moveButton(pal)
+            }
+        }
+    }
+
+    private func moveButton(_ pal: TripBoardPalette) -> some View {
+        let a = actions
+        let id = brokerId
+        return Button {
+            a.present(.settlementMove(id), false)
+        } label: {
+            Text(broker.legacyMoveTitle)
+                .font(.subheadline.weight(.bold))
+                .foregroundStyle(MoneyTone.good.color(pal))
+                .lineLimit(1)
+                .fixedSize()
+                .frame(minHeight: 30)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(MoneyPressStyle())
+        .accessibilityHint("點兩下先看會動到哪些紀錄")
+    }
+
+    private var toggleRow: some View {
+        Button {
+            withAnimation(.easeInOut(duration: 0.25)) { expanded.toggle() }
+        } label: {
+            toggleLabel
+        }
+        .buttonStyle(.plain)
+        .accessibilityHint(toggleHint)
+    }
+
+    private var toggleHint: String {
+        expanded ? "點兩下收起來" : "點兩下展開"
+    }
+
+    private var toggleLabel: some View {
+        HStack(alignment: .center, spacing: 10) {
+            Image(systemName: "tray.full")
+                .font(.system(size: 13, weight: .bold))
+                .foregroundStyle(Color.white)
+                .frame(width: 28, height: 28)
+                .background(Color(tb: 0x6B44E0), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .accessibilityHidden(true)
+            Text(broker.legacyTitle ?? "")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(Color.primary)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 6)
+            Image(systemName: "chevron.right")
+                .font(.caption2.weight(.bold))
+                .foregroundStyle(.tertiary)
+                .rotationEffect(.degrees(expanded ? 90 : 0))
+        }
+        .multilineTextAlignment(.leading)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .contentShape(Rectangle())
+    }
+
+    static let farAway = "這些紀錄的日子太遠，明細列不出來；搬的時候照樣會列在清單裡。"
+
+    @ViewBuilder
+    private func expandedList(_ pal: TripBoardPalette) -> some View {
+        Divider().padding(.leading, 14)
+        if broker.legacyRows.isEmpty {
+            Text(Self.farAway)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(14)
+        } else {
+            WealthCardRowList(rows: broker.legacyRows, limit: 8, moreTitle: "看全部 \(broker.legacyRows.count) 筆",
+                              actions: actions, pal: pal)
+        }
+    }
+}
+
+// MARK: - 保單頁（§4.4；[v25.567] 踏腳石、繳費＝記帳那一筆、誰的保單）
+
+/// 保單：③ 保障內容（＋⑥ 醫療地圖一行）、④ 繳費、⑤ 誰的保單、⑦ 資料、⑧ 照片
 struct WealthPolicySections: View {
+    let policyId: UUID
     let policy: WealthCardPolicy
+    let isPremium: Bool
     let reveal: WealthCardReveal
     let actions: WealthCardActions
 
@@ -2500,10 +2831,9 @@ struct WealthPolicySections: View {
         let pal = TripBoardPalette(scheme)
         VStack(spacing: 22) {
             coverage(pal)
-            if let p = policy.payment {
-                payment(p)
-                    .id(WealthCardAnchor.payment)
-            }
+            WealthCardPolicyPaymentSection(policyId: policyId, policy: policy, isPremium: isPremium, actions: actions)
+                .id(WealthCardAnchor.payment)
+            people(pal)
             WealthCardInfoSection(title: "資料", rows: policy.info, reveal: reveal, actions: actions)
                 .id(WealthCardAnchor.accountInfo)
             WealthCardPhotosSection(title: "保單照片", note: policy.note, photos: policy.photos,
@@ -2512,35 +2842,29 @@ struct WealthPolicySections: View {
         }
     }
 
+    /// 白卡裡一行灰綠字的按鈕（沒寫保障內容、沒寫誰的保單：打開編輯）
+    private func hintButton(_ title: String, pal: TripBoardPalette) -> some View {
+        let a = actions
+        return Button {
+            a.tap(.edit(nil))
+        } label: {
+            Text(title)
+                .font(.subheadline.weight(.bold))
+                .foregroundStyle(pal.hint)
+                .frame(maxWidth: .infinity, minHeight: 48)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(MoneyPressStyle())
+        .modifier(FinanceCardChrome())
+    }
+
     private func coverage(_ pal: TripBoardPalette) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             FinanceCardHeader(title: "保障內容")
             if policy.coverage.isEmpty {
-                Button {
-                    actions.tap(.edit(nil))
-                } label: {
-                    Text("寫下保障內容，醫療地圖就看得到 ›")
-                        .font(.subheadline.weight(.bold))
-                        .foregroundStyle(pal.hint)
-                        .frame(maxWidth: .infinity, minHeight: 48)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(MoneyPressStyle())
-                .modifier(FinanceCardChrome())
+                hintButton("寫下保障內容，醫療地圖就看得到 ›", pal: pal)
             } else {
-                VStack(alignment: .leading, spacing: 0) {
-                    ForEach(Array(policy.coverage.enumerated()), id: \.offset) { i, item in
-                        if i > 0 {
-                            Divider().padding(.leading, 14)
-                        }
-                        Text(item)
-                            .font(.subheadline.weight(.semibold))
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 11)
-                    }
-                }
-                .modifier(FinanceCardChrome())
+                coverageList
             }
             if let m = policy.medicalNote {
                 Text(m)
@@ -2550,15 +2874,181 @@ struct WealthPolicySections: View {
         }
     }
 
-    private func payment(_ text: String) -> some View {
+    private var coverageList: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(Array(policy.coverage.enumerated()), id: \.offset) { i, item in
+                if i > 0 {
+                    Divider().padding(.leading, 14)
+                }
+                Text(item)
+                    .font(.subheadline.weight(.semibold))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 11)
+            }
+        }
+        .modifier(FinanceCardChrome())
+    }
+
+    /// ⑤ 誰的保單：要保人・被保險人・受益人（一列一個人）；都沒寫一行〔寫下要保人、被保險人、受益人 ›〕
+    @ViewBuilder
+    private func people(_ pal: TripBoardPalette) -> some View {
+        if policy.peopleRows.isEmpty {
+            VStack(alignment: .leading, spacing: 10) {
+                FinanceCardHeader(title: "誰的保單")
+                hintButton("寫下要保人、被保險人、受益人 ›", pal: pal)
+            }
+        } else {
+            WealthCardInfoSection(title: "誰的保單", rows: policy.peopleRows, reveal: reveal, actions: actions)
+        }
+    }
+}
+
+/// ④ [v25.567] 繳費（judge §4.4 ④：記帳的那一筆）：連著＝整塊點了開記帳那一筆（記帳不擋）＋灰字「在這裡改＝改記帳那一筆…」；
+/// 沒連＝你填的保費＋〔連到記帳的保費〕（要訂閱）〔新建一筆〕（有記帳週期才有；要訂閱 → 確認框）；沒填保費＝「填保費 ›」
+struct WealthCardPolicyPaymentSection: View {
+    let policyId: UUID
+    let policy: WealthCardPolicy
+    let isPremium: Bool
+    let actions: WealthCardActions
+
+    @Environment(\.colorScheme) private var scheme
+
+    var body: some View {
+        let pal = TripBoardPalette(scheme)
         VStack(alignment: .leading, spacing: 10) {
-            FinanceCardHeader(title: "繳費")
-            Text(text)
+            FinanceCardHeader(title: "繳費", trailing: policy.linked ? "記帳那一筆" : nil)
+            card(pal)
+            if let n = policy.paymentNote {
+                Text(n)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func card(_ pal: TripBoardPalette) -> some View {
+        if policy.linked {
+            linkedCard
+        } else {
+            unlinkedCard(pal)
+        }
+    }
+
+    /// 連著：整塊一顆按鈕（打開記帳那一筆；記帳本來就不用訂閱）
+    private var linkedCard: some View {
+        let a = actions
+        let eid = policy.paymentExpenseId
+        return Button {
+            if let eid { a.open(.expense(eid)) }
+        } label: {
+            linkedLabel
+        }
+        .buttonStyle(MoneyPressStyle())
+        .modifier(FinanceCardChrome())
+        .accessibilityHint("點兩下打開記帳那一筆")
+    }
+
+    private var linkedLabel: some View {
+        HStack(alignment: .center, spacing: 10) {
+            Text(policy.payment ?? "")
                 .font(.subheadline.weight(.semibold))
+                .monospacedDigit()
+                .foregroundStyle(Color.primary)
+                .multilineTextAlignment(.leading)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .fixedSize(horizontal: false, vertical: true)
-                .padding(14)
-                .modifier(FinanceCardChrome())
+            Image(systemName: "chevron.right")
+                .font(.caption2.weight(.bold))
+                .foregroundStyle(.tertiary)
         }
+        .padding(14)
+        .contentShape(Rectangle())
+    }
+
+    /// 沒連：你填的保費（或〔填保費 ›〕）＋下面一列兩顆按鈕
+    private func unlinkedCard(_ pal: TripBoardPalette) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if let p = policy.payment {
+                Text(p)
+                    .font(.subheadline.weight(.semibold))
+                    .monospacedDigit()
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(14)
+            } else {
+                fillPremiumRow(pal)
+            }
+            Divider().padding(.leading, 14)
+            buttons(pal)
+        }
+        .modifier(FinanceCardChrome())
+    }
+
+    /// 沒填保費：〔填保費 ›〕打開編輯、捲到保費那一段（要訂閱：卡片頁擋）
+    private func fillPremiumRow(_ pal: TripBoardPalette) -> some View {
+        let a = actions
+        return Button {
+            a.tap(.edit(.premium))
+        } label: {
+            Text("填保費 ›")
+                .font(.subheadline.weight(.bold))
+                .foregroundStyle(pal.hint)
+                .frame(maxWidth: .infinity, minHeight: 46, alignment: .leading)
+                .padding(.horizontal, 14)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(MoneyPressStyle())
+    }
+
+    /// 〔連到記帳的保費〕〔新建一筆〕（一列最多兩顆）
+    private func buttons(_ pal: TripBoardPalette) -> some View {
+        HStack(spacing: 0) {
+            linkButton(pal)
+            if policy.canCreateExpense {
+                Divider().frame(height: 28)
+                createButton(pal)
+            }
+        }
+    }
+
+    private func linkButton(_ pal: TripBoardPalette) -> some View {
+        let a = actions
+        let id = policyId
+        return Button {
+            a.present(.policyLink(id), true)
+        } label: {
+            buttonLabel("連到記帳的保費", icon: "link", pal: pal)
+        }
+        .buttonStyle(MoneyPressStyle())
+    }
+
+    /// 〔新建一筆〕：沒訂閱跳付費說明；有訂閱先問（確認框的字是資料端組好的那一句）
+    private func createButton(_ pal: TripBoardPalette) -> some View {
+        let a = actions
+        let id = policyId
+        let premium = isPremium
+        return Button {
+            if premium {
+                a.confirm(.createPolicyExpense(id))
+            } else {
+                a.askPremium()
+            }
+        } label: {
+            buttonLabel("新建一筆", icon: "plus", pal: pal)
+        }
+        .buttonStyle(MoneyPressStyle())
+    }
+
+    private func buttonLabel(_ title: String, icon: String, pal: TripBoardPalette) -> some View {
+        Label(title, systemImage: icon)
+            .font(.subheadline.weight(.bold))
+            .foregroundStyle(MoneyTone.good.color(pal))
+            .lineLimit(1)
+            .minimumScaleFactor(0.85)
+            .frame(maxWidth: .infinity, minHeight: 46)
+            .contentShape(Rectangle())
     }
 }

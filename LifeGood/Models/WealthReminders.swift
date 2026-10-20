@@ -37,6 +37,10 @@ import UserNotifications
 // • 通知多「定存到期前 7 天 09:00」：「定存 3/15 到期（7 天後）」＋一句到期怎麼處理；**不寫銀行名、金額、帳號、存單號碼**。
 //   每一期的「到期前 7 天提醒」關掉（WealthTimeDeposit.remind == false）就不排；設定的「財富提醒」關掉全部不排。
 //   跟卡費、交割、卡片效期一起排序（近的先排、最多 10 則，照舊）。點了開那個帳戶（userInfo＝帳戶 id）。
+//
+// [v25.567] 財富 v6（build/v6/brief.md §2）：通知多「一年一約保單到期前 30 天 09:00」：「保單 8/15 到期（30 天後）」
+// 「一年一約的保單記得續保；打開看看。」**不寫保險公司、金額、保單號碼**；點了開那張保單（userInfo＝保單 id，卡片頁照子分類開保單頁）。
+// 一年一約＝繳費年期 1 年、不是躉繳（WealthPolicyFacts.Policy.renewal：生效日每年同一天）。收起來的保單不排。行事曆不加。
 
 // MARK: - 1. 財富的日子
 
@@ -246,6 +250,17 @@ enum WealthReminders {
             out.append(WealthReminderJob(key: prefix + "td.\(t.id.uuidString).\(WealthCal.dayKey(m))",
                                          title: "定存 \(WealthFormat.monthDay(m)) 到期（7 天後）", body: body,
                                          fireDate: f, accountId: t.accountId))
+        }
+
+        // [v25.567] 一年一約的保單：到期前 30 天 09:00（judge §6.6；不寫保險公司、金額、保單號碼）
+        for p in facts.policies.policies where !p.hidden {
+            guard let r = p.renewal else { continue }
+            let f = at(WealthCal.addDays(-30, to: r), hour: 9)
+            guard f > now else { continue }
+            out.append(WealthReminderJob(key: prefix + "policy.\(p.id.uuidString).\(WealthCal.dayKey(r))",
+                                         title: "保單 \(WealthFormat.monthDay(r)) 到期（30 天後）",
+                                         body: "一年一約的保單記得續保；打開看看。",
+                                         fireDate: f, accountId: p.id))
         }
 
         // 近的先排（同一個時間照產生的先後；sort 不保證穩定，帶著位置比）
