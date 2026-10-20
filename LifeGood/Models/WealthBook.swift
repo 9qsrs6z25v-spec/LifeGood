@@ -40,6 +40,8 @@ struct WealthBook: Codable, Equatable {
 
     /// [v25.563] 「銀行的數字改成跟存摺一樣」那段說明的 key
     static let passbookNoticeKey = "v2-passbook"
+    /// [v25.568] 「號碼改成加密存了」那段說明的 key（LifeStore.wealthVaultNotice；財富頁打開時說一次）
+    static let vaultNoticeKey = "v7-vault"
 
     init(accounts: [String: WealthAccountPrefs]? = nil, cards: [String: WealthCardPrefs]? = nil,
          dismissed: [String]? = nil, notices: [String]? = nil,

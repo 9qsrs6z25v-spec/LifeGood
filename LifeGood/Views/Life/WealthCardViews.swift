@@ -44,6 +44,13 @@ import UniformTypeIdentifiers
 // • 保單：④ 繳費連著記帳＝整塊點了開記帳那一筆（不擋）；沒連＝〔連到記帳的保費〕（WealthPolicyLinkSheet，要訂閱）
 //  〔新建一筆〕（要訂閱 → 確認框「在記帳建一筆保費？」→ 下一個 runloop LifeStore.savePolicyPremium）；沒填保費＝「填保費 ›」；
 //   ⑤ 誰的保單（WealthCardInfoSection；都沒寫一列「寫下要保人、被保險人、受益人 ›」）。看板風景是踏腳石（.stones）。
+//
+// [v25.568] 財富 v7 G2（build/v7/brief.md §4 G2；judge §4.1 ⑧⑨、§4.2 ⑧⑨、§4.4 ⑦、§7.1、§7.2）：
+// • 〔顯示〕改讀密文：有效期限、保單號碼、悠遊卡／一卡通／Happy Go 卡號＝WealthSecrets.reveal（密文在 WealthVaultBook，
+//   里程碑那一欄只留後 4 碼、是「有沒有」）；完整帳號＝WealthSecrets.revealAccount（帳本的密文；還沒搬的舊明碼也照看得到）。
+//   卡號、安全碼照舊（第 6 題「我要存」：安全碼照樣加密存、Face ID 後 30 秒看得到）。open 一律 openIfKey（CardVault.open 本身也不產生金鑰）。
+// • 30 秒收回、切背景收回、帳號〔複製〕60 秒＋只在這台都不動；這台還沒同步到金鑰：照舊跳說明（第一句改「這台還沒同步到金鑰」）。
+// • 照片 footer：信用卡「…拍到像完整卡號的數字會提醒你。」（提醒在表單加照片那一刻，WealthPhotoScan）；銀行、證券戶「…照片不會加密。」
 
 /// 打開卡片頁時捲到哪一區（財富頁 ③ 點一列＝.upcoming；要確認、四格點了也用）
 enum WealthCardAnchor: String, Hashable {
@@ -633,7 +640,7 @@ struct WealthCardPage: View {
 
     private var revealReason: String {
         switch data?.kind {
-        case .card?: return "檢視完整卡號、有效期限與安全碼"
+        case .card?: return "檢視完整卡號、有效期限、安全碼與票證號碼"
         case .policy?: return "檢視完整保單號碼"
         default: return "檢視完整帳號"
         }
@@ -660,7 +667,7 @@ struct WealthCardPage: View {
             case .ok:
                 let got = secretValues(for: id)
                 if got.missingKey {
-                    revealMessage = "這台裝置沒有解密金鑰，看不到原本存的號碼。"
+                    revealMessage = "這台還沒同步到金鑰，看不到原本存的號碼。"
                         + "金鑰是透過 iCloud 鑰匙圈同步的，請確認「設定 → Apple ID → iCloud → 密碼與鑰匙圈」已開啟；"
                         + "若金鑰已經遺失，請到編輯畫面重新輸入一次。"
                 }
@@ -675,7 +682,9 @@ struct WealthCardPage: View {
         }
     }
 
-    /// 這一筆的完整號碼（只在按了〔顯示〕、Face ID 過了才讀）
+    /// 這一筆的完整號碼（只在按了〔顯示〕、Face ID 過了才讀）。
+    /// [v25.568] 有效期限、票證號、保單號碼讀密文那一包（WealthVaultBook）；完整帳號讀帳本的密文（或還沒搬的舊明碼）。
+    /// 里程碑那一欄是「有沒有」：空的＝沒有這個號碼（還沒更新的 iPad 清掉了，密文不算數）；規則都在 WealthSecrets，這裡只排字
     private func secretValues(for id: UUID) -> (values: [WealthCardInfo.Secret: String], missingKey: Bool) {
         guard let m = lifeStore.milestones.first(where: { $0.id == id }) else { return ([:], false) }
         var v: [WealthCardInfo.Secret: String] = [:]
@@ -683,39 +692,51 @@ struct WealthCardPage: View {
         if let cipher = m.cardNumberCipher {
             if let n = Self.openIfKey(cipher), !n.isEmpty { v[.cardNumber] = CardVault.grouped(n) } else { missing = true }
         }
-        if let ed = m.expiryDate {
-            let c = WealthCal.calendar.dateComponents([.year, .month], from: ed)
-            v[.expiry] = String(format: "%02ld/%02ld", c.month ?? 0, (c.year ?? 0) % 100)
-        }
         // 第 6 題「我要存」：安全碼照樣加密存，跟卡號同一顆 Face ID
         if let cipher = m.cardSecurityCipher {
             if let s = Self.openIfKey(cipher), !s.isEmpty { v[.securityCode] = s } else { missing = true }
         }
-        if let s = Self.trimmed(m.easyCardNumber) { v[.easyCard] = s }
-        if let s = Self.trimmed(m.iPassNumber) {
-            v[.iPass] = CardVault.isSafeToRegroup(s) ? CardVault.grouped(s, limit: CardVault.iPassDigits) : s
+        // 有效期限（「03/27」）、三種票證（卡）、保單號碼（保單）：一個迴圈（那一欄空的＝沒有這個號碼，跳過）
+        let sub = m.financeSubCategory ?? .bank
+        let entry = lifeStore.wealthVault.entry(id)
+        let pairs: [(WealthSecretField, WealthCardInfo.Secret)] = Self.vaultPairs(sub)
+        for (field, slot) in pairs {
+            let r = WealthSecrets.reveal(field, milestone: m, entry: entry,
+                                         open: { (d: Data) -> String? in Self.openIfKey(d) })
+            if r.missingKey { missing = true }
+            guard let s = r.value, !s.isEmpty else { continue }
+            v[slot] = Self.revealedText(s, for: field)
         }
-        if let s = Self.trimmed(m.happyGoNumber) { v[.happyGo] = s }
-        // 帳號：帳本的密文（第 7 題）→ 舊的明碼（v7 才全面搬）
-        if let cipher = lifeStore.wealthBook.account(id).accountNumberCipher {
-            if let s = Self.openIfKey(cipher), !s.isEmpty { v[.account] = s } else { missing = true }
+        // 帳號（銀行、證券戶）：還沒搬的舊明碼 → 帳本的密文（第 7 題）；只剩末 4 碼、沒有密文＝沒有〔顯示〕可看
+        if sub == .bank || sub == .securities {
+            let account = WealthSecrets.revealAccount(milestone: m, prefs: lifeStore.wealthBook.account(id),
+                                                      open: { (d: Data) -> String? in Self.openIfKey(d) })
+            if account.missingKey { missing = true }
+            if let s = account.value, !s.isEmpty { v[.account] = s }
         }
-        // 里程碑上只剩末 4 碼（第 7 題新存的）不算「完整帳號」：密文解不開時照樣說明金鑰不在
-        if v[.account] == nil, let s = Self.trimmed(m.accountNumber), s.count > 4 {
-            v[.account] = s
-            missing = false
-        }
-        if let s = Self.trimmed(m.policyNumber) { v[.policy] = s }
         return (v, missing)
     }
 
-    private static func trimmed(_ s: String?) -> String? {
-        guard let t = s?.trimmingCharacters(in: .whitespaces), !t.isEmpty else { return nil }
-        return t
+    /// 這一種頁要從密文那一包解哪幾個號碼（跟 sim_v7 reveal 同：卡＝有效期限＋三種票證、保單＝保單號碼、其他沒有）
+    private static func vaultPairs(_ sub: FinanceSubCategory) -> [(WealthSecretField, WealthCardInfo.Secret)] {
+        switch sub {
+        case .creditCard:
+            return [(.expiry, .expiry), (.easyCard, .easyCard), (.iPass, .iPass), (.happyGo, .happyGo)]
+        case .insurance:
+            return [(.policy, .policy)]
+        case .bank, .securities:
+            return []
+        }
     }
 
-    /// 這台有金鑰才解：沒有金鑰時 CardVault.open 會先產生一把新的寫進 iCloud 鑰匙圈（可能蓋掉別台那把），
-    /// 而且新的那把也解不開原本的密文——直接當作解不開（照樣跳「金鑰不在這台」的說明）
+    /// 解出來的字怎麼排：一卡通照舊能分組就四碼一組（悠遊卡、Happy Go、保單號碼、有效期限照原樣）
+    private static func revealedText(_ s: String, for field: WealthSecretField) -> String {
+        guard field == .iPass, CardVault.isSafeToRegroup(s) else { return s }
+        return CardVault.grouped(s, limit: CardVault.iPassDigits)
+    }
+
+    /// 這台有金鑰才解。[v25.568] CardVault.open 本身也從不產生金鑰了（CardVault 規矩 3）；這裡照留，
+    /// 沒有金鑰時直接當作解不開（照樣跳「這台還沒同步到金鑰」的說明）
     private static func openIfKey(_ cipher: Data?) -> String? {
         guard CardVault.hasKey else { return nil }
         return CardVault.open(cipher)
@@ -1425,7 +1446,7 @@ struct WealthCreditSections: View {
                 .id(WealthCardAnchor.cardInfo)
             disableButton
             WealthCardPhotosSection(title: "權益與說明", photos: credit.photos,
-                                    footer: "不要拍卡片正反面（完整卡號、安全碼）。",
+                                    footer: "不要拍卡片正反面（完整卡號、安全碼）。拍到像完整卡號的數字會提醒你。",
                                     emptyHint: "權益 DM、帳單說明可以拍起來放這裡（按右上＋）", actions: actions)
                 .id(WealthCardAnchor.photos)
         }
@@ -2039,7 +2060,7 @@ struct WealthBankSections: View {
                 .id(WealthCardAnchor.accountInfo)
             hideButton
             WealthCardPhotosSection(title: "備註與照片", note: bank.note, photos: bank.photos,
-                                    footer: "別拍到完整帳號和密碼。",
+                                    footer: "別拍到完整帳號和密碼。照片不會加密。",
                                     emptyHint: bank.note.isEmpty ? "存摺封面、約定轉帳設定可以拍起來放這裡（按右上＋）" : nil,
                                     actions: actions)
                 .id(WealthCardAnchor.note)
@@ -2525,7 +2546,7 @@ struct WealthBrokerSections: View {
                 .id(WealthCardAnchor.accountInfo)
             if !broker.note.isEmpty || !broker.photos.isEmpty {
                 WealthCardPhotosSection(title: "備註與照片", note: broker.note, photos: broker.photos,
-                                        footer: "別拍到完整帳號和密碼。", actions: actions)
+                                        footer: "別拍到完整帳號和密碼。照片不會加密。", actions: actions)
                     .id(WealthCardAnchor.note)
             }
         }

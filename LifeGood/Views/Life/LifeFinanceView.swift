@@ -172,25 +172,28 @@ private struct WealthPrivacyCurtainCover: View {
 }
 
 // MARK: - [v25.563] 「為什麼數字變了」說明一次（judge §9-1；字由 WealthFacts.passbookNotice 用你自己的數字組好）
+// [v25.568] 同一個框也說「號碼改成加密存了」（LifeStore.wealthVaultNotice）：key＝按〔知道了〕後記成說明過的那個鍵
 
 fileprivate struct WealthNoticeAlert {
     let title: String
     let message: String
+    /// 說明過的鍵（WealthBook.passbookNoticeKey「v2-passbook」、vaultNoticeKey「v7-vault」）
+    let key: String
 }
 
 /// 拆成 ViewModifier：財富頁 body 已經掛了 sheet、toolbar，再塞一個 alert 會讓型別檢查變慢（坑 #7）。
-/// 只有一顆〔知道了〕：按了才記成說明過（onDone），換頁回來不再跳。
+/// 只有一顆〔知道了〕：按了才記成說明過（onDone 帶這個說明的 key），換頁回來不再跳。
 fileprivate struct WealthNoticeAlertModifier: ViewModifier {
     @Binding var notice: WealthNoticeAlert?
-    let onDone: () -> Void
+    let onDone: (String) -> Void
 
     func body(content: Content) -> some View {
         content.alert(
             notice?.title ?? "",
             isPresented: Binding(get: { notice != nil }, set: { if !$0 { notice = nil } }),
             presenting: notice
-        ) { _ in
-            Button("知道了") { onDone() }
+        ) { n in
+            Button("知道了") { onDone(n.key) }
         } message: { n in
             Text(n.message)
         }
@@ -228,6 +231,12 @@ fileprivate struct WealthNoticeAlertModifier: ViewModifier {
 //   車險→VehicleDetailView、房屋險→RealEstateDetailView（捲到房屋資料，同人生 › 房地產）；看完關掉還在財富頁，不切分頁。
 //   儲蓄險、房子在 store 裡找不到（剛被刪了）只寫一行字。〔補保單〕→ WealthAccountEditor(kind: .policy, fromExpense:)（要訂閱，open 擋）。
 // • ⑦ 的資料（保單總表、六格）由 WealthPageData.build 讀 facts.policies 組好，這頁不另外算。
+//
+// [v25.568] 財富 v7 號碼加密（build/v7/brief.md §4 G2-4；judge §8 v7）：
+// • 打開財富頁、回到前景：rollOver() 的下一個 runloop 在自動續存後叫 lifeStore.migrateWealthSecrets()（舊的明碼帳號、有效期限、
+//   保單號碼、票證號搬成密文；這台還沒同步到金鑰的那幾筆整筆不動、下次再搬；沒有要搬的什麼都不做）。
+// • 「號碼改成加密存了」說明一次：同一個 WealthNoticeAlert 框（多一個 key），checkPassbookNotice 之後 checkVaultNotice；
+//   〔知道了〕＝markNoticeSeen(key)（下一個 runloop LifeStore.markWealthNoticeSeen，跟 iCloud 同步，換一台不再說）。
 
 struct LifeFinanceView: View {
     @EnvironmentObject var lifeStore: LifeStore
@@ -286,7 +295,8 @@ struct LifeFinanceView: View {
             .onDeepLinkItem { openDeepLinkedAccount() }
         }
         // [v25.563] 第一次打開：用你自己的數字說明為什麼銀行的數字變了（說一次，跟 iCloud 同步）
-        .modifier(WealthNoticeAlertModifier(notice: $notice, onDone: { markPassbookNoticeSeen() }))
+        // [v25.568] 同一個框再說一次「號碼改成加密存了」（passbook 那個先；兩個不會同時跳）
+        .modifier(WealthNoticeAlertModifier(notice: $notice, onDone: { k in markNoticeSeen(k) }))
     }
 
     /// 捲動頁本身：大標「財富」、底色、右上三顆；進場動畫掛在 ScrollView 本身
@@ -424,6 +434,8 @@ struct LifeFinanceView: View {
     private func pageAppeared() {
         refreshDay()
         checkPassbookNotice()
+        // [v25.568] passbook 那個在說就先不說（checkVaultNotice 先看 notice == nil）；下次打開再說
+        checkVaultNotice()
         if !appeared {
             withAnimation(.easeOut(duration: 0.3)) { appeared = true }
         }
@@ -439,10 +451,13 @@ struct LifeFinanceView: View {
 
     /// [v25.566] 自動續存的那幾期寫進財富帳本（定存那一包）：store 先抓進區域常數、下一個 runloop 才寫
     ///（不在畫面更新當中寫 store）；沒有到期續存的什麼都不做，不會白存一次
+    /// [v25.568] 同一個 runloop 再把還沒搬的舊明碼號碼搬成密文（LifeStore.migrateWealthSecrets：這台還沒同步到金鑰的那幾筆
+    /// 整筆不動、下次再搬；沒有要搬的什麼都不做）——金鑰剛從 iCloud 鑰匙圈同步過來時，打開財富頁、回到前景就收掉
     private func rollOver() {
         let life = lifeStore
         DispatchQueue.main.async {
             life.rollOverTimeDeposits()
+            life.migrateWealthSecrets()
         }
     }
 
@@ -742,17 +757,25 @@ struct LifeFinanceView: View {
               !lifeStore.wealthBook.hasNotice(WealthBook.passbookNoticeKey) else { return }
         let facts = lifeStore.wealthFacts(expense: expenseStore, finance: financeStore)
         if let n = facts.passbookNotice {
-            notice = WealthNoticeAlert(title: n.title, message: n.message)
+            notice = WealthNoticeAlert(title: n.title, message: n.message, key: WealthBook.passbookNoticeKey)
         } else if !facts.banks.isEmpty {
-            markPassbookNoticeSeen()
+            markNoticeSeen(WealthBook.passbookNoticeKey)
         }
     }
 
+    /// [v25.568] 「號碼改成加密存了」說明一次（judge §8 v7【待確認】、待決定 7：還沒更新的 iPad 只看得到後 4 碼）。
+    /// 說明過（WealthBook.vaultNoticeKey，跟 iCloud 同步）、一筆加密的帳號／有效期限／保單號碼／票證號都沒有＝不說（LifeStore.wealthVaultNotice）；
+    /// 「為什麼數字變了」正在說就等下次打開
+    private func checkVaultNotice() {
+        guard notice == nil, let n = lifeStore.wealthVaultNotice else { return }
+        notice = WealthNoticeAlert(title: n.title, message: n.message, key: WealthBook.vaultNoticeKey)
+    }
+
     /// 記成說明過：store 先抓進區域常數、下一個 runloop 才寫（alert 正在收起來）
-    private func markPassbookNoticeSeen() {
+    private func markNoticeSeen(_ key: String) {
         let life = lifeStore
         DispatchQueue.main.async {
-            life.markWealthNoticeSeen(WealthBook.passbookNoticeKey)
+            life.markWealthNoticeSeen(key)
         }
     }
 }

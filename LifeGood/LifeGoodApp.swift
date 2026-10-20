@@ -163,6 +163,9 @@ struct LifeGoodApp: App {
                     // 掛好監聽（記帳／理財／人生一改，防抖 3 秒重排）、馬上排一次；第二次呼叫什麼都不做。
                     // 同步呼叫、不 await：授權照 MeetingReminders 的慣例，有要排的才問（WealthReminderCenter 裡）
                     WealthReminderCenter.shared.start(expense: expenseStore, finance: financeStore, life: lifeStore)
+                    // [財富 v7] 給網頁版的財富數字（life_wealth_facts_v1：合計、暱稱、後 4 碼、存摺上、要繳、交割、定存到期日；
+                    // 沒有完整號碼、有效期限）：掛好監聽（防抖 5 秒）、馬上寫一次；跟上次一樣就不寫。第二次呼叫什麼都不做
+                    WealthWebFactsWriter.shared.start(expense: expenseStore, finance: financeStore, life: lifeStore)
                     // [v25.552] 找上次跑到一半被關掉、還沒存的那幾趟（讀檔在背景，很快）。
                     // 放在其他 await 前面：開場謝幕（約 2 秒）之前就找好，LaunchGate 謝幕後問一次
                     await RunRecoveryCenter.shared.scan()
@@ -210,6 +213,8 @@ struct LifeGoodApp: App {
                         )
                         // [v25.545] 保底：離開 App 那一刻小工具的快照一定是最新的
                         WidgetSnapshotWriter.shared.writeNow()
+                        // [財富 v7] 網頁版那一包也寫一次（force：平常 App 在背景時寫手不寫，這裡是你剛離開，以這台為準）
+                        WealthWebFactsWriter.shared.writeNow(force: true)
                     } else if phase == .active {
                         // [健康 v6] 正在記錄、跑步的即時動態不見了（系統 8 小時收掉、一開始系統關著）就重開；快 8 小時了收舊開新
                         RunActivityCenter.shared.appBecameActive()

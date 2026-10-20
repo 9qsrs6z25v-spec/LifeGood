@@ -1537,6 +1537,7 @@ struct WealthFacts {
         let linkedRaw: UUID?
         // [v25.565] v4 加的（build 建好卡之後才填；memberwise init 不用傳）
         /// 卡片有效期限那個月的 1 號（里程碑 expiryDate 只取年月；沒填 nil）。只給行事曆「卡片到期」、要確認 #12、通知用
+        /// [v25.568] v7 起有效期限是密文：build 的 expiryMonths（LifeStore.cardExpiryMonths 解好的）優先。網頁版那一包不放它
         var expiryMonth: Date? = nil
         /// 接下來要繳的幾期（已結帳還沒繳的、這一期、下一期；照截止日；金額 0 的不列）
         var dues: [WealthCardDue] = []
@@ -2080,11 +2081,13 @@ struct WealthFacts {
 
     /// 一次建好全部（很重：展開每一期）。全 App 請用 LifeStore.wealthFacts(expense:finance:) 拿快取的。
     /// [v25.566] deposits：財富帳本的定存那一包（LifeStore.wealthDeposits）
+    /// [v25.568] expiryMonths：每張卡有效期限那個月 1 號（LifeStore.cardExpiryMonths：v7 起有效期限是密文，那邊解好給）；
+    /// 沒給（nil）或沒有那張卡＝照里程碑的 expiryDate（還沒搬的明碼；搬完是 nil＝沒有效期限）
     static func build(milestones: [LifeMilestone], book: WealthBook, deposits: WealthDepositBook = WealthDepositBook(),
                       expenses: [Expense], incomes: [Income],
                       stocks: [Stock], rates: FinanceRates, now: Date,
                       insurances: [SavingsInsurance] = [], vehicles: [Vehicle] = [],
-                      realEstates: [RealEstate] = []) -> WealthFacts {
+                      realEstates: [RealEstate] = [], expiryMonths: [UUID: Date]? = nil) -> WealthFacts {
         let today = WealthCal.day(now)
         let horizon = WealthCal.addDays(upcomingDays, to: today)
         let finance = milestones.filter { $0.category == .achievement && $0.financeSubCategory != nil }
@@ -2164,7 +2167,7 @@ struct WealthFacts {
         for i in cards.indices {
             guard let cm = cardMsById[cards[i].id] else { continue }
             let dues = makeDues(cards[i], milestone: cm, ctx: ctx, bankIds: bankIds)
-            cards[i].expiryMonth = cm.expiryDate.map { WealthCal.startOfMonth($0) }
+            cards[i].expiryMonth = expiryMonths?[cm.id] ?? cm.expiryDate.map { WealthCal.startOfMonth($0) }
             cards[i].dues = dues
         }
         // [v25.566] 定存：續存鏈（自動續存算出來、帳本還沒寫進去的那幾期也在）→ 每一期的狀態、動到哪個帳戶的哪一天

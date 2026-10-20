@@ -12,7 +12,7 @@
 // 常數
 // ---------------------------------------------------------------------------
 /** 網頁版自己的版本（與 App 版本無關；改網頁不再動 App 版號） */
-const WEB_VERSION = '1.12';
+const WEB_VERSION = '1.13';
 const CONTAINER_ID = 'iCloud.com.lifegood.app';
 const ZONE_NAME = 'LifeGoodZone';
 const TOKEN_KEY = 'lifegood_ck_token';
@@ -41,6 +41,8 @@ const KV_KEYS = {
   stocks: 'lifegood_stocks',
   vehicles: 'lifegood_vehicles',
   realEstates: 'lifegood_realestates',
+  // 財富：App 算好的一套數字（v1.13；App v25.568 起寫，WealthWebFacts.swift）。單一物件、日期是字串「2026-10-27」
+  wealthFacts: 'life_wealth_facts_v1',
 };
 // JSONEncoder 預設把 Date 編成「距 2001-01-01 的秒數」；這些欄位名一律還原成 Date
 const DATE_KEYS = new Set([
@@ -67,6 +69,7 @@ const Store = {
   subs: [], depts: [], orgPeople: [], grades: [], equipment: [], milestones: [], cards: [], personalEvents: [],
   expenses: [], incomes: [], currencyRates: [], insurances: [], stocks: [], vehicles: [], realEstates: [],
   profile: {}, health: {}, familyMembers: [], relationships: [], pets: [], familyTasks: [], ballots: [],
+  wealthFacts: null,
   source: '', loadedAt: null, ctx: null,
 };
 let ckContainer = null;
@@ -177,7 +180,8 @@ async function loadFromCloud() {
   const out = {};
   const entries = Object.entries(KV_KEYS);
   const results = await Promise.all(entries.map(([k, key]) => fetchKV(db, key)));
-  entries.forEach(([k], i) => { out[k] = results[i] || []; });
+  // 財富那一包讀不到給 null（不是陣列；applyData 會再驗一次格式）
+  entries.forEach(([k], i) => { out[k] = results[i] || (k === 'wealthFacts' ? null : []); });
   if (!out.subs.length && !out.depts.length && !out.orgPeople.length) {
     throw new Error('iCloud 裡沒有找到部屬／部門資料。請確認是用「擁有資料的那個 Apple ID」登入，且 App 已完成一次 iCloud 同步。');
   }
@@ -191,6 +195,8 @@ function applyData(raw, source) {
   Store.fingerprint = fingerprint;
   for (const k of Object.keys(KV_KEYS)) {
     const v = raw[k];
+    // 財富那一包：單一物件、不轉日期（日期是字串）；格式不對當作沒有（退回舊算法）
+    if (k === 'wealthFacts') { Store.wealthFacts = validWealthFacts(v); continue; }
     // life_profile / life_health_profile 是單一物件，其餘都是陣列
     Store[k] = (k === 'profile' || k === 'health')
       ? reviveDates(v && typeof v === 'object' && !Array.isArray(v) ? v : {})
@@ -1518,8 +1524,11 @@ function financeSummary() {
   const fm = financeMilestones();
   const banks = fm.filter((m) => m.financeSubCategory === '銀行' && !m.isDisabled);
   const cardsMs = fm.filter((m) => m.financeSubCategory === '信用卡');
-  const bankRows = banks.map((m) => { const bal = bankBalances(m); return { m, bal, twd: balanceTWD(bal) }; }).sort((a, b) => b.twd - a.twd);
-  const bankTotal = bankRows.reduce((a, r) => a + r.twd, 0);
+  // v1.13：讀得到 App 算好的那一包（life_wealth_facts_v1）就照它（存款合計、每個帳戶，跟 App 同一個數）；讀不到才用舊算法
+  const wf = wealthFactsOK();
+  const bankRows = wf ? wealthBankRows(wf)
+    : banks.map((m) => { const bal = bankBalances(m); return { m, bal, twd: balanceTWD(bal) }; }).sort((a, b) => b.twd - a.twd);
+  const bankTotal = wf ? wfNum(wf.cash) : bankRows.reduce((a, r) => a + r.twd, 0);
   const activeStocks = Store.stocks.filter((s) => !s.isSold && s.shares > 0).map((s) => Object.assign({ s }, stockView(s)));
   const stockMV = activeStocks.reduce((a, x) => a + x.mv, 0), stockCost = activeStocks.reduce((a, x) => a + x.cost, 0);
   const insTotal = Store.insurances.reduce((a, i) => a + (i.currentValue || 0) * rateOf(i.currencyCode), 0);
@@ -1527,7 +1536,10 @@ function financeSummary() {
   const vhHeld = Store.vehicles.filter((v) => !v.soldDate); const vhValue = vhHeld.reduce((a, v) => a + (v.currentValue || 0), 0);
   const thisKey = monthKeyOf(now);
   const cardMonth = (c) => creditCardEntries(c.id, now).filter((e) => monthKeyOf(e.date) === thisKey).reduce((a, e) => a + e.amount, 0);
-  return { now, fm, banks, cardsMs, bankRows, bankTotal, activeStocks, stockMV, stockCost, insTotal, reHeld, reValue, reDebt, vhHeld, vhValue, netWorth: bankTotal + stockMV + insTotal + reValue + vhValue - reDebt, thisKey, cardMonth };
+  // 淨資產：App 算的（理財總覽那個數：含存款、扣卡費與待交割）；那一包沒有才用舊算法
+  const netFromApp = !!(wf && typeof wf.netWorth === 'number' && isFinite(wf.netWorth));
+  const netWorth = netFromApp ? wf.netWorth : bankTotal + stockMV + insTotal + reValue + vhValue - reDebt;
+  return { now, fm, banks, cardsMs, bankRows, bankTotal, activeStocks, stockMV, stockCost, insTotal, reHeld, reValue, reDebt, vhHeld, vhValue, netWorth, netFromApp, wf, thisKey, cardMonth };
 }
 const kpiCard = (label, value, cls = '', foot = '') => `<div class="card kpi"><div class="label">${label}</div><div class="value ${cls}" style="font-size:22px">${value}</div>${foot ? `<div class="foot">${foot}</div>` : ''}</div>`;
 function chartColors() { const css = getComputedStyle(document.documentElement); return { text: css.getPropertyValue('--text').trim() || '#000', line: css.getPropertyValue('--line').trim() || 'rgba(0,0,0,0.1)' }; }
@@ -1660,7 +1672,7 @@ function renderFinanceHome(main, tab, id) {
     body = `<div class="card"><h3>資產配置（台幣等值）</h3><div style="display:flex;height:22px;border-radius:8px;overflow:hidden;border:1px solid var(--line)">${alloc.map(([l, v, c]) => `<div title="${l} ${fmtMoney(v)}" style="width:${v / total * 100}%;background:${c}"></div>`).join('')}</div><div class="chips" style="margin-top:10px">${alloc.map(([l, v, c]) => `<span class="chip" style="background:${c}22;color:${c}">${l} ${fmtMoney(v)}・${Math.round(v / total * 100)}%</span>`).join('')}${S.reDebt ? `<span class="chip red">房貸餘額 −${fmtMoney(S.reDebt)}</span>` : ''}</div></div>
     <div class="grid cols-2 mt">
       <div class="card"><h3>持股市值前五 <span class="count">${S.activeStocks.length}</span></h3><div class="list">${S.activeStocks.sort((a, b) => b.mv - a.mv).slice(0, 5).map((x) => `<a class="item clickable" href="#/finance/stock/${x.s.id}"><div class="avatar sm" style="background:linear-gradient(135deg,#34c759,#30b0c7)">${esc(initial(x.s.symbol))}</div><div class="main-text"><div class="title">${esc(x.s.symbol)} ${esc(x.s.name)}</div><div class="meta">${x.s.shares.toLocaleString()} 股・成本 ${fmtMoney(x.cost)}</div></div><div style="text-align:right"><div class="score s80">${fmtMoney(x.mv)}</div><div class="small" style="color:${x.pl >= 0 ? 'var(--green)' : 'var(--red)'}">${x.pl >= 0 ? '+' : ''}${x.rate.toFixed(1)}%</div></div></a>`).join('') || '<div class="empty">尚無持股</div>'}</div></div>
-      <div class="card"><h3>銀行帳戶 <span class="count">${S.bankRows.length}</span></h3><div class="list">${S.bankRows.map(({ m, bal, twd }) => `<a class="item clickable" href="#/life/wealth"><div class="avatar sm" style="background:linear-gradient(135deg,#007aff,#5ac8fa)">${esc(initial(m.bankName || m.title))}</div><div class="main-text"><div class="title">${esc(m.title)}</div><div class="meta">${esc([m.bankName, m.branchName, m.bankAccountType].filter(Boolean).join('・'))}${Object.keys(bal).length > 1 ? '・' + Object.entries(bal).map(([c, v]) => `${c} ${Math.round(v).toLocaleString()}`).join('／') : ''}</div></div><span class="score ${twd >= 0 ? 's80' : 's0'}">${fmtMoney(twd)}</span></a>`).join('') || '<div class="empty">尚無銀行帳戶</div>'}</div></div>
+      <div class="card"><h3>銀行帳戶 <span class="count">${S.bankRows.length}</span></h3><div class="list">${S.bankRows.map(({ m, bal, twd, wfa }) => `<a class="item clickable" href="#/life/wealth"><div class="avatar sm" style="background:linear-gradient(135deg,#007aff,#5ac8fa)">${esc(initial(m.bankName || m.title))}</div><div class="main-text"><div class="title">${esc(wfa ? wfa.name : m.title)}</div><div class="meta">${esc((wfa ? [wfa.bank, maskTail(wfa.last4), wfNum(wfa.depositNTD) > 0.004 ? '含定存 ' + fmtNT(wfa.depositNTD) : ''] : [m.bankName, m.branchName, m.bankAccountType]).filter(Boolean).join('・'))}${Object.keys(bal).length > 1 ? '・' + Object.entries(bal).map(([c, v]) => `${esc(c)} ${Math.round(v).toLocaleString()}`).join('／') : ''}</div></div><span class="score ${twd >= 0 ? 's80' : 's0'}">${fmtMoney(twd)}</span></a>`).join('') || '<div class="empty">尚無銀行帳戶</div>'}</div></div>
     </div>`;
   } else if (tab === 'insurance') {
     body = `<div class="card table-wrap"><h3>儲蓄險 <span class="count">${Store.insurances.length}</span><span class="spacer"></span><span class="muted small">現值合計 ${fmtMoney(S.insTotal)}</span></h3><table class="tbl"><thead><tr><th>名稱</th><th>公司</th><th class="num">每期保費</th><th>週期・利率</th><th>期間</th><th class="num">目前現值</th><th class="num">預期到期</th><th>連結固定支出</th></tr></thead><tbody>${Store.insurances.map((i) => { const total = Math.max(1, (i.maturityDate - i.startDate)); const pct = Math.min(100, Math.max(0, Math.round((now - i.startDate) / total * 100))); const linked = i.linkedExpenseId && Store.expenses.find((e) => e.id === i.linkedExpenseId); return `<tr><td><b>${esc(i.name)}</b>${i.note ? `<div class="muted small">${esc(i.note)}</div>` : ''}</td><td>${esc(i.company)}</td><td class="num">${fmtAmt(i.premiumAmount, i.currencyCode)}</td><td>${esc(i.paymentPeriod)}・${i.annualRate}%</td><td>${fmtDate(i.startDate).split(' ')[0]} – ${fmtDate(i.maturityDate).split(' ')[0]}<div style="height:4px;border-radius:2px;background:var(--card2);margin-top:4px"><div style="width:${pct}%;height:100%;background:var(--purple);border-radius:2px"></div></div><div class="muted small">${pct}%・剩 ${Math.max(0, Math.round((i.maturityDate - now) / 86400000 / 30))} 個月</div></td><td class="num"><b>${fmtAmt(i.currentValue, i.currencyCode)}</b>${i.currencyCode !== 'NT$' ? `<div class="muted small">≈ ${fmtMoney(i.currentValue * rateOf(i.currencyCode))}</div>` : ''}</td><td class="num">${fmtAmt(i.expectedReturn, i.currencyCode)}</td><td class="muted small">${linked ? esc(linked.title) : '—'}</td></tr>`; }).join('') || '<tr><td colspan="8" class="empty">尚無儲蓄險</td></tr>'}</tbody></table></div>`;
@@ -1705,8 +1717,8 @@ function renderFinanceHome(main, tab, id) {
   main.innerHTML = `
     ${pageHead('理財', `台幣等值概算・${fmtDate(now)}`)}
     <div class="grid cols-5">
-      ${kpiCard('淨資產概算', fmtMoney(S.netWorth), S.netWorth >= 0 ? 'green' : 'red', '銀行＋股票＋保險＋房產＋車輛 − 房貸餘額')}
-      ${kpiCard('銀行總餘額', fmtMoney(S.bankTotal), '', `${S.bankRows.length} 個帳戶`)}
+      ${kpiCard('淨資產概算', fmtMoney(S.netWorth), S.netWorth >= 0 ? 'green' : 'red', S.netFromApp ? `App 算的（含存款，扣卡費與交割）・${esc(wfMD(S.wf.asOf))}` : '銀行＋股票＋保險＋房產＋車輛 − 房貸餘額')}
+      ${kpiCard('銀行總餘額', fmtMoney(S.bankTotal), '', S.wf ? `App 的存款合計・${S.bankRows.length} 個帳戶` : `${S.bankRows.length} 個帳戶`)}
       ${kpiCard('股票市值', fmtMoney(S.stockMV), '', `損益 ${S.stockMV - S.stockCost >= 0 ? '+' : ''}${fmtMoney(S.stockMV - S.stockCost)}`)}
       ${kpiCard('儲蓄險現值', fmtMoney(S.insTotal), '', `${Store.insurances.length} 張`)}
       ${kpiCard('房產・車輛', fmtMoney(S.reValue + S.vhValue), '', S.reDebt ? `房貸餘額 ${fmtMoney(S.reDebt)}` : '')}

@@ -51,6 +51,14 @@ import SwiftUI
 //   ④ 繳費：連著＝「年繳 24,000・每年 8/15・刷 CUBE・第 6／20 期」整塊點了開記帳那一筆；沒連＝你填的保費＋〔連到記帳的保費〕〔新建一筆〕
 //  （新建的字與 WealthPolicyPremiumDraft 在這裡組好：第一期 WealthPolicyLink.firstDue，以前的不補記）；⑤ 誰的保單（要保人・被保險人・受益人）；
 //   ⑦ 資料多「繳費年期」，被保險人／要保人／受益人搬到 ⑤；保單號碼照 v3（只露後 4 碼、〔顯示〕過 Face ID）。找不到那張（不該發生）照 v3 的寫法退回。
+//
+// [v25.568] 財富 v7 G2（build/v7/brief.md §4 G2；judge §4.1 ⑧、§4.2 ⑧、§4.4 ⑦、§7.1）：
+// • 有效期限、保單號碼、悠遊卡／一卡通／Happy Go 卡號改成密文（WealthVaultBook，同步鍵 life_wealth_vault_v1；完整帳號照舊在帳本
+//   accounts[id].accountNumberCipher）。ctx 多帶這一筆的密文（WealthCardCtx.vault＝life.wealthVault.entry(id)）。
+// • ⑧ 卡片資料「有效期限 ••／••〔顯示〕」：里程碑上還沒搬的明碼（expiryDate）或密文那一包有 expiryCipher 都算有；值照舊只放遮好的字。
+// • 票證、保單號碼那幾列照舊讀里程碑那一欄（v7 起只存後 4 碼，CardVault.maskedTail 照樣「•••• 4321」）：那一欄空的＝沒有這個號碼。
+//   帳號那一列照舊（帳本有密文或里程碑上還是完整的舊明碼才有〔顯示〕）。完整的字一律由卡片頁〔顯示〕過 Face ID 後才解
+//  （WealthSecrets.reveal／revealAccount），這裡從不解密文（CardVault 規矩 4）。
 
 // MARK: - 型別
 
@@ -466,7 +474,8 @@ struct WealthCardData {
                               expenses: expenses, expensesById: byId, incomes: expense.incomes,
                               stocks: finance.stocks, rates: FinanceRates(expense), today: WealthCal.day(now),
                               masked: masked, rateDate: AppQuoteClock.ratesUpdatedAt,
-                              depositBankIds: Set(life.wealthDeposits.all.map { $0.bankId }))
+                              depositBankIds: Set(life.wealthDeposits.all.map { $0.bankId }),
+                              vault: life.wealthVault.entry(m.id))
         switch m.financeSubCategory ?? .bank {
         case .creditCard:
             guard let c = facts.card(id) else { return nil }
@@ -500,6 +509,8 @@ private struct WealthCardCtx {
     let rateDate: Date?
     /// [v25.566] 定存帳本裡有過任何一期的帳戶（含已經結束的）：舊定存帳戶的〔補上利率和到期日〕跟要確認同一條規則
     let depositBankIds: Set<UUID>
+    /// [v25.568] 這一筆的號碼密文（有效期限、保單號碼、票證號；只用來判斷「有沒有」那一列，這裡從不解開）
+    let vault: WealthVaultEntry
 }
 
 // MARK: - 字
@@ -1163,7 +1174,8 @@ extension WealthCardData {
             rows.append(WealthCardInfo(id: "number", label: "卡號", value: "•••• " + (last4 ?? "••••"),
                                        secret: m.cardNumberCipher != nil ? .cardNumber : nil))
         }
-        if m.expiryDate != nil {
+        // [v25.568] 有效期限 v7 起是密文（WealthVaultBook）；還沒搬的舊明碼也算有。值照舊遮好，〔顯示〕過 Face ID 才解
+        if m.expiryDate != nil || x.vault.expiryCipher != nil {
             rows.append(WealthCardInfo(id: "expiry", label: "有效期限", value: "••／••", secret: .expiry))
         }
         // 第 6 題「我要存」：有存安全碼才多這一列（跟卡號同一顆 Face ID）

@@ -2227,9 +2227,11 @@ struct SettingsView: View {
         guard !exportBusy else { return }
         exportBusy = true
         let payload = UnifiedExport.build(expense: store, finance: financeStore, life: lifeStore)
+        // [v25.568] 財富帳戶清單（暱稱、銀行、末 4 碼、存摺上、結帳日／截止日；不含完整號碼）：主執行緒先組好
+        let accounts = WealthWebFacts.make(life: lifeStore, expense: store, finance: financeStore)
         let filename = "LifeGood_\(dateStamp()).csv"
         Task.detached {
-            let csv = UnifiedExporter.exportCSV(payload)
+            let csv = UnifiedExporter.exportCSV(payload, accounts: accounts)
             let url = FileManager.default.temporaryDirectory.appendingPathComponent(filename)
             do {
                 try csv.write(to: url, atomically: true, encoding: .utf8)

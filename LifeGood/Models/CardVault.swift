@@ -16,6 +16,24 @@ import LocalAuthentication
 //     （與 AIKeychainStore 存 API Key 的做法同一套思路。）
 //
 // 要看明碼一定要先過 Face ID／Touch ID／裝置密碼。
+//
+// MARK: - [v25.568] 規矩（財富 v7；wealth/judge.md §7、build/v7/brief.md §1）—— 改這個檔、叫這個檔之前先讀
+//
+// 1. 一把金鑰：service／account 不變（com.lifegood.cardvault／card.aeskey.v1），可同步鑰匙圈（AfterFirstUnlock）。
+//    卡號、安全碼、完整帳號、有效期限、保單號碼、票證號全部用這一把。
+// 2. 只有「整份資料裡一筆密文都沒有」的時候，seal 才可以產生新金鑰（第一台裝置第一次存號碼）。
+//    有密文、這台卻沒有金鑰＝在別台存的、iCloud 鑰匙圈還沒同步過來：這時產生新金鑰會蓋掉別台那把，別台存的號碼全部解不開。
+//    所以 seal 會擋下（回 nil）；表單存新號碼前先看 keyMissingHere，擋下並說明「這台還沒同步到金鑰」（keyMissingMessage），
+//    原本的密文原封留著——絕不因為這台解不開就洗掉別台的密文。「有沒有密文」由 LifeStore 告訴這裡（cipherProbe）。
+// 3. open 永遠不產生金鑰（v3 以前會，v25.564 起畫面先看 hasKey 擋著；v7 起這裡本身就不會）。
+// 4. 任何分享、匯出、CSV、小工具、鎖定畫面、通知、網頁版（life_wealth_facts_v1）都不准呼叫 open；
+//    明碼只活在畫面的 @State 和記憶體（看完 30 秒收回），不寫進任何 Codable 結構、UserDefaults、log、錯誤回報。
+//    例外只有一個：App 裡的行事曆「卡片到期」、要確認 #12、通知要知道有效期限是哪個月（judge §7.1 行事曆「只有卡片到期那天」）：
+//    LifeStore.cardExpiryMonths 在這台有金鑰時解開、只取年月、只放記憶體。
+// 5. 新的密文欄位只放兩種地方：舊版認得、存檔會照寫回去的欄位（LifeMilestone.cardNumberCipher／cardSecurityCipher、
+//    財富帳本 accounts[id].accountNumberCipher），或舊版不認得、不會碰的同步鍵（WealthVaultBook，life_wealth_vault_v1）。
+//    不要加在舊版認得的那一包的新欄位上：還沒更新的 iPad 存一次就把它洗掉，明碼又已經清了＝號碼永遠不見。
+// 6. 完整備份、「記帳理財」匯出只帶密文（金鑰不在備份裡：換一台同一個 Apple ID 的裝置，鑰匙圈同步過來才解得開）。
 
 enum CardVault {
 
@@ -26,21 +44,33 @@ enum CardVault {
     /// 解完一次就留著，避免每次顯示都去敲 Keychain
     private static var cachedKey: SymmetricKey?
 
-    /// 取得（必要時產生）卡號加密金鑰。金鑰寫不進 Keychain 時回 nil——
-    /// 此時寧可不存，也不要退而求其次存明碼。
-    private static func key() -> SymmetricKey? {
+    /// [v25.568] 這台已經有的金鑰（快取或鑰匙圈；不是 32 位元組的當沒有）。**從不產生新的**（規矩 3）
+    private static func existingKey() -> SymmetricKey? {
         if let cachedKey { return cachedKey }
-        if let data = readKeyData(), data.count == 32 {
-            let k = SymmetricKey(data: data)
-            cachedKey = k
-            return k
-        }
+        guard let data = readKeyData(), data.count == 32 else { return nil }
+        let k = SymmetricKey(data: data)
+        cachedKey = k
+        return k
+    }
+
+    /// [v25.568] 封密文用的金鑰：這台有就用；沒有、而且整份資料裡一筆密文都沒有，才產生一把新的寫進可同步的鑰匙圈（規矩 2）。
+    /// 有密文、這台沒有金鑰＝還沒同步過來：回 nil（不產生，免得蓋掉別台那把）。金鑰寫不進 Keychain 也回 nil——
+    /// 此時寧可不存，也不要退而求其次存明碼。
+    private static func keyForSealing() -> SymmetricKey? {
+        if let k = existingKey() { return k }
+        guard !anyCipherExists else { return nil }
         let fresh = SymmetricKey(size: .bits256)
         let data = fresh.withUnsafeBytes { Data($0) }
         guard writeKeyData(data) else { return nil }
         cachedKey = fresh
         return fresh
     }
+
+    /// [v25.568] 整份資料裡有沒有任何號碼密文（LifeStore 在 init 一開始掛上：LifeStore.hasAnyWealthCipher）。
+    /// 還沒掛上（理論上不會）一律當「有」：寧可擋下不存，也不要產生新金鑰蓋掉別台那把
+    static var cipherProbe: (() -> Bool)? = nil
+
+    private static var anyCipherExists: Bool { cipherProbe?() ?? true }
 
     private static func baseQuery() -> [String: Any] {
         [
@@ -72,24 +102,38 @@ enum CardVault {
     }
 
     /// 這台裝置上到底有沒有金鑰。沒有金鑰又有密文＝在別台裝置存的、這台解不開。
-    static var hasKey: Bool { cachedKey != nil || readKeyData() != nil }
+    /// [v25.568] 改看 existingKey（鑰匙圈裡那筆不是 32 位元組的也當沒有：以前會被 key() 當成沒有、產生新的蓋掉）
+    static var hasKey: Bool { existingKey() != nil }
+
+    /// [v25.568] 這台還沒同步到金鑰：有密文、這台沒有金鑰。這時 seal 一律回 nil（規矩 2）；
+    /// 表單要存「你剛打的新號碼」前先看這個，擋下並跳 keyMissingMessage（舊的明碼原封不動照舊留著，不擋）
+    static var keyMissingHere: Bool { !hasKey && anyCipherExists }
+
+    /// [v25.568] 這台還沒同步到金鑰時，表單存新號碼的說明（what：「卡號」「完整帳號」「有效期限」「保單號碼」「悠遊卡卡號」…）
+    static func keyMissingMessage(_ what: String) -> String {
+        "這台還沒同步到金鑰，剛打的" + what + "這次存不了：在這台產生新的金鑰，會蓋掉另一台裝置的金鑰，"
+            + "原本存的號碼就再也解不開了。請確認「設定 → Apple ID → iCloud → 密碼與鑰匙圈」已開啟，等一下再存；"
+            + "或先把剛打的" + what + "清掉，其他的照樣可以存。原本存的號碼都還在。"
+    }
 
     // MARK: - 加解密
 
     /// 把明碼封成密文。空字串回 nil（等同「沒有這筆資料」）。
+    /// [v25.568] 這台還沒同步到金鑰（keyMissingHere）也回 nil，而且不產生新金鑰（規矩 2）：呼叫端先看 keyMissingHere 分清楚
     static func seal(_ text: String) -> Data? {
         let trimmed = text.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty,
-              let key = key(),
+              let key = keyForSealing(),
               let plain = trimmed.data(using: .utf8),
               let box = try? AES.GCM.seal(plain, using: key) else { return nil }
         return box.combined
     }
 
     /// 解出明碼。金鑰不在這台裝置、或密文壞掉時回 nil。
+    /// [v25.568] 只用這台已經有的金鑰，從不產生新的（規矩 3）。分享、匯出、小工具、網頁版不准叫（規矩 4）
     static func open(_ data: Data?) -> String? {
         guard let data,
-              let key = key(),
+              let key = existingKey(),
               let box = try? AES.GCM.SealedBox(combined: data),
               let plain = try? AES.GCM.open(box, using: key) else { return nil }
         return String(data: plain, encoding: .utf8)
@@ -144,12 +188,16 @@ enum CardVault {
 
     /// [v25.562] 帳號、保單號碼、票證號碼畫面上只露後 4 碼：「•••• 5678」。
     /// 有數字就取最後 4 個數字（「2061-1234-5678-90」→「•••• 7890」）；一個數字都沒有就取最後 4 個字。
-    /// 只遮畫面，存法不動（完整的仍是明碼存，v7 才改密文）。
+    /// [v25.568] 存法 v7 起改密文：完整的封在密文裡，里程碑上那一欄只留 tail4（舊 iPad、網頁版、這裡照讀）
     static func maskedTail(_ raw: String) -> String {
+        "•••• " + tail4(raw)
+    }
+
+    /// [v25.568] 後 4 碼（maskedTail 的那 4 個字；網頁版 maskTail 同一條規則）：有數字取最後 4 個數字，沒有數字取最後 4 個字
+    static func tail4(_ raw: String) -> String {
         let trimmed = raw.trimmingCharacters(in: .whitespaces)
         let digitsOnly = trimmed.filter(\.isNumber)
-        let tail = digitsOnly.isEmpty ? String(trimmed.suffix(4)) : String(digitsOnly.suffix(4))
-        return "•••• " + tail
+        return digitsOnly.isEmpty ? String(trimmed.suffix(4)) : String(digitsOnly.suffix(4))
     }
 
     /// 檢核碼遮罩（3 碼；美國運通是 4 碼，一樣照長度出點）

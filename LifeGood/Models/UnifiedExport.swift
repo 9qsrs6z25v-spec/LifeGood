@@ -137,6 +137,9 @@ struct UnifiedExport: Codable {
         var wealthBook: WealthBook?
         /// [v25.566] 財富帳本・定存那一包（WealthDepositBook）。舊備份沒有，所以是 Optional；跟財富帳本一起走
         var wealthDeposits: WealthDepositBook?
+        /// [v25.568] 號碼密文那一包（WealthVaultBook：有效期限、保單號碼、票證號的密文）。舊備份沒有，所以是 Optional；
+        /// 跟財富帳本一起走。**只有密文**（金鑰在鑰匙圈、不在備份裡；judge §7.1 備份「密文」）
+        var wealthVault: WealthVaultBook?
     }
 
     static func build(expense: ExpenseStore, finance: FinanceStore, life: LifeStore,
@@ -208,7 +211,9 @@ struct UnifiedExport: Codable {
                 // [v25.563] 財富帳本跟財富帳戶一起走（完整備份、「記帳理財」）
                 wealthBook: scope.carriesFinance ? life.wealthBook : nil,
                 // [v25.566] 定存跟財富帳本一起走
-                wealthDeposits: scope.carriesFinance ? life.wealthDeposits : nil
+                wealthDeposits: scope.carriesFinance ? life.wealthDeposits : nil,
+                // [v25.568] 號碼密文跟財富帳本一起走（只有密文）
+                wealthVault: scope.carriesFinance ? life.wealthVault : nil
             ),
             scope: scope.rawValue
         )
@@ -254,11 +259,15 @@ enum UnifiedExporter {
     }
 
     static func exportCSV(expense: ExpenseStore, finance: FinanceStore, life: LifeStore) -> String {
-        exportCSV(UnifiedExport.build(expense: expense, finance: finance, life: life))
+        // [v25.568] 財富帳戶清單讀給網頁版的那一包（同一套數字；主執行緒先組好）
+        exportCSV(UnifiedExport.build(expense: expense, finance: finance, life: life),
+                  accounts: WealthWebFacts.make(life: life, expense: expense, finance: finance))
     }
 
     /// 純 payload 版本：只碰 struct 快照，不觸及 @Published，可安全在背景執行緒呼叫。
-    static func exportCSV(_ payload: UnifiedExport) -> String {
+    /// [v25.568] accounts：財富帳戶清單（WealthWebFacts，主執行緒先用 WealthWebFacts.make 組好帶進來；judge §6.9：
+    /// 暱稱、銀行、末 4 碼、存摺上、卡的結帳日／截止日，不含完整卡號、帳號、有效期限）。nil＝不寫這一段
+    static func exportCSV(_ payload: UnifiedExport, accounts: WealthWebFacts? = nil) -> String {
         let expense = payload.expense
         let finance = payload.finance
         let life = payload.life
@@ -510,6 +519,11 @@ enum UnifiedExporter {
                 }
             }
             csv += "\n"
+        }
+
+        // [v25.568] 財富帳戶清單（不含完整卡號、帳號、有效期限）
+        if let accounts {
+            csv += accounts.csvSection(esc: { (v: String) -> String in esc(v) })
         }
 
         // 人生 - 里程碑
@@ -954,6 +968,10 @@ enum UnifiedImporter {
                 if scope.carriesFinance, let wd = payload.life.wealthDeposits {
                     life.wealthDeposits = wd
                 }
+                // [v25.568] 號碼密文：舊備份沒有（nil）就不動本機的
+                if scope.carriesFinance, let wv = payload.life.wealthVault {
+                    life.wealthVault = wv
+                }
             }
 
             result.expenses = payload.expense.expenses.count
@@ -1155,6 +1173,11 @@ enum UnifiedImporter {
                     let merged = life.wealthDeposits.merged(with: wd)
                     if merged != life.wealthDeposits { life.wealthDeposits = merged }
                 }
+                // [v25.568] 號碼密文：本機有的留本機的、本機沒有的帶進來
+                if let wv = payload.life.wealthVault {
+                    let merged = life.wealthVault.merged(with: wv)
+                    if merged != life.wealthVault { life.wealthVault = merged }
+                }
                 // 舊格式備份的機台上面 appendNewByID 進了部屬的 equipments——搬進機台池
                 life.migrateLegacyEquipmentsToPool()
             }
@@ -1241,6 +1264,8 @@ enum UnifiedImporter {
             result.realEstates = newRECount
         }
 
+        // [v25.568] 匯入的是 v7 以前的備份（號碼還是明碼）：照新版第一次打開那樣搬成密文（這台封不了的整筆不動，下次再搬）
+        life.migrateWealthSecrets()
         return result
     }
 

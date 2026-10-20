@@ -140,6 +140,8 @@
 		A01B000001001581 /* WealthCardData.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001581 /* WealthCardData.swift */; };
 		A01B000001001587 /* WealthReminders.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001587 /* WealthReminders.swift */; };
 		A01B000001001589 /* WealthPolicyFacts.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001589 /* WealthPolicyFacts.swift */; };
+		A01B000001001591 /* WealthVault.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001591 /* WealthVault.swift */; };
+		A01B000001001592 /* WealthWebFacts.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001592 /* WealthWebFacts.swift */; };
 		A01B000001001582 /* WealthBoard.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001582 /* WealthBoard.swift */; };
 		A01B000001001583 /* WealthBoardScenes.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001583 /* WealthBoardScenes.swift */; };
 		A01B000001001584 /* WealthItems.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001584 /* WealthItems.swift */; };
@@ -360,6 +362,8 @@
 		A01A000001001581 /* WealthCardData.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WealthCardData.swift; sourceTree = "<group>"; };
 		A01A000001001587 /* WealthReminders.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WealthReminders.swift; sourceTree = "<group>"; };
 		A01A000001001589 /* WealthPolicyFacts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WealthPolicyFacts.swift; sourceTree = "<group>"; };
+		A01A000001001591 /* WealthVault.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WealthVault.swift; sourceTree = "<group>"; };
+		A01A000001001592 /* WealthWebFacts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WealthWebFacts.swift; sourceTree = "<group>"; };
 		A01A000001001582 /* WealthBoard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WealthBoard.swift; sourceTree = "<group>"; };
 		A01A000001001583 /* WealthBoardScenes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WealthBoardScenes.swift; sourceTree = "<group>"; };
 		A01A000001001584 /* WealthItems.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WealthItems.swift; sourceTree = "<group>"; };
@@ -663,6 +667,8 @@
 				A01A000001001581 /* WealthCardData.swift */,
 				A01A000001001587 /* WealthReminders.swift */,
 				A01A000001001589 /* WealthPolicyFacts.swift */,
+				A01A000001001591 /* WealthVault.swift */,
+				A01A000001001592 /* WealthWebFacts.swift */,
 				A01A000001000020 /* LifeModels.swift */,
 				A01A000001000201 /* HealthModels.swift */,
 				A01A000001000204 /* ChildVaccineSchedule.swift */,
@@ -1066,6 +1072,8 @@
 				A01B000001001581 /* WealthCardData.swift in Sources */,
 				A01B000001001587 /* WealthReminders.swift in Sources */,
 				A01B000001001589 /* WealthPolicyFacts.swift in Sources */,
+				A01B000001001591 /* WealthVault.swift in Sources */,
+				A01B000001001592 /* WealthWebFacts.swift in Sources */,
 				A01B000001001582 /* WealthBoard.swift in Sources */,
 				A01B000001001583 /* WealthBoardScenes.swift in Sources */,
 				A01B000001001584 /* WealthItems.swift in Sources */,
@@ -1334,7 +1342,7 @@
 				INFOPLIST_KEY_NSCalendarsUsageDescription = "LifeGood 需要讀取 Apple 行事曆，把您的系統行程併入「我的行事曆」一併顯示。";
 				INFOPLIST_KEY_NSCameraUsageDescription = "LifeGood 需要使用相機來拍攝裝潢照片或收據。";
 				INFOPLIST_KEY_NSContactsUsageDescription = "LifeGood 需要存取聯絡人，以匯入聯絡人為名片或把名片加入聯絡人。";
-				INFOPLIST_KEY_NSFaceIDUsageDescription = "LifeGood 用 Face ID 確認是您本人，才顯示信用卡的完整卡號、到期日與檢核碼。";
+				INFOPLIST_KEY_NSFaceIDUsageDescription = "LifeGood 用 Face ID 確認是您本人，才顯示信用卡的完整卡號、有效期限、檢核碼，以及完整帳號、保單號碼與票證號碼。";
 				INFOPLIST_KEY_NSRemindersFullAccessUsageDescription = "LifeGood 需要存取提醒事項，把家庭待辦與部屬任務同步到 Apple 提醒事項。";
 				INFOPLIST_KEY_NSRemindersUsageDescription = "LifeGood 需要存取提醒事項，把家庭待辦與部屬任務同步到 Apple 提醒事項。";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "LifeGood 用你的位置在你跑步、騎車、健走時畫出路線；也用來推薦附近的餐廳、在美食地圖標出你去過的店。";
@@ -1383,7 +1391,7 @@
 				INFOPLIST_KEY_NSCalendarsUsageDescription = "LifeGood 需要讀取 Apple 行事曆，把您的系統行程併入「我的行事曆」一併顯示。";
 				INFOPLIST_KEY_NSCameraUsageDescription = "LifeGood 需要使用相機來拍攝裝潢照片或收據。";
 				INFOPLIST_KEY_NSContactsUsageDescription = "LifeGood 需要存取聯絡人，以匯入聯絡人為名片或把名片加入聯絡人。";
-				INFOPLIST_KEY_NSFaceIDUsageDescription = "LifeGood 用 Face ID 確認是您本人，才顯示信用卡的完整卡號、到期日與檢核碼。";
+				INFOPLIST_KEY_NSFaceIDUsageDescription = "LifeGood 用 Face ID 確認是您本人，才顯示信用卡的完整卡號、有效期限、檢核碼，以及完整帳號、保單號碼與票證號碼。";
 				INFOPLIST_KEY_NSRemindersFullAccessUsageDescription = "LifeGood 需要存取提醒事項，把家庭待辦與部屬任務同步到 Apple 提醒事項。";
 				INFOPLIST_KEY_NSRemindersUsageDescription = "LifeGood 需要存取提醒事項，把家庭待辦與部屬任務同步到 Apple 提醒事項。";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "LifeGood 用你的位置在你跑步、騎車、健走時畫出路線；也用來推薦附近的餐廳、在美食地圖標出你去過的店。";

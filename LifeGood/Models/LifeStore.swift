@@ -30,6 +30,10 @@ class LifeStore: ObservableObject {
     /// 進完整備份與「理財」匯出）。不放進 wealthBook：v25.563–565 的 iPad 存一次帳本會把它不認得的欄位洗掉，另一個鍵它不碰。
     /// 一改 wealthRevision 也加一
     @Published var wealthDeposits: WealthDepositBook = WealthDepositBook() { didSet { wealthRevision &+= 1; if !isLoading { save() } } }
+    /// [v25.568] 號碼密文那一包（WealthVault.swift WealthVaultBook；鍵 life_wealth_vault_v1，跟 iCloud 同步、進完整備份與
+    /// 「記帳理財」匯出——裡面只有密文）：有效期限、保單號碼、票證號。不放進 wealthBook：25.564–25.567 的 iPad 存一次帳本會把
+    /// 不認得的欄位洗掉，另一個鍵它不碰。一改 wealthRevision 也加一（有效期限的快取、財富的一套數字跟著重算）
+    @Published var wealthVault: WealthVaultBook = WealthVaultBook() { didSet { wealthRevision &+= 1; if !isLoading { save() } } }
     /// [v25.357] 公司廠區據點：與重大決議的「廠區」欄位對應，長成每個廠的歷史年線
     @Published var companySites: [CompanySite] = [] { didSet { if !isLoading { save() } } }
     /// [v25.399] 旅遊規劃（要去的行程；與旅遊地圖「去過的地點」是兩回事）
@@ -70,10 +74,15 @@ class LifeStore: ObservableObject {
         "life_org_people", "life_health_profile", "life_family_tasks",
         "life_equipment_pool", "life_performance_ballots", "life_workouts",
         "life_company_sites", "life_trip_plans", "life_workout_prefs", "life_workout_health",
-        "life_workout_leave", "life_wealth_book_v1", "life_wealth_deposits_v1"
+        "life_workout_leave", "life_wealth_book_v1", "life_wealth_deposits_v1",
+        // [v25.568] 號碼密文那一包（life_wealth_facts_v1 不在這裡：App 只寫給網頁版、自己不讀）
+        "life_wealth_vault_v1"
     ]
 
     init() {
+        // [v25.568] CardVault 問「整份資料裡有沒有任何號碼密文」問這裡（有密文、這台沒金鑰時不准產生新金鑰：CardVault 規矩 2）。
+        // 所有屬性都有預設值，這裡已經可以用 self；weak：store 不在了就當「有」（寧可擋下）
+        CardVault.cipherProbe = { [weak self] in self?.hasAnyWealthCipher ?? true }
         load()
         // 用 defer 重置，避免日後在中間加入 guard/return 導致 isLoading 卡死為 true（save() 永久停擺）
         isLoading = true
@@ -82,7 +91,9 @@ class LifeStore: ObservableObject {
         let didRepair = repairSideRoleMemberLinks()
         let didMigrateEq = migrateLegacyEquipmentsToPool()
         let didSerial = migrateResolutionSerials()
-        if didBackfill || didRepair || didMigrateEq || didSerial { save() }
+        // [v25.568] 舊的明碼號碼搬成密文（新版第一次打開；這台封不了的整筆不動，下次再搬）
+        let didVault = migrateWealthSecrets() > 0
+        if didBackfill || didRepair || didMigrateEq || didSerial || didVault { save() }
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(reloadFromCloud),
@@ -121,8 +132,10 @@ class LifeStore: ObservableObject {
         // 雲端另一台裝置若仍是舊版（機台存在部屬身上），拉下來後在這裡搬進機台池
         let didMigrateEq = migrateLegacyEquipmentsToPool()
         let didSerial = migrateResolutionSerials()
+        // [v25.568] 還沒更新的 iPad 又寫回明碼（舊版表單打了完整號碼）、或這台的金鑰剛同步過來：拉下來就搬成密文
+        let didVault = migrateWealthSecrets() > 0
         // 若 backfill 新建了 OrgPerson/BusinessCard 或修復了成員連結，立即持久化避免重啟後消失
-        if didBackfill || didRepair || didMigrateEq || didSerial { save() }
+        if didBackfill || didRepair || didMigrateEq || didSerial || didVault { save() }
         // [v25.454] 比對拉取前後的旅遊規劃，把別台裝置新增的行程／景點／攜帶物品／
         // 伴手禮寫成本機通知。
         if tripKeyTouched {
@@ -337,12 +350,98 @@ class LifeStore: ObservableObject {
         let key = WealthFacts.cacheKey(revision: wealthRevision, expense: expense, finance: finance, now: now)
         if let c = wealthFactsCache, c.key == key { return c.facts }
         // [v25.567] 保單總表要儲蓄險、車子、房子（四個來源去重）；cacheKey 已經含理財的 modifyID
+        // [v25.568] 有效期限 v7 起是密文：每張卡那個月 1 號由 cardExpiryMonths 解好給（行事曆、要確認 #12、通知照舊）
         let f = WealthFacts.build(milestones: milestones, book: wealthBook, deposits: wealthDeposits,
                                   expenses: expense.expenses, incomes: expense.incomes, stocks: finance.stocks,
                                   rates: FinanceRates(expense), now: now, insurances: finance.insurances,
-                                  vehicles: finance.vehicles, realEstates: finance.realEstates)
+                                  vehicles: finance.vehicles, realEstates: finance.realEstates,
+                                  expiryMonths: cardExpiryMonths())
         wealthFactsCache = (key: key, facts: f)
         return f
+    }
+
+    // MARK: - [v25.568] 財富 v7：號碼加密（WealthVault.swift；CardVault 規矩）
+
+    /// 整份資料裡有沒有任何號碼密文（卡號、安全碼、完整帳號、有效期限、保單號碼、票證號）。
+    /// CardVault.cipherProbe 問這個：有密文、這台沒有金鑰＝還沒同步過來，不准產生新金鑰
+    var hasAnyWealthCipher: Bool {
+        if wealthVault.hasAnyCipher { return true }
+        if (wealthBook.accounts ?? [:]).values.contains(where: { (p: WealthAccountPrefs) -> Bool in p.accountNumberCipher != nil }) {
+            return true
+        }
+        return milestones.contains { (m: LifeMilestone) -> Bool in m.cardNumberCipher != nil || m.cardSecurityCipher != nil }
+    }
+
+    /// 有效期限的快取（wealthRevision 對得上就不重解；只在記憶體）
+    private var expiryMonthsCache: (revision: Int, hasKey: Bool, months: [UUID: Date])?
+
+    /// 每張卡有效期限那個月 1 號（行事曆「卡片到期」、要確認 #12、通知用；judge §7.1 行事曆「只有卡片到期那天」）：
+    /// 還沒搬的明碼照用；密文那一包的，這台有金鑰才解（CardVault.open 從不產生金鑰）、只取年月、只放記憶體。
+    /// 這台還沒同步到金鑰：密文的那幾張先沒有（行事曆、提醒少那幾張，金鑰同步過來就回來）。
+    /// 網頁版那一包、匯出、CSV、小工具的快照都不叫這支拿有效期限本身（CardVault 規矩 4）
+    func cardExpiryMonths() -> [UUID: Date] {
+        let canOpen = CardVault.hasKey
+        if let c = expiryMonthsCache, c.revision == wealthRevision, c.hasKey == canOpen { return c.months }
+        var out: [UUID: Date] = [:]
+        for m in milestones where m.financeSubCategory == .creditCard {
+            if let raw = m.expiryDate {
+                out[m.id] = WealthCal.startOfMonth(raw)
+                continue
+            }
+            guard canOpen, let cipher = wealthVault.entry(m.id).expiryCipher,
+                  let text = CardVault.open(cipher), let d = WealthSecrets.expiryDate(text) else { continue }
+            out[m.id] = d
+        }
+        expiryMonthsCache = (revision: wealthRevision, hasKey: canOpen, months: out)
+        return out
+    }
+
+    /// 舊的明碼號碼搬成密文（judge §8 v7）：完整帳號 → 帳本 accounts[id].accountNumberCipher（里程碑只留後 4 碼）；
+    /// 有效期限、保單號碼、票證號 → 密文那一包（保單號碼、票證號只留後 4 碼，有效期限清掉）。
+    /// 一筆裡有一個封不了（這台還沒同步到金鑰、鑰匙圈寫不進去）整筆不動，照舊留明碼，下次再搬。沒有要搬的什麼都不做。
+    /// 讀檔、從 iCloud 拉到新資料（init、reloadFromCloud）、打開財富頁、匯入備份之後叫；在主執行緒。
+    /// milestones、wealthBook、wealthVault 各最多指派一次。回傳搬了幾筆
+    @discardableResult
+    func migrateWealthSecrets() -> Int {
+        guard milestones.contains(where: { (m: LifeMilestone) -> Bool in WealthSecrets.needsMigration(m) }) else { return 0 }
+        var list = milestones
+        var book = wealthBook
+        var vault = wealthVault
+        var moved = 0
+        for i in list.indices {
+            let m = list[i]
+            guard WealthSecrets.needsMigration(m) else { continue }
+            guard let r = WealthSecrets.migrate(m, prefs: book.account(m.id), entry: vault.entry(m.id),
+                                                seal: { (text: String) -> Data? in CardVault.seal(text) }) else { continue }
+            list[i] = r.milestone
+            book.setAccount(r.prefs, for: m.id)
+            vault.setEntry(r.entry, for: m.id)
+            moved += 1
+        }
+        guard moved > 0 else { return 0 }
+        // 先寫密文、再清明碼（萬一中間被打斷，最多是明碼還在、密文也有，下次再搬一次；不會兩邊都沒有）
+        if vault != wealthVault { wealthVault = vault }
+        if book != wealthBook { wealthBook = book }
+        milestones = list
+        return moved
+    }
+
+    /// 改號碼密文那一包（改完跟原本一樣就不寫）
+    func updateWealthVault(_ body: (inout WealthVaultBook) -> Void) {
+        var v = wealthVault
+        body(&v)
+        if v != wealthVault { wealthVault = v }
+    }
+
+    /// 「號碼改成加密存了」說明一次（財富頁打開時；judge §8 v7【待確認】還沒更新的 iPad 只看得到後 4 碼）。
+    /// 說明過（WealthBook.vaultNoticeKey，跟 iCloud 同步，換一台不會再說）或一筆加密的帳號、有效期限、保單號碼、票證號都沒有＝nil
+    var wealthVaultNotice: (title: String, message: String)? {
+        guard !wealthBook.hasNotice(WealthBook.vaultNoticeKey) else { return nil }
+        let accountCipher = (wealthBook.accounts ?? [:]).values.contains(where: { (p: WealthAccountPrefs) -> Bool in
+            p.accountNumberCipher != nil
+        })
+        guard accountCipher || wealthVault.hasAnyCipher else { return nil }
+        return (title: WealthSecrets.vaultNoticeTitle, message: WealthSecrets.vaultNoticeMessage)
     }
 
     /// [v25.563] 對存摺要的「App 算的數字」：這個帳戶這個幣別在 day 那天結束時（excluding：編輯以前那筆對存摺時不算它自己）。
@@ -650,8 +749,15 @@ class LifeStore: ObservableObject {
     /// 日期記在「昨天結束時」：對存摺是那天結束時的數字（同一天記的會被它吸收），記成今天的話，
     /// 開完帳戶馬上記一筆今天的扣款，數字會不動；記昨天，今天起記的每一筆都會算進去。
     /// 卡費怎麼繳改成自己繳／每次問我時，從今天起才追（呼叫端先用 WealthCardPrefs.setMode 設好）。
+    /// [v25.568] vault：這一筆的號碼密文（有效期限、保單號碼、票證號；表單 sealVault 封好的）。nil＝不動那一包
+    ///（先寫密文那一包、再寫里程碑：里程碑上的明碼由表單換成後 4 碼）
     func saveWealthAccount(_ item: LifeMilestone, prefs: WealthAccountPrefs, card: WealthCardPrefs?,
-                           policy: WealthPolicyPrefs?, openingBalances: [String: Double], now: Date = Date()) {
+                           policy: WealthPolicyPrefs?, openingBalances: [String: Double], now: Date = Date(),
+                           vault: WealthVaultEntry? = nil) {
+        if let vault {
+            let vid = item.id
+            updateWealthVault { $0.setEntry(vault, for: vid) }
+        }
         var m = item
         if !openingBalances.isEmpty {
             var deps = m.bankDeposits ?? []
@@ -1203,6 +1309,8 @@ class LifeStore: ObservableObject {
         for name in photos { LifeMilestone.deletePhoto(name) }
         // [v25.563] 財富帳本裡它的設定（扣款帳戶的歷史、暱稱…）
         updateWealthBook { $0.remove(id) }
+        // [v25.568] 它的號碼密文（有效期限、保單號碼、票證號）
+        updateWealthVault { $0.remove(id) }
         // [v25.566] 這個帳戶的定存一起刪；別的定存還沒到期、說好轉進它的，改回轉進自己的帳戶
         // [v25.566 驗證修正] 先寫進自動續存算出來的那幾期（同 save／setMaturity／close／delete）：上一期已經到期、
         // 下一期還沒寫進帳本時，下一期照上一期的 payoutId 算，不先寫進來就改不到，到期的錢會轉進刪掉的帳戶、從合計消失
@@ -4189,7 +4297,7 @@ class LifeStore: ObservableObject {
             performanceBallots: performanceBallots, workouts: workouts,
             companySites: companySites, tripPlans: tripPlans, workoutPrefs: workoutPrefs,
             workoutHealthLedger: workoutHealthLedger, workoutLeave: workoutLeave,
-            wealthBook: wealthBook, wealthDeposits: wealthDeposits
+            wealthBook: wealthBook, wealthDeposits: wealthDeposits, wealthVault: wealthVault
         )
         saveQueue.async {
             let encoder = JSONEncoder()
@@ -4218,6 +4326,7 @@ class LifeStore: ObservableObject {
             if let d = try? encoder.encode(snap.workoutLeave)   { ud.set(d, forKey: "life_workout_leave") }
             if let d = try? encoder.encode(snap.wealthBook)     { ud.set(d, forKey: "life_wealth_book_v1") }
             if let d = try? encoder.encode(snap.wealthDeposits) { ud.set(d, forKey: "life_wealth_deposits_v1") }
+            if let d = try? encoder.encode(snap.wealthVault)    { ud.set(d, forKey: WealthVaultBook.syncKey) }
             CloudSyncManager.shared.pushAll()
         }
     }
@@ -4277,6 +4386,11 @@ class LifeStore: ObservableObject {
         if let data = rawDataIfChanged("life_wealth_deposits_v1"),
            let wd = try? decoder.decode(WealthDepositBook.self, from: data) {
             wealthDeposits = wd
+        }
+        // [v25.568] 號碼密文那一包
+        if let data = rawDataIfChanged(WealthVaultBook.syncKey),
+           let wv = try? decoder.decode(WealthVaultBook.self, from: data) {
+            wealthVault = wv
         }
     }
 
@@ -4356,6 +4470,7 @@ class LifeStore: ObservableObject {
         workoutLeave = WorkoutLeaveBook()
         wealthBook = WealthBook()
         wealthDeposits = WealthDepositBook()
+        wealthVault = WealthVaultBook()
         companySites.removeAll()
         // 行程的照片檔也要一起清，不然會留下沒人指向的孤兒檔被雲端一直重傳
         for plan in tripPlans {

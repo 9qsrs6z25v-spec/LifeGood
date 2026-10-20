@@ -43,7 +43,19 @@ import SwiftUI
 // • 證券戶表單：改交割銀行而且還有股票用別的銀行交割 → 問「這 N 檔的交割銀行也一起改嗎？以前的交割不動」
 //   〔一起改〕＝LifeStore.moveBrokerStocks（今天起的交割搬過去，以前的照舊）〔只改證券戶〕。
 // • 第 6 題：這版不碰卡號、安全碼、帳號（CardVault 那幾段照 v3）。保單號碼照 judge §7.1「編輯表單同卡片頁」：
-//   編輯時只露後 4 碼（CardVault.maskedTail），點了過 Face ID 才看得到、改得到；存法照舊（明碼，v7 才談）。
+//   編輯時只露後 4 碼（CardVault.maskedTail），點了過 Face ID 才看得到、改得到；存法 v7 起改密文（見下面 v25.568）。
+//
+// [v25.568] 財富 v7（build/v7/brief.md §4 G1；judge §5.1–5.4、§7.1、§7.2；樣稿③-C1，但安全碼照留）：
+// • 有效期限、保單號碼、悠遊卡／一卡通／Happy Go 改密文（WealthVaultBook，同步鍵 life_wealth_vault_v1；
+//   LifeStore.saveWealthAccount(…, vault:) 整筆換掉）。里程碑上保單號碼、票證號只留後 4 碼，有效期限寫 nil。
+//   完整帳號的密文照舊在帳本 accountNumberCipher，里程碑只留後 4 碼。
+// • 存檔一律走 WealthSecrets.sealPlan（sealVault）：完整的封成密文、4 個字以內照存明碼、解鎖了但這台解不開又沒重打＝原封不動。
+// • 這台還沒同步到金鑰（CardVault.keyMissingHere）：你新打的號碼（卡號、檢核碼、有效期限、票證號、保單號碼、完整帳號）
+//   擋下並說明（CardVault.keyMissingMessage）、整張表單不存；原本的密文、舊明碼原封不動（舊明碼等金鑰同步過來自動搬）。
+// • 有效期限、票證號跟卡號同一顆 Face ID（unlockCard）；保單號碼 Face ID 才看得到、改得到（unlockPolicyNumber）。
+// • 第 6 題「我要存」：「記錄檢核碼（CVV／CVC）」開關、預設、存法照舊（加密存、Face ID 才看得到）。
+// • 照片拍到像完整卡號的數字（16 位）提醒（WealthPhotoScan：手機內建的 Vision，不上網）：只看這次新加的照片，
+//   〔刪掉這張〕〔留著〕，不擋存檔；PDF 不看。
 
 /// 表單的類型（開了就鎖住）
 enum WealthAccountKind: String, CaseIterable, Identifiable {
@@ -124,6 +136,15 @@ struct WealthSealed {
     var cardNumber: Data? = nil
     var security: Data? = nil
     var cardLast4: String? = nil
+    /// [v25.568] 這一筆的號碼密文（有效期限、保單號碼、票證號；LifeStore.saveWealthAccount(vault:) 整筆換掉）
+    var vault = WealthVaultEntry()
+    /// [v25.568] 里程碑上保單號碼、三種票證要寫的字（後 4 碼、4 個字以內的、或這台還沒同步到金鑰時原封不動的舊明碼）；
+    /// 沒有 key＝寫 nil
+    var plain: [WealthSecretField: String] = [:]
+    /// [v25.568] 里程碑 expiryDate 要寫的（v7 起只有「這台還沒同步到金鑰時原封不動的舊明碼」才會有值）
+    var expiryDate: Date? = nil
+    /// [v25.568] 這台還沒同步到金鑰時原封不動的舊完整帳號（里程碑 accountNumber 寫它）；nil＝照 accountTail
+    var accountPlain: String? = nil
 }
 
 /// 表單上的欄位（一個 struct 存全部：@State 少、帶入／存檔是純函式，型別檢查不爆）
@@ -207,6 +228,17 @@ struct WealthAccountForm {
     var policyNumber = ""
     /// [v25.567] 保單的從哪扣（銀行＋幣別或卡；同記帳選單 WealthPayFromMenu）。卡照舊用 payFrom
     var payChoice = WealthPayFromChoice()
+    // [v25.568] 號碼密文（有效期限、保單號碼、票證號；build/v7/brief.md §4 G1-3）
+    /// 打開表單時密文那一包的這一筆（沒重打、解不開、沒解鎖時原封帶回）
+    var vaultBase = WealthVaultEntry()
+    /// 打開表單時里程碑那幾欄的字（保單號碼、三種票證；v7 起多半是後 4 碼）
+    var originalPlain: [WealthSecretField: String] = [:]
+    /// 打開表單時里程碑上的有效期限（v7 起只有還沒搬的舊明碼才有）
+    var originalExpiry: Date? = nil
+    /// 解鎖了但這台解不開（還沒同步到金鑰）、欄位空著的那幾種：沒重打就原封帶回
+    var lostFields: Set<WealthSecretField> = []
+    /// 里程碑上舊的完整明碼帳號（還沒搬成密文；沒有＝""）
+    var originalAccountRaw = ""
 
     static func trimmed(_ s: String) -> String? {
         let t = s.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -221,6 +253,33 @@ struct WealthAccountForm {
         let d = fullNumber.filter { $0.isASCII && $0.isNumber }
         return String(d.suffix(4))
     }
+
+    /// [v25.568] 票證那三格的字（悠遊卡、一卡通、Happy Go；有效期限、保單號碼不在這裡＝""）
+    func ticket(_ t: WealthSecretField) -> String {
+        switch t {
+        case .easyCard: return easyCard
+        case .iPass: return iPass
+        case .happyGo: return happyGo
+        case .expiry, .policy: return ""
+        }
+    }
+
+    /// [v25.568] 解鎖後填票證（一卡通照舊能分組就每四碼一個「-」）
+    mutating func setTicket(_ t: WealthSecretField, _ v: String) {
+        switch t {
+        case .easyCard:
+            easyCard = v
+        case .iPass:
+            iPass = CardVault.isSafeToRegroup(v) ? CardVault.grouped(v, limit: CardVault.iPassDigits) : v
+        case .happyGo:
+            happyGo = v
+        case .expiry, .policy:
+            break
+        }
+    }
+
+    /// [v25.568] 票證三格打得到字：解鎖了，或這張卡的票證沒有密文（照舊明碼，跟以前一樣不鎖）
+    var ticketsEditable: Bool { cardUnlocked || !vaultBase.hasTicketCipher }
 
     /// 新增銀行帳戶「今天存摺上有多少」：幣別 → 數字（空著的不寫）
     var openingBalances: [String: Double] {
@@ -249,8 +308,9 @@ struct WealthAccountForm {
 }
 
 extension WealthAccountForm {
-    /// 編輯：從里程碑＋帳本帶入
-    static func load(_ m: LifeMilestone, kind: WealthAccountKind, book: WealthBook) -> WealthAccountForm {
+    /// 編輯：從里程碑＋帳本帶入。[v25.568] vault：密文那一包的這一筆（LifeStore.wealthVault.entry(m.id)）
+    static func load(_ m: LifeMilestone, kind: WealthAccountKind, book: WealthBook,
+                     vault: WealthVaultEntry) -> WealthAccountForm {
         var f = WealthAccountForm()
         let prefs = book.account(m.id)
         f.nickname = prefs.nickname ?? ""
@@ -270,9 +330,9 @@ extension WealthAccountForm {
             f.settlementBankId = prefs.settlementBankId
             f.secType = m.securitiesAccountType ?? .regular
         case .card:
-            f.loadCard(m, book: book)
+            f.loadCard(m, book: book, vault: vault)
         case .policy:
-            f.loadPolicy(m, book: book)
+            f.loadPolicy(m, book: book, vault: vault)
         }
         return f
     }
@@ -280,11 +340,14 @@ extension WealthAccountForm {
     mutating func loadAccountNumber(_ m: LifeMilestone, prefs: WealthAccountPrefs) {
         let raw = (m.accountNumber ?? "").trimmingCharacters(in: .whitespaces)
         let digits = raw.filter { $0.isASCII && $0.isNumber }
+        // [v25.568] 舊的完整明碼：跟搬家同一條（WealthSecrets.isFull：超過 4 個字）。有密文也記著——
+        // 明碼一定比密文新（還沒更新的 iPad 寫回來的、這台還沒同步到金鑰搬不了），存檔時不能把它換成後 4 碼弄丟
+        if WealthSecrets.isFull(raw) { originalAccountRaw = raw }
         if let c = prefs.accountNumberCipher {
             accountCipher = c
             storeFullNumber = true
             accountUnlocked = false
-        } else if digits.count > 4 {
+        } else if !originalAccountRaw.isEmpty {
             legacyFullNumber = true
             storeFullNumber = true
             fullNumber = raw
@@ -292,7 +355,7 @@ extension WealthAccountForm {
         last4 = prefs.accountLast4 ?? String(digits.suffix(4))
     }
 
-    mutating func loadCard(_ m: LifeMilestone, book: WealthBook) {
+    mutating func loadCard(_ m: LifeMilestone, book: WealthBook, vault: WealthVaultEntry) {
         let cp = book.card(m.id)
         name = m.bankName ?? ""
         cardName = m.cardName ?? ""
@@ -306,12 +369,15 @@ extension WealthAccountForm {
         cardLast4 = m.cardLastFour ?? ""
         cardCipher = m.cardNumberCipher
         securityCipher = m.cardSecurityCipher
-        cardUnlocked = m.cardNumberCipher == nil && m.cardSecurityCipher == nil && m.expiryDate == nil
+        // [v25.568] 有效期限、票證號的密文也跟卡號同一把鎖（Face ID 才看得到、改得到）
+        let noCardCipher: Bool = m.cardNumberCipher == nil && m.cardSecurityCipher == nil
+        cardUnlocked = noCardCipher && m.expiryDate == nil && vault.expiryCipher == nil && !vault.hasTicketCipher
         wantsSecurity = m.cardSecurityCipher != nil
-        if let e = m.expiryDate {
-            hasExpiry = true
-            expiry = e
-        }
+        // 有沒有有效期限：還沒搬的明碼或密文那一包有一個就算有（鎖著時顯示「••/••」）
+        hasExpiry = m.expiryDate != nil || vault.expiryCipher != nil
+        expiry = m.expiryDate ?? Date()
+        originalExpiry = m.expiryDate
+        vaultBase = vault
         if let a = m.annualFee, a > 0 { annualFeeText = WealthFormText.editable(a) }
         if let w = cp.feeWaiveAmount, w > 0 { waiveAmountText = WealthFormText.editable(w) }
         if let n = cp.feeWaiveCount, n > 0 { waiveCountText = "\(n)" }
@@ -322,9 +388,13 @@ extension WealthAccountForm {
         iPass = CardVault.isSafeToRegroup(rawIPass)
             ? CardVault.grouped(rawIPass, limit: CardVault.iPassDigits) : rawIPass
         happyGo = m.happyGoNumber ?? ""
+        // [v25.568] 打開時那三格的字（v7 起多半是後 4 碼；一卡通記分組後的，跟欄位上的一樣，沒改就不算新打的）
+        for t in WealthSecretField.tickets {
+            if let v = Self.trimmed(ticket(t)) { originalPlain[t] = v }
+        }
     }
 
-    mutating func loadPolicy(_ m: LifeMilestone, book: WealthBook) {
+    mutating func loadPolicy(_ m: LifeMilestone, book: WealthBook, vault: WealthVaultEntry) {
         let pp = book.policy(m.id)
         name = m.insuranceCompany ?? ""
         policyKind = pp.kind ?? WealthPolicyKind.from(legacy: m.insuranceType)
@@ -341,7 +411,10 @@ extension WealthAccountForm {
         }
         coverageUntil = pp.coverageUntil ?? ""
         coverageText = (pp.coverageItems ?? []).joined(separator: "\n")
+        // [v25.568] 里程碑上 v7 起只留後 4 碼；完整的在密文那一包（Face ID 解鎖時才解開）
         policyNumber = m.policyNumber ?? ""
+        if let p = Self.trimmed(policyNumber) { originalPlain[.policy] = p }
+        vaultBase = vault
     }
 
     /// [v25.567] 連著記帳的保費（或〔補保單〕帶進來的那一筆）：保費、繳法、從哪扣、下次扣款日讀記帳那一筆
@@ -369,21 +442,24 @@ extension WealthAccountForm {
         m.photoFileNames = photos.isEmpty ? nil : photos
         let n: String? = Self.trimmed(name)
         let tail = accountTail
+        // [v25.568] 里程碑上永遠不寫完整號碼（只有「這台還沒同步到金鑰時原封不動的舊明碼」例外：sealed.accountPlain）
+        let accountShown: String? = sealed.accountPlain ?? (tail.isEmpty ? nil : tail)
         switch kind {
         case .bank:
             m.bankName = n
             m.branchName = Self.trimmed(branch)
-            m.accountNumber = tail.isEmpty ? nil : tail
+            m.accountNumber = accountShown
             m.bankAccountType = bankType
         case .broker:
             m.bankName = n
-            m.accountNumber = tail.isEmpty ? nil : tail
+            m.accountNumber = accountShown
             m.securitiesAccountType = secType
         case .card:
             applyCard(to: &m, issuer: n, sealed: sealed)
         case .policy:
             m.insuranceCompany = n
-            m.policyNumber = Self.trimmed(policyNumber)
+            // [v25.568] 後 4 碼（完整的在密文那一包 sealed.vault.policyCipher）
+            m.policyNumber = sealed.plain[.policy]
             // 舊資料的車險讀進來是「其他」（WealthPolicyKind.from(legacy:)）；沒換險種就照舊留車險，
             // 不然存一次就變成壽險（醫療地圖、舊 iPad 照讀這一欄）
             if !(policyKind == .other && m.insuranceType == .car) {
@@ -405,11 +481,13 @@ extension WealthAccountForm {
         m.linkedBankMilestoneId = payFrom
         m.cardNumberCipher = sealed.cardNumber
         m.cardSecurityCipher = sealed.security
-        // 沒解鎖：有效期限看不到也改不了，照原本的留著
-        if cardUnlocked { m.expiryDate = hasExpiry ? expiry : nil }
-        m.easyCardNumber = Self.trimmed(easyCard)
-        m.iPassNumber = Self.trimmed(iPass)
-        m.happyGoNumber = Self.trimmed(happyGo)
+        // [v25.568] 有效期限 v7 起是密文（sealed.vault.expiryCipher）：這裡只有「這台還沒同步到金鑰時原封不動的舊明碼」
+        // 才有值；沒解鎖時 sealed.expiryDate 就是原本的
+        m.expiryDate = sealed.expiryDate
+        // [v25.568] 票證號只留後 4 碼（完整的在密文那一包）
+        m.easyCardNumber = sealed.plain[.easyCard]
+        m.iPassNumber = sealed.plain[.iPass]
+        m.happyGoNumber = sealed.plain[.happyGo]
     }
 
     /// 帳本 accounts[id]（base＝存檔那一刻帳本裡的，只改表單管的欄位）
@@ -505,6 +583,26 @@ struct WealthVaultMessageAlert: ViewModifier {
             Button("好") { message = nil }
         } message: {
             Text(message ?? "")
+        }
+    }
+}
+
+/// [v25.568] 這次新加的照片好像拍到完整卡號（judge §7.2、§8 v7；WealthPhotoScan）：〔刪掉這張〕〔留著〕。
+/// 只提醒、不擋存檔（拆成 modifier，坑 #7）
+fileprivate struct WealthPhotoHitAlert: ViewModifier {
+    @Binding var hit: WealthPhotoHit?
+    let onDelete: (WealthPhotoHit) -> Void
+
+    private var isPresented: Binding<Bool> {
+        Binding(get: { hit != nil }, set: { if !$0 { hit = nil } })
+    }
+
+    func body(content: Content) -> some View {
+        content.alert(WealthPhotoHit.title, isPresented: isPresented, presenting: hit) { h in
+            Button("刪掉這張", role: .destructive) { onDelete(h) }
+            Button("留著", role: .cancel) {}
+        } message: { h in
+            Text(h.message)
         }
     }
 }
@@ -661,6 +759,8 @@ struct WealthAccountEditor: View {
     @State private var familyNames: [String] = []
     /// [v25.567] 編輯保單時保單號碼先遮住（只露後 4 碼），Face ID 才打開
     @State private var policyNumberLocked = false
+    /// [v25.568] 這次新加的照片好像拍到完整卡號（WealthPhotoScan；只提醒、不擋存檔）
+    @State private var photoHit: WealthPhotoHit?
 
     private static let redirects: [(title: String, message: String)] = [
         ("儲蓄險", "儲蓄險在理財 › 儲蓄險記，會算現在值多少、到期領多少。"),
@@ -717,6 +817,7 @@ struct WealthAccountEditor: View {
             .onAppear { load() }
         }
         .modifier(WealthVaultMessageAlert(message: $vaultMessage))
+        .modifier(WealthPhotoHitAlert(hit: $photoHit, onDelete: { h in deleteHitPhoto(h) }))
         .modifier(CardDebitChangeDialog(isPresented: $askDebitChange, title: debitChangeTitle,
                                         nextLabel: nextStatement.label,
                                         onNext: { save(payFromAll: false) },
@@ -900,7 +1001,9 @@ struct WealthAccountEditor: View {
 
     private var accountFootnote: String {
         if f.legacyFullNumber {
-            return "以前記的完整帳號是沒加密的；存檔後改成加密存，列表、選單只露末 4 碼。還沒更新的 iPad 上只看得到末 4 碼。"
+            // [v25.568] 這台還沒同步到金鑰時存檔照舊留著（WealthSecrets.sealPlan .plain），同步過來自動加密（LifeStore.migrateWealthSecrets）
+            return "以前記的完整帳號還沒加密：這台有金鑰時存檔就會改成加密；還沒同步到金鑰的話先照舊留著，同步過來會自動加密。"
+                + "列表、選單只露末 4 碼。"
         }
         return "列表、選單、卡面只用末 4 碼。完整帳號要打開開關才存，加密後才存起來，要看得先過 Face ID。"
     }
@@ -909,7 +1012,7 @@ struct WealthAccountEditor: View {
     private var fullNumberRow: some View {
         if f.accountUnlocked {
             VStack(alignment: .leading, spacing: 4) {
-                Text(f.legacyFullNumber ? "完整帳號（舊的，存檔後改成加密）" : "完整帳號")
+                Text(f.legacyFullNumber ? "完整帳號（舊的，還沒加密）" : "完整帳號")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                 SecureField("打完整帳號", text: $f.fullNumber)
@@ -1053,19 +1156,11 @@ struct WealthAccountEditor: View {
         cardVaultSection
         cardFeeSection
         Section {
-            TextField("悠遊卡卡號（選填）", text: $f.easyCard)
-                .keyboardType(.numbersAndPunctuation)
-            TextField("一卡通卡號（選填，16 碼）", text: $f.iPass)
-                .keyboardType(.numberPad)
-                .font(.body.monospaced())
-                .onChange(of: f.iPass) { _, v in
-                    let g = CardVault.grouped(v, limit: CardVault.iPassDigits)
-                    if g != v { f.iPass = g }
-                }
-            TextField("Happy Go 卡號（選填）", text: $f.happyGo)
-                .keyboardType(.numbersAndPunctuation)
+            ticketRows
         } header: {
             WealthFormHeader(title: "綁定的票證與會員", icon: "wallet.pass.fill", color: .teal)
+        } footer: {
+            Text(Self.ticketFootnote)
         }
         Section {
             DatePicker("核卡日", selection: $f.date, displayedComponents: .date)
@@ -1074,6 +1169,83 @@ struct WealthAccountEditor: View {
             WealthFormHeader(title: "其他", icon: "slider.horizontal.3", color: .secondary)
         }
     }
+
+    /// [v25.568] 綁定的票證與會員：有密文、還沒解鎖＝每個有值的只露後 4 碼（跟卡號同一顆 Face ID）；
+    /// 不然照舊三格（沒有密文的舊明碼跟以前一樣不鎖）。拆出來（坑 #7）
+    @ViewBuilder
+    private var ticketRows: some View {
+        if f.ticketsEditable {
+            ticketFields
+        } else if lockedTickets.isEmpty {
+            lockedTicketRow("票證號碼", value: "未填")
+        } else {
+            ForEach(lockedTickets, id: \.self) { t in
+                lockedTicketRow(Self.ticketLabel(t), value: CardVault.maskedTail(f.ticket(t)))
+            }
+        }
+    }
+
+    /// 鎖著時要列的票證（里程碑那一欄有字的；空的＝沒有這個號碼）
+    private var lockedTickets: [WealthSecretField] {
+        WealthSecretField.tickets.filter { (t: WealthSecretField) -> Bool in
+            !f.ticket(t).trimmingCharacters(in: .whitespaces).isEmpty
+        }
+    }
+
+    @ViewBuilder
+    private var ticketFields: some View {
+        TextField("悠遊卡卡號（選填）", text: $f.easyCard)
+            .keyboardType(.numbersAndPunctuation)
+        TextField("一卡通卡號（選填，16 碼）", text: $f.iPass)
+            .keyboardType(.numberPad)
+            .font(.body.monospaced())
+            .onChange(of: f.iPass) { _, v in
+                let g = CardVault.grouped(v, limit: CardVault.iPassDigits)
+                if g != v { f.iPass = g }
+            }
+        TextField("Happy Go 卡號（選填）", text: $f.happyGo)
+            .keyboardType(.numbersAndPunctuation)
+        if hasLostTicket {
+            Text("這台還沒同步到金鑰，看不到原本存的票證號碼；空著不動的話，存檔時原本存的照樣留著。")
+                .font(.caption)
+                .foregroundStyle(Color.orange)
+        }
+    }
+
+    private var hasLostTicket: Bool {
+        WealthSecretField.tickets.contains { (t: WealthSecretField) -> Bool in f.lostFields.contains(t) }
+    }
+
+    /// 一個鎖著的票證：「悠遊卡　•••• 4321 🔒」，點了 Face ID（unlockCard：卡號、有效期限、票證一起解）
+    private func lockedTicketRow(_ title: String, value: String) -> some View {
+        Button {
+            unlockCard()
+        } label: {
+            HStack {
+                Text(title).foregroundStyle(Color.primary)
+                Spacer()
+                Text(value)
+                    .font(.body.monospaced())
+                    .foregroundStyle(.secondary)
+                Image(systemName: unlocking ? "hourglass" : "lock.fill")
+                    .font(.caption)
+                    .foregroundStyle(Color.orange)
+            }
+            .contentShape(Rectangle())
+        }
+        .disabled(unlocking)
+    }
+
+    private static func ticketLabel(_ t: WealthSecretField) -> String {
+        switch t {
+        case .easyCard: return "悠遊卡"
+        case .iPass: return "一卡通"
+        case .happyGo: return "Happy Go"
+        case .expiry, .policy: return t.title
+        }
+    }
+
+    static let ticketFootnote = "票證號碼加密後才存，列表、卡片頁只露後 4 碼；要看或修改先過 Face ID（跟卡號一起解開）。"
 
     private var cardBillSection: some View {
         Section {
@@ -1202,7 +1374,7 @@ struct WealthAccountEditor: View {
     }
 
     static let cardVaultFootnote =
-        "完整卡號、有效期限、檢核碼會加密後才存起來，金鑰放在系統鑰匙圈，備份檔與桌面網頁版都讀不到明碼。"
+        "完整卡號、有效期限、檢核碼、票證號碼會加密後才存起來，金鑰放在系統鑰匙圈，備份檔與桌面網頁版都讀不到明碼。"
         + "要看或修改一定要先通過 Face ID 或裝置密碼。檢核碼預設不記，由你自己決定。"
 
     @ViewBuilder
@@ -1269,6 +1441,11 @@ struct WealthAccountEditor: View {
             Toggle("填有效期限", isOn: $f.hasExpiry)
             if f.hasExpiry {
                 expiryPicker
+            } else if f.lostFields.contains(.expiry) {
+                // [v25.568] 解鎖了但這台解不開：開關先關著，存檔照留原本的（不會把今天封進去）
+                Text("這台還沒同步到金鑰，看不到原本存的有效期限；開關不動的話，存檔時原本存的照樣留著。")
+                    .font(.caption)
+                    .foregroundStyle(Color.orange)
             }
         } else {
             HStack {
@@ -1456,8 +1633,13 @@ struct WealthAccountEditor: View {
             noteRow
         } header: {
             WealthFormHeader(title: "保障", icon: "cross.case.fill", color: .green)
+        } footer: {
+            Text(Self.policyNumberFootnote)
         }
     }
+
+    /// [v25.568] 保單號碼 v7 起加密存（WealthVaultBook.policyCipher；里程碑只留後 4 碼）
+    static let policyNumberFootnote = "保單號碼加密後才存，列表、卡片頁只露後 4 碼；要看或修改先過 Face ID。"
 
     private var policyKindSection: some View {
         Section {
@@ -1619,12 +1801,16 @@ struct WealthAccountEditor: View {
         switch kind {
         case .card:
             return "權益說明、優惠 DM、帳單說明都可以拍；請不要拍卡片正面或背面——卡號和檢核碼填在上面的「卡號與安全」，那裡會加密。"
+                + Self.photoScanNote
         case .bank, .broker:
-            return "請不要拍存摺內頁的完整帳號；完整帳號填在上面，那裡會加密。"
+            return "請不要拍存摺內頁的完整帳號；完整帳號填在上面，那裡會加密。" + Self.photoScanNote
         case .policy:
-            return "保單首頁、保障內容都可以拍下來。"
+            return "保單首頁、保障內容都可以拍下來。" + Self.photoScanNote
         }
     }
+
+    /// [v25.568] 照片拍到完整卡號時提醒（WealthPhotoScan：手機內建的文字辨識，不上網；只提醒、不擋存檔）
+    static let photoScanNote = "照片不會加密；拍到像完整卡號的數字（16 位）會提醒你。"
 
     private var photoSection: some View {
         let id = editing?.id ?? draftId
@@ -1638,11 +1824,37 @@ struct WealthAccountEditor: View {
                 title: photoTitle
             )
             .padding(.vertical, 4)
+            .onChange(of: f.photos) { old, new in photosChanged(old: old, new: new) }
         } header: {
             WealthFormHeader(title: photoTitle, icon: "doc.text.image", color: .orange)
         } footer: {
             Text(photoFootnote).font(.caption2)
         }
+    }
+
+    /// [v25.568] 這次新加的照片（不在 old、也不是打開表單時就有的）在背景用手機內建的 Vision 讀字，
+    /// 像拍到完整卡號就提醒一次（judge §7.2、§8 v7）。不上網、不擋存檔；PDF 不看（WealthPhotoScan.firstHit 跳過）
+    private func photosChanged(old: [String], new: [String]) {
+        let before = Set(old)
+        let original = Set(editing?.photoFileNames ?? [])
+        let added: [String] = new.filter { (n: String) -> Bool in !before.contains(n) && !original.contains(n) }
+        guard !added.isEmpty else { return }
+        let items: [(name: String, url: URL)] = added.map { (n: String) -> (name: String, url: URL) in
+            (name: n, url: LifeMilestone.photoURL(for: n))
+        }
+        Task { @MainActor in
+            // 等拍照／相簿的畫面收好再跳（同一刻疊兩個彈窗，iOS 會把第二個吃掉）
+            try? await Task.sleep(nanoseconds: 600_000_000)
+            if let hit = await WealthPhotoScan.firstHit(items), f.photos.contains(hit.name) {
+                photoHit = hit
+            }
+        }
+    }
+
+    /// [v25.568] 提醒框〔刪掉這張〕：檔案刪掉、從這張表單拿掉（同 MultiPhotoGallery 的刪除）
+    private func deleteHitPhoto(_ h: WealthPhotoHit) {
+        LifeMilestone.deletePhoto(h.name)
+        f.photos.removeAll { (n: String) -> Bool in n == h.name }
     }
 
     private var deleteSection: some View {
@@ -1667,7 +1879,8 @@ struct WealthAccountEditor: View {
         let book = lifeStore.wealthBook
         var form = WealthAccountForm()
         if let m = editing {
-            form = WealthAccountForm.load(m, kind: kind, book: book)
+            // [v25.568] 密文那一包的這一筆一起帶（有效期限、保單號碼、票證號）
+            form = WealthAccountForm.load(m, kind: kind, book: book, vault: lifeStore.wealthVault.entry(m.id))
             editName = WealthFacts.displayName(of: m, book: book)
             // v2 的帳戶沒勾過幣別：已經有外幣紀錄的那幾個先勾好（一套數字本來就把它們算進這個帳戶）
             if kind == .bank, let a = facts.account(m.id) {
@@ -1775,7 +1988,7 @@ struct WealthAccountEditor: View {
         unlocking = true
         Task { @MainActor in
             defer { unlocking = false }
-            switch await CardVault.unlock(reason: "檢視或修改完整卡號") {
+            switch await CardVault.unlock(reason: "檢視或修改卡號、有效期限與票證號碼") {
             case .ok:
                 let number = Self.openIfKey(f.cardCipher) ?? ""
                 let code = Self.openIfKey(f.securityCipher) ?? ""
@@ -1785,8 +1998,13 @@ struct WealthAccountEditor: View {
                 f.cardVaultLost = f.cardCipher != nil && number.isEmpty
                 f.securityVaultLost = f.securityCipher != nil && code.isEmpty
                 f.wantsSecurity = !code.isEmpty || f.securityVaultLost
-                if f.cardVaultLost || f.securityVaultLost {
-                    vaultMessage = Self.missingKeyMessage(f.cardVaultLost ? "卡號" : "檢核碼")
+                // [v25.568] 有效期限、票證號（密文那一包）跟卡號同一顆 Face ID
+                var lost: [String] = []
+                if f.cardVaultLost { lost.append("卡號") }
+                if f.securityVaultLost { lost.append("檢核碼") }
+                lost += revealCardSecrets().map { (t: WealthSecretField) -> String in t.title }
+                if !lost.isEmpty {
+                    vaultMessage = Self.missingKeyMessage(lost.joined(separator: "、"))
                 }
                 f.cardUnlocked = true
             case .denied:
@@ -1797,6 +2015,35 @@ struct WealthAccountEditor: View {
         }
     }
 
+    /// [v25.568] Face ID 過了以後帶入有效期限、三種票證（WealthSecrets.expiry／reveal；open＝openIfKey）。
+    /// 用打開表單時那一筆（editing＋f.vaultBase：同一刻抓的，跟 originalPlain／originalExpiry 對得上）。
+    /// 這台解不開的：欄位空著（有效期限開關關著，不能讓預設的今天被封進去）、記進 lostFields，存檔原封帶回。回傳解不開的那幾種
+    private func revealCardSecrets() -> [WealthSecretField] {
+        guard let m = editing else { return [] }
+        let entry = f.vaultBase
+        var lost: [WealthSecretField] = []
+        let e = WealthSecrets.expiry(milestone: m, entry: entry, open: { (d: Data) -> String? in Self.openIfKey(d) })
+        if let d = e.date {
+            f.hasExpiry = true
+            f.expiry = d
+        } else if e.missingKey {
+            f.lostFields.insert(.expiry)
+            f.hasExpiry = false
+            lost.append(.expiry)
+        }
+        for t in WealthSecretField.tickets {
+            let r = WealthSecrets.reveal(t, milestone: m, entry: entry, open: { (d: Data) -> String? in Self.openIfKey(d) })
+            if let v = r.value {
+                f.setTicket(t, v)
+            } else if r.missingKey {
+                f.setTicket(t, "")
+                f.lostFields.insert(t)
+                lost.append(t)
+            }
+        }
+        return lost
+    }
+
     /// [v25.567] 保單號碼：過 Face ID 才看得到、改得到（同完整帳號那一把鎖）
     private func unlockPolicyNumber() {
         guard !unlocking else { return }
@@ -1805,6 +2052,19 @@ struct WealthAccountEditor: View {
             defer { unlocking = false }
             switch await CardVault.unlock(reason: "檢視或修改保單號碼") {
             case .ok:
+                // [v25.568] 完整的在密文那一包（WealthSecrets.reveal：里程碑那一欄是「有沒有」，密文是「完整的」）
+                if let m = editing {
+                    let r = WealthSecrets.reveal(.policy, milestone: m, entry: f.vaultBase,
+                                                 open: { (d: Data) -> String? in Self.openIfKey(d) })
+                    if let v = r.value {
+                        f.policyNumber = v
+                    } else if r.missingKey {
+                        // 這台解不開：欄位空著，沒重打就原封帶回（sealVault .keep）
+                        f.policyNumber = ""
+                        f.lostFields.insert(.policy)
+                        vaultMessage = Self.missingKeyMessage("保單號碼")
+                    }
+                }
                 policyNumberLocked = false
             case .denied:
                 break
@@ -1821,6 +2081,15 @@ struct WealthAccountEditor: View {
             defer { unlocking = false }
             switch await CardVault.unlock(reason: "檢視或修改完整帳號") {
             case .ok:
+                // [v25.568] 里程碑上還有完整的舊明碼（比密文新：還沒更新的 iPad 寫回來的）就用它（同 WealthSecrets.revealAccount），
+                // 存檔照舊明碼的規則走（這台有金鑰就加密，還沒同步到金鑰就原封不動）
+                if !f.originalAccountRaw.isEmpty {
+                    f.fullNumber = f.originalAccountRaw
+                    f.legacyFullNumber = true
+                    f.accountVaultLost = false
+                    f.accountUnlocked = true
+                    return
+                }
                 let number = Self.openIfKey(f.accountCipher) ?? ""
                 f.accountVaultLost = f.accountCipher != nil && number.isEmpty
                 if number.isEmpty {
@@ -1838,15 +2107,21 @@ struct WealthAccountEditor: View {
 
     /// 這台有金鑰才解：沒有金鑰時 CardVault.open 會先產生一把新的寫進 iCloud 鑰匙圈（可能蓋掉別台那把），
     /// 新的那把也解不開原本的密文——直接當作解不開（欄位空著、存檔時原本的密文照留）
+    /// [v25.568] CardVault.open 本身也不再產生金鑰（CardVault 規矩 3）；這道照留
     private static func openIfKey(_ cipher: Data?) -> String? {
         guard CardVault.hasKey else { return nil }
         return CardVault.open(cipher)
     }
 
+    /// [v25.568] 第一句改「這台還沒同步到金鑰」；這台還沒同步到金鑰（CardVault.keyMissingHere）時重打的新號碼存不了（會擋下說明），
+    /// 不再說「只能重新輸入一次」（有金鑰但解不開＝金鑰不一樣，才照舊可以重打）
     private static func missingKeyMessage(_ what: String) -> String {
-        "這台裝置沒有解密金鑰，看不到原本存的完整" + what + "。"
+        let retype: String = CardVault.keyMissingHere
+            ? "金鑰同步過來以前，這台也存不了新打的號碼（免得蓋掉另一台的金鑰）。"
+            : "若金鑰已經遺失，只能重新輸入一次。"
+        return "這台還沒同步到金鑰，看不到原本存的完整" + what + "。"
             + "金鑰是透過 iCloud 鑰匙圈同步的，請確認「設定 → Apple ID → iCloud → 密碼與鑰匙圈」已開啟；"
-            + "若金鑰已經遺失，只能重新輸入一次。沒有重新輸入就存的話，原本存的會照樣留著。"
+            + retype + "沒有重新輸入就存的話，原本存的會照樣留著。"
     }
 
     private static func sealFailedMessage(_ what: String) -> String {
@@ -1938,65 +2213,209 @@ struct WealthAccountEditor: View {
     }
 
     /// 號碼封成密文（主執行緒）；鑰匙圈寫不進金鑰就不存並提示（nil）
+    /// [v25.568] 全部走 WealthSecrets.sealPlan（build/v7/brief.md §2 契約、§4 G1-7）。這台還沒同步到金鑰
+    /// （CardVault.keyMissingHere）時你新打的號碼擋下並說明（keyMissingMessage）、整張表單不存、什麼都不改；
+    /// 原本的密文、舊明碼原封不動（CardVault 規矩 2：絕不因為這台解不開就洗掉別台的密文）
     private func sealVault() -> WealthSealed? {
         var out = WealthSealed()
+        // 這一筆原本的密文先整包帶著（只換表單管、而且你動過的那幾種；saveWealthAccount 整筆換掉）
+        out.vault = f.vaultBase
+        let km = CardVault.keyMissingHere
+        let ok: Bool
         switch kind {
         case .bank, .broker:
-            if !f.storeFullNumber {
-                out.accountCipher = nil
-            } else if !f.accountUnlocked {
+            ok = sealAccount(&out, keyMissing: km)
+        case .card:
+            ok = sealCard(&out, keyMissing: km)
+        case .policy:
+            ok = sealPolicy(&out, keyMissing: km)
+        }
+        return ok ? out : nil
+    }
+
+    /// sealPlan 的 seal：CardVault.seal（這台還沒同步到金鑰時回 nil、不產生新金鑰；呼叫前已經先看 keyMissingHere）
+    private static func sealText(_ t: String) -> Data? { CardVault.seal(t) }
+
+    /// [v25.568] 銀行、證券戶的完整帳號（密文在帳本 accountNumberCipher；里程碑只留後 4 碼）。擋下／失敗回 false（訊息已設好）
+    private func sealAccount(_ out: inout WealthSealed, keyMissing km: Bool) -> Bool {
+        if !f.storeFullNumber {
+            out.accountCipher = nil
+            return true
+        }
+        if !f.accountUnlocked {
+            // 沒解鎖：看不到內容，原封帶回既有密文（絕不能洗掉）；里程碑上還有比密文新的舊明碼（這台還沒搬）也原封不動
+            out.accountCipher = f.accountCipher
+            out.accountPlain = WealthAccountForm.trimmed(f.originalAccountRaw)
+            return true
+        }
+        let original: String? = f.legacyFullNumber ? f.originalAccountRaw : nil
+        let plan = WealthSecrets.sealPlan(typed: f.fullNumber, original: original, lost: f.accountVaultLost,
+                                          keyMissing: km, seal: { (t: String) -> Data? in Self.sealText(t) })
+        switch plan {
+        case .sealed(let c, _):
+            out.accountCipher = c
+        case .plain(let t):
+            if WealthSecrets.isFull(t) {
+                // 這台還沒同步到金鑰、原封不動的舊明碼：照留明碼（下次有金鑰自動搬），原本的密文也照留
+                out.accountPlain = t
                 out.accountCipher = f.accountCipher
             } else {
-                let full = f.fullNumber.trimmingCharacters(in: .whitespaces)
-                if !full.isEmpty {
-                    guard let c = CardVault.seal(full) else {
-                        vaultMessage = Self.sealFailedMessage("完整帳號")
-                        return nil
-                    }
-                    out.accountCipher = c
-                } else if f.accountVaultLost {
-                    // 這台解不開、你也沒重打：原本的密文照留（不然別台存的完整帳號會被洗掉）
-                    out.accountCipher = f.accountCipher
-                }
+                // 4 個字以內（不是完整帳號）或清掉了
+                out.accountCipher = nil
             }
-        case .card:
-            let typed = WealthFormText.digits(f.cardLast4, limit: 4)
-            if f.cardUnlocked {
-                let digits = CardVault.digits(f.cardNumber)
-                if !digits.isEmpty {
-                    guard let c = CardVault.seal(digits) else {
-                        vaultMessage = Self.sealFailedMessage("卡號")
-                        return nil
-                    }
-                    out.cardNumber = c
-                } else if f.cardVaultLost {
-                    // 這台解不開、你也沒重打：原本的密文照留（不然別台存的卡號會被洗掉）
-                    out.cardNumber = f.cardCipher
-                }
-                let code = f.security.trimmingCharacters(in: .whitespaces)
-                if f.wantsSecurity && !code.isEmpty {
-                    guard let c = CardVault.seal(code) else {
-                        vaultMessage = Self.sealFailedMessage("檢核碼")
-                        return nil
-                    }
-                    out.security = c
-                } else if f.wantsSecurity && f.securityVaultLost {
-                    // 同上：開關還開著、沒重打 → 原本的檢核碼密文照留（使用者第 6 題「我要存」）；你自己關掉開關才刪
-                    out.security = f.securityCipher
-                }
-                let derived = CardVault.lastFour(f.cardNumber)
-                let tail = derived.isEmpty ? typed : derived
-                out.cardLast4 = tail.isEmpty ? nil : tail
-            } else {
-                // 沒解鎖：看不到內容，原封帶回既有密文（絕不能洗掉）
-                out.cardNumber = f.cardCipher
-                out.security = f.securityCipher
-                out.cardLast4 = typed.isEmpty ? nil : typed
-            }
-        case .policy:
-            break
+        case .keep:
+            // 這台解不開、你也沒重打：原本的密文照留（不然別台存的完整帳號會被洗掉）
+            out.accountCipher = f.accountCipher
+        case .blocked:
+            vaultMessage = CardVault.keyMissingMessage("完整帳號")
+            return false
+        case .failed:
+            vaultMessage = Self.sealFailedMessage("完整帳號")
+            return false
         }
-        return out
+        return true
+    }
+
+    /// [v25.568] 信用卡：卡號、檢核碼（里程碑上的密文，照 v3）＋有效期限、三種票證（密文那一包）
+    private func sealCard(_ out: inout WealthSealed, keyMissing km: Bool) -> Bool {
+        let typed = WealthFormText.digits(f.cardLast4, limit: 4)
+        if f.cardUnlocked {
+            guard sealCardNumber(&out, keyMissing: km) else { return false }
+            let derived = CardVault.lastFour(f.cardNumber)
+            let tail = derived.isEmpty ? typed : derived
+            out.cardLast4 = tail.isEmpty ? nil : tail
+            guard sealExpiry(&out, keyMissing: km) else { return false }
+        } else {
+            // 沒解鎖：看不到內容，原封帶回既有密文（絕不能洗掉）；有效期限照打開時的（密文、舊明碼都不動）
+            out.cardNumber = f.cardCipher
+            out.security = f.securityCipher
+            out.cardLast4 = typed.isEmpty ? nil : typed
+            out.vault.expiryCipher = f.vaultBase.expiryCipher
+            out.expiryDate = f.originalExpiry
+        }
+        if f.ticketsEditable {
+            // 三格打得到字（解鎖了，或沒有票證密文）：照你打的存
+            for t in WealthSecretField.tickets {
+                let plan = WealthSecrets.sealPlan(typed: f.ticket(t), original: f.originalPlain[t],
+                                                  lost: f.lostFields.contains(t), keyMissing: km,
+                                                  seal: { (s: String) -> Data? in Self.sealText(s) })
+                guard applyPlan(plan, field: t, to: &out) else { return false }
+            }
+        } else {
+            // 鎖著：密文（out.vault 已經是原本的）、里程碑那三欄照打開時的
+            for t in WealthSecretField.tickets {
+                out.plain[t] = f.originalPlain[t]
+            }
+        }
+        return true
+    }
+
+    /// 卡號、檢核碼（v3 那一段；[v25.568] 這台還沒同步到金鑰時打了新的 → 擋下說明，不要跳成「加密失敗」）
+    private func sealCardNumber(_ out: inout WealthSealed, keyMissing km: Bool) -> Bool {
+        let digits = CardVault.digits(f.cardNumber)
+        if !digits.isEmpty {
+            // 這台還沒同步到金鑰時解不開原本的卡號（欄位一定是空的）：有字＝你剛打的新卡號
+            if km {
+                vaultMessage = CardVault.keyMissingMessage("卡號")
+                return false
+            }
+            guard let c = CardVault.seal(digits) else {
+                vaultMessage = Self.sealFailedMessage("卡號")
+                return false
+            }
+            out.cardNumber = c
+        } else if f.cardVaultLost {
+            // 這台解不開、你也沒重打：原本的密文照留（不然別台存的卡號會被洗掉）
+            out.cardNumber = f.cardCipher
+        }
+        let code = f.security.trimmingCharacters(in: .whitespaces)
+        if f.wantsSecurity && !code.isEmpty {
+            if km {
+                vaultMessage = CardVault.keyMissingMessage("檢核碼")
+                return false
+            }
+            guard let c = CardVault.seal(code) else {
+                vaultMessage = Self.sealFailedMessage("檢核碼")
+                return false
+            }
+            out.security = c
+        } else if f.wantsSecurity && f.securityVaultLost {
+            // 同上：開關還開著、沒重打 → 原本的檢核碼密文照留（使用者第 6 題「我要存」）；你自己關掉開關才刪
+            out.security = f.securityCipher
+        }
+        return true
+    }
+
+    /// [v25.568] 有效期限（解鎖後）：密文進 out.vault.expiryCipher，里程碑 expiryDate 寫 nil（日期沒辦法只留一半）
+    private func sealExpiry(_ out: inout WealthSealed, keyMissing km: Bool) -> Bool {
+        let typed: String = f.hasExpiry ? WealthSecrets.expiryText(f.expiry) : ""
+        let original: String? = f.originalExpiry.map { (d: Date) -> String in WealthSecrets.expiryText(d) }
+        let plan = WealthSecrets.sealPlan(typed: typed, original: original, lost: f.lostFields.contains(.expiry),
+                                          keyMissing: km, seal: { (s: String) -> Data? in Self.sealText(s) })
+        switch plan {
+        case .sealed(let c, _):
+            out.vault.expiryCipher = c
+            out.expiryDate = nil
+        case .plain(let t):
+            if let t {
+                // 這台還沒同步到金鑰、原封不動的舊明碼：照留（下次有金鑰自動搬），原本的密文也照留
+                out.vault.expiryCipher = f.vaultBase.expiryCipher
+                out.expiryDate = f.originalExpiry ?? WealthSecrets.expiryDate(t)
+            } else {
+                // 開關關掉＝不填有效期限
+                out.vault.expiryCipher = nil
+                out.expiryDate = nil
+            }
+        case .keep:
+            out.vault.expiryCipher = f.vaultBase.expiryCipher
+            out.expiryDate = f.originalExpiry
+        case .blocked:
+            vaultMessage = CardVault.keyMissingMessage(WealthSecretField.expiry.title)
+            return false
+        case .failed:
+            vaultMessage = Self.sealFailedMessage(WealthSecretField.expiry.title)
+            return false
+        }
+        return true
+    }
+
+    /// [v25.568] 保單號碼：鎖著＝密文、里程碑那一欄照打開時的；解鎖了（或新增）照你打的存
+    private func sealPolicy(_ out: inout WealthSealed, keyMissing km: Bool) -> Bool {
+        if policyNumberLocked {
+            out.vault.policyCipher = f.vaultBase.policyCipher
+            out.plain[.policy] = f.originalPlain[.policy]
+            return true
+        }
+        let plan = WealthSecrets.sealPlan(typed: f.policyNumber, original: f.originalPlain[.policy],
+                                          lost: f.lostFields.contains(.policy), keyMissing: km,
+                                          seal: { (s: String) -> Data? in Self.sealText(s) })
+        return applyPlan(plan, field: .policy, to: &out)
+    }
+
+    /// [v25.568] 一個字串號碼（保單號碼、票證號）的 plan 寫進 out：密文進 out.vault、里程碑那一欄的字進 out.plain。
+    /// 擋下／失敗回 false（訊息已經設好，整張表單不存）
+    private func applyPlan(_ plan: WealthSecrets.SealPlan, field: WealthSecretField, to out: inout WealthSealed) -> Bool {
+        switch plan {
+        case .sealed(let c, let tail):
+            out.vault.setCipher(c, for: field)
+            out.plain[field] = tail
+        case .plain(let t):
+            // 完整的明碼＝這台還沒同步到金鑰、原封不動的舊明碼：原本的密文也照留（別台解得開）；
+            // 4 個字以內或清掉了＝沒有完整的，密文拿掉
+            let keepCipher: Data? = WealthSecrets.isFull(t) ? f.vaultBase.cipher(field) : nil
+            out.vault.setCipher(keepCipher, for: field)
+            out.plain[field] = t
+        case .keep:
+            out.vault.setCipher(f.vaultBase.cipher(field), for: field)
+            out.plain[field] = f.originalPlain[field]
+        case .blocked:
+            vaultMessage = CardVault.keyMissingMessage(field.title)
+            return false
+        case .failed:
+            vaultMessage = Self.sealFailedMessage(field.title)
+            return false
+        }
+        return true
     }
 
     /// payFromAll：卡改了扣款帳戶時確認框選的（true＝以前的帳單也改；false／nil＝從下一期起）。
@@ -2037,7 +2456,10 @@ struct WealthAccountEditor: View {
             let card: WealthCardPrefs? = k == .card ? form.cardPrefs(book.card(id), now: Date()) : nil
             let policy: WealthPolicyPrefs? = k == .policy ? form.policyPrefs(book.policy(id)) : nil
             let openings: [String: Double] = (isNew && k == .bank) ? form.openingBalances : [:]
-            life.saveWealthAccount(m, prefs: prefs, card: card, policy: policy, openingBalances: openings)
+            // [v25.568] 卡、保單的號碼密文那一筆整筆換掉（先寫密文那一包、再寫里程碑）；銀行、證券戶不動那一包（nil）
+            let vaultEntry: WealthVaultEntry? = (k == .card || k == .policy) ? sealed.vault : nil
+            life.saveWealthAccount(m, prefs: prefs, card: card, policy: policy, openingBalances: openings,
+                                   vault: vaultEntry)
             if let eid = linkTo {
                 life.linkPolicy(id, expenseId: eid, expense: es)
             } else if let draft = premium {
