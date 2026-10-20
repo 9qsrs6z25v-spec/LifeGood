@@ -49,7 +49,8 @@ import UniformTypeIdentifiers
 // • 〔顯示〕改讀密文：有效期限、保單號碼、悠遊卡／一卡通／Happy Go 卡號＝WealthSecrets.reveal（密文在 WealthVaultBook，
 //   里程碑那一欄只留後 4 碼、是「有沒有」）；完整帳號＝WealthSecrets.revealAccount（帳本的密文；還沒搬的舊明碼也照看得到）。
 //   卡號、安全碼照舊（第 6 題「我要存」：安全碼照樣加密存、Face ID 後 30 秒看得到）。open 一律 openIfKey（CardVault.open 本身也不產生金鑰）。
-// • 30 秒收回、切背景收回、帳號〔複製〕60 秒＋只在這台都不動；這台還沒同步到金鑰：照舊跳說明（第一句改「這台還沒同步到金鑰」）。
+// • 30 秒收回、切背景收回、帳號〔複製〕60 秒＋只在這台都不動；這台還沒同步到金鑰：照舊跳說明（第一句改「這台還沒同步到金鑰」；
+//   CardVault.keyMissingHere 時不再叫你去編輯畫面重打——重打也會被擋下，改說「金鑰同步過來就看得到」：missingKeyText）。
 // • 照片 footer：信用卡「…拍到像完整卡號的數字會提醒你。」（提醒在表單加照片那一刻，WealthPhotoScan）；銀行、證券戶「…照片不會加密。」
 
 /// 打開卡片頁時捲到哪一區（財富頁 ③ 點一列＝.upcoming；要確認、四格點了也用）
@@ -667,9 +668,7 @@ struct WealthCardPage: View {
             case .ok:
                 let got = secretValues(for: id)
                 if got.missingKey {
-                    revealMessage = "這台還沒同步到金鑰，看不到原本存的號碼。"
-                        + "金鑰是透過 iCloud 鑰匙圈同步的，請確認「設定 → Apple ID → iCloud → 密碼與鑰匙圈」已開啟；"
-                        + "若金鑰已經遺失，請到編輯畫面重新輸入一次。"
+                    revealMessage = Self.missingKeyText
                 }
                 reveal.values = got.values
                 reveal.on = true
@@ -733,6 +732,18 @@ struct WealthCardPage: View {
     private static func revealedText(_ s: String, for field: WealthSecretField) -> String {
         guard field == .iPass, CardVault.isSafeToRegroup(s) else { return s }
         return CardVault.grouped(s, limit: CardVault.iPassDigits)
+    }
+
+    /// [v25.568] 〔顯示〕解不開時的說明（同表單 WealthEditors.missingKeyMessage 的分法）：這台還沒同步到金鑰（CardVault.keyMissingHere）
+    /// 時重打也存不了（CardVault 規矩 2：免得蓋掉另一台的金鑰），所以不叫你去重打；這台有金鑰卻解不開（密文是另一把金鑰封的）才請你重打
+    private static var missingKeyText: String {
+        // 「原本存的號碼都還在」只在還沒同步到金鑰時說（金鑰同步過來就解得開）；這台有金鑰卻解不開＝照舊請你重打
+        let retype: String = CardVault.keyMissingHere
+            ? "金鑰同步過來就看得到；在那之前這台也存不了新打的號碼（免得蓋掉另一台的金鑰）。原本存的號碼都還在。"
+            : "若金鑰已經遺失，請到編輯畫面重新輸入一次。"
+        return "這台還沒同步到金鑰，看不到原本存的號碼。"
+            + "金鑰是透過 iCloud 鑰匙圈同步的，請確認「設定 → Apple ID → iCloud → 密碼與鑰匙圈」已開啟；"
+            + retype
     }
 
     /// 這台有金鑰才解。[v25.568] CardVault.open 本身也從不產生金鑰了（CardVault 規矩 3）；這裡照留，

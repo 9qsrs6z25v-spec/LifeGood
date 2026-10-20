@@ -92,7 +92,10 @@ class LifeStore: ObservableObject {
         let didMigrateEq = migrateLegacyEquipmentsToPool()
         let didSerial = migrateResolutionSerials()
         // [v25.568] 舊的明碼號碼搬成密文（新版第一次打開；這台封不了的整筆不動，下次再搬）
-        let didVault = migrateWealthSecrets() > 0
+        // [v25.568 裁定] 這裡還沒跟 iCloud 拉過：這台沒有金鑰就先不搬（allowNewKey: false＝不准在這裡產生新金鑰）。
+        // 不然兩台都沒存過號碼、iCloud 鑰匙圈還沒同步時，各自用本機的舊資料產生一把，後寫的蓋掉先寫的，先搬那台的號碼就解不開了。
+        // 等 iCloud 拉完（reloadFromCloud）、打開財富頁、匯入備份時再搬；這台已經有金鑰（大多數人）照樣在這裡搬
+        let didVault = migrateWealthSecrets(allowNewKey: false) > 0
         if didBackfill || didRepair || didMigrateEq || didSerial || didVault { save() }
         NotificationCenter.default.addObserver(
             self,
@@ -401,9 +404,18 @@ class LifeStore: ObservableObject {
     /// 一筆裡有一個封不了（這台還沒同步到金鑰、鑰匙圈寫不進去）整筆不動，照舊留明碼，下次再搬。沒有要搬的什麼都不做。
     /// 讀檔、從 iCloud 拉到新資料（init、reloadFromCloud）、打開財富頁、匯入備份之後叫；在主執行緒。
     /// milestones、wealthBook、wealthVault 各最多指派一次。回傳搬了幾筆
+    /// [v25.568 裁定] allowNewKey: false（init，還沒跟 iCloud 拉過）＝這台沒有金鑰就先不搬，絕不在這裡產生新金鑰
     @discardableResult
-    func migrateWealthSecrets() -> Int {
+    func migrateWealthSecrets(allowNewKey: Bool = true) -> Int {
+        // [v25.568 裁定] 金鑰剛從 iCloud 鑰匙圈同步過來（上次解有效期限時這台還沒有）：當作財富資料改了一次（wealthRevision 加一），
+        // 財富的一套數字、財富頁／卡片頁的快取、小工具快照跟著重算，畫面重畫一次——行事曆「卡片到期」、要確認 #12、
+        // 效期通知那幾張卡就回來（不用等資料改動或重開 App）。資料本身沒動、不存檔
+        if let c = expiryMonthsCache, !c.hasKey, CardVault.hasKey {
+            wealthRevision &+= 1
+            objectWillChange.send()
+        }
         guard milestones.contains(where: { (m: LifeMilestone) -> Bool in WealthSecrets.needsMigration(m) }) else { return 0 }
+        if !allowNewKey && !CardVault.hasKey { return 0 }
         var list = milestones
         var book = wealthBook
         var vault = wealthVault

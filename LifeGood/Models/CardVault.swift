@@ -110,10 +110,13 @@ enum CardVault {
     static var keyMissingHere: Bool { !hasKey && anyCipherExists }
 
     /// [v25.568] 這台還沒同步到金鑰時，表單存新號碼的說明（what：「卡號」「完整帳號」「有效期限」「保單號碼」「悠遊卡卡號」…）
+    /// [v25.568 裁定] 多一句給用不同 Apple ID 的家人（他們的裝置永遠等不到這把金鑰）；拆成四段 let，免得一長串 + 拖慢型別檢查
     static func keyMissingMessage(_ what: String) -> String {
-        "這台還沒同步到金鑰，剛打的" + what + "這次存不了：在這台產生新的金鑰，會蓋掉另一台裝置的金鑰，"
-            + "原本存的號碼就再也解不開了。請確認「設定 → Apple ID → iCloud → 密碼與鑰匙圈」已開啟，等一下再存；"
-            + "或先把剛打的" + what + "清掉，其他的照樣可以存。原本存的號碼都還在。"
+        let headText: String = "這台還沒同步到金鑰，剛打的" + what + "這次存不了：在這台產生新的金鑰，會蓋掉另一台裝置的金鑰，"
+        let waitText: String = "原本存的號碼就再也解不開了。請確認「設定 → Apple ID → iCloud → 密碼與鑰匙圈」已開啟，等一下再存；"
+        let clearText: String = "或先把剛打的" + what + "清掉，其他的照樣可以存。原本存的號碼都還在。"
+        let familyText: String = "（用不同 Apple ID 的家人的裝置永遠同步不到這把金鑰：號碼請在你自己的裝置改。）"
+        return headText + waitText + clearText + familyText
     }
 
     // MARK: - 加解密

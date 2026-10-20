@@ -1,4 +1,6 @@
 import SwiftUI
+// [v25.568] WealthCoverDepth 用到 UIApplication／UIViewController（照片提醒框等相機收起來再跳）
+import UIKit
 
 // MARK: - 財富的表單、小表單、要確認（v25.564，財富 v3；wealth/judge.md §5、§4.5、§3.5、§5.6）
 //
@@ -607,6 +609,24 @@ fileprivate struct WealthPhotoHitAlert: ViewModifier {
     }
 }
 
+/// [v25.568] 這個 App 的視窗上蓋了幾層畫面（從根往上數 presentedViewController：表單 sheet、全螢幕相機、看大圖、提醒框…）。
+/// 照片提醒框等表單上面沒有別的畫面再跳（WealthAccountEditor.waitUntilFormOnTop）。量不到＝0
+@MainActor
+fileprivate enum WealthCoverDepth {
+    static func current() -> Int {
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        let scene = scenes.first { $0.activationState == .foregroundActive } ?? scenes.first
+        guard let root = scene?.keyWindow?.rootViewController else { return 0 }
+        var depth = 0
+        var top: UIViewController? = root.presentedViewController
+        while let vc = top {
+            depth += 1
+            top = vc.presentedViewController
+        }
+        return depth
+    }
+}
+
 /// 刪銀行先問〔收起來就好〕〔仍要刪除〕（judge §5.6；拆成 modifier，坑 #7）
 struct WealthBankDeleteDialog: ViewModifier {
     @Binding var isPresented: Bool
@@ -761,6 +781,8 @@ struct WealthAccountEditor: View {
     @State private var policyNumberLocked = false
     /// [v25.568] 這次新加的照片好像拍到完整卡號（WealthPhotoScan；只提醒、不擋存檔）
     @State private var photoHit: WealthPhotoHit?
+    /// [v25.568] 打開表單時畫面蓋了幾層（WealthCoverDepth；0＝量不到）。比它多＝相機、相簿、看大圖還蓋在表單上，提醒框先等
+    @State private var photoBaseDepth: Int = 0
 
     private static let redirects: [(title: String, message: String)] = [
         ("儲蓄險", "儲蓄險在理財 › 儲蓄險記，會算現在值多少、到期領多少。"),
@@ -1671,7 +1693,8 @@ struct WealthAccountEditor: View {
         f.policyKind = k
     }
 
-    /// [v25.567] 保單號碼（judge §7.1：編輯表單也只露後 4 碼，Face ID 才看全部；存法照舊，沒解鎖存檔照原本的留著）
+    /// [v25.567] 保單號碼（judge §7.1：編輯表單也只露後 4 碼，Face ID 才看全部；沒解鎖存檔照原本的留著）。
+    /// [v25.568] 存法改密文（sealPolicy：完整的進 WealthVaultBook.policyCipher，里程碑只留後 4 碼）
     @ViewBuilder
     private var policyNumberRow: some View {
         if policyNumberLocked {
@@ -1693,6 +1716,12 @@ struct WealthAccountEditor: View {
             .disabled(unlocking)
         } else {
             TextField("保單號碼（選填）", text: $f.policyNumber)
+            if f.lostFields.contains(.policy) {
+                // [v25.568] 解鎖了但這台解不開：欄位空著，沒重打存檔照留原本的（sealPolicy .keep）
+                Text("這台還沒同步到金鑰，看不到原本存的保單號碼；空著不動的話，存檔時原本存的照樣留著。")
+                    .font(.caption)
+                    .foregroundStyle(Color.orange)
+            }
         }
     }
 
@@ -1845,9 +1874,25 @@ struct WealthAccountEditor: View {
         Task { @MainActor in
             // 等拍照／相簿的畫面收好再跳（同一刻疊兩個彈窗，iOS 會把第二個吃掉）
             try? await Task.sleep(nanoseconds: 600_000_000)
-            if let hit = await WealthPhotoScan.firstHit(items), f.photos.contains(hit.name) {
+            guard let hit = await WealthPhotoScan.firstHit(items) else { return }
+            await waitUntilFormOnTop()
+            if f.photos.contains(hit.name) {
                 photoHit = hit
             }
+        }
+    }
+
+    /// [v25.568] 連拍相機是全螢幕、拍一張存一張（還開著就加進照片了）；看大圖、另一個提醒框也會蓋在表單上。
+    /// 蓋著的時候提醒框跳不上去（會被吃掉），先等它們收起來、上一個照片提醒按掉；每半秒看一次，最多等 3 分鐘
+    @MainActor
+    private func waitUntilFormOnTop() async {
+        let base: Int = photoBaseDepth
+        var tries = 0
+        while tries < 360 {
+            let covered: Bool = base > 0 && WealthCoverDepth.current() > base
+            if !covered && photoHit == nil { return }
+            try? await Task.sleep(nanoseconds: 500_000_000)
+            tries += 1
         }
     }
 
@@ -1915,6 +1960,8 @@ struct WealthAccountEditor: View {
         for c in form.currencies where !codes.contains(c) { codes.append(c) }
         foreignCodes = codes
         f = form
+        // [v25.568] 這張表單本身蓋在第幾層（照片提醒框等相機收起來再跳：waitUntilFormOnTop）
+        photoBaseDepth = WealthCoverDepth.current()
         loaded = true
     }
 
@@ -2000,7 +2047,7 @@ struct WealthAccountEditor: View {
                 f.wantsSecurity = !code.isEmpty || f.securityVaultLost
                 // [v25.568] 有效期限、票證號（密文那一包）跟卡號同一顆 Face ID
                 var lost: [String] = []
-                if f.cardVaultLost { lost.append("卡號") }
+                if f.cardVaultLost { lost.append("完整卡號") }
                 if f.securityVaultLost { lost.append("檢核碼") }
                 lost += revealCardSecrets().map { (t: WealthSecretField) -> String in t.title }
                 if !lost.isEmpty {
@@ -2021,6 +2068,8 @@ struct WealthAccountEditor: View {
     private func revealCardSecrets() -> [WealthSecretField] {
         guard let m = editing else { return [] }
         let entry = f.vaultBase
+        // 票證三格本來就打得到字（沒有票證密文）＝不用解、也不能蓋掉你解鎖前剛打的字（unlockCard 之後才設 cardUnlocked）
+        let ticketsWereLocked: Bool = !f.ticketsEditable
         var lost: [WealthSecretField] = []
         let e = WealthSecrets.expiry(milestone: m, entry: entry, open: { (d: Data) -> String? in Self.openIfKey(d) })
         if let d = e.date {
@@ -2031,7 +2080,7 @@ struct WealthAccountEditor: View {
             f.hasExpiry = false
             lost.append(.expiry)
         }
-        for t in WealthSecretField.tickets {
+        for t in WealthSecretField.tickets where ticketsWereLocked {
             let r = WealthSecrets.reveal(t, milestone: m, entry: entry, open: { (d: Data) -> String? in Self.openIfKey(d) })
             if let v = r.value {
                 f.setTicket(t, v)
@@ -2093,7 +2142,7 @@ struct WealthAccountEditor: View {
                 let number = Self.openIfKey(f.accountCipher) ?? ""
                 f.accountVaultLost = f.accountCipher != nil && number.isEmpty
                 if number.isEmpty {
-                    vaultMessage = Self.missingKeyMessage("帳號")
+                    vaultMessage = Self.missingKeyMessage("完整帳號")
                 }
                 f.fullNumber = number
                 f.accountUnlocked = true
@@ -2119,7 +2168,7 @@ struct WealthAccountEditor: View {
         let retype: String = CardVault.keyMissingHere
             ? "金鑰同步過來以前，這台也存不了新打的號碼（免得蓋掉另一台的金鑰）。"
             : "若金鑰已經遺失，只能重新輸入一次。"
-        return "這台還沒同步到金鑰，看不到原本存的完整" + what + "。"
+        return "這台還沒同步到金鑰，看不到原本存的" + what + "。"
             + "金鑰是透過 iCloud 鑰匙圈同步的，請確認「設定 → Apple ID → iCloud → 密碼與鑰匙圈」已開啟；"
             + retype + "沒有重新輸入就存的話，原本存的會照樣留著。"
     }

@@ -179,7 +179,8 @@ async function loadFromCloud() {
   const db = ckContainer.privateCloudDatabase;
   const out = {};
   const entries = Object.entries(KV_KEYS);
-  const results = await Promise.all(entries.map(([k, key]) => fetchKV(db, key)));
+  // 財富那一包是選配的：讀失敗（下載不到、JSON 壞掉）當作沒有、退回舊算法，不讓整個網頁讀不進來
+  const results = await Promise.all(entries.map(([k, key]) => (k === 'wealthFacts' ? fetchKV(db, key).catch(() => null) : fetchKV(db, key))));
   // 財富那一包讀不到給 null（不是陣列；applyData 會再驗一次格式）
   entries.forEach(([k], i) => { out[k] = results[i] || (k === 'wealthFacts' ? null : []); });
   if (!out.subs.length && !out.depts.length && !out.orgPeople.length) {
@@ -1672,7 +1673,7 @@ function renderFinanceHome(main, tab, id) {
     body = `<div class="card"><h3>資產配置（台幣等值）</h3><div style="display:flex;height:22px;border-radius:8px;overflow:hidden;border:1px solid var(--line)">${alloc.map(([l, v, c]) => `<div title="${l} ${fmtMoney(v)}" style="width:${v / total * 100}%;background:${c}"></div>`).join('')}</div><div class="chips" style="margin-top:10px">${alloc.map(([l, v, c]) => `<span class="chip" style="background:${c}22;color:${c}">${l} ${fmtMoney(v)}・${Math.round(v / total * 100)}%</span>`).join('')}${S.reDebt ? `<span class="chip red">房貸餘額 −${fmtMoney(S.reDebt)}</span>` : ''}</div></div>
     <div class="grid cols-2 mt">
       <div class="card"><h3>持股市值前五 <span class="count">${S.activeStocks.length}</span></h3><div class="list">${S.activeStocks.sort((a, b) => b.mv - a.mv).slice(0, 5).map((x) => `<a class="item clickable" href="#/finance/stock/${x.s.id}"><div class="avatar sm" style="background:linear-gradient(135deg,#34c759,#30b0c7)">${esc(initial(x.s.symbol))}</div><div class="main-text"><div class="title">${esc(x.s.symbol)} ${esc(x.s.name)}</div><div class="meta">${x.s.shares.toLocaleString()} 股・成本 ${fmtMoney(x.cost)}</div></div><div style="text-align:right"><div class="score s80">${fmtMoney(x.mv)}</div><div class="small" style="color:${x.pl >= 0 ? 'var(--green)' : 'var(--red)'}">${x.pl >= 0 ? '+' : ''}${x.rate.toFixed(1)}%</div></div></a>`).join('') || '<div class="empty">尚無持股</div>'}</div></div>
-      <div class="card"><h3>銀行帳戶 <span class="count">${S.bankRows.length}</span></h3><div class="list">${S.bankRows.map(({ m, bal, twd, wfa }) => `<a class="item clickable" href="#/life/wealth"><div class="avatar sm" style="background:linear-gradient(135deg,#007aff,#5ac8fa)">${esc(initial(m.bankName || m.title))}</div><div class="main-text"><div class="title">${esc(wfa ? wfa.name : m.title)}</div><div class="meta">${esc((wfa ? [wfa.bank, maskTail(wfa.last4), wfNum(wfa.depositNTD) > 0.004 ? '含定存 ' + fmtNT(wfa.depositNTD) : ''] : [m.bankName, m.branchName, m.bankAccountType]).filter(Boolean).join('・'))}${Object.keys(bal).length > 1 ? '・' + Object.entries(bal).map(([c, v]) => `${esc(c)} ${Math.round(v).toLocaleString()}`).join('／') : ''}</div></div><span class="score ${twd >= 0 ? 's80' : 's0'}">${fmtMoney(twd)}</span></a>`).join('') || '<div class="empty">尚無銀行帳戶</div>'}</div></div>
+      <div class="card"><h3>銀行帳戶 <span class="count">${S.bankRows.length}</span></h3><div class="list">${S.bankRows.map(({ m, bal, twd, wfa }) => `<a class="item clickable" href="#/life/wealth"><div class="avatar sm" style="background:linear-gradient(135deg,#007aff,#5ac8fa)">${esc(initial(m.bankName || m.title))}</div><div class="main-text"><div class="title">${esc(wfa ? wfa.name : m.title)}</div><div class="meta">${esc((wfa ? [wfa.bank, maskTail(wfa.last4), wfNum(wfa.depositNTD) > 0.004 ? '含定存 ' + fmtNT(wfa.depositNTD) : '', wfa.countsInCash === false ? '不算進存款合計' : ''] : [m.bankName, m.branchName, m.bankAccountType]).filter(Boolean).join('・'))}${(Object.keys(bal).length > 1 || (wfa && Object.keys(bal).some((c) => c !== 'NT$'))) ? '・' + Object.entries(bal).map(([c, v]) => (wfa ? esc(wfAmt(v, c)) : `${esc(c)} ${Math.round(v).toLocaleString()}`)).join('／') : ''}</div></div><span class="score ${twd >= 0 ? 's80' : 's0'}">${fmtMoney(twd)}</span></a>`).join('') || '<div class="empty">尚無銀行帳戶</div>'}</div></div>
     </div>`;
   } else if (tab === 'insurance') {
     body = `<div class="card table-wrap"><h3>儲蓄險 <span class="count">${Store.insurances.length}</span><span class="spacer"></span><span class="muted small">現值合計 ${fmtMoney(S.insTotal)}</span></h3><table class="tbl"><thead><tr><th>名稱</th><th>公司</th><th class="num">每期保費</th><th>週期・利率</th><th>期間</th><th class="num">目前現值</th><th class="num">預期到期</th><th>連結固定支出</th></tr></thead><tbody>${Store.insurances.map((i) => { const total = Math.max(1, (i.maturityDate - i.startDate)); const pct = Math.min(100, Math.max(0, Math.round((now - i.startDate) / total * 100))); const linked = i.linkedExpenseId && Store.expenses.find((e) => e.id === i.linkedExpenseId); return `<tr><td><b>${esc(i.name)}</b>${i.note ? `<div class="muted small">${esc(i.note)}</div>` : ''}</td><td>${esc(i.company)}</td><td class="num">${fmtAmt(i.premiumAmount, i.currencyCode)}</td><td>${esc(i.paymentPeriod)}・${i.annualRate}%</td><td>${fmtDate(i.startDate).split(' ')[0]} – ${fmtDate(i.maturityDate).split(' ')[0]}<div style="height:4px;border-radius:2px;background:var(--card2);margin-top:4px"><div style="width:${pct}%;height:100%;background:var(--purple);border-radius:2px"></div></div><div class="muted small">${pct}%・剩 ${Math.max(0, Math.round((i.maturityDate - now) / 86400000 / 30))} 個月</div></td><td class="num"><b>${fmtAmt(i.currentValue, i.currencyCode)}</b>${i.currencyCode !== 'NT$' ? `<div class="muted small">≈ ${fmtMoney(i.currentValue * rateOf(i.currencyCode))}</div>` : ''}</td><td class="num">${fmtAmt(i.expectedReturn, i.currencyCode)}</td><td class="muted small">${linked ? esc(linked.title) : '—'}</td></tr>`; }).join('') || '<tr><td colspan="8" class="empty">尚無儲蓄險</td></tr>'}</tbody></table></div>`;
@@ -1775,9 +1776,191 @@ function maskTail(raw) {
   const digits = s.match(/[0-9０-９]/g);
   return '••' + (digits ? digits.slice(-4).join('') : [...s].slice(-4).join(''));
 }
+
+// ---- v1.13：App 算好的那一包（life_wealth_facts_v1；App v25.568 起寫，WealthWebFacts.swift）--------------
+// App 把財富的一套數字（存款合計、每個帳戶的存摺上、卡費還沒扣、交割、定存、理財淨資產）算好、跟著 iCloud 上來；
+// 網頁版讀得到就照這包顯示（跟 App 同一個數），讀不到（App 還沒更新到 25.568、還沒打開過、格式不認得）才用自己的舊算法。
+// 這包裡只有後 4 碼（last4）：沒有完整卡號、安全碼、完整帳號、有效期限、保單號碼、票證號；畫面上一律再經過 maskTail。
+// 日期是字串「2026-10-27」（不經 reviveDates：它只轉數字，欄位名也避開 DATE_KEYS）。
+/** 收下那一包：只認 version 1、accounts／cards 是陣列、cash 是數字；其他當作沒有（null＝退回舊算法） */
+function validWealthFacts(v) {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return null;
+  if (v.version !== 1 || !Array.isArray(v.accounts) || !Array.isArray(v.cards)) return null;
+  if (typeof v.cash !== 'number' || !isFinite(v.cash)) return null;
+  for (const k of ['accounts', 'cards', 'brokers', 'settlements', 'deposits']) {
+    v[k] = Array.isArray(v[k]) ? v[k].filter((x) => x && typeof x === 'object' && !Array.isArray(x)) : [];
+  }
+  for (const a of v.accounts) {
+    a.balances = Array.isArray(a.balances) ? a.balances.filter((b) => b && typeof b === 'object') : [];
+    a.unknownCodes = Array.isArray(a.unknownCodes) ? a.unknownCodes : [];
+  }
+  return v;
+}
+/** 讀得到那一包就回它，讀不到 null（financeSummary、renderWealth 用） */
+function wealthFactsOK() { const wf = Store.wealthFacts; return wf && wf.version === 1 ? wf : null; }
+/** 那一包裡的數字（不是數字當 0） */
+function wfNum(v) { return typeof v === 'number' && isFinite(v) ? v : 0; }
+/** 台幣「NT$816,800」（App 的寫法：沒有空格、整數） */
+function fmtNT(v) { const r = Math.round(wfNum(v)); return (r < 0 ? '-' : '') + 'NT$' + Math.abs(r).toLocaleString('zh-Hant-TW'); }
+/** 一個幣別的金額：台幣「NT$128,400」、外幣「美金 3,200.00」 */
+function wfAmt(v, code) {
+  if (!code || code === 'NT$') return fmtNT(v);
+  return `${code} ${wfNum(v).toLocaleString('zh-Hant-TW', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+/** 「2026-10-27」→ { y, m, d }（不對回 null） */
+function wfDay(s) { const r = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(s || '')); return r ? { y: +r[1], m: +r[2], d: +r[3] } : null; }
+/** 「2026-10-27」→「10/27」 */
+function wfMD(s) { const d = wfDay(s); return d ? `${d.m}/${d.d}` : ''; }
+/** 「2027-03-15」→「2027/3/15」 */
+function wfYMD(s) { const d = wfDay(s); return d ? `${d.y}/${d.m}/${d.d}` : ''; }
+/** 這台電腦的今天「2026-10-20」（跟 asOf 比：App 今天算過沒有） */
+function wfTodayKey() { const n = new Date(); return `${n.getFullYear()}-${pad2(n.getMonth() + 1)}-${pad2(n.getDate())}`; }
+/** 理財頁「銀行帳戶」清單：那一包裡沒收起來的帳戶（twd＝存摺上＋存著的定存，跟 App 存款合計同一個口徑） */
+function wealthBankRows(wf) {
+  return wf.accounts.filter((a) => !a.hidden).map((a) => {
+    const m = Store.milestones.find((x) => x.id === a.id) || { title: a.name || '', bankName: a.bank || '' };
+    const bal = {};
+    for (const b of a.balances || []) { if (b && b.code) bal[b.code] = (bal[b.code] || 0) + wfNum(b.amount); }
+    return { m, bal, twd: wfNum(a.ntd) + wfNum(a.depositNTD), wfa: a };
+  }).sort((x, y) => y.twd - x.twd);
+}
+/** 一期定存：「台灣銀行 定存 NT$500,000・2027/3/15 到期・本息續存」 */
+function wfDepositLine(t) {
+  const st = t.status === 'notStarted' ? '還沒開始' : t.status === 'waiting' ? '到期待決定' : '';
+  return [`${t.account ? t.account + ' ' : ''}定存 ${wfAmt(t.principal, t.code)}`, t.maturityDay ? `${wfYMD(t.maturityDay)} 到期` : '', t.mode || '', st].filter(Boolean).join('・');
+}
+/** 一筆交割：「10/21 交割 NT$52,340（元大證券）」（賣的是「交割入帳」） */
+function wfSettlementLine(s) {
+  return `${wfMD(s.day)} ${s.outflow ? '交割' : '交割入帳'} ${wfAmt(Math.abs(wfNum(s.amount)), s.code)}${s.broker ? `（${s.broker}）` : ''}`;
+}
+/** 卡費怎麼繳（同 App 卡片頁 WealthCardData「怎麼繳」）：自動扣＝「自動扣全額，從薪轉扣」；自己繳／每次問我＝「自己繳，通常從房貸扣款」 */
+function wfPayText(c) {
+  const mode = c.payMode || '';
+  if (!c.payer) return mode;
+  if (!mode) return `通常從${c.payer}`;
+  return mode.startsWith('自動扣') ? `${mode}，從${c.payer}扣` : `${mode}，通常從${c.payer}`;
+}
+
+// 財富卡片的外框（舊算法、App 那一包共用同一個長相）
+const WEALTH_SUB_COLOR = { '銀行': 'blue', '信用卡': 'orange', '證券': 'green', '保險': 'purple' };
+const WEALTH_SUB_BG = { '銀行': 'linear-gradient(135deg,#007aff,#5ac8fa)', '信用卡': 'linear-gradient(135deg,#ff9500,#ffcc00)', '證券': 'linear-gradient(135deg,#34c759,#30b0c7)', '保險': 'linear-gradient(135deg,#af52de,#5856d6)' };
+/** o：{ sub, title, avatar, subline, tags[], val, valCls, lead, lines[], extra(HTML), note, faded }；字一律在這裡 esc */
+function wealthCardShell(o) {
+  const tags = (o.tags || []).filter(Boolean).map((t) => ` <span class="chip">${esc(t)}</span>`).join('');
+  const lead = o.lead ? `<div style="margin-top:8px;font-weight:700;font-size:13px">${esc(o.lead)}</div>` : '';
+  const lines = (o.lines || []).filter(Boolean).map((l, i) => `<div class="muted small" style="margin-top:${i === 0 && !o.lead ? 8 : 4}px">${esc(l)}</div>`).join('');
+  return `<div class="card" style="${o.faded ? 'opacity:.55' : ''}"><div class="row" style="align-items:flex-start"><div class="avatar sm" style="background:${WEALTH_SUB_BG[o.sub] || WEALTH_SUB_BG['保險']}">${esc(initial(o.avatar))}</div><div style="flex:1;min-width:0"><div style="font-weight:900;font-size:15px">${esc(o.title)} <span class="chip ${WEALTH_SUB_COLOR[o.sub] || ''}">${esc(o.sub)}</span>${tags}</div><div class="muted small">${esc(o.subline || '')}</div></div><div class="score ${o.valCls || 's80'}" style="font-size:18px">${esc(o.val || '')}</div></div>${lead}${lines}${o.extra || ''}${o.note ? `<div class="muted small" style="margin-top:6px">${esc(o.note)}</div>` : ''}</div>`;
+}
+/** 銀行卡的「最近存提」摺疊清單（沒有號碼） */
+function wealthDepositsExtra(m) {
+  const deps = [...((m && m.bankDeposits) || [])].sort((a, b) => b.date - a.date).slice(0, 8);
+  return deps.length ? `<details class="agenda"><summary>最近存提 ${deps.length} 筆</summary><div class="sub-items">${deps.map((d) => `<div class="t-meta" style="padding:3px 0;display:flex;justify-content:space-between"><span>${fmtDate(d.date).split(' ')[0]}${d.isAdjust ? ' <span class="chip indigo">沖正</span>' : ''}${d.note ? '・' + esc(d.note) : ''}</span><b style="color:${d.isWithdrawal ? 'var(--red)' : 'var(--green)'}">${d.isWithdrawal ? '−' : '+'}${fmtAmt(d.amount, d.currencyCode)}</b></div>`).join('')}</div></details>` : '';
+}
+/** 信用卡的「最近消費」摺疊清單（沒有號碼） */
+function wealthSpendExtra(m, now) {
+  if (!m) return '';
+  const ents = creditCardEntries(m.id, now).sort((a, b) => b.date - a.date).slice(0, 8);
+  return ents.length ? `<details class="agenda"><summary>最近消費 ${ents.length} 筆</summary><div class="sub-items">${ents.map((e) => `<div class="t-meta" style="padding:3px 0;display:flex;justify-content:space-between"><span>${fmtDate(e.date).split(' ')[0]}・${esc(e.expense.title)}</span><b>${fmtFull(e.amount)}</b></div>`).join('')}</div></details>` : '';
+}
+/** 證券戶連到的持股（只有代號） */
+function wealthStockChips(id) {
+  const linked = Store.stocks.filter((s) => s.linkedSecuritiesMilestoneId === id && !s.isSold);
+  return linked.length ? `<div class="chips" style="margin-top:6px">${linked.map((s) => `<a class="chip green" href="#/finance/stock/${esc(s.id)}">${esc(s.symbol)}</a>`).join('')}</div>` : '';
+}
+/** 保單卡（兩條路一樣：讀里程碑，保單號碼只露後 4 碼） */
+function wealthPolicyCard(m) {
+  return wealthCardShell({ sub: '保險', title: m.title, avatar: m.bankName || m.insuranceCompany || m.title, faded: !!m.isDisabled,
+    subline: [m.bankName, m.branchName, m.bankAccountType, m.cardName, m.cardLastFour ? maskTail(m.cardLastFour) : ''].filter(Boolean).join('・'),
+    tags: [m.isDisabled ? '停用' : ''], val: m.premiumAmount ? fmtMoney(m.premiumAmount) + '／期' : '',
+    lines: [[m.insuranceCompany, m.insuranceType, m.policyNumber ? '保單 ' + maskTail(m.policyNumber) : '', m.beneficiary ? '受益人 ' + m.beneficiary : ''].filter(Boolean).join('・')],
+    note: m.note });
+}
+
+/** App 那一包的銀行帳戶卡：「薪轉」「台新銀行・••7890」「NT$128,400」、多幣別逐格、扣完能用、交割、定存 */
+function wealthBankCardFromApp(a, wf, m) {
+  const bals = (a.balances || []).filter((b) => b && b.code);
+  const multi = bals.length > 1 || bals.some((b) => b.code !== 'NT$');
+  const unknown = Array.isArray(a.unknownCodes) ? a.unknownCodes.filter(Boolean) : [];
+  const lines = [];
+  if (wfNum(a.notYetDebited) > 0.004) lines.push(`還沒扣 ${fmtNT(a.notYetDebited)}・扣完能用 ${fmtNT(a.usable)}`);
+  for (const s of wf.settlements) if (s.accountId === a.id) lines.push(wfSettlementLine(s));
+  for (const t of wf.deposits) if (t.accountId === a.id) lines.push(wfDepositLine(t));
+  if (unknown.length) lines.push(`${unknown.join('、')} 查不到匯率，沒算進台幣`);
+  if (a.countsInCash === false) lines.push('不算進存款合計');
+  const chips = multi ? `<div class="chips" style="margin-top:8px">${bals.map((b) => `<span class="chip">${esc(wfAmt(b.amount, b.code))}</span>`).join('')}</div>` : '';
+  return wealthCardShell({ sub: '銀行', title: a.name || a.bank || '銀行帳戶', avatar: a.bank || a.name, faded: !!a.hidden,
+    subline: [a.bank && a.bank !== a.name ? a.bank : '', maskTail(a.last4)].filter(Boolean).join('・'),
+    tags: [a.hidden ? '收起來' : ''], val: (unknown.length ? '約 ' : '') + fmtNT(a.ntd),
+    lines, extra: chips + wealthDepositsExtra(m), note: m && m.note });
+}
+/** App 那一包的信用卡：「國泰世華 CUBE」「••5678」「要繳 NT$18,600・10/27 截止」……（沒有到期日） */
+function wealthCreditCardFromApp(c, m, now) {
+  const due = wfNum(c.due);
+  const lead = due > 0.004 ? `要繳 ${fmtNT(due)}${c.dueDay ? '・' + wfMD(c.dueDay) + ' 截止' : ''}`
+    : `這期沒有要繳${c.nextCloseDay ? '・下次結帳 ' + wfMD(c.nextCloseDay) : ''}`;
+  const info = [`還沒出帳 ${fmtNT(c.unbilled)}`, typeof c.available === 'number' ? '還能刷 ' + fmtNT(c.available) : '',
+    c.billingDay ? `結帳 ${c.billingDay} 日` : '', c.paymentDay ? `截止 ${c.paymentDay} 日` : '', wfPayText(c)].filter(Boolean).join('・');
+  const name = c.name || '信用卡';
+  return wealthCardShell({ sub: '信用卡', title: name, avatar: c.issuer || name, faded: !!c.disabled,
+    subline: [c.issuer && !name.includes(c.issuer) ? c.issuer : '', maskTail(c.last4)].filter(Boolean).join('・'),
+    tags: [c.disabled ? '停用' : ''], val: fmtNT(due), valCls: due > 0.004 ? 's70' : 's80',
+    lead, lines: [info], extra: wealthSpendExtra(m, now), note: m && m.note });
+}
+/** App 那一包的證券戶：「元大證券」「••2468」「交割銀行 薪轉・市值 NT$863,900・10/21 交割 NT$52,340」 */
+function wealthBrokerCardFromApp(b, m) {
+  const amt = wfNum(b.nextSettlementAmount);
+  const settle = b.nextSettlementDay && Math.abs(amt) > 0.004 ? `${wfMD(b.nextSettlementDay)} ${amt > 0 ? '交割' : '交割入帳'} ${fmtNT(Math.abs(amt))}` : '';
+  return wealthCardShell({ sub: '證券', title: b.name || '證券戶', avatar: b.name, subline: maskTail(b.last4),
+    val: fmtNT(b.marketValue),
+    lines: [[b.settlementBank ? '交割銀行 ' + b.settlementBank : '還沒選交割銀行', '市值 ' + fmtNT(b.marketValue), settle].filter(Boolean).join('・')],
+    extra: wealthStockChips(b.id), note: m && m.note });
+}
+/** 網頁讀到、App 那一包還沒有的帳戶（別台剛新增、App 還沒在這台算過）：不放數字，免得兩套算法混在一起 */
+function wealthPendingCard(m) {
+  return wealthCardShell({ sub: m.financeSubCategory, title: m.title, avatar: m.bankName || m.title, faded: true,
+    subline: [m.bankName, m.cardLastFour ? maskTail(m.cardLastFour) : ''].filter(Boolean).join('・'),
+    lines: ['App 還沒算到這一筆：在 App 打開一次，這裡就會出現跟 App 一樣的數字。'] });
+}
+
+/** v1.13：讀得到 App 那一包時的財富卡片——跟 App 同一個數；號碼只露後 4 碼、沒有卡片到期日 */
+function renderWealthFromApp(main, S) {
+  const wf = S.wf; const now = S.now;
+  const msById = {}; for (const m of S.fm) msById[m.id] = m;
+  const items = []; const known = new Set(); const accountIds = new Set();
+  for (const a of wf.accounts) { known.add(a.id); accountIds.add(a.id); items.push({ faded: !!a.hidden, html: wealthBankCardFromApp(a, wf, msById[a.id]) }); }
+  for (const c of wf.cards) { known.add(c.id); items.push({ faded: !!c.disabled, html: wealthCreditCardFromApp(c, msById[c.id], now) }); }
+  for (const b of wf.brokers) { known.add(b.id); items.push({ faded: false, html: wealthBrokerCardFromApp(b, msById[b.id]) }); }
+  const policies = S.fm.filter((m) => m.financeSubCategory === '保險');
+  for (const m of policies) items.push({ faded: !!m.isDisabled, html: wealthPolicyCard(m) });
+  for (const m of S.fm) {
+    // App 只算「成就」底下的財富里程碑（WealthFacts.build）：其他分類的不出現，免得永遠掛著「還沒算到」
+    if (known.has(m.id) || m.category !== '成就' || !['銀行', '信用卡', '證券'].includes(m.financeSubCategory)) continue;
+    items.push({ faded: true, html: wealthPendingCard(m) });
+  }
+  // 定存掛的帳戶不在那一包（不應該發生）：另外一張，不漏掉
+  const orphan = wf.deposits.filter((t) => !accountIds.has(t.accountId));
+  if (orphan.length) items.push({ faded: false, html: wealthCardShell({ sub: '銀行', title: '定存', avatar: '定', lines: orphan.map(wfDepositLine) }) });
+  // 收起來的帳戶、停用的卡淡一點放後面
+  const shown = [...items.filter((x) => !x.faded), ...items.filter((x) => x.faded)];
+  const head = [`存款合計 ${wf.cashApprox ? '約 ' : ''}${fmtNT(wf.cash)}`, `卡費還沒扣 ${fmtNT(wf.owedCards)}`,
+    Math.abs(wfNum(wf.pendingSettlement)) > 0.004 ? `交割 ${fmtNT(wf.pendingSettlement)}` : '',
+    wfNum(wf.scheduledOut) > 0.004 ? `排定的提款 ${fmtNT(wf.scheduledOut)}` : '',
+    `扣完活存能用 ${fmtNT(wf.usable)}`].filter(Boolean).join('・');
+  const counts = [['銀行', wf.accounts.length], ['信用卡', wf.cards.length], ['證券', wf.brokers.length], ['保險', policies.length]].filter(([, n]) => n > 0);
+  const parts = [['活存', wf.live], ['定存', wf.fixedDeposit], ['外幣', wf.foreign]].filter(([, v]) => Math.abs(wfNum(v)) > 0.004);
+  const asOf = wfMD(wf.asOf);
+  const stale = wf.asOf && wf.asOf !== wfTodayKey() ? '今天還沒在 App 算過：打開 App 一次就會更新。' : '';
+  main.innerHTML = `
+    ${pageHead('財富卡片', esc(head))}
+    <div class="chips" style="margin-bottom:14px">${counts.map(([k, n]) => `<span class="chip ${WEALTH_SUB_COLOR[k] || ''} big">${esc(k)} ${n}</span>`).join('')}${parts.map(([k, v]) => `<span class="chip">${esc(k)} ${esc(fmtNT(v))}</span>`).join('')}</div>
+    <div class="grid cols-2">${shown.map((x) => x.html).join('') || '<div class="empty">尚無財富卡片</div>'}</div>
+    <div class="muted small" style="margin-top:12px">${esc(`這裡的數字是 App 在 ${asOf || '上次打開時'} 算好的，跟 App 同一個數；號碼只露後 4 碼，沒有卡片到期日。${stale}`)}</div>`;
+}
 function renderWealth(main) {
   const S = financeSummary(); const now = S.now;
-  const subColor = { '銀行': 'blue', '信用卡': 'orange', '證券': 'green', '保險': 'purple' };
+  // v1.13：讀得到 App 算好的那一包就照它（跟 App 同一個數）；讀不到才用下面的舊算法
+  if (S.wf) { renderWealthFromApp(main, S); return; }
+  const subColor = WEALTH_SUB_COLOR;
   const order = { '銀行': 0, '信用卡': 1, '證券': 2, '保險': 3 };
   const fm = [...S.fm].sort((a, b) => (order[a.financeSubCategory] ?? 9) - (order[b.financeSubCategory] ?? 9));
   const counts = {}; for (const m of fm) counts[m.financeSubCategory] = (counts[m.financeSubCategory] || 0) + 1;
@@ -1785,20 +1968,18 @@ function renderWealth(main) {
     ${pageHead('財富卡片', `${fm.length} 筆帳戶・銀行總餘額 ${fmtMoney(S.bankTotal)}（台幣等值）`)}
     <div class="chips" style="margin-bottom:14px">${Object.entries(counts).map(([k, n]) => `<span class="chip ${subColor[k] || ''} big">${esc(k)} ${n}</span>`).join('')}</div>
     <div class="grid cols-2">${fm.map((m) => {
+      if (m.financeSubCategory === '保險') return wealthPolicyCard(m);
       let val = '', detail = '', extra = '';
       if (m.financeSubCategory === '銀行') {
         const bal = bankBalances(m); val = fmtMoney(balanceTWD(bal)); detail = Object.entries(bal).map(([c, v]) => `${c} ${Math.round(v).toLocaleString()}`).join('／');
-        const deps = [...(m.bankDeposits || [])].sort((a, b) => b.date - a.date).slice(0, 8);
-        extra = deps.length ? `<details class="agenda"><summary>最近存提 ${deps.length} 筆</summary><div class="sub-items">${deps.map((d) => `<div class="t-meta" style="padding:3px 0;display:flex;justify-content:space-between"><span>${fmtDate(d.date).split(' ')[0]}${d.isAdjust ? ' <span class="chip indigo">沖正</span>' : ''}${d.note ? '・' + esc(d.note) : ''}</span><b style="color:${d.isWithdrawal ? 'var(--red)' : 'var(--green)'}">${d.isWithdrawal ? '−' : '+'}${fmtAmt(d.amount, d.currencyCode)}</b></div>`).join('')}</div></details>` : '';
+        extra = wealthDepositsExtra(m);
       } else if (m.financeSubCategory === '信用卡') {
         const used = S.cardMonth(m); val = fmtMoney(used) + '／本月'; detail = [m.creditLimit ? `額度 ${fmtMoney(m.creditLimit)}・${Math.round(used / m.creditLimit * 100)}%` : '', m.annualFee ? '年費 ' + fmtMoney(m.annualFee) : '', m.billingDay ? '結帳 ' + m.billingDay + ' 日' : '', m.paymentDay ? '繳款 ' + m.paymentDay + ' 日' : '', m.linkedBankMilestoneId ? '扣款 ' + bankNameOf(m.linkedBankMilestoneId) : ''].filter(Boolean).join('・');
-        const ents = creditCardEntries(m.id, now).sort((a, b) => b.date - a.date).slice(0, 8);
-        extra = ents.length ? `<details class="agenda"><summary>最近消費 ${ents.length} 筆</summary><div class="sub-items">${ents.map((e) => `<div class="t-meta" style="padding:3px 0;display:flex;justify-content:space-between"><span>${fmtDate(e.date).split(' ')[0]}・${esc(e.expense.title)}</span><b>${fmtFull(e.amount)}</b></div>`).join('')}</div></details>` : '';
-      } else if (m.financeSubCategory === '保險') { val = m.premiumAmount ? fmtMoney(m.premiumAmount) + '／期' : ''; detail = [m.insuranceCompany, m.insuranceType, m.policyNumber ? '保單 ' + maskTail(m.policyNumber) : '', m.beneficiary ? '受益人 ' + m.beneficiary : ''].filter(Boolean).join('・'); }
-      else { const linked = Store.stocks.filter((s) => s.linkedSecuritiesMilestoneId === m.id && !s.isSold); val = fmtMoney(linked.reduce((a, s) => a + stockView(s).mv, 0)); detail = [m.securitiesAccountType, `持股 ${linked.length} 檔`].filter(Boolean).join('・'); extra = linked.length ? `<div class="chips" style="margin-top:6px">${linked.map((s) => `<a class="chip green" href="#/finance/stock/${s.id}">${esc(s.symbol)}</a>`).join('')}</div>` : ''; }
-      return `<div class="card" style="${m.isDisabled ? 'opacity:.55' : ''}"><div class="row" style="align-items:flex-start"><div class="avatar sm" style="background:${m.financeSubCategory === '銀行' ? 'linear-gradient(135deg,#007aff,#5ac8fa)' : m.financeSubCategory === '信用卡' ? 'linear-gradient(135deg,#ff9500,#ffcc00)' : m.financeSubCategory === '證券' ? 'linear-gradient(135deg,#34c759,#30b0c7)' : 'linear-gradient(135deg,#af52de,#5856d6)'}">${esc(initial(m.bankName || m.insuranceCompany || m.title))}</div><div style="flex:1;min-width:0"><div style="font-weight:900;font-size:15px">${esc(m.title)} <span class="chip ${subColor[m.financeSubCategory] || ''}">${esc(m.financeSubCategory)}</span>${m.isDisabled ? ' <span class="chip">停用</span>' : ''}</div><div class="muted small">${esc([m.bankName, m.branchName, m.bankAccountType, m.cardName, m.cardLastFour ? '末' + m.cardLastFour : ''].filter(Boolean).join('・'))}</div></div><div class="score s80" style="font-size:18px">${val}</div></div><div class="muted small" style="margin-top:8px">${esc(detail)}</div>${extra}${m.note ? `<div class="muted small" style="margin-top:6px">${esc(m.note)}</div>` : ''}</div>`;
+        extra = wealthSpendExtra(m, now);
+      } else { const linked = Store.stocks.filter((s) => s.linkedSecuritiesMilestoneId === m.id && !s.isSold); val = fmtMoney(linked.reduce((a, s) => a + stockView(s).mv, 0)); detail = [m.securitiesAccountType, `持股 ${linked.length} 檔`].filter(Boolean).join('・'); extra = wealthStockChips(m.id); }
+      return `<div class="card" style="${m.isDisabled ? 'opacity:.55' : ''}"><div class="row" style="align-items:flex-start"><div class="avatar sm" style="background:${WEALTH_SUB_BG[m.financeSubCategory] || WEALTH_SUB_BG['保險']}">${esc(initial(m.bankName || m.insuranceCompany || m.title))}</div><div style="flex:1;min-width:0"><div style="font-weight:900;font-size:15px">${esc(m.title)} <span class="chip ${subColor[m.financeSubCategory] || ''}">${esc(m.financeSubCategory)}</span>${m.isDisabled ? ' <span class="chip">停用</span>' : ''}</div><div class="muted small">${esc([m.bankName, m.branchName, m.bankAccountType, m.cardName, m.cardLastFour ? maskTail(m.cardLastFour) : ''].filter(Boolean).join('・'))}</div></div><div class="score s80" style="font-size:18px">${val}</div></div><div class="muted small" style="margin-top:8px">${esc(detail)}</div>${extra}${m.note ? `<div class="muted small" style="margin-top:6px">${esc(m.note)}</div>` : ''}</div>`;
     }).join('') || '<div class="empty">尚無財富卡片</div>'}</div>
-    <div class="muted small" style="margin-top:12px">這裡的數字是舊算法（刷卡當天就扣、沒算卡費截止日與交割），以 App 為準。</div>`;
+    <div class="muted small" style="margin-top:12px">這裡的數字是舊算法（刷卡當天就扣、沒算卡費截止日與交割），以 App 為準。App 更新到 25.568 以上、打開一次，這裡就會跟 App 一樣。</div>`;
 }
 
 // ---- 績效評分加總 -----------------------------------------------------------
