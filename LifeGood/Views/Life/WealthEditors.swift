@@ -1909,18 +1909,24 @@ struct WealthAccountEditor: View {
     /// [v25.567] 證券戶改了交割銀行（judge §4.3 ⑥）：這個證券戶還沒賣掉、交割銀行不是新的那幾檔，問要不要一起改（以前的交割不動）
     private func brokerStocksAsk() -> WealthEditorAsk? {
         guard let id = editing?.id, let new = f.settlementBankId, new != originalSettlement else { return nil }
+        // [v25.567 驗] 外幣交割的（複委託從美金子帳戶扣）不算：LifeStore.moveBrokerStocks 不搬它們（同一條規則）
         let n = financeStore.stocks.filter { s in
             s.linkedSecuritiesMilestoneId == id && !s.isSold && s.linkedBankMilestoneId != new
+                && FinanceRates.isNTD(s.linkedBankCurrency ?? "NT$")
         }.count
         guard n > 0 else { return nil }
         let name: String = banks.first(where: { $0.id == new })?.name ?? "新的交割銀行"
         return .brokerStocks(count: n, bankId: new, bankName: name)
     }
 
-    /// [v25.567] 保單存檔時的保費（保費 0 就不寫記帳：nil）。第一期＝你填的下次扣款日（今天或以後）；沒填照生效日往後推
-    /// （WealthPolicyLink.firstDue；以前的期數不補記）
-    private static func premiumDraft(_ form: WealthAccountForm) -> WealthPolicyPremiumDraft? {
-        guard let amount = WealthFormText.number(form.premiumText), amount > 0 else { return nil }
+    /// [v25.567] 保單存檔時的保費（沒連、保費 0 就不寫記帳：nil）。第一期＝你填的下次扣款日（今天或以後）；沒填照生效日往後推
+    /// （WealthPolicyLink.firstDue；以前的期數不補記）。
+    /// linked：連著記帳（含〔補保單〕帶進來的那一筆）——保費欄空著也照樣給（金額 0＝savePolicyPremium 不改那一筆的金額）：
+    /// 〔補保單〕存檔才連得上，里程碑的保費（醫療地圖、舊 iPad 讀）也照記帳那一筆寫回，不會留成空的
+    private static func premiumDraft(_ form: WealthAccountForm, linked: Bool) -> WealthPolicyPremiumDraft? {
+        let typed: Double = WealthFormText.number(form.premiumText) ?? 0
+        let amount: Double = typed > 0 ? typed : 0
+        guard amount > 0 || linked else { return nil }
         let today = WealthCal.day(Date())
         let next: Date? = form.hasNextDue ? form.nextDue : nil
         let first = WealthPolicyLink.firstDue(start: form.date, nextDue: next, cycle: form.payCycle, today: today)
@@ -1996,7 +2002,7 @@ struct WealthAccountEditor: View {
     /// payFromAll：卡改了扣款帳戶時確認框選的（true＝以前的帳單也改；false／nil＝從下一期起）。
     /// 先關畫面、下一個 runloop 才寫：里程碑一次＋帳本一次（LifeStore.saveWealthAccount），改扣款帳戶再記一段歷史。
     /// [v25.567] useExpense：保單〔用那一筆〕選的記帳保費（linkPolicy 連起來，記帳那一筆不動）；moveStocks：證券戶〔一起改〕。
-    /// 保單接著寫記帳那一筆保費（savePolicyPremium：沒連就建、連著（含〔補保單〕）就改；保費 0 不叫）、證券戶接著搬股票（moveBrokerStocks）
+    /// 保單接著寫記帳那一筆保費（savePolicyPremium：沒連就建、連著（含〔補保單〕）就改；沒連而且保費 0 不叫）、證券戶接著搬股票（moveBrokerStocks）
     private func save(payFromAll: Bool?, useExpense: UUID? = nil, moveStocks: Bool = false) {
         guard !isSaving, canSave else { return }
         guard let sealed = sealVault() else { return }
@@ -2018,8 +2024,9 @@ struct WealthAccountEditor: View {
         // 〔用那一筆〕＝照記帳那一筆連起來（linkPolicy：記帳那一筆不動，保單的舊欄位照它寫一份）；不拿表單的繳法、
         // 從哪扣去改它（表單沒填的「從哪扣」會把那一筆的刷卡清掉）。其他照表單寫記帳那一筆（savePolicyPremium）
         let linkTo: UUID? = k == .policy ? useExpense : nil
-        let premium: WealthPolicyPremiumDraft? = (k == .policy && linkTo == nil) ? Self.premiumDraft(form) : nil
         let useId: UUID? = linkedExpenseId
+        let premium: WealthPolicyPremiumDraft? = (k == .policy && linkTo == nil)
+            ? Self.premiumDraft(form, linked: useId != nil) : nil
         let moveTo: UUID? = (k == .broker && moveStocks) ? form.settlementBankId : nil
         dismiss()
         DispatchQueue.main.async {

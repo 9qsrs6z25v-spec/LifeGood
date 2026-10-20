@@ -2381,9 +2381,14 @@ extension WealthCardData {
         bk.legacyRows = mine.map { legacyRow($0, x: x) }
         bk.legacyTitle = "以前記在這裡的交割紀錄 \(k.legacyCount) 筆"
         let bankName: String? = k.settlementBankId == nil ? nil : k.settlementName
-        bk.canMoveLegacy = k.settlementBankId != nil
+        // [v25.567 裁] 只剩股票已經刪了的紀錄（搬的時候留在證券戶當紀錄）不給〔搬到…〕：同 #16 的 legacyLiveCount，
+        // 以前照樣有按鈕、按了是「沒有要搬的紀錄」
+        let movable: Bool = k.legacyLiveCount > 0
+        bk.canMoveLegacy = k.settlementBankId != nil && movable
         bk.legacyMoveTitle = "搬到" + (bankName ?? "交割銀行")
-        if let n = bankName {
+        if !movable {
+            bk.legacyNote = "不算進任何合計。這幾筆的股票已經刪了，留在這裡當紀錄。"
+        } else if let n = bankName {
             bk.legacyNote = "不算進任何合計。交割其實是從" + n + "扣的：按〔搬到" + n + "〕會先列出會動到哪些，你按確定才搬。"
         } else {
             bk.legacyNote = "不算進任何合計。先在下面「資料」選交割銀行，才能把這些紀錄搬過去。"
@@ -2470,14 +2475,15 @@ extension WealthCardData {
         return p.perPeriod
     }
 
-    /// 看板一句：「已繳 6 年・還剩 14 年・刷 CUBE」「已繳 20 年・繳完了」「2027/1/1 生效」；一年一約「一年一約・從薪轉扣」
+    /// 看板一句：「已繳 6 年・還剩 14 年・刷 CUBE」「已繳 20 年・繳完了」「2027/1/1 生效」；一年一約「每年續約・從薪轉扣」
     ///（每年續，不寫「已繳 1 年・繳完了」：跟膠囊「記得續保」打架）；什麼都沒有＝險種
     fileprivate static func policyLineParts(_ p: WealthPolicyFacts.Policy) -> [String] {
         var parts: [String] = []
         if p.yearIndex == 0 {
             parts.append(WealthPageText.ymd(p.start) + " 生效")
         } else if p.isOneYear {
-            parts.append("一年一約")
+            // 日期列已經寫「・一年一約」，這裡不再重複
+            parts.append("每年續約")
         } else if let py = p.payYears, let paid = p.paidYears {
             if paid >= py {
                 parts.append("已繳 \(py) 年・繳完了")
@@ -2590,8 +2596,11 @@ extension WealthCardData {
     fileprivate static func fillPolicyPayment(_ pol: inout WealthCardPolicy, p: WealthPolicyFacts.Policy, x: WealthCardCtx) {
         let mk = x.masked
         let head: String = (p.cycle?.title ?? "保費") + " " + WealthCardText.plain(p.perPeriod, code: p.code, masked: mk)
-        let period: String? = (p.cycle == .year && !p.isOneYear && p.payYears != nil && p.paidYears != nil)
-            ? "第 \(p.paidYears ?? 0)／\(p.payYears ?? 0) 期" : nil
+        // [審] 拆成 if let（一長串 && 加三元運算子，沒編譯環境時少冒險）
+        var period: String? = nil
+        if p.cycle == .year, !p.isOneYear, let py = p.payYears, let paid = p.paidYears {
+            period = "第 \(paid)／\(py) 期"
+        }
         if let eid = p.expenseId, let e = x.expensesById[eid] {
             var pay: [String] = [head, WealthPolicyLink.scheduleText(e)]
             if let payer = p.payerText { pay.append(payer) }

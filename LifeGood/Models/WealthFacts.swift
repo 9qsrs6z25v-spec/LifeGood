@@ -915,7 +915,9 @@ struct WealthBrokerDue: Identifiable {
             }
             let left0: String = WealthFormat.plain(before, code: code)
             let gap: String = WealthFormat.plain(short, code: code)
-            return accountName + "只剩 " + left0 + "，差 " + gap + "，" + when + "10 點前要轉進去"
+            // [v25.567 編] 拆兩段（一個運算式 8 個 + 太長，沒編譯環境時少冒險）
+            let head: String = accountName + "只剩 " + left0 + "，差 " + gap
+            return head + "，" + when + "10 點前要轉進去"
         }
         if Swift.abs(before - now) < 0.5 {
             return accountName + "現在 " + WealthFormat.plain(now, code: code) + "，夠"
@@ -1611,6 +1613,8 @@ struct WealthFacts {
         var legacyCount: Int = 0
         var legacyTotal: Double = 0
         var legacyIds: [UUID] = []
+        /// [v25.567 驗] 舊交割紀錄裡股票還在的幾筆（搬得動的；股票已經刪了的留在證券戶當紀錄，#16 不為它們再問）
+        var legacyLiveCount: Int = 0
 
         var unrealized: Double { marketValue - cost }
         /// 未實現 %（成本 0＝nil）
@@ -3025,14 +3029,17 @@ struct WealthFacts {
         // linkedStockId 的那幾筆（含股利），不管股票還在不在；合計換台幣（查不到匯率當 1，只拿來寫一句話）
         var legacyIds: [UUID] = []
         var legacyTotal: Double = 0
+        var legacyLive = 0
         for dep in m.bankDeposits ?? [] where dep.linkedStockId != nil && !dep.isTransfer && !dep.isAnchor {
             legacyIds.append(dep.id)
             let r = ctx.rates.known(norm(dep.currencyCode)) ?? 1
             legacyTotal += (dep.isWithdrawal ? -dep.amount : dep.amount) * r
+            if let sid = dep.linkedStockId, ctx.stocksById[sid] != nil { legacyLive += 1 }
         }
         b.legacyIds = legacyIds
         b.legacyCount = legacyIds.count
         b.legacyTotal = legacyTotal
+        b.legacyLiveCount = legacyLive
         return b
     }
 
@@ -3422,7 +3429,8 @@ struct WealthFacts {
         }
 
         // [v25.567] #16 證券戶身上有舊交割紀錄（只問一次：key 不帶事件；搬完就沒有紀錄、這條自己不見）
-        for b in brokers where b.legacyCount > 0 {
+        // [v25.567 驗] 只剩股票已經刪了的紀錄（搬的時候留在證券戶當紀錄）不再問：以前搬完還一直跳〔搬到薪轉〕、按了又「沒有要搬的」
+        for b in brokers where b.legacyCount > 0 && b.legacyLiveCount > 0 {
             guard let acc = accounts.first(where: { $0.id == b.id }), !acc.hidden else { continue }
             let sign = b.legacyTotal < 0 ? "−" : "+"
             let total = sign + WealthFormat.grouped(Swift.abs(b.legacyTotal).rounded(), decimals: 0)

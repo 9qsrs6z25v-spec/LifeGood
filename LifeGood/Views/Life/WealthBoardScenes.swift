@@ -1280,9 +1280,11 @@ extension MoneyBoardSky {
             return yLeft + (yRight - yLeft) * CGFloat(ease) + CGFloat(wave)
         }
 
-        // 石頭排在 rect 寬 8%～88%（一塊的時候在中間）；> 20 塊縮小，最小 5pt
+        // 石頭排在 rect 寬 8%～88%（一塊的時候在中間；open 從左邊排起）；> 20 塊縮小，最小 5pt
         let x0 = r.minX + r.width * 0.08
-        let x1 = r.minX + r.width * 0.88
+        let fullX1 = r.minX + r.width * 0.88
+        // [審] open（沒填繳費年期）：不知道路有多長，石頭一步最多 36pt，後面留一段虛線（3 塊不會拉滿整條路）
+        let x1: CGFloat = s.open ? Swift.min(fullX1, x0 + CGFloat(Swift.max(1, n - 1)) * 36) : fullX1
         let gap: CGFloat = n > 1 ? (x1 - x0) / CGFloat(n - 1) : (x1 - x0)
         let shrink: CGFloat = n > 20 ? 0.62 : 0.72
         let stoneW = Swift.min(20, Swift.max(5, gap * shrink))

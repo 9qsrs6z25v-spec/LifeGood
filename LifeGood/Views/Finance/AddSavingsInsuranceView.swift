@@ -657,6 +657,9 @@ struct AddSavingsInsuranceView: View {
             e.linkedInsuranceId = insuranceId
             e.note = note
             e.currencyCode = currencyCode
+            // [v25.567 審] 利率那一份也跟著改：記帳表單打開時「利率以支出自身欄位為主」，留舊的會在記帳存檔時把這裡改的利率蓋回去
+            //（以前整筆重建等於清成 nil；現在改那一筆，要自己寫）
+            e.insuranceRate = annualRate > 0 ? annualRate : nil
             expenseStore.update(e)
             return eid
         }
@@ -676,6 +679,7 @@ struct AddSavingsInsuranceView: View {
             linkedInsuranceId: insuranceId,
             note: note,
             currencyCode: currencyCode,
+            insuranceRate: annualRate > 0 ? annualRate : nil,
             linkedBankMilestoneId: c.cardId != nil ? cardBank : c.bankId,
             linkedBankCurrency: (c.cardId == nil && c.bankId != nil) ? c.bankCode : nil,
             linkedCreditCardMilestoneId: c.cardId

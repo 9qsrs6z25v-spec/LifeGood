@@ -837,7 +837,8 @@ class LifeStore: ObservableObject {
         if changed { milestones = all }
     }
 
-    /// 證券戶改交割銀行時選「這幾檔也一起改」（judge §4.3 ⑥：以前的交割不動）：這個證券戶還沒賣掉的股票交割銀行改成 bankId，
+    /// 證券戶改交割銀行時選「這幾檔也一起改」（judge §4.3 ⑥：以前的交割不動）：這個證券戶還沒賣掉的股票（台幣交割的；
+    /// [v25.567 驗] 外幣交割的不動）交割銀行改成 bankId，
     /// 帳本 linkFrom[股票] 記「今天起 → 新的」（以前的照舊記在原本的帳戶）；今天以後（含今天）還沒交割的那幾筆搬到新的銀行。
     /// 證券戶自己的 settlementBankId 由表單照舊寫（saveWealthAccount）。帳本、milestones、股票各只指派一次
     func moveBrokerStocks(_ brokerId: UUID, to bankId: UUID, finance: FinanceStore, now: Date = Date()) {
@@ -851,6 +852,9 @@ class LifeStore: ObservableObject {
         for i in stocks.indices where stocks[i].linkedSecuritiesMilestoneId == brokerId && !stocks[i].isSold {
             let s = stocks[i]
             guard s.linkedBankMilestoneId != bankId else { continue }
+            // [v25.567 驗] 外幣交割的（複委託從美金子帳戶扣）不跟著改：證券戶的交割銀行是台幣那一個；以前一起搬，
+            // 今天以後的美金交割原封搬進台幣帳戶（多一個美金格子），之後重寫又把以前的美金交割換成台幣記在原本的帳戶
+            guard FinanceRates.isNTD(s.linkedBankCurrency ?? "NT$") else { continue }
             let old: UUID? = s.linkedBankMilestoneId ?? s.linkedSecuritiesMilestoneId
             book.setLinks(Self.linkHistory(book.links(s.id), old: old, new: bankId, fromKey: fromKey), for: s.id)
             stocks[i].linkedBankMilestoneId = bankId
@@ -944,10 +948,21 @@ class LifeStore: ObservableObject {
 
     /// 你按了確定：照計畫搬（證券戶拿掉要搬的、已經有同一筆的；交割銀行加上搬過去的，id 不變；這個證券戶還沒有交割銀行的股票
     /// 改成交割銀行＝它）。milestones、股票各只指派一次。搬完證券戶不再有那幾筆，#16 自己不見
+    /// [v25.567 驗] 帳本改交割銀行的歷史裡指著這個證券戶的那一段（舊資料只選證券戶、之後證券戶〔一起改〕記的「以前→證券戶」）
+    /// 改成那檔股票的交割銀行（沒有＝證券戶的交割銀行，同搬過去的地方）：不然之後重寫交割（股票卡加一筆、股票表單存檔）
+    /// 又把以前的寫回證券戶，#16 又跳出來
     func moveLegacySettlements(_ plan: WealthSettlementMovePlan, finance: FinanceStore) {
         let applied = WealthSettlementMovePlan.applied(plan, milestones: milestones, stocks: finance.stocks)
         milestones = applied.milestones
         if applied.stocksChanged { finance.stocks = applied.stocks }
+        var book = wealthBook
+        for s in applied.stocks {
+            guard var h = book.links(s.id), h.contains(where: { $0.accountId == plan.brokerId }) else { continue }
+            let dest: UUID = s.linkedBankMilestoneId ?? plan.bankId
+            for i in h.indices where h[i].accountId == plan.brokerId { h[i].accountId = dest }
+            book.setLinks(h, for: s.id)
+        }
+        if book != wealthBook { wealthBook = book }
     }
 
     /// 保單連到記帳的這一筆保費（#15〔是同一張，連起來〕、保單頁〔連到記帳的保費〕）：帳本 policies[id].linkedExpenseId；
@@ -992,7 +1007,8 @@ class LifeStore: ObservableObject {
     /// • 連著記帳那一筆（或 useExpenseId：你選「用那一筆」）→ 改那一筆：金額改了從今天起（以前的期數照原本的金額，同記帳表單
     ///   「從今天起」AmountHistoryChange）、週期（記帳有對應的才改）、從哪扣改了從今天起（以前的期數照舊記在原本的卡／帳戶，帳本 linkFrom）
     /// • 沒連、create＝true → 新建一筆記帳固定支出（保險、人身保險子分類、第一期＝draft.firstDue）並連起來；
-    ///   半年繳、躉繳記帳沒有對應的週期，不建（回 nil，表單 footer 講）
+    ///   半年繳、躉繳記帳沒有對應的週期，不建（回 nil，表單 footer 講）；[v25.567 驗] 有繳費年期的扣到期滿那天
+    ///  （WealthPolicyLink.premiumStop，endDate），已經繳完的不建
     /// 回傳連著的記帳 id。帳本、記帳、里程碑各只指派一次
     @discardableResult
     func savePolicyPremium(policyId: UUID, draft: WealthPolicyPremiumDraft, useExpenseId: UUID?, create: Bool,
@@ -1029,17 +1045,25 @@ class LifeStore: ObservableObject {
             }
             linkedId = e.id
         } else if create, let r = WealthPolicyLink.recurrence(of: draft.cycle), draft.amount > 0 {
-            let title = draft.title.trimmingCharacters(in: .whitespacesAndNewlines)
-            let e = Expense(title: title.isEmpty ? "保費" : title, amount: draft.amount, date: WealthCal.day(draft.firstDue),
-                            expenseType: .fixed, fixedCategory: .insurance, recurrence: r,
-                            insuranceSubCategory: WealthPolicyLink.insuranceSub(draft.kind),
-                            note: "", currencyCode: "NT$",
-                            linkedBankMilestoneId: draft.cardId != nil ? cardPayer : draft.bankId,
-                            linkedBankCurrency: draft.cardId != nil ? nil : draft.bankCode,
-                            linkedCreditCardMilestoneId: draft.cardId)
-            expenses.append(e)
-            expensesChanged = true
-            linkedId = e.id
+            // [v25.567 驗] 繳費年期滿了就停（生效日＋繳費年期的前一天；一年一約每年續約、沒填年期不停）；
+            // 第一期已經在那之後＝這張保單繳完了，不建（以前照樣建一筆每年扣、沒有停止日的保費）
+            let stop: Date? = WealthPolicyLink.premiumStop(start: milestones.first(where: { $0.id == policyId })?.date,
+                                                           payYears: book.policy(policyId).payYears)
+            let first: Date = WealthCal.day(draft.firstDue)
+            let paidUp: Bool = stop.map { first > $0 } ?? false
+            if !paidUp {
+                let title = draft.title.trimmingCharacters(in: .whitespacesAndNewlines)
+                let e = Expense(title: title.isEmpty ? "保費" : title, amount: draft.amount, date: first,
+                                expenseType: .fixed, fixedCategory: .insurance, recurrence: r,
+                                insuranceSubCategory: WealthPolicyLink.insuranceSub(draft.kind),
+                                note: "", currencyCode: "NT$",
+                                linkedBankMilestoneId: draft.cardId != nil ? cardPayer : draft.bankId,
+                                linkedBankCurrency: draft.cardId != nil ? nil : draft.bankCode,
+                                linkedCreditCardMilestoneId: draft.cardId, endDate: stop)
+                expenses.append(e)
+                expensesChanged = true
+                linkedId = e.id
+            }
         }
         var prefs = book.policy(policyId)
         prefs.linkedExpenseId = linkedId

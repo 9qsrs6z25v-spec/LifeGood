@@ -94,7 +94,7 @@ struct WealthPolicyFacts {
         let yearIndex: Int
         /// 已繳幾年（有繳費年期才有：min(第幾年, 繳費年期)）
         let paidYears: Int?
-        /// 繳費年期滿了，或連著的記帳那筆已經停了
+        /// 繳費年期滿了（一年一約每年續約，不算），或連著的記帳那筆已經停了
         let finished: Bool
         /// 連著的記帳那筆到今天扣了幾期（沒連 nil）
         let paidPeriods: Int?
@@ -376,7 +376,7 @@ struct WealthPolicyFacts {
             let raw = e.amount
             let per = WealthPolicyLink.cycle(of: e.recurrence)
             let times = Double(per?.timesPerYear ?? 1)
-            let ntd: Double? = yearlyNTD(raw * times, expense: e, rates: rates)
+            let ntd: Double? = ntdPerYear(raw * times, expense: e, rates: rates)
             let unit = per.map { unitText($0) } ?? ""
             unclaimed.append(Unclaimed(expenseId: e.id, title: e.title.trimmingCharacters(in: .whitespacesAndNewlines),
                                        amountText: amountText(raw, code: expenseCode(e)) + unit, yearlyNTD: ntd))
@@ -412,13 +412,14 @@ struct WealthPolicyFacts {
     }
 
     /// 一年（原幣）換台幣：外幣儲蓄險照設定匯率（查不到 nil）；其他已經是台幣
-    private static func yearlyNTD(_ yearlyRaw: Double, expense e: Expense?, rates: FinanceRates) -> Double? {
+    /// [v25.567 裁] 名字不跟屬性 yearlyNTD 同名（規則上可以編，但沒編譯環境時不冒險）
+    private static func ntdPerYear(_ yearlyRaw: Double, expense e: Expense?, rates: FinanceRates) -> Double? {
         guard let e, let o = e.originalCurrencyAmount else { return yearlyRaw }
         guard let r = rates.known(o.code) else { return nil }
         return yearlyRaw * r
     }
 
-    private static func yearlyNTD(_ yearlyRaw: Double, code: String, rates: FinanceRates) -> Double? {
+    private static func ntdPerYear(_ yearlyRaw: Double, code: String, rates: FinanceRates) -> Double? {
         if FinanceRates.isNTD(code) { return yearlyRaw }
         guard let r = rates.known(code) else { return nil }
         return yearlyRaw * r
@@ -492,17 +493,21 @@ struct WealthPolicyFacts {
             payerText = isCard ? Self.payerText(cardId: prefs.payFromId, bankId: nil, names: names)
                                : Self.payerText(cardId: nil, bankId: prefs.payFromId, names: names)
         }
-        if let py = payYears, yearIndex > py { finished = true }
+        let isOneYear = payYears == 1 && cycle != .single
+        // [v25.567 驗] 一年一約每年續約：第 2 年起不是「繳完了」（以前第 2 年起當繳完了：列寫「2,400 繳完了」、不算進一年合計、沒有下次）
+        if let py = payYears, yearIndex > py, !isOneYear { finished = true }
         // 一年（原幣）：繳完了、躉繳 0；不知道繳法也 0（不算進一年合計，保單頁要確認問「是一年繳一次嗎？」）
         var yearly: Double = 0
         if let c = cycle, !finished, c.timesPerYear > 0 { yearly = per * Double(c.timesPerYear) }
-        let isOneYear = payYears == 1 && cycle != .single
         var renewal: Date? = nil
         if isOneYear {
+            // [v25.567 驗] 到期＝生效日之後的週年（最早是生效滿一年那天）：今天才生效、還沒生效的不是「今天到期」
+            //（以前滿 0 年時拿生效日本身當到期日：新增一張今天生效的一年一約，馬上跳「今天到期：記得續保」）
             let full = Swift.max(0, WealthCal.calendar.dateComponents([.year], from: start, to: today).year ?? 0)
-            var cand = WealthCal.calendar.date(byAdding: .year, value: full, to: start) ?? start
+            let years = Swift.max(1, full)
+            var cand = WealthCal.calendar.date(byAdding: .year, value: years, to: start) ?? start
             if WealthCal.day(cand) < today {
-                cand = WealthCal.calendar.date(byAdding: .year, value: full + 1, to: start) ?? cand
+                cand = WealthCal.calendar.date(byAdding: .year, value: years + 1, to: start) ?? cand
             }
             renewal = WealthCal.day(cand)
         }
@@ -511,7 +516,7 @@ struct WealthPolicyFacts {
         return Policy(id: m.id, title: title(of: m, book: book), company: company, kind: kind,
                       expenseId: e?.id, code: code, perPeriod: per, cycle: cycle,
                       cycleMissing: e == nil && per > 0.5 && prefs.cycle == nil,
-                      yearly: yearly, yearlyNTD: cycle == nil ? nil : yearlyNTD(yearly, code: code, rates: rates),
+                      yearly: yearly, yearlyNTD: cycle == nil ? nil : ntdPerYear(yearly, code: code, rates: rates),
                       nextDue: finished ? nil : next, payerId: payerId, payerText: payerText,
                       start: start, payYears: payYears, yearIndex: yearIndex, paidYears: paidYears,
                       finished: finished, paidPeriods: paidPeriods, totalPeriods: total,
@@ -567,7 +572,7 @@ struct WealthPolicyFacts {
             : (e?.nextFixedDueDate(onOrAfter: today, calendar: WealthCal.calendar) ?? ins.moneyNextDue(now: today))
         let payer = e.flatMap { x in payerText(cardId: x.linkedCreditCardMilestoneId, bankId: x.linkedBankMilestoneId, names: names) }
         let detail = detailText(next: next, payer: payer)
-        let ntd = yearlyNTD(yearlyRaw, code: code, rates: rates)
+        let ntd = ntdPerYear(yearlyRaw, code: code, rates: rates)
         var said = title + spokenAmount(yearlyRaw, code: code)
         if let d = detail { said += "，" + d }
         return Row(id: "s-" + ins.id.uuidString, source: .savings(ins.id), icon: "leaf.fill", title: title,
@@ -634,7 +639,10 @@ struct WealthPolicyFacts {
         let like = score >= 2 ? "一樣的" : "像是它的"
         let title = e.title.trimmingCharacters(in: .whitespacesAndNewlines)
         let which = (score >= 2 || title.isEmpty) ? "" : "「" + title + "」"
-        return p.title + "：記帳裡有一筆" + like + "保費" + which + "（" + parts.joined(separator: "・") + "），是同一張嗎？"
+        // [v25.567 編] 拆兩段（一個運算式 8 個 + 太長，沒編譯環境時少冒險）
+        let lead: String = p.title + "：記帳裡有一筆" + like + "保費" + which
+        let detail: String = parts.joined(separator: "・")
+        return lead + "（" + detail + "），是同一張嗎？"
     }
 
     // MARK: 保障六格
@@ -732,6 +740,15 @@ enum WealthPolicyLink {
             cur = WealthCal.addMonths(months * k, to: base)
         }
         return cur
+    }
+
+    /// [v25.567 驗] 自動建的記帳保費最後扣到哪天（Expense.endDate）：生效日＋繳費年期的前一天
+    ///（20 年期、2021/8/15 生效＝2041/8/14，最後一期 2040/8/15）。一年一約（繳費年期 1 年）每年續約、沒填繳費年期＝nil（不停）。
+    /// 以前沒有停止日：繳費年期滿了記帳照樣每年扣（存摺上、卡費、稅務頁都多算），已經繳完的保單存檔還會新建一筆
+    static func premiumStop(start: Date?, payYears: Int?) -> Date? {
+        guard let s = start, let py = payYears, py > 1,
+              let end = WealthCal.calendar.date(byAdding: .year, value: py, to: WealthCal.day(s)) else { return nil }
+        return WealthCal.addDays(-1, to: end)
     }
 
     /// 記帳的週期 → 保單繳法（每年／每季／每月；沒有週期 nil）
