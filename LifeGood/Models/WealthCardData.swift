@@ -478,7 +478,8 @@ struct WealthCardData {
                               stocks: finance.stocks, rates: FinanceRates(expense), today: WealthCal.day(now),
                               masked: masked, rateDate: AppQuoteClock.ratesUpdatedAt,
                               depositBankIds: Set(life.wealthDeposits.all.map { $0.bankId }),
-                              vault: life.wealthVault.entry(m.id))
+                              vault: life.wealthVault.entry(m.id),
+                              tripNames: Self.tripNames(life.tripPlans))
         switch m.financeSubCategory ?? .bank {
         case .creditCard:
             guard let c = facts.card(id) else { return nil }
@@ -514,6 +515,8 @@ private struct WealthCardCtx {
     let depositBankIds: Set<UUID>
     /// [v25.568] 這一筆的號碼密文（有效期限、保單號碼、票證號；只用來判斷「有沒有」那一列，這裡從不解開）
     let vault: WealthVaultEntry
+    /// [v25.571] 旅遊規劃的名字（刷卡那一列的小字寫「交通・韓國三日遊」；記帳那筆連了哪一趟就寫哪一趟）
+    var tripNames: [UUID: String] = [:]
 }
 
 // MARK: - 字
@@ -739,6 +742,16 @@ extension WealthCardData {
         }
     }
 
+    /// [v25.571] 旅遊規劃 id → 名字（沒取名的不放，那一列就只寫分類）
+    fileprivate static func tripNames(_ plans: [TripPlan]) -> [UUID: String] {
+        var out: [UUID: String] = [:]
+        for p in plans {
+            let t = p.title.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !t.isEmpty { out[p.id] = t }
+        }
+        return out
+    }
+
     fileprivate static func entryRow(_ e: WealthCardEntry, x: WealthCardCtx, shifted: Bool) -> WealthCardRow {
         let exp = x.expensesById[e.expenseId]
         let title = exp?.title ?? "刷卡"
@@ -746,9 +759,12 @@ extension WealthCardData {
         let theme = exp.map { MoneyArtTheme.of($0) } ?? MoneyArtTheme.misc
         let isFixed = exp?.expenseType == .fixed
         let amount = x.masked ? WealthCardText.dots : WealthFormat.grouped(e.amount.rounded(), decimals: 0)
+        // [v25.571] 旅遊規劃記的那筆：小字寫「交通・韓國三日遊」，不然只看到站名（一日拾樂）認不出是哪一趟
+        let trip: String? = exp?.linkedTripPlanId.flatMap { x.tripNames[$0] }
+        let detail: String = trip.map { cat + "・" + $0 } ?? cat
         var r = WealthCardRow(id: e.id, date: e.date, dayText: WealthCardText.dayNum(e.date),
                               monthText: WealthCardText.monthText(e.date), glyph: String(cat.prefix(1)),
-                              mark: theme.tint, title: title, detail: cat, amountText: amount)
+                              mark: theme.tint, title: title, detail: detail, amountText: amount)
         if shifted {
             r.tag = "下一期"
         } else if isFixed {
@@ -759,7 +775,7 @@ extension WealthCardData {
         r.shifted = shifted
         r.category = cat
         let said = x.masked ? "金額已遮住" : WealthPageText.spoken(e.amount)
-        r.accessibilityText = WealthPageText.spokenDate(e.date) + "，" + title + "，" + cat + "，" + said
+        r.accessibilityText = WealthPageText.spokenDate(e.date) + "，" + title + "，" + detail + "，" + said
         return r
     }
 

@@ -398,8 +398,13 @@ struct TripBoardData {
     // 標頭
     var seed = 0
     var departText = ""
+    /// [v25.571] 看板最上面寫這趟的名字（「韓國三日遊」）；沒取名就照舊寫「12/24 (週四) 出發」
+    var title = ""
     var timeStart: String? = nil
     var timeEnd: String? = nil
+    /// [v25.571] 大字時間上面的日期：「12/24 (四) 出發」「12/24 (四) 結束」。只有時間會誤會成哪一天
+    var dateStart: String? = nil
+    var dateEnd: String? = nil
     var spanText: String? = nil
     var travelMode: TripTravelMode = .driving
     var checklistDone = 0
@@ -1239,11 +1244,21 @@ struct TripBoardHeader: View {
         HStack(spacing: 6) {
             Image(systemName: data.scene == .flight ? "airplane.departure" : "flag.fill")
                 .font(.footnote.weight(.bold))
-            Text(data.departText)
-                .font(.footnote.weight(.semibold))
-                .lineLimit(1)
+                .foregroundStyle(pal.inkDate)
+            // [v25.571] 有名字就寫名字（出發日搬到大字時間上面），沒名字照舊寫出發日
+            if data.title.isEmpty {
+                Text(data.departText)
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(pal.inkDate)
+                    .lineLimit(1)
+            } else {
+                Text(data.title)
+                    .font(.headline.weight(.bold))
+                    .foregroundStyle(pal.ink)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+            }
         }
-        .foregroundStyle(pal.inkDate)
         .accessibilityElement(children: .combine)
     }
 
@@ -1292,22 +1307,45 @@ struct TripBoardHeader: View {
     @ViewBuilder
     private func bigTime(_ pal: TripBoardPalette) -> some View {
         if let start = data.timeStart, let end = data.timeEnd {
-            let a11y = start + " 出發，" + end + " 結束"
-            HStack(alignment: .center, spacing: 6) {
-                Text(start)
+            // [v25.571] 兩個時間上面各寫日期，例「12/24 (四) 出發」「12/26 (六) 結束」
+            let a11y = (data.dateStart ?? "") + " " + start + " 出發，" + (data.dateEnd ?? "") + " " + end + " 結束"
+            HStack(alignment: .bottom, spacing: 6) {
+                TripBoardTimeColumn(date: data.dateStart, time: start, pal: pal)
                 Image(systemName: "arrow.right")
                     .font(.system(size: 20, weight: .bold))
-                Text(end)
+                    .foregroundStyle(pal.ink)
+                    .padding(.bottom, 12)
+                TripBoardTimeColumn(date: data.dateEnd, time: end, pal: pal)
             }
-            .font(.system(size: 40, weight: .heavy, design: .rounded))
-            .foregroundStyle(pal.ink)
-            .lineLimit(1)
-            .minimumScaleFactor(0.7)
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(a11y)
         } else {
             Text("尚未加入景點")
                 .font(.system(size: 30, weight: .heavy, design: .rounded))
+                .foregroundStyle(pal.ink)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+        }
+    }
+}
+
+/// [v25.571] 大字時間一欄：上面小字日期（「12/24 (四) 出發」），下面大字時間（字級固定 40，排不下縮到 0.7）
+struct TripBoardTimeColumn: View {
+    let date: String?
+    let time: String
+    let pal: TripBoardPalette
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if let date {
+                Text(date)
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(pal.inkDate)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+            }
+            Text(time)
+                .font(.system(size: 40, weight: .heavy, design: .rounded))
                 .foregroundStyle(pal.ink)
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)

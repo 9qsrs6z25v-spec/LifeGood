@@ -684,12 +684,16 @@ struct TripPlanDetailView: View {
         // 標頭
         d.seed = Self.boardSeed(p.id)
         d.departText = Self.dayFmt.string(from: p.startDate) + " 出發"
+        // [v25.571] 看板上寫這趟的名字；出發、結束的日期寫在大字時間上面
+        d.title = p.title.trimmingCharacters(in: .whitespacesAndNewlines)
         if !p.stops.isEmpty {
             d.timeStart = Self.timeFmt.string(from: p.startDate)
             d.timeEnd = Self.timeFmt.string(from: endDate)
-            // 只寫 14:40 → 15:29 的話，跨天行程看起來像當天來回
+            d.dateStart = Self.dayFmt.string(from: p.startDate) + " 出發"
+            d.dateEnd = Self.dayFmt.string(from: endDate) + " 結束"
+            // 只寫 14:40 → 15:29 的話，跨天行程看起來像當天來回（日期已寫在時間上面，這裡只寫跨幾天）
             if dayCount > 1 {
-                d.spanText = "跨 \(dayCount) 天，" + Self.dayFmt.string(from: endDate) + " 結束"
+                d.spanText = "跨 \(dayCount) 天"
             }
         }
         d.travelMode = p.travelMode
