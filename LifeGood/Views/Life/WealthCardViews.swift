@@ -1707,7 +1707,37 @@ struct WealthCardUnbilledSection: View {
                 }
             }
             .modifier(FinanceCardChrome())
+            if !credit.laterRows.isEmpty {
+                WealthCardLaterBlock(credit: credit, actions: actions, pal: pal)
+            }
         }
+    }
+}
+
+/// [v25.570] 日期還沒到的刷卡（旅遊規劃先記的行程花費等）：「11/5 起 3 筆・12,400・日期到了才算進帳單」＋清單
+private struct WealthCardLaterBlock: View {
+    let credit: WealthCardCredit
+    let actions: WealthCardActions
+    let pal: TripBoardPalette
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("日期還沒到的刷卡")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(Color.primary)
+                .padding(.horizontal, 14)
+                .padding(.top, 14)
+            Text(credit.laterHead)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 14)
+                .padding(.top, 4)
+                .padding(.bottom, 10)
+            Divider().padding(.leading, 14)
+            WealthCardRowList(rows: credit.laterRows, moreTitle: "看全部 \(credit.laterRows.count) 筆",
+                              actions: actions, pal: pal)
+        }
+        .modifier(FinanceCardChrome())
     }
 }
 

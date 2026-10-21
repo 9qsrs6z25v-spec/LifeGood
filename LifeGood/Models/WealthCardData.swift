@@ -307,6 +307,9 @@ struct WealthCardCredit {
     var unbilledTrailing = ""
     var unbilledHead = FinanceLine()
     var unbilledRows: [WealthCardRow] = []
+    /// [v25.570] 日期還沒到的刷卡（例：旅遊規劃先記好的行程花費）：日期到了才算進帳單，先列出來讓你看得到有連到這張卡
+    var laterHead = ""
+    var laterRows: [WealthCardRow] = []
     var recurring: [WealthCardLinkRow] = []
     var recurringTrailing: String? = nil
     var recurringIds: [UUID] = []
@@ -651,6 +654,32 @@ extension WealthCardData {
         }
         cr.unbilledHead = FinanceLine(runs: unRuns)
         cr.unbilledRows = un.reversed().map { entryRow($0, x: x, shifted: shifted.contains($0.id)) }
+
+        // [v25.570] 日期還沒到的刷卡：cardEntries 只算到今天（還沒刷到的不進帳單、不扣額度），
+        // 所以旅遊規劃先記好的行程花費（日期是出發那天）在這張卡上看不到，像是沒連到。這裡另外列出來。
+        let todayDay = WealthCal.day(x.today)
+        let later: [WealthCardEntry] = x.expenses
+            .filter { e in
+                e.linkedCreditCardMilestoneId == c.id
+                    && !(e.expenseType == .fixed && e.recurrence != nil)
+                    && WealthCal.day(e.date) > todayDay
+            }
+            .sorted { $0.date < $1.date }
+            .map { e in
+                WealthCardEntry(id: "cc-later-\(e.id.uuidString)", date: e.date,
+                                amount: WealthSchedule.ntd(of: e, raw: e.amount, rates: x.rates),
+                                expenseId: e.id, isRecurring: false)
+            }
+        if let first = later.first {
+            let total = later.reduce(0.0) { $0 + $1.amount }
+            cr.laterHead = WealthCardText.md(first.date) + " 起 \(later.count) 筆・"
+                + WealthCardText.plain(total, masked: x.masked) + "・日期到了才算進帳單"
+            cr.laterRows = later.map { e -> WealthCardRow in
+                var r = entryRow(e, x: x, shifted: false)
+                r.tag = "還沒到"
+                return r
+            }
+        }
 
         // ⑤ 綁在這張卡的定期扣款
         let recs = recurringOnCard(c.id, x: x)

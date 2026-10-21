@@ -1719,7 +1719,10 @@ struct AddExpenseView: View {
         guard let c = facts.card(id) else { return nil }
         let close = WealthCardCycle.statementClose(for: date, billingDay: c.billingDay)
         let due = WealthCardCycle.dueDate(close: close, billingDay: c.billingDay, paymentDay: c.paymentDay)
-        return "算在 " + WealthFormat.monthDay(close) + " 結帳那期，" + WealthFormat.monthDay(due) + " 繳"
+        let base: String = "算在 " + WealthFormat.monthDay(close) + " 結帳那期，" + WealthFormat.monthDay(due) + " 繳"
+        // [v25.570] 日期還沒到（例：旅遊規劃先記的行程花費）：卡片頁先放在「日期還沒到的刷卡」，那天才進帳單
+        guard WealthCal.day(date) > WealthCal.day(Date()) else { return base }
+        return base + "（日期還沒到，卡片頁先列在「日期還沒到的刷卡」）"
     }
 
     /// 標題像「繳卡費」而且扣的是銀行（不是卡）：卡費 App 已經自己算了，記了會扣兩次
