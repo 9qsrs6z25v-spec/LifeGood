@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- [手錶 v0，v25.573] 手錶 App（com.lifegood.app.watchkitapp）。跟 GENERATE_INFOPLIST_FILE 合併。
+	     陣列、字典型的鍵一律寫在這個檔（v25.533 的教訓）；字串型的也寫一份，保險。
+	     版號用變數：MARKETING_VERSION／CURRENT_PROJECT_VERSION 只寫在 pbxproj 的專案層，四個 target 一定同號。
+	     WKApplication＋WKCompanionAppBundleIdentifier：單一 target 的手錶 App、依附 iPhone 的 LifeGood
+	     （照 Apple 範例 SimpleWatchConnectivity Watch App/Info.plist）。不寫 WKRunsIndependentlyOfCompanionApp＝依附型。
+	     v4 才加 WKBackgroundModes（workout-processing）、UIBackgroundModes（audio）、NSLocationTemporaryUsageDescriptionDictionary。 -->
+	<key>CFBundleDisplayName</key>
+	<string>LifeGood</string>
+	<key>CFBundleShortVersionString</key>
+	<string>$(MARKETING_VERSION)</string>
+	<key>CFBundleVersion</key>
+	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>UISupportedInterfaceOrientations</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+		<string>UIInterfaceOrientationPortraitUpsideDown</string>
+	</array>
+	<key>WKApplication</key>
+	<true/>
+	<key>WKCompanionAppBundleIdentifier</key>
+	<string>com.lifegood.app</string>
+</dict>
+</plist>
