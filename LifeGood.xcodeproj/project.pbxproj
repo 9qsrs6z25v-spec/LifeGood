@@ -142,6 +142,7 @@
 		A01B000001001589 /* WealthPolicyFacts.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001589 /* WealthPolicyFacts.swift */; };
 		A01B000001001591 /* WealthVault.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001591 /* WealthVault.swift */; };
 		A01B000001001592 /* WealthWebFacts.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001592 /* WealthWebFacts.swift */; };
+		A01B000001001593 /* NotificationActions.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001593 /* NotificationActions.swift */; };
 		A01B000001001582 /* WealthBoard.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001582 /* WealthBoard.swift */; };
 		A01B000001001583 /* WealthBoardScenes.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001583 /* WealthBoardScenes.swift */; };
 		A01B000001001584 /* WealthItems.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001584 /* WealthItems.swift */; };
@@ -364,6 +365,7 @@
 		A01A000001001589 /* WealthPolicyFacts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WealthPolicyFacts.swift; sourceTree = "<group>"; };
 		A01A000001001591 /* WealthVault.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WealthVault.swift; sourceTree = "<group>"; };
 		A01A000001001592 /* WealthWebFacts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WealthWebFacts.swift; sourceTree = "<group>"; };
+		A01A000001001593 /* NotificationActions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationActions.swift; sourceTree = "<group>"; };
 		A01A000001001582 /* WealthBoard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WealthBoard.swift; sourceTree = "<group>"; };
 		A01A000001001583 /* WealthBoardScenes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WealthBoardScenes.swift; sourceTree = "<group>"; };
 		A01A000001001584 /* WealthItems.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WealthItems.swift; sourceTree = "<group>"; };
@@ -669,6 +671,7 @@
 				A01A000001001589 /* WealthPolicyFacts.swift */,
 				A01A000001001591 /* WealthVault.swift */,
 				A01A000001001592 /* WealthWebFacts.swift */,
+				A01A000001001593 /* NotificationActions.swift */,
 				A01A000001000020 /* LifeModels.swift */,
 				A01A000001000201 /* HealthModels.swift */,
 				A01A000001000204 /* ChildVaccineSchedule.swift */,
@@ -1074,6 +1077,7 @@
 				A01B000001001589 /* WealthPolicyFacts.swift in Sources */,
 				A01B000001001591 /* WealthVault.swift in Sources */,
 				A01B000001001592 /* WealthWebFacts.swift in Sources */,
+				A01B000001001593 /* NotificationActions.swift in Sources */,
 				A01B000001001582 /* WealthBoard.swift in Sources */,
 				A01B000001001583 /* WealthBoardScenes.swift in Sources */,
 				A01B000001001584 /* WealthItems.swift in Sources */,
