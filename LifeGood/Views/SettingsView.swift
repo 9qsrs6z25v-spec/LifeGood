@@ -277,6 +277,9 @@ struct SettingsView: View {
     @State private var widgetExpanded = false
     /// [v2 小工具] 隱藏小工具的金額：App Group 的共用設定，跟控制中心的「隱藏金額」是同一個開關
     @AppStorage(WidgetHideAmounts.key, store: WidgetShared.defaults) private var widgetHideAmounts = false
+    /// [手錶 v1] Apple Watch（送到手錶的內容）；沒配對手錶、iPad、Mac 整段不出現
+    @State private var watchExpanded = false
+    @StateObject private var watchBridge = WatchBridge.shared
     @StateObject private var dayTimeline = DayTimelineController.shared
     /// [v25.383] 系統行事曆的授權狀態（時間軸的第三個來源）
     @StateObject private var appleCal = AppleCalendarBridge.shared
@@ -349,6 +352,8 @@ struct SettingsView: View {
                                     color: .blue, isExpanded: $widgetExpanded) {
                         widgetSection
                     }
+                    // [手錶 v1] 桌面小工具後面接「Apple Watch」（同一組，List 這一層子項數不變）
+                    watchBlock
                 }
                 disclosureBlock("資料統計", icon: "chart.bar.fill", color: .orange, isExpanded: $dataStatsExpanded) {
                     dataStatsSection
@@ -1428,6 +1433,8 @@ struct SettingsView: View {
             .onChange(of: widgetHideAmounts) { _, _ in
                 // 全部小工具＋控制中心「隱藏金額」重畫（控制項改的也走這一支）
                 WidgetRefresh.afterHideAmountsChanged()
+                // [手錶 v1] 手錶包帶著 iPhone 的「隱藏金額」：重組重送（錶面「已花」跟著遮）
+                WatchBridge.shared.settingsChanged()
             }
         } footer: {
             Text(Self.widgetFootnote)
@@ -1439,6 +1446,18 @@ struct SettingsView: View {
         "打開後，主畫面、鎖定畫面、StandBy 上所有 LifeGood 小工具的金額都會變成「NT$ ••••」，"
         + "百分比、日期、筆數照常。控制中心的「隱藏金額」是同一個開關。"
         + "只影響這台裝置，不會同步到 iPad。"
+
+    // MARK: - [手錶 v1] Apple Watch
+
+    /// 沒配對手錶（iPad、Mac 上 WCSession 不支援也一樣）整段不出現。內容在 WatchSettingsSection.swift
+    @ViewBuilder
+    private var watchBlock: some View {
+        if watchBridge.isPaired {
+            disclosureBlock("Apple Watch", icon: "applewatch", color: .indigo, isExpanded: $watchExpanded) {
+                WatchSettingsSection(bridge: watchBridge)
+            }
+        }
+    }
 
     // MARK: - 語音 AI 助手
 

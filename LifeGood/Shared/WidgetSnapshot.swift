@@ -39,6 +39,10 @@ import Foundation
 // 換日不靠小工具算：App 寫快照時就把「今天、明天……」每一天要顯示的字各準備一份，
 // 小工具只依現在時間挑對應的那一份。
 //
+// [手錶 v1，v25.574] 這個檔也編進手錶兩個 target（LifeGoodWatch、LifeGoodWatchWidgets；watch/judge.md §7.3）：
+//      手錶包的每一天那一份照用 WidgetLifeDay／WidgetMoneyDay（currentStop(at:)、lines(hidden:) 手錶直接呼叫）。
+//      所以下面那條「只准 Foundation」對手錶一樣成立；新增欄位會不會流上手錶由 pkg_keys_check.py 擋（白名單）。
+//
 // ⚠️ 這個檔案只准用 Foundation、TimelineStop／DayTimelineFormat／DayTimelineLink
 //    （DayTimelineAttributes.swift）與同檔型別。不准引用 App 才有的型別
 //    （ExpenseStore、AppMode、MoneyFormat、OverviewBoardData…）：Widget target 編不過，
@@ -159,6 +163,12 @@ enum WidgetSnapshotFile: String {
     case finance = "finance_v1.json"
     /// [v4] 小工具自己抓的股價、金價匯率（**只有小工具讀寫**，App 不讀不寫）
     case quotes = "quotes_v1.json"
+    /// [手錶 v1] 手錶包（WatchPackage，Shared/WatchPackage.swift）：iPhone 的 App Group 留「最新的那一包」
+    ///（WatchBridge 比內容、冷啟動回覆用）；手錶收到後存進**手錶自己的** App Group 同一個檔名（手錶 App、手錶小格都讀）
+    case watch = "watch_v1.json"
+    /// [手錶 v1] 手錶附加資料快取（WatchExtrasCache，Models/WatchExtrasWriter.swift）：**只在 iPhone**，
+    /// App 開著時寫要碰帳本才算得出來的東西（v1：哪幾期卡費是自己繳），組手錶包時只讀這個檔
+    case watchExtras = "watch_extras_v1.json"
 }
 
 // MARK: - [v2] 隱藏金額

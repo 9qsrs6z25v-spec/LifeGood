@@ -16,6 +16,9 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         // [手錶 v3] 通知的按鈕（〔5 分鐘後再提醒〕〔明天 9 點再提醒〕〔晚上再提醒〕）：每次啟動都要登記（背景冷啟動也是）
         NotificationActions.registerCategories()
         UNUserNotificationCenter.current().delegate = self
+        // [手錶 v1] 手錶傳話（WCSession）一啟動就接上：手錶在背景叫醒 iPhone 時（「給我最新的」）要有人接（judge §5.4）。
+        // 只讀 App Group 的檔、不碰三份資料；iPad、Mac 上 WCSession.isSupported() 是 false，什麼都不做
+        WatchBridge.shared.activate()
         return true
     }
 

@@ -39,6 +39,9 @@ import WidgetKit
 //        只改了家人、行程（revision 沒變）照舊只寫 life，不多算兩份 FinanceLoanIndex。
 //      • 今天小工具的財富日子（卡費截止、交割，CalendarDayItems）會跟著記帳（刷卡）、股票（買賣）變：
 //        記帳＋理財那條防抖多寫 life（內容沒變 write 回 false，不重畫）。
+// [手錶 v1] v25.574（watch/build/v1/brief.md G1-2）：writeNow 最後面寫手錶附加資料快取（WatchExtrasWriter，寫 bills 時；
+//      哪幾期卡費是自己繳）、叫 WatchBridge.snapshotsDidChange()（只讀 App Group 的檔組手錶包、內容變了才送；還沒 start 也叫，
+//      冷啟動時拿現成的檔組包）。
 //
 // 什麼時候寫：
 //   • 啟動（start）：掛好監聽後馬上寫一次全部
@@ -213,6 +216,11 @@ final class WidgetSnapshotWriter {
         if parts.contains(.bills), parts.contains(.finance), expenseStore != nil, financeStore != nil {
             lastWealthRevision = lifeStore?.wealthRevision ?? -1
         }
+        // [手錶 v1] 手錶附加資料快取（寫 bills 的時候；App 開著才有三份資料）＋手錶包（只讀檔組包、內容變了才送）
+        if parts.contains(.bills), let expense = expenseStore, let finance = financeStore, let life = lifeStore {
+            WatchExtrasWriter.write(expense: expense, finance: finance, life: life, now: now)
+        }
+        WatchBridge.shared.snapshotsDidChange()
     }
 
     /// [v4] finance_v1.json 寫了之後要重畫哪幾種：沒有舊檔（第一次寫、schema 換了）＝全部；

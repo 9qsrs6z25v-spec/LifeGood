@@ -273,6 +273,38 @@
 		A01B000003000020 /* LifeGoodWatch.app in Embed Watch Content */ = {isa = PBXBuildFile; fileRef = A01A000003000100 /* LifeGoodWatch.app */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		A01B000004000001 /* LifeGoodWatchWidgetsBundle.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000004000001 /* LifeGoodWatchWidgetsBundle.swift */; };
 		A01B000004000020 /* LifeGoodWatchWidgets.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = A01A000004000100 /* LifeGoodWatchWidgets.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		A01B000001001594 /* WatchPackageBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001594 /* WatchPackageBuilder.swift */; };
+		A01B000001001595 /* WatchExtrasWriter.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001595 /* WatchExtrasWriter.swift */; };
+		A01B000001001596 /* WatchBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001596 /* WatchBridge.swift */; };
+		A01B000001001597 /* WatchSettingsSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001597 /* WatchSettingsSection.swift */; };
+		A01B000002000110 /* WatchPackage.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000110 /* WatchPackage.swift */; };
+		A01B000003000005 /* WatchAppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000003000005 /* WatchAppDelegate.swift */; };
+		A01B000003000006 /* WatchSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000003000006 /* WatchSync.swift */; };
+		A01B000003000007 /* WatchModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000003000007 /* WatchModel.swift */; };
+		A01B000003000008 /* WatchPrivacy.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000003000008 /* WatchPrivacy.swift */; };
+		A01B000003000009 /* WatchStyle.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000003000009 /* WatchStyle.swift */; };
+		A01B000003000010 /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000003000010 /* RootView.swift */; };
+		A01B000003000011 /* TodayPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000003000011 /* TodayPage.swift */; };
+		A01B000003000012 /* DayListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000003000012 /* DayListView.swift */; };
+		A01B000003000013 /* StopDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000003000013 /* StopDetailView.swift */; };
+		A01B000003000014 /* MoneyPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000003000014 /* MoneyPage.swift */; };
+		A01B000003000015 /* BillsList.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000003000015 /* BillsList.swift */; };
+		A01B000003000016 /* FreshnessFooter.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000003000016 /* FreshnessFooter.swift */; };
+		A01B000003000017 /* SettingsSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000003000017 /* SettingsSheet.swift */; };
+		A01B000003000018 /* WatchNotificationDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000003000018 /* WatchNotificationDelegate.swift */; };
+		A01B000004000004 /* WatchPackageProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000004000004 /* WatchPackageProvider.swift */; };
+		A01B000004000005 /* NextUpWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000004000005 /* NextUpWidget.swift */; };
+		A01B000004000006 /* SpentWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000004000006 /* SpentWidget.swift */; };
+		A01B000003000051 /* DayTimelineAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000003 /* DayTimelineAttributes.swift */; };
+		A01B000004000051 /* DayTimelineAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000003 /* DayTimelineAttributes.swift */; };
+		A01B000003000052 /* WidgetSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000051 /* WidgetSnapshot.swift */; };
+		A01B000004000052 /* WidgetSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000051 /* WidgetSnapshot.swift */; };
+		A01B000003000053 /* WidgetLink.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000052 /* WidgetLink.swift */; };
+		A01B000004000053 /* WidgetLink.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000052 /* WidgetLink.swift */; };
+		A01B000003000055 /* WatchPackage.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000110 /* WatchPackage.swift */; };
+		A01B000004000055 /* WatchPackage.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000110 /* WatchPackage.swift */; };
+		A01B000003000056 /* WatchText.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000111 /* WatchText.swift */; };
+		A01B000004000056 /* WatchText.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000111 /* WatchText.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -613,6 +645,29 @@
 		A01A000004000001 /* LifeGoodWatchWidgetsBundle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LifeGoodWatchWidgetsBundle.swift; sourceTree = "<group>"; };
 		A01A000004000002 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		A01A000004000003 /* LifeGoodWatchWidgets.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = LifeGoodWatchWidgets.entitlements; sourceTree = "<group>"; };
+		A01A000001001594 /* WatchPackageBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchPackageBuilder.swift; sourceTree = "<group>"; };
+		A01A000001001595 /* WatchExtrasWriter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchExtrasWriter.swift; sourceTree = "<group>"; };
+		A01A000001001596 /* WatchBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchBridge.swift; sourceTree = "<group>"; };
+		A01A000001001597 /* WatchSettingsSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchSettingsSection.swift; sourceTree = "<group>"; };
+		A01A000002000110 /* WatchPackage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchPackage.swift; sourceTree = "<group>"; };
+		A01A000002000111 /* WatchText.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchText.swift; sourceTree = "<group>"; };
+		A01A000003000005 /* WatchAppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchAppDelegate.swift; sourceTree = "<group>"; };
+		A01A000003000006 /* WatchSync.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchSync.swift; sourceTree = "<group>"; };
+		A01A000003000007 /* WatchModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchModel.swift; sourceTree = "<group>"; };
+		A01A000003000008 /* WatchPrivacy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchPrivacy.swift; sourceTree = "<group>"; };
+		A01A000003000009 /* WatchStyle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchStyle.swift; sourceTree = "<group>"; };
+		A01A000003000010 /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
+		A01A000003000011 /* TodayPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TodayPage.swift; sourceTree = "<group>"; };
+		A01A000003000012 /* DayListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DayListView.swift; sourceTree = "<group>"; };
+		A01A000003000013 /* StopDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StopDetailView.swift; sourceTree = "<group>"; };
+		A01A000003000014 /* MoneyPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MoneyPage.swift; sourceTree = "<group>"; };
+		A01A000003000015 /* BillsList.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BillsList.swift; sourceTree = "<group>"; };
+		A01A000003000016 /* FreshnessFooter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FreshnessFooter.swift; sourceTree = "<group>"; };
+		A01A000003000017 /* SettingsSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsSheet.swift; sourceTree = "<group>"; };
+		A01A000003000018 /* WatchNotificationDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchNotificationDelegate.swift; sourceTree = "<group>"; };
+		A01A000004000004 /* WatchPackageProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchPackageProvider.swift; sourceTree = "<group>"; };
+		A01A000004000005 /* NextUpWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NextUpWidget.swift; sourceTree = "<group>"; };
+		A01A000004000006 /* SpentWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpentWidget.swift; sourceTree = "<group>"; };
 		A01A000004000100 /* LifeGoodWatchWidgets.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = LifeGoodWatchWidgets.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -696,6 +751,8 @@
 				A01A000002000089 /* DayTimelineToggleIntent.swift */,
 				A01A000002000094 /* RunActivityAttributes.swift */,
 				A01A000002000095 /* RunPauseIntent.swift */,
+				A01A000002000110 /* WatchPackage.swift */,
+				A01A000002000111 /* WatchText.swift */,
 			);
 			path = Shared;
 			sourceTree = "<group>";
@@ -748,6 +805,9 @@
 				A01A000001001591 /* WealthVault.swift */,
 				A01A000001001592 /* WealthWebFacts.swift */,
 				A01A000001001593 /* NotificationActions.swift */,
+				A01A000001001594 /* WatchPackageBuilder.swift */,
+				A01A000001001595 /* WatchExtrasWriter.swift */,
+				A01A000001001596 /* WatchBridge.swift */,
 				A01A000001000020 /* LifeModels.swift */,
 				A01A000001000201 /* HealthModels.swift */,
 				A01A000001000204 /* ChildVaccineSchedule.swift */,
@@ -850,6 +910,7 @@
 				A01A000001001529 /* FinHouseScene.swift */,
 				A01A000001001535 /* FinDriveScene.swift */,
 				A01A000001001532 /* AppStores.swift */,
+				A01A000001001597 /* WatchSettingsSection.swift */,
 				A01A000001001524 /* FinanceBoards.swift */,
 				A01A000001001525 /* FinanceItems.swift */,
 				A01A000001001501 /* MapPlacePicker.swift */,
@@ -985,6 +1046,20 @@
 			isa = PBXGroup;
 			children = (
 				A01A000003000001 /* LifeGoodWatchApp.swift */,
+				A01A000003000005 /* WatchAppDelegate.swift */,
+				A01A000003000006 /* WatchSync.swift */,
+				A01A000003000007 /* WatchModel.swift */,
+				A01A000003000008 /* WatchPrivacy.swift */,
+				A01A000003000009 /* WatchStyle.swift */,
+				A01A000003000010 /* RootView.swift */,
+				A01A000003000011 /* TodayPage.swift */,
+				A01A000003000012 /* DayListView.swift */,
+				A01A000003000013 /* StopDetailView.swift */,
+				A01A000003000014 /* MoneyPage.swift */,
+				A01A000003000015 /* BillsList.swift */,
+				A01A000003000016 /* FreshnessFooter.swift */,
+				A01A000003000017 /* SettingsSheet.swift */,
+				A01A000003000018 /* WatchNotificationDelegate.swift */,
 				A01A000003000004 /* Assets.xcassets */,
 				A01A000003000002 /* Info.plist */,
 				A01A000003000003 /* LifeGoodWatch.entitlements */,
@@ -996,6 +1071,9 @@
 			isa = PBXGroup;
 			children = (
 				A01A000004000001 /* LifeGoodWatchWidgetsBundle.swift */,
+				A01A000004000004 /* WatchPackageProvider.swift */,
+				A01A000004000005 /* NextUpWidget.swift */,
+				A01A000004000006 /* SpentWidget.swift */,
 				A01A000004000002 /* Info.plist */,
 				A01A000004000003 /* LifeGoodWatchWidgets.entitlements */,
 			);
@@ -1238,6 +1316,11 @@
 				A01B000001001591 /* WealthVault.swift in Sources */,
 				A01B000001001592 /* WealthWebFacts.swift in Sources */,
 				A01B000001001593 /* NotificationActions.swift in Sources */,
+				A01B000001001594 /* WatchPackageBuilder.swift in Sources */,
+				A01B000001001595 /* WatchExtrasWriter.swift in Sources */,
+				A01B000001001596 /* WatchBridge.swift in Sources */,
+				A01B000001001597 /* WatchSettingsSection.swift in Sources */,
+				A01B000002000110 /* WatchPackage.swift in Sources */,
 				A01B000001001582 /* WealthBoard.swift in Sources */,
 				A01B000001001583 /* WealthBoardScenes.swift in Sources */,
 				A01B000001001584 /* WealthItems.swift in Sources */,
@@ -1437,6 +1520,25 @@
 			buildActionMask = 2147483647;
 			files = (
 				A01B000003000001 /* LifeGoodWatchApp.swift in Sources */,
+				A01B000003000005 /* WatchAppDelegate.swift in Sources */,
+				A01B000003000006 /* WatchSync.swift in Sources */,
+				A01B000003000007 /* WatchModel.swift in Sources */,
+				A01B000003000008 /* WatchPrivacy.swift in Sources */,
+				A01B000003000009 /* WatchStyle.swift in Sources */,
+				A01B000003000010 /* RootView.swift in Sources */,
+				A01B000003000011 /* TodayPage.swift in Sources */,
+				A01B000003000012 /* DayListView.swift in Sources */,
+				A01B000003000013 /* StopDetailView.swift in Sources */,
+				A01B000003000014 /* MoneyPage.swift in Sources */,
+				A01B000003000015 /* BillsList.swift in Sources */,
+				A01B000003000016 /* FreshnessFooter.swift in Sources */,
+				A01B000003000017 /* SettingsSheet.swift in Sources */,
+				A01B000003000018 /* WatchNotificationDelegate.swift in Sources */,
+				A01B000003000051 /* DayTimelineAttributes.swift in Sources */,
+				A01B000003000052 /* WidgetSnapshot.swift in Sources */,
+				A01B000003000053 /* WidgetLink.swift in Sources */,
+				A01B000003000055 /* WatchPackage.swift in Sources */,
+				A01B000003000056 /* WatchText.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -1445,6 +1547,14 @@
 			buildActionMask = 2147483647;
 			files = (
 				A01B000004000001 /* LifeGoodWatchWidgetsBundle.swift in Sources */,
+				A01B000004000004 /* WatchPackageProvider.swift in Sources */,
+				A01B000004000005 /* NextUpWidget.swift in Sources */,
+				A01B000004000006 /* SpentWidget.swift in Sources */,
+				A01B000004000051 /* DayTimelineAttributes.swift in Sources */,
+				A01B000004000052 /* WidgetSnapshot.swift in Sources */,
+				A01B000004000053 /* WidgetLink.swift in Sources */,
+				A01B000004000055 /* WatchPackage.swift in Sources */,
+				A01B000004000056 /* WatchText.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

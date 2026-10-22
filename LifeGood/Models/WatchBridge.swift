@@ -1,0 +1,319 @@
+import Foundation
+import UIKit
+import WatchConnectivity
+
+// MARK: - iPhone 這一頭的手錶傳話（手錶 v1，v25.574；只屬於主 App；watch/judge.md §5.2、§5.4、§7.8-5／6、附錄 B；
+//         watch/build/v1/brief.md G1-1；送不送、走哪條路照 watch/build/v1/sim_v1.py 的 bridge_decide）
+//
+// 誰叫：
+//   • AppDelegate.didFinishLaunching → activate()（手錶叫醒 iPhone 時要有人接；iPad、Mac 上 isSupported 是 false，什麼都不做）
+//   • WidgetSnapshotWriter.writeNow 寫完 → snapshotsDidChange()
+//   • 設定頁改了「送到手錶」的開關、「隱藏金額」→ settingsChanged()
+//
+// 送包（refresh）：WatchPackageBuilder 只讀 App Group 的檔組一包 → WidgetSnapshotStore.write（iPhone 自己的 watch_v1.json，
+// 拿掉 generatedAt 比內容）回 true＝內容變了。下面三種「不比內容也送」：
+//   • 換錶、重新配對、手錶版第一次裝好：session.watchDirectoryURL（每支錶一個、手錶版刪掉時系統一起清）底下沒有記號檔
+//   • 上次沒送成（還沒啟動好、沒配對、沒裝、送的時候出錯）：App Group 的 watch_send_pending
+//   • 手錶要（sendMessage ["want": "pkg"]）：直接回覆那一包
+// 走哪條路：壓完 ≤ 48 KB 用 updateApplicationContext（只留最新一份）；錶面的字變了（WatchPackageDiff.widgetKinds 不是空的）
+// 而且錶面真的放了 LifeGood、系統還有額度、今天用不到 30 次 → 再多走 transferCurrentComplicationUserInfo（比較快叫醒手錶）；
+// 壓完 > 48 KB 改用 transferFile。
+//
+// ⚠️ 被手錶叫醒的冷啟動也會跑到這裡：每個 delegate 方法只讀寫 App Group 的檔與 UserDefaults，
+//    不碰 App 的三份大資料、不 start 任何寫入器、不算數字（judge §5.4、§7.8-6；pkg_keys_check.py D 段擋）。
+//    回「給我最新的」時先叫 WidgetSnapshotWriter.shared.writeNow()：App 活著＝先重寫快照；冷啟動時寫手還沒 start、什麼都不做。
+// ⚠️ WCSession 的 delegate 方法在背景執行緒：一律 nonisolated、要動狀態包 Task { @MainActor in … }（照 RunTracker 的寫法）。
+//
+// 對外的名字（WidgetSnapshotWriter、AppDelegate、設定頁在叫）不准改。
+
+/// App Group 的鍵與檔名（WidgetShared.defaults；delegate 方法在背景執行緒也要讀得到，放在 actor 外面）
+private enum WatchBridgeKeys {
+    /// 上次送到手錶的時間（1970 起的秒，Double）
+    static let lastSentAt = "watch_last_sent_at"
+    /// 上次送到手錶的大小（壓縮後的位元組，Int）
+    static let lastSentBytes = "watch_last_sent_bytes"
+    /// 上次沒送成，下次一有機會就送（Bool）
+    static let pending = "watch_send_pending"
+    /// 錶面快速推送：哪一天（「2026-10-22」）、那天用了幾次
+    static let facePushDay = "watch_face_push_day"
+    static let facePushCount = "watch_face_push_count"
+    /// 送到過這支錶的記號檔（session.watchDirectoryURL 底下）
+    static let markerFile = "lg_watch_pkg_v1"
+    /// 壓完超過 48 KB 改用 transferFile 時，暫存檔的開頭（「watch_v1_<秒>_<8 碼>.lzfse」；送完就刪）。
+    /// 後面多 8 碼：同一秒送兩次時，被取消的舊那份收尾刪檔不會刪到新的那份
+    static let tempFilePrefix = "watch_v1_"
+    /// 錶面快速推送每天最多幾次（系統一天 50 次，留 20 次給 v2 記帳後馬上更新）
+    static let facePushDailyCap = 30
+}
+
+@MainActor
+final class WatchBridge: NSObject, ObservableObject {
+    static let shared = WatchBridge()
+
+    /// 這支 iPhone 有配對手錶（設定頁「Apple Watch」段沒配對就整段不出現）
+    @Published private(set) var isPaired = false
+    /// 手錶上裝了 LifeGood 手錶版
+    @Published private(set) var isWatchAppInstalled = false
+    /// 上次送到手錶的時間、大小（壓縮後的位元組）
+    @Published private(set) var lastSentAt: Date?
+    @Published private(set) var lastSentBytes: Int = 0
+
+    /// activate() 叫過了（在這之前 refresh 什麼都不做）
+    private var activationRequested = false
+
+    private override init() {
+        super.init()
+        let d = WidgetShared.defaults
+        let sentAt = d?.double(forKey: WatchBridgeKeys.lastSentAt) ?? 0
+        if sentAt > 0 {
+            lastSentAt = Date(timeIntervalSince1970: sentAt)
+        }
+        lastSentBytes = d?.integer(forKey: WatchBridgeKeys.lastSentBytes) ?? 0
+    }
+
+    /// AppDelegate.didFinishLaunching 叫（先問 WCSession.isSupported()；iPad、Mac 什麼都不做）
+    func activate() {
+        guard WCSession.isSupported(), !activationRequested else { return }
+        activationRequested = true
+        let session = WCSession.default
+        session.delegate = self
+        session.activate()
+    }
+
+    /// WidgetSnapshotWriter.writeNow 寫完叫：組包（只讀檔）、內容變了才送
+    func snapshotsDidChange() {
+        refresh()
+    }
+
+    /// 設定頁改了「送到手錶」的開關、「隱藏金額」：重組重送
+    func settingsChanged() {
+        refresh()
+    }
+
+    // MARK: - 送不送
+
+    /// 上次沒送成（App Group；冷啟動、下次打開都看得到）
+    private var pending: Bool {
+        get { WidgetShared.defaults?.bool(forKey: WatchBridgeKeys.pending) ?? false }
+        set { WidgetShared.defaults?.set(newValue, forKey: WatchBridgeKeys.pending) }
+    }
+
+    /// 現在能送：啟動好了、有配對、手錶上裝了 LifeGood
+    private static func canSend(_ session: WCSession) -> Bool {
+        session.activationState == .activated && session.isPaired && session.isWatchAppInstalled
+    }
+
+    /// 組包、跟 iPhone 上存的那一包比，該送才送（sim_v1.py bridge_decide）
+    private func refresh() {
+        guard WCSession.isSupported(), activationRequested else { return }
+        let old = WidgetSnapshotStore.read(WatchPackage.self)
+        guard let pkg = WatchPackageBuilder.build(now: Date()) else { return }
+        let changed = WidgetSnapshotStore.write(pkg)
+        let session = WCSession.default
+        guard Self.canSend(session) else {
+            // 還沒啟動好、沒配對、沒裝：記著，啟動好、裝好（watchStateChanged）再送
+            if changed { pending = true }
+            return
+        }
+        guard changed || pending || isNewWatch(session) else { return }
+        let faceKinds: [String] = changed ? WatchPackageDiff.widgetKinds(old: old, new: pkg) : []
+        send(pkg, faceKinds: faceKinds, session: session)
+    }
+
+    /// 送一包：≤ 48 KB 走 application context（＋錶面的字變了再走錶面那條）；> 48 KB 走 transferFile
+    private func send(_ pkg: WatchPackage, faceKinds: [String], session: WCSession) {
+        guard let data = WatchPackageCodec.encode(pkg) else { return }
+        let now = Date()
+        if data.count > WatchLink.maxContextBytes {
+            guard sendFile(data, at: now, session: session) else {
+                pending = true
+                return
+            }
+        } else {
+            let payload = Self.payload(data, at: now)
+            do {
+                try session.updateApplicationContext(payload)
+            } catch {
+                pending = true
+                return
+            }
+            if !faceKinds.isEmpty {
+                pushFace(payload, session: session, now: now)
+            }
+        }
+        didSend(bytes: data.count, at: now, session: session)
+    }
+
+    /// ["pkg": LZFSE, "v": 1, "t": 秒]（t 讓每一次的內容都不一樣：強制重送也送得出去）
+    private static func payload(_ data: Data, at now: Date) -> [String: Any] {
+        [WatchLink.packageKey: data,
+         WatchLink.versionKey: WatchPackage.schemaVersion,
+         WatchLink.sentAtKey: now.timeIntervalSince1970]
+    }
+
+    /// 壓完 > 48 KB：寫成暫存檔、取消還沒送完的舊檔、transferFile。寫不出檔回 false
+    private func sendFile(_ data: Data, at now: Date, session: WCSession) -> Bool {
+        let stamp: String = String(Int(now.timeIntervalSince1970))
+        let unique: String = String(UUID().uuidString.prefix(8))
+        let name: String = WatchBridgeKeys.tempFilePrefix + stamp + "_" + unique + ".lzfse"
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(name, isDirectory: false)
+        do {
+            try data.write(to: url, options: [.atomic])
+        } catch {
+            return false
+        }
+        for transfer in session.outstandingFileTransfers {
+            transfer.cancel()
+        }
+        let metadata: [String: Any] = [WatchLink.versionKey: WatchPackage.schemaVersion,
+                                       WatchLink.sentAtKey: now.timeIntervalSince1970]
+        _ = session.transferFile(url, metadata: metadata)
+        return true
+    }
+
+    /// 錶面快速推送：錶面真的放了 LifeGood、系統還有額度、今天用不到 30 次（換日歸零）
+    private func pushFace(_ payload: [String: Any], session: WCSession, now: Date) {
+        guard session.isComplicationEnabled, session.remainingComplicationUserInfoTransfers > 0 else { return }
+        let d = WidgetShared.defaults
+        let day = WidgetDateText.dayKey(now)
+        var used = d?.integer(forKey: WatchBridgeKeys.facePushCount) ?? 0
+        if d?.string(forKey: WatchBridgeKeys.facePushDay) != day {
+            used = 0
+        }
+        guard used < WatchBridgeKeys.facePushDailyCap else { return }
+        _ = session.transferCurrentComplicationUserInfo(payload)
+        d?.set(day, forKey: WatchBridgeKeys.facePushDay)
+        d?.set(used + 1, forKey: WatchBridgeKeys.facePushCount)
+    }
+
+    /// 送成了：清 pending、這支錶寫記號、記上次送的時間與大小（設定頁「上次送到手錶 09:24・6 KB」）
+    private func didSend(bytes: Int, at now: Date, session: WCSession) {
+        pending = false
+        markWatch(session)
+        lastSentAt = now
+        lastSentBytes = bytes
+        let d = WidgetShared.defaults
+        d?.set(now.timeIntervalSince1970, forKey: WatchBridgeKeys.lastSentAt)
+        d?.set(bytes, forKey: WatchBridgeKeys.lastSentBytes)
+    }
+
+    // MARK: - 換錶、第一次裝好
+
+    /// 這支錶的記號檔（沒配對、沒裝手錶版時 watchDirectoryURL 是 nil）
+    private func markerURL(_ session: WCSession) -> URL? {
+        session.watchDirectoryURL?.appendingPathComponent(WatchBridgeKeys.markerFile, isDirectory: false)
+    }
+
+    /// 換錶、重新配對、手錶版第一次裝好（含刪掉重裝、TestFlight 自動安裝）：記號檔不在
+    private func isNewWatch(_ session: WCSession) -> Bool {
+        guard let url = markerURL(session) else { return false }
+        return !FileManager.default.fileExists(atPath: url.path)
+    }
+
+    private func markWatch(_ session: WCSession) {
+        guard let url = markerURL(session) else { return }
+        try? Data().write(to: url, options: [.atomic])
+    }
+
+    // MARK: - 狀態變了、手錶來要
+
+    /// 啟動好了、配對或安裝狀態變了：更新設定頁那兩個；裝著就 refresh（新錶、pending 會在裡面送）
+    private func watchStateChanged() {
+        let session = WCSession.default
+        let activated = session.activationState == .activated
+        let paired = activated && session.isPaired
+        let installed = paired && session.isWatchAppInstalled
+        if isPaired != paired { isPaired = paired }
+        if isWatchAppInstalled != installed { isWatchAppInstalled = installed }
+        if installed {
+            refresh()
+        }
+    }
+
+    /// 手錶要「給我最新的」：活著先重寫快照（冷啟動什麼都不做）→ 只讀檔組包 → 回覆那一包。
+    /// 沒有包回 ["none": 1]；壓完 > 48 KB 改走 transferFile、回 ["none": 1]
+    private func replyPackage(_ wants: Bool) -> [String: Any] {
+        guard wants else { return [:] }
+        WidgetSnapshotWriter.shared.writeNow()
+        let now = Date()
+        guard let pkg = WatchPackageBuilder.build(now: now) else { return [WatchLink.noneKey: 1] }
+        WidgetSnapshotStore.write(pkg)
+        guard let data = WatchPackageCodec.encode(pkg) else { return [WatchLink.noneKey: 1] }
+        let session = WCSession.default
+        if data.count > WatchLink.maxContextBytes {
+            if sendFile(data, at: now, session: session) {
+                didSend(bytes: data.count, at: now, session: session)
+            } else {
+                pending = true
+            }
+            return [WatchLink.noneKey: 1]
+        }
+        didSend(bytes: data.count, at: now, session: session)
+        return Self.payload(data, at: now)
+    }
+
+    /// transferFile 沒送成（不是被新的那一份取消）：下次一有機會就送
+    private func fileTransferFailed() {
+        if WCSession.default.outstandingFileTransfers.isEmpty {
+            pending = true
+        }
+    }
+}
+
+// MARK: - WCSessionDelegate（背景執行緒；一律 nonisolated，要動狀態包 Task { @MainActor in … }）
+
+extension WatchBridge: WCSessionDelegate {
+
+    /// 啟動好了（iOS、watchOS 都必寫）：看到配對＋已安裝就 refresh（新錶、pending 不比內容也送）
+    nonisolated func session(_ session: WCSession,
+                             activationDidCompleteWith activationState: WCSessionActivationState,
+                             error: Error?) {
+        Task { @MainActor in
+            self.watchStateChanged()
+        }
+    }
+
+    /// 配對、安裝、錶面有沒有放 LifeGood 變了（同啟動好）
+    nonisolated func sessionWatchStateDidChange(_ session: WCSession) {
+        Task { @MainActor in
+            self.watchStateChanged()
+        }
+    }
+
+    /// iOS 必寫（少寫編不過）：換錶中，舊的 session 還在送完手上的東西，這裡什麼都不做
+    nonisolated func sessionDidBecomeInactive(_ session: WCSession) {
+    }
+
+    /// iOS 必寫：換錶，舊的 session 關掉了 → 再 activate 一次接新錶（Apple 範例 SessionDelegator 同一句）
+    nonisolated func sessionDidDeactivate(_ session: WCSession) {
+        session.activate()
+    }
+
+    /// 手錶來要「給我最新的」（要回覆的那種）。訊息在這裡先拆好，主執行緒只拿一個 Bool
+    nonisolated func session(_ session: WCSession,
+                             didReceiveMessage message: [String: Any],
+                             replyHandler: @escaping ([String: Any]) -> Void) {
+        let wants = (message[WatchLink.wantKey] as? String) == WatchLink.wantPackage
+        Task { @MainActor in
+            replyHandler(self.replyPackage(wants))
+        }
+    }
+
+    /// 不用回覆的訊息：v1 手錶不送這種，什麼都不做
+    nonisolated func session(_ session: WCSession, didReceiveMessage message: [String: Any]) {
+    }
+
+    /// transferFile 送完（或被取消、失敗）：刪暫存檔；失敗了記 pending
+    nonisolated func session(_ session: WCSession,
+                             didFinish fileTransfer: WCSessionFileTransfer,
+                             error: Error?) {
+        let url = fileTransfer.file.fileURL
+        if url.lastPathComponent.hasPrefix(WatchBridgeKeys.tempFilePrefix) {
+            try? FileManager.default.removeItem(at: url)
+        }
+        guard error != nil else { return }
+        Task { @MainActor in
+            self.fileTransferFailed()
+        }
+    }
+}

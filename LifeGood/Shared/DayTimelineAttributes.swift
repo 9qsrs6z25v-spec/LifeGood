@@ -1,5 +1,7 @@
 import Foundation
+#if canImport(ActivityKit)
 import ActivityKit
+#endif
 
 // MARK: - 今日行程時間軸 · Live Activity 資料（v25.377）
 //
@@ -8,6 +10,12 @@ import ActivityKit
 //
 // ⚠️ ContentState 有 4KB 上限（ActivityKit 硬限制），超過會直接啟動失敗。
 //    所以場次數量與文字長度都要先裁切，見 DayTimelineSnapshotBuilder。
+//
+// [手錶 v1，v25.574] 這個檔也編進手錶兩個 target（LifeGoodWatch、LifeGoodWatchWidgets；watch/judge.md §1.4-3、§7.3）。
+// 手錶沒有 ActivityKit，所以只有三段用 #if canImport(ActivityKit) 包起來：import、DayTimelineAttributes、
+// DayTimelineFormat.compactTrailing。iPhone 兩個 target 的 canImport 是真，編出來跟以前一模一樣。
+// 其他（TimelineStopKind、TimelineStop、DayTimelineFormat、DayTimelineLink）只准用 Foundation。
+// 萬一手錶上 canImport(ActivityKit) 也是真（第一輪編譯紀錄看到），三段改 #if os(iOS)（judge §7.8-2 的唯一例外）。
 
 /// [v25.380] 這一站是哪裡來的。決定點的顏色與詳情裡的來源標籤。
 enum TimelineStopKind: String, Codable, Hashable {
@@ -57,6 +65,7 @@ struct TimelineStop: Codable, Hashable, Identifiable {
     }
 }
 
+#if canImport(ActivityKit)
 struct DayTimelineAttributes: ActivityAttributes {
     struct ContentState: Codable, Hashable {
         /// 今天的場次，已依時間排序
@@ -123,6 +132,7 @@ struct DayTimelineAttributes: ActivityAttributes {
 
     init(dayLabel: String) { self.dayLabel = dayLabel }
 }
+#endif
 
 // MARK: - 共用格式
 
@@ -153,12 +163,15 @@ enum DayTimelineFormat {
     /// 收合狀態的右側文字：進行中顯示結束時間，否則顯示下一場開始時間。
     /// [v25.381] 兩者都沒有＝今天的行程都跑完了。原本回「N 場」看不出這件事，
     /// 而且現在軸上不只會議，「場」這個量詞也不對了。
+    /// [手錶 v1] 用到 ActivityKit 的型別，手錶上不編
+    #if canImport(ActivityKit)
     static func compactTrailing(_ state: DayTimelineAttributes.ContentState,
                                 now: Date = Date()) -> String {
         if let cur = state.currentStop(now) { return time(cur.end) }
         if let next = state.nextStop(now) { return time(next.start) }
         return "已結束"
     }
+    #endif
 }
 
 // MARK: - 深層連結

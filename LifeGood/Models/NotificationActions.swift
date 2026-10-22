@@ -5,9 +5,12 @@ import UserNotifications
 //
 // iPhone 排的本機通知，iPhone 鎖著、手錶戴著時系統會轉到手錶；按鈕定義在 iPhone，手錶上就有，
 // 按了在 iPhone **背景**跑。這一版只改 iPhone，手錶 App 還沒有任何程式。
+// [手錶 v1] v25.574（judge §3.5 v1、watch/build/v1/brief.md G1-3）：部屬會議多一顆前景按鈕〔看議程〕（排在再提醒後面）。
+//   在手錶上按：前景動作交給手錶 App（WatchNotificationDelegate 用 userInfo["meeting_id"] 開那一場的細節）；
+//   在 iPhone 上按：handle 回 false，AppDelegate 照原本的路開我的行事曆那張卡。字串放在 WatchLink（手錶不編這個檔）。
 //
 // 分類（categoryIdentifier；AppDelegate 一啟動就 registerCategories）：
-//   LG_MEETING       部屬會議（NotificationManager.scheduleMeetingJobs）〔5 分鐘後再提醒〕（v1 再加〔看議程〕）
+//   LG_MEETING       部屬會議（NotificationManager.scheduleMeetingJobs）〔5 分鐘後再提醒〕〔看議程〕（手錶 v1 加的，前景）
 //   LG_EVENT         我的行事曆的個人事件（NotificationManager）〔5 分鐘後再提醒〕
 //   LG_WEALTH        財富提醒：卡費截止前 3 天、自動扣款可能不夠扣、交割、卡片到期、定存、保單〔明天 9 點再提醒〕
 //   LG_WEALTH_TODAY  卡費今天截止（wealth.due.….0）〔晚上再提醒〕：20:00 以前按＝今天 20:00；20:00 以後按＝1 小時後
@@ -47,6 +50,8 @@ enum NotificationActions {
     static let snoozeTomorrowAction = "LG_SNOOZE_TOMORROW_9"
     /// 〔晚上再提醒〕（卡費今天截止）
     static let snoozeEveningAction = "LG_SNOOZE_EVENING"
+    /// [手錶 v1] 〔看議程〕（部屬會議，前景：手錶上按開手錶 App 那一場的細節；iPhone 上按照舊開我的行事曆那張卡）
+    static let viewAgendaAction = WatchLink.viewAgendaAction
 
     // MARK: userInfo 的鍵
 
@@ -97,8 +102,10 @@ enum NotificationActions {
         let five = UNNotificationAction(identifier: snoozeFiveAction, title: "5 分鐘後再提醒", options: [])
         let tomorrow = UNNotificationAction(identifier: snoozeTomorrowAction, title: "明天 9 點再提醒", options: [])
         let evening = UNNotificationAction(identifier: snoozeEveningAction, title: "晚上再提醒", options: [])
+        // [手錶 v1] 前景按鈕：排在〔5 分鐘後再提醒〕後面（第一顆不動＝雙指互點照舊是再提醒）
+        let agenda = UNNotificationAction(identifier: viewAgendaAction, title: "看議程", options: [.foreground])
         let categories: Set<UNNotificationCategory> = [
-            UNNotificationCategory(identifier: meetingCategory, actions: [five], intentIdentifiers: [], options: []),
+            UNNotificationCategory(identifier: meetingCategory, actions: [five, agenda], intentIdentifiers: [], options: []),
             UNNotificationCategory(identifier: eventCategory, actions: [five], intentIdentifiers: [], options: []),
             UNNotificationCategory(identifier: wealthCategory, actions: [tomorrow], intentIdentifiers: [], options: []),
             UNNotificationCategory(identifier: wealthTodayCategory, actions: [evening], intentIdentifiers: [], options: [])
