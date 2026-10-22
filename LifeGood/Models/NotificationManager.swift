@@ -43,8 +43,12 @@ final class NotificationManager {
     nonisolated func cancel(eventId: UUID) {
         let center = UNUserNotificationCenter.current()
         let prefix = eventId.uuidString
+        // [手錶 v3] 這一筆延後的再提醒（snooze.evt.<UUID>.）一起拿掉
+        let snooze = NotificationActions.snoozePrefix + NotificationActions.eventSource(eventId) + "."
         center.getPendingNotificationRequests { reqs in
-            let ids = reqs.map(\.identifier).filter { $0 == prefix || $0.hasPrefix(prefix + "#") }
+            let ids = reqs.map(\.identifier).filter {
+                $0 == prefix || $0.hasPrefix(prefix + "#") || $0.hasPrefix(snooze)
+            }
             if !ids.isEmpty {
                 center.removePendingNotificationRequests(withIdentifiers: ids)
             }
@@ -84,9 +88,17 @@ final class NotificationManager {
         let center = UNUserNotificationCenter.current()
         let pending = await center.pendingNotificationRequests()
         let prefixes = Set(events.map { $0.id.uuidString })
-        let toRemove = pending.map(\.identifier).filter { id in
+        var toRemove = pending.map(\.identifier).filter { id in
             prefixes.contains(where: { id == $0 || id.hasPrefix($0 + "#") })
         }
+        // [手錶 v3] 延後的再提醒（snooze.evt.）：事件刪了、或改了時間／重複／提醒（指紋不一樣）才拿掉。
+        // 每次打開 App 都會跑這裡，不能一律清（09:25 按了 5 分鐘後、09:27 打開 App，那則要留著）
+        let byId = Dictionary(events.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        let staleSnoozes = NotificationActions.staleSnoozes(in: pending, kind: "evt.") { _, source, stamp in
+            guard let id = NotificationActions.sourceId(source), let event = byId[id] else { return false }
+            return stamp == nil || stamp == NotificationActions.eventStamp(event)
+        }
+        toRemove += staleSnoozes
         if !toRemove.isEmpty {
             center.removePendingNotificationRequests(withIdentifiers: toRemove)
         }
@@ -153,7 +165,10 @@ final class NotificationManager {
     /// 與個人事件那條路不同，這裡不做「無限重複用單一 repeats trigger」的優化——
     /// 週期會議的每一場都可能被改期或取消，用 repeats 的單一 trigger 表達不了，
     /// 只能逐場排一次性的。所以呼叫端必須先裁切數量（iOS 只保留最近 64 則待送）。
-    func scheduleMeetingJobs(_ jobs: [ReminderJob]) async {
+    ///
+    /// [手錶 v3] liveMeetingKeys：現在還在的每一場的「mtg_<會議>_<場次秒>」（ReminderCenter.liveMeetingKeys）。
+    /// 延後的再提醒（snooze.mtg.）原本那場不在裡面就拿掉；nil＝不動再提醒。
+    func scheduleMeetingJobs(_ jobs: [ReminderJob], liveMeetingKeys: Set<String>? = nil) async {
         let center = UNUserNotificationCenter.current()
         // 先清掉上一輪排的全部會議提醒：場次會被改期／取消，殘留的舊通知會在
         // 已經不存在的時間響起來。
@@ -161,6 +176,17 @@ final class NotificationManager {
         let stale = pending.map(\.identifier).filter { $0.hasPrefix(Self.meetingPrefix) }
         if !stale.isEmpty {
             center.removePendingNotificationRequests(withIdentifiers: stale)
+        }
+
+        // [手錶 v3] 延後的會議再提醒（snooze.mtg.）：原本那場（mtg_<會議>_<場次秒>）不在了——刪了、改時間、取消那一場——就拿掉。
+        // 放在 guard !jobs.isEmpty 前面：最後一場刪掉、沒有要排的，也要清
+        if let live = liveMeetingKeys {
+            let gone = NotificationActions.staleSnoozes(in: pending, kind: "mtg.") { origin, _, _ in
+                live.contains(origin)
+            }
+            if !gone.isEmpty {
+                center.removePendingNotificationRequests(withIdentifiers: gone)
+            }
         }
 
         guard !jobs.isEmpty else { return }
@@ -177,7 +203,10 @@ final class NotificationManager {
             // 同一場會議的提醒在通知中心疊成一組
             if let mid = job.meetingId {
                 content.threadIdentifier = Self.meetingPrefix + mid.uuidString
-                content.userInfo = [DeepLinkRouter.meetingNotificationKey: mid.uuidString]
+                content.userInfo = [DeepLinkRouter.meetingNotificationKey: mid.uuidString,
+                                    NotificationActions.sourceKey: NotificationActions.meetingSource(mid)]
+                // [手錶 v3] 〔5 分鐘後再提醒〕（v1 再加〔看議程〕）
+                content.categoryIdentifier = NotificationActions.meetingCategory
             }
             let req = UNNotificationRequest(identifier: job.key, content: content, trigger: trigger)
             try? await center.add(req)
@@ -223,6 +252,11 @@ final class NotificationManager {
         content.title = event.title.isEmpty ? event.kind.rawValue : event.title
         content.body = makeBody(for: event, fireDate: fireDate, infiniteRecurrence: infiniteRecurrence)
         content.sound = .default
+        // [手錶 v3] 〔5 分鐘後再提醒〕；來源與時間指紋給重排時判斷「延後的那則還要不要」
+        //（一次性、展開、無限重複三種都經過這裡）
+        content.categoryIdentifier = NotificationActions.eventCategory
+        content.userInfo = [NotificationActions.sourceKey: NotificationActions.eventSource(event.id),
+                            NotificationActions.stampKey: NotificationActions.eventStamp(event)]
         return content
     }
 
@@ -252,13 +286,20 @@ final class NotificationManager {
                 timeStr = "\(pattern) · \(Self.timeFormatter.string(from: event.date))"
             }
         } else {
-            // 一次性事件，或重複事件已展開成多筆 → 用該筆實際的觸發時間
-            let dateToShow = fireDate ?? event.date
+            // 一次性事件，或重複事件已展開成多筆 → 寫那一場的開始。
+            // [手錶 v3] fireDate 是觸發那一刻（開始－提醒分鐘），內文要寫那一場的開始（以前 09:30 的會寫成 09:25）
+            let dateToShow = fireDate.flatMap {
+                Calendar.current.date(byAdding: .minute, value: event.reminderMinutes, to: $0)
+            } ?? event.date
             let fmt = event.durationMinutes == 0 ? Self.dateFormatter : Self.dateTimeFormatter
             timeStr = fmt.string(from: dateToShow)
         }
 
-        let pieces = [kindLabel, timeStr, durStr] + (event.note.isEmpty ? [] : [event.note])
+        var pieces = [kindLabel, timeStr, durStr]
+        // [手錶 v3] 地點接在長度後面（跟鬧鐘那條路 ReminderCenter.eventBody 一樣）；備註照舊放最後
+        let place = event.location.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !place.isEmpty { pieces.append(place) }
+        if !event.note.isEmpty { pieces.append(event.note) }
         return pieces.joined(separator: " · ")
     }
 

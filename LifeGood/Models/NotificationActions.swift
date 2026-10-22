@@ -17,6 +17,8 @@ import UserNotifications
 //   • 原通知內容整份複製（標題、內文、聲音、分類、串、userInfo 都照舊），識別字「snooze.<來源>.<觸發時間秒>」，
 //     來源＝userInfo[sourceKey]（排的時候填：mtg.<會議 UUID>／evt.<事件 UUID>／wealth.<帳戶 UUID>）。
 //     不能用 mtg_／wealth. 開頭：重排時 NotificationManager、WealthReminderCenter 照前綴整批清掉。
+//     同一個來源的另一則已經延到同一刻（同一張卡的「快到期」和「截止前 3 天」同一天都按〔明天 9 點〕）：
+//     識別字後面再接按下去的秒（freeIdentifier），不然 add 會把先排的那則蓋掉。
 //   • userInfo 多兩把鍵：originKey＝原本那則的 identifier（再提醒的再提醒照舊帶第一則的）、madeKey＝按下去的時間（秒）。
 //   • 同一則（同 origin）只留最新的一個；同時最多 5 則再提醒，第 6 則把最早按的換掉（iOS 一個 App 最多 64 則待送）。
 //   • 卡費 3 天前那則（wealth.due.<卡>.<期>.3）延到的時間，同一期「今天截止」那則（….0）已經排在那時或更早：不另排（免得同一刻兩則）。
@@ -176,6 +178,14 @@ enum NotificationActions {
         return next <= fireDate.addingTimeInterval(60)
     }
 
+    /// 待送裡已經有這個識別字＝同一個來源的另一則延到同一刻（例：同一張卡的「快到期」和「截止前 3 天」同一天 09:00 響、
+    /// 兩則都按〔明天 9 點〕）：add 會把先排的那則蓋掉 → 後面再接按下去的秒。
+    /// 還是「snooze.<來源>.」開頭：重排（staleSnoozes）、刪事件（cancel）照前綴認得到
+    static func freeIdentifier(_ identifier: String, pending: [UNNotificationRequest], made: Int) -> String {
+        guard pending.contains(where: { $0.identifier == identifier }) else { return identifier }
+        return identifier + "." + String(made)
+    }
+
     // MARK: 按了
 
     /// AppDelegate.userNotificationCenter(_:didReceive:) **第一件事**叫這支。
@@ -195,8 +205,9 @@ enum NotificationActions {
         var info = original.content.userInfo
         let origin = (info[AnyHashable(originKey)] as? String) ?? original.identifier
         let source = (info[AnyHashable(sourceKey)] as? String) ?? "other"
+        let made = Int(now.timeIntervalSince1970)
         info[AnyHashable(originKey)] = origin
-        info[AnyHashable(madeKey)] = Int(now.timeIntervalSince1970)
+        info[AnyHashable(madeKey)] = made
         content.userInfo = info
 
         let trigger: UNNotificationTrigger
@@ -220,7 +231,11 @@ enum NotificationActions {
             if !drop.isEmpty {
                 center.removePendingNotificationRequests(withIdentifiers: drop)
             }
-            center.add(request) { _ in
+            // 識別字撞到待送裡的另一則就換一個（不然 add 會把那則蓋掉、少響一則）
+            let freeId = NotificationActions.freeIdentifier(identifier, pending: pending, made: made)
+            let toAdd = freeId == identifier ? request
+                : UNNotificationRequest(identifier: freeId, content: request.content, trigger: request.trigger)
+            center.add(toAdd) { _ in
                 DispatchQueue.main.async { completion() }
             }
         }

@@ -13,6 +13,8 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         //   • 前景顯示：沒有 delegate 時，App 開著收到的通知會被系統靜靜丟掉。
         //     行事曆提醒一直是這樣——人正在用 App，提醒就不會出現。
         //   • 點擊：旅遊的跨裝置通知要能點進那一份行程。
+        // [手錶 v3] 通知的按鈕（〔5 分鐘後再提醒〕〔明天 9 點再提醒〕〔晚上再提醒〕）：每次啟動都要登記（背景冷啟動也是）
+        NotificationActions.registerCategories()
         UNUserNotificationCenter.current().delegate = self
         return true
     }
@@ -57,9 +59,13 @@ extension AppDelegate: UNUserNotificationCenterDelegate {
 
     /// 點通知：旅遊的跨裝置通知帶了行程 id，切到旅遊地圖並打開那一份行程。
     /// 其他通知（行事曆提醒）沒帶 id，就只是開 App，維持原本行為。
+    /// [手錶 v3] 按鈕（再提醒）見 NotificationActions.handle：第一件事就交給它，是按鈕就不往下走。
     func userNotificationCenter(_ center: UNUserNotificationCenter,
                                 didReceive response: UNNotificationResponse,
                                 withCompletionHandler completionHandler: @escaping () -> Void) {
+        // [手錶 v3] 第一件事看按了哪一顆：再提醒是背景動作（手錶上按也在這裡跑，可能是 iPhone 背景冷啟動）。
+        // 只碰通知中心、自己叫 completionHandler；一定 return，不准往下走到底下的 AppStores.life
+        if NotificationActions.handle(response, completion: completionHandler) { return }
         let info = response.notification.request.content.userInfo
         if let raw = info[TripChangeNotifier.planIdKey] as? String,
            let id = UUID(uuidString: raw) {

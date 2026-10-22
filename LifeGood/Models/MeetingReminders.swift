@@ -121,8 +121,10 @@ enum ReminderCenter {
 
         // 2) 部屬會議的通知型
         let notificationJobs = jobs.filter { $0.style == .notification }
+        // [手錶 v3] 一起傳現在還在的每一場：延後的會議再提醒（snooze.mtg.）原本那場不在了就拿掉
         await NotificationManager.shared.scheduleMeetingJobs(
-            Array(notificationJobs.prefix(meetingNotificationLimit)))
+            Array(notificationJobs.prefix(meetingNotificationLimit)),
+            liveMeetingKeys: liveMeetingKeys(subordinates: subordinates, now: now))
 
         // 3) 鬧鐘型（個人事件 + 部屬會議一起排，因為鬧鐘的額度是共用的）
         let alarmJobs = (eventAlarmJobs(events: events, now: now)
@@ -185,7 +187,7 @@ enum ReminderCenter {
                     // 有週期的會議，議程項目掛在各場次上；不重複的會議掛在會議本身
                     let itemCount = occ.items.isEmpty ? meeting.items.count : occ.items.count
                     out.append(ReminderJob(
-                        key: "mtg_\(meeting.id.uuidString)_\(Int(occ.date.timeIntervalSince1970))",
+                        key: meetingKey(meeting.id, at: occ.date),
                         title: meeting.topic.isEmpty ? "部屬會議" : meeting.topic,
                         body: meetingBody(sub: sub, meeting: meeting, at: occ.date,
                                           itemCount: itemCount, isAdHoc: occ.isAdHoc),
@@ -197,6 +199,28 @@ enum ReminderCenter {
             }
         }
         return out.sorted { $0.fireDate < $1.fireDate }
+    }
+
+    /// 部屬會議那一則的識別字「mtg_<會議 UUID>_<場次開始秒>」（通知 identifier；延後的再提醒用它認原本那場）
+    static func meetingKey(_ meetingId: UUID, at date: Date) -> String {
+        "mtg_\(meetingId.uuidString)_\(Int(date.timeIntervalSince1970))"
+    }
+
+    /// [手錶 v3] 現在還在的每一場（前 1 天～後 horizonDays 天、沒取消的；不管提醒分鐘、旅遊、通知或鬧鐘）的 meetingKey。
+    /// NotificationManager.scheduleMeetingJobs 用它判斷延後的再提醒要不要留
+    static func liveMeetingKeys(subordinates: [Subordinate], now: Date) -> Set<String> {
+        let cal = Calendar.current
+        let from = cal.date(byAdding: .day, value: -1, to: now) ?? now
+        let horizon = cal.date(byAdding: .day, value: horizonDays, to: now) ?? now
+        var out = Set<String>()
+        for sub in subordinates {
+            for meeting in sub.meetings {
+                for occ in meeting.expandedOccurrences(from: from, horizon: horizon) where !occ.isCancelled {
+                    out.insert(meetingKey(meeting.id, at: occ.date))
+                }
+            }
+        }
+        return out
     }
 
     /// 個人事件裡選了鬧鐘的那些。
@@ -240,10 +264,12 @@ enum ReminderCenter {
         return f
     }()
 
+    /// [手錶 v3] sub 不再用於字（Q6：內文不寫部屬名字），留著免得動呼叫端
     private static func meetingBody(sub: Subordinate, meeting: SubordinateMeeting,
                                     at date: Date, itemCount: Int,
                                     isAdHoc: Bool) -> String {
-        var pieces = [sub.name.isEmpty ? "部屬" : sub.name, dtFmt.string(from: date)]
+        // [手錶 v3] 第一段不寫部屬名字（Q6）：通知內文會原樣出現在鎖定畫面與手錶上；點開才看得到是誰
+        var pieces = ["部屬會議", dtFmt.string(from: date)]
         if isAdHoc { pieces.append("臨時加開") }
         if meeting.durationMinutes > 0 { pieces.append("\(meeting.durationMinutes) 分鐘") }
         if itemCount > 0 { pieces.append("\(itemCount) 個議程項目") }
