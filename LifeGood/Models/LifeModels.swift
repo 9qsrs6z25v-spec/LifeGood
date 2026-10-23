@@ -4328,11 +4328,14 @@ struct WorkoutHealthLink: Codable, Equatable {
     var climbKnown: Bool?
     /// 跟手錶那一筆合成過：手錶那筆的 Apple 健康編號
     var mergedWatchUUID: String?
+    /// [手錶 v4] LifeGood 手錶記的（成果頁「LifeGood 手錶記的・10/22 06:45 帶進來」；舊 iPad 存檔洗掉也只是少一行字）。
+    /// nil＝不是（iPhone 記的、內建體能訓練、v25.579 以前帶進來的）。來源照樣是 WorkoutSource.watch（不新增值：舊 iPad 解不開）
+    var byLifeGoodWatch: Bool?
 
     init(written: Bool? = nil, writtenAt: Date? = nil, writtenKm: Double? = nil,
          writtenMinutes: Double? = nil, writtenStart: Date? = nil, writtenSport: String? = nil,
          importedAt: Date? = nil, refreshedAt: Date? = nil, climbKnown: Bool? = nil,
-         mergedWatchUUID: String? = nil) {
+         mergedWatchUUID: String? = nil, byLifeGoodWatch: Bool? = nil) {
         self.written = written
         self.writtenAt = writtenAt
         self.writtenKm = writtenKm
@@ -4343,6 +4346,7 @@ struct WorkoutHealthLink: Codable, Equatable {
         self.refreshedAt = refreshedAt
         self.climbKnown = climbKnown
         self.mergedWatchUUID = mergedWatchUUID
+        self.byLifeGoodWatch = byLifeGoodWatch
     }
 
     init(from decoder: Decoder) throws {
@@ -4357,10 +4361,12 @@ struct WorkoutHealthLink: Codable, Equatable {
         refreshedAt = try? c.decodeIfPresent(Date.self, forKey: .refreshedAt)
         climbKnown = try? c.decodeIfPresent(Bool.self, forKey: .climbKnown)
         mergedWatchUUID = try? c.decodeIfPresent(String.self, forKey: .mergedWatchUUID)
+        byLifeGoodWatch = try? c.decodeIfPresent(Bool.self, forKey: .byLifeGoodWatch)
     }
     private enum CodingKeys: String, CodingKey {
         case written, writtenAt, writtenKm, writtenMinutes, writtenStart, writtenSport
         case importedAt, refreshedAt, climbKnown, mergedWatchUUID
+        case byLifeGoodWatch
     }
 
     /// 寫進去的數字全部清掉（〔更新〕刪掉舊的那筆之後、合成時 LifeGood 那筆刪掉之後）；帶進來、合成、爬升的欄位留著

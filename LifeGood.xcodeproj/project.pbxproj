@@ -321,6 +321,17 @@
 		A01B000001001602 /* WatchActionInbox.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001602 /* WatchActionInbox.swift */; };
 		A01B000003000057 /* WatchTripText.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000112 /* WatchTripText.swift */; };
 		A01B000004000057 /* WatchTripText.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000112 /* WatchTripText.swift */; };
+		A01B000001001604 /* WatchRunImport.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001604 /* WatchRunImport.swift */; };
+		A01B000003000058 /* WatchRunText.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000113 /* WatchRunText.swift */; };
+		A01B000004000058 /* WatchRunText.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000113 /* WatchRunText.swift */; };
+		A01B000003000032 /* WorkoutManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000003000032 /* WorkoutManager.swift */; };
+		A01B000003000033 /* RouteRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000003000033 /* RouteRecorder.swift */; };
+		A01B000003000034 /* WatchRunVoice.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000003000034 /* WatchRunVoice.swift */; };
+		A01B000003000035 /* RunStash.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000003000035 /* RunStash.swift */; };
+		A01B000003000036 /* RunHomePage.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000003000036 /* RunHomePage.swift */; };
+		A01B000003000037 /* RunPrepView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000003000037 /* RunPrepView.swift */; };
+		A01B000003000038 /* RunSessionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000003000038 /* RunSessionView.swift */; };
+		A01B000003000039 /* RunSummaryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000003000039 /* RunSummaryView.swift */; };
 		A01B000003000029 /* TripPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000003000029 /* TripPage.swift */; };
 		A01B000003000030 /* TripStopDetail.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000003000030 /* TripStopDetail.swift */; };
 		A01B000003000031 /* TripCheckIns.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000003000031 /* TripCheckIns.swift */; };
@@ -704,6 +715,16 @@
 		A01A000003000029 /* TripPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripPage.swift; sourceTree = "<group>"; };
 		A01A000003000030 /* TripStopDetail.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripStopDetail.swift; sourceTree = "<group>"; };
 		A01A000003000031 /* TripCheckIns.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripCheckIns.swift; sourceTree = "<group>"; };
+		A01A000001001604 /* WatchRunImport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchRunImport.swift; sourceTree = "<group>"; };
+		A01A000002000113 /* WatchRunText.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchRunText.swift; sourceTree = "<group>"; };
+		A01A000003000032 /* WorkoutManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkoutManager.swift; sourceTree = "<group>"; };
+		A01A000003000033 /* RouteRecorder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RouteRecorder.swift; sourceTree = "<group>"; };
+		A01A000003000034 /* WatchRunVoice.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchRunVoice.swift; sourceTree = "<group>"; };
+		A01A000003000035 /* RunStash.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunStash.swift; sourceTree = "<group>"; };
+		A01A000003000036 /* RunHomePage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunHomePage.swift; sourceTree = "<group>"; };
+		A01A000003000037 /* RunPrepView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunPrepView.swift; sourceTree = "<group>"; };
+		A01A000003000038 /* RunSessionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunSessionView.swift; sourceTree = "<group>"; };
+		A01A000003000039 /* RunSummaryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunSummaryView.swift; sourceTree = "<group>"; };
 		A01A000004000007 /* AddWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddWidget.swift; sourceTree = "<group>"; };
 		A01A000004000100 /* LifeGoodWatchWidgets.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = LifeGoodWatchWidgets.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
@@ -791,6 +812,7 @@
 				A01A000002000110 /* WatchPackage.swift */,
 				A01A000002000111 /* WatchText.swift */,
 				A01A000002000112 /* WatchTripText.swift */,
+				A01A000002000113 /* WatchRunText.swift */,
 			);
 			path = Shared;
 			sourceTree = "<group>";
@@ -850,6 +872,7 @@
 				A01A000001001595 /* WatchExtrasWriter.swift */,
 				A01A000001001596 /* WatchBridge.swift */,
 				A01A000001001602 /* WatchActionInbox.swift */,
+				A01A000001001604 /* WatchRunImport.swift */,
 				A01A000001000020 /* LifeModels.swift */,
 				A01A000001000201 /* HealthModels.swift */,
 				A01A000001000204 /* ChildVaccineSchedule.swift */,
@@ -1114,6 +1137,14 @@
 				A01A000003000029 /* TripPage.swift */,
 				A01A000003000030 /* TripStopDetail.swift */,
 				A01A000003000031 /* TripCheckIns.swift */,
+				A01A000003000032 /* WorkoutManager.swift */,
+				A01A000003000033 /* RouteRecorder.swift */,
+				A01A000003000034 /* WatchRunVoice.swift */,
+				A01A000003000035 /* RunStash.swift */,
+				A01A000003000036 /* RunHomePage.swift */,
+				A01A000003000037 /* RunPrepView.swift */,
+				A01A000003000038 /* RunSessionView.swift */,
+				A01A000003000039 /* RunSummaryView.swift */,
 				A01A000003000004 /* Assets.xcassets */,
 				A01A000003000002 /* Info.plist */,
 				A01A000003000003 /* LifeGoodWatch.entitlements */,
@@ -1378,6 +1409,7 @@
 				A01B000001001595 /* WatchExtrasWriter.swift in Sources */,
 				A01B000001001596 /* WatchBridge.swift in Sources */,
 				A01B000001001602 /* WatchActionInbox.swift in Sources */,
+				A01B000001001604 /* WatchRunImport.swift in Sources */,
 				A01B000001001597 /* WatchSettingsSection.swift in Sources */,
 				A01B000002000110 /* WatchPackage.swift in Sources */,
 				A01B000001001582 /* WealthBoard.swift in Sources */,
@@ -1606,6 +1638,15 @@
 				A01B000003000029 /* TripPage.swift in Sources */,
 				A01B000003000030 /* TripStopDetail.swift in Sources */,
 				A01B000003000031 /* TripCheckIns.swift in Sources */,
+				A01B000003000058 /* WatchRunText.swift in Sources */,
+				A01B000003000032 /* WorkoutManager.swift in Sources */,
+				A01B000003000033 /* RouteRecorder.swift in Sources */,
+				A01B000003000034 /* WatchRunVoice.swift in Sources */,
+				A01B000003000035 /* RunStash.swift in Sources */,
+				A01B000003000036 /* RunHomePage.swift in Sources */,
+				A01B000003000037 /* RunPrepView.swift in Sources */,
+				A01B000003000038 /* RunSessionView.swift in Sources */,
+				A01B000003000039 /* RunSummaryView.swift in Sources */,
 				A01B000003000051 /* DayTimelineAttributes.swift in Sources */,
 				A01B000003000052 /* WidgetSnapshot.swift in Sources */,
 				A01B000003000053 /* WidgetLink.swift in Sources */,
@@ -1629,6 +1670,7 @@
 				A01B000004000055 /* WatchPackage.swift in Sources */,
 				A01B000004000056 /* WatchText.swift in Sources */,
 				A01B000004000057 /* WatchTripText.swift in Sources */,
+				A01B000004000058 /* WatchRunText.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -1813,7 +1855,7 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 1332;
+				CURRENT_PROJECT_VERSION = 1333;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
@@ -1834,7 +1876,7 @@
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
-				MARKETING_VERSION = 25.579;
+				MARKETING_VERSION = 25.580;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
@@ -1878,7 +1920,7 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 1332;
+				CURRENT_PROJECT_VERSION = 1333;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
@@ -1893,7 +1935,7 @@
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
-				MARKETING_VERSION = 25.579;
+				MARKETING_VERSION = 25.580;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				SDKROOT = iphoneos;
@@ -1911,6 +1953,9 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = LifeGoodWatch/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "LifeGood";
+				INFOPLIST_KEY_NSHealthShareUsageDescription = "LifeGood 手錶版在你跑步、健走、騎車、登山時讀取心率、距離與大卡，顯示在手錶的跑步畫面上。";
+				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "LifeGood 手錶版把你在手錶上記的運動（時間、距離、路線、暫停與大卡）存進「健康」，讓運動計入體能訓練圓環、在「健身」App 看得到路線，iPhone 上的 LifeGood 健康頁也會帶進來。";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "LifeGood 手錶版在你跑步、健走、騎車、登山時用位置畫出路線、算距離。";
 				INFOPLIST_KEY_WKApplication = YES;
 				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = com.lifegood.app;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -1937,6 +1982,9 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = LifeGoodWatch/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "LifeGood";
+				INFOPLIST_KEY_NSHealthShareUsageDescription = "LifeGood 手錶版在你跑步、健走、騎車、登山時讀取心率、距離與大卡，顯示在手錶的跑步畫面上。";
+				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "LifeGood 手錶版把你在手錶上記的運動（時間、距離、路線、暫停與大卡）存進「健康」，讓運動計入體能訓練圓環、在「健身」App 看得到路線，iPhone 上的 LifeGood 健康頁也會帶進來。";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "LifeGood 手錶版在你跑步、健走、騎車、登山時用位置畫出路線、算距離。";
 				INFOPLIST_KEY_WKApplication = YES;
 				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = com.lifegood.app;
 				LD_RUNPATH_SEARCH_PATHS = (

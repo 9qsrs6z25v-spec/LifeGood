@@ -15,30 +15,47 @@ import SwiftUI
 // [手錶 v6] v25.578（watch/build/v6/brief.md §2）：頁多 ④ 旅行（TripPage）——旅途中排第一（④①②）、出發前 7 天排最後（①②④）、
 //   其他時候沒有（WatchModel.tripKind）；第二層多「這一站」（TripStopDetail）、「天氣資料出處」（TripWeatherSourcePage）。
 //   換時區的那一行由第一頁自己畫（TripPage／TodayPage，WatchTripText.timeZoneHint）。
+// [手錶 v4] v25.580（watch/judge.md §2.0、§2.9～§2.12；watch/build/v4/brief.md §2）：
+//   • 頁多 ③ 跑步（RunHomePage）：② 錢之後、出發前那一頁 ④ 之前；旅途中照樣 ④ 排第一（④①②③）。
+//   • 跑步（WorkoutManager.phase 不是 idle：準備、倒數、跑步中、存檔中、不到 1 分鐘、摘要）整個畫面換成 RunFlowView——
+//     不是彈出頁，跑步中打開 App、手腕放下再抬起來、當機接回都直接回到跑步那一頁（judge §2.0「正在跑步→跑步中」）。
+//     彈出頁、錶面點進來、scenePhase 照舊掛在最外層。
 
 struct RootView: View {
     @ObservedObject private var model = WatchModel.shared
+    /// [v4] 跑步中：整個畫面換成跑步
+    @ObservedObject private var runs = WorkoutManager.shared
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
-        NavigationStack(path: $model.path) {
-            pages
-                .navigationDestination(for: WatchRoute.self) { route in
-                    destination(route)
-                }
-        }
-        .sheet(item: $model.sheet) { sheet in
-            sheetContent(sheet)
-        }
-        .onOpenURL { url in
-            model.open(url)
-        }
-        .onChange(of: scenePhase, initial: true) { _, phase in
-            model.scenePhaseChanged(phase)
+        content
+            .sheet(item: $model.sheet) { sheet in
+                sheetContent(sheet)
+            }
+            .onOpenURL { url in
+                model.open(url)
+            }
+            .onChange(of: scenePhase, initial: true) { _, phase in
+                model.scenePhaseChanged(phase)
+            }
+    }
+
+    /// [v4] 跑步中（WorkoutManager.showsRunFlow）＝跑步那一頁；不然照舊（翻頁＋第二層）
+    @ViewBuilder
+    private var content: some View {
+        if runs.showsRunFlow {
+            RunFlowView()
+        } else {
+            NavigationStack(path: $model.path) {
+                pages
+                    .navigationDestination(for: WatchRoute.self) { route in
+                        destination(route)
+                    }
+            }
         }
     }
 
-    /// 垂直翻頁的那幾頁（v1：① 今天、② 錢；v6：旅途中 ④ 旅行排第一、出發前 7 天排最後）
+    /// 垂直翻頁的那幾頁（v1：① 今天、② 錢；v6：旅途中 ④ 旅行排第一、出發前 7 天排最後；v4：② 之後 ③ 跑步）
     private var pages: some View {
         TabView(selection: $model.selection) {
             if model.tripKind == .during {
@@ -51,6 +68,8 @@ struct RootView: View {
                 MoneyPage()
                     .tag(WatchPage.money)
             }
+            RunHomePage()
+                .tag(WatchPage.run)
             if model.tripKind == .upcoming {
                 TripPage()
                     .tag(WatchPage.trip)
@@ -88,6 +107,26 @@ struct RootView: View {
             SettingsSheet()
         case .record:
             RecordSheet()
+        }
+    }
+}
+
+/// [v4] 跑步那一頁：照 WorkoutManager.phase 換（準備 → 倒數 → 跑步中 → 存檔中／不到 1 分鐘／摘要）
+private struct RunFlowView: View {
+    @ObservedObject private var runs = WorkoutManager.shared
+
+    var body: some View {
+        switch runs.phase {
+        case .idle:
+            Color.black
+        case .preparing:
+            RunPrepView()
+        case .countdown:
+            RunCountdownView()
+        case .running, .paused:
+            RunSessionView()
+        case .ending, .askShort, .summary:
+            RunSummaryView()
         }
     }
 }

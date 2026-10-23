@@ -6,6 +6,7 @@ import WatchKit
 // 只屬於 LifeGoodWatch（手錶小格有自己的一份，不能編這個檔）。色碼數字在 WatchPalette（Shared/WatchText.swift）。
 // 看板頁（① 今天、② 錢）：.containerBackground(WatchStyle.sky, for: .tabView)；
 // 推進去的清單、細節：.containerBackground(Color.black, for: .navigation)。手腕放下全部純黑（View 自己判斷 dimmed）。
+// [手錶 v4] v25.580：跑步的幾個色（開始鈕綠 1F9D57＝iPhone 健康頁那顆、運動色、配速五級深色那組；watch/judge.md §2.9～§2.12）
 
 extension Color {
     /// 0xRRGGBB
@@ -42,6 +43,32 @@ enum WatchStyle {
     static let fixedBar = Color(watchHex: WatchPalette.fixedBar)
     static let variableBar = Color(watchHex: WatchPalette.variableBar)
     static let green = Color(watchHex: WatchPalette.green)
+    /// [v4] ▶ 開始跑步、準備頁大圓鈕（iPhone 健康頁那顆 WorkoutPalette.go）
+    static let go = Color(watchHex: 0x1F9D57)
+    /// [v4] 跑完「✓ 已存好」、達標
+    static let saved = Color(watchHex: 0x5BD99A)
+    /// [v4] 心率 ♥
+    static let heart = Color(watchHex: 0xFF7A8A)
+
+    /// [v4] 運動色（WatchSport.tint：跑 EB6834、走 1BAF7A、騎 2A78D6、登山 EDA100）
+    static func sport(_ s: WatchSport) -> Color {
+        Color(watchHex: s.tint)
+    }
+
+    /// [v4] 路線小圖的配速色（深色那組：很快 9EC5F4、快 3987E5、差不多 6B6A65、慢 C98500、很慢 F5C56B）
+    static func pace(_ level: WatchPaceLevel) -> Color {
+        Color(watchHex: level.darkHex)
+    }
+
+    /// [v4] WatchRunText 的字色
+    static func tone(_ t: WatchRunTone, sport: WatchSport) -> Color {
+        switch t {
+        case .normal: return small
+        case .green: return saved
+        case .amber: return amber
+        case .sport: return Color(watchHex: sport.tint)
+        }
+    }
 
     static func kindColor(_ kind: TimelineStopKind) -> Color {
         Color(watchHex: WatchPalette.kind(kind))

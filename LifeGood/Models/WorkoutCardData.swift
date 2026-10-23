@@ -53,6 +53,11 @@ import CoreLocation
 // 新欄位 milestones：這一趟達成的運動里程碑（WorkoutFacts.milestones(reachedBy:)，連續週數照請假算；自動算、不存）。
 //    成果頁「達成里程碑」卡（WorkoutDetailExtras.swift 的 WorkoutMilestoneCard）用；分享圖、項目卡、清單都不放。
 // 心率不在這裡（WorkoutDetailView 自己 .task 讀、只放記憶體，不進 card：分享圖也用 build）。
+//
+// [手錶 v4] 手錶 LifeGood 自己記的跑步（watch/judge.md §5.7；watch/build/v4/brief.md §3 G1-4）：只改字——
+// ⑧ Apple 健康那一列：WorkoutHealthLink.byLifeGoodWatch 是 true 寫「LifeGood 手錶記的・10/22 06:45 帶進來」，
+//    內建體能訓練照舊「來自 Apple Watch・10/8 匯入」；⑨ 記錄方式「LifeGood（Apple Watch）」。名字、分段、暫停、亮點是帶進來時
+//    HealthSyncCenter 存好的，這裡照舊只讀。
 
 /// 成果頁全部的字與數字。型別都收在裡面（不佔全域名字：v3 四組同時開工）
 struct WorkoutCardData {
@@ -1225,11 +1230,10 @@ extension WorkoutCardData {
         guard hkAvailable else { return nil }
         let src = WorkoutFacts.source(of: s)
         let link = s.health
-        // 手錶記的：「來自 Apple Watch・10/8 匯入」（v25.553 以前帶進來的沒記匯入時間，只寫前半句）
+        // 手錶記的：「來自 Apple Watch・10/8 匯入」（v25.553 以前帶進來的沒記匯入時間，只寫前半句）；
+        // [手錶 v4] LifeGood 手錶記的：「LifeGood 手錶記的・10/22 06:45 帶進來」（watchHealthText）
         if src == .watch {
-            var text = "來自 Apple Watch"
-            if let at = link?.importedAt { text += "・" + WorkoutFormat.monthDay(at) + " 匯入" }
-            return HealthLine(text: text, good: false)
+            return HealthLine(text: watchHealthText(link), good: false)
         }
         if link?.mergedWatchUUID != nil {
             return HealthLine(text: "已跟 Apple Watch 那筆合成", good: true, note: "Apple 健康裡留手錶記的那一筆")
@@ -1257,6 +1261,24 @@ extension WorkoutCardData {
             return HealthLine(text: "沒存成功：Apple 健康沒給寫入權限", good: false, button: .howTo)
         }
         return HealthLine(text: "還沒存進 Apple 健康", good: false, button: .push)
+    }
+
+    /// [手錶 v4] LifeGood 手錶記的那一筆：Apple 健康那一列的開頭、資料「記錄方式」
+    private static let lifeGoodWatchText = "LifeGood 手錶記的"
+    private static let lifeGoodWatchSource = "LifeGood（Apple Watch）"
+
+    /// [手錶 v4] 手錶那一筆的 Apple 健康那一列：LifeGood 手錶記的「LifeGood 手錶記的・10/22 06:45 帶進來」；
+    /// 內建體能訓練（和舊 iPad 洗掉旗子的）照舊「來自 Apple Watch・10/8 匯入」；沒記帶進來的時間只寫前半句
+    private static func watchHealthText(_ link: WorkoutHealthLink?) -> String {
+        let byWatch = link?.byLifeGoodWatch == true
+        guard let imported = link?.importedAt else {
+            return byWatch ? lifeGoodWatchText : "來自 Apple Watch"
+        }
+        let day = WorkoutFormat.monthDay(imported)
+        if byWatch {
+            return lifeGoodWatchText + "・" + day + " " + WorkoutFormat.time(imported) + " 帶進來"
+        }
+        return "來自 Apple Watch・" + day + " 匯入"
     }
 
     /// 「已存進 Apple 健康・06:40」：存進去那天跟這一趟同一天只寫幾點（樣稿②-5），不同天「・10/16 07:12」；
@@ -1299,7 +1321,9 @@ extension WorkoutCardData {
             let legacyNote: String? = s.isLegacyRouteMissing ? "舊版記錄，距離可能多算一點" : nil
             // [v25.554] 跟手錶那筆合成過：「LifeGood（iPhone）＋Apple Watch」
             let merged = s.health?.mergedWatchUUID != nil && src != .watch
-            let value = merged ? src.label + "＋" + WorkoutSource.watch.label : src.label
+            var value = merged ? src.label + "＋" + WorkoutSource.watch.label : src.label
+            // [手錶 v4] LifeGood 手錶記的：「LifeGood（Apple Watch）」（內建體能訓練照舊「Apple Watch」）
+            if src == .watch && s.health?.byLifeGoodWatch == true { value = lifeGoodWatchSource }
             out.append(InfoItem(id: "source", label: "記錄方式", value: value, note: legacyNote))
         }
         if let k = WorkoutFacts.kcal(s, bodyWeightKg: bodyWeightKg) {

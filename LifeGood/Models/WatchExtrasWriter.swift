@@ -29,6 +29,10 @@ import CoreLocation
 //   • 天氣只讀 TripWeatherStore 的快取（手錶不自己抓）；App 在前景、今天明天的站預報還沒抓過或超過一天，
 //     叫一次 TripWeatherStore.preload（已經有新的就不打網路、失敗過的不自動重試、10 分鐘最多一次），抓完重寫 life
 //   • 幣別（tripCurrency）：這趟已經記過的外幣 → 站的電話國碼 → 座標（台韓日三個框）；到 iPhone 設定的匯率找那一筆
+//
+// [手錶 v4] v25.580（watch/judge.md §2.9、§5.7；watch/build/v4/brief.md §2；sim_v4.py 的 run_week）：跑步——
+//   • 快取多 runWeek（這週跑步：WatchRunWeekBuilder.make，跟健康頁看板同一套 WorkoutFacts；seen＝iPhone 處理過的手錶跑步編號）
+//   • write（寫 money／bills）、writeTrip（只寫 life：運動、目標、請假、刪掉一趟都會讓 life 重寫）都順手算（fillRun）
 
 /// watch_extras_v1.json（只在 iPhone；不會送到手錶）
 struct WatchExtrasCache: Codable, Equatable, WidgetSnapshotPayload {
@@ -62,6 +66,11 @@ struct WatchExtrasCache: Codable, Equatable, WidgetSnapshotPayload {
     var tripToday: WatchTripDay? = nil
     /// 旅途中明天的站
     var tripTomorrow: WatchTripDay? = nil
+
+    // MARK: [v4] 跑步（選填；v6 以前寫的舊檔沒有）
+
+    /// 這週跑步（WatchRunWeekBuilder.make）
+    var runWeek: WatchRunWeek? = nil
 }
 
 @MainActor
@@ -106,6 +115,8 @@ enum WatchExtrasWriter {
         cache.includedIds = includedIds(log: log, ledger: Set(all.map(\.id)), now: now)
         // [v6] 旅行
         fillTrip(&cache, expense: expense, life: life, now: now)
+        // [v4] 這週跑步
+        fillRun(&cache, life: life, now: now)
         WidgetSnapshotStore.write(cache)
         preloadWeatherIfNeeded(plans: life.tripPlans, now: now)
     }
@@ -115,9 +126,35 @@ enum WatchExtrasWriter {
     static func writeTrip(expense: ExpenseStore, life: LifeStore, now: Date) {
         guard var cache = WidgetSnapshotStore.read(WatchExtrasCache.self) else { return }
         fillTrip(&cache, expense: expense, life: life, now: now)
+        // [v4] 這週跑步（跑完一趟、改目標、請假、在健康頁刪掉一趟都只寫 life，走這裡）
+        fillRun(&cache, life: life, now: now)
         cache.generatedAt = now
         WidgetSnapshotStore.write(cache)
         preloadWeatherIfNeeded(plans: life.tripPlans, now: now)
+    }
+
+    // MARK: - [v4] 這週跑步
+
+    /// 這週跑步（WatchRunWeekBuilder：主角、公里、次數、目標、連續週數、每天公里、seen）。
+    /// 數字與 seen 都跟上一份一樣就整份沿用（連 generatedAt）：WidgetSnapshotStore.write 只換掉最外層的 generatedAt 比內容，
+    /// 裡面這一個每次都換成 now 的話，快取與手錶包每寫一次快照都算「變了」、每次都送手錶（judge §5.8「內容沒變不送」）。
+    /// write 是新組的快取（runWeek 還是 nil）：拿檔裡上一份比
+    static func fillRun(_ cache: inout WatchExtrasCache, life: LifeStore, now: Date) {
+        let week = WatchRunWeekBuilder.make(sessions: life.workouts,
+                                            prefs: life.workoutPrefs,
+                                            leave: WorkoutFacts.leaveWeeks(life.workoutLeave),
+                                            ignored: life.workoutHealthLedger.ignored ?? [],
+                                            now: now)
+        let previous = cache.runWeek ?? WidgetSnapshotStore.read(WatchExtrasCache.self)?.runWeek
+        cache.runWeek = sameRunWeek(week, previous) ?? week
+    }
+
+    /// 除了 generatedAt 都一樣：回上一份（沿用它的 generatedAt）；不一樣、沒有上一份回 nil
+    static func sameRunWeek(_ week: WatchRunWeek, _ previous: WatchRunWeek?) -> WatchRunWeek? {
+        guard let previous else { return nil }
+        var probe = week
+        probe.generatedAt = previous.generatedAt
+        return probe == previous ? previous : nil
     }
 
     // MARK: - [v2] 規則（sim_v2.py 同名函式）
@@ -352,7 +389,7 @@ extension WatchExtrasWriter {
         let timelineId = "t" + String(planId.uuidString.prefix(8)) + String(Int(slot.arrival.timeIntervalSince1970))
         var out = WatchTripStop(id: s.id, timelineStopId: timelineId, name: s.displayName,
                                 isOvernight: s.isOvernight, arrival: slot.arrival, departure: slot.departure,
-                                dwellMinutes: max(0, s.dwellMinutes),
+                                dwellMinutes: min(max(0, s.dwellMinutes), 100_000),   // [v4] 夾上限：arm64_32 的 Int 是 32 位（v6 裁定 §4-1）
                                 address: s.displayAddress.trimmingCharacters(in: .whitespacesAndNewlines))
         out.latitude = s.latitude
         out.longitude = s.longitude

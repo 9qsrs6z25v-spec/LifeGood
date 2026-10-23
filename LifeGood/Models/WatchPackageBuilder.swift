@@ -31,6 +31,10 @@ import Foundation
 //    • timeZoneId：快取裡 App 寫快照那一刻的時區（不是組包這一刻的：冷啟動時 iPhone 可能已經換了時區、快照還是舊的）
 //    • tripToday／tripTomorrow：快取原樣抄（WatchExtrasWriter 已經只放白名單那幾欄）；iPhone 設定「旅行」關掉時不放，
 //      而且 life.trips 也拿掉（手錶上沒有旅行那一頁、也不寫出發倒數）。「錢」關掉不影響旅行（記外幣跟著「錢」走，在手錶那邊擋）
+//
+// [手錶 v4] v25.580（watch/judge.md §2.9、§5.7；watch/build/v4/brief.md §2；sim_v4.py 的 build_package_v4）：
+//    • runWeek：快取原樣抄（WatchRunWeekBuilder 已經只放數字與 Apple 健康編號）。沒有開關（不是隱私資料：公里、次數、天數，
+//      judge §6.1「跑步距離、時間、次數、連續週數」可以上鎖定畫面）
 
 /// iPhone 設定頁「Apple Watch」段的開關（App Group 的 UserDefaults；WatchSettingsSection 與這裡同一組鍵）
 enum WatchPhoneSettings {
@@ -134,6 +138,8 @@ enum WatchPackageBuilder {
         } else {
             package.life?.trips = nil
         }
+        // [v4] 這週跑步（數字與 Apple 健康編號；③ 跑步、手錶自己記的那幾趟要不要自己加看 seen）
+        package.runWeek = extras?.runWeek
         return package
     }
 

@@ -23,11 +23,16 @@ import WidgetKit
 //   • 第二層多「這一站」（WatchRoute.tripStop）、「天氣資料出處」（WatchRoute.weatherSource）
 //   • 錶面「下一場」點進來的是旅途中的站（lifegood://today?stop=t…）→ ④ 旅行＋那一站；lifegood://life/trip → ④ 旅行
 //   • 打卡（TripCheckIns）跟著畫面走：回前景重讀、補送；收到新包重讀
+// [手錶 v4] v25.580（watch/judge.md §2.0、§2.9；watch/build/v4/brief.md §2）：
+//   • 頁多 ③ 跑步（WatchPage.run，② 錢之後；一直都在）
+//   • 回前景叫 WorkoutManager.appBecameActive（跑完 15 分鐘以上的摘要收起來、沒接回的跑步中存檔變成沒存成的那一趟）
 
-/// 垂直翻頁的頁（v1：① 今天、② 錢；v6：④ 旅行）
+/// 垂直翻頁的頁（v1：① 今天、② 錢；v6：④ 旅行；v4：③ 跑步）
 enum WatchPage: Hashable {
     case today
     case money
+    /// [v4] ③ 跑步（② 錢之後、出發前那一頁 ④ 之前）
+    case run
     /// [v6] ④ 旅行（旅途中排第一、出發前 7 天排最後；WatchModel.tripKind）
     case trip
 }
@@ -161,6 +166,8 @@ final class WatchModel: ObservableObject {
             // [v6] 打卡：重讀、還沒送出去的補送
             TripCheckIns.shared.reload()
             TripCheckIns.shared.sendDue()
+            // [v4] 跑步：跑完 15 分鐘以上的摘要收起來、沒接回的跑步中存檔變成沒存成的那一趟、重讀權限
+            WorkoutManager.shared.appBecameActive(now: Date())
             // 正在要（例：還在等 activate）就不再送一次；手腕放下再抬起來（inactive → active）也不會重複要
             if shouldAsk(now: Date()) && !asking {
                 requestFromPhone()

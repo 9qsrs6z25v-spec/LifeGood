@@ -28,6 +28,10 @@ import Foundation
 //   • WatchTripDay／WatchTripStop／WatchCurrency：只有站名、時間、第幾站、地址、座標、電話、打卡時間、天氣字與出處、
 //     這趟的幣別與匯率、這趟最近記過的金額（只有數字）與常用分類——沒有備註、照片、伴手禮「給誰」、同行者
 //   • 手錶 → iPhone 的 WatchCheckIn（打卡：到了／離開，送「設成」不送「切換」）；WatchRecord 多外幣與記到哪一站（選填）
+// [手錶 v4] v25.580（watch/judge.md §2.9、§5.7、附錄 A；watch/build/v4/brief.md §2）：手錶自己記跑步——
+//   • 包多 runWeek（這週跑步：主角運動、這週公里、次數、目標、連續週數、每天公里、iPhone 處理過的手錶跑步編號 seen；選填）。
+//     只有數字與 Apple 健康編號：沒有地名、路線、心率、名字
+//   • WatchRunMeta：手錶寫進 Apple 健康那一筆的 LifeGood 附註（鍵、寫法）；手錶寫、iPhone 帶進來時讀，兩邊同一組
 
 /// iPhone → 手錶的一整包（watch_v1.json）
 struct WatchPackage: Codable, Equatable, WidgetSnapshotPayload {
@@ -75,6 +79,12 @@ struct WatchPackage: Codable, Equatable, WidgetSnapshotPayload {
     var tripToday: WatchTripDay? = nil
     /// 旅途中明天的站：過了午夜 iPhone 的 LifeGood 還沒打開，手錶照樣有「今天」的站（旅途最後一天是 nil）
     var tripTomorrow: WatchTripDay? = nil
+
+    // MARK: [v4] 跑步（選填；v6 以前的 iPhone 送來的沒有）
+
+    /// 這週跑步（iPhone 健康頁看板同一套數字，WatchExtrasWriter 算好）。手錶自己記、seen 裡沒有的那幾趟，
+    /// 手錶自己加上去（WatchRunText.home）；iPhone 從來沒算過（還沒更新、健康頁沒打開過）是 nil：③ 大字寫「—」
+    var runWeek: WatchRunWeek? = nil
 }
 
 /// 今天、明天的行程。從 WidgetLifeSnapshot 一欄一欄抄：
@@ -288,6 +298,85 @@ extension WatchMoney {
     /// 照抄 WidgetMoneySnapshot.isStale(at:)：超過兩天沒更新寫「上次更新 10/20」
     func isStale(at date: Date) -> Bool {
         date.timeIntervalSince(generatedAt) > WidgetFreshness.moneyStaleAfter
+    }
+}
+
+// MARK: - [v4] 跑步（judge §2.9、§5.7、附錄 A）
+
+/// [v4] 這週跑步（iPhone 的 WatchRunWeekBuilder 用 WorkoutFacts 算好；跟健康頁看板、小工具「這週跑了」同一套）。
+/// 一週從星期一算（WorkoutFacts.weekStart）。只有數字與 Apple 健康編號：沒有地名、路線、心率、名字
+struct WatchRunWeek: Codable, Equatable {
+    /// iPhone 算這一份的時間
+    var generatedAt: Date
+    /// 這週主角運動（WorkoutSport.rawValue：run／walk／bike／hike；WorkoutFacts.heroSport）
+    var sport: String
+    /// 這週週一 00:00。手錶的「這週」跟它不一樣＝iPhone 的數字是上週的（手錶從 0 算起，WatchRunText.home）
+    var weekStart: Date
+    /// 這週主角運動的公里（WorkoutFacts.weekDistanceKm）
+    var doneKm: Double
+    /// 每週目標（WorkoutPrefs.goalKm(for:)）；沒設是 nil
+    var goalKm: Double? = nil
+    /// 這週含主角運動的趟數（WorkoutFacts.weekCount）
+    var runs: Int
+    /// 週一到週日每天的公里（7 個；主角運動）：③ 小風景條插旗
+    var dayKm: [Double]
+    /// 連續幾週有運動（WorkoutFacts.streak）
+    var streakWeeks: Int
+    /// 這週已經算進連續週數（這週有任何一趟算數的運動）。false 時手錶自己跑了一趟（任何運動）＝連續週數 +1
+    var weekCounted: Bool
+    /// iPhone 處理過的手錶跑步 Apple 健康編號：這週帶進來的、合成用掉的、最近「不再帶進來」的（在 iPhone 刪掉的那一趟）。
+    /// 手錶自己記的那一趟編號在這裡＝iPhone 已經算過（或你刪掉了），手錶不再自己加
+    var seen: [String]
+}
+
+/// [v4] 手錶寫進 Apple 健康那一筆的 LifeGood 附註（自訂 metadata；鍵不能用 HK 開頭）。
+/// 手錶（WorkoutManager）寫、iPhone（HealthKitManager.makeImported）讀，兩邊同一組（judge §5.7）
+enum WatchRunMeta {
+    /// 「watch 25.580」：LifeGood 手錶記的（iPhone 認來源的第二道：bundle id 之外再看這個）
+    static let recorderKey = "LifeGood.recorder"
+    /// 「365,735,1105,1485,1851」：每跑滿一公里那一刻的移動秒數（整數秒；暫停不算）
+    static let kmTimesKey = "LifeGood.kmTimes"
+    /// 「1,1」：每一次暫停是不是自動的（1＝自動）；iPhone 照 Apple 健康的暫停事件分，這個留著查問題
+    static let autoPausesKey = "LifeGood.autoPauses"
+    /// recorder 的開頭
+    static let recorderPrefix = "watch"
+    /// kmTimes 最多幾個（超過的不寫：1,000 公里）
+    static let maxTimes = 1_000
+
+    /// 「watch 25.580」；版號空的＝「watch」
+    static func recorder(version: String) -> String {
+        let v = version.trimmingCharacters(in: .whitespacesAndNewlines)
+        return v.isEmpty ? recorderPrefix : recorderPrefix + " " + v
+    }
+
+    /// 秒數取整數（四捨五入）；NaN、負的當 0，超大夾住（Int(Double) 碰到這些會閃退；arm64_32 的 Int 是 32 位）
+    static func whole(_ seconds: Double) -> Int {
+        guard seconds.isFinite, seconds > 0 else { return 0 }
+        return Int(min(seconds, 360_000_000).rounded())
+    }
+
+    /// [365.2, 734.8] →「365,735」（最多 maxTimes 個）
+    static func encodeTimes(_ times: [Double]) -> String {
+        times.prefix(maxTimes).map { String(whole($0)) }.joined(separator: ",")
+    }
+
+    /// 「365,735」→ [365, 735]；空的、看不懂、不是一個比一個大的回 nil（整份不用，iPhone 改用路線推算）
+    static func decodeTimes(_ text: String?) -> [Double]? {
+        guard let text = text?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else { return nil }
+        var out: [Double] = []
+        var prev = 0.0
+        for part in text.split(separator: ",", omittingEmptySubsequences: false) {
+            guard let v = Double(part.trimmingCharacters(in: .whitespaces)), v.isFinite, v > prev else { return nil }
+            out.append(v)
+            prev = v
+            if out.count > maxTimes { return nil }
+        }
+        return out
+    }
+
+    /// [true, false] →「1,0」
+    static func encodeFlags(_ flags: [Bool]) -> String {
+        flags.map { $0 ? "1" : "0" }.joined(separator: ",")
     }
 }
 

@@ -39,6 +39,13 @@ import CoreLocation
 // - 寫的權限拿掉體重（寫體重那一支全 App 沒人叫，刪掉）；讀寫都多「騎車距離」。
 // - 打包出來的 Info.plist 沒有兩句健康說明字（hasUsageDescriptions）就整個不碰 HealthKit：isAvailable 是 false、
 //   不叫 requestAuthorization（少了說明字會閃退）、讀寫都直接回空的。
+//
+// [手錶 v4] 手錶 LifeGood 自己記的跑步帶進來（watch/judge.md §5.7；watch/build/v4/brief.md §3 G1-1）：
+// - ImportedWorkout 多三欄：byLifeGoodWatch（LifeGood 手錶記的：WatchRunImport.isLifeGoodWatch 看來源的 bundle id
+//   「iPhone 的 id＋.watchkitapp」開頭，或附註 LifeGood.recorder 是「watch …」）、pauses（HKWorkout.workoutEvents 的
+//   暫停／繼續、手錶的自動暫停 motionPaused／motionResumed 配對成 WorkoutPause；內建體能訓練也有）、kmTimes（附註
+//   LifeGood.kmTimes 的每公里移動秒數；不是 LifeGood 手錶記的、沒有、讀不懂是 nil）。三欄都只在 makeImported 算。
+// - isOwn 一字不動：只認 iPhone 自己（手錶 App 的 id 不一樣，照樣當成手錶的帶進來；刪除照舊回 .notOurs）。
 
 @MainActor
 final class HealthKitManager: ObservableObject {
@@ -196,6 +203,14 @@ final class HealthKitManager: ObservableObject {
         let climbM: Double?
         /// [v25.554] LifeGood 自己寫進去的（同步不帶進來；刪除、〔更新〕才刪得掉）
         let isOwn: Bool
+        /// [手錶 v4] LifeGood 手錶記的（WatchRunImport.isLifeGoodWatch）：帶進來時補名字、分段、亮點；
+        /// 成果頁「LifeGood 手錶記的・10/22 06:45 帶進來」。iPhone 自己寫的（isOwn）、內建體能訓練是 false
+        let byLifeGoodWatch: Bool
+        /// [手錶 v4] 暫停（Apple 健康的暫停事件配對，WatchRunImport.pauses；手錶的自動暫停 auto＝true）；沒有是空的
+        let pauses: [WorkoutPause]
+        /// [手錶 v4] LifeGood 附註的每公里時間（每跑滿一公里那一刻的移動秒數，WatchRunMeta.decodeTimes）；
+        /// 不是 LifeGood 手錶記的、沒有、讀不懂是 nil
+        let kmTimes: [Double]?
     }
 
     /// 匯入 since 之後的訓練（帶路線）。excluding 傳已經有的 HealthKit UUID，避免重複匯入。
@@ -596,6 +611,14 @@ final class HealthKitManager: ObservableObject {
         // 移動時間：HKWorkout.duration 扣掉手錶的暫停；不合理（0、負的、不是有限數）就用結束減開始
         let duration = w.duration
         let moving = (duration.isFinite && duration > 0) ? duration : span
+        // [手錶 v4] 是不是 LifeGood 手錶記的（來源 bundle id、附註 LifeGood.recorder）、暫停、每公里時間（只有 LifeGood 手錶寫）
+        let recorder = w.metadata?[WatchRunMeta.recorderKey] as? String
+        let byWatch = WatchRunImport.isLifeGoodWatch(bundleId: w.sourceRevision.source.bundleIdentifier,
+                                                     appBundleId: HKSource.default().bundleIdentifier,
+                                                     recorder: recorder)
+        let pauses = WatchRunImport.pauses(Self.importEvents(w), start: w.startDate, end: w.endDate)
+        let kmText = w.metadata?[WatchRunMeta.kmTimesKey] as? String
+        let kmTimes: [Double]? = byWatch ? WatchRunMeta.decodeTimes(kmText) : nil
         return ImportedWorkout(
             uuid: w.uuid.uuidString, start: w.startDate, end: w.endDate,
             activityName: Self.name(for: w.workoutActivityType),
@@ -604,7 +627,32 @@ final class HealthKitManager: ObservableObject {
             sport: Self.sport(for: w.workoutActivityType),
             movingMinutes: moving / 60,
             climbM: Self.climbM(of: w),
-            isOwn: Self.isOwn(w))
+            isOwn: Self.isOwn(w),
+            byLifeGoodWatch: byWatch,
+            pauses: pauses,
+            kmTimes: kmTimes)
+    }
+
+    /// [手錶 v4] 運動的暫停事件 → WatchRunImport.Event：你按的暫停／繼續（pause／resume）、手錶的自動暫停／繼續
+    /// （motionPaused／motionResumed）；分段、圈數、標記這些不要。HKWorkoutEventType 不是 frozen，一定要 default
+    private static func importEvents(_ w: HKWorkout) -> [WatchRunImport.Event] {
+        var out: [WatchRunImport.Event] = []
+        for e in w.workoutEvents ?? [] {
+            let at = e.dateInterval.start
+            switch e.type {
+            case .pause:
+                out.append(WatchRunImport.Event(kind: .pause, at: at))
+            case .resume:
+                out.append(WatchRunImport.Event(kind: .resume, at: at))
+            case .motionPaused:
+                out.append(WatchRunImport.Event(kind: .autoPause, at: at))
+            case .motionResumed:
+                out.append(WatchRunImport.Event(kind: .autoResume, at: at))
+            default:
+                break
+            }
+        }
+        return out
     }
 
     // MARK: - 工具
@@ -620,7 +668,8 @@ final class HealthKitManager: ObservableObject {
         return cal.date(from: cal.dateComponents([.year, .month, .day, .hour, .minute], from: d)) ?? d
     }
 
-    /// [v25.554] 是不是 LifeGood 自己寫進去的（來源是這個 App）
+    /// [v25.554] 是不是 LifeGood 自己寫進去的（來源是這個 App）。
+    /// [手錶 v4] 手錶 App（.watchkitapp）不是 isOwn，照樣帶進來；是不是 LifeGood 手錶記的看 byLifeGoodWatch
     private static func isOwn(_ object: HKObject) -> Bool {
         object.sourceRevision.source.bundleIdentifier == HKSource.default().bundleIdentifier
     }

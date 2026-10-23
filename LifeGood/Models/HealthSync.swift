@@ -15,6 +15,18 @@ import Combine
 //   手錶記的只從 LifeGood 刪、以後不再帶進來（LifeStore.workoutHealthLedger）。
 // • 手錶和 App 同一趟〔合成一筆〕〔兩筆都留〕（WorkoutFacts.duplicates／merged）；舊紀錄〔接回來〕〔先不要〕。
 // 判斷、合成、字都在 WorkoutFacts（純函式，build/v4/sim_v4.py 驗算）；Apple 健康的讀寫在 HealthKitManager。
+//
+// [手錶 v4] 手錶 LifeGood 自己記的跑步帶進來（watch/judge.md §5.7；watch/build/v4/brief.md §3 G1-3）：
+// • 帶進來的每一趟（importedSession）：路線照暫停切段（WatchRunImport.segmented：地圖暫停前後不連線、最快幾公里不算暫停）、
+//   每公里分段（LifeGood 手錶寫的 kmTimes → WatchRunImport.splits；沒有才從路線推算 RouteMath.kmSplits；對不上這一趟的
+//   距離、時間就不存）、暫停（手錶的自動暫停記 auto）、byLifeGoodWatch；LifeGood 手錶記的跑走騎登山名字用 WorkoutFacts.autoTitle
+//   （「河濱晨跑」／「晨跑」，內建的照舊運動名）；有氧有路線就算亮點（WorkoutFacts.highlights「第 12 次・快 42 秒」，
+//   從這版起內建體能訓練帶進來的也算；同一次出門 iPhone 也記的那一筆不當成「上一次」，highlightPool）。
+//   來源照樣 .watch（不新增 WorkoutSource 的值）。
+// • importWorkouts 舊到新一趟一趟組，組好就放進比較的那一堆（同一次帶進來兩趟同一條路，後一趟是第 13 次）。
+// • 路線晚到、這次才補上的（applyWatchRefresh）補同樣幾樣：切段、分段（還沒有才補）、名字（你沒改過才換）、亮點（還沒算過才算）；
+//   路線不是這次補上的一行都不動（以前帶進來的不重算）。
+// • 不重複兩筆：手錶那一筆只由手錶寫進 Apple 健康；帶進來的有 healthKitUUID，push 第一行就擋（規則不動）。
 
 /// [v25.554] 存檔前完整的點（還沒簡化）：只放記憶體一下，寫進 Apple 健康時拿走（judge §6 v4「用簡化前的點」）。
 /// WorkoutFacts.makeSession 放進來（按完成、救回中途存檔都走它），HealthSyncCenter.push 拿走；最多留 4 趟。
@@ -243,9 +255,16 @@ final class HealthSyncCenter: ObservableObject {
     /// HealthKitManager 已經跳過 LifeGood 自己寫的、excluding 裡的；寫之前用最新的 store 再擋一次重複編號，一次 append
     private func importWorkouts(since: Date, now: Date, store: LifeStore) async -> [String] {
         let imported = await hk.fetchWorkouts(since: since, excluding: knownUUIDs(store))
-        let fresh = imported
-            .filter { $0.end.timeIntervalSince($0.start) >= 60 }
-            .map { importedSession(from: $0, now: now) }
+        // [手錶 v4] await 之後的 store 當比較的那一堆（名字、亮點跟比它早的比）；舊到新一趟一趟組、組好就放進去
+        // （同一次帶進來兩趟同一條路，後一趟是第 13 次）
+        let ordered = imported.sorted { $0.start < $1.start }
+        var pool = store.workouts
+        var fresh: [WorkoutSession] = []
+        for i in ordered where i.end.timeIntervalSince(i.start) >= 60 {
+            let s = importedSession(from: i, now: now, sessions: pool)
+            pool.append(s)
+            fresh.append(s)
+        }
         guard !fresh.isEmpty else { return [] }
 
         var known = knownUUIDs(store)
@@ -262,25 +281,98 @@ final class HealthSyncCenter: ObservableObject {
     }
 
     /// Apple 健康的一筆 → LifeGood 的一趟（帶進來的樣子；舊紀錄找回路線的 WorkoutRouteFind.watch 也用這個組）。
-    /// 移動時間用 HKWorkout.duration（扣掉手錶的暫停）、結束是手錶那筆的結束；爬升手錶有量才知道（0＝平路），沒量是不知道
-    private func importedSession(from i: HealthKitManager.ImportedWorkout, now: Date) -> WorkoutSession {
+    /// 移動時間用 HKWorkout.duration（扣掉手錶的暫停）、結束是手錶那筆的結束；爬升手錶有量才知道（0＝平路），沒量是不知道。
+    /// [手錶 v4] sessions：比較的那一堆（store 裡的；名字、亮點只跟比它早的比）。舊紀錄找回路線那一處不傳（只照時段、沒有亮點）。
+    /// 路線照暫停切段、每公里分段（kmTimes 優先）、暫停、byLifeGoodWatch；LifeGood 手錶記的跑走騎登山名字用 autoTitle
+    /// （「河濱晨跑」／「晨跑」；動作名稱照舊運動名「跑步」）；有氧有路線算亮點（內建體能訓練也算）。來源照樣 .watch
+    private func importedSession(from i: HealthKitManager.ImportedWorkout, now: Date,
+                                 sessions: [WorkoutSession] = []) -> WorkoutSession {
+        // 暫停前後不連線（路線的 t 是離開始幾秒、含暫停）；沒暫停原樣
+        let route = WatchRunImport.segmented(i.route, pauses: i.pauses, start: i.start)
+        let sport = Self.routeSport(of: i)
+        let splits = i.isCardio
+            ? Self.importSplits(kmTimes: i.kmTimes, route: route, sport: sport,
+                                distanceKm: i.distanceKm, movingMinutes: i.movingMinutes)
+            : nil
         let ex = WorkoutExercise(
             name: i.activityName,
             kind: i.isCardio ? .cardio : .strength,
             reps: 0, sets: 0, loadType: .none, loadKg: 0,
             distanceKm: i.distanceKm, durationMinutes: i.movingMinutes,
-            route: i.route, elevationGainM: i.climbM ?? 0,
+            route: route, elevationGainM: i.climbM ?? 0,
             note: i.isCardio ? "" : "來自 Apple 健康，組數次數請自行補上",
-            sport: i.sport)
+            sport: i.sport, splits: splits)
         let climbKnown: Bool? = i.isCardio ? (i.climbM != nil) : nil
         // 騎車距離還沒同意時讀到 0 公里的騎車：先不記讀過，按〔去同意〕之後的同步補讀一次（補上公里）
         let waits = needsMoreAccess && i.sport == .bike && i.distanceKm <= 0
-        let link = WorkoutHealthLink(importedAt: now, refreshedAt: waits ? nil : now, climbKnown: climbKnown)
-        return WorkoutSession(
-            date: i.start, title: i.activityName, exercises: [ex],
+        let mark: Bool? = i.byLifeGoodWatch ? true : nil
+        let link = WorkoutHealthLink(importedAt: now, refreshedAt: waits ? nil : now, climbKnown: climbKnown,
+                                     byLifeGoodWatch: mark)
+        let title = Self.importTitle(i, sport: sport, startPoint: route.first, sessions: sessions)
+        var s = WorkoutSession(
+            date: i.start, title: title, exercises: [ex],
             durationMinutes: i.movingMinutes,
             healthKitUUID: i.uuid, activeEnergyKcal: i.energyKcal,
-            endedAt: i.end, source: .watch, health: link)
+            endedAt: i.end, source: .watch,
+            pauses: i.pauses.isEmpty ? nil : i.pauses,
+            health: link)
+        // 亮點：帶進來那一刻跟比它早的比一次存起來（之後打開不重算）；從這版起內建體能訓練帶進來的也算
+        if i.isCardio, s.firstRouteExercise != nil {
+            s.highlights = WorkoutFacts.highlights(for: s, among: Self.highlightPool(for: s, among: sessions))
+        }
+        return s
+    }
+
+    /// [手錶 v4] 算亮點時比較的那一堆：拿掉跟這一趟同一次出門的（同一類運動、時間對得上 WorkoutFacts.sameOuting）——
+    /// 同一趟 iPhone 也按了「開始運動」、還沒〔合成一筆〕的那一筆早幾秒開始，不拿掉的話手錶這一趟會把它當成「上一次」
+    /// （「第 13 次・差不多」、量差一點的假新紀錄）。這一趟自己（同一個 id）highlights 本來就不比
+    private static func highlightPool(for s: WorkoutSession, among sessions: [WorkoutSession]) -> [WorkoutSession] {
+        let end = WorkoutFacts.endDate(s)
+        let sport = s.primarySport
+        return sessions.filter { o in
+            guard o.id != s.id, WorkoutFacts.sportsMatch(o.primarySport, sport) else { return true }
+            return !WorkoutFacts.sameOuting(aStart: s.date, aEnd: end, bStart: o.date, bEnd: WorkoutFacts.endDate(o))
+        }
+    }
+
+    /// [手錶 v4] 帶進來那一趟算哪一種「有路線的運動」（跑、走、騎、登山）；不是有氧、別種運動是 nil
+    private static func routeSport(of i: HealthKitManager.ImportedWorkout) -> WorkoutSport? {
+        guard i.isCardio, let sp = i.sport, routeSports.contains(sp) else { return nil }
+        return sp
+    }
+
+    /// [手錶 v4] 帶進來那一趟的名字：LifeGood 手錶記的跑走騎登山 → WorkoutFacts.autoTitle（起點 150 公尺內有你取過名字的
+    /// 同一種運動就是「河濱晨跑」，不然照時段「晨跑」）；其他（內建體能訓練、重訓、游泳…）照舊運動名（畫面照時段取名）
+    private static func importTitle(_ i: HealthKitManager.ImportedWorkout, sport: WorkoutSport?,
+                                    startPoint: RoutePoint?, sessions: [WorkoutSession]) -> String {
+        guard i.byLifeGoodWatch, let sp = sport else { return i.activityName }
+        return WorkoutFacts.autoTitle(sport: sp, start: i.start, startPoint: startPoint, sessions: sessions)
+    }
+
+    /// [手錶 v4] 帶進來那一趟的每公里分段：LifeGood 手錶寫的 kmTimes（WatchRunImport.splits）優先；沒有、讀不懂、
+    /// 對不上才從路線推算（RouteMath.kmSplits；路線 2 點以上的跑走騎登山）；都沒有 nil。
+    /// 跟這一趟的距離、移動時間對不上的不存（WorkoutFacts.validSplits 同一套門檻）：手錶量的距離跟路線加起來常差幾 %，
+    /// 存了成果頁會說「這一趟的距離或時間改過，每公里分段對不上了」，其實沒改過
+    private static func importSplits(kmTimes: [Double]?, route: [RoutePoint], sport: WorkoutSport?,
+                                     distanceKm: Double, movingMinutes: Double) -> [WorkoutSplit]? {
+        if let times = kmTimes, !times.isEmpty {
+            let fromWatch = WatchRunImport.splits(kmTimes: times, distanceKm: distanceKm,
+                                                  movingSeconds: movingMinutes * 60)
+            if let ok = checkedSplits(fromWatch, distanceKm: distanceKm, movingMinutes: movingMinutes) {
+                return ok
+            }
+        }
+        guard route.count >= 2, let sp = sport, routeSports.contains(sp) else { return nil }
+        return checkedSplits(RouteMath.kmSplits(route), distanceKm: distanceKm, movingMinutes: movingMinutes)
+    }
+
+    /// [手錶 v4] 分段對得上這一趟的距離、移動時間才回（同成果頁的 WorkoutFacts.validSplits）；空的、對不上 nil
+    private static func checkedSplits(_ splits: [WorkoutSplit], distanceKm: Double,
+                                      movingMinutes: Double) -> [WorkoutSplit]? {
+        guard !splits.isEmpty else { return nil }
+        let probe = WorkoutExercise(kind: .cardio, distanceKm: distanceKm, durationMinutes: movingMinutes,
+                                    splits: splits)
+        return WorkoutFacts.validSplits(probe)
     }
 
     // MARK: 補讀（v4 以前的紀錄、路線晚到）
@@ -332,7 +424,8 @@ final class HealthSyncCenter: ObservableObject {
                     // 讀過的手錶紀錄這次只為了晚到的路線（跑步機那種永遠沒有）：沒找到就不動，
                     // 不為了改 refreshedAt 每 15 分鐘整包存檔、推 iCloud、健康頁重算一次
                     if s.health?.refreshedAt != nil && lateRoute == nil { continue }
-                    if applyWatchRefresh(&s, info: info, route: lateRoute, now: now) { routesAdded += 1 }
+                    // [手錶 v4] 路線晚到補名字、亮點時跟這時候的整堆比（all：前面幾趟這一輪改過的也算）
+                    if applyWatchRefresh(&s, info: info, route: lateRoute, now: now, sessions: all) { routesAdded += 1 }
                 } else {
                     applyOwnRefresh(&s, info: info, now: now)
                 }
@@ -369,13 +462,16 @@ final class HealthSyncCenter: ObservableObject {
     }
 
     /// 手錶那一趟補讀。爬升、距離、移動時間只在第一次補讀時改（之後的再讀只為了晚到的路線，不蓋掉使用者自己改過的數字）；
-    /// 回傳有沒有補上路線
+    /// 回傳有沒有補上路線。
+    /// [手錶 v4] sessions：路線這次才補上時，名字、亮點跟這一堆裡比它早的比（fillLateRoute）
     private func applyWatchRefresh(_ s: inout WorkoutSession, info: HealthKitManager.ImportedWorkout,
-                                   route: [RoutePoint]?, now: Date) -> Bool {
+                                   route: [RoutePoint]?, now: Date, sessions: [WorkoutSession]) -> Bool {
         var h = s.health ?? WorkoutHealthLink()
         let firstTime = h.refreshedAt == nil
         // 先記來源：下面補 endedAt 之後，沒記來源的會被 source(of:) 當成 App 記的
         if s.source == nil { s.source = .watch }
+        // [手錶 v4] LifeGood 手錶記的：第一次補讀、路線晚到時順便補上（舊 iPad 存檔洗掉的旗子；refreshOld 只在這兩種時候叫這裡）
+        if info.byLifeGoodWatch && h.byLifeGoodWatch != true { h.byLifeGoodWatch = true }
         var gotRoute = false
         if let i = WorkoutFacts.mainCardioIndex(s), s.exercises[i].kind == .cardio {
             if firstTime {
@@ -386,7 +482,9 @@ final class HealthSyncCenter: ObservableObject {
                 }
             }
             if let r = route, r.count >= 2, s.firstRouteExercise == nil {
-                s.exercises[i].route = r
+                // [手錶 v4] 照暫停切段（同 importedSession）；舊版帶進來、還沒記暫停的用 Apple 健康這次讀到的
+                if s.pauses == nil && !info.pauses.isEmpty { s.pauses = info.pauses }
+                s.exercises[i].route = WatchRunImport.segmented(r, pauses: s.pauses ?? [], start: s.date)
                 gotRoute = true
             }
         }
@@ -403,7 +501,32 @@ final class HealthSyncCenter: ObservableObject {
         }
         h.refreshedAt = now
         s.health = h
+        // [手錶 v4] 路線這次才補上：分段、名字、亮點（移動時間、距離上面改完才算，分段才對得上）
+        if gotRoute { fillLateRoute(&s, info: info, sessions: sessions) }
         return gotRoute
+    }
+
+    /// [手錶 v4] 路線晚到、這次才補上的那一趟補跟 importedSession 一樣的幾樣（路線已經照暫停切好段）：
+    /// • 那個動作的每公里分段還沒有 → kmTimes（WatchRunImport.splits）優先、不然從路線推算（RouteMath.kmSplits）；對不上不存；
+    /// • LifeGood 手錶記的、名字不是你取的 → WorkoutFacts.autoTitle（「河濱晨跑」／「晨跑」）；
+    /// • 有氧有路線、亮點還沒算過 → WorkoutFacts.highlights（跟 sessions 裡比它早的比；內建體能訓練也算）
+    private func fillLateRoute(_ s: inout WorkoutSession, info: HealthKitManager.ImportedWorkout,
+                               sessions: [WorkoutSession]) {
+        guard let i = s.exercises.firstIndex(where: { $0.hasRoute }), s.exercises[i].kind == .cardio else { return }
+        let e = s.exercises[i]
+        let sport = e.resolvedSport
+        if e.splits == nil {
+            s.exercises[i].splits = Self.importSplits(kmTimes: info.kmTimes, route: e.route, sport: sport,
+                                                      distanceKm: e.distanceKm, movingMinutes: e.durationMinutes)
+        }
+        if s.health?.byLifeGoodWatch == true, Self.routeSports.contains(sport),
+           !WorkoutFacts.isCustomTitle(s.title) {
+            s.title = WorkoutFacts.autoTitle(sport: sport, start: s.date, startPoint: e.route.first,
+                                             sessions: sessions)
+        }
+        if s.highlights == nil {
+            s.highlights = WorkoutFacts.highlights(for: s, among: Self.highlightPool(for: s, among: sessions))
+        }
     }
 
     /// LifeGood 寫的（或舊資料看不出來、Apple 健康說是 LifeGood 寫的）那一趟補讀：
