@@ -83,6 +83,24 @@ import CryptoKit
 // • 股票的交割記在哪個帳戶（WealthStockSettle）：帳本 linkFrom[股票]（證券戶改交割銀行選「這幾檔也一起改」時記的，從哪天起）
 //   照交割那天找；沒有歷史＝股票現在的交割銀行，再沒有＝證券戶。股票卡、股票表單、記帳改舊股票都經 LifeStore.rewriteStockSettlements 寫。
 //
+// [v25.575] 定期轉帳 v1a 數字對（transfer/judge.md §3；transfer/build/v1a/brief.md §2；sim_v1a.py 照這裡寫過、跑過）：
+// • 規則在新的一包（WealthTransferBook，同步鍵 life_wealth_transfers_v1；WealthTransfers.swift），build 多一個參數 transfers。
+//   每一期像固定支出一樣算出來（WealthTransferSchedule.refs）：轉出帳戶一列 .transferOut「轉給 存錢」、轉入帳戶一列 .transferIn
+//  「來自 薪轉」，id「tr-<規則>-<key>-o／-i」，WealthLedgerRow.transferRuleId／periodKey 指著那一期；note＝「每週五」「每月 6 日」
+//  （自己轉的「自己轉」）。這期不轉、沒轉成、暫停的不算；今天那一期算進存摺上（銀行多半一早就轉）。
+// • 同一天的先後：真的紀錄 → ② 固定支出 → ③ 月薪 → ④ 卡費 → ⑤ 定存 → ⑥ 定期轉帳（照規則建立的先後）→ 對存摺 →
+//   記了 lateOut／lateIn 的那一邊（對存摺的時候這筆還沒進來／還沒扣：排在對存摺後面，不會被它吃掉）。
+// • 修 D1：以後日期的轉帳（單次、換匯）不算進「已經排定的提款」（scheduledOut）：以前只扣轉出那邊，扣完能用、淨資產先少一截。
+//   以後日期的轉帳跟定期轉帳、固定支出一樣，只在接下來、30 天內最低、不夠扣出現。
+// • Account.shortages：30 天內**每一筆**扣完會是負的出去（第一次之後又扣的也算）；shortage 照舊＝第一次從 ≥0 掉到 <0。
+//   每一筆帶 rowId（「bill-<卡>-<2026-10>」）、定期轉帳那一期、cover（補到 30 天內都夠＝那個幣別 30 天內最低的負數）。
+//   卡片頁「這期扣款帳戶可能不夠」、卡費自動扣提醒、交割提醒改找自己那一筆（不再只看第一筆）。
+// • recentCount（銀行排序用）不數定期轉帳那幾列（零用錢每週多一筆，不會慢慢爬到最上面）。
+// • 要確認 #1：第一筆不夠的是定期轉帳的轉出 → 換一句話（自動轉「…銀行可能轉不過去」、自己轉「要自己從…轉…差…」），後面還有卡費、
+//   交割、固定支出也會不夠時多半句；按鈕〔轉帳過去〕（帶「補到 30 天內都夠」）〔看這一期〕。每月的固定支出那句照舊（〔轉帳過去〕也帶補到都夠）。
+//   #10 帳戶是負的：7 天內有一期自動轉出、轉之前就不夠（那一列餘額 < 0）→ 換成「11/13 那筆自動轉帳可能沒轉成…」〔沒轉成〕〔轉成了〕
+//  （〔轉成了〕＝知道了，之後還是負的就回到 #10 原本那句）。還在跑的規則碰到收起來或找不到的帳戶（舊版收的、刪的）〔結束這條〕〔看這條〕。
+//
 // （工程）build 很重（展開每一期），全 App 只透過 LifeStore.wealthFacts(expense:finance:) 拿快取的那一份
 // （key＝里程碑／財富帳本的 revision＋記帳、理財的 modifyID＋匯率＋日期），打字時不重算（U1 P1、P5）。
 // 不標 @MainActor（AI 記帳、LifeStore 都會叫）；但字串用到 ntdWanString（NumberFormatter），請在主執行緒叫。
@@ -614,12 +632,18 @@ struct WealthLedgerRow: Identifiable {
     let isEstimate: Bool
     /// [v25.566] 定存那幾列（轉定存、定存到期、定存利息、解約）：那一期定存的 id（點了開定存表單）
     let timeDepositId: UUID?
+    /// [v25.575] 定期轉帳那一期（WealthFacts 算的，不是 BankDeposit）：哪一條規則、那一期原本的日子「2026-11-06」（點了開那一期）
+    let transferRuleId: UUID?
+    let periodKey: String?
+    /// [v25.575] 那一條是「我自己轉」（銀行頁膠囊算它；銀行自動轉的不搶膠囊）
+    let transferManual: Bool
 
     init(id: String, date: Date, code: String, amount: Double, isOutflow: Bool, kind: Kind,
          title: String, note: String? = nil, balanceAfter: Double = 0, anchorDiff: Double? = nil,
          depositId: UUID? = nil, expenseId: UUID? = nil, incomeId: UUID? = nil, stockId: UUID? = nil,
          cardId: UUID? = nil, statementKey: String? = nil, transferPairId: UUID? = nil,
-         isEstimate: Bool = false, timeDepositId: UUID? = nil) {
+         isEstimate: Bool = false, timeDepositId: UUID? = nil, transferRuleId: UUID? = nil,
+         periodKey: String? = nil, transferManual: Bool = false) {
         self.id = id
         self.date = date
         self.code = code
@@ -639,6 +663,9 @@ struct WealthLedgerRow: Identifiable {
         self.transferPairId = transferPairId
         self.isEstimate = isEstimate
         self.timeDepositId = timeDepositId
+        self.transferRuleId = transferRuleId
+        self.periodKey = periodKey
+        self.transferManual = transferManual
     }
 
     /// 「+NT$80,000」「-美金 10.00」；對存摺「NT$74,199」
@@ -658,8 +685,12 @@ struct WealthCheck: Identifiable {
     enum Kind: String, CaseIterable {
         // bad：不夠扣、過期、負的
         case shortage, cardOverdue, askPaid, negative
+        // [v25.575] bad：過了日子、自動轉、轉之前就不夠（取代那個帳戶的 #10）
+        case transferFailed
         // warn
         case assumedPaid, cardFeeExpense, disabledRecurring, noPayer, legacyFX, unknownRate
+        // [v25.575] warn：還在跑的定期轉帳，從／到的帳戶收起來了或找不到了
+        case transferAccount
         // [v25.565] warn：卡片效期前 30 天（#12）
         case cardExpiring
         // [v25.567] warn：證券戶身上有舊交割紀錄（#16）、一年一約保單 60 天內到期
@@ -719,6 +750,15 @@ struct WealthCheck: Identifiable {
         case setPolicyCycle(policyId: UUID, cycle: String)
         /// [v25.567] #16〔搬到薪轉〕：先開「會動到哪些」（WealthSettlementMoveSheet），你按確定才搬（不擋訂閱：修資料，同〔改過來〕）
         case moveSettlements(brokerId: UUID)
+        /// [v25.575] 〔看這一期〕：開那一期的小表單（WealthTransferPeriodSheet；不擋訂閱：看的）
+        case openTransferPeriod(ruleId: UUID, key: String)
+        /// [v25.575] 〔沒轉成〕：那一期記成這個狀態（WealthTransferStatus.rawValue，"failed"；LifeStore.setTransferStatus；
+        /// 不擋訂閱：記下銀行真的發生了什麼）
+        case setTransferStatus(ruleId: UUID, key: String, status: String?)
+        /// [v25.575] 〔結束這條〕：最後一期 lastKey（nil＝一期都不算；LifeStore.endTransferRule；不擋訂閱：銀行那邊停了，App 也要停得了）
+        case endTransferRule(ruleId: UUID, lastKey: String?)
+        /// [v25.575] 〔看這條〕：開規則頁（WealthTransferRulePage；不擋訂閱）
+        case openTransferRule(UUID)
     }
     struct Action: Identifiable, Equatable {
         let title: String
@@ -759,7 +799,15 @@ struct WealthCheck: Identifiable {
         case .policyCycle: return "questionmark.circle.fill"
         case .cardDaysMissing: return "calendar"
         case .staleAnchor: return "checkmark.seal.fill"
+        // [v25.575] 定期轉帳
+        case .transferFailed: return "arrow.left.arrow.right"
+        case .transferAccount: return "archivebox.fill"
         }
+    }
+
+    /// [v25.575] #1 不夠扣那一條的 id（一期小表單〔知道了〕記進帳本 dismissed 用同一個字）
+    static func shortageId(accountId: UUID, day: Date) -> String {
+        "short-\(accountId.uuidString)-\(WealthCal.dayKey(day))"
     }
 
     /// VoiceOver：「轉帳過去：10/21 薪轉要扣…」
@@ -779,6 +827,17 @@ struct WealthShortage: Equatable {
     let amount: Double
     let before: Double
     let short: Double
+    // [v25.575] 定期轉帳 v1a（Account.shortages 每一筆都帶；build 填，memberwise init 不用傳）
+    /// 那一列的 id（「bill-<卡>-<2026-10>」「tr-<規則>-<key>-o」「fx-<支出>-<k>」）：卡片頁、卡費提醒找自己那一筆
+    var rowId: String = ""
+    /// 定期轉帳那一期（只在記憶體）
+    var transferRuleId: UUID? = nil
+    var periodKey: String? = nil
+    /// 那一條是「我自己轉」（#1 的字「要自己從…轉」）
+    var transferManual: Bool = false
+    /// 補到 30 天內都夠（那個幣別 30 天內最低的負數，正的；〔轉帳過去〕帶這個）、最低那天
+    var cover: Double = 0
+    var lowDate: Date? = nil
 }
 
 // MARK: - [v25.565] v4：接下來要繳的卡費、交割、理財每月回推（judge §6.4–6.6；sim_v4.py）
@@ -1045,7 +1104,9 @@ struct WealthHistory {
                 let startValue: Double = days.firstIndex(of: start).map { values[$0] } ?? 0
                 // [v25.566 驗證修正] startDay 以前（含）App 算的定存那幾列：平推時 d 之後的退回去（見 Line.depositSteps）
                 var steps: [DepositStep] = []
-                for row in rows where row.code == code && row.timeDepositId != nil && row.kind != .anchor {
+                // [v25.575] 定期轉帳那幾列也是 App 算的（同一招）
+                for row in rows where row.code == code && (row.timeDepositId != nil || row.transferRuleId != nil)
+                    && row.kind != .anchor {
                     let d = WealthCal.day(row.date)
                     guard d <= start else { continue }
                     steps.append(DepositStep(day: d, delta: row.isOutflow ? -row.amount : row.amount))
@@ -1200,6 +1261,10 @@ struct WealthFacts {
     let depositInsurance: [InsuranceGroup]
     /// [v25.567] 保單總表（財富頁的保障型保單、儲蓄險、車險、房屋險合成一張；一筆記帳保費只算一次）
     let policies: WealthPolicyFacts
+    /// [v25.575] 定期轉帳：每一條沒刪掉的規則（已結束的也在，isEnded；照建立的先後）：財富頁定期轉帳卡、規則頁、要確認
+    let transferRules: [TransferRule]
+    /// [v25.575] 定期轉帳那一包（規則頁、一期小表單照它展開：transferPeriods／transferPeriod）
+    let transferBook: WealthTransferBook
 
     /// [v25.566] 存款保險：同一家銀行（每一存款人）本金＋利息最多保 300 萬（中央存款保險；境內外幣也保，人民幣不保）
     static let insuranceLimit: Double = 3_000_000
@@ -1399,6 +1464,16 @@ struct WealthFacts {
         var depositNTD: Double = 0
         /// 定存查不到匯率的幣別（存款合計前面加「約」）
         var depositUnknownCodes: [String] = []
+        /// [v25.575] 接下來 30 天每一筆「扣完會是負的」出去（第一次之後又扣的也算；照日期）。shortage 是其中第一次從 ≥0 掉到 <0 的那一筆
+        var shortages: [WealthShortage] = []
+
+        /// [v25.575] 〔轉帳過去〕小表單第一行：「補到 30 天內都夠：4,600（11/13 起會不夠，最低 11/20 −4,600）」；沒有不夠扣＝nil
+        var coverLine: String? {
+            guard let s = shortage, s.cover > 0.004 else { return nil }
+            let amount = WealthFormat.plain(s.cover.rounded(.up), code: s.code)
+            let low = s.lowDate ?? s.date
+            return "補到 30 天內都夠：\(amount)（\(WealthFormat.monthDay(s.date)) 起會不夠，最低 \(WealthFormat.monthDay(low)) −\(amount)）"
+        }
 
         /// [v25.566] 存摺上＋定存（台幣；水塔、帳戶頁看板用）
         var totalNTD: Double { ntdTotal + depositNTD }
@@ -2083,7 +2158,9 @@ struct WealthFacts {
     /// [v25.566] deposits：財富帳本的定存那一包（LifeStore.wealthDeposits）
     /// [v25.568] expiryMonths：每張卡有效期限那個月 1 號（LifeStore.cardExpiryMonths：v7 起有效期限是密文，那邊解好給）；
     /// 沒給（nil）或沒有那張卡＝照里程碑的 expiryDate（還沒搬的明碼；搬完是 nil＝沒有效期限）
+    /// [v25.575] transfers：定期轉帳那一包（LifeStore.wealthTransfers）；三個呼叫點（wealthFacts、passbookBalance、settlementMovePlan）都要帶
     static func build(milestones: [LifeMilestone], book: WealthBook, deposits: WealthDepositBook = WealthDepositBook(),
+                      transfers: WealthTransferBook = WealthTransferBook(),
                       expenses: [Expense], incomes: [Income],
                       stocks: [Stock], rates: FinanceRates, now: Date,
                       insurances: [SavingsInsurance] = [], vehicles: [Vehicle] = [],
@@ -2181,12 +2258,17 @@ struct WealthFacts {
             for r in made.refs { depositRefs[r.accountId, default: []].append(r) }
         }
 
+        // [v25.575] 定期轉帳：每一期兩個帳戶各一列（一次掃、照帳戶分好；收起來的帳戶照算，找不到的那一邊不記）
+        let transferRefs = WealthTransferSchedule.refs(transfers, bankIds: bankIds, names: nameById, today: today,
+                                                       horizon: horizon)
+
         var accounts: [Account] = []
         for m in bankMs {
             accounts.append(makeAccount(m, isSecurities: false, ctx: ctx,
                                         fixed: fixedByBank[m.id] ?? [], incomes: incomesByBank[m.id] ?? [],
                                         bills: billsByAccount[m.id] ?? [], cardOwed: owedByAccount[m.id] ?? 0,
-                                        depositRows: depositRefs[m.id] ?? []))
+                                        depositRows: depositRefs[m.id] ?? [],
+                                        transferRows: transferRefs[m.id] ?? []))
         }
         for m in securityMs {
             accounts.append(makeAccount(m, isSecurities: true, ctx: ctx, fixed: [], incomes: [], bills: [], cardOwed: 0,
@@ -2244,9 +2326,12 @@ struct WealthFacts {
                                                   insurances: insurances, vehicles: vehicles,
                                                   realEstates: realEstates, names: nameById,
                                                   cardIds: Set(cardMs.map(\.id)), rates: rates, today: today)
+        // [v25.575] 每一條定期轉帳（帳戶建好之後：收起來、找不到要看帳戶）
+        let transferFacts = makeTransferRules(transfers, accounts: accounts, names: nameById, today: today)
         let checks = makeChecks(cards: cards, accounts: accounts, bankMs: bankMs, unknown: unknown,
                                 ctx: ctx, bankIds: bankIds, terms: currentTerms, insurance: insurance,
-                                deposits: deposits, brokers: brokers, policies: policyFacts)
+                                deposits: deposits, brokers: brokers, policies: policyFacts,
+                                transfers: transferFacts)
         let settlements = makeSettlements(accounts: accounts, ctx: ctx)
         let history = WealthHistory.make(accounts: accounts, cards: cards, deposits: allTerms, rates: rates)
 
@@ -2255,7 +2340,8 @@ struct WealthFacts {
                            foreign: foreign, owedCards: owed, pendingSettlement: pending,
                            unknownCodes: unknown, scheduledOut: scheduled, brokers: brokers, checks: checks,
                            settlements: settlements, history: history, timeDeposits: currentTerms,
-                           depositInsurance: insurance, policies: policyFacts)
+                           depositInsurance: insurance, policies: policyFacts,
+                           transferRules: transferFacts, transferBook: transfers)
     }
 
     // MARK: - [v25.566] 定存的零件
@@ -2645,6 +2731,8 @@ struct WealthFacts {
         /// 同一天的先後（真的紀錄照存的順序在前，展開的在後；對存摺一律最後）
         let seq: Int
         let row: WealthLedgerRow
+        /// [v25.575] 定期轉帳記了「對存摺之後才扣／才進」的那一邊：同一天排在對存摺後面
+        var late: Bool = false
     }
 
     /// [v25.564] 一期帳單對銀行的影響（沒有就 nil）
@@ -2768,7 +2856,8 @@ struct WealthFacts {
 
     private static func makeAccount(_ m: LifeMilestone, isSecurities: Bool, ctx: BuildContext,
                                     fixed: [FixedRef], incomes: [IncomeRef], bills: [BillRef],
-                                    cardOwed: Double, depositRows: [DepositRef]) -> Account {
+                                    cardOwed: Double, depositRows: [DepositRef],
+                                    transferRows: [WealthTransferRef] = []) -> Account {
         let rates = ctx.rates
         let prefs = ctx.book.account(m.id)
         var events: [Event] = []
@@ -2790,7 +2879,9 @@ struct WealthFacts {
                 pendingByDay[day, default: [:]][code, default: 0] += dep.isWithdrawal ? dep.amount : -dep.amount
             }
             // [v25.564] 已經排定、還沒到的提款（刪卡寫回的那幾期、你記的未來日期提款）：算進還沒扣
-            if !isSecurities, day > ctx.today, dep.isWithdrawal, dep.linkedStockId == nil, !dep.isAnchor {
+            // [v25.575] 修 D1：以後日期的轉帳（單次、換匯）不算（以前只扣轉出那邊：扣完能用、淨資產先少一截，到那天才回來）。
+            // 它跟定期轉帳、固定支出一樣只在接下來、30 天內最低、不夠扣出現，兩邊都看得到
+            if !isSecurities, day > ctx.today, dep.isWithdrawal, dep.linkedStockId == nil, !dep.isAnchor, !dep.isTransfer {
                 scheduledByCode[code, default: 0] += dep.amount
             }
             guard day <= ctx.horizon else { continue }
@@ -2869,11 +2960,26 @@ struct WealthFacts {
             seq += 1
         }
 
-        // 照日期累加：同一天先算每一筆，對存摺最後（記的是那天結束時）
+        // ⑥ [v25.575] 定期轉帳：每一期一列（WealthTransferSchedule.refs 算的，不是 BankDeposit；照規則建立的先後）
+        var transferCodes: [String] = []
+        for r in transferRows {
+            let code = norm(r.code)
+            if !transferCodes.contains(code) { transferCodes.append(code) }
+            guard r.day <= ctx.horizon else { continue }
+            let row = WealthLedgerRow(
+                id: r.id, date: r.day, code: code, amount: Swift.abs(r.delta), isOutflow: r.delta < 0,
+                kind: r.delta < 0 ? .transferOut : .transferIn, title: r.title, note: r.note,
+                transferRuleId: r.ruleId, periodKey: r.key, transferManual: r.manual)
+            events.append(Event(day: r.day, code: code, delta: r.delta, anchor: nil, seq: seq, row: row, late: r.late))
+            seq += 1
+        }
+
+        // 照日期累加：同一天先算每一筆，對存摺最後（記的是那天結束時）；[v25.575] 記了 late 的定期轉帳排在對存摺後面
         events.sort { a, b in
             if a.day != b.day { return a.day < b.day }
-            let aa = a.anchor != nil, bb = b.anchor != nil
-            if aa != bb { return !aa }
+            let ta: Int = a.late ? 2 : (a.anchor != nil ? 1 : 0)
+            let tb: Int = b.late ? 2 : (b.anchor != nil ? 1 : 0)
+            if ta != tb { return ta < tb }
             return a.seq < b.seq
         }
         var running: [String: Double] = [:]
@@ -2915,6 +3021,10 @@ struct WealthFacts {
         var lowest: Double? = nil
         var lowestDate: Date? = nil
         var shortage: WealthShortage? = nil
+        // [v25.575] 30 天內每一筆扣完會是負的（shortages）、每個幣別 30 天內最低（補到都夠）
+        var shortages: [WealthShortage] = []
+        var lowByCode: [String: Double] = [:]
+        var lowDayByCode: [String: Date] = [:]
         if events.contains(where: { $0.day > ctx.today && $0.day <= windowEnd }) {
             var run = todayBalances
             func ntdOf(_ b: [String: Double]) -> Double {
@@ -2928,15 +3038,36 @@ struct WealthFacts {
                 let before = run[e.code] ?? 0
                 if let a = e.anchor { run[e.code] = a } else { run[e.code] = before + e.delta }
                 let after = run[e.code] ?? 0
-                if shortage == nil, e.anchor == nil, e.delta < 0, before >= -0.5, after < -0.5 {
-                    shortage = WealthShortage(date: e.day, code: e.code, title: e.row.title, kind: e.row.kind,
-                                              amount: -e.delta, before: before, short: -after)
+                if after < (lowByCode[e.code] ?? 0) {
+                    lowByCode[e.code] = after
+                    lowDayByCode[e.code] = e.day
+                }
+                if e.anchor == nil, e.delta < 0, after < -0.5 {
+                    var s = WealthShortage(date: e.day, code: e.code, title: e.row.title, kind: e.row.kind,
+                                           amount: -e.delta, before: before, short: -after)
+                    s.rowId = e.row.id
+                    s.transferRuleId = e.row.transferRuleId
+                    s.periodKey = e.row.periodKey
+                    s.transferManual = e.row.transferManual
+                    shortages.append(s)
+                    if shortage == nil, before >= -0.5 { shortage = s }
                 }
                 let v = ntdOf(run)
                 if v < low { low = v; lowDay = e.day }
             }
             lowest = low
             lowestDate = lowDay
+            // 補到 30 天內都夠＝那個幣別 30 天內最低的負數（同一個幣別每一筆都一樣）
+            for i in shortages.indices {
+                let c = shortages[i].code
+                shortages[i].cover = -(lowByCode[c] ?? 0)
+                shortages[i].lowDate = lowDayByCode[c]
+            }
+            if var s = shortage {
+                s.cover = -(lowByCode[s.code] ?? 0)
+                s.lowDate = lowDayByCode[s.code]
+                shortage = s
+            }
         }
 
         // 待交割、已經排定的提款（台幣）
@@ -2953,12 +3084,16 @@ struct WealthFacts {
 
         // 最近 90 天的進出筆數（對存摺不算）
         let recentFrom = WealthCal.addDays(-90, to: ctx.today)
-        let recentCount = past.filter { $0.kind != .anchor && WealthCal.day($0.date) >= recentFrom }.count
+        // [v25.575] 定期轉帳那幾列不數（零用錢每週多一筆，不會慢慢爬到最上面）
+        let recentCount = past.filter {
+            $0.kind != .anchor && $0.transferRuleId == nil && WealthCal.day($0.date) >= recentFrom
+        }.count
         let next30 = future.filter { WealthCal.day($0.date) <= windowEnd }
 
         // [v25.566] 定存動到這個帳戶的幣別也列進來（美金定存到期轉進台幣帳戶：那個帳戶就有美金那一格）
         let codes = WealthFacts.currencies(forAccount: m, expenses: ctx.expenses, incomes: ctx.incomes,
-                                           stocks: ctx.stocks, extra: (prefs.currencies ?? []) + depositCodes)
+                                           stocks: ctx.stocks,
+                                           extra: (prefs.currencies ?? []) + depositCodes + transferCodes)
         var balances = todayBalances
         for c in codes where balances[c] == nil { balances[c] = 0 }
 
@@ -2970,7 +3105,7 @@ struct WealthFacts {
             return String(digits.suffix(4))
         }()
 
-        return Account(
+        var account = Account(
             id: m.id, name: ctx.nameById[m.id] ?? bankName(of: m), bankName: bankName(of: m),
             nickname: prefs.trimmedNickname, isSecurities: isSecurities,
             isFixedDeposit: m.bankAccountType == .fixed,
@@ -2983,6 +3118,8 @@ struct WealthFacts {
             isForeignType: m.bankAccountType == .foreign, openedDate: m.date,
             scheduledOut: isSecurities ? 0 : scheduledNTD, shortage: isSecurities ? nil : shortage,
             next30: next30, recentCount: recentCount)
+        account.shortages = isSecurities ? [] : shortages
+        return account
     }
 
     // MARK: - [v25.564] 證券戶（券商名片）
@@ -3152,7 +3289,8 @@ struct WealthFacts {
     private static func makeChecks(cards: [Card], accounts: [Account], bankMs: [LifeMilestone], unknown: [String],
                                    ctx: BuildContext, bankIds: Set<UUID>, terms: [TimeDeposit],
                                    insurance: [InsuranceGroup], deposits: WealthDepositBook,
-                                   brokers: [Broker] = [], policies: WealthPolicyFacts = WealthPolicyFacts()) -> [WealthCheck] {
+                                   brokers: [Broker] = [], policies: WealthPolicyFacts = WealthPolicyFacts(),
+                                   transfers: [TransferRule] = []) -> [WealthCheck] {
         let today = ctx.today
         let book = ctx.book
         var out: [WealthCheck] = []
@@ -3163,20 +3301,48 @@ struct WealthFacts {
         let visibleBanks = accounts.filter { !$0.isSecurities && !$0.hidden }
         func name(_ id: UUID?) -> String? { id.flatMap { ctx.nameById[$0] } }
 
-        // #1 接下來 30 天某一天會不夠扣
+        // #1 接下來 30 天某一天會不夠扣（[v25.575] 〔轉帳過去〕帶「補到 30 天內都夠」：每週的轉帳會連著不夠，只補第一次的差額下週又跳一條）
         for a in visibleBanks {
             guard let s = a.shortage else { continue }
-            let what: String = s.kind == .stockBuy ? "交割（\(s.title)）" : "「\(s.title)」"
-            let text = "\(WealthFormat.monthDay(s.date)) \(a.name)要扣\(what)\(WealthFormat.plain(s.amount, code: s.code))，"
-                + "預估只有 \(WealthFormat.plain(s.before, code: s.code))，差 \(WealthFormat.plain(s.short, code: s.code))"
+            let md = WealthFormat.monthDay(s.date)
+            let amountText = WealthFormat.plain(s.amount, code: s.code)
+            let beforeText = WealthFormat.plain(s.before, code: s.code)
+            let shortText = WealthFormat.plain(s.short, code: s.code)
+            let cover: Double = Swift.max(s.cover, s.short).rounded(.up)
             var actions: [WealthCheck.Action] = []
             if s.code == "NT$" {
                 let from = transferSource(excluding: a.id, accounts: visibleBanks)
-                actions.append(WealthCheck.Action(title: "轉帳過去",
-                                                  fix: .transfer(to: a.id, from: from, amount: s.short.rounded(.up))))
+                actions.append(WealthCheck.Action(title: "轉帳過去", fix: .transfer(to: a.id, from: from, amount: cover)))
             }
-            actions.append(WealthCheck.Action(title: "知道了", fix: .dismiss))
-            add(WealthCheck(id: "short-\(a.id.uuidString)-\(WealthCal.dayKey(s.date))", kind: .shortage, tone: .bad,
+            var text: String
+            if let rid = s.transferRuleId, let key = s.periodKey, let t = transfers.first(where: { $0.id == rid }) {
+                // [v25.575] 第一筆不夠的是定期轉帳的轉出：自動轉「銀行可能轉不過去」、自己轉「要自己從…轉」；
+                // 後面還有卡費／交割／固定支出也會不夠時多半句。第二顆〔看這一期〕（小表單裡才有〔銀行這期取消了〕〔知道了〕）
+                if t.isManual {
+                    text = "\(md) 要自己從 \(a.name) 轉 \(amountText) 到 \(t.toName)，預估只有 \(beforeText)，差 \(shortText)"
+                } else {
+                    text = "\(md) \(a.name)要自動轉 \(amountText) 到 \(t.toName)，預估只有 \(beforeText)，銀行可能轉不過去"
+                }
+                let later: WealthShortage? = a.shortages.first { x in
+                    x.rowId != s.rowId && x.date >= s.date
+                        && (x.kind == .cardBill || x.kind == .stockBuy || x.kind == .fixedExpense)
+                }
+                if let l = later {
+                    let what: String
+                    switch l.kind {
+                    case .stockBuy: what = "交割（\(l.title)）"
+                    case .fixedExpense: what = "「\(l.title)」"
+                    default: what = l.title
+                    }
+                    text += "；\(WealthFormat.monthDay(l.date)) \(what)也會不夠"
+                }
+                actions.append(WealthCheck.Action(title: "看這一期", fix: .openTransferPeriod(ruleId: rid, key: key)))
+            } else {
+                let what: String = s.kind == .stockBuy ? "交割（\(s.title)）" : "「\(s.title)」"
+                text = "\(md) \(a.name)要扣\(what)\(amountText)，預估只有 \(beforeText)，差 \(shortText)"
+                actions.append(WealthCheck.Action(title: "知道了", fix: .dismiss))
+            }
+            add(WealthCheck(id: WealthCheck.shortageId(accountId: a.id, day: s.date), kind: .shortage, tone: .bad,
                             text: text, actions: actions, accountIds: [a.id]))
         }
 
@@ -3219,10 +3385,16 @@ struct WealthFacts {
         }
 
         // #10 帳戶算出來是負的
+        // [v25.575] 7 天內有一期自動轉出、轉之前就不夠（那一列餘額 < 0）：換成「可能沒轉成」那一句（〔轉成了〕＝知道了，之後回到這一句）
         for a in visibleBanks {
             for code in a.currencies {
                 let v = a.balance(code)
                 guard v < -0.5 else { continue }
+                if code == "NT$", let f = failedTransferCheck(a, today: today, transfers: transfers),
+                   !book.isDismissed(f.id) {
+                    add(f)
+                    continue
+                }
                 add(WealthCheck(id: "neg-\(a.id.uuidString)-\(code)-\(Int(v.rounded()))", kind: .negative, tone: .bad,
                                 text: "\(a.name) \(WealthFormat.money(v, code: code))：可能漏記了收入或轉帳",
                                 actions: [WealthCheck.Action(title: "對存摺", fix: .anchor(accountId: a.id, code: code))],
@@ -3477,6 +3649,35 @@ struct WealthFacts {
                             accountIds: [a.id], onPage: false))
         }
 
+        // [v25.575] 還在跑的定期轉帳，從／到的帳戶收起來了或找不到了（新版收起來、刪帳戶時就結束了；這是舊版收的、刪的，從資料算）
+        let accountsById = Dictionary(accounts.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        for t in transfers where !t.isEnded {
+            let gone: String
+            var limit: Date = today
+            if t.toMissing {
+                gone = "轉進的帳戶已經刪掉了"
+            } else if t.fromMissing {
+                gone = "轉出的帳戶已經刪掉了"
+            } else if t.toHidden {
+                gone = "轉進的 \(t.toName) 已經收起來"
+                if let c = t.toId.flatMap({ accountsById[$0]?.closedDate }) { limit = WealthCal.addDays(-1, to: c) }
+            } else if t.fromHidden {
+                gone = "轉出的 \(t.fromName) 已經收起來"
+                if let c = t.fromId.flatMap({ accountsById[$0]?.closedDate }) { limit = WealthCal.addDays(-1, to: c) }
+            } else {
+                continue
+            }
+            // 〔結束這條〕：收起來的結束在收起來那天以前的最後一期；找不到的結束在今天（含）以前的最後一期；都沒有＝一期都不算
+            let lastKey: String? = WealthTransferSchedule.lastOriginal(t.rule, onOrBefore: Swift.min(limit, today))
+                .map { WealthCal.dayKey($0) }
+            let ids: [UUID] = [t.fromId, t.toId].compactMap { $0 }.filter { bankIds.contains($0) }
+            add(WealthCheck(id: "trgone-\(t.id.uuidString)", kind: .transferAccount, tone: .warn,
+                            text: "『\(t.title)』" + gone,
+                            actions: [WealthCheck.Action(title: "結束這條", fix: .endTransferRule(ruleId: t.id, lastKey: lastKey)),
+                                      WealthCheck.Action(title: "看這條", fix: .openTransferRule(t.id))],
+                            accountIds: ids))
+        }
+
         // 排序：bad → warn → info，同一種語氣照種類先後，同一種照產生的順序（sort 不保證穩定，帶著原本的位置比）
         let indexed = Array(out.enumerated())
         let sorted = indexed.sorted { x, y in
@@ -3485,6 +3686,28 @@ struct WealthFacts {
             return x.offset < y.offset
         }
         return sorted.map { $0.element }
+    }
+
+    /// [v25.575] 過了日子、自動轉、轉之前就不夠（7 天內、台幣、那一列餘額 < 0）的最近一期：「11/13 那筆自動轉帳可能沒轉成
+    /// （那天薪轉算起來只有 1,400）」〔沒轉成〕〔轉成了〕；沒有＝nil
+    private static func failedTransferCheck(_ a: Account, today: Date, transfers: [TransferRule]) -> WealthCheck? {
+        // ledger 新到舊：第一筆對上的就是最近那一期
+        guard let r = a.ledger.first(where: { row in
+            guard let _ = row.transferRuleId, row.periodKey != nil, row.isOutflow, !row.transferManual,
+                  row.code == "NT$", row.balanceAfter < -0.5 else { return false }
+            let n = WealthCal.days(from: row.date, to: today)
+            return n >= 0 && n <= 7
+        }), let rid = r.transferRuleId, let key = r.periodKey else { return nil }
+        let before = WealthFormat.plain(r.balanceAfter + r.amount, code: r.code)
+        var ids: [UUID] = [a.id]
+        if let to = transfers.first(where: { $0.id == rid })?.toId, to != a.id { ids.append(to) }
+        return WealthCheck(id: "trfail-\(rid.uuidString)-\(key)", kind: .transferFailed, tone: .bad,
+                           text: "\(WealthFormat.monthDay(r.date)) 那筆自動轉帳可能沒轉成（那天\(a.name)算起來只有 \(before)）",
+                           actions: [WealthCheck.Action(title: "沒轉成",
+                                                        fix: .setTransferStatus(ruleId: rid, key: key,
+                                                                                status: WealthTransferStatus.failed.rawValue)),
+                                     WealthCheck.Action(title: "轉成了", fix: .dismiss)],
+                           accountIds: ids)
     }
 
     /// 〔轉帳過去〕預設的轉出帳戶：存摺上台幣最多的另一個活存（不是定存、沒收起來、有錢）；都沒有＝nil（表單裡選）
@@ -3517,16 +3740,18 @@ extension WealthFacts {
     /// 這個帳戶這個幣別在 day 那天結束時，App 算的存摺上；excluding：不算那一筆（編輯以前的對存摺時，不算它自己）。
     /// 用同一套算法、把「今天」當成 day 重算一次（只在選日期、打開表單時算，打字時不算）
     /// [v25.566] deposits：定存那一包（起存那天的轉定存、到期轉活存也算進「App 算的」）
+    /// [v25.575] transfers：定期轉帳那一包（漏了的話「App 算的」少算轉帳、對存摺的差額寫錯）
     static func passbookBalance(accountId: UUID, code: String, endOf day: Date, excluding: UUID?,
                                 milestones: [LifeMilestone], book: WealthBook,
-                                deposits: WealthDepositBook = WealthDepositBook(), expenses: [Expense],
+                                deposits: WealthDepositBook = WealthDepositBook(),
+                                transfers: WealthTransferBook = WealthTransferBook(), expenses: [Expense],
                                 incomes: [Income], stocks: [Stock], rates: FinanceRates) -> Double {
         var list = milestones
         if let ex = excluding, let i = list.firstIndex(where: { $0.id == accountId }) {
             list[i].bankDeposits = (list[i].bankDeposits ?? []).filter { $0.id != ex }
         }
-        let f = build(milestones: list, book: book, deposits: deposits, expenses: expenses, incomes: incomes,
-                      stocks: stocks, rates: rates, now: day)
+        let f = build(milestones: list, book: book, deposits: deposits, transfers: transfers, expenses: expenses,
+                      incomes: incomes, stocks: stocks, rates: rates, now: day)
         return f.account(accountId)?.balance(code) ?? 0
     }
 }

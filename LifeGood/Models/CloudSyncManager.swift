@@ -54,6 +54,9 @@ final class CloudSyncManager: ObservableObject {
         "life_wealth_deposits_v1",
         // [v25.568] 號碼密文那一包（有效期限、保單號碼、票證號；只有密文。同上，單獨一個鍵：25.564–567 的 iPad 存帳本會洗掉它不認得的欄位）
         "life_wealth_vault_v1",
+        // [v25.575] 定期轉帳那一包（WealthTransferBook；單獨一個鍵：還沒更新的 iPad 不認得、不會碰。你和太太各加各的：
+        // 收到增量更新時 LifeStore.reloadFromCloud 照 id＋updatedAt 合併，不整包換掉）
+        "life_wealth_transfers_v1",
         // [v25.568] 給網頁版的財富數字（WealthWebFacts：App 算好寫的，網頁版照讀；App 自己不讀。只有合計、暱稱、後 4 碼，沒有完整號碼、有效期限）
         "life_wealth_facts_v1",
         // 股票每週市值快照（英雄卡背景折線）：同步安全性依賴「先拉後推」順序——

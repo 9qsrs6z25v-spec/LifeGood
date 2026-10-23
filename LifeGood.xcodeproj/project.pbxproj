@@ -142,6 +142,7 @@
 		A01B000001001589 /* WealthPolicyFacts.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001589 /* WealthPolicyFacts.swift */; };
 		A01B000001001591 /* WealthVault.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001591 /* WealthVault.swift */; };
 		A01B000001001592 /* WealthWebFacts.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001592 /* WealthWebFacts.swift */; };
+		A01B000001001598 /* WealthTransfers.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001598 /* WealthTransfers.swift */; };
 		A01B000001001593 /* NotificationActions.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001593 /* NotificationActions.swift */; };
 		A01B000001001582 /* WealthBoard.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001582 /* WealthBoard.swift */; };
 		A01B000001001583 /* WealthBoardScenes.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001583 /* WealthBoardScenes.swift */; };
@@ -149,6 +150,7 @@
 		A01B000001001585 /* WealthCardViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001585 /* WealthCardViews.swift */; };
 		A01B000001001586 /* WealthEditors.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001586 /* WealthEditors.swift */; };
 		A01B000001001588 /* WealthDepositForms.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001588 /* WealthDepositForms.swift */; };
+		A01B000001001599 /* WealthTransferViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001599 /* WealthTransferViews.swift */; };
 		A01B000001001590 /* WealthLinkForms.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001590 /* WealthLinkForms.swift */; };
 		A01B000001001529 /* FinHouseScene.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001529 /* FinHouseScene.swift */; };
 		A01B000001001532 /* AppStores.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001532 /* AppStores.swift */; };
@@ -448,6 +450,7 @@
 		A01A000001001589 /* WealthPolicyFacts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WealthPolicyFacts.swift; sourceTree = "<group>"; };
 		A01A000001001591 /* WealthVault.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WealthVault.swift; sourceTree = "<group>"; };
 		A01A000001001592 /* WealthWebFacts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WealthWebFacts.swift; sourceTree = "<group>"; };
+		A01A000001001598 /* WealthTransfers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WealthTransfers.swift; sourceTree = "<group>"; };
 		A01A000001001593 /* NotificationActions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationActions.swift; sourceTree = "<group>"; };
 		A01A000001001582 /* WealthBoard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WealthBoard.swift; sourceTree = "<group>"; };
 		A01A000001001583 /* WealthBoardScenes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WealthBoardScenes.swift; sourceTree = "<group>"; };
@@ -455,6 +458,7 @@
 		A01A000001001585 /* WealthCardViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WealthCardViews.swift; sourceTree = "<group>"; };
 		A01A000001001586 /* WealthEditors.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WealthEditors.swift; sourceTree = "<group>"; };
 		A01A000001001588 /* WealthDepositForms.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WealthDepositForms.swift; sourceTree = "<group>"; };
+		A01A000001001599 /* WealthTransferViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WealthTransferViews.swift; sourceTree = "<group>"; };
 		A01A000001001590 /* WealthLinkForms.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WealthLinkForms.swift; sourceTree = "<group>"; };
 		A01A000001001529 /* FinHouseScene.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FinHouseScene.swift; sourceTree = "<group>"; };
 		A01A000001001532 /* AppStores.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppStores.swift; sourceTree = "<group>"; };
@@ -804,6 +808,7 @@
 				A01A000001001589 /* WealthPolicyFacts.swift */,
 				A01A000001001591 /* WealthVault.swift */,
 				A01A000001001592 /* WealthWebFacts.swift */,
+				A01A000001001598 /* WealthTransfers.swift */,
 				A01A000001001593 /* NotificationActions.swift */,
 				A01A000001001594 /* WatchPackageBuilder.swift */,
 				A01A000001001595 /* WatchExtrasWriter.swift */,
@@ -1002,6 +1007,7 @@
 				A01A000001001585 /* WealthCardViews.swift */,
 				A01A000001001586 /* WealthEditors.swift */,
 				A01A000001001588 /* WealthDepositForms.swift */,
+				A01A000001001599 /* WealthTransferViews.swift */,
 				A01A000001001590 /* WealthLinkForms.swift */,
 				A01A000001000102 /* FoodMapView.swift */,
 				A01A000001000200 /* TravelMapView.swift */,
@@ -1315,6 +1321,7 @@
 				A01B000001001589 /* WealthPolicyFacts.swift in Sources */,
 				A01B000001001591 /* WealthVault.swift in Sources */,
 				A01B000001001592 /* WealthWebFacts.swift in Sources */,
+				A01B000001001598 /* WealthTransfers.swift in Sources */,
 				A01B000001001593 /* NotificationActions.swift in Sources */,
 				A01B000001001594 /* WatchPackageBuilder.swift in Sources */,
 				A01B000001001595 /* WatchExtrasWriter.swift in Sources */,
@@ -1327,6 +1334,7 @@
 				A01B000001001585 /* WealthCardViews.swift in Sources */,
 				A01B000001001586 /* WealthEditors.swift in Sources */,
 				A01B000001001588 /* WealthDepositForms.swift in Sources */,
+				A01B000001001599 /* WealthTransferViews.swift in Sources */,
 				A01B000001001590 /* WealthLinkForms.swift in Sources */,
 				A01B000001001529 /* FinHouseScene.swift in Sources */,
 				A01B000001001532 /* AppStores.swift in Sources */,
@@ -1739,7 +1747,7 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 1327;
+				CURRENT_PROJECT_VERSION = 1328;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
@@ -1760,7 +1768,7 @@
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
-				MARKETING_VERSION = 25.574;
+				MARKETING_VERSION = 25.575;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
@@ -1804,7 +1812,7 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 1327;
+				CURRENT_PROJECT_VERSION = 1328;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
@@ -1819,7 +1827,7 @@
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
-				MARKETING_VERSION = 25.574;
+				MARKETING_VERSION = 25.575;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				SDKROOT = iphoneos;

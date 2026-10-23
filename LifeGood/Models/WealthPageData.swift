@@ -48,6 +48,17 @@ import SwiftUI
 // [v25.568] 財富 v7 隱私加強與網頁版（build/v7/brief.md §4 G2-5；judge §7.1、§7.3）：
 // • 「iCloud 與家人共享說明」第一句：加密的多了有效期限、保單號碼、票證號碼（安全碼照樣加密存：第 6 題）。
 // • 「這頁的數字怎麼算」多一句 webHow：網頁版讀 App 算好的那一包（life_wealth_facts_v1），只露後 4 碼、沒有卡片到期日。
+//
+// [v25.575] 定期轉帳 v1a（transfer/build/v1a/brief.md §6 G1；transfer/judge.md §4.3、§5；樣稿①-2）：
+// • ⑤ 銀行帳戶最後一張「定期轉帳・4 條」卡：WealthPageTransfers（facts.transferRules 空的＝nil，整張不出現）。
+//   一列＝一條還在跑的（facts.runningTransfers）：第一行「薪轉 → 零用錢」＋右「3,000」；第二行「每週五・銀行自動轉」＋右「下次 10/30（五）」；
+//   第三行（有才出現）最要緊的一件：14 天內最後一次（橘）＞對方收起來了／找不到（橘）＞銀行設到哪天（灰）——照樣稿①-2 拆三行
+//  （樣稿註 5：規劃把週期擠在第一行，393 寬「薪轉 → 房貸扣款」會撞到金額）。照轉出帳戶在 ⑤ 的位置→下次日子→建立先後排。
+//   卡底「一個月大約轉出 63,000（每週的照一年 52 次算）」（monthlyOut 加總；有每週的才寫括號）＋灰字；已結束的「已結束 1 條 ›」點了在卡裡展開
+//  （第二行右邊「最後一次 2026/12/6」；設錯了「一期都不算」；收起來、刪帳戶結束的第三行灰字說一句）。
+// • ③ 短名：轉帳寫「轉給房貸扣款」「來自薪轉」（只拿掉開頭那個空白、不再截 6 字；換匯「換匯（換出）」照原字）；不夠扣那一筆同樣。
+// • 收起來確認框多一句：WealthPageBankRow.hideNote＝facts.hideTransferSentence(id)（「有 1 條定期轉帳轉進這裡，會一起結束」）。
+//   結束本身在 LifeStore.setWealthHidden 裡（主控），這裡只組字。
 
 // MARK: - 捲到哪一區
 
@@ -192,6 +203,55 @@ struct WealthPageBankRow: Identifiable {
     let name: String
     /// 這個帳戶的幣別（對存摺選哪一格；兩個以上長按出子選單）
     let codes: [String]
+    /// [v25.575] 收起來確認框多的那一句（facts.hideTransferSentence：「有 1 條定期轉帳轉進這裡，會一起結束」）；沒有＝nil
+    let hideNote: String?
+}
+
+/// [v25.575] ⑤ 銀行帳戶最後一張「定期轉帳・4 條」卡（judge §4.3、樣稿①-2；facts.transferRules 空的＝nil，整張不出現）。
+/// 字全部在 WealthPageText.transfers 組好，WealthPageTransfersCard 只畫
+struct WealthPageTransfers {
+    /// 一列＝一條規則：第一行「薪轉 → 零用錢」＋右「3,000」；第二行「每週五・銀行自動轉」＋右「下次 10/30（五）」；
+    /// 第三行（有才出現）最要緊的一件「銀行設到 2027/4/9」
+    struct Row: Identifiable {
+        /// 規則的 id（點了開規則頁）
+        let id: UUID
+        /// 「薪轉 → 零用錢」（有取名字寫名字）
+        let title: String
+        /// 「每週五・銀行自動轉」「每月最後一天・自己轉」
+        let detail: String
+        /// 「3,000」；遮住「••••」
+        let amount: String
+        /// 還在跑：「下次 10/30（五）」「沒有下一期」；已結束：「最後一次 2026/12/6」「一期都不算」
+        let next: String
+        /// 第三行（有才出現）：「4/9 最後一次」「零用錢 已經收起來」「轉進的帳戶已經刪掉了」「銀行設到 2027/4/9」；
+        /// 已結束的「零用錢收起來時結束」「帳戶刪掉時結束」
+        let note: String?
+        /// 第三行用注意色（14 天內最後一次、對方收起來／找不到）；其他灰
+        let noteWarn: Bool
+        /// 已結束的那幾列（淡一點）
+        let ended: Bool
+        /// VoiceOver「薪轉 轉到 零用錢，每週五，銀行自動轉，3,000 元，下次 10 月 30 日」（遮住念「金額已遮住」）
+        let accessibilityText: String
+    }
+
+    /// 標頭「定期轉帳・4 條」（還在跑的條數；一條都沒在跑「定期轉帳」）
+    let title: String
+    /// 還在跑的（照轉出帳戶在 ⑤ 的位置、下次日子、建立先後排）
+    let rows: [Row]
+    /// 一條還在跑的都沒有：「現在沒有還在轉的定期轉帳」；有＝nil
+    let emptyText: String?
+    /// 「一個月大約轉出 63,000（每週的照一年 52 次算）」（金額粗體；遮住「••••」）；一條還在跑的都沒有＝nil
+    let monthly: FinanceLine?
+    /// VoiceOver 念 monthly 那一句（遮住念「金額已遮住」）
+    let monthlySpoken: String?
+    /// 灰字「轉給家人、房東的記在記帳的固定支出（算花掉）。」
+    let note: String
+    /// 「已結束 1 條」；沒有已結束的＝nil
+    let endedTitle: String?
+    /// 已結束的（點「已結束 1 條 ›」在卡裡展開；最後一次新的在前）
+    let ended: [Row]
+    /// 標頭〔＋〕：沒收起來的銀行帳戶兩個以上才有
+    let canAdd: Bool
 }
 
 /// ⑥ 一個證券戶
@@ -307,6 +367,8 @@ struct WealthPageData {
     let showBankPrompt: Bool
     let banksHeader: WealthPageGroupHeader?
     let banks: [WealthPageBankRow]
+    /// [v25.575] ⑤ 銀行帳戶最後一張「定期轉帳」卡（沒有規則＝nil）
+    let transfers: WealthPageTransfers?
     let brokersHeader: WealthPageGroupHeader?
     let brokers: [WealthPageBrokerRow]
     let policies: WealthPagePolicies?
@@ -358,11 +420,15 @@ struct WealthPageData {
             // [v25.566] 外幣第二行「約 NT$102,400（10/19 匯率 32.0）」要匯率更新那天
             let item = MoneyItem.wealthBank(a, facts: facts, rates: rates, masked: masked, now: now,
                                             rateDate: ratesUpdatedAt)
-            bankRows.append(WealthPageBankRow(id: a.id, item: item, name: a.name, codes: WealthPageText.codes(a)))
+            // [v25.575] 收起來確認框多一句「有 1 條定期轉帳轉進這裡，會一起結束」（沒有＝nil）
+            bankRows.append(WealthPageBankRow(id: a.id, item: item, name: a.name, codes: WealthPageText.codes(a),
+                                              hideNote: facts.hideTransferSentence(a.id)))
         }
         let banksHeader: WealthPageGroupHeader? = banks.isEmpty ? nil
             : WealthPageGroupHeader(count: banks.count,
                                     total: "存摺合計 " + (masked ? WealthFormat.masked : facts.cashText))
+        // [v25.575] ⑤ 銀行帳戶最後一張「定期轉帳」卡（有規則才有）
+        let transfers = WealthPageText.transfers(facts: facts, banks: banks, today: today, masked: masked)
 
         // ⑥ 證券戶（收起來的放 ⑧）
         let visibleBrokers = WealthPageText.orderBrokers(facts.brokers.filter { facts.account($0.id)?.hidden != true },
@@ -391,7 +457,7 @@ struct WealthPageData {
                               checks: facts.pageChecks, upcoming: upcoming,
                               cardsHeader: cardsHeader, cards: cardRows,
                               showBankPrompt: mode == .cardsOnly,
-                              banksHeader: banksHeader, banks: bankRows,
+                              banksHeader: banksHeader, banks: bankRows, transfers: transfers,
                               brokersHeader: brokersHeader, brokers: brokerRows,
                               policies: policies, hidden: hidden, footer: footer, bridge: bridge, masked: masked)
     }
@@ -515,6 +581,9 @@ enum WealthPageText {
         case .interest where row.timeDepositId != nil:
             // [v25.566] 定存利息（本金續存的利息、舊的定存種類帳戶到期的利息）
             return "定存利息"
+        case .transferOut, .transferIn:
+            // [v25.575] 轉帳（定期、單次）：「轉給房貸扣款」「來自薪轉」（前 6 字會變「轉給 房貸扣」）；換匯「換匯（換出）」照原字
+            return transferShort(row.title)
         default:
             return String(row.title.prefix(6))
         }
@@ -527,8 +596,19 @@ enum WealthPageText {
         case .cardBill: return cardShort(fromBillTitle: s.title)
         // [v25.566] 起存那天從活存轉出（「轉定存（一年定存）」）
         case .timeDeposit: return "轉定存"
+        // [v25.575] 定期轉帳、單次轉帳轉出：「轉給零用錢」（四格「薪轉・11/13 轉給零用錢前」）
+        case .transferOut, .transferIn: return transferShort(s.title)
         default: return String(s.title.prefix(6))
         }
+    }
+
+    /// [v25.575] 轉帳的短名：「轉給 房貸扣款」→「轉給房貸扣款」、「來自 薪轉」→「來自薪轉」（只拿掉開頭那個空白，
+    /// 暱稱裡的空白照留、不截字）；其他（換匯「換匯（換出）」）照原字
+    static func transferShort(_ title: String) -> String {
+        for head in ["轉給 ", "來自 "] where title.hasPrefix(head) {
+            return String(head.dropLast()) + String(title.dropFirst(head.count))
+        }
+        return title
     }
 
     /// 接下來一列的金額「−52,340」「+80,000」「約 −23,000」（句子裡：台幣不寫 NT$）
@@ -1326,6 +1406,167 @@ extension WealthPageText {
         if row.kind == .transferIn { return "轉" }
         if row.timeDepositId != nil { return "定" }
         return "入"
+    }
+}
+
+// MARK: - ⑤ 定期轉帳卡（[v25.575] 定期轉帳 v1a；transfer/judge.md §4.3、樣稿①-2）
+
+extension WealthPageText {
+    /// 卡底灰字（v1a 沒有 ④「連到這個帳戶的」：不寫「在每個帳戶看得到」）
+    static let transferNote = "轉給家人、房東的記在記帳的固定支出（算花掉）。"
+
+    /// 第三行要緊的那一件：14 天內最後一次幾天內算
+    static let transferEndSoonDays = 14
+
+    /// ⑤ 銀行帳戶最後一張「定期轉帳」卡：facts.transferRules（沒刪掉的，含已結束）空的＝nil。
+    /// banks：⑤ 的順序（orderBanks、沒收起來的）；還在跑的照「轉出帳戶在 banks 的位置（找不到排最後）→ 下次日子 → 建立先後」排，
+    /// 已結束的照最後一次新到舊。一個月大約＝還在跑的 monthlyOut 加總（每週＝每期 × 52 ÷ 12，WealthFacts.makeTransferRules 算好）
+    static func transfers(facts: WealthFacts, banks: [WealthFacts.Account], today: Date,
+                          masked: Bool) -> WealthPageTransfers? {
+        let all: [WealthFacts.TransferRule] = facts.transferRules
+        guard !all.isEmpty else { return nil }
+        var position: [UUID: Int] = [:]
+        for (i, a) in banks.enumerated() where position[a.id] == nil {
+            position[a.id] = i
+        }
+        let running: [WealthFacts.TransferRule] = all.filter { !$0.isEnded }.sorted { l, r in
+            let lp: Int = l.fromId.flatMap { position[$0] } ?? Int.max
+            let rp: Int = r.fromId.flatMap { position[$0] } ?? Int.max
+            if lp != rp { return lp < rp }
+            let ld: Date = l.next?.day ?? Date.distantFuture
+            let rd: Date = r.next?.day ?? Date.distantFuture
+            if ld != rd { return ld < rd }
+            return l.order < r.order
+        }
+        let ended: [WealthFacts.TransferRule] = all.filter { $0.isEnded }.sorted { l, r in
+            let ld: Date = l.lastDay ?? Date.distantPast
+            let rd: Date = r.lastDay ?? Date.distantPast
+            if ld != rd { return ld > rd }
+            return l.order < r.order
+        }
+        var rows: [WealthPageTransfers.Row] = []
+        for t in running {
+            rows.append(transferRow(t, today: today, masked: masked))
+        }
+        var endedRows: [WealthPageTransfers.Row] = []
+        for t in ended {
+            endedRows.append(transferRow(t, today: today, masked: masked))
+        }
+        let title: String = running.isEmpty ? "定期轉帳" : "定期轉帳・\(running.count) 條"
+        let monthly = transferMonthly(running, masked: masked)
+        return WealthPageTransfers(title: title, rows: rows,
+                                   emptyText: running.isEmpty ? "現在沒有還在轉的定期轉帳" : nil,
+                                   monthly: monthly?.line, monthlySpoken: monthly?.spoken, note: transferNote,
+                                   endedTitle: ended.isEmpty ? nil : "已結束 \(ended.count) 條", ended: endedRows,
+                                   canAdd: banks.count >= 2)
+    }
+
+    /// 「一個月大約轉出 63,000（每週的照一年 52 次算）」：金額粗體；有每週的才寫括號；遮住「••••」、念「金額已遮住」
+    private static func transferMonthly(_ running: [WealthFacts.TransferRule],
+                                        masked: Bool) -> (line: FinanceLine, spoken: String)? {
+        guard !running.isEmpty else { return nil }
+        let total: Double = running.reduce(0) { $0 + $1.monthlyOut }
+        let shown: String = masked ? dots : WealthFormat.grouped(total.rounded(), decimals: 0)
+        var runs: [FinanceRun] = [FinanceRun(text: "一個月大約轉出 ")]
+        runs.append(FinanceRun(text: shown, bold: true))
+        var said: String = "一個月大約轉出 " + (masked ? "金額已遮住" : spoken(total))
+        if running.contains(where: { $0.rule.cycleKind == .weekly }) {
+            runs.append(FinanceRun(text: "（每週的照一年 52 次算）"))
+            said += "，每週的照一年 52 次算"
+        }
+        return (line: FinanceLine(runs: runs), spoken: said)
+    }
+
+    /// 一條一列（還在跑、已結束共用）
+    private static func transferRow(_ t: WealthFacts.TransferRule, today: Date,
+                                    masked: Bool) -> WealthPageTransfers.Row {
+        let detail: String = t.cycleText + "・" + t.modeText
+        let amount: String = masked ? dots : WealthFormat.plain(t.amount, code: t.code)
+        let amountSaid: String
+        if masked {
+            amountSaid = "金額已遮住"
+        } else if FinanceRates.isNTD(t.code) {
+            amountSaid = spoken(t.amount)
+        } else {
+            amountSaid = WealthFormat.plain(t.amount, code: t.code)
+        }
+        var said: [String] = [transferSpokenTitle(t), t.cycleText, t.modeText, amountSaid]
+        let next: String
+        let pick: (text: String, warn: Bool)?
+        if t.isEnded {
+            next = transferEndedText(t)
+            pick = transferEndedNote(t)
+            said.append("已結束，" + next)
+        } else {
+            if let n = t.next {
+                next = "下次 " + WealthFormat.monthDayWeek(n.day)
+                said.append("下次 " + spokenDate(n.day))
+            } else {
+                next = "沒有下一期"
+                said.append(next)
+            }
+            pick = transferPick(t, today: today)
+        }
+        if let p = pick { said.append(p.text) }
+        return WealthPageTransfers.Row(id: t.id, title: t.title, detail: detail, amount: amount, next: next,
+                                       note: pick?.text, noteWarn: pick?.warn ?? false, ended: t.isEnded,
+                                       accessibilityText: said.joined(separator: "，"))
+    }
+
+    /// 第三行最要緊的一件：14 天內最後一次（橘）＞對方收起來了／找不到（橘）＞銀行設到哪天（灰，年份不是今年才寫年）；都沒有 nil。
+    /// 暫停（v2）還沒有
+    private static func transferPick(_ t: WealthFacts.TransferRule, today: Date) -> (text: String, warn: Bool)? {
+        if let last = t.lastDay {
+            let n = WealthCal.days(from: today, to: last)
+            if n >= 0 && n <= transferEndSoonDays {
+                let text: String = n == 0 ? "今天最後一次" : md(last) + " 最後一次"
+                return (text: text, warn: true)
+            }
+        }
+        if t.toMissing { return (text: "轉進的帳戶已經刪掉了", warn: true) }
+        if t.fromMissing { return (text: "轉出的帳戶已經刪掉了", warn: true) }
+        if t.toHidden { return (text: t.toName + " 已經收起來", warn: true) }
+        if t.fromHidden { return (text: t.fromName + " 已經收起來", warn: true) }
+        if let last = t.lastDay {
+            return (text: "銀行設到 " + yearAwareDate(last, today: today), warn: false)
+        }
+        return nil
+    }
+
+    /// 已結束那一列第二行右邊：「最後一次 2026/12/6」；設錯了（最後一期比第一期早）「一期都不算」
+    private static func transferEndedText(_ t: WealthFacts.TransferRule) -> String {
+        guard let last = t.lastDay else { return "已結束" }
+        if let first = t.firstDay, last < first { return "一期都不算" }
+        return "最後一次 " + ymd(last)
+    }
+
+    /// 已結束那一列第三行（灰）：收起來時結束「零用錢收起來時結束」、刪帳戶時結束「帳戶刪掉時結束」；你按的〔結束〕nil
+    private static func transferEndedNote(_ t: WealthFacts.TransferRule) -> (text: String, warn: Bool)? {
+        switch t.rule.endedBy {
+        case "accountHidden"?:
+            if t.toHidden { return (text: t.toName + "收起來時結束", warn: false) }
+            if t.fromHidden { return (text: t.fromName + "收起來時結束", warn: false) }
+            return (text: "帳戶收起來時結束", warn: false)
+        case "accountDeleted"?:
+            return (text: "帳戶刪掉時結束", warn: false)
+        default:
+            return nil
+        }
+    }
+
+    /// VoiceOver 的頭：「薪轉 轉到 零用錢」；有取名字「房租，薪轉 轉到 零用錢」
+    private static func transferSpokenTitle(_ t: WealthFacts.TransferRule) -> String {
+        let pair: String = t.fromName + " 轉到 " + t.toName
+        let plainTitle: String = t.fromName + " → " + t.toName
+        if t.title == plainTitle { return pair }
+        return t.title + "，" + pair
+    }
+
+    /// 今年「4/9」；不是今年「2027/4/9」
+    static func yearAwareDate(_ d: Date, today: Date) -> String {
+        let y = WealthCal.calendar.component(.year, from: d)
+        let ty = WealthCal.calendar.component(.year, from: today)
+        return y == ty ? md(d) : ymd(d)
     }
 }
 

@@ -237,6 +237,12 @@ fileprivate struct WealthNoticeAlertModifier: ViewModifier {
 //   保單號碼、票證號搬成密文；這台還沒同步到金鑰的那幾筆整筆不動、下次再搬；沒有要搬的什麼都不做）。
 // • 「號碼改成加密存了」說明一次：同一個 WealthNoticeAlert 框（多一個 key），checkPassbookNotice 之後 checkVaultNotice；
 //   〔知道了〕＝markNoticeSeen(key)（下一個 runloop LifeStore.markWealthNoticeSeen，跟 iCloud 同步，換一台不再說）。
+//
+// [v25.575] 定期轉帳 v1a（transfer/build/v1a/brief.md §6 G1；judge §4.1、§4.3、§5、§6）：
+// • 右上綠色＋選單多「定期轉帳」（沒收起來的銀行帳戶兩個以上才出現）→ WealthSheet.transferForm(nil)：「從」由表單預設月薪入帳的帳戶。要訂閱（open 擋）。
+// • ⑤ 銀行帳戶傳 p.transfers：銀行項目卡最後一張「定期轉帳・4 條」卡（WealthItems.swift；VStack 照舊 10 個子項）。
+// • 同一個 .sheet(item:)（外面照舊 .appStores()）多三種：新增表單、規則頁、一期小表單（G4 的 WealthTransferViews.swift，三張自己掛布幕、detents）。
+// • 收起來確認框多一句「有 1 條定期轉帳轉進這裡，會一起結束」（WealthPageConfirm.message 組好）；結束本身在 LifeStore.setWealthHidden 裡。
 
 struct LifeFinanceView: View {
     @EnvironmentObject var lifeStore: LifeStore
@@ -376,11 +382,12 @@ struct LifeFinanceView: View {
         }
     }
 
-    /// ⑤ 銀行帳戶（只有卡：換一張提示卡；新手：不出現）
+    /// ⑤ 銀行帳戶（只有卡：換一張提示卡；新手：不出現）。[v25.575] 銀行項目卡最後一張「定期轉帳」卡（有規則才有）
     @ViewBuilder
     private func banksBlock(_ p: WealthPageData, actions: WealthPageActions) -> some View {
         if !p.banks.isEmpty || p.showBankPrompt {
-            WealthPageBanksSection(header: p.banksHeader, rows: p.banks, showPrompt: p.showBankPrompt, actions: actions)
+            WealthPageBanksSection(header: p.banksHeader, rows: p.banks, showPrompt: p.showBankPrompt, actions: actions,
+                                   transfers: p.transfers)
                 .id(WealthPageAnchor.banks)
         }
     }
@@ -518,7 +525,8 @@ struct LifeFinanceView: View {
             } else {
                 DispatchQueue.main.async { life.setCardDisabled(id, disabled: true) }
             }
-        case .hideAccount(let id, _):
+        case .hideAccount(let id, _, _):
+            // [v25.575] 碰到它的定期轉帳在 setWealthHidden 裡一起結束（主控）
             DispatchQueue.main.async { life.setWealthHidden(id, hidden: true) }
         }
     }
@@ -623,6 +631,7 @@ struct LifeFinanceView: View {
                     }
                 }
                 depositMenuItem
+                transferMenuItem
             } label: {
                 addIcon
             }
@@ -653,6 +662,24 @@ struct LifeFinanceView: View {
     private var canAddDeposit: Bool {
         guard let p = page else { return false }
         return !p.banks.isEmpty
+    }
+
+    /// [v25.575] ＋選單的「定期轉帳」：沒收起來的銀行帳戶兩個以上才出現；「從」由表單預設月薪入帳的帳戶（judge §4.1）
+    @ViewBuilder
+    private var transferMenuItem: some View {
+        if canAddTransfer {
+            Button {
+                open(.transferForm(nil))
+            } label: {
+                Label("定期轉帳", systemImage: "arrow.triangle.2.circlepath")
+            }
+        }
+    }
+
+    /// [v25.575] 沒收起來的銀行帳戶兩個以上（page.banks 已經去掉收起來的）
+    private var canAddTransfer: Bool {
+        guard let p = page else { return false }
+        return p.banks.count >= 2
     }
 
     /// 綠圓白「＋」（同健康頁：綠用 1F9D57，深色也是白色的＋）
@@ -729,6 +756,15 @@ struct LifeFinanceView: View {
         case .newPolicy(let eid):
             // [v25.567] 〔補保單〕：新增保單、預填這一筆記帳保費，存檔連它（G3 的 fromExpense）
             return AnyView(WealthAccountEditor(kind: .policy, fromExpense: eid))
+        case .transferForm(let from):
+            // [v25.575] 新增定期轉帳（G4；自己掛布幕、detents）
+            return AnyView(WealthTransferRuleForm(fromId: from))
+        case .transferRule(let id):
+            // [v25.575] 定期轉帳的規則頁（G4）
+            return AnyView(WealthTransferRulePage(ruleId: id))
+        case .transferPeriod(let id, let key):
+            // [v25.575] 定期轉帳的一期（G4）
+            return AnyView(WealthTransferPeriodSheet(ruleId: id, periodKey: key))
         }
     }
 

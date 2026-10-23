@@ -19,7 +19,7 @@ import UserNotifications
 // 2. WealthReminders：本機通知（identifier 前綴 "wealth."；最多 10 則、近的先排；iOS 一個 App 最多 64 則待發，
 //    部屬會議用 20，judge §9-11）：
 //    • 自己繳／每次問我的卡：截止前 3 天、當天 09:00；標成已繳那一期就不在 dues 裡，重排時移掉（當天那則不會來）
-//    • 自動扣的卡：只在扣款帳戶 30 天內可能不夠扣（Account.shortage 在截止日或更早）時，扣款前 3 天 09:00
+//    • 自動扣的卡：只在扣款帳戶 30 天內可能不夠扣（[v25.575] Account.shortages 裡有這張卡這一期）時，扣款前 3 天 09:00
 //    • 交割：只在交割帳戶那天可能不夠扣時，前一天 20:00
 //    • 卡片效期：那個月 1 號往前 30 天 09:00
 //    字一律**不寫卡名、金額、末四碼、帳號**（鎖定畫面、通知中心看得到；使用者的規則＋judge §7.1）：「卡費 10/27 截止（3 天後）」。
@@ -57,6 +57,12 @@ import UserNotifications
 //   延後的那則每次重排都看（放在簽名比對前面，跟會議、個人事件一樣）：標成已繳之後才在手錶上按了還留在通知中心的舊通知，
 //   簽名沒變，下次打開 App 也會拿掉。
 //   字（標題、內文）、prefix、limit、threadId 都沒改。
+//
+// [v25.575] 定期轉帳 v1a（transfer/judge.md §4.10「v1a 就要改的提醒」、§3.5；build/v1a/brief.md §2）：
+// • 自動扣的卡費提醒改成「扣款帳戶 30 天內每一筆扣完會是負的（Account.shortages）裡有這張卡這一期那一列」才排
+//  （以前只看第一次不夠扣在截止日或更早：每週的小轉帳排第一，卡費扣完明明夠也假警報；卡費前面先有別的不夠，卡費自己不夠反而不排）。
+// • 交割提醒改成「shortages 裡有那天的交割」才排（以前要第一次不夠扣剛好在交割那天）。
+// • 定期轉帳自己的提醒是 v2；這版不加候選、字、分類都沒改。
 
 // MARK: - 1. 財富的日子
 
@@ -227,8 +233,10 @@ enum WealthReminders {
                                                  title: "卡費今天截止（\(md)）", body: paidHint,
                                                  fireDate: f0, accountId: c.id))
                 } else {
-                    guard let pid = d.payerId, let a = accounts[pid], let sh = a.shortage,
-                          WealthCal.day(sh.date) <= dueDay else { continue }
+                    // [v25.575] 扣款帳戶 shortages 裡有這張卡這一期那一列（rowId＝WealthFacts 卡費那一列的 id）
+                    let rowId = "bill-\(c.id.uuidString)-\(d.key)"
+                    guard let pid = d.payerId, let a = accounts[pid],
+                          a.shortages.contains(where: { $0.rowId == rowId }) else { continue }
                     let f = at(WealthCal.addDays(-3, to: dueDay), hour: 9)
                     out.append(WealthReminderJob(key: prefix + "auto.\(c.id.uuidString).\(d.key)",
                                                  title: "卡費 \(md) 自動扣款（3 天後）",
@@ -240,8 +248,10 @@ enum WealthReminders {
 
         // 交割：只在那天可能不夠扣時，前一天 20:00
         for s in facts.settlements where s.isOutflow {
-            guard let a = accounts[s.accountId], let sh = a.shortage,
-                  WealthCal.day(sh.date) == WealthCal.day(s.day) else { continue }
+            // [v25.575] shortages 裡有那天的交割（買）那一筆
+            guard let a = accounts[s.accountId],
+                  a.shortages.contains(where: { $0.kind == .stockBuy && WealthCal.day($0.date) == WealthCal.day(s.day) })
+            else { continue }
             let f = at(WealthCal.addDays(-1, to: s.day), hour: 20)
             out.append(WealthReminderJob(key: prefix + "settle.\(s.accountId.uuidString).\(WealthCal.dayKey(s.day))",
                                          title: "明天 \(WealthFormat.monthDay(s.day)) 交割",

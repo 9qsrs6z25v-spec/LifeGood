@@ -59,6 +59,15 @@ import SwiftUI
 // • 票證、保單號碼那幾列照舊讀里程碑那一欄（v7 起只存後 4 碼，CardVault.maskedTail 照樣「•••• 4321」）：那一欄空的＝沒有這個號碼。
 //   帳號那一列照舊（帳本有密文或里程碑上還是完整的舊明碼才有〔顯示〕）。完整的字一律由卡片頁〔顯示〕過 Face ID 後才解
 //  （WealthSecrets.reveal／revealAccount），這裡從不解密文（CardVault 規矩 4）。
+//
+// [v25.575] 定期轉帳 v1a G2（transfer/build/v1a/brief.md §6 G2；transfer/judge.md §4.7、§3.5）：
+// • 看板膠囊（nextOut，14 天內下一筆出去）不算銀行自動轉的定期轉帳（capsuleCounts：transferRuleId 有、不是自己轉的跳過）；
+//   自己轉的算（要你動手）：薪轉「10/31 轉給台灣銀行・8 天」。不夠扣的膠囊照舊優先。
+// • 卡片頁「這期扣款帳戶可能不夠」（payerShortage）改在扣款帳戶 Account.shortages 裡找這張卡這一期那一筆
+//  （卡費、同一天、rowId「bill-<卡>-<期>」或標題開頭「卡名 10 月帳單」），不再只看第一筆 shortage（每週的小轉帳排在前面也找得到）。
+// • ③ 接下來、⑦ 存摺明細：定期轉帳那幾列（WealthLedgerRow.transferRuleId 有）細字一律「定期・」＋note（「定期・每週五」
+//  「定期・每月 6 日」「定期・自己轉」；ruleDetail），不再寫「轉出・轉帳」；點了開那一期（WealthCardOpen.transferPeriod）。單次轉帳照舊。
+// • 收起來確認框多一句：WealthCardBank.hideTransferNote＝facts.hideTransferSentence（「有 1 條定期轉帳轉進這裡，會一起結束」）。
 
 // MARK: - 型別
 
@@ -97,6 +106,10 @@ enum WealthCardOpen: Equatable {
     case transfer(UUID)
     /// [v25.566] 一期定存（WealthFacts.TimeDeposit.id；轉定存、定存到期、定存利息、⑥ 一格）：開定存表單（要訂閱）
     case timeDeposit(UUID)
+    /// [v25.575] 定期轉帳的一期（規則 id、那一期原本的日子「2026-11-06」）：開一期小表單（不擋）
+    case transferPeriod(UUID, String)
+    /// [v25.575] 一條定期轉帳的規則頁（不擋）
+    case transferRule(UUID)
 }
 
 /// 存摺明細的篩選（只列有的）
@@ -357,6 +370,8 @@ struct WealthCardBank {
     var hidden = false
     /// 收起來前問「還有 3,200，要轉到哪？」；存摺上是 0＝nil
     var leftover: String? = nil
+    /// [v25.575] 收起來確認框多一句「有 1 條定期轉帳轉進這裡，會一起結束」（facts.hideTransferSentence；沒有＝nil）
+    var hideTransferNote: String? = nil
 }
 
 /// [v25.566] ⑥ 定存的一格（FinanceProgressCell 畫；點了開那一期的定存表單）
@@ -905,14 +920,20 @@ extension WealthCardData {
         return b
     }
 
-    /// 自動扣的卡：扣款帳戶 30 天內第一次不夠扣的就是這張卡的這一期帳單
+    /// 自動扣的卡：扣款帳戶 30 天內扣完會是負的那幾筆裡，有這張卡的這一期帳單
+    /// （[v25.575] 改找 Account.shortages：以前只看第一筆 shortage，每週的小轉帳先不夠時卡費這一期就找不到）
     fileprivate static func payerShortage(_ c: WealthFacts.Card, statement s: WealthStatement,
                                           x: WealthCardCtx) -> WealthShortage? {
-        guard let acc = x.facts.account(c.payerId), let sh = acc.shortage else { return nil }
-        // 卡費那一列的標題＝「卡名 10 月帳單」（WealthFacts 組的）；整段比，卡名開頭一樣的別張卡不會被認成這張
-        guard sh.kind == .cardBill, WealthCal.day(sh.date) == WealthCal.day(s.due),
-              sh.title.hasPrefix(c.name + " " + s.label) else { return nil }
-        return sh
+        guard let acc = x.facts.account(c.payerId) else { return nil }
+        // 卡費那一列 id＝「bill-<卡>-<2026-10>」、標題＝「卡名 10 月帳單」（WealthFacts 組的）；
+        // 標題整段比，卡名開頭一樣的別張卡不會被認成這張
+        let rowId = "bill-" + c.id.uuidString + "-" + s.key
+        let head = c.name + " " + s.label
+        let due = WealthCal.day(s.due)
+        return acc.shortages.first { sh in
+            guard sh.kind == .cardBill, WealthCal.day(sh.date) == due else { return false }
+            return sh.rowId == rowId || sh.title.hasPrefix(head)
+        }
     }
 
     // MARK: 風景：帳單週期
@@ -1327,6 +1348,10 @@ extension WealthCardData {
             bk.leftover = "還有 " + (a.singleCode.map { WealthCardText.plain(a.balance($0), code: $0, masked: x.masked) }
                                      ?? "約 " + WealthCardText.wan(a.ntdTotal, masked: x.masked))
         }
+        // [v25.575] 收起來確認框多一句（結束本身在 LifeStore.setWealthHidden 裡）
+        if !a.hidden {
+            bk.hideTransferNote = x.facts.hideTransferSentence(a.id)
+        }
         d.bank = bk
         return d
     }
@@ -1467,6 +1492,14 @@ extension WealthCardData {
 
     // MARK: 看板
 
+    /// [v25.575] 膠囊「14 天內下一筆出去」算不算這一列：出去的、14 天內；銀行自動轉的定期轉帳不算（不用你動手），
+    /// 自己轉的照算（judge §4.7 ①）
+    fileprivate static func capsuleCounts(_ r: WealthLedgerRow, today: Date) -> Bool {
+        guard r.isOutflow, WealthCal.days(from: today, to: r.date) <= 14 else { return false }
+        if r.transferRuleId != nil && !r.transferManual { return false }
+        return true
+    }
+
     fileprivate static func bankBoard(_ x: WealthCardCtx, _ a: WealthFacts.Account) -> WealthCardBoard {
         // [v25.566] 看起來是定存帳戶（收起來的照舊）
         if !a.hidden && a.showsAsDeposit { return depositBoard(x, a) }
@@ -1481,7 +1514,8 @@ extension WealthCardData {
             + (a.lastAnchorDate.map { "・對過存摺 " + WealthCardText.md($0) } ?? "・還沒對過存摺")
         b.dateIcon = "checkmark.seal"
         let payday = a.ledger.first { WealthCal.day($0.date) == t && $0.kind == .recurringIncome }
-        let nextOut = a.next30.first { $0.isOutflow && WealthCal.days(from: t, to: $0.date) <= 14 }
+        // [v25.575] 銀行自動轉的定期轉帳不搶膠囊（自己轉的算：要你動手）
+        let nextOut = a.next30.first { capsuleCounts($0, today: t) }
         let negative = multi ? a.ntdTotal < -0.5 : balance < -0.004
 
         // 膠囊
@@ -1955,6 +1989,8 @@ extension WealthCardData {
         case .transferIn, .transferOut:
             glyph = "轉"
             mark = 0x2F7FE8
+            // [v25.575] 定期轉帳那一期：小字「定期・每週五」「定期・自己轉」（單次轉帳照舊沒有小字）
+            detail = ruleDetail(r) ?? ""
         case .timeDeposit:
             // [v25.566] 轉定存、定存到期（還沒到的利息是估的：金額前面「約」照 isEstimate）
             glyph = "定"
@@ -1980,8 +2016,22 @@ extension WealthCardData {
         row.open = openFor(r)
         let said = mk ? "金額已遮住" : (r.isOutflow ? "扣 " : "進 ") + WealthFormat.money(r.amount, code: r.code)
         let after = mk ? "" : "，扣完剩 " + WealthFormat.money(r.balanceAfter, code: r.code)
-        row.accessibilityText = WealthPageText.spokenDate(r.date) + "，" + title + "，" + said + after
+        row.accessibilityText = WealthPageText.spokenDate(r.date) + "，" + title + ruleSpoken(r) + "，" + said + after
         return row
+    }
+
+    /// [v25.575] 定期轉帳那一列的細字：「定期・」＋note（「定期・每週五」「定期・每月 6 日」「定期・自己轉」）；
+    /// 不是定期轉帳（單次轉帳、換匯…）＝nil
+    fileprivate static func ruleDetail(_ r: WealthLedgerRow) -> String? {
+        guard r.transferRuleId != nil else { return nil }
+        let n = r.note?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return n.isEmpty ? "定期" : "定期・" + n
+    }
+
+    /// [v25.575] VoiceOver：定期轉帳那一列在標題後面念「，定期，每週五」（不是定期轉帳＝空字）
+    fileprivate static func ruleSpoken(_ r: WealthLedgerRow) -> String {
+        guard let d = ruleDetail(r) else { return "" }
+        return "，" + d.replacingOccurrences(of: "・", with: "，")
     }
 
     /// 一列點了打開什麼（接下來、存摺明細共用）
@@ -1994,6 +2044,8 @@ extension WealthCardData {
             if let s = r.stockId { return .stock(s) }
             return .none
         case .transferIn, .transferOut:
+            // [v25.575] 定期轉帳那一期（WealthFacts 算的，沒有 BankDeposit）：開一期小表單
+            if let rid = r.transferRuleId, let key = r.periodKey { return .transferPeriod(rid, key) }
             if let d = r.depositId { return .transfer(d) }
             return .none
         case .anchor:
@@ -2168,13 +2220,18 @@ extension WealthCardData {
             } else {
                 amount = "差 " + WealthCardText.signed(diff, out: diff < 0, code: r.code, masked: mk)
             }
+        } else if let rd = ruleDetail(r) {
+            // [v25.575] 定期轉帳那一期：細字「定期・每月 6 日」（note 已經在裡面；不再寫「轉出・轉帳」）
+            detail = rd
+            amount = WealthCardText.signed(r.amount, out: r.isOutflow, code: r.code, masked: mk)
         } else {
             // [v25.566] 徽章跟來源同一個字（定存）只寫一次
             let src = source(r)
             detail = src == r.kind.badge ? src : r.kind.badge + "・" + src
             amount = WealthCardText.signed(r.amount, out: r.isOutflow, code: r.code, masked: mk)
         }
-        if let n = r.note?.trimmingCharacters(in: .whitespacesAndNewlines), !n.isEmpty, r.kind != .anchor {
+        if let n = r.note?.trimmingCharacters(in: .whitespacesAndNewlines), !n.isEmpty, r.kind != .anchor,
+           r.transferRuleId == nil {
             detail += "・" + n
         }
         var row = WealthCardRow(id: r.id, date: r.date, dayText: WealthCardText.dayNum(r.date),
@@ -2191,7 +2248,7 @@ extension WealthCardData {
         row.signedValue = r.kind == .anchor ? 0 : (r.isOutflow ? -r.amount : r.amount)
         let said = mk ? "金額已遮住" : amount
         let bal = mk ? "" : "，" + r.balanceText
-        row.accessibilityText = WealthPageText.spokenDate(r.date) + "，" + title + "，" + said + bal
+        row.accessibilityText = WealthPageText.spokenDate(r.date) + "，" + title + ruleSpoken(r) + "，" + said + bal
         return row
     }
 

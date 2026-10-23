@@ -46,6 +46,15 @@ import SwiftUI
 // • 證券戶項目卡的交割膠囊改讀 Broker.dues（接下來 30 天、每天買賣相抵、夠不夠看交割銀行那天扣之前）：「10/21 交割 52,340」；
 //   不夠扣「10/21 交割 差 23,940」（warn）；以前記在證券戶身上的交割多一顆「舊交割 18 筆」（一列放不下先少放這顆）。
 //   沒有 dues（舊資料、超過 30 天）照 v3 讀 nextSettlementDate。
+//
+// [v25.575] 定期轉帳 v1a（transfer/build/v1a/brief.md §6 G1；judge §4.3、§5、§6；樣稿①-2）：
+// • WealthSheet 加 .transferForm(從哪個帳戶；nil＝表單預設月薪入帳的帳戶)／.transferRule(規則)／.transferPeriod(規則, 那一期 key)：
+//   新增要訂閱（財富頁的 open 擋）；看規則頁、點一期不擋（裡面的刪除 G4 自己擋）。三張表單是 G4 的 WealthTransferViews.swift。
+// • ⑤ 銀行帳戶最後一張「定期轉帳・4 條」卡（WealthPageTransfersCard，放在 WealthPageBanksSection 裡、銀行項目卡下面；
+//   財富頁 VStack 的 10 個子項不加）：點一列＝規則頁、〔＋〕＝新增（沒收起來的銀行兩個以上才有）、「已結束 1 條 ›」點了在卡裡展開。
+// • 收起來確認框多一句：WealthPageConfirm.hideAccount 多帶第三個值（facts.hideTransferSentence；沒有＝nil）。
+// • 銀行項目卡「接下來兩件」膠囊：銀行自動轉的定期轉帳轉出不搶（樣稿①-2 註 2；自己轉的照放，同銀行頁膠囊 G2）；
+//   同一條只放最近一期。短名讀 WealthPageText.shortName（「轉給台灣銀行」「來自薪轉」）。
 
 // MARK: - 財富頁的彈出頁（一個 enum、一個 .sheet(item:)）
 
@@ -81,6 +90,12 @@ enum WealthSheet: Identifiable {
     case house(UUID)
     /// [v25.567] 〔補保單〕：新增保單、預填這一筆記帳保費（記帳的 id），存檔連它
     case newPolicy(UUID)
+    /// [v25.575] 新增定期轉帳（「從」帶這個帳戶；nil＝表單預設月薪入帳的帳戶）→ WealthTransferRuleForm
+    case transferForm(UUID?)
+    /// [v25.575] 一條定期轉帳的規則頁（規則的 id）→ WealthTransferRulePage
+    case transferRule(UUID)
+    /// [v25.575] 定期轉帳的一期（規則的 id、那一期原本的日子「2026-11-06」）→ WealthTransferPeriodSheet
+    case transferPeriod(UUID, String)
 
     var id: String {
         switch self {
@@ -100,15 +115,21 @@ enum WealthSheet: Identifiable {
         case .vehicle(let id): return "vehicle-\(id.uuidString)"
         case .house(let id): return "house-\(id.uuidString)"
         case .newPolicy(let id): return "newpolicy-\(id.uuidString)"
+        case .transferForm(let from): return "transferform-\(from?.uuidString ?? "new")"
+        case .transferRule(let id): return "transferrule-\(id.uuidString)"
+        case .transferPeriod(let id, let key): return "transferperiod-\(id.uuidString)-\(key)"
         }
     }
 
-    /// 要訂閱（待決定 10）：新增、編輯、記一筆、轉帳、對存摺、刷這張卡記一筆、[v25.566] 定存表單、[v25.567] 〔補保單〕。
-    /// 不擋：看卡片頁、標成已繳、排序與收起來、說明、接下來全部、[v25.567] 看儲蓄險／車子卡／房屋卡（同看卡片頁）
+    /// 要訂閱（待決定 10）：新增、編輯、記一筆、轉帳、對存摺、刷這張卡記一筆、[v25.566] 定存表單、[v25.567] 〔補保單〕、
+    /// [v25.575] 新增定期轉帳。
+    /// 不擋：看卡片頁、標成已繳、排序與收起來、說明、接下來全部、[v25.567] 看儲蓄險／車子卡／房屋卡（同看卡片頁）、
+    /// [v25.575] 定期轉帳的規則頁、一期（judge §6：看、改這一期、這期不轉、沒轉成、結束不用；刪除在規則頁裡擋）
     var needsPremium: Bool {
         switch self {
-        case .editor, .record, .transfer, .anchor, .addExpense, .timeDeposit, .newPolicy: return true
-        case .card, .paid, .order, .info, .upcomingAll, .savings, .vehicle, .house: return false
+        case .editor, .record, .transfer, .anchor, .addExpense, .timeDeposit, .newPolicy, .transferForm: return true
+        case .card, .paid, .order, .info, .upcomingAll, .savings, .vehicle, .house, .transferRule, .transferPeriod:
+            return false
         }
     }
 }
@@ -136,20 +157,21 @@ enum WealthPageInfoTopic: String {
 enum WealthPageConfirm: Identifiable {
     /// 停用一張卡：卡的 id、名字、還在刷它的定期扣款幾筆
     case disableCard(UUID, String, Int)
-    /// 收起來一個帳戶（銀行：銷戶）
-    case hideAccount(UUID, String)
+    /// 收起來一個帳戶（銀行：銷戶）：帳戶的 id、名字、[v25.575] 定期轉帳那一句
+    /// （facts.hideTransferSentence「有 1 條定期轉帳轉進這裡，會一起結束」；沒有＝nil。結束本身在 LifeStore.setWealthHidden 裡）
+    case hideAccount(UUID, String, String?)
 
     var id: String {
         switch self {
         case .disableCard(let id, _, _): return "disable-\(id.uuidString)"
-        case .hideAccount(let id, _): return "hide-\(id.uuidString)"
+        case .hideAccount(let id, _, _): return "hide-\(id.uuidString)"
         }
     }
 
     var title: String {
         switch self {
         case .disableCard(_, let name, _): return "停用「\(name)」？"
-        case .hideAccount(_, let name): return "收起來「\(name)」？"
+        case .hideAccount(_, let name, _): return "收起來「\(name)」？"
         }
     }
 
@@ -158,8 +180,11 @@ enum WealthPageConfirm: Identifiable {
         case .disableCard(_, _, let n):
             let base = "停用後不會出現在記帳的卡片選單，歷史帳單照算。"
             return n > 0 ? base + "還有 \(n) 筆定期扣款刷它，要先改嗎？" : base
-        case .hideAccount:
-            return "收起來：不算進存款合計、不出現在記帳選單；歷史照算，隨時可以在「⋯ › 排序與收起來」打開。"
+        case .hideAccount(_, _, let transferNote):
+            let base = "收起來：不算進存款合計、不出現在記帳選單；歷史照算，隨時可以在「⋯ › 排序與收起來」打開。"
+            // 接在原句後面（同卡片頁 WealthCardConfirm、刪銀行〔收起來就好〕的寫法：三個入口一樣的字）
+            guard let t = transferNote, !t.isEmpty else { return base }
+            return base + t + "。"
         }
     }
 }
@@ -470,12 +495,33 @@ extension MoneyItem {
         }
         // 接下來兩件；定存帳戶的到期、利息已經在進度條和上面那顆，不再列一次
         let rows: [WealthLedgerRow] = a.showsAsDeposit ? a.next30.filter { $0.timeDepositId == nil } : a.next30
-        let outs = rows.filter { $0.isOutflow }
-        let ins = rows.filter { !$0.isOutflow }
+        // [v25.575] 銀行自動轉的定期轉帳轉出不搶膠囊（樣稿①-2 註 2：不然每週都被零用錢佔走；自己轉的照放，同銀行頁膠囊）；
+        // 同一條定期轉帳只放最近一期（每週的轉進來不會兩顆都是它）
+        let outs = wealthFirstPerRule(rows.filter { $0.isOutflow && !wealthIsAutoTransfer($0) })
+        let ins = wealthFirstPerRule(rows.filter { !$0.isOutflow })
         for row in Array((outs + ins).prefix(2)) {
             chips.append(MoneyItemChip(icon: "calendar", text: wealthUpcomingChip(row, facts: facts, masked: masked)))
         }
         return chips
+    }
+
+    /// [v25.575] 銀行自動轉的定期轉帳那一列（自己轉的不算）
+    private static func wealthIsAutoTransfer(_ row: WealthLedgerRow) -> Bool {
+        row.transferRuleId != nil && !row.transferManual
+    }
+
+    /// [v25.575] 同一條定期轉帳只留最早那一期（其他列照留、照原本先後）
+    private static func wealthFirstPerRule(_ rows: [WealthLedgerRow]) -> [WealthLedgerRow] {
+        var seen = Set<UUID>()
+        var out: [WealthLedgerRow] = []
+        for row in rows {
+            if let rid = row.transferRuleId {
+                if seen.contains(rid) { continue }
+                seen.insert(rid)
+            }
+            out.append(row)
+        }
+        return out
     }
 
     /// [v25.566] 定存帳戶的膠囊：一筆「預估利息 8,500」（沒填利率沒有；遮住「預估利息 ••••」）；
@@ -744,6 +790,8 @@ struct WealthPageBanksSection: View {
     /// 沒有銀行帳戶（只有卡）：換一張提示卡
     let showPrompt: Bool
     let actions: WealthPageActions
+    /// [v25.575] 銀行項目卡最後一張「定期轉帳・4 條」卡（沒有規則＝nil；放在這區裡，財富頁 VStack 不多一個子項）
+    var transfers: WealthPageTransfers? = nil
 
     @Environment(\.colorScheme) private var scheme
 
@@ -755,6 +803,7 @@ struct WealthPageBanksSection: View {
                     ForEach(rows) { r in
                         card(r)
                     }
+                    transfersCard
                 }
             }
         } else if showPrompt {
@@ -762,6 +811,14 @@ struct WealthPageBanksSection: View {
                 FinanceCardHeader(title: "銀行帳戶")
                 prompt
             }
+        }
+    }
+
+    /// [v25.575] 「定期轉帳」卡（有規則才有）
+    @ViewBuilder
+    private var transfersCard: some View {
+        if let t = transfers {
+            WealthPageTransfersCard(data: t, actions: actions)
         }
     }
 
@@ -828,7 +885,7 @@ struct WealthPageBanksSection: View {
             Label("編輯", systemImage: "pencil")
         }
         Button {
-            actions.confirm(.hideAccount(r.id, r.name))
+            actions.confirm(.hideAccount(r.id, r.name, r.hideNote))
         } label: {
             Label("收起來", systemImage: "archivebox")
         }
@@ -876,8 +933,257 @@ struct WealthPageBanksSection: View {
             actions.edit(r.id, .bank)
         }
         Button("收起來") {
-            actions.confirm(.hideAccount(r.id, r.name))
+            actions.confirm(.hideAccount(r.id, r.name, r.hideNote))
         }
+    }
+}
+
+// MARK: - ⑤ 定期轉帳卡（[v25.575] 定期轉帳 v1a；judge §4.3、樣稿①-2）
+
+/// ⑤ 銀行帳戶最後一張「定期轉帳・4 條」白卡：標頭（圖示、標題、〔＋〕）、一條一列、「一個月大約轉出 …」＋灰字、
+/// 「已結束 1 條 ›」（點了在卡裡展開）。點一列＝規則頁（不擋訂閱）；〔＋〕＝新增（要訂閱：財富頁的 open 擋）。
+/// 字全部在 WealthPageTransfers 組好，這裡只畫
+struct WealthPageTransfersCard: View {
+    let data: WealthPageTransfers
+    let actions: WealthPageActions
+
+    @Environment(\.colorScheme) private var scheme
+    /// 已結束的那幾列展開了沒
+    @State private var showEnded = false
+
+    // @State 是 private：合成的 memberwise init 會變 private，WealthPageBanksSection 叫不到，自己寫一個
+    init(data: WealthPageTransfers, actions: WealthPageActions) {
+        self.data = data
+        self.actions = actions
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            header
+            Divider().padding(.leading, 14)
+            rowsBlock
+            footer
+            endedBlock
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .modifier(FinanceCardChrome())
+    }
+
+    private var pal: TripBoardPalette { TripBoardPalette(scheme) }
+
+    /// 「⟳ 定期轉帳・4 條　　〔＋〕」
+    private var header: some View {
+        HStack(alignment: .center, spacing: 10) {
+            TripBoardIconBadge(icon: "arrow.triangle.2.circlepath", colors: pal.badge(.blue), diameter: 30,
+                               dark: pal.dark)
+            Text(data.title)
+                .font(.headline)
+                .foregroundStyle(Color.primary)
+                .lineLimit(1)
+                .accessibilityAddTraits(.isHeader)
+            Spacer(minLength: 8)
+            addButton
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+    }
+
+    /// 〔＋〕：沒收起來的銀行帳戶兩個以上才有（要訂閱：財富頁的 open 擋）
+    @ViewBuilder
+    private var addButton: some View {
+        if data.canAdd {
+            FinanceAddButton(label: "新增定期轉帳", action: { actions.open(.transferForm(nil)) })
+        }
+    }
+
+    /// 還在跑的一條一列；一條都沒有：一行灰字
+    @ViewBuilder
+    private var rowsBlock: some View {
+        if let e = data.emptyText {
+            Text(e)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 11)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        ForEach(Array(data.rows.enumerated()), id: \.element.id) { i, r in
+            if i > 0 {
+                Divider().padding(.leading, 56)
+            }
+            rowButton(r)
+        }
+    }
+
+    /// 點一列＝那條的規則頁（不擋訂閱）
+    private func rowButton(_ r: WealthPageTransfers.Row) -> some View {
+        Button {
+            actions.open(.transferRule(r.id))
+        } label: {
+            WealthPageTransferLine(row: r, pal: pal)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(r.accessibilityText)
+        .accessibilityHint("點兩下打開這條定期轉帳")
+    }
+
+    /// 「一個月大約轉出 63,000（每週的照一年 52 次算）」＋灰字「轉給家人、房東的記在記帳的固定支出（算花掉）。」
+    private var footer: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Divider().padding(.leading, 14)
+            WealthPageTransfersFooter(monthly: data.monthly, monthlySpoken: data.monthlySpoken, note: data.note,
+                                      pal: pal)
+        }
+    }
+
+    /// 「已結束 1 條 ›」（有才出現）：點了在卡裡展開那幾列（淡一點）
+    @ViewBuilder
+    private var endedBlock: some View {
+        if let t = data.endedTitle {
+            Divider().padding(.leading, 14)
+            Button {
+                withAnimation(.easeInOut(duration: 0.25)) { showEnded.toggle() }
+            } label: {
+                endedHeader(t)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(t)
+            .accessibilityValue(showEnded ? "已展開" : "已收起")
+            .accessibilityHint(showEnded ? "點兩下收起" : "點兩下展開")
+            if showEnded {
+                ForEach(data.ended) { r in
+                    Divider().padding(.leading, 56)
+                    rowButton(r)
+                }
+            }
+        }
+    }
+
+    private func endedHeader(_ title: String) -> some View {
+        HStack(spacing: 6) {
+            Text(title)
+                .font(.subheadline.weight(.bold))
+                .foregroundStyle(pal.hint)
+                .lineLimit(1)
+            Spacer(minLength: 8)
+            Image(systemName: showEnded ? "chevron.down" : "chevron.right")
+                .font(.caption.weight(.bold))
+                .foregroundStyle(.tertiary)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .contentShape(Rectangle())
+    }
+}
+
+/// 定期轉帳卡的卡底：「一個月大約轉出 63,000（…）」（金額粗體）＋灰字
+private struct WealthPageTransfersFooter: View {
+    let monthly: FinanceLine?
+    let monthlySpoken: String?
+    let note: String
+    let pal: TripBoardPalette
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            monthlyLine
+            Text(note)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 11)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    @ViewBuilder
+    private var monthlyLine: some View {
+        if let m = monthly {
+            FinanceLineText.text(m, pal: pal)
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(Color.primary)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityLabel(monthlySpoken ?? m.plain)
+        }
+    }
+}
+
+/// 定期轉帳卡的一列（樣稿①-2）：⇄ 圖示；「薪轉 → 零用錢」右「3,000」；「每週五・銀行自動轉」右「下次 10/30（五）」；
+/// 第三行小標（有才出現：注意色或灰）。已結束的整列淡一點
+private struct WealthPageTransferLine: View {
+    let row: WealthPageTransfers.Row
+    let pal: TripBoardPalette
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            icon
+            VStack(alignment: .leading, spacing: 3) {
+                firstLine
+                secondLine
+                noteTag
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 11)
+        .opacity(row.ended ? 0.6 : 1)
+        .contentShape(Rectangle())
+    }
+
+    /// 淡藍圓底＋藍色 ⇄
+    private var icon: some View {
+        Image(systemName: "arrow.left.arrow.right")
+            .font(.system(size: 13, weight: .bold))
+            .foregroundStyle(iconColor)
+            .frame(width: 30, height: 30)
+            .background(iconColor.opacity(pal.dark ? 0.22 : 0.12), in: Circle())
+            .accessibilityHidden(true)
+    }
+
+    private var iconColor: Color { pal.dark ? Color(tb: 0x6FA8FF) : Color(tb: 0x2F7FE8) }
+
+    private var firstLine: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text(row.title)
+                .font(.subheadline.weight(.bold))
+                .foregroundStyle(Color.primary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.85)
+            Spacer(minLength: 6)
+            Text(row.amount)
+                .font(.system(.subheadline, design: .rounded).weight(.heavy))
+                .monospacedDigit()
+                .foregroundStyle(Color.primary)
+                .lineLimit(1)
+                .fixedSize()
+        }
+    }
+
+    private var secondLine: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text(row.detail)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.85)
+            Spacer(minLength: 6)
+            Text(row.next)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .fixedSize()
+        }
+    }
+
+    @ViewBuilder
+    private var noteTag: some View {
+        if let n = row.note {
+            FinanceMiniTag(text: n, color: noteColor)
+                .padding(.top, 2)
+        }
+    }
+
+    private var noteColor: Color {
+        row.noteWarn ? MoneyTone.warn.color(pal) : MoneyTone.neutral.color(pal)
     }
 }
 

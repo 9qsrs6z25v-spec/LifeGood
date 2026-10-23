@@ -34,6 +34,10 @@ class LifeStore: ObservableObject {
     /// 「記帳理財」匯出——裡面只有密文）：有效期限、保單號碼、票證號。不放進 wealthBook：25.564–25.567 的 iPad 存一次帳本會把
     /// 不認得的欄位洗掉，另一個鍵它不碰。一改 wealthRevision 也加一（有效期限的快取、財富的一套數字跟著重算）
     @Published var wealthVault: WealthVaultBook = WealthVaultBook() { didSet { wealthRevision &+= 1; if !isLoading { save() } } }
+    /// [v25.575] 定期轉帳那一包（WealthTransfers.swift WealthTransferBook；鍵 life_wealth_transfers_v1，跟 iCloud 同步、進完整備份與
+    /// 「記帳理財」匯出）。不放進 wealthBook、不加在 BankDeposit 上：還沒更新的 iPad 存一次會把不認得的欄位洗掉，另一個鍵它不碰。
+    /// 一改 wealthRevision 也加一（一套數字的快取跟著重算：每一期算進兩個帳戶）
+    @Published var wealthTransfers: WealthTransferBook = WealthTransferBook() { didSet { wealthRevision &+= 1; if !isLoading { save() } } }
     /// [v25.357] 公司廠區據點：與重大決議的「廠區」欄位對應，長成每個廠的歷史年線
     @Published var companySites: [CompanySite] = [] { didSet { if !isLoading { save() } } }
     /// [v25.399] 旅遊規劃（要去的行程；與旅遊地圖「去過的地點」是兩回事）
@@ -76,7 +80,9 @@ class LifeStore: ObservableObject {
         "life_company_sites", "life_trip_plans", "life_workout_prefs", "life_workout_health",
         "life_workout_leave", "life_wealth_book_v1", "life_wealth_deposits_v1",
         // [v25.568] 號碼密文那一包（life_wealth_facts_v1 不在這裡：App 只寫給網頁版、自己不讀）
-        "life_wealth_vault_v1"
+        "life_wealth_vault_v1",
+        // [v25.575] 定期轉帳那一包（WealthTransferBook.syncKey）
+        "life_wealth_transfers_v1"
     ]
 
     init() {
@@ -125,6 +131,11 @@ class LifeStore: ObservableObject {
         // 「別人剛新增了什麼」。
         let tripKeyTouched = (note.userInfo?["keys"] as? [String])?.contains("life_trip_plans") ?? false
         let tripsBefore = tripKeyTouched ? tripPlans : []
+        // [v25.575] 定期轉帳：你和太太各加各的（transfer/judge.md §2.3 #9）。增量拉取帶了這個鍵＝別台改過，load() 會整包換成雲端那份；
+        // 先留下本機的，load() 之後照 id＋updatedAt 合併（墓碑勝過比它舊的）——不然後同步的那台會把另一台剛加的那條洗掉。
+        // 沒帶 keys 的全量重載（以雲端覆蓋這台、第一次合併）照雲端那包，不併
+        let transfersKeyTouched = (note.userInfo?["keys"] as? [String])?.contains(WealthTransferBook.syncKey) ?? false
+        let transfersBefore = wealthTransfers
         load()
         // backfill 期間暫停 save()，避免剛從雲端拉取就立刻回寫；用 defer 重置，
         // 避免日後在中間加入 guard/return 導致 isLoading 卡死為 true（save() 永久停擺）
@@ -137,8 +148,17 @@ class LifeStore: ObservableObject {
         let didSerial = migrateResolutionSerials()
         // [v25.568] 還沒更新的 iPad 又寫回明碼（舊版表單打了完整號碼）、或這台的金鑰剛同步過來：拉下來就搬成密文
         let didVault = migrateWealthSecrets() > 0
+        // [v25.575] 定期轉帳：雲端那份（剛 load 進來的）併上本機剛才那份；合出來跟雲端那份不一樣（本機有它沒有的）就存回去、推上去
+        var didTransfers = false
+        if transfersKeyTouched {
+            let merged = wealthTransfers.merged(with: transfersBefore)
+            if merged != wealthTransfers {
+                wealthTransfers = merged
+                didTransfers = true
+            }
+        }
         // 若 backfill 新建了 OrgPerson/BusinessCard 或修復了成員連結，立即持久化避免重啟後消失
-        if didBackfill || didRepair || didMigrateEq || didSerial || didVault { save() }
+        if didBackfill || didRepair || didMigrateEq || didSerial || didVault || didTransfers { save() }
         // [v25.454] 比對拉取前後的旅遊規劃，把別台裝置新增的行程／景點／攜帶物品／
         // 伴手禮寫成本機通知。
         if tripKeyTouched {
@@ -355,6 +375,7 @@ class LifeStore: ObservableObject {
         // [v25.567] 保單總表要儲蓄險、車子、房子（四個來源去重）；cacheKey 已經含理財的 modifyID
         // [v25.568] 有效期限 v7 起是密文：每張卡那個月 1 號由 cardExpiryMonths 解好給（行事曆、要確認 #12、通知照舊）
         let f = WealthFacts.build(milestones: milestones, book: wealthBook, deposits: wealthDeposits,
+                                  transfers: wealthTransfers,
                                   expenses: expense.expenses, incomes: expense.incomes, stocks: finance.stocks,
                                   rates: FinanceRates(expense), now: now, insurances: finance.insurances,
                                   vehicles: finance.vehicles, realEstates: finance.realEstates,
@@ -462,7 +483,7 @@ class LifeStore: ObservableObject {
                          expense: ExpenseStore, finance: FinanceStore) -> Double {
         WealthFacts.passbookBalance(accountId: accountId, code: code, endOf: day, excluding: excluding,
                                     milestones: milestones, book: wealthBook, deposits: wealthDeposits,
-                                    expenses: expense.expenses, incomes: expense.incomes, stocks: finance.stocks,
+                                    transfers: wealthTransfers, expenses: expense.expenses, incomes: expense.incomes, stocks: finance.stocks,
                                     rates: FinanceRates(expense))
     }
 
@@ -624,12 +645,18 @@ class LifeStore: ObservableObject {
     }
 
     /// 收起來（銀行：銷戶）／打開：不算進合計、不出現在選單；歷史照算
+    /// [v25.575] 收起來時，碰到這個帳戶、還在跑的定期轉帳一律結束：最後一期＝收起來那天以前的最後一期（endedBy "accountHidden"）。
+    /// 收起來有 4 個入口（財富頁、卡片頁、刪銀行時〔收起來就好〕、排序與收起來頁一次好幾個）全部走這支，結束放在這裡就不會漏
     func setWealthHidden(_ id: UUID, hidden: Bool, on date: Date = Date()) {
         updateWealthBook { book in
             var prefs = book.account(id)
             prefs.hidden = hidden ? true : nil
             prefs.closedDate = hidden ? WealthCal.day(date) : nil
             book.setAccount(prefs, for: id)
+        }
+        if hidden {
+            endTransferRules(touching: id, lastOnOrBefore: WealthCal.addDays(-1, to: WealthCal.day(date)),
+                             endedBy: "accountHidden", now: date)
         }
     }
 
@@ -911,6 +938,137 @@ class LifeStore: ObservableObject {
         book.deposits = book.all.filter { !drop.contains($0.id) }
     }
 
+    // MARK: - [v25.575] 定期轉帳 v1a（WealthTransferBook；transfer/build/v1a/brief.md §2）
+    // 規則只算不寫：這裡只改規則與每一期的註記（不寫 BankDeposit、不碰記帳，除了「是同一筆嗎？」答〔是〕那兩支）。
+    // 每支只指派一次 wealthTransfers（一次存檔、一次推 iCloud）；刪掉超過 30 天的墓碑順手清掉。畫面先 dismiss、下一個 runloop 才叫
+
+    /// 改定期轉帳那一包（改完跟原本一樣就不寫；順手清掉超過 30 天的墓碑）
+    func updateWealthTransfers(now: Date = Date(), _ body: (inout WealthTransferBook) -> Void) {
+        var b = wealthTransfers
+        body(&b)
+        b = b.purged(now: now)
+        if b != wealthTransfers { wealthTransfers = b }
+    }
+
+    /// 新增（或整條換掉）一條定期轉帳（新增表單存檔；要訂閱，畫面擋）。createdAt 沒有就補上今天這一刻、updatedAt＝現在
+    func saveTransferRule(_ rule: WealthTransferRule, now: Date = Date()) {
+        var r = rule
+        if r.createdAt == nil { r.createdAt = now }
+        r.updatedAt = now
+        r.deletedAt = nil
+        updateWealthTransfers(now: now) { $0.upsert(r) }
+    }
+
+    /// 〔結束〕〔結束這條〕：最後一期＝lastKey（那一期原本的日子，含）；nil＝一期都不算（〔設錯了〕：最後一期設在第一期前一天）。
+    /// 規則留在「已結束」，以前的期照算（不擋訂閱）
+    func endTransferRule(_ id: UUID, lastKey: String?, endedBy: String? = nil, now: Date = Date()) {
+        updateWealthTransfers(now: now) { book in
+            guard var r = book.rule(id) else { return }
+            r.endKey = lastKey ?? Self.transferKeyBeforeStart(r)
+            r.endedBy = endedBy
+            r.updatedAt = now
+            book.upsert(r)
+        }
+    }
+
+    /// 刪除這條＝墓碑（deletedAt；不展開、不列，30 天後才真的清掉，另一台還沒同步的舊內容不會把它長回來）。要訂閱，畫面擋
+    func deleteTransferRule(_ id: UUID, now: Date = Date()) {
+        updateWealthTransfers(now: now) { book in
+            guard var r = book.rule(id) else { return }
+            r.deletedAt = now
+            r.updatedAt = now
+            book.upsert(r)
+        }
+    }
+
+    /// 一期的註記：status（WealthTransferStatus.rawValue；nil＝照規則）、dayKey（實際哪天；nil＝原本那天）、amount（nil＝照規則）
+    /// 三個一起換掉（lateOut／lateIn 照留）。〔改這一期〕〔銀行這期取消了〕〔這期不轉〕〔沒轉成〕〔今天補轉〕〔復原〕〔銀行還是轉了〕都走這支
+    /// （不擋訂閱）。全部回到照規則時留一個只有時間的空註記：不然另一台的舊註記合併時會長回來
+    func setTransferNote(ruleId: UUID, key: String, status: String?, dayKey: String?, amount: Double?,
+                         now: Date = Date()) {
+        updateWealthTransfers(now: now) { book in
+            guard var r = book.rule(ruleId) else { return }
+            var notes = r.notes ?? [:]
+            var n = notes[key] ?? WealthTransferNote()
+            n.status = status
+            n.dayKey = dayKey == key ? nil : dayKey
+            n.amount = amount
+            n.at = now
+            n.updatedAt = now
+            notes[key] = n
+            r.notes = notes
+            book.upsert(r)
+        }
+    }
+
+    /// 只改一期的狀態：〔銀行這期取消了〕〔這期不轉〕"skip"、〔沒轉成〕"failed"、〔復原〕〔銀行還是轉了〕〔還是要轉〕nil（不擋訂閱）。
+    /// 金額照留（〔改這一期〕改過的不會不見）；從補轉（原本 "redo"）改成別的時，補轉那天（dayKey）一起拿掉
+    func setTransferStatus(ruleId: UUID, key: String, status: String?, now: Date = Date()) {
+        updateWealthTransfers(now: now) { book in
+            guard var r = book.rule(ruleId) else { return }
+            var notes = r.notes ?? [:]
+            var n = notes[key] ?? WealthTransferNote()
+            if n.status == WealthTransferStatus.redo.rawValue && status != n.status { n.dayKey = nil }
+            n.status = status
+            n.at = now
+            n.updatedAt = now
+            notes[key] = n
+            r.notes = notes
+            book.upsert(r)
+        }
+    }
+
+    /// 對存摺表單「這天還有：來自 薪轉 +3,000」〔還沒有〕／〔存摺上已經有了〕：那一期這一邊在對存摺之後才進（out＝轉出那邊）
+    func setTransferLate(ruleId: UUID, key: String, out: Bool, late: Bool, now: Date = Date()) {
+        updateWealthTransfers(now: now) { book in
+            guard var r = book.rule(ruleId) else { return }
+            var notes = r.notes ?? [:]
+            var n = notes[key] ?? WealthTransferNote()
+            let value: Bool? = late ? true : nil
+            if out {
+                guard n.lateOut != value else { return }
+                n.lateOut = value
+            } else {
+                guard n.lateIn != value else { return }
+                n.lateIn = value
+            }
+            n.updatedAt = now
+            notes[key] = n
+            r.notes = notes
+            book.upsert(r)
+        }
+    }
+
+    /// 存規則時「是同一筆嗎？」收入那筆答〔是〕：那筆週期性收入結束在 day（Income.endDate 照月份算、那個月含：
+    /// WealthTransferMatch.endDay 已經是前一個月月底）
+    func endRecurringIncome(_ incomeId: UUID, on day: Date, expense: ExpenseStore) {
+        var incomes = expense.incomes
+        guard let i = incomes.firstIndex(where: { $0.id == incomeId }) else { return }
+        incomes[i].endDate = WealthCal.day(day)
+        expense.incomes = incomes
+    }
+
+    /// 收起來、刪帳戶：碰到這個帳戶、還在跑的規則一律結束，最後一期＝limit（含）以前的最後一期；一期都沒有＝一期都不算
+    func endTransferRules(touching accountId: UUID, lastOnOrBefore limit: Date, endedBy: String, now: Date = Date()) {
+        let todayKey = WealthCal.dayKey(now)
+        updateWealthTransfers(now: now) { book in
+            for r0 in book.live where r0.touches(accountId) && r0.isRunning(todayKey: todayKey) {
+                var r = r0
+                let last: Date? = WealthTransferSchedule.lastOriginal(r, onOrBefore: limit)
+                r.endKey = last.map { WealthCal.dayKey($0) } ?? Self.transferKeyBeforeStart(r)
+                r.endedBy = endedBy
+                r.updatedAt = now
+                book.upsert(r)
+            }
+        }
+    }
+
+    /// 第一期的前一天（〔設錯了，一期都不算〕的最後一期）；沒有第一期＝今天前一天
+    private static func transferKeyBeforeStart(_ r: WealthTransferRule) -> String {
+        let start: Date = r.startKey.flatMap { WealthTransferSchedule.date(fromKey: $0) } ?? WealthCal.day(Date())
+        return WealthCal.dayKey(WealthCal.addDays(-1, to: start))
+    }
+
     // MARK: - [v25.567] 財富 v6：證券戶交割、保單連記帳、從哪扣（build/v6/brief.md §2；都只寫一次 milestones／帳本／記帳／理財）
 
     /// 股票的交割紀錄重寫一次（股票表單、股票卡加交易、記帳改舊版單筆股票都叫這一支；以前三份各寫各的）：
@@ -1057,6 +1215,7 @@ class LifeStore: ObservableObject {
             cashBefore: facts.cash, cashAfter: 0, lastAnchor: facts.account(bankId)?.lastAnchorDate)
         let applied = WealthSettlementMovePlan.applied(plan, milestones: milestones, stocks: finance.stocks)
         let after = WealthFacts.build(milestones: applied.milestones, book: wealthBook, deposits: wealthDeposits,
+                                      transfers: wealthTransfers,
                                       expenses: expense.expenses, incomes: expense.incomes, stocks: applied.stocks,
                                       rates: rates, now: now)
         plan.bankAfter = after.account(bankId)?.ntdTotal ?? 0
@@ -1330,6 +1489,8 @@ class LifeStore: ObservableObject {
             if let rolled = book.rolledOver(through: WealthCal.day(now)) { book = rolled }
             book.removeBank(id, today: now)
         }
+        // [v25.575] 碰到它的定期轉帳結束在今天（今天以前的期照算；不刪規則：另一邊的列寫「轉給 別的帳戶」）
+        endTransferRules(touching: id, lastOnOrBefore: WealthCal.day(now), endedBy: "accountDeleted", now: now)
 
         var stocks = finance.stocks
         var stocksChanged = false
@@ -1390,6 +1551,10 @@ class LifeStore: ObservableObject {
         }.count
         // [v25.566] 這個帳戶的定存（每一串算一筆：自動續存的不重複數）
         let depositCount = isBank ? wealthDeposits.all.filter { $0.bankId == id && $0.previousId == nil }.count : 0
+        // [v25.575] 碰到它、還在跑的定期轉帳（刪掉時結束在今天）
+        let todayKey = WealthCal.dayKey(now)
+        let transferCount = isBank
+            ? wealthTransfers.live.filter { $0.touches(id) && $0.isRunning(todayKey: todayKey) }.count : 0
 
         var bankName: String?
         var paidTotal: Double = 0
@@ -1435,7 +1600,8 @@ class LifeStore: ObservableObject {
             linkedCardCount: linkedCards, directExpenseCount: directExpenses, incomeCount: incomeCount,
             stockCount: stockCount, debitBankName: bankName, cardTotal: paidTotal,
             unpaidCardTotal: unpaidTotal,
-            cardExpenseCount: cardCount, recurringTexts: recurring, timeDepositCount: depositCount)
+            cardExpenseCount: cardCount, recurringTexts: recurring, timeDepositCount: depositCount,
+            transferRuleCount: transferCount)
     }
 
     // MARK: - 配偶協定
@@ -4309,7 +4475,8 @@ class LifeStore: ObservableObject {
             performanceBallots: performanceBallots, workouts: workouts,
             companySites: companySites, tripPlans: tripPlans, workoutPrefs: workoutPrefs,
             workoutHealthLedger: workoutHealthLedger, workoutLeave: workoutLeave,
-            wealthBook: wealthBook, wealthDeposits: wealthDeposits, wealthVault: wealthVault
+            wealthBook: wealthBook, wealthDeposits: wealthDeposits, wealthVault: wealthVault,
+            wealthTransfers: wealthTransfers
         )
         saveQueue.async {
             let encoder = JSONEncoder()
@@ -4339,6 +4506,7 @@ class LifeStore: ObservableObject {
             if let d = try? encoder.encode(snap.wealthBook)     { ud.set(d, forKey: "life_wealth_book_v1") }
             if let d = try? encoder.encode(snap.wealthDeposits) { ud.set(d, forKey: "life_wealth_deposits_v1") }
             if let d = try? encoder.encode(snap.wealthVault)    { ud.set(d, forKey: WealthVaultBook.syncKey) }
+            if let d = try? encoder.encode(snap.wealthTransfers) { ud.set(d, forKey: WealthTransferBook.syncKey) }
             CloudSyncManager.shared.pushAll()
         }
     }
@@ -4403,6 +4571,11 @@ class LifeStore: ObservableObject {
         if let data = rawDataIfChanged(WealthVaultBook.syncKey),
            let wv = try? decoder.decode(WealthVaultBook.self, from: data) {
             wealthVault = wv
+        }
+        // [v25.575] 定期轉帳那一包
+        if let data = rawDataIfChanged(WealthTransferBook.syncKey),
+           let wt = try? decoder.decode(WealthTransferBook.self, from: data) {
+            wealthTransfers = wt
         }
     }
 
@@ -4483,6 +4656,7 @@ class LifeStore: ObservableObject {
         wealthBook = WealthBook()
         wealthDeposits = WealthDepositBook()
         wealthVault = WealthVaultBook()
+        wealthTransfers = WealthTransferBook()
         companySites.removeAll()
         // 行程的照片檔也要一起清，不然會留下沒人指向的孤兒檔被雲端一直重傳
         for plan in tripPlans {
@@ -4528,6 +4702,8 @@ struct FinanceDeletionImpact {
     let recurringTexts: [String]
     /// [v25.566] 刪銀行：這個帳戶的定存（一串算一筆）會一起刪
     var timeDepositCount: Int = 0
+    /// [v25.575] 刪銀行：碰到它、還在跑的定期轉帳（會在今天結束，以前的期照算）
+    var transferRuleCount: Int = 0
 
     var title: String { "刪掉「\(displayName)」？" }
     /// 還在用的卡先建議改成停用
@@ -4569,6 +4745,7 @@ struct FinanceDeletionImpact {
         if !kept.isEmpty { parts.append(kept.joined(separator: "、") + "會留著，但不再算任何帳戶") }
         if stockCount > 0 { parts.append("\(stockCount) 檔股票的交割帳戶會清掉") }
         if timeDepositCount > 0 { parts.append("這個帳戶的 \(timeDepositCount) 筆定存會一起刪掉") }
+        if transferRuleCount > 0 { parts.append("有 \(transferRuleCount) 條定期轉帳會在今天結束（以前轉的照算）") }
         parts.append(isBank ? "這個帳戶自己的存提款紀錄會一起刪掉，無法復原" : "刪掉後無法復原")
         return parts.joined(separator: "；") + "。"
     }

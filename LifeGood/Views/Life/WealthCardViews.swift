@@ -52,6 +52,12 @@ import UniformTypeIdentifiers
 // • 30 秒收回、切背景收回、帳號〔複製〕60 秒＋只在這台都不動；這台還沒同步到金鑰：照舊跳說明（第一句改「這台還沒同步到金鑰」；
 //   CardVault.keyMissingHere 時不再叫你去編輯畫面重打——重打也會被擋下，改說「金鑰同步過來就看得到」：missingKeyText）。
 // • 照片 footer：信用卡「…拍到像完整卡號的數字會提醒你。」（提醒在表單加照片那一刻，WealthPhotoScan）；銀行、證券戶「…照片不會加密。」
+//
+// [v25.575] 定期轉帳 v1a G2（transfer/build/v1a/brief.md §6 G2；transfer/judge.md §4.7）：
+// • ③⑦ 定期轉帳那一列點了＝WealthCardOpen.transferPeriod → WealthTransferPeriodSheet（不擋訂閱）；.transferRule → 規則頁（不擋）。
+// • 〔＋〕選單（WealthBankAddItems）「轉帳」下面多「定期轉帳」（沒收起來才有；要訂閱）→ WealthTransferRuleForm(fromId: 這個帳戶)。
+//   三張表單（WealthTransferViews.swift）自己掛布幕、presentationDetents，sheetView 不再包一層。
+// • 收起來確認框：WealthCardBank.hideTransferNote 有字就接在 message 後面（「…有 1 條定期轉帳轉進這裡，會一起結束。」）；按鈕不變。
 
 /// 打開卡片頁時捲到哪一區（財富頁 ③ 點一列＝.upcoming；要確認、四格點了也用）
 enum WealthCardAnchor: String, Hashable {
@@ -100,6 +106,12 @@ struct WealthCardSheet: Identifiable {
         case policyLink(UUID)
         /// [v25.567] 要交割不夠〔轉帳過去〕（轉到哪個帳戶、先填好的金額；要訂閱）
         case transferTo(UUID, Double)
+        /// [v25.575] 新增定期轉帳（「從」帶這個帳戶；要訂閱：〔＋〕選單打開時擋）
+        case transferForm(UUID)
+        /// [v25.575] 一條定期轉帳的規則頁（不擋；刪除在規則頁裡擋）
+        case transferRule(UUID)
+        /// [v25.575] 定期轉帳的一期（規則 id、那一期原本的日子「2026-11-06」；不擋）
+        case transferPeriod(UUID, String)
     }
     let id = UUID()
     let kind: Kind
@@ -556,6 +568,11 @@ struct WealthCardPage: View {
             // [v25.566] 帳戶帶那一期自己的（定存到期轉進薪轉的那一列在薪轉頁點，表單還是台灣銀行那一期）
             let owner = lifeStore.timeDepositRecord(termId)?.bankId ?? currentId
             present(.timeDeposit(owner, termId), premium: true)
+        // [v25.575] 定期轉帳的一期、規則頁：看、改這一期、這期不轉、沒轉成都不用訂閱（新增、刪除在表單／規則頁裡擋）
+        case .transferPeriod(let ruleId, let key):
+            present(.transferPeriod(ruleId, key), premium: false)
+        case .transferRule(let ruleId):
+            present(.transferRule(ruleId), premium: false)
         }
     }
 
@@ -621,7 +638,11 @@ struct WealthCardPage: View {
         switch c {
         case .createPolicyExpense:
             return data?.policy?.createMessage ?? c.message
-        case .disableCard, .hideAccount, .deleteTransfer:
+        case .hideAccount(let id, _):
+            // [v25.575] 有定期轉帳碰到這個帳戶：多一句「有 1 條定期轉帳轉進這裡，會一起結束」（結束在 setWealthHidden 裡做）
+            guard data?.id == id, let note = data?.bank?.hideTransferNote else { return c.message }
+            return c.message + note + "。"
+        case .disableCard, .deleteTransfer:
             return c.message
         }
     }
@@ -890,6 +911,13 @@ struct WealthCardPage: View {
             return AnyView(WealthPolicyLinkSheet(policyId: id))
         case .transferTo(let id, let amount):
             return AnyView(WealthTransferSheet(toId: id, amount: amount))
+        // [v25.575] 定期轉帳（G4 的三張表單自己掛布幕、presentationDetents）
+        case .transferForm(let id):
+            return AnyView(WealthTransferRuleForm(fromId: id))
+        case .transferRule(let id):
+            return AnyView(WealthTransferRulePage(ruleId: id))
+        case .transferPeriod(let id, let key):
+            return AnyView(WealthTransferPeriodSheet(ruleId: id, periodKey: key))
         }
     }
 }
@@ -915,6 +943,12 @@ struct WealthBankAddItems: View {
         }
         Button("轉帳") {
             actions.present(.transfer(accountId), true)
+        }
+        // [v25.575] 定期轉帳（「從」帶這個帳戶；要訂閱；收起來的帳戶沒有）
+        if !accountHidden {
+            Button("定期轉帳") {
+                actions.present(.transferForm(accountId), true)
+            }
         }
         // [v25.566] 定存（記在這個帳戶）、換匯（有外幣才有）
         if !accountHidden {
