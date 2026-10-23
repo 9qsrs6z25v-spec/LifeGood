@@ -17,7 +17,20 @@ import WidgetKit
 // ⚠️ 不加 actor：delegate 方法在 WCSession 的背景執行緒。要動 WatchModel 一律 Task { @MainActor in … }
 //    （judge §7.8-8）。寫檔、重畫小格要在 delegate 方法 return 之前做完——背景被叫醒時，
 //    WatchAppDelegate 等 hasContentPending 變 false 就標完成，App 隨時會被暫停（judge §5.3-4）。
-// ⚠️ watchOS 沒有 sessionDidBecomeInactive／sessionDidDeactivate（iOS 才有），不准寫。
+// ⚠️ watchOS 沒有 iOS 那兩支「變成不活動／停用」的 delegate（session…DidBecomeInactive／session…DidDeactivate，iOS 才有），不准寫。
+//
+// [手錶 v2，v25.576] 記一筆送 iPhone（judge §4.3、§5.3、附錄 B「記一筆」那一列；watch/build/v2/brief.md G2-1）：
+//   • sendRecord：RecordOutbox（主執行緒）過了 10 秒／〔完成〕／翻走／手腕放下才叫。每一筆都 transferUserInfo(["record": JSON])
+//     （排隊、保證照順序送到、App 被暫停也繼續）；iPhone 在旁邊（isReachable）再 sendMessage 同一份（會把 iPhone 在背景叫醒、
+//     有回話 ["ok": "imported"|"queued"|"failed", "today": 3]）→ RecordOutbox.phoneReplied；送不出去 → phoneUnreachable
+//     （transferUserInfo 那一份照樣排著）。兩條都到也只記一次：iPhone 用編號擋（WatchImportedLog＋收件匣 id＝支出 id）。
+//   • transferUserInfo 送完（session(_:didFinish:error:)、沒有錯）→ RecordOutbox.markDelivered（設定第一行不再算這一筆）。
+//   • outstandingRecordIds：系統排隊裡還沒送完的記帳編號（設定〔現在送〕只補送排隊裡已經沒有的那幾筆）。
+//   • applyData 寫好包之後（還在 applyLock 裡）RecordOutboxStore.reconcile：對 includedIds／queuedIds 收尾；
+//     主執行緒那一份由 notifyModel → WatchModel.packageReceived → RecordOutbox.packageApplied 重讀、補送。
+//   • activate 好、iPhone 變得在旁邊：RecordOutbox.sendDue（還沒 activate 好時按的、App 被暫停沒送成的，現在送）。
+//   鎖的方向只有 applyLock → stateLock、applyLock → RecordOutboxStore 的鎖；RecordOutboxStore 不回頭拿這兩把，不會互鎖。
+//   手錶不會收到 record（iPhone → 手錶只有包），didReceiveUserInfo 照 v1。
 
 final class WatchSync: NSObject, WCSessionDelegate {
     static let shared = WatchSync()
@@ -93,6 +106,60 @@ final class WatchSync: NSObject, WCSessionDelegate {
         })
     }
 
+    // MARK: [v2] 記一筆送 iPhone（brief G2-1；名字、參數不准改，RecordOutbox 在叫）
+
+    /// iPhone 在旁邊（activate 好、isReachable）：RecordOutbox 決定寫「正在送到 iPhone…」還是「先存在手錶上」
+    var isPhoneReachable: Bool {
+        guard WCSession.isSupported() else { return false }
+        let session = WCSession.default
+        return session.activationState == .activated && session.isReachable
+    }
+
+    /// 送一筆（RecordOutbox 在主執行緒叫）：transferUserInfo（排隊、保證送到）＋ iPhone 在旁邊再 sendMessage（快、有回話）。
+    /// 還沒 activate 好（或編不成 JSON）回 false（RecordOutbox 留著 holding，activate 好、回前景、收到包再送）。
+    /// 回 true＝transferUserInfo 已經排進系統（不在旁邊時 RecordOutbox 自己寫「還沒送到 iPhone，先存在手錶上」）。
+    /// 回話一律 Task { @MainActor in } 交給 RecordOutbox（replyHandler／errorHandler 在 WCSession 的背景執行緒）
+    func sendRecord(_ record: WatchRecord) -> Bool {
+        guard WCSession.isSupported() else { return false }
+        let session = WCSession.default
+        guard session.activationState == .activated, let data = WatchRecordCodec.encode(record) else { return false }
+        let message: [String: Any] = [WatchLink.recordKey: data]
+        // 排隊、保證照順序送到、App 被暫停也繼續（送完 → session(_:didFinish:error:) → markDelivered）
+        _ = session.transferUserInfo(message)
+        // 不在旁邊：只排隊（RecordOutbox 寫「先存在手錶上」，回到身邊系統自己補送）
+        guard session.isReachable else { return true }
+        let id = record.id
+        session.sendMessage(message, replyHandler: { reply in
+            // iPhone 回 ["ok": "imported"|"queued"|"failed", "today": 3]（today 只有 imported 才可能有）
+            let ok = reply[WatchLink.okKey] as? String
+            let today = reply[WatchLink.todayCountKey] as? Int
+            Task { @MainActor in
+                RecordOutbox.shared.phoneReplied(id, ok: ok, today: today)
+            }
+        }, errorHandler: { _ in
+            // iPhone 不在旁邊了、LifeGood 被滑掉、逾時…：transferUserInfo 那一份照樣排著
+            Task { @MainActor in
+                RecordOutbox.shared.phoneUnreachable(id)
+            }
+        })
+        return true
+    }
+
+    /// 系統排隊裡還沒送完的手錶記帳編號（WCSession.outstandingUserInfoTransfers 裡帶 "record" 的）；〔現在送〕用：
+    /// 還在排隊的不再送一次，排隊裡已經沒有、iPhone 也還沒確認的才補送。還沒 activate 好回空（那時 sendRecord 也送不出去）
+    func outstandingRecordIds() -> Set<UUID> {
+        guard WCSession.isSupported() else { return [] }
+        let session = WCSession.default
+        guard session.activationState == .activated else { return [] }
+        var ids = Set<UUID>()
+        for transfer in session.outstandingUserInfoTransfers {
+            guard let data = transfer.userInfo[WatchLink.recordKey] as? Data,
+                  let record = WatchRecordCodec.decode(data) else { continue }
+            ids.insert(record.id)
+        }
+        return ids
+    }
+
     // MARK: 收包
 
     /// application context／complication user info／回覆那一份字典：取出 "pkg"（LZFSE）交給 applyData。
@@ -124,6 +191,10 @@ final class WatchSync: NSObject, WCSessionDelegate {
         }
         let kinds = WatchPackageDiff.widgetKinds(old: old, new: pkg)
         let wrote = WidgetSnapshotStore.write(pkg)
+        // [v2] 待送盒對這一包的 includedIds／queuedIds 收尾（judge §4.3；還在 applyLock 裡，兩包同時到也照順序對）。
+        // 舊包（上面 isOlder 那條）不對：名單是舊的。同一包（generatedAt 一樣）不會重算「沒有它」。
+        // 主執行緒那一份由 notifyModel → WatchModel.packageReceived → RecordOutbox.packageApplied 重讀
+        RecordOutboxStore.reconcile(with: pkg, now: Date())
         if fresh || wrote {
             WatchReceiveLog.note(Date())
         }
@@ -159,7 +230,8 @@ final class WatchSync: NSObject, WCSessionDelegate {
     // MARK: WCSessionDelegate（watchOS）
 
     /// watchOS 必寫。activate 好：先套手上那一份 context（只放智慧型堆疊時打開 App 馬上看到，做好標準 7）；
-    /// 之前被叫要包的現在要；App 在前景、包太舊（或沒有）也要一份
+    /// 之前被叫要包的現在要；App 在前景、包太舊（或沒有）也要一份。
+    /// [v2] activate 好時待送盒到期的現在送（還沒 activate 好時按的那幾筆，sendRecord 回 false 留在 holding）
     func session(_ session: WCSession,
                  activationDidCompleteWith activationState: WCSessionActivationState,
                  error: Error?) {
@@ -185,6 +257,9 @@ final class WatchSync: NSObject, WCSessionDelegate {
         }
         guard activated else { return }
         Task { @MainActor in
+            // [v2] 先送記帳、再要包（下面 requestFromPhone 那一條）：iPhone 收完這幾筆組的包才帶得到它們。
+            // 上面 wanted 那一條已經先要過了也沒關係：iPhone 入帳後 writeNow([.money]) 會再送一包新的
+            RecordOutbox.shared.sendDue()
             let model = WatchModel.shared
             if model.isActive && model.shouldAsk(now: Date()) && !model.asking {
                 model.requestFromPhone()
@@ -208,14 +283,29 @@ final class WatchSync: NSObject, WCSessionDelegate {
         applyData(data)
     }
 
-    /// iPhone 變得在旁邊：App 在前景、手上還沒有包、也沒在要 → 要一份
+    /// iPhone 變得在旁邊：App 在前景、手上還沒有包、也沒在要 → 要一份。
+    /// [v2] 待送盒到期還沒送的也現在送（已經排進 transferUserInfo 的，系統自己會補送，不用再送）
     func sessionReachabilityDidChange(_ session: WCSession) {
         guard session.isReachable else { return }
         Task { @MainActor in
+            RecordOutbox.shared.sendDue()
             let model = WatchModel.shared
             if model.isActive && model.package == nil && !model.asking {
                 model.requestFromPhone()
             }
+        }
+    }
+
+    /// [v2] 手錶送出的 transferUserInfo 送完了（iPhone 收到）：待送盒那一筆不再算「還沒送到 iPhone」。
+    /// 有錯（例：iPhone 上還沒裝 LifeGood）就不動：留在「還沒送到」，設定〔現在送〕再送。
+    /// 不是記帳的（沒有 "record"）不管
+    func session(_ session: WCSession, didFinish userInfoTransfer: WCSessionUserInfoTransfer, error: Error?) {
+        guard error == nil,
+              let data = userInfoTransfer.userInfo[WatchLink.recordKey] as? Data,
+              let record = WatchRecordCodec.decode(data) else { return }
+        let id = record.id
+        Task { @MainActor in
+            RecordOutbox.shared.markDelivered(id)
         }
     }
 }

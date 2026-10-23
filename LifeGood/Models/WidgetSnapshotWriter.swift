@@ -42,6 +42,8 @@ import WidgetKit
 // [手錶 v1] v25.574（watch/build/v1/brief.md G1-2）：writeNow 最後面寫手錶附加資料快取（WatchExtrasWriter，寫 bills 時；
 //      哪幾期卡費是自己繳）、叫 WatchBridge.snapshotsDidChange()（只讀 App Group 的檔組手錶包、內容變了才送；還沒 start 也叫，
 //      冷啟動時拿現成的檔組包）。
+// [手錶 v2] v25.576（watch/build/v2/brief.md G1-2）：寫 money 的時候也重寫手錶附加資料快取（手錶記的帳收完只寫 [.money]，
+//      快取裡的今天記的帳、includedIds 要跟著變，手錶的待送盒才收得了尾）。
 //
 // 什麼時候寫：
 //   • 啟動（start）：掛好監聽後馬上寫一次全部
@@ -216,8 +218,10 @@ final class WidgetSnapshotWriter {
         if parts.contains(.bills), parts.contains(.finance), expenseStore != nil, financeStore != nil {
             lastWealthRevision = lifeStore?.wealthRevision ?? -1
         }
-        // [手錶 v1] 手錶附加資料快取（寫 bills 的時候；App 開著才有三份資料）＋手錶包（只讀檔組包、內容變了才送）
-        if parts.contains(.bills), let expense = expenseStore, let finance = financeStore, let life = lifeStore {
+        // [手錶 v1、v2] 手錶附加資料快取（寫 bills 或 money 的時候；App 開著才有三份資料）＋手錶包（只讀檔組包、內容變了才送）。
+        // [v2] 手錶記的帳收完只寫 [.money]：今天記的帳、includedIds 要跟著重寫，手錶才知道那筆入帳了
+        if parts.contains(.bills) || parts.contains(.money), let expense = expenseStore, let finance = financeStore,
+           let life = lifeStore {
             WatchExtrasWriter.write(expense: expense, finance: finance, life: life, now: now)
         }
         WatchBridge.shared.snapshotsDidChange()

@@ -18,6 +18,14 @@ import Foundation
 //    • 帳單：會領回的（isIncome）整列不放；財富（卡費、交割）title＝lockedTitle、amountText＝""、detail＝nil；
 //      每一列 link＝""；卡費自己繳（needsAction）看快取的 manualCardBillKeys
 //    • 「送到手錶：錢」關著：money、bills 都不放
+//
+// [手錶 v2] v25.576（watch/judge.md §2.6～§2.8、§5.2；watch/build/v2/brief.md §2；sim_v2.py 的 build_package_v2）：
+//    • money 多記帳台：templates → WatchTemplate、categories → WatchCategory（一欄一欄抄）、topCategoryKeys；
+//      手錶上不給的分類（WatchCategoryRule：股票、房地產、稅費、節稅）三樣都拿掉
+//    • recentAmounts、titleHints、todayRecords 從快取抄（「錢」關著不放：手錶上不能記帳、沒有今天記的帳）
+//    • includedIds（快取）、queuedIds（收件匣資料夾的檔，QuickRecordInbox.watchIds）：「錢」關著也放（手錶待送盒收尾要用）
+//    • carrierBarcode：iPhone 設定「手機條碼」打開、而且格式對（「/」＋7 碼 0-9 A-Z . + -）才放；
+//      只讀 UserDefaults 的手機條碼那一個鍵，**驗證碼在鑰匙圈，這裡碰都不碰**
 
 /// iPhone 設定頁「Apple Watch」段的開關（App Group 的 UserDefaults；WatchSettingsSection 與這裡同一組鍵）
 enum WatchPhoneSettings {
@@ -25,6 +33,11 @@ enum WatchPhoneSettings {
     static let sendMoneyKey = "watch_send_money"
     /// 會議細節裡的部屬名字。沒設定過＝這支 iPhone 不是加入別人的共享就開（judge §6.6）
     static let showOwnerNamesKey = "watch_show_owner_names"
+    /// [v2] 手機條碼送到手錶。沒設定過＝關（judge §2.8、§6.3）
+    static let sendBarcodeKey = "watch_send_barcode"
+    /// [v2] 手機條碼存在哪（**App 自己的** UserDefaults.standard；＝EInvoiceSyncManager.cardNoKey，那邊是 private，
+    /// 改了兩邊一起改，pkg_keys_check E 段核對）。驗證碼在鑰匙圈，這裡不碰
+    static let carrierCardNoKey = "einvoice_card_no"
 
     static var sendMoney: Bool {
         guard let d = WidgetShared.defaults, d.object(forKey: sendMoneyKey) != nil else { return true }
@@ -42,6 +55,30 @@ enum WatchPhoneSettings {
 
     static func setShowOwnerNames(_ on: Bool) {
         WidgetShared.defaults?.set(on, forKey: showOwnerNamesKey)
+    }
+
+    /// [v2] 手機條碼送不送（沒設定過＝不送）
+    static var sendBarcode: Bool {
+        WidgetShared.defaults?.bool(forKey: sendBarcodeKey) ?? false
+    }
+
+    /// [v2] 已經連結的手機條碼（格式不對、沒連結是 nil）
+    static var carrierBarcode: String? {
+        guard let raw = UserDefaults.standard.string(forKey: carrierCardNoKey) else { return nil }
+        return validBarcode(raw)
+    }
+
+    /// [v2] 手機條碼格式：「/」開頭＋7 碼，每碼是 0-9、A-Z、「.」「+」「-」（都是 Code 39 有的字）。
+    /// 先去頭尾空白、轉大寫；不對回 nil（不送，手錶上就沒有 🧾）
+    static func validBarcode(_ raw: String) -> String? {
+        let text = raw.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        let chars = Array(text)
+        guard chars.count == 8, chars[0] == "/" else { return nil }
+        let allowed = Set("0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ.+-")
+        for c in chars.dropFirst() where !allowed.contains(c) {
+            return nil
+        }
+        return text
     }
 }
 
@@ -63,9 +100,18 @@ enum WatchPackageBuilder {
         if sendMoney {
             package.money = money.map { watchMoney($0) }
             package.bills = bills.map { watchBills($0, manualKeys: manual) }
+            // [v2] 記一筆、今天記的帳（「錢」關著＝手錶上不能記帳，這三樣都不放）
+            package.recentAmounts = extras?.recentAmounts
+            package.titleHints = extras?.titleHints
+            package.todayRecords = extras?.todayRecords
         }
         package.phoneHidesAmounts = WidgetHideAmounts.isOn
         package.showOwnerNames = showOwners
+        // [v2] 待送盒收尾要的兩張名單（只有編號）
+        package.includedIds = extras?.includedIds
+        package.queuedIds = QuickRecordInbox.watchIds()
+        // [v2] 手機條碼：設定打開才送（預設關）
+        package.carrierBarcode = WatchPhoneSettings.sendBarcode ? WatchPhoneSettings.carrierBarcode : nil
         return package
     }
 
@@ -121,7 +167,30 @@ enum WatchPackageBuilder {
             out.incomeText = nil
             return out
         }
-        return WatchMoney(generatedAt: s.generatedAt, dataDay: s.dataDay, month: s.month, days: days)
+        var m = WatchMoney(generatedAt: s.generatedAt, dataDay: s.dataDay, month: s.month, days: days)
+        // [v2] 記帳台：一欄一欄抄，手錶上不給的分類拿掉
+        m.templates = s.templates.map { list in
+            list.filter { WatchCategoryRule.isAllowed($0.categoryKey) }.map { watchTemplate($0) }
+        }
+        m.topCategoryKeys = s.topCategoryKeys.map { keys in
+            keys.filter { WatchCategoryRule.isAllowed($0) }
+        }
+        m.categories = s.categories.map { list in
+            list.filter { WatchCategoryRule.isAllowed($0.key) }.map { watchCategory($0) }
+        }
+        return m
+    }
+
+    /// [v2] 一按就記的範本：沒有 top／bottom 漸層、沒有次數（手錶只要分類色）
+    static func watchTemplate(_ t: WidgetQuickTemplate) -> WatchTemplate {
+        WatchTemplate(id: t.id, title: t.title, amount: t.amount, amountText: t.amountText,
+                      categoryKey: t.categoryKey, vehicleId: t.vehicleId, vehicleCategoryKey: t.vehicleCategoryKey,
+                      icon: t.icon, tint: t.tint)
+    }
+
+    /// [v2] 分類：名稱、圖示、分類色
+    static func watchCategory(_ c: WidgetCategory) -> WatchCategory {
+        WatchCategory(key: c.key, title: c.title, icon: c.icon, tint: c.tint)
     }
 
     // MARK: 要繳

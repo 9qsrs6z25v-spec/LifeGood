@@ -9,6 +9,8 @@ import WatchConnectivity
 //   • AppDelegate.didFinishLaunching → activate()（手錶叫醒 iPhone 時要有人接；iPad、Mac 上 isSupported 是 false，什麼都不做）
 //   • WidgetSnapshotWriter.writeNow 寫完 → snapshotsDidChange()
 //   • 設定頁改了「送到手錶」的開關、「隱藏金額」→ settingsChanged()
+//   • [v2] 設定頁「手機條碼」開關、EInvoiceSyncManager 連結／拿掉手機條碼 → settingsChanged()
+//   • [v2] 手錶記一筆（sendMessage 帶 "record"、transferUserInfo）→ receiveRecord
 //
 // 送包（refresh）：WatchPackageBuilder 只讀 App Group 的檔組一包 → WidgetSnapshotStore.write（iPhone 自己的 watch_v1.json，
 // 拿掉 generatedAt 比內容）回 true＝內容變了。下面三種「不比內容也送」：
@@ -23,6 +25,17 @@ import WatchConnectivity
 //    不碰 App 的三份大資料、不 start 任何寫入器、不算數字（judge §5.4、§7.8-6；pkg_keys_check.py D 段擋）。
 //    回「給我最新的」時先叫 WidgetSnapshotWriter.shared.writeNow()：App 活著＝先重寫快照；冷啟動時寫手還沒 start、什麼都不做。
 // ⚠️ WCSession 的 delegate 方法在背景執行緒：一律 nonisolated、要動狀態包 Task { @MainActor in … }（照 RunTracker 的寫法）。
+//
+// [手錶 v2] v25.576（watch/judge.md §4.1、§4.3、§5.4、§5.5、附錄 B；watch/build/v2/brief.md G1-1）：收手錶記的帳——
+//   • 手錶每一筆走兩條路：transferUserInfo（排隊、保證送到；didReceiveUserInfo，沒有回話）＋ iPhone 在旁邊時再 sendMessage
+//     （didReceiveMessage 帶 "record"，回 ["ok": "imported" | "queued" | "failed", "today": 3]）。兩條路都走 receiveRecord
+//   • receiveRecord：解開 → 撐 3 秒背景時間（蓋過收件匣晚 2 秒收尾；連記好幾筆用最後一筆的 3 秒）
+//     → watch_imported_ids 有＝另一條路早就入帳了，直接回 imported（不再進收件匣，iPhone 小工具不會冒出「待入帳 1 筆」）
+//     → 放進收件匣（純檔案；收件匣編號＝那筆支出的編號，兩條路都到只記一次）
+//     → QuickRecordImporter 準備好了（App 開著、或剛用過還活著）才 importFromWatch（只收手錶來的；小工具剛按、
+//       還能〔復原〕的那筆不動）→ 入帳了回 imported＋今天幾筆（讀剛寫好的 money 快照）
+//     → 不是（被手錶叫醒的冷啟動）：只重組包（queuedIds 變了就送）、回 queued，打開 iPhone 上的 LifeGood 才入帳
+//   • 冷啟動照舊不碰三份大資料：收件匣、watch_imported_ids、小工具快照都只是 App Group 的檔
 //
 // 對外的名字（WidgetSnapshotWriter、AppDelegate、設定頁在叫）不准改。
 
@@ -61,6 +74,13 @@ final class WatchBridge: NSObject, ObservableObject {
     /// activate() 叫過了（在這之前 refresh 什麼都不做）
     private var activationRequested = false
 
+    /// [v2] 收手錶記的帳時撐的背景時間（照 WidgetSnapshotWriter 的 beginBackgroundTask 寫法）
+    private var recordTask: UIBackgroundTaskIdentifier = .invalid
+    /// [v2] 第幾次撐：連記好幾筆時，只有最後一筆的 3 秒到了才收掉
+    private var recordHoldGeneration = 0
+    /// [v2] 撐幾秒：要比收件匣晚 2 秒收尾（QuickRecordImporter.finishDelay）長
+    private static let recordHoldSeconds: UInt64 = 3
+
     private override init() {
         super.init()
         let d = WidgetShared.defaults
@@ -85,7 +105,8 @@ final class WatchBridge: NSObject, ObservableObject {
         refresh()
     }
 
-    /// 設定頁改了「送到手錶」的開關、「隱藏金額」：重組重送
+    /// 設定頁改了「送到手錶」的開關、「隱藏金額」：重組重送。
+    /// [v2] 設定頁「手機條碼」開關、電子發票連結或拿掉手機條碼（EInvoiceSyncManager）也叫
     func settingsChanged() {
         refresh()
     }
@@ -258,6 +279,69 @@ final class WatchBridge: NSObject, ObservableObject {
             pending = true
         }
     }
+
+    // MARK: - [v2] 收手錶記的帳
+
+    /// 手錶記的一筆（sendMessage、transferUserInfo 兩條路都走這裡；主執行緒）。
+    /// 回 ["ok": "imported", "today": 3]／["ok": "queued"]／["ok": "failed"]（transferUserInfo 那條沒有回話，丟掉）
+    private func receiveRecord(_ data: Data) -> [String: Any] {
+        let now = Date()
+        guard let record = WatchRecordCodec.decode(data),
+              let entry = WatchRecordInbox.entry(from: record, now: now) else {
+            return [WatchLink.okKey: WatchLink.okFailed]
+        }
+        holdForRecord()
+        // 另一條路早就入帳了：不再進收件匣
+        if WatchImportedLog.contains(record.id) {
+            return importedReply(now: now)
+        }
+        // .ignoredDoubleTap＝同一筆兩條路幾乎同時到、第一份還在收件匣：照樣往下走
+        if QuickRecordInbox.add(entry) == .failed {
+            return [WatchLink.okKey: WatchLink.okFailed]
+        }
+        let importer = QuickRecordImporter.shared
+        // App 開著、或剛用過還活著：入帳 → writeNow([.money]) → 手錶快取、手錶包跟著重寫重送
+        if importer.isReady {
+            importer.importFromWatch()
+            if WatchImportedLog.contains(record.id) {
+                return importedReply(now: now)
+            }
+        }
+        // 冷啟動：只讀檔重組包（queuedIds 變了就送）
+        refresh()
+        return [WatchLink.okKey: WatchLink.okQueued]
+    }
+
+    /// ["ok": "imported"]，money 快照讀得到今天幾筆就多帶 "today"
+    private func importedReply(now: Date) -> [String: Any] {
+        var reply: [String: Any] = [WatchLink.okKey: WatchLink.okImported]
+        if let n = WidgetSnapshotStore.read(WidgetMoneySnapshot.self)?.day(at: now)?.todayCount {
+            reply[WatchLink.todayCountKey] = n
+        }
+        return reply
+    }
+
+    /// 撐 3 秒背景時間（被手錶叫醒、或 App 剛進背景時，收件匣寫檔與入帳做得完）；再叫一次就從那時候重算 3 秒
+    private func holdForRecord() {
+        if recordTask == .invalid {
+            recordTask = UIApplication.shared.beginBackgroundTask(withName: "watch.record") { [weak self] in
+                self?.endRecordHold()
+            }
+        }
+        recordHoldGeneration += 1
+        let generation = recordHoldGeneration
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: WatchBridge.recordHoldSeconds * 1_000_000_000)
+            guard let self, self.recordHoldGeneration == generation else { return }
+            self.endRecordHold()
+        }
+    }
+
+    private func endRecordHold() {
+        guard recordTask != .invalid else { return }
+        UIApplication.shared.endBackgroundTask(recordTask)
+        recordTask = .invalid
+    }
 }
 
 // MARK: - WCSessionDelegate（背景執行緒；一律 nonisolated，要動狀態包 Task { @MainActor in … }）
@@ -289,18 +373,35 @@ extension WatchBridge: WCSessionDelegate {
         session.activate()
     }
 
-    /// 手錶來要「給我最新的」（要回覆的那種）。訊息在這裡先拆好，主執行緒只拿一個 Bool
+    /// 手錶來要「給我最新的」、[v2] 手錶記的一筆（要回覆的那種）。訊息在這裡先拆好，主執行緒只拿一個 Bool、一份 Data
     nonisolated func session(_ session: WCSession,
                              didReceiveMessage message: [String: Any],
                              replyHandler: @escaping ([String: Any]) -> Void) {
         let wants = (message[WatchLink.wantKey] as? String) == WatchLink.wantPackage
+        let recordData = message[WatchLink.recordKey] as? Data
         Task { @MainActor in
-            replyHandler(self.replyPackage(wants))
+            if let recordData {
+                replyHandler(self.receiveRecord(recordData))
+            } else {
+                replyHandler(self.replyPackage(wants))
+            }
         }
     }
 
-    /// 不用回覆的訊息：v1 手錶不送這種，什麼都不做
+    /// 不用回覆的訊息：手錶不送這種；[v2] 萬一帶了一筆記帳，照樣收（沒有回話）
     nonisolated func session(_ session: WCSession, didReceiveMessage message: [String: Any]) {
+        guard let data = message[WatchLink.recordKey] as? Data else { return }
+        Task { @MainActor in
+            _ = self.receiveRecord(data)
+        }
+    }
+
+    /// [v2] 手錶 transferUserInfo 來的一筆記帳（排隊、保證送到；沒有回話）。iOS 也有這個 delegate 方法
+    nonisolated func session(_ session: WCSession, didReceiveUserInfo userInfo: [String: Any] = [:]) {
+        guard let data = userInfo[WatchLink.recordKey] as? Data else { return }
+        Task { @MainActor in
+            _ = self.receiveRecord(data)
+        }
     }
 
     /// transferFile 送完（或被取消、失敗）：刪暫存檔；失敗了記 pending

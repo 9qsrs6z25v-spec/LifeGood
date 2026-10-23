@@ -68,12 +68,16 @@ final class EInvoiceSyncManager: ObservableObject {
         UserDefaults.standard.set(trimmed.cardNo, forKey: Self.cardNoKey)
         KeychainHelper.save(trimmed.cardEncrypt, for: Self.cardEncryptKeychainAccount)
         self.carrier = trimmed
+        // [手錶 v2] 手機條碼換了，手錶包跟著重組（組包只讀條碼那一個鍵，不碰驗證碼；設定沒打開就不送）
+        WatchBridge.shared.settingsChanged()
     }
 
     func unlinkCarrier() {
         UserDefaults.standard.removeObject(forKey: Self.cardNoKey)
         KeychainHelper.delete(for: Self.cardEncryptKeychainAccount)
         self.carrier = nil
+        // [手錶 v2] 手機條碼拿掉了，手錶包跟著重組（手錶上的 🧾 跟著消失）
+        WatchBridge.shared.settingsChanged()
     }
 
     private func loadCarrier() {

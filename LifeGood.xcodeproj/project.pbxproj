@@ -297,6 +297,15 @@
 		A01B000004000004 /* WatchPackageProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000004000004 /* WatchPackageProvider.swift */; };
 		A01B000004000005 /* NextUpWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000004000005 /* NextUpWidget.swift */; };
 		A01B000004000006 /* SpentWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000004000006 /* SpentWidget.swift */; };
+		A01B000003000021 /* RecordSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000003000021 /* RecordSheet.swift */; };
+		A01B000003000022 /* AmountPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000003000022 /* AmountPicker.swift */; };
+		A01B000003000023 /* DigitPad.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000003000023 /* DigitPad.swift */; };
+		A01B000003000024 /* RecordOutbox.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000003000024 /* RecordOutbox.swift */; };
+		A01B000003000025 /* TodayRecordsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000003000025 /* TodayRecordsView.swift */; };
+		A01B000003000026 /* BarcodePage.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000003000026 /* BarcodePage.swift */; };
+		A01B000003000027 /* Code39.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000003000027 /* Code39.swift */; };
+		A01B000003000028 /* RecordText.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000003000028 /* RecordText.swift */; };
+		A01B000004000007 /* AddWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000004000007 /* AddWidget.swift */; };
 		A01B000003000051 /* DayTimelineAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000003 /* DayTimelineAttributes.swift */; };
 		A01B000004000051 /* DayTimelineAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000003 /* DayTimelineAttributes.swift */; };
 		A01B000003000052 /* WidgetSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000051 /* WidgetSnapshot.swift */; };
@@ -672,6 +681,15 @@
 		A01A000004000004 /* WatchPackageProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchPackageProvider.swift; sourceTree = "<group>"; };
 		A01A000004000005 /* NextUpWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NextUpWidget.swift; sourceTree = "<group>"; };
 		A01A000004000006 /* SpentWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpentWidget.swift; sourceTree = "<group>"; };
+		A01A000003000021 /* RecordSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordSheet.swift; sourceTree = "<group>"; };
+		A01A000003000022 /* AmountPicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AmountPicker.swift; sourceTree = "<group>"; };
+		A01A000003000023 /* DigitPad.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DigitPad.swift; sourceTree = "<group>"; };
+		A01A000003000024 /* RecordOutbox.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordOutbox.swift; sourceTree = "<group>"; };
+		A01A000003000025 /* TodayRecordsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TodayRecordsView.swift; sourceTree = "<group>"; };
+		A01A000003000026 /* BarcodePage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BarcodePage.swift; sourceTree = "<group>"; };
+		A01A000003000027 /* Code39.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Code39.swift; sourceTree = "<group>"; };
+		A01A000003000028 /* RecordText.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordText.swift; sourceTree = "<group>"; };
+		A01A000004000007 /* AddWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddWidget.swift; sourceTree = "<group>"; };
 		A01A000004000100 /* LifeGoodWatchWidgets.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = LifeGoodWatchWidgets.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -1066,6 +1084,14 @@
 				A01A000003000016 /* FreshnessFooter.swift */,
 				A01A000003000017 /* SettingsSheet.swift */,
 				A01A000003000018 /* WatchNotificationDelegate.swift */,
+				A01A000003000021 /* RecordSheet.swift */,
+				A01A000003000022 /* AmountPicker.swift */,
+				A01A000003000023 /* DigitPad.swift */,
+				A01A000003000024 /* RecordOutbox.swift */,
+				A01A000003000025 /* TodayRecordsView.swift */,
+				A01A000003000026 /* BarcodePage.swift */,
+				A01A000003000027 /* Code39.swift */,
+				A01A000003000028 /* RecordText.swift */,
 				A01A000003000004 /* Assets.xcassets */,
 				A01A000003000002 /* Info.plist */,
 				A01A000003000003 /* LifeGoodWatch.entitlements */,
@@ -1080,6 +1106,7 @@
 				A01A000004000004 /* WatchPackageProvider.swift */,
 				A01A000004000005 /* NextUpWidget.swift */,
 				A01A000004000006 /* SpentWidget.swift */,
+				A01A000004000007 /* AddWidget.swift */,
 				A01A000004000002 /* Info.plist */,
 				A01A000004000003 /* LifeGoodWatchWidgets.entitlements */,
 			);
@@ -1542,6 +1569,14 @@
 				A01B000003000016 /* FreshnessFooter.swift in Sources */,
 				A01B000003000017 /* SettingsSheet.swift in Sources */,
 				A01B000003000018 /* WatchNotificationDelegate.swift in Sources */,
+				A01B000003000021 /* RecordSheet.swift in Sources */,
+				A01B000003000022 /* AmountPicker.swift in Sources */,
+				A01B000003000023 /* DigitPad.swift in Sources */,
+				A01B000003000024 /* RecordOutbox.swift in Sources */,
+				A01B000003000025 /* TodayRecordsView.swift in Sources */,
+				A01B000003000026 /* BarcodePage.swift in Sources */,
+				A01B000003000027 /* Code39.swift in Sources */,
+				A01B000003000028 /* RecordText.swift in Sources */,
 				A01B000003000051 /* DayTimelineAttributes.swift in Sources */,
 				A01B000003000052 /* WidgetSnapshot.swift in Sources */,
 				A01B000003000053 /* WidgetLink.swift in Sources */,
@@ -1558,6 +1593,7 @@
 				A01B000004000004 /* WatchPackageProvider.swift in Sources */,
 				A01B000004000005 /* NextUpWidget.swift in Sources */,
 				A01B000004000006 /* SpentWidget.swift in Sources */,
+				A01B000004000007 /* AddWidget.swift in Sources */,
 				A01B000004000051 /* DayTimelineAttributes.swift in Sources */,
 				A01B000004000052 /* WidgetSnapshot.swift in Sources */,
 				A01B000004000053 /* WidgetLink.swift in Sources */,
@@ -1747,7 +1783,7 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 1328;
+				CURRENT_PROJECT_VERSION = 1329;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
@@ -1768,7 +1804,7 @@
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
-				MARKETING_VERSION = 25.575;
+				MARKETING_VERSION = 25.576;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
@@ -1812,7 +1848,7 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 1328;
+				CURRENT_PROJECT_VERSION = 1329;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
@@ -1827,7 +1863,7 @@
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
-				MARKETING_VERSION = 25.575;
+				MARKETING_VERSION = 25.576;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				SDKROOT = iphoneos;

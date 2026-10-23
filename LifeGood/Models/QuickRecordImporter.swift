@@ -20,6 +20,14 @@ import UIKit
 // 不用檔案協調也不用鎖（0xdead10cc）。
 //
 // 訂閱：記帳免費，一按就記不擋（決定 5 只擋付費功能的資料；AddExpenseView 連車也不擋）。
+//
+// [手錶 v2] v25.576（watch/judge.md §1.4-2、§4.3；watch/build/v2/brief.md §2）：手錶記的帳也走這裡——
+//   • isReady：start 叫過、記帳與理財兩份資料還在。WatchBridge 收到手錶的帳時，是才 importFromWatch，不是就只放收件匣
+//     （被手錶叫醒的冷啟動不碰三份大資料，judge §5.4）
+//   • importFromWatch()：只收手錶來的（QuickRecordInbox.take(where:)）——小工具剛按、還在 10 分鐘復原時間裡的不動
+//   • importPending()（啟動、回前景）照舊收全部，手錶來的也一起收
+//   • 手錶來的一入帳（或帳本裡早就有），編號記進 WatchImportedLog（watch_imported_ids）：同一筆從另一條路再到，連收件匣都不進
+//   • importOverdue 看全部（pending(includeWatch: true)）：手錶那筆也要在發票比對前先進帳本，才會跟發票合成一筆
 
 @MainActor
 final class QuickRecordImporter {
@@ -36,6 +44,9 @@ final class QuickRecordImporter {
     private init() {}
 
     // MARK: - 對外
+
+    /// [手錶 v2] start 叫過、兩份資料都還在（App 開著、或剛用過還活著）。WatchBridge 看這個決定「馬上入帳」還是「只放收件匣」
+    var isReady: Bool { expenseStore != nil && financeStore != nil }
 
     /// 啟動時呼叫一次（重複呼叫無害）：記住 store、掛 Darwin 通知、馬上收一次。
     /// 被系統叫起來在背景跑的（還沒人看到畫面）先不收，等回前景（importPending）再收，
@@ -55,8 +66,20 @@ final class QuickRecordImporter {
     /// 收件匣 → 帳本，回傳這次新增幾筆。啟動、回前景（LifeGoodApp）、App 在前景時收到 Darwin 通知時呼叫
     @discardableResult
     func importPending() -> Int {
+        guard isReady else { return 0 }
+        return importEntries(QuickRecordInbox.take())
+    }
+
+    /// [手錶 v2] 只收手錶來的（WatchBridge 收到手錶的帳、App 活著時叫）。小工具那幾筆照舊等 App 回前景（主控定案 13）
+    @discardableResult
+    func importFromWatch() -> Int {
+        guard isReady else { return 0 }
+        return importEntries(QuickRecordInbox.take(where: { $0.isFromWatch }))
+    }
+
+    /// 交出來的那幾筆 → 帳本，回傳新增幾筆（importPending、importFromWatch 共用）
+    private func importEntries(_ entries: [QuickRecordEntry]) -> Int {
         guard let expense = expenseStore, let finance = financeStore else { return 0 }
-        let entries = QuickRecordInbox.take()
         guard !entries.isEmpty else { return 0 }
 
         // 帳本裡已經有同 id 的（上次存好了、.taken 還沒刪）跳過
@@ -88,8 +111,14 @@ final class QuickRecordImporter {
             QuickRecordInbox.finish(ids)
         }
 
-        // 「待入帳 N 筆」立刻消失；有新增就立刻重寫「今天 N 筆」（不等 3 秒防抖）
-        WidgetRefresh.reload([WidgetKind.quickRecord])
+        // [手錶 v2] 手錶來的、帳本裡確定有了（這次新增的＋早就有的）：記進 watch_imported_ids
+        let watchImported: [UUID] = entries.filter { $0.isFromWatch && known.contains($0.id) }.map(\.id)
+        WatchImportedLog.note(watchImported, at: Date())
+
+        // 「待入帳 N 筆」立刻消失（小工具只畫自己按的：只有收到小工具那幾筆才重畫）；有新增就立刻重寫「今天 N 筆」（不等 3 秒防抖）
+        if entries.contains(where: { !$0.isFromWatch }) {
+            WidgetRefresh.reload([WidgetKind.quickRecord])
+        }
         if !newExpenses.isEmpty {
             WidgetSnapshotWriter.shared.writeNow([.money])
         }
@@ -108,7 +137,8 @@ final class QuickRecordImporter {
     /// 全部都還在復原時間內就不動——剛按的那筆，發票也還不可能查得到。
     @discardableResult
     func importOverdue(now: Date = Date()) -> Int {
-        let hasOverdue = QuickRecordInbox.pending().contains { entry in
+        // [手錶 v2] 看全部（含手錶來的：手錶那杯咖啡也要先進帳本，晚上的發票才會跟它合成一筆）
+        let hasOverdue = QuickRecordInbox.pending(includeWatch: true).contains { entry in
             now.timeIntervalSince(entry.createdAt) >= QuickRecordInbox.bannerDuration
         }
         guard hasOverdue else { return 0 }

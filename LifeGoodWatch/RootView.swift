@@ -11,6 +11,7 @@ import SwiftUI
 //   • 錶面小格點進來：onOpenURL → WatchModel.open（WidgetLink.parse，同一套網址）。
 //   • scenePhase：WatchModel.scenePhaseChanged（進背景收回第一頁；回前景重讀包、太舊就跟 iPhone 要）。
 // 字、遮不遮都不在這裡：每一頁自己讀 WatchModel、叫 WatchText。
+// [手錶 v2] v25.576：彈出頁多「記一筆」（RecordSheet）；第二層多「今天記的帳」（TodayRecordsView）、「手機條碼」（BarcodePage）。
 
 struct RootView: View {
     @ObservedObject private var model = WatchModel.shared
@@ -23,8 +24,8 @@ struct RootView: View {
                     destination(route)
                 }
         }
-        .sheet(item: $model.sheet) { _ in
-            SettingsSheet()
+        .sheet(item: $model.sheet) { sheet in
+            sheetContent(sheet)
         }
         .onOpenURL { url in
             model.open(url)
@@ -57,6 +58,21 @@ struct RootView: View {
             StopDetailView(stopId: id)
         case .bills:
             BillsList()
+        case .todayRecords:
+            TodayRecordsView()
+        case .barcode:
+            BarcodePage()
+        }
+    }
+
+    /// 彈出頁（⋯ 設定、[v2] 記一筆）
+    @ViewBuilder
+    private func sheetContent(_ sheet: WatchSheet) -> some View {
+        switch sheet {
+        case .settings:
+            SettingsSheet()
+        case .record:
+            RecordSheet()
         }
     }
 }

@@ -14,11 +14,13 @@ import WidgetKit
 // 每一種小格最外層都要 widget 用的 container background（寫法見 NextUpWidgetView、SpentWidgetView），
 // 少了整格會變成系統的英文提示（critic 🔴5、judge §7.8-10）。
 // 智慧型堆疊自己往上排、watchOS 26 才有的卡與控制項都是 v7b，這版不寫。
+// [手錶 v2] v25.576：多「＋ 記一筆」（AddWidget.swift；圓形、角落；點了開記帳台）。
 
 @main
 struct LifeGoodWatchWidgetsBundle: WidgetBundle {
     var body: some Widget {
         NextUpWidget()
         SpentWidget()
+        AddWidget()
     }
 }

@@ -24,6 +24,15 @@ import Foundation
 //     App 用「收件匣 id＝Expense id」判斷已經存過就不再建一筆（防重收）。
 //
 // ⚠️ 只准用 Foundation 與同 target 的 WidgetSnapshotStore（WidgetSnapshot.swift）。
+//
+// [手錶 v2] v25.576（watch/judge.md §1.4-1、§1.4-2、§4.3；watch/build/v2/brief.md §2）：手錶記的帳也進這個收件匣——
+//   • QuickRecordEntry.source：nil＝iPhone 小工具；"watch"＝手錶（iPhone 的 WatchBridge 收到 WatchRecord 轉的；舊檔沒有也解得開）
+//   • pending(includeWatch:)：預設**不含**手錶來的——小工具「待入帳 N 筆」「✓ 已記…〔復原〕」只畫自己按的，
+//     手錶那筆不會在 iPhone 上被〔復原〕刪掉（小工具的程式一行不用改）
+//   • take(where:)：只收指定的（QuickRecordImporter.importFromWatch 只收手錶來的；小工具剛按、還在 10 分鐘
+//     復原時間裡的那幾筆原封不動）。take() 照舊收全部（App 回前景）
+//   • add 判斷「3 秒內同一顆」看全部（含手錶來的）；手錶自己打數字的那筆 templateId 是「watch.<編號>」，每筆都不一樣
+//   • watchIds()：收件匣裡手錶來的編號（組手錶包的 queuedIds；純檔案，被手錶叫醒的冷啟動也能叫）
 
 /// 收件匣裡的一筆（使用者按了一顆「7-11 咖啡 NT$65」）
 struct QuickRecordEntry: Codable, Equatable, Identifiable {
@@ -45,6 +54,11 @@ struct QuickRecordEntry: Codable, Equatable, Identifiable {
     var vehicleCategoryKey: String? = nil
     /// 按下去的時間 → Expense.date
     var createdAt: Date
+    /// [手錶 v2] 哪裡來的：nil＝iPhone 小工具；QuickRecordInbox.watchSource（"watch"）＝手錶。舊檔沒有這一欄＝nil
+    var source: String? = nil
+
+    /// [手錶 v2] 手錶記的
+    var isFromWatch: Bool { source == QuickRecordInbox.watchSource }
 
     /// 從範本做一筆（小工具的 QuickRecordIntent 用；它手上是範本的各個欄位，見 init(templateId:…)）
     init(template t: WidgetQuickTemplate, now: Date = Date()) {
@@ -77,6 +91,8 @@ enum QuickRecordInbox {
     static let bannerDuration: TimeInterval = 10 * 60
     /// 小工具記了一筆／復原了一筆時發的 Darwin 通知（App 在前景時收到就馬上收）
     static let darwinNotificationName = "com.lifegood.app.quickinbox.changed"
+    /// [手錶 v2] QuickRecordEntry.source：手錶記的
+    static let watchSource = "watch"
 
     private static let pendingExtension = "json"
     private static let takenExtension = "taken"
@@ -129,11 +145,14 @@ enum QuickRecordInbox {
 
     // MARK: 小工具用
 
-    /// 還沒被 App 收走的，依按下的時間由舊到新（小工具畫「待入帳 N 筆」「✓ 已記…」用）
-    static func pending() -> [QuickRecordEntry] {
+    /// 還沒被 App 收走的，依按下的時間由舊到新（小工具畫「待入帳 N 筆」「✓ 已記…」用）。
+    /// [手錶 v2] includeWatch 預設 false：手錶來的不算（小工具不畫、不能〔復原〕）；要全部的（add 判斷手滑、
+    /// QuickRecordImporter.importOverdue）傳 true
+    static func pending(includeWatch: Bool = false) -> [QuickRecordEntry] {
         guard let folder = folderURL(create: false) else { return [] }
         let entries = files(withExtension: pendingExtension, in: folder).compactMap { decode($0.url) }
-        return entries.sorted { $0.createdAt < $1.createdAt }
+        let kept = includeWatch ? entries : entries.filter { !$0.isFromWatch }
+        return kept.sorted { $0.createdAt < $1.createdAt }
     }
 
     enum AddResult: Equatable {
@@ -147,7 +166,8 @@ enum QuickRecordInbox {
     /// 記一筆（QuickRecordIntent 呼叫）。寫完記得 postChanged() 並重畫。
     @discardableResult
     static func add(_ entry: QuickRecordEntry) -> AddResult {
-        let isDoubleTap = pending().contains {
+        // [手錶 v2] 看全部（含手錶來的）：同一筆從手錶的兩條路都到時，第二份在這裡就擋掉
+        let isDoubleTap = pending(includeWatch: true).contains {
             $0.templateId == entry.templateId
                 && abs(entry.createdAt.timeIntervalSince($0.createdAt)) < doubleTapWindow
         }
@@ -183,9 +203,19 @@ enum QuickRecordInbox {
     ///
     /// 交出來的每一筆，App 要嘛存進帳本、要嘛確認帳本裡已經有同 id 的支出，然後呼叫 finish。
     static func take() -> [QuickRecordEntry] {
+        take(where: { _ in true })
+    }
+
+    /// [手錶 v2] 只收 include 回 true 的（QuickRecordImporter.importFromWatch：只收手錶來的）。
+    /// 不收的 .json 原封不動（小工具剛按、還能〔復原〕的那筆）；不收的 .taken 也留著，等它自己那一支收。
+    /// 解不開的 .json 不管 include 照樣改名、再當壞檔刪掉（跟 take() 原本一樣，不然每次都卡在那裡）。
+    static func take(where include: (QuickRecordEntry) -> Bool) -> [QuickRecordEntry] {
         guard let folder = folderURL(create: false) else { return [] }
         let fm = FileManager.default
         for item in files(withExtension: pendingExtension, in: folder) {
+            if let entry = decode(item.url), !include(entry) {
+                continue
+            }
             let dest = fileURL(item.id, ext: takenExtension, in: folder)
             if fm.fileExists(atPath: dest.path) {
                 // 同一個 id 已經在收走中（不該發生）：留著的那份為準，這份丟掉
@@ -198,12 +228,29 @@ enum QuickRecordInbox {
         var out: [QuickRecordEntry] = []
         for item in files(withExtension: takenExtension, in: folder) {
             if let entry = decode(item.url) {
-                out.append(entry)
+                if include(entry) {
+                    out.append(entry)
+                }
             } else {
                 try? fm.removeItem(at: item.url)
             }
         }
         return out.sorted { $0.createdAt < $1.createdAt }
+    }
+
+    /// [手錶 v2] 收件匣裡（待入帳＋收走中）手錶來的編號，依編號字串排好、不重複（組手錶包的 queuedIds）。
+    /// 純檔案：被手錶叫醒的冷啟動也能叫
+    static func watchIds() -> [UUID] {
+        guard let folder = folderURL(create: false) else { return [] }
+        var seen = Set<UUID>()
+        for ext in [pendingExtension, takenExtension] {
+            for item in files(withExtension: ext, in: folder) {
+                if let entry = decode(item.url), entry.isFromWatch {
+                    seen.insert(entry.id)
+                }
+            }
+        }
+        return seen.sorted { $0.uuidString < $1.uuidString }
     }
 
     /// 帳本確定有這幾筆之後呼叫：刪掉它們的 .taken。

@@ -3,7 +3,10 @@ import SwiftUI
 // MARK: - 手錶設定（① 左上「⋯」，彈出頁）（手錶 v1，v25.574；watch/judge.md §2.15；watch/build/v1/brief.md G2-6）
 //
 // 只屬於 LifeGoodWatch。RootView 的 sheet(item: model.sheet) 開（WatchSheet.settings）；手錶的彈出頁系統自己會畫關閉鈕。
-// v1 只有這幾列（「還沒送到 iPhone：N 筆〔現在送〕」v2、「每公里講一句／震一下」v4 才加）：
+// 這幾列（「每公里講一句／震一下」v4 才加）：
+//   ⓪ [v2] 「還沒送到 iPhone：N 筆」〔現在送〕（judge §2.15 第一行、評論 🟠14；brief G2-2）：0 筆整段不出現；
+//      標題琥珀色（換手錶、清除手錶內容之前要看得到）；〔現在送〕＝RecordOutbox.resendUnconfirmed
+//      （還在 10 秒內的、送出了但系統排隊裡已經沒有、iPhone 也還沒確認的再送一次；iPhone 用編號擋重複）
 //   ① 遮住金額（只存在這支手錶的 App Group：WatchHideAmounts；切換後 WatchModel 馬上 reloadAllTimelines，錶面跟著遮／露）
 //   ② 「iPhone 14:02 更新」〔現在更新〕（sendMessage 跟 iPhone 要一份；查問題先看這一行，judge §7.8-13）
 //   ③ 錶面那一句（WatchText.faceNote，iPhone 設定頁也寫同一句）
@@ -12,21 +15,52 @@ import SwiftUI
 
 struct SettingsSheet: View {
     @ObservedObject private var model = WatchModel.shared
+    /// [v2] 待送盒（第一行「還沒送到 iPhone：N 筆」）
+    @ObservedObject private var outbox = RecordOutbox.shared
 
     static let hideNote = "只在這支手錶；手腕放下時一律會遮"
     static let noPackageText = "還沒收到 iPhone 的資料"
     static let askingText = "正在跟 iPhone 要…"
     static let askFailedText = "iPhone 不在旁邊，或 LifeGood 沒打開"
     static let refreshTitle = "現在更新"
+    static let resendTitle = "現在送"
+    static let outboxNote = "換手錶、清除手錶內容之前，先等這一行消失（還沒送到的會跟著不見）"
 
     var body: some View {
         NavigationStack {
             List {
+                outboxSection
                 hideSection
                 phoneSection
                 aboutSection
             }
             .navigationTitle("設定")
+            .onAppear { outbox.reload() }
+        }
+    }
+
+    // MARK: ⓪ [v2] 還沒送到 iPhone：N 筆〔現在送〕
+
+    /// 0 筆（RecordText.unsentLine 回 nil）整段不出現
+    @ViewBuilder
+    private var outboxSection: some View {
+        if let line = RecordText.unsentLine(outbox.items) {
+            Section {
+                SettingsTwoLine(title: line, note: nil, noteIsAmber: false, titleIsAmber: true)
+                resendButton
+            } footer: {
+                Text(Self.outboxNote)
+                    .font(.footnote)
+                    .foregroundStyle(WatchStyle.small)
+            }
+        }
+    }
+
+    private var resendButton: some View {
+        Button {
+            outbox.resendUnconfirmed()
+        } label: {
+            Label(Self.resendTitle, systemImage: "arrow.up.circle")
         }
     }
 
@@ -95,16 +129,19 @@ struct SettingsSheet: View {
     }
 }
 
-/// 設定頁的一列：第一行字＋（有的話）第二行小字。小字琥珀＝上次沒要到
+/// 設定頁的一列：第一行字＋（有的話）第二行小字。小字琥珀＝上次沒要到；標題琥珀＝[v2] 還沒送到 iPhone
 private struct SettingsTwoLine: View {
     let title: String
     let note: String?
     let noteIsAmber: Bool
+    /// [v2] 第一行用琥珀色（「還沒送到 iPhone：N 筆」）；v1 的呼叫不用帶
+    var titleIsAmber: Bool = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(title)
                 .font(.body)
+                .foregroundStyle(titleColor)
             if let note {
                 Text(note)
                     .font(.footnote)
@@ -115,5 +152,9 @@ private struct SettingsTwoLine: View {
 
     private var noteColor: Color {
         noteIsAmber ? WatchStyle.amber : WatchStyle.small
+    }
+
+    private var titleColor: Color {
+        titleIsAmber ? WatchStyle.amber : Color.primary
     }
 }

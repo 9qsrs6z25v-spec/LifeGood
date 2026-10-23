@@ -1,18 +1,28 @@
 import SwiftUI
 
-// MARK: - ② 錢（judge §2.4、§2.17；brief G3-4；§13-8）（手錶 v1，v25.574）
+// MARK: - ② 錢（judge §2.4、§2.17；brief G3-4；§13-8）（手錶 v1，v25.574；[手錶 v2] v25.576）
 //
 // 只屬於 LifeGoodWatch。垂直翻頁的第二頁，夜空底；iPhone 關掉「送到手錶：錢」整頁不出現（RootView 看 WatchModel.showsMoney）。
 // 字全部是 WatchText.money 組好的（WatchMoneyView）＝iPhone 寫好的 WidgetMoneyDay.lines(hidden:)：手錶不加減、不拼金額。
-//   抬手：「本月還能花・10/22 週四」／大字「2.4萬」那一句／「每天 …・還有 10 天」／細條／「今天 …・2 筆」／「💳 10/27（二）卡費・5 天後 ›」
+//   抬手：「本月還能花・10/22 週四」／大字「2.4萬」那一句／「每天 …・還有 10 天」／細條／「今天 …・2 筆 ›」／「💳 10/27（二）卡費・5 天後 ›」
 //   遮住（手腕放下、沒解鎖、手錶「遮住金額」、iPhone「隱藏金額」任一個）：整組換隱藏版「本月已花／72%／還有 10 天／今天 2 筆」，
 //   細條照畫（只透露比例，跟 72% 一樣），卡費那列本來就只有類別字＋日期（§13-8：沒有卡名、沒有金額）。
 //   超支：大字紅（遮住時不紅）。41mm：大字 34、第二行不寫「還有 N 天」、卡費日期不寫星期（WatchText 依 compact 組好）。
-// 點「💳 …」→ 接下來要繳（WatchRoute.bills）。v1 沒有〔＋ 記一筆〕、🧾 手機條碼、「今天 N 筆 ›」（v2）。
+// 點「💳 …」→ 接下來要繳（WatchRoute.bills）。
 // 手上沒有包：大字「—」＋〔再試一次〕（judge §2.0）。最下面資料多舊（FreshnessFooter；過期那一句已經寫在第二行，不重複）。
+//
+// [手錶 v2] v25.576（watch/judge.md §2.4 v2 那幾處、§2.17、§2.18；watch/build/v2/brief.md G4-1）——只加，v1 的字一個沒改：
+//   • 左上 🧾 手機條碼：iPhone 設定打開「手機條碼」才有（WatchModel.barcode）→ 第二層 WatchRoute.barcode
+//   • 「今天 …・3 筆 ›」可以點 → 今天記的帳（WatchRoute.todayRecords；只有 mode == .normal 才是連結）
+//   • 「剛記的 1 筆還沒算進去」（RecordText.notCountedLine：待送盒裡還不在新包 includedIds 的；**手錶不自己減**，
+//     iPhone 的新包帶著那個編號回來就消失）。只有筆數，手腕放下照顯示。41mm 有這一行時不畫細條（版面預算 judge §2.4 約 205／215）
+//   • 底部〔＋ 記一筆〕：包裡有錢才有 → WatchModel.openRecord（記一筆彈出頁）。手腕放下變暗、暫時不能按（不拿掉、版面不跳）
+//   • 放得下照 v1 一整頁；放不下（40mm，或 41mm 又過期又有剛記的）整頁可以捲（ViewThatFits，judge §2.18「40mm 整頁可捲」）
 
 struct MoneyPage: View {
     @ObservedObject private var model = WatchModel.shared
+    /// [v2] 待送盒（「剛記的 N 筆還沒算進去」）
+    @ObservedObject private var outbox = RecordOutbox.shared
     @Environment(\.isLuminanceReduced) private var dimmed
     @Environment(\.redactionReasons) private var reasons
 
@@ -20,6 +30,10 @@ struct MoneyPage: View {
     static let dimmedOpacity: Double = 0.75
     /// 要繳那一列的圖示（WatchText 沒給時）
     static let defaultBillIcon = "creditcard.fill"
+    /// [v2] 底部主鈕
+    static let recordTitle = "記一筆"
+    /// [v2] 左上 🧾 的 VoiceOver
+    static let barcodeLabel = "手機條碼"
 
     private var privacy: WatchPrivacy {
         model.privacy(dimmed: dimmed, redacted: reasons.contains(.privacy))
@@ -27,11 +41,31 @@ struct MoneyPage: View {
 
     var body: some View {
         TimelineView(.everyMinute) { context in
-            content(now: context.date)
+            fitted(now: context.date)
+        }
+        .toolbar {
+            if model.barcode != nil {
+                ToolbarItem(placement: .topBarLeading) {
+                    barcodeButton
+                }
+            }
         }
         .containerBackground(for: .tabView) {
             pageBackground
         }
+    }
+
+    // MARK: 外框
+
+    /// [v2] 左上 🧾 → 手機條碼（第二層；手腕放下變暗、暫時不能按）
+    private var barcodeButton: some View {
+        Button {
+            model.path = [.barcode]
+        } label: {
+            Image(systemName: "barcode")
+        }
+        .accessibilityLabel(Text(Self.barcodeLabel))
+        .disabled(dimmed)
     }
 
     @ViewBuilder
@@ -43,20 +77,34 @@ struct MoneyPage: View {
         }
     }
 
-    private func content(now: Date) -> some View {
+    /// [v2] 放得下照 v1 一整頁（第一個）；放不下（40mm，或 41mm 又過期又有剛記的）整頁可以捲（第二個，judge §2.18）。
+    /// 字只算一次，兩個版本畫同一份
+    private func fitted(now: Date) -> some View {
         let money = WatchText.money(package: model.package, now: now,
                                     masked: privacy.masksAmounts, compact: WatchStyle.isCompact)
         let freshness: WatchFreshness? = money.mode == .normal
             ? WatchText.moneyFreshness(package: model.package, now: now)
             : nil
-        return VStack(alignment: .leading, spacing: 3) {
+        let notCounted: String? = RecordText.notCountedLine(package: model.package, items: outbox.items)
+        return ViewThatFits(in: .vertical) {
+            content(money, freshness: freshness, notCounted: notCounted)
+            ScrollView {
+                content(money, freshness: freshness, notCounted: notCounted)
+            }
+        }
+    }
+
+    private func content(_ money: WatchMoneyView, freshness: WatchFreshness?, notCounted: String?) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
             titleText(money)
             heroText(money)
             lineText(money)
-            barView(money)
-            todayText(money)
+            barView(money, notCounted: notCounted)
+            todayRow(money)
+            notCountedText(notCounted)
             billRow(money)
             retryRow(money)
+            recordRow
             FreshnessFooter(freshness: freshness)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -95,19 +143,48 @@ struct MoneyPage: View {
     }
 
     @ViewBuilder
-    private func barView(_ m: WatchMoneyView) -> some View {
-        if let bar = m.bar {
+    private func barView(_ m: WatchMoneyView, notCounted: String?) -> some View {
+        if let bar = m.bar, !hidesBar(notCounted: notCounted) {
             WatchMoneyBarView(bar: bar)
                 .frame(height: WatchMoneyBarView.height)
                 .padding(.vertical, 2)
         }
     }
 
-    /// 「今天 …・2 筆」／遮住「今天 2 筆」（v1 不能點）
+    /// [v2] 41mm（WatchStyle.isCompact）有「剛記的 N 筆還沒算進去」時不畫細條（版面預算，judge §2.4 約 205／215）
+    private func hidesBar(notCounted: String?) -> Bool {
+        WatchStyle.isCompact && notCounted != nil
+    }
+
+    /// 「今天 …・2 筆 ›」／遮住「今天 2 筆 ›」→ [v2] 今天記的帳（只有 mode == .normal 才是連結；其他照舊純字）
     @ViewBuilder
-    private func todayText(_ m: WatchMoneyView) -> some View {
+    private func todayRow(_ m: WatchMoneyView) -> some View {
         if let today = m.today {
-            Text(today)
+            if m.mode == .normal {
+                NavigationLink(value: WatchRoute.todayRecords) {
+                    WatchMoneyTodayLabel(text: today)
+                }
+                .buttonStyle(.plain)
+                .disabled(dimmed)
+            } else {
+                todayText(today)
+            }
+        }
+    }
+
+    private func todayText(_ today: String) -> some View {
+        Text(today)
+            .font(.footnote)
+            .foregroundStyle(WatchStyle.small)
+            .lineLimit(1)
+            .minimumScaleFactor(0.8)
+    }
+
+    /// [v2] 「剛記的 1 筆還沒算進去」（灰字；只有筆數，手腕放下照顯示）；nil＝不畫
+    @ViewBuilder
+    private func notCountedText(_ line: String?) -> some View {
+        if let line {
+            Text(line)
                 .font(.footnote)
                 .foregroundStyle(WatchStyle.small)
                 .lineLimit(1)
@@ -135,6 +212,56 @@ struct MoneyPage: View {
                 model.requestFromPhone()
             }
         }
+    }
+
+    // MARK: [v2] 〔＋ 記一筆〕
+
+    /// 底部主鈕：包裡有錢才有（還沒收到包、iPhone 關掉「錢」都沒有）。前面的 Spacer 把它推到最下面（樣稿①錢那格）；
+    /// 整頁要捲的時候 Spacer 縮成 4 點
+    @ViewBuilder
+    private var recordRow: some View {
+        if model.package?.money != nil {
+            Spacer(minLength: 4)
+            recordButton
+        }
+    }
+
+    private var recordButton: some View {
+        Button {
+            model.openRecord()
+        } label: {
+            Label(Self.recordTitle, systemImage: "plus")
+                .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(.borderedProminent)
+        .tint(recordTint)
+        .disabled(dimmed)
+    }
+
+    /// 抬手綠（5ACC70）；手腕放下暗下來（不留一大塊亮綠）、暫時不能按，版面不動（judge §2.4 遮住那一版）
+    private var recordTint: Color {
+        dimmed ? WatchStyle.small.opacity(0.25) : WatchStyle.green
+    }
+}
+
+// MARK: - [v2] 今天那一列（「今天 …・3 筆 ›」→ 今天記的帳）
+
+private struct WatchMoneyTodayLabel: View {
+    let text: String
+
+    var body: some View {
+        HStack(spacing: 5) {
+            Text(text)
+                .font(.footnote)
+                .foregroundStyle(WatchStyle.small)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+            Spacer(minLength: 4)
+            Image(systemName: "chevron.right")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(WatchStyle.small)
+        }
+        .contentShape(Rectangle())
     }
 }
 

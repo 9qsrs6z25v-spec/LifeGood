@@ -10,6 +10,12 @@ import WidgetKit
 //
 // 打開落在哪（judge §2.0）：一律第一頁（今天）；進背景時就把頁、層、彈出頁收回來，
 // 錶面小格、通知點進來（onOpenURL、〔看議程〕）再開到那一頁那一件。
+//
+// [手錶 v2] v25.576（watch/build/v2/brief.md §2）：
+//   • 彈出頁多「記一筆」（WatchSheet.record：② 錢〔＋ 記一筆〕、錶面「＋」lifegood://add/expense）
+//   • 第二層多「今天記的帳」（WatchRoute.todayRecords：② 錢「今天 N 筆 ›」）、「手機條碼」（WatchRoute.barcode：② 錢左上 🧾）
+//   • 待送盒（RecordOutbox）跟著畫面走：回前景重讀、把到期沒送的補送；手腕放下（inactive）、退到背景＝還在 10 秒內的馬上送
+//     （judge §2.6「你點完成、翻走、或手腕放下時立刻送」）；收到新包重讀、補送
 
 /// 垂直翻頁的頁（v1：① 今天、② 錢）
 enum WatchPage: Hashable {
@@ -25,12 +31,18 @@ enum WatchRoute: Hashable {
     case stop(String)
     /// 接下來要繳（judge §2.5）
     case bills
+    /// [v2] 今天記的帳（judge §2.7）
+    case todayRecords
+    /// [v2] 手機條碼（全螢幕白底，judge §2.8）
+    case barcode
 }
 
 /// 彈出頁（sheet(item:)）
 enum WatchSheet: String, Identifiable {
     /// ① 左上「⋯」設定（judge §2.15）
     case settings
+    /// [v2] 記一筆（judge §2.6：記帳台 → 選分類 → 金額 → 記好了）
+    case record
 
     var id: String { rawValue }
 }
@@ -71,6 +83,9 @@ final class WatchModel: ObservableObject {
     /// ② 錢出不出現：還沒收過包（畫「—」的空版面）或包裡有錢才出現；iPhone 關掉「錢」就整頁不出現
     var showsMoney: Bool { package == nil || package?.money != nil }
 
+    /// [v2] 手機條碼（iPhone 設定打開才有；② 錢左上 🧾 出不出現看這個）
+    var barcode: String? { package?.carrierBarcode }
+
     /// 重讀手上那一包（WatchSync 寫好檔之後、回前景時）
     func reload() {
         package = WidgetSnapshotStore.read(WatchPackage.self)
@@ -85,6 +100,12 @@ final class WatchModel: ObservableObject {
     func packageReceived() {
         reload()
         askFinished(ok: true)
+        // [v2] 待送盒已經對新包收尾（WatchSync 在背景做完）：重讀、把到期沒送的補送
+        RecordOutbox.shared.packageApplied()
+        // [v2] 手機條碼被關掉了：條碼那一頁收起來
+        if barcode == nil {
+            closeBarcode()
+        }
     }
 
     /// RootView 的 scenePhase 一變就叫
@@ -97,9 +118,16 @@ final class WatchModel: ObservableObject {
             if shouldAsk(now: Date()) && !asking {
                 requestFromPhone()
             }
+            // [v2] 待送盒：重讀、到期沒送的補送（App 被系統暫停時沒送成的）
+            RecordOutbox.shared.reload()
+            RecordOutbox.shared.sendDue()
         case .inactive:
             isActive = true
+            // [v2] 手腕放下：還在 10 秒內的馬上送（judge §2.6）
+            RecordOutbox.shared.sendHoldingNow()
         case .background:
+            // [v2] 翻走、退到背景：還在 10 秒內的馬上送
+            RecordOutbox.shared.sendHoldingNow()
             // 真的從前景退到背景才收回（這個行程之前到過 active／inactive）。被 WatchConnectivity 在背景叫醒、
             // 或冷啟動時第一個回報的是 .background：本來就在第一頁，而且錶面／〔看議程〕可能剛用
             // onOpenURL／openMeeting 開好那一件，不能在這裡被清掉
@@ -169,6 +197,11 @@ final class WatchModel: ObservableObject {
         case .expenseOverview:
             selection = showsMoney ? .money : .today
             path = []
+        case .addExpense:
+            // [v2] 錶面「＋」：記帳台（關掉記一筆回到 ② 錢；iPhone 關掉「錢」時記一筆那一頁自己寫不能記帳）
+            selection = showsMoney ? .money : .today
+            path = []
+            sheet = .record
         default:
             selection = .today
             path = []
@@ -184,6 +217,28 @@ final class WatchModel: ObservableObject {
             path = [.stop(id)]
         } else {
             path = []
+        }
+    }
+
+    // MARK: [v2] 記一筆、手機條碼
+
+    /// ② 錢〔＋ 記一筆〕
+    func openRecord() {
+        sheet = .record
+    }
+
+    /// 記一筆收起來（記好了 2.5 秒後、〔完成〕）：回 ② 錢（iPhone 關掉「錢」時留在原頁）
+    func closeRecord() {
+        sheet = nil
+        if showsMoney {
+            selection = .money
+        }
+    }
+
+    /// 手機條碼那一頁收起來（手腕放下、條碼被關掉）
+    func closeBarcode() {
+        if path.last == .barcode {
+            path.removeLast()
         }
     }
 
