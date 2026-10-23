@@ -243,6 +243,11 @@ fileprivate struct WealthNoticeAlertModifier: ViewModifier {
 // • ⑤ 銀行帳戶傳 p.transfers：銀行項目卡最後一張「定期轉帳・4 條」卡（WealthItems.swift；VStack 照舊 10 個子項）。
 // • 同一個 .sheet(item:)（外面照舊 .appStores()）多三種：新增表單、規則頁、一期小表單（G4 的 WealthTransferViews.swift，三張自己掛布幕、detents）。
 // • 收起來確認框多一句「有 1 條定期轉帳轉進這裡，會一起結束」（WealthPageConfirm.message 組好）；結束本身在 LifeStore.setWealthHidden 裡。
+//
+// [v25.577] 定期轉帳 v1b（transfer/build/v1b/brief.md §6 G1-3）：
+// • ⑤ 多傳 p.transferInvite（沒有規則時一行邀請）；WealthPageActions.dismissTransferInvite＝dismissInvite()：
+//   下一個 runloop 叫 lifeStore.dismissTransferInvite()（不擋訂閱；〔＋ 定期轉帳〕走 open(.transferForm(nil))，照舊擋訂閱）。
+// • 〔看全部〕（.upcomingAll）點轉帳那一列開那一期：在 WealthPageUpcomingSheet 裡巢狀 .sheet(item:)，這頁不動。
 
 struct LifeFinanceView: View {
     @EnvironmentObject var lifeStore: LifeStore
@@ -382,12 +387,13 @@ struct LifeFinanceView: View {
         }
     }
 
-    /// ⑤ 銀行帳戶（只有卡：換一張提示卡；新手：不出現）。[v25.575] 銀行項目卡最後一張「定期轉帳」卡（有規則才有）
+    /// ⑤ 銀行帳戶（只有卡：換一張提示卡；新手：不出現）。[v25.575] 銀行項目卡最後一張「定期轉帳」卡（有規則才有）；
+    /// [v25.577] 沒有規則：同一個位置一行邀請（〔不用了〕＝dismissInvite）
     @ViewBuilder
     private func banksBlock(_ p: WealthPageData, actions: WealthPageActions) -> some View {
         if !p.banks.isEmpty || p.showBankPrompt {
             WealthPageBanksSection(header: p.banksHeader, rows: p.banks, showPrompt: p.showBankPrompt, actions: actions,
-                                   transfers: p.transfers)
+                                   transfers: p.transfers, transferInvite: p.transferInvite)
                 .id(WealthPageAnchor.banks)
         }
     }
@@ -479,7 +485,8 @@ struct LifeFinanceView: View {
         WealthPageActions(open: { s in open(s) },
                           edit: { id, kind in edit(id, kind: kind) },
                           confirm: { c in confirm = c },
-                          restore: { id, isCard in restore(id, isCard: isCard) })
+                          restore: { id, isCard in restore(id, isCard: isCard) },
+                          dismissTransferInvite: { dismissInvite() })
     }
 
     /// 打開一張彈出頁；要訂閱的那幾種（新增、編輯、記一筆、轉帳、對存摺、刷這張卡記一筆）沒訂閱先跳付費說明
@@ -511,6 +518,14 @@ struct LifeFinanceView: View {
             } else {
                 life.setWealthHidden(id, hidden: false)
             }
+        }
+    }
+
+    /// [v25.577] 定期轉帳邀請〔不用了〕（不擋訂閱）：按鈕那一次畫面更新先過，下一輪才寫 store（inviteDismissed，同步）
+    private func dismissInvite() {
+        let life = lifeStore
+        DispatchQueue.main.async {
+            life.dismissTransferInvite()
         }
     }
 

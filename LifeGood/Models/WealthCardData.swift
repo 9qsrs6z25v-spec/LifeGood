@@ -68,6 +68,15 @@ import SwiftUI
 // • ③ 接下來、⑦ 存摺明細：定期轉帳那幾列（WealthLedgerRow.transferRuleId 有）細字一律「定期・」＋note（「定期・每週五」
 //  「定期・每月 6 日」「定期・自己轉」；ruleDetail），不再寫「轉出・轉帳」；點了開那一期（WealthCardOpen.transferPeriod）。單次轉帳照舊。
 // • 收起來確認框多一句：WealthCardBank.hideTransferNote＝facts.hideTransferSentence（「有 1 條定期轉帳轉進這裡，會一起結束」）。
+//
+// [v25.577] 定期轉帳 v1b G2（transfer/build/v1b/brief.md §1-10、§6 G2；transfer/judge.md §4.7；sim_v1b §10）：
+// • ④ 連到這個帳戶的多一組定期轉帳（fillTransferLinks；facts.runningTransfers，從／到＝下一期那一段）：
+//   轉出「定期轉帳・轉出 4 條・每個月約 6.3萬」（monthlyOut 加總 → WealthPageText.wan；遮住不寫金額）、
+//   轉進「定期轉帳・轉進 1 條」；一列「轉給 零用錢」「每週五・銀行自動轉」「3,000」／「來自 薪轉」「每月 8 日・銀行自動轉」「+25,000」，
+//   點了開規則頁（.transferRule）、長按〔改到別的帳戶…〕（WealthCardLinkRow.editTransferRuleId）。排序：每週的在前（照星期幾）
+//   → 每月照幾日（31＝最後一天排最後）→ 建立的先後。canAddTransfer＝沒收起來（最下〔＋ 定期轉帳〕）；件數把定期轉帳的列也算進去。
+// • 水位小牌（transferTideLabel）：定期轉帳每週的不掛（""）；每月的掛你取的名字（去空白 ≤ 4 個字），不然對方的名字前 4 個字
+//  （那一期那一列的「轉給 X」「來自 X」；找不到規則、單次轉帳照舊「轉出」「轉入」）。
 
 // MARK: - 型別
 
@@ -102,7 +111,7 @@ enum WealthCardOpen: Equatable {
     case record(UUID, WealthRecordKind)
     /// 對存摺那一列（要訂閱）
     case anchorEdit(UUID)
-    /// 轉帳那一列：問要不要刪（要訂閱）
+    /// 單次轉帳那一列（BankDeposit 的 id）：[v25.577] 先開那一筆（WealthRecordSheet：唯讀＋〔刪除〕問兩邊一起刪；要訂閱）
     case transfer(UUID)
     /// [v25.566] 一期定存（WealthFacts.TimeDeposit.id；轉定存、定存到期、定存利息、⑥ 一格）：開定存表單（要訂閱）
     case timeDeposit(UUID)
@@ -286,6 +295,8 @@ struct WealthCardLinkRow: Identifiable {
     /// 長按〔改到別的帳戶…〕
     var moveExpenseId: UUID? = nil
     var moveIncomeId: UUID? = nil
+    /// [v25.577] ④ 定期轉帳那一列：長按〔改到別的帳戶…〕開〔改金額或帳戶〕表單（WealthTransferRuleForm(editRuleId:)，要訂閱）
+    var editTransferRuleId: UUID? = nil
 }
 
 /// ⑦ 年費與回饋小抄
@@ -344,6 +355,14 @@ struct WealthCardBank {
     var linkedOut: [WealthCardLinkRow] = []
     var linkedIn: [WealthCardLinkRow] = []
     var linkedTrailing: String? = nil
+    /// [v25.577] ④ 定期轉帳：從這裡轉出、轉進這裡（還在跑的；每週的在前、每月照幾日）
+    var transferOut: [WealthCardLinkRow] = []
+    var transferIn: [WealthCardLinkRow] = []
+    /// [v25.577] ④ 那兩組的小標「定期轉帳・轉出 4 條・每個月約 6.3萬」（遮住「定期轉帳・轉出 4 條」）／「定期轉帳・轉進 1 條」；沒有＝nil
+    var transferOutTitle: String? = nil
+    var transferInTitle: String? = nil
+    /// [v25.577] ④ 最下〔＋ 定期轉帳〕（收起來的帳戶沒有；按鈕本身擋訂閱）
+    var canAddTransfer = false
     var foreign: [WealthCardFTile] = []
     /// [v25.566] ⑤ 格子下一行（換匯怎麼記）；沒有外幣＝nil
     var foreignNote: String? = nil
@@ -1805,8 +1824,8 @@ extension WealthCardData {
             return r.title.contains("薪") ? "薪" : String(r.title.prefix(2))
         case .stockBuy, .stockSell: return "交割"
         case .dividend: return "股利"
-        case .transferOut: return "轉出"
-        case .transferIn: return "轉入"
+        // [v25.577] 定期轉帳：每週的不掛、每月的掛名字或對方名（單次轉帳照舊「轉出」「轉入」）
+        case .transferOut, .transferIn: return transferTideLabel(r, facts: facts)
         case .expense, .fixedExpense: return String(r.title.suffix(2))
         case .deposit: return "存"
         case .withdrawal: return "提"
@@ -1817,6 +1836,29 @@ extension WealthCardData {
         // [v25.566] 轉定存、定存到期、定存解約
         case .timeDeposit: return "定存"
         }
+    }
+
+    /// [v25.577] 轉帳那一列的水位小牌（sim_v1b §10）：定期轉帳每週的回 ""（不掛，線往下一階就好；同一天別的那一筆照樣輪得到）；
+    /// 每月的：你取的名字去空白後 ≤ 4 個字回名字，不然回對方的名字前 4 個字（那一期那一列「轉給 存錢」「來自 薪轉」的對方；
+    /// 拆不出來用規則下一期那一段的對方）。單次轉帳、找不到規則照舊「轉出」「轉入」
+    fileprivate static func transferTideLabel(_ r: WealthLedgerRow, facts: WealthFacts) -> String {
+        let plain: String = r.kind == .transferOut ? "轉出" : "轉入"
+        guard let t = facts.transferRule(r.transferRuleId) else { return plain }
+        if t.rule.cycleKind == .weekly { return "" }
+        let name = (t.rule.name ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if !name.isEmpty && name.count <= 4 { return name }
+        let fallback: String = r.kind == .transferOut ? t.toName : t.fromName
+        let other: String = transferCounterpart(r.title) ?? fallback
+        return String(other.prefix(4))
+    }
+
+    /// [v25.577] 「轉給 存錢」「來自 薪轉」→「存錢」「薪轉」（WealthTransferSchedule.refs 組的標題）；拆不出來＝nil
+    fileprivate static func transferCounterpart(_ title: String) -> String? {
+        for head in ["轉給 ", "來自 "] where title.hasPrefix(head) {
+            let rest = String(title.dropFirst(head.count)).trimmingCharacters(in: .whitespaces)
+            return rest.isEmpty ? nil : rest
+        }
+        return nil
     }
 
     // MARK: 四格
@@ -2132,8 +2174,67 @@ extension WealthCardData {
         }
         bk.linkedOut = out
         bk.linkedIn = into
-        let n = out.count + into.count
+        // [v25.577] 定期轉帳一組（轉出、轉進；最下〔＋ 定期轉帳〕）
+        fillTransferLinks(&bk, a: a, x: x)
+        let n = out.count + into.count + bk.transferOut.count + bk.transferIn.count
         bk.linkedTrailing = n > 0 ? "\(n) 項" : nil
+    }
+
+    /// [v25.577] ④ 定期轉帳（judge §4.7；sim_v1b §10）：還在跑的規則，轉出＝下一期那一段從這裡轉出（TransferRule.fromId）、
+    /// 轉進＝轉到這裡（toId）。薪轉「定期轉帳・轉出 4 條・每個月約 6.3萬」轉給 零用錢、存錢、房貸扣款、台灣銀行；
+    /// 房貸扣款「定期轉帳・轉進 1 條」來自 薪轉 +25,000；只有轉進的零用錢也有這一組
+    fileprivate static func fillTransferLinks(_ bk: inout WealthCardBank, a: WealthFacts.Account, x: WealthCardCtx) {
+        let mk = x.masked
+        let running = x.facts.runningTransfers
+        let outs = transferLinkSorted(running.filter { $0.fromId == a.id })
+        let ins = transferLinkSorted(running.filter { $0.toId == a.id })
+        bk.transferOut = outs.map { t in transferLinkRow(t, out: true, masked: mk) }
+        bk.transferIn = ins.map { t in transferLinkRow(t, out: false, masked: mk) }
+        if !outs.isEmpty {
+            var title = "定期轉帳・轉出 \(outs.count) 條"
+            if !mk {
+                let monthly: Double = outs.reduce(0.0) { sum, t in sum + t.monthlyOut }
+                title += "・每個月約 " + WealthPageText.wan(monthly)
+            }
+            bk.transferOutTitle = title
+        }
+        if !ins.isEmpty {
+            bk.transferInTitle = "定期轉帳・轉進 \(ins.count) 條"
+        }
+        bk.canAddTransfer = !a.hidden
+    }
+
+    /// [v25.577] ④ 定期轉帳的一列：「轉給 零用錢」「每週五・銀行自動轉」「3,000」／「來自 薪轉」「每月 8 日・銀行自動轉」「+25,000」（綠）；
+    /// 點了開規則頁、長按〔改到別的帳戶…〕（editTransferRuleId）
+    fileprivate static func transferLinkRow(_ t: WealthFacts.TransferRule, out: Bool, masked mk: Bool) -> WealthCardLinkRow {
+        let title: String = out ? "轉給 " + t.toName : "來自 " + t.fromName
+        let trailing: String = out ? WealthCardText.plain(t.amount, code: t.code, masked: mk)
+                                   : WealthCardText.signed(t.amount, out: false, code: t.code, masked: mk)
+        // 轉出、轉進兩組各自一個 ForEach；id 照樣分開（同一條兩邊都碰到這個帳戶時也不撞）
+        let rowId: String = "tr-" + t.id.uuidString + (out ? "" : "-in")
+        var row = WealthCardLinkRow(id: rowId, icon: "arrow.left.arrow.right", tint: 0x2F7FE8, title: title,
+                                    detail: t.cycleText + "・" + t.modeText, trailing: trailing,
+                                    trailingTone: out ? nil : MoneyTone.good, open: .transferRule(t.id))
+        row.editTransferRuleId = t.id
+        return row
+    }
+
+    /// [v25.577] ④ 定期轉帳的先後：每週的在前（照星期幾，日 1…六 7）→ 每月照幾日（31＝最後一天排最後）→ 建立的先後（order 不重複，
+    /// 所以排出來是固定的）；不認得的週期排最後
+    fileprivate static func transferLinkSorted(_ list: [WealthFacts.TransferRule]) -> [WealthFacts.TransferRule] {
+        list.sorted { p, q in transferLinkRank(p) < transferLinkRank(q) }
+    }
+
+    fileprivate static func transferLinkRank(_ t: WealthFacts.TransferRule) -> (Int, Int, Int) {
+        switch t.rule.cycleKind {
+        case .weekly?:
+            let w: Int = t.firstDay.map { d in WealthCal.calendar.component(.weekday, from: d) } ?? 0
+            return (0, w, t.order)
+        case .monthly?:
+            return (1, t.rule.day ?? 1, t.order)
+        case nil:
+            return (2, 0, t.order)
+        }
     }
 
     // MARK: ⑦ 存摺明細

@@ -55,6 +55,12 @@ import SwiftUI
 // • 收起來確認框多一句：WealthPageConfirm.hideAccount 多帶第三個值（facts.hideTransferSentence；沒有＝nil）。
 // • 銀行項目卡「接下來兩件」膠囊：銀行自動轉的定期轉帳轉出不搶（樣稿①-2 註 2；自己轉的照放，同銀行頁膠囊 G2）；
 //   同一條只放最近一期。短名讀 WealthPageText.shortName（「轉給台灣銀行」「來自薪轉」）。
+//
+// [v25.577] 定期轉帳 v1b（transfer/build/v1b/brief.md §6 G1-3；judge §4.1、樣稿③-A5）：
+// • 沒有規則時 ⑤ 定期轉帳卡那個位置換一行邀請 WealthPageTransferInviteCard（WealthPageBanksSection.transferInvite）：
+//   「在銀行設了預約轉帳？抄一份進來，接下來 30 天就算得準。」〔＋ 定期轉帳〕（open(.transferForm(nil))，財富頁擋訂閱）
+//   〔不用了〕（WealthPageActions.dismissTransferInvite，不擋；財富頁下一個 runloop 叫 lifeStore.dismissTransferInvite）。
+// • 定期轉帳卡底字改在 WealthPageText.transferNote（「…在每個帳戶的「連到這個帳戶的」看得到。」）。
 
 // MARK: - 財富頁的彈出頁（一個 enum、一個 .sheet(item:)）
 
@@ -199,6 +205,8 @@ struct WealthPageActions {
     var confirm: (WealthPageConfirm) -> Void = { _ in }
     /// 收起來的：重新啟用卡（true）／不收起來帳戶（false）
     var restore: (UUID, Bool) -> Void = { _, _ in }
+    /// [v25.577] 定期轉帳邀請〔不用了〕（不擋訂閱；財富頁下一個 runloop 才叫 lifeStore.dismissTransferInvite）
+    var dismissTransferInvite: () -> Void = {}
 }
 
 // MARK: - 工廠：一張卡、一個帳戶、一個證券戶
@@ -792,6 +800,8 @@ struct WealthPageBanksSection: View {
     let actions: WealthPageActions
     /// [v25.575] 銀行項目卡最後一張「定期轉帳・4 條」卡（沒有規則＝nil；放在這區裡，財富頁 VStack 不多一個子項）
     var transfers: WealthPageTransfers? = nil
+    /// [v25.577] 沒有規則時同一個位置換一行邀請（WealthPageData.transferInvite）
+    var transferInvite: Bool = false
 
     @Environment(\.colorScheme) private var scheme
 
@@ -814,11 +824,13 @@ struct WealthPageBanksSection: View {
         }
     }
 
-    /// [v25.575] 「定期轉帳」卡（有規則才有）
+    /// [v25.575] 「定期轉帳」卡（有規則才有）；[v25.577] 沒有規則：同一個位置一行邀請（沒按過〔不用了〕、銀行兩個以上）
     @ViewBuilder
     private var transfersCard: some View {
         if let t = transfers {
             WealthPageTransfersCard(data: t, actions: actions)
+        } else if transferInvite {
+            WealthPageTransferInviteCard(actions: actions)
         }
     }
 
@@ -1073,6 +1085,114 @@ struct WealthPageTransfersCard: View {
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
         .contentShape(Rectangle())
+    }
+}
+
+// MARK: - ⑤ 定期轉帳邀請（[v25.577] 定期轉帳 v1b；judge §4.1、樣稿③-A5）
+
+/// ⑤ 銀行帳戶最下面一行邀請（一條定期轉帳都沒有、沒按過〔不用了〕、沒收起來的銀行兩個以上；WealthPageData.transferInvite）：
+/// ⇄ 「在銀行設了預約轉帳？抄一份進來，接下來 30 天就算得準。」＋〔＋ 定期轉帳〕（要訂閱：財富頁的 open 擋）〔不用了〕
+///（不擋；財富頁下一個 runloop 寫 store，inviteDismissed 同步：另一台也不再出現）。這裡不寫 store
+struct WealthPageTransferInviteCard: View {
+    let actions: WealthPageActions
+
+    @Environment(\.colorScheme) private var scheme
+
+    init(actions: WealthPageActions) {
+        self.actions = actions
+    }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            icon
+            VStack(alignment: .leading, spacing: 9) {
+                message
+                buttons
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .modifier(FinanceCardChrome())
+    }
+
+    private var pal: TripBoardPalette { TripBoardPalette(scheme) }
+
+    /// 藍圓 ⟳（同定期轉帳卡的標頭）
+    private var icon: some View {
+        TripBoardIconBadge(icon: "arrow.triangle.2.circlepath", colors: pal.badge(.blue), diameter: 28,
+                           dark: pal.dark)
+            .accessibilityHidden(true)
+    }
+
+    private var message: some View {
+        Text(WealthPageText.transferInvite)
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(Color.primary)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    /// 兩顆並排；字放大放不下一列就上下疊
+    private var buttons: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 8) {
+                addButton
+                laterButton
+            }
+            VStack(alignment: .leading, spacing: 8) {
+                addButton
+                laterButton
+            }
+        }
+    }
+
+    /// 〔＋ 定期轉帳〕綠底白字（要訂閱：財富頁的 open 擋）
+    private var addButton: some View {
+        Button {
+            actions.open(.transferForm(nil))
+        } label: {
+            WealthPageInvitePill(icon: "plus", text: "定期轉帳", fill: Color(tb: 0x1F9D57), ink: Color.white)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("新增定期轉帳")
+    }
+
+    /// 〔不用了〕灰底（不擋訂閱）
+    private var laterButton: some View {
+        Button {
+            actions.dismissTransferInvite()
+        } label: {
+            WealthPageInvitePill(icon: nil, text: "不用了", fill: Color(.tertiarySystemFill), ink: Color.secondary)
+        }
+        .buttonStyle(.plain)
+        .accessibilityHint("點兩下不再顯示這一行")
+    }
+}
+
+/// 邀請那兩顆膠囊的樣子（圖示可有可無）
+private struct WealthPageInvitePill: View {
+    let icon: String?
+    let text: String
+    let fill: Color
+    let ink: Color
+
+    var body: some View {
+        HStack(spacing: 4) {
+            if let i = icon {
+                Image(systemName: i)
+                    .font(.caption.weight(.heavy))
+            }
+            Text(text)
+                .font(.footnote.weight(.bold))
+                .lineLimit(1)
+        }
+        .foregroundStyle(ink)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .background(fill, in: Capsule())
+        .fixedSize()
+        .contentShape(Capsule())
     }
 }
 

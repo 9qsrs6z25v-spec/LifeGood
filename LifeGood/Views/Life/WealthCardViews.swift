@@ -58,6 +58,14 @@ import UniformTypeIdentifiers
 // • 〔＋〕選單（WealthBankAddItems）「轉帳」下面多「定期轉帳」（沒收起來才有；要訂閱）→ WealthTransferRuleForm(fromId: 這個帳戶)。
 //   三張表單（WealthTransferViews.swift）自己掛布幕、presentationDetents，sheetView 不再包一層。
 // • 收起來確認框：WealthCardBank.hideTransferNote 有字就接在 message 後面（「…有 1 條定期轉帳轉進這裡，會一起結束。」）；按鈕不變。
+//
+// [v25.577] 定期轉帳 v1b G2（transfer/build/v1b/brief.md §1-10、§6 G2；transfer/judge.md §4.7）：
+// • ④ 連到這個帳戶的：有扣款、收入或定期轉帳就出現（零用錢那種只有轉進的帳戶也有）；卡裡「從這裡扣」→ 定期轉帳轉出那組 →
+//  「入這裡」→ 定期轉帳轉進那組（小標可能長，可以換行）；最下〔＋ 定期轉帳〕（.transferForm，要訂閱；收起來的帳戶沒有）。
+//   定期轉帳那一列點了開規則頁（不擋），長按〔改到別的帳戶…〕＝WealthCardSheet.Kind.transferEdit → WealthTransferRuleForm(editRuleId:)
+//  （要訂閱；存檔時表單自己問從哪一期起）；〔打開〕照舊。底下說明字多「定期轉帳」。
+// • ③⑦ 點單次轉帳那一列（.transfer）先開那一筆（WealthRecordSheet：編輯轉帳＝唯讀＋〔刪除〕問兩邊一起刪；要訂閱），
+//   不再直接跳刪除框（WealthCardConfirm.deleteTransfer 留著）。
 
 /// 打開卡片頁時捲到哪一區（財富頁 ③ 點一列＝.upcoming；要確認、四格點了也用）
 enum WealthCardAnchor: String, Hashable {
@@ -112,6 +120,8 @@ struct WealthCardSheet: Identifiable {
         case transferRule(UUID)
         /// [v25.575] 定期轉帳的一期（規則 id、那一期原本的日子「2026-11-06」；不擋）
         case transferPeriod(UUID, String)
+        /// [v25.577] ④ 長按〔改到別的帳戶…〕：〔改金額或帳戶〕表單（規則 id；要訂閱：present 擋；存檔時問從哪一期起）
+        case transferEdit(UUID)
     }
     let id = UUID()
     let kind: Kind
@@ -563,7 +573,10 @@ struct WealthCardPage: View {
             guard let dep = deposit(depId) else { return }
             present(.anchor(currentId, WealthFacts.norm(dep.currencyCode), dep), premium: true)
         case .transfer(let depId):
-            requirePremium { confirm = .deleteTransfer(depId) }
+            // [v25.577] 單次轉帳那一列先開那一筆（WealthRecordSheet 編輯轉帳＝唯讀＋〔刪除〕問兩邊一起刪；要訂閱同 v2）
+            guard let dep = deposit(depId) else { return }
+            let kind: WealthRecordKind = dep.isWithdrawal ? .withdrawal : .deposit
+            present(.record(currentId, kind, dep.currencyCode, dep), premium: true)
         case .timeDeposit(let termId):
             // [v25.566] 帳戶帶那一期自己的（定存到期轉進薪轉的那一列在薪轉頁點，表單還是台灣銀行那一期）
             let owner = lifeStore.timeDepositRecord(termId)?.bankId ?? currentId
@@ -918,6 +931,9 @@ struct WealthCardPage: View {
             return AnyView(WealthTransferRulePage(ruleId: id))
         case .transferPeriod(let id, let key):
             return AnyView(WealthTransferPeriodSheet(ruleId: id, periodKey: key))
+        // [v25.577] ④ 長按〔改到別的帳戶…〕：同一張表單的編輯模式（G4；表單自己掛布幕）
+        case .transferEdit(let id):
+            return AnyView(WealthTransferRuleForm(editRuleId: id))
         }
     }
 }
@@ -2114,7 +2130,7 @@ struct WealthBankSections: View {
         VStack(spacing: 22) {
             WealthCardUpcomingSection(bank: bank, actions: actions)
                 .id(WealthCardAnchor.upcoming)
-            if !bank.linkedOut.isEmpty || !bank.linkedIn.isEmpty {
+            if showsLinked {
                 WealthCardLinkedSection(accountId: accountId, bank: bank, actions: actions)
                     .id(WealthCardAnchor.linked)
             }
@@ -2140,6 +2156,11 @@ struct WealthBankSections: View {
                                     actions: actions)
                 .id(WealthCardAnchor.note)
         }
+    }
+
+    /// [v25.577] ④ 要不要出現：扣款、收入、定期轉帳（轉出或轉進）有一樣就有（零用錢那種只有轉進的帳戶也出現）
+    private var showsLinked: Bool {
+        !bank.linkedOut.isEmpty || !bank.linkedIn.isEmpty || !bank.transferOut.isEmpty || !bank.transferIn.isEmpty
     }
 
     /// [v25.566] ⑥ 定存要不要出現
@@ -2190,7 +2211,7 @@ struct WealthCardUpcomingSection: View {
     }
 }
 
-/// ④ 連到這個帳戶的（從這裡扣／入這裡；長按固定支出、收入〔改到別的帳戶…〕）
+/// ④ 連到這個帳戶的（從這裡扣／定期轉帳轉出／入這裡／定期轉帳轉進；長按固定支出、收入、定期轉帳〔改到別的帳戶…〕）
 struct WealthCardLinkedSection: View {
     let accountId: UUID
     let bank: WealthCardBank
@@ -2198,36 +2219,75 @@ struct WealthCardLinkedSection: View {
 
     @Environment(\.colorScheme) private var scheme
 
+    static let footnote = "刪除或收起來前看這裡，就知道會影響什麼。長按扣款、收入、定期轉帳可以改到別的帳戶。"
+
     var body: some View {
         let pal = TripBoardPalette(scheme)
         VStack(alignment: .leading, spacing: 10) {
             FinanceCardHeader(title: "連到這個帳戶的", trailing: bank.linkedTrailing)
-            VStack(alignment: .leading, spacing: 0) {
-                if !bank.linkedOut.isEmpty {
-                    groupTitle("從這裡扣", pal: pal)
-                    lines(bank.linkedOut, pal: pal)
-                }
-                if !bank.linkedIn.isEmpty {
-                    groupTitle("入這裡", pal: pal)
-                    lines(bank.linkedIn, pal: pal)
-                }
-            }
-            .padding(.bottom, 6)
-            .modifier(FinanceCardChrome())
-            Text("刪除或收起來前看這裡，就知道會影響什麼。長按扣款、收入可以改到別的帳戶。")
+            groups(pal)
+                .padding(.bottom, 6)
+                .modifier(FinanceCardChrome())
+            Text(Self.footnote)
                 .font(.footnote)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
     }
 
+    /// 卡裡：「從這裡扣」→ 定期轉帳轉出那組 →「入這裡」→ 定期轉帳轉進那組 →〔＋ 定期轉帳〕
+    private func groups(_ pal: TripBoardPalette) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if !bank.linkedOut.isEmpty {
+                groupTitle("從這裡扣", pal: pal)
+                lines(bank.linkedOut, pal: pal)
+            }
+            if !bank.transferOut.isEmpty {
+                groupTitle(bank.transferOutTitle ?? "定期轉帳", pal: pal)
+                lines(bank.transferOut, pal: pal)
+            }
+            if !bank.linkedIn.isEmpty {
+                groupTitle("入這裡", pal: pal)
+                lines(bank.linkedIn, pal: pal)
+            }
+            if !bank.transferIn.isEmpty {
+                groupTitle(bank.transferInTitle ?? "定期轉帳", pal: pal)
+                lines(bank.transferIn, pal: pal)
+            }
+            if bank.canAddTransfer {
+                addTransferRow(pal)
+            }
+        }
+    }
+
+    /// [v25.577] 小標可能長（「定期轉帳・轉出 4 條・每個月約 6.3萬」）：可以換行
     private func groupTitle(_ t: String, pal: TripBoardPalette) -> some View {
         Text(t)
             .font(.caption.weight(.heavy))
             .foregroundStyle(pal.label)
+            .fixedSize(horizontal: false, vertical: true)
             .padding(.horizontal, 14)
             .padding(.top, 12)
             .padding(.bottom, 2)
+            .accessibilityAddTraits(.isHeader)
+    }
+
+    /// [v25.577] 卡最下面〔＋ 定期轉帳〕（「從」帶這個帳戶；要訂閱：WealthCardPage.present 擋；收起來的帳戶沒有）
+    private func addTransferRow(_ pal: TripBoardPalette) -> some View {
+        let a = actions
+        let id = accountId
+        return VStack(spacing: 0) {
+            Divider()
+                .padding(.leading, 14)
+                .padding(.top, 6)
+            Button {
+                a.present(.transferForm(id), true)
+            } label: {
+                WealthCardAddTransferLabel(pal: pal)
+            }
+            .buttonStyle(MoneyPressStyle())
+            .accessibilityLabel("新增定期轉帳")
+        }
     }
 
     private func lines(_ rows: [WealthCardLinkRow], pal: TripBoardPalette) -> some View {
@@ -2246,6 +2306,8 @@ struct WealthCardLinkedSection: View {
         let expenseIds: [UUID] = r.moveExpenseId.map { [$0] } ?? []
         let incomeIds: [UUID] = r.moveIncomeId.map { [$0] } ?? []
         let from = accountId
+        // [v25.577] 定期轉帳那一列：〔改到別的帳戶…〕＝〔改金額或帳戶〕表單（要訂閱；存檔時問從哪一期起）
+        let ruleId: UUID? = r.editTransferRuleId
         return Button {
             actions.open(r.open)
         } label: {
@@ -2253,7 +2315,13 @@ struct WealthCardLinkedSection: View {
         }
         .buttonStyle(.plain)
         .contextMenu {
-            if canMove {
+            if let rid = ruleId {
+                Button {
+                    actions.present(.transferEdit(rid), true)
+                } label: {
+                    Label("改到別的帳戶…", systemImage: "arrow.left.arrow.right")
+                }
+            } else if canMove {
                 Button {
                     actions.present(.moveLinks(from, expenseIds, incomeIds, false), true)
                 } label: {
@@ -2266,6 +2334,19 @@ struct WealthCardLinkedSection: View {
                 Label("打開", systemImage: "square.and.pencil")
             }
         }
+    }
+}
+
+/// [v25.577] ④ 最下〔＋ 定期轉帳〕的字（綠，同 ⑥〔＋ 定存〕）
+private struct WealthCardAddTransferLabel: View {
+    let pal: TripBoardPalette
+
+    var body: some View {
+        Label("定期轉帳", systemImage: "plus")
+            .font(.subheadline.weight(.bold))
+            .foregroundStyle(MoneyTone.good.color(pal))
+            .frame(maxWidth: .infinity, minHeight: 44)
+            .contentShape(Rectangle())
     }
 }
 

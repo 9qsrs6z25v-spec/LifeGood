@@ -20,6 +20,10 @@ import SwiftUI
 // [v25.565] 財富 v4（build/v4/brief.md §G4-2；judge §3.4）：
 // • WealthPageBridgeView：①' 看板下的橋，一顆白色膠囊列「↗ 這些已算進理財淨資產 NT$1381.1萬 ›」，點了切到理財 › 總覽
 //  （財富頁給 onTap；全頁唯一會切分頁的地方）。字放不下一列就疊兩行（ViewThatFits），整列一個 VoiceOver 元素。
+//
+// [v25.577] 定期轉帳 v1b（transfer/build/v1b/brief.md §6 G1-2）：
+// • WealthPageUpcomingSheet：一筆轉帳已經在 WealthPageText.upcoming 併成一列；有 transferRuleId＋periodKey 的列包成 Button，
+//   點了在這張上面巢狀 .sheet(item:) 開 WealthTransferPeriodSheet（那一期；.appStores()；不擋訂閱）。其他列照舊不能點。
 
 // MARK: - ① 看板
 
@@ -437,12 +441,28 @@ private struct WealthPageUpcomingLine: View {
     }
 }
 
-/// 「看 6 件」：全部帳戶的接下來 30 天照日期排（日期塊＋一句＋金額＋扣完剩多少；變負的整列 warn）
+/// [v25.577] 〔看全部〕點了定期轉帳那一列：開哪一期（巢狀 .sheet(item:) 用）
+private struct WealthBoardUpcomingPeriodPick: Identifiable {
+    let ruleId: UUID
+    let periodKey: String
+
+    var id: String { ruleId.uuidString + "|" + periodKey }
+}
+
+/// 「看 6 件」：全部帳戶的接下來 30 天照日期排（日期塊＋一句＋金額＋扣完剩多少；變負的整列 warn）。
+/// [v25.577] 一筆轉帳併成一列（WealthPageText.upcoming 併好）；有 transferRuleId＋periodKey 的列可以點：在這張上面再開
+/// WealthTransferPeriodSheet（那一期；不擋訂閱，看的）。其他列照舊不能點
 struct WealthPageUpcomingSheet: View {
     let items: [WealthPageUpcomingItem]
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var scheme
+    /// [v25.577] 點了的那一期（nil＝沒開）
+    @State private var openPeriod: WealthBoardUpcomingPeriodPick? = nil
+
+    init(items: [WealthPageUpcomingItem]) {
+        self.items = items
+    }
 
     var body: some View {
         NavigationStack {
@@ -460,6 +480,15 @@ struct WealthPageUpcomingSheet: View {
             }
         }
         .presentationDetents([.medium, .large])
+        .sheet(item: $openPeriod) { p in
+            periodSheet(p)
+        }
+    }
+
+    /// [v25.577] 那一期的小表單（G4；自己掛布幕、detents），最外層 .appStores()
+    private func periodSheet(_ p: WealthBoardUpcomingPeriodPick) -> AnyView {
+        WealthTransferPeriodSheet(ruleId: p.ruleId, periodKey: p.periodKey)
+            .appStores()
     }
 
     @ViewBuilder
@@ -484,8 +513,25 @@ struct WealthPageUpcomingSheet: View {
                 if i > 0 {
                     Divider().padding(.leading, 76)
                 }
+                tappableRow(item, pal: pal)
+            }
+        }
+    }
+
+    /// [v25.577] 定期轉帳那一期（transferRuleId＋periodKey 都有）包成 Button：點了開那一期；其他列照舊只畫
+    @ViewBuilder
+    private func tappableRow(_ item: WealthPageUpcomingItem, pal: TripBoardPalette) -> some View {
+        if let rid = item.transferRuleId, let key = item.periodKey {
+            Button {
+                openPeriod = WealthBoardUpcomingPeriodPick(ruleId: rid, periodKey: key)
+            } label: {
                 row(item, pal: pal)
             }
+            .buttonStyle(.plain)
+            .accessibilityLabel(item.accessibilityText)
+            .accessibilityHint("點兩下打開這一期")
+        } else {
+            row(item, pal: pal)
         }
     }
 

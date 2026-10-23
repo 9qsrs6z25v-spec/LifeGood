@@ -1069,6 +1069,70 @@ class LifeStore: ObservableObject {
         return WealthCal.dayKey(WealthCal.addDays(-1, to: start))
     }
 
+    // MARK: - [v25.577] 定期轉帳 v1b（transfer/build/v1b/brief.md §2；算法在 WealthTransferPlans.swift）
+    // 一樣只改規則（不寫 BankDeposit、不碰記帳）、每支只指派一次 wealthTransfers；**不加任何新欄位**（v1a 的 iPhone 會原樣留著）。
+
+    /// 〔改金額或帳戶〕存檔（要訂閱，畫面擋）：body 拿到的是存著的那條**最新的**（另一台剛合併進來的註記不會被表單打開時的舊內容蓋掉），
+    /// 改完 updatedAt＝現在。刪掉的（墓碑）不改。分段用 WealthTransferRule.changed(from:_:)
+    func updateTransferRule(_ id: UUID, now: Date = Date(), _ body: (inout WealthTransferRule) -> Void) {
+        updateWealthTransfers(now: now) { book in
+            guard var r = book.rule(id) else { return }
+            let before = r
+            body(&r)
+            guard r != before else { return }
+            r.updatedAt = now
+            book.upsert(r)
+        }
+    }
+
+    /// 改週期或日子〔下一期起（以前的照舊）〕（要訂閱，畫面擋）：舊的那條最後一期＝lastKey（nil＝一期都不算：第一期前一天）、
+    /// 新的一條接上（previousId＝舊的 id、createdAt／updatedAt＝現在）。兩件事一次寫
+    func splitTransferRule(_ oldId: UUID, lastKey: String?, next newRule: WealthTransferRule, now: Date = Date()) {
+        updateWealthTransfers(now: now) { book in
+            guard var old = book.rule(oldId) else { return }
+            old.endKey = lastKey ?? Self.transferKeyBeforeStart(old)
+            old.endedBy = nil
+            old.updatedAt = now
+            book.upsert(old)
+            var r = newRule
+            r.previousId = oldId
+            r.createdAt = now
+            r.updatedAt = now
+            r.deletedAt = nil
+            r.endedBy = nil
+            book.upsert(r)
+        }
+    }
+
+    /// 要確認〔接著轉〕（帳戶收起來時結束、又打開了；不擋訂閱）：WealthTransferRule.resumed（收起來那段記成暫停、下一期起接著轉）
+    func resumeTransferRule(_ id: UUID, now: Date = Date()) {
+        updateWealthTransfers(now: now) { book in
+            guard let r = book.rule(id), r.endedBy == "accountHidden",
+                  var resumedRule = r.resumed(today: WealthCal.day(now), now: now) else { return }
+            resumedRule.updatedAt = now
+            book.upsert(resumedRule)
+        }
+    }
+
+    /// 財富頁新手邀請〔不用了〕（WealthTransferBook.inviteDismissed：v1a 就有這欄、跟 iCloud 同步）
+    func dismissTransferInvite() {
+        updateWealthTransfers { book in
+            if book.inviteDismissed != true { book.inviteDismissed = true }
+        }
+    }
+
+    /// 新增／改定期轉帳表單最下面的預覽：帶一包還沒存的定期轉帳重算一次（**不走快取**、很重：畫面停 0.5 秒才叫，打字時不叫）。
+    /// 第 4 個 build 呼叫點（其他三個：wealthFacts、passbookBalance、settlementMovePlan），參數照 wealthFacts 那一份
+    func wealthFactsPreview(transfers: WealthTransferBook, expense: ExpenseStore, finance: FinanceStore,
+                            now: Date = Date()) -> WealthFacts {
+        WealthFacts.build(milestones: milestones, book: wealthBook, deposits: wealthDeposits,
+                          transfers: transfers,
+                          expenses: expense.expenses, incomes: expense.incomes, stocks: finance.stocks,
+                          rates: FinanceRates(expense), now: now, insurances: finance.insurances,
+                          vehicles: finance.vehicles, realEstates: finance.realEstates,
+                          expiryMonths: cardExpiryMonths())
+    }
+
     // MARK: - [v25.567] 財富 v6：證券戶交割、保單連記帳、從哪扣（build/v6/brief.md §2；都只寫一次 milestones／帳本／記帳／理財）
 
     /// 股票的交割紀錄重寫一次（股票表單、股票卡加交易、記帳改舊版單筆股票都叫這一支；以前三份各寫各的）：

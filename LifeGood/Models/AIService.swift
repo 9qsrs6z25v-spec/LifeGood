@@ -154,6 +154,11 @@ struct ParsedAIExpense {
     var realEstateSubCategory: String?
     /// 原始辨識到的語音文字（保底放到備註用）
     var originalText: String?
+    /// [v25.577] 自己帳戶之間的轉帳（「轉兩萬到玉山」「存 5000 到台銀」）：不是花費，AIExpenseCommitter 不記成支出、只提示。
+    /// 轉給家人、房東、朋友、店家不算（照舊記支出）
+    var ownTransfer: Bool = false
+    /// [v25.577] 轉到哪個帳戶（AI 從 [可選銀行帳戶] 清單原樣挑的；沒有對應＝nil）
+    var transferTo: String?
 }
 
 enum AIParseError: LocalizedError {
@@ -204,6 +209,12 @@ final class AIExpenseParserService {
 - 比對銀行 / 卡片名稱時忽略「銀行」「商業銀行」「股份有限公司」「信用卡」等通用詞，重點比對品牌字（玉山、國泰、中信、台新…）與末四碼
 - paymentAccount 一定要與清單中的某一項完全相同，不要自己改寫
 
+如果句子是把錢從使用者自己的一個帳戶轉、存、匯到自己的另一個帳戶，這是自己帳戶之間的轉帳、不是花費：
+- 例：「轉兩萬到玉山」「每月轉兩萬到我的存錢帳戶」「存 5000 到台銀」——目的地是 [可選銀行帳戶] 清單裡的帳戶，或句子說「我的」「自己的」帳戶
+- 回傳 "ownTransfer": true，amount 照填，categoryRaw 填「其他」，title 填「轉帳」
+- 目的地在 [可選銀行帳戶] 清單裡，就把那一項整段字串原樣填到 transferTo
+- 轉給家人、房東、朋友、店家（錢給了別人）不是 ownTransfer，照一般支出回傳，不要填 ownTransfer
+
 如果句子前面附帶 [可選房地產：A、B、C] 標籤，請依下列規則決定 realEstate 與 realEstateSubCategory：
 - 句子提到房子的別名、地址關鍵字（信義店、新店、老家、出租屋…），或「我家／我的房子／房屋／物件／租屋處／管理費／房貸／房屋稅／地價稅／房屋保險」等與不動產有關的詞 → 從清單挑出最相近的整段字串原樣回填到 realEstate
 - 沒有清單或完全沒提到房子就不要填 realEstate
@@ -232,6 +243,8 @@ final class AIExpenseParserService {
 - paymentAccount (string)：扣款帳戶。**必須**從 [可選信用卡] 或 [可選銀行帳戶] 清單中原樣挑一個，沒有對應就不要填
 - realEstate (string)：房地產物件。**必須**從 [可選房地產] 清單中原樣挑一個，沒提到房子就不要填
 - realEstateSubCategory (string)：房地產支出子分類（房屋價金 / 買房費用 / 裝修 / 維修 / 家具 / 清潔 / 水電瓦斯 / 稅費 / 保險 / 其他）；有設 realEstate 就要一併設這個
+- ownTransfer (boolean)：自己帳戶之間的轉帳才填 true（見上面的規則）；不是就不要填
+- transferTo (string)：轉到哪個帳戶。**必須**從 [可選銀行帳戶] 清單中原樣挑一個，沒有對應就不要填
 - diningMember (string)：同行者姓名 / 稱謂。判斷規則：
   · 句子裡只要出現「跟」「和」「同」「與」「陪」「帶」後接一個指人的詞，就要抽出
   · 常見指人詞：太太、老婆、先生、老公、女友、男友、女朋友、男朋友、家人、爸媽、爸爸、媽媽、孩子、兒子、女兒、小孩、朋友、同事、同學、客戶、廠商、長官、老闆、家裡人、家人們
@@ -271,6 +284,12 @@ final class AIExpenseParserService {
 
 **範例輸入 8**：[可選房地產：信義小套房] 房屋稅繳了 12000
 **範例輸出 8**：{"amount":12000,"categoryRaw":"房地產","title":"房屋稅","realEstate":"信義小套房","realEstateSubCategory":"稅費"}
+
+**範例輸入 9**：[可選銀行帳戶：台新銀行、玉山銀行] 每月轉兩萬到玉山
+**範例輸出 9**：{"amount":20000,"categoryRaw":"其他","title":"轉帳","ownTransfer":true,"transferTo":"玉山銀行"}
+
+**範例輸入 10**：[可選銀行帳戶：台新銀行、玉山銀行] 從台新轉兩萬給媽媽
+**範例輸出 10**：{"amount":20000,"categoryRaw":"其他","title":"給媽媽","paymentAccount":"台新銀行"}
 """
 
     func parse(
@@ -606,6 +625,16 @@ final class AIExpenseParserService {
             ?? (json["realEstateCategory"] as? String) {
             let trimmed = sub.trimmingCharacters(in: .whitespaces)
             p.realEstateSubCategory = trimmed.isEmpty ? nil : trimmed
+        }
+        // [v25.577] 自己帳戶之間的轉帳：布林值（字串 "true" 也算）；轉到哪個帳戶去空白、空字＝nil
+        if let b = json["ownTransfer"] as? Bool {
+            p.ownTransfer = b
+        } else if let s = json["ownTransfer"] as? String {
+            p.ownTransfer = s.trimmingCharacters(in: .whitespaces).lowercased() == "true"
+        }
+        if let to = json["transferTo"] as? String {
+            let trimmed = to.trimmingCharacters(in: .whitespaces)
+            p.transferTo = trimmed.isEmpty ? nil : trimmed
         }
         return p
     }

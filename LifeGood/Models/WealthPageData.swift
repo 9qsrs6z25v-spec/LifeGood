@@ -59,6 +59,15 @@ import SwiftUI
 // • ③ 短名：轉帳寫「轉給房貸扣款」「來自薪轉」（只拿掉開頭那個空白、不再截 6 字；換匯「換匯（換出）」照原字）；不夠扣那一筆同樣。
 // • 收起來確認框多一句：WealthPageBankRow.hideNote＝facts.hideTransferSentence(id)（「有 1 條定期轉帳轉進這裡，會一起結束」）。
 //   結束本身在 LifeStore.setWealthHidden 裡（主控），這裡只組字。
+//
+// [v25.577] 定期轉帳 v1b（transfer/build/v1b/brief.md §6 G1；judge §4.1、§4.3；樣稿③-A5；sim_v1b §9）：
+// • 〔看全部〕一筆轉帳併成一列：定期照 transferRuleId＋periodKey、單次照 transferPairId；同一個 key 剛好兩列、在兩個不同的
+//   列出帳戶、一出一進、同一個幣別才併（另一邊收起來、換匯同一個帳戶兩格、兩個帳戶之間台幣轉外幣照舊單列）。併的那列「薪轉 → 零用錢」右「3,000」（不帶正負號）、
+//   灰字「薪轉扣完剩 49,400・定期」（自己轉「・自己轉」、單次不加）、日期塊「轉」；件數照併完的算（例 18 列 → 11 件）。
+//   排序：日子 → 帳戶在 listed 的位置（併的那列用轉出帳戶）→ 那一列在 next30 的位置。定期那一期帶 transferRuleId／periodKey
+//  （WealthBoard 的〔看全部〕點了開那一期）。③ 每個帳戶那一列不動。
+// • transferInvite：沒有規則（刪掉的不算）、沒按過〔不用了〕、沒收起來的銀行兩個以上 → ⑤ 最下面一行邀請。
+// • 定期轉帳卡底字補「在每個帳戶的「連到這個帳戶的」看得到。」（v1b 有 ④ 了）。
 
 // MARK: - 捲到哪一區
 
@@ -167,6 +176,10 @@ struct WealthPageUpcomingItem: Identifiable {
     /// 扣完變負的（整列 warn）
     let negative: Bool
     let accessibilityText: String
+    /// [v25.577] 定期轉帳那一期（〔看全部〕點了在 sheet 裡開那一期）：規則的 id、那一期原本的日子「2026-11-06」；
+    /// 單次轉帳、其他列 nil（不能點）
+    var transferRuleId: UUID? = nil
+    var periodKey: String? = nil
 }
 
 struct WealthPageUpcoming {
@@ -369,6 +382,9 @@ struct WealthPageData {
     let banks: [WealthPageBankRow]
     /// [v25.575] ⑤ 銀行帳戶最後一張「定期轉帳」卡（沒有規則＝nil）
     let transfers: WealthPageTransfers?
+    /// [v25.577] ⑤ 最下面一行邀請「在銀行設了預約轉帳？…」〔＋ 定期轉帳〕〔不用了〕（judge §4.1、樣稿③-A5）：
+    /// 一條規則都沒有（刪掉的不算）、沒按過〔不用了〕（哪一台按的都算）、沒收起來的銀行兩個以上
+    let transferInvite: Bool
     let brokersHeader: WealthPageGroupHeader?
     let brokers: [WealthPageBrokerRow]
     let policies: WealthPagePolicies?
@@ -429,6 +445,9 @@ struct WealthPageData {
                                     total: "存摺合計 " + (masked ? WealthFormat.masked : facts.cashText))
         // [v25.575] ⑤ 銀行帳戶最後一張「定期轉帳」卡（有規則才有）
         let transfers = WealthPageText.transfers(facts: facts, banks: banks, today: today, masked: masked)
+        // [v25.577] 沒有規則時 ⑤ 最下面一行邀請（inviteDismissed 同步、合併取聯集：另一台按過〔不用了〕這台也不出現）
+        let transferInvite: Bool = facts.transferRules.isEmpty && facts.transferBook.inviteDismissed != true
+            && banks.count >= 2
 
         // ⑥ 證券戶（收起來的放 ⑧）
         let visibleBrokers = WealthPageText.orderBrokers(facts.brokers.filter { facts.account($0.id)?.hidden != true },
@@ -458,7 +477,7 @@ struct WealthPageData {
                               cardsHeader: cardsHeader, cards: cardRows,
                               showBankPrompt: mode == .cardsOnly,
                               banksHeader: banksHeader, banks: bankRows, transfers: transfers,
-                              brokersHeader: brokersHeader, brokers: brokerRows,
+                              transferInvite: transferInvite, brokersHeader: brokersHeader, brokers: brokerRows,
                               policies: policies, hidden: hidden, footer: footer, bridge: bridge, masked: masked)
     }
 }
@@ -1290,27 +1309,121 @@ extension WealthPageText {
 
 // MARK: - ③ 接下來 30 天
 
+/// [v25.577] 〔看全部〕併列用：一筆轉帳的一邊在哪（帳戶在 listed 的位置、在那個帳戶 next30 的位置、是不是轉出、幣別）
+private struct WealthPageUpcomingSpot {
+    let order: Int
+    let index: Int
+    let out: Bool
+    let code: String
+}
+
+/// [v25.577] 〔看全部〕要併成一列的一筆轉帳：轉出那一列在哪（帳戶位置、next30 位置）、轉入那邊是哪個帳戶（listed 的位置）
+private struct WealthPageUpcomingPair {
+    let outOrder: Int
+    let outIndex: Int
+    let inOrder: Int
+}
+
 extension WealthPageText {
-    /// 每個沒收起來、30 天內有進出的銀行一列；「看 6 件」照日期排全部
+    /// 每個沒收起來、30 天內有進出的銀行一列；「看 6 件」照日期排全部。
+    /// [v25.577] 〔看全部〕一筆轉帳（定期轉帳的一期、一筆單次轉帳）兩邊帳戶各一列 → 併成一列（upcomingTransferPairs）；
+    /// 件數照併完的算（judge §11 例：各帳戶分開 18 列 → 11 件）。③ 每個帳戶那一列（upcomingRow）照舊各算各的。
+    /// 排序：日子 → 帳戶在 listed 的位置（併的那列用轉出帳戶）→ 那一列在帳戶 next30 裡的位置（Swift 的 sort 不穩定：
+    /// 第三層一定要有，同一天同一個帳戶的先後才不會亂）
     static func upcoming(banks: [WealthFacts.Account], facts: WealthFacts, rates: FinanceRates,
                          masked: Bool) -> WealthPageUpcoming? {
         let listed = banks.filter { !$0.next30.isEmpty }
         guard !listed.isEmpty else { return nil }
+        let pairs = upcomingTransferPairs(listed)
         var rows: [WealthPageUpcomingRow] = []
-        var all: [(date: Date, order: Int, item: WealthPageUpcomingItem)] = []
-        var count = 0
+        var all: [(day: Date, order: Int, index: Int, item: WealthPageUpcomingItem)] = []
         for (order, a) in listed.enumerated() {
             rows.append(upcomingRow(a, facts: facts, rates: rates, masked: masked))
-            for row in a.next30 {
-                count += 1
-                all.append((date: row.date, order: order, item: upcomingItem(row, account: a, facts: facts, masked: masked)))
+            for (index, row) in a.next30.enumerated() {
+                let day = WealthCal.day(row.date)
+                let item: WealthPageUpcomingItem
+                if let key = upcomingTransferKey(row), let pair = pairs[key] {
+                    // 併的那一列只在轉出那邊出一次；轉入那邊那一列跳過
+                    guard pair.outOrder == order, pair.outIndex == index else { continue }
+                    item = upcomingTransferItem(row, from: a, to: listed[pair.inOrder], key: key, masked: masked)
+                } else {
+                    item = upcomingItem(row, account: a, facts: facts, masked: masked)
+                }
+                all.append((day: day, order: order, index: index, item: item))
             }
         }
         let sorted = all.sorted { l, r in
-            if l.date != r.date { return l.date < r.date }
-            return l.order < r.order
+            if l.day != r.day { return l.day < r.day }
+            if l.order != r.order { return l.order < r.order }
+            return l.index < r.index
         }.map(\.item)
-        return WealthPageUpcoming(trailing: "\(count) 件", rows: rows, all: sorted)
+        return WealthPageUpcoming(trailing: "\(sorted.count) 件", rows: rows, all: sorted)
+    }
+
+    /// [v25.577] 一筆轉帳兩邊共用的 key：定期轉帳「r|規則|2026-11-06」（transferRuleId＋periodKey）、單次「p|配對」（transferPairId）；
+    /// 不是轉帳的列 nil
+    private static func upcomingTransferKey(_ row: WealthLedgerRow) -> String? {
+        guard row.kind == .transferOut || row.kind == .transferIn else { return nil }
+        if let rid = row.transferRuleId, let key = row.periodKey {
+            return "r|" + rid.uuidString + "|" + key
+        }
+        if let pid = row.transferPairId {
+            return "p|" + pid.uuidString
+        }
+        return nil
+    }
+
+    /// [v25.577] 哪幾筆轉帳要併成一列：同一個 key 剛好兩列、在兩個不同帳戶（都在 listed 裡）、一出一進、兩邊同一個幣別才併。
+    /// 另一邊收起來（不在 listed）＝只有一列、換匯（同一個帳戶的兩格）＝同一個帳戶 → 都照舊單列；
+    /// 兩個帳戶之間台幣轉外幣的單次轉帳也照舊兩列（併成一列只看得到轉出那邊的幣別與金額）
+    private static func upcomingTransferPairs(_ listed: [WealthFacts.Account]) -> [String: WealthPageUpcomingPair] {
+        var found: [String: [WealthPageUpcomingSpot]] = [:]
+        for (order, a) in listed.enumerated() {
+            for (index, row) in a.next30.enumerated() {
+                guard let key = upcomingTransferKey(row) else { continue }
+                let spot = WealthPageUpcomingSpot(order: order, index: index, out: row.isOutflow, code: row.code)
+                found[key, default: []].append(spot)
+            }
+        }
+        var pairs: [String: WealthPageUpcomingPair] = [:]
+        for (key, spots) in found where spots.count == 2 {
+            guard let o = spots.first(where: { $0.out }), let i = spots.first(where: { !$0.out }),
+                  o.order != i.order, o.code == i.code else { continue }
+            pairs[key] = WealthPageUpcomingPair(outOrder: o.order, outIndex: o.index, inOrder: i.order)
+        }
+        return pairs
+    }
+
+    /// [v25.577] 併成一列的一筆轉帳（judge §4.3、sim_v1b §9）：日期塊「轉」、藍圓；「薪轉 → 零用錢」（兩個帳戶的名字，不用規則的名字）、
+    /// 右「3,000」（不帶正負號；遮住 ••••）、灰字「薪轉扣完剩 49,400・定期」（自己轉的那條「・自己轉」、單次轉帳不加尾巴；
+    /// 遮住「薪轉扣完剩 ••••・定期」）；轉出那邊扣完是負的整列 warn。id「tr|」＋key；定期那一期帶 transferRuleId／periodKey（點了開那一期）。
+    /// VoiceOver「10 月 30 日，薪轉 轉到 零用錢，3,000，薪轉扣完剩 49,400，定期」
+    private static func upcomingTransferItem(_ row: WealthLedgerRow, from a: WealthFacts.Account,
+                                             to b: WealthFacts.Account, key: String,
+                                             masked: Bool) -> WealthPageUpcomingItem {
+        let c = WealthCal.calendar.dateComponents([.month, .day], from: row.date)
+        let plain: String = WealthFormat.plain(row.amount, code: row.code)
+        let after: String = WealthFormat.plain(row.balanceAfter, code: row.code)
+        let tail: String = upcomingTransferTail(row)
+        var detail: String = a.name + "扣完剩 " + (masked ? dots : after)
+        if !tail.isEmpty { detail += "・" + tail }
+        let negative = row.balanceAfter < -0.5
+        let money: String = "\(plain)，\(a.name)扣完剩 \(after)"
+        var said: String = "\(spokenDate(row.date))，\(a.name) 轉到 \(b.name)，"
+        said += masked ? "金額已遮住" : money
+        if !tail.isEmpty { said += "，" + tail }
+        if negative { said += "，會不夠扣" }
+        return WealthPageUpcomingItem(id: "tr|" + key, day: "\(c.day ?? 0)", month: "\(c.month ?? 0)月",
+                                      glyph: "轉", mark: .other, title: a.name + " → " + b.name, detail: detail,
+                                      amount: masked ? dots : plain, negative: negative, accessibilityText: said,
+                                      transferRuleId: row.periodKey == nil ? nil : row.transferRuleId,
+                                      periodKey: row.transferRuleId == nil ? nil : row.periodKey)
+    }
+
+    /// [v25.577] 併的那一列灰字尾巴：定期轉帳「定期」、自己轉的那條「自己轉」、單次轉帳不加（""）
+    private static func upcomingTransferTail(_ row: WealthLedgerRow) -> String {
+        guard row.transferRuleId != nil else { return "" }
+        return row.transferManual ? "自己轉" : "定期"
     }
 
     private static func upcomingRow(_ a: WealthFacts.Account, facts: WealthFacts, rates: FinanceRates,
@@ -1396,9 +1509,12 @@ extension WealthPageText {
         var said = "\(spokenDate(row.date))，\(row.title)，\(a.name)，"
         said += masked ? "金額已遮住" : "\(signed(row))，扣完剩 \(after)"
         if negative { said += "，會不夠扣" }
+        // [v25.577] 沒併的定期轉帳那一期（另一邊收起來了）也帶規則與那一期：〔看全部〕點了一樣開那一期
         return WealthPageUpcomingItem(id: a.id.uuidString + "|" + row.id, day: "\(c.day ?? 0)",
                                       month: "\(c.month ?? 0)月", glyph: glyph, mark: mark, title: row.title,
-                                      detail: detail, amount: amount, negative: negative, accessibilityText: said)
+                                      detail: detail, amount: amount, negative: negative, accessibilityText: said,
+                                      transferRuleId: row.periodKey == nil ? nil : row.transferRuleId,
+                                      periodKey: row.transferRuleId == nil ? nil : row.periodKey)
     }
 
     /// 進帳那一列日期塊的字：轉入「轉」、[v25.566] 定存利息「定」、其他「入」
@@ -1412,8 +1528,11 @@ extension WealthPageText {
 // MARK: - ⑤ 定期轉帳卡（[v25.575] 定期轉帳 v1a；transfer/judge.md §4.3、樣稿①-2）
 
 extension WealthPageText {
-    /// 卡底灰字（v1a 沒有 ④「連到這個帳戶的」：不寫「在每個帳戶看得到」）
-    static let transferNote = "轉給家人、房東的記在記帳的固定支出（算花掉）。"
+    /// 卡底灰字。[v25.577] v1b 銀行頁有 ④「連到這個帳戶的」定期轉帳那一組了：補「在每個帳戶的…看得到」（judge §4.3）
+    static let transferNote = "轉給家人、房東的記在記帳（算花掉），在每個帳戶的「連到這個帳戶的」看得到。"
+
+    /// [v25.577] ⑤ 最下面那一行邀請（沒有規則時；judge §4.1、樣稿③-A5）
+    static let transferInvite = "在銀行設了預約轉帳？抄一份進來，接下來 30 天就算得準。"
 
     /// 第三行要緊的那一件：14 天內最後一次幾天內算
     static let transferEndSoonDays = 14

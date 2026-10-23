@@ -70,6 +70,15 @@ import UIKit
 //  （WealthAnchorSideRow；預設照現在記的 late）；〔還沒有〕＝「App 算的」加 TransferSide.appDelta，存檔（一般、漏記的支出兩條路）
 //   後同一個 runloop LifeStore.setTransferLate。記成利息、手續費那兩條路不記 late。
 // • 刪銀行〔收起來就好〕確認框多一句（WealthBankDeleteDialog(transferNote:)＝WealthFacts.hideTransferSentence）。
+//
+// [v25.577] 定期轉帳 v1b（transfer/build/v1b/brief.md §6 G3；judge §4.6、§4.8、§5）：
+// • 要確認〔接著轉〕（WealthChecksSection.tap，Fix.resumeTransferRule）：下一個 runloop LifeStore.resumeTransferRule（不擋訂閱）。
+// • 單次轉帳存檔前（像帳號那一問之後、真的寫之前）：台幣、不是換匯、不是〔轉帳過去〕、兩個不同帳戶 → facts.transferDuplicate
+//   找得到同兩個帳戶、同金額、前後 3 天的那一期就先問「這筆跟定期轉帳『薪轉 → 存錢』11/6 那期一樣，App 已經算進去了」
+//   〔不用記了〕（關掉、什麼都不存）〔還是要記（另外多轉一筆）〕〔取消〕（WealthTransferDuplicateDialog）。
+// • 〔轉帳過去〕小表單最下面：「到」那個帳戶第一筆不夠扣的是每月的固定支出 → 「『房貸』每月 10 日都要從這裡扣：」
+//   〔改成每月定期轉帳〕＝巢狀 sheet WealthTransferRuleForm(preset: facts.monthlyTransferPreset(…))；不另外擋訂閱
+//  （〔轉帳過去〕打開這張表時擋過了）；新增表單關掉後這張留著（存好了那一行就不見）。
 
 /// 表單的類型（開了就鎖住）
 enum WealthAccountKind: String, CaseIterable, Identifiable {
@@ -3226,6 +3235,16 @@ struct WealthTransferSheet: View {
     @State private var coverLine: String?
     /// [v25.575] 備註裡像帳號的那串數字的後 4 碼（存檔前先問〔只留後 4 碼〕〔不是帳號，照存〕）
     @State private var noteAccountTail: String?
+    /// [v25.577] 跟定期轉帳的某一期重複（存檔前先問〔不用記了〕〔還是要記〕；nil＝沒在問）
+    @State private var duplicateAsk: WealthTransferDuplicate?
+    /// [v25.577] 問重複時帶著的〔只留後 4 碼〕答案（〔還是要記〕照它存）
+    @State private var duplicateMaskNote = false
+    /// [v25.577] 那個框的標題（問的時候存好、收起來不清：收起來的那一下字不會變空白）
+    @State private var duplicateTitle = ""
+    /// [v25.577] 〔轉帳過去〕最下面〔改成每月定期轉帳〕帶好的欄位（「到」那個帳戶不夠扣的是每月固定支出才有）
+    @State private var monthlyPreset: WealthTransferPreset?
+    /// [v25.577] 巢狀新增表單（sheet(item:)）
+    @State private var ruleFormPreset: WealthTransferPreset?
 
     private func codes(of id: UUID?) -> [String] {
         choices.first { $0.id == id }?.codes ?? ["NT$"]
@@ -3309,29 +3328,57 @@ struct WealthTransferSheet: View {
 
     var body: some View {
         NavigationStack {
-            Form {
-                coverSection
-                fromSection
-                toSection
-                amountSection
-            }
-            .navigationTitle(navTitle)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                WealthSaveToolbar(title: "存", isSaving: isSaving, disabled: saveDisabled,
-                                  onCancel: { dismiss() }, onSave: { requestSave() })
-            }
-            .modifier(WealthAccountLikeAlert(tail: $noteAccountTail,
-                                             onMask: { save(maskNote: true) },
-                                             onKeep: { save(maskNote: false) }))
-            .onAppear { load() }
-            .onChange(of: from) { _, _ in fromChanged() }
-            .onChange(of: to) { _, _ in toChanged() }
-            .onChange(of: fromCode) { _, _ in fromCodeChanged() }
-            .onChange(of: toCode) { _, _ in resetRate() }
+            formWithAsks
+                .navigationTitle(navTitle)
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    WealthSaveToolbar(title: "存", isSaving: isSaving, disabled: saveDisabled,
+                                      onCancel: { dismiss() }, onSave: { requestSave() })
+                }
+                .onAppear { load() }
+                .onChange(of: from) { _, _ in fromChanged() }
+                .onChange(of: to) { _, _ in toChanged() }
+                .onChange(of: fromCode) { _, _ in fromCodeChanged() }
+                .onChange(of: toCode) { _, _ in resetRate() }
         }
         .presentationDetents([.medium, .large])
         .modifier(WealthPrivacyCurtain(armed: true))
+    }
+
+    /// 表單＋存檔前的兩個問句（像帳號、[v25.577] 跟某一期重複）＋[v25.577]〔改成每月定期轉帳〕的新增表單
+    private var formWithAsks: some View {
+        Form {
+            coverSection
+            fromSection
+            toSection
+            amountSection
+            monthlySection
+        }
+        .modifier(WealthAccountLikeAlert(tail: $noteAccountTail,
+                                         onMask: { proceed(maskNote: true, afterAlert: true) },
+                                         onKeep: { proceed(maskNote: false, afterAlert: true) }))
+        .modifier(WealthTransferDuplicateDialog(asking: duplicateAsk != nil, title: duplicateTitle,
+                                                onSkip: { skipDuplicate() },
+                                                onKeep: { keepDuplicate() },
+                                                onCancel: { cancelDuplicate() }))
+        .sheet(item: $ruleFormPreset, onDismiss: { refreshMonthlyPreset() }) { p in
+            WealthTransferRuleForm(preset: p).appStores()
+        }
+    }
+
+    /// [v25.577] 〔轉帳過去〕最下面：「『房貸』每月 10 日都要從這裡扣：」〔改成每月定期轉帳〕（judge §4.8、樣稿③-B2）
+    @ViewBuilder
+    private var monthlySection: some View {
+        if let p = monthlyPreset {
+            Section {
+                if let offer = p.offer {
+                    Text(offer)
+                        .font(.subheadline)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Button("改成每月定期轉帳") { ruleFormPreset = p }
+            }
+        }
     }
 
     /// [v25.575] 〔轉帳過去〕第一行：補到 30 天內都夠多少（每週的轉帳會連著不夠，只補第一次的差額下週又跳一條）
@@ -3437,6 +3484,8 @@ struct WealthTransferSheet: View {
         // [v25.575] 要確認 #1〔轉帳過去〕：「到」那個帳戶 30 天內會不夠扣 → 第一行補到都夠多少（金額欄要確認已經帶好 cover）
         if showsCover, !exchange, let t = toId {
             coverLine = facts.account(t)?.coverLine
+            // [v25.577] 不夠扣的是每月的固定支出：最下面〔改成每月定期轉帳〕（帶好從、到、金額、每月、扣款日前 2 天）
+            monthlyPreset = facts.monthlyTransferPreset(forShortageOf: t, expenses: expenseStore.expenses)
         }
         choices = WealthFormAccountChoice.banks(facts, including: exchange ? (toId ?? fromId) : fromId, includeFixed: true)
         // [v25.566] 換匯：照那個帳戶的幣別決定兩邊（同一個帳戶自己換，或從別的台幣活存換進來）
@@ -3539,7 +3588,66 @@ struct WealthTransferSheet: View {
             noteAccountTail = tail
             return
         }
-        save(maskNote: false)
+        proceed(maskNote: false, afterAlert: false)
+    }
+
+    /// [v25.577] 像帳號那一問之後、真的寫之前：跟定期轉帳的某一期重複就先問（afterAlert：等像帳號那個框收好再跳）；沒有就存
+    private func proceed(maskNote: Bool, afterAlert: Bool) {
+        guard !isSaving else { return }
+        guard let dup = findDuplicate() else {
+            save(maskNote: maskNote)
+            return
+        }
+        isSaving = true
+        duplicateMaskNote = maskNote
+        duplicateTitle = dup.question
+        if afterAlert {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                self.duplicateAsk = dup
+            }
+        } else {
+            duplicateAsk = dup
+        }
+    }
+
+    /// [v25.577] 單次轉帳跟某一期重複（judge §4.6；facts.transferDuplicate：同兩個帳戶、同金額、前後 3 天內有一期算進去）。
+    /// 只看台幣、不是換匯、不是〔轉帳過去〕（那是補錢，不是重複）、兩個不同帳戶
+    private func findDuplicate() -> WealthTransferDuplicate? {
+        guard !exchange, !showsCover, let f = from, let t = to, f != t,
+              fromCode == "NT$", toCode == "NT$",
+              let v = WealthFormText.number(amountText), v > 0 else { return nil }
+        let facts = lifeStore.wealthFacts(expense: expenseStore, finance: financeStore)
+        return facts.transferDuplicate(fromId: f, toId: t, amount: v, on: date)
+    }
+
+    /// [v25.577]〔不用記了〕：什麼都不存，關掉（不看 duplicateAsk：框收起來那一下可能先把它清掉了）
+    private func skipDuplicate() {
+        duplicateAsk = nil
+        dismiss()
+    }
+
+    /// [v25.577]〔還是要記（另外多轉一筆）〕：帶著剛才〔只留後 4 碼〕的答案存（直接存、不再問）
+    private func keepDuplicate() {
+        duplicateAsk = nil
+        isSaving = false
+        save(maskNote: duplicateMaskNote)
+    }
+
+    /// [v25.577]〔取消〕或框被關掉（沒按任何一顆）：回表單。晚一個 runloop 才看還在不在問：
+    /// 按了〔不用記了〕〔還是要記〕的話那邊已經清掉了＝什麼都不做；先清了也不擋那兩顆（它們不看 duplicateAsk）
+    private func cancelDuplicate() {
+        DispatchQueue.main.async {
+            guard self.duplicateAsk != nil else { return }
+            self.duplicateAsk = nil
+            self.isSaving = false
+        }
+    }
+
+    /// [v25.577] 新增表單關掉後：存好了（不再不夠扣）那一行就不見；沒存照舊
+    private func refreshMonthlyPreset() {
+        guard showsCover, !exchange, let t = toId else { return }
+        let facts = lifeStore.wealthFacts(expense: expenseStore, finance: financeStore)
+        monthlyPreset = facts.monthlyTransferPreset(forShortageOf: t, expenses: expenseStore.expenses)
     }
 
     /// maskNote：[v25.575]〔只留後 4 碼〕＝備註裡像帳號的每一串換成「••8901」再存
@@ -3594,6 +3702,29 @@ struct WealthAccountLikeAlert: ViewModifier {
             Button("不是帳號，照存") { onKeep() }
         } message: { t in
             Text(Self.message(t))
+        }
+    }
+}
+
+/// [v25.577] 單次轉帳跟定期轉帳的某一期重複（judge §4.6、樣稿③-C5）：標題「這筆跟定期轉帳『薪轉 → 存錢』11/6 那期一樣，
+/// App 已經算進去了」〔不用記了〕〔還是要記（另外多轉一筆）〕〔取消〕。框被關掉（沒按任何一顆）＝〔取消〕。拆成 modifier（坑 #7）
+struct WealthTransferDuplicateDialog: ViewModifier {
+    let asking: Bool
+    /// 問的時候存好、收起來不清（收起來的那一下字不會變空白）
+    let title: String
+    let onSkip: () -> Void
+    let onKeep: () -> Void
+    let onCancel: () -> Void
+
+    private var isPresented: Binding<Bool> {
+        Binding(get: { asking }, set: { if !$0 { onCancel() } })
+    }
+
+    func body(content: Content) -> some View {
+        content.confirmationDialog(title, isPresented: isPresented, titleVisibility: .visible) {
+            Button("不用記了") { onSkip() }
+            Button("還是要記（另外多轉一筆）") { onKeep() }
+            Button("取消", role: .cancel) { onCancel() }
         }
     }
 }
@@ -5056,6 +5187,12 @@ struct WealthChecksSection: View {
         case .openTransferRule(let rid):
             // [v25.575]〔看這條〕：規則頁（不擋訂閱；刪除在裡面擋）
             sheet = .transferRule(ruleId: rid)
+        case .resumeTransferRule(let rid):
+            // [v25.577]〔接著轉〕：帳戶收起來時結束的那條從下一期起接著轉（不擋訂閱：同〔結束這條〕）；
+            // 下一個 runloop 才寫（這一列會跟著不見）
+            DispatchQueue.main.async {
+                life.resumeTransferRule(rid)
+            }
         }
     }
 

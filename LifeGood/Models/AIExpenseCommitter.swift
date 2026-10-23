@@ -16,6 +16,9 @@ import MapKit
 //   • lifeStore／financeStore／expenseStore → 參數 life／finance／expense
 //   • aiShowToast(…) → return AIExpenseOutcome(…)（同樣的字，由呼叫的人決定怎麼顯示）
 //   • 函式去掉 ai 前綴、變成 private static；兩個 struct 收進這個 enum 裡當 private 型別
+//
+// [v25.577] 定期轉帳 v1b：AI 認得「轉到自己的帳戶」（ParsedAIExpense.ownTransfer）→ commit 第一行就回
+// 「這是轉帳，沒有記成支出」，不建 Expense、不扣帳戶（轉給家人、房東照舊記支出）。
 
 /// AI 記帳的結果提示（浮動麥克風的 toast、說一句的結果卡都用這一份字）
 struct AIExpenseOutcome: Equatable {
@@ -133,6 +136,13 @@ enum AIExpenseCommitter {
         banks bankDisplayNames: [AccountOption],
         estates realEstateDisplayNames: [RealEstateOption]
     ) async -> AIExpenseOutcome {
+        // [v25.577] 跟 AI 說轉到自己的帳戶（定期轉帳 v1b，judge §5）：自己帳戶之間搬錢不是花費——不建 Expense、不扣帳戶，只提示。
+        // 不幫你建單次轉帳或規則：AI 認錯帳戶時不會偷偷寫一筆轉帳；「每月轉兩萬」也不是單次（真的幫你建留在以後）
+        if parsed.ownTransfer {
+            return AIExpenseOutcome(title: "這是轉帳，沒有記成支出",
+                                    detail: "自己帳戶之間搬錢不算花費。到財富頁按〔＋〕記〔轉帳〕；每個月都轉的記〔定期轉帳〕。",
+                                    isError: false)
+        }
         let amount = parsed.amount ?? 0
         guard amount > 0 else {
             return AIExpenseOutcome(title: "找不到金額", detail: parsed.originalText ?? "AI 沒辨識出金額", isError: true)
