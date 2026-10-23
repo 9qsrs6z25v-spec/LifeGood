@@ -68,6 +68,11 @@ import SwiftUI
 //  （WealthBoard 的〔看全部〕點了開那一期）。③ 每個帳戶那一列不動。
 // • transferInvite：沒有規則（刪掉的不算）、沒按過〔不用了〕、沒收起來的銀行兩個以上 → ⑤ 最下面一行邀請。
 // • 定期轉帳卡底字補「在每個帳戶的「連到這個帳戶的」看得到。」（v1b 有 ④ 了）。
+//
+// [v25.579] 定期轉帳 v2 會提醒你（transfer/build/v2/brief.md §6 G2-3；judge §4.3；樣稿③-A1；sim_v2 §10）：
+// • 定期轉帳卡第三行最優先「暫停到 12/24」（暫停中，恢復那一期的前一天）／「12/4 起暫停到 12/24」（還沒開始）／「暫停中」「12/4 起暫停」
+//  （沒設恢復），灰字；字照 WealthTransferRule.pauseInfo(today:).text（主控），這裡只排先後。其他照舊：14 天內最後一次（橘）＞
+//   對方收起來了／找不到（橘）＞銀行設到哪天（灰）。VoiceOver 照舊帶到第三行那句。
 
 // MARK: - 捲到哪一區
 
@@ -1632,9 +1637,13 @@ extension WealthPageText {
                                        accessibilityText: said.joined(separator: "，"))
     }
 
-    /// 第三行最要緊的一件：14 天內最後一次（橘）＞對方收起來了／找不到（橘）＞銀行設到哪天（灰，年份不是今年才寫年）；都沒有 nil。
-    /// 暫停（v2）還沒有
+    /// 第三行最要緊的一件：[v25.579] 暫停（灰：「暫停到 12/24」「12/4 起暫停到 12/24」「暫停中」）＞14 天內最後一次（橘）＞
+    /// 對方收起來了／找不到（橘）＞銀行設到哪天（灰，年份不是今年才寫年）；都沒有 nil。
     private static func transferPick(_ t: WealthFacts.TransferRule, today: Date) -> (text: String, warn: Bool)? {
+        // [v25.579] 暫停最優先（WealthTransferRule.pauseInfo：還在跑、今天以後 400 天內有暫停的期才有；judge §4.3、sim_v2 §10）
+        if let p = t.rule.pauseInfo(today: today) {
+            return (text: p.text, warn: false)
+        }
         if let last = t.lastDay {
             let n = WealthCal.days(from: today, to: last)
             if n >= 0 && n <= transferEndSoonDays {

@@ -293,6 +293,11 @@ struct SettingsView: View {
     @StateObject private var alarmScheduler = MeetingAlarmScheduler.shared
     /// [財富 v4] 財富提醒（卡費截止、可能不夠扣的扣款與交割、卡片快到期）全部開關；沒設定過＝開（WealthReminders.isEnabled 同一個鍵）
     @AppStorage(WealthReminders.enabledKey) private var wealthRemindersOn = true
+    /// [v25.579 定期轉帳 v2] 「定期轉帳提醒（只這台）」（WealthReminders.transferEnabledKey，UserDefaults.standard、不同步、不進備份）。
+    /// 不用 @AppStorage：沒設過時的預設值要照「是不是加入別人的共享」算（加入共享的那支預設關），只有真的撥了才寫進 UserDefaults
+    @State private var transferRemindersOn: Bool = WealthReminders.transfersEnabled
+    /// [v25.579] 這支是不是加入別人的共享（「加入共享的這支預設關」那一行）；onAppear、共享狀態一變（下面的共享區塊加入／退出）就重讀
+    @State private var transferShareParticipant: Bool = CloudKitManager.shared.isShareParticipant
     @State private var reminderExpanded = false
     @State private var dataManagementExpanded = false
     @State private var dataStatsExpanded = false
@@ -1350,6 +1355,8 @@ struct SettingsView: View {
 
                 // [財富 v4] 財富提醒（全部）；每張卡另外有「提醒我繳卡費」（卡片表單）
                 wealthReminderToggle
+                // [v25.579 定期轉帳 v2] 定期轉帳那三種提醒（只這台；財富提醒關著時灰掉）；每一條另外有「提醒我」（規則頁）
+                transferReminderToggle
             }
         } header: {
             Text("會議提醒")
@@ -1381,8 +1388,64 @@ struct SettingsView: View {
 
     /// [財富 v4] 說明一次寫成單一字串常數，不要在 Text(...) 裡用 + 串接
     // [v25.566 財富 v5] 多了定存到期前 7 天（通知只寫「定存 3/15 到期（7 天後）」，不寫銀行、金額）
+    // [v25.579 定期轉帳 v2] 多了定期轉帳（下面那顆「定期轉帳提醒（只這台）」另外管）
     private static let wealthReminderHint =
-        "卡費截止、可能不夠扣的扣款與交割、卡片快到期、定存到期前 7 天；通知不寫卡名、銀行和金額"
+        "卡費截止、可能不夠扣的扣款與交割、卡片快到期、定存到期前 7 天、定期轉帳；通知不寫卡名、銀行和金額"
+
+    /// [v25.579 定期轉帳 v2] 「定期轉帳提醒（只這台）」（judge §4.10、第 6 題；拆出來，body 裡只放一個名字）。
+    /// 只管定期轉帳那三種（自己轉那天 09:00、自動轉可能轉不過去前一晚 20:00、銀行設的最後一次前 14 天），卡費、定存照「財富提醒」。
+    /// 沒設過＝WealthReminders.transfersEnabled 照「是不是加入別人的共享」算（加入共享的那支預設關）；
+    /// **只有真的撥了才寫 UserDefaults**（onAppear 把值對回去時 v == transfersEnabled，guard 擋掉，預設值不會被「凍住」）
+    private var transferReminderToggle: some View {
+        Toggle(isOn: $transferRemindersOn) {
+            Label {
+                transferReminderLabelText
+            } icon: {
+                Image(systemName: "arrow.left.arrow.right.circle.fill")
+                    .foregroundStyle(.orange)
+            }
+        }
+        .disabled(!wealthRemindersOn)
+        .onChange(of: transferRemindersOn) { _, v in
+            guard v != WealthReminders.transfersEnabled else { return }
+            UserDefaults.standard.set(v, forKey: WealthReminders.transferEnabledKey)
+            WealthReminderCenter.shared.rebuildSoon()
+        }
+        .onAppear {
+            // 加入（或退出）共享之後回來看：沒設過的預設值要跟著變
+            transferShareParticipant = CloudKitManager.shared.isShareParticipant
+            transferRemindersOn = WealthReminders.transfersEnabled
+        }
+        .onReceive(NotificationCenter.default.publisher(for: CloudKitManager.sharingStateDidChangeNotification)) { _ in
+            // 設定頁開著時在下面的共享區塊加入／退出：顯示的值、那一行小字馬上對（不然退出共享後畫面寫關、實際照開在排）。
+            // 值相同時 onChange 的 guard 擋掉、不寫 UserDefaults；通知不一定在主執行緒發，放回主執行緒
+            DispatchQueue.main.async {
+                transferShareParticipant = CloudKitManager.shared.isShareParticipant
+                transferRemindersOn = WealthReminders.transfersEnabled
+            }
+        }
+    }
+
+    /// [v25.579] 「定期轉帳提醒（只這台）」的標題＋小字（加入共享的那支多一行）
+    private var transferReminderLabelText: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(Self.transferReminderTitle)
+            Text(Self.transferReminderHint)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            if transferShareParticipant {
+                Text(Self.transferReminderShareHint)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    /// [v25.579] 字一律單一字串常數，不要在 Text(...) 裡用 + 串接
+    private static let transferReminderTitle = "定期轉帳提醒（只這台）"
+    private static let transferReminderHint =
+        "自己轉的那天早上 9 點、銀行可能轉不過去的前一晚、銀行設的最後一次前 14 天；只在這支手機響，不同步。通知不寫帳戶、銀行和金額"
+    private static let transferReminderShareHint = "加入共享的這支預設關"
 
     /// 說明一次寫成單一字串常數，不要在 Text(...) 裡用 + 串接
     private static let meetingAlertFootnote =

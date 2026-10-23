@@ -1133,6 +1133,58 @@ class LifeStore: ObservableObject {
                           expiryMonths: cardExpiryMonths())
     }
 
+    // MARK: - [v25.579] 定期轉帳 v2 會提醒你（transfer/build/v2/brief.md §2；算法在 WealthTransferNotices.swift）
+    // 一樣只改規則與註記（不寫 BankDeposit、不碰記帳）、每支只指派一次 wealthTransfers；**不加任何新欄位**（v1a、v1b 的手機會原樣留著）。
+    // 都不擋訂閱（judge §6：〔轉好了〕〔轉了〕〔還沒〕〔暫停〕〔恢復〕是記下銀行真的發生了什麼、銀行那邊停了 App 也要停得了）。
+    // 畫面先 dismiss（或關掉小框）、下一個 runloop 才叫
+
+    /// 〔轉好了〕〔今天轉好了〕：那一期記成你轉好了（status "done"）、實際那天 day（＝原本那天就不存 dayKey）、
+    /// 實際轉了多少 amount（nil＝照留；跟這一段每期一樣＝不存）、今天對存摺的時候還沒轉的那一邊 lateOut／lateIn（nil＝照留；
+    /// true＝排在對存摺後面、false＝拿掉）。〔轉了〕（過了日子那一期當天就轉了）走 setTransferStatus(… "done")，日子照留
+    func markTransferDone(ruleId: UUID, key: String, day: Date, amount: Double? = nil, lateOut: Bool? = nil,
+                          lateIn: Bool? = nil, now: Date = Date()) {
+        updateWealthTransfers(now: now) { book in
+            guard var r = book.rule(ruleId) else { return }
+            var notes = r.notes ?? [:]
+            var n = notes[key] ?? WealthTransferNote()
+            n.status = WealthTransferStatus.done.rawValue
+            let dk = WealthCal.dayKey(day)
+            n.dayKey = dk == key ? nil : dk
+            if let v = amount {
+                let seg: Double = r.segment(at: key)?.amount ?? 0
+                n.amount = Swift.abs(v - seg) < 0.5 ? nil : v
+            }
+            if let lo = lateOut { n.lateOut = lo ? true : nil }
+            if let li = lateIn { n.lateIn = li ? true : nil }
+            n.at = now
+            n.updatedAt = now
+            notes[key] = n
+            r.notes = notes
+            book.upsert(r)
+        }
+    }
+
+    /// 〔暫停〕：從 fromKey 那一期（含）起暫停，到 untilKey 那一期恢復（nil＝〔先不設〕）；WealthTransferRule.paused（金額 0 的一段）
+    func pauseTransferRule(_ id: UUID, from fromKey: String, until untilKey: String?, now: Date = Date()) {
+        updateTransferRule(id, now: now) { r in
+            r = r.paused(from: fromKey, until: untilKey, now: now)
+        }
+    }
+
+    /// 〔恢復〕：從 fromKey 那一期（含）起照轉（WealthTransferRule.unpaused；以前暫停過的期照舊不算）
+    func unpauseTransferRule(_ id: UUID, from fromKey: String, now: Date = Date()) {
+        updateTransferRule(id, now: now) { r in
+            r = r.unpaused(from: fromKey)
+        }
+    }
+
+    /// 規則頁「這條要提醒我」：rule.remind（nil＝要；v1a 就有這欄）。關掉＝這條的三種通知都不排（要確認照樣問）
+    func setTransferRemind(_ id: UUID, on: Bool, now: Date = Date()) {
+        updateTransferRule(id, now: now) { r in
+            r.remind = on ? nil : false
+        }
+    }
+
     // MARK: - [v25.567] 財富 v6：證券戶交割、保單連記帳、從哪扣（build/v6/brief.md §2；都只寫一次 milestones／帳本／記帳／理財）
 
     /// 股票的交割紀錄重寫一次（股票表單、股票卡加交易、記帳改舊版單筆股票都叫這一支；以前三份各寫各的）：

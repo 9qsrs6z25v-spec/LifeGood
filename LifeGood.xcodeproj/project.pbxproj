@@ -144,6 +144,7 @@
 		A01B000001001592 /* WealthWebFacts.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001592 /* WealthWebFacts.swift */; };
 		A01B000001001598 /* WealthTransfers.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001598 /* WealthTransfers.swift */; };
 		A01B000001001601 /* WealthTransferPlans.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001601 /* WealthTransferPlans.swift */; };
+		A01B000001001603 /* WealthTransferNotices.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001603 /* WealthTransferNotices.swift */; };
 		A01B000001001593 /* NotificationActions.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001593 /* NotificationActions.swift */; };
 		A01B000001001582 /* WealthBoard.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001582 /* WealthBoard.swift */; };
 		A01B000001001583 /* WealthBoardScenes.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001583 /* WealthBoardScenes.swift */; };
@@ -468,6 +469,7 @@
 		A01A000001001592 /* WealthWebFacts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WealthWebFacts.swift; sourceTree = "<group>"; };
 		A01A000001001598 /* WealthTransfers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WealthTransfers.swift; sourceTree = "<group>"; };
 		A01A000001001601 /* WealthTransferPlans.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WealthTransferPlans.swift; sourceTree = "<group>"; };
+		A01A000001001603 /* WealthTransferNotices.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WealthTransferNotices.swift; sourceTree = "<group>"; };
 		A01A000001001593 /* NotificationActions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationActions.swift; sourceTree = "<group>"; };
 		A01A000001001582 /* WealthBoard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WealthBoard.swift; sourceTree = "<group>"; };
 		A01A000001001583 /* WealthBoardScenes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WealthBoardScenes.swift; sourceTree = "<group>"; };
@@ -842,6 +844,7 @@
 				A01A000001001592 /* WealthWebFacts.swift */,
 				A01A000001001598 /* WealthTransfers.swift */,
 				A01A000001001601 /* WealthTransferPlans.swift */,
+				A01A000001001603 /* WealthTransferNotices.swift */,
 				A01A000001001593 /* NotificationActions.swift */,
 				A01A000001001594 /* WatchPackageBuilder.swift */,
 				A01A000001001595 /* WatchExtrasWriter.swift */,
@@ -1369,6 +1372,7 @@
 				A01B000001001592 /* WealthWebFacts.swift in Sources */,
 				A01B000001001598 /* WealthTransfers.swift in Sources */,
 				A01B000001001601 /* WealthTransferPlans.swift in Sources */,
+				A01B000001001603 /* WealthTransferNotices.swift in Sources */,
 				A01B000001001593 /* NotificationActions.swift in Sources */,
 				A01B000001001594 /* WatchPackageBuilder.swift in Sources */,
 				A01B000001001595 /* WatchExtrasWriter.swift in Sources */,
@@ -1809,7 +1813,7 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 1331;
+				CURRENT_PROJECT_VERSION = 1332;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
@@ -1830,7 +1834,7 @@
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
-				MARKETING_VERSION = 25.578;
+				MARKETING_VERSION = 25.579;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
@@ -1874,7 +1878,7 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 1331;
+				CURRENT_PROJECT_VERSION = 1332;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
@@ -1889,7 +1893,7 @@
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
-				MARKETING_VERSION = 25.578;
+				MARKETING_VERSION = 25.579;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				SDKROOT = iphoneos;

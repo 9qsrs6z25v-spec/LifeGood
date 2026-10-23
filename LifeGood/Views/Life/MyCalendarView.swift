@@ -63,11 +63,24 @@ import UIKit
 //   開 WealthCardPage(accountId:)（看不擋訂閱，卡片頁自己擋編輯）。
 // • **不送 Apple 行事曆**（AppleCalendarBridge 只寫個人行事曆事件與部屬生日提醒）；搜尋（searchHits）這版不加財富。
 // • 規則同 CalendarDayItems（「今天」小工具的全天的事），改一邊改另一邊；小工具主畫面不寫金額、鎖定畫面只寫類別字。
+//
+// [v25.579] 定期轉帳 v2（transfer/judge.md §4.9；build/v2/brief.md §1-7、§6 G3）：我的行事曆顯示定期轉帳，照財富的日子同一套
+//   CalendarEvent／eventsOn／eventRow，不另寫一套列：
+// • 只放還在跑的規則：自己轉的每條接下來 2 期（財富橘）、銀行自動轉**每月**的接下來 2 期（灰，wealthAutoPayGray）、每週自動轉的不放（太多）。
+//   「[arrow.left.arrow.right] 薪轉 → 台灣銀行　〔財富〕　☀ 全日 · 自己轉・NT$5,000」；財富頁右上眼睛遮住時（WealthMask）金額寫「NT$ ••••」。
+//   字、數字全在 WealthDates.transferItems(facts:masked:)（Models/WealthTransferNotices.swift），這裡只挑日子、上色。
+// • 一次算好、一天一天挑：body 預先計算那段先算 transferAll（一次 render 只展開一次轉帳），eventsOn(_:transfers:) 只挑那一天的；
+//   搜尋模式下不算（同 allEventsMap）。
+// • 點了照 .wealth(id) 開轉出帳戶的卡片頁（既有 openTarget）。**不送 Apple 行事曆**、搜尋不加。
+// • **CalendarDayItems（今天小工具 → 手錶今天頁）不放轉帳**：transferItems 不在 WealthDates.all／items 裡，這份只有我的行事曆讀；
+//   CalendarDayItems 一個字都沒改（「規則同 CalendarDayItems」這一條轉帳例外）。
 
 /// 我的行事曆：彙整當日家庭紀念日、工作會議與任務、本週快覽、未來里程碑、Apple 行事曆事件。
 struct MyCalendarView: View {
     @EnvironmentObject var lifeStore: LifeStore
     @EnvironmentObject var financeStore: FinanceStore
+    /// [v25.579] 財富頁右上眼睛那一顆（這台裝置、不同步）：遮住時定期轉帳的金額寫「NT$ ••••」
+    @AppStorage(WealthMask.storageKey) private var wealthMasked = false
     @StateObject private var appleCal = AppleCalendarBridge.shared
     /// [v25.454] 從靈動島點進來要打開哪一筆的卡片
     @ObservedObject private var deepLink = DeepLinkRouter.shared
@@ -159,7 +172,9 @@ struct MyCalendarView: View {
         // eventsOn()（家人+里程碑+行事曆全量查詢，非輕量運算），weekEventsMap／heroEventsMap
         // 再各自從聯集結果取子集，避免重疊日期被 eventsOn() 重複掃描兩次。
         let allDates = trimmedQuery.isEmpty ? Array(Set(resolvedWeekDates).union(heroWeekDates)) : []
-        let allEventsMap = Dictionary(uniqueKeysWithValues: allDates.map { ($0, eventsOn($0)) })
+        // [v25.579] 定期轉帳一次 render 只展開一次（每次展開很重），eventsOn 只挑那一天的；搜尋模式下不算
+        let transferAll: [WealthDateItem] = trimmedQuery.isEmpty ? transferItemsNow : []
+        let allEventsMap = Dictionary(uniqueKeysWithValues: allDates.map { ($0, eventsOn($0, transfers: transferAll)) })
         let weekEventsMap = Dictionary(uniqueKeysWithValues: resolvedWeekDates.map { ($0, allEventsMap[$0] ?? []) })
         let heroEventsMap = heroIsToday ? weekEventsMap
             : Dictionary(uniqueKeysWithValues: heroWeekDates.map { ($0, allEventsMap[$0] ?? []) })
@@ -483,9 +498,18 @@ struct MyCalendarView: View {
     private static let wealthAutoPayGray = Color(red: 0.56, green: 0.60, blue: 0.66)
 
     /// [財富 v4] 財富日子那一列的顏色：只有自動扣的卡費是灰的
+    /// [v25.579] 銀行自動轉的定期轉帳也灰（自己轉的照財富橘）
     private static func wealthTint(_ item: WealthDateItem) -> Color? {
         if item.kind == .cardDue && !item.isManual { return wealthAutoPayGray }
+        if item.kind == .transfer && !item.isManual { return wealthAutoPayGray }
         return nil
+    }
+
+    /// [v25.579] 我的行事曆的定期轉帳（今天起；自己轉的每條 2 期、自動轉每月的 2 期、每週自動轉的不放）。
+    /// body 預先計算那段叫一次，再交給 eventsOn 一天一天挑；數字只讀 lifeStore.wealthFacts 那一份（記帳用 AppStores.expense，同財富的日子）
+    private var transferItemsNow: [WealthDateItem] {
+        let facts = lifeStore.wealthFacts(expense: AppStores.expense, finance: financeStore)
+        return WealthDates.transferItems(facts: facts, masked: wealthMasked)
     }
 
     /// [財富 v4] 「接下來 7 天」的彩點與 eventRow 的顏色：這一列自己的顏色優先
@@ -520,7 +544,8 @@ struct MyCalendarView: View {
         return calendar.date(from: comp) ?? date
     }
 
-    private func eventsOn(_ day: Date) -> [CalendarEvent] {
+    /// [v25.579] transfers：body 先算好的定期轉帳（WealthDates.transferItems，今天起全部）；這裡只挑這一天的
+    private func eventsOn(_ day: Date, transfers: [WealthDateItem] = []) -> [CalendarEvent] {
         var events: [CalendarEvent] = []
         let year = calendar.component(.year, from: day)
 
@@ -585,6 +610,21 @@ struct MyCalendarView: View {
         // 記帳用 AppStores.expense（同一份；不加 @EnvironmentObject：#Preview 沒注入會當掉）
         let wFacts = lifeStore.wealthFacts(expense: AppStores.expense, finance: financeStore)
         for item in WealthDates.items(on: day, facts: wFacts) {
+            events.append(CalendarEvent(
+                id: item.id,
+                type: .wealth,
+                title: item.title,
+                time: nil,
+                detail: item.detail,
+                iconName: item.icon,
+                wealthAccountId: item.accountId,
+                tint: Self.wealthTint(item)
+            ))
+        }
+
+        // [v25.579] 定期轉帳：自己轉的橘、銀行自動轉每月的灰（wealthTint）；點了開轉出帳戶的卡片頁（.wealth）。不送 Apple 行事曆
+        let d0 = WealthCal.day(day)
+        for item in transfers where item.day == d0 {
             events.append(CalendarEvent(
                 id: item.id,
                 type: .wealth,

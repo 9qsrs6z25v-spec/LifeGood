@@ -63,6 +63,16 @@ import UserNotifications
 //  （以前只看第一次不夠扣在截止日或更早：每週的小轉帳排第一，卡費扣完明明夠也假警報；卡費前面先有別的不夠，卡費自己不夠反而不排）。
 // • 交割提醒改成「shortages 裡有那天的交割」才排（以前要第一次不夠扣剛好在交割那天）。
 // • 定期轉帳自己的提醒是 v2；這版不加候選、字、分類都沒改。
+//
+// [v25.579] 定期轉帳 v2 會提醒你（transfer/judge.md §4.9、§4.10；build/v2/brief.md §2；候選、字在 WealthTransferNotices.swift）：
+// • candidates 多三種（WealthTransferNotices.candidates）：wealth.tr.do.<日子>（自己轉那天 09:00，同一天併一則，LG_WEALTH_TODAY〔晚上再提醒〕）、
+//   wealth.tr.short.<日子>（自動轉可能轉不過去前一天 20:00，同一天併一則，不掛按鈕）、wealth.tr.end.<規則>.<日子>
+//  （銀行設的最後一次前 14 天 09:00，LG_WEALTH〔明天 9 點再提醒〕）。字不寫帳戶、銀行、金額、對方、名字。跟卡費、定存一起排、最多 10 則（照舊）。
+//   〔轉好了〕〔這期不轉〕之後那天的候選就不在了，延後的再提醒照 v25.572 那條路一起拿掉。
+// • 開關：「財富提醒」關掉全部不排（照舊）；**「定期轉帳提醒（只這台）」**（transferEnabledKey，UserDefaults.standard、不同步）只管這三種，
+//   沒設過時照 CloudKitManager.isShareParticipant：加入別人共享的那支（太太的）預設關（judge 第 6 題）。每一條 rule.remind == false 不排。
+// • WealthDateItem.Kind 多 .transfer：只給我的行事曆（WealthDates.transferItems），**不在 all／items 裡**——CalendarDayItems（今天小工具、
+//   手錶今天頁）讀的是 items，一個字都不會多。
 
 // MARK: - 1. 財富的日子
 
@@ -72,6 +82,8 @@ struct WealthDateItem: Identifiable, Equatable {
         case cardDue, settlement, cardExpiry
         /// [v25.566] 定存到期
         case depositMaturity
+        /// [v25.579] 定期轉帳（只給我的行事曆：WealthDates.transferItems；all／items 不含它，今天小工具、手錶不會有）
+        case transfer
     }
 
     /// 「wd-due-<卡>-<2026-10>」「wd-settle-<帳戶>-<2026-10-21>-NT$」「wd-expiry-<卡>-<2027-03>」
@@ -194,6 +206,15 @@ enum WealthReminders {
         UserDefaults.standard.object(forKey: enabledKey) as? Bool ?? true
     }
 
+    /// [v25.579] 設定的「定期轉帳提醒（只這台）」開關（UserDefaults.standard，不同步、不進備份）
+    static let transferEnabledKey = "wealth_transfer_reminders_enabled"
+
+    /// [v25.579] 這台要不要排定期轉帳的三種提醒：設過照設的；沒設過＝加入別人共享的那支（太太的）關、其他開（judge 第 6 題）
+    static var transfersEnabled: Bool {
+        if let v = UserDefaults.standard.object(forKey: transferEnabledKey) as? Bool { return v }
+        return !CloudKitManager.shared.isShareParticipant
+    }
+
     /// 要排的提醒（近的先排、最多 10 則；sim_v4.py reminder_jobs 照這裡寫）。純計算：不碰通知中心
     static func jobs(facts: WealthFacts, book: WealthBook, now: Date) -> [WealthReminderJob] {
         jobs(from: candidates(facts: facts, book: book), now: now)
@@ -213,7 +234,8 @@ enum WealthReminders {
     /// [v25.572] 所有財富提醒：不看時間、不限則數、照產生的先後（sim_v3.py wealth_candidates）。純計算：不碰通知中心。
     /// 也是「延後的再提醒（snooze.wealth.）還要不要」的判斷依據：原本那則的 key 不在這裡就拿掉——
     /// 標成已繳那一期不在 dues 的 due／unbilled 裡、這張卡不提醒、定存那一期不提醒、保單收起來，都不在候選裡
-    static func candidates(facts: WealthFacts, book: WealthBook) -> [WealthReminderJob] {
+    /// [v25.579] transfers：要不要排定期轉帳那三種（nil＝照這台的開關 transfersEnabled）
+    static func candidates(facts: WealthFacts, book: WealthBook, transfers: Bool? = nil) -> [WealthReminderJob] {
         var out: [WealthReminderJob] = []
         let accounts = Dictionary(facts.accounts.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         let paidHint = "繳完到財富頁按「標成已繳」，提醒就會取消。"
@@ -293,6 +315,11 @@ enum WealthReminders {
                                          title: "保單 \(WealthFormat.monthDay(r)) 到期（30 天後）",
                                          body: "一年一約的保單記得續保；打開看看。",
                                          fireDate: f, accountId: p.id))
+        }
+
+        // [v25.579] 定期轉帳：自己轉那天、自動轉可能轉不過去前一晚、銀行設的最後一次前 14 天（「定期轉帳提醒（只這台）」關著就不排）
+        if transfers ?? transfersEnabled {
+            out.append(contentsOf: WealthTransferNotices.candidates(facts: facts))
         }
 
         // 不排序、不限則數（jobs(from:now:) 再篩時間、排序、取前 10 則）

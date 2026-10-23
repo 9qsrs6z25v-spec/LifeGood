@@ -107,6 +107,13 @@ import CryptoKit
 // • 要確認多一條 transferResume：帳戶收起來時結束的定期轉帳（endedBy "accountHidden"），兩邊帳戶又都在、沒收起來 →
 //  「『薪轉 → 零用錢』在帳戶收起來時結束了。帳戶又打開了，要從下一期 12/11（五）起接著轉嗎？」〔接著轉〕（Fix.resumeTransferRule）〔不用〕。
 //
+// [v25.579] 定期轉帳 v2 會提醒你（transfer/build/v2/brief.md §2；算法、字在 WealthTransferNotices.swift，sim_v2.py 照那裡寫過、跑過）：
+// • 要確認多四條（WealthTransferNotices.checks；一列都 ≤ 2 顆，都是 warn）：transferToday「今天要自己從 薪轉 轉 5,000 到 台灣銀行」
+//  〔轉好了〕（Fix.transferDoneToday）〔看這一期〕；transferAsk「10/31 該從 薪轉 轉 5,000 到 台灣銀行，轉了嗎？（App 先當作轉了）」
+//  〔轉了〕（setTransferStatus "done"）〔還沒…〕（Fix.askTransferNotYet：〔還沒，算在明天〕〔這期不轉〕）；transferHanging「10/31 那筆 5,000
+//   還沒轉（一直算在明天）。還要轉嗎？」〔今天轉好了〕〔這期不轉了〕；transferEnding「『薪轉 → 零用錢』4/9 是最後一次（你設的銀行到期日）。
+//   要繼續的話記得去銀行續設」〔已經續設〕（Fix.renewTransferEnd）〔知道了〕。
+//
 // （工程）build 很重（展開每一期），全 App 只透過 LifeStore.wealthFacts(expense:finance:) 拿快取的那一份
 // （key＝里程碑／財富帳本的 revision＋記帳、理財的 modifyID＋匯率＋日期），打字時不重算（U1 P1、P5）。
 // 不標 @MainActor（AI 記帳、LifeStore 都會叫）；但字串用到 ntdWanString（NumberFormatter），請在主執行緒叫。
@@ -699,6 +706,8 @@ struct WealthCheck: Identifiable {
         case transferAccount
         // [v25.577] warn：帳戶收起來時結束的定期轉帳，帳戶又打開了〔接著轉〕〔不用〕
         case transferResume
+        // [v25.579] warn：自己轉今天要轉、過了日子還沒回答、〔還沒〕掛滿 7 天、銀行設的最後一次 14 天內（WealthTransferNotices.checks）
+        case transferToday, transferAsk, transferHanging, transferEnding
         // [v25.565] warn：卡片效期前 30 天（#12）
         case cardExpiring
         // [v25.567] warn：證券戶身上有舊交割紀錄（#16）、一年一約保單 60 天內到期
@@ -769,6 +778,13 @@ struct WealthCheck: Identifiable {
         case openTransferRule(UUID)
         /// [v25.577] 〔接著轉〕：帳戶收起來時結束的那條從下一期起接著轉（LifeStore.resumeTransferRule；不擋訂閱：同〔結束這條〕）
         case resumeTransferRule(UUID)
+        /// [v25.579]〔轉好了〕（今天那一期）〔今天轉好了〕（〔還沒〕掛滿 7 天）：那一期記成你今天轉好了（LifeStore.markTransferDone，day＝今天）；
+        /// 轉出或轉進的帳戶今天對過存摺先問「今天對存摺的時候，這筆轉了嗎？」（facts.transferReconciledToday）。不擋訂閱
+        case transferDoneToday(ruleId: UUID, key: String)
+        /// [v25.579]〔還沒…〕：先問〔還沒，算在明天〕（"notYet"）〔這期不轉〕（"skip"）（LifeStore.setTransferStatus；不擋訂閱）
+        case askTransferNotYet(ruleId: UUID, key: String)
+        /// [v25.579]〔已經續設〕：開「銀行那邊設到哪天」小表單（WealthTransferRenewSheet；不擋訂閱：同〔結束〕）
+        case renewTransferEnd(UUID)
     }
     struct Action: Identifiable, Equatable {
         let title: String
@@ -814,6 +830,11 @@ struct WealthCheck: Identifiable {
         case .transferAccount: return "archivebox.fill"
         // [v25.577]
         case .transferResume: return "arrow.clockwise.circle.fill"
+        // [v25.579]
+        case .transferToday: return "arrow.left.arrow.right.circle.fill"
+        case .transferAsk: return "questionmark.circle.fill"
+        case .transferHanging: return "clock.fill"
+        case .transferEnding: return "bell.fill"
         }
     }
 
@@ -3706,6 +3727,11 @@ struct WealthFacts {
                             actions: [WealthCheck.Action(title: "接著轉", fix: .resumeTransferRule(t.id)),
                                       WealthCheck.Action(title: "不用", fix: .dismiss)],
                             accountIds: ids))
+        }
+
+        // [v25.579] 定期轉帳 v2：今天要轉、過了日子還沒回答、〔還沒〕掛滿 7 天、銀行設的最後一次 14 天內（WealthTransferNotices.checks）
+        for c in WealthTransferNotices.checks(transfers: transfers, names: ctx.nameById, bankIds: bankIds, today: today) {
+            add(c)
         }
 
         // 排序：bad → warn → info，同一種語氣照種類先後，同一種照產生的順序（sort 不保證穩定，帶著原本的位置比）

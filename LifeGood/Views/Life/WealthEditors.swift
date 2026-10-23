@@ -79,6 +79,17 @@ import UIKit
 // • 〔轉帳過去〕小表單最下面：「到」那個帳戶第一筆不夠扣的是每月的固定支出 → 「『房貸』每月 10 日都要從這裡扣：」
 //   〔改成每月定期轉帳〕＝巢狀 sheet WealthTransferRuleForm(preset: facts.monthlyTransferPreset(…))；不另外擋訂閱
 //  （〔轉帳過去〕打開這張表時擋過了）；新增表單關掉後這張留著（存好了那一行就不見）。
+//
+// [v25.579] 定期轉帳 v2 會提醒你（transfer/build/v2/brief.md §6 G2；judge §3.6、§4.8 v2）：
+// • 要確認三個新按鈕（WealthChecksSection.tap，都不擋訂閱）：
+//   〔轉好了〕（今天那一期）〔今天轉好了〕（〔還沒〕掛滿 7 天）＝Fix.transferDoneToday：轉出或轉進的帳戶今天對過存摺
+//  （facts.transferReconciledToday）先問「今天對存摺的時候，這筆轉了嗎？」〔還沒，對完才轉的〕（對過的那一邊記 late）
+//   〔轉了，存摺上已經有了〕（那一邊 late 拿掉）；兩邊都沒對過＝下一個 runloop 直接 LifeStore.markTransferDone(day: 今天)。
+//   〔還沒…〕＝Fix.askTransferNotYet：先問〔還沒，算在明天〕（"notYet"）〔這期不轉〕（"skip"）→ LifeStore.setTransferStatus。
+//   〔已經續設〕＝Fix.renewTransferEnd：開 WealthFormSheet.transferRenew → WealthTransferRenewSheet（G1 的「銀行那邊設到哪天」）。
+//   〔轉了〕〔這期不轉了〕〔看這一期〕〔知道了〕是既有的 Fix（setTransferStatus／openTransferPeriod／dismiss）。
+// • 多問的那一句：WealthChecksTransferAsk＋WealthChecksTransferDialog（confirmationDialog；拆成 ViewModifier，同 WealthCheckAskDialog）；
+//   選了之後確認框先收好、下一個 runloop 才寫（這一列會跟著不見）。
 
 /// 表單的類型（開了就鎖住）
 enum WealthAccountKind: String, CaseIterable, Identifiable {
@@ -2903,6 +2914,8 @@ enum WealthFormSheet: Identifiable {
     case transferRule(ruleId: UUID)
     /// [v25.575] 要確認〔看這一期〕：定期轉帳那一期的小表單（key＝那一期原本的日子「2026-11-13」）
     case transferPeriod(ruleId: UUID, key: String)
+    /// [v25.579] 要確認〔已經續設〕：銀行那邊設到哪天
+    case transferRenew(ruleId: UUID)
 
     var id: String {
         switch self {
@@ -2932,6 +2945,8 @@ enum WealthFormSheet: Identifiable {
             return "transferrule-" + r.uuidString
         case .transferPeriod(let r, let k):
             return "transferperiod-" + r.uuidString + "-" + k
+        case .transferRenew(let r):
+            return "transferrenew-" + r.uuidString
         }
     }
 
@@ -2970,6 +2985,9 @@ enum WealthFormSheet: Identifiable {
             return AnyView(WealthTransferRulePage(ruleId: r))
         case .transferPeriod(let r, let k):
             return AnyView(WealthTransferPeriodSheet(ruleId: r, periodKey: k))
+        // [v25.579] 銀行續設（G1 的小表單自己掛布幕、presentationDetents）
+        case .transferRenew(let r):
+            return AnyView(WealthTransferRenewSheet(ruleId: r))
         }
     }
 }
@@ -5026,6 +5044,82 @@ struct WealthCheckAskDialog: ViewModifier {
     }
 }
 
+/// [v25.579] 要確認〔還沒…〕〔轉好了〕〔今天轉好了〕之後多問的一句（要確認一列最多 2 顆，第三個選項放這裡）
+enum WealthChecksTransferAsk: Identifiable {
+    /// 〔還沒…〕：〔還沒，算在明天〕〔這期不轉〕
+    case notYet(ruleId: UUID, key: String)
+    /// 今天對過存摺：〔還沒，對完才轉的〕〔轉了，存摺上已經有了〕（from／to：哪一邊今天對過）
+    case late(ruleId: UUID, key: String, from: Bool, to: Bool)
+
+    var id: String {
+        switch self {
+        case .notYet(let r, let k): return "ny-" + r.uuidString + "-" + k
+        case .late(let r, let k, _, _): return "late-" + r.uuidString + "-" + k
+        }
+    }
+
+    var title: String {
+        switch self {
+        case .notYet: return "這期還沒轉？"
+        case .late: return "今天對存摺的時候，這筆轉了嗎？"
+        }
+    }
+
+    var message: String {
+        switch self {
+        case .notYet:
+            return "選〔還沒，算在明天〕：這筆先算在明天、每天往後挪，\(WealthTransferNotices.hangDays) 天後再問你一次。"
+        case .late:
+            return "對存摺之後才轉的，App 會把這筆排在對存摺後面。"
+        }
+    }
+}
+
+/// [v25.579] 多問的那一句（拆成 ViewModifier：要確認的 body 已經掛了 sheet、確認框、付費說明，坑 #7）。
+/// 按了只回呼，寫 store 由呼叫端放下一個 runloop（確認框先收好）
+struct WealthChecksTransferDialog: ViewModifier {
+    @Binding var ask: WealthChecksTransferAsk?
+    /// 〔還沒，算在明天〕〔這期不轉〕：規則、那一期原本的日子、狀態字（LifeStore.setTransferStatus）
+    let onStatus: (UUID, String, String) -> Void
+    /// 〔還沒，對完才轉的〕〔轉了，存摺上已經有了〕：規則、那一期、lateOut、lateIn（nil＝那一邊照留；LifeStore.markTransferDone）
+    let onDone: (UUID, String, Bool?, Bool?) -> Void
+
+    private var isPresented: Binding<Bool> {
+        Binding(get: { self.ask != nil }, set: { if !$0 { self.ask = nil } })
+    }
+
+    private var title: String {
+        ask?.title ?? ""
+    }
+
+    /// 對過存摺的那一邊（anchored）寫 value（true＝對完才轉、排在對存摺後面；false＝存摺上已經有了、拿掉）；沒對過的那一邊 nil＝照留
+    private static func lateFlag(_ anchored: Bool, _ value: Bool) -> Bool? {
+        anchored ? value : nil
+    }
+
+    @ViewBuilder
+    private func buttons(_ a: WealthChecksTransferAsk) -> some View {
+        switch a {
+        case .notYet(let r, let k):
+            Button("還沒，算在明天") { onStatus(r, k, WealthTransferStatus.notYet.rawValue) }
+            Button("這期不轉") { onStatus(r, k, WealthTransferStatus.skip.rawValue) }
+        case .late(let r, let k, let f, let t):
+            Button("還沒，對完才轉的") { onDone(r, k, Self.lateFlag(f, true), Self.lateFlag(t, true)) }
+            Button("轉了，存摺上已經有了") { onDone(r, k, Self.lateFlag(f, false), Self.lateFlag(t, false)) }
+        }
+    }
+
+    func body(content: Content) -> some View {
+        content.confirmationDialog(title, isPresented: isPresented, titleVisibility: .visible,
+                                   presenting: ask) { a in
+            buttons(a)
+            Button("取消", role: .cancel) {}
+        } message: { a in
+            Text(a.message)
+        }
+    }
+}
+
 /// 要確認（財富頁 ②、卡片頁 ② 共用；0 件整區不出現）。limit：先放幾件，「再看 N 件」
 struct WealthChecksSection: View {
     let checks: [WealthCheck]
@@ -5043,6 +5137,8 @@ struct WealthChecksSection: View {
     @State private var expanded = false
     @State private var sheet: WealthFormSheet?
     @State private var ask: WealthCheckAsk?
+    /// [v25.579] 定期轉帳〔還沒…〕、〔轉好了〕那天對過存摺多問的一句
+    @State private var transferAsk: WealthChecksTransferAsk?
     @State private var showPremium = false
 
     private var visible: [WealthCheck] {
@@ -5057,8 +5153,24 @@ struct WealthChecksSection: View {
                     s.view.appStores()
                 }
                 .modifier(WealthCheckAskDialog(ask: $ask, onConfirm: { a in perform(a) }))
+                .modifier(transferDialog)
                 .premiumLockAlert(isPresented: $showPremium)
         }
+    }
+
+    /// [v25.579] 定期轉帳多問的那一句：選了之後確認框先收好，下一個 runloop 才寫（這一列會跟著不見；store 先抓進區域常數）
+    private var transferDialog: WealthChecksTransferDialog {
+        let life = lifeStore
+        return WealthChecksTransferDialog(ask: $transferAsk, onStatus: { rid, key, status in
+            DispatchQueue.main.async {
+                life.setTransferStatus(ruleId: rid, key: key, status: status)
+            }
+        }, onDone: { rid, key, lateOut, lateIn in
+            let day = Date()
+            DispatchQueue.main.async {
+                life.markTransferDone(ruleId: rid, key: key, day: day, lateOut: lateOut, lateIn: lateIn)
+            }
+        })
     }
 
     private var content: some View {
@@ -5193,6 +5305,25 @@ struct WealthChecksSection: View {
             DispatchQueue.main.async {
                 life.resumeTransferRule(rid)
             }
+        case .transferDoneToday(let rid, let key):
+            // [v25.579]〔轉好了〕（今天那一期）〔今天轉好了〕（〔還沒〕掛滿 7 天）：不擋訂閱（記下你真的轉了）。
+            // 轉出或轉進的帳戶今天對過存摺 → 先問「今天對存摺的時候，這筆轉了嗎？」；都沒對過 → 下一個 runloop 直接記今天轉好了
+            let facts = lifeStore.wealthFacts(expense: expenseStore, finance: financeStore)
+            let rec = facts.transferReconciledToday(ruleId: rid, key: key)
+            if rec.any {
+                transferAsk = .late(ruleId: rid, key: key, from: rec.from, to: rec.to)
+            } else {
+                let day = Date()
+                DispatchQueue.main.async {
+                    life.markTransferDone(ruleId: rid, key: key, day: day)
+                }
+            }
+        case .askTransferNotYet(let rid, let key):
+            // [v25.579]〔還沒…〕：先問〔還沒，算在明天〕〔這期不轉〕（不擋訂閱；寫在確認框的回呼裡）
+            transferAsk = .notYet(ruleId: rid, key: key)
+        case .renewTransferEnd(let rid):
+            // [v25.579]〔已經續設〕：開「銀行那邊設到哪天」小表單（不擋訂閱：同〔結束這條〕）
+            sheet = .transferRenew(ruleId: rid)
         }
     }
 

@@ -17,6 +17,8 @@ import Foundation
 // • 兩台合併（你和太太各加各的）：照 id；同一條取「最後改的時間」新的（刪掉＝墓碑 deletedAt，勝過比它舊的內容，30 天後存檔時才清）；
 //   同一期的註記取 updatedAt 新的。註記〔復原〕不刪掉、留一個只有時間的空註記（不然另一台的舊註記會長回來）。
 // • 安全：不存任何帳號（App 不幫你轉，用不到）；名字、備註存檔前掃「像帳號的數字串」（WealthTransferText.accountLikeTail）。
+// • [v25.579] v2：明細細字照那一期寫——自己轉、你按了〔轉好了〕「自己轉・轉好了 ✓」、你說〔還沒〕「自己轉・還沒轉」（refs）。
+//   提醒、〔暫停〕、我的行事曆、要確認 v2 在 WealthTransferNotices.swift；資料一個欄位都沒加。
 
 /// 週期（存字串；不認得＝這條不展開但留著）。v4 起加 biweekly、yearly
 enum WealthTransferCycle: String {
@@ -596,9 +598,13 @@ extension WealthTransferSchedule {
         let until = WealthCal.addDays(31, to: horizon)
         for r in book.live {
             let manual = r.isManual
-            let note: String = manual ? "自己轉" : WealthTransferText.cycleText(r)
+            let baseNote: String = manual ? "自己轉" : WealthTransferText.cycleText(r)
             for p in periods(r, through: until, today: today) where p.counts {
                 guard p.day <= horizon else { continue }
+                // [v25.579] 自己轉的：按了〔轉好了〕「自己轉・轉好了 ✓」、說〔還沒〕「自己轉・還沒轉」（銀行頁明細細字「定期・」＋這個）
+                var note: String = baseNote
+                if manual && p.status == .done { note = "自己轉・轉好了 ✓" }
+                if manual && p.status == .notYet { note = "自己轉・還沒轉" }
                 let base = "tr-" + r.id.uuidString + "-" + p.key
                 if let f = p.fromId, bankIds.contains(f), p.amount > 0.004 {
                     let other: String = p.toId.flatMap { names[$0] } ?? "別的帳戶"

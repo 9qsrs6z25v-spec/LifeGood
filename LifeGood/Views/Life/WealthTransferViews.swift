@@ -28,6 +28,16 @@ import SwiftUI
 // • 提示（WealthTransferHints）、最下面「11/8 轉完，薪轉約剩 61,400 ✓」（wealthFactsPreview＋WealthTransferPreview）、〔更早…〕的影響
 //   （transferEarlyImpact）：欄位停 0.5 秒才算（.task(id:)），結果放 @State，body 不算 facts。
 // • 規則頁〔改金額或帳戶〕（要訂閱）、頭下面改過的那一行；一期小表單轉之前已經是負的橘字。
+//
+// [v25.579] G1 v2 會提醒你（transfer/build/v2/brief.md §6 G1；算法、字、要確認、通知都是主控的 WealthTransferNotices.swift，這裡只叫）：
+// • 一期的狀態字：自己轉的先看 manualPhase——「今天要轉」（橘）「轉好了 ✓ 10/31」「當作轉了・等你回答」（橘）「當作轉了」「還沒轉・算在明天」（橘）。
+// • 一期小表單：今天要轉〔轉好了〕（展開「實際轉了 NT$…」可改金額）〔改到明天〕〔這期不轉〕；等你回答／當作轉了〔轉了〕〔還沒，算在明天〕〔這期不轉〕〔改這一期〕；
+//   還沒轉〔轉好了〕〔這期不轉〕；轉好了〔改這一期〕〔復原〕。〔轉好了〕存檔時兩邊帳戶今天對過存摺先問「今天對存摺的時候，這筆轉了嗎？」
+//  （facts.transferReconciledToday → LifeStore.markTransferDone 的 lateOut／lateIn）。
+// • 規則頁：還沒定下來的多列自己轉的（今天要轉、等你回答、還沒轉）；頭下面最前面「暫停到 12/24」（rule.pauseInfo）；〔暫停〕小表單（從哪一期起、
+//   到哪一期恢復、pauseSummary）／〔恢復…〕（下一期起照轉）；「提醒我」開關（rule.remind）；〔結束〕記 endedBy "user"（WealthTransferNotices.endedByUser）。
+// • 新增表單「誰轉」小字換 v2 那句；WealthTransferRenewSheet（要確認〔已經續設〕：銀行那邊設到哪天，改 endKey、endedBy nil）。
+// • 這版新的每一顆都不擋訂閱（judge §6）；寫 store 一律先 dismiss（「提醒我」開關不關頁）、下一個 runloop 才叫。不加任何存檔欄位。
 
 // MARK: - 共用的字
 
@@ -91,6 +101,10 @@ private struct WealthTransferUIStatus {
     static func of(_ p: WealthTransferPeriod, manual: Bool, short: Bool, today: Date) -> WealthTransferUIStatus {
         // 還沒到、轉完會不夠：橘字（補轉排在以後的也一樣）
         let w: String? = (short && p.state == .planned) ? (manual ? "轉之前要先補錢" : "可能轉不過去") : nil
+        // [v25.579] 自己轉的先看在哪一步（補轉、這期不轉、沒轉成、暫停、壞掉＝nil，照下面畫）
+        if manual, let ph = p.manualPhase(today: today), let s = manualStatus(ph, p: p, warn: w, today: today) {
+            return s
+        }
         if p.status == .redo && (p.state == .planned || p.state == .done) {
             let text = "沒轉成・" + WealthTransferUIText.shortDay(p.day, today: today) + " 補轉"
             return WealthTransferUIStatus(text: text, tone: .normal, warn: w)
@@ -108,6 +122,26 @@ private struct WealthTransferUIStatus {
             return WealthTransferUIStatus(text: "暫停", tone: .muted, warn: nil)
         case .broken:
             return WealthTransferUIStatus(text: "帳戶找不到，不算", tone: .muted, warn: nil)
+        }
+    }
+
+    /// [v25.579] 自己轉那一期的字（judge §4.5 v2 那幾列）；預計＝nil（照 state 畫「預計」）
+    private static func manualStatus(_ ph: WealthTransferManualPhase, p: WealthTransferPeriod, warn w: String?,
+                                     today: Date) -> WealthTransferUIStatus? {
+        switch ph {
+        case .upcoming:
+            return nil
+        case .today:
+            return WealthTransferUIStatus(text: "今天要轉", tone: .warn, warn: nil)
+        case .done:
+            let text = "轉好了 ✓ " + WealthTransferUIText.shortDay(p.day, today: today)
+            return WealthTransferUIStatus(text: text, tone: .normal, warn: nil)
+        case .waiting:
+            return WealthTransferUIStatus(text: "當作轉了・等你回答", tone: .warn, warn: nil)
+        case .assumed:
+            return WealthTransferUIStatus(text: "當作轉了", tone: .normal, warn: nil)
+        case .notYet:
+            return WealthTransferUIStatus(text: "還沒轉・算在明天", tone: .warn, warn: w)
         }
     }
 
@@ -1296,7 +1330,7 @@ struct WealthTransferRuleForm: View {
         } header: {
             WealthFormHeader(title: "誰轉", icon: "person", color: .blue)
         } footer: {
-            Text("現在一律當作那天轉了；之後的版本起，自己轉的那天早上 9 點會提醒你")
+            Text("銀行自動轉的，到那天 App 就當作轉了；可能不夠時前一晚提醒你。自己轉的，那天早上 9 點提醒，轉好了按〔轉好了〕。")
         }
     }
 
@@ -2000,16 +2034,30 @@ private struct WealthTransferUIPeriodPick: Identifiable {
     var id: String { key }
 }
 
-/// [v25.577] 規則頁〔改金額或帳戶〕（巢狀 sheet 的 item）
-private struct WealthTransferUIEditPick: Identifiable {
-    let ruleId: UUID
-    var id: UUID { ruleId }
+/// 規則頁疊的表單（巢狀 sheet 的 item；一個 sheet(item:) 開兩種）：
+/// [v25.577]〔改金額或帳戶〕（新增表單的編輯模式）；[v25.579]〔暫停〕（暫停小表單）
+private enum WealthTransferUIRuleSheet: Identifiable {
+    case edit(UUID)
+    case pause(UUID)
+
+    var id: String {
+        switch self {
+        case .edit(let r): return "edit-" + r.uuidString
+        case .pause(let r): return "pause-" + r.uuidString
+        }
+    }
 }
 
-/// 規則頁的確認框：〔結束〕或〔刪除〕（一個畫面一個 confirmationDialog）
+/// 規則頁的確認框：〔結束〕〔刪除〕、[v25.579]〔恢復…〕（一個畫面一個 confirmationDialog）
 private enum WealthTransferUIRuleAsk: Identifiable {
-    case end, delete
-    var id: Int { self == .end ? 0 : 1 }
+    case end, delete, resume
+    var id: Int {
+        switch self {
+        case .end: return 0
+        case .delete: return 1
+        case .resume: return 2
+        }
+    }
 }
 
 /// 規則頁要畫的（一次從 facts 組好；body 只畫）
@@ -2041,15 +2089,46 @@ private struct WealthTransferUIRuleModel {
     let pastCount: Int
     let deleteMessage: String
     let spoken: String
+    // [v25.579] v2
+    /// 我自己轉（「還沒定下來的」footer、「提醒我」第二行）
+    let isManual: Bool
+    /// 「暫停到 12/24」「12/4 起暫停到 12/24」「暫停中」（rule.pauseInfo）；nil＝沒有暫停
+    let pauseText: String?
+    /// 〔暫停〕：今天以後還有期可以選
+    let canPause: Bool
+    /// 〔恢復…〕：下一期（WealthTransferPlan.nextKey）與按鈕字「下一期 12/11（五）起照轉」
+    let resumeKey: String?
+    let resumeLabel: String
+    /// 「提醒我」（rule.remind != false）
+    let remindOn: Bool
+
+    /// 「還沒定下來的」footer（自己轉的多一句）
+    var pendingFooter: String {
+        isManual
+            ? "沒轉成的：點進去〔今天補轉〕或〔復原〕；自己轉的：點進去〔轉好了〕〔轉了〕〔還沒〕"
+            : "銀行沒轉成的期：點進去〔今天補轉〕或〔復原〕"
+    }
+
+    /// 「提醒我」第二行
+    var remindDetail: String {
+        isManual
+            ? "那天早上 9 點提醒你轉"
+            : "可能轉不過去時前一晚 8 點、銀行設的最後一次前 14 天提醒你"
+    }
+
+    /// 〔恢復…〕的說明：「暫停到 12/24；以前暫停的期照舊不算」
+    var resumeMessage: String {
+        (pauseText ?? "暫停中") + "；以前暫停的期照舊不算"
+    }
 
     static func make(facts: WealthFacts, ruleId: UUID, masked: Bool, showMore: Bool) -> WealthTransferUIRuleModel? {
         guard let t = facts.transferRule(ruleId) else { return nil }
         let today = facts.today
         let periods = facts.transferPeriods(ruleId, through: WealthCal.addDays(400, to: today))
         let manual = t.isManual
-        // 還沒定下來的：過了日子、沒轉成（最近 6 期，新到舊）
-        let failedList: [WealthTransferPeriod] = periods.filter { $0.state == .failed && $0.original <= today }
-        let pendingList: [WealthTransferPeriod] = Array(failedList.reversed().prefix(6))
+        // 還沒定下來的：過了日子、沒轉成＋[v25.579] 自己轉的今天要轉、等你回答、還沒轉（最近 6 期，新到舊）
+        let pendingAll: [WealthTransferPeriod] = periods.filter { isPending($0, manual: manual, today: today) }
+        let pendingList: [WealthTransferPeriod] = Array(pendingAll.reversed().prefix(6))
         let pendingKeys = Set(pendingList.map { $0.key })
         // 接下來：實際那天在今天以後（含這期不轉的）
         let futureAll: [WealthTransferPeriod] = periods
@@ -2087,6 +2166,15 @@ private struct WealthTransferUIRuleModel {
         let spoken = t.title + "，" + t.cycleText + "，"
             + WealthTransferUIText.spokenAmount(t.amount, code: t.code, masked: masked) + "，" + accountsLine
 
+        // [v25.579]〔暫停〕〔恢復…〕：暫停中或排好了暫停＝〔恢復…〕（下一期起照轉）；沒有＝〔暫停〕（今天以後還有期才給）
+        let pause: WealthTransferPauseInfo? = t.isEnded ? nil : t.rule.pauseInfo(today: today)
+        let canPause: Bool = !t.isEnded && !WealthTransferPlan.pauseStarts(t.rule, today: today).isEmpty
+        let resumeKey: String? = pause == nil ? nil : WealthTransferPlan.nextKey(t.rule, today: today)
+        var resumeLabel = ""
+        if let k = resumeKey, let d = WealthTransferSchedule.date(fromKey: k) {
+            resumeLabel = "下一期 " + WealthTransferUIText.day(d, today: today) + " 起照轉"
+        }
+
         return WealthTransferUIRuleModel(
             title: t.title, cycleText: t.cycleText, amountText: amountText, accountsLine: accountsLine,
             rangeLine: makeRangeLine(t), changeLines: makeChangeLines(t, facts: facts, masked: masked),
@@ -2094,7 +2182,16 @@ private struct WealthTransferUIRuleModel {
             pending: pending, upcoming: Array(upcoming), past: Array(past), hasMore: hasMore,
             lastPastKey: lastPastKey, lastPastLabel: lastPastLabel, nextKey: t.isEnded ? nil : nextKey,
             nextLabel: nextLabel, pastCount: counted.count,
-            deleteMessage: makeDeleteMessage(counted, facts: facts, masked: masked), spoken: spoken)
+            deleteMessage: makeDeleteMessage(counted, facts: facts, masked: masked), spoken: spoken,
+            isManual: manual, pauseText: pause?.text, canPause: canPause, resumeKey: resumeKey,
+            resumeLabel: resumeLabel, remindOn: t.rule.remind != false)
+    }
+
+    /// [v25.579] 還沒定下來的一期：過了日子、沒轉成；自己轉的今天要轉、過了日子等你回答、你說還沒轉（judge §4.4）
+    static func isPending(_ p: WealthTransferPeriod, manual: Bool, today: Date) -> Bool {
+        if p.state == .failed && p.original <= today { return true }
+        guard manual, let ph = p.manualPhase(today: today) else { return false }
+        return ph == .today || ph == .waiting || ph == .notYet
     }
 
     /// 「2026/11/6 起・沒有設結束日」「2026/11/6 起・銀行設到 2027/4/9」；已結束「已結束：最後一次 2026/12/6（零用錢收起來時結束）」
@@ -2120,6 +2217,10 @@ private struct WealthTransferUIRuleModel {
     /// 下一期那一段是後來改的「2027/1/6 起 25,000（以前 20,000）」（只寫最近那一次）
     static func makeChangeLines(_ t: WealthFacts.TransferRule, facts: WealthFacts, masked: Bool) -> [String] {
         var out: [String] = []
+        // [v25.579] 最前面：「暫停到 12/24」「12/4 起暫停到 12/24」（還在跑的才有）
+        if let p = t.rule.pauseInfo(today: facts.today) {
+            out.append(p.text)
+        }
         if let pid = t.rule.previousId, let prev = facts.transferRule(pid), let first = t.firstDay {
             out.append(WealthFormat.ymd(first) + " 起改成" + t.cycleText + "（以前" + prev.cycleText + "）")
         }
@@ -2256,6 +2357,8 @@ private struct WealthTransferUIRuleDialog: ViewModifier {
     /// 最後一期（nil＝〔設錯了，一期都不算〕）
     let onEnd: (String?) -> Void
     let onDelete: () -> Void
+    /// [v25.579]〔恢復…〕：從這一期（含）起照轉
+    let onResume: (String) -> Void
 
     private var isPresented: Binding<Bool> {
         Binding(get: { self.ask != nil }, set: { if !$0 { self.ask = nil } })
@@ -2265,6 +2368,7 @@ private struct WealthTransferUIRuleDialog: ViewModifier {
         switch ask {
         case .end?: return "最後一次是哪一期？"
         case .delete?: return "刪除「" + model.title + "」？"
+        case .resume?: return "從哪一期起照轉？"
         case nil: return ""
         }
     }
@@ -2273,6 +2377,15 @@ private struct WealthTransferUIRuleDialog: ViewModifier {
         switch a {
         case .end: return "以前的期照算；銀行那邊請到銀行 App 取消預約轉帳。"
         case .delete: return model.deleteMessage
+        case .resume: return model.resumeMessage
+        }
+    }
+
+    /// 〔下一期 12/11（五）起照轉〕（沒有下一期就不給這顆，只剩〔取消〕）
+    @ViewBuilder
+    private var resumeButtons: some View {
+        if let k = model.resumeKey {
+            Button(model.resumeLabel) { onResume(k) }
         }
     }
 
@@ -2307,10 +2420,195 @@ private struct WealthTransferUIRuleDialog: ViewModifier {
                 endButtons
             case .delete:
                 deleteButtons
+            case .resume:
+                resumeButtons
             }
             Button("取消", role: .cancel) {}
         } message: { a in
             Text(message(a))
+        }
+    }
+}
+
+/// [v25.579] 規則頁「提醒我」開關的字（兩行：第二行灰字講什麼時候提醒）
+private struct WealthTransferUIRemindLabel: View {
+    let detail: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text("提醒我")
+            Text(detail)
+                .font(.footnote)
+                .foregroundStyle(Color.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+}
+
+/// [v25.579]〔暫停〕小表單（judge §4.6；brief §6 G1 C-3）：從哪一期起暫停（今天以後 12 期，第一個＝下一期）、
+/// 到哪一期恢復（那期以後 26 期；〔先不設〕＝到你按〔恢復〕）。Picker 用 Int index 當 tag。
+/// 存＝dismiss、下一個 runloop LifeStore.pauseTransferRule（金額 0 的一段＋恢復那段，WealthTransferRule.paused）。不擋訂閱
+private struct WealthTransferUIPauseSheet: View {
+    let ruleId: UUID
+
+    @EnvironmentObject var lifeStore: LifeStore
+    @EnvironmentObject var expenseStore: ExpenseStore
+    @EnvironmentObject var financeStore: FinanceStore
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var loaded = false
+    /// 今天 00:00（打開時從 facts 抓一次）
+    @State private var today: Date = WealthCal.day(Date())
+    /// 打開時那一條（找不到＝刪了）
+    @State private var rule: WealthTransferRule? = nil
+    /// 「從哪一期起暫停」可以選的（原本的日子）、選的那一個
+    @State private var starts: [Date] = []
+    @State private var startIndex: Int = 0
+    /// 「到哪一期恢復」可以選的（原本的日子）、選的那一個（−1＝先不設）
+    @State private var resumes: [Date] = []
+    @State private var resumeIndex: Int = -1
+
+    /// 〔先不設（到我按〔恢復〕）〕的 tag
+    private static let noResume = -1
+    private static let bankNote = "銀行那邊也要暫停：到銀行 App 取消那幾筆預約轉帳。App 不會幫你改銀行。"
+
+    private var selectedStart: Date? {
+        starts.indices.contains(startIndex) ? starts[startIndex] : nil
+    }
+
+    private var selectedResume: Date? {
+        resumes.indices.contains(resumeIndex) ? resumes[resumeIndex] : nil
+    }
+
+    private var saveDisabled: Bool { rule == nil || selectedStart == nil }
+
+    /// 「12/4、12/11、12/18 這 3 期不算，12/25 起照轉」＋換行＋銀行那邊也要暫停
+    private var footerText: String {
+        guard let r = rule, let start = selectedStart else { return Self.bankNote }
+        let summary = WealthTransferPlan.pauseSummary(r, from: start, until: selectedResume, today: today)
+        return summary + "\n" + Self.bankNote
+    }
+
+    /// 「下一期 11/27（五）」「12/4（五）」
+    private func startLabel(_ i: Int) -> String {
+        guard starts.indices.contains(i) else { return "" }
+        let d = WealthTransferUIText.day(starts[i], today: today)
+        return i == 0 ? "下一期 " + d : d
+    }
+
+    private func resumeLabel(_ i: Int) -> String {
+        guard resumes.indices.contains(i) else { return "" }
+        return WealthTransferUIText.day(resumes[i], today: today)
+    }
+
+    var body: some View {
+        NavigationStack {
+            content
+                .navigationTitle("暫停")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("取消") { dismiss() }
+                    }
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("暫停") { save() }
+                            .disabled(saveDisabled)
+                    }
+                }
+                .onAppear { load() }
+                .onChange(of: startIndex) { _, _ in startChanged() }
+        }
+        .presentationDetents([.medium, .large])
+        .modifier(WealthPrivacyCurtain(armed: true))
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        if !loaded {
+            Form {}
+        } else if rule == nil {
+            Form {
+                Text("這條定期轉帳已經刪了")
+                    .foregroundStyle(Color.secondary)
+            }
+        } else if starts.isEmpty {
+            Form {
+                Text("今天以後沒有要轉的期，不用暫停")
+                    .foregroundStyle(Color.secondary)
+            }
+        } else {
+            Form {
+                startSection
+                resumeSection
+            }
+        }
+    }
+
+    private var startSection: some View {
+        Section {
+            Picker("從哪一期起", selection: $startIndex) {
+                ForEach(starts.indices, id: \.self) { i in
+                    Text(startLabel(i)).tag(i)
+                }
+            }
+        } header: {
+            Text("從哪一期起暫停")
+        }
+    }
+
+    private var resumeSection: some View {
+        Section {
+            Picker("到哪一期恢復", selection: $resumeIndex) {
+                Text("先不設（到我按〔恢復〕）").tag(Self.noResume)
+                ForEach(resumes.indices, id: \.self) { i in
+                    Text(resumeLabel(i)).tag(i)
+                }
+            }
+        } header: {
+            Text("到哪一期恢復")
+        } footer: {
+            Text(footerText)
+        }
+    }
+
+    private func load() {
+        guard !loaded else { return }
+        let facts = lifeStore.wealthFacts(expense: expenseStore, finance: financeStore)
+        let t = facts.today
+        today = t
+        if let tr = facts.transferRule(ruleId), !tr.isEnded {
+            let list = WealthTransferPlan.pauseStarts(tr.rule, today: t)
+            rule = tr.rule
+            starts = list
+            resumes = list.first.map { WealthTransferPlan.pauseResumes(tr.rule, after: $0) } ?? []
+            resumeIndex = Self.noResume
+        }
+        loaded = true
+    }
+
+    /// 換了「從哪一期起」：恢復的清單跟著換；原本選的那天不在新的清單裡＝回到〔先不設〕
+    private func startChanged() {
+        guard let r = rule, let start = selectedStart else { return }
+        let old: Date? = selectedResume
+        let list = WealthTransferPlan.pauseResumes(r, after: start)
+        resumes = list
+        if let o = old, let i = list.firstIndex(of: o) {
+            resumeIndex = i
+        } else {
+            resumeIndex = Self.noResume
+        }
+    }
+
+    /// 〔暫停〕：先關，下一個 runloop 才寫
+    private func save() {
+        guard rule != nil, let start = selectedStart else { return }
+        let fromKey = WealthTransferSchedule.key(of: start)
+        let untilKey: String? = selectedResume.map { WealthTransferSchedule.key(of: $0) }
+        let life = lifeStore
+        let id = ruleId
+        dismiss()
+        DispatchQueue.main.async {
+            life.pauseTransferRule(id, from: fromKey, until: untilKey)
         }
     }
 }
@@ -2330,8 +2628,8 @@ struct WealthTransferRulePage: View {
     @State private var openPeriod: WealthTransferUIPeriodPick?
     @State private var ask: WealthTransferUIRuleAsk?
     @State private var showPremium = false
-    /// [v25.577]〔改金額或帳戶〕
-    @State private var editPick: WealthTransferUIEditPick?
+    /// [v25.577]〔改金額或帳戶〕、[v25.579]〔暫停〕
+    @State private var ruleSheet: WealthTransferUIRuleSheet?
 
     private var model: WealthTransferUIRuleModel? {
         let facts = lifeStore.wealthFacts(expense: expenseStore, finance: financeStore)
@@ -2351,9 +2649,8 @@ struct WealthTransferRulePage: View {
                     }
                 }
         }
-        .sheet(item: $editPick) { p in
-            WealthTransferRuleForm(editRuleId: p.ruleId)
-                .appStores()
+        .sheet(item: $ruleSheet) { s in
+            ruleSheetView(s)
         }
         .premiumLockAlert(isPresented: $showPremium)
         .presentationDetents([.medium, .large])
@@ -2366,11 +2663,15 @@ struct WealthTransferRulePage: View {
             List {
                 WealthTransferUIRuleHeader(model: m)
                 periodSections(m)
+                if m.isRunning {
+                    remindSection(m)
+                }
                 actionSection(m)
             }
             .modifier(WealthTransferUIRuleDialog(ask: $ask, model: m,
                                                  onEnd: { k in end(k) },
-                                                 onDelete: { delete() }))
+                                                 onDelete: { delete() },
+                                                 onResume: { k in resume(k) }))
             .sheet(item: $openPeriod) { p in
                 WealthTransferPeriodSheet(ruleId: ruleId, periodKey: p.key, fromRulePage: true)
                     .appStores()
@@ -2391,7 +2692,7 @@ struct WealthTransferRulePage: View {
             } header: {
                 Text("還沒定下來的")
             } footer: {
-                Text("銀行沒轉成的期：點進去〔今天補轉〕或〔復原〕")
+                Text(m.pendingFooter)
             }
         }
         if !m.upcoming.isEmpty {
@@ -2425,15 +2726,64 @@ struct WealthTransferRulePage: View {
         }
     }
 
+    /// [v25.579]〔改金額或帳戶〕→〔暫停〕或〔恢復…〕→〔結束〕；刪除（List 的列，不受要確認 2 顆的限制）
     private func actionSection(_ m: WealthTransferUIRuleModel) -> some View {
         Section {
             if m.isRunning {
                 Button("改金額或帳戶") { tapEdit() }
+                if m.pauseText != nil {
+                    Button("恢復…") { ask = .resume }
+                } else if m.canPause {
+                    Button("暫停") { tapPause() }
+                }
                 Button("結束") { ask = .end }
             }
             Button("刪除這條定期轉帳", role: .destructive) { tapDelete() }
         } footer: {
             Text("App 不會幫你轉錢；在這裡改，銀行 App 那邊也要改。")
+        }
+    }
+
+    /// [v25.579]「這條要提醒我」（還在跑的才有；judge §4.10）
+    private func remindSection(_ m: WealthTransferUIRuleModel) -> some View {
+        Section {
+            Toggle(isOn: remindBinding(m)) {
+                WealthTransferUIRemindLabel(detail: m.remindDetail)
+            }
+        } header: {
+            Text("提醒")
+        } footer: {
+            Text(remindFooter)
+        }
+    }
+
+    /// 值讀 model（rule.remind != false）；撥了下一個 runloop 才寫
+    private func remindBinding(_ m: WealthTransferUIRuleModel) -> Binding<Bool> {
+        let on: Bool = m.remindOn
+        return Binding(get: { on }, set: { v in setRemind(v) })
+    }
+
+    /// 這支手機的開關關著就講去哪裡開（財富提醒全關／只有定期轉帳關）
+    private var remindFooter: String {
+        if !WealthReminders.isEnabled {
+            return "這支手機的財富提醒關著：設定 › 會議提醒 ›「財富提醒」"
+        }
+        if !WealthReminders.transfersEnabled {
+            return "這支手機的提醒關著：設定 › 會議提醒 ›「定期轉帳提醒（只這台）」"
+        }
+        return "通知不寫帳戶、銀行和金額。"
+    }
+
+    /// 〔改金額或帳戶〕〔暫停〕（每個 case 自己 .appStores()）
+    @ViewBuilder
+    private func ruleSheetView(_ s: WealthTransferUIRuleSheet) -> some View {
+        switch s {
+        case .edit(let rid):
+            WealthTransferRuleForm(editRuleId: rid)
+                .appStores()
+        case .pause(let rid):
+            WealthTransferUIPauseSheet(ruleId: rid)
+                .appStores()
         }
     }
 
@@ -2445,7 +2795,12 @@ struct WealthTransferRulePage: View {
             showPremium = true
             return
         }
-        editPick = WealthTransferUIEditPick(ruleId: ruleId)
+        ruleSheet = .edit(ruleId)
+    }
+
+    /// [v25.579]〔暫停〕：開暫停小表單（不擋訂閱：同〔結束〕；表單自己存、這一頁留著）
+    private func tapPause() {
+        ruleSheet = .pause(ruleId)
     }
 
     /// 〔刪除〕要訂閱（看、〔結束〕不用）
@@ -2457,13 +2812,33 @@ struct WealthTransferRulePage: View {
         ask = .delete
     }
 
-    /// 〔結束〕：最後一期＝key（nil＝一期都不算）；不擋訂閱
+    /// 〔結束〕：最後一期＝key（nil＝一期都不算）；不擋訂閱。
+    /// [v25.579] 記 endedBy "user"：你按的結束不會被當成「銀行設的最後一次」（要確認、到期通知都不講）
     private func end(_ key: String?) {
         let life = lifeStore
         let id = ruleId
         dismiss()
         DispatchQueue.main.async {
-            life.endTransferRule(id, lastKey: key)
+            life.endTransferRule(id, lastKey: key, endedBy: WealthTransferNotices.endedByUser)
+        }
+    }
+
+    /// [v25.579]〔恢復…〕〔下一期 12/11（五）起照轉〕：key 那一期（含）起照轉；以前暫停的期照舊不算。不擋訂閱
+    private func resume(_ key: String) {
+        let life = lifeStore
+        let id = ruleId
+        dismiss()
+        DispatchQueue.main.async {
+            life.unpauseTransferRule(id, from: key)
+        }
+    }
+
+    /// [v25.579]「提醒我」：不關頁，下一個 runloop 才寫（rule.remind nil／false）。不擋訂閱
+    private func setRemind(_ on: Bool) {
+        let life = lifeStore
+        let id = ruleId
+        DispatchQueue.main.async {
+            life.setTransferRemind(id, on: on)
         }
     }
 
@@ -2490,12 +2865,46 @@ private struct WealthTransferUIRulePick: Identifiable {
     var id: UUID { ruleId }
 }
 
-/// 〔改這一期〕〔今天補轉〕展開的兩欄
+/// 〔改這一期〕〔今天補轉〕〔轉好了〕展開的三欄
 private enum WealthTransferUIPeriodEdit: Hashable {
     /// 改這一期（日子不能跨過前後一期）
     case change
     /// 今天補轉（不早於原本那天；狀態存 redo）
     case redo
+    /// [v25.579] 自己轉〔轉好了〕：只有「實際轉了 NT$…」（日子一律今天；LifeStore.markTransferDone）
+    case done
+}
+
+/// [v25.579]〔轉好了〕存檔時兩邊帳戶今天對過存摺：先問「今天對存摺的時候，這筆轉了嗎？」（確認框的 item）
+private struct WealthTransferUIDoneAsk: Identifiable {
+    let id = UUID()
+    /// 實際轉了多少（表單打的）
+    let amount: Double
+    /// 轉出、轉進帳戶今天對過存摺（facts.transferReconciledToday）
+    let from: Bool
+    let to: Bool
+}
+
+/// [v25.579]「今天對存摺的時候，這筆轉了嗎？」〔還沒，對完才轉的〕（對過的那一邊記 late）〔轉了，存摺上已經有了〕（那一邊 late 拿掉）〔取消〕
+private struct WealthTransferUIDoneDialog: ViewModifier {
+    @Binding var ask: WealthTransferUIDoneAsk?
+    /// late：true＝〔還沒，對完才轉的〕、false＝〔轉了，存摺上已經有了〕
+    let onAnswer: (WealthTransferUIDoneAsk, Bool) -> Void
+
+    private var isPresented: Binding<Bool> {
+        Binding(get: { self.ask != nil }, set: { if !$0 { self.ask = nil } })
+    }
+
+    func body(content: Content) -> some View {
+        content.confirmationDialog("今天對存摺的時候，這筆轉了嗎？", isPresented: isPresented,
+                                   titleVisibility: .visible, presenting: ask) { a in
+            Button("還沒，對完才轉的") { onAnswer(a, true) }
+            Button("轉了，存摺上已經有了") { onAnswer(a, false) }
+            Button("取消", role: .cancel) {}
+        } message: { _ in
+            Text("對存摺之後才轉的，App 會把這筆排在對存摺後面，存摺上的數字才對。")
+        }
+    }
 }
 
 /// 一期現在給哪幾顆按鈕（brief §6 G4 C-2 的表）
@@ -2512,6 +2921,15 @@ private enum WealthTransferUIPeriodButtons: Equatable {
     case skipped
     /// 暫停、壞掉：只有字
     case textOnly
+    // [v25.579] 自己轉（judge §4.5 v2 那幾列；brief §6 G1 B）
+    /// 今天要轉：〔轉好了〕〔改到明天〕〔這期不轉〕〔看整條〕
+    case manualToday
+    /// 當作轉了・等你回答／當作轉了：〔轉了〕〔還沒，算在明天〕〔這期不轉〕〔改這一期〕〔看整條〕
+    case manualWaiting
+    /// 還沒轉・算在明天：〔轉好了〕〔這期不轉〕〔看整條〕
+    case manualNotYet
+    /// 轉好了：〔改這一期〕〔復原〕〔看整條〕
+    case manualDone
 }
 
 /// 一期小表單要畫的（一次從 facts 組好）
@@ -2554,6 +2972,12 @@ private struct WealthTransferUIPeriodModel {
             + " 那一筆；沒取消的話，你先補了錢銀行就會照轉。"
     }
 
+    /// [v25.579]〔改到明天〕：明天沒有跨過下一期才給
+    var canMoveToTomorrow: Bool { WealthCal.addDays(1, to: today) <= upper }
+
+    /// 明天的 key（〔改到明天〕存成 dayKey）
+    var tomorrowKey: String { WealthTransferSchedule.key(of: WealthCal.addDays(1, to: today)) }
+
     func range(for mode: WealthTransferUIPeriodEdit) -> ClosedRange<Date> {
         switch mode {
         case .redo:
@@ -2561,16 +2985,27 @@ private struct WealthTransferUIPeriodModel {
             return original...hi
         case .change:
             return lower...upper
+        case .done:
+            // 不放 DatePicker：日子一律今天
+            return today...today
         }
     }
 
     func editTitle(_ mode: WealthTransferUIPeriodEdit) -> String {
-        mode == .redo ? "補轉那天" : "這期哪天"
+        switch mode {
+        case .redo: return "補轉那天"
+        case .change: return "這期哪天"
+        case .done: return "轉好了那天"
+        }
     }
 
     /// 補轉那期按〔改這一期〕也是改補轉（狀態留 redo），標題照按的那顆寫
     func editHeader(_ mode: WealthTransferUIPeriodEdit) -> String {
-        (mode == .redo && buttons != .redo) ? "今天補轉" : "改這一期"
+        switch mode {
+        case .redo: return buttons != .redo ? "今天補轉" : "改這一期"
+        case .change: return "改這一期"
+        case .done: return "轉好了"
+        }
     }
 
     func editFooter(_ mode: WealthTransferUIPeriodEdit) -> String {
@@ -2580,6 +3015,19 @@ private struct WealthTransferUIPeriodModel {
         case .change:
             return "日子不能跨過前後一期（" + WealthTransferUIText.shortDay(lower, today: today) + "～"
                 + WealthTransferUIText.shortDay(upper, today: today) + "）；只改這一期，以後的照舊。"
+        case .done:
+            return "今天（" + WealthTransferUIText.shortDay(today, today: today) + "）轉好了；金額跟這期不一樣就改成實際轉的。"
+        }
+    }
+
+    /// [v25.579] 自己轉的那幾種按鈕（預計＝nil：照 state 給〔改這一期〕〔這期不轉〕）
+    static func manualButtons(_ ph: WealthTransferManualPhase) -> WealthTransferUIPeriodButtons? {
+        switch ph {
+        case .upcoming: return nil
+        case .today: return .manualToday
+        case .waiting, .assumed: return .manualWaiting
+        case .notYet: return .manualNotYet
+        case .done: return .manualDone
         }
     }
 
@@ -2603,7 +3051,11 @@ private struct WealthTransferUIPeriodModel {
         let status = WealthTransferUIStatus.of(p, manual: manual, short: shortage != nil, today: today)
 
         let buttons: WealthTransferUIPeriodButtons
-        if p.status == .redo && (p.state == .planned || p.state == .done) {
+        // [v25.579] 自己轉的先照在哪一步給（放在補轉前面；補轉、這期不轉、沒轉成、暫停、壞掉的 phase 是 nil，照下面）
+        let phase: WealthTransferManualPhase? = manual ? p.manualPhase(today: today) : nil
+        if let ph = phase, let b = Self.manualButtons(ph) {
+            buttons = b
+        } else if p.status == .redo && (p.state == .planned || p.state == .done) {
             buttons = .redo
         } else {
             switch p.state {
@@ -2712,6 +3164,8 @@ struct WealthTransferPeriodSheet: View {
     /// 〔銀行這期取消了〕先跳「App 不會幫你取消」
     @State private var askCancel = false
     @State private var openRule: WealthTransferUIRulePick?
+    /// [v25.579]〔轉好了〕存檔時兩邊帳戶今天對過存摺：先問「今天對存摺的時候，這筆轉了嗎？」
+    @State private var doneAsk: WealthTransferUIDoneAsk?
 
     private var model: WealthTransferUIPeriodModel? {
         let facts = lifeStore.wealthFacts(expense: expenseStore, finance: financeStore)
@@ -2738,6 +3192,7 @@ struct WealthTransferPeriodSheet: View {
                     }
                 }
         }
+        .modifier(WealthTransferUIDoneDialog(ask: $doneAsk, onAnswer: { a, late in answerDone(a, late: late) }))
         .presentationDetents([.medium, .large])
         .modifier(WealthPrivacyCurtain(armed: true))
     }
@@ -2811,6 +3266,14 @@ struct WealthTransferPeriodSheet: View {
                 WealthTransferUIActionRow(title: m.manual ? "還是要轉" : "銀行還是轉了") { setStatus(nil) }
             case .textOnly:
                 EmptyView()
+            case .manualToday:
+                manualTodayRows(m)
+            case .manualWaiting:
+                manualWaitingRows(m)
+            case .manualNotYet:
+                manualNotYetRows(m)
+            case .manualDone:
+                manualDoneRows(m)
             }
         }
     }
@@ -2819,16 +3282,66 @@ struct WealthTransferPeriodSheet: View {
         WealthTransferUIActionRow(title: "看整條", chevron: true) { openWholeRule() }
     }
 
+    // MARK: [v25.579] 自己轉的按鈕（judge §4.5 v2 那幾列；都不擋訂閱）
+
+    /// 今天要轉：〔轉好了〕（金額可改）〔改到明天〕（明天沒跨過下一期才有）〔這期不轉〕〔看整條〕
+    @ViewBuilder
+    private func manualTodayRows(_ m: WealthTransferUIPeriodModel) -> some View {
+        WealthTransferUIActionRow(title: "轉好了", detail: "金額不一樣可以改") { startEdit(m, mode: .done) }
+        if m.canMoveToTomorrow {
+            WealthTransferUIActionRow(title: "改到明天") { moveToTomorrow(m) }
+        }
+        WealthTransferUIActionRow(title: "這期不轉") { setStatus(WealthTransferStatus.skip.rawValue) }
+        wholeRuleRow
+    }
+
+    /// 當作轉了・等你回答／當作轉了：〔轉了〕（日子照留）〔還沒，算在明天〕〔這期不轉〕〔改這一期〕〔看整條〕
+    @ViewBuilder
+    private func manualWaitingRows(_ m: WealthTransferUIPeriodModel) -> some View {
+        WealthTransferUIActionRow(title: "轉了") { setStatus(WealthTransferStatus.done.rawValue) }
+        WealthTransferUIActionRow(title: "還沒，算在明天", detail: "每天往後挪") {
+            setStatus(WealthTransferStatus.notYet.rawValue)
+        }
+        WealthTransferUIActionRow(title: "這期不轉") { setStatus(WealthTransferStatus.skip.rawValue) }
+        WealthTransferUIActionRow(title: "改這一期", detail: "金額、日子") { startEdit(m, mode: .change) }
+        wholeRuleRow
+    }
+
+    /// 還沒轉・算在明天：〔轉好了〕（今天轉的）〔這期不轉〕（〔知道了〕照舊）〔看整條〕
+    @ViewBuilder
+    private func manualNotYetRows(_ m: WealthTransferUIPeriodModel) -> some View {
+        WealthTransferUIActionRow(title: "轉好了", detail: "金額不一樣可以改") { startEdit(m, mode: .done) }
+        WealthTransferUIActionRow(title: "這期不轉") { setStatus(WealthTransferStatus.skip.rawValue) }
+        if m.ackKey != nil {
+            WealthTransferUIActionRow(title: "知道了", detail: "不再出現在要確認") { acknowledge(m) }
+        }
+        wholeRuleRow
+    }
+
+    /// 轉好了：〔改這一期〕（狀態照留 "done"）〔復原〕〔看整條〕
+    @ViewBuilder
+    private func manualDoneRows(_ m: WealthTransferUIPeriodModel) -> some View {
+        WealthTransferUIActionRow(title: "改這一期", detail: "金額、日子") { startEdit(m, mode: .change) }
+        WealthTransferUIActionRow(title: "復原", detail: "回到還沒按〔轉好了〕") { setStatus(nil) }
+        wholeRuleRow
+    }
+
     private func editSection(_ m: WealthTransferUIPeriodModel, mode: WealthTransferUIPeriodEdit) -> some View {
         Section {
-            HStack {
-                Text("NT$").foregroundStyle(Color.secondary)
-                TextField("這期轉多少", text: $amountText)
-                    .keyboardType(.numberPad)
+            if mode == .done {
+                doneAmountRow
+                Button("存") { tapSaveDone() }
+                    .disabled(editAmount == nil)
+            } else {
+                HStack {
+                    Text("NT$").foregroundStyle(Color.secondary)
+                    TextField("這期轉多少", text: $amountText)
+                        .keyboardType(.numberPad)
+                }
+                DatePicker(m.editTitle(mode), selection: $pickedDay, in: m.range(for: mode), displayedComponents: .date)
+                Button("存") { saveEdit(m, mode: mode) }
+                    .disabled(editAmount == nil)
             }
-            DatePicker(m.editTitle(mode), selection: $pickedDay, in: m.range(for: mode), displayedComponents: .date)
-            Button("存") { saveEdit(m, mode: mode) }
-                .disabled(editAmount == nil)
             Button("取消") { editing = nil }
         } header: {
             Text(m.editHeader(mode))
@@ -2868,7 +3381,70 @@ struct WealthTransferPeriodSheet: View {
         }
     }
 
-    /// 〔銀行這期取消了〕〔這期不轉〕"skip"、〔沒轉成〕"failed"、〔復原〕〔銀行還是轉了〕〔還是要轉〕nil
+    /// [v25.579]「轉好了」那一欄的金額：「實際轉了　NT$〔5,000〕」（不放 DatePicker：日子一律今天）
+    private var doneAmountRow: some View {
+        HStack(spacing: 8) {
+            Text("實際轉了")
+            Spacer(minLength: 8)
+            Text("NT$").foregroundStyle(Color.secondary)
+            TextField("這期轉多少", text: $amountText)
+                .keyboardType(.numberPad)
+                .multilineTextAlignment(.trailing)
+                .frame(minWidth: 72, maxWidth: 140)
+        }
+    }
+
+    /// [v25.579]「轉好了」〔存〕：兩邊帳戶今天對過存摺（那個幣別）先關這一欄、問一句；沒對過直接存
+    private func tapSaveDone() {
+        guard let v = editAmount else { return }
+        let facts = lifeStore.wealthFacts(expense: expenseStore, finance: financeStore)
+        let rec = facts.transferReconciledToday(ruleId: ruleId, key: periodKey)
+        if rec.any {
+            editing = nil
+            doneAsk = WealthTransferUIDoneAsk(amount: v, from: rec.from, to: rec.to)
+            return
+        }
+        saveDone(v, lateOut: nil, lateIn: nil)
+    }
+
+    /// 「今天對存摺的時候，這筆轉了嗎？」：〔還沒，對完才轉的〕對過的那一邊記 late（true）；〔轉了，存摺上已經有了〕那一邊拿掉（false）；
+    /// 沒對過的那一邊 nil（照留）
+    private func answerDone(_ a: WealthTransferUIDoneAsk, late: Bool) {
+        doneAsk = nil
+        let lo: Bool? = a.from ? late : nil
+        let li: Bool? = a.to ? late : nil
+        saveDone(a.amount, lateOut: lo, lateIn: li)
+    }
+
+    /// [v25.579]〔轉好了〕：先關，下一個 runloop 才寫（status "done"、日子今天、金額跟這一段一樣不存——LifeStore.markTransferDone）
+    private func saveDone(_ v: Double, lateOut: Bool?, lateIn: Bool?) {
+        let life = lifeStore
+        let rid = ruleId
+        let key = periodKey
+        dismiss()
+        DispatchQueue.main.async {
+            life.markTransferDone(ruleId: rid, key: key, day: Date(), amount: v, lateOut: lateOut, lateIn: lateIn)
+        }
+    }
+
+    /// [v25.579]〔改到明天〕：那一期的日子改成明天（狀態照留；金額跟這一段一樣不存、改過的照留）
+    private func moveToTomorrow(_ m: WealthTransferUIPeriodModel) {
+        var same = false
+        if let s = m.segmentAmount, Swift.abs(s - m.amount) < 0.5 { same = true }
+        let amount: Double? = same ? nil : m.amount
+        let status: String? = m.rawStatus
+        let dayKey: String = m.tomorrowKey
+        let life = lifeStore
+        let rid = ruleId
+        let key = periodKey
+        dismiss()
+        DispatchQueue.main.async {
+            life.setTransferNote(ruleId: rid, key: key, status: status, dayKey: dayKey, amount: amount)
+        }
+    }
+
+    /// 〔銀行這期取消了〕〔這期不轉〕"skip"、〔沒轉成〕"failed"、〔復原〕〔銀行還是轉了〕〔還是要轉〕nil；
+    /// [v25.579]〔轉了〕"done"（日子照留）、〔還沒，算在明天〕"notYet"
     private func setStatus(_ status: String?) {
         let life = lifeStore
         let rid = ruleId
@@ -2895,6 +3471,183 @@ struct WealthTransferPeriodSheet: View {
             dismiss()
         } else {
             openRule = WealthTransferUIRulePick(ruleId: ruleId)
+        }
+    }
+}
+
+// MARK: - [v25.579] D. 銀行那邊設到哪天（要確認〔已經續設〕；transfer/build/v2/brief.md §6 G1-D）
+// 主控開的骨架（名字、參數、外框定好：WealthEditors 的 WealthFormSheet.transferRenew 照這個名字打開）；G1 實作裡面。
+// 不擋訂閱（同〔結束〕：銀行那邊續設了，App 也要改得了）；寫 store 先 dismiss、下一個 runloop 才叫 LifeStore.updateTransferRule。
+
+/// 一條定期轉帳的「銀行那邊設到哪天」：〔不設〕〔到哪天〕〔共幾次〕（銀行續設之後改結束日）。
+/// [v25.579] G1：照新增表單 endSection 同一套（WealthTransferUIEnd、WealthTransferUITimesRow、WealthTransferUIEndSpec）；
+/// 〔共幾次〕從這條的第一期起數（v1b 已知限制 8 同一套）。預設：原本有結束日＝〔到哪天〕＋原本那天、沒有＝〔不設〕。
+/// 新的最後一期早於今天＝存鈕灰、紅字「要選今天以後」。〔存〕＝dismiss、下一個 runloop updateTransferRule（endKey 換成新的、endedBy nil）。
+/// 例：2027/3/26 開、〔共幾次〕48 → endKey 2027-09-24 → 要確認那一條不見、到期通知改成 9/10
+struct WealthTransferRenewSheet: View {
+    let ruleId: UUID
+
+    @EnvironmentObject var lifeStore: LifeStore
+    @EnvironmentObject var expenseStore: ExpenseStore
+    @EnvironmentObject var financeStore: FinanceStore
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var loaded = false
+    /// 今天 00:00（打開時從 facts 抓一次）
+    @State private var today: Date = WealthCal.day(Date())
+    /// 打開時那一條（找不到＝刪了）
+    @State private var rule: WealthTransferRule? = nil
+    /// 「『薪轉 → 零用錢』現在設到 2027/4/9（五）」
+    @State private var currentLine = ""
+    @State private var endMode: WealthTransferUIEnd = .noEnd
+    @State private var endDate = Date()
+    @State private var timesText = "12"
+
+    private var timesValue: Int {
+        let n = Int(timesText.trimmingCharacters(in: .whitespaces)) ?? 1
+        return Swift.min(Swift.max(n, 1), 240)
+    }
+
+    /// 〔不設〕〔到哪天〕〔共幾次〕照這一條的日子換算
+    private var spec: WealthTransferUIEndSpec {
+        switch endMode {
+        case .noEnd: return .noEnd
+        case .byDate: return .date(WealthCal.day(endDate))
+        case .byCount: return .count(timesValue)
+        }
+    }
+
+    /// 新的最後一期（不設＝nil）
+    private var newLast: Date? {
+        guard let r = rule, let k = spec.key(for: r) else { return nil }
+        return WealthTransferSchedule.date(fromKey: k)
+    }
+
+    /// 新的最後一期早於今天（〔到哪天〕比今天以後第一期還早、〔共幾次〕太少）：擋存檔＋紅字
+    private var endInvalid: Bool {
+        guard endMode != .noEnd else { return false }
+        guard let d = newLast else { return true }
+        return d < today
+    }
+
+    private var saveDisabled: Bool { rule == nil || endInvalid }
+
+    /// 「共 48 次：最後一次 2027/9/24（五）」；早於今天「要選今天以後」
+    private var endLine: String? {
+        guard endMode != .noEnd else { return nil }
+        if endInvalid { return "要選今天以後" }
+        guard var r = rule, let last = newLast else { return nil }
+        r.endKey = WealthTransferSchedule.key(of: last)
+        let n = WealthTransferSchedule.originalDates(r, through: last).count
+        return "共 \(n) 次：最後一次 " + Self.fullDay(last)
+    }
+
+    /// 「2027/4/9（五）」（續設多半跨年：一律寫年）
+    private static func fullDay(_ d: Date) -> String {
+        WealthFormat.ymd(d) + "（" + WealthTransferText.weekdayName(d) + "）"
+    }
+
+    var body: some View {
+        NavigationStack {
+            content
+                .navigationTitle("銀行續設")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("取消") { dismiss() }
+                    }
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("存") { save() }
+                            .disabled(saveDisabled)
+                    }
+                }
+                .onAppear { load() }
+        }
+        .presentationDetents([.medium, .large])
+        .modifier(WealthPrivacyCurtain(armed: true))
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        if !loaded {
+            Form {}
+        } else if rule == nil {
+            Form {
+                Text("這條定期轉帳已經刪了")
+                    .foregroundStyle(Color.secondary)
+            }
+        } else {
+            Form {
+                Section {
+                    Text(currentLine)
+                        .font(.subheadline)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                endSection
+            }
+        }
+    }
+
+    private var endSection: some View {
+        Section {
+            Picker("銀行那邊設到哪天", selection: $endMode) {
+                Text("不設").tag(WealthTransferUIEnd.noEnd)
+                Text("到哪天").tag(WealthTransferUIEnd.byDate)
+                Text("共幾次").tag(WealthTransferUIEnd.byCount)
+            }
+            .pickerStyle(.segmented)
+            if endMode == .byDate {
+                DatePicker("到哪天", selection: $endDate, in: today..., displayedComponents: .date)
+            } else if endMode == .byCount {
+                WealthTransferUITimesRow(text: $timesText)
+            }
+            if let line = endLine {
+                Text(line)
+                    .font(.footnote)
+                    .foregroundStyle(endInvalid ? Color.red : Color.secondary)
+            }
+        } header: {
+            WealthFormHeader(title: "銀行那邊設到哪天", icon: "calendar.badge.clock", color: .blue)
+        } footer: {
+            Text("銀行續設好了再改這裡；App 不會幫你改銀行。")
+        }
+    }
+
+    /// 打開時帶好：原本有結束日＝〔到哪天〕＋那天（〔共幾次〕先填到那天的次數）；沒有＝〔不設〕
+    private func load() {
+        guard !loaded else { return }
+        let facts = lifeStore.wealthFacts(expense: expenseStore, finance: financeStore)
+        let t = facts.today
+        today = t
+        endDate = WealthCal.addMonths(12, to: t)
+        if let tr = facts.transferRule(ruleId) {
+            let r = tr.rule
+            rule = r
+            if let ek = r.endKey, let ed = WealthTransferSchedule.date(fromKey: ek), r.startKey.map({ ek >= $0 }) ?? true {
+                endMode = .byDate
+                endDate = Swift.max(ed, t)
+                let n = WealthTransferSchedule.originalDates(r, through: ed).count
+                if n >= 1 { timesText = String(Swift.min(n, 240)) }
+                currentLine = "『" + tr.title + "』現在設到 " + Self.fullDay(ed)
+            } else {
+                currentLine = "『" + tr.title + "』現在沒有設結束日"
+            }
+        }
+        loaded = true
+    }
+
+    /// 〔存〕：先關，下一個 runloop 才寫（照存著的那一條最新的日子換算；endedBy 拿掉＝銀行那邊設的）。不擋訂閱
+    private func save() {
+        guard rule != nil, !endInvalid else { return }
+        let s = spec
+        let life = lifeStore
+        let id = ruleId
+        dismiss()
+        DispatchQueue.main.async {
+            life.updateTransferRule(id) { r in
+                r.endKey = s.key(for: r)
+                r.endedBy = nil
+            }
         }
     }
 }

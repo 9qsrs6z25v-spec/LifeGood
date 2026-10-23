@@ -14,6 +14,9 @@ import UserNotifications
 //   LG_EVENT         我的行事曆的個人事件（NotificationManager）〔5 分鐘後再提醒〕
 //   LG_WEALTH        財富提醒：卡費截止前 3 天、自動扣款可能不夠扣、交割、卡片到期、定存、保單〔明天 9 點再提醒〕
 //   LG_WEALTH_TODAY  卡費今天截止（wealth.due.….0）〔晚上再提醒〕：20:00 以前按＝今天 20:00；20:00 以後按＝1 小時後
+//                    [v25.579] 定期轉帳自己轉那天（wealth.tr.do.<日子>）也是這一類
+//   [v25.579] 定期轉帳自動轉可能轉不過去（wealth.tr.short.<日子>，前一天 20:00）不掛按鈕（明天一早就跑過了）；銀行設的最後一次
+//   （wealth.tr.end.…）照其他財富提醒 LG_WEALTH〔明天 9 點再提醒〕。〔轉好了〕不做成通知按鈕：按鈕在背景跑、只碰通知中心、不寫資料
 // 旅遊變更、跑步暫停 30 分鐘、鬧鐘型會議提醒（AlarmKit）不加按鈕。
 //
 // 再提醒（handle）：
@@ -89,9 +92,12 @@ enum NotificationActions {
         return "\(start)|\(event.recurrence.rawValue)|\(end)|\(event.reminderMinutes)"
     }
 
-    /// 財富提醒用哪一類：卡費今天截止（wealth.due.<卡>.<期>.0）＝LG_WEALTH_TODAY，其他＝LG_WEALTH
+    /// 財富提醒用哪一類：卡費今天截止（wealth.due.<卡>.<期>.0）＝LG_WEALTH_TODAY，其他＝LG_WEALTH。
+    /// [v25.579] 定期轉帳自己轉那天（wealth.tr.do.）＝LG_WEALTH_TODAY〔晚上再提醒〕；自動轉可能轉不過去（wealth.tr.short.）＝""（不掛按鈕）
     static func categoryForWealth(key: String) -> String {
         if key.hasPrefix(WealthReminders.prefix + "due."), key.hasSuffix(".0") { return wealthTodayCategory }
+        if key.hasPrefix(WealthReminders.prefix + "tr.do.") { return wealthTodayCategory }
+        if key.hasPrefix(WealthReminders.prefix + "tr.short.") { return "" }
         return wealthCategory
     }
 
