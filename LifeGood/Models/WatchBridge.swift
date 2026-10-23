@@ -11,6 +11,8 @@ import WatchConnectivity
 //   • 設定頁改了「送到手錶」的開關、「隱藏金額」→ settingsChanged()
 //   • [v2] 設定頁「手機條碼」開關、EInvoiceSyncManager 連結／拿掉手機條碼 → settingsChanged()
 //   • [v2] 手錶記一筆（sendMessage 帶 "record"、transferUserInfo）→ receiveRecord
+//   • [v6] 手錶打卡（sendMessage 帶 "checkIn"、transferUserInfo）→ receiveCheckIn
+//   • [v6] 系統換時區（NSSystemTimeZoneDidChange，activate() 裡掛一次）→ timeZoneChanged()
 //
 // 送包（refresh）：WatchPackageBuilder 只讀 App Group 的檔組一包 → WidgetSnapshotStore.write（iPhone 自己的 watch_v1.json，
 // 拿掉 generatedAt 比內容）回 true＝內容變了。下面三種「不比內容也送」：
@@ -36,6 +38,19 @@ import WatchConnectivity
 //       還能〔復原〕的那筆不動）→ 入帳了回 imported＋今天幾筆（讀剛寫好的 money 快照）
 //     → 不是（被手錶叫醒的冷啟動）：只重組包（queuedIds 變了就送）、回 queued，打開 iPhone 上的 LifeGood 才入帳
 //   • 冷啟動照舊不碰三份大資料：收件匣、watch_imported_ids、小工具快照都只是 App Group 的檔
+//
+// [手錶 v6] v25.578（watch/judge.md §4.1、§4.4、§5.2「換時區」、§5.4、附錄 B 打卡那一列；watch/build/v6/brief.md G1-1）：
+//   • 收手錶的打卡〔到了〕〔離開〕：跟記一筆一樣兩條路（transferUserInfo＋iPhone 在旁邊再 sendMessage，鍵 "checkIn"），
+//     三支 delegate 方法（有回話、沒回話的 didReceiveMessage、didReceiveUserInfo）都走 receiveCheckIn
+//   • receiveCheckIn：解開 → 撐 3 秒背景時間（跟記一筆同一個）→ WatchActionApplier 準備好了（App 開著、或剛用過還活著）
+//     就馬上寫進行程（只補 iPhone 上還沒有的；寫進去它自己重寫 life 快照、手錶包跟著送），
+//     回 ["ok": "done"]／["ok": "already", "at": 秒]（那一站本來就打過卡，不蓋）／["ok": "gone"]（那一站被刪了）
+//     → 不是（被手錶叫醒的冷啟動）：只寫 watch_actions_v1/<編號>.json 一個小檔（WatchActionInbox.add）、回 queued；
+//       打開 iPhone 上的 LifeGood（.task、回前景 WatchActionApplier.applyPending）才照按下去的時間順序寫進行程
+//   • 寫行程一律經 WatchActionApplier（這個檔不直接動 LifeStore；pkg_keys_check.py D3 段擋）
+//   • 換時區：收到 NSSystemTimeZoneDidChange（App 活著才收得到）→ timeZoneChanged：清掉系統時區的快取
+//     （NSTimeZone.resetSystemTimeZone，Calendar.current 才是新的）→ WidgetSnapshotWriter.writeNow() 全部用新時區重寫
+//     （快取的 timeZoneId 跟著換）→ 最後它自己叫 snapshotsDidChange() 重組重送。冷啟動時寫手沒 start，只會用現成的檔重組
 //
 // 對外的名字（WidgetSnapshotWriter、AppDelegate、設定頁在叫）不准改。
 
@@ -81,6 +96,9 @@ final class WatchBridge: NSObject, ObservableObject {
     /// [v2] 撐幾秒：要比收件匣晚 2 秒收尾（QuickRecordImporter.finishDelay）長
     private static let recordHoldSeconds: UInt64 = 3
 
+    /// [v6] 系統換時區的監聽（activate() 裡掛一次；跟著 shared 活一輩子，不拿掉）
+    private var timeZoneObserver: NSObjectProtocol?
+
     private override init() {
         super.init()
         let d = WidgetShared.defaults
@@ -98,6 +116,23 @@ final class WatchBridge: NSObject, ObservableObject {
         let session = WCSession.default
         session.delegate = self
         session.activate()
+        // [v6] 出國落地換時區（App 活著才收得到）：快照、手錶快取的 timeZoneId 用新時區重寫、重送。
+        // 閉包不抓 self（主執行緒佇列；Swift 5 模式不會有 Sendable 警告）
+        if timeZoneObserver == nil {
+            timeZoneObserver = NotificationCenter.default.addObserver(forName: .NSSystemTimeZoneDidChange,
+                                                                      object: nil, queue: .main) { _ in
+                Task { @MainActor in
+                    WatchBridge.shared.timeZoneChanged()
+                }
+            }
+        }
+    }
+
+    /// [v6] 系統換時區了：清掉系統時區的快取（Calendar.current 才是新的）→ 全部重寫。
+    /// writeNow 最後自己會叫 snapshotsDidChange() 送包；冷啟動時寫手還沒 start，只會用現成的檔重組
+    func timeZoneChanged() {
+        NSTimeZone.resetSystemTimeZone()
+        WidgetSnapshotWriter.shared.writeNow()
     }
 
     /// WidgetSnapshotWriter.writeNow 寫完叫：組包（只讀檔）、內容變了才送
@@ -342,6 +377,36 @@ final class WatchBridge: NSObject, ObservableObject {
         UIApplication.shared.endBackgroundTask(recordTask)
         recordTask = .invalid
     }
+
+    // MARK: - [v6] 收手錶的打卡
+
+    /// 手錶按〔到了〕〔離開〕送來的一筆（sendMessage、transferUserInfo 兩條路都走這裡；主執行緒）。
+    /// 回 ["ok": "done"]／["ok": "already", "at": 秒]／["ok": "gone"]／["ok": "queued"]／["ok": "failed"]
+    /// （transferUserInfo 那條沒有回話，丟掉）。時間一律是手錶按下去那一刻（WatchCheckIn 裡帶的），不是送到的時間
+    private func receiveCheckIn(_ data: Data) -> [String: Any] {
+        guard let checkIn = WatchCheckInCodec.decode(data) else {
+            return [WatchLink.okKey: WatchLink.okFailed]
+        }
+        // 同一個 3 秒背景時間（寫行程、重寫 life、組包、回話）
+        holdForRecord()
+        let applier = WatchActionApplier.shared
+        // App 開著、或剛用過還活著：馬上寫（寫進去了它自己 writeNow([.life]) → 手錶快取、手錶包跟著重寫重送）
+        if applier.isReady {
+            switch applier.apply(checkIn) {
+            case .applied:
+                return [WatchLink.okKey: WatchLink.okDone]
+            case .already(let at):
+                return [WatchLink.okKey: WatchLink.okAlready, WatchLink.checkInAtKey: at.timeIntervalSince1970]
+            case .gone:
+                return [WatchLink.okKey: WatchLink.okGone]
+            }
+        }
+        // 冷啟動：只寫一個小檔，打開 LifeGood 才寫進行程（兩條路都到＝同一個編號同一個檔，不會變兩筆）
+        guard WatchActionInbox.add(checkIn) else {
+            return [WatchLink.okKey: WatchLink.okFailed]
+        }
+        return [WatchLink.okKey: WatchLink.okQueued]
+    }
 }
 
 // MARK: - WCSessionDelegate（背景執行緒；一律 nonisolated，要動狀態包 Task { @MainActor in … }）
@@ -373,34 +438,52 @@ extension WatchBridge: WCSessionDelegate {
         session.activate()
     }
 
-    /// 手錶來要「給我最新的」、[v2] 手錶記的一筆（要回覆的那種）。訊息在這裡先拆好，主執行緒只拿一個 Bool、一份 Data
+    /// 手錶來要「給我最新的」、[v2] 手錶記的一筆、[v6] 手錶的打卡（要回覆的那種）。
+    /// 訊息在這裡先拆好，主執行緒只拿一個 Bool、兩份 Data
     nonisolated func session(_ session: WCSession,
                              didReceiveMessage message: [String: Any],
                              replyHandler: @escaping ([String: Any]) -> Void) {
         let wants = (message[WatchLink.wantKey] as? String) == WatchLink.wantPackage
         let recordData = message[WatchLink.recordKey] as? Data
+        let checkInData = message[WatchLink.checkInKey] as? Data
         Task { @MainActor in
             if let recordData {
                 replyHandler(self.receiveRecord(recordData))
+            } else if let checkInData {
+                replyHandler(self.receiveCheckIn(checkInData))
             } else {
                 replyHandler(self.replyPackage(wants))
             }
         }
     }
 
-    /// 不用回覆的訊息：手錶不送這種；[v2] 萬一帶了一筆記帳，照樣收（沒有回話）
+    /// 不用回覆的訊息：手錶不送這種；[v2] 萬一帶了一筆記帳、[v6] 一筆打卡，照樣收（沒有回話）
     nonisolated func session(_ session: WCSession, didReceiveMessage message: [String: Any]) {
-        guard let data = message[WatchLink.recordKey] as? Data else { return }
+        let recordData = message[WatchLink.recordKey] as? Data
+        let checkInData = message[WatchLink.checkInKey] as? Data
+        guard recordData != nil || checkInData != nil else { return }
         Task { @MainActor in
-            _ = self.receiveRecord(data)
+            if let recordData {
+                _ = self.receiveRecord(recordData)
+            }
+            if let checkInData {
+                _ = self.receiveCheckIn(checkInData)
+            }
         }
     }
 
-    /// [v2] 手錶 transferUserInfo 來的一筆記帳（排隊、保證送到；沒有回話）。iOS 也有這個 delegate 方法
+    /// [v2] 手錶 transferUserInfo 來的一筆記帳、[v6] 一筆打卡（排隊、保證送到；沒有回話）。iOS 也有這個 delegate 方法
     nonisolated func session(_ session: WCSession, didReceiveUserInfo userInfo: [String: Any] = [:]) {
-        guard let data = userInfo[WatchLink.recordKey] as? Data else { return }
+        let recordData = userInfo[WatchLink.recordKey] as? Data
+        let checkInData = userInfo[WatchLink.checkInKey] as? Data
+        guard recordData != nil || checkInData != nil else { return }
         Task { @MainActor in
-            _ = self.receiveRecord(data)
+            if let recordData {
+                _ = self.receiveRecord(recordData)
+            }
+            if let checkInData {
+                _ = self.receiveCheckIn(checkInData)
+            }
         }
     }
 

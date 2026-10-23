@@ -28,6 +28,11 @@ import UIKit
 //   • importPending()（啟動、回前景）照舊收全部，手錶來的也一起收
 //   • 手錶來的一入帳（或帳本裡早就有），編號記進 WatchImportedLog（watch_imported_ids）：同一筆從另一條路再到，連收件匣都不進
 //   • importOverdue 看全部（pending(includeWatch: true)）：手錶那筆也要在發票比對前先進帳本，才會跟發票合成一筆
+//
+// [手錶 v6] v25.578（watch/judge.md §2.14、§4.1；watch/build/v6/brief.md §2）：旅途中記的帳——
+//   • start 多收 life（預設 nil，舊的呼叫照樣編得過；LifeGoodApp 傳 lifeStore）：入帳時確認那一趟、那一站還在才連
+//   • makeExpense：金額一律用收件匣那一筆的台幣（手錶上看到的那個，不用今天的匯率重算）；currencyCode＝那一筆的幣別
+//     （沒有＝"NT$"）；連旅遊照 AddExpenseView 存檔那一段：只有變動支出、那一趟還在才連，站要還在那一趟裡（不在＝算整趟）
 
 @MainActor
 final class QuickRecordImporter {
@@ -35,6 +40,8 @@ final class QuickRecordImporter {
 
     private weak var expenseStore: ExpenseStore?
     private weak var financeStore: FinanceStore?
+    /// [手錶 v6] 旅途中記的帳要連到那一趟、那一站：入帳時看它還在不在（沒給＝不連）
+    private weak var lifeStore: LifeStore?
     /// Darwin 通知只掛一次（singleton 不會釋放，不用拿掉）
     private var observingDarwin = false
 
@@ -51,9 +58,12 @@ final class QuickRecordImporter {
     /// 啟動時呼叫一次（重複呼叫無害）：記住 store、掛 Darwin 通知、馬上收一次。
     /// 被系統叫起來在背景跑的（還沒人看到畫面）先不收，等回前景（importPending）再收，
     /// 小工具上的「復原」才不會莫名失效（同主控定案 13 的理由）。
-    func start(expense: ExpenseStore, finance: FinanceStore) {
+    func start(expense: ExpenseStore, finance: FinanceStore, life: LifeStore? = nil) {
         expenseStore = expense
         financeStore = finance
+        if let life {
+            lifeStore = life
+        }
         if !observingDarwin {
             observingDarwin = true
             let observer = UnsafeRawPointer(Unmanaged.passUnretained(self).toOpaque())
@@ -85,12 +95,14 @@ final class QuickRecordImporter {
         // 帳本裡已經有同 id 的（上次存好了、.taken 還沒刪）跳過
         var known = Set(expense.expenses.map(\.id))
         var vehicles = finance.vehicles
+        // [手錶 v6] 旅途中記的那幾筆：那一趟、那一站還在不在（沒給 life＝空的，一律不連）
+        let plans: [TripPlan] = lifeStore?.tripPlans ?? []
         var vehiclesChanged = false
         var newExpenses: [Expense] = []
 
         for entry in entries {
             guard !known.contains(entry.id) else { continue }
-            guard let built = Self.makeExpense(from: entry, vehicles: vehicles) else { continue }
+            guard let built = Self.makeExpense(from: entry, vehicles: vehicles, plans: plans) else { continue }
             known.insert(entry.id)
             newExpenses.append(built)
             if let vid = built.linkedVehicleId,
@@ -150,7 +162,8 @@ final class QuickRecordImporter {
     /// 收件匣一筆 → Expense（還沒存）。金額不是正的有限數字就不建（回 nil，照樣 finish 掉）。
     /// 連車照 AddExpenseView 的規則（targetVehicleId／variableVehicleLinked）：分類是「汽車」
     /// 而且那台車還在才連，否則 linkedVehicleId、vehicleExpenseCategory 都是 nil。
-    private static func makeExpense(from entry: QuickRecordEntry, vehicles: [Vehicle]) -> Expense? {
+    /// [手錶 v6] 幣別照那一筆（金額已經是台幣）；旅途中記的連到那一趟、那一站（tripLink）
+    private static func makeExpense(from entry: QuickRecordEntry, vehicles: [Vehicle], plans: [TripPlan]) -> Expense? {
         guard entry.amount.isFinite, entry.amount > 0 else { return nil }
         let category = VariableCategory(rawValue: entry.categoryKey) ?? .other
         let trimmedTitle = entry.title.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -167,10 +180,30 @@ final class QuickRecordImporter {
             linkedVehicleId: vehicleId,
             vehicleExpenseCategory: vehicleId == nil ? nil : carCategory,
             note: "",
-            currencyCode: "NT$"
+            currencyCode: currencyCode(of: entry)
         )
         expense.fromQuickRecord = true
+        // [手錶 v6] 旅途中記的（不在 memberwise init，照 AddExpenseView 存檔端指派）
+        let link = tripLink(entry, plans: plans)
+        expense.linkedTripPlanId = link.planId
+        expense.linkedTripStopId = link.stopId
         return expense
+    }
+
+    /// [手錶 v6] 幣別：收件匣那一筆的寫法（去頭尾空白）；沒有、空的＝"NT$"
+    static func currencyCode(of entry: QuickRecordEntry) -> String {
+        let code = (entry.currencyCode ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        return code.isEmpty ? "NT$" : code
+    }
+
+    /// [手錶 v6] 連到哪一趟、哪一站（照 AddExpenseView 存檔那一段）：那一趟還在才連；
+    /// 站要還在那一趟裡，不在（被刪了）＝算在整趟上（stopId nil）
+    static func tripLink(_ entry: QuickRecordEntry, plans: [TripPlan]) -> (planId: UUID?, stopId: UUID?) {
+        guard let pid = entry.tripPlanId, let plan = plans.first(where: { $0.id == pid }) else {
+            return (planId: nil, stopId: nil)
+        }
+        let sid: UUID? = plan.stops.first(where: { $0.id == entry.tripStopId })?.id
+        return (planId: pid, stopId: sid)
     }
 
     /// 這筆要連到哪台車（nil＝不連）

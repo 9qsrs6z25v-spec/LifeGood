@@ -44,6 +44,8 @@ import WidgetKit
 //      冷啟動時拿現成的檔組包）。
 // [手錶 v2] v25.576（watch/build/v2/brief.md G1-2）：寫 money 的時候也重寫手錶附加資料快取（手錶記的帳收完只寫 [.money]，
 //      快取裡的今天記的帳、includedIds 要跟著變，手錶的待送盒才收得了尾）。
+// [手錶 v6] v25.578（watch/build/v6/brief.md G1-2）：只寫 life（手錶打卡、改行程、天氣抓到了）時，手錶附加資料快取
+//      只換旅行那幾欄（WatchExtrasWriter.writeTrip；不重算卡費、最近金額）；寫 money 或 bills 照舊整份重寫（含旅行）。
 //
 // 什麼時候寫：
 //   • 啟動（start）：掛好監聽後馬上寫一次全部
@@ -223,6 +225,9 @@ final class WidgetSnapshotWriter {
         if parts.contains(.bills) || parts.contains(.money), let expense = expenseStore, let finance = financeStore,
            let life = lifeStore {
             WatchExtrasWriter.write(expense: expense, finance: finance, life: life, now: now)
+        } else if parts.contains(.life), let expense = expenseStore, let life = lifeStore {
+            // [手錶 v6] 只寫 life（打卡、改行程、天氣抓到了）：手錶快取只換旅行那幾欄
+            WatchExtrasWriter.writeTrip(expense: expense, life: life, now: now)
         }
         WatchBridge.shared.snapshotsDidChange()
     }

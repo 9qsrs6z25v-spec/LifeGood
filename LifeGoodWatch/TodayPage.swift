@@ -17,6 +17,10 @@ import WatchKit
 // 字放到 xxLarge 以上、或 40mm（螢幕高不到 200 點）：只畫現在或下一件＋「還有 N 件」，今天要留意也收起來
 // （judge §2.1、§2.18 表「40mm：現在或下一件＋還有 N 件」）。
 // 收起來的件數加回「還有 N 件」。不加 ScrollView（轉錶冠翻到 ② 錢）。倒數字每分鐘重畫（TimelineView(.everyMinute)）。
+// [手錶 v6] v25.578（watch/judge.md §2.14「第一頁最上面寫一行」、§5.6；watch/build/v6/brief.md G3-3）：
+//   ① 是第一頁時（不是旅途中；旅途中第一頁是 ④ 旅行，那一行 TripPage 自己畫），手錶的時差跟 iPhone 算包的時區不一樣
+//   （WatchTripText.timeZoneHint）→ 最上面琥珀一行「換時區了：打開 iPhone 上的 LifeGood 一次，日期才會對」（兩行、可縮 0.8）；
+//   41mm 版面預算：這一行出現時「今天要留意」收起來。v1 的字一個沒改。
 
 struct TodayPage: View {
     @ObservedObject private var model = WatchModel.shared
@@ -91,16 +95,37 @@ struct TodayPage: View {
         let freshness: WatchFreshness? = today.mode == .expired
             ? nil
             : WatchText.lifeFreshness(package: model.package, now: now)
+        // [v6] 換時區那一行：只有 ① 是第一頁時才畫（旅途中第一頁是 ④ 旅行，那一行由 TripPage 畫）
+        let tzHint: String? = model.firstPage == .today
+            ? WatchTripText.timeZoneHint(package: model.package, now: now)
+            : nil
         return VStack(alignment: .leading, spacing: 3) {
+            if let hint = tzHint {
+                tzHintText(hint)
+            }
             header(today)
             rowList(today)
             messageBlock(today)
-            attentionList(today)
+            // [v6] 41mm 版面預算：換時區那一行出現時「今天要留意」收起來
+            if tzHint == nil {
+                attentionList(today)
+            }
             FreshnessFooter(freshness: freshness)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .scenePadding(.horizontal)
         .opacity(dimmed ? Self.dimmedOpacity : 1)
+    }
+
+    // MARK: [v6] 換時區（judge §2.14、§5.6）
+
+    /// 「換時區了：打開 iPhone 上的 LifeGood 一次，日期才會對」（琥珀 Footnote、兩行、可縮 0.8；字是 WatchTripText 的）
+    private func tzHintText(_ hint: String) -> some View {
+        Text(hint)
+            .font(.footnote)
+            .foregroundStyle(WatchStyle.amber)
+            .lineLimit(2)
+            .minimumScaleFactor(0.8)
     }
 
     // MARK: 最上面那一行

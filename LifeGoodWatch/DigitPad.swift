@@ -10,9 +10,15 @@ import SwiftUI
 //   ✓ 沒打任何數字（或刪光）＝照原本的金額。最多 6 位數（RecordText.maxAmount，padAppend 擋）；開頭的 0 不算。
 // 每一列平分剩下的高度，最高 46mm 40／41mm 以下 34（40mm 螢幕矮，跟著縮）。手腕放下能按的變暗、暫時不能按。
 // 手腕放下（或系統要遮）：上面那一行「NT$ ••••」（judge §2.17「記一筆：金額 → •••」；版面不動）。
+//
+// [手錶 v6，v25.578] 旅途中外幣（judge §2.14；watch/build/v6/brief.md G2-4）：currency 有值時打的是原幣——
+//   上面那一行「₩18,000」（WatchTripText.foreignText）、遮住「₩ ••••」（WatchTripText.foreignMask）；最多 6 位數照舊
+//   （WatchTripText.maxForeignAmount＝RecordText.maxAmount＝999,999）。換成台幣在金額頁（AmountPicker 的「≈ NT$」那一行），這裡不算。
 
 struct DigitPad: View {
     let initial: Int
+    /// [v6] 旅途中外幣（nil＝台幣）
+    let currency: WatchCurrency?
     let onDone: (Int) -> Void
 
     @Environment(\.isLuminanceReduced) private var dimmed
@@ -27,8 +33,9 @@ struct DigitPad: View {
     static let displayHeight: CGFloat = 30
     static let dimmedOpacity: Double = 0.75
 
-    init(initial: Int, onDone: @escaping (Int) -> Void) {
+    init(initial: Int, currency: WatchCurrency? = nil, onDone: @escaping (Int) -> Void) {
         self.initial = initial
+        self.currency = currency
         self.onDone = onDone
         _value = State(initialValue: 0)
     }
@@ -56,9 +63,13 @@ struct DigitPad: View {
         value > 0 ? value : initial
     }
 
-    /// 「NT$1,200」；手腕放下、系統要遮「NT$ ••••」
+    /// 「NT$1,200」；手腕放下、系統要遮「NT$ ••••」。[v6] 外幣「₩18,000」；遮住「₩ ••••」
     private var shownText: String {
-        (dimmed || reasons.contains(.privacy)) ? WidgetHideAmounts.mask : RecordText.amountText(shownValue)
+        let hidden = dimmed || reasons.contains(.privacy)
+        if let c = currency {
+            return hidden ? WatchTripText.foreignMask(c) : WatchTripText.foreignText(shownValue, c)
+        }
+        return hidden ? WidgetHideAmounts.mask : RecordText.amountText(shownValue)
     }
 
     // MARK: 顯示＋⌫

@@ -18,7 +18,20 @@ import WatchKit
 //      狀態變成最後的字之後 2.5 秒自己回 ② 錢（WatchModel.closeRecord）；〔復原〕＝刪掉手錶上這一筆、回到金額頁（金額照剛剛那筆）
 // 10 秒內根本還沒送；〔完成〕、關掉這一頁、手腕放下＝馬上送（RecordOutbox.sendHoldingNow；judge §2.6）。
 // 手腕放下：金額「•••」「••••」（RecordText 依 privacy.masksAmounts 組好）、能按的變暗不拿掉（.disabled(dimmed)）。
-// 付款方式手錶上不選；外幣、記到旅遊那一站是 v6。
+// 付款方式手錶上不選。
+//
+// [手錶 v6，v25.578] 旅途中記一筆（judge §2.14「旅途中記一筆自動變外幣」；watch/build/v6/brief.md G2-2；sim_v6.py §6）：
+//   旅途中＝WatchTripText.recordContext 有值（包裡有今天的站；手錶上按過的打卡一起算，TripCheckIns.items）。
+//   • 記帳台 RecordText.desk(…trip:)：外幣時換成這趟常用 4 個分類（範本不出現）、最下面「在國外：記帳台換成這趟常用的分類」；
+//     國內旅行照舊範本；認得那一國但 iPhone 沒有匯率，最下面寫「要記韓元：到 iPhone 設定加「韓元」匯率」
+//   • 每一筆都「記到」一站：預設＝WatchTripRecordContext.defaultTarget（到了還沒離開的那一站；沒打卡＝時間最近；今天沒站＝整趟）；
+//     金額頁「📍 記到 弘大 ›」推「記到哪裡」（RecordStep.stops）可以換別站或整趟（tripChoice；同一趟才算、那一站不見了回預設）
+//   • 金額頁 RecordText.tripAmountSetup（外幣：原幣、膠囊是這趟最近記過的、錶冠一格 ₩1,000）；〔記下來〕
+//     RecordText.record(…currency:target:)（台幣＝手錶上看到的「≈ NT$412」，iPhone 入帳不重算）
+//   • 點範本格（國內旅行）RecordText.record(template:now:target:)；橫幅「已記 早餐 NT$65・記到 竹北老街」（tripBannerText）
+//   • 記好了「韓國炸雞 ₩18,000 ≈ NT$412・記到 弘大」（tripDoneLine）
+//   站名照 privacy.hidesPersonal 換（過夜那一站手腕放下寫「住宿」）：記到哪裡的字每次重畫都對回 recordContext 的那一列。
+//   不是旅途中（recordContext nil）：v2 的行為一字不變。
 
 /// 記一筆裡推進去的那幾頁（NavigationStack(path:)）
 private enum RecordStep: Hashable {
@@ -26,12 +39,14 @@ private enum RecordStep: Hashable {
     case categories
     /// 金額頁（分類 key：「飲食」）
     case amount(String)
+    /// [v6] 記到哪裡（金額頁「📍 記到 弘大 ›」）
+    case stops
 }
 
 /// 記帳台頂上的橫幅
 private enum RecordBanner: Equatable {
-    /// 點一格記好的那一筆
-    case recorded(WatchRecord)
+    /// 點一格記好的那一筆；[v6] 旅途中記到哪裡（nil＝不在旅途中，橫幅照 v2）
+    case recorded(WatchRecord, WatchTripRecordTarget?)
     /// 手錶上寫不進檔（幾乎不會發生）；at＝按的那一下（再按一次也重新數 2.5 秒）
     case failed(Date)
 }
@@ -64,10 +79,16 @@ private enum RecordLook {
 struct RecordSheet: View {
     @ObservedObject private var model = WatchModel.shared
     @ObservedObject private var outbox = RecordOutbox.shared
+    /// [v6] 手錶上按過、iPhone 還沒寫回包裡的打卡（預設記到哪一站要算進去）
+    @ObservedObject private var trips = TripCheckIns.shared
     @Environment(\.isLuminanceReduced) private var dimmed
     @Environment(\.redactionReasons) private var reasons
 
     @State private var path: [RecordStep] = []
+    /// [v6] 你在「記到哪裡」選的（nil＝照預設那一站）
+    @State private var tripChoice: WatchTripRecordTarget?
+    /// [v6] 記好了那一頁的那一筆記到哪（nil＝不在旅途中，記好了照 v2）
+    @State private var doneTarget: WatchTripRecordTarget?
     /// 記帳台頂上的橫幅（點範本格記好的那一筆）
     @State private var banner: RecordBanner?
     /// 記好了那一頁的那一筆（金額頁〔記下來〕）；有值時整頁換成記好了
@@ -77,11 +98,45 @@ struct RecordSheet: View {
 
     static let title = "記一筆"
     static let failedText = "沒記到，再按一次"
+    /// [v6] 「記到哪裡」那一頁的標題
+    static let stopsTitle = "記到哪裡"
     /// 最後的字出現之後幾秒：橫幅收起來／記好了回 ② 錢（judge §2.6「2.5 秒後自己回 ② 錢」）
     static let closeDelayNanos: UInt64 = 2_500_000_000
 
     private var privacy: WatchPrivacy {
         model.privacy(dimmed: dimmed, redacted: reasons.contains(.privacy))
+    }
+
+    // MARK: [v6] 旅途中
+
+    /// 旅途中記帳用得到的（外幣、預設記到哪、可以選的站）；不是旅途中 nil（v2 照舊）
+    private var tripContext: WatchTripRecordContext? {
+        WatchTripText.recordContext(package: model.package, now: Date(), pending: trips.items,
+                                    dimmed: privacy.hidesPersonal)
+    }
+
+    /// 現在記到哪裡（不是旅途中 nil）
+    private var currentTarget: WatchTripRecordTarget? {
+        guard let ctx = tripContext else { return nil }
+        return target(in: ctx)
+    }
+
+    /// 你選過、而且是同一趟、那一站（或整趟）還在可以選的裡面 → 用它（字照這一刻的手腕放下換）；不然預設那一站
+    private func target(in ctx: WatchTripRecordContext) -> WatchTripRecordTarget {
+        guard let pick = tripChoice, pick.planId == ctx.planId,
+              let hit = ctx.choices.first(where: { $0.target.stopId == pick.stopId }) else {
+            return ctx.defaultTarget
+        }
+        return hit.target
+    }
+
+    /// 橫幅、記好了那一行的「記到 弘大」：還在今天的站裡就用這一刻的名字（手腕放下過夜那一站「住宿」）；不然照記的那時候
+    private func shownTarget(_ t: WatchTripRecordTarget) -> WatchTripRecordTarget {
+        guard let ctx = tripContext, ctx.planId == t.planId,
+              let hit = ctx.choices.first(where: { $0.target.stopId == t.stopId }) else {
+            return t
+        }
+        return hit.target
     }
 
     // ⚠️ 外層一定是 ZStack（真的容器）：Group 的修飾器會套到裡面每一個，換成記好了那一頁時
@@ -126,7 +181,7 @@ struct RecordSheet: View {
     }
 
     private var deskPage: some View {
-        RecordDeskPage(desk: RecordText.desk(package: model.package, now: Date(), masked: privacy.masksAmounts),
+        RecordDeskPage(desk: currentDesk,
                        highlightTemplateId: highlightTemplateId,
                        dimmed: dimmed,
                        asking: model.asking,
@@ -141,6 +196,11 @@ struct RecordSheet: View {
             .containerBackground(Color.black, for: .navigation)
     }
 
+    /// 記帳台：[v6] 旅途中 RecordText.desk(…trip:)（外幣換成這趟常用的分類）；trip nil 時跟 v2 同一份
+    private var currentDesk: RecordDesk {
+        RecordText.desk(package: model.package, now: Date(), masked: privacy.masksAmounts, trip: tripContext)
+    }
+
     @ViewBuilder
     private func destination(_ step: RecordStep) -> some View {
         switch step {
@@ -148,6 +208,8 @@ struct RecordSheet: View {
             categoryPage
         case .amount(let key):
             amountPage(key)
+        case .stops:
+            stopPage
         }
     }
 
@@ -162,21 +224,71 @@ struct RecordSheet: View {
 
     private func amountPage(_ key: String) -> some View {
         let setup = amountSetup(key)
-        return AmountPicker(setup: setup) { amount in
+        return AmountPicker(setup: setup, onPickStop: pickStopAction(setup)) { amount in
             recordAmount(setup: setup, amount: amount)
         }
+        // [v6] 幣別換了（例：iPhone 剛加了韓元匯率、新包到了）：金額頁重來（錶冠的格、一打開的金額照新幣別）
+        .id(setup.currency?.code ?? "")
         .containerBackground(Color.black, for: .navigation)
     }
 
-    /// 金額頁一打開的樣子；剛在記好了那一頁〔復原〕的同一個分類：金額照那一筆（可以改了再記）
+    /// [v6] 「📍 記到 弘大 ›」點了：推「記到哪裡」（不是旅途中沒有那一行，nil）
+    private func pickStopAction(_ setup: RecordAmountSetup) -> (() -> Void)? {
+        guard setup.target != nil else { return nil }
+        return { path.append(.stops) }
+    }
+
+    /// 金額頁一打開的樣子；剛在記好了那一頁〔復原〕的同一個分類：金額照那一筆（可以改了再記）。
+    /// [v6] 旅途中 RecordText.tripAmountSetup（記到哪裡；外幣時原幣、膠囊是這趟的）；〔復原〕回來的外幣那筆用原幣
     private func amountSetup(_ key: String) -> RecordAmountSetup {
-        var setup = RecordText.amountSetup(categoryKey: key, package: model.package, now: Date(),
+        var setup: RecordAmountSetup
+        if let ctx = tripContext {
+            setup = RecordText.tripAmountSetup(categoryKey: key, package: model.package, now: Date(),
+                                               calendar: Calendar.current, trip: ctx, target: target(in: ctx),
+                                               items: outbox.items)
+        } else {
+            setup = RecordText.amountSetup(categoryKey: key, package: model.package, now: Date(),
                                            calendar: Calendar.current)
-        if let u = undone, u.categoryKey == key, u.amountTWD.isFinite, u.amountTWD >= 1,
-           u.amountTWD <= Double(RecordText.maxAmount) {
+        }
+        guard let u = undone, u.categoryKey == key else { return setup }
+        if let code = u.currencyCode {
+            // 外幣那筆：同一個幣別才照它（先在 Double 上夾 1…999,999 再轉 Int，arm64_32）
+            guard setup.currency?.code == code, let v = u.foreignAmount, v.isFinite else { return setup }
+            let clamped = min(max(v.rounded(), 1), Double(WatchTripText.maxForeignAmount))
+            setup.initialAmount = Int(clamped)
+        } else if setup.currency == nil, u.amountTWD.isFinite, u.amountTWD >= 1,
+                  u.amountTWD <= Double(RecordText.maxAmount) {
             setup.initialAmount = Int(u.amountTWD.rounded())
         }
         return setup
+    }
+
+    // MARK: [v6] 記到哪裡
+
+    private var stopPage: some View {
+        stopPageContent
+            .navigationTitle(Self.stopsTitle)
+            .containerBackground(Color.black, for: .navigation)
+    }
+
+    @ViewBuilder
+    private var stopPageContent: some View {
+        if let ctx = tripContext {
+            RecordStopPicker(choices: ctx.choices, selected: target(in: ctx), dimmed: dimmed) { picked in
+                pickStop(picked)
+            }
+        } else {
+            // 旅途剛結束、包換了：沒有今天的站
+            RecordStopMissing(text: WatchTripText.staleText)
+        }
+    }
+
+    /// 選了一列：記住、回金額頁（金額照剛剛調的，AmountPicker 的狀態還在）
+    private func pickStop(_ picked: WatchTripRecordTarget) {
+        tripChoice = picked
+        if let last = path.last, last == .stops {
+            path.removeLast()
+        }
     }
 
     // MARK: 記
@@ -187,11 +299,13 @@ struct RecordSheet: View {
             path.append(.amount(tile.categoryKey))
             return
         }
-        let r = RecordText.record(template: t, now: Date())
+        // [v6] 旅途中（國內旅行才有範本格）：記到現在那一站；不是旅途中 target nil＝跟 v2 同一筆
+        let target = currentTarget
+        let r = RecordText.record(template: t, now: Date(), target: target)
         switch outbox.add(r) {
         case .added:
             WKInterfaceDevice.current().play(.success)
-            banner = .recorded(r)
+            banner = .recorded(r, target)
         case .ignoredDoubleTap:
             // 3 秒內同一格：不記，只「喀」一下
             WKInterfaceDevice.current().play(.click)
@@ -201,14 +315,17 @@ struct RecordSheet: View {
         }
     }
 
-    /// 金額頁〔記下來〕：沒有範本編號（iPhone 填 watch.<編號>）、名稱＝這個時段最常寫的
+    /// 金額頁〔記下來〕：沒有範本編號（iPhone 填 watch.<編號>）、名稱＝這個時段最常寫的。
+    /// [v6] 外幣時 amount 是原幣、台幣用手錶上看到的換算；記到 setup.target（不是旅途中兩個都 nil＝跟 v2 同一筆）
     private func recordAmount(setup: RecordAmountSetup, amount: Int) {
         // 〔記下來〕連按兩下：第一下已經換成記好了那一頁，第二下不再記（自己打的數字沒有範本編號，待送盒不會擋）
         guard doneRecord == nil else { return }
-        let r = RecordText.record(categoryKey: setup.categoryKey, title: setup.recordTitle, amount: amount, now: Date())
+        let r = RecordText.record(categoryKey: setup.categoryKey, title: setup.recordTitle, amount: amount, now: Date(),
+                                  currency: setup.currency, target: setup.target)
         if outbox.add(r) == .added {
             WKInterfaceDevice.current().play(.success)
             undone = nil
+            doneTarget = setup.target
             doneRecord = r
         } else {
             WKInterfaceDevice.current().play(.failure)
@@ -219,7 +336,7 @@ struct RecordSheet: View {
 
     /// 剛點的那一格（還沒有最後的字）：格子綠框綠勾（judge §2.6「格子閃綠勾」）
     private var highlightTemplateId: String? {
-        guard let b = banner, case .recorded(let r) = b else { return nil }
+        guard let b = banner, case .recorded(let r, _) = b else { return nil }
         if let s = outbox.sendState(of: r.id), s.isFinal {
             return nil
         }
@@ -239,9 +356,9 @@ struct RecordSheet: View {
         case .failed:
             return RecordBannerView(text: Self.failedText, tone: .failed, undoStart: nil, undoSeconds: seconds,
                                     dimmed: dimmed, onUndo: {})
-        case .recorded(let r):
+        case .recorded(let r, let target):
             let state = outbox.sendState(of: r.id)
-            var text = RecordText.bannerText(r, package: model.package, masked: privacy.masksAmounts)
+            var text = bannerLine(r, target: target)
             if let s = state, let status = RecordText.bannerStatus(s) {
                 text = status
             }
@@ -250,6 +367,15 @@ struct RecordSheet: View {
             return RecordBannerView(text: text, tone: tone, undoStart: undoStart, undoSeconds: seconds,
                                     dimmed: dimmed, onUndo: { undoBanner(r) })
         }
+    }
+
+    /// 「已記 早餐 NT$65」；[v6] 旅途中「已記 早餐 NT$65・記到 竹北老街」
+    private func bannerLine(_ r: WatchRecord, target: WatchTripRecordTarget?) -> String {
+        guard let t = target else {
+            return RecordText.bannerText(r, package: model.package, masked: privacy.masksAmounts)
+        }
+        return RecordText.tripBannerText(r, package: model.package, masked: privacy.masksAmounts,
+                                         target: shownTarget(t))
     }
 
     private func undoBanner(_ r: WatchRecord) {
@@ -264,7 +390,7 @@ struct RecordSheet: View {
         switch b {
         case .failed(let at):
             return "failed-" + String(at.timeIntervalSince1970)
-        case .recorded(let r):
+        case .recorded(let r, _):
             guard let s = outbox.sendState(of: r.id) else { return "gone-" + r.id.uuidString }
             guard s.isFinal else { return "" }
             return r.id.uuidString + "-" + RecordText.statusLine(s)
@@ -294,7 +420,7 @@ struct RecordSheet: View {
     // MARK: 記好了
 
     private func doneView(_ r: WatchRecord) -> some View {
-        RecordDoneView(line: RecordText.doneLine(r, package: model.package, masked: privacy.masksAmounts),
+        RecordDoneView(line: doneLine(r),
                        state: outbox.sendState(of: r.id) ?? .holding,
                        undoStart: r.createdAt,
                        undoSeconds: RecordOutbox.undoSeconds,
@@ -303,11 +429,21 @@ struct RecordSheet: View {
                        onFinish: { finish() })
     }
 
-    /// 〔復原〕：只刪手錶上這一筆（還沒送出去），回到金額頁（path 還在）
+    /// 「午餐 NT$180・12:10」；[v6] 旅途中「韓國炸雞 ₩18,000 ≈ NT$412・記到 弘大」
+    private func doneLine(_ r: WatchRecord) -> String {
+        guard let t = doneTarget else {
+            return RecordText.doneLine(r, package: model.package, masked: privacy.masksAmounts)
+        }
+        return RecordText.tripDoneLine(r, package: model.package, masked: privacy.masksAmounts,
+                                       target: shownTarget(t))
+    }
+
+    /// 〔復原〕：只刪手錶上這一筆（還沒送出去），回到金額頁（path 還在；[v6] 記到哪裡照你選的 tripChoice）
     private func undoDone(_ r: WatchRecord) {
         guard outbox.undo(r.id) else { return }
         undone = r
         doneRecord = nil
+        doneTarget = nil
     }
 
     /// 〔完成〕：還在 10 秒內的馬上送、回 ② 錢
@@ -768,6 +904,98 @@ private struct RecordCategoryRow: View {
                 .lineLimit(1)
                 .minimumScaleFactor(0.8)
             Spacer(minLength: 0)
+        }
+    }
+}
+
+// MARK: - [v6] 記到哪裡（金額頁「📍 記到 弘大 ›」推進來）
+
+/// 今天的站（照時間軸）＋最後一列「整趟」：一列一個，站名 Body、下面「14:00・第 3 站」灰；選中的綠勾。選了回金額頁
+private struct RecordStopPicker: View {
+    let choices: [WatchTripRecordChoice]
+    let selected: WatchTripRecordTarget?
+    let dimmed: Bool
+    let onPick: (WatchTripRecordTarget) -> Void
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: RecordLook.gridSpacing) {
+                ForEach(choices) { c in
+                    row(c)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .scenePadding(.horizontal)
+        }
+    }
+
+    private func row(_ c: WatchTripRecordChoice) -> some View {
+        Button {
+            onPick(c.target)
+        } label: {
+            RecordStopRow(choice: c, selected: isSelected(c))
+        }
+        .disabled(dimmed)
+        .opacity(dimmed ? RecordLook.dimmedOpacity : 1)
+    }
+
+    /// 同一趟、同一站（整趟＝stopId 都是 nil）；名字不比（手腕放下過夜那一站會換字）
+    private func isSelected(_ c: WatchTripRecordChoice) -> Bool {
+        guard let s = selected else { return false }
+        return s.planId == c.target.planId && s.stopId == c.target.stopId
+    }
+}
+
+/// 「記到哪裡」的一列
+private struct RecordStopRow: View {
+    let choice: WatchTripRecordChoice
+    let selected: Bool
+
+    var body: some View {
+        HStack(spacing: 6) {
+            texts
+            Spacer(minLength: 2)
+            checkMark
+        }
+    }
+
+    private var texts: some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text(choice.title)
+                .font(.body)
+                .foregroundStyle(WatchStyle.primary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+            Text(choice.detail)
+                .font(.footnote)
+                .foregroundStyle(WatchStyle.small)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+        }
+    }
+
+    @ViewBuilder
+    private var checkMark: some View {
+        if selected {
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(WatchStyle.green)
+        }
+    }
+}
+
+/// 「記到哪裡」打開時已經不是旅途中（包換了）：寫「打開 iPhone 上的 LifeGood 一次，才有今天的站」
+private struct RecordStopMissing: View {
+    let text: String
+
+    var body: some View {
+        ScrollView {
+            Text(text)
+                .font(.footnote)
+                .foregroundStyle(WatchStyle.small)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .scenePadding(.horizontal)
         }
     }
 }

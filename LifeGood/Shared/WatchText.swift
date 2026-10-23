@@ -14,6 +14,11 @@ import Foundation
 //     家人生日寫 lockTitle（「家人生日」）；金額照遮住規則（WatchPrivacyRule.masksAmounts）。
 //   • 手錶 App 抬手＝解鎖的 iPhone App；手腕放下（isLuminanceReduced）或系統要求遮（redactionReasons.privacy）：
 //     金額一律遮、人名／議程／備註／家人名字換字（WatchPrivacyRule.hidesPersonal）。
+//
+// [手錶 v6] v25.578（watch/build/v6/brief.md §2）：錶面「下一場」旅途中換成下一站（WatchTripText.faceNextUp：
+//   「14:00 弘大」／「第 3／5 站・停留 90 分」／「25 分後・第 2 天」；不放天氣、過夜那站寫「住宿」）。
+//   只有一般的下一場本來就是旅遊景點、或今天已經沒有下一場時才換——比下一站早的會議、行事曆照舊。
+//   手錶上按過還沒被 iPhone 確認的打卡（WatchCheckInLog）也算進去。其他一個字都沒動（sim_v1 照過）。
 
 // MARK: - 遮的規則（judge §6.2-2、§6.2-3；兩個手錶 target 都經過這裡）
 
@@ -731,6 +736,8 @@ struct WatchNextUp: Equatable {
     var inline: String
     /// 點了開哪一件（nil＝只開 App 第一頁）
     var stopId: String?
+    /// [v6] 旅途中那一種：那一趟（包裡找不到那一站時，點了開 ④ 旅行）
+    var tripPlanId: UUID? = nil
 }
 
 extension WatchText {
@@ -782,6 +789,11 @@ extension WatchText {
             out = WatchNextUp(mark: nil, line1: day.dateText, line2: "今天沒排行程",
                               line3: first?.lockTitle ?? "", line3Icon: first?.icon,
                               time: nil, ring: nil, inline: "今天沒排行程", stopId: nil)
+        }
+        // [v6] 旅途中：下一場換成下一站（一般的下一場是旅遊景點、或已經沒有下一場時才換；錶面不放天氣）
+        if out.mark == .trip || out.mark == nil,
+           let trip = WatchTripText.faceNextUp(package: package, now: now, pending: WatchCheckInLog.all()) {
+            out = trip
         }
         // 第三行換字：自己繳的卡費今天截止 ＞ 資料超過 3 小時（judge §3.1 表的後三列）
         let cardToday = (package.bills ?? []).contains { b in

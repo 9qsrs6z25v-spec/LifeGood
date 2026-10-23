@@ -11,6 +11,11 @@ import WidgetKit
 // 錶面＝鎖定畫面：用 lockedSurfaceTitle（會議主題，不是人），**不寫部屬名字**；本來就沒有金額，所以手腕放下不用換字。
 // 點了開那一件的細節（lifegood://today?stop=<id>&src=widget；WatchModel.open）；沒有那一件只開 ① 今天。
 // 外圈用 Gauge＋時間軸的「每分鐘一筆」（WatchTimelinePlan.nextUp），不用 ProgressView(timerInterval:)（brief §1-14）。
+// [手錶 v6] v25.578（watch/judge.md §3.1 表「旅途中（v6）」那一列；watch/build/v6/brief.md G3-4）：
+//   旅途中那一種的字已經在 WatchText.nextUp 換好（「✈︎ 14:00 弘大／第 3／5 站・停留 90 分／25 分後・第 2 天」；過夜那一站一律
+//   「住宿」；錶面放不下出處，所以不放天氣）。按了〔到了〕錶面馬上換：TripCheckIns 叫 reloadTimelines(ofKind: nextUp)，
+//   這裡讀 WatchCheckInLog（經 WatchText.nextUp）。這裡只改點了開哪裡（linkURL）：包裡找得到那一場 → 那一場
+//   （旅途中的站：WatchModel.open 開 ④ 旅行＋那一站）；找不到、但是旅途中那一種 → lifegood://life/trip（④ 旅行）；都沒有 → ① 今天。
 
 struct NextUpWidget: Widget {
     var body: some WidgetConfiguration {
@@ -39,9 +44,20 @@ struct NextUpWidgetView: View {
         return WatchText.findStop(id: id, in: entry.package)?.stop
     }
 
+    /// [v6] 點了開哪裡：那一場（旅途中的站也是）→ 旅途中那一種、包裡找不到那一站 → 那一趟（④ 旅行）→ 只開 App 第一頁
+    private var linkURL: URL {
+        if let stop = linkedStop {
+            return WidgetLink.today(stop)
+        }
+        if let planId = model.tripPlanId {
+            return WidgetLink.trip(planId)
+        }
+        return WidgetLink.today(nil)
+    }
+
     var body: some View {
         content
-            .widgetURL(WidgetLink.today(linkedStop))
+            .widgetURL(linkURL)
             .containerBackground(for: .widget) {
                 WatchWidgetStyle.sky
             }

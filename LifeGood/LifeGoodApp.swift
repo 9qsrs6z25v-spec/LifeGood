@@ -164,10 +164,15 @@ struct LifeGoodApp: App {
                 .task {
                     // [v2 小工具] 一按就記的收件匣先收進帳本（第一份快照才含剛記的）；
                     // 放在電子發票同步（einvoiceSync.syncIfDue）之前，防重複才找得到一按記的那筆
-                    QuickRecordImporter.shared.start(expense: expenseStore, finance: financeStore)
+                    // [手錶 v6] 多收 life：旅途中在手錶記的帳入帳時要看那一趟、那一站還在不在（連旅遊）
+                    QuickRecordImporter.shared.start(expense: expenseStore, finance: financeStore, life: lifeStore)
                     // [v25.545] 桌面小工具的快照：掛好監聽、馬上寫一次（放在任何 await 之前，
                     // 開場動畫期間就寫好；第二次呼叫什麼都不做）。[v2] 多收 finance（車子卡、接下來要繳）
                     WidgetSnapshotWriter.shared.start(expense: expenseStore, finance: financeStore, life: lifeStore)
+                    // [手錶 v6] 手錶的打卡：記住 LifeStore（之後手錶打卡馬上寫進行程）、把 iPhone 沒開時排著的
+                    // 照按下去的時間套進行程。要在寫手 start 之後：套完才寫得出新的手錶包
+                    WatchActionApplier.shared.start(life: lifeStore)
+                    WatchActionApplier.shared.applyPending()
                     // [財富 v4] 財富提醒（卡費截止、可能不夠扣的扣款與交割、卡片快到期；通知不寫卡名、金額、號碼）：
                     // 掛好監聽（記帳／理財／人生一改，防抖 3 秒重排）、馬上排一次；第二次呼叫什麼都不做。
                     // 同步呼叫、不 await：授權照 MeetingReminders 的慣例，有要排的才問（WealthReminderCenter 裡）
@@ -233,6 +238,8 @@ struct LifeGoodApp: App {
                         // [v2 小工具] 先把一按就記的待入帳收進帳本，再接控制項存著的網址（萬一沒直接交到），
                         // 最後才重寫快照（「今天 N 筆」含剛收進來的）
                         _ = QuickRecordImporter.shared.importPending()
+                        // [手錶 v6] iPhone 沒開時手錶打的卡（watch_actions_v1 排著的）照按下去的時間寫進行程
+                        WatchActionApplier.shared.applyPending()
                         WidgetOpenAppHandoff.consumeStored()
                         // [v25.545] 今天往前走了（過了午夜、過了一場）：重寫小工具快照，內容沒變就不寫
                         WidgetSnapshotWriter.shared.writeNow()

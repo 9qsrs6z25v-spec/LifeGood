@@ -11,6 +11,13 @@ import Foundation
 // **不自己減**，只寫「剛記的 N 筆還沒算進去」。
 // 遮住（手腕放下、沒解鎖、手錶「遮住金額」、iPhone「隱藏金額」，WatchPrivacyRule.masksAmounts）：
 //   記帳台格子的金額「•••」、今天記的帳「NT$ ••••」、記帳台頂上那一行換隱藏版（「已花 72%・今天 2 筆」）；名稱照顯示。
+//
+// [手錶 v6] v25.578（watch/judge.md §2.14「旅途中記一筆自動變外幣」；watch/build/v6/brief.md §2；sim_v6.py 同名函式）：
+//   旅途中（WatchTripText.recordContext 有值）——
+//   • 外幣（這趟有幣別與匯率）：記帳台換成這趟常用 4 個分類（範本是台幣固定金額，在國外沒意義）；金額頁是原幣
+//     （「₩18,000」、錶冠一格 ₩1,000、膠囊是這趟最近記過的），送 iPhone 的台幣＝手錶上看到的「≈ NT$412」（入帳不重算）
+//   • 國內旅行（沒有幣別）：記帳台照舊；每一筆都「記到」預設那一站（可以換成別站或整趟）
+//   • 認得是哪一國、iPhone 沒有匯率：照台幣記，記帳台最下面寫「要記韓元：到 iPhone 設定加「韓元」匯率」
 
 /// 記好的那一筆送到哪了（記好了那一頁的狀態行、記帳台的橫幅）
 enum RecordSendState: Equatable {
@@ -106,8 +113,12 @@ struct RecordAmountSetup: Equatable {
     var recordTitle: String?
     /// 一打開的金額（這個分類上次的金額；沒記過＝0，〔記下來〕先不能按）
     var initialAmount: Int
-    /// 膠囊：這個分類最近 3 個不同金額（新到舊）
+    /// 膠囊：這個分類最近 3 個不同金額（新到舊）；[v6] 外幣時是這趟最近記過的原幣金額
     var recent: [Int]
+    /// [v6] 旅途中外幣（nil＝台幣）：金額、膠囊、錶冠都是原幣，下面一行「≈ NT$412（0.0229）」
+    var currency: WatchCurrency? = nil
+    /// [v6] 旅途中：記到哪裡（「📍 記到 弘大 ›」；nil＝不在旅途中，不畫那一行）
+    var target: WatchTripRecordTarget? = nil
 }
 
 /// 今天記的帳的一列
@@ -392,6 +403,116 @@ enum RecordText {
     static func record(categoryKey: String, title: String?, amount: Int, now: Date) -> WatchRecord {
         WatchRecord(id: UUID(), createdAt: now, templateId: nil, title: title, amountTWD: Double(amount),
                     amountText: amountText(amount), categoryKey: categoryKey, vehicleId: nil, vehicleCategoryKey: nil)
+    }
+
+    // MARK: [v6] 旅途中
+
+    /// 記帳台（旅途中）：外幣時換成這趟常用 4 個分類（範本不出現）、最下面「在國外：記帳台換成這趟常用的分類」；
+    /// 沒有匯率時最下面寫「要記韓元：到 iPhone 設定加「韓元」匯率」；不在旅途中（trip nil）照 v2
+    static func desk(package: WatchPackage?, now: Date, masked: Bool, trip: WatchTripRecordContext?) -> RecordDesk {
+        var out = desk(package: package, now: now, masked: masked)
+        guard out.mode == .normal, let trip else { return out }
+        guard trip.currency != nil else {
+            if let missing = trip.missingCurrencyLabel {
+                out.hint = WatchTripText.missingRateHint(missing)
+            }
+            return out
+        }
+        let categories = package?.money?.categories ?? []
+        var tiles: [RecordDeskTile] = []
+        for key in trip.topCategoryKeys + fallbackCategoryKeys where tiles.count < 4 {
+            guard let c = categories.first(where: { $0.key == key }) else { continue }
+            let id = "c-" + c.key
+            if tiles.contains(where: { $0.id == id }) { continue }
+            tiles.append(RecordDeskTile(id: id, kind: .category, title: c.title, amountText: nil, icon: c.icon,
+                                        tint: c.tint, categoryKey: c.key, template: nil))
+        }
+        out.tiles = tiles
+        out.hint = WatchTripText.foreignDeskHint
+        return out
+    }
+
+    /// 金額頁（旅途中）：記到哪裡；外幣時膠囊＝這趟最近記過的（手錶待送盒裡同幣別還沒入帳的排前面）、一打開是第一個
+    static func tripAmountSetup(categoryKey: String, package: WatchPackage?, now: Date, calendar: Calendar,
+                                trip: WatchTripRecordContext, target: WatchTripRecordTarget,
+                                items: [WatchOutboxItem]) -> RecordAmountSetup {
+        var setup = amountSetup(categoryKey: categoryKey, package: package, now: now, calendar: calendar)
+        setup.target = target
+        guard let c = trip.currency else { return setup }
+        let recent = tripRecent(trip: trip, currency: c, items: items)
+        setup.currency = c
+        setup.recent = recent
+        setup.initialAmount = recent.first ?? 0
+        return setup
+    }
+
+    /// 這趟最近記過的原幣金額：手錶待送盒裡同幣別的（新到舊）＋包裡這趟的；不重複、最多 3 個
+    static func tripRecent(trip: WatchTripRecordContext, currency c: WatchCurrency, items: [WatchOutboxItem]) -> [Int] {
+        var out: [Int] = []
+        let local = items.sorted { a, b in a.record.createdAt > b.record.createdAt }
+        for item in local where item.record.currencyCode == c.code {
+            guard let v = item.record.foreignAmount, v.isFinite, v >= 1,
+                  v <= Double(WatchTripText.maxForeignAmount) else { continue }
+            let n = Int(v.rounded())
+            if !out.contains(n) { out.append(n) }
+            if out.count == 3 { return out }
+        }
+        for n in trip.recentAmounts where !out.contains(n) {
+            out.append(n)
+            if out.count == 3 { break }
+        }
+        return out
+    }
+
+    /// 一按就記（旅途中）：照 v2＋記到哪一趟、哪一站（範本是台幣，國內旅行才會出現在記帳台）
+    static func record(template t: WatchTemplate, now: Date, target: WatchTripRecordTarget?) -> WatchRecord {
+        var r = record(template: t, now: now)
+        r.tripPlanId = target?.planId
+        r.tripStopId = target?.stopId
+        return r
+    }
+
+    /// 選分類＋金額（旅途中）：外幣時 amount 是原幣（₩18,000）、台幣用手錶上看到的換算（WatchTripText.twdAmount，入帳不重算）；
+    /// 沒有幣別照 v2 的台幣
+    static func record(categoryKey: String, title: String?, amount: Int, now: Date, currency: WatchCurrency?,
+                       target: WatchTripRecordTarget?) -> WatchRecord {
+        var r: WatchRecord
+        if let c = currency {
+            let twd = WatchTripText.twdAmount(amount, c)
+            r = WatchRecord(id: UUID(), createdAt: now, templateId: nil, title: title, amountTWD: Double(twd),
+                            amountText: WatchTripText.foreignText(amount, c), categoryKey: categoryKey,
+                            vehicleId: nil, vehicleCategoryKey: nil)
+            r.currencyCode = c.code
+            r.foreignAmount = Double(amount)
+            r.rateShown = c.rateToTWD
+        } else {
+            r = record(categoryKey: categoryKey, title: title, amount: amount, now: now)
+        }
+        r.tripPlanId = target?.planId
+        r.tripStopId = target?.stopId
+        return r
+    }
+
+    /// 金額那一段：台幣「NT$180」；外幣「₩18,000 ≈ NT$412」；遮住「•••」
+    static func tripAmountPart(_ r: WatchRecord, masked: Bool) -> String {
+        if masked { return tileMask }
+        guard r.currencyCode != nil else { return r.amountText }
+        let twd = r.amountTWD.isFinite ? min(max(r.amountTWD, 0), Double(WatchTripText.maxTWD)) : 0
+        return r.amountText + " ≈ NT$" + grouped(Int(twd.rounded()))
+    }
+
+    /// 記好了那一行（旅途中）：「韓國炸雞 ₩18,000 ≈ NT$412・記到 弘大」；遮住「韓國炸雞 •••・記到 弘大」
+    static func tripDoneLine(_ r: WatchRecord, package: WatchPackage?, masked: Bool,
+                             target: WatchTripRecordTarget?) -> String {
+        let base = recordName(r, package: package) + " " + tripAmountPart(r, masked: masked)
+        guard let target else { return base }
+        return base + "・" + WatchTripText.targetLine(target)
+    }
+
+    /// 記帳台橫幅（旅途中、一按就記）：「已記 早餐 NT$65・記到 竹北老街」；遮住「已記 早餐 •••・記到 竹北老街」
+    static func tripBannerText(_ r: WatchRecord, package: WatchPackage?, masked: Bool,
+                               target: WatchTripRecordTarget?) -> String {
+        "已記 " + tripDoneLine(r, package: package, masked: masked, target: target)
     }
 
     /// 這筆叫什麼（沒有名稱用分類名）

@@ -23,6 +23,11 @@ import Foundation
 //     不放 WidgetQuickTemplate／WidgetCategory——真的白名單）
 //   • 手錶 → iPhone 的 WatchRecord（記一筆），兩邊同一組 WatchLink 鍵與 WatchRecordCodec
 //   • 手錶上不給的分類（WatchCategoryRule）、時段（WatchTimeSlot：iPhone 算「這個時段最常寫的名稱」、手錶查）
+// [手錶 v6] v25.578（watch/judge.md §2.14、§3.1、§4.1、§5.2、附錄 A／B；watch/build/v6/brief.md §2）：旅行——
+//   • 包多 timeZoneId（每一天的起訖是用哪個時區算的）、tripToday／tripTomorrow（旅途中今天、明天的站；全部選填）
+//   • WatchTripDay／WatchTripStop／WatchCurrency：只有站名、時間、第幾站、地址、座標、電話、打卡時間、天氣字與出處、
+//     這趟的幣別與匯率、這趟最近記過的金額（只有數字）與常用分類——沒有備註、照片、伴手禮「給誰」、同行者
+//   • 手錶 → iPhone 的 WatchCheckIn（打卡：到了／離開，送「設成」不送「切換」）；WatchRecord 多外幣與記到哪一站（選填）
 
 /// iPhone → 手錶的一整包（watch_v1.json）
 struct WatchPackage: Codable, Equatable, WidgetSnapshotPayload {
@@ -60,6 +65,16 @@ struct WatchPackage: Codable, Equatable, WidgetSnapshotPayload {
     var queuedIds: [UUID]? = nil
     /// 手機條碼「/ABC1234」：iPhone 設定「手機條碼」打開、而且格式對才有（發票驗證碼永遠不在這裡）
     var carrierBarcode: String? = nil
+
+    // MARK: [v6] 旅行（一律選填；「送到手錶：旅行」關掉時 tripToday／tripTomorrow 是 nil、life.trips 也是 nil）
+
+    /// 每一天的起訖是 iPhone 用哪個時區算的（「Asia/Taipei」；WatchExtrasCache 帶過來，是 App 寫快照那一刻的時區，
+    /// 不是組包那一刻的）。手錶自己的時區跟它差幾小時，第一頁最上面寫「換時區了…」（WatchTripText.timeZoneHint）
+    var timeZoneId: String? = nil
+    /// 旅途中今天的站（今天不在任何一趟的期間裡是 nil）
+    var tripToday: WatchTripDay? = nil
+    /// 旅途中明天的站：過了午夜 iPhone 的 LifeGood 還沒打開，手錶照樣有「今天」的站（旅途最後一天是 nil）
+    var tripTomorrow: WatchTripDay? = nil
 }
 
 /// 今天、明天的行程。從 WidgetLifeSnapshot 一欄一欄抄：
@@ -197,6 +212,19 @@ struct WatchRecord: Codable, Equatable, Identifiable {
     var categoryKey: String
     var vehicleId: UUID? = nil
     var vehicleCategoryKey: String? = nil
+
+    // MARK: [v6] 旅途中（一律選填；v2 的手錶送來的沒有）
+
+    /// 外幣：iPhone 設定裡那個幣別的寫法（WatchCurrency.code，例「韓元」）＝那筆支出的 currencyCode；nil＝台幣
+    var currencyCode: String? = nil
+    /// 原幣金額（18000）；台幣的是 nil
+    var foreignAmount: Double? = nil
+    /// 手錶上換算用的匯率（0.0229；1 單位外幣＝幾台幣）。amountTWD 已經是用它換好的台幣——iPhone 入帳**一律用 amountTWD**，
+    /// 隔幾天才入帳、匯率已經更新也不重算（judge §2.14）
+    var rateShown: Double? = nil
+    /// 記到哪一趟、哪一站（nil＝不在旅途中；tripStopId nil＝記在整趟上）
+    var tripPlanId: UUID? = nil
+    var tripStopId: UUID? = nil
 }
 
 /// [v2] 手錶上不給選的分類（要連到別的東西，留在 iPhone；judge §2.6）。iPhone 組包時拿掉，手錶不會送這幾種
@@ -263,6 +291,107 @@ extension WatchMoney {
     }
 }
 
+// MARK: - [v6] 旅行（judge §2.14、§5.2、附錄 A）
+
+/// 旅途中的一天（WatchExtrasWriter 從 LifeStore.tripPlans 的時間軸挑那一天的站、組好；手錶只排版）
+struct WatchTripDay: Codable, Equatable {
+    var planId: UUID
+    /// 「韓國三日遊」（跟 WidgetTrip.title 同一個字：TripPlan.displayTitle 去頭尾空白，空的寫「旅行」）
+    var title: String
+    /// 「2026-11-07」（WidgetDateText.dayKey）
+    var dayKey: String
+    /// 這一天 00:00、隔天 00:00（iPhone 用 timeZoneId 那個時區算的）
+    var dayStart: Date
+    var dayEnd: Date
+    /// 第幾天（1 起算，已夾在 1…dayCount）、共幾天（至少 1）
+    var dayIndex: Int
+    var dayCount: Int
+    /// 這一天的站，照時間軸順序（含已經離開的：畫進度條、算「第 3／5 站」）
+    var stops: [WatchTripStop]
+    /// 這趟記帳用的幣別與匯率（國內旅行、認不得是哪一國、iPhone 設定沒有那個幣別的匯率都是 nil：照台幣記）
+    var currency: WatchCurrency? = nil
+    /// 認得是哪一國、但 iPhone 設定沒有那個幣別的匯率：「韓元」（手錶記帳台寫「要記韓元：到 iPhone 設定加匯率」）
+    var missingCurrencyLabel: String? = nil
+    /// 天氣出處網址（TripWeatherStore.attributionURL）。**有任何一站有天氣字才有**；沒有它手錶不准畫天氣（judge §2.14）
+    var weatherSource: String? = nil
+    /// 這趟最近記過的外幣金額（新到舊、不重複、最多 3 個；已經對齊到錶冠一格）。只有數字，沒有名稱
+    var recentAmounts: [Double]? = nil
+    /// 這趟最常記的分類 key（多到少，最多 4 個；手錶上不給的已拿掉）：外幣時記帳台換成這幾格
+    var topCategoryKeys: [String]? = nil
+
+    func contains(_ date: Date) -> Bool { dayStart <= date && date < dayEnd }
+}
+
+/// 旅途中的一站（TripPlan.timeline 的一格＋那一站的地址、座標、電話、打卡、天氣字）
+struct WatchTripStop: Codable, Equatable, Identifiable {
+    /// TripStop.id（打卡送回 iPhone 用）
+    var id: UUID
+    /// 跟 life 那一站同一個場次 id（「t」＋行程編號前 8 碼＋抵達時間的秒，TodayAgenda 的寫法）：
+    /// 錶面「下一場」點進來找得到這一站
+    var timelineStopId: String
+    /// 站名（TripStop.displayName）。過夜那一站是飯店名：錶面、手腕放下換「住宿」（手錶自己換）
+    var name: String
+    var isOvernight: Bool
+    /// 時間軸上的抵達、離開（打過卡的是實際時間；後面的站跟著挪，iPhone 算好的）
+    var arrival: Date
+    var departure: Date
+    /// 預計停留（分鐘）
+    var dwellMinutes: Int
+    /// 地址（TripStop.displayAddress）；沒有是空字串
+    var address: String
+    var latitude: Double? = nil
+    var longitude: Double? = nil
+    /// 電話（Apple 地圖給的國際格式「+82 2-3142-0000」，原樣）；沒有是 nil
+    var phone: String? = nil
+    /// 現場打卡的到達、離開（TripStop.actualArrival／actualDeparture）
+    var arrivedAt: Date? = nil
+    var departedAt: Date? = nil
+    /// 「18°／11° 短暫陣雨 40%」（TripWeatherStore 快取那一天的預報；沒有是 nil）
+    var weatherText: String? = nil
+    /// SF Symbol（WeatherKit 給的「cloud.drizzle」）
+    var weatherSymbol: String? = nil
+    /// 天氣提醒前兩句（TripDayWeather.tips：「有 40% 的機會下雨，摺傘放包裡」）
+    var weatherTips: [String]? = nil
+}
+
+/// 這趟記帳用的外幣
+struct WatchCurrency: Codable, Equatable {
+    /// iPhone 設定裡那個幣別的寫法（CurrencyRate.code，例「韓元」「KRW」）＝那筆支出存的 currencyCode
+    var code: String
+    /// 給人看的名字「韓元」
+    var label: String
+    /// 金額前面的符號「₩」；認不得是 ""（手錶寫「韓元 18,000」）
+    var symbol: String
+    /// 1 單位外幣＝幾台幣（0.0229；iPhone 設定那一刻的匯率）
+    var rateToTWD: Double
+    /// 錶冠轉一格多少（韓元 1000、日圓 100、美金 1）
+    var crownStep: Double
+}
+
+/// [v6] 手錶 → iPhone：打卡（judge §4.1、§4.4、附錄 B）。送的是「設成幾點」不是「切換」：
+/// 〔到了〕＝arrival 是按下去那一刻、departure nil；〔離開〕＝departure 是按下去那一刻（arrival 帶手錶上看到的到達時間）。
+/// iPhone 只補還沒有的（那一站已經打過卡就不蓋，回「已經在 14:05 打過卡」）；那一站被刪了回「這一站在 iPhone 上改過了」
+struct WatchCheckIn: Codable, Equatable, Identifiable {
+    var id: UUID
+    var planId: UUID
+    var stopId: UUID
+    var arrival: Date? = nil
+    var departure: Date? = nil
+    /// 按下去那一刻
+    var createdAt: Date
+}
+
+/// [v6] 打卡的 JSON（不壓縮；兩邊同一組編碼器）
+enum WatchCheckInCodec {
+    static func encode(_ checkIn: WatchCheckIn) -> Data? {
+        try? WidgetSnapshotStore.makeEncoder().encode(checkIn)
+    }
+
+    static func decode(_ data: Data) -> WatchCheckIn? {
+        try? WidgetSnapshotStore.makeDecoder().decode(WatchCheckIn.self, from: data)
+    }
+}
+
 /// 一筆要繳。bill 是 iPhone 小工具那一份消毒過的：
 /// 財富（卡費、交割，kind.isWealth）title＝lockedTitle（「卡費」）、amountText＝""、detail＝nil；
 /// 每一列 link＝""（手錶不開 iPhone 的網址）；會領回的（isIncome）根本不在這裡。
@@ -310,6 +439,20 @@ enum WatchLink {
     static let okFailed = "failed"
     /// 入帳之後今天記了幾筆（iPhone 讀剛寫好的 money 快照；沒有就不帶）
     static let todayCountKey = "today"
+
+    // MARK: [v6] 打卡（附錄 B）
+
+    /// 手錶 → iPhone：["checkIn": Data(WatchCheckInCodec)]（transferUserInfo；iPhone 在旁邊再 sendMessage 一次）。
+    /// iPhone 回 ["ok": "done" | "already" | "gone" | "queued" | "failed", "at": 秒]
+    static let checkInKey = "checkIn"
+    /// 寫進行程了（iPhone 的 LifeGood 開著、或剛用過還活著）
+    static let okDone = "done"
+    /// 那一站本來就打過卡（不蓋）；"at"＝iPhone 上那個時間（1970 起的秒）
+    static let okAlready = "already"
+    /// 那一趟或那一站在 iPhone 上被刪了
+    static let okGone = "gone"
+    /// "already" 帶回來的時間
+    static let checkInAtKey = "at"
 }
 
 /// 手錶小格的 kind（手錶小格 StaticConfiguration 與手錶 App／WatchSync 的 reloadTimelines(ofKind:) 都用這裡）
@@ -350,11 +493,13 @@ enum WatchPackageCodec {
 enum WatchPackageDiff {
     /// 錶面小格要重畫哪幾種：沒有舊包＝全部；行程或要繳變了（「卡費今天截止」在下一場第三行）→ 下一場；
     /// 錢或 iPhone 的隱藏金額變了 → 已花。iPhone 決定要不要用 transferCurrentComplicationUserInfo、
-    /// 手錶在背景收到新包時只重畫這幾種，都用這一支
+    /// 手錶在背景收到新包時只重畫這幾種，都用這一支。
+    /// [v6] 旅途中今天、明天的站變了（打卡、改站）也重畫下一場（旅途中「下一場」寫下一站）
     static func widgetKinds(old: WatchPackage?, new: WatchPackage) -> [String] {
         guard let old else { return WatchWidgetKind.all }
         var kinds: [String] = []
-        if old.life != new.life || old.bills != new.bills {
+        if old.life != new.life || old.bills != new.bills
+            || old.tripToday != new.tripToday || old.tripTomorrow != new.tripTomorrow {
             kinds.append(WatchWidgetKind.nextUp)
         }
         if old.money != new.money || old.phoneHidesAmounts != new.phoneHidesAmounts {

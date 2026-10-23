@@ -12,6 +12,9 @@ import SwiftUI
 //   • scenePhase：WatchModel.scenePhaseChanged（進背景收回第一頁；回前景重讀包、太舊就跟 iPhone 要）。
 // 字、遮不遮都不在這裡：每一頁自己讀 WatchModel、叫 WatchText。
 // [手錶 v2] v25.576：彈出頁多「記一筆」（RecordSheet）；第二層多「今天記的帳」（TodayRecordsView）、「手機條碼」（BarcodePage）。
+// [手錶 v6] v25.578（watch/build/v6/brief.md §2）：頁多 ④ 旅行（TripPage）——旅途中排第一（④①②）、出發前 7 天排最後（①②④）、
+//   其他時候沒有（WatchModel.tripKind）；第二層多「這一站」（TripStopDetail）、「天氣資料出處」（TripWeatherSourcePage）。
+//   換時區的那一行由第一頁自己畫（TripPage／TodayPage，WatchTripText.timeZoneHint）。
 
 struct RootView: View {
     @ObservedObject private var model = WatchModel.shared
@@ -35,14 +38,22 @@ struct RootView: View {
         }
     }
 
-    /// 垂直翻頁的那幾頁（v1：① 今天、② 錢）
+    /// 垂直翻頁的那幾頁（v1：① 今天、② 錢；v6：旅途中 ④ 旅行排第一、出發前 7 天排最後）
     private var pages: some View {
         TabView(selection: $model.selection) {
+            if model.tripKind == .during {
+                TripPage()
+                    .tag(WatchPage.trip)
+            }
             TodayPage()
                 .tag(WatchPage.today)
             if model.showsMoney {
                 MoneyPage()
                     .tag(WatchPage.money)
+            }
+            if model.tripKind == .upcoming {
+                TripPage()
+                    .tag(WatchPage.trip)
             }
         }
         .tabViewStyle(.verticalPage)
@@ -62,6 +73,10 @@ struct RootView: View {
             TodayRecordsView()
         case .barcode:
             BarcodePage()
+        case .tripStop(let id):
+            TripStopDetail(stopId: id)
+        case .weatherSource:
+            TripWeatherSourcePage()
         }
     }
 

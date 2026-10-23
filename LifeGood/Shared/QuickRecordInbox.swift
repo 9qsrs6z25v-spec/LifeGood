@@ -33,6 +33,9 @@ import Foundation
 //     復原時間裡的那幾筆原封不動）。take() 照舊收全部（App 回前景）
 //   • add 判斷「3 秒內同一顆」看全部（含手錶來的）；手錶自己打數字的那筆 templateId 是「watch.<編號>」，每筆都不一樣
 //   • watchIds()：收件匣裡手錶來的編號（組手錶包的 queuedIds；純檔案，被手錶叫醒的冷啟動也能叫）
+// [手錶 v6] v25.578（watch/judge.md §2.14、§4.1；watch/build/v6/brief.md §2）：旅途中記的帳——
+//   • QuickRecordEntry 多 currencyCode、foreignAmount、rateShown、tripPlanId、tripStopId（全部選填；舊檔、小工具寫的都沒有＝台幣、不連旅遊）。
+//     amount 照舊是台幣（手錶上看到的那個，iPhone 入帳不重算）
 
 /// 收件匣裡的一筆（使用者按了一顆「7-11 咖啡 NT$65」）
 struct QuickRecordEntry: Codable, Equatable, Identifiable {
@@ -56,6 +59,15 @@ struct QuickRecordEntry: Codable, Equatable, Identifiable {
     var createdAt: Date
     /// [手錶 v2] 哪裡來的：nil＝iPhone 小工具；QuickRecordInbox.watchSource（"watch"）＝手錶。舊檔沒有這一欄＝nil
     var source: String? = nil
+    /// [手錶 v6] 外幣：iPhone 設定裡那個幣別的寫法（「韓元」）→ Expense.currencyCode；nil＝台幣（"NT$"）
+    var currencyCode: String? = nil
+    /// [手錶 v6] 原幣金額（18000；只是紀錄，入帳用 amount）
+    var foreignAmount: Double? = nil
+    /// [手錶 v6] 手錶上換算用的匯率（0.0229）
+    var rateShown: Double? = nil
+    /// [手錶 v6] 記到哪一趟、哪一站 → Expense.linkedTripPlanId／linkedTripStopId（入帳時那一趟、那一站還在才連）
+    var tripPlanId: UUID? = nil
+    var tripStopId: UUID? = nil
 
     /// [手錶 v2] 手錶記的
     var isFromWatch: Bool { source == QuickRecordInbox.watchSource }

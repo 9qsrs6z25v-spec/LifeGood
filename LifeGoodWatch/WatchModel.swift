@@ -16,11 +16,20 @@ import WidgetKit
 //   • 第二層多「今天記的帳」（WatchRoute.todayRecords：② 錢「今天 N 筆 ›」）、「手機條碼」（WatchRoute.barcode：② 錢左上 🧾）
 //   • 待送盒（RecordOutbox）跟著畫面走：回前景重讀、把到期沒送的補送；手腕放下（inactive）、退到背景＝還在 10 秒內的馬上送
 //     （judge §2.6「你點完成、翻走、或手腕放下時立刻送」）；收到新包重讀、補送
+// [手錶 v6] v25.578（watch/judge.md §2.0、§2.14；watch/build/v6/brief.md §2）：
+//   • 頁多 ④ 旅行（WatchPage.trip）：tripKind＝WatchTripText.pageKind（旅途中 .during 排第一頁、出發前 7 天 .upcoming 排最後）；
+//     打開落在 firstPage（旅途中＝④ 旅行，不然 ① 今天）。進背景記著「下次打開回第一頁」，回前景重算 tripKind 之後才決定
+//     （午夜進了旅途、App 在背景時也對）；錶面／通知點進來的（open、openMeeting）優先
+//   • 第二層多「這一站」（WatchRoute.tripStop）、「天氣資料出處」（WatchRoute.weatherSource）
+//   • 錶面「下一場」點進來的是旅途中的站（lifegood://today?stop=t…）→ ④ 旅行＋那一站；lifegood://life/trip → ④ 旅行
+//   • 打卡（TripCheckIns）跟著畫面走：回前景重讀、補送；收到新包重讀
 
-/// 垂直翻頁的頁（v1：① 今天、② 錢）
+/// 垂直翻頁的頁（v1：① 今天、② 錢；v6：④ 旅行）
 enum WatchPage: Hashable {
     case today
     case money
+    /// [v6] ④ 旅行（旅途中排第一、出發前 7 天排最後；WatchModel.tripKind）
+    case trip
 }
 
 /// 推進去的第二層（NavigationStack(path:)）
@@ -35,6 +44,10 @@ enum WatchRoute: Hashable {
     case todayRecords
     /// [v2] 手機條碼（全螢幕白底，judge §2.8）
     case barcode
+    /// [v6] 旅途中的一站（TripStop.id；④ 旅行點大字那一塊）
+    case tripStop(UUID)
+    /// [v6] 天氣資料出處（「 Weather ›」；judge §2.14）
+    case weatherSource
 }
 
 /// 彈出頁（sheet(item:)）
@@ -66,6 +79,10 @@ final class WatchModel: ObservableObject {
     @Published private(set) var askFailed = false
     /// 畫面在前景（含手腕放下的永遠顯示）：收到新包時 4 種小格全部重畫（judge §3.1「更新額度」）
     private(set) var isActive = false
+    /// [v6] ④ 旅行那一頁：旅途中 .during（排第一）、出發前 7 天 .upcoming（排最後）、沒有 nil
+    @Published private(set) var tripKind: WatchTripPageKind?
+    /// [v6] 從前景退到背景過：下次回前景、tripKind 重算好之後回第一頁（錶面、通知點進來的會先清掉它）
+    private var returnToFirstPage = false
 
     /// 打開 App 時包超過這麼久沒收到新的、iPhone 在旁邊，就跟 iPhone 要一份（judge §5.8）
     static let refreshAfter: TimeInterval = 5 * 60
@@ -78,7 +95,12 @@ final class WatchModel: ObservableObject {
         watchHidesAmounts = WatchHideAmounts.isOn
         package = WidgetSnapshotStore.read(WatchPackage.self)
         lastReceivedAt = WatchReceiveLog.lastReceivedAt
+        tripKind = WatchTripText.pageKind(package: package, now: Date())
+        selection = tripKind == .during ? .trip : .today
     }
+
+    /// [v6] 打開落在哪一頁：旅途中＝④ 旅行，不然 ① 今天
+    var firstPage: WatchPage { tripKind == .during ? .trip : .today }
 
     /// ② 錢出不出現：還沒收過包（畫「—」的空版面）或包裡有錢才出現；iPhone 關掉「錢」就整頁不出現
     var showsMoney: Bool { package == nil || package?.money != nil }
@@ -91,8 +113,23 @@ final class WatchModel: ObservableObject {
         package = WidgetSnapshotStore.read(WatchPackage.self)
         lastReceivedAt = WatchReceiveLog.lastReceivedAt
         watchHidesAmounts = WatchHideAmounts.isOn
+        refreshTrip(now: Date())
         if selection == .money && !showsMoney {
+            selection = firstPage
+        }
+    }
+
+    /// [v6] ④ 旅行那一頁有沒有、排第幾（包換了、過了午夜、回前景）；那一頁不見了而且正停在那裡 → 回第一頁
+    func refreshTrip(now: Date) {
+        let kind = WatchTripText.pageKind(package: package, now: now)
+        if tripKind != kind {
+            tripKind = kind
+        }
+        if selection == .trip && kind == nil {
             selection = .today
+            if case .some(.tripStop) = path.last {
+                path = []
+            }
         }
     }
 
@@ -106,6 +143,8 @@ final class WatchModel: ObservableObject {
         if barcode == nil {
             closeBarcode()
         }
+        // [v6] 打卡：WatchSync 已經對新包收尾，重讀、還沒送出去的補送
+        TripCheckIns.shared.packageApplied()
     }
 
     /// RootView 的 scenePhase 一變就叫
@@ -114,6 +153,14 @@ final class WatchModel: ObservableObject {
         case .active:
             isActive = true
             reload()
+            // [v6] 退到背景過：tripKind 重算好了才回第一頁（午夜進了旅途也落在 ④ 旅行）
+            if returnToFirstPage {
+                returnToFirstPage = false
+                selection = firstPage
+            }
+            // [v6] 打卡：重讀、還沒送出去的補送
+            TripCheckIns.shared.reload()
+            TripCheckIns.shared.sendDue()
             // 正在要（例：還在等 activate）就不再送一次；手腕放下再抬起來（inactive → active）也不會重複要
             if shouldAsk(now: Date()) && !asking {
                 requestFromPhone()
@@ -135,9 +182,10 @@ final class WatchModel: ObservableObject {
             isActive = false
             if wasForeground {
                 // 下次打開一律第一頁（不記上次停哪）；錶面、通知點進來的會在 onOpenURL／通知回呼裡再開
-                selection = .today
+                selection = firstPage
                 path = []
                 sheet = nil
+                returnToFirstPage = true
             }
         @unknown default:
             break
@@ -185,15 +233,26 @@ final class WatchModel: ObservableObject {
     func open(_ url: URL) {
         guard let route = WidgetLink.parse(url) else { return }
         reload()
+        returnToFirstPage = false
         sheet = nil
         switch route.destination {
         case .today(let stopId):
+            // [v6] 旅途中的站（錶面「下一場」旅途中那一種）：④ 旅行＋那一站
+            if let id = stopId, tripKind != nil, let tripStop = WatchTripText.tripStopId(timelineId: id, in: package) {
+                selection = .trip
+                path = [.tripStop(tripStop)]
+                return
+            }
             selection = .today
             if let id = stopId, WatchText.findStop(id: id, in: package) != nil {
                 path = [.stop(id)]
             } else {
                 path = []
             }
+        case .trip:
+            // [v6] lifegood://life/trip（錶面「下一場」旅途中、包裡找不到那一站時）
+            selection = tripKind != nil ? .trip : .today
+            path = []
         case .expenseOverview:
             selection = showsMoney ? .money : .today
             path = []
@@ -211,6 +270,7 @@ final class WatchModel: ObservableObject {
     /// 部屬會議通知〔看議程〕（WatchNotificationDelegate）：那一場的細節；包裡找不到就停在 ① 今天
     func openMeeting(meetingId: String) {
         reload()
+        returnToFirstPage = false
         sheet = nil
         selection = .today
         if let id = WatchText.meetingStopId(meetingId: meetingId, in: package, now: Date()) {

@@ -14,9 +14,20 @@ import WatchKit
 // 金額 0（這個分類沒記過、也還沒轉）〔記下來〕不能按；手腕放下能按的變暗、暫時不能按。付款方式手錶上不選。
 // 手腕放下（或系統要遮）：大字「NT$ ••••」、膠囊「•••」（judge §2.17「記一筆：金額 → •••」；版面不動）。
 //   只看手腕放下／系統遮，不看「遮住金額」設定：抬手時要看得到自己正在調的數字。
+//
+// [手錶 v6，v25.578] 旅途中（judge §2.14「旅途中記一筆自動變外幣」、§7.8-15；watch/build/v6/brief.md G2-3）：
+//   • setup.currency 有值＝外幣：大字「₩18,000」（遮住「₩ ••••」）、下面一行「≈ NT$412（匯率）」（遮住「≈ NT$ ••••」，版面不動）、
+//     錶冠一格照幣別（韓元 ₩1,000；一樣綁 Double 的格數，WatchTripText.foreignStep*）、膠囊「₩18,000」、數字鍵打原幣。
+//     步距、換算、字一律拿 WatchTripText（View 不算）；〔記下來〕交回 RecordSheet 的是原幣整數，台幣由 RecordText.record 換。
+//   • setup.target 有值＝旅途中：再下面一行「📍 記到 弘大 ›」，點了 onPickStop（RecordSheet 推「記到哪裡」）。
+//   • 41mm 以下（WatchStyle.isCompact）旅途中多了兩行：不畫「轉錶冠調金額」（也不算一次）、膠囊只放 2 顆；不加 ScrollView
+//     （錶冠綁在大字上）。外幣時 45mm 也不畫那一行提示（多了「≈ NT$」「記到」兩行，加上提示約 209 點會擠掉〔記下來〕）。
+//     不在旅途中（currency、target 都 nil）跟 v2 一模一樣。
 
 struct AmountPicker: View {
     let setup: RecordAmountSetup
+    /// [v6] 旅途中「📍 記到 弘大 ›」點了（RecordSheet 推「記到哪裡」）；nil＝那一行沒有箭頭、點了不做事
+    let onPickStop: (() -> Void)?
     let onRecord: (Int) -> Void
 
     @Environment(\.isLuminanceReduced) private var dimmed
@@ -43,11 +54,17 @@ struct AmountPicker: View {
     /// 推進來之後補給一次焦點（onAppear 當下有時還收不到）
     static let focusDelayNanos: UInt64 = 300_000_000
     static let dimmedOpacity: Double = 0.75
+    /// [v6] 遮住時「≈ NT$」那一行
+    static let approxMask = "≈ " + WidgetHideAmounts.mask
 
-    init(setup: RecordAmountSetup, onRecord: @escaping (Int) -> Void) {
+    /// v2 的 `AmountPicker(setup:) { … }` 照樣編得過（onPickStop 預設 nil）
+    init(setup: RecordAmountSetup, onPickStop: (() -> Void)? = nil, onRecord: @escaping (Int) -> Void) {
         self.setup = setup
+        self.onPickStop = onPickStop
         self.onRecord = onRecord
-        let idx = RecordText.stepIndex(for: setup.initialAmount)
+        // init 裡還不能叫 instance 方法：直接照幣別分（同 stepIndex(_:)）
+        let idx = setup.currency.map { WatchTripText.foreignStepIndex(for: setup.initialAmount, $0) }
+            ?? RecordText.stepIndex(for: setup.initialAmount)
         _amount = State(initialValue: setup.initialAmount)
         _crownValue = State(initialValue: Double(idx))
         _lastIndex = State(initialValue: idx)
@@ -61,7 +78,7 @@ struct AmountPicker: View {
     @ViewBuilder
     private var page: some View {
         if showPad {
-            DigitPad(initial: amount) { value in
+            DigitPad(initial: amount, currency: setup.currency) { value in
                 padDone(value)
             }
         } else {
@@ -72,8 +89,10 @@ struct AmountPicker: View {
     // MARK: 主畫面
 
     private var mainView: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: mainSpacing) {
             amountLabel
+            approxLabel
+            targetRow
             hintLabel
             capsuleRow
             Spacer(minLength: 0)
@@ -94,13 +113,81 @@ struct AmountPicker: View {
         dimmed || reasons.contains(.privacy)
     }
 
-    /// 「NT$ 180」；遮住「NT$ ••••」
+    /// 「NT$ 180」；遮住「NT$ ••••」。[v6] 外幣「₩18,000」；遮住「₩ ••••」
     private var amountString: String {
-        masked ? WidgetHideAmounts.mask : "NT$ " + RecordText.grouped(amount)
+        if let c = setup.currency {
+            return masked ? WatchTripText.foreignMask(c) : WatchTripText.foreignText(amount, c)
+        }
+        return masked ? WidgetHideAmounts.mask : "NT$ " + RecordText.grouped(amount)
     }
 
-    /// 大字「180」（46mm 38／41mm 34 rounded 等寬）；錶冠綁在這裡
+    /// [v6] 41mm 以下的旅途中（多了「≈ NT$」「記到」兩行）：不畫「轉錶冠調金額」、膠囊只放 2 顆、行距 6 → 4
+    private var tripCompact: Bool {
+        setup.target != nil && WatchStyle.isCompact
+    }
+
+    /// 每一行之間（v2 6；41mm 以下的旅途中 4，40mm 也放得下〔記下來〕）
+    private var mainSpacing: CGFloat {
+        tripCompact ? 4 : 6
+    }
+
+    /// [v6] 這一頁不畫「轉錶冠調金額」（也不算一次）：41mm 以下的旅途中；外幣（多了「≈ NT$」「記到」兩行，
+    /// 45mm 加上提示約 209 點、放不下〔記下來〕）。台幣、不在旅途中照 v2
+    private var hidesCrownHint: Bool {
+        tripCompact || setup.currency != nil
+    }
+
+    // MARK: 錶冠的格（View 不算步距：台幣 RecordText、外幣 WatchTripText）
+
+    /// 錶冠有幾格（台幣 481；韓元 1,000）
+    private var stepCount: Int {
+        setup.currency.map { WatchTripText.foreignStepCount($0) } ?? RecordText.amountSteps.count
+    }
+
+    /// 第 i 格的金額（外幣是原幣）
+    private func stepAmount(_ i: Int) -> Int {
+        if let c = setup.currency {
+            return WatchTripText.foreignStepAmount(at: i, c)
+        }
+        return RecordText.stepAmount(at: i)
+    }
+
+    /// 這個金額在第幾格（「≤ 它」的最後一格）
+    private func stepIndex(_ v: Int) -> Int {
+        if let c = setup.currency {
+            return WatchTripText.foreignStepIndex(for: v, c)
+        }
+        return RecordText.stepIndex(for: v)
+    }
+
+    /// 錶冠的上限（格數 − 1；至少 0）
+    private var crownMax: Double {
+        Double(max(stepCount - 1, 0))
+    }
+
+    /// 錶冠綁在大字上。台幣照 v2（481 格）；[v6] 外幣的格數照幣別（韓元 1,000 格，WatchTripText.foreignStepCount）。
+    /// 幣別換了 RecordSheet 用 .id 整頁重來，不會兩種格混在一起
+    @ViewBuilder
     private var amountLabel: some View {
+        if let c = setup.currency {
+            amountText
+                .digitalCrownRotation($crownValue, from: 0, through: Double(WatchTripText.foreignStepCount(c) - 1), by: 1,
+                                      sensitivity: .medium, isContinuous: false, isHapticFeedbackEnabled: true)
+                .onChange(of: crownValue) { _, value in
+                    crownMoved(value)
+                }
+        } else {
+            amountText
+                .digitalCrownRotation($crownValue, from: 0, through: Double(RecordText.amountSteps.count - 1), by: 1,
+                                      sensitivity: .medium, isContinuous: false, isHapticFeedbackEnabled: true)
+                .onChange(of: crownValue) { _, value in
+                    crownMoved(value)
+                }
+        }
+    }
+
+    /// 大字「180」（46mm 38／41mm 34 rounded 等寬）；[v6] 外幣「₩18,000」（字長，可縮到一半）
+    private var amountText: some View {
         Text(amountString)
             .font(WatchStyle.heroFont(compact: WatchStyle.isCompact))
             .monospacedDigit()
@@ -111,17 +198,40 @@ struct AmountPicker: View {
             .opacity(dimmed ? Self.dimmedOpacity : 1)
             .focusable()
             .focused($crownFocused)
-            .digitalCrownRotation($crownValue, from: 0, through: Double(RecordText.amountSteps.count - 1), by: 1,
-                                  sensitivity: .medium, isContinuous: false, isHapticFeedbackEnabled: true)
-            .onChange(of: crownValue) { _, value in
-                crownMoved(value)
-            }
     }
 
-    /// 「轉錶冠調金額」（Footnote A3B2D9；前 3 次）
+    /// [v6] 外幣：大字下面「≈ NT$412（匯率）」（WatchTripText.approxLine）；遮住「≈ NT$ ••••」（這一行不拿掉，版面不動）
+    @ViewBuilder
+    private var approxLabel: some View {
+        if let c = setup.currency {
+            Text(masked ? Self.approxMask : WatchTripText.approxLine(amount, c))
+                .font(.footnote)
+                .foregroundStyle(WatchStyle.small)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+                .opacity(dimmed ? Self.dimmedOpacity : 1)
+        }
+    }
+
+    /// [v6] 旅途中「📍 記到 弘大 ›」：點了換別站或整趟（手腕放下變暗、暫時不能按）
+    @ViewBuilder
+    private var targetRow: some View {
+        if let t = setup.target {
+            Button {
+                onPickStop?()
+            } label: {
+                AmountTargetLabel(text: WatchTripText.targetLine(t), showsChevron: onPickStop != nil)
+            }
+            .buttonStyle(.plain)
+            .disabled(dimmed)
+            .opacity(dimmed ? Self.dimmedOpacity : 1)
+        }
+    }
+
+    /// 「轉錶冠調金額」（Footnote A3B2D9；前 3 次）。[v6] 41mm 以下的旅途中、外幣時不畫（hidesCrownHint）
     @ViewBuilder
     private var hintLabel: some View {
-        if showsCrownHint {
+        if showsCrownHint && !hidesCrownHint {
             Text(RecordText.crownHint)
                 .font(.footnote)
                 .foregroundStyle(WatchStyle.small)
@@ -143,10 +253,18 @@ struct AmountPicker: View {
         }
     }
 
-    /// 這個分類最近 3 個不同金額（RecordText 組好、新到舊）；40mm 只放 2 顆
+    /// 這個分類最近 3 個不同金額（RecordText 組好、新到舊）；40mm 只放 2 顆。[v6] 外幣是這趟最近記過的原幣；41mm 以下的旅途中 2 顆
     private var shownRecent: [Int] {
         let narrow = WKInterfaceDevice.current().screenBounds.width < Self.narrowWidth
-        return Array(setup.recent.prefix(narrow ? 2 : 3))
+        return Array(setup.recent.prefix((narrow || tripCompact) ? 2 : 3))
+    }
+
+    /// 膠囊的字：「1,200」；[v6] 外幣「₩18,000」；遮住「•••」
+    private func capsuleText(_ n: Int) -> String {
+        if let c = setup.currency {
+            return masked ? RecordText.tileMask : WatchTripText.foreignText(n, c)
+        }
+        return masked ? RecordText.tileMask : RecordText.grouped(n)
     }
 
     private func capsuleButton(_ n: Int) -> some View {
@@ -155,7 +273,7 @@ struct AmountPicker: View {
             // 點了按鈕焦點可能被拿走：還給大字，錶冠接著轉
             crownFocused = true
         } label: {
-            AmountCapsuleLabel(text: masked ? RecordText.tileMask : RecordText.grouped(n), selected: n == amount)
+            AmountCapsuleLabel(text: capsuleText(n), selected: n == amount)
         }
         .buttonStyle(.plain)
         .disabled(dimmed)
@@ -205,19 +323,20 @@ struct AmountPicker: View {
 
     // MARK: 改金額
 
-    /// 錶冠轉了：真的換一格才改金額
+    /// 錶冠轉了：真的換一格才改金額（先在 Double 上夾到 0…格數−1 再轉 Int：arm64_32 的 Int 只有 32 位）
     private func crownMoved(_ value: Double) {
         guard value.isFinite else { return }
-        let i = Int(value.rounded())
+        let clamped = min(max(value.rounded(), 0), crownMax)
+        let i = Int(clamped)
         guard i != lastIndex else { return }
         lastIndex = i
-        amount = RecordText.stepAmount(at: i)
+        amount = stepAmount(i)
     }
 
     /// 膠囊、數字鍵：金額照設，錶冠對到「≤ 它」的那一格（先設 lastIndex，onChange 不會把 187 蓋成 185）
     private func setAmount(_ value: Int) {
         amount = value
-        let i = RecordText.stepIndex(for: value)
+        let i = stepIndex(value)
         lastIndex = i
         crownValue = Double(i)
     }
@@ -231,7 +350,8 @@ struct AmountPicker: View {
 
     private func mainAppeared() {
         crownFocused = true
-        guard !hintCounted else { return }
+        // [v6] 41mm 以下的旅途中、外幣時不畫提示，也不算一次（回到台灣照樣有前 3 次）
+        guard !hintCounted, !hidesCrownHint else { return }
         hintCounted = true
         let defaults = WidgetShared.defaults
         let shown = defaults?.integer(forKey: RecordText.crownHintKey) ?? 0
@@ -250,6 +370,40 @@ struct AmountPicker: View {
 /// 這個檔的顏色
 private enum AmountLook {
     static let capsuleFill = Color.white.opacity(0.16)
+    /// [v6] 「記到」前面的圖釘（旅遊紫）
+    static let pinTint = Color(watchHex: WatchPalette.trip)
+}
+
+/// [v6] 「📍 記到 弘大 ›」那一行（Footnote semibold；箭頭只有點得進去時才畫）
+private struct AmountTargetLabel: View {
+    /// 「記到 弘大」（WatchTripText.targetLine）
+    let text: String
+    let showsChevron: Bool
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Image(systemName: "mappin.and.ellipse")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(AmountLook.pinTint)
+            Text(text)
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(WatchStyle.primary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+            Spacer(minLength: 2)
+            chevron
+        }
+        .contentShape(Rectangle())
+    }
+
+    @ViewBuilder
+    private var chevron: some View {
+        if showsChevron {
+            Image(systemName: "chevron.right")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(WatchStyle.small)
+        }
+    }
 }
 
 /// 最近金額的一顆膠囊（選中的綠框）

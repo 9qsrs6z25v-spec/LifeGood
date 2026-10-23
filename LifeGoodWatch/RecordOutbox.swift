@@ -16,6 +16,9 @@ import Foundation
 //   已經送出、連續 3 包（每包都比送出晚 60 秒以上、同一包不重算）兩張名單都沒有它（例：在 iPhone 上刪了）
 //   → deleted「在 iPhone 上被刪掉了」（灰字），24 小時後刪檔——不會永遠卡在「已送出」。
 //   之後的包 queuedIds 又有它（iPhone 收件匣裡有＝沒被刪）：改回 queued（[裁定] watch/build/v2/adjudicate.md §2）。
+//   [手錶 v6] 系統排隊裡還沒送完的（WatchSync.outstandingRecordIds，transferUserInfo 還在手錶上）＝iPhone 根本還沒收到：
+//   那幾包沒有它**不算**「沒有它」（v2 已知限制：iPhone 在家時一直有更新，回到身邊先被數成「在 iPhone 上被刪掉了」）。
+//   已經被數成 deleted 的也改回 sent。sim_v6.py outbox_reconcile_v6。
 // 規則跟 scratchpad/watch/build/v2/sim_v2.py 的 outbox_* 一模一樣（改了兩邊一起改、重跑 sim）。
 //
 // ⚠️ RecordOutboxStore（檔案）在 WatchSync 的背景執行緒也會被叫（收到新包就收尾）：一律過 lock。
@@ -126,12 +129,13 @@ enum RecordOutboxStore {
         return unlockedSave(item)
     }
 
-    /// 收到 iPhone 的新包（WatchSync.applyData 寫好檔之後，背景執行緒）：對 includedIds／queuedIds 收尾
-    static func reconcile(with package: WatchPackage, now: Date) {
+    /// 收到 iPhone 的新包（WatchSync.applyData 寫好檔之後，背景執行緒）：對 includedIds／queuedIds 收尾。
+    /// [v6] outstanding＝系統排隊裡還沒送完的記帳編號（WatchSync.outstandingRecordIds）
+    static func reconcile(with package: WatchPackage, now: Date, outstanding: Set<UUID> = []) {
         lock.lock()
         defer { lock.unlock() }
         let old = unlockedLoadAll()
-        let result = reconciled(old, package: package, now: now)
+        let result = reconciled(old, package: package, now: now, outstanding: outstanding)
         for id in result.remove {
             unlockedRemove(id)
         }
@@ -144,9 +148,9 @@ enum RecordOutboxStore {
 
     /// 對一包收尾：在 includedIds＝刪；在 queuedIds＝queued（已經標成 deleted 的也改回來）；已送出而且連續 3 包都沒有＝deleted；
     /// deleted 滿 24 小時＝刪。
-    /// 還在 10 秒內（holding）的不動
-    static func reconciled(_ items: [WatchOutboxItem], package: WatchPackage,
-                           now: Date) -> (keep: [WatchOutboxItem], remove: [UUID]) {
+    /// 還在 10 秒內（holding）的不動。[v6] 還在系統排隊裡（outstanding）的不數「沒有它」，deleted 的改回 sent
+    static func reconciled(_ items: [WatchOutboxItem], package: WatchPackage, now: Date,
+                           outstanding: Set<UUID> = []) -> (keep: [WatchOutboxItem], remove: [UUID]) {
         let included = Set(package.includedIds ?? [])
         let queued = Set(package.queuedIds ?? [])
         var keep: [WatchOutboxItem] = []
@@ -169,6 +173,16 @@ enum RecordOutboxStore {
                 item.misses = 0
                 item.deletedAt = nil
                 item.lastPackageAt = package.generatedAt
+                keep.append(item)
+                continue
+            }
+            // [v6] iPhone 根本還沒收到（transferUserInfo 還在手錶的系統排隊裡）：這一包沒有它不算數
+            if outstanding.contains(item.id) {
+                if item.state == .deleted {
+                    item.state = .sent
+                    item.deletedAt = nil
+                    item.misses = 0
+                }
                 keep.append(item)
                 continue
             }

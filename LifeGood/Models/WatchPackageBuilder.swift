@@ -26,6 +26,11 @@ import Foundation
 //    • includedIds（快取）、queuedIds（收件匣資料夾的檔，QuickRecordInbox.watchIds）：「錢」關著也放（手錶待送盒收尾要用）
 //    • carrierBarcode：iPhone 設定「手機條碼」打開、而且格式對（「/」＋7 碼 0-9 A-Z . + -）才放；
 //      只讀 UserDefaults 的手機條碼那一個鍵，**驗證碼在鑰匙圈，這裡碰都不碰**
+//
+// [手錶 v6] v25.578（watch/judge.md §2.14、§2.16、§5.2、§6.3；watch/build/v6/brief.md §2；sim_v6.py 的 build_package_v6）：
+//    • timeZoneId：快取裡 App 寫快照那一刻的時區（不是組包這一刻的：冷啟動時 iPhone 可能已經換了時區、快照還是舊的）
+//    • tripToday／tripTomorrow：快取原樣抄（WatchExtrasWriter 已經只放白名單那幾欄）；iPhone 設定「旅行」關掉時不放，
+//      而且 life.trips 也拿掉（手錶上沒有旅行那一頁、也不寫出發倒數）。「錢」關掉不影響旅行（記外幣跟著「錢」走，在手錶那邊擋）
 
 /// iPhone 設定頁「Apple Watch」段的開關（App Group 的 UserDefaults；WatchSettingsSection 與這裡同一組鍵）
 enum WatchPhoneSettings {
@@ -35,6 +40,8 @@ enum WatchPhoneSettings {
     static let showOwnerNamesKey = "watch_show_owner_names"
     /// [v2] 手機條碼送到手錶。沒設定過＝關（judge §2.8、§6.3）
     static let sendBarcodeKey = "watch_send_barcode"
+    /// [v6] 送到手錶：旅行（出發前 7 天到回來那天：下一站、打卡、記外幣、天氣）。沒設定過＝開
+    static let sendTripKey = "watch_send_trip"
     /// [v2] 手機條碼存在哪（**App 自己的** UserDefaults.standard；＝EInvoiceSyncManager.cardNoKey，那邊是 private，
     /// 改了兩邊一起改，pkg_keys_check E 段核對）。驗證碼在鑰匙圈，這裡不碰
     static let carrierCardNoKey = "einvoice_card_no"
@@ -55,6 +62,12 @@ enum WatchPhoneSettings {
 
     static func setShowOwnerNames(_ on: Bool) {
         WidgetShared.defaults?.set(on, forKey: showOwnerNamesKey)
+    }
+
+    /// [v6] 旅行送不送（沒設定過＝送）
+    static var sendTrip: Bool {
+        guard let d = WidgetShared.defaults, d.object(forKey: sendTripKey) != nil else { return true }
+        return d.bool(forKey: sendTripKey)
     }
 
     /// [v2] 手機條碼送不送（沒設定過＝不送）
@@ -112,6 +125,15 @@ enum WatchPackageBuilder {
         package.queuedIds = QuickRecordInbox.watchIds()
         // [v2] 手機條碼：設定打開才送（預設關）
         package.carrierBarcode = WatchPhoneSettings.sendBarcode ? WatchPhoneSettings.carrierBarcode : nil
+        // [v6] 每一天的起訖是用哪個時區算的（App 寫快照那一刻的；手錶看它決定要不要寫「換時區了」）
+        package.timeZoneId = extras?.timeZoneId
+        // [v6] 旅行：設定打開才送；關掉時出發倒數（life.trips）也拿掉
+        if WatchPhoneSettings.sendTrip {
+            package.tripToday = extras?.tripToday
+            package.tripTomorrow = extras?.tripTomorrow
+        } else {
+            package.life?.trips = nil
+        }
         return package
     }
 

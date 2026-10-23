@@ -14,7 +14,11 @@ import SwiftUI
 //   • 手機條碼［關］：預設不送；打開才把「電子發票」連結的手機條碼送到手錶（② 錢左上 🧾 全螢幕給店員掃）。
 //     驗證碼在鑰匙圈，永遠不送。還沒連結時小字寫怎麼連結（連結、拿掉時 EInvoiceSyncManager 自己叫 settingsChanged）
 //   • 「錢」關掉的小字多一句：手錶上也不能記帳（記帳台、今天記的帳都跟著「錢」走）
-// 旅行（v6）、智慧型堆疊（v7b）這一版不放。
+// [手錶 v6] v25.578（watch/build/v6/brief.md G1-4；judge §2.16「旅行 [開]」、§6.3）：
+//   • 旅行（下一站、打卡、記外幣）［開］：出發前 7 天到回來那天把今天、明天的站送到手錶（④ 旅行、錶面下一場）；
+//     關掉＝今天明天的站不送、出發倒數也拿掉（WatchPhoneSettings.sendTrip 同一個鍵；沒設定過＝開）
+//   • 小字多一句：旅行只送站名、時間、地址、電話、天氣；不送備註、照片、同行者
+// 智慧型堆疊（v7b）這一版不放。
 // 改了開關：寫 App Group（WatchPhoneSettings 同一組鍵）→ bridge.settingsChanged() 重組重送。
 
 struct WatchSettingsSection: View {
@@ -24,6 +28,8 @@ struct WatchSettingsSection: View {
     @AppStorage(WatchPhoneSettings.sendMoneyKey, store: WidgetShared.defaults) private var sendMoney = true
     /// [v2] 送到手錶：手機條碼（WatchPhoneSettings.sendBarcode 同一個鍵；沒設定過＝關）
     @AppStorage(WatchPhoneSettings.sendBarcodeKey, store: WidgetShared.defaults) private var sendBarcode = false
+    /// [v6] 送到手錶：旅行（WatchPhoneSettings.sendTrip 同一個鍵；沒設定過＝開）
+    @AppStorage(WatchPhoneSettings.sendTripKey, store: WidgetShared.defaults) private var sendTrip = true
     /// [v2] 電子發票連結、拿掉手機條碼時重畫（手機條碼那一列的小字）
     @ObservedObject private var einvoice = EInvoiceSyncManager.shared
     /// 會議細節裡的部屬名字（沒設定過＝這支 iPhone 不是加入別人的共享就開）
@@ -38,6 +44,7 @@ struct WatchSettingsSection: View {
             statusRow
             moneyToggle
             barcodeToggle
+            tripToggle
             ownerToggle
             diagnosticsRow
         } header: {
@@ -80,6 +87,19 @@ struct WatchSettingsSection: View {
         }
         .tint(.indigo)
         .onChange(of: sendBarcode) { _, _ in
+            bridge.settingsChanged()
+        }
+    }
+
+    /// [v6] 旅行（預設開；關掉＝手錶上沒有旅行那一頁、也不寫出發倒數）
+    private var tripToggle: some View {
+        Toggle(isOn: $sendTrip) {
+            rowLabel(icon: "airplane", color: .purple,
+                     title: "旅行（下一站、打卡、記外幣）",
+                     subtitle: sendTrip ? Self.tripOn : Self.tripOff)
+        }
+        .tint(.indigo)
+        .onChange(of: sendTrip) { _, _ in
             bridge.settingsChanged()
         }
     }
@@ -168,9 +188,13 @@ struct WatchSettingsSection: View {
     private static let barcodeOn = "送到手錶：② 錢左上 🧾；驗證碼永遠不送"
     private static let barcodeOff = "不送（預設）；驗證碼永遠不送"
 
+    private static let tripOn = "出發前 7 天到回來那天送到手錶；天氣由 iPhone 抓"
+    private static let tripOff = "不送：手錶上沒有旅行那一頁、也不寫出發倒數"
+
     private static let footnote =
         "卡名、卡費金額、存摺、淨資產、部屬請假、完整號碼不會送到手錶。手腕放下時手錶上的金額一律遮起來。"
         + "手機條碼預設不送；發票驗證碼永遠不送。"
+        + "旅行只送站名、時間、地址、電話、天氣；不送備註、照片、同行者。"
         + "會議主題會出現在錶面與通知上。"
         + "錶面上至少放一格 LifeGood，數字才會自己跟上；只放在智慧型堆疊的話，要打開手錶 App 一次才會更新。"
 }

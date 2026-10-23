@@ -317,6 +317,12 @@
 		A01B000004000055 /* WatchPackage.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000110 /* WatchPackage.swift */; };
 		A01B000003000056 /* WatchText.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000111 /* WatchText.swift */; };
 		A01B000004000056 /* WatchText.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000111 /* WatchText.swift */; };
+		A01B000001001602 /* WatchActionInbox.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001602 /* WatchActionInbox.swift */; };
+		A01B000003000057 /* WatchTripText.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000112 /* WatchTripText.swift */; };
+		A01B000004000057 /* WatchTripText.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000112 /* WatchTripText.swift */; };
+		A01B000003000029 /* TripPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000003000029 /* TripPage.swift */; };
+		A01B000003000030 /* TripStopDetail.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000003000030 /* TripStopDetail.swift */; };
+		A01B000003000031 /* TripCheckIns.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000003000031 /* TripCheckIns.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -691,6 +697,11 @@
 		A01A000003000026 /* BarcodePage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BarcodePage.swift; sourceTree = "<group>"; };
 		A01A000003000027 /* Code39.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Code39.swift; sourceTree = "<group>"; };
 		A01A000003000028 /* RecordText.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordText.swift; sourceTree = "<group>"; };
+		A01A000001001602 /* WatchActionInbox.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchActionInbox.swift; sourceTree = "<group>"; };
+		A01A000002000112 /* WatchTripText.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchTripText.swift; sourceTree = "<group>"; };
+		A01A000003000029 /* TripPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripPage.swift; sourceTree = "<group>"; };
+		A01A000003000030 /* TripStopDetail.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripStopDetail.swift; sourceTree = "<group>"; };
+		A01A000003000031 /* TripCheckIns.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripCheckIns.swift; sourceTree = "<group>"; };
 		A01A000004000007 /* AddWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddWidget.swift; sourceTree = "<group>"; };
 		A01A000004000100 /* LifeGoodWatchWidgets.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = LifeGoodWatchWidgets.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
@@ -777,6 +788,7 @@
 				A01A000002000095 /* RunPauseIntent.swift */,
 				A01A000002000110 /* WatchPackage.swift */,
 				A01A000002000111 /* WatchText.swift */,
+				A01A000002000112 /* WatchTripText.swift */,
 			);
 			path = Shared;
 			sourceTree = "<group>";
@@ -834,6 +846,7 @@
 				A01A000001001594 /* WatchPackageBuilder.swift */,
 				A01A000001001595 /* WatchExtrasWriter.swift */,
 				A01A000001001596 /* WatchBridge.swift */,
+				A01A000001001602 /* WatchActionInbox.swift */,
 				A01A000001000020 /* LifeModels.swift */,
 				A01A000001000201 /* HealthModels.swift */,
 				A01A000001000204 /* ChildVaccineSchedule.swift */,
@@ -1095,6 +1108,9 @@
 				A01A000003000026 /* BarcodePage.swift */,
 				A01A000003000027 /* Code39.swift */,
 				A01A000003000028 /* RecordText.swift */,
+				A01A000003000029 /* TripPage.swift */,
+				A01A000003000030 /* TripStopDetail.swift */,
+				A01A000003000031 /* TripCheckIns.swift */,
 				A01A000003000004 /* Assets.xcassets */,
 				A01A000003000002 /* Info.plist */,
 				A01A000003000003 /* LifeGoodWatch.entitlements */,
@@ -1357,6 +1373,7 @@
 				A01B000001001594 /* WatchPackageBuilder.swift in Sources */,
 				A01B000001001595 /* WatchExtrasWriter.swift in Sources */,
 				A01B000001001596 /* WatchBridge.swift in Sources */,
+				A01B000001001602 /* WatchActionInbox.swift in Sources */,
 				A01B000001001597 /* WatchSettingsSection.swift in Sources */,
 				A01B000002000110 /* WatchPackage.swift in Sources */,
 				A01B000001001582 /* WealthBoard.swift in Sources */,
@@ -1581,6 +1598,10 @@
 				A01B000003000026 /* BarcodePage.swift in Sources */,
 				A01B000003000027 /* Code39.swift in Sources */,
 				A01B000003000028 /* RecordText.swift in Sources */,
+				A01B000003000057 /* WatchTripText.swift in Sources */,
+				A01B000003000029 /* TripPage.swift in Sources */,
+				A01B000003000030 /* TripStopDetail.swift in Sources */,
+				A01B000003000031 /* TripCheckIns.swift in Sources */,
 				A01B000003000051 /* DayTimelineAttributes.swift in Sources */,
 				A01B000003000052 /* WidgetSnapshot.swift in Sources */,
 				A01B000003000053 /* WidgetLink.swift in Sources */,
@@ -1603,6 +1624,7 @@
 				A01B000004000053 /* WidgetLink.swift in Sources */,
 				A01B000004000055 /* WatchPackage.swift in Sources */,
 				A01B000004000056 /* WatchText.swift in Sources */,
+				A01B000004000057 /* WatchTripText.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
