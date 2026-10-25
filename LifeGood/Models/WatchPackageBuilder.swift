@@ -41,6 +41,10 @@ import Foundation
 //      你自己加的「下一場」「已花」「這週跑步」也不自己往上排）。卡**從這一包已經消毒過的欄位組**（WatchRelevancePlan.cards：
 //      life 的部屬名字照設定清掉、財富只剩類別字；bills 卡費沒有金額卡名；旅行照「旅行」開關）——所以一定放在最後組。
 //      每一種卡各自一個開關（WatchPhoneSettings.stackKinds）；「平常跑步的時間」打開才帶快取的 runSlots（只有時段與時段名）
+//
+// [手錶 v7a] v25.585（watch/judge.md §5.2；watch/build/v7a/brief.md §2；sim_v7a.py 的 build_voice_ready）：
+//    • voiceReady：快取原樣抄（WatchExtrasWriter：有訂閱、設好 AI 才 true）。只是一個布林；「錢」關掉時手錶上沒有記帳台，
+//      這一欄照放也用不到
 
 /// iPhone 設定頁「Apple Watch」段的開關（App Group 的 UserDefaults；WatchSettingsSection 與這裡同一組鍵）
 enum WatchPhoneSettings {
@@ -167,6 +171,8 @@ enum WatchPackageBuilder {
         }
         // [v4] 這週跑步（數字與 Apple 健康編號；③ 跑步、手錶自己記的那幾趟要不要自己加看 seen）
         package.runWeek = extras?.runWeek
+        // [v7a] 說一句能不能用（訂閱、AI 設好；只是一個布林）
+        package.voiceReady = extras?.voiceReady
         // [v7b] 智慧型堆疊卡：一定最後組（從上面已經消毒過的 package 欄位組；總開關關掉＝nil）
         if WatchPhoneSettings.stackCards {
             let kinds = WatchPhoneSettings.stackKinds

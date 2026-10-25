@@ -38,6 +38,12 @@ import CoreLocation
 //   • 快取多 runSlots（平常跑步的時段：近 28 天主角運動、算數的那幾趟的開始時間 → WatchRelevancePlan.runSlots，
 //     60 分鐘內 3 趟以上、前後各多 15 分鐘、最多 2 段；時段名 WorkoutFacts.timeOfDayName）。fillRun 順手算（同 runWeek 的時機）。
 //     只有一天裡的分鐘數與時段名——沒有日期、地點、名字
+//
+// [手錶 v7a] v25.585（watch/judge.md §5.2 voiceReady、§8 v7a；watch/build/v7a/brief.md §2）：
+//   • 快取多 voiceReady（說一句能不能用＝有訂閱、設好 AI 語音助手；WatchVoiceRule.ready）。write、writeTrip 都重算。
+//     只是一個布林：沒有訂閱方案、到期日、AI 服務名稱、金鑰
+//   • refreshVoiceReady：App 剛打開時訂閱還沒讀進來（SubscriptionManager.refreshStatus 是 await），第一次寫的可能是 false；
+//     LifeGoodApp 讀完訂閱之後叫這支，跟快取不一樣才改那一欄、重組手錶包（不重算別的）
 
 /// watch_extras_v1.json（只在 iPhone；不會送到手錶）
 struct WatchExtrasCache: Codable, Equatable, WidgetSnapshotPayload {
@@ -81,6 +87,11 @@ struct WatchExtrasCache: Codable, Equatable, WidgetSnapshotPayload {
 
     /// 近 4 週同一時段跑過 3 次以上的時段（WatchRelevancePlan.runSlots；最多 2 段）。手錶包「平常跑步的時間」卡用
     var runSlots: [WatchRunSlot]? = nil
+
+    // MARK: [v7a] 說一句（選填；v7b 以前寫的舊檔沒有）
+
+    /// 說一句能不能用（有訂閱、設好 AI 語音助手；WatchExtrasWriter.voiceReadyNow）
+    var voiceReady: Bool? = nil
 }
 
 @MainActor
@@ -127,6 +138,8 @@ enum WatchExtrasWriter {
         fillTrip(&cache, expense: expense, life: life, now: now)
         // [v4] 這週跑步
         fillRun(&cache, life: life, now: now)
+        // [v7a] 說一句能不能用
+        cache.voiceReady = voiceReadyNow()
         WidgetSnapshotStore.write(cache)
         preloadWeatherIfNeeded(plans: life.tripPlans, now: now)
     }
@@ -138,9 +151,29 @@ enum WatchExtrasWriter {
         fillTrip(&cache, expense: expense, life: life, now: now)
         // [v4] 這週跑步（跑完一趟、改目標、請假、在健康頁刪掉一趟都只寫 life，走這裡）
         fillRun(&cache, life: life, now: now)
+        // [v7a] 說一句能不能用
+        cache.voiceReady = voiceReadyNow()
         cache.generatedAt = now
         WidgetSnapshotStore.write(cache)
         preloadWeatherIfNeeded(plans: life.tripPlans, now: now)
+    }
+
+    // MARK: - [v7a] 說一句能不能用
+
+    /// 有訂閱（SubscriptionManager.isPremium）而且 iPhone 設好 AI 語音助手（AISettingsStore.isReady：選了服務、填了金鑰）
+    static func voiceReadyNow() -> Bool {
+        WatchVoiceRule.ready(premium: SubscriptionManager.shared.isPremium, aiReady: AISettingsStore.shared.isReady)
+    }
+
+    /// 訂閱讀進來之後（LifeGoodApp：.task、回前景的 refreshStatus 之後）：快取的 voiceReady 跟現在不一樣才改、重組手錶包。
+    /// 還沒寫過快取（write 還沒跑過）就不寫，等 write
+    static func refreshVoiceReady() {
+        guard var cache = WidgetSnapshotStore.read(WatchExtrasCache.self) else { return }
+        let ready = voiceReadyNow()
+        guard cache.voiceReady != ready else { return }
+        cache.voiceReady = ready
+        WidgetSnapshotStore.write(cache)
+        WatchBridge.shared.snapshotsDidChange()
     }
 
     // MARK: - [v4] 這週跑步

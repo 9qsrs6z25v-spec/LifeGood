@@ -173,6 +173,8 @@ struct LifeGoodApp: App {
                     // 照按下去的時間套進行程。要在寫手 start 之後：套完才寫得出新的手錶包
                     WatchActionApplier.shared.start(life: lifeStore)
                     WatchActionApplier.shared.applyPending()
+                    // [手錶 v7a] 手錶的說一句：記住三份資料（之後手錶說一句、App 活著就馬上記）。排著的等下面讀完訂閱才記
+                    WatchVoiceApplier.shared.start(expense: expenseStore, finance: financeStore, life: lifeStore)
                     // [財富 v4] 財富提醒（卡費截止、可能不夠扣的扣款與交割、卡片快到期；通知不寫卡名、金額、號碼）：
                     // 掛好監聽（記帳／理財／人生一改，防抖 3 秒重排）、馬上排一次；第二次呼叫什麼都不做。
                     // 同步呼叫、不 await：授權照 MeetingReminders 的慣例，有要排的才問（WealthReminderCenter 裡）
@@ -187,6 +189,9 @@ struct LifeGoodApp: App {
                     // 正在記錄的那一趟、已經結束的「完成」那張不動。沒在記錄時一起取消暫停 30 分鐘提醒
                     await RunActivityCenter.shared.endLeftovers(keeping: RunTracker.shared.activeRunId)
                     await subscription.refreshStatus()
+                    // [手錶 v7a] 訂閱讀進來了：手錶包的「說一句能不能用」跟著對（剛打開時可能寫成 false）；iPhone 沒開時手錶說的那幾句現在記
+                    WatchExtrasWriter.refreshVoiceReady()
+                    WatchVoiceApplier.shared.applyPending()
                     await subscription.loadProducts()
                     await einvoiceSync.syncIfDue(expenseStore: expenseStore)
                     // 啟動時重排所有提醒，讓舊事件升級到新版 body / 截止日邏輯。
@@ -247,6 +252,10 @@ struct LifeGoodApp: App {
                         WealthReminderCenter.shared.rebuildSoon()
                         Task {
                             await subscription.refreshStatus()
+                            // [手錶 v7a] 回前景：訂閱、AI 設定可能改了，手錶包的「說一句能不能用」跟著對；
+                            // iPhone 沒開時手錶說的那幾句（watch_voice_v1 排著的）照講完的時間記
+                            WatchExtrasWriter.refreshVoiceReady()
+                            WatchVoiceApplier.shared.applyPending()
                             await einvoiceSync.syncIfDue(expenseStore: expenseStore)
                             // [v5] 控制項在小工具的行程裡被按了、沒交到 App（保險）：照使用者按的開／關
                             if let want = DayTimelineToggleState.takePending() {

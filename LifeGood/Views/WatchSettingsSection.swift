@@ -36,6 +36,12 @@ import Combine
 //   • 新列全收在 stackBlock（ownerToggle 之後、diagnosticsRow 之前；Section 直接子 view 9 個）
 //   • 說明多一句：智慧型堆疊卡不寫卡名、卡費金額、部屬名字，也不放天氣；手腕放下時連會議名、站名也不寫
 //   • 說明最後那句（v1「錶面上至少放一格 LifeGood，數字才會自己跟上…」）拿掉：跟上面那一列同一句，不在同一段寫兩次（judge §2.16、§3.2）
+// [手錶 v7a] v25.585（watch/build/v7a/brief.md G1-3、主控定案 13；judge §2.16、§6.1）：
+//   • 「錢」那一列後面多一列「說一句（手錶記帳台第 4 格）」（不是開關；Section 直接子 view 從 9 個變 10 個）：
+//     小字寫能不能用、為什麼——「錢」關掉／可以用／要訂閱／先到進階設定設好語音 AI 助手（WatchVoiceRule.ready 跟手錶包同一個判斷）
+//   • 訂閱、AI 設定改了這一列跟著換字（SubscriptionManager.shared、AISettingsStore.shared 都 @ObservedObject）；
+//     打開這一列、這一列的字換了（訂閱、AI 設定改了）時 WatchExtrasWriter.refreshVoiceReady()（剛設好 AI 回到這頁，手錶下一包馬上跟上）
+//   • 說明多一句：你講的那句只送到 iPhone 解析；回手錶的字付款只寫刷卡／現金／轉帳，不寫卡名
 // 改了開關：寫 App Group（WatchPhoneSettings 同一組鍵）→ bridge.settingsChanged() 重組重送。
 
 struct WatchSettingsSection: View {
@@ -66,6 +72,9 @@ struct WatchSettingsSection: View {
     @AppStorage(WatchRelevanceKind.cardBill.settingsKey, store: WidgetShared.defaults) private var stackCardBill = true
     @AppStorage(WatchRelevanceKind.usualRun.settingsKey, store: WidgetShared.defaults) private var stackUsualRun = true
     @AppStorage(WatchRelevanceKind.tripStop.settingsKey, store: WidgetShared.defaults) private var stackTripStop = true
+    /// [v7a] 說一句那一列：訂閱、AI 設定改了跟著換字
+    @ObservedObject private var subscription = SubscriptionManager.shared
+    @ObservedObject private var ai = AISettingsStore.shared
 
     var body: some View {
         Section {
@@ -77,6 +86,7 @@ struct WatchSettingsSection: View {
                 runRow
             }
             moneyToggle
+            voiceRow
             barcodeToggle
             tripToggle
             ownerToggle
@@ -136,6 +146,18 @@ struct WatchSettingsSection: View {
         .onChange(of: sendMoney) { _, _ in
             bridge.settingsChanged()
         }
+    }
+
+    /// [v7a] 說一句（手錶記帳台第 4 格）：不是開關，只寫能不能用、為什麼（手錶設定 › 記帳台第 4 格才換回常記的那一筆）
+    private var voiceRow: some View {
+        rowLabel(icon: "mic.fill", color: .purple, title: Self.voiceTitle, subtitle: voiceSubtitle)
+            .onAppear {
+                WatchExtrasWriter.refreshVoiceReady()
+            }
+            // 進階設定是推進去的另一頁：設好 AI 返回時這一列不一定再 onAppear；字一換（訂閱、AI 改了）就跟上
+            .onChange(of: voiceSubtitle) { _, _ in
+                WatchExtrasWriter.refreshVoiceReady()
+            }
     }
 
     /// [v2] 手機條碼（預設關；驗證碼永遠不送）
@@ -282,6 +304,14 @@ struct WatchSettingsSection: View {
         return Self.runHint
     }
 
+    /// [v7a]「錢」關掉／可以用／要訂閱／先設好 AI（跟手錶包 voiceReady 同一個判斷：WatchVoiceRule.ready）
+    private var voiceSubtitle: String {
+        if !sendMoney { return Self.voiceMoneyOff }
+        if WatchVoiceRule.ready(premium: subscription.isPremium, aiReady: ai.isReady) { return Self.voiceReadyText }
+        if !subscription.isPremium { return Self.voiceNeedsPremium }
+        return Self.voiceNeedsAI
+    }
+
     /// [v2] 還沒連結（或格式不對，不會送）／開著／關著。跟組包看同一個（WatchPhoneSettings.carrierBarcode）；
     /// einvoice 只用來在連結、拿掉時重畫這一列
     private var barcodeSubtitle: String {
@@ -332,6 +362,13 @@ struct WatchSettingsSection: View {
     private static let stackOff = "關掉：卡不會浮上來，下一場、已花、這週跑步也不自己往上排"
     private static let stackFaceNote = "錶面上至少放一格 LifeGood 數字才會自己跟上；只放堆疊的話打開手錶 App 一次就更新"
 
+    /// [v7a] 說一句那一列的字
+    private static let voiceTitle = "說一句（手錶記帳台第 4 格）"
+    private static let voiceReadyText = "可以用：在手錶上講一句就記好"
+    private static let voiceNeedsPremium = "要訂閱 LifeGood 才能用"
+    private static let voiceNeedsAI = "先到「進階設定 › 語音 AI 助手」選好服務、填好金鑰"
+    private static let voiceMoneyOff = "「錢」關掉時手錶上不能記帳，也不能說一句"
+
     private static let footnote: String =
         "卡名、卡費金額、存摺、淨資產、部屬請假、完整號碼不會送到手錶。手腕放下時手錶上的金額一律遮起來。"
         + "手機條碼預設不送；發票驗證碼永遠不送。"
@@ -339,4 +376,5 @@ struct WatchSettingsSection: View {
         + "會議主題會出現在錶面與通知上。"
         + "智慧型堆疊卡不寫卡名、卡費金額、部屬名字，也不放天氣；手腕放下時連會議名、站名也不寫。"
         + "跑步選「用手錶記」時，iPhone 不會多記一筆；手錶跑完會叫 iPhone 馬上帶進健康頁。"
+        + "手錶說一句：你講的那句只送到 iPhone 解析；回手錶的字付款只寫刷卡／現金／轉帳，不寫卡名。"
 }

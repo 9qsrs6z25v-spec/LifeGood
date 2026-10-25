@@ -45,6 +45,10 @@ import Foundation
 //     會議沒有部屬名字；沒有天氣**（組卡的規則在 Shared/WatchRelevance.swift，pkg_keys_check C7 擋）
 //   • 堆疊卡、控制項的 kind（WatchWidgetKind.card*／control*）；WatchPackageDiff.relevanceKinds（手錶收到新包要重新問系統
 //     「什麼時候浮上來」的那幾種）
+// [手錶 v7a] v25.585（watch/judge.md §5.2 voiceReady、§8 v7a；watch/build/v7a/brief.md §2）：說一句
+//   • 包多 voiceReady（訂閱、iPhone 設好 AI 才 true；WatchExtrasWriter 算、選填）：手錶記帳台第 4 格「🎤 說一句」能不能用，
+//     不能用時寫為什麼（WatchVoiceText.blockedReason）。只是一個布林，沒有訂閱方案、到期日、AI 服務名稱、金鑰
+//   • 說一句的訊息型別（WatchVoice、WatchVoiceSaid）在 Shared/WatchVoice.swift（只有 iPhone App 與手錶 App 編；手錶小格用不到）
 
 /// iPhone → 手錶的一整包（watch_v1.json）
 struct WatchPackage: Codable, Equatable, WidgetSnapshotPayload {
@@ -104,6 +108,12 @@ struct WatchPackage: Codable, Equatable, WidgetSnapshotPayload {
     /// 智慧型堆疊卡（WatchRelevancePlan.cards 從這一包已經消毒過的 life／bills／旅行組；平常跑步的時段 WatchExtrasWriter 算）。
     /// iPhone 設定「智慧型堆疊卡」關掉是 nil：手錶不浮任何卡，你自己加的「下一場」「已花」「這週跑步」也不自己往上排
     var relevanceCards: WatchRelevanceCards? = nil
+
+    // MARK: [v7a] 說一句（選填；v7b 以前的 iPhone 送來的沒有）
+
+    /// 說一句能不能用（iPhone 有訂閱、設好 AI 語音助手；WatchExtrasWriter.voiceReadyNow）。
+    /// nil＝iPhone 還沒更新到 25.585（手錶第 4 格寫「打開 iPhone 上的 LifeGood 一次」）
+    var voiceReady: Bool? = nil
 }
 
 /// 今天、明天的行程。從 WidgetLifeSnapshot 一欄一欄抄：

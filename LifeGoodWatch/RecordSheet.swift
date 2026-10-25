@@ -32,6 +32,19 @@ import WatchKit
 //   • 記好了「韓國炸雞 ₩18,000 ≈ NT$412・記到 弘大」（tripDoneLine）
 //   站名照 privacy.hidesPersonal 換（過夜那一站手腕放下寫「住宿」）：記到哪裡的字每次重畫都對回 recordContext 的那一列。
 //   不是旅途中（recordContext nil）：v2 的行為一字不變。
+//
+// [手錶 v7a，v25.585] 說一句（watch/judge.md §2.6、§2.17、§4.1「說一句」；watch/build/v7a/brief.md G3-1；sim_v7a.py §3、§4、§7、§8）：
+//   • 記帳台 RecordText.desk(…voiceTile: WatchVoiceSettings.tileOn)：第 4 格換成「🎤 說一句」（手錶設定可換回常記的那一筆）；
+//     那一格是 VoiceTile（VoiceRecord.swift）：包的 voiceReady 是 true＝系統聽寫（TextFieldLink），不是＝按了推「說一句」那一頁
+//     （RecordStep.voiceInfo，VoiceInfoView 寫完整原因），記帳台最下面琥珀一行寫短的（desk.voiceBlocked）
+//   • 講完（系統輸入畫面按了完成）：放下一輪才 submitVoice（系統輸入畫面正在收起來）→ 去頭尾空白、沒字什麼都不做 →
+//     VoiceOutbox.add（旅途中記到記一筆同一個預設那一站、這趟的幣別；不在旅途中都是 nil）→ 叮 → 整頁換成講完那一頁（VoiceDoneView）
+//   • 講完那一頁：「你講的那一句」（手腕放下、沒解鎖換一行字）、送到哪了／結果（VoiceOutbox.status(of:)，金額照 masksAmounts 遮）、〔完成〕。
+//     記好了、在 iPhone 等著記、還沒送到、已送到：抬手時 2.5 秒自己收（手腕放下不數，抬手才看得到結果）；正在送、正在記、沒記成：要按〔完成〕
+//   • 看過＝VoiceOutbox.markSeen：講完那一頁正好是結果、這一頁收起來時（〔完成〕、自己收、抬手關掉；手腕放下被收掉不算）；
+//     記帳台最下面「上一句・…」那一行點了。之後才到的結果（冷啟動、你先關掉）寫在記帳台最下面一直到你點它
+//   • 第 4 格不是說一句時（設定關掉、記帳台不是 normal）：v2／v6 的行為一字不變。
+//   ⚠️ 原文只在講完那一頁的 @State（voiceDone）裡；待送盒送到 iPhone 就清掉（VoiceOutboxRule.advanced）
 
 /// 記一筆裡推進去的那幾頁（NavigationStack(path:)）
 private enum RecordStep: Hashable {
@@ -41,6 +54,8 @@ private enum RecordStep: Hashable {
     case amount(String)
     /// [v6] 記到哪裡（金額頁「📍 記到 弘大 ›」）
     case stops
+    /// [v7a] 說一句不能用（記帳台第 4 格 🔒 點了）：為什麼、怎麼換回來
+    case voiceInfo
 }
 
 /// 記帳台頂上的橫幅
@@ -81,6 +96,8 @@ struct RecordSheet: View {
     @ObservedObject private var outbox = RecordOutbox.shared
     /// [v6] 手錶上按過、iPhone 還沒寫回包裡的打卡（預設記到哪一站要算進去）
     @ObservedObject private var trips = TripCheckIns.shared
+    /// [v7a] 說一句的待送盒（講完那一頁的狀態、記帳台最下面那一行）
+    @ObservedObject private var voices = VoiceOutbox.shared
     @Environment(\.isLuminanceReduced) private var dimmed
     @Environment(\.redactionReasons) private var reasons
 
@@ -95,6 +112,10 @@ struct RecordSheet: View {
     @State private var doneRecord: WatchRecord?
     /// 記好了那一頁按〔復原〕的那一筆：回到金額頁時金額照它，可以改了再記
     @State private var undone: WatchRecord?
+    /// [v7a] 講完那一頁的那一句（有值時整頁換成講完那一頁；原文只在這裡、只在記憶體）
+    @State private var voiceDone: VoiceDoneInfo?
+    /// [v7a] 講完那一頁是按〔完成〕／抬手時自己收的（收起來時就算手腕剛好放下也記「看過了」）
+    @State private var voiceFinished = false
 
     static let title = "記一筆"
     static let failedText = "沒記到，再按一次"
@@ -143,7 +164,9 @@ struct RecordSheet: View {
     //    NavigationStack 的 onDisappear 會先跑 → 剛記的那筆馬上被送出去，〔復原〕就沒用了。
     var body: some View {
         ZStack {
-            if let r = doneRecord {
+            if let v = voiceDone {
+                voiceDoneView(v)
+            } else if let r = doneRecord {
                 doneView(r)
             } else {
                 stack
@@ -155,6 +178,9 @@ struct RecordSheet: View {
         .task(id: doneCloseKey) {
             await closeDoneLater(doneCloseKey)
         }
+        .task(id: voiceCloseKey) {
+            await closeVoiceLater(voiceCloseKey)
+        }
         .onChange(of: dimmed) { _, isDimmed in
             // 手腕放下＝接受了：還在 10 秒內的馬上送（WatchModel 的 scenePhase .inactive 也會送，重複叫沒關係）
             if isDimmed {
@@ -162,9 +188,14 @@ struct RecordSheet: View {
             }
         }
         .onDisappear {
+            // [v7a] 講完那一頁正好是結果：看過了（編號先取出來；手腕放下時被收掉不算，留在記帳台最下面那一行）
+            let seenVoiceId = voiceSeenId
             // 關掉這一頁＝接受了。彈出頁正在收起來：寫待送盒放到下一輪（同 iPhone「dismiss 後寫 store 放下一個 runloop」）
             Task { @MainActor in
                 RecordOutbox.shared.sendHoldingNow()
+                if let seenVoiceId {
+                    VoiceOutbox.shared.markSeen(seenVoiceId)
+                }
             }
         }
     }
@@ -186,6 +217,16 @@ struct RecordSheet: View {
                        dimmed: dimmed,
                        asking: model.asking,
                        askFailed: model.askFailed,
+                       voiceReady: model.package?.voiceReady == true,
+                       voiceLine: voiceDeskLine,
+                       onVoice: { text in
+                           // 系統輸入畫面正在收起來：寫待送盒、換頁放下一輪
+                           Task { @MainActor in
+                               submitVoice(text)
+                           }
+                       },
+                       onVoiceBlocked: { path.append(.voiceInfo) },
+                       onVoiceLine: { id in voices.markSeen(id) },
                        onTile: { tile in tapTile(tile) },
                        onRetry: { model.requestFromPhone() })
             .overlay(alignment: .top) {
@@ -196,9 +237,16 @@ struct RecordSheet: View {
             .containerBackground(Color.black, for: .navigation)
     }
 
-    /// 記帳台：[v6] 旅途中 RecordText.desk(…trip:)（外幣換成這趟常用的分類）；trip nil 時跟 v2 同一份
+    /// 記帳台：[v6] 旅途中 RecordText.desk(…trip:)（外幣換成這趟常用的分類）；trip nil 時跟 v2 同一份。
+    /// [v7a] 第 4 格照手錶設定換成「🎤 說一句」（設定關掉＝v2／v6 那一份一字不變）
     private var currentDesk: RecordDesk {
-        RecordText.desk(package: model.package, now: Date(), masked: privacy.masksAmounts, trip: tripContext)
+        RecordText.desk(package: model.package, now: Date(), masked: privacy.masksAmounts, trip: tripContext,
+                        voiceTile: WatchVoiceSettings.tileOn)
+    }
+
+    /// [v7a] 記帳台最下面那一行（上一句的結果／在 iPhone 等著記／還沒送到；金額照 masksAmounts 遮）
+    private var voiceDeskLine: VoiceDeskLine? {
+        VoiceOutboxRule.deskLine(voices.items, masked: privacy.masksAmounts)
     }
 
     @ViewBuilder
@@ -210,6 +258,8 @@ struct RecordSheet: View {
             amountPage(key)
         case .stops:
             stopPage
+        case .voiceInfo:
+            voiceInfoPage
         }
     }
 
@@ -291,10 +341,25 @@ struct RecordSheet: View {
         }
     }
 
+    // MARK: [v7a] 說一句不能用那一頁
+
+    private var voiceInfoPage: some View {
+        VoiceInfoView(reason: voiceInfoReason)
+            .navigationTitle(WatchVoiceText.pageTitle)
+            .containerBackground(Color.black, for: .navigation)
+    }
+
+    /// 為什麼不能用（沒訂閱、沒設 AI、iPhone 還沒更新）；這一頁打開之後新包到了、能用了：「說一句可以用了…」
+    private var voiceInfoReason: String {
+        WatchVoiceText.blockedReason(voiceReady: model.package?.voiceReady) ?? WatchVoiceText.nowReady
+    }
+
     // MARK: 記
 
     /// 點記帳台一格：範本＝馬上記（不換頁）；分類＝到金額頁
     private func tapTile(_ tile: RecordDeskTile) {
+        // [v7a] 說一句那一格自己是 VoiceTile（系統聽寫／不能用那一頁），不走這裡
+        guard tile.kind != .voice else { return }
         guard tile.kind == .template, let t = tile.template else {
             path.append(.amount(tile.categoryKey))
             return
@@ -330,6 +395,25 @@ struct RecordSheet: View {
         } else {
             WKInterfaceDevice.current().play(.failure)
         }
+    }
+
+    /// [v7a] 講完（TextFieldLink 的 onSubmit，已經放到下一輪）：去頭尾空白、沒字（取消、沒講）什麼都不做；
+    /// 寫待送盒、馬上送（VoiceOutbox.add）；旅途中記到跟記一筆同一個預設那一站、這趟的幣別（不在旅途中都是 nil）。
+    /// 寫不進檔：失敗的震動＋記帳台橫幅「沒記到，再按一次」；寫好了：叮、整頁換成講完那一頁
+    private func submitVoice(_ text: String) {
+        let cleaned = WatchVoiceRule.cleanText(text)
+        guard !cleaned.isEmpty else { return }
+        // 講完那一頁已經開著（系統輸入畫面連送兩次）：不再記一句
+        guard voiceDone == nil, doneRecord == nil else { return }
+        let target = currentTarget
+        guard let id = voices.add(text: cleaned, now: Date(), target: target, currency: tripContext?.currency) else {
+            WKInterfaceDevice.current().play(.failure)
+            banner = .failed(Date())
+            return
+        }
+        WKInterfaceDevice.current().play(.success)
+        voiceFinished = false
+        voiceDone = VoiceDoneInfo(id: id, text: cleaned, target: target)
     }
 
     // MARK: 橫幅（記帳台）
@@ -464,6 +548,60 @@ struct RecordSheet: View {
         guard !Task.isCancelled, key == doneCloseKey else { return }
         model.closeRecord()
     }
+
+    // MARK: [v7a] 講完那一頁
+
+    /// 站名照這一刻的手腕放下換（過夜那一站「住宿」）；原文、金額 VoiceDoneView 照 hidesPersonal／masked 換
+    private func voiceDoneView(_ v: VoiceDoneInfo) -> some View {
+        VoiceDoneView(info: shownVoiceInfo(v),
+                      status: voices.status(of: v.id),
+                      masked: privacy.masksAmounts,
+                      hidesPersonal: privacy.hidesPersonal,
+                      dimmed: dimmed,
+                      onDone: { finishVoice() })
+    }
+
+    private func shownVoiceInfo(_ v: VoiceDoneInfo) -> VoiceDoneInfo {
+        VoiceDoneInfo(id: v.id, text: v.text, target: v.target.map { shownTarget($0) })
+    }
+
+    /// 這一句的結果已經來了（記好了、或為什麼沒記成）
+    private func isVoiceDone(_ id: UUID) -> Bool {
+        guard let s = voices.status(of: id) else { return false }
+        if case .done = s {
+            return true
+        }
+        return false
+    }
+
+    /// 這一頁收起來時要記「看過了」的那一句：講完那一頁正好是結果，而且是〔完成〕／抬手時自己收的、或抬手時關掉的。
+    /// 手腕放下時被收掉（例：退回錶面）不算看過：留在記帳台最下面「上一句・…」那一行
+    private var voiceSeenId: UUID? {
+        guard let v = voiceDone, isVoiceDone(v.id), voiceFinished || !dimmed else { return nil }
+        return v.id
+    }
+
+    /// 〔完成〕、2.5 秒自己收：回 ② 錢。「看過了」（markSeen）等這一頁真的收起來（onDisappear）才記——
+    /// 在這裡記的話待送盒馬上刪掉那一句，收起來的動畫裡狀態會先跳成「已送出」；voiceDone 也不清（不然動畫裡閃回記帳台）
+    private func finishVoice() {
+        voiceFinished = true
+        model.closeRecord()
+    }
+
+    /// 講完那一頁自己收的計時：記好了、在 iPhone 等著記、還沒送到、已送到（closesAutomatically）而且抬著手才有值；
+    /// 值一變（狀態換了、手腕放下又抬起來）就重新數 2.5 秒。"" ＝不數（正在送、正在記、沒記成：要按〔完成〕）
+    private var voiceCloseKey: String {
+        guard let v = voiceDone, !voiceFinished, !dimmed,
+              let s = voices.status(of: v.id), s.closesAutomatically else { return "" }
+        return v.id.uuidString + "-" + WatchVoiceText.statusLine(s, masked: false)
+    }
+
+    private func closeVoiceLater(_ key: String) async {
+        guard !key.isEmpty else { return }
+        try? await Task.sleep(nanoseconds: Self.closeDelayNanos)
+        guard !Task.isCancelled, key == voiceCloseKey else { return }
+        finishVoice()
+    }
 }
 
 // MARK: - 記帳台（第一步）
@@ -475,6 +613,16 @@ private struct RecordDeskPage: View {
     let dimmed: Bool
     let asking: Bool
     let askFailed: Bool
+    /// [v7a] 包的 voiceReady == true（第 4 格「🎤 說一句」是系統聽寫；不是＝按了推不能用那一頁）
+    let voiceReady: Bool
+    /// [v7a] 最下面那一行（VoiceOutboxRule.deskLine；沒有 nil）
+    let voiceLine: VoiceDeskLine?
+    /// [v7a] 系統聽寫打好、按了完成（RecordSheet 放下一輪才寫）
+    let onVoice: (String) -> Void
+    /// [v7a] 說一句不能用時點了那一格
+    let onVoiceBlocked: () -> Void
+    /// [v7a] 點了最下面那一行（結果那一種）：看過了
+    let onVoiceLine: (UUID) -> Void
     let onTile: (RecordDeskTile) -> Void
     let onRetry: () -> Void
 
@@ -510,6 +658,8 @@ private struct RecordDeskPage: View {
             tileGrid
             moreLink
             hintText
+            voiceBlockedText
+            voiceLineView
         } else {
             messageText
             if desk.mode == .noPackage {
@@ -521,8 +671,19 @@ private struct RecordDeskPage: View {
     private var tileGrid: some View {
         LazyVGrid(columns: RecordLook.columns, spacing: RecordLook.gridSpacing) {
             ForEach(desk.tiles) { tile in
-                tileButton(tile)
+                tileCell(tile)
             }
+        }
+    }
+
+    /// [v7a] 說一句那一格是 VoiceTile（系統聽寫／不能用時一般按鈕）；其他照 v2
+    @ViewBuilder
+    private func tileCell(_ tile: RecordDeskTile) -> some View {
+        if tile.kind == .voice {
+            VoiceTile(tile: tile, ready: voiceReady, dimmed: dimmed, compact: WatchStyle.isCompact,
+                      onSubmit: onVoice, onBlocked: onVoiceBlocked)
+        } else {
+            tileButton(tile)
         }
     }
 
@@ -574,6 +735,33 @@ private struct RecordDeskPage: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .opacity(dimmed ? RecordLook.dimmedOpacity : 1)
         }
+    }
+
+    /// [v7a] 說一句不能用：「說一句：要訂閱、在 iPhone 設好 AI 才能用」（琥珀、兩行內；點第 4 格看完整原因）
+    @ViewBuilder
+    private var voiceBlockedText: some View {
+        if let text = desk.voiceBlocked {
+            Text(text)
+                .font(.footnote)
+                .foregroundStyle(WatchStyle.amber)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+                .opacity(dimmed ? RecordLook.dimmedOpacity : 1)
+        }
+    }
+
+    /// [v7a] 「上一句・已記一筆：…」／「1 句在 iPhone 等著記」／「1 句還沒送到 iPhone」
+    @ViewBuilder
+    private var voiceLineView: some View {
+        if let l = voiceLine {
+            VoiceDeskLineView(line: l, dimmed: dimmed, onTap: { tapVoiceLine(l) })
+        }
+    }
+
+    /// 結果那一種才有編號：點了＝看過了（那一行消失）
+    private func tapVoiceLine(_ l: VoiceDeskLine) {
+        guard let id = l.id else { return }
+        onVoiceLine(id)
     }
 
     /// 沒包／「錢」關掉／包裡沒分類的說明

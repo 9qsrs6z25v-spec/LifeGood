@@ -29,6 +29,8 @@ import WidgetKit
 // [手錶 v7b] v25.584（watch/judge.md §3.4；watch/build/v7b/brief.md §2）：
 //   • 回前景登記 WatchOpenHandoff（控制項「＋ 記一筆」→ 記帳台、「▶ 開始跑步」→ 準備頁，走 open 同一條路）
 //   • 「遮住金額」改了走 WatchControlRefresh（錶面全部重畫＋控制中心那顆重畫）；控制項改的值回前景 reload() 讀回來
+// [手錶 v7a] v25.585（watch/judge.md §4.1「說一句」；watch/build/v7a/brief.md §2）：
+//   • 說一句的待送盒（VoiceOutbox）跟著畫面走：回前景重讀（看過的、過期的順手刪）、還沒交給系統的補送
 // [手錶 v5] v25.582（watch/judge.md §2.13、§3.1；watch/build/v5/brief.md §2）：
 //   • 第二層多「這週」（WatchRoute.runWeek：點 ③ 看板）、「那一趟」（WatchRoute.runDetail(id)：這週點一列）
 //   • 錶面「這週跑步」點進來：圓形、長方形、一行字 lifegood://life/health → ③ 跑步；角落跑者 lifegood://life/health/run → 準備頁
@@ -185,6 +187,9 @@ final class WatchModel: ObservableObject {
             // [v2] 待送盒：重讀、到期沒送的補送（App 被系統暫停時沒送成的）
             RecordOutbox.shared.reload()
             RecordOutbox.shared.sendDue()
+            // [v7a] 說一句：重讀（App 沒開時 iPhone 送來的結果 WatchSync 已經寫進檔了）、還沒交給系統的補送
+            VoiceOutbox.shared.reload()
+            VoiceOutbox.shared.sendDue()
             // [v7b] 控制項「＋ 記一筆」「▶ 開始跑步」（WatchOpenIntent）：登記交接、撿 20 秒內存著的網址，
             // 走跟錶面點進來同一條 open（要在上面回第一頁之後，網址的那一頁才不會被蓋掉）
             WatchOpenHandoff.register { url in

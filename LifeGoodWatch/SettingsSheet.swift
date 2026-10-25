@@ -17,6 +17,12 @@ import SwiftUI
 //     （跑步中控制頁那兩顆小開關同一組；存在手錶 App Group：WatchRunPrefs）
 //   • 最下面：「語音：中文（台灣）✓」／「這支手錶沒有台灣中文語音，每公里只震動」（琥珀）＋手錶上找得到的中文嗓音
 //     （WatchRunVoice.chineseVoiceNames，「美佳（zh-TW）、婷婷（zh-CN）…」；你截圖給我）。打開設定時查一次，不在每次重畫都查
+// [手錶 v7a] v25.585（watch/judge.md §2.15、§8 v7a；watch/build/v7a/brief.md §1-1、G2-2）：
+//   • ⓪ 第一段多一行「說一句還沒送到 iPhone：N 句」（VoiceOutboxRule.unsentLine，琥珀）；記一筆、說一句兩種都 0 才整段不出現。
+//     〔現在送〕兩種都補送（RecordOutbox.resendUnconfirmed＋VoiceOutbox.resendUnconfirmed；iPhone 用編號擋重複）
+//   • ① 遮住金額下面：「記帳台第 4 格：🎤 說一句」開關（WatchVoiceSettings，手錶 App Group，沒設定過＝開）；
+//     關掉＝第 4 格照 v2 放常記的那一筆（跟 WatchVoiceText.blockedFooter 的「手錶設定 › 記帳台第 4 格」對得上）
+//   • 這幾行一樣沒有金額、人名、你講的原文（只有句數），手腕放下不用換字
 
 struct SettingsSheet: View {
     @ObservedObject private var model = WatchModel.shared
@@ -26,6 +32,10 @@ struct SettingsSheet: View {
     @ObservedObject private var runs = WorkoutManager.shared
     /// [v4] 最下面那一段：打開設定時查一次手錶上的嗓音（nil＝還沒查，那一段先不畫）
     @State private var voices: SettingsVoiceInfo?
+    /// [v7a] 說一句的待送盒（第一段「說一句還沒送到 iPhone：N 句」）。`voices` 已經是 v4 的嗓音那一段，這裡叫 voiceOutbox
+    @ObservedObject private var voiceOutbox = VoiceOutbox.shared
+    /// [v7a] 記帳台第 4 格放說一句（打開設定時讀一次；改了馬上寫回手錶 App Group）
+    @State private var voiceTile = WatchVoiceSettings.tileOn
 
     static let hideNote = "只在這支手錶；手腕放下時一律會遮"
     static let noPackageText = "還沒收到 iPhone 的資料"
@@ -38,12 +48,17 @@ struct SettingsSheet: View {
     static let noVoices = "這支手錶找不到中文語音"
     /// [v4] 嗓音清單的分隔
     static let voiceSeparator = "、"
+    /// [v7a] 記帳台第 4 格那個開關
+    static let voiceTileTitle = "記帳台第 4 格：🎤 說一句"
+    static let voiceTileOn = "講一句就記好（要 iPhone 有訂閱、設好 AI）"
+    static let voiceTileOff = "關掉：第 4 格放常記的那一筆"
 
     var body: some View {
         NavigationStack {
             List {
                 outboxSection
                 hideSection
+                voiceTileSection
                 runSection
                 phoneSection
                 aboutSection
@@ -51,18 +66,38 @@ struct SettingsSheet: View {
             }
             .navigationTitle("設定")
             .onAppear { outbox.reload() }
+            .onAppear { voiceOutbox.reload() }
             .onAppear { loadVoices() }
         }
     }
 
-    // MARK: ⓪ [v2] 還沒送到 iPhone：N 筆〔現在送〕
+    // MARK: ⓪ [v2] 還沒送到 iPhone：N 筆〔現在送〕（[v7a] 多「說一句還沒送到 iPhone：N 句」）
 
-    /// 0 筆（RecordText.unsentLine 回 nil）整段不出現
+    /// [v2]「還沒送到 iPhone：N 筆」；0 筆 nil
+    private var recordUnsentLine: String? {
+        RecordText.unsentLine(outbox.items)
+    }
+
+    /// [v7a]「說一句還沒送到 iPhone：N 句」；0 句 nil
+    private var voiceUnsentLine: String? {
+        VoiceOutboxRule.unsentLine(voiceOutbox.items)
+    }
+
+    /// 記一筆、說一句兩種都 0（兩行都是 nil）整段不出現
+    private var hasUnsent: Bool {
+        recordUnsentLine != nil || voiceUnsentLine != nil
+    }
+
     @ViewBuilder
     private var outboxSection: some View {
-        if let line = RecordText.unsentLine(outbox.items) {
+        if hasUnsent {
             Section {
-                SettingsTwoLine(title: line, note: nil, noteIsAmber: false, titleIsAmber: true)
+                if let line = recordUnsentLine {
+                    SettingsTwoLine(title: line, note: nil, noteIsAmber: false, titleIsAmber: true)
+                }
+                if let line = voiceUnsentLine {
+                    SettingsTwoLine(title: line, note: nil, noteIsAmber: false, titleIsAmber: true)
+                }
                 resendButton
             } footer: {
                 Text(Self.outboxNote)
@@ -74,7 +109,9 @@ struct SettingsSheet: View {
 
     private var resendButton: some View {
         Button {
+            // 記一筆、說一句兩種都補送（還在系統排隊裡的不再送；iPhone 用編號擋重複）
             outbox.resendUnconfirmed()
+            voiceOutbox.resendUnconfirmed()
         } label: {
             Label(Self.resendTitle, systemImage: "arrow.up.circle")
         }
@@ -91,6 +128,24 @@ struct SettingsSheet: View {
         Section {
             Toggle(isOn: hideBinding) {
                 SettingsTwoLine(title: "遮住金額", note: Self.hideNote, noteIsAmber: false)
+            }
+        }
+    }
+
+    // MARK: [v7a] 記帳台第 4 格：🎤 說一句
+
+    /// 開：「講一句就記好（要 iPhone 有訂閱、設好 AI）」；關：「關掉：第 4 格放常記的那一筆」
+    private var voiceTileNote: String {
+        voiceTile ? Self.voiceTileOn : Self.voiceTileOff
+    }
+
+    private var voiceTileSection: some View {
+        Section {
+            Toggle(isOn: $voiceTile) {
+                SettingsTwoLine(title: Self.voiceTileTitle, note: voiceTileNote, noteIsAmber: false)
+            }
+            .onChange(of: voiceTile) { _, on in
+                WatchVoiceSettings.setTileOn(on)
             }
         }
     }

@@ -18,6 +18,13 @@ import Foundation
 //     （「₩18,000」、錶冠一格 ₩1,000、膠囊是這趟最近記過的），送 iPhone 的台幣＝手錶上看到的「≈ NT$412」（入帳不重算）
 //   • 國內旅行（沒有幣別）：記帳台照舊；每一筆都「記到」預設那一站（可以換成別站或整趟）
 //   • 認得是哪一國、iPhone 沒有匯率：照台幣記，記帳台最下面寫「要記韓元：到 iPhone 設定加「韓元」匯率」
+//
+// [手錶 v7a] v25.585（watch/judge.md §8 v7a、§2.6；watch/build/v7a/brief.md §2；sim_v7a.py desk_voice）：
+//   • 記帳台第 4 格可以換成「🎤 說一句」（手錶設定「記帳台第 4 格：說一句」，WatchVoiceSettings，沒設定過＝開）：
+//     desk(…trip:voiceTile:) 在 v2／v6 那一份上面把第 4 格換掉（不到 4 格就補在最後）；記帳台不是 normal（沒包、「錢」關掉、
+//     沒分類）照舊不畫格子、也沒有說一句
+//   • 包的 voiceReady 不是 true（沒訂閱、沒設 AI、iPhone 還沒更新）：格子照畫，RecordDesk.voiceBlocked 寫為什麼
+//     （WatchVoiceText.blockedShort；點了推「說一句」那一頁寫完整的 blockedReason）
 
 /// 記好的那一筆送到哪了（記好了那一頁的狀態行、記帳台的橫幅）
 enum RecordSendState: Equatable {
@@ -56,6 +63,8 @@ struct RecordDeskTile: Equatable, Identifiable {
         case template
         /// 分類（範本不到 4 個時補的；點了直接到金額頁）
         case category
+        /// [v7a] 🎤 說一句（第 4 格；點了打開系統聽寫，不能用時推「說一句」那一頁寫為什麼）
+        case voice
     }
 
     var id: String
@@ -92,6 +101,9 @@ struct RecordDesk: Equatable {
     var hint: String?
     /// noPackage／moneyOff／noDesk 的說明
     var message: String?
+    /// [v7a] 有「🎤 說一句」那一格、但現在不能用：記帳台最下面寫為什麼（「說一句：要訂閱、在 iPhone 設好 AI 才能用」）；
+    /// 能用、沒有那一格是 nil
+    var voiceBlocked: String? = nil
 }
 
 /// 記一筆第二步之一（選分類）
@@ -429,6 +441,24 @@ enum RecordText {
         }
         out.tiles = tiles
         out.hint = WatchTripText.foreignDeskHint
+        return out
+    }
+
+    /// [v7a] 記帳台（第 4 格可以換成「🎤 說一句」）：先照 v2／v6 組好（trip nil＝不在旅途中），voiceTile 開著、記帳台是 normal
+    /// 才換：滿 4 格換掉第 4 格、不到 4 格補在最後。包的 voiceReady 不是 true 時 voiceBlocked 寫為什麼（格子照畫）
+    static func desk(package: WatchPackage?, now: Date, masked: Bool, trip: WatchTripRecordContext?,
+                     voiceTile: Bool) -> RecordDesk {
+        var out = desk(package: package, now: now, masked: masked, trip: trip)
+        guard voiceTile, out.mode == .normal else { return out }
+        let tile = RecordDeskTile(id: WatchVoiceText.tileId, kind: .voice, title: WatchVoiceText.tileTitle,
+                                  amountText: nil, icon: WatchVoiceText.tileIcon, tint: WatchVoiceText.tileTint,
+                                  categoryKey: "", template: nil)
+        if out.tiles.count >= 4 {
+            out.tiles[3] = tile
+        } else {
+            out.tiles.append(tile)
+        }
+        out.voiceBlocked = WatchVoiceText.blockedShort(voiceReady: package?.voiceReady)
         return out
     }
 

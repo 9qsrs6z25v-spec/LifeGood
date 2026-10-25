@@ -52,6 +52,23 @@ import WidgetKit
 //   • 還沒 activate 好：先存在 UserDefaults（watch_run_report_pending_v1，只留最後一份「我跑完了」、最後一份「沒存成」），
 //     activate 好再送
 //   • reloadRunWeekWidget：錶面「這週跑步」馬上重畫（手錶自己記的那一趟算進去了；WatchRunLog 一改就叫）
+//
+// [手錶 v7a，v25.585] 說一句送 iPhone、收結果（judge §4.1「說一句」、§4.3、§5.3、§5.5、附錄 B「說一句」那一列；watch/build/v7a/brief.md G2-1）：
+//   • sendVoice：VoiceOutbox（主執行緒）講完馬上叫、sendDue／〔現在送〕再叫。跟 sendRecord 同一個樣子——transferUserInfo(["voice": JSON])
+//     （排隊、保證送到、iPhone 不在旁邊也排著）＋ iPhone 在旁邊再 sendMessage 同一份（回 ["ok": "working"|"queued"|"done"|"failed",
+//     "said": Data（done 才有）]）。回話帶 said：先在這個背景執行緒 VoiceOutboxStore.applySaid 寫進檔（過 Store 自己的鎖），
+//     再 Task { @MainActor } 交給 VoiceOutbox.phoneReplied；送不出去 → phoneUnreachable（transferUserInfo 那一份照樣排著）。
+//     兩條都到、手錶重送，iPhone 只記一次（一句的編號＝支出編號＋iPhone 的 WatchVoiceLog）。
+//   • outstandingVoiceIds：系統排隊裡還沒送完的說一句編號（設定〔現在送〕只補送排隊裡已經沒有的）。
+//   • cancelVoiceTransfer：iPhone 回話確定收到了（working／queued，VoiceOutbox.phoneReplied 叫；結果來了——回話帶 said、
+//     receiveSaid——這裡自己叫），系統排隊裡那一份（裡面有你講的原文）取消（judge §6.1「送到就刪」）。
+//   • 收結果有兩條路，都走 receiveSaid（delegate return 之前寫好檔，背景被叫醒時 WatchAppDelegate 等 hasContentPending 變 false 就標完成）：
+//     iPhone transferUserInfo(["said": …]) → didReceiveUserInfo（先看 "said"，不是才當包 apply）；
+//     iPhone 在旁邊 sendMessage(["said": …], replyHandler: nil) → session(_:didReceiveMessage:)（v7a 新加；不是 said 的不管）。
+//     同一句的結果到兩次不改（VoiceOutboxRule.withSaid）。
+//   • transferUserInfo 送完（didFinish、沒有錯）：voice 那一份 → VoiceOutbox.markDelivered（原文清掉）；record、checkIn 照 v2、v6。
+//   • activate 好、iPhone 變得在旁邊：TripCheckIns.sendDue 之後 VoiceOutbox.sendDue（還沒 activate 好時講的那幾句現在送）。
+//   鎖的方向：VoiceOutboxStore 的鎖不回頭拿 applyLock／stateLock，applySaid 也不在 applyLock 裡叫，不會互鎖。
 
 final class WatchSync: NSObject, WCSessionDelegate {
     static let shared = WatchSync()
@@ -212,6 +229,84 @@ final class WatchSync: NSObject, WCSessionDelegate {
             }
         })
         return true
+    }
+
+    // MARK: [v7a] 說一句送 iPhone（骨架：主控定名字與參數，G2 填本體；VoiceOutbox 在叫，名字、參數不准改。watch/build/v7a/brief.md G2-1）
+
+    /// 送一句（VoiceOutbox 在主執行緒叫）：transferUserInfo(["voice": JSON])＋ iPhone 在旁邊再 sendMessage（回話交給
+    /// VoiceOutbox.shared.phoneReplied／phoneUnreachable）。還沒 activate 好、編不成 JSON 回 false（VoiceOutbox 留著 pending）
+    /// 回 true＝transferUserInfo 已經排進系統（不在旁邊時 VoiceOutbox 自己寫「還沒送到 iPhone，先存在手錶上」）
+    func sendVoice(_ voice: WatchVoice) -> Bool {
+        guard WCSession.isSupported() else { return false }
+        let session = WCSession.default
+        guard session.activationState == .activated, let data = WatchVoiceCodec.encode(voice) else { return false }
+        let message: [String: Any] = [WatchLink.voiceKey: data]
+        // 排隊、保證送到、App 被暫停也繼續（送完 → session(_:didFinish:error:) → markDelivered）
+        _ = session.transferUserInfo(message)
+        // 不在旁邊：只排隊（VoiceOutbox 寫「先存在手錶上」，回到身邊系統自己補送）
+        guard session.isReachable else { return true }
+        let id = voice.id
+        session.sendMessage(message, replyHandler: { reply in
+            // iPhone 回 ["ok": "working"|"queued"|"done"|"failed", "said": Data（done 才有）]
+            let ok = reply[WatchLink.okKey] as? String
+            let said: WatchVoiceSaid? = (reply[WatchLink.saidKey] as? Data).flatMap { WatchVoiceSaidCodec.decode($0) }
+            if let said {
+                // 先寫檔（這裡是 WCSession 的背景執行緒；VoiceOutboxStore 過自己的鎖）
+                VoiceOutboxStore.applySaid(said, now: Date())
+                // 有結果＝iPhone 早就收到這一句了：排隊裡那一份（裡面有原文）不用再送
+                self.cancelVoiceTransfer(id)
+            }
+            Task { @MainActor in
+                VoiceOutbox.shared.phoneReplied(id, ok: ok, said: said)
+            }
+        }, errorHandler: { _ in
+            // iPhone 不在旁邊了、LifeGood 被滑掉、逾時…：transferUserInfo 那一份照樣排著
+            Task { @MainActor in
+                VoiceOutbox.shared.phoneUnreachable(id)
+            }
+        })
+        return true
+    }
+
+    /// 系統排隊裡還沒送完的說一句編號（WCSession.outstandingUserInfoTransfers 裡帶 "voice" 的）；設定〔現在送〕用：
+    /// 還在排隊的不再送一次。還沒 activate 好回空（那時 sendVoice 也送不出去）
+    func outstandingVoiceIds() -> Set<UUID> {
+        guard WCSession.isSupported() else { return [] }
+        let session = WCSession.default
+        guard session.activationState == .activated else { return [] }
+        var ids = Set<UUID>()
+        for transfer in session.outstandingUserInfoTransfers {
+            guard let data = transfer.userInfo[WatchLink.voiceKey] as? Data,
+                  let voice = WatchVoiceCodec.decode(data) else { continue }
+            ids.insert(voice.id)
+        }
+        return ids
+    }
+
+    /// iPhone 回話確定收到了這一句：系統排隊裡那一份（裡面有原文）取消，不用再送（judge §6.1「送到就刪」）
+    func cancelVoiceTransfer(_ id: UUID) {
+        guard WCSession.isSupported() else { return }
+        let session = WCSession.default
+        guard session.activationState == .activated else { return }
+        for transfer in session.outstandingUserInfoTransfers {
+            guard let data = transfer.userInfo[WatchLink.voiceKey] as? Data,
+                  let voice = WatchVoiceCodec.decode(data),
+                  voice.id == id else { continue }
+            transfer.cancel()
+        }
+    }
+
+    /// iPhone 送來的一句結果（transferUserInfo 或 sendMessage 的 ["said": Data]；WCSession 的背景執行緒）：
+    /// delegate return 之前先寫進待送盒的檔（背景被叫醒時 App 隨時會被暫停），再交給主執行緒那一份重讀。
+    /// 解不開不管；手錶上已經沒有這一句（早就刪了）applySaid 自己回 false、不新增
+    private func receiveSaid(_ data: Data) {
+        guard let said = WatchVoiceSaidCodec.decode(data) else { return }
+        VoiceOutboxStore.applySaid(said, now: Date())
+        // 有結果＝iPhone 早就收到這一句了：排隊裡如果還有那一份（裡面有原文）就取消
+        cancelVoiceTransfer(said.id)
+        Task { @MainActor in
+            VoiceOutbox.shared.saidArrived(said)
+        }
     }
 
     // MARK: [v5] 我跑完了、沒存成（brief §2；名字、參數不准改，WorkoutManager 在叫）
@@ -402,6 +497,8 @@ final class WatchSync: NSObject, WCSessionDelegate {
             RecordOutbox.shared.sendDue()
             // [v6] 還沒 activate 好時按的打卡（sendCheckIn 回 false 留在 holding）現在送
             TripCheckIns.shared.sendDue()
+            // [v7a] 還沒 activate 好時講的那幾句（sendVoice 回 false 留在 pending）現在送
+            VoiceOutbox.shared.sendDue()
             let model = WatchModel.shared
             if model.isActive && model.shouldAsk(now: Date()) && !model.asking {
                 model.requestFromPhone()
@@ -414,9 +511,20 @@ final class WatchSync: NSObject, WCSessionDelegate {
         apply(applicationContext)
     }
 
-    /// iPhone transferCurrentComplicationUserInfo 送來的（錶面推送也從這裡進來；內容跟 context 同一包）
+    /// iPhone transferCurrentComplicationUserInfo 送來的（錶面推送也從這裡進來；內容跟 context 同一包）。
+    /// [v7a] iPhone transferUserInfo 送來的說一句結果（["said": Data]）也從這裡進來：先看 "said"，不是才當包
     func session(_ session: WCSession, didReceiveUserInfo userInfo: [String: Any] = [:]) {
+        if let data = userInfo[WatchLink.saidKey] as? Data {
+            receiveSaid(data)
+            return
+        }
         apply(userInfo)
+    }
+
+    /// [v7a] iPhone 在旁邊 sendMessage 送來的（replyHandler 是 nil）：只有說一句的結果（["said": Data]），其他的不管
+    func session(_ session: WCSession, didReceiveMessage message: [String: Any]) {
+        guard let data = message[WatchLink.saidKey] as? Data else { return }
+        receiveSaid(data)
     }
 
     /// iPhone transferFile 送來的（壓完超過 48 KB）。這個方法 return 之後系統就把檔刪了：一定在這裡同步讀完
@@ -428,11 +536,13 @@ final class WatchSync: NSObject, WCSessionDelegate {
     /// iPhone 變得在旁邊：App 在前景、手上還沒有包、也沒在要 → 要一份。
     /// [v2] 待送盒到期還沒送的也現在送（已經排進 transferUserInfo 的，系統自己會補送，不用再送）
     /// [v6] 還沒送出去的打卡（holding）也現在送
+    /// [v7a] 還沒交給系統的說一句（pending）也現在送
     func sessionReachabilityDidChange(_ session: WCSession) {
         guard session.isReachable else { return }
         Task { @MainActor in
             RecordOutbox.shared.sendDue()
             TripCheckIns.shared.sendDue()
+            VoiceOutbox.shared.sendDue()
             let model = WatchModel.shared
             if model.isActive && model.package == nil && !model.asking {
                 model.requestFromPhone()
@@ -443,9 +553,18 @@ final class WatchSync: NSObject, WCSessionDelegate {
     /// [v2] 手錶送出的 transferUserInfo 送完了（iPhone 收到）：待送盒那一筆不再算「還沒送到 iPhone」。
     /// 有錯（例：iPhone 上還沒裝 LifeGood）就不動：留在「還沒送到」，設定〔現在送〕再送。
     /// [v6] 不是記帳的再看是不是打卡（"checkIn"）：TripCheckIns.markDelivered（按鈕下面寫「已送到 iPhone」）。都不是不管
+    /// [v7a] 說一句（"voice"）：VoiceOutbox.markDelivered（「已送到 iPhone，記好會告訴你」、原文清掉）
     func session(_ session: WCSession, didFinish userInfoTransfer: WCSessionUserInfoTransfer, error: Error?) {
         guard error == nil else { return }
         let info = userInfoTransfer.userInfo
+        if let data = info[WatchLink.voiceKey] as? Data {
+            guard let voice = WatchVoiceCodec.decode(data) else { return }
+            let id = voice.id
+            Task { @MainActor in
+                VoiceOutbox.shared.markDelivered(id)
+            }
+            return
+        }
         if let data = info[WatchLink.recordKey] as? Data {
             guard let record = WatchRecordCodec.decode(data) else { return }
             let id = record.id

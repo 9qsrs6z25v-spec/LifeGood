@@ -160,6 +160,11 @@
 		A01B000004000060 /* WatchRelevance.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000115 /* WatchRelevance.swift */; };
 		A01B000003000061 /* WatchOpenIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000116 /* WatchOpenIntent.swift */; };
 		A01B000004000061 /* WatchOpenIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000116 /* WatchOpenIntent.swift */; };
+		A01B000002000117 /* WatchVoice.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000117 /* WatchVoice.swift */; };
+		A01B000003000062 /* WatchVoice.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000117 /* WatchVoice.swift */; };
+		A01B000001001609 /* WatchVoiceInbox.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001609 /* WatchVoiceInbox.swift */; };
+		A01B000003000043 /* VoiceOutbox.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000003000043 /* VoiceOutbox.swift */; };
+		A01B000003000044 /* VoiceRecord.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000003000044 /* VoiceRecord.swift */; };
 		A01B000004000009 /* RelevanceCards.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000004000009 /* RelevanceCards.swift */; };
 		A01B000004000010 /* WatchControls.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000004000010 /* WatchControls.swift */; };
 		A01B000001001593 /* NotificationActions.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001593 /* NotificationActions.swift */; };
@@ -509,6 +514,10 @@
 		A01A000004000008 /* RunWeekWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunWeekWidget.swift; sourceTree = "<group>"; };
 		A01A000002000115 /* WatchRelevance.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchRelevance.swift; sourceTree = "<group>"; };
 		A01A000002000116 /* WatchOpenIntent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchOpenIntent.swift; sourceTree = "<group>"; };
+		A01A000002000117 /* WatchVoice.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchVoice.swift; sourceTree = "<group>"; };
+		A01A000001001609 /* WatchVoiceInbox.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchVoiceInbox.swift; sourceTree = "<group>"; };
+		A01A000003000043 /* VoiceOutbox.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceOutbox.swift; sourceTree = "<group>"; };
+		A01A000003000044 /* VoiceRecord.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceRecord.swift; sourceTree = "<group>"; };
 		A01A000004000009 /* RelevanceCards.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RelevanceCards.swift; sourceTree = "<group>"; };
 		A01A000004000010 /* WatchControls.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchControls.swift; sourceTree = "<group>"; };
 		A01A000001001593 /* NotificationActions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationActions.swift; sourceTree = "<group>"; };
@@ -846,6 +855,7 @@
 				A01A000002000114 /* WatchRunWeekText.swift */,
 				A01A000002000115 /* WatchRelevance.swift */,
 				A01A000002000116 /* WatchOpenIntent.swift */,
+				A01A000002000117 /* WatchVoice.swift */,
 			);
 			path = Shared;
 			sourceTree = "<group>";
@@ -908,6 +918,7 @@
 				A01A000001001595 /* WatchExtrasWriter.swift */,
 				A01A000001001596 /* WatchBridge.swift */,
 				A01A000001001602 /* WatchActionInbox.swift */,
+				A01A000001001609 /* WatchVoiceInbox.swift */,
 				A01A000001001604 /* WatchRunImport.swift */,
 				A01A000001000020 /* LifeModels.swift */,
 				A01A000001000201 /* HealthModels.swift */,
@@ -1185,6 +1196,8 @@
 				A01A000003000040 /* RunWeekView.swift */,
 				A01A000003000041 /* RunDetailView.swift */,
 				A01A000003000042 /* StartRunIntent.swift */,
+				A01A000003000043 /* VoiceOutbox.swift */,
+				A01A000003000044 /* VoiceRecord.swift */,
 				A01A000003000004 /* Assets.xcassets */,
 				A01A000003000002 /* Info.plist */,
 				A01A000003000003 /* LifeGoodWatch.entitlements */,
@@ -1456,6 +1469,8 @@
 				A01B000001001595 /* WatchExtrasWriter.swift in Sources */,
 				A01B000001001596 /* WatchBridge.swift in Sources */,
 				A01B000001001602 /* WatchActionInbox.swift in Sources */,
+				A01B000002000117 /* WatchVoice.swift in Sources */,
+				A01B000001001609 /* WatchVoiceInbox.swift in Sources */,
 				A01B000001001604 /* WatchRunImport.swift in Sources */,
 				A01B000001001597 /* WatchSettingsSection.swift in Sources */,
 				A01B000002000110 /* WatchPackage.swift in Sources */,
@@ -1701,6 +1716,9 @@
 				A01B000003000040 /* RunWeekView.swift in Sources */,
 				A01B000003000041 /* RunDetailView.swift in Sources */,
 				A01B000003000042 /* StartRunIntent.swift in Sources */,
+				A01B000003000062 /* WatchVoice.swift in Sources */,
+				A01B000003000043 /* VoiceOutbox.swift in Sources */,
+				A01B000003000044 /* VoiceRecord.swift in Sources */,
 				A01B000003000051 /* DayTimelineAttributes.swift in Sources */,
 				A01B000003000052 /* WidgetSnapshot.swift in Sources */,
 				A01B000003000053 /* WidgetLink.swift in Sources */,

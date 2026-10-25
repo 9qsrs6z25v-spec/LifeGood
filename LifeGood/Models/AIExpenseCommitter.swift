@@ -19,21 +19,49 @@ import MapKit
 //
 // [v25.577] 定期轉帳 v1b：AI 認得「轉到自己的帳戶」（ParsedAIExpense.ownTransfer）→ commit 第一行就回
 // 「這是轉帳，沒有記成支出」，不建 Expense、不扣帳戶（轉給家人、房東照舊記支出）。
+//
+// [手錶 v7a] v25.585（watch/judge.md §4.1「說一句」、§8 v7a；watch/build/v7a/brief.md §2）：手錶說一句也走這一支——
+//   • record 多三個選填參數（都有預設值，iPhone 浮動麥克風、說一句的呼叫一行不改、行為不變）：
+//     id（那筆支出的編號＝手錶那一句的編號：兩條路都到、手錶重送只記一次）、date（講完那一刻，不是 iPhone 解析的時間）、
+//     trip（旅途中：記到哪一趟哪一站；外幣照 v6——AI 聽到的數字是那一國的錢，台幣用手錶上的匯率換，WatchVoiceRule.recorded）
+//   • 三種沒記成的提示字收成常數（ownTransferTitle、noAmountTitle、failedTitle；字一個都沒改）：手錶那邊照這幾個分是哪一種
+//   • 記好了的 AIExpenseOutcome 多帶 spokenAmount（AI 聽到的數字；旅途中外幣是原幣）：回手錶的「₩18,000 ≈ NT$412」用
 
 /// AI 記帳的結果提示（浮動麥克風的 toast、說一句的結果卡都用這一份字）
 struct AIExpenseOutcome: Equatable {
     let title: String
     let detail: String
     let isError: Bool
+    /// [手錶 v7a] 記好了才有：AI 聽到的數字（旅途中外幣是原幣「18000」；國內＝存的金額）。iPhone 的提示不用它
+    var spokenAmount: Double? = nil
+}
+
+/// [手錶 v7a] 手錶說一句在旅途中：記到哪一趟、哪一站；外幣（照 v6 記一筆：台幣用手錶上的匯率換、入帳不重算）
+struct AIExpenseTripLink: Equatable {
+    var planId: UUID
+    /// nil＝記在整趟上
+    var stopId: UUID?
+    /// 那一國的幣別寫法（＝支出存的 currencyCode，例「韓元」）；nil＝台幣
+    var currencyCode: String?
+    /// 1 單位外幣＝幾台幣（手錶上那個匯率）
+    var rateToTWD: Double?
 }
 
 @MainActor
 enum AIExpenseCommitter {
 
+    /// [手錶 v7a] 沒記成的提示字（手錶 WatchVoiceSaidBuilder.outcome 照這幾個分是哪一種；字跟以前一模一樣）
+    static let ownTransferTitle = "這是轉帳，沒有記成支出"
+    static let noAmountTitle = "找不到金額"
+    static let failedTitle = "AI 解析失敗"
+
     /// 一句話 → AI 解析 → 存檔（含銀行扣款、房地產章節同步、美食地圖查詢）→ 要顯示的提示。
     /// text 由呼叫的人去頭尾空白、確定不是空的（空的提示字兩邊不一樣，各自處理）。
+    /// [手錶 v7a] id、date、trip 只有手錶說一句（WatchVoiceApplier）會給：支出編號＝那一句的編號、時間＝講完那一刻、
+    /// 旅途中記到那一站（外幣照 v6）。iPhone 的呼叫不給＝新編號、現在、台幣、不連旅遊（跟以前一樣）
     static func record(text: String, expense: ExpenseStore, life: LifeStore,
-                       finance: FinanceStore) async -> AIExpenseOutcome {
+                       finance: FinanceStore, id: UUID? = nil, date: Date? = nil,
+                       trip: AIExpenseTripLink? = nil) async -> AIExpenseOutcome {
         do {
             // 把家庭成員姓名與本人名字一起送給 AI，讓它從固定清單選同行者
             // 優先用中文姓名，沒填才用英文姓名
@@ -69,10 +97,13 @@ enum AIExpenseCommitter {
                 finance: finance,
                 cards: cardDisplayNames,
                 banks: bankDisplayNames,
-                estates: realEstateDisplayNames
+                estates: realEstateDisplayNames,
+                id: id,
+                date: date,
+                trip: trip
             )
         } catch {
-            return AIExpenseOutcome(title: "AI 解析失敗", detail: error.localizedDescription, isError: true)
+            return AIExpenseOutcome(title: failedTitle, detail: error.localizedDescription, isError: true)
         }
     }
 
@@ -134,19 +165,26 @@ enum AIExpenseCommitter {
         finance: FinanceStore,
         cards cardDisplayNames: [AccountOption],
         banks bankDisplayNames: [AccountOption],
-        estates realEstateDisplayNames: [RealEstateOption]
+        estates realEstateDisplayNames: [RealEstateOption],
+        id recordId: UUID?,
+        date recordDate: Date?,
+        trip: AIExpenseTripLink?
     ) async -> AIExpenseOutcome {
         // [v25.577] 跟 AI 說轉到自己的帳戶（定期轉帳 v1b，judge §5）：自己帳戶之間搬錢不是花費——不建 Expense、不扣帳戶，只提示。
         // 不幫你建單次轉帳或規則：AI 認錯帳戶時不會偷偷寫一筆轉帳；「每月轉兩萬」也不是單次（真的幫你建留在以後）
         if parsed.ownTransfer {
-            return AIExpenseOutcome(title: "這是轉帳，沒有記成支出",
+            return AIExpenseOutcome(title: ownTransferTitle,
                                     detail: "自己帳戶之間搬錢不算花費。到財富頁按〔＋〕記〔轉帳〕；每個月都轉的記〔定期轉帳〕。",
                                     isError: false)
         }
-        let amount = parsed.amount ?? 0
-        guard amount > 0 else {
-            return AIExpenseOutcome(title: "找不到金額", detail: parsed.originalText ?? "AI 沒辨識出金額", isError: true)
+        let spoken = parsed.amount ?? 0
+        guard spoken > 0 else {
+            return AIExpenseOutcome(title: noAmountTitle, detail: parsed.originalText ?? "AI 沒辨識出金額", isError: true)
         }
+        // [手錶 v7a] 旅途中外幣（手錶說一句）：AI 聽到的是那一國的錢，台幣用手錶上的匯率換、幣別存那一國；
+        // 沒有 trip（iPhone 自己的說一句、浮動麥克風）＝原樣、"NT$"（跟以前一樣）
+        let money = WatchVoiceRule.recorded(spoken: spoken, code: trip?.currencyCode, rate: trip?.rateToTWD)
+        let amount: Double = money.amount
         let category = AIVariableCategoryMapper.map(parsed.categoryRaw) ?? .other
         let title: String = {
             if let t = parsed.title, !t.isEmpty { return t }
@@ -199,16 +237,17 @@ enum AIExpenseCommitter {
             ) ?? .other
         }
         let finalCategory: VariableCategory = (linkedRealEstateId != nil) ? .realEstate : category
-        let exp = Expense(
-            id: UUID(),
+        var exp = Expense(
+            id: recordId ?? UUID(),
             title: title,
             amount: amount,
-            date: Date(),
+            date: recordDate ?? Date(),
             expenseType: .variable,
             variableCategory: finalCategory,
             linkedRealEstateId: linkedRealEstateId,
             realEstateExpenseCategory: realEstateSubCat,
             note: parsed.note ?? "",
+            currencyCode: money.currencyCode,
             diningMember: resolvedDiningMember,
             linkedBankMilestoneId: linkedBankId,
             // [v25.563] 預設幣別跟記帳選單同一支（WealthFacts.currencies，D20／C2）；刷卡的照記帳表單寫台幣
@@ -220,6 +259,10 @@ enum AIExpenseCommitter {
             placeLatitude: placeLat,
             placeLongitude: placeLon
         )
+        // [手錶 v7a] 旅途中記到那一趟、那一站（不在 memberwise init，照 AddExpenseView 存檔端、QuickRecordImporter.tripLink 指派）
+        let link = tripLink(trip, plans: life.tripPlans)
+        exp.linkedTripPlanId = link.planId
+        exp.linkedTripStopId = link.stopId
         expense.add(exp)
         // AI 語音記帳原本只寫入 Expense 就結束，沒有比照 AddExpenseView.save() 呼叫
         // syncBankWithdrawal／syncRealEstateVariableExpense，導致銀行帳戶餘額、房地產支出
@@ -239,7 +282,18 @@ enum AIExpenseCommitter {
             detailParts.append("\(re)\(subText)")
         }
         if placeLat != nil { detailParts.append("已標 美食地圖") }
-        return AIExpenseOutcome(title: "已記一筆：\(title)", detail: detailParts.joined(separator: "・"), isError: false)
+        return AIExpenseOutcome(title: "已記一筆：\(title)", detail: detailParts.joined(separator: "・"), isError: false,
+                                spokenAmount: spoken)
+    }
+
+    /// [手錶 v7a] 連到哪一趟、哪一站（同 QuickRecordImporter.tripLink）：那一趟還在才連；站要還在那一趟裡，不在＝算整趟。
+    /// 沒有 trip（iPhone 的呼叫）＝兩個都 nil（跟以前一樣不連）
+    private static func tripLink(_ trip: AIExpenseTripLink?, plans: [TripPlan]) -> (planId: UUID?, stopId: UUID?) {
+        guard let trip, let plan = plans.first(where: { $0.id == trip.planId }) else {
+            return (planId: nil, stopId: nil)
+        }
+        let sid: UUID? = plan.stops.first(where: { $0.id == trip.stopId })?.id
+        return (planId: trip.planId, stopId: sid)
     }
 
     /// AI 記帳扣款帳戶預設幣別：而非寫死 "NT$"，避免外幣帳戶被記到錯誤幣別的桶子。

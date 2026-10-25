@@ -63,6 +63,21 @@ import WatchConnectivity
 //     不碰 Apple 健康同步、App 的三份大資料、不 refresh（旗子跟包無關）；健康頁回前景、收到 WatchRunFlags.changed 才去找那一筆
 //   • 有回話的那支：記一筆、打卡都沒有、只有跑步 → 回 ["ok": "queued"]（手錶其實不等回話；保險）
 //
+// [手錶 v7a] v25.585（watch/judge.md §4.1「說一句」、§5.4、§5.5、§6.1、§6.7、附錄 B 說一句那一列；watch/build/v7a/brief.md G1-1；
+//         sim_v7a.py receive_voice）：收手錶的說一句——
+//   • 手錶每一句跟記一筆一樣走兩條路：transferUserInfo（排隊、保證送到；didReceiveUserInfo，沒有回話）＋ iPhone 在旁邊時再
+//     sendMessage（didReceiveMessage 帶 "voice"，回 ["ok": "working" | "queued" | "done" | "failed", "said": Data（done 才有）]）。
+//     三支 delegate 方法（有回話、沒回話的 didReceiveMessage、didReceiveUserInfo）都在背景執行緒先拆好 voiceData，主執行緒走 receiveVoice
+//   • receiveVoice 的順序：解開 → 撐 3 秒背景時間（跟記一筆同一個）→ WatchVoiceLog 有這個編號＝另一條路早就記過了、手錶重送：
+//     直接回 done＋那一份結果（不再排、不再記）→ 先寫 App Group 一個小檔 watch_voice_v1/<編號>.json（WatchVoiceInbox.add；
+//     同一個編號同一個檔，兩條路都到也只有一個）→ WatchVoiceApplier 準備好了（App 開著、或剛用過還活著：.task 叫過 start）
+//     才叫它記（applyPending）、回 working；不是（被手錶叫醒的冷啟動）只寫了檔、回 queued
+//   • 冷啟動只寫檔：不碰 App 的三份大資料、不叫 AI、不讀訂閱與 AI 設定、不算數字（judge §5.4、§7.8-6；pkg_keys_check.py D8 擋）。
+//     打開 iPhone 上的 LifeGood（.task、回前景，讀完訂閱之後 WatchVoiceApplier.applyPending）才照講完的時間順序記
+//   • 記帳、回手錶的字都在 WatchVoiceApplier（Models/WatchVoiceInbox.swift）；這個檔只排檔、叫它
+//   • 回手錶的結果 sendSaid（主控寫的）：只送 WatchVoiceSaid（名稱、分類、台幣、外幣字、付款類別刷卡／現金／轉帳），
+//     沒有卡名、末四碼、你講的原文
+//
 // 對外的名字（WidgetSnapshotWriter、AppDelegate、設定頁在叫）不准改。
 
 /// App Group 的鍵與檔名（WidgetShared.defaults；delegate 方法在背景執行緒也要讀得到，放在 actor 外面）
@@ -430,6 +445,51 @@ final class WatchBridge: NSObject, ObservableObject {
             WatchRunFlags.noteUnsaved(unsaved == 1, now: Date())
         }
     }
+
+    // MARK: - [v7a] 說一句（主控寫好 sendSaid；收的那一半 receiveVoice 與三支 delegate 的接線是 G1，watch/build/v7a/brief.md G1-1）
+
+    /// 手錶講的一句（sendMessage、transferUserInfo 兩條路都走這裡；主執行緒）。
+    /// 回 ["ok": "working"]（App 活著，正在記；記好了 WatchVoiceApplier 另外 sendSaid）／["ok": "queued"]（冷啟動，只寫了檔）／
+    /// ["ok": "done", "said": Data]（早就記過了）／["ok": "failed"]（解不開、寫不進檔）。transferUserInfo 那條沒有回話，丟掉。
+    /// 時間一律是手錶講完那一刻（WatchVoice.saidAt），不是送到的時間
+    private func receiveVoice(_ data: Data) -> [String: Any] {
+        guard let voice = WatchVoiceCodec.decode(data) else {
+            return [WatchLink.okKey: WatchLink.okFailed]
+        }
+        // 同一個 3 秒背景時間（寫檔、回話）；記帳那一段 WatchVoiceApplier 自己撐背景時間
+        holdForRecord()
+        // 另一條路早就記過了、手錶重送：直接回那一份結果（不再排、不再記）
+        if let said = WatchVoiceLog.said(for: voice.id), let saidData = WatchVoiceSaidCodec.encode(said) {
+            return [WatchLink.okKey: WatchLink.okDone, WatchLink.saidKey: saidData]
+        }
+        // 先寫一個小檔（冷啟動也對；同一個編號覆寫同一個檔，兩條路都到也只有一個）
+        guard WatchVoiceInbox.add(voice) else {
+            return [WatchLink.okKey: WatchLink.okFailed]
+        }
+        let applier = WatchVoiceApplier.shared
+        // App 開著、或剛用過還活著：馬上記（AI 要幾秒；記好了 WatchVoiceApplier 自己 sendSaid 回手錶）
+        if applier.isReady {
+            applier.applyPending()
+            return [WatchLink.okKey: WatchLink.okWorking]
+        }
+        // 被手錶叫醒的冷啟動：只寫了檔，打開 iPhone 上的 LifeGood 才記（不碰三份大資料、不叫 AI、不讀訂閱）
+        return [WatchLink.okKey: WatchLink.okQueued]
+    }
+
+    /// 一句記完（不管結果）回手錶（WatchVoiceApplier 叫；主執行緒）：transferUserInfo（排隊、保證送到、手錶 App 沒開也收得到）
+    /// ＋手錶在旁邊再 sendMessage（快；手錶 WatchSync 的 didReceiveMessage）。兩份都到手錶照編號只算一次。
+    /// 只送 WatchVoiceSaid（名稱、分類、台幣、外幣字、付款類別）：沒有卡名、末四碼、你講的原文
+    func sendSaid(_ said: WatchVoiceSaid) {
+        guard WCSession.isSupported(), activationRequested else { return }
+        let session = WCSession.default
+        guard Self.canSend(session), let data = WatchVoiceSaidCodec.encode(said) else { return }
+        let message: [String: Any] = [WatchLink.saidKey: data]
+        _ = session.transferUserInfo(message)
+        guard session.isReachable else { return }
+        session.sendMessage(message, replyHandler: nil, errorHandler: { _ in
+            // 手錶不在旁邊了：transferUserInfo 那一份照樣排著
+        })
+    }
 }
 
 // MARK: - WCSessionDelegate（背景執行緒；一律 nonisolated，要動狀態包 Task { @MainActor in … }）
@@ -461,14 +521,17 @@ extension WatchBridge: WCSessionDelegate {
         session.activate()
     }
 
-    /// 手錶來要「給我最新的」、[v2] 手錶記的一筆、[v6] 手錶的打卡（要回覆的那種）、[v5] 我跑完了／沒存成（保險：手錶送這兩種不等回話）。
-    /// 訊息在這裡先拆好，主執行緒只拿一個 Bool、兩份 Data、跑步那三樣
+    /// 手錶來要「給我最新的」、[v2] 手錶記的一筆、[v6] 手錶的打卡（要回覆的那種）、[v5] 我跑完了／沒存成（保險：手錶送這兩種不等回話）、
+    /// [v7a] 手錶的說一句（回 working／queued／done＋said／failed）。
+    /// 訊息在這裡先拆好，主執行緒只拿一個 Bool、三份 Data、跑步那三樣
     nonisolated func session(_ session: WCSession,
                              didReceiveMessage message: [String: Any],
                              replyHandler: @escaping ([String: Any]) -> Void) {
         let wants = (message[WatchLink.wantKey] as? String) == WatchLink.wantPackage
         let recordData = message[WatchLink.recordKey] as? Data
         let checkInData = message[WatchLink.checkInKey] as? Data
+        // [v7a] 說一句（WatchVoiceCodec 的 JSON）
+        let voiceData = message[WatchLink.voiceKey] as? Data
         // [v5] 有 "ranWorkout" 這個鍵就是「我跑完了」（空字串＝讀不到編號，也算）；"unsavedRun" 1／0
         let ranId = message[WatchLink.ranWorkoutKey] as? String
         let ranAt = (message[WatchLink.ranAtKey] as? Double).map { Date(timeIntervalSince1970: $0) }
@@ -482,6 +545,8 @@ extension WatchBridge: WCSessionDelegate {
                 replyHandler(self.receiveRecord(recordData))
             } else if let checkInData {
                 replyHandler(self.receiveCheckIn(checkInData))
+            } else if let voiceData {
+                replyHandler(self.receiveVoice(voiceData))
             } else if hasRun && !wants {
                 replyHandler([WatchLink.okKey: WatchLink.okQueued])
             } else {
@@ -490,22 +555,26 @@ extension WatchBridge: WCSessionDelegate {
         }
     }
 
-    /// 不用回覆的訊息：[v2] 萬一帶了一筆記帳、[v6] 一筆打卡，照樣收（沒有回話）；
+    /// 不用回覆的訊息：[v2] 萬一帶了一筆記帳、[v6] 一筆打卡、[v7a] 一句說一句，照樣收（沒有回話）；
     /// [v5] 手錶的「我跑完了」「沒存成」走這支（sendMessage 的 replyHandler 是 nil）
     nonisolated func session(_ session: WCSession, didReceiveMessage message: [String: Any]) {
         let recordData = message[WatchLink.recordKey] as? Data
         let checkInData = message[WatchLink.checkInKey] as? Data
+        let voiceData = message[WatchLink.voiceKey] as? Data
         let ranId = message[WatchLink.ranWorkoutKey] as? String
         let ranAt = (message[WatchLink.ranAtKey] as? Double).map { Date(timeIntervalSince1970: $0) }
         let unsaved = message[WatchLink.unsavedRunKey] as? Int
         let hasRun = ranId != nil || unsaved != nil
-        guard recordData != nil || checkInData != nil || hasRun else { return }
+        guard recordData != nil || checkInData != nil || voiceData != nil || hasRun else { return }
         Task { @MainActor in
             if let recordData {
                 _ = self.receiveRecord(recordData)
             }
             if let checkInData {
                 _ = self.receiveCheckIn(checkInData)
+            }
+            if let voiceData {
+                _ = self.receiveVoice(voiceData)
             }
             if hasRun {
                 self.receiveRun(ranId: ranId, ranAt: ranAt, unsaved: unsaved)
@@ -513,22 +582,26 @@ extension WatchBridge: WCSessionDelegate {
         }
     }
 
-    /// [v2] 手錶 transferUserInfo 來的一筆記帳、[v6] 一筆打卡、[v5] 我跑完了／沒存成（排隊、保證送到；沒有回話）。
+    /// [v2] 手錶 transferUserInfo 來的一筆記帳、[v6] 一筆打卡、[v5] 我跑完了／沒存成、[v7a] 一句說一句（排隊、保證送到；沒有回話）。
     /// iOS 也有這個 delegate 方法
     nonisolated func session(_ session: WCSession, didReceiveUserInfo userInfo: [String: Any] = [:]) {
         let recordData = userInfo[WatchLink.recordKey] as? Data
         let checkInData = userInfo[WatchLink.checkInKey] as? Data
+        let voiceData = userInfo[WatchLink.voiceKey] as? Data
         let ranId = userInfo[WatchLink.ranWorkoutKey] as? String
         let ranAt = (userInfo[WatchLink.ranAtKey] as? Double).map { Date(timeIntervalSince1970: $0) }
         let unsaved = userInfo[WatchLink.unsavedRunKey] as? Int
         let hasRun = ranId != nil || unsaved != nil
-        guard recordData != nil || checkInData != nil || hasRun else { return }
+        guard recordData != nil || checkInData != nil || voiceData != nil || hasRun else { return }
         Task { @MainActor in
             if let recordData {
                 _ = self.receiveRecord(recordData)
             }
             if let checkInData {
                 _ = self.receiveCheckIn(checkInData)
+            }
+            if let voiceData {
+                _ = self.receiveVoice(voiceData)
             }
             if hasRun {
                 self.receiveRun(ranId: ranId, ranAt: ranAt, unsaved: unsaved)
