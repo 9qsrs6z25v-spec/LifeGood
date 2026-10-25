@@ -27,7 +27,15 @@ import Combine
 //     打開這一段、手錶送「我跑完了」「沒存成」（WatchRunFlags.changed）時重讀
 //   • 小字多一句：用手錶記時 iPhone 不會多記一筆；手錶跑完會叫 iPhone 馬上帶進健康頁
 //   • 第一列照舊「手錶版已安裝・上次送到手錶 09:24・6 KB」；SettingsView.swift 一行不動
-// 智慧型堆疊（v7b）這一版不放。
+// [手錶 v7b] v25.584（watch/build/v7b/brief.md G1；judge §2.16、§6.3；brief 主控定案 7）：
+//   • 「智慧型堆疊卡（watchOS 26）」總開關［開］（WatchPhoneSettings.stackCardsKey 同一個鍵；沒設定過＝開）：
+//     關掉＝iPhone 下一包 relevanceCards 是 nil，五張卡不浮，「下一場」「已花」「這週跑步」也不自己往上排
+//   • 五張卡各自一個開關［開］（WatchRelevanceKind.allCases 的順序：早安、快開會了、卡費快到了、平常跑步的時間、旅途下一站；
+//     鍵 WatchRelevanceKind.settingsKey；小字 WatchRelevanceKind.whenText）。總開關關著時五列變暗（.disabled，不拿掉）
+//   • 小字一列：「錶面上至少放一格 LifeGood 數字才會自己跟上；只放堆疊的話打開手錶 App 一次就更新」
+//   • 新列全收在 stackBlock（ownerToggle 之後、diagnosticsRow 之前；Section 直接子 view 9 個）
+//   • 說明多一句：智慧型堆疊卡不寫卡名、卡費金額、部屬名字，也不放天氣；手腕放下時連會議名、站名也不寫
+//   • 說明最後那句（v1「錶面上至少放一格 LifeGood，數字才會自己跟上…」）拿掉：跟上面那一列同一句，不在同一段寫兩次（judge §2.16、§3.2）
 // 改了開關：寫 App Group（WatchPhoneSettings 同一組鍵）→ bridge.settingsChanged() 重組重送。
 
 struct WatchSettingsSection: View {
@@ -50,6 +58,14 @@ struct WatchSettingsSection: View {
     @State private var runUnsaved = WatchRunFlags.hasUnsaved(now: Date())
     /// [v5] 手錶上次跑完（那一趟結束的時間）
     @State private var runLastRanAt: Date? = WatchRunFlags.lastRanAt
+    /// [v7b] 智慧型堆疊卡總開關（WatchPhoneSettings.stackCards 同一個鍵；沒設定過＝開）
+    @AppStorage(WatchPhoneSettings.stackCardsKey, store: WidgetShared.defaults) private var stackCards = true
+    /// [v7b] 五張卡各自的開關（WatchPhoneSettings.stackKinds 同一組鍵；沒設定過＝開）
+    @AppStorage(WatchRelevanceKind.morning.settingsKey, store: WidgetShared.defaults) private var stackMorning = true
+    @AppStorage(WatchRelevanceKind.meeting.settingsKey, store: WidgetShared.defaults) private var stackMeeting = true
+    @AppStorage(WatchRelevanceKind.cardBill.settingsKey, store: WidgetShared.defaults) private var stackCardBill = true
+    @AppStorage(WatchRelevanceKind.usualRun.settingsKey, store: WidgetShared.defaults) private var stackUsualRun = true
+    @AppStorage(WatchRelevanceKind.tripStop.settingsKey, store: WidgetShared.defaults) private var stackTripStop = true
 
     var body: some View {
         Section {
@@ -64,6 +80,7 @@ struct WatchSettingsSection: View {
             barcodeToggle
             tripToggle
             ownerToggle
+            stackBlock
             diagnosticsRow
         } header: {
             Text("送到手錶的內容")
@@ -155,6 +172,65 @@ struct WatchSettingsSection: View {
         .onChange(of: showOwnerNames) { _, on in
             WatchPhoneSettings.setShowOwnerNames(on)
             bridge.settingsChanged()
+        }
+    }
+
+    /// [v7b] 智慧型堆疊卡：總開關＋五張卡（WatchRelevanceKind.allCases 的順序）＋那一句。
+    /// 每個開關改了都 bridge.settingsChanged()（WatchPhoneSettings 讀同一組鍵，這裡不另外存）
+    @ViewBuilder
+    private var stackBlock: some View {
+        stackMasterToggle
+        stackToggle(.morning, isOn: $stackMorning)
+            .onChange(of: stackMorning) { _, _ in bridge.settingsChanged() }
+        stackToggle(.meeting, isOn: $stackMeeting)
+            .onChange(of: stackMeeting) { _, _ in bridge.settingsChanged() }
+        stackToggle(.cardBill, isOn: $stackCardBill)
+            .onChange(of: stackCardBill) { _, _ in bridge.settingsChanged() }
+        stackToggle(.usualRun, isOn: $stackUsualRun)
+            .onChange(of: stackUsualRun) { _, _ in bridge.settingsChanged() }
+        stackToggle(.tripStop, isOn: $stackTripStop)
+            .onChange(of: stackTripStop) { _, _ in bridge.settingsChanged() }
+        stackNoteRow
+    }
+
+    /// [v7b] 總開關（關掉＝下一包不放卡、三種也不自己往上排）
+    private var stackMasterToggle: some View {
+        Toggle(isOn: $stackCards) {
+            rowLabel(icon: "square.stack.3d.up.fill", color: .teal,
+                     title: "智慧型堆疊卡（watchOS 26）",
+                     subtitle: stackCards ? Self.stackOn : Self.stackOff)
+        }
+        .tint(.indigo)
+        .onChange(of: stackCards) { _, _ in
+            bridge.settingsChanged()
+        }
+    }
+
+    /// [v7b] 一張卡的開關（總開關關著時變暗、不拿掉；往右縮一點表示在總開關底下）
+    private func stackToggle(_ kind: WatchRelevanceKind, isOn: Binding<Bool>) -> some View {
+        Toggle(isOn: isOn) {
+            rowLabel(icon: kind.icon, color: stackColor(kind), title: kind.title, subtitle: kind.whenText)
+        }
+        .tint(.indigo)
+        .disabled(!stackCards)
+        .padding(.leading, 12)
+    }
+
+    /// [v7b] 「錶面上至少放一格 LifeGood 數字才會自己跟上…」
+    private var stackNoteRow: some View {
+        Text(Self.stackFaceNote)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+    }
+
+    /// [v7b] 每張卡圖示的色
+    private func stackColor(_ kind: WatchRelevanceKind) -> Color {
+        switch kind {
+        case .morning:  return .orange
+        case .meeting:  return .blue
+        case .cardBill: return .yellow
+        case .usualRun: return .orange
+        case .tripStop: return .purple
         }
     }
 
@@ -250,11 +326,17 @@ struct WatchSettingsSection: View {
     private static let runLastPrefix = "手錶上次跑完 "
     private static let runHint = "選「用手錶記」：健康頁按開始，手錶自己打開準備頁"
 
-    private static let footnote =
+    /// [v7b] 智慧型堆疊卡那幾列的字
+    private static let stackOn =
+        "早安、快開會了、卡費快到了、平常跑步的時間、旅途下一站到時間自己浮上來；你加進堆疊的下一場、已花、這週跑步也會自己排到上面"
+    private static let stackOff = "關掉：卡不會浮上來，下一場、已花、這週跑步也不自己往上排"
+    private static let stackFaceNote = "錶面上至少放一格 LifeGood 數字才會自己跟上；只放堆疊的話打開手錶 App 一次就更新"
+
+    private static let footnote: String =
         "卡名、卡費金額、存摺、淨資產、部屬請假、完整號碼不會送到手錶。手腕放下時手錶上的金額一律遮起來。"
         + "手機條碼預設不送；發票驗證碼永遠不送。"
         + "旅行只送站名、時間、地址、電話、天氣；不送備註、照片、同行者。"
         + "會議主題會出現在錶面與通知上。"
+        + "智慧型堆疊卡不寫卡名、卡費金額、部屬名字，也不放天氣；手腕放下時連會議名、站名也不寫。"
         + "跑步選「用手錶記」時，iPhone 不會多記一筆；手錶跑完會叫 iPhone 馬上帶進健康頁。"
-        + "錶面上至少放一格 LifeGood，數字才會自己跟上；只放在智慧型堆疊的話，要打開手錶 App 一次才會更新。"
 }

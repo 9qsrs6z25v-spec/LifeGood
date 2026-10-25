@@ -231,6 +231,12 @@ final class WatchSync: NSObject, WCSessionDelegate {
     func sendUnsavedRun(_ unsaved: Bool) {
         let message: [String: Any] = [WatchLink.unsavedRunKey: unsaved ? 1 : 0]
         deliverRunReport(message, slot: WatchLink.unsavedRunKey)
+        // [v7b] 沒存成的那一趟也寫進了 WatchRunLog（RelevanceCardSource 照樣算「今天那個時段跑過了」）：
+        // 請系統重新問「平常跑步的時間」「這週跑步」什麼時候浮（存好的那條走 sendRanWorkout → reloadRunWeekWidget）
+        if unsaved {
+            WidgetCenter.shared.invalidateRelevance(ofKind: WatchWidgetKind.runWeek)
+            WidgetCenter.shared.invalidateRelevance(ofKind: WatchWidgetKind.cardRun)
+        }
     }
 
     /// 錶面「這週跑步」重畫（WatchRunLog 加了、拿掉一趟）。

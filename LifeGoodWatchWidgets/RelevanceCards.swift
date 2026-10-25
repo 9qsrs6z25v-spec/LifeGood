@@ -252,7 +252,8 @@ struct TripStopCardWidget: Widget {
 //   • 點了開 card.link（widgetURL）；最外層 .containerBackground(for: .widget) { WatchWidgetStyle.sky }（不整片紅綠）
 //   • 41mm（堆疊卡約 162 點寬）也要放得下：字不夠寬靠 minimumScaleFactor，不換行
 
-/// 一張堆疊卡（G2 擁有；主控先放一個編得過的最簡版）
+/// 一張堆疊卡（G2）：三行左對齊。字只拿 lines（WatchRelevancePlan.shownLines 選好的那一份）：不讀包、不讀設定、不拼字。
+/// 最外層只有點了開哪裡（widgetURL）與夜空底（containerBackground）；手腕放下不另外換字、不另外調暗（系統會），版面不跳
 struct RelevanceCardView: View {
     let card: WatchRelevanceCard
 
@@ -267,9 +268,7 @@ struct RelevanceCardView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 1) {
             ForEach(Array(lines.enumerated()), id: \.offset) { pair in
-                Text(pair.element.text)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.7)
+                RelevanceCardLineView(line: pair.element, isFirst: pair.offset == 0)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -277,5 +276,85 @@ struct RelevanceCardView: View {
         .containerBackground(for: .widget) {
             WatchWidgetStyle.sky
         }
+    }
+}
+
+/// 卡的一行：圖示（有 tint 用 tint，沒有跟字同色）＋開頭上色那一段（lead，tone 的顏色）＋其餘的字。
+/// 第一行 16 semibold rounded、其他 15 medium rounded；一行、放不下縮到 0.7（41mm 約 162 點寬也不換行）
+private struct RelevanceCardLineView: View {
+    let line: WatchCardLine
+    let isFirst: Bool
+
+    var body: some View {
+        HStack(spacing: 4) {
+            iconView
+            textView
+        }
+    }
+
+    /// 「☀︎」「💳」「🏃」…；沒有 icon 不畫（HStack 不留空位）
+    @ViewBuilder
+    private var iconView: some View {
+        if let symbol = line.icon {
+            Image(systemName: symbol)
+                .font(.system(size: iconSize, weight: .semibold))
+                .foregroundStyle(iconColor)
+                .widgetAccentable()
+        }
+    }
+
+    private var textView: some View {
+        lineText
+            .font(lineFont)
+            .lineLimit(1)
+            .minimumScaleFactor(0.7)
+    }
+
+    /// 有 lead：「3 天後」（tone 色）＋「・要自己繳」（一般色）；沒有 lead：tone 上在整行（tone 是 nil＝一般色）
+    private var lineText: Text {
+        guard let lead = line.lead else {
+            let whole: Text = Text(line.text).foregroundStyle(toneColor)
+            return whole
+        }
+        let head: Text = Text(lead).foregroundStyle(toneColor)
+        let rest: Text = Text(line.text).foregroundStyle(baseColor)
+        return head + rest
+    }
+
+    private var lineFont: Font {
+        if isFirst {
+            return Font.system(size: 16, weight: .semibold, design: .rounded)
+        }
+        return Font.system(size: 15, weight: .medium, design: .rounded)
+    }
+
+    private var iconSize: CGFloat {
+        isFirst ? 12 : 11
+    }
+
+    private var iconColor: Color {
+        if let hex = line.tint {
+            return WatchWidgetStyle.color(hex)
+        }
+        return toneColor
+    }
+
+    /// tone："amber" 琥珀、"blue" 倒數藍、"dim" 灰；nil 或其他＝一般色
+    private var toneColor: Color {
+        switch line.tone ?? "" {
+        case WatchRelevancePlan.toneAmber:
+            return WatchWidgetStyle.color(WatchPalette.amber)
+        case WatchRelevancePlan.toneBlue:
+            return WatchWidgetStyle.countdown
+        case WatchRelevancePlan.toneDim:
+            return Color.secondary
+        default:
+            return baseColor
+        }
+    }
+
+    /// 第一行 primary、其他 primary 0.9
+    private var baseColor: Color {
+        isFirst ? Color.primary : Color.primary.opacity(0.9)
     }
 }
