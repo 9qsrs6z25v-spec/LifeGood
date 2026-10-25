@@ -38,6 +38,15 @@ import SwiftUI
 //   到哪一期恢復、pauseSummary）／〔恢復…〕（下一期起照轉）；「提醒我」開關（rule.remind）；〔結束〕記 endedBy "user"（WealthTransferNotices.endedByUser）。
 // • 新增表單「誰轉」小字換 v2 那句；WealthTransferRenewSheet（要確認〔已經續設〕：銀行那邊設到哪天，改 endKey、endedBy nil）。
 // • 這版新的每一顆都不擋訂閱（judge §6）；寫 store 一律先 dismiss（「提醒我」開關不關頁）、下一個 runloop 才叫。不加任何存檔欄位。
+//
+// [v25.581] G1 v3 以前湊的找出來（transfer/build/v3/brief.md §6 G1；算法、字、key 都是主控的 WealthTransferFinds.swift，這裡只叫）：
+// • 新增表單吃要確認 v3〔改成定期轉帳〕〔合成一條定期轉帳〕〔設成每月都轉〕、明細長按〔設成每月〕、單次轉帳表單〔改成定期轉帳〕帶來的 preset：
+//   最上面一行 preset.lead（「照記帳的『轉玉山存錢』帶好了；存檔時會問記帳那筆怎麼辦」；v1b〔轉帳過去〕那條路沒有 lead，照舊不出現）。
+// • 存檔時「是同一筆嗎？」一定問 preset.matchExpenseId／matchIncomeId 那一筆（WealthTransferMatcher.forcedExpense／forcedIncome：
+//   你改了金額、日子也照問，排最前面；支出先、收入後；小字「本月還能花每月會多…」寫記帳那筆自己的金額）；那筆找不到（記帳刪了）＝照 matcher
+//   原本的，不多問；早就結束了（forced 回 nil）＝那筆不問（不會把結束日往後延）。
+// • 〔不是，兩筆都要〕〔不是〕（不是關掉、〔取消〕）記住：存好後 WealthTransferFinds.notSameKeys → LifeStore.dismissWealthCheck，
+//   要確認不會再問同一筆；關掉沒答的照 v1a 說的之後再問。不加任何存檔欄位、不擋訂閱（新增表單打開的地方照舊擋）。
 
 // MARK: - 共用的字
 
@@ -362,8 +371,10 @@ private enum WealthTransferUIAnswer {
     case endItem
     /// 是，但記帳照記（那筆加進「這筆不算」）
     case keepButExclude
-    /// 不是，兩筆都要（關掉也是）
+    /// 關掉、〔取消〕：兩筆都留、照存，不記（要確認之後還會再問）
     case keepBoth
+    /// [v25.581] 你按的〔不是，兩筆都要〕〔不是〕：兩筆都留，存好後記住不再問（WealthTransferFinds.notSameKeys）
+    case notSame
 }
 
 /// 帶去記帳新增固定支出（巢狀 sheet 的 item）
@@ -395,10 +406,10 @@ private struct WealthTransferUIMatchDialog: ViewModifier {
             if m.kind == .expense {
                 Button("是：記帳那筆從下一期起結束") { onAnswer(m, .endItem) }
                 Button("是，但記帳照記（還能花先扣掉）") { onAnswer(m, .keepButExclude) }
-                Button("不是，兩筆都要") { onAnswer(m, .keepBoth) }
+                Button("不是，兩筆都要") { onAnswer(m, .notSame) }
             } else {
                 Button("是：那筆收入從下個月起結束") { onAnswer(m, .endItem) }
-                Button("不是") { onAnswer(m, .keepBoth) }
+                Button("不是") { onAnswer(m, .notSame) }
             }
             Button("取消", role: .cancel) { onAnswer(m, .keepBoth) }
         } message: { m in
@@ -693,7 +704,9 @@ private struct WealthTransferUIPickSheet: View {
 
 /// 新增或改一條定期轉帳。fromId：「從」帶好這個帳戶（nil＝WealthFacts.defaultTransferFromId：月薪入帳的那個帳戶）。
 /// [v25.577] editRuleId：〔改金額或帳戶〕（同一張表單；存檔問從哪一期起改；要訂閱：打開的地方擋）。
-/// preset：帶好欄位（要確認〔轉帳過去〕小表單的〔改成每月定期轉帳〕；只在新增時看）
+/// preset：帶好欄位（要確認〔轉帳過去〕小表單的〔改成每月定期轉帳〕；只在新增時看）。
+/// [v25.581] preset 也從要確認 v3、明細長按〔設成每月〕、單次轉帳表單〔改成定期轉帳〕來：lead＝表單最上面一行；
+/// matchExpenseId／matchIncomeId＝存檔時「是同一筆嗎？」一定問的那一筆
 struct WealthTransferRuleForm: View {
     var fromId: UUID? = nil
     var editRuleId: UUID? = nil
@@ -742,6 +755,12 @@ struct WealthTransferRuleForm: View {
     @State private var endExpenses: [WealthTransferMatch] = []
     @State private var endIncomes: [WealthTransferMatch] = []
     @State private var excludeExpenses: [UUID] = []
+    /// [v25.581] 「是同一筆嗎？」按了〔不是，兩筆都要〕〔不是〕的那幾筆（存好後記住不再問）
+    @State private var notSameMatches: [WealthTransferMatch] = []
+    /// [v25.581] 打開時抓的帳戶名字（「是同一筆嗎？」問句裡記帳那筆的扣款、入帳帳戶不在選單裡時用）
+    @State private var accountNames: [UUID: String] = [:]
+    /// [v25.581] 「是同一筆嗎？」小字的金額（WealthTransferMatch.id → 「20,000」；只放帶來的那筆支出，其他照這條的金額）
+    @State private var askAmounts: [String: String] = [:]
     @State private var expenseAsk: WealthTransferUIExpenseAsk?
 
     // [v25.577] v1b
@@ -792,6 +811,20 @@ struct WealthTransferRuleForm: View {
     private func choiceName(_ id: UUID?) -> String? {
         guard let id else { return nil }
         return choices.first { $0.id == id }?.name
+    }
+
+    /// [v25.581] 帳戶名字：選單裡的 → 打開時抓的 → 「別的帳戶」
+    private func accountName(_ id: UUID?) -> String {
+        if let n = choiceName(id) { return n }
+        if let id, let n = accountNames[id] { return n }
+        return "別的帳戶"
+    }
+
+    /// [v25.581] 表單最上面一行（新增才有；preset 沒帶 lead＝nil）
+    private var leadLine: String? {
+        guard !isEditing, let line = preset?.lead?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !line.isEmpty else { return nil }
+        return line
     }
 
     /// 每次轉多少（台幣到元；< 1 元＝nil）
@@ -999,7 +1032,8 @@ struct WealthTransferRuleForm: View {
     }
 
     private var amountForDialog: String {
-        WealthFormat.grouped(amountValue ?? 0, decimals: 0)
+        if let m = asking, let t = askAmounts[m.id] { return t }
+        return WealthFormat.grouped(amountValue ?? 0, decimals: 0)
     }
 
     /// 欄位串起來：變了 0.5 秒才重算提示、預覽、〔更早…〕的影響（打字時不算）
@@ -1084,6 +1118,9 @@ struct WealthTransferRuleForm: View {
             }
         } else {
             Form {
+                if let line = leadLine {
+                    leadSection(line)
+                }
                 accountsSection
                 amountSection
                 cycleSection
@@ -1105,6 +1142,15 @@ struct WealthTransferRuleForm: View {
                 }
                 footerSection
             }
+        }
+    }
+
+    /// [v25.581] 「照記帳的『轉玉山存錢』帶好了；存檔時會問記帳那筆怎麼辦」
+    private func leadSection(_ line: String) -> some View {
+        Section {
+            Text(line)
+                .font(.subheadline)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
@@ -1396,6 +1442,11 @@ struct WealthTransferRuleForm: View {
         let facts = lifeStore.wealthFacts(expense: expenseStore, finance: financeStore)
         let t = facts.today
         today = t
+        var names: [UUID: String] = [:]
+        for a in facts.accounts where names[a.id] == nil {
+            names[a.id] = a.name
+        }
+        accountNames = names
         let todayKey = WealthCal.dayKey(t)
         var anchored = Set<UUID>()
         for a in facts.banks {
@@ -1739,12 +1790,49 @@ struct WealthTransferRuleForm: View {
         endExpenses = []
         endIncomes = []
         excludeExpenses = []
+        notSameMatches = []
+        let asked = matchRule(rule)
         let found = WealthTransferMatcher.matches(
-            rule: matchRule(rule), fromName: choiceName(from) ?? "別的帳戶", toName: choiceName(toId) ?? "別的帳戶",
+            rule: asked, fromName: choiceName(from) ?? "別的帳戶", toName: choiceName(toId) ?? "別的帳戶",
             expenses: expenseStore.expenses, incomes: expenseStore.incomes,
             excluded: Set(lifeStore.wealthBook.excludedExpenses ?? []))
-        matchQueue = found
+        let queue: [WealthTransferMatch] = withPresetItems(found, rule: asked)
+        askAmounts = presetAmounts(queue)
+        matchQueue = queue
         askNext()
+    }
+
+    /// [v25.581] 要確認 v3 帶來的記帳那一筆（preset.matchExpenseId／matchIncomeId）一定問、排最前面（支出先、收入接在後面；
+    /// 你改了金額、日子也照問，matcher 找到的同一筆拿掉）。那筆找不到（記帳刪了，matcher 也找不到）＝照 matcher 原本的；
+    /// 早就結束了（forced 回 nil）＝那筆不問（matcher 在 3 天窗裡找到的也拿掉：它的備用結束日會把結束日往後延）
+    private func withPresetItems(_ found: [WealthTransferMatch], rule r: WealthTransferRule) -> [WealthTransferMatch] {
+        guard let p = preset else { return found }
+        var queue: [WealthTransferMatch] = found
+        var at = 0
+        if let eid = p.matchExpenseId, let e = expenseStore.expenses.first(where: { $0.id == eid }) {
+            queue.removeAll { $0.kind == .expense && $0.itemId == eid }
+            let payer: String = accountName(e.linkedBankMilestoneId)
+            if let m = WealthTransferMatcher.forcedExpense(rule: r, expense: e, payerName: payer) {
+                queue.insert(m, at: 0)
+                at = 1
+            }
+        }
+        if let iid = p.matchIncomeId, let inc = expenseStore.incomes.first(where: { $0.id == iid }) {
+            queue.removeAll { $0.kind == .income && $0.itemId == iid }
+            let into: String = accountName(inc.linkedBankMilestoneId)
+            if let m = WealthTransferMatcher.forcedIncome(rule: r, income: inc, intoName: into) {
+                queue.insert(m, at: Swift.min(at, queue.count))
+            }
+        }
+        return queue
+    }
+
+    /// [v25.581] 帶來的那筆支出「是同一筆嗎？」小字的金額＝記帳那筆自己的（你改了金額時跟這條不一樣；記帳那筆結束後還能花多的是它的金額）
+    private func presetAmounts(_ queue: [WealthTransferMatch]) -> [String: String] {
+        guard let eid = preset?.matchExpenseId,
+              let m = queue.first(where: { $0.kind == .expense && $0.itemId == eid }),
+              let e = expenseStore.expenses.first(where: { $0.id == eid }) else { return [:] }
+        return [m.id: WealthTransferFinds.amountText(e.amount)]
     }
 
     /// 「是同一筆嗎？」照哪一期問：選了〔更早…〕的照今天以後第一期（〔是：記帳那筆從下一期起結束〕不會把以前好幾個月的記帳一起收掉）
@@ -1782,6 +1870,8 @@ struct WealthTransferRuleForm: View {
             excludeExpenses.append(m.itemId)
         case .keepBoth:
             break
+        case .notSame:
+            notSameMatches.append(m)
         }
         asking = nil
         askNext()
@@ -1795,7 +1885,7 @@ struct WealthTransferRuleForm: View {
         }
     }
 
-    /// 先關表單，下一個 runloop 才寫：存規則＋「是同一筆嗎？」答〔是〕的那幾筆
+    /// 先關表單，下一個 runloop 才寫：存規則＋「是同一筆嗎？」答〔是〕的那幾筆＋[v25.581] 答〔不是〕的記住不再問
     private func finish() {
         guard let rule = pendingRule else { return }
         pendingRule = nil
@@ -1804,6 +1894,7 @@ struct WealthTransferRuleForm: View {
         let ends: [WealthTransferMatch] = endExpenses
         let incomes: [WealthTransferMatch] = endIncomes
         let excluded: [UUID] = excludeExpenses
+        let keys: [String] = notSameDismissKeys(ruleId: rule.id)
         dismiss()
         DispatchQueue.main.async {
             life.saveTransferRule(rule)
@@ -1816,7 +1907,21 @@ struct WealthTransferRuleForm: View {
             for m in incomes {
                 life.endRecurringIncome(m.itemId, on: m.endDay, expense: expense)
             }
+            for k in keys {
+                life.dismissWealthCheck(k)
+            }
         }
+    }
+
+    /// [v25.581] 按了〔不是，兩筆都要〕〔不是〕的那幾筆：要確認不再問的 key（帳本 dismissed；同一個 key 只留一次）
+    private func notSameDismissKeys(ruleId: UUID) -> [String] {
+        var out: [String] = []
+        for m in notSameMatches {
+            for k in WealthTransferFinds.notSameKeys(ruleId: ruleId, match: m, preset: preset) where !out.contains(k) {
+                out.append(k)
+            }
+        }
+        return out
     }
 
     // MARK: 存檔（〔改金額或帳戶〕）

@@ -77,6 +77,12 @@ import SwiftUI
 //   → 每月照幾日（31＝最後一天排最後）→ 建立的先後。canAddTransfer＝沒收起來（最下〔＋ 定期轉帳〕）；件數把定期轉帳的列也算進去。
 // • 水位小牌（transferTideLabel）：定期轉帳每週的不掛（""）；每月的掛你取的名字（去空白 ≤ 4 個字），不然對方的名字前 4 個字
 //  （那一期那一列的「轉給 X」「來自 X」；找不到規則、單次轉帳照舊「轉出」「轉入」）。
+//
+// [v25.581] 定期轉帳 v3 G3（transfer/build/v3/brief.md §1-9、§6 G3；transfer/judge.md §4.1、§4.7 ⑦；sim_v3 §3）：
+// • ⑦ 存摺明細一筆單次轉帳（不是定期轉帳那一期、台幣、沒有匯率、不是換匯）、兩邊都是沒收起來、不是證券戶的帳戶：
+//   WealthCardRow.monthlyTransfer＝WealthTransferFinds.monthlyPreset(for:in:)（從＝轉出那邊、到、金額、每月幾日＝那天，
+//   30、31 號又是月底＝每月最後一天；lead「照 10/6 這筆帶好了；這筆照留，從下一期起算」）。轉出那邊、轉入那邊長按都一樣帶。
+//   卡片頁長按〔設成每月〕（要訂閱）→ WealthTransferRuleForm(preset:)。⑤ 以前記在這裡的交割紀錄（唯讀）一律沒有。
 
 // MARK: - 型別
 
@@ -209,6 +215,8 @@ struct WealthCardRow: Identifiable {
     var monthKey = ""
     var code = "NT$"
     var signedValue: Double = 0
+    /// [v25.581] 單次轉帳那一列長按〔設成每月〕帶好的欄位（台幣、兩個沒收起來的銀行帳戶；其他 nil）
+    var monthlyTransfer: WealthTransferPreset? = nil
 }
 
 /// 資料卡的一列（號碼類只放遮好的字；secret 不是 nil 才有〔顯示〕）
@@ -2347,10 +2355,24 @@ extension WealthCardData {
         row.monthKey = WealthCal.monthKey(r.date)
         row.code = WealthFacts.norm(r.code)
         row.signedValue = r.kind == .anchor ? 0 : (r.isOutflow ? -r.amount : r.amount)
+        row.monthlyTransfer = monthlyTransferPreset(r, x: x)
         let said = mk ? "金額已遮住" : amount
         let bal = mk ? "" : "，" + r.balanceText
         row.accessibilityText = WealthPageText.spokenDate(r.date) + "，" + title + ruleSpoken(r) + "，" + said + bal
         return row
+    }
+
+    /// [v25.581] ⑦ 明細一筆單次轉帳長按〔設成每月〕帶好的欄位（brief §6 G3；sim_v3 §3）：轉出、轉入那一列都算
+    /// （WealthTransferFinds.monthlyPreset(for:in:)：從＝轉出那邊、每月幾日＝那天、台幣、沒有匯率、不是換匯）；
+    /// 定期轉帳那一期（transferRuleId 有）、找不到那筆紀錄、任一邊帳戶不在 facts、收起來了或是證券戶＝nil
+    fileprivate static func monthlyTransferPreset(_ r: WealthLedgerRow, x: WealthCardCtx) -> WealthTransferPreset? {
+        guard r.kind == .transferOut || r.kind == .transferIn, r.transferRuleId == nil,
+              let depId = r.depositId,
+              let dep = x.item.bankDeposits?.first(where: { $0.id == depId }),
+              let p = WealthTransferFinds.monthlyPreset(for: dep, in: x.item.id),
+              let fromAcc = x.facts.account(p.fromId), let toAcc = x.facts.account(p.toId),
+              !fromAcc.hidden, !fromAcc.isSecurities, !toAcc.hidden, !toAcc.isSecurities else { return nil }
+        return p
     }
 
     /// 明細細字裡「從哪來」：財富頁、記帳、收入、股票、轉帳
@@ -2616,6 +2638,8 @@ extension WealthCardData {
         row.sub = nil
         row.open = .none
         row.tag = nil
+        // [v25.581] 唯讀：沒有長按〔設成每月〕
+        row.monthlyTransfer = nil
         let said: String = x.masked ? "金額已遮住" : row.amountText
         row.accessibilityText = WealthPageText.spokenDate(r.date) + "，" + row.title + "，" + row.detail + "，" + said
         return row

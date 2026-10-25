@@ -164,6 +164,12 @@ struct WealthTransferPreset: Identifiable, Equatable {
     var short: String? = nil
     /// 〔轉帳過去〕小表單最下面那一行「『房貸』每月 10 日都要從這裡扣：」
     var offer: String? = nil
+    /// [v25.581] 要確認 v3 帶來的記帳那一筆固定支出／收入：存檔時「是同一筆嗎？」一定問它（你在表單改了金額、日子也照問；
+    /// WealthTransferMatcher.forcedExpense／forcedIncome）。放最後、有預設：既有的呼叫不用改
+    var matchExpenseId: UUID? = nil
+    var matchIncomeId: UUID? = nil
+    /// [v25.581] 新增表單最上面一行（「照記帳的『轉玉山存錢』帶好了；存檔時會問記帳那筆怎麼辦」）；nil＝不出現
+    var lead: String? = nil
 }
 
 // MARK: - 字

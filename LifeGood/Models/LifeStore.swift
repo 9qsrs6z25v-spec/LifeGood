@@ -1185,6 +1185,33 @@ class LifeStore: ObservableObject {
         }
     }
 
+    // MARK: - [v25.581] 定期轉帳 v3 以前湊的找出來（transfer/build/v3/brief.md §2；算法在 WealthTransferFinds.swift）
+    // 不加任何存檔欄位、不開新的同步鍵。要確認 v3 的〔不是〕〔知道了〕走 dismissWealthCheck、〔是同一筆…〕走 endRecurring／
+    // excludeExpenseFromWealth／endRecurringIncome、〔那期沒轉成〕走 setTransferStatus "failed"（都是既有的）；新的只有下面這支。
+
+    /// 對存摺〔把差的記成「零用錢」支出〕（judge §3.8、第 8 題）：記帳一筆變動支出（標題「零用錢」、類別其他、台幣、扣這個帳戶、
+    /// 日子＝對存摺那天）＋這個帳戶一筆扣款（BankDeposit linkedExpenseId：同 AI 記帳那條路，財富照這筆扣）＋這次對存摺，milestones 只指派一次。
+    /// 扣款跟對存摺同一天：對存摺排最後（那天結束時的數字），存摺不會再扣一次；anchor 的差額（amount／isWithdrawal）由呼叫端照
+    /// 「扣掉這筆之後」算好（約 0）。spend < 0.5 或找不到帳戶＝只存對存摺。記帳本來就不擋訂閱（對存摺表單打開時擋過了）
+    func savePocketAnchor(_ anchor: BankDeposit, accountId: UUID, spend: Double, expense: ExpenseStore) {
+        let amount = spend.rounded()
+        guard amount >= 0.5, let ai = milestones.firstIndex(where: { $0.id == accountId }) else {
+            upsertBankDeposit(anchor, in: accountId)
+            return
+        }
+        let e = Expense(title: WealthTransferFinds.pocketTitle, amount: amount, date: anchor.date, expenseType: .variable,
+                        variableCategory: .other, note: WealthTransferFinds.pocketNote, currencyCode: "NT$",
+                        linkedBankMilestoneId: accountId)
+        expense.add(e)
+        var list = milestones
+        var deps = list[ai].bankDeposits ?? []
+        deps.append(BankDeposit(date: anchor.date, amount: amount, currencyCode: "NT$", isWithdrawal: true,
+                                linkedExpenseId: e.id))
+        if let di = deps.firstIndex(where: { $0.id == anchor.id }) { deps[di] = anchor } else { deps.append(anchor) }
+        list[ai].bankDeposits = deps
+        milestones = list
+    }
+
     // MARK: - [v25.567] 財富 v6：證券戶交割、保單連記帳、從哪扣（build/v6/brief.md §2；都只寫一次 milestones／帳本／記帳／理財）
 
     /// 股票的交割紀錄重寫一次（股票表單、股票卡加交易、記帳改舊版單筆股票都叫這一支；以前三份各寫各的）：

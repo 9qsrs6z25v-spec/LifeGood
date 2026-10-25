@@ -66,6 +66,10 @@ import UniformTypeIdentifiers
 //  （要訂閱；存檔時表單自己問從哪一期起）；〔打開〕照舊。底下說明字多「定期轉帳」。
 // • ③⑦ 點單次轉帳那一列（.transfer）先開那一筆（WealthRecordSheet：編輯轉帳＝唯讀＋〔刪除〕問兩邊一起刪；要訂閱），
 //   不再直接跳刪除框（WealthCardConfirm.deleteTransfer 留著）。
+//
+// [v25.581] 定期轉帳 v3 G3（transfer/build/v3/brief.md §1-9、§6 G3；transfer/judge.md §4.1）：⑦ 存摺明細一筆單次轉帳
+//（WealthCardRow.monthlyTransfer 有）長按多〔設成每月〕（放〔打開這一筆〕前面；要訂閱，present 擋）＝WealthCardSheet.Kind.transferPreset
+// → WealthTransferRuleForm(preset:)（表單自己掛布幕、最上面一行 lead、存檔時照 v1a 問）。這筆單次轉帳照留，從下一期起算。
 
 /// 打開卡片頁時捲到哪一區（財富頁 ③ 點一列＝.upcoming；要確認、四格點了也用）
 enum WealthCardAnchor: String, Hashable {
@@ -122,6 +126,8 @@ struct WealthCardSheet: Identifiable {
         case transferPeriod(UUID, String)
         /// [v25.577] ④ 長按〔改到別的帳戶…〕：〔改金額或帳戶〕表單（規則 id；要訂閱：present 擋；存檔時問從哪一期起）
         case transferEdit(UUID)
+        /// [v25.581] 明細長按〔設成每月〕：新增定期轉帳帶好欄位（要訂閱：present 擋）
+        case transferPreset(WealthTransferPreset)
     }
     let id = UUID()
     let kind: Kind
@@ -934,6 +940,9 @@ struct WealthCardPage: View {
         // [v25.577] ④ 長按〔改到別的帳戶…〕：同一張表單的編輯模式（G4；表單自己掛布幕）
         case .transferEdit(let id):
             return AnyView(WealthTransferRuleForm(editRuleId: id))
+        // [v25.581] ⑦ 明細長按〔設成每月〕：新增表單帶好從、到、金額、每月幾日（表單自己掛布幕）
+        case .transferPreset(let p):
+            return AnyView(WealthTransferRuleForm(preset: p))
         }
     }
 }
@@ -1219,6 +1228,14 @@ struct WealthCardRowButton: View {
                 } label: {
                     Label("算到下一期", systemImage: "arrow.right.to.line")
                 }
+            }
+        }
+        // [v25.581] ⑦ 單次轉帳那一列：〔設成每月〕新增定期轉帳帶好欄位（要訂閱）
+        if let p = row.monthlyTransfer {
+            Button {
+                actions.present(.transferPreset(p), true)
+            } label: {
+                Label("設成每月", systemImage: "repeat")
             }
         }
         if row.open != WealthCardOpen.none {

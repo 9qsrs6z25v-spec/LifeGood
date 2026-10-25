@@ -114,6 +114,14 @@ import CryptoKit
 //   還沒轉（一直算在明天）。還要轉嗎？」〔今天轉好了〕〔這期不轉了〕；transferEnding「『薪轉 → 零用錢』4/9 是最後一次（你設的銀行到期日）。
 //   要繼續的話記得去銀行續設」〔已經續設〕（Fix.renewTransferEnd）〔知道了〕。
 //
+// [v25.581] 定期轉帳 v3 以前湊的找出來（transfer/build/v3/brief.md §2；算法、字在 WealthTransferFinds.swift，sim_v3.py 照那裡寫過、跑過）：
+// • 要確認多四種（WealthTransferFinds.checks；一列都 ≤ 2 顆；資料一個欄位都沒加，〔不是〕〔知道了〕記在帳本 dismissed）：
+//   transferItemDup（warn）記帳那筆或收入跟一條還在跑的定期轉帳像同一筆〔是同一筆…〕（Fix.askTransferItem）〔不是〕；
+//   transferPair（warn）同一天同金額的固定支出＋收入一對〔合成一條定期轉帳〕（Fix.newTransferRule）〔不是〕；
+//   transferSuspect（warn）像轉到自己帳戶的固定支出〔改成定期轉帳〕（Fix.newTransferRule）〔不是〕；
+//   transferRepeat（info）連 3 個月手記的單次轉帳〔設成每月都轉〕（Fix.newTransferRule）〔知道了〕。
+// • 對存摺差額剛好一期（transferMiss）、零用錢帳戶（isPocketAccount）也在 WealthTransferFinds.swift（對存摺表單叫）。
+//
 // （工程）build 很重（展開每一期），全 App 只透過 LifeStore.wealthFacts(expense:finance:) 拿快取的那一份
 // （key＝里程碑／財富帳本的 revision＋記帳、理財的 modifyID＋匯率＋日期），打字時不重算（U1 P1、P5）。
 // 不標 @MainActor（AI 記帳、LifeStore 都會叫）；但字串用到 ntdWanString（NumberFormatter），請在主執行緒叫。
@@ -708,6 +716,8 @@ struct WealthCheck: Identifiable {
         case transferResume
         // [v25.579] warn：自己轉今天要轉、過了日子還沒回答、〔還沒〕掛滿 7 天、銀行設的最後一次 14 天內（WealthTransferNotices.checks）
         case transferToday, transferAsk, transferHanging, transferEnding
+        // [v25.581] warn：記帳那筆跟定期轉帳像同一筆、固定支出＋收入一對、像轉到自己帳戶的固定支出（WealthTransferFinds.checks）
+        case transferItemDup, transferPair, transferSuspect
         // [v25.565] warn：卡片效期前 30 天（#12）
         case cardExpiring
         // [v25.567] warn：證券戶身上有舊交割紀錄（#16）、一年一約保單 60 天內到期
@@ -718,6 +728,8 @@ struct WealthCheck: Identifiable {
         case depositInfoMissing, depositInsurance
         // [v25.567] info：保單跟記帳的保費像同一張（#15）、舊資料的保單沒寫繳法（保單頁）
         case policyMatch, policyCycle
+        // [v25.581] info：連 3 個月手記的單次轉帳〔設成每月都轉〕（WealthTransferFinds.checks）
+        case transferRepeat
         // info
         case cardDaysMissing, staleAnchor
 
@@ -785,6 +797,12 @@ struct WealthCheck: Identifiable {
         case askTransferNotYet(ruleId: UUID, key: String)
         /// [v25.579]〔已經續設〕：開「銀行那邊設到哪天」小表單（WealthTransferRenewSheet；不擋訂閱：同〔結束〕）
         case renewTransferEnd(UUID)
+        /// [v25.581]〔改成定期轉帳〕〔合成一條定期轉帳〕〔設成每月都轉〕：開新增定期轉帳表單（WealthTransferRuleForm(preset:)，帶好從、到、金額、
+        /// 每月幾日；matchExpenseId／matchIncomeId＝存檔時一定問的記帳那一筆）。要訂閱（是新增）
+        case newTransferRule(WealthTransferPreset)
+        /// [v25.581]〔是同一筆…〕：記帳那筆固定支出（isIncome false）或收入跟這條定期轉帳像同一筆 → 先問（facts.transferItemAsk）
+        /// 〔是：記帳那筆從下一期起結束〕〔是，但記帳照記（還能花先扣掉）〕／收入〔是：那筆收入從下個月起結束〕。不擋訂閱（同〔已經退訂〕〔這筆不算〕）
+        case askTransferItem(ruleId: UUID, itemId: UUID, isIncome: Bool)
     }
     struct Action: Identifiable, Equatable {
         let title: String
@@ -835,6 +853,11 @@ struct WealthCheck: Identifiable {
         case .transferAsk: return "questionmark.circle.fill"
         case .transferHanging: return "clock.fill"
         case .transferEnding: return "bell.fill"
+        // [v25.581]
+        case .transferItemDup: return "square.on.square"
+        case .transferPair: return "arrow.triangle.merge"
+        case .transferSuspect: return "arrow.triangle.swap"
+        case .transferRepeat: return "repeat.circle.fill"
         }
     }
 
@@ -3731,6 +3754,12 @@ struct WealthFacts {
 
         // [v25.579] 定期轉帳 v2：今天要轉、過了日子還沒回答、〔還沒〕掛滿 7 天、銀行設的最後一次 14 天內（WealthTransferNotices.checks）
         for c in WealthTransferNotices.checks(transfers: transfers, names: ctx.nameById, bankIds: bankIds, today: today) {
+            add(c)
+        }
+
+        // [v25.581] 定期轉帳 v3：以前用記帳湊的、連 3 個月手記的（WealthTransferFinds.checks；按過〔不是〕〔知道了〕的照帳本濾）
+        for c in WealthTransferFinds.checks(transfers: transfers, banks: visibleBanks, bankMs: bankMs, expenses: ctx.expenses,
+                                            incomes: ctx.incomes, excluded: ctx.excluded, today: today) {
             add(c)
         }
 

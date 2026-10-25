@@ -90,6 +90,24 @@ import UIKit
 //   〔轉了〕〔這期不轉了〕〔看這一期〕〔知道了〕是既有的 Fix（setTransferStatus／openTransferPeriod／dismiss）。
 // • 多問的那一句：WealthChecksTransferAsk＋WealthChecksTransferDialog（confirmationDialog；拆成 ViewModifier，同 WealthCheckAskDialog）；
 //   選了之後確認框先收好、下一個 runloop 才寫（這一列會跟著不見）。
+//
+// [v25.581] 定期轉帳 v3 以前湊的找出來（transfer/build/v3/brief.md §6 G2；judge §3.6、§3.8、§4.1、§4.8 v3、§6、第 8、9 題）：
+// • 要確認兩個新 Fix（WealthChecksSection.tap）：
+//   〔改成定期轉帳〕〔合成一條定期轉帳〕〔設成每月都轉〕＝Fix.newTransferRule：要訂閱（是新增）→ WealthFormSheet.transferNew(preset:)
+//  （WealthTransferRuleForm(preset:)，帶好從、到、金額、每月幾日；存檔時記帳那筆照 v1a「是同一筆嗎？」問，你不按就不動）。
+//   〔是同一筆…〕＝Fix.askTransferItem：不擋訂閱 → facts.transferItemAsk → WealthChecksTransferAsk.sameItem 確認框
+//   〔是：記帳那筆從下一期起結束〕（endRecurring）〔是，但記帳照記（還能花先扣掉）〕（excludeExpenseFromWealth）／
+//   收入〔是：那筆收入從下個月起結束〕（endRecurringIncome）；確認框先收好、下一個 runloop 才寫。
+// • 對存摺（WealthAnchorSheet）：新的一筆、台幣、沒選差額原因（或「不知道」）、差額剛好是前 1～7 天某一期（facts.transferMiss）→
+//   按〔存〕時、真的寫之前先問（WealthAnchorMissDialog）〔那期沒轉成〕（差額寫 diffAfter、那一期 "failed"）〔不是，照存摺就好〕
+//  （照原本存）；零用錢帳戶（facts.isPocketAccount）多〔不是，記成「零用錢」支出〕；〔取消〕回表單。
+//   零用錢帳戶存摺比 App 少 1 元以上：差額那段多〔把差的 11,500 記成「零用錢」支出〕＋小字（直接存，不再問；
+//   LifeStore.savePocketAnchor：記帳一筆變動支出＋這個帳戶一筆扣款＋這次對存摺，同一天，存摺不會再扣一次）。都不擋訂閱
+//  （對存摺表單打開時擋過了）。改以前的對存摺、外幣那一格都不問、不出現。
+// • 單次轉帳表單（WealthTransferSheet）最下面「每個月都會轉？」〔改成定期轉帳〕（不是換匯、不是〔轉帳過去〕、從到都選了、兩邊台幣、
+//   金額 ≥ 1；WealthTransferFinds.monthlyPreset(fromId:toId:amount:on:)）→ 巢狀 WealthTransferRuleForm(preset:)。不另外擋訂閱
+//  （同 v1b〔改成每月定期轉帳〕：轉帳表單每個入口打開時都擋過了）。新增表單關掉後：剛存的規則已經算到這筆
+//  （facts.transferDuplicate 有、而且打開前沒有那一期）＝轉帳表單一起關（不用再記）；沒有＝留著讓你存這筆。
 
 /// 表單的類型（開了就鎖住）
 enum WealthAccountKind: String, CaseIterable, Identifiable {
@@ -2916,6 +2934,8 @@ enum WealthFormSheet: Identifiable {
     case transferPeriod(ruleId: UUID, key: String)
     /// [v25.579] 要確認〔已經續設〕：銀行那邊設到哪天
     case transferRenew(ruleId: UUID)
+    /// [v25.581] 要確認〔改成定期轉帳〕〔合成一條定期轉帳〕〔設成每月都轉〕：新增定期轉帳帶好欄位
+    case transferNew(preset: WealthTransferPreset)
 
     var id: String {
         switch self {
@@ -2947,6 +2967,8 @@ enum WealthFormSheet: Identifiable {
             return "transferperiod-" + r.uuidString + "-" + k
         case .transferRenew(let r):
             return "transferrenew-" + r.uuidString
+        case .transferNew(let p):
+            return "transfernew-" + p.id.uuidString
         }
     }
 
@@ -2988,6 +3010,9 @@ enum WealthFormSheet: Identifiable {
         // [v25.579] 銀行續設（G1 的小表單自己掛布幕、presentationDetents）
         case .transferRenew(let r):
             return AnyView(WealthTransferRenewSheet(ruleId: r))
+        // [v25.581] 新增定期轉帳帶好欄位（G1 的表單自己掛布幕、presentationDetents）
+        case .transferNew(let p):
+            return AnyView(WealthTransferRuleForm(preset: p))
         }
     }
 }
@@ -3263,6 +3288,10 @@ struct WealthTransferSheet: View {
     @State private var monthlyPreset: WealthTransferPreset?
     /// [v25.577] 巢狀新增表單（sheet(item:)）
     @State private var ruleFormPreset: WealthTransferPreset?
+    /// [v25.581] 新增表單是最下面〔改成定期轉帳〕打開的（關掉後看要不要一起關這張）
+    @State private var repeatOpened = false
+    /// [v25.581] 按〔改成定期轉帳〕那時這筆已經跟哪一期重複（關掉後還是同一期＝不是剛存的規則算到的，不一起關）
+    @State private var repeatBefore: WealthTransferDuplicate?
 
     private func codes(of id: UUID?) -> [String] {
         choices.first { $0.id == id }?.codes ?? ["NT$"]
@@ -3364,6 +3393,7 @@ struct WealthTransferSheet: View {
     }
 
     /// 表單＋存檔前的兩個問句（像帳號、[v25.577] 跟某一期重複）＋[v25.577]〔改成每月定期轉帳〕的新增表單
+    /// （[v25.581] 最下面〔改成定期轉帳〕也開同一張）
     private var formWithAsks: some View {
         Form {
             coverSection
@@ -3371,6 +3401,7 @@ struct WealthTransferSheet: View {
             toSection
             amountSection
             monthlySection
+            repeatSection
         }
         .modifier(WealthAccountLikeAlert(tail: $noteAccountTail,
                                          onMask: { proceed(maskNote: true, afterAlert: true) },
@@ -3379,8 +3410,31 @@ struct WealthTransferSheet: View {
                                                 onSkip: { skipDuplicate() },
                                                 onKeep: { keepDuplicate() },
                                                 onCancel: { cancelDuplicate() }))
-        .sheet(item: $ruleFormPreset, onDismiss: { refreshMonthlyPreset() }) { p in
+        .sheet(item: $ruleFormPreset, onDismiss: { ruleFormClosed() }) { p in
             WealthTransferRuleForm(preset: p).appStores()
+        }
+    }
+
+    /// [v25.581] 最下面「每個月都會轉？」〔改成定期轉帳〕帶好的欄位（judge §4.1）：不是換匯、不是〔轉帳過去〕那張、從到都選了、
+    /// 兩邊台幣、金額 ≥ 1；只算日子、不算 facts（WealthTransferFinds.monthlyPreset；同一個帳戶＝nil）
+    private var repeatPreset: WealthTransferPreset? {
+        guard !exchange, !showsCover, monthlyPreset == nil, let f = from, let t = to,
+              fromCode == "NT$", toCode == "NT$",
+              let v = WealthFormText.number(amountText), v >= 1 else { return nil }
+        return WealthTransferFinds.monthlyPreset(fromId: f, toId: t, amount: v, on: date)
+    }
+
+    /// [v25.581] 「每個月都會轉？」〔改成定期轉帳〕＋小字
+    @ViewBuilder
+    private var repeatSection: some View {
+        if let p = repeatPreset {
+            Section {
+                Text("每個月都會轉？")
+                    .font(.subheadline)
+                Button("改成定期轉帳") { openRepeat(p) }
+            } footer: {
+                Text("銀行設好的預約轉帳抄一份進來，以後每個月不用記。")
+            }
         }
     }
 
@@ -3668,6 +3722,31 @@ struct WealthTransferSheet: View {
         monthlyPreset = facts.monthlyTransferPreset(forShortageOf: t, expenses: expenseStore.expenses)
     }
 
+    /// [v25.581]〔改成定期轉帳〕：記下這筆現在是不是已經跟某一期重複（關掉後比），再開新增表單
+    private func openRepeat(_ p: WealthTransferPreset) {
+        guard !isSaving else { return }
+        repeatBefore = findDuplicate()
+        repeatOpened = true
+        ruleFormPreset = p
+    }
+
+    /// 新增表單關掉後（[v25.577] 那一行照舊重算）。[v25.581] 是〔改成定期轉帳〕打開的：剛存的規則已經算到這筆
+    ///（facts.transferDuplicate 找得到、而且不是打開前就重複的那一期）＝這張也關（不用再記）；
+    /// 沒有（沒存、以前的日子、今天這期不算）＝留著讓你存這筆。
+    /// 晚一個 runloop 才看：新增表單 finish() 是 dismiss() 之後才排 saveTransferRule（main.async），
+    /// 這裡也排在 main 佇列後面，一定看得到剛存的規則（不靠 onDismiss 剛好在動畫跑完才叫）
+    private func ruleFormClosed() {
+        refreshMonthlyPreset()
+        guard repeatOpened else { return }
+        repeatOpened = false
+        let before: WealthTransferDuplicate? = repeatBefore
+        repeatBefore = nil
+        DispatchQueue.main.async {
+            guard !self.isSaving, let dup = self.findDuplicate(), dup != before else { return }
+            self.dismiss()
+        }
+    }
+
     /// maskNote：[v25.575]〔只留後 4 碼〕＝備註裡像帳號的每一串換成「••8901」再存
     private func save(maskNote: Bool) {
         // [v25.566] 不同帳戶，或同一個帳戶不同幣別（換匯）
@@ -3747,6 +3826,42 @@ struct WealthTransferDuplicateDialog: ViewModifier {
     }
 }
 
+/// [v25.581] 對存摺按〔存〕時差額剛好是前 1～7 天某一期（judge §3.6；樣稿③-C4）：標題「差的 20,000 剛好是 11/6『薪轉 → 存錢』那一期」、
+/// 小字「存錢 11/9：App 算的 206,000、存摺上 186,000、差 −20,000。選〔那期沒轉成〕：…」〔那期沒轉成〕〔不是，照存摺就好〕
+///（零用錢帳戶多〔不是，記成「零用錢」支出〕）〔取消〕。框被關掉（沒按任何一顆）＝〔取消〕：回表單、什麼都沒寫。
+/// presenting＋問的時候存好的 title（收起來的那一下字不會變空白）。按了只回呼，寫 store 由呼叫端先 dismiss、下一個 runloop。拆成 modifier（坑 #7）
+struct WealthAnchorMissDialog: ViewModifier {
+    @Binding var ask: WealthTransferMiss?
+    let title: String
+    /// 零用錢帳戶、差的是負的（WealthAnchorSheet.pocketSpend 有）
+    let showsPocket: Bool
+    let onFailed: (WealthTransferMiss) -> Void
+    let onKeep: () -> Void
+    let onPocket: () -> Void
+
+    private var isPresented: Binding<Bool> {
+        Binding(get: { self.ask != nil }, set: { if !$0 { self.ask = nil } })
+    }
+
+    private static var pocketTitle: String {
+        "不是，記成「" + WealthTransferFinds.pocketTitle + "」支出"
+    }
+
+    func body(content: Content) -> some View {
+        content.confirmationDialog(title, isPresented: isPresented, titleVisibility: .visible,
+                                   presenting: ask) { m in
+            Button("那期沒轉成") { onFailed(m) }
+            Button("不是，照存摺就好") { onKeep() }
+            if showsPocket {
+                Button(Self.pocketTitle) { onPocket() }
+            }
+            Button("取消", role: .cancel) {}
+        } message: { m in
+            Text(m.message)
+        }
+    }
+}
+
 // MARK: - 對存摺（取代沖正；judge §4.5、樣稿③-C3）
 
 /// 差額是什麼（選填）
@@ -3795,6 +3910,12 @@ struct WealthAnchorSheet: View {
     @State private var sides: [WealthFacts.TransferSide] = []
     /// [v25.575] 每一邊你選的：true＝〔還沒有〕（對存摺之後才進／才扣）；預設照現在記的 late
     @State private var notYet: [String: Bool] = [:]
+    /// [v25.581] 按〔存〕時差額剛好是前 1～7 天某一期（先問〔那期沒轉成〕〔不是，照存摺就好〕；nil＝沒在問）
+    @State private var missAsk: WealthTransferMiss?
+    /// [v25.581] 那個框的標題（問的時候存好、收起來不清：收起來的那一下字不會變空白）
+    @State private var missTitle = ""
+    /// [v25.581] 零用錢帳戶（打開時抓一次；facts.isPocketAccount）
+    @State private var pocketAccount = false
 
     private var taskKey: String { WealthCal.dayKey(date) + "|" + pickedCode + "|" + (loaded ? "1" : "0") }
     private var balanceReady: Bool { appBalance != nil && appBalanceKey == taskKey }
@@ -3827,6 +3948,12 @@ struct WealthAnchorSheet: View {
         Binding(get: { notYet[s.id] ?? s.late }, set: { notYet[s.id] = $0 })
     }
 
+    /// [v25.581] 零用錢帳戶、新的一筆、台幣、存摺比 App 算的少 1 元以上：〔把差的…記成「零用錢」支出〕記多少（judge §3.8、第 8 題）；不然 nil
+    private var pocketSpend: Double? {
+        guard editing == nil, pocketAccount, pickedCode == "NT$", let d = diff, d <= -1 else { return nil }
+        return -d
+    }
+
     private var navTitle: String {
         if pickedCode == "NT$" { return "對存摺" }
         return "對存摺・" + pickedCode
@@ -3834,31 +3961,45 @@ struct WealthAnchorSheet: View {
 
     var body: some View {
         NavigationStack {
-            Form {
-                mainSection
-                diffSection
-                reasonSection
-                if editing != nil {
-                    deleteSection
+            formWithAsk
+                .navigationTitle(navTitle)
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    WealthSaveToolbar(title: "存", isSaving: isSaving, disabled: diff == nil,
+                                      onCancel: { dismiss() }, onSave: { save() })
                 }
-            }
-            .navigationTitle(navTitle)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                WealthSaveToolbar(title: "存", isSaving: isSaving, disabled: diff == nil,
-                                  onCancel: { dismiss() }, onSave: { save() })
-            }
-            .onAppear { load() }
-            .task(id: taskKey) { refresh() }
-            .modifier(WealthDeleteAsk(isPresented: $confirmDelete, title: "刪除這次對存摺？",
-                                      message: "刪掉這次對存摺，之後的數字回到 App 算的。",
-                                      onDelete: { _ in performDelete() }))
-            .sheet(item: $sheet, onDismiss: { dismiss() }) { s in
-                s.view.appStores()
-            }
+                .onAppear { load() }
+                .task(id: taskKey) { refresh() }
+                .modifier(WealthDeleteAsk(isPresented: $confirmDelete, title: "刪除這次對存摺？",
+                                          message: "刪掉這次對存摺，之後的數字回到 App 算的。",
+                                          onDelete: { _ in performDelete() }))
+                .sheet(item: $sheet, onDismiss: { dismiss() }) { s in
+                    s.view.appStores()
+                }
         }
         .presentationDetents([.medium, .large])
         .modifier(WealthPrivacyCurtain(armed: true))
+    }
+
+    /// 表單＋[v25.581] 存檔前「差額剛好是一期」的確認框（拆出 body，坑 #7）
+    private var formWithAsk: some View {
+        Form {
+            mainSection
+            diffSection
+            reasonSection
+            if editing != nil {
+                deleteSection
+            }
+        }
+        .modifier(missDialog)
+    }
+
+    /// [v25.581]〔那期沒轉成〕〔不是，照存摺就好〕（零用錢帳戶多〔不是，記成「零用錢」支出〕）〔取消〕：選了才寫；〔取消〕、框被關掉＝回表單
+    private var missDialog: WealthAnchorMissDialog {
+        WealthAnchorMissDialog(ask: $missAsk, title: missTitle, showsPocket: pocketSpend != nil,
+                               onFailed: { m in commit(diff: m.diffAfter, failing: m) },
+                               onKeep: { commitAsTyped() },
+                               onPocket: { savePocket() })
     }
 
     private var mainSection: some View {
@@ -3918,15 +4059,40 @@ struct WealthAnchorSheet: View {
         return WealthFormat.money(v, code: pickedCode)
     }
 
+    /// [v25.581] 零用錢帳戶存摺比 App 少：多一顆〔把差的 11,500 記成「零用錢」支出〕＋小字（樣稿③-C4）
     @ViewBuilder
     private var diffSection: some View {
         if let d = diff, let target = WealthFormText.number(amountText) {
-            Section {
-                Text(diffLine(d, target: target))
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(Swift.abs(d) < 0.005 ? Color.secondary : Color.blue)
+            if let s = pocketSpend {
+                Section {
+                    diffText(d, target: target)
+                    pocketRow(s)
+                } footer: {
+                    Text(pocketFooter)
+                }
+            } else {
+                Section {
+                    diffText(d, target: target)
+                }
             }
         }
+    }
+
+    private func diffText(_ d: Double, target: Double) -> some View {
+        Text(diffLine(d, target: target))
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(Swift.abs(d) < 0.005 ? Color.secondary : Color.blue)
+    }
+
+    /// [v25.581]「把差的 11,500 記成「零用錢」支出」（按了直接存）
+    private func pocketRow(_ s: Double) -> some View {
+        Button(WealthTransferFinds.pocketButton(s)) { savePocket() }
+            .disabled(isSaving)
+    }
+
+    /// [v25.581]「記帳多一筆變動支出「零用錢」（類別其他、從 零用錢 扣），本月還能花跟著扣；存摺照這次的數字往後算，不會再扣一次。」
+    private var pocketFooter: String {
+        WealthTransferFinds.pocketFooter(accountName: accountName.isEmpty ? "這個帳戶" : accountName)
     }
 
     private func diffLine(_ d: Double, target: Double) -> String {
@@ -4016,6 +4182,8 @@ struct WealthAnchorSheet: View {
             accountName = a.name
             codes = a.currencies.isEmpty ? ["NT$"] : a.currencies
         }
+        // [v25.581] 零用錢帳戶（用途「零用」、名字有「零用」、或每週有定期轉帳轉進來）：差的是負的多一顆〔記成「零用錢」支出〕
+        pocketAccount = facts.isPocketAccount(accountId)
         pickedCode = WealthFacts.norm(code)
         if !codes.contains(pickedCode) { codes.append(pickedCode) }
         if let e = editing {
@@ -4056,8 +4224,7 @@ struct WealthAnchorSheet: View {
     }
 
     private func save() {
-        guard !isSaving, let d = diff, let target = WealthFormText.number(amountText) else { return }
-        isSaving = true
+        guard !isSaving, missAsk == nil, let d = diff, let target = WealthFormText.number(amountText) else { return }
         let life = lifeStore
         let id = accountId
         let c = pickedCode
@@ -4066,6 +4233,7 @@ struct WealthAnchorSheet: View {
         let isNew = editing == nil
         // 利息（存摺多了）、手續費（存摺少了）：記成那一種，不是對存摺
         if isNew, r == .interest, d > 0.004 {
+            isSaving = true
             let dep = BankDeposit(date: day, amount: d, currencyCode: c, isWithdrawal: false,
                                   note: "對存摺時補記", kind: BankDeposit.kindInterest)
             dismiss()
@@ -4073,12 +4241,49 @@ struct WealthAnchorSheet: View {
             return
         }
         if isNew, r == .fee, d < -0.004 {
+            isSaving = true
             let dep = BankDeposit(date: day, amount: -d, currencyCode: c, isWithdrawal: true,
                                   note: "對存摺時補記", kind: BankDeposit.kindFee)
             dismiss()
             DispatchQueue.main.async { life.upsertBankDeposit(dep, in: id) }
             return
         }
+        // [v25.581] 差額剛好是前 1～7 天某一期（judge §3.6）：先問，還沒寫任何東西（isSaving 不設，〔取消〕回表單改數字）
+        if let m = findMiss(target: target) {
+            missTitle = m.title
+            missAsk = m
+            return
+        }
+        commit(diff: d, failing: nil)
+    }
+
+    /// [v25.581] 新的一筆、台幣、沒選差額原因（或「不知道」）、App 算的有了：差額剛好是這個帳戶前 1～7 天某一期的這一邊
+    ///（facts.transferMiss：±1 元、在這一格上一次對存摺之後、取最近的）；不然 nil。改以前的對存摺、外幣那一格都不問
+    private func findMiss(target: Double) -> WealthTransferMiss? {
+        guard editing == nil, pickedCode == "NT$", reason == nil || reason == .unknown,
+              let app = comparedBalance else { return nil }
+        let facts = lifeStore.wealthFacts(expense: expenseStore, finance: financeStore)
+        return facts.transferMiss(accountId: accountId, code: pickedCode, on: date, app: app, target: target)
+    }
+
+    /// [v25.581]〔不是，照存摺就好〕：照你打的存（差額照原本的）
+    private func commitAsTyped() {
+        guard let d = diff else { return }
+        commit(diff: d, failing: nil)
+    }
+
+    /// 組好這次對存摺寫進去（[v25.581] 從 save 抽出來：漏記的支出、一般存兩條路照舊）。d：差額欄寫多少
+    ///（〔那期沒轉成〕＝那期不算之後的差額 diffAfter）；failing：〔那期沒轉成〕那一期——存好對存摺之後同一個 runloop 記 "failed"
+    ///（v1a 就認得：兩邊都不算，另一個帳戶多回來）
+    private func commit(diff d: Double, failing: WealthTransferMiss?) {
+        guard !isSaving, let target = WealthFormText.number(amountText) else { return }
+        isSaving = true
+        let life = lifeStore
+        let id = accountId
+        let c = pickedCode
+        let day = date
+        let r = reason
+        let isNew = editing == nil
         let noteText: String? = r?.title ?? editing?.note
         let anchor = BankDeposit(id: editing?.id ?? UUID(), date: day, amount: Swift.abs(d), currencyCode: c,
                                  isWithdrawal: d < 0, isAdjust: true, note: noteText,
@@ -4086,7 +4291,7 @@ struct WealthAnchorSheet: View {
         // [v25.575] 這天的定期轉帳選了〔還沒有〕／〔存摺上已經有了〕（跟現在記的不一樣的）：存好對存摺之後同一個 runloop 記 late
         let changes = lateChanges
         // 漏記的支出（台幣、存摺少了）：先存對存摺（這張表單還開著），再打開記帳（金額先填好）；記帳關掉這張也關
-        if isNew, r == .missedExpense, d < -0.004, c == "NT$" {
+        if isNew, failing == nil, r == .missedExpense, d < -0.004, c == "NT$" {
             life.upsertBankDeposit(anchor, in: id)
             for x in changes {
                 life.setTransferLate(ruleId: x.ruleId, key: x.key, out: x.out, late: x.late)
@@ -4095,9 +4300,37 @@ struct WealthAnchorSheet: View {
             sheet = .expense(token: UUID(), preset: preset)
             return
         }
+        // [v25.581]〔那期沒轉成〕的那一期（參數本來就是 let；下一個 runloop 的閉包不抓 @State）
+        let failed: WealthTransferMiss? = failing
         dismiss()
         DispatchQueue.main.async {
             life.upsertBankDeposit(anchor, in: id)
+            for x in changes {
+                life.setTransferLate(ruleId: x.ruleId, key: x.key, out: x.out, late: x.late)
+            }
+            if let f = failed {
+                life.setTransferStatus(ruleId: f.ruleId, key: f.key, status: WealthTransferStatus.failed.rawValue)
+            }
+        }
+    }
+
+    /// [v25.581]〔把差的 11,500 記成「零用錢」支出〕（judge §3.8、第 8 題：轉過去不算花掉，對存摺差的記成支出）：直接存，不再問差額剛好一期
+    ///（你說了是花掉的）。LifeStore.savePocketAnchor：記帳一筆變動支出「零用錢」（其他、台幣、扣這個帳戶、對存摺那天）＋這個帳戶一筆扣款
+    ///＋這次對存摺，同一天（對存摺排最後，存摺不會再扣一次）；對存摺的差額＝扣掉這筆之後（到元：≈ 0）
+    private func savePocket() {
+        guard !isSaving, let s = pocketSpend, let target = WealthFormText.number(amountText) else { return }
+        isSaving = true
+        let life = lifeStore
+        let es = expenseStore
+        let id = accountId
+        let after = ((s.rounded() - s) * 100).rounded() / 100
+        let anchor = BankDeposit(id: UUID(), date: date, amount: Swift.abs(after), currencyCode: "NT$",
+                                 isWithdrawal: after < 0, isAdjust: true, note: WealthTransferFinds.pocketNote,
+                                 kind: BankDeposit.kindAnchor, anchorAmount: target)
+        let changes = lateChanges
+        dismiss()
+        DispatchQueue.main.async {
+            life.savePocketAnchor(anchor, accountId: id, spend: s, expense: es)
             for x in changes {
                 life.setTransferLate(ruleId: x.ruleId, key: x.key, out: x.out, late: x.late)
             }
@@ -5050,11 +5283,15 @@ enum WealthChecksTransferAsk: Identifiable {
     case notYet(ruleId: UUID, key: String)
     /// 今天對過存摺：〔還沒，對完才轉的〕〔轉了，存摺上已經有了〕（from／to：哪一邊今天對過）
     case late(ruleId: UUID, key: String, from: Bool, to: Bool)
+    /// [v25.581] 要確認〔是同一筆…〕（記帳那筆跟定期轉帳像同一筆）：固定支出〔是：記帳那筆從下一期起結束〕〔是，但記帳照記（還能花先扣掉）〕；
+    /// 收入〔是：那筆收入從下個月起結束〕（facts.transferItemAsk）
+    case sameItem(WealthTransferItemAsk)
 
     var id: String {
         switch self {
         case .notYet(let r, let k): return "ny-" + r.uuidString + "-" + k
         case .late(let r, let k, _, _): return "late-" + r.uuidString + "-" + k
+        case .sameItem(let a): return "item-" + a.id
         }
     }
 
@@ -5062,6 +5299,7 @@ enum WealthChecksTransferAsk: Identifiable {
         switch self {
         case .notYet: return "這期還沒轉？"
         case .late: return "今天對存摺的時候，這筆轉了嗎？"
+        case .sameItem(let a): return a.title
         }
     }
 
@@ -5071,6 +5309,8 @@ enum WealthChecksTransferAsk: Identifiable {
             return "選〔還沒，算在明天〕：這筆先算在明天、每天往後挪，\(WealthTransferNotices.hangDays) 天後再問你一次。"
         case .late:
             return "對存摺之後才轉的，App 會把這筆排在對存摺後面。"
+        case .sameItem(let a):
+            return a.message
         }
     }
 }
@@ -5083,6 +5323,8 @@ struct WealthChecksTransferDialog: ViewModifier {
     let onStatus: (UUID, String, String) -> Void
     /// 〔還沒，對完才轉的〕〔轉了，存摺上已經有了〕：規則、那一期、lateOut、lateIn（nil＝那一邊照留；LifeStore.markTransferDone）
     let onDone: (UUID, String, Bool?, Bool?) -> Void
+    /// [v25.581]〔是同一筆…〕的選項：那一筆、keep（true＝〔是，但記帳照記〕不扣帳戶；false＝從下一期起結束）
+    let onItem: (WealthTransferItemAsk, Bool) -> Void
 
     private var isPresented: Binding<Bool> {
         Binding(get: { self.ask != nil }, set: { if !$0 { self.ask = nil } })
@@ -5106,6 +5348,19 @@ struct WealthChecksTransferDialog: ViewModifier {
         case .late(let r, let k, let f, let t):
             Button("還沒，對完才轉的") { onDone(r, k, Self.lateFlag(f, true), Self.lateFlag(t, true)) }
             Button("轉了，存摺上已經有了") { onDone(r, k, Self.lateFlag(f, false), Self.lateFlag(t, false)) }
+        case .sameItem(let item):
+            itemButtons(item)
+        }
+    }
+
+    /// [v25.581]〔是同一筆…〕：固定支出兩顆、收入一顆（〔取消〕在外面）
+    @ViewBuilder
+    private func itemButtons(_ a: WealthTransferItemAsk) -> some View {
+        if a.isIncome {
+            Button("是：那筆收入從下個月起結束") { onItem(a, false) }
+        } else {
+            Button("是：記帳那筆從下一期起結束") { onItem(a, false) }
+            Button("是，但記帳照記（還能花先扣掉）") { onItem(a, true) }
         }
     }
 
@@ -5159,8 +5414,11 @@ struct WealthChecksSection: View {
     }
 
     /// [v25.579] 定期轉帳多問的那一句：選了之後確認框先收好，下一個 runloop 才寫（這一列會跟著不見；store 先抓進區域常數）
+    /// [v25.581]〔是同一筆…〕：收入〔是：那筆收入從下個月起結束〕＝endRecurringIncome；固定支出〔是，但記帳照記〕＝這筆不扣帳戶
+    ///（excludeExpenseFromWealth）、〔是：記帳那筆從下一期起結束〕＝endRecurring（結束在下一期前一天，以前的月份不動）
     private var transferDialog: WealthChecksTransferDialog {
         let life = lifeStore
+        let es = expenseStore
         return WealthChecksTransferDialog(ask: $transferAsk, onStatus: { rid, key, status in
             DispatchQueue.main.async {
                 life.setTransferStatus(ruleId: rid, key: key, status: status)
@@ -5169,6 +5427,16 @@ struct WealthChecksSection: View {
             let day = Date()
             DispatchQueue.main.async {
                 life.markTransferDone(ruleId: rid, key: key, day: day, lateOut: lateOut, lateIn: lateIn)
+            }
+        }, onItem: { a, keep in
+            DispatchQueue.main.async {
+                if a.isIncome {
+                    life.endRecurringIncome(a.itemId, on: a.endDay, expense: es)
+                } else if keep {
+                    life.excludeExpenseFromWealth(a.itemId)
+                } else {
+                    life.endRecurring(expenseIds: [a.itemId], on: a.endDay, expense: es)
+                }
             }
         })
     }
@@ -5324,6 +5592,18 @@ struct WealthChecksSection: View {
         case .renewTransferEnd(let rid):
             // [v25.579]〔已經續設〕：開「銀行那邊設到哪天」小表單（不擋訂閱：同〔結束這條〕）
             sheet = .transferRenew(ruleId: rid)
+        case .newTransferRule(let p):
+            // [v25.581]〔改成定期轉帳〕〔合成一條定期轉帳〕〔設成每月都轉〕：新增定期轉帳帶好欄位（要訂閱：是新增）；
+            // 記帳那筆存檔時在表單裡問，你不按就不動
+            guard subscription.isPremium else { showPremium = true; return }
+            sheet = .transferNew(preset: p)
+        case .askTransferItem(let rid, let itemId, let isIncome):
+            // [v25.581]〔是同一筆…〕：先問記帳那筆怎麼結束（不擋訂閱：同〔已經退訂〕〔這筆不算〕；寫在確認框的回呼裡）。
+            // 找不到那筆、已經沒有下一期＝什麼都不做（這一列下次算就不見）
+            let facts = lifeStore.wealthFacts(expense: expenseStore, finance: financeStore)
+            guard let a = facts.transferItemAsk(ruleId: rid, itemId: itemId, isIncome: isIncome,
+                                                expenses: expenseStore.expenses, incomes: expenseStore.incomes) else { return }
+            transferAsk = .sameItem(a)
         }
     }
 
