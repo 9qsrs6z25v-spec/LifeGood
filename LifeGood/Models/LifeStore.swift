@@ -1174,7 +1174,11 @@ class LifeStore: ObservableObject {
             n.dayKey = dk == key ? nil : dk
             if let v = amount {
                 let seg: Double = r.segment(at: key)?.amount ?? 0
-                n.amount = Swift.abs(v - seg) < 0.5 ? nil : v
+                // [v25.583 裁定修] 跟這一段一樣＝不存：台幣 ±0.5、外幣轉出（美金戶自己轉）±0.005
+                //（US$300.40 跟規則的 300.00 不一樣，要存；以前一律 ±0.5 會被當成一樣）
+                let fromNTD: Bool = FinanceRates.isNTD(r.segment(at: key)?.fromCode ?? "NT$")
+                let tol: Double = fromNTD ? 0.5 : 0.005
+                n.amount = Swift.abs(v - seg) < tol ? nil : v
             }
             if let ta = toAmount {
                 let segTo: Double = r.segment(at: key)?.toAmount ?? (r.segment(at: key)?.amount ?? 0)

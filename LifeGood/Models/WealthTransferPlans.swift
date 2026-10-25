@@ -494,9 +494,9 @@ extension WealthFacts {
             for d in fromDeposits where d.isTransfer && d.isWithdrawal && d.counterpartyId == to
                 && FinanceRates.isNTD(d.currencyCode) {
                 let day = WealthCal.day(d.date)
-                let hit = past.contains { p in
-                    p.fromId == f && p.fromCode == "NT$" && Swift.abs(p.amount - d.amount) < 0.5
-                        && Swift.abs(WealthCal.days(from: p.day, to: day)) <= 3
+                let hit = past.contains { (p: WealthTransferPeriod) -> Bool in
+                    guard p.fromId == f, p.fromCode == "NT$" else { return false }
+                    return Swift.abs(p.amount - d.amount) < 0.5 && Swift.abs(WealthCal.days(from: p.day, to: day)) <= 3
                 }
                 if hit && !dupDays.contains(day) { dupDays.append(day) }
             }
@@ -541,9 +541,19 @@ extension WealthFacts {
         let total: Double = hits.reduce(0) { $0 + (out ? $1.amount : $1.toAmount) }
         let money: String = masked ? "" : "（" + WealthFacts.earlySigned(out ? -total : total, code: code) + "）"
         // 同一個帳戶兩格：「存錢台幣」「存錢 USD 」（英文代碼後面空一格再接中文）
+        // [裁定] 拆成 if／else（巢狀三元＋多個 + 怕型別推斷太久）
         let isNTD: Bool = FinanceRates.isNTD(code)
-        let name: String = sideNamed ? (isNTD ? a.name + "台幣" : a.name + " " + code + " ") : a.name
-        let bare: String = sideNamed ? (isNTD ? a.name + "台幣" : a.name + " " + code) : a.name
+        var name: String = a.name
+        var bare: String = a.name
+        if sideNamed {
+            if isNTD {
+                name = a.name + "台幣"
+                bare = name
+            } else {
+                bare = a.name + " " + code
+                name = bare + " "
+            }
+        }
         guard let x = anchor else {
             return name + "從沒對過存摺 → \(hits.count) 期都會算進今天" + money
         }
@@ -566,7 +576,8 @@ extension WealthFacts {
     /// [v25.583 驗證修] 〔更早…〕那一句的金額：台幣「+20,000」「−9,600」（同 v1b，WealthTransferText.signed）、外幣「+US$900.00」
     private static func earlySigned(_ v: Double, code: String) -> String {
         if FinanceRates.isNTD(code) { return WealthTransferText.signed(v) }
-        return (v < 0 ? "−" : "+") + WealthFormat.plain(Swift.abs(v), code: code)
+        let sign: String = v < 0 ? "−" : "+"
+        return sign + WealthFormat.plain(Swift.abs(v), code: code)
     }
 
     /// 存一筆單次轉帳（同幣別台幣）時：同兩個帳戶、同金額、前後 3 天內有一期算進去的定期轉帳＝那一期（最近的那一期）；沒有＝nil
