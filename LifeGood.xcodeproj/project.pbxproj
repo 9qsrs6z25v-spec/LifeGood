@@ -146,6 +146,7 @@
 		A01B000001001601 /* WealthTransferPlans.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001601 /* WealthTransferPlans.swift */; };
 		A01B000001001603 /* WealthTransferNotices.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001603 /* WealthTransferNotices.swift */; };
 		A01B000001001605 /* WealthTransferFinds.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001605 /* WealthTransferFinds.swift */; };
+		A01B000001001608 /* WealthTransferCycles.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001608 /* WealthTransferCycles.swift */; };
 		A01B000001001606 /* WatchRunPhone.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001606 /* WatchRunPhone.swift */; };
 		A01B000001001607 /* WatchRunChoiceSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001607 /* WatchRunChoiceSheet.swift */; };
 		A01B000003000059 /* WatchRunWeekText.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000114 /* WatchRunWeekText.swift */; };
@@ -491,6 +492,7 @@
 		A01A000001001601 /* WealthTransferPlans.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WealthTransferPlans.swift; sourceTree = "<group>"; };
 		A01A000001001603 /* WealthTransferNotices.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WealthTransferNotices.swift; sourceTree = "<group>"; };
 		A01A000001001605 /* WealthTransferFinds.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WealthTransferFinds.swift; sourceTree = "<group>"; };
+		A01A000001001608 /* WealthTransferCycles.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WealthTransferCycles.swift; sourceTree = "<group>"; };
 		A01A000001001606 /* WatchRunPhone.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchRunPhone.swift; sourceTree = "<group>"; };
 		A01A000001001607 /* WatchRunChoiceSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchRunChoiceSheet.swift; sourceTree = "<group>"; };
 		A01A000002000114 /* WatchRunWeekText.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchRunWeekText.swift; sourceTree = "<group>"; };
@@ -886,6 +888,7 @@
 				A01A000001001601 /* WealthTransferPlans.swift */,
 				A01A000001001603 /* WealthTransferNotices.swift */,
 				A01A000001001605 /* WealthTransferFinds.swift */,
+				A01A000001001608 /* WealthTransferCycles.swift */,
 				A01A000001001606 /* WatchRunPhone.swift */,
 				A01A000001001593 /* NotificationActions.swift */,
 				A01A000001001594 /* WatchPackageBuilder.swift */,
@@ -1430,6 +1433,7 @@
 				A01B000001001601 /* WealthTransferPlans.swift in Sources */,
 				A01B000001001603 /* WealthTransferNotices.swift in Sources */,
 				A01B000001001605 /* WealthTransferFinds.swift in Sources */,
+				A01B000001001608 /* WealthTransferCycles.swift in Sources */,
 				A01B000001001606 /* WatchRunPhone.swift in Sources */,
 				A01B000001001607 /* WatchRunChoiceSheet.swift in Sources */,
 				A01B000001001593 /* NotificationActions.swift in Sources */,

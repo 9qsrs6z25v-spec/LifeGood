@@ -26,6 +26,9 @@ import Foundation
 // • 對存摺：差額剛好是對存摺那天前 1～7 天某一期的這一邊（±1 元）→ 存檔前問〔那期沒轉成〕〔不是，照存摺就好〕（WealthFacts.transferMiss）；
 //   零用錢帳戶（用途「零用」、名字有「零用」、或每週有一條定期轉帳轉進來；WealthFacts.isPocketAccount）存摺比 App 算的少
 //   →〔把差的記成「零用錢」支出〕。
+// • [v25.583] v4（transfer/build/v4/brief.md §2；sim_v4.py §6）：④ 連 3 個月的那三個月裡有兩個月以上同一組各記了 2 筆以上（多半是每兩週手記的：
+//   一個月 2 筆，偶爾 3 筆）＝不問（不然二月那種 59 天的兩個月，每兩週會剛好湊成「每月差 3 天內」帶成每月）；零用錢帳戶也認每兩週轉進來的；
+//   ① 像同一筆只看台幣對台幣的規則（換匯、外幣的規則金額是別的幣別）。
 
 // MARK: - 常數、id、字
 
@@ -37,6 +40,8 @@ enum WealthTransferFinds {
     /// [裁定修] 連 3 個月那三個月裡，同一組（同從、同到、同金額）有一個月記了幾筆以上＝不是每月一次（多半是每週手記的，
     /// 例 v1a 以前每週五轉零用錢 3,000）：不問（每週一定每個月都有一筆差 3 天內，會被當成「每月」帶錯）
     static let repeatMonthMax = 3
+    /// [v25.583] 連 3 個月那三個月裡，同一組有幾個月各記了 2 筆以上＝不是每月一次（多半是每兩週手記的；每月一筆、某個月多轉一次只有一個月 2 筆，照問）
+    static let repeatTwiceMonths = 2
     /// 對存摺差額剛好是一期：對存摺那天往前幾天內的期（不含那天：那天的在表單「這天還有」問過）
     static let missDays = 7
     /// 差額跟那一期差多少以內算「剛好」（±1 元）
@@ -192,7 +197,8 @@ enum WealthTransferFinds {
     /// 一條還在跑的每月定期轉帳跟這筆對得上（同 v1a 存規則時問的條件：從（或到）同一個帳戶、同金額、每月幾號差 3 天內）；沒有＝nil
     static func coveringRule(from payer: UUID?, to into: UUID?, amount: Double, day: Int,
                              transfers: [WealthFacts.TransferRule]) -> WealthFacts.TransferRule? {
-        for t in transfers where !t.isEnded && t.rule.cycleKind == .monthly {
+        // [v25.583] 只看台幣對台幣（換匯、外幣的規則 amount 是別的幣別，跟記帳那筆比不起來）
+        for t in transfers where !t.isEnded && t.rule.cycleKind == .monthly && t.code == "NT$" && t.toCode == "NT$" {
             if let p = payer, t.fromId != p { continue }
             if let i = into, t.toId != i { continue }
             guard Swift.abs(t.amount - amount) < 0.5,
@@ -241,7 +247,8 @@ enum WealthTransferFinds {
 
     /// 連 3 個月：最近一筆 L（今天往前 45 天內）、L 的前一個月與前兩個月各有一筆每月幾號跟 L 差 3 天內（那個月取最接近的）。
     /// 回三筆（舊到新）與每月幾日（三筆都是月底＝31，不然＝L 那天）；沒有＝nil。
-    /// [裁定修] 那三個月裡有一個月這一組記了 3 筆以上（repeatMonthMax；多半是每週手記的）＝nil
+    /// [裁定修] 那三個月裡有一個月這一組記了 3 筆以上（repeatMonthMax；多半是每週手記的）＝nil。
+    /// [v25.583] 那三個月裡有兩個月以上各記了 2 筆以上（repeatTwiceMonths；多半是每兩週手記的）＝nil
     static func repeatDays(_ list: [Date], today: Date) -> (days: [Date], day: Int)? {
         let t = WealthCal.day(today)
         let sorted: [Date] = list.map { WealthCal.day($0) }.sorted()
@@ -250,6 +257,7 @@ enum WealthTransferFinds {
         let lastMonth = WealthCal.startOfMonth(last)
         let lastCount: Int = sorted.filter({ WealthCal.startOfMonth($0) == lastMonth }).count
         guard lastCount < repeatMonthMax else { return nil }
+        var twiceMonths: Int = lastCount >= 2 ? 1 : 0
         var picked: [Date] = [last]
         for back in 1...2 {
             let month = WealthCal.startOfMonth(WealthCal.addMonths(-back, to: lastMonth))
@@ -264,8 +272,10 @@ enum WealthTransferFinds {
                 bestGap = g
             }
             guard inMonth < repeatMonthMax, let b = best else { return nil }
+            if inMonth >= 2 { twiceMonths += 1 }
             picked.insert(b, at: 0)
         }
+        guard twiceMonths < repeatTwiceMonths else { return nil }
         let allEnd = picked.allSatisfy { isMonthEnd($0) }
         return (days: picked, day: allEnd ? 31 : lastDay)
     }
@@ -553,11 +563,13 @@ extension WealthFacts {
     }
 
     /// [v25.581] 零用錢帳戶（judge §3.8、第 8 題：轉過去不算花掉，對存摺差的一鍵記成支出）：用途寫「零用」、名字有「零用」、
-    /// 或每週有一條還在跑的定期轉帳轉進來。證券戶、定存帳戶不算
+    /// 或每週有一條還在跑的定期轉帳轉進來。證券戶、定存帳戶不算。[v25.583] 每兩週轉進來的也算（從別的帳戶轉進來、不是換匯）
     func isPocketAccount(_ id: UUID) -> Bool {
         guard let a = account(id), !a.isSecurities, !a.isFixedDeposit else { return false }
         if (a.purpose ?? "").contains("零用") || a.name.contains("零用") { return true }
-        return runningTransfers.contains { $0.toId == id && $0.rule.cycleKind == .weekly }
+        return runningTransfers.contains { t in
+            t.toId == id && !t.isSameAccount && (t.rule.cycleKind == .weekly || t.rule.cycleKind == .biweekly)
+        }
     }
 }
 

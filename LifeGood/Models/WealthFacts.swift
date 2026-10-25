@@ -122,6 +122,12 @@ import CryptoKit
 //   transferRepeat（info）連 3 個月手記的單次轉帳〔設成每月都轉〕（Fix.newTransferRule）〔知道了〕。
 // • 對存摺差額剛好一期（transferMiss）、零用錢帳戶（isPocketAccount）也在 WealthTransferFinds.swift（對存摺表單叫）。
 //
+// [v25.583] 定期轉帳 v4 換匯、每兩週、每年、遇六日（transfer/build/v4/brief.md §2；算法、字在 WealthTransfers.swift、WealthTransferCycles.swift）：
+// • ⑥ 定期轉帳那一列帶 isEstimate＝未來的換匯那一期（WealthTransferRef.estimate）：接下來那一列金額前面寫「約」（同還沒結帳的卡費）。
+//   每一期兩邊照自己的幣別記（轉出 amount×fromCode、轉入 toAmount×toCode）——一套數字本來就一個幣別一條 running，換匯不用另外算：
+//   同一個帳戶台幣格 −9,600、美金格 +US$300.00；存款合計照設定的匯率換算（匯率 32.0 那天合計不變）。
+// • #1 不夠扣、第一筆是同一個帳戶兩格互換：「11/2 存錢要自動把 9,600 換成 USD，預估只有 …，銀行可能換不過去」。
+//
 // （工程）build 很重（展開每一期），全 App 只透過 LifeStore.wealthFacts(expense:finance:) 拿快取的那一份
 // （key＝里程碑／財富帳本的 revision＋記帳、理財的 modifyID＋匯率＋日期），打字時不重算（U1 P1、P5）。
 // 不標 @MainActor（AI 記帳、LifeStore 都會叫）；但字串用到 ntdWanString（NumberFormatter），請在主執行緒叫。
@@ -3024,10 +3030,11 @@ struct WealthFacts {
             let code = norm(r.code)
             if !transferCodes.contains(code) { transferCodes.append(code) }
             guard r.day <= ctx.horizon else { continue }
+            // [v25.583] 未來的換匯那一期：金額前面「約」（isEstimate）
             let row = WealthLedgerRow(
                 id: r.id, date: r.day, code: code, amount: Swift.abs(r.delta), isOutflow: r.delta < 0,
                 kind: r.delta < 0 ? .transferOut : .transferIn, title: r.title, note: r.note,
-                transferRuleId: r.ruleId, periodKey: r.key, transferManual: r.manual)
+                isEstimate: r.estimate, transferRuleId: r.ruleId, periodKey: r.key, transferManual: r.manual)
             events.append(Event(day: r.day, code: code, delta: r.delta, anchor: nil, seq: seq, row: row, late: r.late))
             seq += 1
         }
@@ -3377,7 +3384,13 @@ struct WealthFacts {
             if let rid = s.transferRuleId, let key = s.periodKey, let t = transfers.first(where: { $0.id == rid }) {
                 // [v25.575] 第一筆不夠的是定期轉帳的轉出：自動轉「銀行可能轉不過去」、自己轉「要自己從…轉」；
                 // 後面還有卡費／交割／固定支出也會不夠時多半句。第二顆〔看這一期〕（小表單裡才有〔銀行這期取消了〕〔知道了〕）
-                if t.isManual {
+                if t.isSameAccount {
+                    // [v25.583] 同一個帳戶兩格互換（台幣格 → 美金格）
+                    let into = WealthTransferText.codeName(t.toCode)
+                    text = t.isManual
+                        ? "\(md) 要自己在 \(a.name) 把 \(amountText) 換成 \(into)，預估只有 \(beforeText)，差 \(shortText)"
+                        : "\(md) \(a.name)要自動把 \(amountText) 換成 \(into)，預估只有 \(beforeText)，銀行可能換不過去"
+                } else if t.isManual {
                     text = "\(md) 要自己從 \(a.name) 轉 \(amountText) 到 \(t.toName)，預估只有 \(beforeText)，差 \(shortText)"
                 } else {
                     text = "\(md) \(a.name)要自動轉 \(amountText) 到 \(t.toName)，預估只有 \(beforeText)，銀行可能轉不過去"

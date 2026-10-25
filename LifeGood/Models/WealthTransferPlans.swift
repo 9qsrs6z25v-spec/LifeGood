@@ -10,6 +10,8 @@ import Foundation
 // • 改週期或日子「從哪天起」＝舊的那條結束（endKey）、新的一條接上（previousId，v1a 就有這欄）；
 // • 新手邀請〔不用了〕＝WealthTransferBook.inviteDismissed（v1a 就有）。
 // 這個檔只放算法與字（純函式；畫面、LifeStore、WealthFacts 叫），不碰存檔。
+// [v25.583] v4（transfer/build/v4/brief.md §2）：〔改金額或帳戶〕多改幣別、對方收到多少（換匯：toAmount 照你填的，不跟匯率；同幣別＝nil）；
+// 「下一期」「選一期」「從哪天起照新的日子」照遇六日挪過的那天比；每年的往後多看幾年；表單提示看遇六日；單次轉帳跟某一期重複只看台幣對台幣。
 
 // MARK: - 從哪一期起改（judge §3.1-3）
 
@@ -18,14 +20,26 @@ struct WealthTransferSegmentChange: Equatable {
     var fromId: UUID? = nil
     var toId: UUID? = nil
     var amount: Double? = nil
+    /// [v25.583] 換了轉出、轉入幣別（兩個都填，"NT$" 或外幣代碼）；nil＝沒改
+    var codes: WealthTransferCodes? = nil
+    /// [v25.583] 對方收到多少（換匯）：改了金額、幣別或這個數時照這個寫；nil＝換匯的照留原本的、同幣別的拿掉
+    var toAmount: Double? = nil
 
-    var isEmpty: Bool { fromId == nil && toId == nil && amount == nil }
+    var isEmpty: Bool { fromId == nil && toId == nil && amount == nil && codes == nil && toAmount == nil }
+}
+
+/// [v25.583] 一條規則（一段）的兩個幣別
+struct WealthTransferCodes: Equatable {
+    var from: String
+    var to: String
 }
 
 extension WealthTransferRule {
     /// 從 key 那一期（含）起改：那一期插一段（那一期已經有一段就改那一段），內容抄「那一期原本那段」再改你動的欄位；
     /// **那一期以後的每一段，同一個欄位一起改**（先排「12/4 起暫停、12/25 恢復」再改「11/13 起從國泰世華轉」，12/25 以後也是國泰世華）；
-    /// 改金額時，後面暫停（0）的段照舊是 0。key ""＝〔全部都改〕。改完把「跟前一段一模一樣」的段併掉（結果不變，段比較少）
+    /// 改金額時，後面暫停（0）的段照舊是 0。key ""＝〔全部都改〕。改完把「跟前一段一模一樣」的段併掉（結果不變，段比較少）。
+    /// [v25.583] 幣別（codes）跟從、到一樣每一段一起換；金額、幣別、對方收到多少有改的段：換完還是換匯＝toAmount 照 c.toAmount（沒給＝照留），
+    /// 同幣別＝toAmount 拿掉（v1b 原本「改金額＝toAmount 拿掉」就是同幣別這一種）
     func changed(from key: String, _ c: WealthTransferSegmentChange) -> WealthTransferRule {
         guard !c.isEmpty else { return self }
         var segs: [WealthTransferSegment] = sortedSegments
@@ -34,16 +48,27 @@ extension WealthTransferRule {
         segs.removeAll { ($0.fromKey ?? "") == key }
         segs.append(cur)
         segs.sort { ($0.fromKey ?? "") < ($1.fromKey ?? "") }
+        let money: Bool = c.amount != nil || c.codes != nil || c.toAmount != nil
         for i in segs.indices where (segs[i].fromKey ?? "") >= key {
             let isCur: Bool = (segs[i].fromKey ?? "") == key
             if let f = c.fromId { segs[i].fromId = f }
             if let t = c.toId { segs[i].toId = t }
-            if let v = c.amount {
-                let paused: Bool = (segs[i].amount ?? 0) <= 0.004
-                if isCur || !paused {
-                    segs[i].amount = v
-                    segs[i].toAmount = nil
-                }
+            if let cc = c.codes {
+                segs[i].fromCode = WealthTransferExchange.storedCode(cc.from)
+                segs[i].toCode = WealthTransferExchange.storedCode(cc.to)
+            }
+            guard money else { continue }
+            let paused: Bool = (segs[i].amount ?? 0) <= 0.004
+            guard isCur || !paused else {
+                segs[i].toAmount = nil
+                continue
+            }
+            if let v = c.amount { segs[i].amount = v }
+            let exchange: Bool = WealthFacts.norm(segs[i].fromCode ?? "NT$") != WealthFacts.norm(segs[i].toCode ?? "NT$")
+            if !exchange {
+                segs[i].toAmount = nil
+            } else if let ta = c.toAmount {
+                segs[i].toAmount = ta
             }
         }
         var out = self
@@ -112,19 +137,22 @@ extension WealthTransferRule {
 
 /// 〔改金額或帳戶〕〔改週期或日子〕存檔時問的那幾個選項要的日子（規則頁、表單都叫）
 enum WealthTransferPlan {
-    /// 〔下一期起〕：今天以後（不含今天）第一期原本的日子（暫停、這期不轉的也算一期）；沒有＝nil
+    /// 〔下一期起〕：今天以後（不含今天）第一期原本的日子（暫停、這期不轉的也算一期）；沒有＝nil。
+    /// [v25.583] 照遇六日挪過的那天比（提前到星期五、今天就轉的那期不算「下一期」）；每年的往後看 3 年多
     static func nextKey(_ r: WealthTransferRule, today: Date) -> String? {
         let t = WealthCal.day(today)
-        let list = WealthTransferSchedule.originalDates(r, through: WealthCal.addDays(400, to: t))
-        return list.first(where: { $0 > t }).map { WealthTransferSchedule.key(of: $0) }
+        let h = r.holidayKind
+        let list = WealthTransferSchedule.originalDates(r, through: WealthCal.addDays(WealthTransferSchedule.lookAheadDays(r.cycleKind), to: t))
+        return list.first(where: { WealthTransferSchedule.shifted($0, holiday: h) > t }).map { WealthTransferSchedule.key(of: $0) }
     }
 
-    /// 〔選一期…〕可以選的期：今天（含）以前最近 24 期＋以後 12 期（原本的日子，舊到新）
+    /// 〔選一期…〕可以選的期：今天（含）以前最近 24 期＋以後 12 期（原本的日子，舊到新）。[v25.583] 以前／以後照挪過的那天分；每年的往後看 3 年多
     static func pickDates(_ r: WealthTransferRule, today: Date) -> [Date] {
         let t = WealthCal.day(today)
-        let list = WealthTransferSchedule.originalDates(r, through: WealthCal.addDays(400, to: t))
-        let past: [Date] = list.filter { $0 <= t }
-        let future: [Date] = list.filter { $0 > t }
+        let h = r.holidayKind
+        let list = WealthTransferSchedule.originalDates(r, through: WealthCal.addDays(WealthTransferSchedule.lookAheadDays(r.cycleKind), to: t))
+        let past: [Date] = list.filter { WealthTransferSchedule.shifted($0, holiday: h) <= t }
+        let future: [Date] = list.filter { WealthTransferSchedule.shifted($0, holiday: h) > t }
         return Array(past.suffix(24)) + Array(future.prefix(12))
     }
 
@@ -135,11 +163,12 @@ enum WealthTransferPlan {
     }
 
     /// 改週期或日子「從哪天起照新的日子」：effective＝從哪天起（〔下一期起〕＝明天；〔選一天…〕＝選的那天，不早於明天）。
-    /// 新的一條的第一期＝新的日子 effective（含）以後第一期；算不出來＝nil
-    static func splitStart(cycle: WealthTransferCycle, day: Int, short: String?, weekday: Int,
-                           from effective: Date) -> Date? {
-        WealthTransferSchedule.firstDate(cycle: cycle, day: day, short: short, weekday: weekday,
-                                         onOrAfter: WealthCal.day(effective))
+    /// 新的一條的第一期＝新的日子 effective（含）以後第一期；算不出來＝nil。
+    /// [v25.583] 每年多 month；遇六日照新的那條（實際那天在 effective（含）以後的第一期，回原本的日子）
+    static func splitStart(cycle: WealthTransferCycle, day: Int, short: String?, weekday: Int, month: Int = 1,
+                           holiday: WealthTransferHoliday = .onDay, from effective: Date) -> Date? {
+        WealthTransferSchedule.firstScheduled(cycle: cycle, day: day, short: short, weekday: weekday, month: month,
+                                              holiday: holiday, onOrAfter: WealthCal.day(effective))
     }
 
     /// 改週期或日子：舊的那條最後一期＝effective 前一天（含）以前最後一期（effective 以後的舊日子都不轉了：每月 6 日 → 8 日、
@@ -238,6 +267,9 @@ enum WealthTransferHints {
         let early = WealthCal.addDays(-debitWindow, to: first)
         let firstKey = WealthCal.dayKey(first)
         let ruleDay = cal.component(.day, from: first)
+        // [v25.583] 遇六日：第一期實際那天（①② 照它比）；順延的那條 ④ 不是「銀行要是順延」而是一定會挪
+        let holiday: WealthTransferHoliday = r.holidayKind
+        let firstDay: Date = WealthTransferSchedule.shifted(first, holiday: holiday)
 
         // 轉出帳戶的每月入帳（照第一期那天的帳戶）
         var incomeDates: [(date: Date, title: String)] = []
@@ -266,7 +298,7 @@ enum WealthTransferHints {
 
         var out: [WealthTransferHint] = []
         // ① 同一天有入帳
-        if let inc = incomeDates.first(where: { $0.date == first }) {
+        if let inc = incomeDates.first(where: { $0.date == firstDay }) {
             let suggest: String = ruleDay < 28 ? "建議設 \(ruleDay + 1) 號以後" : "建議晚一天以上"
             out.append(WealthTransferHint(id: "same-income",
                                           text: "\(inc.title)也是 \(ruleDay) 號：銀行可能先轉、\(inc.title)還沒進來，\(suggest)。",
@@ -274,10 +306,10 @@ enum WealthTransferHints {
         }
         // ② 轉進帳戶這期後 0～3 天有扣款（照第一期）
         if let deb = debitDates.first(where: { d in
-            let n = WealthCal.days(from: first, to: d.date)
+            let n = WealthCal.days(from: firstDay, to: d.date)
             return n >= 0 && n <= debitWindow
         }) {
-            let gap = WealthCal.days(from: first, to: deb.date)
+            let gap = WealthCal.days(from: firstDay, to: deb.date)
             let eDay = cal.component(.day, from: deb.date)
             let text: String
             switch gap {
@@ -305,17 +337,19 @@ enum WealthTransferHints {
                 break hint3
             }
         }
-        // ④ 灰字：這條遇六日、順延到星期一會碰到（或晚過）轉進帳戶的扣款
-        hint4: for x in periods where WealthTransferText.isWeekend(x) {
+        // ④ 灰字：這條遇六日、順延到星期一會碰到（或晚過）轉進帳戶的扣款。
+        // [v25.583] 選了〔順延到星期一〕＝一定會挪：橘的提示「…順延到 5/10（一），會跟房貸同一天」；〔提前到星期五〕不會晚過扣款，不提示
+        hint4: for x in periods where WealthTransferText.isWeekend(x) && holiday != .prev {
             let shifted = WealthTransferText.nextWeekday(x)
             for deb in debitDates where deb.date > x && deb.date <= shifted {
                 let w = WealthTransferText.weekdayName(x)
                 let tail: String = deb.date == shifted
                     ? "會跟\(deb.title)同一天"
                     : "會晚過\(deb.title)（\(WealthFormat.monthDay(deb.date))）"
-                let text = WealthTransferText.dayText(x, today: today) + " 是星期\(w)：銀行要是順延到 "
+                let lead: String = holiday == .next ? " 是星期\(w)：順延到 " : " 是星期\(w)：銀行要是順延到 "
+                let text = WealthTransferText.dayText(x, today: today) + lead
                     + WealthFormat.monthDayWeek(shifted) + "，" + tail
-                out.append(WealthTransferHint(id: "shift-debit", text: text, gray: true))
+                out.append(WealthTransferHint(id: "shift-debit", text: text, gray: holiday != .next))
                 break hint4
             }
         }
@@ -518,7 +552,9 @@ extension WealthFacts {
         var best: (dist: Int, dup: WealthTransferDuplicate)? = nil
         for r in transferBook.live {
             for p in WealthTransferSchedule.periods(r, through: WealthCal.addDays(4, to: d), today: today) where p.counts {
-                guard p.fromId == fromId, p.toId == toId, Swift.abs(p.amount - amount) < 0.5 else { continue }
+                // [v25.583] 只比台幣對台幣（單次轉帳這一問只問台幣；換匯、外幣的期金額是別的幣別）
+                guard p.fromId == fromId, p.toId == toId, p.fromCode == "NT$", p.toCode == "NT$",
+                      Swift.abs(p.amount - amount) < 0.5 else { continue }
                 let n = Swift.abs(WealthCal.days(from: p.day, to: d))
                 guard n <= 3 else { continue }
                 if let b = best, b.dist <= n { continue }

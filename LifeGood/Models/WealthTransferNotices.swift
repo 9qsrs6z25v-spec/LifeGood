@@ -21,6 +21,8 @@ import Foundation
 //   **字一律不寫帳戶、銀行、金額、對方、名字**（你取的名字可能是「給媽媽」；手錶戴著時通知原樣轉過去）。日子可以寫。
 // • 我的行事曆（WealthDates.transferItems；MyCalendarView 叫）：自己轉的每條接下來 2 期（橘）、銀行自動轉每月的接下來 2 期（灰）、每週的不放。
 //   **不放進 WealthDates.all／items**：CalendarDayItems（今天小工具 → 手錶今天頁）讀的是那一份，轉帳一個字都不會流過去。
+// • [v25.583] v4：我的行事曆銀行自動轉的「每月一次以下」才放＝每月、**每年**放（每年一次、多半是大筆的換匯，忘不得），**每兩週不放**
+//  （一個月 2～3 筆，同每週太多）；自己轉的照舊每條都放。〔暫停〕可以選的期、恢復的期往後看多遠照週期（每年的看 3 年多）。
 
 // MARK: - 自己轉那一期在哪一步
 
@@ -182,14 +184,19 @@ extension WealthTransferPlan {
     /// 〔暫停〕「從哪一期起暫停？」可以選的：今天以後（不含今天）12 期原本的日子（第一個＝〔下一期〕）
     static func pauseStarts(_ r: WealthTransferRule, today: Date) -> [Date] {
         let t = WealthCal.day(today)
-        let list = WealthTransferSchedule.originalDates(r, through: WealthCal.addDays(400, to: t))
-        return Array(list.filter { $0 > t }.prefix(12))
+        let h = r.holidayKind
+        let ahead = WealthTransferSchedule.lookAheadDays(r.cycleKind)
+        let list = WealthTransferSchedule.originalDates(r, through: WealthCal.addDays(ahead, to: t))
+        // [v25.583] 照遇六日挪過的那天比（提前到今天就轉的那期不能再暫停）
+        return Array(list.filter { WealthTransferSchedule.shifted($0, holiday: h) > t }.prefix(12))
     }
 
     /// 「到哪一期恢復？」可以選的：暫停那一期以後 26 期原本的日子（〔先不設〕另外一顆）
     static func pauseResumes(_ r: WealthTransferRule, after start: Date) -> [Date] {
         let s = WealthCal.day(start)
-        let list = WealthTransferSchedule.originalDates(r, through: WealthCal.addDays(31 * 27, to: s))
+        // [v25.583] 往後看 27 期那麼遠（每年的 27 年；以前一律 31×27 天）
+        let span: Int = WealthTransferSchedule.periodDays(r.cycleKind ?? .monthly) * 27
+        let list = WealthTransferSchedule.originalDates(r, through: WealthCal.addDays(Swift.max(span, 31 * 27), to: s))
         return Array(list.filter { $0 > s }.prefix(26))
     }
 
@@ -295,7 +302,7 @@ enum WealthTransferNotices {
                 for p in list where p.manualPhase(today: t) == .today {
                     out.append(WealthCheck(
                         id: "trtoday-\(r.id.uuidString)-\(p.key)", kind: .transferToday, tone: .warn,
-                        text: "今天要自己從 \(name(p.fromId, names)) 轉 \(money(p)) 到 \(name(p.toId, names))",
+                        text: "今天要自己" + doing(p, names),
                         actions: [WealthCheck.Action(title: "轉好了", fix: .transferDoneToday(ruleId: r.id, key: p.key)),
                                   WealthCheck.Action(title: "看這一期", fix: .openTransferPeriod(ruleId: r.id, key: p.key))],
                         accountIds: ids))
@@ -304,7 +311,7 @@ enum WealthTransferNotices {
                     let md = WealthTransferText.dayText(p.day, today: t)
                     out.append(WealthCheck(
                         id: "trask-\(r.id.uuidString)-\(p.key)", kind: .transferAsk, tone: .warn,
-                        text: "\(md) 該從 \(name(p.fromId, names)) 轉 \(money(p)) 到 \(name(p.toId, names))，轉了嗎？（App 先當作轉了）",
+                        text: "\(md) 該" + doing(p, names) + "，轉了嗎？（App 先當作轉了）",
                         actions: [WealthCheck.Action(title: "轉了",
                                                      fix: .setTransferStatus(ruleId: r.id, key: p.key,
                                                                              status: WealthTransferStatus.done.rawValue)),
@@ -342,6 +349,14 @@ enum WealthTransferNotices {
         let pressed: Date? = note?.at
         let answered: Date = pressed.map { WealthCal.day($0) } ?? WealthCal.addDays(1, to: p.original)
         return WealthCal.days(from: answered, to: WealthCal.day(today)) >= hangDays
+    }
+
+    /// 「從 薪轉 轉 5,000 到 台灣銀行」；[v25.583] 同一個帳戶兩格互換「在 存錢 把 9,600 換成 USD」
+    private static func doing(_ p: WealthTransferPeriod, _ names: [UUID: String]) -> String {
+        if p.fromId != nil && p.fromId == p.toId {
+            return "在 \(name(p.fromId, names)) 把 \(money(p)) 換成 \(WealthTransferText.codeName(p.toCode))"
+        }
+        return "從 \(name(p.fromId, names)) 轉 \(money(p)) 到 \(name(p.toId, names))"
     }
 
     /// 帳戶的名字（找不到「別的帳戶」）
@@ -441,20 +456,21 @@ extension WealthDates {
     static let transfersPerRule = 2
 
     /// 我的行事曆的定期轉帳（今天起；照日子、同一天照標題）：自己轉的每條接下來 2 期（isManual，橘）、銀行自動轉**每月**的接下來 2 期（灰）、
-    /// 每週自動轉的不放（太多）。標題＝你取的名字或「薪轉 → 台灣銀行」；灰字「自己轉・NT$5,000」「銀行自動轉・NT$20,000」（遮住「NT$ ••••」）。
+    /// 每週自動轉的不放（太多）。[v25.583] 銀行自動轉**每年**的也放（每月一次以下）、**每兩週**的不放（同每週）；換匯寫兩邊「NT$9,600 → US$300.00」。標題＝你取的名字或「薪轉 → 台灣銀行」；灰字「自己轉・NT$5,000」「銀行自動轉・NT$20,000」（遮住「NT$ ••••」）。
     /// widgetTitle／lockTitle 只寫「轉帳」：**這一份不給 CalendarDayItems**（今天小工具、手錶都不放；all／items 不含它）
     static func transferItems(facts: WealthFacts, masked: Bool) -> [WealthDateItem] {
         let t = facts.today
         var out: [WealthDateItem] = []
         for r in facts.transferRules where !r.isEnded {
-            guard r.isManual || r.rule.cycleKind == .monthly else { continue }
+            guard r.isManual || r.rule.cycleKind == .monthly || r.rule.cycleKind == .yearly else { continue }
             var shown = 0
-            for p in WealthTransferSchedule.periods(r.rule, through: WealthCal.addDays(400, to: t), today: t) where p.counts {
+            let ahead = WealthTransferSchedule.lookAheadDays(r.rule.cycleKind)
+            for p in WealthTransferSchedule.periods(r.rule, through: WealthCal.addDays(ahead, to: t), today: t) where p.counts {
                 let d = WealthCal.day(p.day)
                 guard d >= t, let f = p.fromId ?? r.fromId else { continue }
                 if shown >= transfersPerRule { break }
                 shown += 1
-                let money: String = masked ? WealthFormat.masked : WealthFormat.money(p.amount, code: p.fromCode)
+                let money: String = masked ? WealthFormat.masked : WealthTransferText.pair(p, money: true)
                 let detail: String = (r.isManual ? "自己轉" : "銀行自動轉") + "・" + money
                 out.append(WealthDateItem(id: "wd-tr-" + r.id.uuidString + "-" + p.key, day: d, kind: .transfer,
                                           title: r.title, detail: detail, widgetTitle: "轉帳", lockTitle: "轉帳",

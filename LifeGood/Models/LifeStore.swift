@@ -1001,6 +1001,27 @@ class LifeStore: ObservableObject {
         }
     }
 
+    /// [v25.583] 換匯那一期〔改這一期〕〔今天補轉〕：同上，再加對方收到多少 toAmount（nil＝照規則；跟這一段一樣由呼叫端傳 nil）。
+    /// 四個一起換掉（lateOut／lateIn 照留）。例：每月 1 日 NT$9,600 → US$300.00，11/1 那期銀行實際 31.85＝amount 9,555、toAmount nil。
+    /// 不擋訂閱（同〔改這一期〕）。不帶 toAmount 的那一支（上面）照舊把 toAmount 留著（〔改到明天〕不會把換匯那期改過的美金洗掉）
+    func setTransferNote(ruleId: UUID, key: String, status: String?, dayKey: String?, amount: Double?, toAmount: Double?,
+                         now: Date = Date()) {
+        updateWealthTransfers(now: now) { book in
+            guard var r = book.rule(ruleId) else { return }
+            var notes = r.notes ?? [:]
+            var n = notes[key] ?? WealthTransferNote()
+            n.status = status
+            n.dayKey = dayKey == key ? nil : dayKey
+            n.amount = amount
+            n.toAmount = toAmount
+            n.at = now
+            n.updatedAt = now
+            notes[key] = n
+            r.notes = notes
+            book.upsert(r)
+        }
+    }
+
     /// 只改一期的狀態：〔銀行這期取消了〕〔這期不轉〕"skip"、〔沒轉成〕"failed"、〔復原〕〔銀行還是轉了〕〔還是要轉〕nil（不擋訂閱）。
     /// 金額照留（〔改這一期〕改過的不會不見）；從補轉（原本 "redo"）改成別的時，補轉那天（dayKey）一起拿掉
     func setTransferStatus(ruleId: UUID, key: String, status: String?, now: Date = Date()) {
@@ -1141,8 +1162,9 @@ class LifeStore: ObservableObject {
     /// 〔轉好了〕〔今天轉好了〕：那一期記成你轉好了（status "done"）、實際那天 day（＝原本那天就不存 dayKey）、
     /// 實際轉了多少 amount（nil＝照留；跟這一段每期一樣＝不存）、今天對存摺的時候還沒轉的那一邊 lateOut／lateIn（nil＝照留；
     /// true＝排在對存摺後面、false＝拿掉）。〔轉了〕（過了日子那一期當天就轉了）走 setTransferStatus(… "done")，日子照留
+    /// [v25.583] toAmount：換匯那一期對方實際收到多少（nil＝照留；跟這一段一樣＝不存）
     func markTransferDone(ruleId: UUID, key: String, day: Date, amount: Double? = nil, lateOut: Bool? = nil,
-                          lateIn: Bool? = nil, now: Date = Date()) {
+                          lateIn: Bool? = nil, toAmount: Double? = nil, now: Date = Date()) {
         updateWealthTransfers(now: now) { book in
             guard var r = book.rule(ruleId) else { return }
             var notes = r.notes ?? [:]
@@ -1153,6 +1175,10 @@ class LifeStore: ObservableObject {
             if let v = amount {
                 let seg: Double = r.segment(at: key)?.amount ?? 0
                 n.amount = Swift.abs(v - seg) < 0.5 ? nil : v
+            }
+            if let ta = toAmount {
+                let segTo: Double = r.segment(at: key)?.toAmount ?? (r.segment(at: key)?.amount ?? 0)
+                n.toAmount = Swift.abs(ta - segTo) < 0.005 ? nil : ta
             }
             if let lo = lateOut { n.lateOut = lo ? true : nil }
             if let li = lateIn { n.lateIn = li ? true : nil }
