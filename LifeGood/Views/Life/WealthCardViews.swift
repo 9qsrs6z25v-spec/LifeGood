@@ -70,6 +70,10 @@ import UniformTypeIdentifiers
 // [v25.581] 定期轉帳 v3 G3（transfer/build/v3/brief.md §1-9、§6 G3；transfer/judge.md §4.1）：⑦ 存摺明細一筆單次轉帳
 //（WealthCardRow.monthlyTransfer 有）長按多〔設成每月〕（放〔打開這一筆〕前面；要訂閱，present 擋）＝WealthCardSheet.Kind.transferPreset
 // → WealthTransferRuleForm(preset:)（表單自己掛布幕、最上面一行 lead、存檔時照 v1a 問）。這筆單次轉帳照留，從下一期起算。
+//
+// [v25.583] 定期轉帳 v4 G2（transfer/build/v4/brief.md §6 G2；transfer/judge.md §4.7、§5、§11.5）：字全在 WealthCardData 組好；
+// 這裡只讓變長的金額縮得下：④ 那一列右邊（換匯「9,600 → US$300.00」）、③⑦ 一列的金額與扣完剩（「約 +US$3,000.00」
+//「扣完剩 US$6,200.00」）多 minimumScaleFactor（放得下時照原大小，不換行、不截字）。
 
 /// 打開卡片頁時捲到哪一區（財富頁 ③ 點一列＝.upcoming；要確認、四格點了也用）
 enum WealthCardAnchor: String, Hashable {
@@ -1183,12 +1187,14 @@ struct WealthCardRowView: View {
                 .monospacedDigit()
                 .foregroundStyle(amountColor)
                 .lineLimit(1)
+                .minimumScaleFactor(0.8)
             if let sub = row.sub {
                 Text(sub)
                     .font(.caption2.weight(.semibold))
                     .monospacedDigit()
                     .foregroundStyle(row.warn ? MoneyTone.warn.color(pal) : Color.secondary)
                     .lineLimit(1)
+                    .minimumScaleFactor(0.8)
             }
         }
     }
@@ -1460,6 +1466,7 @@ struct WealthCardLinkLine: View {
                 .monospacedDigit()
                 .foregroundStyle(row.trailingTone?.color(pal) ?? Color.primary)
                 .lineLimit(1)
+                .minimumScaleFactor(0.75)
             Image(systemName: "chevron.right")
                 .font(.caption2.weight(.bold))
                 .foregroundStyle(.tertiary)

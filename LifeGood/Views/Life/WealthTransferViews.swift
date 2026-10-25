@@ -47,6 +47,20 @@ import SwiftUI
 //   原本的，不多問；早就結束了（forced 回 nil）＝那筆不問（不會把結束日往後延）。
 // • 〔不是，兩筆都要〕〔不是〕（不是關掉、〔取消〕）記住：存好後 WealthTransferFinds.notSameKeys → LifeStore.dismissWealthCheck，
 //   要確認不會再問同一筆；關掉沒答的照 v1a 說的之後再問。不加任何存檔欄位、不擋訂閱（新增表單打開的地方照舊擋）。
+//
+// [v25.583] G1 v4 換匯、每兩週、每年、遇六日（transfer/build/v4/brief.md §6 G1；算法、字都是主控的 WealthTransferCycles.swift、
+// WealthTransfers.swift、WealthTransferPlans.swift，這裡只叫）：
+// • 新增／改表單：〔每月〕〔每週〕〔每兩週〕〔每年〕；每兩週「下一次是哪天」兩選一（這週那天／下週那天，只在新增時）；每年幾月＋幾日
+//  （2/29 那種照「沒有這天的月份」）；「遇六日」〔照當天〕〔順延到星期一〕〔提前到星期五〕＋小字（每月、每年一定給；每週、每兩週選六日才給；
+//   換匯預設順延，你動過就不跟著換）；「從」「到」外幣帳戶也列（拿掉 v1 的只列台幣）、「到」多「同一個帳戶（換匯）」；轉出幣別、對方幣別；
+//   換匯多「對方收到」：一邊是台幣照現在設定的匯率帶好（你沒動過才跟著金額、幣別換），兩邊都外幣空的你填；存了就寫死、不跟匯率。
+//   下一期、接下來寫實際那天（挪過的多寫原本那天「11/2（一）（11/1 是星期日，順延）」）。
+// • 規則頁：頭的金額兩邊（「NT$9,600 → US$300.00」）、週期後面接「・遇六日順延」；改週期的每一次（facts.transferHistory）＋被接的舊那條
+//  「…（新的那條）」〔看新的那條〕；以前那條的期照樣列在「以前的」（點了開那一條的那一期）；每一列金額兩邊（未來的期「約」）；
+//   刪除的影響照帳戶＋幣別分開算。
+// • 一期小表單：頭的金額兩邊；換匯〔改這一期〕〔今天補轉〕兩個金額（那期銀行實際換多少：LifeStore.setTransferNote(…toAmount:)）、
+//   自己轉〔轉好了〕多「對方收到」（markTransferDone(…toAmount:)）；〔改這一期〕日子範圍照週期（editGapDays）。
+// • 不加存檔欄位、不擋新的訂閱（新增、〔改金額或帳戶〕照舊在打開的地方擋；〔改這一期〕〔看新的那條〕不擋）；新 sheet 照舊 sheet(item:)＋.appStores()。
 
 // MARK: - 共用的字
 
@@ -81,9 +95,11 @@ private enum WealthTransferUIText {
         return "\(c.month ?? 0) 月 \(c.day ?? 0) 日"
     }
 
-    /// VoiceOver 的金額「20,000 元」（遮住「金額已遮住」）
+    /// VoiceOver 的金額「20,000 元」（遮住「金額已遮住」）；[審查修] 外幣不接「元」：「US$300.00」
     static func spokenAmount(_ v: Double, code: String, masked: Bool) -> String {
-        masked ? "金額已遮住" : WealthFormat.plain(v, code: code) + " 元"
+        if masked { return "金額已遮住" }
+        if FinanceRates.isNTD(code) { return WealthFormat.plain(v, code: code) + " 元" }
+        return WealthFormat.money(v, code: code)
     }
 
     /// 帳戶「薪轉（台新銀行）」；沒有暱稱（名字就是銀行名）只寫一次；找不到＝fallback
@@ -92,6 +108,37 @@ private enum WealthTransferUIText {
         let bank = a.bankName.trimmingCharacters(in: .whitespacesAndNewlines)
         if bank.isEmpty || bank == a.name { return a.name }
         return a.name + "（" + bank + "）"
+    }
+
+    /// [v25.583] 打的金額：台幣到元（≥ 1）、外幣到 0.01（≥ 0.01）；讀不懂＝nil
+    static func parseAmount(_ text: String, code: String) -> Double? {
+        guard let v = WealthFormText.number(text) else { return nil }
+        if FinanceRates.isNTD(code) {
+            let r = v.rounded()
+            return r >= 1 ? r : nil
+        }
+        let r = (v * 100).rounded() / 100
+        return r > 0.004 ? r : nil
+    }
+
+    /// [v25.583] 輸入框前面的字：台幣「NT$」、外幣「US$」（認不得的「泰銖 」）
+    static func prefix(_ code: String) -> String {
+        FinanceRates.isNTD(code) ? "NT$" : WealthFormat.foreignPrefix(code)
+    }
+
+    /// [v25.583] 「跟這一段一樣」差多少以內算一樣：台幣 0.5 元、外幣 0.005
+    static func tolerance(_ code: String) -> Double {
+        FinanceRates.isNTD(code) ? 0.5 : 0.005
+    }
+
+    /// [v25.583] 句子裡的「11/2（一）（11/1 是星期日，順延）」：照遇六日挪過的那天；沒挪＝只寫那天
+    static func shiftedDay(_ original: Date, holiday: WealthTransferHoliday, today: Date) -> String {
+        let actual = WealthTransferSchedule.shifted(original, holiday: holiday)
+        let text = day(actual, today: today)
+        guard WealthCal.dayKey(actual) != WealthCal.dayKey(original) else { return text }
+        let how: String = holiday == .prev ? "提前" : "順延"
+        return text + "（" + shortDay(original, today: today) + " 是星期" + WealthTransferText.weekdayName(original)
+            + "，" + how + "）"
     }
 }
 
@@ -175,6 +222,8 @@ private struct WealthTransferUIStatus {
 
 /// 規則頁一列＝一期
 private struct WealthTransferUIRow: Identifiable {
+    /// [v25.583] 那一期是哪一條的（「以前的」也列改週期以前那條的期：點了開那一條的那一期）
+    let ruleId: UUID
     /// 那一期原本的日子「2026-11-06」
     let key: String
     let dayText: String
@@ -182,17 +231,20 @@ private struct WealthTransferUIRow: Identifiable {
     let status: WealthTransferUIStatus
     let spoken: String
 
-    var id: String { key }
+    var id: String { ruleId.uuidString + "-" + key }
 
+    /// [v25.583] 金額照兩邊寫：同幣別「20,000」；換匯「約 9,600 → US$300.00」（未來沒改過的期「約」；WealthTransferText.pair）
     static func make(_ p: WealthTransferPeriod, facts: WealthFacts, manual: Bool, masked: Bool) -> WealthTransferUIRow {
         let today = facts.today
         let short: Bool = p.state == .planned && facts.transferShortage(p.ruleId, key: p.key) != nil
         let st = WealthTransferUIStatus.of(p, manual: manual, short: short, today: today)
-        let spoken = WealthTransferUIText.spokenDay(p.day) + "，"
-            + WealthTransferUIText.spokenAmount(p.amount, code: p.fromCode, masked: masked) + "，" + st.spoken
-        return WealthTransferUIRow(key: p.key, dayText: WealthTransferUIText.day(p.day, today: today),
-                                   amountText: WealthTransferUIText.amount(p.amount, code: p.fromCode, masked: masked),
-                                   status: st, spoken: spoken)
+        let amountText: String = masked ? "••••" : WealthTransferText.pair(p)
+        let spokenAmount: String = (p.isExchange && !masked)
+            ? WealthTransferText.pair(p, money: true)
+            : WealthTransferUIText.spokenAmount(p.amount, code: p.fromCode, masked: masked)
+        let spoken = WealthTransferUIText.spokenDay(p.day) + "，" + spokenAmount + "，" + st.spoken
+        return WealthTransferUIRow(ruleId: p.ruleId, key: p.key, dayText: WealthTransferUIText.day(p.day, today: today),
+                                   amountText: amountText, status: st, spoken: spoken)
     }
 }
 
@@ -488,11 +540,18 @@ private struct WealthTransferUIOriginal {
     let fromId: UUID?
     let toId: UUID?
     let amount: Double
+    /// [v25.583] 下一期那一段的兩個幣別（"NT$" 或外幣代碼）、對方收到多少（同幣別＝nil）
+    let fromCode: String
+    let toCode: String
+    let toAmount: Double?
     let cycle: WealthTransferCycle
-    /// 照表單換算的 day（1～31）、short（nil／"next"）、每週星期幾
+    /// 照表單換算的 day（1～31）、short（nil／"next"）、每週星期幾、[v25.583] 每年幾月
     let day: Int
     let short: String?
     let weekday: Int
+    let month: Int
+    /// [v25.583] 遇六日（不算改日子：只改它＝直接存）
+    let holiday: WealthTransferHoliday
 }
 
 /// 表單現在的值（編輯存檔、預覽共用；純值，閉包帶著走）
@@ -500,26 +559,38 @@ private struct WealthTransferUIFormValues {
     let fromId: UUID
     let toId: UUID
     let amount: Double
+    /// [v25.583] 轉出、對方幣別（"NT$" 或外幣代碼）；對方收到多少（換匯才有）
+    let fromCode: String
+    let toCode: String
+    let toAmount: Double?
     let cycle: WealthTransferCycle
-    /// 每月幾日（每週＝nil）
+    /// 每月（每年）幾日（每週、每兩週＝nil）
     let day: Int?
     let short: String?
+    /// [v25.583] 每年幾月（不是每年＝nil）
+    let month: Int?
     let weekday: Int
+    /// [v25.583] 遇六日（不給那一列＝照當天）
+    let holiday: WealthTransferHoliday
     /// nil＝銀行會自動轉；"manual"＝我自己轉
     let mode: String?
     let name: String?
     let memo: String?
     let end: WealthTransferUIEndSpec
-    /// 從、到、金額有改的才填（WealthTransferRule.changed(from:_:)）
+    /// 從、到、金額、[v25.583] 幣別、對方收到多少有改的才填（WealthTransferRule.changed(from:_:)）
     let change: WealthTransferSegmentChange
-    /// 週期、每月幾日、沒有這天的月份、星期幾有改
+    /// 週期、每月幾日、沒有這天的月份、星期幾、[v25.583] 每年幾月有改（遇六日不算）
     let scheduleChanged: Bool
 
-    /// 誰轉、名字、備註、銀行設到哪天（照這一條的日子換算）
+    /// [v25.583] 兩邊幣別不一樣
+    var isExchange: Bool { WealthFacts.norm(fromCode) != WealthFacts.norm(toCode) }
+
+    /// 誰轉、名字、備註、銀行設到哪天（照這一條的日子換算）、[v25.583] 遇六日（整條一起：以前的期也跟著挪）
     func applyCommon(_ r: inout WealthTransferRule) {
         r.mode = mode
         r.name = name
         r.memo = memo
+        r.holiday = holiday.raw
         r.endKey = end.key(for: r)
     }
 
@@ -536,9 +607,10 @@ private struct WealthTransferUIFormValues {
         r.cycle = cycle.rawValue
         r.day = day
         r.short = short
+        r.month = month
         if let sk = base.startKey, let first = WealthTransferSchedule.date(fromKey: sk),
            let s = WealthTransferSchedule.firstDate(cycle: cycle, day: day ?? 1, short: short, weekday: weekday,
-                                                    onOrAfter: first) {
+                                                    month: month ?? 1, onOrAfter: first) {
             r.startKey = WealthTransferSchedule.key(of: s)
         }
         if !change.isEmpty { r = r.changed(from: "", change) }
@@ -546,14 +618,18 @@ private struct WealthTransferUIFormValues {
         return r
     }
 
-    /// 改週期或日子〔下一期起〕的新的一條（previousId、createdAt 由 LifeStore.splitTransferRule 填）；算不出第一期＝nil
+    /// 改週期或日子〔下一期起〕的新的一條（previousId、createdAt 由 LifeStore.splitTransferRule 填）；算不出第一期＝nil。
+    /// [v25.583] 段帶兩個幣別、換匯帶對方收到多少；規則帶每年幾月、遇六日（新的那條第一期照它的遇六日找）
     func splitNext(id: UUID, effective: Date) -> WealthTransferRule? {
         guard let s = WealthTransferPlan.splitStart(cycle: cycle, day: day ?? 1, short: short, weekday: weekday,
+                                                    month: month ?? 1, holiday: holiday,
                                                     from: effective) else { return nil }
-        let seg = WealthTransferSegment(fromKey: "", fromId: fromId, toId: toId, amount: amount)
-        var r = WealthTransferRule(id: id, cycle: cycle.rawValue, day: day, short: short,
-                                   startKey: WealthTransferSchedule.key(of: s), mode: mode, segments: [seg],
-                                   name: name, memo: memo)
+        let seg = WealthTransferSegment(fromKey: "", fromId: fromId, fromCode: WealthTransferExchange.storedCode(fromCode),
+                                        toId: toId, toCode: WealthTransferExchange.storedCode(toCode), amount: amount,
+                                        toAmount: isExchange ? toAmount : nil)
+        var r = WealthTransferRule(id: id, cycle: cycle.rawValue, day: day, short: short, month: month,
+                                   startKey: WealthTransferSchedule.key(of: s), mode: mode, holiday: holiday.raw,
+                                   segments: [seg], name: name, memo: memo)
         r.endKey = end.key(for: r)
         return r
     }
@@ -632,15 +708,17 @@ private struct WealthTransferUIPickList: Identifiable {
     let upcoming: [WealthTransferUIPickRow]
     let past: [WealthTransferUIPickRow]
 
-    /// dates：WealthTransferPlan.pickDates（以前最近 24 期＋以後 12 期，舊到新）
-    static func make(_ dates: [Date], today: Date) -> WealthTransferUIPickList {
+    /// dates：WealthTransferPlan.pickDates（以前最近 24 期＋以後 12 期，舊到新）。
+    /// [v25.583] 字、以前／接下來照遇六日挪過的那天（key 照舊是原本的日子）
+    static func make(_ dates: [Date], today: Date, holiday: WealthTransferHoliday) -> WealthTransferUIPickList {
         let t = WealthCal.day(today)
         var up: [WealthTransferUIPickRow] = []
         var past: [WealthTransferUIPickRow] = []
         for d in dates {
-            let text = WealthFormat.ymd(d) + "（" + WealthTransferText.weekdayName(d) + "）"
+            let actual = WealthTransferSchedule.shifted(d, holiday: holiday)
+            let text = WealthFormat.ymd(actual) + "（" + WealthTransferText.weekdayName(actual) + "）"
             let row = WealthTransferUIPickRow(key: WealthTransferSchedule.key(of: d), text: text)
-            if d > t {
+            if actual > t {
                 up.append(row)
             } else {
                 past.insert(row, at: 0)
@@ -702,6 +780,25 @@ private struct WealthTransferUIPickSheet: View {
     }
 }
 
+/// [v25.583] 新增表單看幣別、換匯的三個 onChange（拆成 ViewModifier：表單 body 的修飾器鏈不再加長）
+private struct WealthTransferUIFormWatch: ViewModifier {
+    /// 「從」、轉出幣別、「到」串起來（變了重挑對方幣別）
+    let codesKey: String
+    /// 金額、兩個幣別、是不是換匯串起來（變了、你沒動過「對方收到」＝照匯率重帶）
+    let exchangeKey: String
+    let isExchange: Bool
+    let onCodes: () -> Void
+    let onAmounts: () -> Void
+    let onExchange: (Bool) -> Void
+
+    func body(content: Content) -> some View {
+        content
+            .onChange(of: codesKey) { _, _ in onCodes() }
+            .onChange(of: exchangeKey) { _, _ in onAmounts() }
+            .onChange(of: isExchange) { _, x in onExchange(x) }
+    }
+}
+
 /// 新增或改一條定期轉帳。fromId：「從」帶好這個帳戶（nil＝WealthFacts.defaultTransferFromId：月薪入帳的那個帳戶）。
 /// [v25.577] editRuleId：〔改金額或帳戶〕（同一張表單；存檔問從哪一期起改；要訂閱：打開的地方擋）。
 /// preset：帶好欄位（要確認〔轉帳過去〕小表單的〔改成每月定期轉帳〕；只在新增時看）。
@@ -722,10 +819,8 @@ struct WealthTransferRuleForm: View {
     @State private var loaded = false
     /// 今天 00:00（打開時從 facts 抓一次）
     @State private var today: Date = WealthCal.day(Date())
-    /// 「從」「到」可以選的（沒收起來的銀行、含定存帳戶；v1 只列有台幣那一格的）
+    /// 「從」「到」可以選的（沒收起來的銀行、含定存帳戶；[v25.583] 外幣帳戶也列）
     @State private var choices: [WealthFormAccountChoice] = []
-    /// 有被濾掉的外幣帳戶（選單下面一行小字）
-    @State private var hidesForeign = false
     /// 今天對過存摺的帳戶（今天剛好是那一期：兩選一或三選一）
     @State private var anchoredToday: Set<UUID> = []
     @State private var from: UUID?
@@ -785,9 +880,34 @@ struct WealthTransferRuleForm: View {
     @State private var pickList: WealthTransferUIPickList? = nil
     @State private var pickedKey: String? = nil
 
+    // [v25.583] v4 換匯、每兩週、每年、遇六日
+    /// 轉出、對方幣別（"NT$" 或外幣代碼；WealthFacts.norm 過的）
+    @State private var fromCode = "NT$"
+    @State private var toCode = "NT$"
+    /// 「對方收到」打的字；toAmountTouched＝你動過（不再照匯率自動帶；改的時候一打開就是 true）
+    @State private var toAmountText = ""
+    @State private var toAmountTouched = false
+    /// 遇六日；holidayTouched＝你動過（換匯預設順延不再跟著切；改的時候一打開就是 true）
+    @State private var holiday: WealthTransferHoliday = .onDay
+    @State private var holidayTouched = false
+    /// 每年幾月 1～12（打開時帶今天的月）
+    @State private var yearMonth = 1
+    /// 每兩週「下一次是哪天」選了〔下週那天〕（只在新增時）
+    @State private var biweeklyLater = false
+    /// 設定裡的匯率（打開時抓一次；「對方收到」預設照它換，存了就寫死）
+    @State private var rates = FinanceRates(rates: [])
+    /// 轉出幣別是照哪一個「從」挑的、對方幣別是照哪一組（從、轉出幣別、到）挑的：
+    /// 打開時帶好的記在這裡，onChange 看到一樣的就不重挑（不會把〔改金額或帳戶〕帶好的幣別洗掉）
+    @State private var fromBasis: UUID? = nil
+    @State private var codesBasis = ""
+
     /// 每週〔一〕…〔日〕（Calendar 的 weekday）
     private static let weekdayOrder: [Int] = [2, 3, 4, 5, 6, 7, 1]
     private static let weekdayNames: [String] = ["日", "一", "二", "三", "四", "五", "六"]
+    /// [v25.583] 「遇六日」三顆（Picker 用 index 當 tag）
+    private static let holidayChoices: [WealthTransferHoliday] = [.onDay, .next, .prev]
+    /// [v25.583] 每個月最少幾天（每年那條選 29～31 日時，那個月可能沒有這天才給「沒有這天的月份」）
+    private static let minMonthDays: [Int] = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
     /// 〔更早…〕最早可以選幾個月前（20 年；每週的 1,043 期，不到 1,200 期上限）
     private static let earliestMonths = 240
 
@@ -808,6 +928,107 @@ struct WealthTransferRuleForm: View {
 
     private var toChoices: [WealthFormAccountChoice] { choices.filter { $0.id != from } }
 
+    /// [v25.583] 那個帳戶的幣別（WealthFacts.norm 過；台幣在前；不在選單＝空的）
+    private func codes(of id: UUID?) -> [String] {
+        guard let id, let c = choices.first(where: { $0.id == id }) else { return [] }
+        return Self.normalized(c.codes)
+    }
+
+    /// [v25.583] 同一個帳戶兩格互換（台幣格 → 美金格）
+    private var isSameAccount: Bool {
+        guard let f = from else { return false }
+        return toId == f
+    }
+
+    /// [v25.583] 「到」選單多一列「同一個帳戶（換匯）」：從的帳戶有兩個以上幣別（已經選了它的也照列，不會變空白）
+    private var offersSameAccount: Bool { codes(of: from).count >= 2 || isSameAccount }
+
+    /// [v25.583] 兩邊幣別不一樣（「到」還沒選、不在 App 裡的人＝不是）
+    private var isExchange: Bool {
+        guard toId != nil else { return false }
+        return WealthFacts.norm(fromCode) != WealthFacts.norm(toCode)
+    }
+
+    /// [v25.583] 「轉出幣別」可以選的（現在選的不在帳戶裡也列，不會變空白）
+    private var fromCodeChoices: [String] {
+        var list = codes(of: from)
+        if !list.contains(fromCode) { list.append(fromCode) }
+        return list
+    }
+
+    /// [v25.583] 「對方幣別」可以選的：到的帳戶的幣別；同一個帳戶＝除了轉出那個
+    private var toCodeChoices: [String] {
+        guard let t = toId else { return [] }
+        let same = isSameAccount
+        var list: [String] = codes(of: t).filter { !same || $0 != fromCode }
+        if !list.isEmpty && !list.contains(toCode) && !(same && toCode == fromCode) { list.append(toCode) }
+        return list
+    }
+
+    /// [v25.583] 轉出幣別預設：有台幣＝台幣，不然第一個
+    private static func defaultFromCode(_ list: [String]) -> String {
+        if list.contains("NT$") { return "NT$" }
+        return list.first ?? "NT$"
+    }
+
+    /// [v25.583] 對方幣別預設：同一個帳戶＝第一個跟轉出不一樣的；別的帳戶＝有同幣別就同幣別、不然台幣、不然第一個
+    private static func defaultToCode(_ list: [String], fromCode fc: String, same: Bool) -> String {
+        if same { return list.first(where: { $0 != fc }) ?? (list.first ?? "NT$") }
+        if list.contains(fc) { return fc }
+        if list.contains("NT$") { return "NT$" }
+        return list.first ?? "NT$"
+    }
+
+    /// [v25.583] 挑幣別的依據（「從」、轉出幣別、「到」）
+    private static func makeCodesKey(from f: UUID?, fromCode fc: String, target t: WealthTransferUITarget) -> String {
+        let to: String
+        switch t {
+        case .unpicked: to = "u"
+        case .outside: to = "o"
+        case .account(let id): to = id.uuidString
+        }
+        let head: String = f?.uuidString ?? "-"
+        return head + "|" + fc + "|" + to
+    }
+
+    private var codesKey: String { Self.makeCodesKey(from: from, fromCode: fromCode, target: target) }
+
+    /// [v25.583] 金額、兩個幣別、是不是換匯（變了、你沒動過「對方收到」＝照匯率重帶）
+    private var exchangeKey: String {
+        let x: String = isExchange ? "x" : "-"
+        return amountText + "|" + fromCode + "|" + toCode + "|" + x
+    }
+
+    /// [v25.583] 「對方收到」改的時候記你動過（之後不再照匯率自動帶）
+    private var toAmountBinding: Binding<String> {
+        Binding(get: { self.toAmountText },
+                set: { v in
+                    self.toAmountText = v
+                    self.toAmountTouched = true
+                })
+    }
+
+    /// [v25.583] 「遇六日」三顆（index 當 tag）；選了記你動過（換匯預設順延不再跟著切）
+    private var holidayBinding: Binding<Int> {
+        Binding(get: { Self.holidayChoices.firstIndex(of: self.holiday) ?? 0 },
+                set: { i in
+                    self.holiday = Self.holidayChoices.indices.contains(i) ? Self.holidayChoices[i] : .onDay
+                    self.holidayTouched = true
+                })
+    }
+
+    /// [v25.583] 給不給「遇六日」那一列：每月、每年一定給；每週、每兩週選星期六、日才給（平日永遠不會遇到六日）
+    private var showsHolidayRow: Bool {
+        guard !isOutside else { return false }
+        switch cycle {
+        case .monthly, .yearly: return true
+        case .weekly, .biweekly: return weekday == 1 || weekday == 7
+        }
+    }
+
+    /// [v25.583] 存的遇六日（不給那一列＝照當天）
+    private var holidayValue: WealthTransferHoliday { showsHolidayRow ? holiday : .onDay }
+
     private func choiceName(_ id: UUID?) -> String? {
         guard let id else { return nil }
         return choices.first { $0.id == id }?.name
@@ -827,34 +1048,64 @@ struct WealthTransferRuleForm: View {
         return line
     }
 
-    /// 每次轉多少（台幣到元；< 1 元＝nil）
-    private var amountValue: Double? {
-        guard let v = WealthFormText.number(amountText) else { return nil }
-        let r = v.rounded()
-        return r >= 1 ? r : nil
-    }
+    /// 每次轉多少（台幣到元、< 1 元＝nil；[v25.583] 外幣到 0.01）
+    private var amountValue: Double? { WealthTransferUIText.parseAmount(amountText, code: fromCode) }
+
+    /// [v25.583] 對方收到多少（照對方幣別：台幣到元、外幣到 0.01）
+    private var toAmountValue: Double? { WealthTransferUIText.parseAmount(toAmountText, code: toCode) }
 
     private var storedDay: Int { Swift.min(Swift.max(monthDay, 1), 31) }
 
-    private var showsShortRow: Bool { cycle == .monthly && monthDay >= 29 && monthDay <= 31 }
+    /// [v25.583] 每月、每年才有「幾日」
+    private var isDated: Bool { cycle == .monthly || cycle == .yearly }
+
+    /// 選 29～31 日多一列「沒有這天的月份」；[v25.583] 每年的只在那個月可能沒有這天時給（2/29、4/31；1/31 不給）
+    private var showsShortRow: Bool { Self.shortRowShown(cycle: cycle, monthDay: monthDay, month: yearMonth) }
+
+    private static func shortRowShown(cycle c: WealthTransferCycle, monthDay md: Int, month m: Int) -> Bool {
+        guard md >= 29 && md <= 31 else { return false }
+        switch c {
+        case .monthly: return true
+        case .yearly:
+            let i = Swift.min(Swift.max(m, 1), 12) - 1
+            return md > minMonthDays[i]
+        case .weekly, .biweekly: return false
+        }
+    }
 
     private var storedShort: String? { (showsShortRow && shortNext) ? "next" : nil }
 
+    /// [v25.583] 實際那天在 d（含）以後的第一期（原本的日子；照遇六日挪過的那天比：WealthTransferSchedule.firstScheduled）
     private func firstPeriod(onOrAfter d: Date) -> Date? {
-        WealthTransferSchedule.firstDate(cycle: cycle, day: storedDay, short: storedShort, weekday: weekday,
-                                         onOrAfter: d)
+        WealthTransferSchedule.firstScheduled(cycle: cycle, day: storedDay, short: storedShort, weekday: weekday,
+                                              month: yearMonth, holiday: holidayValue, onOrAfter: d)
     }
 
-    /// 照週期、哪天：今天（含）以後第一期
-    private var firstFromToday: Date? { firstPeriod(onOrAfter: today) }
+    /// [v25.583] 每兩週選了〔下週那天〕：再加 7 天（只在新增、沒選〔更早…〕時）
+    private var biweeklyPushed: Bool { cycle == .biweekly && biweeklyLater && !isEditing && !earlyOpen }
 
+    /// [v25.583] 每兩週「下一次是哪天」兩選一的第一個（這週那天；原本的日子）
+    private var biweeklyBase: Date? { firstPeriod(onOrAfter: today) }
+
+    /// 照週期、哪天：今天（含）以後第一期（原本的日子）。[v25.583] 每兩週〔下週那天〕再 +7
+    private var firstFromToday: Date? {
+        guard let d = firstPeriod(onOrAfter: today) else { return nil }
+        return biweeklyPushed ? WealthCal.addDays(7, to: d) : d
+    }
+
+    /// 今天剛好是那一期：[v25.583] 第一期**挪過的那天**是今天（每月 1 日提前到星期五、今天 10/30：那期 key 是 11/1）
     private var todayIsPeriod: Bool {
         guard let d = firstFromToday else { return false }
-        return WealthCal.dayKey(d) == WealthCal.dayKey(today)
+        return WealthCal.dayKey(WealthTransferSchedule.shifted(d, holiday: holidayValue)) == WealthCal.dayKey(today)
     }
 
-    /// 今天這期不算時的下一期
-    private var nextAfterToday: Date? { firstPeriod(onOrAfter: tomorrow) }
+    /// 今天這期不算時的下一期（[v25.583] 每兩週＝第一期 +14）
+    private var nextAfterToday: Date? {
+        if cycle == .biweekly {
+            return firstFromToday.map { WealthCal.addDays(14, to: $0) }
+        }
+        return firstPeriod(onOrAfter: tomorrow)
+    }
 
     private var fromAnchored: Bool {
         guard let f = from else { return false }
@@ -872,11 +1123,17 @@ struct WealthTransferRuleForm: View {
     /// 今天剛好是那一期的問句：新增、沒選〔更早…〕才問（選了更早的，今天那期跟以前的期一樣算）
     private var showsTodaySection: Bool { !isEditing && !earlyOpen && todayIsPeriod }
 
-    /// 週期、每月幾日、沒有這天的月份、星期幾跟打開時不一樣
+    /// 週期、每月幾日、沒有這天的月份、星期幾跟打開時不一樣。[v25.583] 每兩週同每週比星期幾；每年多比幾月；遇六日不算
     private func scheduleChanged(_ o: WealthTransferUIOriginal) -> Bool {
         if cycle != o.cycle { return true }
-        if cycle == .weekly { return weekday != o.weekday }
-        return storedDay != o.day || storedShort != o.short
+        switch cycle {
+        case .weekly, .biweekly:
+            return weekday != o.weekday
+        case .monthly:
+            return storedDay != o.day || storedShort != o.short
+        case .yearly:
+            return yearMonth != o.month || storedDay != o.day || storedShort != o.short
+        }
     }
 
     /// 第一期（存成 startKey）。新增：〔更早…〕選的那天以後第一期；今天剛好是那一期，選〔不算〕＝下一期。
@@ -884,12 +1141,17 @@ struct WealthTransferRuleForm: View {
     private var startDay: Date? {
         if let o = original {
             guard let first = o.firstDay else { return nil }
-            return scheduleChanged(o) ? firstPeriod(onOrAfter: first) : first
+            guard scheduleChanged(o) else { return first }
+            // [審查修] 跟〔全部都改〕存的同一套（WealthTransferUIFormValues.scheduleEditedAll：firstDate、原本的日子），
+            // 「共 N 次：最後一次…」、銀行設到哪天才對得上
+            return WealthTransferSchedule.firstDate(cycle: cycle, day: storedDay, short: storedShort, weekday: weekday,
+                                                    month: yearMonth, onOrAfter: first)
         }
         if isEditing { return nil }
         if earlyOpen { return firstPeriod(onOrAfter: WealthCal.day(earlyDay)) }
         if todayIsPeriod {
-            return todayChoice == .skip ? nextAfterToday : today
+            // [v25.583] 今天那期的 key 是原本的日子（提前到今天的那期不是今天的 key）
+            return todayChoice == .skip ? nextAfterToday : firstFromToday
         }
         return firstFromToday
     }
@@ -904,13 +1166,13 @@ struct WealthTransferRuleForm: View {
         WealthCal.addMonths(-Self.earliestMonths, to: today)...today
     }
 
-    /// 只有日子的規則（設到哪天、接下來三個日子用；還沒選帳戶也算得出來）
+    /// 只有日子的規則（設到哪天、接下來三個日子用；還沒選帳戶也算得出來）。[v25.583] 每年帶 month、遇六日帶 holiday
     private var scheduleRule: WealthTransferRule? {
         guard let s = startDay else { return nil }
-        let monthly = cycle == .monthly
-        return WealthTransferRule(cycle: cycle.rawValue, day: monthly ? storedDay : nil,
-                                  short: monthly ? storedShort : nil,
-                                  startKey: WealthTransferSchedule.key(of: s))
+        let dated = isDated
+        return WealthTransferRule(cycle: cycle.rawValue, day: dated ? storedDay : nil,
+                                  short: dated ? storedShort : nil, month: cycle == .yearly ? yearMonth : nil,
+                                  startKey: WealthTransferSchedule.key(of: s), holiday: holidayValue.raw)
     }
 
     private var timesValue: Int {
@@ -950,32 +1212,53 @@ struct WealthTransferRuleForm: View {
         guard var r = scheduleRule, let last = lastPeriod else { return nil }
         r.endKey = WealthTransferSchedule.key(of: last)
         let n = WealthTransferSchedule.originalDates(r, through: last).count
-        return "共 \(n) 次：最後一次 " + WealthTransferUIText.day(last, today: today)
+        // [v25.583] 寫實際那天（遇六日挪過的）
+        let actual = WealthTransferSchedule.shifted(last, holiday: holidayValue)
+        return "共 \(n) 次：最後一次 " + WealthTransferUIText.day(actual, today: today)
     }
 
-    /// 最下面「接下來：11/8（日）、12/8（二）、2027/1/8（五）」（今天以後的；改的時候不含今天）
+    /// 最下面「接下來：11/8（日）、12/8（二）、2027/1/8（五）」（今天以後的；改的時候不含今天）。
+    /// [v25.583] 列**實際那天**（遇六日挪過的：periods 的 day）；每年的往後看 3 年多（lookAheadDays）
     private var previewLine: String? {
         guard var r = scheduleRule else { return nil }
         if let last = lastPeriod { r.endKey = WealthTransferSchedule.key(of: last) }
-        let list = WealthTransferSchedule.originalDates(r, through: WealthCal.addDays(400, to: today))
+        let through = WealthCal.addDays(WealthTransferSchedule.lookAheadDays(cycle), to: today)
+        let list: [WealthTransferPeriod] = WealthTransferSchedule.periods(r, through: through, today: today)
         let lower: Date = isEditing ? tomorrow : today
-        let texts: [String] = list.filter { $0 >= lower }.prefix(3).map { WealthTransferUIText.day($0, today: today) }
+        let days: [Date] = list.map { $0.day }.filter { $0 >= lower }
+        let texts: [String] = days.prefix(3).map { WealthTransferUIText.day($0, today: today) }
         guard !texts.isEmpty else { return nil }
         return "接下來：" + texts.joined(separator: "、")
     }
 
+    /// [v25.583] 「從」「到」能存：兩個不一樣的帳戶，或同一個帳戶兩個不一樣的幣別（同一個帳戶又同幣別＝擋）
+    private var accountsReady: Bool {
+        guard let f = from, let t = toId else { return false }
+        return f != t || isExchange
+    }
+
     private var saveDisabled: Bool {
-        guard !editMissing, let f = from, let t = toId, f != t, amountValue != nil, startDay != nil else { return true }
+        guard !editMissing, accountsReady, amountValue != nil, startDay != nil else { return true }
+        // [v25.583] 換匯一定要填對方收到多少
+        if isExchange && toAmountValue == nil { return true }
         return endInvalid
     }
 
+    /// 名字的 placeholder「薪轉 → 房貸扣款」；[v25.583] 同一個帳戶「存錢 台幣 → USD」
     private var namePlaceholder: String {
-        (choiceName(from) ?? "薪轉") + " → " + (choiceName(toId) ?? "房貸扣款")
+        let f: String = choiceName(from) ?? "薪轉"
+        if isSameAccount {
+            return WealthTransferText.pairTitle(fromName: f, toName: f, fromCode: fromCode, toCode: toCode,
+                                                sameAccount: true)
+        }
+        return f + " → " + (choiceName(toId) ?? "房貸扣款")
     }
 
+    /// [v25.583] 每兩週同每週「今天（10/23）剛好是週五，這期呢？」；每年同每月；遇六日挪到今天的那期一律「剛好是轉帳那天」
     private var todayQuestion: String {
         let d = WealthFormat.monthDay(today)
-        if cycle == .weekly {
+        let moved: Bool = firstFromToday.map { WealthCal.dayKey($0) != WealthCal.dayKey(today) } ?? false
+        if (cycle == .weekly || cycle == .biweekly) && !moved {
             return "今天（\(d)）剛好是週" + WealthTransferText.weekdayName(today) + "，這期呢？"
         }
         return "今天（\(d)）剛好是轉帳那天，這期呢？"
@@ -991,16 +1274,19 @@ struct WealthTransferRuleForm: View {
         return names.joined(separator: "、") + (names.count > 1 ? "今天都對過存摺" : "今天對過存摺")
     }
 
-    /// 〔今天這期不算（從下一期 10/30 起）〕
+    /// 〔今天這期不算（從下一期 10/30 起）〕（[v25.583] 寫實際那天）
     private var skipLabel: String {
         guard let n = nextAfterToday else { return "今天這期不算（從下一期起）" }
-        return "今天這期不算（從下一期 " + WealthTransferUIText.shortDay(n, today: today) + " 起）"
+        let actual = WealthTransferSchedule.shifted(n, holiday: holidayValue)
+        return "今天這期不算（從下一期 " + WealthTransferUIText.shortDay(actual, today: today) + " 起）"
     }
 
+    /// [v25.583] 寫實際那天；挪過的多寫原本那天「11/2（一）（11/1 是星期日，順延）」
     private var startText: String {
         guard let s = startDay else { return "—" }
-        let t = WealthTransferUIText.day(s, today: today)
-        return WealthCal.dayKey(s) == WealthCal.dayKey(today) ? "今天 " + t : t
+        let actual = WealthTransferSchedule.shifted(s, holiday: holidayValue)
+        let t = WealthTransferUIText.shiftedDay(s, holiday: holidayValue, today: today)
+        return WealthCal.dayKey(actual) == WealthCal.dayKey(today) ? "今天 " + t : t
     }
 
     /// 「第一期」「下一期」
@@ -1017,9 +1303,13 @@ struct WealthTransferRuleForm: View {
         return WealthFormat.ymd(d)
     }
 
+    /// [v25.583] 每兩週同每週（記帳的固定支出沒有每兩週）；每年同每月（三顆照給，帶每年）
     private var outsideText: String {
         if cycle == .weekly {
             return "記帳的固定支出沒有每週：請改每月，或把對方的帳戶也加進 App"
+        }
+        if cycle == .biweekly {
+            return "記帳的固定支出沒有每兩週：請改每月，或把對方的帳戶也加進 App"
         }
         let f = choiceName(from) ?? "轉出的帳戶"
         return "轉給家人、房東是花掉的錢，請記在記帳的固定支出（從 " + f + " 扣），這樣本月還能花、稅務才對。"
@@ -1028,7 +1318,20 @@ struct WealthTransferRuleForm: View {
 
     private var footerText: String {
         if isOutside { return "這裡什麼都不存。" }
-        return "App 不會幫你轉錢，只照你在銀行的設定算進兩個帳戶。銀行那邊改了，這裡也要改。"
+        let base = "App 不會幫你轉錢，只照你在銀行的設定算進兩個帳戶。銀行那邊改了，這裡也要改。"
+        // [v25.583] 換匯多一句
+        return isExchange ? base + "換匯：兩邊金額照你填的，不跟設定的匯率。" : base
+    }
+
+    /// [v25.583] 換匯那一格下面的小字：一邊是台幣「等於 1 USD＝32.0。兩邊金額都存在這條規則裡…」；兩邊都外幣「兩邊都是外幣：兩邊金額都你填」
+    private var exchangeFooter: String {
+        guard FinanceRates.isNTD(fromCode) || FinanceRates.isNTD(toCode) else {
+            return "兩邊都是外幣：兩邊金額都你填。"
+        }
+        let tail = "兩邊金額都存在這條規則裡，設定改匯率也不會變；哪一期銀行實際換多少，點那一期改。"
+        guard let v = amountValue, let tv = toAmountValue,
+              let line = WealthTransferExchange.rateLine(v, code: fromCode, to: tv, toCode: toCode) else { return tail }
+        return line + "。" + tail
     }
 
     private var amountForDialog: String {
@@ -1047,6 +1350,11 @@ struct WealthTransferRuleForm: View {
         parts.append(amountText)
         parts.append(cycle.rawValue + "/\(monthDay)/\(weekday)")
         parts.append(shortNext ? "n" : "l")
+        // [v25.583] 幣別、對方收到、遇六日、每年幾月、每兩週下一次是哪天
+        parts.append(fromCode + ">" + toCode + "=" + toAmountText)
+        let holidayPart: String = holidayValue.raw ?? "-"
+        let laterPart: String = biweeklyLater ? "b" : "-"
+        parts.append(holidayPart + "/\(yearMonth)/" + laterPart)
         parts.append(startDay.map { WealthCal.dayKey($0) } ?? "-")
         switch endMode {
         case .noEnd: parts.append("e0")
@@ -1094,6 +1402,7 @@ struct WealthTransferRuleForm: View {
                 }
                 .onAppear { load() }
                 .onChange(of: from) { _, _ in fromChanged() }
+                .modifier(formWatch)
                 .task(id: previewKey) { await recomputeLater() }
         }
         .modifier(WealthTransferUIEditDialog(asking: editAsk,
@@ -1105,6 +1414,13 @@ struct WealthTransferRuleForm: View {
         }
         .presentationDetents([.medium, .large])
         .modifier(WealthPrivacyCurtain(armed: true))
+    }
+
+    /// [v25.583] 幣別、換匯的三個 onChange
+    private var formWatch: WealthTransferUIFormWatch {
+        WealthTransferUIFormWatch(codesKey: codesKey, exchangeKey: exchangeKey, isExchange: isExchange,
+                                  onCodes: { codesChanged() }, onAmounts: { amountsChanged() },
+                                  onExchange: { x in exchangeToggled(x) })
     }
 
     @ViewBuilder
@@ -1127,6 +1443,9 @@ struct WealthTransferRuleForm: View {
                 if isOutside {
                     outsideSection
                 } else {
+                    if showsHolidayRow {
+                        holidaySection
+                    }
                     if showsTodaySection {
                         todaySection
                     }
@@ -1154,6 +1473,7 @@ struct WealthTransferRuleForm: View {
         }
     }
 
+    /// [v25.583] 外幣帳戶也列（拿掉 v1 的「只列有台幣」）；「到」多「同一個帳戶（換匯）」；兩個以上幣別多「轉出幣別」「對方幣別」
     private var accountsSection: some View {
         Section {
             Picker("從", selection: $from) {
@@ -1161,53 +1481,99 @@ struct WealthTransferRuleForm: View {
                     Text(c.label).tag(c.id as UUID?)
                 }
             }
+            fromCodeRow
             Picker("到", selection: $target) {
                 Text("選一個").tag(WealthTransferUITarget.unpicked)
                 ForEach(toChoices) { c in
                     Text(c.label).tag(WealthTransferUITarget.account(c.id))
                 }
-                if !isEditing {
+                if let f = from, offersSameAccount {
+                    Text("同一個帳戶（換匯）").tag(WealthTransferUITarget.account(f))
+                }
+                if !isEditing && FinanceRates.isNTD(fromCode) {
                     Text("不在 App 裡的人（家人、房東…）").tag(WealthTransferUITarget.outside)
                 }
             }
+            toCodeRow
         } header: {
             WealthFormHeader(title: "從哪轉到哪", icon: "arrow.left.arrow.right", color: .blue)
         } footer: {
-            if hidesForeign {
-                Text("外幣帳戶之後的版本才能選")
+            if isSameAccount && !isExchange {
+                Text("同一個帳戶：轉出、對方要選不一樣的幣別")
             }
         }
     }
 
+    /// [v25.583] 「轉出幣別」：從的帳戶有兩個以上幣別才給
+    @ViewBuilder
+    private var fromCodeRow: some View {
+        let list: [String] = fromCodeChoices
+        if list.count >= 2 {
+            Picker("轉出幣別", selection: $fromCode) {
+                ForEach(list, id: \.self) { c in
+                    Text(WealthTransferText.codeName(c)).tag(c)
+                }
+            }
+        }
+    }
+
+    /// [v25.583] 「對方幣別」：到的帳戶有兩個以上幣別（同一個帳戶＝除了轉出那個）才給
+    @ViewBuilder
+    private var toCodeRow: some View {
+        let list: [String] = toCodeChoices
+        if list.count >= 2 {
+            Picker("對方幣別", selection: $toCode) {
+                ForEach(list, id: \.self) { c in
+                    Text(WealthTransferText.codeName(c)).tag(c)
+                }
+            }
+        }
+    }
+
+    /// [v25.583] 字頭照轉出幣別（外幣到 0.01）；換匯多一列「對方收到」＋小字
     private var amountSection: some View {
         Section {
             HStack {
-                Text("NT$").foregroundStyle(Color.secondary)
+                Text(WealthTransferUIText.prefix(fromCode)).foregroundStyle(Color.secondary)
                 TextField("每次轉多少", text: $amountText)
-                    .keyboardType(.numberPad)
+                    .keyboardType(FinanceRates.isNTD(fromCode) ? .numberPad : .decimalPad)
+            }
+            if isExchange {
+                toAmountRow
             }
         } header: {
             WealthFormHeader(title: "每次轉多少", icon: "dollarsign.circle", color: .blue)
+        } footer: {
+            if isExchange {
+                Text(exchangeFooter)
+            }
         }
     }
 
+    /// [v25.583] 「對方收到　US$〔300〕」（你改了就不再照匯率自動帶）
+    private var toAmountRow: some View {
+        HStack(spacing: 8) {
+            Text("對方收到")
+            Spacer(minLength: 8)
+            Text(WealthTransferUIText.prefix(toCode)).foregroundStyle(Color.secondary)
+            TextField("多少", text: toAmountBinding)
+                .keyboardType(FinanceRates.isNTD(toCode) ? .numberPad : .decimalPad)
+                .multilineTextAlignment(.trailing)
+                .frame(minWidth: 72, maxWidth: 140)
+        }
+    }
+
+    /// [v25.583] 〔每月〕〔每週〕〔每兩週〕〔每年〕
     private var cycleSection: some View {
         Section {
             Picker("多久一次", selection: $cycle) {
                 Text("每月").tag(WealthTransferCycle.monthly)
                 Text("每週").tag(WealthTransferCycle.weekly)
+                Text("每兩週").tag(WealthTransferCycle.biweekly)
+                Text("每年").tag(WealthTransferCycle.yearly)
             }
             .pickerStyle(.segmented)
-            if cycle == .monthly {
-                monthDayRows
-            } else {
-                Picker("星期幾", selection: $weekday) {
-                    ForEach(Self.weekdayOrder, id: \.self) { w in
-                        Text(Self.weekdayNames[w - 1]).tag(w)
-                    }
-                }
-                .pickerStyle(.segmented)
-            }
+            cycleRows
             if !isOutside && cycle == .monthly {
                 ForEach(hints) { h in
                     WealthTransferUIHintRow(hint: h)
@@ -1216,15 +1582,81 @@ struct WealthTransferRuleForm: View {
         } header: {
             WealthFormHeader(title: "多久一次、哪天", icon: "calendar", color: .blue)
         } footer: {
-            if showsShortRow {
-                Text("玉山、郵局是當月最後一天；國泰世華是下個月 1 號（11 月那期會在 12/1）")
+            if let line = cycleFooter {
+                Text(line)
             }
         }
     }
 
+    /// [v25.583] 每月：幾日；每年：幾月＋幾日；每週：星期幾；每兩週：星期幾＋「下一次是哪天」
+    @ViewBuilder
+    private var cycleRows: some View {
+        switch cycle {
+        case .monthly:
+            monthDayRows
+        case .yearly:
+            Picker("每年幾月", selection: $yearMonth) {
+                ForEach(1...12, id: \.self) { m in
+                    Text("\(m) 月").tag(m)
+                }
+            }
+            monthDayRows
+        case .weekly:
+            weekdayRow
+        case .biweekly:
+            weekdayRow
+            biweeklyRows
+        }
+    }
+
+    private var weekdayRow: some View {
+        Picker("星期幾", selection: $weekday) {
+            ForEach(Self.weekdayOrder, id: \.self) { w in
+                Text(Self.weekdayNames[w - 1]).tag(w)
+            }
+        }
+        .pickerStyle(.segmented)
+    }
+
+    /// [v25.583] 每兩週「下一次是哪天」兩選一（照銀行 App 上的下一次）：〔今天 10/23（五）〕〔10/30（五）〕；只在新增、沒選〔更早…〕時
+    @ViewBuilder
+    private var biweeklyRows: some View {
+        if !isEditing && !earlyOpen, let d0 = biweeklyBase {
+            Text("下一次是哪天（照銀行 App 上的）")
+                .font(.footnote)
+                .foregroundStyle(Color.secondary)
+            WealthTransferUIChoiceRow(title: biweeklyLabel(d0), selected: !biweeklyLater) {
+                biweeklyLater = false
+            }
+            WealthTransferUIChoiceRow(title: biweeklyLabel(WealthCal.addDays(7, to: d0)), selected: biweeklyLater) {
+                biweeklyLater = true
+            }
+        }
+    }
+
+    /// 「今天 10/23（五）」「10/30（五）」（實際那天）
+    private func biweeklyLabel(_ original: Date) -> String {
+        let actual = WealthTransferSchedule.shifted(original, holiday: holidayValue)
+        let t = WealthTransferUIText.day(actual, today: today)
+        return WealthCal.dayKey(actual) == WealthCal.dayKey(today) ? "今天 " + t : t
+    }
+
+    /// 「沒有這天的月份」那一列的小字（每年的多一句 2/29）
+    private var cycleFooter: String? {
+        guard showsShortRow else { return nil }
+        let bank = "玉山、郵局是當月最後一天；國泰世華是下個月 1 號"
+        if cycle == .yearly {
+            return bank + "。每年 2/29：沒有 29 號的年份照「沒有這天的月份」。"
+        }
+        return bank + "（11 月那期會在 12/1）"
+    }
+
+    /// [v25.583] 每年的「幾日」、每月的「每月幾日」
+    private var dayPickerTitle: String { cycle == .yearly ? "幾日" : "每月幾日" }
+
     @ViewBuilder
     private var monthDayRows: some View {
-        Picker("每月幾日", selection: $monthDay) {
+        Picker(dayPickerTitle, selection: $monthDay) {
             ForEach(1...31, id: \.self) { d in
                 Text("\(d) 日").tag(d)
             }
@@ -1238,12 +1670,25 @@ struct WealthTransferRuleForm: View {
         }
     }
 
+    /// [v25.583] 「遇六日」〔照當天〕〔順延到星期一〕〔提前到星期五〕＋小字（換匯預設順延；你動過就不跟著換）
+    private var holidaySection: some View {
+        Section {
+            Picker("遇六日", selection: holidayBinding) {
+                ForEach(Self.holidayChoices.indices, id: \.self) { i in
+                    Text(WealthTransferText.holidayLabel(Self.holidayChoices[i])).tag(i)
+                }
+            }
+        } footer: {
+            Text(WealthTransferText.holidayFooter)
+        }
+    }
+
     private var outsideSection: some View {
         Section {
             Text(outsideText)
                 .font(.subheadline)
                 .fixedSize(horizontal: false, vertical: true)
-            if cycle == .monthly {
+            if cycle == .monthly || cycle == .yearly {
                 Button("給家人（孝親費）") { openExpense(.other) }
                 Button("付房租（報稅可扣）") { openExpense(.rent) }
                 Button("其他") { openExpense(.other) }
@@ -1400,9 +1845,9 @@ struct WealthTransferRuleForm: View {
         previewBlock(previewLine, lines: previewReady ? previewLines : [])
     }
 
-    /// 欄位還沒填好時不留上一次算的字
+    /// 欄位還沒填好時不留上一次算的字（[v25.583] 同一個帳戶換匯也算填好）
     private var previewReady: Bool {
-        guard let f = from, let t = toId, f != t else { return false }
+        guard accountsReady else { return false }
         return amountValue != nil
     }
 
@@ -1456,28 +1901,52 @@ struct WealthTransferRuleForm: View {
         let cal = WealthCal.calendar
         monthDay = cal.component(.day, from: t)
         weekday = cal.component(.weekday, from: t)
+        yearMonth = cal.component(.month, from: t)
         endDate = WealthCal.addMonths(12, to: t)
         earlyDay = WealthCal.addMonths(-1, to: t)
+        rates = FinanceRates(expenseStore)
         if let rid = editRuleId {
             loadEdit(rid, facts: facts)
             return
         }
-        // v1 只列有台幣那一格的帳戶（只有外幣的帳戶選了會多長出一格台幣）
+        // [v25.583] 外幣帳戶也列（v1 只列有台幣那一格的）
         let all = WealthFormAccountChoice.banks(facts, including: fromId, includeFixed: true)
-        let ntd = all.filter { $0.codes.contains("NT$") }
-        choices = ntd
-        hidesForeign = all.count > ntd.count
-        // 帶進來的帳戶 → 帶好的欄位 → 月薪入帳的那個（defaultTransferFromId）→ 第一個；帶進來的是只有外幣的帳戶（被濾掉）時照樣往下找
+        choices = all
+        // 帶進來的帳戶 → 帶好的欄位 → 月薪入帳的那個（defaultTransferFromId）→ 第一個
         let wanted: [UUID] = [fromId, preset?.fromId, facts.defaultTransferFromId].compactMap { $0 }
-        let f: UUID? = wanted.first(where: { w in ntd.contains(where: { $0.id == w }) }) ?? ntd.first?.id
+        let f: UUID? = wanted.first(where: { w in all.contains(where: { $0.id == w }) }) ?? all.first?.id
         from = f
-        if let p = preset { applyPreset(p, from: f, choices: ntd) }
+        // [v25.583] 轉出幣別＝那個帳戶的預設（有台幣＝台幣）；帶好的「到」照它挑對方幣別（記住依據：onChange 不重挑）
+        let fc: String = Self.defaultFromCode(Self.normalized(all.first(where: { $0.id == f })?.codes ?? []))
+        fromCode = fc
+        fromBasis = f
+        var picked: WealthTransferUITarget = .unpicked
+        if let p = preset { picked = applyPreset(p, from: f, choices: all) }
+        if case .account(let tid) = picked {
+            let list = Self.normalized(all.first(where: { $0.id == tid })?.codes ?? [])
+            toCode = Self.defaultToCode(list, fromCode: fc, same: tid == f)
+        }
+        codesBasis = Self.makeCodesKey(from: f, fromCode: fc, target: picked)
     }
 
-    /// 〔改成每月定期轉帳〕帶好的欄位：到（在選單裡、不是「從」才帶）、金額、多久一次、每月幾日（31＝最後一天）、沒有這天的月份
-    private func applyPreset(_ p: WealthTransferPreset, from f: UUID?, choices list: [WealthFormAccountChoice]) {
+    /// [v25.583] 幣別 WealthFacts.norm 過、不重複（台幣在前照帳戶的順序）
+    private static func normalized(_ codes: [String]) -> [String] {
+        var out: [String] = []
+        for x in codes.map({ WealthFacts.norm($0) }) where !out.contains(x) {
+            out.append(x)
+        }
+        return out
+    }
+
+    /// 〔改成每月定期轉帳〕帶好的欄位：到（在選單裡、不是「從」才帶）、金額、多久一次、每月幾日（31＝最後一天）、沒有這天的月份。
+    /// [v25.583] 回帶好的「到」（load 照它挑對方幣別）
+    @discardableResult
+    private func applyPreset(_ p: WealthTransferPreset, from f: UUID?,
+                             choices list: [WealthFormAccountChoice]) -> WealthTransferUITarget {
+        var picked: WealthTransferUITarget = .unpicked
         if let t = p.toId, t != f, list.contains(where: { $0.id == t }) {
             target = .account(t)
+            picked = .account(t)
         }
         if let v = p.amount, v >= 1 {
             amountText = WealthFormText.editable(v.rounded())
@@ -1492,6 +1961,7 @@ struct WealthTransferRuleForm: View {
                 shortNext = p.short == "next"
             }
         }
+        return picked
     }
 
     /// 〔改金額或帳戶〕：照存著的那一條帶好（從、到、金額＝下一期那一段）；找不到＝「這條定期轉帳已經刪了」
@@ -1508,24 +1978,49 @@ struct WealthTransferRuleForm: View {
         let to: UUID? = seg?.toId ?? tr.toId
         let segAmount: Double = seg?.amount ?? 0
         let amount: Double = segAmount > 0.004 ? segAmount : tr.amount
-        // 選單：有台幣的＋現在的從、到（到不在選單裡手動補；帳戶找不到用名字頂著）
-        let all = WealthFormAccountChoice.banks(facts, including: f, includeFixed: true)
-        var list: [WealthFormAccountChoice] = all.filter { $0.codes.contains("NT$") || $0.id == f || $0.id == to }
+        // [v25.583] 兩個幣別、對方收到多少（換匯才有；暫停那段的照下一期）
+        // 段裡 nil＝台幣（v1a 的寫法）；沒有段才照 facts 那條
+        let fc: String = WealthFacts.norm(seg.map { $0.fromCode ?? "NT$" } ?? tr.code)
+        let tc: String = WealthFacts.norm(seg.map { $0.toCode ?? "NT$" } ?? tr.toCode)
+        var toAmt: Double? = nil
+        if fc != tc {
+            if segAmount > 0.004 {
+                // [審查修] 段裡沒寫對方收到（舊版改過的換匯段）＝空的、照匯率重帶；不拿 facts 那條的（那是「跟轉出一樣」頂著的數，
+                // 9,600 會被當成 US$9,600 帶進來）
+                toAmt = seg?.toAmount
+            } else if tr.isExchange {
+                toAmt = tr.toAmount
+            }
+        }
+        // 選單：[v25.583] 全部的銀行（外幣帳戶也列）＋現在的從、到（不在選單裡手動補；帳戶找不到用名字頂著）
+        var list: [WealthFormAccountChoice] = WealthFormAccountChoice.banks(facts, including: f, includeFixed: true)
         Self.appendChoice(f, fallback: tr.fromName, facts: facts, to: &list)
         Self.appendChoice(to, fallback: tr.toName, facts: facts, to: &list)
         choices = list
-        hidesForeign = all.contains { !$0.codes.contains("NT$") }
         from = f
-        if let to { target = .account(to) }
+        fromBasis = f
+        fromCode = fc
+        toCode = tc
+        var picked: WealthTransferUITarget = .unpicked
+        if let to {
+            target = .account(to)
+            picked = .account(to)
+        }
+        codesBasis = Self.makeCodesKey(from: f, fromCode: fc, target: picked)
         amountText = WealthFormText.editable(amount)
-        // 週期、每月幾日（31 且不是下個月 1 號＝最後一天）、每週星期幾（第一期那天）
+        toAmountText = toAmt.map { WealthFormText.editable($0) } ?? ""
+        // [審查修] 存著對方收到多少＝當作你動過（改的時候不跟著匯率換）；沒存（同幣別的改成換匯、舊版改過的換匯段）＝照新增的規矩帶匯率
+        toAmountTouched = toAmt != nil
+        // 週期、每月（每年）幾日（31 且不是下個月 1 號＝最後一天）、每週（每兩週）星期幾（第一期那天）、[v25.583] 每年幾月
         let kind: WealthTransferCycle = r.cycleKind ?? .monthly
         let first: Date? = r.startKey.flatMap { WealthTransferSchedule.date(fromKey: $0) }
         let t = facts.today
         var md: Int = cal.component(.day, from: t)
         var sn = false
         var wd: Int = cal.component(.weekday, from: t)
-        if kind == .monthly {
+        var ym: Int = cal.component(.month, from: t)
+        switch kind {
+        case .monthly, .yearly:
             let d: Int = r.day ?? first.map { cal.component(.day, from: $0) } ?? 1
             if d >= 31 && r.short != "next" {
                 md = 32
@@ -1533,13 +2028,20 @@ struct WealthTransferRuleForm: View {
                 md = Swift.min(Swift.max(d, 1), 31)
                 sn = r.short == "next"
             }
-        } else if let s = first {
-            wd = cal.component(.weekday, from: s)
+            if kind == .yearly {
+                let m: Int = r.month ?? first.map { cal.component(.month, from: $0) } ?? ym
+                ym = Swift.min(Swift.max(m, 1), 12)
+            }
+        case .weekly, .biweekly:
+            if let s = first { wd = cal.component(.weekday, from: s) }
         }
         cycle = kind
         monthDay = md
         shortNext = sn
         weekday = wd
+        yearMonth = ym
+        holiday = r.holidayKind
+        holidayTouched = true
         manual = r.isManual
         name = r.name ?? ""
         memo = r.memo ?? ""
@@ -1548,9 +2050,11 @@ struct WealthTransferRuleForm: View {
             endDate = ed
         }
         let oDay: Int = Swift.min(Swift.max(md, 1), 31)
-        let oShort: String? = (md >= 29 && md <= 31 && sn) ? "next" : nil
+        // 跟 storedShort 同一套（每年的那個月一定有這天＝不給那一列、存 nil）
+        let oShort: String? = (Self.shortRowShown(cycle: kind, monthDay: md, month: ym) && sn) ? "next" : nil
         original = WealthTransferUIOriginal(ruleId: rid, firstDay: first, fromId: f, toId: to, amount: amount,
-                                            cycle: kind, day: oDay, short: oShort, weekday: wd)
+                                            fromCode: fc, toCode: tc, toAmount: toAmt, cycle: kind, day: oDay,
+                                            short: oShort, weekday: wd, month: ym, holiday: r.holidayKind)
     }
 
     /// 選單沒有這個帳戶就補一列（帳戶找不到：用規則上的名字）
@@ -1565,16 +2069,57 @@ struct WealthTransferRuleForm: View {
         }
     }
 
-    /// 換了「從」：跟「到」同一個帳戶就把「到」清掉
+    /// 換了「從」：跟「到」同一個帳戶就把「到」清掉。[v25.583] 那個帳戶有兩個以上幣別＝留著（同一個帳戶換匯）；
+    /// 轉出幣別換成那個帳戶的預設（有台幣＝台幣，不然第一個）、對方幣別跟著重挑。打開時帶好的（fromBasis 一樣）不動
     private func fromChanged() {
-        if let f = from, toId == f { target = .unpicked }
+        guard from != fromBasis else { return }
+        fromBasis = from
+        let list = codes(of: from)
+        fromCode = Self.defaultFromCode(list)
+        if let f = from, toId == f, list.count < 2 { target = .unpicked }
+        codesChanged()
+    }
+
+    /// [v25.583] 「從」、轉出幣別、「到」變了：對方幣別重挑（同一個帳戶＝第一個跟轉出不一樣的；別的帳戶＝有同幣別就同幣別、
+    /// 不然台幣、不然第一個）。轉出幣別不是台幣時「不在 App 裡的人」拿掉。打開時帶好的、剛挑過的（codesBasis 一樣）不動
+    private func codesChanged() {
+        if target == .outside && !FinanceRates.isNTD(fromCode) { target = .unpicked }
+        let k = codesKey
+        guard k != codesBasis else { return }
+        codesBasis = k
+        guard let t = toId else { return }
+        let list: [String] = codes(of: t)
+        guard !list.isEmpty else { return }
+        toCode = Self.defaultToCode(list, fromCode: fromCode, same: isSameAccount)
+    }
+
+    /// [v25.583] 金額、幣別變了：你沒動過「對方收到」＝照現在設定的匯率重帶（一邊是台幣才帶得出來；兩邊都外幣、查不到匯率＝空的）
+    private func amountsChanged() {
+        guard !toAmountTouched else { return }
+        guard isExchange, let v = amountValue,
+              let d = WealthTransferExchange.defaultToAmount(v, from: fromCode, to: toCode, rates: rates) else {
+            toAmountText = ""
+            return
+        }
+        toAmountText = WealthFormText.editable(d)
+    }
+
+    /// [v25.583] 換匯預設〔順延到星期一〕、不是換匯〔照當天〕（你動過「遇六日」就不跟著換）
+    private func exchangeToggled(_ x: Bool) {
+        guard !holidayTouched else { return }
+        holiday = x ? .next : .onDay
     }
 
     // MARK: 〔更早…〕
 
-    /// 展開 DatePicker（預設一期前：每週 7 天前、每月一個月前）
+    /// 展開 DatePicker（預設一期前：每週 7 天前、每月一個月前；[v25.583] 每兩週 14 天前、每年一年前）
     private func openEarly() {
-        earlyDay = cycle == .weekly ? WealthCal.addDays(-7, to: today) : WealthCal.addMonths(-1, to: today)
+        switch cycle {
+        case .weekly: earlyDay = WealthCal.addDays(-7, to: today)
+        case .biweekly: earlyDay = WealthCal.addDays(-14, to: today)
+        case .monthly: earlyDay = WealthCal.addMonths(-1, to: today)
+        case .yearly: earlyDay = WealthCal.addMonths(-12, to: today)
+        }
         earlyAccepted = false
         earlyOpen = true
     }
@@ -1604,7 +2149,7 @@ struct WealthTransferRuleForm: View {
     }
 
     private func recompute() {
-        guard loaded, !editMissing, !isOutside, let f = from, let t = toId, f != t,
+        guard loaded, !editMissing, !isOutside, accountsReady, let f = from, let t = toId,
               let draft = draftRule(fromId: f, toId: t) else {
             hints = []
             previewLines = []
@@ -1623,14 +2168,23 @@ struct WealthTransferRuleForm: View {
         previewLines = previewLinesFor(draft, before: before)
     }
 
-    /// 草稿（預覽、提示、〔更早…〕用）：一段（從、到、金額；還沒打金額＝0）、第一期＝startDay、id＝draftId、createdAt＝現在（排在最後）
+    /// [v25.583] 一段：幣別照表單（台幣存 nil，v1a 的寫法）、換匯才帶對方收到多少
+    private func makeSegment(fromId f: UUID, toId t: UUID, amount v: Double, toAmount ta: Double?) -> WealthTransferSegment {
+        WealthTransferSegment(fromKey: "", fromId: f, fromCode: WealthTransferExchange.storedCode(fromCode), toId: t,
+                              toCode: WealthTransferExchange.storedCode(toCode), amount: v,
+                              toAmount: isExchange ? ta : nil)
+    }
+
+    /// 草稿（預覽、提示、〔更早…〕用）：一段（從、到、金額；還沒打金額＝0）、第一期＝startDay、id＝draftId、createdAt＝現在（排在最後）。
+    /// [v25.583] 段帶幣別、對方收到（還沒打＝0：那一邊不算）；規則帶每年幾月、遇六日
     private func draftRule(fromId f: UUID, toId t: UUID) -> WealthTransferRule? {
         guard let s = startDay else { return nil }
-        let monthly = cycle == .monthly
-        let seg = WealthTransferSegment(fromKey: "", fromId: f, toId: t, amount: amountValue ?? 0)
-        var r = WealthTransferRule(id: draftId, cycle: cycle.rawValue, day: monthly ? storedDay : nil,
-                                   short: monthly ? storedShort : nil, startKey: WealthTransferSchedule.key(of: s),
-                                   mode: manual ? "manual" : nil, segments: [seg], createdAt: Date())
+        let dated = isDated
+        let seg = makeSegment(fromId: f, toId: t, amount: amountValue ?? 0, toAmount: toAmountValue ?? 0)
+        var r = WealthTransferRule(id: draftId, cycle: cycle.rawValue, day: dated ? storedDay : nil,
+                                   short: dated ? storedShort : nil, month: cycle == .yearly ? yearMonth : nil,
+                                   startKey: WealthTransferSchedule.key(of: s), mode: manual ? "manual" : nil,
+                                   holiday: holidayValue.raw, segments: [seg], createdAt: Date())
         if let last = lastPeriod { r.endKey = WealthTransferSchedule.key(of: last) }
         // 跟存檔那條一樣：〔還沒，今天會轉〕今天那期排在對存摺後面（不然「轉完約剩」會照對存摺之前算）
         r.notes = lateNotes(now: Date())
@@ -1712,7 +2266,9 @@ struct WealthTransferRuleForm: View {
 
     /// 〔給家人（孝親費）〕〔付房租（報稅可扣）〕〔其他〕：記帳新增固定支出（每月、日子、扣款帳戶、金額帶好；名稱空著）
     private func openExpense(_ category: FixedCategory) {
-        let preset = AddExpensePreset(fixedCategory: category, recurrence: .monthly, date: firstFromToday,
+        // [v25.583] 每年的帶每年
+        let rec: Recurrence = cycle == .yearly ? .yearly : .monthly
+        let preset = AddExpensePreset(fixedCategory: category, recurrence: rec, date: firstFromToday,
                                       paymentBankId: from, amount: amountValue)
         expenseAsk = WealthTransferUIExpenseAsk(preset: preset)
     }
@@ -1727,11 +2283,14 @@ struct WealthTransferRuleForm: View {
 
     /// 組好要存的那一條（name、memo 已經去空白、遮好；空＝nil）
     private func makeRule(name: String?, memo: String?) -> WealthTransferRule? {
-        guard var r = scheduleRule, let f = from, let t = toId, f != t, let v = amountValue, !endInvalid else {
+        guard var r = scheduleRule, accountsReady, let f = from, let t = toId, let v = amountValue, !endInvalid else {
             return nil
         }
+        // [v25.583] 換匯一定要有對方收到多少（寫死在段裡，不跟設定的匯率）
+        let ta: Double? = isExchange ? toAmountValue : nil
+        if isExchange && ta == nil { return nil }
         r.mode = manual ? "manual" : nil
-        r.segments = [WealthTransferSegment(fromKey: "", fromId: f, toId: t, amount: v)]
+        r.segments = [makeSegment(fromId: f, toId: t, amount: v, toAmount: ta)]
         r.name = name
         r.memo = memo
         if let last = lastPeriod { r.endKey = WealthTransferSchedule.key(of: last) }
@@ -1740,9 +2299,10 @@ struct WealthTransferRuleForm: View {
     }
 
     /// 〔還沒，今天會轉〕：今天這期算，今天對過存摺的那一邊排在對存摺後面（選了〔更早…〕不問這句）。存檔、預覽的草稿共用
+    /// [v25.583] key＝第一期**原本的**日子（遇六日挪到今天的那期 key 是原本那天，不是今天）
     private func lateNotes(now: Date) -> [String: WealthTransferNote]? {
-        guard showsTodaySection && todayChoice == .late && threeChoice else { return nil }
-        let k = WealthTransferSchedule.key(of: today)
+        guard showsTodaySection && todayChoice == .late && threeChoice, let s = startDay else { return nil }
+        let k = WealthTransferSchedule.key(of: s)
         return [k: WealthTransferNote(lateOut: fromAnchored ? true : nil,
                                       lateIn: toAnchored ? true : nil,
                                       updatedAt: now)]
@@ -1927,21 +2487,35 @@ struct WealthTransferRuleForm: View {
     // MARK: 存檔（〔改金額或帳戶〕）
 
     /// 表單現在的值；改的時候 change 只填改了的欄位、scheduleChanged 比打開時的值。從、到、金額沒填好＝nil
+    /// [v25.583] 幣別跟打開時不一樣＝change.codes；換匯而且金額、幣別、對方收到多少有一個改了＝change.toAmount（現在填的）
     private func formValues(name: String?, memo: String?) -> WealthTransferUIFormValues? {
-        guard let f = from, let t = toId, f != t, let v = amountValue else { return nil }
-        let monthly = cycle == .monthly
+        guard accountsReady, let f = from, let t = toId, let v = amountValue else { return nil }
+        let exchange = isExchange
+        let ta: Double? = exchange ? toAmountValue : nil
+        if exchange && ta == nil { return nil }
+        let fc = WealthFacts.norm(fromCode)
+        let tc = WealthFacts.norm(toCode)
+        let dated = isDated
         var change = WealthTransferSegmentChange()
         var schedule = false
         if let o = original {
             if f != o.fromId { change.fromId = f }
             if t != o.toId { change.toId = t }
-            if Swift.abs(v - o.amount) >= 0.5 { change.amount = v }
+            if Swift.abs(v - o.amount) >= WealthTransferUIText.tolerance(fc) { change.amount = v }
+            let codesMoved: Bool = fc != o.fromCode || tc != o.toCode
+            if codesMoved { change.codes = WealthTransferCodes(from: fc, to: tc) }
+            if exchange, let x = ta {
+                let toMoved: Bool = o.toAmount.map { Swift.abs(x - $0) >= WealthTransferUIText.tolerance(tc) } ?? true
+                if change.amount != nil || codesMoved || toMoved { change.toAmount = x }
+            }
             schedule = scheduleChanged(o)
         }
         return WealthTransferUIFormValues(
-            fromId: f, toId: t, amount: v, cycle: cycle, day: monthly ? storedDay : nil,
-            short: monthly ? storedShort : nil, weekday: weekday, mode: manual ? "manual" : nil,
-            name: name, memo: memo, end: endSpec, change: change, scheduleChanged: schedule)
+            fromId: f, toId: t, amount: v, fromCode: fc, toCode: tc, toAmount: ta, cycle: cycle,
+            day: dated ? storedDay : nil, short: dated ? storedShort : nil,
+            month: cycle == .yearly ? yearMonth : nil, weekday: weekday, holiday: holidayValue,
+            mode: manual ? "manual" : nil, name: name, memo: memo, end: endSpec, change: change,
+            scheduleChanged: schedule)
     }
 
     /// 看改了什麼：週期或日子＝「從哪天起照新的日子？」（以前一期都沒有就不用問：同一條換日子）；
@@ -1975,8 +2549,13 @@ struct WealthTransferRuleForm: View {
     /// 「從哪天起照新的日子？」〔下一期 2027/1/8 起（以前的照舊）〕〔全部都改（以前的也照新的日子）〕〔取消〕
     private func scheduleAsk(_ values: WealthTransferUIFormValues) -> WealthTransferUIEditAsk {
         let start: Date? = WealthTransferPlan.splitStart(cycle: values.cycle, day: values.day ?? 1, short: values.short,
-                                                         weekday: values.weekday, from: tomorrow)
-        let label: String? = start.map { "下一期 " + WealthTransferText.dayText($0, today: today) + " 起（以前的照舊）" }
+                                                         weekday: values.weekday, month: values.month ?? 1,
+                                                         holiday: values.holiday, from: tomorrow)
+        // [v25.583] 寫實際那天（新的那條的遇六日）
+        let label: String? = start.map {
+            "下一期 " + WealthTransferText.dayText(WealthTransferSchedule.shifted($0, holiday: values.holiday), today: today)
+                + " 起（以前的照舊）"
+        }
         return WealthTransferUIEditAsk(kind: .schedule, title: "從哪天起照新的日子？",
                                        message: "以前的照舊；銀行 App 那邊也要改。", nextLabel: label, nextKey: nil,
                                        allLabel: "全部都改（以前的也照新的日子）")
@@ -1985,7 +2564,9 @@ struct WealthTransferRuleForm: View {
     /// 「從哪一期起改？」〔下一期 2027/1/6 起（以前的照舊）〕〔全部都改〕〔選一期…〕〔取消〕
     private func segmentAsk(_ base: WealthTransferRule) -> WealthTransferUIEditAsk {
         let nk: String? = WealthTransferPlan.nextKey(base, today: today)
+        // [v25.583] 寫實際那天（這條的遇六日）
         let nd: Date? = nk.flatMap { WealthTransferSchedule.date(fromKey: $0) }
+            .map { WealthTransferSchedule.shifted($0, holiday: base.holidayKind) }
         let label: String? = nd.map { "下一期 " + WealthTransferText.dayText($0, today: today) + " 起（以前的照舊）" }
         let past = WealthTransferPlan.pastCount(base, today: today)
         let message: String? = past > 0
@@ -2045,7 +2626,8 @@ struct WealthTransferRuleForm: View {
             cancelEdit()
             return
         }
-        let list = WealthTransferUIPickList.make(WealthTransferPlan.pickDates(base, today: today), today: today)
+        let list = WealthTransferUIPickList.make(WealthTransferPlan.pickDates(base, today: today), today: today,
+                                                 holiday: base.holidayKind)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
             self.pickList = list
         }
@@ -2133,22 +2715,25 @@ struct WealthTransferRuleForm: View {
 
 // MARK: - B. 規則頁
 
-/// 規則頁點一期（巢狀 sheet 的 item）
+/// 規則頁點一期（巢狀 sheet 的 item）。[v25.583] ruleId：「以前的」也列改週期以前那條的期（開那一條的那一期）
 private struct WealthTransferUIPeriodPick: Identifiable {
+    let ruleId: UUID
     let key: String
-    var id: String { key }
+    var id: String { ruleId.uuidString + "-" + key }
 }
 
-/// 規則頁疊的表單（巢狀 sheet 的 item；一個 sheet(item:) 開兩種）：
-/// [v25.577]〔改金額或帳戶〕（新增表單的編輯模式）；[v25.579]〔暫停〕（暫停小表單）
+/// 規則頁疊的表單（巢狀 sheet 的 item；一個 sheet(item:) 開好幾種）：
+/// [v25.577]〔改金額或帳戶〕（新增表單的編輯模式）；[v25.579]〔暫停〕（暫停小表單）；[v25.583]〔看新的那條〕（接下去那條的規則頁）
 private enum WealthTransferUIRuleSheet: Identifiable {
     case edit(UUID)
     case pause(UUID)
+    case successor(UUID)
 
     var id: String {
         switch self {
         case .edit(let r): return "edit-" + r.uuidString
         case .pause(let r): return "pause-" + r.uuidString
+        case .successor(let r): return "successor-" + r.uuidString
         }
     }
 }
@@ -2206,6 +2791,9 @@ private struct WealthTransferUIRuleModel {
     let resumeLabel: String
     /// 「提醒我」（rule.remind != false）
     let remindOn: Bool
+    // [v25.583] v4
+    /// 這條是被接的舊那條：接下去那一條（〔看新的那條〕；facts.transferHistory(id).successor）
+    let successorId: UUID?
 
     /// 「還沒定下來的」footer（自己轉的多一句）
     var pendingFooter: String {
@@ -2229,8 +2817,11 @@ private struct WealthTransferUIRuleModel {
     static func make(facts: WealthFacts, ruleId: UUID, masked: Bool, showMore: Bool) -> WealthTransferUIRuleModel? {
         guard let t = facts.transferRule(ruleId) else { return nil }
         let today = facts.today
-        let periods = facts.transferPeriods(ruleId, through: WealthCal.addDays(400, to: today))
+        // [v25.583] 每年的往後看 3 年多（不然「接下來」只有一期）
+        let ahead: Int = WealthTransferSchedule.lookAheadDays(t.rule.cycleKind)
+        let periods = facts.transferPeriods(ruleId, through: WealthCal.addDays(ahead, to: today))
         let manual = t.isManual
+        let history: WealthTransferHistory = facts.transferHistory(ruleId)
         // 還沒定下來的：過了日子、沒轉成＋[v25.579] 自己轉的今天要轉、等你回答、還沒轉（最近 6 期，新到舊）
         let pendingAll: [WealthTransferPeriod] = periods.filter { isPending($0, manual: manual, today: today) }
         let pendingList: [WealthTransferPeriod] = Array(pendingAll.reversed().prefix(6))
@@ -2240,36 +2831,48 @@ private struct WealthTransferUIRuleModel {
             .filter { $0.day > today && !pendingKeys.contains($0.key) }
             .sorted { $0.day < $1.day }
         let futureKeys = Set(futureAll.map { $0.key })
-        // 以前的：其他今天（含）以前的，新到舊
-        let pastAll: [WealthTransferPeriod] = periods
+        // 以前的：其他今天（含）以前的，新到舊。[v25.583] 改週期以前那幾條今天（含）以前的期照樣列（transferPredecessorPeriods；照 day 排在一起）
+        let ownPast: [WealthTransferPeriod] = periods
             .filter { !pendingKeys.contains($0.key) && !futureKeys.contains($0.key) && ($0.original <= today || $0.day <= today) }
+        let pastAll: [WealthTransferPeriod] = (ownPast + facts.transferPredecessorPeriods(ruleId))
             .sorted { $0.day > $1.day }
         let upLimit = showMore ? 15 : 3
         let pastLimit = showMore ? 18 : 6
         let hasMore = !showMore && (futureAll.count > upLimit || pastAll.count > pastLimit)
         let pending = pendingList.map { WealthTransferUIRow.make($0, facts: facts, manual: manual, masked: masked) }
         let upcoming = futureAll.prefix(upLimit).map { WealthTransferUIRow.make($0, facts: facts, manual: manual, masked: masked) }
-        let past = pastAll.prefix(pastLimit).map { WealthTransferUIRow.make($0, facts: facts, manual: manual, masked: masked) }
+        let past: [WealthTransferUIRow] = pastAll.prefix(pastLimit).map { p in
+            // 以前那條的期：「自己轉」照那一條
+            let m: Bool = p.ruleId == ruleId ? manual : (facts.transferRule(p.ruleId)?.isManual ?? manual)
+            return WealthTransferUIRow.make(p, facts: facts, manual: m, masked: masked)
+        }
 
-        let amountText = masked ? WealthFormat.masked : WealthFormat.money(t.amount, code: t.code)
-        let fromLabel = WealthTransferUIText.accountLabel(t.fromId, fallback: t.fromName, facts: facts)
-        let toLabel = WealthTransferUIText.accountLabel(t.toId, fallback: t.toName, facts: facts)
-        let accountsLine = fromLabel + " → " + toLabel + "・" + (manual ? "我自己轉" : "銀行會自動轉")
+        // [v25.583] 頭的金額兩邊「NT$9,600 → US$300.00」；週期後面接「・遇六日順延」
+        let amountText: String = masked
+            ? WealthFormat.masked
+            : WealthTransferText.pair(t.amount, code: t.code, to: t.toAmount, toCode: t.toCode, money: true)
+        let cycleText: String = t.cycleText + (t.holidayText.map { "・" + $0 } ?? "")
+        let accountsLine = makeAccountsLine(t, facts: facts)
         let memoTrimmed = (t.rule.memo ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
 
+        // [v25.583] 〔結束〕〔恢復…〕的字寫實際那天（遇六日挪過的）；key 照舊原本的日子
+        let holiday: WealthTransferHoliday = t.rule.holidayKind
         let lastPastKey: String? = t.isEnded ? nil : t.lastPast.map { WealthTransferSchedule.key(of: $0) }
         var lastPastLabel = ""
         if let d = t.lastPast {
-            lastPastLabel = "最後一次是 " + WealthTransferUIText.shortDay(d, today: today) + "（最近轉的那一期）"
+            let actual = WealthTransferSchedule.shifted(d, holiday: holiday)
+            lastPastLabel = "最後一次是 " + WealthTransferUIText.shortDay(actual, today: today) + "（最近轉的那一期）"
         }
         let nextKey: String? = t.next?.key
         var nextLabel = ""
         if let n = t.next {
-            nextLabel = "下一期 " + WealthTransferUIText.shortDay(n.original, today: today) + " 轉完再停"
+            nextLabel = "下一期 " + WealthTransferUIText.shortDay(n.day, today: today) + " 轉完再停"
         }
         let counted: [WealthTransferPeriod] = periods.filter { $0.counts && $0.day <= today }
-        let spoken = t.title + "，" + t.cycleText + "，"
-            + WealthTransferUIText.spokenAmount(t.amount, code: t.code, masked: masked) + "，" + accountsLine
+        let spokenAmount: String = (t.isExchange && !masked)
+            ? WealthTransferText.pair(t.amount, code: t.code, to: t.toAmount, toCode: t.toCode, money: true)
+            : WealthTransferUIText.spokenAmount(t.amount, code: t.code, masked: masked)
+        let spoken = t.title + "，" + cycleText + "，" + spokenAmount + "，" + accountsLine
 
         // [v25.579]〔暫停〕〔恢復…〕：暫停中或排好了暫停＝〔恢復…〕（下一期起照轉）；沒有＝〔暫停〕（今天以後還有期才給）
         let pause: WealthTransferPauseInfo? = t.isEnded ? nil : t.rule.pauseInfo(today: today)
@@ -2277,19 +2880,41 @@ private struct WealthTransferUIRuleModel {
         let resumeKey: String? = pause == nil ? nil : WealthTransferPlan.nextKey(t.rule, today: today)
         var resumeLabel = ""
         if let k = resumeKey, let d = WealthTransferSchedule.date(fromKey: k) {
-            resumeLabel = "下一期 " + WealthTransferUIText.day(d, today: today) + " 起照轉"
+            let actual = WealthTransferSchedule.shifted(d, holiday: holiday)
+            resumeLabel = "下一期 " + WealthTransferUIText.day(actual, today: today) + " 起照轉"
         }
 
         return WealthTransferUIRuleModel(
-            title: t.title, cycleText: t.cycleText, amountText: amountText, accountsLine: accountsLine,
-            rangeLine: makeRangeLine(t), changeLines: makeChangeLines(t, facts: facts, masked: masked),
+            title: t.title, cycleText: cycleText, amountText: amountText, accountsLine: accountsLine,
+            rangeLine: makeRangeLine(t), changeLines: makeChangeLines(t, history: history, facts: facts, masked: masked),
             memo: memoTrimmed.isEmpty ? nil : memoTrimmed, isRunning: !t.isEnded,
-            pending: pending, upcoming: Array(upcoming), past: Array(past), hasMore: hasMore,
+            pending: pending, upcoming: Array(upcoming), past: past, hasMore: hasMore,
             lastPastKey: lastPastKey, lastPastLabel: lastPastLabel, nextKey: t.isEnded ? nil : nextKey,
             nextLabel: nextLabel, pastCount: counted.count,
             deleteMessage: makeDeleteMessage(counted, facts: facts, masked: masked), spoken: spoken,
             isManual: manual, pauseText: pause?.text, canPause: canPause, resumeKey: resumeKey,
-            resumeLabel: resumeLabel, remindOn: t.rule.remind != false)
+            resumeLabel: resumeLabel, remindOn: t.rule.remind != false, successorId: history.successor?.id)
+    }
+
+    /// [v25.583] 「薪轉（台新銀行）→ 存錢（玉山銀行）・銀行會自動轉」；同一個帳戶「存錢（玉山銀行）台幣 → USD・…」；
+    /// 兩個帳戶換匯，外幣那一邊後面寫幣別「薪轉（台新銀行）→ 存錢（玉山銀行）USD・…」
+    static func makeAccountsLine(_ t: WealthFacts.TransferRule, facts: WealthFacts) -> String {
+        let mode: String = t.isManual ? "我自己轉" : "銀行會自動轉"
+        let fromLabel = WealthTransferUIText.accountLabel(t.fromId, fallback: t.fromName, facts: facts)
+        if t.isSameAccount {
+            let gap: String = fromLabel.hasSuffix("）") ? "" : " "
+            return fromLabel + gap + WealthTransferText.codeName(t.code) + " → " + WealthTransferText.codeName(t.toCode)
+                + "・" + mode
+        }
+        let toLabel = WealthTransferUIText.accountLabel(t.toId, fallback: t.toName, facts: facts)
+        guard t.isExchange else { return fromLabel + " → " + toLabel + "・" + mode }
+        return codeSide(fromLabel, code: t.code) + " → " + codeSide(toLabel, code: t.toCode) + "・" + mode
+    }
+
+    /// 換匯那一邊是外幣：帳戶後面接幣別（「存錢（玉山銀行）USD」「存錢 USD」）；台幣不寫
+    private static func codeSide(_ label: String, code: String) -> String {
+        guard !FinanceRates.isNTD(code) else { return label }
+        return label + (label.hasSuffix("）") ? "" : " ") + code
     }
 
     /// [v25.579] 還沒定下來的一期：過了日子、沒轉成；自己轉的今天要轉、過了日子等你回答、你說還沒轉（judge §4.4）
@@ -2319,16 +2944,19 @@ private struct WealthTransferUIRuleModel {
     }
 
     /// [v25.577] 頭下面的灰字：改週期或日子接上來的（previousId）「2027/1/8 起改成每月 8 日（以前每月 6 日）」；
-    /// 下一期那一段是後來改的「2027/1/6 起 25,000（以前 20,000）」（只寫最近那一次）
-    static func makeChangeLines(_ t: WealthFacts.TransferRule, facts: WealthFacts, masked: Bool) -> [String] {
+    /// 下一期那一段是後來改的「2027/1/6 起 25,000（以前 20,000）」（只寫最近那一次）。
+    /// [v25.583] 改週期的每一次都一行（facts.transferHistory：新到舊、日子照年份）；被接的舊那條多「2027/1/8 起改成每月 8 日（新的那條）」
+    static func makeChangeLines(_ t: WealthFacts.TransferRule, history: WealthTransferHistory, facts: WealthFacts,
+                                masked: Bool) -> [String] {
         var out: [String] = []
         // [v25.579] 最前面：「暫停到 12/24」「12/4 起暫停到 12/24」（還在跑的才有）
         if let p = t.rule.pauseInfo(today: facts.today) {
             out.append(p.text)
         }
-        if let pid = t.rule.previousId, let prev = facts.transferRule(pid), let first = t.firstDay {
-            out.append(WealthFormat.ymd(first) + " 起改成" + t.cycleText + "（以前" + prev.cycleText + "）")
+        if let line = history.successorLine {
+            out.append(line)
         }
+        out.append(contentsOf: history.lines)
         if let line = segmentChangeLine(t, facts: facts, masked: masked) {
             out.append(line)
         }
@@ -2336,7 +2964,9 @@ private struct WealthTransferUIRuleModel {
     }
 
     /// 下一期（沒有＝今天以後第一期原本的日子）那一段的 fromKey 不是 ""、跟前一段金額不一樣（暫停的段不算）：
-    /// 「2027/1/6 起 25,000（以前 20,000）」（遮住「2027/1/6 起改過每期金額」）；金額一樣、帳戶不一樣：「…起改從 國泰世華 轉出」「…起改轉到 存錢」
+    /// 「2027/1/6 起 25,000（以前 20,000）」（遮住「2027/1/6 起改過每期金額」）；金額一樣、帳戶不一樣：「…起改從 國泰世華 轉出」「…起改轉到 存錢」。
+    /// [v25.583] 幣別不一樣「2027/1/1 起改轉成 USD」；換匯的段金額一樣、對方收到多少不一樣「2027/1/1 起 US$310.00（以前 US$300.00）」；
+    /// 換匯的段金額不一樣寫兩邊「2027/1/1 起 9,800 → US$310.00（以前 9,600 → US$300.00）」
     static func segmentChangeLine(_ t: WealthFacts.TransferRule, facts: WealthFacts, masked: Bool) -> String? {
         let r = t.rule
         guard let nk = t.next?.key ?? WealthTransferPlan.nextKey(r, today: facts.today) else { return nil }
@@ -2349,12 +2979,27 @@ private struct WealthTransferUIRuleModel {
         let b: Double = prev.amount ?? 0
         guard a > 0.004 && b > 0.004 else { return nil }
         let head: String = WealthFormat.ymd(d) + " 起"
-        if Swift.abs(a - b) >= 0.5 {
+        let curFrom: String = WealthFacts.norm(cur.fromCode ?? "NT$")
+        let curTo: String = WealthFacts.norm(cur.toCode ?? "NT$")
+        let prevFrom: String = WealthFacts.norm(prev.fromCode ?? "NT$")
+        let prevTo: String = WealthFacts.norm(prev.toCode ?? "NT$")
+        if curTo != prevTo {
+            return head + "改轉成 " + WealthTransferText.codeName(curTo)
+        }
+        if curFrom != prevFrom {
+            return head + "改從 " + WealthTransferText.codeName(curFrom) + " 轉出"
+        }
+        let exchange: Bool = curFrom != curTo
+        if Swift.abs(a - b) >= WealthTransferUIText.tolerance(curFrom) {
             if masked { return head + "改過每期金額" }
-            let code: String = cur.fromCode ?? "NT$"
-            let now: String = WealthFormat.plain(a, code: code)
-            let was: String = WealthFormat.plain(b, code: prev.fromCode ?? "NT$")
+            let now: String = WealthTransferText.pair(a, code: curFrom, to: cur.toAmount ?? a, toCode: curTo)
+            let was: String = WealthTransferText.pair(b, code: prevFrom, to: prev.toAmount ?? b, toCode: prevTo)
             return head + " " + now + "（以前 " + was + "）"
+        }
+        if exchange, let ta = cur.toAmount, let tb = prev.toAmount,
+           Swift.abs(ta - tb) >= WealthTransferUIText.tolerance(curTo) {
+            if masked { return head + "改過每期金額" }
+            return head + " " + WealthFormat.plain(ta, code: curTo) + "（以前 " + WealthFormat.plain(tb, code: prevTo) + "）"
         }
         if let f = cur.fromId, f != prev.fromId {
             return head + "改從 " + (facts.account(f)?.name ?? "別的帳戶") + " 轉出"
@@ -2366,32 +3011,48 @@ private struct WealthTransferUIRuleModel {
     }
 
     /// 〔全部刪掉〕的影響：照每個帳戶最近一次對存摺算（對存摺以前的期不影響今天的數字）。
-    /// 轉出那邊拿掉＝今天多、轉入那邊拿掉＝今天少（「薪轉今天多 50,000、存錢少 50,000」）
+    /// 轉出那邊拿掉＝今天多、轉入那邊拿掉＝今天少（「薪轉今天多 50,000、存錢少 50,000」）。
+    /// [v25.583] 照**帳戶＋幣別**分開加（同一個帳戶換匯的兩格不能加在一起）、字照那個幣別；同一個帳戶出現兩個幣別才在名字後面寫幣別
+    ///（「存錢台幣今天多 19,200、存錢 USD 少 US$600.00」）
     static func makeDeleteMessage(_ counted: [WealthTransferPeriod], facts: WealthFacts, masked: Bool) -> String {
         guard !counted.isEmpty else { return "這條還沒有轉過的期，刪掉不影響今天的數字。" }
-        var delta: [UUID: Double] = [:]
-        var order: [UUID] = []
+        var delta: [String: Double] = [:]
+        var order: [(id: UUID, code: String)] = []
         for p in counted {
             if let f = p.fromId, afterAnchor(p.day, late: p.lateOut, code: p.fromCode, account: facts.account(f)) {
-                if delta[f] == nil { order.append(f) }
-                delta[f, default: 0] += p.amount
+                let k = f.uuidString + "|" + p.fromCode
+                if delta[k] == nil { order.append((id: f, code: p.fromCode)) }
+                delta[k, default: 0] += p.amount
             }
             if let t = p.toId, afterAnchor(p.day, late: p.lateIn, code: p.toCode, account: facts.account(t)) {
-                if delta[t] == nil { order.append(t) }
-                delta[t, default: 0] -= p.toAmount
+                let k = t.uuidString + "|" + p.toCode
+                if delta[k] == nil { order.append((id: t, code: p.toCode)) }
+                delta[k, default: 0] -= p.toAmount
             }
         }
         var parts: [String] = []
-        for id in order {
-            guard let v = delta[id], Swift.abs(v) > 0.5, let a = facts.account(id) else { continue }
-            let lead: String = parts.isEmpty ? a.name + "今天" : a.name
+        for side in order {
+            let k = side.id.uuidString + "|" + side.code
+            guard let v = delta[k], Swift.abs(v) > WealthTransferUIText.tolerance(side.code),
+                  let a = facts.account(side.id) else { continue }
+            let twoCodes: Bool = order.filter { $0.id == side.id }.count >= 2
+            let named: String = twoCodes ? deleteSideName(a.name, code: side.code) : a.name
+            // 結尾是英文代碼（「存錢 USD」）後面空一格再接中文
+            let latinEnd: Bool = named.last.map { $0.isASCII && $0.isLetter } ?? false
+            let name: String = latinEnd ? named + " " : named
+            let lead: String = parts.isEmpty ? name + "今天" : name
             let word: String = v > 0 ? "多" : "少"
-            let num: String = masked ? "" : " " + WealthFormat.plain(Swift.abs(v), code: "NT$")
+            let num: String = masked ? "" : " " + WealthFormat.plain(Swift.abs(v), code: side.code)
             parts.append(lead + word + num)
         }
         let head = "全部刪掉的話，以前 \(counted.count) 期也拿掉"
         if parts.isEmpty { return head + "（都在對存摺以前，今天的數字不變）。" }
         return head + "：" + parts.joined(separator: "、") + "。"
+    }
+
+    /// [v25.583] 刪除影響那一句的帳戶名＋幣別：台幣「存錢台幣」、外幣「存錢 USD」
+    static func deleteSideName(_ name: String, code: String) -> String {
+        FinanceRates.isNTD(code) ? name + "台幣" : name + " " + code
     }
 
     /// 這一期這一邊在那個帳戶最近一次對存摺之後（從沒對過＝都算；同一天記了 late＝在對存摺之後）。帳戶找不到＝不算。
@@ -2435,8 +3096,9 @@ private struct WealthTransferUIRuleHeader: View {
                 Text(model.rangeLine)
                     .font(.footnote)
                     .foregroundStyle(Color.secondary)
-                ForEach(model.changeLines, id: \.self) { line in
-                    Text(line)
+                // [審查修] 改週期的歷史可能好幾行：用第幾行當 id（字一樣的兩行不會撞）
+                ForEach(Array(model.changeLines.enumerated()), id: \.offset) { item in
+                    Text(item.element)
                         .font(.footnote)
                         .foregroundStyle(Color.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -2594,16 +3256,22 @@ private struct WealthTransferUIPauseSheet: View {
         return summary + "\n" + Self.bankNote
     }
 
+    /// [v25.583] 字寫實際那天（遇六日挪過的；選的值照舊是原本的日子）
+    private func actualDay(_ d: Date) -> String {
+        let h: WealthTransferHoliday = rule?.holidayKind ?? .onDay
+        return WealthTransferUIText.day(WealthTransferSchedule.shifted(d, holiday: h), today: today)
+    }
+
     /// 「下一期 11/27（五）」「12/4（五）」
     private func startLabel(_ i: Int) -> String {
         guard starts.indices.contains(i) else { return "" }
-        let d = WealthTransferUIText.day(starts[i], today: today)
+        let d = actualDay(starts[i])
         return i == 0 ? "下一期 " + d : d
     }
 
     private func resumeLabel(_ i: Int) -> String {
         guard resumes.indices.contains(i) else { return "" }
-        return WealthTransferUIText.day(resumes[i], today: today)
+        return actualDay(resumes[i])
     }
 
     var body: some View {
@@ -2778,7 +3446,8 @@ struct WealthTransferRulePage: View {
                                                  onDelete: { delete() },
                                                  onResume: { k in resume(k) }))
             .sheet(item: $openPeriod) { p in
-                WealthTransferPeriodSheet(ruleId: ruleId, periodKey: p.key, fromRulePage: true)
+                // [v25.583] 以前那條的期：開那一條的那一期（〔看整條〕疊那一條的規則頁）
+                WealthTransferPeriodSheet(ruleId: p.ruleId, periodKey: p.key, fromRulePage: p.ruleId == ruleId)
                     .appStores()
             }
         } else {
@@ -2824,16 +3493,20 @@ struct WealthTransferRulePage: View {
     private func rows(_ list: [WealthTransferUIRow]) -> some View {
         ForEach(list) { r in
             Button {
-                openPeriod = WealthTransferUIPeriodPick(key: r.key)
+                openPeriod = WealthTransferUIPeriodPick(ruleId: r.ruleId, key: r.key)
             } label: {
                 WealthTransferUIRowView(row: r)
             }
         }
     }
 
-    /// [v25.579]〔改金額或帳戶〕→〔暫停〕或〔恢復…〕→〔結束〕；刪除（List 的列，不受要確認 2 顆的限制）
+    /// [v25.579]〔改金額或帳戶〕→〔暫停〕或〔恢復…〕→〔結束〕；刪除（List 的列，不受要確認 2 顆的限制）。
+    /// [v25.583] 被接的舊那條最前面〔看新的那條〕（看，不擋訂閱）
     private func actionSection(_ m: WealthTransferUIRuleModel) -> some View {
         Section {
+            if let sid = m.successorId {
+                WealthTransferUIActionRow(title: "看新的那條", chevron: true) { ruleSheet = .successor(sid) }
+            }
             if m.isRunning {
                 Button("改金額或帳戶") { tapEdit() }
                 if m.pauseText != nil {
@@ -2888,6 +3561,9 @@ struct WealthTransferRulePage: View {
                 .appStores()
         case .pause(let rid):
             WealthTransferUIPauseSheet(ruleId: rid)
+                .appStores()
+        case .successor(let rid):
+            WealthTransferRulePage(ruleId: rid)
                 .appStores()
         }
     }
@@ -2988,6 +3664,8 @@ private struct WealthTransferUIDoneAsk: Identifiable {
     /// 轉出、轉進帳戶今天對過存摺（facts.transferReconciledToday）
     let from: Bool
     let to: Bool
+    /// [v25.583] 換匯：對方實際收到多少（表單打的；不是換匯＝nil 照留）
+    let toAmount: Double?
 }
 
 /// [v25.579]「今天對存摺的時候，這筆轉了嗎？」〔還沒，對完才轉的〕（對過的那一邊記 late）〔轉了，存摺上已經有了〕（那一邊 late 拿掉）〔取消〕
@@ -3056,6 +3734,15 @@ private struct WealthTransferUIPeriodModel {
     let amount: Double
     /// 這一段原本每期多少（〔改這一期〕打一樣的＝不存金額）
     let segmentAmount: Double?
+    // [v25.583] 換匯
+    /// 兩邊幣別（"NT$" 或外幣代碼）、這期對方收到多少
+    let fromCode: String
+    let toCode: String
+    let toAmount: Double
+    /// 這一段原本對方收到多少（段沒寫＝跟轉出一樣，同 LifeStore.markTransferDone）；〔改這一期〕打一樣的＝不存
+    let segmentToAmount: Double?
+    /// 照遇六日挪過、沒改過日子的那天（〔改這一期〕日子沒動＝不存 dayKey）
+    let naturalKey: String
     /// 註記原本的狀態字（〔改這一期〕照留；不認得的字也照留）
     let rawStatus: String?
     /// 〔改這一期〕日子的範圍：前一期原本的日子＋1 天…後一期原本的日子−1 天
@@ -3070,6 +3757,9 @@ private struct WealthTransferUIPeriodModel {
         guard let w = warnLine else { return spoken }
         return spoken + "，" + w
     }
+
+    /// [v25.583] 換匯：兩邊幣別不一樣（〔改這一期〕〔今天補轉〕〔轉好了〕多「對方收到」）
+    var isExchange: Bool { fromCode != toCode }
 
     /// 「請先到銀行 App 取消 11/13 那一筆；…」
     var cancelMessage: String {
@@ -3114,15 +3804,19 @@ private struct WealthTransferUIPeriodModel {
     }
 
     func editFooter(_ mode: WealthTransferUIPeriodEdit) -> String {
+        let base: String
         switch mode {
         case .redo:
-            return "日子不能早於原本那天（" + WealthTransferUIText.shortDay(original, today: today) + "）；補轉那天兩邊才算。"
+            base = "日子不能早於原本那天（" + WealthTransferUIText.shortDay(original, today: today) + "）；補轉那天兩邊才算。"
         case .change:
-            return "日子不能跨過前後一期（" + WealthTransferUIText.shortDay(lower, today: today) + "～"
+            base = "日子不能跨過前後一期（" + WealthTransferUIText.shortDay(lower, today: today) + "～"
                 + WealthTransferUIText.shortDay(upper, today: today) + "）；只改這一期，以後的照舊。"
         case .done:
-            return "今天（" + WealthTransferUIText.shortDay(today, today: today) + "）轉好了；金額跟這期不一樣就改成實際轉的。"
+            base = "今天（" + WealthTransferUIText.shortDay(today, today: today) + "）轉好了；金額跟這期不一樣就改成實際轉的。"
         }
+        // [v25.583] 換匯：那一期銀行實際換多少
+        guard isExchange else { return base }
+        return base + "\n銀行那一期實際換多少（看網銀的換匯明細）；以後的期照規則。"
     }
 
     /// [v25.579] 自己轉的那幾種按鈕（預計＝nil：照 state 給〔改這一期〕〔這期不轉〕）
@@ -3198,20 +3892,29 @@ private struct WealthTransferUIPeriodModel {
             if i > 0 { prev = around[i - 1].original }
             if i + 1 < around.count { next = around[i + 1].original }
         }
-        let gap = t.rule.cycleKind == .weekly ? 6 : 27
+        // [v25.583] 放寬幾天照週期（每週 6、每兩週 13、每月 27、每年 364）
+        let gap: Int = WealthTransferSchedule.editGapDays(t.rule.cycleKind)
         let lo: Date = prev.map { WealthCal.addDays(1, to: $0) } ?? WealthCal.addDays(-gap, to: p.original)
         let hi: Date = next.map { WealthCal.addDays(-1, to: $0) } ?? WealthCal.addDays(gap, to: p.original)
 
-        let amountText = masked ? WealthFormat.masked : WealthFormat.money(p.amount, code: p.fromCode)
+        // [v25.583] 金額兩邊「NT$9,600 → US$300.00」（未來沒改過的期「約」）
+        let amountText: String = masked ? WealthFormat.masked : WealthTransferText.pair(p, money: true)
         let dayText = WealthTransferUIText.day(p.day, today: today)
-        let spoken = WealthTransferUIText.spokenDay(p.day) + "，" + t.title + "，"
-            + WealthTransferUIText.spokenAmount(p.amount, code: p.fromCode, masked: masked) + "，" + status.spoken
+        let spokenAmount: String = (p.isExchange && !masked)
+            ? WealthTransferText.pair(p, money: true)
+            : WealthTransferUIText.spokenAmount(p.amount, code: p.fromCode, masked: masked)
+        let spoken = WealthTransferUIText.spokenDay(p.day) + "，" + t.title + "，" + spokenAmount + "，" + status.spoken
+        let seg: WealthTransferSegment? = t.rule.segment(at: key)
+        let natural: Date = WealthTransferSchedule.shifted(p.original, holiday: t.rule.holidayKind)
 
         return WealthTransferUIPeriodModel(
             key: key, caption: "定期轉帳・" + t.title, dayText: dayText, amountText: amountText, status: status,
             warnLine: warnLine, buttons: buttons, manual: manual, today: today, original: p.original, day: p.day,
-            amount: p.amount, segmentAmount: t.rule.segment(at: key)?.amount, rawStatus: t.rule.notes?[key]?.status,
-            lower: Swift.min(lo, p.original), upper: Swift.max(hi, p.original), ackKey: ackKey, spoken: spoken)
+            amount: p.amount, segmentAmount: seg?.amount, fromCode: p.fromCode, toCode: p.toCode,
+            toAmount: p.toAmount, segmentToAmount: seg?.toAmount ?? seg?.amount,
+            naturalKey: WealthTransferSchedule.key(of: natural), rawStatus: t.rule.notes?[key]?.status,
+            lower: Swift.min(lo, p.original, p.day), upper: Swift.max(hi, p.original, p.day), ackKey: ackKey,
+            spoken: spoken)
     }
 }
 
@@ -3271,6 +3974,11 @@ struct WealthTransferPeriodSheet: View {
     @State private var openRule: WealthTransferUIRulePick?
     /// [v25.579]〔轉好了〕存檔時兩邊帳戶今天對過存摺：先問「今天對存摺的時候，這筆轉了嗎？」
     @State private var doneAsk: WealthTransferUIDoneAsk?
+    /// [v25.583] 換匯「對方收到」打的字；展開時抓的兩個幣別、是不是換匯（存鈕灰不灰照它算，body 不叫 facts）
+    @State private var toAmountText = ""
+    @State private var editFromCode = "NT$"
+    @State private var editToCode = "NT$"
+    @State private var editExchange = false
 
     private var model: WealthTransferUIPeriodModel? {
         let facts = lifeStore.wealthFacts(expense: expenseStore, finance: financeStore)
@@ -3279,12 +3987,14 @@ struct WealthTransferPeriodSheet: View {
                                                 acknowledged: { book.isDismissed($0) })
     }
 
-    /// 打的金額（台幣到元；< 1 元＝nil，存鈕灰）
-    private var editAmount: Double? {
-        guard let v = WealthFormText.number(amountText) else { return nil }
-        let r = v.rounded()
-        return r >= 1 ? r : nil
-    }
+    /// 打的金額（台幣到元；< 1 元＝nil，存鈕灰）。[v25.583] 外幣到 0.01
+    private var editAmount: Double? { WealthTransferUIText.parseAmount(amountText, code: editFromCode) }
+
+    /// [v25.583] 換匯：對方收到多少（照對方幣別）
+    private var editToAmount: Double? { WealthTransferUIText.parseAmount(toAmountText, code: editToCode) }
+
+    /// [v25.583] 存鈕灰：金額沒填好；換匯兩個都要
+    private var editSaveDisabled: Bool { editAmount == nil || (editExchange && editToAmount == nil) }
 
     var body: some View {
         NavigationStack {
@@ -3435,17 +4145,25 @@ struct WealthTransferPeriodSheet: View {
         Section {
             if mode == .done {
                 doneAmountRow
+                if editExchange {
+                    toAmountRow
+                }
                 Button("存") { tapSaveDone() }
-                    .disabled(editAmount == nil)
+                    .disabled(editSaveDisabled)
             } else {
-                HStack {
-                    Text("NT$").foregroundStyle(Color.secondary)
-                    TextField("這期轉多少", text: $amountText)
-                        .keyboardType(.numberPad)
+                if editExchange {
+                    fromAmountRow
+                    toAmountRow
+                } else {
+                    HStack {
+                        Text(WealthTransferUIText.prefix(editFromCode)).foregroundStyle(Color.secondary)
+                        TextField("這期轉多少", text: $amountText)
+                            .keyboardType(FinanceRates.isNTD(editFromCode) ? .numberPad : .decimalPad)
+                    }
                 }
                 DatePicker(m.editTitle(mode), selection: $pickedDay, in: m.range(for: mode), displayedComponents: .date)
                 Button("存") { saveEdit(m, mode: mode) }
-                    .disabled(editAmount == nil)
+                    .disabled(editSaveDisabled)
             }
             Button("取消") { editing = nil }
         } header: {
@@ -3455,10 +4173,41 @@ struct WealthTransferPeriodSheet: View {
         }
     }
 
+    /// [v25.583] 換匯「轉出　NT$〔9,600〕」
+    private var fromAmountRow: some View {
+        HStack(spacing: 8) {
+            Text("轉出")
+            Spacer(minLength: 8)
+            Text(WealthTransferUIText.prefix(editFromCode)).foregroundStyle(Color.secondary)
+            TextField("這期轉多少", text: $amountText)
+                .keyboardType(FinanceRates.isNTD(editFromCode) ? .numberPad : .decimalPad)
+                .multilineTextAlignment(.trailing)
+                .frame(minWidth: 72, maxWidth: 140)
+        }
+    }
+
+    /// [v25.583] 換匯「對方收到　US$〔300〕」（那期銀行實際換多少）
+    private var toAmountRow: some View {
+        HStack(spacing: 8) {
+            Text("對方收到")
+            Spacer(minLength: 8)
+            Text(WealthTransferUIText.prefix(editToCode)).foregroundStyle(Color.secondary)
+            TextField("多少", text: $toAmountText)
+                .keyboardType(FinanceRates.isNTD(editToCode) ? .numberPad : .decimalPad)
+                .multilineTextAlignment(.trailing)
+                .frame(minWidth: 72, maxWidth: 140)
+        }
+    }
+
     // MARK: 按鈕
 
     private func startEdit(_ m: WealthTransferUIPeriodModel, mode: WealthTransferUIPeriodEdit) {
         amountText = WealthFormText.editable(m.amount)
+        // [v25.583] 換匯：兩個金額都帶這期的
+        editFromCode = m.fromCode
+        editToCode = m.toCode
+        editExchange = m.isExchange
+        toAmountText = m.isExchange ? WealthFormText.editable(m.toAmount) : ""
         let range = m.range(for: mode)
         // 〔今天補轉〕預設今天（不早於原本那天）；其他照現在那天
         let start: Date = m.buttons == .failed ? Swift.max(m.today, m.original) : m.day
@@ -3466,50 +4215,69 @@ struct WealthTransferPeriodSheet: View {
         editing = mode
     }
 
-    /// 〔存〕：那一期的註記（金額跟這一段原本一樣＝不存；日子等於原本那天＝不存）
+    /// 〔存〕：那一期的註記（金額跟這一段原本一樣＝不存；日子等於原本那天＝不存）。
+    /// [v25.583] 〔改這一期〕日子沒動（＝遇六日挪過的那天）也不存；換匯兩個金額都存（跟這一段一樣的那一個傳 nil：台幣 ±0.5、外幣 ±0.005）
     private func saveEdit(_ m: WealthTransferUIPeriodModel, mode: WealthTransferUIPeriodEdit) {
         guard let v = editAmount else { return }
         let range = m.range(for: mode)
         let picked = Swift.min(Swift.max(WealthCal.day(pickedDay), range.lowerBound), range.upperBound)
         let pickedKey = WealthTransferSchedule.key(of: picked)
-        let dayKey: String? = pickedKey == m.key ? nil : pickedKey
+        let unmoved: Bool = pickedKey == m.key || (mode == .change && pickedKey == m.naturalKey)
+        let dayKey: String? = unmoved ? nil : pickedKey
         var same = false
-        if let s = m.segmentAmount, Swift.abs(s - v) < 0.5 { same = true }
+        if let s = m.segmentAmount, Swift.abs(s - v) < WealthTransferUIText.tolerance(m.fromCode) { same = true }
         let amount: Double? = same ? nil : v
         let status: String? = mode == .redo ? WealthTransferStatus.redo.rawValue : m.rawStatus
+        let exchange: Bool = m.isExchange
+        var toAmount: Double? = nil
+        if exchange {
+            guard let tv = editToAmount else { return }
+            var sameTo = false
+            if let s = m.segmentToAmount, Swift.abs(s - tv) < WealthTransferUIText.tolerance(m.toCode) { sameTo = true }
+            toAmount = sameTo ? nil : tv
+        }
+        let toValue: Double? = toAmount
         let life = lifeStore
         let rid = ruleId
         let key = periodKey
         dismiss()
         DispatchQueue.main.async {
-            life.setTransferNote(ruleId: rid, key: key, status: status, dayKey: dayKey, amount: amount)
+            if exchange {
+                life.setTransferNote(ruleId: rid, key: key, status: status, dayKey: dayKey, amount: amount,
+                                     toAmount: toValue)
+            } else {
+                life.setTransferNote(ruleId: rid, key: key, status: status, dayKey: dayKey, amount: amount)
+            }
         }
     }
 
-    /// [v25.579]「轉好了」那一欄的金額：「實際轉了　NT$〔5,000〕」（不放 DatePicker：日子一律今天）
+    /// [v25.579]「轉好了」那一欄的金額：「實際轉了　NT$〔5,000〕」（不放 DatePicker：日子一律今天）；[v25.583] 字頭照幣別
     private var doneAmountRow: some View {
         HStack(spacing: 8) {
             Text("實際轉了")
             Spacer(minLength: 8)
-            Text("NT$").foregroundStyle(Color.secondary)
+            Text(WealthTransferUIText.prefix(editFromCode)).foregroundStyle(Color.secondary)
             TextField("這期轉多少", text: $amountText)
-                .keyboardType(.numberPad)
+                .keyboardType(FinanceRates.isNTD(editFromCode) ? .numberPad : .decimalPad)
                 .multilineTextAlignment(.trailing)
                 .frame(minWidth: 72, maxWidth: 140)
         }
     }
 
-    /// [v25.579]「轉好了」〔存〕：兩邊帳戶今天對過存摺（那個幣別）先關這一欄、問一句；沒對過直接存
+    /// [v25.579]「轉好了」〔存〕：兩邊帳戶今天對過存摺（那個幣別）先關這一欄、問一句；沒對過直接存。
+    /// [v25.583] 換匯多帶對方收到多少
     private func tapSaveDone() {
         guard let v = editAmount else { return }
+        let tv: Double? = editExchange ? editToAmount : nil
+        if editExchange && tv == nil { return }
         let facts = lifeStore.wealthFacts(expense: expenseStore, finance: financeStore)
         let rec = facts.transferReconciledToday(ruleId: ruleId, key: periodKey)
         if rec.any {
             editing = nil
-            doneAsk = WealthTransferUIDoneAsk(amount: v, from: rec.from, to: rec.to)
+            doneAsk = WealthTransferUIDoneAsk(amount: v, from: rec.from, to: rec.to, toAmount: tv)
             return
         }
-        saveDone(v, lateOut: nil, lateIn: nil)
+        saveDone(v, lateOut: nil, lateIn: nil, toAmount: tv)
     }
 
     /// 「今天對存摺的時候，這筆轉了嗎？」：〔還沒，對完才轉的〕對過的那一邊記 late（true）；〔轉了，存摺上已經有了〕那一邊拿掉（false）；
@@ -3518,24 +4286,26 @@ struct WealthTransferPeriodSheet: View {
         doneAsk = nil
         let lo: Bool? = a.from ? late : nil
         let li: Bool? = a.to ? late : nil
-        saveDone(a.amount, lateOut: lo, lateIn: li)
+        saveDone(a.amount, lateOut: lo, lateIn: li, toAmount: a.toAmount)
     }
 
-    /// [v25.579]〔轉好了〕：先關，下一個 runloop 才寫（status "done"、日子今天、金額跟這一段一樣不存——LifeStore.markTransferDone）
-    private func saveDone(_ v: Double, lateOut: Bool?, lateIn: Bool?) {
+    /// [v25.579]〔轉好了〕：先關，下一個 runloop 才寫（status "done"、日子今天、金額跟這一段一樣不存——LifeStore.markTransferDone）。
+    /// [v25.583] toAmount：換匯對方實際收到多少（nil＝照留；跟這一段一樣 LifeStore 不存）
+    private func saveDone(_ v: Double, lateOut: Bool?, lateIn: Bool?, toAmount: Double?) {
         let life = lifeStore
         let rid = ruleId
         let key = periodKey
         dismiss()
         DispatchQueue.main.async {
-            life.markTransferDone(ruleId: rid, key: key, day: Date(), amount: v, lateOut: lateOut, lateIn: lateIn)
+            life.markTransferDone(ruleId: rid, key: key, day: Date(), amount: v, lateOut: lateOut, lateIn: lateIn,
+                                  toAmount: toAmount)
         }
     }
 
     /// [v25.579]〔改到明天〕：那一期的日子改成明天（狀態照留；金額跟這一段一樣不存、改過的照留）
     private func moveToTomorrow(_ m: WealthTransferUIPeriodModel) {
         var same = false
-        if let s = m.segmentAmount, Swift.abs(s - m.amount) < 0.5 { same = true }
+        if let s = m.segmentAmount, Swift.abs(s - m.amount) < WealthTransferUIText.tolerance(m.fromCode) { same = true }
         let amount: Double? = same ? nil : m.amount
         let status: String? = m.rawStatus
         let dayKey: String = m.tomorrowKey

@@ -83,6 +83,16 @@ import SwiftUI
 //   WealthCardRow.monthlyTransfer＝WealthTransferFinds.monthlyPreset(for:in:)（從＝轉出那邊、到、金額、每月幾日＝那天，
 //   30、31 號又是月底＝每月最後一天；lead「照 10/6 這筆帶好了；這筆照留，從下一期起算」）。轉出那邊、轉入那邊長按都一樣帶。
 //   卡片頁長按〔設成每月〕（要訂閱）→ WealthTransferRuleForm(preset:)。⑤ 以前記在這裡的交割紀錄（唯讀）一律沒有。
+//
+// [v25.583] 定期轉帳 v4 G2（transfer/build/v4/brief.md §6 G2；transfer/judge.md §4.7、§5、§11.5；sim_v4 §3、§5）：
+// • ④ 先後（transferLinkRank）：每兩週跟每週排一起（照星期幾）、每年排在每月後面（照幾月幾日）、不認得的最後。
+// • ④ 一列：換匯右邊寫兩邊「9,600 → US$300.00」（轉進那一組寫對方收到的「+US$300.00」）；同一個帳戶兩格互換只在轉出那一組一列
+//  「換匯 台幣 → USD」（轉進那一組排掉，件數也只算一次）；第二行有遇六日才接「每月 1 日・遇六日順延・銀行自動轉」。
+//   轉出那一組小標「每個月約 …」照舊加 monthlyOut（主控只加台幣）；轉出那幾條沒有一條是台幣（外幣帳戶）就不寫那一段（不寫「約 0」）。
+// • 水位小牌：每兩週的同每週不掛；每年的照每月的規矩掛；同一個帳戶互換那一期（「換匯（換出）」「換匯（換入）」）掛「換匯」
+//  （取代「對方的名字」那一步；你取的名字 ≤ 4 個字照樣優先）。
+// • ③ 標頭：存摺上只有一個幣別而且是外幣、30 天內每一列都是那個幣別＝照原幣寫最低「最低 US$1,200.00」（含今天的數字）；
+//   其他照舊台幣換算。換匯那幾列「約」、扣完剩照那一列的幣別（WealthFacts 帶好的 isEstimate、balanceAfter）；念的也加「約」。
 
 // MARK: - 型別
 
@@ -1855,7 +1865,7 @@ extension WealthCardData {
     /// 每月的：你取的名字去空白後 ≤ 4 個字回名字，不然回對方的名字前 4 個字（那一期那一列「轉給 存錢」「來自 薪轉」的對方；
     /// 拆不出來用規則下一期那一段的對方）。單次轉帳、找不到規則照舊「轉出」「轉入」。
     /// [v25.583] 每兩週的同每週不掛（一個月 2～3 筆）；每年的照每月的規矩掛；同一個帳戶兩格互換那一期（「換匯（換出）」「換匯（換入）」
-    /// 那兩列，對方就是自己）掛「換匯」
+    /// 那兩列，對方就是自己）沒取名字（或名字超過 4 個字）時掛「換匯」（取了 ≤ 4 個字的名字照樣掛名字）
     fileprivate static func transferTideLabel(_ r: WealthLedgerRow, facts: WealthFacts) -> String {
         let plain: String = r.kind == .transferOut ? "轉出" : "轉入"
         guard let t = facts.transferRule(r.transferRuleId) else { return plain }
@@ -1863,11 +1873,12 @@ extension WealthCardData {
         case .weekly?, .biweekly?: return ""
         case .monthly?, .yearly?, nil: break
         }
+        let name = (t.rule.name ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if !name.isEmpty && name.count <= 4 { return name }
+        // [v25.583] 同一個帳戶兩格互換那一期：對方就是自己 → 「換匯」（你取的名字 ≤ 4 個字照樣優先，同每月的規矩）
         if r.title == WealthTransferText.exchangeOutTitle || r.title == WealthTransferText.exchangeInTitle {
             return "換匯"
         }
-        let name = (t.rule.name ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        if !name.isEmpty && name.count <= 4 { return name }
         let fallback: String = r.kind == .transferOut ? t.toName : t.fromName
         let other: String = transferCounterpart(r.title) ?? fallback
         return String(other.prefix(4))
@@ -2301,9 +2312,9 @@ extension WealthCardData {
         case .monthly?:
             return (1, t.rule.day ?? 1, t.order)
         case .yearly?:
-            let m: Int = t.rule.month ?? t.firstDay.map { d in WealthCal.calendar.component(.month, from: d) } ?? 1
-            let d: Int = t.rule.day ?? t.firstDay.map { x in WealthCal.calendar.component(.day, from: x) } ?? 1
-            return (2, m * 100 + d, t.order)
+            let mm: Int = t.rule.month ?? t.firstDay.map { s in WealthCal.calendar.component(.month, from: s) } ?? 1
+            let dd: Int = t.rule.day ?? t.firstDay.map { s in WealthCal.calendar.component(.day, from: s) } ?? 1
+            return (2, mm * 100 + dd, t.order)
         case nil:
             return (3, 0, t.order)
         }

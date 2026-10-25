@@ -3099,7 +3099,7 @@ struct WealthFacts {
             }
             var low = ntdOf(run)
             var lowDay = ctx.today
-            for e in events where e.day > ctx.today && e.day <= windowEnd {
+            for (idx, e) in events.enumerated() where e.day > ctx.today && e.day <= windowEnd {
                 let before = run[e.code] ?? 0
                 if let a = e.anchor { run[e.code] = a } else { run[e.code] = before + e.delta }
                 let after = run[e.code] ?? 0
@@ -3117,6 +3117,16 @@ struct WealthFacts {
                     s.expenseId = e.row.expenseId
                     shortages.append(s)
                     if shortage == nil, before >= -0.5 { shortage = s }
+                }
+                // [v25.583 驗證修] 同一個帳戶兩格互換（定期轉帳換匯）那一期：換出那一列緊接著就是同一條、同一期的換入那一列
+                //（同一天）＝等換入也算完才比最低。不然換出那一下台幣少了、外幣還沒進來，「30 天內最低」會多掉一截
+                //（例 存錢 11/2 換 US$300：最低變 27.9萬、其實一直是 28.8萬）。每個幣別的最低、不夠扣照舊一筆一筆算
+                if idx + 1 < events.count, e.delta < 0, e.anchor == nil, let rid = e.row.transferRuleId {
+                    let nx = events[idx + 1]
+                    if nx.day == e.day, nx.delta > 0, nx.anchor == nil, nx.row.transferRuleId == rid,
+                       nx.row.periodKey == e.row.periodKey {
+                        continue
+                    }
                 }
                 let v = ntdOf(run)
                 if v < low { low = v; lowDay = e.day }

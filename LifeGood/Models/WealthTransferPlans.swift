@@ -382,6 +382,9 @@ enum WealthTransferPreview {
         guard let p = list.first(where: { $0.counts && $0.day >= today }), let fromId = p.fromId,
               let toId = p.toId else { return [] }
         func num(_ v: Double) -> String { masked ? "••••" : WealthFormat.grouped(v.rounded(), decimals: 0) }
+        // [v25.583 驗證修] 轉出那一邊照那一格的幣別寫（v4 起可以從外幣那格轉出：美金戶「約剩 US$1,500.00」，不寫成「約剩 1,500」）；
+        // 台幣跟 num 一模一樣（WealthFormat.plain 的台幣＝grouped(rounded)）
+        func numIn(_ v: Double, _ code: String) -> String { masked ? "••••" : WealthFormat.plain(v, code: code) }
         let fromAcc = after.account(fromId)
         let toAcc = after.account(toId)
         let fromName: String = fromAcc?.name ?? "轉出的帳戶"
@@ -392,17 +395,17 @@ enum WealthTransferPreview {
         let tail: String = r.isManual ? "轉之前要先補錢" : "銀行可能轉不過去"
         if let s = fromAcc?.shortages.first(where: { $0.transferRuleId == r.id }) {
             let text = WealthTransferText.dayText(s.date, today: today) + " 轉完，" + fromName + "會是 −"
-                + num(s.short) + "，" + tail
+                + numIn(s.short, s.code) + "，" + tail
             out.append(WealthTransferPreviewLine(id: "from", text: text, warn: true))
         } else if let a = fromAcc {
             let rowId = "tr-" + r.id.uuidString + "-" + p.key + "-o"
             if let row = (a.upcoming + a.ledger).first(where: { $0.id == rowId }) {
                 let head = WealthTransferText.dayText(p.day, today: today) + " 轉完，" + fromName
                 if row.balanceAfter < -0.5 {
-                    out.append(WealthTransferPreviewLine(id: "from", text: head + "會是 −" + num(-row.balanceAfter) + "，" + tail,
-                                                         warn: true))
+                    out.append(WealthTransferPreviewLine(id: "from", text: head + "會是 −" + numIn(-row.balanceAfter, row.code) + "，"
+                                                         + tail, warn: true))
                 } else {
-                    out.append(WealthTransferPreviewLine(id: "from", text: head + "約剩 " + num(row.balanceAfter) + " ✓",
+                    out.append(WealthTransferPreviewLine(id: "from", text: head + "約剩 " + numIn(row.balanceAfter, row.code) + " ✓",
                                                          warn: false))
                 }
             }
@@ -475,16 +478,24 @@ extension WealthFacts {
         // 轉進那邊先講、再講轉出（樣稿②-2）
         let toId: UUID? = past.first?.toId
         let fromId: UUID? = past.first?.fromId
-        if let id = toId, let line = earlySide(id, out: false, past: past, masked: masked) { parts.append(line) }
-        if let id = fromId, id != toId, let line = earlySide(id, out: true, past: past, masked: masked) { parts.append(line) }
-        // 手記過的單次轉帳
+        // [v25.583 驗證修] 同一個帳戶兩格互換（換匯）：兩格各講一句，名字後面寫哪一格（「存錢 USD 從沒對過存摺…」「存錢台幣 10/1 對過…」）；
+        // 以前只講轉進那一格，台幣那格少掉的錢沒講
+        let sameAccount: Bool = toId != nil && toId == fromId
+        if let id = toId, let line = earlySide(id, out: false, past: past, masked: masked, sideNamed: sameAccount) {
+            parts.append(line)
+        }
+        if let id = fromId, id != toId || sameAccount,
+           let line = earlySide(id, out: true, past: past, masked: masked, sideNamed: sameAccount) {
+            parts.append(line)
+        }
+        // 手記過的單次轉帳（[v25.583 驗證修] 只比台幣轉出的期：手記的那筆是台幣）
         var dupDays: [Date] = []
         if let f = fromId, let to = toId {
             for d in fromDeposits where d.isTransfer && d.isWithdrawal && d.counterpartyId == to
                 && FinanceRates.isNTD(d.currencyCode) {
                 let day = WealthCal.day(d.date)
                 let hit = past.contains { p in
-                    p.fromId == f && Swift.abs(p.amount - d.amount) < 0.5
+                    p.fromId == f && p.fromCode == "NT$" && Swift.abs(p.amount - d.amount) < 0.5
                         && Swift.abs(WealthCal.days(from: p.day, to: day)) <= 3
                 }
                 if hit && !dupDays.contains(day) { dupDays.append(day) }
@@ -508,7 +519,9 @@ extension WealthFacts {
 
     /// 一個帳戶那一句：「存錢上次對存摺 10/1 → 只有 10/6 那期會算進今天（+20,000）」「薪轉 10/23 對過 → 今天的數字不變」
     /// 「零用錢從沒對過存摺 → 10 期都會算進今天（+30,000）」；帳戶找不到＝nil
-    private func earlySide(_ id: UUID, out: Bool, past: [WealthTransferPeriod], masked: Bool) -> String? {
+    /// [v25.583 驗證修] sideNamed：同一個帳戶兩格互換時名字後面寫哪一格（「存錢台幣」「存錢 USD」）；金額照那一格的幣別（外幣「+US$900.00」）
+    private func earlySide(_ id: UUID, out: Bool, past: [WealthTransferPeriod], masked: Bool,
+                           sideNamed: Bool = false) -> String? {
         guard let a = account(id) else { return nil }
         let t = today
         // [驗證修] 這一邊那個幣別（v1 一律台幣）最近一次對存摺：lastAnchorDate 是任何幣別的，外幣帳戶只對了美金那格
@@ -526,12 +539,16 @@ extension WealthFacts {
             return d > x || (d == x && late)
         }
         let total: Double = hits.reduce(0) { $0 + (out ? $1.amount : $1.toAmount) }
-        let money: String = masked ? "" : "（" + WealthTransferText.signed(out ? -total : total) + "）"
+        let money: String = masked ? "" : "（" + WealthFacts.earlySigned(out ? -total : total, code: code) + "）"
+        // 同一個帳戶兩格：「存錢台幣」「存錢 USD 」（英文代碼後面空一格再接中文）
+        let isNTD: Bool = FinanceRates.isNTD(code)
+        let name: String = sideNamed ? (isNTD ? a.name + "台幣" : a.name + " " + code + " ") : a.name
+        let bare: String = sideNamed ? (isNTD ? a.name + "台幣" : a.name + " " + code) : a.name
         guard let x = anchor else {
-            return a.name + "從沒對過存摺 → \(hits.count) 期都會算進今天" + money
+            return name + "從沒對過存摺 → \(hits.count) 期都會算進今天" + money
         }
         let when = WealthTransferText.dayText(x, today: t)
-        if hits.isEmpty { return a.name + " " + when + " 對過 → 今天的數字不變" }
+        if hits.isEmpty { return bare + " " + when + " 對過 → 今天的數字不變" }
         let mineCount = past.filter { out ? $0.fromId == id : $0.toId == id }.count
         let which: String
         if hits.count == 1 {
@@ -543,7 +560,13 @@ extension WealthFacts {
                 + WealthTransferText.dayText(hits[hits.count - 1].day, today: t) + " 那 \(hits.count) 期"
         }
         let lead: String = hits.count < mineCount ? "只有 " : ""
-        return a.name + "上次對存摺 " + when + " → " + lead + which + "會算進今天" + money
+        return name + "上次對存摺 " + when + " → " + lead + which + "會算進今天" + money
+    }
+
+    /// [v25.583 驗證修] 〔更早…〕那一句的金額：台幣「+20,000」「−9,600」（同 v1b，WealthTransferText.signed）、外幣「+US$900.00」
+    private static func earlySigned(_ v: Double, code: String) -> String {
+        if FinanceRates.isNTD(code) { return WealthTransferText.signed(v) }
+        return (v < 0 ? "−" : "+") + WealthFormat.plain(Swift.abs(v), code: code)
     }
 
     /// 存一筆單次轉帳（同幣別台幣）時：同兩個帳戶、同金額、前後 3 天內有一期算進去的定期轉帳＝那一期（最近的那一期）；沒有＝nil
