@@ -1356,7 +1356,12 @@ extension WealthCardData {
         bk.upcoming = a.next30.map { upcomingRow($0, x: x) }
         if !a.next30.isEmpty {
             var t = "\(a.next30.count) 件"
-            if let low = a.lowestNTD { t += "・最低 " + WealthCardText.wan(low, masked: x.masked) }
+            // [v25.583] 只有一個外幣幣別的帳戶：照原幣寫「最低 US$1,200.00」；其他照舊（台幣換算）
+            if let low = upcomingForeignLow(a, masked: x.masked) {
+                t += "・最低 " + low
+            } else if let low = a.lowestNTD {
+                t += "・最低 " + WealthCardText.wan(low, masked: x.masked)
+            }
             bk.upcomingTrailing = t
         }
         // ④ 連到這個帳戶的
@@ -1848,11 +1853,19 @@ extension WealthCardData {
 
     /// [v25.577] 轉帳那一列的水位小牌（sim_v1b §10）：定期轉帳每週的回 ""（不掛，線往下一階就好；同一天別的那一筆照樣輪得到）；
     /// 每月的：你取的名字去空白後 ≤ 4 個字回名字，不然回對方的名字前 4 個字（那一期那一列「轉給 存錢」「來自 薪轉」的對方；
-    /// 拆不出來用規則下一期那一段的對方）。單次轉帳、找不到規則照舊「轉出」「轉入」
+    /// 拆不出來用規則下一期那一段的對方）。單次轉帳、找不到規則照舊「轉出」「轉入」。
+    /// [v25.583] 每兩週的同每週不掛（一個月 2～3 筆）；每年的照每月的規矩掛；同一個帳戶兩格互換那一期（「換匯（換出）」「換匯（換入）」
+    /// 那兩列，對方就是自己）掛「換匯」
     fileprivate static func transferTideLabel(_ r: WealthLedgerRow, facts: WealthFacts) -> String {
         let plain: String = r.kind == .transferOut ? "轉出" : "轉入"
         guard let t = facts.transferRule(r.transferRuleId) else { return plain }
-        if t.rule.cycleKind == .weekly { return "" }
+        switch t.rule.cycleKind {
+        case .weekly?, .biweekly?: return ""
+        case .monthly?, .yearly?, nil: break
+        }
+        if r.title == WealthTransferText.exchangeOutTitle || r.title == WealthTransferText.exchangeInTitle {
+            return "換匯"
+        }
         let name = (t.rule.name ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         if !name.isEmpty && name.count <= 4 { return name }
         let fallback: String = r.kind == .transferOut ? t.toName : t.fromName
@@ -2011,6 +2024,20 @@ extension WealthCardData {
 
     // MARK: ③ 接下來 30 天
 
+    /// [v25.583] ③ 標頭「N 件・最低 …」：存摺上只有一個幣別而且是外幣（a.singleCode）、接下來 30 天每一列也都是那個幣別＝
+    /// 照原幣寫那個幣別最低的扣完剩（含今天的數字）「US$1,200.00」；遮住＝••••。其他（台幣、好幾個幣別）＝nil，照舊台幣換算
+    fileprivate static func upcomingForeignLow(_ a: WealthFacts.Account, masked mk: Bool) -> String? {
+        guard let single = a.singleCode else { return nil }
+        let one: String = WealthFacts.norm(single)
+        guard !FinanceRates.isNTD(one), !a.next30.isEmpty,
+              a.next30.allSatisfy({ r in WealthFacts.norm(r.code) == one }) else { return nil }
+        var low: Double = a.balance(one)
+        for r in a.next30 where r.balanceAfter < low {
+            low = r.balanceAfter
+        }
+        return mk ? WealthCardText.dots : WealthFormat.money(low, code: one)
+    }
+
     fileprivate static func upcomingRow(_ r: WealthLedgerRow, x: WealthCardCtx) -> WealthCardRow {
         let mk = x.masked
         var title = r.title
@@ -2064,7 +2091,9 @@ extension WealthCardData {
         row.sub = "扣完剩 " + WealthCardText.plain(r.balanceAfter, code: r.code, masked: mk)
         row.warn = r.balanceAfter < -0.004
         row.open = openFor(r)
-        let said = mk ? "金額已遮住" : (r.isOutflow ? "扣 " : "進 ") + WealthFormat.money(r.amount, code: r.code)
+        // [v25.583] 金額前面寫「約」的那幾列（未來的換匯那一期、還沒結帳的卡費…）念的也加「約」
+        let approx: String = r.isEstimate ? "約 " : ""
+        let said = mk ? "金額已遮住" : (r.isOutflow ? "扣 " : "進 ") + approx + WealthFormat.money(r.amount, code: r.code)
         let after = mk ? "" : "，扣完剩 " + WealthFormat.money(r.balanceAfter, code: r.code)
         row.accessibilityText = WealthPageText.spokenDate(r.date) + "，" + title + ruleSpoken(r) + "，" + said + after
         return row
@@ -2195,12 +2224,15 @@ extension WealthCardData {
         let mk = x.masked
         let running = x.facts.runningTransfers
         let outs = transferLinkSorted(running.filter { $0.fromId == a.id })
-        let ins = transferLinkSorted(running.filter { $0.toId == a.id })
+        // [v25.583] 同一個帳戶兩格互換（台幣格 → 美金格）只在轉出那一組出一次（「換匯 台幣 → USD」），轉進那一組排掉
+        let ins = transferLinkSorted(running.filter { $0.toId == a.id && !$0.isSameAccount })
         bk.transferOut = outs.map { t in transferLinkRow(t, out: true, masked: mk) }
         bk.transferIn = ins.map { t in transferLinkRow(t, out: false, masked: mk) }
         if !outs.isEmpty {
             var title = "定期轉帳・轉出 \(outs.count) 條"
-            if !mk {
+            // [v25.583] monthlyOut 主控已經只加台幣（外幣轉出＝0）：轉出那幾條沒有一條是台幣的（外幣帳戶）就不寫「每個月約 0」
+            let hasNTD: Bool = outs.contains { t in FinanceRates.isNTD(t.code) }
+            if !mk && hasNTD {
                 let monthly: Double = outs.reduce(0.0) { sum, t in sum + t.monthlyOut }
                 title += "・每個月約 " + WealthPageText.wan(monthly)
             }
@@ -2213,18 +2245,45 @@ extension WealthCardData {
     }
 
     /// [v25.577] ④ 定期轉帳的一列：「轉給 零用錢」「每週五・銀行自動轉」「3,000」／「來自 薪轉」「每月 8 日・銀行自動轉」「+25,000」（綠）；
-    /// 點了開規則頁、長按〔改到別的帳戶…〕（editTransferRuleId）
+    /// 點了開規則頁、長按〔改到別的帳戶…〕（editTransferRuleId）。
+    /// [v25.583] 換匯：轉出那一組右邊寫兩邊「9,600 → US$300.00」（WealthTransferText.pair）、轉進那一組寫對方收到的「+US$300.00」；
+    /// 同一個帳戶兩格互換只一列（轉出那一組）「換匯 台幣 → USD」；第二行有遇六日才接「・遇六日順延」：「每月 1 日・遇六日順延・銀行自動轉」
     fileprivate static func transferLinkRow(_ t: WealthFacts.TransferRule, out: Bool, masked mk: Bool) -> WealthCardLinkRow {
-        let title: String = out ? "轉給 " + t.toName : "來自 " + t.fromName
-        let trailing: String = out ? WealthCardText.plain(t.amount, code: t.code, masked: mk)
-                                   : WealthCardText.signed(t.amount, out: false, code: t.code, masked: mk)
+        let title: String = transferLinkTitle(t, out: out)
+        let trailing: String = transferLinkTrailing(t, out: out, masked: mk)
         // 轉出、轉進兩組各自一個 ForEach；id 照樣分開（同一條兩邊都碰到這個帳戶時也不撞）
         let rowId: String = "tr-" + t.id.uuidString + (out ? "" : "-in")
         var row = WealthCardLinkRow(id: rowId, icon: "arrow.left.arrow.right", tint: 0x2F7FE8, title: title,
-                                    detail: t.cycleText + "・" + t.modeText, trailing: trailing,
+                                    detail: transferLinkDetail(t), trailing: trailing,
                                     trailingTone: out ? nil : MoneyTone.good, open: .transferRule(t.id))
         row.editTransferRuleId = t.id
         return row
+    }
+
+    /// [v25.583] ④ 那一列的標題：同一個帳戶兩格互換「換匯 台幣 → USD」；兩個帳戶照舊「轉給 存錢」「來自 薪轉」
+    fileprivate static func transferLinkTitle(_ t: WealthFacts.TransferRule, out: Bool) -> String {
+        if t.isSameAccount {
+            return "換匯 " + WealthTransferText.codeName(t.code) + " → " + WealthTransferText.codeName(t.toCode)
+        }
+        return out ? "轉給 " + t.toName : "來自 " + t.fromName
+    }
+
+    /// [v25.583] ④ 那一列右邊：轉出那一組「20,000」（同幣別，照舊）／「9,600 → US$300.00」（換匯）；
+    /// 轉進那一組照對方收到的幣別「+25,000」「+US$300.00」。遮住＝••••（照舊）
+    fileprivate static func transferLinkTrailing(_ t: WealthFacts.TransferRule, out: Bool, masked mk: Bool) -> String {
+        if mk { return WealthCardText.dots }
+        if out {
+            return WealthTransferText.pair(t.amount, code: t.code, to: t.toAmount, toCode: t.toCode)
+        }
+        return WealthCardText.signed(t.toAmount, out: false, code: t.toCode, masked: false)
+    }
+
+    /// [v25.583] ④ 那一列第二行：「每月 1 日・遇六日順延・銀行自動轉」（照當天＝沒有中間那段：「每週五・銀行自動轉」照舊）
+    fileprivate static func transferLinkDetail(_ t: WealthFacts.TransferRule) -> String {
+        var parts: [String] = [t.cycleText]
+        if let h = t.holidayText, !h.isEmpty { parts.append(h) }
+        parts.append(t.modeText)
+        return parts.joined(separator: "・")
     }
 
     /// [v25.577] ④ 定期轉帳的先後：每週的在前（照星期幾，日 1…六 7）→ 每月照幾日（31＝最後一天排最後）→ 建立的先後（order 不重複，
