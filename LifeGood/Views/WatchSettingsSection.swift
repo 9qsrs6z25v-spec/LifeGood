@@ -1,4 +1,5 @@
 import SwiftUI
+import Combine
 
 // MARK: - 設定頁「Apple Watch」段（手錶 v1，v25.574；只屬於主 App；watch/judge.md §2.16、§6.3、§6.5、§6.6；
 //         watch/build/v1/brief.md G1-7）
@@ -18,6 +19,14 @@ import SwiftUI
 //   • 旅行（下一站、打卡、記外幣）［開］：出發前 7 天到回來那天把今天、明天的站送到手錶（④ 旅行、錶面下一場）；
 //     關掉＝今天明天的站不送、出發倒數也拿掉（WatchPhoneSettings.sendTrip 同一個鍵；沒設定過＝開）
 //   • 小字多一句：旅行只送站名、時間、地址、電話、天氣；不送備註、照片、同行者
+// [手錶 v5] v25.582（watch/build/v5/brief.md G1-3；judge §2.16、§8 v5 做好標準 5；brief §1-2、§1-3）：
+//   • 手錶版已安裝時多一列「開始跑步時」：每次問／用手錶記／用 iPhone 記（WatchRunStarter.choice，UserDefaults.standard，
+//     只這支 iPhone；健康頁「▶ 開始跑步」勾「記住我的選擇」存的同一個；改回「每次問」就又會問）
+//   • 那一列的小字：手錶說有一趟沒存成 →「手錶上有 1 趟沒存進 Apple 健康」；不然「手錶上次跑完 06:45」
+//     （WatchRunFlags.lastRanAt＝手錶那一趟結束的時間；不同天「10/21 22:10」）；都沒有寫怎麼用。
+//     打開這一段、手錶送「我跑完了」「沒存成」（WatchRunFlags.changed）時重讀
+//   • 小字多一句：用手錶記時 iPhone 不會多記一筆；手錶跑完會叫 iPhone 馬上帶進健康頁
+//   • 第一列照舊「手錶版已安裝・上次送到手錶 09:24・6 KB」；SettingsView.swift 一行不動
 // 智慧型堆疊（v7b）這一版不放。
 // 改了開關：寫 App Group（WatchPhoneSettings 同一組鍵）→ bridge.settingsChanged() 重組重送。
 
@@ -35,6 +44,12 @@ struct WatchSettingsSection: View {
     /// 會議細節裡的部屬名字（沒設定過＝這支 iPhone 不是加入別人的共享就開）
     @State private var showOwnerNames =
         WatchPhoneSettings.showOwnerNames(isShareParticipant: CloudKitManager.shared.isShareParticipant)
+    /// [v5] 開始跑步時（每次問／用手錶記／用 iPhone 記）：onAppear 才讀 WatchRunStarter.choice（@MainActor，不在初值碰）
+    @State private var runChoice: WatchRunStarter.Choice = .ask
+    /// [v5] 手錶說有一趟沒存進 Apple 健康（WatchRunFlags 只碰 UserDefaults、沒有 actor：初值直接讀）
+    @State private var runUnsaved = WatchRunFlags.hasUnsaved(now: Date())
+    /// [v5] 手錶上次跑完（那一趟結束的時間）
+    @State private var runLastRanAt: Date? = WatchRunFlags.lastRanAt
 
     var body: some View {
         Section {
@@ -42,6 +57,9 @@ struct WatchSettingsSection: View {
                 shareRow
             }
             statusRow
+            if bridge.isWatchAppInstalled {
+                runRow
+            }
             moneyToggle
             barcodeToggle
             tripToggle
@@ -66,6 +84,29 @@ struct WatchSettingsSection: View {
         rowLabel(icon: "applewatch", color: .indigo,
                  title: bridge.isWatchAppInstalled ? "手錶版已安裝" : "手錶版還沒裝",
                  subtitle: statusSubtitle)
+    }
+
+    /// [v5] 開始跑步時：每次問／用手錶記／用 iPhone 記（健康頁「▶ 開始跑步」、跑步畫面〔開始〕照這個走）
+    private var runRow: some View {
+        Picker(selection: $runChoice) {
+            ForEach(WatchRunStarter.Choice.allCases) { c in
+                Text(c.title).tag(c)
+            }
+        } label: {
+            rowLabel(icon: "figure.run", color: .orange,
+                     title: WatchRunStarter.settingsRowTitle, subtitle: runSubtitle)
+        }
+        .pickerStyle(.menu)
+        .onAppear {
+            runChoice = WatchRunStarter.choice
+            refreshRunFlags()
+        }
+        .onChange(of: runChoice) { _, c in
+            WatchRunStarter.setChoice(c)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: WatchRunFlags.changed)) { _ in
+            refreshRunFlags()
+        }
     }
 
     private var moneyToggle: some View {
@@ -117,6 +158,12 @@ struct WatchSettingsSection: View {
         }
     }
 
+    /// [v5] 重讀手錶跑步的旗子（打開這一段、WatchRunFlags.changed）
+    private func refreshRunFlags() {
+        runUnsaved = WatchRunFlags.hasUnsaved(now: Date())
+        runLastRanAt = WatchRunFlags.lastRanAt
+    }
+
     private var diagnosticsRow: some View {
         Text(diagnosticsText)
             .font(.caption)
@@ -150,6 +197,13 @@ struct WatchSettingsSection: View {
         guard bridge.isWatchAppInstalled else { return Self.installHint }
         guard let at = bridge.lastSentAt else { return "還沒送過" }
         return "上次送到手錶 " + Self.sentTime(at, now: Date()) + "・" + Self.kilobytes(bridge.lastSentBytes)
+    }
+
+    /// [v5]「手錶上有 1 趟沒存進 Apple 健康」／「手錶上次跑完 06:45」（不同天「10/21 22:10」）／怎麼用
+    private var runSubtitle: String {
+        if runUnsaved { return Self.runUnsavedNote }
+        if let t = runLastRanAt { return Self.runLastPrefix + Self.sentTime(t, now: Date()) }
+        return Self.runHint
     }
 
     /// [v2] 還沒連結（或格式不對，不會送）／開著／關著。跟組包看同一個（WatchPhoneSettings.carrierBarcode）；
@@ -191,10 +245,16 @@ struct WatchSettingsSection: View {
     private static let tripOn = "出發前 7 天到回來那天送到手錶；天氣由 iPhone 抓"
     private static let tripOff = "不送：手錶上沒有旅行那一頁、也不寫出發倒數"
 
+    /// [v5] 開始跑步時那一列的小字
+    private static let runUnsavedNote = "手錶上有 1 趟沒存進 Apple 健康"
+    private static let runLastPrefix = "手錶上次跑完 "
+    private static let runHint = "選「用手錶記」：健康頁按開始，手錶自己打開準備頁"
+
     private static let footnote =
         "卡名、卡費金額、存摺、淨資產、部屬請假、完整號碼不會送到手錶。手腕放下時手錶上的金額一律遮起來。"
         + "手機條碼預設不送；發票驗證碼永遠不送。"
         + "旅行只送站名、時間、地址、電話、天氣；不送備註、照片、同行者。"
         + "會議主題會出現在錶面與通知上。"
+        + "跑步選「用手錶記」時，iPhone 不會多記一筆；手錶跑完會叫 iPhone 馬上帶進健康頁。"
         + "錶面上至少放一格 LifeGood，數字才會自己跟上；只放在智慧型堆疊的話，要打開手錶 App 一次才會更新。"
 }

@@ -27,6 +27,13 @@ import Combine
 // • 路線晚到、這次才補上的（applyWatchRefresh）補同樣幾樣：切段、分段（還沒有才補）、名字（你沒改過才換）、亮點（還沒算過才算）；
 //   路線不是這次補上的一行都不動（以前帶進來的不重算）。
 // • 不重複兩筆：手錶那一筆只由手錶寫進 Apple 健康；帶進來的有 healthKitUUID，push 第一行就擋（規則不動）。
+//
+// [手錶 v5] v25.582（watch/judge.md §5.7 最後一段、§8 v5 做好標準 6；watch/build/v5/brief.md G1-2；sim_v5.py §7）：
+// • 手錶跑完送「我跑完了」（WatchBridge 只寫 WatchRunFlags：編號＋收到的時間）→ 健康頁打開、回前景、收到 WatchRunFlags.changed
+//   叫 syncForWatchRun：不等 15 分鐘——已經在 LifeGood（或帳上不再帶進來）的編號先拿掉；剩下的有空字串（手錶讀不到編號）、
+//   或 Apple 健康已經找得到（fetchWorkouts(uuids:)，還沒同步到 iPhone 的 Apple 健康就找不到）才同步一次；同步完帶進來的拿掉。
+//   找不到就等下次回前景再找；24 小時後 WatchRunFlags.pending 自己不給了（交給原本的 15 分鐘自動同步）。
+// • 亮點比較的那一堆改叫 WorkoutFacts.highlightPool（iPhone 存檔 makeSession 也用同一支；v4 adjudicate §4-3 的相反方向）。
 
 /// [v25.554] 存檔前完整的點（還沒簡化）：只放記憶體一下，寫進 Apple 健康時拿走（judge §6 v4「用簡化前的點」）。
 /// WorkoutFacts.makeSession 放進來（按完成、救回中途存檔都走它），HealthSyncCenter.push 拿走；最多留 4 趟。
@@ -150,6 +157,33 @@ final class HealthSyncCenter: ObservableObject {
         guard isEnabled, hk.isAvailable, !syncing else { return }
         guard WorkoutFacts.healthSyncDue(lastSync: lastSyncDate, now: Date()) else { return }
         await sync(store: store)
+    }
+
+    /// [手錶 v5] 手錶說「我跑完了」（WatchRunFlags 有 24 小時內的編號）：不等 15 分鐘，先找那一筆、到了就同步一次。
+    /// 健康頁打開、回前景、收到 WatchRunFlags.changed 叫（sim_v5.py sync_for_watch_plan、after_sync_clear）
+    func syncForWatchRun(store: LifeStore) async {
+        guard isEnabled, hk.isAvailable, !syncing else { return }
+        let now = Date()
+        let ids = WatchRunFlags.pending(now: now)
+        guard !ids.isEmpty else { return }
+        let knownBefore = knownUUIDs(store)
+        // 另一條路（15 分鐘自動同步、立即同步）早就帶進來了，或帳上「不再帶進來」：拿掉、不為它同步
+        let already = ids.filter { !$0.isEmpty && knownBefore.contains($0) }
+        WatchRunFlags.clear(already)
+        let remaining = ids.filter { !already.contains($0) }
+        guard !remaining.isEmpty else { return }
+        var go = remaining.contains("")
+        if !go {
+            // 還沒同步到 iPhone 的 Apple 健康就找不到
+            let found = await hk.fetchWorkouts(uuids: remaining)
+            go = !found.isEmpty
+        }
+        // 都還找不到：下次回前景再找（24 小時內）
+        guard go else { return }
+        await sync(store: store)
+        // await 之後才讀 store：帶進來的（或不再帶進來的）編號、空字串拿掉（sim_v5.py after_sync_clear）
+        let known = knownUUIDs(store)
+        WatchRunFlags.clear(remaining.filter { $0.isEmpty || known.contains($0) })
     }
 
     /// 立即同步（設定小頁「立即同步」、打開開關之後）：不跳任何權限框（新的權限走 requestAccess）
@@ -326,13 +360,9 @@ final class HealthSyncCenter: ObservableObject {
     /// [手錶 v4] 算亮點時比較的那一堆：拿掉跟這一趟同一次出門的（同一類運動、時間對得上 WorkoutFacts.sameOuting）——
     /// 同一趟 iPhone 也按了「開始運動」、還沒〔合成一筆〕的那一筆早幾秒開始，不拿掉的話手錶這一趟會把它當成「上一次」
     /// （「第 13 次・差不多」、量差一點的假新紀錄）。這一趟自己（同一個 id）highlights 本來就不比
+    /// [手錶 v5] 規則搬到 WorkoutFacts.highlightPool（iPhone 存檔 makeSession 也用同一支），這裡照叫
     private static func highlightPool(for s: WorkoutSession, among sessions: [WorkoutSession]) -> [WorkoutSession] {
-        let end = WorkoutFacts.endDate(s)
-        let sport = s.primarySport
-        return sessions.filter { o in
-            guard o.id != s.id, WorkoutFacts.sportsMatch(o.primarySport, sport) else { return true }
-            return !WorkoutFacts.sameOuting(aStart: s.date, aEnd: end, bStart: o.date, bEnd: WorkoutFacts.endDate(o))
-        }
+        WorkoutFacts.highlightPool(for: s, among: sessions)
     }
 
     /// [手錶 v4] 帶進來那一趟算哪一種「有路線的運動」（跑、走、騎、登山）；不是有氧、別種運動是 nil

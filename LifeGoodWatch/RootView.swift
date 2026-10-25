@@ -20,6 +20,7 @@ import SwiftUI
 //   • 跑步（WorkoutManager.phase 不是 idle：準備、倒數、跑步中、存檔中、不到 1 分鐘、摘要）整個畫面換成 RunFlowView——
 //     不是彈出頁，跑步中打開 App、手腕放下再抬起來、當機接回都直接回到跑步那一頁（judge §2.0「正在跑步→跑步中」）。
 //     彈出頁、錶面點進來、scenePhase 照舊掛在最外層。
+// [手錶 v5] v25.582（watch/build/v5/brief.md §2）：第二層多「這週」（RunWeekView）、「那一趟」（RunDetailView）。
 
 struct RootView: View {
     @ObservedObject private var model = WatchModel.shared
@@ -96,6 +97,10 @@ struct RootView: View {
             TripStopDetail(stopId: id)
         case .weatherSource:
             TripWeatherSourcePage()
+        case .runWeek:
+            RunWeekView()
+        case .runDetail(let id):
+            RunDetailView(runId: id)
         }
     }
 

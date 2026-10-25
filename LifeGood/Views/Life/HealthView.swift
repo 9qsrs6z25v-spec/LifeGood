@@ -67,6 +67,22 @@ import Combine
 //   • 收 lifegood://life/health?id=<UUID>（「今天（大）」小工具運動那一行；DeepLinkRouter.requestHealthSession）：.onDeepLinkHealthSession，
 //     跑步全螢幕開著不動、那一趟已經刪掉停在健康頁、已經在看那一趟不動；彈出頁開著先收掉，0.45 秒後（同 presentRunCover）再開成果頁。
 //     不擋訂閱（看成果頁免費）。還是一個 .sheet(item:)＋一個 .fullScreenCover(item:)。
+//
+// [手錶 v5，v25.582]（watch/build/v5/brief.md G2-1～G2-3；judge §2.12、§5.7 最後一段、§8 v5 做好標準 5、6）：
+//   • 手錶跑完送「我跑完了」（WatchBridge 寫 WatchRunFlags）：打開頁面、回到前景、關掉彈出頁、收到 WatchRunFlags.changed
+//     （這頁在畫面上、App 在前景、沒蓋著彈出頁）時先叫 HealthSyncCenter.syncForWatchRun（找到那一筆就同步，不等 15 分鐘），
+//     再照舊 syncIfDue（剛同步過 lastSync 是新的，它自己不再跑）。
+//   • 手錶說有一趟存不進 Apple 健康：最上面一行「手錶上有 1 趟沒存進 Apple 健康，打開手錶上的 LifeGood 再存一次」
+//     （HealthWatchUnsavedRow，不能按；WatchRunFlags.hasUnsaved，出現、回前景、旗子一變都重看）。
+//   • 「▶ 開始跑步」照 WatchRunStarter.route（sim_v5 §8）：戴著手錶先問（HealthSheet.runChoice → WatchRunChoiceSheet）、
+//     記住手錶就直接叫手錶（startOnWatch：HKHealthStore.startWatchApp(toHandle:)，手錶打開準備頁、不自己開跑）、
+//     其他照舊開 iPhone 跑步全螢幕。**選手錶那條路不碰 RunTracker、不開 runCover：iPhone 不會多記一筆。**
+//     叫的時候開始列下面一行灰字「正在叫醒手錶…」→「已經在手錶上打開準備頁，在手錶上按〔開始〕」；叫不醒跳
+//     「沒叫醒手錶（…），可以改用 iPhone 記」〔改用 iPhone 記〕〔好〕（掛在開始列那一區，這一區只有這一個提示框）。
+//     選 iPhone、〔改用 iPhone 記〕都記下時間（WatchRunStarter.notePhoneChosen：跑步畫面〔開始〕10 分鐘內不再問、不再叫手錶）。
+//   • 開始列大鈕：記住用手錶記時多一個 applewatch（HealthStartRow.watchMark）。
+//   • 跑步畫面〔開始〕交給手錶時（RunTrackingView 自己關掉全螢幕）：回到這頁開始列下面那一行講一聲（onWatchStarted）。
+//   • 生命週期那幾個修飾器收進 lifecycle(_:)，body 不再加長。還是一個 .sheet(item:)＋一個 .fullScreenCover(item:)。
 
 // MARK: - 彈出頁
 
@@ -82,6 +98,8 @@ private enum HealthSheet: Identifiable {
     case appleHealth(UUID)
     /// 健康里程碑：nil＝新增
     case milestone(UUID, LifeMilestone?)
+    /// [手錶 v5] 「這一趟用哪個記？」（戴著手錶按「▶ 開始跑步」；要開始的運動）
+    case runChoice(UUID, WorkoutSport)
 
     var id: UUID {
         switch self {
@@ -90,6 +108,7 @@ private enum HealthSheet: Identifiable {
         case .goal(let id): return id
         case .appleHealth(let id): return id
         case .milestone(let id, _): return id
+        case .runChoice(let id, _): return id
         }
     }
 }
@@ -97,6 +116,44 @@ private enum HealthSheet: Identifiable {
 /// [v25.555] 跑步畫面（全螢幕）：每次打開都是新的 id（.fullScreenCover(item:)，同 HealthSheet 每次帶新的 UUID）
 private struct HealthRunCover: Identifiable {
     let id = UUID()
+}
+
+/// [手錶 v5] 叫不醒手錶（WatchRunStarter.startOnWatch 回的那一句）：提示框〔改用 iPhone 記〕〔好〕
+private struct HealthWatchFailure: Identifiable {
+    let id = UUID()
+    /// 「沒叫醒手錶（…），可以改用 iPhone 記」（WatchRunStarter.failedText 組好的）
+    let message: String
+}
+
+/// [手錶 v5] 健康頁最上面那一行（judge §2.12）：手錶上有一趟存不進 Apple 健康、留在手錶上。只是說明，不能按；
+/// 手錶〔再存一次〕存好（ranWorkout）或 7 天沒消息就不出現（WatchRunFlags.hasUnsaved）
+private struct HealthWatchUnsavedRow: View {
+    let pal: TripBoardPalette
+
+    private var shape: RoundedRectangle {
+        RoundedRectangle(cornerRadius: 12, style: .continuous)
+    }
+
+    var body: some View {
+        let c = pal.notice(.late)
+        return HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(c.icon)
+                .accessibilityHidden(true)
+            Text(WatchRunFlags.unsavedBanner)
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(c.text)
+                .fixedSize(horizontal: false, vertical: true)
+                .multilineTextAlignment(.leading)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(c.fill, in: shape)
+        .overlay { shape.stroke(c.stroke, lineWidth: 0.75) }
+        .accessibilityElement(children: .combine)
+    }
 }
 
 /// 最近運動的一列：一趟＋它的卡（page.recent[i] 對 page.recentItems[i]，item.id == session.id）
@@ -190,6 +247,15 @@ struct HealthView: View {
     /// [v25.388] 複製到現在之後的短暫提示（新的一筆排到最上面，不講一聲會以為沒反應）
     @State private var copiedNote: String?
     @State private var copiedNoteTask: Task<Void, Never>?
+    /// [手錶 v5] 最上面「手錶上有 1 趟沒存進 Apple 健康…」那一行（WatchRunFlags.hasUnsaved；出現、回前景、旗子一變才重看）
+    @State private var watchUnsaved = false
+    /// [手錶 v5] 開始列下面那一行灰字（「正在叫醒手錶…」「已經在手錶上打開準備頁…」）；nil＝不顯示
+    @State private var watchNote: String?
+    @State private var watchNoteTask: Task<Void, Never>?
+    /// [手錶 v5] 正在叫手錶（再按一次不再叫）
+    @State private var watchStarting = false
+    /// [手錶 v5] 叫不醒手錶：「沒叫醒手錶（…），可以改用 iPhone 記」〔改用 iPhone 記〕〔好〕
+    @State private var watchFailure: HealthWatchFailure?
 
     /// 「＋」選單裡補記的四種有氧（重訓另外一顆）
     private static let logSports: [WorkoutSport] = HealthPageData.cardioSports
@@ -205,35 +271,47 @@ struct HealthView: View {
 
     // MARK: 主體
 
-    // 修飾器鏈拆兩段（捲動頁一段、彈出頁與生命週期一段），閉包裡只呼叫具名函式：body 一個運算式不要太大（坑 #7）
+    // 修飾器鏈拆三段（捲動頁一段、彈出頁一段、生命週期一段），閉包裡只呼叫具名函式：body 一個運算式不要太大（坑 #7）
     var body: some View {
         NavigationStack {
-            ScrollViewReader { proxy in
-                scrollPage(proxy)
-            }
-            // [v25.554] 彈出頁關掉、回到這頁：Apple 健康 15 分鐘沒同步就同步（開著彈出頁時回到前景不同步，見 sceneChanged）
-            .sheet(item: $sheet, onDismiss: { sheetDismissed() }) { s in
-                sheetView(s).appStores()
-            }
-            // [v25.555] 跑步畫面全螢幕（往下滑不會收掉）；關掉時剛跑完那張卡亮一下、看要不要同步 Apple 健康
-            .fullScreenCover(item: $runCover, onDismiss: { runCoverDismissed() }) { _ in
-                runScreen.appStores()
-            }
-            .premiumLockAlert(isPresented: $showPremiumAlert)
-            .task(id: taskKey) { rebuild() }
-            // 打開頁面（每次出現）：救回 scan＋Apple 健康 15 分鐘沒同步就同步
-            .task { await pageOpened() }
+            lifecycle(presentedPage)
+        }
+    }
+
+    /// 捲動頁＋彈出頁（一個 .sheet(item:)＋一個 .fullScreenCover(item:)）＋整頁重算、打開頁面
+    private var presentedPage: some View {
+        ScrollViewReader { proxy in
+            scrollPage(proxy)
+        }
+        // [v25.554] 彈出頁關掉、回到這頁：Apple 健康 15 分鐘沒同步就同步（開著彈出頁時回到前景不同步，見 sceneChanged）
+        .sheet(item: $sheet, onDismiss: { sheetDismissed() }) { s in
+            sheetView(s).appStores()
+        }
+        // [v25.555] 跑步畫面全螢幕（往下滑不會收掉）；關掉時剛跑完那張卡亮一下、看要不要同步 Apple 健康
+        .fullScreenCover(item: $runCover, onDismiss: { runCoverDismissed() }) { _ in
+            runScreen.appStores()
+        }
+        .premiumLockAlert(isPresented: $showPremiumAlert)
+        .task(id: taskKey) { rebuild() }
+        // 打開頁面（每次出現）：救回 scan＋[手錶 v5] 手錶跑完那一筆＋Apple 健康 15 分鐘沒同步就同步
+        .task { await pageOpened() }
+    }
+
+    /// [手錶 v5] 生命週期那幾個收在這裡（body 不再加長）
+    private func lifecycle<V: View>(_ v: V) -> some View {
+        v
             // Published 一訂閱就送目前的值；之後只在開始、暫停、繼續、結束時送
             .onReceive(RunTracker.shared.$phase) { p in phaseChanged(p) }
             // [v25.557] 鎖定畫面／靈動島的跑步卡點進來（冷啟動 onAppear、已經在這頁 onChange 都收）
             .onDeepLinkHealthRun { openRunFromLink() }
             // [健康 v7b] 「今天（大）」小工具運動那一行點進來（lifegood://life/health?id=…）：打開那一趟的成果頁
             .onDeepLinkHealthSession { openSessionFromLink() }
+            // [手錶 v5] 手錶送來「我跑完了」「沒存成」（WatchBridge 寫好旗子、主執行緒發）
+            .onReceive(NotificationCenter.default.publisher(for: WatchRunFlags.changed)) { _ in watchFlagsChanged() }
             .onAppear { pageAppeared() }
             .onChange(of: scenePhase) { _, phase in sceneChanged(phase) }
             // 離開頁面時把還在倒數的提示收掉，不要留一個醒著的 Task
             .onDisappear { pageDisappeared() }
-        }
     }
 
     /// 捲動頁本身：大標「健康」、底色、⓪ 記錄中條、右上兩顆
@@ -269,20 +347,24 @@ struct HealthView: View {
 
     /// [v25.552] 救回：App 一打開已經 scan 過（LifeGoodApp），這裡重複呼叫什麼都不做。
     /// [v25.554] 接著 Apple 健康：開著、離上次同步 15 分鐘以上才同步（syncIfDue 自己判斷；不跳權限框）
+    /// [手錶 v5] syncIfDue 之前先 syncForWatchRun：手錶說「我跑完了」（24 小時內）就不等 15 分鐘，找到那一筆就同步
     private func pageOpened() async {
         await RunRecoveryCenter.shared.scan()
+        await HealthSyncCenter.shared.syncForWatchRun(store: lifeStore)
         await HealthSyncCenter.shared.syncIfDue(store: lifeStore)
     }
 
     private func pageAppeared() {
         onScreen = true
         refreshDay()
+        refreshWatchUnsaved()
     }
 
     private func pageDisappeared() {
         onScreen = false
         clearCopiedNote()
         clearFlash()
+        clearWatchNote()
     }
 
     /// 記錄器開始、暫停、繼續、結束：只記「在不在記錄」（一樣就不寫，免得多重畫一次）
@@ -297,8 +379,24 @@ struct HealthView: View {
     private func sceneChanged(_ phase: ScenePhase) {
         guard phase == .active else { return }
         refreshDay()
+        refreshWatchUnsaved()
         guard onScreen, sheet == nil, runCover == nil else { return }
         autoSync()
+    }
+
+    /// [手錶 v5] 手錶送來「我跑完了」「沒存成」（WatchRunFlags.changed）：最上面那一行跟著變；
+    /// 這頁在畫面上、App 在前景、沒蓋著彈出頁／全螢幕就馬上看要不要同步（同回到前景）。
+    /// 背景被手錶叫醒時不讀 Apple 健康（鎖著讀不到），回到前景 sceneChanged 再看
+    private func watchFlagsChanged() {
+        refreshWatchUnsaved()
+        guard scenePhase == .active, onScreen, sheet == nil, runCover == nil else { return }
+        autoSync()
+    }
+
+    /// [手錶 v5] 「手錶上有 1 趟沒存進 Apple 健康…」要不要出現（一樣就不寫，免得多重畫一次）
+    private func refreshWatchUnsaved() {
+        let on = WatchRunFlags.hasUnsaved(now: Date())
+        if on != watchUnsaved { watchUnsaved = on }
     }
 
     /// [v25.554] 彈出頁關掉（成果頁、設定小頁、跑完…）：這頁還在畫面上就看要不要同步（syncIfDue 自己判斷 15 分鐘、正在同步就不動）
@@ -343,10 +441,14 @@ struct HealthView: View {
         flashId = nil
     }
 
-    /// 排到下一輪主執行緒才同步（不跟關彈出頁、回到前景那一次畫面更新搶同一輪；syncIfDue 的 store 寫入都在 await 之後）
+    /// 排到下一輪主執行緒才同步（不跟關彈出頁、回到前景那一次畫面更新搶同一輪；syncIfDue 的 store 寫入都在 await 之後）。
+    /// [手錶 v5] 先 syncForWatchRun（手錶說跑完了：找到那一筆就同步、不等 15 分鐘），同步過的話 syncIfDue 自己不再跑
     private func autoSync() {
         let store = lifeStore
-        Task { await HealthSyncCenter.shared.syncIfDue(store: store) }
+        Task {
+            await HealthSyncCenter.shared.syncForWatchRun(store: store)
+            await HealthSyncCenter.shared.syncIfDue(store: store)
+        }
     }
 
     /// 回到前景、切回這頁：日期變了才改（改了 taskKey 就變，看板重算）
@@ -374,11 +476,17 @@ struct HealthView: View {
     private func sections(_ p: HealthPageData, proxy: ScrollViewProxy) -> some View {
         let checks = checkKinds(p)
         return VStack(spacing: 20) {
-            HealthBoard(data: p, onGoalTap: { openGoal() })
-                .padding(.horizontal, 16)
-            if !runActive {
-                HealthStartRow(data: p.start) { s in start(s) }
+            // [手錶 v5] 最上面那一行跟看板包一個 Group（VStack 直接的子 view 維持 10 個以內；Group 裡的照樣各自排、間距不變）
+            Group {
+                if watchUnsaved {
+                    HealthWatchUnsavedRow(pal: pal)             // [手錶 v5] 手錶上有一趟沒存進 Apple 健康
+                        .padding(.horizontal, 16)
+                }
+                HealthBoard(data: p, onGoalTap: { openGoal() })
                     .padding(.horizontal, 16)
+            }
+            if !runActive {
+                startSection(p)
             }
             if !checks.isEmpty {
                 checkSection(checks)
@@ -406,13 +514,170 @@ struct HealthView: View {
 
     // MARK: 動作（訂閱照待決定 8）
 
-    /// 開始列：大鈕或小膠囊。運動先寫進上次用的那一種（RunTrackingView 一打開就讀這個鍵）；記錄中不改
+    /// 開始列：大鈕或小膠囊。運動先寫進上次用的那一種（RunTrackingView 一打開就讀這個鍵）；記錄中不改。
+    /// [手錶 v5] 接著照 WatchRunStarter.route（sim_v5 §8）：戴著手錶先問、記住手錶直接叫手錶、其他照舊開 iPhone 跑步全螢幕
+    /// （沒手錶、iPad、Mac、重訓、其他有氧、記住 iPhone 都是 .phone，跟以前一模一樣）
     private func start(_ s: WorkoutSport) {
         guard subscription.isPremium else { showPremiumAlert = true; return }
         if !RunTracker.shared.isActive, let rs = s.runSport, rs != lastSport {
             lastSport = rs
         }
-        runCover = HealthRunCover()
+        switch WatchRunStarter.route(sport: s, now: Date(), fromRunScreen: false) {
+        case .ask: sheet = .runChoice(UUID(), s)
+        case .watch: startOnWatch(s)
+        case .phone: runCover = HealthRunCover()
+        }
+    }
+
+    // MARK: [手錶 v5] 用手錶記／用 iPhone 記
+
+    /// 開始列大鈕標 applewatch：戴著手錶、記住「用手錶記」
+    private var startWatchMark: Bool {
+        WatchRunStarter.watchReady && WatchRunStarter.choice == .watch
+    }
+
+    /// 「這一趟用哪個記？」選了（WatchRunChoiceSheet 已經先收起來、下一個 runloop 才叫這裡）：
+    /// 勾了記住就存（只這支 iPhone）；手錶 → 叫手錶；iPhone → 記下時間（跑步畫面〔開始〕不再問）、開跑步全螢幕
+    private func choicePicked(_ c: WatchRunStarter.Choice, remember: Bool, sport: WorkoutSport) {
+        if remember { WatchRunStarter.setChoice(c) }
+        switch c {
+        case .watch:
+            startOnWatch(sport)
+        case .phone, .ask:
+            WatchRunStarter.notePhoneChosen(now: Date())
+            presentRunCoverAfterChoice()
+        }
+    }
+
+    /// 選了 iPhone：那一頁 dismiss() 時 sheet 已經回到 nil、收的動畫還在跑——跟 presentRunCover 一樣等 0.45 秒再開全螢幕
+    /// （同一個 view 上 sheet 還在收時開 fullScreenCover 會開不起來）
+    private func presentRunCoverAfterChoice() {
+        guard sheet == nil else {
+            presentRunCover()
+            return
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) {
+            reopenRunCoverAfterSheet()
+        }
+    }
+
+    /// 用手錶記：叫醒手錶 LifeGood 打開準備頁（WatchRunStarter.startOnWatch → HKHealthStore.startWatchApp(toHandle:)；
+    /// 手錶不自己開跑）。**iPhone 這邊不碰 RunTracker、不開 runCover：不會多記一筆。**
+    /// 正在叫的時候再按不再叫一次。成功：開始列下面「已經在手錶上打開準備頁…」；叫不醒：提示框〔改用 iPhone 記〕〔好〕
+    private func startOnWatch(_ s: WorkoutSport) {
+        guard !watchStarting else { return }
+        watchStarting = true
+        showWatchNote(WatchRunStarter.startingText, hideAfter: nil)
+        let began = Date()
+        Task { @MainActor in
+            let failure = await WatchRunStarter.startOnWatch(sport: s)
+            watchStarting = false
+            guard let failure else {
+                showWatchNote(WatchRunStarter.startedMessage(syncOn: HealthSyncCenter.shared.isEnabled),
+                              hideAfter: watchNoteSeconds)
+                return
+            }
+            await Self.settle(since: began)
+            clearWatchNote()
+            guard runCover == nil else { return }               // 等的時候改用 iPhone 開了跑步畫面：不再跳
+            guard sheet == nil else {                           // 等的時候又開了別的彈出頁：提示框跳不出來，改寫在開始列下面
+                showWatchNote(failure, hideAfter: 6)
+                return
+            }
+            watchFailure = HealthWatchFailure(message: failure)
+        }
+    }
+
+    /// 剛收掉「用哪個記」那一頁就失敗（手錶不在身邊時很快就回來）：等收的動畫跑完（同 presentRunCover 的 0.45 秒）再跳提示框
+    private static func settle(since began: Date) async {
+        let wait = min(0.5, 0.5 - Date().timeIntervalSince(began))
+        guard wait > 0 else { return }
+        try? await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000))
+    }
+
+    /// 成功那一句留多久（Apple 健康同步沒開那一句比較長，多留一下）
+    private var watchNoteSeconds: Double {
+        HealthSyncCenter.shared.isEnabled ? 3.5 : 6
+    }
+
+    /// 跑步畫面〔開始〕交給手錶了（RunTrackingView 自己關掉全螢幕、iPhone 什麼都沒記）：開始列下面那一行講一聲
+    private func watchStartedFromRunScreen() {
+        showWatchNote(WatchRunStarter.startedMessage(syncOn: HealthSyncCenter.shared.isEnabled),
+                      hideAfter: watchNoteSeconds)
+    }
+
+    /// 開始列下面那一行灰字（hideAfter nil＝一直留著，等叫手錶的結果）；VoiceOver 唸出來
+    private func showWatchNote(_ text: String, hideAfter seconds: Double?) {
+        watchNoteTask?.cancel()
+        watchNoteTask = nil
+        withAnimation(.easeOut(duration: 0.2)) { watchNote = text }
+        UIAccessibility.post(notification: .announcement, argument: text)
+        guard let seconds else { return }
+        let nanos = UInt64(min(max(seconds, 0), 30) * 1_000_000_000)
+        watchNoteTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: nanos)
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeOut(duration: 0.25)) { watchNote = nil }
+        }
+    }
+
+    private func clearWatchNote() {
+        watchNoteTask?.cancel()
+        watchNoteTask = nil
+        watchNote = nil
+    }
+
+    /// 〔改用 iPhone 記〕：記下剛選了 iPhone（跑步畫面〔開始〕10 分鐘內不再問、不再叫手錶）；
+    /// 提示框收掉那一下先過，再開跑步全螢幕（訂閱、上次用的運動在 start 已經擋過、寫好）
+    private func usePhoneAfterWatchFailed() {
+        WatchRunStarter.notePhoneChosen(now: Date())
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+            reopenRunCoverAfterSheet()
+        }
+    }
+
+    private var watchFailureBinding: Binding<Bool> {
+        Binding(get: { watchFailure != nil }, set: { if !$0 { watchFailure = nil } })
+    }
+
+    /// 「沒叫醒手錶（…），可以改用 iPhone 記」
+    private var watchFailureTitle: String {
+        watchFailure?.message ?? ""
+    }
+
+    @ViewBuilder
+    private var watchFailureButtons: some View {
+        Button(WatchRunStarter.usePhoneTitle) { usePhoneAfterWatchFailed() }
+        Button(WatchRunStarter.okTitle, role: .cancel) { }
+    }
+
+    /// ② 開始列＋叫手錶那一行灰字。「沒叫醒手錶…」提示框掛在這一區（這一區只有這一個提示框；刪除掛在最近運動、丟掉掛在要確認）
+    private func startSection(_ p: HealthPageData) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HealthStartRow(data: p.start, watchMark: startWatchMark) { s in start(s) }
+            if let note = watchNote {
+                watchNoteLine(note)
+            }
+        }
+        .padding(.horizontal, 16)
+        .alert(watchFailureTitle, isPresented: watchFailureBinding, presenting: watchFailure) { _ in
+            watchFailureButtons
+        }
+    }
+
+    /// 「正在叫醒手錶…」「已經在手錶上打開準備頁，在手錶上按〔開始〕」：灰字、手錶圖示（不能按）
+    private func watchNoteLine(_ note: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Image(systemName: "applewatch")
+                .font(.footnote.weight(.semibold))
+                .accessibilityHidden(true)
+            Text(note)
+                .font(.footnote.weight(.semibold))
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+        }
+        .foregroundStyle(.secondary)
+        .transition(.opacity)
     }
 
     /// 記錄中條「回到跑步」：不擋訂閱（在跑的那一趟一定讓你存完）。[v25.555] 全螢幕
@@ -703,17 +968,29 @@ struct HealthView: View {
             HealthAppleHealthSheet()
         case .milestone(_, let m):
             milestoneSheet(m)
+        case .runChoice(_, let sport):
+            runChoiceSheet(sport)
+        }
+    }
+
+    /// [手錶 v5] 「這一趟用哪個記？」（半頁）：WatchRunChoiceSheet 已經先收起來、下一個 runloop 才交出選的
+    private func runChoiceSheet(_ sport: WorkoutSport) -> some View {
+        WatchRunChoiceSheet(sport: sport) { c, remember in
+            choicePicked(c, remember: remember, sport: sport)
         }
     }
 
     /// [v25.555] 跑步畫面（全螢幕的內容）：按住結束後 RunTrackingView 在下一個 runloop 才交出那一趟，
     /// 這裡同步寫好 store＋排 Apple 健康（WorkoutActions.save）；它接著把同一個全螢幕換成成果頁（剛跑完），不關全螢幕
+    /// [手錶 v5] 跑步畫面〔開始〕交給手錶時（它自己關掉全螢幕）：onWatchStarted 在開始列下面講一聲
     private var runScreen: some View {
         let store = lifeStore
-        return RunTrackingView { session in
+        return RunTrackingView(onFinish: { session in
             WorkoutActions.save(session, store: store)
             justFinished(session.id)
-        }
+        }, onWatchStarted: {
+            watchStartedFromRunScreen()
+        })
     }
 
     /// 補記／編輯：WorkoutEditorView 的 onSave 已經在關掉之後下一輪才呼叫

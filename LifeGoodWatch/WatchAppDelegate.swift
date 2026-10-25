@@ -1,6 +1,7 @@
 import Foundation
 import WatchKit
 import WatchConnectivity
+import HealthKit
 
 // MARK: - 手錶 App 的 delegate（手錶 v1，v25.574；watch/judge.md §5.3-4、§7.8-7；watch/build/v1/brief.md G2-2）
 //
@@ -18,6 +19,10 @@ import WatchConnectivity
 // [手錶 v4，v25.580] 跑到一半 App 當掉、被系統關掉：系統重開 App 時叫 handleActiveWorkoutRecovery（Apple「Running workout
 // sessions」）→ WorkoutManager.recoverActiveWorkout 用 recoverActiveWorkoutSession 接回運動 session，從 RunStash 補每公里、
 // 暫停、路線點，頁首「已接回」（judge §2.11「當機重開後」；watch/build/v4/brief.md G2-4）。其他一行沒動。
+//
+// [手錶 v5，v25.582] iPhone 健康頁選「用手錶記」（HKHealthStore.startWatchApp(toHandle:)）：系統叫醒手錶 App、交來這一趟的設定
+// → handle(_ workoutConfiguration:) → WorkoutManager.openPrepFromPhone：**打開準備頁，不自己開跑**（主控定案；
+// Apple 範例是直接開始，我們讓你在手錶上看到 GPS、權限再按〔開始〕）。跑步中、倒數中不動（watch/build/v5/brief.md §1）。
 
 final class WatchAppDelegate: NSObject, WKApplicationDelegate {
 
@@ -104,6 +109,14 @@ final class WatchAppDelegate: NSObject, WKApplicationDelegate {
     func handleActiveWorkoutRecovery() {
         Task { @MainActor in
             WorkoutManager.shared.recoverActiveWorkout()
+        }
+    }
+
+    /// [手錶 v5] iPhone 叫手錶開始（WKApplicationDelegate.handle(_:)，watchOS 7 起）：打開準備頁（運動照 iPhone 選的），不自己開跑
+    func handle(_ workoutConfiguration: HKWorkoutConfiguration) {
+        let type = workoutConfiguration.activityType
+        Task { @MainActor in
+            WorkoutManager.shared.openPrepFromPhone(sport: WorkoutManager.watchSport(for: type))
         }
     }
 }

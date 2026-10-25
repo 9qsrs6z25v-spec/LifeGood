@@ -26,6 +26,9 @@ import WidgetKit
 // [手錶 v4] v25.580（watch/judge.md §2.0、§2.9；watch/build/v4/brief.md §2）：
 //   • 頁多 ③ 跑步（WatchPage.run，② 錢之後；一直都在）
 //   • 回前景叫 WorkoutManager.appBecameActive（跑完 15 分鐘以上的摘要收起來、沒接回的跑步中存檔變成沒存成的那一趟）
+// [手錶 v5] v25.582（watch/judge.md §2.13、§3.1；watch/build/v5/brief.md §2）：
+//   • 第二層多「這週」（WatchRoute.runWeek：點 ③ 看板）、「那一趟」（WatchRoute.runDetail(id)：這週點一列）
+//   • 錶面「這週跑步」點進來：圓形、長方形、一行字 lifegood://life/health → ③ 跑步；角落跑者 lifegood://life/health/run → 準備頁
 
 /// 垂直翻頁的頁（v1：① 今天、② 錢；v6：④ 旅行；v4：③ 跑步）
 enum WatchPage: Hashable {
@@ -53,6 +56,10 @@ enum WatchRoute: Hashable {
     case tripStop(UUID)
     /// [v6] 天氣資料出處（「 Weather ›」；judge §2.14）
     case weatherSource
+    /// [v5] 這週（點 ③ 看板；judge §2.13）
+    case runWeek
+    /// [v5] 那一趟（這週點一列；WatchRunRow.id：iPhone 那一趟的編號，或「w-<手錶編號>」）
+    case runDetail(String)
 }
 
 /// 彈出頁（sheet(item:)）
@@ -268,6 +275,15 @@ final class WatchModel: ObservableObject {
             selection = showsMoney ? .money : .today
             path = []
             sheet = .record
+        case .health:
+            // [v5] 錶面「這週跑步」圓形、長方形、一行字：③ 跑步
+            selection = .run
+            path = []
+        case .healthRun:
+            // [v5] 錶面「這週跑步」角落跑者：③ 跑步＋準備頁（直接到〔開始〕；跑步中、摘要開著時不動）
+            selection = .run
+            path = []
+            openRunPrep()
         default:
             selection = .today
             path = []
@@ -307,6 +323,24 @@ final class WatchModel: ObservableObject {
         if path.last == .barcode {
             path.removeLast()
         }
+    }
+
+    // MARK: [v5] 跑步：這週、那一趟、角落跑者
+
+    /// ③ 看板 → 這週
+    func openRunWeek() {
+        path = [.runWeek]
+    }
+
+    /// 這週點一列 → 那一趟
+    func openRunDetail(_ id: String) {
+        path = [.runWeek, .runDetail(id)]
+    }
+
+    /// 角落跑者：準備頁（上一次用的運動；沒有＝這週主角、跑步）
+    func openRunPrep() {
+        let hero = package?.runWeek.flatMap { WatchSport(rawValue: $0.sport) }
+        WorkoutManager.shared.openPrep(sport: WatchRunPrefs.lastSport ?? hero ?? .run)
     }
 
     /// 頁面上點一列（「還有 N 件 ›」、「今天要留意」的卡費、生日）

@@ -26,6 +26,11 @@ import Foundation
 //    手錶 App 的 WorkoutManager／RouteRecorder 把 HKWorkout、CLLocation 換成這幾個。
 // ⚠️ 隱私（judge §6.1）：跑步中頁首只寫時段名「晨跑」（不寫地名）；路線小圖是 0～1 相對形狀（不畫地圖、不送 iPhone）；
 //    心率只在手錶上顯示，不存進 iPhone 的 LifeGood。
+//
+// [手錶 v5] v25.582（watch/build/v5/brief.md §2）：只加不改——
+//   • WatchRunHome 多幾個數字欄（km、goalKm、runs、streakWeeks、daysLeft、hasData、dayKm、ownExtra；都有預設值）：
+//     「這週」7 根小柱、錶面「這週跑步」小格用同一份（WatchRunWeekText，Shared/WatchRunWeekText.swift）。home() 的規則一行沒改
+//   • WatchRunLogEntry 多 heartAvg、heartMax、shape（選填；「那一趟」的心率、小圖：手錶自己記的那幾趟）
 
 // MARK: - 運動種類
 
@@ -669,6 +674,25 @@ struct WatchRunHome: Equatable {
     var startSport: WatchSport
     /// 準備頁最下面「這週 9.4／20 公里」；從來沒收過 nil
     var prepWeekLine: String?
+
+    // MARK: [v5] 數字（「這週」小柱、錶面小格用；home() 一起算好，View 不自己加減）
+
+    /// 這週主角運動的公里（＝big 那個數）
+    var km: Double = 0
+    /// 每週目標（沒設 nil）
+    var goalKm: Double? = nil
+    /// 這週次數（主角運動）
+    var runs: Int = 0
+    /// 連續幾週（頁首那個數；0＝不寫）
+    var streakWeeks: Int = 0
+    /// 剩幾天（含今天）
+    var daysLeft: Int = 0
+    /// 收過 iPhone 的這週跑步（false＝大字「—」）
+    var hasData: Bool = false
+    /// 週一到週日每天的公里（7 個；主角運動；iPhone 的＋手錶自己加的）
+    var dayKm: [Double] = []
+    /// 手錶自己記、iPhone 還沒處理過、這週算進來的那幾趟（任何運動；「這週」清單補上去）
+    var ownExtra: [WatchRunLogEntry] = []
 }
 
 /// 準備頁那一行（judge §2.10 五種狀態，一次只寫最要緊的一句）
@@ -823,10 +847,14 @@ enum WatchRunText {
         let dayHead = "這週第 \(todayIndex + 1) 天"
         guard let w = package?.runWeek, let hero = WatchSport(rawValue: w.sport) else {
             let sport = lastSport ?? .run
-            return WatchRunHome(header: dayHead, verbLine: "這週" + WatchRunFacts.verb(sport) + "了",
-                                big: "—", showsUnit: false, line3: noWeek, line4: nil, line4IsGreen: false,
-                                compactLine: noWeek, flags: Array(repeating: false, count: 7), todayIndex: todayIndex,
-                                sport: sport, startSport: sport, prepWeekLine: nil)
+            var empty = WatchRunHome(header: dayHead, verbLine: "這週" + WatchRunFacts.verb(sport) + "了",
+                                     big: "—", showsUnit: false, line3: noWeek, line4: nil, line4IsGreen: false,
+                                     compactLine: noWeek, flags: Array(repeating: false, count: 7), todayIndex: todayIndex,
+                                     sport: sport, startSport: sport, prepWeekLine: nil)
+            // [v5]
+            empty.daysLeft = daysLeft
+            empty.dayKm = Array(repeating: 0, count: 7)
+            return empty
         }
         let sameWeek = abs(w.weekStart.timeIntervalSince(week.start)) < 1
         var km = sameWeek ? max(0, w.doneKm) : 0
@@ -835,6 +863,12 @@ enum WatchRunText {
         if sameWeek && w.dayKm.count == 7 {
             flags = w.dayKm.map { $0 > 0 }
         }
+        // [v5] 每天公里（iPhone 的這週那一份＋下面手錶自己加的）
+        var dayKm = Array(repeating: 0.0, count: 7)
+        if sameWeek && w.dayKm.count == 7 {
+            dayKm = w.dayKm.map { $0.isFinite ? max(0, $0) : 0 }
+        }
+        var extra: [WatchRunLogEntry] = []
         let counted = sameWeek ? w.weekCounted : false
         var streak = 0
         if sameWeek {
@@ -852,11 +886,15 @@ enum WatchRunText {
             guard e.end.timeIntervalSince(e.start) >= WatchRunMath.shortSeconds else { continue }
             used.insert(id)
             movedThisWeek = true
+            extra.append(e)
             guard e.sport == hero.rawValue else { continue }
             km += max(0, e.meters) / 1000
             runs += 1
             let i = WatchRunFacts.weekdayIndex(e.start)
-            if i >= 0 && i < 7 { flags[i] = true }
+            if i >= 0 && i < 7 {
+                flags[i] = true
+                dayKm[i] += max(0, e.meters) / 1000
+            }
         }
         if movedThisWeek && !counted {
             streak += 1
@@ -888,10 +926,20 @@ enum WatchRunText {
                 if runs > 0 { compact += "・還差 " + WatchRunFormat.kmNumber(g - km) + " 公里" }
             }
         }
-        return WatchRunHome(header: header, verbLine: "這週" + verb + "了", big: WatchRunFormat.kmNumber(km),
-                            showsUnit: true, line3: line3, line4: line4, line4IsGreen: green, compactLine: compact,
-                            flags: flags, todayIndex: todayIndex, sport: hero, startSport: lastSport ?? hero,
-                            prepWeekLine: prepWeek)
+        var out = WatchRunHome(header: header, verbLine: "這週" + verb + "了", big: WatchRunFormat.kmNumber(km),
+                               showsUnit: true, line3: line3, line4: line4, line4IsGreen: green, compactLine: compact,
+                               flags: flags, todayIndex: todayIndex, sport: hero, startSport: lastSport ?? hero,
+                               prepWeekLine: prepWeek)
+        // [v5] 數字（「這週」小柱、錶面小格）
+        out.km = km
+        out.goalKm = goal
+        out.runs = runs
+        out.streakWeeks = streak
+        out.daysLeft = daysLeft
+        out.hasData = true
+        out.dayKm = dayKm
+        out.ownExtra = extra
+        return out
     }
 
     // MARK: 準備頁
@@ -1051,6 +1099,11 @@ struct WatchRunLogEntry: Codable, Equatable, Identifiable {
     var meters: Double
     /// 存進 Apple 健康了（沒存成的不算進 ③：iPhone 永遠帶不進來）
     var saved: Bool
+    /// [v5] 平均、最高心率（「那一趟」♥ 那一行；只在手錶上，不送 iPhone）
+    var heartAvg: Double? = nil
+    var heartMax: Double? = nil
+    /// [v5] 路線形狀（0～1000、最多 40 點；「那一趟」小圖。WatchRunWeekText.compactShape 從摘要那份小圖抽）
+    var shape: [WatchRunShapeXY]? = nil
 }
 
 enum WatchRunLog {

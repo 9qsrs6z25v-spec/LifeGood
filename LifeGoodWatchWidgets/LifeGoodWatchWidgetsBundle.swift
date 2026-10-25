@@ -15,6 +15,7 @@ import WidgetKit
 // 少了整格會變成系統的英文提示（critic 🔴5、judge §7.8-10）。
 // 智慧型堆疊自己往上排、watchOS 26 才有的卡與控制項都是 v7b，這版不寫。
 // [手錶 v2] v25.576：多「＋ 記一筆」（AddWidget.swift；圓形、角落；點了開記帳台）。
+// [手錶 v5] v25.582：多「這週跑步」（RunWeekWidget.swift；四個形狀；角落跑者點了直接到準備頁）。
 
 @main
 struct LifeGoodWatchWidgetsBundle: WidgetBundle {
@@ -22,5 +23,6 @@ struct LifeGoodWatchWidgetsBundle: WidgetBundle {
         NextUpWidget()
         SpentWidget()
         AddWidget()
+        RunWeekWidget()
     }
 }

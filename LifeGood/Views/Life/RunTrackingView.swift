@@ -75,6 +75,17 @@ import CoreLocation
 //   兩個都是 UserDefaults（不發布）：optionTick 加一讓選單的勾重算（同 keepAwakeTick）。
 // • GPS 燈、gpsFresh 不動（暫停中回 true；自動暫停時記錄器照常更新誤差，燈照常）；
 //   存檔那幾支（finishNow、holdFinished、confirmEnd、finishTapped、abandon、startRun）、地圖與跟隨一行沒動。
+//
+// [手錶 v5，v25.582] 〔開始〕也問「用手錶記／用 iPhone 記」（watch/build/v5/brief.md G2-4；judge §8 v5 做好標準 5）：
+// • startTapped 照 WatchRunStarter.route(sport:now:fromRunScreen: true)：戴著手錶先問（RunWatchChoice → WatchRunChoiceSheet，
+//   .sheet(item:)＋.appStores()）、記住手錶直接叫手錶、其他照舊（原本那段搬進 beginPhoneStart：倒數或 startRun）。
+//   健康頁剛選過 iPhone（含叫不醒手錶後〔改用 iPhone 記〕，10 分鐘內：WatchRunStarter.phoneChosenRecently）直接用 iPhone 記，
+//   不再問、不再叫手錶（記住手錶、手錶剛叫不醒時不會再叫一次）。
+// • 用手錶記：WatchRunStarter.startOnWatch（HKHealthStore.startWatchApp(toHandle:)，手錶打開準備頁、不自己開跑）；
+//   叫的時候開始圓鈕下面第二行寫「正在叫醒手錶…」。成功 → onWatchStarted（健康頁講一聲）＋dismiss() 關掉整個全螢幕：
+//   **這一趟交給手錶，記錄器一行都沒碰，iPhone 不會多記一筆**。叫不醒 → 「沒叫醒手錶（…），可以改用 iPhone 記」
+//   〔改用 iPhone 記〕＝beginPhoneStart〔好〕（提示框掛在地圖那一層，不疊在上面那排、面板、按住結束那三個上）。
+// • startRun、存檔那幾支一行沒動。
 
 struct RunTrackingView: View {
     @EnvironmentObject var lifeStore: LifeStore
@@ -87,6 +98,8 @@ struct RunTrackingView: View {
     /// 結束後把成果交出去（呼叫端負責存檔與寫回 Apple 健康）。
     /// [v25.555] 結束後下一個 runloop 呼叫一次、呼叫端同步寫好 store；這個畫面不 dismiss，自己換成成果頁
     let onFinish: (WorkoutSession) -> Void
+    /// [手錶 v5] 〔開始〕交給手錶了（叫醒手錶成功；這個畫面接著自己 dismiss）：呼叫端講一聲。iPhone 什麼都沒記
+    let onWatchStarted: () -> Void
 
     /// 地圖鏡頭：init 就算好開場位置
     @State private var camera: MapCameraPosition
@@ -138,12 +151,20 @@ struct RunTrackingView: View {
     @State private var endConfirm = false
     /// [v25.557] 切「每公里語音」「自動暫停」時加一：讓選單的勾重算（兩個都記在 UserDefaults，不發布）
     @State private var optionTick = 0
+    /// [手錶 v5] 戴著手錶按〔開始〕：「這一趟用哪個記？」（nil＝沒在問）
+    @State private var watchChoice: RunWatchChoice?
+    /// [手錶 v5] 正在叫手錶（再按〔開始〕不再叫一次；開始圓鈕下面寫「正在叫醒手錶…」）
+    @State private var watchStarting = false
+    /// [手錶 v5] 叫不醒手錶那一句（nil＝沒在問）
+    @State private var watchFailure: RunWatchFailure?
 
     /// [v25.551] 開場鏡頭在這裡就算好：手機記得的上一個位置＋這種運動記住的遠近；
     /// 手機不記得就先放台北車站 3 公里（onAppear 再試上一趟紀錄的起點）
+    /// [手錶 v5] onWatchStarted 有預設（什麼都不做）
     @MainActor
-    init(onFinish: @escaping (WorkoutSession) -> Void) {
+    init(onFinish: @escaping (WorkoutSession) -> Void, onWatchStarted: @escaping () -> Void = {}) {
         self.onFinish = onFinish
+        self.onWatchStarted = onWatchStarted
         let shared = RunTracker.shared
         let sport = shared.isActive ? shared.sport : RunSport.remembered
         let distance = sport.rememberedFollowDistance
@@ -169,11 +190,15 @@ struct RunTrackingView: View {
 
     private var runScreen: some View {
         ZStack {
-            mapLayer
+            watchFailurePrompt(mapLayer)                                     // [手錶 v5] 叫不醒手錶（地圖這一層只有這一個提示框）
             overlayStack
             if let n = countdown {
                 RunCountdownOverlay(value: n, onSkip: { skipCountdown() }, onCancel: { cancelCountdown() })
             }
+        }
+        // [手錶 v5] 戴著手錶按〔開始〕先問（半頁；內容最外層 .appStores()）
+        .sheet(item: $watchChoice) { c in
+            watchChoiceSheet(c).appStores()
         }
         .mapScope(mapScope)
         .onAppear { appear() }
@@ -601,6 +626,7 @@ struct RunTrackingView: View {
 
     /// 第二行：沒有權限、還在找位置時換成一句說明（樣稿③-B1／B2），其他時候是上一趟
     private var introSecond: String? {
+        if watchStarting { return WatchRunStarter.startingText }             // [手錶 v5] 正在叫醒手錶…
         if gpsDenied { return "沒有位置權限，記不了路線" }
         if gpsLevel == .searching { return "可以先按開始出發，訊號好了才開始畫線" }
         return intro?.last
@@ -986,14 +1012,98 @@ struct RunTrackingView: View {
 
     // MARK: 開始（倒數 3-2-1，judge §4.1 第 5 列）
 
-    /// 按「開始」：倒數開著就先倒數，關著直接開始。位置被拒時按不到（圓鈕 disabled），這裡再擋一次
+    /// 按「開始」。位置被拒時按不到（圓鈕 disabled），這裡再擋一次。
+    /// [手錶 v5] 照 WatchRunStarter.route（fromRunScreen: true；sim_v5 §8）：戴著手錶先問、記住手錶直接叫手錶、其他照舊用 iPhone 記。
+    /// 健康頁剛選過 iPhone（10 分鐘內，含叫不醒手錶後〔改用 iPhone 記〕）直接用 iPhone 記：記住手錶時不會再叫一次叫不醒的手錶
     private func startTapped() {
+        guard !tracker.isActive, countdown == nil, canStart, !watchStarting else { return }
+        let s = WorkoutSport(pickedSport)
+        let now = Date()
+        if WatchRunStarter.phoneChosenRecently(now: now) {
+            beginPhoneStart()
+            return
+        }
+        switch WatchRunStarter.route(sport: s, now: now, fromRunScreen: true) {
+        case .ask: watchChoice = RunWatchChoice(sport: s)
+        case .watch: startOnWatchFromRunScreen(s)
+        case .phone: beginPhoneStart()
+        }
+    }
+
+    /// [手錶 v5] 用 iPhone 記（原本 startTapped 的那段）：倒數開著就先倒數，關著直接開始
+    private func beginPhoneStart() {
         guard !tracker.isActive, countdown == nil, canStart else { return }
         if RunSport.countdownOn {
             beginCountdown()
         } else {
             startRun()
         }
+    }
+
+    // MARK: [手錶 v5] 用手錶記
+
+    /// 「這一趟用哪個記？」：WatchRunChoiceSheet 已經先收起來、下一個 runloop 才交出選的
+    private func watchChoiceSheet(_ c: RunWatchChoice) -> some View {
+        WatchRunChoiceSheet(sport: c.sport) { choice, remember in
+            watchChoicePicked(choice, remember: remember, sport: c.sport)
+        }
+    }
+
+    /// 勾了記住就存（只這支 iPhone）；手錶 → 叫手錶；iPhone → 記下時間（10 分鐘內再打開不再問）、照舊倒數或開始
+    private func watchChoicePicked(_ choice: WatchRunStarter.Choice, remember: Bool, sport: WorkoutSport) {
+        if remember { WatchRunStarter.setChoice(choice) }
+        switch choice {
+        case .watch:
+            startOnWatchFromRunScreen(sport)
+        case .phone, .ask:
+            WatchRunStarter.notePhoneChosen(now: Date())
+            beginPhoneStart()
+        }
+    }
+
+    /// 叫醒手錶 LifeGood 打開準備頁（手錶不自己開跑）。**記錄器一行都不碰：iPhone 不會多記一筆。**
+    /// 成功 → 呼叫端講一聲、關掉整個全螢幕；叫不醒 → 提示框〔改用 iPhone 記〕〔好〕
+    private func startOnWatchFromRunScreen(_ s: WorkoutSport) {
+        guard !watchStarting else { return }
+        watchStarting = true
+        let began = Date()
+        let done = onWatchStarted
+        Task { @MainActor in
+            let failure = await WatchRunStarter.startOnWatch(sport: s)
+            // 剛收掉「用哪個記」那一頁：成功也先等收的動畫跑完再關全螢幕（半頁還在收時關不掉全螢幕）
+            await Self.settle(since: began)
+            watchStarting = false
+            guard let failure else {
+                done()
+                dismiss()
+                return
+            }
+            watchFailure = RunWatchFailure(message: failure)
+        }
+    }
+
+    /// 剛收掉「用哪個記」那一頁就有結果（手錶不在身邊時很快就回來）：等收的動畫跑完再跳提示框、再關全螢幕
+    private static func settle(since began: Date) async {
+        let wait = min(0.5, 0.5 - Date().timeIntervalSince(began))
+        guard wait > 0 else { return }
+        try? await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000))
+    }
+
+    /// 「沒叫醒手錶（…），可以改用 iPhone 記」〔改用 iPhone 記〕〔好〕：掛在地圖那一層
+    /// （上面那排掛「放棄這一趟？」、面板掛「太短要存嗎？」、按住結束那一排掛「結束這一趟？」，同一個 view 不疊兩個 .alert）
+    private func watchFailurePrompt<V: View>(_ v: V) -> some View {
+        v.alert(watchFailureTitle, isPresented: watchFailureBinding, presenting: watchFailure) { _ in
+            Button(WatchRunStarter.usePhoneTitle) { beginPhoneStart() }
+            Button(WatchRunStarter.okTitle, role: .cancel) { }
+        }
+    }
+
+    private var watchFailureBinding: Binding<Bool> {
+        Binding(get: { watchFailure != nil }, set: { if !$0 { watchFailure = nil } })
+    }
+
+    private var watchFailureTitle: String {
+        watchFailure?.message ?? ""
     }
 
     /// 3 → 2 → 1 →「開始！」每秒震一下；「開始！」那一刻才 tracker.start，0.6 秒後蓋層收掉
@@ -1378,4 +1488,16 @@ struct RouteMapView: View {
             }
         }
     }
+}
+
+/// [手錶 v5] 跑步畫面〔開始〕先問「這一趟用哪個記？」：每次新的 id（.sheet(item:)）
+private struct RunWatchChoice: Identifiable {
+    let id = UUID()
+    let sport: WorkoutSport
+}
+
+/// [手錶 v5] 叫不醒手錶（WatchRunStarter.startOnWatch 回的那一句）
+private struct RunWatchFailure: Identifiable {
+    let id = UUID()
+    let message: String
 }

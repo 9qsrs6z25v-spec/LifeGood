@@ -12,6 +12,10 @@ import SwiftUI
 // • HealthStartRow：② 開始列（大綠鈕＋三顆小膠囊＋一句灰字；Mac 上換一行字）。
 // • HealthGoalSheet：每週目標小表單（5～100 公里、5 公里一格的轉盤＋「不設目標」）。
 //
+// [手錶 v5，v25.582] HealthStartRow 多 watchMark（watch/build/v5/brief.md G2-6）：記住「用手錶記」、這支 iPhone 配了裝好
+// LifeGood 的手錶時（HealthView 算好傳進來），大綠鈕「▶ 開始跑步」後面多一個 applewatch（白），VoiceOver 提示「會交給手錶記」。
+// init 的 watchMark 有預設 false（舊的呼叫照樣編得過）；其他一行沒動。
+//
 // 左右 16pt：HealthBoard、HealthStartRow 不含（照 VehicleCardBoard，呼叫端加）；HealthLiveStrip 自己含（釘在 safeAreaInset 裡）。
 // 版面照樣稿①-1／①-3（看板、開始列）、③-A1～A4（四種看板）、③-C6（記錄中條）。
 
@@ -384,11 +388,14 @@ struct HealthLiveStrip: View {
 /// ② 開始列（記錄中不出現：HealthView 不放它）
 struct HealthStartRow: View {
     let data: HealthStartData
+    /// [手錶 v5] 記住「用手錶記」（而且戴著手錶）：大鈕多一個 applewatch，按了交給手錶記
+    let watchMark: Bool
     /// 按了哪一種（大鈕是 data.sport，小膠囊是 data.others 裡的那一種）
     let onStart: (WorkoutSport) -> Void
 
-    init(data: HealthStartData, onStart: @escaping (WorkoutSport) -> Void) {
+    init(data: HealthStartData, watchMark: Bool = false, onStart: @escaping (WorkoutSport) -> Void) {
         self.data = data
+        self.watchMark = watchMark
         self.onStart = onStart
     }
 
@@ -417,7 +424,7 @@ struct HealthStartRow: View {
         Button {
             onStart(data.sport)
         } label: {
-            Label(startTitle, systemImage: "play.fill")
+            startLabel
                 .font(.headline.weight(.heavy))
                 .foregroundStyle(Color.white)
                 .lineLimit(1)
@@ -426,9 +433,29 @@ struct HealthStartRow: View {
                 .contentShape(Capsule())
         }
         .buttonStyle(MoneyPressStyle())
+        .accessibilityHint(startHint)
+    }
+
+    /// 「▶ 開始跑步」；[手錶 v5] 記住用手錶記時後面多一個白色 applewatch（VoiceOver 不唸圖示，改唸提示）
+    @ViewBuilder
+    private var startLabel: some View {
+        if watchMark {
+            HStack(spacing: 8) {
+                Label(startTitle, systemImage: "play.fill")
+                Image(systemName: "applewatch")
+                    .font(.headline)
+                    .foregroundStyle(Color.white)
+                    .accessibilityHidden(true)
+            }
+        } else {
+            Label(startTitle, systemImage: "play.fill")
+        }
     }
 
     private var startTitle: String { "開始" + data.sport.displayName }
+
+    /// [手錶 v5] VoiceOver：記住用手錶記時「會交給手錶記」
+    private var startHint: String { watchMark ? "會交給手錶記" : "" }
 
     /// 綠色膠囊底＋淡淡的綠影子（影子只掛在底上：掛在整顆鈕上，白字也會拖一圈綠影子變糊）
     private var startPill: some View {

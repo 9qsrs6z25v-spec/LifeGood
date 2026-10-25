@@ -32,6 +32,12 @@ import Foundation
 //   • 包多 runWeek（這週跑步：主角運動、這週公里、次數、目標、連續週數、每天公里、iPhone 處理過的手錶跑步編號 seen；選填）。
 //     只有數字與 Apple 健康編號：沒有地名、路線、心率、名字
 //   • WatchRunMeta：手錶寫進 Apple 健康那一筆的 LifeGood 附註（鍵、寫法）；手錶寫、iPhone 帶進來時讀，兩邊同一組
+// [手錶 v5] v25.582（watch/judge.md §2.12、§2.13、§3.1、§6.1、附錄 B；watch/build/v5/brief.md §2）：跑步——這週、錶面、老路線
+//   • WatchRunWeek 多 recent（這週那幾趟，最多 5 趟：名字兩種、時間、公里、秒數、⌚︎、0～1000 相對形狀最多 40 點、亮點字）、
+//     latest（最新一趟的亮點字，跨週也留著）。**沒有經緯度、沒有比例尺、沒有地點、沒有心率**（心率只在手錶自己記的那一份）
+//   • WatchRunRecent／WatchRunHighlight／WatchRunShapeXY：手錶自己的型別（WorkoutSession／WorkoutHighlights 照舊不准進包）
+//   • 手錶 → iPhone 的「我跑完了」ranWorkout（＋ranAt）、「沒存成」unsavedRun（WatchLink 鍵）
+//   • 錶面「這週跑步」小格的 kind（WatchWidgetKind.runWeek）；runWeek 變了重畫它（WatchPackageDiff）
 
 /// iPhone → 手錶的一整包（watch_v1.json）
 struct WatchPackage: Codable, Equatable, WidgetSnapshotPayload {
@@ -327,6 +333,72 @@ struct WatchRunWeek: Codable, Equatable {
     /// iPhone 處理過的手錶跑步 Apple 健康編號：這週帶進來的、合成用掉的、最近「不再帶進來」的（在 iPhone 刪掉的那一趟）。
     /// 手錶自己記的那一趟編號在這裡＝iPhone 已經算過（或你刪掉了），手錶不再自己加
     var seen: [String]
+
+    // MARK: [v5] 這週那幾趟、最新一趟的亮點（選填；v4 的 iPhone 送來的沒有）
+
+    /// 這週那幾趟（新到舊、最多 5 趟；跑走騎登山）：手錶「這週」清單、「那一趟」（WatchRunRecentBuilder.recent）
+    var recent: [WatchRunRecent]? = nil
+    /// 最新一趟（LifeGood 手錶記的、2 天內）的亮點字：手錶摘要「河濱老路線・第 12 次…」那兩行。跨週也留著
+    /// （週日晚上跑、週一才帶進 iPhone）。都沒有 nil（WatchRunRecentBuilder.latest）
+    var latest: WatchRunHighlight? = nil
+}
+
+/// [v5] 這週的一趟（iPhone 的 WatchRunRecentBuilder 組；手錶「這週」清單一列、「那一趟」）。
+/// 名字有兩種（抬手寫你取的、手腕放下寫時段名）；路線只有 0～1000 的相對形狀
+struct WatchRunRecent: Codable, Equatable, Identifiable {
+    /// iPhone 那一趟的編號（WorkoutSession.id）
+    var id: String
+    /// Apple 健康編號（手錶記的那一趟帶進來、或跟 iPhone 那一筆合成過的：手錶拿它對自己的 WatchRunLog）；沒有 nil
+    var workoutId: String? = nil
+    /// WatchSport.rawValue（run／walk／bike／hike）
+    var sport: String
+    /// 抬手：「河濱晨跑」（你取的名字，可能是地名；只在手錶 App 抬手出現）
+    var title: String
+    /// 手腕放下：「晨跑」（你自己取的名字換成時段名；judge §2.17）
+    var privateTitle: String
+    var start: Date
+    /// 這一種運動的公里（同一趟的動作加總）
+    var km: Double
+    /// 移動秒數（扣掉暫停）
+    var movingSeconds: Double
+    /// LifeGood 手錶記的（列尾 ⌚︎）
+    var byLifeGoodWatch: Bool = false
+    /// 路線形狀（0～1000、北在上、最多 40 點；沒有經緯度）；沒有路線 nil
+    var shape: [WatchRunShapeXY]? = nil
+    /// 這一趟的亮點（同一條路第幾次、破紀錄）；都沒有 nil
+    var highlight: WatchRunHighlight? = nil
+}
+
+/// [v5] 一趟的亮點字（iPhone 照 WorkoutSession.highlights 寫好：WorkoutFacts.routeCapsule／routeDeltaText／recordValueText；
+/// 手錶只排版，不重算）
+struct WatchRunHighlight: Codable, Equatable {
+    /// iPhone 那一趟的編號
+    var sessionId: String
+    /// Apple 健康編號（手錶摘要拿它認「是不是剛跑完的那一趟」）；沒有 nil
+    var workoutId: String? = nil
+    /// 那一趟開始的時間（「這週」那一行的「（今天）」）
+    var start: Date
+    /// 「河濱老路線・第 12 次」（同一條路第 2 次起才有；抬手）
+    var routeHead: String? = nil
+    /// 「老路線・第 12 次」（手腕放下：不寫地名）
+    var routePrivateHead: String? = nil
+    /// 「比上次快 42 秒」「比上次慢 15 秒」「跟上次差不多」；算不出來 nil
+    var routeDelta: String? = nil
+    /// 比上次快（「比上次快 42 秒」綠 5BD99A）；慢、差不多 false；沒有比 nil
+    var routeFaster: Bool? = nil
+    /// 「最快 5 公里 新紀錄 30:51（快 18 秒）」（破紀錄才有；只寫第一個）
+    var recordLine: String? = nil
+    /// 「最快 5 公里 30:51」（手錶「這週」那一行）
+    var recordShort: String? = nil
+}
+
+/// [v5] 路線形狀的一點：0～1000 的相對座標（北在上、等比例、置中）＋第幾段（暫停前後不連線）。
+/// 沒有經緯度、沒有比例尺：看得出形狀，看不出在哪裡
+struct WatchRunShapeXY: Codable, Equatable {
+    var x: Int
+    var y: Int
+    /// 第幾段（0 起）
+    var s: Int
 }
 
 /// [v4] 手錶寫進 Apple 健康那一筆的 LifeGood 附註（自訂 metadata；鍵不能用 HK 開頭）。
@@ -542,6 +614,16 @@ enum WatchLink {
     static let okGone = "gone"
     /// "already" 帶回來的時間
     static let checkInAtKey = "at"
+
+    // MARK: [v5] 我跑完了、沒存成（附錄 B）
+
+    /// 手錶 → iPhone：["ranWorkout": "<Apple 健康編號>", "ranAt": 結束秒]（transferUserInfo；iPhone 在旁邊再 sendMessage 一次、不等回話）。
+    /// 編號空字串＝存好了但讀不到編號（iPhone 照樣馬上同步一次）。〔再存一次〕存好也送這個（iPhone 順手清掉「沒存成」旗子）
+    static let ranWorkoutKey = "ranWorkout"
+    /// 那一趟結束的時間（1970 起的秒；iPhone 設定頁「手錶上次跑完 06:45」）
+    static let ranAtKey = "ranAt"
+    /// 手錶 → iPhone：["unsavedRun": 1]＝有一趟存不進 Apple 健康、留在手錶上；0＝沒有了（存好了、丟掉了、過期了）
+    static let unsavedRunKey = "unsavedRun"
 }
 
 /// 手錶小格的 kind（手錶小格 StaticConfiguration 與手錶 App／WatchSync 的 reloadTimelines(ofKind:) 都用這裡）
@@ -550,10 +632,12 @@ enum WatchWidgetKind {
     static let nextUp = "LifeGoodWatchNextUp"
     /// 已花（圓形、角落、一行字、長方形）
     static let spent = "LifeGoodWatchSpent"
-    /// 會跟著包變的小格（重畫用）。[v2]「＋ 記一筆」（add）不讀包、不用重畫，不在這裡
-    static let all = [nextUp, spent]
+    /// 會跟著包變的小格（重畫用）。[v2]「＋ 記一筆」（add）不讀包、不用重畫，不在這裡。[v5] 多「這週跑步」
+    static let all = [nextUp, spent, runWeek]
     /// [v2] ＋ 記一筆（圓形、角落；點了開記帳台）
     static let add = "LifeGoodWatchAdd"
+    /// [v5] 這週跑步（圓形、角落、一行字、長方形；包裡的 runWeek＋手錶自己記的 WatchRunLog）
+    static let runWeek = "LifeGoodWatchRunWeek"
 }
 
 // MARK: - 壓縮與解開（兩邊同一組編碼器）
@@ -584,6 +668,7 @@ enum WatchPackageDiff {
     /// 錢或 iPhone 的隱藏金額變了 → 已花。iPhone 決定要不要用 transferCurrentComplicationUserInfo、
     /// 手錶在背景收到新包時只重畫這幾種，都用這一支。
     /// [v6] 旅途中今天、明天的站變了（打卡、改站）也重畫下一場（旅途中「下一場」寫下一站）
+    /// [v5] 這週跑步變了 → 這週跑步
     static func widgetKinds(old: WatchPackage?, new: WatchPackage) -> [String] {
         guard let old else { return WatchWidgetKind.all }
         var kinds: [String] = []
@@ -593,6 +678,10 @@ enum WatchPackageDiff {
         }
         if old.money != new.money || old.phoneHidesAmounts != new.phoneHidesAmounts {
             kinds.append(WatchWidgetKind.spent)
+        }
+        // [v5] 這週跑步（iPhone 帶進來一趟、改目標、刪掉一趟）
+        if old.runWeek != new.runWeek {
+            kinds.append(WatchWidgetKind.runWeek)
         }
         return kinds
     }

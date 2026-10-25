@@ -146,6 +146,14 @@
 		A01B000001001601 /* WealthTransferPlans.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001601 /* WealthTransferPlans.swift */; };
 		A01B000001001603 /* WealthTransferNotices.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001603 /* WealthTransferNotices.swift */; };
 		A01B000001001605 /* WealthTransferFinds.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001605 /* WealthTransferFinds.swift */; };
+		A01B000001001606 /* WatchRunPhone.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001606 /* WatchRunPhone.swift */; };
+		A01B000001001607 /* WatchRunChoiceSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001607 /* WatchRunChoiceSheet.swift */; };
+		A01B000003000059 /* WatchRunWeekText.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000114 /* WatchRunWeekText.swift */; };
+		A01B000004000059 /* WatchRunWeekText.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000114 /* WatchRunWeekText.swift */; };
+		A01B000003000040 /* RunWeekView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000003000040 /* RunWeekView.swift */; };
+		A01B000003000041 /* RunDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000003000041 /* RunDetailView.swift */; };
+		A01B000003000042 /* StartRunIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000003000042 /* StartRunIntent.swift */; };
+		A01B000004000008 /* RunWeekWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000004000008 /* RunWeekWidget.swift */; };
 		A01B000001001593 /* NotificationActions.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001593 /* NotificationActions.swift */; };
 		A01B000001001582 /* WealthBoard.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001582 /* WealthBoard.swift */; };
 		A01B000001001583 /* WealthBoardScenes.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001583 /* WealthBoardScenes.swift */; };
@@ -483,6 +491,13 @@
 		A01A000001001601 /* WealthTransferPlans.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WealthTransferPlans.swift; sourceTree = "<group>"; };
 		A01A000001001603 /* WealthTransferNotices.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WealthTransferNotices.swift; sourceTree = "<group>"; };
 		A01A000001001605 /* WealthTransferFinds.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WealthTransferFinds.swift; sourceTree = "<group>"; };
+		A01A000001001606 /* WatchRunPhone.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchRunPhone.swift; sourceTree = "<group>"; };
+		A01A000001001607 /* WatchRunChoiceSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchRunChoiceSheet.swift; sourceTree = "<group>"; };
+		A01A000002000114 /* WatchRunWeekText.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchRunWeekText.swift; sourceTree = "<group>"; };
+		A01A000003000040 /* RunWeekView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunWeekView.swift; sourceTree = "<group>"; };
+		A01A000003000041 /* RunDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunDetailView.swift; sourceTree = "<group>"; };
+		A01A000003000042 /* StartRunIntent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StartRunIntent.swift; sourceTree = "<group>"; };
+		A01A000004000008 /* RunWeekWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunWeekWidget.swift; sourceTree = "<group>"; };
 		A01A000001001593 /* NotificationActions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationActions.swift; sourceTree = "<group>"; };
 		A01A000001001582 /* WealthBoard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WealthBoard.swift; sourceTree = "<group>"; };
 		A01A000001001583 /* WealthBoardScenes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WealthBoardScenes.swift; sourceTree = "<group>"; };
@@ -815,6 +830,7 @@
 				A01A000002000111 /* WatchText.swift */,
 				A01A000002000112 /* WatchTripText.swift */,
 				A01A000002000113 /* WatchRunText.swift */,
+				A01A000002000114 /* WatchRunWeekText.swift */,
 			);
 			path = Shared;
 			sourceTree = "<group>";
@@ -870,6 +886,7 @@
 				A01A000001001601 /* WealthTransferPlans.swift */,
 				A01A000001001603 /* WealthTransferNotices.swift */,
 				A01A000001001605 /* WealthTransferFinds.swift */,
+				A01A000001001606 /* WatchRunPhone.swift */,
 				A01A000001001593 /* NotificationActions.swift */,
 				A01A000001001594 /* WatchPackageBuilder.swift */,
 				A01A000001001595 /* WatchExtrasWriter.swift */,
@@ -1056,6 +1073,7 @@
 				A01A000001001100 /* WorkoutEditorView.swift */,
 				A01A000001001000 /* HealthView.swift */,
 				A01A000001001554 /* HealthBoard.swift */,
+				A01A000001001607 /* WatchRunChoiceSheet.swift */,
 				A01A000001001555 /* HealthBoardScenes.swift */,
 				A01A000001001556 /* WorkoutItems.swift */,
 				A01A000001001557 /* WorkoutListView.swift */,
@@ -1148,6 +1166,9 @@
 				A01A000003000037 /* RunPrepView.swift */,
 				A01A000003000038 /* RunSessionView.swift */,
 				A01A000003000039 /* RunSummaryView.swift */,
+				A01A000003000040 /* RunWeekView.swift */,
+				A01A000003000041 /* RunDetailView.swift */,
+				A01A000003000042 /* StartRunIntent.swift */,
 				A01A000003000004 /* Assets.xcassets */,
 				A01A000003000002 /* Info.plist */,
 				A01A000003000003 /* LifeGoodWatch.entitlements */,
@@ -1163,6 +1184,7 @@
 				A01A000004000005 /* NextUpWidget.swift */,
 				A01A000004000006 /* SpentWidget.swift */,
 				A01A000004000007 /* AddWidget.swift */,
+				A01A000004000008 /* RunWeekWidget.swift */,
 				A01A000004000002 /* Info.plist */,
 				A01A000004000003 /* LifeGoodWatchWidgets.entitlements */,
 			);
@@ -1408,6 +1430,8 @@
 				A01B000001001601 /* WealthTransferPlans.swift in Sources */,
 				A01B000001001603 /* WealthTransferNotices.swift in Sources */,
 				A01B000001001605 /* WealthTransferFinds.swift in Sources */,
+				A01B000001001606 /* WatchRunPhone.swift in Sources */,
+				A01B000001001607 /* WatchRunChoiceSheet.swift in Sources */,
 				A01B000001001593 /* NotificationActions.swift in Sources */,
 				A01B000001001594 /* WatchPackageBuilder.swift in Sources */,
 				A01B000001001595 /* WatchExtrasWriter.swift in Sources */,
@@ -1651,6 +1675,10 @@
 				A01B000003000037 /* RunPrepView.swift in Sources */,
 				A01B000003000038 /* RunSessionView.swift in Sources */,
 				A01B000003000039 /* RunSummaryView.swift in Sources */,
+				A01B000003000059 /* WatchRunWeekText.swift in Sources */,
+				A01B000003000040 /* RunWeekView.swift in Sources */,
+				A01B000003000041 /* RunDetailView.swift in Sources */,
+				A01B000003000042 /* StartRunIntent.swift in Sources */,
 				A01B000003000051 /* DayTimelineAttributes.swift in Sources */,
 				A01B000003000052 /* WidgetSnapshot.swift in Sources */,
 				A01B000003000053 /* WidgetLink.swift in Sources */,
@@ -1668,6 +1696,8 @@
 				A01B000004000005 /* NextUpWidget.swift in Sources */,
 				A01B000004000006 /* SpentWidget.swift in Sources */,
 				A01B000004000007 /* AddWidget.swift in Sources */,
+				A01B000004000059 /* WatchRunWeekText.swift in Sources */,
+				A01B000004000008 /* RunWeekWidget.swift in Sources */,
 				A01B000004000051 /* DayTimelineAttributes.swift in Sources */,
 				A01B000004000052 /* WidgetSnapshot.swift in Sources */,
 				A01B000004000053 /* WidgetLink.swift in Sources */,

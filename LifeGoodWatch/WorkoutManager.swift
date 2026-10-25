@@ -40,6 +40,16 @@ import WatchKit
 // [裁定] 手錶的自動暫停兩條路都聽：session 的 didGenerate，加上 builder 收到的事件（workoutBuilderDidCollectEvent 讀
 //   workoutEvents；研究 u3 §6.3 寫的是這一條，Apple 沒寫清楚 watchOS 26 走哪一條）。兩條都走 motionEvent：同一個事件來兩次、
 //   晚到的舊事件（時間不比上一個處理過的新）都不再處理，不會講兩次「自動暫停。」、不會多記一段暫停。當機接回時舊的事件不重播。
+//
+// [手錶 v5，v25.582]（watch/build/v5/brief.md §2；主控寫，對外名字凍結）：
+// • 「我跑完了」：存好一趟（saveLive）、〔再存一次〕存好（saveAgain）→ WatchSync.sendRanWorkout（Apple 健康編號＋結束時間；
+//   iPhone 健康頁回前景馬上同步）。存不進去（keepUnsaved）、沒接回變成沒存成（settleStaleCheckpoint）→ sendUnsavedRun(true)；
+//   沒存成那一趟被接回去接著跑（takeRecord）→ sendUnsavedRun(false)。WatchRunLog 一改就重畫錶面「這週跑步」
+// • WatchRunLogEntry 多存平均、最高心率與 40 點小圖（「那一趟」用；只在手錶上）
+// • openPrepFromPhone：iPhone「用手錶記」叫醒手錶（WatchAppDelegate.handle）→ 打開準備頁（不自己開跑）
+// • startFromActionButton／pauseFromActionButton／resumeFromActionButton：Ultra 動作按鈕（StartRunIntent.swift）——
+//   一按＝準備頁＋權限都好就直接 3、2、1（GPS 還沒找到也開始）；權限沒給、還沒問過就停在準備頁講清楚（judge §3.6）；
+//   動作＋側邊一起按＝暫停／繼續
 
 /// 跑步這一趟在哪一步（RootView 看它：不是 idle 就整個畫面換成跑步）
 enum RunPhase: Equatable {
@@ -442,6 +452,8 @@ final class WorkoutManager: NSObject, ObservableObject {
             do {
                 try await self.healthStore.delete(toDelete)
                 WatchRunLog.remove(id)
+                // [v5] 錶面「這週跑步」跟著少這一趟
+                WatchSync.reloadRunWeekWidget()
                 self.busy = false
                 self.problem = nil
                 self.finishSummary()
@@ -483,6 +495,56 @@ final class WorkoutManager: NSObject, ObservableObject {
         problem = nil
         summarySince = Date()
         phase = .summary
+    }
+
+    // MARK: [v5] iPhone 叫手錶、Ultra 動作按鈕（WatchAppDelegate、StartRunIntent 叫；主控寫）
+
+    /// iPhone「用手錶記」：打開準備頁（運動照 iPhone 選的），不自己開跑。摘要開著先收起來；已經在準備頁就只換運動；
+    /// 倒數中、跑步中、存檔中不動（judge §8 v5 做好標準 5：手錶自己打開準備頁、iPhone 不會多記一筆）
+    func openPrepFromPhone(sport: WatchSport) {
+        switch phase {
+        case .idle, .summary:
+            openPrep(sport: sport)
+        case .preparing:
+            setSport(sport)
+        default:
+            break
+        }
+    }
+
+    /// Ultra 動作按鈕一按（StartRunIntent.perform）：準備頁 → 權限都好就直接 3、2、1（GPS 還沒找到也開始，同準備頁「可以先開始」）。
+    /// 健康沒給、健康或位置還沒問過：停在準備頁、那一行講清楚（judge §3.6）。等到真的開始（或不在倒數了，最多 8 秒）才回：
+    /// Apple 規定 30 秒內要開始運動 session
+    func startFromActionButton(sport: WatchSport) async {
+        switch phase {
+        case .idle, .summary:
+            openPrep(sport: sport)
+        case .preparing:
+            setSport(sport)
+        default:
+            return
+        }
+        guard phase == .preparing else { return }
+        refreshReadiness()
+        let route = RouteRecorder.shared
+        let line = WatchRunText.prepLine(health: health, location: route.access, lowPower: lowPower,
+                                         gpsFound: route.gpsFound)
+        guard line.canStart, !line.asksFirst else { return }
+        beginCountdown()
+        for _ in 0..<16 {
+            guard phase == .countdown else { return }
+            try? await Task.sleep(nanoseconds: 500_000_000)
+        }
+    }
+
+    /// Ultra 動作＋側邊一起按（PauseRunIntent）：跑步中才暫停（自動暫停中也算你按的暫停）
+    func pauseFromActionButton() {
+        pause()
+    }
+
+    /// Ultra 動作＋側邊一起按（ResumeRunIntent）：你按的暫停中才繼續
+    func resumeFromActionButton() {
+        resume()
     }
 
     // MARK: 系統（G2：WatchAppDelegate、WatchModel 叫）
@@ -554,8 +616,8 @@ final class WorkoutManager: NSObject, ObservableObject {
         return c
     }
 
-    /// 接回的 session 是哪一種運動（不是這四種的當跑步）
-    private static func watchSport(for type: HKWorkoutActivityType) -> WatchSport {
+    /// 接回的 session、iPhone 叫手錶開始（[v5] WatchAppDelegate.handle）是哪一種運動（不是這四種的當跑步）
+    static func watchSport(for type: HKWorkoutActivityType) -> WatchSport {
         switch type {
         case .walking:
             return .walk
@@ -1031,6 +1093,8 @@ final class WorkoutManager: NSObject, ObservableObject {
             WatchRunLog.upsert(logEntry(r, saved: w != nil), now: now)
             RunStash.clearCurrent()
             play(.success)
+            // [v5] 我跑完了：iPhone 健康頁回前景馬上同步、先找這一筆（錶面「這週跑步」跟著重畫）
+            WatchSync.shared.sendRanWorkout(workoutId: r.workoutId, endedAt: r.end ?? now)
         } catch {
             session?.end()
             keepUnsaved(&r, reason: error.localizedDescription)
@@ -1051,6 +1115,8 @@ final class WorkoutManager: NSObject, ObservableObject {
         problem = "Apple 健康：" + reason
         WatchRunLog.upsert(logEntry(r, saved: false), now: now)
         play(.failure)
+        // [v5] 沒存成：iPhone 健康頁最上面「手錶上有 1 趟沒存進 Apple 健康…」
+        WatchSync.shared.sendUnsavedRun(true)
     }
 
     /// 摘要：小圖算一次、放掉 session 與 builder
@@ -1079,9 +1145,14 @@ final class WorkoutManager: NSObject, ObservableObject {
         return meta
     }
 
+    /// [v5] 多存平均、最高心率、40 點小圖（「那一趟」；只在手錶上）
     private func logEntry(_ r: WatchRunRecord, saved: Bool) -> WatchRunLogEntry {
-        WatchRunLogEntry(id: r.id, workoutId: r.workoutId, sport: r.sport.rawValue, start: r.start,
-                         end: r.end ?? r.updatedAt, movingSeconds: r.movingSeconds, meters: r.meters, saved: saved)
+        let shape = WatchRunMath.routeShape(r.points, kmTimes: r.kmTimes, sport: r.sport,
+                                            movingSeconds: r.movingSeconds, meters: r.meters)
+        let compact = WatchRunWeekText.compactShape(shape)
+        return WatchRunLogEntry(id: r.id, workoutId: r.workoutId, sport: r.sport.rawValue, start: r.start,
+                                end: r.end ?? r.updatedAt, movingSeconds: r.movingSeconds, meters: r.meters, saved: saved,
+                                heartAvg: r.heartAvg, heartMax: r.heartMax, shape: compact.isEmpty ? nil : compact)
     }
 
     private func canShare(_ type: HKObjectType) -> Bool {
@@ -1126,6 +1197,8 @@ final class WorkoutManager: NSObject, ObservableObject {
             unsaved = nil
             RunStash.clearUnsaved()
             WatchRunLog.upsert(logEntry(r, saved: w != nil), now: now)
+            // [v5] 我跑完了（iPhone 順手清掉「沒存成」旗子）
+            WatchSync.shared.sendRanWorkout(workoutId: r.workoutId, endedAt: end)
             problem = nil
             if phase == .summary, result?.id == r.id {
                 result = r
@@ -1261,6 +1334,8 @@ final class WorkoutManager: NSObject, ObservableObject {
         if let u = unsaved, u.savedAt == nil, begun != nil, Self.sameRun(u, begun) {
             unsaved = nil
             RunStash.clearUnsaved()
+            // [v5] 沒存成那一趟被接回去接著跑：iPhone 那一行拿掉（存好時會再送「我跑完了」）
+            WatchSync.shared.sendUnsavedRun(false)
             return u
         }
         return nil
@@ -1294,6 +1369,8 @@ final class WorkoutManager: NSObject, ObservableObject {
         unsaved = r
         RunStash.saveUnsaved(r)
         WatchRunLog.upsert(logEntry(r, saved: false), now: now)
+        // [v5] 沒接回、變成沒存成：iPhone 健康頁最上面那一行
+        WatchSync.shared.sendUnsavedRun(true)
     }
 
     // MARK: - 震動

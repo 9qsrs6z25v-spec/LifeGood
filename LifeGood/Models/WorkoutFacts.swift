@@ -286,10 +286,24 @@ enum WorkoutFacts {
             gps: r.gps)
         applyKcalEstimate(&session, bodyWeightKg: bodyWeightKg)
         // [v25.557] 這一趟的亮點（破了哪幾個個人紀錄、同一條路第幾次、比上次快多少）：跟 store 裡比它早的每一趟比一次存起來，之後打開不重算
-        session.highlights = highlights(for: session, among: sessions)
+        // [手錶 v5] 比較的那一堆拿掉同一次出門的（highlightPool）：手錶 LifeGood 記的那一筆先帶進來、iPhone 這一筆後存時，
+        // 不把手錶那一筆當成「上一次」（「第 13 次・差不多」；手錶 v4 adjudicate §4-3 的相反方向，同 HealthSyncCenter 的做法）
+        session.highlights = highlights(for: session, among: highlightPool(for: session, among: sessions))
         // [v25.554] 寫進 Apple 健康用簡化前的點（judge §6 v4）：完整的點只放記憶體一下，寫的時候拿走（WorkoutRouteStash）
         WorkoutRouteStash.keep(r.route, for: session.id)
         return session
+    }
+
+    /// [手錶 v5] 算亮點時比較的那一堆：拿掉跟這一趟同一次出門的（同一類運動、時間對得上 sameOuting）。
+    /// 兩個方向都用這一支：手錶那一趟帶進來時（HealthSyncCenter.importedSession／applyWatchRefresh）不把 iPhone 也記的那一筆當
+    /// 「上一次」；iPhone 這一趟存檔時（makeSession）不把先帶進來的手錶那一筆當「上一次」。這一趟自己（同一個 id）highlights 本來就不比
+    static func highlightPool(for s: WorkoutSession, among sessions: [WorkoutSession]) -> [WorkoutSession] {
+        let end = endDate(s)
+        let sport = s.primarySport
+        return sessions.filter { o in
+            guard o.id != s.id, sportsMatch(o.primarySport, sport) else { return true }
+            return !sameOuting(aStart: s.date, aEnd: end, bStart: o.date, bEnd: endDate(o))
+        }
     }
 
     /// 每公里爬升：kmClimb[i]＝記錄器走到第 i+1 公里那一刻的累計爬升。

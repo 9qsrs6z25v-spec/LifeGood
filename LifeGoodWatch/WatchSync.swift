@@ -43,6 +43,15 @@ import WidgetKit
 //     → TripCheckIns.packageApplied 重讀、補送。
 //   • activate 好、iPhone 變得在旁邊：RecordOutbox.sendDue 之後 TripCheckIns.sendDue（還沒 activate 好時按的打卡現在送）。
 //   鎖的方向多一條 applyLock → WatchCheckInLog 的鎖；WatchCheckInLog 不回頭拿這邊的鎖，不會互鎖。
+//
+// [手錶 v5，v25.582] 「我跑完了」「沒存成」送 iPhone（judge §5.7 最後一段、§2.12、附錄 B；watch/build/v5/brief.md §2）：
+//   • sendRanWorkout：WorkoutManager 存好一趟（或〔再存一次〕存好）就叫。transferUserInfo(["ranWorkout": 編號, "ranAt": 結束秒])
+//     （排隊、保證送到）＋ iPhone 在旁邊再 sendMessage 同一份（會在背景叫醒 iPhone、不等回話）。iPhone 記旗子 watch_run_pending，
+//     健康頁回前景不等 15 分鐘馬上同步、先找那一筆（WatchRunFlags、HealthSyncCenter.syncForWatchRun）。兩條都到也只記一次（同一個編號）
+//   • sendUnsavedRun：存不進 Apple 健康（true）、那一趟不在手錶上了（false）→ ["unsavedRun": 1／0]（同兩條路）
+//   • 還沒 activate 好：先存在 UserDefaults（watch_run_report_pending_v1，只留最後一份「我跑完了」、最後一份「沒存成」），
+//     activate 好再送
+//   • reloadRunWeekWidget：錶面「這週跑步」馬上重畫（手錶自己記的那一趟算進去了；WatchRunLog 一改就叫）
 
 final class WatchSync: NSObject, WCSessionDelegate {
     static let shared = WatchSync()
@@ -205,6 +214,63 @@ final class WatchSync: NSObject, WCSessionDelegate {
         return true
     }
 
+    // MARK: [v5] 我跑完了、沒存成（brief §2；名字、參數不准改，WorkoutManager 在叫）
+
+    /// 還沒 activate 好時先存起來的那幾份（["ranWorkout": …] 一份、["unsavedRun": …] 一份；activate 好再送）
+    private static let reportPendingKey = "watch_run_report_pending_v1"
+
+    /// 跑完存好了（或〔再存一次〕存好了）：告訴 iPhone 馬上去 Apple 健康找這一筆。workoutId nil／空＝存好了但讀不到編號
+    func sendRanWorkout(workoutId: String?, endedAt: Date) {
+        let message: [String: Any] = [WatchLink.ranWorkoutKey: workoutId ?? "",
+                                      WatchLink.ranAtKey: endedAt.timeIntervalSince1970]
+        deliverRunReport(message, slot: WatchLink.ranWorkoutKey)
+        WatchSync.reloadRunWeekWidget()
+    }
+
+    /// 有一趟存不進 Apple 健康、留在手錶上（true）／那一趟不在手錶上了（false）
+    func sendUnsavedRun(_ unsaved: Bool) {
+        let message: [String: Any] = [WatchLink.unsavedRunKey: unsaved ? 1 : 0]
+        deliverRunReport(message, slot: WatchLink.unsavedRunKey)
+    }
+
+    /// 錶面「這週跑步」重畫（WatchRunLog 加了、拿掉一趟）
+    static func reloadRunWeekWidget() {
+        WidgetCenter.shared.reloadTimelines(ofKind: WatchWidgetKind.runWeek)
+    }
+
+    /// transferUserInfo（排隊、保證送到）＋ iPhone 在旁邊再 sendMessage（不等回話）。還沒 activate 好：存起來、activate 好再送
+    private func deliverRunReport(_ message: [String: Any], slot: String) {
+        guard WCSession.isSupported() else { return }
+        let session = WCSession.default
+        guard session.activationState == .activated else {
+            Self.keepRunReport(message, slot: slot)
+            return
+        }
+        _ = session.transferUserInfo(message)
+        guard session.isReachable else { return }
+        session.sendMessage(message, replyHandler: nil, errorHandler: { _ in
+            // iPhone 不在旁邊了、LifeGood 被滑掉…：transferUserInfo 那一份照樣排著
+        })
+    }
+
+    /// 還沒 activate 好時存起來（同一種只留最後一份）
+    private static func keepRunReport(_ message: [String: Any], slot: String) {
+        let d = WidgetShared.defaults
+        var all = (d?.dictionary(forKey: reportPendingKey) as? [String: [String: Any]]) ?? [:]
+        all[slot] = message
+        d?.set(all, forKey: reportPendingKey)
+    }
+
+    /// activate 好了：存起來的那幾份送出去、刪掉
+    private func flushRunReports() {
+        let d = WidgetShared.defaults
+        guard let all = d?.dictionary(forKey: Self.reportPendingKey) as? [String: [String: Any]], !all.isEmpty else { return }
+        d?.removeObject(forKey: Self.reportPendingKey)
+        for (slot, message) in all {
+            deliverRunReport(message, slot: slot)
+        }
+    }
+
     // MARK: 收包
 
     /// application context／complication user info／回覆那一份字典：取出 "pkg"（LZFSE）交給 applyData。
@@ -306,6 +372,8 @@ final class WatchSync: NSObject, WCSessionDelegate {
             }
         }
         guard activated else { return }
+        // [v5] 還沒 activate 好時跑完的那一趟（「我跑完了」「沒存成」）現在送
+        flushRunReports()
         Task { @MainActor in
             // [v2] 先送記帳、再要包（下面 requestFromPhone 那一條）：iPhone 收完這幾筆組的包才帶得到它們。
             // 上面 wanted 那一條已經先要過了也沒關係：iPhone 入帳後 writeNow([.money]) 會再送一包新的

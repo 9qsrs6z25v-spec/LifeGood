@@ -52,6 +52,17 @@ import WatchConnectivity
 //     （NSTimeZone.resetSystemTimeZone，Calendar.current 才是新的）→ WidgetSnapshotWriter.writeNow() 全部用新時區重寫
 //     （快取的 timeZoneId 跟著換）→ 最後它自己叫 snapshotsDidChange() 重組重送。冷啟動時寫手沒 start，只會用現成的檔重組
 //
+// [手錶 v5] v25.582（watch/judge.md §2.12、§5.4、§5.7 最後一段、附錄 B ranWorkout／unsavedRun；watch/build/v5/brief.md G1-1；
+//         sim_v5.py §7）：收手錶的「我跑完了」「沒存成」——
+//   • 手錶兩條路一起送：transferUserInfo（排隊、保證送到；didReceiveUserInfo）＋ iPhone 在旁邊再 sendMessage
+//     （replyHandler: nil，走沒回話的 didReceiveMessage）。三支 delegate 方法都在背景執行緒先拆好：
+//     "ranWorkout"（Apple 健康編號；有這個鍵就是「我跑完了」，空字串＝讀不到編號也算）、"ranAt"（那一趟結束的時間，秒）、
+//     "unsavedRun"（1＝有一趟存不進 Apple 健康、留在手錶上；0＝沒有了）
+//   • 主執行緒 receiveRun：**只寫 WatchRunFlags**（App Group 的 UserDefaults；被手錶叫醒的冷啟動也對）。
+//     有編號 → noteRan（記編號、清「沒存成」、記上次跑完）；不然有 unsavedRun → noteUnsaved。
+//     不碰 Apple 健康同步、App 的三份大資料、不 refresh（旗子跟包無關）；健康頁回前景、收到 WatchRunFlags.changed 才去找那一筆
+//   • 有回話的那支：記一筆、打卡都沒有、只有跑步 → 回 ["ok": "queued"]（手錶其實不等回話；保險）
+//
 // 對外的名字（WidgetSnapshotWriter、AppDelegate、設定頁在叫）不准改。
 
 /// App Group 的鍵與檔名（WidgetShared.defaults；delegate 方法在背景執行緒也要讀得到，放在 actor 外面）
@@ -407,6 +418,18 @@ final class WatchBridge: NSObject, ObservableObject {
         }
         return [WatchLink.okKey: WatchLink.okQueued]
     }
+
+    // MARK: - [v5] 收手錶的「我跑完了」「沒存成」
+
+    /// 手錶跑完存好（或〔再存一次〕存好）送的編號、存不進 Apple 健康送的旗子（兩條路都走這裡；主執行緒）。
+    /// 只寫 WatchRunFlags（App Group 的 UserDefaults；冷啟動也對），寫完它自己在主執行緒發 WatchRunFlags.changed
+    private func receiveRun(ranId: String?, ranAt: Date?, unsaved: Int?) {
+        if let ranId {
+            WatchRunFlags.noteRan(workoutId: ranId, endedAt: ranAt, now: Date())
+        } else if let unsaved {
+            WatchRunFlags.noteUnsaved(unsaved == 1, now: Date())
+        }
+    }
 }
 
 // MARK: - WCSessionDelegate（背景執行緒；一律 nonisolated，要動狀態包 Task { @MainActor in … }）
@@ -438,51 +461,77 @@ extension WatchBridge: WCSessionDelegate {
         session.activate()
     }
 
-    /// 手錶來要「給我最新的」、[v2] 手錶記的一筆、[v6] 手錶的打卡（要回覆的那種）。
-    /// 訊息在這裡先拆好，主執行緒只拿一個 Bool、兩份 Data
+    /// 手錶來要「給我最新的」、[v2] 手錶記的一筆、[v6] 手錶的打卡（要回覆的那種）、[v5] 我跑完了／沒存成（保險：手錶送這兩種不等回話）。
+    /// 訊息在這裡先拆好，主執行緒只拿一個 Bool、兩份 Data、跑步那三樣
     nonisolated func session(_ session: WCSession,
                              didReceiveMessage message: [String: Any],
                              replyHandler: @escaping ([String: Any]) -> Void) {
         let wants = (message[WatchLink.wantKey] as? String) == WatchLink.wantPackage
         let recordData = message[WatchLink.recordKey] as? Data
         let checkInData = message[WatchLink.checkInKey] as? Data
+        // [v5] 有 "ranWorkout" 這個鍵就是「我跑完了」（空字串＝讀不到編號，也算）；"unsavedRun" 1／0
+        let ranId = message[WatchLink.ranWorkoutKey] as? String
+        let ranAt = (message[WatchLink.ranAtKey] as? Double).map { Date(timeIntervalSince1970: $0) }
+        let unsaved = message[WatchLink.unsavedRunKey] as? Int
+        let hasRun = ranId != nil || unsaved != nil
         Task { @MainActor in
+            if hasRun {
+                self.receiveRun(ranId: ranId, ranAt: ranAt, unsaved: unsaved)
+            }
             if let recordData {
                 replyHandler(self.receiveRecord(recordData))
             } else if let checkInData {
                 replyHandler(self.receiveCheckIn(checkInData))
+            } else if hasRun && !wants {
+                replyHandler([WatchLink.okKey: WatchLink.okQueued])
             } else {
                 replyHandler(self.replyPackage(wants))
             }
         }
     }
 
-    /// 不用回覆的訊息：手錶不送這種；[v2] 萬一帶了一筆記帳、[v6] 一筆打卡，照樣收（沒有回話）
+    /// 不用回覆的訊息：[v2] 萬一帶了一筆記帳、[v6] 一筆打卡，照樣收（沒有回話）；
+    /// [v5] 手錶的「我跑完了」「沒存成」走這支（sendMessage 的 replyHandler 是 nil）
     nonisolated func session(_ session: WCSession, didReceiveMessage message: [String: Any]) {
         let recordData = message[WatchLink.recordKey] as? Data
         let checkInData = message[WatchLink.checkInKey] as? Data
-        guard recordData != nil || checkInData != nil else { return }
+        let ranId = message[WatchLink.ranWorkoutKey] as? String
+        let ranAt = (message[WatchLink.ranAtKey] as? Double).map { Date(timeIntervalSince1970: $0) }
+        let unsaved = message[WatchLink.unsavedRunKey] as? Int
+        let hasRun = ranId != nil || unsaved != nil
+        guard recordData != nil || checkInData != nil || hasRun else { return }
         Task { @MainActor in
             if let recordData {
                 _ = self.receiveRecord(recordData)
             }
             if let checkInData {
                 _ = self.receiveCheckIn(checkInData)
+            }
+            if hasRun {
+                self.receiveRun(ranId: ranId, ranAt: ranAt, unsaved: unsaved)
             }
         }
     }
 
-    /// [v2] 手錶 transferUserInfo 來的一筆記帳、[v6] 一筆打卡（排隊、保證送到；沒有回話）。iOS 也有這個 delegate 方法
+    /// [v2] 手錶 transferUserInfo 來的一筆記帳、[v6] 一筆打卡、[v5] 我跑完了／沒存成（排隊、保證送到；沒有回話）。
+    /// iOS 也有這個 delegate 方法
     nonisolated func session(_ session: WCSession, didReceiveUserInfo userInfo: [String: Any] = [:]) {
         let recordData = userInfo[WatchLink.recordKey] as? Data
         let checkInData = userInfo[WatchLink.checkInKey] as? Data
-        guard recordData != nil || checkInData != nil else { return }
+        let ranId = userInfo[WatchLink.ranWorkoutKey] as? String
+        let ranAt = (userInfo[WatchLink.ranAtKey] as? Double).map { Date(timeIntervalSince1970: $0) }
+        let unsaved = userInfo[WatchLink.unsavedRunKey] as? Int
+        let hasRun = ranId != nil || unsaved != nil
+        guard recordData != nil || checkInData != nil || hasRun else { return }
         Task { @MainActor in
             if let recordData {
                 _ = self.receiveRecord(recordData)
             }
             if let checkInData {
                 _ = self.receiveCheckIn(checkInData)
+            }
+            if hasRun {
+                self.receiveRun(ranId: ranId, ranAt: ranAt, unsaved: unsaved)
             }
         }
     }

@@ -14,7 +14,9 @@ import SwiftUI
 //     〔再存一次〕。這一行出現時版面預算不夠：「這週跑了」那一行與風景條收起來（大字、公里、次數照寫）
 //   手腕放下（§2.17）：背景純黑、字 0.75、風景條換 1.5 點 40% 白線＋旗子外框；公里、次數、天數照顯示（§6.1 可以上鎖定畫面）；
 //     按鈕暫時不能按、綠色暗下來（不拿掉，版面不跳）
-// 不加 ScrollView（轉錶冠翻頁）、不加 toolbar（設定在 ①）；點看板不動（v5 才有「這週」）。
+// 不加 ScrollView（轉錶冠翻頁）、不加 toolbar（設定在 ①）。
+// [手錶 v5] v25.582（watch/build/v5/brief.md G3-3）：點看板（頁首到小風景條那一塊）推「這週」（WatchModel.openRunWeek → RunWeekView）；
+//   同一組 View 只是包一層 .plain 的 Button（版面不變高）；手腕放下暫時不能按。琥珀那一行、〔▶ 開始跑步〕照舊在外面各自能按。
 // 跑完回到這一頁：RootView 從跑步那一頁換回來時整頁重畫，WatchRunLog 多的那一趟馬上算進去（不用等下一分鐘）。
 
 struct RunHomePage: View {
@@ -56,6 +58,30 @@ struct RunHomePage: View {
         // 有沒存成的那一趟：多一行琥珀，收起「這週跑了」與風景條（46mm 約 250 點放不下 240）
         let reduced = runs.unsaved != nil
         return VStack(alignment: .leading, spacing: 2) {
+            board(home, compact: compact, reduced: reduced)
+            unsavedRow
+            Spacer(minLength: 4)
+            startButton(home)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .scenePadding(.horizontal)
+        .opacity(dimmed ? Self.dimmedOpacity : 1)
+    }
+
+    /// [v5] 看板（頁首、這週跑了、大字、那兩句、小風景條）：點了推「這週」（judge §2.9「看板 → 這週」）。
+    /// 跟 v4 同一組 View、同樣的間距，只是包一層 .plain 的 Button（版面不變高）；手腕放下暫時不能按（不拿掉）
+    private func board(_ home: WatchRunHome, compact: Bool, reduced: Bool) -> some View {
+        Button {
+            model.openRunWeek()
+        } label: {
+            boardContent(home, compact: compact, reduced: reduced)
+        }
+        .buttonStyle(.plain)
+        .disabled(dimmed)
+    }
+
+    private func boardContent(_ home: WatchRunHome, compact: Bool, reduced: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
             RunHomeHeader(home: home)
             if !reduced {
                 verbText(home)
@@ -66,13 +92,9 @@ struct RunHomePage: View {
                 RunWeekStrip(flags: home.flags, todayIndex: home.todayIndex, sport: home.sport, dimmed: dimmed)
                     .padding(.top, 2)
             }
-            unsavedRow
-            Spacer(minLength: 4)
-            startButton(home)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .scenePadding(.horizontal)
-        .opacity(dimmed ? Self.dimmedOpacity : 1)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
     }
 
     /// 「這週跑了」「這週騎了」

@@ -14,12 +14,19 @@ import SwiftUI
 //     每公里：6'05" 6'10" …／暫停 2 次・1:10（都是自動）／已存進 Apple 健康・iPhone 健康頁會自己帶進來／（出錯那一句，琥珀）
 //     存好了〔不存這一趟〕（先問一次：Apple 健康裡這一趟會刪掉）；沒存好〔再存一次〕
 //     〔完成〕→ 回 ③
-// 字一律拿 WatchRunText.summary 的結果與 WatchRunText 的常數（View 不自己拼）。亮點那兩行（第 12 次、新紀錄）是 v5。
+// 字一律拿 WatchRunText.summary 的結果與 WatchRunText 的常數（View 不自己拼）。
+// [手錶 v5] v25.582（watch/judge.md §2.12；watch/build/v5/brief.md G3-4）：數字下面多亮點兩行，從包裡來（WatchRunWeekText.summaryLines：
+//   iPhone 帶進來、算好、送回 runWeek.latest／recent 才有）：「河濱老路線・第 12 次・比上次快 42 秒」（後半快＝綠）／
+//   「★ 最快 5 公里 新紀錄 30:51（快 18 秒）」（琥珀）；還沒帶進來灰字「第幾次、破紀錄，iPhone 帶進來後會算好」（不寫假的）；
+//   沒存好、第一次跑這條路又沒破紀錄：什麼都不寫。手腕放下用不寫地名的那一份（「老路線・第 12 次」，hide: dimmed）。
+//   畫法跟「那一趟」同一個 RunHighlightLinesView（RunDetailView.swift）。新包一到（WatchModel.package）就換字。
 // 手腕放下（judge §2.17）：路線小圖換「路線已存進 Apple 健康」（還沒存好那一趟不寫這句、留同樣的高度：版面不跳）；
 // 距離、時間、配速照顯示；字調暗、按鈕暫時不能按（不拿掉）。
 
 struct RunSummaryView: View {
     @ObservedObject private var runs = WorkoutManager.shared
+    /// [v5] 手上那一包（亮點兩行：runWeek.latest／recent）
+    @ObservedObject private var model = WatchModel.shared
     @Environment(\.isLuminanceReduced) private var dimmed
 
     /// 〔不存這一趟〕先問一次
@@ -121,7 +128,8 @@ struct RunSummaryView: View {
     @ViewBuilder
     private var summaryView: some View {
         if let r = runs.result {
-            summaryScroll(WatchRunText.summary(r, saved: runs.saved), canDiscard: r.workoutId != nil)
+            summaryScroll(WatchRunText.summary(r, saved: runs.saved), canDiscard: r.workoutId != nil,
+                          lines: highlightLines(r))
         } else {
             // 不該發生（摘要一定有那一趟）：至少留〔完成〕，不會卡在這一頁
             VStack {
@@ -131,12 +139,21 @@ struct RunSummaryView: View {
         }
     }
 
+    /// [v5] 亮點兩行（包裡來；手腕放下不寫地名）
+    private func highlightLines(_ r: WatchRunRecord) -> WatchRunHighlightLines {
+        WatchRunWeekText.summaryLines(r, saved: runs.saved, package: model.package, hide: dimmed)
+    }
+
     /// canDiscard：真的拿到 Apple 健康那一筆（有編號）才能〔不存這一趟〕（存好了但讀不到那一筆時刪不了，不出這顆）
-    private func summaryScroll(_ s: WatchRunSummary, canDiscard: Bool) -> some View {
+    /// lines：[v5] 亮點兩行（什麼都沒有不畫）
+    private func summaryScroll(_ s: WatchRunSummary, canDiscard: Bool, lines: WatchRunHighlightLines) -> some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 4) {
                 RunSummaryHead(summary: s)
                 RunSummaryNumbers(summary: s)
+                if !lines.isEmpty {
+                    RunHighlightLinesView(lines: lines)
+                }
                 routeBlock(saved: s.saved)
                 RunSummaryNotes(summary: s, problem: runs.problem)
                 actionButton(s, canDiscard: canDiscard)
