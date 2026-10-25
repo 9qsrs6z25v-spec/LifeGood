@@ -233,9 +233,12 @@ final class WatchSync: NSObject, WCSessionDelegate {
         deliverRunReport(message, slot: WatchLink.unsavedRunKey)
     }
 
-    /// 錶面「這週跑步」重畫（WatchRunLog 加了、拿掉一趟）
+    /// 錶面「這週跑步」重畫（WatchRunLog 加了、拿掉一趟）。
+    /// [v7b] 順手請系統重新問「這週跑步」「平常跑步的時間」什麼時候浮（今天那個時段跑過了就不浮、週日差幾公里）
     static func reloadRunWeekWidget() {
         WidgetCenter.shared.reloadTimelines(ofKind: WatchWidgetKind.runWeek)
+        WidgetCenter.shared.invalidateRelevance(ofKind: WatchWidgetKind.runWeek)
+        WidgetCenter.shared.invalidateRelevance(ofKind: WatchWidgetKind.cardRun)
     }
 
     /// transferUserInfo（排隊、保證送到）＋ iPhone 在旁邊再 sendMessage（不等回話）。還沒 activate 好：存起來、activate 好再送
@@ -321,6 +324,19 @@ final class WatchSync: NSObject, WCSessionDelegate {
         } else if wrote {
             for kind in kinds {
                 WidgetCenter.shared.reloadTimelines(ofKind: kind)
+            }
+        }
+        // [v7b] 智慧型堆疊：內容真的變了才請系統重新問「什麼時候浮上來」（invalidateRelevance，watchOS 11 起；
+        // 下一場、已花、這週跑步＋5 種卡，WatchPackageDiff.relevanceKinds）。背景時卡那幾種也重畫（前景上面已經全部重畫）
+        if wrote {
+            let clues = WatchPackageDiff.relevanceKinds(old: old, new: pkg)
+            for kind in clues {
+                WidgetCenter.shared.invalidateRelevance(ofKind: kind)
+            }
+            if !appActive {
+                for kind in clues where WatchWidgetKind.cards.contains(kind) {
+                    WidgetCenter.shared.reloadTimelines(ofKind: kind)
+                }
             }
         }
         applyLock.unlock()

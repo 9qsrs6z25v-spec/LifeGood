@@ -33,6 +33,11 @@ import CoreLocation
 // [手錶 v4] v25.580（watch/judge.md §2.9、§5.7；watch/build/v4/brief.md §2；sim_v4.py 的 run_week）：跑步——
 //   • 快取多 runWeek（這週跑步：WatchRunWeekBuilder.make，跟健康頁看板同一套 WorkoutFacts；seen＝iPhone 處理過的手錶跑步編號）
 //   • write（寫 money／bills）、writeTrip（只寫 life：運動、目標、請假、刪掉一趟都會讓 life 重寫）都順手算（fillRun）
+//
+// [手錶 v7b] v25.584（watch/judge.md §3.2；watch/build/v7b/brief.md §2；sim_v7b.py 的 run_slots）：
+//   • 快取多 runSlots（平常跑步的時段：近 28 天主角運動、算數的那幾趟的開始時間 → WatchRelevancePlan.runSlots，
+//     60 分鐘內 3 趟以上、前後各多 15 分鐘、最多 2 段；時段名 WorkoutFacts.timeOfDayName）。fillRun 順手算（同 runWeek 的時機）。
+//     只有一天裡的分鐘數與時段名——沒有日期、地點、名字
 
 /// watch_extras_v1.json（只在 iPhone；不會送到手錶）
 struct WatchExtrasCache: Codable, Equatable, WidgetSnapshotPayload {
@@ -71,6 +76,11 @@ struct WatchExtrasCache: Codable, Equatable, WidgetSnapshotPayload {
 
     /// 這週跑步（WatchRunWeekBuilder.make）
     var runWeek: WatchRunWeek? = nil
+
+    // MARK: [v7b] 平常跑步的時段（選填；v5 以前寫的舊檔沒有）
+
+    /// 近 4 週同一時段跑過 3 次以上的時段（WatchRelevancePlan.runSlots；最多 2 段）。手錶包「平常跑步的時間」卡用
+    var runSlots: [WatchRunSlot]? = nil
 }
 
 @MainActor
@@ -147,6 +157,22 @@ enum WatchExtrasWriter {
                                             now: now)
         let previous = cache.runWeek ?? WidgetSnapshotStore.read(WatchExtrasCache.self)?.runWeek
         cache.runWeek = sameRunWeek(week, previous) ?? week
+        // [v7b] 平常跑步的時段（主角運動＝這週那一份的 sport）
+        let hero = WorkoutSport(rawValue: week.sport) ?? .run
+        cache.runSlots = runSlots(sessions: life.workouts, hero: hero, now: now)
+    }
+
+    /// [v7b] 近 28 天主角運動、算數的（WorkoutFacts.counts）那幾趟的開始時間 → 平常跑步的時段（sim_v7b.py run_slots）
+    static func runSlots(sessions: [WorkoutSession], hero: WorkoutSport, now: Date) -> [WatchRunSlot] {
+        let starts: [Date] = sessions.filter { s in
+            s.primarySport == hero && WorkoutFacts.counts(s)
+        }.map { $0.date }
+        let cal = Calendar.current
+        let today = cal.startOfDay(for: now)
+        return WatchRelevancePlan.runSlots(starts: starts, now: now) { minute in
+            let at = today.addingTimeInterval(Double(minute) * 60)
+            return WorkoutFacts.timeOfDayName(hero, start: at)
+        }
     }
 
     /// 除了 generatedAt 都一樣：回上一份（沿用它的 generatedAt）；不一樣、沒有上一份回 nil

@@ -79,6 +79,8 @@ final class TripCheckIns: ObservableObject {
         reload()
         // 錶面「下一場」馬上換成「到了」／下一站（手錶小格讀同一份 WatchCheckInLog）
         WidgetCenter.shared.reloadTimelines(ofKind: WatchWidgetKind.nextUp)
+        // [v7b] 按了〔到了〕：智慧型堆疊「旅途下一站」那一站不再浮（手錶小格讀同一份 WatchCheckInLog）
+        WidgetCenter.shared.invalidateRelevance(ofKind: WatchWidgetKind.cardTrip)
         send(c)
     }
 

@@ -26,6 +26,9 @@ import WidgetKit
 // [手錶 v4] v25.580（watch/judge.md §2.0、§2.9；watch/build/v4/brief.md §2）：
 //   • 頁多 ③ 跑步（WatchPage.run，② 錢之後；一直都在）
 //   • 回前景叫 WorkoutManager.appBecameActive（跑完 15 分鐘以上的摘要收起來、沒接回的跑步中存檔變成沒存成的那一趟）
+// [手錶 v7b] v25.584（watch/judge.md §3.4；watch/build/v7b/brief.md §2）：
+//   • 回前景登記 WatchOpenHandoff（控制項「＋ 記一筆」→ 記帳台、「▶ 開始跑步」→ 準備頁，走 open 同一條路）
+//   • 「遮住金額」改了走 WatchControlRefresh（錶面全部重畫＋控制中心那顆重畫）；控制項改的值回前景 reload() 讀回來
 // [手錶 v5] v25.582（watch/judge.md §2.13、§3.1；watch/build/v5/brief.md §2）：
 //   • 第二層多「這週」（WatchRoute.runWeek：點 ③ 看板）、「那一趟」（WatchRoute.runDetail(id)：這週點一列）
 //   • 錶面「這週跑步」點進來：圓形、長方形、一行字 lifegood://life/health → ③ 跑步；角落跑者 lifegood://life/health/run → 準備頁
@@ -182,6 +185,11 @@ final class WatchModel: ObservableObject {
             // [v2] 待送盒：重讀、到期沒送的補送（App 被系統暫停時沒送成的）
             RecordOutbox.shared.reload()
             RecordOutbox.shared.sendDue()
+            // [v7b] 控制項「＋ 記一筆」「▶ 開始跑步」（WatchOpenIntent）：登記交接、撿 20 秒內存著的網址，
+            // 走跟錶面點進來同一條 open（要在上面回第一頁之後，網址的那一頁才不會被蓋掉）
+            WatchOpenHandoff.register { url in
+                WatchModel.shared.open(url)
+            }
         case .inactive:
             isActive = true
             // [v2] 手腕放下：還在 10 秒內的馬上送（judge §2.6）
@@ -231,7 +239,8 @@ final class WatchModel: ObservableObject {
     func setWatchHidesAmounts(_ on: Bool) {
         WatchHideAmounts.set(on)
         watchHidesAmounts = on
-        WidgetCenter.shared.reloadAllTimelines()
+        // 錶面全部重畫；[v7b] 控制中心「遮住金額（手錶）」那顆也跟著換（WatchControlRefresh，watchOS 26 才有那顆）
+        WatchControlRefresh.afterHideAmountsChanged()
     }
 
     /// 這一刻要不要遮（View 讀 isLuminanceReduced、redactionReasons 之後問這裡）

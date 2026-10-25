@@ -35,6 +35,12 @@ import Foundation
 // [手錶 v4] v25.580（watch/judge.md §2.9、§5.7；watch/build/v4/brief.md §2；sim_v4.py 的 build_package_v4）：
 //    • runWeek：快取原樣抄（WatchRunWeekBuilder 已經只放數字與 Apple 健康編號）。沒有開關（不是隱私資料：公里、次數、天數，
 //      judge §6.1「跑步距離、時間、次數、連續週數」可以上鎖定畫面）
+//
+// [手錶 v7b] v25.584（watch/judge.md §3.2、§2.16、§6.1、§6.3；watch/build/v7b/brief.md §2；sim_v7b.py 的 build_cards）：
+//    • relevanceCards（智慧型堆疊卡）：設定「智慧型堆疊卡」總開關打開才放（沒設定過＝開）；關掉＝nil（手錶不浮任何卡、
+//      你自己加的「下一場」「已花」「這週跑步」也不自己往上排）。卡**從這一包已經消毒過的欄位組**（WatchRelevancePlan.cards：
+//      life 的部屬名字照設定清掉、財富只剩類別字；bills 卡費沒有金額卡名；旅行照「旅行」開關）——所以一定放在最後組。
+//      每一種卡各自一個開關（WatchPhoneSettings.stackKinds）；「平常跑步的時間」打開才帶快取的 runSlots（只有時段與時段名）
 
 /// iPhone 設定頁「Apple Watch」段的開關（App Group 的 UserDefaults；WatchSettingsSection 與這裡同一組鍵）
 enum WatchPhoneSettings {
@@ -46,6 +52,9 @@ enum WatchPhoneSettings {
     static let sendBarcodeKey = "watch_send_barcode"
     /// [v6] 送到手錶：旅行（出發前 7 天到回來那天：下一站、打卡、記外幣、天氣）。沒設定過＝開
     static let sendTripKey = "watch_send_trip"
+    /// [v7b] 智慧型堆疊卡總開關（五種卡＋「下一場」「已花」「這週跑步」自己往上排）。沒設定過＝開。
+    /// 每一種卡各自的鍵是 WatchRelevanceKind.settingsKey（「watch_stack_morning」…，沒設定過＝開）
+    static let stackCardsKey = "watch_stack_cards"
     /// [v2] 手機條碼存在哪（**App 自己的** UserDefaults.standard；＝EInvoiceSyncManager.cardNoKey，那邊是 private，
     /// 改了兩邊一起改，pkg_keys_check E 段核對）。驗證碼在鑰匙圈，這裡不碰
     static let carrierCardNoKey = "einvoice_card_no"
@@ -72,6 +81,24 @@ enum WatchPhoneSettings {
     static var sendTrip: Bool {
         guard let d = WidgetShared.defaults, d.object(forKey: sendTripKey) != nil else { return true }
         return d.bool(forKey: sendTripKey)
+    }
+
+    /// [v7b] 智慧型堆疊卡總開關（沒設定過＝開）
+    static var stackCards: Bool {
+        guard let d = WidgetShared.defaults, d.object(forKey: stackCardsKey) != nil else { return true }
+        return d.bool(forKey: stackCardsKey)
+    }
+
+    /// [v7b] 打開的那幾種卡（每一種沒設定過＝開；總開關另外看 stackCards）
+    static var stackKinds: Set<WatchRelevanceKind> {
+        var out = Set<WatchRelevanceKind>()
+        for kind in WatchRelevanceKind.allCases {
+            if let d = WidgetShared.defaults, d.object(forKey: kind.settingsKey) != nil, !d.bool(forKey: kind.settingsKey) {
+                continue
+            }
+            out.insert(kind)
+        }
+        return out
     }
 
     /// [v2] 手機條碼送不送（沒設定過＝不送）
@@ -140,6 +167,13 @@ enum WatchPackageBuilder {
         }
         // [v4] 這週跑步（數字與 Apple 健康編號；③ 跑步、手錶自己記的那幾趟要不要自己加看 seen）
         package.runWeek = extras?.runWeek
+        // [v7b] 智慧型堆疊卡：一定最後組（從上面已經消毒過的 package 欄位組；總開關關掉＝nil）
+        if WatchPhoneSettings.stackCards {
+            let kinds = WatchPhoneSettings.stackKinds
+            let slots = kinds.contains(.usualRun) ? (extras?.runSlots ?? []) : []
+            package.relevanceCards = WatchRelevanceCards(cards: WatchRelevancePlan.cards(package: package, kinds: kinds),
+                                                         runSlots: slots)
+        }
         return package
     }
 

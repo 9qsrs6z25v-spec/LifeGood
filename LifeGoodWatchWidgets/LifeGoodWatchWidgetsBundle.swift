@@ -13,9 +13,13 @@ import WidgetKit
 // 小格是另一個 bundle、沒有素材目錄，讀不到手錶 App 的圖示，所以只用 SF Symbol 與字（critic 🟠8）。
 // 每一種小格最外層都要 widget 用的 container background（寫法見 NextUpWidgetView、SpentWidgetView），
 // 少了整格會變成系統的英文提示（critic 🔴5、judge §7.8-10）。
-// 智慧型堆疊自己往上排、watchOS 26 才有的卡與控制項都是 v7b，這版不寫。
+// 智慧型堆疊自己往上排、watchOS 26 才有的卡與控制項：v7b（下面）。
 // [手錶 v2] v25.576：多「＋ 記一筆」（AddWidget.swift；圓形、角落；點了開記帳台）。
 // [手錶 v5] v25.582：多「這週跑步」（RunWeekWidget.swift；四個形狀；角落跑者點了直接到準備頁）。
+// [手錶 v7b] v25.584（watch/judge.md §3.2、§3.4；watch/build/v7b/brief.md §2）：watchOS 26 才有的五張堆疊卡（RelevanceCards.swift）
+//   與三個控制項（WatchControls.swift）放在 LifeGoodWatch26Bundle，外面用 if #available(watchOS 26, *) 包一次
+//   （WidgetBundleBuilder.buildLimitedAvailability(_: some Widget) watchOS 9.1 起、buildOptional watchOS 9 起；build/v7b/doc/）。
+//   watchOS 11 的錶只看得到上面四種，其他照常。「下一場」「已花」「這週跑步」自己往上排（relevance()）在 RelevanceCards.swift。
 
 @main
 struct LifeGoodWatchWidgetsBundle: WidgetBundle {
@@ -24,5 +28,23 @@ struct LifeGoodWatchWidgetsBundle: WidgetBundle {
         SpentWidget()
         AddWidget()
         RunWeekWidget()
+        if #available(watchOS 26, *) {
+            LifeGoodWatch26Bundle().body
+        }
+    }
+}
+
+/// [v7b] watchOS 26 才有的：五張智慧型堆疊卡（只在堆疊出現、不能手動加）＋三個控制項（控制中心、智慧型堆疊）
+@available(watchOS 26, *)
+struct LifeGoodWatch26Bundle: WidgetBundle {
+    var body: some Widget {
+        MorningCardWidget()
+        MeetingCardWidget()
+        CardBillCardWidget()
+        UsualRunCardWidget()
+        TripStopCardWidget()
+        WatchAddRecordControl()
+        WatchStartRunControl()
+        WatchHideAmountsControl()
     }
 }

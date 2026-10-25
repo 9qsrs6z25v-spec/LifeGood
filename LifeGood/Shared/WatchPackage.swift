@@ -38,6 +38,13 @@ import Foundation
 //   • WatchRunRecent／WatchRunHighlight／WatchRunShapeXY：手錶自己的型別（WorkoutSession／WorkoutHighlights 照舊不准進包）
 //   • 手錶 → iPhone 的「我跑完了」ranWorkout（＋ranAt）、「沒存成」unsavedRun（WatchLink 鍵）
 //   • 錶面「這週跑步」小格的 kind（WatchWidgetKind.runWeek）；runWeek 變了重畫它（WatchPackageDiff）
+// [手錶 v7b] v25.584（watch/judge.md §3.2、§3.4、§2.16、§2.17、§6.1；watch/build/v7b/brief.md §2）：watchOS 26 的卡與控制項
+//   • 包多 relevanceCards（智慧型堆疊卡：iPhone 照設定挑好、字寫好的早安、快開會了、卡費快到了、旅途下一站，
+//     加上平常跑步的時段；選填。iPhone「智慧型堆疊卡」總開關關掉＝nil）。WatchRelevanceCards／WatchRelevanceCard／
+//     WatchCardLine／WatchRunSlot 只有卡上那幾個字、圖示名、時間與點了開哪裡——**卡費沒有卡名、金額、末四碼；
+//     會議沒有部屬名字；沒有天氣**（組卡的規則在 Shared/WatchRelevance.swift，pkg_keys_check C7 擋）
+//   • 堆疊卡、控制項的 kind（WatchWidgetKind.card*／control*）；WatchPackageDiff.relevanceKinds（手錶收到新包要重新問系統
+//     「什麼時候浮上來」的那幾種）
 
 /// iPhone → 手錶的一整包（watch_v1.json）
 struct WatchPackage: Codable, Equatable, WidgetSnapshotPayload {
@@ -91,6 +98,12 @@ struct WatchPackage: Codable, Equatable, WidgetSnapshotPayload {
     /// 這週跑步（iPhone 健康頁看板同一套數字，WatchExtrasWriter 算好）。手錶自己記、seen 裡沒有的那幾趟，
     /// 手錶自己加上去（WatchRunText.home）；iPhone 從來沒算過（還沒更新、健康頁沒打開過）是 nil：③ 大字寫「—」
     var runWeek: WatchRunWeek? = nil
+
+    // MARK: [v7b] 智慧型堆疊卡（選填；v5 以前的 iPhone 送來的沒有）
+
+    /// 智慧型堆疊卡（WatchRelevancePlan.cards 從這一包已經消毒過的 life／bills／旅行組；平常跑步的時段 WatchExtrasWriter 算）。
+    /// iPhone 設定「智慧型堆疊卡」關掉是 nil：手錶不浮任何卡，你自己加的「下一場」「已花」「這週跑步」也不自己往上排
+    var relevanceCards: WatchRelevanceCards? = nil
 }
 
 /// 今天、明天的行程。從 WidgetLifeSnapshot 一欄一欄抄：
@@ -564,6 +577,56 @@ struct WatchBill: Codable, Equatable, Identifiable {
     var id: String { bill.id }
 }
 
+// MARK: - [v7b] 智慧型堆疊卡（watchOS 26；judge §3.2、§2.16、§2.17、§6.1）
+
+/// [v7b] 堆疊卡那一包。iPhone 照設定挑好、字寫好（WatchRelevancePlan.cards）；手錶小格到時間才請系統浮上來
+struct WatchRelevanceCards: Codable, Equatable {
+    /// 早安、快開會了、卡費快到了、旅途下一站（今天、明天；卡費是截止前 3 天到當天）。關掉的那幾種 iPhone 根本不放
+    var cards: [WatchRelevanceCard]
+    /// 平常跑步的時段（近 4 週同一時段 3 次以上，最多 2 段）。「平常跑步的時間」關掉是空的。
+    /// 卡上的公里、還差幾公里手錶自己算（③ 跑步同一套 WatchRunText.home），所以包裡只有時段與時段名
+    var runSlots: [WatchRunSlot]
+}
+
+/// [v7b] 一張堆疊卡（三行字＋什麼時候浮上來＋點了開哪裡）。**錶面、堆疊＝鎖定畫面**：
+/// 卡費只寫「卡費」與日期（沒有卡名、金額、末四碼），會議寫主題不寫部屬名字，旅途下一站不放天氣
+struct WatchRelevanceCard: Codable, Equatable, Identifiable {
+    /// 「meeting@<場次 id>」「cardBill@2026-10-27@3」…（WatchRelevancePlan.cardId；手錶小格拿它找回這一張）
+    var id: String
+    /// WatchRelevanceKind.rawValue（morning／meeting／cardBill／usualRun／tripStop）
+    var kind: String
+    /// 從什麼時候到什麼時候該浮上來（end 一定比 start 晚）
+    var start: Date
+    var end: Date
+    /// 抬手時的三行（最多 3 行）
+    var lines: [WatchCardLine]
+    /// 手腕放下、沒解鎖時換這一份（會議名、站名、旅行名抬手才寫）；nil＝跟 lines 一樣（本來就沒有名字）
+    var privateLines: [WatchCardLine]? = nil
+    /// 點了開手錶 App 哪裡（WidgetLink 組好的 absoluteString；手錶 WatchModel.open 認得的那幾種）
+    var link: String
+}
+
+/// [v7b] 堆疊卡的一行：前面一個 SF Symbol、可以上色的開頭一段（「3 天後」琥珀）、其餘的字
+struct WatchCardLine: Codable, Equatable {
+    /// SF Symbol（「sun.horizon.fill」「birthday.cake.fill」「creditcard.fill」…）；nil＝不畫圖示
+    var icon: String? = nil
+    /// 圖示的顏色 0xRRGGBB；nil＝跟字一樣
+    var tint: UInt32? = nil
+    /// 開頭上色的那一段（「3 天後」「還差 10.6」）；nil＝沒有
+    var lead: String? = nil
+    var text: String
+    /// lead 的顏色（沒有 lead 時是整行的）："amber"、"blue"、"dim"；nil＝一般
+    var tone: String? = nil
+}
+
+/// [v7b] 平常跑步的一個時段（一天裡的分鐘數；05:45–06:30＝345…390）。iPhone 用近 4 週主角運動的開始時間算
+struct WatchRunSlot: Codable, Equatable {
+    var startMinute: Int
+    var endMinute: Int
+    /// 時段名「晨跑」「夜跑」「晨走」（WorkoutFacts.timeOfDayName；卡上寫「平常晨跑的時間」）
+    var label: String
+}
+
 // MARK: - 傳話的鍵（iPhone、手錶兩邊同一份）
 
 enum WatchLink {
@@ -638,6 +701,20 @@ enum WatchWidgetKind {
     static let add = "LifeGoodWatchAdd"
     /// [v5] 這週跑步（圓形、角落、一行字、長方形；包裡的 runWeek＋手錶自己記的 WatchRunLog）
     static let runWeek = "LifeGoodWatchRunWeek"
+
+    // MARK: [v7b] 智慧型堆疊卡（watchOS 26；只在堆疊出現、不能手動加）與控制項（watchOS 26）
+
+    static let cardMorning = "LifeGoodWatchCardMorning"
+    static let cardMeeting = "LifeGoodWatchCardMeeting"
+    static let cardBill = "LifeGoodWatchCardBill"
+    static let cardRun = "LifeGoodWatchCardRun"
+    static let cardTrip = "LifeGoodWatchCardTrip"
+    /// 五種堆疊卡
+    static let cards = [cardMorning, cardMeeting, cardBill, cardRun, cardTrip]
+    /// 控制項：＋ 記一筆、▶ 開始跑步、遮住金額（手錶）
+    static let controlAdd = "LifeGoodWatchControlAdd"
+    static let controlRun = "LifeGoodWatchControlRun"
+    static let controlHide = "LifeGoodWatchControlHide"
 }
 
 // MARK: - 壓縮與解開（兩邊同一組編碼器）
@@ -682,6 +759,27 @@ enum WatchPackageDiff {
         // [v5] 這週跑步（iPhone 帶進來一趟、改目標、刪掉一趟）
         if old.runWeek != new.runWeek {
             kinds.append(WatchWidgetKind.runWeek)
+        }
+        return kinds
+    }
+
+    /// [v7b] 智慧型堆疊要重新問「什麼時候該浮上來」的幾種（手錶收到新包、內容真的變了時 invalidateRelevance）：
+    /// 沒有舊包、堆疊卡那一包變了（含總開關）＝全部（下一場、已花、這週跑步＋5 種卡）；
+    /// 行程變了＝下一場；有沒有「錢」變了＝已花；這週跑步變了＝這週跑步＋平常跑步的時間（卡上的公里、週日差幾公里）
+    static func relevanceKinds(old: WatchPackage?, new: WatchPackage) -> [String] {
+        let everything = [WatchWidgetKind.nextUp, WatchWidgetKind.spent, WatchWidgetKind.runWeek] + WatchWidgetKind.cards
+        guard let old else { return everything }
+        if old.relevanceCards != new.relevanceCards { return everything }
+        var kinds: [String] = []
+        if old.life != new.life {
+            kinds.append(WatchWidgetKind.nextUp)
+        }
+        if (old.money == nil) != (new.money == nil) {
+            kinds.append(WatchWidgetKind.spent)
+        }
+        if old.runWeek != new.runWeek {
+            kinds.append(WatchWidgetKind.runWeek)
+            kinds.append(WatchWidgetKind.cardRun)
         }
         return kinds
     }
