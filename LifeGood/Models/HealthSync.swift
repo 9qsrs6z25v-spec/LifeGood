@@ -33,6 +33,7 @@ import Combine
 //   叫 syncForWatchRun：不等 15 分鐘——已經在 LifeGood（或帳上不再帶進來）的編號先拿掉；剩下的有空字串（手錶讀不到編號）、
 //   或 Apple 健康已經找得到（fetchWorkouts(uuids:)，還沒同步到 iPhone 的 Apple 健康就找不到）才同步一次；同步完帶進來的拿掉。
 //   找不到就等下次回前景再找；24 小時後 WatchRunFlags.pending 自己不給了（交給原本的 15 分鐘自動同步）。
+//   同步時 Apple 健康已經找得到、卻沒帶進來的（不到 1 分鐘的那一趟）也拿掉，不再為它每次回前景都整份同步（驗證 v5-1）。
 // • 亮點比較的那一堆改叫 WorkoutFacts.highlightPool（iPhone 存檔 makeSession 也用同一支；v4 adjudicate §4-3 的相反方向）。
 
 /// [v25.554] 存檔前完整的點（還沒簡化）：只放記憶體一下，寫進 Apple 健康時拿走（judge §6 v4「用簡化前的點」）。
@@ -173,17 +174,22 @@ final class HealthSyncCenter: ObservableObject {
         let remaining = ids.filter { !already.contains($0) }
         guard !remaining.isEmpty else { return }
         var go = remaining.contains("")
+        // [驗證 v5-1] 這次 Apple 健康已經找得到的編號（同步時 importWorkouts 看得到它們）
+        var foundIds = Set<String>()
         if !go {
             // 還沒同步到 iPhone 的 Apple 健康就找不到
             let found = await hk.fetchWorkouts(uuids: remaining)
+            foundIds = Set(found.map { $0.uuid })
             go = !found.isEmpty
         }
         // 都還找不到：下次回前景再找（24 小時內）
         guard go else { return }
         await sync(store: store)
-        // await 之後才讀 store：帶進來的（或不再帶進來的）編號、空字串拿掉（sim_v5.py after_sync_clear）
+        // await 之後才讀 store：帶進來的（或不再帶進來的）編號、空字串拿掉（sim_v5.py after_sync_clear）。
+        // [驗證 v5-1] 同步時 Apple 健康已經有、卻還是沒帶進來的也拿掉（手錶〔存下來〕的不到 1 分鐘那一趟：帶進來的規矩不要它）——
+        // 再找也一樣，不然 24 小時內每次打開健康頁、回前景都會整份同步一次
         let known = knownUUIDs(store)
-        WatchRunFlags.clear(remaining.filter { $0.isEmpty || known.contains($0) })
+        WatchRunFlags.clear(remaining.filter { $0.isEmpty || known.contains($0) || foundIds.contains($0) })
     }
 
     /// 立即同步（設定小頁「立即同步」、打開開關之後）：不跳任何權限框（新的權限走 requestAccess）

@@ -322,9 +322,26 @@ enum WatchRunWeekText {
         if id.hasPrefix(ownPrefix) {
             let raw = String(id.dropFirst(ownPrefix.count))
             guard let e = own.first(where: { $0.id.uuidString == raw }) else { return nil }
-            return ownDetail(e, now: now)
+            // [驗證 v5-2] 看著這一頁的時候 iPhone 帶進來了（包裡這週那幾趟有同一個 Apple 健康編號）：換成 iPhone 那一份
+            // （名字、亮點、形狀），不再一直寫「iPhone 帶進來後會算好」
+            if let wid = e.workoutId, !wid.isEmpty,
+               let r = package?.runWeek?.recent?.first(where: { $0.workoutId == wid }) {
+                return phoneDetail(r, own: own, now: now)
+            }
+            var d = ownDetail(e, now: now)
+            // [驗證 v5-2] 帶進來又在 iPhone 刪掉（seen 有、recent 沒有）：不會再算了，灰字不寫（同 summaryLines）
+            if let wid = e.workoutId, package?.runWeek?.seen.contains(wid) == true {
+                d.lines = .blank
+                d.privateLines = .blank
+            }
+            return d
         }
         guard let r = package?.runWeek?.recent?.first(where: { $0.id == id }) else { return nil }
+        return phoneDetail(r, own: own, now: now)
+    }
+
+    /// iPhone 送的那一趟（名字、亮點、形狀；手錶自己也記過的補心率、iPhone 沒形狀時用手錶存的小圖）
+    static func phoneDetail(_ r: WatchRunRecent, own: [WatchRunLogEntry], now: Date) -> WatchRunDetail {
         let sport = WatchSport(rawValue: r.sport) ?? .run
         var heart: String? = nil
         var shape = r.shape ?? []
@@ -364,6 +381,10 @@ enum WatchRunWeekText {
     /// 沒存好（saved＝false）、沒有編號：不寫。hide＝手腕放下（「老路線・第 12 次」）
     static func summaryLines(_ r: WatchRunRecord, saved: Bool, package: WatchPackage?, hide: Bool) -> WatchRunHighlightLines {
         guard saved, let id = r.workoutId, !id.isEmpty else { return .blank }
+        // [驗證 v5-3] 不到 1 分鐘的那一趟（〔存下來〕的；開始到結束，同 iPhone 帶進來、③ 的規矩）：iPhone 不會帶進來，灰字不寫
+        if (r.end ?? r.updatedAt).timeIntervalSince(r.start) < WatchRunMath.shortSeconds {
+            return .blank
+        }
         let w = package?.runWeek
         if let h = w?.latest, h.workoutId == id {
             return lines(h, hideNames: hide)

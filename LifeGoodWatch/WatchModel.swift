@@ -280,7 +280,8 @@ final class WatchModel: ObservableObject {
             selection = .run
             path = []
         case .healthRun:
-            // [v5] 錶面「這週跑步」角落跑者：③ 跑步＋準備頁（直接到〔開始〕；跑步中、摘要開著時不動）
+            // [v5] 錶面「這週跑步」角落跑者：③ 跑步＋準備頁（直接到〔開始〕）。摘要開著先收起來（同 ③〔▶ 開始跑步〕，
+            // WorkoutManager.openPrep）；倒數、跑步中、存檔中不動
             selection = .run
             path = []
             openRunPrep()
