@@ -2228,20 +2228,25 @@ extension WealthCardData {
     }
 
     /// [v25.577] ④ 定期轉帳的先後：每週的在前（照星期幾，日 1…六 7）→ 每月照幾日（31＝最後一天排最後）→ 建立的先後（order 不重複，
-    /// 所以排出來是固定的）；不認得的週期排最後
+    /// 所以排出來是固定的）；不認得的週期排最後。
+    /// [v25.583] 每兩週跟每週排一起（照星期幾）；每年排在每月後面（照幾月幾日：month＝規則的 month，沒存＝第一期那個月）
     fileprivate static func transferLinkSorted(_ list: [WealthFacts.TransferRule]) -> [WealthFacts.TransferRule] {
         list.sorted { p, q in transferLinkRank(p) < transferLinkRank(q) }
     }
 
     fileprivate static func transferLinkRank(_ t: WealthFacts.TransferRule) -> (Int, Int, Int) {
         switch t.rule.cycleKind {
-        case .weekly?:
+        case .weekly?, .biweekly?:
             let w: Int = t.firstDay.map { d in WealthCal.calendar.component(.weekday, from: d) } ?? 0
             return (0, w, t.order)
         case .monthly?:
             return (1, t.rule.day ?? 1, t.order)
+        case .yearly?:
+            let m: Int = t.rule.month ?? t.firstDay.map { d in WealthCal.calendar.component(.month, from: d) } ?? 1
+            let d: Int = t.rule.day ?? t.firstDay.map { x in WealthCal.calendar.component(.day, from: x) } ?? 1
+            return (2, m * 100 + d, t.order)
         case nil:
-            return (2, 0, t.order)
+            return (3, 0, t.order)
         }
     }
 
