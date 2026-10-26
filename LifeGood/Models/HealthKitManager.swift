@@ -691,8 +691,9 @@ final class HealthKitManager: ObservableObject {
     /// [v25.586] 這一筆是不是在 Apple Watch 上記的：來源版本的機型（productType，例「Watch6,4」）是 Watch 開頭，
     /// 或記錄的裝置型號（HKDevice.model）是「Watch」。iPhone 記的是「iPhone…」／「iPhone」
     private static func recordedOnWatch(_ object: HKObject) -> Bool {
-        if let p = object.sourceRevision.productType, p.hasPrefix("Watch") { return true }
-        if let m = object.device?.model, m.hasPrefix("Watch") { return true }
+        // 大小寫都認（Apple 文件的例子是小寫「watch2,4」，實機多半是「Watch6,4」）
+        if let p = object.sourceRevision.productType, p.lowercased().hasPrefix("watch") { return true }
+        if let m = object.device?.model, m.lowercased().hasPrefix("watch") { return true }
         return false
     }
 

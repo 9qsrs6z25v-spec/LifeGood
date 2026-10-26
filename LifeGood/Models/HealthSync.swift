@@ -143,6 +143,12 @@ final class HealthSyncCenter: ObservableObject {
     /// 上次同步的時間（@AppStorage("health_hk_last_sync")，秒；0＝沒同步過）
     static let lastSyncKey = "health_hk_last_sync"
 
+    /// [v25.586] LifeGood 手錶記的往回補過一次沒有（true＝補過）。以前 isOwn 把它們當成 iPhone 自己寫的跳過，
+    /// 上次同步往回 1 天以前的那幾趟照一般的同步永遠讀不到，修好之後第一次同步往回補一次
+    private static let watchBackfillKey = "health_hk_watch_backfill_v25586"
+    /// [v25.586] 往回補幾天（手錶 App 25.573 才有，30 天一定包得住）
+    private static let watchBackfillDays: TimeInterval = 30
+
     private var hk: HealthKitManager { HealthKitManager.shared }
 
     /// 上次同步的時間；沒同步過是 nil
@@ -205,13 +211,17 @@ final class HealthSyncCenter: ObservableObject {
         let now = Date()
         // 上次同步往回 1 天（第一次 90 天）；HealthKit 那邊用結束時間篩（重疊就算）
         let since = WorkoutFacts.healthSyncStart(lastSync: lastSyncDate, now: now)
+        // [v25.586] 還沒往回補過：這次多讀 30 天、只多帶 LifeGood 手錶記的（見 importWorkouts）；整次同步做完才記補過
+        let backfill = !UserDefaults.standard.bool(forKey: Self.watchBackfillKey)
+        let watchSince: Date? = backfill ? now.addingTimeInterval(-Self.watchBackfillDays * 86_400) : nil
 
         let measured = await syncProfile(since: since, store: store)
-        let added = await importWorkouts(since: since, now: now, store: store)
+        let added = await importWorkouts(since: since, now: now, store: store, watchSince: watchSince)
         let routes = await refreshOld(now: now, skip: Set(added), store: store)
         await findLegacyRoutes(now: now, store: store)
 
         UserDefaults.standard.set(now.timeIntervalSince1970, forKey: Self.lastSyncKey)
+        if backfill { UserDefaults.standard.set(true, forKey: Self.watchBackfillKey) }
         lastMessage = Self.summary(workouts: added.count, weights: measured.weights,
                                    vitals: measured.vitals, routes: routes)
     }
@@ -293,8 +303,12 @@ final class HealthSyncCenter: ObservableObject {
 
     /// 手錶的運動帶進來（不到 1 分鐘的不要）；回傳這次帶進來的編號。
     /// HealthKitManager 已經跳過 LifeGood 自己寫的、excluding 裡的；寫之前用最新的 store 再擋一次重複編號，一次 append
-    private func importWorkouts(since: Date, now: Date, store: LifeStore) async -> [String] {
-        let imported = await hk.fetchWorkouts(since: since, excluding: knownUUIDs(store))
+    /// [v25.586] watchSince（往回補那一次才有）：從 watchSince 起讀，since 以前的只留 LifeGood 手錶記的
+    /// （內建體能訓練、以前從 LifeGood 刪掉還沒記帳的不會被多帶回來）；nil＝照舊從 since 起
+    private func importWorkouts(since: Date, now: Date, store: LifeStore, watchSince: Date? = nil) async -> [String] {
+        let from = min(since, watchSince ?? since)
+        let read = await hk.fetchWorkouts(since: from, excluding: knownUUIDs(store))
+        let imported = read.filter { $0.end >= since || $0.byLifeGoodWatch }
         // [手錶 v4] await 之後的 store 當比較的那一堆（名字、亮點跟比它早的比）；舊到新一趟一趟組、組好就放進去
         // （同一次帶進來兩趟同一條路，後一趟是第 13 次）
         let ordered = imported.sorted { $0.start < $1.start }
