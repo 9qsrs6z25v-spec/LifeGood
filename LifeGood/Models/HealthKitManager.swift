@@ -46,6 +46,8 @@ import CoreLocation
 //   暫停／繼續、手錶的自動暫停 motionPaused／motionResumed 配對成 WorkoutPause；內建體能訓練也有）、kmTimes（附註
 //   LifeGood.kmTimes 的每公里移動秒數；不是 LifeGood 手錶記的、沒有、讀不懂是 nil）。三欄都只在 makeImported 算。
 // - isOwn 一字不動：只認 iPhone 自己（手錶 App 的 id 不一樣，照樣當成手錶的帶進來；刪除照舊回 .notOurs）。
+//   [v25.586] 實機發現：手錶 LifeGood 存的運動，在 iPhone 上來源是 iPhone App 的 id（不是 .watchkitapp），被 isOwn 跳過、
+//   帶不進來。isOwn 改成「iPhone 的 id，而且不是在手錶上記的、附註不是 watch」才算自己（見 isOwn、recordedOnWatch）。
 
 @MainActor
 final class HealthKitManager: ObservableObject {
@@ -613,9 +615,12 @@ final class HealthKitManager: ObservableObject {
         let moving = (duration.isFinite && duration > 0) ? duration : span
         // [手錶 v4] 是不是 LifeGood 手錶記的（來源 bundle id、附註 LifeGood.recorder）、暫停、每公里時間（只有 LifeGood 手錶寫）
         let recorder = w.metadata?[WatchRunMeta.recorderKey] as? String
+        // [v25.586] 來源是 iPhone App 的 id、但在手錶上記的（Apple 把手錶 LifeGood 存的標成 iPhone 的 id）也算手錶記的
+        let sameApp = w.sourceRevision.source.bundleIdentifier == HKSource.default().bundleIdentifier
         let byWatch = WatchRunImport.isLifeGoodWatch(bundleId: w.sourceRevision.source.bundleIdentifier,
                                                      appBundleId: HKSource.default().bundleIdentifier,
                                                      recorder: recorder)
+            || (sameApp && Self.recordedOnWatch(w))
         let pauses = WatchRunImport.pauses(Self.importEvents(w), start: w.startDate, end: w.endDate)
         let kmText = w.metadata?[WatchRunMeta.kmTimesKey] as? String
         let kmTimes: [Double]? = byWatch ? WatchRunMeta.decodeTimes(kmText) : nil
@@ -670,8 +675,25 @@ final class HealthKitManager: ObservableObject {
 
     /// [v25.554] 是不是 LifeGood 自己寫進去的（來源是這個 App）。
     /// [手錶 v4] 手錶 App（.watchkitapp）不是 isOwn，照樣帶進來；是不是 LifeGood 手錶記的看 byLifeGoodWatch
+    /// [v25.586] 手錶 LifeGood 存的運動，Apple 在 iPhone 上把來源標成「iPhone App 的 id」（不是 .watchkitapp），
+    /// 以前被當成 iPhone 自己寫的跳過、永遠帶不進健康頁。現在 iPhone 的 id 之外還要「不是在手錶上記的」才算自己：
+    /// 在手錶上記的（來源版本的機型是 Watch…、或裝置型號是 Watch）、附註 LifeGood.recorder 是「watch …」的都不算
     private static func isOwn(_ object: HKObject) -> Bool {
-        object.sourceRevision.source.bundleIdentifier == HKSource.default().bundleIdentifier
+        guard object.sourceRevision.source.bundleIdentifier == HKSource.default().bundleIdentifier else { return false }
+        if recordedOnWatch(object) { return false }
+        if let w = object as? HKWorkout,
+           WatchRunImport.isWatchRecorder(w.metadata?[WatchRunMeta.recorderKey] as? String) {
+            return false
+        }
+        return true
+    }
+
+    /// [v25.586] 這一筆是不是在 Apple Watch 上記的：來源版本的機型（productType，例「Watch6,4」）是 Watch 開頭，
+    /// 或記錄的裝置型號（HKDevice.model）是「Watch」。iPhone 記的是「iPhone…」／「iPhone」
+    private static func recordedOnWatch(_ object: HKObject) -> Bool {
+        if let p = object.sourceRevision.productType, p.hasPrefix("Watch") { return true }
+        if let m = object.device?.model, m.hasPrefix("Watch") { return true }
+        return false
     }
 
     /// [v25.554] 手錶量的爬升（公尺）：運動附註的 HKMetadataKeyElevationAscended；沒有、單位不是長度、不合理的都是 nil（不知道，不是 0）

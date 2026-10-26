@@ -6,7 +6,8 @@ import Foundation
 //
 // • WatchRunImport：HealthKitManager.makeImported／HealthSyncCenter.importedSession 帶進手錶那一趟時用的純規則——
 //   是不是 LifeGood 手錶記的（isLifeGoodWatch：bundle id 是 iPhone 的 id＋「.watchkitapp」開頭，或附註 LifeGood.recorder
-//   是「watch …」；isOwn 照舊只認 iPhone 自己，手錶記的照樣當成手錶的帶進來）、Apple 健康的暫停事件配成暫停清單（pauses：
+//   是「watch …」；[v25.586] Apple 在 iPhone 上把手錶 LifeGood 存的來源標成 iPhone 的 id，所以 isOwn 另外看「在手錶上記的」、
+//   附註 isWatchRecorder，手錶記的照樣當成手錶的帶進來）、Apple 健康的暫停事件配成暫停清單（pauses：
 //   手錶的自動暫停 motionPaused 記成 auto）、LifeGood.kmTimes 換成每公里分段（splits）、路線照暫停切段（segmented：
 //   暫停前後不連線，最快幾公里也不會把暫停那幾分鐘算進去）。
 // • WatchRunWeekBuilder：WatchExtrasWriter 寫手錶快取時算這週跑步（WatchRunWeek）：跟健康頁看板同一套 WorkoutFacts；
@@ -35,6 +36,12 @@ enum WatchRunImport {
         if !base.isEmpty && bundleId.hasPrefix(base + watchBundleSuffix) {
             return true
         }
+        return isWatchRecorder(recorder)
+    }
+
+    /// [v25.586] LifeGood.recorder 附註是不是手錶寫的（「watch」／「watch 25.580」）。
+    /// 手錶 LifeGood 存的運動，Apple 在 iPhone 上把來源標成 iPhone App 的 id（不是 .watchkitapp），所以要靠這個附註分辨
+    static func isWatchRecorder(_ recorder: String?) -> Bool {
         guard let r = recorder?.trimmingCharacters(in: .whitespacesAndNewlines), !r.isEmpty else { return false }
         return r == WatchRunMeta.recorderPrefix || r.hasPrefix(WatchRunMeta.recorderPrefix + " ")
     }
