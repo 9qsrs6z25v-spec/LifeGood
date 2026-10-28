@@ -388,6 +388,12 @@ struct SubExportSnapshot {
     /// [v25.590 轉組織 v1a-1] 現在負責、而且是從交接單收到的機台 id → 交到這位同仁手上的那一刻
     ///（OrgMoveIndex.receivedByItem、toId 是這位同仁才算；不看膠囊期間）。時間軸〔只列接手之後〕用
     var equipmentSince: [UUID: Date] = [:]
+    /// [v25.593 轉組織 v2] 已轉出：〔在我這裡的時候〕的最後一天「2026-11-01」（轉出生效日；OrgMovePlan.whileMineEndKey）。在職＝nil
+    var whileMineEndKey: String? = nil
+    /// [v25.593 轉組織 v2] 文字版部門那一行後面「（11/1 轉出）」「（10/28 離職）」（OrgMovePlan.exportDeptSuffix）。在職＝nil
+    var deptSuffix: String? = nil
+    /// [v25.593 轉組織 v2] 已轉出（選項頁多〔在我這裡的時候〕、圖片版看板多一顆「已轉出」膠囊；export design §5.4）
+    var isArchived: Bool { whileMineEndKey != nil }
 
     /// 抽一次快照。mentioned 由卡片算好傳進來（`mentionedItemsCache`；很貴，不在選項頁重掃，design §6.4-8）。
     @MainActor
@@ -585,12 +591,30 @@ struct SubExportSnapshot {
             let world = OrgMoveWorld(store: store)
             let rows = OrgMovePlan.historyRows(personId: subordinateId, book: store.orgMoves, world: world)
             for row in rows where !row.isUndone {
+                // [v25.593 轉組織 v2] 一行不再套兩層括號、調出／離職／退休／回到我的部屬前面多那個字（historyLineText）。
+                // 要退回這一件：text 改回 `row.detail + "（" + row.sub + "）"`
+                let text = historyLineText(row, move: store.orgMoves.move(row.moveId))
                 snap.orgHistory.append(SubExportModel.HistoryLine(id: row.moveId, date: row.date,
                                                                   kind: SubExportModel.HistoryLine.orgMoveKind,
-                                                                  text: row.detail + "（" + row.sub + "）", note: ""))
+                                                                  text: text, note: ""))
             }
         }
+        // [v25.593 轉組織 v2] 已轉出（export design §1.3、§5.4）：〔在我這裡的時候〕的尾、部門那行的尾巴。
+        // 交接單算的（OrgMoveIndex.archived），部屬身上沒有欄位。要退回這一件：刪這兩行與上面三個欄位
+        snap.whileMineEndKey = OrgMovePlan.whileMineEndKey(personId: subordinateId)
+        snap.deptSuffix = OrgMovePlan.exportDeptSuffix(personId: subordinateId)
         return snap
+    }
+
+    /// [v25.593 轉組織 v2] 歷程一行（v1b adjudicate §4-2 第 3 點、v2 brief §1-19／§4-16）：
+    /// 「製造一課 P1 → 設備課 P2（交出去 9・跟著 5・11/1 才改部門）」——sub 裡的「（」換「・」、「）」拿掉，不再套兩層括號；
+    /// sub 是空的（回到我的部屬）不加括號；調出、離職、退休、回到我的部屬前面多那個字：
+    /// 「調出　製造一課 P1 → 品保課 P1（交出去 9・跟著 3）」「回到我的部屬　品保課 P1」（轉組織不加）
+    static func historyLineText(_ row: OrgMoveHistoryRow, move: OrgMove?) -> String {
+        let sub = row.sub.replacingOccurrences(of: "（", with: "・").replacingOccurrences(of: "）", with: "")
+        let body: String = sub.isEmpty ? row.detail : row.detail + "（" + sub + "）"
+        guard let m = move, m.isLeaving || m.isBack else { return body }
+        return OrgMovePlan.historyWord(m) + "　" + body
     }
 
     /// 交接單上的名字快照（去頭尾空白；空的寫「這位同仁」）
@@ -869,7 +893,11 @@ enum SubExportComposer {
     // MARK: 期間
 
     /// 期間的頭尾（那一天 00:00，含頭含尾；nil＝不限）
-    static func periodRange(_ o: SubExportOptions, joinDate: Date?, now: Date, cal: Calendar) -> (start: Date?, end: Date?) {
+    /// [v25.593 轉組織 v2] endKey：〔在我這裡的時候〕的最後一天（已轉出＝轉出生效日「2026-11-01」，SubExportSnapshot.whileMineEndKey）；
+    /// nil＝這位同仁還在＝到今天（記住的是這一顆、這次開的人還在；design §2.5 斷言 27）。呼叫端只有 resolve 一處。
+    /// 要退回這一件：刪 endKey 參數，.whileMine 那一段改回 `(joinDate…, today)`
+    static func periodRange(_ o: SubExportOptions, joinDate: Date?, now: Date, cal: Calendar,
+                            endKey: String? = nil) -> (start: Date?, end: Date?) {
         let today = cal.startOfDay(for: now)
         switch o.period {
         case .all:
@@ -895,9 +923,16 @@ enum SubExportComposer {
             if let s, let e, s > e { return (e, s) }   // 記住的兩個日子顛倒了就對調，不出空的一份
             return (s, e)
         case .whileMine:
-            // v2 起：已轉出的人＝轉進來（或入職）～轉出生效日；這版只有「還在的人」＝入職～今天
-            return (joinDate.map { cal.startOfDay(for: $0) }, today)
+            // v2 起：已轉出的人＝入職～轉出生效日（轉進來那天是 v4）；還在的人＝入職～今天
+            let start: Date? = joinDate.map { cal.startOfDay(for: $0) }
+            return (start, whileMineEnd(endKey, today: today, cal: cal))
         }
+    }
+
+    /// [v25.593 轉組織 v2]〔在我這裡的時候〕的尾：轉出生效日那天 00:00（讀不懂、沒有＝今天）
+    static func whileMineEnd(_ endKey: String?, today: Date, cal: Calendar) -> Date {
+        guard let k = endKey, let d = OrgMovePlan.date(fromKey: k) else { return today }
+        return cal.startOfDay(for: d)
     }
 
     /// 這一天在不在期間裡（nil 日子只在「全部」算在內）
@@ -1183,7 +1218,8 @@ enum SubExportComposer {
 
     static func resolve(_ s: SubExportSnapshot, _ o: SubExportOptions, excludedMeetings: Set<UUID>,
                         now: Date, cal: Calendar = SubExportComposer.gregorian) -> SubExportModel {
-        let range = periodRange(o, joinDate: s.joinDate, now: now, cal: cal)
+        // [v25.593 轉組織 v2] 已轉出的人〔在我這裡的時候〕到轉出生效日。要退回這一件：拿掉 endKey 那個參數
+        let range = periodRange(o, joinDate: s.joinDate, now: now, cal: cal, endKey: s.whileMineEndKey)
         let rs = range.start, re = range.end
         var m = SubExportModel(snapshot: s, options: o, rangeStart: rs, rangeEnd: re, now: now,
                                calendar: cal, excludedMeetings: excludedMeetings)
@@ -1455,7 +1491,8 @@ enum SubExportComposer {
         var dept: [String] = []
         if !trim(s.department).isEmpty { dept.append(s.department) }
         if !s.plantArea.isEmpty { dept.append(s.plantArea + " 廠區") }
-        if !dept.isEmpty { L.append("🏢 部門：" + dept.joined(separator: "・")) }
+        // [v25.593 轉組織 v2] 已轉出：「🏢 部門：品保課（11/1 轉出）」（export design §5.4）。要退回這一件：拿掉 `+ (s.deptSuffix ?? "")`
+        if !dept.isEmpty { L.append("🏢 部門：" + dept.joined(separator: "・") + (s.deptSuffix ?? "")) }
         if let jd = s.joinDate {
             var row = "📅 入職：" + ymd(jd, cal: cal)
             if let y = s.seniority { row += "（\(y) 年資歷）" }

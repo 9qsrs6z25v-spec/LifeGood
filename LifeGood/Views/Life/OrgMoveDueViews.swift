@@ -20,6 +20,10 @@ import SwiftUI
 //  〔知道了〕整頁關（brief §4-11 擇一：在 rescheduleSheet 裡自己跳完再關）。改成以後的照規矩：先關頁、下一個 runloop 才寫。
 // 要退回 G2 這一版：整個檔換回上面說的骨架（modifier 直接回 content、卡片 EmptyView()、三張 sheet 只有標題與〔取消〕／〔知道了〕），
 // 刪掉 OrgMoveBirthdayRetitle 與兩個環境值（交接單頁那兩行 .environment 一起刪）。
+//
+// [v25.593 轉組織 v2] 調出、離職、退休（orgmove/build/v2/brief.md §4-6）：「今天生效」那張的字（dueTitle、「✓ 已收進「已轉出」」）主控接好了；
+// 這裡只改〔現在套用〕〔只做交接〕確認框的字（applyAsk／applyWhat／skipAsk：「現在套用 11/1 的調出？」「…收進部屬名單最下面「已轉出」」）。
+// 換單位、只換廠區的字一個都沒變。
 
 /// 提示列、「今天生效」卡上按了哪一顆（呼叫端設這個；modifier 負責訂閱、確認框、寫 store、跳「今天生效」）
 struct OrgMoveHintActionRequest: Identifiable, Equatable {
@@ -183,21 +187,43 @@ struct OrgMoveHintActionsModifier: ViewModifier {
     }
 
     /// 「現在套用 11/1 的轉組織？」「王小明 製造一課 → 設備課（P1 → P2）：部門、廠區、名片、組織圖現在改。」
+    /// [v25.593 轉組織 v2] 調出、離職、退休：「現在套用 11/1 的調出？」「王小明 製造一課 → 品保課（調出）：部門、廠區、名片、組織圖現在改，
+    /// 收進部屬名單最下面「已轉出」（卡片、歷史、分數都留著）。」（applyWhat）。要退回這一件：title 的 historyWord 改回「轉組織」、what 改回原本那一行
     private func applyAsk(_ m: OrgMove) -> OMDueAsk? {
         guard OrgMovePlan.isDue(m, todayKey: OrgMovePlan.dayKey(Date())) else { return nil }
-        let head = OrgMovePlan.dueTitle(m, world: OrgMoveWorld(store: lifeStore))
+        let world = OrgMoveWorld(store: lifeStore)
+        let head = OrgMovePlan.dueTitle(m, world: world)
         // 〔11/1 一起做〕排好的：交接也是這時候做
-        let what = m.isPlanned ? "交接單上的事現在交出去；部門、廠區、名片、組織圖現在改。" : "部門、廠區、名片、組織圖現在改。"
-        return OMDueAsk(moveId: m.id, title: "現在套用 \(OrgMovePlan.shortDay(m.effectiveKey)) 的轉組織？",
+        let lead = m.isPlanned ? "交接單上的事現在交出去；" : ""
+        let what = lead + Self.applyWhat(m, world: world)
+        return OMDueAsk(moveId: m.id, title: "現在套用 \(OrgMovePlan.shortDay(m.effectiveKey)) 的\(OrgMovePlan.historyWord(m))？",
                         message: head + "：" + what, first: "現在套用", firstOp: .applyNow, firstDestructive: false,
                         cancelLabel: "取消")
     }
 
+    /// [v25.593 轉組織 v2]〔現在套用〕確認字後半：換單位、只換廠區照舊「部門、廠區、名片、組織圖現在改。」；
+    /// 調出：「…現在改，收進部屬名單最下面「已轉出」（…）。」（部門照舊的調出：「部門照舊；收進…」）；
+    /// 離職、退休：「組織圖標成已離職、收進…」（沒有連到的組織人員就不寫組織圖）。不寫分數、考評
+    static func applyWhat(_ m: OrgMove, world: OrgMoveWorld) -> String {
+        guard m.isLeaving else { return "部門、廠區、名片、組織圖現在改。" }
+        let archive = "收進部屬名單最下面「已轉出」（卡片、歷史、分數都留著）。"
+        if m.isLeaveCompany {
+            let org = world.orgPerson(linkedTo: m.personId) != nil ? "組織圖標成已離職、" : ""
+            return org + archive
+        }
+        let plantChanged = (m.to.plant ?? "") != (m.from.plant ?? "")
+        if m.changesDept || plantChanged { return "部門、廠區、名片、組織圖現在改，" + archive }
+        return "部門照舊；" + archive
+    }
+
     /// 「只做交接？」「部門、廠區照現在的，不改。原本 11/1 要調設備課；生效時部門已經不是單上寫的，部門那段沒做」
+    /// [v25.593 轉組織 v2] 調出（新部門生效前被刪了）：多「照樣收進「已轉出」」（skipOrgMoveOrg 記 keepDept＝組織那段做完＝已轉出）。
+    /// 要退回這一件：keep 改回「部門、廠區照現在的，不改。」
     private func skipAsk(_ m: OrgMove) -> OMDueAsk? {
         guard m.orgPending else { return nil }
         let note = OrgMovePlan.cancelNoteText(m, world: OrgMoveWorld(store: lifeStore), now: Date(), skip: true)
-        let head = m.isPlanned ? "交接單上的事現在交出去；部門、廠區照現在的，不改。" : "部門、廠區照現在的，不改。"
+        let keep = m.isLeaving ? "部門、廠區照現在的，不改；照樣收進「已轉出」。" : "部門、廠區照現在的，不改。"
+        let head = m.isPlanned ? "交接單上的事現在交出去；" + keep : keep
         return OMDueAsk(moveId: m.id, title: "只做交接？", message: head + note, first: "只做交接", firstOp: .skipOrg,
                         firstDestructive: false, cancelLabel: "取消")
     }

@@ -223,7 +223,8 @@ struct MyCalendarView: View {
                         upcomingMilestonesSection(milestones: upcomingMS)
                     }
                     // 部屬事項（請假 / 會議 / 任務 / 未完成會議 / 未完成任務）
-                    if !lifeStore.subordinates.isEmpty {
+                    // [v25.593 轉組織 v2] 只看在職的（全部都已轉出＝不出這一區）
+                    if !lifeStore.activeSubordinates.isEmpty {
                         subordinateAgendaSection(date: startOfSelectedDay)
                     }
                 }
@@ -1202,9 +1203,11 @@ struct MyCalendarView: View {
     }()
     private func subAgendaTime(_ d: Date) -> String { Self.subAgendaFmt.string(from: d) }
 
+    // [v25.593 轉組織 v2] 部屬事項（請假、會議、報告、任務、未完成、已完成）只列在職的（judge §3.6、v2 brief §6-1）；
+    // 搜尋照舊全部（找得到已轉出那位的舊紀錄）。要退回這一件：這幾支的 activeSubordinates 改回 subordinates
     private func subLeaves(on date: Date) -> [(sub: Subordinate, rec: SubordinateRecord)] {
         let d = calendar.startOfDay(for: date)
-        return lifeStore.subordinates.flatMap { sub in
+        return lifeStore.activeSubordinates.flatMap { sub in
             sub.records.filter { r in
                 guard r.type == .leave else { return false }
                 let s = calendar.startOfDay(for: r.date)
@@ -1214,7 +1217,7 @@ struct MyCalendarView: View {
         }
     }
     private func subMeetings(on date: Date) -> [(sub: Subordinate, meeting: SubordinateMeeting)] {
-        lifeStore.subordinates.flatMap { sub in
+        lifeStore.activeSubordinates.flatMap { sub in
             sub.meetings.filter { calendar.isDate($0.date, inSameDayAs: date) }.map { (sub: sub, meeting: $0) }
         }
     }
@@ -1226,7 +1229,7 @@ struct MyCalendarView: View {
     private func subReports(on date: Date) -> [(sub: Subordinate, report: WeeklyReport, status: SubReportStatus)] {
         let wk = calendar.dateInterval(of: .weekOfYear, for: date)
             ?? DateInterval(start: calendar.startOfDay(for: date), duration: 86_400)
-        return lifeStore.subordinates.flatMap { sub in
+        return lifeStore.activeSubordinates.flatMap { sub in
             sub.weeklyReports.compactMap { r -> (sub: Subordinate, report: WeeklyReport, status: SubReportStatus)? in
                 if r.isCompleted { return nil }                      // 已完成 → 移至「已完成」收合卡
                 let inWeek = wk.contains(r.date)
@@ -1262,7 +1265,7 @@ struct MyCalendarView: View {
     /// 任務日期落在當日但截止日不在當日的，部屬總覽的「當日任務」已涵蓋——
     /// 行事曆這個區塊只管「今天非處理不可」的緊急項目。
     private func subTasks(on date: Date) -> [(sub: Subordinate, task: SubordinateTask)] {
-        lifeStore.subordinates.flatMap { sub in
+        lifeStore.activeSubordinates.flatMap { sub in
             sub.tasks.filter { t in
                 guard !t.isCompleted, let due = t.dueDate else { return false }
                 return calendar.isDate(due, inSameDayAs: date)
@@ -1273,7 +1276,7 @@ struct MyCalendarView: View {
     /// 那一場什麼時候開」，就必須帶著場次，allItems 把那個資訊攤掉了。
     private var subIncompleteMeetingItems: [(sub: Subordinate, meeting: SubordinateMeeting,
                                              ctx: SubordinateMeeting.ItemContext)] {
-        lifeStore.subordinates.flatMap { sub in
+        lifeStore.activeSubordinates.flatMap { sub in
             sub.meetings.flatMap { m in
                 m.itemContexts.filter { !$0.item.isCompleted }
                     .map { (sub: sub, meeting: m, ctx: $0) }
@@ -1281,7 +1284,7 @@ struct MyCalendarView: View {
         }.sorted { $0.meeting.date > $1.meeting.date }
     }
     private var subIncompleteTasks: [(sub: Subordinate, task: SubordinateTask)] {
-        lifeStore.subordinates.flatMap { sub in
+        lifeStore.activeSubordinates.flatMap { sub in
             sub.tasks.filter { !$0.isCompleted }.map { (sub: sub, task: $0) }
         }.sorted { ($0.task.dueDate ?? $0.task.date) < ($1.task.dueDate ?? $1.task.date) }
     }
@@ -1400,7 +1403,7 @@ struct MyCalendarView: View {
     /// 全部已完成的部屬項目（不限日期），供底部收合卡使用；點一下開啟該項目
     private var subCompletedEntries: [CompletedEntry] {
         var out: [CompletedEntry] = []
-        for sub in lifeStore.subordinates {
+        for sub in lifeStore.activeSubordinates {
             let who = sub.name.isEmpty ? "未命名" : sub.name
             for r in sub.weeklyReports where r.isCompleted {
                 out.append(CompletedEntry(id: r.id, kind: .report, title: r.topic,

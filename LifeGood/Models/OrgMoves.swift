@@ -249,6 +249,24 @@ struct OrgMove: Codable, Equatable, Identifiable {
 
     var isUndone: Bool { state == OrgMoveState.undone.rawValue }
     var isClosed: Bool { state == OrgMoveState.closed.rawValue || closedAt != nil }
+    // [v25.593 轉組織 v2] 調出、離職、退休、回到我的部屬（judge §2.2「已轉出也用算的」、§3.6；orgmove/build/v2/brief.md §2-1）。
+    // 不加任何存檔欄位：kind 本來就是字串（25.592 的 App 讀到不認得的 kind＝只顯示、不套用，存回去照原樣）。
+    // 要退回這一件：刪這 6 支，用到的地方改回 `kind == OrgMoveKind.move.rawValue && keepDept != true && …`
+    /// 只在記憶體轉成列舉（不認得的字＝nil）
+    var kindValue: OrgMoveKind? { OrgMoveKind(rawValue: kind) }
+    /// 調出我的管轄、離職、退休（生效後這位同仁收進「已轉出」）
+    var isLeaving: Bool { kindValue?.isLeaving == true }
+    /// 離職、退休（組織人員同時設成「已離職」；沒有新部門、廠區、職稱）
+    var isLeaveCompany: Bool { kindValue?.isLeaveCompany == true }
+    /// 回到我的部屬（已轉出的人〔回到我的部屬〕記的那一張；什麼都不搬）
+    var isBack: Bool { kind == OrgMoveKind.back.rawValue }
+    /// 部門有改（換單位或調出、不是〔照舊（只交接）〕、新部門跟舊的不一樣）。
+    /// v1a～v1b 寫成 `kind == "move" && keepDept != true && to.deptId != nil && to.deptId != from.deptId` 的地方都換成這一支（調出也改部門）
+    var changesDept: Bool {
+        (kindValue?.canChangeDept ?? false) && keepDept != true && to.deptId != nil && to.deptId != from.deptId
+    }
+    /// 組織那幾格做完了（生效了）：套用過、沒復原、不是排好／交了還沒改部門、沒墓碑。已轉出、班表照那天的部門都只看這種
+    var orgDone: Bool { wasApplied && !isUndone && !orgPending && deletedAt == nil }
     /// 已經套用過（復原的也算：歷程照樣列一行灰字）
     var wasApplied: Bool { appliedAt != nil || handedAt != nil }
     /// [v25.592 轉組織 v1b] 排好了、什麼都還沒做（〔11/1 一起做〕，生效那天才一起做）
@@ -305,6 +323,10 @@ struct OrgMove: Codable, Equatable, Identifiable {
         if !head.orgPending, head.cancelledAt == nil { head.cancelledAt = a.cancelledAt ?? b.cancelledAt }
         if !head.orgPending, head.cancelNote == nil { head.cancelNote = a.cancelNote ?? b.cancelNote }
         if aT == bT, head.lateRefIds == nil { head.lateRefIds = a.lateRefIds ?? b.lateRefIds }
+        // [v25.593 轉組織 v2] 離職、退休前組織人員是不是已離職（復原用；25.592 的 App 存回來會少這兩個）：哪一份有就補回。
+        // 要退回這一件：刪這兩行
+        if head.before != nil, head.before?.orgInactive == nil { head.before?.orgInactive = a.before?.orgInactive ?? b.before?.orgInactive }
+        if head.before != nil, head.before?.orgLeftDate == nil { head.before?.orgLeftDate = a.before?.orgLeftDate ?? b.before?.orgLeftDate }
         return head
     }
 
@@ -535,12 +557,19 @@ struct OrgMoveRestore: Codable, Equatable {
     var cardId: UUID?
     var cardDept: String?
     var cardJobTitle: String?
+    // [v25.593 轉組織 v2] 離職、退休會把組織人員設成「已離職」：套用前的樣子（復原放回）。新欄位 Optional＋decodeIfPresent＋init 預設 nil；
+    // 舊單沒有＝不影響。要退回這一件：刪這 2 個欄位與 init／init(from:)／CodingKeys 對應的那幾行
+    /// 套用前組織人員是不是已離職（nil＝舊單或沒有組織人員；復原時當 false）
+    var orgInactive: Bool?
+    /// 套用前組織人員的離職日
+    var orgLeftDate: Date?
 
     init(deptId: UUID? = nil, deptText: String? = nil, plant: String? = nil,
          gradeTitleId: UUID? = nil, jobTitle: String? = nil,
          orgPersonId: UUID? = nil, orgDeptId: UUID? = nil, orgJobTitle: String? = nil,
          orgGradeTitleId: UUID? = nil, createdOrgPerson: Bool? = nil,
-         cardId: UUID? = nil, cardDept: String? = nil, cardJobTitle: String? = nil) {
+         cardId: UUID? = nil, cardDept: String? = nil, cardJobTitle: String? = nil,
+         orgInactive: Bool? = nil, orgLeftDate: Date? = nil) {
         self.deptId = deptId
         self.deptText = deptText
         self.plant = plant
@@ -554,6 +583,8 @@ struct OrgMoveRestore: Codable, Equatable {
         self.cardId = cardId
         self.cardDept = cardDept
         self.cardJobTitle = cardJobTitle
+        self.orgInactive = orgInactive
+        self.orgLeftDate = orgLeftDate
     }
 
     init(from decoder: Decoder) throws {
@@ -571,11 +602,14 @@ struct OrgMoveRestore: Codable, Equatable {
         cardId = try? c.decodeIfPresent(UUID.self, forKey: .cardId)
         cardDept = try? c.decodeIfPresent(String.self, forKey: .cardDept)
         cardJobTitle = try? c.decodeIfPresent(String.self, forKey: .cardJobTitle)
+        orgInactive = try? c.decodeIfPresent(Bool.self, forKey: .orgInactive)
+        orgLeftDate = try? c.decodeIfPresent(Date.self, forKey: .orgLeftDate)
     }
 
     private enum CodingKeys: String, CodingKey {
         case deptId, deptText, plant, gradeTitleId, jobTitle, orgPersonId, orgDeptId, orgJobTitle
         case orgGradeTitleId, createdOrgPerson, cardId, cardDept, cardJobTitle
+        case orgInactive, orgLeftDate
     }
 }
 
@@ -703,6 +737,30 @@ enum OrgMoveKind: String {
     case move
     /// 只換廠區
     case plant
+    /// [v25.593 轉組織 v2] 調出我的管轄／離職／退休（生效後收進部屬名單最下面「已轉出」；judge §3.6、第 7 題）
+    case out, resign, retire
+    /// [v25.593 轉組織 v2] 回到我的部屬（已轉出的人按〔回到我的部屬〕記的一張：什麼都不搬、只讓這位同仁回到在職名單）
+    case back
+
+    /// 調出、離職、退休
+    var isLeaving: Bool { self == .out || self == .resign || self == .retire }
+    /// 離職、退休（組織人員同時設成「已離職」；第 ① 步沒有新部門、廠區、職稱）
+    var isLeaveCompany: Bool { self == .resign || self == .retire }
+    /// 這一種會改部門（換單位、調出；〔照舊（只交接）〕另外看 keepDept）
+    var canChangeDept: Bool { self == .move || self == .out }
+    /// 精靈「這次是」那一排膠囊的字；歷程、單頭也用（「調出我的管轄」「離職」「退休」）
+    var label: String {
+        switch self {
+        case .move: return "換單位"
+        case .plant: return "只換廠區"
+        case .out: return "調出我的管轄"
+        case .resign: return "離職"
+        case .retire: return "退休"
+        case .back: return "回到我的部屬"
+        }
+    }
+    /// 精靈「這次是」那一排（照這個順序；回到我的部屬不在這裡）
+    static let wizardCases: [OrgMoveKind] = [.move, .plant, .out, .resign, .retire]
 }
 
 enum OrgMoveState: String {
@@ -785,6 +843,9 @@ enum OrgMoveAction: String {
     case add, skip
     /// [v25.591 轉組織 v1a-2] 會議：到交接那天前一天結束（〔10/27 是最後一場〕）／舊的結束、新的在 toId 名下接著開（〔交給…〕）
     case end, newSeries
+    /// [v25.593 轉組織 v2] 交出去（給不在部屬名單的人＝組織人員 id，或給「我」＝OrgMovePlan.meId）：從原人拿掉、原樣存進交接單、
+    /// 提醒事項刪掉；不算完成、不算任何人的分（交接那一刻已逾期的扣分照留原人）。只有待辦、週報、自己加的一項有（judge §3.6）
+    case handOut
 }
 
 enum OrgMoveLineState: String {
@@ -904,7 +965,8 @@ enum OrgMoveIndex {
             for l in m.allLines {
                 if l.state == OrgMoveLineState.undone.rawValue { continue }
                 // [v25.591 轉組織 v1a-2] 〔不要了〕只記任務、週報、議程（班〔這幾天清掉〕沒有 refId，記在 handedShiftDays）
-                if l.action == OrgMoveAction.drop.rawValue, let r = l.refId,
+                // [v25.593 轉組織 v2]〔交出去〕的也記（一樣從原人拿掉了：合併匯入舊備份不讓它長回來）。要退回這一件：拿掉 `|| …handOut…`
+                if l.action == OrgMoveAction.drop.rawValue || l.action == OrgMoveAction.handOut.rawValue, let r = l.refId,
                    l.kind != OrgMoveLineKind.shifts.rawValue { dropped.insert(r) }
                 if l.action == OrgMoveAction.pending.rawValue, l.state == OrgMoveLineState.done.rawValue,
                    l.kind == OrgMoveLineKind.equipment.rawValue, let r = l.refId {
@@ -952,6 +1014,95 @@ enum OrgMoveIndex {
         receivedShiftDays = shiftDays
         handedShiftDays = handedDays
         plannedByPerson = plannedIndex(book)
+        // [v25.593 轉組織 v2] 已轉出、那天在哪個部門（只看組織那幾格做完了的單）。要退回這一件：刪這三行
+        let roster = rosterIndex(book)
+        archived = roster.archived
+        spans = roster.spans
+    }
+
+    // MARK: [v25.593 轉組織 v2] 已轉出、那天在哪個部門（judge §2.2、§3.6、§5-32；orgmove/build/v2/brief.md §2-1）
+
+    /// 已轉出的那一位：最後一張「調出／離職／退休／回到我的部屬」是調出、離職、退休
+    struct Archived: Equatable {
+        let moveId: UUID
+        /// "out"／"resign"／"retire"
+        let kind: String
+        /// 「2026-11-01」
+        let effectiveKey: String
+        /// 調出到哪個部門（離職、退休、部門照舊＝nil）
+        let toDeptId: UUID?
+        /// 單上的快照字「QA — 品保課」（部門之後改名、刪了也看得懂）
+        let toDeptLabel: String
+    }
+    /// 部屬 id → 已轉出的那一張（沒有＝在職）
+    static var archived: [UUID: Archived] = [:]
+
+    /// 某一段日子這位同仁在哪：untilKey 以前（不含）、上一段以後是 deptId／plant（archived＝那一段已經轉出了）
+    struct Span: Equatable {
+        /// 「2026-11-01」（不含這一天）
+        let untilKey: String
+        let deptId: UUID?
+        let plant: String
+        let archived: Bool
+    }
+    /// 部屬 id → 照 untilKey 排好的幾段（最後一段以後＝現在的部門、廠區；沒有＝一直是現在的）
+    static var spans: [UUID: [Span]] = [:]
+
+    static func isArchived(_ id: UUID?) -> Bool {
+        guard let id else { return false }
+        return archived[id] != nil
+    }
+
+    /// 在職的（小工具、會議通知、今天時間軸、挑人清單…都讀這一份；judge §3.6）
+    static func activeOnly(_ subs: [Subordinate]) -> [Subordinate] {
+        guard !archived.isEmpty else { return subs }
+        return subs.filter { archived[$0.id] == nil }
+    }
+
+    /// 那一天這位同仁在哪（「2026-10-15」）：nil＝跟現在一樣（看部屬身上的 departmentId、plantArea、是不是已轉出）
+    static func placement(_ personId: UUID, dayKey: String) -> Span? {
+        guard let list = spans[personId] else { return nil }
+        return list.first { dayKey < $0.untilKey }
+    }
+
+    /// 組織那幾格做完了的單，照生效日（同一天照套用的時間）排：最後一張調出／離職／退休／回到我的部屬決定在不在職；
+    /// 每一張有改部門、廠區、或調出、回來的，切一段「這天以前在哪」
+    private static func rosterIndex(_ book: OrgMoveBook) -> (archived: [UUID: Archived], spans: [UUID: [Span]]) {
+        var byPerson: [UUID: [OrgMove]] = [:]
+        for m in book.live where m.orgDone {
+            byPerson[m.personId, default: []].append(m)
+        }
+        var arch: [UUID: Archived] = [:]
+        var out: [UUID: [Span]] = [:]
+        for (pid, list) in byPerson {
+            let sorted = list.sorted { a, b in
+                if a.effectiveKey != b.effectiveKey { return a.effectiveKey < b.effectiveKey }
+                let ta: Date = a.appliedAt ?? a.handedAt ?? a.createdAt ?? Date.distantPast
+                let tb: Date = b.appliedAt ?? b.handedAt ?? b.createdAt ?? Date.distantPast
+                return ta < tb
+            }
+            var wasArchived = false
+            var last: OrgMove?
+            var spansOut: [Span] = []
+            for m in sorted {
+                let roster = m.isLeaving || m.isBack
+                let moved = (m.from.deptId != m.to.deptId && m.keepDept != true && m.kindValue?.canChangeDept == true)
+                    || (m.from.plant ?? "") != (m.to.plant ?? "")
+                guard roster || moved else { continue }
+                spansOut.append(Span(untilKey: m.effectiveKey, deptId: m.from.deptId, plant: m.from.plant ?? "",
+                                     archived: wasArchived))
+                if m.isLeaving { wasArchived = true }
+                if m.isBack { wasArchived = false }
+                if roster { last = m }
+            }
+            if !spansOut.isEmpty { out[pid] = spansOut }
+            if let m = last, m.isLeaving {
+                let dept: UUID? = m.changesDept ? m.to.deptId : nil
+                arch[pid] = Archived(moveId: m.id, kind: m.kind, effectiveKey: m.effectiveKey, toDeptId: dept,
+                                     toDeptLabel: dept == nil ? "" : (m.to.deptLabel ?? ""))
+            }
+        }
+        return (arch, out)
     }
 
     /// [v25.592 轉組織 v1b] 排好、部門還沒改的（planned／handed、沒刪）：一人取後建的那一張

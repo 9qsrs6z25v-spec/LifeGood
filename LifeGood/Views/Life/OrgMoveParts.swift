@@ -113,6 +113,100 @@ struct OrgMovePersonPicker: View {
     }
 }
 
+/// [v25.593 轉組織 v2]〔交出去…〕挑人頁要做什麼（調出、離職、退休第 ② 步的待辦、週報、自己加的一項；交接單頁自己加的一項）
+struct OrgMoveHandOutRequest: Identifiable, Equatable {
+    let id = UUID()
+    /// 轉組織的那位（清單不列、連到這位的組織人員也不列）
+    let personId: UUID
+    /// 新部門（調出才有；那個部門的管理人員排最前面）
+    let toDeptId: UUID?
+    /// 目前選的（打勾；「我」＝OrgMovePlan.meId）
+    let selected: UUID?
+    /// 呼叫端自己認得的用途（例："line:<列 id>"、"custom:<列 id>"）
+    let purpose: String
+}
+
+/// [v25.593 轉組織 v2]〔交出去…〕挑人：第一列「我」（放在部屬總覽「我接的」），再列不在部屬名單、沒離職的組織人員
+///（新部門的管理人員排前面；OrgMovePlan.handOutCandidates）。在職部屬不在這裡——那種用〔交給…〕。
+/// 點一下：先關這一頁，**下一個 runloop** 才回呼 onPick(id, 名字)（「我」的 id 是 OrgMovePlan.meId、名字「我」；呼叫端可以直接寫 store）。
+/// 主控寫好、凍結：各組只准呼叫，不改簽名。
+struct OrgMoveHandOutPicker: View {
+    let request: OrgMoveHandOutRequest
+    let onPick: (UUID, String) -> Void
+
+    @EnvironmentObject var lifeStore: LifeStore
+    @Environment(\.dismiss) private var dismiss
+    @State private var query = ""
+
+    init(request: OrgMoveHandOutRequest, onPick: @escaping (UUID, String) -> Void) {
+        self.request = request
+        self.onPick = onPick
+    }
+
+    private var candidates: [OrgMoveHandOutCandidate] {
+        let world = OrgMoveWorld(store: lifeStore)
+        let all = OrgMovePlan.handOutCandidates(personId: request.personId, toDeptId: request.toDeptId, world: world)
+        let q = query.trimmingCharacters(in: .whitespaces)
+        guard !q.isEmpty else { return all }
+        return all.filter { c in
+            c.isMe || c.name.localizedCaseInsensitiveContains(q) || c.sub.localizedCaseInsensitiveContains(q)
+        }
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                ForEach(candidates) { c in
+                    row(c)
+                }
+                if candidates.count <= 1 {
+                    Text("組織圖裡沒有其他不在部屬名單的人。可以先交給我，或到〔組織〕加人。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .searchable(text: $query, prompt: "搜尋姓名、部門或職稱")
+            .navigationTitle("交出去給誰")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("取消") { dismiss() }
+                }
+            }
+        }
+    }
+
+    private func row(_ c: OrgMoveHandOutCandidate) -> some View {
+        let isOn = c.id == request.selected
+        let id = c.id
+        let name = c.name
+        return Button {
+            dismiss()
+            let pick = onPick
+            DispatchQueue.main.async { pick(id, name) }
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: isOn ? "checkmark.circle.fill" : (c.isMe ? "person.crop.circle" : "circle"))
+                    .font(.system(size: 18))
+                    .foregroundStyle(isOn ? Color.teal : Color.secondary)
+                VStack(alignment: .leading, spacing: 2) {
+                    MarqueeText(name)
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(.primary)
+                    if !c.sub.isEmpty {
+                        Text(c.sub)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                Spacer(minLength: 0)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+}
+
 /// 一列左邊 32pt 色圓裡一個字（任／缺／兼／機／報／組／會／議／班；同 FinanceLedgerRow 的分類色圓）
 struct OrgMoveGlyph: View {
     let line: OrgMoveLine

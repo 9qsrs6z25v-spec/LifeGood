@@ -45,7 +45,17 @@ class LifeStore: ObservableObject {
     /// [v25.590 轉組織 v1a-1] 交接單（OrgMoves.swift OrgMoveBook；鍵 life_org_moves_v1，跟 iCloud 同步、進完整備份與「職涯」匯出）。
     /// 不加在部屬、組織人員、部門、任務上：還沒更新的 iPad 存一次會洗掉不認得的欄位，另一個鍵它不碰（u1 §9.2-12）。
     /// 一改就重建 OrgMoveIndex（「交接自」膠囊、待分派的機台、合併匯入不補〔不要了〕的那幾筆查這張表）
-    @Published var orgMoves: OrgMoveBook = OrgMoveBook() { didSet { OrgMoveIndex.rebuild(orgMoves); if !isLoading { save() } } }
+    /// [v25.593 轉組織 v2] 誰是已轉出一變（批次外：iCloud 合併、單張存檔），會議通知照「在職的」重排（ReminderCenter.rebuildAll
+    /// 只排在職的；judge §7 v2 做好標準 2）。讀檔、批次裡不在這裡排（讀到一半的資料不排；批次的呼叫端自己排：applyOrgMove、
+    /// applyDueOrgMoves、applyDueOrgMove、undoOrgMove 看 move.isLeaving）。要退回這一件：刪 before 與 if 那兩段
+    @Published var orgMoves: OrgMoveBook = OrgMoveBook() {
+        didSet {
+            let before = OrgMoveIndex.archived
+            OrgMoveIndex.rebuild(orgMoves)
+            if !isLoading, OrgMoveIndex.archived != before { rebuildMeetingReminders() }
+            if !isLoading { save() }
+        }
+    }
     /// [v25.357] 公司廠區據點：與重大決議的「廠區」欄位對應，長成每個廠的歷史年線
     @Published var companySites: [CompanySite] = [] { didSet { if !isLoading { save() } } }
     /// [v25.399] 旅遊規劃（要去的行程；與旅遊地圖「去過的地點」是兩回事）
@@ -2237,9 +2247,12 @@ class LifeStore: ObservableObject {
     /// 單人組不產生（自己排自己沒有意義，也拿不出相對名次）。
     func performanceGroups(forRater raterId: UUID) -> [PerformanceRankGroup] {
         let scopeDeptId: UUID??   // nil＝不限課（我）；.some(x)＝限定該課（含 x == nil 的未分部門）
+        // [v25.593 轉組織 v2] 已轉出的人不投票、也不被排（judge 第 9 題「調出那年不排」；已送出的票照舊不動）。
+        // 要退回這一件：兩處 activeSubordinates 改回 subordinates
+        let active = activeSubordinates
         if raterId == PerformanceBallot.selfRaterId {
             scopeDeptId = nil
-        } else if let me = subordinates.first(where: { $0.id == raterId }) {
+        } else if let me = active.first(where: { $0.id == raterId }) {
             scopeDeptId = .some(me.departmentId)
         } else {
             return []
@@ -2247,7 +2260,7 @@ class LifeStore: ObservableObject {
         // 分組鍵：課別 id + 職等 id（都可能是 nil）
         struct Key: Hashable { let dept: UUID?; let grade: UUID? }
         var buckets: [Key: [Subordinate]] = [:]
-        for s in subordinates {
+        for s in active {
             if let scope = scopeDeptId, s.departmentId != scope { continue }
             buckets[Key(dept: s.departmentId, grade: s.gradeTitleId), default: []].append(s)
         }
@@ -2366,10 +2379,11 @@ class LifeStore: ObservableObject {
                 let key = PerformanceGradeKey(id: g.gradeId, label: g.gradeLabel)
                 for (idx, entry) in g.entries.enumerated() {
                     gradeVotes[entry.id, default: [:]][key, default: 0] += 1
+                    // [v25.593 轉組織 v2] 票上那一組的課（加總頁篩課別用票上的課，judge 第 9 題）。要退回這一件：刪 groupDeptId 那個參數
                     let src = PerformanceScoreSource(
                         raterId: ballot.raterId, raterName: ballot.raterName,
                         raterGradeLabel: ballot.raterGradeLabel, weight: ballot.raterWeight,
-                        rank: idx + 1, groupSize: n, groupTitle: g.title
+                        rank: idx + 1, groupSize: n, groupTitle: g.title, groupDeptId: g.departmentId
                     )
                     var cur = totals[entry.id] ?? PerformanceScore(
                         personId: entry.id, name: entry.name, total: 0, sources: []
@@ -2482,8 +2496,12 @@ class LifeStore: ObservableObject {
                                   deptId: UUID?) -> [PerformanceGradeSection] {
         var scores = input
         if let deptId {
+            // [v25.593 轉組織 v2] 篩課別用票上的課（年中調課、已轉出的人照被排的那一課算；judge 第 9 題）；
+            // 票上的組都沒有課（未分部門）才看現在的部門。要退回這一件：改回只看 subordinates 的那一行
             scores = scores.filter { s in
-                subordinates.first(where: { $0.id == s.personId })?.departmentId == deptId
+                let onBallot = Set(s.sources.compactMap(\.groupDeptId))
+                if !onBallot.isEmpty { return onBallot.contains(deptId) }
+                return subordinates.first(where: { $0.id == s.personId })?.departmentId == deptId
             }
         }
         var buckets: [PerformanceGradeKey: [PerformanceScore]] = [:]
@@ -2694,7 +2712,8 @@ class LifeStore: ObservableObject {
         if !submitted.contains(PerformanceBallot.selfRaterId) {
             out.append((PerformanceBallot.selfRaterId, profile.chineseName.isEmpty ? "我" : profile.chineseName))
         }
-        for s in subordinates where !submitted.contains(s.id) {
+        // [v25.593 轉組織 v2] 已轉出的人不列在「還沒投票的人」。要退回這一件：activeSubordinates 改回 subordinates
+        for s in activeSubordinates where !submitted.contains(s.id) {
             // 沒有任何可排的組（例如整課只有他一人）就不用投票
             guard !performanceGroups(forRater: s.id).isEmpty else { continue }
             out.append((s.id, s.name.isEmpty ? "未命名" : s.name))
@@ -2992,6 +3011,124 @@ class LifeStore: ObservableObject {
         if let i = schedules.firstIndex(where: { $0.id == item.id }) {
             schedules[i].isCompleted.toggle()
         }
+    }
+
+    // MARK: - [v25.593 轉組織 v2] 在職的部屬（judge §3.6、§7.1-8；orgmove/build/v2/brief.md §2-3）
+    // 已轉出的人照樣在 subordinates 裡（分數、議程負責人、兼任、@ 標註、互評、機台歷史都靠部屬 id 找人；judge 第 7 題），
+    // 「誰是已轉出」查 OrgMoveIndex.archived（交接單算的，不存在部屬身上）。小工具、會議通知、今天時間軸、挑人清單…讀 activeSubordinates。
+
+    /// 在職的部屬（不含已轉出；照 subordinates 的順序）
+    var activeSubordinates: [Subordinate] { OrgMoveIndex.activeOnly(subordinates) }
+
+    /// 已轉出的部屬（照 subordinates 的順序；名單最下面那一區照 OrgMovePlan.archivedRows 排）
+    var archivedSubordinates: [Subordinate] { subordinates.filter { OrgMoveIndex.isArchived($0.id) } }
+
+    func isArchived(_ id: UUID) -> Bool { OrgMoveIndex.isArchived(id) }
+
+    /// 挑人清單（任務指派、會議負責人、機台負責人…）：在職的＋現在選著的那一位（已轉出也留在最後，Picker 才有那一格、
+    /// 舊資料打開不會變空白；judge §3.6「所有挑人清單」不列已轉出的人）。id 是在職的、nil、找不到＝只有在職的
+    func pickableSubordinates(keeping id: UUID?) -> [Subordinate] {
+        let active = activeSubordinates
+        guard let id, OrgMoveIndex.isArchived(id),
+              let s = subordinates.first(where: { $0.id == id }) else { return active }
+        return active + [s]
+    }
+
+    /// 名單手動排序（只有在職的那幾位在畫面上）：visibleIds＝畫面上那幾位的 id（照畫面順序），offsets 是畫面上的位置。
+    /// 已轉出的人留在陣列原本的位置（judge §4.8：拖曳用陣列位置，有已轉出的人時要用 id 換算）
+    func moveActiveSubordinates(visibleIds: [UUID], fromOffsets: IndexSet, toOffset: Int) {
+        // 照 SwiftUI 的 move(fromOffsets:toOffset:) 算（這個檔只 import Foundation，不能直接叫那一支）：
+        // 搬的那幾位照原本的順序，插在「toOffset 以前、沒有被搬的那幾位」後面
+        let picked = fromOffsets.filter { $0 >= 0 && $0 < visibleIds.count }
+        guard !picked.isEmpty else { return }
+        let moving: [UUID] = picked.sorted().map { visibleIds[$0] }
+        var rest: [UUID] = []
+        for (i, id) in visibleIds.enumerated() where !picked.contains(i) { rest.append(id) }
+        let limit = min(max(toOffset, 0), visibleIds.count)
+        let insertAt = (0..<limit).filter { !picked.contains($0) }.count
+        rest.insert(contentsOf: moving, at: min(insertAt, rest.count))
+        let order = rest
+        guard order != visibleIds else { return }
+        let visible = Set(visibleIds)
+        var queue = order.compactMap { id in subordinates.first(where: { $0.id == id }) }
+        var out: [Subordinate] = []
+        out.reserveCapacity(subordinates.count)
+        for s in subordinates {
+            if visible.contains(s.id), !queue.isEmpty {
+                out.append(queue.removeFirst())
+            } else if !visible.contains(s.id) {
+                out.append(s)
+            }
+        }
+        out.append(contentsOf: queue)
+        subordinates = out   // 只存一次
+    }
+
+    /// 〔回到我的部屬〕（不用訂閱：把設錯的收回來）：記一張 kind "back" 的交接單（什麼都不搬）；離職、退休的組織人員「已離職」拿掉
+    ///（這張單設的才拿：離職日還是那張單的生效日）。一次存檔。回傳那一張的 id（在職的人＝nil）
+    @discardableResult
+    func returnArchivedSubordinate(_ personId: UUID, now: Date = Date()) -> UUID? {
+        guard let a = OrgMoveIndex.archived[personId],
+              let back = OrgMovePlan.makeBackMove(personId: personId, world: OrgMoveWorld(store: self), now: now) else { return nil }
+        batched {
+            if OrgMoveKind(rawValue: a.kind)?.isLeaveCompany == true,
+               let pi = orgPeople.firstIndex(where: { $0.linkedSubordinateId == personId }), orgPeople[pi].isInactive {
+                let leftKey = orgPeople[pi].leftDate.map { OrgMovePlan.dayKey($0) }
+                if leftKey == nil || leftKey == a.effectiveKey {
+                    orgPeople[pi].isInactive = false
+                    orgPeople[pi].leftDate = nil
+                }
+            }
+            orgMoves.upsert(back)
+        }
+        // 會議通知照「在職的」重排（回來了照排）；小工具、手錶的快照照舊由 WidgetSnapshotWriter 的觀察者寫（它是 @MainActor，這裡不直接叫）
+        rebuildMeetingReminders()
+        return back.id
+    }
+
+    /// 部屬總覽「我接的」打勾收掉／取消（不用訂閱）：〔交出去〕給「我」的那一列記 checkedAt
+    func setOrgMoveMineChecked(_ moveId: UUID, lineId: UUID, checked: Bool, now: Date = Date()) {
+        guard var move = orgMoves.move(moveId), let l = move.line(lineId),
+              l.lineAction == .handOut, l.toId == OrgMovePlan.meId else { return }
+        move.updateLine(lineId) { x in
+            x.checkedAt = checked ? now : nil
+            x.updatedAt = now
+        }
+        move.updatedAt = now
+        orgMoves.upsert(move)
+    }
+
+    /// [v25.593 轉組織 v2] 任務〔拆成兩件〕（judge §5-3：一件事交給兩個人；兩件各算一次分，所以只在你按的時候拆、不預設）。
+    /// 第一件不動；第二件放在第一件的正後面：名字＝secondTitle（空的＝OrgMovePlan.splitDefaultTitle）、內容／日期／截止日／關聯機台／
+    /// 自訂分數照第一件，不帶提醒事項 id、兼任、警報連結、缺失（OrgMovePlan.canSplit 擋掉的那幾種本來就不給拆）。一次存檔；
+    /// 有開提醒事項同步就幫第二件建一筆（同手動新增）。回傳第二件的 id（找不到、已完成、缺失、警報、兼任＝nil）
+    @MainActor
+    @discardableResult
+    func splitSubordinateTask(personId: UUID, taskId: UUID, secondTitle: String) -> UUID? {
+        guard let si = subordinates.firstIndex(where: { $0.id == personId }),
+              let ti = subordinates[si].tasks.firstIndex(where: { $0.id == taskId }) else { return nil }
+        let t = subordinates[si].tasks[ti]
+        guard !t.isCompleted, !t.isDereliction, t.equipmentLink == nil, t.sideRoleLink == nil else { return nil }
+        let typed = secondTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        let title = typed.isEmpty ? OrgMovePlan.splitDefaultTitle(OrgMovePlan.taskTitle(t)) : typed
+        let second = SubordinateTask(topic: title, content: t.content, date: t.date, dueDate: t.dueDate, note: "",
+                                     linkedEquipmentIds: t.linkedEquipmentIds, customScore: t.customScore)
+        subordinates[si].tasks.insert(second, at: ti + 1)   // 只存一次（didSet）
+        syncReminderForSubordinateTask(subordinateId: personId, taskId: second.id)
+        return second.id
+    }
+
+    /// 交接單上自己加的一項改成〔交出去〕給組織人員或「我」（要訂閱，同 setOrgMoveCustomReceiver）
+    func setOrgMoveCustomHandOut(_ moveId: UUID, lineId: UUID, to: UUID, name: String, now: Date = Date()) {
+        guard var move = orgMoves.move(moveId), move.line(lineId)?.isCustom == true else { return }
+        move.updateLine(lineId) { l in
+            l.action = OrgMoveAction.handOut.rawValue
+            l.toId = to
+            l.toName = to == OrgMovePlan.meId ? "我" : name
+            l.updatedAt = now
+        }
+        move.updatedAt = now
+        orgMoves.upsert(move)
     }
 
     // MARK: - 部屬 CRUD
@@ -3823,7 +3960,9 @@ class LifeStore: ObservableObject {
                 kind: "task", itemId: taskId, fromId: from, fromName: fromName,
                 toId: to, toName: subordinates[toIdx].name,
                 title: moved.topic.isEmpty ? moved.content : moved.topic,
-                dueKey: OrgHandoffRules.dayKey(od), newDueKey: OrgHandoffRules.dayKey(fixed),
+                // [v25.593 轉組織 v2・v1a-1 §8-15] 日子字串一律西曆（手機設民國曆時 Calendar.current 會寫成「0115-10-20」）。
+                // 要退回這一件：兩個 OrgMovePlan.dayKey 改回 OrgHandoffRules.dayKey
+                dueKey: OrgMovePlan.dayKey(od), newDueKey: OrgMovePlan.dayKey(fixed),
                 wasOverdue: true, via: via, handedAt: now))
             moved.dueDate = fixed
         }
@@ -4270,11 +4409,13 @@ class LifeStore: ObservableObject {
         guard let s = subordinates.first(where: { $0.id == pid }) else { return OrgMoveRestore() }
         let op = orgPeople.first { $0.linkedSubordinateId == pid }
         let card = op?.linkedBusinessCardId.flatMap { cid in businessCards.first { $0.id == cid } }
+        // [v25.593 轉組織 v2] 離職、退休復原用：套用前組織人員是不是已離職、離職日。要退回這一件：刪最後兩個參數
         return OrgMoveRestore(deptId: s.departmentId, deptText: s.department, plant: s.plantArea,
                               gradeTitleId: s.gradeTitleId, jobTitle: s.jobTitle,
                               orgPersonId: op?.id, orgDeptId: op?.departmentId, orgJobTitle: op?.jobTitle,
                               orgGradeTitleId: op?.gradeTitleId, createdOrgPerson: op == nil ? true : nil,
-                              cardId: card?.id, cardDept: card?.department, cardJobTitle: card?.jobTitle)
+                              cardId: card?.id, cardDept: card?.department, cardJobTitle: card?.jobTitle,
+                              orgInactive: op?.isInactive, orgLeftDate: op?.leftDate)
     }
 
     /// 按〔確認交接〕：一張交接單一次做完（一次存檔、一次推 iCloud）。move＝OrgMovePlan.makeMove 組好的那一張
@@ -4301,7 +4442,8 @@ class LifeStore: ObservableObject {
             orgMoves.upsert(move)
         }
         // [v25.591 轉組織 v1a-2] 會議結束、新會議接著開：會議通知重排（結束的不再排、新的照排；通知標題＝新會議名稱，沒有人名）
-        if meetingsChanged { rebuildMeetingReminders() }
+        // [v25.593 轉組織 v2] 調出、離職、退休：已轉出的人的會議不再排。要退回這一件：拿掉 `|| move.isLeaving`
+        if meetingsChanged || move.isLeaving { rebuildMeetingReminders() }
         return move.id
     }
 
@@ -4416,7 +4558,9 @@ class LifeStore: ObservableObject {
         }
         switch res.action {
         case .some(.give):
-            guard let to = res.toId, subordinates.contains(where: { $0.id == to }) else {
+            // [v25.593 轉組織 v2] 接手的人在排好之後已轉出（另一台做的；judge §5-2）：不交，留在原人身上（交接單那一列照現在的資料寫）。
+            // 要退回這一件：拿掉 `, !OrgMoveIndex.isArchived(to)`
+            guard let to = res.toId, subordinates.contains(where: { $0.id == to }), !OrgMoveIndex.isArchived(to) else {
                 line.state = OrgMoveLineState.skipped.rawValue
                 return
             }
@@ -4434,8 +4578,10 @@ class LifeStore: ObservableObject {
             } else {
                 line.state = OrgMoveLineState.skipped.rawValue
             }
-        case .some(.drop):
-            // 從原人拿掉、原樣存進交接單；交接那一刻已經逾期的扣分照留原人（judge §1.4-4）
+        case .some(.drop), .some(.handOut):
+            // 從原人拿掉、原樣存進交接單；交接那一刻已經逾期的扣分照留原人（judge §1.4-4）。
+            // [v25.593 轉組織 v2]〔交出去〕（給不在部屬名單的人、給我）同一條：不算完成、不算分、提醒事項刪掉（judge §3.6）。
+            // 要退回這一件：拿掉 `, .some(.handOut)`
             let removed = subordinates[si].tasks.remove(at: ti)
             line.removedJSON = try? JSONEncoder().encode(removed)
             if let d = removed.dueDate, d < now {
@@ -4481,7 +4627,9 @@ class LifeStore: ObservableObject {
         switch res.action {
         case .some(.give):
             // 已經過了報告日的不能交（週報的截止就是報告日：交出去會兩個人各扣一次；judge §3.2）
-            guard let to = res.toId, subordinates.contains(where: { $0.id == to }), r.date >= now else {
+            // [v25.593 轉組織 v2] 接手的人已轉出：不交（judge §5-2）。要退回這一件：拿掉 `, !OrgMoveIndex.isArchived(to)`
+            guard let to = res.toId, subordinates.contains(where: { $0.id == to }), r.date >= now,
+                  !OrgMoveIndex.isArchived(to) else {
                 line.state = OrgMoveLineState.skipped.rawValue
                 return
             }
@@ -4492,7 +4640,8 @@ class LifeStore: ObservableObject {
             } else {
                 line.state = OrgMoveLineState.skipped.rawValue
             }
-        case .some(.drop):
+        case .some(.drop), .some(.handOut):
+            // [v25.593 轉組織 v2]〔交出去〕同〔不要了〕（judge §3.6）。要退回這一件：拿掉 `, .some(.handOut)`
             let removed = subordinates[si].weeklyReports.remove(at: ri)
             line.removedJSON = try? JSONEncoder().encode(removed)
             if removed.date < now {
@@ -4516,6 +4665,15 @@ class LifeStore: ObservableObject {
         }
         switch line.lineAction {
         case .some(.give):
+            // [v25.593 轉組織 v2] 接手的人在排好之後已轉出（另一台做的）：這一列改成待分派（judge §5-2「那一列改成待分派」）。
+            // 要退回這一件：刪這個 if
+            if let to = line.toId, OrgMoveIndex.isArchived(to), equipmentPool[ei].ownerId == holder {
+                line.action = OrgMoveAction.pending.rawValue
+                line.toId = nil
+                line.toName = nil
+                line.state = OrgMoveLineState.done.rawValue
+                return
+            }
             guard let to = line.toId, subordinates.contains(where: { $0.id == to }),
                   equipmentPool[ei].ownerId == holder else {
                 line.state = OrgMoveLineState.skipped.rawValue
@@ -4535,10 +4693,17 @@ class LifeStore: ObservableObject {
     private func applyOrgMovePhase(_ move: OrgMove, lines: inout [OrgMoveLine], force: Bool, now: Date) {
         let pid = move.personId
         guard let si = subordinates.firstIndex(where: { $0.id == pid }) else { return }
-        let deptChanged = move.kind == OrgMoveKind.move.rawValue && move.keepDept != true
-            && move.to.deptId != nil && move.to.deptId != move.from.deptId
+        // [v25.593 轉組織 v2] 調出也改部門（move.changesDept）。要退回這一件：改回 `move.kind == OrgMoveKind.move.rawValue && …`
+        let deptChanged = move.changesDept
         if deptChanged, subordinates[si].departmentId != move.to.deptId {
             setDepartmentBody(pid, to: move.to.deptId, freeText: nil)
+        }
+        // [v25.593 轉組織 v2] 離職、退休：連到的組織人員同時設成「已離職」、離職日＝生效日（judge §3.6；已經是已離職的不動）。
+        // 部屬身上不加任何欄位（「已轉出」用交接單算）。要退回這一件：刪這個 if
+        if move.isLeaveCompany, let pi = orgPeople.firstIndex(where: { $0.linkedSubordinateId == pid }),
+           !orgPeople[pi].isInactive {
+            orgPeople[pi].isInactive = true
+            orgPeople[pi].leftDate = OrgMovePlan.date(fromKey: move.effectiveKey)
         }
         if let p = move.to.plant, p != (move.from.plant ?? ""), subordinates[si].plantArea != p {
             subordinates[si].plantArea = p
@@ -4610,7 +4775,8 @@ class LifeStore: ObservableObject {
             meetingsChanged = undoOrgMoveBody(&move, lineIds: lineIds, now: now)
             orgMoves.upsert(move)
         }
-        if meetingsChanged { rebuildMeetingReminders() }
+        // [v25.593 轉組織 v2] 復原調出、離職、退休：回到在職，會議照排。要退回這一件：拿掉 `|| move.isLeaving`
+        if meetingsChanged || move.isLeaving { rebuildMeetingReminders() }
     }
 
     /// 回傳有沒有動到會議（呼叫端批次外重排會議通知）
@@ -4672,7 +4838,8 @@ class LifeStore: ObservableObject {
     private func undoOrgMoveTaskLine(_ line: inout OrgMoveLine, receiver: UUID?, person: UUID) {
         guard let tid = line.refId, let pi = subordinates.firstIndex(where: { $0.id == person }) else { return }
         switch line.lineAction {
-        case .some(.drop):
+        // [v25.593 轉組織 v2]〔交出去〕的同〔不要了〕放回原人。要退回這一件：拿掉 `, .some(.handOut)`
+        case .some(.drop), .some(.handOut):
             guard taskHolderId(tid) == nil, let data = line.removedJSON,
                   var t = try? JSONDecoder().decode(SubordinateTask.self, from: data) else { return }
             t.reminderId = nil   // 原本那則交接時刪了：放回來重建一則
@@ -4707,7 +4874,8 @@ class LifeStore: ObservableObject {
 
     private func undoOrgMoveReportLine(_ line: inout OrgMoveLine, receiver: UUID?, person: UUID) {
         guard let rid = line.refId, let pi = subordinates.firstIndex(where: { $0.id == person }) else { return }
-        if line.action == OrgMoveAction.drop.rawValue {
+        // [v25.593 轉組織 v2]〔交出去〕的同〔不要了〕放回原人。要退回這一件：拿掉 `|| …handOut…`
+        if line.action == OrgMoveAction.drop.rawValue || line.action == OrgMoveAction.handOut.rawValue {
             guard reportHolderId(rid) == nil, let data = line.removedJSON,
                   let r = try? JSONDecoder().decode(WeeklyReport.self, from: data) else { return }
             subordinates[pi].weeklyReports.append(r)
@@ -4760,8 +4928,16 @@ class LifeStore: ObservableObject {
     private func undoOrgMovePhase(_ move: OrgMove, lines: inout [OrgMoveLine], now: Date) {
         let pid = move.personId
         guard let b = move.before, let si = subordinates.firstIndex(where: { $0.id == pid }) else { return }
-        let deptChanged = move.kind == OrgMoveKind.move.rawValue && move.keepDept != true
-            && move.to.deptId != nil && move.to.deptId != move.from.deptId
+        // [v25.593 轉組織 v2] 調出也改部門（move.changesDept）。要退回這一件：改回 `move.kind == OrgMoveKind.move.rawValue && …`
+        let deptChanged = move.changesDept
+        // [v25.593 轉組織 v2] 離職、退休：組織人員的「已離職」照套用前的樣子放回（離職日還是這張單的生效日才放；你另外改過的不動）。
+        // 舊單、25.592 存回來少了 orgInactive＝當 false。要退回這一件：刪這個 if
+        if move.isLeaveCompany, let pi = orgPeople.firstIndex(where: { $0.linkedSubordinateId == pid }),
+           orgPeople[pi].isInactive,
+           orgPeople[pi].leftDate.map({ OrgMovePlan.dayKey($0) }) == move.effectiveKey {
+            orgPeople[pi].isInactive = b.orgInactive ?? false
+            orgPeople[pi].leftDate = b.orgLeftDate
+        }
         if deptChanged, subordinates[si].departmentId == move.to.deptId {
             let newCardLabel = departments.first(where: { $0.id == move.to.deptId }).map { Self.departmentLabel($0) } ?? ""
             setDepartmentBody(pid, to: b.deptId, freeText: b.deptText)
@@ -5212,7 +5388,8 @@ class LifeStore: ObservableObject {
             }
         }
         suppressReminderWork = wasSuppressed
-        if meetingsChanged { rebuildMeetingReminders() }
+        // [v25.593 轉組織 v2] 到期的有調出、離職、退休：已轉出的人的會議不再排。要退回這一件：拿掉 `|| …isLeaving…`
+        if meetingsChanged || due.contains(where: { $0.isLeaving }) { rebuildMeetingReminders() }
         return results
     }
 
@@ -5224,7 +5401,8 @@ class LifeStore: ObservableObject {
         batched {
             result = applyDueOrgMoveBody(moveId, now: now, auto: false, meetingsChanged: &meetingsChanged)
         }
-        if meetingsChanged { rebuildMeetingReminders() }
+        // [v25.593 轉組織 v2] 同 applyDueOrgMoves。要退回這一件：拿掉 `|| …isLeaving…`
+        if meetingsChanged || orgMoves.move(moveId)?.isLeaving == true { rebuildMeetingReminders() }
         return result
     }
 

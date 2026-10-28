@@ -123,7 +123,11 @@ extension LifeStore {
     /// 挑選成員用的人員清單。
     /// 刻意不複用 mentionPeople()：那個是給 @ 標註用的、不帶聯絡方式，
     /// 而這裡挑完人要能自動帶入電話／Email，少了會變成挑完還要手動再打一次。
-    func sideRolePersonCandidates() -> [SideRolePersonCandidate] {
+    /// [v25.593 轉組織 v2] includeArchived：false＝挑人清單用（不列已轉出的部屬；連到這位的名片、組織人員照舊不列，
+    /// 因為 listedSubIds 還是全部部屬；judge §3.6「所有挑人清單」）。
+    /// true（預設）＝反查名字、「已連結」徽章、議程負責人名字、匯出用：已轉出的人照樣查得到，名字不會不見。
+    /// 要退回這一件：拿掉參數與第一圈的 where
+    func sideRolePersonCandidates(includeArchived: Bool = true) -> [SideRolePersonCandidate] {
         var out: [SideRolePersonCandidate] = []
         let deptName = Dictionary(departments.map { ($0.id, $0.name) },
                                   uniquingKeysWith: { a, _ in a })
@@ -141,7 +145,7 @@ extension LifeStore {
             if !c.isEmpty { contactOfSub[sid] = c }
         }
 
-        for s in subordinates {
+        for s in subordinates where includeArchived || !OrgMoveIndex.isArchived(s.id) {
             let n = s.name.trimmingCharacters(in: .whitespaces)
             guard !n.isEmpty else { continue }
             let dept = s.department.isEmpty
@@ -2062,7 +2066,8 @@ struct SideRolePersonPicker: View {
     @State private var query = ""
     @State private var deptFilter: String?
 
-    private var all: [SideRolePersonCandidate] { lifeStore.sideRolePersonCandidates() }
+    /// [v25.593 轉組織 v2] 挑人：不列已轉出的部屬
+    private var all: [SideRolePersonCandidate] { lifeStore.sideRolePersonCandidates(includeArchived: false) }
 
     /// 有人的部門清單（依人數多寡排序，人最多的排前面）
     ///
@@ -3264,7 +3269,8 @@ struct SideRoleInitiatorPicker: View {
 
     private var groupedOthers: [(dept: String, people: [SideRolePersonCandidate])] {
         let memberNames = Set(members.map { $0.name.trimmingCharacters(in: .whitespaces) })
-        let list = lifeStore.sideRolePersonCandidates()
+        // [v25.593 轉組織 v2] 挑人：不列已轉出的部屬
+        let list = lifeStore.sideRolePersonCandidates(includeArchived: false)
             .filter { !memberNames.contains($0.name) }
             .filter { matches($0.name) || matches($0.subtitle) || matches($0.department) }
         var order: [String] = []
@@ -3676,7 +3682,8 @@ struct SideRoleLinkPicker: View {
             if let pid = m.linkedPersonId { pids.append(pid) }
         }
         let wanted = Set(pids)
-        return lifeStore.subordinates.filter { wanted.contains($0.id) }
+        // [v25.593 轉組織 v2] 只列在職的（已轉出的人的紀錄不再接到兼任待辦）。要退回這一件：改回 lifeStore.subordinates
+        return lifeStore.activeSubordinates.filter { wanted.contains($0.id) }
     }
 
     /// 已經連上的紀錄不再列出，避免重複接同一筆
@@ -3894,7 +3901,8 @@ struct SideRoleAttendeePicker: View {
 
     private var others: [SideRolePersonCandidate] {
         let memberNames = Set(members.map { $0.name.trimmingCharacters(in: .whitespaces) })
-        return lifeStore.sideRolePersonCandidates()
+        // [v25.593 轉組織 v2] 挑人：不列已轉出的部屬
+        return lifeStore.sideRolePersonCandidates(includeArchived: false)
             .filter { !memberNames.contains($0.name) }
     }
 

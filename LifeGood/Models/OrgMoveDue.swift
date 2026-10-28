@@ -128,6 +128,9 @@ extension OrgMovePlan {
         p.timingOptions = timingOptions(effectiveKey: move.effectiveKey,
                                         plantOnly: move.kind == OrgMoveKind.plant.rawValue,
                                         keepDept: move.keepDept == true)
+        // [v25.593 轉組織 v2] 調出、離職、退休的兩顆（「現在就交接，11/1 才調出」…；OrgMoveOut.swift）。要退回這一件：刪這兩行
+        let leaving = leavingTimingOptions(move)
+        if !leaving.isEmpty { p.timingOptions = leaving }
         let chosen = p.timingOptions.first(where: { $0.timing == draft.timing }) ?? p.timingOptions[0]
         p.timingNote = chosen.note
         p.birthdayNote = "\(shortDay(move.effectiveKey)) 在「今天生效」那張上按一下才改"
@@ -154,6 +157,10 @@ extension OrgMovePlan {
         guard let p = OrgMoveIndex.plannedByPerson[subId] else { return nil }
         let d = shortDay(p.effectiveKey)
         if p.kind == OrgMoveKind.plant.rawValue { return "\(d) 也要換廠區" }
+        // [v25.593 轉組織 v2] 排好要調出、離職、退休的：「11/9 也要調走」「11/9 離職」「11/9 退休」（部門照舊的調出也寫）。要退回這一件：刪這三行
+        if p.kind == OrgMoveKind.resign.rawValue { return "\(d) 離職" }
+        if p.kind == OrgMoveKind.retire.rawValue { return "\(d) 退休" }
+        if p.kind == OrgMoveKind.out.rawValue { return "\(d) 也要調走" }
         if p.keepDept || p.toDeptId == p.fromDeptId { return nil }
         return "\(d) 也要調走"
     }
@@ -179,6 +186,8 @@ extension OrgMovePlan {
 
     /// 交接單那一列：✓「11/3 已交給 陳怡君」／○「交給 陳怡君・還沒交」／・「跟著王小明」
     static func customStatus(_ line: OrgMoveLine, move: OrgMove) -> OrgMoveLineStatus {
+        // [v25.593 轉組織 v2] 自己加的一項〔交出去〕（鑰匙交給黃冠宇、我先收著）：同待辦那一種（OrgMoveOut.swift）。要退回這一件：刪這一行
+        if line.lineAction == .handOut { return handOutStatus(line, move: move) }
         let person = move.personName.isEmpty ? "這位同仁" : move.personName
         let to = line.lineAction == .give ? line.toId : nil
         let toName = line.toName ?? ""
@@ -222,6 +231,9 @@ extension OrgMovePlan {
         case .some(.drop): text = "排好了：\(d) 不要了"
         case .some(.closeNow): text = "排好了：\(d) 結案"
         case .some(.end): text = "排好了：\(d) 前一場是最後一場"
+        // [v25.593 轉組織 v2]「排好了：11/1 交出去給 黃冠宇」「排好了：11/1 我先接」
+        case .some(.handOut):
+            text = (line.toId == meId) ? "排好了：\(d) 我先接" : "排好了：\(d) 交出去給 \(line.toName ?? "")"
         case .some(.remove), .some(.replace), .some(.add), .some(.keep), .some(.skip): text = line.title
         case .some(.follow), .some(.withEquipment), .none: text = "排好了：跟著\(person)"
         }
@@ -245,6 +257,8 @@ extension OrgMovePlan {
     static func pendingHead(_ m: OrgMove, world: OrgMoveWorld) -> String {
         let d = shortDay(m.effectiveKey)
         if m.kind == OrgMoveKind.plant.rawValue { return "\(d) 起換到 \(m.to.plant ?? "")" }
+        // [v25.593 轉組織 v2]「11/1 起調出到品保課」「11/1 起調出我的管轄」「11/1 起離職」「11/1 起退休」。要退回這一件：刪這一行
+        if let h = leavingPendingHead(m, world: world) { return h }
         if m.keepDept == true || m.to.deptId == m.from.deptId { return "\(d) 交接（部門照舊）" }
         let dept = sideText(OrgMoveSide(deptId: m.to.deptId, deptLabel: m.to.deptLabel), world: world)
         return "\(d) 起調\(dept)"
@@ -255,28 +269,36 @@ extension OrgMovePlan {
         if isDue(move, todayKey: dayKey(now)), let b = dueBlock(move, world: world) {
             return (false, "⚠ " + b.text)
         }
-        let deptChanged = move.kind == OrgMoveKind.move.rawValue && move.keepDept != true && move.to.deptId != move.from.deptId
+        // [v25.593 轉組織 v2] 調出也改部門（changesDept）；調出、離職、退休多「收進已轉出」「標成已離職」。
+        // 要退回這一件：改回 `move.kind == OrgMoveKind.move.rawValue && …`、刪 leavingWhat 那一行
+        let deptChanged = move.changesDept
         let plantChanged = (move.to.plant ?? "") != (move.from.plant ?? "")
         let gradeChanged = move.to.gradeTitleId != move.from.gradeTitleId
         var what: [String] = []
         if deptChanged { what.append(sideText(OrgMoveSide(deptId: move.to.deptId, deptLabel: move.to.deptLabel), world: world)) }
         if plantChanged, let p = move.to.plant, !p.isEmpty { what.append(p) }
         if gradeChanged, let t = move.to.titleLabel, !t.isEmpty { what.append(t) }
+        what.append(contentsOf: leavingWhat(move))
         if what.isEmpty { return (true, "部門照舊") }
         return (true, "\(shortDay(move.effectiveKey)) 才改：" + what.joined(separator: "・"))
     }
 
     /// 歷程那一列的標題（「2026/11/1 轉組織」「…（已取消）」「…（已復原）」）
     static func historyTitle(_ m: OrgMove) -> String {
+        // [v25.593 轉組織 v2]「2026/11/1 調出我的管轄」「2026/11/1 離職」「2026/11/1 退休」「2026/12/15 回到我的部屬」。
+        // 要退回這一件：word 改回 "轉組織"
+        let word = historyWord(m)
         // [v25.592 轉組織 v1b 裁定] 用 undoneByCancel（〔留給接手的人〕之後再〔復原〕寫「已復原」）。要退回這一件：改回 `m.cancelledAt != nil`
-        if m.isUndone { return "\(fullDay(m.effectiveKey)) 轉組織" + (m.undoneByCancel ? "（已取消）" : "（已復原）") }
-        return "\(fullDay(m.effectiveKey)) 轉組織"
+        if m.isUndone { return "\(fullDay(m.effectiveKey)) \(word)" + (m.undoneByCancel ? "（已取消）" : "（已復原）") }
+        return "\(fullDay(m.effectiveKey)) \(word)"
     }
 
     /// 歷程那一列的灰字（「交出去 10・跟著 5」「（已取消）」「交出去 9・跟著 5（11/1 才改部門）」）
     static func historySub(_ m: OrgMove, given: Int, follow: Int) -> String {
         // [v25.592 轉組織 v1b 裁定] 同 historyTitle。要退回這一件：改回 `m.cancelledAt != nil`
         if m.isUndone { return m.undoneByCancel ? "（已取消）" : "（已復原）" }
+        // [v25.593 轉組織 v2] 回到我的部屬那一張什麼都沒交：不寫件數。要退回這一件：刪這一行
+        if m.isBack { return "" }
         var s = "交出去 \(given)・跟著 \(follow)"
         if m.isHanded { s += "（\(shortDay(m.effectiveKey)) 才改部門）" }
         if m.keepDept == true, m.cancelledAt != nil { s += "（調動取消了）" }
@@ -444,8 +466,8 @@ extension OrgMovePlan {
         guard let sub = world.sub(m.personId) else {
             return (.personGone, "找不到\(person)了（可能被刪了），這張單只能取消")
         }
-        let changesDept = m.kind == OrgMoveKind.move.rawValue && m.keepDept != true
-            && m.to.deptId != nil && m.to.deptId != m.from.deptId
+        // [v25.593 轉組織 v2] 調出也改部門（m.changesDept）。要退回這一件：改回 `m.kind == OrgMoveKind.move.rawValue && …`
+        let changesDept = m.changesDept
         guard changesDept else { return nil }
         let toText = sideText(OrgMoveSide(deptId: m.to.deptId, deptLabel: m.to.deptLabel), world: world)
         if world.dept(m.to.deptId) == nil {
@@ -462,6 +484,8 @@ extension OrgMovePlan {
     /// 「王小明 製造一課 → 設備課（P1 → P2）」
     static func dueTitle(_ m: OrgMove, world: OrgMoveWorld) -> String {
         let person = m.personName.isEmpty ? "這位同仁" : m.personName
+        // [v25.593 轉組織 v2]「王小明 製造一課 → 品保課（調出）」「王小明 離職（製造一課）」。要退回這一件：刪這一行
+        if let t = leavingDueTitle(m, world: world) { return t }
         let f = sideText(OrgMoveSide(deptId: m.from.deptId, deptLabel: m.from.deptLabel), world: world)
         let t = sideText(OrgMoveSide(deptId: m.to.deptId, deptLabel: m.to.deptLabel), world: world)
         let pf = m.from.plant ?? ""
@@ -480,7 +504,9 @@ extension OrgMovePlan {
                                     blockKind: b.kind.rawValue, birthdayOffer: false, reminderCount: 0)
         }
         let by = dayText(m.handoverByKey ?? handoverByKey(effectiveKey: m.effectiveKey))
-        let head = m.timingValue == .together ? "✓ 交接、部門都做好了" : "✓ 已換好"
+        // [v25.593 轉組織 v2] 調出、離職、退休：「✓ 已收進「已轉出」」。要退回這一件：改回只有後面那一行
+        let head = m.isLeaving ? "✓ 已收進「已轉出」"
+            : (m.timingValue == .together ? "✓ 交接、部門都做好了" : "✓ 已換好")
         let detail = applied ? "\(head)・交接完成日 \(by)" : "部門、廠區還沒改"
         let offer = applied && m.retitleBirthday == true && birthdayOffer(m, world: world)
         return OrgMoveDueResult(moveId: m.id, personId: m.personId, applied: applied, title: title, detail: detail,
@@ -501,6 +527,8 @@ extension OrgMovePlan {
         // 要退回這一件：刪 keep、plant 與兩個 if 裡的分支，改回原本的兩行 return
         let keep = m.keepDept == true
         let plant = m.kind == OrgMoveKind.plant.rawValue
+        // [v25.593 轉組織 v2] 調出、離職、退休的完成畫面字（OrgMoveOut.swift）。要退回這一件：刪這一行
+        if let t = leavingDoneTexts(m) { return t }
         if m.isPlanned {
             if keep { return ("交接單排好了", "\(d) 以前什麼都不動；\(d) 打開 App 時交接、部門照舊（在你自己的手機上）") }
             if plant { return ("交接單排好了", "\(d) 以前什麼都不動；\(d) 打開 App 時一起交接、換廠區（在你自己的手機上）") }
@@ -559,8 +587,11 @@ extension OrgMovePlan {
 
     /// 取消、只做交接時寫進單上的那一句
     static func cancelNoteText(_ m: OrgMove, world: OrgMoveWorld, now: Date, skip: Bool) -> String {
+        // [v25.593 轉組織 v2] 「11/1 起離職」「11/1 起退休」也換成「要」。要退回這一件：刪後面兩個 replacingOccurrences
         let head = pendingHead(m, world: world).replacingOccurrences(of: " 起調", with: " 要調")
             .replacingOccurrences(of: " 起換到", with: " 要換到")
+            .replacingOccurrences(of: " 起離職", with: " 要離職")
+            .replacingOccurrences(of: " 起退休", with: " 要退休")
         if skip { return "原本 \(head)；生效時部門已經不是單上寫的，部門那段沒做" }
         return "原本 \(head)，\(shortDay(dayKey(now))) 取消了調動；交出去的照舊"
     }
@@ -591,6 +622,10 @@ extension OrgMovePlan {
         guard let p = OrgMoveIndex.plannedByPerson[personId] else { return nil }
         let d = shortDay(p.effectiveKey)
         if p.kind == OrgMoveKind.plant.rawValue { return "\(d) 起 \(p.toPlant)" }
+        // [v25.593 轉組織 v2]「11/1 離職」「11/1 退休」「11/1 調出」（調出到別的部門寫部門：「11/1 起 品保課」）。要退回這一件：刪這三行
+        if p.kind == OrgMoveKind.resign.rawValue { return "\(d) 離職" }
+        if p.kind == OrgMoveKind.retire.rawValue { return "\(d) 退休" }
+        if p.kind == OrgMoveKind.out.rawValue, p.keepDept || p.toDeptId == p.fromDeptId { return "\(d) 調出" }
         if p.keepDept || p.toDeptId == p.fromDeptId { return "\(d) 交接" }
         return "\(d) 起 \(labelShort(p.toDeptLabel))"
     }
@@ -600,6 +635,9 @@ extension OrgMovePlan {
         guard let p = OrgMoveIndex.plannedByPerson[personId] else { return nil }
         let d = shortDay(p.effectiveKey)
         if p.kind == OrgMoveKind.plant.rawValue { return "\(d) 換到 \(p.toPlant)" }
+        // [v25.593 轉組織 v2]「11/1 離職」「11/1 退休」（組織圖名字後面的小字；調出照「11/1 調品保課」）。要退回這一件：刪這兩行
+        if p.kind == OrgMoveKind.resign.rawValue { return "\(d) 離職" }
+        if p.kind == OrgMoveKind.retire.rawValue { return "\(d) 退休" }
         if p.keepDept || p.toDeptId == p.fromDeptId { return nil }
         return "\(d) 調\(labelShort(p.toDeptLabel))"
     }
@@ -613,8 +651,9 @@ extension OrgMovePlan {
     /// 部門頁最下面「異動」：這個部門進出的交接單（judge §4.8；排好的、交出去了、改好了；取消、復原的不列）
     static func deptMoveRows(deptId: UUID, book: OrgMoveBook, world: OrgMoveWorld) -> [OrgMoveDeptRow] {
         var out: [OrgMoveDeptRow] = []
-        for m in book.live where !m.isUndone && m.kind == OrgMoveKind.move.rawValue && m.keepDept != true
-            && m.from.deptId != m.to.deptId {
+        // [v25.593 轉組織 v2] 調出（改部門的、部門照舊的）、離職、退休也列在舊部門那頁（「11/1 王小明 調出到 品保課」「11/1 王小明 離職」）。
+        // 要退回這一件：條件改回 `m.kind == OrgMoveKind.move.rawValue && m.keepDept != true && m.from.deptId != m.to.deptId`、刪 verb
+        for m in book.live where !m.isUndone && (m.changesDept || m.isLeaving) {
             let person = m.personName.isEmpty ? "這位同仁" : m.personName
             let d = shortDay(m.effectiveKey)
             if m.from.deptId == deptId {
@@ -625,7 +664,8 @@ extension OrgMovePlan {
                 } else {
                     tail = "（交出去 \(handedCounts(m).given) 項）"
                 }
-                out.append(OrgMoveDeptRow(moveId: m.id, title: "\(d) \(person) 調到 \(to)\(tail)", incoming: false,
+                let verb = deptRowVerb(m, to: to)
+                out.append(OrgMoveDeptRow(moveId: m.id, title: "\(d) \(person) \(verb)\(tail)", incoming: false,
                                           effectiveKey: m.effectiveKey))
             } else if m.to.deptId == deptId {
                 let from = sideText(OrgMoveSide(deptId: m.from.deptId, deptLabel: m.from.deptLabel), world: world)

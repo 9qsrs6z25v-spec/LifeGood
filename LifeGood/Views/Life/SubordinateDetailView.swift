@@ -565,6 +565,9 @@ struct SubordinateDetailView: View {
     ///（兩個 sheet 在 OrgMoveCardParts.swift 的 orgMoveCardSheets。要退回這一件：刪這兩行與用到的地方）
     @State private var orgMoveWizard: OrgMoveWizardRequest?
     @State private var orgMoveSheet: OrgMoveSheetRequest?
+    /// [v25.593 轉組織 v2] 已轉出的卡片：「…」與最上面灰條〔回到我的部屬〕、「…」〔真的刪除…〕要問的那一框
+    ///（框在 OrgMoveCardParts.swift 的 .subArchivedAsk。要退回這一件：刪這一行與用到的地方）
+    @State private var archivedAsk: SubArchivedAsk?
 
     // 進場動畫旗標
     @State private var headerAppeared = false
@@ -612,6 +615,8 @@ struct SubordinateDetailView: View {
         return NavigationStack {
             ScrollView {
                 VStack(spacing: 16) {
+                    // [v25.593 轉組織 v2] 已轉出：看板上方灰條＋〔回到我的部屬〕（在職的不佔位；OrgMoveCardParts.swift）。要退回這一件：刪這一行
+                    SubArchivedBanner(personId: subordinateId, onReturn: askReturnToMine)
                     headerCard(mentionedCount: mentionedItemsCache.count)
 
                     // [v25.590 轉組織 v1a-1] 看板下提示列（原人、接手的人；沒事不佔位，judge §4.7）。要退回這一件：刪這一行
@@ -754,53 +759,10 @@ struct SubordinateDetailView: View {
                 // 連同左邊的「關閉」把標題擠成「部屬...」。全部收進一顆溢出選單，
                 // 標題才有位置完整顯示。
                 ToolbarItem(placement: .topBarTrailing) {
+                    // [v25.593 轉組織 v2] 選單內容搬到 cardMenuItems（已轉出只剩〔匯出〕〔回到我的部屬〕〔真的刪除…〕；在職照舊）。
+                    // 要退回這一件：把 activeMenuItems、exportMenuItems 的內容搬回這個 Menu，刪 cardMenuItems／archivedMenuItems
                     Menu {
-                        Button {
-                            if subscription.isPremium { showEdit = true }
-                            else { showPremiumAlert = true }
-                        } label: {
-                            Label("編輯", systemImage: "square.and.pencil")
-                        }
-                        // 升職（使用者指定）：付費鎖比照編輯
-                        Button {
-                            if subscription.isPremium { showPromotion = true }
-                            else { showPremiumAlert = true }
-                        } label: {
-                            Label("升職", systemImage: "arrow.up.circle.fill")
-                        }
-                        // [v25.590 轉組織 v1a-1] 轉組織（judge §4.1）：在〔升職〕下面；開始精靈要訂閱（judge §6）。
-                        // 要退回這一件：刪這一顆。
-                        Button {
-                            if subscription.isPremium { orgMoveWizard = OrgMoveWizardRequest(personId: subordinateId) }
-                            else { showPremiumAlert = true }
-                        } label: {
-                            // [v25.592 轉組織 v1b] 排好、部門還沒改的那位寫「轉組織（11/1 排好了）」（字在 orgMoveMenuTitle 組好）。
-                            // 要退回這一件：改回 Label("轉組織", …)，刪 orgMoveMenuTitle
-                            Label(orgMoveMenuTitle, systemImage: "arrow.left.arrow.right.circle.fill")
-                        }
-                        // [v25.348] 績效互評：填這位同仁對大家的年度排名
-                        Button {
-                            if subscription.isPremium { showPerformance = true }
-                            else { showPremiumAlert = true }
-                        } label: {
-                            Label("績效互評排名", systemImage: "trophy.fill")
-                        }
-                        Divider()
-                        // [v25.374] 匯出圖片分成兩種內容：卡片本身／這位同仁填的排名票
-                        // [v25.588 部屬匯出] 匯出前先開選項頁；排名票照舊走自己的確認框（不併進選項頁）
-                        Menu {
-                            Button { exportRequest = SubExportRequest(format: .image) } label: {
-                                Label("部屬卡片…", systemImage: "person.text.rectangle")
-                            }
-                            Button { confirmBallotExport = true } label: {
-                                Label("這位同仁填的排名票", systemImage: "trophy")
-                            }
-                        } label: {
-                            Label("匯出圖片", systemImage: "photo")
-                        }
-                        Button { exportRequest = SubExportRequest(format: .text) } label: {
-                            Label("匯出文字…", systemImage: "text.alignleft")
-                        }
+                        cardMenuItems
                     } label: {
                         Image(systemName: "ellipsis.circle")
                     }
@@ -832,6 +794,8 @@ struct SubordinateDetailView: View {
             .sheet(isPresented: $showPromotion) { PromotionSheet(subordinateId: subordinateId).appStores() }
             // [v25.590 轉組織 v1a-1] 精靈、交接單頁兩個 .sheet(item:)＋.appStores()（包在 OrgMoveCardParts.swift）
             .orgMoveCardSheets(wizard: $orgMoveWizard, sheet: $orgMoveSheet)
+            // [v25.593 轉組織 v2] 已轉出〔回到我的部屬〕〔真的刪除…〕那一框（OrgMoveCardParts.swift）。要退回這一件：刪這一行
+            .subArchivedAsk($archivedAsk, onReturn: confirmReturnToMine, onDelete: confirmHardDelete)
             .sheet(item: $viewingSideRole) { role in
                 // 不給跳回部屬明細：我們就是從那裡進來的，會無限疊 sheet
                 SideRoleWorkspaceView(roleId: role.id, allowSubordinateJump: false)
@@ -953,6 +917,8 @@ struct SubordinateDetailView: View {
 
                     // 職等 + 部門膠囊
                     HStack(spacing: 5) {
+                        // [v25.593 轉組織 v2] 已轉出：最前面一顆灰膠囊「已轉出」（在職的不畫；OrgMoveCardParts.swift）。要退回這一件：刪這一行
+                        SubArchivedHeroChip(archived: isArchivedCard)
                         if !gradeTitleText.isEmpty {
                             Text(gradeTitleText)
                                 .font(.system(size: 10, weight: .semibold))
@@ -1229,6 +1195,134 @@ struct SubordinateDetailView: View {
               let move = book.move(prompt.moveId) else { return "轉組織" }
         let day = OrgMovePlan.shortDay(move.effectiveKey)
         return day.isEmpty ? "轉組織（排好了）" : "轉組織（\(day) 排好了）"
+    }
+
+    // MARK: - [v25.593 轉組織 v2] 已轉出的卡片（唯讀感；judge §3.6、§4.7；brief v2 §5-1～§5-4）
+    // 「已轉出」用交接單算（OrgMoveIndex.archived），部屬身上一個欄位都沒加。寫入一律在確認框按下去的下一個 runloop。
+
+    /// 這位同仁是不是已轉出（body 外算；看板膠囊、區塊標頭〔＋〕、右上「…」都看它）
+    private var isArchivedCard: Bool { OrgMoveIndex.isArchived(subordinateId) }
+
+    /// 右上「…」：已轉出只剩〔匯出圖片 ▸〕〔匯出文字…〕、〔回到我的部屬〕〔真的刪除…〕；在職照舊
+    @ViewBuilder
+    private var cardMenuItems: some View {
+        if isArchivedCard {
+            archivedMenuItems
+        } else {
+            activeMenuItems
+        }
+    }
+
+    /// 在職的「…」（v25.370 起的那幾顆，v25.593 只是從 body 搬來，一個字都沒改）
+    @ViewBuilder
+    private var activeMenuItems: some View {
+        Button {
+            if subscription.isPremium { showEdit = true }
+            else { showPremiumAlert = true }
+        } label: {
+            Label("編輯", systemImage: "square.and.pencil")
+        }
+        // 升職（使用者指定）：付費鎖比照編輯
+        Button {
+            if subscription.isPremium { showPromotion = true }
+            else { showPremiumAlert = true }
+        } label: {
+            Label("升職", systemImage: "arrow.up.circle.fill")
+        }
+        // [v25.590 轉組織 v1a-1] 轉組織（judge §4.1）：在〔升職〕下面；開始精靈要訂閱（judge §6）。
+        // 要退回這一件：刪這一顆。
+        Button {
+            if subscription.isPremium { orgMoveWizard = OrgMoveWizardRequest(personId: subordinateId) }
+            else { showPremiumAlert = true }
+        } label: {
+            // [v25.592 轉組織 v1b] 排好、部門還沒改的那位寫「轉組織（11/1 排好了）」（字在 orgMoveMenuTitle 組好）。
+            // 要退回這一件：改回 Label("轉組織", …)，刪 orgMoveMenuTitle
+            Label(orgMoveMenuTitle, systemImage: "arrow.left.arrow.right.circle.fill")
+        }
+        // [v25.348] 績效互評：填這位同仁對大家的年度排名
+        Button {
+            if subscription.isPremium { showPerformance = true }
+            else { showPremiumAlert = true }
+        } label: {
+            Label("績效互評排名", systemImage: "trophy.fill")
+        }
+        Divider()
+        exportMenuItems
+    }
+
+    /// [v25.593 轉組織 v2] 已轉出的「…」（judge §3.6：只剩〔匯出〕〔轉回來〕〔真的刪除〕；〔轉回來〕寫〔回到我的部屬〕）
+    @ViewBuilder
+    private var archivedMenuItems: some View {
+        exportMenuItems
+        Divider()
+        Button {
+            askReturnToMine()
+        } label: {
+            Label("回到我的部屬", systemImage: "arrow.uturn.backward.circle")
+        }
+        Button(role: .destructive) {
+            askHardDelete()
+        } label: {
+            Label("真的刪除…", systemImage: "trash")
+        }
+    }
+
+    /// 〔匯出圖片 ▸〕〔匯出文字…〕（在職、已轉出都有）
+    /// [v25.374] 匯出圖片分成兩種內容：卡片本身／這位同仁填的排名票
+    /// [v25.588 部屬匯出] 匯出前先開選項頁；排名票照舊走自己的確認框（不併進選項頁）
+    @ViewBuilder
+    private var exportMenuItems: some View {
+        Menu {
+            Button { exportRequest = SubExportRequest(format: .image) } label: {
+                Label("部屬卡片…", systemImage: "person.text.rectangle")
+            }
+            Button { confirmBallotExport = true } label: {
+                Label("這位同仁填的排名票", systemImage: "trophy")
+            }
+        } label: {
+            Label("匯出圖片", systemImage: "photo")
+        }
+        Button { exportRequest = SubExportRequest(format: .text) } label: {
+            Label("匯出文字…", systemImage: "text.alignleft")
+        }
+    }
+
+    /// 〔回到我的部屬〕（灰條、「…」）：先問（字照 OrgMovePlan.returnAsk）；不用訂閱（把設錯的收回來，同〔復原〕）。
+    /// 下一個 runloop 才跳框（從選單按下去時，選單先收完）
+    private func askReturnToMine() {
+        let ask = OrgMovePlan.returnAsk(personId: subordinateId, world: OrgMoveWorld(store: lifeStore))
+        let req = SubArchivedAsk(kind: .returnToMine, title: ask.title, message: ask.message)
+        DispatchQueue.main.async { archivedAsk = req }
+    }
+
+    /// 〔真的刪除…〕：要訂閱（同名單往左滑）；字照 subordinateDeleteConfirm，身上還有沒交出去的前面多一句（deleteOpenNote，只提醒不擋）
+    private func askHardDelete() {
+        guard subscription.isPremium else { showPremiumAlert = true; return }
+        guard let s = lifeStore.subordinates.first(where: { $0.id == subordinateId }) else { return }
+        let confirm = lifeStore.subordinateDeleteConfirm(s)
+        let note = OrgMovePlan.deleteOpenNote(personId: subordinateId, world: OrgMoveWorld(store: lifeStore))
+        let message: String = note.map { $0 + "\n" + confirm.message } ?? confirm.message
+        let req = SubArchivedAsk(kind: .hardDelete, title: confirm.title, message: message)
+        DispatchQueue.main.async { archivedAsk = req }
+    }
+
+    /// 框裡按〔回到我的部屬〕：下一個 runloop 記一張 back 的交接單（LifeStore 一次存檔、自己重排會議通知）
+    private func confirmReturnToMine() {
+        let store = lifeStore
+        let id = subordinateId
+        DispatchQueue.main.async { _ = store.returnArchivedSubordinate(id) }
+    }
+
+    /// 框裡按〔真的刪除〕：先關卡片，下一個 runloop 才刪（用 store 裡現在那一筆；問的期間人已經被刪了就什麼都不做。
+    /// 同 SubordinateView.confirmDelete）
+    private func confirmHardDelete() {
+        let store = lifeStore
+        let id = subordinateId
+        dismiss()
+        DispatchQueue.main.async {
+            guard let fresh = store.subordinates.first(where: { $0.id == id }) else { return }
+            store.deleteSubordinate(fresh)
+        }
     }
 
     /// 打開交接單頁（看交接單不用訂閱，judge §6）
@@ -2124,7 +2218,11 @@ struct SubordinateDetailView: View {
                     .clipShape(Capsule())
                     .overlay(Capsule().stroke(color.opacity(0.22), lineWidth: 0.75))
             }
-            action()
+            // [v25.593 轉組織 v2] 已轉出：藏區塊標頭右邊的〔＋〕（報告、會議、任務、兼任、優缺點、紀錄；唯讀為主，judge §3.6）。
+            // 已經有的項目照樣點得開、改得到（修紀錄用）。要退回這一件：改回只有 action()
+            if !isArchivedCard {
+                action()
+            }
         }
         .padding(.horizontal, 16)
         .padding(.top, 14)
@@ -2646,7 +2744,7 @@ struct RecordEditorSheet: View {
                     }
                 }
                 Section {
-                    MentionTextField(text: $note, placeholder: "選填（可打 @ 標註人員）", people: lifeStore.mentionPeople())
+                    MentionTextField(text: $note, placeholder: "選填（可打 @ 標註人員）", people: lifeStore.mentionPickPeople())
                 } header: {
                     editorSectionHeader("備註", icon: "note.text", tint: Color(.systemGray2))
                 }
@@ -2866,7 +2964,8 @@ struct AddSubItemSheet: View {
         } else {
             NavigationStack {
                 Group {
-                    if lifeStore.subordinates.isEmpty {
+                    // [v25.593 轉組織 v2] 挑人清單只列在職的（已轉出的不給新增；judge §3.6）。要退回這一件：改回 lifeStore.subordinates
+                    if lifeStore.activeSubordinates.isEmpty {
                         emptyState
                     } else {
                         pickerList
@@ -2939,7 +3038,8 @@ struct AddSubItemSheet: View {
     /// 是 Unicode 碼位序，看起來像亂排的。
     private var groupedSubordinates: [(title: String, people: [Subordinate])] {
         var buckets: [String: [Subordinate]] = [:]
-        for sub in lifeStore.subordinates where matches(sub) {
+        // [v25.593 轉組織 v2] 只列在職的（已轉出的收在部屬名單最下面，不給新增）。要退回這一件：改回 lifeStore.subordinates
+        for sub in lifeStore.activeSubordinates where matches(sub) {
             buckets[deptTitle(sub), default: []].append(sub)
         }
         return buckets
@@ -3008,6 +3108,17 @@ struct AddSubItemSheet: View {
 
     // MARK: 空狀態（雙圈脈衝，對齊 SubordinateEquipmentView.emptyState 規格）
 
+    /// [v25.593 轉組織 v2] 部屬都轉出了（挑人清單只列在職的，名單只剩最下面「已轉出」）：不叫人「先新增部屬」。
+    /// 一位部屬都沒有的時候跟以前一字不差。要退回這一件：emptyState 兩行 Text 改回原本的字，刪這兩支
+    private var emptyTitle: String {
+        lifeStore.subordinates.isEmpty ? "尚無部屬" : "目前沒有在職的部屬"
+    }
+
+    private var emptyNote: String {
+        if lifeStore.subordinates.isEmpty { return "請先在『部屬』頁新增部屬，才能建立\(kind.title)" }
+        return "已轉出的同仁收在『部屬』頁最下面「已轉出」；要再交事情給這位同仁，先打開卡片按〔回到我的部屬〕"
+    }
+
     private var emptyState: some View {
         VStack(spacing: 10) {
             ZStack {
@@ -3042,8 +3153,8 @@ struct AddSubItemSheet: View {
                 emptyPulseTask?.cancel()
                 emptyIconPulse = false
             }
-            Text("尚無部屬").font(.caption).foregroundStyle(.secondary)
-            Text("請先在『部屬』頁新增部屬，才能建立\(kind.title)")
+            Text(emptyTitle).font(.caption).foregroundStyle(.secondary)
+            Text(emptyNote)
                 .font(.caption2).foregroundStyle(.tertiary)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 32)
@@ -3178,7 +3289,7 @@ struct MeetingEditorSheet: View {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("備註").font(.caption).foregroundStyle(.secondary)
                         MentionTextField(text: $note, placeholder: "選填（可打 @ 標註人員）",
-                                         people: lifeStore.mentionPeople())
+                                         people: lifeStore.mentionPickPeople())
                     }
                 } header: {
                     editorSectionHeader("會議資訊", icon: "person.badge.clock")
@@ -3258,9 +3369,11 @@ struct MeetingEditorSheet: View {
 
                 // [v25.332] 會議也能移交給其他部屬（比照任務編輯的「指派人員」）：
                 // 原本會議只能掛在開會時選的那個人身上，掛錯人只能刪掉重建。
+                // [v25.593 轉組織 v2] 挑人清單：在職的＋現在選著的那位（已轉出的會議打開來不會變空白；pickableSubordinates）。
+                // 要退回這一件：ForEach 改回 lifeStore.subordinates
                 Section {
                     Picker(selection: $assignedSubId) {
-                        ForEach(lifeStore.subordinates) { s in
+                        ForEach(lifeStore.pickableSubordinates(keeping: assignedSubId)) { s in
                             Text(s.name.isEmpty ? "未命名" : s.name).tag(s.id)
                         }
                     } label: {
@@ -3880,7 +3993,7 @@ struct MeetingItemsEditor: View {
             }
             forceOnTimeRow(item)
             MentionTextField(text: item.note, placeholder: "項目備註（可打 @ 標註人員）",
-                             people: lifeStore.mentionPeople())
+                             people: lifeStore.mentionPickPeople())
         }
     }
 
@@ -4240,7 +4353,9 @@ struct SubordinatePickerSheet: View {
     }
 
     private var grouped: [(dept: String, people: [Subordinate])] {
-        let list = lifeStore.subordinates.filter(matches)
+        // [v25.593 轉組織 v2] 「記給誰」：在職的＋現在選著的那位（已轉出的放最後，打開舊紀錄不會沒有勾）。
+        // 要退回這一件：改回 lifeStore.subordinates.filter(matches)
+        let list = lifeStore.pickableSubordinates(keeping: initial).filter(matches)
         var order: [String] = []
         var map: [String: [Subordinate]] = [:]
         for s in list {
@@ -4572,7 +4687,7 @@ struct TaskEditorSheet: View {
             Form {
                 Section {
                     TextField("任務主題", text: $topic)
-                    MentionTextField(text: $content, placeholder: "任務內容（可打 @ 標註人員）", people: lifeStore.mentionPeople())
+                    MentionTextField(text: $content, placeholder: "任務內容（可打 @ 標註人員）", people: lifeStore.mentionPickPeople())
                     HStack {
                         Text("任務日期")
                         Spacer()
@@ -4642,9 +4757,11 @@ struct TaskEditorSheet: View {
                          ? "應做未作為＝缺失事項：完成（結案）時計 \(scoreValue) 分（可用加減微調）。卡片與列表會以紅色缺失樣式顯示。"
                          : "完成這個任務時計入主動性評分的分數（可正可負）。沒有調整就跟隨進階設定的「完成任務」權重（目前 +\(ScoreWeights.actTask)）。")
                 }
+                // [v25.593 轉組織 v2] 挑人清單：在職的＋現在選著的那位（已轉出的任務打開來不會變空白；pickableSubordinates）。
+                // 要退回這一件：ForEach 改回 lifeStore.subordinates
                 Section {
                     Picker(selection: $assignedSubId) {
-                        ForEach(lifeStore.subordinates) { s in
+                        ForEach(lifeStore.pickableSubordinates(keeping: assignedSubId)) { s in
                             Text(s.name.isEmpty ? "未命名" : s.name).tag(s.id)
                         }
                     } label: {
@@ -4715,7 +4832,7 @@ struct TaskEditorSheet: View {
                     if showForceOnTime { Text(forceOnTimeFootnote) }
                 }
                 Section {
-                    MentionTextField(text: $note, placeholder: "選填（可打 @ 標註人員）", people: lifeStore.mentionPeople())
+                    MentionTextField(text: $note, placeholder: "選填（可打 @ 標註人員）", people: lifeStore.mentionPickPeople())
                 } header: {
                     editorSectionHeader("備註", icon: "note.text", tint: Color(.systemGray2))
                 }
@@ -5348,7 +5465,7 @@ struct WeeklyReportEditorSheet: View {
                     if showForceOnTime { Text(forceOnTimeFootnote) }
                 }
                 Section {
-                    MentionTextField(text: $note, placeholder: "選填（可打 @ 標註人員）", people: lifeStore.mentionPeople())
+                    MentionTextField(text: $note, placeholder: "選填（可打 @ 標註人員）", people: lifeStore.mentionPickPeople())
                 } header: {
                     editorSectionHeader("備註", icon: "note.text", tint: Color(.systemGray2))
                 }
@@ -5617,6 +5734,13 @@ extension LifeStore {
             out.append(MentionPerson(id: c.id, kind: .card, name: c.name, subtitle: c.company))
         }
         return out
+    }
+
+    /// [v25.593 轉組織 v2] @ 標註「挑人」用：不列已轉出的人（連到這位的名片本來就不列：mentionPeople 的去重看全部部屬）。
+    /// 解析、算分、顯示連結照舊用 mentionPeople()（全部；手打的「@王小明」照樣變連結、照樣算被標註）。
+    /// 只給 MentionTextField 的 people（本檔 8 處）。要退回這一件：那 8 處改回 mentionPeople()，刪這支
+    func mentionPickPeople() -> [MentionPerson] {
+        mentionPeople().filter { $0.kind != .sub || !OrgMoveIndex.isArchived($0.id) }
     }
 
     /// 一次掃描所有部屬的任務/會議/報告，統計每個人被 @ 標註到的「項目數」。
@@ -6992,7 +7116,7 @@ struct MeetingQuickAddItemSheet: View {
                             .clipShape(Capsule())
                     }
                     MentionTextField(text: $content, placeholder: "議程項目內容（可打 @ 標註人員）",
-                                     people: lifeStore.mentionPeople())
+                                     people: lifeStore.mentionPickPeople())
                 }
                 Section {
                     Button {
@@ -7017,7 +7141,7 @@ struct MeetingQuickAddItemSheet: View {
                             FiveMinuteDateTimePicker(selection: $dueDate).fixedSize()
                         }
                     }
-                    MentionTextField(text: $note, placeholder: "備註（選填）", people: lifeStore.mentionPeople())
+                    MentionTextField(text: $note, placeholder: "備註（選填）", people: lifeStore.mentionPickPeople())
                 } footer: {
                     Text("議程項目完成的分數計給指派的負責人；沒指派才計給會議負責人。")
                 }

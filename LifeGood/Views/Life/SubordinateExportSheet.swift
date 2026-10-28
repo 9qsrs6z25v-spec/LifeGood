@@ -191,8 +191,15 @@ struct SubordinateExportSheet: View {
             XSheetTileGrid(tiles: tileSpecs(m))
             XSheetPeriodSection(options: $options,
                                 rangeText: SubExportComposer.periodCore(m),
-                                fallbackStart: m.rangeStart)
+                                fallbackStart: m.rangeStart,
+                                showsWhileMine: showsWhileMine(m))
         }
+    }
+
+    /// [v25.593 轉組織 v2]〔在我這裡的時候〕：已轉出的人才多這一顆（export design §1.3、§5.4）；
+    /// 記住的是這一顆、這次開的人還在（入職～今天，斷言 27）時也畫出來，免得五顆都沒亮。要退回這一件：刪這一支與上面那個參數
+    private func showsWhileMine(_ m: SubExportModel) -> Bool {
+        m.snapshot.isArchived || options.period == .whileMine
     }
 
     /// 往上拉之後：細項、另外三區、潛力性、執掌、排班、細節與敏感、圖片分頁、不會匯出
@@ -763,8 +770,10 @@ struct TeamExportSheet: View {
 
     // MARK: 小工具
 
+    /// [v25.593 轉組織 v2] 部屬總覽的匯出只匯在職的（同總覽畫面；judge §3.6）。knownNames、onlyName 照舊全部（提醒點名、查名字）。
+    /// 要退回這一件：activeSubordinates 改回 subordinates（這裡與 subtitle 兩處）
     private func currentModel() -> TeamExportModel {
-        TeamExportComposer.resolve(subordinates: lifeStore.subordinates,
+        TeamExportComposer.resolve(subordinates: lifeStore.activeSubordinates,
                                    onlyPersonId: onlyOn ? onlyPersonId : nil,
                                    options: options, day: pickedDay, now: Date(),
                                    cal: Calendar.current, knownNames: knownNames())
@@ -799,9 +808,9 @@ struct TeamExportSheet: View {
         let date = SubExportComposer.md(pickedDay, wd: true, now: Date(), cal: g)
         let people: Int
         if onlyOn, let pid = onlyPersonId {
-            people = lifeStore.subordinates.filter { $0.id == pid }.count
+            people = lifeStore.activeSubordinates.filter { $0.id == pid }.count
         } else {
-            people = lifeStore.subordinates.count
+            people = lifeStore.activeSubordinates.count
         }
         return date + "・\(people) 位"
     }
@@ -1368,11 +1377,15 @@ private struct XSheetTile: View {
 // MARK: 期間
 
 /// 期間：小標右邊藍字「2026/10/1～10/31」、五顆等寬膠囊、〔自訂…〕兩個日子、「不管期間都列」開關
+/// [v25.593 轉組織 v2] 已轉出的人多第六顆〔在我這裡的時候〕（入職～轉出生效日）：字長，五顆那一排放不下，
+/// 自己一排放在五顆下面（不藏進 ScrollView）。要退回這一件：刪 showsWhileMine 與 whileMineRow
 private struct XSheetPeriodSection: View {
     @Binding var options: SubExportOptions
     let rangeText: String
     /// 切到〔自訂…〕而且還沒有起日時，先帶入原本那段期間的起日（沒有就一個月前）
     let fallbackStart: Date?
+    /// [v25.593 轉組織 v2] 多畫〔在我這裡的時候〕那一顆
+    var showsWhileMine: Bool = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -1381,6 +1394,9 @@ private struct XSheetPeriodSection: View {
                 ForEach(SubExportPeriod.pickerCases) { p in
                     XSheetSegmentChip(title: p.label, isOn: options.period == p) { pick(p) }
                 }
+            }
+            if showsWhileMine {
+                whileMineRow
             }
             if options.period == .custom {
                 XSheetCustomRange(options: $options)
@@ -1395,6 +1411,13 @@ private struct XSheetPeriodSection: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             .padding(.horizontal, 4)
+        }
+    }
+
+    /// [v25.593 轉組織 v2]〔在我這裡的時候〕（一整排寬）
+    private var whileMineRow: some View {
+        XSheetSegmentChip(title: SubExportPeriod.whileMine.label, isOn: options.period == .whileMine) {
+            pick(.whileMine)
         }
     }
 

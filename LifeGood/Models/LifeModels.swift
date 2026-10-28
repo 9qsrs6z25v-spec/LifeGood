@@ -4587,6 +4587,9 @@ struct PerformanceScoreSource: Identifiable {
     let rank: Int
     let groupSize: Int
     let groupTitle: String
+    /// [v25.593 轉組織 v2] 票上那一組的課（加總頁篩課別用票上的課，judge 第 9 題；只在記憶體算、不存檔）。
+    /// 有預設值：別的地方照舊用 7 個參數建也編得過。要退回這一件：刪這一行與 LifeStore.performanceScores 的 groupDeptId 參數
+    var groupDeptId: UUID? = nil
     /// 基礎分＝組人數 − 名次 + 1
     var base: Int { max(0, groupSize - rank + 1) }
     var points: Double { Double(base) * weight }

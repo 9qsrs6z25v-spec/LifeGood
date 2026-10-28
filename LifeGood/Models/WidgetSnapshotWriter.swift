@@ -497,7 +497,8 @@ final class WidgetSnapshotWriter {
                                       days: [day0, day1],
                                       trips: trips(life: life, now: now, calendar: cal))
         // [v5] 部屬今天、廠區、家庭待辦（今天、明天各一份，跟 days 同兩天）、倒數（WidgetLifeExtras）
-        snap.hasTeam = !life.subordinates.isEmpty
+        // [v25.593 轉組織 v2] 只有已轉出的人時＝「還沒有部屬資料」（同 team 只算在職的）。要退回這一件：改回 life.subordinates
+        snap.hasTeam = !life.activeSubordinates.isEmpty
         snap.team = WidgetLifeExtras.team(life: life, dayStarts: [start0, start1], now: now, calendar: cal)
         snap.plantAreas = WidgetLifeExtras.plantAreas(life: life)
         snap.familyTasks = WidgetLifeExtras.familyTasks(life: life, dayStarts: [start0, start1], calendar: cal)

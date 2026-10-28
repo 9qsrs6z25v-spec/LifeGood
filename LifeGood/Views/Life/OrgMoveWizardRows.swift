@@ -332,3 +332,79 @@ struct OrgMoveWizAddCustomButton: View {
         .buttonStyle(.plain)
     }
 }
+
+// MARK: - [v25.593 轉組織 v2] 精靈 v2 多的小零件（orgmove/build/v2/brief.md §3-1）
+// 第 ① 步「這次是」兩排：〔換單位〕〔只換廠區〕（還是我帶的）／〔調出我的管轄〕〔離職〕〔退休〕（不是我帶的了）。
+// 字一律 OrgMoveKind.label、順序照 OrgMoveKind.wizardCases（主控定的），這裡只排版。
+// 要退回這一段：刪到檔尾，OrgMoveWizard.swift 的 kindCard 換回 v1 那兩顆 OrgMoveWizChip。
+
+/// 「這次是」五顆兩排。一排放不下（小螢幕、大字）就一顆一行（ViewThatFits；不用 ScrollView 把後面幾顆藏起來）
+struct OrgMoveWizKindPicker: View {
+    let selected: OrgMoveKind
+    let onPick: (OrgMoveKind) -> Void
+
+    init(selected: OrgMoveKind, onPick: @escaping (OrgMoveKind) -> Void) {
+        self.selected = selected
+        self.onPick = onPick
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            OrgMoveWizKindRow(caption: "還是我帶的", kinds: Self.stayKinds, selected: selected, onPick: onPick)
+            OrgMoveWizKindRow(caption: "不是我帶的了", kinds: Self.leaveKinds, selected: selected, onPick: onPick)
+        }
+    }
+
+    /// 第一排：還是我帶的（換單位、只換廠區）
+    static var stayKinds: [OrgMoveKind] { OrgMoveKind.wizardCases.filter { !$0.isLeaving } }
+    /// 第二排：不是我帶的了（調出我的管轄、離職、退休）
+    static var leaveKinds: [OrgMoveKind] { OrgMoveKind.wizardCases.filter { $0.isLeaving } }
+}
+
+/// 一排：小灰字＋膠囊（放得下一排，放不下一顆一行）
+private struct OrgMoveWizKindRow: View {
+    let caption: String
+    let kinds: [OrgMoveKind]
+    let selected: OrgMoveKind
+    let onPick: (OrgMoveKind) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(caption)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 8) { chips }
+                VStack(alignment: .leading, spacing: 8) { chips }
+            }
+        }
+    }
+
+    private var chips: some View {
+        ForEach(kinds, id: \.self) { k in
+            OrgMoveWizKindChip(text: k.label, on: k == selected) { onPick(k) }
+        }
+    }
+}
+
+/// 一顆（樣子同 OrgMoveWizard.swift 的 OrgMoveWizChip：選中的藍底白字）
+private struct OrgMoveWizKindChip: View {
+    let text: String
+    let on: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Text(text)
+                .font(.subheadline.weight(on ? .semibold : .regular))
+                .lineLimit(1)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 7)
+                .foregroundStyle(on ? Color.white : Color.primary)
+                .background(on ? Color.blue : Color(.tertiarySystemFill), in: Capsule())
+                .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(on ? .isSelected : [])
+    }
+}

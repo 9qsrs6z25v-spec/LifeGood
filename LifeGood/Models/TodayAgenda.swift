@@ -48,7 +48,9 @@ enum TodayAgenda {
         // [v25.470] 旅遊期間不收部屬會議（使用者：代理人會處理）。
         // 只擋部屬會議——個人事件與系統行事曆是自己的事，旅行中照樣要看得到。
         if !store.hidesMeetings(on: day) {
-            for sub in store.subordinates {
+            // [v25.593 轉組織 v2] 只排在職的同仁（已轉出的會議不上今天時間軸、手錶時間軸；judge §3.6、§4.11）。
+            // 要退回這一件：activeSubordinates 改回 subordinates
+            for sub in store.activeSubordinates {
                 for meeting in sub.meetings {
                     for occ in meeting.expandedOccurrences(from: from, horizon: dayEnd) {
                         guard !occ.isCancelled else { continue }

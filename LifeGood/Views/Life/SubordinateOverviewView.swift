@@ -127,9 +127,10 @@ struct SubordinateOverviewView: View {
     // MARK: - 當日請假
 
     /// 各清單共用的部屬來源：套用「只看某人」篩選
+    /// [v25.593 轉組織 v2] 只讀在職的（已轉出的人不在總覽；judge §3.6、brief §4-7）。要退回這一件：兩個 activeSubordinates 改回 subordinates
     private var visibleSubordinates: [Subordinate] {
-        guard let pid = filterPersonId else { return lifeStore.subordinates }
-        return lifeStore.subordinates.filter { $0.id == pid }
+        guard let pid = filterPersonId else { return lifeStore.activeSubordinates }
+        return lifeStore.activeSubordinates.filter { $0.id == pid }
     }
 
     /// [v5] 判斷抽到 TeamDay.leaves（部屬今天小工具同一份），行為不變
@@ -219,6 +220,11 @@ struct SubordinateOverviewView: View {
 
                     // [v25.590 轉組織 v1a-1] 「待分派 N」〔分給…〕（judge §4.9；沒有待分派時整張不出現、不佔位；〔分給…〕不用訂閱）
                     OrgMovePendingCard { id in orgMoveSheet = OrgMoveSheetRequest(moveId: id) }
+                        .padding(.horizontal)
+
+                    // [v25.593 轉組織 v2]「我接的（N）」：〔交出去〕給「我」的事（judge §3.6；沒有就整張不出現、不佔位；打勾不用訂閱）。
+                    // 要退回這一件：刪這兩行與檔尾的 OrgMoveMineCard
+                    OrgMoveMineCard { id in orgMoveSheet = OrgMoveSheetRequest(moveId: id) }
                         .padding(.horizontal)
 
                     MacaronDatePicker(selectedDate: $selectedDate)
@@ -1199,7 +1205,8 @@ struct SubordinateOverviewView: View {
     private func summaryHeroCard(leaveCnt: Int, meetCnt: Int, taskCnt: Int,
                                  forExport: Bool = false, dayWord: String = "今日",
                                  peopleCount: Int? = nil) -> some View {
-        let people: Int = peopleCount ?? lifeStore.subordinates.count
+        // [v25.593 轉組織 v2]「共 N 人」只算在職的。要退回這一件：activeSubordinates 改回 subordinates
+        let people: Int = peopleCount ?? lifeStore.activeSubordinates.count
         let outerPadding: CGFloat? = forExport ? 0 : nil
         return VStack(alignment: .leading, spacing: 12) {
             // 標題列
@@ -1390,10 +1397,12 @@ struct BirthdayOverviewSheet: View {
 
     /// 全部有填生日的人：部屬＋在職組織人員；已連動到「有生日的部屬」的
     /// 組織人員跳過（同一個人不重複列）。
+    /// [v25.593 轉組織 v2] 只列在職的部屬；連到已轉出部屬的組織人員也跳過（judge §3.6 生日名單標在職）。
+    /// 要退回這一件：activeSubordinates 改回 subordinates、刪 isArchived 那一行
     static func birthdayPeople(in store: LifeStore) -> [Person] {
         var out: [Person] = []
         var subIdsWithBirthday = Set<UUID>()
-        for s in store.subordinates {
+        for s in store.activeSubordinates {
             guard let bd = s.birthday else { continue }
             subIdsWithBirthday.insert(s.id)
             let role = ["部屬", s.jobTitle].filter { !$0.isEmpty }.joined(separator: "・")
@@ -1403,6 +1412,7 @@ struct BirthdayOverviewSheet: View {
         for p in store.orgPeople where !p.isInactive {
             guard let bd = p.birthday else { continue }
             if let linked = p.linkedSubordinateId, subIdsWithBirthday.contains(linked) { continue }
+            if let linked = p.linkedSubordinateId, OrgMoveIndex.isArchived(linked) { continue }
             let dept = p.departmentId.flatMap { id in
                 store.departments.first { $0.id == id }?.name
             } ?? ""
@@ -1533,5 +1543,171 @@ struct BirthdayOverviewSheet: View {
             }
         }
         .padding(.vertical, 2)
+    }
+}
+
+// MARK: - [v25.593 轉組織 v2] 部屬總覽「我接的（N）」
+
+/// 〔交出去〕給「我」的待辦、週報、自己加的一項（judge §3.6「這件我先接」；orgmove/build/v2/brief.md §4-10）。
+/// 放在「待分派」卡下面；沒有還沒收掉的就整張不出現、不佔位。左邊圓圈打勾＝收掉（不用訂閱：把開始了的交接做完）；
+/// 點標題開那張交接單（onOpenMove）。字照 OrgMovePlan.mineRows（「從王小明・10/28・原訂 11/5」）。
+/// 這裡的字只在 App 內頁；通知、小工具、手錶一個字都沒加。要退回這一件：刪這兩個 struct 與總覽 body 那兩行
+private struct OrgMoveMineCard: View {
+    /// 點一列的標題：打開那一張交接單（moveId）
+    let onOpenMove: (UUID) -> Void
+
+    @EnvironmentObject var lifeStore: LifeStore
+
+    var body: some View {
+        content(currentRows())
+    }
+
+    /// 沒有〔交出去〕給「我」、還沒收掉的就不建 OrgMoveWorld（部屬總覽每次重畫都會叫到）
+    private func currentRows() -> [OrgMoveMineRow] {
+        let book = lifeStore.orgMoves
+        guard Self.hasOpen(book) else { return [] }
+        return OrgMovePlan.mineRows(book: book, world: OrgMoveWorld(store: lifeStore))
+    }
+
+    /// 先粗篩一次（mineRows 的條件再嚴一點：那一列要做了）
+    private static func hasOpen(_ book: OrgMoveBook) -> Bool {
+        let me: UUID = OrgMovePlan.meId
+        let handOut: String = OrgMoveAction.handOut.rawValue
+        return book.live.contains { m in
+            m.wasApplied && !m.isUndone && m.allLines.contains { l in
+                l.action == handOut && l.toId == me && l.checkedAt == nil
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func content(_ rows: [OrgMoveMineRow]) -> some View {
+        if rows.isEmpty {
+            EmptyView()
+        } else {
+            card(rows)
+        }
+    }
+
+    private func card(_ rows: [OrgMoveMineRow]) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            header(rows.count)
+            ForEach(rows) { r in
+                Divider()
+                    .padding(.leading, 14)
+                rowView(r)
+            }
+            Divider()
+                .padding(.leading, 14)
+            footnote
+        }
+        .background(Color(.systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16)
+                .stroke(Color(.separator).opacity(0.12), lineWidth: 0.75)
+        )
+        .shadow(color: Color.teal.opacity(0.12), radius: 10, x: 0, y: 4)
+        .shadow(color: Color.black.opacity(0.05), radius: 3, x: 0, y: 1)
+    }
+
+    private func header(_ n: Int) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: "tray.and.arrow.down.fill")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(Color.teal)
+                .frame(width: 28, height: 28)
+                .background(Color.teal.opacity(0.14), in: Circle())
+            Text("我接的（\(n)）")
+                .font(.subheadline.weight(.bold))
+                .foregroundStyle(.primary)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+    }
+
+    private func rowView(_ r: OrgMoveMineRow) -> some View {
+        let open = onOpenMove
+        let moveId = r.moveId
+        return OrgMoveMineRowView(row: r, onOpen: { open(moveId) }, onCheck: { check(r) })
+    }
+
+    private var footnote: some View {
+        Text("交出去給我的事：不在任何人的清單、不算分；做完了打勾收掉")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+    }
+
+    /// 打勾收掉（不用訂閱；沒有 sheet、確認框，直接寫）。交接單那一列變「✓ 11/3 收掉了（我接的）」，〔還沒收掉〕在交接單長按
+    private func check(_ r: OrgMoveMineRow) {
+        let store = lifeStore
+        withAnimation(.easeInOut(duration: 0.2)) {
+            store.setOrgMoveMineChecked(r.moveId, lineId: r.lineId, checked: true)
+        }
+    }
+}
+
+/// 「我接的」一列：左邊圓圈（收掉）｜標題＋灰字「從王小明・10/28・原訂 11/5」（點了開交接單）。點的範圍跟圓圈分開（不巢狀）
+private struct OrgMoveMineRowView: View {
+    let row: OrgMoveMineRow
+    let onOpen: () -> Void
+    let onCheck: () -> Void
+
+    private var titleText: String {
+        let t = row.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        return t.isEmpty ? "（沒有標題）" : t
+    }
+
+    private var checkLabel: String {
+        "收掉「" + titleText + "」"
+    }
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 10) {
+            checkButton
+            openButton
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+    }
+
+    private var checkButton: some View {
+        Button(action: onCheck) {
+            Image(systemName: "circle")
+                .font(.system(size: 22))
+                .foregroundStyle(Color.secondary)
+                .frame(width: 32, height: 32)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(checkLabel)
+    }
+
+    private var openButton: some View {
+        Button(action: onOpen) {
+            label
+        }
+        .buttonStyle(.plain)
+        .accessibilityHint("打開交接單")
+    }
+
+    private var label: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(titleText)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.primary)
+                .lineLimit(2)
+            Text(row.detail)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
     }
 }

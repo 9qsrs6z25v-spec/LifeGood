@@ -106,9 +106,13 @@ enum ReminderCenter {
     /// 一律整批重算而不是增量維護：提醒的來源有週期會議的展開、改期、加開場次、
     /// 取消場次，增量維護要處理的狀態轉移太多，而整批重算很便宜（純記憶體計算）。
     @MainActor
-    static func rebuildAll(events: [PersonalEvent], subordinates: [Subordinate],
+    static func rebuildAll(events: [PersonalEvent], subordinates allSubordinates: [Subordinate],
                            tripPlans: [TripPlan] = []) async {
         let now = Date()
+        // [v25.593 轉組織 v2] 已轉出的同仁的會議不再提醒（judge §3.6、§4.11；查 OrgMoveIndex，不讀 store）：
+        // 呼叫端照舊傳全部部屬（LifeGoodApp、LifeStore、我的行事曆、部屬卡片…），在這裡一次濾掉，一個呼叫點都不用改。
+        // liveMeetingKeys 也只算在職的：已轉出那位的「延後再提醒」一起拿掉。要退回這一件：刪這一行、參數名改回 subordinates
+        let subordinates: [Subordinate] = OrgMoveIndex.activeOnly(allSubordinates)
         // [v25.470] 旅遊期間不提醒部屬會議（使用者：代理人會處理）。
         // 判斷由呼叫端把行程傳進來，而不是在這裡讀 store——這一層是純計算，
         // 伸手去拿 store 會讓它變成只能在 App 裡跑的東西。

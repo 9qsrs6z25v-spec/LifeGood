@@ -337,10 +337,20 @@ struct TalentMatrixView: View {
     // [v3] 散布圖 + 圖例進場動畫旗標
     @State private var chartAppeared = false
     @State private var legendAppeared = false
+    /// [v25.593 轉組織 v2]〔含已轉出〕：預設只畫在職的（judge §3.6）；開了連已轉出的一起畫（點、名字用灰）。
+    /// 不記住（每次打開都從只看在職的開始）
+    @State private var includeArchived = false
 
+    /// [v25.593 轉組織 v2] 預設 activeSubordinates；〔含已轉出〕開了用全部。要退回這一件：base 改回 lifeStore.subordinates
     private var members: [Subordinate] {
         let ids = selectedDeptIds
-        return lifeStore.subordinates.filter { ids.isEmpty || ($0.departmentId.map { ids.contains($0) } ?? false) }
+        let base: [Subordinate] = includeArchived ? lifeStore.subordinates : lifeStore.activeSubordinates
+        return base.filter { ids.isEmpty || ($0.departmentId.map { ids.contains($0) } ?? false) }
+    }
+
+    /// [v25.593 轉組織 v2] 有已轉出的人才出現〔含已轉出〕那一顆
+    private var hasArchived: Bool {
+        lifeStore.subordinates.contains { OrgMoveIndex.isArchived($0.id) }
     }
 
     /// 各成員含被標註加分的主動性分數 + X 軸中位數，由呼叫端（body / exportContent）
@@ -414,7 +424,8 @@ struct TalentMatrixView: View {
                         .pickerStyle(.segmented)
                         .padding(.horizontal)
                         // 評分加總有自己的年度／課別篩選，不套用上方的部門篩選列
-                        if tab != 2 { deptFilter }
+                        // [v25.593 轉組織 v2] 部門篩選旁多〔含已轉出〕（filterRow）
+                        if tab != 2 { filterRow }
                         if tab == 2 {
                             PerformanceSummaryView()
                         } else if members.isEmpty {
@@ -483,7 +494,40 @@ struct TalentMatrixView: View {
         }
     }
 
+    /// [v25.593 轉組織 v2] 篩選列：部門＋〔含已轉出〕（有已轉出的人才出現）
+    private var filterRow: some View {
+        HStack(spacing: 8) {
+            deptFilter
+            if hasArchived { archivedToggle }
+        }
+        .padding(.horizontal)
+    }
+
+    /// [v25.593 轉組織 v2]〔含已轉出〕開關（膠囊樣式同部門篩選）；一切換就先收起明細卡（同部門篩選變更）
+    private var archivedToggle: some View {
+        let on = includeArchived
+        let a11yValue: String = on ? "開" : "關"
+        return Button {
+            selected = nil
+            includeArchived.toggle()
+        } label: {
+            HStack(spacing: 5) {
+                Image(systemName: on ? "checkmark.circle.fill" : "circle")
+                Text("含已轉出").lineLimit(1)
+            }
+            .font(.subheadline.weight(.medium))
+            .foregroundStyle(on ? Color.indigo : Color.secondary)
+            .padding(.horizontal, 12).padding(.vertical, 7)
+            .background(on ? Color.indigo.opacity(0.10) : Color(.secondarySystemBackground))
+            .clipShape(Capsule())
+            .overlay(Capsule().stroke(Color.indigo.opacity(on ? 0.22 : 0.0), lineWidth: 0.6))
+        }
+        .buttonStyle(.plain)
+        .accessibilityValue(a11yValue)
+    }
+
     // [v2] 選取特定部門時改為 indigo 淺底 + 細邊框，對齊 FilterChip 選取態規格；支援多選
+    // [v25.593 轉組織 v2] 左右留白移到 filterRow
     private var deptFilter: some View {
         let isFiltered = !selectedDeptIds.isEmpty
         return Menu {
@@ -510,7 +554,6 @@ struct TalentMatrixView: View {
             .clipShape(Capsule())
             .overlay(Capsule().stroke(Color.indigo.opacity(isFiltered ? 0.22 : 0.0), lineWidth: 0.6))
         }
-        .padding(.horizontal)
     }
 
     // MARK: - 匯出 JPG
@@ -541,6 +584,11 @@ struct TalentMatrixView: View {
         let f = DateFormatter(); f.dateFormat = "yyyyMMdd_HHmm"; return f
     }()
 
+    /// [v25.593 轉組織 v2] 匯出照畫面：〔含已轉出〕開著時右上多「・含已轉出」
+    private var exportFilterText: String {
+        includeArchived ? selectedDeptName + "・含已轉出" : selectedDeptName
+    }
+
     /// 供 ImageRenderer 使用的靜態版面（不含互動）
     private var exportContent: some View {
         let ctx = makeAxisContext()
@@ -549,7 +597,7 @@ struct TalentMatrixView: View {
                 Image(systemName: "chart.dots.scatter").foregroundStyle(.indigo)
                 Text("人才矩陣").font(.headline)
                 Spacer()
-                Text(selectedDeptName).font(.caption).foregroundStyle(.secondary)
+                Text(exportFilterText).font(.caption).foregroundStyle(.secondary)
             }
             if members.isEmpty {
                 Text("尚無部屬資料").font(.subheadline).foregroundStyle(.secondary).padding(.vertical, 40)
@@ -686,6 +734,8 @@ struct TalentMatrixView: View {
     }
 
     private func pointColor(_ m: Subordinate, _ ctx: AxisContext) -> Color {
+        // [v25.593 轉組織 v2]〔含已轉出〕開著時，已轉出的點、名字、明細卡用灰
+        if OrgMoveIndex.isArchived(m.id) { return .gray }
         let hiX = Double(proactivity(m, ctx)) >= ctx.xMid
         let hiY = Double(potential(m, ctx)) >= ctx.yMid
         switch (hiY, hiX) {

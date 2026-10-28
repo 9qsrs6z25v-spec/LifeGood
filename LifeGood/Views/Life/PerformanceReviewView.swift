@@ -781,6 +781,9 @@ struct PerformanceSummaryView: View {
         let isOpen = expanded.contains(score.personId)
         // 副標一次組好再交給 Text：串在 Text(...) 裡的字串相加會讓型別檢查爆掉
         let metaText = metaLine(deptName: deptName, score: score)
+        // [v25.593 轉組織 v2]「已轉出」膠囊：刪掉的（找不到人）或轉組織收進「已轉出」的（OrgMoveIndex）。
+        // 要退回這一件：改回只看 sub == nil
+        let showsArchived = sub == nil || OrgMoveIndex.isArchived(score.personId)
         return VStack(alignment: .leading, spacing: 0) {
             Button {
                 withAnimation(.spring(response: 0.32, dampingFraction: 0.85)) {
@@ -799,7 +802,7 @@ struct PerformanceSummaryView: View {
                     VStack(alignment: .leading, spacing: 3) {
                         HStack(spacing: 5) {
                             MarqueeText(score.name).font(.subheadline.weight(.bold))
-                            if sub == nil {
+                            if showsArchived {
                                 Text("已轉出")
                                     .font(.system(size: 9, weight: .bold))
                                     .padding(.horizontal, 5).padding(.vertical, 1.5)

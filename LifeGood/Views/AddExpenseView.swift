@@ -2024,22 +2024,35 @@ struct AddExpenseView: View {
     }
 
     /// 部屬，依課別分組（跟「選擇部屬」同一套課別名）
+    /// [v25.593 轉組織 v2] 已轉出的同仁照樣選得到（送禮給調走、離職的同仁；judge §7.1-8），
+    /// 收在在職的後面「部屬・已轉出」那一組、小字多「已轉出」（同組織圖「公司・已離職」放最後）。
+    /// 要退回這一件：拿掉 archived 那幾行
     private var subordinateRecipientGroups: [RecipientGroup] {
         let deptNames = recipientDepartmentNames
         var buckets: [String: [RecipientCandidate]] = [:]
+        var archived: [RecipientCandidate] = []
         for sub in lifeStore.subordinates {
+            if OrgMoveIndex.isArchived(sub.id) {
+                let detail = Self.joinedDetail([sub.jobTitle, sub.plantArea, OrgMovePlan.archivedChipText])
+                archived.append(RecipientCandidate(name: sub.name, detail: detail))
+                continue
+            }
             let raw = sub.department.trimmingCharacters(in: .whitespaces)
             let linked = sub.departmentId.flatMap { deptNames[$0] }
             let dept = linked ?? (raw.isEmpty ? "未分課別" : raw)
             buckets[dept, default: []].append(
                 RecipientCandidate(name: sub.name, detail: Self.joinedDetail([sub.jobTitle, sub.plantArea])))
         }
-        return buckets.keys
+        var out: [RecipientGroup] = buckets.keys
             .sorted { a, b in
                 if (a == "未分課別") != (b == "未分課別") { return b == "未分課別" }
                 return a.localizedStandardCompare(b) == .orderedAscending
             }
             .map { RecipientGroup(title: "部屬・\($0)", people: Self.recipientSorted(buckets[$0] ?? [])) }
+        if !archived.isEmpty {
+            out.append(RecipientGroup(title: "部屬・\(OrgMovePlan.archivedChipText)", people: Self.recipientSorted(archived)))
+        }
+        return out
     }
 
     /// 組織圖裡的同事，依部門分組；已離職的放最後一組

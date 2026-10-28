@@ -12,7 +12,7 @@
 // 常數
 // ---------------------------------------------------------------------------
 /** 網頁版自己的版本（與 App 版本無關；改網頁不再動 App 版號） */
-const WEB_VERSION = '1.13';
+const WEB_VERSION = '1.14';
 const CONTAINER_ID = 'iCloud.com.lifegood.app';
 const ZONE_NAME = 'LifeGoodZone';
 const TOKEN_KEY = 'lifegood_ck_token';
@@ -43,13 +43,21 @@ const KV_KEYS = {
   realEstates: 'lifegood_realestates',
   // 財富：App 算好的一套數字（v1.13；App v25.568 起寫，WealthWebFacts.swift）。單一物件、日期是字串「2026-10-27」
   wealthFacts: 'life_wealth_facts_v1',
+  // 轉組織（v1.14；App v25.590 起寫）：交接單、交出去時已逾期的帳。單一物件 { moves: [...] }／{ entries: [...] }，
+  // 只讀：算「已轉出」、班表那天在哪個部門、逾期件數（照 App 的 OrgMoveIndex／OrgHandoffIndex）；不顯示交接單內容、交接備註
+  orgMoves: 'life_org_moves_v1',
+  orgHandoffs: 'life_org_handoffs_v1',
 };
+/** 讀不到（沒有這筆、下載失敗、JSON 壞掉）當作沒有、不讓整個網頁讀不進來的鍵 */
+const OPTIONAL_KV = new Set(['wealthFacts', 'orgMoves', 'orgHandoffs']);
 // JSONEncoder 預設把 Date 編成「距 2001-01-01 的秒數」；這些欄位名一律還原成 Date
 const DATE_KEYS = new Set([
   'date', 'dueDate', 'completedAt', 'endDate', 'joinDate', 'birthday', 'scheduledDate',
   'movedTo', 'createdAt', 'dateAdded', 'leftDate', 'sideRoleEndDate', 'updatedAt', 'recurrenceEndDate',
   'marriageDate', 'divorceDate', 'anniversary', 'submittedAt', 'nextDueDate',
   'purchaseDate', 'soldDate', 'startDate', 'maturityDate', 'expiryDate', 'bldgCompletionDate',
+  // v1.14 交接單、交出去時已逾期的帳（按下去的時間存 Date；生效日、截止日是字串「2026-11-01」不轉）
+  'handedAt', 'appliedAt', 'closedAt', 'undoneAt', 'deletedAt', 'cancelledAt', 'resolvedAt', 'checkedAt',
 ]);
 
 // App 出廠權重（TalentMatrixView.ScoreWeights）
@@ -70,6 +78,8 @@ const Store = {
   expenses: [], incomes: [], currencyRates: [], insurances: [], stocks: [], vehicles: [], realEstates: [],
   profile: {}, health: {}, familyMembers: [], relationships: [], pets: [], familyTasks: [], ballots: [],
   wealthFacts: null,
+  // v1.14 轉組織：交接單（moves）、交出去時已逾期（entries）；orgIndex＝讀完算好的查表（buildOrgIndex）
+  orgMoves: [], orgHandoffs: [], orgIndex: null,
   source: '', loadedAt: null, ctx: null,
 };
 let ckContainer = null;
@@ -180,7 +190,8 @@ async function loadFromCloud() {
   const out = {};
   const entries = Object.entries(KV_KEYS);
   // 財富那一包是選配的：讀失敗（下載不到、JSON 壞掉）當作沒有、退回舊算法，不讓整個網頁讀不進來
-  const results = await Promise.all(entries.map(([k, key]) => (k === 'wealthFacts' ? fetchKV(db, key).catch(() => null) : fetchKV(db, key))));
+  // v1.14 交接單兩包同（讀不到＝空的：大家都算在職、逾期照舊算法）
+  const results = await Promise.all(entries.map(([k, key]) => (OPTIONAL_KV.has(k) ? fetchKV(db, key).catch(() => null) : fetchKV(db, key))));
   // 財富那一包讀不到給 null（不是陣列；applyData 會再驗一次格式）
   entries.forEach(([k], i) => { out[k] = results[i] || (k === 'wealthFacts' ? null : []); });
   if (!out.subs.length && !out.depts.length && !out.orgPeople.length) {
@@ -198,6 +209,12 @@ function applyData(raw, source) {
     const v = raw[k];
     // 財富那一包：單一物件、不轉日期（日期是字串）；格式不對當作沒有（退回舊算法）
     if (k === 'wealthFacts') { Store.wealthFacts = validWealthFacts(v); continue; }
+    // v1.14 交接單、交出去時已逾期：App 存的是單一物件，這裡只留陣列（格式不對、讀不到＝空的）
+    if (k === 'orgMoves' || k === 'orgHandoffs') {
+      const list = v && typeof v === 'object' && !Array.isArray(v) ? v[k === 'orgMoves' ? 'moves' : 'entries'] : null;
+      Store[k] = reviveDates(Array.isArray(list) ? list.filter((x) => x && typeof x === 'object') : []);
+      continue;
+    }
     // life_profile / life_health_profile 是單一物件，其餘都是陣列
     Store[k] = (k === 'profile' || k === 'health')
       ? reviveDates(v && typeof v === 'object' && !Array.isArray(v) ? v : {})
@@ -205,6 +222,7 @@ function applyData(raw, source) {
   }
   Store.source = source;
   Store.loadedAt = new Date();
+  Store.orgIndex = buildOrgIndex();
   Store.ctx = buildScoreContext();
   updateSourceLabel();
   return changed;
@@ -267,6 +285,102 @@ const AutoRefresh = {
 };
 
 // ---------------------------------------------------------------------------
+// 轉組織（v1.14；移植自 App 的 OrgMoveIndex.rebuild／rosterIndex、OrgHandoffIndex、OrgMovePlan.rosterMembers）
+// 「已轉出」用交接單算（部屬身上沒有任何欄位）：組織那一段做完了的單照生效日（同一天照套用的時間）排，
+// 最後一張「調出／離職／退休／回到我的部屬」是調出、離職、退休＝已轉出。不認得的 kind 不算。只讀，不寫任何鍵。
+// ---------------------------------------------------------------------------
+const ORG_LEAVING_KINDS = new Set(['out', 'resign', 'retire']);
+/** App OrgMoveKind.canChangeDept：換單位、調出 */
+const ORG_DEPT_KINDS = new Set(['move', 'out']);
+const EMPTY_ORG_INDEX = { archived: {}, spans: {}, pendingEq: {}, handedOverdue: {} };
+const ARCHIVED_CHIP = '<span class="chip">已轉出</span>';
+/** App OrgMove.orgDone：套用過、沒復原、不是排好／交了還沒改部門、沒墓碑 */
+function orgMoveDone(m) {
+  if (m.deletedAt != null) return false;
+  if (!(m.appliedAt || m.handedAt)) return false;
+  return m.state !== 'undone' && m.state !== 'planned' && m.state !== 'handed';
+}
+function orgMoveTime(m) {
+  const d = m.appliedAt || m.handedAt || m.createdAt;
+  return d instanceof Date && !isNaN(d) ? d.getTime() : -8.64e15;
+}
+/** 讀完資料算一次：archived（部屬 id → 那一張）、spans（那一天在哪個部門）、
+ *  pendingEq（原人 id → 待分派機台 id → 交接那一刻）、handedOverdue（原人 id → 交出去時已逾期的任務／週報 id） */
+function buildOrgIndex() {
+  const archived = {}, spans = {}, pendingEq = {}, handedOverdue = {};
+  const byPerson = {};
+  for (const m of Store.orgMoves || []) {
+    if (!m || typeof m !== 'object' || !m.personId || m.deletedAt != null) continue;
+    // 待分派、還沒分好的機台（沒復原、套用過的單）：這幾台交接之後才到期的警報任務，逾期不算原人
+    if (m.state !== 'undone' && (m.appliedAt || m.handedAt)) {
+      const handed = m.handedAt || m.appliedAt;
+      for (const l of m.lines || []) {
+        if (l && l.kind === 'equipment' && l.action === 'pending' && l.state === 'done' && l.refId) {
+          (pendingEq[m.personId] = pendingEq[m.personId] || {})[l.refId] = handed;
+        }
+      }
+    }
+    if (orgMoveDone(m)) (byPerson[m.personId] = byPerson[m.personId] || []).push(m);
+  }
+  for (const pid of Object.keys(byPerson)) {
+    const list = byPerson[pid].slice().sort((a, b) => {
+      const ka = String(a.effectiveKey || ''), kb = String(b.effectiveKey || '');
+      if (ka !== kb) return ka < kb ? -1 : 1;
+      return orgMoveTime(a) - orgMoveTime(b);
+    });
+    let wasArchived = false, last = null;
+    const out = [];
+    for (const m of list) {
+      const leaving = ORG_LEAVING_KINDS.has(m.kind), back = m.kind === 'back';
+      const from = m.from || {}, to = m.to || {};
+      const moved = ((from.deptId || null) !== (to.deptId || null) && m.keepDept !== true && ORG_DEPT_KINDS.has(m.kind))
+        || (from.plant || '') !== (to.plant || '');
+      if (!leaving && !back && !moved) continue;
+      // 這一天以前（不含）在 from 那個部門、廠區
+      out.push({ untilKey: String(m.effectiveKey || ''), deptId: from.deptId || null, plant: from.plant || '', archived: wasArchived });
+      if (leaving) wasArchived = true;
+      if (back) wasArchived = false;
+      if (leaving || back) last = m;
+    }
+    if (out.length) spans[pid] = out;
+    if (last && ORG_LEAVING_KINDS.has(last.kind)) archived[pid] = { moveId: last.id, kind: last.kind, effectiveKey: String(last.effectiveKey || '') };
+  }
+  for (const e of Store.orgHandoffs || []) {
+    if (!e || typeof e !== 'object' || !e.fromId || !e.itemId || e.wasOverdue === false) continue;
+    (handedOverdue[e.fromId] = handedOverdue[e.fromId] || new Set()).add(e.itemId);
+  }
+  return { archived, spans, pendingEq, handedOverdue };
+}
+const orgIndex = () => Store.orgIndex || EMPTY_ORG_INDEX;
+/** 已轉出（調出我的管轄、離職、退休生效了；〔回到我的部屬〕之後又是在職） */
+function isArchivedId(id) { return !!(id && orgIndex().archived[id]); }
+/** 在職的部屬（同 App 的 activeSubordinates：總覽、矩陣、統計、行事曆、還沒投票的人讀這一份） */
+function activeSubs() { return Store.subs.filter((s) => !isArchivedId(s.id)); }
+/** 那一天（「2026-10-15」）這位在哪：null＝跟現在一樣 */
+function orgPlacement(personId, dayKey) {
+  const list = orgIndex().spans[personId];
+  if (!list) return null;
+  return list.find((x) => dayKey < x.untilKey) || null;
+}
+/** 班表那個月要列的人（App OrgMovePlan.rosterMembers）：這個月有任何一天在職、而且在 deptId 這個部門（null＝全部）就列；
+ *  分組的廠區＝符合的最後那一天的廠區。回看 10 月製造一課看得到 11/1 調走的人，11 月就沒有 */
+function rosterMembers(subs, deptId, dayKeys) {
+  const out = [];
+  for (const s of subs) {
+    let plant = null;
+    const nowArchived = isArchivedId(s.id);
+    for (const d of dayKeys) {
+      const p = orgPlacement(s.id, d);
+      if (p ? p.archived : nowArchived) continue;
+      const dept = p ? p.deptId : (s.departmentId || null);
+      if (deptId == null || dept === deptId) plant = p ? p.plant : (s.plantArea || '');
+    }
+    if (plant !== null) out.push({ s, plant });
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
 // 評分（移植自 App）
 // ---------------------------------------------------------------------------
 function potentialScore(s) {
@@ -286,20 +400,40 @@ function potentialScore(s) {
   return Math.max(0, Math.round(score));
 }
 
-/** 逾期定案制：逾期未完成 ＋ 逾期才完成（completedAt > dueDate）都算 */
-function overdueOpenCount(s) {
+/** 自己身上照算逾期的任務、週報 id（App overdueOwnIds）：逾期未完成 ＋ 逾期才完成（completedAt > dueDate）。
+ *  v1.14：交接單上待分派、還沒分好的機台，交接之後才到期的警報任務不算這位（人已經調走、機台還沒分） */
+function overdueOwnIds(s) {
   const now = new Date();
-  let n = 0;
+  const pend = orgIndex().pendingEq[s.id] || {};
+  const ids = new Set();
   for (const t of s.tasks || []) {
     if (t.sideRoleLink || !t.dueDate) continue;
-    if (t.isCompleted) { if (t.completedAt && t.completedAt > t.dueDate) n++; }
-    else if (t.dueDate < now) n++;
+    const eid = t.equipmentLink && t.equipmentLink.equipmentId;
+    const handed = eid ? pend[eid] : null;
+    if (handed instanceof Date && t.dueDate >= handed) continue;
+    if (t.isCompleted) { if (t.completedAt && t.completedAt > t.dueDate) ids.add(t.id); }
+    else if (t.dueDate < now) ids.add(t.id);
   }
   for (const r of s.weeklyReports || []) {
-    if (r.isCompleted) { if (r.completedAt && r.completedAt > r.date) n++; }
-    else if (r.date < now) n++;
+    if (r.isCompleted) { if (r.completedAt && r.completedAt > r.date) ids.add(r.id); }
+    else if (r.date < now) ids.add(r.id);
   }
+  return ids;
+}
+/** v1.14 交出去時已逾期、扣分留在這位的件數（App overdueHandedCount；life_org_handoffs_v1）：
+ *  記在這位名下、而且這位身上現在沒有照算逾期的那幾筆（還沒更新的 iPad 存回來的不重複扣） */
+function overdueHandedCount(s, own) {
+  const handed = orgIndex().handedOverdue[s.id];
+  if (!handed || !handed.size) return 0;
+  const mine = own || overdueOwnIds(s);
+  let n = 0;
+  for (const id of handed) if (!mine.has(id)) n++;
   return n;
+}
+/** 逾期定案制（App overdueOpenCount）：自己身上的 ＋ 交出去時已逾期的。列表「逾期」欄、明細「目前逾期 N 項」、扣分都用這一支 */
+function overdueOpenCount(s) {
+  const own = overdueOwnIds(s);
+  return own.size + overdueHandedCount(s, own);
 }
 
 function leaveHoursOf(s) {
@@ -329,8 +463,11 @@ function proactivityBreakdown(s, ctx) {
     const h = Number.isInteger(leaveHours) ? String(leaveHours) : leaveHours.toFixed(1);
     items.push([`請假 ${h} 小時`, -Math.round(leaveHours / 8 * W.actLeavePer8h)]);
   }
-  const overdue = overdueOpenCount(s);
-  if (W.actOverdue > 0 && overdue > 0) items.push([`逾期（含補完成）×${overdue}`, -overdue * W.actOverdue]);
+  // 逾期 Offset（設了 > 0 才顯示）：自己身上的、交出去時已逾期的分兩行（App 同；網頁版是出廠值 0）
+  const own = overdueOwnIds(s);
+  const handedOverdue = overdueHandedCount(s, own);
+  if (W.actOverdue > 0 && own.size > 0) items.push([`逾期（含補完成）×${own.size}`, -own.size * W.actOverdue]);
+  if (W.actOverdue > 0 && handedOverdue > 0) items.push([`交出去時已逾期 ×${handedOverdue}`, -handedOverdue * W.actOverdue]);
   return items;
 }
 
@@ -592,7 +729,8 @@ function pageHead(title, sub, extra = '') {
 
 // ---- 部屬總覽 -------------------------------------------------------------
 function renderOverview(main, ctx) {
-  const subs = Store.subs;
+  // v1.14 只看在職的（同 App 部屬總覽；已轉出的在部屬列表最下面）
+  const subs = activeSubs();
   const now = new Date();
   const openTasks = [], overdueTasks = [], openReports = [];
   for (const s of subs) {
@@ -686,22 +824,24 @@ const subsState = { dept: 'all', q: '', sort: 'total', dir: -1 };
 function renderSubs(main, ctx) {
   const rows = Store.subs.map((s) => {
     const open = (s.tasks || []).filter((t) => !t.isCompleted).length;
-    return { s, name: s.name, title: s.jobTitle || '', dept: deptNameOf(s), grade: gradeLabelOf(s), pot: potentialScore(s), act: proactivityScore(s, ctx), total: overallScore(s, ctx), open, overdue: overdueOpenCount(s), reports: (s.weeklyReports || []).filter((r) => !r.isCompleted).length, leave: leaveHoursOf(s) };
+    return { s, name: s.name, title: s.jobTitle || '', dept: deptNameOf(s), grade: gradeLabelOf(s), pot: potentialScore(s), act: proactivityScore(s, ctx), total: overallScore(s, ctx), open, overdue: overdueOpenCount(s), reports: (s.weeklyReports || []).filter((r) => !r.isCompleted).length, leave: leaveHoursOf(s), archived: isArchivedId(s.id) };
   });
+  const archivedN = rows.filter((r) => r.archived).length;
   const depts = [...new Set(rows.map((r) => r.dept).filter(Boolean))].sort();
   const draw = () => {
     let list = rows.filter((r) => (subsState.dept === 'all' || r.dept === subsState.dept) && (!subsState.q || (r.name + r.title + r.dept + r.grade).toLowerCase().includes(subsState.q.toLowerCase())));
     const k = subsState.sort;
-    list.sort((a, b) => (typeof a[k] === 'number' ? (a[k] - b[k]) : String(a[k]).localeCompare(String(b[k]), 'zh-Hant')) * subsState.dir);
+    // v1.14 已轉出的一律在最下面（灰字），其餘照點的欄位排
+    list.sort((a, b) => (Number(a.archived) - Number(b.archived)) || (typeof a[k] === 'number' ? (a[k] - b[k]) : String(a[k]).localeCompare(String(b[k]), 'zh-Hant')) * subsState.dir);
     const th = (key, label, num) => `<th class="${num ? 'num' : ''} ${subsState.sort === key ? 'sorted' : ''}" data-sort="${key}">${label}${subsState.sort === key ? (subsState.dir > 0 ? ' ↑' : ' ↓') : ''}</th>`;
     $('#subs-table').innerHTML = `<table class="tbl"><thead><tr>${th('name', '姓名')}${th('title', '職稱')}${th('dept', '部門')}${th('grade', '職等')}${th('pot', '潛力', 1)}${th('act', '主動性', 1)}${th('total', '總分', 1)}${th('open', '未完成任務', 1)}${th('overdue', '逾期', 1)}${th('reports', '未交報告', 1)}${th('leave', '請假時數', 1)}</tr></thead><tbody>
-      ${list.map((r) => `<tr class="clickable" data-id="${r.s.id}"><td><b>${esc(r.name)}</b></td><td>${esc(r.title)}</td><td>${esc(r.dept)}</td><td>${esc(r.grade)}</td><td class="num">${scoreHTML(r.pot)}</td><td class="num">${scoreHTML(r.act)}</td><td class="num">${scoreHTML(r.total)}</td><td class="num">${r.open}</td><td class="num">${r.overdue ? `<span class="chip red">${r.overdue}</span>` : '0'}</td><td class="num">${r.reports}</td><td class="num">${r.leave}</td></tr>`).join('') || '<tr><td colspan="11" class="empty">沒有符合的部屬</td></tr>'}
+      ${list.map((r) => `<tr class="clickable${r.archived ? ' muted' : ''}" data-id="${r.s.id}"><td><b>${esc(r.name)}</b>${r.archived ? ' ' + ARCHIVED_CHIP : ''}</td><td>${esc(r.title)}</td><td>${esc(r.dept)}</td><td>${esc(r.grade)}</td><td class="num">${scoreHTML(r.pot)}</td><td class="num">${scoreHTML(r.act)}</td><td class="num">${scoreHTML(r.total)}</td><td class="num">${r.open}</td><td class="num">${r.overdue ? `<span class="chip red">${r.overdue}</span>` : '0'}</td><td class="num">${r.reports}</td><td class="num">${r.leave}</td></tr>`).join('') || '<tr><td colspan="11" class="empty">沒有符合的部屬</td></tr>'}
     </tbody></table>`;
     $('#subs-table').querySelectorAll('th').forEach((h) => h.onclick = () => { const key = h.dataset.sort; if (subsState.sort === key) subsState.dir *= -1; else { subsState.sort = key; subsState.dir = typeof rows[0]?.[key] === 'number' ? -1 : 1; } draw(); });
     $('#subs-table').querySelectorAll('tr.clickable').forEach((tr) => tr.onclick = () => { location.hash = `#/sub/${tr.dataset.id}`; });
   };
   main.innerHTML = `
-    ${pageHead('部屬列表', `${Store.subs.length} 位・點任一列看明細`)}
+    ${pageHead('部屬列表', `${Store.subs.length - archivedN} 位${archivedN ? `・已轉出 ${archivedN} 位（灰字，在最下面）` : ''}・點任一列看明細`)}
     <div class="filters">
       <input type="search" id="subs-q" placeholder="搜尋姓名／職稱／部門" value="${esc(subsState.q)}">
       <span class="fchip ${subsState.dept === 'all' ? 'on' : ''}" data-dept="all">全部</span>
@@ -808,7 +948,7 @@ function renderSubDetail(main, ctx, id, tab) {
     <div class="card hero">
       <div class="avatar">${esc(initial(s.name))}</div>
       <div style="flex:1;min-width:0">
-        <div class="name">${esc(s.name)}</div>
+        <div class="name">${esc(s.name)}${isArchivedId(s.id) ? ' ' + ARCHIVED_CHIP : ''}</div>
         <div class="facts">
           ${s.jobTitle ? `<span>💼 ${esc(s.jobTitle)}</span>` : ''}
           ${deptNameOf(s) ? `<span>🏢 ${esc(deptNameOf(s))}${s.plantArea ? '（' + esc(s.plantArea) + '）' : ''}</span>` : ''}
@@ -828,7 +968,7 @@ function renderSubDetail(main, ctx, id, tab) {
     </div>
     <div class="grid cols-2 mt">
       <div class="card"><h3>潛力評分明細</h3>${breakdownHTML(potentialBreakdown(s))}<div class="legend-note">記錄式評分：優點／成就／改善加分，缺點／缺失／疏失扣分。沒有 100 分上限。</div></div>
-      <div class="card"><h3>主動性評分明細</h3>${breakdownHTML(proactivityBreakdown(s, ctx))}<div class="legend-note">逾期採定案制：逾期未完成與逾期才完成都計入（目前逾期 ${overdueOpenCount(s)} 項）。</div></div>
+      <div class="card"><h3>主動性評分明細</h3>${breakdownHTML(proactivityBreakdown(s, ctx))}<div class="legend-note">逾期採定案制：逾期未完成與逾期才完成都計入（目前逾期 ${overdueOpenCount(s)} 項${overdueHandedCount(s) ? `，含交出去時已逾期 ${overdueHandedCount(s)} 項` : ''}）。</div></div>
     </div>
     <div class="tabs">${tabs.map(([k, l]) => `<button class="${k === tab ? 'on' : ''}" data-tab="${k}">${l}</button>`).join('')}</div>
     ${body}`;
@@ -838,7 +978,8 @@ function renderSubDetail(main, ctx, id, tab) {
 // ---- 人才矩陣 -------------------------------------------------------------
 function median(arr) { if (!arr.length) return 0; const a = [...arr].sort((x, y) => x - y); const m = Math.floor(a.length / 2); return a.length % 2 ? a[m] : (a[m - 1] + a[m]) / 2; }
 function renderMatrix(main, ctx) {
-  const pts = Store.subs.map((s) => ({ s, x: proactivityScore(s, ctx), y: potentialScore(s), total: overallScore(s, ctx) }));
+  // v1.14 只畫在職的（同 App 人才矩陣預設）
+  const pts = activeSubs().map((s) => ({ s, x: proactivityScore(s, ctx), y: potentialScore(s), total: overallScore(s, ctx) }));
   const mx = median(pts.map((p) => p.x)), my = median(pts.map((p) => p.y));
   const q = { star: pts.filter((p) => p.x >= mx && p.y >= my), pot: pts.filter((p) => p.x < mx && p.y >= my), work: pts.filter((p) => p.x >= mx && p.y < my), watch: pts.filter((p) => p.x < mx && p.y < my) };
   main.innerHTML = `
@@ -900,7 +1041,8 @@ function renderMatrix(main, ctx) {
 function yearOf(d) { return d instanceof Date ? d.getFullYear() : null; }
 function inYear(d, year) { return year === 'all' || yearOf(d) === Number(year); }
 function renderStats(main, ctx, year) {
-  const subs = Store.subs;
+  // v1.14 只看在職的（同 App 統計圖表預設）
+  const subs = activeSubs();
   const years = new Set();
   for (const s of subs) {
     for (const t of s.tasks || []) { years.add(yearOf(t.completedAt || t.date)); }
@@ -958,14 +1100,19 @@ function deptMembers(deptId) {
   const people = Store.orgPeople.filter((p) => p.departmentId === deptId);
   const linked = new Set(people.map((p) => p.linkedSubordinateId).filter(Boolean));
   const extraSubs = Store.subs.filter((s) => subIds.has(s.id) && !linked.has(s.id)).map((s) => ({ id: s.id, name: s.name, jobTitle: s.jobTitle, isSub: true, subId: s.id, gradeTitleId: s.gradeTitleId }));
-  return people.map((p) => ({ id: p.id, name: p.name, jobTitle: p.jobTitle, isInactive: p.isInactive, subId: p.linkedSubordinateId && subById(p.linkedSubordinateId) ? p.linkedSubordinateId : null, gradeTitleId: p.gradeTitleId, birthday: p.birthday, works: p.works || [] })).concat(extraSubs);
+  const list = people.map((p) => ({ id: p.id, name: p.name, jobTitle: p.jobTitle, isInactive: p.isInactive, subId: p.linkedSubordinateId && subById(p.linkedSubordinateId) ? p.linkedSubordinateId : null, gradeTitleId: p.gradeTitleId, birthday: p.birthday, works: p.works || [] })).concat(extraSubs);
+  // v1.14 連到已轉出的部屬：灰字、「已轉出」、列到最下面（部門人數不算）
+  for (const m of list) m.archived = !!(m.subId && isArchivedId(m.subId));
+  return list.filter((m) => !m.archived).concat(list.filter((m) => m.archived));
 }
+/** 部門頁、組織頁的人數只算在職的（沒離職、不是已轉出） */
+const countsInDept = (m) => !m.isInactive && !m.archived;
 function personCard(m) {
   const g = m.gradeTitleId && gradeById(m.gradeTitleId);
   const title = m.jobTitle || (g ? g.title : '');
-  return `<div class="person ${m.isInactive ? 'inactive' : ''} ${m.subId ? 'clickable' : ''}" ${m.subId ? `onclick="location.hash='#/sub/${m.subId}'"` : ''}>
-    <div class="avatar sm" style="${m.subId ? '' : 'background:linear-gradient(135deg,#8e8e93,#636366)'}">${esc(initial(m.name))}</div>
-    <div style="min-width:0"><div class="pn">${esc(m.name)}${m.isInactive ? ' <span class="chip">已離職</span>' : ''}${m.subId ? ' <span class="chip green">部屬</span>' : ''}</div><div class="pt">${esc(title || '—')}${g && g.grade ? '・' + esc(g.grade) : ''}</div></div>
+  return `<div class="person ${m.isInactive ? 'inactive' : ''} ${m.archived ? 'muted' : ''} ${m.subId ? 'clickable' : ''}" ${m.subId ? `onclick="location.hash='#/sub/${m.subId}'"` : ''}>
+    <div class="avatar sm" style="${m.subId && !m.archived ? '' : 'background:linear-gradient(135deg,#8e8e93,#636366)'}">${esc(initial(m.name))}</div>
+    <div style="min-width:0"><div class="pn">${esc(m.name)}${m.isInactive ? ' <span class="chip">已離職</span>' : ''}${m.archived ? ' ' + ARCHIVED_CHIP : m.subId ? ' <span class="chip green">部屬</span>' : ''}</div><div class="pt">${esc(title || '—')}${g && g.grade ? '・' + esc(g.grade) : ''}</div></div>
   </div>`;
 }
 function renderOrg(main) {
@@ -979,13 +1126,15 @@ function renderOrg(main) {
     <div class="grid cols-3">${depts.filter(hit).map((d) => {
       const members = deptMembers(d.id); const eq = Store.equipment.filter((e) => e.departmentId === d.id);
       const managers = (d.managerIds || []).map(personName).filter(Boolean);
+      // v1.14 人數、名字、「等 N 人」都只算在職的（同一份；以前「等 N 人」連已離職的也算進去）
+      const counted = members.filter(countsInDept);
       return `<div class="card dept-card" onclick="location.hash='#/dept/${d.id}'">
         <div class="code">${esc(d.code || '—')}</div><div class="dname">${esc(d.name || '未命名部門')}</div><div class="dfn">${esc(d.function || '')}</div>
-        <div class="chips" style="margin-top:10px"><span class="chip green">${members.filter((m) => !m.isInactive).length} 人</span>${eq.length ? `<span class="chip teal">${eq.length} 台設備</span>` : ''}${managers.length ? `<span class="chip gold">主管：${esc(managers.join('、'))}</span>` : ''}</div>
-        <div class="muted small" style="margin-top:8px">${esc(members.filter((m) => !m.isInactive).slice(0, 6).map((m) => m.name).join('、'))}${members.length > 6 ? ` 等 ${members.length} 人` : ''}</div>
+        <div class="chips" style="margin-top:10px"><span class="chip green">${counted.length} 人</span>${eq.length ? `<span class="chip teal">${eq.length} 台設備</span>` : ''}${managers.length ? `<span class="chip gold">主管：${esc(managers.join('、'))}</span>` : ''}</div>
+        <div class="muted small" style="margin-top:8px">${esc(counted.slice(0, 6).map((m) => m.name).join('、'))}${counted.length > 6 ? ` 等 ${counted.length} 人` : ''}</div>
       </div>`;
     }).join('') || '<div class="empty">沒有符合的部門</div>'}</div>
-    ${noDept.length ? `<div class="section-title">未分部門的人員（${noDept.length}）</div><div class="people-grid">${noDept.filter((p) => !q || (p.name + p.jobTitle).toLowerCase().includes(q)).map((p) => personCard({ id: p.id, name: p.name, jobTitle: p.jobTitle, isInactive: p.isInactive, subId: p.linkedSubordinateId && subById(p.linkedSubordinateId) ? p.linkedSubordinateId : null, gradeTitleId: p.gradeTitleId })).join('')}</div>` : ''}`;
+    ${noDept.length ? `<div class="section-title">未分部門的人員（${noDept.length}）</div><div class="people-grid">${noDept.filter((p) => !q || (p.name + p.jobTitle).toLowerCase().includes(q)).map((p) => personCard({ id: p.id, name: p.name, jobTitle: p.jobTitle, isInactive: p.isInactive, subId: p.linkedSubordinateId && subById(p.linkedSubordinateId) ? p.linkedSubordinateId : null, gradeTitleId: p.gradeTitleId, archived: !!(p.linkedSubordinateId && subById(p.linkedSubordinateId) && isArchivedId(p.linkedSubordinateId)) })).join('')}</div>` : ''}`;
   $('#org-q').oninput = (e) => { renderOrg.q = e.target.value; const pos = e.target.selectionStart; renderOrg(main); const inp = $('#org-q'); inp.focus(); inp.setSelectionRange(pos, pos); };
 }
 function renderDept(main, ctx, id) {
@@ -1002,12 +1151,12 @@ function renderDept(main, ctx, id) {
     <div class="card hero"><div class="avatar" style="background:linear-gradient(135deg,#5856d6,#32ade6)">${esc(initial(d.code || d.name))}</div>
       <div style="flex:1"><div class="name">${esc(d.name)}${d.code ? ` <span class="chip">${esc(d.code)}</span>` : ''}</div>
         <div class="muted" style="margin-top:2px">${esc(d.function || '')}</div>
-        <div class="facts" style="margin-top:8px">${managers.length ? `<span>👑 主管：${esc(managers.join('、'))}</span>` : ''}<span>👥 ${members.filter((m) => !m.isInactive).length} 人</span><span>⚙️ ${eq.length} 台設備</span></div>
+        <div class="facts" style="margin-top:8px">${managers.length ? `<span>👑 主管：${esc(managers.join('、'))}</span>` : ''}<span>👥 ${members.filter(countsInDept).length} 人</span><span>⚙️ ${eq.length} 台設備</span></div>
         <div class="row" style="margin-top:8px;gap:14px">${rel(d.upstreamIds, '上游')}${rel(d.downstreamIds, '下游')}${rel(d.peerIds, '平行')}</div>
       </div></div>
     <div class="section-title">成員</div>
     <div class="people-grid">${members.map(personCard).join('') || '<div class="empty">尚無成員</div>'}</div>
-    ${subs.length ? `<div class="section-title">部屬評分</div><div class="card table-wrap"><table class="tbl"><thead><tr><th>姓名</th><th>職稱</th><th class="num">潛力</th><th class="num">主動性</th><th class="num">綜合</th><th class="num">未完成任務</th><th class="num">逾期</th></tr></thead><tbody>${subs.map((s) => `<tr class="clickable" onclick="location.hash='#/sub/${s.id}'"><td><b>${esc(s.name)}</b></td><td>${esc(s.jobTitle || '')}</td><td class="num">${scoreHTML(potentialScore(s))}</td><td class="num">${scoreHTML(proactivityScore(s, ctx))}</td><td class="num">${scoreHTML(overallScore(s, ctx))}</td><td class="num">${(s.tasks || []).filter((t) => !t.isCompleted).length}</td><td class="num">${overdueOpenCount(s)}</td></tr>`).join('')}</tbody></table></div>` : ''}
+    ${subs.length ? `<div class="section-title">部屬評分</div><div class="card table-wrap"><table class="tbl"><thead><tr><th>姓名</th><th>職稱</th><th class="num">潛力</th><th class="num">主動性</th><th class="num">綜合</th><th class="num">未完成任務</th><th class="num">逾期</th></tr></thead><tbody>${subs.map((s) => `<tr class="clickable${isArchivedId(s.id) ? ' muted' : ''}" onclick="location.hash='#/sub/${s.id}'"><td><b>${esc(s.name)}</b>${isArchivedId(s.id) ? ' ' + ARCHIVED_CHIP : ''}</td><td>${esc(s.jobTitle || '')}</td><td class="num">${scoreHTML(potentialScore(s))}</td><td class="num">${scoreHTML(proactivityScore(s, ctx))}</td><td class="num">${scoreHTML(overallScore(s, ctx))}</td><td class="num">${(s.tasks || []).filter((t) => !t.isCompleted).length}</td><td class="num">${overdueOpenCount(s)}</td></tr>`).join('')}</tbody></table></div>` : ''}
     <div class="section-title">設備（${eq.length}）</div>
     <div class="card table-wrap"><table class="tbl"><thead><tr><th>設備</th><th>系統別</th><th>負責人</th><th>最近 PM</th><th class="num">PM 次數</th><th>最近警報</th><th class="num">警報數</th><th class="num">近 30 天警報</th></tr></thead><tbody>
       ${[...eq].sort((a, b) => (a.system || '').localeCompare(b.system || '') || a.name.localeCompare(b.name)).map((e) => {
@@ -1306,7 +1455,8 @@ function calendarItems(from, to) {
   const add = (d, it) => { const k = ymdKey(d); (out[k] = out[k] || []).push(Object.assign({ date: d }, it)); };
   const inRange = (d) => d >= from && d < to;
   const now = new Date();
-  for (const s of Store.subs) {
+  // v1.14 部屬事項只列在職的（同 App 我的行事曆）
+  for (const s of activeSubs()) {
     for (const t of s.tasks || []) {
       const d = t.dueDate || t.date; if (!inRange(d)) continue;
       add(d, { kind: 'task', title: t.topic || '未命名任務', who: s.name, done: t.isCompleted, derel: t.isDereliction, time: t.dueDate && !(t.dueDate.getHours() === 0 && t.dueDate.getMinutes() === 0) ? fmtTime(t.dueDate) : '', href: `#/sub/${s.id}/tasks`, overdue: !t.isCompleted && t.dueDate && t.dueDate < now });
@@ -2005,7 +2155,8 @@ function perfScores(year) {
         if (sub && sub.name) cur.name = sub.name;
         cur.total += base * w;
         cur.sources.push({ raterId: b.raterId, raterName: b.raterName || '未命名', raterGradeLabel: b.raterGradeLabel || '',
-          weight: w, rank: i + 1, groupSize: entries.length, groupTitle: g.departmentName || '', base, points: base * w });
+          weight: w, rank: i + 1, groupSize: entries.length, groupTitle: g.departmentName || '', base, points: base * w,
+          groupDeptId: g.departmentId || null });
         // 被排在哪個職等：用票上的快照，轉出／離職的人也還原得回來
         const gk = `${g.gradeId || ''}|${g.gradeLabel || ''}`;
         cur.gradeVotes[gk] = (cur.gradeVotes[gk] || 0) + 1;
@@ -2051,11 +2202,17 @@ function renderPerf(main, param) {
   const scores = perfScores(year);
   const submitted = (Store.ballots || []).filter((b) => b.year === year && b.submittedAt);
   const raterIds = new Set(submitted.map((b) => b.raterId));
-  const pending = Store.subs.filter((s) => !raterIds.has(s.id));
+  // v1.14 已轉出的人不列在「尚未送出」（調出那年不排；同 App）
+  const pending = activeSubs().filter((s) => !raterIds.has(s.id));
   // 記住的課別若已不存在（換帳號、部門被刪）就自動回到「全部」
   if (perfUI.dept !== 'all' && !deptById(perfUI.dept)) perfUI.setDept('all');
+  // v1.14 篩課別照票上那一組的課（年中調課、已轉出的人照被排的那一課算）；票上的組都沒有課才看現在的部門（同 App）
   const shown = perfUI.dept === 'all' ? scores
-    : scores.filter((s) => { const sub = subById(s.personId); return sub && sub.departmentId === perfUI.dept; });
+    : scores.filter((s) => {
+      const onBallot = new Set(s.sources.map((x) => x.groupDeptId).filter(Boolean));
+      if (onBallot.size) return onBallot.has(perfUI.dept);
+      const sub = subById(s.personId); return !!sub && sub.departmentId === perfUI.dept;
+    });
   const sections = perfSections(shown);
   const rankColor = (r) => (r === 1 ? 'gold' : r === 2 ? '' : r === 3 ? 'orange' : '');
   const scoreRow = (sc, rank) => {
@@ -2065,7 +2222,7 @@ function renderPerf(main, param) {
     return `<details class="agenda" style="border-top:1px solid var(--line);padding:8px 0;margin:0">
       <summary style="list-style:none;display:flex;align-items:center;gap:12px;color:inherit;font-weight:400">
         <span class="chip ${rankColor(rank)} big" style="min-width:34px;justify-content:center">${rank}</span>
-        <span style="flex:1;min-width:0"><b>${esc(sc.name)}</b>${sub ? '' : ' <span class="chip">已轉出</span>'}
+        <span style="flex:1;min-width:0"><b>${esc(sc.name)}</b>${sub && !isArchivedId(sc.personId) ? '' : ' ' + ARCHIVED_CHIP}
           <div class="muted small">${esc([dept, `${sc.sources.length} 票`, `平均第 ${avgRank} 名`].filter(Boolean).join('・'))}</div></span>
         <span class="muted small">明細 ▾</span>
         <b style="color:var(--orange);font-size:17px;min-width:48px;text-align:right">${num(sc.total)}</b>
@@ -2141,8 +2298,11 @@ function renderRoster(main, param) {
   const inMonth = (d) => d instanceof Date && d.getFullYear() === month.getFullYear() && d.getMonth() === month.getMonth();
 
   if (rosterUI.dept !== 'all' && !deptById(rosterUI.dept)) rosterUI.setDept('all');
-  const people = Store.subs
-    .filter((s) => rosterUI.dept === 'all' || s.departmentId === rosterUI.dept)
+  // v1.14 照那天的部門（同 App）：這個月有任何一天在職、而且在選的課就列；廠區＝符合的最後那一天的廠區
+  const placed = rosterMembers(Store.subs, rosterUI.dept === 'all' ? null : rosterUI.dept, days.map(ymdKey));
+  const plantOf = {};
+  for (const x of placed) plantOf[x.s.id] = x.plant;
+  const people = placed.map((x) => x.s)
     .sort((a, b) => (a.name || '').localeCompare(b.name || '', 'zh-Hant'));
 
   // 查表：部屬 → 日 → 班別／假別
@@ -2161,7 +2321,7 @@ function renderRoster(main, param) {
 
   // 依廠區分組（與 App 相同：有廠區的先照名稱排，未分廠區墊底）
   const byArea = {};
-  for (const s of people) (byArea[s.plantArea || ''] = byArea[s.plantArea || ''] || []).push(s);
+  for (const s of people) { const pa = plantOf[s.id] || ''; (byArea[pa] = byArea[pa] || []).push(s); }
   const areas = Object.keys(byArea).filter((a) => a).sort();
   const groups = areas.map((a) => [a, byArea[a]]);
   if (byArea['']) groups.push([areas.length ? '未分廠區' : '', byArea['']]);
@@ -2226,7 +2386,7 @@ function renderRoster(main, param) {
       ${groups.map(([area, items]) => `
         ${area ? `<tr class="rs-group"><td class="rs-name">${esc(area)}</td><td colspan="${dayCount + 1}" class="muted small">${items.length} 人</td></tr>` : ''}
         ${items.map((s) => `<tr>
-          <td class="rs-name"><a href="#/sub/${s.id}">${esc(s.name)}</a></td>
+          <td class="rs-name"><a class="${isArchivedId(s.id) ? 'muted' : ''}" href="#/sub/${s.id}">${esc(s.name)}</a></td>
           ${days.map((d) => cell(s, d)).join('')}
           <td class="rs-sum">${Object.keys(shiftOf[s.id]).length || '—'}</td>
         </tr>`).join('')}`).join('') || `<tr><td colspan="${dayCount + 2}" class="empty">這個課別沒有部屬</td></tr>`}
@@ -2234,8 +2394,8 @@ function renderRoster(main, param) {
     </div>
     <div class="card mt"><h3>各人班別統計 <span class="count">${people.length}</span></h3>
       ${groups.flatMap(([, items]) => items).map((s) => `<div class="row" style="gap:10px;padding:6px 0;border-top:1px solid var(--line)">
-        <a href="#/sub/${s.id}" style="min-width:88px;font-weight:700">${esc(s.name)}</a>
-        <span class="muted small" style="min-width:64px">${esc(s.plantArea || '未分廠區')}</span>
+        <a class="${isArchivedId(s.id) ? 'muted' : ''}" href="#/sub/${s.id}" style="min-width:88px;font-weight:700">${esc(s.name)}</a>
+        <span class="muted small" style="min-width:64px">${esc(plantOf[s.id] || '未分廠區')}${isArchivedId(s.id) ? '・已轉出' : ''}</span>
         <span style="flex:1;min-width:0">${typeChips(s)}</span>
       </div>`).join('') || '<div class="empty">這個課別沒有部屬</div>'}
     </div>
@@ -2379,15 +2539,17 @@ function renderLifeOverview(main, ctx) {
   const S = financeSummary();
   const p = Store.profile || {};
   const yrs = careerYears();
-  const openTasks = Store.subs.reduce((a, s) => a + (s.tasks || []).filter((t) => !t.isCompleted).length, 0);
-  const overdue = Store.subs.reduce((a, s) => a + (s.tasks || []).filter((t) => !t.isCompleted && t.dueDate && t.dueDate < now).length, 0);
+  // v1.14 部屬只算在職的（已轉出的在部屬列表最下面）
+  const subsNow = activeSubs();
+  const openTasks = subsNow.reduce((a, s) => a + (s.tasks || []).filter((t) => !t.isCompleted).length, 0);
+  const overdue = subsNow.reduce((a, s) => a + (s.tasks || []).filter((t) => !t.isCompleted && t.dueDate && t.dueDate < now).length, 0);
   const famOpen = (Store.familyTasks || []).filter((t) => !t.isCompleted).length;
   // 今天與未來 7 天的行事曆項目
   const from = startOfDay(now); const to = new Date(from); to.setDate(to.getDate() + 8);
   const items = calendarItems(from, to);
   const upcoming = Object.keys(items).sort().flatMap((k) => items[k]).slice(0, 12);
   const bdays = [
-    ...Store.subs.map((s) => ({ name: s.name, sub: '部屬', b: birthdayInfo(s.birthday) })),
+    ...subsNow.map((s) => ({ name: s.name, sub: '部屬', b: birthdayInfo(s.birthday) })),
     ...(Store.familyMembers || []).map((m) => ({ name: m.chineseName || m.englishName, sub: m.role, b: birthdayInfo(m.birthday) })),
   ].filter((x) => x.b && x.b.days <= 30).sort((a, b) => a.b.days - b.b.days);
   // 待辦：家庭待辦＋兼任職務待辦，逾期在前、再依到期日
@@ -2412,7 +2574,7 @@ function renderLifeOverview(main, ctx) {
         <div class="facts">
           ${p.company ? `<span>🏢 ${esc(p.company)}</span>` : ''}${p.jobTitle ? `<span>💼 ${esc(p.jobTitle)}</span>` : ''}
           ${yrs ? `<span>📆 年資 ${yrs.years.toFixed(1)} 年</span>` : ''}
-          <span>👥 部屬 ${Store.subs.length} 人</span><span>🧩 兼任 ${sideRoles().filter(roleActive).length} 個</span>
+          <span>👥 部屬 ${subsNow.length} 人</span><span>🧩 兼任 ${sideRoles().filter(roleActive).length} 個</span>
         </div>
       </div>
     </div>
@@ -2438,7 +2600,7 @@ function renderLifeOverview(main, ctx) {
         </a>`).join('') || '<div class="empty">沒有未完成的待辦 🎉</div>'}</div></div>
     </div>
     <div class="grid cols-3 mt">
-      ${tile('💼', '職涯', '#/overview', [['部屬', Store.subs.length + ' 人'], ['未交報告', Store.subs.reduce((a, s) => a + (s.weeklyReports || []).filter((r) => !r.isCompleted).length, 0) + ' 份'], ['執掌設備', Store.equipment.length + ' 台']])}
+      ${tile('💼', '職涯', '#/overview', [['部屬', subsNow.length + ' 人'], ['未交報告', subsNow.reduce((a, s) => a + (s.weeklyReports || []).filter((r) => !r.isCompleted).length, 0) + ' 份'], ['執掌設備', Store.equipment.length + ' 台']])}
       ${tile('👨‍👩‍👧', '家庭', '#/life/family', [['成員', (Store.familyMembers || []).length + ' 位'], ['寵物', (Store.pets || []).length + ' 隻'], ['人際關係', (Store.relationships || []).length + ' 位']])}
       ${tile('💰', '理財', '#/finance/overview', [['股票市值', fmtMoney(S.stockMV)], ['儲蓄險現值', fmtMoney(S.insTotal)], ['房產・車輛', fmtMoney(S.reValue + S.vhValue)]])}
     </div>`;

@@ -14,6 +14,10 @@ import SwiftUI
 // 一條多灰字一行（hint.note）、下面一排小按鈕（hint.actions：〔現在套用〕〔加進交接單〕〔只做交接〕〔選部門〕〔取消這張單〕，
 // 走 G2 的 .orgMoveHintActions：訂閱、確認框、寫 store、跳「今天生效」都在那裡，這個檔照舊一個 lifeStore 的寫入都沒有）、
 // 灰色那一種（hint.muted：接手的人「11/1 起會從王小明接手 6 項」）；精靈帶 presetDeptId。
+// [v25.593 轉組織 v2] G3（orgmove/build/v2/brief.md §5）：已轉出的卡片零件——最上面灰條＋〔回到我的部屬〕（SubArchivedBanner）、
+// 看板頭像旁膠囊「已轉出」（SubArchivedHeroChip）、「…」〔回到我的部屬〕〔真的刪除…〕那一框（SubArchivedAsk／.subArchivedAsk）；
+// 灰色提示列的「待分派 1」照舊橘點（已轉出那一條是灰的，待分派還是要你處理）；歷程同一天兩列照套用的時間排（調出、回到我的部屬同一天）。
+// 這個檔照舊一個 lifeStore 的寫入都沒有：〔回到我的部屬〕〔真的刪除〕的寫入在 SubordinateDetailView（下一個 runloop）。
 
 // MARK: - 算資料（卡片每次重畫都會算，先擋掉沒有交接單的大多數時候）
 
@@ -114,12 +118,25 @@ enum OrgMoveCardHistoryItem: Identifiable {
     static func items(promotions: [PromotionRecord], personId: UUID, store: LifeStore) -> [OrgMoveCardHistoryItem] {
         var out: [OrgMoveCardHistoryItem] = promotions.map { OrgMoveCardHistoryItem.promotion($0) }
         let book = store.orgMoves
+        // [v25.593 轉組織 v2] 同一天的兩張（例：11/5 調出、11/5 又〔回到我的部屬〕）照套用的時間排，新的在上面。
+        // 要退回這一件：刪 stamps 與 sorted 裡 if case 那一段
+        var stamps: [UUID: Date] = [:]
         if book.live.contains(where: { $0.personId == personId && $0.wasApplied }) {
             let rows = OrgMovePlan.historyRows(personId: personId, book: book, world: OrgMoveWorld(store: store))
             out.append(contentsOf: rows.map { OrgMoveCardHistoryItem.move($0) })
+            for m in book.live where m.personId == personId {
+                // 同 OrgMoveIndex.rosterIndex 的排法（appliedAt → handedAt → createdAt）；先標型別再放進字典，少讓型別檢查猜
+                let stamp: Date = m.appliedAt ?? m.handedAt ?? m.createdAt ?? Date.distantPast
+                stamps[m.id] = stamp
+            }
         }
         return out.sorted { a, b in
             if a.date != b.date { return a.date > b.date }
+            if case .move(let x) = a, case .move(let y) = b {
+                let sx: Date = stamps[x.moveId] ?? Date.distantPast
+                let sy: Date = stamps[y.moveId] ?? Date.distantPast
+                if sx != sy { return sx > sy }
+            }
             return a.id < b.id
         }
     }
@@ -267,7 +284,10 @@ private struct OrgMoveCardHintMain: View {
 }
 
 /// [v25.592 轉組織 v1b] 提示列的字：主句、橘點「待分派 1」、橘字警告、灰字一行（note：「排好之後多了 1 件（先跟著王小明）」）。
-/// muted 的主句灰、點與警告也灰（不用紫／橘；照理灰色那一種不會有點與警告）
+/// muted 的主句灰、警告也灰（不用紫／橘）
+/// [v25.593 轉組織 v2] 點（badge）一律橘：已轉出那一條是灰的，可是那張單還有待分派時多橘點「待分派 1」（OrgMovePlan.archivedHint、
+/// judge §4.7「有待分派：後面一個橘點」）；v1b 灰色那一種（接手的人預告）本來就沒有點，看起來不變。
+/// 要退回這一件：badge 那一行的 Color.orange 改回 alertColor
 private struct OrgMoveCardHintTexts: View {
     let hint: OrgMoveHint
 
@@ -282,7 +302,7 @@ private struct OrgMoveCardHintTexts: View {
                 .lineLimit(2)
                 .fixedSize(horizontal: false, vertical: true)
             if let badge = hint.badge {
-                OrgMoveDotLabel(text: badge, color: alertColor)
+                OrgMoveDotLabel(text: badge, color: Color.orange)
             }
             if let warning = hint.warning {
                 Text(warning)
@@ -817,6 +837,7 @@ struct OrgMoveHistoryRowView: View {
     private var tint: Color { row.isUndone ? Color.gray : Color.blue }
     private var mainColor: Color { row.isUndone ? Color.secondary : Color.primary }
     /// 已復原的 title 已經寫「（已復原）」，sub 也是「（已復原）」：不寫兩次
+    /// [v25.593 轉組織 v2] 回到我的部屬那一列 sub 是空的（「2026/11/5 回到我的部屬　品保課 P1」）：本來就不畫空的灰字（brief v2 §5-8）
     private var showSub: Bool { !row.isUndone && !row.sub.isEmpty }
 
     var body: some View {
@@ -870,6 +891,175 @@ private struct OrgMoveDateCapsule: View {
         .padding(.vertical, 2.5)
         .background(Color(.tertiarySystemFill))
         .clipShape(Capsule())
+    }
+}
+
+// MARK: - [v25.593 轉組織 v2] 已轉出的卡片：最上面灰條、看板膠囊、「…」那一框（judge §3.6、§4.7；brief v2 §5-2、§5-3）
+// 字都是 OrgMovePlan 組好的（archivedReadOnlyNote、archivedChipText、returnAsk）；只在 App 內頁，通知、小工具、手錶一個字都沒加。
+// 要退回這一段：刪 SubArchivedBanner、SubArchivedBannerRow、SubArchivedBannerIcon、SubArchivedHeroChip、SubArchivedAsk、
+// SubArchivedAskModifier 與 extension 的 subArchivedAsk，SubordinateDetailView 那幾行呼叫一起刪。
+
+/// 卡片最上面（看板上方）那一條灰：「已轉出（11/1 轉到品保課）：卡片、歷史、分數都留著；要再交事情給這位同仁，先〔回到我的部屬〕」
+/// ＋右邊小按鈕〔回到我的部屬〕（按了交給呼叫端：問、下一個 runloop 寫 store）。在職的人整條不畫、不佔位。
+struct SubArchivedBanner: View {
+    let personId: UUID
+    /// 〔回到我的部屬〕
+    let onReturn: () -> Void
+
+    @EnvironmentObject var lifeStore: LifeStore
+
+    init(personId: UUID, onReturn: @escaping () -> Void) {
+        self.personId = personId
+        self.onReturn = onReturn
+    }
+
+    /// 已轉出才建 OrgMoveWorld（卡片每次重畫都會走到；在職的大多數時候一個字都不算）
+    private var note: String? {
+        guard OrgMoveIndex.isArchived(personId) else { return nil }
+        return OrgMovePlan.archivedReadOnlyNote(personId: personId, world: OrgMoveWorld(store: lifeStore))
+    }
+
+    var body: some View {
+        if let text = note {
+            SubArchivedBannerRow(note: text, onReturn: onReturn)
+        }
+    }
+}
+
+/// 灰條本身：左邊灰圓圖示、灰字（可以折行）、右邊藍色小膠囊〔回到我的部屬〕；灰底（同灰色提示列 tertiarySystemFill）、圓角 14
+private struct SubArchivedBannerRow: View {
+    let note: String
+    let onReturn: () -> Void
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 10) {
+            SubArchivedBannerIcon()
+            Text(note)
+                .font(.caption)
+                .foregroundStyle(Color.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .fixedSize(horizontal: false, vertical: true)
+            Button(action: onReturn) {
+                Text("回到我的部屬")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(Color.blue)
+                    .lineLimit(1)
+                    .fixedSize()
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(Color.blue.opacity(0.12))
+                    .clipShape(Capsule())
+                    .contentShape(Capsule())
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(Color(.tertiarySystemFill))
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color(.separator).opacity(0.12), lineWidth: 0.75))
+        .padding(.horizontal)
+    }
+}
+
+/// 灰條左邊的灰圓（收進「已轉出」）
+private struct SubArchivedBannerIcon: View {
+    var body: some View {
+        ZStack {
+            Circle()
+                .fill(Color.gray.opacity(0.16))
+            Image(systemName: "tray.and.arrow.down.fill")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(Color.gray)
+        }
+        .frame(width: 30, height: 30)
+        .accessibilityHidden(true)
+    }
+}
+
+/// 看板頭像旁（職等、部門膠囊那一排的最前面）那一顆「已轉出」：灰底白字。在職的不畫、不佔位。
+/// archived 由呼叫端算好傳進來（這顆不看 lifeStore：傳值進來，交接單一變、卡片重畫時才會跟著變）
+struct SubArchivedHeroChip: View {
+    let archived: Bool
+
+    var body: some View {
+        if archived {
+            Text(OrgMovePlan.archivedChipText)
+                .font(.system(size: 10, weight: .bold))
+                .foregroundStyle(Color.white)
+                .lineLimit(1)
+                .fixedSize()
+                .padding(.horizontal, 8)
+                .padding(.vertical, 3)
+                .background(Color.black.opacity(0.30))
+                .clipShape(Capsule())
+                .overlay(Capsule().stroke(Color.white.opacity(0.35), lineWidth: 0.6))
+        }
+    }
+}
+
+/// 已轉出的卡片「…」〔回到我的部屬〕〔真的刪除…〕、最上面灰條〔回到我的部屬〕要問的那一框（字在按下去那一刻組好）
+struct SubArchivedAsk: Identifiable {
+    enum Kind { case returnToMine, hardDelete }
+    let id = UUID()
+    let kind: Kind
+    let title: String
+    let message: String
+}
+
+/// 那一框（一個 state 兩種框：SubordinateDetailView 那一串修飾器只多一行）。
+/// 〔回到我的部屬〕〔取消〕／〔真的刪除〕（紅）〔取消〕；按下去的寫入交給呼叫端（onReturn、onDelete 自己排下一個 runloop）
+struct SubArchivedAskModifier: ViewModifier {
+    @Binding var ask: SubArchivedAsk?
+    let onReturn: () -> Void
+    let onDelete: () -> Void
+    /// 框收起那一瞬間 ask 已清成 nil：標題留最後一次的字，不閃成空的（同 OrgMoveHintActionsModifier）
+    @State private var titleKeep = ""
+
+    init(ask: Binding<SubArchivedAsk?>, onReturn: @escaping () -> Void, onDelete: @escaping () -> Void) {
+        self._ask = ask
+        self.onReturn = onReturn
+        self.onDelete = onDelete
+    }
+
+    private var shown: Binding<Bool> {
+        Binding(get: { ask != nil }, set: { if !$0 { ask = nil } })
+    }
+
+    private var title: String { ask?.title ?? titleKeep }
+
+    func body(content: Content) -> some View {
+        content
+            .onChange(of: ask?.id) { _, _ in keepTitle() }
+            .alert(title, isPresented: shown, presenting: ask) { a in
+                buttons(a)
+            } message: { a in
+                Text(a.message)
+            }
+    }
+
+    private func keepTitle() {
+        if let t = ask?.title { titleKeep = t }
+    }
+
+    @ViewBuilder
+    private func buttons(_ a: SubArchivedAsk) -> some View {
+        switch a.kind {
+        case .returnToMine:
+            Button("回到我的部屬") { onReturn() }
+            Button("取消", role: .cancel) { }
+        case .hardDelete:
+            Button("真的刪除", role: .destructive) { onDelete() }
+            Button("取消", role: .cancel) { }
+        }
+    }
+}
+
+extension View {
+    /// [v25.593 轉組織 v2] 已轉出的卡片〔回到我的部屬〕〔真的刪除…〕那一框（SubArchivedAskModifier）
+    func subArchivedAsk(_ ask: Binding<SubArchivedAsk?>, onReturn: @escaping () -> Void,
+                        onDelete: @escaping () -> Void) -> some View {
+        modifier(SubArchivedAskModifier(ask: ask, onReturn: onReturn, onDelete: onDelete))
     }
 }
 

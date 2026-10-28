@@ -148,6 +148,7 @@
 		A01B000001001615 /* OrgMovePlan.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001615 /* OrgMovePlan.swift */; };
 		A01B000001001620 /* OrgMoveMeetingPlan.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001620 /* OrgMoveMeetingPlan.swift */; };
 		A01B000001001622 /* OrgMoveDue.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001622 /* OrgMoveDue.swift */; };
+		A01B000001001624 /* OrgMoveOut.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001624 /* OrgMoveOut.swift */; };
 		A01B000001001601 /* WealthTransferPlans.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001601 /* WealthTransferPlans.swift */; };
 		A01B000001001603 /* WealthTransferNotices.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001603 /* WealthTransferNotices.swift */; };
 		A01B000001001605 /* WealthTransferFinds.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001605 /* WealthTransferFinds.swift */; };
@@ -520,6 +521,7 @@
 		A01A000001001615 /* OrgMovePlan.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrgMovePlan.swift; sourceTree = "<group>"; };
 		A01A000001001620 /* OrgMoveMeetingPlan.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrgMoveMeetingPlan.swift; sourceTree = "<group>"; };
 		A01A000001001622 /* OrgMoveDue.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrgMoveDue.swift; sourceTree = "<group>"; };
+		A01A000001001624 /* OrgMoveOut.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrgMoveOut.swift; sourceTree = "<group>"; };
 		A01A000001001601 /* WealthTransferPlans.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WealthTransferPlans.swift; sourceTree = "<group>"; };
 		A01A000001001603 /* WealthTransferNotices.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WealthTransferNotices.swift; sourceTree = "<group>"; };
 		A01A000001001605 /* WealthTransferFinds.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WealthTransferFinds.swift; sourceTree = "<group>"; };
@@ -941,6 +943,7 @@
 				A01A000001001615 /* OrgMovePlan.swift */,
 				A01A000001001620 /* OrgMoveMeetingPlan.swift */,
 				A01A000001001622 /* OrgMoveDue.swift */,
+				A01A000001001624 /* OrgMoveOut.swift */,
 				A01A000001001601 /* WealthTransferPlans.swift */,
 				A01A000001001603 /* WealthTransferNotices.swift */,
 				A01A000001001605 /* WealthTransferFinds.swift */,
@@ -1505,6 +1508,7 @@
 				A01B000001001615 /* OrgMovePlan.swift in Sources */,
 				A01B000001001620 /* OrgMoveMeetingPlan.swift in Sources */,
 				A01B000001001622 /* OrgMoveDue.swift in Sources */,
+				A01B000001001624 /* OrgMoveOut.swift in Sources */,
 				A01B000001001601 /* WealthTransferPlans.swift in Sources */,
 				A01B000001001603 /* WealthTransferNotices.swift in Sources */,
 				A01B000001001605 /* WealthTransferFinds.swift in Sources */,

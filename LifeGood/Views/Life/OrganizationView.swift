@@ -869,8 +869,10 @@ struct DepartmentDetailView: View {
     // personRow 的 plannedOrgNoteView，刪 subscription、orgMoveWizard、orgMoveSheet、showOrgMovePremium。
 
     /// 連到、而且還在的部屬（沒有＝不給〔轉組織…〕）
+    /// [v25.593 轉組織 v2] 已轉出的人也不給（要再交事情先在卡片〔回到我的部屬〕；judge §3.6）。要退回這一件：拿掉 isArchived 那一行
     private func liveSubordinateId(_ p: OrgPerson) -> UUID? {
         guard let sid = p.linkedSubordinateId,
+              !OrgMoveIndex.isArchived(sid),
               lifeStore.subordinates.contains(where: { $0.id == sid }) else { return nil }
         return sid
     }
@@ -2332,9 +2334,11 @@ struct OrgPersonEditor: View {
     private var canUseOrgMove: Bool { onUseOrgMove != nil }
 
     /// [v25.592 轉組織 v1b] 編輯既有、連到還在的部屬、部門跟打開時不一樣 → 要先問（judge §4.1）
+    /// [v25.593 轉組織 v2] 已轉出的人（調出後的組織人員）改部門不問、直接存（已經不是你的部屬了）。要退回這一件：拿掉 isArchived 那一行
     private func deptChangeAsk() -> OrgPersonDeptAsk? {
         guard isEditing, let o = opened, departmentId != o.departmentId,
               let sid = existing?.linkedSubordinateId,
+              !OrgMoveIndex.isArchived(sid),
               lifeStore.subordinates.contains(where: { $0.id == sid }) else { return nil }
         let message = OrgMovePlan.directDeptChangeMessage(personId: sid, world: OrgMoveWorld(store: lifeStore))
         return OrgPersonDeptAsk(subordinateId: sid, newDeptId: departmentId, message: message)
@@ -2739,9 +2743,16 @@ struct OrgPersonDetailView: View {
     // 要退回這一件：刪這一區、toolbar 的 orgMoveToolbarButton、body 外面的 .orgMoveEntrySheets、
     // 編輯頁 sheet 改回沒有 onDismiss／onUseOrgMove，刪 subscription、orgMoveWizard、pendingOrgMove、showOrgMovePremium。
 
+    /// [v25.593 轉組織 v2] 已轉出的人不給〔轉組織〕（同部門頁長按的 liveSubordinateId；要再交事情先在卡片〔回到我的部屬〕；judge §3.6）。
+    /// 要退回這一件：刪這一支，下面改回 `if let sid = linkedSub?.id`
+    private var orgMoveSubordinateId: UUID? {
+        guard let sid = linkedSub?.id, !OrgMoveIndex.isArchived(sid) else { return nil }
+        return sid
+    }
+
     @ViewBuilder
     private var orgMoveToolbarButton: some View {
-        if let sid = linkedSub?.id {
+        if let sid = orgMoveSubordinateId {
             Button { openOrgMove(sid) } label: { Text("轉組織").foregroundStyle(.indigo) }
         }
     }
@@ -3782,7 +3793,10 @@ struct OrgPersonDuplicateReview: View {
         var parts: [String] = []
         let t = p.jobTitle.trimmingCharacters(in: .whitespaces)
         parts.append(t.isEmpty ? "未填職稱" : t)
-        if p.linkedSubordinateId != nil { parts.append("已連結部屬") }
+        // [v25.593 轉組織 v2] 連到已轉出的那位寫「已連結部屬（已轉出）」。要退回這一件：改回只 append("已連結部屬")
+        if let sid = p.linkedSubordinateId {
+            parts.append(OrgMoveIndex.isArchived(sid) ? "已連結部屬（\(OrgMovePlan.archivedChipText)）" : "已連結部屬")
+        }
         if p.photoFileName != nil { parts.append("有照片") }
         if p.birthday != nil { parts.append("有生日") }
         if !p.relations.isEmpty { parts.append("關係 \(p.relations.count)") }

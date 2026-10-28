@@ -76,6 +76,10 @@ struct SubordinateEquipmentSection: View {
         let f = DateFormatter(); f.locale = Locale(identifier: "zh_Hant_TW"); f.dateFormat = "yyyy/M/d"; return f
     }()
 
+    /// [v25.593 轉組織 v2] 已轉出的人卡片唯讀為主：不給〔新增機台〕〔選取現有機台〕（不再交新的事；已經有的機台照樣點得開、改得到）。
+    /// 要退回這一件：刪這一支與 body、emptyState 的 `if canAddEquipment`
+    private var canAddEquipment: Bool { !OrgMoveIndex.isArchived(subordinateId) }
+
     var body: some View {
         // 機台存放於共用機台池（機台屬於部門、生老病死跟著機台）；
         // 這裡只列出「這位部屬目前擔任負責人」的機台
@@ -99,22 +103,24 @@ struct SubordinateEquipmentSection: View {
                         .overlay(Capsule().stroke(accent.opacity(0.22), lineWidth: 0.6))
                 }
                 Spacer()
-                Menu {
-                    Button {
-                        if subscription.isPremium { addingEquipment = true }
-                        else { showPremiumAlert = true }
+                if canAddEquipment {
+                    Menu {
+                        Button {
+                            if subscription.isPremium { addingEquipment = true }
+                            else { showPremiumAlert = true }
+                        } label: {
+                            Label("新增機台", systemImage: "plus")
+                        }
+                        Button {
+                            if subscription.isPremium { pickingExisting = true }
+                            else { showPremiumAlert = true }
+                        } label: {
+                            Label("選取現有機台", systemImage: "checklist")
+                        }
                     } label: {
-                        Label("新增機台", systemImage: "plus")
+                        Image(systemName: "plus.circle.fill")
+                            .font(.system(size: 18, weight: .semibold)).foregroundStyle(accent)
                     }
-                    Button {
-                        if subscription.isPremium { pickingExisting = true }
-                        else { showPremiumAlert = true }
-                    } label: {
-                        Label("選取現有機台", systemImage: "checklist")
-                    }
-                } label: {
-                    Image(systemName: "plus.circle.fill")
-                        .font(.system(size: 18, weight: .semibold)).foregroundStyle(accent)
                 }
             }
             .padding(.horizontal, 14).padding(.top, 14).padding(.bottom, 8)
@@ -206,7 +212,9 @@ struct SubordinateEquipmentSection: View {
                 emptyIconPulse = false
             }
             Text("尚未執掌任何機台").font(.caption).foregroundStyle(.secondary)
-            Text("可新增機台，或從部門機台池選取現有機台").font(.caption2).foregroundStyle(.tertiary)
+            if canAddEquipment {
+                Text("可新增機台，或從部門機台池選取現有機台").font(.caption2).foregroundStyle(.tertiary)
+            }
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 20)
@@ -568,13 +576,26 @@ struct EquipmentEditorSheet: View {
 
     /// 負責人候選：依所選部門分成「部門成員」與「其他部屬」兩組（各依姓名排序）；
     /// 未指定部門則全部一組
+    /// [v25.593 轉組織 v2] 只列在職的＋現在選著的那一位（已轉出也留著放最後，Picker 才有那一格、打開舊資料不會變空白；
+    /// judge §3.6「所有挑人清單」）。要退回這一件：pickable 改回 lifeStore.subordinates、拿掉 kept
     private var ownerGroups: (members: [Subordinate], others: [Subordinate]) {
-        let sorted = lifeStore.subordinates.sorted {
+        let pickable = lifeStore.pickableSubordinates(keeping: ownerId)
+        let kept: [Subordinate] = pickable.filter { OrgMoveIndex.isArchived($0.id) }
+        let active: [Subordinate] = pickable.filter { !OrgMoveIndex.isArchived($0.id) }
+        let byName: [Subordinate] = active.sorted {
             $0.name.localizedStandardCompare($1.name) == .orderedAscending
         }
+        let sorted: [Subordinate] = byName + kept
         guard let did = departmentId else { return (sorted, []) }
         return (sorted.filter { effectiveDeptId($0) == did },
                 sorted.filter { effectiveDeptId($0) != did })
+    }
+
+    /// [v25.593 轉組織 v2] 負責人 Picker 那一格的字：已轉出的那位（只有現在選著時才在清單裡）多「（已轉出）」
+    private func ownerLabel(_ s: Subordinate) -> String {
+        let name = s.name.isEmpty ? "未命名" : s.name
+        guard OrgMoveIndex.isArchived(s.id) else { return name }
+        return "\(name)（\(OrgMovePlan.archivedChipText)）"
     }
 
     /// 負責人 Picker 的部門成員分組標題（「實驗室 成員」）
@@ -626,19 +647,19 @@ struct EquipmentEditorSheet: View {
                         if departmentId != nil {
                             Section(deptSectionTitle) {
                                 ForEach(groups.members) { s in
-                                    Text(s.name.isEmpty ? "未命名" : s.name).tag(UUID?.some(s.id))
+                                    Text(ownerLabel(s)).tag(UUID?.some(s.id))
                                 }
                             }
                             if !groups.others.isEmpty {
                                 Section("其他部屬") {
                                     ForEach(groups.others) { s in
-                                        Text(s.name.isEmpty ? "未命名" : s.name).tag(UUID?.some(s.id))
+                                        Text(ownerLabel(s)).tag(UUID?.some(s.id))
                                     }
                                 }
                             }
                         } else {
                             ForEach(groups.members) { s in
-                                Text(s.name.isEmpty ? "未命名" : s.name).tag(UUID?.some(s.id))
+                                Text(ownerLabel(s)).tag(UUID?.some(s.id))
                             }
                         }
                     }
@@ -2548,9 +2569,11 @@ struct EquipmentTaskCard: View {
     // MARK: 動作
 
     /// ＋：機台有負責人就直接幫他開任務；沒有負責人才跳出來讓使用者挑人。
+    /// [v25.593 轉組織 v2] 負責人已轉出（待分派的機台負責人照舊是原人）＝不直接開給這位，改跳挑人（只列在職的；
+    /// 已轉出的人不再交新任務，judge §3.6）。要退回這一件：拿掉 isArchived 那一個條件
     private func startAdding() {
         let ownerId = lifeStore.equipment(id: equipmentId)?.ownerId
-        if let oid = ownerId, lifeStore.subordinates.contains(where: { $0.id == oid }) {
+        if let oid = ownerId, !OrgMoveIndex.isArchived(oid), lifeStore.subordinates.contains(where: { $0.id == oid }) {
             adding = .owner(oid)
         } else {
             adding = .choose
@@ -2650,9 +2673,10 @@ struct EquipmentTaskOwnerPicker: View {
         self.equipmentId = equipmentId
     }
 
+    /// [v25.593 轉組織 v2] 只列在職的（已轉出的人不再交新任務；judge §3.6）。要退回這一件：all 改回 lifeStore.subordinates
     private var people: [Subordinate] {
         let q = query.trimmingCharacters(in: .whitespaces).lowercased()
-        let all = lifeStore.subordinates
+        let all = lifeStore.activeSubordinates
         guard !q.isEmpty else { return all }
         return all.filter {
             $0.name.lowercased().contains(q)

@@ -99,6 +99,11 @@ struct SubordinateView: View {
     /// [v25.592 轉組織 v1b] 名單長按〔轉組織…〕開的精靈（judge §4.1；開始精靈要訂閱）。
     /// 要退回這一件：刪這一行、listRow 的 .contextMenu、personMenu／openOrgMove／openEdit、body 的 .sheet(item: $orgMoveWizard)
     @State private var orgMoveWizard: OrgMoveWizardRequest?
+    /// [v25.593 轉組織 v2] 名單最下面「已轉出（N）」展開了沒（預設收起；judge §4.8）。要退回這一件：刪這一行與 archivedSection
+    @State private var archivedOpen = false
+    /// [v25.593 轉組織 v2] 往左滑〔刪除〕在職的人先問三選一「王小明是轉走了嗎？」（judge §3.6、③-C2）：問的是哪一位。
+    /// 跟 pendingDelete 分開（兩個框不能掛同一個 state）。要退回這一件：刪這一行、滑出按鈕改回 pendingDelete = s、body 的第二個 .alert
+    @State private var deleteChoiceFor: Subordinate?
     @AppStorage("subordinateSortOption") private var sortOptionRaw = SubordinateSortOption.dateAdded.rawValue
     @AppStorage("subordinateSortAscending") private var sortAscending = false
     @AppStorage("subordinateFilterDeptRaw") private var filterDeptRaw = ""   // 舊版單選（保留供遷移）
@@ -139,7 +144,9 @@ struct SubordinateView: View {
     }
 
     private var sortedSubordinates: [Subordinate] {
-        let list = lifeStore.subordinates
+        // [v25.593 轉組織 v2] 名單上面只列在職的；已轉出的收在最下面「已轉出（N）」（archivedSection）。
+        // 要退回這一件：改回 lifeStore.subordinates
+        let list = lifeStore.activeSubordinates
         if sortOption == .manual { return list }
         // 預先建立 id→index 對照，避免 sort closure 內部重複呼叫 firstIndex 造成 O(n² log n)
         let indexMap: [UUID: Int] = sortOption == .dateAdded
@@ -226,6 +233,8 @@ struct SubordinateView: View {
         // section 的空狀態檢查、計數徽章、ForEach 共用，避免同一次 body 求值各自重跑三次。
         let filtered = filteredSubordinates
         let rows = displayRows(filtered)
+        // [v25.593 轉組織 v2] 最下面「已轉出（N）」那幾列（交接單算的；新的在前；不套部門篩選）。一次算好給 archivedSection
+        let archived = archivedListRows()
         // 部門篩選列（有定義部門才顯示）
         if !lifeStore.departments.isEmpty {
             Section {
@@ -269,9 +278,11 @@ struct SubordinateView: View {
                             // 不用 role: .destructive：有確認框時，帶 destructive 的列一按就先被 List 滑掉，
                             // 按〔取消〕也回不來（坑 #12，同 ResumeView v25.562／RealEstateView v25.530）；改紅色 tint，按鈕看起來一樣。
                             // （要退回這一件：改回 Button(role: .destructive) { …; lifeStore.deleteSubordinate(s) }、拿掉 .tint。）
+                            // [v25.593 轉組織 v2] 先問三選一「王小明是轉走了嗎？」〔轉組織…〕〔真的刪除〕〔取消〕（deleteChoiceFor）；
+                            // 〔真的刪除〕才走原本的刪除確認框（pendingDelete）。要退回這一件：deleteChoiceFor 改回 pendingDelete
                             Button {
                                 guard subscription.isPremium else { showPremiumAlert = true; return }
-                                pendingDelete = s
+                                deleteChoiceFor = s
                             } label: {
                                 Label("刪除", systemImage: "trash")
                             }
@@ -283,9 +294,14 @@ struct SubordinateView: View {
                 guard subscription.isPremium else { showPremiumAlert = true; return }
                 // 僅在「手動排序 + 全部部門」的平面清單下允許拖曳，offset 才與底層陣列一致
                 guard sortOption == .manual, selectedDeptIds.isEmpty else { return }
-                lifeStore.subordinates.move(fromOffsets: from, toOffset: to)
+                // [v25.593 轉組織 v2] 畫面上只有在職的：照 id 換算，已轉出的人留在陣列原本的位置（judge §4.8 ⚠️）。
+                // filtered 在手動排序＋全部部門時就是在職的那份順序。要退回這一件：改回 lifeStore.subordinates.move(fromOffsets: from, toOffset: to)
+                lifeStore.moveActiveSubordinates(visibleIds: filtered.map(\.id), fromOffsets: from, toOffset: to)
             }
         }
+
+        // [v25.593 轉組織 v2] 名單最下面「已轉出（N）」（收起來；沒有就不出現）。要退回這一件：刪這一行與 archived 那一行
+        archivedSection(archived)
     }
 
     @ToolbarContentBuilder
@@ -429,7 +445,18 @@ struct SubordinateView: View {
             Button("刪除", role: .destructive) { confirmDelete(s) }
             Button("取消", role: .cancel) { }
         } message: { s in
-            Text(lifeStore.subordinateDeleteConfirm(s).message)
+            // [v25.593 轉組織 v2] 前面多「王小明身上還有 3 件沒交出去。」（有才接；deleteConfirmMessage）。
+            // 要退回這一件：改回 Text(lifeStore.subordinateDeleteConfirm(s).message)
+            Text(deleteConfirmMessage(s))
+        }
+        // [v25.593 轉組織 v2] 往左滑〔刪除〕先問三選一「王小明是轉走了嗎？」（judge §3.6、③-C2；字在 OrgMovePlan.deleteChoice）。
+        // 跟上面那一框分開兩個 state；〔真的刪除〕等這一框收完（0.35 秒）才跳上面那一框。要退回這一件：刪這一個 .alert
+        .alert(deleteChoiceTitle, isPresented: deleteChoiceShown, presenting: deleteChoiceFor) { s in
+            Button("轉組織…") { chooseOrgMove(s) }
+            Button("真的刪除", role: .destructive) { chooseHardDelete(s) }
+            Button("取消", role: .cancel) { }
+        } message: { s in
+            Text(deleteChoiceMessage(s))
         }
     }
 
@@ -454,6 +481,119 @@ struct SubordinateView: View {
             guard let fresh = lifeStore.subordinates.first(where: { $0.id == id }) else { return }
             lifeStore.deleteSubordinate(fresh)
         }
+    }
+
+    /// [v25.593 轉組織 v2] 刪除確認框的內文：身上還有沒交出去的，前面多一句「王小明身上還有 3 件沒交出去。」
+    ///（只提醒不擋；沒有就跟以前一字不差。在職的〔真的刪除〕、已轉出那一區的往左滑都走這一框）
+    private func deleteConfirmMessage(_ s: Subordinate) -> String {
+        let base = lifeStore.subordinateDeleteConfirm(s).message
+        guard let note = OrgMovePlan.deleteOpenNote(personId: s.id, world: OrgMoveWorld(store: lifeStore)) else {
+            return base
+        }
+        return note + "\n" + base
+    }
+
+    // MARK: - [v25.593 轉組織 v2] 往左滑〔刪除〕三選一（judge §3.6、③-C2；字在 OrgMovePlan.deleteChoice）
+    // 〔轉組織…〕開精靈（照舊要訂閱）；〔真的刪除〕再跳原本的刪除確認框；〔取消〕不刪。
+    // （要退回這一件：滑出按鈕改回 pendingDelete = s，刪 deleteChoiceFor、這四支與 body 的第二個 .alert。）
+
+    private var deleteChoiceShown: Binding<Bool> {
+        Binding(get: { deleteChoiceFor != nil }, set: { if !$0 { deleteChoiceFor = nil } })
+    }
+
+    private var deleteChoiceTitle: String {
+        guard let s = deleteChoiceFor else { return "" }
+        return OrgMovePlan.deleteChoice(personId: s.id, world: OrgMoveWorld(store: lifeStore)).title
+    }
+
+    private func deleteChoiceMessage(_ s: Subordinate) -> String {
+        OrgMovePlan.deleteChoice(personId: s.id, world: OrgMoveWorld(store: lifeStore)).message
+    }
+
+    /// 〔轉組織…〕：框收起之後（下一個 runloop）才開精靈（訂閱在 openOrgMove 裡照舊看）
+    private func chooseOrgMove(_ s: Subordinate) {
+        deleteChoiceFor = nil
+        let id = s.id
+        DispatchQueue.main.async { openOrgMove(id) }
+    }
+
+    /// 〔真的刪除〕：框收起來之後才跳原本的刪除確認框（pendingDelete；兩個框不同時開）。
+    /// 等 0.35 秒不是只等下一個 runloop：框還在收的那一刻疊第二個框，iOS 會把第二個吃掉（同 WealthEditors.confirmBankDelete）。
+    /// 問的期間人已經被刪了（另一台、iCloud 拉下來）就不跳
+    private func chooseHardDelete(_ s: Subordinate) {
+        deleteChoiceFor = nil
+        let id = s.id
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 350_000_000)
+            guard let fresh = lifeStore.subordinates.first(where: { $0.id == id }) else { return }
+            pendingDelete = fresh
+        }
+    }
+
+    // MARK: - [v25.593 轉組織 v2] 名單最下面「已轉出（N）」（judge §3.6、§4.8、③-B6）
+    // 收起來的一區（預設收起）：點標題列展開／收起；每列灰字名字＋右邊「11/1 轉到品保課」；點了開卡片（同在職那列 viewingItem）；
+    // 往左滑〔刪除〕直接走原本的刪除確認框（已經轉出了，不再問三選一）。不套部門篩選、不給拖曳、不給長按〔轉組織…〕。
+    // （要退回這一件：刪 archivedOpen、這六支、subordinateSections 裡 archived 那兩行、檔尾兩個 SubArchivedList… struct。）
+
+    /// 已轉出的那幾列（新的在前；OrgMovePlan.archivedRows）。沒有已轉出的人就不建 OrgMoveWorld
+    private func archivedListRows() -> [OrgMoveArchivedRow] {
+        guard !OrgMoveIndex.archived.isEmpty else { return [] }
+        return OrgMovePlan.archivedRows(world: OrgMoveWorld(store: lifeStore))
+    }
+
+    @ViewBuilder
+    private func archivedSection(_ rows: [OrgMoveArchivedRow]) -> some View {
+        if !rows.isEmpty {
+            Section {
+                archivedHeader(count: rows.count)
+                if archivedOpen {
+                    ForEach(rows) { r in
+                        archivedRow(r)
+                    }
+                }
+            }
+        }
+    }
+
+    /// 標題列「已轉出（1）▸」：整列點了展開／收起（用點擊手勢：手動排序時 List 在編輯模式，Button 點不到）
+    private func archivedHeader(count: Int) -> some View {
+        SubArchivedListHeader(count: count, open: archivedOpen)
+            .contentShape(Rectangle())
+            .onTapGesture { toggleArchived() }
+    }
+
+    /// 一列：點了開卡片；往左滑〔刪除〕（同在職那列：不用 role: .destructive，坑 #12，改紅色 tint）
+    private func archivedRow(_ r: OrgMoveArchivedRow) -> some View {
+        SubArchivedListRow(row: r)
+            .contentShape(Rectangle())
+            .onTapGesture { openArchived(r.personId) }
+            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                Button {
+                    deleteArchived(r.personId)
+                } label: {
+                    Label("刪除", systemImage: "trash")
+                }
+                .tint(.red)
+            }
+    }
+
+    private func toggleArchived() {
+        withAnimation(.easeInOut(duration: 0.2)) {
+            archivedOpen.toggle()
+        }
+    }
+
+    /// 打開已轉出那位的卡片（唯讀感在卡片裡；看卡片不用訂閱，同在職那列）
+    private func openArchived(_ id: UUID) {
+        guard let s = lifeStore.subordinates.first(where: { $0.id == id }) else { return }
+        viewingItem = s
+    }
+
+    /// 已轉出那一區往左滑〔刪除〕：要訂閱；直接跳原本的刪除確認框（不再問三選一）
+    private func deleteArchived(_ id: UUID) {
+        guard subscription.isPremium else { showPremiumAlert = true; return }
+        guard let s = lifeStore.subordinates.first(where: { $0.id == id }) else { return }
+        pendingDelete = s
     }
 
     // MARK: - [v25.592 轉組織 v1b] 名單長按：〔轉組織…〕〔編輯〕（judge §4.1、§4.8）
@@ -484,7 +624,8 @@ struct SubordinateView: View {
 
 
     private func summaryStatsCard(ctx: LifeStore.ScoreContext) -> some View {
-        let subordinates = lifeStore.subordinates
+        // [v25.593 轉組織 v2] 人數、平均、優秀、待提升只算在職的（已轉出的不算進團隊）。要退回這一件：改回 lifeStore.subordinates
+        let subordinates = lifeStore.activeSubordinates
         let scores = subordinates.map { subordinateScore($0, ctx: ctx) }
         let total = subordinates.count
         let avg: Int = scores.isEmpty ? 0 : scores.reduce(0, +) / scores.count
@@ -784,6 +925,11 @@ struct SubordinateView: View {
     /// [v3] 部門篩選後零筆時的次要空狀態：輕量圖示＋文字卡片，對齊 ResumeView
     /// .categoryEmptyState 規格（篩選態不做全頁雙層脈衝光環，僅頁面首次無資料的
     /// emptyStateView 才用大型脈衝設計），取代原本裸露 Text 造成的視覺缺口。
+    /// [v25.593 轉組織 v2] 篩選後零筆那一句（有篩部門照舊「此部門尚無部屬」）
+    private var filteredEmptyText: String {
+        selectedDeptIds.isEmpty ? "目前沒有在職的部屬" : "此部門尚無部屬"
+    }
+
     private var filteredEmptyState: some View {
         let accent = Color(red: 0.22, green: 0.53, blue: 0.98)
         return VStack(spacing: 10) {
@@ -796,7 +942,9 @@ struct SubordinateView: View {
                     .font(.system(size: 22, weight: .light))
                     .foregroundStyle(accent.opacity(0.75))
             }
-            Text("此部門尚無部屬")
+            // [v25.593 轉組織 v2] 沒有篩部門、在職的都轉出了（只剩最下面「已轉出」）時寫「目前沒有在職的部屬」。
+            // 要退回這一件：改回 Text("此部門尚無部屬")
+            Text(filteredEmptyText)
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
         }
@@ -985,6 +1133,63 @@ struct SubordinateView: View {
         case 70...:  return .orange
         default:     return .red
         }
+    }
+}
+
+// MARK: - [v25.593 轉組織 v2] 名單最下面「已轉出（N）」的標題列與一列（judge §4.8、③-B6；字在 OrgMovePlan.archivedRows 組好）
+// 只在 App 內名單；小工具、通知、手錶一個字都沒有。要退回這一件：刪這兩個 struct 與 SubordinateView 的 archivedSection 那幾支
+
+/// 「已轉出（1）▸」：灰側條、灰字粗體、右邊箭頭（展開轉成朝下）
+private struct SubArchivedListHeader: View {
+    let count: Int
+    let open: Bool
+
+    private var hint: String { open ? "收起已轉出的部屬" : "展開已轉出的部屬" }
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Capsule()
+                .fill(Color.gray.opacity(0.45))
+                .frame(width: 4, height: 16)
+            Text("已轉出（\(count)）")
+                .font(.subheadline.weight(.bold))
+                .foregroundStyle(Color.secondary)
+                .lineLimit(1)
+            Spacer(minLength: 6)
+            Image(systemName: "chevron.right")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(Color.secondary)
+                .rotationEffect(.degrees(open ? 90 : 0))
+        }
+        .padding(.vertical, 4)
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityHint(Text(hint))
+    }
+}
+
+/// 一列：灰字「王小明」＋右邊灰字「11/1 轉到品保課」＋箭頭（點了開卡片）
+private struct SubArchivedListRow: View {
+    let row: OrgMoveArchivedRow
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Text(row.name)
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(Color.secondary)
+                .lineLimit(1)
+            Spacer(minLength: 8)
+            Text(row.detail)
+                .font(.caption)
+                .foregroundStyle(Color.secondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+            Image(systemName: "chevron.right")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(Color(.tertiaryLabel))
+        }
+        .padding(.vertical, 4)
+        .accessibilityElement(children: .combine)
     }
 }
 

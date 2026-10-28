@@ -34,7 +34,9 @@ enum WidgetLifeExtras {
     /// dayStarts＝[今天 00:00, 明天 00:00]；沒有部屬時每一天都是空的那一份
     static func team(life: LifeStore, dayStarts: [Date], now: Date,
                      calendar cal: Calendar = .current) -> [WidgetTeamDay] {
-        let subs: [Subordinate] = life.subordinates
+        // [v25.593 轉組織 v2] 小工具「部屬今天」只算在職的（已轉出的不算人數、任務、請假；一個字都沒加，judge §4.11）。
+        // 要退回這一件：activeSubordinates 改回 subordinates（下面 plantAreas 那一支也一樣）
+        let subs: [Subordinate] = life.activeSubordinates
         let areas: [String] = plantAreas(life: life)
         let hasUnassigned: Bool = subs.contains { trim($0.plantArea).isEmpty }
         let areaKeys: [String] = hasUnassigned ? areas + [""] : areas
@@ -243,7 +245,7 @@ enum WidgetLifeExtras {
 
     /// Subordinate.plantArea 去頭尾空白、非空、去重，localizedStandardCompare 排（「P2」排在「P10」前面）
     static func plantAreas(life: LifeStore) -> [String] {
-        let set = Set(life.subordinates.map { trim($0.plantArea) }.filter { !$0.isEmpty })
+        let set = Set(life.activeSubordinates.map { trim($0.plantArea) }.filter { !$0.isEmpty })
         return set.sorted { $0.localizedStandardCompare($1) == .orderedAscending }
     }
 

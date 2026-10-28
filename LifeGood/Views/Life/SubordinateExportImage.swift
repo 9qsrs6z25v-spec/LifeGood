@@ -763,15 +763,36 @@ struct SubExportBoardView: View {
         HStack(alignment: .center, spacing: 14) {
             initialsDisc
             VStack(alignment: .leading, spacing: 6) {
-                Text(nameLine)
-                    .font(.title3.bold())
-                    .foregroundStyle(.white)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
+                nameRow
                 tagRow
             }
             Spacer(minLength: 0)
         }
+    }
+
+    /// [v25.593 轉組織 v2] 已轉出：名字旁一顆「已轉出」膠囊（export design §5.4；部門照現在的）。要退回這一件：nameRow 換回只有 nameText
+    private var archivedChip: String? {
+        m.snapshot.isArchived ? OrgMovePlan.archivedChipText : nil
+    }
+
+    @ViewBuilder
+    private var nameRow: some View {
+        if let chip = archivedChip {
+            HStack(alignment: .center, spacing: 6) {
+                nameText
+                SubExportArchivedChip(text: chip)
+            }
+        } else {
+            nameText
+        }
+    }
+
+    private var nameText: some View {
+        Text(nameLine)
+            .font(.title3.bold())
+            .foregroundStyle(.white)
+            .lineLimit(1)
+            .minimumScaleFactor(0.8)
     }
 
     private var initialsDisc: some View {
@@ -928,6 +949,23 @@ struct SubExportBoardTag: View {
             .padding(.vertical, 3)
             .background(fillColor)
             .clipShape(Capsule())
+    }
+}
+
+/// [v25.593 轉組織 v2] 看板名字旁的「已轉出」膠囊（灰底白字，比部門膠囊淡；出圖專用，純靜態）
+struct SubExportArchivedChip: View {
+    let text: String
+
+    var body: some View {
+        Text(text)
+            .font(.system(size: 10, weight: .semibold))
+            .foregroundStyle(Color.white.opacity(0.92))
+            .padding(.horizontal, 7)
+            .padding(.vertical, 2)
+            .background(Color.black.opacity(0.22))
+            .clipShape(Capsule())
+            .overlay(Capsule().stroke(Color.white.opacity(0.35), lineWidth: 0.6))
+            .fixedSize()
     }
 }
 

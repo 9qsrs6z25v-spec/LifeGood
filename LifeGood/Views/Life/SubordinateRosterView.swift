@@ -193,10 +193,22 @@ struct SubordinateRosterView: View {
 
     // MARK: 資料
 
+    /// [v25.593 轉組織 v2] 這個月要列的人與分組廠區：照那天的部門（judge §5-32、v1a-1 adjudicate §8-17）——
+    /// 這個月有任何一天在職、而且在選的部門就列（回看 10 月製造一課看得到 11/1 調走的王小明；11 月就沒有），
+    /// 廠區＝符合的最後那一天的廠區（不是部屬身上現在的 plantArea）。沒有任何交接單時跟以前一模一樣。
+    /// 要退回這一件：people 改回 `lifeStore.subordinates.filter { 部門 }.sorted`、rosterRows 改回 `$0.plantArea` 分組
+    private var rosterPlacement: (people: [Subordinate], plants: [UUID: String]) {
+        let keys: [String] = days.map { OrgMovePlan.dayKey($0) }
+        let members = OrgMovePlan.rosterMembers(lifeStore.subordinates, deptId: selectedDeptId, dayKeys: keys)
+        var plants: [UUID: String] = [:]
+        for m in members { plants[m.personId] = m.plant }
+        let picked: [Subordinate] = lifeStore.subordinates.filter { plants[$0.id] != nil }
+        let sorted: [Subordinate] = picked.sorted { $0.name < $1.name }
+        return (sorted, plants)
+    }
+
     private var people: [Subordinate] {
-        lifeStore.subordinates
-            .filter { selectedDeptId == nil || $0.departmentId == selectedDeptId }
-            .sorted { $0.name < $1.name }
+        rosterPlacement.people
     }
 
     /// 班表列：依廠區分組後的展開列（廠區標題 + 各部屬）
@@ -214,8 +226,11 @@ struct SubordinateRosterView: View {
     /// 把 people 依廠區分組：有分廠區者各自成段（前面加標題），未分廠區者收在最後。
     /// 完全沒有人分廠區時，回傳純名單（不顯示任何標題）。
     private var rosterRows: [RosterRow] {
-        let ppl = people
-        let grouped = Dictionary(grouping: ppl) { $0.plantArea }
+        let placed = rosterPlacement
+        let ppl = placed.people
+        let plants = placed.plants
+        // [v25.593 轉組織 v2] 廠區照那個月在這個部門的最後那一天（rosterPlacement）
+        let grouped = Dictionary(grouping: ppl) { (p: Subordinate) -> String in plants[p.id] ?? p.plantArea }
         let areas = grouped.keys.filter { !$0.isEmpty }.sorted()
         if areas.isEmpty { return ppl.map { .person($0) } }
         var rows: [RosterRow] = []
@@ -550,11 +565,18 @@ struct SubordinateRosterView: View {
             // [v25.520] 姓名放不下改跑馬燈（原本縮字後切成「…」）
             MarqueeText(sub.name.isEmpty ? "未命名" : sub.name)
                 .font(.system(size: 12, weight: .medium))
+                // [v25.593 轉組織 v2] 回看以前的月份列到的已轉出同仁：名字灰字
+                .foregroundStyle(nameColor(sub))
             Spacer(minLength: 0)
         }
         .padding(.leading, 8)
         .frame(width: nameColWidth, height: cellH)
         .overlay(Rectangle().stroke(Color(.separator).opacity(0.2), lineWidth: 0.5))
+    }
+
+    /// [v25.593 轉組織 v2] 已轉出（回看以前的月份才會列到）＝灰字
+    private func nameColor(_ sub: Subordinate) -> Color {
+        OrgMoveIndex.isArchived(sub.id) ? Color.secondary : Color.primary
     }
 
     /// 廠區分段：姓名欄上的標題格
@@ -965,7 +987,9 @@ private struct RosterCellDetailSheet: View {
             // 週六沒人 → 五時差、六起大夜、下週五休（標準序列）。
             if Calendar.current.component(.weekday, from: selectedDate) == 6 {
                 let saturday = Calendar.current.date(byAdding: .day, value: 1, to: selectedDate) ?? selectedDate
-                let plant = lifeStore.subordinates.first { $0.id == cell.subId }?.plantArea ?? ""
+                // [v25.593 轉組織 v2] 那天在哪個廠區（OrgMoveIndex.placement；nil＝跟現在一樣）。要退回這一件：改回只看 plantArea
+                let placedPlant: String? = OrgMoveIndex.placement(cell.subId, dayKey: OrgMovePlan.dayKey(selectedDate))?.plant
+                let plant = placedPlant ?? (sub?.plantArea ?? "")
                 let saturdayCovered = lifeStore.plantHasNightShift(on: saturday, plantArea: plant,
                                                                    excluding: cell.subId)
                 Button {
