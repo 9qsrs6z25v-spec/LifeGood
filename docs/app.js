@@ -331,7 +331,8 @@ function buildOrgIndex() {
     let wasArchived = false, last = null;
     const out = [];
     for (const m of list) {
-      const leaving = ORG_LEAVING_KINDS.has(m.kind), back = m.kind === 'back';
+      // 回到我的部屬那張只在「那時已轉出」才算（先回來、再復原調出那張：不能把以前切成在新部門；同 App rosterIndex）
+      const leaving = ORG_LEAVING_KINDS.has(m.kind), back = m.kind === 'back' && wasArchived;
       const from = m.from || {}, to = m.to || {};
       const moved = ((from.deptId || null) !== (to.deptId || null) && m.keepDept !== true && ORG_DEPT_KINDS.has(m.kind))
         || (from.plant || '') !== (to.plant || '');

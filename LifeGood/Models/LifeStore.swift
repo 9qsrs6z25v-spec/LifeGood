@@ -166,6 +166,10 @@ class LifeStore: ObservableObject {
         // [v25.590] 轉組織 v1a-1：交接單逐張、逐列合併（iPhone 改 P-12、iPad 改 T3，兩列都要留得住；judge §2.1、§5-10）
         let movesKeyTouched = (note.userInfo?["keys"] as? [String])?.contains(OrgMoveBook.syncKey) ?? false
         let movesBefore = orgMoves
+        // [v25.593 轉組織 v2 驗證] 拉下來之後「誰是已轉出」變了（另一台套用、復原、回到我的部屬）就照在職的重排會議通知：
+        // load()／合併都在 isLoading 裡，orgMoves 的 didSet 不會排（brief §1-11「iCloud 合併」那一條原本走不到）。
+        // 要退回這一件：刪這一行與檔尾那個 if
+        let archivedBefore = OrgMoveIndex.archived
         load()
         // backfill 期間暫停 save()，避免剛從雲端拉取就立刻回寫；用 defer 重置，
         // 避免日後在中間加入 guard/return 導致 isLoading 卡死為 true（save() 永久停擺）
@@ -207,6 +211,8 @@ class LifeStore: ObservableObject {
         }
         // 若 backfill 新建了 OrgPerson/BusinessCard 或修復了成員連結，立即持久化避免重啟後消失
         if didBackfill || didRepair || didMigrateEq || didSerial || didVault || didTransfers || didHandoffs || didMoves { save() }
+        // [v25.593 轉組織 v2 驗證] 已轉出的人變了：會議通知照在職的重排（rebuildAll 裡再濾一次；通知字一個都沒加）
+        if OrgMoveIndex.archived != archivedBefore { rebuildMeetingReminders() }
         // [v25.454] 比對拉取前後的旅遊規劃，把別台裝置新增的行程／景點／攜帶物品／
         // 伴手禮寫成本機通知。
         if tripKeyTouched {

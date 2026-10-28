@@ -1085,9 +1085,14 @@ enum OrgMoveIndex {
             var last: OrgMove?
             var spansOut: [Span] = []
             for m in sorted {
-                let roster = m.isLeaving || m.isBack
-                let moved = (m.from.deptId != m.to.deptId && m.keepDept != true && m.kindValue?.canChangeDept == true)
-                    || (m.from.plant ?? "") != (m.to.plant ?? "")
+                // [v25.593 驗證] 回到我的部屬那張只在「那時已轉出」才算：先〔回到我的部屬〕、再〔復原〕原本那張調出的，
+                // 那張 back 不能切出「11/5 以前在品保課」那一段（不然回看 10 月製造一課的班表王小明跑到品保課）。
+                // 要退回這一件：改回 `m.isLeaving || m.isBack`
+                let roster: Bool = m.isLeaving || (m.isBack && wasArchived)
+                // [v25.593 裁定] 拆成兩行、標型別（同一個條件；少讓型別檢查猜 `??` 與 Optional 比較）
+                let deptMoved: Bool = m.from.deptId != m.to.deptId && m.keepDept != true && m.kindValue?.canChangeDept == true
+                let plantMoved: Bool = (m.from.plant ?? "") != (m.to.plant ?? "")
+                let moved: Bool = deptMoved || plantMoved
                 guard roster || moved else { continue }
                 spansOut.append(Span(untilKey: m.effectiveKey, deptId: m.from.deptId, plant: m.from.plant ?? "",
                                      archived: wasArchived))

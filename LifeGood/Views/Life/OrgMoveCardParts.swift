@@ -288,11 +288,13 @@ private struct OrgMoveCardHintMain: View {
 /// [v25.593 轉組織 v2] 點（badge）一律橘：已轉出那一條是灰的，可是那張單還有待分派時多橘點「待分派 1」（OrgMovePlan.archivedHint、
 /// judge §4.7「有待分派：後面一個橘點」）；v1b 灰色那一種（接手的人預告）本來就沒有點，看起來不變。
 /// 要退回這一件：badge 那一行的 Color.orange 改回 alertColor
+/// [v25.593 轉組織 v2 裁定] 警告（⚠ 那一行）也一律橘：已轉出那一條（灰）還在交接中、又回到原人身上或部門被改回去時
+///（OrgMovePlan.archivedHint）要看得出來。v1b 灰色那一種（接手的人預告）本來就沒有警告，看起來不變。
+/// 要退回這一件：warning 那一行的 Color.orange 改回 alertColor，加回 alertColor
 private struct OrgMoveCardHintTexts: View {
     let hint: OrgMoveHint
 
     private var textColor: Color { hint.muted ? Color.secondary : Color.primary }
-    private var alertColor: Color { hint.muted ? Color.secondary : Color.orange }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
@@ -307,7 +309,7 @@ private struct OrgMoveCardHintTexts: View {
             if let warning = hint.warning {
                 Text(warning)
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(alertColor)
+                    .foregroundStyle(Color.orange)
                     .lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)
             }

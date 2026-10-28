@@ -4451,8 +4451,17 @@ struct MeetingAssigneePicker: View {
             || p.department.localizedCaseInsensitiveContains(q)
     }
 
+    /// [v25.593 轉組織 v2 驗證] 議程負責人也是挑人清單（judge §3.6「所有挑人清單…議程負責人」）：不列已轉出的人；
+    /// 已經指派給已轉出那位的照樣列著（打勾著、可以取消；同 pickableSubordinates(keeping:)）。
+    /// 要退回這一件：刪這一支，grouped 改回 `lifeStore.sideRolePersonCandidates().filter(matches)`
+    private func pickable(_ p: SideRolePersonCandidate) -> Bool {
+        guard p.kind == .subordinate, OrgMoveIndex.isArchived(p.id) else { return true }
+        return initial.contains(p.id)
+    }
+
     private var grouped: [(dept: String, people: [SideRolePersonCandidate])] {
-        let list = lifeStore.sideRolePersonCandidates().filter(matches)
+        let all: [SideRolePersonCandidate] = lifeStore.sideRolePersonCandidates()
+        let list: [SideRolePersonCandidate] = all.filter { p in pickable(p) && matches(p) }
         var order: [String] = []
         var map: [String: [SideRolePersonCandidate]] = [:]
         for p in list {

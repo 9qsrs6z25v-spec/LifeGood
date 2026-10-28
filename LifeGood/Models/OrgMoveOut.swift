@@ -104,16 +104,39 @@ extension OrgMovePlan {
     }
 
     /// 卡片看板下那一條（已轉出，灰）：「11/1 轉到品保課（已轉出）」；那張單還有待分派的多橘點「待分派 1」（judge §4.7）
+    /// [v25.593 轉組織 v2 裁定] 還在交接中的那幾天，⚠ 照樣寫出來（同 personHint 的三種：又回到原人身上、部門／組織圖又被改回去、
+    /// 在兩個人身上；judge §4.7 v1a 那幾列）。已轉出的人不在任何清單，提示列不寫就沒人看得到：還沒更新的 iPad 沒拉到就存回來、
+    /// 25.592 的 iPad 先打開而只做了一半（部門沒改、組織人員沒標已離職）時，你在卡片上就看得到，點進交接單〔再交一次〕〔再改一次〕。
+    /// 平常（沒有 ⚠）跟 v2 原本一模一樣。要退回這一件：warning 改回 nil、刪 archivedWarning
     static func archivedHint(personId: UUID, book: OrgMoveBook, world: OrgMoveWorld, now: Date) -> OrgMoveHint? {
         guard let a = OrgMoveIndex.archived[personId], let m = book.move(a.moveId) else { return nil }
         let text = archivedText(a, world: world) + "（已轉出）"
         var badge: String?
+        var warning: String?
         if isOpen(m, todayKey: dayKey(now)) {
             let map = OrgMoveHolderMap(world: world)
             let pend = tiles(m, map: map, world: world, now: now).first(where: { $0.id == "pending" })?.value ?? "0"
             badge = pend == "0" ? nil : "待分派 \(pend)"
+            warning = archivedWarning(m, map: map, world: world, now: now)
         }
-        return OrgMoveHint(moveId: m.id, text: text, badge: badge, warning: nil, isReceiver: false, muted: true)
+        return OrgMoveHint(moveId: m.id, text: text, badge: badge, warning: warning, isReceiver: false, muted: true)
+    }
+
+    /// [v25.593 轉組織 v2 裁定] 已轉出那一條的 ⚠（字、先後同 personHint：又回到原人身上 → 組織那一列 → 在兩個人身上）。沒有＝nil
+    private static func archivedWarning(_ m: OrgMove, map: OrgMoveHolderMap, world: OrgMoveWorld, now: Date) -> String? {
+        var back = 0
+        var both = 0
+        for l in m.allLines where !l.isOrgLine {
+            let k: OrgMoveLineStatus.Kind = status(l, in: m, map: map, now: now).kind
+            if k == .backOnPerson { back += 1 }
+            if k == .onBoth { both += 1 }
+        }
+        let person = m.personName.isEmpty ? "這位同仁" : m.personName
+        if back > 0 { return "有 \(back) 項又回到\(person)身上" }
+        let org = orgStatus(m, world: world, now: now)
+        if !org.ok { return org.text.replacingOccurrences(of: "⚠ ", with: "") }
+        if both > 0 { return "有 \(both) 項在兩個人身上" }
+        return nil
     }
 
     /// 已轉出的卡片最上面那一行（唯讀感）：「已轉出（11/1 轉到品保課）：卡片、歷史、分數都留著；要再交事情給這位同仁，先〔回到我的部屬〕」

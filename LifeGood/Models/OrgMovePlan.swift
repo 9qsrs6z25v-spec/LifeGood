@@ -847,7 +847,7 @@ enum OrgMovePlan {
                 }
             }
         }
-        var out = taskLines + eqLines + meetingLines + reportLines + shiftLines + managerLines
+        var out: [OrgMoveLine] = taskLines + eqLines + meetingLines + reportLines + shiftLines + managerLines
         // [v25.593 轉組織 v2] 調出、離職、退休的預設（judge §3.6「預設變了」、第 3 題；OrgMoveOut.swift）。要退回這一件：刪這一行
         applyLeavingDefaults(&out, kind: kind, personId: personId, world: world)
         return out
