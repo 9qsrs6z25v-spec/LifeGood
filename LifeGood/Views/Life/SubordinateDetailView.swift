@@ -559,6 +559,8 @@ struct SubordinateDetailView: View {
     @State private var ballotExportError: String?
     /// [v25.375] 匯出排名票前的確認：這張圖等於公開他把誰排在後面
     @State private var confirmBallotExport = false
+    /// [v25.588 部屬匯出] 「…」▸〔部屬卡片…〕〔匯出文字…〕→ 選項頁（先選再出）
+    @State private var exportRequest: SubExportRequest?
 
     // 進場動畫旗標
     @State private var headerAppeared = false
@@ -763,18 +765,19 @@ struct SubordinateDetailView: View {
                         }
                         Divider()
                         // [v25.374] 匯出圖片分成兩種內容：卡片本身／這位同仁填的排名票
+                        // [v25.588 部屬匯出] 匯出前先開選項頁；排名票照舊走自己的確認框（不併進選項頁）
                         Menu {
-                            Button { exportJPG(mentioned: mentionedItemsCache) } label: {
-                                Label("部屬卡片內容", systemImage: "person.text.rectangle")
+                            Button { exportRequest = SubExportRequest(format: .image) } label: {
+                                Label("部屬卡片…", systemImage: "person.text.rectangle")
                             }
                             Button { confirmBallotExport = true } label: {
-                                Label("績效互評排名內容", systemImage: "trophy")
+                                Label("這位同仁填的排名票", systemImage: "trophy")
                             }
                         } label: {
                             Label("匯出圖片", systemImage: "photo")
                         }
-                        Button { exportText(mentioned: mentionedItemsCache) } label: {
-                            Label("匯出文字", systemImage: "text.alignleft")
+                        Button { exportRequest = SubExportRequest(format: .text) } label: {
+                            Label("匯出文字…", systemImage: "text.alignleft")
                         }
                     } label: {
                         Image(systemName: "ellipsis.circle")
@@ -782,6 +785,12 @@ struct SubordinateDetailView: View {
                 }
             }
             .sheet(item: $shareItem) { item in ShareSheet(items: item.items).appStores() }
+            // [v25.588 部屬匯出] 選項頁（提醒、產圖、分享面板都在選項頁裡，sheet 疊 sheet）
+            .sheet(item: $exportRequest) { req in
+                SubordinateExportSheet(subordinateId: subordinateId, initialFormat: req.format,
+                                       mentioned: mentionedItemsCache)
+                    .appStores()
+            }
             // [v25.375] 這張圖會寫出這位同仁把每個人排第幾名，傳出去就收不回來了
             .alert("要匯出排名票嗎？", isPresented: $confirmBallotExport) {
                 Button("取消", role: .cancel) {}
@@ -881,7 +890,8 @@ struct SubordinateDetailView: View {
         return (done, total)
     }
 
-    /// forExport：給 exportJPG 的 ImageRenderer 用（靜態圖，跑馬燈捲不動）——姓名維持原本的縮字。
+    /// forExport：[v25.588] 匯出改用 SubordinateExportImage 的出圖專用看板，這個參數暫時沒人用
+    /// （原本給舊的卡片出圖用：靜態圖跑馬燈捲不動，姓名維持原本的縮字）。
     private func headerCard(mentionedCount: Int, forExport: Bool = false) -> some View {
         let initials = String(subordinate.name.prefix(2))
         // 一次計算所有類型計數，避免 KPI 橫列 5 個 statBadge 各自 O(n) 掃描 records
@@ -2111,42 +2121,13 @@ struct SubordinateDetailView: View {
     }
 
     // MARK: - 匯出圖片
-
-    private static let stampFmt: DateFormatter = {
-        let f = DateFormatter(); f.dateFormat = "yyyyMMdd_HHmm"; return f
-    }()
-
-    /// 把部屬卡片（英雄卡 + 目前分頁全部章節）渲染成 JPG 並開啟系統分享面板
-    /// （對齊 TalentMatrixView.exportJPG／SubordinateItemCard.shareJPG 既有規格）。
-    @MainActor
-    private func exportJPG(mentioned: [SubordinateItemRef]) {
-        let content = exportContent(mentioned: mentioned)
-            .frame(width: 430)
-            .padding(.vertical, 20)
-            .background(Color(.systemGroupedBackground))
-            // [v25.371] 出的是靜態圖，橫向捲軸捲不動＝捲出 430pt 的膠囊會被整個裁掉。
-            // 讓所有 ItemRow 的膠囊改成換行排版，該有的標籤才全部入鏡。
-            .environment(\.itemRowChipsWrap, true)
-            .environmentObject(lifeStore)
-            .environmentObject(subscription)
-        let renderer = ImageRenderer(content: content)
-        var measured = CGSize.zero
-        renderer.render { size, _ in measured = size }
-        renderer.scale = ImageExportLimits.safeScale(for: measured)
-        guard let ui = renderer.uiImage, !ImageExportLimits.isBlank(ui),
-              let data = ui.jpegData(compressionQuality: 0.95) else { return }
-        let subName = subordinate.name.isEmpty ? "部屬" : subordinate.name
-        let name = "部屬卡片_\(subName)_\(Self.stampFmt.string(from: Date())).jpg"
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent(name)
-        do {
-            try data.write(to: url)
-            shareItem = CardSharePayload(items: [url])
-        } catch { }
-    }
+    // [v25.588 部屬匯出] 部屬卡片的匯出改成先開選項頁（SubordinateExportSheet，新檔 SubordinateExport*.swift）；
+    // 舊的直接出圖、直接出文字那幾支（連同時間戳格式）已刪。這裡只剩排名票（照舊自己的確認框）。
 
     /// 匯出排名票前的警語。字串在 ViewBuilder 外組好。
+    /// [v25.588 部屬匯出] 去掉代名詞（E1 9-5、E2 B14）：改成「寫著這位同仁自己的名字」。
     private static let ballotExportWarning =
-        "這張圖會完整寫出這位同仁把每一位同事排在第幾名，而且帶著他本人的姓名。"
+        "這張圖會完整寫出這位同仁把每一位同事排在第幾名，而且寫著這位同仁自己的名字。"
         + "傳出去之後就收不回來了，請確認收圖的人適合看到這些內容。"
         + "（如果只是要看年度結果，評分加總頁的匯出可以把評分者匿名。）"
 
@@ -2177,159 +2158,6 @@ struct SubordinateDetailView: View {
             return
         }
         shareItem = CardSharePayload(items: urls)
-    }
-
-    /// 供 ImageRenderer 使用的靜態版面：英雄卡 + 目前分頁的全部章節（不含進場動畫修飾）。
-    @ViewBuilder
-    private func exportContent(mentioned: [SubordinateItemRef]) -> some View {
-        VStack(spacing: 16) {
-            headerCard(mentionedCount: mentioned.count, forExport: true)
-            switch detailTab {
-            case .daily:
-                weeklyReportSection
-                meetingSection
-                taskSection
-                mentionedSection(mentioned)
-                recordSection(.leave)
-                completedSection
-            case .rating:
-                promotionSection
-                proConSection
-                recordSection(.achievement)
-                recordSection(.improvement)
-                recordSection(.fault)
-                recordSection(.missOperation)
-            case .duty:
-                SubordinateEquipmentSection(subordinateId: subordinateId)
-                SubordinateEquipmentTimelineSection(subordinateId: subordinateId)
-            }
-        }
-    }
-
-    /// 把部屬卡片（基本資料＋分數＋目前分頁內容）組成 Emoji 排版純文字並開啟系統分享面板。
-    private func exportText(mentioned: [SubordinateItemRef]) {
-        let divider = "━━━━━━━━━━━━━━"
-        let sub = subordinate
-        var lines: [String] = []
-        lines.append("👤 部屬卡片｜\(sub.name.isEmpty ? "未命名" : sub.name)")
-        lines.append(divider)
-        if !gradeTitleText.isEmpty { lines.append("💼 職稱：\(gradeTitleText)") }
-        if !departmentText.isEmpty { lines.append("🏢 部門：\(departmentText)") }
-        if !sub.plantArea.isEmpty { lines.append("🏭 廠區：\(sub.plantArea)") }
-        if let jd = sub.joinDate {
-            // [v25.546] 跟看板一樣帶年資
-            let tenure = Self.seniorityYears(from: jd).map { "（\($0)年資歷）" } ?? ""
-            lines.append("📅 入職：\(formatDate(jd))\(tenure)")
-        }
-        let srDone = sideRoleStat.done
-        let itemDone = itemCredit
-        lines.append("📊 主動性 \(sub.proactivityScore(mentionedCount: mentioned.count, sideRoleDone: srDone, itemDone: itemDone))｜潛力性 \(sub.potentialScore)｜綜合 \(sub.overallScore(mentionedCount: mentioned.count, sideRoleDone: srDone, itemDone: itemDone))")
-
-        switch detailTab {
-        case .daily:
-            // 含已完成事項一併匯出：✅/⬜️ 並列，完成者附完成時間
-            let reports = sub.weeklyReports
-            if !reports.isEmpty {
-                let done = reports.filter(\.isCompleted).count
-                lines.append(""); lines.append("📄 報告（\(done)/\(reports.count) 完成）")
-                for r in reports.sorted(by: { $0.date > $1.date }) {
-                    var row = "\(r.isCompleted ? "✅" : "⬜️") "
-                    if !r.reportType.isEmpty { row += "【\(r.reportType)】" }
-                    row += "\(r.topic.isEmpty ? "未命名報告" : r.topic)｜\(formatDate(r.date))"
-                    if r.isCompleted, let at = r.completedAt { row += "｜🏁 \(formatDate(at))" }
-                    lines.append(row)
-                }
-            }
-            if !sub.meetings.isEmpty {
-                lines.append(""); lines.append("👥 會議")
-                for m in sub.meetings.sorted(by: { $0.date > $1.date }) {
-                    let done = m.allItems.filter(\.isCompleted).count
-                    lines.append("• \(m.topic.isEmpty ? "未命名會議" : m.topic)｜\(formatDateTime(m.date))\(m.allItems.isEmpty ? "" : "｜議程 \(done)/\(m.allItems.count)")")
-                    for item in m.allItems {
-                        var row = "　\(item.isCompleted ? "✅" : "⬜️") \(item.content.isEmpty ? "未填內容" : item.content)"
-                        if item.isCompleted, let at = item.completedAt { row += "｜🏁 \(formatDate(at))" }
-                        else if let due = item.dueDate { row += "｜⏰ \(formatDate(due))" }
-                        lines.append(row)
-                    }
-                }
-            }
-            let tasks = sub.tasks
-            if !tasks.isEmpty {
-                let done = tasks.filter(\.isCompleted).count
-                lines.append(""); lines.append("📋 任務（\(done)/\(tasks.count) 完成）")
-                for t in tasks.sorted(by: { $0.date > $1.date }) {
-                    var row = "\(t.isCompleted ? "✅" : "⬜️") \(t.topic.isEmpty ? "未命名任務" : t.topic)"
-                    if t.isCompleted, let at = t.completedAt { row += "｜🏁 \(formatDate(at))" }
-                    else if let due = t.dueDate { row += "｜⏰ 截止 \(formatDate(due))" }
-                    lines.append(row)
-                }
-            }
-            let leaves = sub.records.filter { $0.type == .leave }
-            if !leaves.isEmpty {
-                lines.append(""); lines.append("🌴 請假記錄（\(leaves.count)）")
-                for rec in leaves.sorted(by: { $0.date > $1.date }).prefix(10) {
-                    var row = "• \(formatDate(rec.date))"
-                    if let lt = rec.leaveType { row += "｜\(lt.rawValue)" }
-                    if let h = rec.leaveHours, h > 0 { row += "｜\(String(format: "%g", h)) 小時" }
-                    lines.append(row)
-                }
-            }
-        case .rating:
-            let groups: [(SubordinateRecordType, String)] = [
-                (.pro, "👍 優點"), (.con, "👎 缺點"),
-                (.achievement, "🏆 成就"), (.improvement, "📈 進步"),
-                (.fault, "⚠️ 缺失"), (.missOperation, "❌ Miss Operation")
-            ]
-            for (type, title) in groups {
-                let recs = sub.records.filter { $0.type == type }
-                if !recs.isEmpty {
-                    lines.append(""); lines.append("\(title)（\(recs.count)）")
-                    for rec in recs.sorted(by: { $0.date > $1.date }) {
-                        lines.append("• \(rec.content.isEmpty ? "未填內容" : rec.content)｜\(formatDate(rec.date))")
-                    }
-                }
-            }
-        case .duty:
-            let equipments = lifeStore.equipmentPool.filter { $0.ownerId == sub.id }
-                .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
-            if !equipments.isEmpty {
-                lines.append(""); lines.append("🛠 執掌設備（\(equipments.count) 台）")
-                for eq in equipments {
-                    var row = "• \(eq.name.isEmpty ? "未命名設備" : eq.name)｜🔧 PM \(eq.pmRecords.count)｜🚨 警報 \(eq.alarms.count)"
-                    if !eq.system.isEmpty { row += "｜⚙️ \(eq.system)" }
-                    if let deptName = lifeStore.departments.first(where: { $0.id == eq.departmentId })?.name,
-                       !deptName.isEmpty { row += "｜🏭 \(deptName)" }
-                    if let last = eq.pmRecords.map(\.date).max() { row += "｜上次 PM \(formatDate(last))" }
-                    lines.append(row)
-                }
-                // 時間軸（新到舊）：PM 與警報合併，警報標示距同設備上次 PM 天數
-                struct Entry { let date: Date; let text: String }
-                var entries: [Entry] = []
-                for eq in equipments {
-                    let name = eq.name.isEmpty ? "未命名設備" : eq.name
-                    let pmDates = eq.pmRecords.map(\.date).sorted()
-                    for pm in eq.pmRecords {
-                        entries.append(Entry(date: pm.date,
-                                             text: "🔧 \(formatDate(pm.date))｜\(name)｜PM 保養\(pm.note.isEmpty ? "" : "｜\(pm.note)")"))
-                    }
-                    for al in eq.alarms {
-                        let prior = pmDates.last(where: { $0 <= al.date })
-                        let daysText = prior.flatMap {
-                            Calendar.current.dateComponents([.day], from: $0, to: al.date).day
-                        }.map { "｜PM 後 \($0) 天" } ?? ""
-                        entries.append(Entry(date: al.date,
-                                             text: "🚨 \(formatDateTime(al.date))｜\(name)｜\(al.content.isEmpty ? "警報" : al.content)\(daysText)"))
-                    }
-                }
-                if !entries.isEmpty {
-                    lines.append(""); lines.append("⏱ PM／警報時間軸")
-                    for e in entries.sorted(by: { $0.date > $1.date }) {
-                        lines.append(e.text)
-                    }
-                }
-            }
-        }
-        shareItem = CardSharePayload(items: [lines.joined(separator: "\n")])
     }
 
     private func colorFor(_ type: SubordinateRecordType) -> Color {
@@ -5631,6 +5459,16 @@ struct SubordinateItemCard: View {
     @State private var cardAppeared = false
     /// [v25.389] 逾期才打勾時跳出來問「要不要算壓線準時」的請求（見 LateCompletionGate）
     @State private var lateRequest: LateCompletionRequest?
+    /// [v25.588 部屬匯出] 分享這一件之前的短提醒（design §4.4）；按〔分享〕才出圖／出字
+    @State private var shareAsk: ItemShareAsk?
+
+    /// [v25.588 部屬匯出] 短提醒的內容（按下〔匯出圖片〕〔匯出文字〕那一刻用最新資料組好）
+    private struct ItemShareAsk: Identifiable {
+        let id = UUID()
+        let isImage: Bool
+        let title: String
+        let message: String
+    }
 
     struct QuickSessionTarget: Identifiable {
         let subId: UUID
@@ -5672,6 +5510,8 @@ struct SubordinateItemCard: View {
             .padding(20)
             .background(Color(.systemBackground))
             .environmentObject(lifeStore)
+            // [v25.588 部屬匯出] 出圖一律淺色：手機開深色模式時不再出一張黑底圖（design §4.4、§6.4-5）
+            .environment(\.colorScheme, .light)
         let renderer = ImageRenderer(content: content)
         var measured = CGSize.zero
         renderer.render { size, _ in measured = size }
@@ -5690,6 +5530,105 @@ struct SubordinateItemCard: View {
     /// （LINE／訊息可直接貼上顯示，比 HTML 檔案更適合聊天分享）。
     private func shareText() {
         shareItem = CardSharePayload(items: [shareTextContent()])
+    }
+
+    // MARK: - [v25.588 部屬匯出] 分享前的短提醒（design §1.2、§4.4）
+
+    /// alert 的開關：有提醒就開、關掉就清（不在 body 裡現組 Binding）
+    private var shareAskShown: Binding<Bool> {
+        Binding(get: { shareAsk != nil },
+                set: { if !$0 { shareAsk = nil } })
+    }
+
+    /// alert 標題（字在 body 外組好；收起那一瞬間 shareAsk 已清成 nil，標題也不閃成空的）
+    private var shareAskTitle: String {
+        shareAsk?.title ?? "要分享這一件嗎？"
+    }
+
+    /// 提醒按〔分享〕：等 alert 收完（下一個 runloop）再出圖／出字、開分享面板
+    private func confirmShareAsk(_ ask: ItemShareAsk) {
+        let isImage = ask.isImage
+        DispatchQueue.main.async {
+            if isImage { shareJPG() } else { shareText() }
+        }
+    }
+
+    /// 按下〔匯出圖片〕〔匯出文字〕那一刻，照這一件「最新的」資料（liveTask／liveMeeting／liveReport）組提醒。
+    private func makeShareAsk(isImage: Bool) -> ItemShareAsk {
+        let facts = shareFacts(isImage: isImage)
+        let w = SubExportComposer.itemShareWarning(facts, isImage: isImage)
+        return ItemShareAsk(isImage: isImage, title: w.title, message: w.message)
+    }
+
+    /// 這一件會寫出哪些敏感的東西。文字版沒有寫負責人（E2 B15，這版不修），所以文字不說名字。
+    private func shareFacts(isImage: Bool) -> SubExportComposer.ItemShareFacts {
+        var f = SubExportComposer.ItemShareFacts(subjectName: "")
+        f.writesName = isImage
+        let holder: UUID
+        switch ref {
+        case .task(let refSubId, let snap):
+            let live = liveTask(refSubId, snap)
+            holder = live.0
+            f.dereliction = live.1.isDereliction
+            // 圖片卡會畫「任務分數」那一列；文字版沒有
+            f.taskScore = isImage
+        case .meeting(let refSubId, let snap):
+            let live = liveMeeting(refSubId, snap)
+            holder = live.0
+            let items: [MeetingItem] = live.1.allItems
+            f.oneOnOne = SubExportComposer.isOneOnOneName(live.1.topic) && !items.isEmpty
+            let who = assigneeFacts(items, holder: live.0)
+            f.assigneeNames = who.others
+            // 文字版的議程列會寫負責人名字：持有人自己也是某一條的負責人時，文字版也會寫出持有人的名字
+            if who.includesHolder { f.writesName = true }
+        case .report(let refSubId, let snap):
+            holder = liveReport(refSubId, snap).0
+        case .leave(let subId, let snap):
+            holder = subId
+            let rec: SubordinateRecord = liveRecord(subId, snap)
+            f.leaveReason = !SubExportComposer.trim(rec.content).isEmpty
+        case .record(let subId, _):
+            holder = subId
+            f.evaluation = true
+        }
+        f.subjectName = lifeStore.subordinates.first(where: { $0.id == holder })?.name ?? ""
+        return f
+    }
+
+    /// 議程負責人：others＝不是持有人本人的那幾位（名字來源同 assigneeNames：挑人清單那份反查；去重、照出現順序）；
+    /// includesHolder＝持有人自己也是某一條的負責人（卡片的議程列會寫出持有人的名字）。
+    private func assigneeFacts(_ items: [MeetingItem], holder: UUID) -> (others: [String], includesHolder: Bool) {
+        let holderName = SubExportComposer.trim(lifeStore.subordinates.first(where: { $0.id == holder })?.name ?? "")
+        let pairs: [(UUID, String)] = lifeStore.sideRolePersonCandidates().map { ($0.id, $0.name) }
+        let nameById: [UUID: String] = Dictionary(pairs, uniquingKeysWith: { a, _ in a })
+        var seen = Set<String>()
+        var out: [String] = []
+        var includesHolder = false
+        for item in items {
+            for pid in item.assigneeIds {
+                guard let raw = nameById[pid] else { continue }
+                let name = SubExportComposer.trim(raw)
+                if name.isEmpty { continue }
+                if pid == holder || name == holderName { includesHolder = true; continue }
+                if seen.insert(name).inserted { out.append(name) }
+            }
+        }
+        return (out, includesHolder)
+    }
+
+    /// 請假、紀錄的最新那一筆（找不到才退回快照；同 cardBody、shareTextContent 的寫法）
+    private func liveRecord(_ subId: UUID, _ snap: SubordinateRecord) -> SubordinateRecord {
+        lifeStore.subordinates.first(where: { $0.id == subId })?.records.first(where: { $0.id == snap.id }) ?? snap
+    }
+
+    /// [v25.588 部屬匯出] 請假卡文字第一行：「🌴 請假｜10/23（五）特休 8 小時」（西曆；不拿事由當標題，E2 §2.4）
+    private func leaveShareHeadline(_ rec: SubordinateRecord) -> String {
+        let g = SubExportComposer.gregorian
+        var tail: [String] = []
+        if let lt = rec.leaveType { tail.append(lt.rawValue) }
+        if let h = rec.leaveHours, h > 0 { tail.append(SubExportComposer.hoursText(h)) }
+        return "🌴 請假｜" + SubExportComposer.md(rec.date, wd: true, now: Date(), cal: g)
+            + tail.joined(separator: " ")
     }
 
     private static let weekdayShort = ["日", "一", "二", "三", "四", "五", "六"]
@@ -5903,7 +5842,18 @@ struct SubordinateItemCard: View {
             if !reportEqs.isEmpty { lines.append("⚙️ 關聯機台：" + reportEqs) }
             if r.isCompleted, let at = r.completedAt { lines.append("✅ 完成時間：\(fmt(at))") }
             if !r.note.isEmpty { lines.append(""); lines.append("💬 備註"); lines.append(r.note) }
-        case .leave(let subId, let snap), .record(let subId, let snap):
+        case .leave(let subId, let snap):
+            // [v25.588 部屬匯出] 第一行不再拿事由當標題；事由有填才放在分隔線下一行（你點進這一筆、自己要分享的，照寫）
+            let rec = liveRecord(subId, snap)
+            lines.append(leaveShareHeadline(rec))
+            lines.append(divider)
+            if !SubExportComposer.trim(rec.content).isEmpty { lines.append("📝 事由：\(rec.content)") }
+            lines.append("🗓 日期：\(fmt(rec.date))")
+            if let end = rec.endDate { lines.append("🗓 結束：\(fmt(end))") }
+            if let lt = rec.leaveType { lines.append("🌴 假別：\(lt.rawValue)") }
+            if let hours = rec.leaveHours, hours > 0 { lines.append("⏱ 時數：\(String(format: "%g", hours)) 小時") }
+            if !rec.note.isEmpty { lines.append(""); lines.append("💬 備註"); lines.append(rec.note) }
+        case .record(let subId, let snap):
             let rec = lifeStore.subordinates.first { $0.id == subId }?.records.first { $0.id == snap.id } ?? snap
             let emoji: String = {
                 switch rec.type {
@@ -5944,8 +5894,9 @@ struct SubordinateItemCard: View {
                 ToolbarItem(placement: .topBarTrailing) {
                     HStack(spacing: 16) {
                         Menu {
-                            Button { shareJPG() } label: { Label("匯出圖片", systemImage: "photo") }
-                            Button { shareText() } label: { Label("匯出文字", systemImage: "text.alignleft") }
+                            // [v25.588 部屬匯出] 先跳短提醒，按〔分享〕才出
+                            Button { shareAsk = makeShareAsk(isImage: true) } label: { Label("匯出圖片", systemImage: "photo") }
+                            Button { shareAsk = makeShareAsk(isImage: false) } label: { Label("匯出文字", systemImage: "text.alignleft") }
                         } label: {
                             Image(systemName: "square.and.arrow.up")
                         }
@@ -5958,6 +5909,13 @@ struct SubordinateItemCard: View {
             .sheet(item: $openSub) { s in SubordinateDetailView(subordinate: s).appStores() }
             .sheet(item: $openCard) { box in BusinessCardDetailView(cardId: box.id).appStores() }
             .sheet(item: $shareItem) { item in ShareSheet(items: item.items).appStores() }
+            // [v25.588 部屬匯出] 分享前短提醒；〔分享〕之後放下一個 runloop 再出圖／出字（等 alert 收完再開分享面板）
+            .alert(shareAskTitle, isPresented: shareAskShown, presenting: shareAsk) { ask in
+                Button("取消", role: .cancel) { }
+                Button("分享") { confirmShareAsk(ask) }
+            } message: { ask in
+                Text(ask.message)
+            }
             .sheet(item: $quickSessionTarget) { t in
                 MeetingQuickAddSessionSheet(subId: t.subId, meetingId: t.meetingId)
                     .appStores()

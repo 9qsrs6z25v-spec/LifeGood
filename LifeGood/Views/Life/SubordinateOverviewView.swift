@@ -85,10 +85,8 @@ struct SubordinateOverviewView: View {
     @State private var lateRequest: LateCompletionRequest?
     @State private var addPersonalKind: PersonalEventKind?   // 新增我的會議 / 事務
     @State private var subAddKind: SubAddKind?               // 新增部屬任務 / 會議 / 報告
-    @State private var sharePayload: OverviewSharePayload?   // 文字匯出分享
-    /// 匯出前的每頁項目數選擇（PagedImageExporter 模組）
-    @State private var askExportPageSize = false
-    @State private var pendingExportSection: ExportSection = .leaves
+    /// [v25.588 部屬匯出] 右上 ⤴ ▸〔匯出圖片…〕〔匯出文字…〕→ 選項頁 TeamExportSheet（先選再出）
+    @State private var teamExportRequest: TeamExportRequest?
     /// 暫時只看某位部屬（點項目上的人名膠囊設定；點 ✕ 或再點同一人取消）。
     /// 刻意用 @State 不落地：這是「看一眼」的臨時篩選，關掉頁面就重置。
     @State private var filterPersonId: UUID?
@@ -272,11 +270,8 @@ struct SubordinateOverviewView: View {
                     }
                 }
             }
-            .sheet(item: $sharePayload) { payload in ShareSheet(items: payload.items).appStores() }
-            .exportPageSizeDialog(isPresented: $askExportPageSize,
-                                  itemCount: exportRowCount(pendingExportSection)) { per in
-                exportImagePaged(pendingExportSection, perPage: per)
-            }
+            // [v25.588 部屬匯出] 匯出前先開選項頁（取代舊的分享面板＋每頁項目數對話框）
+            .sheet(item: $teamExportRequest) { req in teamExportSheet(req) }
             .sheet(item: $addPersonalKind) { kind in
                 PersonalEventEditor(initialDate: selectedDate, editing: nil, initialKind: kind)
                     .appStores()
@@ -325,18 +320,15 @@ struct SubordinateOverviewView: View {
         }
     }
 
-    /// 右上角匯出選單：完整文字＋各區塊圖片匯出（使用者指定）
+    /// 右上角匯出選單。[v25.588 部屬匯出] 先選再出：兩顆都開同一個選項頁（TeamExportSheet，從哪顆進來就先選哪種）。
+    /// 舊的〔完整文字〕＋「圖片匯出」7 顆單區按鈕拿掉：選項頁勾一格就是以前那一顆，記住上次之後一樣兩下（design §8.2）。
     private var exportMenu: some View {
         Menu {
-            Button { exportText() } label: { Label("完整文字", systemImage: "text.alignleft") }
-            Section("圖片匯出") {
-                Button { startExport(.hero) } label: { Label("總覽看板", systemImage: "rectangle.on.rectangle") }
-                Button { startExport(.leaves) } label: { Label("請假", systemImage: "calendar.badge.minus") }
-                Button { startExport(.reports) } label: { Label("報告", systemImage: "doc.text.fill") }
-                Button { startExport(.meetings) } label: { Label("會議", systemImage: "person.3.fill") }
-                Button { startExport(.dayTasks) } label: { Label("當日任務", systemImage: "checklist") }
-                Button { startExport(.meetingItems) } label: { Label("未完成會議條目", systemImage: "person.3.sequence.fill") }
-                Button { startExport(.tasks) } label: { Label("未完成任務", systemImage: "tray.full.fill") }
+            Button { teamExportRequest = TeamExportRequest(format: .image) } label: {
+                Label("匯出圖片…", systemImage: "photo")
+            }
+            Button { teamExportRequest = TeamExportRequest(format: .text) } label: {
+                Label("匯出文字…", systemImage: "text.alignleft")
             }
         } label: {
             Image(systemName: "square.and.arrow.up")
@@ -360,99 +352,174 @@ struct SubordinateOverviewView: View {
         }
     }
 
-    // MARK: - 圖片匯出
+    // MARK: - [v25.588 部屬匯出] 匯出：選項頁＋出圖
+    //
+    // 舊的 7 顆單區圖片（startExport／exportImagePaged／exportImage／exportImageContent）、〔完整文字〕（exportText）
+    // 和它們的 DateFormatter（stampFmt、shareDateFmt…，沒固定西曆＝B9）都拿掉了：
+    // 文字、提醒、件數在選項頁用 TeamExportComposer 組（西曆），這裡只負責出圖。
+    // 留著：exportSectionTitle（出圖的區塊標題）、sliceTallImage（PerformanceExportView 在用）。
 
-    /// 圖片匯出的區塊選項
-    private enum ExportSection: String {
-        case hero = "總覽看板"
-        case leaves = "請假"
-        case reports = "報告"
-        case meetings = "會議"
-        case dayTasks = "當日任務"
-        case meetingItems = "未完成會議條目"
-        case tasks = "未完成任務"
+    /// 右上 ⤴ 開的選項頁。日期、「只看」照畫面帶進去（選項頁裡可以改，不回寫畫面）；
+    /// 出圖叫 teamExportImage（用這一頁自己的列，出圖模式）。
+    private func teamExportSheet(_ req: TeamExportRequest) -> AnyView {
+        TeamExportSheet(initialFormat: req.format, day: selectedDate, onlyPersonId: filterPersonId,
+                        makeImage: { model, perPage in teamExportImage(model, perPage: perPage) })
+            .appStores()
     }
 
-    private static let stampFmt: DateFormatter = {
-        let f = DateFormatter(); f.dateFormat = "yyyyMMdd_HHmm"; return f
-    }()
-
-    /// 匯出入口（v25.284）：看板（單卡）與空區塊走整張渲染；
-    /// 有項目的區塊先跳「每頁項目數」選單，再用 PagedImageExporter 分頁產圖。
-    private func startExport(_ section: ExportSection) {
-        if section == .hero || exportRowCount(section) == 0 {
-            exportImage(section)
-        } else {
-            pendingExportSection = section
-            askExportPageSize = true
-        }
-    }
-
-    /// 各區塊的項目數（每頁項目數選單用）
-    private func exportRowCount(_ section: ExportSection) -> Int {
-        switch section {
-        case .hero: return 0
-        case .leaves: return todayLeaves.count
-        case .reports: return displayedReports.count
-        case .meetings: return todayMeetings.count
-        case .dayTasks: return todayTasks.count
-        case .meetingItems: return incompleteMeetingItems.count
-        case .tasks: return incompleteTasks.count
-        }
-    }
-
-    /// 分頁產圖（PagedImageExporter 模組）：每頁重複「📊 部屬總覽｜日期」抬頭與
-    /// 區塊標題，以項目為單位分頁；每頁項目數由匯出前的選單決定。
+    /// 部屬總覽的圖（design §8.6）：每頁抬頭「📊 部屬總覽｜2026/10/28 (週三)」（右邊「只看：王小明」）、
+    /// 看板（勾了才有，第 1 張開頭）、勾的區塊（照文字版順序：請假、報告、當日會議、未完成會議條目、當日任務、未完成任務、完成項目），
+    /// 最後一張多一行灰字「（這天沒有：…）」。
+    /// 資料一律取自 m（選項頁按〔匯出…〕那一刻 TeamExportComposer.resolve 的那一份），這裡不再篩一次；
+    /// 0 列（只要看板、或勾的全是 0 筆）renderPaged 自己改整張一張（灰字放看板下面）。
+    /// 檔名「部屬總覽_20261028_1020_1之2.jpg」（西曆、不放名字、不再帶區塊名）。
     @MainActor
-    private func exportImagePaged(_ section: ExportSection, perPage: Int) {
-        let header = AnyView(
-            HStack {
-                Text("📊 部屬總覽｜\(Self.shareDateFmt.string(from: selectedDate))")
-                    .font(.subheadline.weight(.semibold))
-                Spacer()
-            }
-            .padding(.horizontal, 20)
-        )
-        func title(_ t: String, icon: String, color: Color, count: Int) -> PagedExportItem {
-            .sectionHeader(AnyView(exportSectionTitle(t, icon: icon, color: color, count: count)))
+    private func teamExportImage(_ m: TeamExportModel, perPage: Int?) -> SubExportRenderResult {
+        let trailing: String = m.onlyPersonName.map { "只看：" + $0 } ?? ""
+        let header = SubExportImage.pageHeader(title: "📊 部屬總覽｜" + TeamExportComposer.shareDate(m.day),
+                                               trailing: trailing)
+        let board: AnyView? = m.options.includeBoard ? teamExportBoard(m) : nil
+        let empty: [String] = TeamExportComposer.emptyLabels(m)
+        let note: String? = empty.isEmpty ? nil : "（這天沒有：" + empty.joined(separator: "、") + "）"
+        var items: [PagedExportItem] = teamExportItems(m)
+        if let note {
+            items.append(.sectionHeader(AnyView(teamExportNote(note))))
         }
-        var items: [PagedExportItem] = []
-        switch section {
-        case .hero:
-            return
-        case .leaves:
-            items.append(title("當日請假", icon: "calendar.badge.minus", color: .teal, count: todayLeaves.count))
-            for it in todayLeaves { items.append(.row(AnyView(leaveRow(it.sub, it.rec)))) }
-        case .reports:
-            items.append(title("報告", icon: "doc.text.fill", color: .purple, count: displayedReports.count))
-            for it in displayedReports { items.append(.row(AnyView(reportRow(it.sub, it.report, status: it.status)))) }
-        case .meetings:
-            items.append(title("當日會議", icon: "person.3.fill", color: .indigo, count: todayMeetings.count))
-            for it in todayMeetings { items.append(.row(AnyView(meetingRow(it.sub, it.meeting)))) }
-        case .dayTasks:
-            items.append(title("當日任務", icon: "checklist", color: .cyan, count: todayTasks.count))
-            for it in todayTasks { items.append(.row(AnyView(taskRow(it.sub, it.task)))) }
-        case .meetingItems:
-            items.append(title("未完成會議條目", icon: "person.3.sequence.fill", color: .indigo,
-                               count: incompleteMeetingItems.count))
-            for it in incompleteMeetingItems {
-                items.append(.row(AnyView(meetingItemOverviewRow(it.sub, it.meeting, it.ctx))))
+        return SubExportImage.renderPaged(baseName: SubExportComposer.teamFileBase, header: header, board: board,
+                                          items: items, perPage: perPage, emptyNote: note, now: Date())
+    }
+
+    /// 出圖的看板：畫面上那張英雄卡（forExport：沒有獎盃、蛋糕按鈕），三格＝這份匯出的筆數（同文字版的「👥 共 3 人｜…」那一行）；
+    /// 不是今天時「今日」改「當日」；「共 N 人」＝這份的人數（只看一位時是 1）。
+    private func teamExportBoard(_ m: TeamExportModel) -> AnyView {
+        AnyView(summaryHeroCard(leaveCnt: m.leaves.count, meetCnt: m.dayMeetings.count,
+                                taskCnt: m.openTaskTotal, forExport: true,
+                                dayWord: TeamExportComposer.dayWord(m), peopleCount: m.subs.count))
+    }
+
+    /// 各區：標題（.sectionHeader）＋每筆一列（.row）。列都是出圖模式：沒有跑馬燈、沒有可點的東西、
+    /// 第二行的預覽字只放文字版也有的（請假事由要勾〔事由〕；任務內容、報告備註不放）。
+    /// .row 的總數一定等於 m.pageRowCount（每筆一列；選項頁「約 N 張」才準）。
+    @MainActor
+    private func teamExportItems(_ m: TeamExportModel) -> [PagedExportItem] {
+        let showReason: Bool = m.options.leaveReason
+        var out: [PagedExportItem] = []
+        if m.isSelected(.leaves) && !m.leaves.isEmpty {
+            out.append(exportTitleItem("當日請假", icon: "calendar.badge.minus", color: .teal, count: m.leaves.count))
+            for it in m.leaves {
+                out.append(.row(AnyView(leaveRow(it.sub, it.rec, forExport: true, showReason: showReason))))
             }
-        case .tasks:
-            items.append(title("未完成任務", icon: "tray.full.fill", color: .orange, count: incompleteTasks.count))
-            for it in incompleteTasks { items.append(.row(AnyView(taskRow(it.sub, it.task)))) }
         }
-        let urls = PagedImageExporter.exportSections(
-            baseName: "部屬總覽_\(section.rawValue)",
-            itemsPerPage: perPage,
-            header: header,
-            items: items,
-            // [v25.520] 出圖模式：ItemRow 的標題改回完整折行（靜態圖裡跑馬燈捲不動），
-            // 膠囊列也跟整張匯出（exportImage）一樣改換行，不會被裁掉
-            decorate: { AnyView($0.environmentObject(lifeStore).environment(\.itemRowChipsWrap, true)) }
+        if m.isSelected(.reports) && !m.reports.isEmpty {
+            out.append(exportTitleItem("報告（本週 / 待辦）", icon: "doc.text.fill", color: .purple,
+                                       count: m.reports.count))
+            for it in m.reports {
+                out.append(.row(AnyView(reportRow(it.sub, it.report, status: it.status, forExport: true))))
+            }
+        }
+        if m.isSelected(.meetings) {
+            if !m.dayMeetings.isEmpty {
+                out.append(exportTitleItem("當日會議", icon: "person.3.fill", color: .indigo,
+                                           count: m.dayMeetings.count))
+                for it in m.dayMeetings {
+                    out.append(.row(AnyView(meetingExportRow(it.sub, it.meeting))))
+                }
+            }
+            if !m.meetingItems.isEmpty {
+                out.append(exportTitleItem("未完成會議條目", icon: "person.3.sequence.fill", color: .indigo,
+                                           count: m.meetingItems.count))
+                for it in m.meetingItems {
+                    out.append(.row(AnyView(meetingItemOverviewRow(it.sub, it.meeting, it.ctx, forExport: true))))
+                }
+            }
+        }
+        if m.isSelected(.tasks) {
+            if !m.dayTasks.isEmpty {
+                out.append(exportTitleItem("當日任務", icon: "checklist", color: .cyan, count: m.dayTasks.count))
+                for it in m.dayTasks {
+                    out.append(.row(AnyView(taskRow(it.sub, it.task, forExport: true))))
+                }
+            }
+            if !m.openTasks.isEmpty {
+                out.append(exportTitleItem("未完成任務", icon: "tray.full.fill", color: .orange,
+                                           count: m.openTasks.count))
+                for it in m.openTasks {
+                    out.append(.row(AnyView(taskRow(it.sub, it.task, forExport: true))))
+                }
+            }
+        }
+        if m.isSelected(.completed) && !m.completed.isEmpty {
+            let title: String = "完成項目（" + TeamExportComposer.completedRangeText(m) + "）"
+            out.append(exportTitleItem(title, icon: "checkmark.circle.fill", color: .green, count: m.completed.count))
+            for c in m.completed {
+                out.append(.row(AnyView(completedExportRow(c))))
+            }
+        }
+        #if DEBUG
+        var rows = 0
+        for item in out {
+            if case .row = item { rows += 1 }
+        }
+        assert(rows == m.pageRowCount, "[v25.588] 部屬總覽出圖列數 \(rows) 跟 pageRowCount \(m.pageRowCount) 對不起來")
+        #endif
+        return out
+    }
+
+    private func exportTitleItem(_ title: String, icon: String, color: Color, count: Int) -> PagedExportItem {
+        .sectionHeader(AnyView(exportSectionTitle(title, icon: icon, color: color, count: count)))
+    }
+
+    /// 最後一張的灰字「（這天沒有：當日會議）」（同文字版最後一行）
+    private func teamExportNote(_ text: String) -> some View {
+        Text(text)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// [v25.588 部屬匯出] 當日會議的出圖列。畫面上的 meetingRow 主題是跑馬燈（靜態圖捲不動）、底下掛一串可打勾的議程按鈕；
+    /// 出圖改走 ItemRow 出圖模式：主題整行折行、膠囊 時間／分鐘／人（不能點）。
+    /// 不列議程：議程在「未完成會議條目」那一區（同文字版）。
+    private func meetingExportRow(_ sub: Subordinate, _ meeting: SubordinateMeeting) -> some View {
+        ItemRow(
+            chips: meetingChips(sub, meeting, forExport: true),
+            title: meeting.topic.isEmpty ? "未命名會議" : meeting.topic,
+            leading: { ItemIconDisc(icon: "person.3.fill", color: .indigo, iconSize: 12) }
         )
-        guard !urls.isEmpty else { return }
-        sharePayload = OverviewSharePayload(items: urls)
+    }
+
+    /// [v25.588 部屬匯出] 完成項目的出圖列（畫面上的「已完成」是可收合、可點的按鈕列，出圖另寫這支靜態的）：
+    /// 綠勾圓、膠囊〔報告／議程／任務〕〔名字（議程是「名字・會議名」）〕〔完成 10/27 16:05〕、標題整行折行。
+    /// 不畫準時／逾期章：部屬總覽沒有「逾期、準時」那個開關（同文字版只寫日子）。
+    private func completedExportRow(_ c: TeamExportModel.CompletedLine) -> some View {
+        ItemRow(
+            chips: completedExportChips(c),
+            title: c.title,
+            leading: { ItemIconDisc(icon: "checkmark.circle.fill", color: .green) }
+        )
+    }
+
+    private func completedExportChips(_ c: TeamExportModel.CompletedLine) -> [ItemChip] {
+        let g = SubExportComposer.gregorian
+        let look = completedKindLook(c.kind)
+        var chips: [ItemChip] = [ItemChip(id: "kind", text: look.label, color: look.color)]
+        if !c.subtitle.isEmpty {
+            chips.append(ItemChip(id: "who", text: c.subtitle, color: .secondary))
+        }
+        if let at = c.at {
+            let when: String = "完成 " + SubExportComposer.shortMD(at, cal: g) + " " + SubExportComposer.hm(at, cal: g)
+            chips.append(ItemChip(id: "at", text: when, color: .green, icon: "clock"))
+        }
+        return chips
+    }
+
+    /// 完成項目種類的字與顏色（照畫面「已完成」CompletedEntry.Kind 的顏色：報告紫、會議靛、任務青；議程寫「議程」同文字版）
+    private func completedKindLook(_ k: SubExportCompletedKind) -> (label: String, color: Color) {
+        switch k {
+        case .report: return ("報告", .purple)
+        case .agenda: return ("議程", .indigo)
+        case .task: return ("任務", .cyan)
+        }
     }
 
     /// 模組分頁用的區塊標題：sectionHeader 的無內距版（模組自己會加水平內距）
@@ -473,39 +540,6 @@ struct SubordinateOverviewView: View {
                 .background(color.opacity(0.10)).clipShape(Capsule())
                 .overlay(Capsule().stroke(color.opacity(0.22), lineWidth: 0.75))
         }
-    }
-
-    /// 整張渲染路徑（總覽看板與空區塊用）：寬 430、scale ≥3、JPG 0.95、
-    /// 過長仍以 sliceTallImage 保底切頁。
-    @MainActor
-    private func exportImage(_ section: ExportSection) {
-        let content = exportImageContent(section)
-            .frame(width: 430)
-            .padding(.vertical, 20)
-            .background(Color(.systemGroupedBackground))
-            // [v25.371] 靜態圖捲不動：膠囊列改換行，不然捲出 430pt 的標籤會被裁掉
-            .environment(\.itemRowChipsWrap, true)
-            .environmentObject(lifeStore)
-        let renderer = ImageRenderer(content: content)
-        // [v25.426] 人多的時候整張圖會高到光柵化上限以上，出來會是一片空白。
-        // 先量再決定倍率，並擋掉空白圖——寧可明講失敗，也不要存一張空檔案。
-        var measured = CGSize.zero
-        renderer.render { size, _ in measured = size }
-        renderer.scale = ImageExportLimits.safeScale(for: measured)
-        guard let ui = renderer.uiImage, !ImageExportLimits.isBlank(ui) else { return }
-        let pages = Self.sliceTallImage(ui, maxPageHeightPt: 1600)
-        let stamp = Self.stampFmt.string(from: Date())
-        var urls: [URL] = []
-        for (i, page) in pages.enumerated() {
-            guard let data = page.jpegData(compressionQuality: 0.95) else { continue }
-            // 多頁才帶頁碼，單頁維持原本的檔名格式
-            let suffix = pages.count > 1 ? "_\(i + 1)之\(pages.count)" : ""
-            let name = "部屬總覽_\(section.rawValue)_\(stamp)\(suffix).jpg"
-            let url = FileManager.default.temporaryDirectory.appendingPathComponent(name)
-            do { try data.write(to: url); urls.append(url) } catch { }
-        }
-        guard !urls.isEmpty else { return }
-        sharePayload = OverviewSharePayload(items: urls)
     }
 
     /// 長圖切頁：超過 maxPageHeightPt 就依像素座標裁成多張。
@@ -538,169 +572,6 @@ struct SubordinateOverviewView: View {
             yPx += pageHeightPx - overlapPx
         }
         return pages.isEmpty ? [image] : pages
-    }
-
-    /// 供 ImageRenderer 使用的靜態版面：非看板區塊在頂部附「部屬總覽｜日期」標題列，
-    /// 圖片單獨分享時仍看得出日期脈絡（看板本身已含日期資訊則免）
-    @ViewBuilder
-    private func exportImageContent(_ section: ExportSection) -> some View {
-        VStack(spacing: 12) {
-            if section != .hero {
-                HStack {
-                    Text("📊 部屬總覽｜\(Self.shareDateFmt.string(from: selectedDate))")
-                        .font(.subheadline.weight(.semibold))
-                    Spacer()
-                }
-                .padding(.horizontal, 20)
-            }
-            switch section {
-            case .hero:
-                summaryHeroCard(leaveCnt: todayLeaves.count,
-                                meetCnt: todayMeetings.count,
-                                taskCnt: incompleteTasks.count,
-                                forExport: true)
-            case .leaves:
-                leaveSection(todayLeaves)
-            case .reports:
-                reportSection(displayedReports)
-            case .meetings:
-                meetingSection(todayMeetings)
-            case .dayTasks:
-                taskGroupCard(title: "當日任務", icon: "checklist", color: .cyan,
-                              items: todayTasks, emptyText: "當日無任務")
-                    .padding(.horizontal)
-            case .meetingItems:
-                meetingItemsCard(incompleteMeetingItems)
-                    .padding(.horizontal)
-            case .tasks:
-                taskGroupCard(title: "未完成任務", icon: "tray.full.fill", color: .orange,
-                              items: incompleteTasks, emptyText: "沒有未完成任務")
-                    .padding(.horizontal)
-            }
-        }
-    }
-
-    // MARK: - 文字匯出
-
-    private static let shareDateFmt: DateFormatter = {
-        let f = DateFormatter(); f.locale = Locale(identifier: "zh_Hant_TW"); f.dateFormat = "yyyy/M/d (E)"; return f
-    }()
-    private static let shareShortFmt: DateFormatter = {
-        let f = DateFormatter(); f.locale = Locale(identifier: "zh_Hant_TW"); f.dateFormat = "M/d"; return f
-    }()
-    private static let shareTimeFmt: DateFormatter = {
-        let f = DateFormatter(); f.dateFormat = "HH:mm"; return f
-    }()
-
-    /// 把部屬總覽（請假／報告／會議／任務，含已完成收合區）組成 Emoji 排版純文字並分享
-    /// （對齊部屬卡片 exportText 規格：✅/⬜️ 並列、完成附 🏁、未完成附 ⏰）。
-    private func exportText() {
-        let divider = "━━━━━━━━━━━━━━"
-        var lines: [String] = []
-        lines.append("📊 部屬總覽｜\(Self.shareDateFmt.string(from: selectedDate))")
-        lines.append(divider)
-
-        // 當日請假
-        let leaves = todayLeaves
-        lines.append("")
-        lines.append("🌴 當日請假（\(leaves.count)）")
-        if leaves.isEmpty {
-            lines.append("・當日無人請假")
-        } else {
-            for it in leaves {
-                var row = "• \(it.sub.name.isEmpty ? "未命名" : it.sub.name)"
-                if let lt = it.rec.leaveType { row += "｜\(lt.rawValue)" }
-                if let h = it.rec.leaveHours, h > 0 { row += "｜\(String(format: "%g", h)) 小時" }
-                lines.append(row)
-            }
-        }
-
-        // 報告（本週全部 + 未完成；含已完成，狀態各自標示）
-        let reports = displayedReports
-        if !reports.isEmpty {
-            let done = reports.filter { $0.report.isCompleted }.count
-            lines.append("")
-            lines.append("📄 報告（\(done)/\(reports.count) 完成）")
-            for it in reports {
-                let who = it.sub.name.isEmpty ? "未命名" : it.sub.name
-                var row = "\(it.report.isCompleted ? "✅" : "⬜️") "
-                if !it.report.reportType.isEmpty { row += "【\(it.report.reportType)】" }
-                row += "\(it.report.topic.isEmpty ? "未命名報告" : it.report.topic)｜\(who)"
-                switch it.status {
-                case .overdue: row += "｜⚠️ 逾期 \(Self.shareShortFmt.string(from: it.report.date))"
-                case .thisWeek, .pending: row += "｜\(Self.shareShortFmt.string(from: it.report.date))"
-                case .done:
-                    if let at = it.report.completedAt { row += "｜🏁 \(Self.shareShortFmt.string(from: at))" }
-                }
-                lines.append(row)
-            }
-        }
-
-        // 當日會議（議程 ✅/⬜️ 全列，含已完成）
-        let meetings = todayMeetings
-        lines.append("")
-        lines.append("👥 當日會議（\(meetings.count)）")
-        if meetings.isEmpty {
-            lines.append("・當日無會議")
-        } else {
-            for it in meetings {
-                let doneCnt = it.meeting.allItems.filter(\.isCompleted).count
-                var head = "• \(it.meeting.topic.isEmpty ? "未命名會議" : it.meeting.topic)｜\(Self.shareTimeFmt.string(from: it.meeting.date))｜\(it.meeting.durationMinutes) 分鐘"
-                if !it.meeting.allItems.isEmpty { head += "｜議程 \(doneCnt)/\(it.meeting.allItems.count)" }
-                lines.append(head)
-                for item in it.meeting.allItems {
-                    var row = "　\(item.isCompleted ? "✅" : "⬜️") \(item.content.isEmpty ? "未填內容" : item.content)"
-                    if item.isCompleted, let at = item.completedAt { row += "｜🏁 \(Self.shareShortFmt.string(from: at))" }
-                    else if let due = item.dueDate { row += "｜⏰ \(Self.shareShortFmt.string(from: due))" }
-                    lines.append(row)
-                }
-            }
-        }
-
-        // 未完成任務（跨所有日期）
-        let tasks = incompleteTasks
-        if !tasks.isEmpty {
-            lines.append("")
-            lines.append("📋 未完成任務（\(tasks.count)）")
-            for it in tasks {
-                let who = it.sub.name.isEmpty ? "未命名" : it.sub.name
-                var row = "⬜️ \(it.task.topic.isEmpty ? "未命名任務" : it.task.topic)｜\(who)"
-                if let due = it.task.dueDate { row += "｜⏰ 截止 \(Self.shareShortFmt.string(from: due))" }
-                lines.append(row)
-            }
-        }
-
-        // 未完成會議條目（跨所有會議）
-        let pendingItems = incompleteMeetingItems
-        if !pendingItems.isEmpty {
-            lines.append("")
-            lines.append("🗂 未完成會議條目（\(pendingItems.count)）")
-            for it in pendingItems {
-                let who = it.sub.name.isEmpty ? "未命名" : it.sub.name
-                var row = "⬜️ \(it.ctx.item.content.isEmpty ? "未填內容" : it.ctx.item.content)｜\(who)・\(it.meeting.topic.isEmpty ? "會議" : it.meeting.topic)"
-                row += "｜🗓 開會 \(Self.shareShortFmt.string(from: it.ctx.sessionDate))"
-                if let due = it.ctx.item.dueDate { row += "｜⏰ 截止 \(Self.shareShortFmt.string(from: due))" }
-                lines.append(row)
-            }
-        }
-
-        // 已完成（報告 / 會議條目 / 任務，同底部收合卡內容）
-        let completed = overviewCompletedEntries.sorted { ($0.completedAt ?? .distantPast) > ($1.completedAt ?? .distantPast) }
-        if !completed.isEmpty {
-            lines.append("")
-            lines.append("✅ 已完成（\(completed.count)）")
-            for e in completed {
-                let emoji: String = {
-                    switch e.kind { case .report: return "📄"; case .meeting: return "👥"; case .task: return "📋" }
-                }()
-                var row = "🏁 "
-                if let at = e.completedAt { row += "\(Self.shareShortFmt.string(from: at))｜" }
-                row += "\(emoji) \(e.title.isEmpty ? "未命名" : e.title)｜\(e.subtitle)"
-                lines.append(row)
-            }
-        }
-
-        sharePayload = OverviewSharePayload(items: [lines.joined(separator: "\n")])
     }
 
     // MARK: - 請假
@@ -775,32 +646,42 @@ struct SubordinateOverviewView: View {
 
     /// [v25.355] 改用共用的 ItemRow 模板：左側漸層圓＝可點的完成勾選，
     /// 報告類型／狀態／人員／日期改走膠囊橫向捲軸。
-    private func reportRow(_ sub: Subordinate, _ report: WeeklyReport, status: ReportStatus) -> some View {
+    /// [v25.588 部屬匯出] forExport＝出圖模式（teamExportItems 用）：整列、勾選圓、人名膠囊都不能點，
+    /// 不放備註預覽（文字版沒有備註）。畫面上的呼叫不傳，照舊。
+    private func reportRow(_ sub: Subordinate, _ report: WeeklyReport, status: ReportStatus,
+                           forExport: Bool = false) -> some View {
         let accent: Color = report.isCompleted ? .green : .purple
+        var tap: (() -> Void)? = nil
+        var toggle: (() -> Void)? = nil
+        if !forExport {
+            tap = { editTarget = .report(subId: sub.id, report: report) }
+            toggle = {
+                lateRequest = LateCompletionGate.report(
+                    lifeStore, subordinateId: sub.id, report: report)
+            }
+        }
+        let preview: String? = forExport ? nil : report.note
         return ItemRow(
-            chips: reportChips(sub, report, status: status),
+            chips: reportChips(sub, report, status: status, forExport: forExport),
             title: report.topic.isEmpty ? "未命名報告" : report.topic,
             titleIsMuted: report.isCompleted,
             titleStrikethrough: report.isCompleted,
-            preview: report.note,
+            preview: preview,
             previewLineLimit: 1,
             extra: report.isCompleted
                 ? AnyView(CompletionStamp(completedAt: report.completedAt, due: report.date))
                 : nil,
-            onTap: { editTarget = .report(subId: sub.id, report: report) },
+            onTap: tap,
             leading: {
                 ItemIconDisc(icon: report.isCompleted ? "checkmark.circle.fill" : "circle",
-                             color: accent) {
-                    lateRequest = LateCompletionGate.report(
-                        lifeStore, subordinateId: sub.id, report: report)
-                }
+                             color: accent, action: toggle)
             }
         )
         .opacity(report.isCompleted ? 0.7 : 1)
     }
 
     private func reportChips(_ sub: Subordinate, _ report: WeeklyReport,
-                             status: ReportStatus) -> [ItemChip] {
+                             status: ReportStatus, forExport: Bool = false) -> [ItemChip] {
         var chips: [ItemChip] = []
         // 分類膠囊排在最前面——放後面不醒目（使用者回饋）
         if !report.reportType.isEmpty {
@@ -809,7 +690,7 @@ struct SubordinateOverviewView: View {
         if let badge = reportStatusBadge(status) {
             chips.append(ItemChip(id: "status", text: badge.text, color: badge.color))
         }
-        chips.append(personItemChip(sub, tint: .purple))
+        chips.append(personItemChip(sub, tint: .purple, forExport: forExport))
         chips.append(ItemChip(id: "date", text: reportDateText(report.date),
                               color: .secondary, icon: "calendar"))
         return chips
@@ -939,34 +820,45 @@ struct SubordinateOverviewView: View {
     /// 順帶收斂：原本手刻的 36pt 漸層圓與 ItemIconDisc 規格完全相同
     ///（0.22→0.08 漸層、0.18/5/0/2 陰影、0.22 描邊、36pt），換過去沒有視覺差異。
     /// 版面上唯一的變化是膠囊從標題下方移到標題上方——那正是其餘三列的排法。
+    /// [v25.588 部屬匯出] forExport＝出圖模式（teamExportItems 用）：整列、勾選圓、開會時間膠囊、人名膠囊都不能點
+    ///（人名膠囊不帶「只看」的 ✕）。畫面上的呼叫不傳，照舊。
     private func meetingItemOverviewRow(_ sub: Subordinate, _ meeting: SubordinateMeeting,
-                                       _ ctx: SubordinateMeeting.ItemContext) -> some View {
+                                       _ ctx: SubordinateMeeting.ItemContext,
+                                       forExport: Bool = false) -> some View {
         let item = ctx.item
         let accent: Color = item.isCompleted ? .green : .indigo
+        var tap: (() -> Void)? = nil
+        var toggle: (() -> Void)? = nil
+        if !forExport {
+            tap = { editTarget = .meeting(subId: sub.id, meeting: meeting) }
+            toggle = {
+                lateRequest = LateCompletionGate.meetingItem(
+                    lifeStore, subordinateId: sub.id, meetingId: meeting.id, item: item)
+            }
+        }
         return ItemRow(
-            chips: meetingItemChips(sub, meeting, ctx),
+            chips: meetingItemChips(sub, meeting, ctx, forExport: forExport),
             title: item.content.isEmpty ? "未填內容" : item.content,
             titleIsMuted: item.isCompleted,
             titleStrikethrough: item.isCompleted,
-            onTap: { editTarget = .meeting(subId: sub.id, meeting: meeting) },
+            onTap: tap,
             leading: {
                 ItemIconDisc(icon: item.isCompleted ? "checkmark.circle.fill" : "circle",
-                             color: accent) {
-                    lateRequest = LateCompletionGate.meetingItem(
-                        lifeStore, subordinateId: sub.id, meetingId: meeting.id, item: item)
-                }
+                             color: accent, action: toggle)
             }
         )
     }
 
-    private func meetingChips(_ sub: Subordinate, _ meeting: SubordinateMeeting) -> [ItemChip] {
+    private func meetingChips(_ sub: Subordinate, _ meeting: SubordinateMeeting,
+                              forExport: Bool = false) -> [ItemChip] {
         [ItemChip(id: "time", text: fmtTime(meeting.date), color: .secondary, icon: "clock"),
          ItemChip(id: "dur", text: "\(meeting.durationMinutes) 分鐘", color: .indigo),
-         personItemChip(sub)]
+         personItemChip(sub, forExport: forExport)]
     }
 
     private func meetingItemChips(_ sub: Subordinate, _ meeting: SubordinateMeeting,
-                                  _ ctx: SubordinateMeeting.ItemContext) -> [ItemChip] {
+                                  _ ctx: SubordinateMeeting.ItemContext,
+                                  forExport: Bool = false) -> [ItemChip] {
         var chips: [ItemChip] = [
             ItemChip(id: "meeting", text: meeting.topic.isEmpty ? "未命名會議" : meeting.topic,
                      color: .indigo)
@@ -975,8 +867,8 @@ struct SubordinateOverviewView: View {
             chips.append(ItemChip(id: "due", text: "截止 \(fmtDateTime(due))",
                                   color: due < Date() ? .red : .indigo, icon: "flag.fill"))
         }
-        chips.append(sessionItemChip(sub, meeting, ctx))
-        chips.append(personItemChip(sub))
+        chips.append(sessionItemChip(sub, meeting, ctx, forExport: forExport))
+        chips.append(personItemChip(sub, forExport: forExport))
         return chips
     }
 
@@ -987,11 +879,18 @@ struct SubordinateOverviewView: View {
     ///（setMeetingSessionDate 對臨時場次是直接改 scheduledDate 並清掉 movedTo），
     /// 所以一個圖示就夠，不會有兩種狀態同時成立卻只顯示一種。
     private func sessionItemChip(_ sub: Subordinate, _ meeting: SubordinateMeeting,
-                                 _ ctx: SubordinateMeeting.ItemContext) -> ItemChip {
+                                 _ ctx: SubordinateMeeting.ItemContext,
+                                 forExport: Bool = false) -> ItemChip {
         let icon: String = ctx.isAdHoc ? "calendar.badge.plus"
             : (ctx.isRescheduled ? "arrow.triangle.swap" : "calendar")
-        return ItemChip(id: "session", text: "開會 \(fmtDateTime(ctx.sessionDate))",
-                        color: ctx.isCancelled ? .secondary : .teal,
+        let text: String = "開會 \(fmtDateTime(ctx.sessionDate))"
+        let color: Color = ctx.isCancelled ? .secondary : .teal
+        // [v25.588 部屬匯出] 出圖：同一顆膠囊、不能點
+        if forExport {
+            return ItemChip(id: "session", text: text, color: color, icon: icon)
+        }
+        return ItemChip(id: "session", text: text,
+                        color: color,
                         icon: icon,
                         onTap: {
                             sessionEdit = SessionEditTarget(subId: sub.id, meetingId: meeting.id,
@@ -1075,19 +974,34 @@ struct SubordinateOverviewView: View {
 
     /// [v25.355] 改用共用的 ItemRow 模板。標題仍是人名（可點＝以這個人篩選），
     /// 假別／時數／時間改走膠囊橫向捲軸。
-    private func leaveRow(_ sub: Subordinate, _ rec: SubordinateRecord) -> some View {
-        ItemRow(
-            chips: leaveChips(rec),
-            title: sub.name,
-            titleTap: {
+    /// [v25.588 部屬匯出] forExport＝出圖模式（teamExportItems 用）：標題、整列不能點（沒有「只看」的 ✕）；
+    /// 第二行的事由**預設不出去**——只有 showReason（細項〔事由〕勾了）才放，前面寫「事由：」（同文字版）。
+    /// 畫面上的呼叫不傳，照舊（畫面第二行照樣是事由）。
+    private func leaveRow(_ sub: Subordinate, _ rec: SubordinateRecord,
+                          forExport: Bool = false, showReason: Bool = true) -> some View {
+        var titleTap: (() -> Void)? = nil
+        var tap: (() -> Void)? = nil
+        var preview: String? = rec.content
+        if forExport {
+            let reason = rec.content.trimmingCharacters(in: .whitespacesAndNewlines)
+            preview = (showReason && !reason.isEmpty) ? "事由：" + reason : nil
+        } else {
+            titleTap = {
                 withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
                     filterPersonId = filterPersonId == sub.id ? nil : sub.id
                 }
-            },
-            titleIsFiltering: filterPersonId == sub.id,
-            preview: rec.content,
-            previewLineLimit: 1,
-            onTap: { editTarget = .leave(subId: sub.id, rec: rec) },
+            }
+            tap = { editTarget = .leave(subId: sub.id, rec: rec) }
+        }
+        let title: String = (forExport && sub.name.isEmpty) ? "未命名" : sub.name
+        return ItemRow(
+            chips: leaveChips(rec),
+            title: title,
+            titleTap: titleTap,
+            titleIsFiltering: !forExport && filterPersonId == sub.id,
+            preview: preview,
+            previewLineLimit: forExport ? 8 : 1,
+            onTap: tap,
             leading: { ItemIconDisc(icon: "calendar.badge.minus", color: .teal, iconSize: 14) }
         )
     }
@@ -1175,41 +1089,60 @@ struct SubordinateOverviewView: View {
 
     /// [v25.355] 改用共用的 ItemRow 模板：左側漸層圓＝可點的完成勾選，
     /// 人員／時間／截止／設備／系統改走膠囊橫向捲軸（分類多也不會把標題擠掉）。
-    private func taskRow(_ sub: Subordinate, _ task: SubordinateTask) -> some View {
+    /// [v25.588 部屬匯出] forExport＝出圖模式（teamExportItems 用）：整列、勾選圓、人名膠囊都不能點；
+    /// 不放內容預覽（文字版沒有內容）；膠囊多〔立案 M/d〕（沒截止的）、〔缺失任務〕（紅，同文字版「⚠️ 缺失任務」）。
+    /// 畫面上的呼叫不傳，照舊。
+    private func taskRow(_ sub: Subordinate, _ task: SubordinateTask,
+                         forExport: Bool = false) -> some View {
         let isOverdue = TeamDay.isOverdue(task, at: Date())   // [v5] 部屬今天小工具的「逾期」同一個判斷
         let accent: Color = task.isCompleted ? .green : (isOverdue ? .red : .cyan)
         let icon = task.isCompleted
             ? "checkmark.circle.fill"
             : (isOverdue ? "exclamationmark.circle.fill" : "circle")
+        var tap: (() -> Void)? = nil
+        var toggle: (() -> Void)? = nil
+        if !forExport {
+            tap = { editTarget = .task(subId: sub.id, task: task) }
+            toggle = {
+                lateRequest = LateCompletionGate.task(
+                    lifeStore, subordinateId: sub.id, task: task)
+            }
+        }
+        let preview: String? = forExport ? nil : task.content
         return ItemRow(
-            chips: taskChips(sub, task, isOverdue: isOverdue),
+            chips: taskChips(sub, task, isOverdue: isOverdue, forExport: forExport),
             title: task.topic.isEmpty ? "未命名任務" : task.topic,
             titleIsMuted: task.isCompleted,
             titleStrikethrough: task.isCompleted,
-            preview: task.content,
+            preview: preview,
             previewLineLimit: 2,
             extra: task.isCompleted
                 ? AnyView(CompletionStamp(completedAt: task.completedAt, due: task.dueDate))
                 : nil,
-            onTap: { editTarget = .task(subId: sub.id, task: task) },
+            onTap: tap,
             leading: {
-                ItemIconDisc(icon: icon, color: accent, iconSize: 16) {
-                    lateRequest = LateCompletionGate.task(
-                        lifeStore, subordinateId: sub.id, task: task)
-                }
+                ItemIconDisc(icon: icon, color: accent, iconSize: 16, action: toggle)
             }
         )
         .opacity(task.isCompleted ? 0.6 : 1)
     }
 
     private func taskChips(_ sub: Subordinate, _ task: SubordinateTask,
-                           isOverdue: Bool) -> [ItemChip] {
-        var chips: [ItemChip] = [personItemChip(sub)]
+                           isOverdue: Bool, forExport: Bool = false) -> [ItemChip] {
+        var chips: [ItemChip] = [personItemChip(sub, forExport: forExport)]
         chips.append(ItemChip(id: "time", text: fmtTime(task.date), color: .secondary, icon: "clock"))
         if let due = task.dueDate {
             chips.append(ItemChip(id: "due", text: "截止 \(fmtDateTime(due))",
                                   color: isOverdue ? .red : .cyan,
                                   icon: isOverdue ? "exclamationmark.triangle.fill" : "clock.badge"))
+        } else if forExport {
+            // [v25.588 部屬匯出] 出圖：沒截止的寫立案日（西曆，同文字版「立案 6/2」）
+            let created: String = "立案 " + SubExportComposer.shortMD(task.date, cal: SubExportComposer.gregorian)
+            chips.append(ItemChip(id: "created", text: created, color: .secondary, icon: "calendar"))
+        }
+        if forExport && task.isDereliction {
+            chips.append(ItemChip(id: "dereliction", text: "缺失任務", color: .red,
+                                  icon: "exclamationmark.triangle.fill"))
         }
         // 機台警報任務：來源機台＋系統別（顯示用；篩選在部屬明細頁）
         if let link = task.equipmentLink {
@@ -1225,7 +1158,12 @@ struct SubordinateOverviewView: View {
     }
 
     /// 人員膠囊（可點＝以這個人篩選，點第二次取消）
-    private func personItemChip(_ sub: Subordinate, tint: Color = .secondary) -> ItemChip {
+    /// [v25.588 部屬匯出] forExport：出圖用的同一顆膠囊——不能點、不帶「只看」的加深與 ✕（那是畫面上的狀態）
+    private func personItemChip(_ sub: Subordinate, tint: Color = .secondary,
+                                forExport: Bool = false) -> ItemChip {
+        if forExport {
+            return ItemChip(id: "person", text: sub.name.isEmpty ? "未命名" : sub.name, color: tint)
+        }
         let active = filterPersonId == sub.id
         return ItemChip(id: "person", text: sub.name.isEmpty ? "未命名" : sub.name,
                         color: active ? .indigo : tint,
@@ -1239,9 +1177,15 @@ struct SubordinateOverviewView: View {
 
     // MARK: - 英雄摘要卡
 
+    /// [v25.588 部屬匯出] 出圖多兩個有預設值的參數（畫面上的呼叫一個字不改）：
+    /// dayWord＝KPI 標籤的「今日／當日」（匯出的那天不是今天就寫「當日」）；peopleCount＝「共 N 人」（nil＝全部部屬，照舊）。
+    /// forExport 時不加外層水平內距：出圖模組（PagedImageExporter／SubExportSinglePage）自己會加 20。
     private func summaryHeroCard(leaveCnt: Int, meetCnt: Int, taskCnt: Int,
-                                 forExport: Bool = false) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
+                                 forExport: Bool = false, dayWord: String = "今日",
+                                 peopleCount: Int? = nil) -> some View {
+        let people: Int = peopleCount ?? lifeStore.subordinates.count
+        let outerPadding: CGFloat? = forExport ? 0 : nil
+        return VStack(alignment: .leading, spacing: 12) {
             // 標題列
             HStack(spacing: 8) {
                 ZStack {
@@ -1288,7 +1232,7 @@ struct SubordinateOverviewView: View {
                     }
                     .buttonStyle(.plain)
                 }
-                Text("共 \(lifeStore.subordinates.count) 人")
+                Text("共 \(people) 人")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.white.opacity(0.88))
                     .padding(.horizontal, 10).padding(.vertical, 4)
@@ -1302,10 +1246,10 @@ struct SubordinateOverviewView: View {
                 .frame(height: 0.5)
 
             HStack(spacing: 0) {
-                HeroKpiCell(label: "今日請假", value: "\(leaveCnt)",
+                HeroKpiCell(label: "\(dayWord)請假", value: "\(leaveCnt)",
                             icon: "calendar.badge.minus")
                 HeroKpiDivider()
-                HeroKpiCell(label: "今日會議", value: "\(meetCnt)",
+                HeroKpiCell(label: "\(dayWord)會議", value: "\(meetCnt)",
                             icon: "person.3.fill")
                 HeroKpiDivider()
                 HeroKpiCell(label: "待辦任務", value: "\(taskCnt)",
@@ -1315,7 +1259,7 @@ struct SubordinateOverviewView: View {
         .padding(16)
         .frame(maxWidth: .infinity)
         .heroCardShell(card: .subordinateOverview)
-        .padding(.horizontal)
+        .padding(.horizontal, outerPadding)
     }
 
 
@@ -1411,9 +1355,6 @@ struct SubordinateOverviewView: View {
         Self.fmtDateTimeFormatter.string(from: date)
     }
 }
-
-/// 文字匯出分享項目的 Identifiable 包裝（供 .sheet(item:) 使用）
-private struct OverviewSharePayload: Identifiable { let id = UUID(); let items: [Any] }
 
 // MARK: - 生日名單視窗（看板蛋糕鈕）
 
