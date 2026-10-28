@@ -1153,18 +1153,9 @@ struct SubordinateDetailView: View {
                                         .strikethrough(r.isCompleted, color: .secondary)
                                         .foregroundStyle(r.isCompleted ? .secondary : .primary)
                                 }
-                                // [v25.590 轉組織 v1a-1] 日期膠囊旁邊多「交接自 王小明」「交接時已逾期」（judge §4.6；字在
-                                // OrgMoveCardData.chips 組好，沒有就不佔位）。要退回這一件：拿掉外層 HStack 與 OrgMoveHandoverChipRow 那一行
-                                HStack(spacing: 6) {
-                                    HStack(spacing: 3) {
-                                        Image(systemName: "calendar").font(.system(size: 8))
-                                        Text(formatDate(r.date))
-                                    }
-                                    .font(.caption2.weight(.medium)).foregroundStyle(.secondary)
-                                    .padding(.horizontal, 6).padding(.vertical, 2)
-                                    .background(Color(.tertiarySystemFill)).clipShape(Capsule())
-                                    OrgMoveHandoverChipRow(chips: reportHandoverChips(r))
-                                }
+                                // [v25.590 轉組織 v1a-1] 日期膠囊旁邊多「交接自 王小明」「交接時已逾期」（judge §4.6；
+                                // 拆到 reportDateRow，body 只留一個呼叫）。要退回這一件：這一行換回原本的日期膠囊
+                                reportDateRow(r)
                                 if !r.note.isEmpty {
                                     Text(r.note).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                                 }
@@ -1195,6 +1186,21 @@ struct SubordinateDetailView: View {
     /// 週報列的「交接自」膠囊（字在 body 外組好；本檔有型別檢查逾時的前科）
     private func reportHandoverChips(_ r: WeeklyReport) -> [ItemChip] {
         OrgMoveCardData.chips(itemId: r.id, holderId: subordinateId)
+    }
+
+    /// 週報列的日期膠囊＋「交接自」膠囊（原本日期膠囊寫在 weeklyReportSection 的 body 裡；
+    /// 拆出來讓那一大串 ForEach 少一層，沒有交接就跟以前一模一樣）
+    private func reportDateRow(_ r: WeeklyReport) -> some View {
+        HStack(spacing: 6) {
+            HStack(spacing: 3) {
+                Image(systemName: "calendar").font(.system(size: 8))
+                Text(formatDate(r.date))
+            }
+            .font(.caption2.weight(.medium)).foregroundStyle(.secondary)
+            .padding(.horizontal, 6).padding(.vertical, 2)
+            .background(Color(.tertiarySystemFill)).clipShape(Capsule())
+            OrgMoveHandoverChipRow(chips: reportHandoverChips(r))
+        }
     }
 
     /// 打開交接單頁（看交接單不用訂閱，judge §6）

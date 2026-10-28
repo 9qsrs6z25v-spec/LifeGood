@@ -550,6 +550,10 @@ enum OrgMoveIndex {
         let closed: Bool
         /// 這張單還有沒分好的待分派
         let hasPending: Bool
+        /// [v25.590 轉組織 v1a-1 驗證] 這張單上還沒分好的待分派機台 id：receivedChip 照機台現在的負責人再對一次
+        ///（在機台編輯頁直接換過負責人＝算分好，交接完成日過了照樣收；judge §4.9、第 5／10 題）。
+        /// 要退回這一件：刪這個欄位、rebuild 裡的 pendingEq、receivedChip 改回 `|| r.hasPending`
+        let pendingEquipmentIds: [UUID]
     }
 
     /// 任務／週報／機台 id → 最新一張交出它的那一列（接力：王小明 → 陳怡君 → 林志豪，用最新那張）
@@ -558,6 +562,24 @@ enum OrgMoveIndex {
     static var pendingEquipment: [UUID: [UUID: Date]] = [:]
     /// 〔不要了〕的任務、週報 id（合併匯入舊備份時不補回來）
     static var droppedItemIds: Set<UUID> = []
+    /// [v25.590 轉組織 v1a-1 驗證] 機台 id → 現在的負責人（LifeStore.equipmentPool 一改就設；預設空的）。
+    /// 「還有沒有待分派」照機台現在的負責人算（judge §4.9、第 5 題：在機台編輯頁直接換過＝算分好），
+    /// 不然直接換過負責人的那張單，提示列、「交接自」膠囊、接手那一區過了交接完成日也一直不收。
+    static var equipmentOwners: [UUID: UUID] = [:]
+
+    /// LifeStore.equipmentPool 的 didSet 呼叫（只記有負責人的）
+    static func setEquipmentOwners(_ pool: [ManagedEquipment]) {
+        var out: [UUID: UUID] = [:]
+        for e in pool {
+            if let o = e.ownerId { out[e.id] = o }
+        }
+        equipmentOwners = out
+    }
+
+    /// 單上還沒分好的待分派機台裡，還有一台現在是原人負責（＝真的還在待分派）
+    static func stillPending(_ equipmentIds: [UUID], personId: UUID) -> Bool {
+        equipmentIds.contains { equipmentOwners[$0] == personId }
+    }
 
     static func rebuild(_ book: OrgMoveBook) {
         var received: [UUID: Received] = [:]
@@ -568,6 +590,11 @@ enum OrgMoveIndex {
             let byKey = m.handoverByKey ?? m.effectiveKey
             let hasPending = m.allLines.contains { l in
                 l.action == OrgMoveAction.pending.rawValue && l.state == OrgMoveLineState.done.rawValue
+            }
+            var pendingEq: [UUID] = []
+            for l in m.allLines where l.kind == OrgMoveLineKind.equipment.rawValue
+                && l.action == OrgMoveAction.pending.rawValue && l.state == OrgMoveLineState.done.rawValue {
+                if let r = l.refId { pendingEq.append(r) }
             }
             for l in m.allLines {
                 if l.state == OrgMoveLineState.undone.rawValue { continue }
@@ -588,7 +615,8 @@ enum OrgMoveIndex {
                 let r = Received(moveId: m.id, lineId: l.id, fromId: m.personId, fromName: m.personName,
                                  toId: to, handedAt: at, dueKey: l.dueKey, wasOverdue: l.wasOverdue == true,
                                  memo: (l.memo ?? "").trimmingCharacters(in: .whitespacesAndNewlines),
-                                 handoverByKey: byKey, closed: m.isClosed, hasPending: hasPending)
+                                 handoverByKey: byKey, closed: m.isClosed, hasPending: hasPending,
+                                 pendingEquipmentIds: pendingEq)
                 if let old = received[ref], old.handedAt > at { continue }
                 received[ref] = r
             }
@@ -600,9 +628,11 @@ enum OrgMoveIndex {
 
     /// 還在顯示期間的「交接自」（膠囊、提示列）：沒按〔交接完成〕、而且還沒過交接完成日或還有待分派。
     /// todayKey：手機當地的今天「2026-11-02」
+    /// [v25.590 轉組織 v1a-1 驗證]「還有待分派」照機台現在的負責人算（同 OrgMovePlan.isOpen、pendingRows）
     static func receivedChip(_ itemId: UUID, holderId: UUID, todayKey: String) -> Received? {
         guard let r = receivedByItem[itemId], r.toId == holderId, !r.closed else { return nil }
-        guard todayKey <= r.handoverByKey || r.hasPending else { return nil }
+        let pending = r.hasPending && stillPending(r.pendingEquipmentIds, personId: r.fromId)
+        guard todayKey <= r.handoverByKey || pending else { return nil }
         return r
     }
 }

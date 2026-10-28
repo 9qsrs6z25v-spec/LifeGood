@@ -1908,7 +1908,8 @@ private struct XSheetMiniCell: View {
 
 /// 執掌（執掌設備、PM／警報時間軸）＋卡片上沒有的（排班）
 /// [v25.590 轉組織 v1a-1] 這位同仁有從交接單收到的機台，時間軸底下多一列〔只列接手之後〕（預設開；
-/// 執掌設備的件數也跟著切）。要退回這一件：刪掉 handoverRow 那三行與兩個 computed var，caption 改回原句。
+/// 執掌設備的件數也跟著切）。要退回這一件：刪掉 `if hasReceivedEquipment { … }` 那一段、hasReceivedEquipment／
+/// handoverCaption／handoverEnabled 三個 computed var 與底下的 XSheetHandoverRow，timelineCaption 改回原句。
 private struct XSheetDutyCard: View {
     @Binding var options: SubExportOptions
     let model: SubExportModel

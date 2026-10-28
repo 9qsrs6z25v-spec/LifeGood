@@ -169,8 +169,8 @@ struct OrgMoveSheetView: View {
             Text(t.sub)
                 .font(.caption2)
                 .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .minimumScaleFactor(0.7)
+                .lineLimit(2)
+                .minimumScaleFactor(0.8)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(8)
@@ -209,7 +209,9 @@ struct OrgMoveSheetView: View {
                 }
             }
         }
-        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .background(Color(.secondarySystemGroupedBackground))
+        // 每一列自己有底色（長按浮起來時不透明）：整張裁成圓角，最後一列的方角才不會蓋掉卡片下緣的圓角
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 
     private func groupHeader(_ g: OMSheetGroupData) -> some View {
@@ -241,7 +243,7 @@ struct OrgMoveSheetView: View {
         }
     }
 
-    /// 長按〔改交給…〕（要訂閱）〔拿回來〕；鎖住的、組織的、還沒分好的待分派、已復原的不給
+    /// 長按〔改交給…〕（要訂閱）〔拿回來〕；鎖住的（含跟著機台的警報任務）、組織的、還沒分好的待分派、已復原的不給
     @ViewBuilder
     private func rowWithMenu(_ r: OMSheetRow) -> some View {
         if r.canReassign || r.canTakeBack {
@@ -552,8 +554,9 @@ struct OrgMoveSheetView: View {
     }
 
     /// 長按〔拿回來〕：先問「把「E-03 腔體漏率改善」拿回王小明身上？」
+    /// 機台那一列連它底下的警報任務列一起退（LifeStore 退機台時警報任務本來就一起回；列不一起退會變成 ⚠〔再交一次〕）
     private func askTakeBack(_ r: OMSheetRow) {
-        let a = OMSheetAsk(kind: .takeBack(r.id), title: "把「\(r.title)」拿回\(r.personName)身上？",
+        let a = OMSheetAsk(kind: .takeBack(r.takeBackIds), title: "把「\(r.title)」拿回\(r.personName)身上？",
                            message: Self.takeBackMessage(r), confirm: "拿回來", destructive: false)
         present(a)
     }
@@ -565,7 +568,9 @@ struct OrgMoveSheetView: View {
         if r.line.kind == OrgMoveLineKind.report.rawValue {
             return "還沒交的才會搬回\(r.personName)身上。"
         }
-        return "還沒做完的才會搬回\(r.personName)身上；截止日還是交接時給的，會改回原本的。"
+        let head = "還沒做完的才會搬回\(r.personName)身上"
+        guard r.line.wasOverdue == true, let nd = r.line.newDueKey, let od = r.line.dueKey else { return head + "。" }
+        return head + "；截止日如果還是交接時給的 \(OrgMovePlan.shortDay(nd))，會改回原本的 \(OrgMovePlan.shortDay(od))。"
     }
 
     /// 〔復原這次轉組織（到 11/9）〕：確認字照 undoPreview（按下去那一刻用最新資料算）
@@ -593,8 +598,8 @@ struct OrgMoveSheetView: View {
         switch a.kind {
         case .share(let rid):
             DispatchQueue.main.async { openShare(receiverId: rid) }
-        case .takeBack(let lineId):
-            DispatchQueue.main.async { store.undoOrgMove(id, lineIds: Set([lineId])) }
+        case .takeBack(let lineIds):
+            DispatchQueue.main.async { store.undoOrgMove(id, lineIds: lineIds) }
         case .undo:
             DispatchQueue.main.async { store.undoOrgMove(id) }
         }
@@ -781,6 +786,8 @@ private struct OMSheetRow: Identifiable {
     let holderId: UUID?
     let canReassign: Bool
     let canTakeBack: Bool
+    /// 〔拿回來〕要退的列（這一列；機台多它底下的警報任務列）
+    let takeBackIds: Set<UUID>
     var id: UUID { line.id }
 }
 
@@ -814,7 +821,8 @@ private struct OMSheetSnapshot {
 private struct OMSheetAsk {
     enum Kind {
         case share(UUID?)
-        case takeBack(UUID)
+        /// 〔拿回來〕那幾列（一般就一列；機台＋它底下的警報任務列）
+        case takeBack(Set<UUID>)
         case undo
     }
     let kind: Kind
@@ -874,14 +882,15 @@ private enum OMSheetBuild {
                               title: OrgMovePlan.orgLineText(line, move: move, world: world),
                               mark: "", statusText: undone ? "已復原" : "", tone: .gray, memo: "",
                               fix: nil, fixLabel: "", indent: false, preview: nil, holderId: nil,
-                              canReassign: false, canTakeBack: false)
+                              canReassign: false, canTakeBack: false, takeBackIds: [])
         }
         let st = OrgMovePlan.status(line, in: move, map: map, now: now)
         let rawTitle = line.title.trimmingCharacters(in: .whitespacesAndNewlines)
         let memo = (line.memo ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         let isAlarm = line.kind == OrgMoveLineKind.alarmTask.rawValue
         let indent = isAlarm && line.parentId.map { eqIds.contains($0) } == true
-        let live = !move.isUndone && line.state != OrgMoveLineState.undone.rawValue
+        // 鎖住的列（缺失、兼任、過了報告日的週報、跟著機台的警報任務）整列不給長按：警報任務跟著機台，改機台那一列
+        let live = !move.isUndone && line.state != OrgMoveLineState.undone.rawValue && !line.isLocked
         let reassign = live && canReassign(line, status: st, map: map, now: now)
         let takeBack = live && (st.kind == .open || st.kind == .handed)
         return OMSheetRow(line: line, personId: move.personId, personName: person,
@@ -889,7 +898,20 @@ private enum OMSheetBuild {
                           mark: st.mark, statusText: st.text, tone: OMSheetTone.of(mark: st.mark), memo: memo,
                           fix: st.fix, fixLabel: st.fixLabel ?? "", indent: indent,
                           preview: previewRef(line, holder: st.holderId, map: map), holderId: st.holderId,
-                          canReassign: reassign, canTakeBack: takeBack)
+                          canReassign: reassign, canTakeBack: takeBack,
+                          takeBackIds: takeBack ? takeBackIds(line, move: move) : [])
+    }
+
+    /// 〔拿回來〕要退的列：機台那一列連它底下還沒退的警報任務列（LifeStore 退機台時把接手的人身上這台的警報任務一起搬回，
+    /// 同一個批次裡警報任務列看到「已經回到原人身上」就記成已復原）
+    static func takeBackIds(_ line: OrgMoveLine, move: OrgMove) -> Set<UUID> {
+        var ids: Set<UUID> = [line.id]
+        guard line.kind == OrgMoveLineKind.equipment.rawValue, let eid = line.refId else { return ids }
+        for x in move.allLines where x.kind == OrgMoveLineKind.alarmTask.rawValue && x.parentId == eid
+            && x.state != OrgMoveLineState.undone.rawValue {
+            ids.insert(x.id)
+        }
+        return ids
     }
 
     /// 任務（含警報、兼任那一筆）、週報：現在持有人身上的那一份
@@ -908,18 +930,13 @@ private enum OMSheetBuild {
         }
     }
 
-    /// 長按〔改交給…〕：任務、警報任務、週報、機台；缺失、兼任、過了報告日的週報（鎖住的）、組織的、還沒分好的待分派不給
-    ///（LifeStore.reassignOrgMoveLine 也擋同一批；週報過了報告日、做完了它不搬，這裡先不給按）
+    /// 長按〔改交給…〕：任務、週報、機台；鎖住的（缺失、兼任、過了報告日的週報、跟著機台的警報任務）、組織的、
+    /// 還沒分好的待分派不給（警報任務跟著機台：改機台那一列，警報任務一起過去）
+    ///（LifeStore.reassignOrgMoveLine 也擋缺失、兼任、組織；週報過了報告日、做完了它不搬，這裡先不給按）
     static func canReassign(_ line: OrgMoveLine, status: OrgMoveLineStatus, map: OrgMoveHolderMap, now: Date) -> Bool {
-        guard reassignKinds.contains(status.kind) else { return false }
-        switch line.lineLock {
-        case .some(.dereliction), .some(.sideRole), .some(.pastDue):
-            return false
-        default:
-            break
-        }
+        guard reassignKinds.contains(status.kind), !line.isLocked else { return false }
         switch line.lineKind {
-        case .some(.task), .some(.alarmTask), .some(.equipment):
+        case .some(.task), .some(.equipment):
             return true
         case .some(.report):
             guard let rid = line.refId, let h = status.holderId,

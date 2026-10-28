@@ -59,7 +59,9 @@ class LifeStore: ObservableObject {
     @Published var familyTasks: [FamilyTask] = [] { didSet { if !isLoading { save() } } }
     /// 機台池：全公司的設備（機台）共用清單。機台屬於部門（departmentId）、
     /// 由部屬擔任負責人（ownerId）；PM／警報等生老病死記錄跟著機台，換負責人不搬記錄。
-    @Published var equipmentPool: [ManagedEquipment] = [] { didSet { if !isLoading { save() } } }
+    /// [v25.590 轉組織 v1a-1 驗證] 一改就重設 OrgMoveIndex.equipmentOwners（「還有沒有待分派」照機台現在的負責人算）。
+    /// 要退回這一件：didSet 拿掉 `OrgMoveIndex.setEquipmentOwners(equipmentPool); `
+    @Published var equipmentPool: [ManagedEquipment] = [] { didSet { OrgMoveIndex.setEquipmentOwners(equipmentPool); if !isLoading { save() } } }
 
     /// [v25.553] 只放記憶體的遞增數字：workouts、workoutPrefs、healthProfile 一改就加一（不存檔、不發通知；
     /// 那三個本身是 @Published，畫面會重畫，重畫時讀到新的數字，.task(id:) 才重算一次）
@@ -4113,9 +4115,21 @@ class LifeStore: ObservableObject {
     private func carryAlarmTasksBody(equipmentId: UUID, from: UUID, to: UUID, now: Date) {
         guard from != to, let fi = subordinates.firstIndex(where: { $0.id == from }) else { return }
         let open = subordinates[fi].tasks.filter { !$0.isCompleted && $0.equipmentLink?.equipmentId == equipmentId }
+        // [v25.590 轉組織 v1a-1 驗證] 交接單上這台還待分派（在機台編輯頁直接換負責人＝算分好，judge §4.9、第 5 題）：
+        // 交接之後才到期、已經逾期的警報任務不算原人——截止先改成今天＋3 天再搬、不記扣分（同 resolvePendingTaskBody）。
+        // 要退回這一件：刪 pendingSince 與 if 裡那一段，改回 `newDue = OrgHandoffRules.newDueForAlarm(originalDue: d, now: now)`
+        let pendingSince: Date? = OrgMoveIndex.pendingEquipment[from]?[equipmentId]
         for t in open {
             var newDue: Date?
-            if let d = t.dueDate, d < now { newDue = OrgHandoffRules.newDueForAlarm(originalDue: d, now: now) }
+            if let d = t.dueDate, d < now {
+                let fixed = OrgHandoffRules.newDueForAlarm(originalDue: d, now: now)
+                if let since = pendingSince, d >= since,
+                   let ti = subordinates[fi].tasks.firstIndex(where: { $0.id == t.id }) {
+                    subordinates[fi].tasks[ti].dueDate = fixed
+                } else {
+                    newDue = fixed
+                }
+            }
             moveTaskBody(t.id, from: from, to: to, newDue: newDue, overdueDue: nil, via: "equipment", now: now)
         }
     }
@@ -4705,20 +4719,31 @@ class LifeStore: ObservableObject {
                     && x.state == OrgMoveLineState.done.rawValue {
                     guard let rid = x.refId else { continue }
                     var moved = false
+                    // [v25.590 轉組織 v1a-1 驗證] 交接那一刻就已逾期的（扣分留原人）：單上照樣記「交接時已逾期」＋新的截止，
+                    // 膠囊、預覽「（原訂 10/20）」、交接單那一列、復原改回原本的截止才對得上（同 applyOrgMove 交出去的那件）。
+                    // 要退回這一件：刪 lateAtHandover、newDue 與 updateLine 裡的 if lateAtHandover 那一段
+                    var lateAtHandover = false
                     if x.kind == OrgMoveLineKind.report.rawValue {
                         let r = subordinates.first(where: { $0.id == pid })?.weeklyReports.first(where: { $0.id == rid })
                         if let r, !r.isCompleted, r.date >= now { moved = moveReportBody(rid, from: pid, to: to) }
                     } else {
+                        let before = subordinates.first(where: { $0.id == pid })?.tasks.first(where: { $0.id == rid })
+                        if let d = before?.dueDate, d < now, d < handed { lateAtHandover = true }
                         moved = resolvePendingTaskBody(rid, from: pid, to: to, handed: handed,
                                                        alarm: x.kind == OrgMoveLineKind.alarmTask.rawValue, now: now)
                     }
                     if moved {
+                        let newDue: Date? = subordinates.first(where: { $0.id == to })?.tasks.first(where: { $0.id == rid })?.dueDate
                         move.updateLine(x.id) { y in
                             y.toId = to
                             y.toName = toName
                             y.state = OrgMoveLineState.resolved.rawValue
                             y.resolvedAt = now
                             y.updatedAt = now
+                            if lateAtHandover {
+                                y.wasOverdue = true
+                                if let d = newDue { y.newDueKey = OrgMovePlan.dayKey(d) }
+                            }
                         }
                     }
                 }

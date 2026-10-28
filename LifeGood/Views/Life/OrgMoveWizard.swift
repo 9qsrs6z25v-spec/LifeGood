@@ -181,13 +181,22 @@ private struct OrgMoveStepWhere: View {
     @State private var orgPick: OrgMoveWizOrgPick?
 
     var body: some View {
-        whereBody(OrgMoveWorld(store: lifeStore))
+        whereBody(world)
             .sheet(item: $orgPick) { r in
                 OrgMoveWizOrgPicker(request: r, excluding: draft.personId) { id, name in
                     applyOrgPick(r.purpose, id: id, name: name)
                 }
                 .appStores()
             }
+    }
+
+    /// 這一畫面用的那一份資料（body 外抽一次）
+    private var world: OrgMoveWorld { OrgMoveWorld(store: lifeStore) }
+
+    /// 這位同仁現在的廠區（自動帶的廠區要退回時用）
+    private var currentPlant: String {
+        (lifeStore.subordinates.first(where: { $0.id == draft.personId })?.plantArea ?? draft.toPlant)
+            .trimmingCharacters(in: .whitespaces)
     }
 
     private func whereBody(_ w: OrgMoveWorld) -> some View {
@@ -317,27 +326,36 @@ private struct OrgMoveStepWhere: View {
         id == w.sub(draft.personId)?.departmentId ? label + "（現在）" : label
     }
 
+    /// [v25.590 轉組織 v1a-1 審查] 你沒點過廠區：選了別的部門時自動帶的廠區退回現在的（不然〔照舊（只交接）〕會悄悄換廠區）。
+    /// 要退回這一件：拿掉 `if !touched { d.toPlant = current }` 那一行。
     private func chooseKeepDept() {
+        let touched = plantTouched
+        let current = currentPlant
         update { d in
             d.keepDept = true
             d.toDeptId = nil
             d.toManagerId = nil
             d.addToNewDeptManagers = false
+            if !touched { d.toPlant = current }
         }
     }
 
-    /// 選了新部門：新主管帶那個部門的第一位管理人員；你沒點過廠區就帶那個部門最多人在的廠
+    /// 選了新部門：新主管帶那個部門的第一位管理人員（不會是這位同仁自己）；你沒點過廠區就帶那個部門最多人在的廠，
+    /// 那個部門沒人可參考就退回現在的廠區（不留上一個部門帶的）。
+    /// [v25.590 轉組織 v1a-1 審查] 要退回這一件：toManagerId 改回 `manager`、toPlant 改回 `if !touched, let h = hint { d.toPlant = h.plant }`。
     private func chooseDept(_ id: UUID, world w: OrgMoveWorld) {
-        let manager = OrgMovePlan.suggestedManager(deptId: id, world: w)
+        let suggested = OrgMovePlan.suggestedManager(deptId: id, world: w)
+        let own = w.orgPerson(linkedTo: draft.personId)?.id
+        let manager: UUID? = (suggested == own) ? nil : suggested
         let hint = OrgMovePlan.plantHint(deptId: id, excluding: draft.personId, world: w)
         let touched = plantTouched
+        let current = currentPlant
         update { d in
             d.keepDept = false
             d.toDeptId = id
             d.toManagerId = manager
-            if !touched, let h = hint { d.toPlant = h.plant }
+            if !touched { d.toPlant = hint?.plant ?? current }
         }
-        if !touched, hint != nil { otherPlantOpen = false }
     }
 
     // MARK: 新主管（任何組織人員或空白；只記在單上）
@@ -581,7 +599,7 @@ private struct OrgMoveStepList: View {
     @State private var showMemo = false
 
     var body: some View {
-        listBody(OrgMoveWizListModel.make(draft, world: OrgMoveWorld(store: lifeStore), now: Date()))
+        listBody(listModel)
             .sheet(item: $pick) { r in
                 OrgMovePersonPicker(request: r) { id, _ in applyPick(r.purpose, id: id) }
                     .appStores()
@@ -601,6 +619,11 @@ private struct OrgMoveStepList: View {
             } message: {
                 Text("寫在交接單上；分享給接手的人時會一起帶。不會出現在通知、小工具。")
             }
+    }
+
+    /// 第 ② 步每一列的字（body 外算一次；OrgMoveWorld 只抽一份）
+    private var listModel: OrgMoveWizListModel {
+        OrgMoveWizListModel.make(draft, world: OrgMoveWorld(store: lifeStore), now: Date())
     }
 
     private func listBody(_ m: OrgMoveWizListModel) -> some View {
@@ -1222,7 +1245,12 @@ private struct OrgMoveStepConfirm: View {
     @EnvironmentObject var lifeStore: LifeStore
 
     var body: some View {
-        confirmBody(OrgMovePlan.preview(draft, world: OrgMoveWorld(store: lifeStore), now: Date()))
+        confirmBody(previewModel)
+    }
+
+    /// 第 ③ 步的句子（OrgMovePlan.preview 組好；brief G1-4：算在 computed var，不在 body 裡）
+    private var previewModel: OrgMovePreview {
+        OrgMovePlan.preview(draft, world: OrgMoveWorld(store: lifeStore), now: Date())
     }
 
     private func confirmBody(_ p: OrgMovePreview) -> some View {
@@ -1300,11 +1328,14 @@ private struct OrgMoveStepConfirm: View {
         .padding(.top, 4)
     }
 
+    /// 包一層 VStack：OrgMoveWizLines 是 ForEach，padding 直接掛上去會每一行各墊一次
     private func listCard(title: String, lines: [String]) -> some View {
         OrgMoveWizSection(title: title) {
-            OrgMoveWizLines(lines: lines, color: .secondary)
-                .padding(.horizontal, 14)
-                .padding(.bottom, 12)
+            VStack(alignment: .leading, spacing: 4) {
+                OrgMoveWizLines(lines: lines, color: .secondary)
+            }
+            .padding(.horizontal, 14)
+            .padding(.bottom, 12)
         }
     }
 
@@ -1353,7 +1384,7 @@ private struct OrgMoveDoneView: View {
     @State private var sheetRequest: OrgMoveSheetRequest?
 
     var body: some View {
-        doneBody(OrgMoveWizDoneModel.make(moveId: moveId, store: lifeStore))
+        doneBody(doneModel)
             .alert(shareAsk?.title ?? "要分享交接單嗎？", isPresented: $showShareAsk, presenting: shareAsk) { ask in
                 Button("分享") { share(ask) }
                 Button("取消", role: .cancel) {}
@@ -1368,6 +1399,11 @@ private struct OrgMoveDoneView: View {
                 OrgMoveSheetView(moveId: r.moveId)
                     .appStores()
             }
+    }
+
+    /// 完成畫面的字（body 外算一次；OrgMoveHolderMap 不在這裡建，按〔分享給…〕才建）
+    private var doneModel: OrgMoveWizDoneModel {
+        OrgMoveWizDoneModel.make(moveId: moveId, store: lifeStore)
     }
 
     private func doneBody(_ m: OrgMoveWizDoneModel) -> some View {

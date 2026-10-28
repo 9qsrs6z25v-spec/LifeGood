@@ -13,6 +13,10 @@ import SwiftUI
 //
 // 日子一律用西曆（gregorian）的 DateComponents 算、組字（修 B9：手機設民國曆時不再寫成 115 年），不用 DateFormatter。
 // 寫給使用者的字不用人稱代名詞，用名字或「這位同仁」。
+//
+// [v25.590 轉組織 v1a-1] 照 design.md §5.2 補四件：「升職歷程」→「歷程」、歷程多轉組織那列、任務／報告「｜交接自 王小明」
+//（「｜交接時已逾期」跟〔逾期、準時與自訂分〕同一個開關）、時間軸〔只列接手之後〕。交接資料只在 make 讀 OrgMoveIndex／
+// OrgMovePlan.historyRows（主控寫好、凍結）；交接備註、調動原因、你的備註都不進匯出。對照模擬：build/v1a-1/g4/sim_export_v1a1.py。
 
 // MARK: - 共用小型別
 
@@ -552,6 +556,14 @@ struct SubExportSnapshot {
             if let r = OrgMoveIndex.receivedChip(rep.id, holderId: subordinateId, todayKey: todayKey) {
                 snap.handovers[rep.id] = HandoverMark(fromName: handoverName(r.fromName), wasOverdue: r.wasOverdue)
             }
+        }
+        // 「交接自」寫的是交接單上的名字快照：交出來的那位後來刪掉、改名了，名字照樣寫出去，
+        // 提醒「也會寫出…」也要點到（design §5.2；knownNames 只有現在的部屬、組織人員、名片）
+        for mark in snap.handovers.values {
+            let n = mark.fromName
+            guard n.count >= 2, n != "這位同仁", !seenNames.contains(n) else { continue }
+            seenNames.insert(n)
+            snap.knownNames.append(n)
         }
         for eq in mine {
             if let r = OrgMoveIndex.receivedByItem[eq.id], r.toId == subordinateId {

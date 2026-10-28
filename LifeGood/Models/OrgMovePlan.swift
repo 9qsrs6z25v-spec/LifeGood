@@ -361,7 +361,16 @@ enum OrgMovePlan {
 
     // MARK: 日子（都用手機當地的日子；存字串「2026-11-01」，同定期轉帳）
 
-    static var calendar: Calendar { Calendar.current }
+    /// [v25.590 轉組織 v1a-1 驗證] 一律西曆（同定期轉帳 WealthCal）：手機設民國曆時 Calendar.current 的年是 115，
+    /// 存進同步鍵的「2026-11-01」會變成「0115-11-01」，另一台設西曆的比不起來（交接完成日、復原期限、膠囊收起都算錯），
+    /// 歷程也會寫成「115/11/1 轉組織」。時區照手機（autoupdatingCurrent）。
+    /// 要退回這一件：改回 `static var calendar: Calendar { Calendar.current }`（ballotLines 那一行可以留著）。
+    static let calendar: Calendar = {
+        var c = Calendar(identifier: .gregorian)
+        c.locale = Locale(identifier: "zh_TW")
+        c.timeZone = TimeZone.autoupdatingCurrent
+        return c
+    }()
 
     static func dayKey(_ d: Date) -> String {
         OrgHandoffRules.dayKey(d, calendar: calendar)
@@ -456,7 +465,10 @@ enum OrgMovePlan {
     static func isOpen(_ m: OrgMove, todayKey: String) -> Bool {
         guard m.wasApplied, !m.isUndone, !m.isClosed, m.deletedAt == nil else { return false }
         if todayKey <= (m.handoverByKey ?? m.effectiveKey) { return true }
-        return pendingLineIds(m).isEmpty == false
+        // [v25.590 轉組織 v1a-1 驗證]「還有待分派」照機台現在的負責人算（同 pendingRows、tiles）：在機台編輯頁直接換過負責人
+        // ＝算分好，交接完成日過了就收（judge §4.9、第 5／10 題）。要退回這一件：改回 `return pendingLineIds(m).isEmpty == false`
+        let pendingEq: [UUID] = pendingLineIds(m).compactMap { m.line($0)?.refId }
+        return OrgMoveIndex.stillPending(pendingEq, personId: m.personId)
     }
 
     // MARK: 第 ① 步
@@ -1189,7 +1201,8 @@ enum OrgMovePlan {
         let deptChanged = move.to.deptId != move.from.deptId
         let gradeChanged = move.to.gradeTitleId != move.from.gradeTitleId
         guard deptChanged || gradeChanged else { return [] }
-        let year = calendar.component(.year, from: now)
+        // 互評票的 year 是 PerformanceReviewView／LifeStore 用 Calendar.current 記的（民國曆的手機是 115）：這裡要跟它一樣
+        let year = Calendar.current.component(.year, from: now)
         let person = move.personName.isEmpty ? "這位同仁" : move.personName
         let open = world.ballots.filter { $0.year == year && !$0.isSubmitted }
         var out: [String] = []

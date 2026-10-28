@@ -436,7 +436,7 @@ private struct OrgMoveReceivedRowLabel: View {
     }
 }
 
-/// 左邊的狀態圖示（✓ 綠勾、○ 空圈、● 機台齒輪／實心圈、⚠ 橘三角、◌ 虛線圈）；顏色照種類（任務青、週報紫、機台綠藍）
+/// 左邊的狀態圖示（✓ 綠勾、○ 空圈、● 機台齒輪／實心圈、⚠ 橘三角、◌ 虛線圈、・ 灰減號圈）；顏色照種類（任務青、週報紫、機台綠藍）
 private struct OrgMoveMarkIcon: View {
     enum Kind { case task, report, equipment }
 
@@ -463,6 +463,8 @@ private struct OrgMoveMarkIcon: View {
         case "⚠": return "exclamationmark.triangle.fill"
         case "◌": return "circle.dashed"
         case "●": return kind == .equipment ? "gearshape.fill" : "circle.fill"
+        // 「・」＝現在在別人身上、找不到了、不要了…（灰色減號圈，跟「○ 還沒做」的空圈分得開）
+        case "・": return "minus.circle"
         default: return kind == .equipment ? "gearshape" : "circle"
         }
     }
