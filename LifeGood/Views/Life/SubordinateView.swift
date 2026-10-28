@@ -1205,11 +1205,13 @@ struct AddSubordinateView: View {
             item.jobTitle = linkedTitle
             changed = true
         }
-        if cur.departmentId != o.departmentId || cur.department != o.department {
-            item.departmentId = selectedDepartmentId
-            item.department = deptText
-            changed = true
-        }
+        // [v25.589 轉組織 v0b④] 部門改走 lifeStore.setDepartment（同組織頁那條路：字樣統一「代碼 — 名稱」、組織人員跟著
+        // 但「未選擇」不蓋成空的、自動產生的名片部門一起換）；這裡只記下有沒有改，其他欄位照舊 update。
+        // （要退回這一件：換回原本這四行
+        //   if cur.departmentId != o.departmentId || cur.department != o.department {
+        //       item.departmentId = selectedDepartmentId; item.department = deptText; changed = true }
+        //  ，拿掉下面 if deptEdited 那一行。）
+        let deptEdited = cur.departmentId != o.departmentId || cur.department != o.department
         if cur.note != o.note {
             item.note = note.trimmingCharacters(in: .whitespaces)
             changed = true
@@ -1219,6 +1221,9 @@ struct AddSubordinateView: View {
             changed = true
         }
         if changed { lifeStore.update(item) }
+        // [v25.589 轉組織 v0b④] 順序：先 update（別的欄位；這時 item 的部門還是 store 現在的，組織人員不會被改）、
+        // 再 setDepartment（倒過來的話 update 會用舊部門把剛換好的蓋回去）。兩次存檔，各自是完整的狀態。
+        if deptEdited { lifeStore.setDepartment(id, to: selectedDepartmentId, freeText: deptText) }
     }
 
     private func loadEditing() {

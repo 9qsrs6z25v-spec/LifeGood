@@ -142,6 +142,8 @@ struct UnifiedExport: Codable {
         var wealthVault: WealthVaultBook?
         /// [v25.575] 定期轉帳那一包（WealthTransferBook）。舊備份沒有，所以是 Optional；跟財富帳本一起走
         var wealthTransfers: WealthTransferBook?
+        /// [v25.589] 轉組織 v0b：交出去時已逾期的帳（OrgHandoffBook）。舊備份沒有，所以是 Optional；跟部屬一起走（完整備份、「職涯」）
+        var orgHandoffs: OrgHandoffBook?
     }
 
     static func build(expense: ExpenseStore, finance: FinanceStore, life: LifeStore,
@@ -217,7 +219,9 @@ struct UnifiedExport: Codable {
                 // [v25.568] 號碼密文跟財富帳本一起走（只有密文）
                 wealthVault: scope.carriesFinance ? life.wealthVault : nil,
                 // [v25.575] 定期轉帳跟財富帳本一起走
-                wealthTransfers: scope.carriesFinance ? life.wealthTransfers : nil
+                wealthTransfers: scope.carriesFinance ? life.wealthTransfers : nil,
+                // [v25.589] 轉組織 v0b：交出去時已逾期的帳跟部屬一起走（完整備份、「職涯」）
+                orgHandoffs: scope.carriesCareer ? life.orgHandoffs : nil
             ),
             scope: scope.rawValue
         )
@@ -980,6 +984,10 @@ enum UnifiedImporter {
                 if scope.carriesFinance, let wt = payload.life.wealthTransfers {
                     life.wealthTransfers = wt
                 }
+                // [v25.589] 轉組織 v0b：交出去時已逾期的帳：舊備份沒有（nil）就不動本機的
+                if scope.carriesCareer, let oh = payload.life.orgHandoffs {
+                    life.orgHandoffs = oh
+                }
             }
 
             result.expenses = payload.expense.expenses.count
@@ -1196,6 +1204,11 @@ enum UnifiedImporter {
                 if let wt = payload.life.wealthTransfers {
                     let merged = life.wealthTransfers.merged(with: wt)
                     if merged != life.wealthTransfers { life.wealthTransfers = merged }
+                }
+                // [v25.589] 轉組織 v0b：交出去時已逾期的帳：照 id 取聯集（一筆寫下去就不再改，兩邊一樣）
+                if let oh = payload.life.orgHandoffs {
+                    let merged = life.orgHandoffs.merged(with: oh)
+                    if merged != life.orgHandoffs { life.orgHandoffs = merged }
                 }
                 // 舊格式備份的機台上面 appendNewByID 進了部屬的 equipments——搬進機台池
                 life.migrateLegacyEquipmentsToPool()

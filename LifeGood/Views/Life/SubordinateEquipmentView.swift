@@ -531,6 +531,11 @@ struct EquipmentEditorSheet: View {
     @State private var system = ""
     @State private var departmentId: UUID?
     @State private var ownerId: UUID?
+    /// [v25.589 轉組織 v0b③] 打開那一刻表單上的負責人（onAppear 記下）。存檔時「負責人有沒有換」跟這個比，
+    /// 不跟 editing 比：機台詳情卡片傳的 editing 是 store 現撈的，開著的時候別處（另一台、執掌頁）換了負責人，
+    /// 卡片重畫會用新的那台重新 init 這一頁——拿 editing.ownerId 比會把「沒動」當成換人、存檔又換回原人
+    ///（同 MeetingEditorSheet／TaskEditorSheet 的 openedSubId，v0a §5-5①）。
+    @State private var openedOwnerId: UUID?
     @State private var pmRecords: [EquipmentPMRecord] = []
     @State private var alarms: [EquipmentAlarm] = []
     @State private var isSaving = false
@@ -640,7 +645,9 @@ struct EquipmentEditorSheet: View {
                 } header: {
                     editorSectionHeader("設備資訊", icon: "gearshape.2.fill", tint: .teal)
                 } footer: {
-                    Text("機台屬於部門；PM／警報等歷史記錄跟著機台，換負責人不會搬動記錄。")
+                    // [v25.589 轉組織 v0b③] 多一句：換負責人時還沒處理完的警報任務一起過去（save 的 assignEquipmentOwner）
+                    //（要退回這一件：刪掉後半句。）
+                    Text("機台屬於部門；PM／警報等歷史記錄跟著機台，換負責人不會搬動記錄。換負責人時，這台還沒處理完的警報任務會一起交給新的負責人。")
                 }
 
                 Section {
@@ -792,6 +799,7 @@ struct EquipmentEditorSheet: View {
                 if let e = editing {
                     name = e.name; note = e.note; system = e.system
                     departmentId = e.departmentId; ownerId = e.ownerId
+                    openedOwnerId = e.ownerId   // [v25.589 轉組織 v0b③] 存檔時跟這個比（見 openedOwnerId）
                     pmRecords = e.pmRecords.sorted { $0.date > $1.date }
                     alarms = e.alarms.sorted { $0.date > $1.date }
                 } else if let src = duplicating {
@@ -917,6 +925,16 @@ struct EquipmentEditorSheet: View {
         // 而且要從 store 現撈，不能用 editing 的快照：表單開著的時候，
         // 下方的關聯區塊可能已經改過關係了。
         let live = lifeStore.equipment(id: id)
+        // [v25.589 轉組織 v0b③] 負責人：既有機台先照 store 現在的寫（表單上沒換就不蓋掉別處剛換的負責人）；
+        // 表單上換了負責人（跟打開那一刻比，見 openedOwnerId），存完再走 assignEquipmentOwner
+        //（這台在原負責人身上還沒處理完的警報任務一起交給新的負責人；已逾期的扣分留原負責人、截止改今天＋3 天）。
+        // 新增、複製機台（editing == nil）照舊用表單的負責人，不帶任何任務。
+        // （要退回這一件：ownerId: keptOwnerId 換回 ownerId: ownerId，拿掉下面 if ownerEdited 那段，
+        //   createTasksForNewAlarms 換回 equipment: eq；再刪 ownerEdited、keptOwnerId 這兩行、ownerToKeep、
+        //   @State openedOwnerId 與 onAppear 記它的那一行。）
+        let ownerEdited = editing != nil && ownerId != openedOwnerId
+        let keptOwnerId = Self.ownerToKeep(isEditing: editing != nil, live: live,
+                                           formOwnerId: ownerId, openedOwnerId: openedOwnerId)
         let eq = ManagedEquipment(
             id: id,
             name: name.trimmingCharacters(in: .whitespaces),
@@ -924,7 +942,7 @@ struct EquipmentEditorSheet: View {
             pmRecords: pmRecords,
             alarms: alarms,
             departmentId: departmentId,
-            ownerId: ownerId,
+            ownerId: keptOwnerId,
             system: system.trimmingCharacters(in: .whitespaces),
             upstreamIds: live?.upstreamIds ?? [],
             downstreamIds: live?.downstreamIds ?? []
@@ -934,8 +952,23 @@ struct EquipmentEditorSheet: View {
         let newAlarms = alarms.filter { !previousAlarmIds.contains($0.id) }
         lifeStore.upsertEquipment(eq)
         copyRelations(to: id)
-        lifeStore.createTasksForNewAlarms(equipment: eq, newAlarms: newAlarms)
+        if ownerEdited {
+            lifeStore.assignEquipmentOwner(equipmentId: id, ownerId: ownerId, carryOpenAlarmTasks: true)
+        }
+        // [v25.589 轉組織 v0b③] 新警報掛給換過之後的負責人（store 現在那一台；查不到才用表單組的）
+        lifeStore.createTasksForNewAlarms(equipment: lifeStore.equipment(id: id) ?? eq, newAlarms: newAlarms)
         dismiss()
+    }
+
+    /// [v25.589 轉組織 v0b③] 存檔時先寫進機台的負責人（表單上換了負責人的話，存完再由 assignEquipmentOwner 換）。
+    /// • 新增、複製（不是編輯）：表單選的。
+    /// • 編輯、store 裡還有這台：store 現在的（開著的時候別處換了負責人，不被這次存檔蓋回去）。
+    /// • 編輯、開著的時候這台被刪了（存檔會把它加回來）：打開那一刻的。
+    private static func ownerToKeep(isEditing: Bool, live: ManagedEquipment?,
+                                    formOwnerId: UUID?, openedOwnerId: UUID?) -> UUID? {
+        guard isEditing else { return formOwnerId }
+        if let live { return live.ownerId }
+        return openedOwnerId
     }
 
     /// [v25.390] 複製模式：把來源機台的上下游關係也複製一份到新機台上。
@@ -1044,7 +1077,10 @@ struct EquipmentClaimPicker: View {
         let mine = eq.ownerId == subordinateId
         return Button {
             // 點選接手／釋回：立即寫回（只改負責人欄位，機台記錄不動）
-            lifeStore.assignEquipmentOwner(equipmentId: eq.id, ownerId: mine ? nil : subordinateId)
+            // [v25.589 轉組織 v0b③] 接手時這台在原負責人身上還沒處理完的警報任務一起過來（一次存檔）；
+            // 釋回（nil）只改這一欄（照舊）。（要退回這一件：拿掉 carryOpenAlarmTasks: true。）
+            lifeStore.assignEquipmentOwner(equipmentId: eq.id, ownerId: mine ? nil : subordinateId,
+                                           carryOpenAlarmTasks: true)
         } label: {
             HStack(spacing: 10) {
                 Image(systemName: mine ? "checkmark.circle.fill" : "circle")

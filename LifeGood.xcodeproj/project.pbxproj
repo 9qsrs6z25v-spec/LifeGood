@@ -143,6 +143,7 @@
 		A01B000001001591 /* WealthVault.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001591 /* WealthVault.swift */; };
 		A01B000001001592 /* WealthWebFacts.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001592 /* WealthWebFacts.swift */; };
 		A01B000001001598 /* WealthTransfers.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001598 /* WealthTransfers.swift */; };
+		A01B000001001613 /* OrgHandoffs.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001613 /* OrgHandoffs.swift */; };
 		A01B000001001601 /* WealthTransferPlans.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001601 /* WealthTransferPlans.swift */; };
 		A01B000001001603 /* WealthTransferNotices.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001603 /* WealthTransferNotices.swift */; };
 		A01B000001001605 /* WealthTransferFinds.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001605 /* WealthTransferFinds.swift */; };
@@ -504,6 +505,7 @@
 		A01A000001001591 /* WealthVault.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WealthVault.swift; sourceTree = "<group>"; };
 		A01A000001001592 /* WealthWebFacts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WealthWebFacts.swift; sourceTree = "<group>"; };
 		A01A000001001598 /* WealthTransfers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WealthTransfers.swift; sourceTree = "<group>"; };
+		A01A000001001613 /* OrgHandoffs.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrgHandoffs.swift; sourceTree = "<group>"; };
 		A01A000001001601 /* WealthTransferPlans.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WealthTransferPlans.swift; sourceTree = "<group>"; };
 		A01A000001001603 /* WealthTransferNotices.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WealthTransferNotices.swift; sourceTree = "<group>"; };
 		A01A000001001605 /* WealthTransferFinds.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WealthTransferFinds.swift; sourceTree = "<group>"; };
@@ -914,6 +916,7 @@
 				A01A000001001591 /* WealthVault.swift */,
 				A01A000001001592 /* WealthWebFacts.swift */,
 				A01A000001001598 /* WealthTransfers.swift */,
+				A01A000001001613 /* OrgHandoffs.swift */,
 				A01A000001001601 /* WealthTransferPlans.swift */,
 				A01A000001001603 /* WealthTransferNotices.swift */,
 				A01A000001001605 /* WealthTransferFinds.swift */,
@@ -1467,6 +1470,7 @@
 				A01B000001001591 /* WealthVault.swift in Sources */,
 				A01B000001001592 /* WealthWebFacts.swift in Sources */,
 				A01B000001001598 /* WealthTransfers.swift in Sources */,
+				A01B000001001613 /* OrgHandoffs.swift in Sources */,
 				A01B000001001601 /* WealthTransferPlans.swift in Sources */,
 				A01B000001001603 /* WealthTransferNotices.swift in Sources */,
 				A01B000001001605 /* WealthTransferFinds.swift in Sources */,
@@ -1945,7 +1949,7 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 1341;
+				CURRENT_PROJECT_VERSION = 1342;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
@@ -1966,7 +1970,7 @@
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
-				MARKETING_VERSION = 25.588;
+				MARKETING_VERSION = 25.589;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
@@ -2010,7 +2014,7 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 1341;
+				CURRENT_PROJECT_VERSION = 1342;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
@@ -2025,7 +2029,7 @@
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
-				MARKETING_VERSION = 25.588;
+				MARKETING_VERSION = 25.589;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				SDKROOT = iphoneos;

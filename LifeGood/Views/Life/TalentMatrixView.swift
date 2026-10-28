@@ -79,7 +79,15 @@ extension Subordinate {
     /// ・逾期未完成：截止日已過、還沒完成
     /// ・逾期才完成：完成時間晚於截止日（舊資料沒記完成時間的從寬不計）
     /// 任務需未連兼任（連結的那份由兼任側計）；報告以報告日為截止。
+    /// [v25.589 轉組織 v0b] 再加「交出去時已逾期、扣分留在這位」的件數（overdueHandedCount；judge §13 第 2 題）。
+    /// 只改這一處：列表、人才矩陣、明細頁、圖表同一個數。
     var overdueOpenCount: Int {
+        let own = overdueOwnIds
+        return own.count + Self.handedOverdueExtra(personId: id, own: own)
+    }
+
+    /// 自己身上照算逾期的任務、週報 id（原本 overdueOpenCount 的兩段，原封不動）
+    private var overdueOwnIds: Set<UUID> {
         let now = Date()
         let t = tasks.filter { t in
             guard t.sideRoleLink == nil, let due = t.dueDate else { return false }
@@ -88,15 +96,28 @@ extension Subordinate {
                 return done > due
             }
             return due < now
-        }.count
+        }.map(\.id)
         let r = weeklyReports.filter { r in
             if r.isCompleted {
                 guard let done = r.completedAt else { return false }
                 return done > r.date
             }
             return r.date < now
-        }.count
-        return t + r
+        }.map(\.id)
+        return Set(t).union(r)
+    }
+
+    /// [v25.589 轉組織 v0b] 交出去時已逾期、扣分留在這位的件數（OrgHandoffIndex，查 life_org_handoffs_v1 那一包）：
+    /// 記在這位名下、而且這位身上現在沒有照算逾期的那幾筆——還沒更新的 iPad 把任務存回這位身上、陣列那邊已經算到了，
+    /// 就不重複扣（judge §1.4-8）。例（逾期 Offset 2）：王小明 T1（10/20 截止）10/28 交給陳怡君 → 王小明照樣 2 件（T1、T4）191、
+    /// 陳怡君 0 件（新截止 11/4）172；舊 iPad 把 T1 存回王小明身上 → 王小明照樣 2 件。
+    var overdueHandedCount: Int {
+        Self.handedOverdueExtra(personId: id, own: overdueOwnIds)
+    }
+
+    private static func handedOverdueExtra(personId: UUID, own: Set<UUID>) -> Int {
+        guard let handed = OrgHandoffIndex.overdueIds[personId], !handed.isEmpty else { return 0 }
+        return handed.subtracting(own).count
     }
 
     /// 主動性分數（日常）：完成任務 / 完成會議議程項目 / 報告加分、被標註加分，請假時數扣分。
@@ -201,9 +222,14 @@ extension Subordinate {
             items.append(("請假 \(h) 小時", -Int((leaveHours / 8 * Double(ScoreWeights.actLeavePer8h)).rounded())))
         }
         // 逾期 Offset（設定 > 0 時才顯示這一列；含逾期未完成＋逾期才完成）
-        let overdue = overdueOpenCount
-        if ScoreWeights.actOverdue > 0 && overdue > 0 {
-            items.append(("逾期（含補完成）×\(overdue)", -overdue * ScoreWeights.actOverdue))
+        // [v25.589 轉組織 v0b] 拆兩列：自己身上的、交出去時已逾期的（任務已經不在這位身上還被扣，要看得懂為什麼）；兩列加起來＝overdueOpenCount
+        let own = overdueOwnIds.count
+        let handed = overdueHandedCount
+        if ScoreWeights.actOverdue > 0 && own > 0 {
+            items.append(("逾期（含補完成）×\(own)", -own * ScoreWeights.actOverdue))
+        }
+        if ScoreWeights.actOverdue > 0 && handed > 0 {
+            items.append(("交出去時已逾期 ×\(handed)", -handed * ScoreWeights.actOverdue))
         }
         return items
     }

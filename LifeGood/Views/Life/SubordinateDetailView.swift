@@ -2948,6 +2948,14 @@ struct MeetingEditorSheet: View {
     @State private var isSaving = false
     /// [v25.332] 會議負責人（可移交給其他部屬）
     @State private var assignedSubId = UUID()
+    /// [v25.589 轉組織 v0b①・v0a §5-5①] 打開那一刻「會議負責人」的值。卡片〔編輯〕開著的時候被移交，卡片重畫會用
+    /// liveMeeting 重新 init 這一頁：subordinateId 變成新的持有人、assignedSubId（@State）還是原人——
+    /// 拿 subordinateId 比會把「沒動」當成換人、存檔搬回原人。一律跟這個比（assignChanged）。同 TaskEditorSheet v0a⑦。
+    @State private var openedSubId: UUID?
+    /// [v25.589 轉組織 v0b①] 打開那一刻的那一筆會議（存檔時跟它比，只寫改過的欄位；LifeStore.mergedMeetingEdit）
+    @State private var openedMeeting: SubordinateMeeting?
+    /// [v25.589 轉組織 v0b①] 換人前要問的那一句（nil＝沒在問）
+    @State private var moveNotice: HandoffNotice?
     /// [v25.391] 關聯機台（可多台）。掛在整場會議上，不是逐個議程項目。
     @State private var linkedEquipmentIds: [UUID] = []
     /// [v25.455] 開會前多久提醒（部屬會議在此之前完全沒有提醒）
@@ -2967,6 +2975,9 @@ struct MeetingEditorSheet: View {
 
     /// 沒開週期但有加開場次 → 場次清單模式（主場次＋加開場次並列）
     private var hasAdHoc: Bool { occurrences.contains(where: \.isAdHoc) }
+
+    /// [v25.589 轉組織 v0b①] 「會議負責人」有沒有動過：跟打開那一刻比（不跟會被重新 init 的 subordinateId 比）
+    private var assignChanged: Bool { assignedSubId != (openedSubId ?? subordinateId) }
 
     /// 負責人姓名快取：sideRolePersonCandidates() 每次呼叫都會重建三種來源、做去重與排序，
     /// 直接在每一列裡呼叫會讓打字時每個字元都重算一次全公司名單。
@@ -3092,8 +3103,9 @@ struct MeetingEditorSheet: View {
                 } header: {
                     editorSectionHeader("指派人員", icon: "person.crop.circle.badge.checkmark")
                 } footer: {
-                    if assignedSubId != subordinateId {
-                        Text("儲存後整場會議（含所有場次與議程項目）會移交給所選人員；議程項目的負責人設定不變。")
+                    // [v25.589 轉組織 v0b①] 原本：assignedSubId != subordinateId；字原本「議程項目的負責人設定不變」
+                    if assignChanged {
+                        Text("儲存後整場會議（含所有場次與議程項目）會移交給所選人員；已指派的議程負責人不變。")
                     }
                 }
 
@@ -3176,6 +3188,7 @@ struct MeetingEditorSheet: View {
                 peopleIndex = Dictionary(lifeStore.sideRolePersonCandidates().map { ($0.id, $0) },
                                          uniquingKeysWith: { a, _ in a })
                 assignedSubId = subordinateId
+                openedSubId = subordinateId   // [v25.589 轉組織 v0b①] 打開那一刻的「會議負責人」
                 if let e = editing {
                     topic = e.topic; date = e.date; createdAt = e.createdAt
                     durationText = "\(e.durationMinutes)"
@@ -3191,6 +3204,7 @@ struct MeetingEditorSheet: View {
                     }
                     reminder = EventReminder(rawValue: e.reminderMinutes) ?? .none
                     alertStyle = e.alertStyle
+                    if openedMeeting == nil { openedMeeting = e }   // [v25.589 轉組織 v0b①] 只記一次
                 } else {
                     // 新會議：預設時間用排程時段（整點/半點，過 18:00 則隔天 09:30）
                     date = FiveMinuteDateTimePicker.defaultSchedulingTime()
@@ -3199,6 +3213,7 @@ struct MeetingEditorSheet: View {
                 }
             }
         }
+        .modifier(HandoffNoticeAlert(notice: $moveNotice, onConfirm: { confirmMove() }))
     }
 
     // MARK: 週期規則
@@ -3457,9 +3472,32 @@ struct MeetingEditorSheet: View {
 
     private func save() {
         guard !isSaving else { return }
+        let meeting = formMeeting
+        // [v25.589 轉組織 v0b①・v0a §5-5①] 既有會議：存到這場會議現在的持有人身上（開著的時候被移交走了也不搬回原人）、
+        // 只寫改過的欄位、「會議負責人」有換才搬（一次存檔）；換人前先問一句。（要退回這一件：刪掉這個 if。）
+        if let e = editing {
+            let holderId = lifeStore.meetingHolderId(e.id, preferring: subordinateId) ?? subordinateId
+            let moveTo = moveTarget(holderId: holderId)
+            if let to = moveTo, let n = lifeStore.meetingMoveNotice(e.id, from: holderId, to: to) {
+                moveNotice = n
+                return
+            }
+            commitEdit(meeting, holderId: holderId, moveTo: moveTo)
+            return
+        }
         isSaving = true
-        // items ⇄ 場次的搬動已經在切換「設定週期」的當下就做掉了（見 onChange），
-        // 這裡不再搬一次，否則會搬兩遍。
+        // 新會議：照舊掛在「會議負責人」選的那位身上
+        //（原本「先從原負責人移除、同 id 就地換」對新會議都不會發生，結果一樣）
+        guard var target = lifeStore.subordinates.first(where: { $0.id == assignedSubId }) else { dismiss(); return }
+        target.meetings.append(meeting)
+        lifeStore.update(target)
+        rebuildReminders()
+        dismiss()
+    }
+
+    /// 存檔用的會議（原本 save 裡那一段，一字不改）。
+    /// items ⇄ 場次的搬動已經在切換「設定週期」的當下就做掉了（見 onChange），這裡不再搬一次，否則會搬兩遍。
+    private var formMeeting: SubordinateMeeting {
         var meeting = SubordinateMeeting(
             id: editing?.id ?? UUID(),
             topic: topic.trimmingCharacters(in: .whitespaces),
@@ -3472,24 +3510,38 @@ struct MeetingEditorSheet: View {
             alertStyleRaw: alertStyle?.rawValue
         )
         meeting.pruneOccurrences()
-        // [v25.332] 移交：先從原負責人移除（比照 TaskEditorSheet.save 的換人流程）
-        let targetId = assignedSubId
-        if targetId != subordinateId,
-           var old = lifeStore.subordinates.first(where: { $0.id == subordinateId }) {
-            old.meetings.removeAll { $0.id == meeting.id }
-            lifeStore.update(old)
-        }
-        guard var target = lifeStore.subordinates.first(where: { $0.id == targetId }) else { dismiss(); return }
-        if let idx = target.meetings.firstIndex(where: { $0.id == meeting.id }) { target.meetings[idx] = meeting }
-        else { target.meetings.append(meeting) }
-        lifeStore.update(target)
+        return meeting
+    }
+
+    /// [v25.589 轉組織 v0b①] 「會議負責人」有換、而且換的不是現在的持有人＝要搬
+    private func moveTarget(holderId: UUID) -> UUID? {
+        (assignChanged && assignedSubId != holderId) ? assignedSubId : nil
+    }
+
+    /// [v25.589 轉組織 v0b①] 真的存：LifeStore.saveMeetingFromEditor（只寫改過的欄位、要換人一起換，一次存檔）；會議通知照舊整批重排
+    private func commitEdit(_ meeting: SubordinateMeeting, holderId: UUID, moveTo: UUID?) {
+        isSaving = true
+        lifeStore.saveMeetingFromEditor(meeting, opened: openedMeeting, holderId: holderId, moveTo: moveTo)
         rebuildReminders()
         dismiss()
     }
 
+    /// [v25.589 轉組織 v0b①] 確認框按〔一起換〕〔換〕：確認框收起、下一個 runloop 才寫 store
+    private func confirmMove() {
+        guard !isSaving, let e = editing else { return }
+        let holderId = lifeStore.meetingHolderId(e.id, preferring: subordinateId) ?? subordinateId
+        let moveTo = moveTarget(holderId: holderId)
+        let meeting = formMeeting
+        DispatchQueue.main.async { commitEdit(meeting, holderId: holderId, moveTo: moveTo) }
+    }
+
     private func deleteMeeting() {
         guard !isSaving else { return }
-        guard let e = editing, var sub = lifeStore.subordinates.first(where: { $0.id == subordinateId }) else { dismiss(); return }
+        // [v25.589 轉組織 v0b①] 從這場會議現在的持有人身上刪（開著的時候被移交走了也刪得到；同 v0a 任務刪除）
+        // （要退回這一件：holderId 換回 subordinateId。）
+        guard let e = editing else { dismiss(); return }
+        let holderId = lifeStore.meetingHolderId(e.id, preferring: subordinateId) ?? subordinateId
+        guard var sub = lifeStore.subordinates.first(where: { $0.id == holderId }) else { dismiss(); return }
         isSaving = true
         sub.meetings.removeAll { $0.id == e.id }
         lifeStore.update(sub)
@@ -4183,6 +4235,48 @@ struct MeetingAssigneePicker: View {
     }
 }
 
+// MARK: - [v25.589 轉組織 v0b①] 換人前問一句（任務編輯頁、會議編輯頁共用；字在 LifeStore.taskMoveNotice／meetingMoveNotice）
+// （要退回這一件：兩個編輯頁拿掉 .modifier(HandoffNoticeAlert…)、save 裡問的那段，這個型別可以留著不用。）
+private struct HandoffNoticeAlert: ViewModifier {
+    @Binding var notice: HandoffNotice?
+    let onConfirm: () -> Void
+    /// 上一次問的標題：收起那一瞬間 notice 已清成 nil，標題不閃成空的（同 SubordinateItemCard.shareAskTitle 的考量）
+    @State private var lastTitle = ""
+
+    /// 明確寫出 init：上面有 private 的 @State，合成的 memberwise init 會跟著變 private，
+    /// 兩個編輯頁（別的型別）叫不到（同 CompanySiteSection、TaskEditorSheet 的寫法）。
+    init(notice: Binding<HandoffNotice?>, onConfirm: @escaping () -> Void) {
+        self._notice = notice
+        self.onConfirm = onConfirm
+    }
+
+    private var shown: Binding<Bool> {
+        Binding(get: { notice != nil }, set: { if !$0 { notice = nil } })
+    }
+
+    func body(content: Content) -> some View {
+        content
+            .alert(notice?.title ?? lastTitle, isPresented: shown, presenting: notice) { n in
+                actions(n)
+            } message: { n in
+                Text(n.message)
+            }
+            .onChange(of: notice) { _, n in
+                if let n { lastTitle = n.title }
+            }
+    }
+
+    @ViewBuilder
+    private func actions(_ n: HandoffNotice) -> some View {
+        if let label = n.confirm {
+            Button(label) { onConfirm() }
+            Button("取消", role: .cancel) { }
+        } else {
+            Button("好", role: .cancel) { }
+        }
+    }
+}
+
 // MARK: - 任務編輯 Sheet
 
 struct TaskEditorSheet: View {
@@ -4217,6 +4311,11 @@ struct TaskEditorSheet: View {
     /// 拿 subordinateId 比，會把「指派給沒動」當成換人，存檔把任務搬回原人。所以「有沒有換人」一律跟這個比（assignChanged）。
     /// （要退回這一件：刪掉這個、onAppear 裡記它的那行、assignChanged，兩處 assignChanged 改回比 subordinateId。）
     @State private var openedSubId: UUID?
+    /// [v25.589 轉組織 v0b②] 打開那一刻表單上的值（onAppear 記一次）；存檔時跟它比，只寫真的改過的欄位
+    ///（原本整件重建：開著的時候手錶、另一台打的勾會被蓋掉——v0a §8-2）
+    @State private var opened: TaskFormValues?
+    /// [v25.589 轉組織 v0b①] 換人前要問的那一句（nil＝沒在問）
+    @State private var moveNotice: HandoffNotice?
     @State private var isSaving = false
     /// 機台警報任務的回報欄位（一般任務不顯示）
     @State private var responseAction = ""
@@ -4234,6 +4333,30 @@ struct TaskEditorSheet: View {
     /// [v25.587 轉組織 v0a⑦] 「指派給」有沒有動過：跟打開那一刻（openedSubId）比，不跟會被重新 init 的 subordinateId 比。
     /// 平常（開著時沒被移交）openedSubId ＝ subordinateId，跟原本一模一樣。
     private var assignChanged: Bool { assignedSubId != (openedSubId ?? subordinateId) }
+
+    /// [v25.589 轉組織 v0b②] 表單上的欄位（onAppear 填的、save 讀的就是這幾個）
+    private struct TaskFormValues: Equatable {
+        var topic: String
+        var content: String
+        var date: Date
+        var hasDueDate: Bool
+        var dueDate: Date
+        var note: String
+        var isCompleted: Bool
+        var forceOnTime: Bool
+        var responseAction: String
+        var responseResult: String
+        var scoreValue: Int
+        var isDereliction: Bool
+        var linkedEquipmentIds: [UUID]
+    }
+
+    private var formValues: TaskFormValues {
+        TaskFormValues(topic: topic, content: content, date: date, hasDueDate: hasDueDate, dueDate: dueDate,
+                       note: note, isCompleted: isCompleted, forceOnTime: forceOnTime,
+                       responseAction: responseAction, responseResult: responseResult,
+                       scoreValue: scoreValue, isDereliction: isDereliction, linkedEquipmentIds: linkedEquipmentIds)
+    }
 
     /// 機台選單的候選：這位部屬負責的機台排前面，其餘照名稱排。
     /// 最常見的情況是「這件事跟我自己顧的機台有關」，不該從整個機台池裡慢慢找。
@@ -4457,19 +4580,7 @@ struct TaskEditorSheet: View {
                 assignedSubId = subordinateId
                 openedSubId = subordinateId   // [v25.587 轉組織 v0a⑦] 打開那一刻的「指派給」
                 if let e = editing {
-                    topic = e.topic; content = e.content; date = e.date; note = e.note
-                    isCompleted = e.isCompleted
-                    responseAction = e.responseAction; responseResult = e.responseResult
-                    scoreValue = e.customScore ?? ScoreWeights.actTask
-                    isDereliction = e.isDereliction
-                    // 機台可能已經被刪掉，帶回來之前先確認它還在，不然選單會顯示空白
-                    // 機台可能已經被刪掉，帶回來之前先濾掉查不到的
-                    linkedEquipmentIds = e.linkedEquipmentIds.filter { id in
-                        lifeStore.equipmentPool.contains { $0.id == id }
-                    }
-                    if let d = e.dueDate { hasDueDate = true; dueDate = d }
-                    // 已經是壓線補登的就把開關打開，不然再存一次會看不出它被強制過
-                    forceOnTime = isOnTimeForced(completedAt: e.completedAt, due: e.dueDate)
+                    fillForm(from: e)   // [v25.589 轉組織 v0b②] 只填一次、記成 opened
                 } else {
                     // 新任務：預設時間用排程時段（整點/半點，過 18:00 則隔天 09:30）
                     date = FiveMinuteDateTimePicker.defaultSchedulingTime()
@@ -4481,6 +4592,32 @@ struct TaskEditorSheet: View {
                 }
             }
         }
+        .modifier(HandoffNoticeAlert(notice: $moveNotice, onConfirm: { confirmMove() }))
+    }
+
+    /// [v25.589 轉組織 v0b②] 既有任務填表：只填一次（onAppear 再跑時不把你剛改的欄位蓋回去）；
+    /// 先組好 v 再一次指派（不在同一支裡回讀剛設的 @State），填進去的值記成 opened（存檔時跟它比）。
+    /// （要退回這一件：onAppear 換回原本那一段直接用 e 填的寫法。）
+    private func fillForm(from e: SubordinateTask) {
+        guard opened == nil else { return }
+        // 機台可能已經被刪掉，帶回來之前先濾掉查不到的
+        let eqIds = e.linkedEquipmentIds.filter { id in lifeStore.equipmentPool.contains { $0.id == id } }
+        let v = TaskFormValues(
+            topic: e.topic, content: e.content, date: e.date,
+            hasDueDate: e.dueDate != nil, dueDate: e.dueDate ?? dueDate, note: e.note,
+            isCompleted: e.isCompleted,
+            // 已經是壓線補登的就把開關打開，不然再存一次會看不出它被強制過
+            forceOnTime: isOnTimeForced(completedAt: e.completedAt, due: e.dueDate),
+            responseAction: e.responseAction, responseResult: e.responseResult,
+            scoreValue: e.customScore ?? ScoreWeights.actTask, isDereliction: e.isDereliction,
+            linkedEquipmentIds: eqIds)
+        topic = v.topic; content = v.content; date = v.date
+        hasDueDate = v.hasDueDate; dueDate = v.dueDate; note = v.note
+        isCompleted = v.isCompleted; forceOnTime = v.forceOnTime
+        responseAction = v.responseAction; responseResult = v.responseResult
+        scoreValue = v.scoreValue; isDereliction = v.isDereliction
+        linkedEquipmentIds = v.linkedEquipmentIds
+        opened = v
     }
 
     /// 「強制準時完成」這一列要不要出現：已勾完成、有截止日，而且**會被判逾期**。
@@ -4507,7 +4644,52 @@ struct TaskEditorSheet: View {
 
     private func save() {
         guard !isSaving else { return }
+        // [v25.589 轉組織 v0b①②] 既有任務：只寫改過的欄位、要換人一起換（LifeStore.saveTaskFromEditor，一次存檔）；
+        // 換人前先問一句（兼任〔一起換〕、做完了、已逾期、缺失不能換）。（要退回這一件：刪掉這個 if。）
+        if let e = editing, let o = opened {
+            let holderId = lifeStore.taskHolderId(e.id, preferring: subordinateId) ?? subordinateId
+            let moveTo = moveTarget(holderId: holderId)
+            if let to = moveTo,
+               let n = lifeStore.taskMoveNotice(e.id, from: holderId, to: to,
+                                                finalIsDereliction: isDereliction != o.isDereliction ? isDereliction : nil,
+                                                finalIsCompleted: isCompleted != o.isCompleted ? isCompleted : nil,
+                                                formDue: editedFutureDue(o)) {
+                moveNotice = n
+                return
+            }
+            commitEdit(e, o, holderId: holderId, moveTo: moveTo)
+            return
+        }
         isSaving = true
+        let task = formTask(id: editing?.id ?? UUID())
+        // [v25.587 轉組織 v0a⑦] 這件現在在誰身上：編輯頁開著的時候被移交走了（另一台、還沒更新的 iPad），
+        // 存到真正持有人身上、不 append 回原人（不然同一件在兩個人身上各一筆）。新任務照舊放 subordinateId。
+        // 「指派給」沒動（assignChanged：跟打開那一刻比）＝留在現在持有人身上；有換人才從現在持有人搬走。
+        // 都找不到（被刪了）照舊存回原人。
+        // （要退回這一件：holderId 換回 subordinateId、targetId 換回 assignedSubId。）
+        // [v25.589 轉組織 v0b②] 既有任務都走上面那個 if；這裡只剩新任務（與 opened 沒記到的保險路）。
+        let holderId: UUID = editing == nil ? subordinateId
+            : (lifeStore.taskHolderId(task.id, preferring: subordinateId) ?? subordinateId)
+        let targetId = assignChanged ? assignedSubId : holderId
+        // 換人：先從現在持有者移除該任務
+        if targetId != holderId,
+           var old = lifeStore.subordinates.first(where: { $0.id == holderId }) {
+            old.tasks.removeAll { $0.id == task.id }
+            lifeStore.update(old)
+        }
+        // 寫入目標人員（同一人則原地更新 / 新增；換人則加到新人員）
+        guard var target = lifeStore.subordinates.first(where: { $0.id == targetId }) else { dismiss(); return }
+        if let idx = target.tasks.firstIndex(where: { $0.id == task.id }) { target.tasks[idx] = task }
+        else { target.tasks.append(task) }
+        lifeStore.update(target)
+        // Apple 提醒事項同步（開啟時才動作）
+        lifeStore.syncReminderForSubordinateTask(subordinateId: targetId, taskId: task.id)
+        dismiss()
+    }
+
+    /// 表單整件組成一筆任務（原本 save 裡那一段，一字不改；id 換成參數）。
+    /// [v25.589 轉組織 v0b②] 新任務存檔用；既有任務只在「開著的時候被刪了」才當 fallback 整件存回。
+    private func formTask(id: UUID) -> SubordinateTask {
         // 完成時間：強制準時→押截止時間；否則原本未完成→改完成時記下現在、
         // 維持完成則沿用舊時間；取消完成則清空
         let completedAt: Date? = {
@@ -4515,8 +4697,8 @@ struct TaskEditorSheet: View {
             if forceOnTime, hasDueDate { return onTimeCompletionStamp(due: dueDate) }
             return editing?.completedAt ?? Date()
         }()
-        let task = SubordinateTask(
-            id: editing?.id ?? UUID(),
+        return SubordinateTask(
+            id: id,
             topic: topic.trimmingCharacters(in: .whitespaces),
             content: content.trimmingCharacters(in: .whitespaces),
             date: date, dueDate: hasDueDate ? dueDate : nil,
@@ -4535,28 +4717,76 @@ struct TaskEditorSheet: View {
                 : (scoreValue == ScoreWeights.actTask ? nil : scoreValue),
             isDereliction: isDereliction
         )
-        // [v25.587 轉組織 v0a⑦] 這件現在在誰身上：編輯頁開著的時候被移交走了（另一台、還沒更新的 iPad），
-        // 存到真正持有人身上、不 append 回原人（不然同一件在兩個人身上各一筆）。新任務照舊放 subordinateId。
-        // 「指派給」沒動（assignChanged：跟打開那一刻比）＝留在現在持有人身上；有換人才從現在持有人搬走。
-        // 都找不到（被刪了）照舊存回原人。
-        // （要退回這一件：holderId 換回 subordinateId、targetId 換回 assignedSubId。）
-        let holderId: UUID = editing == nil ? subordinateId
-            : (lifeStore.taskHolderId(task.id, preferring: subordinateId) ?? subordinateId)
-        let targetId = assignChanged ? assignedSubId : holderId
-        // 換人：先從現在持有者移除該任務
-        if targetId != holderId,
-           var old = lifeStore.subordinates.first(where: { $0.id == holderId }) {
-            old.tasks.removeAll { $0.id == task.id }
-            lifeStore.update(old)
+    }
+
+    /// [v25.589 轉組織 v0b①] 「指派給」有換、而且換的不是現在的持有人＝要搬
+    private func moveTarget(holderId: UUID) -> UUID? {
+        (assignChanged && assignedSubId != holderId) ? assignedSubId : nil
+    }
+
+    /// [v25.589 轉組織 v0b①] 表單上的截止日「有改、而且比現在晚」才給（接手的人用這個；沒給就照規矩算新的）
+    private func editedFutureDue(_ o: TaskFormValues) -> Date? {
+        guard hasDueDate, hasDueDate != o.hasDueDate || dueDate != o.dueDate, dueDate > Date() else { return nil }
+        return dueDate
+    }
+
+    /// [v25.589 轉組織 v0b①②] 真的存：只寫改過的欄位（applyEdits）＋要換人一起換；開著的時候被刪了才用 formTask 整件存回。
+    /// Apple 提醒事項：saveTaskFromEditor 批次結束後自己重寫，這條路不再呼叫 syncReminderForSubordinateTask。
+    /// ⚠️ edit 閉包裡不准讀 lifeStore（inout 改 subordinates[si].tasks[ti] 的時候呼叫；只吃事先算好的 cur、o）。
+    private func commitEdit(_ e: SubordinateTask, _ o: TaskFormValues, holderId: UUID, moveTo: UUID?) {
+        isSaving = true
+        let cur = formValues
+        let fallback = formTask(id: e.id)
+        let newDue = editedFutureDue(o)
+        lifeStore.saveTaskFromEditor(e.id, holderId: holderId, moveTo: moveTo, newDue: newDue,
+                                     fallback: fallback) { t in
+            Self.applyEdits(&t, cur: cur, opened: o)
         }
-        // 寫入目標人員（同一人則原地更新 / 新增；換人則加到新人員）
-        guard var target = lifeStore.subordinates.first(where: { $0.id == targetId }) else { dismiss(); return }
-        if let idx = target.tasks.firstIndex(where: { $0.id == task.id }) { target.tasks[idx] = task }
-        else { target.tasks.append(task) }
-        lifeStore.update(target)
-        // Apple 提醒事項同步（開啟時才動作）
-        lifeStore.syncReminderForSubordinateTask(subordinateId: targetId, taskId: task.id)
         dismiss()
+    }
+
+    /// [v25.589 轉組織 v0b①] 確認框按〔一起換〕〔換〕：確認框收起、下一個 runloop 才寫 store
+    private func confirmMove() {
+        guard !isSaving, let e = editing, let o = opened else { return }
+        let holderId = lifeStore.taskHolderId(e.id, preferring: subordinateId) ?? subordinateId
+        let moveTo = moveTarget(holderId: holderId)
+        DispatchQueue.main.async { commitEdit(e, o, holderId: holderId, moveTo: moveTo) }
+    }
+
+    /// [v25.589 轉組織 v0b②] 跟打開那一刻（o）比，只把改過的欄位寫進 store 裡現在那一筆（t）。static、只吃參數（不准讀 lifeStore）。
+    /// 完成時間：照原本的規矩（強制準時→押截止；剛改成完成→現在；本來就完成→沿用 store 現在的；取消完成→清空）。
+    /// 「本來就完成」看 store 現在的那一筆（wasDone）：開著的時候手錶先打了勾、表單也勾了，完成時間留手錶那一刻。
+    private static func applyEdits(_ t: inout SubordinateTask, cur: TaskFormValues, opened o: TaskFormValues) {
+        if cur.topic != o.topic { t.topic = cur.topic.trimmingCharacters(in: .whitespaces) }
+        if cur.content != o.content { t.content = cur.content.trimmingCharacters(in: .whitespaces) }
+        if cur.date != o.date { t.date = cur.date }
+        let dueEdited = cur.hasDueDate != o.hasDueDate || (cur.hasDueDate && cur.dueDate != o.dueDate)
+        if dueEdited { t.dueDate = cur.hasDueDate ? cur.dueDate : nil }
+        if cur.note != o.note { t.note = cur.note.trimmingCharacters(in: .whitespaces) }
+        if cur.isCompleted != o.isCompleted || cur.forceOnTime != o.forceOnTime || (cur.forceOnTime && dueEdited) {
+            let wasDone = t.isCompleted
+            t.isCompleted = cur.isCompleted
+            if !cur.isCompleted {
+                t.completedAt = nil
+            } else if cur.forceOnTime, cur.hasDueDate {
+                t.completedAt = onTimeCompletionStamp(due: cur.dueDate)
+            } else if !wasDone || t.completedAt == nil {
+                t.completedAt = Date()
+            }
+        }
+        if cur.responseAction != o.responseAction {
+            t.responseAction = cur.responseAction.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        if cur.responseResult != o.responseResult {
+            t.responseResult = cur.responseResult.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        if cur.scoreValue != o.scoreValue || cur.isDereliction != o.isDereliction {
+            t.isDereliction = cur.isDereliction
+            // 等於全域預設＝視同沒自訂（存 nil）；缺失一律存明確分數（同原本）
+            t.customScore = cur.isDereliction ? cur.scoreValue
+                : (cur.scoreValue == ScoreWeights.actTask ? nil : cur.scoreValue)
+        }
+        if cur.linkedEquipmentIds != o.linkedEquipmentIds { t.linkedEquipmentIds = cur.linkedEquipmentIds }
     }
 
     private func deleteTask() {
@@ -6455,10 +6685,12 @@ struct PromotionSheet: View {
     }
 
     private func applyPromotion() {
-        guard let idx = lifeStore.subordinates.firstIndex(where: { $0.id == subordinateId }),
+        // [v25.589 轉組織 v0b⑤] 改走 LifeStore.promoteSubordinate（一次存檔）：歷程 +1、職等換、部屬 jobTitle 照原本清空
+        //（自訂職稱文字已被職等職稱取代）；組織人員的職等、職稱跟著，自動產生的名片職稱也跟著（原本整筆寫回部屬、不走同步：
+        // 組織人員停在舊職等）。（要退回這一件：換回原本的 var sub＝…、lifeStore.subordinates[idx] = sub。）
+        guard lifeStore.subordinates.contains(where: { $0.id == subordinateId }),
               let sel = selectedGradeTitleId,
               let target = lifeStore.gradeTitles.first(where: { $0.id == sel }) else { return }
-        var sub = lifeStore.subordinates[idx]
         let record = PromotionRecord(
             date: effectiveDate,
             fromTitle: currentTitleText,
@@ -6466,11 +6698,7 @@ struct PromotionSheet: View {
             toGradeTitleId: sel,
             note: note.trimmingCharacters(in: .whitespacesAndNewlines)
         )
-        sub.promotions.append(record)
-        sub.gradeTitleId = sel
-        // 自訂職稱文字已被職等職稱取代，清空避免舊文字在對照失敗時誤顯示
-        sub.jobTitle = ""
-        lifeStore.subordinates[idx] = sub   // didSet 觸發 save + iCloud 同步
+        lifeStore.promoteSubordinate(subordinateId, to: sel, record: record)
         dismiss()
     }
 }

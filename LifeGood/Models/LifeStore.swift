@@ -38,6 +38,10 @@ class LifeStore: ObservableObject {
     /// 「記帳理財」匯出）。不放進 wealthBook、不加在 BankDeposit 上：還沒更新的 iPad 存一次會把不認得的欄位洗掉，另一個鍵它不碰。
     /// 一改 wealthRevision 也加一（一套數字的快取跟著重算：每一期算進兩個帳戶）
     @Published var wealthTransfers: WealthTransferBook = WealthTransferBook() { didSet { wealthRevision &+= 1; if !isLoading { save() } } }
+    /// [v25.589 轉組織 v0b] 一筆一筆換人時「交出去時已逾期」的帳（OrgHandoffs.swift OrgHandoffBook；鍵 life_org_handoffs_v1，
+    /// 跟 iCloud 同步、進完整備份與「職涯」匯出）。不加在部屬、任務上：還沒更新的 iPad 存一次部屬會洗掉不認得的欄位，另一個鍵它不碰。
+    /// 一改就重建 OrgHandoffIndex（Subordinate.overdueOpenCount 查這張表：扣分留在原人）
+    @Published var orgHandoffs: OrgHandoffBook = OrgHandoffBook() { didSet { OrgHandoffIndex.rebuild(orgHandoffs); if !isLoading { save() } } }
     /// [v25.357] 公司廠區據點：與重大決議的「廠區」欄位對應，長成每個廠的歷史年線
     @Published var companySites: [CompanySite] = [] { didSet { if !isLoading { save() } } }
     /// [v25.399] 旅遊規劃（要去的行程；與旅遊地圖「去過的地點」是兩回事）
@@ -82,7 +86,9 @@ class LifeStore: ObservableObject {
         // [v25.568] 號碼密文那一包（life_wealth_facts_v1 不在這裡：App 只寫給網頁版、自己不讀）
         "life_wealth_vault_v1",
         // [v25.575] 定期轉帳那一包（WealthTransferBook.syncKey）
-        "life_wealth_transfers_v1"
+        "life_wealth_transfers_v1",
+        // [v25.589] 轉組織 v0b：交出去時已逾期的帳（OrgHandoffBook.syncKey）
+        "life_org_handoffs_v1"
     ]
 
     init() {
@@ -136,6 +142,9 @@ class LifeStore: ObservableObject {
         // 沒帶 keys 的全量重載（以雲端覆蓋這台、第一次合併）照雲端那包，不併
         let transfersKeyTouched = (note.userInfo?["keys"] as? [String])?.contains(WealthTransferBook.syncKey) ?? false
         let transfersBefore = wealthTransfers
+        // [v25.589] 轉組織 v0b：交出去時已逾期的帳也照 id 取聯集（兩台各換各的人，兩筆都要留得住；不然後同步的那台會把另一台記的那筆洗掉、扣分跟著不見）
+        let handoffsKeyTouched = (note.userInfo?["keys"] as? [String])?.contains(OrgHandoffBook.syncKey) ?? false
+        let handoffsBefore = orgHandoffs
         load()
         // backfill 期間暫停 save()，避免剛從雲端拉取就立刻回寫；用 defer 重置，
         // 避免日後在中間加入 guard/return 導致 isLoading 卡死為 true（save() 永久停擺）
@@ -157,8 +166,17 @@ class LifeStore: ObservableObject {
                 didTransfers = true
             }
         }
+        // [v25.589] 轉組織 v0b：交出去時已逾期的帳，雲端那份併上本機剛才那份；本機有它沒有的就存回去、推上去
+        var didHandoffs = false
+        if handoffsKeyTouched {
+            let merged = orgHandoffs.merged(with: handoffsBefore)
+            if merged != orgHandoffs {
+                orgHandoffs = merged
+                didHandoffs = true
+            }
+        }
         // 若 backfill 新建了 OrgPerson/BusinessCard 或修復了成員連結，立即持久化避免重啟後消失
-        if didBackfill || didRepair || didMigrateEq || didSerial || didVault || didTransfers { save() }
+        if didBackfill || didRepair || didMigrateEq || didSerial || didVault || didTransfers || didHandoffs { save() }
         // [v25.454] 比對拉取前後的旅遊規劃，把別台裝置新增的行程／景點／攜帶物品／
         // 伴手禮寫成本機通知。
         if tripKeyTouched {
@@ -1933,7 +1951,38 @@ class LifeStore: ObservableObject {
         isLoading = true
         body()
         isLoading = wasLoading
-        if !wasLoading { save() }
+        if !wasLoading {
+            save()
+            flushReminderWork()   // [v25.589 轉組織 v0b②] 批次裡收集的提醒事項，最外層存完才送
+        }
+    }
+
+    // MARK: - [v25.589 轉組織 v0b②] 批次結束後才做的提醒事項
+    //
+    // 換人、兼任換人時，部屬任務會「收回」（App 自動建的分身被拿掉）或「新建／搬到別人身上」。
+    // 原本兼任同步只動任務、不動提醒事項：收回的分身那則提醒事項變孤兒留在「美好人生」清單、新分身沒有提醒事項
+    //（judge §7 v0b②、§評論回覆 C5）。批次裡只記下來，最外層 batched／withBatch 存完檔才一次送出（EventKit 在背景佇列）。
+    // 不在批次裡的呼叫端照舊自己處理（toggleTaskCompletion、createTasksForNewAlarms…）。
+
+    /// 要刪的提醒事項 id（收回的分身、拿掉的任務）
+    private var pendingReminderDeletes: [String] = []
+    /// 要重寫的部屬任務（新分身、搬到別人身上的那一筆：備註換成接手的人、新截止日一起寫）
+    private var pendingReminderUpserts: [(subId: UUID, taskId: UUID)] = []
+
+    private func flushReminderWork() {
+        guard !pendingReminderDeletes.isEmpty || !pendingReminderUpserts.isEmpty else { return }
+        let deletes = pendingReminderDeletes
+        let upserts = pendingReminderUpserts
+        pendingReminderDeletes = []
+        pendingReminderUpserts = []
+        for rid in deletes { ReminderBridge.shared.deleteAsync(id: rid) }
+        guard !upserts.isEmpty else { return }
+        // syncReminderForSubordinateTask 是 main actor 隔離（同 toggleTaskCompletion 的寫法）；它自己會在沒開同步時直接跳過
+        Task { @MainActor in
+            for u in upserts {
+                self.syncReminderForSubordinateTask(subordinateId: u.subId, taskId: u.taskId)
+            }
+        }
     }
 
     /// 把某筆兼任待辦的狀態推到部屬那一側：
@@ -2014,6 +2063,8 @@ class LifeStore: ObservableObject {
             subordinates[si].tasks.append(newTask)
             links.append(SideRoleTaskLink(kind: .task, subordinateId: pid,
                                           itemId: newTask.id, isAutoCreated: true))
+            // [v25.589 轉組織 v0b②] 新分身：批次結束後建提醒事項（有開同步才會建；同手動新增的任務）
+            if !newTask.isCompleted { pendingReminderUpserts.append((subId: pid, taskId: newTask.id)) }
         }
 
         task.links = links.isEmpty ? nil : links
@@ -2115,6 +2166,10 @@ class LifeStore: ObservableObject {
             switch link.kind {
             case .task:
                 if link.isAutoCreated {
+                    // [v25.589 轉組織 v0b②] 收回的分身：它的提醒事項批次結束後刪掉（原本留一則孤兒在「美好人生」清單）
+                    if let rid = subordinates[si].tasks.first(where: { $0.id == link.itemId })?.reminderId {
+                        pendingReminderDeletes.append(rid)
+                    }
                     subordinates[si].tasks.removeAll { $0.id == link.itemId }
                 } else if let i = subordinates[si].tasks.firstIndex(where: { $0.id == link.itemId }) {
                     subordinates[si].tasks[i].sideRoleLink = nil
@@ -3245,7 +3300,9 @@ class LifeStore: ObservableObject {
             p.name = sub.name
             p.jobTitle = resolvedTitle
             p.gradeTitleId = sub.gradeTitleId
-            p.departmentId = sub.departmentId
+            // [v25.589 轉組織 v0b④] 部屬沒選部門（nil）不蓋：部屬編輯頁選「未選擇」，不會把組織人員的部門蓋成空的
+            //（原本：p.departmentId = sub.departmentId，連 nil 也蓋）
+            if let d = sub.departmentId { p.departmentId = d }
             orgPeople[i] = p
             return
         }
@@ -3273,7 +3330,8 @@ class LifeStore: ObservableObject {
 
         let personId = UUID()
         let cardId = UUID()
-        let deptName = departments.first(where: { $0.id == deptId })?.name ?? sub.department
+        // [v25.589 轉組織 v0b④] 名片的部門字樣統一「代碼 — 名稱」（原本：只有名稱）
+        let deptName = departments.first(where: { $0.id == deptId }).map { Self.departmentLabel($0) } ?? sub.department
 
         // 自動產生對應名片
         let card = BusinessCard(
@@ -3438,9 +3496,21 @@ class LifeStore: ObservableObject {
     }
 
     /// 指派／解除機台負責人（ownerId 為 nil 即解除）。只動負責人欄位，PM／警報記錄不動。
-    func assignEquipmentOwner(equipmentId: UUID, ownerId: UUID?) {
+    /// [v25.589 轉組織 v0b③] carryOpenAlarmTasks：換成另一位負責人時，這台在**原負責人**身上還沒處理完的警報任務
+    /// 一起搬過去（同一筆；已經逾期的扣分留原負責人、截止改成今天＋3 天）——不然新的負責人接了機台，
+    /// 10/27 那筆警報還掛在原人身上沒人處理。機台編輯頁換負責人、執掌頁「選取機台」點一下接手都傳 true；一次存檔。
+    /// 解除（nil）、同一位、原本沒負責人、或傳 false：只改這一欄（照舊）。
+    func assignEquipmentOwner(equipmentId: UUID, ownerId: UUID?, carryOpenAlarmTasks: Bool = false,
+                              now: Date = Date()) {
         guard let i = equipmentPool.firstIndex(where: { $0.id == equipmentId }) else { return }
-        equipmentPool[i].ownerId = ownerId
+        guard carryOpenAlarmTasks, let to = ownerId, let from = equipmentPool[i].ownerId, from != to else {
+            equipmentPool[i].ownerId = ownerId
+            return
+        }
+        batched {
+            equipmentPool[i].ownerId = to
+            carryAlarmTasksBody(equipmentId: equipmentId, from: from, to: to, now: now)
+        }
     }
 
     /// 機台警報自動掛任務：設備儲存時對「這次新增的警報」呼叫。
@@ -3528,6 +3598,558 @@ class LifeStore: ObservableObject {
             return p
         }
         return subordinates.first(where: { s in s.weeklyReports.contains(where: { $0.id == reportId }) })?.id
+    }
+
+    // MARK: - [v25.589 轉組織 v0b①③④⑤] 換人改對（judge §7 v0b、§1.4-11、§2.5、§3.2、§3.3、§13；orgmove/build/v0b/brief.md §2）
+    //
+    // 任務、會議換人抽成一支（一次存檔、一次推 iCloud）；有兼任連結的一律連兼任負責人一起換（reassignSideRoleBody）；
+    // 換機台負責人帶走還沒處理完的警報任務；部門一支（setDepartment）；升職一支（promoteSubordinate）。
+    // 分數照 §13：交出去前做完的算原人（做完的任務畫面先問；會議裡做完、沒指派負責人的議程寫上原人）、之後做完的算做的人
+    //（同一筆搬過去）、交出去那一刻已經逾期的扣分留原人（orgHandoffs 記一筆）、接手的人拿新截止日。
+    // …Body 是私有的：v1a 的交接單（applyOrgMove）在同一個批次裡共用；judge §3.9 不准呼叫的 9 支照舊不准呼叫。
+    // sim：orgmove/build/v0b/sim_v0b.py（move_task_body、reassign_side_role_body、move_meeting_body、carry_alarm_tasks、
+    // set_department_body、promote、task_move_notice、meeting_move_notice、merged_meeting_edit 一行一行對照）。
+
+    /// 這場會議現在在誰身上（同 taskHolderId：先看 preferred，沒有再掃全部；都沒有回 nil）。
+    /// 給：會議編輯頁存檔、刪除（MeetingEditorSheet）。純讀、不存檔。
+    func meetingHolderId(_ meetingId: UUID, preferring preferred: UUID? = nil) -> UUID? {
+        if let p = preferred,
+           subordinates.first(where: { $0.id == p })?.meetings.contains(where: { $0.id == meetingId }) == true {
+            return p
+        }
+        return subordinates.first(where: { s in s.meetings.contains(where: { $0.id == meetingId }) })?.id
+    }
+
+    /// 寫給使用者看的名字（沒名字＝「這位同仁」；不用代名詞）
+    private func handoffWho(_ id: UUID) -> String {
+        let n = subordinates.first(where: { $0.id == id })?.name.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return n.isEmpty ? "這位同仁" : n
+    }
+
+    /// 兼任的名字（「尾牙籌備」；沒填＝「兼任職務」）
+    private func handoffRoleTitle(_ roleId: UUID) -> String {
+        let t = milestones.first(where: { $0.id == roleId })?.sideRoleName?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return t.isEmpty ? "兼任職務" : t
+    }
+
+    /// 這條兼任連結還接得上（兼任、那則待辦都還在）
+    private func sideRoleLinkAlive(_ back: SideRoleBackLink) -> Bool {
+        milestones.first(where: { $0.id == back.roleId })?
+            .sideRoleTasks?.contains(where: { $0.id == back.taskId }) == true
+    }
+
+    /// 這則兼任待辦的負責人裡，有沒有「連到這位部屬」的成員
+    private func sideRoleAssigns(_ back: SideRoleBackLink, person: UUID) -> Bool {
+        guard let role = milestones.first(where: { $0.id == back.roleId }),
+              let task = role.sideRoleTasks?.first(where: { $0.id == back.taskId }) else { return false }
+        let mids = Set((role.sideRoleMembers ?? []).filter { $0.linkedPersonId == person }.map(\.id))
+        return (task.assigneeIds ?? []).contains(where: { mids.contains($0) })
+    }
+
+    /// 議程負責人 id（部屬、組織人員、名片三種）→ 部屬 id（同 meetingItemCredits 的反查）
+    private func itemOwnerResolver() -> (UUID) -> UUID? {
+        let subIds = Set(subordinates.map(\.id))
+        var viaOrg: [UUID: UUID] = [:]
+        var viaCard: [UUID: UUID] = [:]
+        for p in orgPeople {
+            guard let sid = p.linkedSubordinateId, subIds.contains(sid) else { continue }
+            viaOrg[p.id] = sid
+            if let cid = p.linkedBusinessCardId { viaCard[cid] = sid }
+        }
+        return { pid in
+            if subIds.contains(pid) { return pid }
+            return viaOrg[pid] ?? viaCard[pid]
+        }
+    }
+
+    /// [v0b①] 有 sideRoleLink 的那一筆換人：到兼任那邊換（judge §1.4-11、§3.2 兼任兩列）。呼叫端負責 batched。
+    /// ① 這則兼任待辦的負責成員裡「連到 from 的那位」換成「連到 to 的那位」（to 還不是這個兼任的成員就先加一位，分工空白、
+    ///    不抄「職稱 · 部門」）；from 本來就不是這則待辦的負責人＝負責人不動（只搬連結）。
+    /// ② 連結裡 subordinateId == from、itemId == itemId 的那一條：
+    ///    • 從部屬這邊拉進來的**任務** → 同一筆搬到 to、連結改 to（只搬任務不換成員的話，下一次同步原人身上會再長一筆分身、+3 照算原人）
+    ///    • **議程** → 會議已經在 to 身上（moveMeetingBody 先搬了）才改連結；不然留原處（之後交接單交議程用：連結不動）
+    ///    • App 自動建的**分身** → 不動（③ 同步時收回原人那筆、在 to 身上建一筆新的）
+    /// ③ syncSideRoleTaskLinksBody：收回的分身提醒事項刪掉、新分身建提醒事項（批次結束後，flushReminderWork）。
+    private func reassignSideRoleBody(_ back: SideRoleBackLink, itemId: UUID, from: UUID, to: UUID) {
+        guard from != to,
+              let ri = milestones.firstIndex(where: { $0.id == back.roleId }),
+              var tasks = milestones[ri].sideRoleTasks,
+              let ti = tasks.firstIndex(where: { $0.id == back.taskId }),
+              let toIdx = subordinates.firstIndex(where: { $0.id == to }) else { return }
+        var members = milestones[ri].sideRoleMembers ?? []
+        var task = tasks[ti]
+        // ① 負責人換人
+        let fromMemberIds = Set(members.filter { $0.linkedPersonId == from }.map(\.id))
+        var ids = task.assigneeIds ?? []
+        if let pos = ids.firstIndex(where: { fromMemberIds.contains($0) }) {
+            ids.removeAll { fromMemberIds.contains($0) }
+            let toMemberId: UUID
+            if let m = members.first(where: { $0.linkedPersonId == to }) {
+                toMemberId = m.id
+            } else {
+                let m = SideRoleMember(name: subordinates[toIdx].name, linkedPersonId: to)
+                members.append(m)
+                toMemberId = m.id
+            }
+            if !ids.contains(toMemberId) { ids.insert(toMemberId, at: min(pos, ids.count)) }
+            task.assigneeIds = ids.isEmpty ? nil : ids
+        }
+        // ② 連結跟著搬
+        var links = task.links ?? []
+        for k in links.indices where links[k].subordinateId == from && links[k].itemId == itemId {
+            switch links[k].kind {
+            case .task:
+                guard !links[k].isAutoCreated else { continue }
+                if let fi = subordinates.firstIndex(where: { $0.id == from }),
+                   let tIdx = subordinates[fi].tasks.firstIndex(where: { $0.id == itemId }) {
+                    let moved = subordinates[fi].tasks.remove(at: tIdx)
+                    if !subordinates[toIdx].tasks.contains(where: { $0.id == itemId }) {
+                        subordinates[toIdx].tasks.append(moved)
+                    }
+                    if moved.reminderId != nil || !moved.isCompleted {
+                        pendingReminderUpserts.append((subId: to, taskId: itemId))
+                    }
+                }
+                links[k].subordinateId = to
+            case .meetingItem:
+                guard let mid = links[k].meetingId,
+                      subordinates[toIdx].meetings.contains(where: { $0.id == mid }) else { continue }
+                links[k].subordinateId = to
+            }
+        }
+        task.links = links.isEmpty ? nil : links
+        tasks[ti] = task
+        var role = milestones[ri]
+        role.sideRoleMembers = members.isEmpty ? role.sideRoleMembers : members
+        role.sideRoleTasks = tasks
+        milestones[ri] = role
+        // ③ 再同步一次（收回原人的分身、在 to 身上補建；提醒事項批次結束後一起做）
+        syncSideRoleTaskLinksBody(back.taskId, in: back.roleId)
+    }
+
+    /// [v0b①] 任務換人的本體：同一筆從 from 搬到 to。呼叫端負責 batched。回傳有沒有搬。
+    /// • 缺失（isDereliction）不搬：扣分是這位同仁自己的（judge §1.4-3、§13）；畫面先擋（taskMoveNotice）。
+    /// • 有兼任連結：到兼任換人（reassignSideRoleBody），不只搬這一側。
+    /// • 交出去那一刻還沒做完、已經逾期（overdueDue：呼叫端在改欄位之前看到的截止；沒給就看任務現在的截止）：
+    ///   扣分留原人（orgHandoffs 記一筆）；接手的人拿新截止日——newDue 比現在晚就用它，不然照 OrgHandoffRules.newDueForTask。
+    /// • 重做不多一份：to 身上已經有這一筆就不再加。搬過去的那一筆批次結束後重寫提醒事項（備註換成接手的人、新截止日）。
+    @discardableResult
+    private func moveTaskBody(_ taskId: UUID, from: UUID, to: UUID, newDue: Date?, overdueDue: Date?,
+                              via: String, now: Date) -> Bool {
+        guard from != to,
+              let fi = subordinates.firstIndex(where: { $0.id == from }),
+              let tIdx = subordinates[fi].tasks.firstIndex(where: { $0.id == taskId }),
+              let toIdx = subordinates.firstIndex(where: { $0.id == to }) else { return false }
+        let current = subordinates[fi].tasks[tIdx]
+        guard !current.isDereliction else { return false }
+        if let back = current.sideRoleLink, sideRoleLinkAlive(back) {
+            reassignSideRoleBody(back, itemId: taskId, from: from, to: to)
+            return true
+        }
+        let fromName = subordinates[fi].name
+        var moved = subordinates[fi].tasks.remove(at: tIdx)
+        var lateDue: Date?
+        if !moved.isCompleted {
+            if let od = overdueDue {
+                lateDue = od
+            } else if let d = moved.dueDate, d < now {
+                lateDue = d
+            }
+        }
+        if let od = lateDue {
+            let fixed: Date
+            if let d = newDue, d > now {
+                fixed = d
+            } else {
+                fixed = OrgHandoffRules.newDueForTask(originalDue: od, now: now)
+            }
+            orgHandoffs.append(OrgHandoff(
+                kind: "task", itemId: taskId, fromId: from, fromName: fromName,
+                toId: to, toName: subordinates[toIdx].name,
+                title: moved.topic.isEmpty ? moved.content : moved.topic,
+                dueKey: OrgHandoffRules.dayKey(od), newDueKey: OrgHandoffRules.dayKey(fixed),
+                wasOverdue: true, via: via, handedAt: now))
+            moved.dueDate = fixed
+        }
+        if !subordinates[toIdx].tasks.contains(where: { $0.id == taskId }) {
+            subordinates[toIdx].tasks.append(moved)
+        }
+        if moved.reminderId != nil || !moved.isCompleted {
+            pendingReminderUpserts.append((subId: to, taskId: taskId))
+        }
+        return true
+    }
+
+    /// [v0b①] 任務換人（同一筆從 from 搬到 to；一次存檔、一次推 iCloud；提醒事項批次結束後跟著改）。
+    /// 任務編輯頁走 saveTaskFromEditor（改欄位＋換人同一次存）；這支給只換人、不改別的呼叫端。
+    func moveTask(_ taskId: UUID, from: UUID, to: UUID, newDue: Date? = nil, now: Date = Date()) {
+        batched {
+            _ = moveTaskBody(taskId, from: from, to: to, newDue: newDue, overdueDue: nil, via: "editor", now: now)
+        }
+    }
+
+    /// [v0b①②・v0a §5-5②] 任務編輯頁存檔（既有任務；新任務照舊）：一次存檔。
+    /// • edit：只把表單上**真的改過的欄位**寫進 store 裡**現在**那一筆（TaskEditorSheet 跟打開那一刻比）——
+    ///   開著的時候手錶、另一台打的勾、別處改的備註不會被表單整件重建蓋回去（同 v0a⑥）。
+    /// • 兼任的分身在這裡打勾／取消打勾：兼任那邊一起（同 toggleTaskCompletion；原本只改這一側，下一次同步又被改回去）。
+    /// • moveTo：「指派給」有換才給；跟改欄位同一個批次搬（moveTaskBody）。newDue：表單上的截止日「有改而且比現在晚」才給。
+    /// • 存到這一筆**現在**的持有人身上（holderId 先看、找不到掃全部）；任何人身上都找不到（開著的時候被刪了）
+    ///   → 照舊把 fallback（表單整件組的）存回 moveTo ?? holderId（原本的行為）。
+    /// 回傳最後在誰身上。
+    @discardableResult
+    func saveTaskFromEditor(_ taskId: UUID, holderId: UUID, moveTo: UUID?, newDue: Date?,
+                            fallback: SubordinateTask, now: Date = Date(),
+                            edit: (inout SubordinateTask) -> Void) -> UUID {
+        var finalHolder = holderId
+        batched {
+            guard let h = taskHolderId(taskId, preferring: holderId) else {
+                let target = moveTo ?? holderId
+                guard let si = subordinates.firstIndex(where: { $0.id == target }) else { return }
+                subordinates[si].tasks.append(fallback)
+                pendingReminderUpserts.append((subId: target, taskId: taskId))
+                finalHolder = target
+                return
+            }
+            finalHolder = h
+            guard let si = subordinates.firstIndex(where: { $0.id == h }),
+                  let ti = subordinates[si].tasks.firstIndex(where: { $0.id == taskId }) else { return }
+            let before = subordinates[si].tasks[ti]
+            edit(&subordinates[si].tasks[ti])
+            let after = subordinates[si].tasks[ti]
+            if let back = after.sideRoleLink, before.isCompleted != after.isCompleted {
+                propagateCompletionToSideRole(back, isCompleted: after.isCompleted, completedAt: after.completedAt)
+            }
+            var overdueDue: Date?
+            if !before.isCompleted, let d = before.dueDate, d < now { overdueDue = d }
+            if let to = moveTo, to != h,
+               moveTaskBody(taskId, from: h, to: to, newDue: newDue, overdueDue: overdueDue, via: "editor", now: now) {
+                finalHolder = to
+            } else {
+                pendingReminderUpserts.append((subId: h, taskId: taskId))
+            }
+        }
+        return finalHolder
+    }
+
+    /// [v0b①] 任務編輯頁換人前要問的那一句（nil＝不用問，直接換）。字跟 sim_v0b.py task_move_notice 一字不差。
+    /// finalIsDereliction／finalIsCompleted：表單上改過才給（nil＝表單沒動這一欄，照 store 現在的）；
+    /// formDue：表單上的截止日「有改、而且比現在晚」才給（接手的人用這個；沒給就照規矩算新的）。
+    /// 順序：缺失（不能換）→ 兼任（一起換）→ 做完了（換）→ 已經逾期（換）。
+    func taskMoveNotice(_ taskId: UUID, from: UUID, to: UUID, finalIsDereliction: Bool?, finalIsCompleted: Bool?,
+                        formDue: Date?, now: Date = Date()) -> HandoffNotice? {
+        guard from != to,
+              let t = subordinates.first(where: { $0.id == from })?.tasks.first(where: { $0.id == taskId }) else { return nil }
+        let a = handoffWho(from)
+        let b = handoffWho(to)
+        if finalIsDereliction ?? t.isDereliction {
+            return HandoffNotice(
+                title: "缺失不能換人",
+                message: "這件是\(a)的缺失，結案時 −1 算\(a)，要留在\(a)身上。記錯人的話，先關掉「應做未作為（缺失）」再換。",
+                confirm: nil)
+        }
+        if let back = t.sideRoleLink, sideRoleLinkAlive(back) {
+            let head = "這件也是兼任「\(handoffRoleTitle(back.roleId))」的待辦："
+            // [v25.589 轉組織 v0b① 裁定] 做完的兼任待辦換人：兼任 +3 跟著兼任負責人走（sideRoleTaskCounts 每位負責人各算一次），
+            // 一樣先講分數會怎麼變（同下面「做完了」那一句；§13「交出去前做完的算原人」：要換就是改算）。
+            // 原人本來就不是這則的負責人（只是拉進來的）：分數本來就不在原人身上，不多講。
+            //（要退回這一件：拿掉 done、doneNote，兩個 body 拿掉 + doneNote。）
+            let done = finalIsCompleted ?? t.isCompleted
+            let body: String
+            if !sideRoleAssigns(back, person: from) {
+                body = "這件會搬到\(b)身上，兼任那邊的負責人不變。"
+            } else if sideRoleAssigns(back, person: to) {
+                let doneNote: String = done ? "\(a)已經做完這件了：拿掉之後，完成的分數不再算\(a)。" : ""
+                body = "\(b)本來就是負責人，會一起把\(a)從兼任負責人拿掉。" + doneNote
+            } else {
+                let doneNote: String = done ? "\(a)已經做完這件了：換給\(b)之後，完成的分數會改算\(b)。" : ""
+                body = "會一起把兼任負責人換成\(b)。" + doneNote
+            }
+            return HandoffNotice(title: "一起換兼任負責人？", message: head + body, confirm: "一起換")
+        }
+        let completed = finalIsCompleted ?? t.isCompleted
+        if completed {
+            return HandoffNotice(
+                title: "這件已經做完了",
+                message: "\(a)已經做完這件了：換給\(b)之後，完成的分數會改算\(b)。通常只有當初指派錯了才需要換。",
+                confirm: "換")
+        }
+        if let due = t.dueDate, due < now {
+            let fixed: Date
+            let how: String
+            if let d = formDue, d > now {
+                fixed = d
+                how = "照你改的"
+            } else {
+                fixed = OrgHandoffRules.newDueForTask(originalDue: due, now: now)
+                how = "改成"
+            }
+            return HandoffNotice(
+                title: "這件已經逾期",
+                message: "原本的截止 \(OrgHandoffRules.dueText(due)) 已經過了：逾期的扣分留在\(a)；交給\(b)之後，截止日\(how) \(OrgHandoffRules.dueText(fixed))。",
+                confirm: "換")
+        }
+        return nil
+    }
+
+    /// [v0b①] 會議換人的本體：整場會議（含所有場次與議程）從 from 搬到 to（會議編輯頁「會議負責人」原本的意思，照舊）。
+    /// 呼叫端負責 batched。回傳有沒有搬。
+    /// • 交出去前已經做完、沒指派負責人的議程：寫上 from（meetingItemCredits 沒負責人時算會議主人；不寫的話搬過去就改算 to，
+    ///   judge §13「交出去前完成的算原人」）。有指派的、連到兼任的不動。
+    /// • 議程連到兼任的：會議先搬，再到兼任換人（reassignSideRoleBody：負責人換成 to、連結跟著改）。
+    /// • 重做不多一份：to 身上已經有這場就不再加。提醒（會議通知）由呼叫端重排（moveMeeting、會議編輯頁）。
+    @discardableResult
+    private func moveMeetingBody(_ meetingId: UUID, from: UUID, to: UUID) -> Bool {
+        guard from != to,
+              let fi = subordinates.firstIndex(where: { $0.id == from }),
+              let mi = subordinates[fi].meetings.firstIndex(where: { $0.id == meetingId }),
+              let toIdx = subordinates.firstIndex(where: { $0.id == to }) else { return false }
+        let resolve = itemOwnerResolver()
+        var m = subordinates[fi].meetings.remove(at: mi)
+        func stamp(_ item: inout MeetingItem) {
+            guard item.isCompleted, item.sideRoleLink == nil,
+                  item.assigneeIds.compactMap(resolve).isEmpty else { return }
+            item.assigneeIds.append(from)
+        }
+        for i in m.items.indices { stamp(&m.items[i]) }
+        for o in m.occurrences.indices {
+            for i in m.occurrences[o].items.indices { stamp(&m.occurrences[o].items[i]) }
+        }
+        if !subordinates[toIdx].meetings.contains(where: { $0.id == meetingId }) {
+            subordinates[toIdx].meetings.append(m)
+        }
+        for item in m.allItems {
+            guard let back = item.sideRoleLink, sideRoleLinkAlive(back) else { continue }
+            reassignSideRoleBody(back, itemId: item.id, from: from, to: to)
+        }
+        return true
+    }
+
+    /// [v0b①] 會議換人（一次存檔、一次推 iCloud；搬了就重排會議通知）。會議編輯頁走 saveMeetingFromEditor。
+    func moveMeeting(_ meetingId: UUID, from: UUID, to: UUID) {
+        var moved = false
+        batched { moved = moveMeetingBody(meetingId, from: from, to: to) }
+        if moved { rebuildMeetingReminders() }
+    }
+
+    /// [v0b，給 v1a 交接單共用] 議程換負責人：議程留在原本那場會議，只換負責人（judge §1.4-2、§3.2 議程兩列）。
+    /// 呼叫端負責 batched。回傳有沒有改。
+    /// • 負責人裡「是 from 的那幾個 id」（部屬 id、連到 from 的組織人員 id、那位組織人員的名片 id）換成 to；
+    ///   **本來沒指派的寫成〔to〕**（沒指派的做完算會議主人：不寫上去，接手的人做完還是算原人）。
+    /// • 連到兼任的：到兼任換人（reassignSideRoleBody；會議沒搬、連結不動，to 身上會自動多一筆兼任分身）。
+    /// • 做完的不動（交出去前做完的算原人）。
+    @discardableResult
+    private func moveMeetingItemBody(_ itemId: UUID, in meetingId: UUID, holderId: UUID,
+                                     from: UUID, to: UUID) -> Bool {
+        guard from != to,
+              let hi = subordinates.firstIndex(where: { $0.id == holderId }),
+              let mi = subordinates[hi].meetings.firstIndex(where: { $0.id == meetingId }),
+              subordinates.contains(where: { $0.id == to }),
+              let item = subordinates[hi].meetings[mi].allItems.first(where: { $0.id == itemId }),
+              !item.isCompleted else { return false }
+        if let back = item.sideRoleLink, sideRoleLinkAlive(back) {
+            reassignSideRoleBody(back, itemId: itemId, from: from, to: to)
+            return true
+        }
+        var fromIds: Set<UUID> = [from]
+        if let p = orgPeople.first(where: { $0.linkedSubordinateId == from }) {
+            fromIds.insert(p.id)
+            if let cid = p.linkedBusinessCardId { fromIds.insert(cid) }
+        }
+        mutateMeetingItem(&subordinates[hi].meetings[mi], itemId: itemId) { it in
+            if it.assigneeIds.isEmpty {
+                it.assigneeIds = [to]
+                return
+            }
+            var out: [UUID] = []
+            for id in it.assigneeIds {
+                let mapped = fromIds.contains(id) ? to : id
+                if !out.contains(mapped) { out.append(mapped) }
+            }
+            it.assigneeIds = out
+        }
+        return true
+    }
+
+    /// [v0b，給 v1a 交接單共用] 議程換負責人（一次存檔）。v0b 畫面沒有入口（會議編輯頁照舊在議程上挑負責人）。
+    func moveMeetingItem(_ itemId: UUID, in meetingId: UUID, holderId: UUID, from: UUID, to: UUID) {
+        batched { _ = moveMeetingItemBody(itemId, in: meetingId, holderId: holderId, from: from, to: to) }
+    }
+
+    /// [v0b①・v0a §5-5①] 會議編輯頁存檔（既有會議；新會議照舊）：一次存檔。
+    /// • edited：表單組出來的（已 pruneOccurrences）；opened：打開那一刻的那一筆（MeetingEditorSheet 記下的）。
+    ///   跟打開那一刻比，只寫改過的欄位；議程（items）、場次（occurrences）各自整串比：沒動就用 store 現在的——
+    ///   開著的時候卡片上、另一台打的勾留得住（mergedMeetingEdit）。
+    /// • 存到這場會議**現在**的持有人身上（開著的時候被移交走了也一樣，不再搬回原人）；moveTo（「會議負責人」有換）才搬。
+    /// • 任何人身上都找不到（開著的時候被刪了）→ 照舊把 edited 存回 moveTo ?? holderId（原本的行為）。
+    /// 會議通知由呼叫端重排（MeetingEditorSheet.rebuildReminders 照舊）。回傳最後在誰身上。
+    @discardableResult
+    func saveMeetingFromEditor(_ edited: SubordinateMeeting, opened: SubordinateMeeting?,
+                               holderId: UUID, moveTo: UUID?) -> UUID {
+        var finalHolder = holderId
+        batched {
+            guard let h = meetingHolderId(edited.id, preferring: holderId) else {
+                let target = moveTo ?? holderId
+                guard let si = subordinates.firstIndex(where: { $0.id == target }) else { return }
+                subordinates[si].meetings.append(edited)
+                finalHolder = target
+                return
+            }
+            finalHolder = h
+            guard let si = subordinates.firstIndex(where: { $0.id == h }),
+                  let mi = subordinates[si].meetings.firstIndex(where: { $0.id == edited.id }) else { return }
+            let current = subordinates[si].meetings[mi]
+            subordinates[si].meetings[mi] = Self.mergedMeetingEdit(opened: opened ?? current, edited: edited,
+                                                                   current: current)
+            if let to = moveTo, to != h, moveMeetingBody(edited.id, from: h, to: to) {
+                finalHolder = to
+            }
+        }
+        return finalHolder
+    }
+
+    /// 會議編輯頁「只寫改過的欄位」：每一欄跟打開那一刻比，改過才用表單的、沒改用 store 現在的；
+    /// 議程、場次整串比（JSON 一樣＝沒動）。場次先各自 prune 再比（表單存檔前會 prune，打開那一刻的沒有）。
+    static func mergedMeetingEdit(opened: SubordinateMeeting, edited: SubordinateMeeting,
+                                  current: SubordinateMeeting) -> SubordinateMeeting {
+        var out = current
+        if edited.topic != opened.topic { out.topic = edited.topic }
+        if edited.date != opened.date { out.date = edited.date }
+        if edited.durationMinutes != opened.durationMinutes { out.durationMinutes = edited.durationMinutes }
+        if edited.rule != opened.rule {
+            out.rule = edited.rule
+            out.recurrence = edited.recurrence
+        }
+        if edited.note != opened.note { out.note = edited.note }
+        if edited.createdAt != opened.createdAt { out.createdAt = edited.createdAt }
+        if edited.linkedEquipmentIds != opened.linkedEquipmentIds { out.linkedEquipmentIds = edited.linkedEquipmentIds }
+        if edited.reminderMinutes != opened.reminderMinutes { out.reminderMinutes = edited.reminderMinutes }
+        if edited.alertStyleRaw != opened.alertStyleRaw { out.alertStyleRaw = edited.alertStyleRaw }
+        if !Self.sameJSON(edited.items, opened.items) { out.items = edited.items }
+        var openedPruned = opened
+        openedPruned.pruneOccurrences()
+        if !Self.sameJSON(edited.occurrences, openedPruned.occurrences) { out.occurrences = edited.occurrences }
+        out.pruneOccurrences()
+        return out
+    }
+
+    /// 兩份編成 JSON 一不一樣（議程、場次沒有 Equatable；鍵排好再比）
+    private static func sameJSON<T: Encodable>(_ a: T, _ b: T) -> Bool {
+        let enc = JSONEncoder()
+        enc.outputFormatting = [.sortedKeys]
+        guard let x = try? enc.encode(a), let y = try? enc.encode(b) else { return false }
+        return x == y
+    }
+
+    /// [v0b①] 會議編輯頁換人前要問的那一句（nil＝不用問，直接換）。字跟 sim_v0b.py meeting_move_notice 一字不差。
+    /// 只有「有做完、沒指派負責人的議程」或「有議程連到兼任」時才問。
+    func meetingMoveNotice(_ meetingId: UUID, from: UUID, to: UUID) -> HandoffNotice? {
+        guard from != to,
+              let m = subordinates.first(where: { $0.id == from })?.meetings.first(where: { $0.id == meetingId })
+        else { return nil }
+        let resolve = itemOwnerResolver()
+        let items = m.allItems
+        let doneUnassigned = items.filter {
+            $0.isCompleted && $0.sideRoleLink == nil && $0.assigneeIds.compactMap(resolve).isEmpty
+        }.count
+        var roleIds: [UUID] = []
+        var linked = 0
+        for item in items {
+            guard let back = item.sideRoleLink, sideRoleLinkAlive(back) else { continue }
+            linked += 1
+            if !roleIds.contains(back.roleId) { roleIds.append(back.roleId) }
+        }
+        guard doneUnassigned > 0 || linked > 0 else { return nil }
+        let a = handoffWho(from)
+        let b = handoffWho(to)
+        var lines: [String] = ["整場會議（含所有場次與議程）會移到\(b)名下。"]
+        if doneUnassigned > 0 {
+            lines.append("已經做完、沒指派負責人的 \(doneUnassigned) 項議程會寫上\(a)，分數留在\(a)。")
+        }
+        if linked > 0 {
+            let names = roleIds.map { "「\(handoffRoleTitle($0))」" }.joined(separator: "、")
+            lines.append("其中 \(linked) 項也是兼任\(names)的待辦：會一起把兼任負責人換成\(b)。")
+        }
+        return HandoffNotice(title: "把會議交給\(b)？", message: lines.joined(separator: "\n"),
+                             confirm: linked > 0 ? "一起換" : "換")
+    }
+
+    /// [v0b③] 換機台負責人帶走的警報任務：這台在 from 身上還沒處理完的警報任務（equipmentLink 是這台）一起搬到 to。
+    /// 已經逾期的：扣分留 from（orgHandoffs）、截止改成今天＋3 天（同警報的規矩，OrgHandoffRules.newDueForAlarm）。呼叫端負責 batched。
+    private func carryAlarmTasksBody(equipmentId: UUID, from: UUID, to: UUID, now: Date) {
+        guard from != to, let fi = subordinates.firstIndex(where: { $0.id == from }) else { return }
+        let open = subordinates[fi].tasks.filter { !$0.isCompleted && $0.equipmentLink?.equipmentId == equipmentId }
+        for t in open {
+            var newDue: Date?
+            if let d = t.dueDate, d < now { newDue = OrgHandoffRules.newDueForAlarm(originalDue: d, now: now) }
+            moveTaskBody(t.id, from: from, to: to, newDue: newDue, overdueDue: nil, via: "equipment", now: now)
+        }
+    }
+
+    /// 機台的部門字樣「代碼 — 名稱」（沒有代碼＝只有名稱；沒有名稱＝只有代碼）。部屬、名片的部門字樣統一用這一種（judge §7 v0b④）
+    static func departmentLabel(_ d: Department) -> String {
+        let code = d.code.trimmingCharacters(in: .whitespaces)
+        let name = d.name.trimmingCharacters(in: .whitespaces)
+        if code.isEmpty { return name }
+        if name.isEmpty { return code }
+        return "\(code) — \(name)"
+    }
+
+    /// [v0b④] 部屬換部門（部屬編輯頁 saveEdits、組織頁 update(OrgPerson) 兩條路都走這裡；judge §7 v0b④、§2.5）。一次存檔。
+    /// • 部屬 departmentId＋部門字樣統一成「代碼 — 名稱」（departmentLabel）。選「未選擇」（deptId nil）：departmentId 清掉、
+    ///   字樣用 freeText（部屬編輯頁傳表單上的字＝原本的字樣照留；組織頁傳 nil＝空白，同 v25.297）。
+    /// • 連到的組織人員：departmentId 跟著——**nil 不蓋**（部屬選「未選擇」不會把組織人員的部門蓋成空的）。
+    ///   這位同仁還沒有組織人員、新部門有值：照舊補建（syncOrgPersonFor）。
+    /// • 組織人員連到的名片：部門字樣是空的、或跟舊部門一樣（名稱、「代碼 — 名稱」、部屬原本的字樣）＝App 自動寫的，換成新的；
+    ///   你自己改過字的不動。
+    func setDepartment(_ subId: UUID, to deptId: UUID?, freeText: String? = nil) {
+        batched { setDepartmentBody(subId, to: deptId, freeText: freeText) }
+    }
+
+    private func setDepartmentBody(_ subId: UUID, to deptId: UUID?, freeText: String?) {
+        guard let si = subordinates.firstIndex(where: { $0.id == subId }) else { return }
+        let oldText = subordinates[si].department.trimmingCharacters(in: .whitespaces)
+        let oldDept = subordinates[si].departmentId.flatMap { id in departments.first { $0.id == id } }
+        let newDept = deptId.flatMap { id in departments.first { $0.id == id } }
+        let newText: String = newDept.map { Self.departmentLabel($0) }
+            ?? (freeText ?? "").trimmingCharacters(in: .whitespaces)
+        if subordinates[si].departmentId != deptId { subordinates[si].departmentId = deptId }
+        if subordinates[si].department != newText { subordinates[si].department = newText }
+        guard let pi = orgPeople.firstIndex(where: { $0.linkedSubordinateId == subId }) else {
+            if deptId != nil { syncOrgPersonFor(subordinate: subordinates[si]) }
+            return
+        }
+        if let d = deptId, orgPeople[pi].departmentId != d { orgPeople[pi].departmentId = d }
+        guard let nd = newDept, let cid = orgPeople[pi].linkedBusinessCardId,
+              let ci = businessCards.firstIndex(where: { $0.id == cid }) else { return }
+        let cur = businessCards[ci].department.trimmingCharacters(in: .whitespaces)
+        var autoTexts: Set<String> = ["", oldText]
+        if let od = oldDept {
+            autoTexts.insert(od.name.trimmingCharacters(in: .whitespaces))
+            autoTexts.insert(Self.departmentLabel(od))
+        }
+        let label = Self.departmentLabel(nd)
+        if autoTexts.contains(cur), cur != label { businessCards[ci].department = label }
+    }
+
+    /// [v0b⑤] 升職表單（PromotionSheet）：記一筆升職歷程、換職等；組織人員的職等、職稱跟著（syncOrgPersonFor），
+    /// 自動產生的名片職稱（空白、或跟組織人員原本的職稱一樣）也跟著。原本表單直接整筆寫回部屬、不走同步：組織人員停在舊職等。
+    /// 部屬的 jobTitle 照原本清空（自訂職稱文字已被職等職稱取代）。一次存檔。
+    func promoteSubordinate(_ subId: UUID, to gradeTitleId: UUID, record: PromotionRecord) {
+        batched {
+            guard let si = subordinates.firstIndex(where: { $0.id == subId }) else { return }
+            let oldOrgTitle = orgPeople.first(where: { $0.linkedSubordinateId == subId })?
+                .jobTitle.trimmingCharacters(in: .whitespaces) ?? ""
+            subordinates[si].promotions.append(record)
+            subordinates[si].gradeTitleId = gradeTitleId
+            subordinates[si].jobTitle = ""
+            syncOrgPersonFor(subordinate: subordinates[si])
+            guard let p = orgPeople.first(where: { $0.linkedSubordinateId == subId }),
+                  let cid = p.linkedBusinessCardId,
+                  let ci = businessCards.firstIndex(where: { $0.id == cid }) else { return }
+            let cur = businessCards[ci].jobTitle.trimmingCharacters(in: .whitespaces)
+            if cur.isEmpty || cur == oldOrgTitle, cur != p.jobTitle { businessCards[ci].jobTitle = p.jobTitle }
+        }
     }
 
     func mutateSubordinateTaskFields(subordinateId: UUID, taskId: UUID,
@@ -3664,17 +4286,26 @@ class LifeStore: ObservableObject {
 
     func add(_ item: OrgPerson) { orgPeople.append(item) }
     func update(_ item: OrgPerson) {
-        if let i = orgPeople.firstIndex(where: { $0.id == item.id }) { orgPeople[i] = item }
-        // [v25.297] 部門反向同步：組織人員改了部門，連動的部屬也要跟著搬。
-        // 原本只有部屬→組織人員的單向同步，從公司組織頁調部門時部屬端
-        // 停在舊部門，設備編輯器等依部屬 departmentId 篩選的地方就對不上。
-        if let sid = item.linkedSubordinateId,
-           let si = subordinates.firstIndex(where: { $0.id == sid }),
-           subordinates[si].departmentId != item.departmentId {
-            subordinates[si].departmentId = item.departmentId
-            subordinates[si].department = item.departmentId.flatMap { did in
-                departments.first { $0.id == did }?.name
-            } ?? ""
+        // [v25.589 轉組織 v0b④] 組織人員、部屬、名片一次存（原本兩次 didSet 各存一次）
+        batched {
+            // [v25.589 轉組織 v0b④ 驗證] 組織人員「自己的部門真的改了」才反向搬部屬（跟 store 裡現在那一筆比；查不到＝照舊當成改了）。
+            // 原本只比「部屬 departmentId != 這筆的 departmentId」：v0b 起部屬選「未選擇」不蓋組織人員（部屬 nil、組織人員還在製造一課），
+            // 之後組織人員詳情頁新增／刪除簡易作品、生日提醒寫回事件 id、刪名片清連結這幾處 update(p)（部門沒動）
+            // 就會把部屬搬回製造一課（verify/repro_unselected.py）。（要退回這一件：拿掉 deptChanged 這兩行與 if 裡的 deptChanged。）
+            let before = orgPeople.firstIndex(where: { $0.id == item.id }).map { orgPeople[$0].departmentId }
+            let deptChanged = before.map { $0 != item.departmentId } ?? true
+            if let i = orgPeople.firstIndex(where: { $0.id == item.id }) { orgPeople[i] = item }
+            // [v25.297] 部門反向同步：組織人員改了部門，連動的部屬也要跟著搬。
+            // 原本只有部屬→組織人員的單向同步，從公司組織頁調部門時部屬端
+            // 停在舊部門，設備編輯器等依部屬 departmentId 篩選的地方就對不上。
+            // [v25.589 轉組織 v0b④] 改走 setDepartmentBody（同部屬編輯頁那條路）：部屬的部門字樣統一「代碼 — 名稱」
+            //（原本這裡只寫名稱、部屬編輯頁寫「代碼 — 名稱」，兩條路結果不一樣）、自動產生的名片部門一起換
+            if deptChanged,
+               let sid = item.linkedSubordinateId,
+               let si = subordinates.firstIndex(where: { $0.id == sid }),
+               subordinates[si].departmentId != item.departmentId {
+                setDepartmentBody(sid, to: item.departmentId, freeText: nil)
+            }
         }
     }
     /// [v25.587 轉組織 v0a⑥] 組織人員編輯頁存檔用（OrgPersonEditor.save）：
@@ -4355,7 +4986,10 @@ class LifeStore: ObservableObject {
         isLoading = true
         body()
         isLoading = wasLoading
-        if !wasLoading { save() }
+        if !wasLoading {
+            save()
+            flushReminderWork()   // [v25.589 轉組織 v0b②] 同 batched：裡面收集的提醒事項，最外層存完才送（沒有就什麼都不做）
+        }
     }
 
     // MARK: - [v25.399] 旅遊規劃 CRUD
@@ -4731,7 +5365,8 @@ class LifeStore: ObservableObject {
             companySites: companySites, tripPlans: tripPlans, workoutPrefs: workoutPrefs,
             workoutHealthLedger: workoutHealthLedger, workoutLeave: workoutLeave,
             wealthBook: wealthBook, wealthDeposits: wealthDeposits, wealthVault: wealthVault,
-            wealthTransfers: wealthTransfers
+            wealthTransfers: wealthTransfers,
+            orgHandoffs: orgHandoffs
         )
         saveQueue.async {
             let encoder = JSONEncoder()
@@ -4762,6 +5397,7 @@ class LifeStore: ObservableObject {
             if let d = try? encoder.encode(snap.wealthDeposits) { ud.set(d, forKey: "life_wealth_deposits_v1") }
             if let d = try? encoder.encode(snap.wealthVault)    { ud.set(d, forKey: WealthVaultBook.syncKey) }
             if let d = try? encoder.encode(snap.wealthTransfers) { ud.set(d, forKey: WealthTransferBook.syncKey) }
+            if let d = try? encoder.encode(snap.orgHandoffs)    { ud.set(d, forKey: OrgHandoffBook.syncKey) }
             CloudSyncManager.shared.pushAll()
         }
     }
@@ -4831,6 +5467,11 @@ class LifeStore: ObservableObject {
         if let data = rawDataIfChanged(WealthTransferBook.syncKey),
            let wt = try? decoder.decode(WealthTransferBook.self, from: data) {
             wealthTransfers = wt
+        }
+        // [v25.589] 轉組織 v0b：交出去時已逾期的帳
+        if let data = rawDataIfChanged(OrgHandoffBook.syncKey),
+           let oh = try? decoder.decode(OrgHandoffBook.self, from: data) {
+            orgHandoffs = oh
         }
     }
 
@@ -4912,6 +5553,7 @@ class LifeStore: ObservableObject {
         wealthDeposits = WealthDepositBook()
         wealthVault = WealthVaultBook()
         wealthTransfers = WealthTransferBook()
+        orgHandoffs = OrgHandoffBook()   // [v25.589] 轉組織 v0b
         companySites.removeAll()
         // 行程的照片檔也要一起清，不然會留下沒人指向的孤兒檔被雲端一直重傳
         for plan in tripPlans {

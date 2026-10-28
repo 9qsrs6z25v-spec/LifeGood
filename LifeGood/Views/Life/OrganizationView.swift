@@ -1864,10 +1864,10 @@ struct OrgPersonEditor: View {
                 }
 
                 Section {
-                    TextField("例：他是我直屬主管的好朋友、他掌握決策權…", text: $relationship, axis: .vertical)
+                    TextField("例：直屬主管的好朋友、掌握決策權…", text: $relationship, axis: .vertical)
                         .lineLimit(3...6)
                 } header: {
-                    orgPersonEditorSectionHeader("我與他的利害關係", icon: "person.2.fill", color: .purple)
+                    orgPersonEditorSectionHeader("我與這位同仁的利害關係", icon: "person.2.fill", color: .purple)
                 }
 
                 Section {
@@ -1896,7 +1896,7 @@ struct OrgPersonEditor: View {
                             .foregroundStyle(.green)
                     }
                 } header: {
-                    orgPersonEditorSectionHeader("他的子女", icon: "figure.2.and.child.holdinghands", color: .pink)
+                    orgPersonEditorSectionHeader("子女", icon: "figure.2.and.child.holdinghands", color: .pink)
                 } footer: {
                     Text("方便記住對方家庭背景，找話題用。")
                 }
@@ -2365,7 +2365,7 @@ struct OrgPersonDetailView: View {
                     // [v25.323] 相關作品／報告／改善：部屬自動帶入＋手動記錄的簡易項目
                     worksCard
                     if !person.relationship.isEmpty {
-                        sectionCard("我與他的利害關係", systemImage: "link.circle.fill", color: .indigo) {
+                        sectionCard("我與這位同仁的利害關係", systemImage: "link.circle.fill", color: .indigo) {
                             Text(person.relationship).font(.subheadline)
                         }
                     }
@@ -2529,7 +2529,7 @@ struct OrgPersonDetailView: View {
                     }
                 }
                 if person.works.isEmpty && linkedSub == nil {
-                    Text("還沒有紀錄。非部屬的同仁也可以按下方「新增項目」記下他報告過的東西（項目＋日期）。")
+                    Text("還沒有紀錄。非部屬的同仁也可以按下方「新增項目」記下報告過的東西（項目＋日期）。")
                         .font(.caption).foregroundStyle(.tertiary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -2788,7 +2788,7 @@ struct OrgPersonDetailView: View {
 
     // [v2] 每列加入 30pt 粉紅漸層圖示圓；生日改為 Capsule 日期膠囊徽章；列間加 separator
     private var childrenCard: some View {
-        sectionCard("他的子女", systemImage: "figure.child", color: .pink) {
+        sectionCard("子女", systemImage: "figure.child", color: .pink) {
             VStack(alignment: .leading, spacing: 4) {
                 ForEach(person.children) { c in
                     HStack(spacing: 10) {
@@ -2840,7 +2840,7 @@ struct OrgPersonDetailView: View {
     // giftHistory（全量 filter+字串切分+sort）改由呼叫端（body）算一次傳入，避免本卡片
     // 內的累計/列表/計數三處各自重觸發一次全量掃描（比照 memberGiftsSection(_ gifts:) 既有規格）。
     private func giftCard(_ giftHistory: [Expense]) -> some View {
-        sectionCard("我送過他的禮金", systemImage: "gift.fill", color: .pink) {
+        sectionCard("我送過的禮金", systemImage: "gift.fill", color: .pink) {
             let total = giftHistory.reduce(0) { $0 + $1.amount }
             VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 10) {
@@ -3388,7 +3388,7 @@ struct OrgPersonDuplicateReview: View {
     }
 
     private static let explainer =
-        "刪除部屬時，公司組織裡的那個人會被保留下來（他還在公司，只是不再是你的部屬），"
+        "刪除部屬時，公司組織裡的那個人會被保留下來（人還在公司，只是不再是你的部屬），"
         + "只解除兩邊的連結。之後同一個人重新被加成部屬時——重新加、從備份還原、"
         + "或換手機後 iCloud 把部屬資料拉回來——系統找不到「已連結」的人員，就會再建一筆新的。"
         + "部屬清單曾經整批重來過的話，整個部門就會變成兩倍。\n\n"
