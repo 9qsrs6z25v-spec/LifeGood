@@ -134,3 +134,201 @@ struct OrgMoveMeetingTopicRow: View {
     /// 「新會議名稱：週會」
     private var label: String { "新會議名稱：" + topic }
 }
+
+// MARK: - [v25.592 轉組織 v1b] 精靈 v1b 多的幾個小零件（orgmove/build/v1b/brief.md §3）
+// 一位同仁同時只能有一張（橘框卡、〔打開那張〕的交接單頁、〔取消那張、重排〕的確認框）、第 ③ 步「什麼時候做」的一顆、
+// 第 ② 步〔＋ 自己加一項〕。字都在 OrgMovePlan 組好（plannedPrompt／cancelAsk／timingOptions），這裡只排版。
+// 要退回這一段：刪到檔尾，OrgMoveWizard.swift 那幾處 [v25.592 轉組織 v1b] 呼叫一起刪。
+
+/// 第 ① 步最上面那張橘框卡（judge §5-21「王小明已經排了 11/1 轉組織〔打開那張〕〔取消那張、重排〕」）。
+/// 不用 alert：精靈剛打開就跳 alert 會跟 sheet 的動畫打架
+struct OrgMoveWizPlannedCard: View {
+    let prompt: OrgMovePlannedPrompt
+    let onOpen: () -> Void
+    let onCancel: () -> Void
+
+    init(prompt: OrgMovePlannedPrompt, onOpen: @escaping () -> Void, onCancel: @escaping () -> Void) {
+        self.prompt = prompt
+        self.onOpen = onOpen
+        self.onCancel = onCancel
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.subheadline)
+                Text(prompt.title)
+                    .font(.subheadline.weight(.bold))
+                    .monospacedDigit()
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .foregroundStyle(.orange)
+            Text(prompt.message)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            buttons
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .strokeBorder(Color.orange.opacity(0.55), lineWidth: 1)
+        }
+    }
+
+    /// 〔打開那張〕〔取消那張、重排〕
+    private var buttons: some View {
+        HStack(spacing: 8) {
+            Button(action: onOpen) {
+                Text("打開那張")
+                    .font(.subheadline.weight(.semibold))
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(.orange)
+            Button(action: onCancel) {
+                Text("取消那張、重排")
+                    .font(.subheadline.weight(.semibold))
+            }
+            .buttonStyle(.bordered)
+            .tint(.red)
+            Spacer(minLength: 0)
+        }
+        .controlSize(.small)
+        .padding(.top, 2)
+    }
+}
+
+/// 〔取消那張、重排〕要的那一份：哪一張、確認框的字（OrgMovePlan.cancelAsk）
+struct OrgMoveWizCancelRequest: Identifiable {
+    let id = UUID()
+    let moveId: UUID
+    let ask: OrgMoveCancelAsk
+
+    init(moveId: UUID, ask: OrgMoveCancelAsk) {
+        self.moveId = moveId
+        self.ask = ask
+    }
+}
+
+/// 精靈根層：〔打開那張〕的交接單頁（`.sheet(item:)`＋`.appStores()`；關掉時 onSheetClosed：在那張單上取消、拿回來之後清單要重算）、
+/// 〔取消那張、重排〕的確認框（排好的：一顆〔取消這張單〕；交出去了：〔拿回來（還沒做完的 7 項）〕〔留給接手的人〕＋〔不要取消〕）。
+/// onCancel(moveId, takeBack)：呼叫端在下一個 runloop 寫 store（LifeStore.cancelOrgMove）
+struct OrgMoveWizPlannedActions: ViewModifier {
+    @Binding var sheet: OrgMoveSheetRequest?
+    @Binding var cancel: OrgMoveWizCancelRequest?
+    let onCancel: (UUID, Bool) -> Void
+    let onSheetClosed: () -> Void
+
+    init(sheet: Binding<OrgMoveSheetRequest?>, cancel: Binding<OrgMoveWizCancelRequest?>,
+         onCancel: @escaping (UUID, Bool) -> Void, onSheetClosed: @escaping () -> Void) {
+        self._sheet = sheet
+        self._cancel = cancel
+        self.onCancel = onCancel
+        self.onSheetClosed = onSheetClosed
+    }
+
+    func body(content: Content) -> some View {
+        content
+            .sheet(item: $sheet, onDismiss: onSheetClosed) { r in
+                OrgMoveSheetView(moveId: r.moveId)
+                    .appStores()
+            }
+            .confirmationDialog(cancelTitle, isPresented: cancelShown, titleVisibility: .visible, presenting: cancel) { r in
+                cancelButtons(r)
+            } message: { r in
+                Text(r.ask.message)
+            }
+    }
+
+    private var cancelTitle: String {
+        cancel?.ask.title ?? ""
+    }
+
+    private var cancelShown: Binding<Bool> {
+        Binding(get: { cancel != nil }, set: { if !$0 { cancel = nil } })
+    }
+
+    @ViewBuilder
+    private func cancelButtons(_ r: OrgMoveWizCancelRequest) -> some View {
+        if let c = r.ask.confirmLabel {
+            Button(c, role: .destructive) { onCancel(r.moveId, false) }
+        }
+        if let t = r.ask.takeBackLabel {
+            Button(t, role: .destructive) { onCancel(r.moveId, true) }
+        }
+        if let k = r.ask.keepLabel {
+            Button(k) { onCancel(r.moveId, false) }
+        }
+        Button("不要取消", role: .cancel) {}
+    }
+}
+
+/// 第 ③ 步「什麼時候做」的一顆（〔現在就交接，11/1 才改部門〕〔11/1 一起做〕；選中的藍色實心圓）
+struct OrgMoveWizTimingRow: View {
+    let label: String
+    let on: Bool
+    let action: () -> Void
+
+    init(label: String, on: Bool, action: @escaping () -> Void) {
+        self.label = label
+        self.on = on
+        self.action = action
+    }
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 10) {
+                Image(systemName: on ? "largecircle.fill.circle" : "circle")
+                    .font(.system(size: 18))
+                    .foregroundStyle(on ? Color.blue : Color.secondary)
+                Text(label)
+                    .font(.subheadline.weight(on ? .semibold : .regular))
+                    .foregroundStyle(.primary)
+                    .monospacedDigit()
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .background(fill, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(on ? .isSelected : [])
+    }
+
+    private var fill: Color {
+        on ? Color.blue.opacity(0.1) : Color(.tertiarySystemFill)
+    }
+}
+
+/// 第 ② 步〔＋ 自己加一項〕（門禁卡、鑰匙、帳號…只記在交接單上；按了開 OrgMoveCustomLineEditor）
+struct OrgMoveWizAddCustomButton: View {
+    let action: () -> Void
+
+    init(action: @escaping () -> Void) {
+        self.action = action
+    }
+
+    var body: some View {
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: 2) {
+                Label("自己加一項", systemImage: "plus.circle.fill")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Color.accentColor)
+                Text("門禁卡、鑰匙、帳號…只記在交接單上，不動任何資料")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+}

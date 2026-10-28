@@ -10,6 +10,10 @@ import SwiftUI
 // 要退回這一個檔：三個 struct 的 body 改回 EmptyView()，刪掉下面新加的型別，SubordinateDetailView 那幾行呼叫一起刪。
 // [v25.591 轉組織 v1a-2] G3（orgmove/build/v1a-2/brief.md §5）：接手那一區多會議、議程、班、兼任四種圖示，會議、議程點了開那場會議
 // （OrgMoveReceivedCard 多一個有預設值的 onOpenMeeting）；chips(task:)／previewLine(task:)（兼任分身照 sideRoleLink.taskId）。
+// [v25.592 轉組織 v1b] G3（orgmove/build/v1b/brief.md §5）：提示列先擋改 OrgMovePlan.hasHint（認得部門還沒改的：排好的、交出去了的）；
+// 一條多灰字一行（hint.note）、下面一排小按鈕（hint.actions：〔現在套用〕〔加進交接單〕〔只做交接〕〔選部門〕〔取消這張單〕，
+// 走 G2 的 .orgMoveHintActions：訂閱、確認框、寫 store、跳「今天生效」都在那裡，這個檔照舊一個 lifeStore 的寫入都沒有）、
+// 灰色那一種（hint.muted：接手的人「11/1 起會從王小明接手 6 項」）；精靈帶 presetDeptId。
 
 // MARK: - 算資料（卡片每次重畫都會算，先擋掉沒有交接單的大多數時候）
 
@@ -124,12 +128,17 @@ enum OrgMoveCardHistoryItem: Identifiable {
 // MARK: - 看板下那一條提示列
 
 /// 看板下面、分頁切換器上面那一條細提示列（原人＋接手的人；有事才出現，沒事整條不佔位）
+/// [v25.592 轉組織 v1b] 提示列上的按鈕（hint.actions）設 actionRequest，body 掛 .orgMoveHintActions（G2 的 modifier：
+/// 訂閱、確認框、下一個 runloop 寫 store、做完跳「今天生效」都在那裡）。要退回這一件：刪 actionRequest、requestAction、
+/// body 的 .orgMoveHintActions，OrgMoveHintBarList／OrgMoveHintBarRow 刪 onAction
 struct OrgMoveHintBars: View {
     let personId: UUID
     /// 點〔看〕：打開那一張交接單（moveId）
     let onOpen: (UUID) -> Void
 
     @EnvironmentObject var lifeStore: LifeStore
+    /// [v25.592 轉組織 v1b] 提示列上按了哪一顆（modifier 用完清 nil）
+    @State private var actionRequest: OrgMoveHintActionRequest?
 
     init(personId: UUID, onOpen: @escaping (UUID) -> Void) {
         self.personId = personId
@@ -138,10 +147,13 @@ struct OrgMoveHintBars: View {
 
     /// 原人那一條在前（每人最多一條）、接手的那幾條在後（每張還在交接中、有交給這位的單一條）。
     /// 例：王小明「11/1 從製造一課調來・交出去 5・做完 0」＋橘點「待分派 1」；陳怡君「從王小明接手 4 項・做完 0」
+    /// [v25.592 轉組織 v1b] 先擋改 OrgMovePlan.hasHint：多認得部門還沒改的（「11/1 起調設備課・交接單排好了（16 項）」
+    /// 「11/1 起調設備課・已交出 9 項」、接手的人灰色「11/1 起會從王小明接手 6 項」）。
+    /// 要退回這一件：改回 OrgMoveCardData.hasOpenMove(personId:book:todayKey:)
     private var hints: [OrgMoveHint] {
         let now = Date()
         let book = lifeStore.orgMoves
-        guard OrgMoveCardData.hasOpenMove(personId: personId, book: book, todayKey: OrgMovePlan.dayKey(now)) else {
+        guard OrgMovePlan.hasHint(personId: personId, book: book, todayKey: OrgMovePlan.dayKey(now)) else {
             return []
         }
         let world = OrgMoveWorld(store: lifeStore)
@@ -153,20 +165,28 @@ struct OrgMoveHintBars: View {
         return out
     }
 
+    /// [v25.592 轉組織 v1b] 提示列上按了一顆：交給 .orgMoveHintActions（這裡不判斷訂閱、不寫 store）
+    private func requestAction(_ moveId: UUID, _ action: OrgMoveHintAction) {
+        actionRequest = OrgMoveHintActionRequest(moveId: moveId, action: action)
+    }
+
     var body: some View {
-        OrgMoveHintBarList(hints: hints, onOpen: onOpen)
+        OrgMoveHintBarList(hints: hints, onOpen: onOpen, onAction: requestAction)
+            .orgMoveHintActions($actionRequest)
     }
 }
 
 private struct OrgMoveHintBarList: View {
     let hints: [OrgMoveHint]
     let onOpen: (UUID) -> Void
+    /// [v25.592 轉組織 v1b] 按了一條上的按鈕（moveId、哪一顆）
+    let onAction: (UUID, OrgMoveHintAction) -> Void
 
     var body: some View {
         if !hints.isEmpty {
             VStack(spacing: 8) {
                 ForEach(hints) { h in
-                    OrgMoveHintBarRow(hint: h, onOpen: onOpen)
+                    OrgMoveHintBarRow(hint: h, onOpen: onOpen, onAction: onAction)
                 }
             }
             .padding(.horizontal)
@@ -175,68 +195,186 @@ private struct OrgMoveHintBarList: View {
 }
 
 /// 一條：白卡、圓角 14、左邊雙箭頭、右邊〔看〕；第二行橘點「待分派 1」、橘字警告（judge §4.7 表）
+/// [v25.592 轉組織 v1b] 再一行灰字（note）、最下面一排小按鈕（actions）；muted＝整條灰（灰底、灰圖示、灰字、沒有陰影）。
+/// 上半截（圖示、字、〔看〕）照舊整塊點了開交接單；按鈕那一排空白的地方點了也開交接單（按鈕自己的點擊優先）。
+/// 要退回這一件：改回一整顆 Button（上半截 OrgMoveCardHintMain 的內容＋原本的背景、陰影），刪 OrgMoveCardHintActionStrip
 private struct OrgMoveHintBarRow: View {
     let hint: OrgMoveHint
     let onOpen: (UUID) -> Void
+    let onAction: (UUID, OrgMoveHintAction) -> Void
+
+    private var hasActions: Bool { !hint.actions.isEmpty }
+    /// 有按鈕時上半截底下留少一點（按鈕那一排自己有下邊距）
+    private var mainBottom: CGFloat { hasActions ? 7 : 11 }
+    private var fill: Color { hint.muted ? Color(.tertiarySystemFill) : Color(.systemBackground) }
+    private var shadowOpacity: Double { hint.muted ? 0 : 0.05 }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            OrgMoveCardHintMain(hint: hint, bottomPadding: mainBottom, onOpen: onOpen)
+            if hasActions {
+                OrgMoveCardHintActionStrip(moveId: hint.moveId, actions: hint.actions,
+                                           onOpen: onOpen, onAction: onAction)
+            }
+        }
+        .background(fill)
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color(.separator).opacity(0.12), lineWidth: 0.75))
+        .shadow(color: .black.opacity(shadowOpacity), radius: 6, x: 0, y: 2)
+    }
+}
+
+/// [v25.592 轉組織 v1b] 提示列上半截（v1a 那一整條）：左圖示、字、右〔看〕；整塊點了開交接單
+private struct OrgMoveCardHintMain: View {
+    let hint: OrgMoveHint
+    let bottomPadding: CGFloat
+    let onOpen: (UUID) -> Void
+
+    private var iconColor: Color { hint.muted ? Color.gray : Color.blue }
+    private var linkColor: Color { hint.muted ? Color.secondary : Color.blue }
 
     var body: some View {
         Button {
             onOpen(hint.moveId)
         } label: {
             HStack(alignment: .center, spacing: 10) {
-                OrgMoveCardIcon(color: .blue, size: 30, iconSize: 12)
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(hint.text)
-                        .font(.footnote.weight(.semibold))
-                        .foregroundStyle(Color.primary)
-                        .lineLimit(2)
-                        .fixedSize(horizontal: false, vertical: true)
-                    if let badge = hint.badge {
-                        OrgMoveDotLabel(text: badge)
-                    }
-                    if let warning = hint.warning {
-                        Text(warning)
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(Color.orange)
-                            .lineLimit(2)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
+                OrgMoveCardIcon(color: iconColor, size: 30, iconSize: 12)
+                OrgMoveCardHintTexts(hint: hint)
                 Spacer(minLength: 6)
-                OrgMoveLinkLabel(text: "看")
+                OrgMoveLinkLabel(text: "看", color: linkColor)
             }
             .padding(.horizontal, 14)
-            .padding(.vertical, 11)
-            .background(Color(.systemBackground))
-            .clipShape(RoundedRectangle(cornerRadius: 14))
-            .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color(.separator).opacity(0.12), lineWidth: 0.75))
-            .shadow(color: .black.opacity(0.05), radius: 6, x: 0, y: 2)
-            .contentShape(RoundedRectangle(cornerRadius: 14))
+            .padding(.top, 11)
+            .padding(.bottom, bottomPadding)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityHint("打開交接單")
     }
 }
 
+/// [v25.592 轉組織 v1b] 提示列的字：主句、橘點「待分派 1」、橘字警告、灰字一行（note：「排好之後多了 1 件（先跟著王小明）」）。
+/// muted 的主句灰、點與警告也灰（不用紫／橘；照理灰色那一種不會有點與警告）
+private struct OrgMoveCardHintTexts: View {
+    let hint: OrgMoveHint
+
+    private var textColor: Color { hint.muted ? Color.secondary : Color.primary }
+    private var alertColor: Color { hint.muted ? Color.secondary : Color.orange }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(hint.text)
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(textColor)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+            if let badge = hint.badge {
+                OrgMoveDotLabel(text: badge, color: alertColor)
+            }
+            if let warning = hint.warning {
+                Text(warning)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(alertColor)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if let note = hint.note {
+                Text(note)
+                    .font(.caption)
+                    .foregroundStyle(Color.secondary)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+}
+
+/// [v25.592 轉組織 v1b] 提示列最下面一排小按鈕（對齊字的左邊：圖示 30＋間距 10＋左邊距 14＝54）。
+/// 一排放不下（字放大時）就直的排。空白的地方點了照舊開交接單
+private struct OrgMoveCardHintActionStrip: View {
+    let moveId: UUID
+    let actions: [OrgMoveHintAction]
+    let onOpen: (UUID) -> Void
+    let onAction: (UUID, OrgMoveHintAction) -> Void
+
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 8) {
+                chips
+            }
+            VStack(alignment: .leading, spacing: 6) {
+                chips
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.leading, 54)
+        .padding(.trailing, 14)
+        .padding(.bottom, 11)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            onOpen(moveId)
+        }
+    }
+
+    private var chips: some View {
+        ForEach(actions) { a in
+            OrgMoveCardHintActionChip(action: a) {
+                onAction(moveId, a)
+            }
+        }
+    }
+}
+
+/// [v25.592 轉組織 v1b] 一顆小按鈕：〔現在套用〕藍底白字（最要緊的那一顆）、〔取消這張單〕紅字、其他藍字（淡底膠囊）
+private struct OrgMoveCardHintActionChip: View {
+    let action: OrgMoveHintAction
+    let onTap: () -> Void
+
+    private var prominent: Bool { action == .applyNow }
+    private var tint: Color { action == .cancel ? Color.red : Color.blue }
+    private var textColor: Color { prominent ? Color.white : tint }
+    private var chipFill: Color { prominent ? tint : tint.opacity(0.12) }
+
+    var body: some View {
+        Button(action: onTap) {
+            Text(action.label)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(textColor)
+                .lineLimit(1)
+                .fixedSize()
+                .padding(.horizontal, 11)
+                .padding(.vertical, 6)
+                .background(chipFill)
+                .clipShape(Capsule())
+                .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+    }
+}
+
 /// 橘點＋橘字（「待分派 1」）
+/// [v25.592 轉組織 v1b] color 有預設值（橘）：灰色那一種提示列傳灰。要退回這一件：刪 color，兩處改回 Color.orange
 private struct OrgMoveDotLabel: View {
     let text: String
+    var color: Color = .orange
 
     var body: some View {
         HStack(spacing: 4) {
             Circle()
-                .fill(Color.orange)
+                .fill(color)
                 .frame(width: 6, height: 6)
             Text(text)
                 .font(.caption.weight(.semibold))
-                .foregroundStyle(Color.orange)
+                .foregroundStyle(color)
         }
     }
 }
 
 /// 右邊的藍字連結（「看 ›」「交接單 ›」）
+/// [v25.592 轉組織 v1b] color 有預設值（藍）：灰色那一種提示列傳灰。要退回這一件：刪 color，改回 Color.blue
 private struct OrgMoveLinkLabel: View {
     let text: String
+    var color: Color = .blue
 
     var body: some View {
         HStack(spacing: 2) {
@@ -245,7 +383,7 @@ private struct OrgMoveLinkLabel: View {
                 .font(.system(size: 9, weight: .bold))
         }
         .font(.footnote.weight(.semibold))
-        .foregroundStyle(Color.blue)
+        .foregroundStyle(color)
     }
 }
 
@@ -734,7 +872,9 @@ struct OrgMoveCardSheets: ViewModifier {
     func body(content: Content) -> some View {
         content
             .sheet(item: $wizard) { r in
-                OrgMoveWizard(personId: r.personId)
+                // [v25.592 轉組織 v1b] 帶 presetDeptId（組織頁〔用轉組織〕帶新部門；卡片「…」是 nil＝照舊）。
+                // 要退回這一件：改回 OrgMoveWizard(personId: r.personId)
+                OrgMoveWizard(personId: r.personId, presetDeptId: r.presetDeptId)
                     .appStores()
             }
             .sheet(item: $sheet) { r in

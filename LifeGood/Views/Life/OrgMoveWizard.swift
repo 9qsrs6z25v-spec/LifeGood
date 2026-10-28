@@ -10,9 +10,19 @@ import SwiftUI
 // [v25.591 轉組織 v1a-2] 第 ② 步多會議、議程、班、兼任四種列（orgmove/build/v1a-2/brief.md §3）：選項、灰字一律走
 // OrgMovePlan.choices／reasonLines 的 in:personId: 那一支；新會議名稱〔改〕、撞班那幾天的排版在 OrgMoveWizardRows.swift；
 // 灰字「下一版才能在這裡交」拿掉。要退回 v1a-2 這幾件：照每一處 [v25.591 轉組織 v1a-2] 註解的「要退回」改。
+// [v25.592 轉組織 v1b] 排在以後（orgmove/build/v1b/brief.md §3；judge §4.1～§4.4、§5-1、§5-21、第 6 題）：
+// • init 多一個有預設值的 presetDeptId（組織頁〔用轉組織〕帶新部門；舊的 OrgMoveWizard(personId:) 照樣編得過）
+// • 生效日可以選任何一天，預設下個月 1 號（OrgMovePlan.defaultEffectiveDate）；生效日在以後多一行灰字
+// • 一位同仁同時只能有一張（OrgMovePlan.plannedPrompt）：第 ① 步最上面橘框卡〔打開那張〕〔取消那張、重排〕，有這張卡〔下一步〕按不下去
+// • 第 ② 步「自己加的」那一組＋〔＋ 自己加一項〕（OrgMoveCustomLineEditor，只寫草稿）
+// • 第 ③ 步「什麼時候做」兩顆（綁 draft.timing）、生日提醒那行小字、接手的人先調走的橘字；大按鈕〔排好（11/1 一起做）〕
+// • 完成畫面的大字照 OrgMovePlan.doneTexts；排好、交出去了（部門還沒改）的不改生日提醒
+// 新的小零件在 OrgMoveWizardRows.swift。要退回 v1b 這幾件：照每一處 [v25.592 轉組織 v1b] 註解的「要退回」改。
 
 struct OrgMoveWizard: View {
     let personId: UUID
+    /// [v25.592 轉組織 v1b] 組織頁改部門時〔用轉組織〕帶來的新部門（nil＝不帶）；prepare() 裡照「選部門」那一支帶
+    let presetDeptId: UUID?
 
     @EnvironmentObject var lifeStore: LifeStore
     @EnvironmentObject var subscription: SubscriptionManager
@@ -28,10 +38,17 @@ struct OrgMoveWizard: View {
     /// 完成畫面那一句（生日提醒改好了／行事曆沒有權限）
     @State private var birthdayNote: String?
     @State private var showPremiumAlert = false
+    /// [v25.592 轉組織 v1b] 〔打開那張〕的交接單頁、〔取消那張、重排〕的確認框
+    @State private var plannedSheet: OrgMoveSheetRequest?
+    @State private var cancelRequest: OrgMoveWizCancelRequest?
 
-    init(personId: UUID) {
+    /// [v25.592 轉組織 v1b] 多 presetDeptId（有預設值）；生效日預設下個月 1 號（judge 第 6 題）。
+    /// 要退回這一件：拿掉 presetDeptId 參數與欄位，effective 改回 `Date()`。
+    init(personId: UUID, presetDeptId: UUID? = nil) {
         self.personId = personId
-        _draft = State(initialValue: OrgMoveDraft(personId: personId, effective: Date()))
+        self.presetDeptId = presetDeptId
+        let start = OrgMovePlan.defaultEffectiveDate(now: Date())
+        _draft = State(initialValue: OrgMoveDraft(personId: personId, effective: start))
     }
 
     var body: some View {
@@ -46,7 +63,16 @@ struct OrgMoveWizard: View {
         }
         .interactiveDismissDisabled(step == .list || step == .confirm)
         .premiumLockAlert(isPresented: $showPremiumAlert)
+        .modifier(plannedActions)
         .onAppear { prepare() }
+    }
+
+    /// [v25.592 轉組織 v1b] 〔打開那張〕〔取消那張、重排〕的 sheet 與確認框（OrgMoveWizardRows.swift）。
+    /// 要退回這一件：刪 body 的 `.modifier(plannedActions)` 與這一支。
+    private var plannedActions: OrgMoveWizPlannedActions {
+        OrgMoveWizPlannedActions(sheet: $plannedSheet, cancel: $cancelRequest,
+                                 onCancel: { id, back in cancelPlanned(id, takeBack: back) },
+                                 onSheetClosed: { refreshLines() })
     }
 
     /// 這位同仁不在名單了（iCloud 從別台刪了）。完成畫面不看（交接單已經做好）
@@ -57,6 +83,25 @@ struct OrgMoveWizard: View {
     /// 換單位、不是〔照舊（只交接）〕、還沒選新部門：〔下一步〕按不下去
     private var canLeavePlace: Bool {
         !(draft.kind == .move && !draft.keepDept && draft.toDeptId == nil)
+    }
+
+    /// [v25.592 轉組織 v1b] 這位已經有一張排好、部門還沒改的（judge §5-21；只在第 ① 步、還沒按確認時看）。
+    /// 每次畫面照現在的交接單算：〔取消那張、重排〕之後、在那張交接單頁取消之後，卡片自己收起。
+    /// 要退回這一件：刪這一支、canNext／nextHint 改回 canLeavePlace 與 v1a 那行字、StepWhere 拿掉 prompt 那三個參數。
+    private var plannedPrompt: OrgMovePlannedPrompt? {
+        guard step == .place, appliedMoveId == nil else { return nil }
+        return OrgMovePlan.plannedPrompt(personId: personId, book: lifeStore.orgMoves)
+    }
+
+    /// [v25.592 轉組織 v1b] 〔下一步〕按得下去：選好部門（或照舊）、而且沒有排好的那一張
+    private var canNext: Bool {
+        canLeavePlace && plannedPrompt == nil
+    }
+
+    /// [v25.592 轉組織 v1b] 〔下一步〕按不下去時下面那行橘字
+    private var nextHint: String? {
+        if plannedPrompt != nil { return "先打開那張改，或取消那張再重排" }
+        return canLeavePlace ? nil : "選新部門，或選〔照舊（只交接）〕"
     }
 
     private var titleText: String {
@@ -74,7 +119,11 @@ struct OrgMoveWizard: View {
         } else {
             switch step {
             case .place:
-                OrgMoveStepWhere(draft: $draft, plantTouched: $plantTouched, canNext: canLeavePlace) { goToList() }
+                // [v25.592 轉組織 v1b] 多 nextHint、prompt 與兩個回呼（排好的那一張）。要退回這一件：換回 v1a 那一行
+                OrgMoveStepWhere(draft: $draft, plantTouched: $plantTouched, canNext: canNext, nextHint: nextHint,
+                                 prompt: plannedPrompt,
+                                 onOpenPlanned: { id in openPlanned(id) },
+                                 onCancelPlanned: { id in askCancelPlanned(id) }) { goToList() }
             case .list:
                 OrgMoveStepList(draft: $draft) { step = .confirm }
             case .confirm:
@@ -111,7 +160,7 @@ struct OrgMoveWizard: View {
             switch step {
             case .place:
                 Button("下一步") { goToList() }
-                    .disabled(!canLeavePlace)
+                    .disabled(!canNext)
             case .list:
                 Button("下一步") { step = .confirm }
             case .confirm:
@@ -125,14 +174,23 @@ struct OrgMoveWizard: View {
     /// 建草稿（只建一次）：廠區先帶現在的；清單照〔換單位〕、部門還沒換的預設（brief G1-1）
     /// [v25.591 轉組織 v1a-2] 多傳 plantChanges（現在一定是 false：廠區剛帶成現在的；寫上去跟 rebuild 一致）。
     /// 要退回這一件：拿掉 `plantChanges:` 那個參數。
+    /// [v25.592 轉組織 v1b] presetDeptId 有值（〔用轉組織〕帶來的）＝換單位、先選好那個部門：新主管、廠區照第 ① 步選部門那一支
+    ///（OrgMoveWizEdit.chooseDept：「設備課 4 位裡 3 位在 P2」那套自動帶）；部門被刪了就不帶。deptChanges 照草稿算（沒帶＝false，同 v1a）。
+    /// 要退回這一件：刪 `if let pre` 那一段，deptChanges 改回 `false`。
     private func prepare() {
         guard !prepared else { return }
         prepared = true
         let world = OrgMoveWorld(store: lifeStore)
         guard let sub = world.sub(personId) else { return }
         var d = draft
-        d.toPlant = sub.plantArea.trimmingCharacters(in: .whitespaces)
-        d.lines = OrgMovePlan.buildLines(personId: personId, kind: d.kind, deptChanges: false,
+        let current = sub.plantArea.trimmingCharacters(in: .whitespaces)
+        d.toPlant = current
+        if let pre = presetDeptId, world.dept(pre) != nil {
+            d.kind = .move
+            OrgMoveWizEdit.chooseDept(&d, deptId: pre, world: world, plantTouched: false, currentPlant: current)
+        }
+        d.lines = OrgMovePlan.buildLines(personId: personId, kind: d.kind,
+                                         deptChanges: OrgMovePlan.deptChanges(d, world: world),
                                          effectiveKey: OrgMovePlan.dayKey(d.effective), world: world, now: Date(),
                                          plantChanges: OrgMovePlan.plantChanges(d, world: world))
         draft = d
@@ -141,18 +199,32 @@ struct OrgMoveWizard: View {
     /// [v25.591 轉組織 v1a-2] 第 ① 步〔下一步〕（右上那顆、最下面那顆都走這裡）：先重算一次清單再到第 ② 步。
     /// 「其他…」廠區文字框每打一字不重算，到這裡才算（班的預設看部門或廠區有沒有換）；你動過的列照留（OrgMovePlan.rebuild）。
     /// 要退回這一件：兩處呼叫改回 `step = .list`、刪這支。
+    /// [v25.592 轉組織 v1b] 有排好的那一張時不走（按鈕已經按不下去，這裡再擋一次）。要退回這一件：刪 guard 那一行
     private func goToList() {
-        var d = draft
-        OrgMovePlan.rebuild(&d, world: OrgMoveWorld(store: lifeStore), now: Date())
-        draft = d
+        guard canNext else { return }
+        refreshLines()
         step = .list
     }
 
+    /// 照現在的資料重算清單（你動過的列、自己加的照留；OrgMovePlan.rebuild）
+    private func refreshLines() {
+        var d = draft
+        OrgMovePlan.rebuild(&d, world: OrgMoveWorld(store: lifeStore), now: Date())
+        draft = d
+    }
+
     /// 〔確認交接〕（要訂閱）：sheet 還開著時直接寫（applyOrgMove 一個 batched、只存一次），寫完換到完成畫面、不能再回上一步
+    /// [v25.592 轉組織 v1b] ① 這位已經有一張排好的（iCloud 剛從另一台拉來）：回第 ① 步看那張卡，不建第二張（judge §5-21）。
+    /// ② 生日提醒只在這張真的改好部門（state "applied"）時才改；排好、交出去了的到「今天生效」那張上你按才改（brief §3-7）。
+    /// 要退回這一件：刪 plannedPrompt 那一段，`if wantsBirthday && applied` 改回 `if wantsBirthday`。
     private func confirm() {
         guard step == .confirm else { return }
         guard subscription.isPremium else {
             showPremiumAlert = true
+            return
+        }
+        if OrgMovePlan.plannedPrompt(personId: personId, book: lifeStore.orgMoves) != nil {
+            step = .place
             return
         }
         let world = OrgMoveWorld(store: lifeStore)
@@ -160,9 +232,35 @@ struct OrgMoveWizard: View {
         let now = Date()
         let move = OrgMovePlan.makeMove(draft, world: world, now: now)
         let wantsBirthday = draft.retitleBirthday && OrgMovePlan.birthdayOffer(move, world: world)
-        appliedMoveId = lifeStore.applyOrgMove(move, now: now)
+        let id = lifeStore.applyOrgMove(move, now: now)
+        appliedMoveId = id
         step = .done
-        if wantsBirthday { retitleBirthdays() }
+        let applied = lifeStore.orgMoves.move(id)?.state == OrgMoveState.applied.rawValue
+        if wantsBirthday && applied { retitleBirthdays() }
+    }
+
+    // MARK: [v25.592 轉組織 v1b] 排好的那一張（〔打開那張〕〔取消那張、重排〕）
+
+    private func openPlanned(_ moveId: UUID) {
+        plannedSheet = OrgMoveSheetRequest(moveId: moveId)
+    }
+
+    /// 確認框的字照 OrgMovePlan.cancelAsk（排好的：一顆〔取消這張單〕；交出去了：〔拿回來（還沒做完的 7 項）〕〔留給接手的人〕）
+    private func askCancelPlanned(_ moveId: UUID) {
+        guard let m = lifeStore.orgMoves.move(moveId), OrgMovePlan.canCancel(m) else { return }
+        let map = OrgMoveHolderMap(world: OrgMoveWorld(store: lifeStore))
+        let ask = OrgMovePlan.cancelAsk(m, map: map, now: Date())
+        cancelRequest = OrgMoveWizCancelRequest(moveId: moveId, ask: ask)
+    }
+
+    /// 確認框按下去：關框後下一個 runloop 才取消（不用訂閱；排好的 takeBack 不看），再照現在的資料重算清單
+    ///（〔拿回來〕的那幾件回到這位同仁身上，第 ② 步要列得到）。卡片照 plannedPrompt 自己收起、照常往下走
+    private func cancelPlanned(_ moveId: UUID, takeBack: Bool) {
+        let store = lifeStore
+        DispatchQueue.main.async {
+            store.cancelOrgMove(moveId, takeBack: takeBack, now: Date())
+            refreshLines()
+        }
     }
 
     /// 生日提醒：只在按的這台、只改既有事件的字；沒有行事曆權限就跳過（不在這裡要權限）
@@ -190,6 +288,12 @@ private struct OrgMoveStepWhere: View {
     @Binding var draft: OrgMoveDraft
     @Binding var plantTouched: Bool
     let canNext: Bool
+    /// [v25.592 轉組織 v1b] 〔下一步〕按不下去時下面那行橘字（nil＝按得下去）
+    let nextHint: String?
+    /// [v25.592 轉組織 v1b] 這位已經有一張排好的：最上面那張橘框卡（nil＝沒有）
+    let prompt: OrgMovePlannedPrompt?
+    let onOpenPlanned: (UUID) -> Void
+    let onCancelPlanned: (UUID) -> Void
     let onNext: () -> Void
 
     @EnvironmentObject var lifeStore: LifeStore
@@ -218,6 +322,7 @@ private struct OrgMoveStepWhere: View {
     private func whereBody(_ w: OrgMoveWorld) -> some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
+                plannedCard
                 OrgMoveWizSection { personHeader(w) }
                 kindCard
                 infoCard(w)
@@ -230,6 +335,17 @@ private struct OrgMoveStepWhere: View {
             .padding(16)
         }
         .background(Color(.systemGroupedBackground))
+    }
+
+    /// [v25.592 轉組織 v1b] 一位同仁同時只能有一張（judge §5-21）：橘框卡（不是 alert：精靈剛打開跳 alert 會跟 sheet 動畫打架）。
+    /// 要退回這一件：刪這一支與 whereBody 裡的 `plannedCard`。
+    @ViewBuilder
+    private var plannedCard: some View {
+        if let p = prompt {
+            OrgMoveWizPlannedCard(prompt: p,
+                                  onOpen: { onOpenPlanned(p.moveId) },
+                                  onCancel: { onCancelPlanned(p.moveId) })
+        }
     }
 
     private func personHeader(_ w: OrgMoveWorld) -> some View {
@@ -277,8 +393,10 @@ private struct OrgMoveStepWhere: View {
         }
     }
 
-    // MARK: 生效日（v1a 只能今天或以前）
+    // MARK: 生效日（[v25.592 轉組織 v1b] 任何一天；預設下個月 1 號）
 
+    /// [v25.592 轉組織 v1b] 日期選擇器拿掉 `in: ...Date()`（不另設上、下限）；「下一版就能排」那行換成生效日在以後的灰字。
+    /// 要退回這一件：DatePicker 加回 `in: ...Date()`、`if effectiveIsFuture` 那段換回 v1a 那行灰字。
     private var effectiveRow: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 12) {
@@ -286,7 +404,7 @@ private struct OrgMoveStepWhere: View {
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                 Spacer(minLength: 8)
-                DatePicker("生效日", selection: effectiveBinding, in: ...Date(), displayedComponents: .date)
+                DatePicker("生效日", selection: effectiveBinding, displayedComponents: .date)
                     .labelsHidden()
                     .datePickerStyle(.compact)
             }
@@ -298,12 +416,28 @@ private struct OrgMoveStepWhere: View {
                     .font(.caption)
                     .foregroundStyle(.orange)
             }
-            Text("人事令先公告、要排在以後的，下一版就能排")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
+            if effectiveIsFuture {
+                Text(futureNote)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
+    }
+
+    /// [v25.592 轉組織 v1b] 生效日在今天以後（＝要排；最後一步選什麼時候交）
+    private var effectiveIsFuture: Bool {
+        OrgMovePlan.isFuture(OrgMovePlan.dayKey(draft.effective), todayKey: OrgMovePlan.dayKey(Date()))
+    }
+
+    /// 「11/1 以後才改部門；事情什麼時候交在最後一步選」（只換廠區寫「換廠區」）
+    private var futureNote: String {
+        let d = OrgMovePlan.shortDay(OrgMovePlan.dayKey(draft.effective))
+        let what = draft.kind == .plant ? "換廠區" : "改部門"
+        return d + " 以後才" + what + "；事情什麼時候交在最後一步選"
     }
 
     private var effectiveBinding: Binding<Date> {
@@ -359,18 +493,13 @@ private struct OrgMoveStepWhere: View {
     /// 選了新部門：新主管帶那個部門的第一位管理人員（不會是這位同仁自己）；你沒點過廠區就帶那個部門最多人在的廠，
     /// 那個部門沒人可參考就退回現在的廠區（不留上一個部門帶的）。
     /// [v25.590 轉組織 v1a-1 審查] 要退回這一件：toManagerId 改回 `manager`、toPlant 改回 `if !touched, let h = hint { d.toPlant = h.plant }`。
+    /// [v25.592 轉組織 v1b] 內容搬到 OrgMoveWizEdit.chooseDept（精靈打開時 presetDeptId 走同一支）。
+    /// 要退回這一件：把 OrgMoveWizEdit.chooseDept 的內容搬回這裡。
     private func chooseDept(_ id: UUID, world w: OrgMoveWorld) {
-        let suggested = OrgMovePlan.suggestedManager(deptId: id, world: w)
-        let own = w.orgPerson(linkedTo: draft.personId)?.id
-        let manager: UUID? = (suggested == own) ? nil : suggested
-        let hint = OrgMovePlan.plantHint(deptId: id, excluding: draft.personId, world: w)
         let touched = plantTouched
         let current = currentPlant
         update { d in
-            d.keepDept = false
-            d.toDeptId = id
-            d.toManagerId = manager
-            if !touched { d.toPlant = hint?.plant ?? current }
+            OrgMoveWizEdit.chooseDept(&d, deptId: id, world: w, plantTouched: touched, currentPlant: current)
         }
     }
 
@@ -552,11 +681,13 @@ private struct OrgMoveStepWhere: View {
         }
     }
 
+    /// [v25.592 轉組織 v1b] 下面那行橘字改成呼叫端給的 nextHint（排好的那一張／還沒選部門）。
+    /// 要退回這一件：`if let h = nextHint` 換回 `if !canNext` 與 v1a 那行字。
     private var nextButton: some View {
         VStack(spacing: 6) {
             OrgMoveWizBigButton(title: nextTitle, color: .blue, enabled: canNext, action: onNext)
-            if !canNext {
-                Text("選新部門，或選〔照舊（只交接）〕")
+            if let h = nextHint {
+                Text(h)
                     .font(.caption)
                     .foregroundStyle(.orange)
             }
@@ -619,9 +750,12 @@ private struct OrgMoveStepList: View {
     @State private var topicTarget: UUID?
     @State private var topicText = ""
     @State private var showTopic = false
+    /// [v25.592 轉組織 v1b] 〔＋ 自己加一項〕／點自己加的那一列標題改字（小表單 OrgMoveCustomLineEditor）
+    @State private var customEdit: OrgMoveCustomRequest?
 
     var body: some View {
         listBody(listModel)
+            .sheet(item: $customEdit) { r in customEditor(r) }
             .sheet(item: $pick) { r in
                 OrgMovePersonPicker(request: r) { id, _ in applyPick(r.purpose, id: id) }
                     .appStores()
@@ -656,16 +790,24 @@ private struct OrgMoveStepList: View {
         OrgMoveWizListModel.make(draft, world: OrgMoveWorld(store: lifeStore), now: Date())
     }
 
+    /// [v25.592 轉組織 v1b] 還沒有自己加的：〔＋ 自己加一項〕放在組織那組前面一個小卡（沒有組織那組＝放在最後）；
+    /// 有了：在「自己加的」那一組最後（groupCard）。要退回這一件：刪 ForEach 裡的 `if` 與 `if m.addAtEnd` 那兩段。
     private func listBody(_ m: OrgMoveWizListModel) -> some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
                 OrgMoveWizTallyStrip(tally: m.tally, caption: m.caption, spoken: m.spoken)
                 giveAllBar(m.suggestion)
                 ForEach(m.groups) { g in
+                    if g.id == "org" && m.addBeforeOrg {
+                        addCustomCard
+                    }
                     groupCard(g, suggestion: m.suggestion)
                 }
                 if m.groups.isEmpty {
                     emptyCard
+                }
+                if m.addAtEnd {
+                    addCustomCard
                 }
                 footNotes(m)
                 OrgMoveWizBigButton(title: "下一步：確認交接單", color: .blue, action: onNext)
@@ -718,6 +860,18 @@ private struct OrgMoveStepList: View {
             if hiddenCount(g) > 0 {
                 OrgMoveWizMoreButton(hidden: hiddenCount(g)) { _ = expanded.insert(g.id) }
             }
+            // [v25.592 轉組織 v1b]「自己加的」那一組最後一列〔＋ 自己加一項〕。要退回這一件：刪這一段
+            if g.id == "custom" {
+                Divider().padding(.leading, 14)
+                OrgMoveWizAddCustomButton { openNewCustom() }
+            }
+        }
+    }
+
+    /// [v25.592 轉組織 v1b] 還沒有自己加的那一項時，〔＋ 自己加一項〕自己一張小卡
+    private var addCustomCard: some View {
+        OrgMoveWizSection {
+            OrgMoveWizAddCustomButton { openNewCustom() }
         }
     }
 
@@ -737,6 +891,8 @@ private struct OrgMoveStepList: View {
 
     /// [v25.591 轉組織 v1a-2] 多三個回呼：新會議名稱〔改〕、撞班那天選了、撞班那天〔這天交給別人…〕。
     /// 要退回這一件：刪 onRename／onShiftDay／onShiftOther 三行（OrgMoveWizLineRow 那三個欄位一起刪）。
+    /// [v25.592 轉組織 v1b] 多兩個回呼：自己加的那一列〔改這一項…〕（點標題也是）、〔拿掉這一項〕。
+    /// 要退回這一件：刪 onEditCustom／onRemoveCustom 兩行（OrgMoveWizLineRow 那兩個欄位一起刪）。
     private func lineRow(_ r: OrgMoveWizRow) -> some View {
         OrgMoveWizLineRow(row: r,
                           onChoose: { c in choose(r, c) },
@@ -745,7 +901,9 @@ private struct OrgMoveStepList: View {
                           onRole: { openRole(r) },
                           onRename: { openTopic(r) },
                           onShiftDay: { day, choice in setShiftDay(r.id, day: day, choice: choice) },
-                          onShiftOther: { day in pickShiftOther(r, day: day) })
+                          onShiftOther: { day in pickShiftOther(r, day: day) },
+                          onEditCustom: { openEditCustom(r) },
+                          onRemoveCustom: { removeCustom(r.id) })
     }
 
     /// 一組超過 8 列：先 5 列＋〔再看 N 件〕
@@ -916,6 +1074,55 @@ private struct OrgMoveStepList: View {
         guard let rid = r.sideRoleId else { return }
         roleToOpen = OrgMoveWizRoleRequest(id: rid)
     }
+
+    // MARK: [v25.592 轉組織 v1b] 自己加的一項（門禁卡、鑰匙、帳號…）：只寫草稿，按〔確認交接〕才跟著那張單存
+    // 要退回這幾件：刪這一段、body 的 `.sheet(item: $customEdit)`、groupCard／listBody 的〔＋ 自己加一項〕。
+
+    /// 小表單（主控寫好的 OrgMoveCustomLineEditor：按〔好〕／〔拿掉這一項〕先關頁、下一個 runloop 才回呼）
+    private func customEditor(_ r: OrgMoveCustomRequest) -> some View {
+        OrgMoveCustomLineEditor(request: r,
+                                onSave: { t, m in saveCustom(r.lineId, title: t, memo: m) },
+                                onDelete: customDeleteAction(r.lineId))
+            .appStores()
+    }
+
+    /// 改那一列才有〔拿掉這一項〕（新加的沒有）
+    private func customDeleteAction(_ lineId: UUID?) -> (() -> Void)? {
+        guard let id = lineId else { return nil }
+        return { removeCustom(id) }
+    }
+
+    private func openNewCustom() {
+        customEdit = OrgMoveCustomRequest()
+    }
+
+    private func openEditCustom(_ r: OrgMoveWizRow) {
+        guard r.isCustom else { return }
+        customEdit = OrgMoveCustomRequest(lineId: r.id, title: r.line.title, memo: r.line.memo ?? "")
+    }
+
+    /// 〔好〕：新加的插在自己加的那幾列最後（還沒有就插在組織那幾列前面）；改的只改字＋updatedAt
+    private func saveCustom(_ lineId: UUID?, title: String, memo: String) {
+        var d = draft
+        let now = Date()
+        if let id = lineId {
+            guard let i = d.lines.firstIndex(where: { $0.id == id && $0.isCustom }) else { return }
+            d.lines[i].title = title
+            d.lines[i].memo = memo.isEmpty ? nil : memo
+            d.lines[i].updatedAt = now
+        } else {
+            let line = OrgMovePlan.newCustomLine(title: title, memo: memo, now: now)
+            OrgMoveWizEdit.insertCustom(line, into: &d.lines)
+        }
+        draft = d
+    }
+
+    /// 草稿裡拿掉＝直接從清單移除（還沒存，不用記 undone）
+    private func removeCustom(_ id: UUID) {
+        var d = draft
+        d.lines.removeAll { $0.id == id && $0.isCustom }
+        draft = d
+    }
 }
 
 /// 第 ② 步的資料（每次畫面算一次：OrgMoveWorld 只抽一份，每列的字都在這裡組好）
@@ -928,6 +1135,9 @@ private struct OrgMoveWizListModel {
     var suggestion: OrgMoveWizSuggestion?
     var groups: [OrgMoveWizGroupModel] = []
     var leave: String?
+    /// [v25.592 轉組織 v1b] 還沒有「自己加的」那一組：〔＋ 自己加一項〕放在組織那組前面（有組織那組）／最後（沒有）
+    var addBeforeOrg = false
+    var addAtEnd = false
 
     /// [v25.591 轉組織 v1a-2] 每一列多帶這位同仁的 id 與交接那天（議程、會議、撞班要）；caption 多「　結束 N」；
     /// `deferred`（灰字「下一版才能在這裡交」）拿掉。要退回這一件：list 改回 v1a-1 的參數、caption 改回只接不要了。
@@ -945,6 +1155,11 @@ private struct OrgMoveWizListModel {
         if d.kind == .move {
             m.leave = OrgMovePlan.leaveNote(personId: d.personId, personName: person, world: w, now: now)
         }
+        // [v25.592 轉組織 v1b] 〔＋ 自己加一項〕放哪（OrgMovePlan.groups 的 "custom"／"org" 那兩組）。要退回這一件：刪這三行
+        let hasCustom = m.groups.contains(where: { $0.id == "custom" })
+        let hasOrg = m.groups.contains(where: { $0.id == "org" })
+        m.addBeforeOrg = !hasCustom && hasOrg
+        m.addAtEnd = !hasCustom && !hasOrg
         return m
     }
 
@@ -1023,6 +1238,8 @@ private struct OrgMoveWizRow: Identifiable {
 
     var id: UUID { line.id }
     var isOrg: Bool { line.isOrgLine }
+    /// [v25.592 轉組織 v1b] 你自己加的一項（標題點了改字、選單多〔改這一項…〕〔拿掉這一項〕）
+    var isCustom: Bool { line.isCustom }
 
     /// [v25.591 轉組織 v1a-2] 選項、灰字換成 in:personId: 那一支（議程分得出自己會議／別人會議、會議多〔交給 陳怡君（新會議接著開）〕）；
     /// 標題用 rowTitle（議程寫哪一場）；可以寫交接備註的多會議、議程、班、兼任；有「新會議名稱」那一列時灰字那一行不重複。
@@ -1117,13 +1334,16 @@ private struct OrgMoveWizLineRow: View {
     let onRename: () -> Void
     let onShiftDay: (String, String) -> Void
     let onShiftOther: (String) -> Void
+    /// [v25.592 轉組織 v1b] 自己加的那一列：點標題／〔改這一項…〕開小表單、〔拿掉這一項〕
+    ///（清單是 ScrollView 不是 List，往左滑出不來：〔拿掉〕放在膠囊選單裡，小表單裡也有）
+    let onEditCustom: () -> Void
+    let onRemoveCustom: () -> Void
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
             OrgMoveGlyph(line: row.line)
             VStack(alignment: .leading, spacing: 4) {
-                MarqueeText(row.title)
-                    .font(.subheadline.weight(.semibold))
+                titleView
                 OrgMoveWizLines(lines: row.reasons, color: .secondary)
                 topicView
                 controls
@@ -1135,6 +1355,25 @@ private struct OrgMoveWizLineRow: View {
         .padding(.leading, row.indent ? 38 : 14)
         .padding(.trailing, 14)
         .padding(.vertical, 10)
+    }
+
+    /// [v25.592 轉組織 v1b] 自己加的那一列標題是一顆按鈕（點了改字）；其他照舊跑馬燈。要退回這一件：換回 MarqueeText 那兩行
+    @ViewBuilder
+    private var titleView: some View {
+        if row.isCustom {
+            Button(action: onEditCustom) {
+                Text(row.title)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .buttonStyle(.plain)
+            .accessibilityHint("改這一項")
+        } else {
+            MarqueeText(row.title)
+                .font(.subheadline.weight(.semibold))
+        }
     }
 
     @ViewBuilder
@@ -1183,6 +1422,12 @@ private struct OrgMoveWizLineRow: View {
                 if !row.overdue.isEmpty {
                     Button { onDue() } label: { Label("改新的截止日…", systemImage: "calendar") }
                 }
+            }
+            // [v25.592 轉組織 v1b] 自己加的一項：〔改這一項…〕〔拿掉這一項〕。要退回這一件：刪這一段
+            if row.isCustom {
+                Divider()
+                Button { onEditCustom() } label: { Label("改這一項…", systemImage: "pencil") }
+                Button(role: .destructive) { onRemoveCustom() } label: { Label("拿掉這一項", systemImage: "trash") }
             }
         } label: {
             OrgMoveWizCapsule(text: row.capsule, tone: row.tone, showLock: row.showLock)
@@ -1422,10 +1667,13 @@ private struct OrgMoveStepConfirm: View {
         OrgMovePlan.preview(draft, world: OrgMoveWorld(store: lifeStore), now: Date())
     }
 
+    /// [v25.592 轉組織 v1b] 多：接手的人先調走的橘字（交給誰那幾段上面）、「什麼時候做」那一區（生效日在以後才有）、
+    /// 大按鈕的字照你選的那顆。要退回這一件：刪 warningsView、timingSection 兩行，大按鈕改回「確認交接」綠色。
     private func confirmBody(_ p: OrgMovePreview) -> some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
                 headCard(p)
+                warningsView(p.warnings)
                 if !p.blocks.isEmpty {
                     blocksCard(p.blocks)
                 }
@@ -1434,12 +1682,59 @@ private struct OrgMoveStepConfirm: View {
                 }
                 changesCard(p)
                 listCard(title: "不會動", lines: p.untouched)
+                timingSection(p)
                 footNotes(p)
-                OrgMoveWizBigButton(title: "確認交接", color: .green, action: onConfirm)
+                OrgMoveWizBigButton(title: confirmTitle(p), color: confirmColor(p), action: onConfirm)
             }
             .padding(16)
         }
         .background(Color(.systemGroupedBackground))
+    }
+
+    /// [v25.592 轉組織 v1b] 「陳怡君 11/1 前就調走了（10/31），確定交給這位？」（judge §5-1；字在 OrgMovePlan 組好，這裡只加 ⚠）
+    @ViewBuilder
+    private func warningsView(_ warnings: [String]) -> some View {
+        if !warnings.isEmpty {
+            OrgMoveWizNotice(text: warningText(warnings), color: .orange)
+        }
+    }
+
+    private func warningText(_ warnings: [String]) -> String {
+        warnings.map { "⚠ " + $0 }.joined(separator: "\n")
+    }
+
+    /// [v25.592 轉組織 v1b] 「什麼時候做」：兩顆（綁 draft.timing；預設〔現在就交接，11/1 才改部門〕）＋下面那一行（照選的那顆）
+    @ViewBuilder
+    private func timingSection(_ p: OrgMovePreview) -> some View {
+        if !p.timingOptions.isEmpty {
+            OrgMoveWizSection(title: "什麼時候做") {
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(p.timingOptions) { o in
+                        OrgMoveWizTimingRow(label: o.label, on: draft.timing == o.timing) { draft.timing = o.timing }
+                    }
+                    Text(p.timingNote)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(.horizontal, 14)
+                .padding(.bottom, 12)
+            }
+        }
+    }
+
+    /// 生效日在以後、選〔11/1 一起做〕＝「排好（11/1 一起做）」（藍）；其他「確認交接」（綠）
+    private func confirmTitle(_ p: OrgMovePreview) -> String {
+        guard isTogether(p) else { return "確認交接" }
+        return "排好（" + OrgMovePlan.shortDay(OrgMovePlan.dayKey(draft.effective)) + " 一起做）"
+    }
+
+    private func confirmColor(_ p: OrgMovePreview) -> Color {
+        isTogether(p) ? Color.blue : Color.green
+    }
+
+    private func isTogether(_ p: OrgMovePreview) -> Bool {
+        !p.timingOptions.isEmpty && draft.timing == .together
     }
 
     private func headCard(_ p: OrgMovePreview) -> some View {
@@ -1467,12 +1762,22 @@ private struct OrgMoveStepConfirm: View {
         }
     }
 
+    /// [v25.592 轉組織 v1b] ☑ 順便更新生日提醒 下面多一行小字（生效日在以後：「11/1 在「今天生效」那張上按一下才改」）。
+    /// 要退回這一件：刪 `if let n = p.birthdayNote` 那一段。
     private func changesCard(_ p: OrgMovePreview) -> some View {
         OrgMoveWizSection(title: "會一起改") {
             VStack(alignment: .leading, spacing: 6) {
                 OrgMoveWizLines(lines: p.changes.isEmpty ? ["部門、組織圖都照舊"] : p.changes, color: .primary)
                 if p.birthdayOffer {
                     birthdayToggle
+                    if let n = p.birthdayNote {
+                        Text(n)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .monospacedDigit()
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.leading, 26)
+                    }
                 }
             }
             .padding(.horizontal, 14)
@@ -1510,10 +1815,14 @@ private struct OrgMoveStepConfirm: View {
 
     /// [v25.591 轉組織 v1a-2] 「下一版才能在這裡交」那一行拿掉（plan 已經回 nil；留著是死碼），只剩「按下去就全部改好」。
     /// 要退回這一件：加回 `if let d = p.deferred { Text(d) }`（caption、secondary）。
+    /// [v25.592 轉組織 v1b] 生效日在以後：那一行在「什麼時候做」裡（照選的那顆），這裡不重複。要退回這一件：拿掉 if 與 @ViewBuilder
+    @ViewBuilder
     private func footNotes(_ p: OrgMovePreview) -> some View {
-        Text(p.timingNote)
-            .font(.footnote.weight(.semibold))
-            .padding(.horizontal, 4)
+        if p.timingOptions.isEmpty {
+            Text(p.timingNote)
+                .font(.footnote.weight(.semibold))
+                .padding(.horizontal, 4)
+        }
     }
 }
 
@@ -1573,12 +1882,7 @@ private struct OrgMoveDoneView: View {
     private func doneBody(_ m: OrgMoveWizDoneModel) -> some View {
         ScrollView {
             VStack(spacing: 14) {
-                Image(systemName: "checkmark.circle.fill")
-                    .font(.system(size: 56))
-                    .foregroundStyle(.green)
-                    .padding(.top, 24)
-                Text("交接單做好了")
-                    .font(.title2.weight(.bold))
+                doneHead(m)
                 headLines(m)
                 if let note = birthdayNote {
                     Text(note)
@@ -1596,6 +1900,28 @@ private struct OrgMoveDoneView: View {
             .padding(16)
         }
         .background(Color(.systemGroupedBackground))
+    }
+
+    /// [v25.592 轉組織 v1b] 圖示、大字、下面那一行照 OrgMovePlan.doneTexts（排好的：藍色 calendar.badge.clock「交接單排好了」；
+    /// 交出去了還沒改部門：綠勾「事情交出去了」＋「部門、廠區、名片、組織圖 11/1 才改…」；做好的照舊）。
+    /// 要退回這一件：換回綠勾＋「交接單做好了」那三行。
+    private func doneHead(_ m: OrgMoveWizDoneModel) -> some View {
+        VStack(spacing: 6) {
+            Image(systemName: m.planned ? "calendar.badge.clock" : "checkmark.circle.fill")
+                .font(.system(size: 56))
+                .foregroundStyle(m.planned ? Color.blue : Color.green)
+                .padding(.top, 24)
+            Text(m.headline)
+                .font(.title2.weight(.bold))
+            if let s = m.sub {
+                Text(s)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .monospacedDigit()
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
     }
 
     @ViewBuilder
@@ -1670,12 +1996,21 @@ private struct OrgMoveWizDoneModel {
     var dates = ""
     var shares: [OrgMoveWizShareButton] = []
     var whereText = "交接單會留在這位同仁卡片〔潛力性〕的「歷程」裡，隨時打得開。"
+    /// [v25.592 轉組織 v1b] 大字與下面那一行（OrgMovePlan.doneTexts）、排好的（圖示換藍色日曆）
+    var headline = "交接單做好了"
+    var sub: String?
+    var planned = false
 
+    /// [v25.592 轉組織 v1b] 多讀 doneTexts、isPlanned。要退回這一件：刪 texts 那三行。
     static func make(moveId: UUID?, store: LifeStore) -> OrgMoveWizDoneModel {
         var m = OrgMoveWizDoneModel()
         guard let id = moveId, let move = store.orgMoves.move(id) else { return m }
         let world = OrgMoveWorld(store: store)
         let head = OrgMovePlan.sheetHeader(move, world: world)
+        let texts = OrgMovePlan.doneTexts(move)
+        m.headline = texts.headline
+        m.sub = texts.sub
+        m.planned = move.isPlanned
         m.moveId = id
         m.title = head.title
         m.dates = head.dates
@@ -2065,5 +2400,35 @@ private enum OrgMoveWizText {
     /// 「要加進 設備課 的管理人員嗎？」
     static func addQuestion(_ d: OrgMoveDraft, world w: OrgMoveWorld) -> String {
         "要加進 " + w.deptShort(d.toDeptId) + " 的管理人員嗎？"
+    }
+}
+
+/// [v25.592 轉組織 v1b] 草稿上的幾個小動作（第 ① 步選部門與精靈打開時的 presetDeptId 走同一支；第 ② 步自己加的一項插在哪）。
+/// 要退回這一件：chooseDept 的內容搬回 OrgMoveStepWhere.chooseDept、prepare() 拿掉 preset 那段、刪 insertCustom 與這個 enum。
+private enum OrgMoveWizEdit {
+    /// 選了新部門：新主管帶那個部門的第一位管理人員（不會是這位同仁自己）；你沒點過廠區就帶那個部門最多人在的廠，
+    /// 那個部門沒人可參考就退回現在的廠區（v1a-1 審查那一版，原本寫在 OrgMoveStepWhere.chooseDept）
+    static func chooseDept(_ d: inout OrgMoveDraft, deptId id: UUID, world w: OrgMoveWorld,
+                           plantTouched: Bool, currentPlant: String) {
+        let suggested = OrgMovePlan.suggestedManager(deptId: id, world: w)
+        let own = w.orgPerson(linkedTo: d.personId)?.id
+        let manager: UUID? = (suggested == own) ? nil : suggested
+        let hint = OrgMovePlan.plantHint(deptId: id, excluding: d.personId, world: w)
+        d.keepDept = false
+        d.toDeptId = id
+        d.toManagerId = manager
+        if !plantTouched { d.toPlant = hint?.plant ?? currentPlant }
+    }
+
+    /// 自己加的一項插在自己加的那幾列最後；還沒有就插在組織那幾列前面；都沒有就接在最後
+    ///（OrgMovePlan.groups 照 kind 分組，位置只影響「自己加的」那一組裡的順序）
+    static func insertCustom(_ line: OrgMoveLine, into lines: inout [OrgMoveLine]) {
+        if let last = lines.lastIndex(where: { $0.isCustom }) {
+            lines.insert(line, at: last + 1)
+        } else if let firstOrg = lines.firstIndex(where: { $0.isOrgLine }) {
+            lines.insert(line, at: firstOrg)
+        } else {
+            lines.append(line)
+        }
     }
 }

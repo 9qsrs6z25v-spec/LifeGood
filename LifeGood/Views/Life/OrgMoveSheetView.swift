@@ -24,6 +24,22 @@ import SwiftUI
 // • 長按〔拿回來〕：多結束的會議（.ended＝拿掉結束日、接著開）；四種的說明字（takeBackTitle／takeBackMessage）。
 // 要退回這一件：previewRef／canReassign 換回只認任務、警報、兼任（itemId）、週報的版本，takeBackKinds 拿掉 .ended，
 // 刪掉 reassignRequest、takeBackTitle、meetingTakeBackMessage 與 takeBackMessage 裡議程、會議、班、兼任那幾個 case。
+//
+// [v25.592 轉組織 v1b] 排在以後（orgmove/build/v1b/brief.md §4；judge §3.5、§3.8 生效前那一列、§4.5、§5-6、§5-15）
+// • 單頭、「組織」那一列、每一列的狀態都照 OrgMovePlan（sheetHeader／orgStatus(now:)／status 認得 planned、handed、cancelled、custom）。
+//   排好的（planned）不放四格，改一行灰字「11/1 才交接；在那之前什麼都不動」；「組織」那一列部門還沒改＝藍字「11/1 才改：…」，
+//   到了卻卡住＝橘字＋〔只做交接〕／〔選部門〕，到了沒卡住＝〔現在套用〕（都走 OrgMoveDueViews.swift 的 .orgMoveHintActions，同卡片）。
+// • 部門還沒改的（orgPending）最下面換成〔改生效日〕（要訂閱：OrgMoveRescheduleSheet 自己擋）〔取消這張單〕（不用訂閱；確認框照
+//   OrgMovePlan.cancelAsk）；〔交接完成〕〔復原〕不給（canClose 加 !orgPending；canUndo 主控已擋）。排好的取消後單不見了 → 自己關頁。
+// • 排好的列長按〔改交給…〕只改單（OMSheetBuild.canReassignPlanned；LifeStore.reassignOrgMoveLine 的 planned 那一段）；
+//   〔分給…〕〔拿回來〕〔再交一次〕排好的一律不給（狀態 .planned 沒有 fix、不在 takeBackKinds）。
+// • 「自己加的（N）」那一組：✓／○／・照 status；點一列改字（OrgMoveCustomLineEditor）、右邊圓圈勾「已交」（不用訂閱）、
+//   長按〔交給…〕〔跟著王小明〕〔改〕；最後〔＋ 自己加一項〕（沒有自己加的時，放在「組織」那組前面一張小卡）。已復原、已取消的不給改。
+// • 單頭下面「排好之後多了 1 件（先跟著王小明）」〔加進交接單〕（要訂閱：modifier 擋）；〔11/1 一起做〕套用時逾期改了截止的那一列
+//   多一行灰字（lateAtApplyText）、〔加進交接單〕加進來的那一列多一行「排好之後才加進來的」。
+// • 「…」多〔改生效日〕〔取消這張單〕〔更新生日提醒〕（套用好了、不是 v1a 那種當下全部做的、你確認時勾了、有生日提醒）。
+// 要退回這一件：刪掉這段註解以下標 [v25.592 轉組織 v1b] 的部分（pageLayer 換回 page(snap) 那四行修飾器、
+// OMSheetSnapshot／OMSheetRow／OMSheetGroupData 的 v1b 欄位、OMSheetPending、OMSheetOrgTone、canReassignPlanned、extraLines）。
 
 struct OrgMoveSheetView: View {
     let moveId: UUID
@@ -46,9 +62,19 @@ struct OrgMoveSheetView: View {
     /// 分享面板（按了提醒上的〔分享〕才開）
     @State private var sharePayload: OMSheetSharePayload?
     @State private var showPremiumAlert = false
+    /// [v25.592 轉組織 v1b]〔現在套用〕〔只做交接〕〔選部門〕〔取消這張單〕〔加進交接單〕（OrgMoveDueViews.swift 的 modifier 負責訂閱、確認框、寫 store）
+    @State private var hintRequest: OrgMoveHintActionRequest?
+    /// [v25.592 轉組織 v1b]〔＋ 自己加一項〕／點自己加的那一列改字
+    @State private var customEdit: OrgMoveCustomRequest?
+    /// [v25.592 轉組織 v1b]〔改生效日〕
+    @State private var reschedule: OrgMoveSheetRequest?
+    /// [v25.592 轉組織 v1b]〔更新生日提醒〕按過之後那一行（「生日提醒改好了（1 則）」）
+    @State private var birthdayNote: String?
 
     private static let resolvePrefix = "resolve:"
     private static let reassignPrefix = "reassign:"
+    /// [v25.592 轉組織 v1b] 自己加的那一項〔交給…〕
+    private static let customPrefix = "custom:"
 
     init(moveId: UUID) {
         self.moveId = moveId
@@ -58,11 +84,7 @@ struct OrgMoveSheetView: View {
         let snap = currentSnapshot()
         let askTitle = ask?.title ?? askTitleKeep
         return NavigationStack {
-            page(snap)
-                .navigationTitle("交接單")
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar { toolbarItems(snap) }
-                .premiumLockAlert(isPresented: $showPremiumAlert)
+            pageLayer(snap)
         }
         .sheet(item: $pick) { r in pickerSheet(r) }
         .sheet(item: $preview) { r in previewSheet(r) }
@@ -86,6 +108,32 @@ struct OrgMoveSheetView: View {
         Binding(get: { ask != nil }, set: { if !$0 { ask = nil } })
     }
 
+    /// [v25.592 轉組織 v1b] 排好的〔取消這張單〕之後（墓碑）：單不見了
+    private var cancelledNow: Bool {
+        lifeStore.orgMoves.move(moveId)?.isCancelled == true
+    }
+
+    /// NavigationStack 裡那一層：標題、右上、訂閱提示；[v25.592 轉組織 v1b] 提示列那一套按鈕、自己加一項、改生效日、取消後關頁。
+    /// hostId：「今天生效」那張不再給〔看交接單〕開這一張（OrgMoveDueViews.swift）
+    private func pageLayer(_ snap: OMSheetSnapshot?) -> some View {
+        page(snap)
+            .navigationTitle("交接單")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { toolbarItems(snap) }
+            .premiumLockAlert(isPresented: $showPremiumAlert)
+            .orgMoveHintActions($hintRequest)
+            .environment(\.orgMoveSheetHostId, moveId)
+            .sheet(item: $customEdit) { r in customEditorSheet(r) }
+            .sheet(item: $reschedule) { r in rescheduleSheet(r) }
+            .onChange(of: cancelledNow) { _, gone in closeIfCancelled(gone) }
+    }
+
+    /// [v25.592 轉組織 v1b] 排好的取消了（這台按的、或另一台同步來的）：確認框收完再關頁（找不到的畫面只是後備）
+    private func closeIfCancelled(_ gone: Bool) {
+        guard gone else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { dismiss() }
+    }
+
     // MARK: 畫面
 
     @ViewBuilder
@@ -95,7 +143,10 @@ struct OrgMoveSheetView: View {
                 VStack(alignment: .leading, spacing: 14) {
                     headerCard(s)
                     ForEach(s.groups) { g in
-                        groupCard(g)
+                        groupSlot(g, s)
+                    }
+                    if s.looseAddAtEnd {
+                        looseAddCard
                     }
                     footer(s)
                 }
@@ -107,12 +158,26 @@ struct OrgMoveSheetView: View {
         }
     }
 
+    /// [v25.592 轉組織 v1b] 還沒有自己加的：〔＋ 自己加一項〕那張小卡放在「組織」那組前面（同精靈第 ② 步）
+    @ViewBuilder
+    private func groupSlot(_ g: OMSheetGroupData, _ s: OMSheetSnapshot) -> some View {
+        if g.id == "org" && s.looseAdd {
+            looseAddCard
+        }
+        groupCard(g)
+    }
+
+    /// [v25.592 轉組織 v1b] 排好的取消了＝「這張交接單取消了」
+    private var notFoundTitle: String {
+        cancelledNow ? "這張交接單取消了" : "找不到這張交接單了"
+    }
+
     private var notFound: some View {
         VStack(spacing: 14) {
             Image(systemName: "doc.text.magnifyingglass")
                 .font(.system(size: 40))
                 .foregroundStyle(.secondary)
-            Text("找不到這張交接單了")
+            Text(notFoundTitle)
                 .font(.headline)
             Button("關閉") { dismiss() }
                 .buttonStyle(.bordered)
@@ -125,7 +190,7 @@ struct OrgMoveSheetView: View {
     private func headerCard(_ s: OMSheetSnapshot) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             if s.isUndone {
-                undoneBadge
+                undoneBadge(cancelled: s.isCancelledBack)
             }
             Text(s.title)
                 .font(.headline)
@@ -135,8 +200,7 @@ struct OrgMoveSheetView: View {
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             if !s.isUndone {
-                tileGrid(s.tiles)
-                orgRow(s)
+                headerBody(s)
             }
         }
         .padding(14)
@@ -144,13 +208,68 @@ struct OrgMoveSheetView: View {
         .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 
-    private var undoneBadge: some View {
-        Label("已復原", systemImage: "arrow.uturn.backward")
+    /// [v25.592 轉組織 v1b] 排好的不放四格（還沒交出去，四格都是 0）改一行灰字；「排好之後多了 1 件」〔加進交接單〕；生日提醒改好了沒
+    @ViewBuilder
+    private func headerBody(_ s: OMSheetSnapshot) -> some View {
+        if s.pending.isPlanned {
+            plannedLine(s.pending.plannedNote)
+        } else {
+            tileGrid(s.tiles)
+        }
+        orgRow(s)
+        if !s.pending.lateNote.isEmpty {
+            lateRow(s.pending.lateNote)
+        }
+        if let b = birthdayNote {
+            Label(b, systemImage: "gift")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    /// 「已復原」；[v25.592 轉組織 v1b] 生效前〔取消這張單〕〔拿回來〕的寫「已取消」
+    private func undoneBadge(cancelled: Bool) -> some View {
+        Label(Self.badgeText(cancelled), systemImage: Self.badgeIcon(cancelled))
             .font(.caption.weight(.semibold))
             .foregroundStyle(.secondary)
             .padding(.horizontal, 8)
             .padding(.vertical, 3)
             .background(Color.secondary.opacity(0.12), in: Capsule())
+    }
+
+    private static func badgeText(_ cancelled: Bool) -> String {
+        cancelled ? "已取消" : "已復原"
+    }
+
+    private static func badgeIcon(_ cancelled: Bool) -> String {
+        cancelled ? "xmark.circle" : "arrow.uturn.backward"
+    }
+
+    /// [v25.592 轉組織 v1b]「11/1 才交接；在那之前什麼都不動」
+    private func plannedLine(_ text: String) -> some View {
+        Label(text, systemImage: "calendar.badge.clock")
+            .font(.footnote)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color(.tertiarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+
+    /// [v25.592 轉組織 v1b]「排好之後多了 1 件（先跟著王小明）」〔加進交接單〕（要訂閱：modifier 擋）
+    private func lateRow(_ note: String) -> some View {
+        HStack(alignment: .center, spacing: 8) {
+            Text(note)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Button(OrgMoveHintAction.addLate.label) { runHint(.addLate) }
+                .font(.caption.weight(.semibold))
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+        }
     }
 
     /// 四格（交出去／做完／待分派／跟著；樣子照 FinanceTileGrid，一排四格、超大字兩欄）
@@ -190,24 +309,48 @@ struct OrgMoveSheetView: View {
     }
 
     /// 「組織 ✓ 設備課・P2（部門、組織圖、名片都對）」綠字；不對＝橘字＋〔再改一次〕（不用訂閱）
+    /// [v25.592 轉組織 v1b] 部門還沒改＝藍字「組織 11/1 才改：設備課・P2」（不給〔再改一次〕）；到了＝下面一排〔現在套用〕
+    /// 或卡住的〔只做交接〕／〔選部門〕（〔取消這張單〕在最下面）
     private func orgRow(_ s: OMSheetSnapshot) -> some View {
-        let tint: Color = s.orgOK ? Color.green : Color.orange
-        return HStack(alignment: .center, spacing: 8) {
-            Text("組織 " + s.orgText)
-                .font(.footnote.weight(.semibold))
-                .foregroundStyle(tint)
-                .fixedSize(horizontal: false, vertical: true)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            if !s.orgOK {
-                Button("再改一次") { redoOrg() }
-                    .font(.caption.weight(.semibold))
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                    .tint(.orange)
+        let tint: Color = s.orgTone.color
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .center, spacing: 8) {
+                Text("組織 " + s.orgText)
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(tint)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                if s.canRedoOrg {
+                    Button("再改一次") { redoOrg() }
+                        .font(.caption.weight(.semibold))
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .tint(.orange)
+                }
+            }
+            if !s.pending.dueActions.isEmpty {
+                dueActionRow(s.pending.dueActions)
             }
         }
         .padding(10)
         .background(tint.opacity(0.10), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+
+    /// [v25.592 轉組織 v1b] 到了那天的按鈕（同卡片提示列：走 .orgMoveHintActions）
+    private func dueActionRow(_ actions: [OrgMoveHintAction]) -> some View {
+        HStack(spacing: 8) {
+            ForEach(actions) { a in
+                Button(a.label) { runHint(a) }
+                    .font(.caption.weight(.semibold))
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                    .tint(Self.hintTint(a))
+            }
+        }
+    }
+
+    private static func hintTint(_ a: OrgMoveHintAction) -> Color {
+        a == .applyNow ? Color.blue : Color.orange
     }
 
     /// 一組一張白卡（陳怡君（4）、林志豪（1）、待分派（1）、跟著王小明（2）、不要了、組織）；點標頭收起／展開
@@ -217,6 +360,10 @@ struct OrgMoveSheetView: View {
             if isExpanded(g) {
                 ForEach(g.rows) { r in
                     rowBlock(r)
+                }
+                // [v25.592 轉組織 v1b]「自己加的（N）」那一組最後一列〔＋ 自己加一項〕
+                if g.addable {
+                    addCustomRow
                 }
             }
         }
@@ -255,14 +402,119 @@ struct OrgMoveSheetView: View {
     }
 
     /// 長按〔改交給…〕（要訂閱）〔拿回來〕；鎖住的（含跟著機台的警報任務）、組織的、還沒分好的待分派、已復原的不給
+    /// [v25.592 轉組織 v1b] 自己加的那一項另一套（customRowWithMenu）
     @ViewBuilder
     private func rowWithMenu(_ r: OMSheetRow) -> some View {
-        if r.canReassign || r.canTakeBack {
+        if r.isCustom {
+            customRowWithMenu(r)
+        } else if r.canReassign || r.canTakeBack {
             rowMain(r)
                 .contextMenu { rowMenu(r) }
         } else {
             rowMain(r)
         }
+    }
+
+    // MARK: [v25.592 轉組織 v1b] 自己加的一項（門禁卡、鑰匙、帳號…：只記在單上）
+
+    /// 長按〔交給…〕〔跟著王小明〕〔改〕（都要訂閱）；已復原、已取消的單不給
+    @ViewBuilder
+    private func customRowWithMenu(_ r: OMSheetRow) -> some View {
+        if r.customEditable {
+            customRowMain(r)
+                .contextMenu { customMenu(r) }
+        } else {
+            customRowMain(r)
+        }
+    }
+
+    @ViewBuilder
+    private func customMenu(_ r: OMSheetRow) -> some View {
+        Button { askCustomGive(r) } label: {
+            Label("交給…", systemImage: "person.2.circle")
+        }
+        Button { askCustomFollow(r) } label: {
+            Label("跟著" + r.personName, systemImage: "person.crop.circle")
+        }
+        Button { askCustomEdit(r) } label: {
+            Label("改", systemImage: "pencil")
+        }
+    }
+
+    /// 一列：色圓「自」＋標題＋✓／○／・狀態（＋💬）｜右邊一顆圓圈勾「已交」（不用訂閱）
+    private func customRowMain(_ r: OMSheetRow) -> some View {
+        HStack(alignment: .center, spacing: 8) {
+            customTappable(r)
+            checkToggle(r)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(Color(.secondarySystemGroupedBackground))
+        .contentShape(Rectangle())
+    }
+
+    /// 點一列打開小表單改字（要訂閱）
+    @ViewBuilder
+    private func customTappable(_ r: OMSheetRow) -> some View {
+        if r.customEditable {
+            rowLabel(r)
+                .contentShape(Rectangle())
+                .onTapGesture { askCustomEdit(r) }
+                .accessibilityAddTraits(.isButton)
+        } else {
+            rowLabel(r)
+        }
+    }
+
+    @ViewBuilder
+    private func checkToggle(_ r: OMSheetRow) -> some View {
+        if r.customEditable {
+            Button { toggleCustomChecked(r) } label: {
+                Image(systemName: r.checked ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 22))
+                    .foregroundStyle(r.checked ? Color.green : Color.secondary)
+                    .frame(width: 36, height: 36)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(r.checked ? "已交，按一下改回還沒交" : "勾已交")
+        }
+    }
+
+    /// 那一組最後一列〔＋ 自己加一項〕
+    private var addCustomRow: some View {
+        VStack(spacing: 0) {
+            Divider()
+                .padding(.leading, 14)
+            addCustomButton
+                .padding(.horizontal, 14)
+                .padding(.vertical, 12)
+        }
+    }
+
+    /// 還沒有自己加的：一張小卡（放在「組織」那組前面）
+    private var looseAddCard: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            addCustomButton
+            Text("門禁卡、鑰匙、帳號…只記在交接單上（可以勾已交），不會動任何資料。")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+
+    private var addCustomButton: some View {
+        Button { askCustomAdd() } label: {
+            Label("自己加一項", systemImage: "plus.circle.fill")
+                .font(.subheadline.weight(.semibold))
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(Color.pink)
     }
 
     @ViewBuilder
@@ -314,6 +566,7 @@ struct OrgMoveSheetView: View {
                     .foregroundStyle(.primary)
                     .lineLimit(2)
                 statusLine(r)
+                rowExtras(r.extra)
                 if !r.memo.isEmpty {
                     Text("💬 " + r.memo)
                         .font(.caption)
@@ -324,6 +577,16 @@ struct OrgMoveSheetView: View {
             Spacer(minLength: 0)
         }
         .accessibilityElement(children: .combine)
+    }
+
+    /// [v25.592 轉組織 v1b]「11/2 套用時已逾期，改成 11/9」「排好之後才加進來的」（灰字）
+    private func rowExtras(_ lines: [String]) -> some View {
+        ForEach(Array(lines.enumerated()), id: \.offset) { item in
+            Text(item.element)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
     }
 
     /// ✓ 綠、○ 藍、● 灰、⚠ 橘、◌ 橘＋狀態字（照現在的資料算）
@@ -373,11 +636,34 @@ struct OrgMoveSheetView: View {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            if s.canClose || s.canUndo {
+            // [v25.592 轉組織 v1b] 部門還沒改的：〔改生效日〕〔取消這張單〕（〔交接完成〕〔復原〕不給：canClose、canUndo 已擋）
+            if s.pending.canReschedule || s.pending.canCancel {
+                pendingButtons(s)
+            } else if s.canClose || s.canUndo {
                 footerButtons(s)
             }
         }
         .padding(.horizontal, 4)
+    }
+
+    /// [v25.592 轉組織 v1b]〔改生效日〕（要訂閱：那一頁按〔改好了〕時擋）〔取消這張單〕（不用訂閱；確認框走 .orgMoveHintActions）
+    private func pendingButtons(_ s: OMSheetSnapshot) -> some View {
+        HStack(spacing: 10) {
+            if s.pending.canReschedule {
+                Button { askReschedule() } label: {
+                    footerLabel("改生效日")
+                }
+                .buttonStyle(.bordered)
+                .tint(.blue)
+            }
+            if s.pending.canCancel {
+                Button(role: .destructive) { runHint(.cancel) } label: {
+                    footerLabel("取消這張單")
+                }
+                .buttonStyle(.bordered)
+                .tint(.red)
+            }
+        }
     }
 
     private func footerButtons(_ s: OMSheetSnapshot) -> some View {
@@ -422,25 +708,46 @@ struct OrgMoveSheetView: View {
     }
 
     /// 「…」：〔分享 ▸〕三顆、〔交接完成〕、〔復原〕（7 天內）。不給刪；已復原的單整顆不出現
+    /// [v25.592 轉組織 v1b] 多〔改生效日〕〔取消這張單〕（部門還沒改的）、〔更新生日提醒〕（排在以後、套用好了的）
     @ViewBuilder
     private func moreMenu(_ snap: OMSheetSnapshot?) -> some View {
         if let s = snap, !s.isUndone {
             Menu {
-                shareMenu(s)
-                if s.canClose {
-                    Button { closeMove() } label: {
-                        Label("交接完成", systemImage: "checkmark.seal")
-                    }
-                }
-                if s.canUndo {
-                    Button(role: .destructive) { askUndo() } label: {
-                        Label(s.undoTitle, systemImage: "arrow.uturn.backward")
-                    }
-                }
+                menuItems(s)
             } label: {
                 Image(systemName: "ellipsis.circle")
             }
             .accessibilityLabel("更多")
+        }
+    }
+
+    @ViewBuilder
+    private func menuItems(_ s: OMSheetSnapshot) -> some View {
+        shareMenu(s)
+        if s.pending.canReschedule {
+            Button { askReschedule() } label: {
+                Label("改生效日", systemImage: "calendar")
+            }
+        }
+        if s.pending.canCancel {
+            Button(role: .destructive) { runHint(.cancel) } label: {
+                Label("取消這張單", systemImage: "xmark.circle")
+            }
+        }
+        if s.pending.canRetitleBirthday {
+            Button { retitleBirthday() } label: {
+                Label("更新生日提醒", systemImage: "gift")
+            }
+        }
+        if s.canClose {
+            Button { closeMove() } label: {
+                Label("交接完成", systemImage: "checkmark.seal")
+            }
+        }
+        if s.canUndo {
+            Button(role: .destructive) { askUndo() } label: {
+                Label(s.undoTitle, systemImage: "arrow.uturn.backward")
+            }
         }
     }
 
@@ -472,6 +779,37 @@ struct OrgMoveSheetView: View {
 
     private func shareSheet(_ p: OMSheetSharePayload) -> some View {
         ShareSheet(items: [p.text])
+            .appStores()
+    }
+
+    /// [v25.592 轉組織 v1b] 自己加一項／改那一項（小表單按〔好〕〔拿掉這一項〕：先關頁、下一個 runloop 才回呼 → 直接寫 store）
+    private func customEditorSheet(_ r: OrgMoveCustomRequest) -> some View {
+        let id = moveId
+        let store = lifeStore
+        let lineId = r.lineId
+        var onDelete: (() -> Void)? = nil
+        if let lid = lineId {
+            onDelete = { store.removeOrgMoveCustomLine(id, lineId: lid) }
+        }
+        return OrgMoveCustomLineEditor(request: r, onSave: { title, memo in
+            Self.saveCustom(store, moveId: id, lineId: lineId, title: title, memo: memo)
+        }, onDelete: onDelete)
+        .appStores()
+    }
+
+    /// lineId＝nil：新加（放在組織那幾列前面）；有值：改那一項的字
+    private static func saveCustom(_ store: LifeStore, moveId: UUID, lineId: UUID?, title: String, memo: String) {
+        if let lid = lineId {
+            store.updateOrgMoveCustomLine(moveId, lineId: lid, title: title, memo: memo)
+        } else {
+            _ = store.addOrgMoveCustomLine(moveId, title: title, memo: memo)
+        }
+    }
+
+    /// [v25.592 轉組織 v1b]〔改生效日〕：改成今天或以前、馬上改好時，那一頁自己換成「今天生效」再關（hostId：不給〔看交接單〕開這一張）
+    private func rescheduleSheet(_ r: OrgMoveSheetRequest) -> some View {
+        OrgMoveRescheduleSheet(moveId: r.moveId)
+            .environment(\.orgMoveSheetHostId, r.moveId)
             .appStores()
     }
 
@@ -521,6 +859,70 @@ struct OrgMoveSheetView: View {
         lifeStore.redoOrgMoveOrg(moveId)
     }
 
+    // MARK: [v25.592 轉組織 v1b] 動作
+
+    /// 〔現在套用〕〔只做交接〕〔選部門〕〔取消這張單〕〔加進交接單〕：交給 .orgMoveHintActions（訂閱、確認框、下一個 runloop 寫 store、
+    /// 跳「今天生效」、開選部門）
+    private func runHint(_ a: OrgMoveHintAction) {
+        hintRequest = OrgMoveHintActionRequest(moveId: moveId, action: a)
+    }
+
+    /// 〔改生效日〕：打開那一頁（看不擋；按〔改好了〕時那一頁擋訂閱）。從「…」選單按的：選單收完再開
+    private func askReschedule() {
+        let req = OrgMoveSheetRequest(moveId: moveId)
+        DispatchQueue.main.async { reschedule = req }
+    }
+
+    /// 〔更新生日提醒〕（同精靈 retitleBirthdays：只在你按的這台、只改既有事件的字；沒有行事曆權限就跳過）
+    private func retitleBirthday() {
+        guard let m = lifeStore.orgMoves.move(moveId) else { return }
+        let pid = m.personId
+        let store = lifeStore
+        Task { @MainActor in
+            birthdayNote = OrgMoveBirthdayRetitle.run(store, personId: pid)
+        }
+    }
+
+    /// 訂閱擋（自己加的那一項：加、改、交給誰、拿掉要；勾已交不用，judge §6）
+    private func premiumOK() -> Bool {
+        if subscription.isPremium { return true }
+        DispatchQueue.main.async { showPremiumAlert = true }
+        return false
+    }
+
+    private func askCustomAdd() {
+        guard premiumOK() else { return }
+        DispatchQueue.main.async { customEdit = OrgMoveCustomRequest() }
+    }
+
+    private func askCustomEdit(_ r: OMSheetRow) {
+        guard premiumOK() else { return }
+        let req = OrgMoveCustomRequest(lineId: r.id, title: r.line.title, memo: r.line.memo ?? "")
+        DispatchQueue.main.async { customEdit = req }
+    }
+
+    /// 長按〔交給…〕：挑人頁（打勾＝現在寫的那一位）
+    private func askCustomGive(_ r: OMSheetRow) {
+        guard premiumOK() else { return }
+        let req = OrgMovePickRequest(title: "交給誰", personId: r.personId, selected: r.line.toId,
+                                     purpose: Self.customPrefix + r.id.uuidString)
+        DispatchQueue.main.async { pick = req }
+    }
+
+    /// 長按〔跟著王小明〕：選單收完、下一個 runloop 才寫
+    private func askCustomFollow(_ r: OMSheetRow) {
+        guard premiumOK() else { return }
+        let id = moveId
+        let lid = r.id
+        let store = lifeStore
+        DispatchQueue.main.async { store.setOrgMoveCustomReceiver(id, lineId: lid, to: nil) }
+    }
+
+    /// 右邊圓圈勾「已交」／改回還沒交（不用訂閱：把開始了的交接做完）
+    private func toggleCustomChecked(_ r: OMSheetRow) {
+        lifeStore.setOrgMoveCustomChecked(moveId, lineId: r.id, checked: !r.checked)
+    }
+
     /// 〔交接完成〕（不用訂閱）：寫 closedAt，兩邊的提示列、「交接自」膠囊收起
     private func closeMove() {
         lifeStore.closeOrgMove(moveId)
@@ -562,7 +964,9 @@ struct OrgMoveSheetView: View {
         case .some(.agenda):
             return OrgMovePickRequest(title: "改由誰", personId: r.personId, selected: r.line.toId, purpose: purpose)
         default:
-            return OrgMovePickRequest(title: "改交給誰", personId: r.personId, selected: r.holderId, purpose: purpose)
+            // [v25.592 轉組織 v1b] 排好的（什麼都還沒交）：打勾＝單上寫的接手人（東西還在原人身上）
+            let selected: UUID? = r.planned ? r.line.toId : r.holderId
+            return OrgMovePickRequest(title: "改交給誰", personId: r.personId, selected: selected, purpose: purpose)
         }
     }
 
@@ -574,6 +978,10 @@ struct OrgMoveSheetView: View {
         } else if purpose.hasPrefix(Self.reassignPrefix),
                   let lid = UUID(uuidString: String(purpose.dropFirst(Self.reassignPrefix.count))) {
             lifeStore.reassignOrgMoveLine(moveId, lineId: lid, to: to)
+        } else if purpose.hasPrefix(Self.customPrefix),
+                  let lid = UUID(uuidString: String(purpose.dropFirst(Self.customPrefix.count))) {
+            // [v25.592 轉組織 v1b] 自己加的那一項〔交給…〕（只改單上的字）
+            lifeStore.setOrgMoveCustomReceiver(moveId, lineId: lid, to: to)
         }
     }
 
@@ -849,6 +1257,17 @@ private struct OMSheetRow: Identifiable {
     let canTakeBack: Bool
     /// 〔拿回來〕要退的列（這一列；機台多它底下的警報任務列）
     let takeBackIds: Set<UUID>
+    // [v25.592 轉組織 v1b] 下面幾個有預設值（memberwise init 照舊可以不給）
+    /// 灰字（「11/2 套用時已逾期，改成 11/9」「排好之後才加進來的」）
+    var extra: [String] = []
+    /// 排好的單上的一列（〔改交給…〕挑人頁打勾＝單上寫的接手人）
+    var planned: Bool = false
+    /// 你自己加的一項（門禁卡、鑰匙…）
+    var isCustom: Bool = false
+    /// 自己加的那一項勾了「已交」
+    var checked: Bool = false
+    /// 自己加的那一項可以改（沒復原、沒取消）
+    var customEditable: Bool = false
     var id: UUID { line.id }
 }
 
@@ -857,6 +1276,36 @@ private struct OMSheetGroupData: Identifiable {
     let title: String
     let collapsed: Bool
     let rows: [OMSheetRow]
+    /// [v25.592 轉組織 v1b]「自己加的（N）」那一組最後有〔＋ 自己加一項〕
+    var addable: Bool = false
+}
+
+/// [v25.592 轉組織 v1b]「組織」那一列的顏色：綠＝都對、藍＝排好了還沒改、橘＝又回去了／到了卻卡住
+private enum OMSheetOrgTone {
+    case ok, pending, warn
+
+    var color: Color {
+        switch self {
+        case .ok: return Color.green
+        case .pending: return Color.blue
+        case .warn: return Color.orange
+        }
+    }
+}
+
+/// [v25.592 轉組織 v1b] 部門還沒改的那張（排好的、交出去了還沒到生效日的）要的東西；其他單全是預設值
+private struct OMSheetPending {
+    var isPlanned = false
+    /// 排好的不放四格：「11/1 才交接；在那之前什麼都不動」
+    var plannedNote = ""
+    /// 到了那天：〔現在套用〕／卡住的〔只做交接〕〔選部門〕（〔取消這張單〕另外一顆，不重複）
+    var dueActions: [OrgMoveHintAction] = []
+    var canCancel = false
+    var canReschedule = false
+    /// 「排好之後多了 1 件（先跟著王小明）」（套用之後也可能有：改部門那一刻記下的）
+    var lateNote = ""
+    /// 「…」〔更新生日提醒〕
+    var canRetitleBirthday = false
 }
 
 private struct OMSheetSnapshot {
@@ -876,6 +1325,16 @@ private struct OMSheetSnapshot {
     let canUndo: Bool
     let undoTitle: String
     let shareTargets: [OrgMoveShareTarget]
+    // [v25.592 轉組織 v1b]
+    let pending: OMSheetPending
+    let orgTone: OMSheetOrgTone
+    /// 「組織」那一列〔再改一次〕（部門還沒改的不給：那是到期那天的事）
+    let canRedoOrg: Bool
+    /// 生效前〔取消這張單〕〔拿回來〕的（徽章寫「已取消」）
+    let isCancelledBack: Bool
+    /// 還沒有自己加的：〔＋ 自己加一項〕小卡放在「組織」那組前面；沒有組織那組就放最後
+    let looseAdd: Bool
+    let looseAddAtEnd: Bool
 }
 
 /// 確認框（分享前提醒、〔拿回來〕、〔復原〕）
@@ -912,7 +1371,9 @@ private enum OMSheetBuild {
         let map = OrgMoveHolderMap(world: world)
         let todayKey = OrgMovePlan.dayKey(now)
         let head = OrgMovePlan.sheetHeader(move, world: world)
-        let org = OrgMovePlan.orgStatus(move, world: world)
+        // [v25.592 轉組織 v1b] 帶 now：部門還沒改的那張到了沒、卡住了沒（「11/1 才改：…」「⚠ 設備課已經刪掉了…」）
+        let org = OrgMovePlan.orgStatus(move, world: world, now: now)
+        let editable = !move.isUndone && move.deletedAt == nil
         var groups: [OMSheetGroupData] = []
         for g in OrgMovePlan.sheetGroups(move) {
             let lines: [OrgMoveLine] = g.lineIds.compactMap { move.line($0) }
@@ -924,17 +1385,56 @@ private enum OMSheetBuild {
             for l in lines {
                 rows.append(row(l, move: move, map: map, world: world, now: now, eqIds: eqIds))
             }
-            groups.append(OMSheetGroupData(id: g.id, title: g.title, collapsed: g.collapsed, rows: rows))
+            groups.append(OMSheetGroupData(id: g.id, title: g.title, collapsed: g.collapsed, rows: rows,
+                                           addable: g.id == "custom" && editable))
         }
         let note = (move.note ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let hasCustom = groups.contains { $0.id == "custom" }
+        let hasOrg = groups.contains { $0.id == "org" }
+        // 還沒有自己加的：小卡（按過〔交接完成〕的單不放，免得每張舊單都多一張；有自己加的那一組照樣有〔＋ 自己加一項〕）
+        let loose = editable && !hasCustom && !move.isClosed
+        let tone: OMSheetOrgTone = !org.ok ? .warn : (move.orgPending ? .pending : .ok)
+        // 排好的四格都是 0（還沒交出去）：不算、不放
+        let tiles: [OrgMoveTile] = move.isPlanned ? [] : OrgMovePlan.tiles(move, map: map, world: world, now: now)
         return OMSheetSnapshot(moveId: move.id, personId: move.personId, title: head.title, dates: head.dates,
                                isUndone: move.isUndone,
-                               tiles: OrgMovePlan.tiles(move, map: map, world: world, now: now),
+                               tiles: tiles,
                                orgOK: org.ok, orgText: org.text, groups: groups, note: note,
-                               canClose: !move.isUndone && OrgMovePlan.isOpen(move, todayKey: todayKey),
+                               // [v25.592 轉組織 v1b] 部門還沒改的不給〔交接完成〕（收了就變 closed、到期那天不會改部門）
+                               canClose: !move.isUndone && !move.orgPending && OrgMovePlan.isOpen(move, todayKey: todayKey),
                                canUndo: OrgMovePlan.canUndo(move, todayKey: todayKey),
                                undoTitle: OrgMovePlan.undoButtonTitle(move),
-                               shareTargets: OrgMovePlan.shareTargets(move))
+                               shareTargets: OrgMovePlan.shareTargets(move),
+                               pending: pendingParts(move, world: world, now: now),
+                               orgTone: tone,
+                               canRedoOrg: !org.ok && !move.orgPending && !move.isUndone,
+                               isCancelledBack: move.isUndone && move.cancelledAt != nil,
+                               looseAdd: loose,
+                               looseAddAtEnd: loose && !hasOrg)
+    }
+
+    /// [v25.592 轉組織 v1b] 部門還沒改的那張：排好的那一行灰字、到了那天的按鈕、取消、改生效日；「排好之後多了 N 件」；〔更新生日提醒〕
+    static func pendingParts(_ move: OrgMove, world: OrgMoveWorld, now: Date) -> OMSheetPending {
+        var p = OMSheetPending()
+        let todayKey = OrgMovePlan.dayKey(now)
+        let person = move.personName.isEmpty ? "這位同仁" : move.personName
+        p.isPlanned = move.isPlanned
+        p.plannedNote = "\(OrgMovePlan.shortDay(move.effectiveKey)) 才交接；在那之前什麼都不動"
+        p.canCancel = OrgMovePlan.canCancel(move)
+        p.canReschedule = move.orgPending && !move.isUndone
+        if OrgMovePlan.isDue(move, todayKey: todayKey) {
+            if let b = OrgMovePlan.dueBlock(move, world: world) {
+                p.dueActions = OrgMovePlan.blockActions(b.kind).filter { $0 != .cancel }
+            } else {
+                p.dueActions = [.applyNow]
+            }
+        }
+        let late = OrgMovePlan.lateLines(move, world: world, now: now)
+        if !late.isEmpty { p.lateNote = OrgMovePlan.lateNote(late.count, person: person) }
+        // 套用好了、不是 v1a 那種確認當下全部做的（那種精靈已經改過）、你確認時勾了、有生日提醒、部門或職稱有換
+        let scheduled = move.state == OrgMoveState.applied.rawValue && move.timingValue != OrgMoveTiming.now
+        p.canRetitleBirthday = scheduled && move.retitleBirthday == true && OrgMovePlan.birthdayOffer(move, world: world)
+        return p
     }
 
     static func row(_ line: OrgMoveLine, move: OrgMove, map: OrgMoveHolderMap, world: OrgMoveWorld,
@@ -956,15 +1456,44 @@ private enum OMSheetBuild {
         let indent = isAlarm && line.parentId.map { eqIds.contains($0) } == true
         // 鎖住的列（缺失、兼任、過了報告日的週報、跟著機台的警報任務）整列不給長按：警報任務跟著機台，改機台那一列
         let live = !move.isUndone && line.state != OrgMoveLineState.undone.rawValue && !line.isLocked
-        let reassign = live && canReassign(line, status: st, map: map, now: now)
+        // [v25.592 轉組織 v1b] 排好的單另一條（只改單上的決定；LifeStore.reassignOrgMoveLine 的 planned 那一段）
+        let reassign = live && (move.isPlanned ? canReassignPlanned(line, move: move, status: st)
+                                               : canReassign(line, status: st, map: map, now: now))
         let takeBack = live && takeBackKinds.contains(st.kind)
-        return OMSheetRow(line: line, personId: move.personId, personName: person,
-                          title: rawTitle.isEmpty ? "（沒有標題）" : rawTitle,
-                          mark: st.mark, statusText: st.text, tone: OMSheetTone.of(mark: st.mark), memo: memo,
-                          fix: st.fix, fixLabel: st.fixLabel ?? "", indent: indent,
-                          preview: previewRef(line, holder: st.holderId, map: map), holderId: st.holderId,
-                          canReassign: reassign, canTakeBack: takeBack,
-                          takeBackIds: takeBack ? takeBackIds(line, move: move) : [])
+        // [v25.592 轉組織 v1b] 排好了（◌）用灰色，不跟待分派的橘色混在一起
+        let tone: OMSheetTone = st.kind == .planned ? .gray : OMSheetTone.of(mark: st.mark)
+        var r = OMSheetRow(line: line, personId: move.personId, personName: person,
+                           title: rawTitle.isEmpty ? "（沒有標題）" : rawTitle,
+                           mark: st.mark, statusText: st.text, tone: tone, memo: memo,
+                           fix: st.fix, fixLabel: st.fixLabel ?? "", indent: indent,
+                           preview: previewRef(line, holder: st.holderId, map: map), holderId: st.holderId,
+                           canReassign: reassign, canTakeBack: takeBack,
+                           takeBackIds: takeBack ? takeBackIds(line, move: move) : [])
+        r.extra = extraLines(line, move: move)
+        r.planned = move.isPlanned
+        r.isCustom = line.isCustom
+        r.checked = line.checkedAt != nil
+        r.customEditable = line.isCustom && !move.isUndone && move.deletedAt == nil
+        return r
+    }
+
+    /// [v25.592 轉組織 v1b] 一列下面的灰字：〔11/1 一起做〕套用那天才逾期、改了截止的；〔加進交接單〕加進來的
+    static func extraLines(_ line: OrgMoveLine, move: OrgMove) -> [String] {
+        var out: [String] = []
+        if let t = OrgMovePlan.lateAtApplyText(line, move: move) { out.append(t) }
+        if line.addedLate == true { out.append("排好之後才加進來的") }
+        return out
+    }
+
+    /// [v25.592 轉組織 v1b] 排好的（〔11/1 一起做〕還沒到）長按〔改交給…〕：只改單上的決定（不搬任何東西）。
+    /// 班、組織、鎖著的（缺失、警報任務）、自己加的不給；會議只給〔交給…〕那兩種（LifeStore 也一樣擋：〔照舊〕〔最後一場〕直接 return）
+    static func canReassignPlanned(_ line: OrgMoveLine, move: OrgMove, status: OrgMoveLineStatus) -> Bool {
+        guard move.isPlanned, status.kind == .planned, !line.isLocked, !line.isOrgLine, !line.isCustom,
+              line.kind != OrgMoveLineKind.shifts.rawValue, line.lineKind != nil else { return false }
+        if line.kind == OrgMoveLineKind.meeting.rawValue {
+            return line.lineAction == .newSeries || line.lineAction == .give
+        }
+        return true
     }
 
     /// 〔拿回來〕要退的列：機台那一列連它底下還沒退的警報任務列（LifeStore 退機台時把接手的人身上這台的警報任務一起搬回，

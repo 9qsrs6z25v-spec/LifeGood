@@ -774,7 +774,9 @@ struct SubordinateDetailView: View {
                             if subscription.isPremium { orgMoveWizard = OrgMoveWizardRequest(personId: subordinateId) }
                             else { showPremiumAlert = true }
                         } label: {
-                            Label("轉組織", systemImage: "arrow.left.arrow.right.circle.fill")
+                            // [v25.592 轉組織 v1b] 排好、部門還沒改的那位寫「轉組織（11/1 排好了）」（字在 orgMoveMenuTitle 組好）。
+                            // 要退回這一件：改回 Label("轉組織", …)，刪 orgMoveMenuTitle
+                            Label(orgMoveMenuTitle, systemImage: "arrow.left.arrow.right.circle.fill")
                         }
                         // [v25.348] 績效互評：填這位同仁對大家的年度排名
                         Button {
@@ -1216,6 +1218,17 @@ struct SubordinateDetailView: View {
     /// 要退回這一件：刪這支、meetingHandoverChips 與 meetingSection 裡呼叫它的那一行
     private func meetingHandoverRow(_ m: SubordinateMeeting) -> some View {
         OrgMoveHandoverChipRow(chips: meetingHandoverChips(m))
+    }
+
+    /// [v25.592 轉組織 v1b]「…」〔轉組織〕的字（judge §4.1、§5-21；brief v1b §5-1）：這位有一張排好、部門還沒改的單
+    ///（OrgMovePlan.plannedPrompt：planned 或 handed、沒墓碑）→「轉組織（11/1 排好了）」；沒有 →「轉組織」。
+    /// 按了照舊開精靈（精靈自己跳〔打開那張〕〔取消那張、重排〕）。要退回這一件：刪這支，Label 改回 "轉組織"
+    private var orgMoveMenuTitle: String {
+        let book = lifeStore.orgMoves
+        guard let prompt = OrgMovePlan.plannedPrompt(personId: subordinateId, book: book),
+              let move = book.move(prompt.moveId) else { return "轉組織" }
+        let day = OrgMovePlan.shortDay(move.effectiveKey)
+        return day.isEmpty ? "轉組織（排好了）" : "轉組織（\(day) 排好了）"
     }
 
     /// 打開交接單頁（看交接單不用訂閱，judge §6）

@@ -12,6 +12,8 @@ struct OrgMoveSheetRequest: Identifiable, Equatable {
 /// 打開轉組織精靈（部屬卡片「…」〔轉組織〕）
 struct OrgMoveWizardRequest: Identifiable, Equatable {
     let personId: UUID
+    /// [v25.592 轉組織 v1b] 組織頁改部門時〔用轉組織〕：新部門先帶這個（nil＝照舊不帶）
+    var presetDeptId: UUID? = nil
     var id: UUID { personId }
 }
 
@@ -128,6 +130,8 @@ struct OrgMoveGlyph: View {
     }
 
     static func look(_ line: OrgMoveLine) -> (text: String, color: Color) {
+        // [v25.592 轉組織 v1b] 你自己加的一項（門禁卡、鑰匙…）
+        if line.isCustom { return ("自", Color.pink) }
         switch line.lineKind {
         case .some(.task):
             return line.lineLock == .dereliction ? ("缺", Color.red) : ("任", Color.cyan)
@@ -151,5 +155,112 @@ struct OrgMoveGlyph: View {
         case .none:
             return ("・", Color.gray)
         }
+    }
+}
+
+// MARK: - [v25.592 轉組織 v1b] 〔＋ 自己加一項〕的小表單（精靈第 ② 步、交接單頁共用；主控寫好、凍結）
+
+/// 打開「自己加一項」小表單（`.sheet(item:)`＋`.appStores()`）。lineId＝nil：新加；有值：改那一列
+struct OrgMoveCustomRequest: Identifiable, Equatable {
+    let id = UUID()
+    var lineId: UUID? = nil
+    var title: String = ""
+    var memo: String = ""
+}
+
+/// 門禁卡、鑰匙、帳號、廠商窗口…只記在交接單上（不動任何資料）。按〔好〕：先關這一頁，**下一個 runloop** 才回呼 onSave
+///（呼叫端可以直接寫 store 或草稿）。onDelete 有給才出現〔拿掉這一項〕（同樣關頁後下一個 runloop）
+struct OrgMoveCustomLineEditor: View {
+    let request: OrgMoveCustomRequest
+    let onSave: (String, String) -> Void
+    let onDelete: (() -> Void)?
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var title = ""
+    @State private var memo = ""
+    @State private var loaded = false
+
+    private static let examples = ["門禁卡", "鑰匙", "帳號", "廠商窗口", "公務手機"]
+
+    init(request: OrgMoveCustomRequest, onSave: @escaping (String, String) -> Void, onDelete: (() -> Void)? = nil) {
+        self.request = request
+        self.onSave = onSave
+        self.onDelete = onDelete
+    }
+
+    private var canSave: Bool {
+        !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    TextField("例：門禁卡", text: $title)
+                    exampleChips
+                } header: {
+                    Text("要交的東西")
+                } footer: {
+                    Text("只記在交接單上（可以勾已交），不會動任何資料。")
+                }
+                Section {
+                    TextField("例：11/1 前交給總務", text: $memo, axis: .vertical)
+                        .lineLimit(1...4)
+                } header: {
+                    Text("交接備註（會寫進分享的交接單）")
+                }
+                if onDelete != nil {
+                    Section {
+                        Button("拿掉這一項", role: .destructive) { remove() }
+                    }
+                }
+            }
+            .navigationTitle(request.lineId == nil ? "自己加一項" : "改這一項")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("取消") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("好") { save() }
+                        .disabled(!canSave)
+                }
+            }
+            .onAppear { load() }
+        }
+    }
+
+    private var exampleChips: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                ForEach(Self.examples, id: \.self) { e in
+                    Button(e) { title = e }
+                        .font(.caption)
+                        .buttonStyle(.bordered)
+                }
+            }
+        }
+    }
+
+    private func load() {
+        guard !loaded else { return }
+        loaded = true
+        title = request.title
+        memo = request.memo
+    }
+
+    private func save() {
+        let t = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let m = memo.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !t.isEmpty else { return }
+        dismiss()
+        let done = onSave
+        DispatchQueue.main.async { done(t, m) }
+    }
+
+    private func remove() {
+        dismiss()
+        guard let del = onDelete else { return }
+        DispatchQueue.main.async { del() }
     }
 }

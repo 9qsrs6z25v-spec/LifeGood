@@ -136,6 +136,8 @@ struct OrgMoveDraft {
     var lines: [OrgMoveLine] = []
     /// 順便更新生日提醒（標題有部門）
     var retitleBirthday: Bool = true
+    /// [v25.592 轉組織 v1b] 生效日在以後時什麼時候做（預設〔現在就交接，11/1 才改部門〕，judge 第 6 題）；生效日今天或以前不看這個
+    var timing: OrgMoveTiming = .handoverNow
 
     init(personId: UUID, effective: Date) {
         self.personId = personId
@@ -207,6 +209,22 @@ struct OrgMovePreview {
     var untouched: [String] = []
     var deferred: String?
     var timingNote = "按下去就全部改好"
+    /// [v25.592 轉組織 v1b] 「什麼時候做」那一區的兩顆（生效日在以後才有；生效日今天或以前＝空的，畫面不出現那一區）
+    var timingOptions: [OrgMoveTimingOption] = []
+    /// [v25.592 轉組織 v1b] ☑ 順便更新生日提醒 下面那行小字（生效日在以後：「11/1 在「今天生效」那張上按一下才改」）
+    var birthdayNote: String?
+    /// [v25.592 轉組織 v1b] 橘字提醒（「陳怡君 11/1 前就調走了，確定交給這位？」judge §5-1）
+    var warnings: [String] = []
+}
+
+/// [v25.592 轉組織 v1b] 第 ③ 步「什麼時候做」的一顆
+struct OrgMoveTimingOption: Identifiable, Equatable {
+    let timing: OrgMoveTiming
+    /// 「現在就交接，11/1 才改部門」「11/1 一起做」
+    let label: String
+    /// 選了之後下面那一行
+    let note: String
+    var id: String { timing.rawValue }
 }
 
 /// 交接單頁一列的狀態（照現在的資料算）
@@ -216,6 +234,8 @@ struct OrgMoveLineStatus: Equatable {
         case pending, pendingElsewhere, follow, closed, dropped, undone, org
         /// [v25.591 轉組織 v1a-2] 會議〔最後一場〕做好了
         case ended
+        /// [v25.592 轉組織 v1b] 排好了、還沒做（〔11/1 一起做〕生效前）／你自己加的一項
+        case planned, custom
     }
     /// 這一列能按的那一顆
     enum Fix: String {
@@ -255,7 +275,30 @@ struct OrgMoveHint: Identifiable, Equatable {
     /// 橘字（又回到原人身上、部門又被改回去、在兩個人身上）
     let warning: String?
     let isReceiver: Bool
+    /// [v25.592 轉組織 v1b] 灰字一行（「排好之後多了 2 件（先跟著王小明）」）
+    var note: String? = nil
+    /// [v25.592 轉組織 v1b] 這一條上的按鈕（〔現在套用〕〔加進交接單〕〔只做交接〕〔選部門〕〔取消這張單〕）
+    var actions: [OrgMoveHintAction] = []
+    /// [v25.592 轉組織 v1b] 灰色那一種（接手的人「11/1 起會從王小明接手 6 項」：什麼都還沒交過來）
+    var muted: Bool = false
     var id: String { moveId.uuidString + (isReceiver ? "-r" : "-p") }
+}
+
+/// [v25.592 轉組織 v1b] 提示列、「今天生效」卡上的按鈕（訂閱：〔現在套用〕〔只做交接〕〔取消這張單〕不用；〔加進交接單〕〔選部門〕要，judge §6）
+enum OrgMoveHintAction: String, Identifiable, Equatable {
+    case applyNow, addLate, skipOrg, pickDept, cancel
+    var id: String { rawValue }
+    var label: String {
+        switch self {
+        case .applyNow: return "現在套用"
+        case .addLate: return "加進交接單"
+        case .skipOrg: return "只做交接"
+        case .pickDept: return "選部門"
+        case .cancel: return "取消這張單"
+        }
+    }
+    /// 要訂閱的（judge §6：改排好的單要；把開始了的做完、設錯的收掉不用）
+    var needsPremium: Bool { self == .addLate || self == .pickDept }
 }
 
 /// 〔潛力性〕「歷程」裡轉組織那一列
@@ -536,13 +579,18 @@ enum OrgMovePlan {
     }
 
     /// 復原的期限：生效日與按確認那天取晚的＋7 天（judge §3.8；例 11/1 生效、11/2 按 → 11/9）
+    /// [v25.592 轉組織 v1b]「按確認那天」＝交接那一刻（handedAt；v1a 的單 handedAt＝appliedAt 同一刻）：
+    /// 〔現在就交接〕10/28 按、11/2 才改部門 → 到 11/8（judge §3.8 v1b 例），不是照改部門那天算到 11/9。
+    /// 要退回這一件：`m.handedAt ?? m.appliedAt` 改回 `m.appliedAt`
     static func undoUntilKey(_ m: OrgMove) -> String {
-        let applied = m.appliedAt.map { dayKey($0) } ?? m.effectiveKey
+        let applied = (m.handedAt ?? m.appliedAt).map { dayKey($0) } ?? m.effectiveKey
         return addDays(max(m.effectiveKey, applied), 7)
     }
 
+    /// [v25.592 轉組織 v1b] 部門還沒改的（排好的、交出去了還沒到生效日的）不給〔復原這次轉組織〕：用〔取消這張單〕
+    ///（已經交出去的會問〔拿回來〕〔留給接手的人〕；judge §3.8 生效前那一列）。要退回這一件：拿掉 `!m.orgPending &&`
     static func canUndo(_ m: OrgMove, todayKey: String) -> Bool {
-        m.wasApplied && !m.isUndone && m.deletedAt == nil && todayKey <= undoUntilKey(m)
+        !m.orgPending && m.wasApplied && !m.isUndone && m.deletedAt == nil && todayKey <= undoUntilKey(m)
     }
 
     /// 還在交接中（提示列、「交接自」膠囊、接手那一區要不要出現）：套用過、沒復原、沒按〔交接完成〕、
@@ -640,6 +688,8 @@ enum OrgMovePlan {
             var parts = [world.deptShort(s.departmentId), s.plantArea.trimmingCharacters(in: .whitespaces),
                          world.titleLabel(gradeTitleId: s.gradeTitleId, jobTitle: s.jobTitle)]
             if memberSet.contains(s.id) { parts.insert("\(roleName)成員", at: 0) }
+            // [v25.592 轉組織 v1b] 接手的人自己也排了轉組織：副標多「11/9 也要調走」（judge §4.3、§5-1）。要退回這一件：刪這一行
+            if let leaving = leavingNote(s.id) { parts.append(leaving) }
             return (id: s.id, name: n.isEmpty ? "未命名" : n, sub: parts.filter { !$0.isEmpty }.joined(separator: "・"))
         }
     }
@@ -786,6 +836,7 @@ enum OrgMovePlan {
                                effectiveKey: dayKey(draft.effective), world: world, now: now,
                                plantChanges: plantChanges(draft, world: world))
         var touched: [String: OrgMoveLine] = [:]
+        let oldCustom = draft.lines.filter(\.isLiveCustom)
         for l in draft.lines where l.updatedAt != nil {
             let key = l.kind + "|" + (l.refId?.uuidString ?? "")
             touched[key] = l
@@ -800,6 +851,8 @@ enum OrgMovePlan {
             }
             return t
         }
+        // [v25.592 轉組織 v1b] 你自己加的一項（門禁卡、鑰匙…）重算時照留，排在最後（buildLines 不會長出這種）。要退回這一件：刪這一行
+        draft.lines.append(contentsOf: oldCustom)
     }
 
     /// [v25.591 轉組織 v1a-2] 這次廠區有沒有換（班的預設用；只換廠區、換單位都看 toPlant）
@@ -830,6 +883,8 @@ enum OrgMovePlan {
     /// 這一列能選的（judge §3.2）。[v25.591 轉組織 v1a-2] 會議、議程、班、兼任要知道整張清單與這位同仁是誰：用這一支
     static func choices(_ line: OrgMoveLine, in lines: [OrgMoveLine], personId: UUID, personName: String,
                         world: OrgMoveWorld) -> [OrgMoveChoice] {
+        // [v25.592 轉組織 v1b] 你自己加的一項：〔交給…〕〔跟著王小明〕（拿掉這一項在那一列往左滑）
+        if line.isCustom { return customChoices(personName: personName) }
         switch line.lineKind {
         case .some(.meeting): return meetingChoices(line, in: lines, world: world)
         case .some(.agenda): return agendaChoices(line, personId: personId, world: world)
@@ -927,6 +982,8 @@ enum OrgMovePlan {
     /// 灰字＝為什麼這樣排（一到三行）。[v25.591 轉組織 v1a-2] 會議、議程、班、兼任要整張清單與這位同仁：用這一支
     static func reasonLines(_ line: OrgMoveLine, in lines: [OrgMoveLine], personId: UUID, personName: String,
                             world: OrgMoveWorld, now: Date) -> [String] {
+        // [v25.592 轉組織 v1b] 你自己加的一項
+        if line.isCustom { return customReasons(line) }
         if line.lineLock != .sideRole,
            let r = moreReasonLines(line, in: lines, personId: personId, personName: personName, world: world, now: now) {
             return r
@@ -1024,7 +1081,8 @@ enum OrgMovePlan {
         var order: [UUID] = []
         var names: [UUID: String] = [:]
         var counts: [UUID: Int] = [:]
-        for l in lines where !l.isOrgLine && l.lineKind != nil {
+        // [v25.592 轉組織 v1b] 你自己加的一項也算（交給陳怡君＝交給別人 +1）。要退回這一件：拿掉 `|| l.isCustom`
+        for l in lines where !l.isOrgLine && (l.lineKind != nil || l.isLiveCustom) {
             let r = resolved(l, in: lines)
             switch r.action {
             case .none:
@@ -1082,7 +1140,8 @@ enum OrgMovePlan {
         var n = 0
         for i in lines.indices {
             let l = lines[i]
-            guard l.action == nil, !l.isLocked, !l.isOrgLine, l.lineKind != nil else { continue }
+            // [v25.592 轉組織 v1b] 你自己加的一項（還沒決定的）也一起帶。要退回這一件：拿掉 `|| l.isCustom`
+            guard l.action == nil, !l.isLocked, !l.isOrgLine, l.lineKind != nil || l.isLiveCustom else { continue }
             if let only = onlyIds, !only.contains(l.id) { continue }
             lines[i].action = OrgMoveAction.give.rawValue
             lines[i].toId = to
@@ -1134,6 +1193,9 @@ enum OrgMovePlan {
         }
         if !reps.isEmpty { out.append(OrgMoveGroup(id: "reports", title: "週報題目 \(reps.count)", lineIds: reps.map(\.id), canGiveAll: true)) }
         if !shifts.isEmpty { out.append(OrgMoveGroup(id: "shifts", title: "以後的班", lineIds: shifts.map(\.id), canGiveAll: false)) }
+        // [v25.592 轉組織 v1b]「自己加的 2」（門禁卡、鑰匙…；〔這組交給 ▾〕可以）。要退回這一件：刪這兩行
+        let custom = lines.filter(\.isLiveCustom)
+        if !custom.isEmpty { out.append(OrgMoveGroup(id: "custom", title: "自己加的 \(custom.count)", lineIds: custom.map(\.id), canGiveAll: true)) }
         if !org.isEmpty { out.append(OrgMoveGroup(id: "org", title: "組織 \(org.count)", lineIds: org.map(\.id), canGiveAll: false)) }
         return out
     }
@@ -1245,9 +1307,12 @@ enum OrgMovePlan {
                                      title: "\(world.deptShort(d)) 管理人員", action: OrgMoveAction.add.rawValue))
         }
         let note = draft.note.trimmingCharacters(in: .whitespacesAndNewlines)
+        // [v25.592 轉組織 v1b] 生效日在以後：照你選的〔現在就交接，11/1 才改部門〕／〔11/1 一起做〕；今天或以前一律 "now"。
+        // state 先寫 applied，LifeStore.applyOrgMove 照 timing 改成 handed／planned。要退回這一件：timing 改回 "now"
+        let timingRaw = effKey > dayKey(now) ? draft.timing.rawValue : OrgMoveTiming.now.rawValue
         return OrgMove(personId: draft.personId, personName: world.name(draft.personId),
                        kind: draft.kind.rawValue, effectiveKey: effKey,
-                       handoverByKey: handoverByKey(effectiveKey: effKey), timing: "now",
+                       handoverByKey: handoverByKey(effectiveKey: effKey), timing: timingRaw,
                        from: fromSide, to: toSide, keepDept: (draft.kind == .move && draft.keepDept) ? true : nil,
                        note: note.isEmpty ? nil : note, state: OrgMoveState.applied.rawValue,
                        lines: lines, retitleBirthday: draft.retitleBirthday, createdAt: now, updatedAt: now)
@@ -1277,9 +1342,15 @@ enum OrgMovePlan {
             var shiftTitles: [String] = []
             var shiftNotes: [String] = []
             var sides: [String] = []
+            // [v25.592 轉組織 v1b] 你自己加的一項（「自己加的 2（門禁卡、鑰匙）」）
+            var customs: [String] = []
             for l in lines where !l.isOrgLine {
                 let res = resolved(l, in: lines)
                 guard res.action == .give || res.action == .newSeries, res.toId == r.id else { continue }
+                if l.isCustom {
+                    if l.isLiveCustom { customs.append(l.title) }
+                    continue
+                }
                 switch l.lineKind {
                 case .some(.task), .some(.alarmTask):
                     if let note = overdueNote(l, in: lines, personName: person, world: world, now: now), !note.isEmpty {
@@ -1320,6 +1391,7 @@ enum OrgMovePlan {
             small.append(contentsOf: shiftTitles)
             if !small.isEmpty { body.append(small.joined(separator: "・")) }
             if !sides.isEmpty { body.append("兼任 \(sides.count)（\(sides.joined(separator: "、"))，連兼任負責人一起換）") }
+            if !customs.isEmpty { body.append("自己加的 \(customs.count)（\(customs.joined(separator: "、"))）") }
             body.append(contentsOf: shiftNotes)
             p.blocks.append(OrgMovePreviewBlock(id: "to-" + r.id.uuidString, title: "交給 \(r.name) \(r.count) 項", lines: body))
         }
@@ -1367,6 +1439,9 @@ enum OrgMovePlan {
         p.untouched = untouchedLines(personId: draft.personId, world: world)
         // [v25.591 轉組織 v1a-2] 會議、議程、班、兼任都在清單上交了：灰字「下一版才能在這裡交」不再出現
         p.deferred = nil
+        // [v25.592 轉組織 v1b] 生效日在以後：「什麼時候做」兩顆、生日提醒那行小字、接手的人比這張先調走的提醒（OrgMoveDue.swift）。
+        // 要退回這一件：刪這一行
+        applyScheduleTexts(&p, draft: draft, move: move, world: world, now: now)
         return p
     }
 
@@ -1395,9 +1470,14 @@ enum OrgMovePlan {
     private static func followSummary(_ lines: [OrgMoveLine]) -> [String] {
         var derel = 0, side = 0, tasks = 0, reports = 0, machines = 0
         var oneOnOne = 0, meetings = 0, agenda = 0, shifts = 0
+        var customs = 0
         for l in lines where !l.isOrgLine {
             let a = resolved(l, in: lines).action
             guard a == .follow || a == .closeNow else { continue }
+            if l.isCustom {
+                customs += 1   // [v25.592 轉組織 v1b] 你自己加的一項〔跟著〕
+                continue
+            }
             switch l.lineKind {
             case .some(.task):
                 if l.lineLock == .dereliction { derel += 1 } else { tasks += 1 }
@@ -1422,6 +1502,7 @@ enum OrgMovePlan {
         if agenda > 0 { out.append("議程 \(agenda)") }
         if reports > 0 { out.append("週報 \(reports)") }
         if shifts > 0 { out.append("以後的班") }
+        if customs > 0 { out.append("自己加的 \(customs)") }
         return out
     }
 
@@ -1609,6 +1690,10 @@ enum OrgMovePlan {
         if line.isOrgLine {
             return OrgMoveLineStatus(kind: .org, mark: "・", text: line.title, holderId: nil, fix: nil, fixLabel: nil)
         }
+        // [v25.592 轉組織 v1b] 你自己加的一項（只記在單上：已交／還沒交）；排好了、什麼都還沒做的單（「排好了：11/1 交給 陳怡君」）。
+        // 要退回這一件：刪這兩個 if
+        if line.isCustom { return customStatus(line, move: move) }
+        if move.isPlanned { return plannedStatus(line, move: move) }
         // [v25.591 轉組織 v1a-2] 會議、議程、班、兼任（v1a-1 存的鎖著的兼任列照舊走下面）
         if line.lineLock != .sideRole, let more = moreStatus(line, in: move, map: map, now: now) {
             return more
@@ -1748,7 +1833,8 @@ enum OrgMovePlan {
     }
 
     /// 「組織」那一列：部屬的部門、廠區、職稱，組織人員的部門，名片的部門，管理人員，照現在的資料跟單上的「到」比（judge §4.5）
-    static func orgStatus(_ move: OrgMove, world: OrgMoveWorld) -> (ok: Bool, text: String) {
+    /// [v25.592 轉組織 v1b] 多 now（部門還沒改的那張到了沒、卡住了沒）；呼叫端不給＝現在
+    static func orgStatus(_ move: OrgMove, world: OrgMoveWorld, now: Date = Date()) -> (ok: Bool, text: String) {
         let person = move.personName.isEmpty ? "這位同仁" : move.personName
         guard let sub = world.sub(move.personId) else { return (true, "找不到\(person)了") }
         let deptChanged = move.kind == OrgMoveKind.move.rawValue && move.keepDept != true && move.to.deptId != move.from.deptId
@@ -1757,7 +1843,11 @@ enum OrgMovePlan {
         let toDept = sideText(OrgMoveSide(deptId: move.to.deptId, deptLabel: move.to.deptLabel), world: world)
         let fromDept = sideText(OrgMoveSide(deptId: move.from.deptId, deptLabel: move.from.deptLabel), world: world)
         let op = world.orgPerson(linkedTo: move.personId)
-        if move.isUndone { return (true, "已復原") }
+        if move.isUndone { return (true, move.cancelledAt != nil ? "已取消" : "已復原") }
+        // [v25.592 轉組織 v1b] 部門還沒改（排好的、交出去了還沒到生效日的）：「11/1 才改：設備課・P2」；到了卻卡住的寫為什麼；
+        // 取消了調動、只做交接的寫那一句（cancelNote）。要退回這一件：刪這兩個 if
+        if move.orgPending { return pendingOrgStatus(move, world: world, now: now) }
+        if move.keepDept == true, let n = move.cancelNote, !n.isEmpty { return (true, "✓ 部門照舊・" + n) }
         if deptChanged {
             let subOK = sub.departmentId == move.to.deptId
             let orgOK = op.map { $0.departmentId == move.to.deptId } ?? true
@@ -1846,6 +1936,9 @@ enum OrgMovePlan {
         if !follow.isEmpty { out.append(OrgMoveSheetGroup(id: "follow", title: "跟著\(person)（\(follow.count)）", lineIds: follow, collapsed: true)) }
         if !dropped.isEmpty { out.append(OrgMoveSheetGroup(id: "drop", title: "不要了（\(dropped.count)）", lineIds: dropped, collapsed: true)) }
         if !ended.isEmpty { out.append(OrgMoveSheetGroup(id: "end", title: "結束的會議（\(ended.count)）", lineIds: ended, collapsed: false)) }
+        // [v25.592 轉組織 v1b]「自己加的（2）」：門禁卡、鑰匙…（只記在單上、可以勾已交）。要退回這一件：刪這兩行
+        let custom = move.allLines.filter(\.isLiveCustom)
+        if !custom.isEmpty { out.append(OrgMoveSheetGroup(id: "custom", title: "自己加的（\(custom.count)）", lineIds: custom.map(\.id), collapsed: false)) }
         let org = move.allLines.filter { $0.isOrgLine }
         if !org.isEmpty { out.append(OrgMoveSheetGroup(id: "org", title: "組織", lineIds: org.map(\.id), collapsed: false)) }
         return out
@@ -1916,9 +2009,15 @@ enum OrgMovePlan {
         let t = sideText(move.to, world: world)
         let title = f == t ? "\(person)　\(f)（部門照舊）" : "\(person)　\(f) → \(t)"
         var dates = "\(dayText(move.effectiveKey))生效"
+        // [v25.592 轉組織 v1b] 排好的「（排好了）」；交出去了、部門還沒改的「・10/28 交接・11/1 才改部門」；
+        // 生效那天才改部門的「・11/2 08:10 改的部門」（judge §7 v1b 做好標準 2）。要退回這一件：刪 scheduleHeaderParts 那一段
+        if move.isPlanned { dates += "（排好了）" }
         if let h = move.handedAt ?? move.appliedAt { dates += "・\(shortDay(dayKey(h))) 交接" }
+        dates += scheduleHeaderParts(move)
         dates += "・交接完成日 \(shortDay(move.handoverByKey))"
-        if move.isUndone, let u = move.undoneAt { dates += "・\(shortDay(dayKey(u))) 已復原" }
+        if move.isUndone, let u = move.undoneAt {
+            dates += move.cancelledAt != nil ? "・\(shortDay(dayKey(u))) 取消了" : "・\(shortDay(dayKey(u))) 已復原"
+        }
         return (title, dates)
     }
 
@@ -1927,6 +2026,9 @@ enum OrgMovePlan {
     /// 原人卡片的提示列（還在交接中才有；judge §4.7）
     static func personHint(personId: UUID, book: OrgMoveBook, world: OrgMoveWorld, now: Date) -> OrgMoveHint? {
         let todayKey = dayKey(now)
+        // [v25.592 轉組織 v1b] 部門還沒改的那一張先（「11/1 起調設備課・交接單排好了（16 項）」「…・已交出 9 項」、
+        // 到了還沒改的〔現在套用〕、卡住的為什麼；OrgMoveDue.swift）。要退回這一件：刪這一行
+        if let h = pendingPersonHint(personId: personId, book: book, world: world, now: now) { return h }
         guard let m = book.live.filter({ $0.personId == personId && isOpen($0, todayKey: todayKey) })
             .sorted(by: { ($0.appliedAt ?? Date.distantPast) > ($1.appliedAt ?? Date.distantPast) }).first
         else { return nil }
@@ -1955,7 +2057,7 @@ enum OrgMovePlan {
         }
         let person = m.personName.isEmpty ? "這位同仁" : m.personName
         var warning: String?
-        let org = orgStatus(m, world: world)
+        let org = orgStatus(m, world: world, now: now)
         if back > 0 {
             warning = "有 \(back) 項又回到\(person)身上"
         } else if !org.ok {
@@ -1963,14 +2065,22 @@ enum OrgMovePlan {
         } else if both > 0 {
             warning = "有 \(both) 項在兩個人身上"
         }
-        return OrgMoveHint(moveId: m.id, text: text, badge: badge, warning: warning, isReceiver: false)
+        var hint = OrgMoveHint(moveId: m.id, text: text, badge: badge, warning: warning, isReceiver: false)
+        // [v25.592 轉組織 v1b]「排好之後多了 2 件（先跟著王小明）」〔加進交接單〕（生效那天改部門時記下的；judge §5-15）。
+        // 要退回這一件：刪這三行
+        let late = lateLines(m, world: world, now: now)
+        if !late.isEmpty { hint.note = lateNote(late.count, person: person) }
+        if !late.isEmpty { hint.actions = [.addLate] }
+        return hint
     }
 
     /// 接手的人卡片的提示列（每一張還在交接中、有交給這位的單一條）
     static func receiverHints(personId: UUID, book: OrgMoveBook, world: OrgMoveWorld, now: Date) -> [OrgMoveHint] {
         let todayKey = dayKey(now)
         let map = OrgMoveHolderMap(world: world)
-        var out: [OrgMoveHint] = []
+        // [v25.592 轉組織 v1b]〔11/1 一起做〕排好的：「11/1 起會從王小明接手 6 項」（灰；什麼都還沒交過來，judge §4.6、§4.7）。
+        // 要退回這一件：改回 `var out: [OrgMoveHint] = []`
+        var out: [OrgMoveHint] = plannedReceiverHints(personId: personId, book: book)
         for m in book.live where m.personId != personId && isOpen(m, todayKey: todayKey) {
             var n = 0, done = 0, both = 0
             for l in m.allLines where !l.isOrgLine && l.lineKind != nil && l.state != OrgMoveLineState.undone.rawValue {
@@ -1997,8 +2107,10 @@ enum OrgMovePlan {
                 let t = sideText(m.to, world: world)
                 let detail = f == t ? "\(f)（部門照舊）" : "\(f) → \(t)"
                 let c = handedCounts(m)
-                let sub = m.isUndone ? "（已復原）" : "交出去 \(c.given)・跟著 \(c.follow)"
-                let title = m.isUndone ? "\(fullDay(m.effectiveKey)) 轉組織（已復原）" : "\(fullDay(m.effectiveKey)) 轉組織"
+                // [v25.592 轉組織 v1b] 生效前取消的寫「（已取消）」、取消了調動但交接照舊的多寫那一句；部門還沒改的寫「（11/1 才改部門）」。
+                // 要退回這一件：sub、title 改回只看 isUndone 的那兩行
+                let sub = historySub(m, given: c.given, follow: c.follow)
+                let title = historyTitle(m)
                 return OrgMoveHistoryRow(moveId: m.id, date: date(fromKey: m.effectiveKey) ?? Date.distantPast,
                                          title: title, detail: detail, sub: sub, isUndone: m.isUndone)
             }
@@ -2103,7 +2215,8 @@ enum OrgMovePlan {
         var order: [UUID] = []
         var names: [UUID: String] = [:]
         var counts: [UUID: Int] = [:]
-        for l in move.allLines where !l.isOrgLine && l.lineKind != nil && l.state != OrgMoveLineState.undone.rawValue {
+        // [v25.592 轉組織 v1b] 你自己加的一項交給誰也算（只有門禁卡交給林志豪，也有〔給林志豪的 1 項〕）。要退回這一件：拿掉 `|| l.isCustom`
+        for l in move.allLines where !l.isOrgLine && (l.lineKind != nil || l.isLiveCustom) && l.state != OrgMoveLineState.undone.rawValue {
             guard let to = receiver(l, in: move).id else { continue }
             if counts[to] == nil { order.append(to) }
             counts[to, default: 0] += 1
@@ -2182,6 +2295,8 @@ enum OrgMovePlan {
             !l.isOrgLine && l.lineKind != nil && l.state != OrgMoveLineState.undone.rawValue
                 && receiver(l, in: move).id == receiverId
         }
+        // [v25.592 轉組織 v1b] 你自己加的一項（門禁卡、鑰匙…），排在最後一段「自己加的」
+        let customs = move.allLines.filter { l in l.isLiveCustom && receiver(l, in: move).id == receiverId }
         let tasks = mine.filter { $0.kind == OrgMoveLineKind.task.rawValue } + mine.filter { $0.kind == OrgMoveLineKind.alarmTask.rawValue }
         let eqs = mine.filter { $0.kind == OrgMoveLineKind.equipment.rawValue }
         let reps = mine.filter { $0.kind == OrgMoveLineKind.report.rawValue }
@@ -2229,6 +2344,7 @@ enum OrgMovePlan {
             }
         }
         out.append(contentsOf: moreShareItems(shiftsSides, move: move, map: map, world: world, n: &n))
+        out.append(contentsOf: customShareItems(customs, n: &n))
         return out
     }
 

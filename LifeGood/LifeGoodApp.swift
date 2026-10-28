@@ -121,6 +121,8 @@ struct LifeGoodApp: App {
     @StateObject private var cloudSync = CloudSyncManager.shared
     @StateObject private var subscription = SubscriptionManager.shared
     @StateObject private var einvoiceSync = EInvoiceSyncManager.shared
+    /// [v25.592 轉組織 v1b] 生效那天自動改部門之後跳的「今天生效」那張（OrgMoveDueCenter.notice）
+    @StateObject private var orgMoveDue = OrgMoveDueCenter.shared
     @Environment(\.scenePhase) private var scenePhase
 
     init() {
@@ -161,7 +163,15 @@ struct LifeGoodApp: App {
                 .environmentObject(cloudSync)
                 .environmentObject(subscription)
                 .environmentObject(einvoiceSync)
+                // [v25.592 轉組織 v1b]「今天生效」：生效那天你自己的手機拉完 iCloud、自動改好部門之後跳一次（上面有別的畫面就等它關掉）。
+                // 要退回這一件：刪這個 .sheet 與 .task、scenePhase 裡 OrgMoveDueCenter 那兩行
+                .sheet(item: $orgMoveDue.notice) { n in
+                    OrgMoveDueSheet(notice: n).appStores()
+                }
                 .task {
+                    // [v25.592 轉組織 v1b] 轉組織到期那天：掛好「這一輪 iCloud 拉完了」的監聽（第一個 await 之前，不漏掉開 App 那一輪）；
+                    // 三個條件都成立才自動改部門（不是加入共享的那支、這一輪拉成功、沒有編輯頁開著）
+                    OrgMoveDueCenter.shared.start(life: lifeStore)
                     // [v2 小工具] 一按就記的收件匣先收進帳本（第一份快照才含剛記的）；
                     // 放在電子發票同步（einvoiceSync.syncIfDue）之前，防重複才找得到一按記的那筆
                     // [手錶 v6] 多收 life：旅途中在手錶記的帳入帳時要看那一趟、那一站還在不在（連旅遊）
@@ -240,6 +250,8 @@ struct LifeGoodApp: App {
                         // 節流：30 秒內已同步過會自動跳過，避免快速切換 App
                         // 造成的反覆 CloudKit pull 觸發畫面閃爍
                         cloudSync.syncNowIfDue()
+                        // [v25.592 轉組織 v1b] 回前景：剛拉過（2 分鐘內成功）或這台沒開同步就看一次到期的；不然等這一輪拉完的通知
+                        OrgMoveDueCenter.shared.appBecameActive()
                         // [v2 小工具] 先把一按就記的待入帳收進帳本，再接控制項存著的網址（萬一沒直接交到），
                         // 最後才重寫快照（「今天 N 筆」含剛收進來的）
                         _ = QuickRecordImporter.shared.importPending()

@@ -496,6 +496,12 @@ final class CloudSyncManager: ObservableObject {
                         return
                     }
                     CloudKitManager.shared.fetchChanges { [weak self] ok in
+                        // [v25.592 轉組織 v1b] 這一輪拉完了（不管有沒有變更）：轉組織到期那天「這一輪 iCloud 拉取成功」才自動改部門
+                        //（OrgMoveDueCenter；judge §7 v1b）。下一個 runloop 才發：排在各 Store 收到 .cloudSyncDidPullChanges 重新載入之後。
+                        // 要退回這一件：刪這三行
+                        DispatchQueue.main.async {
+                            NotificationCenter.default.post(name: .cloudSyncDidFinishPull, object: nil, userInfo: ["ok": ok])
+                        }
                         // fetchChanges completion 已保證在主執行緒執行，直接重置旗標
                         // 拉取失敗時不推送：避免以過期本地資料覆蓋雲端（潛在資料遺失）
                         guard ok else {
@@ -605,6 +611,9 @@ extension Notification.Name {
     static let cloudSyncDidPullChanges = Notification.Name("cloudSyncDidPullChanges")
     /// iCloud 拉到照片變更後發送，UI 需重新載入圖片
     static let cloudSyncPhotosDidUpdate = Notification.Name("cloudSyncPhotosDidUpdate")
+    /// [v25.592 轉組織 v1b] 手動／回前景的那一輪拉取做完了（不管有沒有變更；userInfo["ok"]＝拉取成功）。
+    /// 在 .cloudSyncDidPullChanges 之後才發（各 Store 已經載入新的資料）
+    static let cloudSyncDidFinishPull = Notification.Name("cloudSyncDidFinishPull")
 }
 
 // MARK: - 進階設定／AI 偏好打包同步

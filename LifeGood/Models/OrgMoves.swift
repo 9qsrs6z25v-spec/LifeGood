@@ -50,7 +50,7 @@ struct OrgMoveBook: Codable, Equatable {
     }
 
     var all: [OrgMove] { moves ?? [] }
-    /// 沒有墓碑的（v1a-1 不會刪；欄位先留給 v1b 的「排好、還沒做的可以刪」）
+    /// 沒有墓碑的（[v25.592 轉組織 v1b] 排好、什麼都還沒做的〔取消〕寫 deletedAt＝墓碑；兩台合併時墓碑勝過比它舊的）
     var live: [OrgMove] { all.filter { $0.deletedAt == nil } }
     var isEmpty: Bool { all.isEmpty }
 
@@ -115,7 +115,7 @@ struct OrgMove: Codable, Equatable, Identifiable {
     var effectiveKey: String
     /// 交接完成日（生效日＋10 天）
     var handoverByKey: String?
-    /// nil／"now"＝確認那一刻全部做（v1a 只有這個）
+    /// nil／"now"＝確認那一刻全部做；[v25.592 轉組織 v1b] "handoverNow" 現在就交接、生效那天才改部門／"together" 生效那天一起做（OrgMoveTiming）
     var timing: String?
     var from: OrgMoveSide
     var to: OrgMoveSide
@@ -123,7 +123,7 @@ struct OrgMove: Codable, Equatable, Identifiable {
     var keepDept: Bool?
     /// 你自己打的備註（「人事令 1015-07 號」）；只有你看得到，不上分享
     var note: String?
-    /// "applied" 全部做完／"closed" 按了〔交接完成〕／"undone" 復原了（v1b 起 "planned"、"handed"、"cancelled"）
+    /// "applied" 全部做完／"closed" 按了〔交接完成〕／"undone" 復原了；[v25.592 轉組織 v1b] "planned" 排好了／"handed" 事情交了、部門還沒改／"cancelled" 排好的取消了
     var state: String
     var handedAt: Date?
     var appliedAt: Date?
@@ -138,6 +138,15 @@ struct OrgMove: Codable, Equatable, Identifiable {
     var createdAt: Date?
     var updatedAt: Date?
     var deletedAt: Date?
+    // [v25.592 轉組織 v1b] 排在以後（judge §3.5、§3.8、§5-15、§5-21、§7 v1b；orgmove/build/v1b/brief.md §2-1）。
+    // 新欄位一律 Optional＋decodeIfPresent＋init 預設 nil：v1a 存的舊單沒有這幾個＝不影響；25.591 的 App 讀到不認得的欄位照樣解得開。
+    // 要退回這一件：刪這 3 個欄位與 init／init(from:)／CodingKeys 裡對應的那幾行。
+    /// 生效前取消的時間（排好的〔取消〕；已經交出去的〔拿回來〕〔留給接手的人〕；〔只做交接〕不算取消）
+    var cancelledAt: Date?
+    /// 取消、只做交接時寫下的一句（「原本 11/1 要調設備課，10/30 取消了調動；交出去的照舊」）；交接單「組織」那一列、歷程照寫
+    var cancelNote: String?
+    /// 生效那天改部門時（排好之後）原人身上多出來、單上沒有的待辦、週報 id（「排好之後多了 2 件」〔加進交接單〕；judge §5-15）
+    var lateRefIds: [UUID]?
 
     init(id: UUID = UUID(), personId: UUID, personKind: String? = nil, personName: String,
          kind: String = OrgMoveKind.move.rawValue, effectiveKey: String, handoverByKey: String? = nil,
@@ -145,7 +154,8 @@ struct OrgMove: Codable, Equatable, Identifiable {
          keepDept: Bool? = nil, note: String? = nil, state: String = OrgMoveState.applied.rawValue,
          handedAt: Date? = nil, appliedAt: Date? = nil, closedAt: Date? = nil, undoneAt: Date? = nil,
          lines: [OrgMoveLine]? = nil, before: OrgMoveRestore? = nil, retitleBirthday: Bool? = nil,
-         createdAt: Date? = nil, updatedAt: Date? = nil, deletedAt: Date? = nil) {
+         createdAt: Date? = nil, updatedAt: Date? = nil, deletedAt: Date? = nil,
+         cancelledAt: Date? = nil, cancelNote: String? = nil, lateRefIds: [UUID]? = nil) {
         self.id = id
         self.personId = personId
         self.personKind = personKind
@@ -169,6 +179,9 @@ struct OrgMove: Codable, Equatable, Identifiable {
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.deletedAt = deletedAt
+        self.cancelledAt = cancelledAt
+        self.cancelNote = cancelNote
+        self.lateRefIds = lateRefIds
     }
 
     init(from decoder: Decoder) throws {
@@ -209,12 +222,16 @@ struct OrgMove: Codable, Equatable, Identifiable {
         createdAt = try? c.decodeIfPresent(Date.self, forKey: .createdAt)
         updatedAt = try? c.decodeIfPresent(Date.self, forKey: .updatedAt)
         deletedAt = try? c.decodeIfPresent(Date.self, forKey: .deletedAt)
+        cancelledAt = try? c.decodeIfPresent(Date.self, forKey: .cancelledAt)
+        cancelNote = try? c.decodeIfPresent(String.self, forKey: .cancelNote)
+        lateRefIds = try? c.decodeIfPresent([UUID].self, forKey: .lateRefIds)
     }
 
     private enum CodingKeys: String, CodingKey {
         case id, personId, personKind, personName, kind, effectiveKey, handoverByKey, timing
         case from, to, keepDept, note, state, handedAt, appliedAt, closedAt, undoneAt
         case lines, before, retitleBirthday, createdAt, updatedAt, deletedAt
+        case cancelledAt, cancelNote, lateRefIds
     }
 
     var allLines: [OrgMoveLine] { lines ?? [] }
@@ -234,6 +251,16 @@ struct OrgMove: Codable, Equatable, Identifiable {
     var isClosed: Bool { state == OrgMoveState.closed.rawValue || closedAt != nil }
     /// 已經套用過（復原的也算：歷程照樣列一行灰字）
     var wasApplied: Bool { appliedAt != nil || handedAt != nil }
+    /// [v25.592 轉組織 v1b] 排好了、什麼都還沒做（〔11/1 一起做〕，生效那天才一起做）
+    var isPlanned: Bool { state == OrgMoveState.planned.rawValue }
+    /// [v25.592 轉組織 v1b] 事情交出去了、部門還沒改（〔現在就交接，11/1 才改部門〕）
+    var isHanded: Bool { state == OrgMoveState.handed.rawValue }
+    /// [v25.592 轉組織 v1b] 排好的〔取消〕（什麼都沒做過；同時寫了 deletedAt，live 看不到）
+    var isCancelled: Bool { state == OrgMoveState.cancelled.rawValue }
+    /// [v25.592 轉組織 v1b] 部門、廠區還沒改（排好的、交出去了還沒到生效日的）：名單膠囊「11/1 起 設備課」、到期套用看這個
+    var orgPending: Bool { (isPlanned || isHanded) && deletedAt == nil }
+    /// [v25.592 轉組織 v1b] 什麼時候做（nil／"now"＝確認那一刻全部做）
+    var timingValue: OrgMoveTiming { timing.flatMap { OrgMoveTiming(rawValue: $0) } ?? .now }
 
     /// 同一張的兩份合併（見 OrgMoveBook.merged）
     static func merge(_ a: OrgMove, _ b: OrgMove) -> OrgMove {
@@ -362,6 +389,12 @@ struct OrgMoveLine: Codable, Equatable, Identifiable {
     var removedShifts: [OrgMoveShiftCell]?
     /// 只有 agenda〔改由…〕：交接前的負責人（復原照這個放回；本來沒指派＝空陣列）
     var prevAssigneeIds: [UUID]?
+    // [v25.592 轉組織 v1b] 你自己加的一項（kind "custom"：門禁卡、鑰匙、帳號…，只記在單上）、排好之後才加進來的那幾列。
+    // 新欄位一律 Optional＋decodeIfPresent＋init 預設 nil。要退回這一件：刪這 2 個欄位與 init／init(from:)／CodingKeys 對應的那幾行。
+    /// 只有 custom：勾了「已交」的時間（nil＝還沒交）
+    var checkedAt: Date?
+    /// 排好之後原人才多出來、你按〔加進交接單〕加進來的（交接單那一列多一行灰字「排好之後才加進來的」）
+    var addedLate: Bool?
 
     init(id: UUID = UUID(), kind: String, refId: UUID? = nil, itemId: UUID? = nil, parentId: UUID? = nil,
          holderId: UUID? = nil, title: String, dueKey: String? = nil, action: String? = nil,
@@ -369,7 +402,8 @@ struct OrgMoveLine: Codable, Equatable, Identifiable {
          memo: String? = nil, lock: String? = nil, slot: Int? = nil, removedJSON: Data? = nil,
          state: String? = nil, resolvedAt: Date? = nil, updatedAt: Date? = nil,
          meetingId: UUID? = nil, newId: UUID? = nil, newTopic: String? = nil, days: [String: String]? = nil,
-         removedShifts: [OrgMoveShiftCell]? = nil, prevAssigneeIds: [UUID]? = nil) {
+         removedShifts: [OrgMoveShiftCell]? = nil, prevAssigneeIds: [UUID]? = nil,
+         checkedAt: Date? = nil, addedLate: Bool? = nil) {
         self.id = id
         self.kind = kind
         self.refId = refId
@@ -396,6 +430,8 @@ struct OrgMoveLine: Codable, Equatable, Identifiable {
         self.days = days
         self.removedShifts = removedShifts
         self.prevAssigneeIds = prevAssigneeIds
+        self.checkedAt = checkedAt
+        self.addedLate = addedLate
     }
 
     init(from decoder: Decoder) throws {
@@ -426,12 +462,15 @@ struct OrgMoveLine: Codable, Equatable, Identifiable {
         days = try? c.decodeIfPresent([String: String].self, forKey: .days)
         removedShifts = try? c.decodeIfPresent([OrgMoveShiftCell].self, forKey: .removedShifts)
         prevAssigneeIds = try? c.decodeIfPresent([UUID].self, forKey: .prevAssigneeIds)
+        checkedAt = try? c.decodeIfPresent(Date.self, forKey: .checkedAt)
+        addedLate = try? c.decodeIfPresent(Bool.self, forKey: .addedLate)
     }
 
     private enum CodingKeys: String, CodingKey {
         case id, kind, refId, itemId, parentId, holderId, title, dueKey, action, toId, toName
         case newDueKey, wasOverdue, memo, lock, slot, removedJSON, state, resolvedAt, updatedAt
         case meetingId, newId, newTopic, days, removedShifts, prevAssigneeIds
+        case checkedAt, addedLate
     }
 
     // 只在記憶體轉成列舉（不認得的字＝nil：只顯示、不套用）
@@ -442,6 +481,14 @@ struct OrgMoveLine: Codable, Equatable, Identifiable {
     var isLocked: Bool { lock != nil }
     /// 組織那幾列（第 ① 步問的；頂端四格不算）
     var isOrgLine: Bool { kind == OrgMoveLineKind.manager.rawValue || kind == OrgMoveLineKind.managerAdd.rawValue }
+
+    /// [v25.592 轉組織 v1b] 你自己加的一項（門禁卡、鑰匙、帳號…）的 kind 字。**不放進 OrgMoveLineKind**：
+    /// 加一個 case 要改二十幾個 switch（畫面那幾個檔各組各自的）；lineKind＝nil 的列原本就是「只顯示、不套用」，
+    /// 剛好是這一種要的（只記在單上、不動任何資料）。要用到它的地方一律看 isCustom。25.591 的 App 讀到也只顯示不套用。
+    static let customKind = "custom"
+    var isCustom: Bool { kind == Self.customKind }
+    /// 自己加的、沒被拿掉的（拿掉＝state "undone"：逐列合併時另一台還有這一列也不會長回來）
+    var isLiveCustom: Bool { isCustom && state != OrgMoveLineState.undone.rawValue }
 }
 
 /// 套用前的樣子（復原、⚠〔再改一次〕用）。管理人員的差異記在各自那一列（slot），不存整串
@@ -632,6 +679,57 @@ enum OrgMoveKind: String {
 
 enum OrgMoveState: String {
     case applied, closed, undone
+    /// [v25.592 轉組織 v1b] 排好了（什麼都還沒做）／事情交了、部門還沒改／排好的取消了（同時寫 deletedAt）
+    case planned, handed, cancelled
+}
+
+/// [v25.592 轉組織 v1b] 什麼時候做（存字串在 OrgMove.timing）
+enum OrgMoveTiming: String {
+    /// 確認那一刻全部做（生效日今天或以前）
+    case now
+    /// 〔現在就交接，11/1 才改部門〕（v1b 預設，judge 第 6 題）
+    case handoverNow
+    /// 〔11/1 一起做〕：生效那天交接、改部門一起做
+    case together
+}
+
+/// [v25.592 轉組織 v1b] applyOrgMove 這一次做哪一段（只在記憶體）
+enum OrgMovePhase {
+    /// 交接＋組織（v1a、生效日今天或以前、〔11/1 一起做〕到期）
+    case all
+    /// 只交接（〔現在就交接〕確認那一刻）
+    case handover
+    /// 只改組織那幾格（〔現在就交接〕到期那天）
+    case org
+}
+
+/// [v25.592 轉組織 v1b] 到期套用的一張（「今天生效」那張、卡片〔現在套用〕之後跳的那張；字在 OrgMovePlan.dueResult 組好）
+struct OrgMoveDueResult: Identifiable, Equatable {
+    let moveId: UUID
+    let personId: UUID
+    /// 這次改好了（false＝卡住了：blockKind／detail 寫為什麼）
+    let applied: Bool
+    /// 「王小明 製造一課 → 設備課（P1 → P2）」
+    let title: String
+    /// 「✓ 已換好・交接完成日 11/11（三）」／「王小明現在已經在品保課了，這張單還要做嗎？」
+    let detail: String
+    /// nil＝沒卡住；"deptMoved"／"deptGone"／"personGone"（OrgMoveDueBlock）
+    let blockKind: String?
+    /// 「今天生效」上要不要有〔更新生日提醒〕（部屬或組織人員有生日提醒、部門或職稱有換、你確認時勾了）
+    let birthdayOffer: Bool
+    /// 自動套用沒動的 Apple 提醒事項件數（〔11/1 一起做〕到期自動做時才有；〔更新提醒事項〕）
+    let reminderCount: Int
+    var id: UUID { moveId }
+}
+
+/// [v25.592 轉組織 v1b] 到期那天為什麼不能自動改（照現在的資料算，不存）
+enum OrgMoveDueBlock: String {
+    /// 生效前你又把這位同仁的部門改了（現在不是單上的「從」）：〔只做交接〕〔取消這張單〕
+    case deptMoved
+    /// 新部門在生效前被刪了：〔選部門〕〔只做交接〕
+    case deptGone
+    /// 這位同仁被刪了：只能〔取消這張單〕
+    case personGone
 }
 
 enum OrgMoveLineKind: String {
@@ -719,6 +817,26 @@ enum OrgMoveIndex {
     static var receivedShiftDays: [UUID: [String: Received]] = [:]
     /// [v25.591 轉組織 v1a-2] 原人 id → 交出去、清掉的班那幾天（合併匯入舊備份時不把這幾天的班補回原人身上，judge §2.4）
     static var handedShiftDays: [UUID: Set<String>] = [:]
+    /// [v25.592 轉組織 v1b] 排好、部門還沒改的那一張（一人一張；judge §2.6 plannedByPerson、§3.5、§5-21）
+    struct Planned: Equatable {
+        let moveId: UUID
+        /// 「2026-11-01」
+        let effectiveKey: String
+        /// "planned"／"handed"
+        let state: String
+        /// "move"／"plant"
+        let kind: String
+        let keepDept: Bool
+        let fromDeptId: UUID?
+        let toDeptId: UUID?
+        /// 單上的快照字「EQ — 設備課」
+        let toDeptLabel: String
+        let fromPlant: String
+        let toPlant: String
+    }
+    /// [v25.592 轉組織 v1b] 部屬 id → 排好、部門還沒改的那一張（部屬名單「11/1 起 設備課」、組織圖「11/1 調設備課」、
+    /// 挑人頁「11/9 也要調走」、精靈「已經排了」查這張；同一位有兩張時取後建的）
+    static var plannedByPerson: [UUID: Planned] = [:]
     /// [v25.590 轉組織 v1a-1 驗證] 機台 id → 現在的負責人（LifeStore.equipmentPool 一改就設；預設空的）。
     /// 「還有沒有待分派」照機台現在的負責人算（judge §4.9、第 5 題：在機台編輯頁直接換過＝算分好），
     /// 不然直接換過負責人的那張單，提示列、「交接自」膠囊、接手那一區過了交接完成日也一直不收。
@@ -805,6 +923,23 @@ enum OrgMoveIndex {
         droppedItemIds = dropped
         receivedShiftDays = shiftDays
         handedShiftDays = handedDays
+        plannedByPerson = plannedIndex(book)
+    }
+
+    /// [v25.592 轉組織 v1b] 排好、部門還沒改的（planned／handed、沒刪）：一人取後建的那一張
+    private static func plannedIndex(_ book: OrgMoveBook) -> [UUID: Planned] {
+        var out: [UUID: Planned] = [:]
+        var at: [UUID: Date] = [:]
+        for m in book.live where m.orgPending {
+            let made: Date = m.createdAt ?? m.updatedAt ?? Date.distantPast
+            if let old = at[m.personId], old > made { continue }
+            at[m.personId] = made
+            out[m.personId] = Planned(moveId: m.id, effectiveKey: m.effectiveKey, state: m.state, kind: m.kind,
+                                      keepDept: m.keepDept == true, fromDeptId: m.from.deptId, toDeptId: m.to.deptId,
+                                      toDeptLabel: m.to.deptLabel ?? "", fromPlant: m.from.plant ?? "",
+                                      toPlant: m.to.plant ?? "")
+        }
+        return out
     }
 
     /// 還在顯示期間的「交接自」（膠囊、提示列）：沒按〔交接完成〕、而且還沒過交接完成日或還有待分派。

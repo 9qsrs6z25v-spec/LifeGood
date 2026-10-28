@@ -1988,9 +1988,21 @@ class LifeStore: ObservableObject {
     private var pendingReminderDeletes: [String] = []
     /// 要重寫的部屬任務（新分身、搬到別人身上的那一筆：備註換成接手的人、新截止日一起寫）
     private var pendingReminderUpserts: [(subId: UUID, taskId: UUID)] = []
+    /// [v25.592 轉組織 v1b] 到期自動套用（〔11/1 一起做〕打開 App 自動做）時不碰提醒事項（judge §3.5、風險 #5）：
+    /// 那一個批次收集的先不送（applyDueOrgMoves(auto: true) 設、做完還原）
+    private var suppressReminderWork = false
+    /// [v25.592 轉組織 v1b] 自動套用時收回的分身、不要了的那幾則提醒事項 id（這一次打開 App 期間記著；「今天生效」〔更新提醒事項〕才刪）
+    private var deferredReminderDeletes: [String] = []
 
     private func flushReminderWork() {
         guard !pendingReminderDeletes.isEmpty || !pendingReminderUpserts.isEmpty else { return }
+        // [v25.592 轉組織 v1b] 自動套用：刪的先記著、改的不送（syncOrgMoveReminders 照單重算）。要退回這一件：刪這個 if
+        if suppressReminderWork {
+            deferredReminderDeletes.append(contentsOf: pendingReminderDeletes)
+            pendingReminderDeletes = []
+            pendingReminderUpserts = []
+            return
+        }
         let deletes = pendingReminderDeletes
         let upserts = pendingReminderUpserts
         pendingReminderDeletes = []
@@ -4268,12 +4280,24 @@ class LifeStore: ObservableObject {
     /// 按〔確認交接〕：一張交接單一次做完（一次存檔、一次推 iCloud）。move＝OrgMovePlan.makeMove 組好的那一張
     /// （同一張再按一次＝重做：做過的列不再做）。回傳那一張的 id。
     /// 呼叫端在 App 裡你按的那台；之後要不要改生日提醒另外叫 retitleOrgMoveBirthdays（只改字、不新建）。
+    /// [v25.592 轉組織 v1b] 生效日在以後（judge §3.5、第 6 題）：timing "handoverNow"＝現在只做交接（state "handed"，
+    /// 部門那幾格到期那天 applyDueOrgMoves 才改）；"together"＝什麼都不動、只把單存下來（state "planned"）。
+    /// 生效日今天或以前照舊全部做。要退回這一件：刪 future／together 那一段，phase 一律 .all
     @discardableResult
     func applyOrgMove(_ draftMove: OrgMove, now: Date = Date()) -> UUID {
         var move = orgMoves.move(draftMove.id) ?? draftMove
+        let future = OrgMovePlan.isFuture(move.effectiveKey, todayKey: OrgMovePlan.dayKey(now))
+        if future && move.timingValue == .together && !move.wasApplied {
+            move.state = OrgMoveState.planned.rawValue
+            if move.createdAt == nil { move.createdAt = now }
+            move.updatedAt = now
+            orgMoves.upsert(move)   // 只存這一張（didSet 存一次、推一次）
+            return move.id
+        }
+        let phase: OrgMovePhase = future ? .handover : (move.isHanded ? .org : .all)
         var meetingsChanged = false
         batched {
-            meetingsChanged = applyOrgMoveBody(&move, now: now)
+            meetingsChanged = applyOrgMoveBody(&move, now: now, phase: phase)
             orgMoves.upsert(move)
         }
         // [v25.591 轉組織 v1a-2] 會議結束、新會議接著開：會議通知重排（結束的不再排、新的照排；通知標題＝新會議名稱，沒有人名）
@@ -4281,20 +4305,51 @@ class LifeStore: ObservableObject {
         return move.id
     }
 
-    /// 回傳有沒有動到會議（呼叫端批次外重排會議通知）
+    /// 回傳有沒有動到會議（呼叫端批次外重排會議通知）。
+    /// [v25.592 轉組織 v1b] phase：.handover 只做①②③（state "handed"）、.org 只做④（state "applied"）、.all 全部（v1a 照舊）
     @discardableResult
-    private func applyOrgMoveBody(_ move: inout OrgMove, now: Date) -> Bool {
+    private func applyOrgMoveBody(_ move: inout OrgMove, now: Date, phase: OrgMovePhase = .all) -> Bool {
         let pid = move.personId
         guard subordinates.contains(where: { $0.id == pid }) else { return false }
         if move.before == nil { move.before = orgMoveRestoreSnapshot(pid) }
-        if move.handedAt == nil { move.handedAt = now }   // 交接那天（會議、班從這天切開）先定下來
         var lines = move.allLines
+        var meetingsChanged = false
+        if phase != .org {
+            meetingsChanged = applyOrgMoveHandoverBody(&move, lines: &lines, now: now)
+        }
+        // ④ 組織：部門、廠區、職稱、組織人員（沒有就補建）、名片、管理人員
+        if phase != .handover {
+            applyOrgMovePhase(move, lines: &lines, force: false, now: now)
+        }
+        // [v25.592 轉組織 v1b] 只改組織那一段（到期那天）只動組織那幾列的時間（applyOrgMovePhase 自己寫）：交接那幾列不蓋別台剛改的
+        if phase != .org {
+            for i in lines.indices { lines[i].updatedAt = now }
+        }
+        move.lines = lines
+        if phase == .handover {
+            move.state = OrgMoveState.handed.rawValue
+        } else {
+            move.state = OrgMoveState.applied.rawValue
+            if move.appliedAt == nil { move.appliedAt = now }
+        }
+        move.updatedAt = now
+        return meetingsChanged
+    }
+
+    /// [v25.592 轉組織 v1b] ①②③ 交接那一段（原本 applyOrgMoveBody 的前半，抽出來給 .handover／.all 共用）。回傳有沒有動到會議
+    private func applyOrgMoveHandoverBody(_ move: inout OrgMove, lines: inout [OrgMoveLine], now: Date) -> Bool {
+        let pid = move.personId
+        if move.handedAt == nil { move.handedAt = now }   // 交接那天（會議、班從這天切開）先定下來
         let snapshot = lines
         let frozen = move
         var meetingsChanged = false
+        // [v25.592 轉組織 v1b・v1a-2 裁定 §4 留著 1] 兼任的議程、而且它那場會議在同一張單上〔交給…（新會議）〕：等會議搬完再換兼任
+        //（先換兼任，接手的人會先多一筆分身，議程搬過去之後同一件事在接手的人那邊出現兩次）。要退回這一件：deferredSide 改成空的
+        let deferredSide = orgMoveDeferredSideRoleLineIds(lines)
         // ① 待辦、警報任務、週報（跟著機台的照那台的決定）、兼任（到兼任換人）、議程（先做議程、再動場次）：先搬東西，再換機台負責人
         for i in lines.indices {
             guard lines[i].state == nil, let kind = lines[i].lineKind else { continue }
+            if deferredSide.contains(lines[i].id) { continue }
             switch kind {
             case .task, .alarmTask:
                 applyOrgMoveTaskLine(&lines[i], all: snapshot, person: pid, now: now)
@@ -4320,14 +4375,29 @@ class LifeStore: ObservableObject {
                 applyOrgMoveShiftsLine(&lines[i], move: frozen, person: pid, now: now)
             }
         }
-        // ④ 組織：部門、廠區、職稱、組織人員（沒有就補建）、名片、管理人員
-        applyOrgMovePhase(move, lines: &lines, force: false, now: now)
-        for i in lines.indices { lines[i].updatedAt = now }
-        move.lines = lines
-        move.state = OrgMoveState.applied.rawValue
-        if move.appliedAt == nil { move.appliedAt = now }
-        move.updatedAt = now
+        // ③' [v25.592 轉組織 v1b] 等會議搬完的兼任議程（議程已經跟著場次到新會議、連結也改到接手的人：換兼任時不會再建分身）
+        for i in lines.indices where lines[i].state == nil && deferredSide.contains(lines[i].id) {
+            applyOrgMoveSideRoleLine(&lines[i], person: pid)
+        }
+        // [v25.592 轉組織 v1b] 你自己加的一項：只記在單上（做了＝記下來了）
+        for i in lines.indices where lines[i].isCustom && lines[i].state == nil {
+            lines[i].state = OrgMoveLineState.done.rawValue
+        }
         return meetingsChanged
+    }
+
+    /// [v25.592 轉組織 v1b・v1a-2 裁定 §4 留著 1] 兼任的議程（sideRole、有 meetingId），它那場會議在同一張單上選了〔交給…（新會議）〕、還沒做
+    private func orgMoveDeferredSideRoleLineIds(_ lines: [OrgMoveLine]) -> Set<UUID> {
+        var series = Set<UUID>()
+        for l in lines where l.kind == OrgMoveLineKind.meeting.rawValue && l.lineAction == .newSeries && l.state == nil {
+            if let r = l.refId { series.insert(r) }
+        }
+        guard !series.isEmpty else { return [] }
+        var out = Set<UUID>()
+        for l in lines where l.kind == OrgMoveLineKind.sideRole.rawValue && l.state == nil {
+            if let mid = l.meetingId, series.contains(mid) { out.insert(l.id) }
+        }
+        return out
     }
 
     private func applyOrgMoveTaskLine(_ line: inout OrgMoveLine, all: [OrgMoveLine], person: UUID, now: Date) {
@@ -4588,7 +4658,9 @@ class LifeStore: ObservableObject {
             if lines[i].state == OrgMoveLineState.undone.rawValue { lines[i].updatedAt = now }
         }
         if lineIds == nil {
-            undoOrgMovePhase(frozen, lines: &lines, now: now)
+            // [v25.592 轉組織 v1b] 交出去了、部門還沒改的（〔取消這張單〕〔拿回來〕）：組織那幾格本來就沒動，你自己又改的也不碰。
+            // 要退回這一件：拿掉 `if !frozen.isHanded`
+            if !frozen.isHanded { undoOrgMovePhase(frozen, lines: &lines, now: now) }
             move.state = OrgMoveState.undone.rawValue
             move.undoneAt = now
         }
@@ -4945,7 +5017,8 @@ class LifeStore: ObservableObject {
 
     /// 「組織」那一列 ⚠〔再改一次〕（不用訂閱）：部門、廠區、職稱、組織人員、名片、管理人員有一格又回到「從」→ 同一支套用的組織那段再做一次
     func redoOrgMoveOrg(_ moveId: UUID, now: Date = Date()) {
-        guard var move = orgMoves.move(moveId), move.wasApplied, !move.isUndone else { return }
+        // [v25.592 轉組織 v1b] 部門還沒改的不准先改（那是到期那天的事）。要退回這一件：拿掉 `!move.orgPending,`
+        guard var move = orgMoves.move(moveId), !move.orgPending, move.wasApplied, !move.isUndone else { return }
         batched {
             var lines = move.allLines
             applyOrgMovePhase(move, lines: &lines, force: true, now: now)
@@ -4989,6 +5062,19 @@ class LifeStore: ObservableObject {
         let pid = move.personId
         let current = OrgMovePlan.receiver(l, in: move).id ?? pid
         let newName = subordinates.first(where: { $0.id == newTo })?.name ?? ""
+        // [v25.592 轉組織 v1b] 排好、什麼都還沒做的（〔11/1 一起做〕）：只改單上的決定（不搬任何東西；生效那天照這個做）。
+        // 要退回這一件：刪這個 if
+        if move.isPlanned {
+            // 鎖著的（警報任務跟著機台：改機台那一列）、自己加的（setOrgMoveCustomReceiver）不走這支
+            guard !l.isLocked, !l.isCustom else { return }
+            var lines = move.allLines
+            let a: OrgMoveAction = l.lineAction == .newSeries ? .newSeries : .give
+            OrgMovePlan.setAction(&lines, lineId: lineId, action: a, toId: newTo, toName: newName, now: now)
+            move.lines = lines
+            move.updatedAt = now
+            orgMoves.upsert(move)
+            return
+        }
         var meetingsChanged = false
         batched {
             var did = false
@@ -5058,7 +5144,8 @@ class LifeStore: ObservableObject {
 
     /// 〔交接完成〕（不用訂閱）：收起兩邊的提示列與「交接自」膠囊（寫 closedAt；交接完成日過了、沒有待分派也會自動收，用算的不寫）
     func closeOrgMove(_ moveId: UUID, now: Date = Date()) {
-        guard var move = orgMoves.move(moveId), move.wasApplied, !move.isUndone, !move.isClosed else { return }
+        // [v25.592 轉組織 v1b] 部門還沒改的（交出去了、還沒到生效日）不給收：收了就變 closed、到期那天不會改部門。要退回這一件：拿掉 `!move.orgPending,`
+        guard var move = orgMoves.move(moveId), !move.orgPending, move.wasApplied, !move.isUndone, !move.isClosed else { return }
         move.state = OrgMoveState.closed.rawValue
         move.closedAt = now
         move.updatedAt = now
@@ -5092,6 +5179,337 @@ class LifeStore: ObservableObject {
     private func orgMoveBirthdayDept(_ id: UUID?, fallback: String) -> String {
         if let id, let d = departments.first(where: { $0.id == id }), !d.name.isEmpty { return d.name }
         return fallback
+    }
+
+    // MARK: - [v25.592 轉組織 v1b] 排在以後：到期那天改部門、取消、改生效日、自己加一項（judge §3.5、§3.8、§5-6、§5-15、§5-21、§7 v1b；
+    // orgmove/build/v1b/brief.md §2-4）
+    //
+    // 一樣只走 batched（一次存檔、推一次）；批次裡只就地改陣列＋私有 …Body，judge §3.9 不准呼叫的那幾支一支都沒叫。
+    // 到期自動做（applyDueOrgMoves(auto: true)，OrgMoveDueCenter 三個條件都成立才叫）：〔現在就交接〕只改組織那幾格；
+    //〔11/1 一起做〕照那天的資料重算後整張做；行事曆、提醒事項不碰（「今天生效」那張上你按）。
+    // sim：orgmove/build/v1b/sim_v1b.py（apply_due／cancel／reschedule／custom／late 一行一行對照）。
+
+    /// 到了（生效日今天或以前）、部門還沒改的那幾張一次做（一次存檔）。auto＝打開 App 自動做（提醒事項先收著不送）。
+    /// 回傳每一張的結果（卡住的 applied＝false，寫為什麼；「今天生效」那張只列改好的）
+    @discardableResult
+    func applyDueOrgMoves(now: Date = Date(), auto: Bool) -> [OrgMoveDueResult] {
+        let due = OrgMovePlan.dueMoves(book: orgMoves, todayKey: OrgMovePlan.dayKey(now))
+        guard !due.isEmpty else { return [] }
+        // 全部卡住（你又改了部門、新部門刪了、人不見了）：只回為什麼，不進批次、不存檔（每次回前景、拉完 iCloud 都會看一次）
+        let world0 = OrgMoveWorld(store: self)
+        if due.allSatisfy({ OrgMovePlan.dueBlock($0, world: world0) != nil }) {
+            return due.map { OrgMovePlan.dueResult($0, applied: false, world: world0, reminderCount: 0) }
+        }
+        var results: [OrgMoveDueResult] = []
+        var meetingsChanged = false
+        let wasSuppressed = suppressReminderWork
+        if auto { suppressReminderWork = true }
+        batched {
+            for m in due {
+                if let r = applyDueOrgMoveBody(m.id, now: now, auto: auto, meetingsChanged: &meetingsChanged) {
+                    results.append(r)
+                }
+            }
+        }
+        suppressReminderWork = wasSuppressed
+        if meetingsChanged { rebuildMeetingReminders() }
+        return results
+    }
+
+    /// 卡片、部屬總覽、交接單〔現在套用〕（不用訂閱；你按的這台：提醒事項照平常改）。還沒到、已經改好了＝nil
+    @discardableResult
+    func applyDueOrgMove(_ moveId: UUID, now: Date = Date()) -> OrgMoveDueResult? {
+        var result: OrgMoveDueResult?
+        var meetingsChanged = false
+        batched {
+            result = applyDueOrgMoveBody(moveId, now: now, auto: false, meetingsChanged: &meetingsChanged)
+        }
+        if meetingsChanged { rebuildMeetingReminders() }
+        return result
+    }
+
+    /// 到期那一張：卡住（找不到人、新部門刪了、你又改了部門）就不做、回傳為什麼；
+    ///〔現在就交接〕只做組織那段；〔11/1 一起做〕先照那天的資料重算（逾期的新截止、會議與班的切點）再整張做。
+    /// 改部門那一刻原人身上、單上沒有的待辦與週報記進 lateRefIds（「排好之後多了 2 件」）。呼叫端負責 batched
+    private func applyDueOrgMoveBody(_ moveId: UUID, now: Date, auto: Bool, meetingsChanged: inout Bool) -> OrgMoveDueResult? {
+        guard var move = orgMoves.move(moveId), OrgMovePlan.isDue(move, todayKey: OrgMovePlan.dayKey(now)) else { return nil }
+        let world = OrgMoveWorld(store: self)
+        if OrgMovePlan.dueBlock(move, world: world) != nil {
+            return OrgMovePlan.dueResult(move, applied: false, world: world, reminderCount: 0)
+        }
+        let late = OrgMovePlan.lateLines(move, world: world, now: now).compactMap(\.refId)
+        var reminders = 0
+        if move.isPlanned {
+            move = OrgMovePlan.refreshForApply(move, world: world, now: now)
+            if auto { reminders = orgMoveReminderCount(move, world: world) }
+            if applyOrgMoveBody(&move, now: now, phase: .all) { meetingsChanged = true }
+        } else {
+            if applyOrgMoveBody(&move, now: now, phase: .org) { meetingsChanged = true }
+        }
+        move.lateRefIds = late.isEmpty ? nil : late
+        orgMoves.upsert(move)
+        return OrgMovePlan.dueResult(move, applied: true, world: OrgMoveWorld(store: self), reminderCount: reminders)
+    }
+
+    /// 〔11/1 一起做〕自動套用時沒動的 Apple 提醒事項件數（交出去、不要了、結案的那幾件有提醒事項的；同步沒開＝0）
+    private func orgMoveReminderCount(_ move: OrgMove, world: OrgMoveWorld) -> Int {
+        guard world.remindersOn, let holder = subordinates.first(where: { $0.id == move.personId }) else { return 0 }
+        var n = 0
+        let lines = move.allLines
+        for l in lines where l.kind == OrgMoveLineKind.task.rawValue || l.kind == OrgMoveLineKind.alarmTask.rawValue
+            || (l.kind == OrgMoveLineKind.sideRole.rawValue && l.meetingId == nil) {
+            let tid: UUID? = l.kind == OrgMoveLineKind.sideRole.rawValue ? l.itemId : l.refId
+            guard let t = holder.tasks.first(where: { $0.id == tid }), t.reminderId != nil else { continue }
+            let a = OrgMovePlan.resolved(l, in: lines).action
+            if a == .give || a == .drop || a == .closeNow { n += 1 }
+        }
+        return n
+    }
+
+    /// 「今天生效」〔更新提醒事項〕（自動套用時沒動的那幾則；只在你按的這台）：交出去的照接手的人重寫、結案的打勾、
+    /// 不要了的刪掉、自動套用時收回的分身那幾則刪掉。回傳動了幾則
+    @discardableResult
+    func syncOrgMoveReminders(_ moveId: UUID) -> Int {
+        guard let move = orgMoves.move(moveId) else { return 0 }
+        var n = 0
+        for l in move.allLines where l.state == OrgMoveLineState.done.rawValue || l.state == OrgMoveLineState.resolved.rawValue {
+            switch l.lineKind {
+            case .some(.task), .some(.alarmTask):
+                guard let tid = l.refId else { continue }
+                let a = OrgMovePlan.resolved(l, in: move.allLines).action
+                if a == .drop {
+                    if let data = l.removedJSON, let t = try? JSONDecoder().decode(SubordinateTask.self, from: data),
+                       let rid = t.reminderId {
+                        pendingReminderDeletes.append(rid)
+                        n += 1
+                    }
+                    continue
+                }
+                let holder = OrgMovePlan.receiver(l, in: move).id ?? move.personId
+                guard subordinates.first(where: { $0.id == holder })?.tasks.contains(where: { $0.id == tid }) == true else { continue }
+                pendingReminderUpserts.append((subId: holder, taskId: tid))
+                n += 1
+            case .some(.sideRole):
+                guard l.lineAction == .give, let to = l.toId, let rid = l.refId else { continue }
+                let mine = subordinates.first(where: { $0.id == to })?.tasks.filter { $0.sideRoleLink?.taskId == rid } ?? []
+                for t in mine where !t.isCompleted {
+                    pendingReminderUpserts.append((subId: to, taskId: t.id))
+                    n += 1
+                }
+            default:
+                continue
+            }
+        }
+        if !deferredReminderDeletes.isEmpty {
+            n += deferredReminderDeletes.count
+            pendingReminderDeletes.append(contentsOf: deferredReminderDeletes)
+            deferredReminderDeletes = []
+        }
+        flushReminderWork()
+        return n
+    }
+
+    /// 〔取消這張單〕（生效前；不用訂閱，judge §6）。排好的（什麼都沒做）：state "cancelled"＋墓碑（live 看不到）。
+    /// 交出去了：takeBack＝〔拿回來〕整張復原（同 undoOrgMove：沒被動過的才退回），記 cancelledAt；
+    /// 否則〔留給接手的人〕＝交接照舊、部門不改了（變成一張做完的「交接（部門照舊）」，單上寫那一句）
+    func cancelOrgMove(_ moveId: UUID, takeBack: Bool, now: Date = Date()) {
+        guard var move = orgMoves.move(moveId), OrgMovePlan.canCancel(move) else { return }
+        if move.isPlanned {
+            move.state = OrgMoveState.cancelled.rawValue
+            move.cancelledAt = now
+            move.deletedAt = now
+            move.updatedAt = now
+            orgMoves.upsert(move)
+            return
+        }
+        let note = OrgMovePlan.cancelNoteText(move, world: OrgMoveWorld(store: self), now: now, skip: false)
+        var meetingsChanged = false
+        batched {
+            if takeBack {
+                meetingsChanged = undoOrgMoveBody(&move, lineIds: nil, now: now)
+            } else {
+                orgMoveKeepHandover(&move, note: note, now: now)
+            }
+            move.cancelledAt = now
+            move.updatedAt = now
+            orgMoves.upsert(move)
+        }
+        if meetingsChanged { rebuildMeetingReminders() }
+    }
+
+    /// 〔只做交接〕（到期卡住時；不用訂閱）：排好的先照那天的資料把交接做了；部門、廠區、職稱、管理人員都不改，
+    /// 單變成一張做完的「交接（部門照舊）」，寫那一句（「原本 11/1 要調設備課；生效時部門已經不是單上寫的，部門那段沒做」）
+    func skipOrgMoveOrg(_ moveId: UUID, now: Date = Date()) {
+        guard var move = orgMoves.move(moveId), move.orgPending,
+              subordinates.contains(where: { $0.id == move.personId }) else { return }
+        let world = OrgMoveWorld(store: self)
+        let note = OrgMovePlan.cancelNoteText(move, world: world, now: now, skip: true)
+        var meetingsChanged = false
+        batched {
+            if move.isPlanned {
+                move = OrgMovePlan.refreshForApply(move, world: world, now: now)
+                meetingsChanged = applyOrgMoveBody(&move, now: now, phase: .handover)
+            }
+            orgMoveKeepHandover(&move, note: note, now: now)
+            orgMoves.upsert(move)
+        }
+        if meetingsChanged { rebuildMeetingReminders() }
+    }
+
+    /// 交接照舊、部門不改了：單上的「到」改成這位同仁現在的樣子（部門照舊）、組織那幾列記成跳過、state "applied"。呼叫端負責 batched
+    private func orgMoveKeepHandover(_ move: inout OrgMove, note: String, now: Date) {
+        let world = OrgMoveWorld(store: self)
+        if let s = subordinates.first(where: { $0.id == move.personId }) {
+            var to = move.to
+            to.deptId = s.departmentId
+            let label = world.deptLabel(s.departmentId)
+            to.deptLabel = label.isEmpty ? s.department : label
+            to.plant = s.plantArea
+            to.gradeTitleId = s.gradeTitleId
+            to.titleLabel = world.titleLabel(gradeTitleId: s.gradeTitleId, jobTitle: s.jobTitle)
+            move.to = to
+        }
+        move.keepDept = true
+        move.cancelNote = note
+        var lines = move.allLines
+        for i in lines.indices where lines[i].isOrgLine && lines[i].state == nil {
+            lines[i].state = OrgMoveLineState.skipped.rawValue
+            lines[i].updatedAt = now
+        }
+        move.lines = lines
+        move.state = OrgMoveState.applied.rawValue
+        if move.appliedAt == nil { move.appliedAt = now }
+        move.updatedAt = now
+    }
+
+    /// 〔改生效日〕（生效前；要訂閱）：只改日子與交接完成日（生效日＋10 天）。改成今天或以前＝馬上照到期那樣做（你按的這台）。
+    /// 已經交出去的會議、班照原本的生效日切（要改請〔拿回來〕再交）
+    @discardableResult
+    func rescheduleOrgMove(_ moveId: UUID, effectiveKey: String, now: Date = Date()) -> OrgMoveDueResult? {
+        guard var move = orgMoves.move(moveId), move.orgPending, OrgMovePlan.date(fromKey: effectiveKey) != nil else { return nil }
+        move.effectiveKey = effectiveKey
+        move.handoverByKey = OrgMovePlan.handoverByKey(effectiveKey: effectiveKey)
+        move.updatedAt = now
+        var result: OrgMoveDueResult?
+        var meetingsChanged = false
+        batched {
+            orgMoves.upsert(move)
+            if effectiveKey <= OrgMovePlan.dayKey(now) {
+                result = applyDueOrgMoveBody(moveId, now: now, auto: false, meetingsChanged: &meetingsChanged)
+            }
+        }
+        if meetingsChanged { rebuildMeetingReminders() }
+        return result
+    }
+
+    /// 〔選部門〕（新部門在生效前被刪了；要訂閱）：單上的「到」換成這個部門；已經到了就馬上改（你按的這台）
+    @discardableResult
+    func retargetOrgMove(_ moveId: UUID, toDeptId: UUID, now: Date = Date()) -> OrgMoveDueResult? {
+        guard var move = orgMoves.move(moveId), move.orgPending,
+              let d = departments.first(where: { $0.id == toDeptId }) else { return nil }
+        move.to.deptId = toDeptId
+        move.to.deptLabel = Self.departmentLabel(d)
+        move.updatedAt = now
+        var result: OrgMoveDueResult?
+        var meetingsChanged = false
+        batched {
+            orgMoves.upsert(move)
+            if OrgMovePlan.isDue(move, todayKey: OrgMovePlan.dayKey(now)) {
+                result = applyDueOrgMoveBody(moveId, now: now, auto: false, meetingsChanged: &meetingsChanged)
+            }
+        }
+        if meetingsChanged { rebuildMeetingReminders() }
+        return result
+    }
+
+    /// 交接單〔＋ 自己加一項〕（要訂閱）：門禁卡、鑰匙、帳號…只記在單上（不動任何資料）。放在組織那幾列前面。回傳那一列的 id
+    @discardableResult
+    func addOrgMoveCustomLine(_ moveId: UUID, title: String, memo: String, now: Date = Date()) -> UUID? {
+        guard var move = orgMoves.move(moveId), !move.isUndone, move.deletedAt == nil else { return nil }
+        var line = OrgMovePlan.newCustomLine(title: title, memo: memo, now: now)
+        if !move.isPlanned { line.state = OrgMoveLineState.done.rawValue }
+        var lines = move.allLines
+        let at = lines.firstIndex(where: { $0.isOrgLine }) ?? lines.count
+        lines.insert(line, at: at)
+        move.lines = lines
+        move.updatedAt = now
+        orgMoves.upsert(move)
+        return line.id
+    }
+
+    /// 改自己加的那一項的字（要訂閱）
+    func updateOrgMoveCustomLine(_ moveId: UUID, lineId: UUID, title: String, memo: String, now: Date = Date()) {
+        guard var move = orgMoves.move(moveId), move.line(lineId)?.isCustom == true else { return }
+        let t = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let m = memo.trimmingCharacters(in: .whitespacesAndNewlines)
+        move.updateLine(lineId) { l in
+            if !t.isEmpty { l.title = t }
+            l.memo = m.isEmpty ? nil : m
+            l.updatedAt = now
+        }
+        move.updatedAt = now
+        orgMoves.upsert(move)
+    }
+
+    /// 自己加的那一項交給誰（nil＝跟著這位同仁；要訂閱）
+    func setOrgMoveCustomReceiver(_ moveId: UUID, lineId: UUID, to: UUID?, now: Date = Date()) {
+        guard var move = orgMoves.move(moveId), move.line(lineId)?.isCustom == true else { return }
+        let name: String? = to.flatMap { id in subordinates.first(where: { $0.id == id })?.name }
+        move.updateLine(lineId) { l in
+            l.action = to == nil ? OrgMoveAction.follow.rawValue : OrgMoveAction.give.rawValue
+            l.toId = to
+            l.toName = name
+            l.updatedAt = now
+        }
+        move.updatedAt = now
+        orgMoves.upsert(move)
+    }
+
+    /// 自己加的那一項勾「已交」／取消（不用訂閱：把開始了的交接做完）
+    func setOrgMoveCustomChecked(_ moveId: UUID, lineId: UUID, checked: Bool, now: Date = Date()) {
+        guard var move = orgMoves.move(moveId), move.line(lineId)?.isCustom == true else { return }
+        move.updateLine(lineId) { l in
+            l.checkedAt = checked ? now : nil
+            l.updatedAt = now
+        }
+        move.updatedAt = now
+        orgMoves.upsert(move)
+    }
+
+    /// 拿掉自己加的那一項（要訂閱）。記成 "undone"（逐列合併：另一台還有這一列也不會長回來）
+    func removeOrgMoveCustomLine(_ moveId: UUID, lineId: UUID, now: Date = Date()) {
+        guard var move = orgMoves.move(moveId), move.line(lineId)?.isCustom == true else { return }
+        move.updateLine(lineId) { l in
+            l.state = OrgMoveLineState.undone.rawValue
+            l.updatedAt = now
+        }
+        move.updatedAt = now
+        orgMoves.upsert(move)
+    }
+
+    /// 「排好之後多了 2 件」〔加進交接單〕（要訂閱）：那幾件加成單上的列（排好的＝還沒決定；交出去了的＝跟著，之後〔改交給…〕）。
+    /// 回傳加了幾列
+    @discardableResult
+    func addLateOrgMoveLines(_ moveId: UUID, now: Date = Date()) -> Int {
+        guard var move = orgMoves.move(moveId), !move.isUndone, move.deletedAt == nil else { return 0 }
+        var add = OrgMovePlan.lateLines(move, world: OrgMoveWorld(store: self), now: now)
+        guard !add.isEmpty else { return 0 }
+        for i in add.indices {
+            add[i].updatedAt = now
+            if !move.isPlanned { add[i].state = OrgMoveLineState.done.rawValue }
+        }
+        var lines = move.allLines
+        let at = lines.firstIndex(where: { $0.isOrgLine }) ?? lines.count
+        lines.insert(contentsOf: add, at: at)
+        move.lines = lines
+        if !move.orgPending {
+            let ids = Set(add.compactMap(\.refId))
+            let rest = (move.lateRefIds ?? []).filter { !ids.contains($0) }
+            move.lateRefIds = rest.isEmpty ? nil : rest
+        }
+        move.updatedAt = now
+        orgMoves.upsert(move)
+        return add.count
     }
 
     // MARK: - [v25.591 轉組織 v1a-2] 會議、議程、班、兼任（judge §3.2、§3.8、§3.9、§7 v1a-2；orgmove/build/v1a-2/brief.md §2-3）
