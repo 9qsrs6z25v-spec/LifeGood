@@ -7,6 +7,9 @@ import SwiftUI
 // 確認只走 OrgMovePlan.makeMove → lifeStore.applyOrgMove（一次存檔）→ retitleOrgMoveBirthdays（只在按的這台、只改字）。
 // 字的規矩：不用「他／她」（名字或「這位同仁」）；這頁的字只在 App 內頁，分享前一定先跳 shareWarning。
 // 要退回這一件：把這個檔換回主控的骨架（只有標題「轉組織」與〔取消〕），卡片「…」〔轉組織〕照樣打得開、什麼都不會改。
+// [v25.591 轉組織 v1a-2] 第 ② 步多會議、議程、班、兼任四種列（orgmove/build/v1a-2/brief.md §3）：選項、灰字一律走
+// OrgMovePlan.choices／reasonLines 的 in:personId: 那一支；新會議名稱〔改〕、撞班那幾天的排版在 OrgMoveWizardRows.swift；
+// 灰字「下一版才能在這裡交」拿掉。要退回 v1a-2 這幾件：照每一處 [v25.591 轉組織 v1a-2] 註解的「要退回」改。
 
 struct OrgMoveWizard: View {
     let personId: UUID
@@ -71,7 +74,7 @@ struct OrgMoveWizard: View {
         } else {
             switch step {
             case .place:
-                OrgMoveStepWhere(draft: $draft, plantTouched: $plantTouched, canNext: canLeavePlace) { step = .list }
+                OrgMoveStepWhere(draft: $draft, plantTouched: $plantTouched, canNext: canLeavePlace) { goToList() }
             case .list:
                 OrgMoveStepList(draft: $draft) { step = .confirm }
             case .confirm:
@@ -107,7 +110,7 @@ struct OrgMoveWizard: View {
         } else {
             switch step {
             case .place:
-                Button("下一步") { step = .list }
+                Button("下一步") { goToList() }
                     .disabled(!canLeavePlace)
             case .list:
                 Button("下一步") { step = .confirm }
@@ -120,6 +123,8 @@ struct OrgMoveWizard: View {
     }
 
     /// 建草稿（只建一次）：廠區先帶現在的；清單照〔換單位〕、部門還沒換的預設（brief G1-1）
+    /// [v25.591 轉組織 v1a-2] 多傳 plantChanges（現在一定是 false：廠區剛帶成現在的；寫上去跟 rebuild 一致）。
+    /// 要退回這一件：拿掉 `plantChanges:` 那個參數。
     private func prepare() {
         guard !prepared else { return }
         prepared = true
@@ -128,8 +133,19 @@ struct OrgMoveWizard: View {
         var d = draft
         d.toPlant = sub.plantArea.trimmingCharacters(in: .whitespaces)
         d.lines = OrgMovePlan.buildLines(personId: personId, kind: d.kind, deptChanges: false,
-                                         effectiveKey: OrgMovePlan.dayKey(d.effective), world: world, now: Date())
+                                         effectiveKey: OrgMovePlan.dayKey(d.effective), world: world, now: Date(),
+                                         plantChanges: OrgMovePlan.plantChanges(d, world: world))
         draft = d
+    }
+
+    /// [v25.591 轉組織 v1a-2] 第 ① 步〔下一步〕（右上那顆、最下面那顆都走這裡）：先重算一次清單再到第 ② 步。
+    /// 「其他…」廠區文字框每打一字不重算，到這裡才算（班的預設看部門或廠區有沒有換）；你動過的列照留（OrgMovePlan.rebuild）。
+    /// 要退回這一件：兩處呼叫改回 `step = .list`、刪這支。
+    private func goToList() {
+        var d = draft
+        OrgMovePlan.rebuild(&d, world: OrgMoveWorld(store: lifeStore), now: Date())
+        draft = d
+        step = .list
     }
 
     /// 〔確認交接〕（要訂閱）：sheet 還開著時直接寫（applyOrgMove 一個 batched、只存一次），寫完換到完成畫面、不能再回上一步
@@ -462,10 +478,12 @@ private struct OrgMoveStepWhere: View {
         otherPlantOpen || isCustomPlant(OrgMovePlan.plantChoices(w))
     }
 
+    /// [v25.591 轉組織 v1a-2] 點廠區膠囊＝重算清單（班的預設看廠區有沒有換；「其他…」文字框不在這裡算，〔下一步〕才算）。
+    /// 要退回這一件：`update { $0.toPlant = p }` 改回 `draft.toPlant = p`。
     private func pickPlant(_ p: String) {
-        draft.toPlant = p
         plantTouched = true
         otherPlantOpen = false
+        update { $0.toPlant = p }
     }
 
     private func openOtherPlant() {
@@ -582,7 +600,7 @@ private struct OrgMoveStepWhere: View {
     }
 }
 
-// MARK: - 第 ② 步：交接清單（judge §4.3；v1a-1：會議、議程、班只寫灰字，兼任鎖住〔照舊〕＋〔前往〕）
+// MARK: - 第 ② 步：交接清單（judge §4.3；v1a-2 起會議、議程、班、兼任都是真的列，兼任〔照舊〕〔到兼任換人…〕＋〔前往〕）
 
 private struct OrgMoveStepList: View {
     @Binding var draft: OrgMoveDraft
@@ -597,6 +615,10 @@ private struct OrgMoveStepList: View {
     @State private var memoTarget: UUID?
     @State private var memoText = ""
     @State private var showMemo = false
+    /// [v25.591 轉組織 v1a-2] 新會議名稱〔改〕（哪一列、框裡的字）
+    @State private var topicTarget: UUID?
+    @State private var topicText = ""
+    @State private var showTopic = false
 
     var body: some View {
         listBody(listModel)
@@ -618,6 +640,14 @@ private struct OrgMoveStepList: View {
                 Button("取消", role: .cancel) { memoTarget = nil }
             } message: {
                 Text("寫在交接單上；分享給接手的人時會一起帶。不會出現在通知、小工具。")
+            }
+            // [v25.591 轉組織 v1a-2] 新會議名稱〔改〕：空的＝回到「拿掉人名」的預設。要退回這一件：刪這個 alert。
+            .alert("新會議名稱", isPresented: $showTopic) {
+                TextField("例：週會", text: $topicText)
+                Button("好") { saveTopic() }
+                Button("取消", role: .cancel) { topicTarget = nil }
+            } message: {
+                Text("這個名稱會出現在通知與手錶上，建議不要放人名。")
             }
     }
 
@@ -705,12 +735,17 @@ private struct OrgMoveStepList: View {
         .padding(.vertical, 12)
     }
 
+    /// [v25.591 轉組織 v1a-2] 多三個回呼：新會議名稱〔改〕、撞班那天選了、撞班那天〔這天交給別人…〕。
+    /// 要退回這一件：刪 onRename／onShiftDay／onShiftOther 三行（OrgMoveWizLineRow 那三個欄位一起刪）。
     private func lineRow(_ r: OrgMoveWizRow) -> some View {
         OrgMoveWizLineRow(row: r,
                           onChoose: { c in choose(r, c) },
                           onMemo: { openMemo(r) },
                           onDue: { openDue(r) },
-                          onRole: { openRole(r) })
+                          onRole: { openRole(r) },
+                          onRename: { openTopic(r) },
+                          onShiftDay: { day, choice in setShiftDay(r.id, day: day, choice: choice) },
+                          onShiftOther: { day in pickShiftOther(r, day: day) })
     }
 
     /// 一組超過 8 列：先 5 列＋〔再看 N 件〕
@@ -725,26 +760,24 @@ private struct OrgMoveStepList: View {
 
     private var emptyCard: some View {
         OrgMoveWizSection {
-            Text("這位同仁手上沒有還沒做完的待辦、機台、週報，直接下一步就好。")
+            Text("這位同仁手上沒有還沒做完的待辦、機台、會議、週報、以後的班，直接下一步就好。")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .padding(14)
         }
     }
 
-    /// 最下面兩行灰字：「下一版才能在這裡交：…」「跟著王小明、不用交：11/12 有 1 筆請假」
+    /// 最下面灰字：「跟著王小明、不用交：11/12 有 1 筆請假」
+    /// [v25.591 轉組織 v1a-2] 「下一版才能在這裡交：…」那一行拿掉（會議、議程、班、兼任都在清單上交了）。
+    /// 要退回這一件：ListModel 加回 `deferred`（OrgMovePlan.deferredTextV1a1）、這裡加回 `if let t = m.deferred { Text(t) }`。
+    @ViewBuilder
     private func footNotes(_ m: OrgMoveWizListModel) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            if let t = m.deferred {
-                Text(t)
-            }
-            if let t = m.leave {
-                Text(t)
-            }
+        if let t = m.leave {
+            Text(t)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 4)
         }
-        .font(.caption)
-        .foregroundStyle(.secondary)
-        .padding(.horizontal, 4)
     }
 
     // MARK: 寫草稿（只走 OrgMovePlan.giveAll／setAction；交接備註、新截止日直接寫那一列＋updatedAt）
@@ -761,27 +794,90 @@ private struct OrgMoveStepList: View {
         draft = d
     }
 
+    /// [v25.591 轉組織 v1a-2] 帶好人的那一顆（〔改由 林志豪（會議主人）〕〔交給 陳怡君（新會議接著開）〕）直接寫那位；
+    /// 要挑人的記住是哪一種動作（purpose "line:<列 id>:<動作>"：會議〔交給…〕是 newSeries／整場 give，其他 give）。
+    /// 要退回這一件：拿掉 `else if let to = c.toId` 那一段，pick 改回 v1a-1 的 "line:<列 id>"＋標題「交給誰」。
     private func choose(_ r: OrgMoveWizRow, _ c: OrgMoveChoice) {
         if c.needsPerson {
-            pick = OrgMovePickRequest(title: "交給誰", personId: draft.personId, selected: r.line.toId,
-                                      purpose: "line:" + r.id.uuidString)
+            pick = linePick(r, action: c.action)
+        } else if let to = c.toId {
+            setLineAction(r.id, c.action, toId: to, toName: c.toName)
         } else {
             setLineAction(r.id, c.action)
         }
     }
 
+    /// [v25.591 轉組織 v1a-2] 一列的挑人頁：兼任「兼任負責人換成誰」（這個兼任的成員排最前面）、議程「改由誰」、其他「交給誰」
+    private func linePick(_ r: OrgMoveWizRow, action: OrgMoveAction) -> OrgMovePickRequest {
+        let purpose = "line:" + r.id.uuidString + ":" + action.rawValue
+        let me = draft.personId
+        let current: UUID? = r.line.toId
+        switch r.line.lineKind {
+        case .some(.sideRole):
+            return OrgMovePickRequest(title: "兼任負責人換成誰", personId: me, selected: current, purpose: purpose,
+                                      sideRoleId: r.line.parentId)
+        case .some(.agenda):
+            return OrgMovePickRequest(title: "改由誰", personId: me, selected: current, purpose: purpose)
+        default:
+            return OrgMovePickRequest(title: "交給誰", personId: me, selected: current, purpose: purpose)
+        }
+    }
+
     /// 挑人頁回來（已經關頁、下一個 runloop）。名字照 OrgMoveWorld.name（沒名字＝「這位同仁」）
+    /// [v25.591 轉組織 v1a-2] "line:<列 id>:<動作>"（動作認不得＝give；v1a-1 沒有動作那一段也＝give）、
+    /// "day:<班那一列 id>:<日子>"＝撞班那天〔這天交給別人…〕。要退回這一件：拿掉 parts 那兩段，換回 v1a-1 的 "line:" 那一段。
     private func applyPick(_ purpose: String, id: UUID) {
         let name = OrgMoveWorld(store: lifeStore).name(id)
+        let parts = purpose.components(separatedBy: ":")
         if purpose == "all" {
             giveAll(to: id, name: name, onlyIds: nil)
         } else if purpose.hasPrefix("group:") {
             let gid = String(purpose.dropFirst(6))
             guard let g = OrgMovePlan.groups(draft.lines).first(where: { $0.id == gid }) else { return }
             giveAll(to: id, name: name, onlyIds: Set(g.lineIds))
-        } else if purpose.hasPrefix("line:"), let lid = UUID(uuidString: String(purpose.dropFirst(5))) {
-            setLineAction(lid, .give, toId: id, toName: name)
+        } else if parts.first == "line", parts.count >= 2, let lid = UUID(uuidString: parts[1]) {
+            let raw = parts.count > 2 ? parts[2] : ""
+            let a: OrgMoveAction = OrgMoveAction(rawValue: raw) ?? .give
+            setLineAction(lid, a, toId: id, toName: name)
+        } else if parts.first == "day", parts.count == 3, let lid = UUID(uuidString: parts[1]) {
+            setShiftDay(lid, day: parts[2], choice: id.uuidString)
         }
+    }
+
+    /// [v25.591 轉組織 v1a-2] 撞班那天選了〔改成…〕〔這天清掉〕或挑好的人（只寫草稿；OrgMovePlan.setShiftDay）
+    private func setShiftDay(_ lineId: UUID, day: String, choice: String) {
+        var d = draft
+        OrgMovePlan.setShiftDay(&d.lines, lineId: lineId, day: day, choice: choice, now: Date())
+        draft = d
+    }
+
+    /// [v25.591 轉組織 v1a-2] 〔這天交給別人…〕：挑人頁不列原本的接手人（這位同仁自己本來就不列）
+    private func pickShiftOther(_ r: OrgMoveWizRow, day: String) {
+        let raw: String = r.line.days?[day] ?? ""
+        let current: UUID? = UUID(uuidString: raw)
+        let skip: [UUID] = [r.line.toId].compactMap { $0 }
+        pick = OrgMovePickRequest(title: "這天交給誰", personId: draft.personId, selected: current,
+                                  purpose: "day:" + r.id.uuidString + ":" + day, excluding: skip)
+    }
+
+    /// [v25.591 轉組織 v1a-2] 新會議名稱〔改〕：框裡先帶現在的字
+    private func openTopic(_ r: OrgMoveWizRow) {
+        topicTarget = r.id
+        topicText = r.meetingTopic ?? ""
+        showTopic = true
+    }
+
+    /// 〔好〕：寫那一列的 newTopic（空的＝nil：回到「拿掉人名」的預設）＋updatedAt（rebuild 才留得住）
+    private func saveTopic() {
+        guard let id = topicTarget else { return }
+        let text = topicText.trimmingCharacters(in: .whitespacesAndNewlines)
+        var d = draft
+        if let i = d.lines.firstIndex(where: { $0.id == id }) {
+            d.lines[i].newTopic = text.isEmpty ? nil : text
+            d.lines[i].updatedAt = Date()
+        }
+        draft = d
+        topicTarget = nil
     }
 
     private func openMemo(_ r: OrgMoveWizRow) {
@@ -831,24 +927,33 @@ private struct OrgMoveWizListModel {
     var spoken = ""
     var suggestion: OrgMoveWizSuggestion?
     var groups: [OrgMoveWizGroupModel] = []
-    var deferred: String?
     var leave: String?
 
+    /// [v25.591 轉組織 v1a-2] 每一列多帶這位同仁的 id 與交接那天（議程、會議、撞班要）；caption 多「　結束 N」；
+    /// `deferred`（灰字「下一版才能在這裡交」）拿掉。要退回這一件：list 改回 v1a-1 的參數、caption 改回只接不要了。
     static func make(_ d: OrgMoveDraft, world w: OrgMoveWorld, now: Date) -> OrgMoveWizListModel {
         var m = OrgMoveWizListModel()
         let person = w.name(d.personId)
         m.tally = OrgMovePlan.tally(d.lines)
         let receivers = OrgMovePlan.receiverText(m.tally)
-        m.caption = m.tally.dropped > 0 ? receivers + "　不要了 \(m.tally.dropped)" : receivers
+        m.caption = captionText(m.tally, receivers: receivers)
         m.spoken = OrgMovePlan.tallyText(m.tally) + receivers
         m.suggestion = OrgMoveWizSuggestion.make(d.personId, world: w)
-        m.groups = OrgMoveWizGroupModel.list(d.lines, personName: person, world: w, now: now)
+        let cut = OrgMovePlan.draftCutKey(d, now: now)
+        m.groups = OrgMoveWizGroupModel.list(d.lines, personId: d.personId, personName: person, cutKey: cut,
+                                             world: w, now: now)
         if d.kind == .move {
-            m.deferred = OrgMovePlan.deferredText(personId: d.personId, effectiveKey: OrgMovePlan.dayKey(d.effective),
-                                                  world: w, now: now)
             m.leave = OrgMovePlan.leaveNote(personId: d.personId, personName: person, world: w, now: now)
         }
         return m
+    }
+
+    /// 「（陳怡君 5、林志豪 3）　不要了 1　結束 1」（沒有的那段不寫）
+    private static func captionText(_ t: OrgMoveTally, receivers: String) -> String {
+        var parts: [String] = [receivers]
+        if t.dropped > 0 { parts.append("不要了 \(t.dropped)") }
+        if t.ended > 0 { parts.append("結束 \(t.ended)") }
+        return parts.filter { !$0.isEmpty }.joined(separator: "　")
     }
 }
 
@@ -873,7 +978,8 @@ private struct OrgMoveWizGroupModel: Identifiable {
     let lineIds: [UUID]
     let rows: [OrgMoveWizRow]
 
-    static func list(_ lines: [OrgMoveLine], personName: String, world w: OrgMoveWorld, now: Date) -> [OrgMoveWizGroupModel] {
+    static func list(_ lines: [OrgMoveLine], personId: UUID, personName: String, cutKey: String,
+                     world w: OrgMoveWorld, now: Date) -> [OrgMoveWizGroupModel] {
         var byId: [UUID: OrgMoveLine] = [:]
         for l in lines where byId[l.id] == nil { byId[l.id] = l }
         var out: [OrgMoveWizGroupModel] = []
@@ -881,7 +987,8 @@ private struct OrgMoveWizGroupModel: Identifiable {
             var rows: [OrgMoveWizRow] = []
             for id in g.lineIds {
                 guard let l = byId[id] else { continue }
-                rows.append(OrgMoveWizRow.make(l, in: lines, personName: personName, world: w, now: now))
+                rows.append(OrgMoveWizRow.make(l, in: lines, personId: personId, personName: personName,
+                                               cutKey: cutKey, world: w, now: now))
             }
             out.append(OrgMoveWizGroupModel(id: g.id, title: g.title, canGiveAll: g.canGiveAll,
                                             lineIds: g.lineIds, rows: rows))
@@ -907,42 +1014,80 @@ private struct OrgMoveWizRow: Identifiable {
     let canMemo: Bool
     /// 兼任那一列〔前往〕
     let sideRoleId: UUID?
+    /// [v25.591 轉組織 v1a-2] 會議選了〔交給…〕：「新會議名稱：週會〔改〕」的「週會」（其他列 nil）
+    let meetingTopic: String?
+    /// [v25.591 轉組織 v1a-2] 班〔交給…〕撞到的那幾天（只展開這幾天；沒撞＝空）
+    let conflicts: [OrgMoveShiftConflict]
+    /// [v25.591 轉組織 v1a-2] 選單裡打勾的那一顆（OrgMoveChoice.id）：帶好人的那顆對上了只勾它，不然勾同動作、沒帶人的那顆
+    let checkedIds: Set<String>
 
     var id: UUID { line.id }
     var isOrg: Bool { line.isOrgLine }
-    var selectedAction: OrgMoveAction? { line.lineAction }
 
-    static func make(_ l: OrgMoveLine, in lines: [OrgMoveLine], personName: String,
-                     world w: OrgMoveWorld, now: Date) -> OrgMoveWizRow {
+    /// [v25.591 轉組織 v1a-2] 選項、灰字換成 in:personId: 那一支（議程分得出自己會議／別人會議、會議多〔交給 陳怡君（新會議接著開）〕）；
+    /// 標題用 rowTitle（議程寫哪一場）；可以寫交接備註的多會議、議程、班、兼任；有「新會議名稱」那一列時灰字那一行不重複。
+    /// 要退回這一件：參數拿掉 personId／cutKey，title／reasons／choices 換回 v1a-1 那兩支、memoKinds 拿掉後四種、刪後三個欄位。
+    static func make(_ l: OrgMoveLine, in lines: [OrgMoveLine], personId: UUID, personName: String,
+                     cutKey: String, world w: OrgMoveWorld, now: Date) -> OrgMoveWizRow {
         let capsule = OrgMovePlan.capsuleText(l, in: lines, personName: personName, world: w)
         let kind = l.lineKind
-        let memoKinds: [OrgMoveLineKind] = [.task, .alarmTask, .report, .equipment]
+        let memoKinds: [OrgMoveLineKind] = [.task, .alarmTask, .report, .equipment, .meeting, .agenda, .shifts, .sideRole]
         let canMemo = kind.map { memoKinds.contains($0) } ?? false
         let memo = (l.memo ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        let title = l.isOrgLine ? l.title + "：" + capsule : l.title
-        let reasons: [String] = l.isOrgLine
-            ? ["在上一步改"] : OrgMovePlan.reasonLines(l, personName: personName, world: w, now: now)
-        let choices: [OrgMoveChoice] = l.isOrgLine ? [] : OrgMovePlan.choices(l, personName: personName, world: w)
+        let title: String = l.isOrgLine ? l.title + "：" + capsule : OrgMovePlan.rowTitle(l, personId: personId, world: w)
+        let topic: String? = topicFor(l, world: w)
+        let allReasons: [String] = l.isOrgLine
+            ? ["在上一步改"]
+            : OrgMovePlan.reasonLines(l, in: lines, personId: personId, personName: personName, world: w, now: now)
+        let reasons: [String] = topic == nil ? allReasons : allReasons.filter { !$0.hasPrefix("新會議名稱：") }
+        let choices: [OrgMoveChoice] = l.isOrgLine
+            ? [] : OrgMovePlan.choices(l, in: lines, personId: personId, personName: personName, world: w)
+        let conflicts: [OrgMoveShiftConflict] = kind == .shifts
+            ? OrgMovePlan.shiftConflicts(l, personName: personName, world: w, cutKey: cutKey) : []
         let overdue = OrgMovePlan.overdueNote(l, in: lines, personName: personName, world: w, now: now) ?? []
         return OrgMoveWizRow(line: l, title: title, reasons: reasons, capsule: capsule,
                              tone: OrgMoveWizTone.of(l, in: lines), choices: choices,
                              showLock: l.isLocked && !capsule.hasPrefix("🔒"),
                              indent: kind == .alarmTask, overdue: overdue, memo: memo, canMemo: canMemo,
-                             sideRoleId: kind == .sideRole ? l.parentId : nil)
+                             sideRoleId: kind == .sideRole ? l.parentId : nil,
+                             meetingTopic: topic, conflicts: conflicts,
+                             checkedIds: checkedChoiceIds(choices, line: l))
+    }
+
+    /// 會議那一列選了〔交給…（新會議接著開）〕或〔交給…（整場交出去）〕才有：你改過的名稱，沒改＝原本的拿掉人名
+    private static func topicFor(_ l: OrgMoveLine, world w: OrgMoveWorld) -> String? {
+        guard l.lineKind == .meeting else { return nil }
+        let a = l.lineAction
+        guard a == .newSeries || a == .give else { return nil }
+        return OrgMovePlan.newSeriesTopic(l, world: w)
+    }
+
+    /// 兩顆同動作的〔交給…〕不要一起打勾：帶好人的那顆（toId）跟這一列的接手人一樣＝只勾它；不然勾同動作、沒帶人的那顆
+    private static func checkedChoiceIds(_ choices: [OrgMoveChoice], line l: OrgMoveLine) -> Set<String> {
+        let a: OrgMoveAction? = l.lineAction
+        let to: UUID? = l.toId
+        if let hit = choices.first(where: { c in c.action == a && c.toId != nil && c.toId == to }) {
+            return [hit.id]
+        }
+        let plain = choices.filter { c in c.action == a && c.toId == nil }
+        return Set(plain.map { $0.id })
     }
 }
 
 /// 膠囊的顏色（照算到底的動作；鎖住的灰）
+/// [v25.591 轉組織 v1a-2] 會議〔交給…（新會議接著開）〕＝交給（teal）；〔最後一場〕＝新的 .ended（灰，跟鎖住的 .secondary 分得開）。
+/// 要退回這一件：拿掉 `.some(.newSeries)`、`.some(.end)` 與 `ended`。
 private enum OrgMoveWizTone {
-    case undecided, give, follow, pending, drop, locked
+    case undecided, give, follow, pending, drop, locked, ended
 
     static func of(_ l: OrgMoveLine, in lines: [OrgMoveLine]) -> OrgMoveWizTone {
         if l.isLocked { return .locked }
         switch OrgMovePlan.resolved(l, in: lines).action {
         case .none: return .undecided
-        case .some(.give): return .give
+        case .some(.give), .some(.newSeries): return .give
         case .some(.pending): return .pending
         case .some(.drop): return .drop
+        case .some(.end): return .ended
         default: return .follow
         }
     }
@@ -955,17 +1100,23 @@ private enum OrgMoveWizTone {
         case .pending: return .brown
         case .drop: return .red
         case .locked: return .secondary
+        case .ended: return Color.gray
         }
     }
 }
 
 /// 清單一列：色圓、標題（跑馬燈）、灰字理由、膠囊選單（＋兼任〔前往〕）、逾期兩行、💬 交接備註
+/// [v25.591 轉組織 v1a-2] 會議：灰字下面「新會議名稱：週會〔改〕」；班：膠囊下面撞班那幾天（OrgMoveWizardRows.swift）。
+/// 要退回這一件：刪 onRename／onShiftDay／onShiftOther、topicView、conflictView。
 private struct OrgMoveWizLineRow: View {
     let row: OrgMoveWizRow
     let onChoose: (OrgMoveChoice) -> Void
     let onMemo: () -> Void
     let onDue: () -> Void
     let onRole: () -> Void
+    let onRename: () -> Void
+    let onShiftDay: (String, String) -> Void
+    let onShiftOther: (String) -> Void
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
@@ -974,7 +1125,9 @@ private struct OrgMoveWizLineRow: View {
                 MarqueeText(row.title)
                     .font(.subheadline.weight(.semibold))
                 OrgMoveWizLines(lines: row.reasons, color: .secondary)
+                topicView
                 controls
+                conflictView
                 overdueView
                 memoView
             }
@@ -982,6 +1135,21 @@ private struct OrgMoveWizLineRow: View {
         .padding(.leading, row.indent ? 38 : 14)
         .padding(.trailing, 14)
         .padding(.vertical, 10)
+    }
+
+    @ViewBuilder
+    private var topicView: some View {
+        if let t = row.meetingTopic {
+            OrgMoveMeetingTopicRow(topic: t, onRename: onRename)
+        }
+    }
+
+    @ViewBuilder
+    private var conflictView: some View {
+        if !row.conflicts.isEmpty {
+            OrgMoveShiftConflictList(conflicts: row.conflicts, onChoose: onShiftDay, onPickOther: onShiftOther)
+                .padding(.top, 2)
+        }
     }
 
     @ViewBuilder
@@ -1000,12 +1168,13 @@ private struct OrgMoveWizLineRow: View {
         }
     }
 
-    /// 只列這一列能選的（OrgMovePlan.choices）；task／alarmTask／report／equipment 最下面多〔交接備註…〕（逾期的再多〔改新的截止日…〕）
+    /// 只列這一列能選的（OrgMovePlan.choices）；task／alarmTask／report／equipment（v1a-2 起加會議、議程、班、兼任）
+    /// 最下面多〔交接備註…〕（逾期的再多〔改新的截止日…〕）。打勾照 row.checkedIds（兩顆〔交給…〕不一起勾）
     private var capsuleMenu: some View {
         Menu {
             ForEach(row.choices) { c in
                 Button { onChoose(c) } label: {
-                    OrgMoveWizMenuText(text: c.label, on: c.action == row.selectedAction)
+                    OrgMoveWizMenuText(text: c.label, on: row.checkedIds.contains(c.id))
                 }
             }
             if row.canMemo {
@@ -1339,17 +1508,12 @@ private struct OrgMoveStepConfirm: View {
         }
     }
 
+    /// [v25.591 轉組織 v1a-2] 「下一版才能在這裡交」那一行拿掉（plan 已經回 nil；留著是死碼），只剩「按下去就全部改好」。
+    /// 要退回這一件：加回 `if let d = p.deferred { Text(d) }`（caption、secondary）。
     private func footNotes(_ p: OrgMovePreview) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            if let d = p.deferred {
-                Text(d)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            Text(p.timingNote)
-                .font(.footnote.weight(.semibold))
-        }
-        .padding(.horizontal, 4)
+        Text(p.timingNote)
+            .font(.footnote.weight(.semibold))
+            .padding(.horizontal, 4)
     }
 }
 
@@ -1692,17 +1856,22 @@ private struct OrgMoveWizManagerModel: Identifiable {
     let chips: [OrgMoveWizChipModel]
     let toId: UUID?
 
+    /// [v25.591 轉組織 v1a-2] 跟第 ② 步一樣走 in:personId: 那一支（管理人員那幾列結果跟 v1a-1 一樣：plan 交回舊的那支）。
+    /// 要退回這一件：兩處換回 `choices(l, personName:world:)`、`reasonLines(l, personName:world:now:)`。
     static func list(_ d: OrgMoveDraft, world w: OrgMoveWorld) -> [OrgMoveWizManagerModel] {
         let person = w.name(d.personId)
         let now = Date()
         var out: [OrgMoveWizManagerModel] = []
         for l in d.lines where l.kind == OrgMoveLineKind.manager.rawValue {
             var chips: [OrgMoveWizChipModel] = []
-            for c in OrgMovePlan.choices(l, personName: person, world: w) {
+            let choices = OrgMovePlan.choices(l, in: d.lines, personId: d.personId, personName: person, world: w)
+            for c in choices {
                 chips.append(OrgMoveWizChipModel(action: c.action, text: chipText(c, line: l),
                                                  on: c.action == l.lineAction, needsPerson: c.needsPerson))
             }
-            let reason = OrgMovePlan.reasonLines(l, personName: person, world: w, now: now).first ?? l.title
+            let reasons = OrgMovePlan.reasonLines(l, in: d.lines, personId: d.personId, personName: person,
+                                                  world: w, now: now)
+            let reason = reasons.first ?? l.title
             out.append(OrgMoveWizManagerModel(id: l.id, reason: reason, chips: chips, toId: l.toId))
         }
         return out

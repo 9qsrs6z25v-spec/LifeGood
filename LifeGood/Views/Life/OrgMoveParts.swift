@@ -26,6 +26,10 @@ struct OrgMovePickRequest: Identifiable, Equatable {
     let selected: UUID?
     /// 呼叫端自己認得的用途（例：某一列的 id、"all"、某一組的 id）
     let purpose: String
+    /// [v25.591 轉組織 v1a-2] 〔到兼任換人…〕：這個兼任的成員排最前面（副標「尾牙籌備成員」）；nil＝一般挑人
+    var sideRoleId: UUID? = nil
+    /// [v25.591 轉組織 v1a-2] 不列的另外幾位（〔這天交給別人…〕不列原本的接手人）
+    var excluding: [UUID] = []
 }
 
 /// 挑人：先列「舊部門、同廠區」，再列其他部屬（副標「部門・廠區・職稱」）；這位同仁自己不列；「我」不在清單
@@ -45,7 +49,9 @@ struct OrgMovePersonPicker: View {
 
     private var candidates: [(id: UUID, name: String, sub: String)] {
         let world = OrgMoveWorld(store: lifeStore)
-        let all = OrgMovePlan.receiverCandidates(personId: request.personId, world: world)
+        let skip = Set(request.excluding)
+        let all = OrgMovePlan.receiverCandidates(personId: request.personId, world: world,
+                                                 sideRoleId: request.sideRoleId).filter { !skip.contains($0.id) }
         let q = query.trimmingCharacters(in: .whitespaces)
         guard !q.isEmpty else { return all }
         return all.filter { c in
@@ -105,7 +111,7 @@ struct OrgMovePersonPicker: View {
     }
 }
 
-/// 一列左邊 32pt 色圓裡一個字（任／缺／兼／機／報／組；同 FinanceLedgerRow 的分類色圓）
+/// 一列左邊 32pt 色圓裡一個字（任／缺／兼／機／報／組／會／議／班；同 FinanceLedgerRow 的分類色圓）
 struct OrgMoveGlyph: View {
     let line: OrgMoveLine
 
@@ -135,6 +141,13 @@ struct OrgMoveGlyph: View {
             return ("報", Color.purple)
         case .some(.manager), .some(.managerAdd):
             return ("組", Color.gray)
+        // [v25.591 轉組織 v1a-2]
+        case .some(.meeting):
+            return ("會", Color.blue)
+        case .some(.agenda):
+            return ("議", Color.mint)
+        case .some(.shifts):
+            return ("班", Color.brown)
         case .none:
             return ("・", Color.gray)
         }

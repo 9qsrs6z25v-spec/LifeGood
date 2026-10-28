@@ -149,7 +149,10 @@ struct OrgMoveChoice: Identifiable, Equatable {
     let label: String
     /// 選了要再挑人（交給…、換成…）
     let needsPerson: Bool
-    var id: String { action.rawValue }
+    /// [v25.591 轉組織 v1a-2] 已經帶好人的那一顆（〔改由 林志豪（會議主人）〕〔交給 陳怡君（新會議接著開）〕）：選了直接寫這位
+    var toId: UUID? = nil
+    var toName: String? = nil
+    var id: String { action.rawValue + (toId?.uuidString ?? "") }
 }
 
 /// 頂端四個數（還沒決定・交給別人・跟著・待分派）＋不要了、每位接手的人幾項
@@ -159,12 +162,14 @@ struct OrgMoveTally: Equatable {
     var follow = 0
     var pending = 0
     var dropped = 0
+    /// [v25.591 轉組織 v1a-2] 會議〔最後一場〕
+    var ended = 0
     /// 接手的人 id → 幾項（照清單順序第一次出現排）
     var byReceiver: [(id: UUID, name: String, count: Int)] = []
 
     static func == (a: OrgMoveTally, b: OrgMoveTally) -> Bool {
         guard a.undecided == b.undecided, a.given == b.given, a.follow == b.follow,
-              a.pending == b.pending, a.dropped == b.dropped,
+              a.pending == b.pending, a.dropped == b.dropped, a.ended == b.ended,
               a.byReceiver.count == b.byReceiver.count else { return false }
         for i in a.byReceiver.indices {
             if a.byReceiver[i].id != b.byReceiver[i].id || a.byReceiver[i].count != b.byReceiver[i].count { return false }
@@ -175,7 +180,7 @@ struct OrgMoveTally: Equatable {
 
 /// 第 ② 步的一組（待辦／機台／週報題目／組織）
 struct OrgMoveGroup: Identifiable {
-    /// "tasks"／"equipment"／"reports"／"org"
+    /// "tasks"／"equipment"／"meetings"／"reports"／"shifts"／"org"
     let id: String
     let title: String
     let lineIds: [UUID]
@@ -209,6 +214,8 @@ struct OrgMoveLineStatus: Equatable {
     enum Kind: String {
         case done, open, handed, backOnPerson, onBoth, elsewhere, skipped, missing
         case pending, pendingElsewhere, follow, closed, dropped, undone, org
+        /// [v25.591 轉組織 v1a-2] 會議〔最後一場〕做好了
+        case ended
     }
     /// 這一列能按的那一顆
     enum Fix: String {
@@ -272,9 +279,14 @@ struct OrgMoveReceivedRow: Identifiable, Equatable {
     let mark: String
     let title: String
     let detail: String
-    /// 任務／週報 id（點了開預覽）；機台＝nil
+    /// 任務／週報 id（點了開預覽）；機台＝nil。兼任那種＝接手的人身上那一筆（分身換人後是新 id）
     let taskId: UUID?
     let reportId: UUID?
+    /// [v25.591 轉組織 v1a-2] OrgMoveLineKind 的字（畫面挑圖示：task／report／equipment／meeting／agenda／shifts／sideRole…）
+    var kind: String = ""
+    /// [v25.591 轉組織 v1a-2] 會議（新會議）、議程所在的會議：點了開那場會議的預覽（持有人＝meetingHolderId）
+    var meetingId: UUID? = nil
+    var meetingHolderId: UUID? = nil
     var id: UUID { lineId }
 }
 
@@ -325,12 +337,37 @@ struct OrgMoveHolderMap {
         let holder: UUID
         let report: WeeklyReport
     }
+    /// [v25.591 轉組織 v1a-2] 議程現在在哪一場會議、誰的會議
+    struct ItemCopy {
+        let holder: UUID
+        let meetingId: UUID
+        let topic: String
+        let session: Date
+        let item: MeetingItem
+    }
     var tasks: [UUID: [TaskCopy]] = [:]
     var reports: [UUID: [ReportCopy]] = [:]
     /// 機台 id → 現在的負責人（沒負責人不放）
     var owners: [UUID: UUID] = [:]
     var equipmentIds: Set<UUID> = []
     var names: [UUID: String] = [:]
+    // [v25.591 轉組織 v1a-2] 會議、議程、班、兼任（同一次掃，不要每列各掃一次全部部屬）
+    var items: [UUID: [ItemCopy]] = [:]
+    /// 會議 id → 現在在誰名下（第一位）
+    var meetingHolders: [UUID: UUID] = [:]
+    var meetings: [UUID: SubordinateMeeting] = [:]
+    /// 部屬 id →「2026-11-04」→ 那天的班
+    var shiftDays: [UUID: [String: SubordinateShift]] = [:]
+    /// 兼任待辦 id → 部屬身上連著它的那幾筆任務（分身、拉進來的）
+    var sideRoleCopies: [UUID: [TaskCopy]] = [:]
+    /// 兼任待辦 id → 那一則
+    var sideRoleTasks: [UUID: SideRoleTask] = [:]
+    /// 兼任待辦 id → 負責成員連到的部屬 id
+    var sideRoleAssignees: [UUID: Set<UUID>] = [:]
+    /// 兼任 id → 名稱
+    var sideRoleNames: [UUID: String] = [:]
+    /// 組織人員、名片 id → 部屬 id（議程負責人三種 id 反查）
+    var ownerOf: [UUID: UUID] = [:]
 
     init(world: OrgMoveWorld) {
         for s in world.subordinates {
@@ -338,15 +375,63 @@ struct OrgMoveHolderMap {
             names[s.id] = n.isEmpty ? "這位同仁" : n
             for t in s.tasks {
                 tasks[t.id, default: []].append(TaskCopy(holder: s.id, task: t))
+                if let back = t.sideRoleLink {
+                    sideRoleCopies[back.taskId, default: []].append(TaskCopy(holder: s.id, task: t))
+                }
             }
             for r in s.weeklyReports {
                 reports[r.id, default: []].append(ReportCopy(holder: s.id, report: r))
             }
+            for m in s.meetings {
+                if meetingHolders[m.id] == nil {
+                    meetingHolders[m.id] = s.id
+                    meetings[m.id] = m
+                }
+                let topic = m.topic.trimmingCharacters(in: .whitespacesAndNewlines)
+                for ctx in m.itemContexts {
+                    items[ctx.item.id, default: []].append(ItemCopy(holder: s.id, meetingId: m.id, topic: topic,
+                                                                    session: ctx.sessionDate, item: ctx.item))
+                }
+            }
+            var days: [String: SubordinateShift] = [:]
+            for sh in s.shifts { days[OrgMovePlan.dayKey(sh.date)] = sh }
+            shiftDays[s.id] = days
         }
         for e in world.equipment {
             equipmentIds.insert(e.id)
             if let o = e.ownerId { owners[e.id] = o }
         }
+        let subIds = Set(world.subordinates.map(\.id))
+        for p in world.orgPeople {
+            guard let sid = p.linkedSubordinateId, subIds.contains(sid) else { continue }
+            ownerOf[p.id] = sid
+            if let cid = p.linkedBusinessCardId { ownerOf[cid] = sid }
+        }
+        for role in world.sideRoles {
+            sideRoleNames[role.id] = role.sideRoleName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            var memberTo: [UUID: UUID] = [:]
+            for mb in role.sideRoleMembers ?? [] {
+                if let pid = mb.linkedPersonId, subIds.contains(pid) { memberTo[mb.id] = pid }
+            }
+            for t in role.sideRoleTasks ?? [] {
+                sideRoleTasks[t.id] = t
+                var who = Set<UUID>()
+                for mid in t.assigneeIds ?? [] {
+                    if let pid = memberTo[mid] { who.insert(pid) }
+                }
+                sideRoleAssignees[t.id] = who
+            }
+        }
+    }
+
+    /// 議程做完算誰（照 meetingItemCredits：負責人反查成部屬；沒指派＝會議主人）
+    func creditedPeople(_ c: ItemCopy) -> [UUID] {
+        var out: [UUID] = []
+        for id in c.item.assigneeIds {
+            let sid: UUID? = names[id] != nil ? id : ownerOf[id]
+            if let s = sid, !out.contains(s) { out.append(s) }
+        }
+        return out.isEmpty ? [c.holder] : out
     }
 
     func name(_ id: UUID?) -> String {
@@ -532,16 +617,29 @@ enum OrgMovePlan {
     }
 
     /// 人名清單：先列「舊部門、同廠區」，再列其他部屬；這位同仁自己不列（judge §4.3）
-    static func receiverCandidates(personId: UUID, world: OrgMoveWorld) -> [(id: UUID, name: String, sub: String)] {
+    static func receiverCandidates(personId: UUID, world: OrgMoveWorld,
+                                   sideRoleId: UUID? = nil) -> [(id: UUID, name: String, sub: String)] {
         guard let me = world.sub(personId) else { return [] }
         let others = world.subordinates.filter { $0.id != personId }
-        let near = others.filter { $0.departmentId == me.departmentId && $0.plantArea == me.plantArea }
+        // [v25.591 轉組織 v1a-2] 兼任〔到兼任換人…〕：這個兼任的成員排最前面（副標多「尾牙籌備成員」）；不是成員的選了會先加成員
+        var memberIds: [UUID] = []
+        if let rid = sideRoleId, let role = world.sideRoles.first(where: { $0.id == rid }) {
+            for m in role.sideRoleMembers ?? [] {
+                if let pid = m.linkedPersonId, pid != personId, others.contains(where: { $0.id == pid }),
+                   !memberIds.contains(pid) { memberIds.append(pid) }
+            }
+        }
+        let members = memberIds.compactMap { id in others.first(where: { $0.id == id }) }
+        let memberSet = Set(memberIds)
+        let near = others.filter { !memberSet.contains($0.id) && $0.departmentId == me.departmentId && $0.plantArea == me.plantArea }
         let nearIds = Set(near.map(\.id))
-        let rest = others.filter { !nearIds.contains($0.id) }
-        return (near + rest).map { s -> (id: UUID, name: String, sub: String) in
+        let rest = others.filter { !nearIds.contains($0.id) && !memberSet.contains($0.id) }
+        let roleName = sideRoleId.map { world.sideRoleName($0) } ?? ""
+        return (members + near + rest).map { s -> (id: UUID, name: String, sub: String) in
             let n = s.name.trimmingCharacters(in: .whitespacesAndNewlines)
-            let parts = [world.deptShort(s.departmentId), s.plantArea.trimmingCharacters(in: .whitespaces),
+            var parts = [world.deptShort(s.departmentId), s.plantArea.trimmingCharacters(in: .whitespaces),
                          world.titleLabel(gradeTitleId: s.gradeTitleId, jobTitle: s.jobTitle)]
+            if memberSet.contains(s.id) { parts.insert("\(roleName)成員", at: 0) }
             return (id: s.id, name: n.isEmpty ? "未命名" : n, sub: parts.filter { !$0.isEmpty }.joined(separator: "・"))
         }
     }
@@ -562,13 +660,17 @@ enum OrgMovePlan {
         return shortDay(dayKey(r.date)) + " " + t
     }
 
-    /// 這位同仁手上還沒做完的待辦、機台、週報，加上管理人員身分（judge §3.2；v1a-1：會議、議程、班、兼任不列成列）。
-    /// 順序：待辦（截止早的先，同 TeamDay.incompleteTasks）→ 機台（照名字；每台後面接它還沒處理完的警報任務）→ 週報（照報告日）→ 管理人員。
-    /// kind == .plant（只換廠區）：只列機台（和它們的警報任務）。
+    /// 這位同仁手上還沒做完的待辦、機台、會議與議程、週報、以後的班，加上管理人員身分（judge §3.2）。
+    /// 順序：待辦（截止早的先，同 TeamDay.incompleteTasks；兼任的任務、議程也在這組）→ 機台（照名字；每台後面接它還沒處理完的警報任務）
+    /// → 會議與議程（每場會議後面接它的議程，再接別人會議裡交給這位同仁的）→ 週報（照報告日）→ 班 → 管理人員。
+    /// kind == .plant（只換廠區）：只列機台（和它們的警報任務）、會議（預設照舊）、以後的班（judge §5-22）。
+    /// [v25.591 轉組織 v1a-2] 加會議、議程、班、兼任四種（v1a-1 只有灰字「下一版才能在這裡交」）；
+    /// plantChanges：廠區有換（班的預設：換了部門或廠區＝還沒決定，都沒換＝跟著）
     static func buildLines(personId: UUID, kind: OrgMoveKind, deptChanges: Bool, effectiveKey: String,
-                           world: OrgMoveWorld, now: Date) -> [OrgMoveLine] {
+                           world: OrgMoveWorld, now: Date, plantChanges: Bool = false) -> [OrgMoveLine] {
         guard let sub = world.sub(personId) else { return [] }
         let todayKey = dayKey(now)
+        let cut = cutKey(effectiveKey: effectiveKey, todayKey: todayKey)
         let owned = world.equipment.filter { $0.ownerId == personId }
             .sorted { a, b in
                 let x = a.name.localizedStandardCompare(b.name)
@@ -585,6 +687,7 @@ enum OrgMovePlan {
             }
         var taskLines: [OrgMoveLine] = []
         var alarmLines: [UUID: [OrgMoveLine]] = [:]
+        var sideSeen = Set<UUID>()
         for t in open {
             let due = t.dueDate.map { dayKey($0) }
             let overdue = t.dueDate.map { $0 < now } ?? false
@@ -599,10 +702,15 @@ enum OrgMovePlan {
             }
             guard kind == .move else { continue }
             if let back = t.sideRoleLink, world.sideRoleAlive(back) {
+                // [v25.591 轉組織 v1a-2] 不再鎖：〔照舊〕〔到兼任換人…〕（預設照舊；〔全部交給〕不動它）
+                guard !sideSeen.contains(back.taskId) else { continue }
+                sideSeen.insert(back.taskId)
+                // [v25.591 轉組織 v1a-2 驗證] 標題：App 自動建的分身 topic 是兼任名稱（「尾牙籌備」），寫那件事（「尾牙場控彩排」）。
+                // 要退回這一件：title 改回 taskTitle(t)
                 taskLines.append(OrgMoveLine(kind: OrgMoveLineKind.sideRole.rawValue, refId: back.taskId, itemId: t.id,
-                                             parentId: back.roleId, holderId: personId, title: taskTitle(t),
-                                             dueKey: due, action: OrgMoveAction.follow.rawValue,
-                                             lock: OrgMoveLock.sideRole.rawValue))
+                                             parentId: back.roleId, holderId: personId,
+                                             title: sideRoleLineTitle(t, back: back, world: world),
+                                             dueKey: due, action: OrgMoveAction.follow.rawValue))
                 continue
             }
             if t.isDereliction {
@@ -623,6 +731,15 @@ enum OrgMovePlan {
                                        title: world.equipmentName(e.id)))
             eqLines.append(contentsOf: alarmLines[e.id] ?? [])
         }
+        // [v25.591 轉組織 v1a-2] 兼任的議程（拉進兼任的）接在待辦那組後面；會議與議程、以後的班
+        if kind == .move {
+            taskLines.append(contentsOf: sideRoleAgendaLines(personId: personId, sub: sub, world: world, seen: &sideSeen))
+        }
+        let meetingLines = meetingAndAgendaLines(personId: personId, sub: sub, owned: owned, cutKey: cut,
+                                                 withAgenda: kind == .move, world: world)
+        let changes = kind == .plant ? true : (deptChanges || plantChanges)
+        let shiftLines: [OrgMoveLine] = shiftsLine(personId: personId, sub: sub, cutKey: cut,
+                                                   defaultFollow: !changes).map { [$0] } ?? []
         var reportLines: [OrgMoveLine] = []
         var managerLines: [OrgMoveLine] = []
         if kind == .move {
@@ -659,14 +776,15 @@ enum OrgMovePlan {
                 }
             }
         }
-        return taskLines + eqLines + reportLines + managerLines
+        return taskLines + eqLines + meetingLines + reportLines + shiftLines + managerLines
     }
 
     /// 第 ① 步改了（換單位／只換廠區、新部門、照舊）之後重算清單：同一筆（kind＋refId）你動過的（updatedAt 有值）照留，
     /// 沒動過的換成新的預設。管理人員那幾列跟著「部門有沒有換」換預設。
     static func rebuild(_ draft: inout OrgMoveDraft, world: OrgMoveWorld, now: Date) {
         let fresh = buildLines(personId: draft.personId, kind: draft.kind, deptChanges: deptChanges(draft, world: world),
-                               effectiveKey: dayKey(draft.effective), world: world, now: now)
+                               effectiveKey: dayKey(draft.effective), world: world, now: now,
+                               plantChanges: plantChanges(draft, world: world))
         var touched: [String: OrgMoveLine] = [:]
         for l in draft.lines where l.updatedAt != nil {
             let key = l.kind + "|" + (l.refId?.uuidString ?? "")
@@ -674,9 +792,21 @@ enum OrgMovePlan {
         }
         draft.lines = fresh.map { (l: OrgMoveLine) -> OrgMoveLine in
             let key = l.kind + "|" + (l.refId?.uuidString ?? "")
-            if let t = touched[key] { return t }
-            return l
+            guard var t = touched[key] else { return l }
+            // [v25.591 轉組織 v1a-2] 會議、班：你選的照留，交接那天（dueKey）與班的標題照新的生效日重算
+            if l.kind == OrgMoveLineKind.meeting.rawValue || l.kind == OrgMoveLineKind.shifts.rawValue {
+                t.dueKey = l.dueKey
+                t.title = l.title
+            }
+            return t
         }
+    }
+
+    /// [v25.591 轉組織 v1a-2] 這次廠區有沒有換（班的預設用；只換廠區、換單位都看 toPlant）
+    static func plantChanges(_ draft: OrgMoveDraft, world: OrgMoveWorld) -> Bool {
+        let p = draft.toPlant.trimmingCharacters(in: .whitespaces)
+        guard !p.isEmpty, let sub = world.sub(draft.personId) else { return false }
+        return p != sub.plantArea.trimmingCharacters(in: .whitespaces)
     }
 
     /// 這次部門有沒有換（換單位、不是〔照舊〕、新部門跟現在的不一樣）
@@ -697,7 +827,21 @@ enum OrgMovePlan {
         return (a, line.toId, line.toName)
     }
 
-    /// 這一列能選的（judge §3.2）
+    /// 這一列能選的（judge §3.2）。[v25.591 轉組織 v1a-2] 會議、議程、班、兼任要知道整張清單與這位同仁是誰：用這一支
+    static func choices(_ line: OrgMoveLine, in lines: [OrgMoveLine], personId: UUID, personName: String,
+                        world: OrgMoveWorld) -> [OrgMoveChoice] {
+        switch line.lineKind {
+        case .some(.meeting): return meetingChoices(line, in: lines, world: world)
+        case .some(.agenda): return agendaChoices(line, personId: personId, world: world)
+        case .some(.shifts): return shiftsChoices(personName: personName)
+        case .some(.sideRole):
+            // v1a-1 存的舊單（鎖著）照舊只有〔照舊〕
+            return line.lineLock == .sideRole ? [OrgMoveChoice(action: .follow, label: "照舊", needsPerson: false)] : sideRoleChoices()
+        default: return choices(line, personName: personName, world: world)
+        }
+    }
+
+    /// 這一列能選的（v1a-1 那幾種；會議、議程、班、兼任請用上面那一支）
     static func choices(_ line: OrgMoveLine, personName: String, world: OrgMoveWorld) -> [OrgMoveChoice] {
         let follow = OrgMoveChoice(action: .follow, label: "跟著\(personName)", needsPerson: false)
         let give = OrgMoveChoice(action: .give, label: "交給…", needsPerson: true)
@@ -726,7 +870,13 @@ enum OrgMovePlan {
         case .some(.alarmTask):
             return [OrgMoveChoice(action: .withEquipment, label: "跟著 \(world.equipmentName(line.parentId))", needsPerson: false)]
         case .some(.sideRole):
-            return [OrgMoveChoice(action: .follow, label: "照舊", needsPerson: false)]
+            return line.lineLock == .sideRole ? [OrgMoveChoice(action: .follow, label: "照舊", needsPerson: false)] : sideRoleChoices()
+        case .some(.meeting):
+            return meetingChoices(line, in: [line], world: world)
+        case .some(.agenda):
+            return agendaChoices(line, personId: line.holderId ?? UUID(), world: world)
+        case .some(.shifts):
+            return shiftsChoices(personName: personName)
         case .some(.manager):
             return [OrgMoveChoice(action: .remove, label: "拿掉", needsPerson: false),
                     OrgMoveChoice(action: .keep, label: "照舊", needsPerson: false),
@@ -741,6 +891,9 @@ enum OrgMovePlan {
 
     /// 膠囊上的字（「交給 陳怡君」「🔗 跟著 蝕刻機 E-03 → 陳怡君」「🔒 跟著王小明」「照舊」「還沒決定」）
     static func capsuleText(_ line: OrgMoveLine, in lines: [OrgMoveLine], personName: String, world: OrgMoveWorld) -> String {
+        // [v25.591 轉組織 v1a-2] 會議、議程、班、兼任的字在 OrgMoveMeetingPlan.swift
+        if let t = moreCapsuleText(line, personName: personName, world: world),
+           line.lineLock != .sideRole { return t }
         guard let a = line.lineAction else { return "還沒決定" }
         switch a {
         case .give:
@@ -766,12 +919,28 @@ enum OrgMovePlan {
         case .replace: return "換成 \(line.toName ?? "")"
         case .add: return "加"
         case .skip: return "不用"
+        case .end: return "最後一場"
+        case .newSeries: return "交給 \(line.toName ?? "")"
         }
     }
 
-    /// 灰字＝為什麼這樣排（一到兩行）
+    /// 灰字＝為什麼這樣排（一到三行）。[v25.591 轉組織 v1a-2] 會議、議程、班、兼任要整張清單與這位同仁：用這一支
+    static func reasonLines(_ line: OrgMoveLine, in lines: [OrgMoveLine], personId: UUID, personName: String,
+                            world: OrgMoveWorld, now: Date) -> [String] {
+        if line.lineLock != .sideRole,
+           let r = moreReasonLines(line, in: lines, personId: personId, personName: personName, world: world, now: now) {
+            return r
+        }
+        return reasonLines(line, personName: personName, world: world, now: now)
+    }
+
+    /// 灰字（v1a-1 那幾種；會議、議程、班、兼任請用上面那一支）
     static func reasonLines(_ line: OrgMoveLine, personName: String, world: OrgMoveWorld, now: Date) -> [String] {
         let todayKey = dayKey(now)
+        if line.lineLock != .sideRole,
+           let r = moreReasonLines(line, in: [line], personId: nil, personName: personName, world: world, now: now) {
+            return r
+        }
         switch line.lineKind {
         case .some(.task), .some(.sideRole), .some(.alarmTask):
             let taskId = line.kind == OrgMoveLineKind.sideRole.rawValue ? line.itemId : line.refId
@@ -818,7 +987,7 @@ enum OrgMovePlan {
             return out
         case .some(.manager):
             return ["\(personName)是 \(line.title.replacingOccurrences(of: " 管理人員", with: "")) 的管理人員"]
-        case .some(.managerAdd), .none:
+        case .some(.managerAdd), .some(.meeting), .some(.agenda), .some(.shifts), .none:
             return []
         }
     }
@@ -867,10 +1036,20 @@ enum OrgMovePlan {
                     counts[id, default: 0] += 1
                     names[id] = r.toName ?? ""
                 }
+            case .some(.newSeries):
+                // [v25.591 轉組織 v1a-2] 會議〔交給…〕＝交給別人
+                t.given += 1
+                if let id = r.toId {
+                    if counts[id] == nil { order.append(id) }
+                    counts[id, default: 0] += 1
+                    names[id] = r.toName ?? ""
+                }
             case .some(.pending):
                 t.pending += 1
             case .some(.drop):
                 t.dropped += 1
+            case .some(.end):
+                t.ended += 1
             default:
                 t.follow += 1
             }
@@ -881,10 +1060,11 @@ enum OrgMovePlan {
         return t
     }
 
-    /// 「還沒決定 0・交給別人 5・跟著 2・待分派 1」（不要了有才接「・不要了 1」）
+    /// 「還沒決定 0・交給別人 5・跟著 2・待分派 1」（不要了有才接「・不要了 1」；會議〔最後一場〕有才接「・結束 1」）
     static func tallyText(_ t: OrgMoveTally) -> String {
         var s = "還沒決定 \(t.undecided)・交給別人 \(t.given)・跟著 \(t.follow)・待分派 \(t.pending)"
         if t.dropped > 0 { s += "・不要了 \(t.dropped)" }
+        if t.ended > 0 { s += "・結束 \(t.ended)" }
         return s
     }
 
@@ -917,24 +1097,43 @@ enum OrgMovePlan {
     static func setAction(_ lines: inout [OrgMoveLine], lineId: UUID, action: OrgMoveAction,
                           toId: UUID? = nil, toName: String? = nil, now: Date) {
         guard let i = lines.firstIndex(where: { $0.id == lineId }) else { return }
+        let oldTo = lines[i].toId
+        let oldAction = lines[i].action
         lines[i].action = action.rawValue
-        let keepsPerson = action == .give || action == .replace
+        let keepsPerson = action == .give || action == .replace || action == .newSeries
         lines[i].toId = keepsPerson ? toId : nil
         lines[i].toName = keepsPerson ? toName : nil
         lines[i].updatedAt = now
+        // [v25.591 轉組織 v1a-2] 會議〔交給…〕：新會議的 id 先配好（兩台、重做都只有一條）
+        if action == .newSeries, lines[i].newId == nil { lines[i].newId = UUID() }
+        // 班換了接手的人：撞班那幾天重新問（換人之後撞的是別天）
+        if lines[i].kind == OrgMoveLineKind.shifts.rawValue, oldTo != lines[i].toId || oldAction != action.rawValue {
+            lines[i].days = nil
+        }
     }
 
     /// 第 ② 步的分組（待辦／機台／週報題目／組織）；空的組不出現。機台那組裡警報任務緊接在它的機台後面（畫面縮排）
     static func groups(_ lines: [OrgMoveLine]) -> [OrgMoveGroup] {
         let tasks = lines.filter { $0.kind == OrgMoveLineKind.task.rawValue || $0.kind == OrgMoveLineKind.sideRole.rawValue }
         let eq = lines.filter { $0.kind == OrgMoveLineKind.equipment.rawValue || $0.kind == OrgMoveLineKind.alarmTask.rawValue }
+        let mtg = lines.filter { $0.kind == OrgMoveLineKind.meeting.rawValue || $0.kind == OrgMoveLineKind.agenda.rawValue }
         let reps = lines.filter { $0.kind == OrgMoveLineKind.report.rawValue }
+        let shifts = lines.filter { $0.kind == OrgMoveLineKind.shifts.rawValue }
         let org = lines.filter { $0.isOrgLine }
         let machines = eq.filter { $0.kind == OrgMoveLineKind.equipment.rawValue }.count
+        let meetings = mtg.filter { $0.kind == OrgMoveLineKind.meeting.rawValue }.count
+        let agenda = mtg.count - meetings
         var out: [OrgMoveGroup] = []
         if !tasks.isEmpty { out.append(OrgMoveGroup(id: "tasks", title: "待辦 \(tasks.count)", lineIds: tasks.map(\.id), canGiveAll: true)) }
         if !eq.isEmpty { out.append(OrgMoveGroup(id: "equipment", title: "機台 \(machines)", lineIds: eq.map(\.id), canGiveAll: true)) }
+        if !mtg.isEmpty {
+            // [v25.591 轉組織 v1a-2]「會議 1・議程 3」（〔這組交給〕只動還沒決定的議程：會議預設照舊）
+            let title = [meetings > 0 ? "會議 \(meetings)" : "", agenda > 0 ? "議程 \(agenda)" : ""]
+                .filter { !$0.isEmpty }.joined(separator: "・")
+            out.append(OrgMoveGroup(id: "meetings", title: title, lineIds: mtg.map(\.id), canGiveAll: true))
+        }
         if !reps.isEmpty { out.append(OrgMoveGroup(id: "reports", title: "週報題目 \(reps.count)", lineIds: reps.map(\.id), canGiveAll: true)) }
+        if !shifts.isEmpty { out.append(OrgMoveGroup(id: "shifts", title: "以後的班", lineIds: shifts.map(\.id), canGiveAll: false)) }
         if !org.isEmpty { out.append(OrgMoveGroup(id: "org", title: "組織 \(org.count)", lineIds: org.map(\.id), canGiveAll: false)) }
         return out
     }
@@ -947,7 +1146,14 @@ enum OrgMovePlan {
     /// 最下面灰字「下一版才能在這裡交：1on1 1・議程 3・11/2 以後的班 7 格（先到原本的地方改）」（v1a-1；沒有就 nil）。
     /// 會議：一對一（名稱像 1on1，同匯出的判斷）寫「1on1」，其他寫「會議」；議程＝自己會議裡沒做完的＋別人會議裡交給這位同仁的；
     /// 班＝生效日與今天取晚的那天（含）以後
+    /// [v25.591 轉組織 v1a-2] 會議、議程、班、兼任都在清單上交了：一律 nil（灰字那一行不再出現）。
+    /// 留著這支只是讓舊的呼叫端照樣編得過（G1 會拿掉呼叫）。要退回 v1a-1 的灰字：刪掉下面這一行 `return nil` 與 `_ = …`。
     static func deferredText(personId: UUID, effectiveKey: String, world: OrgMoveWorld, now: Date) -> String? {
+        return nil
+    }
+
+    /// v1a-1 的灰字（只給 sim 對照、v1a-1 的舊單回看；畫面不用）
+    static func deferredTextV1a1(personId: UUID, effectiveKey: String, world: OrgMoveWorld, now: Date) -> String? {
         guard let sub = world.sub(personId) else { return nil }
         let oneOnOne = sub.meetings.filter { SubExportComposer.isOneOnOneName($0.topic) }.count
         let otherMeetings = sub.meetings.count - oneOnOne
@@ -1025,6 +1231,15 @@ enum OrgMovePlan {
                                  managerId: draft.toManagerId,
                                  managerName: draft.toManagerId.map { world.orgPersonName($0) })
         var lines = draft.lines
+        // [v25.591 轉組織 v1a-2] 會議〔交給…〕：新會議的 id、名稱定下來（沒改過名稱＝原本的拿掉人名）
+        for i in lines.indices where lines[i].kind == OrgMoveLineKind.meeting.rawValue {
+            let a = lines[i].lineAction
+            guard a == .newSeries || a == .give else { continue }
+            if a == .newSeries, lines[i].newId == nil { lines[i].newId = UUID() }
+            if (lines[i].newTopic ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                lines[i].newTopic = newSeriesTopic(lines[i], world: world)
+            }
+        }
         if changes, draft.addToNewDeptManagers, let d = toDept {
             lines.append(OrgMoveLine(kind: OrgMoveLineKind.managerAdd.rawValue, refId: d,
                                      title: "\(world.deptShort(d)) 管理人員", action: OrgMoveAction.add.rawValue))
@@ -1050,13 +1265,21 @@ enum OrgMovePlan {
         p.dates = "\(dayText(move.effectiveKey))生效・交接完成日 \(dayText(move.handoverByKey))"
         let t = tally(lines)
         // 交給每一位
+        let cut = cutKey(move, now: now)
         for r in t.byReceiver {
             var taskTitles: [String] = []
             var eqLines: [String] = []
             var reports = 0
+            // [v25.591 轉組織 v1a-2] 會議、議程、班、兼任
+            var agenda = 0
+            var agendaUnassigned = 0
+            var meetingLines: [String] = []
+            var shiftTitles: [String] = []
+            var shiftNotes: [String] = []
+            var sides: [String] = []
             for l in lines where !l.isOrgLine {
                 let res = resolved(l, in: lines)
-                guard res.action == .give, res.toId == r.id else { continue }
+                guard res.action == .give || res.action == .newSeries, res.toId == r.id else { continue }
                 switch l.lineKind {
                 case .some(.task), .some(.alarmTask):
                     if let note = overdueNote(l, in: lines, personName: person, world: world, now: now), !note.isEmpty {
@@ -1069,6 +1292,18 @@ enum OrgMovePlan {
                     eqLines.append(alarms > 0 ? "\(l.title)（含沒處理完的警報 \(alarms)）" : l.title)
                 case .some(.report):
                     reports += 1
+                case .some(.agenda):
+                    agenda += 1
+                    let item = l.holderId.flatMap { h in world.sub(h)?.meetings.first(where: { $0.id == l.parentId }) }?
+                        .allItems.first(where: { $0.id == l.refId })
+                    if item?.assigneeIds.isEmpty == true { agendaUnassigned += 1 }
+                case .some(.meeting):
+                    meetingLines.append(contentsOf: previewMeetingLines(l, world: world))
+                case .some(.shifts):
+                    shiftTitles.append(l.title)
+                    shiftNotes.append(contentsOf: shiftOverwriteLines(l, personName: person, world: world, cutKey: cut))
+                case .some(.sideRole):
+                    sides.append(l.title)
                 default:
                     break
                 }
@@ -1076,7 +1311,16 @@ enum OrgMovePlan {
             var body: [String] = []
             if !taskTitles.isEmpty { body.append("待辦 \(taskTitles.count)（\(taskTitles.joined(separator: "、"))）") }
             body.append(contentsOf: eqLines)
-            if reports > 0 { body.append("週報 \(reports)") }
+            body.append(contentsOf: meetingLines)
+            var small: [String] = []
+            if agenda > 0 {
+                small.append(agenda == agendaUnassigned ? "議程 \(agenda)（沒指派負責人，會寫上\(r.name)）" : "議程 \(agenda)")
+            }
+            if reports > 0 { small.append("週報 \(reports)") }
+            small.append(contentsOf: shiftTitles)
+            if !small.isEmpty { body.append(small.joined(separator: "・")) }
+            if !sides.isEmpty { body.append("兼任 \(sides.count)（\(sides.joined(separator: "、"))，連兼任負責人一起換）") }
+            body.append(contentsOf: shiftNotes)
             p.blocks.append(OrgMovePreviewBlock(id: "to-" + r.id.uuidString, title: "交給 \(r.name) \(r.count) 項", lines: body))
         }
         let pendingNames = lines.filter { $0.lineAction == .pending }.map(\.title)
@@ -1091,6 +1335,14 @@ enum OrgMovePlan {
         let dropped = lines.filter { !$0.isOrgLine && $0.lineAction == .drop }.map(\.title)
         if !dropped.isEmpty {
             p.blocks.append(OrgMovePreviewBlock(id: "drop", title: "不要了 \(dropped.count) 項：\(dropped.joined(separator: "、"))", lines: []))
+        }
+        // [v25.591 轉組織 v1a-2] 會議〔最後一場〕：一場一段（之後的加開取消、排好的議程搬到最後一場）
+        for l in lines where l.kind == OrgMoveLineKind.meeting.rawValue && l.lineAction == .end {
+            guard let m = meeting(l, world: world) else { continue }
+            let f = meetingFacts(m, cutKey: cut)
+            p.blocks.append(OrgMovePreviewBlock(id: "end-" + l.id.uuidString,
+                                                title: "\(l.title)：\(meetingEndLabel(f, cutKey: cut))",
+                                                lines: meetingEndNotes(f, cutKey: cut)))
         }
         if t.undecided > 0 {
             p.blocks.append(OrgMovePreviewBlock(id: "undecided", title: "還沒決定 \(t.undecided) 項 → 先跟著\(person)", lines: []))
@@ -1113,14 +1365,36 @@ enum OrgMovePlan {
         p.changes = changeLines(move, world: world, now: now)
         p.birthdayOffer = birthdayOffer(move, world: world)
         p.untouched = untouchedLines(personId: draft.personId, world: world)
-        p.deferred = draft.kind == .move
-            ? deferredText(personId: draft.personId, effectiveKey: move.effectiveKey, world: world, now: now) : nil
+        // [v25.591 轉組織 v1a-2] 會議、議程、班、兼任都在清單上交了：灰字「下一版才能在這裡交」不再出現
+        p.deferred = nil
         return p
+    }
+
+    /// [v25.591 轉組織 v1a-2] 確認頁「交給 陳怡君」裡會議那幾行：「週會・每週二 14:00（11/3 起）」
+    /// 「新會議名稱：週會（這個名稱會出現在通知與手錶上，建議不要放人名）」「11/3 以後排好的場次與議程一起搬到新會議」
+    static func previewMeetingLines(_ l: OrgMoveLine, world: OrgMoveWorld) -> [String] {
+        guard let m = meeting(l, world: world) else { return [] }
+        let cut = l.dueKey ?? dayKey(Date())
+        let f = meetingFacts(m, cutKey: cut)
+        let topic = newSeriesTopic(l, world: world)
+        var out: [String] = []
+        if l.lineAction == .newSeries {
+            let start = f.firstRuleDate.map { "（\(shortDay(dayKey($0))) 起）" } ?? ""
+            out.append("會議 \(topic)・\(f.schedule)\(start)")
+        } else {
+            out.append("會議 \(topic)・\(f.schedule)")
+        }
+        out.append("新會議名稱：\(topic)（這個名稱會出現在通知與手錶上，建議不要放人名）")
+        if l.lineAction == .newSeries, let start = f.firstRuleDate, !(f.futureWithItems.isEmpty && f.futureEmpty.isEmpty) {
+            out.append("\(shortDay(dayKey(start))) 以後排好的場次與議程一起搬到新會議")
+        }
+        return out
     }
 
     /// 「缺失 1、兼任 1、週報 1」（跟著那一項的內容；缺失只寫件數）
     private static func followSummary(_ lines: [OrgMoveLine]) -> [String] {
         var derel = 0, side = 0, tasks = 0, reports = 0, machines = 0
+        var oneOnOne = 0, meetings = 0, agenda = 0, shifts = 0
         for l in lines where !l.isOrgLine {
             let a = resolved(l, in: lines).action
             guard a == .follow || a == .closeNow else { continue }
@@ -1131,6 +1405,10 @@ enum OrgMovePlan {
             case .some(.sideRole): side += 1
             case .some(.report): reports += 1
             case .some(.equipment): machines += 1
+            case .some(.meeting):
+                if SubExportComposer.isOneOnOneName(l.title) { oneOnOne += 1 } else { meetings += 1 }
+            case .some(.agenda): agenda += 1
+            case .some(.shifts): shifts += 1
             default: break
             }
         }
@@ -1139,7 +1417,11 @@ enum OrgMovePlan {
         if side > 0 { out.append("兼任 \(side)") }
         if tasks > 0 { out.append("待辦 \(tasks)") }
         if machines > 0 { out.append("機台 \(machines)") }
+        if oneOnOne > 0 { out.append(oneOnOne == 1 ? "1on1" : "1on1 \(oneOnOne)") }
+        if meetings > 0 { out.append("會議 \(meetings)") }
+        if agenda > 0 { out.append("議程 \(agenda)") }
         if reports > 0 { out.append("週報 \(reports)") }
+        if shifts > 0 { out.append("以後的班") }
         return out
     }
 
@@ -1177,8 +1459,10 @@ enum OrgMovePlan {
             var moved = 0, deleted = 0, checked = 0
             let lines = move.allLines
             let holder = world.sub(move.personId)
-            for l in lines where l.kind == OrgMoveLineKind.task.rawValue || l.kind == OrgMoveLineKind.alarmTask.rawValue {
-                guard let t = holder?.tasks.first(where: { $0.id == l.refId }), t.reminderId != nil else { continue }
+            for l in lines where l.kind == OrgMoveLineKind.task.rawValue || l.kind == OrgMoveLineKind.alarmTask.rawValue
+                || (l.kind == OrgMoveLineKind.sideRole.rawValue && l.meetingId == nil) {
+                let tid: UUID? = l.kind == OrgMoveLineKind.sideRole.rawValue ? l.itemId : l.refId
+                guard let t = holder?.tasks.first(where: { $0.id == tid }), t.reminderId != nil else { continue }
                 switch resolved(l, in: lines).action {
                 case .some(.give): moved += 1
                 case .some(.drop): deleted += 1
@@ -1254,7 +1538,7 @@ enum OrgMovePlan {
     /// 還沒套用（精靈的草稿）跟著機台的照那台機台的決定算
     static func receiver(_ line: OrgMoveLine, in move: OrgMove) -> (id: UUID?, name: String?) {
         switch line.lineAction {
-        case .some(.give):
+        case .some(.give), .some(.newSeries):
             return (line.toId, line.toName)
         case .some(.withEquipment):
             if let to = line.toId { return (to, line.toName) }
@@ -1324,6 +1608,10 @@ enum OrgMovePlan {
         }
         if line.isOrgLine {
             return OrgMoveLineStatus(kind: .org, mark: "・", text: line.title, holderId: nil, fix: nil, fixLabel: nil)
+        }
+        // [v25.591 轉組織 v1a-2] 會議、議程、班、兼任（v1a-1 存的鎖著的兼任列照舊走下面）
+        if line.lineLock != .sideRole, let more = moreStatus(line, in: move, map: map, now: now) {
+            return more
         }
         let r = resolved(line, in: move.allLines)
         let rec = receiver(line, in: move)
@@ -1405,7 +1693,7 @@ enum OrgMovePlan {
             }
             return OrgMoveLineStatus(kind: .elsewhere, mark: "・", text: "現在在 \(map.name(now0)) 身上",
                                      holderId: now0, fix: nil, fixLabel: nil)
-        case .some(.manager), .some(.managerAdd), .none:
+        case .some(.manager), .some(.managerAdd), .some(.meeting), .some(.agenda), .some(.shifts), .none:
             return OrgMoveLineStatus(kind: .org, mark: "・", text: line.title, holderId: nil, fix: nil, fixLabel: nil)
         }
     }
@@ -1531,6 +1819,7 @@ enum OrgMovePlan {
         var pending: [UUID] = []
         var follow: [UUID] = []
         var dropped: [UUID] = []
+        var ended: [UUID] = []
         for l in lines {
             let rec = receiver(l, in: move)
             let a = resolved(l, in: move.allLines).action
@@ -1542,6 +1831,8 @@ enum OrgMovePlan {
                 pending.append(l.id)
             } else if a == .drop {
                 dropped.append(l.id)
+            } else if a == .end {
+                ended.append(l.id)
             } else {
                 follow.append(l.id)
             }
@@ -1554,6 +1845,7 @@ enum OrgMovePlan {
         if !pending.isEmpty { out.append(OrgMoveSheetGroup(id: "pending", title: "待分派（\(pending.count)）", lineIds: pending, collapsed: false)) }
         if !follow.isEmpty { out.append(OrgMoveSheetGroup(id: "follow", title: "跟著\(person)（\(follow.count)）", lineIds: follow, collapsed: true)) }
         if !dropped.isEmpty { out.append(OrgMoveSheetGroup(id: "drop", title: "不要了（\(dropped.count)）", lineIds: dropped, collapsed: true)) }
+        if !ended.isEmpty { out.append(OrgMoveSheetGroup(id: "end", title: "結束的會議（\(ended.count)）", lineIds: ended, collapsed: false)) }
         let org = move.allLines.filter { $0.isOrgLine }
         if !org.isEmpty { out.append(OrgMoveSheetGroup(id: "org", title: "組織", lineIds: org.map(\.id), collapsed: false)) }
         return out
@@ -1584,14 +1876,17 @@ enum OrgMovePlan {
             let a = resolved(l, in: move.allLines).action
             if rec.id != nil {
                 given += 1
-                if l.kind != OrgMoveLineKind.equipment.rawValue {
+                // [v25.591 轉組織 v1a-2] 會議、班跟機台一樣「交了就好」（●），不算要做的
+                let handOnly = l.kind == OrgMoveLineKind.equipment.rawValue || l.kind == OrgMoveLineKind.meeting.rawValue
+                    || l.kind == OrgMoveLineKind.shifts.rawValue
+                if !handOnly {
                     toDo += 1
                     if status(l, in: move, map: map, now: now).kind == .done { done += 1 }
                 }
             } else if a == .pending && l.kind == OrgMoveLineKind.equipment.rawValue {
                 let s = status(l, in: move, map: map, now: now)
                 if s.kind == .pending { pendingNames.append(l.title) }
-            } else if a == .drop {
+            } else if a == .drop || a == .end {
                 continue
             } else if a != .pending {
                 follow += 1
@@ -1719,11 +2014,7 @@ enum OrgMovePlan {
             for l in m.allLines where !l.isOrgLine && l.lineKind != nil && l.state != OrgMoveLineState.undone.rawValue {
                 guard receiver(l, in: m).id == personId else { continue }
                 let s = status(l, in: m, map: map, now: now)
-                let isReport = l.kind == OrgMoveLineKind.report.rawValue
-                let isEq = l.kind == OrgMoveLineKind.equipment.rawValue
-                rows.append(OrgMoveReceivedRow(lineId: l.id, mark: s.mark, title: l.title, detail: s.text,
-                                               taskId: (isReport || isEq) ? nil : l.refId,
-                                               reportId: isReport ? l.refId : nil))
+                rows.append(receivedRow(l, status: s, move: m, map: map))
             }
             guard !rows.isEmpty else { continue }
             let from = m.personName.isEmpty ? "這位同仁" : m.personName
@@ -1731,6 +2022,42 @@ enum OrgMovePlan {
             out.append(OrgMoveReceivedSection(moveId: m.id, header: "從\(from)接手（\(rows.count)）・\(at)", rows: rows))
         }
         return out
+    }
+
+    /// [v25.591 轉組織 v1a-2] 接手那一區的一列：待辦、週報點了開預覽；會議（新會議）、議程點了開那場會議；兼任＝接手的人身上那一筆
+    static func receivedRow(_ l: OrgMoveLine, status s: OrgMoveLineStatus, move: OrgMove, map: OrgMoveHolderMap) -> OrgMoveReceivedRow {
+        var taskId: UUID?
+        var reportId: UUID?
+        var meetingId: UUID?
+        var meetingHolder: UUID?
+        var title = l.title
+        switch l.lineKind {
+        case .some(.task), .some(.alarmTask):
+            taskId = l.refId
+        case .some(.report):
+            reportId = l.refId
+        case .some(.sideRole):
+            if let mid = l.meetingId {
+                meetingId = mid
+                meetingHolder = map.meetingHolders[mid]
+            } else if let tid = l.refId, let to = l.toId {
+                taskId = map.sideRoleCopies[tid]?.first(where: { $0.holder == to })?.task.id ?? l.itemId
+            }
+            title = l.title + "（兼任）"
+        case .some(.meeting):
+            meetingId = l.lineAction == .newSeries ? l.newId : l.refId
+            meetingHolder = meetingId.flatMap { map.meetingHolders[$0] }
+            title = l.lineAction == .newSeries ? "會議 " + (l.newTopic ?? l.title) : "會議 " + l.title
+        case .some(.agenda):
+            let c = l.refId.flatMap { map.items[$0]?.first }
+            meetingId = c?.meetingId ?? l.parentId
+            meetingHolder = c?.holder ?? l.holderId
+            title = "議程：" + l.title
+        default:
+            break
+        }
+        return OrgMoveReceivedRow(lineId: l.id, mark: s.mark, title: title, detail: s.text, taskId: taskId,
+                                  reportId: reportId, kind: l.kind, meetingId: meetingId, meetingHolderId: meetingHolder)
     }
 
     /// 部屬總覽「待分派」卡（judge §4.9）：照機台現在的負責人算——還是原人＝待分派；已經不是＝算分好了，不列
@@ -1815,9 +2142,18 @@ enum OrgMovePlan {
             }.map(\.title)
             if !pend.isEmpty { out.append("待分派：" + pend.joined(separator: "、")) }
             var follows: [String] = []
+            var ended: [String] = []
             for l in move.allLines where !l.isOrgLine && l.lineKind != nil && l.state != OrgMoveLineState.undone.rawValue {
                 guard receiver(l, in: move).id == nil else { continue }
                 let a = resolved(l, in: move.allLines).action
+                // [v25.591 轉組織 v1a-2] 一對一的會議、一對一裡的議程不寫（judge §4.10）；結束的會議另一段
+                guard shareFollowAllowed(l, map: map) else { continue }
+                if a == .end {
+                    let undo = OrgMoveMeetingUndo.decode(l.removedJSON)
+                    let last = undo?.lastScheduled.map { "（\(shortDay(dayKey($0))) 是最後一場）" } ?? ""
+                    ended.append(l.title + last)
+                    continue
+                }
                 guard a == nil || a == .follow else { continue }
                 if l.lineLock == .dereliction { continue }      // 缺失不寫
                 if l.kind == OrgMoveLineKind.sideRole.rawValue {
@@ -1827,6 +2163,7 @@ enum OrgMovePlan {
                 }
             }
             if !follows.isEmpty { out.append("跟著\(person)的：" + follows.joined(separator: "、")) }
+            if !ended.isEmpty { out.append("結束的會議：" + ended.joined(separator: "、")) }
         }
         return out.joined(separator: "\n")
     }
@@ -1848,6 +2185,9 @@ enum OrgMovePlan {
         let tasks = mine.filter { $0.kind == OrgMoveLineKind.task.rawValue } + mine.filter { $0.kind == OrgMoveLineKind.alarmTask.rawValue }
         let eqs = mine.filter { $0.kind == OrgMoveLineKind.equipment.rawValue }
         let reps = mine.filter { $0.kind == OrgMoveLineKind.report.rawValue }
+        // [v25.591 轉組織 v1a-2] 會議、議程排在機台後面、週報前面；班、兼任排在週報後面
+        let meetingsAgenda = mine.filter { $0.kind == OrgMoveLineKind.meeting.rawValue || $0.kind == OrgMoveLineKind.agenda.rawValue }
+        let shiftsSides = mine.filter { $0.kind == OrgMoveLineKind.shifts.rawValue || $0.kind == OrgMoveLineKind.sideRole.rawValue }
         var out: [String] = []
         var n = 0
         if !tasks.isEmpty {
@@ -1878,6 +2218,7 @@ enum OrgMovePlan {
                 if !memo.isEmpty { out.append("   備註：\(memo)") }
             }
         }
+        out.append(contentsOf: moreShareItems(meetingsAgenda, move: move, map: map, world: world, n: &n))
         if !reps.isEmpty {
             out.append("週報題目")
             for l in reps {
@@ -1887,6 +2228,7 @@ enum OrgMovePlan {
                 if !memo.isEmpty { out.append("   備註：\(memo)") }
             }
         }
+        out.append(contentsOf: moreShareItems(shiftsSides, move: move, map: map, world: world, n: &n))
         return out
     }
 
@@ -1931,7 +2273,8 @@ enum OrgMovePlan {
             let s = status(l, in: move, map: map, now: now)
             switch s.kind {
             case .open:
-                if l.kind != OrgMoveLineKind.equipment.rawValue { back += 1 }
+                // [v25.591 轉組織 v1a-2] 兼任的另外寫（「兼任「尾牙籌備」負責人換回王小明」）
+                if l.kind != OrgMoveLineKind.equipment.rawValue && l.kind != OrgMoveLineKind.sideRole.rawValue { back += 1 }
             case .handed:
                 if l.kind == OrgMoveLineKind.equipment.rawValue { machines.append(l.title) }
             case .dropped:
@@ -1949,6 +2292,7 @@ enum OrgMovePlan {
         }
         if back > 0 { parts.append("還沒做完的 \(back) 件搬回\(person)") }
         if !machines.isEmpty { parts.append("\(machines.joined(separator: "、")) 換回\(person)顧") }
+        parts.append(contentsOf: moreUndoParts(move, map: map, now: now))
         if putBack > 0 { parts.append("不要了的 \(putBack) 件放回\(person)") }
         let mgr = move.allLines.filter { $0.isOrgLine && ($0.lineAction == .remove || $0.lineAction == .replace) }
         for l in mgr { parts.append("\(world.deptShort(l.refId))管理人員加回\(person)") }

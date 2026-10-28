@@ -675,8 +675,10 @@ struct SubordinateDetailView: View {
 
                     if detailTab == .daily {
                         // [v25.590 轉組織 v1a-1] 「從王小明接手（4）・11/2」（還在交接中才有，judge §4.6）。要退回這一件：刪這一行
+                        // [v25.591 轉組織 v1a-2] 會議、議程那一列點了開那場會議（onOpenMeeting）。要退回這一件：刪 onOpenMeeting 那個參數
                         OrgMoveReceivedCard(personId: subordinateId, onOpenMove: openOrgMoveSheet,
-                                            onOpenTask: openTaskPreview, onOpenReport: openReportPreview)
+                                            onOpenTask: openTaskPreview, onOpenReport: openReportPreview,
+                                            onOpenMeeting: openMeetingPreview)
                         weeklyReportSection
                             .opacity(tabSectionsAppeared ? 1 : 0)
                             .offset(y: tabSectionsAppeared ? 0 : 14)
@@ -1203,6 +1205,19 @@ struct SubordinateDetailView: View {
         }
     }
 
+    /// [v25.591 轉組織 v1a-2] 會議列的「交接自 王小明」（新會議 id＝單上的 newId、整場交出去的＝原 id，receivedChip 都查得到；
+    /// 到交接完成日、沒有待分派就自動收）。字在 body 外組好（本檔有型別檢查逾時的前科）
+    private func meetingHandoverChips(_ m: SubordinateMeeting) -> [ItemChip] {
+        OrgMoveCardData.chips(itemId: m.id, holderId: subordinateId)
+    }
+
+    /// [v25.591 轉組織 v1a-2] 會議列日期那一行下面的「交接自」膠囊（沒有交接＝什麼都不畫、不佔位，跟以前一模一樣）。
+    /// 不跟日期膠囊擠同一行：那一行已經有日期、時長、週期、待辦數，新會議（每週＋搬過來的議程）一定擠不下。
+    /// 要退回這一件：刪這支、meetingHandoverChips 與 meetingSection 裡呼叫它的那一行
+    private func meetingHandoverRow(_ m: SubordinateMeeting) -> some View {
+        OrgMoveHandoverChipRow(chips: meetingHandoverChips(m))
+    }
+
     /// 打開交接單頁（看交接單不用訂閱，judge §6）
     private func openOrgMoveSheet(_ moveId: UUID) {
         orgMoveSheet = OrgMoveSheetRequest(moveId: moveId)
@@ -1234,6 +1249,24 @@ struct SubordinateDetailView: View {
         for s in lifeStore.subordinates {
             if let r = s.weeklyReports.first(where: { $0.id == reportId }) {
                 previewItem = .report(subId: s.id, report: r)
+                return
+            }
+        }
+    }
+
+    /// [v25.591 轉組織 v1a-2] 接手那一區點一列會議（新會議、整場交出去的）、議程：開那場會議的預覽（照會議列的規矩要訂閱）。
+    /// 先找持有人身上的（議程可能在別人的會議裡，例：王小明 1on1、林志豪的晨會）；找不到（後來又換人了）再掃全部部屬。
+    /// 要退回這一件：刪這支與 OrgMoveReceivedCard 的 onOpenMeeting 參數
+    private func openMeetingPreview(_ meetingId: UUID, _ holderId: UUID) {
+        guard subscription.isPremium else { showPremiumAlert = true; return }
+        if let h = lifeStore.subordinates.first(where: { $0.id == holderId }),
+           let m = h.meetings.first(where: { $0.id == meetingId }) {
+            previewItem = .meeting(subId: h.id, meeting: m)
+            return
+        }
+        for s in lifeStore.subordinates {
+            if let m = s.meetings.first(where: { $0.id == meetingId }) {
+                previewItem = .meeting(subId: s.id, meeting: m)
                 return
             }
         }
@@ -1521,6 +1554,8 @@ struct SubordinateDetailView: View {
                                             .foregroundStyle(.secondary)
                                     }
                                 }
+                                // [v25.591 轉組織 v1a-2] 新會議、整場交過來的會議「交接自 王小明」。要退回這一件：刪這一行
+                                meetingHandoverRow(m)
                             }
                             Spacer(minLength: 4)
                             Image(systemName: "chevron.right")
@@ -1711,7 +1746,9 @@ struct SubordinateDetailView: View {
         }
         // [v25.590 轉組織 v1a-1] 「交接自 王小明」（有交接備註多 💬）、灰色「交接時已逾期」；到交接完成日、
         // 沒有待分派就自動收（judge §4.6、第 10 題）。要退回這一件：刪這一行
-        chips.append(contentsOf: OrgMoveCardData.chips(itemId: t.id, holderId: subordinateId))
+        // [v25.591 轉組織 v1a-2] 改叫 chips(task:)：兼任分身換人後是新 id，再照 sideRoleLink.taskId 找（judge §4.6）。
+        // 要退回這一件：改回 chips(itemId: t.id, holderId: subordinateId)
+        chips.append(contentsOf: OrgMoveCardData.chips(task: t, holderId: subordinateId))
         // [v25.294] 自訂分數任務
         if let cs = t.customScore {
             chips.append(ItemChip(id: "score", text: taskScoreText(cs),
@@ -1926,7 +1963,9 @@ struct SubordinateDetailView: View {
                     HStack(spacing: 3) {
                         Image(systemName: "calendar")
                             .font(.system(size: 9))
-                        Text(formatDate(p.date))
+                        // [v25.591 轉組織 v1a-2] §8-14：手機設民國曆也寫西曆 2026/7/1（不是 115/7/1），跟旁邊轉組織那列一樣。
+                        // 要退回這一件：改回 formatDate(p.date)
+                        Text(formatGregorian(p.date))
                     }
                     .font(.caption2)
                     .foregroundStyle(.secondary)
@@ -2287,6 +2326,20 @@ struct SubordinateDetailView: View {
 
     private func formatDateTime(_ date: Date) -> String {
         Self.dateTimeFormatter.string(from: date)
+    }
+
+    /// [v25.591 轉組織 v1a-2] §8-14：西曆固定（手機設民國曆、佛曆也是 2026/7/1）。只給「歷程」升職那列用（dateFormatter 其他用處不動）。
+    /// 要退回這一件：刪這兩個、promotionRow 改回 formatDate
+    private static let gregorianDateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.calendar = Calendar(identifier: .gregorian)
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "yyyy/M/d"
+        return f
+    }()
+
+    private func formatGregorian(_ date: Date) -> String {
+        Self.gregorianDateFormatter.string(from: date)
     }
 }
 
@@ -6305,7 +6358,8 @@ struct SubordinateItemCard: View {
             taskStatusRow(t)
             // [v25.590 轉組織 v1a-1] 「11/2 交接自 王小明（原訂 10/20）・備註：…」（有才出現；出圖不放、分享文字不加，
             // judge §4.6）。要退回這一件：刪這一行
-            OrgMoveReceivedPreviewLine(text: OrgMoveCardData.previewLine(itemId: t.id, holderId: subId, hidden: forExport))
+            // [v25.591 轉組織 v1a-2] 改叫 previewLine(task:)（兼任分身照 sideRoleLink.taskId）。要退回這一件：改回 previewLine(itemId: t.id, …)
+            OrgMoveReceivedPreviewLine(text: OrgMoveCardData.previewLine(task: t, holderId: subId, hidden: forExport))
             // [v25.331] 卡片補顯示任務分數：編輯頁改了分數，卡片原本完全沒地方看得到
             field("任務分數", taskScoreText(t))
             if let info = cardEquipmentInfo(t.equipmentLink) {
@@ -6338,6 +6392,9 @@ struct SubordinateItemCard: View {
             titleBlock(icon: "person.3.fill", color: .indigo, title: m.topic.isEmpty ? "未命名會議" : m.topic,
                        forExport: forExport)
             ownerBlock(subId: subId, accent: .indigo)
+            // [v25.591 轉組織 v1a-2] 新會議、整場交過來的會議：同任務那一行「11/2 交接自 王小明・備註：…」（會議列膠囊有 💬 時看得到備註；
+            // 出圖不放）。要退回這一件：刪這一行
+            OrgMoveReceivedPreviewLine(text: OrgMoveCardData.previewLine(itemId: m.id, holderId: subId, hidden: forExport))
             field("會議時間", "\(fmt(m.date)) – \(MeetingTimeFormat.time24.string(from: m.endDate))")
             field("會議長度", "\(m.durationMinutes) 分鐘")
             if let r = m.rule { field("週期", ruleSummary(r)) }

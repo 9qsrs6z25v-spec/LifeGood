@@ -1112,8 +1112,11 @@ enum UnifiedImporter {
                             HeldSubordinateItemIds.appendNew(&s.weeklyReports, inc.weeklyReports, held: &held.reports)
                             appendNewByID(&s.equipments, inc.equipments)
                             var existingShiftDays = Set(s.shifts.map { cal.startOfDay(for: $0.date) })
+                            // [v25.591 轉組織 v1a-2] 交接單交出去、清掉的那幾天不補回原人（judge §2.4；要退回這一件：刪 handed 與 continue 那一行）
+                            let handed = OrgMoveIndex.handedShiftDays[s.id] ?? []
                             for sh in inc.shifts {
                                 let day = cal.startOfDay(for: sh.date)
+                                if handed.contains(OrgMovePlan.dayKey(sh.date)) { continue }
                                 if !existingShiftDays.contains(day) {
                                     s.shifts.append(sh)
                                     existingShiftDays.insert(day)
@@ -1420,7 +1423,9 @@ enum SubordinateImporter {
                         r.meetingsMerged += HeldSubordinateItemIds.appendNew(&s.meetings, inc.meetings, held: &held.meetings)
                         r.tasksMerged    += HeldSubordinateItemIds.appendNew(&s.tasks,    inc.tasks,    held: &held.tasks)
                         r.reportsMerged  += HeldSubordinateItemIds.appendNew(&s.weeklyReports, inc.weeklyReports, held: &held.reports)
-                        r.shiftsMerged   += appendNewShifts(&s.shifts, inc.shifts)
+                        // [v25.591 轉組織 v1a-2] 交接單交出去、清掉的那幾天不補回原人（要退回這一件：改回 appendNewShifts(&s.shifts, inc.shifts)）
+                        let handedDays = OrgMoveIndex.handedShiftDays[s.id] ?? []
+                        r.shiftsMerged   += appendNewShifts(&s.shifts, inc.shifts.filter { !handedDays.contains(OrgMovePlan.dayKey($0.date)) })
                         _ = appendNew(&s.equipments, inc.equipments)
                         if s.plantArea.isEmpty, !inc.plantArea.isEmpty { s.plantArea = inc.plantArea }
                         if s.joinDate == nil { s.joinDate = inc.joinDate }

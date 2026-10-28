@@ -310,15 +310,15 @@ struct OrgMoveSide: Codable, Equatable {
 struct OrgMoveLine: Codable, Equatable, Identifiable {
     let id: UUID
     /// OrgMoveLineKind 的字："task"／"alarmTask"／"equipment"／"report"／"sideRole"／"manager"／"managerAdd"
-    ///（v1a-2 起 "meeting"、"agenda"、"shifts"）
+    ///／"meeting"／"agenda"／"shifts"（v1a-2）
     var kind: String
-    /// 那一筆的 id（任務、機台、週報；manager／managerAdd＝部門 id；sideRole＝兼任待辦 id）
+    /// 那一筆的 id（任務、機台、週報、會議、議程；manager／managerAdd＝部門 id；sideRole＝兼任待辦 id；shifts＝nil）
     var refId: UUID?
-    /// 只有 sideRole：掛在這位同仁身上的那一筆任務 id
+    /// 只有 sideRole：掛在這位同仁身上的那一筆（任務或議程）id
     var itemId: UUID?
-    /// 警報任務／跟著機台的待辦、週報所屬的機台；sideRole 的兼任 id
+    /// 警報任務／跟著機台的待辦、週報所屬的機台；sideRole 的兼任 id；agenda 所在的會議；meeting 連到的（要交的）機台
     var parentId: UUID?
-    /// 東西掛在誰身上（v1a-1 都是本人）
+    /// 東西掛在誰身上（agenda＝會議主人：別人會議裡的議程是那位；其他都是本人）
     var holderId: UUID?
     /// 列出來那時的名字（快照）
     var title: String
@@ -347,12 +347,29 @@ struct OrgMoveLine: Codable, Equatable, Identifiable {
     var resolvedAt: Date?
     /// 這一列最後改的時間（逐列合併用；畫面上你動過這一列也寫，套用時全部寫）
     var updatedAt: Date?
+    // [v25.591 轉組織 v1a-2] 會議、議程、班、兼任（judge §2.1 OrgMoveLine 表的 newId／newTopic／days／removedShifts；
+    // 新欄位一律 Optional＋decodeIfPresent：v1a-1 存的舊單沒有這幾個＝不影響）。
+    // 要退回這一件：刪這 6 個欄位與 init／init(from:)／CodingKeys 裡對應的那幾行。
+    /// 只有 sideRole（兼任的議程那種）：議程所在的會議 id（兼任待辦的任務那種＝nil）
+    var meetingId: UUID?
+    /// 會議〔交給…〕（newSeries）：新會議先配好的 id——兩台同時套用、重做也只有一條
+    var newId: UUID?
+    /// 會議〔交給…〕：新會議的名稱（原本的名稱拿掉人名，「王小明 週會」→「週會」；你可以改）
+    var newTopic: String?
+    /// 只有 shifts：撞班那幾天怎麼辦（"2026-11-04": "overwrite" 改成…／"drop" 這天清掉／"<部屬 id>" 這天交給別人）
+    var days: [String: String]?
+    /// 只有 shifts：搬走、清掉的班，和接手的人被蓋掉的那一格（復原放得回去）
+    var removedShifts: [OrgMoveShiftCell]?
+    /// 只有 agenda〔改由…〕：交接前的負責人（復原照這個放回；本來沒指派＝空陣列）
+    var prevAssigneeIds: [UUID]?
 
     init(id: UUID = UUID(), kind: String, refId: UUID? = nil, itemId: UUID? = nil, parentId: UUID? = nil,
          holderId: UUID? = nil, title: String, dueKey: String? = nil, action: String? = nil,
          toId: UUID? = nil, toName: String? = nil, newDueKey: String? = nil, wasOverdue: Bool? = nil,
          memo: String? = nil, lock: String? = nil, slot: Int? = nil, removedJSON: Data? = nil,
-         state: String? = nil, resolvedAt: Date? = nil, updatedAt: Date? = nil) {
+         state: String? = nil, resolvedAt: Date? = nil, updatedAt: Date? = nil,
+         meetingId: UUID? = nil, newId: UUID? = nil, newTopic: String? = nil, days: [String: String]? = nil,
+         removedShifts: [OrgMoveShiftCell]? = nil, prevAssigneeIds: [UUID]? = nil) {
         self.id = id
         self.kind = kind
         self.refId = refId
@@ -373,6 +390,12 @@ struct OrgMoveLine: Codable, Equatable, Identifiable {
         self.state = state
         self.resolvedAt = resolvedAt
         self.updatedAt = updatedAt
+        self.meetingId = meetingId
+        self.newId = newId
+        self.newTopic = newTopic
+        self.days = days
+        self.removedShifts = removedShifts
+        self.prevAssigneeIds = prevAssigneeIds
     }
 
     init(from decoder: Decoder) throws {
@@ -397,11 +420,18 @@ struct OrgMoveLine: Codable, Equatable, Identifiable {
         state = try? c.decodeIfPresent(String.self, forKey: .state)
         resolvedAt = try? c.decodeIfPresent(Date.self, forKey: .resolvedAt)
         updatedAt = try? c.decodeIfPresent(Date.self, forKey: .updatedAt)
+        meetingId = try? c.decodeIfPresent(UUID.self, forKey: .meetingId)
+        newId = try? c.decodeIfPresent(UUID.self, forKey: .newId)
+        newTopic = try? c.decodeIfPresent(String.self, forKey: .newTopic)
+        days = try? c.decodeIfPresent([String: String].self, forKey: .days)
+        removedShifts = try? c.decodeIfPresent([OrgMoveShiftCell].self, forKey: .removedShifts)
+        prevAssigneeIds = try? c.decodeIfPresent([UUID].self, forKey: .prevAssigneeIds)
     }
 
     private enum CodingKeys: String, CodingKey {
         case id, kind, refId, itemId, parentId, holderId, title, dueKey, action, toId, toName
         case newDueKey, wasOverdue, memo, lock, slot, removedJSON, state, resolvedAt, updatedAt
+        case meetingId, newId, newTopic, days, removedShifts, prevAssigneeIds
     }
 
     // 只在記憶體轉成列舉（不認得的字＝nil：只顯示、不套用）
@@ -474,6 +504,123 @@ struct OrgMoveRestore: Codable, Equatable {
     }
 }
 
+// MARK: - [v25.591 轉組織 v1a-2] 班、會議、議程的原樣（復原用）
+
+/// 一格班的原樣（shifts 那一列的 removedShifts）：搬走的、清掉的、接手的人被蓋掉的那一格（judge §2.1、§3.2 班、§8 風險 18）
+struct OrgMoveShiftCell: Codable, Equatable {
+    /// 原本是誰的班
+    var who: UUID
+    /// 「2026-11-04」
+    var day: String
+    /// ShiftType 的字（「大夜班」「日值班」…）
+    var type: String
+    /// 原本那一格的 id（搬過去的同一格 id 不變）
+    var id: UUID?
+    /// 搬給誰（nil＝清掉了／被蓋掉了）
+    var to: UUID?
+    /// 這格是接手的人被蓋掉的那一格（復原時放回 who 身上）
+    var overwritten: Bool?
+
+    init(who: UUID, day: String, type: String, id: UUID? = nil, to: UUID? = nil, overwritten: Bool? = nil) {
+        self.who = who
+        self.day = day
+        self.type = type
+        self.id = id
+        self.to = to
+        self.overwritten = overwritten
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        who = try c.decode(UUID.self, forKey: .who)
+        day = (try? c.decodeIfPresent(String.self, forKey: .day)) ?? ""
+        type = (try? c.decodeIfPresent(String.self, forKey: .type)) ?? ""
+        id = try? c.decodeIfPresent(UUID.self, forKey: .id)
+        to = try? c.decodeIfPresent(UUID.self, forKey: .to)
+        overwritten = try? c.decodeIfPresent(Bool.self, forKey: .overwritten)
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case who, day, type, id, to, overwritten
+    }
+}
+
+/// 會議那一列套用前後的樣子（存在 OrgMoveLine.removedJSON；會議、場次、議程沒有 Equatable，所以存 JSON）。
+/// 〔最後一場〕：結束前的結束日、取消的覆寫場次（原樣）、搬到最後一場的議程原本在哪一場；
+/// 〔交給…〕：結束前的結束日、搬到新系列的覆寫場次 id；只有一場的會議整場交出去：原本的名稱
+struct OrgMoveMeetingUndo: Codable {
+    /// 套用前的 rule.endDate（nil＝原本沒有結束日）
+    var prevEndDate: Date?
+    /// 套用時寫上的結束日（復原時現在還是這一天才改回）
+    var setEndDate: Date?
+    /// 取消的覆寫場次（原樣；有議程的那幾場議程先搬到最後一場）
+    var removedOccurrences: [MeetingOccurrence]
+    /// 搬到最後一場的議程 id（復原時從最後一場拿回原本那一場）
+    var movedItemIds: [UUID]
+    /// 最後一場的 scheduledDate（議程搬進去的那一場）
+    var lastScheduled: Date?
+    /// 最後一場的覆寫是套用時才建的（復原後空了就拿掉）
+    var createdLast: Bool?
+    /// 〔交給…〕：搬到新系列的覆寫場次 id
+    var movedOccurrenceIds: [UUID]
+    /// 名稱改過的：原本的名稱
+    var oldTopic: String?
+
+    init(prevEndDate: Date? = nil, setEndDate: Date? = nil, removedOccurrences: [MeetingOccurrence] = [],
+         movedItemIds: [UUID] = [], lastScheduled: Date? = nil, createdLast: Bool? = nil,
+         movedOccurrenceIds: [UUID] = [], oldTopic: String? = nil) {
+        self.prevEndDate = prevEndDate
+        self.setEndDate = setEndDate
+        self.removedOccurrences = removedOccurrences
+        self.movedItemIds = movedItemIds
+        self.lastScheduled = lastScheduled
+        self.createdLast = createdLast
+        self.movedOccurrenceIds = movedOccurrenceIds
+        self.oldTopic = oldTopic
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        prevEndDate = try? c.decodeIfPresent(Date.self, forKey: .prevEndDate)
+        setEndDate = try? c.decodeIfPresent(Date.self, forKey: .setEndDate)
+        removedOccurrences = (try? c.decodeIfPresent([MeetingOccurrence].self, forKey: .removedOccurrences)) ?? []
+        movedItemIds = (try? c.decodeIfPresent([UUID].self, forKey: .movedItemIds)) ?? []
+        lastScheduled = try? c.decodeIfPresent(Date.self, forKey: .lastScheduled)
+        createdLast = try? c.decodeIfPresent(Bool.self, forKey: .createdLast)
+        movedOccurrenceIds = (try? c.decodeIfPresent([UUID].self, forKey: .movedOccurrenceIds)) ?? []
+        oldTopic = try? c.decodeIfPresent(String.self, forKey: .oldTopic)
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case prevEndDate, setEndDate, removedOccurrences, movedItemIds, lastScheduled, createdLast
+        case movedOccurrenceIds, oldTopic
+    }
+
+    func encoded() -> Data? { try? JSONEncoder().encode(self) }
+
+    static func decode(_ data: Data?) -> OrgMoveMeetingUndo? {
+        guard let data else { return nil }
+        return try? JSONDecoder().decode(OrgMoveMeetingUndo.self, from: data)
+    }
+}
+
+/// 〔不要了〕的議程原樣（存在 OrgMoveLine.removedJSON）：放回原本那場會議的那一場
+struct OrgMoveRemovedAgenda: Codable {
+    var item: MeetingItem
+    var meetingId: UUID
+    /// 原本在哪一場（nil＝不重複的會議，議程掛在會議本身）
+    var occurrenceId: UUID?
+    /// 那一場的 scheduledDate（那一場的覆寫後來被回收了，就照這個日子再建一場）
+    var scheduledDate: Date?
+
+    func encoded() -> Data? { try? JSONEncoder().encode(self) }
+
+    static func decode(_ data: Data?) -> OrgMoveRemovedAgenda? {
+        guard let data else { return nil }
+        return try? JSONDecoder().decode(OrgMoveRemovedAgenda.self, from: data)
+    }
+}
+
 // MARK: - 只在記憶體的列舉（存檔一律存字串）
 
 enum OrgMoveKind: String {
@@ -489,6 +636,8 @@ enum OrgMoveState: String {
 
 enum OrgMoveLineKind: String {
     case task, alarmTask, equipment, report, sideRole, manager, managerAdd
+    /// [v25.591 轉組織 v1a-2] 固定會議／議程／生效日（與今天取晚的那天）以後的班
+    case meeting, agenda, shifts
 }
 
 enum OrgMoveAction: String {
@@ -508,6 +657,8 @@ enum OrgMoveAction: String {
     case remove, keep, replace
     /// 新部門的管理人員：加進去／不用
     case add, skip
+    /// [v25.591 轉組織 v1a-2] 會議：到交接那天前一天結束（〔10/27 是最後一場〕）／舊的結束、新的在 toId 名下接著開（〔交給…〕）
+    case end, newSeries
 }
 
 enum OrgMoveLineState: String {
@@ -517,7 +668,7 @@ enum OrgMoveLineState: String {
 enum OrgMoveLock: String {
     /// 缺失：只能〔跟著〕〔現在結案〕
     case dereliction
-    /// 兼任：v1a-1 只能〔照舊〕＋〔前往〕兼任那頁換
+    /// 兼任：v1a-1 只能〔照舊〕＋〔前往〕兼任那頁換（v1a-2 起新的單不再鎖：〔照舊〕〔到兼任換人…〕；舊單照樣認得）
     case sideRole
     /// 機台警報任務：跟著機台
     case alarm
@@ -554,6 +705,8 @@ enum OrgMoveIndex {
         ///（在機台編輯頁直接換過負責人＝算分好，交接完成日過了照樣收；judge §4.9、第 5／10 題）。
         /// 要退回這一件：刪這個欄位、rebuild 裡的 pendingEq、receivedChip 改回 `|| r.hasPending`
         let pendingEquipmentIds: [UUID]
+        /// [v25.591 轉組織 v1a-2] 哪一種（OrgMoveLineKind 的字：task／report／equipment／meeting／agenda／sideRole／shifts…）
+        var lineKind: String = ""
     }
 
     /// 任務／週報／機台 id → 最新一張交出它的那一列（接力：王小明 → 陳怡君 → 林志豪，用最新那張）
@@ -562,6 +715,10 @@ enum OrgMoveIndex {
     static var pendingEquipment: [UUID: [UUID: Date]] = [:]
     /// 〔不要了〕的任務、週報 id（合併匯入舊備份時不補回來）
     static var droppedItemIds: Set<UUID> = []
+    /// [v25.591 轉組織 v1a-2] 接手的人 id →「2026-11-04」→ 那一天的班是從哪一張單交過來的（接手那一區、匯出的排班）
+    static var receivedShiftDays: [UUID: [String: Received]] = [:]
+    /// [v25.591 轉組織 v1a-2] 原人 id → 交出去、清掉的班那幾天（合併匯入舊備份時不把這幾天的班補回原人身上，judge §2.4）
+    static var handedShiftDays: [UUID: Set<String>] = [:]
     /// [v25.590 轉組織 v1a-1 驗證] 機台 id → 現在的負責人（LifeStore.equipmentPool 一改就設；預設空的）。
     /// 「還有沒有待分派」照機台現在的負責人算（judge §4.9、第 5 題：在機台編輯頁直接換過＝算分好），
     /// 不然直接換過負責人的那張單，提示列、「交接自」膠囊、接手那一區過了交接完成日也一直不收。
@@ -585,6 +742,8 @@ enum OrgMoveIndex {
         var received: [UUID: Received] = [:]
         var pending: [UUID: [UUID: Date]] = [:]
         var dropped = Set<UUID>()
+        var shiftDays: [UUID: [String: Received]] = [:]
+        var handedDays: [UUID: Set<String>] = [:]
         for m in book.live where !m.isUndone && m.wasApplied {
             let handed: Date = m.handedAt ?? m.appliedAt ?? Date.distantPast
             let byKey = m.handoverByKey ?? m.effectiveKey
@@ -598,17 +757,37 @@ enum OrgMoveIndex {
             }
             for l in m.allLines {
                 if l.state == OrgMoveLineState.undone.rawValue { continue }
-                if l.action == OrgMoveAction.drop.rawValue, let r = l.refId { dropped.insert(r) }
+                // [v25.591 轉組織 v1a-2] 〔不要了〕只記任務、週報、議程（班〔這幾天清掉〕沒有 refId，記在 handedShiftDays）
+                if l.action == OrgMoveAction.drop.rawValue, let r = l.refId,
+                   l.kind != OrgMoveLineKind.shifts.rawValue { dropped.insert(r) }
                 if l.action == OrgMoveAction.pending.rawValue, l.state == OrgMoveLineState.done.rawValue,
                    l.kind == OrgMoveLineKind.equipment.rawValue, let r = l.refId {
                     pending[m.personId, default: [:]][r] = handed
                 }
-                guard let ref = l.refId, let to = l.toId,
+                // [v25.591 轉組織 v1a-2] 班：交出去、清掉的那幾天（原人）；搬到誰身上的那幾天（接手的人）
+                if l.kind == OrgMoveLineKind.shifts.rawValue, l.state == OrgMoveLineState.done.rawValue {
+                    for c in l.removedShifts ?? [] where c.overwritten != true && c.who == m.personId {
+                        handedDays[m.personId, default: []].insert(c.day)
+                        guard let to = c.to else { continue }
+                        let r = Received(moveId: m.id, lineId: l.id, fromId: m.personId, fromName: m.personName,
+                                         toId: to, handedAt: handed, dueKey: c.day, wasOverdue: false,
+                                         memo: (l.memo ?? "").trimmingCharacters(in: .whitespacesAndNewlines),
+                                         handoverByKey: byKey, closed: m.isClosed, hasPending: hasPending,
+                                         pendingEquipmentIds: pendingEq, lineKind: l.kind)
+                        shiftDays[to, default: [:]][c.day] = r
+                    }
+                    continue
+                }
+                // 會議〔交給…〕：新會議的 id（舊的那場還在原人身上、只是結束了）
+                let isSeries = l.kind == OrgMoveLineKind.meeting.rawValue && l.action == OrgMoveAction.newSeries.rawValue
+                let key: UUID? = isSeries ? l.newId : l.refId
+                guard let ref = key, let to = l.toId,
                       l.state == OrgMoveLineState.done.rawValue || l.state == OrgMoveLineState.resolved.rawValue,
                       l.kind != OrgMoveLineKind.manager.rawValue, l.kind != OrgMoveLineKind.managerAdd.rawValue
                 else { continue }
                 let given = l.action == OrgMoveAction.give.rawValue
                     || l.action == OrgMoveAction.withEquipment.rawValue
+                    || isSeries
                     || (l.action == OrgMoveAction.pending.rawValue && l.state == OrgMoveLineState.resolved.rawValue)
                 guard given else { continue }
                 let at = l.state == OrgMoveLineState.resolved.rawValue ? (l.resolvedAt ?? handed) : handed
@@ -616,7 +795,7 @@ enum OrgMoveIndex {
                                  toId: to, handedAt: at, dueKey: l.dueKey, wasOverdue: l.wasOverdue == true,
                                  memo: (l.memo ?? "").trimmingCharacters(in: .whitespacesAndNewlines),
                                  handoverByKey: byKey, closed: m.isClosed, hasPending: hasPending,
-                                 pendingEquipmentIds: pendingEq)
+                                 pendingEquipmentIds: pendingEq, lineKind: l.kind)
                 if let old = received[ref], old.handedAt > at { continue }
                 received[ref] = r
             }
@@ -624,6 +803,8 @@ enum OrgMoveIndex {
         receivedByItem = received
         pendingEquipment = pending
         droppedItemIds = dropped
+        receivedShiftDays = shiftDays
+        handedShiftDays = handedDays
     }
 
     /// 還在顯示期間的「交接自」（膠囊、提示列）：沒按〔交接完成〕、而且還沒過交接完成日或還有待分派。
@@ -631,8 +812,26 @@ enum OrgMoveIndex {
     /// [v25.590 轉組織 v1a-1 驗證]「還有待分派」照機台現在的負責人算（同 OrgMovePlan.isOpen、pendingRows）
     static func receivedChip(_ itemId: UUID, holderId: UUID, todayKey: String) -> Received? {
         guard let r = receivedByItem[itemId], r.toId == holderId, !r.closed else { return nil }
+        return stillShowing(r, todayKey: todayKey) ? r : nil
+    }
+
+    /// [v25.591 轉組織 v1a-2] 任務列的「交接自」：先照任務 id 找；兼任的分身換人後是新的 id，再照 sideRoleLink.taskId（兼任待辦 id）找
+    ///（judge §4.6：兼任那種用接手的人那筆的 sideRoleLink.taskId 對）
+    static func receivedChip(task t: SubordinateTask, holderId: UUID, todayKey: String) -> Received? {
+        if let r = receivedChip(t.id, holderId: holderId, todayKey: todayKey) { return r }
+        guard let back = t.sideRoleLink else { return nil }
+        return receivedChip(back.taskId, holderId: holderId, todayKey: todayKey)
+    }
+
+    /// [v25.591 轉組織 v1a-2] 這位同仁那一天的班是交接過來的（還在顯示期間）
+    static func receivedShift(holderId: UUID, dayKey: String, todayKey: String) -> Received? {
+        guard let r = receivedShiftDays[holderId]?[dayKey], !r.closed else { return nil }
+        return stillShowing(r, todayKey: todayKey) ? r : nil
+    }
+
+    /// 還在交接完成日以前、或這張單還有沒分好的待分派
+    private static func stillShowing(_ r: Received, todayKey: String) -> Bool {
         let pending = r.hasPending && stillPending(r.pendingEquipmentIds, personId: r.fromId)
-        guard todayKey <= r.handoverByKey || pending else { return nil }
-        return r
+        return todayKey <= r.handoverByKey || pending
     }
 }

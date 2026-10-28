@@ -1906,7 +1906,7 @@ private struct XSheetMiniCell: View {
     }
 }
 
-/// 執掌（執掌設備、PM／警報時間軸）＋卡片上沒有的（排班）
+/// 執掌（執掌設備、PM／警報時間軸）＋卡片上沒有的（排班；[v25.591 轉組織 v1a-2] 有交接過來的班，caption 多說一句）
 /// [v25.590 轉組織 v1a-1] 這位同仁有從交接單收到的機台，時間軸底下多一列〔只列接手之後〕（預設開；
 /// 執掌設備的件數也跟著切）。要退回這一件：刪掉 `if hasReceivedEquipment { … }` 那一段、hasReceivedEquipment／
 /// handoverCaption／handoverEnabled 三個 computed var 與底下的 XSheetHandoverRow，timelineCaption 改回原句。
@@ -1936,11 +1936,20 @@ private struct XSheetDutyCard: View {
                 XSheetSectionLabel(title: "卡片上沒有的")
                 XSheetCard {
                     XSheetCheckRow(title: "排班", icon: "calendar", color: .indigo,
-                                   caption: "班表頁沒有匯出；連續同一班併成一段",
+                                   caption: shiftCaption,
                                    count: model.shiftDays, unit: "天", isOn: blockOn(.shifts))
                 }
             }
         }
+    }
+
+    /// [v25.591 轉組織 v1a-2] 期間內有交接過來的班：說一句「交接過來的那幾天另成一段」（匯出那一段後面寫「｜交接自 王小明」）。
+    /// 要退回這一件：刪掉這個 computed var，排班那一列的 caption 改回原句
+    private var shiftCaption: String {
+        if model.shiftRuns.contains(where: { $0.handoverFrom != nil }) {
+            return "班表頁沒有匯出；連續同一班併成一段，交接過來的那幾天另成一段"
+        }
+        return "班表頁沒有匯出；連續同一班併成一段"
     }
 
     /// 這位同仁現在負責的機台裡，有從交接單收到的

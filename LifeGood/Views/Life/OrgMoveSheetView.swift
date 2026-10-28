@@ -13,6 +13,17 @@ import SwiftUI
 //   不給刪（已經套用過的交接單；judge §4.5）。
 // 要退回這一件：OrgMoveSheetView 的 body 換回骨架（Text("交接單")＋〔關閉〕）、OrgMovePendingCard 的 body 換回 EmptyView()，
 // 刪掉檔尾那幾個 private 型別。
+//
+// [v25.591 轉組織 v1a-2] 會議、議程、班、兼任（orgmove/build/v1a-2/brief.md §4；judge §4.5、§3.8、§7 v1a-2）
+// • 狀態、分組（多「結束的會議（N）」那組，不收起來）、分享、復原字都照 OrgMovePlan（status／sheetGroups／shareText／undoPreview），
+//   這裡不自己判斷；〔再交一次〕〔再結束一次〕〔放回王小明〕照舊走 runFix（redoOrgMoveLine／undoOrgMove(lineIds:)）。
+// • 點一列：會議開那場會議（新會議開新的那條）、議程開它所在的那場會議、兼任開接手的人身上的分身、班不開（OMSheetBuild.previewRef）。
+// • 長按〔改交給…〕：多議程、兼任（〔到兼任換人…〕那種，兼任負責人裡還有單上的接手人）、會議（新會議／整場交出去，會議現在還在接手的人名下）；
+//   班、〔最後一場〕、〔照舊〕的會議不給（OMSheetBuild.canReassign；LifeStore.reassignOrgMoveLine 也擋）。
+//   兼任的挑人頁帶 sideRoleId（成員排前面）、標題「兼任負責人換成誰」；議程「改由誰」（OrgMoveSheetView.reassignRequest）。
+// • 長按〔拿回來〕：多結束的會議（.ended＝拿掉結束日、接著開）；四種的說明字（takeBackTitle／takeBackMessage）。
+// 要退回這一件：previewRef／canReassign 換回只認任務、警報、兼任（itemId）、週報的版本，takeBackKinds 拿掉 .ended，
+// 刪掉 reassignRequest、takeBackTitle、meetingTakeBackMessage 與 takeBackMessage 裡議程、會議、班、兼任那幾個 case。
 
 struct OrgMoveSheetView: View {
     let moveId: UUID
@@ -537,9 +548,22 @@ struct OrgMoveSheetView: View {
             DispatchQueue.main.async { showPremiumAlert = true }
             return
         }
-        let req = OrgMovePickRequest(title: "改交給誰", personId: r.personId, selected: r.holderId,
-                                     purpose: Self.reassignPrefix + r.id.uuidString)
+        let req = Self.reassignRequest(r, purpose: Self.reassignPrefix + r.id.uuidString)
         DispatchQueue.main.async { pick = req }
+    }
+
+    /// [v25.591 轉組織 v1a-2] 〔改交給…〕的挑人頁：兼任＝這個兼任的成員排前面、標題「兼任負責人換成誰」；
+    /// 議程「改由誰」（打勾＝現在的負責人：單上的接手人，不是會議主人）；其他照 v1a-1「改交給誰」（打勾＝現在在誰身上）
+    private static func reassignRequest(_ r: OMSheetRow, purpose: String) -> OrgMovePickRequest {
+        switch r.line.lineKind {
+        case .some(.sideRole):
+            return OrgMovePickRequest(title: "兼任負責人換成誰", personId: r.personId, selected: r.line.toId ?? r.holderId,
+                                      purpose: purpose, sideRoleId: r.line.parentId)
+        case .some(.agenda):
+            return OrgMovePickRequest(title: "改由誰", personId: r.personId, selected: r.line.toId, purpose: purpose)
+        default:
+            return OrgMovePickRequest(title: "改交給誰", personId: r.personId, selected: r.holderId, purpose: purpose)
+        }
     }
 
     /// 挑人頁回來（已經關了、下一個 runloop）：直接寫 store
@@ -556,18 +580,55 @@ struct OrgMoveSheetView: View {
     /// 長按〔拿回來〕：先問「把「E-03 腔體漏率改善」拿回王小明身上？」
     /// 機台那一列連它底下的警報任務列一起退（LifeStore 退機台時警報任務本來就一起回；列不一起退會變成 ⚠〔再交一次〕）
     private func askTakeBack(_ r: OMSheetRow) {
-        let a = OMSheetAsk(kind: .takeBack(r.takeBackIds), title: "把「\(r.title)」拿回\(r.personName)身上？",
+        let a = OMSheetAsk(kind: .takeBack(r.takeBackIds), title: Self.takeBackTitle(r),
                            message: Self.takeBackMessage(r), confirm: "拿回來", destructive: false)
         present(a)
     }
 
+    /// [v25.591 轉組織 v1a-2] 結束的會議〔拿回來〕＝拿掉結束日、接著開（會議本來就在這位同仁名下，不說「拿回…身上」）
+    private static func takeBackTitle(_ r: OMSheetRow) -> String {
+        if r.line.kind == OrgMoveLineKind.meeting.rawValue && r.line.lineAction == .end {
+            return "「\(r.title)」拿回來接著開？"
+        }
+        return "把「\(r.title)」拿回\(r.personName)身上？"
+    }
+
     private static func takeBackMessage(_ r: OMSheetRow) -> String {
-        if r.line.kind == OrgMoveLineKind.equipment.rawValue {
+        switch r.line.lineKind {
+        case .some(.equipment):
             return "負責人換回\(r.personName)，這台還沒處理完的警報任務一起回來。"
-        }
-        if r.line.kind == OrgMoveLineKind.report.rawValue {
+        case .some(.report):
             return "還沒交的才會搬回\(r.personName)身上。"
+        // [v25.591 轉組織 v1a-2] 議程、會議、班、兼任（LifeStore.undoOrgMove 的 …AgendaLine／…MeetingLine／…ShiftsLine／…SideRoleLine）
+        case .some(.agenda):
+            return "負責人換回交接前的（本來沒指派的拿掉負責人）。"
+        case .some(.meeting):
+            return meetingTakeBackMessage(r)
+        case .some(.shifts):
+            let to = (r.line.toName ?? "").isEmpty ? "這位同仁" : (r.line.toName ?? "")
+            return "今天以後還在\(to)身上的那幾格搬回\(r.personName)；被蓋掉的那幾格放回。"
+        case .some(.sideRole):
+            return "兼任負責人換回\(r.personName)。"
+        default:
+            return taskTakeBackMessage(r)
         }
+    }
+
+    /// 會議三種：新會議（還沒開過＝拿掉；開過＝現在起停開）、整場交出去的（開過了不搬回）、結束的（拿掉結束日）
+    private static func meetingTakeBackMessage(_ r: OMSheetRow) -> String {
+        switch r.line.lineAction {
+        case .some(.newSeries):
+            // [v25.591 轉組織 v1a-2 裁定] 復原從「現在」切（驗證修的），字跟著改。要退回這一件：改回「開過了今天起停開；以後的場次搬回」
+            return "新會議還沒開過就拿掉，開過了現在起停開；還沒開的場次搬回「\(r.title)」。"
+        case .some(.end):
+            return "拿掉結束日：取消的場次放回、搬到最後一場的議程放回原場次。"
+        default:
+            return "還沒開過的才會整場搬回\(r.personName)名下（名稱換回原本的）。"
+        }
+    }
+
+    /// 待辦、警報任務（v1a-1 的字）
+    private static func taskTakeBackMessage(_ r: OMSheetRow) -> String {
         let head = "還沒做完的才會搬回\(r.personName)身上"
         guard r.line.wasOverdue == true, let nd = r.line.newDueKey, let od = r.line.dueKey else { return head + "。" }
         return head + "；截止日如果還是交接時給的 \(OrgMovePlan.shortDay(nd))，會改回原本的 \(OrgMovePlan.shortDay(od))。"
@@ -842,6 +903,10 @@ private struct OMSheetSharePayload: Identifiable {
 private enum OMSheetBuild {
     /// 〔改交給…〕可以用的狀態（做完的、不要了的、結案的、找不到的、還沒分好的待分派、在兩個人身上的不給）
     private static let reassignKinds: Set<OrgMoveLineStatus.Kind> = [.open, .handed, .follow, .elsewhere, .backOnPerson]
+    /// [v25.591 轉組織 v1a-2] 議程〔改交給…〕只給已經交出去的（○ 在那場、現在別人負責、又回到原人身上）；照舊、不要了的不給
+    private static let agendaReassignKinds: Set<OrgMoveLineStatus.Kind> = [.open, .elsewhere, .backOnPerson]
+    /// 〔拿回來〕：○ 還沒做完、● 交了就好（機台、會議、班）、[v25.591 轉組織 v1a-2] ✓ 結束的會議（拿掉結束日、接著開）
+    private static let takeBackKinds: Set<OrgMoveLineStatus.Kind> = [.open, .handed, .ended]
 
     static func snapshot(_ move: OrgMove, world: OrgMoveWorld, now: Date) -> OMSheetSnapshot {
         let map = OrgMoveHolderMap(world: world)
@@ -892,7 +957,7 @@ private enum OMSheetBuild {
         // 鎖住的列（缺失、兼任、過了報告日的週報、跟著機台的警報任務）整列不給長按：警報任務跟著機台，改機台那一列
         let live = !move.isUndone && line.state != OrgMoveLineState.undone.rawValue && !line.isLocked
         let reassign = live && canReassign(line, status: st, map: map, now: now)
-        let takeBack = live && (st.kind == .open || st.kind == .handed)
+        let takeBack = live && takeBackKinds.contains(st.kind)
         return OMSheetRow(line: line, personId: move.personId, personName: person,
                           title: rawTitle.isEmpty ? "（沒有標題）" : rawTitle,
                           mark: st.mark, statusText: st.text, tone: OMSheetTone.of(mark: st.mark), memo: memo,
@@ -914,25 +979,72 @@ private enum OMSheetBuild {
         return ids
     }
 
-    /// 任務（含警報、兼任那一筆）、週報：現在持有人身上的那一份
+    /// 點一列打開的那一筆：任務（含警報）、週報＝現在持有人身上的那一份；
+    /// [v25.591 轉組織 v1a-2] 會議＝那場會議（新會議開新的那條）、議程＝它所在的那場會議、兼任＝持有人身上連著它的那一筆（分身）、班不開
     static func previewRef(_ line: OrgMoveLine, holder: UUID?, map: OrgMoveHolderMap) -> SubordinateItemRef? {
-        guard let h = holder else { return nil }
         switch line.lineKind {
-        case .some(.task), .some(.alarmTask), .some(.sideRole):
-            let taskId: UUID? = line.kind == OrgMoveLineKind.sideRole.rawValue ? line.itemId : line.refId
-            guard let tid = taskId, let c = map.tasks[tid]?.first(where: { $0.holder == h }) else { return nil }
+        case .some(.meeting):
+            return meetingRef(line, map: map)
+        case .some(.agenda):
+            return itemMeetingRef(itemId: line.refId, meetingId: line.parentId, map: map)
+        case .some(.sideRole):
+            return sideRoleRef(line, holder: holder, map: map)
+        case .some(.task), .some(.alarmTask):
+            guard let h = holder, let tid = line.refId,
+                  let c = map.tasks[tid]?.first(where: { $0.holder == h }) else { return nil }
             return SubordinateItemRef.task(subId: h, task: c.task)
         case .some(.report):
-            guard let rid = line.refId, let c = map.reports[rid]?.first(where: { $0.holder == h }) else { return nil }
+            guard let h = holder, let rid = line.refId,
+                  let c = map.reports[rid]?.first(where: { $0.holder == h }) else { return nil }
             return SubordinateItemRef.report(subId: h, report: c.report)
         default:
             return nil
         }
     }
 
-    /// 長按〔改交給…〕：任務、週報、機台；鎖住的（缺失、兼任、過了報告日的週報、跟著機台的警報任務）、組織的、
+    /// 會議那一列：〔交給…（新會議接著開）〕開新會議（找不到＝舊 iPad 洗掉了、或已經拿回來：開原本那場）；其他開原本那場
+    static func meetingRef(_ line: OrgMoveLine, map: OrgMoveHolderMap) -> SubordinateItemRef? {
+        if line.lineAction == .newSeries, let nid = line.newId, let r = meetingById(nid, map: map) {
+            return r
+        }
+        guard let mid = line.refId else { return nil }
+        return meetingById(mid, map: map)
+    }
+
+    /// 會議 id → 現在在誰名下的那一份（持有人＝map.meetingHolders）
+    static func meetingById(_ id: UUID, map: OrgMoveHolderMap) -> SubordinateItemRef? {
+        guard let m = map.meetings[id], let h = map.meetingHolders[id] else { return nil }
+        return SubordinateItemRef.meeting(subId: h, meeting: m)
+    }
+
+    /// 議程現在在哪一場會議（搬到新會議、搬到最後一場的也找得到）；議程不在了（〔不要了〕）＝開它原本那場
+    static func itemMeetingRef(itemId: UUID?, meetingId: UUID?, map: OrgMoveHolderMap) -> SubordinateItemRef? {
+        if let iid = itemId, let c = map.items[iid]?.first, let m = map.meetings[c.meetingId] {
+            return SubordinateItemRef.meeting(subId: c.holder, meeting: m)
+        }
+        guard let mid = meetingId else { return nil }
+        return meetingById(mid, map: map)
+    }
+
+    /// 兼任：議程那種開那場會議；任務那種先照 itemId 找持有人身上那一筆（v1a-1 的做法；拉進兼任的那筆換人後同 id 搬過去），
+    /// 找不到再找持有人身上連著這則兼任待辦的那一筆（App 自動建的分身換人後，接手的人身上是新 id）
+    static func sideRoleRef(_ line: OrgMoveLine, holder: UUID?, map: OrgMoveHolderMap) -> SubordinateItemRef? {
+        if line.meetingId != nil {
+            return itemMeetingRef(itemId: line.itemId, meetingId: line.meetingId, map: map)
+        }
+        guard let h = holder else { return nil }
+        if let tid = line.itemId, let c = map.tasks[tid]?.first(where: { $0.holder == h }) {
+            return SubordinateItemRef.task(subId: h, task: c.task)
+        }
+        guard let rid = line.refId, let c = map.sideRoleCopies[rid]?.first(where: { $0.holder == h }) else { return nil }
+        return SubordinateItemRef.task(subId: h, task: c.task)
+    }
+
+    /// 長按〔改交給…〕：任務、週報、機台；鎖住的（缺失、v1a-1 鎖著的兼任、過了報告日的週報、跟著機台的警報任務）、組織的、
     /// 還沒分好的待分派不給（警報任務跟著機台：改機台那一列，警報任務一起過去）
     ///（LifeStore.reassignOrgMoveLine 也擋缺失、兼任、組織；週報過了報告日、做完了它不搬，這裡先不給按）
+    /// [v25.591 轉組織 v1a-2] 加議程（已經交出去的）、兼任（〔到兼任換人…〕那種，負責人裡還有單上的接手人）、會議（新會議／整場交出去，現在還在接手的人名下）；
+    /// 班（要逐天看撞班：到班表改，或〔拿回來〕再重交）、〔最後一場〕、〔照舊〕的會議不給（LifeStore 也直接 return）
     static func canReassign(_ line: OrgMoveLine, status: OrgMoveLineStatus, map: OrgMoveHolderMap, now: Date) -> Bool {
         guard reassignKinds.contains(status.kind), !line.isLocked else { return false }
         switch line.lineKind {
@@ -942,8 +1054,38 @@ private enum OMSheetBuild {
             guard let rid = line.refId, let h = status.holderId,
                   let c = map.reports[rid]?.first(where: { $0.holder == h }) else { return false }
             return !c.report.isCompleted && c.report.date >= now
+        case .some(.agenda):
+            return agendaReassignKinds.contains(status.kind)
+        case .some(.sideRole):
+            return canReassignSideRole(line, map: map)
+        case .some(.meeting):
+            return canReassignMeeting(line, map: map)
         default:
             return false
         }
+    }
+
+    /// [v25.591 轉組織 v1a-2 審查] 兼任：LifeStore 從單上的接手人換成新的人（reassignSideRoleBody(from: toId)），
+    /// 所以兼任負責人裡現在還要有單上的接手人才給（⚠ 又是王小明了＝先按〔再交一次〕；被你在兼任頁改給別人的到兼任頁改）。
+    /// 不然按了負責人沒換、單上的接手人卻改成新的人。要退回這一件：canReassign 的 .sideRole 換回 `line.lineAction == .give`
+    static func canReassignSideRole(_ line: OrgMoveLine, map: OrgMoveHolderMap) -> Bool {
+        guard line.lineAction == .give, let tid = line.refId, let to = line.toId else { return false }
+        return map.sideRoleAssignees[tid]?.contains(to) == true
+    }
+
+    /// 會議：LifeStore 從單上的接手人名下整條搬給新的人（moveMeetingBody），所以會議現在要還在接手的人名下才給
+    ///（新會議被舊 iPad 洗掉、又回到原人名下、在別人名下時按了也搬不動）
+    static func canReassignMeeting(_ line: OrgMoveLine, map: OrgMoveHolderMap) -> Bool {
+        let mid: UUID?
+        switch line.lineAction {
+        case .some(.newSeries):
+            mid = line.newId
+        case .some(.give):
+            mid = line.refId
+        default:
+            return false
+        }
+        guard let m = mid, let to = line.toId else { return false }
+        return map.meetingHolders[m] == to
     }
 }

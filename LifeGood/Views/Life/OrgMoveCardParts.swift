@@ -8,6 +8,8 @@ import SwiftUI
 // 這裡只排版；body 裡不放 let 計算、不寫長運算式。
 // 隱私（judge §4.12）：這些都是 App 內頁；通知、小工具、手錶、鎖定畫面一個字都沒加。
 // 要退回這一個檔：三個 struct 的 body 改回 EmptyView()，刪掉下面新加的型別，SubordinateDetailView 那幾行呼叫一起刪。
+// [v25.591 轉組織 v1a-2] G3（orgmove/build/v1a-2/brief.md §5）：接手那一區多會議、議程、班、兼任四種圖示，會議、議程點了開那場會議
+// （OrgMoveReceivedCard 多一個有預設值的 onOpenMeeting）；chips(task:)／previewLine(task:)（兼任分身照 sideRoleLink.taskId）。
 
 // MARK: - 算資料（卡片每次重畫都會算，先擋掉沒有交接單的大多數時候）
 
@@ -35,8 +37,25 @@ enum OrgMoveCardData {
     /// 任務、週報列多的膠囊（judge §4.6）：紫色「交接自 王小明」（有交接備註多一個 💬）、
     /// 交接那一刻已逾期的再一顆灰色「交接時已逾期」（不紅：扣分留在原人，這位從新截止日算）。
     /// 到交接完成日（生效日＋10 天）、沒有待分派就自動收（receivedChip 用算的）。
+    /// [v25.591 轉組織 v1a-2] 也給會議列用（新會議 id＝單上的 newId、整場交出去的＝原 id，receivedChip 都查得到；
+    /// 會議沒有逾期的事，wasOverdue 一律 false，只會有紫色那一顆）
     static func chips(itemId: UUID, holderId: UUID, now: Date = Date()) -> [ItemChip] {
         guard let r = received(itemId, holderId: holderId, now: now) else { return [] }
+        return chipList(r)
+    }
+
+    /// [v25.591 轉組織 v1a-2] 任務列的膠囊：先照任務 id 找，找不到再照 sideRoleLink.taskId（兼任分身換人後是新 id，
+    /// judge §4.6；OrgMoveIndex.receivedChip(task:holderId:todayKey:)）。字同 chips(itemId:)。
+    /// 要退回這一件：SubordinateDetailView 的 taskChips 改回 chips(itemId: t.id, …)，刪這支
+    static func chips(task t: SubordinateTask, holderId: UUID, now: Date = Date()) -> [ItemChip] {
+        guard let r = OrgMoveIndex.receivedChip(task: t, holderId: holderId, todayKey: OrgMovePlan.dayKey(now)) else {
+            return []
+        }
+        return chipList(r)
+    }
+
+    /// 紫色「交接自 王小明」（有交接備註多 💬）＋灰色「交接時已逾期」（v1a-1 的字，兩支共用）
+    private static func chipList(_ r: OrgMoveIndex.Received) -> [ItemChip] {
         let from = r.fromName.trimmingCharacters(in: .whitespaces).isEmpty ? "這位同仁" : r.fromName
         let text = "交接自 " + from + (r.memo.isEmpty ? "" : " 💬")
         var out: [ItemChip] = [ItemChip(id: "handover", text: text, color: .purple, icon: "arrow.left.arrow.right")]
@@ -50,6 +69,16 @@ enum OrgMoveCardData {
     /// hidden：預覽出圖（forExport）不放——交接備註只在 App 內頁與交接單的分享（brief §1-6）
     static func previewLine(itemId: UUID, holderId: UUID, hidden: Bool, now: Date = Date()) -> String? {
         guard !hidden, let r = received(itemId, holderId: holderId, now: now) else { return nil }
+        return OrgMovePlan.receivedPreviewLine(r)
+    }
+
+    /// [v25.591 轉組織 v1a-2] 任務預覽那一行：同 chips(task:)，兼任分身照 sideRoleLink.taskId 也找得到。
+    /// 要退回這一件：任務預覽改回 previewLine(itemId: t.id, …)，刪這支
+    static func previewLine(task t: SubordinateTask, holderId: UUID, hidden: Bool, now: Date = Date()) -> String? {
+        guard !hidden,
+              let r = OrgMoveIndex.receivedChip(task: t, holderId: holderId, todayKey: OrgMovePlan.dayKey(now)) else {
+            return nil
+        }
         return OrgMovePlan.receivedPreviewLine(r)
     }
 }
@@ -253,15 +282,20 @@ struct OrgMoveReceivedCard: View {
     let onOpenTask: (UUID) -> Void
     /// 點一列週報：開那份週報的預覽（週報 id）
     let onOpenReport: (UUID) -> Void
+    /// [v25.591 轉組織 v1a-2] 點一列會議（新會議、整場交出去的）、議程：開那場會議的預覽（會議 id、持有人 id；
+    /// 卡片那邊照現在的規矩要訂閱）。有預設值：v1a-1 的呼叫照樣編得過。
+    /// 要退回這一件：刪這個參數與一路傳下去的 onOpenMeeting，OrgMoveReceivedRowButton 刪會議那一支
+    let onOpenMeeting: (UUID, UUID) -> Void
 
     @EnvironmentObject var lifeStore: LifeStore
 
     init(personId: UUID, onOpenMove: @escaping (UUID) -> Void, onOpenTask: @escaping (UUID) -> Void,
-         onOpenReport: @escaping (UUID) -> Void) {
+         onOpenReport: @escaping (UUID) -> Void, onOpenMeeting: @escaping (UUID, UUID) -> Void = { _, _ in }) {
         self.personId = personId
         self.onOpenMove = onOpenMove
         self.onOpenTask = onOpenTask
         self.onOpenReport = onOpenReport
+        self.onOpenMeeting = onOpenMeeting
     }
 
     /// 每一張還在交接中、有交給這位的單一段（每列照現在的資料算：✓ 做完、○ 還沒做、● 機台負責人、⚠ 兩個人身上）
@@ -276,7 +310,7 @@ struct OrgMoveReceivedCard: View {
 
     var body: some View {
         OrgMoveReceivedList(sections: sections, onOpenMove: onOpenMove, onOpenTask: onOpenTask,
-                            onOpenReport: onOpenReport)
+                            onOpenReport: onOpenReport, onOpenMeeting: onOpenMeeting)
     }
 }
 
@@ -285,13 +319,14 @@ private struct OrgMoveReceivedList: View {
     let onOpenMove: (UUID) -> Void
     let onOpenTask: (UUID) -> Void
     let onOpenReport: (UUID) -> Void
+    let onOpenMeeting: (UUID, UUID) -> Void
 
     var body: some View {
         if !sections.isEmpty {
             VStack(spacing: 16) {
                 ForEach(sections) { s in
                     OrgMoveReceivedSectionCard(section: s, onOpenMove: onOpenMove, onOpenTask: onOpenTask,
-                                               onOpenReport: onOpenReport)
+                                               onOpenReport: onOpenReport, onOpenMeeting: onOpenMeeting)
                 }
             }
         }
@@ -304,6 +339,7 @@ private struct OrgMoveReceivedSectionCard: View {
     let onOpenMove: (UUID) -> Void
     let onOpenTask: (UUID) -> Void
     let onOpenReport: (UUID) -> Void
+    let onOpenMeeting: (UUID, UUID) -> Void
 
     private var lastIndex: Int { section.rows.count - 1 }
 
@@ -313,7 +349,8 @@ private struct OrgMoveReceivedSectionCard: View {
                 onOpenMove(section.moveId)
             }
             ForEach(Array(section.rows.enumerated()), id: \.element.id) { idx, row in
-                OrgMoveReceivedRowButton(row: row, onOpenTask: onOpenTask, onOpenReport: onOpenReport)
+                OrgMoveReceivedRowButton(row: row, onOpenTask: onOpenTask, onOpenReport: onOpenReport,
+                                         onOpenMeeting: onOpenMeeting)
                 if idx < lastIndex {
                     Divider().padding(.leading, 52)
                 }
@@ -376,14 +413,25 @@ private struct OrgMoveReceivedHeader: View {
     }
 }
 
-/// 一列：任務、週報點了開預覽（呼叫端照現在的規矩擋訂閱）；機台那列不給點
+/// 一列：任務、週報點了開預覽（呼叫端照現在的規矩擋訂閱）；機台那列不給點。
+/// [v25.591 轉組織 v1a-2] 會議（新會議、整場交出去的）、議程（含拉進兼任的議程）：開那場會議（持有人＝meetingHolderId）；
+/// 兼任：taskId 已經是接手的人身上那一筆（分身換人後的新 id，OrgMovePlan.receivedRow 算好）；班不給點。
+/// 要退回這一件：刪會議那一支（第一個 if）
 private struct OrgMoveReceivedRowButton: View {
     let row: OrgMoveReceivedRow
     let onOpenTask: (UUID) -> Void
     let onOpenReport: (UUID) -> Void
+    let onOpenMeeting: (UUID, UUID) -> Void
 
     var body: some View {
-        if let tid = row.taskId {
+        if let mid = row.meetingId, let hid = row.meetingHolderId {
+            Button {
+                onOpenMeeting(mid, hid)
+            } label: {
+                OrgMoveReceivedRowLabel(row: row, tappable: true)
+            }
+            .buttonStyle(.plain)
+        } else if let tid = row.taskId {
             Button {
                 onOpenTask(tid)
             } label: {
@@ -437,13 +485,27 @@ private struct OrgMoveReceivedRowLabel: View {
 }
 
 /// 左邊的狀態圖示（✓ 綠勾、○ 空圈、● 機台齒輪／實心圈、⚠ 橘三角、◌ 虛線圈、・ 灰減號圈）；顏色照種類（任務青、週報紫、機台綠藍）
+/// [v25.591 轉組織 v1a-2] 多四種（brief §5-1；會、議、班的顏色同 OrgMoveGlyph，兼任照 brief 用橘，OrgMoveGlyph「兼」是靛）：
+/// 會議藍 person.3.fill、議程薄荷 text.bubble、班棕 calendar、兼任橘 star。○、● 畫那一種自己的圖示（● 實心、○ 空心）；
+/// ✓ ⚠ ◌ ・ 照舊畫狀態。要退回這一件：Kind 刪後四個 case、kindFor 改回只看 taskId／reportId、刪 filledSymbol／outlineSymbol／symbolSize
 private struct OrgMoveMarkIcon: View {
-    enum Kind { case task, report, equipment }
+    enum Kind { case task, report, equipment, meeting, agenda, shifts, sideRole }
 
     let mark: String
     let kind: Kind
 
+    /// 照 row.kind（OrgMoveLineKind 的字）；空的、認不得的照 v1a-1 推（taskId → 任務、reportId → 週報、其他 → 機台）
     static func kindFor(_ row: OrgMoveReceivedRow) -> Kind {
+        switch OrgMoveLineKind(rawValue: row.kind) {
+        case .some(.meeting): return .meeting
+        case .some(.agenda): return .agenda
+        case .some(.shifts): return .shifts
+        case .some(.sideRole): return .sideRole
+        case .some(.equipment): return .equipment
+        case .some(.report): return .report
+        case .some(.task), .some(.alarmTask): return .task
+        default: break
+        }
         if row.taskId != nil { return .task }
         if row.reportId != nil { return .report }
         return .equipment
@@ -454,6 +516,34 @@ private struct OrgMoveMarkIcon: View {
         case .task: return .cyan
         case .report: return .purple
         case .equipment: return .teal
+        case .meeting: return .blue
+        case .agenda: return .mint
+        case .shifts: return .brown
+        case .sideRole: return .orange
+        }
+    }
+
+    /// ● 的圖示（任務、週報＝實心圈；其他畫那一種）
+    private var filledSymbol: String {
+        switch kind {
+        case .task, .report: return "circle.fill"
+        case .equipment: return "gearshape.fill"
+        case .meeting: return "person.3.fill"
+        case .agenda: return "text.bubble.fill"
+        case .shifts: return "calendar"
+        case .sideRole: return "star.fill"
+        }
+    }
+
+    /// ○（與其他沒列到的符號）的圖示（會議的狀態只有 ●✓⚠・，○ 照理不會出現；出現就畫空心的 person.3，同其他種類）
+    private var outlineSymbol: String {
+        switch kind {
+        case .task, .report: return "circle"
+        case .equipment: return "gearshape"
+        case .meeting: return "person.3"
+        case .agenda: return "text.bubble"
+        case .shifts: return "calendar"
+        case .sideRole: return "star"
         }
     }
 
@@ -462,11 +552,16 @@ private struct OrgMoveMarkIcon: View {
         case "✓": return "checkmark.circle.fill"
         case "⚠": return "exclamationmark.triangle.fill"
         case "◌": return "circle.dashed"
-        case "●": return kind == .equipment ? "gearshape.fill" : "circle.fill"
+        case "●": return filledSymbol
         // 「・」＝現在在別人身上、找不到了、不要了…（灰色減號圈，跟「○ 還沒做」的空圈分得開）
         case "・": return "minus.circle"
-        default: return kind == .equipment ? "gearshape" : "circle"
+        default: return outlineSymbol
         }
+    }
+
+    /// person.3 很寬：縮小才塞得進 24pt 那一格（其他照 19）
+    private var symbolSize: CGFloat {
+        symbol.hasPrefix("person.3") ? 12 : 19
     }
 
     private var tint: Color {
@@ -474,14 +569,14 @@ private struct OrgMoveMarkIcon: View {
         case "✓": return .green
         case "⚠", "◌": return .orange
         case "○": return kindColor
-        case "●": return kind == .equipment ? kindColor : Color.gray
+        case "●": return (kind == .task || kind == .report) ? Color.gray : kindColor
         default: return Color.gray
         }
     }
 
     var body: some View {
         Image(systemName: symbol)
-            .font(.system(size: 19))
+            .font(.system(size: symbolSize))
             .foregroundStyle(tint)
             .frame(width: 24, height: 24)
             .accessibilityHidden(true)

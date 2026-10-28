@@ -17,6 +17,10 @@ import SwiftUI
 // [v25.590 轉組織 v1a-1] 照 design.md §5.2 補四件：「升職歷程」→「歷程」、歷程多轉組織那列、任務／報告「｜交接自 王小明」
 //（「｜交接時已逾期」跟〔逾期、準時與自訂分〕同一個開關）、時間軸〔只列接手之後〕。交接資料只在 make 讀 OrgMoveIndex／
 // OrgMovePlan.historyRows（主控寫好、凍結）；交接備註、調動原因、你的備註都不進匯出。對照模擬：build/v1a-1/g4/sim_export_v1a1.py。
+//
+// [v25.591 轉組織 v1a-2] 「｜交接自 王小明」擴到兼任分身任務（OrgMoveIndex.receivedChip(task:)）、新會議與整場交出去的會議、
+// 議程（自己會議裡的、別人會議交給這位同仁的）、排班（交接過來的那幾天另成一段）；圖片同一顆紫膠囊，名字照樣進提醒。
+// 「交接時已逾期」只有任務、報告有。對照模擬：build/v1a-2/g4/sim_export_v1a2.py。
 
 // MARK: - 共用小型別
 
@@ -376,6 +380,8 @@ struct SubExportSnapshot {
     }
 
     /// [v25.590 轉組織 v1a-1] 任務、週報 id → 交接自誰（跟卡片膠囊同一個條件：OrgMoveIndex.receivedChip，交接完成就收起來）
+    /// [v25.591 轉組織 v1a-2] 也放：會議 id（新會議、整場交出去的）、議程 id、班的 id（那一天的班是交接過來的）。
+    /// 這幾種的 wasOverdue 一律 false（會議、議程、班沒有「交接時已逾期」）
     var handovers: [UUID: HandoverMark] = [:]
     /// [v25.590 轉組織 v1a-1] 歷程的轉組織那幾列（OrgMovePlan.historyRows；已復原的不放；不寫調動原因、交接備註、你的備註）
     var orgHistory: [SubExportModel.HistoryLine] = []
@@ -547,8 +553,10 @@ struct SubExportSnapshot {
         // [v25.590 轉組織 v1a-1] 交接：「交接自」、接手的機台、歷程的轉組織列（export/design.md §5.2）。
         // 要退回這一件：刪掉這一段＋上面三個欄位（handovers／orgHistory／equipmentSince）。
         let todayKey = OrgMovePlan.dayKey(now)
+        // [v25.591 轉組織 v1a-2] 兼任的分身換人後是新 id：receivedChip(task:) 先照任務 id、找不到再照 sideRoleLink.taskId
+        //（同卡片膠囊）。要退回這一件：改回 receivedChip(t.id, holderId:todayKey:)。
         for t in sub.tasks {
-            if let r = OrgMoveIndex.receivedChip(t.id, holderId: subordinateId, todayKey: todayKey) {
+            if let r = OrgMoveIndex.receivedChip(task: t, holderId: subordinateId, todayKey: todayKey) {
                 snap.handovers[t.id] = HandoverMark(fromName: handoverName(r.fromName), wasOverdue: r.wasOverdue)
             }
         }
@@ -557,6 +565,8 @@ struct SubExportSnapshot {
                 snap.handovers[rep.id] = HandoverMark(fromName: handoverName(r.fromName), wasOverdue: r.wasOverdue)
             }
         }
+        // [v25.591 轉組織 v1a-2] 會議、議程、班（要在下面補 knownNames 之前：名字一起進提醒）
+        addMeetingShiftHandovers(&snap, sub: sub, todayKey: todayKey)
         // 「交接自」寫的是交接單上的名字快照：交出來的那位後來刪掉、改名了，名字照樣寫出去，
         // 提醒「也會寫出…」也要點到（design §5.2；knownNames 只有現在的部屬、組織人員、名片）
         for mark in snap.handovers.values {
@@ -587,6 +597,34 @@ struct SubExportSnapshot {
     private static func handoverName(_ raw: String) -> String {
         let n = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         return n.isEmpty ? "這位同仁" : n
+    }
+
+    /// [v25.591 轉組織 v1a-2] 會議、議程、班的「交接自」（跟卡片膠囊同一個條件：還沒按〔交接完成〕、還在交接完成日以前或還有待分派）：
+    /// • 會議：新會議（交接單記的 newId＝新會議的 id）、整場交出去的會議（原 id），都在這位同仁名下
+    /// • 議程：自己會議裡、別人會議交給這位同仁的〔改由…〕那幾條（toId 是這位同仁才算；receivedChip 自己會對）
+    /// • 班：那一天的班是交接過來的（OrgMoveIndex.receivedShift，照日子對；記在那一格班的 id 上，resolve 併段時用）
+    /// 會議、議程、班沒有「交接時已逾期」：wasOverdue 一律 false。要退回這一件：刪掉這一支與 make 裡呼叫它的那一行。
+    @MainActor
+    private static func addMeetingShiftHandovers(_ snap: inout SubExportSnapshot, sub: Subordinate, todayKey: String) {
+        let me = snap.subordinateId
+        for m in sub.meetings {
+            if let r = OrgMoveIndex.receivedChip(m.id, holderId: me, todayKey: todayKey) {
+                snap.handovers[m.id] = HandoverMark(fromName: handoverName(r.fromName), wasOverdue: false)
+            }
+            for item in m.allItems where !item.isCompleted {
+                guard let r = OrgMoveIndex.receivedChip(item.id, holderId: me, todayKey: todayKey) else { continue }
+                snap.handovers[item.id] = HandoverMark(fromName: handoverName(r.fromName), wasOverdue: false)
+            }
+        }
+        for x in snap.othersAgenda where !x.item.isCompleted {
+            guard let r = OrgMoveIndex.receivedChip(x.item.id, holderId: me, todayKey: todayKey) else { continue }
+            snap.handovers[x.item.id] = HandoverMark(fromName: handoverName(r.fromName), wasOverdue: false)
+        }
+        for sh in sub.shifts {
+            let key = OrgMovePlan.dayKey(sh.date)
+            guard let r = OrgMoveIndex.receivedShift(holderId: me, dayKey: key, todayKey: todayKey) else { continue }
+            snap.handovers[sh.id] = HandoverMark(fromName: handoverName(r.fromName), wasOverdue: false)
+        }
     }
 }
 
@@ -668,6 +706,9 @@ struct SubExportModel {
         let start: Date
         let end: Date
         let days: Int
+        /// [v25.591 轉組織 v1a-2] 這一段是交接過來的：交出來的那位（交接單上的名字快照）；不是＝nil。
+        /// 交接過來的那幾天另成一段（不跟自己原本的班併在一起），後面寫「｜交接自 王小明」
+        var handoverFrom: String? = nil
         var id: Date { start }
     }
 
@@ -1102,6 +1143,12 @@ enum SubExportComposer {
         return out
     }
 
+    /// [v25.591 轉組織 v1a-2] 排班那一段後面的「｜交接自 王小明」（不是交接過來的那一段＝空字串）
+    static func shiftHandoverText(_ r: SubExportModel.ShiftRun) -> String {
+        guard let from = r.handoverFrom else { return "" }
+        return "｜交接自 " + from
+    }
+
     /// 執掌設備件數後面的「（11/2 接手之後）」（沒切＝空字串）
     static func sinceSuffix(_ x: SubExportModel.EquipmentRow, now: Date, cal: Calendar) -> String {
         guard let since = x.since else { return "" }
@@ -1182,7 +1229,10 @@ enum SubExportComposer {
             var byMeeting: [UUID: [SubExportSnapshot.OthersAgendaLine]] = [:]
             var head: [UUID: (topic: String, owner: String)] = [:]
             for x in s.othersAgenda {
-                if x.isOneOnOne || x.item.isCompleted { continue }
+                // [v25.591 轉組織 v1a-2] 別人的一對一照樣不出去；只有從交接單交給這位同仁的那幾條例外（交接單分享也照寫
+                // 交出去的那項，judge §4.10；同一場的其他議程照樣不出去）。要退回這一件：改回 `if x.isOneOnOne || …`。
+                let handed = s.handovers[x.item.id] != nil
+                if (x.isOneOnOne && !handed) || x.item.isCompleted { continue }
                 if !keepOpen && !inRange(x.sessionDate, rs, re, cal: cal) { continue }
                 if byMeeting[x.meetingId] == nil {
                     order.append(x.meetingId)
@@ -1319,16 +1369,21 @@ enum SubExportComposer {
         m.timeline = tl.sorted { $0.date > $1.date }
 
         // 排班：期間內，連續同一種班併成一段
+        // [v25.591 轉組織 v1a-2] 交接過來的那幾天另成一段（交出來的是同一位才併）：林志豪「11/2～11/7 大夜班｜交接自 王小明」。
+        // 要退回這一件：拿掉 from 與 `last.handoverFrom == from` 那個條件。
         let shifts = s.shifts.filter { inRange($0.date, rs, re, cal: cal) }.sorted { $0.date < $1.date }
         var runs: [SubExportModel.ShiftRun] = []
         for sh in shifts {
             let day = cal.startOfDay(for: sh.date)
-            if let last = runs.last, last.type == sh.type, dayDiff(from: last.end, to: day, cal: cal) == 1 {
-                runs[runs.count - 1] = SubExportModel.ShiftRun(type: last.type, start: last.start, end: day, days: last.days + 1)
+            let from: String? = s.handovers[sh.id]?.fromName
+            if let last = runs.last, last.type == sh.type, last.handoverFrom == from,
+               dayDiff(from: last.end, to: day, cal: cal) == 1 {
+                runs[runs.count - 1] = SubExportModel.ShiftRun(type: last.type, start: last.start, end: day,
+                                                               days: last.days + 1, handoverFrom: from)
             } else if let last = runs.last, dayDiff(from: last.end, to: day, cal: cal) == 0 {
                 continue   // 同一天兩筆（舊資料）只算一次
             } else {
-                runs.append(SubExportModel.ShiftRun(type: sh.type, start: day, end: day, days: 1))
+                runs.append(SubExportModel.ShiftRun(type: sh.type, start: day, end: day, days: 1, handoverFrom: from))
             }
         }
         m.shiftRuns = runs
@@ -1435,7 +1490,9 @@ enum SubExportComposer {
         L.append("👥 會議（\(m.rowCount(.meetings))）")
         for b in m.meetings {
             let mt = b.meeting
-            L.append("• " + (mt.topic.isEmpty ? "未命名會議" : mt.topic) + "｜" + meetingWhenText(b, now: m.now, cal: cal))
+            var head = "• " + (mt.topic.isEmpty ? "未命名會議" : mt.topic) + "｜" + meetingWhenText(b, now: m.now, cal: cal)
+            head += handoverText(mt.id, s, marks: false)   // [v25.591 轉組織 v1a-2] 新會議、整場交出去的會議「｜交接自 王小明」
+            L.append(head)
             let mNote = trim(mt.note)
             if o.includeNotes && !mNote.isEmpty { L.append("　備註：" + mNote) }
             for ctx in b.openItems {
@@ -1444,6 +1501,7 @@ enum SubExportComposer {
                 if let due = ctx.item.dueDate { row += "｜截止 " + md(due, wd: true, now: m.now, cal: cal) }
                 let who = assigneeOthers(ctx.item, s)
                 if !who.isEmpty { row += "｜負責 " + who.joined(separator: "、") }
+                row += handoverText(ctx.item.id, s, marks: false)   // [v25.591 轉組織 v1a-2] 議程「｜交接自 王小明」
                 L.append(row)
                 let iNote = trim(ctx.item.note)
                 if o.includeNotes && !iNote.isEmpty { L.append("　　備註：" + iNote) }
@@ -1456,6 +1514,7 @@ enum SubExportComposer {
                 var row = "　⬜️ " + (x.item.content.isEmpty ? "未填內容" : x.item.content)
                 row += "｜" + md(x.sessionDate, now: m.now, cal: cal) + " 那場"
                 if let due = x.item.dueDate { row += "｜截止 " + md(due, wd: true, now: m.now, cal: cal) }
+                row += handoverText(x.item.id, s, marks: false)   // [v25.591 轉組織 v1a-2]「｜交接自 王小明」
                 L.append(row)
                 let iNote = trim(x.item.note)
                 if o.includeNotes && !iNote.isEmpty { L.append("　　備註：" + iNote) }
@@ -1627,6 +1686,7 @@ enum SubExportComposer {
             if r.days > 1 { row += "～" + md(r.end, wd: true, now: m.now, cal: cal) }
             row += "｜" + r.type.rawValue
             if r.days > 1 { row += "（\(r.days) 天）" }
+            row += shiftHandoverText(r)   // [v25.591 轉組織 v1a-2]「｜交接自 王小明」
             L.append(row)
         }
     }
@@ -1699,6 +1759,10 @@ enum SubExportComposer {
             case .meetings:
                 for x in m.meetings { h += 62 + CGFloat(30 * x.openItems.count) }
                 for g in m.othersAgenda { h += 62 + CGFloat(30 * g.items.count) }
+                // [v25.591 轉組織 v1a-2] 紫膠囊〔⇄ 交接自 王小明〕常把那一列的膠囊擠成兩行（固定會議「每週二…」「下一場…」
+                // 再加這顆就超過 326pt）：有這顆的列各多 24（寧可估多：〔全部一張〕超過 12,000 不給選）。
+                // 排班的交接段另成一列，rowCount 已經算進去。要退回這一件：刪掉這一行與 meetingHandoverRows。
+                h += CGFloat(24 * meetingHandoverRows(m))
             case .completed, .reports, .sideRoles, .mentioned:
                 h += CGFloat(58 * m.rowCount(b))
             case .leaves, .history, .timeline:
@@ -1712,6 +1776,20 @@ enum SubExportComposer {
             }
         }
         return h
+    }
+
+    /// [v25.591 轉組織 v1a-2] 會議那一區畫了紫膠囊〔⇄ 交接自〕的列數：會議系列、自己會議的議程、別人會議交給這位同仁的議程
+    static func meetingHandoverRows(_ m: SubExportModel) -> Int {
+        let hv = m.snapshot.handovers
+        var n = 0
+        for b in m.meetings {
+            if hv[b.meeting.id] != nil { n += 1 }
+            n += b.openItems.filter { hv[$0.item.id] != nil }.count
+        }
+        for g in m.othersAgenda {
+            n += g.items.filter { hv[$0.item.id] != nil }.count
+        }
+        return n
     }
 
     // MARK: 分享前提醒（§4.2：只點名這份真的寫出來的）

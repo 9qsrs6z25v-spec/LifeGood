@@ -232,6 +232,7 @@ enum SubExportImage {
 
     /// 會議：系列一列（〔每週四 10:00・60 分鐘〕〔下一場 10/29（四）〕、主題）＋每條未完成議程各一列（縮排、空心圓）；
     /// 別人會議的段：一列「別人的會議交給王小明的：製造一課晨會（林志豪）」＋底下各條
+    /// [v25.591 轉組織 v1a-2] 新會議、整場交出去的會議：系列那一列多〔⇄ 交接自 王小明〕紫膠囊（同任務那顆）
     @MainActor
     private static func meetingRows(_ m: SubExportModel) -> [AnyView] {
         let cal = m.calendar
@@ -244,6 +245,7 @@ enum SubExportImage {
                 let color: Color = (i > 0 && b.next != nil) ? .indigo : .secondary
                 chips.add(p, color)
             }
+            addHandover(&chips, mt.id, m, marks: false)
             var det = SubExportDetails()
             if m.options.includeNotes { det.add("備註", mt.note) }
             let title = mt.topic.isEmpty ? "未命名會議" : mt.topic
@@ -266,7 +268,8 @@ enum SubExportImage {
         return out
     }
 
-    /// 議程一列：空心圓（只是「未完成」記號，不是按鈕）；〔10/15 那場〕〔截止 11/2（一）〕〔負責 陳怡君〕；內容；備註
+    /// 議程一列：空心圓（只是「未完成」記號，不是按鈕）；〔10/15 那場〕〔截止 11/2（一）〕〔負責 陳怡君〕
+    /// 〔⇄ 交接自 王小明〕（[v25.591 轉組織 v1a-2] 紫；自己會議、別人會議交給這位同仁的都一樣）；內容；備註
     @MainActor
     private static func agendaRow(_ item: MeetingItem, session: String, _ m: SubExportModel,
                                   showAssignees: Bool) -> AnyView {
@@ -279,6 +282,7 @@ enum SubExportImage {
             let who = SubExportComposer.assigneeOthers(item, m.snapshot)
             if !who.isEmpty { chips.add(clip("負責 " + who.joined(separator: "、")), .blue) }
         }
+        addHandover(&chips, item.id, m, marks: false)
         var det = SubExportDetails()
         if m.options.includeNotes { det.add("備註", item.note) }
         let title = item.content.isEmpty ? "未填內容" : item.content
@@ -566,6 +570,7 @@ enum SubExportImage {
     }
 
     /// 排班：靛色日曆圓；「大夜班 6 天」；〔10/5（一）～10/10（六）〕
+    /// [v25.591 轉組織 v1a-2] 交接過來的那一段（另成一段）多〔⇄ 交接自 王小明〕紫膠囊
     @MainActor
     private static func shiftRows(_ m: SubExportModel) -> [AnyView] {
         let cal = m.calendar
@@ -575,9 +580,17 @@ enum SubExportImage {
             if r.days > 1 { when += "～" + SubExportComposer.md(r.end, wd: true, now: m.now, cal: cal) }
             var chips = SubExportChips()
             chips.add(when)
+            addShiftHandover(&chips, r)
             out.append(row(.disc("calendar", .indigo), chips, "\(r.type.rawValue) \(r.days) 天"))
         }
         return out
+    }
+
+    /// [v25.591 轉組織 v1a-2] 排班那一段的紫膠囊〔⇄ 交接自 王小明〕（同 addHandover 那一顆；班沒有「交接時已逾期」）。
+    /// 要退回這一件：刪掉這一支與 shiftRows 裡呼叫它的那一行
+    private static func addShiftHandover(_ chips: inout SubExportChips, _ r: SubExportModel.ShiftRun) {
+        guard let from = r.handoverFrom else { return }
+        chips.add(clip("交接自 " + from), .purple, icon: "arrow.left.arrow.right")
     }
 }
 
