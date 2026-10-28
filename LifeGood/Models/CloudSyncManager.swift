@@ -60,6 +60,9 @@ final class CloudSyncManager: ObservableObject {
         // [v25.589] 轉組織 v0b：一筆一筆換人時「交出去時已逾期」的帳（OrgHandoffBook；單獨一個鍵：還沒更新的 iPad 不認得、不會碰。
         // 兩台各換各的人：收到增量更新時 LifeStore.reloadFromCloud 照 id 取聯集，不整包換掉）
         "life_org_handoffs_v1",
+        // [v25.590] 轉組織 v1a-1：交接單（OrgMoveBook；單獨一個鍵：還沒更新的 iPad 不認得、不會碰。
+        // 兩台各改一列：收到增量更新時 LifeStore.reloadFromCloud 逐張、逐列合併，不整包換掉）
+        "life_org_moves_v1",
         // [v25.568] 給網頁版的財富數字（WealthWebFacts：App 算好寫的，網頁版照讀；App 自己不讀。只有合計、暱稱、後 4 碼，沒有完整號碼、有效期限）
         "life_wealth_facts_v1",
         // 股票每週市值快照（英雄卡背景折線）：同步安全性依賴「先拉後推」順序——

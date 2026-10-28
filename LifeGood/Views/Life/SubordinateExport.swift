@@ -75,7 +75,8 @@ enum SubExportBlock: String, CaseIterable, Identifiable {
                                                .equipment, .timeline, .shifts]
 
     /// 選項頁、空區塊「（這段期間沒有：…）」、提醒用的名字。
-    /// 25.590（v1a-1）起 history 改「歷程」：只改這一個字，記住的選擇（rawValue "history"）照樣有效。
+    /// [v25.590 轉組織 v1a-1] history「升職歷程」→「歷程」（升職、轉組織同一區）：只改這一個字，
+    /// 記住的選擇（rawValue "history"）照樣有效。要退回這一件：改回 "升職歷程"。
     var label: String {
         switch self {
         case .reports: return "報告"
@@ -85,7 +86,7 @@ enum SubExportBlock: String, CaseIterable, Identifiable {
         case .sideRoles: return "兼任職務"
         case .leaves: return "請假"
         case .completed: return "完成項目"
-        case .history: return "升職歷程"
+        case .history: return "歷程"
         case .proCon: return "優缺點"
         case .achievements: return "成就"
         case .improvements: return "改善"
@@ -171,7 +172,7 @@ struct SubExportOptions: Equatable, Codable {
     var customEnd: Date? = nil
     /// 還沒做完、還沒到的不管期間都列（§2.5）
     var openItemsIgnorePeriod = true
-    /// 〔逾期、準時與自訂分〕：任務逾期幾天、完成章、自訂分（25.590 起多「交接時已逾期」）
+    /// 〔逾期、準時與自訂分〕：任務逾期幾天、完成章、自訂分、「交接時已逾期」（[v25.590 轉組織 v1a-1]）
     var includeMarks = false
     /// 〔備註〕：任務、議程、會議、報告、紀錄、升職的備註（可能 @ 到別的同仁）
     var includeNotes = false
@@ -187,7 +188,8 @@ struct SubExportOptions: Equatable, Codable {
     var completedKinds: Set<SubExportCompletedKind> = Set(SubExportCompletedKind.allCases)
     /// 會議〔別人會議交給這位同仁的〕
     var othersAgenda = false
-    /// 25.590 起才有作用：時間軸〔只列接手之後〕
+    /// [v25.590 轉組織 v1a-1] 時間軸〔只列接手之後〕：從交接單收到的機台，PM、警報、件數都從交到這位同仁手上那一刻起算
+    ///（選項頁只有這位同仁有從交接單收到的機台才出現這一顆；25.588 就存在記住的那包裡，預設開）
     var timelineAfterHandover = true
 
     init() {}
@@ -360,6 +362,23 @@ struct SubExportSnapshot {
     /// 提醒「也會寫出…的名字」掃全文用：部屬＋公司組織人員＋名片的名字（2 字以上、去重）
     var knownNames: [String] = []
 
+    /// [v25.590 轉組織 v1a-1] 從交接單接手的那一筆（任務、報告的「｜交接自 王小明」）。
+    /// 只記名字與「交接時已逾期」：交接備註、你的備註、原本的截止日都不進匯出（design §5.2）。
+    struct HandoverMark: Equatable {
+        /// 交出來的那位同仁（交接單上的名字快照；空的寫「這位同仁」）
+        let fromName: String
+        /// 交接那一刻已經逾期（只在〔逾期、準時與自訂分〕開著時寫出去）
+        let wasOverdue: Bool
+    }
+
+    /// [v25.590 轉組織 v1a-1] 任務、週報 id → 交接自誰（跟卡片膠囊同一個條件：OrgMoveIndex.receivedChip，交接完成就收起來）
+    var handovers: [UUID: HandoverMark] = [:]
+    /// [v25.590 轉組織 v1a-1] 歷程的轉組織那幾列（OrgMovePlan.historyRows；已復原的不放；不寫調動原因、交接備註、你的備註）
+    var orgHistory: [SubExportModel.HistoryLine] = []
+    /// [v25.590 轉組織 v1a-1] 現在負責、而且是從交接單收到的機台 id → 交到這位同仁手上的那一刻
+    ///（OrgMoveIndex.receivedByItem、toId 是這位同仁才算；不看膠囊期間）。時間軸〔只列接手之後〕用
+    var equipmentSince: [UUID: Date] = [:]
+
     /// 抽一次快照。mentioned 由卡片算好傳進來（`mentionedItemsCache`；很貴，不在選項頁重掃，design §6.4-8）。
     @MainActor
     static func make(store: LifeStore, subordinateId: UUID, mentioned: [SubordinateItemRef],
@@ -520,7 +539,42 @@ struct SubExportSnapshot {
                 }
             }
         }
+
+        // [v25.590 轉組織 v1a-1] 交接：「交接自」、接手的機台、歷程的轉組織列（export/design.md §5.2）。
+        // 要退回這一件：刪掉這一段＋上面三個欄位（handovers／orgHistory／equipmentSince）。
+        let todayKey = OrgMovePlan.dayKey(now)
+        for t in sub.tasks {
+            if let r = OrgMoveIndex.receivedChip(t.id, holderId: subordinateId, todayKey: todayKey) {
+                snap.handovers[t.id] = HandoverMark(fromName: handoverName(r.fromName), wasOverdue: r.wasOverdue)
+            }
+        }
+        for rep in sub.weeklyReports {
+            if let r = OrgMoveIndex.receivedChip(rep.id, holderId: subordinateId, todayKey: todayKey) {
+                snap.handovers[rep.id] = HandoverMark(fromName: handoverName(r.fromName), wasOverdue: r.wasOverdue)
+            }
+        }
+        for eq in mine {
+            if let r = OrgMoveIndex.receivedByItem[eq.id], r.toId == subordinateId {
+                snap.equipmentSince[eq.id] = r.handedAt
+            }
+        }
+        // 這位同仁沒有任何交接單就不建 OrgMoveWorld（快照 0.3 秒重抽一次，省一次整包複製）
+        if store.orgMoves.live.contains(where: { $0.personId == subordinateId }) {
+            let world = OrgMoveWorld(store: store)
+            let rows = OrgMovePlan.historyRows(personId: subordinateId, book: store.orgMoves, world: world)
+            for row in rows where !row.isUndone {
+                snap.orgHistory.append(SubExportModel.HistoryLine(id: row.moveId, date: row.date,
+                                                                  kind: SubExportModel.HistoryLine.orgMoveKind,
+                                                                  text: row.detail + "（" + row.sub + "）", note: ""))
+            }
+        }
         return snap
+    }
+
+    /// 交接單上的名字快照（去頭尾空白；空的寫「這位同仁」）
+    private static func handoverName(_ raw: String) -> String {
+        let n = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        return n.isEmpty ? "這位同仁" : n
     }
 }
 
@@ -562,12 +616,17 @@ struct SubExportModel {
     }
 
     struct HistoryLine: Identifiable {
+        /// [v25.590 轉組織 v1a-1] 轉組織那一列的 kind（文字「｜轉組織｜」、圖片藍色雙箭頭圓）
+        static let orgMoveKind = "轉組織"
+
         let id: UUID
         let date: Date
-        /// 「升職」（25.590 起多「轉組織」）
+        /// 「升職」「轉組織」
         let kind: String
         let text: String
         let note: String
+
+        var isOrgMove: Bool { kind == HistoryLine.orgMoveKind }
     }
 
     struct EquipmentRow: Identifiable {
@@ -575,6 +634,8 @@ struct SubExportModel {
         let pmCount: Int
         let alarmCount: Int
         let lastPM: Date?
+        /// [v25.590 轉組織 v1a-1] 〔只列接手之後〕切過的那一刻（沒切＝nil）：件數後面寫「（11/2 接手之後）」
+        var since: Date? = nil
         var id: UUID { line.id }
     }
 
@@ -1012,6 +1073,41 @@ enum SubExportComposer {
         return d < 0 ? "超前" : "逾期 \(d) 天"
     }
 
+    // MARK: [v25.590 轉組織 v1a-1] 交接
+
+    /// 〔只列接手之後〕：since nil＝不切；有值＝那一刻（含）以後才算
+    static func notBefore(_ d: Date, _ since: Date?) -> Bool {
+        guard let since else { return true }
+        return d >= since
+    }
+
+    /// 任務、報告那一列後面的「｜交接自 王小明」；marks（〔逾期、準時與自訂分〕）開著、交接時已逾期再接「｜交接時已逾期」。
+    /// 不是從交接單接手的（或交接完成、收起來了）回空字串。交接備註不寫（只在交接單的分享）
+    static func handoverText(_ id: UUID, _ s: SubExportSnapshot, marks: Bool) -> String {
+        guard let h = s.handovers[id] else { return "" }
+        var out = "｜交接自 " + h.fromName
+        if marks && h.wasOverdue { out += "｜交接時已逾期" }
+        return out
+    }
+
+    /// 執掌設備件數後面的「（11/2 接手之後）」（沒切＝空字串）
+    static func sinceSuffix(_ x: SubExportModel.EquipmentRow, now: Date, cal: Calendar) -> String {
+        guard let since = x.since else { return "" }
+        return "（" + md(since, now: now, cal: cal) + " 接手之後）"
+    }
+
+    /// 選項頁〔只列接手之後〕底下的灰字：「蝕刻機 E-03 從 11/2 接手：PM、警報、件數都從那一刻起算」
+    static func handoverTimelineCaption(_ s: SubExportSnapshot, now: Date, cal: Calendar = SubExportComposer.gregorian) -> String {
+        let got = s.equipment.filter { s.equipmentSince[$0.id] != nil }
+        guard let first = got.first else { return "" }
+        if got.count == 1, let since = s.equipmentSince[first.id] {
+            return first.name + " 從 " + md(since, now: now, cal: cal) + " 接手：PM、警報、件數都從那一刻起算"
+        }
+        let names = got.prefix(3).map { $0.name }.joined(separator: "、")
+        let more = got.count > 3 ? "等 \(got.count) 台" : ""
+        return names + more + "是從交接單收到的：PM、警報、件數都從接手那一刻起算"
+    }
+
     // MARK: 兼任
 
     /// 「2026/9～12」「2025/3～2026/2」「2026/9 起」
@@ -1142,12 +1238,15 @@ enum SubExportComposer {
         // 兼任：在任的都列；卸任的看職務期間（不跟「不管期間」開關，卸任＝已經發生的事）
         m.sideRoles = s.sideRoles.filter { $0.isActive || overlaps($0.start, $0.end, rs, re, cal: cal) }
 
-        // 歷程（25.588＝升職；25.590 起加轉組織）
+        // 歷程（升職＋[v25.590 轉組織 v1a-1] 轉組織；照期間、新到舊混排）
         var hist: [SubExportModel.HistoryLine] = []
         for p in s.promotions where inRange(p.date, rs, re, cal: cal) {
             let to = p.toTitle.isEmpty ? "—" : p.toTitle
             let text = p.fromTitle.isEmpty ? to : p.fromTitle + " → " + to
             hist.append(SubExportModel.HistoryLine(id: p.id, date: p.date, kind: "升職", text: text, note: trim(p.note)))
+        }
+        for h in s.orgHistory where inRange(h.date, rs, re, cal: cal) {
+            hist.append(h)
         }
         m.history = hist.sorted { $0.date > $1.date }
 
@@ -1171,14 +1270,18 @@ enum SubExportComposer {
         m.records = recs
         m.recordTally = tally
 
-        // 執掌設備（清單＝現在負責的）＋期間內 PM、警報件數；上次 PM 不跟期間
+        // 執掌設備（清單＝現在負責的）＋期間內 PM、警報件數；上次 PM 不跟期間（也不跟〔只列接手之後〕：那是機台現在的狀態）。
+        // [v25.590 轉組織 v1a-1] 〔只列接手之後〕開著：從交接單收到的機台，PM、警報、件數、時間軸都從交到這位同仁手上那一刻起算
+        //（「PM 後 N 天」照樣用機台全部的 PM 算）。要退回這一件：since 一律 nil。
         var eqRows: [SubExportModel.EquipmentRow] = []
         var tl: [SubExportModel.TimelineLine] = []
         for e in s.equipment {
-            let pmIn = e.pmRecords.filter { inRange($0.date, rs, re, cal: cal) }
-            let alIn = e.alarms.filter { inRange($0.date, rs, re, cal: cal) }
+            let since: Date? = o.timelineAfterHandover ? s.equipmentSince[e.id] : nil
+            let pmIn = e.pmRecords.filter { inRange($0.date, rs, re, cal: cal) && notBefore($0.date, since) }
+            let alIn = e.alarms.filter { inRange($0.date, rs, re, cal: cal) && notBefore($0.date, since) }
             let lastPM = e.pmRecords.map { $0.date }.max()
-            eqRows.append(SubExportModel.EquipmentRow(line: e, pmCount: pmIn.count, alarmCount: alIn.count, lastPM: lastPM))
+            eqRows.append(SubExportModel.EquipmentRow(line: e, pmCount: pmIn.count, alarmCount: alIn.count, lastPM: lastPM,
+                                                      since: since))
 
             // 時間軸：PM 分停機／完成復機／保養；警報寫「PM 後 N 天」
             let pmDays = e.pmRecords.map { cal.startOfDay(for: $0.date) }.sorted()
@@ -1308,6 +1411,7 @@ enum SubExportComposer {
             let type = trim(r.reportType)
             if !type.isEmpty { row += "【\(type)】" }
             row += (r.topic.isEmpty ? "未命名報告" : r.topic) + "｜報告日 " + md(r.date, wd: true, now: m.now, cal: m.calendar)
+            row += handoverText(r.id, m.snapshot, marks: false)   // [v25.590 轉組織 v1a-1]「｜交接自 王小明」
             L.append(row)
             let note = trim(r.note)
             if m.options.includeNotes && !note.isEmpty { L.append("　備註：" + note) }
@@ -1366,6 +1470,7 @@ enum SubExportComposer {
                 if let n = s.equipmentNames[id] { row += "｜🔧 " + n }
             }
             if let side = sideRoleName(t, s) { row += "｜🔗 兼任 " + side }
+            row += handoverText(t.id, s, marks: o.includeMarks)   // [v25.590 轉組織 v1a-1]「｜交接自 王小明｜交接時已逾期」
             if o.includeMarks, let cs = t.customScore, !t.isDereliction { row += "｜" + scoreText(cs) }
             L.append(row)
             if o.taskDetails {
@@ -1480,6 +1585,7 @@ enum SubExportComposer {
             if !trim(x.line.department).isEmpty { row += "｜" + x.line.department }
             if let last = x.lastPM { row += "｜上次 PM " + md(last, now: m.now, cal: m.calendar) }
             row += "｜這段期間 PM 紀錄 \(x.pmCount)・警報 \(x.alarmCount)"
+            row += sinceSuffix(x, now: m.now, cal: m.calendar)   // [v25.590 轉組織 v1a-1]「（11/2 接手之後）」
             L.append(row)
         }
     }
@@ -1598,13 +1704,15 @@ enum SubExportComposer {
 
     // MARK: 分享前提醒（§4.2：只點名這份真的寫出來的）
 
-    /// 這份有沒有真的寫出逾期天數、自訂分、完成章
+    /// 這份有沒有真的寫出逾期天數、自訂分、完成章、「交接時已逾期」
     static func marksWritten(_ m: SubExportModel) -> Bool {
         guard m.options.includeMarks else { return false }
         if m.isSelected(.tasks) {
             for t in m.tasks {
                 if overdueDays(t, now: m.now, cal: m.calendar) != nil && t.dueDate != nil { return true }
                 if t.customScore != nil && !t.isDereliction { return true }
+                // [v25.590 轉組織 v1a-1]「｜交接時已逾期」也是逾期標記
+                if m.snapshot.handovers[t.id]?.wasOverdue == true { return true }
             }
         }
         if m.isSelected(.completed) {

@@ -87,10 +87,14 @@ extension Subordinate {
     }
 
     /// 自己身上照算逾期的任務、週報 id（原本 overdueOpenCount 的兩段，原封不動）
+    /// [v25.590 轉組織 v1a-1] 交接單上待分派、還沒分好的機台：交接之後才到期的警報任務不算這位（人已經調走、機台還沒分；
+    /// judge §2.6 pendingEquipment、§3.3、第 5 題）。分好時跟著搬、截止改成分好那天＋3 天（LifeStore.resolveOrgMovePending）
     private var overdueOwnIds: Set<UUID> {
         let now = Date()
+        let pendingEq: [UUID: Date] = OrgMoveIndex.pendingEquipment[id] ?? [:]
         let t = tasks.filter { t in
             guard t.sideRoleLink == nil, let due = t.dueDate else { return false }
+            if let eid = t.equipmentLink?.equipmentId, let handed = pendingEq[eid], due >= handed { return false }
             if t.isCompleted {
                 guard let done = t.completedAt else { return false }
                 return done > due
@@ -113,6 +117,16 @@ extension Subordinate {
     /// 陳怡君 0 件（新截止 11/4）172；舊 iPad 把 T1 存回王小明身上 → 王小明照樣 2 件。
     var overdueHandedCount: Int {
         Self.handedOverdueExtra(personId: id, own: overdueOwnIds)
+    }
+
+    /// [v25.590 轉組織 v1a-1] 「（E-03 腔體漏率改善 → 陳怡君）」；兩件以上「（E-03 腔體漏率改善 → 陳怡君 等 2 件）」（只在 App 的明細裡）
+    private var handedOverdueDetail: String {
+        guard let handed = OrgHandoffIndex.overdueIds[id] else { return "" }
+        let ids = handed.subtracting(overdueOwnIds)
+        let names = OrgHandoffIndex.labels[id] ?? [:]
+        let shown: [String] = ids.compactMap { names[$0] }.sorted()
+        guard let first = shown.first else { return "" }
+        return ids.count > 1 ? "（\(first) 等 \(ids.count) 件）" : "（\(first)）"
     }
 
     private static func handedOverdueExtra(personId: UUID, own: Set<UUID>) -> Int {
@@ -229,7 +243,7 @@ extension Subordinate {
             items.append(("逾期（含補完成）×\(own)", -own * ScoreWeights.actOverdue))
         }
         if ScoreWeights.actOverdue > 0 && handed > 0 {
-            items.append(("交出去時已逾期 ×\(handed)", -handed * ScoreWeights.actOverdue))
+            items.append(("交出去時已逾期 ×\(handed)" + handedOverdueDetail, -handed * ScoreWeights.actOverdue))
         }
         return items
     }

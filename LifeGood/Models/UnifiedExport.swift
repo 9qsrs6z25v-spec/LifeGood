@@ -144,6 +144,8 @@ struct UnifiedExport: Codable {
         var wealthTransfers: WealthTransferBook?
         /// [v25.589] 轉組織 v0b：交出去時已逾期的帳（OrgHandoffBook）。舊備份沒有，所以是 Optional；跟部屬一起走（完整備份、「職涯」）
         var orgHandoffs: OrgHandoffBook?
+        /// [v25.590] 轉組織 v1a-1：交接單（OrgMoveBook）。舊備份沒有，所以是 Optional；跟部屬一起走（完整備份、「職涯」）
+        var orgMoves: OrgMoveBook?
     }
 
     static func build(expense: ExpenseStore, finance: FinanceStore, life: LifeStore,
@@ -221,7 +223,9 @@ struct UnifiedExport: Codable {
                 // [v25.575] 定期轉帳跟財富帳本一起走
                 wealthTransfers: scope.carriesFinance ? life.wealthTransfers : nil,
                 // [v25.589] 轉組織 v0b：交出去時已逾期的帳跟部屬一起走（完整備份、「職涯」）
-                orgHandoffs: scope.carriesCareer ? life.orgHandoffs : nil
+                orgHandoffs: scope.carriesCareer ? life.orgHandoffs : nil,
+                // [v25.590] 轉組織 v1a-1：交接單跟部屬一起走（完整備份、「職涯」）
+                orgMoves: scope.carriesCareer ? life.orgMoves : nil
             ),
             scope: scope.rawValue
         )
@@ -988,6 +992,10 @@ enum UnifiedImporter {
                 if scope.carriesCareer, let oh = payload.life.orgHandoffs {
                     life.orgHandoffs = oh
                 }
+                // [v25.590] 轉組織 v1a-1：交接單：舊備份沒有（nil）就不動本機的
+                if scope.carriesCareer, let om = payload.life.orgMoves {
+                    life.orgMoves = om
+                }
             }
 
             result.expenses = payload.expense.expenses.count
@@ -1209,6 +1217,11 @@ enum UnifiedImporter {
                 if let oh = payload.life.orgHandoffs {
                     let merged = life.orgHandoffs.merged(with: oh)
                     if merged != life.orgHandoffs { life.orgHandoffs = merged }
+                }
+                // [v25.590] 轉組織 v1a-1：交接單：逐張、逐列合併（同一列取後改的；同 iCloud）
+                if let om = payload.life.orgMoves {
+                    let merged = life.orgMoves.merged(with: om)
+                    if merged != life.orgMoves { life.orgMoves = merged }
                 }
                 // 舊格式備份的機台上面 appendNewByID 進了部屬的 equipments——搬進機台池
                 life.migrateLegacyEquipmentsToPool()
@@ -1470,6 +1483,10 @@ fileprivate struct HeldSubordinateItemIds {
         tasks = Set(subs.flatMap { $0.tasks.map(\.id) })
         meetings = Set(subs.flatMap { $0.meetings.map(\.id) })
         reports = Set(subs.flatMap { $0.weeklyReports.map(\.id) })
+        // [v25.590 轉組織 v1a-1] 交接單上〔不要了〕的任務、週報也當成「已經有了」：舊備份不把它們補回原人身上（judge §2.4、C15）。
+        //（要退回這一件：刪掉這兩行。）
+        tasks.formUnion(OrgMoveIndex.droppedItemIds)
+        reports.formUnion(OrgMoveIndex.droppedItemIds)
     }
 
     /// 只補 held 裡沒有的；補進來的記進 held（同一份備份兩個人都有同一筆時只補第一個）。回傳補了幾筆

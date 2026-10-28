@@ -213,7 +213,7 @@ enum SubExportImage {
         return String(s.prefix(limit - 1)) + "…"
     }
 
-    /// 報告：紫色文件圓；〔周報〕〔報告日 10/30（五）〕；題目；備註
+    /// 報告：紫色文件圓；〔周報〕〔報告日 10/30（五）〕〔⇄ 交接自 王小明〕（[v25.590]）；題目；備註
     @MainActor
     private static func reportRows(_ m: SubExportModel) -> [AnyView] {
         var out: [AnyView] = []
@@ -221,6 +221,7 @@ enum SubExportImage {
             var chips = SubExportChips()
             chips.add(clip(SubExportComposer.trim(r.reportType)), .purple)
             chips.add("報告日 " + SubExportComposer.md(r.date, wd: true, now: m.now, cal: m.calendar))
+            addHandover(&chips, r.id, m, marks: false)
             var det = SubExportDetails()
             if m.options.includeNotes { det.add("備註", r.note) }
             let title = r.topic.isEmpty ? "未命名報告" : r.topic
@@ -284,7 +285,8 @@ enum SubExportImage {
         return row(.open, chips, title, details: det, indented: true)
     }
 
-    /// 任務：青色清單圓（警報任務鈴鐺、缺失任務紅三角）；〔截止〕或〔立案〕〔機台〕〔系統〕〔🔧 關聯機台〕〔兼任 X〕〔缺失任務〕；
+    /// 任務：青色清單圓（警報任務鈴鐺、缺失任務紅三角）；〔截止〕或〔立案〕〔機台〕〔系統〕〔🔧 關聯機台〕〔兼任 X〕
+    /// 〔⇄ 交接自 王小明〕（[v25.590] 紫；〔逾期、準時與自訂分〕開著再〔交接時已逾期〕灰）〔缺失任務〕；
     /// 〔逾期、準時與自訂分〕開著：截止膠囊紅＋〔逾期 8 天〕、〔+5分〕（缺失任務不畫分）；細節攤開、備註
     @MainActor
     private static func taskRows(_ m: SubExportModel) -> [AnyView] {
@@ -311,6 +313,7 @@ enum SubExportImage {
             if let side = SubExportComposer.sideRoleName(t, s) {
                 chips.add(clip("兼任 " + side), .indigo, icon: "link")
             }
+            addHandover(&chips, t.id, m, marks: o.includeMarks)
             if t.isDereliction { chips.add("缺失任務", .red) }
             if o.includeMarks, let cs = t.customScore, !t.isDereliction {
                 let scoreColor: Color = cs >= 0 ? .green : .red
@@ -441,7 +444,8 @@ enum SubExportImage {
         return .red
     }
 
-    /// 升職歷程：橘色向上圓；「升職　技術員 → 工程師」；〔2025/7/1〕；備註
+    /// 歷程：升職＝橘色向上圓「升職　技術員 → 工程師」；[v25.590 轉組織 v1a-1] 轉組織＝藍色雙箭頭圓
+    /// 「轉組織　製造一課 P1 → 設備課 P2（交出去 5・跟著 2）」；〔2025/7/1〕；備註（轉組織沒有備註：不寫調動原因、交接備註）
     @MainActor
     private static func historyRows(_ m: SubExportModel) -> [AnyView] {
         var out: [AnyView] = []
@@ -450,9 +454,23 @@ enum SubExportImage {
             chips.add(SubExportComposer.ymd(h.date, cal: m.calendar))
             var det = SubExportDetails()
             if m.options.includeNotes { det.add("備註", h.note) }
-            out.append(row(.disc("arrow.up.right.circle.fill", .orange), chips, "\(h.kind)　\(h.text)", details: det))
+            out.append(row(historyLead(h), chips, "\(h.kind)　\(h.text)", details: det))
         }
         return out
+    }
+
+    /// [v25.590 轉組織 v1a-1] 歷程列左邊的圓：轉組織藍色雙箭頭、升職照舊橘色向上（要退回這一件：一律回升職那顆）
+    private static func historyLead(_ h: SubExportModel.HistoryLine) -> SubExportRowLead {
+        if h.isOrgMove { return .disc("arrow.left.arrow.right.circle.fill", .blue) }
+        return .disc("arrow.up.right.circle.fill", .orange)
+    }
+
+    /// [v25.590 轉組織 v1a-1] 從交接單接手的任務、報告：紫膠囊〔⇄ 交接自 王小明〕（同卡片膠囊）；
+    /// marks 開著、交接時已逾期再一顆灰膠囊〔交接時已逾期〕（灰，不紅）。交接備註不畫（💬 只在 App 裡）
+    private static func addHandover(_ chips: inout SubExportChips, _ id: UUID, _ m: SubExportModel, marks: Bool) {
+        guard let h = m.snapshot.handovers[id] else { return }
+        chips.add(clip("交接自 " + h.fromName), .purple, icon: "arrow.left.arrow.right")
+        if marks && h.wasOverdue { chips.add("交接時已逾期") }
     }
 
     /// 紀錄類（優缺點、成就、改善、缺失紀錄、Miss）：各自顏色圖示；〔優點／缺點〕（優缺點那一區）〔10/15〕〔一般〕（Miss）；內容；備註
@@ -507,7 +525,8 @@ enum SubExportImage {
                 chips.add("上次 PM " + SubExportComposer.md(last, now: m.now, cal: m.calendar))
             }
             var det = SubExportDetails()
-            det.add("這段期間", "PM 紀錄 \(x.pmCount)・警報 \(x.alarmCount)")
+            let suffix = SubExportComposer.sinceSuffix(x, now: m.now, cal: m.calendar)   // [v25.590]「（11/2 接手之後）」
+            det.add("這段期間", "PM 紀錄 \(x.pmCount)・警報 \(x.alarmCount)" + suffix)
             out.append(row(.disc("wrench.and.screwdriver.fill", .teal), chips, x.line.name, details: det))
         }
         return out

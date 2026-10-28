@@ -1,0 +1,655 @@
+import SwiftUI
+
+// MARK: - [v25.590 轉組織 v1a-1] 部屬卡片上的轉組織零件（看板下那一條、接手那一區、歷程那一列）
+// G3 寫這個檔（orgmove/build/v1a-1/brief.md §5）。SubordinateDetailView 只加呼叫（judge §7.1-6：那個檔不加大段 body）。
+// 主控只放骨架：三個 struct 的名字與 init 簽名不准改。
+// 這個檔只讀不寫：一個 lifeStore 的寫入都沒有（看交接單、歷程、接手那一區都不用訂閱，judge §6）。
+// 句子都是 OrgMovePlan 組好的（personHint／receiverHints／receivedSections／historyRows／receivedPreviewLine），
+// 這裡只排版；body 裡不放 let 計算、不寫長運算式。
+// 隱私（judge §4.12）：這些都是 App 內頁；通知、小工具、手錶、鎖定畫面一個字都沒加。
+// 要退回這一個檔：三個 struct 的 body 改回 EmptyView()，刪掉下面新加的型別，SubordinateDetailView 那幾行呼叫一起刪。
+
+// MARK: - 算資料（卡片每次重畫都會算，先擋掉沒有交接單的大多數時候）
+
+/// 卡片那幾處共用的小計算（膠囊、預覽那一行、歷程混排、要不要建 OrgMoveWorld）
+enum OrgMoveCardData {
+
+    /// 有沒有跟這位同仁有關、還在交接中的單。沒有就不建 OrgMoveWorld、不掃全部部屬（卡片每次重畫都會走到）。
+    /// 只做「寬鬆」的先擋：原人是這位；或單上有一列 toId 是這位（套用之後每一列自己記著接手的人）；
+    /// 或有跟著機台、還沒寫 toId 的列（保守起見照算）。真正的判斷照 OrgMovePlan.personHint／receiverHints。
+    static func hasOpenMove(personId: UUID, book: OrgMoveBook, todayKey: String) -> Bool {
+        book.live.contains { m in
+            guard OrgMovePlan.isOpen(m, todayKey: todayKey) else { return false }
+            if m.personId == personId { return true }
+            return m.allLines.contains { l in
+                l.toId == personId || (l.action == OrgMoveAction.withEquipment.rawValue && l.toId == nil)
+            }
+        }
+    }
+
+    /// 這一筆（任務／週報 id）是不是還在顯示期間的「交接自」（持有人＝現在掛著它的那位）
+    static func received(_ itemId: UUID, holderId: UUID, now: Date = Date()) -> OrgMoveIndex.Received? {
+        OrgMoveIndex.receivedChip(itemId, holderId: holderId, todayKey: OrgMovePlan.dayKey(now))
+    }
+
+    /// 任務、週報列多的膠囊（judge §4.6）：紫色「交接自 王小明」（有交接備註多一個 💬）、
+    /// 交接那一刻已逾期的再一顆灰色「交接時已逾期」（不紅：扣分留在原人，這位從新截止日算）。
+    /// 到交接完成日（生效日＋10 天）、沒有待分派就自動收（receivedChip 用算的）。
+    static func chips(itemId: UUID, holderId: UUID, now: Date = Date()) -> [ItemChip] {
+        guard let r = received(itemId, holderId: holderId, now: now) else { return [] }
+        let from = r.fromName.trimmingCharacters(in: .whitespaces).isEmpty ? "這位同仁" : r.fromName
+        let text = "交接自 " + from + (r.memo.isEmpty ? "" : " 💬")
+        var out: [ItemChip] = [ItemChip(id: "handover", text: text, color: .purple, icon: "arrow.left.arrow.right")]
+        if r.wasOverdue {
+            out.append(ItemChip(id: "handoverLate", text: "交接時已逾期", color: .secondary))
+        }
+        return out
+    }
+
+    /// 任務、週報預覽多的那一行（judge §4.6）：「11/2 交接自 王小明（原訂 10/20）・備註：…」。
+    /// hidden：預覽出圖（forExport）不放——交接備註只在 App 內頁與交接單的分享（brief §1-6）
+    static func previewLine(itemId: UUID, holderId: UUID, hidden: Bool, now: Date = Date()) -> String? {
+        guard !hidden, let r = received(itemId, holderId: holderId, now: now) else { return nil }
+        return OrgMovePlan.receivedPreviewLine(r)
+    }
+}
+
+// MARK: - 〔潛力性〕「歷程」：升職、轉組織混在同一條
+
+/// 「歷程」的一列（升職照舊 promotionRow、轉組織 OrgMoveHistoryRowView）
+enum OrgMoveCardHistoryItem: Identifiable {
+    case promotion(PromotionRecord)
+    case move(OrgMoveHistoryRow)
+
+    var id: String {
+        switch self {
+        case .promotion(let p): return "p-" + p.id.uuidString
+        case .move(let r): return "m-" + r.moveId.uuidString
+        }
+    }
+
+    /// 排序用：升職＝生效日期；轉組織＝生效日那天 00:00
+    var date: Date {
+        switch self {
+        case .promotion(let p): return p.date
+        case .move(let r): return r.date
+        }
+    }
+
+    /// 新到舊排好的一條（judge §4.7）。轉組織列含已復原的（灰、寫「（已復原）」；交接單永遠在歷程裡）。
+    /// 這位同仁沒有任何交接單就不建 OrgMoveWorld（卡片每次重畫都會走到）
+    static func items(promotions: [PromotionRecord], personId: UUID, store: LifeStore) -> [OrgMoveCardHistoryItem] {
+        var out: [OrgMoveCardHistoryItem] = promotions.map { OrgMoveCardHistoryItem.promotion($0) }
+        let book = store.orgMoves
+        if book.live.contains(where: { $0.personId == personId && $0.wasApplied }) {
+            let rows = OrgMovePlan.historyRows(personId: personId, book: book, world: OrgMoveWorld(store: store))
+            out.append(contentsOf: rows.map { OrgMoveCardHistoryItem.move($0) })
+        }
+        return out.sorted { a, b in
+            if a.date != b.date { return a.date > b.date }
+            return a.id < b.id
+        }
+    }
+}
+
+// MARK: - 看板下那一條提示列
+
+/// 看板下面、分頁切換器上面那一條細提示列（原人＋接手的人；有事才出現，沒事整條不佔位）
+struct OrgMoveHintBars: View {
+    let personId: UUID
+    /// 點〔看〕：打開那一張交接單（moveId）
+    let onOpen: (UUID) -> Void
+
+    @EnvironmentObject var lifeStore: LifeStore
+
+    init(personId: UUID, onOpen: @escaping (UUID) -> Void) {
+        self.personId = personId
+        self.onOpen = onOpen
+    }
+
+    /// 原人那一條在前（每人最多一條）、接手的那幾條在後（每張還在交接中、有交給這位的單一條）。
+    /// 例：王小明「11/1 從製造一課調來・交出去 5・做完 0」＋橘點「待分派 1」；陳怡君「從王小明接手 4 項・做完 0」
+    private var hints: [OrgMoveHint] {
+        let now = Date()
+        let book = lifeStore.orgMoves
+        guard OrgMoveCardData.hasOpenMove(personId: personId, book: book, todayKey: OrgMovePlan.dayKey(now)) else {
+            return []
+        }
+        let world = OrgMoveWorld(store: lifeStore)
+        var out: [OrgMoveHint] = []
+        if let h = OrgMovePlan.personHint(personId: personId, book: book, world: world, now: now) {
+            out.append(h)
+        }
+        out.append(contentsOf: OrgMovePlan.receiverHints(personId: personId, book: book, world: world, now: now))
+        return out
+    }
+
+    var body: some View {
+        OrgMoveHintBarList(hints: hints, onOpen: onOpen)
+    }
+}
+
+private struct OrgMoveHintBarList: View {
+    let hints: [OrgMoveHint]
+    let onOpen: (UUID) -> Void
+
+    var body: some View {
+        if !hints.isEmpty {
+            VStack(spacing: 8) {
+                ForEach(hints) { h in
+                    OrgMoveHintBarRow(hint: h, onOpen: onOpen)
+                }
+            }
+            .padding(.horizontal)
+        }
+    }
+}
+
+/// 一條：白卡、圓角 14、左邊雙箭頭、右邊〔看〕；第二行橘點「待分派 1」、橘字警告（judge §4.7 表）
+private struct OrgMoveHintBarRow: View {
+    let hint: OrgMoveHint
+    let onOpen: (UUID) -> Void
+
+    var body: some View {
+        Button {
+            onOpen(hint.moveId)
+        } label: {
+            HStack(alignment: .center, spacing: 10) {
+                OrgMoveCardIcon(color: .blue, size: 30, iconSize: 12)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(hint.text)
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(Color.primary)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if let badge = hint.badge {
+                        OrgMoveDotLabel(text: badge)
+                    }
+                    if let warning = hint.warning {
+                        Text(warning)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(Color.orange)
+                            .lineLimit(2)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                Spacer(minLength: 6)
+                OrgMoveLinkLabel(text: "看")
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 11)
+            .background(Color(.systemBackground))
+            .clipShape(RoundedRectangle(cornerRadius: 14))
+            .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color(.separator).opacity(0.12), lineWidth: 0.75))
+            .shadow(color: .black.opacity(0.05), radius: 6, x: 0, y: 2)
+            .contentShape(RoundedRectangle(cornerRadius: 14))
+        }
+        .buttonStyle(.plain)
+        .accessibilityHint("打開交接單")
+    }
+}
+
+/// 橘點＋橘字（「待分派 1」）
+private struct OrgMoveDotLabel: View {
+    let text: String
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Circle()
+                .fill(Color.orange)
+                .frame(width: 6, height: 6)
+            Text(text)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(Color.orange)
+        }
+    }
+}
+
+/// 右邊的藍字連結（「看 ›」「交接單 ›」）
+private struct OrgMoveLinkLabel: View {
+    let text: String
+
+    var body: some View {
+        HStack(spacing: 2) {
+            Text(text)
+            Image(systemName: "chevron.right")
+                .font(.system(size: 9, weight: .bold))
+        }
+        .font(.footnote.weight(.semibold))
+        .foregroundStyle(Color.blue)
+    }
+}
+
+/// 雙箭頭漸層圓（提示列 30pt、接手那一區標頭 30pt、歷程那一列 36pt）
+private struct OrgMoveCardIcon: View {
+    let color: Color
+    let size: CGFloat
+    let iconSize: CGFloat
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .fill(LinearGradient(colors: [color.opacity(0.20), color.opacity(0.08)],
+                                     startPoint: .topLeading, endPoint: .bottomTrailing))
+            Circle()
+                .stroke(color.opacity(0.20), lineWidth: 0.75)
+            Image(systemName: "arrow.left.arrow.right")
+                .font(.system(size: iconSize, weight: .bold))
+                .foregroundStyle(color)
+        }
+        .frame(width: size, height: size)
+        .accessibilityHidden(true)
+    }
+}
+
+// MARK: - 接手的人〔主動性〕最上面那一區
+
+/// 接手的人〔主動性〕分頁最上面「從王小明接手（4）・11/2」那一區（還在交接中才有）
+struct OrgMoveReceivedCard: View {
+    let personId: UUID
+    /// 點標頭：打開那一張交接單（moveId）
+    let onOpenMove: (UUID) -> Void
+    /// 點一列待辦：開那件任務的預覽（任務 id；卡片那邊照現在的規矩要訂閱）
+    let onOpenTask: (UUID) -> Void
+    /// 點一列週報：開那份週報的預覽（週報 id）
+    let onOpenReport: (UUID) -> Void
+
+    @EnvironmentObject var lifeStore: LifeStore
+
+    init(personId: UUID, onOpenMove: @escaping (UUID) -> Void, onOpenTask: @escaping (UUID) -> Void,
+         onOpenReport: @escaping (UUID) -> Void) {
+        self.personId = personId
+        self.onOpenMove = onOpenMove
+        self.onOpenTask = onOpenTask
+        self.onOpenReport = onOpenReport
+    }
+
+    /// 每一張還在交接中、有交給這位的單一段（每列照現在的資料算：✓ 做完、○ 還沒做、● 機台負責人、⚠ 兩個人身上）
+    private var sections: [OrgMoveReceivedSection] {
+        let now = Date()
+        let book = lifeStore.orgMoves
+        guard OrgMoveCardData.hasOpenMove(personId: personId, book: book, todayKey: OrgMovePlan.dayKey(now)) else {
+            return []
+        }
+        return OrgMovePlan.receivedSections(personId: personId, book: book, world: OrgMoveWorld(store: lifeStore), now: now)
+    }
+
+    var body: some View {
+        OrgMoveReceivedList(sections: sections, onOpenMove: onOpenMove, onOpenTask: onOpenTask,
+                            onOpenReport: onOpenReport)
+    }
+}
+
+private struct OrgMoveReceivedList: View {
+    let sections: [OrgMoveReceivedSection]
+    let onOpenMove: (UUID) -> Void
+    let onOpenTask: (UUID) -> Void
+    let onOpenReport: (UUID) -> Void
+
+    var body: some View {
+        if !sections.isEmpty {
+            VStack(spacing: 16) {
+                ForEach(sections) { s in
+                    OrgMoveReceivedSectionCard(section: s, onOpenMove: onOpenMove, onOpenTask: onOpenTask,
+                                               onOpenReport: onOpenReport)
+                }
+            }
+        }
+    }
+}
+
+/// 一張單一張白卡（同卡片其他區塊：圓角 16、細邊、淡陰影）
+private struct OrgMoveReceivedSectionCard: View {
+    let section: OrgMoveReceivedSection
+    let onOpenMove: (UUID) -> Void
+    let onOpenTask: (UUID) -> Void
+    let onOpenReport: (UUID) -> Void
+
+    private var lastIndex: Int { section.rows.count - 1 }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            OrgMoveReceivedHeader(header: section.header) {
+                onOpenMove(section.moveId)
+            }
+            ForEach(Array(section.rows.enumerated()), id: \.element.id) { idx, row in
+                OrgMoveReceivedRowButton(row: row, onOpenTask: onOpenTask, onOpenReport: onOpenReport)
+                if idx < lastIndex {
+                    Divider().padding(.leading, 52)
+                }
+            }
+        }
+        .padding(.bottom, 4)
+        .background(Color(.systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color(.separator).opacity(0.12), lineWidth: 0.75))
+        .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 3)
+        .padding(.horizontal)
+    }
+}
+
+/// 標頭「從王小明接手（4）・11/2」＋右邊「交接單 ›」；整條點了開交接單（看交接單不用訂閱，judge §6）
+private struct OrgMoveReceivedHeader: View {
+    let header: String
+    let onTap: () -> Void
+
+    /// 「從王小明接手」粗體、「（4）・11/2」灰字（照最後一個「（」切；切不到整句粗體）
+    private var mainText: String {
+        guard let r = header.range(of: "（", options: .backwards) else { return header }
+        return String(header[..<r.lowerBound])
+    }
+
+    private var tailText: String {
+        guard let r = header.range(of: "（", options: .backwards) else { return "" }
+        return String(header[r.lowerBound...])
+    }
+
+    var body: some View {
+        Button(action: onTap) {
+            HStack(spacing: 10) {
+                Capsule()
+                    .fill(LinearGradient(colors: [Color.blue, Color.blue.opacity(0.55)],
+                                         startPoint: .top, endPoint: .bottom))
+                    .frame(width: 4, height: 18)
+                OrgMoveCardIcon(color: .blue, size: 30, iconSize: 12)
+                HStack(alignment: .firstTextBaseline, spacing: 2) {
+                    Text(mainText)
+                        .font(.subheadline.weight(.bold))
+                        .foregroundStyle(Color.primary)
+                    Text(tailText)
+                        .font(.footnote)
+                        .foregroundStyle(Color.secondary)
+                }
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+                Spacer(minLength: 6)
+                OrgMoveLinkLabel(text: "交接單")
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 14)
+            .padding(.bottom, 10)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityElement(children: .combine)
+        .accessibilityHint("打開交接單")
+    }
+}
+
+/// 一列：任務、週報點了開預覽（呼叫端照現在的規矩擋訂閱）；機台那列不給點
+private struct OrgMoveReceivedRowButton: View {
+    let row: OrgMoveReceivedRow
+    let onOpenTask: (UUID) -> Void
+    let onOpenReport: (UUID) -> Void
+
+    var body: some View {
+        if let tid = row.taskId {
+            Button {
+                onOpenTask(tid)
+            } label: {
+                OrgMoveReceivedRowLabel(row: row, tappable: true)
+            }
+            .buttonStyle(.plain)
+        } else if let rid = row.reportId {
+            Button {
+                onOpenReport(rid)
+            } label: {
+                OrgMoveReceivedRowLabel(row: row, tappable: true)
+            }
+            .buttonStyle(.plain)
+        } else {
+            OrgMoveReceivedRowLabel(row: row, tappable: false)
+        }
+    }
+}
+
+/// 例：「○ E-03 腔體漏率改善　截止 11/9・交接時已逾期」「● 蝕刻機 E-03　負責人」
+private struct OrgMoveReceivedRowLabel: View {
+    let row: OrgMoveReceivedRow
+    let tappable: Bool
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 12) {
+            OrgMoveMarkIcon(mark: row.mark, kind: OrgMoveMarkIcon.kindFor(row))
+            VStack(alignment: .leading, spacing: 3) {
+                MarqueeText(row.title.isEmpty ? "未命名" : row.title)
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(Color.primary)
+                if !row.detail.isEmpty {
+                    Text(row.detail)
+                        .font(.caption)
+                        .foregroundStyle(Color.secondary)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            if tappable {
+                Image(systemName: "chevron.right")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .contentShape(Rectangle())
+    }
+}
+
+/// 左邊的狀態圖示（✓ 綠勾、○ 空圈、● 機台齒輪／實心圈、⚠ 橘三角、◌ 虛線圈）；顏色照種類（任務青、週報紫、機台綠藍）
+private struct OrgMoveMarkIcon: View {
+    enum Kind { case task, report, equipment }
+
+    let mark: String
+    let kind: Kind
+
+    static func kindFor(_ row: OrgMoveReceivedRow) -> Kind {
+        if row.taskId != nil { return .task }
+        if row.reportId != nil { return .report }
+        return .equipment
+    }
+
+    private var kindColor: Color {
+        switch kind {
+        case .task: return .cyan
+        case .report: return .purple
+        case .equipment: return .teal
+        }
+    }
+
+    private var symbol: String {
+        switch mark {
+        case "✓": return "checkmark.circle.fill"
+        case "⚠": return "exclamationmark.triangle.fill"
+        case "◌": return "circle.dashed"
+        case "●": return kind == .equipment ? "gearshape.fill" : "circle.fill"
+        default: return kind == .equipment ? "gearshape" : "circle"
+        }
+    }
+
+    private var tint: Color {
+        switch mark {
+        case "✓": return .green
+        case "⚠", "◌": return .orange
+        case "○": return kindColor
+        case "●": return kind == .equipment ? kindColor : Color.gray
+        default: return Color.gray
+        }
+    }
+
+    var body: some View {
+        Image(systemName: symbol)
+            .font(.system(size: 19))
+            .foregroundStyle(tint)
+            .frame(width: 24, height: 24)
+            .accessibilityHidden(true)
+    }
+}
+
+// MARK: - 任務、週報列的膠囊；預覽那一行
+
+/// 週報列「交接自 王小明」那幾顆小膠囊（樣子同 ItemChipBar 的膠囊；字在 OrgMoveCardData.chips 組好）。
+/// 呼叫端：`OrgMoveHandoverChipRow(chips: OrgMoveCardData.chips(itemId: r.id, holderId: subordinateId))`
+struct OrgMoveHandoverChipRow: View {
+    let chips: [ItemChip]
+
+    var body: some View {
+        if !chips.isEmpty {
+            HStack(spacing: 6) {
+                ForEach(chips) { c in
+                    OrgMoveSmallChip(chip: c)
+                }
+            }
+        }
+    }
+}
+
+private struct OrgMoveSmallChip: View {
+    let chip: ItemChip
+
+    var body: some View {
+        HStack(spacing: 3) {
+            if let icon = chip.icon {
+                Image(systemName: icon)
+                    .font(.system(size: 8, weight: .bold))
+            }
+            Text(chip.text)
+        }
+        .font(.system(size: 10, weight: .bold))
+        .foregroundStyle(chip.color)
+        .lineLimit(1)
+        .padding(.horizontal, 6)
+        .padding(.vertical, 2)
+        .background(chip.color.opacity(0.14))
+        .clipShape(Capsule())
+        .overlay(Capsule().stroke(chip.color.opacity(0.25), lineWidth: 0.6))
+    }
+}
+
+/// 任務、週報預覽（SubordinateItemCard）資訊列多的一行（有才出現）。
+/// 呼叫端：`OrgMoveReceivedPreviewLine(text: OrgMoveCardData.previewLine(itemId:holderId:hidden: forExport))`
+struct OrgMoveReceivedPreviewLine: View {
+    let text: String?
+
+    var body: some View {
+        if let text {
+            HStack(alignment: .top, spacing: 8) {
+                Image(systemName: "arrow.left.arrow.right")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(Color.purple)
+                    .padding(.top, 3)
+                    .accessibilityHidden(true)
+                Text(text)
+                    .font(.subheadline)
+                    .foregroundStyle(Color.primary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .background(Color(.secondarySystemGroupedBackground))
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color(.separator).opacity(0.12), lineWidth: 0.75))
+        }
+    }
+}
+
+// MARK: - 〔潛力性〕「歷程」裡轉組織那一列
+
+/// 〔潛力性〕「歷程」裡轉組織那一列（圖示 arrow.left.arrow.right；點了開交接單由呼叫端包 Button）
+/// 畫法照 promotionRow：36pt 圓、第一行「製造一課 P1 → 設備課 P2」＋右邊「交接單 ›」、
+/// 第二行日期膠囊「2026/11/1 轉組織」＋灰字「交出去 5・跟著 2」。已復原：整列灰、沒有「交接單 ›」（點了照樣打得開）。
+struct OrgMoveHistoryRowView: View {
+    let row: OrgMoveHistoryRow
+
+    init(row: OrgMoveHistoryRow) {
+        self.row = row
+    }
+
+    private var tint: Color { row.isUndone ? Color.gray : Color.blue }
+    private var mainColor: Color { row.isUndone ? Color.secondary : Color.primary }
+    /// 已復原的 title 已經寫「（已復原）」，sub 也是「（已復原）」：不寫兩次
+    private var showSub: Bool { !row.isUndone && !row.sub.isEmpty }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            OrgMoveCardIcon(color: tint, size: 36, iconSize: 14)
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 6) {
+                    Text(row.detail)
+                        .font(.footnote.weight(.bold))
+                        .foregroundStyle(mainColor)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                    Spacer(minLength: 4)
+                    if !row.isUndone {
+                        OrgMoveLinkLabel(text: "交接單")
+                    }
+                }
+                HStack(spacing: 6) {
+                    OrgMoveDateCapsule(text: row.title)
+                    if showSub {
+                        Text(row.sub)
+                            .font(.caption2)
+                            .foregroundStyle(Color.secondary)
+                    }
+                }
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .contentShape(Rectangle())
+        .opacity(row.isUndone ? 0.7 : 1)
+        .accessibilityElement(children: .combine)
+    }
+}
+
+/// 灰底日期膠囊（同 promotionRow 的日期膠囊）
+private struct OrgMoveDateCapsule: View {
+    let text: String
+
+    var body: some View {
+        HStack(spacing: 3) {
+            Image(systemName: "calendar")
+                .font(.system(size: 9))
+            Text(text)
+        }
+        .font(.caption2)
+        .foregroundStyle(Color.secondary)
+        .padding(.horizontal, 7)
+        .padding(.vertical, 2.5)
+        .background(Color(.tertiarySystemFill))
+        .clipShape(Capsule())
+    }
+}
+
+// MARK: - 卡片的兩個 sheet（精靈、交接單頁）
+
+/// 部屬卡片的兩個 sheet：「…」〔轉組織〕開精靈；提示列〔看〕、接手那一區標頭、歷程那一列開交接單頁。
+/// 一律 `.sheet(item:)`＋`.appStores()`。包成一個 modifier：SubordinateDetailView 那一串修飾器只多一行
+///（那個檔型別檢查有前科，closure 放在這裡檢查）。
+struct OrgMoveCardSheets: ViewModifier {
+    @Binding var wizard: OrgMoveWizardRequest?
+    @Binding var sheet: OrgMoveSheetRequest?
+
+    func body(content: Content) -> some View {
+        content
+            .sheet(item: $wizard) { r in
+                OrgMoveWizard(personId: r.personId)
+                    .appStores()
+            }
+            .sheet(item: $sheet) { r in
+                OrgMoveSheetView(moveId: r.moveId)
+                    .appStores()
+            }
+    }
+}
+
+extension View {
+    /// 部屬卡片的轉組織精靈、交接單頁兩個 sheet（OrgMoveCardSheets）
+    func orgMoveCardSheets(wizard: Binding<OrgMoveWizardRequest?>, sheet: Binding<OrgMoveSheetRequest?>) -> some View {
+        modifier(OrgMoveCardSheets(wizard: wizard, sheet: sheet))
+    }
+}

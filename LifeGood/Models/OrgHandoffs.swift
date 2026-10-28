@@ -160,9 +160,20 @@ struct OrgHandoff: Codable, Equatable, Identifiable {
 enum OrgHandoffIndex {
     /// 部屬 id → 交出去時已逾期、扣分留在這位的任務／週報 id
     static var overdueIds: [UUID: Set<UUID>] = [:]
+    /// [v25.590 轉組織 v1a-1] 部屬 id → 那一筆 id →「E-03 腔體漏率改善 → 陳怡君」（〔不要了〕的：「…（不要了）」）。
+    /// 主動性明細「交出去時已逾期 ×1（…）」那一行用（judge §3.3：王小明身上已經沒有 T1 還被扣，要看得懂為什麼）
+    static var labels: [UUID: [UUID: String]] = [:]
 
     static func rebuild(_ book: OrgHandoffBook) {
         overdueIds = book.overdueIdsByPerson()
+        var out: [UUID: [UUID: String]] = [:]
+        for e in book.all where e.wasOverdue != false {
+            let t = (e.title ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            let title = t.isEmpty ? "未命名" : t
+            let to = (e.toName ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            out[e.fromId, default: [:]][e.itemId] = to.isEmpty ? "\(title)（不要了）" : "\(title) → \(to)"
+        }
+        labels = out
     }
 }
 

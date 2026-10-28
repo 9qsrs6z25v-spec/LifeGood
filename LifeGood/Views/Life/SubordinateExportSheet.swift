@@ -1833,7 +1833,8 @@ private struct XSheetActiveCard: View {
     }
 }
 
-/// 潛力性（考評）：3×2 小格（升職歷程、優缺點、成就、改善、缺失紀錄、Miss Operation），右邊期間內筆數，0 筆灰
+/// 潛力性（考評）：3×2 小格（歷程、優缺點、成就、改善、缺失紀錄、Miss Operation），右邊期間內筆數，0 筆灰
+///（[v25.590 轉組織 v1a-1]「升職歷程」改「歷程」：格子的字吃 SubExportBlock.label；歷程＝升職＋轉組織）
 private struct XSheetPotentialCard: View {
     @Binding var options: SubExportOptions
     let model: SubExportModel
@@ -1906,6 +1907,8 @@ private struct XSheetMiniCell: View {
 }
 
 /// 執掌（執掌設備、PM／警報時間軸）＋卡片上沒有的（排班）
+/// [v25.590 轉組織 v1a-1] 這位同仁有從交接單收到的機台，時間軸底下多一列〔只列接手之後〕（預設開；
+/// 執掌設備的件數也跟著切）。要退回這一件：刪掉 handoverRow 那三行與兩個 computed var，caption 改回原句。
 private struct XSheetDutyCard: View {
     @Binding var options: SubExportOptions
     let model: SubExportModel
@@ -1920,8 +1923,12 @@ private struct XSheetDutyCard: View {
                                    count: model.rowCount(.equipment), unit: "台", isOn: blockOn(.equipment))
                     Divider()
                     XSheetCheckRow(title: "PM／警報時間軸", icon: "clock.arrow.circlepath", color: .orange,
-                                   caption: "機台的一生，會含前一位負責人的時期",
+                                   caption: timelineCaption,
                                    count: model.rowCount(.timeline), isOn: blockOn(.timeline))
+                    if hasReceivedEquipment {
+                        Divider()
+                        XSheetHandoverRow(options: $options, caption: handoverCaption, enabled: handoverEnabled)
+                    }
                 }
             }
             VStack(alignment: .leading, spacing: 8) {
@@ -1935,6 +1942,29 @@ private struct XSheetDutyCard: View {
         }
     }
 
+    /// 這位同仁現在負責的機台裡，有從交接單收到的
+    private var hasReceivedEquipment: Bool {
+        !model.snapshot.equipmentSince.isEmpty
+    }
+
+    /// 〔只列接手之後〕開著：前一位負責人的時期不列
+    private var timelineCaption: String {
+        if hasReceivedEquipment && options.timelineAfterHandover {
+            return "機台的一生；從交接單收到的只列接手之後"
+        }
+        return "機台的一生，會含前一位負責人的時期"
+    }
+
+    /// 「蝕刻機 E-03 從 11/2 接手：PM、警報、件數都從那一刻起算」
+    private var handoverCaption: String {
+        SubExportComposer.handoverTimelineCaption(model.snapshot, now: model.now)
+    }
+
+    /// 執掌設備、時間軸都沒勾：這一列灰掉
+    private var handoverEnabled: Bool {
+        options.blocks.contains(.timeline) || options.blocks.contains(.equipment)
+    }
+
     private func blockOn(_ b: SubExportBlock) -> Binding<Bool> {
         Binding(get: { options.blocks.contains(b) },
                 set: { on in
@@ -1943,7 +1973,35 @@ private struct XSheetDutyCard: View {
     }
 }
 
+/// [v25.590 轉組織 v1a-1] 時間軸底下的〔只列接手之後〕（只有這位同仁有從交接單收到的機台才出現）
+private struct XSheetHandoverRow: View {
+    @Binding var options: SubExportOptions
+    let caption: String
+    let enabled: Bool
+
+    var body: some View {
+        XSheetDetailRow(label: "時間軸", enabled: enabled) {
+            XSheetChip(title: "只列接手之後", isOn: options.timelineAfterHandover,
+                       spoken: "時間軸只列接手之後") {
+                options.timelineAfterHandover.toggle()
+            }
+            captionText
+        }
+    }
+
+    @ViewBuilder
+    private var captionText: some View {
+        if !caption.isEmpty {
+            Text(caption)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+}
+
 /// 細節與敏感：〔逾期、準時與自訂分〕〔備註〕
+/// [v25.590 轉組織 v1a-1]「交接時已逾期」跟〔逾期、準時與自訂分〕同一個開關（caption 多寫一句）
 private struct XSheetSensitiveCard: View {
     @Binding var options: SubExportOptions
 
@@ -1952,7 +2010,7 @@ private struct XSheetSensitiveCard: View {
             XSheetSectionLabel(title: "細節與敏感")
             XSheetCard {
                 XSheetToggleRow(title: "逾期、準時與自訂分",
-                                caption: "任務逾期幾天、完成章（準時／超前／逾期）、自訂分；看板分數在看板那張卡",
+                                caption: "任務逾期幾天、交接時已逾期、完成章（準時／超前／逾期）、自訂分；看板分數在看板那張卡",
                                 isOn: $options.includeMarks)
                 Divider()
                 XSheetToggleRow(title: "備註",
@@ -1963,14 +2021,15 @@ private struct XSheetSensitiveCard: View {
     }
 }
 
-/// 不會匯出（這版沒有轉組織提示列、交接單，不寫）
+/// 不會匯出。[v25.590 轉組織 v1a-1] 多「交接單（在交接單頁分享）」：交接單只從交接單頁右上分享（文字、分享前提醒）；
+/// 轉組織提示列、「從王小明接手」那一區是操作提示，也不進匯出（design §5.2，這裡不另外寫）。
 private struct XSheetNeverCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text("不會匯出")
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(.secondary)
-            Text("你寫的部屬備註、生日的年份、被別人排第幾名、這位同仁填的排名票（在「…」▸ 匯出圖片）")
+            Text("你寫的部屬備註、生日的年份、被別人排第幾名、這位同仁填的排名票（在「…」▸ 匯出圖片）、交接單（在交接單頁分享）")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)

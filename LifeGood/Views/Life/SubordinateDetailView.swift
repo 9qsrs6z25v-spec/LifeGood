@@ -561,6 +561,10 @@ struct SubordinateDetailView: View {
     @State private var confirmBallotExport = false
     /// [v25.588 部屬匯出] 「…」▸〔部屬卡片…〕〔匯出文字…〕→ 選項頁（先選再出）
     @State private var exportRequest: SubExportRequest?
+    /// [v25.590 轉組織 v1a-1] 「…」〔轉組織〕→ 精靈；提示列〔看〕、接手那一區、歷程那一列 → 交接單頁
+    ///（兩個 sheet 在 OrgMoveCardParts.swift 的 orgMoveCardSheets。要退回這一件：刪這兩行與用到的地方）
+    @State private var orgMoveWizard: OrgMoveWizardRequest?
+    @State private var orgMoveSheet: OrgMoveSheetRequest?
 
     // 進場動畫旗標
     @State private var headerAppeared = false
@@ -609,6 +613,9 @@ struct SubordinateDetailView: View {
             ScrollView {
                 VStack(spacing: 16) {
                     headerCard(mentionedCount: mentionedItemsCache.count)
+
+                    // [v25.590 轉組織 v1a-1] 看板下提示列（原人、接手的人；沒事不佔位，judge §4.7）。要退回這一件：刪這一行
+                    OrgMoveHintBars(personId: subordinateId, onOpen: openOrgMoveSheet)
 
                     // 自訂 Capsule Pill Tab 切換器（matchedGeometryEffect 讓指示器平滑滑動）
                     // 日常→藍色 / 評分系統→橘色，對齊 RealEstateDetailView.tabPicker 規格
@@ -667,6 +674,9 @@ struct SubordinateDetailView: View {
                     }
 
                     if detailTab == .daily {
+                        // [v25.590 轉組織 v1a-1] 「從王小明接手（4）・11/2」（還在交接中才有，judge §4.6）。要退回這一件：刪這一行
+                        OrgMoveReceivedCard(personId: subordinateId, onOpenMove: openOrgMoveSheet,
+                                            onOpenTask: openTaskPreview, onOpenReport: openReportPreview)
                         weeklyReportSection
                             .opacity(tabSectionsAppeared ? 1 : 0)
                             .offset(y: tabSectionsAppeared ? 0 : 14)
@@ -756,6 +766,14 @@ struct SubordinateDetailView: View {
                         } label: {
                             Label("升職", systemImage: "arrow.up.circle.fill")
                         }
+                        // [v25.590 轉組織 v1a-1] 轉組織（judge §4.1）：在〔升職〕下面；開始精靈要訂閱（judge §6）。
+                        // 要退回這一件：刪這一顆。
+                        Button {
+                            if subscription.isPremium { orgMoveWizard = OrgMoveWizardRequest(personId: subordinateId) }
+                            else { showPremiumAlert = true }
+                        } label: {
+                            Label("轉組織", systemImage: "arrow.left.arrow.right.circle.fill")
+                        }
                         // [v25.348] 績效互評：填這位同仁對大家的年度排名
                         Button {
                             if subscription.isPremium { showPerformance = true }
@@ -808,6 +826,8 @@ struct SubordinateDetailView: View {
                 Text(ballotExportError ?? "")
             }
             .sheet(isPresented: $showPromotion) { PromotionSheet(subordinateId: subordinateId).appStores() }
+            // [v25.590 轉組織 v1a-1] 精靈、交接單頁兩個 .sheet(item:)＋.appStores()（包在 OrgMoveCardParts.swift）
+            .orgMoveCardSheets(wizard: $orgMoveWizard, sheet: $orgMoveSheet)
             .sheet(item: $viewingSideRole) { role in
                 // 不給跳回部屬明細：我們就是從那裡進來的，會無限疊 sheet
                 SideRoleWorkspaceView(roleId: role.id, allowSubordinateJump: false)
@@ -1133,13 +1153,18 @@ struct SubordinateDetailView: View {
                                         .strikethrough(r.isCompleted, color: .secondary)
                                         .foregroundStyle(r.isCompleted ? .secondary : .primary)
                                 }
-                                HStack(spacing: 3) {
-                                    Image(systemName: "calendar").font(.system(size: 8))
-                                    Text(formatDate(r.date))
+                                // [v25.590 轉組織 v1a-1] 日期膠囊旁邊多「交接自 王小明」「交接時已逾期」（judge §4.6；字在
+                                // OrgMoveCardData.chips 組好，沒有就不佔位）。要退回這一件：拿掉外層 HStack 與 OrgMoveHandoverChipRow 那一行
+                                HStack(spacing: 6) {
+                                    HStack(spacing: 3) {
+                                        Image(systemName: "calendar").font(.system(size: 8))
+                                        Text(formatDate(r.date))
+                                    }
+                                    .font(.caption2.weight(.medium)).foregroundStyle(.secondary)
+                                    .padding(.horizontal, 6).padding(.vertical, 2)
+                                    .background(Color(.tertiarySystemFill)).clipShape(Capsule())
+                                    OrgMoveHandoverChipRow(chips: reportHandoverChips(r))
                                 }
-                                .font(.caption2.weight(.medium)).foregroundStyle(.secondary)
-                                .padding(.horizontal, 6).padding(.vertical, 2)
-                                .background(Color(.tertiarySystemFill)).clipShape(Capsule())
                                 if !r.note.isEmpty {
                                     Text(r.note).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                                 }
@@ -1163,6 +1188,49 @@ struct SubordinateDetailView: View {
         .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color(.separator).opacity(0.12), lineWidth: 0.75))
         .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 3)
         .padding(.horizontal)
+    }
+
+    // MARK: - [v25.590 轉組織 v1a-1] 交接單、接手那一區的小呼叫（畫面在 OrgMoveCardParts.swift）
+
+    /// 週報列的「交接自」膠囊（字在 body 外組好；本檔有型別檢查逾時的前科）
+    private func reportHandoverChips(_ r: WeeklyReport) -> [ItemChip] {
+        OrgMoveCardData.chips(itemId: r.id, holderId: subordinateId)
+    }
+
+    /// 打開交接單頁（看交接單不用訂閱，judge §6）
+    private func openOrgMoveSheet(_ moveId: UUID) {
+        orgMoveSheet = OrgMoveSheetRequest(moveId: moveId)
+    }
+
+    /// 接手那一區點一列待辦：開那件任務的預覽（照任務列的規矩要訂閱）。
+    /// 先找這位同仁身上的；找不到（後來又換人了）再掃全部部屬，預覽開在現在的持有人身上
+    private func openTaskPreview(_ taskId: UUID) {
+        guard subscription.isPremium else { showPremiumAlert = true; return }
+        if let t = subordinate.tasks.first(where: { $0.id == taskId }) {
+            previewItem = .task(subId: subordinateId, task: t)
+            return
+        }
+        for s in lifeStore.subordinates {
+            if let t = s.tasks.first(where: { $0.id == taskId }) {
+                previewItem = .task(subId: s.id, task: t)
+                return
+            }
+        }
+    }
+
+    /// 接手那一區點一列週報：開那份週報的預覽（同上）
+    private func openReportPreview(_ reportId: UUID) {
+        guard subscription.isPremium else { showPremiumAlert = true; return }
+        if let r = subordinate.weeklyReports.first(where: { $0.id == reportId }) {
+            previewItem = .report(subId: subordinateId, report: r)
+            return
+        }
+        for s in lifeStore.subordinates {
+            if let r = s.weeklyReports.first(where: { $0.id == reportId }) {
+                previewItem = .report(subId: s.id, report: r)
+                return
+            }
+        }
     }
 
     // MARK: - 已完成（報告 / 會議項目 / 任務）收合於最下方
@@ -1635,6 +1703,9 @@ struct SubordinateDetailView: View {
             chips.append(ItemChip(id: "dereliction", text: "缺失", color: .red,
                                   icon: "exclamationmark.triangle.fill"))
         }
+        // [v25.590 轉組織 v1a-1] 「交接自 王小明」（有交接備註多 💬）、灰色「交接時已逾期」；到交接完成日、
+        // 沒有待分派就自動收（judge §4.6、第 10 題）。要退回這一件：刪這一行
+        chips.append(contentsOf: OrgMoveCardData.chips(itemId: t.id, holderId: subordinateId))
         // [v25.294] 自訂分數任務
         if let cs = t.customScore {
             chips.append(ItemChip(id: "score", text: taskScoreText(cs),
@@ -1761,18 +1832,20 @@ struct SubordinateDetailView: View {
 
     // MARK: - 優缺點
 
-    /// 升職歷程（潛力性分頁）：from → to 時間軸，新到舊；無紀錄時整卡隱藏。
-    /// 紀錄由工具列「升職」按鈕（PromotionSheet）產生。
+    /// 歷程（潛力性分頁）：升職、轉組織混在同一條時間軸，新到舊；兩種都沒有時整卡隱藏。
+    /// 升職紀錄由工具列「升職」按鈕（PromotionSheet）產生；轉組織那一列點了開交接單。
+    /// [v25.590 轉組織 v1a-1] 原本叫「升職歷程」、只有升職（judge §4.7）。
+    /// 要退回這一件：標題改回「升職歷程」、items 改回 `subordinate.promotions.sorted { $0.date > $1.date }`、列改回 promotionRow(p)。
     @ViewBuilder
     private var promotionSection: some View {
-        let promotions = subordinate.promotions.sorted { $0.date > $1.date }
-        if !promotions.isEmpty {
+        let items = historyItems
+        if !items.isEmpty {
             VStack(alignment: .leading, spacing: 0) {
-                sectionHeader("升職歷程", icon: "arrow.up.right.circle.fill", color: .orange,
-                              count: promotions.count) { }
-                ForEach(Array(promotions.enumerated()), id: \.element.id) { idx, p in
-                    promotionRow(p)
-                    if idx < promotions.count - 1 {
+                sectionHeader("歷程", icon: "arrow.up.right.circle.fill", color: .orange,
+                              count: items.count) { }
+                ForEach(Array(items.enumerated()), id: \.element.id) { idx, item in
+                    historyRow(item)
+                    if idx < items.count - 1 {
                         Divider().padding(.leading, 62)
                     }
                 }
@@ -1786,6 +1859,27 @@ struct SubordinateDetailView: View {
             .shadow(color: Color.orange.opacity(0.12), radius: 10, x: 0, y: 4)
             .shadow(color: .black.opacity(0.05), radius: 3, x: 0, y: 1)
             .padding(.horizontal)
+        }
+    }
+
+    /// [v25.590 轉組織 v1a-1] 歷程的資料：升職＋轉組織（含已復原）新到舊排好（OrgMoveCardParts.swift）
+    private var historyItems: [OrgMoveCardHistoryItem] {
+        OrgMoveCardHistoryItem.items(promotions: subordinate.promotions, personId: subordinateId, store: lifeStore)
+    }
+
+    /// [v25.590 轉組織 v1a-1] 歷程的一列：升職照舊；轉組織點了開交接單（看交接單不用訂閱，judge §6）
+    @ViewBuilder
+    private func historyRow(_ item: OrgMoveCardHistoryItem) -> some View {
+        switch item {
+        case .promotion(let p):
+            promotionRow(p)
+        case .move(let row):
+            Button {
+                openOrgMoveSheet(row.moveId)
+            } label: {
+                OrgMoveHistoryRowView(row: row)
+            }
+            .buttonStyle(.plain)
         }
     }
 
@@ -6203,6 +6297,9 @@ struct SubordinateItemCard: View {
             }
             ownerBlock(subId: subId, accent: .cyan)
             taskStatusRow(t)
+            // [v25.590 轉組織 v1a-1] 「11/2 交接自 王小明（原訂 10/20）・備註：…」（有才出現；出圖不放、分享文字不加，
+            // judge §4.6）。要退回這一件：刪這一行
+            OrgMoveReceivedPreviewLine(text: OrgMoveCardData.previewLine(itemId: t.id, holderId: subId, hidden: forExport))
             // [v25.331] 卡片補顯示任務分數：編輯頁改了分數，卡片原本完全沒地方看得到
             field("任務分數", taskScoreText(t))
             if let info = cardEquipmentInfo(t.equipmentLink) {
@@ -6287,6 +6384,8 @@ struct SubordinateItemCard: View {
             titleBlock(icon: "doc.text.fill", color: .purple, title: r.topic.isEmpty ? "未命名報告" : r.topic,
                        forExport: forExport)
             ownerBlock(subId: subId, accent: .purple)
+            // [v25.590 轉組織 v1a-1] 同任務：交接自哪一位那一行（出圖不放）。要退回這一件：刪這一行
+            OrgMoveReceivedPreviewLine(text: OrgMoveCardData.previewLine(itemId: r.id, holderId: subId, hidden: forExport))
             if !r.reportType.isEmpty { field("分類", r.reportType) }
             field("報告日期", fmt(r.date))
             // [v25.391] 關聯機台（可多台）
@@ -6603,7 +6702,7 @@ struct SubordinateItemCard: View {
 
 // MARK: - 升職表單
 
-/// 部屬升職：選新職等職稱＋生效日期＋備註。儲存時寫入升職歷程
+/// 部屬升職：選新職等職稱＋生效日期＋備註。儲存時寫入升職紀錄（卡片〔潛力性〕「歷程」）
 /// （from/to 存當時職稱快照文字）並更新部屬的 gradeTitleId。
 struct PromotionSheet: View {
     @EnvironmentObject var lifeStore: LifeStore
@@ -6654,7 +6753,8 @@ struct PromotionSheet: View {
                 } header: {
                     Text("升任職稱")
                 } footer: {
-                    Text("升職會記入「升職歷程」（保留升職前後職稱的快照），並同步更新部屬目前職稱。")
+                    // [v25.590 轉組織 v1a-1] 卡片上「升職歷程」改名「歷程」（judge §4.7）。要退回這一件：字改回「升職歷程」
+                    Text("升職會記入「歷程」（保留升職前後職稱的快照），並同步更新部屬目前職稱。")
                 }
                 Section {
                     DatePicker("生效日期", selection: $effectiveDate, displayedComponents: .date)

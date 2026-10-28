@@ -312,6 +312,54 @@ final class AppleCalendarBridge: ObservableObject {
         if removed { try? eventStore.commit() }
     }
 
+    /// [v25.590 轉組織 v1a-1] 轉組織後只改既有生日提醒的字：標題「｜」後面那段換成新的「部門 職稱」，
+    /// 內文「部門：」「職稱：」那兩行換成新的（沒有就加在「身分：」那行後面；新的是空的就拿掉那一行）。
+    /// **不新建、不重寫**（writeBirthdayReminder 會新建一則、提前天數與年數用預設值，把你設的提醒方式蓋掉；judge §2.5、C16）。
+    /// 找不到事件、沒有權限：回 false，什麼都不動。只在你按〔確認交接〕的那台呼叫。
+    @discardableResult
+    func retitleBirthdayEvent(id: String, roleLine: String?, department: String?, jobTitle: String?) -> Bool {
+        guard hasAccess, let e = resolveEvent(id) else { return false }
+        let oldTitle: String = e.title ?? ""
+        let oldNotes: String = e.notes ?? ""
+        let base: String
+        if let r = oldTitle.range(of: "｜") {
+            base = String(oldTitle[..<r.lowerBound])
+        } else {
+            base = oldTitle
+        }
+        var title = base
+        if let role = roleLine?.trimmingCharacters(in: .whitespaces), !role.isEmpty {
+            title += "｜\(role)"
+        }
+        var lines = oldNotes.components(separatedBy: "\n")
+        Self.replaceNoteLine(&lines, prefix: "部門：", value: department, after: "身分：")
+        Self.replaceNoteLine(&lines, prefix: "職稱：", value: jobTitle, after: "部門：")
+        let notes = lines.joined(separator: "\n")
+        guard title != oldTitle || notes != oldNotes else { return true }
+        e.title = title
+        e.notes = notes
+        do {
+            try eventStore.save(e, span: .futureEvents, commit: true)
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    /// 換掉以 prefix 開頭的那一行；沒有就加在 after 那行後面；新的值是空的就拿掉
+    private static func replaceNoteLine(_ lines: inout [String], prefix: String, value: String?, after: String) {
+        let v = (value ?? "").trimmingCharacters(in: .whitespaces)
+        if let i = lines.firstIndex(where: { $0.hasPrefix(prefix) }) {
+            if v.isEmpty {
+                lines.remove(at: i)
+            } else {
+                lines[i] = prefix + v
+            }
+        } else if !v.isEmpty, let j = lines.firstIndex(where: { $0.hasPrefix(after) }) {
+            lines.insert(prefix + v, at: j + 1)
+        }
+    }
+
     /// 既有事件目前所屬的行事曆 id（生日提醒設定頁預填用）
     func calendarId(ofEvent id: String) -> String? {
         guard hasAccess, let e = resolveEvent(id) else { return nil }

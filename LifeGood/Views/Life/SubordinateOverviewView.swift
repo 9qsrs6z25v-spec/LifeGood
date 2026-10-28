@@ -87,6 +87,8 @@ struct SubordinateOverviewView: View {
     @State private var subAddKind: SubAddKind?               // 新增部屬任務 / 會議 / 報告
     /// [v25.588 部屬匯出] 右上 ⤴ ▸〔匯出圖片…〕〔匯出文字…〕→ 選項頁 TeamExportSheet（先選再出）
     @State private var teamExportRequest: TeamExportRequest?
+    /// [v25.590 轉組織 v1a-1] 看板下「待分派」卡點一列打開那一張交接單（要退回這一件：刪這一行、看板下那一行卡片、.sheet(item: $orgMoveSheet)）
+    @State private var orgMoveSheet: OrgMoveSheetRequest?
     /// 暫時只看某位部屬（點項目上的人名膠囊設定；點 ✕ 或再點同一人取消）。
     /// 刻意用 @State 不落地：這是「看一眼」的臨時篩選，關掉頁面就重置。
     @State private var filterPersonId: UUID?
@@ -210,6 +212,10 @@ struct SubordinateOverviewView: View {
                         .offset(y: heroAppeared ? 0 : 16)
                         .animation(.spring(response: 0.52, dampingFraction: 0.80), value: heroAppeared)
 
+                    // [v25.590 轉組織 v1a-1] 「待分派 N」〔分給…〕（judge §4.9；沒有待分派時整張不出現、不佔位；〔分給…〕不用訂閱）
+                    OrgMovePendingCard { id in orgMoveSheet = OrgMoveSheetRequest(moveId: id) }
+                        .padding(.horizontal)
+
                     MacaronDatePicker(selectedDate: $selectedDate)
 
                     filterBanner
@@ -272,6 +278,11 @@ struct SubordinateOverviewView: View {
             }
             // [v25.588 部屬匯出] 匯出前先開選項頁（取代舊的分享面板＋每頁項目數對話框）
             .sheet(item: $teamExportRequest) { req in teamExportSheet(req) }
+            // [v25.590 轉組織 v1a-1] 交接單頁（從「待分派」卡點標題）
+            .sheet(item: $orgMoveSheet) { req in
+                OrgMoveSheetView(moveId: req.moveId)
+                    .appStores()
+            }
             .sheet(item: $addPersonalKind) { kind in
                 PersonalEventEditor(initialDate: selectedDate, editing: nil, initialKind: kind)
                     .appStores()
