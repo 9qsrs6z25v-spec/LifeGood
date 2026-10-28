@@ -297,9 +297,12 @@ struct SubordinateOverviewView: View {
     }
 
     /// [v5] 部屬今天點任務：開那件任務的預覽卡片（同總覽點一列；已刪掉找不到就停在總覽）
+    /// [v25.587 轉組織 v0a④] 小工具記下的是寫快照那時候的持有人；任務已經移交給別人就掃全部部屬（同卡片的 liveTask），
+    /// 開真正持有人身上那件。（要退回這一件：改回只查 ref.subId 那一位。）
     private func openPendingTask() {
         guard let ref = DeepLinkRouter.shared.takeSubordinateTask(),
-              let sub = lifeStore.subordinates.first(where: { $0.id == ref.subId }),
+              let holderId = lifeStore.taskHolderId(ref.taskId, preferring: ref.subId),
+              let sub = lifeStore.subordinates.first(where: { $0.id == holderId }),
               let task = sub.tasks.first(where: { $0.id == ref.taskId }) else { return }
         editTarget = .task(subId: sub.id, task: task)
     }

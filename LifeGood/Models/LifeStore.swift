@@ -2200,6 +2200,14 @@ class LifeStore: ObservableObject {
     /// 但**已經排好的順序完全保留**，不會因為有人加入就被打散。
     func performanceBallotSynced(year: Int, raterId: UUID,
                                  raterGradeId: UUID?) -> PerformanceBallot {
+        // [v25.587 轉組織 v0a②] 已經送出的票原樣回傳：不照「現在的課 × 職等」重分組、不改評分者快照。
+        // 原本打開一張今年 6 月送出的票，同仁換過課、升過職等就被重排（換課的人從原本那組消失、
+        // 排到新課那組最後），關掉時再存回去——加總名次跟著變。票上本來就存快照（見 PerformanceBallot 的說明），
+        // 送出後在這頁拖曳、按〔更新〕仍照舊可以改（改的是這張票原本的組）。還沒送出的照舊同步（第 9 題：照投票那天的課）。
+        // （要退回這一件：刪掉這個 if。）
+        if let submitted = performanceBallot(year: year, raterId: raterId), submitted.isSubmitted {
+            return submitted
+        }
         let fresh = performanceGroups(forRater: raterId)
         var ballot = performanceBallot(year: year, raterId: raterId)
             ?? PerformanceBallot(year: year, raterId: raterId)
@@ -2915,6 +2923,38 @@ class LifeStore: ObservableObject {
         syncOrgPersonFor(subordinate: item)
         save()
     }
+    /// [v25.587 轉組織 v0a①] 部屬名單往左滑〔刪除〕先問一次：確認框的標題與內文（純讀，畫面只負責顯示）。
+    /// 只列有東西的那幾種（順序固定：任務、會議、週報、紀錄、排班、升職歷程）；這位同仁是哪幾台機台的負責人，
+    /// 多一句「刪掉後這幾台新的警報不會掛給任何人」（deleteSubordinate 會把負責人清成空，沒負責人的機台警報不掛任務）。
+    /// 例（judge §11.5，王小明）：
+    ///   標題「刪掉王小明？」
+    ///   內文「任務 18 件、會議 1 個、週報 22 份、紀錄 23 筆、排班 8 天、升職歷程 1 筆會一起刪，不能復原。
+    ///        王小明負責 2 台機台（蝕刻機 E-03、純化器 P-12），刪掉後這 2 台新的警報不會掛給任何人。」
+    /// 機台超過 3 台只寫前 3 台的名字＋「等」。字跟 orgmove/build/v0a/sim_v0a.py 的 delete_confirm 一字不差。
+    /// （要退回這一件：SubordinateView 的往左滑改回直接呼叫 deleteSubordinate，這支可以留著不用。）
+    func subordinateDeleteConfirm(_ item: Subordinate) -> (title: String, message: String) {
+        let trimmed = item.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let who = trimmed.isEmpty ? "這位同仁" : trimmed
+        var parts: [String] = []
+        if !item.tasks.isEmpty { parts.append("任務 \(item.tasks.count) 件") }
+        if !item.meetings.isEmpty { parts.append("會議 \(item.meetings.count) 個") }
+        if !item.weeklyReports.isEmpty { parts.append("週報 \(item.weeklyReports.count) 份") }
+        if !item.records.isEmpty { parts.append("紀錄 \(item.records.count) 筆") }
+        if !item.shifts.isEmpty { parts.append("排班 \(item.shifts.count) 天") }
+        if !item.promotions.isEmpty { parts.append("升職歷程 \(item.promotions.count) 筆") }
+        var message = parts.isEmpty ? "不能復原。" : parts.joined(separator: "、") + "會一起刪，不能復原。"
+        let owned = equipmentPool.filter { $0.ownerId == item.id }
+        if !owned.isEmpty {
+            let names = owned.prefix(3).map { eq -> String in
+                let n = eq.name.trimmingCharacters(in: .whitespacesAndNewlines)
+                return n.isEmpty ? "未命名設備" : n
+            }
+            let list = names.joined(separator: "、") + (owned.count > 3 ? " 等" : "")
+            message += "\n\(who)負責 \(owned.count) 台機台（\(list)），刪掉後這 \(owned.count) 台新的警報不會掛給任何人。"
+        }
+        return (title: "刪掉\(who)？", message: message)
+    }
+
     func deleteSubordinate(_ item: Subordinate) {
         isLoading = true
         defer { isLoading = false }
@@ -3466,6 +3506,30 @@ class LifeStore: ObservableObject {
     // 只改單一文字欄位（備註/內容/處理措施/回復結果…）不必經過完整編輯頁的重建流程，
     // 也就不會碰到「重建漏帶欄位」那一類風險；閉包就地修改，isLoading 批次後存檔一次。
 
+    // MARK: - [v25.587 轉組織 v0a④⑦] 這一筆現在在誰身上
+
+    /// 任務現在的持有人：先看 `preferred`（開卡片、開編輯頁、小工具記下的那一位）身上有沒有，
+    /// 沒有（已經移交給別人、或另一台／還沒更新的 iPad 搬走了）再掃全部部屬；都找不到回 nil。
+    /// 給：小工具點任務（SubordinateOverviewView.openPendingTask）、任務編輯頁存檔與刪除（TaskEditorSheet）。
+    /// 純讀、不存檔。（要退回 ④⑦：呼叫端改回只查 preferred 那一位，這兩支可以留著不用。）
+    func taskHolderId(_ taskId: UUID, preferring preferred: UUID? = nil) -> UUID? {
+        if let p = preferred,
+           subordinates.first(where: { $0.id == p })?.tasks.contains(where: { $0.id == taskId }) == true {
+            return p
+        }
+        return subordinates.first(where: { s in s.tasks.contains(where: { $0.id == taskId }) })?.id
+    }
+
+    /// 週報題目現在的持有人：同 `taskHolderId`。
+    /// 給：週報卡片預覽、分享文字、編輯（SubordinateItemCard.liveReport）、週報編輯頁存檔與刪除（WeeklyReportEditorSheet）。
+    func reportHolderId(_ reportId: UUID, preferring preferred: UUID? = nil) -> UUID? {
+        if let p = preferred,
+           subordinates.first(where: { $0.id == p })?.weeklyReports.contains(where: { $0.id == reportId }) == true {
+            return p
+        }
+        return subordinates.first(where: { s in s.weeklyReports.contains(where: { $0.id == reportId }) })?.id
+    }
+
     func mutateSubordinateTaskFields(subordinateId: UUID, taskId: UUID,
                                      _ mutate: (inout SubordinateTask) -> Void) {
         guard let si = subordinates.firstIndex(where: { $0.id == subordinateId }),
@@ -3612,6 +3676,16 @@ class LifeStore: ObservableObject {
                 departments.first { $0.id == did }?.name
             } ?? ""
         }
+    }
+    /// [v25.587 轉組織 v0a⑥] 組織人員編輯頁存檔用（OrgPersonEditor.save）：
+    /// `item` 是呼叫端拿 store 裡**現在**那一筆、只換掉表單上真的改過的欄位組出來的。
+    /// 表單上的部門有改（`departmentEdited`）才走 `update(_:)`（連動的部屬跟著搬，同 v25.297）；
+    /// 部門沒改就只寫這一筆，**不反向改部屬**——不然開著的編輯頁一存，會拿這筆的部門去蓋掉部屬剛改好的部門
+    /// （例：另一台剛把部屬搬到設備課、這筆組織人員還沒跟上，在這裡改個備註就把部屬搬回製造一課）。
+    /// （要退回這一件：OrgPersonEditor.save 改回呼叫 `update(person)`，這支可以留著不用。）
+    func updateOrgPersonFromEditor(_ item: OrgPerson, departmentEdited: Bool) {
+        if departmentEdited { update(item); return }
+        if let i = orgPeople.firstIndex(where: { $0.id == item.id }) { orgPeople[i] = item }
     }
     func deleteOrgPerson(_ item: OrgPerson) {
         if let name = item.photoFileName { OrgPerson.deletePhoto(name) }
@@ -4269,11 +4343,19 @@ class LifeStore: ObservableObject {
     /// 用法與本檔案內部既有的 `isLoading = true; defer { isLoading = false }; ...; save()` 手法一致，
     /// 只是包成公開函式給 View 端的迴圈（例如刪除部門時連動清除其他部門/人員的關聯）使用，
     /// 避免迴圈跑 N 次就各自觸發 N 次「全量 12 個集合重編碼 + CloudKit 推送節流 + 畫面重繪」。
+    ///
+    /// [v25.587 轉組織 v0a⑤] 改成可以巢狀（同 `batched`）：記住外層原本的值、body 跑完還原，
+    /// 只有最外層那次真的 save()。原本一進來就 `isLoading = true`、結尾一律設回 `false` 再存——
+    /// 包在別的「只存一次」（`batched`、另一層 withBatch、iCloud 拉取的那一段）裡呼叫，
+    /// 會把外層的暫停關掉、當場存一半推上 iCloud，之後外層每改一個陣列又各存一次。
+    /// 最外層呼叫（現在所有的呼叫點：部門頁、匯入、還原備份）行為跟以前一模一樣：跑完存一次。
+    /// （要退回這一件：把這支換回原本的四行 `isLoading = true; defer { isLoading = false }; body(); save()`。）
     func withBatch(_ body: () -> Void) {
+        let wasLoading = isLoading
         isLoading = true
-        defer { isLoading = false }
         body()
-        save()
+        isLoading = wasLoading
+        if !wasLoading { save() }
     }
 
     // MARK: - [v25.399] 旅遊規劃 CRUD

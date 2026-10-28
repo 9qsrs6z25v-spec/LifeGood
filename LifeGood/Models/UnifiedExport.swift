@@ -1084,13 +1084,16 @@ enum UnifiedImporter {
                     // 既有部屬：補進新的子項目（班表/任務/會議/報告/紀錄）；不存在的部屬整筆新增
                     var arr = life.subordinates
                     let cal = Calendar.current
+                    // [v25.587 轉組織 v0a③] 任務、週報、會議的 id 已經在本機任何一位部屬身上就不補（見檔尾 HeldSubordinateItemIds）
+                    var held = HeldSubordinateItemIds(arr)
                     for inc in subs {
                         if let idx = arr.firstIndex(where: { $0.id == inc.id }) {
                             var s = arr[idx]
                             appendNewByID(&s.records,  inc.records)
-                            appendNewByID(&s.meetings, inc.meetings)
-                            appendNewByID(&s.tasks,    inc.tasks)
-                            appendNewByID(&s.weeklyReports, inc.weeklyReports)
+                            // [v25.587 轉組織 v0a③] 原本：appendNewByID(&s.meetings／tasks／weeklyReports, …)（只看這一位身上有沒有）
+                            HeldSubordinateItemIds.appendNew(&s.meetings, inc.meetings, held: &held.meetings)
+                            HeldSubordinateItemIds.appendNew(&s.tasks,    inc.tasks,    held: &held.tasks)
+                            HeldSubordinateItemIds.appendNew(&s.weeklyReports, inc.weeklyReports, held: &held.reports)
                             appendNewByID(&s.equipments, inc.equipments)
                             var existingShiftDays = Set(s.shifts.map { cal.startOfDay(for: $0.date) })
                             for sh in inc.shifts {
@@ -1104,7 +1107,10 @@ enum UnifiedImporter {
                             if s.joinDate == nil { s.joinDate = inc.joinDate }
                             arr[idx] = s
                         } else {
-                            arr.append(inc)
+                            // [v25.587 轉組織 v0a③] 本機沒有的部屬整筆加回：已經在別人身上的任務、週報、會議拿掉（原本：arr.append(inc)）
+                            var add = inc
+                            held.stripHeld(&add)
+                            arr.append(add)
                         }
                     }
                     life.subordinates = arr
@@ -1374,6 +1380,8 @@ enum SubordinateImporter {
 
             case .merge:
                 var subs = life.subordinates
+                // [v25.587 轉組織 v0a③] 任務、週報、會議的 id 已經在本機任何一位部屬身上就不補（見檔尾 HeldSubordinateItemIds）
+                var held = HeldSubordinateItemIds(subs)
                 for inc in payload.subordinates {
                     // 對應現有部屬：先比 id，再退而求其次比「同名同部門」
                     let idx = subs.firstIndex(where: { $0.id == inc.id })
@@ -1381,9 +1389,11 @@ enum SubordinateImporter {
                     if let idx = idx {
                         var s = subs[idx]
                         r.recordsMerged  += appendNew(&s.records,  inc.records)
-                        r.meetingsMerged += appendNew(&s.meetings, inc.meetings)
-                        r.tasksMerged    += appendNew(&s.tasks,    inc.tasks)
-                        r.reportsMerged  += appendNew(&s.weeklyReports, inc.weeklyReports)
+                        // [v25.587 轉組織 v0a③] 原本：appendNew(&s.meetings／tasks／weeklyReports, …)（只看這一位身上有沒有）；
+                        // 「任務 +N」只算真的補進來的
+                        r.meetingsMerged += HeldSubordinateItemIds.appendNew(&s.meetings, inc.meetings, held: &held.meetings)
+                        r.tasksMerged    += HeldSubordinateItemIds.appendNew(&s.tasks,    inc.tasks,    held: &held.tasks)
+                        r.reportsMerged  += HeldSubordinateItemIds.appendNew(&s.weeklyReports, inc.weeklyReports, held: &held.reports)
                         r.shiftsMerged   += appendNewShifts(&s.shifts, inc.shifts)
                         _ = appendNew(&s.equipments, inc.equipments)
                         if s.plantArea.isEmpty, !inc.plantArea.isEmpty { s.plantArea = inc.plantArea }
@@ -1391,7 +1401,10 @@ enum SubordinateImporter {
                         subs[idx] = s
                         r.updated += 1
                     } else {
-                        subs.append(inc); r.added += 1
+                        // [v25.587 轉組織 v0a③] 整筆新增：已經在別人身上的任務、週報、會議拿掉（原本：subs.append(inc)）
+                        var add = inc
+                        held.stripHeld(&add)
+                        subs.append(add); r.added += 1
                     }
                 }
                 life.subordinates = subs   // withBatch 內：與其餘 department/gradeTitle 變更合併只存檔一次
@@ -1424,5 +1437,49 @@ enum SubordinateImporter {
             }
         }
         return added
+    }
+}
+
+// MARK: - [v25.587 轉組織 v0a③] 合併匯入：同一筆不在兩個人身上
+
+/// 合併匯入舊備份時，任務、週報、會議的 id **已經在本機任何一位部屬身上**就不補——
+/// 不然一筆一筆移交出去的那件，會在原人身上「長回來」（同一件兩個人各一筆）。
+/// 不用查交接單：同一個 id 本來就只該在一個人身上。紀錄、執掌設備（舊格式）、班照舊（班的規則是 v1a）。
+/// 用在兩處：UnifiedImporter 的合併（完整備份／職涯匯入）、SubordinateImporter.importData 的 .merge（單獨匯入部屬資料檔）。
+/// 「取代」模式不經過這裡。
+/// （要退回這一件：兩個呼叫點改回 appendNewByID／appendNew，整筆新增的那一位改回直接 append，這個型別可以刪掉。）
+fileprivate struct HeldSubordinateItemIds {
+    var tasks: Set<UUID>
+    var meetings: Set<UUID>
+    var reports: Set<UUID>
+
+    init(_ subs: [Subordinate]) {
+        tasks = Set(subs.flatMap { $0.tasks.map(\.id) })
+        meetings = Set(subs.flatMap { $0.meetings.map(\.id) })
+        reports = Set(subs.flatMap { $0.weeklyReports.map(\.id) })
+    }
+
+    /// 只補 held 裡沒有的；補進來的記進 held（同一份備份兩個人都有同一筆時只補第一個）。回傳補了幾筆
+    @discardableResult
+    static func appendNew<T: Identifiable>(_ dst: inout [T], _ src: [T],
+                                           held: inout Set<UUID>) -> Int where T.ID == UUID {
+        var added: [T] = []
+        for x in src where !held.contains(x.id) {
+            added.append(x)
+            held.insert(x.id)   // 同一份備份裡同一個 id 出現兩次也只補一次
+        }
+        dst.append(contentsOf: added)
+        return added.count
+    }
+
+    /// 本機沒有的部屬整筆加回來時：身上已經在別人那邊的任務、週報、會議拿掉，剩下的記進 held
+    mutating func stripHeld(_ s: inout Subordinate) {
+        let t = tasks, m = meetings, r = reports
+        s.tasks.removeAll { t.contains($0.id) }
+        s.meetings.removeAll { m.contains($0.id) }
+        s.weeklyReports.removeAll { r.contains($0.id) }
+        for x in s.tasks { tasks.insert(x.id) }
+        for x in s.meetings { meetings.insert(x.id) }
+        for x in s.weeklyReports { reports.insert(x.id) }
     }
 }

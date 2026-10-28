@@ -1786,6 +1786,33 @@ struct OrgPersonEditor: View {
     // 狀態；用世代編號讓每次 Task 完成時檢查自己是否仍是最新一次選取。
     @State private var photoLoadGeneration = 0
     @State private var isSaving = false
+    /// [v25.587 轉組織 v0a⑥] 打開那一刻表單上的值（loadInitial 記下）；存檔時跟它比，只寫真的改過的欄位
+    @State private var opened: FormValues?
+
+    /// [v25.587 轉組織 v0a⑥] 表單上的欄位（loadInitial 填的、save 讀的就是這幾個）
+    private struct FormValues: Equatable {
+        var name: String
+        var jobTitle: String
+        var gradeTitleId: UUID?
+        var departmentId: UUID?
+        var hasBirthday: Bool
+        var birthday: Date
+        var relationship: String
+        var note: String
+        var children: [OrgPersonChild]
+        var relations: [OrgPersonRelation]
+        var linkedBusinessCardId: UUID?
+        var isInactive: Bool
+        var leftDate: Date
+        var photoFileName: String?
+    }
+
+    private var formValues: FormValues {
+        FormValues(name: name, jobTitle: jobTitle, gradeTitleId: gradeTitleId, departmentId: departmentId,
+                   hasBirthday: hasBirthday, birthday: birthday, relationship: relationship, note: note,
+                   children: children, relations: relations, linkedBusinessCardId: linkedBusinessCardId,
+                   isInactive: isInactive, leftDate: leftDate, photoFileName: photoFileName)
+    }
 
     private var isEditing: Bool { editingId != nil }
     private var existing: OrgPerson? {
@@ -2066,18 +2093,28 @@ struct OrgPersonEditor: View {
 
     private func loadInitial() {
         if let e = existing {
+            // [v25.587 轉組織 v0a⑥] 只填一次：拍照、選照片的畫面回來 onAppear 再跑時，不把你剛改的欄位蓋回去；
+            // 填進去的值記成 opened（存檔時跟它比）。（要退回這一件：拿掉這個 guard 和最後的 opened = …。）
+            guard opened == nil else { return }
+            let ld = e.leftDate ?? Date()
+            let bd = e.birthday ?? birthday
             name = e.name; jobTitle = e.jobTitle
             gradeTitleId = e.gradeTitleId
             departmentId = e.departmentId
-            if let bd = e.birthday { birthday = bd; hasBirthday = true }
+            if e.birthday != nil { birthday = bd; hasBirthday = true }
             relationship = e.relationship
             note = e.note
             children = e.children
             relations = e.relations
             linkedBusinessCardId = e.linkedBusinessCardId
             isInactive = e.isInactive
-            leftDate = e.leftDate ?? Date()
+            leftDate = ld
             photoFileName = e.photoFileName
+            opened = FormValues(name: e.name, jobTitle: e.jobTitle, gradeTitleId: e.gradeTitleId,
+                                departmentId: e.departmentId, hasBirthday: e.birthday != nil, birthday: bd,
+                                relationship: e.relationship, note: e.note, children: e.children,
+                                relations: e.relations, linkedBusinessCardId: e.linkedBusinessCardId,
+                                isInactive: e.isInactive, leftDate: ld, photoFileName: e.photoFileName)
         } else if let d = defaultDepartmentId {
             departmentId = d
         }
@@ -2113,6 +2150,16 @@ struct OrgPersonEditor: View {
             return jobTitle.trimmingCharacters(in: .whitespaces)
         }()
 
+        // [v25.587 轉組織 v0a⑥] 編輯既有人員：只寫改過的欄位（saveEdits）；新增照舊整筆建。
+        // 照片那段（存新檔、刪舊檔）在這之前，兩條路照舊都跑。
+        // （要退回這一件：刪掉這個 if，回到整筆重建＋update(person)。）
+        if isEditing {
+            saveEdits(id: id, newPhoto: newPhoto, validRelations: validRelations,
+                      finalCardId: finalCardId, resolvedJobTitle: resolvedJobTitle)
+            dismiss()
+            return
+        }
+
         // [v25.292] 生日提醒事件 id 必須跟著帶（比照部屬編輯的 promotions 教訓：
         // 重建整個物件時漏帶欄位＝資料被清空）；生日被拿掉時連動刪除行事曆事件
         var keptEventId = existing?.birthdayEventId
@@ -2144,6 +2191,74 @@ struct OrgPersonEditor: View {
         if isEditing { lifeStore.update(person) } else { lifeStore.add(person) }
         syncBusinessCardLink(personId: id, oldCardId: existing?.linkedBusinessCardId, newCardId: finalCardId)
         dismiss()
+    }
+
+    /// [v25.587 轉組織 v0a⑥] 跟打開那一刻（opened）比，只寫改過的欄位；作品、部屬連結、加入日期、生日提醒事件用 store 現在的。
+    /// 部門有改才連動部屬（updateOrgPersonFromEditor 的 departmentEdited）——不然另一台剛把部屬搬到設備課、
+    /// 這筆組織人員還沒跟上，在這裡改個備註就把部屬搬回去。什麼都沒改就不寫；開著的時候被刪了不加回來。
+    /// （要退回這一件：刪掉 save() 裡呼叫這支的 if；這支、opened、FormValues 可以留著不用。）
+    private func saveEdits(id: UUID, newPhoto: String?, validRelations: [OrgPersonRelation],
+                           finalCardId: UUID?, resolvedJobTitle: String) {
+        guard let o = opened, var person = lifeStore.orgPeople.first(where: { $0.id == id }) else { return }
+        let cur = formValues
+        let oldCardId = person.linkedBusinessCardId
+        var changed = false
+        if cur.name != o.name {
+            person.name = name.trimmingCharacters(in: .whitespaces)
+            changed = true
+        }
+        if cur.gradeTitleId != o.gradeTitleId || cur.jobTitle != o.jobTitle {
+            person.gradeTitleId = gradeTitleId
+            person.jobTitle = resolvedJobTitle
+            changed = true
+        }
+        let departmentEdited = cur.departmentId != o.departmentId
+        if departmentEdited {
+            person.departmentId = departmentId
+            changed = true
+        }
+        if cur.hasBirthday != o.hasBirthday || (cur.hasBirthday && cur.birthday != o.birthday) {
+            person.birthday = hasBirthday ? birthday : nil
+            // 生日被拿掉時連動刪除行事曆事件（同原本 v25.292）
+            if !hasBirthday, let bid = person.birthdayEventId {
+                Task { @MainActor in AppleCalendarBridge.shared.delete(eventIdentifier: bid) }
+                person.birthdayEventId = nil
+            }
+            changed = true
+        }
+        if cur.relationship != o.relationship {
+            person.relationship = relationship.trimmingCharacters(in: .whitespaces)
+            changed = true
+        }
+        if cur.note != o.note {
+            person.note = note.trimmingCharacters(in: .whitespaces)
+            changed = true
+        }
+        if cur.children != o.children {
+            person.children = children
+            changed = true
+        }
+        if cur.relations != o.relations {
+            person.relations = validRelations
+            changed = true
+        }
+        if cur.isInactive != o.isInactive || (cur.isInactive && cur.leftDate != o.leftDate) {
+            person.isInactive = isInactive
+            person.leftDate = isInactive ? leftDate : nil
+            changed = true
+        }
+        // 換了照片（pendingImageData）或按了「移除照片」
+        if pendingImageData != nil || cur.photoFileName != o.photoFileName {
+            person.photoFileName = newPhoto
+            changed = true
+        }
+        if cur.linkedBusinessCardId != o.linkedBusinessCardId {
+            person.linkedBusinessCardId = finalCardId
+            changed = true
+        }
+        guard changed else { return }
+        lifeStore.updateOrgPersonFromEditor(person, departmentEdited: departmentEdited)
+        syncBusinessCardLink(personId: id, oldCardId: oldCardId, newCardId: person.linkedBusinessCardId)
     }
 
     /// 為新人員自動產生一張預填基本資料的名片，並回傳 ID。

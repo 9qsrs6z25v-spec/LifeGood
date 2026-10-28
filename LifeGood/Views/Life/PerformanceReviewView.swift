@@ -29,6 +29,11 @@ struct PerformanceBallotView: View {
     /// [v25.372] 排名分數占比的輸入字串（存進 ballot.rankSharePercent）
     @State private var shareText = ""
     @State private var shareSaveTask: Task<Void, Never>?
+    /// [v25.587 轉組織 v0a②] 這次打開（reload）之後動過沒有：拖過、改過備註、改過占比。
+    /// 已送出的票沒動過就不 flushDraft（打開、關掉不改任何東西）；動過照舊存（送出後可以再調整）。
+    /// （要退回這一件：刪掉這個旗子與用到它的 5 處——占比欄 onChange、備註 Binding（noteBinding）、reload、flushDraft、move——
+    ///  占比欄 onChange 與 reload 改回原本的寫法，shareDisplayText 可以留著不用。）
+    @State private var editedSinceLoad = false
 
     private var isSelf: Bool { raterId == PerformanceBallot.selfRaterId }
 
@@ -175,7 +180,11 @@ struct PerformanceBallotView: View {
                     .onChange(of: shareText) { _, newValue in
                         let cleaned = Self.cleanedPercent(newValue)
                         if cleaned != newValue { shareText = cleaned }
+                        // [v25.587 轉組織 v0a②] 畫面上本來就是這個字（reload 把 13.33 填成「13.3」也會走到這裡）：
+                        // 沒改，不寫不存——原本會把 13.33 改成 13.3 存回去。
+                        if cleaned == Self.shareDisplayText(ballot?.rankSharePercent ?? 0) { return }
                         ballot?.rankSharePercent = Double(cleaned) ?? 0
+                        editedSinceLoad = true
                         saveDraftDebounced()
                     }
                 Text("%").foregroundStyle(.secondary)
@@ -289,11 +298,9 @@ struct PerformanceBallotView: View {
 
     private func noteSection(_ b: PerformanceBallot) -> some View {
         Section {
-            TextField("備註（選填，只有你看得到）", text: Binding(
-                get: { ballot?.note ?? "" },
-                set: { ballot?.note = $0 }
-            ), axis: .vertical)
-            .lineLimit(2...5)
+            // [v25.587 轉組織 v0a②] 備註欄的 Binding 拆到 noteBinding（真的改了才算動過）
+            TextField("備註（選填，只有你看得到）", text: noteBinding, axis: .vertical)
+                .lineLimit(2...5)
             if b.isSubmitted, let at = b.submittedAt {
                 HStack {
                     Text("送出時間").font(.caption).foregroundStyle(.secondary)
@@ -306,6 +313,20 @@ struct PerformanceBallotView: View {
         } footer: {
             Text("送出後仍然可以再調整並「更新」；分數會即時反映在人才矩陣的「評分加總」頁。")
         }
+    }
+
+    /// [v25.587 轉組織 v0a②] 備註欄：字真的不一樣才寫、才算動過（TextField 把同一個字寫回來不算）。
+    /// 拆成 computed var，不把多行 closure 塞進 Section 的 ViewBuilder。
+    /// （要退回這一件：TextField 改回 `text: Binding(get: { ballot?.note ?? "" }, set: { ballot?.note = $0 })`，刪掉這個。）
+    private var noteBinding: Binding<String> {
+        Binding(
+            get: { ballot?.note ?? "" },
+            set: { newValue in
+                guard newValue != (ballot?.note ?? "") else { return }
+                ballot?.note = newValue
+                editedSinceLoad = true
+            }
+        )
     }
 
     private var emptyState: some View {
@@ -336,11 +357,14 @@ struct PerformanceBallotView: View {
     // MARK: - 動作
 
     private func reload() {
+        // [v25.587 轉組織 v0a②] 重新載入＝這次打開還沒動過
+        editedSinceLoad = false
         let b = lifeStore.performanceBallotSynced(year: year, raterId: raterId,
                                                   raterGradeId: raterGradeId)
         ballot = b
         // 0 顯示成空字串：欄位空著比擺一個 0 更像「還沒填」
-        shareText = b.rankSharePercent > 0 ? Self.percentText(b.rankSharePercent) : ""
+        // [v25.587 轉組織 v0a②] 跟占比欄 onChange 用同一支算字，那邊才比得準（原本：b.rankSharePercent > 0 ? percentText : ""）
+        shareText = Self.shareDisplayText(b.rankSharePercent)
     }
 
     /// 占比欄改動時存草稿（比照拖曳排序：中途離開不會白填）。
@@ -359,6 +383,8 @@ struct PerformanceBallotView: View {
         shareSaveTask?.cancel()
         shareSaveTask = nil
         guard let b = ballot else { return }
+        // [v25.587 轉組織 v0a②] 已經送出的票：這次打開之後沒動過就不存回（要退回這一件：刪掉這行）
+        if b.isSubmitted && !editedSinceLoad { return }
         lifeStore.upsertPerformanceBallot(b)
     }
 
@@ -366,10 +392,14 @@ struct PerformanceBallotView: View {
         v == v.rounded() ? String(format: "%.0f", v) : String(format: "%.1f", v)
     }
 
+    /// [v25.587 轉組織 v0a②] 占比欄顯示的字：0 顯示成空字串（reload 與占比欄 onChange 共用）
+    private static func shareDisplayText(_ v: Double) -> String { v > 0 ? percentText(v) : "" }
+
     private func move(groupIndex: Int, from: IndexSet, to: Int) {
         guard var b = ballot, b.groups.indices.contains(groupIndex) else { return }
         b.groups[groupIndex].entries.move(fromOffsets: from, toOffset: to)
         ballot = b
+        editedSinceLoad = true   // [v25.587 轉組織 v0a②] 拖過＝動過
         // 拖一次就存一次草稿：中途離開不會白排
         lifeStore.upsertPerformanceBallot(b)
     }

@@ -4383,6 +4383,12 @@ struct TaskEditorSheet: View {
     @State private var note = ""
     @State private var isCompleted = false
     @State private var assignedSubId = UUID()   // 指派給哪位部屬（可換人處理）
+    /// [v25.587 轉組織 v0a⑦] 打開那一刻「指派給」的值（onAppear 記下）。從卡片〔編輯〕打開時，卡片每次重畫都會用
+    /// liveTask 的結果重新 init 這一頁（sheet 內容會因為上一頁重畫而重新 init，同 AddVehicleView v25.538）：
+    /// 開著的時候任務被移交（另一台、還沒更新的 iPad），subordinateId 會變成新的持有人，assignedSubId（@State）卻還是原人——
+    /// 拿 subordinateId 比，會把「指派給沒動」當成換人，存檔把任務搬回原人。所以「有沒有換人」一律跟這個比（assignChanged）。
+    /// （要退回這一件：刪掉這個、onAppear 裡記它的那行、assignChanged，兩處 assignChanged 改回比 subordinateId。）
+    @State private var openedSubId: UUID?
     @State private var isSaving = false
     /// 機台警報任務的回報欄位（一般任務不顯示）
     @State private var responseAction = ""
@@ -4396,6 +4402,10 @@ struct TaskEditorSheet: View {
     /// [v25.389] 強制準時完成：把完成時間壓在截止的那一刻，算準時。
     /// 太忙沒能在時間內按下去，但事情本來就是準時做完的，用這個補回來。
     @State private var forceOnTime = false
+
+    /// [v25.587 轉組織 v0a⑦] 「指派給」有沒有動過：跟打開那一刻（openedSubId）比，不跟會被重新 init 的 subordinateId 比。
+    /// 平常（開著時沒被移交）openedSubId ＝ subordinateId，跟原本一模一樣。
+    private var assignChanged: Bool { assignedSubId != (openedSubId ?? subordinateId) }
 
     /// 機台選單的候選：這位部屬負責的機台排前面，其餘照名稱排。
     /// 最常見的情況是「這件事跟我自己顧的機台有關」，不該從整個機台池裡慢慢找。
@@ -4526,7 +4536,7 @@ struct TaskEditorSheet: View {
                 } header: {
                     editorSectionHeader("指派人員", icon: "person.crop.circle.badge.checkmark")
                 } footer: {
-                    if assignedSubId != subordinateId {
+                    if assignChanged {   // [v25.587 轉組織 v0a⑦] 原本：assignedSubId != subordinateId
                         Text("儲存後此任務會移交給所選人員。")
                     }
                 }
@@ -4617,6 +4627,7 @@ struct TaskEditorSheet: View {
             }
             .onAppear {
                 assignedSubId = subordinateId
+                openedSubId = subordinateId   // [v25.587 轉組織 v0a⑦] 打開那一刻的「指派給」
                 if let e = editing {
                     topic = e.topic; content = e.content; date = e.date; note = e.note
                     isCompleted = e.isCompleted
@@ -4696,10 +4707,17 @@ struct TaskEditorSheet: View {
                 : (scoreValue == ScoreWeights.actTask ? nil : scoreValue),
             isDereliction: isDereliction
         )
-        let targetId = assignedSubId
-        // 換人：先從原持有者移除該任務
-        if targetId != subordinateId,
-           var old = lifeStore.subordinates.first(where: { $0.id == subordinateId }) {
+        // [v25.587 轉組織 v0a⑦] 這件現在在誰身上：編輯頁開著的時候被移交走了（另一台、還沒更新的 iPad），
+        // 存到真正持有人身上、不 append 回原人（不然同一件在兩個人身上各一筆）。新任務照舊放 subordinateId。
+        // 「指派給」沒動（assignChanged：跟打開那一刻比）＝留在現在持有人身上；有換人才從現在持有人搬走。
+        // 都找不到（被刪了）照舊存回原人。
+        // （要退回這一件：holderId 換回 subordinateId、targetId 換回 assignedSubId。）
+        let holderId: UUID = editing == nil ? subordinateId
+            : (lifeStore.taskHolderId(task.id, preferring: subordinateId) ?? subordinateId)
+        let targetId = assignChanged ? assignedSubId : holderId
+        // 換人：先從現在持有者移除該任務
+        if targetId != holderId,
+           var old = lifeStore.subordinates.first(where: { $0.id == holderId }) {
             old.tasks.removeAll { $0.id == task.id }
             lifeStore.update(old)
         }
@@ -4715,7 +4733,11 @@ struct TaskEditorSheet: View {
 
     private func deleteTask() {
         guard !isSaving else { return }
-        guard let e = editing, var sub = lifeStore.subordinates.first(where: { $0.id == subordinateId }) else { dismiss(); return }
+        // [v25.587 轉組織 v0a⑦] 從真正持有人身上刪（開著的時候被移交走了也刪得到）
+        // （要退回這一件：holderId 換回 subordinateId。）
+        guard let e = editing else { dismiss(); return }
+        let holderId = lifeStore.taskHolderId(e.id, preferring: subordinateId) ?? subordinateId
+        guard var sub = lifeStore.subordinates.first(where: { $0.id == holderId }) else { dismiss(); return }
         isSaving = true
         ReminderBridge.shared.deleteAsync(id: e.reminderId)
         sub.tasks.removeAll { $0.id == e.id }
@@ -5186,7 +5208,10 @@ struct WeeklyReportEditorSheet: View {
 
     private func save() {
         guard !isSaving else { return }
-        guard var sub = lifeStore.subordinates.first(where: { $0.id == subordinateId }) else { dismiss(); return }
+        // [v25.587 轉組織 v0a⑦] 存到這份週報現在的持有人身上（編輯頁開著時被移交走了也一樣，不 append 回原人）；
+        // 新的照舊放 subordinateId；都找不到（被刪了）照舊存回原人。（要退回這一件：holderId 換回 subordinateId。）
+        let holderId: UUID = editing.flatMap { lifeStore.reportHolderId($0.id, preferring: subordinateId) } ?? subordinateId
+        guard var sub = lifeStore.subordinates.first(where: { $0.id == holderId }) else { dismiss(); return }
         isSaving = true
         // [修正 v25.291] 若自訂分類輸入框還有沒按 + 的文字，儲存時直接視同已確認，
         // 避免使用者 key 完直接按儲存導致分類遺失。
@@ -5215,7 +5240,11 @@ struct WeeklyReportEditorSheet: View {
 
     private func deleteReport() {
         guard !isSaving else { return }
-        guard let e = editing, var sub = lifeStore.subordinates.first(where: { $0.id == subordinateId }) else { dismiss(); return }
+        // [v25.587 轉組織 v0a⑦] 從真正持有人身上刪（開著的時候被移交走了也刪得到）
+        // （要退回這一件：holderId 換回 subordinateId。）
+        guard let e = editing else { dismiss(); return }
+        let holderId = lifeStore.reportHolderId(e.id, preferring: subordinateId) ?? subordinateId
+        guard var sub = lifeStore.subordinates.first(where: { $0.id == holderId }) else { dismiss(); return }
         isSaving = true
         sub.weeklyReports.removeAll { $0.id == e.id }
         lifeStore.update(sub); dismiss()
@@ -5863,8 +5892,9 @@ struct SubordinateItemCard: View {
             }
             if !m.note.isEmpty { lines.append(""); lines.append("💬 備註"); lines.append(m.note) }
             lines.append(""); lines.append("🗓 會議產生：\(fmt(m.createdAt))")
-        case .report(let subId, let snap):
-            let r = lifeStore.subordinates.first { $0.id == subId }?.weeklyReports.first { $0.id == snap.id } ?? snap
+        case .report(let refSubId, let snap):
+            // [v25.587 轉組織 v0a⑦] 已移交給別人也找得到最新那份（liveReport）
+            let r = liveReport(refSubId, snap).1
             lines.append("📄 報告｜\(r.topic.isEmpty ? "未命名報告" : r.topic)")
             lines.append(divider)
             if !r.reportType.isEmpty { lines.append("🏷 分類：\(r.reportType)") }
@@ -6063,8 +6093,9 @@ struct SubordinateItemCard: View {
             }
             // 會議產生時間放最下面（使用者需求：匯出時押在底部，字樣「會議產生」）
             field("會議產生", fmt(m.createdAt))
-        case .report(let subId, let snap):
-            let r = lifeStore.subordinates.first { $0.id == subId }?.weeklyReports.first { $0.id == snap.id } ?? snap
+        case .report(let refSubId, let snap):
+            // [v25.587 轉組織 v0a⑦] subId＝現在的持有人（已移交給別人也是），下面的負責人、就地改備註都寫到那位身上
+            let (subId, r) = liveReport(refSubId, snap)
             titleBlock(icon: "doc.text.fill", color: .purple, title: r.topic.isEmpty ? "未命名報告" : r.topic,
                        forExport: forExport)
             ownerBlock(subId: subId, accent: .purple)
@@ -6127,6 +6158,16 @@ struct SubordinateItemCard: View {
         }
         for s in lifeStore.subordinates {
             if let m = s.meetings.first(where: { $0.id == snap.id }) { return (s.id, m) }
+        }
+        return (subId, snap)
+    }
+    /// [v25.587 轉組織 v0a⑦] 週報題目同任務、會議：先查開卡片時的持有人，找不到（已移交給別人）再掃全部部屬。
+    /// 預覽（cardBody）、分享文字（shareTextContent）、編輯（editor）三處都用它；都找不到才退回快照。
+    /// （要退回這一件：三處改回 `lifeStore.subordinates.first { $0.id == subId }?.weeklyReports.first { $0.id == snap.id } ?? snap`。）
+    private func liveReport(_ subId: UUID, _ snap: WeeklyReport) -> (UUID, WeeklyReport) {
+        if let holder = lifeStore.reportHolderId(snap.id, preferring: subId),
+           let r = lifeStore.subordinates.first(where: { $0.id == holder })?.weeklyReports.first(where: { $0.id == snap.id }) {
+            return (holder, r)
         }
         return (subId, snap)
     }
@@ -6345,8 +6386,9 @@ struct SubordinateItemCard: View {
         case .meeting(let refSubId, let snap):
             let (subId, live) = liveMeeting(refSubId, snap)
             MeetingEditorSheet(subordinateId: subId, editing: live)
-        case .report(let subId, let snap):
-            let live = lifeStore.subordinates.first { $0.id == subId }?.weeklyReports.first { $0.id == snap.id } ?? snap
+        case .report(let refSubId, let snap):
+            // [v25.587 轉組織 v0a⑦] 編輯頁帶現在的持有人＋最新那份（liveReport）
+            let (subId, live) = liveReport(refSubId, snap)
             WeeklyReportEditorSheet(subordinateId: subId, editing: live)
         case .leave(let subId, let snap):
             let live = lifeStore.subordinates.first { $0.id == subId }?.records.first { $0.id == snap.id } ?? snap

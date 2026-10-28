@@ -94,6 +94,8 @@ struct SubordinateView: View {
     @State private var showPremiumAlert = false
     @State private var showRoster = false
     @State private var showTalentMatrix = false
+    /// [v25.587 轉組織 v0a①] 往左滑〔刪除〕先問一次：要刪的那一位（nil＝沒有在問）
+    @State private var pendingDelete: Subordinate?
     @AppStorage("subordinateSortOption") private var sortOptionRaw = SubordinateSortOption.dateAdded.rawValue
     @AppStorage("subordinateSortAscending") private var sortAscending = false
     @AppStorage("subordinateFilterDeptRaw") private var filterDeptRaw = ""   // 舊版單選（保留供遷移）
@@ -260,12 +262,17 @@ struct SubordinateView: View {
                     // 避免整列滑到底直接刪除（與邊緣切頁手勢衝突，同型修正見 v25.154）
                     .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                         if case .person(let s) = row {
-                            Button(role: .destructive) {
+                            // [v25.587 轉組織 v0a①] 先問，不直接刪（付費檢查照舊在前面）。
+                            // 不用 role: .destructive：有確認框時，帶 destructive 的列一按就先被 List 滑掉，
+                            // 按〔取消〕也回不來（坑 #12，同 ResumeView v25.562／RealEstateView v25.530）；改紅色 tint，按鈕看起來一樣。
+                            // （要退回這一件：改回 Button(role: .destructive) { …; lifeStore.deleteSubordinate(s) }、拿掉 .tint。）
+                            Button {
                                 guard subscription.isPremium else { showPremiumAlert = true; return }
-                                lifeStore.deleteSubordinate(s)
+                                pendingDelete = s
                             } label: {
                                 Label("刪除", systemImage: "trash")
                             }
+                            .tint(.red)
                         }
                     }
             }
@@ -409,6 +416,36 @@ struct SubordinateView: View {
             .sheet(isPresented: $showRoster) { SubordinateRosterView().appStores() }
             .sheet(isPresented: $showTalentMatrix) { TalentMatrixView().appStores() }
             .premiumLockAlert(isPresented: $showPremiumAlert)
+        }
+        // [v25.587 轉組織 v0a①] 刪除確認框掛在 NavigationStack 外面（List 上已經有付費說明，同一個 view 不掛兩個 alert）
+        .alert(deleteAskTitle, isPresented: deleteAskShown, presenting: pendingDelete) { s in
+            Button("刪除", role: .destructive) { confirmDelete(s) }
+            Button("取消", role: .cancel) { }
+        } message: { s in
+            Text(lifeStore.subordinateDeleteConfirm(s).message)
+        }
+    }
+
+    // MARK: - [v25.587 轉組織 v0a①] 刪除確認框（字在 LifeStore.subordinateDeleteConfirm）
+    // （要退回這一件：滑出按鈕改回直接 lifeStore.deleteSubordinate(s)，刪掉 pendingDelete、這三支和 body 後面的 .alert。）
+
+    private var deleteAskShown: Binding<Bool> {
+        Binding(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } })
+    }
+
+    private var deleteAskTitle: String {
+        guard let s = pendingDelete else { return "" }
+        return lifeStore.subordinateDeleteConfirm(s).title
+    }
+
+    /// 確認框收起之後（下一個 runloop）才刪；用 store 裡現在那一筆（問的期間又加了任務、提醒事項也刪得到）。
+    /// 問的期間人已經被刪了（另一台、iCloud 拉下來）就什麼都不做。
+    private func confirmDelete(_ s: Subordinate) {
+        pendingDelete = nil
+        let id = s.id
+        DispatchQueue.main.async {
+            guard let fresh = lifeStore.subordinates.first(where: { $0.id == id }) else { return }
+            lifeStore.deleteSubordinate(fresh)
         }
     }
 
@@ -936,6 +973,31 @@ struct AddSubordinateView: View {
     @State private var hasPlantArea = false
     @State private var plantArea = ""
     @State private var isSaving = false
+    /// [v25.587 轉組織 v0a⑥] 打開那一刻表單上的值（loadEditing 填好時記下）；存檔時跟它比，只寫真的改過的欄位
+    @State private var opened: FormValues?
+
+    /// [v25.587 轉組織 v0a⑥] 表單上的欄位（loadEditing 填的、save 讀的就是這幾個）
+    private struct FormValues: Equatable {
+        var name: String
+        var hasJoinDate: Bool
+        var joinDate: Date
+        var hasBirthday: Bool
+        var birthday: Date
+        var gradeTitleId: UUID?
+        var departmentId: UUID?
+        var department: String
+        var note: String
+        var hasPlantArea: Bool
+        var plantArea: String
+    }
+
+    private var formValues: FormValues {
+        FormValues(name: name, hasJoinDate: hasJoinDate, joinDate: joinDate,
+                   hasBirthday: hasBirthday, birthday: birthday,
+                   gradeTitleId: selectedGradeTitleId, departmentId: selectedDepartmentId,
+                   department: department, note: note,
+                   hasPlantArea: hasPlantArea, plantArea: plantArea)
+    }
 
     private var canSave: Bool {
         !name.trimmingCharacters(in: .whitespaces).isEmpty
@@ -1079,6 +1141,14 @@ struct AddSubordinateView: View {
             deptText = department.trimmingCharacters(in: .whitespaces)
         }
 
+        // [v25.587 轉組織 v0a⑥] 編輯既有部屬：只把改過的欄位寫到 store 裡現在那一筆（saveEdits）。新增照舊整筆建。
+        // （要退回這一件：刪掉這個 if，回到整筆重建。）
+        if let e = editing {
+            saveEdits(id: e.id, linkedTitle: linkedTitle, deptText: deptText)
+            dismiss()
+            return
+        }
+
         let existingRecords = editing?.records ?? []
         let item = Subordinate(
             id: editing?.id ?? UUID(),
@@ -1109,22 +1179,72 @@ struct AddSubordinateView: View {
         dismiss()
     }
 
+    /// [v25.587 轉組織 v0a⑥] 跟打開那一刻（opened）比，只寫改過的欄位；任務、會議、班、週報、紀錄、升職歷程、
+    /// 執掌設備、生日提醒事件一律用 store 現在的（不從表單帶回）——不然開著的編輯頁一存，就用打開那一刻的快照
+    /// 把手錶剛打的勾、另一台剛搬走的任務、剛改好的部門整包蓋回去。什麼都沒改就不寫；開著的時候人被刪了不加回來。
+    /// （要退回這一件：刪掉 save() 裡呼叫這支的 if；這支、opened、FormValues 可以留著不用。）
+    private func saveEdits(id: UUID, linkedTitle: String, deptText: String) {
+        guard let o = opened, var item = lifeStore.subordinates.first(where: { $0.id == id }) else { return }
+        let cur = formValues
+        var changed = false
+        if cur.name != o.name {
+            item.name = name.trimmingCharacters(in: .whitespaces)
+            changed = true
+        }
+        if cur.hasJoinDate != o.hasJoinDate || (cur.hasJoinDate && cur.joinDate != o.joinDate) {
+            item.joinDate = hasJoinDate ? joinDate : nil
+            changed = true
+        }
+        if cur.hasBirthday != o.hasBirthday || (cur.hasBirthday && cur.birthday != o.birthday) {
+            item.birthday = hasBirthday ? birthday : nil
+            changed = true
+        }
+        // 職等那一欄有改才重寫 jobTitle 字樣（原本每存一次都照職等重組；畫面先查 gradeTitleId，看不出差別）
+        if cur.gradeTitleId != o.gradeTitleId {
+            item.gradeTitleId = selectedGradeTitleId
+            item.jobTitle = linkedTitle
+            changed = true
+        }
+        if cur.departmentId != o.departmentId || cur.department != o.department {
+            item.departmentId = selectedDepartmentId
+            item.department = deptText
+            changed = true
+        }
+        if cur.note != o.note {
+            item.note = note.trimmingCharacters(in: .whitespaces)
+            changed = true
+        }
+        if cur.hasPlantArea != o.hasPlantArea || (cur.hasPlantArea && cur.plantArea != o.plantArea) {
+            item.plantArea = hasPlantArea ? plantArea.trimmingCharacters(in: .whitespaces) : ""
+            changed = true
+        }
+        if changed { lifeStore.update(item) }
+    }
+
     private func loadEditing() {
-        guard let e = editing else { return }
-        name = e.name
-        selectedGradeTitleId = e.gradeTitleId
-        selectedDepartmentId = e.departmentId
-        department = e.department
-        note = e.note
-        plantArea = e.plantArea
-        hasPlantArea = !e.plantArea.isEmpty
-        if let jd = e.joinDate {
-            hasJoinDate = true
-            joinDate = jd
-        }
-        if let bd = e.birthday {
-            hasBirthday = true
-            birthday = bd
-        }
+        // [v25.587 轉組織 v0a⑥] 只填一次（onAppear 再跑時不把你剛改的欄位蓋回去）；
+        // 用 store 裡現在那一筆填（找不到才用傳進來的），填進去的值記成 opened。
+        // （要退回這一件：改回直接用 editing 填、不記 opened。）
+        guard let e = editing, opened == nil else { return }
+        let base = lifeStore.subordinates.first(where: { $0.id == e.id }) ?? e
+        let values = FormValues(
+            name: base.name,
+            hasJoinDate: base.joinDate != nil, joinDate: base.joinDate ?? joinDate,
+            hasBirthday: base.birthday != nil, birthday: base.birthday ?? birthday,
+            gradeTitleId: base.gradeTitleId, departmentId: base.departmentId,
+            department: base.department, note: base.note,
+            hasPlantArea: !base.plantArea.isEmpty, plantArea: base.plantArea)
+        name = values.name
+        hasJoinDate = values.hasJoinDate
+        joinDate = values.joinDate
+        hasBirthday = values.hasBirthday
+        birthday = values.birthday
+        selectedGradeTitleId = values.gradeTitleId
+        selectedDepartmentId = values.departmentId
+        department = values.department
+        note = values.note
+        hasPlantArea = values.hasPlantArea
+        plantArea = values.plantArea
+        opened = values
     }
 }
