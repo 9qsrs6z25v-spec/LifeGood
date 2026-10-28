@@ -165,19 +165,28 @@ struct OrgMoveHintBars: View {
         return out
     }
 
+    /// [v25.592 轉組織 v1b] 按過〔現在套用〕〔選部門〕：之後提示列就算全空了，也留一個 0 高的透明底給 .orgMoveHintActions 掛
+    ///（「今天生效」那張、選部門那一頁、確認框都掛在這條提示列上；交接完成日已經過了才按的，改好那一刻這條就收了，
+    /// 沒有底「今天生效」就跳不出來——同 OrgMoveDueCard 的 busy）。只有這種時候才多那 16pt 的間距，離開卡片就沒了。
+    /// 要退回這一件：刪 keepHost、requestAction 裡那一行，OrgMoveHintBarList 刪 keepHost 與 else if 那一段
+    @State private var keepHost = false
+
     /// [v25.592 轉組織 v1b] 提示列上按了一顆：交給 .orgMoveHintActions（這裡不判斷訂閱、不寫 store）
     private func requestAction(_ moveId: UUID, _ action: OrgMoveHintAction) {
+        if action == .applyNow || action == .pickDept { keepHost = true }
         actionRequest = OrgMoveHintActionRequest(moveId: moveId, action: action)
     }
 
     var body: some View {
-        OrgMoveHintBarList(hints: hints, onOpen: onOpen, onAction: requestAction)
+        OrgMoveHintBarList(hints: hints, keepHost: keepHost, onOpen: onOpen, onAction: requestAction)
             .orgMoveHintActions($actionRequest)
     }
 }
 
 private struct OrgMoveHintBarList: View {
     let hints: [OrgMoveHint]
+    /// [v25.592 轉組織 v1b] 提示列空了也留 0 高的透明底（OrgMoveHintBars.keepHost）
+    let keepHost: Bool
     let onOpen: (UUID) -> Void
     /// [v25.592 轉組織 v1b] 按了一條上的按鈕（moveId、哪一顆）
     let onAction: (UUID, OrgMoveHintAction) -> Void
@@ -190,6 +199,10 @@ private struct OrgMoveHintBarList: View {
                 }
             }
             .padding(.horizontal)
+        } else if keepHost {
+            Color.clear
+                .frame(height: 0)
+                .accessibilityHidden(true)
         }
     }
 }

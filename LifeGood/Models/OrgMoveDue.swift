@@ -91,8 +91,26 @@ extension OrgMovePlan {
     }
 
     /// 「什麼時候做」那兩顆（judge §4.4）
-    static func timingOptions(effectiveKey: String) -> [OrgMoveTimingOption] {
+    static func timingOptions(effectiveKey: String, plantOnly: Bool = false, keepDept: Bool = false) -> [OrgMoveTimingOption] {
         let d = shortDay(effectiveKey)
+        // [v25.592 轉組織 v1b 裁定] 〔照舊（只交接）〕部門不會改、只換廠區改的是廠區：兩顆的字不寫「才改部門」。
+        // 要退回這一件：刪 plantOnly、keepDept 兩個參數與下面兩個 if（applyScheduleTexts 那一行改回只帶 effectiveKey）
+        if keepDept {
+            return [
+                OrgMoveTimingOption(timing: .handoverNow, label: "現在就交接",
+                                    note: "按下去就把事情交出去；部門照舊（\(d) 生效）"),
+                OrgMoveTimingOption(timing: .together, label: "\(d) 再交接",
+                                    note: "\(d) 以前什麼都不動；\(d) 照那天的資料交接、部門照舊（那天已經逾期的會重新給新的截止日）")
+            ]
+        }
+        if plantOnly {
+            return [
+                OrgMoveTimingOption(timing: .handoverNow, label: "現在就交接，\(d) 才換廠區",
+                                    note: "按下去就把事情交出去；廠區 \(d) 才換（\(d) 打開 App 時在你自己的手機上換）"),
+                OrgMoveTimingOption(timing: .together, label: "\(d) 一起做",
+                                    note: "\(d) 以前什麼都不動；\(d) 照那天的資料一起交接、換廠區（那天已經逾期的會重新給新的截止日）")
+            ]
+        }
         return [
             OrgMoveTimingOption(timing: .handoverNow, label: "現在就交接，\(d) 才改部門",
                                 note: "按下去就把事情交出去；部門、廠區、名片、組織圖 \(d) 才改（\(d) 打開 App 時在你自己的手機上改）"),
@@ -106,7 +124,10 @@ extension OrgMovePlan {
                                    world: OrgMoveWorld, now: Date) {
         let today = dayKey(now)
         guard isFuture(move.effectiveKey, todayKey: today) else { return }
-        p.timingOptions = timingOptions(effectiveKey: move.effectiveKey)
+        // [v25.592 轉組織 v1b 裁定] 帶 kind、keepDept（字見 timingOptions）。要退回這一件：改回只帶 effectiveKey
+        p.timingOptions = timingOptions(effectiveKey: move.effectiveKey,
+                                        plantOnly: move.kind == OrgMoveKind.plant.rawValue,
+                                        keepDept: move.keepDept == true)
         let chosen = p.timingOptions.first(where: { $0.timing == draft.timing }) ?? p.timingOptions[0]
         p.timingNote = chosen.note
         p.birthdayNote = "\(shortDay(move.effectiveKey)) 在「今天生效」那張上按一下才改"
@@ -212,7 +233,9 @@ extension OrgMovePlan {
     /// 單頭日子那一行多的那一段：交出去了、部門還沒改＝「・11/1 才改部門」；生效那天才改部門的＝「・11/2 08:10 改的部門」
     static func scheduleHeaderParts(_ move: OrgMove) -> String {
         if move.isHanded { return "・\(shortDay(move.effectiveKey)) 才改部門" }
-        guard move.timingValue == .handoverNow, let a = move.appliedAt else { return "" }
+        // [v25.592 轉組織 v1b 驗證]〔留給接手的人〕〔只做交接〕（cancelNote 寫了那一句）的部門沒改：不寫「…改的部門」
+        //（不然單頭是「10/28 交接・10/30 14:00 改的部門」，可是部門照舊）。要退回這一件：拿掉 `move.cancelNote == nil,`
+        guard move.timingValue == .handoverNow, move.cancelNote == nil, let a = move.appliedAt else { return "" }
         let c = calendar.dateComponents([.hour, .minute], from: a)
         let hm = String(format: "%02d:%02d", c.hour ?? 0, c.minute ?? 0)
         return "・\(shortDay(dayKey(a))) \(hm) 改的部門"
@@ -245,13 +268,15 @@ extension OrgMovePlan {
 
     /// 歷程那一列的標題（「2026/11/1 轉組織」「…（已取消）」「…（已復原）」）
     static func historyTitle(_ m: OrgMove) -> String {
-        if m.isUndone { return "\(fullDay(m.effectiveKey)) 轉組織" + (m.cancelledAt != nil ? "（已取消）" : "（已復原）") }
+        // [v25.592 轉組織 v1b 裁定] 用 undoneByCancel（〔留給接手的人〕之後再〔復原〕寫「已復原」）。要退回這一件：改回 `m.cancelledAt != nil`
+        if m.isUndone { return "\(fullDay(m.effectiveKey)) 轉組織" + (m.undoneByCancel ? "（已取消）" : "（已復原）") }
         return "\(fullDay(m.effectiveKey)) 轉組織"
     }
 
     /// 歷程那一列的灰字（「交出去 10・跟著 5」「（已取消）」「交出去 9・跟著 5（11/1 才改部門）」）
     static func historySub(_ m: OrgMove, given: Int, follow: Int) -> String {
-        if m.isUndone { return m.cancelledAt != nil ? "（已取消）" : "（已復原）" }
+        // [v25.592 轉組織 v1b 裁定] 同 historyTitle。要退回這一件：改回 `m.cancelledAt != nil`
+        if m.isUndone { return m.undoneByCancel ? "（已取消）" : "（已復原）" }
         var s = "交出去 \(given)・跟著 \(follow)"
         if m.isHanded { s += "（\(shortDay(m.effectiveKey)) 才改部門）" }
         if m.keepDept == true, m.cancelledAt != nil { s += "（調動取消了）" }
@@ -361,6 +386,9 @@ extension OrgMovePlan {
     /// 回傳〔加進交接單〕要加的那幾列（排好的＝還沒決定；交出去了的＝跟著，之後在交接單〔改交給…〕）
     static func lateLines(_ m: OrgMove, world: OrgMoveWorld, now: Date) -> [OrgMoveLine] {
         guard !m.isUndone, m.deletedAt == nil, let sub = world.sub(m.personId) else { return [] }
+        // [v25.592 轉組織 v1b 驗證] 只換廠區的單（kind "plant"）本來就不列待辦、週報（buildLines 只有 .move 才列）：
+        // 不然這位同仁手上所有待辦、週報都算成「排好之後多了 N 件」，生效那天還全記進 lateRefIds。要退回這一件：刪這一行
+        guard m.kind == OrgMoveKind.move.rawValue else { return [] }
         let only: Set<UUID>? = m.orgPending ? nil : Set(m.lateRefIds ?? [])
         if let o = only, o.isEmpty { return [] }
         var known = Set<UUID>()
@@ -469,10 +497,18 @@ extension OrgMovePlan {
     /// 精靈完成畫面的大字與下面那一行（排好的、交出去了還沒改部門的；全部做好的＝「交接單做好了」、沒有那一行）
     static func doneTexts(_ m: OrgMove) -> (headline: String, sub: String?) {
         let d = shortDay(m.effectiveKey)
+        // [v25.592 轉組織 v1b 裁定]〔照舊（只交接）〕寫「部門照舊」、只換廠區寫「換廠區」（同 timingOptions）。
+        // 要退回這一件：刪 keep、plant 與兩個 if 裡的分支，改回原本的兩行 return
+        let keep = m.keepDept == true
+        let plant = m.kind == OrgMoveKind.plant.rawValue
         if m.isPlanned {
+            if keep { return ("交接單排好了", "\(d) 以前什麼都不動；\(d) 打開 App 時交接、部門照舊（在你自己的手機上）") }
+            if plant { return ("交接單排好了", "\(d) 以前什麼都不動；\(d) 打開 App 時一起交接、換廠區（在你自己的手機上）") }
             return ("交接單排好了", "\(d) 以前什麼都不動；\(d) 打開 App 時一起交接、改部門（在你自己的手機上）")
         }
         if m.isHanded {
+            if keep { return ("事情交出去了", "部門照舊（\(d) 生效）") }
+            if plant { return ("事情交出去了", "廠區 \(d) 才換（\(d) 打開 App 時在你自己的手機上換）") }
             return ("事情交出去了", "部門、廠區、名片、組織圖 \(d) 才改（\(d) 打開 App 時在你自己的手機上改）")
         }
         return ("交接單做好了", nil)

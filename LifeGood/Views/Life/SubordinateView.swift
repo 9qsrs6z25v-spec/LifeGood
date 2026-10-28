@@ -96,6 +96,9 @@ struct SubordinateView: View {
     @State private var showTalentMatrix = false
     /// [v25.587 轉組織 v0a①] 往左滑〔刪除〕先問一次：要刪的那一位（nil＝沒有在問）
     @State private var pendingDelete: Subordinate?
+    /// [v25.592 轉組織 v1b] 名單長按〔轉組織…〕開的精靈（judge §4.1；開始精靈要訂閱）。
+    /// 要退回這一件：刪這一行、listRow 的 .contextMenu、personMenu／openOrgMove／openEdit、body 的 .sheet(item: $orgMoveWizard)
+    @State private var orgMoveWizard: OrgMoveWizardRequest?
     @AppStorage("subordinateSortOption") private var sortOptionRaw = SubordinateSortOption.dateAdded.rawValue
     @AppStorage("subordinateSortAscending") private var sortAscending = false
     @AppStorage("subordinateFilterDeptRaw") private var filterDeptRaw = ""   // 舊版單選（保留供遷移）
@@ -342,6 +345,8 @@ struct SubordinateView: View {
             subordinateRow(sub, ctx: ctx)
                 .contentShape(Rectangle())
                 .onTapGesture { viewingItem = sub }
+                // [v25.592 轉組織 v1b] 長按：〔轉組織…〕〔編輯〕（judge §4.1）
+                .contextMenu { personMenu(sub) }
                 .opacity(rowsAppeared ? 1 : 0)
                 .offset(y: rowsAppeared ? 0 : 14)
                 .animation(
@@ -412,6 +417,8 @@ struct SubordinateView: View {
             }
             .sheet(isPresented: $showAdd) { AddSubordinateView().appStores() }
             .sheet(item: $editingItem) { item in AddSubordinateView(editing: item).appStores() }
+            // [v25.592 轉組織 v1b] 名單長按〔轉組織…〕（要退回這一件：刪這一行）
+            .sheet(item: $orgMoveWizard) { r in OrgMoveWizard(personId: r.personId, presetDeptId: r.presetDeptId).appStores() }
             .sheet(item: $viewingItem) { item in SubordinateDetailView(subordinate: item).appStores() }
             .sheet(isPresented: $showRoster) { SubordinateRosterView().appStores() }
             .sheet(isPresented: $showTalentMatrix) { TalentMatrixView().appStores() }
@@ -447,6 +454,30 @@ struct SubordinateView: View {
             guard let fresh = lifeStore.subordinates.first(where: { $0.id == id }) else { return }
             lifeStore.deleteSubordinate(fresh)
         }
+    }
+
+    // MARK: - [v25.592 轉組織 v1b] 名單長按：〔轉組織…〕〔編輯〕（judge §4.1、§4.8）
+    // 兩顆都要訂閱（同部屬卡片「…」的〔編輯〕〔轉組織〕）；這位已經有一張排好的，精靈自己會先問〔打開那張〕〔取消那張、重排〕。
+    // （要退回這一件：刪這三支、listRow 的 .contextMenu、orgMoveWizard 與 body 的 .sheet(item: $orgMoveWizard)。）
+
+    @ViewBuilder
+    private func personMenu(_ sub: Subordinate) -> some View {
+        Button { openOrgMove(sub.id) } label: {
+            Label("轉組織…", systemImage: "arrow.left.arrow.right.circle.fill")
+        }
+        Button { openEdit(sub) } label: {
+            Label("編輯", systemImage: "square.and.pencil")
+        }
+    }
+
+    private func openOrgMove(_ id: UUID) {
+        guard subscription.isPremium else { showPremiumAlert = true; return }
+        orgMoveWizard = OrgMoveWizardRequest(personId: id)
+    }
+
+    private func openEdit(_ sub: Subordinate) {
+        guard subscription.isPremium else { showPremiumAlert = true; return }
+        editingItem = sub
     }
 
     // MARK: - 統計摘要卡
@@ -856,6 +887,9 @@ struct SubordinateView: View {
                             .overlay(Capsule().stroke(Color(.separator).opacity(0.18), lineWidth: 0.6))
                             .lineLimit(1)
                     }
+
+                    // [v25.592 轉組織 v1b] 排好、部門還沒改：「11/1 起 設備課」（judge §4.8）
+                    plannedCapsule(sub.id)
                 }
 
                 // [2026-06 v2] 到職日：升級為 Capsule 日期徽章（對齊 CareerView / OverviewView.recentRow v2）
@@ -891,6 +925,24 @@ struct SubordinateView: View {
             }
         }
         .padding(.vertical, 6)
+    }
+
+    /// [v25.592 轉組織 v1b] 排好、部門還沒改的那位：部門膠囊後面一顆藍色小膠囊「11/1 起 設備課」
+    ///（只換廠區「11/1 起 P2」、部門照舊「11/1 交接」；字在 OrgMovePlan.plannedCapsuleText 組好；judge §4.8）。
+    /// 只在 App 內名單；小工具、通知、手錶一個字都沒有。要退回這一件：刪這一支與 subordinateRow 裡叫它的那一行。
+    @ViewBuilder
+    private func plannedCapsule(_ id: UUID) -> some View {
+        if let text = OrgMovePlan.plannedCapsuleText(personId: id) {
+            Text(text)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(Color.blue)
+                .padding(.horizontal, 6).padding(.vertical, 2.5)
+                .background(Color.blue.opacity(0.12))
+                .clipShape(Capsule())
+                .overlay(Capsule().stroke(Color.blue.opacity(0.24), lineWidth: 0.6))
+                .lineLimit(1)
+                .layoutPriority(1)
+        }
     }
 
     private func resolvedDeptName(_ sub: Subordinate) -> String {
@@ -1054,6 +1106,8 @@ struct AddSubordinateView: View {
             }
             .onAppear { loadEditing() }
         }
+        // [v25.592 轉組織 v1b] 編輯頁開著時告訴 OrgMoveDueCenter（開著就不自動改部門，關了再看；brief §1-4 ③）。要退回這一件：刪這一行
+        .orgMoveEditorPresence()
     }
 
     @ViewBuilder
@@ -1251,5 +1305,36 @@ struct AddSubordinateView: View {
         hasPlantArea = values.hasPlantArea
         plantArea = values.plantArea
         opened = values
+    }
+}
+
+// MARK: - [v25.592 轉組織 v1b] 編輯頁開著（OrgMoveDueCenter 第 ③ 個條件）
+
+/// 部屬編輯頁（AddSubordinateView）、組織人員編輯頁（OrgPersonEditor）最外層掛這個：打開時 `editorOpened()`、關掉時 `editorClosed()`
+///（開著的時候到了生效日也不自動改部門，關掉之後再看一次；brief §1-4 ③）。
+/// 一開一關只算一次：拍照、選照片的畫面回來 onAppear 又跑一次也不多算（counted 旗標），計數不會卡住。
+/// 要退回這一件：刪這個 modifier 與兩個編輯頁最外層的 `.orgMoveEditorPresence()`。
+struct OrgMoveEditorPresence: ViewModifier {
+    @State private var counted = false
+
+    func body(content: Content) -> some View {
+        content
+            .onAppear {
+                guard !counted else { return }
+                counted = true
+                OrgMoveDueCenter.shared.editorOpened()
+            }
+            .onDisappear {
+                guard counted else { return }
+                counted = false
+                OrgMoveDueCenter.shared.editorClosed()
+            }
+    }
+}
+
+extension View {
+    /// [v25.592 轉組織 v1b] 部屬／組織人員編輯頁開著時告訴 OrgMoveDueCenter（見 OrgMoveEditorPresence）
+    func orgMoveEditorPresence() -> some View {
+        modifier(OrgMoveEditorPresence())
     }
 }

@@ -257,6 +257,10 @@ struct OrgMove: Codable, Equatable, Identifiable {
     var isHanded: Bool { state == OrgMoveState.handed.rawValue }
     /// [v25.592 轉組織 v1b] 排好的〔取消〕（什麼都沒做過；同時寫了 deletedAt，live 看不到）
     var isCancelled: Bool { state == OrgMoveState.cancelled.rawValue }
+    /// [v25.592 轉組織 v1b 裁定] 生效前〔取消這張單〕〔拿回來〕復原的（記了取消的時間、沒有「取消了調動」那一句）：寫「已取消」。
+    /// 〔留給接手的人〕之後 7 天內又按〔復原〕的（cancelNote 有值）照實寫「已復原」。
+    /// 要退回這一件：刪這一支，歷程、單頭、「組織」那一列、交接單徽章那 5 處改回 `cancelledAt != nil`
+    var undoneByCancel: Bool { isUndone && cancelledAt != nil && cancelNote == nil }
     /// [v25.592 轉組織 v1b] 部門、廠區還沒改（排好的、交出去了還沒到生效日的）：名單膠囊「11/1 起 設備課」、到期套用看這個
     var orgPending: Bool { (isPlanned || isHanded) && deletedAt == nil }
     /// [v25.592 轉組織 v1b] 什麼時候做（nil／"now"＝確認那一刻全部做）
@@ -274,8 +278,15 @@ struct OrgMove: Codable, Equatable, Identifiable {
         for l in a.allLines where !seen.contains(l.id) {
             seen.insert(l.id)
             let mineT: Date = l.updatedAt ?? Date.distantPast
-            if let o = theirs[l.id], (o.updatedAt ?? Date.distantPast) > mineT {
-                out.append(o)
+            // [v25.592 轉組織 v1b 驗證] 取了哪一份，另一份有、這一份沒有的 v1b 欄位補回來（keepingV1bFields）。
+            // 要退回這一件：這個 if let 換回 `if let o = theirs[l.id], (o.updatedAt ?? Date.distantPast) > mineT { out.append(o) } else { out.append(l) }`
+            if let o = theirs[l.id] {
+                let oT: Date = o.updatedAt ?? Date.distantPast
+                if oT > mineT {
+                    out.append(keepingV1bFields(o, from: l, sameTime: false))
+                } else {
+                    out.append(keepingV1bFields(l, from: o, sameTime: oT == mineT))
+                }
             } else {
                 out.append(l)
             }
@@ -287,7 +298,24 @@ struct OrgMove: Codable, Equatable, Identifiable {
         head.lines = out.isEmpty ? head.lines : out
         // 套用前的樣子只在第一次套用時存：哪一邊有就用哪一邊（兩邊都有用先存的那份＝a）
         if head.before == nil { head.before = a.before ?? b.before }
+        // [v25.592 轉組織 v1b 驗證] 25.591 的 App 不認得 v1b 加的欄位：它那台一存檔（改了任何東西都整包重存、推上 iCloud）
+        // 這幾個欄位就不見了，updatedAt 卻沒變（一樣新時本來取 a＝收進來的那份），取消調動那一句、「已交」就被洗掉。
+        // 從另一份補回：取消的時間與那一句 v1b 從不清掉（排好、還沒生效的不補：那是另一台又改回排好的）；
+        // lateRefIds〔加進交接單〕會清掉，只在一樣新時補。要退回這一件：刪這三行
+        if !head.orgPending, head.cancelledAt == nil { head.cancelledAt = a.cancelledAt ?? b.cancelledAt }
+        if !head.orgPending, head.cancelNote == nil { head.cancelNote = a.cancelNote ?? b.cancelNote }
+        if aT == bT, head.lateRefIds == nil { head.lateRefIds = a.lateRefIds ?? b.lateRefIds }
         return head
+    }
+
+    /// [v25.592 轉組織 v1b 驗證] 同一列的兩份：win＝取的那一份；另一份有、win 沒有的 v1b 欄位補回（25.591 的 App 存回來會少這兩個）。
+    /// addedLate v1b 從不清掉，一律補；checkedAt 你取消「已交」時會寫新的 updatedAt，只在一樣新時補（不會被舊的那份勾回來）。
+    /// 要退回這一件：刪這支，merge 裡那個 if let 換回原本的兩行
+    private static func keepingV1bFields(_ win: OrgMoveLine, from other: OrgMoveLine, sameTime: Bool) -> OrgMoveLine {
+        var l = win
+        if l.addedLate == nil { l.addedLate = other.addedLate }
+        if sameTime, l.checkedAt == nil { l.checkedAt = other.checkedAt }
+        return l
     }
 }
 

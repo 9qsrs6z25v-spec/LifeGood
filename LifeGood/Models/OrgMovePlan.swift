@@ -1843,7 +1843,8 @@ enum OrgMovePlan {
         let toDept = sideText(OrgMoveSide(deptId: move.to.deptId, deptLabel: move.to.deptLabel), world: world)
         let fromDept = sideText(OrgMoveSide(deptId: move.from.deptId, deptLabel: move.from.deptLabel), world: world)
         let op = world.orgPerson(linkedTo: move.personId)
-        if move.isUndone { return (true, move.cancelledAt != nil ? "已取消" : "已復原") }
+        // [v25.592 轉組織 v1b 裁定] 用 undoneByCancel（〔留給接手的人〕之後再〔復原〕寫「已復原」）。要退回這一件：改回 `move.cancelledAt != nil`
+        if move.isUndone { return (true, move.undoneByCancel ? "已取消" : "已復原") }
         // [v25.592 轉組織 v1b] 部門還沒改（排好的、交出去了還沒到生效日的）：「11/1 才改：設備課・P2」；到了卻卡住的寫為什麼；
         // 取消了調動、只做交接的寫那一句（cancelNote）。要退回這一件：刪這兩個 if
         if move.orgPending { return pendingOrgStatus(move, world: world, now: now) }
@@ -2016,7 +2017,8 @@ enum OrgMovePlan {
         dates += scheduleHeaderParts(move)
         dates += "・交接完成日 \(shortDay(move.handoverByKey))"
         if move.isUndone, let u = move.undoneAt {
-            dates += move.cancelledAt != nil ? "・\(shortDay(dayKey(u))) 取消了" : "・\(shortDay(dayKey(u))) 已復原"
+            // [v25.592 轉組織 v1b 裁定] 用 undoneByCancel。要退回這一件：改回 `move.cancelledAt != nil`
+            dates += move.undoneByCancel ? "・\(shortDay(dayKey(u))) 取消了" : "・\(shortDay(dayKey(u))) 已復原"
         }
         return (title, dates)
     }

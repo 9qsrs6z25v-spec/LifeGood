@@ -212,6 +212,11 @@ struct SubordinateOverviewView: View {
                         .offset(y: heroAppeared ? 0 : 16)
                         .animation(.spring(response: 0.52, dampingFraction: 0.80), value: heroAppeared)
 
+                    // [v25.592 轉組織 v1b] 「今天生效」：到了、部門還沒改的（沒自動改的、卡住的；judge §3.5、§7 v1b 做好標準 3）。
+                    // 沒有就整張不出現、不佔位；點標題開那張交接單（同一個 orgMoveSheet）。要退回這一件：刪這兩行
+                    OrgMoveDueCard { id in orgMoveSheet = OrgMoveSheetRequest(moveId: id) }
+                        .padding(.horizontal)
+
                     // [v25.590 轉組織 v1a-1] 「待分派 N」〔分給…〕（judge §4.9；沒有待分派時整張不出現、不佔位；〔分給…〕不用訂閱）
                     OrgMovePendingCard { id in orgMoveSheet = OrgMoveSheetRequest(moveId: id) }
                         .padding(.horizontal)

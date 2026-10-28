@@ -92,6 +92,14 @@ struct GradeTitleView: View {
     @State private var deptEmptyPulseTask: Task<Void, Never>?
     @State private var gradeEmptyPulse = false
     @State private var gradeEmptyPulseTask: Task<Void, Never>?
+    /// [v25.592 轉組織 v1b] 往左滑〔刪除〕：有排好的交接單要調到這個部門時先問（nil＝沒有在問）
+    @State private var pendingDeptDelete: DeptDeleteAsk?
+
+    /// [v25.592 轉組織 v1b] 刪部門前要問的那一次（note＝OrgMovePlan.deptDeleteNote）
+    private struct DeptDeleteAsk: Equatable {
+        let deptId: UUID
+        let note: String
+    }
 
     var body: some View {
         NavigationStack {
@@ -118,11 +126,16 @@ struct GradeTitleView: View {
                         // 改用 allowsFullSwipe: false 的滑出按鈕取代 .onDelete：
                         // 避免整列滑到底直接刪除（與邊緣切頁手勢衝突，同型修正見 v25.154）
                         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                            Button(role: .destructive) {
-                                deleteDepartment(dept)
+                            // [v25.592 轉組織 v1b] 有排好的交接單要調到這裡時先問（askDeleteDepartment）；沒有照舊直接刪。
+                            // 不用 role: .destructive：有確認框時，帶 destructive 的列一按就先被 List 滑掉，按〔取消〕也回不來
+                            //（坑 #12，同 SubordinateView v25.587）；改紅色 tint，按鈕看起來一樣。
+                            // （要退回這一件：改回 Button(role: .destructive) { deleteDepartment(dept) }、拿掉 .tint。）
+                            Button {
+                                askDeleteDepartment(dept)
                             } label: {
                                 Label("刪除", systemImage: "trash")
                             }
+                            .tint(.red)
                         }
                     }
 
@@ -204,6 +217,39 @@ struct GradeTitleView: View {
                 DepartmentEditor(editingId: wrapper.id)
                     .appStores()
             }
+        }
+        // [v25.592 轉組織 v1b] 刪部門確認框掛在 NavigationStack 外面（List 上已經有付費說明，同一個 view 不掛兩個 alert）。
+        // 要退回這一件：刪這個 .alert、pendingDeptDelete、DeptDeleteAsk、askDeleteDepartment、confirmDeptDelete、deptDeleteShown。
+        .alert("確定要刪除這個部門嗎？", isPresented: deptDeleteShown, presenting: pendingDeptDelete) { a in
+            Button("刪除", role: .destructive) { confirmDeptDelete(a) }
+            Button("取消", role: .cancel) {}
+        } message: { a in
+            Text(a.note)
+        }
+    }
+
+    // MARK: - [v25.592 轉組織 v1b] 刪部門前多一句（judge §5-6）
+
+    private var deptDeleteShown: Binding<Bool> {
+        Binding(get: { pendingDeptDelete != nil }, set: { if !$0 { pendingDeptDelete = nil } })
+    }
+
+    /// 有排好、部門還沒改的交接單要調到這個部門 → 先問「有 1 張排好的交接單要調到這裡（刪掉後，那幾張到生效日會問你要改去哪個部門）」；沒有＝照舊直接刪
+    private func askDeleteDepartment(_ dept: Department) {
+        if let note = OrgMovePlan.deptDeleteNote(deptId: dept.id, book: lifeStore.orgMoves) {
+            pendingDeptDelete = DeptDeleteAsk(deptId: dept.id, note: note)
+        } else {
+            deleteDepartment(dept)
+        }
+    }
+
+    /// 確認框收起之後（下一個 runloop）才刪；用 store 裡現在那一筆（問的期間被別台刪了就什麼都不做）
+    private func confirmDeptDelete(_ a: DeptDeleteAsk) {
+        pendingDeptDelete = nil
+        let id = a.deptId
+        DispatchQueue.main.async {
+            guard let fresh = lifeStore.departments.first(where: { $0.id == id }) else { return }
+            deleteDepartment(fresh)
         }
     }
 
@@ -640,6 +686,12 @@ struct DepartmentEditor: View {
         lifeStore.departments.filter { $0.id != editingId }
     }
 
+    /// [v25.592 轉組織 v1b] 刪除確認框多一句「有 1 張排好的交接單要調到這裡…」（沒有＝nil）
+    private var deleteNote: String? {
+        guard let id = editingId else { return nil }
+        return OrgMovePlan.deptDeleteNote(deptId: id, book: lifeStore.orgMoves)
+    }
+
     var body: some View {
         NavigationStack {
             Form {
@@ -771,10 +823,19 @@ struct DepartmentEditor: View {
             }
             .alert("確定要刪除這個部門嗎？", isPresented: $showDeleteConfirm) {
                 Button("刪除", role: .destructive) {
-                    if let e = existing { deleteSelf(e) }
+                    // [v25.592 轉組織 v1b] 確認框收起之後（下一個 runloop）才刪。要退回這一件：改回 if let e = existing { deleteSelf(e) }; dismiss()
+                    let e = existing
                     dismiss()
+                    DispatchQueue.main.async {
+                        if let e { deleteSelf(e) }
+                    }
                 }
                 Button("取消", role: .cancel) {}
+            } message: {
+                // [v25.592 轉組織 v1b] 有排好的交接單要調到這裡時多一句（judge §5-6）。要退回這一件：刪這個 message
+                if let note = deleteNote {
+                    Text(note)
+                }
             }
             .onAppear { loadInitial() }
         }

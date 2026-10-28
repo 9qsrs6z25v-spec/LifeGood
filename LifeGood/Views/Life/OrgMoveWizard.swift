@@ -65,6 +65,9 @@ struct OrgMoveWizard: View {
         .premiumLockAlert(isPresented: $showPremiumAlert)
         .modifier(plannedActions)
         .onAppear { prepare() }
+        // [v25.592 轉組織 v1b 裁定] 精靈開著也算「編輯頁開著」（OrgMoveDueCenter 第 ③ 個條件）：生效那天剛好開著精靈時，
+        // 等關掉才自動改部門（草稿是打開時照當時的部門建的；同部屬／組織人員編輯頁）。要退回這一件：刪這一行
+        .orgMoveEditorPresence()
     }
 
     /// [v25.592 轉組織 v1b] 〔打開那張〕〔取消那張、重排〕的 sheet 與確認框（OrgMoveWizardRows.swift）。
@@ -434,8 +437,11 @@ private struct OrgMoveStepWhere: View {
     }
 
     /// 「11/1 以後才改部門；事情什麼時候交在最後一步選」（只換廠區寫「換廠區」）
+    /// [v25.592 轉組織 v1b 審查] 〔照舊（只交接）〕部門不會改：寫「11/1 生效（部門照舊）」，不寫「才改部門」。
+    /// 要退回這一件：刪 `if draft.kind == .move && draft.keepDept` 那一行
     private var futureNote: String {
         let d = OrgMovePlan.shortDay(OrgMovePlan.dayKey(draft.effective))
+        if draft.kind == .move && draft.keepDept { return d + " 生效（部門照舊）；事情什麼時候交在最後一步選" }
         let what = draft.kind == .plant ? "換廠區" : "改部門"
         return d + " 以後才" + what + "；事情什麼時候交在最後一步選"
     }
@@ -694,8 +700,15 @@ private struct OrgMoveStepWhere: View {
         }
     }
 
+    /// [v25.592 轉組織 v1b 裁定] 件數＝第 ② 步會列的總列數（judge §4.2）：自己加的那幾列也算（lineCount 只算認得種類的列；
+    /// 同提示列「交接單排好了（N 項）」的算法）。不然在第 ② 步加了門禁卡、按〔上一步〕回來，件數比清單少。
+    /// 要退回這一件：改回 `"下一步：交接清單（\(OrgMovePlan.lineCount(draft.lines)) 項）"`，刪 lineTotal
     private var nextTitle: String {
-        "下一步：交接清單（\(OrgMovePlan.lineCount(draft.lines)) 項）"
+        "下一步：交接清單（\(lineTotal) 項）"
+    }
+
+    private var lineTotal: Int {
+        OrgMovePlan.lineCount(draft.lines) + draft.lines.filter { $0.isLiveCustom }.count
     }
 
     // MARK: 寫草稿

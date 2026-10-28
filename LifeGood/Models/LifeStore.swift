@@ -5259,7 +5259,9 @@ class LifeStore: ObservableObject {
         for l in lines where l.kind == OrgMoveLineKind.task.rawValue || l.kind == OrgMoveLineKind.alarmTask.rawValue
             || (l.kind == OrgMoveLineKind.sideRole.rawValue && l.meetingId == nil) {
             let tid: UUID? = l.kind == OrgMoveLineKind.sideRole.rawValue ? l.itemId : l.refId
-            guard let t = holder.tasks.first(where: { $0.id == tid }), t.reminderId != nil else { continue }
+            // [v25.592 轉組織 v1b 驗證] 排好期間已經做完的（套用時記成 skipped、提醒事項不會動）不算：不然〔更新提醒事項（4 件）〕
+            // 實際只動 3 則。要退回這一件：拿掉 `, !t.isCompleted`
+            guard let t = holder.tasks.first(where: { $0.id == tid }), t.reminderId != nil, !t.isCompleted else { continue }
             let a = OrgMovePlan.resolved(l, in: lines).action
             if a == .give || a == .drop || a == .closeNow { n += 1 }
         }

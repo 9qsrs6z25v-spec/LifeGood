@@ -1391,8 +1391,11 @@ private enum OMSheetBuild {
         let note = (move.note ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         let hasCustom = groups.contains { $0.id == "custom" }
         let hasOrg = groups.contains { $0.id == "org" }
-        // 還沒有自己加的：小卡（按過〔交接完成〕的單不放，免得每張舊單都多一張；有自己加的那一組照樣有〔＋ 自己加一項〕）
-        let loose = editable && !hasCustom && !move.isClosed
+        // 還沒有自己加的：小卡（只放在部門還沒改、或還在交接中的單；按過〔交接完成〕、過了交接完成日自動收起的舊單不放，
+        // 免得每張舊單都多一張；有自己加的那一組照樣有〔＋ 自己加一項〕）
+        // [v25.592 轉組織 v1b 審查] 原本只擋 isClosed：過了交接完成日（用算的、不寫 closedAt）的 v1a 舊單每張都多一張小卡。
+        // 要退回這一件：改回 `editable && !hasCustom && !move.isClosed`
+        let loose = editable && !hasCustom && (move.orgPending || OrgMovePlan.isOpen(move, todayKey: todayKey))
         let tone: OMSheetOrgTone = !org.ok ? .warn : (move.orgPending ? .pending : .ok)
         // 排好的四格都是 0（還沒交出去）：不算、不放
         let tiles: [OrgMoveTile] = move.isPlanned ? [] : OrgMovePlan.tiles(move, map: map, world: world, now: now)
@@ -1408,7 +1411,9 @@ private enum OMSheetBuild {
                                pending: pendingParts(move, world: world, now: now),
                                orgTone: tone,
                                canRedoOrg: !org.ok && !move.orgPending && !move.isUndone,
-                               isCancelledBack: move.isUndone && move.cancelledAt != nil,
+                               // [v25.592 轉組織 v1b 裁定]〔留給接手的人〕之後再〔復原〕的徽章寫「已復原」。
+                               // 要退回這一件：改回 `move.isUndone && move.cancelledAt != nil`
+                               isCancelledBack: move.undoneByCancel,
                                looseAdd: loose,
                                looseAddAtEnd: loose && !hasOrg)
     }
