@@ -60,8 +60,7 @@ class LifeStore: ObservableObject {
     @Published var companySites: [CompanySite] = [] { didSet { if !isLoading { save() } } }
     /// [v25.399] 旅遊規劃（要去的行程；與旅遊地圖「去過的地點」是兩回事）
     @Published var tripPlans: [TripPlan] = [] { didSet { if !isLoading { save() } } }
-    // [v25.594] 加回刪掉的職等時，把原本那幾位接回去（autoRelinkMissingGradeTitles；接完一起存）
-    @Published var gradeTitles: [GradeTitle] = [] { didSet { if !isLoading { autoRelinkMissingGradeTitles(); save() } } }
+    @Published var gradeTitles: [GradeTitle] = [] { didSet { if !isLoading { save() } } }
     @Published var businessCards: [BusinessCard] = [] { didSet { if !isLoading { save() } } }
     @Published var personalEvents: [PersonalEvent] = [] { didSet { if !isLoading { save() } } }
     @Published var orgPeople: [OrgPerson] = [] { didSet { if !isLoading { save() } } }
@@ -6462,10 +6461,12 @@ class LifeStore: ObservableObject {
     //
     // 部屬、組織人員、互評票記的是職等的 id，不是「32」這幾個字。刪掉職等再加回同一個，新的那筆是新 id，
     // 原本那幾位就一直對不到、互評排名永遠在「未設職等」。
-    // 現在：① 刪之前先問（GradeTitleView）；② 刪的時候這台記下「舊 id → 職等、職稱」；
-    // ③ 加回職等字一樣的（或互評票、升職歷程上記的名稱一樣），自動把部屬、組織人員、互評票、升職歷程接回新的那筆；
+    // 現在：① 刪之前先問（GradeTitleView）；② 刪的時候這台記下「舊 id → 職等、職稱、那時還有哪些職等」；
+    // ③ 刪掉之後**才新增**的職等，職等字一樣（職稱都有填就要一樣），編輯完自動把部屬、組織人員、互評票、升職歷程、「我」的職等接回去；
+    //    這台沒有記錄（舊版刪的、別台刪的）只認「整個名稱一模一樣」（互評票、升職歷程、部屬職稱上記的），而且要每一筆都指向同一個；
     // ④ 對不到的在部門職等頁下面列出來，你按〔接回…〕。
     // 刪的時候 id 照舊留在人身上（跟以前一樣），所以舊版 iPad 不會因為這一版多洗掉什麼。
+    // 不接：交接單（轉組織）上記的職等 id——排好的單生效時若寫回舊 id，下次打開 App 或 iCloud 拉完會再接一次。
 
     /// 這台刪掉過的職等（只存這台、不同步；最多留 100 筆）
     struct DeletedGradeTitle: Codable, Equatable {
@@ -6473,8 +6474,12 @@ class LifeStore: ObservableObject {
         let grade: String
         let title: String
         let deletedAt: Date
+        /// 刪的那一刻還在的職等：只接到「刪掉之後才新增」的（不會把人接到同職等的另一個職稱）
+        var liveAtDelete: [UUID]? = nil
     }
     static let deletedGradeTitlesKey = "life_grade_titles_deleted_v25594"
+    /// 「我」的職等（PerformanceReviewView 的 @AppStorage，會同步）
+    static let selfGradeIdKey = "perf_self_grade_id"
 
     private var deletedGradeTitles: [DeletedGradeTitle] {
         get {
@@ -6489,7 +6494,11 @@ class LifeStore: ObservableObject {
         }
     }
 
-    /// 誰在用這個職等（刪之前問的那一句用）：部屬（含已轉出）＋沒連到部屬的組織人員
+    private var selfGradeId: UUID? {
+        UserDefaults.standard.string(forKey: Self.selfGradeIdKey).flatMap { UUID(uuidString: $0) }
+    }
+
+    /// 誰在用這個職等（刪之前問的那一句、找不到的那一區）：部屬（含已轉出）＋沒連到部屬的組織人員＋「我」
     func gradeTitleUsers(_ id: UUID) -> [String] {
         var names: [String] = subordinates.filter { $0.gradeTitleId == id }
             .map { $0.name.isEmpty ? "未命名" : $0.name }
@@ -6497,6 +6506,7 @@ class LifeStore: ObservableObject {
         names += orgPeople.filter { p in
             p.gradeTitleId == id && !(p.linkedSubordinateId.map { subIds.contains($0) } ?? false)
         }.map { $0.name.isEmpty ? "未命名" : $0.name }
+        if selfGradeId == id { names.append("我") }
         return names
     }
 
@@ -6504,12 +6514,13 @@ class LifeStore: ObservableObject {
     func deleteGradeTitle(id: UUID) {
         guard let g = gradeTitles.first(where: { $0.id == id }) else { return }
         var book = deletedGradeTitles.filter { $0.id != id }
-        book.append(DeletedGradeTitle(id: id, grade: g.grade, title: g.title, deletedAt: Date()))
+        book.append(DeletedGradeTitle(id: id, grade: g.grade, title: g.title, deletedAt: Date(),
+                                      liveAtDelete: gradeTitles.map(\.id).filter { $0 != id }))
         deletedGradeTitles = book
         gradeTitles.removeAll { $0.id == id }
     }
 
-    /// 一個找不到的職等（id 還在人身上、職等清單裡已經沒有）
+    /// 一個找不到的職等（id 還在人身上或票上、職等清單裡已經沒有）
     struct MissingGradeTitle: Identifiable {
         let id: UUID
         /// 原本叫什麼（這台刪的記錄、送出的互評票、升職歷程上記的）；查不到＝空的
@@ -6517,13 +6528,40 @@ class LifeStore: ObservableObject {
         let names: [String]
     }
 
-    /// 找不到的職等，每個一組（部門職等頁下面那一區）
-    var missingGradeTitles: [MissingGradeTitle] {
+    /// 還有人（或票、升職歷程、「我」）記著、職等清單裡已經沒有的職等 id
+    private func danglingGradeIds() -> [UUID] {
         let live = Set(gradeTitles.map(\.id))
         var ids: [UUID] = []
-        for s in subordinates { if let g = s.gradeTitleId, !live.contains(g), !ids.contains(g) { ids.append(g) } }
-        for p in orgPeople { if let g = p.gradeTitleId, !live.contains(g), !ids.contains(g) { ids.append(g) } }
-        return ids.map { MissingGradeTitle(id: $0, label: knownGradeLabels($0).first ?? "", names: gradeTitleUsers($0)) }
+        func push(_ g: UUID?) { if let g, !live.contains(g), !ids.contains(g) { ids.append(g) } }
+        for s in subordinates {
+            push(s.gradeTitleId)
+            for r in s.promotions { push(r.toGradeTitleId) }
+        }
+        for p in orgPeople { push(p.gradeTitleId) }
+        push(selfGradeId)
+        for b in performanceBallots {
+            push(b.raterGradeId)
+            for g in b.groups { push(g.gradeId) }
+        }
+        return ids
+    }
+
+    /// 找不到的職等，每個一組（部門職等頁下面那一區）。只在升職歷程上記著、現在沒人是那個職等的不列（歷程本來就是快照）
+    var missingGradeTitles: [MissingGradeTitle] {
+        danglingGradeIds().compactMap { id in
+            var names = gradeTitleUsers(id)
+            // 只在互評票上：寫票上那幾位（評分加總頁還有一段「未設職等」）
+            if names.isEmpty {
+                for b in performanceBallots {
+                    for g in b.groups where g.gradeId == id {
+                        for e in g.entries where !names.contains(e.name) { names.append(e.name) }
+                    }
+                    if b.raterGradeId == id, !names.contains(b.raterName) { names.append(b.raterName) }
+                }
+            }
+            guard !names.isEmpty else { return nil }
+            return MissingGradeTitle(id: id, label: knownGradeLabels(id).first ?? "", names: names)
+        }
     }
 
     /// 「未設職等」「未命名職等」是畫面上的字，不是職等的名稱
@@ -6532,46 +6570,57 @@ class LifeStore: ObservableObject {
         return !t.isEmpty && t != "未設職等" && t != "未命名職等"
     }
 
-    /// 這個舊 id 以前叫什麼（先看這台刪的記錄，再看送出的互評票、升職歷程）
+    /// 名稱比對用：去頭尾空白、「32 — 工程師」（部屬職稱的寫法）當成「32 工程師」
+    private static func normGradeLabel(_ s: String) -> String {
+        s.replacingOccurrences(of: " — ", with: " ")
+            .replacingOccurrences(of: "—", with: " ")
+            .split(separator: " ").joined(separator: " ")
+    }
+
+    /// 這個舊 id 以前叫什麼：這台刪的記錄 → 互評票（新的年度先）→ 升職歷程（新的先）→ 部屬職稱快照
     private func knownGradeLabels(_ id: UUID) -> [String] {
         var out: [String] = []
         func push(_ s: String) {
-            let t = s.trimmingCharacters(in: .whitespaces)
+            let t = Self.normGradeLabel(s)
             if Self.isRealGradeLabel(t), !out.contains(t) { out.append(t) }
         }
         if let d = deletedGradeTitles.last(where: { $0.id == id }) {
-            push([d.grade, d.title].map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }.joined(separator: " "))
+            push([d.grade, d.title].joined(separator: " "))
         }
-        for b in performanceBallots {
+        for b in performanceBallots.sorted(by: { $0.year > $1.year }) {
             if b.raterGradeId == id { push(b.raterGradeLabel) }
             for g in b.groups where g.gradeId == id { push(g.gradeLabel) }
         }
-        for s in subordinates { for r in s.promotions where r.toGradeTitleId == id { push(r.toTitle) } }
+        let promos = subordinates.flatMap(\.promotions).filter { $0.toGradeTitleId == id }.sorted { $0.date > $1.date }
+        for r in promos { push(r.toTitle) }
+        for s in subordinates where s.gradeTitleId == id { push(s.jobTitle) }
         return out
     }
 
     /// 這個舊 id 該接到現在哪一個職等（對不到、或對到兩個以上都不接）
     private func gradeTitleMatch(for oldId: UUID) -> UUID? {
-        let current = gradeTitles.filter { Self.isRealGradeLabel($0.displayLabel) }
-        func unique(_ hits: [GradeTitle]) -> UUID? { hits.count == 1 ? hits[0].id : nil }
         func norm(_ s: String) -> String { s.trimmingCharacters(in: .whitespaces) }
-        // ① 這台刪的記錄：職等字一樣（同字的有兩個以上，再比職稱）
+        let current = gradeTitles.filter { !norm($0.grade).isEmpty }
+        // ① 這台刪的記錄：只看刪掉之後才新增的；職等字一樣，兩邊職稱都有填就要一樣
         if let d = deletedGradeTitles.last(where: { $0.id == oldId }), !norm(d.grade).isEmpty {
-            let sameGrade = current.filter { norm($0.grade) == norm(d.grade) }
-            if let id = unique(sameGrade) { return id }
-            if let id = unique(sameGrade.filter { norm($0.title) == norm(d.title) }) { return id }
-            if !sameGrade.isEmpty { return nil }
+            let before = Set(d.liveAtDelete ?? [])
+            let hits = current.filter { g in
+                !before.contains(g.id) && norm(g.grade) == norm(d.grade)
+                    && (norm(g.title).isEmpty || norm(d.title).isEmpty || norm(g.title) == norm(d.title))
+            }
+            return hits.count == 1 ? hits[0].id : nil
         }
-        // ② 互評票、升職歷程上記的名稱：整個名稱一樣 → 職等字一樣（名稱的第一段）
+        // ② 沒有記錄：整個名稱一模一樣才算，而且每一個記得的名稱對到的都要是同一個
+        var found: Set<UUID> = []
         for label in knownGradeLabels(oldId) {
-            if let id = unique(current.filter { norm($0.displayLabel) == label }) { return id }
-            let head = label.split(separator: " ").first.map(String.init) ?? label
-            if let id = unique(current.filter { !norm($0.grade).isEmpty && norm($0.grade) == head }) { return id }
+            let hits = current.filter { Self.normGradeLabel($0.displayLabel) == label }
+            if hits.count > 1 { return nil }
+            if let h = hits.first { found.insert(h.id) }
         }
-        return nil
+        return found.count == 1 ? found.first : nil
     }
 
-    /// 把舊職等 id 換成新的（nil＝改成未設職等）：部屬、組織人員、互評票、升職歷程。呼叫端自己存
+    /// 把舊職等 id 換成新的（nil＝改成未設職等）：部屬、組織人員、升職歷程、互評票、「我」的職等。呼叫端自己存
     private func relinkGradeTitleBody(from oldId: UUID, to newId: UUID?) -> Bool {
         let newGrade = newId.flatMap { id in gradeTitles.first(where: { $0.id == id }) }
         let newLabel = newGrade?.displayLabel ?? ""
@@ -6587,7 +6636,12 @@ class LifeStore: ObservableObject {
                 subordinates[si].promotions[ri].toGradeTitleId = newId; changed = true
             }
         }
-        // 互評票：還沒送出的照現在的職等；送出的只換 id（名稱、權重是送出那天的快照，名稱被洗成「未設職等」的才補回來）
+        if selfGradeId == oldId {
+            UserDefaults.standard.set(newId?.uuidString ?? "", forKey: Self.selfGradeIdKey)
+            changed = true
+        }
+        // 互評票：還沒送出的照現在的職等；送出的只換 id（名稱、權重是送出那天的快照）。
+        // 職等不見的那段時間送出的（名稱是空的／「未設職等」）不是真的快照，名稱、權重一起補回來
         for bi in performanceBallots.indices {
             var b = performanceBallots[bi]
             var touched = false
@@ -6595,18 +6649,40 @@ class LifeStore: ObservableObject {
                 b.raterGradeId = newId
                 if !b.isSubmitted || !Self.isRealGradeLabel(b.raterGradeLabel) {
                     b.raterGradeLabel = newLabel
-                    if !b.isSubmitted { b.raterWeight = newGrade?.weightValue ?? 1 }
+                    b.raterWeight = newGrade?.weightValue ?? 1
                 }
                 touched = true
             }
             for gi in b.groups.indices where b.groups[gi].gradeId == oldId {
+                // 改成未設職等時，送出的票照舊留著原本的 id（快照不動）
+                if newId == nil && b.isSubmitted { continue }
                 b.groups[gi].gradeId = newId
                 if !b.isSubmitted || !Self.isRealGradeLabel(b.groups[gi].gradeLabel) { b.groups[gi].gradeLabel = newLabel }
                 touched = true
             }
+            // 還沒送出的票：同一課、同一職等變成兩組（你先手動把一位改回新職等時會這樣）就併成一組，排好的順序照舊
+            if touched && !b.isSubmitted { b.groups = Self.mergedRankGroups(b.groups) }
             if touched { performanceBallots[bi] = b; changed = true }
         }
         return changed
+    }
+
+    /// 同一課 × 同一職等的組併成一組：照原本的先後接起來、同一個人只留第一次出現的位置
+    private static func mergedRankGroups(_ groups: [PerformanceRankGroup]) -> [PerformanceRankGroup] {
+        var out: [PerformanceRankGroup] = []
+        for g in groups {
+            if let i = out.firstIndex(where: { $0.departmentId == g.departmentId && $0.gradeId == g.gradeId }) {
+                // 人多的那組（原本拖好順序的）放前面
+                let bigFirst: Bool = out[i].entries.count >= g.entries.count
+                let lead: [PerformanceRankEntry] = bigFirst ? out[i].entries : g.entries
+                let tail: [PerformanceRankEntry] = bigFirst ? g.entries : out[i].entries
+                let seen = Set(lead.map(\.id))
+                out[i].entries = lead + tail.filter { !seen.contains($0.id) }
+            } else {
+                out.append(g)
+            }
+        }
+        return out
     }
 
     /// 〔接回…〕（部門職等頁）：一次存檔
@@ -6614,12 +6690,17 @@ class LifeStore: ObservableObject {
         withBatch { _ = relinkGradeTitleBody(from: oldId, to: newId) }
     }
 
-    /// 加回同一個職等時自動接回（gradeTitles 改了、打開 App、iCloud 拉完都會跑）。不存檔：呼叫端存
+    /// 職等編輯完（離開那一格、離開這一頁）：對得到的自動接回，有改就存一次
+    func relinkMissingGradeTitlesNow() {
+        // 沒接到任何人就不存（不然每離開一格都推一次 iCloud）
+        if autoRelinkMissingGradeTitles(), !isLoading { save() }
+    }
+
+    /// 加回同一個職等時自動接回（編輯完、打開 App、iCloud 拉完都會跑）。不存檔：呼叫端存。
+    /// 不在每打一個字就跑：打「320」打到「32」停一下，不會先把人接到這一列
     @discardableResult
     func autoRelinkMissingGradeTitles() -> Bool {
-        let live = Set(gradeTitles.map(\.id))
-        var dangling = Set(subordinates.compactMap(\.gradeTitleId)).union(orgPeople.compactMap(\.gradeTitleId))
-        dangling.subtract(live)
+        let dangling = danglingGradeIds()
         guard !dangling.isEmpty, !gradeTitles.isEmpty else { return false }
         let wasLoading = isLoading
         isLoading = true

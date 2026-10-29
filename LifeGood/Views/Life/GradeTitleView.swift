@@ -196,14 +196,15 @@ struct GradeTitleView: View {
                 }
 
                 // ── [v25.594] 職等找不到的人（職等被刪掉了）──
-                if !lifeStore.missingGradeTitles.isEmpty {
+                let missing = lifeStore.missingGradeTitles
+                if !missing.isEmpty {
                     Section {
-                        ForEach(lifeStore.missingGradeTitles) { m in
+                        ForEach(missing) { m in
                             missingGradeRow(m)
                         }
                     } header: {
                         sectionHeader("職等找不到的人", icon: "exclamationmark.triangle.fill", color: .orange,
-                                      count: lifeStore.missingGradeTitles.reduce(0) { $0 + $1.names.count })
+                                      count: missing.reduce(0) { $0 + $1.names.count })
                     } footer: {
                         Text("這幾位的職等被刪掉了，績效互評會排在「未設職等」。加回同一個職等（職等字一樣）會自動接回去；"
                              + "對不到的，按〔接回…〕選一個職等，部屬卡片、互評排名、評分加總就會回來。")
@@ -229,6 +230,7 @@ struct GradeTitleView: View {
                 rowsAppearedTask?.cancel()
                 heroAppeared = false
                 rowsAppeared = false
+                lifeStore.relinkMissingGradeTitlesNow()   // [v25.594] 職等編輯完離開：加回的職等把原本那幾位接回去
             }
             .sheet(isPresented: $addingDepartment) {
                 DepartmentEditor(editingId: nil)
@@ -310,6 +312,9 @@ struct GradeTitleView: View {
             }
             Spacer(minLength: 8)
             Menu {
+                if lifeStore.gradeTitles.isEmpty {
+                    Text("還沒有職等：先按〔新增職等〕")
+                }
                 ForEach(displayedGradeTitlesAll) { g in
                     Button(g.displayLabel.isEmpty ? "未命名職等" : g.displayLabel) {
                         lifeStore.relinkGradeTitle(from: m.id, to: g.id)
@@ -323,7 +328,6 @@ struct GradeTitleView: View {
                 Text("接回…")
                     .font(.subheadline.weight(.semibold))
             }
-            .disabled(lifeStore.gradeTitles.isEmpty)
         }
         .padding(.vertical, 2)
     }
@@ -665,6 +669,8 @@ private struct GradeTitleRow: View {
     /// [v25.348] 績效互評權重（這個職等的人投的票要乘幾倍）
     @State private var weightText: String
     @State private var commitTask: Task<Void, Never>?
+    /// [v25.594] 這一列有沒有一格正在打字：打完（離開這一列）才試著把刪掉的職等接回來，不在打到一半時接
+    @FocusState private var editing: Bool
 
     init(item: GradeTitle, onDelete: @escaping () -> Void) {
         itemId = item.id
@@ -686,6 +692,7 @@ private struct GradeTitleRow: View {
                     .stroke(Color.purple.opacity(0.20), lineWidth: 0.75)
                     .frame(width: 56, height: 36)
                 TextField("職等", text: $gradeText)
+                    .focused($editing)
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(.purple)
                     .multilineTextAlignment(.center)
@@ -701,6 +708,7 @@ private struct GradeTitleRow: View {
                     .stroke(Color(.separator).opacity(0.40), lineWidth: 0.75)
                     .frame(height: 36)
                 TextField("職稱", text: $titleText)
+                    .focused($editing)
                     .font(.subheadline)
                     .padding(.horizontal, 10)
                     .onChange(of: titleText) { _, _ in scheduleCommit() }
@@ -739,6 +747,12 @@ private struct GradeTitleRow: View {
             .buttonStyle(.plain)
         }
         .padding(.vertical, 2)
+        .onChange(of: editing) { _, now in
+            guard !now else { return }
+            commitTask?.cancel()
+            commit()
+            lifeStore.relinkMissingGradeTitlesNow()
+        }
         .onDisappear {
             commitTask?.cancel()
             commit()

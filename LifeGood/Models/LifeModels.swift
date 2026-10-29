@@ -4678,7 +4678,8 @@ struct PerformanceGradeKey: Hashable {
 
 /// [v25.349] 評分加總依職等切開後的一段
 struct PerformanceGradeSection: Identifiable {
-    var id: String { gradeId?.uuidString ?? "none-" + label }
+    /// [v25.594] id 也帶名稱：分組是照（職等 id、票上的名稱）分的，同一個 id 兩種名稱時不會兩段同 id（ForEach 會亂）
+    var id: String { (gradeId?.uuidString ?? "none") + "-" + label }
     let gradeId: UUID?
     /// 顯示名稱（例：E5 資深工程師）
     let label: String
