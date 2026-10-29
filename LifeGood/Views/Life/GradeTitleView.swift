@@ -669,7 +669,7 @@ private struct GradeTitleRow: View {
     /// [v25.348] 績效互評權重（這個職等的人投的票要乘幾倍）
     @State private var weightText: String
     @State private var commitTask: Task<Void, Never>?
-    /// [v25.594] 這一列有沒有一格正在打字：打完（離開這一列）才試著把刪掉的職等接回來，不在打到一半時接
+    /// [v25.594] 這一列有沒有一格正在打字（職等、職稱、權重三格）：打完（離開這一列）才試著把刪掉的職等接回來，不在打到一半時接
     @FocusState private var editing: Bool
 
     init(item: GradeTitle, onDelete: @escaping () -> Void) {
@@ -725,6 +725,7 @@ private struct GradeTitleRow: View {
                 HStack(spacing: 1) {
                     Text("×").font(.caption2.weight(.bold)).foregroundStyle(.orange.opacity(0.7))
                     TextField("1", text: $weightText)
+                        .focused($editing)
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(.orange)
                         .multilineTextAlignment(.center)

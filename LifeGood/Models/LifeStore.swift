@@ -6546,17 +6546,14 @@ class LifeStore: ObservableObject {
         return ids
     }
 
-    /// 找不到的職等，每個一組（部門職等頁下面那一區）。只在升職歷程上記著、現在沒人是那個職等的不列（歷程本來就是快照）
+    /// 找不到的職等，每個一組（部門職等頁下面那一區）。只列「現在還有人是這個職等」的：部屬、組織人員、「我」、還沒送出的互評票。
+    /// 只在送出的票、升職歷程上記著的不列（那是當時的快照；以前刻意刪掉的職等不該變成警告，〔改成未設職等〕也清不掉快照）
     var missingGradeTitles: [MissingGradeTitle] {
         danglingGradeIds().compactMap { id in
             var names = gradeTitleUsers(id)
-            // 只在互評票上：寫票上那幾位（評分加總頁還有一段「未設職等」）
-            if names.isEmpty {
-                for b in performanceBallots {
-                    for g in b.groups where g.gradeId == id {
-                        for e in g.entries where !names.contains(e.name) { names.append(e.name) }
-                    }
-                    if b.raterGradeId == id, !names.contains(b.raterName) { names.append(b.raterName) }
+            for b in performanceBallots where !b.isSubmitted {
+                for g in b.groups where g.gradeId == id {
+                    for e in g.entries where !names.contains(e.name) { names.append(e.name) }
                 }
             }
             guard !names.isEmpty else { return nil }
@@ -6604,20 +6601,23 @@ class LifeStore: ObservableObject {
         // ① 這台刪的記錄：只看刪掉之後才新增的；職等字一樣，兩邊職稱都有填就要一樣
         if let d = deletedGradeTitles.last(where: { $0.id == oldId }), !norm(d.grade).isEmpty {
             let before = Set(d.liveAtDelete ?? [])
+            // 原本有職稱的：新的那筆職稱也要打好、一樣（職稱還沒打完就不接）
             let hits = current.filter { g in
                 !before.contains(g.id) && norm(g.grade) == norm(d.grade)
-                    && (norm(g.title).isEmpty || norm(d.title).isEmpty || norm(g.title) == norm(d.title))
+                    && (norm(d.title).isEmpty || norm(g.title) == norm(d.title))
             }
             return hits.count == 1 ? hits[0].id : nil
         }
-        // ② 沒有記錄：整個名稱一模一樣才算，而且每一個記得的名稱對到的都要是同一個
-        var found: Set<UUID> = []
-        for label in knownGradeLabels(oldId) {
+        // ② 沒有記錄：最新記得的那個名稱要一模一樣對到一個；其他記得的名稱對得到的也要是同一個
+        let labels = knownGradeLabels(oldId)
+        guard let newest = labels.first else { return nil }
+        let first = current.filter { Self.normGradeLabel($0.displayLabel) == newest }
+        guard first.count == 1 else { return nil }
+        for label in labels.dropFirst() {
             let hits = current.filter { Self.normGradeLabel($0.displayLabel) == label }
-            if hits.count > 1 { return nil }
-            if let h = hits.first { found.insert(h.id) }
+            if !hits.isEmpty && (hits.count > 1 || hits[0].id != first[0].id) { return nil }
         }
-        return found.count == 1 ? found.first : nil
+        return first[0].id
     }
 
     /// 把舊職等 id 換成新的（nil＝改成未設職等）：部屬、組織人員、升職歷程、互評票、「我」的職等。呼叫端自己存
@@ -6645,6 +6645,7 @@ class LifeStore: ObservableObject {
         for bi in performanceBallots.indices {
             var b = performanceBallots[bi]
             var touched = false
+            var gapGroup = false   // 職等不見的那段時間存的組（名稱是「未設職等」）
             if b.raterGradeId == oldId {
                 b.raterGradeId = newId
                 if !b.isSubmitted || !Self.isRealGradeLabel(b.raterGradeLabel) {
@@ -6657,11 +6658,13 @@ class LifeStore: ObservableObject {
                 // 改成未設職等時，送出的票照舊留著原本的 id（快照不動）
                 if newId == nil && b.isSubmitted { continue }
                 b.groups[gi].gradeId = newId
+                if !Self.isRealGradeLabel(b.groups[gi].gradeLabel) { gapGroup = true }
                 if !b.isSubmitted || !Self.isRealGradeLabel(b.groups[gi].gradeLabel) { b.groups[gi].gradeLabel = newLabel }
                 touched = true
             }
-            // 還沒送出的票：同一課、同一職等變成兩組（你先手動把一位改回新職等時會這樣）就併成一組，排好的順序照舊
-            if touched && !b.isSubmitted { b.groups = Self.mergedRankGroups(b.groups) }
+            // 同一課、同一職等變成兩組（你先手動把一位改回新職等時會這樣）就併成一組，排好的順序照舊。
+            // 送出的票只在接回的是「職等不見那段時間」存的組才併（那組本來就不是真的快照）
+            if touched && (!b.isSubmitted || gapGroup) { b.groups = Self.mergedRankGroups(b.groups) }
             if touched { performanceBallots[bi] = b; changed = true }
         }
         return changed
