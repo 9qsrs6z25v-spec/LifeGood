@@ -54,9 +54,18 @@ struct EInvoiceImportRecord: Codable, Identifiable {
     let expenseIds: [UUID]
     /// 自動分類結果（預設規則匹配的分類）
     let assignedCategory: VariableCategory
+    /// [v2] 「併入既有」：這張發票沒有另建支出，而是認領了一筆「一按就記」的支出
+    ///（小工具記的同金額、同一天或前後一天那筆），發票號碼補進那筆的備註。
+    /// 這種紀錄的 expenseIds 是空的；撤銷只拿掉那筆備註裡的發票資訊，不刪支出。
+    /// 合成 Codable：舊檔沒有這個 key 解出來是 nil；nil 也不寫 key。
+    let mergedExpenseId: UUID?
+
+    /// [v2] 是不是「併入既有」的紀錄
+    var isMerged: Bool { mergedExpenseId != nil }
 
     init(invNum: String, invDate: Date, sellerName: String, amount: Double,
-         expenseIds: [UUID], assignedCategory: VariableCategory) {
+         expenseIds: [UUID], assignedCategory: VariableCategory,
+         mergedExpenseId: UUID? = nil) {
         self.id = UUID()
         self.invNum = invNum
         self.invDate = invDate
@@ -65,6 +74,7 @@ struct EInvoiceImportRecord: Codable, Identifiable {
         self.importedAt = Date()
         self.expenseIds = expenseIds
         self.assignedCategory = assignedCategory
+        self.mergedExpenseId = mergedExpenseId
     }
 }
 
@@ -76,12 +86,20 @@ struct EInvoiceSyncResult {
     let failedCount: Int
     let errors: [String]
     let timestamp: Date
+    /// [v2] 併入既有（認領了「一按就記」的支出、沒有另建）的張數。有預設值，舊的建法不用改
+    var mergedCount: Int = 0
 
+    /// 「匯入 3 筆、略過 2 筆」；有併入既有才多一段「併入既有 1 筆」，有失敗才多「失敗 N 筆」
     var summary: String {
-        if failedCount > 0 {
-            return "匯入 \(importedCount) 筆、略過 \(skippedCount) 筆、失敗 \(failedCount) 筆"
+        var parts: [String] = ["匯入 \(importedCount) 筆"]
+        if mergedCount > 0 {
+            parts.append("併入既有 \(mergedCount) 筆")
         }
-        return "匯入 \(importedCount) 筆、略過 \(skippedCount) 筆"
+        parts.append("略過 \(skippedCount) 筆")
+        if failedCount > 0 {
+            parts.append("失敗 \(failedCount) 筆")
+        }
+        return parts.joined(separator: "、")
     }
 }
 

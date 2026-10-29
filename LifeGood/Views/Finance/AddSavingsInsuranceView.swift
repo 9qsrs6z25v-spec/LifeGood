@@ -1,8 +1,54 @@
 import SwiftUI
 
+// MARK: - 美化紀錄（AddSavingsInsuranceView）
+// [2026-06] 本次美化方向：
+//   1. sectionHeader：統一升級為「4pt Capsule 漸層色條 + 彩色圖示 + .subheadline.bold 標題」，
+//      對齊 AddVehicleView / AddExpenseView section header 設計語言。
+//   2. calcPreviewCard：在表單頂部加入綠色漸層試算預覽卡，即時顯示「目前帳戶價值 / 期滿預估領回 /
+//      預估總報酬率」三欄 KPI；大數字套用 ntdWanString 萬/億格式；
+//      加入 spring 進場動畫（cardAppeared），對齊 AddExpenseView.loanCalcRow 設計語言。
+//   3. errorBanner：從純紅文字升級為帶圖示的橘色警告膠囊卡，對齊 AddExpenseView 驗證錯誤規格。
+//   4. Form tint 套用 .tint(.green)，與儲蓄險整體綠色主題一致。
+// [2026-06 v2] 本次美化方向：
+//   5. calcPreviewCard 玻璃光澤：背景 ZStack 末層加入 LinearGradient [white.opacity(0.18), clear]
+//      top→center 玻璃反光覆層，對齊 OverviewView.monthlyBalanceCard / FinanceOverviewView
+//      totalAssetsCard / AddVehicleView.vehiclePreviewCard 英雄卡玻璃光澤規格。
+//   6. calcPreviewCard 第三顆散景圓：左下角新增 60pt white.opacity(0.05) blur(7) 裝飾圓，
+//      對齊 VariableExpenseView.monthSummaryHeader v4 / OverviewView.monthlyBalanceCard v3 規格。
+//   7. calcPreviewCard 卡片邊框：RoundedRectangle stroke(.white.opacity(0.18), 0.75pt)，
+//      提升深色模式下卡片邊界感，對齊 AddVehicleView.vehiclePreviewCard 邊框規格。
+//   8. 年利率 Capsule 補邊框：stroke(.white.opacity(0.25), 0.6pt) overlay，
+//      對齊全 App 膠囊描邊規格（BusinessCardView v2 / ChildrenResumeView v2）。
+//   9. previewKpiCell 數字平滑過渡：加入 .contentTransition(.numericText())，
+//      保費金額即時修改時 KPI 數字以滾動效果平滑切換，
+//      對齊 OverviewView.summaryCard / IncomeView.summaryHeader 數字動畫規格。
+//  10. 繳費資訊 section 列：升級為「30pt LinearGradient 漸層圖示圓（含 stroke） +
+//      Capsule 彩色值徽章」，對齊 AddVehicleView.calcSection /
+//      AddStockView.calcSection 設計規格；值膠囊補 stroke 邊框 0.6pt。
+//  11. 自動計算結果 section 列：目前帳戶價值 / 期滿預估領回 / 預估總報酬率 / 複利增值
+//      的右側數值從純色 Text 升級為彩色 Capsule 徽章（含半透明底 + stroke 0.6pt），
+//      對齊 AddStockView 報酬率膠囊 / FinanceOverviewView.allocationSection 規格。
+// [2026-08 v3] 本次美化方向（儲存按鈕載入狀態）：
+//  12. 工具列「儲存／新增」按鈕：v1 起就有 isSaving 忙碌守衛（disabled(isSaving)）避免快速
+//      連點造成重複紀錄，但按鈕本身在 isSaving 期間沒有任何視覺變化，使用者點下後不確定
+//      是否已觸發存檔。補上 ProgressView().scaleEffect(0.7).tint(.green)，isSaving 為 true
+//      時顯示於按鈕左側，對齊 SettingsView「資料管理」匯出按鈕載入狀態規格（同 App 內
+//      ProgressView + scaleEffect(0.7) + 主題色 tint 慣例）。純視覺層補強，save() 內部的
+//      守衛判斷、儲蓄險與固定支出同步寫入邏輯完全未變動。同型 isSaving 守衛也存在於
+//      AddExpenseView / AddIncomeView / AddStockView / AddVehicleView / AddRealEstateView，
+//      皆缺少載入視覺提示，可作為下次美化時比照本檔案補齊的清單，逐步達成全 App 均值性。
+// [v25.567] 財富 v6（judge §6.3；build/v6/brief.md G4 14、15）：
+//  13. 保費那段後面一段「從哪扣」（WealthPayFromMenu，同記帳的扣款選單；外幣保單只列同幣別的子帳戶和信用卡）。
+//      編輯時從連著的那筆記帳帶；改幣別而且選的銀行幣別對不上 → 清掉銀行（卡不動）。
+//  14. syncFixedExpense：既有那筆**改那一筆**（以前整筆重建，存一次就洗掉扣款帳戶、金額歷史、停止日、節稅覆寫…）；
+//      金額改了從今天起（AmountHistoryChange）；從哪扣改了 → 先 dismiss、下一個 runloop LifeStore.setExpensePayer
+//      （從今天起，以前扣的照舊記在原本的卡／帳戶）。新的照原本建、直接寫從哪扣。
+
 struct AddSavingsInsuranceView: View {
     @EnvironmentObject var financeStore: FinanceStore
     @EnvironmentObject var expenseStore: ExpenseStore
+    /// [v25.567] 從哪扣的選單、改扣款（WealthPayFromMenu、setExpensePayer；呼叫端都有 .appStores()）
+    @EnvironmentObject var lifeStore: LifeStore
     @Environment(\.dismiss) private var dismiss
 
     var editing: SavingsInsurance?
@@ -17,6 +63,12 @@ struct AddSavingsInsuranceView: View {
     @State private var maturityDate = Calendar.current.date(byAdding: .year, value: 6, to: Date()) ?? Date()
     @State private var note = ""
     @State private var showError = false
+    @State private var cardAppeared = false
+    // 儲存為同步寫回 store 後立即 dismiss()，sheet 收合動畫期間按鈕仍可觸發，
+    // 快速連點會建立兩筆重複儲蓄險紀錄；補上忙碌守衛比照 AddRealEstateView 既有修法。
+    @State private var isSaving = false
+    /// [v25.567] 保費從哪扣（銀行＋幣別或信用卡）
+    @State private var payChoice = WealthPayFromChoice()
 
     // MARK: - 自動計算
 
@@ -42,7 +94,7 @@ struct AddSavingsInsuranceView: View {
         guard Date() >= startDate else { return 0 }
         let months = Calendar.current.dateComponents([.month], from: startDate, to: min(Date(), maturityDate)).month ?? 0
         let monthsPerPeriod = paymentPeriod == .monthly ? 1 : (paymentPeriod == .quarterly ? 3 : 12)
-        return min(months / monthsPerPeriod + 1, totalPeriods)
+        return max(0, min(months / monthsPerPeriod + 1, totalPeriods))
     }
 
     private var calculatedExpectedReturn: Double {
@@ -67,18 +119,32 @@ struct AddSavingsInsuranceView: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("基本資訊") {
-                    TextField("保單名稱", text: $name)
-                    TextField("保險公司", text: $company)
+                // 試算預覽卡（有保費金額時顯示）
+                if premium > 0 {
+                    Section {
+                        calcPreviewCard
+                            .listRowInsets(EdgeInsets())
+                            .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
+                    }
                 }
 
-                Section("繳費設定") {
+                Section {
+                    TextField("保單名稱", text: $name)
+                    TextField("保險公司", text: $company)
+                } header: {
+                    sectionHeader("基本資訊", icon: "shield.fill",
+                                  gradient: [Color(red: 0.18, green: 0.62, blue: 0.40),
+                                             Color(red: 0.12, green: 0.82, blue: 0.52)])
+                }
+
+                Section {
                     HStack {
                         Text("幣別")
                         Spacer()
                         Menu {
                             Button {
-                                currencyCode = "NT$"
+                                pickCurrency("NT$")
                             } label: {
                                 if currencyCode == "NT$" {
                                     Label("NT$", systemImage: "checkmark")
@@ -88,7 +154,7 @@ struct AddSavingsInsuranceView: View {
                             }
                             ForEach(expenseStore.currencyRates) { rate in
                                 Button {
-                                    currencyCode = rate.code
+                                    pickCurrency(rate.code)
                                 } label: {
                                     if currencyCode == rate.code {
                                         Label("\(rate.code)（1=\(rateDisplay(rate.rate)) 元）", systemImage: "checkmark")
@@ -133,84 +199,101 @@ struct AddSavingsInsuranceView: View {
 
                     DatePicker("起始日", selection: $startDate, displayedComponents: .date)
                     DatePicker("到期日", selection: $maturityDate, displayedComponents: .date)
-                }
-
-                Section {
-                    HStack {
-                        Text("繳費期數")
-                        Spacer()
-                        Text("\(totalPeriods) 期")
-                            .foregroundStyle(.secondary)
-                    }
-                    HStack {
-                        Text("已繳期數")
-                        Spacer()
-                        Text("\(elapsedPeriods) 期")
-                            .foregroundStyle(.secondary)
-                    }
-                    HStack {
-                        Text("已繳總額")
-                        Spacer()
-                        Text(formatCurrency(totalPaid))
-                            .foregroundStyle(.secondary)
-                    }
                 } header: {
-                    Text("繳費資訊")
+                    sectionHeader("繳費設定", icon: "creditcard.fill",
+                                  gradient: [Color(red: 0.22, green: 0.42, blue: 0.88),
+                                             Color(red: 0.32, green: 0.62, blue: 1.00)])
+                }
+
+                // [v25.567] 從哪扣（computed var，不塞 body）
+                payFromSection
+
+                Section {
+                    // v2：繳費資訊列升級為圖示圓 + Capsule 值徽章
+                    calcInfoRow(icon: "calendar.badge.clock",
+                                gradient: [Color(red: 0.42, green: 0.22, blue: 0.82),
+                                           Color(red: 0.62, green: 0.42, blue: 1.00)],
+                                label: "繳費期數",
+                                value: "\(totalPeriods) 期",
+                                accent: Color(red: 0.52, green: 0.32, blue: 0.92))
+                    calcInfoRow(icon: "checkmark.circle.fill",
+                                gradient: [Color(red: 0.22, green: 0.52, blue: 0.88),
+                                           Color(red: 0.32, green: 0.72, blue: 1.00)],
+                                label: "已繳期數",
+                                value: "\(elapsedPeriods) 期",
+                                accent: Color(red: 0.22, green: 0.52, blue: 0.88))
+                    calcInfoRow(icon: "banknote.fill",
+                                gradient: [Color(red: 0.10, green: 0.60, blue: 0.42),
+                                           Color(red: 0.18, green: 0.80, blue: 0.52)],
+                                label: "已繳總額",
+                                value: formatCurrency(totalPaid),
+                                accent: Color(red: 0.10, green: 0.60, blue: 0.42))
+                } header: {
+                    sectionHeader("繳費資訊", icon: "chart.bar.fill",
+                                  gradient: [Color(red: 0.42, green: 0.22, blue: 0.82),
+                                             Color(red: 0.62, green: 0.42, blue: 1.00)])
                 }
 
                 Section {
-                    HStack {
-                        Text("目前帳戶價值")
-                        Spacer()
-                        Text(formatCurrency(calculatedCurrentValue))
-                            .font(.body.bold())
-                            .foregroundStyle(.blue)
-                    }
-                    HStack {
-                        Text("期滿預估領回")
-                        Spacer()
-                        Text(formatCurrency(calculatedExpectedReturn))
-                            .font(.body.bold())
-                            .foregroundStyle(.green)
-                    }
+                    // v2：計算結果列升級為彩色 Capsule 徽章
+                    calcResultRow(icon: "creditcard.fill",
+                                  gradient: [Color(red: 0.22, green: 0.42, blue: 0.88),
+                                             Color(red: 0.32, green: 0.62, blue: 1.00)],
+                                  label: "目前帳戶價值",
+                                  value: formatCurrency(calculatedCurrentValue),
+                                  accent: .blue)
+                    calcResultRow(icon: "leaf.fill",
+                                  gradient: [Color(red: 0.10, green: 0.68, blue: 0.48),
+                                             Color(red: 0.18, green: 0.88, blue: 0.38)],
+                                  label: "期滿預估領回",
+                                  value: formatCurrency(calculatedExpectedReturn),
+                                  accent: .green)
                     if totalPaid > 0 {
-                        HStack {
-                            Text("預估總報酬率")
-                            Spacer()
-                            let roi = (calculatedExpectedReturn - premium * Double(totalPeriods)) / (premium * Double(totalPeriods)) * 100
-                            Text(String(format: "%.2f%%", roi))
-                                .font(.body.bold())
-                                .foregroundStyle(roi >= 0 ? .green : .red)
-                        }
-                        HStack {
-                            Text("複利增值")
-                            Spacer()
-                            let gain = calculatedExpectedReturn - premium * Double(totalPeriods)
-                            Text((gain >= 0 ? "+" : "") + formatCurrency(gain))
-                                .foregroundStyle(gain >= 0 ? .green : .red)
-                        }
+                        let roi = (calculatedExpectedReturn - premium * Double(totalPeriods)) / (premium * Double(totalPeriods)) * 100
+                        calcResultRow(icon: "chart.line.uptrend.xyaxis",
+                                      gradient: roi >= 0
+                                          ? [Color(red: 0.10, green: 0.68, blue: 0.48), Color(red: 0.18, green: 0.88, blue: 0.38)]
+                                          : [Color(red: 0.88, green: 0.22, blue: 0.22), Color(red: 1.00, green: 0.42, blue: 0.32)],
+                                      label: "預估總報酬率",
+                                      value: String(format: "%.2f%%", roi),
+                                      accent: roi >= 0 ? .green : .red)
+                        let gain = calculatedExpectedReturn - premium * Double(totalPeriods)
+                        calcResultRow(icon: "sparkles",
+                                      gradient: gain >= 0
+                                          ? [Color(red: 0.10, green: 0.68, blue: 0.48), Color(red: 0.18, green: 0.88, blue: 0.38)]
+                                          : [Color(red: 0.88, green: 0.22, blue: 0.22), Color(red: 1.00, green: 0.42, blue: 0.32)],
+                                      label: "複利增值",
+                                      value: (gain >= 0 ? "+" : "") + formatCurrency(gain),
+                                      accent: gain >= 0 ? .green : .red)
                     }
                 } header: {
-                    Text("自動計算結果")
+                    sectionHeader("自動計算結果", icon: "sparkles",
+                                  gradient: [Color(red: 0.10, green: 0.68, blue: 0.48),
+                                             Color(red: 0.18, green: 0.88, blue: 0.38)])
                 } footer: {
                     if annualRate > 0 {
                         Text("以年利率 \(String(format: "%.2f%%", annualRate)) 複利計算，\(paymentPeriod.rawValue)繳 \(formatCurrency(premium))，共 \(totalPeriods) 期。")
                     }
                 }
 
-                Section("備註") {
+                Section {
                     TextField("選填備註", text: $note, axis: .vertical)
                         .lineLimit(3)
+                } header: {
+                    sectionHeader("備註", icon: "pencil",
+                                  gradient: [Color.gray, Color.gray.opacity(0.65)])
                 }
 
                 if showError {
                     Section {
-                        Text("請輸入保單名稱和有效保費金額")
-                            .foregroundStyle(.red)
-                            .font(.caption)
+                        errorBanner
+                            .listRowInsets(EdgeInsets())
+                            .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
                     }
                 }
             }
+            .tint(.green)
             .navigationTitle(editing != nil ? "編輯儲蓄險" : "新增儲蓄險")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -218,8 +301,14 @@ struct AddSavingsInsuranceView: View {
                     Button("取消") { dismiss() }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button(editing != nil ? "儲存" : "新增") { save() }
-                        .bold().foregroundStyle(.green)
+                    HStack(spacing: 6) {
+                        // [v3] 存檔中顯示同主題色 ProgressView，取代原本點下後毫無反應的空白等待
+                        if isSaving {
+                            ProgressView().scaleEffect(0.7).tint(.green)
+                        }
+                        Button(editing != nil ? "儲存" : "新增") { save() }
+                            .bold().foregroundStyle(.green).disabled(isSaving)
+                    }
                 }
             }
             .onAppear {
@@ -233,16 +322,271 @@ struct AddSavingsInsuranceView: View {
                     startDate = e.startDate
                     maturityDate = e.maturityDate
                     note = e.note
+                    // [v25.567] 從哪扣：讀連著的那筆記帳
+                    if let x = linkedExpense(of: e) {
+                        payChoice = WealthPayFromChoice.of(x)
+                    }
+                }
+                withAnimation(.spring(response: 0.55, dampingFraction: 0.78).delay(0.12)) {
+                    cardAppeared = true
                 }
             }
         }
     }
 
+    // MARK: - [v25.567] 從哪扣
+
+    private static let payFromFooter = "外幣保單只列同幣別的帳戶和信用卡；改了從下一期起，以前扣的照舊。"
+
+    private var payFromSection: some View {
+        Section {
+            WealthPayFromMenu(choice: $payChoice, onlyCode: currencyCode)
+        } header: {
+            sectionHeader("從哪扣", icon: "building.columns.fill",
+                          gradient: [Color(red: 0.10, green: 0.60, blue: 0.42),
+                                     Color(red: 0.18, green: 0.80, blue: 0.52)])
+        } footer: {
+            Text(Self.payFromFooter)
+        }
+    }
+
+    /// 改幣別：選的銀行幣別對不上就清掉銀行（卡不動；不用 onChange）
+    private func pickCurrency(_ code: String) {
+        currencyCode = code
+        if payChoice.bankId != nil, WealthFacts.norm(payChoice.bankCode) != WealthFacts.norm(code) {
+            payChoice = WealthPayFromChoice()
+        }
+    }
+
+    /// 這張儲蓄險連著的記帳固定支出（linkedExpenseId；跟 syncFixedExpense 改的是同一筆，找不到 nil＝存檔時新建）
+    private func linkedExpense(of ins: SavingsInsurance) -> Expense? {
+        guard let eid = ins.linkedExpenseId else { return nil }
+        return expenseStore.expenses.first(where: { $0.id == eid })
+    }
+
+    // MARK: - 子視圖
+
+    /// 統一 section header：4pt 漸層 Capsule 色條 + 彩色圖示 + 粗體標題
+    private func sectionHeader(_ title: String, icon: String, gradient: [Color]) -> some View {
+        HStack(spacing: 8) {
+            Capsule()
+                .fill(LinearGradient(colors: gradient, startPoint: .top, endPoint: .bottom))
+                .frame(width: 4, height: 16)
+            Image(systemName: icon)
+                .font(.caption.bold())
+                .foregroundStyle(gradient.first ?? .primary)
+            Text(title)
+                .font(.subheadline.bold())
+                .foregroundStyle(.primary)
+            Spacer()
+        }
+        .padding(.vertical, 2)
+        .textCase(nil)
+    }
+
+    /// 即時試算預覽卡（綠色漸層英雄卡）
+    private var calcPreviewCard: some View {
+        ZStack(alignment: .topTrailing) {
+            // 散景裝飾圓（三顆，對齊 OverviewView v3 / AddVehicleView.vehiclePreviewCard 規格）
+            Circle()
+                .fill(Color.white.opacity(0.10))
+                .frame(width: 90, height: 90)
+                .blur(radius: 2)
+                .offset(x: 12, y: -24)
+            Circle()
+                .fill(Color.white.opacity(0.07))
+                .frame(width: 55, height: 55)
+                .blur(radius: 6)
+                .offset(x: -18, y: 14)
+            // v2：第三顆散景圓（左下角）
+            Circle()
+                .fill(Color.white.opacity(0.05))
+                .frame(width: 60, height: 60)
+                .blur(radius: 7)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+                .offset(x: -8, y: 8)
+
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Image(systemName: "leaf.fill")
+                        .font(.caption.bold())
+                        .foregroundStyle(.white.opacity(0.90))
+                    Text("保單試算預覽")
+                        .font(.caption.bold())
+                        .foregroundStyle(.white.opacity(0.90))
+                    Spacer()
+                    if annualRate > 0 {
+                        // v2：年利率膠囊補 stroke 邊框
+                        Text("年利率 \(String(format: "%.2f%%", annualRate))")
+                            .font(.caption2)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 3)
+                            .background(Color.white.opacity(0.22))
+                            .clipShape(Capsule())
+                            .overlay(Capsule().stroke(Color.white.opacity(0.25), lineWidth: 0.6))
+                            .foregroundStyle(.white)
+                    }
+                }
+
+                HStack(spacing: 0) {
+                    previewKpiCell(label: "目前帳戶", value: formatCurrency(calculatedCurrentValue))
+                    Rectangle()
+                        .fill(Color.white.opacity(0.28))
+                        .frame(width: 0.5, height: 36)
+                    previewKpiCell(label: "期滿預估", value: formatCurrency(calculatedExpectedReturn))
+                    if totalPaid > 0 {
+                        Rectangle()
+                            .fill(Color.white.opacity(0.28))
+                            .frame(width: 0.5, height: 36)
+                        let roi = (calculatedExpectedReturn - premium * Double(totalPeriods)) / (premium * Double(totalPeriods)) * 100
+                        previewKpiCell(
+                            label: "預估報酬率",
+                            value: String(format: "%.1f%%", roi),
+                            tint: roi >= 0 ? Color(red: 0.78, green: 1.00, blue: 0.60) : Color(red: 1.00, green: 0.68, blue: 0.68)
+                        )
+                    }
+                }
+            }
+            .padding(16)
+        }
+        .background(
+            ZStack {
+                LinearGradient(
+                    colors: [Color(red: 0.10, green: 0.64, blue: 0.44),
+                             Color(red: 0.16, green: 0.82, blue: 0.34)],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+                // v2：頂部玻璃光澤（對齊 OverviewView / FinanceOverviewView 英雄卡規格）
+                LinearGradient(
+                    colors: [Color.white.opacity(0.18), Color.clear],
+                    startPoint: .top,
+                    endPoint: .center
+                )
+            }
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        // v2：卡片細邊框提升深色模式邊界感
+        .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.white.opacity(0.18), lineWidth: 0.75))
+        .shadow(color: Color(red: 0.10, green: 0.64, blue: 0.44).opacity(0.32), radius: 10, y: 4)
+        .padding(.horizontal, 4)
+        .padding(.vertical, 6)
+        .opacity(cardAppeared ? 1 : 0)
+        .offset(y: cardAppeared ? 0 : 14)
+        .animation(.spring(response: 0.50, dampingFraction: 0.80), value: cardAppeared)
+    }
+
+    private func previewKpiCell(label: String, value: String, tint: Color = .white) -> some View {
+        VStack(spacing: 3) {
+            Text(value)
+                .font(.system(size: 15, weight: .bold, design: .rounded))
+                .foregroundStyle(tint)
+                .minimumScaleFactor(0.70)
+                .lineLimit(1)
+                // v2：數字平滑滾動過渡（對齊 OverviewView.summaryCard 規格）
+                .contentTransition(.numericText())
+            Text(label)
+                .font(.caption2)
+                .foregroundStyle(Color.white.opacity(0.80))
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    /// v2：繳費資訊列（30pt 漸層圖示圓 + Capsule 值徽章）
+    private func calcInfoRow(icon: String, gradient: [Color], label: String, value: String, accent: Color) -> some View {
+        HStack(spacing: 12) {
+            ZStack {
+                Circle()
+                    .fill(LinearGradient(colors: gradient, startPoint: .topLeading, endPoint: .bottomTrailing))
+                    .frame(width: 30, height: 30)
+                Circle()
+                    .stroke(accent.opacity(0.22), lineWidth: 0.75)
+                    .frame(width: 30, height: 30)
+                Image(systemName: icon)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.white)
+            }
+            Text(label)
+                .font(.subheadline)
+                .foregroundStyle(.primary)
+            Spacer()
+            Text(value)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(accent)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 3)
+                .background(accent.opacity(0.10))
+                .clipShape(Capsule())
+                .overlay(Capsule().stroke(accent.opacity(0.22), lineWidth: 0.6))
+                .contentTransition(.numericText())
+        }
+    }
+
+    /// v2：計算結果列（30pt 漸層圖示圓 + 彩色 Capsule 值徽章）
+    private func calcResultRow(icon: String, gradient: [Color], label: String, value: String, accent: Color) -> some View {
+        HStack(spacing: 12) {
+            ZStack {
+                Circle()
+                    .fill(LinearGradient(colors: gradient, startPoint: .topLeading, endPoint: .bottomTrailing))
+                    .frame(width: 30, height: 30)
+                Circle()
+                    .stroke(accent.opacity(0.22), lineWidth: 0.75)
+                    .frame(width: 30, height: 30)
+                Image(systemName: icon)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.white)
+            }
+            Text(label)
+                .font(.subheadline)
+                .foregroundStyle(.primary)
+            Spacer()
+            Text(value)
+                .font(.system(size: 14, weight: .bold, design: .rounded))
+                .foregroundStyle(accent)
+                .minimumScaleFactor(0.72)
+                .lineLimit(1)
+                .padding(.horizontal, 9)
+                .padding(.vertical, 3.5)
+                .background(accent.opacity(0.10))
+                .clipShape(Capsule())
+                .overlay(Capsule().stroke(accent.opacity(0.22), lineWidth: 0.6))
+                .contentTransition(.numericText())
+        }
+    }
+
+    /// 驗證失敗橘色錯誤卡
+    private var errorBanner: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(.white)
+                .font(.subheadline.bold())
+            Text("請輸入保單名稱和有效保費金額")
+                .font(.subheadline.bold())
+                .foregroundStyle(.white)
+            Spacer()
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .background(
+            LinearGradient(
+                colors: [Color.orange, Color(red: 1.0, green: 0.60, blue: 0.15)],
+                startPoint: .leading, endPoint: .trailing
+            )
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .padding(.horizontal, 4)
+        .padding(.vertical, 4)
+    }
+
+    // MARK: - 商業邏輯（不變動）
+
     private func save() {
+        guard !isSaving else { return }
         guard !name.trimmingCharacters(in: .whitespaces).isEmpty,
               premium > 0 else {
             showError = true; return
         }
+        isSaving = true
 
         let trimmedName = name.trimmingCharacters(in: .whitespaces)
         let trimmedCompany = company.trimmingCharacters(in: .whitespaces)
@@ -250,6 +594,10 @@ struct AddSavingsInsuranceView: View {
 
         let insuranceId = editing?.id ?? UUID()
         let existingExpenseId = editing?.linkedExpenseId
+        // [v25.567] 既有那筆原本從哪扣（存完比對，變了下一個 runloop 才改）
+        let existing: Expense? = existingExpenseId.flatMap { id in expenseStore.expenses.first(where: { $0.id == id }) }
+        let before: WealthPayFromChoice? = existing.map { WealthPayFromChoice.of($0) }
+        let choice = payChoice
 
         // 同步建立或更新固定支出紀錄
         let expenseId = syncFixedExpense(
@@ -277,12 +625,48 @@ struct AddSavingsInsuranceView: View {
         )
         if editing != nil { financeStore.update(item) } else { financeStore.add(item) }
         dismiss()
+        // [v25.567] 既有那筆改了從哪扣：從今天起（以前扣的照舊記在原本的卡／帳戶，帳本 linkFrom）；先 dismiss、下一個 runloop 才寫
+        if let old = before, old != choice, existing?.id == expenseId {
+            let life = lifeStore
+            let es = expenseStore
+            DispatchQueue.main.async {
+                life.setExpensePayer(expenseId, bankId: choice.bankId,
+                                     bankCode: choice.bankId != nil ? choice.bankCode : nil,
+                                     cardId: choice.cardId, from: Date(), expense: es)
+            }
+        }
     }
 
     /// 同步建立或更新記帳模式的固定支出紀錄
+    /// [v25.567] 既有那筆改那一筆（以前整筆重建：存一次就洗掉扣款帳戶、金額歷史、停止日、節稅覆寫、小工具標記…）：
+    /// 只改名稱、金額（改了從今天起，以前的期數照原本的金額）、起始日、週期、保險子分類、連結、備註、幣別；
+    /// 從哪扣由 save() 比對後叫 setExpensePayer。找不到那筆（在記帳刪掉了）才新建一筆，新的直接寫從哪扣
     private func syncFixedExpense(insuranceId: UUID, existingExpenseId: UUID?, name: String, note: String) -> UUID {
-        let expenseId = existingExpenseId ?? UUID()
+        if let eid = existingExpenseId, var e = expenseStore.expenses.first(where: { $0.id == eid }) {
+            e.title = name
+            if Swift.abs(e.amount - premium) > 0.004 {
+                e.amountHistory = AmountHistoryChange.from(Date(), history: e.amountHistory, current: e.amount,
+                                                           firstDate: e.date, newAmount: premium)
+                e.amount = premium
+            }
+            e.date = startDate
+            e.expenseType = .fixed
+            e.fixedCategory = .insurance
+            e.recurrence = paymentPeriod
+            e.insuranceSubCategory = .savings
+            e.linkedInsuranceId = insuranceId
+            e.note = note
+            e.currencyCode = currencyCode
+            // [v25.567 審] 利率那一份也跟著改：記帳表單打開時「利率以支出自身欄位為主」，留舊的會在記帳存檔時把這裡改的利率蓋回去
+            //（以前整筆重建等於清成 nil；現在改那一筆，要自己寫）
+            e.insuranceRate = annualRate > 0 ? annualRate : nil
+            expenseStore.update(e)
+            return eid
+        }
 
+        let expenseId = UUID()
+        let c = payChoice
+        let cardBank: UUID? = c.cardId.flatMap { cid in lifeStore.milestones.first(where: { $0.id == cid })?.linkedBankMilestoneId }
         let expense = Expense(
             id: expenseId,
             title: name,
@@ -293,23 +677,34 @@ struct AddSavingsInsuranceView: View {
             recurrence: paymentPeriod,
             insuranceSubCategory: .savings,
             linkedInsuranceId: insuranceId,
-            note: note
+            note: note,
+            currencyCode: currencyCode,
+            insuranceRate: annualRate > 0 ? annualRate : nil,
+            linkedBankMilestoneId: c.cardId != nil ? cardBank : c.bankId,
+            linkedBankCurrency: (c.cardId == nil && c.bankId != nil) ? c.bankCode : nil,
+            linkedCreditCardMilestoneId: c.cardId
         )
-
-        if existingExpenseId != nil {
-            expenseStore.update(expense)
-        } else {
-            expenseStore.add(expense)
-        }
-
+        expenseStore.add(expense)
         return expenseId
     }
 
+    private static let currencyFormatterCache = NSCache<NSString, NumberFormatter>()
     private func formatCurrency(_ value: Double) -> String {
-        let f = NumberFormatter()
-        f.numberStyle = .currency
-        f.currencySymbol = currencySymbol
-        f.maximumFractionDigits = isUSD ? 2 : 0
+        // 台幣套用「萬」規則；外幣維持原幣別與小數位
+        if !isUSD && (currencySymbol == "NT$" || currencySymbol == "TWD") {
+            return value.ntdWanString
+        }
+        let key = "\(currencySymbol)_\(isUSD)" as NSString
+        let f: NumberFormatter
+        if let cached = Self.currencyFormatterCache.object(forKey: key) {
+            f = cached
+        } else {
+            f = NumberFormatter()
+            f.numberStyle = .currency
+            f.currencySymbol = currencySymbol
+            f.maximumFractionDigits = isUSD ? 2 : 0
+            Self.currencyFormatterCache.setObject(f, forKey: key)
+        }
         return f.string(from: NSNumber(value: value)) ?? "\(currencySymbol)0"
     }
 

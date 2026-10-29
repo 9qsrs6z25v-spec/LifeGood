@@ -7,6 +7,108 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		A01B000002000001 /* LifeGoodWidgetsBundle.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000001 /* LifeGoodWidgetsBundle.swift */; };
+		A01B000002000002 /* DayTimelineLiveActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000002 /* DayTimelineLiveActivity.swift */; };
+		A01B000002000003 /* DayTimelineAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000003 /* DayTimelineAttributes.swift */; };
+		A01B000002000004 /* DayTimelineIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000004 /* DayTimelineIntent.swift */; };
+		A01B000002000005 /* PhotoImportAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000008 /* PhotoImportAttributes.swift */; };
+		A01B000002000006 /* PhotoImportLiveActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000007 /* PhotoImportLiveActivity.swift */; };
+		A01B000002000011 /* DayTimelineAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000003 /* DayTimelineAttributes.swift */; };
+		A01B000002000012 /* DayTimelineIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000004 /* DayTimelineIntent.swift */; };
+		A01B000002000013 /* DayTimelineController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000005 /* DayTimelineController.swift */; };
+		A01B000002000014 /* PhotoImportAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000008 /* PhotoImportAttributes.swift */; };
+		A01B000002000051 /* WidgetSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000051 /* WidgetSnapshot.swift */; };
+		A01B000002000061 /* WidgetSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000051 /* WidgetSnapshot.swift */; };
+		A01B000002000052 /* WidgetLink.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000052 /* WidgetLink.swift */; };
+		A01B000002000062 /* WidgetLink.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000052 /* WidgetLink.swift */; };
+		A01B000002000053 /* WidgetPalette.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000053 /* WidgetPalette.swift */; };
+		A01B000002000054 /* MoneyLeftWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000054 /* MoneyLeftWidget.swift */; };
+		A01B000002000055 /* TodayWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000055 /* TodayWidget.swift */; };
+		A01B000001001539 /* WidgetSnapshotWriter.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001539 /* WidgetSnapshotWriter.swift */; };
+		A01B000001001540 /* TodayAgenda.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001540 /* TodayAgenda.swift */; };
+		A01B000001001541 /* CalendarDayItems.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001541 /* CalendarDayItems.swift */; };
+		A01B000002000056 /* QuickRecordInbox.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000056 /* QuickRecordInbox.swift */; };
+		A01B000002000066 /* QuickRecordInbox.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000056 /* QuickRecordInbox.swift */; };
+		A01B000002000057 /* WidgetActions.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000057 /* WidgetActions.swift */; };
+		A01B000002000067 /* WidgetActions.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000057 /* WidgetActions.swift */; };
+		A01B000002000071 /* LedgerDeskWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000071 /* LedgerDeskWidget.swift */; };
+		A01B000002000072 /* QuickRecordWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000072 /* QuickRecordWidget.swift */; };
+		A01B000002000073 /* BillsWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000073 /* BillsWidget.swift */; };
+		A01B000002000074 /* LockScreenWidgets.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000074 /* LockScreenWidgets.swift */; };
+		A01B000002000075 /* LifeGoodControls.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000075 /* LifeGoodControls.swift */; };
+		A01B000002000076 /* WidgetIntents.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000076 /* WidgetIntents.swift */; };
+		A01B000002000077 /* WidgetMoneyPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000077 /* WidgetMoneyPanel.swift */; };
+		A01B000001001542 /* QuickRecordImporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001542 /* QuickRecordImporter.swift */; };
+		A01B000001001543 /* WidgetBillsBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001543 /* WidgetBillsBuilder.swift */; };
+		A01B000001001544 /* WidgetMoneyExtras.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001544 /* WidgetMoneyExtras.swift */; };
+		A01B000002000058 /* WidgetConfigTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000058 /* WidgetConfigTypes.swift */; };
+		A01B000002000068 /* WidgetConfigTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000058 /* WidgetConfigTypes.swift */; };
+		A01B000002000078 /* WidgetConfigs.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000078 /* WidgetConfigs.swift */; };
+		A01B000002000079 /* TravelWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000079 /* TravelWidget.swift */; };
+		A01B000001001545 /* AIExpenseCommitter.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001545 /* AIExpenseCommitter.swift */; };
+		A01B000001001546 /* AIQuickVoice.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001546 /* AIQuickVoice.swift */; };
+		A01B000002000081 /* FXRateService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000081 /* FXRateService.swift */; };
+		A01B000002000091 /* FXRateService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000081 /* FXRateService.swift */; };
+		A01B000002000082 /* WidgetQuoteService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000082 /* WidgetQuoteService.swift */; };
+		A01B000002000092 /* WidgetQuoteService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000082 /* WidgetQuoteService.swift */; };
+		A01B000002000083 /* WidgetMoneyFormat.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000083 /* WidgetMoneyFormat.swift */; };
+		A01B000002000093 /* WidgetMoneyFormat.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000083 /* WidgetMoneyFormat.swift */; };
+		A01B000002000084 /* StockWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000084 /* StockWidget.swift */; };
+		A01B000002000085 /* RatesWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000085 /* RatesWidget.swift */; };
+		A01B000002000086 /* VehicleWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000086 /* VehicleWidget.swift */; };
+		A01B000002000087 /* NetWorthWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000087 /* NetWorthWidget.swift */; };
+		A01B000002000088 /* WidgetQuoteStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000088 /* WidgetQuoteStore.swift */; };
+		A01B000001001547 /* WidgetFinanceBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001547 /* WidgetFinanceBuilder.swift */; };
+		A01B000002000089 /* DayTimelineToggleIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000089 /* DayTimelineToggleIntent.swift */; };
+		A01B000002000099 /* DayTimelineToggleIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000089 /* DayTimelineToggleIntent.swift */; };
+		A01B000002000090 /* TeamWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000090 /* TeamWidget.swift */; };
+		A01B000001001548 /* TeamDay.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001548 /* TeamDay.swift */; };
+		A01B000001001549 /* WidgetLifeExtras.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001549 /* WidgetLifeExtras.swift */; };
+		A01B000001001550 /* WorkoutFacts.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001550 /* WorkoutFacts.swift */; };
+		A01B000001001551 /* RunRecovery.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001551 /* RunRecovery.swift */; };
+		A01B000001001552 /* HealthPageData.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001552 /* HealthPageData.swift */; };
+		A01B000001001553 /* WorkoutCardData.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001553 /* WorkoutCardData.swift */; };
+		A01B000001001559 /* HealthSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001559 /* HealthSync.swift */; };
+		A01B000001001554 /* HealthBoard.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001554 /* HealthBoard.swift */; };
+		A01B000001001555 /* HealthBoardScenes.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001555 /* HealthBoardScenes.swift */; };
+		A01B000001001556 /* WorkoutItems.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001556 /* WorkoutItems.swift */; };
+		A01B000001001557 /* WorkoutListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001557 /* WorkoutListView.swift */; };
+		A01B000001001558 /* WorkoutDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001558 /* WorkoutDetailView.swift */; };
+		A01B000001001560 /* WorkoutPlaceLookup.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001560 /* WorkoutPlaceLookup.swift */; };
+		A01B000001001561 /* RunScreenParts.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001561 /* RunScreenParts.swift */; };
+		A01B000001001562 /* WorkoutShare.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001562 /* WorkoutShare.swift */; };
+		A01B000002000094 /* RunActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000094 /* RunActivityAttributes.swift */; };
+		A01B000002000097 /* RunActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000094 /* RunActivityAttributes.swift */; };
+		A01B000002000095 /* RunPauseIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000095 /* RunPauseIntent.swift */; };
+		A01B000002000098 /* RunPauseIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000095 /* RunPauseIntent.swift */; };
+		A01B000002000096 /* RunLiveActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000096 /* RunLiveActivity.swift */; };
+		A01B000001001563 /* RunActivityCenter.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001563 /* RunActivityCenter.swift */; };
+		A01B000001001564 /* WorkoutProgress.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001564 /* WorkoutProgress.swift */; };
+		A01B000001001565 /* RunVoice.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001565 /* RunVoice.swift */; };
+		A01B000001001566 /* HealthProgressCards.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001566 /* HealthProgressCards.swift */; };
+		A01B000001001567 /* WorkoutLifeLinks.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001567 /* WorkoutLifeLinks.swift */; };
+		A01B000001001568 /* WorkoutDetailExtras.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001568 /* WorkoutDetailExtras.swift */; };
+		A01B000001001506 /* PhotoImportCenter.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001506 /* PhotoImportCenter.swift */; };
+		A01B000001001507 /* PhotoSlideshowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001507 /* PhotoSlideshowView.swift */; };
+		A01B000001001508 /* BeatDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001508 /* BeatDetector.swift */; };
+		A01B000001001509 /* SlideshowDecor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001509 /* SlideshowDecor.swift */; };
+		A01B000001001510 /* SlideshowCyber.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001510 /* SlideshowCyber.swift */; };
+		A01B000001001511 /* TripTimelineCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001511 /* TripTimelineCard.swift */; };
+		A01B000001001512 /* TripHero.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001512 /* TripHero.swift */; };
+		A01B000001001513 /* TripSummaryBoard.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001513 /* TripSummaryBoard.swift */; };
+		A01B000001001514 /* MarqueeText.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001514 /* MarqueeText.swift */; };
+		A01B000001001515 /* WindowSizing.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001515 /* WindowSizing.swift */; };
+		A01B000001001516 /* MoneyBoardKit.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001516 /* MoneyBoardKit.swift */; };
+		A01B000001001517 /* OverviewBoard.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001517 /* OverviewBoard.swift */; };
+		A01B000001001518 /* MoneyArt.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001518 /* MoneyArt.swift */; };
+		A01B000001001519 /* MoneyItemCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001519 /* MoneyItemCard.swift */; };
+		A01B000001001520 /* MoneyBoardScenes.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001520 /* MoneyBoardScenes.swift */; };
+		A01B000001001521 /* MoneyBoards.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001521 /* MoneyBoards.swift */; };
+		A01B000001001522 /* FinanceInsights.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001522 /* FinanceInsights.swift */; };
+		A01B000001001523 /* FinanceBoardScenes.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001523 /* FinanceBoardScenes.swift */; };
+		A01B000001001524 /* FinanceBoards.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001524 /* FinanceBoards.swift */; };
+		A01B000001001525 /* FinanceItems.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001525 /* FinanceItems.swift */; };
+		A01B000002000020 /* LifeGoodWidgets.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = A01A000002000100 /* LifeGoodWidgets.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		A01B000001000001 /* LifeGoodApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000001 /* LifeGoodApp.swift */; };
 		A01B000001000002 /* Expense.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000002 /* Expense.swift */; };
 		A01B000001000003 /* ExpenseStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000003 /* ExpenseStore.swift */; };
@@ -23,6 +125,67 @@
 		A01B00000100000E /* AppMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A00000100000E /* AppMode.swift */; };
 		A01B00000100000F /* FinanceModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A00000100000F /* FinanceModels.swift */; };
 		A01B000001000010 /* FinanceStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000010 /* FinanceStore.swift */; };
+		A01B000001001527 /* HouseFacts.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001527 /* HouseFacts.swift */; };
+		A01B000001001528 /* HouseCardData.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001528 /* HouseCardData.swift */; };
+		A01B000001001533 /* VehicleFacts.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001533 /* VehicleFacts.swift */; };
+		A01B000001001538 /* VehicleEditors.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001538 /* VehicleEditors.swift */; };
+		A01B000001001537 /* VehicleCardViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001537 /* VehicleCardViews.swift */; };
+		A01B000001001536 /* FinanceCardKit.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001536 /* FinanceCardKit.swift */; };
+		A01B000001001535 /* FinDriveScene.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001535 /* FinDriveScene.swift */; };
+		A01B000001001534 /* VehicleCardData.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001534 /* VehicleCardData.swift */; };
+		A01B000001001576 /* VehicleResale.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001576 /* VehicleResale.swift */; };
+		A01B000001001578 /* WealthFacts.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001578 /* WealthFacts.swift */; };
+		A01B000001001579 /* WealthBook.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001579 /* WealthBook.swift */; };
+		A01B000001001580 /* WealthPageData.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001580 /* WealthPageData.swift */; };
+		A01B000001001581 /* WealthCardData.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001581 /* WealthCardData.swift */; };
+		A01B000001001587 /* WealthReminders.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001587 /* WealthReminders.swift */; };
+		A01B000001001589 /* WealthPolicyFacts.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001589 /* WealthPolicyFacts.swift */; };
+		A01B000001001591 /* WealthVault.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001591 /* WealthVault.swift */; };
+		A01B000001001592 /* WealthWebFacts.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001592 /* WealthWebFacts.swift */; };
+		A01B000001001598 /* WealthTransfers.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001598 /* WealthTransfers.swift */; };
+		A01B000001001613 /* OrgHandoffs.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001613 /* OrgHandoffs.swift */; };
+		A01B000001001614 /* OrgMoves.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001614 /* OrgMoves.swift */; };
+		A01B000001001615 /* OrgMovePlan.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001615 /* OrgMovePlan.swift */; };
+		A01B000001001620 /* OrgMoveMeetingPlan.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001620 /* OrgMoveMeetingPlan.swift */; };
+		A01B000001001622 /* OrgMoveDue.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001622 /* OrgMoveDue.swift */; };
+		A01B000001001624 /* OrgMoveOut.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001624 /* OrgMoveOut.swift */; };
+		A01B000001001601 /* WealthTransferPlans.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001601 /* WealthTransferPlans.swift */; };
+		A01B000001001603 /* WealthTransferNotices.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001603 /* WealthTransferNotices.swift */; };
+		A01B000001001605 /* WealthTransferFinds.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001605 /* WealthTransferFinds.swift */; };
+		A01B000001001608 /* WealthTransferCycles.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001608 /* WealthTransferCycles.swift */; };
+		A01B000001001606 /* WatchRunPhone.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001606 /* WatchRunPhone.swift */; };
+		A01B000001001607 /* WatchRunChoiceSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001607 /* WatchRunChoiceSheet.swift */; };
+		A01B000003000059 /* WatchRunWeekText.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000114 /* WatchRunWeekText.swift */; };
+		A01B000004000059 /* WatchRunWeekText.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000114 /* WatchRunWeekText.swift */; };
+		A01B000003000040 /* RunWeekView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000003000040 /* RunWeekView.swift */; };
+		A01B000003000041 /* RunDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000003000041 /* RunDetailView.swift */; };
+		A01B000003000042 /* StartRunIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000003000042 /* StartRunIntent.swift */; };
+		A01B000004000008 /* RunWeekWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000004000008 /* RunWeekWidget.swift */; };
+		A01B000002000115 /* WatchRelevance.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000115 /* WatchRelevance.swift */; };
+		A01B000003000060 /* WatchRelevance.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000115 /* WatchRelevance.swift */; };
+		A01B000004000060 /* WatchRelevance.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000115 /* WatchRelevance.swift */; };
+		A01B000003000061 /* WatchOpenIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000116 /* WatchOpenIntent.swift */; };
+		A01B000004000061 /* WatchOpenIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000116 /* WatchOpenIntent.swift */; };
+		A01B000002000117 /* WatchVoice.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000117 /* WatchVoice.swift */; };
+		A01B000003000062 /* WatchVoice.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000117 /* WatchVoice.swift */; };
+		A01B000001001609 /* WatchVoiceInbox.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001609 /* WatchVoiceInbox.swift */; };
+		A01B000003000043 /* VoiceOutbox.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000003000043 /* VoiceOutbox.swift */; };
+		A01B000003000044 /* VoiceRecord.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000003000044 /* VoiceRecord.swift */; };
+		A01B000004000009 /* RelevanceCards.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000004000009 /* RelevanceCards.swift */; };
+		A01B000004000010 /* WatchControls.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000004000010 /* WatchControls.swift */; };
+		A01B000001001593 /* NotificationActions.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001593 /* NotificationActions.swift */; };
+		A01B000001001582 /* WealthBoard.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001582 /* WealthBoard.swift */; };
+		A01B000001001583 /* WealthBoardScenes.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001583 /* WealthBoardScenes.swift */; };
+		A01B000001001584 /* WealthItems.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001584 /* WealthItems.swift */; };
+		A01B000001001585 /* WealthCardViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001585 /* WealthCardViews.swift */; };
+		A01B000001001586 /* WealthEditors.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001586 /* WealthEditors.swift */; };
+		A01B000001001588 /* WealthDepositForms.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001588 /* WealthDepositForms.swift */; };
+		A01B000001001599 /* WealthTransferViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001599 /* WealthTransferViews.swift */; };
+		A01B000001001590 /* WealthLinkForms.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001590 /* WealthLinkForms.swift */; };
+		A01B000001001529 /* FinHouseScene.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001529 /* FinHouseScene.swift */; };
+		A01B000001001532 /* AppStores.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001532 /* AppStores.swift */; };
+		A01B000001001530 /* HouseCardViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001530 /* HouseCardViews.swift */; };
+		A01B000001001531 /* RealEstateEditors.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001531 /* RealEstateEditors.swift */; };
 		A01B000001000011 /* FinanceOverviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000011 /* FinanceOverviewView.swift */; };
 		A01B000001000012 /* SavingsInsuranceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000012 /* SavingsInsuranceView.swift */; };
 		A01B000001000013 /* StockView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000013 /* StockView.swift */; };
@@ -34,8 +197,12 @@
 		A01B000001000019 /* VehicleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000019 /* VehicleView.swift */; };
 		A01B00000100001A /* AddVehicleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A00000100001A /* AddVehicleView.swift */; };
 		A01B00000100001E /* VehicleDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A00000100001E /* VehicleDetailView.swift */; };
+		A01B000001001577 /* VehicleResaleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001577 /* VehicleResaleView.swift */; };
+		A01B000001000224 /* VehicleChargeAnalyticsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000224 /* VehicleChargeAnalyticsView.swift */; };
+		A01B000001000226 /* TripPlanView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000226 /* TripPlanView.swift */; };
 		A01B00000100001F /* RealEstateDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A00000100001F /* RealEstateDetailView.swift */; };
 		A01B000001000020 /* LifeModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000020 /* LifeModels.swift */; };
+		A01B000001000201 /* HealthModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000201 /* HealthModels.swift */; };
 		A01B000001000021 /* LifeStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000021 /* LifeStore.swift */; };
 		A01B000001000022 /* LifeOverviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000022 /* LifeOverviewView.swift */; };
 		A01B000001000023 /* ResumeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000023 /* ResumeView.swift */; };
@@ -50,8 +217,58 @@
 		A01B00000100009B /* TaxOverviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A00000100009B /* TaxOverviewView.swift */; };
 		A01B000001000033 /* CloudSyncManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000033 /* CloudSyncManager.swift */; };
 		A01B000001000100 /* CloudKitManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000100 /* CloudKitManager.swift */; };
+		A01B000078000038 /* RemoteAdmin.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000078000038 /* RemoteAdmin.swift */; };
+		A01B00007A000038 /* Changelog.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A00007A000038 /* Changelog.swift */; };
+		A01B00007B000038 /* FullBackup.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A00007B000038 /* FullBackup.swift */; };
+		A01B000079000038 /* AdminConsoleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000079000038 /* AdminConsoleView.swift */; };
+		A01B00007C000038 /* TalentMatrixView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A00007C000038 /* TalentMatrixView.swift */; };
 		A01B000001000101 /* RestaurantSearch.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000101 /* RestaurantSearch.swift */; };
 		A01B000001000102 /* FoodMapView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000102 /* FoodMapView.swift */; };
+		A01B000001000200 /* TravelMapView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000200 /* TravelMapView.swift */; };
+		A01B000001000202 /* HealthProfileEditView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000202 /* HealthProfileEditView.swift */; };
+		A01B000001000203 /* MedicalMapView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000203 /* MedicalMapView.swift */; };
+		A01B000001000204 /* ChildVaccineSchedule.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000204 /* ChildVaccineSchedule.swift */; };
+		A01B000001000205 /* ChildVaccineScheduleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000205 /* ChildVaccineScheduleView.swift */; };
+		A01B000001000206 /* SubordinateEquipmentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000206 /* SubordinateEquipmentView.swift */; };
+		A01B000001001610 /* SubordinateExport.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001610 /* SubordinateExport.swift */; };
+		A01B000001001611 /* SubordinateExportSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001611 /* SubordinateExportSheet.swift */; };
+		A01B000001001612 /* SubordinateExportImage.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001612 /* SubordinateExportImage.swift */; };
+		A01B000001001616 /* OrgMoveParts.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001616 /* OrgMoveParts.swift */; };
+		A01B000001001617 /* OrgMoveWizard.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001617 /* OrgMoveWizard.swift */; };
+		A01B000001001618 /* OrgMoveSheetView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001618 /* OrgMoveSheetView.swift */; };
+		A01B000001001619 /* OrgMoveCardParts.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001619 /* OrgMoveCardParts.swift */; };
+		A01B000001001621 /* OrgMoveWizardRows.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001621 /* OrgMoveWizardRows.swift */; };
+		A01B000001001623 /* OrgMoveDueViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001623 /* OrgMoveDueViews.swift */; };
+		A01B000001000221 /* PetResumeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000221 /* PetResumeView.swift */; };
+		A01B000001000222 /* PetDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000222 /* PetDetailView.swift */; };
+		A01B000001000207 /* MapAlbumSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000207 /* MapAlbumSheet.swift */; };
+		A01B000001000223 /* WhatsNewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000223 /* WhatsNewView.swift */; };
+		A01B000001000208 /* QuickPickCapsules.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000208 /* QuickPickCapsules.swift */; };
+		A01B000001000209 /* HeroTrendChart.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000209 /* HeroTrendChart.swift */; };
+		A01B000001000210 /* FlashCardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000210 /* FlashCardView.swift */; };
+		A01B000001000211 /* HeroCardKit.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000211 /* HeroCardKit.swift */; };
+		A01B000001000213 /* SwipeDeleteRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000213 /* SwipeDeleteRow.swift */; };
+		A01B000001000217 /* InlineEditBlock.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000217 /* InlineEditBlock.swift */; };
+		A01B000001000218 /* AmountCalculator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000218 /* AmountCalculator.swift */; };
+		A01B000001000219 /* PagedImageExporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000219 /* PagedImageExporter.swift */; };
+		A01B000001000220 /* FinanceItemCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000220 /* FinanceItemCard.swift */; };
+		A01B000001000216 /* SideRoleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000216 /* SideRoleView.swift */; };
+		A01B000001000900 /* PerformanceReviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000900 /* PerformanceReviewView.swift */; };
+		A01B000001001700 /* CompanyChronicleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001700 /* CompanyChronicleView.swift */; };
+		A01B000001001900 /* PerformanceExportView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001900 /* PerformanceExportView.swift */; };
+		A01B000001001600 /* CompanySiteSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001600 /* CompanySiteSection.swift */; };
+		A01B000001001500 /* ItemRowTemplate.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001500 /* ItemRowTemplate.swift */; };
+		A01B000001001501 /* MapPlacePicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001501 /* MapPlacePicker.swift */; };
+		A01B000001001502 /* TripWeather.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001502 /* TripWeather.swift */; };
+		A01B000001001504 /* TripChangeNotifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001504 /* TripChangeNotifier.swift */; };
+		A01B000001001505 /* MeetingReminders.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001505 /* MeetingReminders.swift */; };
+		A01B000001001503 /* DeepLinkRouter.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001503 /* DeepLinkRouter.swift */; };
+		A01B000001001400 /* RunTrackingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001400 /* RunTrackingView.swift */; };
+		A01B000001001300 /* RunTracker.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001300 /* RunTracker.swift */; };
+		A01B000001001200 /* HealthKitManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001200 /* HealthKitManager.swift */; };
+		A01B000001001100 /* WorkoutEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001100 /* WorkoutEditorView.swift */; };
+		A01B000001001000 /* HealthView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001000 /* HealthView.swift */; };
+		A01B000001000214 /* HeroStyleKit.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000214 /* HeroStyleKit.swift */; };
 		A01B000001000103 /* MultiPhotoGallery.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000103 /* MultiPhotoGallery.swift */; };
 		A01B000001000104 /* ResumeGiftSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000104 /* ResumeGiftSection.swift */; };
 		A01B000001000105 /* OrganizationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000105 /* OrganizationView.swift */; };
@@ -61,6 +278,7 @@
 		A01B000001000036 /* SpouseResumeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000036 /* SpouseResumeView.swift */; };
 		A01B000001000037 /* ChildrenResumeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000037 /* ChildrenResumeView.swift */; };
 		A01B000001000038 /* SubordinateDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000038 /* SubordinateDetailView.swift */; };
+		A01B000077000038 /* SubordinateRosterView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000077000038 /* SubordinateRosterView.swift */; };
 		A01B000001000039 /* ChildDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000039 /* ChildDetailView.swift */; };
 		A01B00000100003A /* LifeFinanceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A00000100003A /* LifeFinanceView.swift */; };
 		A01B00000100003B /* SubscriptionManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A00000100003B /* SubscriptionManager.swift */; };
@@ -68,6 +286,13 @@
 		A01B00000100003D /* PaywallView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A00000100003D /* PaywallView.swift */; };
 		A01B00000100003E /* EInvoice.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A00000100003E /* EInvoice.swift */; };
 		A01B00000100003F /* KeychainHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A00000100003F /* KeychainHelper.swift */; };
+		A01B000001001800 /* CardVault.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001800 /* CardVault.swift */; };
+		A01B000001000225 /* VehicleChargeAnalytics.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000225 /* VehicleChargeAnalytics.swift */; };
+		A01B000001000227 /* TripPlan.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000227 /* TripPlan.swift */; };
+		A01B000001000228 /* TripShare.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000228 /* TripShare.swift */; };
+		A01B000001000229 /* TripImageExport.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000229 /* TripImageExport.swift */; };
+		A01B00000100022A /* TripStopCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A00000100022A /* TripStopCard.swift */; };
+		A01B00000100022B /* TripStats.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A00000100022B /* TripStats.swift */; };
 		A01B000001000040 /* EInvoiceClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000040 /* EInvoiceClient.swift */; };
 		A01B000001000041 /* InvoiceCategorizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000041 /* InvoiceCategorizer.swift */; };
 		A01B000001000042 /* EInvoiceSyncManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000042 /* EInvoiceSyncManager.swift */; };
@@ -76,15 +301,187 @@
 		A01B000001000045 /* MyCalendarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000045 /* MyCalendarView.swift */; };
 		A01B000001000046 /* NotificationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000046 /* NotificationManager.swift */; };
 		A01B000001000047 /* StockDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000047 /* StockDetailView.swift */; };
+		A01B000001001526 /* StockCardViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001526 /* StockCardViews.swift */; };
+		A01B000001000212 /* InstitutionalView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000212 /* InstitutionalView.swift */; };
 		A01B000001000048 /* RenovationPhotoEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000048 /* RenovationPhotoEditor.swift */; };
 		A01B000001000049 /* HolographicBuildingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000049 /* HolographicBuildingView.swift */; };
 		A01B00000100004A /* FamilyOverviewMap.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A00000100004A /* FamilyOverviewMap.swift */; };
 		A01B00000100004B /* FamilyMembersResumeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A00000100004B /* FamilyMembersResumeView.swift */; };
 		A01B00000100000A /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A01A00000100000A /* Assets.xcassets */; };
 		A01B00000100000B /* Preview Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A01A00000100000B /* Preview Assets.xcassets */; };
+		A01B000003000001 /* LifeGoodWatchApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000003000001 /* LifeGoodWatchApp.swift */; };
+		A01B000003000004 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A01A000003000004 /* Assets.xcassets */; };
+		A01B000003000020 /* LifeGoodWatch.app in Embed Watch Content */ = {isa = PBXBuildFile; fileRef = A01A000003000100 /* LifeGoodWatch.app */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		A01B000004000001 /* LifeGoodWatchWidgetsBundle.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000004000001 /* LifeGoodWatchWidgetsBundle.swift */; };
+		A01B000004000020 /* LifeGoodWatchWidgets.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = A01A000004000100 /* LifeGoodWatchWidgets.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		A01B000001001594 /* WatchPackageBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001594 /* WatchPackageBuilder.swift */; };
+		A01B000001001595 /* WatchExtrasWriter.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001595 /* WatchExtrasWriter.swift */; };
+		A01B000001001596 /* WatchBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001596 /* WatchBridge.swift */; };
+		A01B000001001597 /* WatchSettingsSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001597 /* WatchSettingsSection.swift */; };
+		A01B000002000110 /* WatchPackage.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000110 /* WatchPackage.swift */; };
+		A01B000003000005 /* WatchAppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000003000005 /* WatchAppDelegate.swift */; };
+		A01B000003000006 /* WatchSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000003000006 /* WatchSync.swift */; };
+		A01B000003000007 /* WatchModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000003000007 /* WatchModel.swift */; };
+		A01B000003000008 /* WatchPrivacy.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000003000008 /* WatchPrivacy.swift */; };
+		A01B000003000009 /* WatchStyle.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000003000009 /* WatchStyle.swift */; };
+		A01B000003000010 /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000003000010 /* RootView.swift */; };
+		A01B000003000011 /* TodayPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000003000011 /* TodayPage.swift */; };
+		A01B000003000012 /* DayListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000003000012 /* DayListView.swift */; };
+		A01B000003000013 /* StopDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000003000013 /* StopDetailView.swift */; };
+		A01B000003000014 /* MoneyPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000003000014 /* MoneyPage.swift */; };
+		A01B000003000015 /* BillsList.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000003000015 /* BillsList.swift */; };
+		A01B000003000016 /* FreshnessFooter.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000003000016 /* FreshnessFooter.swift */; };
+		A01B000003000017 /* SettingsSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000003000017 /* SettingsSheet.swift */; };
+		A01B000003000018 /* WatchNotificationDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000003000018 /* WatchNotificationDelegate.swift */; };
+		A01B000004000004 /* WatchPackageProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000004000004 /* WatchPackageProvider.swift */; };
+		A01B000004000005 /* NextUpWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000004000005 /* NextUpWidget.swift */; };
+		A01B000004000006 /* SpentWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000004000006 /* SpentWidget.swift */; };
+		A01B000003000021 /* RecordSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000003000021 /* RecordSheet.swift */; };
+		A01B000003000022 /* AmountPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000003000022 /* AmountPicker.swift */; };
+		A01B000003000023 /* DigitPad.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000003000023 /* DigitPad.swift */; };
+		A01B000003000024 /* RecordOutbox.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000003000024 /* RecordOutbox.swift */; };
+		A01B000003000025 /* TodayRecordsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000003000025 /* TodayRecordsView.swift */; };
+		A01B000003000026 /* BarcodePage.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000003000026 /* BarcodePage.swift */; };
+		A01B000003000027 /* Code39.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000003000027 /* Code39.swift */; };
+		A01B000003000028 /* RecordText.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000003000028 /* RecordText.swift */; };
+		A01B000004000007 /* AddWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000004000007 /* AddWidget.swift */; };
+		A01B000003000051 /* DayTimelineAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000003 /* DayTimelineAttributes.swift */; };
+		A01B000004000051 /* DayTimelineAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000003 /* DayTimelineAttributes.swift */; };
+		A01B000003000052 /* WidgetSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000051 /* WidgetSnapshot.swift */; };
+		A01B000004000052 /* WidgetSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000051 /* WidgetSnapshot.swift */; };
+		A01B000003000053 /* WidgetLink.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000052 /* WidgetLink.swift */; };
+		A01B000004000053 /* WidgetLink.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000052 /* WidgetLink.swift */; };
+		A01B000003000055 /* WatchPackage.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000110 /* WatchPackage.swift */; };
+		A01B000004000055 /* WatchPackage.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000110 /* WatchPackage.swift */; };
+		A01B000003000056 /* WatchText.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000111 /* WatchText.swift */; };
+		A01B000004000056 /* WatchText.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000111 /* WatchText.swift */; };
+		A01B000001001602 /* WatchActionInbox.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001602 /* WatchActionInbox.swift */; };
+		A01B000003000057 /* WatchTripText.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000112 /* WatchTripText.swift */; };
+		A01B000004000057 /* WatchTripText.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000112 /* WatchTripText.swift */; };
+		A01B000001001604 /* WatchRunImport.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001604 /* WatchRunImport.swift */; };
+		A01B000003000058 /* WatchRunText.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000113 /* WatchRunText.swift */; };
+		A01B000004000058 /* WatchRunText.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000113 /* WatchRunText.swift */; };
+		A01B000003000032 /* WorkoutManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000003000032 /* WorkoutManager.swift */; };
+		A01B000003000033 /* RouteRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000003000033 /* RouteRecorder.swift */; };
+		A01B000003000034 /* WatchRunVoice.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000003000034 /* WatchRunVoice.swift */; };
+		A01B000003000035 /* RunStash.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000003000035 /* RunStash.swift */; };
+		A01B000003000036 /* RunHomePage.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000003000036 /* RunHomePage.swift */; };
+		A01B000003000037 /* RunPrepView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000003000037 /* RunPrepView.swift */; };
+		A01B000003000038 /* RunSessionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000003000038 /* RunSessionView.swift */; };
+		A01B000003000039 /* RunSummaryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000003000039 /* RunSummaryView.swift */; };
+		A01B000003000029 /* TripPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000003000029 /* TripPage.swift */; };
+		A01B000003000030 /* TripStopDetail.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000003000030 /* TripStopDetail.swift */; };
+		A01B000003000031 /* TripCheckIns.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000003000031 /* TripCheckIns.swift */; };
 /* End PBXBuildFile section */
 
+/* Begin PBXCopyFilesBuildPhase section */
+		A01C000002000004 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				A01B000002000020 /* LifeGoodWidgets.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A01C000001000004 /* Embed Watch Content */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "$(CONTENTS_FOLDER_PATH)/Watch";
+			dstSubfolderSpec = 16;
+			files = (
+				A01B000003000020 /* LifeGoodWatch.app in Embed Watch Content */,
+			);
+			name = "Embed Watch Content";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A01C000003000004 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				A01B000004000020 /* LifeGoodWatchWidgets.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
+/* Begin PBXContainerItemProxy section */
+		A018000002000001 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = A01E000001000002 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = A01E000002000001;
+			remoteInfo = LifeGoodWidgets;
+		};
+		A018000003000001 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = A01E000001000002 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = A01E000003000001;
+			remoteInfo = LifeGoodWatch;
+		};
+		A018000004000001 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = A01E000001000002 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = A01E000004000001;
+			remoteInfo = LifeGoodWatchWidgets;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXTargetDependency section */
+		A019000002000001 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = A01E000002000001 /* LifeGoodWidgets */;
+			targetProxy = A018000002000001 /* PBXContainerItemProxy */;
+		};
+		A019000003000001 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = A01E000003000001 /* LifeGoodWatch */;
+			targetProxy = A018000003000001 /* PBXContainerItemProxy */;
+		};
+		A019000004000001 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = A01E000004000001 /* LifeGoodWatchWidgets */;
+			targetProxy = A018000004000001 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
 /* Begin PBXFileReference section */
+		A01A000002000001 /* LifeGoodWidgetsBundle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LifeGoodWidgetsBundle.swift; sourceTree = "<group>"; };
+		A01A000002000002 /* DayTimelineLiveActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DayTimelineLiveActivity.swift; sourceTree = "<group>"; };
+		A01A000002000008 /* PhotoImportAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoImportAttributes.swift; sourceTree = "<group>"; };
+		A01A000002000007 /* PhotoImportLiveActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoImportLiveActivity.swift; sourceTree = "<group>"; };
+		A01A000001001509 /* SlideshowDecor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SlideshowDecor.swift; sourceTree = "<group>"; };
+		A01A000001001510 /* SlideshowCyber.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SlideshowCyber.swift; sourceTree = "<group>"; };
+		A01A000001001511 /* TripTimelineCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripTimelineCard.swift; sourceTree = "<group>"; };
+		A01A000001001512 /* TripHero.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripHero.swift; sourceTree = "<group>"; };
+		A01A000001001513 /* TripSummaryBoard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripSummaryBoard.swift; sourceTree = "<group>"; };
+		A01A000001001514 /* MarqueeText.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarqueeText.swift; sourceTree = "<group>"; };
+		A01A000001001515 /* WindowSizing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WindowSizing.swift; sourceTree = "<group>"; };
+		A01A000001001516 /* MoneyBoardKit.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MoneyBoardKit.swift; sourceTree = "<group>"; };
+		A01A000001001517 /* OverviewBoard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OverviewBoard.swift; sourceTree = "<group>"; };
+		A01A000001001518 /* MoneyArt.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MoneyArt.swift; sourceTree = "<group>"; };
+		A01A000001001519 /* MoneyItemCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MoneyItemCard.swift; sourceTree = "<group>"; };
+		A01A000001001520 /* MoneyBoardScenes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MoneyBoardScenes.swift; sourceTree = "<group>"; };
+		A01A000001001521 /* MoneyBoards.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MoneyBoards.swift; sourceTree = "<group>"; };
+		A01A000001001522 /* FinanceInsights.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FinanceInsights.swift; sourceTree = "<group>"; };
+		A01A000001001523 /* FinanceBoardScenes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FinanceBoardScenes.swift; sourceTree = "<group>"; };
+		A01A000001001524 /* FinanceBoards.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FinanceBoards.swift; sourceTree = "<group>"; };
+		A01A000001001525 /* FinanceItems.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FinanceItems.swift; sourceTree = "<group>"; };
+		A01A000001001508 /* BeatDetector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BeatDetector.swift; sourceTree = "<group>"; };
+		A01A000001001507 /* PhotoSlideshowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoSlideshowView.swift; sourceTree = "<group>"; };
+		A01A000001001506 /* PhotoImportCenter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoImportCenter.swift; sourceTree = "<group>"; };
+		A01A000002000003 /* DayTimelineAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DayTimelineAttributes.swift; sourceTree = "<group>"; };
+		A01A000002000004 /* DayTimelineIntent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DayTimelineIntent.swift; sourceTree = "<group>"; };
+		A01A000002000005 /* DayTimelineController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DayTimelineController.swift; sourceTree = "<group>"; };
+		A01A000002000006 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		A01A000002000100 /* LifeGoodWidgets.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = LifeGoodWidgets.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		A01A000001000001 /* LifeGoodApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LifeGoodApp.swift; sourceTree = "<group>"; };
 		A01A000001000002 /* Expense.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Expense.swift; sourceTree = "<group>"; };
 		A01A000001000003 /* ExpenseStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExpenseStore.swift; sourceTree = "<group>"; };
@@ -101,6 +498,62 @@
 		A01A00000100000E /* AppMode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppMode.swift; sourceTree = "<group>"; };
 		A01A00000100000F /* FinanceModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FinanceModels.swift; sourceTree = "<group>"; };
 		A01A000001000010 /* FinanceStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FinanceStore.swift; sourceTree = "<group>"; };
+		A01A000001001527 /* HouseFacts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HouseFacts.swift; sourceTree = "<group>"; };
+		A01A000001001528 /* HouseCardData.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HouseCardData.swift; sourceTree = "<group>"; };
+		A01A000001001533 /* VehicleFacts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VehicleFacts.swift; sourceTree = "<group>"; };
+		A01A000001001538 /* VehicleEditors.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VehicleEditors.swift; sourceTree = "<group>"; };
+		A01A000001001537 /* VehicleCardViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VehicleCardViews.swift; sourceTree = "<group>"; };
+		A01A000001001536 /* FinanceCardKit.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FinanceCardKit.swift; sourceTree = "<group>"; };
+		A01A000001001535 /* FinDriveScene.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FinDriveScene.swift; sourceTree = "<group>"; };
+		A01A000001001534 /* VehicleCardData.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VehicleCardData.swift; sourceTree = "<group>"; };
+		A01A000001001576 /* VehicleResale.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VehicleResale.swift; sourceTree = "<group>"; };
+		A01A000001001578 /* WealthFacts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WealthFacts.swift; sourceTree = "<group>"; };
+		A01A000001001579 /* WealthBook.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WealthBook.swift; sourceTree = "<group>"; };
+		A01A000001001580 /* WealthPageData.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WealthPageData.swift; sourceTree = "<group>"; };
+		A01A000001001581 /* WealthCardData.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WealthCardData.swift; sourceTree = "<group>"; };
+		A01A000001001587 /* WealthReminders.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WealthReminders.swift; sourceTree = "<group>"; };
+		A01A000001001589 /* WealthPolicyFacts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WealthPolicyFacts.swift; sourceTree = "<group>"; };
+		A01A000001001591 /* WealthVault.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WealthVault.swift; sourceTree = "<group>"; };
+		A01A000001001592 /* WealthWebFacts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WealthWebFacts.swift; sourceTree = "<group>"; };
+		A01A000001001598 /* WealthTransfers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WealthTransfers.swift; sourceTree = "<group>"; };
+		A01A000001001613 /* OrgHandoffs.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrgHandoffs.swift; sourceTree = "<group>"; };
+		A01A000001001614 /* OrgMoves.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrgMoves.swift; sourceTree = "<group>"; };
+		A01A000001001615 /* OrgMovePlan.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrgMovePlan.swift; sourceTree = "<group>"; };
+		A01A000001001620 /* OrgMoveMeetingPlan.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrgMoveMeetingPlan.swift; sourceTree = "<group>"; };
+		A01A000001001622 /* OrgMoveDue.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrgMoveDue.swift; sourceTree = "<group>"; };
+		A01A000001001624 /* OrgMoveOut.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrgMoveOut.swift; sourceTree = "<group>"; };
+		A01A000001001601 /* WealthTransferPlans.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WealthTransferPlans.swift; sourceTree = "<group>"; };
+		A01A000001001603 /* WealthTransferNotices.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WealthTransferNotices.swift; sourceTree = "<group>"; };
+		A01A000001001605 /* WealthTransferFinds.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WealthTransferFinds.swift; sourceTree = "<group>"; };
+		A01A000001001608 /* WealthTransferCycles.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WealthTransferCycles.swift; sourceTree = "<group>"; };
+		A01A000001001606 /* WatchRunPhone.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchRunPhone.swift; sourceTree = "<group>"; };
+		A01A000001001607 /* WatchRunChoiceSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchRunChoiceSheet.swift; sourceTree = "<group>"; };
+		A01A000002000114 /* WatchRunWeekText.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchRunWeekText.swift; sourceTree = "<group>"; };
+		A01A000003000040 /* RunWeekView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunWeekView.swift; sourceTree = "<group>"; };
+		A01A000003000041 /* RunDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunDetailView.swift; sourceTree = "<group>"; };
+		A01A000003000042 /* StartRunIntent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StartRunIntent.swift; sourceTree = "<group>"; };
+		A01A000004000008 /* RunWeekWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunWeekWidget.swift; sourceTree = "<group>"; };
+		A01A000002000115 /* WatchRelevance.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchRelevance.swift; sourceTree = "<group>"; };
+		A01A000002000116 /* WatchOpenIntent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchOpenIntent.swift; sourceTree = "<group>"; };
+		A01A000002000117 /* WatchVoice.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchVoice.swift; sourceTree = "<group>"; };
+		A01A000001001609 /* WatchVoiceInbox.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchVoiceInbox.swift; sourceTree = "<group>"; };
+		A01A000003000043 /* VoiceOutbox.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceOutbox.swift; sourceTree = "<group>"; };
+		A01A000003000044 /* VoiceRecord.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceRecord.swift; sourceTree = "<group>"; };
+		A01A000004000009 /* RelevanceCards.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RelevanceCards.swift; sourceTree = "<group>"; };
+		A01A000004000010 /* WatchControls.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchControls.swift; sourceTree = "<group>"; };
+		A01A000001001593 /* NotificationActions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationActions.swift; sourceTree = "<group>"; };
+		A01A000001001582 /* WealthBoard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WealthBoard.swift; sourceTree = "<group>"; };
+		A01A000001001583 /* WealthBoardScenes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WealthBoardScenes.swift; sourceTree = "<group>"; };
+		A01A000001001584 /* WealthItems.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WealthItems.swift; sourceTree = "<group>"; };
+		A01A000001001585 /* WealthCardViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WealthCardViews.swift; sourceTree = "<group>"; };
+		A01A000001001586 /* WealthEditors.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WealthEditors.swift; sourceTree = "<group>"; };
+		A01A000001001588 /* WealthDepositForms.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WealthDepositForms.swift; sourceTree = "<group>"; };
+		A01A000001001599 /* WealthTransferViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WealthTransferViews.swift; sourceTree = "<group>"; };
+		A01A000001001590 /* WealthLinkForms.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WealthLinkForms.swift; sourceTree = "<group>"; };
+		A01A000001001529 /* FinHouseScene.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FinHouseScene.swift; sourceTree = "<group>"; };
+		A01A000001001532 /* AppStores.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppStores.swift; sourceTree = "<group>"; };
+		A01A000001001530 /* HouseCardViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HouseCardViews.swift; sourceTree = "<group>"; };
+		A01A000001001531 /* RealEstateEditors.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RealEstateEditors.swift; sourceTree = "<group>"; };
 		A01A000001000011 /* FinanceOverviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FinanceOverviewView.swift; sourceTree = "<group>"; };
 		A01A000001000012 /* SavingsInsuranceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SavingsInsuranceView.swift; sourceTree = "<group>"; };
 		A01A000001000013 /* StockView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StockView.swift; sourceTree = "<group>"; };
@@ -112,8 +565,13 @@
 		A01A000001000019 /* VehicleView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VehicleView.swift; sourceTree = "<group>"; };
 		A01A00000100001A /* AddVehicleView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddVehicleView.swift; sourceTree = "<group>"; };
 		A01A00000100001E /* VehicleDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VehicleDetailView.swift; sourceTree = "<group>"; };
+		A01A000001001577 /* VehicleResaleView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VehicleResaleView.swift; sourceTree = "<group>"; };
+		A01A000001000224 /* VehicleChargeAnalyticsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VehicleChargeAnalyticsView.swift; sourceTree = "<group>"; };
+		A01A000001000226 /* TripPlanView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripPlanView.swift; sourceTree = "<group>"; };
 		A01A00000100001F /* RealEstateDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RealEstateDetailView.swift; sourceTree = "<group>"; };
 		A01A000001000020 /* LifeModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LifeModels.swift; sourceTree = "<group>"; };
+		A01A000001000201 /* HealthModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthModels.swift; sourceTree = "<group>"; };
+		A01A000001000204 /* ChildVaccineSchedule.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChildVaccineSchedule.swift; sourceTree = "<group>"; };
 		A01A000001000021 /* LifeStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LifeStore.swift; sourceTree = "<group>"; };
 		A01A000001000022 /* LifeOverviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LifeOverviewView.swift; sourceTree = "<group>"; };
 		A01A000001000023 /* ResumeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResumeView.swift; sourceTree = "<group>"; };
@@ -128,18 +586,129 @@
 		A01A00000100009B /* TaxOverviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaxOverviewView.swift; sourceTree = "<group>"; };
 		A01A000001000033 /* CloudSyncManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudSyncManager.swift; sourceTree = "<group>"; };
 		A01A000001000100 /* CloudKitManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudKitManager.swift; sourceTree = "<group>"; };
+		A01A000078000038 /* RemoteAdmin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteAdmin.swift; sourceTree = "<group>"; };
+		A01A00007A000038 /* Changelog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Changelog.swift; sourceTree = "<group>"; };
+		A01A00007B000038 /* FullBackup.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FullBackup.swift; sourceTree = "<group>"; };
+		A01A000079000038 /* AdminConsoleView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdminConsoleView.swift; sourceTree = "<group>"; };
+		A01A00007C000038 /* TalentMatrixView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TalentMatrixView.swift; sourceTree = "<group>"; };
 		A01A000001000101 /* RestaurantSearch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RestaurantSearch.swift; sourceTree = "<group>"; };
 		A01A000001000102 /* FoodMapView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FoodMapView.swift; sourceTree = "<group>"; };
+		A01A000001000200 /* TravelMapView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TravelMapView.swift; sourceTree = "<group>"; };
+		A01A000001000202 /* HealthProfileEditView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthProfileEditView.swift; sourceTree = "<group>"; };
+		A01A000001000203 /* MedicalMapView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MedicalMapView.swift; sourceTree = "<group>"; };
+		A01A000001000205 /* ChildVaccineScheduleView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChildVaccineScheduleView.swift; sourceTree = "<group>"; };
+		A01A000001000206 /* SubordinateEquipmentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubordinateEquipmentView.swift; sourceTree = "<group>"; };
+		A01A000001001610 /* SubordinateExport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubordinateExport.swift; sourceTree = "<group>"; };
+		A01A000001001611 /* SubordinateExportSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubordinateExportSheet.swift; sourceTree = "<group>"; };
+		A01A000001001612 /* SubordinateExportImage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubordinateExportImage.swift; sourceTree = "<group>"; };
+		A01A000001001616 /* OrgMoveParts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrgMoveParts.swift; sourceTree = "<group>"; };
+		A01A000001001617 /* OrgMoveWizard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrgMoveWizard.swift; sourceTree = "<group>"; };
+		A01A000001001618 /* OrgMoveSheetView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrgMoveSheetView.swift; sourceTree = "<group>"; };
+		A01A000001001619 /* OrgMoveCardParts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrgMoveCardParts.swift; sourceTree = "<group>"; };
+		A01A000001001621 /* OrgMoveWizardRows.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrgMoveWizardRows.swift; sourceTree = "<group>"; };
+		A01A000001001623 /* OrgMoveDueViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrgMoveDueViews.swift; sourceTree = "<group>"; };
+		A01A000001000221 /* PetResumeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PetResumeView.swift; sourceTree = "<group>"; };
+		A01A000001000222 /* PetDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PetDetailView.swift; sourceTree = "<group>"; };
+		A01A000001000207 /* MapAlbumSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MapAlbumSheet.swift; sourceTree = "<group>"; };
+		A01A000001000223 /* WhatsNewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhatsNewView.swift; sourceTree = "<group>"; };
+		A01A000001000208 /* QuickPickCapsules.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickPickCapsules.swift; sourceTree = "<group>"; };
+		A01A000001000209 /* HeroTrendChart.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HeroTrendChart.swift; sourceTree = "<group>"; };
+		A01A000001000210 /* FlashCardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlashCardView.swift; sourceTree = "<group>"; };
+		A01A000001000211 /* HeroCardKit.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HeroCardKit.swift; sourceTree = "<group>"; };
+		A01A000001000213 /* SwipeDeleteRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwipeDeleteRow.swift; sourceTree = "<group>"; };
+		A01A000001000217 /* InlineEditBlock.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InlineEditBlock.swift; sourceTree = "<group>"; };
+		A01A000001000218 /* AmountCalculator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AmountCalculator.swift; sourceTree = "<group>"; };
+		A01A000001000219 /* PagedImageExporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PagedImageExporter.swift; sourceTree = "<group>"; };
+		A01A000001000220 /* FinanceItemCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FinanceItemCard.swift; sourceTree = "<group>"; };
+		A01A000001000216 /* SideRoleView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SideRoleView.swift; sourceTree = "<group>"; };
+		A01A000001000900 /* PerformanceReviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PerformanceReviewView.swift; sourceTree = "<group>"; };
+		A01A000001001700 /* CompanyChronicleView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompanyChronicleView.swift; sourceTree = "<group>"; };
+		A01A000001001900 /* PerformanceExportView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PerformanceExportView.swift; sourceTree = "<group>"; };
+		A01A000001001600 /* CompanySiteSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompanySiteSection.swift; sourceTree = "<group>"; };
+		A01A000001001500 /* ItemRowTemplate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ItemRowTemplate.swift; sourceTree = "<group>"; };
+		A01A000001001501 /* MapPlacePicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MapPlacePicker.swift; sourceTree = "<group>"; };
+		A01A000001001502 /* TripWeather.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripWeather.swift; sourceTree = "<group>"; };
+		A01A000001001504 /* TripChangeNotifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripChangeNotifier.swift; sourceTree = "<group>"; };
+		A01A000001001505 /* MeetingReminders.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetingReminders.swift; sourceTree = "<group>"; };
+		A01A000001001503 /* DeepLinkRouter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeepLinkRouter.swift; sourceTree = "<group>"; };
+		A01A000001001400 /* RunTrackingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunTrackingView.swift; sourceTree = "<group>"; };
+		A01A000001001300 /* RunTracker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunTracker.swift; sourceTree = "<group>"; };
+		A01A000001001200 /* HealthKitManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthKitManager.swift; sourceTree = "<group>"; };
+		A01A000001001100 /* WorkoutEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkoutEditorView.swift; sourceTree = "<group>"; };
+		A01A000001001000 /* HealthView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthView.swift; sourceTree = "<group>"; };
+		A01A000001000214 /* HeroStyleKit.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HeroStyleKit.swift; sourceTree = "<group>"; };
 		A01A000001000103 /* MultiPhotoGallery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MultiPhotoGallery.swift; sourceTree = "<group>"; };
 		A01A000001000104 /* ResumeGiftSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResumeGiftSection.swift; sourceTree = "<group>"; };
 		A01A000001000105 /* OrganizationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrganizationView.swift; sourceTree = "<group>"; };
 		A01A000001000106 /* AppleCalendarBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleCalendarBridge.swift; sourceTree = "<group>"; };
 		A01A000001000108 /* AIService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIService.swift; sourceTree = "<group>"; };
 		A01A000001000034 /* LifeGood.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = LifeGood.entitlements; sourceTree = "<group>"; };
+		A01A000002000050 /* LifeGoodWidgets.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = LifeGoodWidgets.entitlements; sourceTree = "<group>"; };
+		A01A000002000051 /* WidgetSnapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetSnapshot.swift; sourceTree = "<group>"; };
+		A01A000002000052 /* WidgetLink.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetLink.swift; sourceTree = "<group>"; };
+		A01A000002000053 /* WidgetPalette.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetPalette.swift; sourceTree = "<group>"; };
+		A01A000002000054 /* MoneyLeftWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MoneyLeftWidget.swift; sourceTree = "<group>"; };
+		A01A000002000055 /* TodayWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TodayWidget.swift; sourceTree = "<group>"; };
+		A01A000001001539 /* WidgetSnapshotWriter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetSnapshotWriter.swift; sourceTree = "<group>"; };
+		A01A000001001540 /* TodayAgenda.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TodayAgenda.swift; sourceTree = "<group>"; };
+		A01A000001001541 /* CalendarDayItems.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarDayItems.swift; sourceTree = "<group>"; };
+		A01A000002000056 /* QuickRecordInbox.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickRecordInbox.swift; sourceTree = "<group>"; };
+		A01A000002000057 /* WidgetActions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetActions.swift; sourceTree = "<group>"; };
+		A01A000002000071 /* LedgerDeskWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LedgerDeskWidget.swift; sourceTree = "<group>"; };
+		A01A000002000072 /* QuickRecordWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickRecordWidget.swift; sourceTree = "<group>"; };
+		A01A000002000073 /* BillsWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BillsWidget.swift; sourceTree = "<group>"; };
+		A01A000002000074 /* LockScreenWidgets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LockScreenWidgets.swift; sourceTree = "<group>"; };
+		A01A000002000075 /* LifeGoodControls.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LifeGoodControls.swift; sourceTree = "<group>"; };
+		A01A000002000076 /* WidgetIntents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetIntents.swift; sourceTree = "<group>"; };
+		A01A000002000077 /* WidgetMoneyPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetMoneyPanel.swift; sourceTree = "<group>"; };
+		A01A000001001542 /* QuickRecordImporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickRecordImporter.swift; sourceTree = "<group>"; };
+		A01A000001001543 /* WidgetBillsBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetBillsBuilder.swift; sourceTree = "<group>"; };
+		A01A000001001544 /* WidgetMoneyExtras.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetMoneyExtras.swift; sourceTree = "<group>"; };
+		A01A000002000058 /* WidgetConfigTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetConfigTypes.swift; sourceTree = "<group>"; };
+		A01A000002000078 /* WidgetConfigs.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetConfigs.swift; sourceTree = "<group>"; };
+		A01A000002000079 /* TravelWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TravelWidget.swift; sourceTree = "<group>"; };
+		A01A000001001545 /* AIExpenseCommitter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIExpenseCommitter.swift; sourceTree = "<group>"; };
+		A01A000001001546 /* AIQuickVoice.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIQuickVoice.swift; sourceTree = "<group>"; };
+		A01A000002000081 /* FXRateService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FXRateService.swift; sourceTree = "<group>"; };
+		A01A000002000082 /* WidgetQuoteService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetQuoteService.swift; sourceTree = "<group>"; };
+		A01A000002000083 /* WidgetMoneyFormat.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetMoneyFormat.swift; sourceTree = "<group>"; };
+		A01A000002000084 /* StockWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StockWidget.swift; sourceTree = "<group>"; };
+		A01A000002000085 /* RatesWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RatesWidget.swift; sourceTree = "<group>"; };
+		A01A000002000086 /* VehicleWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VehicleWidget.swift; sourceTree = "<group>"; };
+		A01A000002000087 /* NetWorthWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetWorthWidget.swift; sourceTree = "<group>"; };
+		A01A000002000088 /* WidgetQuoteStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetQuoteStore.swift; sourceTree = "<group>"; };
+		A01A000001001547 /* WidgetFinanceBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetFinanceBuilder.swift; sourceTree = "<group>"; };
+		A01A000002000089 /* DayTimelineToggleIntent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DayTimelineToggleIntent.swift; sourceTree = "<group>"; };
+		A01A000002000090 /* TeamWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TeamWidget.swift; sourceTree = "<group>"; };
+		A01A000001001548 /* TeamDay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TeamDay.swift; sourceTree = "<group>"; };
+		A01A000001001549 /* WidgetLifeExtras.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetLifeExtras.swift; sourceTree = "<group>"; };
+		A01A000001001550 /* WorkoutFacts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkoutFacts.swift; sourceTree = "<group>"; };
+		A01A000001001551 /* RunRecovery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunRecovery.swift; sourceTree = "<group>"; };
+		A01A000001001552 /* HealthPageData.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthPageData.swift; sourceTree = "<group>"; };
+		A01A000001001553 /* WorkoutCardData.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkoutCardData.swift; sourceTree = "<group>"; };
+		A01A000001001559 /* HealthSync.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthSync.swift; sourceTree = "<group>"; };
+		A01A000001001554 /* HealthBoard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthBoard.swift; sourceTree = "<group>"; };
+		A01A000001001555 /* HealthBoardScenes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthBoardScenes.swift; sourceTree = "<group>"; };
+		A01A000001001556 /* WorkoutItems.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkoutItems.swift; sourceTree = "<group>"; };
+		A01A000001001557 /* WorkoutListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkoutListView.swift; sourceTree = "<group>"; };
+		A01A000001001558 /* WorkoutDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkoutDetailView.swift; sourceTree = "<group>"; };
+		A01A000001001560 /* WorkoutPlaceLookup.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkoutPlaceLookup.swift; sourceTree = "<group>"; };
+		A01A000001001561 /* RunScreenParts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunScreenParts.swift; sourceTree = "<group>"; };
+		A01A000001001562 /* WorkoutShare.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkoutShare.swift; sourceTree = "<group>"; };
+		A01A000002000094 /* RunActivityAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunActivityAttributes.swift; sourceTree = "<group>"; };
+		A01A000002000095 /* RunPauseIntent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunPauseIntent.swift; sourceTree = "<group>"; };
+		A01A000002000096 /* RunLiveActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunLiveActivity.swift; sourceTree = "<group>"; };
+		A01A000001001563 /* RunActivityCenter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunActivityCenter.swift; sourceTree = "<group>"; };
+		A01A000001001564 /* WorkoutProgress.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkoutProgress.swift; sourceTree = "<group>"; };
+		A01A000001001565 /* RunVoice.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunVoice.swift; sourceTree = "<group>"; };
+		A01A000001001566 /* HealthProgressCards.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthProgressCards.swift; sourceTree = "<group>"; };
+		A01A000001001567 /* WorkoutLifeLinks.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkoutLifeLinks.swift; sourceTree = "<group>"; };
+		A01A000001001568 /* WorkoutDetailExtras.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkoutDetailExtras.swift; sourceTree = "<group>"; };
 		A01A000001000035 /* GradeTitleView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GradeTitleView.swift; sourceTree = "<group>"; };
 		A01A000001000036 /* SpouseResumeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpouseResumeView.swift; sourceTree = "<group>"; };
 		A01A000001000037 /* ChildrenResumeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChildrenResumeView.swift; sourceTree = "<group>"; };
 		A01A000001000038 /* SubordinateDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubordinateDetailView.swift; sourceTree = "<group>"; };
+		A01A000077000038 /* SubordinateRosterView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubordinateRosterView.swift; sourceTree = "<group>"; };
 		A01A000001000039 /* ChildDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChildDetailView.swift; sourceTree = "<group>"; };
 		A01A00000100003A /* LifeFinanceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LifeFinanceView.swift; sourceTree = "<group>"; };
 		A01A00000100003B /* SubscriptionManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubscriptionManager.swift; sourceTree = "<group>"; };
@@ -147,6 +716,13 @@
 		A01A00000100003D /* PaywallView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaywallView.swift; sourceTree = "<group>"; };
 		A01A00000100003E /* EInvoice.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EInvoice.swift; sourceTree = "<group>"; };
 		A01A00000100003F /* KeychainHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainHelper.swift; sourceTree = "<group>"; };
+		A01A000001001800 /* CardVault.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CardVault.swift; sourceTree = "<group>"; };
+		A01A000001000225 /* VehicleChargeAnalytics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VehicleChargeAnalytics.swift; sourceTree = "<group>"; };
+		A01A000001000227 /* TripPlan.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripPlan.swift; sourceTree = "<group>"; };
+		A01A000001000228 /* TripShare.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripShare.swift; sourceTree = "<group>"; };
+		A01A000001000229 /* TripImageExport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripImageExport.swift; sourceTree = "<group>"; };
+		A01A00000100022B /* TripStats.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripStats.swift; sourceTree = "<group>"; };
+		A01A00000100022A /* TripStopCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripStopCard.swift; sourceTree = "<group>"; };
 		A01A000001000040 /* EInvoiceClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EInvoiceClient.swift; sourceTree = "<group>"; };
 		A01A000001000041 /* InvoiceCategorizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InvoiceCategorizer.swift; sourceTree = "<group>"; };
 		A01A000001000042 /* EInvoiceSyncManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EInvoiceSyncManager.swift; sourceTree = "<group>"; };
@@ -155,6 +731,8 @@
 		A01A000001000045 /* MyCalendarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MyCalendarView.swift; sourceTree = "<group>"; };
 		A01A000001000046 /* NotificationManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationManager.swift; sourceTree = "<group>"; };
 		A01A000001000047 /* StockDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StockDetailView.swift; sourceTree = "<group>"; };
+		A01A000001001526 /* StockCardViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StockCardViews.swift; sourceTree = "<group>"; };
+		A01A000001000212 /* InstitutionalView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InstitutionalView.swift; sourceTree = "<group>"; };
 		A01A000001000048 /* RenovationPhotoEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RenovationPhotoEditor.swift; sourceTree = "<group>"; };
 		A01A000001000049 /* HolographicBuildingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HolographicBuildingView.swift; sourceTree = "<group>"; };
 		A01A00000100004A /* FamilyOverviewMap.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FamilyOverviewMap.swift; sourceTree = "<group>"; };
@@ -162,10 +740,87 @@
 		A01A00000100000A /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		A01A00000100000B /* Preview Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = "Preview Assets.xcassets"; sourceTree = "<group>"; };
 		A01A00000100000C /* LifeGood.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = LifeGood.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A01A000003000001 /* LifeGoodWatchApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LifeGoodWatchApp.swift; sourceTree = "<group>"; };
+		A01A000003000002 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		A01A000003000003 /* LifeGoodWatch.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = LifeGoodWatch.entitlements; sourceTree = "<group>"; };
+		A01A000003000004 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		A01A000003000100 /* LifeGoodWatch.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = LifeGoodWatch.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A01A000004000001 /* LifeGoodWatchWidgetsBundle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LifeGoodWatchWidgetsBundle.swift; sourceTree = "<group>"; };
+		A01A000004000002 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		A01A000004000003 /* LifeGoodWatchWidgets.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = LifeGoodWatchWidgets.entitlements; sourceTree = "<group>"; };
+		A01A000001001594 /* WatchPackageBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchPackageBuilder.swift; sourceTree = "<group>"; };
+		A01A000001001595 /* WatchExtrasWriter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchExtrasWriter.swift; sourceTree = "<group>"; };
+		A01A000001001596 /* WatchBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchBridge.swift; sourceTree = "<group>"; };
+		A01A000001001597 /* WatchSettingsSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchSettingsSection.swift; sourceTree = "<group>"; };
+		A01A000002000110 /* WatchPackage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchPackage.swift; sourceTree = "<group>"; };
+		A01A000002000111 /* WatchText.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchText.swift; sourceTree = "<group>"; };
+		A01A000003000005 /* WatchAppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchAppDelegate.swift; sourceTree = "<group>"; };
+		A01A000003000006 /* WatchSync.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchSync.swift; sourceTree = "<group>"; };
+		A01A000003000007 /* WatchModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchModel.swift; sourceTree = "<group>"; };
+		A01A000003000008 /* WatchPrivacy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchPrivacy.swift; sourceTree = "<group>"; };
+		A01A000003000009 /* WatchStyle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchStyle.swift; sourceTree = "<group>"; };
+		A01A000003000010 /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
+		A01A000003000011 /* TodayPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TodayPage.swift; sourceTree = "<group>"; };
+		A01A000003000012 /* DayListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DayListView.swift; sourceTree = "<group>"; };
+		A01A000003000013 /* StopDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StopDetailView.swift; sourceTree = "<group>"; };
+		A01A000003000014 /* MoneyPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MoneyPage.swift; sourceTree = "<group>"; };
+		A01A000003000015 /* BillsList.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BillsList.swift; sourceTree = "<group>"; };
+		A01A000003000016 /* FreshnessFooter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FreshnessFooter.swift; sourceTree = "<group>"; };
+		A01A000003000017 /* SettingsSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsSheet.swift; sourceTree = "<group>"; };
+		A01A000003000018 /* WatchNotificationDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchNotificationDelegate.swift; sourceTree = "<group>"; };
+		A01A000004000004 /* WatchPackageProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchPackageProvider.swift; sourceTree = "<group>"; };
+		A01A000004000005 /* NextUpWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NextUpWidget.swift; sourceTree = "<group>"; };
+		A01A000004000006 /* SpentWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpentWidget.swift; sourceTree = "<group>"; };
+		A01A000003000021 /* RecordSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordSheet.swift; sourceTree = "<group>"; };
+		A01A000003000022 /* AmountPicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AmountPicker.swift; sourceTree = "<group>"; };
+		A01A000003000023 /* DigitPad.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DigitPad.swift; sourceTree = "<group>"; };
+		A01A000003000024 /* RecordOutbox.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordOutbox.swift; sourceTree = "<group>"; };
+		A01A000003000025 /* TodayRecordsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TodayRecordsView.swift; sourceTree = "<group>"; };
+		A01A000003000026 /* BarcodePage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BarcodePage.swift; sourceTree = "<group>"; };
+		A01A000003000027 /* Code39.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Code39.swift; sourceTree = "<group>"; };
+		A01A000003000028 /* RecordText.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordText.swift; sourceTree = "<group>"; };
+		A01A000001001602 /* WatchActionInbox.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchActionInbox.swift; sourceTree = "<group>"; };
+		A01A000002000112 /* WatchTripText.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchTripText.swift; sourceTree = "<group>"; };
+		A01A000003000029 /* TripPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripPage.swift; sourceTree = "<group>"; };
+		A01A000003000030 /* TripStopDetail.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripStopDetail.swift; sourceTree = "<group>"; };
+		A01A000003000031 /* TripCheckIns.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripCheckIns.swift; sourceTree = "<group>"; };
+		A01A000001001604 /* WatchRunImport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchRunImport.swift; sourceTree = "<group>"; };
+		A01A000002000113 /* WatchRunText.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchRunText.swift; sourceTree = "<group>"; };
+		A01A000003000032 /* WorkoutManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkoutManager.swift; sourceTree = "<group>"; };
+		A01A000003000033 /* RouteRecorder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RouteRecorder.swift; sourceTree = "<group>"; };
+		A01A000003000034 /* WatchRunVoice.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchRunVoice.swift; sourceTree = "<group>"; };
+		A01A000003000035 /* RunStash.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunStash.swift; sourceTree = "<group>"; };
+		A01A000003000036 /* RunHomePage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunHomePage.swift; sourceTree = "<group>"; };
+		A01A000003000037 /* RunPrepView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunPrepView.swift; sourceTree = "<group>"; };
+		A01A000003000038 /* RunSessionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunSessionView.swift; sourceTree = "<group>"; };
+		A01A000003000039 /* RunSummaryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunSummaryView.swift; sourceTree = "<group>"; };
+		A01A000004000007 /* AddWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddWidget.swift; sourceTree = "<group>"; };
+		A01A000004000100 /* LifeGoodWatchWidgets.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = LifeGoodWatchWidgets.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
+		A01C000002000002 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		A01C000001000001 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A01C000003000002 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A01C000004000002 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -175,10 +830,73 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		A01D000002000001 /* LifeGoodWidgets */ = {
+			isa = PBXGroup;
+			children = (
+				A01A000002000001 /* LifeGoodWidgetsBundle.swift */,
+				A01A000002000002 /* DayTimelineLiveActivity.swift */,
+				A01A000002000007 /* PhotoImportLiveActivity.swift */,
+				A01A000002000053 /* WidgetPalette.swift */,
+				A01A000002000054 /* MoneyLeftWidget.swift */,
+				A01A000002000055 /* TodayWidget.swift */,
+				A01A000002000071 /* LedgerDeskWidget.swift */,
+				A01A000002000072 /* QuickRecordWidget.swift */,
+				A01A000002000073 /* BillsWidget.swift */,
+				A01A000002000074 /* LockScreenWidgets.swift */,
+				A01A000002000075 /* LifeGoodControls.swift */,
+				A01A000002000076 /* WidgetIntents.swift */,
+				A01A000002000077 /* WidgetMoneyPanel.swift */,
+				A01A000002000078 /* WidgetConfigs.swift */,
+				A01A000002000079 /* TravelWidget.swift */,
+				A01A000002000084 /* StockWidget.swift */,
+				A01A000002000085 /* RatesWidget.swift */,
+				A01A000002000086 /* VehicleWidget.swift */,
+				A01A000002000087 /* NetWorthWidget.swift */,
+				A01A000002000088 /* WidgetQuoteStore.swift */,
+				A01A000002000090 /* TeamWidget.swift */,
+				A01A000002000096 /* RunLiveActivity.swift */,
+				A01A000002000006 /* Info.plist */,
+				A01A000002000050 /* LifeGoodWidgets.entitlements */,
+			);
+			path = LifeGoodWidgets;
+			sourceTree = "<group>";
+		};
+		A01D000002000002 /* Shared */ = {
+			isa = PBXGroup;
+			children = (
+				A01A000002000003 /* DayTimelineAttributes.swift */,
+				A01A000002000004 /* DayTimelineIntent.swift */,
+				A01A000002000008 /* PhotoImportAttributes.swift */,
+				A01A000002000051 /* WidgetSnapshot.swift */,
+				A01A000002000052 /* WidgetLink.swift */,
+				A01A000002000056 /* QuickRecordInbox.swift */,
+				A01A000002000057 /* WidgetActions.swift */,
+				A01A000002000058 /* WidgetConfigTypes.swift */,
+				A01A000002000081 /* FXRateService.swift */,
+				A01A000002000082 /* WidgetQuoteService.swift */,
+				A01A000002000083 /* WidgetMoneyFormat.swift */,
+				A01A000002000089 /* DayTimelineToggleIntent.swift */,
+				A01A000002000094 /* RunActivityAttributes.swift */,
+				A01A000002000095 /* RunPauseIntent.swift */,
+				A01A000002000110 /* WatchPackage.swift */,
+				A01A000002000111 /* WatchText.swift */,
+				A01A000002000112 /* WatchTripText.swift */,
+				A01A000002000113 /* WatchRunText.swift */,
+				A01A000002000114 /* WatchRunWeekText.swift */,
+				A01A000002000115 /* WatchRelevance.swift */,
+				A01A000002000116 /* WatchOpenIntent.swift */,
+				A01A000002000117 /* WatchVoice.swift */,
+			);
+			path = Shared;
+			sourceTree = "<group>";
+		};
 		A01D000001000001 /* Root */ = {
 			isa = PBXGroup;
 			children = (
 				A01D000001000002 /* LifeGood */,
+				A01D000002000001 /* LifeGoodWidgets */,
+				A01D000003000001 /* LifeGoodWatch */,
+				A01D000004000001 /* LifeGoodWatchWidgets */,
 				A01D000001000005 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -188,6 +906,7 @@
 			children = (
 				A01A000001000001 /* LifeGoodApp.swift */,
 				A01A000001000034 /* LifeGood.entitlements */,
+				A01D000002000002 /* Shared */,
 				A01D000001000003 /* Models */,
 				A01D000001000004 /* Views */,
 				A01A00000100000A /* Assets.xcassets */,
@@ -205,17 +924,88 @@
 				A01A00000100000E /* AppMode.swift */,
 				A01A00000100000F /* FinanceModels.swift */,
 				A01A000001000010 /* FinanceStore.swift */,
+				A01A000001001527 /* HouseFacts.swift */,
+				A01A000001001528 /* HouseCardData.swift */,
+				A01A000001001533 /* VehicleFacts.swift */,
+				A01A000001001534 /* VehicleCardData.swift */,
+				A01A000001001576 /* VehicleResale.swift */,
+				A01A000001001578 /* WealthFacts.swift */,
+				A01A000001001579 /* WealthBook.swift */,
+				A01A000001001580 /* WealthPageData.swift */,
+				A01A000001001581 /* WealthCardData.swift */,
+				A01A000001001587 /* WealthReminders.swift */,
+				A01A000001001589 /* WealthPolicyFacts.swift */,
+				A01A000001001591 /* WealthVault.swift */,
+				A01A000001001592 /* WealthWebFacts.swift */,
+				A01A000001001598 /* WealthTransfers.swift */,
+				A01A000001001613 /* OrgHandoffs.swift */,
+				A01A000001001614 /* OrgMoves.swift */,
+				A01A000001001615 /* OrgMovePlan.swift */,
+				A01A000001001620 /* OrgMoveMeetingPlan.swift */,
+				A01A000001001622 /* OrgMoveDue.swift */,
+				A01A000001001624 /* OrgMoveOut.swift */,
+				A01A000001001601 /* WealthTransferPlans.swift */,
+				A01A000001001603 /* WealthTransferNotices.swift */,
+				A01A000001001605 /* WealthTransferFinds.swift */,
+				A01A000001001608 /* WealthTransferCycles.swift */,
+				A01A000001001606 /* WatchRunPhone.swift */,
+				A01A000001001593 /* NotificationActions.swift */,
+				A01A000001001594 /* WatchPackageBuilder.swift */,
+				A01A000001001595 /* WatchExtrasWriter.swift */,
+				A01A000001001596 /* WatchBridge.swift */,
+				A01A000001001602 /* WatchActionInbox.swift */,
+				A01A000001001609 /* WatchVoiceInbox.swift */,
+				A01A000001001604 /* WatchRunImport.swift */,
 				A01A000001000020 /* LifeModels.swift */,
+				A01A000001000201 /* HealthModels.swift */,
+				A01A000001000204 /* ChildVaccineSchedule.swift */,
 				A01A000001000021 /* LifeStore.swift */,
 				A01A000001000027 /* UnifiedExport.swift */,
 				A01A000001000030 /* BackupManager.swift */,
 				A01A000001000033 /* CloudSyncManager.swift */,
 				A01A000001000100 /* CloudKitManager.swift */,
+				A01A000078000038 /* RemoteAdmin.swift */,
+				A01A00007A000038 /* Changelog.swift */,
+				A01A00007B000038 /* FullBackup.swift */,
 				A01A000001000101 /* RestaurantSearch.swift */,
+				A01A000001001200 /* HealthKitManager.swift */,
+				A01A000001001300 /* RunTracker.swift */,
 				A01A00000100003B /* SubscriptionManager.swift */,
 				A01A00000100003C /* FeatureGate.swift */,
 				A01A00000100003E /* EInvoice.swift */,
 				A01A00000100003F /* KeychainHelper.swift */,
+				A01A000001001800 /* CardVault.swift */,
+				A01A000001000225 /* VehicleChargeAnalytics.swift */,
+				A01A000001000227 /* TripPlan.swift */,
+				A01A000001001502 /* TripWeather.swift */,
+				A01A000001001512 /* TripHero.swift */,
+				A01A000001001504 /* TripChangeNotifier.swift */,
+				A01A000001001505 /* MeetingReminders.swift */,
+				A01A000001001506 /* PhotoImportCenter.swift */,
+				A01A000001001508 /* BeatDetector.swift */,
+				A01A000001001503 /* DeepLinkRouter.swift */,
+				A01A000001000228 /* TripShare.swift */,
+				A01A000002000005 /* DayTimelineController.swift */,
+				A01A000001001539 /* WidgetSnapshotWriter.swift */,
+				A01A000001001540 /* TodayAgenda.swift */,
+				A01A000001001541 /* CalendarDayItems.swift */,
+				A01A000001001542 /* QuickRecordImporter.swift */,
+				A01A000001001543 /* WidgetBillsBuilder.swift */,
+				A01A000001001544 /* WidgetMoneyExtras.swift */,
+				A01A000001001545 /* AIExpenseCommitter.swift */,
+				A01A000001001547 /* WidgetFinanceBuilder.swift */,
+				A01A000001001548 /* TeamDay.swift */,
+				A01A000001001549 /* WidgetLifeExtras.swift */,
+				A01A000001001550 /* WorkoutFacts.swift */,
+				A01A000001001551 /* RunRecovery.swift */,
+				A01A000001001552 /* HealthPageData.swift */,
+				A01A000001001553 /* WorkoutCardData.swift */,
+				A01A000001001559 /* HealthSync.swift */,
+				A01A000001001560 /* WorkoutPlaceLookup.swift */,
+				A01A000001001563 /* RunActivityCenter.swift */,
+				A01A000001001564 /* WorkoutProgress.swift */,
+				A01A000001001567 /* WorkoutLifeLinks.swift */,
+				A01A000001001565 /* RunVoice.swift */,
 				A01A000001000040 /* EInvoiceClient.swift */,
 				A01A000001000041 /* InvoiceCategorizer.swift */,
 				A01A000001000042 /* EInvoiceSyncManager.swift */,
@@ -230,6 +1020,7 @@
 			isa = PBXGroup;
 			children = (
 				A01A000001000004 /* MainTabView.swift */,
+				A01A000001001546 /* AIQuickVoice.swift */,
 				A01A000001000005 /* OverviewView.swift */,
 				A01A000001000006 /* VariableExpenseView.swift */,
 				A01A000001000007 /* FixedExpenseView.swift */,
@@ -238,9 +1029,43 @@
 				A01A00000100001C /* IncomeView.swift */,
 				A01A00000100001D /* AddIncomeView.swift */,
 				A01A00000100000D /* SettingsView.swift */,
+				A01A000079000038 /* AdminConsoleView.swift */,
 				A01A00000100003D /* PaywallView.swift */,
 				A01A000001000043 /* EInvoiceSetupView.swift */,
 				A01A000001000103 /* MultiPhotoGallery.swift */,
+				A01A000001000207 /* MapAlbumSheet.swift */,
+				A01A000001001507 /* PhotoSlideshowView.swift */,
+				A01A000001001509 /* SlideshowDecor.swift */,
+				A01A000001001510 /* SlideshowCyber.swift */,
+				A01A000001000223 /* WhatsNewView.swift */,
+				A01A000001000208 /* QuickPickCapsules.swift */,
+				A01A000001000209 /* HeroTrendChart.swift */,
+				A01A000001000210 /* FlashCardView.swift */,
+				A01A000001000211 /* HeroCardKit.swift */,
+				A01A000001000213 /* SwipeDeleteRow.swift */,
+				A01A000001000217 /* InlineEditBlock.swift */,
+				A01A000001001500 /* ItemRowTemplate.swift */,
+				A01A000001001514 /* MarqueeText.swift */,
+				A01A000001001515 /* WindowSizing.swift */,
+				A01A000001001516 /* MoneyBoardKit.swift */,
+				A01A000001001517 /* OverviewBoard.swift */,
+				A01A000001001518 /* MoneyArt.swift */,
+				A01A000001001519 /* MoneyItemCard.swift */,
+				A01A000001001520 /* MoneyBoardScenes.swift */,
+				A01A000001001521 /* MoneyBoards.swift */,
+				A01A000001001522 /* FinanceInsights.swift */,
+				A01A000001001523 /* FinanceBoardScenes.swift */,
+				A01A000001001529 /* FinHouseScene.swift */,
+				A01A000001001535 /* FinDriveScene.swift */,
+				A01A000001001532 /* AppStores.swift */,
+				A01A000001001597 /* WatchSettingsSection.swift */,
+				A01A000001001524 /* FinanceBoards.swift */,
+				A01A000001001525 /* FinanceItems.swift */,
+				A01A000001001501 /* MapPlacePicker.swift */,
+				A01A000001000218 /* AmountCalculator.swift */,
+				A01A000001000219 /* PagedImageExporter.swift */,
+				A01A000001000220 /* FinanceItemCard.swift */,
+				A01A000001000214 /* HeroStyleKit.swift */,
 				A01D000001000007 /* Finance */,
 			A01D000001000008 /* Life */,
 			);
@@ -258,9 +1083,18 @@
 				A01A000001000016 /* AddSavingsInsuranceView.swift */,
 				A01A000001000017 /* AddStockView.swift */,
 				A01A000001000047 /* StockDetailView.swift */,
+				A01A000001001526 /* StockCardViews.swift */,
+				A01A000001001531 /* RealEstateEditors.swift */,
+				A01A000001001530 /* HouseCardViews.swift */,
+				A01A000001001538 /* VehicleEditors.swift */,
+				A01A000001001537 /* VehicleCardViews.swift */,
+				A01A000001001536 /* FinanceCardKit.swift */,
+				A01A000001000212 /* InstitutionalView.swift */,
 				A01A000001000019 /* VehicleView.swift */,
 				A01A00000100001A /* AddVehicleView.swift */,
 				A01A00000100001E /* VehicleDetailView.swift */,
+				A01A000001001577 /* VehicleResaleView.swift */,
+				A01A000001000224 /* VehicleChargeAnalyticsView.swift */,
 				A01A000001000018 /* AddRealEstateView.swift */,
 				A01A00000100001F /* RealEstateDetailView.swift */,
 				A01A000001000048 /* RenovationPhotoEditor.swift */,
@@ -285,13 +1119,63 @@
 				A01A000001000036 /* SpouseResumeView.swift */,
 				A01A000001000037 /* ChildrenResumeView.swift */,
 				A01A000001000038 /* SubordinateDetailView.swift */,
+				A01A000077000038 /* SubordinateRosterView.swift */,
+				A01A00007C000038 /* TalentMatrixView.swift */,
 				A01A000001000039 /* ChildDetailView.swift */,
 				A01A00000100003A /* LifeFinanceView.swift */,
 				A01A000001000044 /* MacaronDatePicker.swift */,
 				A01A000001000045 /* MyCalendarView.swift */,
 				A01A00000100004A /* FamilyOverviewMap.swift */,
 				A01A00000100004B /* FamilyMembersResumeView.swift */,
+				A01A000001000216 /* SideRoleView.swift */,
+				A01A000001000900 /* PerformanceReviewView.swift */,
+				A01A000001001700 /* CompanyChronicleView.swift */,
+				A01A000001001900 /* PerformanceExportView.swift */,
+				A01A000001001600 /* CompanySiteSection.swift */,
+				A01A000001001400 /* RunTrackingView.swift */,
+				A01A000001001100 /* WorkoutEditorView.swift */,
+				A01A000001001000 /* HealthView.swift */,
+				A01A000001001554 /* HealthBoard.swift */,
+				A01A000001001607 /* WatchRunChoiceSheet.swift */,
+				A01A000001001555 /* HealthBoardScenes.swift */,
+				A01A000001001556 /* WorkoutItems.swift */,
+				A01A000001001557 /* WorkoutListView.swift */,
+				A01A000001001558 /* WorkoutDetailView.swift */,
+				A01A000001001561 /* RunScreenParts.swift */,
+				A01A000001001562 /* WorkoutShare.swift */,
+				A01A000001001566 /* HealthProgressCards.swift */,
+				A01A000001001568 /* WorkoutDetailExtras.swift */,
+				A01A000001001582 /* WealthBoard.swift */,
+				A01A000001001583 /* WealthBoardScenes.swift */,
+				A01A000001001584 /* WealthItems.swift */,
+				A01A000001001585 /* WealthCardViews.swift */,
+				A01A000001001586 /* WealthEditors.swift */,
+				A01A000001001588 /* WealthDepositForms.swift */,
+				A01A000001001599 /* WealthTransferViews.swift */,
+				A01A000001001590 /* WealthLinkForms.swift */,
 				A01A000001000102 /* FoodMapView.swift */,
+				A01A000001000200 /* TravelMapView.swift */,
+				A01A000001000226 /* TripPlanView.swift */,
+				A01A000001000229 /* TripImageExport.swift */,
+				A01A00000100022A /* TripStopCard.swift */,
+				A01A000001001511 /* TripTimelineCard.swift */,
+				A01A000001001513 /* TripSummaryBoard.swift */,
+				A01A00000100022B /* TripStats.swift */,
+				A01A000001000202 /* HealthProfileEditView.swift */,
+				A01A000001000203 /* MedicalMapView.swift */,
+				A01A000001000205 /* ChildVaccineScheduleView.swift */,
+				A01A000001000206 /* SubordinateEquipmentView.swift */,
+				A01A000001001610 /* SubordinateExport.swift */,
+				A01A000001001611 /* SubordinateExportSheet.swift */,
+				A01A000001001612 /* SubordinateExportImage.swift */,
+				A01A000001001616 /* OrgMoveParts.swift */,
+				A01A000001001617 /* OrgMoveWizard.swift */,
+				A01A000001001618 /* OrgMoveSheetView.swift */,
+				A01A000001001619 /* OrgMoveCardParts.swift */,
+				A01A000001001621 /* OrgMoveWizardRows.swift */,
+				A01A000001001623 /* OrgMoveDueViews.swift */,
+				A01A000001000221 /* PetResumeView.swift */,
+				A01A000001000222 /* PetDetailView.swift */,
 				A01A000001000104 /* ResumeGiftSection.swift */,
 				A01A000001000105 /* OrganizationView.swift */,
 			);
@@ -302,6 +1186,9 @@
 			isa = PBXGroup;
 			children = (
 				A01A00000100000C /* LifeGood.app */,
+				A01A000002000100 /* LifeGoodWidgets.appex */,
+				A01A000003000100 /* LifeGoodWatch.app */,
+				A01A000004000100 /* LifeGoodWatchWidgets.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -314,9 +1201,92 @@
 			path = "Preview Content";
 			sourceTree = "<group>";
 		};
+		A01D000003000001 /* LifeGoodWatch */ = {
+			isa = PBXGroup;
+			children = (
+				A01A000003000001 /* LifeGoodWatchApp.swift */,
+				A01A000003000005 /* WatchAppDelegate.swift */,
+				A01A000003000006 /* WatchSync.swift */,
+				A01A000003000007 /* WatchModel.swift */,
+				A01A000003000008 /* WatchPrivacy.swift */,
+				A01A000003000009 /* WatchStyle.swift */,
+				A01A000003000010 /* RootView.swift */,
+				A01A000003000011 /* TodayPage.swift */,
+				A01A000003000012 /* DayListView.swift */,
+				A01A000003000013 /* StopDetailView.swift */,
+				A01A000003000014 /* MoneyPage.swift */,
+				A01A000003000015 /* BillsList.swift */,
+				A01A000003000016 /* FreshnessFooter.swift */,
+				A01A000003000017 /* SettingsSheet.swift */,
+				A01A000003000018 /* WatchNotificationDelegate.swift */,
+				A01A000003000021 /* RecordSheet.swift */,
+				A01A000003000022 /* AmountPicker.swift */,
+				A01A000003000023 /* DigitPad.swift */,
+				A01A000003000024 /* RecordOutbox.swift */,
+				A01A000003000025 /* TodayRecordsView.swift */,
+				A01A000003000026 /* BarcodePage.swift */,
+				A01A000003000027 /* Code39.swift */,
+				A01A000003000028 /* RecordText.swift */,
+				A01A000003000029 /* TripPage.swift */,
+				A01A000003000030 /* TripStopDetail.swift */,
+				A01A000003000031 /* TripCheckIns.swift */,
+				A01A000003000032 /* WorkoutManager.swift */,
+				A01A000003000033 /* RouteRecorder.swift */,
+				A01A000003000034 /* WatchRunVoice.swift */,
+				A01A000003000035 /* RunStash.swift */,
+				A01A000003000036 /* RunHomePage.swift */,
+				A01A000003000037 /* RunPrepView.swift */,
+				A01A000003000038 /* RunSessionView.swift */,
+				A01A000003000039 /* RunSummaryView.swift */,
+				A01A000003000040 /* RunWeekView.swift */,
+				A01A000003000041 /* RunDetailView.swift */,
+				A01A000003000042 /* StartRunIntent.swift */,
+				A01A000003000043 /* VoiceOutbox.swift */,
+				A01A000003000044 /* VoiceRecord.swift */,
+				A01A000003000004 /* Assets.xcassets */,
+				A01A000003000002 /* Info.plist */,
+				A01A000003000003 /* LifeGoodWatch.entitlements */,
+			);
+			path = LifeGoodWatch;
+			sourceTree = "<group>";
+		};
+		A01D000004000001 /* LifeGoodWatchWidgets */ = {
+			isa = PBXGroup;
+			children = (
+				A01A000004000001 /* LifeGoodWatchWidgetsBundle.swift */,
+				A01A000004000004 /* WatchPackageProvider.swift */,
+				A01A000004000005 /* NextUpWidget.swift */,
+				A01A000004000006 /* SpentWidget.swift */,
+				A01A000004000007 /* AddWidget.swift */,
+				A01A000004000008 /* RunWeekWidget.swift */,
+				A01A000004000009 /* RelevanceCards.swift */,
+				A01A000004000010 /* WatchControls.swift */,
+				A01A000004000002 /* Info.plist */,
+				A01A000004000003 /* LifeGoodWatchWidgets.entitlements */,
+			);
+			path = LifeGoodWatchWidgets;
+			sourceTree = "<group>";
+		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		A01E000002000001 /* LifeGoodWidgets */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A01F000002000003 /* Build configuration list for PBXNativeTarget "LifeGoodWidgets" */;
+			buildPhases = (
+				A01C000002000001 /* Sources */,
+				A01C000002000002 /* Frameworks */,
+				A01C000002000003 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = LifeGoodWidgets;
+			productName = LifeGoodWidgets;
+			productReference = A01A000002000100 /* LifeGoodWidgets.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 		A01E000001000001 /* LifeGood */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = A01F000001000003 /* Build configuration list for PBXNativeTarget "LifeGood" */;
@@ -324,15 +1294,55 @@
 				A01C000001000002 /* Sources */,
 				A01C000001000001 /* Frameworks */,
 				A01C000001000003 /* Resources */,
+				A01C000002000004 /* Embed Foundation Extensions */,
+				A01C000001000004 /* Embed Watch Content */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				A019000002000001 /* PBXTargetDependency */,
+				A019000003000001 /* PBXTargetDependency */,
 			);
 			name = LifeGood;
 			productName = LifeGood;
 			productReference = A01A00000100000C /* LifeGood.app */;
 			productType = "com.apple.product-type.application";
+		};
+		A01E000003000001 /* LifeGoodWatch */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A01F000003000003 /* Build configuration list for PBXNativeTarget "LifeGoodWatch" */;
+			buildPhases = (
+				A01C000003000001 /* Sources */,
+				A01C000003000002 /* Frameworks */,
+				A01C000003000003 /* Resources */,
+				A01C000003000004 /* Embed Foundation Extensions */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				A019000004000001 /* PBXTargetDependency */,
+			);
+			name = LifeGoodWatch;
+			productName = LifeGoodWatch;
+			productReference = A01A000003000100 /* LifeGoodWatch.app */;
+			productType = "com.apple.product-type.application";
+		};
+		A01E000004000001 /* LifeGoodWatchWidgets */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A01F000004000003 /* Build configuration list for PBXNativeTarget "LifeGoodWatchWidgets" */;
+			buildPhases = (
+				A01C000004000001 /* Sources */,
+				A01C000004000002 /* Frameworks */,
+				A01C000004000003 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = LifeGoodWatchWidgets;
+			productName = LifeGoodWatchWidgets;
+			productReference = A01A000004000100 /* LifeGoodWatchWidgets.appex */;
+			productType = "com.apple.product-type.app-extension";
 		};
 /* End PBXNativeTarget section */
 
@@ -345,6 +1355,15 @@
 				LastUpgradeCheck = 1540;
 				TargetAttributes = {
 					A01E000001000001 = {
+						CreatedOnToolsVersion = 15.4;
+					};
+					A01E000002000001 = {
+						CreatedOnToolsVersion = 15.4;
+					};
+					A01E000003000001 = {
+						CreatedOnToolsVersion = 15.4;
+					};
+					A01E000004000001 = {
 						CreatedOnToolsVersion = 15.4;
 					};
 				};
@@ -364,11 +1383,21 @@
 			projectRoot = "";
 			targets = (
 				A01E000001000001 /* LifeGood */,
+				A01E000002000001 /* LifeGoodWidgets */,
+				A01E000003000001 /* LifeGoodWatch */,
+				A01E000004000001 /* LifeGoodWatchWidgets */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
+		A01C000002000003 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		A01C000001000003 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -378,9 +1407,67 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		A01C000003000003 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A01B000003000004 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A01C000004000003 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		A01C000002000001 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A01B000002000001 /* LifeGoodWidgetsBundle.swift in Sources */,
+				A01B000002000002 /* DayTimelineLiveActivity.swift in Sources */,
+				A01B000002000003 /* DayTimelineAttributes.swift in Sources */,
+				A01B000002000004 /* DayTimelineIntent.swift in Sources */,
+				A01B000002000005 /* PhotoImportAttributes.swift in Sources */,
+				A01B000002000006 /* PhotoImportLiveActivity.swift in Sources */,
+				A01B000002000051 /* WidgetSnapshot.swift in Sources */,
+				A01B000002000052 /* WidgetLink.swift in Sources */,
+				A01B000002000053 /* WidgetPalette.swift in Sources */,
+				A01B000002000054 /* MoneyLeftWidget.swift in Sources */,
+				A01B000002000055 /* TodayWidget.swift in Sources */,
+				A01B000002000056 /* QuickRecordInbox.swift in Sources */,
+				A01B000002000057 /* WidgetActions.swift in Sources */,
+				A01B000002000071 /* LedgerDeskWidget.swift in Sources */,
+				A01B000002000072 /* QuickRecordWidget.swift in Sources */,
+				A01B000002000073 /* BillsWidget.swift in Sources */,
+				A01B000002000074 /* LockScreenWidgets.swift in Sources */,
+				A01B000002000075 /* LifeGoodControls.swift in Sources */,
+				A01B000002000076 /* WidgetIntents.swift in Sources */,
+				A01B000002000077 /* WidgetMoneyPanel.swift in Sources */,
+				A01B000002000058 /* WidgetConfigTypes.swift in Sources */,
+				A01B000002000078 /* WidgetConfigs.swift in Sources */,
+				A01B000002000079 /* TravelWidget.swift in Sources */,
+				A01B000002000081 /* FXRateService.swift in Sources */,
+				A01B000002000082 /* WidgetQuoteService.swift in Sources */,
+				A01B000002000083 /* WidgetMoneyFormat.swift in Sources */,
+				A01B000002000084 /* StockWidget.swift in Sources */,
+				A01B000002000085 /* RatesWidget.swift in Sources */,
+				A01B000002000086 /* VehicleWidget.swift in Sources */,
+				A01B000002000087 /* NetWorthWidget.swift in Sources */,
+				A01B000002000088 /* WidgetQuoteStore.swift in Sources */,
+				A01B000002000089 /* DayTimelineToggleIntent.swift in Sources */,
+				A01B000002000090 /* TeamWidget.swift in Sources */,
+				A01B000002000094 /* RunActivityAttributes.swift in Sources */,
+				A01B000002000095 /* RunPauseIntent.swift in Sources */,
+				A01B000002000096 /* RunLiveActivity.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		A01C000001000002 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -398,6 +1485,59 @@
 				A01B00000100000E /* AppMode.swift in Sources */,
 				A01B00000100000F /* FinanceModels.swift in Sources */,
 				A01B000001000010 /* FinanceStore.swift in Sources */,
+				A01B000001001527 /* HouseFacts.swift in Sources */,
+				A01B000001001528 /* HouseCardData.swift in Sources */,
+				A01B000001001533 /* VehicleFacts.swift in Sources */,
+				A01B000001001538 /* VehicleEditors.swift in Sources */,
+				A01B000001001537 /* VehicleCardViews.swift in Sources */,
+				A01B000001001536 /* FinanceCardKit.swift in Sources */,
+				A01B000001001535 /* FinDriveScene.swift in Sources */,
+				A01B000001001534 /* VehicleCardData.swift in Sources */,
+				A01B000001001576 /* VehicleResale.swift in Sources */,
+				A01B000001001578 /* WealthFacts.swift in Sources */,
+				A01B000001001579 /* WealthBook.swift in Sources */,
+				A01B000001001580 /* WealthPageData.swift in Sources */,
+				A01B000001001581 /* WealthCardData.swift in Sources */,
+				A01B000001001587 /* WealthReminders.swift in Sources */,
+				A01B000001001589 /* WealthPolicyFacts.swift in Sources */,
+				A01B000001001591 /* WealthVault.swift in Sources */,
+				A01B000001001592 /* WealthWebFacts.swift in Sources */,
+				A01B000001001598 /* WealthTransfers.swift in Sources */,
+				A01B000001001613 /* OrgHandoffs.swift in Sources */,
+				A01B000001001614 /* OrgMoves.swift in Sources */,
+				A01B000001001615 /* OrgMovePlan.swift in Sources */,
+				A01B000001001620 /* OrgMoveMeetingPlan.swift in Sources */,
+				A01B000001001622 /* OrgMoveDue.swift in Sources */,
+				A01B000001001624 /* OrgMoveOut.swift in Sources */,
+				A01B000001001601 /* WealthTransferPlans.swift in Sources */,
+				A01B000001001603 /* WealthTransferNotices.swift in Sources */,
+				A01B000001001605 /* WealthTransferFinds.swift in Sources */,
+				A01B000001001608 /* WealthTransferCycles.swift in Sources */,
+				A01B000001001606 /* WatchRunPhone.swift in Sources */,
+				A01B000001001607 /* WatchRunChoiceSheet.swift in Sources */,
+				A01B000001001593 /* NotificationActions.swift in Sources */,
+				A01B000001001594 /* WatchPackageBuilder.swift in Sources */,
+				A01B000001001595 /* WatchExtrasWriter.swift in Sources */,
+				A01B000001001596 /* WatchBridge.swift in Sources */,
+				A01B000001001602 /* WatchActionInbox.swift in Sources */,
+				A01B000002000117 /* WatchVoice.swift in Sources */,
+				A01B000001001609 /* WatchVoiceInbox.swift in Sources */,
+				A01B000001001604 /* WatchRunImport.swift in Sources */,
+				A01B000001001597 /* WatchSettingsSection.swift in Sources */,
+				A01B000002000110 /* WatchPackage.swift in Sources */,
+				A01B000002000115 /* WatchRelevance.swift in Sources */,
+				A01B000001001582 /* WealthBoard.swift in Sources */,
+				A01B000001001583 /* WealthBoardScenes.swift in Sources */,
+				A01B000001001584 /* WealthItems.swift in Sources */,
+				A01B000001001585 /* WealthCardViews.swift in Sources */,
+				A01B000001001586 /* WealthEditors.swift in Sources */,
+				A01B000001001588 /* WealthDepositForms.swift in Sources */,
+				A01B000001001599 /* WealthTransferViews.swift in Sources */,
+				A01B000001001590 /* WealthLinkForms.swift in Sources */,
+				A01B000001001529 /* FinHouseScene.swift in Sources */,
+				A01B000001001532 /* AppStores.swift in Sources */,
+				A01B000001001530 /* HouseCardViews.swift in Sources */,
+				A01B000001001531 /* RealEstateEditors.swift in Sources */,
 				A01B000001000011 /* FinanceOverviewView.swift in Sources */,
 				A01B000001000012 /* SavingsInsuranceView.swift in Sources */,
 				A01B000001000013 /* StockView.swift in Sources */,
@@ -409,11 +1549,15 @@
 				A01B000001000019 /* VehicleView.swift in Sources */,
 				A01B00000100001A /* AddVehicleView.swift in Sources */,
 				A01B00000100001E /* VehicleDetailView.swift in Sources */,
+				A01B000001001577 /* VehicleResaleView.swift in Sources */,
+				A01B000001000224 /* VehicleChargeAnalyticsView.swift in Sources */,
+				A01B000001000226 /* TripPlanView.swift in Sources */,
 				A01B00000100001F /* RealEstateDetailView.swift in Sources */,
 				A01B00000100001B /* Income.swift in Sources */,
 				A01B00000100001C /* IncomeView.swift in Sources */,
 				A01B00000100001D /* AddIncomeView.swift in Sources */,
 				A01B000001000020 /* LifeModels.swift in Sources */,
+				A01B000001000201 /* HealthModels.swift in Sources */,
 				A01B000001000021 /* LifeStore.swift in Sources */,
 				A01B000001000022 /* LifeOverviewView.swift in Sources */,
 				A01B000001000023 /* ResumeView.swift in Sources */,
@@ -428,8 +1572,42 @@
 				A01B000001000030 /* BackupManager.swift in Sources */,
 				A01B000001000033 /* CloudSyncManager.swift in Sources */,
 				A01B000001000100 /* CloudKitManager.swift in Sources */,
+				A01B000078000038 /* RemoteAdmin.swift in Sources */,
+				A01B00007A000038 /* Changelog.swift in Sources */,
+				A01B00007B000038 /* FullBackup.swift in Sources */,
+				A01B000079000038 /* AdminConsoleView.swift in Sources */,
+				A01B00007C000038 /* TalentMatrixView.swift in Sources */,
 				A01B000001000101 /* RestaurantSearch.swift in Sources */,
 				A01B000001000102 /* FoodMapView.swift in Sources */,
+				A01B000001000200 /* TravelMapView.swift in Sources */,
+				A01B000001000202 /* HealthProfileEditView.swift in Sources */,
+				A01B000001000203 /* MedicalMapView.swift in Sources */,
+				A01B000001000204 /* ChildVaccineSchedule.swift in Sources */,
+				A01B000001000205 /* ChildVaccineScheduleView.swift in Sources */,
+				A01B000001000206 /* SubordinateEquipmentView.swift in Sources */,
+				A01B000001001610 /* SubordinateExport.swift in Sources */,
+				A01B000001001611 /* SubordinateExportSheet.swift in Sources */,
+				A01B000001001612 /* SubordinateExportImage.swift in Sources */,
+				A01B000001001616 /* OrgMoveParts.swift in Sources */,
+				A01B000001001617 /* OrgMoveWizard.swift in Sources */,
+				A01B000001001618 /* OrgMoveSheetView.swift in Sources */,
+				A01B000001001619 /* OrgMoveCardParts.swift in Sources */,
+				A01B000001001621 /* OrgMoveWizardRows.swift in Sources */,
+				A01B000001001623 /* OrgMoveDueViews.swift in Sources */,
+				A01B000001000221 /* PetResumeView.swift in Sources */,
+				A01B000001000222 /* PetDetailView.swift in Sources */,
+				A01B000001000207 /* MapAlbumSheet.swift in Sources */,
+				A01B000001000223 /* WhatsNewView.swift in Sources */,
+				A01B000001000208 /* QuickPickCapsules.swift in Sources */,
+				A01B000001000209 /* HeroTrendChart.swift in Sources */,
+				A01B000001000210 /* FlashCardView.swift in Sources */,
+				A01B000001000211 /* HeroCardKit.swift in Sources */,
+				A01B000001000213 /* SwipeDeleteRow.swift in Sources */,
+				A01B000001000217 /* InlineEditBlock.swift in Sources */,
+				A01B000001000218 /* AmountCalculator.swift in Sources */,
+				A01B000001000219 /* PagedImageExporter.swift in Sources */,
+				A01B000001000220 /* FinanceItemCard.swift in Sources */,
+				A01B000001000214 /* HeroStyleKit.swift in Sources */,
 				A01B000001000103 /* MultiPhotoGallery.swift in Sources */,
 				A01B000001000104 /* ResumeGiftSection.swift in Sources */,
 				A01B000001000105 /* OrganizationView.swift in Sources */,
@@ -439,6 +1617,7 @@
 				A01B000001000036 /* SpouseResumeView.swift in Sources */,
 				A01B000001000037 /* ChildrenResumeView.swift in Sources */,
 				A01B000001000038 /* SubordinateDetailView.swift in Sources */,
+				A01B000077000038 /* SubordinateRosterView.swift in Sources */,
 				A01B000001000039 /* ChildDetailView.swift in Sources */,
 				A01B00000100003A /* LifeFinanceView.swift in Sources */,
 				A01B00000100003B /* SubscriptionManager.swift in Sources */,
@@ -446,6 +1625,63 @@
 				A01B00000100003D /* PaywallView.swift in Sources */,
 				A01B00000100003E /* EInvoice.swift in Sources */,
 				A01B00000100003F /* KeychainHelper.swift in Sources */,
+				A01B000001001800 /* CardVault.swift in Sources */,
+				A01B000001000225 /* VehicleChargeAnalytics.swift in Sources */,
+				A01B000001000227 /* TripPlan.swift in Sources */,
+				A01B000001000228 /* TripShare.swift in Sources */,
+				A01B000001000229 /* TripImageExport.swift in Sources */,
+				A01B00000100022A /* TripStopCard.swift in Sources */,
+				A01B00000100022B /* TripStats.swift in Sources */,
+				A01B000002000011 /* DayTimelineAttributes.swift in Sources */,
+				A01B000002000012 /* DayTimelineIntent.swift in Sources */,
+				A01B000002000013 /* DayTimelineController.swift in Sources */,
+				A01B000002000014 /* PhotoImportAttributes.swift in Sources */,
+				A01B000002000061 /* WidgetSnapshot.swift in Sources */,
+				A01B000002000062 /* WidgetLink.swift in Sources */,
+				A01B000001001539 /* WidgetSnapshotWriter.swift in Sources */,
+				A01B000001001540 /* TodayAgenda.swift in Sources */,
+				A01B000001001541 /* CalendarDayItems.swift in Sources */,
+				A01B000002000066 /* QuickRecordInbox.swift in Sources */,
+				A01B000002000067 /* WidgetActions.swift in Sources */,
+				A01B000001001542 /* QuickRecordImporter.swift in Sources */,
+				A01B000001001543 /* WidgetBillsBuilder.swift in Sources */,
+				A01B000001001544 /* WidgetMoneyExtras.swift in Sources */,
+				A01B000002000068 /* WidgetConfigTypes.swift in Sources */,
+				A01B000001001545 /* AIExpenseCommitter.swift in Sources */,
+				A01B000001001546 /* AIQuickVoice.swift in Sources */,
+				A01B000002000091 /* FXRateService.swift in Sources */,
+				A01B000002000092 /* WidgetQuoteService.swift in Sources */,
+				A01B000002000093 /* WidgetMoneyFormat.swift in Sources */,
+				A01B000001001547 /* WidgetFinanceBuilder.swift in Sources */,
+				A01B000002000099 /* DayTimelineToggleIntent.swift in Sources */,
+				A01B000001001548 /* TeamDay.swift in Sources */,
+				A01B000001001549 /* WidgetLifeExtras.swift in Sources */,
+				A01B000001001550 /* WorkoutFacts.swift in Sources */,
+				A01B000001001551 /* RunRecovery.swift in Sources */,
+				A01B000001001552 /* HealthPageData.swift in Sources */,
+				A01B000001001553 /* WorkoutCardData.swift in Sources */,
+				A01B000001001559 /* HealthSync.swift in Sources */,
+				A01B000001001554 /* HealthBoard.swift in Sources */,
+				A01B000001001555 /* HealthBoardScenes.swift in Sources */,
+				A01B000001001556 /* WorkoutItems.swift in Sources */,
+				A01B000001001557 /* WorkoutListView.swift in Sources */,
+				A01B000001001558 /* WorkoutDetailView.swift in Sources */,
+				A01B000001001560 /* WorkoutPlaceLookup.swift in Sources */,
+				A01B000001001561 /* RunScreenParts.swift in Sources */,
+				A01B000001001562 /* WorkoutShare.swift in Sources */,
+				A01B000002000097 /* RunActivityAttributes.swift in Sources */,
+				A01B000002000098 /* RunPauseIntent.swift in Sources */,
+				A01B000001001563 /* RunActivityCenter.swift in Sources */,
+				A01B000001001564 /* WorkoutProgress.swift in Sources */,
+				A01B000001001565 /* RunVoice.swift in Sources */,
+				A01B000001001566 /* HealthProgressCards.swift in Sources */,
+				A01B000001001567 /* WorkoutLifeLinks.swift in Sources */,
+				A01B000001001568 /* WorkoutDetailExtras.swift in Sources */,
+				A01B000001001506 /* PhotoImportCenter.swift in Sources */,
+				A01B000001001507 /* PhotoSlideshowView.swift in Sources */,
+				A01B000001001509 /* SlideshowDecor.swift in Sources */,
+				A01B000001001510 /* SlideshowCyber.swift in Sources */,
+				A01B000001001508 /* BeatDetector.swift in Sources */,
 				A01B000001000040 /* EInvoiceClient.swift in Sources */,
 				A01B000001000041 /* InvoiceCategorizer.swift in Sources */,
 				A01B000001000042 /* EInvoiceSyncManager.swift in Sources */,
@@ -454,16 +1690,181 @@
 				A01B000001000045 /* MyCalendarView.swift in Sources */,
 				A01B000001000046 /* NotificationManager.swift in Sources */,
 				A01B000001000047 /* StockDetailView.swift in Sources */,
+				A01B000001001526 /* StockCardViews.swift in Sources */,
+				A01B000001000212 /* InstitutionalView.swift in Sources */,
 				A01B000001000048 /* RenovationPhotoEditor.swift in Sources */,
 				A01B000001000049 /* HolographicBuildingView.swift in Sources */,
 				A01B00000100004A /* FamilyOverviewMap.swift in Sources */,
 				A01B00000100004B /* FamilyMembersResumeView.swift in Sources */,
+				A01B000001000216 /* SideRoleView.swift in Sources */,
+				A01B000001000900 /* PerformanceReviewView.swift in Sources */,
+				A01B000001001700 /* CompanyChronicleView.swift in Sources */,
+				A01B000001001900 /* PerformanceExportView.swift in Sources */,
+				A01B000001001600 /* CompanySiteSection.swift in Sources */,
+				A01B000001001500 /* ItemRowTemplate.swift in Sources */,
+				A01B000001001501 /* MapPlacePicker.swift in Sources */,
+				A01B000001001502 /* TripWeather.swift in Sources */,
+				A01B000001001511 /* TripTimelineCard.swift in Sources */,
+				A01B000001001512 /* TripHero.swift in Sources */,
+				A01B000001001513 /* TripSummaryBoard.swift in Sources */,
+				A01B000001001514 /* MarqueeText.swift in Sources */,
+				A01B000001001515 /* WindowSizing.swift in Sources */,
+				A01B000001001516 /* MoneyBoardKit.swift in Sources */,
+				A01B000001001517 /* OverviewBoard.swift in Sources */,
+				A01B000001001518 /* MoneyArt.swift in Sources */,
+				A01B000001001519 /* MoneyItemCard.swift in Sources */,
+				A01B000001001520 /* MoneyBoardScenes.swift in Sources */,
+				A01B000001001521 /* MoneyBoards.swift in Sources */,
+				A01B000001001522 /* FinanceInsights.swift in Sources */,
+				A01B000001001523 /* FinanceBoardScenes.swift in Sources */,
+				A01B000001001524 /* FinanceBoards.swift in Sources */,
+				A01B000001001525 /* FinanceItems.swift in Sources */,
+				A01B000001001504 /* TripChangeNotifier.swift in Sources */,
+				A01B000001001505 /* MeetingReminders.swift in Sources */,
+				A01B000001001503 /* DeepLinkRouter.swift in Sources */,
+				A01B000001001400 /* RunTrackingView.swift in Sources */,
+				A01B000001001300 /* RunTracker.swift in Sources */,
+				A01B000001001200 /* HealthKitManager.swift in Sources */,
+				A01B000001001100 /* WorkoutEditorView.swift in Sources */,
+				A01B000001001000 /* HealthView.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A01C000003000001 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A01B000003000001 /* LifeGoodWatchApp.swift in Sources */,
+				A01B000003000005 /* WatchAppDelegate.swift in Sources */,
+				A01B000003000006 /* WatchSync.swift in Sources */,
+				A01B000003000007 /* WatchModel.swift in Sources */,
+				A01B000003000008 /* WatchPrivacy.swift in Sources */,
+				A01B000003000009 /* WatchStyle.swift in Sources */,
+				A01B000003000010 /* RootView.swift in Sources */,
+				A01B000003000011 /* TodayPage.swift in Sources */,
+				A01B000003000012 /* DayListView.swift in Sources */,
+				A01B000003000013 /* StopDetailView.swift in Sources */,
+				A01B000003000014 /* MoneyPage.swift in Sources */,
+				A01B000003000015 /* BillsList.swift in Sources */,
+				A01B000003000016 /* FreshnessFooter.swift in Sources */,
+				A01B000003000017 /* SettingsSheet.swift in Sources */,
+				A01B000003000018 /* WatchNotificationDelegate.swift in Sources */,
+				A01B000003000021 /* RecordSheet.swift in Sources */,
+				A01B000003000022 /* AmountPicker.swift in Sources */,
+				A01B000003000023 /* DigitPad.swift in Sources */,
+				A01B000003000024 /* RecordOutbox.swift in Sources */,
+				A01B000003000025 /* TodayRecordsView.swift in Sources */,
+				A01B000003000026 /* BarcodePage.swift in Sources */,
+				A01B000003000027 /* Code39.swift in Sources */,
+				A01B000003000028 /* RecordText.swift in Sources */,
+				A01B000003000057 /* WatchTripText.swift in Sources */,
+				A01B000003000029 /* TripPage.swift in Sources */,
+				A01B000003000030 /* TripStopDetail.swift in Sources */,
+				A01B000003000031 /* TripCheckIns.swift in Sources */,
+				A01B000003000058 /* WatchRunText.swift in Sources */,
+				A01B000003000032 /* WorkoutManager.swift in Sources */,
+				A01B000003000033 /* RouteRecorder.swift in Sources */,
+				A01B000003000034 /* WatchRunVoice.swift in Sources */,
+				A01B000003000035 /* RunStash.swift in Sources */,
+				A01B000003000036 /* RunHomePage.swift in Sources */,
+				A01B000003000037 /* RunPrepView.swift in Sources */,
+				A01B000003000038 /* RunSessionView.swift in Sources */,
+				A01B000003000039 /* RunSummaryView.swift in Sources */,
+				A01B000003000059 /* WatchRunWeekText.swift in Sources */,
+				A01B000003000060 /* WatchRelevance.swift in Sources */,
+				A01B000003000061 /* WatchOpenIntent.swift in Sources */,
+				A01B000003000040 /* RunWeekView.swift in Sources */,
+				A01B000003000041 /* RunDetailView.swift in Sources */,
+				A01B000003000042 /* StartRunIntent.swift in Sources */,
+				A01B000003000062 /* WatchVoice.swift in Sources */,
+				A01B000003000043 /* VoiceOutbox.swift in Sources */,
+				A01B000003000044 /* VoiceRecord.swift in Sources */,
+				A01B000003000051 /* DayTimelineAttributes.swift in Sources */,
+				A01B000003000052 /* WidgetSnapshot.swift in Sources */,
+				A01B000003000053 /* WidgetLink.swift in Sources */,
+				A01B000003000055 /* WatchPackage.swift in Sources */,
+				A01B000003000056 /* WatchText.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A01C000004000001 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A01B000004000001 /* LifeGoodWatchWidgetsBundle.swift in Sources */,
+				A01B000004000004 /* WatchPackageProvider.swift in Sources */,
+				A01B000004000005 /* NextUpWidget.swift in Sources */,
+				A01B000004000006 /* SpentWidget.swift in Sources */,
+				A01B000004000007 /* AddWidget.swift in Sources */,
+				A01B000004000059 /* WatchRunWeekText.swift in Sources */,
+				A01B000004000008 /* RunWeekWidget.swift in Sources */,
+				A01B000004000060 /* WatchRelevance.swift in Sources */,
+				A01B000004000061 /* WatchOpenIntent.swift in Sources */,
+				A01B000004000009 /* RelevanceCards.swift in Sources */,
+				A01B000004000010 /* WatchControls.swift in Sources */,
+				A01B000004000051 /* DayTimelineAttributes.swift in Sources */,
+				A01B000004000052 /* WidgetSnapshot.swift in Sources */,
+				A01B000004000053 /* WidgetLink.swift in Sources */,
+				A01B000004000055 /* WatchPackage.swift in Sources */,
+				A01B000004000056 /* WatchText.swift in Sources */,
+				A01B000004000057 /* WatchTripText.swift in Sources */,
+				A01B000004000058 /* WatchRunText.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin XCBuildConfiguration section */
+		A01F000002000001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_ENABLE_MODULES = YES;
+				CODE_SIGN_ENTITLEMENTS = LifeGoodWidgets/LifeGoodWidgets.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = LifeGoodWidgets/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "LifeGood";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.lifegood.app.widgets;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		A01F000002000002 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_ENABLE_MODULES = YES;
+				CODE_SIGN_ENTITLEMENTS = LifeGoodWidgets/LifeGoodWidgets.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = LifeGoodWidgets/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "LifeGood";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.lifegood.app.widgets;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
 		A01F000001000001 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -471,31 +1872,38 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = LifeGood/LifeGood.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 317;
 				DEVELOPMENT_ASSET_PATHS = "\"LifeGood/Preview Content\"";
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = LifeGood/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "LifeGood";
 				INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription = "LifeGood 需要讀取 Apple 行事曆，把您的系統行程併入「我的行事曆」一併顯示。";
 				INFOPLIST_KEY_NSCalendarsUsageDescription = "LifeGood 需要讀取 Apple 行事曆，把您的系統行程併入「我的行事曆」一併顯示。";
 				INFOPLIST_KEY_NSCameraUsageDescription = "LifeGood 需要使用相機來拍攝裝潢照片或收據。";
 				INFOPLIST_KEY_NSContactsUsageDescription = "LifeGood 需要存取聯絡人，以匯入聯絡人為名片或把名片加入聯絡人。";
-				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "LifeGood 需要使用您的位置來推薦附近的餐廳，並在美食地圖上標示您去過的店家。";
+				INFOPLIST_KEY_NSFaceIDUsageDescription = "LifeGood 用 Face ID 確認是您本人，才顯示信用卡的完整卡號、有效期限、檢核碼，以及完整帳號、保單號碼與票證號碼。";
+				INFOPLIST_KEY_NSRemindersFullAccessUsageDescription = "LifeGood 需要存取提醒事項，把家庭待辦與部屬任務同步到 Apple 提醒事項。";
+				INFOPLIST_KEY_NSRemindersUsageDescription = "LifeGood 需要存取提醒事項，把家庭待辦與部屬任務同步到 Apple 提醒事項。";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "LifeGood 用你的位置在你跑步、騎車、健走時畫出路線；也用來推薦附近的餐廳、在美食地圖標出你去過的店。";
+				INFOPLIST_KEY_NSLocationAlwaysAndWhenInUseUsageDescription = "LifeGood 在您開始跑步或騎車後持續記錄路徑，鎖屏或切到其他 App 時也需要位置權限才能繼續記錄。";
+				INFOPLIST_KEY_NSMotionUsageDescription = "LifeGood 用手機的氣壓計算你跑步、騎車、登山時爬了多高；也用來判斷你停下來，等紅燈時自動暫停。";
+				INFOPLIST_KEY_NSHealthShareUsageDescription = "LifeGood 讀取「健康」裡的體重、身高、血壓、心率與運動紀錄（含 Apple Watch 記的路線、距離與爬升），帶進健康頁的健康檔案與運動清單，讓您不用兩邊各記一次。";
+				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "LifeGood 把您在 App 內記錄的運動（時間、距離、路線、暫停與大卡）寫進「健康」，讓運動計入體能訓練圓環、在「健身」App 看得到路線。";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "LifeGood 需要麥克風來錄製語音記帳輸入。";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "LifeGood 用語音辨識把你說的內容轉成文字，再交給 AI 解析成支出項目。";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "LifeGood 需要存取相簿讀取裝潢照片或收據。";
+				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "LifeGood 需要把你在大圖預覽裡按下「存到相簿」的那張照片存進相簿。";
+				INFOPLIST_KEY_NSAppleMusicUsageDescription = "LifeGood 需要讀取你的音樂資料庫，才能讓你挑一首歌當動態相簿的配樂。";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
-				INFOPLIST_KEY_UIBackgroundModes = "remote-notification";
-				INFOPLIST_KEY_UIRequiresFullScreen = YES;
-				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait";
+				INFOPLIST_KEY_UIRequiresFullScreen = NO;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = UIInterfaceOrientationPortrait;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 16.77;
 				PRODUCT_BUNDLE_IDENTIFIER = com.lifegood.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -511,31 +1919,38 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = LifeGood/LifeGood.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 317;
 				DEVELOPMENT_ASSET_PATHS = "\"LifeGood/Preview Content\"";
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = LifeGood/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "LifeGood";
 				INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription = "LifeGood 需要讀取 Apple 行事曆，把您的系統行程併入「我的行事曆」一併顯示。";
 				INFOPLIST_KEY_NSCalendarsUsageDescription = "LifeGood 需要讀取 Apple 行事曆，把您的系統行程併入「我的行事曆」一併顯示。";
 				INFOPLIST_KEY_NSCameraUsageDescription = "LifeGood 需要使用相機來拍攝裝潢照片或收據。";
 				INFOPLIST_KEY_NSContactsUsageDescription = "LifeGood 需要存取聯絡人，以匯入聯絡人為名片或把名片加入聯絡人。";
-				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "LifeGood 需要使用您的位置來推薦附近的餐廳，並在美食地圖上標示您去過的店家。";
+				INFOPLIST_KEY_NSFaceIDUsageDescription = "LifeGood 用 Face ID 確認是您本人，才顯示信用卡的完整卡號、有效期限、檢核碼，以及完整帳號、保單號碼與票證號碼。";
+				INFOPLIST_KEY_NSRemindersFullAccessUsageDescription = "LifeGood 需要存取提醒事項，把家庭待辦與部屬任務同步到 Apple 提醒事項。";
+				INFOPLIST_KEY_NSRemindersUsageDescription = "LifeGood 需要存取提醒事項，把家庭待辦與部屬任務同步到 Apple 提醒事項。";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "LifeGood 用你的位置在你跑步、騎車、健走時畫出路線；也用來推薦附近的餐廳、在美食地圖標出你去過的店。";
+				INFOPLIST_KEY_NSLocationAlwaysAndWhenInUseUsageDescription = "LifeGood 在您開始跑步或騎車後持續記錄路徑，鎖屏或切到其他 App 時也需要位置權限才能繼續記錄。";
+				INFOPLIST_KEY_NSMotionUsageDescription = "LifeGood 用手機的氣壓計算你跑步、騎車、登山時爬了多高；也用來判斷你停下來，等紅燈時自動暫停。";
+				INFOPLIST_KEY_NSHealthShareUsageDescription = "LifeGood 讀取「健康」裡的體重、身高、血壓、心率與運動紀錄（含 Apple Watch 記的路線、距離與爬升），帶進健康頁的健康檔案與運動清單，讓您不用兩邊各記一次。";
+				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "LifeGood 把您在 App 內記錄的運動（時間、距離、路線、暫停與大卡）寫進「健康」，讓運動計入體能訓練圓環、在「健身」App 看得到路線。";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "LifeGood 需要麥克風來錄製語音記帳輸入。";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "LifeGood 用語音辨識把你說的內容轉成文字，再交給 AI 解析成支出項目。";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "LifeGood 需要存取相簿讀取裝潢照片或收據。";
+				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "LifeGood 需要把你在大圖預覽裡按下「存到相簿」的那張照片存進相簿。";
+				INFOPLIST_KEY_NSAppleMusicUsageDescription = "LifeGood 需要讀取你的音樂資料庫，才能讓你挑一首歌當動態相簿的配樂。";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
-				INFOPLIST_KEY_UIBackgroundModes = "remote-notification";
-				INFOPLIST_KEY_UIRequiresFullScreen = YES;
-				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait";
+				INFOPLIST_KEY_UIRequiresFullScreen = NO;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = UIInterfaceOrientationPortrait;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 16.77;
 				PRODUCT_BUNDLE_IDENTIFIER = com.lifegood.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -578,6 +1993,7 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1347;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
@@ -596,8 +2012,9 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MARKETING_VERSION = 25.594;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
@@ -641,6 +2058,7 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1347;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
@@ -653,8 +2071,9 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MARKETING_VERSION = 25.594;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				SDKROOT = iphoneos;
@@ -663,9 +2082,128 @@
 			};
 			name = Release;
 		};
+		A01F000003000001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = LifeGoodWatch/LifeGoodWatch.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = LifeGoodWatch/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "LifeGood";
+				INFOPLIST_KEY_NSHealthShareUsageDescription = "LifeGood 手錶版在你跑步、健走、騎車、登山時讀取心率、距離與大卡，顯示在手錶的跑步畫面上。";
+				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "LifeGood 手錶版把你在手錶上記的運動（時間、距離、路線、暫停與大卡）存進「健康」，讓運動計入體能訓練圓環、在「健身」App 看得到路線，iPhone 上的 LifeGood 健康頁也會帶進來。";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "LifeGood 手錶版在你跑步、健走、騎車、登山時用位置畫出路線、算距離。";
+				INFOPLIST_KEY_WKApplication = YES;
+				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = com.lifegood.app;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.lifegood.app.watchkitapp;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 4;
+				WATCHOS_DEPLOYMENT_TARGET = 11.0;
+			};
+			name = Debug;
+		};
+		A01F000003000002 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = LifeGoodWatch/LifeGoodWatch.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = LifeGoodWatch/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "LifeGood";
+				INFOPLIST_KEY_NSHealthShareUsageDescription = "LifeGood 手錶版在你跑步、健走、騎車、登山時讀取心率、距離與大卡，顯示在手錶的跑步畫面上。";
+				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "LifeGood 手錶版把你在手錶上記的運動（時間、距離、路線、暫停與大卡）存進「健康」，讓運動計入體能訓練圓環、在「健身」App 看得到路線，iPhone 上的 LifeGood 健康頁也會帶進來。";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "LifeGood 手錶版在你跑步、健走、騎車、登山時用位置畫出路線、算距離。";
+				INFOPLIST_KEY_WKApplication = YES;
+				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = com.lifegood.app;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.lifegood.app.watchkitapp;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 4;
+				WATCHOS_DEPLOYMENT_TARGET = 11.0;
+			};
+			name = Release;
+		};
+		A01F000004000001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_ENABLE_MODULES = YES;
+				CODE_SIGN_ENTITLEMENTS = LifeGoodWatchWidgets/LifeGoodWatchWidgets.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = LifeGoodWatchWidgets/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "LifeGood";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.lifegood.app.watchkitapp.widgets;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 4;
+				WATCHOS_DEPLOYMENT_TARGET = 11.0;
+			};
+			name = Debug;
+		};
+		A01F000004000002 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_ENABLE_MODULES = YES;
+				CODE_SIGN_ENTITLEMENTS = LifeGoodWatchWidgets/LifeGoodWatchWidgets.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = LifeGoodWatchWidgets/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "LifeGood";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.lifegood.app.watchkitapp.widgets;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 4;
+				WATCHOS_DEPLOYMENT_TARGET = 11.0;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		A01F000002000003 /* Build configuration list for PBXNativeTarget "LifeGoodWidgets" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A01F000002000001 /* Debug */,
+				A01F000002000002 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 		A01F000001000003 /* Build configuration list for PBXNativeTarget "LifeGood" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
@@ -680,6 +2218,24 @@
 			buildConfigurations = (
 				A01F000001000004 /* Debug */,
 				A01F000001000005 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		A01F000003000003 /* Build configuration list for PBXNativeTarget "LifeGoodWatch" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A01F000003000001 /* Debug */,
+				A01F000003000002 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		A01F000004000003 /* Build configuration list for PBXNativeTarget "LifeGoodWatchWidgets" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A01F000004000001 /* Debug */,
+				A01F000004000002 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
