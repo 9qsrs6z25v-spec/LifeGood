@@ -101,6 +101,15 @@ struct GradeTitleView: View {
         let note: String
     }
 
+    /// [v25.594] 刪職等前要問的那一次（nil＝沒有在問）。以前按紅色減號就直接刪、沒有確認
+    @State private var pendingGradeDelete: GradeDeleteAsk?
+
+    private struct GradeDeleteAsk: Equatable {
+        let gradeId: UUID
+        let label: String
+        let note: String
+    }
+
     var body: some View {
         NavigationStack {
             List {
@@ -160,7 +169,7 @@ struct GradeTitleView: View {
                 // ── 職等設定 ──
                 Section {
                     ForEach(Array(displayedGradeTitles.enumerated()), id: \.element.id) { index, gt in
-                        GradeTitleRow(item: gt)
+                        GradeTitleRow(item: gt, onDelete: { askDeleteGrade(gt.id) })
                             .opacity(rowsAppeared ? 1 : 0)
                             .offset(y: rowsAppeared ? 0 : 12)
                             .animation(.spring(response: 0.50, dampingFraction: 0.78).delay(0.04 * Double(index)), value: rowsAppeared)
@@ -183,7 +192,22 @@ struct GradeTitleView: View {
                 } footer: {
                     Text("設定公司內部的職等編號與對應職稱，方便管理部屬與職涯記錄。\n"
                          + "右側橘色「×」是績效互評權重：這個職等的人投出的票，基礎分要乘上的倍數"
-                         + "（留空＝×1）。例如 32 職等設 ×2，他排第一名的人就拿雙倍分數。")
+                         + "（留空＝×1）。例如 32 職等設 ×2，32 職等的人排第一名的同仁就拿雙倍分數。")
+                }
+
+                // ── [v25.594] 職等找不到的人（職等被刪掉了）──
+                if !lifeStore.missingGradeTitles.isEmpty {
+                    Section {
+                        ForEach(lifeStore.missingGradeTitles) { m in
+                            missingGradeRow(m)
+                        }
+                    } header: {
+                        sectionHeader("職等找不到的人", icon: "exclamationmark.triangle.fill", color: .orange,
+                                      count: lifeStore.missingGradeTitles.reduce(0) { $0 + $1.names.count })
+                    } footer: {
+                        Text("這幾位的職等被刪掉了，績效互評會排在「未設職等」。加回同一個職等（職等字一樣）會自動接回去；"
+                             + "對不到的，按〔接回…〕選一個職等，部屬卡片、互評排名、評分加總就會回來。")
+                    }
                 }
             }
             .listStyle(.insetGrouped)
@@ -226,6 +250,87 @@ struct GradeTitleView: View {
         } message: { a in
             Text(a.note)
         }
+        // [v25.594] 刪職等的確認框：掛在背景那一層（同一個 view 已經掛了兩個 alert，不疊在同一層）
+        .background {
+            Color.clear
+                .alert(pendingGradeDelete.map { "確定要刪除職等「\($0.label)」嗎？" } ?? "確定要刪除這個職等嗎？",
+                       isPresented: gradeDeleteShown, presenting: pendingGradeDelete) { a in
+                    Button("刪除", role: .destructive) { confirmGradeDelete(a) }
+                    Button("取消", role: .cancel) {}
+                } message: { a in
+                    Text(a.note)
+                }
+        }
+    }
+
+    // MARK: - [v25.594] 刪職等先問；職等找不到的人〔接回…〕
+
+    private var gradeDeleteShown: Binding<Bool> {
+        Binding(get: { pendingGradeDelete != nil }, set: { if !$0 { pendingGradeDelete = nil } })
+    }
+
+    /// 紅色減號：先問。有人在用就寫出幾位、是誰（App 內頁，可以寫名字）
+    private func askDeleteGrade(_ id: UUID) {
+        guard let g = lifeStore.gradeTitles.first(where: { $0.id == id }) else { return }
+        let label = g.displayLabel.isEmpty ? "未命名職等" : g.displayLabel
+        let users = lifeStore.gradeTitleUsers(id)
+        let note: String
+        if users.isEmpty {
+            note = "目前沒有人是這個職等。"
+        } else {
+            let shown = users.prefix(5).joined(separator: "、")
+            let more = users.count > 5 ? " 等 \(users.count) 位" : ""
+            note = "有 \(users.count) 位是這個職等（\(shown)\(more)）。刪掉後會變成「未設職等」，績效互評會排到「未設職等」那一組。"
+                + "之後加回同一個職等（職等字一樣）會自動接回去。"
+        }
+        pendingGradeDelete = GradeDeleteAsk(gradeId: id, label: label, note: note)
+    }
+
+    /// 確認框收起之後（下一個 runloop）才刪
+    private func confirmGradeDelete(_ a: GradeDeleteAsk) {
+        pendingGradeDelete = nil
+        let id = a.gradeId
+        DispatchQueue.main.async {
+            lifeStore.deleteGradeTitle(id: id)
+        }
+    }
+
+    private func missingGradeRow(_ m: LifeStore.MissingGradeTitle) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "questionmark.circle.fill")
+                .foregroundStyle(.orange)
+                .font(.title3)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(m.label.isEmpty ? "已刪除的職等" : "已刪除的職等「\(m.label)」")
+                    .font(.subheadline.weight(.semibold))
+                Text(m.names.prefix(6).joined(separator: "、") + (m.names.count > 6 ? " 等 \(m.names.count) 位" : ""))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+            Spacer(minLength: 8)
+            Menu {
+                ForEach(displayedGradeTitlesAll) { g in
+                    Button(g.displayLabel.isEmpty ? "未命名職等" : g.displayLabel) {
+                        lifeStore.relinkGradeTitle(from: m.id, to: g.id)
+                    }
+                }
+                Divider()
+                Button("改成未設職等", role: .destructive) {
+                    lifeStore.relinkGradeTitle(from: m.id, to: nil)
+                }
+            } label: {
+                Text("接回…")
+                    .font(.subheadline.weight(.semibold))
+            }
+            .disabled(lifeStore.gradeTitles.isEmpty)
+        }
+        .padding(.vertical, 2)
+    }
+
+    /// 〔接回…〕的選單：全部職等照職等字排（不套搜尋）
+    private var displayedGradeTitlesAll: [GradeTitle] {
+        lifeStore.gradeTitles.sorted { $0.grade.localizedStandardCompare($1.grade) == .orderedAscending }
     }
 
     // MARK: - [v25.592 轉組織 v1b] 刪部門前多一句（judge §5-6）
@@ -552,6 +657,8 @@ struct GradeTitleView: View {
 private struct GradeTitleRow: View {
     @EnvironmentObject var lifeStore: LifeStore
     let itemId: UUID
+    /// [v25.594] 紅色減號：交給 GradeTitleView 先問再刪（以前直接刪、沒有確認）
+    let onDelete: () -> Void
 
     @State private var gradeText: String
     @State private var titleText: String
@@ -559,8 +666,9 @@ private struct GradeTitleRow: View {
     @State private var weightText: String
     @State private var commitTask: Task<Void, Never>?
 
-    init(item: GradeTitle) {
+    init(item: GradeTitle, onDelete: @escaping () -> Void) {
         itemId = item.id
+        self.onDelete = onDelete
         _gradeText = State(initialValue: item.grade)
         _titleText = State(initialValue: item.title)
         _weightText = State(initialValue: item.performanceWeight.map {
@@ -618,9 +726,11 @@ private struct GradeTitleRow: View {
                 }
             }
 
-            Button(role: .destructive) {
+            // [v25.594] 先把打到一半的字存起來（確認框裡的名稱才對），再問要不要刪
+            Button {
                 commitTask?.cancel()
-                lifeStore.gradeTitles.removeAll { $0.id == itemId }
+                commit()
+                onDelete()
             } label: {
                 Image(systemName: "minus.circle.fill")
                     .foregroundStyle(.red.opacity(0.80))
