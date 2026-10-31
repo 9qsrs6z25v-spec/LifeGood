@@ -44,6 +44,8 @@ struct TripPlanListView: View {
     private let accent = TripDayPalette.color(0)   // 沿用旅遊地圖的娛樂紫
 
     @State private var openPlanId: UUID?
+    /// [v25.595] 匯入旅遊規劃本（AI 排好的行程貼進來）
+    @State private var importing = false
     @State private var removing: TripPlan?
     @State private var sharing: SharePlanText?
 
@@ -83,10 +85,27 @@ struct TripPlanListView: View {
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button("關閉") { dismiss() } }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button { newPlan() } label: {
-                        Image(systemName: "plus.circle.fill").font(.title3).foregroundStyle(accent)
+                    HStack(spacing: 14) {
+                        // [v25.595] 匯入旅遊規劃本
+                        Button { importing = true } label: {
+                            Image(systemName: "square.and.arrow.down").font(.title3).foregroundStyle(accent)
+                        }
+                        .accessibilityLabel("匯入旅遊規劃本")
+                        Button { newPlan() } label: {
+                            Image(systemName: "plus.circle.fill").font(.title3).foregroundStyle(accent)
+                        }
+                        .accessibilityLabel("新增行程")
                     }
                 }
+            }
+            .sheet(isPresented: $importing) {
+                TripPlanImportSheet { id in
+                    // 匯入的不是空白行程，關掉時不要被 discardIfBlank 收掉
+                    freshPlanId = nil
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { openPlanId = id }
+                }
+                .environmentObject(lifeStore)
+                .appStores()
             }
             .sheet(item: Binding(
                 get: { openPlanId.map { IDBox(id: $0) } },
@@ -219,7 +238,7 @@ struct TripPlanListView: View {
                     .font(.system(size: 30, weight: .medium)).foregroundStyle(accent)
             }
             Text("還沒有行程").font(.headline)
-            Text("按右上的＋開一份行程，加入景點與停留時間，\n系統會自動排出時間軸並算出每段路的距離與時間。")
+            Text("按右上的＋開一份行程，加入景點與停留時間，\n系統會自動排出時間軸並算出每段路的距離與時間。\n也可以請 AI 排好，按右上的匯入（↓）貼進來。")
                 .font(.caption).foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
