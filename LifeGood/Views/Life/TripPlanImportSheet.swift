@@ -23,15 +23,14 @@ struct TripPlanImportSheet: View {
     /// 正在找位置：第幾站／共幾站（nil＝沒在找）
     @State private var progress: (done: Int, total: Int)?
     @State private var importTask: Task<Void, Never>?
-    /// 按了〔取消〕：找位置找到一半也不存
-    @State private var abandoned = false
+    /// 按了〔先不找了，直接匯入〕：已經找到的留著、其他的不找了
+    @State private var skipLookup = false
+    /// 預覽（停手 0.25 秒才讀一次：每打一個字都重讀，長的一份會卡）
+    @State private var result: TripPlanImport.Result?
+    /// result 是照哪一份字讀的（還沒讀到最新的字時，不要先跳「看不出行程」）
+    @State private var parsedFor = ""
 
     private let accent = TripDayPalette.color(0)
-
-    private var result: TripPlanImport.Result? {
-        let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        return t.isEmpty ? nil : TripPlanImport.parse(t)
-    }
 
     private static let dayFmt: DateFormatter = {
         let f = DateFormatter(); f.locale = Locale(identifier: "zh_Hant_TW")
@@ -49,7 +48,7 @@ struct TripPlanImportSheet: View {
                 stepTwo
                 if let r = result {
                     preview(r)
-                } else if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                } else if parsedFor == text, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     Section {
                         Label("看不出行程：至少要有一行「景點：…」或「行程：…」。可以把 AI 回的整段原封不動貼上來。",
                               systemImage: "exclamationmark.triangle.fill")
@@ -63,7 +62,7 @@ struct TripPlanImportSheet: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("取消") {
-                        abandoned = true
+                        // 找位置找到一半按〔取消〕：什麼都不存（Task 被取消，最後那段不會存）
                         importTask?.cancel()
                         dismiss()
                     }
@@ -85,6 +84,14 @@ struct TripPlanImportSheet: View {
                 Text(fileError ?? "")
             }
             .overlay { if let p = progress { locatingOverlay(p) } }
+            .task(id: text) {
+                try? await Task.sleep(nanoseconds: 250_000_000)
+                guard !Task.isCancelled else { return }
+                let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                result = t.isEmpty ? nil : TripPlanImport.parse(t)
+                parsedFor = text
+            }
+            .onChange(of: wish) { _, _ in copied = false }
             .interactiveDismissDisabled(progress != nil)
         }
     }
@@ -260,7 +267,7 @@ struct TripPlanImportSheet: View {
                     .frame(width: 200)
                 Text("正在 Apple 地圖找位置… \(p.done) / \(p.total)")
                     .font(.footnote)
-                Button("先不找了，直接匯入") { importTask?.cancel() }
+                Button("先不找了，直接匯入") { skipLookup = true }
                     .font(.footnote.weight(.semibold))
             }
             .padding(20)
@@ -269,14 +276,17 @@ struct TripPlanImportSheet: View {
     }
 
     private func startImport() {
-        guard let r = result, progress == nil else { return }
+        // 用現在的字再讀一次（預覽是停手 0.25 秒才更新的，剛貼上就按也對）
+        let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard progress == nil, !t.isEmpty, let r = TripPlanImport.parse(t) else { return }
         let total = r.plan.stops.count
         progress = (0, total)
+        skipLookup = false
         importTask = Task { @MainActor in
             var plan = r.plan
             var near: CLLocationCoordinate2D?
             for i in plan.stops.indices {
-                if Task.isCancelled { break }
+                if skipLookup || Task.isCancelled { break }
                 progress = (i, total)
                 let hint = r.hints[plan.stops[i].id]
                 if let f = await TripPlanImport.locate(plan.stops[i], hint: hint, near: near) {
@@ -293,12 +303,11 @@ struct TripPlanImportSheet: View {
                 }
             }
             // 找到一半按了〔先不找了〕：已經找到的留著，其他的之後在那一站選。按〔取消〕就什麼都不存
-            if abandoned { return }
+            if Task.isCancelled { return }
             lifeStore.upsertTripPlan(plan)
             progress = nil
-            let id = plan.id
+            onImported(plan.id)
             dismiss()
-            onImported(id)
         }
     }
 

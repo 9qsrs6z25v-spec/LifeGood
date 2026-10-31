@@ -58,6 +58,9 @@ enum TripPlanImport {
         ("必去", .must),
         ("退房時間", .checkout), ("退房", .checkout),
         ("座標", .coord), ("經緯度", .coord),
+        ("建議停留時間", .dwell), ("建議停留", .dwell), ("預計停留", .dwell), ("遊玩時間", .dwell), ("所需時間", .dwell),
+        ("預約時間", .arrival), ("訂位時間", .arrival), ("住址", .address), ("電話號碼", .phone), ("交通工具", .mode),
+        ("必備物品", .packing), ("準備物品", .packing),
         ("攜帶物品", .packing), ("攜帶", .packing), ("要帶", .packing), ("行李", .packing), ("帶去", .packing),
         ("伴手禮", .souvenir), ("要買", .souvenir), ("紀念品", .souvenir),
     ]
@@ -71,7 +74,7 @@ enum TripPlanImport {
         請幫我規劃一趟旅行\(w.isEmpty ? "" : "：\(w)")。
 
         請「只」用下面的格式回覆（放在一個程式碼區塊裡），不要加其他說明，我要直接匯入 App：
-        - 一行一個欄位，寫成「欄位：內容」。
+        - 一行一個欄位，寫成「欄位：內容」。不要用表格、不要用 emoji，時間不要寫在行首。
         - 開頭寫：行程、出發（年/月/日 時:分）、交通（開車／步行／大眾運輸／飛機 選一個）、備註（選填）。
         - 每一天先寫一行「第1天」「第2天」…。
         - 每一站用「景點：」開頭，下面接 地址、停留（分鐘）、抵達（時:分，只有餐廳訂位、船班、表演這種時間固定的才寫）、交通（這一段跟預設不同才寫）、電話、必去（是）、備註。
@@ -116,20 +119,25 @@ enum TripPlanImport {
     /// 讀一份旅遊規劃本。一站都沒有、也沒有行程名稱跟清單＝nil（不是這個格式）
     static func parse(_ raw: String, now: Date = Date(), calendar cal: Calendar = .current) -> Result? {
         var title = ""
-        var startText: String?
+        var startDateText: String?
+        var startClockText: String?
         var mode: TripTravelMode = .driving
         var planNotes: [String] = []
         var stops: [TripStop] = []
         var stopDays: [Int] = []
         var arrivalTexts: [UUID: String] = [:]
+        /// 「時間：09:30-11:00」的長度（沒寫停留時當停留）
+        var rangeDwell: [UUID: Int] = [:]
+        var explicitDwell: Set<UUID> = []
         var hints: [UUID: CLLocationCoordinate2D] = [:]
         var packing: [TripChecklistItem] = []
         var souvenirs: [TripChecklistItem] = []
         var warnings: [String] = []
 
         var day = 1
-        var listMode: Key?          // 正在讀「攜帶」「伴手禮」下面一條一條的
-        var current: TripStop?      // 正在讀的那一站
+        var dayMode: TripTravelMode?   // 「第2天」底下、第一站前面寫的交通
+        var listMode: Key?             // 正在讀「攜帶」「伴手禮」下面一條一條的
+        var current: TripStop?         // 正在讀的那一站
 
         func flush() {
             guard var s = current else { return }
@@ -140,18 +148,57 @@ enum TripPlanImport {
             stopDays.append(day)
         }
 
-        for rawLine in raw.components(separatedBy: .newlines) {
+        /// 這一天的住宿寫在中間（先 check-in 再去吃晚餐）：搬到當天最後，時間軸才在那裡過夜
+        func closeDay() {
+            guard let first = stopDays.firstIndex(of: day),
+                  let li = stops.indices.last(where: { $0 >= first && stops[$0].isOvernight }),
+                  li != stops.count - 1 else { return }
+            let lodging = stops.remove(at: li)
+            stops.append(lodging)   // first 之後都是同一天，stopDays 不用動
+        }
+
+        func addNote(_ text: String) {
+            if current != nil {
+                current!.note += (current!.note.isEmpty ? "" : "\n") + text
+            } else {
+                planNotes.append(text)
+            }
+        }
+
+        let rawLines = raw.components(separatedBy: .newlines)
+        // AI 常在程式碼區塊外加開場白、結尾說明：有區塊就只讀區塊裡面
+        let fenced = rawLines.contains { $0.trimmingCharacters(in: .whitespaces).hasPrefix("```") }
+        var inFence = false
+
+        for rawLine in rawLines {
+            if rawLine.trimmingCharacters(in: .whitespaces).hasPrefix("```") { inFence.toggle(); continue }
+            if fenced && !inFence { continue }
             // 同一行用｜隔開好幾個欄位（「景點：太宰府｜停留：90」）
             let segments = rawLine.contains("｜") || rawLine.contains("|")
                 ? rawLine.components(separatedBy: CharacterSet(charactersIn: "｜|"))
                 : [rawLine]
             for seg in segments {
-                let line = cleanLine(seg)
-                if line.isEmpty || line.hasPrefix("```") { continue }
+                var line = cleanLine(seg)
+                if line.isEmpty { continue }
+
+                // 「09:00 景點：…」「12:00-13:00 午餐：…」：前面的時間＝這一站的時間
+                var leadTime: String?
+                if let r = line.range(of: #"^[0-9]{1,2}[:：][0-9]{2}(\s*[-–—~～至到]\s*[0-9]{1,2}[:：][0-9]{2})?"#,
+                                      options: .regularExpression) {
+                    let rest = cleanLine(String(line[r.upperBound...]))
+                    if let k = splitKey(rest)?.0, k == .stop || k == .lodging {
+                        leadTime = String(line[r])
+                        line = rest
+                    }
+                }
 
                 if let n = dayNumber(line) {
                     flush()
+                    closeDay()
                     listMode = nil
+                    dayMode = nil
+                    // 「第1天（12/20 六）」：沒寫出發日期就用這一天
+                    if startDateText == nil, stops.isEmpty, hasDatePart(line) { startDateText = line }
                     if n > day, let last = stops.indices.last, stopDays[last] == day, !stops[last].isOvernight {
                         // 換天了，前一天最後一站沒寫住宿：時間軸要在這裡過夜才會換到隔天
                         stops[last].isOvernight = true
@@ -161,21 +208,13 @@ enum TripPlanImport {
                     continue
                 }
 
-                func addNote(_ text: String) {
-                    if current != nil {
-                        current!.note += (current!.note.isEmpty ? "" : "\n") + text
-                    } else {
-                        planNotes.append(text)
-                    }
-                }
-
                 guard let kv = splitKey(line) else {
-                    // 沒有欄位名稱的一行：清單底下的一條、這一站（或整份行程）的備註
-                    if listMode == .packing {
-                        packing += items(line)
-                    } else if listMode == .souvenir {
-                        souvenirs += items(line)
+                    if let k = listHeading(line) { flush(); listMode = k; continue }
+                    // 清單底下一條一條的；像一句話（「希望你玩得愉快！」「規劃重點：」）＝清單結束
+                    if let k = listMode, !looksLikeSentence(line) {
+                        if k == .packing { packing += items(line) } else { souvenirs += items(line) }
                     } else {
+                        listMode = nil
                         addNote(line)
                     }
                     continue
@@ -187,23 +226,42 @@ enum TripPlanImport {
                 case .stop, .lodging:
                     flush()
                     listMode = nil
-                    var s = TripStop(name: value, dwellMinutes: 60)
-                    s.isOvernight = key == .lodging
                     let (name, must) = stripMustMark(value)
-                    s.name = name
-                    s.isMustVisit = must
+                    if isNoPlace(name, lodging: key == .lodging) {
+                        planNotes.append("第\(day)天：" + value)
+                        continue
+                    }
+                    let s = TripStop(name: name, dwellMinutes: 60, legModeOverride: dayMode,
+                                     isMustVisit: must, isOvernight: key == .lodging)
+                    if let lt = leadTime {
+                        arrivalTexts[s.id] = lt
+                        if let d = rangeMinutes(lt) { rangeDwell[s.id] = d }
+                    }
                     current = s
                 case .packing, .souvenir:
                     flush()
                     listMode = key
                     if key == .packing { packing += items(value) } else { souvenirs += items(value) }
                 case .title:
-                    if current == nil && stops.isEmpty { title = value } else { addNote(value) }
+                    if current == nil && stops.isEmpty && title.isEmpty { title = value } else { addNote(value) }
                 case .start:
-                    if current == nil && stops.isEmpty { startText = value } else { addNote("出發：" + value) }
+                    if current == nil && stops.isEmpty {
+                        // 「出發日期」「出發時間」分兩行寫；第1天底下再寫一次「日期：」不要蓋掉
+                        if hasDatePart(value) {
+                            if startDateText == nil { startDateText = value }
+                        } else if startClockText == nil, clock(value) != nil {
+                            startClockText = value
+                        } else {
+                            planNotes.append("出發：" + value)
+                        }
+                    } else {
+                        addNote("出發：" + value)
+                    }
                 case .mode:
                     if let m = travelMode(value) {
-                        if current != nil { current!.legModeOverride = m } else if stops.isEmpty { mode = m }
+                        if current != nil { current!.legModeOverride = m }
+                        else if stops.isEmpty && day == 1 { mode = m }
+                        else { dayMode = m }
                     } else {
                         addNote("交通：" + value)
                     }
@@ -214,9 +272,15 @@ enum TripPlanImport {
                 case .phone:
                     if current != nil { current!.phone = value }
                 case .dwell:
-                    if current != nil, let m = minutes(value) { current!.dwellMinutes = m }
+                    if current != nil, let m = minutes(value) {
+                        current!.dwellMinutes = m
+                        explicitDwell.insert(current!.id)
+                    }
                 case .arrival:
-                    if let c = current { arrivalTexts[c.id] = value }
+                    if let c = current {
+                        arrivalTexts[c.id] = value
+                        if let d = rangeMinutes(value) { rangeDwell[c.id] = d }
+                    }
                 case .must:
                     if current != nil { current!.isMustVisit = yes(value) }
                 case .checkout:
@@ -229,10 +293,19 @@ enum TripPlanImport {
             }
         }
         flush()
+        closeDay()
 
         guard !stops.isEmpty || !title.isEmpty || !packing.isEmpty || !souvenirs.isEmpty else { return nil }
+        if stops.isEmpty { warnings.append("沒有讀到任何一站（要有「景點：…」）") }
+
+        // 「時間：09:30-11:00」：沒寫停留就用這段的長度
+        for i in stops.indices where !explicitDwell.contains(stops[i].id) && !stops[i].isOvernight {
+            if let d = rangeDwell[stops[i].id] { stops[i].dwellMinutes = d }
+        }
 
         // 出發時間：沒寫或看不懂就排明天 09:00
+        let startParts = [startDateText, startClockText].compactMap { $0 }
+        let startText: String? = startParts.isEmpty ? nil : startParts.joined(separator: " ")
         let start: Date
         if let t = startText, let d = date(t, now: now, cal: cal) {
             start = d
@@ -240,7 +313,7 @@ enum TripPlanImport {
             let tomorrow = cal.date(byAdding: .day, value: 1, to: cal.startOfDay(for: now)) ?? now
             start = cal.date(bySettingHour: 9, minute: 0, second: 0, of: tomorrow) ?? tomorrow
             warnings.append(startText == nil ? "沒有寫出發時間，先排明天 09:00（匯入後可以改）"
-                                              : "看不懂出發時間「\(startText!)」，先排明天 09:00（匯入後可以改）")
+                                              : "看不懂出發時間「\(startText ?? "")」，先排明天 09:00（匯入後可以改）")
         }
 
         // 指定抵達時間：「18:00」＝那一天的 18:00；「12/21 18:00」照寫的日子
@@ -254,7 +327,6 @@ enum TripPlanImport {
                 stops[i].arrivalOverride = cal.date(bySettingHour: hm.0, minute: hm.1, second: 0, of: dayDate)
             }
         }
-        // 最後一站寫了住宿：當成最後一晚住那裡（行程延到隔天退房）。不警告：那是你寫的
 
         let unnamed = stops.filter { $0.name.isEmpty }.count
         if unnamed > 0 { warnings.append("有 \(unnamed) 站沒有名稱") }
@@ -274,8 +346,8 @@ enum TripPlanImport {
             .replacingOccurrences(of: "__", with: "")
             .replacingOccurrences(of: "`", with: "")
             .trimmingCharacters(in: .whitespaces)
-        // 開頭的 - * • ・ ＊ # > 與「1.」「1、」「(1)」
-        while let f = t.first, "-*•・＊#>●○◆■□▪︎·".contains(f) {
+        // 開頭不是字也不是數字的都拿掉：- * • # > 、emoji（📍🏨⏱️📅）、1️⃣、▪、【、(；再拿掉「1.」「1、」「1)」
+        while let f = t.first, !(f.isLetter || f.isWholeNumber) {
             t.removeFirst()
             t = t.trimmingCharacters(in: .whitespaces)
         }
@@ -291,7 +363,9 @@ enum TripPlanImport {
     /// 「第1天」「第 2 天」「第三天」「Day 2」「D2」（後面接日期、標題都可以）
     private static func dayNumber(_ line: String) -> Int? {
         let t = line.trimmingCharacters(in: .whitespaces)
-        if let r = t.range(of: #"^第\s*([0-9０-９一二三四五六七八九十兩]+)\s*[天日]"#, options: .regularExpression) {
+        // 後面要接結尾、空白、括號、冒號、分隔符號：「第1天晚餐建議提早排隊。」不是分天
+        if let r = t.range(of: #"^第\s*([0-9０-９一二三四五六七八九十兩]+)\s*[天日](?=$|[\s（(:：\-－–—｜|,，、.。】\]」])"#,
+                           options: .regularExpression) {
             let inner = t[r].dropFirst().dropLast().trimmingCharacters(in: .whitespaces)
             return number(String(inner))
         }
@@ -302,15 +376,56 @@ enum TripPlanImport {
         return nil
     }
 
-    /// 「欄位：內容」→ 認得的欄位才算（「18:00」「注意：…」這種靠欄位表分）
+    /// 欄位名稱：只看字（emoji、空白、＊、編號不算：「景點1」「📍景點」），括號後面不看（「景點(必去)」），「…清單」也收
+    private static func keyFor(_ rawHead: Substring) -> Key? {
+        var head = rawHead
+        if let p = head.firstIndex(where: { "（(【[".contains($0) }) { head = head[..<p] }
+        var word = String(head.filter { $0.isLetter })
+        guard !word.isEmpty else { return nil }
+        if let k = keyWords.first(where: { $0.0 == word })?.1 { return k }
+        for suffix in ["清單", "列表"] where word.hasSuffix(suffix) { word.removeLast(suffix.count) }
+        return keyWords.first(where: { $0.0 == word })?.1
+    }
+
+    /// 「欄位：內容」→ 認得的欄位才算（「18:00」的「18」不是字，不算欄位）
     private static func splitKey(_ line: String) -> (Key, String)? {
-        guard let idx = line.firstIndex(where: { $0 == "：" || $0 == ":" }) else { return nil }
-        let head = line[..<idx].trimmingCharacters(in: .whitespaces)
-            .replacingOccurrences(of: " ", with: "")
-        guard !head.isEmpty, head.count <= 6 else { return nil }
-        guard let key = keyWords.first(where: { $0.0 == head })?.1 else { return nil }
-        let value = line[line.index(after: idx)...].trimmingCharacters(in: .whitespaces)
-        return (key, value)
+        guard let idx = line.firstIndex(where: { $0 == "：" || $0 == ":" }),
+              line.distance(from: line.startIndex, to: idx) <= 12,
+              let key = keyFor(line[..<idx]) else { return nil }
+        return (key, line[line.index(after: idx)...].trimmingCharacters(in: .whitespaces))
+    }
+
+    /// 沒有冒號的清單標題（「### 🧳 攜帶物品」「伴手禮清單」）
+    private static func listHeading(_ line: String) -> Key? {
+        guard line.count <= 12, let k = keyFor(line[...]), k == .packing || k == .souvenir else { return nil }
+        return k
+    }
+
+    /// 像一句話（清單結束了）：很長、有句號驚嘆號問號、冒號結尾（「規劃重點：」）
+    private static func looksLikeSentence(_ line: String) -> Bool {
+        line.count > 30 || line.hasSuffix("：") || line.hasSuffix(":") || line.contains { "。！？!?".contains($0) }
+    }
+
+    /// 「住宿：無（搭晚班機返台）」「住宿：回家」「早餐：飯店內享用」「活動：自由活動」：不是一個地方
+    private static func isNoPlace(_ name: String, lodging: Bool) -> Bool {
+        let t = name.lowercased()
+        if t.isEmpty { return false }
+        if t.range(of: #"^(無|沒有|不用|不需要?|免|none|n/?a|[-－—–]+)(?=$|[\s（(，,、。:：]|住宿)"#, options: .regularExpression) != nil {
+            return true
+        }
+        if lodging { return t.range(of: #"^(返|回)(台|家|國)"#, options: .regularExpression) != nil }
+        return ["飯店內", "飯店早餐", "飯店享用", "旅館內", "自理", "自由活動", "自由選擇", "自行", "便利商店", "超商"]
+            .contains { t.contains($0) }
+    }
+
+    /// 「09:30-11:00」→ 90（分）
+    static func rangeMinutes(_ v: String) -> Int? {
+        let t = v.replacingOccurrences(of: "：", with: ":")
+        guard let r = t.range(of: #"[0-9]{1,2}:[0-9]{2}\s*[-–—~～至到]\s*[0-9]{1,2}:[0-9]{2}"#, options: .regularExpression) else { return nil }
+        let n = t[r].split(whereSeparator: { !$0.isNumber }).compactMap { Int($0) }
+        guard n.count == 4 else { return nil }
+        let d = (n[2] * 60 + n[3]) - (n[0] * 60 + n[1])
+        return d > 0 ? d : nil
     }
 
     /// 名字裡的「（必去）」「★」：拿掉、標必去
@@ -329,23 +444,37 @@ enum TripPlanImport {
         return ["是", "要", "必去", "y", "yes", "true", "1", "✓", "✔", "v", "o", "○"].contains(t) || t.hasPrefix("是")
     }
 
+    private static let modeWords: [(TripTravelMode, [String])] = [
+        (.plane, ["飛機", "航班", "搭機", "plane", "flight", "fly"]),
+        (.walking, ["步行", "走路", "徒步", "walk"]),
+        (.transit, ["大眾運輸", "電車", "捷運", "地鐵", "地下鐵", "公車", "火車", "列車", "高鐵", "新幹線", "巴士", "客運",
+                    "jr", "西鐵", "輕軌", "渡輪", "搭船", "船班", "transit", "train", "bus", "subway", "metro"]),
+        (.driving, ["開車", "自駕", "租車", "汽車", "計程車", "car", "drive", "driving", "taxi"]),
+    ]
+
+    /// 「電車＋步行」「搭JR後步行」：取最先出現的那一種
     private static func travelMode(_ v: String) -> TripTravelMode? {
         let t = v.lowercased()
-        if ["飛機", "航班", "搭機", "plane", "flight", "fly"].contains(where: t.contains) { return .plane }
-        if ["步行", "走路", "徒步", "walk"].contains(where: t.contains) { return .walking }
-        if ["大眾運輸", "電車", "捷運", "地鐵", "公車", "火車", "高鐵", "新幹線", "巴士", "客運", "jr", "輕軌", "渡輪", "船", "transit", "train", "bus", "subway", "metro"].contains(where: t.contains) { return .transit }
-        if ["開車", "自駕", "租車", "汽車", "計程車", "car", "drive", "driving", "taxi"].contains(where: t.contains) { return .driving }
-        return nil
+        var best: (at: String.Index, mode: TripTravelMode)?
+        for (m, words) in modeWords {
+            for w in words {
+                if let r = t.range(of: w), best == nil || r.lowerBound < best!.at { best = (r.lowerBound, m) }
+            }
+        }
+        return best?.mode
     }
 
     /// 「90」「90分」「90 分鐘」「1.5小時」「1小時30分」「1小時半」「2h」「30min」
     static func minutes(_ v: String) -> Int? {
-        let t = v.lowercased().replacingOccurrences(of: " ", with: "")
+        // 括號裡的不算（「約1.5小時（含午餐30分）」）
+        let t = v.lowercased()
+            .replacingOccurrences(of: #"[（(][^）)]*[）)]"#, with: "", options: .regularExpression)
+            .replacingOccurrences(of: " ", with: "")
         let digitsOnly = t.filter { $0.isNumber || $0 == "." }
         if !digitsOnly.isEmpty, digitsOnly == t, let n = Double(t) { return max(0, Int(n.rounded())) }
         var total = 0.0
         var matched = false
-        if let r = t.range(of: #"[0-9]+(\.[0-9]+)?(?=(小時|鐘頭|個小時|hr|h|時))"#, options: .regularExpression),
+        if let r = t.range(of: #"[0-9]+(\.[0-9]+)?(?=(小時|鐘頭|個小時|個半|hr|h|時))"#, options: .regularExpression),
            let h = Double(t[r]) {
             total += h * 60; matched = true
             if t.contains("半") { total += 30 }
@@ -462,13 +591,14 @@ enum TripPlanImport {
         var name = raw
         var qty = 1
         var forWhom = ""
-        // （給家人）(給同事)
-        if let r = name.range(of: #"[（(]\s*給\s*([^）)]+)[）)]"#, options: .regularExpression) {
-            forWhom = String(name[r]).trimmingCharacters(in: CharacterSet(charactersIn: "（()）給 "))
+        // （給家人）(送同事)
+        if let r = name.range(of: #"[（(]\s*[給送]\s*([^）)]+)[）)]"#, options: .regularExpression) {
+            forWhom = String(name[r]).trimmingCharacters(in: CharacterSet(charactersIn: "（()）給送 "))
             name.removeSubrange(r)
         }
-        // ×2 x2 *2 X2
-        if let r = name.range(of: #"[×xX*＊]\s*([0-9]+)"#, options: .regularExpression) {
+        // ×2 x2 *2「×2盒」「 2盒」
+        if let r = name.range(of: #"[×xX*＊]\s*[0-9]+\s*[個盒包份瓶罐組件條袋箱入]?|\s[0-9]+\s*[個盒包份瓶罐組件條袋箱入]"#,
+                              options: .regularExpression) {
             qty = Int(name[r].filter(\.isNumber)) ?? 1
             name.removeSubrange(r)
         }
@@ -501,6 +631,7 @@ enum TripPlanImport {
             request.region = MKCoordinateRegion(center: center, latitudinalMeters: meters, longitudinalMeters: meters)
         }
         var items = (try? await MKLocalSearch(request: request).start())?.mapItems ?? []
+        if Task.isCancelled { return nil }
         // 名稱＋地址查不到：只用地址再查一次
         if items.isEmpty, !address.isEmpty, !name.isEmpty {
             let r2 = MKLocalSearch.Request()

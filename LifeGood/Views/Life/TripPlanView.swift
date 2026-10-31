@@ -46,6 +46,8 @@ struct TripPlanListView: View {
     @State private var openPlanId: UUID?
     /// [v25.595] 匯入旅遊規劃本（AI 排好的行程貼進來）
     @State private var importing = false
+    /// 匯入好的那一份：匯入頁收起來之後才打開（同一個畫面不同時開兩張）
+    @State private var importedPlanId: UUID?
     @State private var removing: TripPlan?
     @State private var sharing: SharePlanText?
 
@@ -98,12 +100,13 @@ struct TripPlanListView: View {
                     }
                 }
             }
-            .sheet(isPresented: $importing) {
-                TripPlanImportSheet { id in
-                    // 匯入的不是空白行程，關掉時不要被 discardIfBlank 收掉
-                    freshPlanId = nil
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { openPlanId = id }
-                }
+            .sheet(isPresented: $importing, onDismiss: {
+                guard let id = importedPlanId else { return }
+                importedPlanId = nil
+                freshPlanId = nil   // 匯入的不是空白行程，關掉時不要被 discardIfBlank 收掉
+                openPlanId = id
+            }) {
+                TripPlanImportSheet { id in importedPlanId = id }
                 .environmentObject(lifeStore)
                 .appStores()
             }
