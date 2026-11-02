@@ -836,7 +836,8 @@ struct SubordinateView: View {
                 }
             }
             Divider()
-            ForEach(lifeStore.departments) { dept in
+            // [v25.598 轉組織 v5] 已併入的部門不列（現在勾著的照列，才取消得掉）。要退回這一件：改回 ForEach(lifeStore.departments)
+            ForEach(filterableDepartments) { dept in
                 Toggle(deptLabel(dept), isOn: deptToggleBinding(dept.id))
             }
         } label: {
@@ -882,6 +883,12 @@ struct SubordinateView: View {
                 setSelectedDeptIds(ids)
             }
         )
+    }
+
+    /// [v25.598 轉組織 v5] 篩選選單列的部門：已併入的不列；現在勾著的已併入部門照列（才取消得掉）
+    private var filterableDepartments: [Department] {
+        let ids = selectedDeptIds
+        return lifeStore.departments.filter { !OrgReorgIndex.isMerged($0.id) || ids.contains($0.id) }
     }
 
     /// 下拉按鈕上的選擇摘要：全部部門／部門名（最多列 2 個，其餘以「等 N 個部門」帶過）
@@ -1627,7 +1634,8 @@ struct AddSubordinateView: View {
         } else {
             Picker("部門", selection: $selectedDepartmentId) {
                 Text("未選擇").tag(UUID?.none)
-                ForEach(lifeStore.departments) { dept in
+                // [v25.598 轉組織 v5] 已併入的部門不列（現在選著的照列）。要退回這一件：改回 ForEach(lifeStore.departments)
+                ForEach(lifeStore.pickableDepartments(keeping: selectedDepartmentId)) { dept in
                     Text(dept.code.isEmpty ? dept.name : "\(dept.code) — \(dept.name)")
                         .tag(UUID?.some(dept.id))
                 }

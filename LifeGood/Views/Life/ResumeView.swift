@@ -486,6 +486,8 @@ struct ResumeView: View {
                 }
             }
             .sheet(isPresented: $showAdd) { AddMilestoneView().appStores() }
+            // [v25.598 轉組織 v5] 新增「轉職」存好的那一刻問「部屬要一起整理嗎？」（OrgSelfMoveView.swift）。要退回這一件：刪這一行
+            .orgSelfMoveOffer(watching: showAdd)
             .sheet(item: $editingItem) { item in AddMilestoneView(editing: item).appStores() }
             .sheet(item: $wealthCardItem) { t in WealthCardPage(accountId: t.id).appStores() }
             .premiumLockAlert(isPresented: $showPremiumAlert)
@@ -1825,7 +1827,8 @@ struct AddMilestoneView: View {
             // 管理人員名單會自動顯示「我」。
             if isManagerial {
                 TextField("管理單位（例：製造一課，選填）", text: $managedUnit)
-                if !store.departments.isEmpty {
+                // [v25.598 轉組織 v5] 已併入的部門不列（managedUnitSuggestions 走 pickableDepartments）。要退回這一件：改回 `!store.departments.isEmpty`
+                if !managedUnitSuggestions.isEmpty {
                     FlexibleChipWrap(items: managedUnitSuggestions) { name in
                         managedUnitChip(name)
                     }
@@ -1836,9 +1839,10 @@ struct AddMilestoneView: View {
     }
 
     /// 部門膠囊候選：公司組織的部門名稱（去空白、去重、保留原順序）
+    /// [v25.598 轉組織 v5] 已併入的部門不列（brief §5 G3-5）。要退回這一件：改回 store.departments
     private var managedUnitSuggestions: [String] {
         var seen = Set<String>()
-        return store.departments
+        return store.pickableDepartments()
             .map { $0.name.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty && seen.insert($0).inserted }
     }

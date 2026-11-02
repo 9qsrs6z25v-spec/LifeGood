@@ -12,7 +12,7 @@
 // 常數
 // ---------------------------------------------------------------------------
 /** 網頁版自己的版本（與 App 版本無關；改網頁不再動 App 版號） */
-const WEB_VERSION = '1.14';
+const WEB_VERSION = '1.15';
 const CONTAINER_ID = 'iCloud.com.lifegood.app';
 const ZONE_NAME = 'LifeGoodZone';
 const TOKEN_KEY = 'lifegood_ck_token';
@@ -47,9 +47,12 @@ const KV_KEYS = {
   // 只讀：算「已轉出」、班表那天在哪個部門、逾期件數（照 App 的 OrgMoveIndex／OrgHandoffIndex）；不顯示交接單內容、交接備註
   orgMoves: 'life_org_moves_v1',
   orgHandoffs: 'life_org_handoffs_v1',
+  // 組織重整（v1.15；App v25.598 起寫）：單一物件 { changes: [...], teams: [...] }，這裡只留 changes。
+  // 只讀：算「已併入製造課」（照 App 的 OrgReorgIndex.mergedInto）；不顯示重整明細、全組交接單
+  orgReorgs: 'life_org_reorgs_v1',
 };
 /** 讀不到（沒有這筆、下載失敗、JSON 壞掉）當作沒有、不讓整個網頁讀不進來的鍵 */
-const OPTIONAL_KV = new Set(['wealthFacts', 'orgMoves', 'orgHandoffs']);
+const OPTIONAL_KV = new Set(['wealthFacts', 'orgMoves', 'orgHandoffs', 'orgReorgs']);
 // JSONEncoder 預設把 Date 編成「距 2001-01-01 的秒數」；這些欄位名一律還原成 Date
 const DATE_KEYS = new Set([
   'date', 'dueDate', 'completedAt', 'endDate', 'joinDate', 'birthday', 'scheduledDate',
@@ -80,6 +83,8 @@ const Store = {
   wealthFacts: null,
   // v1.14 轉組織：交接單（moves）、交出去時已逾期（entries）；orgIndex＝讀完算好的查表（buildOrgIndex）
   orgMoves: [], orgHandoffs: [], orgIndex: null,
+  // v1.15 組織重整：部門改名、合併、拆成兩個（changes）；mergedInto＝讀完算好的「已併入」查表（buildMergedIndex）
+  orgReorgs: [], mergedInto: {},
   source: '', loadedAt: null, ctx: null,
 };
 let ckContainer = null;
@@ -190,7 +195,7 @@ async function loadFromCloud() {
   const out = {};
   const entries = Object.entries(KV_KEYS);
   // 財富那一包是選配的：讀失敗（下載不到、JSON 壞掉）當作沒有、退回舊算法，不讓整個網頁讀不進來
-  // v1.14 交接單兩包同（讀不到＝空的：大家都算在職、逾期照舊算法）
+  // v1.14 交接單兩包同（讀不到＝空的：大家都算在職、逾期照舊算法）；v1.15 組織重整同（讀不到＝沒有部門併入過）
   const results = await Promise.all(entries.map(([k, key]) => (OPTIONAL_KV.has(k) ? fetchKV(db, key).catch(() => null) : fetchKV(db, key))));
   // 財富那一包讀不到給 null（不是陣列；applyData 會再驗一次格式）
   entries.forEach(([k], i) => { out[k] = results[i] || (k === 'wealthFacts' ? null : []); });
@@ -215,6 +220,12 @@ function applyData(raw, source) {
       Store[k] = reviveDates(Array.isArray(list) ? list.filter((x) => x && typeof x === 'object') : []);
       continue;
     }
+    // v1.15 組織重整：同上，只留 changes（全組交接單 teams 網頁版不用：每一張都是既有的交接單）
+    if (k === 'orgReorgs') {
+      const list = v && typeof v === 'object' && !Array.isArray(v) ? v.changes : null;
+      Store.orgReorgs = reviveDates(Array.isArray(list) ? list.filter((x) => x && typeof x === 'object') : []);
+      continue;
+    }
     // life_profile / life_health_profile 是單一物件，其餘都是陣列
     Store[k] = (k === 'profile' || k === 'health')
       ? reviveDates(v && typeof v === 'object' && !Array.isArray(v) ? v : {})
@@ -223,6 +234,7 @@ function applyData(raw, source) {
   Store.source = source;
   Store.loadedAt = new Date();
   Store.orgIndex = buildOrgIndex();
+  Store.mergedInto = buildMergedIndex();
   Store.ctx = buildScoreContext();
   updateSourceLabel();
   return changed;
@@ -380,6 +392,65 @@ function rosterMembers(subs, deptId, dayKeys) {
   }
   return out;
 }
+
+// ---------------------------------------------------------------------------
+// 組織重整（v1.15；移植自 App 的 OrgReorgIndex.rebuild／finalTarget、OrgReorgPlan.pickable／mergedNote）
+// 「已併入」用 life_org_reorgs_v1 算（部門身上沒有任何欄位）：做了、沒復原（state === 'applied'）、沒墓碑的合併，
+// sourceIds 裡（不是留下的那個自己）的部門＝已併入 deptId；同一個部門有兩筆取生效日晚的、同一天取後做的。只讀，不寫任何鍵。
+// ---------------------------------------------------------------------------
+function buildMergedIndex() {
+  const out = {}, at = {};
+  for (const c of Store.orgReorgs || []) {
+    if (!c || typeof c !== 'object' || c.kind !== 'merge' || c.state !== 'applied' || c.deletedAt != null || !c.deptId) continue;
+    const key = String(c.effectiveKey || '');
+    const t = c.appliedAt || c.createdAt;
+    const made = t instanceof Date && !isNaN(t) ? t.getTime() : -8.64e15;
+    for (const sid of Array.isArray(c.sourceIds) ? c.sourceIds : []) {
+      if (!sid || sid === c.deptId) continue;
+      const old = at[sid];
+      if (old && (old.key > key || (old.key === key && old.made > made))) continue;
+      at[sid] = { key, made };
+      out[sid] = { changeId: c.id, intoId: c.deptId, effectiveKey: key, intoName: String(c.toName || '') };
+    }
+  }
+  return out;
+}
+/** 這個部門已併入別的部門（合併後舊部門留著） */
+function isMergedDept(id) { return !!(id && Store.mergedInto && Store.mergedInto[id]); }
+/** 一路往下找最後併進的那個（A 併進 B、B 又併進 C → C）；最多走 16 步（防繞圈） */
+function mergedFinalTarget(id) {
+  let cur = id, steps = 0;
+  while (Store.mergedInto[cur] && steps < 16) {
+    const m = Store.mergedInto[cur];
+    if (m.intoId === id) break;
+    cur = m.intoId; steps += 1;
+  }
+  return cur;
+}
+/** 「已併入製造課」（沒併入＝null）。名字照留下的那個現在的名字；那個刪了用合併那時的快照 */
+function mergedNoteOf(id) {
+  if (!isMergedDept(id)) return null;
+  const m = Store.mergedInto[id];
+  const d = deptById(mergedFinalTarget(id));
+  const now = d ? (String(d.name || '').trim() || String(d.code || '').trim()) : '';
+  const name = now || m.intoName.trim();
+  return name ? `已併入${name}` : '已併入其他部門';
+}
+/** 挑得到的部門（已併入的不列；keeping 這一個照樣列，不然選著的那個點不掉）；部門數一律算這一份 */
+function pickableDepts(keeping = null) { return Store.depts.filter((d) => !isMergedDept(d.id) || d.id === keeping); }
+/** 部門清單排序：已併入的排最後，其餘照代號、名稱 */
+function sortDeptsMergedLast(list) {
+  return [...list].sort((a, b) => (Number(isMergedDept(a.id)) - Number(isMergedDept(b.id)))
+    || (a.code || '').localeCompare(b.code || '') || (a.name || '').localeCompare(b.name || '', 'zh-Hant'));
+}
+/** 部門頁名稱後面：「已併入製造課」，點了開最後併進的那個部門頁 */
+function mergedLinkChip(id) {
+  const n = mergedNoteOf(id); if (!n) return '';
+  const to = mergedFinalTarget(id);
+  return deptById(to) && to !== id ? ` <a class="chip" href="#/dept/${esc(to)}">${esc(n)}</a>` : ` <span class="chip">${esc(n)}</span>`;
+}
+/** 名稱後面那個灰色膠囊 */
+function mergedChip(id) { const n = mergedNoteOf(id); return n ? ` <span class="chip">${esc(n)}</span>` : ''; }
 
 // ---------------------------------------------------------------------------
 // 評分（移植自 App）
@@ -763,7 +834,7 @@ function renderOverview(main, ctx) {
   main.innerHTML = `
     ${pageHead('部屬總覽', `${fmtDate(now)}・共 ${subs.length} 位部屬`)}
     <div class="grid cols-5">
-      <div class="card kpi"><div class="label">部屬人數</div><div class="value">${subs.length}</div><div class="foot">${Store.depts.length} 個部門</div></div>
+      <div class="card kpi"><div class="label">部屬人數</div><div class="value">${subs.length}</div><div class="foot">${pickableDepts().length} 個部門</div></div>
       <div class="card kpi"><div class="label">未完成任務</div><div class="value ${openTasks.length ? 'orange' : ''}">${openTasks.length}</div><div class="foot">今日到期 ${todayTasks.length}</div></div>
       <div class="card kpi"><div class="label">逾期（含補完成）</div><div class="value ${totalOverdue ? 'red' : 'green'}">${totalOverdue}</div><div class="foot">目前逾期未完成 ${overdueTasks.length}</div></div>
       <div class="card kpi"><div class="label">未完成報告</div><div class="value ${openReports.length ? 'orange' : ''}">${openReports.length}</div><div class="foot">本週會議 ${meetings.length} 場</div></div>
@@ -828,7 +899,8 @@ function renderSubs(main, ctx) {
     return { s, name: s.name, title: s.jobTitle || '', dept: deptNameOf(s), grade: gradeLabelOf(s), pot: potentialScore(s), act: proactivityScore(s, ctx), total: overallScore(s, ctx), open, overdue: overdueOpenCount(s), reports: (s.weeklyReports || []).filter((r) => !r.isCompleted).length, leave: leaveHoursOf(s), archived: isArchivedId(s.id) };
   });
   const archivedN = rows.filter((r) => r.archived).length;
-  const depts = [...new Set(rows.map((r) => r.dept).filter(Boolean))].sort();
+  // v1.15 篩選不列已併入的部門（現在選著的照列，才點得掉；那個部門的人看「全部」）
+  const depts = [...new Set(rows.filter((r) => !isMergedDept(r.s.departmentId) || r.dept === subsState.dept).map((r) => r.dept).filter(Boolean))].sort();
   const draw = () => {
     let list = rows.filter((r) => (subsState.dept === 'all' || r.dept === subsState.dept) && (!subsState.q || (r.name + r.title + r.dept + r.grade).toLowerCase().includes(subsState.q.toLowerCase())));
     const k = subsState.sort;
@@ -1118,19 +1190,20 @@ function personCard(m) {
 }
 function renderOrg(main) {
   const q = (renderOrg.q || '').trim().toLowerCase();
-  const depts = [...Store.depts].sort((a, b) => (a.code || '').localeCompare(b.code || '') || a.name.localeCompare(b.name, 'zh-Hant'));
+  // v1.15 已併入的部門排最後、卡片灰、標「已併入製造課」；頁首的部門數不算它們
+  const depts = sortDeptsMergedLast(Store.depts);
   const noDept = Store.orgPeople.filter((p) => !p.departmentId || !deptById(p.departmentId));
   const hit = (d) => !q || (d.name + d.code + d.function).toLowerCase().includes(q) || deptMembers(d.id).some((m) => (m.name + (m.jobTitle || '')).toLowerCase().includes(q));
   main.innerHTML = `
-    ${pageHead('公司組織', `${Store.depts.length} 個部門・${Store.orgPeople.length} 位人員・${Store.equipment.length} 台設備`)}
+    ${pageHead('公司組織', `${pickableDepts().length} 個部門・${Store.orgPeople.length} 位人員・${Store.equipment.length} 台設備`)}
     <div class="filters"><input type="search" id="org-q" placeholder="搜尋部門／人員" value="${esc(renderOrg.q || '')}"></div>
     <div class="grid cols-3">${depts.filter(hit).map((d) => {
       const members = deptMembers(d.id); const eq = Store.equipment.filter((e) => e.departmentId === d.id);
       const managers = (d.managerIds || []).map(personName).filter(Boolean);
       // v1.14 人數、名字、「等 N 人」都只算在職的（同一份；以前「等 N 人」連已離職的也算進去）
       const counted = members.filter(countsInDept);
-      return `<div class="card dept-card" onclick="location.hash='#/dept/${d.id}'">
-        <div class="code">${esc(d.code || '—')}</div><div class="dname">${esc(d.name || '未命名部門')}</div><div class="dfn">${esc(d.function || '')}</div>
+      return `<div class="card dept-card"${isMergedDept(d.id) ? ' style="opacity:0.6"' : ''} onclick="location.hash='#/dept/${d.id}'">
+        <div class="code">${esc(d.code || '—')}</div><div class="dname">${esc(d.name || '未命名部門')}${mergedChip(d.id)}</div><div class="dfn">${esc(d.function || '')}</div>
         <div class="chips" style="margin-top:10px"><span class="chip green">${counted.length} 人</span>${eq.length ? `<span class="chip teal">${eq.length} 台設備</span>` : ''}${managers.length ? `<span class="chip gold">主管：${esc(managers.join('、'))}</span>` : ''}</div>
         <div class="muted small" style="margin-top:8px">${esc(counted.slice(0, 6).map((m) => m.name).join('、'))}${counted.length > 6 ? ` 等 ${counted.length} 人` : ''}</div>
       </div>`;
@@ -1150,7 +1223,7 @@ function renderDept(main, ctx, id) {
   main.innerHTML = `
     <div class="crumb"><a href="#/org">公司組織</a> › ${esc(d.name)}</div>
     <div class="card hero"><div class="avatar" style="background:linear-gradient(135deg,#5856d6,#32ade6)">${esc(initial(d.code || d.name))}</div>
-      <div style="flex:1"><div class="name">${esc(d.name)}${d.code ? ` <span class="chip">${esc(d.code)}</span>` : ''}</div>
+      <div style="flex:1"><div class="name">${esc(d.name)}${d.code ? ` <span class="chip">${esc(d.code)}</span>` : ''}${mergedLinkChip(d.id)}</div>
         <div class="muted" style="margin-top:2px">${esc(d.function || '')}</div>
         <div class="facts" style="margin-top:8px">${managers.length ? `<span>👑 主管：${esc(managers.join('、'))}</span>` : ''}<span>👥 ${members.filter(countsInDept).length} 人</span><span>⚙️ ${eq.length} 台設備</span></div>
         <div class="row" style="margin-top:8px;gap:14px">${rel(d.upstreamIds, '上游')}${rel(d.downstreamIds, '下游')}${rel(d.peerIds, '平行')}</div>
@@ -2368,7 +2441,7 @@ function renderRoster(main, param) {
       <span class="spacer"></span>
       <span class="muted small">課別</span>
       <span class="fchip ${rosterUI.dept === 'all' ? 'on' : ''}" data-rd="all">全部</span>
-      ${Store.depts.map((d) => `<span class="fchip ${rosterUI.dept === d.id ? 'on' : ''}" data-rd="${d.id}">${esc(d.name || d.code)}</span>`).join('')}
+      ${pickableDepts(rosterUI.dept).map((d) => `<span class="fchip ${rosterUI.dept === d.id ? 'on' : ''}" data-rd="${d.id}">${esc(d.name || d.code)}</span>`).join('')}
     </div>
     <div class="grid cols-4">
       ${kpiCard('有排班的人', staffed, '', `共 ${people.length} 位`)}
@@ -3487,12 +3560,14 @@ function renderGrades(main) {
   };
   const used = grades.map((g) => ({ g, u: usage(g.id) })).sort((a, b) => b.u.total - a.u.total || (a.g.grade || '').localeCompare(b.g.grade || '', 'zh-Hant'));
   const noGradeSubs = Store.subs.filter((s) => !s.gradeTitleId || !gradeById(s.gradeTitleId));
-  const depts = [...Store.depts].sort((a, b) => (a.code || '').localeCompare(b.code || '') || (a.name || '').localeCompare(b.name || '', 'zh-Hant'));
+  // v1.15 已併入的部門排最後、整列灰、標「已併入製造課」；部門數不算它們
+  const depts = sortDeptsMergedLast(Store.depts);
+  const deptN = pickableDepts().length;
   const rel = (ids) => (ids || []).map(deptById).filter(Boolean).map((d) => `<a class="chip blue" href="#/dept/${d.id}">${esc(d.name)}</a>`).join(' ') || '<span class="muted">—</span>';
   main.innerHTML = `
-    ${pageHead('部門職等', `${depts.length} 個部門・${grades.length} 個職等職稱`)}
+    ${pageHead('部門職等', `${deptN} 個部門・${grades.length} 個職等職稱`)}
     <div class="grid cols-4">
-      ${kpiCard('部門', depts.length, '', `${Store.equipment.length} 台設備`)}
+      ${kpiCard('部門', deptN, '', `${Store.equipment.length} 台設備`)}
       ${kpiCard('職等職稱', grades.length, '', `已指派 ${used.filter((x) => x.u.total).length} 個`)}
       ${kpiCard('已套用職等的部屬', Store.subs.length - noGradeSubs.length, noGradeSubs.length ? 'orange' : 'green', noGradeSubs.length ? `未設定 ${noGradeSubs.length} 人` : '全部已設定')}
       ${kpiCard('組織人員', Store.orgPeople.length, '', `其中部屬 ${Store.orgPeople.filter((p) => p.linkedSubordinateId && subById(p.linkedSubordinateId)).length} 人`)}
@@ -3504,10 +3579,10 @@ function renderGrades(main) {
       </tbody></table>
       ${noGradeSubs.length ? `<div class="muted small" style="margin-top:10px">未設定職等的部屬：${noGradeSubs.map((s) => `<a class="chip orange" href="#/sub/${s.id}">${esc(s.name)}</a>`).join(' ')}</div>` : ''}
     </div>
-    <div class="card table-wrap mt"><h3>部門 <span class="count">${depts.length}</span></h3>
+    <div class="card table-wrap mt"><h3>部門 <span class="count">${deptN}</span></h3>
       <table class="tbl"><thead><tr><th>代號</th><th>部門</th><th>功能</th><th class="num">成員</th><th class="num">設備</th><th>主管</th><th>上游</th><th>下游</th><th>平行</th></tr></thead><tbody>
       ${depts.map((d) => { const mem = deptMembers(d.id); const eq = Store.equipment.filter((e) => e.departmentId === d.id);
-        return `<tr class="clickable" onclick="location.hash='#/dept/${d.id}'"><td><b>${esc(d.code || '—')}</b></td><td>${esc(d.name || '未命名')}</td><td class="muted small" style="white-space:normal;max-width:260px">${esc(d.function || '')}</td>
+        return `<tr class="clickable"${isMergedDept(d.id) ? ' style="opacity:0.6"' : ''} onclick="location.hash='#/dept/${d.id}'"><td><b>${esc(d.code || '—')}</b></td><td>${esc(d.name || '未命名')}${mergedChip(d.id)}</td><td class="muted small" style="white-space:normal;max-width:260px">${esc(d.function || '')}</td>
         <td class="num">${mem.filter((m) => !m.isInactive).length}</td><td class="num">${eq.length}</td>
         <td>${(d.managerIds || []).map(personName).filter(Boolean).map((n) => `<span class="chip gold">${esc(n)}</span>`).join(' ') || '<span class="muted">—</span>'}</td>
         <td>${rel(d.upstreamIds)}</td><td>${rel(d.downstreamIds)}</td><td>${rel(d.peerIds)}</td></tr>`; }).join('') || '<tr><td colspan="9" class="empty">尚無部門</td></tr>'}
@@ -3691,7 +3766,7 @@ async function startWithToken(token) {
 }
 async function afterSignIn() {
   setStatus('已登入，讀取 iCloud 資料中…', 'ok');
-  try { await loadFromCloud(); setStatus(''); showApp(); toast(`已讀取 ${Store.subs.length} 位部屬・${Store.depts.length} 個部門`); AutoRefresh.start(); }
+  try { await loadFromCloud(); setStatus(''); showApp(); toast(`已讀取 ${Store.subs.length} 位部屬・${pickableDepts().length} 個部門`); AutoRefresh.start(); }
   catch (e) { setStatus(String(e.message || e), 'err'); }
 }
 function startDemo() {

@@ -636,8 +636,9 @@ enum OrgMovePlan {
     // MARK: 第 ① 步
 
     /// 部門清單（照現在 departments 的順序）。「現在」那一列由畫面標灰字
+    /// [v25.598 轉組織 v5] 已併入的部門不列（OrgReorgPlan.pickable；judge §7 v5「不出現在挑選清單」）。要退回這一件：改回 `world.departments.map`
     static func departmentChoices(_ world: OrgMoveWorld) -> [(id: UUID, label: String)] {
-        world.departments.map { d -> (id: UUID, label: String) in
+        OrgReorgPlan.pickable(world.departments).map { d -> (id: UUID, label: String) in
             let code = d.code.trimmingCharacters(in: .whitespaces)
             let name = d.name.trimmingCharacters(in: .whitespaces)
             let label = code.isEmpty ? name : (name.isEmpty ? code : "\(code) \(name)")

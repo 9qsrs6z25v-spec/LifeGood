@@ -419,6 +419,12 @@ struct TalentMatrixView: View {
         ctx.potentialScores[m.id] ?? 0
     }
 
+    /// [v25.598 轉組織 v5] 篩選選單列的部門：已併入的不列；現在勾著的已併入部門照列（才取消得掉）
+    private var filterableDepartments: [Department] {
+        let ids = selectedDeptIds
+        return lifeStore.departments.filter { !OrgReorgIndex.isMerged($0.id) || ids.contains($0.id) }
+    }
+
     /// 篩選摘要（全部部門 / 單一部門名 / N 個部門）
     private var selectedDeptName: String {
         let ids = selectedDeptIds
@@ -558,7 +564,8 @@ struct TalentMatrixView: View {
                 if selectedDeptIds.isEmpty { Label("全部部門", systemImage: "checkmark") }
                 else { Text("全部部門") }
             }
-            ForEach(lifeStore.departments) { d in
+            // [v25.598 轉組織 v5] 已併入的部門不列（現在勾著的照列，才取消得掉）。要退回這一件：改回 ForEach(lifeStore.departments)
+            ForEach(filterableDepartments) { d in
                 Button { toggleDept(d.id) } label: {
                     if selectedDeptIds.contains(d.id) { Label(deptName(d), systemImage: "checkmark") }
                     else { Text(deptName(d)) }

@@ -146,6 +146,8 @@ struct UnifiedExport: Codable {
         var orgHandoffs: OrgHandoffBook?
         /// [v25.590] 轉組織 v1a-1：交接單（OrgMoveBook）。舊備份沒有，所以是 Optional；跟部屬一起走（完整備份、「職涯」）
         var orgMoves: OrgMoveBook?
+        /// [v25.598] 轉組織 v5：組織重整、我自己調動（OrgReorgBook）。舊備份沒有，所以是 Optional；跟部屬一起走（完整備份、「職涯」）
+        var orgReorgs: OrgReorgBook?
     }
 
     static func build(expense: ExpenseStore, finance: FinanceStore, life: LifeStore,
@@ -225,7 +227,9 @@ struct UnifiedExport: Codable {
                 // [v25.589] 轉組織 v0b：交出去時已逾期的帳跟部屬一起走（完整備份、「職涯」）
                 orgHandoffs: scope.carriesCareer ? life.orgHandoffs : nil,
                 // [v25.590] 轉組織 v1a-1：交接單跟部屬一起走（完整備份、「職涯」）
-                orgMoves: scope.carriesCareer ? life.orgMoves : nil
+                orgMoves: scope.carriesCareer ? life.orgMoves : nil,
+                // [v25.598] 轉組織 v5：組織重整、我自己調動跟部屬一起走（完整備份、「職涯」）
+                orgReorgs: scope.carriesCareer ? life.orgReorgs : nil
             ),
             scope: scope.rawValue
         )
@@ -996,6 +1000,10 @@ enum UnifiedImporter {
                 if scope.carriesCareer, let om = payload.life.orgMoves {
                     life.orgMoves = om
                 }
+                // [v25.598] 轉組織 v5：組織重整、我自己調動：舊備份沒有（nil）就不動本機的
+                if scope.carriesCareer, let rb = payload.life.orgReorgs {
+                    life.orgReorgs = rb
+                }
             }
 
             result.expenses = payload.expense.expenses.count
@@ -1225,6 +1233,11 @@ enum UnifiedImporter {
                 if let om = payload.life.orgMoves {
                     let merged = life.orgMoves.merged(with: om)
                     if merged != life.orgMoves { life.orgMoves = merged }
+                }
+                // [v25.598] 轉組織 v5：組織重整、我自己調動：照 id 各取後改的（同 iCloud）
+                if let rb = payload.life.orgReorgs {
+                    let merged = life.orgReorgs.merged(with: rb)
+                    if merged != life.orgReorgs { life.orgReorgs = merged }
                 }
                 // 舊格式備份的機台上面 appendNewByID 進了部屬的 equipments——搬進機台池
                 life.migrateLegacyEquipmentsToPool()

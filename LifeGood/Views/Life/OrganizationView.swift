@@ -156,9 +156,17 @@ struct OrganizationView: View {
     private var rootDepartments: [Department] {
         // root = 沒有 upstream 的部門；若全部都有 upstream（可能成環），退而求其次抓部門裡的全部，
         // 但避免重複展開：用 visited 集合處理。
-        let withoutUpstream = lifeStore.departments.filter { $0.upstreamIds.isEmpty }
+        // [v25.598 轉組織 v5] 已併入的部門不列（收在目錄最下面「已併入的部門」；brief §3 G1-4）。要退回這一件：live 改回 lifeStore.departments
+        let live = lifeStore.pickableDepartments()
+        // 上游只剩已併入的部門（舊 iPad 又接回去的）也算最上層，不然整棵樹找不到它；沒有任何合併時＝upstreamIds.isEmpty（同以前）
+        let withoutUpstream = live.filter { d in d.upstreamIds.allSatisfy { OrgReorgIndex.isMerged($0) } }
         if !withoutUpstream.isEmpty { return withoutUpstream }
-        return lifeStore.departments
+        return live
+    }
+
+    /// [v25.598 轉組織 v5] 組織頁最下面「已併入的部門（2）」那幾列（沒有＝空的）
+    private var mergedDeptItems: [OrgMergedDeptItem] {
+        OrgMergedDeptList.build(lifeStore)
     }
 
     /// 目錄 ⇄ 樹狀圖 檢視切換。預設目錄——樹狀圖要雙向捲動，
@@ -191,6 +199,7 @@ struct OrganizationView: View {
                                     ForEach(rootDepartments) { root in
                                         deptTreeNode(root, visited: [], ctx: ctx)
                                     }
+                                    treeMergedSection
                                 }
                                 .padding(24)
                             }
@@ -273,7 +282,7 @@ struct OrganizationView: View {
         let inactive = lifeStore.orgPeople.filter { $0.isInactive }.count
 
         return HStack(spacing: 0) {
-            statPill(value: "\(lifeStore.departments.count)", label: "部門", icon: "building.2.fill", color: .indigo)
+            statPill(value: "\(lifeStore.pickableDepartments().count)", label: "部門", icon: "building.2.fill", color: .indigo)
             statSeparator
             statPill(value: "\(active)", label: "在職人員", icon: "person.2.fill", color: .green)
             if inactive > 0 {
@@ -545,9 +554,35 @@ struct OrganizationView: View {
             }, onEdit: { site in
                 editingSite = SiteEditTarget(site: site ?? CompanySite(), isNew: site == nil)
             }, focus: currentHit)
+            // [v25.598 轉組織 v5] 最下面「已併入的部門」（收合；沒有就不出現）。要退回這一件：刪這一行
+            directoryMergedSection
         }
         .listStyle(.insetGrouped)
         .scrollContentBackground(.hidden)
+    }
+
+    /// [v25.598 轉組織 v5] 目錄最下面「已併入的部門（2）」：灰字「製造一課　已併入製造課」，點了開部門頁
+    @ViewBuilder
+    private var directoryMergedSection: some View {
+        let items = mergedDeptItems
+        if !items.isEmpty {
+            Section {
+                OrgMergedDeptList(items: items) { id in viewingDeptId = id }
+            }
+        }
+    }
+
+    /// [v25.598 轉組織 v5] 樹狀圖最下面同一區（卡片）
+    @ViewBuilder
+    private var treeMergedSection: some View {
+        let items = mergedDeptItems
+        if !items.isEmpty {
+            OrgMergedDeptList(items: items) { id in viewingDeptId = id }
+                .padding(14)
+                .frame(maxWidth: 360)
+                .background(Color(.systemBackground))
+                .clipShape(RoundedRectangle(cornerRadius: 14))
+        }
     }
 
     private func directoryRow(_ dept: Department, ctx: OrgContext) -> some View {
@@ -617,9 +652,11 @@ struct OrganizationView: View {
         let peopleCountByDept: [UUID: Int]
     }
     private func makeOrgContext() -> OrgContext {
-        let byId = Dictionary(lifeStore.departments.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        // [v25.598 轉組織 v5] 已併入的部門不進樹（同層級名字也不列）。要退回這一件：live 改回 lifeStore.departments
+        let live = lifeStore.pickableDepartments()
+        let byId = Dictionary(live.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         var childrenByParent: [UUID: [Department]] = [:]
-        for dept in lifeStore.departments {
+        for dept in live {
             childrenByParent[dept.id] = dept.downstreamIds.compactMap { byId[$0] }
         }
         var peopleCountByDept: [UUID: Int] = [:]
@@ -764,6 +801,9 @@ struct DepartmentDetailView: View {
     @State private var showOrgMovePremium = false
     /// [v25.597 轉組織 v4] 人員長按〔設成我的部屬…〕開的新增部屬表單
     @State private var orgIntake: OrgMoveIntakeRequest?
+    /// [v25.598 轉組織 v5] 右上「…」〔改名…〕〔合併到…〕〔拆成兩個…〕開的表單；已併入的部門頁〔前往製造課〕
+    @State private var reorgRequest: OrgReorgRequest?
+    @State private var reorgJump: IdentifiableUUID?
     @State private var addingPerson = false
     @State private var viewingPersonId: UUID?
     @State private var showEditDept = false
@@ -807,12 +847,16 @@ struct DepartmentDetailView: View {
             ScrollView {
                 VStack(spacing: 16) {
                     headerCard
+                    // [v25.598 轉組織 v5] 已併入的部門：「2027/1/1 併入製造課」〔前往製造課〕（沒併入＝不出現）。要退回這一件：刪這一行
+                    DeptMergedBanner(deptId: deptId) { id in reorgJump = IdentifiableUUID(id: id) }
                     managerSection
                     if !upstreamDepts.isEmpty || !downstreamDepts.isEmpty {
                         relationsCard
                     }
                     equipmentSection
                     peopleSection
+                    // [v25.598 轉組織 v5] 「組織重整」＋7 天內〔復原〕（沒有就不出現）。要退回這一件：刪這一行
+                    DeptReorgSection(deptId: deptId)
                     // [v25.592 轉組織 v1b] 最下面「異動」（沒有就不出現）。要退回這一件：刪這一行
                     moveSection
                 }
@@ -824,7 +868,9 @@ struct DepartmentDetailView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button("關閉") { dismiss() } }
-                ToolbarItem(placement: .topBarTrailing) {
+                // [v25.598 轉組織 v5] 「編輯部門」旁多一顆「…」（已併入的部門不出現）。要退回這一件：改回只放「編輯部門」的 ToolbarItem
+                ToolbarItemGroup(placement: .topBarTrailing) {
+                    reorgMenu
                     Button("編輯部門") { showEditDept = true }
                 }
             }
@@ -861,6 +907,8 @@ struct DepartmentDetailView: View {
                 OrgPersonDetailView(personId: wrapper.id)
                     .appStores()
             }
+            // [v25.598 轉組織 v5] 重整表單、〔前往製造課〕兩個 .sheet(item:)（包成一個 modifier）。要退回這一件：刪這一行
+            .orgReorgSheets(request: $reorgRequest, jump: $reorgJump)
         }
         // [v25.592 轉組織 v1b] 精靈、交接單兩個 .sheet(item:)＋付費說明（包成一個 modifier）。要退回這一件：刪這一行
         .orgMoveEntrySheets(wizard: $orgMoveWizard, sheet: $orgMoveSheet, premium: $showOrgMovePremium, intake: $orgIntake)
@@ -869,6 +917,34 @@ struct DepartmentDetailView: View {
     // MARK: [v25.592 轉組織 v1b] 人員長按〔轉組織…〕、名字後小字、最下面「異動」（judge §4.1、§4.8）
     // 要退回這一件：刪這一區、body 的 moveSection 與 .orgMoveEntrySheets、peopleSection 的 .orgMovePersonMenu、
     // personRow 的 plannedOrgNoteView，刪 subscription、orgMoveWizard、orgMoveSheet、showOrgMovePremium。
+
+    // MARK: [v25.598 轉組織 v5] 右上「…」〔改名…〕〔合併到…〕〔拆成兩個…〕（brief §3 G1-1；要訂閱，judge §6）
+    // 要退回這一件：刪這一區、reorgRequest／reorgJump、toolbar 的 reorgMenu、body 的 DeptMergedBanner／DeptReorgSection／.orgReorgSheets
+
+    /// 已併入的部門不給（避免併進已併入的、或再拆一個已經沒有人的部門）
+    @ViewBuilder
+    private var reorgMenu: some View {
+        if !OrgReorgIndex.isMerged(deptId) {
+            Menu {
+                Button { openReorg(.rename) } label: {
+                    Label("改名…", systemImage: "pencil")
+                }
+                Button { openReorg(.merge) } label: {
+                    Label("合併到…", systemImage: "arrow.triangle.merge")
+                }
+                Button { openReorg(.split) } label: {
+                    Label("拆成兩個…", systemImage: "arrow.triangle.branch")
+                }
+            } label: {
+                Image(systemName: "ellipsis.circle")
+            }
+        }
+    }
+
+    private func openReorg(_ kind: OrgUnitChangeKind) {
+        guard subscription.isPremium else { showOrgMovePremium = true; return }
+        reorgRequest = OrgReorgRequest(deptId: deptId, kind: kind)
+    }
 
     /// 連到、而且還在的部屬（沒有＝不給〔轉組織…〕）
     /// [v25.593 轉組織 v2] 已轉出的人也不給（要再交事情先在卡片〔回到我的部屬〕；judge §3.6）。要退回這一件：拿掉 isArchived 那一行
@@ -2089,7 +2165,8 @@ struct OrgPersonEditor: View {
 
                     Picker("部門", selection: $departmentId) {
                         Text("未指派").tag(nil as UUID?)
-                        ForEach(lifeStore.departments) { d in
+                        // [v25.598 轉組織 v5] 已併入的部門不列（現在選著的照列）。要退回這一件：改回 lifeStore.departments
+                        ForEach(lifeStore.pickableDepartments(keeping: departmentId)) { d in
                             Text(d.name.isEmpty ? "未命名部門" : d.name).tag(d.id as UUID?)
                         }
                     }

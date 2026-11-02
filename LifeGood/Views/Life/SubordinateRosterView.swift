@@ -344,7 +344,8 @@ struct SubordinateRosterView: View {
             }
             Menu {
                 Button("全部部門") { selectedDeptId = nil }
-                ForEach(lifeStore.departments) { d in
+                // [v25.598 轉組織 v5] 已併入的部門不列（現在選著的照列）。要退回這一件：改回 ForEach(lifeStore.departments)
+                ForEach(lifeStore.pickableDepartments(keeping: selectedDeptId)) { d in
                     Button(d.name.isEmpty ? d.code : d.name) { selectedDeptId = d.id }
                 }
             } label: {

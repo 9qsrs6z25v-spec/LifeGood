@@ -57,9 +57,13 @@ struct GradeTitleView: View {
 
     /// 部門依名稱排序（localizedStandardCompare：中文筆劃與「一部/二部/10 部」
     /// 的數字都排得對），再套搜尋。store 內的原始順序不動——只是顯示排序。
+    /// [v25.598 轉組織 v5] 已併入的部門（OrgReorgIndex.isMerged）排在最後，其餘照舊。要退回這一件：改回只照名稱排
     private var displayedDepartments: [Department] {
-        let base = lifeStore.departments.sorted {
-            $0.name.localizedStandardCompare($1.name) == .orderedAscending
+        let base = lifeStore.departments.sorted { a, b in
+            let ma = OrgReorgIndex.isMerged(a.id)
+            let mb = OrgReorgIndex.isMerged(b.id)
+            if ma != mb { return !ma }
+            return a.name.localizedStandardCompare(b.name) == .orderedAscending
         }
         let q = query.trimmingCharacters(in: .whitespaces)
         guard !q.isEmpty else { return base }
@@ -161,7 +165,7 @@ struct GradeTitleView: View {
                             .foregroundStyle(.green)
                     }
                 } header: {
-                    sectionHeader("部門名稱", icon: "building.2.fill", color: .indigo, count: lifeStore.departments.count)
+                    sectionHeader("部門名稱", icon: "building.2.fill", color: .indigo, count: lifeStore.pickableDepartments().count)
                 } footer: {
                     Text("點部門進入編輯畫面，可設定部門功能、上下游部門。資料會被「公司組織」頁拿來繪製組織樹。")
                 }
@@ -391,7 +395,7 @@ struct GradeTitleView: View {
             }
 
             HStack(spacing: 0) {
-                HeroKpiCell(label: "部門數", value: "\(lifeStore.departments.count) 個",
+                HeroKpiCell(label: "部門數", value: "\(lifeStore.pickableDepartments().count) 個",
                             icon: "building.2.fill")
                 HeroKpiDivider()
                 HeroKpiCell(label: "職等數", value: "\(lifeStore.gradeTitles.count) 級",
@@ -481,6 +485,10 @@ struct GradeTitleView: View {
                     // [v25.520] 部門名稱放不下改跑馬燈（原本折成多行）
                     MarqueeText(dept.name.isEmpty ? "未命名部門" : dept.name)
                         .font(.subheadline.weight(.medium))
+                    // [v25.598 轉組織 v5] 已併入的部門名稱後面灰色膠囊「已併入製造課」
+                    if let note = mergedNote(dept.id) {
+                        GradeDeptMergedChip(text: note)
+                    }
                 }
                 if !dept.function.isEmpty {
                     Text(dept.function)
@@ -508,6 +516,13 @@ struct GradeTitleView: View {
             Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.tertiary)
         }
         .padding(.vertical, 4)
+        .opacity(OrgReorgIndex.isMerged(dept.id) ? 0.6 : 1)   // [v25.598 轉組織 v5] 已併入的整列淡一點
+    }
+
+    /// [v25.598 轉組織 v5]「已併入製造課」（沒併入＝nil；只有併入的才建 World）
+    private func mergedNote(_ id: UUID) -> String? {
+        guard OrgReorgIndex.isMerged(id) else { return nil }
+        return OrgReorgPlan.mergedNote(id, world: OrgMoveWorld(store: lifeStore))
     }
 
     // MARK: - Empty States
@@ -798,8 +813,17 @@ struct DepartmentEditor: View {
     @State private var peerIds: Set<UUID> = []
     @State private var showDeleteConfirm = false
     @State private var isSaving = false
+    /// [v25.598 轉組織 v5] 改了名稱時先問「你履歷的管理單位也是製造一課…」（nil＝沒有在問）
+    @State private var unitAsk: OrgReorgUnitAsk?
 
     private var isEditing: Bool { editingId != nil }
+
+    /// [v25.598 轉組織 v5] 編輯中，名稱或代碼跟 store 裡現在那一筆不一樣（＝改名：走 renameDepartment 連動部屬的部門字、名片）
+    private var isRenaming: Bool {
+        guard isEditing, let e = existing else { return false }
+        return code.trimmingCharacters(in: .whitespaces) != e.code.trimmingCharacters(in: .whitespaces)
+            || name.trimmingCharacters(in: .whitespaces) != e.name.trimmingCharacters(in: .whitespaces)
+    }
 
     private var existing: Department? {
         guard let id = editingId else { return nil }
@@ -807,8 +831,32 @@ struct DepartmentEditor: View {
     }
 
     /// 候選部門 = 其他所有部門
+    /// [v25.598 轉組織 v5] 已併入的部門不列；已經勾著（或打開時就連著）的已併入部門照列，才拿得掉。
+    /// 要退回這一件：改回 lifeStore.departments.filter { $0.id != editingId }
     private var candidates: [Department] {
-        lifeStore.departments.filter { $0.id != editingId }
+        let kept = linkedIds
+        return lifeStore.departments.filter {
+            $0.id != editingId && (!OrgReorgIndex.isMerged($0.id) || kept.contains($0.id))
+        }
+    }
+
+    /// [v25.598 轉組織 v5] 現在勾著的＋打開時就連著的上下游、同層級（取消勾選後那一列不會馬上消失）
+    private var linkedIds: Set<UUID> {
+        var ids = upstreamIds.union(downstreamIds).union(peerIds)
+        if let e = existing {
+            ids.formUnion(e.upstreamIds)
+            ids.formUnion(e.downstreamIds)
+            ids.formUnion(e.peerIds)
+        }
+        return ids
+    }
+
+    /// [v25.598 轉組織 v5] 候選那一列的字：已併入的多「（已併入製造課）」
+    private func candidateLabel(_ d: Department) -> String {
+        let base = d.name.isEmpty ? "未命名" : d.name
+        guard OrgReorgIndex.isMerged(d.id),
+              let note = OrgReorgPlan.mergedNote(d.id, world: OrgMoveWorld(store: lifeStore)) else { return base }
+        return "\(base)（\(note)）"
     }
 
     /// [v25.592 轉組織 v1b] 刪除確認框多一句「有 1 張排好的交接單要調到這裡…」（沒有＝nil）
@@ -826,6 +874,11 @@ struct DepartmentEditor: View {
                     TextField("部門名稱", text: $name)
                 } header: {
                     sectionHeader("基本資訊", icon: "info.circle.fill", color: .indigo)
+                } footer: {
+                    // [v25.598 轉組織 v5] 改名稱、代碼＝renameDepartment 連動
+                    if isEditing {
+                        Text("改名稱、代碼時，部屬身上的部門字、名片會一起換（你自己改過字的不動）。")
+                    }
                 }
 
                 Section {
@@ -844,7 +897,7 @@ struct DepartmentEditor: View {
                         ForEach(candidates) { d in
                             checkRow(
                                 isOn: upstreamIds.contains(d.id),
-                                label: d.name.isEmpty ? "未命名" : d.name,
+                                label: candidateLabel(d),
                                 code: d.code,
                                 color: .blue
                             ) {
@@ -871,7 +924,7 @@ struct DepartmentEditor: View {
                         ForEach(candidates) { d in
                             checkRow(
                                 isOn: downstreamIds.contains(d.id),
-                                label: d.name.isEmpty ? "未命名" : d.name,
+                                label: candidateLabel(d),
                                 code: d.code,
                                 color: .orange
                             ) {
@@ -898,7 +951,7 @@ struct DepartmentEditor: View {
                         ForEach(candidates) { d in
                             checkRow(
                                 isOn: peerIds.contains(d.id),
-                                label: d.name.isEmpty ? "未命名" : d.name,
+                                label: candidateLabel(d),
                                 code: d.code,
                                 color: .purple
                             ) {
@@ -963,6 +1016,7 @@ struct DepartmentEditor: View {
                 }
             }
             .onAppear { loadInitial() }
+            .modifier(DeptUnitAskAlert(ask: $unitAsk) { renameMyUnit in commitSave(renameMyUnit: renameMyUnit) })
         }
     }
 
@@ -1051,14 +1105,34 @@ struct DepartmentEditor: View {
         peerIds = Set(e.peerIds)
     }
 
+    /// [v25.598 轉組織 v5] 改了名稱：你履歷的管理單位是舊名字時先問〔一起改〕〔不用〕〔取消〕（〔取消〕＝回表單、不存）；
+    /// 沒有要問的直接存。要退回這一件：save 改回直接存（名稱、代碼照表單），刪 unitAsk、isRenaming、DeptUnitAskAlert
     private func save() {
+        guard !isSaving else { return }
+        if isRenaming, let e = existing,
+           let ask = OrgReorgPlan.myUnitAsk(oldNames: [e.name],
+                                            newName: name.trimmingCharacters(in: .whitespaces),
+                                            myUnit: lifeStore.myCurrentManagedUnit) {
+            unitAsk = ask
+            return
+        }
+        commitSave(renameMyUnit: false)
+    }
+
+    /// 存檔。改名時 update 先用 store 裡現在的名稱、代碼（其他欄位照表單），關掉之後下一個 runloop 再 renameDepartment：
+    /// 它讀部門現在的名稱當「改之前」，先寫新名字就算不出部屬身上要換的字（brief §4 G2-1）
+    private func commitSave(renameMyUnit: Bool) {
         guard !isSaving else { return }
         isSaving = true
         let id = editingId ?? UUID()
+        let newCode = code.trimmingCharacters(in: .whitespaces)
+        let newName = name.trimmingCharacters(in: .whitespaces)
+        let rename = isRenaming
+        let old = existing
         let dept = Department(
             id: id,
-            code: code.trimmingCharacters(in: .whitespaces),
-            name: name.trimmingCharacters(in: .whitespaces),
+            code: rename ? (old?.code ?? newCode) : newCode,
+            name: rename ? (old?.name ?? newName) : newName,
             function: function.trimmingCharacters(in: .whitespaces),
             upstreamIds: Array(upstreamIds),
             downstreamIds: Array(downstreamIds),
@@ -1072,6 +1146,12 @@ struct DepartmentEditor: View {
         // 雙向同步：對方的 upstream/downstream/peer 一併更新
         syncReverseLinks(forDept: dept)
         dismiss()
+        if rename {
+            let store = lifeStore   // 先抓好 store：sheet 關掉之後才寫（同 OrgReorgRenameForm.finish）
+            DispatchQueue.main.async {
+                store.renameDepartment(id, code: newCode, name: newName, renameMyUnit: renameMyUnit)
+            }
+        }
     }
 
     private func syncReverseLinks(forDept dept: Department) {
@@ -1141,6 +1221,49 @@ struct DepartmentEditor: View {
                 lifeStore.update(sub)
             }
             lifeStore.deleteDepartment(dept)
+        }
+    }
+}
+
+// MARK: - [v25.598 轉組織 v5] 部門職等頁的小零件
+
+/// 部門列名稱後面灰色膠囊「已併入製造課」
+private struct GradeDeptMergedChip: View {
+    let text: String
+
+    var body: some View {
+        Text(text)
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+            .padding(.horizontal, 7).padding(.vertical, 2.5)
+            .background(Color(.secondarySystemFill))
+            .clipShape(Capsule())
+            .fixedSize()
+            .layoutPriority(1)
+    }
+}
+
+/// 部門編輯頁改名稱時問「你履歷的管理單位也是製造一課」〔一起改〕〔不用〕〔取消〕（OrgReorgPlan.myUnitAsk）。
+/// 掛在背景那一層（編輯頁已經掛了刪除確認框，不疊在同一層）。按〔一起改〕／〔不用〕＝onAnswer(true／false)；〔取消〕＝回表單、不存
+private struct DeptUnitAskAlert: ViewModifier {
+    @Binding var ask: OrgReorgUnitAsk?
+    let onAnswer: (Bool) -> Void
+
+    private var shown: Binding<Bool> {
+        Binding(get: { ask != nil }, set: { if !$0 { ask = nil } })
+    }
+
+    func body(content: Content) -> some View {
+        content.background {
+            Color.clear
+                .alert(ask?.title ?? "", isPresented: shown, presenting: ask) { a in
+                    Button(a.yes) { onAnswer(true) }
+                    Button(a.no) { onAnswer(false) }
+                    Button("取消", role: .cancel) {}
+                } message: { a in
+                    Text(a.message)
+                }
         }
     }
 }

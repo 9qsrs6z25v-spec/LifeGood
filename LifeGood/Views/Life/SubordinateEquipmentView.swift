@@ -561,8 +561,9 @@ struct EquipmentEditorSheet: View {
         return Array(out.sorted { $0.localizedStandardCompare($1) == .orderedAscending }.prefix(12))
     }
 
+    /// [v25.598 轉組織 v5] 已併入的部門不列（這台機台現在選著的照列，Picker 才有那一格）。要退回這一件：改回 lifeStore.departments.sorted
     private var sortedDepartments: [Department] {
-        lifeStore.departments.sorted {
+        lifeStore.pickableDepartments(keeping: departmentId).sorted {
             $0.name.localizedStandardCompare($1.name) == .orderedAscending
         }
     }

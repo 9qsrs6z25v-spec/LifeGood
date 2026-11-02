@@ -56,6 +56,11 @@ class LifeStore: ObservableObject {
             if !isLoading { save() }
         }
     }
+    /// [v25.598 轉組織 v5] 組織重整（部門改名、合併、拆成兩個）與我自己調動（OrgReorg.swift OrgReorgBook；鍵 life_org_reorgs_v1，
+    /// 跟 iCloud 同步、進完整備份與「職涯」匯出）。「已併入製造課」不加在部門上：還沒更新的 iPad 存一次部門會洗掉不認得的欄位，另一個鍵它不碰。
+    /// 一改就重建 OrgReorgIndex（挑部門的清單不列已併入的、互評票兩課同職等接成一組、交接單屬於哪一份全組交接單查這張表）。
+    /// 要退回這一件：刪這個屬性與 ownedKeys、reloadFromCloud、save、load、清除全部資料裡標 [v25.598] 的那幾行
+    @Published var orgReorgs: OrgReorgBook = OrgReorgBook() { didSet { OrgReorgIndex.rebuild(orgReorgs); if !isLoading { save() } } }
     /// [v25.357] 公司廠區據點：與重大決議的「廠區」欄位對應，長成每個廠的歷史年線
     @Published var companySites: [CompanySite] = [] { didSet { if !isLoading { save() } } }
     /// [v25.399] 旅遊規劃（要去的行程；與旅遊地圖「去過的地點」是兩回事）
@@ -106,7 +111,9 @@ class LifeStore: ObservableObject {
         // [v25.589] 轉組織 v0b：交出去時已逾期的帳（OrgHandoffBook.syncKey）
         "life_org_handoffs_v1",
         // [v25.590] 轉組織 v1a-1：交接單（OrgMoveBook.syncKey）
-        "life_org_moves_v1"
+        "life_org_moves_v1",
+        // [v25.598] 轉組織 v5：組織重整、我自己調動（OrgReorgBook.syncKey）
+        "life_org_reorgs_v1"
     ]
 
     init() {
@@ -167,6 +174,9 @@ class LifeStore: ObservableObject {
         // [v25.590] 轉組織 v1a-1：交接單逐張、逐列合併（iPhone 改 P-12、iPad 改 T3，兩列都要留得住；judge §2.1、§5-10）
         let movesKeyTouched = (note.userInfo?["keys"] as? [String])?.contains(OrgMoveBook.syncKey) ?? false
         let movesBefore = orgMoves
+        // [v25.598] 轉組織 v5：組織重整、我自己調動照 id 各取後改的（兩台各做各的重整，兩筆都要留得住）
+        let reorgsKeyTouched = (note.userInfo?["keys"] as? [String])?.contains(OrgReorgBook.syncKey) ?? false
+        let reorgsBefore = orgReorgs
         // [v25.593 轉組織 v2 驗證] 拉下來之後「誰是已轉出」變了（另一台套用、復原、回到我的部屬）就照在職的重排會議通知：
         // load()／合併都在 isLoading 裡，orgMoves 的 didSet 不會排（brief §1-11「iCloud 合併」那一條原本走不到）。
         // 要退回這一件：刪這一行與檔尾那個 if
@@ -210,9 +220,18 @@ class LifeStore: ObservableObject {
                 didMoves = true
             }
         }
+        // [v25.598] 轉組織 v5：組織重整，雲端那份併上本機剛才那份（照 id 取 updatedAt 新的）；合出來不一樣就存回去、推上去
+        var didReorgs = false
+        if reorgsKeyTouched {
+            let merged = orgReorgs.merged(with: reorgsBefore)
+            if merged != orgReorgs {
+                orgReorgs = merged
+                didReorgs = true
+            }
+        }
         // 若 backfill 新建了 OrgPerson/BusinessCard 或修復了成員連結，立即持久化避免重啟後消失
         let didGrades = autoRelinkMissingGradeTitles()   // [v25.594] 別台加回刪掉的職等：這台也接回去
-        if didBackfill || didRepair || didMigrateEq || didSerial || didVault || didTransfers || didHandoffs || didMoves || didGrades { save() }
+        if didBackfill || didRepair || didMigrateEq || didSerial || didVault || didTransfers || didHandoffs || didMoves || didReorgs || didGrades { save() }
         // [v25.593 轉組織 v2 驗證] 已轉出的人變了：會議通知照在職的重排（rebuildAll 裡再濾一次；通知字一個都沒加）
         if OrgMoveIndex.archived != archivedBefore { rebuildMeetingReminders() }
         // [v25.454] 比對拉取前後的旅遊規劃，把別台裝置新增的行程／景點／攜帶物品／
@@ -2324,15 +2343,12 @@ class LifeStore: ObservableObject {
             ?? PerformanceBallot(year: year, raterId: raterId)
         var merged: [PerformanceRankGroup] = []
         for var g in fresh {
-            if let old = ballot.groups.first(where: { $0.departmentId == g.departmentId && $0.gradeId == g.gradeId }) {
-                let validIds = Set(g.entries.map(\.id))
-                // 舊順序中仍有效的人照舊排在前面，新加入的人接在後面
-                var ordered = old.entries.filter { validIds.contains($0.id) }
-                let seen = Set(ordered.map(\.id))
-                ordered.append(contentsOf: g.entries.filter { !seen.contains($0.id) })
-                // 姓名用最新的（改名要跟著更新，離開的人不在名單裡本來就不影響）
-                let nameOf = Dictionary(g.entries.map { ($0.id, $0.name) }, uniquingKeysWith: { a, _ in a })
-                g.entries = ordered.map { PerformanceRankEntry(id: $0.id, name: nameOf[$0.id] ?? $0.name) }
+            // [v25.598 轉組織 v5] 舊順序照 OrgReorgPlan.carriedEntries 接：完全同一組（課別 × 職等）的先，再來是併進這一課的舊課
+            // 同職等那幾組（製造一課・E3、製造二課・E3 → 製造課・E3，照票上的先後；judge §7 v5「兩課同職等接成一組、原順序保留」）。
+            // 沒有任何合併時跟原本一模一樣：舊順序中仍有效的人照舊排在前面，新加入的人接在後面，姓名用最新的。
+            // 要退回這一件：換回原本的 `if let old = ballot.groups.first(where: { 同課同職等 })` 那一段
+            if let carried = OrgReorgPlan.carriedEntries(for: g, in: ballot.groups) {
+                g.entries = carried
             }
             merged.append(g)
         }
@@ -3978,6 +3994,482 @@ class LifeStore: ObservableObject {
             equipmentPool[i].departmentId = nil
         }
         save()
+    }
+
+    // MARK: - [v25.598 轉組織 v5] 組織重整（部門改名、合併、拆成兩個）、我自己調動（judge §7 v5；orgmove/build/v5/brief.md §2-2）
+    //
+    // 每支都是一個 batched（只存一次、推一次）。批次裡只就地改陣列＋私有的 …Body：judge §3.9 不准呼叫的 9 支一支都沒叫，
+    // 也不叫 setDepartment／syncOrgPersonFor（不幫沒有組織人員的部屬補建、不認領）。人沒換工作：不開交接單、不搬待辦、會議、週報、班。
+    // 部屬、組織人員、部門一個欄位都沒加：「已併入」記在 life_org_reorgs_v1（OrgReorgIndex 用算的）。
+    // 暫時離開中的人照樣搬（OrgMoveIndex.away 不看部門；回來那天就在新部門，v4 brief §14）；已轉出的人也搬（組織圖不會留人在舊部門）。
+    // 呼叫端在 sheet 關掉／確認框按下去的下一個 runloop 叫。sim：orgmove/build/v5/sim_v5.py（merge／rename／split／undo 一行一行對照）。
+
+    /// 挑部門的清單：已併入的部門不列（keeping＝現在選著的那個照樣列，畫面才選得到現在的值）
+    func pickableDepartments(keeping: UUID? = nil) -> [Department] {
+        OrgReorgPlan.pickable(departments, keeping: keeping)
+    }
+
+    /// myCurrentManagedUnit 取的那一筆里程碑（管理職、管理單位就是那個名字、最晚的那筆）；沒有＝nil
+    private func myManagedUnitMilestoneIndex() -> Int? {
+        guard let unit = myCurrentManagedUnit else { return nil }
+        let positionSubs: Set<CareerSubCategory> = [.join, .promote, .transfer, .demote]
+        var best: Int?
+        for i in milestones.indices {
+            let m = milestones[i]
+            guard m.category == .career, let sub = m.careerSubCategory, positionSubs.contains(sub),
+                  m.isManagerial == true,
+                  (m.managedUnit ?? "").trimmingCharacters(in: .whitespaces) == unit else { continue }
+            if let b = best, milestones[b].date >= m.date { continue }
+            best = i
+        }
+        return best
+    }
+
+    /// 你履歷的管理單位一起改（現在的管理單位就是 old 才改）。回傳改的那筆里程碑 id。呼叫端負責 batched
+    private func renameMyManagedUnitBody(from old: String, to new: String) -> UUID? {
+        let o = old.trimmingCharacters(in: .whitespaces)
+        let n = new.trimmingCharacters(in: .whitespaces)
+        guard !o.isEmpty, !n.isEmpty, o != n, let i = myManagedUnitMilestoneIndex(),
+              (milestones[i].managedUnit ?? "").trimmingCharacters(in: .whitespaces) == o else { return nil }
+        milestones[i].managedUnit = n
+        return milestones[i].id
+    }
+
+    /// 組織人員連到的名片：部門字是 App 自動寫的（OrgReorgPlan.autoTexts）才換成新的。呼叫端負責 batched
+    private func reorgCardBody(_ pi: Int, from dept: Department?, label: String) -> OrgUnitCardSnap? {
+        guard let cid = orgPeople[pi].linkedBusinessCardId,
+              let ci = businessCards.firstIndex(where: { $0.id == cid }) else { return nil }
+        let cur = businessCards[ci].department
+        let next = OrgReorgPlan.retitled(cur, fromCode: dept?.code ?? "", fromName: dept?.name ?? "", to: label)
+        guard next != cur else { return nil }
+        businessCards[ci].department = next
+        return OrgUnitCardSnap(id: cid, fromText: cur, toText: next)
+    }
+
+    /// 把 from 那幾個部門裡的人、機台搬到 target（只搬列到的）。部屬：departmentId＋部門字（App 自動寫的才換）；
+    /// 連到的組織人員（在 from 裡的才搬）＋名片；沒連到部屬的組織人員；機台。呼叫端負責 batched
+    private func reorgMoveMembersBody(from: Set<UUID>, to target: Department, subIds: [UUID], orgIds: [UUID],
+                                      equipmentIds: [UUID]) -> (people: [OrgUnitPersonSnap], equipment: [OrgUnitEquipSnap], cards: [OrgUnitCardSnap]) {
+        let newLabel = Self.departmentLabel(target)
+        var people: [OrgUnitPersonSnap] = []
+        var cards: [OrgUnitCardSnap] = []
+        var movedOrg = Set<UUID>()
+        for sid in subIds {
+            guard let si = subordinates.firstIndex(where: { $0.id == sid }),
+                  let fromId = subordinates[si].departmentId, from.contains(fromId) else { continue }
+            let fromDept = departments.first(where: { $0.id == fromId })
+            let oldText = subordinates[si].department
+            let newText = OrgReorgPlan.retitled(oldText, fromCode: fromDept?.code ?? "", fromName: fromDept?.name ?? "",
+                                                to: newLabel)
+            subordinates[si].departmentId = target.id
+            if oldText != newText { subordinates[si].department = newText }
+            var opId: UUID?
+            if let pi = orgPeople.firstIndex(where: { $0.linkedSubordinateId == sid }),
+               let pd = orgPeople[pi].departmentId, from.contains(pd) {
+                let pDept = departments.first(where: { $0.id == pd })
+                orgPeople[pi].departmentId = target.id
+                opId = orgPeople[pi].id
+                movedOrg.insert(orgPeople[pi].id)
+                if let c = reorgCardBody(pi, from: pDept, label: newLabel) { cards.append(c) }
+            }
+            people.append(OrgUnitPersonSnap(subId: sid, orgPersonId: opId, fromDeptId: fromId, toDeptId: target.id,
+                                            fromText: oldText, toText: newText))
+        }
+        for oid in orgIds where !movedOrg.contains(oid) {
+            guard let pi = orgPeople.firstIndex(where: { $0.id == oid }),
+                  let pd = orgPeople[pi].departmentId, from.contains(pd) else { continue }
+            let pDept = departments.first(where: { $0.id == pd })
+            orgPeople[pi].departmentId = target.id
+            movedOrg.insert(oid)
+            if let c = reorgCardBody(pi, from: pDept, label: newLabel) { cards.append(c) }
+            people.append(OrgUnitPersonSnap(subId: nil, orgPersonId: oid, fromDeptId: pd, toDeptId: target.id))
+        }
+        var eqs: [OrgUnitEquipSnap] = []
+        let eqSet = Set(equipmentIds)
+        for i in equipmentPool.indices {
+            guard eqSet.contains(equipmentPool[i].id), let d = equipmentPool[i].departmentId, from.contains(d) else { continue }
+            equipmentPool[i].departmentId = target.id
+            eqs.append(OrgUnitEquipSnap(id: equipmentPool[i].id, fromDeptId: d, toDeptId: target.id))
+        }
+        return (people, eqs, cards)
+    }
+
+    /// 排好（還沒生效）的交接單：調進 sources 的改成調進 target（retargetTo）；這次被搬走的同仁從 sources 調出的改成從 target 調出
+    ///（不然到期那天會卡在「你又改了部門」）。呼叫端負責 batched
+    private func reorgRetargetMovesBody(into target: Department, sources: Set<UUID>, movedSubs: Set<UUID>,
+                                        retargetTo: Bool, now: Date) -> [OrgUnitRetarget] {
+        var out: [OrgUnitRetarget] = []
+        let label = Self.departmentLabel(target)
+        for m0 in orgMoves.live where m0.orgPending {
+            var m = m0
+            var changed = false
+            if retargetTo, let t = m.to.deptId, sources.contains(t) {
+                out.append(OrgUnitRetarget(moveId: m.id, side: "to", fromDeptId: t, toDeptId: target.id))
+                m.to.deptId = target.id
+                m.to.deptLabel = label
+                changed = true
+            }
+            if let f = m.from.deptId, sources.contains(f), movedSubs.contains(m.personId) {
+                out.append(OrgUnitRetarget(moveId: m.id, side: "from", fromDeptId: f, toDeptId: target.id))
+                m.from.deptId = target.id
+                changed = true
+            }
+            if changed {
+                m.updatedAt = now
+                orgMoves.upsert(m)
+            }
+        }
+        return out
+    }
+
+    /// 合併的部門關係：留下的那個接上併進來的上下游、同層級（彼此之間的拿掉）；別的部門指著舊部門的改指留下的那個；
+    /// 舊部門的上下游、管理人員清空（keepManagers：管理人員合在一起，照留下的、再照併進來的順序）。回傳動到的部門改之前的樣子。呼叫端負責 batched
+    private func reorgMergeRelationsBody(sources: [UUID], into targetId: UUID, keepManagers: Bool) -> [OrgUnitDeptSnap] {
+        let srcSet = Set(sources)
+        var group = srcSet
+        group.insert(targetId)
+        let srcDepts: [Department] = sources.compactMap { id in departments.first(where: { $0.id == id }) }
+        let alive = Set(orgPeople.map(\.id))
+        func swapped(_ ids: [UUID], selfId: UUID) -> [UUID] {
+            var out: [UUID] = []
+            for id in ids {
+                let x = srcSet.contains(id) ? targetId : id
+                if x == selfId || out.contains(x) { continue }
+                out.append(x)
+            }
+            return out
+        }
+        var snaps: [OrgUnitDeptSnap] = []
+        for i in departments.indices {
+            let d = departments[i]
+            var up = d.upstreamIds
+            var down = d.downstreamIds
+            var peer = d.peerIds
+            var mgr = d.managerIds
+            if d.id == targetId {
+                for s in srcDepts {
+                    up.append(contentsOf: s.upstreamIds)
+                    down.append(contentsOf: s.downstreamIds)
+                    peer.append(contentsOf: s.peerIds)
+                }
+                up = swapped(up, selfId: targetId).filter { !group.contains($0) }
+                down = swapped(down, selfId: targetId).filter { !group.contains($0) && !up.contains($0) }
+                peer = swapped(peer, selfId: targetId).filter { !group.contains($0) && !up.contains($0) && !down.contains($0) }
+                if keepManagers {
+                    var seen = Set<UUID>()
+                    var merged: [UUID] = []
+                    let all: [UUID] = d.managerIds + srcDepts.flatMap { $0.managerIds }
+                    for id in all where !seen.contains(id) {
+                        seen.insert(id)
+                        if alive.contains(id) { merged.append(id) }
+                    }
+                    mgr = merged
+                }
+            } else if srcSet.contains(d.id) {
+                up = []
+                down = []
+                peer = []
+                mgr = []
+            } else {
+                up = swapped(up, selfId: d.id)
+                down = swapped(down, selfId: d.id)
+                peer = swapped(peer, selfId: d.id)
+            }
+            let changed = up != d.upstreamIds || down != d.downstreamIds || peer != d.peerIds || mgr != d.managerIds
+            guard changed else { continue }
+            snaps.append(OrgUnitDeptSnap(d))
+            departments[i].upstreamIds = up
+            departments[i].downstreamIds = down
+            departments[i].peerIds = peer
+            departments[i].managerIds = mgr
+        }
+        return snaps
+    }
+
+    /// 部門頁〔合併到…〕：sourceIds（第一個是你打開的那個）一次併進 target（既有的部門或新設一個）。
+    /// 人（部屬、組織人員，含已轉出、暫時離開中的）、機台、部門字、名片一次搬；上下游接過去；管理人員合在一起（keepManagers）；
+    /// 舊部門留著，標「已併入」（OrgReorgIndex）、挑部門的清單不再出現；排好的交接單改成新的部門；
+    /// renameMyUnit：你履歷的管理單位是被併的那個名字時一起改成留下的那個（不改「我」會從管理人員消失）。
+    /// 生效日只能今天或以前（畫面擋；這裡照記）。回傳那一筆 id（找不到部門、併到自己＝nil）
+    @discardableResult
+    func mergeDepartments(_ sourceIds: [UUID], into target: OrgReorgTarget, keepManagers: Bool, renameMyUnit: Bool,
+                          effective: Date, now: Date = Date()) -> UUID? {
+        var srcs: [UUID] = []
+        for id in sourceIds where !srcs.contains(id) && departments.contains(where: { $0.id == id }) { srcs.append(id) }
+        guard !srcs.isEmpty else { return nil }
+        if case .existing(let tid) = target {
+            guard departments.contains(where: { $0.id == tid }), !srcs.contains(tid) else { return nil }
+        }
+        if case .new(_, let name) = target, name.trimmingCharacters(in: .whitespaces).isEmpty { return nil }
+        var changeId: UUID?
+        batched {
+            var created: UUID?
+            let targetDept: Department
+            switch target {
+            case .existing(let tid):
+                guard let d = departments.first(where: { $0.id == tid }) else { return }
+                targetDept = d
+            case .new(let code, let name):
+                let d = Department(code: code.trimmingCharacters(in: .whitespaces), name: name.trimmingCharacters(in: .whitespaces))
+                departments.append(d)
+                targetDept = d
+                created = d.id
+            }
+            let srcSet = Set(srcs)
+            let mem = OrgReorgPlan.members(srcSet, world: OrgMoveWorld(store: self))
+            let srcDepts: [Department] = srcs.compactMap { id in departments.first(where: { $0.id == id }) }
+            let labels: [String] = srcDepts.map { Self.departmentLabel($0) }
+            let names: [String] = srcDepts.map { $0.name.trimmingCharacters(in: .whitespaces) }
+            let moved = reorgMoveMembersBody(from: srcSet, to: targetDept, subIds: mem.subIds, orgIds: mem.orgIds,
+                                             equipmentIds: mem.equipmentIds)
+            let deptSnaps = reorgMergeRelationsBody(sources: srcs, into: targetDept.id, keepManagers: keepManagers)
+            let retargets = reorgRetargetMovesBody(into: targetDept, sources: srcSet, movedSubs: Set(mem.subIds),
+                                                   retargetTo: true, now: now)
+            var unitFrom: String?
+            var unitTo: String?
+            var unitMs: UUID?
+            let toName = targetDept.name.trimmingCharacters(in: .whitespaces)
+            if renameMyUnit, let unit = myCurrentManagedUnit, names.contains(unit),
+               let mid = renameMyManagedUnitBody(from: unit, to: toName) {
+                unitFrom = unit
+                unitTo = toName
+                unitMs = mid
+            }
+            let c = OrgUnitChange(kind: OrgUnitChangeKind.merge.rawValue, effectiveKey: OrgMovePlan.dayKey(effective),
+                                  deptId: targetDept.id, sourceIds: srcs, createdDeptId: created,
+                                  toName: targetDept.name, toCode: targetDept.code, sourceLabels: labels,
+                                  myUnitFrom: unitFrom, myUnitTo: unitTo, myUnitMilestoneId: unitMs,
+                                  people: moved.people, equipment: moved.equipment, cards: moved.cards,
+                                  depts: deptSnaps, retargets: retargets,
+                                  peopleCount: mem.peopleCount, equipmentCount: mem.equipmentIds.count,
+                                  appliedAt: now, createdAt: now, updatedAt: now)
+            orgReorgs.upsertChange(c)
+            changeId = c.id
+        }
+        return changeId
+    }
+
+    /// 部門頁〔改名…〕、部門編輯頁改了名稱或代碼：部門名稱、代碼；部屬身上的部門字、名片（App 自動寫的才換）；
+    /// renameMyUnit：你履歷的管理單位是舊名字時一起改（不改「我」會從管理人員消失）。機台、管理人員、組織圖不用動（同一個部門）。
+    /// 名稱、代碼都沒變、找不到＝nil
+    @discardableResult
+    func renameDepartment(_ deptId: UUID, code: String, name: String, renameMyUnit: Bool,
+                          effective: Date = Date(), now: Date = Date()) -> UUID? {
+        guard let old = departments.first(where: { $0.id == deptId }) else { return nil }
+        let newCode = code.trimmingCharacters(in: .whitespaces)
+        let newName = name.trimmingCharacters(in: .whitespaces)
+        guard !newName.isEmpty,
+              newCode != old.code.trimmingCharacters(in: .whitespaces) || newName != old.name.trimmingCharacters(in: .whitespaces)
+        else { return nil }
+        var changeId: UUID?
+        batched {
+            guard let di = departments.firstIndex(where: { $0.id == deptId }) else { return }
+            let snap = OrgUnitDeptSnap(old)
+            departments[di].code = newCode
+            departments[di].name = newName
+            let newLabel = Self.departmentLabel(departments[di])
+            var people: [OrgUnitPersonSnap] = []
+            var cards: [OrgUnitCardSnap] = []
+            for si in subordinates.indices where subordinates[si].departmentId == deptId {
+                let t = subordinates[si].department
+                let n = OrgReorgPlan.retitled(t, fromCode: old.code, fromName: old.name, to: newLabel)
+                guard n != t else { continue }
+                subordinates[si].department = n
+                people.append(OrgUnitPersonSnap(subId: subordinates[si].id, fromDeptId: deptId, toDeptId: deptId,
+                                                fromText: t, toText: n))
+            }
+            for pi in orgPeople.indices where orgPeople[pi].departmentId == deptId {
+                if let c = reorgCardBody(pi, from: old, label: newLabel) { cards.append(c) }
+            }
+            var unitFrom: String?
+            var unitTo: String?
+            var unitMs: UUID?
+            let oldName = old.name.trimmingCharacters(in: .whitespaces)
+            if renameMyUnit, let unit = myCurrentManagedUnit, unit == oldName,
+               let mid = renameMyManagedUnitBody(from: unit, to: newName) {
+                unitFrom = unit
+                unitTo = newName
+                unitMs = mid
+            }
+            let count = OrgReorgPlan.members([deptId], world: OrgMoveWorld(store: self)).peopleCount
+            let c = OrgUnitChange(kind: OrgUnitChangeKind.rename.rawValue, effectiveKey: OrgMovePlan.dayKey(effective),
+                                  deptId: deptId, fromName: old.name, fromCode: old.code, toName: newName, toCode: newCode,
+                                  myUnitFrom: unitFrom, myUnitTo: unitTo, myUnitMilestoneId: unitMs,
+                                  people: people, cards: cards, depts: [snap], peopleCount: count,
+                                  appliedAt: now, createdAt: now, updatedAt: now)
+            orgReorgs.upsertChange(c)
+            changeId = c.id
+        }
+        return changeId
+    }
+
+    /// 部門頁〔拆成兩個…〕：新設一個部門，勾的人（組織人員；連到的部屬一起）、沒有組織人員的部屬、機台搬過去。
+    /// 新部門的管理人員、上下游之後在部門頁設定。名稱是空的、找不到原本的部門＝nil
+    @discardableResult
+    func splitDepartment(_ deptId: UUID, newCode: String, newName: String, orgPersonIds: Set<UUID>, subIds: Set<UUID>,
+                         equipmentIds: Set<UUID>, effective: Date, now: Date = Date()) -> UUID? {
+        guard let orig = departments.first(where: { $0.id == deptId }) else { return nil }
+        let n = newName.trimmingCharacters(in: .whitespaces)
+        guard !n.isEmpty else { return nil }
+        var changeId: UUID?
+        batched {
+            let d = Department(code: newCode.trimmingCharacters(in: .whitespaces), name: n)
+            departments.append(d)
+            var subs: [UUID] = []
+            for s in subordinates where s.departmentId == deptId {
+                if subIds.contains(s.id) {
+                    subs.append(s.id)
+                } else if let p = orgPeople.first(where: { $0.linkedSubordinateId == s.id }), orgPersonIds.contains(p.id) {
+                    subs.append(s.id)
+                }
+            }
+            let orgs: [UUID] = orgPeople.filter { $0.departmentId == deptId && orgPersonIds.contains($0.id) }.map(\.id)
+            let eqs: [UUID] = equipmentPool.filter { $0.departmentId == deptId && equipmentIds.contains($0.id) }.map(\.id)
+            let moved = reorgMoveMembersBody(from: [deptId], to: d, subIds: subs, orgIds: orgs, equipmentIds: eqs)
+            let retargets = reorgRetargetMovesBody(into: d, sources: [deptId], movedSubs: Set(subs), retargetTo: false, now: now)
+            let count = OrgReorgPlan.members([d.id], world: OrgMoveWorld(store: self)).peopleCount
+            let c = OrgUnitChange(kind: OrgUnitChangeKind.split.rawValue, effectiveKey: OrgMovePlan.dayKey(effective),
+                                  deptId: deptId, newDeptId: d.id, createdDeptId: d.id,
+                                  fromName: orig.name, fromCode: orig.code, toName: d.name, toCode: d.code,
+                                  people: moved.people, equipment: moved.equipment, cards: moved.cards,
+                                  retargets: retargets, peopleCount: count, equipmentCount: moved.equipment.count,
+                                  appliedAt: now, createdAt: now, updatedAt: now)
+            orgReorgs.upsertChange(c)
+            changeId = c.id
+        }
+        return changeId
+    }
+
+    /// 〔復原〕一次組織重整（7 天內；OrgReorgPlan.canUndo 畫面擋）：現在還是改成的那樣才改回，之後你自己改過的不動。
+    /// 部門的上下游、管理人員照改之前的樣子放回；改名的名稱、代碼現在還是改成的才改回；這次新建的部門空了就拿掉；
+    /// 履歷的管理單位、排好的交接單現在還是改成的才改回。互評票不在這裡動：還沒送出的照「現在的課 × 職等」分組，
+    /// 人回到兩課就分回兩組（合併期間打開過、已存成新課那一組的，順序回到預設；[v5 裁定] 註解照實際寫）
+    func undoOrgUnitChange(_ id: UUID, now: Date = Date()) {
+        guard var c = orgReorgs.change(id), c.isLive else { return }
+        batched {
+            for p in c.people ?? [] {
+                // 部門現在還是改成的那個才改回（部門字跟著；你之後自己換過部門的整位不動）
+                if let sid = p.subId, let si = subordinates.firstIndex(where: { $0.id == sid }),
+                   subordinates[si].departmentId == p.toDeptId {
+                    subordinates[si].departmentId = p.fromDeptId
+                    if let t = p.toText, let f = p.fromText, subordinates[si].department == t { subordinates[si].department = f }
+                }
+                if let oid = p.orgPersonId, let pi = orgPeople.firstIndex(where: { $0.id == oid }),
+                   orgPeople[pi].departmentId == p.toDeptId {
+                    orgPeople[pi].departmentId = p.fromDeptId
+                }
+            }
+            for s in c.cards ?? [] {
+                if let ci = businessCards.firstIndex(where: { $0.id == s.id }), businessCards[ci].department == s.toText {
+                    businessCards[ci].department = s.fromText
+                }
+            }
+            for e in c.equipment ?? [] {
+                if let ei = equipmentPool.firstIndex(where: { $0.id == e.id }), equipmentPool[ei].departmentId == e.toDeptId {
+                    equipmentPool[ei].departmentId = e.fromDeptId
+                }
+            }
+            for d in c.depts ?? [] {
+                guard let di = departments.firstIndex(where: { $0.id == d.id }) else { continue }
+                if c.isRename {
+                    if departments[di].name == (c.toName ?? "") { departments[di].name = d.name }
+                    if departments[di].code == (c.toCode ?? "") { departments[di].code = d.code }
+                } else {
+                    departments[di].upstreamIds = d.upstreamIds
+                    departments[di].downstreamIds = d.downstreamIds
+                    departments[di].peerIds = d.peerIds
+                    departments[di].managerIds = d.managerIds
+                }
+            }
+            for r in c.retargets ?? [] {
+                guard var m = orgMoves.move(r.moveId), m.orgPending else { continue }
+                if r.side == "to", m.to.deptId == r.toDeptId {
+                    m.to.deptId = r.fromDeptId
+                    if let fd = r.fromDeptId, let dept = departments.first(where: { $0.id == fd }) {
+                        m.to.deptLabel = Self.departmentLabel(dept)
+                    }
+                } else if r.side == "from", m.from.deptId == r.toDeptId {
+                    m.from.deptId = r.fromDeptId
+                } else {
+                    continue
+                }
+                m.updatedAt = now
+                orgMoves.upsert(m)
+            }
+            if let mid = c.myUnitMilestoneId, let f = c.myUnitFrom, let t = c.myUnitTo,
+               let mi = milestones.firstIndex(where: { $0.id == mid }),
+               (milestones[mi].managedUnit ?? "").trimmingCharacters(in: .whitespaces) == t {
+                milestones[mi].managedUnit = f
+            }
+            // 這次新建的部門空了（沒有人、沒有機台）就拿掉，別的部門指著它的關係一起清
+            if let cid = c.createdDeptId,
+               !subordinates.contains(where: { $0.departmentId == cid }),
+               !orgPeople.contains(where: { $0.departmentId == cid }),
+               !equipmentPool.contains(where: { $0.departmentId == cid }) {
+                departments.removeAll { $0.id == cid }
+                for i in departments.indices {
+                    if departments[i].upstreamIds.contains(cid) { departments[i].upstreamIds.removeAll { $0 == cid } }
+                    if departments[i].downstreamIds.contains(cid) { departments[i].downstreamIds.removeAll { $0 == cid } }
+                    if departments[i].peerIds.contains(cid) { departments[i].peerIds.removeAll { $0 == cid } }
+                }
+            }
+            c.state = OrgUnitChangeState.undone.rawValue
+            c.undoneAt = now
+            c.updatedAt = now
+            orgReorgs.upsertChange(c)
+        }
+    }
+
+    /// 我自己調動（CareerView／ResumeView 新增「轉職」那一刻問；OrgSelfMoveView 確認）：跟我走的人（選了部門＝每人一張 kind move）、
+    /// 其餘每人一張 kind out（部門照舊）、一份全組交接單（OrgTeamMove）。生效日今天或以前＝全部做；在以後＝每張都〔那天一起做〕（planned）。
+    /// 一次批次只存 1 次；會議通知批次外重排一次。接任的人沒選＝nil（畫面擋）
+    @discardableResult
+    func applyOrgSelfMove(_ draft: OrgSelfMoveDraft, now: Date = Date()) -> UUID? {
+        guard let built = OrgSelfMovePlan.buildMoves(draft, world: OrgMoveWorld(store: self), now: now),
+              !built.followers.isEmpty || !built.outs.isEmpty else { return nil }
+        let todayKey = OrgMovePlan.dayKey(now)
+        batched {
+            for m0 in built.followers + built.outs {
+                var move = m0
+                if OrgMovePlan.isFuture(move.effectiveKey, todayKey: todayKey) && move.timingValue == .together {
+                    move.state = OrgMoveState.planned.rawValue
+                    if move.createdAt == nil { move.createdAt = now }
+                    move.updatedAt = now
+                    orgMoves.upsert(move)
+                    continue
+                }
+                _ = applyOrgMoveBody(&move, now: now, phase: .all)
+                orgMoves.upsert(move)
+            }
+            orgReorgs.upsertTeam(built.team)
+        }
+        rebuildMeetingReminders()
+        return built.team.id
+    }
+
+    /// 全組交接單〔復原這次調動〕：排好還沒生效的直接取消（墓碑）；做了的 7 天內照 undoOrgMove 一張一張退回（沒被動過的才退）。
+    /// 一次批次只存 1 次
+    func undoOrgSelfMove(_ teamId: UUID, now: Date = Date()) {
+        guard var t = orgReorgs.team(teamId) else { return }
+        let todayKey = OrgMovePlan.dayKey(now)
+        batched {
+            for id in t.everyMoveId {
+                guard var m = orgMoves.move(id) else { continue }
+                if m.isPlanned && m.deletedAt == nil {
+                    m.state = OrgMoveState.cancelled.rawValue
+                    m.cancelledAt = now
+                    m.deletedAt = now
+                    m.updatedAt = now
+                    orgMoves.upsert(m)
+                } else if OrgMovePlan.canUndo(m, todayKey: todayKey) {
+                    _ = undoOrgMoveBody(&m, lineIds: nil, now: now)
+                    orgMoves.upsert(m)
+                }
+            }
+            t.updatedAt = now
+            orgReorgs.upsertTeam(t)
+        }
+        rebuildMeetingReminders()
     }
 
     // MARK: - 機台池（部門所屬設備）CRUD
@@ -8298,7 +8790,8 @@ class LifeStore: ObservableObject {
             wealthBook: wealthBook, wealthDeposits: wealthDeposits, wealthVault: wealthVault,
             wealthTransfers: wealthTransfers,
             orgHandoffs: orgHandoffs,
-            orgMoves: orgMoves
+            orgMoves: orgMoves,
+            orgReorgs: orgReorgs   // [v25.598] 轉組織 v5
         )
         saveQueue.async {
             let encoder = JSONEncoder()
@@ -8331,6 +8824,7 @@ class LifeStore: ObservableObject {
             if let d = try? encoder.encode(snap.wealthTransfers) { ud.set(d, forKey: WealthTransferBook.syncKey) }
             if let d = try? encoder.encode(snap.orgHandoffs)    { ud.set(d, forKey: OrgHandoffBook.syncKey) }
             if let d = try? encoder.encode(snap.orgMoves)       { ud.set(d, forKey: OrgMoveBook.syncKey) }
+            if let d = try? encoder.encode(snap.orgReorgs)      { ud.set(d, forKey: OrgReorgBook.syncKey) }   // [v25.598] 轉組織 v5
             CloudSyncManager.shared.pushAll()
         }
     }
@@ -8410,6 +8904,11 @@ class LifeStore: ObservableObject {
         if let data = rawDataIfChanged(OrgMoveBook.syncKey),
            let om = try? decoder.decode(OrgMoveBook.self, from: data) {
             orgMoves = om
+        }
+        // [v25.598] 轉組織 v5：組織重整、我自己調動
+        if let data = rawDataIfChanged(OrgReorgBook.syncKey),
+           let rb = try? decoder.decode(OrgReorgBook.self, from: data) {
+            orgReorgs = rb
         }
     }
 
@@ -8494,6 +8993,7 @@ class LifeStore: ObservableObject {
         wealthTransfers = WealthTransferBook()
         orgHandoffs = OrgHandoffBook()   // [v25.589] 轉組織 v0b
         orgMoves = OrgMoveBook()         // [v25.590] 轉組織 v1a-1（「清除全部資料」例外：交接單平常不給刪）
+        orgReorgs = OrgReorgBook()       // [v25.598] 轉組織 v5
         OrgMoveReminderLater.clearAll()  // [v25.596] 轉組織 v3：自動套用時沒動的提醒事項（只在這台）
         companySites.removeAll()
         // 行程的照片檔也要一起清，不然會留下沒人指向的孤兒檔被雲端一直重傳

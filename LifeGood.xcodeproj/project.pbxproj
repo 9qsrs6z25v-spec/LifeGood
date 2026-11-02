@@ -151,6 +151,8 @@
 		A01B000001001624 /* OrgMoveOut.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001624 /* OrgMoveOut.swift */; };
 		A01B000001001627 /* OrgMoveNotices.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001627 /* OrgMoveNotices.swift */; };
 		A01B000001001628 /* OrgMoveTemp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001628 /* OrgMoveTemp.swift */; };
+		A01B000001001630 /* OrgReorg.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001630 /* OrgReorg.swift */; };
+		A01B000001001631 /* OrgSelfMove.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001631 /* OrgSelfMove.swift */; };
 		A01B000001001625 /* TripPlanImport.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001625 /* TripPlanImport.swift */; };
 		A01B000001001626 /* TripPlanImportSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001626 /* TripPlanImportSheet.swift */; };
 		A01B000001001601 /* WealthTransferPlans.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001601 /* WealthTransferPlans.swift */; };
@@ -241,6 +243,8 @@
 		A01B000001001617 /* OrgMoveWizard.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001617 /* OrgMoveWizard.swift */; };
 		A01B000001001618 /* OrgMoveSheetView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001618 /* OrgMoveSheetView.swift */; };
 		A01B000001001629 /* OrgMoveReceiveView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001629 /* OrgMoveReceiveView.swift */; };
+		A01B000001001632 /* OrgReorgViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001632 /* OrgReorgViews.swift */; };
+		A01B000001001633 /* OrgSelfMoveView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001633 /* OrgSelfMoveView.swift */; };
 		A01B000001001619 /* OrgMoveCardParts.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001619 /* OrgMoveCardParts.swift */; };
 		A01B000001001621 /* OrgMoveWizardRows.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001621 /* OrgMoveWizardRows.swift */; };
 		A01B000001001623 /* OrgMoveDueViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001623 /* OrgMoveDueViews.swift */; };
@@ -529,6 +533,8 @@
 		A01A000001001624 /* OrgMoveOut.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrgMoveOut.swift; sourceTree = "<group>"; };
 		A01A000001001627 /* OrgMoveNotices.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrgMoveNotices.swift; sourceTree = "<group>"; };
 		A01A000001001628 /* OrgMoveTemp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrgMoveTemp.swift; sourceTree = "<group>"; };
+		A01A000001001630 /* OrgReorg.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrgReorg.swift; sourceTree = "<group>"; };
+		A01A000001001631 /* OrgSelfMove.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrgSelfMove.swift; sourceTree = "<group>"; };
 		A01A000001001625 /* TripPlanImport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripPlanImport.swift; sourceTree = "<group>"; };
 		A01A000001001626 /* TripPlanImportSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripPlanImportSheet.swift; sourceTree = "<group>"; };
 		A01A000001001601 /* WealthTransferPlans.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WealthTransferPlans.swift; sourceTree = "<group>"; };
@@ -614,6 +620,8 @@
 		A01A000001001617 /* OrgMoveWizard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrgMoveWizard.swift; sourceTree = "<group>"; };
 		A01A000001001618 /* OrgMoveSheetView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrgMoveSheetView.swift; sourceTree = "<group>"; };
 		A01A000001001629 /* OrgMoveReceiveView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrgMoveReceiveView.swift; sourceTree = "<group>"; };
+		A01A000001001632 /* OrgReorgViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrgReorgViews.swift; sourceTree = "<group>"; };
+		A01A000001001633 /* OrgSelfMoveView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrgSelfMoveView.swift; sourceTree = "<group>"; };
 		A01A000001001619 /* OrgMoveCardParts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrgMoveCardParts.swift; sourceTree = "<group>"; };
 		A01A000001001621 /* OrgMoveWizardRows.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrgMoveWizardRows.swift; sourceTree = "<group>"; };
 		A01A000001001623 /* OrgMoveDueViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrgMoveDueViews.swift; sourceTree = "<group>"; };
@@ -956,6 +964,8 @@
 				A01A000001001624 /* OrgMoveOut.swift */,
 				A01A000001001627 /* OrgMoveNotices.swift */,
 				A01A000001001628 /* OrgMoveTemp.swift */,
+				A01A000001001630 /* OrgReorg.swift */,
+				A01A000001001631 /* OrgSelfMove.swift */,
 				A01A000001001625 /* TripPlanImport.swift */,
 				A01A000001001601 /* WealthTransferPlans.swift */,
 				A01A000001001603 /* WealthTransferNotices.swift */,
@@ -1186,6 +1196,8 @@
 				A01A000001001617 /* OrgMoveWizard.swift */,
 				A01A000001001618 /* OrgMoveSheetView.swift */,
 				A01A000001001629 /* OrgMoveReceiveView.swift */,
+				A01A000001001632 /* OrgReorgViews.swift */,
+				A01A000001001633 /* OrgSelfMoveView.swift */,
 				A01A000001001619 /* OrgMoveCardParts.swift */,
 				A01A000001001621 /* OrgMoveWizardRows.swift */,
 				A01A000001001623 /* OrgMoveDueViews.swift */,
@@ -1526,6 +1538,8 @@
 				A01B000001001624 /* OrgMoveOut.swift in Sources */,
 				A01B000001001627 /* OrgMoveNotices.swift in Sources */,
 				A01B000001001628 /* OrgMoveTemp.swift in Sources */,
+				A01B000001001630 /* OrgReorg.swift in Sources */,
+				A01B000001001631 /* OrgSelfMove.swift in Sources */,
 				A01B000001001625 /* TripPlanImport.swift in Sources */,
 				A01B000001001626 /* TripPlanImportSheet.swift in Sources */,
 				A01B000001001601 /* WealthTransferPlans.swift in Sources */,
@@ -1611,6 +1625,8 @@
 				A01B000001001617 /* OrgMoveWizard.swift in Sources */,
 				A01B000001001618 /* OrgMoveSheetView.swift in Sources */,
 				A01B000001001629 /* OrgMoveReceiveView.swift in Sources */,
+				A01B000001001632 /* OrgReorgViews.swift in Sources */,
+				A01B000001001633 /* OrgSelfMoveView.swift in Sources */,
 				A01B000001001619 /* OrgMoveCardParts.swift in Sources */,
 				A01B000001001621 /* OrgMoveWizardRows.swift in Sources */,
 				A01B000001001623 /* OrgMoveDueViews.swift in Sources */,
@@ -2013,7 +2029,7 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 1350;
+				CURRENT_PROJECT_VERSION = 1351;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
@@ -2034,7 +2050,7 @@
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
-				MARKETING_VERSION = 25.597;
+				MARKETING_VERSION = 25.598;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
@@ -2078,7 +2094,7 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 1350;
+				CURRENT_PROJECT_VERSION = 1351;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
@@ -2093,7 +2109,7 @@
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
-				MARKETING_VERSION = 25.597;
+				MARKETING_VERSION = 25.598;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				SDKROOT = iphoneos;

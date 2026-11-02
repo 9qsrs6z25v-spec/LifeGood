@@ -295,6 +295,9 @@ struct OrgMoveSheetView: View {
                 .font(.footnote)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+            // [v25.598 轉組織 v5]「2027/1/1 全組交接單的一部分」〔看全組交接單〕（不在全組交接單裡＝不出現；OrgSelfMoveView.swift）。
+            // 要退回這一件：刪這一行
+            OrgMoveTeamLink(moveId: s.moveId)
             // [v25.597 轉組織 v4] 轉進來那張只有兩行頭（不放四格、組織那一列）。要退回這一件：拿掉 `&& !s.isIntake`
             if !s.isUndone && !s.isIntake {
                 headerBody(s)

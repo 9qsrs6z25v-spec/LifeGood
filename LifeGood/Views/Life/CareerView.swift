@@ -179,6 +179,8 @@ struct CareerView: View {
                 }
             }
             .sheet(isPresented: $showAdd) { AddMilestoneView(initialCategory: .career).appStores() }
+            // [v25.598 轉組織 v5] 新增「轉職」存好的那一刻問「部屬要一起整理嗎？」（OrgSelfMoveView.swift）。要退回這一件：刪這一行
+            .orgSelfMoveOffer(watching: showAdd)
             .sheet(item: $editingItem) { item in AddMilestoneView(editing: item).appStores() }
             .premiumLockAlert(isPresented: $showPremiumAlert)
         }
